@@ -60,8 +60,7 @@ DECLARE_LOCK(ip_pptp_lock);
 
 #if 0
 #include "ip_conntrack_pptp_priv.h"
-#define DEBUGP(format, args...)	printk(KERN_DEBUG __FILE__ ":" __FUNCTION__ \
-					": " format, ## args)
+#define DEBUGP(format, args...)	printk(KERN_DEBUG "%s:%s: " format, __FILE__, __FUNCTION__, ## args)
 #else
 #define DEBUGP(format, args...)
 #endif
@@ -173,70 +172,72 @@ exp_gre(struct ip_conntrack *master,
 	u_int16_t callid,
 	u_int16_t peer_callid)
 {
-	struct ip_conntrack_expect exp;
 	struct ip_conntrack_tuple inv_tuple;
+	struct ip_conntrack_tuple exp_tuples[] = {
+		/* tuple in original direction, PNS->PAC */
+		{ .src = { .ip = master->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.ip,
+			   .u = { .gre = { .key = htonl(ntohs(peer_callid)) } }
+			 },
+		  .dst = { .ip = master->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.ip,
+			   .u = { .gre = { .key = htonl(ntohs(callid)) } },
+			   .protonum = IPPROTO_GRE
+			 },
+		 },
+		/* tuple in reply direction, PAC->PNS */
+		{ .src = { .ip = master->tuplehash[IP_CT_DIR_REPLY].tuple.src.ip,
+			   .u = { .gre = { .key = htonl(ntohs(callid)) } }
+			 },
+		  .dst = { .ip = master->tuplehash[IP_CT_DIR_REPLY].tuple.dst.ip,
+			   .u = { .gre = { .key = htonl(ntohs(peer_callid)) } },
+			   .protonum = IPPROTO_GRE
+			 },
+		 }
+	}, *exp_tuple;
 
-	memset(&exp, 0, sizeof(exp));
-	/* tuple in original direction, PNS->PAC */
-	exp.tuple.src.ip = master->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.ip;
-	exp.tuple.src.u.gre.key = htonl(ntohs(peer_callid));
-	exp.tuple.dst.ip = master->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.ip;
-	exp.tuple.dst.u.gre.key = htonl(ntohs(callid));
-	exp.tuple.dst.protonum = IPPROTO_GRE;
+	for (exp_tuple = exp_tuples; exp_tuple < &exp_tuples[2]; exp_tuple++) {
+		struct ip_conntrack_expect *exp;
 
-	exp.mask.src.ip = 0xffffffff;
-	exp.mask.src.u.all = 0;
-	exp.mask.dst.u.all = 0;
-	exp.mask.dst.u.gre.key = 0xffffffff;
-	exp.mask.dst.ip = 0xffffffff;
-	exp.mask.dst.protonum = 0xffff;
+		exp = ip_conntrack_expect_alloc();
+		if (exp == NULL)
+			return 1;
+
+		memcpy(&exp->tuple, exp_tuple, sizeof(exp->tuple));
+
+		exp->mask.src.ip = 0xffffffff;
+		exp->mask.src.u.all = 0;
+		exp->mask.dst.u.all = 0;
+		exp->mask.dst.u.gre.key = 0xffffffff;
+		exp->mask.dst.ip = 0xffffffff;
+		exp->mask.dst.protonum = 0xffff;
 			
-	exp.seq = seq;
-	exp.expectfn = pptp_expectfn;
+		exp->seq = seq;
+		exp->expectfn = pptp_expectfn;
 
-	exp.help.exp_pptp_info.pac_call_id = ntohs(callid);
-	exp.help.exp_pptp_info.pns_call_id = ntohs(peer_callid);
+		exp->help.exp_pptp_info.pac_call_id = ntohs(callid);
+		exp->help.exp_pptp_info.pns_call_id = ntohs(peer_callid);
 
-	DEBUGP("calling expect_related ");
-	DUMP_TUPLE_RAW(&exp.tuple);
+		DEBUGP("calling expect_related ");
+		DUMP_TUPLE_RAW(&exp->tuple);
 	
-	/* Add GRE keymap entries */
-	if (ip_ct_gre_keymap_add(&exp, &exp.tuple, 0) != 0)
-		return 1;
+		/* Add GRE keymap entries */
+		if (ip_ct_gre_keymap_add(exp, &exp->tuple, 0) != 0) {
+			kfree(exp);
+			return 1;
+		}
 
-	invert_tuplepr(&inv_tuple, &exp.tuple);
-	if (ip_ct_gre_keymap_add(&exp, &inv_tuple, 1) != 0) {
-		ip_ct_gre_keymap_destroy(&exp);
-		return 1;
-	}
+		invert_tuplepr(&inv_tuple, &exp->tuple);
+		if (ip_ct_gre_keymap_add(exp, &inv_tuple, 1) != 0) {
+			ip_ct_gre_keymap_destroy(exp);
+			kfree(exp);
+			return 1;
+		}
 	
-	if (ip_conntrack_expect_related(&exp, master) != 0) {
-		ip_ct_gre_keymap_destroy(&exp);
-		DEBUGP("cannot expect_related()\n");
-		return 1;
-	}
-
-	/* tuple in reply direction, PAC->PNS */
-	exp.tuple.src.ip = master->tuplehash[IP_CT_DIR_REPLY].tuple.src.ip;
-	exp.tuple.src.u.gre.key = htonl(ntohs(callid));
-	exp.tuple.dst.ip = master->tuplehash[IP_CT_DIR_REPLY].tuple.dst.ip;
-	exp.tuple.dst.u.gre.key = htonl(ntohs(peer_callid));
-
-	DEBUGP("calling expect_related ");
-	DUMP_TUPLE_RAW(&exp.tuple);
-	
-	/* Add GRE keymap entries */
-	ip_ct_gre_keymap_add(&exp, &exp.tuple, 0);
-	invert_tuplepr(&inv_tuple, &exp.tuple);
-	ip_ct_gre_keymap_add(&exp, &inv_tuple, 1);
-	/* FIXME: cannot handle error correctly, since we need to free
-	 * the above keymap :( */
-	
-	if (ip_conntrack_expect_related(&exp, master) != 0) {
-		/* free the second pair of keypmaps */
-		ip_ct_gre_keymap_destroy(&exp);
-		DEBUGP("cannot expect_related():\n");
-		return 1;
+		if (ip_conntrack_expect_related(exp, master) != 0) {
+			ip_ct_gre_keymap_destroy(exp);
+			kfree(exp);
+			DEBUGP("cannot expect_related()\n");
+			return 1;
+		}
 	}
 
 	return 0;
