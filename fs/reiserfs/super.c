@@ -717,6 +717,7 @@ static int reiserfs_parse_options (struct super_block * s, char * options, /* st
 	{"commit",	.arg_required = 'c', .values = NULL},
 	{"usrquota",},
 	{"grpquota",},
+	{"tagxid",	.setmask = 1<<REISERFS_TAGXID},
 	{NULL,}
     };
 	

@@ -702,7 +702,7 @@ follow_page_pfn(struct mm_struct *mm, unsigned long address, int write,
 		goto out;
 	if (pmd_huge(*pmd))
 		return follow_huge_pmd(mm, address, pmd, write);
-	if (unlikely(pmd_bad(*pmd)))
+	if (pmd_bad(*pmd))
 		goto out;
 
 	ptep = pte_offset_map(pmd, address);
@@ -714,11 +714,15 @@ follow_page_pfn(struct mm_struct *mm, unsigned long address, int write,
 	if (pte_present(pte)) {
 		if (write && !pte_write(pte))
 			goto out;
+		if (write && !pte_dirty(pte)) {
+			struct page *page = pte_page(pte);
+			if (!PageDirty(page))
+				set_page_dirty(page);
+		}
 		pfn = pte_pfn(pte);
 		if (pfn_valid(pfn)) {
-			page = pfn_to_page(pfn);
-			if (write && !pte_dirty(pte) && !PageDirty(page))
-				set_page_dirty(page);
+			struct page *page = pfn_to_page(pfn);
+			
 			mark_page_accessed(page);
 			return page;
 		} else {
@@ -1506,11 +1510,6 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	pte_t entry;
 	struct page * page = ZERO_PAGE(addr);
 
-	if (!vx_rsspages_avail(mm, 1)) {
-		spin_unlock(&mm->page_table_lock);
-		return VM_FAULT_OOM;
-	}
-
 	/* Read-only mapping of ZERO_PAGE. */
 	entry = pte_wrprotect(mk_pte(ZERO_PAGE(addr), vma->vm_page_prot));
 
@@ -1522,6 +1521,9 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 		if (unlikely(anon_vma_prepare(vma)))
 			goto no_mem;
+		if (!vx_rsspages_avail(mm, 1))
+			goto no_mem;
+
 		page = alloc_page_vma(GFP_HIGHUSER, vma, addr);
 		if (!page)
 			goto no_mem;
@@ -1648,8 +1650,7 @@ retry:
 	/* Only go through if we didn't race with anybody else... */
 	if (pte_none(*page_table)) {
 		if (!PageReserved(new_page))
-			// ++mm->rss;
-			vx_rsspages_inc(mm);
+			++mm->rss;
 		flush_icache_page(vma, new_page);
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		if (write_access)

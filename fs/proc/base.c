@@ -32,10 +32,8 @@
 #include <linux/mount.h>
 #include <linux/security.h>
 #include <linux/ptrace.h>
-#include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vs_cvirt.h>
-
 
 /*
  * For hysterical raisins we keep the same inumbers as in the old procfs.

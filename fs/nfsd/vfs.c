@@ -1516,6 +1516,7 @@ int
 nfsd_statfs(struct svc_rqst *rqstp, struct svc_fh *fhp, struct kstatfs *stat)
 {
 	int err = fh_verify(rqstp, fhp, 0, MAY_NOP);
+
 	if (!err && vfs_statfs(fhp->fh_dentry->d_inode->i_sb,stat))
 		err = nfserr_io;
 	return err;
@@ -1533,7 +1534,7 @@ nfsd_permission(struct svc_export *exp, struct dentry *dentry, int acc)
 	if (acc == MAY_NOP)
 		return 0;
 #if 0
-	dprintk("nfsd: permission 0x%x%s%s%s%s%s%s%s mode 0%o%s%s%s\n",
+	printk("nfsd: permission 0x%x%s%s%s%s%s%s%s mode 0%o%s%s%s\n",
 		acc,
 		(acc & MAY_READ)?	" read"  : "",
 		(acc & MAY_WRITE)?	" write" : "",
@@ -1546,7 +1547,7 @@ nfsd_permission(struct svc_export *exp, struct dentry *dentry, int acc)
 		IS_IMMUTABLE(inode)?	" immut" : "",
 		IS_APPEND(inode)?	" append" : "",
 		IS_RDONLY(inode)?	" ro" : "");
-	dprintk("      owner %d/%d user %d/%d\n",
+	printk("      owner %d/%d user %d/%d\n",
 		inode->i_uid, inode->i_gid, current->fsuid, current->fsgid);
 #endif
 

@@ -23,10 +23,9 @@
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
 #include <linux/mempolicy.h>
-#include <linux/vs_limit.h>
-
 #include <linux/ckrm.h>
 #include <linux/ckrm_tsk.h>
+#include <linux/vs_limit.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -391,11 +390,9 @@ static inline void close_files(struct files_struct * files)
 				struct file * file = xchg(&files->fd[i], NULL);
 				if (file) {
 					filp_close(file, files);
-					vx_openfd_dec(fd);
 					cond_resched();
-				} else {
-					vx_openfd_dec(fd);
 				}
+				vx_openfd_dec(fd);
 			}
 			i++;
 			set >>= 1;

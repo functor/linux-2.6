@@ -44,6 +44,8 @@ int vfs_statfs(struct super_block *sb, struct kstatfs *buf)
 			if (retval == 0 && buf->f_frsize == 0)
 				buf->f_frsize = buf->f_bsize;
 		}
+		if (!vx_check(0, VX_ADMIN|VX_WATCH))
+			vx_vsi_statfs(sb, buf);
 	}
 	return retval;
 }
@@ -914,6 +916,7 @@ static inline void __put_unused_fd(struct files_struct *files, unsigned int fd)
 	__FD_CLR(fd, files->open_fds);
 	if (fd < files->next_fd)
 		files->next_fd = fd;
+	vx_openfd_dec(fd);
 }
 
 void fastcall put_unused_fd(unsigned int fd)
@@ -1046,7 +1049,6 @@ asmlinkage long sys_close(unsigned int fd)
 	FD_CLR(fd, files->close_on_exec);
 	__put_unused_fd(files, fd);
 	spin_unlock(&files->file_lock);
-	vx_openfd_dec(fd);
 	return filp_close(filp, files);
 
 out_unlock:

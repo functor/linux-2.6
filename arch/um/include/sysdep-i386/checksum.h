@@ -6,6 +6,7 @@
 #define __UM_SYSDEP_CHECKSUM_H
 
 #include "linux/string.h"
+#include "linux/in6.h"
 
 /*
  * computes the checksum of a memory block at buff, length len,

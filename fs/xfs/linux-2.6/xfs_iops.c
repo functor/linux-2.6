@@ -67,6 +67,7 @@
 #include "xfs_utils.h"
 
 #include <linux/xattr.h>
+#include <linux/namei.h>
 
 
 /*
@@ -419,13 +420,16 @@ linvfs_follow_link(
 	ASSERT(nd);
 
 	link = (char *)kmalloc(MAXNAMELEN+1, GFP_KERNEL);
-	if (!link)
-		return -ENOMEM;
+	if (!link) {
+		nd_set_link(nd, ERR_PTR(-ENOMEM));
+		return 0;
+	}
 
 	uio = (uio_t *)kmalloc(sizeof(uio_t), GFP_KERNEL);
 	if (!uio) {
 		kfree(link);
-		return -ENOMEM;
+		nd_set_link(nd, ERR_PTR(-ENOMEM));
+		return 0;
 	}
 
 	vp = LINVFS_GET_VP(dentry->d_inode);
@@ -441,18 +445,22 @@ linvfs_follow_link(
 
 	VOP_READLINK(vp, uio, 0, NULL, error);
 	if (error) {
-		kfree(uio);
 		kfree(link);
-		return -error;
+		link = ERR_PTR(-error);
+	} else {
+		link[MAXNAMELEN - uio->uio_resid] = '\0';
 	}
-
-	link[MAXNAMELEN - uio->uio_resid] = '\0';
 	kfree(uio);
 
-	/* vfs_follow_link returns (-) errors */
-	error = vfs_follow_link(nd, link);
-	kfree(link);
-	return error;
+	nd_set_link(nd, link);
+	return 0;
+}
+
+static void linvfs_put_link(struct dentry *dentry, struct nameidata *nd)
+{
+	char *s = nd_get_link(nd);
+	if (!IS_ERR(s))
+		kfree(s);
 }
 
 #ifdef CONFIG_XFS_POSIX_ACL
@@ -487,6 +495,28 @@ linvfs_getattr(
 		error = vn_revalidate(vp);
 	if (!error)
 		generic_fillattr(inode, stat);
+	return 0;
+}
+
+STATIC int
+linvfs_setattr_flags(
+	vattr_t *vap,
+	unsigned int flags)
+{
+	unsigned int oldflags, newflags;
+
+	oldflags = vap->va_xflags;
+	newflags = oldflags & ~(XFS_XFLAG_IMMUTABLE |
+		XFS_XFLAG_IUNLINK | XFS_XFLAG_BARRIER);
+	if (flags & ATTR_FLAG_IMMUTABLE)
+		newflags |= XFS_XFLAG_IMMUTABLE;
+	if (flags & ATTR_FLAG_IUNLINK)
+		newflags |= XFS_XFLAG_IUNLINK;
+	if (flags & ATTR_FLAG_BARRIER)
+		newflags |= XFS_XFLAG_BARRIER;
+
+	if (oldflags ^ newflags)
+		vap->va_xflags = newflags;
 	return 0;
 }
 
@@ -540,6 +570,11 @@ linvfs_setattr(
 	if ((ia_valid & ATTR_NO_BLOCK))
 		flags |= ATTR_NONBLOCK;
 #endif
+
+	if (ia_valid & ATTR_ATTR_FLAG) {
+		vattr.va_mask |= XFS_AT_XFLAGS;
+		linvfs_setattr_flags(&vattr, attr->ia_attr_flags);
+	}
 
 	VOP_SETATTR(vp, &vattr, flags, NULL, error);
 	if (error)
@@ -692,6 +727,7 @@ struct inode_operations linvfs_dir_inode_operations = {
 struct inode_operations linvfs_symlink_inode_operations = {
 	.readlink		= linvfs_readlink,
 	.follow_link		= linvfs_follow_link,
+	.put_link		= linvfs_put_link,
 	.permission		= linvfs_permission,
 	.getattr		= linvfs_getattr,
 	.setattr		= linvfs_setattr,

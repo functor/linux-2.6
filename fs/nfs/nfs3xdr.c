@@ -21,6 +21,7 @@
 #include <linux/nfs.h>
 #include <linux/nfs3.h>
 #include <linux/nfs_fs.h>
+#include <linux/vserver/xid.h>
 
 #define NFSDBG_FACILITY		NFSDBG_XDR
 
@@ -185,15 +186,15 @@ xdr_encode_sattr(u32 *p, struct iattr *attr)
 	} else {
 		*p++ = xdr_zero;
 	}
-	if (attr->ia_valid & ATTR_UID) {
+	if (attr->ia_valid & ATTR_UID || attr->ia_valid & ATTR_XID) {
 		*p++ = xdr_one;
-		*p++ = htonl(attr->ia_uid);
+		*p++ = htonl(XIDINO_UID(attr->ia_uid, attr->ia_xid));
 	} else {
 		*p++ = xdr_zero;
 	}
-	if (attr->ia_valid & ATTR_GID) {
+	if (attr->ia_valid & ATTR_GID || attr->ia_valid & ATTR_XID) {
 		*p++ = xdr_one;
-		*p++ = htonl(attr->ia_gid);
+		*p++ = htonl(XIDINO_GID(attr->ia_gid, attr->ia_xid));
 	} else {
 		*p++ = xdr_zero;
 	}

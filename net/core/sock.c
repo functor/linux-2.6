@@ -669,8 +669,6 @@ void sk_free(struct sock *sk)
 	security_sk_free(sk);
 	BUG_ON(sk->sk_vx_info);
 	BUG_ON(sk->sk_nx_info);
-/*	clr_vx_info(&sk->sk_vx_info);
-	clr_nx_info(&sk->sk_nx_info);	*/
 	kmem_cache_free(sk->sk_slab, sk);
 	module_put(owner);
 }

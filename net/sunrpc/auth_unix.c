@@ -13,6 +13,7 @@
 #include <linux/in.h>
 #include <linux/sunrpc/clnt.h>
 #include <linux/sunrpc/auth.h>
+#include <linux/vserver/xid.h>
 
 #define NFS_NGROUPS	16
 
@@ -88,6 +89,8 @@ unx_create_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
 
 		cred->uc_uid = acred->uid;
 		cred->uc_gid = acred->gid;
+//		cred->uc_puid = XIDINO_UID(current->uid, current->xid);
+//		cred->uc_pgid = XIDINO_GID(current->gid, current->xid);
 		cred->uc_puid = current->uid;
 		cred->uc_pgid = current->gid;
 		for (i = 0; i < groups; i++)
@@ -122,8 +125,8 @@ unx_match(struct auth_cred *acred, struct rpc_cred *rcred, int taskflags)
 
 		if (cred->uc_uid != acred->uid
 		 || cred->uc_gid != acred->gid
-		 || cred->uc_puid != current->uid
-		 || cred->uc_pgid != current->gid)
+		 || cred->uc_puid != XIDINO_UID(current->uid, current->xid)
+		 || cred->uc_pgid != XIDINO_GID(current->gid, current->xid))
 			return 0;
 
 		groups = acred->group_info->ngroups;

@@ -1314,11 +1314,15 @@ int ext2_setattr(struct dentry *dentry, struct iattr *iattr)
 	if (error)
 		return error;
 	if ((iattr->ia_valid & ATTR_UID && iattr->ia_uid != inode->i_uid) ||
-	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid)) {
+	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid) ||
+	    (iattr->ia_valid & ATTR_XID && iattr->ia_xid != inode->i_xid)) {
 		error = DQUOT_TRANSFER(inode, iattr) ? -EDQUOT : 0;
 		if (error)
 			return error;
 	}
+	if (iattr->ia_valid & ATTR_ATTR_FLAG)
+		ext2_setattr_flags(inode, iattr->ia_attr_flags);
+
 	error = inode_setattr(inode, iattr);
 	if (!error && (iattr->ia_valid & ATTR_MODE))
 		error = ext2_acl_chmod(inode);

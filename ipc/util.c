@@ -28,6 +28,8 @@
 
 #include <asm/unistd.h>
 
+#include <asm/unistd.h>
+
 #include "util.h"
 
 /**

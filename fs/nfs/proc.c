@@ -244,6 +244,9 @@ nfs_proc_create(struct inode *dir, struct qstr *name, struct iattr *sattr,
 	int			status;
 
 	fattr.valid = 0;
+	memset(&fattr, 0, sizeof(struct nfs_fattr));
+
+
 	dprintk("NFS call  create %s\n", name->name);
 	status = rpc_call(NFS_CLIENT(dir), NFSPROC_CREATE, &arg, &res, 0);
 	dprintk("NFS reply create: %d\n", status);

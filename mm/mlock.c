@@ -50,7 +50,8 @@ static int mlock_fixup(struct vm_area_struct * vma,
 		ret = make_pages_present(start, end);
 	}
 
-	vma->vm_mm->locked_vm -= pages;
+	// vma->vm_mm->locked_vm -= pages;
+	vx_vmlocked_sub(vma->vm_mm, pages);
 out:
 	return ret;
 }
@@ -183,7 +184,6 @@ asmlinkage long sys_mlockall(int flags)
 	ret = -ENOMEM;
 	if (!vx_vmlocked_avail(current->mm, current->mm->total_vm))
 		goto out;
-	/* check vserver lock limits? */
 	if ((current->mm->total_vm <= lock_limit) || capable(CAP_IPC_LOCK))
 		ret = do_mlockall(flags);
 out:

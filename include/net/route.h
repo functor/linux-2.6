@@ -37,7 +37,6 @@
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 
-
 #ifndef __KERNEL__
 #warning This file is not supposed to be used outside of kernel.
 #endif

@@ -462,6 +462,13 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				    .proto = inet->hdrincl ? IPPROTO_RAW :
 					    		     sk->sk_protocol,
 				  };
+		
+		if (sk->sk_nx_info) {
+			err = ip_find_src(sk->sk_nx_info, &rt, &fl);
+
+			if (err)
+				goto done;
+		}
 		err = ip_route_output_flow(&rt, &fl, sk, !(msg->msg_flags&MSG_DONTWAIT));
 	}
 	if (err)

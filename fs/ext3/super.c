@@ -587,7 +587,7 @@ enum {
 	Opt_abort, Opt_data_journal, Opt_data_ordered, Opt_data_writeback,
 	Opt_usrjquota, Opt_grpjquota, Opt_offusrjquota, Opt_offgrpjquota,
 	Opt_jqfmt_vfsold, Opt_jqfmt_vfsv0,
-	Opt_tagxid, Opt_ignore, Opt_err, Opt_resize,
+	Opt_tagxid, Opt_ignore, Opt_err
 };
 
 static match_table_t tokens = {

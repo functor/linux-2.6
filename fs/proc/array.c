@@ -493,12 +493,12 @@ int proc_pid_delay(struct task_struct *task, char * buffer)
 
 	res  = sprintf(buffer,"%u %llu %llu %u %llu %u %llu\n",
 		       get_delay(task,runs),
-		       get_delay(task,runcpu_total),
-		       get_delay(task,waitcpu_total),
+		       (unsigned long long)get_delay(task,runcpu_total),
+		       (unsigned long long)get_delay(task,waitcpu_total),
 		       get_delay(task,num_iowaits),
-		       get_delay(task,iowait_total),
+		       (unsigned long long)get_delay(task,iowait_total),
 		       get_delay(task,num_memwaits),
-		       get_delay(task,mem_iowait_total)
+		       (unsigned long long)get_delay(task,mem_iowait_total)
 		);
 	return res;
 }

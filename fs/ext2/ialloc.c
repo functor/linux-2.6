@@ -18,6 +18,9 @@
 #include <linux/backing-dev.h>
 #include <linux/buffer_head.h>
 #include <linux/random.h>
+#include <linux/vs_base.h>
+#include <linux/vs_dlimit.h>
+
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"
@@ -124,6 +127,7 @@ void ext2_free_inode (struct inode * inode)
 	if (!is_bad_inode(inode)) {
 		/* Quota is already initialized in iput() */
 		ext2_xattr_delete_inode(inode);
+		DLIMIT_FREE_INODE(sb, inode->i_xid);
 	    	DQUOT_FREE_INODE(inode);
 		DQUOT_DROP(inode);
 	}
@@ -465,6 +469,10 @@ struct inode *ext2_new_inode(struct inode *dir, int mode)
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
 
+	if (DLIMIT_ALLOC_INODE(sb, inode->i_xid)) {
+		err = -ENOSPC;
+		goto fail_dlim;
+	}
 	ei = EXT2_I(inode);
 	sbi = EXT2_SB(sb);
 	es = sbi->s_es;
@@ -621,12 +629,15 @@ got:
 	return inode;
 
 fail2:
+	DLIMIT_FREE_INODE(sb, inode->i_xid);	
 	inode->i_flags |= S_NOQUOTA;
 	inode->i_nlink = 0;
 	iput(inode);
 	return ERR_PTR(err);
 
 fail:
+	DLIMIT_FREE_INODE(sb, inode->i_xid);	
+fail_dlim:
 	make_bad_inode(inode);
 	iput(inode);
 	return ERR_PTR(err);

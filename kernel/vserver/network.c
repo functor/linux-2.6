@@ -218,10 +218,8 @@ out_unlock:
 
 void rcu_free_nx_info(struct rcu_head *head)
 {
-        struct nx_info *nxi = container_of(head, struct nx_info, nx_rcu);
+	struct nx_info *nxi = container_of(head, struct nx_info, nx_rcu);
 	int usecnt, refcnt;
-
-	BUG_ON(!nxi || !head);
 
 	usecnt = atomic_read(&nxi->nx_usecnt);
 	BUG_ON(usecnt < 0);

@@ -154,7 +154,6 @@ flags_err:
 			return ret;
 		}
 #endif
-
 #if defined(CONFIG_VSERVER_LEGACY) && !defined(CONFIG_INOXID_NONE)
 	case EXT3_IOC_SETXID: {
 		handle_t *handle;

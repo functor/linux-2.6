@@ -2852,7 +2852,8 @@ int ext3_setattr(struct dentry *dentry, struct iattr *attr)
 		return error;
 
 	if ((ia_valid & ATTR_UID && attr->ia_uid != inode->i_uid) ||
-		(ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid)) {
+		(ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid) ||
+		(ia_valid & ATTR_XID && attr->ia_xid != inode->i_xid)) {
 		handle_t *handle;
 
 		/* (user+group)*(old+new) structure, inode write (sb,
@@ -2873,6 +2874,8 @@ int ext3_setattr(struct dentry *dentry, struct iattr *attr)
 			inode->i_uid = attr->ia_uid;
 		if (attr->ia_valid & ATTR_GID)
 			inode->i_gid = attr->ia_gid;
+		if (attr->ia_valid & ATTR_XID)
+			inode->i_xid = attr->ia_xid;
 		error = ext3_mark_inode_dirty(handle, inode);
 		ext3_journal_stop(handle);
 	}

@@ -36,12 +36,8 @@
 #include <linux/mount.h>
 #include <linux/audit.h>
 #include <linux/rmap.h>
-
 #include <linux/vs_network.h>
-#include <linux/vs_memory.h>
 #include <linux/vs_limit.h>
-#include <linux/vs_base.h>
-
 #include <linux/ckrm.h>
 #include <linux/ckrm_tsk.h>
 
@@ -1138,7 +1134,7 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	vxi = current->vx_info;
 	if (vxi) {
 		atomic_inc(&vxi->cacct.nr_threads);
-		// atomic_inc(&vxi->limit.res[RLIMIT_NPROC]);
+		// atomic_inc(&vxi->limit.rcur[RLIMIT_NPROC]);
 	}
 	vx_nproc_inc();
 	write_unlock_irq(&tasklist_lock);

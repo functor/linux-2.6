@@ -40,9 +40,9 @@
 #include <linux/cpu.h>
 #include <linux/percpu.h>
 #include <linux/kthread.h>
-#include <asm/tlb.h>
 #include <linux/vserver/sched.h>
 #include <linux/vs_base.h>
+#include <asm/tlb.h>
 
 #include <asm/unistd.h>
 
@@ -199,6 +199,15 @@ typedef struct runqueue runqueue_t;
 #define TASK_PREEMPTS_CURR(p, rq) \
 	(((p)->cpu_class != (rq)->curr->cpu_class) && ((rq)->curr != (rq)->idle))? class_preempts_curr((p),(rq)->curr) : ((p)->prio < (rq)->curr->prio)
 #else
+#define BITMAP_SIZE ((((MAX_PRIO+1+7)/8)+sizeof(long)-1)/sizeof(long))
+struct prio_array {
+	unsigned int nr_active;
+	unsigned long bitmap[BITMAP_SIZE];
+	struct list_head queue[MAX_PRIO];
+};
+#define rq_active(p,rq)   (rq->active)
+#define rq_expired(p,rq)  (rq->expired)
+#define ckrm_rebalance_tick(j,this_cpu) do {} while (0)
 #define TASK_PREEMPTS_CURR(p, rq) \
 	((p)->prio < (rq)->curr->prio)
 #endif
@@ -357,6 +366,9 @@ static inline struct task_struct * rq_get_next_task(struct runqueue* rq)
 		array = queue->active;
 		//check switch active/expired queue
 		if (unlikely(!queue->active->nr_active)) {
+			prio_array_t *array;
+		       
+			array = queue->active;
 			queue->active = queue->expired;
 			queue->expired = array;
 			queue->expired_timestamp = 0;
@@ -2245,7 +2257,6 @@ static void active_load_balance(runqueue_t *busiest, int busiest_cpu)
 next_group:
 		group = group->next;
 	} while (group != sd->groups);
->>>>>>> 1.1.9.3
 }
 #endif /* CONFIG_CKRM_CPU_SCHEDULE*/
 

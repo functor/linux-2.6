@@ -814,9 +814,10 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newsk->sk_priority = 0;
 		atomic_set(&newsk->sk_refcnt, 2);
 
-		/* hmm, maybe from socket? */
-		set_vx_info(&newsk->sk_vx_info, current->vx_info);
-		set_nx_info(&newsk->sk_nx_info, current->nx_info);
+		set_vx_info(&newsk->sk_vx_info, sk->sk_vx_info);
+		newsk->sk_xid = sk->sk_xid;
+		set_nx_info(&newsk->sk_nx_info, sk->sk_nx_info);
+		newsk->sk_nid = sk->sk_nid;
 #ifdef INET_REFCNT_DEBUG
 		atomic_inc(&inet_sock_nr);
 #endif

@@ -25,6 +25,7 @@
 #include <linux/syscalls.h>
 #include <linux/ipc.h>
 #include <linux/personality.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/ipc.h>

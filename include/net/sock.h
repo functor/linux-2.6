@@ -434,7 +434,6 @@ static inline int sk_acceptq_is_full(struct sock *sk)
 {
 	return sk->sk_ack_backlog > sk->sk_max_ack_backlog;
 }
-
 #endif
 
 /*

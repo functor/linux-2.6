@@ -258,6 +258,7 @@ typedef void (dio_iodone_t)(struct inode *inode, loff_t offset,
 #define ATTR_ATTR_FLAG	1024
 #define ATTR_KILL_SUID	2048
 #define ATTR_KILL_SGID	4096
+#define	ATTR_XID	8192
 
 /*
  * This is the Inode Attributes structure, used for notify_change().  It
@@ -273,6 +274,7 @@ struct iattr {
 	umode_t		ia_mode;
 	uid_t		ia_uid;
 	gid_t		ia_gid;
+	xid_t		ia_xid;
 	loff_t		ia_size;
 	struct timespec	ia_atime;
 	struct timespec	ia_mtime;

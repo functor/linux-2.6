@@ -76,7 +76,8 @@
 STATIC struct quotactl_ops linvfs_qops;
 STATIC struct super_operations linvfs_sops;
 STATIC struct export_operations linvfs_export_ops;
-STATIC kmem_cache_t * linvfs_inode_cachep;
+STATIC kmem_zone_t *linvfs_inode_zone;
+STATIC kmem_shaker_t xfs_inode_shaker;
 
 STATIC struct xfs_mount_args *
 xfs_args_allocate(
@@ -190,6 +191,14 @@ xfs_revalidate_inode(
 		inode->i_flags |= S_IMMUTABLE;
 	else
 		inode->i_flags &= ~S_IMMUTABLE;
+	if (ip->i_d.di_flags & XFS_DIFLAG_IUNLINK)
+		inode->i_flags |= S_IUNLINK;
+	else
+		inode->i_flags &= ~S_IUNLINK;
+	if (ip->i_d.di_flags & XFS_DIFLAG_BARRIER)
+		inode->i_flags |= S_BARRIER;
+	else
+		inode->i_flags &= ~S_BARRIER;
 	if (ip->i_d.di_flags & XFS_DIFLAG_APPEND)
 		inode->i_flags |= S_APPEND;
 	else
@@ -289,7 +298,7 @@ linvfs_alloc_inode(
 {
 	vnode_t			*vp;
 
-	vp = (vnode_t *)kmem_cache_alloc(linvfs_inode_cachep, 
+	vp = (vnode_t *)kmem_cache_alloc(linvfs_inode_zone, 
                 kmem_flags_convert(KM_SLEEP));
 	if (!vp)
 		return NULL;
@@ -300,7 +309,20 @@ STATIC void
 linvfs_destroy_inode(
 	struct inode		*inode)
 {
-	kmem_cache_free(linvfs_inode_cachep, LINVFS_GET_VP(inode));
+	kmem_cache_free(linvfs_inode_zone, LINVFS_GET_VP(inode));
+}
+
+int
+xfs_inode_shake(
+	int		priority,
+	unsigned int	gfp_mask)
+{
+	int		pages;
+
+	
+	pages = kmem_zone_shrink(linvfs_inode_zone);
+	pages += kmem_zone_shrink(xfs_inode_zone);
+	return pages;
 }
 
 STATIC void
@@ -319,12 +341,12 @@ init_once(
 STATIC int
 init_inodecache( void )
 {
-	linvfs_inode_cachep = kmem_cache_create("linvfs_icache",
+	linvfs_inode_zone = kmem_cache_create("linvfs_icache",
 				sizeof(vnode_t), 0,
 				SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT,
 				init_once, NULL);
 
-	if (linvfs_inode_cachep == NULL)
+	if (linvfs_inode_zone == NULL)
 		return -ENOMEM;
 	return 0;
 }
@@ -332,7 +354,7 @@ init_inodecache( void )
 STATIC void
 destroy_inodecache( void )
 {
-	if (kmem_cache_destroy(linvfs_inode_cachep))
+	if (kmem_cache_destroy(linvfs_inode_zone))
 		printk(KERN_WARNING "%s: cache still in use!\n", __FUNCTION__);
 }
 
@@ -835,15 +857,24 @@ init_xfs_fs( void )
 	vn_init();
 	xfs_init();
 	uuid_init();
-	vfs_initdmapi();
 	vfs_initquota();
+
+	xfs_inode_shaker = kmem_shake_register(xfs_inode_shake);
+	if (!xfs_inode_shaker) {
+		error = -ENOMEM;
+		goto undo_shaker;
+	}
 
 	error = register_filesystem(&xfs_fs_type);
 	if (error)
 		goto undo_register;
+	XFS_DM_INIT(&xfs_fs_type);
 	return 0;
 
 undo_register:
+	kmem_shake_deregister(xfs_inode_shaker);
+
+undo_shaker:
 	pagebuf_terminate();
 
 undo_pagebuf:
@@ -857,8 +888,9 @@ STATIC void __exit
 exit_xfs_fs( void )
 {
 	vfs_exitquota();
-	vfs_exitdmapi();
+	XFS_DM_EXIT(&xfs_fs_type);
 	unregister_filesystem(&xfs_fs_type);
+	kmem_shake_deregister(xfs_inode_shaker);
 	xfs_cleanup();
 	pagebuf_terminate();
 	destroy_inodecache();

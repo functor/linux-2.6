@@ -59,6 +59,7 @@
 #include <linux/mbcache.h>
 #include <linux/quotaops.h>
 #include <linux/rwsem.h>
+#include <linux/vs_dlimit.h>
 #include "xattr.h"
 #include "acl.h"
 
@@ -761,8 +762,12 @@ ext3_xattr_set_handle2(handle_t *handle, struct inode *inode,
 				   the inode. */
 				ea_bdebug(new_bh, "reusing block");
 
+				error = -ENOSPC;
+				if (DLIMIT_ALLOC_BLOCK(sb, inode->i_xid, 1))
+					goto cleanup;
 				error = -EDQUOT;
 				if (DQUOT_ALLOC_BLOCK(inode, 1)) {
+					DLIMIT_FREE_BLOCK(sb, inode->i_xid, 1);
 					unlock_buffer(new_bh);
 					journal_release_buffer(handle, new_bh,
 							       credits);
@@ -848,6 +853,7 @@ getblk_failed:
 			/* Decrement the refcount only. */
 			HDR(old_bh)->h_refcount = cpu_to_le32(
 				le32_to_cpu(HDR(old_bh)->h_refcount) - 1);
+			DLIMIT_FREE_BLOCK(sb, inode->i_xid, 1);
 			DQUOT_FREE_BLOCK(inode, 1);
 			ext3_journal_dirty_metadata(handle, old_bh);
 			ea_bdebug(old_bh, "refcount now=%d",
@@ -939,6 +945,7 @@ ext3_xattr_delete_inode(handle_t *handle, struct inode *inode)
 		ext3_journal_dirty_metadata(handle, bh);
 		if (IS_SYNC(inode))
 			handle->h_sync = 1;
+		DLIMIT_FREE_BLOCK(inode->i_sb, inode->i_xid, 1);
 		DQUOT_FREE_BLOCK(inode, 1);
 	}
 	ea_bdebug(bh, "refcount now=%d", le32_to_cpu(HDR(bh)->h_refcount) - 1);

@@ -179,7 +179,7 @@ config CKRM_CPU_SCHEDULE
 	  Say N if unsure, Y to use the feature.
 
 config CKRM_CPU_MONITOR
-	tristate  "CKRM CPU Resoure Monitor"
+	bool "CKRM CPU Resoure Monitor"
 	depends on CKRM_CPU_SCHEDULE
 	default m
 	help
@@ -246,7 +246,6 @@ config BSD_PROCESS_ACCT_V3
 	  with previous v0/v1/v2 file formats, so you will need updated tools
 	  for processing it. A preliminary version of these tools is available
 	  at <http://http://www.de.kernel.org/pub/linux/utils/acct/>.
-
 
 config SYSCTL
 	bool "Sysctl support"

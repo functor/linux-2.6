@@ -21,6 +21,7 @@
 #include <linux/pagemap.h>
 #include <linux/cdev.h>
 #include <linux/bootmem.h>
+#include <linux/vs_base.h>
 
 /*
  * This is needed for the following functions:
@@ -594,6 +595,7 @@ struct inode *new_inode(struct super_block *sb)
 		list_add(&inode->i_list, &inode_in_use);
 		inode->i_ino = ++last_ino;
 		inode->i_state = 0;
+		inode->i_xid = vx_current_xid();
 		spin_unlock(&inode_lock);
 	}
 	return inode;

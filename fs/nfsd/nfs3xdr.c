@@ -21,6 +21,7 @@
 #include <linux/sunrpc/svc.h>
 #include <linux/nfsd/nfsd.h>
 #include <linux/nfsd/xdr3.h>
+#include <linux/vserver/xid.h>
 
 #define NFSDDBG_FACILITY		NFSDDBG_XDR
 
@@ -176,8 +177,10 @@ encode_fattr3(struct svc_rqst *rqstp, u32 *p, struct svc_fh *fhp)
 	*p++ = htonl(nfs3_ftypes[(stat.mode & S_IFMT) >> 12]);
 	*p++ = htonl((u32) stat.mode);
 	*p++ = htonl((u32) stat.nlink);
-	*p++ = htonl((u32) nfsd_ruid(rqstp, stat.uid));
-	*p++ = htonl((u32) nfsd_rgid(rqstp, stat.gid));
+	*p++ = htonl((u32) nfsd_ruid(rqstp,
+		XIDINO_UID(stat.uid, stat.xid)));
+	*p++ = htonl((u32) nfsd_rgid(rqstp,
+		XIDINO_GID(stat.gid, stat.xid)));
 	if (S_ISLNK(stat.mode) && stat.size > NFS3_MAXPATHLEN) {
 		p = xdr_encode_hyper(p, (u64) NFS3_MAXPATHLEN);
 	} else {

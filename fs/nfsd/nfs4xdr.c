@@ -55,6 +55,7 @@
 #include <linux/nfsd/state.h>
 #include <linux/nfsd/xdr4.h>
 #include <linux/nfsd_idmap.h>
+#include <linux/vserver/xid.h>
 
 #define NFSDDBG_FACILITY		NFSDDBG_XDR
 
@@ -1560,14 +1561,16 @@ nfsd4_encode_fattr(struct svc_fh *fhp, struct svc_export *exp,
 		WRITE32(stat.nlink);
 	}
 	if (bmval1 & FATTR4_WORD1_OWNER) {
-		status = nfsd4_encode_user(rqstp, stat.uid, &p, &buflen);
+		status = nfsd4_encode_user(rqstp,
+			XIDINO_UID(stat.uid, stat.xid), &p, &buflen);
 		if (status == nfserr_resource)
 			goto out_resource;
 		if (status)
 			goto out;
 	}
 	if (bmval1 & FATTR4_WORD1_OWNER_GROUP) {
-		status = nfsd4_encode_group(rqstp, stat.gid, &p, &buflen);
+		status = nfsd4_encode_group(rqstp,
+			XIDINO_GID(stat.gid, stat.xid), &p, &buflen);
 		if (status == nfserr_resource)
 			goto out_resource;
 		if (status)

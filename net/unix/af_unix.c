@@ -118,10 +118,8 @@
 #include <linux/mount.h>
 #include <net/checksum.h>
 #include <linux/security.h>
-
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
-
 
 int sysctl_unix_max_dgram_qlen = 10;
 

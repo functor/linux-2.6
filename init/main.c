@@ -50,8 +50,11 @@
 #include <asm/setup.h>
 
 #include <linux/ckrm.h>
+#ifdef CONFIG_CKRM_CPU_SCHEDULE
 int __init init_ckrm_sched_res(void);
-
+#else
+#define init_ckrm_sched_res() ((void)0)
+#endif
 
 /*
  * This is one of the first .c files built. Error out early

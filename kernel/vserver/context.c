@@ -247,10 +247,10 @@ out_unlock:
 
 void rcu_free_vx_info(struct rcu_head *head)
 {
-        struct vx_info *vxi = container_of(head, struct vx_info, vx_rcu);
+	struct vx_info *vxi = container_of(head, struct vx_info, vx_rcu);
 	int usecnt, refcnt;
 
-	BUG_ON(!vxi || !head);
+	BUG_ON(!vxi);
 
 	usecnt = atomic_read(&vxi->vx_usecnt);
 	BUG_ON(usecnt < 0);

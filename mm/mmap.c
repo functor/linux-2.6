@@ -1226,9 +1226,9 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 	address &= PAGE_MASK;
 	grow = (address - vma->vm_end) >> PAGE_SHIFT;
 
-	/* Overcommit.. */
-	if (security_vm_enough_memory(grow) ||
-		!vx_vmpages_avail(vma->vm_mm, grow)) {
+	/* Overcommit.. vx check first to avoid vm_unacct_memory() */
+	if (!vx_vmpages_avail(vma->vm_mm, grow) ||
+		security_vm_enough_memory(grow)) {
 		anon_vma_unlock(vma);
 		return -ENOMEM;
 	}
@@ -1240,7 +1240,6 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 		vm_unacct_memory(grow);
 		return -ENOMEM;
 	}
-
 	vma->vm_end = address;
 	// vma->vm_mm->total_vm += grow;
 	vx_vmpages_add(vma->vm_mm, grow);
@@ -1291,9 +1290,9 @@ int expand_stack(struct vm_area_struct *vma, unsigned long address)
 	address &= PAGE_MASK;
 	grow = (vma->vm_start - address) >> PAGE_SHIFT;
 
-	/* Overcommit.. */
-	if (security_vm_enough_memory(grow) ||
-		!vx_vmpages_avail(vma->vm_mm, grow)) {
+        /* Overcommit.. vx check first to avoid vm_unacct_memory() */
+	if (!vx_vmpages_avail(vma->vm_mm, grow) ||
+		security_vm_enough_memory(grow)) {
 		anon_vma_unlock(vma);
 		return -ENOMEM;
 	}
@@ -1305,7 +1304,6 @@ int expand_stack(struct vm_area_struct *vma, unsigned long address)
 		vm_unacct_memory(grow);
 		return -ENOMEM;
 	}
-
 	vma->vm_start = address;
 	vma->vm_pgoff -= grow;
 	// vma->vm_mm->total_vm += grow;
@@ -1674,7 +1672,8 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 		locked += len;
 		if (locked > lock_limit && !capable(CAP_IPC_LOCK))
 			return -EAGAIN;
-		/* vserver checks ? */
+		if (!vx_vmlocked_avail(mm, len >> PAGE_SHIFT))
+			return -ENOMEM;
 	}
 
 	/*
