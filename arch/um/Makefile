@@ -61,17 +61,13 @@ CFLAGS += $(CFLAGS-y) -D__arch_um__ -DSUBARCH=\"$(SUBARCH)\" \
 	-D_LARGEFILE64_SOURCE $(ARCH_INCLUDE) -Derrno=kernel_errno \
 	-Dsigprocmask=kernel_sigprocmask $(MODE_INCLUDE)
 
-check_gcc = $(shell if $(CC) $(1) -S -o /dev/null -xc /dev/null > /dev/null 2>&1; then echo "$(1)"; else echo "$(2)"; fi)
-
-CFLAGS += $(call check_gcc,-fno-unit-at-a-time,)
-
 LINK_WRAPS = -Wl,--wrap,malloc -Wl,--wrap,free -Wl,--wrap,calloc
 
 # These are needed for clean and mrproper, since in that case .config is not
 # included; the values here are meaningless
 
 CONFIG_NEST_LEVEL ?= 0
-CONFIG_KERNEL_HALF_GIGS ?= 0
+CONFIG_KERNEL_HALF_GIGS ?=  0
 
 SIZE = (($(CONFIG_NEST_LEVEL) + $(CONFIG_KERNEL_HALF_GIGS)) * 0x20000000)
 
@@ -115,12 +111,8 @@ CPP_MODE_TT := $(shell [ "$(CONFIG_MODE_TT)" = "y" ] && echo -DMODE_TT)
 CONFIG_KERNEL_STACK_ORDER ?= 2
 STACK_SIZE := $(shell echo $$[ 4096 * (1 << $(CONFIG_KERNEL_STACK_ORDER)) ] )
 
-ifndef START
-  START = $$(($(TOP_ADDR) - $(SIZE)))
-endif
-
 AFLAGS_vmlinux.lds.o = $(shell echo -U$(SUBARCH) \
-	-DSTART=$(START) -DELF_ARCH=$(ELF_ARCH) \
+	-DSTART=$$(($(TOP_ADDR) - $(SIZE))) -DELF_ARCH=$(ELF_ARCH) \
 	-DELF_FORMAT=\"$(ELF_FORMAT)\" $(CPP_MODE_TT) \
 	-DKERNEL_STACK_SIZE=$(STACK_SIZE))
 
@@ -215,9 +207,3 @@ $(ARCH_DIR)/util: FORCE
 	$(Q)$(MAKE) $(build)=$@
 
 export SUBARCH USER_CFLAGS OS 
-
-all: linux
-
-define archhelp
-    echo  '* linux	- Binary kernel image (./linux)'
-endef

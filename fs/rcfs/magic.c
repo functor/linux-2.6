@@ -100,7 +100,7 @@ FUNC ## _parse(char *options, char **resstr, char **otherstr)	       \
 	*resstr = NULL;                                                \
 								       \
 	if (!options)						       \
-		return 0;					       \
+		return -EINVAL;					       \
 								       \
 	while ((p = strsep(&options, ",")) != NULL) {		       \
 		substring_t args[MAX_OPT_ARGS];			       \
@@ -113,28 +113,17 @@ FUNC ## _parse(char *options, char **resstr, char **otherstr)	       \
 		switch (token) {				       \
 		case FUNC ## _res_type:			               \
 			*resstr = match_strdup(args);		       \
-			if (!strcmp(#FUNC, "config")) {		       \
-				char *str = p + strlen(p) + 1;	       \
-				*otherstr = kmalloc(strlen(str) + 1,   \
-							 GFP_KERNEL);  \
-				if (*otherstr == NULL) {	       \
-					kfree(*resstr);		       \
-					*resstr = NULL;		       \
-					return 0;		       \
-				} else {			       \
-					strcpy(*otherstr, str);	       \
-					return 1;		       \
-				}				       \
-			}					       \
 			break;					       \
 		case FUNC ## _str:			               \
 			*otherstr = match_strdup(args);		       \
 			break;					       \
 		default:					       \
-			return 0;				       \
+			return -EINVAL;				       \
 		}                                                      \
 	}                                                              \
-	return (*resstr != NULL);				       \
+	if (*resstr)                                                   \
+                return 0;                                              \
+        return -EINVAL;                                                \
 }
 
 #define MAGIC_WRITE(FUNC,CLSTYPEFUN)                                   \
@@ -210,16 +199,17 @@ struct file_operations FUNC ## _fileops = {                            \
 EXPORT_SYMBOL(FUNC ## _fileops);
 
 /******************************************************************************
- * Shared function used by Target / Reclassify
+ * Target
  *
+ * pseudo file for manually reclassifying members to a class
  *
  *****************************************************************************/
 
 #define TARGET_MAX_INPUT_SIZE 100
 
 static ssize_t
-target_reclassify_write(struct file *file, const char __user * buf,
-			size_t count, loff_t * ppos, int manual)
+target_write(struct file *file, const char __user * buf,
+	     size_t count, loff_t * ppos)
 {
 	struct rcfs_inode_info *ri = RCFS_I(file->f_dentry->d_inode);
 	char *optbuf;
@@ -241,7 +231,7 @@ target_reclassify_write(struct file *file, const char __user * buf,
 
 	clstype = ri->core->classtype;
 	if (clstype->forced_reclassify)
-		rc = (*clstype->forced_reclassify) (manual ? ri->core: NULL, optbuf);
+		rc = (*clstype->forced_reclassify) (ri->core, optbuf);
 
 	up(&(ri->vfs_inode.i_sem));
 	kfree(optbuf);
@@ -249,45 +239,11 @@ target_reclassify_write(struct file *file, const char __user * buf,
 
 }
 
-/******************************************************************************
- * Target
- *
- * pseudo file for manually reclassifying members to a class
- *
- *****************************************************************************/
-
-static ssize_t
-target_write(struct file *file, const char __user * buf,
-	     size_t count, loff_t * ppos)
-{
-	return target_reclassify_write(file,buf,count,ppos,1);
-}
-
 struct file_operations target_fileops = {
 	.write = target_write,
 };
 
 EXPORT_SYMBOL(target_fileops);
-
-/******************************************************************************
- * Reclassify
- *
- * pseudo file for reclassification of an object through CE
- *
- *****************************************************************************/
-
-static ssize_t
-reclassify_write(struct file *file, const char __user * buf,
-		 size_t count, loff_t * ppos)
-{
-	return target_reclassify_write(file,buf,count,ppos,0);
-}
-
-struct file_operations reclassify_fileops = {
-	.write = reclassify_write,
-};
-
-EXPORT_SYMBOL(reclassify_fileops);
 
 /******************************************************************************
  * Config
@@ -308,6 +264,7 @@ enum config_token_t {
 
 static match_table_t config_tokens = {
 	{config_res_type, "res=%s"},
+	{config_str, "config=%s"},
 	{config_err, NULL},
 };
 
@@ -504,7 +461,7 @@ shares_write(struct file *file, const char __user * buf,
 		}
 	}
 
-	printk(KERN_DEBUG "Set %s shares to %d %d %d %d\n",
+	printk(KERN_ERR "Set %s shares to %d %d %d %d\n",
 	       resname,
 	       newshares.my_guarantee,
 	       newshares.my_limit,

@@ -2,6 +2,16 @@
 # Makefile for the linux kernel.
 #
 
+ifdef CONFIG_PPC64BRIDGE
+EXTRA_AFLAGS		:= -Wa,-mppc64bridge
+endif
+ifdef CONFIG_4xx
+EXTRA_AFLAGS		:= -Wa,-m405
+endif
+ifdef CONFIG_E500
+EXTRA_AFLAGS		:= -Wa,-me500
+endif
+
 CFLAGS_prom_init.o      += -fPIC
 CFLAGS_btext.o          += -fPIC
 
@@ -15,8 +25,7 @@ ifeq ($(CONFIG_4xx),y)
 obj-$(CONFIG_4xx)		+= ppc4xx_pic.o
 obj-$(CONFIG_40x)		+= ppc4xx_setup.o
 obj-$(CONFIG_GEN_RTC)		+= todc_time.o
-obj-$(CONFIG_PPC4xx_DMA)	+= ppc4xx_dma.o
-obj-$(CONFIG_PPC4xx_EDMA)	+= ppc4xx_sgdma.o
+obj-$(CONFIG_KGDB)		+= ppc4xx_kgdb.o
 ifeq ($(CONFIG_40x),y)
 obj-$(CONFIG_KGDB)		+= ppc4xx_kgdb.o
 obj-$(CONFIG_PCI)		+= indirect_pci.o pci_auto.o ppc405_pci.o
@@ -60,10 +69,10 @@ obj-$(CONFIG_SANDPOINT)		+= i8259.o pci_auto.o todc_time.o
 obj-$(CONFIG_SBC82xx)		+= todc_time.o
 obj-$(CONFIG_SPRUCE)		+= cpc700_pic.o indirect_pci.o pci_auto.o \
 				   todc_time.o
-obj-$(CONFIG_8260)		+= m8260_setup.o
+obj-$(CONFIG_8260)		+= m8260_setup.o cpm2_pic.o
 obj-$(CONFIG_PCI_8260)		+= m8260_pci.o indirect_pci.o
 obj-$(CONFIG_8260_PCI9)		+= m8260_pci_erratum9.o
-obj-$(CONFIG_CPM2)		+= cpm2_common.o cpm2_pic.o
+obj-$(CONFIG_CPM2)		+= cpm2_common.o
 ifeq ($(CONFIG_PPC_GEN550),y)
 obj-$(CONFIG_KGDB)		+= gen550_kgdb.o gen550_dbg.o
 obj-$(CONFIG_SERIAL_TEXT_DEBUG)	+= gen550_dbg.o
@@ -77,4 +86,3 @@ obj-$(CONFIG_85xx)		+= open_pic.o ppc85xx_common.o ppc85xx_setup.o
 ifeq ($(CONFIG_85xx),y)
 obj-$(CONFIG_PCI)		+= indirect_pci.o pci_auto.o
 endif
-obj-$(CONFIG_PPC_MPC52xx)	+= mpc52xx_setup.o mpc52xx_pic.o

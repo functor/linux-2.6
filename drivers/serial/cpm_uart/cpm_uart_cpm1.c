@@ -130,20 +130,20 @@ int cpm_uart_allocbuf(struct uart_cpm_port *pinfo, unsigned int is_con)
 {
 	int dpmemsz, memsz;
 	u8 *dp_mem;
-	uint dp_offset;
+	uint dp_addr;
 	u8 *mem_addr;
-	dma_addr_t dma_addr = 0;
+	dma_addr_t dma_addr;
 
 	pr_debug("CPM uart[%d]:allocbuf\n", pinfo->port.line);
 
 	dpmemsz = sizeof(cbd_t) * (pinfo->rx_nrfifos + pinfo->tx_nrfifos);
-	dp_offset = cpm_dpalloc(dpmemsz, 8);
-	if (IS_DPERR(dp_offset)) {
+	dp_mem = m8xx_cpm_dpalloc(dpmemsz);
+	if (dp_mem == NULL) {
 		printk(KERN_ERR
 		       "cpm_uart_cpm1.c: could not allocate buffer descriptors\n");
 		return -ENOMEM;
 	}
-	dp_mem = cpm_dpram_addr(dp_offset);
+	dp_addr = m8xx_cpm_dpram_offset(dp_mem);
 
 	memsz = L1_CACHE_ALIGN(pinfo->rx_nrfifos * pinfo->rx_fifosize) +
 	    L1_CACHE_ALIGN(pinfo->tx_nrfifos * pinfo->tx_fifosize);
@@ -155,13 +155,13 @@ int cpm_uart_allocbuf(struct uart_cpm_port *pinfo, unsigned int is_con)
 					      GFP_KERNEL);
 
 	if (mem_addr == NULL) {
-		cpm_dpfree(dp_offset);
+		m8xx_cpm_dpfree(dp_mem);
 		printk(KERN_ERR
 		       "cpm_uart_cpm1.c: could not allocate coherent memory\n");
 		return -ENOMEM;
 	}
 
-	pinfo->dp_addr = dp_offset;
+	pinfo->dp_addr = dp_addr;
 	pinfo->mem_addr = mem_addr;
 	pinfo->dma_addr = dma_addr;
 
@@ -183,7 +183,7 @@ void cpm_uart_freebuf(struct uart_cpm_port *pinfo)
 					 pinfo->tx_fifosize), pinfo->mem_addr,
 			  pinfo->dma_addr);
 
-	cpm_dpfree(pinfo->dp_addr);
+	m8xx_cpm_dpfree(m8xx_cpm_dpram_addr(pinfo->dp_addr));
 }
 
 /* Setup any dynamic params in the uart desc */

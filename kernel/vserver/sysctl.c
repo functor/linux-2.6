@@ -26,22 +26,14 @@
 
 enum {
         CTL_DEBUG_SWITCH = 1,
-        CTL_DEBUG_XID,
-        CTL_DEBUG_NID,
-        CTL_DEBUG_NET,
         CTL_DEBUG_LIMIT,
-        CTL_DEBUG_DLIM,
-        CTL_DEBUG_CVIRT,
+        CTL_DEBUG_DLIMIT,
 };
 
 
 unsigned int vx_debug_switch = 0;
-unsigned int vx_debug_xid = 0;
-unsigned int vx_debug_nid = 0;
-unsigned int vx_debug_net = 0;
 unsigned int vx_debug_limit = 0;
-unsigned int vx_debug_dlim = 0;
-unsigned int vx_debug_cvirt = 0;
+unsigned int vx_debug_dlimit = 0;
 
 
 static struct ctl_table_header *vserver_table_header;
@@ -70,13 +62,13 @@ void vserver_unregister_sysctl(void)
 
 
 static int proc_dodebug(ctl_table *table, int write,
-	struct file *filp, void __user *buffer, size_t *lenp, loff_t *ppos)
+	struct file *file, void *buffer, size_t *lenp)
 {
 	char		tmpbuf[20], *p, c;
 	unsigned int	value;
 	size_t		left, len;
 
-	if ((*ppos && !write) || !*lenp) {
+	if ((file->f_pos && !write) || !*lenp) {
 		*lenp = 0;
 		return 0;
 	}
@@ -122,7 +114,7 @@ static int proc_dodebug(ctl_table *table, int write,
 
 done:
 	*lenp -= left;
-	*ppos += *lenp;
+	file->f_pos += *lenp;
 	return 0;
 }
 	
@@ -138,30 +130,6 @@ static ctl_table debug_table[] = {
                 .proc_handler   = &proc_dodebug
         },
         {
-                .ctl_name       = CTL_DEBUG_XID,
-                .procname       = "debug_xid",
-                .data           = &vx_debug_xid,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        {
-                .ctl_name       = CTL_DEBUG_NID,
-                .procname       = "debug_nid",
-                .data           = &vx_debug_nid,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        {
-                .ctl_name       = CTL_DEBUG_NET,
-                .procname       = "debug_net",
-                .data           = &vx_debug_net,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        {
                 .ctl_name       = CTL_DEBUG_LIMIT,
                 .procname       = "debug_limit",
                 .data           = &vx_debug_limit,
@@ -170,17 +138,9 @@ static ctl_table debug_table[] = {
                 .proc_handler   = &proc_dodebug
         },
         {
-                .ctl_name       = CTL_DEBUG_DLIM,
-                .procname       = "debug_dlim",
-                .data           = &vx_debug_dlim,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        {
-                .ctl_name       = CTL_DEBUG_CVIRT,
-                .procname       = "debug_cvirt",
-                .data           = &vx_debug_cvirt,
+                .ctl_name       = CTL_DEBUG_DLIMIT,
+                .procname       = "debug_dlimit",
+                .data           = &vx_debug_dlimit,
                 .maxlen         = sizeof(int),
                 .mode           = 0644,
                 .proc_handler   = &proc_dodebug
@@ -197,9 +157,4 @@ static ctl_table vserver_table[] = {
         },
         { .ctl_name = 0 }
 };
-
-
-EXPORT_SYMBOL_GPL(vx_debug_dlim);
-EXPORT_SYMBOL_GPL(vx_debug_nid);
-EXPORT_SYMBOL_GPL(vx_debug_xid);
 

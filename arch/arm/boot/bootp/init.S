@@ -20,10 +20,8 @@
 		.type	_start, #function
 		.globl	_start
 
-_start:		add	lr, pc, #-0x8		@ lr = current load addr
-		adr	r13, data
+_start:		adr	r13, data
 		ldmia	r13!, {r4-r6}		@ r5 = dest, r6 = length
-		add	r4, r4, lr		@ r4 = initrd_start + load addr
 		bl	move			@ move the initrd
 
 /*

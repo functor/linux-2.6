@@ -21,7 +21,6 @@
 #include <linux/pagemap.h>
 #include <linux/cdev.h>
 #include <linux/bootmem.h>
-#include <linux/vs_base.h>
 
 /*
  * This is needed for the following functions:
@@ -139,10 +138,11 @@ static struct inode *alloc_inode(struct super_block *sb)
 		struct address_space * const mapping = &inode->i_data;
 
 		inode->i_sb = sb;
+		if (sb->s_flags & MS_TAGXID)
+			inode->i_xid = current->xid;
+		else
+			inode->i_xid = 0;       /* maybe xid -1 would be better? */
 		// inode->i_dqh = dqhget(sb->s_dqh);
-
-		/* important because of inode slab reuse */
-		inode->i_xid = 0;
 		inode->i_blkbits = sb->s_blocksize_bits;
 		inode->i_flags = 0;
 		atomic_set(&inode->i_count, 1);
@@ -162,6 +162,7 @@ static struct inode *alloc_inode(struct super_block *sb)
 		inode->i_bdev = NULL;
 		inode->i_cdev = NULL;
 		inode->i_rdev = 0;
+		// inode->i_xid = 0;	/* maybe not too wise ... */
 		inode->i_security = NULL;
 		inode->dirtied_when = 0;
 		if (security_inode_alloc(inode)) {
@@ -1210,14 +1211,14 @@ EXPORT_SYMBOL(update_atime);
  *	When ctime_too is specified update the ctime too.
  */
 
-void inode_update_time(struct inode *inode, struct vfsmount *mnt, int ctime_too)
+void inode_update_time(struct inode *inode, int ctime_too)
 {
 	struct timespec now;
 	int sync_it = 0;
 
 	if (IS_NOCMTIME(inode))
 		return;
-	if (IS_RDONLY(inode) || MNT_IS_RDONLY(mnt))
+	if (IS_RDONLY(inode))
 		return;
 
 	now = current_kernel_time();

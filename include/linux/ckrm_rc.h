@@ -132,7 +132,7 @@ typedef struct ckrm_classtype {
 	int num_classes;	 
 
 	/* state about my ce interaction */
-	atomic_t ce_regd;		// if CE registered
+	int ce_regd;		// if CE registered
 	int ce_cb_active;	// if Callbacks active
 	atomic_t ce_nr_users;	// number of active transient calls 
 	struct ckrm_eng_callback ce_callbacks;	// callback engine
@@ -223,11 +223,7 @@ typedef struct ckrm_core_class {
  * OTHER
  ******************************************************************************/
 
-#define ckrm_get_res_class(rescls, resid, type) \
-	((type*) (((resid != -1) && ((rescls) != NULL) \
-			   && ((rescls) != (void *)-1)) ? \
-	 ((struct ckrm_core_class *)(rescls))->res_class[resid] : NULL))
-
+#define ckrm_get_res_class(rescls,resid,type)   ((type*)((rescls)->res_class[resid]))
 
 extern int ckrm_register_res_ctlr(struct ckrm_classtype *, ckrm_res_ctlr_t *);
 extern int ckrm_unregister_res_ctlr(ckrm_res_ctlr_t *);

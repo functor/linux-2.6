@@ -385,7 +385,7 @@ struct tcp_opt {
 	/* FIFO of established children */
 	struct open_request	*accept_queue;
 #ifndef CONFIG_ACCEPT_QUEUES
-	struct open_request	*accept_queue_tail;
+	struct open_request     *accept_queue_tail;
 #endif
 	unsigned int		keepalive_time;	  /* time before keep alive takes place */
 	unsigned int		keepalive_intvl;  /* time interval between keep alive probes */
@@ -437,7 +437,6 @@ struct tcp_opt {
 		__u32	cnt;		/* increase cwnd by 1 after this number of ACKs */
 		__u32 	last_max_cwnd;	/* last maximium snd_cwnd */
 		__u32	last_cwnd;	/* the last snd_cwnd */
-		__u32   last_stamp;     /* time when updated last_cwnd */
 	} bictcp;
 
 #ifdef CONFIG_ACCEPT_QUEUES

@@ -43,7 +43,7 @@
 
 #define TC_FILE_MODE (S_IFREG | S_IRUGO | S_IWUSR)
 
-#define NR_TCROOTMF  7
+#define NR_TCROOTMF  6
 struct rcfs_magf tc_rootdesc[NR_TCROOTMF] = {
 	/* First entry must be root */
 	{
@@ -77,15 +77,8 @@ struct rcfs_magf tc_rootdesc[NR_TCROOTMF] = {
 	 .i_fop = &shares_fileops,
 	 .i_op = &rcfs_file_inode_operations,
 	 },
-	// Reclassify and Config should be made available only at the 
-	// root level. Make sure they are the last two entries, as 
-	// rcfs_mkdir depends on it
-	{
-	 .name = "reclassify",
-	 .mode = TC_FILE_MODE,
-	 .i_fop = &reclassify_fileops,
-	 .i_op = &rcfs_file_inode_operations,
-	 },
+	// Config should be made available only at the root level
+	// Make sure this is the last entry, as rcfs_mkdir depends on it
 	{
 	 .name = "config",
 	 .mode = TC_FILE_MODE,

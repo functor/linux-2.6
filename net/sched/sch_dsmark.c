@@ -30,7 +30,7 @@
 #endif
 
 
-#define PRIV(sch) qdisc_priv(sch)
+#define PRIV(sch) ((struct dsmark_qdisc_data *) (sch)->data)
 
 
 /*
@@ -383,6 +383,7 @@ static void dsmark_destroy(struct Qdisc *sch)
 		tcf_destroy(tp);
 	}
 	qdisc_destroy(p->q);
+	p->q = &noop_qdisc;
 	kfree(p->mask);
 }
 

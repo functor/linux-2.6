@@ -159,14 +159,6 @@ struct ipmi_msg
 	unsigned char  netfn;
 	unsigned char  cmd;
 	unsigned short data_len;
-	unsigned char  __user *data;
-};
-
-struct kernel_ipmi_msg
-{
-	unsigned char  netfn;
-	unsigned char  cmd;
-	unsigned short data_len;
 	unsigned char  *data;
 };
 
@@ -231,7 +223,7 @@ struct ipmi_recv_msg
 	ipmi_user_t      user;
 	struct ipmi_addr addr;
 	long             msgid;
-	struct kernel_ipmi_msg  msg;
+	struct ipmi_msg  msg;
 
 	/* The user_msg_data is the data supplied when a message was
 	   sent, if this is a response to a sent message.  If this is
@@ -324,7 +316,7 @@ unsigned char ipmi_get_my_LUN(ipmi_user_t user);
 int ipmi_request(ipmi_user_t      user,
 		 struct ipmi_addr *addr,
 		 long             msgid,
-		 struct kernel_ipmi_msg *msg,
+		 struct ipmi_msg  *msg,
 		 void             *user_msg_data,
 		 int              priority);
 
@@ -344,7 +336,7 @@ int ipmi_request(ipmi_user_t      user,
 int ipmi_request_settime(ipmi_user_t      user,
 			 struct ipmi_addr *addr,
 			 long             msgid,
-			 struct kernel_ipmi_msg  *msg,
+			 struct ipmi_msg  *msg,
 			 void             *user_msg_data,
 			 int              priority,
 			 int              max_retries,
@@ -356,7 +348,7 @@ int ipmi_request_settime(ipmi_user_t      user,
 int ipmi_request_with_source(ipmi_user_t      user,
 			     struct ipmi_addr *addr,
 			     long             msgid,
-			     struct kernel_ipmi_msg  *msg,
+			     struct ipmi_msg  *msg,
 			     void             *user_msg_data,
 			     int              priority,
 			     unsigned char    source_address,
@@ -374,7 +366,7 @@ int ipmi_request_with_source(ipmi_user_t      user,
 int ipmi_request_supply_msgs(ipmi_user_t          user,
 			     struct ipmi_addr     *addr,
 			     long                 msgid,
-			     struct kernel_ipmi_msg *msg,
+			     struct ipmi_msg      *msg,
 			     void                 *user_msg_data,
 			     void                 *supplied_smi,
 			     struct ipmi_recv_msg *supplied_recv,

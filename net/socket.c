@@ -68,7 +68,6 @@
 #include <linux/netdevice.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
-#include <net/tux.h>
 #include <linux/wanrouter.h>
 #include <linux/if_bridge.h>
 #include <linux/init.h>
@@ -123,7 +122,7 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
  *	in the operation structures but are done directly via the socketcall() multiplexor.
  */
 
-struct file_operations socket_file_ops = {
+static struct file_operations socket_file_ops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
 	.aio_read =	sock_aio_read,
@@ -365,63 +364,52 @@ static struct dentry_operations sockfs_dentry_operations = {
  *	but we take care of internal coherence yet.
  */
 
-struct file * sock_map_file(struct socket *sock)
-{
-	struct file *file;
-	struct qstr this;
-	char name[32];
-
-	file = get_empty_filp();
-
-	if (!file)
-		return ERR_PTR(-ENFILE);
-
-	sprintf(name, "[%lu]", SOCK_INODE(sock)->i_ino);
-	this.name = name;
-	this.len = strlen(name);
-	this.hash = SOCK_INODE(sock)->i_ino;
-
-	file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
-	if (!file->f_dentry) {
-		put_filp(file);
-		return ERR_PTR(-ENOMEM);
-	}
-	file->f_dentry->d_op = &sockfs_dentry_operations;
-	d_add(file->f_dentry, SOCK_INODE(sock));
-	file->f_vfsmnt = mntget(sock_mnt);
-file->f_mapping = file->f_dentry->d_inode->i_mapping;
-
-	if (sock->file)
-		BUG();
-	sock->file = file;
-	file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
-	file->f_mode = FMODE_READ | FMODE_WRITE;
-	file->f_flags = O_RDWR;
-	file->f_pos = 0;
-
-	return file;
-}
-
 int sock_map_fd(struct socket *sock)
 {
 	int fd;
-	struct file *file;
- 
+	struct qstr this;
+	char name[32];
+
 	/*
 	 *	Find a file descriptor suitable for return to the user. 
 	 */
-  
+
 	fd = get_unused_fd();
-	if (fd < 0)
-		return fd;
-  
-	file = sock_map_file(sock);
-	if (IS_ERR(file)) {
-		put_unused_fd(fd);
-		return PTR_ERR(file);
+	if (fd >= 0) {
+		struct file *file = get_empty_filp();
+
+		if (!file) {
+			put_unused_fd(fd);
+			fd = -ENFILE;
+			goto out;
+		}
+
+		sprintf(name, "[%lu]", SOCK_INODE(sock)->i_ino);
+		this.name = name;
+		this.len = strlen(name);
+		this.hash = SOCK_INODE(sock)->i_ino;
+
+		file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
+		if (!file->f_dentry) {
+			put_filp(file);
+			put_unused_fd(fd);
+			fd = -ENOMEM;
+			goto out;
+		}
+		file->f_dentry->d_op = &sockfs_dentry_operations;
+		d_add(file->f_dentry, SOCK_INODE(sock));
+		file->f_vfsmnt = mntget(sock_mnt);
+		file->f_mapping = file->f_dentry->d_inode->i_mapping;
+
+		sock->file = file;
+		file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
+		file->f_mode = 3;
+		file->f_flags = O_RDWR;
+		file->f_pos = 0;
+		fd_install(fd, file);
 	}
-	fd_install(fd, file);
-  
+
+out:
 	return fd;
 }
 
@@ -563,13 +551,12 @@ static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 		else
 			vx_sock_fail(sock->sk, size);
 	}
-	vxdprintk(VXD_CBIT(net, 7),
-		"__sock_sendmsg: %p[%p,%p,%p;%d]:%d/%d",
+	vxdprintk("__sock_sendmsg: %p[%p,%p,%p;%d]:%d/%d\n",
 		sock, sock->sk,
 		(sock->sk)?sock->sk->sk_nx_info:0,
 		(sock->sk)?sock->sk->sk_vx_info:0,
 		(sock->sk)?sock->sk->sk_xid:0,
-		(unsigned int)size, len);
+		size, len);
 	return len;
 }
 
@@ -587,23 +574,6 @@ int sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 	return ret;
 }
 
-int kernel_sendmsg(struct socket *sock, struct msghdr *msg,
-		   struct kvec *vec, size_t num, size_t size)
-{
-	mm_segment_t oldfs = get_fs();
-	int result;
-
-	set_fs(KERNEL_DS);
-	/*
-	 * the following is safe, since for compiler definitions of kvec and
-	 * iovec are identical, yielding the same in-core layout and alignment
-	 */
-	msg->msg_iov = (struct iovec *)vec,
-	msg->msg_iovlen = num;
-	result = sock_sendmsg(sock, msg, size);
-	set_fs(oldfs);
-	return result;
-}
 
 static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock, 
 				 struct msghdr *msg, size_t size, int flags)
@@ -624,13 +594,12 @@ static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 	len = sock->ops->recvmsg(iocb, sock, msg, size, flags);
 	if ((len >= 0) && sock->sk)
 		vx_sock_recv(sock->sk, len);
-	vxdprintk(VXD_CBIT(net, 7),
-		"__sock_recvmsg: %p[%p,%p,%p;%d]:%d/%d",
+	vxdprintk("__sock_recvmsg: %p[%p,%p,%p;%d]:%d/%d\n",
 		sock, sock->sk,
 		(sock->sk)?sock->sk->sk_nx_info:0,
 		(sock->sk)?sock->sk->sk_vx_info:0,
 		(sock->sk)?sock->sk->sk_xid:0,
-		(unsigned int)size, len);
+		size, len);
 	return len;
 }
 
@@ -647,25 +616,6 @@ int sock_recvmsg(struct socket *sock, struct msghdr *msg,
 	if (-EIOCBQUEUED == ret)
 		ret = wait_on_sync_kiocb(&iocb);
 	return ret;
-}
-
-int kernel_recvmsg(struct socket *sock, struct msghdr *msg, 
-		   struct kvec *vec, size_t num,
-		   size_t size, int flags)
-{
-	mm_segment_t oldfs = get_fs();
-	int result;
-
-	set_fs(KERNEL_DS);
-	/*
-	 * the following is safe, since for compiler definitions of kvec and
-	 * iovec are identical, yielding the same in-core layout and alignment
-	 */
-	msg->msg_iov = (struct iovec *)vec,
-	msg->msg_iovlen = num;
-	result = sock_recvmsg(sock, msg, size, flags);
-	set_fs(oldfs);
-	return result;
 }
 
 static void sock_aio_dtor(struct kiocb *iocb)
@@ -764,6 +714,9 @@ ssize_t sock_sendpage(struct file *file, struct page *page,
 {
 	struct socket *sock;
 	int flags;
+
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 
 	sock = SOCKET_I(file->f_dentry->d_inode);
 
@@ -1078,8 +1031,6 @@ static int sock_fasync(int fd, struct file *filp, int on)
 	}
 
 out:
-	if (sock->sk != sk)
-		BUG();
 	release_sock(sock->sk);
 	return 0;
 }
@@ -2116,51 +2067,6 @@ void __init sock_init(void)
 #endif
 }
 
-int tux_Dprintk;
-int tux_TDprintk;
-
-#ifdef CONFIG_TUX_MODULE
-
-asmlinkage long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info) = NULL;
-
-struct module *tux_module = NULL;
-spinlock_t tux_module_lock = SPIN_LOCK_UNLOCKED;
-
-asmlinkage long sys_tux (unsigned int action, user_req_t *u_info)
-{
-	int ret;
-
-	if (current->tux_info)
-		return sys_tux_ptr(action, u_info);
-
-	ret = -ENOSYS;
-	spin_lock(&tux_module_lock);
-	if (!tux_module)
-		goto out_unlock;
-	if (!try_module_get(tux_module))
-		goto out_unlock;
-	spin_unlock(&tux_module_lock);
-
-	if (!sys_tux_ptr)
-		TUX_BUG();
-	ret = sys_tux_ptr(action, u_info);
-
-	spin_lock(&tux_module_lock);
-	module_put(tux_module);
-out_unlock:
-	spin_unlock(&tux_module_lock);
-
-	return ret;
-}
-
-EXPORT_SYMBOL_GPL(tux_module);
-EXPORT_SYMBOL_GPL(tux_module_lock);
-EXPORT_SYMBOL_GPL(sys_tux_ptr);
-
-EXPORT_SYMBOL_GPL(tux_Dprintk);
-EXPORT_SYMBOL_GPL(tux_TDprintk);
-
-#endif
 #ifdef CONFIG_PROC_FS
 void socket_seq_show(struct seq_file *seq)
 {
@@ -2194,5 +2100,3 @@ EXPORT_SYMBOL(sock_sendmsg);
 EXPORT_SYMBOL(sock_unregister);
 EXPORT_SYMBOL(sock_wake_async);
 EXPORT_SYMBOL(sockfd_lookup);
-EXPORT_SYMBOL(kernel_sendmsg);
-EXPORT_SYMBOL(kernel_recvmsg);

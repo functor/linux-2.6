@@ -933,7 +933,7 @@ static int solo1_open_mixdev(struct inode *inode, struct file *file)
 		return -ENODEV;
        	VALIDATE_STATE(s);
 	file->private_data = s;
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int solo1_release_mixdev(struct inode *inode, struct file *file)
@@ -1010,6 +1010,8 @@ static ssize_t solo1_read(struct file *file, char __user *buffer, size_t count, 
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (s->dma_adc.mapped)
 		return -ENXIO;
 	if (!s->dma_adc.ready && (ret = prog_dmabuf_adc(s)))
@@ -1104,6 +1106,8 @@ static ssize_t solo1_write(struct file *file, const char __user *buffer, size_t 
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (s->dma_dac.mapped)
 		return -ENXIO;
 	if (!s->dma_dac.ready && (ret = prog_dmabuf_dac(s)))
@@ -1643,7 +1647,7 @@ static int solo1_open(struct inode *inode, struct file *file)
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
 	up(&s->open_sem);
 	prog_codec(s);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static /*const*/ struct file_operations solo1_audio_fops = {
@@ -1736,6 +1740,8 @@ static ssize_t solo1_midi_read(struct file *file, char __user *buffer, size_t co
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (!access_ok(VERIFY_WRITE, buffer, count))
 		return -EFAULT;
 	if (count == 0)
@@ -1797,6 +1803,8 @@ static ssize_t solo1_midi_write(struct file *file, const char __user *buffer, si
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (!access_ok(VERIFY_READ, buffer, count))
 		return -EFAULT;
 	if (count == 0)
@@ -1943,7 +1951,7 @@ static int solo1_midi_open(struct inode *inode, struct file *file)
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= (file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ | FMODE_MIDI_WRITE);
 	up(&s->open_sem);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int solo1_midi_release(struct inode *inode, struct file *file)
@@ -2153,7 +2161,7 @@ static int solo1_dmfm_open(struct inode *inode, struct file *file)
 	outb(1, s->sbbase+3);  /* enable OPL3 */
 	s->open_mode |= FMODE_DMFM;
 	up(&s->open_sem);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int solo1_dmfm_release(struct inode *inode, struct file *file)

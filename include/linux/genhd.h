@@ -82,8 +82,7 @@ struct disk_stats {
 struct gendisk {
 	int major;			/* major number of driver */
 	int first_minor;
-	int minors;                     /* maximum number of minors, =1 for
-                                         * disks that can't be partitioned. */
+	int minors;
 	char disk_name[32];		/* name of major driver */
 	struct hd_struct **part;	/* [indexed by minor] */
 	struct block_device_operations *fops;

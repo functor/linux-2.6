@@ -603,7 +603,7 @@ static inline int tabledist(int mu, int sigma)
  */
 static int netem_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
-	struct netem_sched_data *q = qdisc_priv(sch);
+	struct netem_sched_data *q = (struct netem_sched_data *)sch->data;
 	struct netem_skb_cb *cb = (struct netem_skb_cb *)skb->cb;
 	psched_time_t now;
 	long delay;
@@ -643,23 +643,17 @@ static int netem_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	PSCHED_TADD2(now, delay, cb->time_to_send);
 	
 	/* Always queue at tail to keep packets in order */
-	if (likely(q->delayed.qlen < q->limit)) {
-		__skb_queue_tail(&q->delayed, skb);
-		sch->q.qlen++;
-		sch->stats.bytes += skb->len;
-		sch->stats.packets++;
-		return 0;
-	}
-
-	sch->stats.drops++;
-	kfree_skb(skb);
-	return NET_XMIT_DROP;
+	__skb_queue_tail(&q->delayed, skb);
+	sch->q.qlen++;
+	sch->stats.bytes += skb->len;
+	sch->stats.packets++;
+	return 0;
 }
 
 /* Requeue packets but don't change time stamp */
 static int netem_requeue(struct sk_buff *skb, struct Qdisc *sch)
 {
-	struct netem_sched_data *q = qdisc_priv(sch);
+	struct netem_sched_data *q = (struct netem_sched_data *)sch->data;
 	int ret;
 
 	if ((ret = q->qdisc->ops->requeue(skb, q->qdisc)) == 0)
@@ -670,7 +664,7 @@ static int netem_requeue(struct sk_buff *skb, struct Qdisc *sch)
 
 static unsigned int netem_drop(struct Qdisc* sch)
 {
-	struct netem_sched_data *q = qdisc_priv(sch);
+	struct netem_sched_data *q = (struct netem_sched_data *)sch->data;
 	unsigned int len;
 
 	if ((len = q->qdisc->ops->drop(q->qdisc)) != 0) {
@@ -686,7 +680,7 @@ static unsigned int netem_drop(struct Qdisc* sch)
  */
 static struct sk_buff *netem_dequeue(struct Qdisc *sch)
 {
-	struct netem_sched_data *q = qdisc_priv(sch);
+	struct netem_sched_data *q = (struct netem_sched_data *)sch->data;
 	struct sk_buff *skb;
 	psched_time_t now;
 
@@ -726,7 +720,7 @@ static void netem_watchdog(unsigned long arg)
 
 static void netem_reset(struct Qdisc *sch)
 {
-	struct netem_sched_data *q = qdisc_priv(sch);
+	struct netem_sched_data *q = (struct netem_sched_data *)sch->data;
 
 	qdisc_reset(q->qdisc);
 	skb_queue_purge(&q->delayed);
@@ -754,7 +748,7 @@ static int set_fifo_limit(struct Qdisc *q, int limit)
 
 static int netem_change(struct Qdisc *sch, struct rtattr *opt)
 {
-	struct netem_sched_data *q = qdisc_priv(sch);
+	struct netem_sched_data *q = (struct netem_sched_data *)sch->data;
 	struct tc_netem_qopt *qopt = RTA_DATA(opt);
 	struct Qdisc *child;
 	int ret;
@@ -791,7 +785,7 @@ static int netem_change(struct Qdisc *sch, struct rtattr *opt)
 
 static int netem_init(struct Qdisc *sch, struct rtattr *opt)
 {
-	struct netem_sched_data *q = qdisc_priv(sch);
+	struct netem_sched_data *q = (struct netem_sched_data *)sch->data;
 
 	if (!opt)
 		return -EINVAL;
@@ -809,21 +803,20 @@ static int netem_init(struct Qdisc *sch, struct rtattr *opt)
 
 static void netem_destroy(struct Qdisc *sch)
 {
-	struct netem_sched_data *q = qdisc_priv(sch);
+	struct netem_sched_data *q = (struct netem_sched_data *)sch->data;
 
 	del_timer_sync(&q->timer);
-	qdisc_destroy(q->qdisc);
 }
 
 static int netem_dump(struct Qdisc *sch, struct sk_buff *skb)
 {
-	struct netem_sched_data *q = qdisc_priv(sch);
+	struct netem_sched_data *q = (struct netem_sched_data *)sch->data;
 	unsigned char	 *b = skb->tail;
 	struct tc_netem_qopt qopt;
 
 	qopt.latency = q->latency;
 	qopt.jitter = q->jitter;
-	qopt.limit = q->limit;
+	qopt.limit = sch->dev->tx_queue_len;
 	qopt.loss = q->loss;
 	qopt.gap = q->gap;
 
@@ -836,95 +829,8 @@ rtattr_failure:
 	return -1;
 }
 
-static int netem_dump_class(struct Qdisc *sch, unsigned long cl,
-			  struct sk_buff *skb, struct tcmsg *tcm)
-{
-	struct netem_sched_data *q = qdisc_priv(sch);
-
-	if (cl != 1) 	/* only one class */
-		return -ENOENT;
-
-	tcm->tcm_handle |= TC_H_MIN(1);
-	tcm->tcm_info = q->qdisc->handle;
-
-	return 0;
-}
-
-static int netem_graft(struct Qdisc *sch, unsigned long arg, struct Qdisc *new,
-		     struct Qdisc **old)
-{
-	struct netem_sched_data *q = qdisc_priv(sch);
-
-	if (new == NULL)
-		new = &noop_qdisc;
-
-	sch_tree_lock(sch);
-	*old = xchg(&q->qdisc, new);
-	qdisc_reset(*old);
-	sch->q.qlen = 0;
-	sch_tree_unlock(sch);
-
-	return 0;
-}
-
-static struct Qdisc *netem_leaf(struct Qdisc *sch, unsigned long arg)
-{
-	struct netem_sched_data *q = qdisc_priv(sch);
-	return q->qdisc;
-}
-
-static unsigned long netem_get(struct Qdisc *sch, u32 classid)
-{
-	return 1;
-}
-
-static void netem_put(struct Qdisc *sch, unsigned long arg)
-{
-}
-
-static int netem_change_class(struct Qdisc *sch, u32 classid, u32 parentid, 
-			    struct rtattr **tca, unsigned long *arg)
-{
-	return -ENOSYS;
-}
-
-static int netem_delete(struct Qdisc *sch, unsigned long arg)
-{
-	return -ENOSYS;
-}
-
-static void netem_walk(struct Qdisc *sch, struct qdisc_walker *walker)
-{
-	if (!walker->stop) {
-		if (walker->count >= walker->skip)
-			if (walker->fn(sch, 1, walker) < 0) {
-				walker->stop = 1;
-				return;
-			}
-		walker->count++;
-	}
-}
-
-static struct tcf_proto **netem_find_tcf(struct Qdisc *sch, unsigned long cl)
-{
-	return NULL;
-}
-
-static struct Qdisc_class_ops netem_class_ops = {
-	.graft		=	netem_graft,
-	.leaf		=	netem_leaf,
-	.get		=	netem_get,
-	.put		=	netem_put,
-	.change		=	netem_change_class,
-	.delete		=	netem_delete,
-	.walk		=	netem_walk,
-	.tcf_chain	=	netem_find_tcf,
-	.dump		=	netem_dump_class,
-};
-
 static struct Qdisc_ops netem_qdisc_ops = {
 	.id		=	"netem",
-	.cl_ops		=	&netem_class_ops,
 	.priv_size	=	sizeof(struct netem_sched_data),
 	.enqueue	=	netem_enqueue,
 	.dequeue	=	netem_dequeue,

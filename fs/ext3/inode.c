@@ -2474,7 +2474,7 @@ void ext3_set_inode_flags(struct inode *inode)
 {
 	unsigned int flags = EXT3_I(inode)->i_flags;
 
-	inode->i_flags &= ~(S_SYNC|S_APPEND|S_IMMUTABLE|S_IUNLINK|S_BARRIER|S_NOATIME|S_DIRSYNC);
+	inode->i_flags &= ~(S_SYNC|S_APPEND|S_IMMUTABLE|S_NOATIME|S_DIRSYNC);
 	if (flags & EXT3_SYNC_FL)
 		inode->i_flags |= S_SYNC;
 	if (flags & EXT3_APPEND_FL)
@@ -2516,10 +2516,10 @@ void ext3_read_inode(struct inode * inode)
 		uid |= le16_to_cpu(raw_inode->i_uid_high) << 16;
 		gid |= le16_to_cpu(raw_inode->i_gid_high) << 16;
 	}
-	inode->i_uid = INOXID_UID(XID_TAG(inode), uid, gid);
-	inode->i_gid = INOXID_GID(XID_TAG(inode), uid, gid);
-	inode->i_xid = INOXID_XID(XID_TAG(inode), uid, gid,
-		le16_to_cpu(raw_inode->i_raw_xid));
+	inode->i_uid = INOXID_UID(uid, gid);
+	inode->i_gid = INOXID_GID(uid, gid);
+	if (inode->i_sb->s_flags & MS_TAGXID)
+		inode->i_xid = INOXID_XID(uid, gid, le16_to_cpu(raw_inode->i_raw_xid));
 
 	inode->i_nlink = le16_to_cpu(raw_inode->i_links_count);
 	inode->i_size = le32_to_cpu(raw_inode->i_size);
@@ -2628,8 +2628,8 @@ static int ext3_do_update_inode(handle_t *handle,
 	struct ext3_inode *raw_inode = ext3_raw_inode(iloc);
 	struct ext3_inode_info *ei = EXT3_I(inode);
 	struct buffer_head *bh = iloc->bh;
-	uid_t uid = XIDINO_UID(XID_TAG(inode), inode->i_uid, inode->i_xid);
-	gid_t gid = XIDINO_GID(XID_TAG(inode), inode->i_gid, inode->i_xid);
+	uid_t uid = XIDINO_UID(inode->i_uid, inode->i_xid);
+	gid_t gid = XIDINO_GID(inode->i_gid, inode->i_xid);
 	int err = 0, rc, block;
 
 	/* For fields not not tracking in the in-memory inode,
@@ -2852,8 +2852,7 @@ int ext3_setattr(struct dentry *dentry, struct iattr *attr)
 		return error;
 
 	if ((ia_valid & ATTR_UID && attr->ia_uid != inode->i_uid) ||
-		(ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid) ||
-		(ia_valid & ATTR_XID && attr->ia_xid != inode->i_xid)) {
+		(ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid)) {
 		handle_t *handle;
 
 		/* (user+group)*(old+new) structure, inode write (sb,
@@ -2874,10 +2873,6 @@ int ext3_setattr(struct dentry *dentry, struct iattr *attr)
 			inode->i_uid = attr->ia_uid;
 		if (attr->ia_valid & ATTR_GID)
 			inode->i_gid = attr->ia_gid;
-		if ((attr->ia_valid & ATTR_XID)
-			&& inode->i_sb
-			&& (inode->i_sb->s_flags & MS_TAGXID))
-			inode->i_xid = attr->ia_xid;
 		error = ext3_mark_inode_dirty(handle, inode);
 		ext3_journal_stop(handle);
 	}
