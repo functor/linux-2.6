@@ -30,7 +30,6 @@
 #include <asm/tlbflush.h>
 #include <linux/swapops.h>
 #include <linux/vs_base.h>
-#include <linux/vs_memory.h>
 
 spinlock_t swaplock = SPIN_LOCK_UNLOCKED;
 unsigned int nr_swapfiles;

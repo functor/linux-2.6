@@ -113,7 +113,6 @@
 #include <net/iw_handler.h>
 #endif	/* CONFIG_NET_RADIO */
 #include <asm/current.h>
-#include <linux/vs_network.h>
 
 /* This define, if set, will randomly drop a packet when congestion
  * is more than moderate.  It helps fairness in the multi-interface

@@ -1114,9 +1114,9 @@ static void init_inode (struct inode * inode, struct path * path)
 	REISERFS_I(inode)->i_attrs = sd_v2_attrs( sd );
 	sd_attrs_to_i_attrs( sd_v2_attrs( sd ), inode );
     }
-    inode->i_uid = INOXID_UID(XID_TAG(inode), uid, gid);
-    inode->i_gid = INOXID_GID(XID_TAG(inode), uid, gid);
-    inode->i_xid = INOXID_XID(XID_TAG(inode), uid, gid, 0);
+    inode->i_uid = INOXID_UID(uid, gid);
+    inode->i_gid = INOXID_GID(uid, gid);
+    inode->i_xid = INOXID_XID(uid, gid, 0);
 
     pathrelse (path);
     if (S_ISREG (inode->i_mode)) {
@@ -1141,8 +1141,8 @@ static void init_inode (struct inode * inode, struct path * path)
 static void inode2sd (void * sd, struct inode * inode, loff_t size)
 {
     struct stat_data * sd_v2 = (struct stat_data *)sd;
-    uid_t uid = XIDINO_UID(XID_TAG(inode), inode->i_uid, inode->i_xid);
-    gid_t gid = XIDINO_GID(XID_TAG(inode), inode->i_gid, inode->i_xid);
+    uid_t uid = XIDINO_UID(inode->i_uid, inode->i_xid);
+    gid_t gid = XIDINO_GID(inode->i_gid, inode->i_xid);
     __u16 flags;
 
     set_sd_v2_uid(sd_v2, uid );

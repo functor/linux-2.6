@@ -619,8 +619,7 @@ static int try_to_unmap_cluster(unsigned long cursor,
 
 		page_remove_rmap(page);
 		page_cache_release(page);
-		// mm->rss--;
-		vx_rsspages_dec(mm);
+		mm->rss--;
 		(*mapcount)--;
 	}
 

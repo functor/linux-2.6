@@ -260,9 +260,8 @@ rpcauth_lookupcred(struct rpc_auth *auth, int taskflags)
 	struct rpc_cred *ret;
 
 	get_group_info(current->group_info);
-	acred.uid = current->fsuid;
-	acred.gid = current->fsgid;
-	acred.xid = current->xid;
+	acred.uid = XIDINO_UID(current->fsuid, current->xid);
+	acred.gid = XIDINO_GID(current->fsgid, current->xid);
 	acred.group_info = current->group_info;
 
 	dprintk("RPC:     looking up %s cred\n",
@@ -280,9 +279,8 @@ rpcauth_bindcred(struct rpc_task *task)
 	struct rpc_cred *ret;
 
 	get_group_info(current->group_info);
-	acred.uid = current->fsuid;
-	acred.gid = current->fsgid;
-	acred.xid = current->xid;
+	acred.uid = XIDINO_UID(current->fsuid, current->xid);
+	acred.gid = XIDINO_GID(current->fsgid, current->xid);
 	acred.group_info = current->group_info;
 
 	dprintk("RPC: %4d looking up %s cred\n",

@@ -52,7 +52,6 @@ extern syscall_handler_t old_mmap_i386;
 extern syscall_handler_t old_select;
 extern syscall_handler_t sys_modify_ldt;
 extern syscall_handler_t sys_rt_sigsuspend;
-
 extern syscall_handler_t sys_vserver;
 
 syscall_handler_t *sys_call_table[] = {
