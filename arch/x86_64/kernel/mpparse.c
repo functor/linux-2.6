@@ -575,6 +575,7 @@ static int __init smp_scan_config (unsigned long base, unsigned long length)
 	extern void __bad_mpf_size(void); 
 	unsigned int *bp = phys_to_virt(base);
 	struct intel_mp_floating *mpf;
+	static int printed __initdata; 
 
 	Dprintk("Scan SMP from %p for %ld bytes.\n", bp,length);
 	if (sizeof(*mpf) != 16)
@@ -598,7 +599,10 @@ static int __init smp_scan_config (unsigned long base, unsigned long length)
 		bp += 4;
 		length -= 16;
 	}
-	printk(KERN_INFO "No mptable found.\n");
+	if (!printed) {		
+		printk(KERN_INFO "No mptable found.\n");
+		printed = 1;
+	}
 	return 0;
 }
 
@@ -920,8 +924,11 @@ void __init mp_parse_prt (void)
 		}
 
 		/* Don't set up the ACPI SCI because it's already set up */
-		if (acpi_fadt.sci_int == gsi)
+		if (acpi_fadt.sci_int == gsi) {
+			/* we still need to set up the entry's irq */
+			acpi_gsi_to_irq(gsi, &entry->irq);
 			continue;
+		}
 
 		ioapic = mp_find_ioapic(gsi);
 		if (ioapic < 0)

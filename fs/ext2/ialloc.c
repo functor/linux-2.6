@@ -579,7 +579,8 @@ got:
 	inode->i_blocks = 0;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	memset(ei->i_data, 0, sizeof(ei->i_data));
-	ei->i_flags = EXT2_I(dir)->i_flags & ~EXT2_BTREE_FL;
+	ei->i_flags = EXT2_I(dir)->i_flags &
+		~(EXT2_BTREE_FL|EXT2_IUNLINK_FL|EXT2_BARRIER_FL);
 	if (S_ISLNK(mode))
 		ei->i_flags &= ~(EXT2_IMMUTABLE_FL|EXT2_APPEND_FL);
 	/* dirsync is only applied to directories */
@@ -663,7 +664,7 @@ unsigned long ext2_count_free_inodes (struct super_block * sb)
 	}
 	brelse(bitmap_bh);
 	printk("ext2_count_free_inodes: stored = %lu, computed = %lu, %lu\n",
-		percpu_counter_read(EXT2_SB(sb)->s_freeinodes_counter),
+		percpu_counter_read(&EXT2_SB(sb)->s_freeinodes_counter),
 		desc_count, bitmap_count);
 	unlock_super(sb);
 	return desc_count;
@@ -724,7 +725,7 @@ void ext2_check_inodes_bitmap (struct super_block * sb)
 		bitmap_count += x;
 	}
 	brelse(bitmap_bh);
-	if (percpu_counter_read(EXT2_SB(sb)->s_freeinodes_counter) !=
+	if (percpu_counter_read(&EXT2_SB(sb)->s_freeinodes_counter) !=
 				bitmap_count)
 		ext2_error(sb, "ext2_check_inodes_bitmap",
 			    "Wrong free inodes count in super block, "

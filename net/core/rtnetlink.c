@@ -224,6 +224,8 @@ int rtnetlink_dump_ifinfo(struct sk_buff *skb, struct netlink_callback *cb)
 	for (dev=dev_base, idx=0; dev; dev = dev->next, idx++) {
 		if (idx < s_idx)
 			continue;
+		if (!dev_in_nx_info(dev, current->nx_info))
+			continue;
 		if (rtnetlink_fill_ifinfo(skb, dev, RTM_NEWLINK, NETLINK_CB(cb->skb).pid, cb->nlh->nlmsg_seq, 0) <= 0)
 			break;
 	}
@@ -309,6 +311,8 @@ void rtmsg_ifinfo(int type, struct net_device *dev, unsigned change)
 	struct sk_buff *skb;
 	int size = NLMSG_GOODSIZE;
 
+	if (!dev_in_nx_info(dev, current->nx_info))
+		return;
 	skb = alloc_skb(size, GFP_KERNEL);
 	if (!skb)
 		return;

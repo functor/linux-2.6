@@ -232,12 +232,12 @@ int i810_dma_cleanup(drm_device_t *dev)
 {
 	drm_device_dma_t *dma = dev->dma;
 
-#if _HAVE_DMA_IRQ
+#if __HAVE_IRQ
 	/* Make sure interrupts are disabled here because the uninstall ioctl
 	 * may not have been called from userspace and after dev_private
 	 * is freed, it's too late.
 	 */
-	if (dev->irq) DRM(irq_uninstall)(dev);
+	if ( dev->irq_enabled ) DRM(irq_uninstall)(dev);
 #endif
 
 	if (dev->dev_private) {
@@ -843,14 +843,11 @@ static void i810_dma_dispatch_vertex(drm_device_t *dev,
 
 	if (buf_priv->currently_mapped == I810_BUF_MAPPED) {
 		unsigned int prim = (sarea_priv->vertex_prim & PR_MASK);
-
-		put_user((GFX_OP_PRIMITIVE | prim |
-					     ((used/4)-2)),
-		(u32 *)buf_priv->virtual);
+		
+		*(u32 *)buf_priv->kernel_virtual = ((GFX_OP_PRIMITIVE | prim | ((used/4)-2)));
 
 		if (used & 4) {
-			put_user(0,
-			(u32 *)((u32)buf_priv->virtual + used));
+			*(u32 *)((u32)buf_priv->kernel_virtual + used) = 0;
 			used += 4;
 		}
 

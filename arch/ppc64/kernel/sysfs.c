@@ -5,6 +5,7 @@
 #include <linux/percpu.h>
 #include <linux/init.h>
 #include <linux/sched.h>
+#include <linux/module.h>
 #include <asm/current.h>
 #include <asm/processor.h>
 #include <asm/cputable.h>
@@ -114,6 +115,7 @@ void ppc64_enable_pmcs(void)
 	unsigned long hid0;
 	unsigned long set, reset;
 	int ret;
+	unsigned int ctrl;
 
 	/* Only need to enable them once */
 	if (__get_cpu_var(pmcs_enabled))
@@ -158,8 +160,20 @@ void ppc64_enable_pmcs(void)
 		char *ptr = (char *)&paca[smp_processor_id()].xLpPaca;
 		ptr[0xBB] = 1;
 	}
+
+	/*
+	 * On SMT machines we have to set the run latch in the ctrl register
+	 * in order to make PMC6 spin.
+	 */
+	if (cur_cpu_spec->cpu_features & CPU_FTR_SMT) {
+		ctrl = mfspr(CTRLF);
+		ctrl |= RUNLATCH;
+		mtspr(CTRLT, ctrl);
+	}
 }
 #endif
+
+EXPORT_SYMBOL_GPL(ppc64_enable_pmcs);
 
 /* XXX convert to rusty's on_one_cpu */
 static unsigned long run_on_cpu(unsigned long cpu,
