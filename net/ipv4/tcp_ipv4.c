@@ -1763,6 +1763,10 @@ csum_err:
 	goto discard;
 }
 
+extern struct proto_ops inet_stream_ops;
+
+extern int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len);
+
 /*
  *	From tcp_input.c
  */
@@ -1814,10 +1818,12 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		goto no_tcp_socket;
 
 process:
-	/* Silently drop if the context is not entitled to read the
+	/* Silently drop if VNET is active (if INET bind() has been
+	 * overridden) and the context is not entitled to read the
 	 * packet.
 	 */
-	if (sk->sk_xid && sk->sk_xid != skb->xid)
+	if (inet_stream_ops.bind != inet_bind &&
+	    (int) sk->sk_xid >= 0 && sk->sk_xid != skb->xid)
 		goto discard_it;
 
 	if (sk->sk_state == TCP_TIME_WAIT)
