@@ -1087,8 +1087,7 @@ static inline int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	 */
 	if (inet_stream_ops.bind != inet_bind &&
 	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid) {
-	        err = 0; /* ensures that it is silent */
-		kfree_skb(skb); /* discard frame */
+		err = -EPERM;
 		goto out;
 	}
 
