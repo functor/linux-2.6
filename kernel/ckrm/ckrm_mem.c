@@ -192,13 +192,11 @@ mem_res_free(void *my_res)
 		child_guarantee_changed(&parres->shares, res->shares.my_guarantee, 0);
 		child_maxlimit_changed_local(parres);
 	}
-	ckrm_mem_evaluate_all_pages();
-	res->core = NULL;
-
 	spin_lock(&ckrm_mem_lock);
 	list_del(&res->mcls_list);
 	spin_unlock(&ckrm_mem_lock);
 	mem_class_put(res);
+	ckrm_mem_evaluate_all_pages();
 	return;
 }
 
@@ -585,9 +583,6 @@ ckrm_get_reclaim_bits(unsigned int *flags, unsigned int *extract)
 void
 ckrm_at_limit(ckrm_mem_res_t *cls)
 {
-#ifndef AT_LIMIT_SUPPORT
-#warning "ckrm_at_limit disabled due to problems with memory hog tests"
-#else
 	struct zone *zone;
 	unsigned long now = jiffies;
 
@@ -611,7 +606,6 @@ ckrm_at_limit(ckrm_mem_res_t *cls)
 		wakeup_kswapd(zone);
 		break; // only once is enough
 	}
-#endif // AT_LIMIT_SUPPORT
 }
 
 static int unmapped = 0, changed = 0, unchanged = 0, maxnull = 0,
@@ -736,7 +730,7 @@ ckrm_mem_evaluate_all_pages()
 		}
 		spin_unlock_irq(&zone->lru_lock);
 	}
-	printk(KERN_DEBUG "all_pages: active %d inactive %d cleared %d\n", 
+	printk("all_pages: active %d inactive %d cleared %d\n", 
 			active, inactive, cleared);
 	spin_lock(&ckrm_mem_lock);
 	list_for_each_entry(res, &ckrm_memclass_list, mcls_list) {
@@ -746,7 +740,7 @@ ckrm_mem_evaluate_all_pages()
 			inact_cnt += res->nr_inactive[idx];
 			idx++;
 		}
-		printk(KERN_DEBUG "all_pages: %s: tmp_cnt %d; act_cnt %d inact_cnt %d\n",
+		printk("all_pages: %s: tmp_cnt %d; act_cnt %d inact_cnt %d\n",
 			res->core->name, res->tmp_cnt, act_cnt, inact_cnt);
 	}
 	spin_unlock(&ckrm_mem_lock);
