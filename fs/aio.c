@@ -543,7 +543,7 @@ struct kioctx *lookup_ioctx(unsigned long ctx_id)
 	return ioctx;
 }
 
-static void use_mm(struct mm_struct *mm)
+void use_mm(struct mm_struct *mm)
 {
 	struct mm_struct *active_mm;
 

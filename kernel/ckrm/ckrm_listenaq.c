@@ -1,4 +1,4 @@
-/* ckrm_socketaq.c - accept queue resource controller
+/* ckrm_listenaq.c - accept queue resource controller
  *
  * Copyright (C) Vivek Kashyap,      IBM Corp. 2004
  * 
@@ -251,7 +251,7 @@ static int laq_set_share_values(void *my_res, struct ckrm_shares *shares)
 	}
 
 	parent = ckrm_get_res_class(res->pcore, my_resid, ckrm_laq_res_t);
-	if (!parent)		// socket_class does not have a share interface
+	if (!parent)		// socketclass does not have a share interface
 		return -EINVAL;
 
 	// Ensure that we ignore limit values
@@ -380,7 +380,7 @@ static int laq_get_stats(void *my_res, struct seq_file *sfile)
 	}
 
 	parent = ckrm_get_res_class(res->pcore, my_resid, ckrm_laq_res_t);
-	if (!parent) {		// socket_class does not have a stat interface
+	if (!parent) {		// socketclass does not have a stat interface
 		printk(KERN_ERR "socketaq internal fs inconsistency\n");
 		return -EINVAL;
 	}
@@ -451,7 +451,7 @@ static void laq_change_resclass(void *n, void *old, void *r)
 }
 
 struct ckrm_res_ctlr laq_rcbs = {
-	.res_name = "laq",
+	.res_name = "listenaq",
 	.resid = -1,		// dynamically assigned
 	.res_alloc = laq_res_alloc,
 	.res_free = laq_res_free,
@@ -467,9 +467,9 @@ int __init init_ckrm_laq_res(void)
 	struct ckrm_classtype *clstype;
 	int resid;
 
-	clstype = ckrm_find_classtype_by_name("socket_class");
+	clstype = ckrm_find_classtype_by_name("socketclass");
 	if (clstype == NULL) {
-		printk(KERN_INFO " Unknown ckrm classtype<socket_class>");
+		printk(KERN_INFO " Unknown ckrm classtype<socketclass>");
 		return -ENOENT;
 	}
 

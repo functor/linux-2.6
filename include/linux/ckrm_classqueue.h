@@ -19,8 +19,8 @@
  * Aug 28, 2003
  *        Created.
  * July 07, 2004
- *   clean up, add comments     
- *   
+ *   clean up, add comments
+ *
  */
 
 #ifndef _CKRM_CLASSQUEUE_H
