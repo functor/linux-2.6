@@ -18,6 +18,8 @@
  *
  */
 
+#define __KERNEL_SYSCALLS__
+
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/types.h>

@@ -39,8 +39,7 @@ int reiserfs_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		flags &= REISERFS_FL_USER_VISIBLE;
 		return put_user(flags, (int __user *) arg);
 	case REISERFS_IOC_SETFLAGS: {
-		if (IS_RDONLY(inode) ||
-			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
+		if (IS_RDONLY(inode))
 			return -EROFS;
 
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
@@ -50,11 +49,9 @@ int reiserfs_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 			return -EFAULT;
 
 		oldflags = REISERFS_I(inode) -> i_attrs;
-		if ( ( (oldflags & REISERFS_IMMUTABLE_FL) ||
-			( (flags ^ oldflags) &
-			(REISERFS_IMMUTABLE_FL | REISERFS_IUNLINK_FL |
-			 REISERFS_APPEND_FL) ) ) &&
-			!capable( CAP_LINUX_IMMUTABLE ) )
+		if ( (oldflags & REISERFS_IMMUTABLE_FL) || ( ( (flags ^ oldflags) &
+		   (REISERFS_IMMUTABLE_FL | REISERFS_IUNLINK_FL | REISERFS_APPEND_FL)) &&
+		     !capable( CAP_LINUX_IMMUTABLE ) ) )
 			return -EPERM;
 			
 		if( ( flags & REISERFS_NOTAIL_FL ) &&
@@ -79,8 +76,7 @@ int reiserfs_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 	case REISERFS_IOC_SETVERSION:
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
 			return -EPERM;
-		if (IS_RDONLY(inode) ||
-			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
+		if (IS_RDONLY(inode))
 			return -EROFS;
 		if (get_user(inode->i_generation, (int __user *) arg))
 			return -EFAULT;	

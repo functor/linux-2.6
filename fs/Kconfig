@@ -1183,20 +1183,24 @@ config JFFS2_FS_DEBUG
 	  messages at debug level 1 while the misbehaviour was occurring.
 
 config JFFS2_FS_NAND
-	bool "JFFS2 support for NAND flash"
-	depends on JFFS2_FS
+	bool "JFFS2 support for NAND flash (EXPERIMENTAL)"
+	depends on JFFS2_FS && EXPERIMENTAL
 	default n
 	help
-	  This enables the support for NAND flash in JFFS2. NAND is a newer
-	  type of flash chip design than the traditional NOR flash, with
-	  higher density but a handful of characteristics which make it more
-	  interesting for the file system to use.
+	  This enables the experimental support for NAND flash in JFFS2. NAND
+	  is a newer type of flash chip design than the traditional NOR flash,
+	  with higher density but a handful of characteristics which make it
+	  more interesting for the file system to use. Support for NAND flash
+	  is not yet complete and may corrupt data. For further information,
+	  including a link to the mailing list where details of the remaining
+	  work to be completed for NAND flash support can be found, see the 
+	  JFFS2 web site at <http://sources.redhat.com/jffs2>.
 
-	  Say 'N' unless you have NAND flash.
+	  Say 'N' unless you have NAND flash and you are willing to test and
+	  develop JFFS2 support for it.
 
 config JFFS2_COMPRESSION_OPTIONS
 	bool "Advanced compression options for JFFS2"
-	depends on JFFS2_FS
 	default n
 	help
 	  Enabling this option allows you to explicitly choose which
@@ -1261,6 +1265,15 @@ config JFFS2_CMODE_SIZE
           result.
 
 endchoice
+
+config JFFS2_PROC
+	bool "JFFS2 proc interface support" if JFFS2_COMPRESSION_OPTIONS
+	depends on JFFS2_FS && PROC_FS
+	default n
+        help
+          You can read some statistics and set the compression mode and
+          compressor priorities with this interface.
+
 
 config CRAMFS
 	tristate "Compressed ROM file system support"
@@ -1691,22 +1704,6 @@ config CIFS_STATS
         help
           Enabling this option will cause statistics for each server share
 	  mounted by the cifs client to be displayed in /proc/fs/cifs/Stats
-
-config CIFS_XATTR
-        bool "CIFS extended attributes (EXPERIMENTAL)"
-        depends on CIFS
-        help
-          Extended attributes are name:value pairs associated with inodes by
-          the kernel or by users (see the attr(5) manual page, or visit
-          <http://acl.bestbits.at/> for details).  CIFS maps the name of
-          extended attributes beginning with the user namespace prefix
-          to SMB/CIFS EAs. EAs are stored on Windows servers without the
-          user namespace prefix, but their names are seen by Linux cifs clients
-          prefaced by the user namespace prefix. The system namespace
-          (used by some filesystems to store ACLs) is not supported at
-          this time.
-                                                                                                    
-          If unsure, say N.
 
 config CIFS_POSIX
         bool "CIFS POSIX Extensions (EXPERIMENTAL)"

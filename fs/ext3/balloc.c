@@ -19,7 +19,6 @@
 #include <linux/ext3_jbd.h>
 #include <linux/quotaops.h>
 #include <linux/buffer_head.h>
-#include <linux/vs_base.h>
 #include <linux/vs_dlimit.h>
 
 /*
@@ -472,29 +471,19 @@ fail:
 static int ext3_has_free_blocks(struct super_block *sb)
 {
 	struct ext3_sb_info *sbi = EXT3_SB(sb);
-	int free_blocks, root_blocks, cond;
+	int free_blocks, root_blocks;
 
 	free_blocks = percpu_counter_read_positive(&sbi->s_freeblocks_counter);
 	root_blocks = le32_to_cpu(sbi->s_es->s_r_blocks_count);
 
-	vxdprintk(VXD_CBIT(dlim, 3),
-		"ext3_has_free_blocks(%p): free=%u, root=%u",
-		sb, free_blocks, root_blocks);
-
 	DLIMIT_ADJUST_BLOCK(sb, vx_current_xid(), &free_blocks, &root_blocks);
 
-	cond = (free_blocks < root_blocks + 1 &&
-		!capable(CAP_SYS_RESOURCE) &&
+	if (free_blocks < root_blocks + 1 && !capable(CAP_SYS_RESOURCE) &&
 		sbi->s_resuid != current->fsuid &&
-		(sbi->s_resgid == 0 || !in_group_p (sbi->s_resgid)));
-
-	vxdprintk(VXD_CBIT(dlim, 3),
-		"ext3_has_free_blocks(%p): %u<%u+1, %c, %u!=%u r=%d",
-		sb, free_blocks, root_blocks,
-		!capable(CAP_SYS_RESOURCE)?'1':'0',
-		sbi->s_resuid, current->fsuid, cond?0:1);
-
-	return (cond ? 0 : 1);
+		(sbi->s_resgid == 0 || !in_group_p (sbi->s_resgid))) {
+		return 0;
+	}
+	return 1;
 }
 
 /*
@@ -717,8 +706,7 @@ allocated:
 io_error:
 	*errp = -EIO;
 out:
-	if (!performed_allocation)
-		DLIMIT_FREE_BLOCK(sb, inode->i_xid, 1);
+	DLIMIT_FREE_BLOCK(sb, inode->i_xid, 1);
 out_dlimit:
 	if (fatal) {
 		*errp = fatal;
@@ -727,8 +715,10 @@ out_dlimit:
 	/*
 	 * Undo the block allocation
 	 */
-	if (!performed_allocation)
+	if (!performed_allocation) {
+		DLIMIT_FREE_BLOCK(sb, inode->i_xid, 1);
 		DQUOT_FREE_BLOCK(inode, 1);
+	}
 	brelse(bitmap_bh);
 	return 0;
 }

@@ -2,6 +2,7 @@
 #define _LINUX_BINFMTS_H
 
 #include <linux/capability.h>
+#include <linux/vs_memory.h>
 
 struct pt_regs;
 

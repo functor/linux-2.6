@@ -55,8 +55,6 @@
 #include <net/inet_ecn.h>
 #include <net/protocol.h>
 #include <net/xfrm.h>
-#include <net/addrconf.h>
-#include <net/snmp.h>
 
 #include <asm/uaccess.h>
 
@@ -497,7 +495,7 @@ unique:
 		/* Silly. Should hash-dance instead... */
 		local_bh_disable();
 		tcp_tw_deschedule(tw);
-		NET_INC_STATS_BH(LINUX_MIB_TIMEWAITRECYCLED);
+		NET_INC_STATS_BH(TimeWaitRecycled);
 		local_bh_enable();
 
 		tcp_tw_put(tw);
@@ -736,7 +734,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	sk = tcp_v6_lookup(&hdr->daddr, th->dest, &hdr->saddr, th->source, skb->dev->ifindex);
 
 	if (sk == NULL) {
-		ICMP6_INC_STATS_BH(__in6_dev_get(skb->dev), ICMP6_MIB_INERRORS);
+		ICMP6_INC_STATS_BH(__in6_dev_get(skb->dev), Icmp6InErrors);
 		return;
 	}
 
@@ -747,7 +745,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk))
-		NET_INC_STATS_BH(LINUX_MIB_LOCKDROPPEDICMPS);
+		NET_INC_STATS_BH(LockDroppedIcmps);
 
 	if (sk->sk_state == TCP_CLOSE)
 		goto out;
@@ -756,7 +754,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	seq = ntohl(th->seq); 
 	if (sk->sk_state != TCP_LISTEN &&
 	    !between(seq, tp->snd_una, tp->snd_nxt)) {
-		NET_INC_STATS_BH(LINUX_MIB_OUTOFWINDOWICMPS);
+		NET_INC_STATS_BH(OutOfWindowIcmps);
 		goto out;
 	}
 
@@ -824,7 +822,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 		BUG_TRAP(req->sk == NULL);
 
 		if (seq != req->snt_isn) {
-			NET_INC_STATS_BH(LINUX_MIB_OUTOFWINDOWICMPS);
+			NET_INC_STATS_BH(OutOfWindowIcmps);
 			goto out;
 		}
 
@@ -835,7 +833,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	case TCP_SYN_RECV:  /* Cannot happen.
 			       It can, it SYNs are crossed. --ANK */ 
 		if (!sock_owned_by_user(sk)) {
-			TCP_INC_STATS_BH(TCP_MIB_ATTEMPTFAILS);
+			TCP_INC_STATS_BH(TcpAttemptFails);
 			sk->sk_err = err;
 			sk->sk_error_report(sk);		/* Wake people up to see the error (see connect in sock.c) */
 
@@ -1022,8 +1020,8 @@ static void tcp_v6_send_reset(struct sk_buff *skb)
 	/* sk = NULL, but it is safe for now. RST socket required. */
 	if (!ip6_dst_lookup(NULL, &buff->dst, &fl)) {
 		ip6_xmit(NULL, buff, &fl, NULL, 0);
-		TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
-		TCP_INC_STATS_BH(TCP_MIB_OUTRSTS);
+		TCP_INC_STATS_BH(TcpOutSegs);
+		TCP_INC_STATS_BH(TcpOutRsts);
 		return;
 	}
 
@@ -1083,7 +1081,7 @@ static void tcp_v6_send_ack(struct sk_buff *skb, u32 seq, u32 ack, u32 win, u32 
 
 	if (!ip6_dst_lookup(NULL, &buff->dst, &fl)) {
 		ip6_xmit(NULL, buff, &fl, NULL, 0);
-		TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
+		TCP_INC_STATS_BH(TcpOutSegs);
 		return;
 	}
 
@@ -1264,7 +1262,7 @@ drop:
 	if (req)
 		tcp_openreq_free(req);
 
-	TCP_INC_STATS_BH(TCP_MIB_ATTEMPTFAILS);
+	TCP_INC_STATS_BH(TcpAttemptFails);
 	return 0; /* don't send reset */
 }
 
@@ -1444,9 +1442,9 @@ static struct sock * tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	return newsk;
 
 out_overflow:
-	NET_INC_STATS_BH(LINUX_MIB_LISTENOVERFLOWS);
+	NET_INC_STATS_BH(ListenOverflows);
 out:
-	NET_INC_STATS_BH(LINUX_MIB_LISTENDROPS);
+	NET_INC_STATS_BH(ListenDrops);
 	if (opt && opt != np->opt)
 		sock_kfree_s(sk, opt, opt->tot_len);
 	dst_release(dst);
@@ -1571,7 +1569,7 @@ discard:
 	kfree_skb(skb);
 	return 0;
 csum_err:
-	TCP_INC_STATS_BH(TCP_MIB_INERRS);
+	TCP_INC_STATS_BH(TcpInErrs);
 	goto discard;
 
 
@@ -1617,7 +1615,7 @@ static int tcp_v6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 	/*
 	 *	Count it even if it's bad.
 	 */
-	TCP_INC_STATS_BH(TCP_MIB_INSEGS);
+	TCP_INC_STATS_BH(TcpInSegs);
 
 	if (!pskb_may_pull(skb, sizeof(struct tcphdr)))
 		goto discard_it;
@@ -1678,7 +1676,7 @@ no_tcp_socket:
 
 	if (skb->len < (th->doff<<2) || tcp_checksum_complete(skb)) {
 bad_packet:
-		TCP_INC_STATS_BH(TCP_MIB_INERRS);
+		TCP_INC_STATS_BH(TcpInErrs);
 	} else {
 		tcp_v6_send_reset(skb);
 	}
@@ -1703,7 +1701,7 @@ do_time_wait:
 	}
 
 	if (skb->len < (th->doff<<2) || tcp_checksum_complete(skb)) {
-		TCP_INC_STATS_BH(TCP_MIB_INERRS);
+		TCP_INC_STATS_BH(TcpInErrs);
 		tcp_tw_put((struct tcp_tw_bucket *) sk);
 		goto discard_it;
 	}
@@ -2050,12 +2048,12 @@ static int tcp6_seq_show(struct seq_file *seq, void *v)
 	struct tcp_iter_state *st;
 
 	if (v == SEQ_START_TOKEN) {
-		seq_puts(seq,
-			 "  sl  "
-			 "local_address                         "
-			 "remote_address                        "
-			 "st tx_queue rx_queue tr tm->when retrnsmt"
-			 "   uid  timeout inode\n");
+		seq_printf(seq,
+			   "  sl  "
+			   "local_address                         "
+			   "remote_address                        "
+			   "st tx_queue rx_queue tr tm->when retrnsmt"
+			   "   uid  timeout inode\n");
 		goto out;
 	}
 	st = seq->private;

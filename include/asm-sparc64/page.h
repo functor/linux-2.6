@@ -18,7 +18,7 @@ extern void _clear_page(void *page);
 #define clear_page(X)	_clear_page((void *)(X))
 struct page;
 extern void clear_user_page(void *addr, unsigned long vaddr, struct page *page);
-#define copy_page(X,Y)	memcpy((void *)(X), (void *)(Y), PAGE_SIZE)
+#define copy_page(X,Y)	__memcpy((void *)(X), (void *)(Y), PAGE_SIZE)
 extern void copy_user_page(void *to, void *from, unsigned long vaddr, struct page *topage);
 
 /* GROSS, defining this makes gcc pass these types as aggregates,
@@ -164,8 +164,6 @@ static __inline__ int get_order(unsigned long size)
 
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
-
-#define devmem_is_allowed(x) 1
 
 #endif /* !(__KERNEL__) */
 

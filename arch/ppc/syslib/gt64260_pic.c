@@ -3,7 +3,7 @@
  *
  * Interrupt controller support for Galileo's GT64260.
  *
- * Author: Chris Zankel <chris@mvista.com>
+ * Author: Chris Zankel <source@mvista.com>
  * Modified by: Mark A. Greer <mgreer@mvista.com>
  *
  * Based on sources from Rabeeh Khoury / Galileo Technology
@@ -43,7 +43,8 @@
 #include <asm/io.h>
 #include <asm/system.h>
 #include <asm/irq.h>
-#include <asm/gt64260.h>
+#include <asm/ocp.h>
+#include <asm/mv64x60.h>
 
 
 /* ========================== forward declaration ========================== */
@@ -66,6 +67,9 @@ struct hw_interrupt_type gt64260_pic = {
 
 u32 gt64260_irq_base = 0;      /* GT64260 handles the next 96 IRQs from here */
 
+static mv64x60_handle_t base_bh;
+static mv64x60_handle_t ic_bh;
+
 /* gt64260_init_irq()
  *
  *  This function initializes the interrupt controller. It assigns
@@ -87,19 +91,38 @@ u32 gt64260_irq_base = 0;      /* GT64260 handles the next 96 IRQs from here */
 __init void
 gt64260_init_irq(void)
 {
+	struct ocp_def	*def;
 	int i;
 
+/* XXXX extract reg base, irq base from ocp */
+/* XXXX rewrite read/write macros to not use 'bh'?? */
+/* XXXX Have to use ocp b/c can pass arg to this routine */
+
 	if ( ppc_md.progress ) ppc_md.progress("gt64260_init_irq: enter", 0x0);
+
+	if ((def = ocp_get_one_device(OCP_VENDOR_MARVELL, OCP_FUNC_HB,
+					OCP_ANY_INDEX)) == NULL) {
+		/* XXXX SCREAM */
+		return;
+	}
+	base_bh.v_base = (u32)ioremap(def->paddr, 0x10000); /* XXXX */
+
+	if ((def = ocp_get_one_device(OCP_VENDOR_MARVELL, OCP_FUNC_PIC,
+					OCP_ANY_INDEX)) == NULL) {
+		/* XXXX SCREAM */
+		return;
+	}
+	ic_bh.v_base = (u32)ioremap(def->paddr, 0x1000); /* XXXX */
 
 	ppc_cached_irq_mask[0] = 0;
 	ppc_cached_irq_mask[1] = 0x0f000000; /* Enable GPP intrs */
 	ppc_cached_irq_mask[2] = 0;
 
 	/* disable all interrupts and clear current interrupts */
-	gt_write(GT64260_GPP_INTR_MASK, ppc_cached_irq_mask[2]);
-	gt_write(GT64260_GPP_INTR_CAUSE,0);
-	gt_write(GT64260_IC_CPU_INTR_MASK_LO, ppc_cached_irq_mask[0]);
-	gt_write(GT64260_IC_CPU_INTR_MASK_HI, ppc_cached_irq_mask[1]);
+	mv64x60_write(&base_bh, MV64x60_GPP_INTR_MASK, ppc_cached_irq_mask[2]);
+	mv64x60_write(&base_bh, MV64x60_GPP_INTR_CAUSE,0);
+	mv64x60_write(&ic_bh, GT64260_IC_CPU_INTR_MASK_LO, ppc_cached_irq_mask[0]);
+	mv64x60_write(&ic_bh, GT64260_IC_CPU_INTR_MASK_HI, ppc_cached_irq_mask[1]);
 
 	/* use the gt64260 for all (possible) interrupt sources */
 	for( i = gt64260_irq_base;  i < (gt64260_irq_base + 96);  i++ )  {
@@ -110,7 +133,8 @@ gt64260_init_irq(void)
 }
 
 
-/* gt64260_get_irq()
+/*
+ * gt64260_get_irq()
  *
  *  This function returns the lowest interrupt number of all interrupts that
  *  are currently asserted.
@@ -131,18 +155,18 @@ gt64260_get_irq(struct pt_regs *regs)
 	int irq;
 	int irq_gpp;
 
-	irq = gt_read(GT64260_IC_MAIN_CAUSE_LO);
+	irq = mv64x60_read(&ic_bh, GT64260_IC_MAIN_CAUSE_LO);
 	irq = __ilog2((irq & 0x3dfffffe) & ppc_cached_irq_mask[0]);
 
 	if (irq == -1) {
-		irq = gt_read(GT64260_IC_MAIN_CAUSE_HI);
+		irq = mv64x60_read(&ic_bh, GT64260_IC_MAIN_CAUSE_HI);
 		irq = __ilog2((irq & 0x0f000db7) & ppc_cached_irq_mask[1]);
 
 		if (irq == -1) {
 			irq = -2;   /* bogus interrupt, should never happen */
 		} else {
 			if (irq >= 24) {
-				irq_gpp = gt_read(GT64260_GPP_INTR_CAUSE);
+				irq_gpp = mv64x60_read(&base_bh, MV64x60_GPP_INTR_CAUSE);
 				irq_gpp = __ilog2(irq_gpp &
 						  ppc_cached_irq_mask[2]);
 
@@ -150,7 +174,7 @@ gt64260_get_irq(struct pt_regs *regs)
 					irq = -2;
 				} else {
 					irq = irq_gpp + 64;
-					gt_write(GT64260_GPP_INTR_CAUSE, ~(1<<(irq-64)));
+					mv64x60_write(&base_bh, MV64x60_GPP_INTR_CAUSE, ~(1<<(irq-64)));
 				}
 			} else {
 				irq += 32;
@@ -182,20 +206,23 @@ gt64260_get_irq(struct pt_regs *regs)
 static void
 gt64260_unmask_irq(unsigned int irq)
 {
+	/* XXXX
+	printk("XXXX: *** unmask irq: %d\n", irq);
+	*/
 	irq -= gt64260_irq_base;
 	if (irq > 31) {
 		if (irq > 63) {
 			/* unmask GPP irq */
-			gt_write(GT64260_GPP_INTR_MASK,
+			mv64x60_write(&base_bh, MV64x60_GPP_INTR_MASK,
 				     ppc_cached_irq_mask[2] |= (1<<(irq-64)));
 		} else {
 			/* mask high interrupt register */
-			gt_write(GT64260_IC_CPU_INTR_MASK_HI,
+			mv64x60_write(&ic_bh, GT64260_IC_CPU_INTR_MASK_HI,
 				     ppc_cached_irq_mask[1] |= (1<<(irq-32)));
 		}
 	} else {
 		/* mask low interrupt register */
-		gt_write(GT64260_IC_CPU_INTR_MASK_LO,
+		mv64x60_write(&ic_bh, GT64260_IC_CPU_INTR_MASK_LO,
 			     ppc_cached_irq_mask[0] |= (1<<irq));
 	}
 }
@@ -218,20 +245,23 @@ gt64260_unmask_irq(unsigned int irq)
 static void
 gt64260_mask_irq(unsigned int irq)
 {
+	/* XXXX
+	printk("XXXX: *** mask irq: %d\n", irq);
+	*/
 	irq -= gt64260_irq_base;
 	if (irq > 31) {
 		if (irq > 63) {
 			/* mask GPP irq */
-			gt_write(GT64260_GPP_INTR_MASK,
+			mv64x60_write(&base_bh, MV64x60_GPP_INTR_MASK,
 				     ppc_cached_irq_mask[2] &= ~(1<<(irq-64)));
 		} else {
 			/* mask high interrupt register */
-			gt_write(GT64260_IC_CPU_INTR_MASK_HI,
+			mv64x60_write(&ic_bh, GT64260_IC_CPU_INTR_MASK_HI,
 				     ppc_cached_irq_mask[1] &= ~(1<<(irq-32)));
 		}
 	} else {
 		/* mask low interrupt register */
-		gt_write(GT64260_IC_CPU_INTR_MASK_LO,
+		mv64x60_write(&ic_bh, GT64260_IC_CPU_INTR_MASK_LO,
 			     ppc_cached_irq_mask[0] &= ~(1<<irq));
 	}
 

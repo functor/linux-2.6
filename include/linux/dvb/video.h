@@ -24,8 +24,6 @@
 #ifndef _DVBVIDEO_H_
 #define _DVBVIDEO_H_
 
-#include <linux/compiler.h>
-
 #ifdef __KERNEL__
 #include <linux/types.h>
 #else

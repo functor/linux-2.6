@@ -383,7 +383,7 @@ sym_find_firmware(struct sym_pci_chip *chip)
 		return &sym_fw1;
 #endif
 	else
-		return NULL;
+		return 0;
 }
 
 /*

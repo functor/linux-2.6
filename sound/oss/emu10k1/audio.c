@@ -59,6 +59,9 @@ static ssize_t emu10k1_audio_read(struct file *file, char __user *buffer, size_t
 
 	DPD(3, "emu10k1_audio_read(), buffer=%p, count=%d\n", buffer, (u32) count);
 
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	if (!access_ok(VERIFY_WRITE, buffer, count))
 		return -EFAULT;
 
@@ -142,6 +145,9 @@ static ssize_t emu10k1_audio_write(struct file *file, const char __user *buffer,
 	unsigned long flags;
 
 	DPD(3, "emu10k1_audio_write(), buffer=%p, count=%d\n", buffer, (u32) count);
+
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 
 	if (!access_ok(VERIFY_READ, buffer, count))
 		return -EFAULT;
@@ -1243,7 +1249,7 @@ match:
 
 	file->private_data = (void *) wave_dev;
 
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int emu10k1_audio_release(struct inode *inode, struct file *file)

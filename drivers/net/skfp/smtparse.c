@@ -73,7 +73,7 @@ static struct s_ptab {
 	{ "SBACOMMAND",16,	0 } ,
 	{ "SBAAVAILABLE",17,	1,	0,	100	} ,
 #endif
-	{ NULL }
+	{ 0 }
 } ;
 
 /* Define maximum string size for values and keybuffer */

@@ -10,7 +10,6 @@ menu "Serial drivers"
 # The new 8250/16550 serial drivers
 config SERIAL_8250
 	tristate "8250/16550 and compatible serial support"
-	depends on (BROKEN || !SPARC64)
 	select SERIAL_CORE
 	---help---
 	  This selects whether you want to include the driver for the standard
@@ -337,6 +336,20 @@ config SERIAL_UART00_CONSOLE
 	  "console=ttyS1". (Try "man bootparam" or see the documentation of
 	  your boot loader (lilo or loadlin) about how to pass options to the
 	  kernel at boot time.)
+
+config SERIAL_MPSC
+	bool "Marvell MPSC serial port support"
+	depends on PPC32 && MV64X60
+	select SERIAL_CORE
+	help
+	  Say Y here if you want to use the Marvell MPSC serial controller.
+
+config SERIAL_MPSC_CONSOLE
+	bool "Support for console on Marvell MPSC serial port"
+	depends on SERIAL_MPSC
+	select SERIAL_CORE_CONSOLE
+	help
+	  Say Y here if you want to support a serial console on a Marvell MPSC.
 
 config SERIAL_PXA
 	bool "PXA serial port support"
@@ -678,40 +691,5 @@ config SERIAL_CPM_SMC2
 	help
 	  Select the is option to use SMC2 as a serial port
 
-config SERIAL_SGI_L1_CONSOLE
-	bool "SGI Altix L1 serial console support"
-	depends on IA64_GENERIC || IA64_SGI_SN2
-	select SERIAL_CORE
-	help
-		If you have an SGI Altix and you would like to use the system
-		controller serial port as your console (you want this!),
-		say Y.  Otherwise, say N.
-
-config SERIAL_MPC52xx
-	tristate "Freescale MPC52xx family PSC serial support"
-	depends on PPC_MPC52xx
-	select SERIAL_CORE
-	help
-	  This drivers support the MPC52xx PSC serial ports. If you would
-	  like to use them, you must answer Y or M to this option. Not that
-	  for use as console, it must be included in kernel and not as a
-	  module.
-
-config SERIAL_MPC52xx_CONSOLE
-	bool "Console on a Freescale MPC52xx family PSC serial port"
-	depends on SERIAL_MPC52xx=y
-	select SERIAL_CORE_CONSOLE
-	help
-	  Select this options if you'd like to use one of the PSC serial port
-	  of the Freescale MPC52xx family as a console.
-
-config SERIAL_MPC52xx_CONSOLE_BAUD
-	int "Freescale MPC52xx family PSC serial port baud"
-	depends on SERIAL_MPC52xx_CONSOLE=y
-	default "9600"
-	help
-	  Select the MPC52xx console baud rate.
-	  This value is only used if the bootloader doesn't pass in the
-	  console baudrate
-
 endmenu
+

@@ -54,11 +54,9 @@ struct snd_info_entry_ops {
 	int (*release) (snd_info_entry_t * entry,
 			unsigned short mode, void *file_private_data);
 	long (*read) (snd_info_entry_t *entry, void *file_private_data,
-		      struct file * file, char __user *buf,
-		      unsigned long count, unsigned long pos);
+		      struct file * file, char __user *buf, long count);
 	long (*write) (snd_info_entry_t *entry, void *file_private_data,
-		       struct file * file, const char __user *buf,
-		       unsigned long count, unsigned long pos);
+		       struct file * file, const char __user *buf, long count);
 	long long (*llseek) (snd_info_entry_t *entry, void *file_private_data,
 			    struct file * file, long long offset, int orig);
 	unsigned int (*poll) (snd_info_entry_t *entry, void *file_private_data,
