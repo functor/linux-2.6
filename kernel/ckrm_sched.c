@@ -77,7 +77,7 @@ static inline void check_inactive_class(ckrm_lrq_t * lrq,CVT_t cur_cvt)
 		lrq->savings -= savings_used;
 		unscale_cvt(savings_used,lrq);
 		BUG_ON(lrq->local_cvt < savings_used);
-		// lrq->local_cvt -= savings_used;
+		lrq->local_cvt -= savings_used;
 	}		
 }
 

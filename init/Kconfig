@@ -172,16 +172,12 @@ config CKRM_RES_NUMTASKS
 	
 	  Say N if unsure, Y to use the feature.
 
-config CKRM_RES_BLKIO
-	tristate " Disk I/O Resource Controller"
-	depends on CKRM_TYPE_TASKCLASS && IOSCHED_CFQ
-	default m
+config CKRM_CPU_SCHEDULE
+	bool "CKRM CPU scheduler"
+	depends on CKRM_TYPE_TASKCLASS
+	default y
 	help
-	  Provides a resource controller for best-effort block I/O 
-	  bandwidth control. The controller attempts this by proportional 
-	  servicing of requests in the I/O scheduler. However, seek
-	  optimizations and reordering by device drivers/disk controllers may
-	  alter the actual bandwidth delivered to a class.
+	  Use CKRM CPU scheduler instead of Linux Scheduler
 	
 	  Say N if unsure, Y to use the feature.
 
