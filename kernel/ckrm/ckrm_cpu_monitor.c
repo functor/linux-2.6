@@ -929,12 +929,8 @@ void ckrm_cpu_monitor(int check_min)
 	if (update_max_demand(root_core) != 0)
 		goto outunlock;
 	
-#ifndef ALLOC_SURPLUS_SUPPORT
-#warning "MEF taking out alloc_surplus"
-#else
 	if (alloc_surplus(root_core) != 0)
 		goto outunlock;
-#endif
 	
 	adjust_local_weight();
 
@@ -963,7 +959,7 @@ static int ckrm_cpu_monitord(void *nothing)
 	}
 	cpu_monitor_pid = -1;
 	thread_exit = 2;
-	printk(KERN_DEBUG "cpu_monitord exit\n");
+	printk("cpu_monitord exit\n");
 	return 0;
 }
 
@@ -971,13 +967,13 @@ void ckrm_start_monitor(void)
 {
 	cpu_monitor_pid = kernel_thread(ckrm_cpu_monitord, 0, CLONE_KERNEL);
 	if (cpu_monitor_pid < 0) {
-		printk(KERN_DEBUG "ckrm_cpu_monitord for failed\n");
+		printk("ckrm_cpu_monitord for failed\n");
 	}
 }
 
 void ckrm_kill_monitor(void)
 {
-	printk(KERN_DEBUG "killing process %d\n", cpu_monitor_pid);
+	printk("killing process %d\n", cpu_monitor_pid);
 	if (cpu_monitor_pid > 0) {
 		thread_exit = 1;
 		while (thread_exit != 2) {
