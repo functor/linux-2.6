@@ -35,7 +35,7 @@ void cki_cfq_set(icls_tsk_t tskicls, icls_ioprio_t tskioprio)
 	spin_unlock(&stub_lock);
 }
 
-inline void *cki_hash_key(struct task_struct *tsk)
+void *cki_hash_key(struct task_struct *tsk)
 {
 	void *ret;
 	spin_lock(&stub_lock);
@@ -47,7 +47,7 @@ inline void *cki_hash_key(struct task_struct *tsk)
 	return ret;
 }
 
-inline int cki_ioprio(struct task_struct *tsk)
+int cki_ioprio(struct task_struct *tsk)
 {
 	int ret;
 	spin_lock(&stub_lock);

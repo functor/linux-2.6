@@ -521,6 +521,8 @@ struct task_struct {
 
 	struct io_context *io_context;
 
+	int ioprio;
+
 	unsigned long ptrace_message;
 	siginfo_t *last_siginfo; /* For ptrace use.  */
 
