@@ -23,6 +23,7 @@
 #include <linux/security.h>
 #include <linux/dcookies.h>
 #include <linux/suspend.h>
+#include <linux/ckrm.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -593,6 +594,9 @@ asmlinkage long sys_setregid(gid_t rgid, gid_t egid)
 	current->fsgid = new_egid;
 	current->egid = new_egid;
 	current->gid = new_rgid;
+
+	ckrm_cb_gid();
+
 	return 0;
 }
 
@@ -630,6 +634,9 @@ asmlinkage long sys_setgid(gid_t gid)
 	}
 	else
 		return -EPERM;
+
+	ckrm_cb_gid();
+
 	return 0;
 }
   
@@ -718,6 +725,8 @@ asmlinkage long sys_setreuid(uid_t ruid, uid_t euid)
 		current->suid = current->euid;
 	current->fsuid = current->euid;
 
+	ckrm_cb_uid();
+
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_RE);
 }
 
@@ -762,6 +771,8 @@ asmlinkage long sys_setuid(uid_t uid)
 	}
 	current->fsuid = current->euid = uid;
 	current->suid = new_suid;
+
+	ckrm_cb_uid();
 
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_ID);
 }
@@ -808,6 +819,8 @@ asmlinkage long sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 	current->fsuid = current->euid;
 	if (suid != (uid_t) -1)
 		current->suid = suid;
+
+	ckrm_cb_uid();
 
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_RES);
 }
@@ -858,6 +871,9 @@ asmlinkage long sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 		current->gid = rgid;
 	if (sgid != (gid_t) -1)
 		current->sgid = sgid;
+
+	ckrm_cb_gid();
+
 	return 0;
 }
 

@@ -46,6 +46,7 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
+#include <linux/ckrm.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgalloc.h>
@@ -1142,6 +1143,8 @@ int do_execve(char * filename,
 	retval = search_binary_handler(&bprm,regs);
 	if (retval >= 0) {
 		free_arg_pages(&bprm);
+
+		ckrm_cb_exec(filename);
 
 		/* execve success */
 		security_bprm_free(&bprm);

@@ -33,6 +33,8 @@
 #include <linux/ptrace.h>
 #include <linux/mount.h>
 #include <linux/audit.h>
+#include <linux/ckrm.h>
+#include <linux/ckrm_tsk.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -260,6 +262,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->thread_info = ti;
 	ti->task = tsk;
 
+	ckrm_cb_newtask(tsk);
 	/* One for us, one for whoever does the "release_task()" (usually parent) */
 	atomic_set(&tsk->usage,2);
 	return tsk;
@@ -1157,6 +1160,10 @@ long do_fork(unsigned long clone_flags,
 			clone_flags |= CLONE_PTRACE;
 	}
 
+	if (numtasks_get_ref(current->taskclass, 0) == 0) {
+		return -ENOMEM;
+	}
+
 	p = copy_process(clone_flags, stack_start, regs, stack_size, parent_tidptr, child_tidptr);
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
@@ -1166,6 +1173,8 @@ long do_fork(unsigned long clone_flags,
 
 	if (!IS_ERR(p)) {
 		struct completion vfork;
+
+		ckrm_cb_fork(p);
 
 		if (clone_flags & CLONE_VFORK) {
 			p->vfork_done = &vfork;
@@ -1201,6 +1210,8 @@ long do_fork(unsigned long clone_flags,
 			 * COW overhead when the child exec()s afterwards.
 			 */
 			set_need_resched();
+	} else {
+		numtasks_put_ref(current->taskclass);
 	}
 	return pid;
 }
