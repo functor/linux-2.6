@@ -26,7 +26,6 @@
 #include <linux/ckrm.h>
 #include <linux/ckrm_tsk.h>
 #include <linux/vs_limit.h>
-#include <linux/ckrm_mem.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -524,12 +523,6 @@ static inline void __exit_mm(struct task_struct * tsk)
 	task_lock(tsk);
 	tsk->mm = NULL;
 	up_read(&mm->mmap_sem);
-#ifdef CONFIG_CKRM_RES_MEM
-	spin_lock(&mm->peertask_lock);
-	list_del_init(&tsk->mm_peers);
-	ckrm_mem_evaluate_mm(mm);
-	spin_unlock(&mm->peertask_lock);
-#endif
 	enter_lazy_tlb(mm, current);
 	task_unlock(tsk);
 	mmput(mm);
