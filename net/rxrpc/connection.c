@@ -620,6 +620,7 @@ int rxrpc_conn_sendmsg(struct rxrpc_connection *conn,
 		       struct rxrpc_message *msg)
 {
 	struct msghdr msghdr;
+	mm_segment_t oldfs;
 	int ret;
 
 	_enter("%p{%d}", conn, ntohs(conn->addr.sin_port));
@@ -633,6 +634,12 @@ int rxrpc_conn_sendmsg(struct rxrpc_connection *conn,
 	/* set up the message to be transmitted */
 	msghdr.msg_name		= &conn->addr;
 	msghdr.msg_namelen	= sizeof(conn->addr);
+	/*
+	 * the following is safe, since for compiler definitions of kvec and
+	 * iovec are identical, yielding the same in-core layout and alignment
+	 */
+	msghdr.msg_iov		= (struct iovec *)msg->data;
+	msghdr.msg_iovlen	= msg->dcount;
 	msghdr.msg_control	= NULL;
 	msghdr.msg_controllen	= 0;
 	msghdr.msg_flags	= MSG_CONFIRM | MSG_DONTWAIT;
@@ -644,11 +651,15 @@ int rxrpc_conn_sendmsg(struct rxrpc_connection *conn,
 	     htons(conn->addr.sin_port));
 
 	/* send the message */
-	ret = kernel_sendmsg(conn->trans->socket, &msghdr,
-			     msg->data, msg->dcount, msg->dsize);
+	oldfs = get_fs();
+	set_fs(KERNEL_DS);
+	ret = sock_sendmsg(conn->trans->socket, &msghdr, msg->dsize);
+	set_fs(oldfs);
+
 	if (ret < 0) {
 		msg->state = RXRPC_MSG_ERROR;
-	} else {
+	}
+	else {
 		msg->state = RXRPC_MSG_SENT;
 		ret = 0;
 

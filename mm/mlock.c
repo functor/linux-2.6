@@ -200,36 +200,3 @@ asmlinkage long sys_munlockall(void)
 	up_write(&current->mm->mmap_sem);
 	return ret;
 }
-
-/*
- * Objects with different lifetime than processes (SHM_LOCK and SHM_HUGETLB
- * shm segments) get accounted against the user_struct instead.
- */
-static spinlock_t shmlock_user_lock = SPIN_LOCK_UNLOCKED;
-
-int user_shm_lock(size_t size, struct user_struct *user)
-{
-	unsigned long lock_limit, locked;
-	int allowed = 0;
-
-	spin_lock(&shmlock_user_lock);
-	locked = size >> PAGE_SHIFT;
-	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
-	lock_limit >>= PAGE_SHIFT;
-	if (locked + user->locked_shm > lock_limit && !capable(CAP_IPC_LOCK))
-		goto out;
-	get_uid(user);
-	user->locked_shm += locked;
-	allowed = 1;
-out:
-	spin_unlock(&shmlock_user_lock);
-	return allowed;
-}
-
-void user_shm_unlock(size_t size, struct user_struct *user)
-{
-	spin_lock(&shmlock_user_lock);
-	user->locked_shm -= (size >> PAGE_SHIFT);
-	spin_unlock(&shmlock_user_lock);
-	free_uid(user);
-}

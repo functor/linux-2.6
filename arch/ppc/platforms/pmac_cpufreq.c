@@ -469,7 +469,6 @@ static int __pmac pmac_cpufreq_init_MacRISC3(struct device_node *cpunode)
 static int __pmac pmac_cpufreq_init_7447A(struct device_node *cpunode)
 {
 	struct device_node *volt_gpio_np;
-	u32 *reg;
 
 	/* OF only reports the high frequency */
 	hi_freq = cur_freq;
@@ -485,7 +484,7 @@ static int __pmac pmac_cpufreq_init_7447A(struct device_node *cpunode)
 		return 1;
 	}
 
-	reg = (u32 *)get_property(volt_gpio_np, "reg", NULL);
+	u32 *reg = (u32 *)get_property(volt_gpio_np, "reg", NULL);
 	voltage_gpio = *reg;
 	set_speed_proc = dfs_set_cpu_speed;
 

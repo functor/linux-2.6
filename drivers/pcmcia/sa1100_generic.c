@@ -29,6 +29,10 @@
     file under either the MPL or the GPL.
     
 ======================================================================*/
+/*
+ * Please see linux/Documentation/arm/SA1100/PCMCIA for more information
+ * on the low-level kernel interface.
+ */
 
 #include <linux/module.h>
 #include <linux/init.h>

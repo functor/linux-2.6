@@ -19,7 +19,6 @@
 
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>
-#include <asm/smp.h>
 
 #include "../../../drivers/s390/net/smsgiucv.h"
 
@@ -256,13 +255,13 @@ static struct ctl_table cmm_table[];
 
 static int
 cmm_pages_handler(ctl_table *ctl, int write, struct file *filp,
-		  void *buffer, size_t *lenp, loff_t *ppos)
+		  void *buffer, size_t *lenp)
 {
 	char buf[16], *p;
 	long pages;
 	int len;
 
-	if (!*lenp || (*ppos && !write)) {
+	if (!*lenp || (filp->f_pos && !write)) {
 		*lenp = 0;
 		return 0;
 	}
@@ -291,19 +290,19 @@ cmm_pages_handler(ctl_table *ctl, int write, struct file *filp,
 			return -EFAULT;
 	}
 	*lenp = len;
-	*ppos += len;
+	filp->f_pos += len;
 	return 0;
 }
 
 static int
 cmm_timeout_handler(ctl_table *ctl, int write, struct file *filp,
-		    void *buffer, size_t *lenp, loff_t *ppos)
+		    void *buffer, size_t *lenp)
 {
 	char buf[64], *p;
 	long pages, seconds;
 	int len;
 
-	if (!*lenp || (*ppos && !write)) {
+	if (!*lenp || (filp->f_pos && !write)) {
 		*lenp = 0;
 		return 0;
 	}
@@ -328,7 +327,7 @@ cmm_timeout_handler(ctl_table *ctl, int write, struct file *filp,
 			return -EFAULT;
 	}
 	*lenp = len;
-	*ppos += len;
+	filp->f_pos += len;
 	return 0;
 }
 

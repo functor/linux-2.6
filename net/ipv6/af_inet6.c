@@ -560,6 +560,8 @@ static struct inet_protosw rawv6_protosw = {
 	.flags		= INET_PROTOSW_REUSE,
 };
 
+#define INETSW6_ARRAY_LEN (sizeof(inetsw6_array) / sizeof(struct inet_protosw))
+
 void
 inet6_register_protosw(struct inet_protosw *p)
 {

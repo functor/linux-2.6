@@ -82,7 +82,7 @@ struct e1000_adapter;
 
 #include "e1000_hw.h"
 
-#ifdef DBG
+#if DBG
 #define E1000_DBG(args...) printk(KERN_DEBUG "e1000: " args)
 #else
 #define E1000_DBG(args...)

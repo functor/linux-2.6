@@ -213,8 +213,8 @@ int sysctl_icmp_ratemask = 0x1818;
  */
 
 struct icmp_control {
-	int output_entry;	/* Field for increment on output */
-	int input_entry;	/* Field for increment on input */
+	int output_off;		/* Field offset for increment on output */
+	int input_off;		/* Field offset for increment on input */
 	void (*handler)(struct sk_buff *skb);
 	short   error;		/* This ICMP is classed as an error message */
 };
@@ -318,8 +318,8 @@ out:
 static void icmp_out_count(int type)
 {
 	if (type <= NR_ICMP_TYPES) {
-		ICMP_INC_STATS(icmp_pointers[type].output_entry);
-		ICMP_INC_STATS(ICMP_MIB_OUTMSGS);
+		ICMP_INC_STATS_FIELD(icmp_pointers[type].output_off);
+		ICMP_INC_STATS(IcmpOutMsgs);
 	}
 }
 
@@ -526,6 +526,7 @@ void icmp_send(struct sk_buff *skb_in, int type, int code, u32 info)
 							 .saddr = saddr,
 							 .tos = RT_TOS(tos) } },
 				    .proto = IPPROTO_ICMP };
+
 		if (ip_route_output_key(&rt, &fl))
 		    goto out_unlock;
 	}
@@ -714,7 +715,7 @@ static void icmp_unreach(struct sk_buff *skb)
 out:
 	return;
 out_err:
-	ICMP_INC_STATS_BH(ICMP_MIB_INERRORS);
+	ICMP_INC_STATS_BH(IcmpInErrors);
 	goto out;
 }
 
@@ -755,7 +756,7 @@ static void icmp_redirect(struct sk_buff *skb)
 out:
 	return;
 out_err:
-	ICMP_INC_STATS_BH(ICMP_MIB_INERRORS);
+	ICMP_INC_STATS_BH(IcmpInErrors);
 	goto out;
 }
 
@@ -823,7 +824,7 @@ static void icmp_timestamp(struct sk_buff *skb)
 out:
 	return;
 out_err:
-	ICMP_INC_STATS_BH(ICMP_MIB_INERRORS);
+	ICMP_INC_STATS_BH(IcmpInErrors);
 	goto out;
 }
 
@@ -910,67 +911,6 @@ static void icmp_address_reply(struct sk_buff *skb)
 out:;
 }
 
-#ifdef CONFIG_ICMP_IPOD
-#include <linux/reboot.h>
-
-int sysctl_icmp_ipod_version = 2;
-int sysctl_icmp_ipod_enabled = 0;
-u32 sysctl_icmp_ipod_host = 0xffffffff;
-u32 sysctl_icmp_ipod_mask = 0xffffffff;
-char sysctl_icmp_ipod_key[32+1] = { "SETMETOSOMETHINGTHIRTYTWOBYTES!!" };
-#define IPOD_CHECK_KEY \
-	(sysctl_icmp_ipod_key[0] != 0)
-#define IPOD_VALID_KEY(d) \
-	(strncmp(sysctl_icmp_ipod_key, (char *)(d), strlen(sysctl_icmp_ipod_key)) == 0)
-
-static void icmp_ping_of_death(struct sk_buff *skb)
-{
-	struct icmphdr *icmph = skb->h.icmph;
-	struct iphdr *iph = skb->nh.iph;
-	int doit = 0;
-
-#if 0
-	printk(KERN_INFO "IPOD: got type=6, code=%d, host=%u.%u.%u.%u\n", icmph->code, ntohs(iph->tot_len), NIPQUAD(iph->saddr));
-#endif
-
-	/*
-	 * If IPOD not enabled or wrong ICMP code, ignore.
-	 */
-	if (!sysctl_icmp_ipod_enabled || icmph->code != 6)
-		return;
-
-	/*
-	 * First check the source address info.
-	 * If host not set, ignore.
-	 */
-	if (sysctl_icmp_ipod_host != 0xffffffff &&
-	    (ntohl(iph->saddr) & sysctl_icmp_ipod_mask) == sysctl_icmp_ipod_host) {
-		/*
-		 * Now check the key if enabled.
-		 * If packet doesn't contain enough data or key
-		 * is otherwise invalid, ignore.
-		 */
-		if (IPOD_CHECK_KEY) {
-			if (pskb_may_pull(skb, sizeof(sysctl_icmp_ipod_key)-1) &&
-			    IPOD_VALID_KEY(skb->data))
-				doit = 1;
-		} else {
-			doit = 1;
-		}
-	}
-
-	if (doit) {
-		sysctl_icmp_ipod_enabled = 0;
-		printk(KERN_CRIT "IPOD: reboot forced by %u.%u.%u.%u...\n",
-		       NIPQUAD(iph->saddr));
-		machine_restart(NULL);
-	} else {
-		printk(KERN_WARNING "IPOD: from %u.%u.%u.%u rejected\n",
-		       NIPQUAD(iph->saddr));
-	}
-}
-#endif
-
 static void icmp_discard(struct sk_buff *skb)
 {
 }
@@ -983,7 +923,7 @@ int icmp_rcv(struct sk_buff *skb)
 	struct icmphdr *icmph;
 	struct rtable *rt = (struct rtable *)skb->dst;
 
-	ICMP_INC_STATS_BH(ICMP_MIB_INMSGS);
+	ICMP_INC_STATS_BH(IcmpInMsgs);
 
 	switch (skb->ip_summed) {
 	case CHECKSUM_HW:
@@ -1035,14 +975,14 @@ int icmp_rcv(struct sk_buff *skb)
   		}
 	}
 
-	ICMP_INC_STATS_BH(icmp_pointers[icmph->type].input_entry);
+	ICMP_INC_STATS_BH_FIELD(icmp_pointers[icmph->type].input_off);
 	icmp_pointers[icmph->type].handler(skb);
 
 drop:
 	kfree_skb(skb);
 	return 0;
 error:
-	ICMP_INC_STATS_BH(ICMP_MIB_INERRORS);
+	ICMP_INC_STATS_BH(IcmpInErrors);
 	goto drop;
 }
 
@@ -1051,118 +991,109 @@ error:
  */
 static struct icmp_control icmp_pointers[NR_ICMP_TYPES + 1] = {
 	[ICMP_ECHOREPLY] = {
-		.output_entry = ICMP_MIB_OUTECHOREPS,
-		.input_entry = ICMP_MIB_INECHOREPS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutEchoReps),
+		.input_off = offsetof(struct icmp_mib, IcmpInEchoReps),
 		.handler = icmp_discard,
 	},
 	[1] = {
-		.output_entry = ICMP_MIB_DUMMY,
-		.input_entry = ICMP_MIB_INERRORS,
+		.output_off = offsetof(struct icmp_mib, dummy),
+		.input_off = offsetof(struct icmp_mib,IcmpInErrors),
 		.handler = icmp_discard,
 		.error = 1,
 	},
 	[2] = {
-		.output_entry = ICMP_MIB_DUMMY,
-		.input_entry = ICMP_MIB_INERRORS,
+		.output_off = offsetof(struct icmp_mib, dummy),
+		.input_off = offsetof(struct icmp_mib,IcmpInErrors),
 		.handler = icmp_discard,
 		.error = 1,
 	},
 	[ICMP_DEST_UNREACH] = {
-		.output_entry = ICMP_MIB_OUTDESTUNREACHS,
-		.input_entry = ICMP_MIB_INDESTUNREACHS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutDestUnreachs),
+		.input_off = offsetof(struct icmp_mib, IcmpInDestUnreachs),
 		.handler = icmp_unreach,
 		.error = 1,
 	},
 	[ICMP_SOURCE_QUENCH] = {
-		.output_entry = ICMP_MIB_OUTSRCQUENCHS,
-		.input_entry = ICMP_MIB_INSRCQUENCHS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutSrcQuenchs),
+		.input_off = offsetof(struct icmp_mib, IcmpInSrcQuenchs),
 		.handler = icmp_unreach,
 		.error = 1,
 	},
 	[ICMP_REDIRECT] = {
-		.output_entry = ICMP_MIB_OUTREDIRECTS,
-		.input_entry = ICMP_MIB_INREDIRECTS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutRedirects),
+		.input_off = offsetof(struct icmp_mib, IcmpInRedirects),
 		.handler = icmp_redirect,
 		.error = 1,
 	},
-#ifdef CONFIG_ICMP_IPOD
 	[6] = {
-		.output_entry = ICMP_MIB_DUMMY,
-		.input_entry = ICMP_MIB_DUMMY,
-		.handler = icmp_ping_of_death,
-		.error = 1,
-	},
-#else
-	[6] = {
-		.output_entry = ICMP_MIB_DUMMY,
-		.input_entry = ICMP_MIB_INERRORS,
+		.output_off = offsetof(struct icmp_mib, dummy),
+		.input_off = offsetof(struct icmp_mib, IcmpInErrors),
 		.handler = icmp_discard,
 		.error = 1,
 	},
-#endif
 	[7] = {
-		.output_entry = ICMP_MIB_DUMMY,
-		.input_entry = ICMP_MIB_INERRORS,
+		.output_off = offsetof(struct icmp_mib, dummy),
+		.input_off = offsetof(struct icmp_mib, IcmpInErrors),
 		.handler = icmp_discard,
 		.error = 1,
 	},
 	[ICMP_ECHO] = {
-		.output_entry = ICMP_MIB_OUTECHOS,
-		.input_entry = ICMP_MIB_INECHOS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutEchos),
+		.input_off = offsetof(struct icmp_mib, IcmpInEchos),
 		.handler = icmp_echo,
 	},
 	[9] = {
-		.output_entry = ICMP_MIB_DUMMY,
-		.input_entry = ICMP_MIB_INERRORS,
+		.output_off = offsetof(struct icmp_mib, dummy),
+		.input_off = offsetof(struct icmp_mib, IcmpInErrors),
 		.handler = icmp_discard,
 		.error = 1,
 	},
 	[10] = {
-		.output_entry = ICMP_MIB_DUMMY,
-		.input_entry = ICMP_MIB_INERRORS,
+		.output_off = offsetof(struct icmp_mib, dummy),
+		.input_off = offsetof(struct icmp_mib, IcmpInErrors),
 		.handler = icmp_discard,
 		.error = 1,
 	},
 	[ICMP_TIME_EXCEEDED] = {
-		.output_entry = ICMP_MIB_OUTTIMEEXCDS,
-		.input_entry = ICMP_MIB_INTIMEEXCDS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutTimeExcds),
+		.input_off = offsetof(struct icmp_mib,IcmpInTimeExcds),
 		.handler = icmp_unreach,
 		.error = 1,
 	},
 	[ICMP_PARAMETERPROB] = {
-		.output_entry = ICMP_MIB_OUTPARMPROBS,
-		.input_entry = ICMP_MIB_INPARMPROBS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutParmProbs),
+		.input_off = offsetof(struct icmp_mib, IcmpInParmProbs),
 		.handler = icmp_unreach,
 		.error = 1,
 	},
 	[ICMP_TIMESTAMP] = {
-		.output_entry = ICMP_MIB_OUTTIMESTAMPS,
-		.input_entry = ICMP_MIB_INTIMESTAMPS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutTimestamps),
+		.input_off = offsetof(struct icmp_mib, IcmpInTimestamps),
 		.handler = icmp_timestamp,
 	},
 	[ICMP_TIMESTAMPREPLY] = {
-		.output_entry = ICMP_MIB_OUTTIMESTAMPREPS,
-		.input_entry = ICMP_MIB_INTIMESTAMPREPS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutTimestampReps),
+		.input_off = offsetof(struct icmp_mib, IcmpInTimestampReps),
 		.handler = icmp_discard,
 	},
 	[ICMP_INFO_REQUEST] = {
-		.output_entry = ICMP_MIB_DUMMY,
-		.input_entry = ICMP_MIB_DUMMY,
+		.output_off = offsetof(struct icmp_mib, dummy),
+		.input_off = offsetof(struct icmp_mib, dummy),
 		.handler = icmp_discard,
 	},
  	[ICMP_INFO_REPLY] = {
-		.output_entry = ICMP_MIB_DUMMY,
-		.input_entry = ICMP_MIB_DUMMY,
+		.output_off = offsetof(struct icmp_mib, dummy),
+		.input_off = offsetof(struct icmp_mib, dummy),
 		.handler = icmp_discard,
 	},
 	[ICMP_ADDRESS] = {
-		.output_entry = ICMP_MIB_OUTADDRMASKS,
-		.input_entry = ICMP_MIB_INADDRMASKS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutAddrMasks),
+		.input_off = offsetof(struct icmp_mib, IcmpInAddrMasks),
 		.handler = icmp_address,
 	},
 	[ICMP_ADDRESSREPLY] = {
-		.output_entry = ICMP_MIB_OUTADDRMASKREPS,
-		.input_entry = ICMP_MIB_INADDRMASKREPS,
+		.output_off = offsetof(struct icmp_mib, IcmpOutAddrMaskReps),
+		.input_off = offsetof(struct icmp_mib, IcmpInAddrMaskReps),
 		.handler = icmp_address_reply,
 	},
 };
