@@ -50,6 +50,7 @@
 #include <asm/setup.h>
 
 #include <linux/ckrm.h>
+#include <linux/ckrm_sched.h>
 
 /*
  * This is one of the first .c files built. Error out early
@@ -680,6 +681,7 @@ static int init(void * unused)
 
 	do_basic_setup();
 
+	init_ckrm_sched_res();
 	/*
 	 * check if there is an early userspace init.  If yes, let it do all
 	 * the work

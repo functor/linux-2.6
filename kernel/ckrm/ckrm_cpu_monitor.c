@@ -28,36 +28,84 @@
 #include <asm/div64.h>
 #include <linux/ckrm_sched.h>
 
-#define CPU_MONITOR_INTERVAL (4*HZ) /*how often do we adjust the shares*/
-#define CKRM_SHARE_ACCURACY 7
+#define CPU_MONITOR_INTERVAL (HZ) /*how often do we adjust the shares*/
 #define CKRM_SHARE_MAX (1<<CKRM_SHARE_ACCURACY)
 
+#define CKRM_CPU_DEMAND_RUN 0
+#define CKRM_CPU_DEMAND_SLEEP 1
+//sample task cpu demand every 64ms
+#define CPU_DEMAND_TASK_RECALC  (64000000LL)
+#define CPU_DEMAND_CLASS_RECALC (256000000LL)
+#define CPU_DEMAND_TP_CLASS 0
+#define CPU_DEMAND_TP_TASK 1
+
 extern struct ckrm_cpu_class *ckrm_get_cpu_class(struct ckrm_core_class *core);
+void update_ckrm_idle(unsigned long surplus);
+
+/*interface to share definition*/
+static inline int get_soft_limit(struct ckrm_cpu_class *cls)
+{
+	return cls->shares.my_limit;
+}
+
+static inline int get_mysoft_limit(struct ckrm_cpu_class *cls)
+{
+	return cls->shares.total_guarantee;
+}
+
+static inline int get_hard_limit(struct ckrm_cpu_class *cls)
+{
+	return cls->shares.total_guarantee;
+}
+
+static inline int get_myhard_limit(struct ckrm_cpu_class *cls)
+{
+	return cls->shares.total_guarantee;
+}
+
+
+static inline void cpu_demand_stat_init(struct ckrm_cpu_demand_stat* local_stat, int type)
+{
+	unsigned long long now = sched_clock();
+
+	local_stat->run = 0;
+	local_stat->total = 0;
+	local_stat->last_sleep = now;
+	switch (type) {
+	case CPU_DEMAND_TP_CLASS:
+		local_stat->recalc_interval = CPU_DEMAND_CLASS_RECALC;
+		local_stat->cpu_demand = 0; 
+		break;
+	case CPU_DEMAND_TP_TASK:
+		local_stat->recalc_interval = CPU_DEMAND_TASK_RECALC;
+		//for task, the init cpu_demand is copied from its parent
+		break;
+	default:
+		BUG();
+	}
+}
 
 void ckrm_cpu_stat_init(struct ckrm_cpu_class_stat *stat)
 {
 	int i;
-	struct ckrm_cpu_class_local_stat* local_stat;
-	unsigned long long now = sched_clock();
 
 	stat->stat_lock = SPIN_LOCK_UNLOCKED;
 	stat->total_ns = 0;
-	stat->cpu_demand = 0;
+	stat->max_demand = 0;
 
 	for (i=0; i< NR_CPUS; i++) {
-		local_stat = &stat->local_stats[i];
-		local_stat->run = 0;
-		local_stat->total = 0;
-		local_stat->last_sleep = now;
-		local_stat->cpu_demand = 0;		
+		cpu_demand_stat_init(&stat->local_stats[i],CPU_DEMAND_TP_CLASS);
 	}
 
-	stat->effective_guarantee = 0;
-	stat->effective_limit = 0;
-	stat->glut = 0;
-	stat->effective_share = 100;
-	stat->self_effective_share = 100;
+	stat->egrt = 0;
+	stat->megrt = 0;
+	stat->ehl = CKRM_SHARE_MAX; /*default: no limit*/
+	stat->mehl = CKRM_SHARE_MAX; /*default: no limit */
+
+	stat->eshare = CKRM_SHARE_MAX;
+	stat->meshare = CKRM_SHARE_MAX;
 }
+
 /**********************************************/
 /*          cpu demand                        */
 /**********************************************/
@@ -77,51 +125,41 @@ void ckrm_cpu_stat_init(struct ckrm_cpu_class_stat *stat)
  */
 
 /**
- * update_cpu_demand - update a state change
+ * update_cpu_demand_stat - 
  * 
- * should be called whenever the state of a local queue changes
+ * should be called whenever the state of a task/task local queue changes
  * -- when deschedule : report how much run
  * -- when enqueue: report how much sleep
  *
- * to deal with excessive long run/sleep state
- * -- whenever the the ckrm_cpu_monitor is called, check if the class is in sleep state, if yes, then update sleep record
+ * how often should we recalculate the cpu demand
+ * the number is in ns
  */
-#define CKRM_CPU_DEMAND_RUN 0
-#define CKRM_CPU_DEMAND_SLEEP 1
-//how often should we recalculate the cpu demand, in ns
-#define CPU_DEMAND_CAL_THRESHOLD (1000000000LL)
-static inline void update_local_cpu_demand(struct ckrm_cpu_class_local_stat* local_stat,int state, unsigned long long len)
+static inline void update_cpu_demand_stat(struct ckrm_cpu_demand_stat* local_stat,int state, unsigned long long len)
 {	
 	local_stat->total += len;
 	if (state == CKRM_CPU_DEMAND_RUN)
 		local_stat->run += len;
 
-	if (local_stat->total >= CPU_DEMAND_CAL_THRESHOLD) {
+	if (local_stat->total >= local_stat->recalc_interval) {
 		local_stat->total >>= CKRM_SHARE_ACCURACY;
-		if (local_stat->total > 0xFFFFFFFF)
-			local_stat->total = 0xFFFFFFFF;
+		if (unlikely(local_stat->run > 0xFFFFFFFF))
+			local_stat->run = 0xFFFFFFFF;
 
+		if (local_stat->total > 0xFFFFFFFF) 
+			local_stat->total = 0xFFFFFFFF;
+			
 		do_div(local_stat->run,(unsigned long)local_stat->total);
-		local_stat->cpu_demand +=local_stat->run;
-		local_stat->cpu_demand >>= 1;
+
+		if (local_stat->total > 0xFFFFFFFF) //happens after very long sleep
+			local_stat->cpu_demand = local_stat->run;
+		else {
+			local_stat->cpu_demand += local_stat->run;
+			local_stat->cpu_demand >>= 1;
+		}
 		local_stat->total = 0;
 		local_stat->run = 0;
 	}
 }
-
-static inline void cpu_demand_update_run(struct ckrm_cpu_class_local_stat* local_stat, unsigned long long len)
-{
-	update_local_cpu_demand(local_stat,CKRM_CPU_DEMAND_RUN,len);
-}
-
-static inline void cpu_demand_update_sleep(struct ckrm_cpu_class_local_stat* local_stat, unsigned long long len)
-{
-	update_local_cpu_demand(local_stat,CKRM_CPU_DEMAND_SLEEP,len);
-}
-
-#define CPU_DEMAND_ENQUEUE 0
-#define CPU_DEMAND_DEQUEUE 1
-#define CPU_DEMAND_DESCHEDULE 2
 
 /**
  * cpu_demand_event - and cpu_demand event occured
@@ -131,19 +169,24 @@ static inline void cpu_demand_update_sleep(struct ckrm_cpu_class_local_stat* loc
  *   CPU_DEMAND_DESCHEDULE: one task belong a certain local class deschedule
  * @len: valid only for CPU_DEMAND_DESCHEDULE, how long the task has been run
  */
-void cpu_demand_event(struct ckrm_cpu_class_local_stat* local_stat, int event, unsigned long long len) 
+void cpu_demand_event(struct ckrm_cpu_demand_stat* local_stat, int event, unsigned long long len) 
 {	
 	switch (event) {
 	case CPU_DEMAND_ENQUEUE: 
 		len = sched_clock() - local_stat->last_sleep;
 		local_stat->last_sleep = 0;
-		cpu_demand_update_sleep(local_stat,len);
+		update_cpu_demand_stat(local_stat,CKRM_CPU_DEMAND_SLEEP,len);
 		break;
 	case CPU_DEMAND_DEQUEUE:
-		local_stat->last_sleep = sched_clock();
+		if (! local_stat->last_sleep) {
+			local_stat->last_sleep = sched_clock();
+		}
 		break;
 	case CPU_DEMAND_DESCHEDULE:
-		cpu_demand_update_run(local_stat,len);		
+		update_cpu_demand_stat(local_stat,CKRM_CPU_DEMAND_RUN,len);
+		break;
+	case CPU_DEMAND_INIT: //for task init only
+		cpu_demand_stat_init(local_stat,CPU_DEMAND_TP_TASK);
 		break;
 	default:
 		BUG();
@@ -152,18 +195,19 @@ void cpu_demand_event(struct ckrm_cpu_class_local_stat* local_stat, int event, u
 
 /** 
  * check all the class local queue
- * if local queueu is not in runqueue, then it's in sleep state
- * if compare to last sleep, 
+ * 
+ * to deal with excessive long run/sleep state
+ * -- whenever the the ckrm_cpu_monitor is called, check if the class is in sleep state, if yes, then update sleep record
  */
 static inline void cpu_demand_check_sleep(struct ckrm_cpu_class_stat *stat, int cpu)
 {
-	struct ckrm_cpu_class_local_stat * local_stat = &stat->local_stats[cpu];
+	struct ckrm_cpu_demand_stat * local_stat = &stat->local_stats[cpu];
 	unsigned long long sleep,now;
 	if (local_stat->last_sleep) {
 		now = sched_clock();
 		sleep = now - local_stat->last_sleep;
 		local_stat->last_sleep = now;
-		cpu_demand_update_sleep(local_stat,sleep);
+		update_cpu_demand_stat(local_stat,CKRM_CPU_DEMAND_SLEEP,sleep);
 	}
 }
 
@@ -172,50 +216,71 @@ static inline void cpu_demand_check_sleep(struct ckrm_cpu_class_stat *stat, int 
  *
  * self_cpu_demand = sum(cpu demand of all local queues) 
  */
-static unsigned long get_self_cpu_demand(struct ckrm_cpu_class_stat
-						*stat)
+static inline unsigned long get_self_cpu_demand(struct ckrm_cpu_class_stat *stat)
 {
 	int cpu_demand = 0;
 	int i;
+	int cpuonline = 0;
 
 	for_each_online_cpu(i) {
 		cpu_demand_check_sleep(stat,i);
 		cpu_demand += stat->local_stats[i].cpu_demand;
+		cpuonline ++;
 	}
 
-	if (cpu_demand > CKRM_SHARE_MAX)
-		cpu_demand = CKRM_SHARE_MAX;
-	return cpu_demand;
+	return (cpu_demand/cpuonline);
 }
 
 /*
- * update effective cpu demand for each class
- * assume the root_core->parent == NULL
+ * my max demand = min(cpu_demand, my effective hard limit)
  */
-static void update_cpu_demand(struct ckrm_core_class *root_core)
+static inline unsigned long get_mmax_demand(struct ckrm_cpu_class_stat* stat) 
+{
+	unsigned long mmax_demand = get_self_cpu_demand(stat);
+	if (mmax_demand > stat->mehl)
+		mmax_demand = stat->mehl;
+
+	return mmax_demand;
+}
+
+/**
+ * update_max_demand: update effective cpu demand for each class
+ * return -1 on error
+ * 
+ * Assume: the root_core->parent == NULL
+ */
+static int update_max_demand(struct ckrm_core_class *root_core)
 {
 	struct ckrm_core_class *cur_core, *child_core;
-	struct ckrm_cpu_class *cls;
+	struct ckrm_cpu_class *cls,*c_cls;
+	int ret = -1;
 
 	cur_core = root_core;
 	child_core = NULL;
-	/*
-	 * iterate the tree
-	 * update cpu_demand of each node
-	 */
-      repeat:
-	if (!cur_core)
-		return;
+	
+ repeat:
+	if (!cur_core) { //normal exit
+		ret = 0;
+		goto out;
+	}
 
 	cls = ckrm_get_cpu_class(cur_core);
+	if (! cls) //invalid c_cls, abort
+		goto out;
+
 	if (!child_core)	//first child
-		cls->stat.cpu_demand = get_self_cpu_demand(&cls->stat);
+		cls->stat.max_demand = get_mmax_demand(&cls->stat);
 	else {
-		cls->stat.cpu_demand +=
-		    ckrm_get_cpu_class(child_core)->stat.cpu_demand;
-		if (cls->stat.cpu_demand > CKRM_SHARE_MAX)
-			cls->stat.cpu_demand = CKRM_SHARE_MAX;
+		c_cls = ckrm_get_cpu_class(child_core);
+		if (c_cls)
+			cls->stat.max_demand += c_cls->stat.max_demand;
+		else //invalid c_cls, abort
+			goto out;
 	}
+
+	//check class hard limit
+	if (cls->stat.max_demand > cls->stat.ehl)
+		cls->stat.max_demand = cls->stat.ehl;
 
 	//next child
 	child_core = ckrm_get_next_child(cur_core, child_core);
@@ -229,78 +294,116 @@ static void update_cpu_demand(struct ckrm_core_class *root_core)
 		cur_core = child_core->hnode.parent;
 	}
 	goto repeat;
+ out:
+	return ret;
 }
 
 /**********************************************/
 /*          effective guarantee & limit       */
 /**********************************************/
-static inline void set_effective_share(struct ckrm_cpu_class_stat *stat,
+static inline void set_eshare(struct ckrm_cpu_class_stat *stat,
 				       int new_share)
 {
 	if (!new_share)
 		new_share = 1;
-	stat->effective_share = new_share;
+
+	BUG_ON(new_share < 0);
+	stat->eshare = new_share;
 }
 
-static inline void set_self_effective_share(struct ckrm_cpu_class_stat *stat,
+static inline void set_meshare(struct ckrm_cpu_class_stat *stat,
 					    int new_share)
 {
 	if (!new_share)
 		new_share = 1;
-	stat->self_effective_share = new_share;
+
+	BUG_ON(new_share < 0);
+	stat->meshare = new_share;
 }
 
-static inline void update_child_effective(struct ckrm_core_class *parent)
+/**
+ *update_child_effective - update egrt, ehl, mehl for all children of parent
+ *@parent: the parent node
+ *return -1 if anything wrong
+ *
+ */
+static int update_child_effective(struct ckrm_core_class *parent)
 {
 	struct ckrm_cpu_class *p_cls = ckrm_get_cpu_class(parent);
-	struct ckrm_core_class *child_core = ckrm_get_next_child(parent, NULL);
+	struct ckrm_core_class *child_core;	
+	int ret = -1;
 
+	if (! p_cls)
+		return ret;
+
+	child_core = ckrm_get_next_child(parent, NULL);
 	while (child_core) {
 		struct ckrm_cpu_class *c_cls = ckrm_get_cpu_class(child_core);
+		if (! c_cls)
+			return ret;
 
-		c_cls->stat.effective_guarantee =
-		    p_cls->stat.effective_guarantee *
+		c_cls->stat.egrt =
+		    p_cls->stat.egrt *
 		    c_cls->shares.my_guarantee / p_cls->shares.total_guarantee;
-		c_cls->stat.effective_limit =
-		    p_cls->stat.effective_guarantee * c_cls->shares.my_limit /
-		    p_cls->shares.total_guarantee;
+
+		c_cls->stat.megrt = c_cls->stat.egrt * c_cls->shares.unused_guarantee
+			/ c_cls->shares.total_guarantee;
+		
+		c_cls->stat.ehl =
+		    p_cls->stat.ehl *
+		    get_hard_limit(c_cls) / p_cls->shares.total_guarantee;
+
+		c_cls->stat.mehl =
+		    c_cls->stat.ehl *
+		    get_myhard_limit(c_cls) / c_cls->shares.total_guarantee;
 
 		child_core = ckrm_get_next_child(parent, child_core);
 	};
-
+	return 0;
 }
 
-/*
- * update effective guarantee and effective limit
- * -- effective share = parent->effective->share * share/parent->total_share
- * -- effective limit = parent->effective->share * limit/parent->total_share
+/**
+ * update_effectives: update egrt, ehl, mehl for the whole tree
  * should be called only when class structure changed
+ *
+ * return -1 if anything wrong happened (eg: the structure changed during the process)
  */
-static void update_effective_guarantee_limit(struct ckrm_core_class *root_core)
+static int update_effectives(struct ckrm_core_class *root_core)
 {
-	struct ckrm_core_class *cur_core, *child_core = NULL;
+	struct ckrm_core_class *cur_core, *child_core;
 	struct ckrm_cpu_class *cls;
+	int ret = -1;
 
 	cur_core = root_core;
+	child_core = NULL;
 	cls = ckrm_get_cpu_class(cur_core);
-	cls->stat.effective_guarantee = CKRM_SHARE_MAX;
-	cls->stat.effective_limit = cls->stat.effective_guarantee;
 
-      repeat:
+	//initialize the effectives for root 
+	cls->stat.egrt = CKRM_SHARE_MAX; /*egrt of the root is always 100% */
+	cls->stat.megrt = cls->stat.egrt * cls->shares.unused_guarantee
+		/ cls->shares.total_guarantee;
+	cls->stat.ehl = CKRM_SHARE_MAX * get_hard_limit(cls)
+		/ cls->shares.total_guarantee;
+	cls->stat.mehl = cls->stat.ehl * get_myhard_limit(cls)
+		/ cls->shares.total_guarantee;
+	
+ repeat:
 	//check exit
 	if (!cur_core)
-		return;
+		return 0;
 
 	//visit this node
-	update_child_effective(cur_core);
+	if (update_child_effective(cur_core) < 0)
+		return ret; //invalid cur_core node
+	
 	//next child
 	child_core = ckrm_get_next_child(cur_core, child_core);
+
 	if (child_core) {
-		//go down
+		//go down to the next hier
 		cur_core = child_core;
 		child_core = NULL;
-		goto repeat;
-	} else {		//no more child, go back
+	} else { //no more child, go back
 		child_core = cur_core;
 		cur_core = child_core->hnode.parent;
 	}
@@ -312,12 +415,12 @@ static void update_effective_guarantee_limit(struct ckrm_core_class *root_core)
 /**********************************************/
 
 /*
- * surplus = my_effective_share - demand
+ * surplus = egrt - demand
  * if surplus < 0, surplus = 0 
  */
 static inline int get_node_surplus(struct ckrm_cpu_class *cls)
 {
-	int surplus = cls->stat.effective_guarantee - cls->stat.cpu_demand;
+	int surplus = cls->stat.egrt - cls->stat.max_demand;
 
 	if (surplus < 0)
 		surplus = 0;
@@ -325,122 +428,199 @@ static inline int get_node_surplus(struct ckrm_cpu_class *cls)
 	return surplus;
 }
 
-/*
- * consume the surplus
+static inline int get_my_node_surplus(struct ckrm_cpu_class *cls)
+{
+	int surplus = cls->stat.megrt - get_mmax_demand(&cls->stat);
+
+	if (surplus < 0)
+		surplus = 0;
+
+	return surplus;
+}
+
+/**
+ * node_surplus_consume: consume the surplus
+ * @ckeck_sl: if check_sl is set, then check soft_limit
+ * @total_grt: total guarantee 
  * return how much consumed
- * set glut when necessary
+ * return -1 on error
+ *
+ * implements all the CKRM Scheduling Requirement
+ * update total_grt if necessary 
  */
-static inline int node_surplus_consume(int old_surplus,
+static inline int node_surplus_consume(int surplus,
 				       struct ckrm_core_class *child_core,
-				       struct ckrm_cpu_class *p_cls)
+				       struct ckrm_cpu_class *p_cls,
+				       int check_sl
+				       )
 {
 	int consumed = 0;
 	int inc_limit;
+	int glut = 1;
 
 	struct ckrm_cpu_class *c_cls = ckrm_get_cpu_class(child_core);
+	int total_grt = p_cls->shares.total_guarantee;
 
-	if (c_cls->stat.glut)
+ 	BUG_ON(surplus < 0);
+
+	if (! c_cls || ! total_grt)
 		goto out;
 
-	//check demand
-	if (c_cls->stat.effective_share >= c_cls->stat.cpu_demand) {
-		c_cls->stat.glut = 1;
+	/*can't consume more than demand or hard limit*/
+	if (c_cls->stat.eshare >= c_cls->stat.max_demand)
 		goto out;
-	}
 
 	consumed =
-	    old_surplus * c_cls->shares.my_guarantee /
-	    p_cls->shares.total_guarantee;
+		surplus * c_cls->shares.my_guarantee / total_grt;
 
-	//check limit
-	inc_limit = c_cls->stat.effective_limit - c_cls->stat.effective_share;
-	if (inc_limit <= consumed) {
-		c_cls->stat.glut = 1;
-		consumed = inc_limit;
+	if (! consumed) //no more share
+		goto out;
+
+	//hard limit and demand limit
+	inc_limit = c_cls->stat.max_demand - c_cls->stat.eshare;
+
+	if (check_sl) {
+		int esl = p_cls->stat.eshare * get_soft_limit(c_cls)
+			/p_cls->shares.total_guarantee;
+		if (esl < c_cls->stat.max_demand)
+			inc_limit = esl - c_cls->stat.eshare;
 	}
 
-	c_cls->stat.effective_share += consumed;
-      out:
+
+	if (consumed > inc_limit)
+		consumed = inc_limit;
+	else
+		glut = 0;
+
+        BUG_ON(consumed < 0);
+	set_eshare(&c_cls->stat,c_cls->stat.eshare + consumed);
+        BUG_ON(c_cls->stat.eshare < 0);
+
+ out:		
 	return consumed;
 }
 
-/*
- * re-allocate the shares for all the childs under this node
+/**
+ * alloc_surplus_node: re-allocate the shares for children under parent
+ * @parent: parent node
+ * return the remaining surplus
+ *
  * task:
  *  1. get total surplus
  *  2. allocate surplus
  *  3. set the effective_share of each node
  */
-static void alloc_surplus_node(struct ckrm_core_class *parent)
+static int alloc_surplus_node(struct ckrm_core_class *parent)
 {
-	int total_surplus = 0, old_surplus = 0;
+	int total_surplus , old_surplus;
 	struct ckrm_cpu_class *p_cls = ckrm_get_cpu_class(parent);
 	struct ckrm_core_class *child_core = NULL;
 	int self_share;
+	int check_sl;
+	int ret = -1;
+
+	if (! p_cls)
+		return ret;
+
+	total_surplus = get_my_node_surplus(p_cls);
 
 	/*
-	 * calculate surplus 
-	 * total_surplus = sum(child_surplus)
-	 * reset glut flag
 	 * initialize effective_share
 	 */
 	do {
 		child_core = ckrm_get_next_child(parent, child_core);
 		if (child_core) {
-			struct ckrm_cpu_class *c_cls =
-			    ckrm_get_cpu_class(child_core);
-			ckrm_stat_t *stat = &c_cls->stat;
+			struct ckrm_cpu_class *c_cls;
+
+			c_cls = ckrm_get_cpu_class(child_core);				
+			if (! c_cls)
+				return ret; 
 
 			total_surplus += get_node_surplus(c_cls);
-			stat->glut = 0;
-			set_effective_share(stat, stat->effective_guarantee);
+
+		 	set_eshare(&c_cls->stat, c_cls->stat.egrt);
 		}
 	} while (child_core);
 
-	/*distribute the surplus */
+	if (! total_surplus)
+		goto realloc_out;
+
+	/* distribute the surplus */
 	child_core = NULL;
+	check_sl = 1;
+	old_surplus = 0;
 	do {
-		if (!child_core)	//keep the surplus of last round
+		if (!child_core) {//start a new round
+
+			//ok, everybody reached the soft limit
+			if (old_surplus == total_surplus) 
+				check_sl = 0;
 			old_surplus = total_surplus;
+		}
 
 		child_core = ckrm_get_next_child(parent, child_core);
-		if (child_core) {
-			total_surplus -=
-			    node_surplus_consume(old_surplus, child_core,
-						 p_cls);
+		if (child_core)  {
+			int consumed = 0;
+			consumed -=
+				node_surplus_consume(old_surplus, child_core,
+						     p_cls,check_sl);
+			if (consumed >= 0) 
+				total_surplus -= consumed;
+			else
+				return ret;	
 		}
 		//start a new round if something is allocated in the last round
-	} while (child_core || (total_surplus != old_surplus));
+	} while (child_core || check_sl || total_surplus != old_surplus);
 
-	//any remaining surplus goes to the default class
-	self_share = p_cls->stat.effective_share *
+ realloc_out:
+	/*how much for itself*/
+	self_share = p_cls->stat.eshare *
 	    p_cls->shares.unused_guarantee / p_cls->shares.total_guarantee;
-	self_share += total_surplus;
 
-	set_self_effective_share(&p_cls->stat, self_share);
+	if (self_share < p_cls->stat.max_demand) {
+		/*any remaining surplus goes to the default class*/
+		self_share += total_surplus;	
+		if (self_share > p_cls->stat.max_demand)
+			self_share = p_cls->stat.max_demand;
+	}
+	
+	set_meshare(&p_cls->stat, self_share);
+	return 0;
 }
 
 /**
  * alloc_surplus - reallocate unused shares
  *
  * class A's usused share should be allocated to its siblings
+ * the re-allocation goes downward from the top
  */
-static void alloc_surplus(struct ckrm_core_class *root_core)
+static int alloc_surplus(struct ckrm_core_class *root_core)
 {
-	struct ckrm_core_class *cur_core, *child_core = NULL;
+	struct ckrm_core_class *cur_core, *child_core;
 	struct ckrm_cpu_class *cls;
+	int ret = -1;
 
+	/*initialize*/
 	cur_core = root_core;
+	child_core = NULL;
 	cls = ckrm_get_cpu_class(cur_core);
-	cls->stat.glut = 0;
-	set_effective_share(&cls->stat, cls->stat.effective_guarantee);
+
+	//set root eshare
+	set_eshare(&cls->stat, cls->stat.egrt);
+
+	/*the ckrm idle tasks get all what's remaining*/
+	/*hzheng: uncomment the following like for hard limit support */
+	//	update_ckrm_idle(CKRM_SHARE_MAX - cls->stat.max_demand);
+	
       repeat:
 	//check exit
 	if (!cur_core)
-		return;
+		return 0;
 
 	//visit this node
-	alloc_surplus_node(cur_core);
+	if ( alloc_surplus_node(cur_core) < 0 )
+		return ret;
+
 	//next child
 	child_core = ckrm_get_next_child(cur_core, child_core);
 	if (child_core) {
@@ -455,6 +635,199 @@ static void alloc_surplus(struct ckrm_core_class *root_core)
 	goto repeat;
 }
 
+/**********************************************/
+/*           CKRM Idle Tasks                  */
+/**********************************************/
+struct ckrm_cpu_class ckrm_idle_class_obj, *ckrm_idle_class;
+struct task_struct* ckrm_idle_tasks[NR_CPUS];
+
+/*how many ckrm idle tasks should I wakeup*/
+static inline int get_nr_idle(unsigned long surplus)
+{
+	int cpu_online = cpus_weight(cpu_online_map);	
+	int nr_idle = 0; 
+	
+	nr_idle = surplus * cpu_online;
+	nr_idle >>= CKRM_SHARE_ACCURACY;
+
+	if (surplus) 
+		nr_idle ++;
+
+	if (nr_idle > cpu_online)  
+		nr_idle = cpu_online;
+
+	return nr_idle;
+}
+
+/**
+ * update_ckrm_idle: update the status of the idle class according to the new surplus
+ * surplus: new system surplus
+ *
+ * Task:
+ * -- update share of the idle class 
+ * -- wakeup idle tasks according to surplus
+ */
+void update_ckrm_idle(unsigned long surplus)
+{
+	int nr_idle = get_nr_idle(surplus);
+	int i;
+	struct task_struct* idle_task;
+
+	set_eshare(&ckrm_idle_class->stat,surplus);
+	set_meshare(&ckrm_idle_class->stat,surplus);
+	/*wake up nr_idle idle tasks*/
+	for_each_online_cpu(i) {
+		idle_task = ckrm_idle_tasks[i];
+		if (unlikely(idle_task->cpu_class != ckrm_idle_class)) {
+			ckrm_cpu_change_class(idle_task,
+					      idle_task->cpu_class,
+					      ckrm_idle_class);
+		}
+		if (! idle_task)
+			continue;
+		if (i < nr_idle) {
+			//activate it
+			wake_up_process(idle_task);
+		} else {
+			//deactivate it
+			idle_task->state = TASK_INTERRUPTIBLE;
+			set_tsk_need_resched(idle_task);
+		}
+	}
+}
+
+static int ckrm_cpu_idled(void *nothing)
+{
+	set_user_nice(current,19);
+	daemonize("ckrm_idle_task");
+
+	//deactivate it, it will be waked up by ckrm_cpu_monitor
+	current->state = TASK_INTERRUPTIBLE;
+	schedule();		
+
+	/*similar to cpu_idle */
+	while (1) {
+		while (!need_resched()) {
+			ckrm_cpu_monitor();
+			if (current_cpu_data.hlt_works_ok) {
+				local_irq_disable();
+				if (!need_resched()) {
+					set_tsk_need_resched(current);
+					safe_halt();
+				} else
+					local_irq_enable();
+			}
+		}
+		schedule();		
+	}
+	return 0;
+}
+
+/**
+ * ckrm_start_ckrm_idle: 
+ *  create the ckrm_idle_class and starts the idle tasks
+ *
+ */
+void ckrm_start_ckrm_idle(void)
+{
+	int i;
+	int ret;
+	ckrm_shares_t shares;
+	
+	ckrm_idle_class = &ckrm_idle_class_obj; 
+	memset(ckrm_idle_class,0,sizeof(shares));
+	/*don't care about the shares */
+	init_cpu_class(ckrm_idle_class,&shares);
+	printk(KERN_INFO"ckrm idle class %x created\n",(int)ckrm_idle_class);
+	
+	for_each_online_cpu(i) {
+		ret = kernel_thread(ckrm_cpu_idled, 0, CLONE_KERNEL);
+		
+		/*warn on error, but the system should still work without it*/
+		if (ret < 0)
+			printk(KERN_ERR"Warn: can't start ckrm idle tasks\n");
+		else {
+			ckrm_idle_tasks[i] = find_task_by_pid(ret);
+			if (!ckrm_idle_tasks[i])
+				printk(KERN_ERR"Warn: can't find ckrm idle tasks %d\n",ret);
+		}
+	}
+}
+
+/**********************************************/
+/*          Local Weight                      */
+/**********************************************/
+/**
+ * adjust_class_local_weight: adjust the local weight for each cpu
+ *
+ * lrq->weight = lpr->pressure * class->weight / total_pressure
+ */
+static void adjust_lrq_weight(struct ckrm_cpu_class *clsptr, int cpu_online)
+{
+	unsigned long total_pressure = 0;
+	ckrm_lrq_t* lrq;
+	int i;
+	unsigned long class_weight;
+	unsigned long long lw;	
+
+	//get total pressure
+	for_each_online_cpu(i) {
+		lrq = get_ckrm_lrq(clsptr,i);
+		total_pressure += lrq->lrq_load;
+	}
+
+	if (! total_pressure)
+		return;
+	
+	class_weight = cpu_class_weight(clsptr) * cpu_online;
+
+	/*
+	 * update weight for each cpu, minimun is 1
+	 */
+	for_each_online_cpu(i) {
+		lrq = get_ckrm_lrq(clsptr,i);
+		if (! lrq->lrq_load)
+			/*give idle class a high share to boost interactiveness */
+			lw = cpu_class_weight(clsptr); 
+		else {
+			lw = lrq->lrq_load * class_weight;
+			do_div(lw,total_pressure);
+			if (!lw)
+				lw = 1;
+			else if (lw > CKRM_SHARE_MAX)
+				lw = CKRM_SHARE_MAX;
+		}
+		
+		lrq->local_weight = lw;
+	}
+}
+
+/*
+ * assume called with class_list_lock read lock held
+ */
+void adjust_local_weight(void)
+{
+	static spinlock_t lock = SPIN_LOCK_UNLOCKED; 
+	struct ckrm_cpu_class *clsptr;
+	int cpu_online;
+
+	//do nothing if someone already holding the lock
+	if (! spin_trylock(&lock))
+		return;
+
+	cpu_online = cpus_weight(cpu_online_map);	
+
+	//class status: demand, share,total_ns prio, index
+	list_for_each_entry(clsptr,&active_cpu_classes,links) {
+		adjust_lrq_weight(clsptr,cpu_online);
+	}
+
+	spin_unlock(&lock);
+}
+
+/**********************************************/
+/*          Main                              */
+/**********************************************/
 /**
  *ckrm_cpu_monitor - adjust relative shares of the classes based on their progress
  *
@@ -464,13 +837,43 @@ static void alloc_surplus(struct ckrm_core_class *root_core)
  */
 void ckrm_cpu_monitor(void)
 {
-	struct ckrm_core_class *root_core = default_cpu_class->core;
+	static spinlock_t lock = SPIN_LOCK_UNLOCKED; 
+	static unsigned long long last_check = 0;
+	struct ckrm_core_class *root_core = get_default_cpu_class()->core;
+	unsigned long long now;	
+#define MIN_CPU_MONITOR_INTERVAL 100000000UL
+
 	if (!root_core)
 		return;
 
-	update_effective_guarantee_limit(root_core);
-	update_cpu_demand(root_core);
-	alloc_surplus(root_core);
+	//do nothing if someone already holding the lock
+	if (! spin_trylock(&lock))
+		return;
+
+	read_lock(&class_list_lock);
+
+	now = sched_clock();
+
+	//consecutive check should be at least 100ms apart
+	if (now - last_check < MIN_CPU_MONITOR_INTERVAL) {
+		goto outunlock;
+	}
+	last_check = now;
+
+	if (update_effectives(root_core) != 0)
+		goto outunlock;
+	
+	if (update_max_demand(root_core) != 0)
+		goto outunlock;
+	
+	if (alloc_surplus(root_core) != 0)
+		goto outunlock;
+	
+	adjust_local_weight();
+
+ outunlock:	
+	read_unlock(&class_list_lock);
+	spin_unlock(&lock);
 }
 
 /*****************************************************/
@@ -526,6 +929,8 @@ void ckrm_kill_monitor(void)
 int ckrm_cpu_monitor_init(void)
 {
 	ckrm_start_monitor();
+	/*hzheng: uncomment the following like for hard limit support */
+	//	ckrm_start_ckrm_idle();
 	return 0;
 }
 
