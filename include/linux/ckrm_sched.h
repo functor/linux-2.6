@@ -361,7 +361,11 @@ static inline int get_effective_prio(ckrm_lrq_t * lrq)
 	int prio;
 
 	prio = lrq->local_cvt >> CLASS_QUANTIZER;  // cumulative usage
+#ifndef URGENCY_SUPPORT
+#warning "ACB removing urgency calculation from get_effective_prio"
+#else
 	prio += lrq->top_priority >> PRIORITY_QUANTIZER; // queue urgency
+#endif
 
 	return prio;
 }
