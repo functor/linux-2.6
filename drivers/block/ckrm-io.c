@@ -74,10 +74,10 @@ typedef struct ckrm_io_class {
 	/* Absolute shares of this class
 	 * in local units. 
 	 */
-
-	int cnt_guarantee; /* Allocation as parent */
-	int cnt_unused;    /* Allocation to default subclass */
-
+	
+	int ioprio;
+	int unused;
+	
 	/* Statistics, for class and default subclass */
 	cki_stats_t stats; 
 	cki_stats_t mystats;
@@ -90,12 +90,13 @@ typedef struct ckrm_io_class {
 static inline void cki_reset_stats(cki_stats_t *usg);
 static inline void init_icls_one(cki_icls_t *icls);
 static inline int cki_div(int *a, int b, int c);
-//static inline int cki_recalc(cki_icls_t *icls, int rel2abs);
-static void cki_recalc_propagate(cki_icls_t *res, cki_icls_t *parres);
+static inline int cki_recalc(cki_icls_t *icls, int rel2abs);
 
+#ifdef DOES_NOT_WORK_AND_NOT_NEEDED
 /* External functions e.g. interface to ioscheduler */
-void *cki_tsk_icls (struct task_struct *tsk);
-int cki_tsk_ioprio (struct task_struct *tsk);
+inline void *cki_tsk_icls(struct task_struct *tsk);
+inline int cki_tsk_ioprio(struct task_struct *tsk);
+#endif
 
 extern void cki_cfq_set(icls_tsk_t tskicls, icls_ioprio_t tskioprio);
 
@@ -139,13 +140,9 @@ static inline void init_icls_stats(cki_icls_t *icls)
 
 static inline void init_icls_one(cki_icls_t *icls)
 {
-	// Assign zero as initial guarantee otherwise creations
-	// could fail due to inadequate share
-
-	//icls->shares.my_guarantee = 
-	//	(CKI_IOPRIO_MIN * CKRM_SHARE_DFLT_TOTAL_GUARANTEE) / 
-	//	CKI_IOPRIO_DIV ;
-	icls->shares.my_guarantee = 0;
+	icls->shares.my_guarantee = 
+		(CKI_IOPRIO_MIN * CKRM_SHARE_DFLT_TOTAL_GUARANTEE) / 
+		CKI_IOPRIO_DIV ;
 	icls->shares.my_limit = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
 	icls->shares.total_guarantee = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
 	icls->shares.max_limit = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
@@ -155,11 +152,8 @@ static inline void init_icls_one(cki_icls_t *icls)
 	icls->shares.cur_max_limit = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
 
 
-	icls->cnt_guarantee = icls->cnt_unused = IOPRIO_IDLE;
-
-	//Same rationale icls->ioprio = CKI_IOPRIO_MIN;
-	//IOPRIO_IDLE equivalence to zero my_guarantee (set above) relies
-	//on former being zero.
+	icls->ioprio = CKI_IOPRIO_MIN;
+	icls->unused = 0 ;
 	
 	init_icls_stats(icls);
 }
@@ -180,55 +174,6 @@ static inline int cki_div(int *a, int b, int c)
  * Caller should have a lock on icls
  */
 
-static void cki_recalc_propagate(cki_icls_t *res, cki_icls_t *parres)
-{
-
-	ckrm_core_class_t *child = NULL;
-	cki_icls_t *childres;
-	int resid = cki_rcbs.resid;
-
-	if (parres) {
-		struct ckrm_shares *par = &parres->shares;
-		struct ckrm_shares *self = &res->shares;
-
-
-
-		if (parres->cnt_guarantee == CKRM_SHARE_DONTCARE) {
-			res->cnt_guarantee = CKRM_SHARE_DONTCARE;
-		} else if (par->total_guarantee) {
-			u64 temp = (u64) self->my_guarantee * 
-				parres->cnt_guarantee;
-			do_div(temp, par->total_guarantee);
-			res->cnt_guarantee = (int) temp;
-		} else {
-			res->cnt_guarantee = 0;
-		}
-
-		if (res->cnt_guarantee == CKRM_SHARE_DONTCARE) {
-			res->cnt_unused = CKRM_SHARE_DONTCARE;
-		} else if (self->total_guarantee) {
-			u64 temp = (u64) self->unused_guarantee * 
-				res->cnt_guarantee;
-			do_div(temp, self->total_guarantee);
-			res->cnt_unused = (int) temp;
-		} else {
-			res->cnt_unused = 0;
-		}
-	}
-	// propagate to children
-	ckrm_lock_hier(res->core);
-	while ((child = ckrm_get_next_child(res->core,child)) != NULL){
-		childres = ckrm_get_res_class(child, resid, 
-					      cki_icls_t);
-		
-		spin_lock(&childres->shares_lock);
-		cki_recalc_propagate(childres, res);
-		spin_unlock(&childres->shares_lock);
-	}
-	ckrm_unlock_hier(res->core);
-}
-
-#if 0
 static inline int cki_recalc(cki_icls_t *icls, int rel2abs)
 {
 	u64 temp;
@@ -239,10 +184,8 @@ static inline int cki_recalc(cki_icls_t *icls, int rel2abs)
 		temp = icls->shares.my_guarantee * (IOPRIO_NR-1);
 		do_div(temp, icls->shares.total_guarantee);
 
-		icls->total = IOPRIO_NR-1;
 		icls->ioprio = temp ;
-		icls->unused = icls->total - icls->ioprio;
-//		icls->unused = (IOPRIO_NR-1)-icls->ioprio;
+		icls->unused = (IOPRIO_NR-1)-icls->ioprio;
 
 	} else {
 		cki_icls_t *parres;
@@ -257,9 +200,9 @@ static inline int cki_recalc(cki_icls_t *icls, int rel2abs)
 			return -EINVAL;
 		}
 
+		partot = parres->ioprio + parres->unused;
 
-		temp = (icls->shares.my_guarantee * 
-			parres->total);
+		temp = (icls->shares.my_guarantee * (parres->ioprio + parres->unused));
 		do_div(temp, parres->shares.total_guarantee);
 
 		icls->ioprio = temp;
@@ -270,19 +213,19 @@ static inline int cki_recalc(cki_icls_t *icls, int rel2abs)
 	return 0;
 
 }
-#endif
 
-void *cki_tsk_icls(struct task_struct *tsk)
+
+inline void *cki_icls_tsk(struct task_struct *tsk)
 {
 	return (void *) ckrm_get_res_class(class_core(tsk->taskclass),
 					   cki_rcbs.resid, cki_icls_t);
 }
 
-int cki_tsk_ioprio(struct task_struct *tsk)
+inline int cki_icls_ioprio(struct task_struct *tsk)
 {
 	cki_icls_t *icls = ckrm_get_res_class(class_core(tsk->taskclass),
 					   cki_rcbs.resid, cki_icls_t);
-	return icls->cnt_unused;
+	return icls->ioprio;
 }
 
 static void *cki_alloc(struct ckrm_core_class *core,
@@ -302,13 +245,15 @@ static void *cki_alloc(struct ckrm_core_class *core,
 	icls->shares_lock = SPIN_LOCK_UNLOCKED;
 
 	if (parent == NULL) {
+		u64 temp;
 
 		/* Root class gets same as "normal" CFQ priorities to
 		 * retain compatibility of behaviour in the absence of 
 		 * other classes
 		 */
 
-		icls->cnt_guarantee = icls->cnt_unused = IOPRIO_NR-1; 
+		icls->ioprio = IOPRIO_NORM;
+		icls->unused = (IOPRIO_NR-1)-IOPRIO_NORM;
 
 		/* Default gets normal, not minimum */
 		//icls->unused = IOPRIO_NORM;
@@ -317,27 +262,24 @@ static void *cki_alloc(struct ckrm_core_class *core,
 
 		/* Compute shares in abstract units */
 		icls->shares.total_guarantee = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
+		temp = (u64) icls->ioprio * icls->shares.total_guarantee;
+		do_div(temp, CKI_IOPRIO_DIV); 
+		icls->shares.my_guarantee = (int) temp;
 
-		// my_guarantee for root is meaningless. Set to default
-		icls->shares.my_guarantee = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
-
-		icls->shares.unused_guarantee = 
-			CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
-
-		//temp = (u64) icls->cnt_unused * icls->shares.total_guarantee;
-		//do_div(temp, CKI_IOPRIO_DIV); 
-		// temp now has root's default's share
-		//icls->shares.unused_guarantee = 
-		// icls->shares.total_guarantee - temp; 
-
+		//icls->shares.my_limit = CKRM_SHARE_DFLT_MAX_LIMIT;
+		//icls->shares.max_limit = CKRM_SHARE_DFLT_MAX_LIMIT;
 		icls->shares.my_limit = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
 		icls->shares.max_limit = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
+
+
+		icls->shares.unused_guarantee = 
+			icls->shares.total_guarantee - 
+			icls->shares.my_guarantee;
+		//icls->shares.cur_max_limit = CKRM_SHARE_DFLT_MAX_LIMIT;
 		icls->shares.cur_max_limit = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
 
 	} else {
 		init_icls_one(icls);
-		/* No propagation to parent needed if icls'
-		   initial share is zero */
 	}
 	try_module_get(THIS_MODULE);
 	return icls;
@@ -373,7 +315,7 @@ static void cki_free(void *res)
 	/* Update parent's shares */
 	spin_lock(&parres->shares_lock);
 	child_guarantee_changed(&parres->shares, icls->shares.my_guarantee, 0);
-	parres->cnt_unused += icls->cnt_guarantee;
+	parres->unused += icls->ioprio;
 	spin_unlock(&parres->shares_lock);
 
 	kfree(res);
@@ -398,7 +340,9 @@ static int cki_setshare(void *res, struct ckrm_shares *new)
 	/* limits not supported */
 	if ((new->max_limit != CKRM_SHARE_UNCHANGED)
 	    || (new->my_limit != CKRM_SHARE_UNCHANGED)) {
-		printk(KERN_ERR "limits not supported\n");
+		printk(KERN_ERR "limits changed max_limit %d my_limit %d\n",
+		       new->max_limit, new->my_limit);
+
 		return -EINVAL;
 	}
 
@@ -420,32 +364,17 @@ static int cki_setshare(void *res, struct ckrm_shares *new)
 	}
 
 	rc = set_shares(new, cur, par);
+
 	printk(KERN_ERR "rc from set_shares %d\n", rc);
 
-	if ((!rc) && parres) {
-		
-		if (parres->cnt_guarantee == CKRM_SHARE_DONTCARE) {
-			parres->cnt_unused = CKRM_SHARE_DONTCARE;
-		} else if (par->total_guarantee) {
-			u64 temp = (u64) par->unused_guarantee * 
-				parres->cnt_guarantee;
-			do_div(temp, par->total_guarantee);
-			parres->cnt_unused = (int) temp;
-		} else {
-			parres->cnt_unused = 0;
-		}
-		cki_recalc_propagate(res, parres);
-	
-#if 0
+	if (!rc) {
 		int old = icls->ioprio;
-		
 		rc = cki_recalc(icls,0);
 
 		if (!rc && parres) {
 			int raise_tot = icls->ioprio - old ;
-			parres->unused -= raise_tot ;
+			parres->unused += raise_tot ;
 		}
-#endif
 	}
 	spin_unlock(&icls->shares_lock);
 	if (icls->parent) {
@@ -478,8 +407,8 @@ static int cki_getstats(void *res, struct seq_file *sfile)
 	seq_printf(sfile, "%d total_write\n",atomic_read(&icls->stats.blkwr));
 */
 	
-	seq_printf(sfile, "%d total ioprio\n",icls->cnt_guarantee);
-	seq_printf(sfile, "%d unused/default ioprio\n",icls->cnt_unused);
+	seq_printf(sfile, "%d ioprio\n",icls->ioprio);
+	seq_printf(sfile, "%d unused\n",icls->unused);
 
 	return 0;
 }
@@ -523,7 +452,7 @@ static void cki_chgcls(void *tsk, void *oldres, void *newres)
 
 
 struct ckrm_res_ctlr cki_rcbs = {
-	.res_name = "io",
+	.res_name = "cki",
 	.res_hdepth = 1,
 	.resid = -1,
 	.res_alloc = cki_alloc,
@@ -554,7 +483,7 @@ int __init cki_init(void)
 		resid = ckrm_register_res_ctlr(clstype, &cki_rcbs);
 		if (resid != -1) {
 			cki_rcbs.classtype = clstype;
-			cki_cfq_set(cki_tsk_icls,cki_tsk_ioprio);
+			cki_cfq_set(cki_icls_tsk,cki_icls_ioprio);
 		}
 	}
 	
