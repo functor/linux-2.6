@@ -934,14 +934,37 @@ int ckrm_class_set_shares(struct ckrm_core_class *core, const char *resname,
 	int rc;
 
 	// Check for legal values
-	if (!legalshare(shares->my_guarantee) || !legalshare(shares->my_limit)
-	    || !legalshare(shares->total_guarantee)
-	    || !legalshare(shares->max_limit))
+	if (!legalshare(shares->my_guarantee)) {
+		printk("ckrm_class_set_shares: shares->my_guarantee invalid value (%d)\n",
+		       shares->my_guarantee);
 		return -EINVAL;
+	}
+
+	if(!legalshare(shares->my_limit)) {
+		printk("ckrm_class_set_shares: shares->my_limit invalid value (%d)\n",
+		       shares->my_limit);
+		return -EINVAL;
+	}
+
+	if(!legalshare(shares->total_guarantee)){
+		printk("ckrm_class_set_shares: shares->total_guarantee invalid value (%d)\n",
+		       shares->total_guarantee);
+		return -EINVAL;
+	}
+
+	if(!legalshare(shares->max_limit)) {
+		printk("ckrm_class_set_shares: shares->max_limit invalid value (%d)\n",
+		       shares->max_limit);
+		return -EINVAL;
+	}
 
 	rcbs = ckrm_resctlr_lookup(clstype, resname);
-	if (rcbs == NULL || rcbs->set_share_values == NULL)
+	if (rcbs == NULL || rcbs->set_share_values == NULL) {
+		printk("ckrm_class_set_shares: resname=%s, rcbs=%p rcbs->set_shares_values == %p returning error\n",
+		       resname, rcbs, rcbs == NULL ? NULL : rcbs->set_share_values);
 		return -EINVAL;
+	}
+
 	rc = (*rcbs->set_share_values) (core->res_class[rcbs->resid], shares);
 	return rc;
 }
