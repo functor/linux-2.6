@@ -422,7 +422,7 @@ static struct rbce_class *create_rbce_class(const char *classname,
 	return cls;
 }
 
-static struct rbce_class *get_class(const char *classname, int *classtype)
+static struct rbce_class *get_class(char *classname, int *classtype)
 {
 	struct rbce_class *cls;
 	void *classobj;

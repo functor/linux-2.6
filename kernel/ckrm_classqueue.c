@@ -27,19 +27,14 @@
 #include <linux/ckrm_classqueue.h>
 
 #define cq_nr_member(cq) (cq->array.nr_active)
-#define CLASSQUEUE_MASK   (CLASSQUEUE_SIZE - 1)  
 
 /**
- * get_node_index - 
- *      translate the logical priority to the real index in the queue
+ * get_index - translate the logical priority to the real index in the queue
  * 
  * validate the position
  * a valid prio is [cq->base,cq->base + size -1]
- * check whether node is supposed to be enqeued beyond above window and 
- * if so set the need_repos flag 
  */
-static inline unsigned long get_node_index(struct classqueue_struct *cq, 
-					   cq_node_t * node)
+static inline unsigned long get_index(struct classqueue_struct *cq, int *prio)
 {
 	unsigned long index;
 	int max_prio;
@@ -48,24 +43,22 @@ static inline unsigned long get_node_index(struct classqueue_struct *cq,
 		return 0;
 
 	max_prio = cq->base + (CLASSQUEUE_SIZE - 1);
-	if (unlikely(node->prio > max_prio)) {
-		node->real_prio = node->prio;
-		node->prio = max_prio;
-		node->need_repos = 1;
-	} else
-		node->need_repos = 0;
+	if (*prio > max_prio)
+		*prio = max_prio;
+	if (*prio < cq->base)
+		*prio = cq->base;
 
-	if (unlikely(node->prio < cq->base))
-		node->prio = cq->base;
+       	index = (cq->base_offset + (*prio - cq->base)) ;
+	if (index >= CLASSQUEUE_SIZE)
+		index -= CLASSQUEUE_SIZE;
 
-       	index = (cq->base_offset + (node->prio - cq->base)) ;
-	return ( index & CLASSQUEUE_MASK );   // ensure its in limits
+	return index;
 }
 
 /**
  * initialize a class queue object
  */
-int classqueue_init(struct classqueue_struct *cq, int enabled)
+int classqueue_init(struct classqueue_struct *cq)
 {
 	int i;
 	struct cq_prio_array *array;
@@ -80,8 +73,7 @@ int classqueue_init(struct classqueue_struct *cq, int enabled)
 	array->nr_active = 0;
 
 	cq->base = 0;
-	cq->base_offset = 0;
-	cq->enabled = enabled;
+	cq->base_offset = -1;	//not valid yet
 
 	return 0;
 }
@@ -96,7 +88,7 @@ void classqueue_enqueue(struct classqueue_struct *cq,
 
 	//get real index
 	if (cq_nr_member(cq)) {		
-		index = get_node_index(cq, node);
+		index = get_index(cq, &prio);
 	} else {		//the first one
 		cq->base = prio;
 		cq->base_offset = 0;
@@ -131,8 +123,8 @@ void classqueue_update_prio(struct classqueue_struct *cq,
 	if (! cls_in_classqueue(node)) 
 		return;
 
+	index = get_index(cq, &new_pos);
 	node->prio = new_pos;
-	index = get_node_index(cq, node);
 
 	//remove from the original position
 	list_del_init(&(node->list));
@@ -145,32 +137,10 @@ void classqueue_update_prio(struct classqueue_struct *cq,
 	node->index = index;
 }
 
-
-static inline void __classqueue_update_base(struct classqueue_struct *cq, 
-					    int new_base)
-{
-	int max_prio; 
-	if (unlikely(new_base <= cq->base)) // base will never move back
-		return; 
-	if (unlikely(!cq_nr_member(cq))) {  
-		cq->base_offset = 0;
-		cq->base = new_base;        // is this necessary ??
-		return;
-	}
-	    
-	max_prio = cq->base + (CLASSQUEUE_SIZE - 1);
-	if (unlikely(new_base > max_prio))
-		new_base = max_prio;
-
-       	cq->base_offset = (cq->base_offset + (new_base - cq->base)) & CLASSQUEUE_MASK; 
-	cq->base = new_base;
-}
- 
 /**
  *classqueue_get_min_prio: return the priority of the last node in queue
  *
  * this function can be called without runqueue lock held
- * return 0 if there's nothing in the queue
  */
 static inline int classqueue_get_min_prio(struct classqueue_struct *cq)
 {
@@ -201,13 +171,9 @@ static inline int classqueue_get_min_prio(struct classqueue_struct *cq)
  */
 cq_node_t *classqueue_get_head(struct classqueue_struct *cq)
 {
-	cq_node_t *node;
+	cq_node_t *result = NULL;
 	int pos;
-	int index;
-	int new_base;
 
-search_again:
-	node = NULL;
 	/* 
 	 * search over the bitmap to get the first class in the queue
 	 */
@@ -217,38 +183,10 @@ search_again:
 		pos = find_first_bit(cq->array.bitmap, CLASSQUEUE_SIZE);
 
 	if (pos < CLASSQUEUE_SIZE) {
-		//BUG_ON(list_empty(&cq->array.queue[pos]));
- 		node = list_entry(cq->array.queue[pos].next, cq_node_t, list);
+		BUG_ON(list_empty(&cq->array.queue[pos]));
+		result = list_entry(cq->array.queue[pos].next, cq_node_t, list);
 	}
-
-	//check if the node need to be repositioned
-	if (likely(! node || ! node->need_repos)) 
-		return node;
-
-	// We need to reposition this node in the class queue
-	// BUG_ON(node->prio == node->real_prio);
-	
-	//remove from the original position
-	list_del_init(&(node->list));
-	if (list_empty(&cq->array.queue[node->index]))
-	  __clear_bit(node->index, cq->array.bitmap);
-	
-	new_base = classqueue_get_min_prio(cq);
-	node->prio = node->real_prio;
-	
-	if (! new_base)
-		new_base  = node->real_prio;
-	else if (node->real_prio < new_base)
-		new_base  = node->real_prio;
-	__classqueue_update_base(cq,new_base);
-	
-	index = get_node_index(cq, node);		
-	//add to new positon, round robin for classes with same priority
-	list_add_tail(&(node->list), &cq->array.queue[index]);
-	__set_bit(index, cq->array.bitmap);	
-	node->index = index;
-	
-	goto search_again;		
+	return result;
 }
 
 /**
@@ -260,11 +198,14 @@ void classqueue_update_base(struct classqueue_struct *cq)
 	int new_base;
 	
 	if (! cq_nr_member(cq)) {
-		cq->base = 0;
-		cq->base_offset = 0;
+		cq->base_offset = -1;	//not defined
 		return;
 	}
 
 	new_base = classqueue_get_min_prio(cq);
-       	__classqueue_update_base(cq,new_base);
+	
+	if (new_base > cq->base) {
+		cq->base_offset = get_index(cq, &new_base);
+		cq->base = new_base;
+	}
 }
