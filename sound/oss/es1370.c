@@ -1037,7 +1037,7 @@ static int es1370_open_mixdev(struct inode *inode, struct file *file)
 	}
        	VALIDATE_STATE(s);
 	file->private_data = s;
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int es1370_release_mixdev(struct inode *inode, struct file *file)
@@ -1147,6 +1147,8 @@ static ssize_t es1370_read(struct file *file, char __user *buffer, size_t count,
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (s->dma_adc.mapped)
 		return -ENXIO;
 	if (!access_ok(VERIFY_WRITE, buffer, count))
@@ -1223,6 +1225,8 @@ static ssize_t es1370_write(struct file *file, const char __user *buffer, size_t
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (s->dma_dac2.mapped)
 		return -ENXIO;
 	if (!access_ok(VERIFY_READ, buffer, count))
@@ -1785,7 +1789,7 @@ static int es1370_open(struct inode *inode, struct file *file)
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
 	up(&s->open_sem);
 	init_MUTEX(&s->sem);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int es1370_release(struct inode *inode, struct file *file)
@@ -1837,6 +1841,8 @@ static ssize_t es1370_write_dac(struct file *file, const char __user *buffer, si
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (s->dma_dac1.mapped)
 		return -ENXIO;
 	if (!s->dma_dac1.ready && (ret = prog_dmabuf_dac1(s)))
@@ -2216,7 +2222,7 @@ static int es1370_open_dac(struct inode *inode, struct file *file)
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= FMODE_DAC;
 	up(&s->open_sem);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int es1370_release_dac(struct inode *inode, struct file *file)
@@ -2259,6 +2265,8 @@ static ssize_t es1370_midi_read(struct file *file, char __user *buffer, size_t c
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (!access_ok(VERIFY_WRITE, buffer, count))
 		return -EFAULT;
 	if (count == 0)
@@ -2320,6 +2328,8 @@ static ssize_t es1370_midi_write(struct file *file, const char __user *buffer, s
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (!access_ok(VERIFY_READ, buffer, count))
 		return -EFAULT;
 	if (count == 0)
@@ -2454,7 +2464,7 @@ static int es1370_midi_open(struct inode *inode, struct file *file)
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= (file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ | FMODE_MIDI_WRITE);
 	up(&s->open_sem);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int es1370_midi_release(struct inode *inode, struct file *file)

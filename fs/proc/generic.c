@@ -17,7 +17,6 @@
 #include <linux/smp_lock.h>
 #include <linux/init.h>
 #include <linux/idr.h>
-#include <linux/namei.h>
 #include <linux/vs_base.h>
 #include <linux/vserver/inode.h>
 #include <asm/uaccess.h>
@@ -233,21 +232,14 @@ out:
 static int proc_notify_change(struct dentry *dentry, struct iattr *iattr)
 {
 	struct inode *inode = dentry->d_inode;
-	struct proc_dir_entry *de = PDE(inode);
-	int error;
+	int error = inode_setattr(inode, iattr);
+	if (!error) {
+		struct proc_dir_entry *de = PDE(inode);
+		de->uid = inode->i_uid;
+		de->gid = inode->i_gid;
+		de->mode = inode->i_mode;
+	}
 
-	error = inode_change_ok(inode, iattr);
-	if (error)
-		goto out;
-
-	error = inode_setattr(inode, iattr);
-	if (error)
-		goto out;
-	
-	de->uid = inode->i_uid;
-	de->gid = inode->i_gid;
-	de->mode = inode->i_mode;
-out:
 	return error;
 }
 
@@ -388,7 +380,6 @@ struct dentry *proc_lookup(struct inode * dir, struct dentry *dentry, struct nam
 
 				error = -EINVAL;
 				inode = proc_get_inode(dir->i_sb, ino, de);
-				inode->i_xid = vx_current_xid();
 				break;
 			}
 		}

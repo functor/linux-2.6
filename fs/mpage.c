@@ -404,7 +404,6 @@ mpage_writepage(struct bio *bio, struct page *page, get_block_t get_block,
 	struct block_device *boundary_bdev = NULL;
 	int length;
 	struct buffer_head map_bh;
-	loff_t i_size = i_size_read(inode);
 
 	if (page_has_buffers(page)) {
 		struct buffer_head *head = page_buffers(page);
@@ -461,7 +460,7 @@ mpage_writepage(struct bio *bio, struct page *page, get_block_t get_block,
 	 */
 	BUG_ON(!PageUptodate(page));
 	block_in_file = page->index << (PAGE_CACHE_SHIFT - blkbits);
-	last_block = (i_size - 1) >> blkbits;
+	last_block = (i_size_read(inode) - 1) >> blkbits;
 	map_bh.b_page = page;
 	for (page_block = 0; page_block < blocks_per_page; ) {
 
@@ -490,18 +489,9 @@ mpage_writepage(struct bio *bio, struct page *page, get_block_t get_block,
 
 	first_unmapped = page_block;
 
-page_is_mapped:
-	end_index = i_size >> PAGE_CACHE_SHIFT;
+	end_index = i_size_read(inode) >> PAGE_CACHE_SHIFT;
 	if (page->index >= end_index) {
-		/*
-		 * The page straddles i_size.  It must be zeroed out on each
-		 * and every writepage invokation because it may be mmapped.
-		 * "A file is mapped in multiples of the page size.  For a file
-		 * that is not a multiple of the page size, the remaining memory
-		 * is zeroed when mapped, and writes to that region are not
-		 * written out to the file."
-		 */
-		unsigned offset = i_size & (PAGE_CACHE_SIZE - 1);
+		unsigned offset = i_size_read(inode) & (PAGE_CACHE_SIZE - 1);
 		char *kaddr;
 
 		if (page->index > end_index || !offset)
@@ -511,6 +501,8 @@ page_is_mapped:
 		flush_dcache_page(page);
 		kunmap_atomic(kaddr, KM_USER0);
 	}
+
+page_is_mapped:
 
 	/*
 	 * This page will go to BIO.  Do we need to send this BIO off first?
@@ -524,17 +516,6 @@ alloc_new:
 				bio_get_nr_vecs(bdev), GFP_NOFS|__GFP_HIGH);
 		if (bio == NULL)
 			goto confused;
-	}
-
-	/*
-	 * Must try to add the page before marking the buffer clean or
-	 * the confused fail path above (OOM) will be very confused when
-	 * it finds all bh marked clean (i.e. it will not write anything)
-	 */
-	length = first_unmapped << blkbits;
-	if (bio_add_page(bio, page, length, 0) < length) {
-		bio = mpage_bio_submit(WRITE, bio);
-		goto alloc_new;
 	}
 
 	/*
@@ -553,13 +534,14 @@ alloc_new:
 			bh = bh->b_this_page;
 		} while (bh != head);
 
-		/*
-		 * we cannot drop the bh if the page is not uptodate
-		 * or a concurrent readpage would fail to serialize with the bh
-		 * and it would read from disk before we reach the platter.
-		 */
-		if (buffer_heads_over_limit && PageUptodate(page))
+		if (buffer_heads_over_limit)
 			try_to_free_buffers(page);
+	}
+
+	length = first_unmapped << blkbits;
+	if (bio_add_page(bio, page, length, 0) < length) {
+		bio = mpage_bio_submit(WRITE, bio);
+		goto alloc_new;
 	}
 
 	BUG_ON(PageWriteback(page));

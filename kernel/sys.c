@@ -24,9 +24,9 @@
 #include <linux/security.h>
 #include <linux/dcookies.h>
 #include <linux/suspend.h>
-#include <linux/ckrm.h>
 #include <linux/vs_base.h>
 #include <linux/vs_cvirt.h>
+#include <linux/ckrm.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -1539,7 +1539,7 @@ asmlinkage long sys_setrlimit(unsigned int resource, struct rlimit __user *rlim)
 	old_rlim = current->rlim + resource;
 	if (((new_rlim.rlim_cur > old_rlim->rlim_max) ||
 	     (new_rlim.rlim_max > old_rlim->rlim_max)) &&
-	    !capable(CAP_SYS_RESOURCE) && !vx_ccaps(VXC_SET_RLIMIT))
+	    !capable(CAP_SYS_RESOURCE) && vx_ccaps(VXC_SET_RLIMIT))
 		return -EPERM;
 	if (resource == RLIMIT_NOFILE) {
 		if (new_rlim.rlim_cur > NR_OPEN || new_rlim.rlim_max > NR_OPEN)

@@ -395,7 +395,7 @@ file->f_mapping = file->f_dentry->d_inode->i_mapping;
 		BUG();
 	sock->file = file;
 	file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
-	file->f_mode = FMODE_READ | FMODE_WRITE;
+	file->f_mode = 3;
 	file->f_flags = O_RDWR;
 	file->f_pos = 0;
 
@@ -563,47 +563,27 @@ static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 		else
 			vx_sock_fail(sock->sk, size);
 	}
-	vxdprintk(VXD_CBIT(net, 7),
-		"__sock_sendmsg: %p[%p,%p,%p;%d]:%d/%d",
+	vxdprintk("__sock_sendmsg: %p[%p,%p,%p;%d]:%d/%d\n",
 		sock, sock->sk,
 		(sock->sk)?sock->sk->sk_nx_info:0,
 		(sock->sk)?sock->sk->sk_vx_info:0,
 		(sock->sk)?sock->sk->sk_xid:0,
-		(unsigned int)size, len);
+		size, len);
 	return len;
 }
 
 int sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 {
 	struct kiocb iocb;
-	struct sock_iocb siocb;
 	int ret;
 
 	init_sync_kiocb(&iocb, NULL);
-	iocb.private = &siocb;
 	ret = __sock_sendmsg(&iocb, sock, msg, size);
 	if (-EIOCBQUEUED == ret)
 		ret = wait_on_sync_kiocb(&iocb);
 	return ret;
 }
 
-int kernel_sendmsg(struct socket *sock, struct msghdr *msg,
-		   struct kvec *vec, size_t num, size_t size)
-{
-	mm_segment_t oldfs = get_fs();
-	int result;
-
-	set_fs(KERNEL_DS);
-	/*
-	 * the following is safe, since for compiler definitions of kvec and
-	 * iovec are identical, yielding the same in-core layout and alignment
-	 */
-	msg->msg_iov = (struct iovec *)vec,
-	msg->msg_iovlen = num;
-	result = sock_sendmsg(sock, msg, size);
-	set_fs(oldfs);
-	return result;
-}
 
 static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock, 
 				 struct msghdr *msg, size_t size, int flags)
@@ -624,13 +604,12 @@ static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 	len = sock->ops->recvmsg(iocb, sock, msg, size, flags);
 	if ((len >= 0) && sock->sk)
 		vx_sock_recv(sock->sk, len);
-	vxdprintk(VXD_CBIT(net, 7),
-		"__sock_recvmsg: %p[%p,%p,%p;%d]:%d/%d",
+	vxdprintk("__sock_recvmsg: %p[%p,%p,%p;%d]:%d/%d\n",
 		sock, sock->sk,
 		(sock->sk)?sock->sk->sk_nx_info:0,
 		(sock->sk)?sock->sk->sk_vx_info:0,
 		(sock->sk)?sock->sk->sk_xid:0,
-		(unsigned int)size, len);
+		size, len);
 	return len;
 }
 
@@ -638,39 +617,13 @@ int sock_recvmsg(struct socket *sock, struct msghdr *msg,
 		 size_t size, int flags)
 {
 	struct kiocb iocb;
-	struct sock_iocb siocb;
 	int ret;
 
         init_sync_kiocb(&iocb, NULL);
-	iocb.private = &siocb;
 	ret = __sock_recvmsg(&iocb, sock, msg, size, flags);
 	if (-EIOCBQUEUED == ret)
 		ret = wait_on_sync_kiocb(&iocb);
 	return ret;
-}
-
-int kernel_recvmsg(struct socket *sock, struct msghdr *msg, 
-		   struct kvec *vec, size_t num,
-		   size_t size, int flags)
-{
-	mm_segment_t oldfs = get_fs();
-	int result;
-
-	set_fs(KERNEL_DS);
-	/*
-	 * the following is safe, since for compiler definitions of kvec and
-	 * iovec are identical, yielding the same in-core layout and alignment
-	 */
-	msg->msg_iov = (struct iovec *)vec,
-	msg->msg_iovlen = num;
-	result = sock_recvmsg(sock, msg, size, flags);
-	set_fs(oldfs);
-	return result;
-}
-
-static void sock_aio_dtor(struct kiocb *iocb)
-{
-	kfree(iocb->private);
 }
 
 /*
@@ -681,7 +634,7 @@ static void sock_aio_dtor(struct kiocb *iocb)
 static ssize_t sock_aio_read(struct kiocb *iocb, char __user *ubuf,
 			 size_t size, loff_t pos)
 {
-	struct sock_iocb *x, siocb;
+	struct sock_iocb *x = kiocb_to_siocb(iocb);
 	struct socket *sock;
 	int flags;
 
@@ -690,16 +643,6 @@ static ssize_t sock_aio_read(struct kiocb *iocb, char __user *ubuf,
 	if (size==0)		/* Match SYS5 behaviour */
 		return 0;
 
-	if (is_sync_kiocb(iocb))
-		x = &siocb;
-	else {
-		x = kmalloc(sizeof(struct sock_iocb), GFP_KERNEL);
-		if (!x)
-			return -ENOMEM;
-		iocb->ki_dtor = sock_aio_dtor;
-	}
-	iocb->private = x;
-	x->kiocb = iocb;
 	sock = SOCKET_I(iocb->ki_filp->f_dentry->d_inode); 
 
 	x->async_msg.msg_name = NULL;
@@ -724,7 +667,7 @@ static ssize_t sock_aio_read(struct kiocb *iocb, char __user *ubuf,
 static ssize_t sock_aio_write(struct kiocb *iocb, const char __user *ubuf,
 			  size_t size, loff_t pos)
 {
-	struct sock_iocb *x, siocb;
+	struct sock_iocb *x = kiocb_to_siocb(iocb);
 	struct socket *sock;
 	
 	if (pos != 0)
@@ -732,16 +675,6 @@ static ssize_t sock_aio_write(struct kiocb *iocb, const char __user *ubuf,
 	if(size==0)		/* Match SYS5 behaviour */
 		return 0;
 
-	if (is_sync_kiocb(iocb))
-		x = &siocb;
-	else {
-		x = kmalloc(sizeof(struct sock_iocb), GFP_KERNEL);
-		if (!x)
-			return -ENOMEM;
-		iocb->ki_dtor = sock_aio_dtor;
-	}
-	iocb->private = x;
-	x->kiocb = iocb;
 	sock = SOCKET_I(iocb->ki_filp->f_dentry->d_inode); 
 
 	x->async_msg.msg_name = NULL;
@@ -764,6 +697,9 @@ ssize_t sock_sendpage(struct file *file, struct page *page,
 {
 	struct socket *sock;
 	int flags;
+
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 
 	sock = SOCKET_I(file->f_dentry->d_inode);
 
@@ -2194,5 +2130,3 @@ EXPORT_SYMBOL(sock_sendmsg);
 EXPORT_SYMBOL(sock_unregister);
 EXPORT_SYMBOL(sock_wake_async);
 EXPORT_SYMBOL(sockfd_lookup);
-EXPORT_SYMBOL(kernel_sendmsg);
-EXPORT_SYMBOL(kernel_recvmsg);

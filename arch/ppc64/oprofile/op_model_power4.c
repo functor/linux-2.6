@@ -42,7 +42,7 @@ static void power4_reg_setup(struct op_counter_config *ctr,
 	 *
 	 * It has been verified to work on POWER5 so we enable it there.
 	 */
-	if (cur_cpu_spec->cpu_features & CPU_FTR_MMCRA_SIHV)
+	if (!(__is_processor(PV_POWER4) || __is_processor(PV_POWER4p)))
 		mmcra_has_sihv = 1;
 
 	for (i = 0; i < num_counters; ++i)

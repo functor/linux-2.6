@@ -16,8 +16,6 @@
 #include <linux/quotaops.h>
 #include <linux/sched.h>
 #include <linux/buffer_head.h>
-#include <linux/vs_base.h>
-#include <linux/vs_dlimit.h>
 
 /*
  * balloc.c contains the blocks allocation and deallocation routines
@@ -109,8 +107,6 @@ static int reserve_blocks(struct super_block *sb, int count)
 
 	free_blocks = percpu_counter_read_positive(&sbi->s_freeblocks_counter);
 	root_blocks = le32_to_cpu(es->s_r_blocks_count);
-
-	DLIMIT_ADJUST_BLOCK(sb, vx_current_xid(), &free_blocks, &root_blocks);
 
 	if (free_blocks < count)
 		count = free_blocks;
@@ -262,7 +258,6 @@ do_more:
 	}
 error_return:
 	brelse(bitmap_bh);
-	DLIMIT_FREE_BLOCK(sb, inode->i_xid, freed);
 	release_blocks(sb, freed);
 	DQUOT_FREE_BLOCK(inode, freed);
 }
@@ -365,10 +360,6 @@ int ext2_new_block(struct inode *inode, unsigned long goal,
 	if (!es_alloc) {
 		*err = -ENOSPC;
 		goto out_dquot;
-	}
-	if (DLIMIT_ALLOC_BLOCK(sb, inode->i_xid, es_alloc)) {
-		*err = -ENOSPC;
-		goto out_dlimit;
 	}
 
 	ext2_debug ("goal=%lu.\n", goal);
@@ -517,8 +508,6 @@ got_block:
 	*err = 0;
 out_release:
 	group_release_blocks(sb, group_no, desc, gdp_bh, group_alloc);
-	DLIMIT_FREE_BLOCK(sb, inode->i_xid, es_alloc);
-out_dlimit:
 	release_blocks(sb, es_alloc);
 out_dquot:
 	DQUOT_FREE_BLOCK(inode, dq_alloc);

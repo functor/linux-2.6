@@ -2,8 +2,6 @@
 # Kernel configuration targets
 # These targets are used from top-level makefile
 
-export LD_LIBRARY_PATH = scripts/kconfig
-
 .PHONY: oldconfig xconfig gconfig menuconfig config silentoldconfig
 
 xconfig: $(obj)/qconf

@@ -94,7 +94,7 @@ void hcd_buffer_destroy (struct usb_hcd *hcd)
 		struct dma_pool		*pool = hcd->pool [i];
 		if (pool) {
 			dma_pool_destroy (pool);
-			hcd->pool[i] = NULL;
+			hcd->pool [i] = 0;
 		}
 	}
 }

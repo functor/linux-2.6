@@ -203,7 +203,7 @@ static int timer_dev_id;
 static struct irqaction timer_irqaction = {
 	timer_interrupt,
 	SA_INTERRUPT,
-	CPU_MASK_NONE,
+	0,
 	"timer",
 	&timer_dev_id,
 	NULL

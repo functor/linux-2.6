@@ -51,12 +51,9 @@
 #include <net/transp_v6.h>
 #include <net/addrconf.h>
 #include <net/ip6_route.h>
-#include <net/ip6_checksum.h>
 #include <net/inet_ecn.h>
 #include <net/protocol.h>
 #include <net/xfrm.h>
-#include <net/addrconf.h>
-#include <net/snmp.h>
 
 #include <asm/uaccess.h>
 
@@ -497,7 +494,7 @@ unique:
 		/* Silly. Should hash-dance instead... */
 		local_bh_disable();
 		tcp_tw_deschedule(tw);
-		NET_INC_STATS_BH(LINUX_MIB_TIMEWAITRECYCLED);
+		NET_INC_STATS_BH(TimeWaitRecycled);
 		local_bh_enable();
 
 		tcp_tw_put(tw);
@@ -736,7 +733,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	sk = tcp_v6_lookup(&hdr->daddr, th->dest, &hdr->saddr, th->source, skb->dev->ifindex);
 
 	if (sk == NULL) {
-		ICMP6_INC_STATS_BH(__in6_dev_get(skb->dev), ICMP6_MIB_INERRORS);
+		ICMP6_INC_STATS_BH(__in6_dev_get(skb->dev), Icmp6InErrors);
 		return;
 	}
 
@@ -747,7 +744,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk))
-		NET_INC_STATS_BH(LINUX_MIB_LOCKDROPPEDICMPS);
+		NET_INC_STATS_BH(LockDroppedIcmps);
 
 	if (sk->sk_state == TCP_CLOSE)
 		goto out;
@@ -756,7 +753,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	seq = ntohl(th->seq); 
 	if (sk->sk_state != TCP_LISTEN &&
 	    !between(seq, tp->snd_una, tp->snd_nxt)) {
-		NET_INC_STATS_BH(LINUX_MIB_OUTOFWINDOWICMPS);
+		NET_INC_STATS_BH(OutOfWindowIcmps);
 		goto out;
 	}
 
@@ -824,7 +821,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 		BUG_TRAP(req->sk == NULL);
 
 		if (seq != req->snt_isn) {
-			NET_INC_STATS_BH(LINUX_MIB_OUTOFWINDOWICMPS);
+			NET_INC_STATS_BH(OutOfWindowIcmps);
 			goto out;
 		}
 
@@ -835,7 +832,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	case TCP_SYN_RECV:  /* Cannot happen.
 			       It can, it SYNs are crossed. --ANK */ 
 		if (!sock_owned_by_user(sk)) {
-			TCP_INC_STATS_BH(TCP_MIB_ATTEMPTFAILS);
+			TCP_INC_STATS_BH(TcpAttemptFails);
 			sk->sk_err = err;
 			sk->sk_error_report(sk);		/* Wake people up to see the error (see connect in sock.c) */
 
@@ -1022,8 +1019,8 @@ static void tcp_v6_send_reset(struct sk_buff *skb)
 	/* sk = NULL, but it is safe for now. RST socket required. */
 	if (!ip6_dst_lookup(NULL, &buff->dst, &fl)) {
 		ip6_xmit(NULL, buff, &fl, NULL, 0);
-		TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
-		TCP_INC_STATS_BH(TCP_MIB_OUTRSTS);
+		TCP_INC_STATS_BH(TcpOutSegs);
+		TCP_INC_STATS_BH(TcpOutRsts);
 		return;
 	}
 
@@ -1083,7 +1080,7 @@ static void tcp_v6_send_ack(struct sk_buff *skb, u32 seq, u32 ack, u32 win, u32 
 
 	if (!ip6_dst_lookup(NULL, &buff->dst, &fl)) {
 		ip6_xmit(NULL, buff, &fl, NULL, 0);
-		TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
+		TCP_INC_STATS_BH(TcpOutSegs);
 		return;
 	}
 
@@ -1200,14 +1197,21 @@ static int tcp_v6_conn_request(struct sock *sk, struct sk_buff *skb)
 	 * Accept only if the class has shares set or if the default class
 	 * i.e. class 0 has shares
 	 */
-        if (!(tcp_sk(sk)->acceptq[class].aq_ratio)) {
-		if (tcp_sk(sk)->acceptq[0].aq_ratio) 
+        if (!(tcp_sk(sk)->acceptq[class].aq_valid)) {
+		if (tcp_sk(sk)->acceptq[0].aq_valid) 
 			class = 0; 
 		else 
 			goto drop;
 	}
+#endif
 
-	if (sk_acceptq_is_full(sk, class) && tcp_synq_young(sk, class) > 1)
+        /* Accept backlog is full. If we have already queued enough
+	 * of warm entries in syn queue, drop request. It is better than
+	 * clogging syn queue with openreqs with exponentially increasing
+	 * timeout.
+	 */
+#ifdef CONFIG_ACCEPT_QUEUES
+	 if (tcp_acceptq_is_full(sk, class) && tcp_synq_young(sk, class) > 1)
 #else
 	if (sk_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
 #endif
@@ -1264,7 +1268,7 @@ drop:
 	if (req)
 		tcp_openreq_free(req);
 
-	TCP_INC_STATS_BH(TCP_MIB_ATTEMPTFAILS);
+	TCP_INC_STATS_BH(TcpAttemptFails);
 	return 0; /* don't send reset */
 }
 
@@ -1332,7 +1336,7 @@ static struct sock * tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	opt = np->opt;
 
 #ifdef CONFIG_ACCEPT_QUEUES
-	if (sk_acceptq_is_full(sk, req->acceptq_class))
+	if (tcp_acceptq_is_full(sk, req->acceptq_class))
 #else
 	if (sk_acceptq_is_full(sk))
 #endif
@@ -1444,9 +1448,9 @@ static struct sock * tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	return newsk;
 
 out_overflow:
-	NET_INC_STATS_BH(LINUX_MIB_LISTENOVERFLOWS);
+	NET_INC_STATS_BH(ListenOverflows);
 out:
-	NET_INC_STATS_BH(LINUX_MIB_LISTENDROPS);
+	NET_INC_STATS_BH(ListenDrops);
 	if (opt && opt != np->opt)
 		sock_kfree_s(sk, opt, opt->tot_len);
 	dst_release(dst);
@@ -1571,7 +1575,7 @@ discard:
 	kfree_skb(skb);
 	return 0;
 csum_err:
-	TCP_INC_STATS_BH(TCP_MIB_INERRS);
+	TCP_INC_STATS_BH(TcpInErrs);
 	goto discard;
 
 
@@ -1617,7 +1621,7 @@ static int tcp_v6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 	/*
 	 *	Count it even if it's bad.
 	 */
-	TCP_INC_STATS_BH(TCP_MIB_INSEGS);
+	TCP_INC_STATS_BH(TcpInSegs);
 
 	if (!pskb_may_pull(skb, sizeof(struct tcphdr)))
 		goto discard_it;
@@ -1678,7 +1682,7 @@ no_tcp_socket:
 
 	if (skb->len < (th->doff<<2) || tcp_checksum_complete(skb)) {
 bad_packet:
-		TCP_INC_STATS_BH(TCP_MIB_INERRS);
+		TCP_INC_STATS_BH(TcpInErrs);
 	} else {
 		tcp_v6_send_reset(skb);
 	}
@@ -1703,7 +1707,7 @@ do_time_wait:
 	}
 
 	if (skb->len < (th->doff<<2) || tcp_checksum_complete(skb)) {
-		TCP_INC_STATS_BH(TCP_MIB_INERRS);
+		TCP_INC_STATS_BH(TcpInErrs);
 		tcp_tw_put((struct tcp_tw_bucket *) sk);
 		goto discard_it;
 	}
@@ -1927,9 +1931,30 @@ static int tcp_v6_init_sock(struct sock *sk)
 
 static int tcp_v6_destroy_sock(struct sock *sk)
 {
-	extern int tcp_v4_destroy_sock(struct sock *sk);
+	struct tcp_opt *tp = tcp_sk(sk);
+	struct inet_opt *inet = inet_sk(sk);
 
-	tcp_v4_destroy_sock(sk);
+	tcp_clear_xmit_timers(sk);
+
+	/* Cleanup up the write buffer. */
+  	tcp_writequeue_purge(sk);
+
+	/* Cleans up our, hopefully empty, out_of_order_queue. */
+  	__skb_queue_purge(&tp->out_of_order_queue);
+
+	/* Clean prequeue, it must be empty really */
+	__skb_queue_purge(&tp->ucopy.prequeue);
+
+	/* Clean up a referenced TCP bind bucket. */
+	if (tcp_sk(sk)->bind_hash)
+		tcp_put_port(sk);
+
+	/* If sendmsg cached page exists, toss it. */
+	if (inet->sndmsg_page != NULL)
+		__free_page(inet->sndmsg_page);
+
+	atomic_dec(&tcp_sockets_allocated);
+
 	return inet6_destroy_sock(sk);
 }
 
@@ -2050,12 +2075,12 @@ static int tcp6_seq_show(struct seq_file *seq, void *v)
 	struct tcp_iter_state *st;
 
 	if (v == SEQ_START_TOKEN) {
-		seq_puts(seq,
-			 "  sl  "
-			 "local_address                         "
-			 "remote_address                        "
-			 "st tx_queue rx_queue tr tm->when retrnsmt"
-			 "   uid  timeout inode\n");
+		seq_printf(seq,
+			   "  sl  "
+			   "local_address                         "
+			   "remote_address                        "
+			   "st tx_queue rx_queue tr tm->when retrnsmt"
+			   "   uid  timeout inode\n");
 		goto out;
 	}
 	st = seq->private;
@@ -2097,31 +2122,23 @@ void tcp6_proc_exit(void)
 #endif
 
 struct proto tcpv6_prot = {
-	.name			= "TCPv6",
-	.close			= tcp_close,
-	.connect		= tcp_v6_connect,
-	.disconnect		= tcp_disconnect,
-	.accept			= tcp_accept,
-	.ioctl			= tcp_ioctl,
-	.init			= tcp_v6_init_sock,
-	.destroy		= tcp_v6_destroy_sock,
-	.shutdown		= tcp_shutdown,
-	.setsockopt		= tcp_setsockopt,
-	.getsockopt		= tcp_getsockopt,
-	.sendmsg		= tcp_sendmsg,
-	.recvmsg		= tcp_recvmsg,
-	.backlog_rcv		= tcp_v6_do_rcv,
-	.hash			= tcp_v6_hash,
-	.unhash			= tcp_unhash,
-	.get_port		= tcp_v6_get_port,
-	.enter_memory_pressure	= tcp_enter_memory_pressure,
-	.sockets_allocated	= &tcp_sockets_allocated,
-	.memory_allocated	= &tcp_memory_allocated,
-	.memory_pressure	= &tcp_memory_pressure,
-	.sysctl_mem		= sysctl_tcp_mem,
-	.sysctl_wmem		= sysctl_tcp_wmem,
-	.sysctl_rmem		= sysctl_tcp_rmem,
-	.max_header		= MAX_TCP_HEADER,
+	.name		=	"TCPv6",
+	.close		=	tcp_close,
+	.connect	=	tcp_v6_connect,
+	.disconnect	=	tcp_disconnect,
+	.accept		=	tcp_accept,
+	.ioctl		=	tcp_ioctl,
+	.init		=	tcp_v6_init_sock,
+	.destroy	=	tcp_v6_destroy_sock,
+	.shutdown	=	tcp_shutdown,
+	.setsockopt	=	tcp_setsockopt,
+	.getsockopt	=	tcp_getsockopt,
+	.sendmsg	=	tcp_sendmsg,
+	.recvmsg	=	tcp_recvmsg,
+	.backlog_rcv	=	tcp_v6_do_rcv,
+	.hash		=	tcp_v6_hash,
+	.unhash		=	tcp_unhash,
+	.get_port	=	tcp_v6_get_port,
 };
 
 static struct inet6_protocol tcpv6_protocol = {

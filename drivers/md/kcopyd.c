@@ -24,6 +24,9 @@
 
 #include "kcopyd.h"
 
+/* FIXME: this is only needed for the DMERR macros */
+#include "dm.h"
+
 static struct workqueue_struct *_kcopyd_wq;
 static struct work_struct _kcopyd_work;
 
@@ -84,7 +87,7 @@ static int kcopyd_get_pages(struct kcopyd_client *kc,
 		;
 
 	kc->pages = pl->next;
-	pl->next = NULL;
+	pl->next = 0;
 
 	spin_unlock(&kc->lock);
 
@@ -573,11 +576,12 @@ int kcopyd_cancel(struct kcopyd_job *job, int block)
 static DECLARE_MUTEX(_client_lock);
 static LIST_HEAD(_clients);
 
-static void client_add(struct kcopyd_client *kc)
+static int client_add(struct kcopyd_client *kc)
 {
 	down(&_client_lock);
 	list_add(&kc->list, &_clients);
 	up(&_client_lock);
+	return 0;
 }
 
 static void client_del(struct kcopyd_client *kc)
@@ -667,7 +671,15 @@ int kcopyd_client_create(unsigned int nr_pages, struct kcopyd_client **result)
 		return r;
 	}
 
-	client_add(kc);
+	r = client_add(kc);
+	if (r) {
+		dm_io_put(nr_pages);
+		client_free_pages(kc);
+		kfree(kc);
+		kcopyd_exit();
+		return r;
+	}
+
 	*result = kc;
 	return 0;
 }

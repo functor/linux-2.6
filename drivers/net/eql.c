@@ -389,7 +389,7 @@ static inline int eql_is_full(slave_queue_t *queue)
 static int __eql_insert_slave(slave_queue_t *queue, slave_t *slave)
 {
 	if (!eql_is_full(queue)) {
-		slave_t *duplicate_slave = NULL;
+		slave_t *duplicate_slave = 0;
 
 		duplicate_slave = __eql_find_slave_dev(queue, slave->dev);
 		if (duplicate_slave != 0)
@@ -499,8 +499,6 @@ static int eql_g_slave_cfg(struct net_device *dev, slave_config_t __user *scp)
 		return -ENODEV;
 
 	ret = -EINVAL;
-	if (!slave_dev)
-		return ret;
 
 	spin_lock_bh(&eql->queue.lock);
 	if (eql_is_slave(slave_dev)) {
@@ -536,8 +534,6 @@ static int eql_s_slave_cfg(struct net_device *dev, slave_config_t __user *scp)
 		return -ENODEV;
 
 	ret = -EINVAL;
-	if (!slave_dev)
-		return ret;
 
 	eql = dev->priv;
 	spin_lock_bh(&eql->queue.lock);

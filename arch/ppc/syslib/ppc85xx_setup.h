@@ -18,6 +18,7 @@
 #define __PPC_SYSLIB_PPC85XX_SETUP_H
 
 #include <linux/config.h>
+#include <linux/serial.h>
 #include <linux/init.h>
 #include <asm/ppcboot.h>
 
@@ -52,9 +53,7 @@ extern void mpc85xx_setup_hose(void) __init;
 #define RS_TABLE_SIZE  2
 #endif
 
-#ifndef BASE_BAUD
-#define BASE_BAUD 115200
-#endif
+#define BASE_BAUD 0
 
 #define STD_UART_OP(num)					\
 	{ 0, BASE_BAUD, num, MPC85xx_IRQ_DUART,			\

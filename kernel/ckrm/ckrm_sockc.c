@@ -56,71 +56,70 @@ struct ckrm_sock_class {
 	struct ckrm_core_class core;
 };
 
-static struct ckrm_sock_class sockclass_dflt_class = {
+static struct ckrm_sock_class  sockclass_dflt_class = {
 };
 
-#define SOCKET_CLASS_TYPE_NAME  "socketclass"
+#define SOCKET_CLASS_TYPE_NAME  "socket_class"
 
 const char *dflt_sockclass_name = SOCKET_CLASS_TYPE_NAME;
 
-static struct ckrm_core_class *sock_alloc_class(struct ckrm_core_class *parent,
-						const char *name);
-static int sock_free_class(struct ckrm_core_class *core);
+static struct ckrm_core_class *sock_alloc_class(struct ckrm_core_class *parent, const char *name);
+static int  sock_free_class(struct ckrm_core_class *core);
 
-static int sock_forced_reclassify(ckrm_core_class_t * target,
-				  const char *resname);
-static int sock_show_members(struct ckrm_core_class *core,
-			     struct seq_file *seq);
+static int  sock_forced_reclassify(ckrm_core_class_t *target, const char *resname);
+static int  sock_show_members(struct ckrm_core_class *core, struct seq_file *seq);
 static void sock_add_resctrl(struct ckrm_core_class *core, int resid);
 static void sock_reclassify_class(struct ckrm_sock_class *cls);
 
 struct ckrm_classtype CT_sockclass = {
-	.mfidx = 1,
-	.name = SOCKET_CLASS_TYPE_NAME,
-	.typeID = CKRM_CLASSTYPE_SOCKET_CLASS,
-	.maxdepth = 3,
-	.resid_reserved = 0,
-	.max_res_ctlrs = CKRM_MAX_RES_CTLRS,
-	.max_resid = 0,
-	.bit_res_ctlrs = 0L,
+	.mfidx          = 1,
+	.name           = SOCKET_CLASS_TYPE_NAME,
+	.typeID         = CKRM_CLASSTYPE_SOCKET_CLASS, 
+	.maxdepth       = 3,                           
+	.resid_reserved = 0,                           
+	.max_res_ctlrs  = CKRM_MAX_RES_CTLRS,        
+	.max_resid      = 0,
+	.bit_res_ctlrs  = 0L,
 	.res_ctlrs_lock = SPIN_LOCK_UNLOCKED,
-	.classes = LIST_HEAD_INIT(CT_sockclass.classes),
+	.classes        = LIST_HEAD_INIT(CT_sockclass.classes),
 
-	.default_class = &sockclass_dflt_class.core,
-
+	.default_class  = &sockclass_dflt_class.core,
+	
 	// private version of functions 
-	.alloc = &sock_alloc_class,
-	.free = &sock_free_class,
-	.show_members = &sock_show_members,
+	.alloc          = &sock_alloc_class,
+	.free           = &sock_free_class,
+	.show_members   = &sock_show_members,
 	.forced_reclassify = &sock_forced_reclassify,
 
 	// use of default functions 
-	.show_shares = &ckrm_class_show_shares,
-	.show_stats = &ckrm_class_show_stats,
-	.show_config = &ckrm_class_show_config,
-	.set_config = &ckrm_class_set_config,
-	.set_shares = &ckrm_class_set_shares,
-	.reset_stats = &ckrm_class_reset_stats,
+	.show_shares    = &ckrm_class_show_shares,
+	.show_stats     = &ckrm_class_show_stats,
+	.show_config    = &ckrm_class_show_config,
+	.set_config     = &ckrm_class_set_config,
+	.set_shares     = &ckrm_class_set_shares,
+	.reset_stats    = &ckrm_class_reset_stats,
 
 	// mandatory private version .. no dflt available
-	.add_resctrl = &sock_add_resctrl,
+	.add_resctrl    = &sock_add_resctrl,	
 };
 
 /* helper functions */
 
-void ckrm_ns_hold(struct ckrm_net_struct *ns)
+void
+ckrm_ns_hold(struct ckrm_net_struct *ns)
 {
-	atomic_inc(&ns->ns_refcnt);
-	return;
+        atomic_inc(&ns->ns_refcnt);
+        return;
 }
 
-void ckrm_ns_put(struct ckrm_net_struct *ns)
+void
+ckrm_ns_put(struct ckrm_net_struct *ns)
 {
-	if (atomic_dec_and_test(&ns->ns_refcnt))
-		kfree(ns);
-	return;
-}
+        if (atomic_dec_and_test(&ns->ns_refcnt))
+                kfree(ns);
 
+        return;
+}
 /*
  * Change the class of a netstruct 
  *
@@ -131,12 +130,12 @@ void ckrm_ns_put(struct ckrm_net_struct *ns)
 
 static void
 sock_set_class(struct ckrm_net_struct *ns, struct ckrm_sock_class *newcls,
-	       struct ckrm_sock_class *oldcls, enum ckrm_event event)
+	      struct ckrm_sock_class *oldcls, enum ckrm_event event)
 {
 	int i;
 	struct ckrm_res_ctlr *rcbs;
 	struct ckrm_classtype *clstype;
-	void *old_res_class, *new_res_class;
+	void  *old_res_class, *new_res_class;
 
 	if ((newcls == oldcls) || (newcls == NULL)) {
 		ns->core = (void *)oldcls;
@@ -148,46 +147,43 @@ sock_set_class(struct ckrm_net_struct *ns, struct ckrm_sock_class *newcls,
 	list_add(&ns->ckrm_link, &class_core(newcls)->objlist);
 	class_unlock(class_core(newcls));
 
-	clstype = class_isa(newcls);
+	clstype = class_isa(newcls);                 
 	for (i = 0; i < clstype->max_resid; i++) {
 		atomic_inc(&clstype->nr_resusers[i]);
-		old_res_class =
-		    oldcls ? class_core(oldcls)->res_class[i] : NULL;
-		new_res_class =
-		    newcls ? class_core(newcls)->res_class[i] : NULL;
+		old_res_class = oldcls ? class_core(oldcls)->res_class[i] : NULL;
+		new_res_class = newcls ? class_core(newcls)->res_class[i] : NULL;
 		rcbs = clstype->res_ctlrs[i];
-		if (rcbs && rcbs->change_resclass
-		    && (old_res_class != new_res_class))
-			(*rcbs->change_resclass) (ns, old_res_class,
-						  new_res_class);
+		if (rcbs && rcbs->change_resclass && (old_res_class != new_res_class)) 
+			(*rcbs->change_resclass)(ns, old_res_class, new_res_class);
 		atomic_dec(&clstype->nr_resusers[i]);
 	}
 	return;
 }
 
-static void sock_add_resctrl(struct ckrm_core_class *core, int resid)
+static void
+sock_add_resctrl(struct ckrm_core_class *core, int resid)
 {
 	struct ckrm_net_struct *ns;
 	struct ckrm_res_ctlr *rcbs;
 
-	if ((resid < 0) || (resid >= CKRM_MAX_RES_CTLRS)
-	    || ((rcbs = core->classtype->res_ctlrs[resid]) == NULL))
+	if ((resid < 0) || (resid >= CKRM_MAX_RES_CTLRS) || ((rcbs = core->classtype->res_ctlrs[resid]) == NULL)) 
 		return;
 
 	class_lock(core);
 	list_for_each_entry(ns, &core->objlist, ckrm_link) {
 		if (rcbs->change_resclass)
-			(*rcbs->change_resclass) (ns, NULL,
-						  core->res_class[resid]);
+			(*rcbs->change_resclass)(ns, NULL, core->res_class[resid]);
 	}
 	class_unlock(core);
 }
+
 
 /**************************************************************************
  *                   Functions called from classification points          *
  **************************************************************************/
 
-static void cb_sockclass_listen_start(struct sock *sk)
+static void
+cb_sockclass_listen_start(struct sock *sk)
 {
 	struct ckrm_net_struct *ns = NULL;
 	struct ckrm_sock_class *newcls = NULL;
@@ -196,43 +192,43 @@ static void cb_sockclass_listen_start(struct sock *sk)
 	int i = 0;
 
 	// XXX - TBD ipv6
-	if (sk->sk_family == AF_INET6)
+	if (sk->sk_family == IPPROTO_IPV6)
 		return;
 
 	// to store the socket address
 	ns = (struct ckrm_net_struct *)
-	    kmalloc(sizeof(struct ckrm_net_struct), GFP_ATOMIC);
+		kmalloc(sizeof(struct ckrm_net_struct), GFP_ATOMIC);
 	if (!ns)
 		return;
 
-	memset(ns, 0, sizeof(*ns));
+	memset(ns,0, sizeof(ns));
 	INIT_LIST_HEAD(&ns->ckrm_link);
-	ckrm_ns_hold(ns);
 
 	ns->ns_family = sk->sk_family;
-	if (ns->ns_family == AF_INET6)	// IPv6 not supported yet.
+	if (ns->ns_family == IPPROTO_IPV6)	// IPv6 not supported yet.
 		return;
 
 	ns->ns_daddrv4 = inet_sk(sk)->rcv_saddr;
 	ns->ns_dport = inet_sk(sk)->num;
-
+		
 	ns->ns_pid = current->pid;
 	ns->ns_tgid = current->tgid;
-	ns->ns_tsk = current;
+
 	ce_protect(&CT_sockclass);
-	CE_CLASSIFY_RET(newcls, &CT_sockclass, CKRM_EVENT_LISTEN_START, ns,
-			current);
+	CE_CLASSIFY_RET(newcls,&CT_sockclass,CKRM_EVENT_LISTEN_START,ns,current);
 	ce_release(&CT_sockclass);
 
-	if (newcls == NULL) {
+	if (newcls == NULL)  {
 		newcls = &sockclass_dflt_class;
 		ckrm_core_grab(class_core(newcls));
 	}
 
 	class_lock(class_core(newcls));
 	list_add(&ns->ckrm_link, &class_core(newcls)->objlist);
+	ckrm_ns_put(ns);
 	ns->core = newcls;
 	class_unlock(class_core(newcls));
+	
 
 	// the socket is already locked
 	// take a reference on socket on our behalf
@@ -246,27 +242,26 @@ static void cb_sockclass_listen_start(struct sock *sk)
 		atomic_inc(&clstype->nr_resusers[i]);
 		rcbs = clstype->res_ctlrs[i];
 		if (rcbs && rcbs->change_resclass) {
-			(*rcbs->change_resclass) ((void *)ns,
-						  NULL,
-						  class_core(newcls)->
-						  res_class[i]);
+			(*rcbs->change_resclass)((void *)ns, 
+					 NULL,class_core(newcls)->res_class[i]);
 		}
 		atomic_dec(&clstype->nr_resusers[i]);
 	}
 	return;
 }
 
-static void cb_sockclass_listen_stop(struct sock *sk)
+static void
+cb_sockclass_listen_stop(struct sock *sk)
 {
 	struct ckrm_net_struct *ns = NULL;
 	struct ckrm_sock_class *newcls = NULL;
 
 	// XXX - TBD ipv6
-	if (sk->sk_family == AF_INET6)
+	if (sk->sk_family == IPPROTO_IPV6)
 		return;
 
-	ns = (struct ckrm_net_struct *)sk->sk_ns;
-	if (!ns)     // listen_start called before socket_aq was loaded
+	ns =  (struct ckrm_net_struct *)sk->sk_ns;
+	if (!ns) // listen_start called before socket_aq was loaded
 		return;
 
 	newcls = ns->core;
@@ -277,6 +272,7 @@ static void cb_sockclass_listen_stop(struct sock *sk)
 		class_unlock(class_core(newcls));
 		ckrm_core_drop(class_core(newcls));
 	}
+
 	// the socket is already locked
 	sk->sk_ns = NULL;
 	sock_put(sk);
@@ -287,36 +283,35 @@ static void cb_sockclass_listen_stop(struct sock *sk)
 }
 
 static struct ckrm_event_spec sock_events_callbacks[] = {
-	CKRM_EVENT_SPEC(LISTEN_START, cb_sockclass_listen_start),
-	CKRM_EVENT_SPEC(LISTEN_STOP, cb_sockclass_listen_stop),
-	{-1}
+	CKRM_EVENT_SPEC( LISTEN_START, cb_sockclass_listen_start  ),
+	CKRM_EVENT_SPEC( LISTEN_STOP,  cb_sockclass_listen_stop  ),
+	{ -1 }
 };
 
 /**************************************************************************
  *                  Class Object Creation / Destruction
  **************************************************************************/
 
-static struct ckrm_core_class *sock_alloc_class(struct ckrm_core_class *parent,
-						const char *name)
+static struct ckrm_core_class *
+sock_alloc_class(struct ckrm_core_class *parent, const char *name)
 {
 	struct ckrm_sock_class *sockcls;
 	sockcls = kmalloc(sizeof(struct ckrm_sock_class), GFP_KERNEL);
-	if (sockcls == NULL)
+	if (sockcls == NULL) 
 		return NULL;
-	memset(sockcls, 0, sizeof(struct ckrm_sock_class));
 
-	ckrm_init_core_class(&CT_sockclass, class_core(sockcls), parent, name);
+	ckrm_init_core_class(&CT_sockclass,class_core(sockcls),parent,name);
 
 	ce_protect(&CT_sockclass);
 	if (CT_sockclass.ce_cb_active && CT_sockclass.ce_callbacks.class_add)
-		(*CT_sockclass.ce_callbacks.class_add) (name, sockcls,
-							CT_sockclass.typeID);
+		(*CT_sockclass.ce_callbacks.class_add)(name,sockcls);
 	ce_release(&CT_sockclass);
 
 	return class_core(sockcls);
 }
 
-static int sock_free_class(struct ckrm_core_class *core)
+static int
+sock_free_class(struct ckrm_core_class *core)
 {
 	struct ckrm_sock_class *sockcls;
 
@@ -327,7 +322,7 @@ static int sock_free_class(struct ckrm_core_class *core)
 	if (core == core->classtype->default_class) {
 		// reset the name tag
 		core->name = dflt_sockclass_name;
-		return 0;
+ 		return 0;
 	}
 
 	sockcls = class_type(struct ckrm_sock_class, core);
@@ -335,29 +330,28 @@ static int sock_free_class(struct ckrm_core_class *core)
 	ce_protect(&CT_sockclass);
 
 	if (CT_sockclass.ce_cb_active && CT_sockclass.ce_callbacks.class_delete)
-		(*CT_sockclass.ce_callbacks.class_delete) (core->name, sockcls,
-							   CT_sockclass.typeID);
+		(*CT_sockclass.ce_callbacks.class_delete)(core->name,sockcls);
 
-	sock_reclassify_class(sockcls);
+	sock_reclassify_class ( sockcls );
 
 	ce_release(&CT_sockclass);
 
-	ckrm_release_core_class(core);	
-	// Hubertus .... could just drop the class .. error message
-
+	ckrm_release_core_class(core);  // Hubertus .... could just drop the class .. error message
 	return 0;
 }
 
-static int sock_show_members(struct ckrm_core_class *core, struct seq_file *seq)
+
+static int                      
+sock_show_members(struct ckrm_core_class *core, struct seq_file *seq) 
 {
 	struct list_head *lh;
 	struct ckrm_net_struct *ns = NULL;
 
 	class_lock(core);
 	list_for_each(lh, &core->objlist) {
-		ns = container_of(lh, struct ckrm_net_struct, ckrm_link);
-		seq_printf(seq, "%d.%d.%d.%d\\%d\n",
-			   NIPQUAD(ns->ns_daddrv4), ns->ns_dport);
+		ns = container_of(lh, struct ckrm_net_struct,ckrm_link);
+		seq_printf(seq, "%d.%d.%d.%d\\%d\n", 
+			   NIPQUAD(ns->ns_daddrv4),ns->ns_dport);
 	}
 	class_unlock(core);
 
@@ -365,8 +359,7 @@ static int sock_show_members(struct ckrm_core_class *core, struct seq_file *seq)
 }
 
 static int
-sock_forced_reclassify_ns(struct ckrm_net_struct *tns,
-			  struct ckrm_core_class *core)
+sock_forced_reclassify_ns(struct ckrm_net_struct *tns, struct ckrm_core_class *core)
 {
 	struct ckrm_net_struct *ns = NULL;
 	struct sock *sk = NULL;
@@ -380,13 +373,10 @@ sock_forced_reclassify_ns(struct ckrm_net_struct *tns,
 	newcls = class_type(struct ckrm_sock_class, core);
 	// lookup the listening sockets
 	// returns with a reference count set on socket
-	if (tns->ns_family == AF_INET6)
-		return -EOPNOTSUPP;
-
-	sk = tcp_v4_lookup_listener(tns->ns_daddrv4, tns->ns_dport, 0);
+	sk = tcp_v4_lookup_listener(tns->ns_daddrv4,tns->ns_dport,0);
 	if (!sk) {
 		printk(KERN_INFO "No such listener 0x%x:%d\n",
-		       tns->ns_daddrv4, tns->ns_dport);
+				tns->ns_daddrv4, tns->ns_dport);
 		return rc;
 	}
 	lock_sock(sk);
@@ -395,17 +385,12 @@ sock_forced_reclassify_ns(struct ckrm_net_struct *tns,
 	}
 	ns = sk->sk_ns;
 	ckrm_ns_hold(ns);
-	if (!capable(CAP_NET_ADMIN) && (ns->ns_tsk->user != current->user)) {
-		ckrm_ns_put(ns);
-		rc = -EPERM;
-		goto out;
-	}
-
 	oldcls = ns->core;
 	if ((oldcls == NULL) || (oldcls == newcls)) {
 		ckrm_ns_put(ns);
 		goto out;
 	}
+
 	// remove the net_struct from the current class
 	class_lock(class_core(oldcls));
 	list_del(&ns->ckrm_link);
@@ -416,35 +401,37 @@ sock_forced_reclassify_ns(struct ckrm_net_struct *tns,
 	sock_set_class(ns, newcls, oldcls, CKRM_EVENT_MANUAL);
 	ckrm_ns_put(ns);
 	rc = 0;
-      out:
+out:
 	release_sock(sk);
 	sock_put(sk);
 
 	return rc;
 
-}
+} 
 
 enum sock_target_token_t {
-	IPV4, IPV6, SOCKC_TARGET_ERR
+        IPV4, IPV6, SOCKC_TARGET_ERR
 };
 
 static match_table_t sock_target_tokens = {
 	{IPV4, "ipv4=%s"},
 	{IPV6, "ipv6=%s"},
-	{SOCKC_TARGET_ERR, NULL},
+        {SOCKC_TARGET_ERR, NULL},
 };
 
-char *v4toi(char *s, char c, __u32 * v)
+char *
+v4toi(char *s, char c, __u32 *v)
 {
-	unsigned int k = 0, n = 0;
+	unsigned int  k = 0, n = 0;
 
-	while (*s && (*s != c)) {
+	while(*s && (*s != c)) {
 		if (*s == '.') {
 			n <<= 8;
 			n |= k;
 			k = 0;
-		} else
-			k = k * 10 + *s - '0';
+		}
+		else 
+			k = k *10 + *s - '0';
 		s++;
 	}
 
@@ -455,29 +442,19 @@ char *v4toi(char *s, char c, __u32 * v)
 }
 
 static int
-sock_forced_reclassify(struct ckrm_core_class *target, const char *options)
-{
-	char *p, *p2;
+sock_forced_reclassify(struct ckrm_core_class *target,const char *options)
+{	
+	char *p,*p2;
 	struct ckrm_net_struct ns;
 	__u32 v4addr, tmp;
 
 	if (!options)
-		return -EINVAL;
-
-	if (target == NULL) {
-		unsigned long id = simple_strtol(options,NULL,0);
-		if (!capable(CAP_NET_ADMIN))
-			return -EPERM;
-		if (id != 0) 
-			return -EINVAL;
-		printk(KERN_DEBUG "sock_class: reclassify all not net implemented\n");
-		return 0;
-	}
-
-	while ((p = strsep((char **)&options, ",")) != NULL) {
+		return 1;
+	
+	while ((p = strsep((char**)&options, ",")) != NULL) {
 		substring_t args[MAX_OPT_ARGS];
 		int token;
-
+		
 		if (!*p)
 			continue;
 		token = match_token(p, sock_target_tokens, args);
@@ -486,33 +463,33 @@ sock_forced_reclassify(struct ckrm_core_class *target, const char *options)
 		case IPV4:
 
 			p2 = p;
-			while (*p2 && (*p2 != '='))
+			while(*p2 && (*p2 != '='))
 				++p2;
 			p2++;
-			p2 = v4toi(p2, '\\', &(v4addr));
+			p2 = v4toi(p2, '\\',&(v4addr));
 			ns.ns_daddrv4 = htonl(v4addr);
-			ns.ns_family = AF_INET;
-			p2 = v4toi(++p2, ':', &tmp);
-			ns.ns_dport = (__u16) tmp;
-			if (*p2)
-				p2 = v4toi(++p2, '\0', &ns.ns_pid);
-			sock_forced_reclassify_ns(&ns, target);
+			ns.ns_family = 4; //IPPROTO_IPV4
+			p2 = v4toi(++p2, ':',&tmp); ns.ns_dport = (__u16)tmp;
+			p2 = v4toi(++p2,'\0',&ns.ns_pid);
+			
+			sock_forced_reclassify_ns(&ns,target);
 			break;
 
 		case IPV6:
 			printk(KERN_INFO "rcfs: IPV6 not supported yet\n");
-			return -ENOSYS;
+			return 0;	
 		default:
-			return -EINVAL;
+			return 0;
 		}
 	}
-	return -EINVAL;
-}
+	return 1;
+}	
 
 /*
  * Listen_aq reclassification.
  */
-static void sock_reclassify_class(struct ckrm_sock_class *cls)
+static void
+sock_reclassify_class(struct ckrm_sock_class *cls)
 {
 	struct ckrm_net_struct *ns, *tns;
 	struct ckrm_core_class *core = class_core(cls);
@@ -536,41 +513,42 @@ static void sock_reclassify_class(struct ckrm_sock_class *cls)
 	list_splice_init(&core->objlist, &local_list);
 	class_unlock(core);
 	ckrm_core_drop(core);
-
+	
 	list_for_each_entry_safe(ns, tns, &local_list, ckrm_link) {
 		ckrm_ns_hold(ns);
 		list_del(&ns->ckrm_link);
 		if (ns->ns_sk) {
 			lock_sock(ns->ns_sk);
-			sock_set_class(ns, &sockclass_dflt_class, NULL,
-				       CKRM_EVENT_MANUAL);
+			sock_set_class(ns, &sockclass_dflt_class, NULL, CKRM_EVENT_MANUAL);
 			release_sock(ns->ns_sk);
 		}
 		ckrm_ns_put(ns);
 	}
-	return;
+	return ;
 }
 
-void __init ckrm_meta_init_sockclass(void)
+void __init
+ckrm_meta_init_sockclass(void)
 {
-	printk(KERN_DEBUG "...... Initializing ClassType<%s> ........\n",
-	       CT_sockclass.name);
+	printk("...... Initializing ClassType<%s> ........\n",CT_sockclass.name);
 	// intialize the default class
 	ckrm_init_core_class(&CT_sockclass, class_core(&sockclass_dflt_class),
-			     NULL, dflt_sockclass_name);
+			     NULL,dflt_sockclass_name);
 
 	// register classtype and initialize default task class
 	ckrm_register_classtype(&CT_sockclass);
 	ckrm_register_event_set(sock_events_callbacks);
 
-	// note registeration of all resource controllers will be done 
-	// later dynamically as these are specified as modules
+	// note registeration of all resource controllers will be done later dynamically 
+	// as these are specified as modules
 }
+
+
 
 #if 1
 
-/*****************************************************************************
+/***************************************************************************************
  * Debugging Network Classes:  Utility functions
- *****************************************************************************/
+ **************************************************************************************/
 
 #endif

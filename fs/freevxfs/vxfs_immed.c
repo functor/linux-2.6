@@ -32,7 +32,6 @@
  */
 #include <linux/fs.h>
 #include <linux/pagemap.h>
-#include <linux/namei.h>
 
 #include "vxfs.h"
 #include "vxfs_inode.h"

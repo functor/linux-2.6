@@ -201,7 +201,7 @@ static int econet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len
 	return 0;
 }
 
-#if defined(CONFIG_ECONET_AUNUDP) || defined(CONFIG_ECONET_NATIVE)
+#ifdef CONFIG_ECONET_NATIVE
 /*
  *	Queue a transmit result for the user to be told about.
  */
@@ -228,9 +228,7 @@ static void tx_result(struct sock *sk, unsigned long cookie, int result)
 	if (sock_queue_rcv_skb(sk, skb) < 0)
 		kfree_skb(skb);
 }
-#endif
 
-#ifdef CONFIG_ECONET_NATIVE
 /*
  *	Called by the Econet hardware driver when a packet transmit
  *	has completed.  Tell the user.
@@ -257,10 +255,6 @@ static int econet_sendmsg(struct kiocb *iocb, struct socket *sock,
 	struct ec_addr addr;
 	int err;
 	unsigned char port, cb;
-#if defined(CONFIG_ECONET_AUNUDP) || defined(CONFIG_ECONET_NATIVE)
-	struct sk_buff *skb;
-	struct ec_cb *eb;
-#endif
 #ifdef CONFIG_ECONET_AUNUDP
 	struct msghdr udpmsg;
 	struct iovec iov[msg->msg_iovlen+1];
@@ -317,6 +311,8 @@ static int econet_sendmsg(struct kiocb *iocb, struct socket *sock,
 	{
 		/* Real hardware Econet.  We're not worthy etc. */
 #ifdef CONFIG_ECONET_NATIVE
+		struct ec_cb *eb;
+		struct sk_buff *skb;
 		unsigned short proto = 0;
 
 		dev_hold(dev);
@@ -721,7 +717,7 @@ static struct proto_ops SOCKOPS_WRAPPED(econet_ops) = {
 #include <linux/smp_lock.h>
 SOCKOPS_WRAP(econet, PF_ECONET);
 
-#if defined(CONFIG_ECONET_AUNUDP) || defined(CONFIG_ECONET_NATIVE)
+#ifdef CONFIG_ECONET_AUNUDP
 /*
  *	Find the listening socket, if any, for the given data.
  */
@@ -765,31 +761,45 @@ static int ec_queue_packet(struct sock *sk, struct sk_buff *skb,
 
 	return sock_queue_rcv_skb(sk, skb);
 }
-#endif
 
-#ifdef CONFIG_ECONET_AUNUDP
 /*
  *	Send an AUN protocol response. 
  */
 
 static void aun_send_response(__u32 addr, unsigned long seq, int code, int cb)
 {
-	struct sockaddr_in sin = {
-		.sin_family = AF_INET,
-		.sin_port = htons(AUN_PORT),
-		.sin_addr = {.s_addr = addr}
-	};
-	struct aunhdr ah = {.code = code, .cb = cb, .handle = seq};
-	struct kvec iov = {.iov_base = (void *)&ah, .iov_len = sizeof(ah)};
+	struct sockaddr_in sin;
+	struct iovec iov;
+	struct aunhdr ah;
 	struct msghdr udpmsg;
+	int err;
+	mm_segment_t oldfs;
 	
+	memset(&sin, 0, sizeof(sin));
+	sin.sin_family = AF_INET;
+	sin.sin_port = htons(AUN_PORT);
+	sin.sin_addr.s_addr = addr;
+
+	ah.code = code;
+	ah.pad = 0;
+	ah.port = 0;
+	ah.cb = cb;
+	ah.handle = seq;
+
+	iov.iov_base = (void *)&ah;
+	iov.iov_len = sizeof(ah);
+
 	udpmsg.msg_name = (void *)&sin;
 	udpmsg.msg_namelen = sizeof(sin);
+	udpmsg.msg_iov = &iov;
+	udpmsg.msg_iovlen = 1;
 	udpmsg.msg_control = NULL;
 	udpmsg.msg_controllen = 0;
 	udpmsg.msg_flags=0;
 
-	kernel_sendmsg(udpsock, &udpmsg, &iov, 1, sizeof(ah));
+	oldfs = get_fs(); set_fs(KERNEL_DS);
+	err = sock_sendmsg(udpsock, &udpmsg, sizeof(ah));
+	set_fs(oldfs);
 }
 
 
@@ -1075,7 +1085,7 @@ static int econet_notifier(struct notifier_block *this, unsigned long msg, void 
 		if (edev)
 		{
 			if (net2dev_map[0] == dev)
-				net2dev_map[0] = NULL;
+				net2dev_map[0] = 0;
 			net2dev_map[edev->net] = NULL;
 			kfree(edev);
 			dev->ec_ptr = NULL;

@@ -109,6 +109,7 @@ void thaw_processes(void)
 			wake_up_process(p);
 		} else
 			printk(KERN_INFO " Strange, %s not stopped\n", p->comm );
+		wake_up_process(p);
 	} while_each_thread(g, p);
 
 	read_unlock(&tasklist_lock);

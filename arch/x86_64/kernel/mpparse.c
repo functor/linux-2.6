@@ -44,7 +44,7 @@ int acpi_found_madt;
 int apic_version [MAX_APICS];
 unsigned char mp_bus_id_to_type [MAX_MP_BUSSES] = { [0 ... MAX_MP_BUSSES-1] = -1 };
 int mp_bus_id_to_pci_bus [MAX_MP_BUSSES] = { [0 ... MAX_MP_BUSSES-1] = -1 };
-cpumask_t pci_bus_to_cpumask [256] = { [0 ... 255] = CPU_MASK_ALL };
+cpumask_t mp_bus_to_cpumask [MAX_MP_BUSSES] = { [0 ... MAX_MP_BUSSES-1] = CPU_MASK_ALL };
 
 int mp_current_pci_id = 0;
 /* I/O APIC entries */
@@ -859,22 +859,16 @@ void __init mp_config_acpi_legacy_irqs (void)
 	for (i = 0; i < 16; i++) {
 		int idx;
 
-		for (idx = 0; idx < mp_irq_entries; idx++) {
-			struct mpc_config_intsrc *irq = mp_irqs + idx;
-
-			/* Do we already have a mapping for this ISA IRQ? */
-			if (irq->mpc_srcbus == MP_ISA_BUS && irq->mpc_srcbusirq == i)
-				break;
-
-			/* Do we already have a mapping for this IOAPIC pin */
-			if ((irq->mpc_dstapic == intsrc.mpc_dstapic) &&
-				(irq->mpc_dstirq == i))
-				break;
-		}
+		for (idx = 0; idx < mp_irq_entries; idx++)
+			if (mp_irqs[idx].mpc_srcbus == MP_ISA_BUS &&
+				(mp_irqs[idx].mpc_dstapic == ioapic) &&
+				(mp_irqs[idx].mpc_srcbusirq == i ||
+				mp_irqs[idx].mpc_dstirq == i))
+					break;
 
 		if (idx != mp_irq_entries) {
 			printk(KERN_DEBUG "ACPI: IRQ%d used by override.\n", i);
-			continue;			/* IRQ already used */
+			continue;			 /* IRQ already used */
 		}
 
 		intsrc.mpc_irqtype = mp_INT;

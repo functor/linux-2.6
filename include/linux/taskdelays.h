@@ -2,19 +2,19 @@
 #define _LINUX_TASKDELAYS_H
 
 #include <linux/config.h>
-#include <linux/types.h>
 
 struct task_delay_info {
-#if defined CONFIG_DELAY_ACCT 
-	/* delay statistics in usecs */
-	uint64_t waitcpu_total;
-	uint64_t runcpu_total;
-	uint64_t iowait_total;
-	uint64_t mem_iowait_total;
-	uint32_t runs;
-	uint32_t num_iowaits;
-	uint32_t num_memwaits;
-#endif				
+#ifdef CONFIG_DELAY_ACCT
+        /* delay statistics in usecs */
+	unsigned long runs;
+	unsigned long waitcpu_total;
+	unsigned long runcpu_total;
+	unsigned long iowait_total;
+	unsigned long mem_iowait_total;
+	unsigned long num_iowaits;
+	unsigned long num_memwaits;
+#endif
 };
 
-#endif				// _LINUX_TASKDELAYS_H
+#endif // _LINUX_TASKDELAYS_H
+

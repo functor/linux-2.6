@@ -39,14 +39,17 @@ vc_get_version(uint32_t id)
 #include <linux/vserver/dlimit.h>
 
 
+extern unsigned int vx_debug_switch;
+
+
 extern asmlinkage long
 sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 {
 
-	vxdprintk(VXD_CBIT(switch, 0),
-		"vc: VCMD_%02d_%d[%d], %d",
-		VC_CATEGORY(cmd), VC_COMMAND(cmd),
-		VC_VERSION(cmd), id);
+	if (vx_debug_switch)
+		printk( "vc: VCMD_%02d_%d[%d], %d\n",
+			VC_CATEGORY(cmd), VC_COMMAND(cmd),
+			VC_VERSION(cmd), id);
 
 	switch (cmd) {
 	case VCMD_get_version:

@@ -59,7 +59,6 @@
 #include <linux/kmod.h>
 #include <linux/completion.h>
 #include <linux/spinlock.h>
-#include <linux/dmi.h>
 
 #include <asm/page.h>
 #include <asm/desc.h>
@@ -130,7 +129,7 @@ static int pnp_dock_event(int dock, struct pnp_docking_station_info *info)
 	/* only one standardized param to hotplug command: type */
 	argv [0] = hotplug_path;
 	argv [1] = "dock";
-	argv [2] = NULL;
+	argv [2] = 0;
 
 	/* minimal command environment */
 	envp [i++] = "HOME=/";
@@ -153,7 +152,7 @@ static int pnp_dock_event(int dock, struct pnp_docking_station_info *info)
 	envp [i++] = scratch;
 	scratch += sprintf (scratch, "DOCK=%x/%x/%x",
 		info->location_id, info->serial, info->capabilities);
-	envp[i] = NULL;
+	envp[i] = 0;
 	
 	value = call_usermodehelper (argv [0], argv, envp, 0);
 	kfree (buf);
@@ -499,39 +498,10 @@ int __init pnpbios_probe_system(void)
 	return 0;
 }
 
-static int __init exploding_pnp_bios(struct dmi_system_id *d)
-{
-	printk(KERN_WARNING "%s detected. Disabling PnPBIOS\n", d->ident);
-	return 0;
-}
-
-static struct dmi_system_id pnpbios_dmi_table[] = {
-	{	/* PnPBIOS GPF on boot */
-		.callback = exploding_pnp_bios,
-		.ident = "Higraded P14H",
-		.matches = {
-			DMI_MATCH(DMI_BIOS_VENDOR, "American Megatrends Inc."),
-			DMI_MATCH(DMI_BIOS_VERSION, "07.00T"),
-			DMI_MATCH(DMI_SYS_VENDOR, "Higraded"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "P14H"),
-		},
-	},
-	{	/* PnPBIOS GPF on boot */
-		.callback = exploding_pnp_bios,
-		.ident = "ASUS P4P800",
-		.matches = {
-			DMI_MATCH(DMI_BOARD_VENDOR, "ASUSTeK Computer Inc."),
-			DMI_MATCH(DMI_BOARD_NAME, "P4P800"),
-		},
-	},
-	{ }
-};
-
 int __init pnpbios_init(void)
 {
 	int ret;
-
-	if (pnpbios_disabled || dmi_check_system(pnpbios_dmi_table)) {
+	if(pnpbios_disabled || (dmi_broken & BROKEN_PNP_BIOS)) {
 		printk(KERN_INFO "PnPBIOS: Disabled\n");
 		return -ENODEV;
 	}

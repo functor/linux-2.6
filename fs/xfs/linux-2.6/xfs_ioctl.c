@@ -1017,8 +1017,6 @@ xfs_ioc_fsgeometry(
 #define LINUX_XFLAG_APPEND	0x00000020 /* writes to file may only append */
 #define LINUX_XFLAG_NODUMP	0x00000040 /* do not dump file */
 #define LINUX_XFLAG_NOATIME	0x00000080 /* do not update atime */
-#define LINUX_XFLAG_BARRIER	0x00004000 /* chroot() barrier */
-#define LINUX_XFLAG_IUNLINK	0x00008000 /* Immutable unlink */
 
 STATIC unsigned int
 xfs_merge_ioc_xflags(
@@ -1059,8 +1057,6 @@ xfs_di2lxflags(
 
 	if (di_flags & XFS_DIFLAG_IMMUTABLE)
 		flags |= LINUX_XFLAG_IMMUTABLE;
-	if (di_flags & XFS_DIFLAG_IUNLINK)
-		flags |= LINUX_XFLAG_IUNLINK;
 	if (di_flags & XFS_DIFLAG_APPEND)
 		flags |= LINUX_XFLAG_APPEND;
 	if (di_flags & XFS_DIFLAG_SYNC)
@@ -1085,7 +1081,6 @@ xfs_ioc_xattr(
 	int			error;
 	int			attr_flags;
 	unsigned int		flags;
-	unsigned int		old_flags;
 
 	switch (cmd) {
 	case XFS_IOC_FSGETXATTR: {
@@ -1110,7 +1105,7 @@ xfs_ioc_xattr(
 		attr_flags = 0;
 		if (filp->f_flags & (O_NDELAY|O_NONBLOCK))
 			attr_flags |= ATTR_NONBLOCK;
-		
+
 		va.va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE;
 		va.va_xflags  = fa.fsx_xflags;
 		va.va_extsize = fa.fsx_extsize;

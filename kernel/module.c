@@ -37,7 +37,6 @@
 #include <asm/uaccess.h>
 #include <asm/semaphore.h>
 #include <asm/cacheflush.h>
-#include "module-verify.h"
 
 #if 0
 #define DEBUGP printk
@@ -51,6 +50,9 @@
 
 /* If this is set, the section belongs in the init part of the module */
 #define INIT_OFFSET_MASK (1UL << (BITS_PER_LONG-1))
+
+#define symbol_is(literal, string)				\
+	(strcmp(MODULE_SYMBOL_PREFIX literal, (string)) == 0)
 
 /* Protects module list */
 static spinlock_t modlist_lock = SPIN_LOCK_UNLOCKED;
@@ -978,104 +980,6 @@ static unsigned long resolve_symbol(Elf_Shdr *sechdrs,
 	return ret;
 }
 
-
-/*
- * /sys/module/foo/sections stuff
- * J. Corbet <corbet@lwn.net>
- */
-#ifdef CONFIG_KALLSYMS
-static void module_sect_attrs_release(struct kobject *kobj)
-{
-	kfree(container_of(kobj, struct module_sections, kobj));
-}
-
-static ssize_t module_sect_show(struct kobject *kobj, struct attribute *attr,
-		char *buf)
-{
-	struct module_sect_attr *sattr =
-		container_of(attr, struct module_sect_attr, attr);
-	return sprintf(buf, "0x%lx\n", sattr->address);
-}
-
-static struct sysfs_ops module_sect_ops = {
-	.show = module_sect_show,
-};
-
-static struct kobj_type module_sect_ktype = {
-	.sysfs_ops = &module_sect_ops,
-	.release =   module_sect_attrs_release,
-};
-
-static void add_sect_attrs(struct module *mod, unsigned int nsect,
-		char *secstrings, Elf_Shdr *sechdrs)
-{
-	unsigned int nloaded = 0, i;
-	struct module_sect_attr *sattr;
-	
-	if (!mod->mkobj)
-		return;
-	
-	/* Count loaded sections and allocate structures */
-	for (i = 0; i < nsect; i++)
-		if (sechdrs[i].sh_flags & SHF_ALLOC)
-			nloaded++;
-	mod->sect_attrs = kmalloc(sizeof(struct module_sections) +
-			nloaded*sizeof(mod->sect_attrs->attrs[0]), GFP_KERNEL);
-	if (! mod->sect_attrs)
-		return;
-
-	/* sections entry setup */
-	memset(mod->sect_attrs, 0, sizeof(struct module_sections));
-	if (kobject_set_name(&mod->sect_attrs->kobj, "sections"))
-		goto out;
-	mod->sect_attrs->kobj.parent = &mod->mkobj->kobj;
-	mod->sect_attrs->kobj.ktype = &module_sect_ktype;
-	if (kobject_register(&mod->sect_attrs->kobj))
-		goto out;
-
-	/* And the section attributes. */
-	sattr = &mod->sect_attrs->attrs[0];
-	for (i = 0; i < nsect; i++) {
-		if (! (sechdrs[i].sh_flags & SHF_ALLOC))
-			continue;
-		sattr->address = sechdrs[i].sh_addr;
-		strlcpy(sattr->name, secstrings + sechdrs[i].sh_name,
-				MODULE_SECT_NAME_LEN);
-		sattr->attr.name = sattr->name;
-		sattr->attr.owner = mod;
-		sattr->attr.mode = S_IRUGO;
-		(void) sysfs_create_file(&mod->sect_attrs->kobj, &sattr->attr);
-		sattr++;
-	}
-	return;
-  out:
-	kfree(mod->sect_attrs);
-	mod->sect_attrs = NULL;
-}
-
-static void remove_sect_attrs(struct module *mod)
-{
-	if (mod->sect_attrs) {
-		kobject_unregister(&mod->sect_attrs->kobj);
-		mod->sect_attrs = NULL;
-	}
-}
-
-
-#else
-static inline void add_sect_attrs(struct module *mod, unsigned int nsect,
-		char *sectstrings, Elf_Shdr *sechdrs)
-{
-}
-
-static inline void remove_sect_attrs(struct module *mod)
-{
-}
-#endif /* CONFIG_KALLSYMS */
-
-
-
-
 #define to_module_attr(n) container_of(n, struct module_attribute, attr);
 
 static ssize_t module_attr_show(struct kobject *kobj,
@@ -1194,7 +1098,6 @@ static void free_module(struct module *mod)
 	list_del(&mod->list);
 	spin_unlock_irq(&modlist_lock);
 
-	remove_sect_attrs(mod);
 	mod_kobject_remove(mod);
 
 	/* Arch-specific cleanup. */
@@ -1625,14 +1528,6 @@ static struct module *load_module(void __user *umod,
 		goto free_hdr;
 	}
 
-	/* verify the signature on the module */
-#ifdef CONFIG_MODULE_SIG
-	if (module_verify_sig(hdr, sechdrs, secstrings, mod)) {
-		err = -EPERM;
-		goto free_hdr;
-	}
-#endif
-
 	/* Now copy in args */
 	arglen = strlen_user(uargs);
 	if (!arglen) {
@@ -1816,7 +1711,6 @@ static struct module *load_module(void __user *umod,
 			      / sizeof(struct kernel_param));
 	if (err < 0)
 		goto arch_cleanup;
-	add_sect_attrs(mod, hdr->e_shnum, secstrings, sechdrs);
 
 	/* Get rid of temporary copy */
 	vfree(hdr);
@@ -2134,7 +2028,7 @@ const struct exception_table_entry *search_module_extables(unsigned long addr)
 }
 
 /* Is this a valid kernel address?  We don't grab the lock: we are oopsing. */
-struct module *__module_text_address(unsigned long addr)
+struct module *module_text_address(unsigned long addr)
 {
 	struct module *mod;
 
@@ -2145,31 +2039,14 @@ struct module *__module_text_address(unsigned long addr)
 	return NULL;
 }
 
-struct module *module_text_address(unsigned long addr)
-{
-	struct module *mod;
-	unsigned long flags;
-
-	spin_lock_irqsave(&modlist_lock, flags);
-	mod = __module_text_address(addr);
-	spin_unlock_irqrestore(&modlist_lock, flags);
-
-	return mod;
-}
-
 /* Don't grab lock, we're oopsing. */
 void print_modules(void)
 {
 	struct module *mod;
 
 	printk("Modules linked in:");
-	list_for_each_entry(mod, &modules, list) {
+	list_for_each_entry(mod, &modules, list)
 		printk(" %s", mod->name);
-#if CONFIG_MODULE_SIG		
-		if (!mod->gpgsig_ok)
-			printk("(U)");
-#endif		
-	}
 	printk("\n");
 }
 

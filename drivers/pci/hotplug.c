@@ -59,7 +59,7 @@ int pci_hotplug (struct device *dev, char **envp, int num_envp,
 	if ((buffer_size - length <= 0) || (i >= num_envp))
 		return -ENOMEM;
 
-	envp[i] = NULL;
+	envp[i] = 0;
 
 	return 0;
 }

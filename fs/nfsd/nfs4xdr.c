@@ -55,7 +55,6 @@
 #include <linux/nfsd/state.h>
 #include <linux/nfsd/xdr4.h>
 #include <linux/nfsd_idmap.h>
-#include <linux/vserver/xid.h>
 
 #define NFSDDBG_FACILITY		NFSDDBG_XDR
 
@@ -288,40 +287,27 @@ u32 *read_buf(struct nfsd4_compoundargs *argp, int nbytes)
 	return p;
 }
 
-static int
-defer_free(struct nfsd4_compoundargs *argp,
-		void (*release)(const void *), void *p)
-{
-	struct tmpbuf *tb;
-
-	tb = kmalloc(sizeof(*tb), GFP_KERNEL);
-	if (!tb)
-		return -ENOMEM;
-	tb->buf = p;
-	tb->release = release;
-	tb->next = argp->to_free;
-	argp->to_free = tb;
-	return 0;
-}
-
 char *savemem(struct nfsd4_compoundargs *argp, u32 *p, int nbytes)
 {
-	void *new = NULL;
+	struct tmpbuf *tb;
 	if (p == argp->tmp) {
-		new = kmalloc(nbytes, GFP_KERNEL);
-		if (!new) return NULL;
-		p = new;
+		p = kmalloc(nbytes, GFP_KERNEL);
+		if (!p) return NULL;
 		memcpy(p, argp->tmp, nbytes);
 	} else {
 		if (p != argp->tmpp)
 			BUG();
 		argp->tmpp = NULL;
 	}
-	if (defer_free(argp, kfree, p)) {
-		kfree(new);
+	tb = kmalloc(sizeof(*tb), GFP_KERNEL);
+	if (!tb) {
+		kfree(p);
 		return NULL;
-	} else
-		return (char *)p;
+	}
+	tb->buf = p;
+	tb->next = argp->to_free;
+	argp->to_free = tb;
+	return (char*)p;
 }
 
 
@@ -1302,11 +1288,18 @@ static u32 nfs4_ftypes[16] = {
         NF4SOCK, NF4BAD,  NF4LNK, NF4BAD,
 };
 
+static inline int
+xdr_padding(int l)
+{
+       return 3 - ((l - 1) & 3); /* smallest i>=0 such that (l+i)%4 = 0 */
+}
+
 static int
 nfsd4_encode_name(struct svc_rqst *rqstp, int group, uid_t id,
 			u32 **p, int *buflen)
 {
 	int status;
+	u32 len;
 
 	if (*buflen < (XDR_QUADLEN(IDMAP_NAMESZ) << 2) + 4)
 		return nfserr_resource;
@@ -1316,8 +1309,11 @@ nfsd4_encode_name(struct svc_rqst *rqstp, int group, uid_t id,
 		status = nfsd_map_uid_to_name(rqstp, id, (u8 *)(*p + 1));
 	if (status < 0)
 		return nfserrno(status);
-	*p = xdr_encode_opaque(*p, NULL, status);
-	*buflen -= (XDR_QUADLEN(status) << 2) + 4;
+	len = (unsigned)status;
+	*(*p)++ = htonl(len);
+	memset((u8 *)*p + len, 0, xdr_padding(len));
+	*p += XDR_QUADLEN(len);
+	*buflen -= (XDR_QUADLEN(len) << 2) + 4;
 	BUG_ON(*buflen < 0);
 	return 0;
 }
@@ -1561,18 +1557,14 @@ nfsd4_encode_fattr(struct svc_fh *fhp, struct svc_export *exp,
 		WRITE32(stat.nlink);
 	}
 	if (bmval1 & FATTR4_WORD1_OWNER) {
-		status = nfsd4_encode_user(rqstp,
-			XIDINO_UID(XID_TAG(dentry->d_inode),
-			stat.uid, stat.xid), &p, &buflen);
+		status = nfsd4_encode_user(rqstp, stat.uid, &p, &buflen);
 		if (status == nfserr_resource)
 			goto out_resource;
 		if (status)
 			goto out;
 	}
 	if (bmval1 & FATTR4_WORD1_OWNER_GROUP) {
-		status = nfsd4_encode_group(rqstp,
-			XIDINO_GID(XID_TAG(dentry->d_inode),
-			stat.gid, stat.xid), &p, &buflen);
+		status = nfsd4_encode_group(rqstp, stat.gid, &p, &buflen);
 		if (status == nfserr_resource)
 			goto out_resource;
 		if (status)
@@ -2479,24 +2471,6 @@ nfs4svc_encode_voidres(struct svc_rqst *rqstp, u32 *p, void *dummy)
         return xdr_ressize_check(rqstp, p);
 }
 
-void nfsd4_release_compoundargs(struct nfsd4_compoundargs *args)
-{
-	if (args->ops != args->iops) {
-		kfree(args->ops);
-		args->ops = args->iops;
-	}
-	if (args->tmpp) {
-		kfree(args->tmpp);
-		args->tmpp = NULL;
-	}
-	while (args->to_free) {
-		struct tmpbuf *tb = args->to_free;
-		args->to_free = tb->next;
-		tb->release(tb->buf);
-		kfree(tb);
-	}
-}
-
 int
 nfs4svc_decode_compoundargs(struct svc_rqst *rqstp, u32 *p, struct nfsd4_compoundargs *args)
 {
@@ -2513,7 +2487,20 @@ nfs4svc_decode_compoundargs(struct svc_rqst *rqstp, u32 *p, struct nfsd4_compoun
 
 	status = nfsd4_decode_compound(args);
 	if (status) {
-		nfsd4_release_compoundargs(args);
+		if (args->ops != args->iops) {
+			kfree(args->ops);
+			args->ops = args->iops;
+		}
+		if (args->tmpp) {
+			kfree(args->tmpp);
+			args->tmpp = NULL;
+		}
+		while (args->to_free) {
+			struct tmpbuf *tb = args->to_free;
+			args->to_free = tb->next;
+			kfree(tb->buf);
+			kfree(tb);
+		}
 	}
 	return !status;
 }
@@ -2524,7 +2511,7 @@ nfs4svc_encode_compoundres(struct svc_rqst *rqstp, u32 *p, struct nfsd4_compound
 	/*
 	 * All that remains is to write the tag and operation count...
 	 */
-	struct kvec *iov;
+	struct iovec *iov;
 	p = resp->tagp;
 	*p++ = htonl(resp->taglen);
 	memcpy(p, resp->tag, resp->taglen);

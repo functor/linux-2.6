@@ -22,6 +22,8 @@
     
 */
 
+#define __NO_VERSION__ 1
+
 #include <linux/module.h>
 #include <linux/init.h>
 

@@ -844,6 +844,7 @@ ahc_linux_detect(Scsi_Host_Template *template)
 {
 	struct	ahc_softc *ahc;
 	int     found = 0;
+	int	eisa_err, pci_err;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
 	/*
@@ -891,10 +892,13 @@ ahc_linux_detect(Scsi_Host_Template *template)
 	 */
 	ahc_list_lockinit();
 
-	found = ahc_linux_pci_init();
-	if (!ahc_linux_eisa_init())
-		found++;
-	
+	pci_err = ahc_linux_pci_init();
+	eisa_err = ahc_linux_eisa_init();
+
+	if(pci_err && eisa_err)
+		goto out;
+
+
 	/*
 	 * Register with the SCSI layer all
 	 * controllers we've found.
@@ -904,6 +908,7 @@ ahc_linux_detect(Scsi_Host_Template *template)
 		if (ahc_linux_register_host(ahc, template) == 0)
 			found++;
 	}
+out:
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
 	spin_lock_irq(&io_request_lock);

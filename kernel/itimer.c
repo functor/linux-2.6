@@ -68,9 +68,7 @@ void it_real_fn(unsigned long __data)
 	struct task_struct * p = (struct task_struct *) __data;
 	unsigned long interval;
 
-	if (send_group_sig_info(SIGALRM, SEND_SIG_PRIV, p))
-		printk("*warning*: failed to send SIGALRM to %u\n", p->pid);
-
+	send_group_sig_info(SIGALRM, SEND_SIG_PRIV, p);
 	interval = p->it_real_incr;
 	if (interval) {
 		if (interval > (unsigned long) LONG_MAX)
@@ -136,7 +134,7 @@ asmlinkage long sys_setitimer(int which,
 	} else
 		memset((char *) &set_buffer, 0, sizeof(set_buffer));
 
-	error = do_setitimer(which, &set_buffer, ovalue ? &get_buffer : NULL);
+	error = do_setitimer(which, &set_buffer, ovalue ? &get_buffer : 0);
 	if (error || !ovalue)
 		return error;
 

@@ -1060,12 +1060,6 @@ S: USA
 N: Jeff Garzik
 E: jgarzik@pobox.com
 
-N: Kumar Gala
-E: kumar.gala@freescale.com
-D: Embedded PowerPC 6xx/7xx/74xx/82xx/85xx support
-S: Austin, Texas 78729
-S: USA
-
 N: Jacques Gelinas
 E: jacques@solucorp.qc.ca
 D: Author of the Umsdos file system
@@ -1089,10 +1083,6 @@ N: Jan-Benedict Glaw
 E: jbglaw@lug-owl.de
 D: SRM environment driver (for Alpha systems)
 P: 1024D/8399E1BB 250D 3BCF 7127 0D8C A444  A961 1DBD 5E75 8399 E1BB
-
-N: Thomas Gleixner
-E: tglx@linutronix.de
-D: NAND flash hardware support, JFFS2 on NAND flash
 
 N: Richard E. Gooch
 E: rgooch@atnf.csiro.au
@@ -1409,7 +1399,6 @@ W: http://www.holtmann.org
 D: Maintainer of the Linux Bluetooth Subsystem
 D: Author and maintainer of the various Bluetooth HCI drivers
 D: Author and maintainer of the CAPI message transport protocol driver
-D: Author and maintainer of the Bluetooth HID protocol driver
 D: Various other Bluetooth related patches, cleanups and fixes
 S: Germany
 
@@ -2278,8 +2267,8 @@ S: USA
 N: Eberhard Moenkeberg
 E: emoenke@gwdg.de
 D: CDROM driver "sbpcd" (Matsushita/Panasonic/Soundblaster)
-S: Ruhstrathoehe 2 b.
-S: D-37085 Goettingen
+S: Reinholdstrasse 14
+S: D-37083 Goettingen
 S: Germany
 
 N: Thomas Molina
@@ -2707,9 +2696,7 @@ S: Finland
 
 N: Luca Risolia
 E: luca.risolia@studio.unibo.it
-P: 1024D/FCE635A4 88E8 F32F 7244 68BA 3958  5D40 99DA 5D2A FCE6 35A4
 D: V4L driver for W996[87]CF JPEG USB Dual Mode Camera Chips
-D: V4L2 driver for SN9C10[12] PC Camera Controllers
 S: Via Liberta' 41/A
 S: Osio Sotto, 24046, Bergamo
 S: Italy
@@ -3618,14 +3605,6 @@ W: http://www.misterjones.org
 D: MD driver
 D: EISA/sysfs subsystem
 S: France
-
-N: Luiz Fernando N. Capitulino
-E: lcapitulino@terra.com.br
-E: lcapitulino@prefeitura.sp.gov.br
-W: http://www.telecentros.sp.gov.br
-D: Little fixes and a lot of janitorial work
-S: E-GOV Telecentros SP
-S: Brazil
 
 # Don't add your name here, unless you really _are_ after Marc
 # alphabetically. Leonard used to be very proud of being the 

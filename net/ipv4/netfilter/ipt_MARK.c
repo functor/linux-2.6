@@ -50,12 +50,10 @@ checkentry(const char *tablename,
 		return 0;
 	}
 
-#if 0
 	if (strcmp(tablename, "mangle") != 0) {
 		printk(KERN_WARNING "MARK: can only be called from \"mangle\" table, not \"%s\"\n", tablename);
 		return 0;
 	}
-#endif
 
 	return 1;
 }

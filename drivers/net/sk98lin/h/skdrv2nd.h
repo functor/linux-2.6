@@ -170,7 +170,7 @@ struct s_DrvRlmtMbuf {
 typedef struct s_IOCTL	SK_GE_IOCTL;
 
 struct s_IOCTL {
-	char __user *	pData;
+	char*		pData;
 	unsigned int	Len;
 };
 

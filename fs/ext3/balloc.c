@@ -19,8 +19,6 @@
 #include <linux/ext3_jbd.h>
 #include <linux/quotaops.h>
 #include <linux/buffer_head.h>
-#include <linux/vs_base.h>
-#include <linux/vs_dlimit.h>
 
 /*
  * balloc.c contains the blocks allocation and deallocation routines
@@ -277,10 +275,8 @@ do_more:
 error_return:
 	brelse(bitmap_bh);
 	ext3_std_error(sb, err);
-	if (dquot_freed_blocks) {
-		DLIMIT_FREE_BLOCK(sb, inode->i_xid, dquot_freed_blocks);
+	if (dquot_freed_blocks)
 		DQUOT_FREE_BLOCK(inode, dquot_freed_blocks);
-	}
 	return;
 }
 
@@ -469,32 +465,18 @@ fail:
 	return -1;
 }
 
-static int ext3_has_free_blocks(struct super_block *sb)
+static int ext3_has_free_blocks(struct ext3_sb_info *sbi)
 {
-	struct ext3_sb_info *sbi = EXT3_SB(sb);
-	int free_blocks, root_blocks, cond;
+	int free_blocks, root_blocks;
 
 	free_blocks = percpu_counter_read_positive(&sbi->s_freeblocks_counter);
 	root_blocks = le32_to_cpu(sbi->s_es->s_r_blocks_count);
-
-	vxdprintk(VXD_CBIT(dlim, 3),
-		"ext3_has_free_blocks(%p): free=%u, root=%u",
-		sb, free_blocks, root_blocks);
-
-	DLIMIT_ADJUST_BLOCK(sb, vx_current_xid(), &free_blocks, &root_blocks);
-
-	cond = (free_blocks < root_blocks + 1 &&
-		!capable(CAP_SYS_RESOURCE) &&
+	if (free_blocks < root_blocks + 1 && !capable(CAP_SYS_RESOURCE) &&
 		sbi->s_resuid != current->fsuid &&
-		(sbi->s_resgid == 0 || !in_group_p (sbi->s_resgid)));
-
-	vxdprintk(VXD_CBIT(dlim, 3),
-		"ext3_has_free_blocks(%p): %u<%u+1, %c, %u!=%u r=%d",
-		sb, free_blocks, root_blocks,
-		!capable(CAP_SYS_RESOURCE)?'1':'0',
-		sbi->s_resuid, current->fsuid, cond?0:1);
-
-	return (cond ? 0 : 1);
+		(sbi->s_resgid == 0 || !in_group_p (sbi->s_resgid))) {
+		return 0;
+	}
+	return 1;
 }
 
 /*
@@ -505,7 +487,7 @@ static int ext3_has_free_blocks(struct super_block *sb)
  */
 int ext3_should_retry_alloc(struct super_block *sb, int *retries)
 {
-	if (!ext3_has_free_blocks(sb) || (*retries)++ > 3)
+	if (!ext3_has_free_blocks(EXT3_SB(sb)) || (*retries)++ > 3)
 		return 0;
 
 	jbd_debug(1, "%s: retrying operation after ENOSPC\n", sb->s_id);
@@ -555,14 +537,12 @@ ext3_new_block(handle_t *handle, struct inode *inode, unsigned long goal,
 		*errp = -EDQUOT;
 		return 0;
 	}
-	if (DLIMIT_ALLOC_BLOCK(sb, inode->i_xid, 1))
-		goto out_dlimit;
 
 	sbi = EXT3_SB(sb);
 	es = EXT3_SB(sb)->s_es;
 	ext3_debug("goal=%lu.\n", goal);
 
-	if (!ext3_has_free_blocks(sb)) {
+	if (!ext3_has_free_blocks(sbi)) {
 		*errp = -ENOSPC;
 		goto out;
 	}
@@ -717,9 +697,6 @@ allocated:
 io_error:
 	*errp = -EIO;
 out:
-	if (!performed_allocation)
-		DLIMIT_FREE_BLOCK(sb, inode->i_xid, 1);
-out_dlimit:
 	if (fatal) {
 		*errp = fatal;
 		ext3_std_error(sb, fatal);

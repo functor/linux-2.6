@@ -76,8 +76,6 @@ extern struct task_struct *last_task_used_math;
 
 #define MM_VM_SIZE(mm)		DEFAULT_TASK_SIZE
 
-#define HAVE_ARCH_PICK_MMAP_LAYOUT
-
 typedef struct {
         __u32 ar4;
 } mm_segment_t;
@@ -320,16 +318,6 @@ static inline void disabled_wait(unsigned long code)
 		        "m" (dw_psw) : "cc", "0", "1");
 #endif /* __s390x__ */
 }
-
-/*
- * CPU idle notifier chain.
- */
-#define CPU_IDLE	0
-#define CPU_NOT_IDLE	1
-
-struct notifier_block;
-int register_idle_notifier(struct notifier_block *nb);
-int unregister_idle_notifier(struct notifier_block *nb);
 
 #endif
 

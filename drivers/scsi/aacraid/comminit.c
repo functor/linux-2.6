@@ -95,18 +95,13 @@ static int aac_alloc_comm(struct aac_dev *dev, void **commaddr, unsigned long co
 	 * with the math overloading past 32 bits, thus we must limit this
 	 * field.
 	 *
-	 * This assumes the memory is mapped zero->n, which isnt
-	 * always true on real computers. It also has some slight problems
-	 * with the GART on x86-64. I've btw never tried DMA from PCI space
-	 * on this platform but don't be suprised if its problematic.
+	 * FIXME: this assumes the memory is mapped zero->n, which isnt
+	 * always true on real computers.
 	 */
-#ifndef CONFIG_GART_IOMMU
 	if ((num_physpages << (PAGE_SHIFT - 12)) <= AAC_MAX_HOSTPHYSMEMPAGES) {
 		init->HostPhysMemPages = 
 			cpu_to_le32(num_physpages << (PAGE_SHIFT-12));
-	} else 
-#endif	
-	{
+	} else {
 		init->HostPhysMemPages = cpu_to_le32(AAC_MAX_HOSTPHYSMEMPAGES);
 	}
 

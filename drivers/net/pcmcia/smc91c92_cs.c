@@ -411,9 +411,6 @@ static void smc91c92_detach(dev_link_t *link)
     if (*linkp == NULL)
 	return;
 
-    if (link->dev)
-	unregister_netdev(dev);
-
     if (link->state & DEV_CONFIG)
 	smc91c92_release(link);
 
@@ -422,6 +419,8 @@ static void smc91c92_detach(dev_link_t *link)
 
     /* Unlink device structure, free bits */
     *linkp = link->next;
+    if (link->dev)
+	unregister_netdev(dev);
     free_netdev(dev);
 } /* smc91c92_detach */
 
@@ -1113,8 +1112,10 @@ static int smc91c92_event(event_t event, int priority,
     switch (event) {
     case CS_EVENT_CARD_REMOVAL:
 	link->state &= ~DEV_PRESENT;
-	if (link->state & DEV_CONFIG)
+	if (link->state & DEV_CONFIG) {
 	    netif_device_detach(dev);
+	    smc91c92_release(link);
+	}
 	break;
     case CS_EVENT_CARD_INSERTION:
 	link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
@@ -1272,7 +1273,7 @@ static int smc_open(struct net_device *dev)
     link->open++;
 
     netif_start_queue(dev);
-    smc->saved_skb = NULL;
+    smc->saved_skb = 0;
     smc->packets_waiting = 0;
 
     smc_reset(dev);
