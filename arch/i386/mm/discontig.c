@@ -32,6 +32,7 @@
 #include <asm/e820.h>
 #include <asm/setup.h>
 #include <asm/mmzone.h>
+#include <asm/crash_dump.h>
 #include <bios_ebda.h>
 
 struct pglist_data *node_data[MAX_NUMNODES];
@@ -363,6 +364,9 @@ unsigned long __init setup_memory(void)
 		}
 	}
 #endif
+
+	crash_reserve_bootmem();
+
 	return system_max_low_pfn;
 }
 

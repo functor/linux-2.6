@@ -200,7 +200,7 @@ EXPORT_SYMBOL(ist_info);
 
 EXPORT_SYMBOL(csum_partial);
 
-#ifdef CONFIG_CRASH_DUMP_MODULE
+#ifdef CONFIG_CRASH_DUMP
 #ifdef CONFIG_SMP
 extern irq_desc_t irq_desc[NR_IRQS];
 extern unsigned long irq_affinity[NR_IRQS];
@@ -210,8 +210,8 @@ EXPORT_SYMBOL(irq_affinity);
 EXPORT_SYMBOL(stop_this_cpu);
 EXPORT_SYMBOL(dump_send_ipi);
 #endif
-extern int pfn_is_ram(unsigned long);
-EXPORT_SYMBOL(pfn_is_ram);
+extern int page_is_ram(unsigned long);
+EXPORT_SYMBOL(page_is_ram);
 #ifdef ARCH_HAS_NMI_WATCHDOG
 EXPORT_SYMBOL(touch_nmi_watchdog);
 #endif

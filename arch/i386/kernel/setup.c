@@ -48,6 +48,7 @@
 #include <asm/io_apic.h>
 #include <asm/ist.h>
 #include <asm/io.h>
+#include <asm/crash_dump.h>
 #include "setup_arch_pre.h"
 #include <bios_ebda.h>
 
@@ -57,6 +58,7 @@
 unsigned long init_pg_tables_end __initdata = ~0UL;
 
 int disable_pse __initdata = 0;
+unsigned int dump_enabled;
 
 /*
  * Machine setup..
@@ -710,6 +712,11 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 			if (to != command_line)
 				to--;
 			if (!memcmp(from+7, "exactmap", 8)) {
+				/* If we are doing a crash dump, we
+				 * still need to know the real mem
+				 * size.
+				 */
+				set_saved_max_pfn();
 				from += 8+7;
 				e820.nr_map = 0;
 				userdef = 1;
@@ -816,6 +823,9 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 		 */
 		if (c == ' ' && !memcmp(from, "highmem=", 8))
 			highmem_pages = memparse(from+8, &from) >> PAGE_SHIFT;
+
+		if (!memcmp(from, "dump", 4))
+			dump_enabled = 1;
 	
 		if (c == ' ' && !memcmp(from, "crashdump=", 10))
 			crashdump_addr = memparse(from+10, &from); 
@@ -1115,6 +1125,9 @@ static unsigned long __init setup_memory(void)
 		}
 	}
 #endif
+
+	crash_reserve_bootmem();
+
 	return max_low_pfn;
 }
 #else

@@ -146,7 +146,7 @@ void dump_mark_map(struct dump_memdev *dev)
 			pr_debug("indirect map[%d] = 0x%lx\n", i, map1[i]);
 			page = pfn_to_page(map1[i]);
 			set_page_count(page, 1);
-			map2 = kmap_atomic(page, KM_DUMP);
+			map2 = kmap_atomic(page, KM_CRASHDUMP);
 			for (j = 0 ; (j < DUMP_MAP_SZ) && map2[j] && 
 				(off + j < last); j++) {
 				pr_debug("\t map[%d][%d] = 0x%lx\n", i, j, 
@@ -198,7 +198,7 @@ struct page *dump_mem_lookup(struct dump_memdev *dump_mdev, unsigned long loc)
 	}
 
 	if (page)
-		map = kmap_atomic(page, KM_DUMP);
+		map = kmap_atomic(page, KM_CRASHDUMP);
 	else 
 		return NULL;
 
@@ -213,7 +213,7 @@ struct page *dump_mem_lookup(struct dump_memdev *dump_mdev, unsigned long loc)
 	} else {
 		page = NULL;
 	}
-	kunmap_atomic(map, KM_DUMP);
+	kunmap_atomic(map, KM_CRASHDUMP);
 
 	return page;
 }
@@ -248,10 +248,10 @@ struct page *dump_mem_next_page(struct dump_memdev *dev)
 	};
 	
 	if (*dev->curr_map) {
-		map = kmap_atomic(pfn_to_page(*dev->curr_map), KM_DUMP);
+		map = kmap_atomic(pfn_to_page(*dev->curr_map), KM_CRASHDUMP);
 		if (map[i])
 			page = pfn_to_page(map[i]);
-		kunmap_atomic(map, KM_DUMP);
+		kunmap_atomic(map, KM_CRASHDUMP);
 		dev->ddev.curr_offset += PAGE_SIZE;
 	};
 
@@ -308,9 +308,9 @@ int dump_mem_add_space(struct dump_memdev *dev, struct page *page)
 	/* add data space */
 	i = dev->curr_map_offset;
 	map_page = pfn_to_page(*dev->curr_map);
-	map = (unsigned long *)kmap_atomic(map_page, KM_DUMP);
+	map = (unsigned long *)kmap_atomic(map_page, KM_CRASHDUMP);
 	map[i] = page_to_pfn(page);
-	kunmap_atomic(map, KM_DUMP);
+	kunmap_atomic(map, KM_CRASHDUMP);
 	dev->curr_map_offset = ++i;
 	dev->last_offset += PAGE_SIZE;
 	if (i >= DUMP_MAP_SZ) {
@@ -572,10 +572,10 @@ int dump_mem_write(struct dump_dev *dev, void *buf, unsigned long len)
 	page = dump_mem_lookup(dump_mdev, dev->curr_offset >> PAGE_SHIFT);
 
 	for (n = len; (n > 0) && page; n -= PAGE_SIZE, buf += PAGE_SIZE ) {
-		addr = kmap_atomic(page, KM_DUMP);
+		addr = kmap_atomic(page, KM_CRASHDUMP);
 		/* memset(addr, 'x', PAGE_SIZE); */
 		memcpy(addr, buf, PAGE_SIZE);
-		kunmap_atomic(addr, KM_DUMP);
+		kunmap_atomic(addr, KM_CRASHDUMP);
 		/* dev->curr_offset += PAGE_SIZE; */
 		page = dump_mem_next_page(dump_mdev);
 	}

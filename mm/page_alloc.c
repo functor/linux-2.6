@@ -51,7 +51,7 @@ int sysctl_lower_zone_protection = 0;
 EXPORT_SYMBOL(totalram_pages);
 EXPORT_SYMBOL(nr_swap_pages);
 
-#ifdef CONFIG_CRASH_DUMP_MODULE
+#ifdef CONFIG_CRASH_DUMP
 /* This symbol has to be exported to use 'for_each_pgdat' macro by modules. */
 EXPORT_SYMBOL(pgdat_list);
 #endif
@@ -106,8 +106,7 @@ static void bad_page(const char *function, struct page *page)
 	tainted |= TAINT_BAD_PAGE;
 }
 
-#if !defined(CONFIG_HUGETLB_PAGE) && !defined(CONFIG_CRASH_DUMP) \
-	&& !defined(CONFIG_CRASH_DUMP_MODULE)
+#if !defined(CONFIG_HUGETLB_PAGE) && !defined(CONFIG_CRASH_DUMP)
 #define prep_compound_page(page, order) do { } while (0)
 #define destroy_compound_page(page, order) do { } while (0)
 #else

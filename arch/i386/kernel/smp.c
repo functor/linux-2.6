@@ -139,12 +139,15 @@ void __send_IPI_shortcut(unsigned int shortcut, int vector)
 	 */
 	apic_wait_icr_idle();
 
+	if (vector == CRASH_DUMP_VECTOR)
+		cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
+
 	/*
 	 * No need to touch the target chip field
 	 */
 	cfg = __prepare_ICR(shortcut, vector);
 
-	if (vector == DUMP_VECTOR) {
+	if (vector == CRASH_DUMP_VECTOR) {
 		/*
 		 * Setup DUMP IPI to be delivered as an NMI
 		 */
@@ -229,7 +232,7 @@ inline void send_IPI_mask_sequence(cpumask_t mask, int vector)
 			 */
 			cfg = __prepare_ICR(0, vector);
 		
-			if (vector == DUMP_VECTOR) {
+			if (vector == CRASH_DUMP_VECTOR) {
 				/*
 				 * Setup DUMP IPI to be delivered as an NMI
 				 */
@@ -486,7 +489,7 @@ void flush_tlb_all(void)
 
 void dump_send_ipi(void)
 {
-	send_IPI_allbutself(DUMP_VECTOR);
+	send_IPI_allbutself(CRASH_DUMP_VECTOR);
 }
 
 /*
@@ -497,6 +500,11 @@ void dump_send_ipi(void)
 void smp_send_reschedule(int cpu)
 {
 	send_IPI_mask(cpumask_of_cpu(cpu), RESCHEDULE_VECTOR);
+}
+
+void crash_dump_send_ipi(void)
+{
+	send_IPI_allbutself(CRASH_DUMP_VECTOR);
 }
 
 /*

@@ -114,7 +114,7 @@ void __init init_IRQ(void)
 		}
 	}
 	interrupt_redirect_table = ramvec;
-#ifdef DUMP_VECTOR
+#ifdef CRASH_DUMP_VECTOR
 	ramvec_p = ramvec;
 	for (i = 0; i < NR_IRQS; i++) {
 		if ((i % 8) == 0)

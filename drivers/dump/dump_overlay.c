@@ -481,7 +481,7 @@ int dump_saved_data_iterator(int pass, int (*action)(unsigned long,
 				else
 					count++;
 				/* clear the contents of page */
-				/* fixme: consider using KM_DUMP instead */
+				/* fixme: consider using KM_CRASHDUMP instead */
 				clear_highpage(page);
 			
 			}
@@ -679,10 +679,10 @@ int dump_copy_pages(void *buf, struct page *page, unsigned long sz)
 	void *addr;
 
 	while (len < sz) {
-		addr = kmap_atomic(page, KM_DUMP);
+		addr = kmap_atomic(page, KM_CRASHDUMP);
 		bytes = (sz > len + PAGE_SIZE) ? PAGE_SIZE : sz - len;	
 		memcpy(buf, addr, bytes); 
-		kunmap_atomic(addr, KM_DUMP);
+		kunmap_atomic(addr, KM_CRASHDUMP);
 		buf += bytes;
 		len += bytes;
 		page++;
