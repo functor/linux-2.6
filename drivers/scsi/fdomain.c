@@ -681,7 +681,6 @@ static int fdomain_get_irq( int base )
 
 static int fdomain_isa_detect( int *irq, int *iobase )
 {
-#ifndef PCMCIA
    int i, j;
    int base = 0xdeadbeef;
    int flag = 0;
@@ -787,9 +786,6 @@ static int fdomain_isa_detect( int *irq, int *iobase )
    *iobase = base;
 
    return 1;			/* success */
-#else
-   return 0;
-#endif
 }
 
 /* PCI detection function: int fdomain_pci_bios_detect(int* irq, int*

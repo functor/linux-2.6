@@ -253,7 +253,7 @@ menu "General setup"
 # Select various configuration options depending on the machine type
 config DISCONTIGMEM
 	bool
-	depends on ARCH_EDB7211 || ARCH_SA1100 || (ARCH_LH7A40X && !LH7A40X_CONTIGMEM)
+	depends on ARCH_EDB7211 || ARCH_SA1100 || (ARCH_LH7A40X && !LH7A40X_SROMLL)
 	default y
 	help
 	  Say Y to support efficient handling of discontiguous physical memory,
@@ -370,7 +370,7 @@ config CPU_FREQ_INTEGRATOR
 	help
 	  This enables the CPUfreq driver for ARM Integrator CPUs.
 
-	  For details, take a look at <file:Documentation/cpu-freq>.
+	  For details, take a look at linux/Documentation/cpu-freq.
 
 	  If in doubt, say Y.
 

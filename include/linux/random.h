@@ -73,9 +73,6 @@ extern __u32 secure_ipv6_id(__u32 *daddr);
 extern struct file_operations random_fops, urandom_fops;
 #endif
 
-unsigned int get_random_int(void);
-unsigned long randomize_range(unsigned long start, unsigned long end, unsigned long len);
-
 #endif /* __KERNEL___ */
 
 #endif /* _LINUX_RANDOM_H */

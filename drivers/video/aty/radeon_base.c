@@ -386,7 +386,7 @@ static int __devinit radeon_map_ROM(struct radeonfb_info *rinfo, struct pci_dev 
 	return -ENXIO;
 }
 
-#ifdef CONFIG_X86
+#ifdef __i386__
 static int  __devinit radeon_find_mem_vbios(struct radeonfb_info *rinfo)
 {
 	/* I simplified this code as we used to miss the signatures in
@@ -415,7 +415,7 @@ static int  __devinit radeon_find_mem_vbios(struct radeonfb_info *rinfo)
 
 	return 0;
 }
-#endif
+#endif /* __i386__ */
 
 #ifdef CONFIG_PPC_OF
 /*
@@ -432,7 +432,7 @@ static int __devinit radeon_read_xtal_OF (struct radeonfb_info *rinfo)
 		printk(KERN_WARNING "radeonfb: Cannot match card to OF node !\n");
 		return -ENODEV;
 	}
-	val = (u32 *) get_property(dp, "ATY,RefCLK", NULL);
+	val = (u32 *) get_property(dp, "ATY,RefCLK", 0);
 	if (!val || !*val) {
 		printk(KERN_WARNING "radeonfb: No ATY,RefCLK property !\n");
 		return -EINVAL;
@@ -440,11 +440,11 @@ static int __devinit radeon_read_xtal_OF (struct radeonfb_info *rinfo)
 
 	rinfo->pll.ref_clk = (*val) / 10;
 
-	val = (u32 *) get_property(dp, "ATY,SCLK", NULL);
+	val = (u32 *) get_property(dp, "ATY,SCLK", 0);
 	if (val && *val)
 		rinfo->pll.sclk = (*val) / 10;
 
-	val = (u32 *) get_property(dp, "ATY,MCLK", NULL);
+	val = (u32 *) get_property(dp, "ATY,MCLK", 0);
 	if (val && *val)
 		rinfo->pll.mclk = (*val) / 10;
 
@@ -2282,13 +2282,13 @@ static int radeonfb_pci_register (struct pci_dev *pdev,
 	/*
 	 * On x86, the primary display on laptop may have it's BIOS
 	 * ROM elsewhere, try to locate it at the legacy memory hole.
-	 * We probably need to make sure this is the primary display,
+	 * We probably need to make sure this is the primary dispay,
 	 * but that is difficult without some arch support.
 	 */
-#ifdef CONFIG_X86
+#ifdef __i386__
 	if (rinfo->bios_seg == NULL)
 		radeon_find_mem_vbios(rinfo);
-#endif
+#endif /* __i386__ */
 
 	/* If both above failed, try the BIOS ROM again for mobility
 	 * chips

@@ -184,9 +184,7 @@ get_order (unsigned long size)
 
 #define VM_DATA_DEFAULT_FLAGS		(VM_READ | VM_WRITE |					\
 					 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC |		\
-					 (((current->personality & READ_IMPLIES_EXEC) != 0)	\
+					 (((current->thread.flags & IA64_THREAD_XSTACK) != 0)	\
 					  ? VM_EXEC : 0))
-
-#define devmem_is_allowed(x) 1
 
 #endif /* _ASM_IA64_PAGE_H */

@@ -879,7 +879,7 @@ static void sctp_assoc_bh_rcv(struct sctp_association *asoc)
 		if (sctp_chunk_is_data(chunk))
 			asoc->peer.last_data_from = chunk->transport;
 		else
-			SCTP_INC_STATS(SCTP_MIB_INCTRLCHUNKS);
+			SCTP_INC_STATS(SctpInCtrlChunks);
 
 		if (chunk->transport)
 			chunk->transport->last_time_heard = jiffies;
@@ -1093,7 +1093,6 @@ static inline int sctp_peer_needs_update(struct sctp_association *asoc)
 	case SCTP_STATE_ESTABLISHED:
 	case SCTP_STATE_SHUTDOWN_PENDING:
 	case SCTP_STATE_SHUTDOWN_RECEIVED:
-	case SCTP_STATE_SHUTDOWN_SENT:
 		if ((asoc->rwnd > asoc->a_rwnd) &&
 		    ((asoc->rwnd - asoc->a_rwnd) >=
 		     min_t(__u32, (asoc->base.sk->sk_rcvbuf >> 1), asoc->pmtu)))

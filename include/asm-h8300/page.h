@@ -96,8 +96,6 @@ extern unsigned long memory_end;
 
 #endif /* __ASSEMBLY__ */
 
-#define devmem_is_allowed(x) 1
-
 #endif /* __KERNEL__ */
 
 #endif /* _H8300_PAGE_H */

@@ -263,7 +263,7 @@ out:
  * ioremap and friends.
  *
  * ioremap takes a PCI memory address, as specified in
- * Documentation/IO-mapping.txt.
+ * linux/Documentation/IO-mapping.txt.
  */
 extern void * __ioremap(unsigned long, size_t, unsigned long, unsigned long);
 extern void __iounmap(void *addr);

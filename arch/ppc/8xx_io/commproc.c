@@ -286,7 +286,7 @@ m8xx_cpm_hostalloc(uint size)
 #define BRG_UART_CLK_DIV16	(BRG_UART_CLK/16)
 
 void
-cpm_setbrg(uint brg, uint rate)
+m8xx_cpm_setbrg(uint brg, uint rate)
 {
 	volatile uint	*bp;
 
@@ -336,7 +336,8 @@ void m8xx_cpm_dpinit(void)
 	 * with the processor and the microcode patches applied / activated.
 	 * But the following should be at least safe.
 	 */
-	rh_attach_region(&cpm_dpmem_info, (void *)CPM_DATAONLY_BASE, CPM_DATAONLY_SIZE);
+	rh_attach_region(&cpm_dpmem_info, cp->cp_dpmem + CPM_DATAONLY_BASE,
+			CPM_DATAONLY_SIZE);
 }
 
 /*
@@ -345,55 +346,59 @@ void m8xx_cpm_dpinit(void)
  * Now it returns the actuall physical address of that area.
  * use m8xx_cpm_dpram_offset() to get the index
  */
-uint cpm_dpalloc(uint size, uint align)
+void *m8xx_cpm_dpalloc(int size)
 {
 	void *start;
 	unsigned long flags;
 
 	spin_lock_irqsave(&cpm_dpmem_lock, flags);
-	cpm_dpmem_info.alignment = align;
 	start = rh_alloc(&cpm_dpmem_info, size, "commproc");
 	spin_unlock_irqrestore(&cpm_dpmem_lock, flags);
 
-	return (uint)start;
+	return start;
 }
-EXPORT_SYMBOL(cpm_dpalloc);
+EXPORT_SYMBOL(m8xx_cpm_dpalloc);
 
-int cpm_dpfree(uint offset)
+int m8xx_cpm_dpfree(void *addr)
 {
 	int ret;
 	unsigned long flags;
 
 	spin_lock_irqsave(&cpm_dpmem_lock, flags);
-	ret = rh_free(&cpm_dpmem_info, (void *)offset);
+	ret = rh_free(&cpm_dpmem_info, addr);
 	spin_unlock_irqrestore(&cpm_dpmem_lock, flags);
 
 	return ret;
 }
-EXPORT_SYMBOL(cpm_dpfree);
+EXPORT_SYMBOL(m8xx_cpm_dpfree);
 
-uint cpm_dpalloc_fixed(uint offset, uint size, uint align)
+void *m8xx_cpm_dpalloc_fixed(void *addr, int size)
 {
 	void *start;
 	unsigned long flags;
 
 	spin_lock_irqsave(&cpm_dpmem_lock, flags);
-	cpm_dpmem_info.alignment = align;
-	start = rh_alloc_fixed(&cpm_dpmem_info, (void *)offset, size, "commproc");
+	start = rh_alloc_fixed(&cpm_dpmem_info, addr, size, "commproc");
 	spin_unlock_irqrestore(&cpm_dpmem_lock, flags);
 
-	return (uint)start;
+	return start;
 }
-EXPORT_SYMBOL(cpm_dpalloc_fixed);
+EXPORT_SYMBOL(m8xx_cpm_dpalloc_fixed);
 
-void cpm_dpdump(void)
+void m8xx_cpm_dpdump(void)
 {
 	rh_dump(&cpm_dpmem_info);
 }
-EXPORT_SYMBOL(cpm_dpdump);
+EXPORT_SYMBOL(m8xx_cpm_dpdump);
 
-void *cpm_dpram_addr(uint offset)
+int m8xx_cpm_dpram_offset(void *addr)
+{
+	return (u_char *)addr - ((immap_t *)IMAP_ADDR)->im_cpm.cp_dpmem;
+}
+EXPORT_SYMBOL(m8xx_cpm_dpram_offset);
+
+void *m8xx_cpm_dpram_addr(int offset)
 {
 	return ((immap_t *)IMAP_ADDR)->im_cpm.cp_dpmem + offset;
 }
-EXPORT_SYMBOL(cpm_dpram_addr);
+EXPORT_SYMBOL(m8xx_cpm_dpram_addr);

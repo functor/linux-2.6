@@ -1,5 +1,5 @@
 /*
- * $Id: redboot.c,v 1.15 2004/08/10 07:55:16 dwmw2 Exp $
+ * $Id: redboot.c,v 1.13 2004/04/01 10:17:40 gthomas Exp $
  *
  * Parse RedBoot-style Flash Image System (FIS) tables and
  * produce a Linux partition array to match.
@@ -8,7 +8,6 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/init.h>
-#include <linux/vmalloc.h>
 
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
@@ -54,7 +53,7 @@ static int parse_redboot_partitions(struct mtd_info *master,
 	static char nullstring[] = "unallocated";
 #endif
 
-	buf = vmalloc(master->erasesize);
+	buf = kmalloc(master->erasesize, GFP_KERNEL);
 
 	if (!buf)
 		return -ENOMEM;
@@ -191,7 +190,7 @@ static int parse_redboot_partitions(struct mtd_info *master,
 		fl = fl->next;
 		kfree(old);
 	}
-	vfree(buf);
+	kfree(buf);
 	return ret;
 }
 
