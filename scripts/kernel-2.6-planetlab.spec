@@ -387,7 +387,19 @@ exit 0
 exit 0
 
 %post 
+# trick mkinitrd in case the current environment does not have device mapper
+rootdev=$(awk '/^[ \t]*[^#]/ { if ($2 == "/") { print $1; }}' /etc/fstab)
+if echo $rootdev |grep -q /dev/mapper 2>/dev/null ; then
+    if [ ! -f $rootdev ]; then
+	fake_root_lvm=1
+	mkdir -p $(dirname $rootdev)
+	touch $rootdev
+    fi
+fi
 [ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}
+if [ -n "$fake_root_lvm" ]; then
+    rm -f $rootdev
+fi
 if [ -x /usr/sbin/hardlink ] ; then
 pushd /lib/modules/%{KVERREL}/build > /dev/null ; {
 	cd /lib/modules/%{KVERREL}/build
