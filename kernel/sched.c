@@ -349,35 +349,36 @@ static inline struct task_struct * rq_get_next_task(struct runqueue* rq)
 	ckrm_lrq_t *queue;
 	int idx;
 	int cpu = smp_processor_id();
-
-	// it is guaranteed be the ( rq->nr_running > 0 ) check in 
-	// schedule that a task will be found.
-
+	
+	next = rq->idle;
  retry_next_class:
-	queue = rq_get_next_class(rq);
-	// BUG_ON( !queue );
+	if ((queue = rq_get_next_class(rq))) {
+		//check switch active/expired queue
+		array = queue->active;
+		if (unlikely(!array->nr_active)) {
+			queue->active = queue->expired;
+			queue->expired = array;
+			queue->expired_timestamp = 0;
 
-	array = queue->active;
-	if (unlikely(!array->nr_active)) {
-		queue->active = queue->expired;
-		queue->expired = array;
-		queue->expired_timestamp = 0;
-
-		if (queue->active->nr_active)
-			set_top_priority(queue,
-					 find_first_bit(queue->active->bitmap, MAX_PRIO));
-		else {
-			classqueue_dequeue(queue->classqueue,
-					   &queue->classqueue_linkobj);
-			cpu_demand_event(get_rq_local_stat(queue,cpu),CPU_DEMAND_DEQUEUE,0);
+			if (queue->active->nr_active)
+				set_top_priority(queue,
+						 find_first_bit(queue->active->bitmap, MAX_PRIO));
+			else {
+				classqueue_dequeue(queue->classqueue,
+						   &queue->classqueue_linkobj);
+				cpu_demand_event(get_rq_local_stat(queue,cpu),CPU_DEMAND_DEQUEUE,0);
+			}
+			goto retry_next_class; 				
 		}
-		goto retry_next_class; 				
-	}
-	// BUG_ON(!array->nr_active);
+		BUG_ON(!array->nr_active);
 
-	idx = queue->top_priority;
-	// BUG_ON (idx == MAX_PRIO);
-	next = task_list_entry(array->queue[idx].next);
+		idx = queue->top_priority;
+		if (queue->top_priority == MAX_PRIO) {
+			BUG_ON(1);
+		}
+
+		next = task_list_entry(array->queue[idx].next);
+	}
 	return next;
 }
 #else /*! CONFIG_CKRM_CPU_SCHEDULE*/
@@ -416,6 +417,7 @@ static inline void ckrm_sched_tick(int j,int this_cpu,void* name) {}
  */
 static void dequeue_task(struct task_struct *p, prio_array_t *array)
 {
+	BUG_ON(! array);
 	array->nr_active--;
 	list_del(&p->run_list);
 	if (list_empty(array->queue + p->prio))
@@ -2531,7 +2533,7 @@ static inline int wake_priority_sleeper(runqueue_t *rq)
 	return 0;
 }
 
-DEFINE_PER_CPU(struct kernel_stat, kstat);
+DEFINE_PER_CPU(struct kernel_stat, kstat) = { { 0 } };
 EXPORT_PER_CPU_SYMBOL(kstat);
 
 /*
@@ -2898,17 +2900,14 @@ pick_next:
 #endif
 	if (unlikely(!rq->nr_running)) {
 		idle_balance(cpu, rq);
-                if (!rq->nr_running) {
-                        next = rq->idle;
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-                        rq->expired_timestamp = 0;
-#endif
-                        wake_sleeping_dependent(cpu, rq);
-                        goto switch_tasks;
-                }
 	}
 
 	next = rq_get_next_task(rq);
+	if (next == rq->idle) {
+		rq->expired_timestamp = 0;
+		wake_sleeping_dependent(cpu, rq);
+		goto switch_tasks;
+	}
 
 	if (dependent_sleeper(cpu, rq, next)) {
 		next = rq->idle;
