@@ -76,11 +76,6 @@ struct rtable
 	/* Miscellaneous cached information */
 	__u32			rt_spec_dst; /* RFC1122 specific destination */
 	struct inet_peer	*peer; /* long-living peer info */
-
-#ifdef CONFIG_IP_ROUTE_NAT
-	__u32			rt_src_map;
-	__u32			rt_dst_map;
-#endif
 };
 
 struct ip_rt_acct
@@ -233,7 +228,7 @@ static inline int ip_route_connect(struct rtable **rp, u32 dst,
 			return err;
 		if (fl.fl4_dst == IPI_LOOPBACK && !vx_check(0, VX_ADMIN))
 			fl.fl4_dst = nx_info->ipv4[0];
-	}	
+	}
 	if (!fl.fl4_dst || !fl.fl4_src) {
 		err = __ip_route_output_key(rp, &fl);
 		if (err)

@@ -57,19 +57,19 @@ long vs_reboot(unsigned int cmd, void * arg)
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:
 		argv[1] = "restart";
-		break;	
+		break;
 
 	case LINUX_REBOOT_CMD_HALT:
 		argv[1] = "halt";
-		break;	
+		break;
 
 	case LINUX_REBOOT_CMD_POWER_OFF:
 		argv[1] = "poweroff";
-		break;	
+		break;
 
 	case LINUX_REBOOT_CMD_SW_SUSPEND:
 		argv[1] = "swsusp";
-		break;	
+		break;
 
 	case LINUX_REBOOT_CMD_RESTART2:
 		if (strncpy_from_user(&buffer[0], (char *)arg, sizeof(buffer) - 1) < 0)
@@ -77,7 +77,7 @@ long vs_reboot(unsigned int cmd, void * arg)
 		argv[3] = buffer;
 	default:
 		argv[1] = "restart2";
-		break;	
+		break;
 	}
 
 	/* maybe we should wait ? */

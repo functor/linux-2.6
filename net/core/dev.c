@@ -113,6 +113,7 @@
 #include <net/iw_handler.h>
 #endif	/* CONFIG_NET_RADIO */
 #include <asm/current.h>
+#include <linux/vs_base.h>
 #include <linux/vs_network.h>
 
 /* This define, if set, will randomly drop a packet when congestion
@@ -862,18 +863,6 @@ static int default_rebuild_header(struct sk_buff *skb)
 }
 
 
-/*
- * Some old buggy device drivers change get_stats after registering
- * the device.  Try and trap them here.
- * This can be elimnated when all devices are known fixed.
- */
-static inline int get_stats_changed(struct net_device *dev)
-{
-	int changed = dev->last_stats != dev->get_stats;
-	dev->last_stats = dev->get_stats;
-	return changed;
-}
-
 /**
  *	dev_open	- prepare an interface for use.
  *	@dev:	device to open
@@ -898,14 +887,6 @@ int dev_open(struct net_device *dev)
 		return 0;
 
 	/*
-	 *	 Check for broken device drivers.
-	 */
-	if (get_stats_changed(dev) && net_ratelimit()) {
-		printk(KERN_ERR "%s: driver changed get_stats after register\n",
-		       dev->name);
-	}
-
-	/*
 	 *	Is it even present?
 	 */
 	if (!netif_device_present(dev))
@@ -919,14 +900,6 @@ int dev_open(struct net_device *dev)
 		ret = dev->open(dev);
 		if (ret)
 			clear_bit(__LINK_STATE_START, &dev->state);
-	}
-
-	/*
-	 * 	Check for more broken device drivers.
-	 */
-	if (get_stats_changed(dev) && net_ratelimit()) {
-		printk(KERN_ERR "%s: driver changed get_stats in open\n",
-		       dev->name);
 	}
 
  	/*
@@ -1145,16 +1118,10 @@ int skb_checksum_help(struct sk_buff **pskb, int inward)
 		goto out;
 	}
 
-	if (skb_shared(*pskb)  || skb_cloned(*pskb)) {
-		struct sk_buff *newskb = skb_copy(*pskb, GFP_ATOMIC);
-		if (!newskb) {
-			ret = -ENOMEM;
+	if (skb_cloned(*pskb)) {
+		ret = pskb_expand_head(*pskb, 0, 0, GFP_ATOMIC);
+		if (ret)
 			goto out;
-		}
-		if ((*pskb)->sk)
-			skb_set_owner_w(newskb, (*pskb)->sk);
-		kfree_skb(*pskb);
-		*pskb = newskb;
 	}
 
 	if (offset > (int)(*pskb)->len)
@@ -1256,17 +1223,17 @@ int __skb_linearize(struct sk_buff *skb, int gfp_mask)
 	return 0;
 }
 
-#define HARD_TX_LOCK_BH(dev, cpu) {			\
+#define HARD_TX_LOCK(dev, cpu) {			\
 	if ((dev->features & NETIF_F_LLTX) == 0) {	\
-		spin_lock_bh(&dev->xmit_lock);		\
+		spin_lock(&dev->xmit_lock);		\
 		dev->xmit_lock_owner = cpu;		\
 	}						\
 }
 
-#define HARD_TX_UNLOCK_BH(dev) {			\
+#define HARD_TX_UNLOCK(dev) {				\
 	if ((dev->features & NETIF_F_LLTX) == 0) {	\
 		dev->xmit_lock_owner = -1;		\
-		spin_unlock_bh(&dev->xmit_lock);	\
+		spin_unlock(&dev->xmit_lock);		\
 	}						\
 }
 
@@ -1320,7 +1287,12 @@ int dev_queue_xmit(struct sk_buff *skb)
 	      	if (skb_checksum_help(&skb, 0))
 	      		goto out_kfree_skb;
 
-	rcu_read_lock();
+
+	/* Disable soft irqs for various locks below. Also 
+	 * stops preemption for RCU. 
+	 */
+	local_bh_disable(); 
+
 	/* Updates of qdisc are serialized by queue_lock. 
 	 * The struct Qdisc which is pointed to by qdisc is now a 
 	 * rcu structure - it may be accessed without acquiring 
@@ -1333,25 +1305,22 @@ int dev_queue_xmit(struct sk_buff *skb)
 	 * also serializes access to the device queue.
 	 */
 
-	q = dev->qdisc;
-	smp_read_barrier_depends();
+	q = rcu_dereference(dev->qdisc);
 #ifdef CONFIG_NET_CLS_ACT
 	skb->tc_verd = SET_TC_AT(skb->tc_verd,AT_EGRESS);
 #endif
 	if (q->enqueue) {
 		/* Grab device queue */
-		spin_lock_bh(&dev->queue_lock);
+		spin_lock(&dev->queue_lock);
 
 		rc = q->enqueue(skb, q);
 
 		qdisc_run(dev);
 
-		spin_unlock_bh(&dev->queue_lock);
-		rcu_read_unlock();
+		spin_unlock(&dev->queue_lock);
 		rc = rc == NET_XMIT_BYPASS ? NET_XMIT_SUCCESS : rc;
 		goto out;
 	}
-	rcu_read_unlock();
 
 	/* The device has no queue. Common case for software devices:
 	   loopback, all the sorts of tunnels...
@@ -1366,12 +1335,11 @@ int dev_queue_xmit(struct sk_buff *skb)
 	   Either shot noqueue qdisc, it is even simpler 8)
 	 */
 	if (dev->flags & IFF_UP) {
-		int cpu = get_cpu();
+		int cpu = smp_processor_id(); /* ok because BHs are off */
 
 		if (dev->xmit_lock_owner != cpu) {
 
-			HARD_TX_LOCK_BH(dev, cpu);
-			put_cpu();
+			HARD_TX_LOCK(dev, cpu);
 
 			if (!netif_queue_stopped(dev)) {
 				if (netdev_nit)
@@ -1379,17 +1347,16 @@ int dev_queue_xmit(struct sk_buff *skb)
 
 				rc = 0;
 				if (!dev->hard_start_xmit(skb, dev)) {
-					HARD_TX_UNLOCK_BH(dev);
+					HARD_TX_UNLOCK(dev);
 					goto out;
 				}
 			}
-			HARD_TX_UNLOCK_BH(dev);
+			HARD_TX_UNLOCK(dev);
 			if (net_ratelimit())
 				printk(KERN_CRIT "Virtual device %s asks to "
 				       "queue packet!\n", dev->name);
 			goto out_enetdown;
 		} else {
-			put_cpu();
 			/* Recursion is detected! It is possible,
 			 * unfortunately */
 			if (net_ratelimit())
@@ -1402,6 +1369,7 @@ out_enetdown:
 out_kfree_skb:
 	kfree_skb(skb);
 out:
+	local_bh_enable();
 	return rc;
 }
 
@@ -1559,7 +1527,7 @@ int netif_rx(struct sk_buff *skb)
 	struct softnet_data *queue;
 	unsigned long flags;
 
-#ifdef CONFIG_NETPOLL_RX
+#ifdef CONFIG_NETPOLL
 	if (skb->dev->netpoll_rx && netpoll_rx(skb)) {
 		kfree_skb(skb);
 		return NET_RX_DROP;
@@ -1678,43 +1646,34 @@ static void net_tx_action(struct softirq_action *h)
 }
 
 static __inline__ int deliver_skb(struct sk_buff *skb,
-				  struct packet_type *pt_prev, int last)
+				  struct packet_type *pt_prev)
 {
 	atomic_inc(&skb->users);
 	return pt_prev->func(skb, skb->dev, pt_prev);
 }
 
-
 #if defined(CONFIG_BRIDGE) || defined (CONFIG_BRIDGE_MODULE)
-int (*br_handle_frame_hook)(struct sk_buff *skb);
+int (*br_handle_frame_hook)(struct net_bridge_port *p, struct sk_buff **pskb);
 
-static __inline__ int handle_bridge(struct sk_buff *skb,
-				     struct packet_type *pt_prev)
+static __inline__ int handle_bridge(struct sk_buff **pskb,
+				    struct packet_type **pt_prev, int *ret)
 {
-	int ret = NET_RX_DROP;
-	if (pt_prev)
-		ret = deliver_skb(skb, pt_prev, 0);
+	struct net_bridge_port *port;
 
-	return ret;
-}
+	if ((*pskb)->pkt_type == PACKET_LOOPBACK ||
+	    (port = rcu_dereference((*pskb)->dev->br_port)) == NULL)
+		return 0;
 
-#endif
-
-static inline int __handle_bridge(struct sk_buff *skb,
-			struct packet_type **pt_prev, int *ret)
-{
-#if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
-	if (skb->dev->br_port && skb->pkt_type != PACKET_LOOPBACK) {
-		*ret = handle_bridge(skb, *pt_prev);
-		if (br_handle_frame_hook(skb) == 0)
-			return 1;
-
+	if (*pt_prev) {
+		*ret = deliver_skb(*pskb, *pt_prev);
 		*pt_prev = NULL;
-	}
-#endif
-	return 0;
+	} 
+	
+	return br_handle_frame_hook(port, pskb);
 }
-
+#else
+#define handle_bridge(skb, pt_prev, ret)	(0)
+#endif
 
 #ifdef CONFIG_NET_CLS_ACT
 /* TODO: Maybe we should just force sch_ingress to be compiled in
@@ -1763,7 +1722,7 @@ int netif_receive_skb(struct sk_buff *skb)
 	int ret = NET_RX_DROP;
 	unsigned short type;
 
-#ifdef CONFIG_NETPOLL_RX
+#ifdef CONFIG_NETPOLL
 	if (skb->dev->netpoll_rx && skb->dev->poll && netpoll_rx(skb)) {
 		kfree_skb(skb);
 		return NET_RX_DROP;
@@ -1781,27 +1740,27 @@ int netif_receive_skb(struct sk_buff *skb)
 	skb->mac_len = skb->nh.raw - skb->mac.raw;
 
 	pt_prev = NULL;
+
+	rcu_read_lock();
+
 #ifdef CONFIG_NET_CLS_ACT
 	if (skb->tc_verd & TC_NCLS) {
 		skb->tc_verd = CLR_TC_NCLS(skb->tc_verd);
-		rcu_read_lock();
 		goto ncls;
 	}
- #endif
+#endif
 
-	rcu_read_lock();
 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
 		if (!ptype->dev || ptype->dev == skb->dev) {
 			if (pt_prev) 
-				ret = deliver_skb(skb, pt_prev, 0);
+				ret = deliver_skb(skb, pt_prev);
 			pt_prev = ptype;
 		}
 	}
 
 #ifdef CONFIG_NET_CLS_ACT
 	if (pt_prev) {
-		atomic_inc(&skb->users);
-		ret = pt_prev->func(skb, skb->dev, pt_prev);
+		ret = deliver_skb(skb, pt_prev);
 		pt_prev = NULL; /* noone else should process this after*/
 	} else {
 		skb->tc_verd = SET_TC_OK2MUNGE(skb->tc_verd);
@@ -1820,7 +1779,7 @@ ncls:
 
 	handle_diverter(skb);
 
-	if (__handle_bridge(skb, &pt_prev, &ret))
+	if (handle_bridge(&skb, &pt_prev, &ret))
 		goto out;
 
 	type = skb->protocol;
@@ -1828,7 +1787,7 @@ ncls:
 		if (ptype->type == type &&
 		    (!ptype->dev || ptype->dev == skb->dev)) {
 			if (pt_prev) 
-				ret = deliver_skb(skb, pt_prev, 0);
+				ret = deliver_skb(skb, pt_prev);
 			pt_prev = ptype;
 		}
 	}
@@ -2043,7 +2002,8 @@ static int dev_ifconf(char __user *arg)
 
 	total = 0;
 	for (dev = dev_base; dev; dev = dev->next) {
-		if (!dev_in_nx_info(dev, current->nx_info))
+		if (vx_flags(VXF_HIDE_NETIF, 0) &&
+			!dev_in_nx_info(dev, current->nx_info))
 			continue;
 		for (i = 0; i < NPROTO; i++) {
 			if (gifconf_list[i]) {
@@ -2107,7 +2067,7 @@ static void dev_seq_printf_stats(struct seq_file *seq, struct net_device *dev)
 {
 	struct nx_info *nxi = current->nx_info;
 
-	if (!dev_in_nx_info(dev, nxi))
+	if (vx_flags(VXF_HIDE_NETIF, 0) && !dev_in_nx_info(dev, nxi))
 		return;
 	if (dev->get_stats) {
 		struct net_device_stats *stats = dev->get_stats(dev);
@@ -3287,6 +3247,8 @@ static int __init net_dev_init(void)
 
 	BUG_ON(!dev_boot_phase);
 
+	net_random_init();
+
 	if (dev_proc_init())
 		goto out;
 
@@ -3366,6 +3328,7 @@ EXPORT_SYMBOL(dev_remove_pack);
 EXPORT_SYMBOL(dev_set_allmulti);
 EXPORT_SYMBOL(dev_set_promiscuity);
 EXPORT_SYMBOL(dev_change_flags);
+EXPORT_SYMBOL(dev_change_name);
 EXPORT_SYMBOL(dev_set_mtu);
 EXPORT_SYMBOL(free_netdev);
 EXPORT_SYMBOL(netdev_boot_setup_check);

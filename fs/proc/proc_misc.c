@@ -84,17 +84,32 @@ static int proc_calc_metrics(char *page, char **start, off_t off,
 static int loadavg_read_proc(char *page, char **start, off_t off,
 				 int count, int *eof, void *data)
 {
+	unsigned int running, threads;
 	int a, b, c;
 	int len;
 
-	a = avenrun[0] + (FIXED_1/200);
-	b = avenrun[1] + (FIXED_1/200);
-	c = avenrun[2] + (FIXED_1/200);
-	len = sprintf(page,"%d.%02d %d.%02d %d.%02d %ld/%d %d\n",
+	if (vx_flags(VXF_VIRT_LOAD, 0)) {
+		struct vx_info *vxi = current->vx_info;
+
+		a = vxi->cvirt.load[0] + (FIXED_1/200);
+		b = vxi->cvirt.load[1] + (FIXED_1/200);
+		c = vxi->cvirt.load[2] + (FIXED_1/200);
+
+		running = atomic_read(&vxi->cvirt.nr_running);
+		threads = atomic_read(&vxi->cvirt.nr_threads);
+	} else {
+		a = avenrun[0] + (FIXED_1/200);
+		b = avenrun[1] + (FIXED_1/200);
+		c = avenrun[2] + (FIXED_1/200);
+
+		running = nr_running();
+		threads = nr_threads;
+	}
+	len = sprintf(page,"%d.%02d %d.%02d %d.%02d %d/%d %d\n",
 		LOAD_INT(a), LOAD_FRAC(a),
 		LOAD_INT(b), LOAD_FRAC(b),
 		LOAD_INT(c), LOAD_FRAC(c),
-		nr_running(), nr_threads, last_pid);
+		running, threads, last_pid);
 	return proc_calc_metrics(page, start, off, count, eof, len);
 }
 
@@ -547,70 +562,6 @@ static int execdomains_read_proc(char *page, char **start, off_t off,
 	return proc_calc_metrics(page, start, off, count, eof, len);
 }
 
-/*
- * This function accesses profiling information. The returned data is
- * binary: the sampling step and the actual contents of the profile
- * buffer. Use of the program readprofile is recommended in order to
- * get meaningful info out of these data.
- */
-static ssize_t
-read_profile(struct file *file, char __user *buf, size_t count, loff_t *ppos)
-{
-	unsigned long p = *ppos;
-	ssize_t read;
-	char * pnt;
-	unsigned int sample_step = 1 << prof_shift;
-
-	if (p >= (prof_len+1)*sizeof(unsigned int))
-		return 0;
-	if (count > (prof_len+1)*sizeof(unsigned int) - p)
-		count = (prof_len+1)*sizeof(unsigned int) - p;
-	read = 0;
-
-	while (p < sizeof(unsigned int) && count > 0) {
-		put_user(*((char *)(&sample_step)+p),buf);
-		buf++; p++; count--; read++;
-	}
-	pnt = (char *)prof_buffer + p - sizeof(unsigned int);
-	if (copy_to_user(buf,(void *)pnt,count))
-		return -EFAULT;
-	read += count;
-	*ppos += read;
-	return read;
-}
-
-/*
- * Writing to /proc/profile resets the counters
- *
- * Writing a 'profiling multiplier' value into it also re-sets the profiling
- * interrupt frequency, on architectures that support this.
- */
-static ssize_t write_profile(struct file *file, const char __user *buf,
-			     size_t count, loff_t *ppos)
-{
-#ifdef CONFIG_SMP
-	extern int setup_profiling_timer (unsigned int multiplier);
-
-	if (count == sizeof(int)) {
-		unsigned int multiplier;
-
-		if (copy_from_user(&multiplier, buf, sizeof(int)))
-			return -EFAULT;
-
-		if (setup_profiling_timer(multiplier))
-			return -EINVAL;
-	}
-#endif
-
-	memset(prof_buffer, 0, prof_len * sizeof(*prof_buffer));
-	return count;
-}
-
-static struct file_operations proc_profile_operations = {
-	.read		= read_profile,
-	.write		= write_profile,
-};
-
 #ifdef CONFIG_MAGIC_SYSRQ
 /*
  * writing 'C' to /proc/sysrq-trigger is like sysrq-C
@@ -687,6 +638,9 @@ void __init proc_misc_init(void)
 #ifdef CONFIG_MODULES
 	create_seq_entry("modules", 0, &proc_modules_operations);
 #endif
+#ifdef CONFIG_SCHEDSTATS
+	create_seq_entry("schedstat", 0, &proc_schedstat_operations);
+#endif
 #ifdef CONFIG_PROC_KCORE
 	proc_root_kcore = create_proc_entry("kcore", S_IRUSR, NULL);
 	if (proc_root_kcore) {
@@ -695,13 +649,6 @@ void __init proc_misc_init(void)
 				(size_t)high_memory - PAGE_OFFSET + PAGE_SIZE;
 	}
 #endif
-	if (prof_on) {
-		entry = create_proc_entry("profile", S_IWUSR | S_IRUGO, NULL);
-		if (entry) {
-			entry->proc_fops = &proc_profile_operations;
-			entry->size = (1+prof_len) * sizeof(unsigned int);
-		}
-	}
 #ifdef CONFIG_MAGIC_SYSRQ
 	entry = create_proc_entry("sysrq-trigger", S_IWUSR, NULL);
 	if (entry)

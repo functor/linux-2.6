@@ -9,12 +9,12 @@
 #include <linux/mm.h>
 #include <linux/smp_lock.h>
 #include <linux/interrupt.h>
+#include <linux/vs_memory.h>
 
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/system.h>
 #include <asm/uaccess.h>
-#include <asm/hardirq.h>
 
 extern void die (char *, struct pt_regs *, long);
 
@@ -47,6 +47,7 @@ expand_backing_store (struct vm_area_struct *vma, unsigned long address)
 	if (vma->vm_flags & VM_LOCKED)
 		// vma->vm_mm->locked_vm += grow;
 		vx_vmlocked_add(vma->vm_mm, grow);
+	__vm_stat_account(vma->vm_mm, vma->vm_flags, vma->vm_file, grow);
 	return 0;
 }
 
@@ -203,7 +204,7 @@ ia64_do_page_fault (unsigned long address, unsigned long isr, struct pt_regs *re
 		si.si_signo = signal;
 		si.si_errno = 0;
 		si.si_code = code;
-		si.si_addr = (void *) address;
+		si.si_addr = (void __user *) address;
 		si.si_isr = isr;
 		si.si_flags = __ISR_VALID;
 		force_sig_info(signal, &si, current);

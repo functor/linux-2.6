@@ -120,8 +120,6 @@ rwlock_t udp_hash_lock = RW_LOCK_UNLOCKED;
 /* Shared by v4/v6 udp. */
 int udp_port_rover;
 
-int tcp_ipv4_addr_conflict(struct sock *sk1, struct sock *sk2);
-
 static int udp_v4_get_port(struct sock *sk, unsigned short snum)
 {
 	struct hlist_node *node;
@@ -176,12 +174,12 @@ gotit:
 			struct inet_opt *inet2 = inet_sk(sk2);
 
 			if (inet2->num == snum &&
-			    sk2 != sk &&
-			    !ipv6_only_sock(sk2) &&
+			    sk2 != sk && !ipv6_only_sock(sk2) &&
 			    (!sk2->sk_bound_dev_if ||
 			     !sk->sk_bound_dev_if ||
 			     sk2->sk_bound_dev_if == sk->sk_bound_dev_if) &&
-			    tcp_ipv4_addr_conflict(sk2, sk) &&
+			    nx_addr_conflict(sk->sk_nx_info,
+			     tcp_v4_rcv_saddr(sk), sk2) &&
 			    (!sk2->sk_reuse || !sk->sk_reuse))
 				goto fail;
 		}
@@ -1346,6 +1344,7 @@ struct proto udp_prot = {
 	.hash =		udp_v4_hash,
 	.unhash =	udp_v4_unhash,
 	.get_port =	udp_v4_get_port,
+	.slab_obj_size = sizeof(struct udp_sock),
 };
 
 /* ------------------------------------------------------------------------ */

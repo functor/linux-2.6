@@ -104,34 +104,23 @@ static void raw_v4_unhash(struct sock *sk)
 
 
 /*
-	Check if an address is in the list
-*/
-static inline int raw_addr_in_list (
-	u32 rcv_saddr1,
-	u32 rcv_saddr2,
-	u32 loc_addr,
-	struct nx_info *nx_info)
+ *	Check if a given address matches for a socket
+ *
+ *	nxi:		the socket's nx_info if any
+ *	addr:		to be verified address
+ *	saddr/baddr:	socket addresses
+ */
+static inline int raw_addr_match (
+	struct nx_info *nxi,
+	uint32_t addr,
+	uint32_t saddr,
+	uint32_t baddr)
 {
-	int ret = 0;
-	if (loc_addr != 0 &&
-		(rcv_saddr1 == loc_addr || rcv_saddr2 == loc_addr))
-		ret = 1;
-	else if (rcv_saddr1 == 0) {
-		/* Accept any address or only the one in the list */
-		if (nx_info == NULL)
-			ret = 1;
-		else {
-			int n = nx_info->nbipv4;
-			int i;
-			for (i=0; i<n; i++) {
-				if (nx_info->ipv4[i] == loc_addr) {
-					ret = 1;
-					break;
-				}
-			}
-		}
-	}
-	return ret;
+	if (addr && (saddr == addr || baddr == addr))
+		return 1;
+	if (!saddr)
+		return addr_in_nx_info(nxi, addr);
+	return 0;
 }
 
 struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
@@ -145,8 +134,8 @@ struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
 
 		if (inet->num == num 					&&
 		    !(inet->daddr && inet->daddr != raddr) 		&&
-		    raw_addr_in_list(inet->rcv_saddr, inet->rcv_saddr2,
-			laddr, sk->sk_nx_info) &&
+		    raw_addr_match(sk->sk_nx_info, laddr,
+			inet->rcv_saddr, inet->rcv_saddr2)		&&
 		    !(sk->sk_bound_dev_if && sk->sk_bound_dev_if != dif))
 			goto found; /* gotcha */
 	}
@@ -340,7 +329,7 @@ static int raw_send_hdrinc(struct sock *sk, void *from, int length,
 	}
 	err = -EPERM;
 	if (!vx_check(0, VX_ADMIN) && !capable(CAP_NET_RAW)
-		&& (!raw_addr_in_list(0, 0, iph->saddr, sk->sk_nx_info)))
+		&& (!addr_in_nx_info(sk->sk_nx_info, iph->saddr)))
 		goto error;
 
 	err = NF_HOOK(PF_INET, NF_IP_LOCAL_OUT, skb, NULL, rt->u.dst.dev,
@@ -358,6 +347,51 @@ error_fault:
 error:
 	IP_INC_STATS(IPSTATS_MIB_OUTDISCARDS);
 	return err; 
+}
+
+static void raw_probe_proto_opt(struct flowi *fl, struct msghdr *msg)
+{
+	struct iovec *iov;
+	u8 __user *type = NULL;
+	u8 __user *code = NULL;
+	int probed = 0;
+	int i;
+
+	if (!msg->msg_iov)
+		return;
+
+	for (i = 0; i < msg->msg_iovlen; i++) {
+		iov = &msg->msg_iov[i];
+		if (!iov)
+			continue;
+
+		switch (fl->proto) {
+		case IPPROTO_ICMP:
+			/* check if one-byte field is readable or not. */
+			if (iov->iov_base && iov->iov_len < 1)
+				break;
+
+			if (!type) {
+				type = iov->iov_base;
+				/* check if code field is readable or not. */
+				if (iov->iov_len > 1)
+					code = type + 1;
+			} else if (!code)
+				code = iov->iov_base;
+
+			if (type && code) {
+				get_user(fl->fl_icmp_type, type);
+				__get_user(fl->fl_icmp_code, code);
+				probed = 1;
+			}
+			break;
+		default:
+			probed = 1;
+			break;
+		}
+		if (probed)
+			break;
+	}
 }
 
 static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
@@ -466,7 +500,9 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				    .proto = inet->hdrincl ? IPPROTO_RAW :
 					    		     sk->sk_protocol,
 				  };
-		
+		if (!inet->hdrincl)
+			raw_probe_proto_opt(&fl, msg);
+
 		if (sk->sk_nx_info) {
 			err = ip_find_src(sk->sk_nx_info, &rt, &fl);
 
@@ -715,6 +751,7 @@ struct proto raw_prot = {
 	.backlog_rcv =	raw_rcv_skb,
 	.hash =		raw_v4_hash,
 	.unhash =	raw_v4_unhash,
+	.slab_obj_size = sizeof(struct raw_sock),
 };
 
 #ifdef CONFIG_PROC_FS

@@ -368,7 +368,7 @@ void tcp_time_wait(struct sock *sk, int state, int timeo)
 		tw->tw_vx_info		= NULL;
 		tw->tw_nid		= sk->sk_nid;
 		tw->tw_nx_info		= NULL;
-		
+
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 		if (tw->tw_family == PF_INET6) {
 			struct ipv6_pinfo *np = inet6_sk(sk);
@@ -694,7 +694,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 	/* allocate the newsk from the same slab of the master sock,
 	 * if not, at sk_free time we'll try to free it from the wrong
 	 * slabcache (i.e. is it TCPv4 or v6?) -acme */
-	struct sock *newsk = sk_alloc(PF_INET, GFP_ATOMIC, 0, sk->sk_slab);
+	struct sock *newsk = sk_alloc(PF_INET, GFP_ATOMIC, 0, sk->sk_prot->slab);
 
 	if(newsk != NULL) {
 		struct tcp_opt *newtp;
@@ -761,11 +761,11 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newtp->mdev = TCP_TIMEOUT_INIT;
 		newtp->rto = TCP_TIMEOUT_INIT;
 
-		newtp->packets_out = 0;
-		newtp->left_out = 0;
-		newtp->retrans_out = 0;
-		newtp->sacked_out = 0;
-		newtp->fackets_out = 0;
+		tcp_set_pcount(&newtp->packets_out, 0);
+		tcp_set_pcount(&newtp->left_out, 0);
+		tcp_set_pcount(&newtp->retrans_out, 0);
+		tcp_set_pcount(&newtp->sacked_out, 0);
+		tcp_set_pcount(&newtp->fackets_out, 0);
 		newtp->snd_ssthresh = 0x7fffffff;
 
 		/* So many TCP implementations out there (incorrectly) count the
@@ -856,7 +856,8 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		if (newtp->ecn_flags&TCP_ECN_OK)
 			newsk->sk_no_largesend = 1;
 
-		tcp_vegas_init(newtp);
+		tcp_ca_init(newtp);
+
 		TCP_INC_STATS_BH(TCP_MIB_PASSIVEOPENS);
 	}
 	return newsk;

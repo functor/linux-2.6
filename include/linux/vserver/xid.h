@@ -2,7 +2,7 @@
 #define _VX_XID_H
 
 
-#define	XID_TAG(in)	(!(in) || \
+#define XID_TAG(in)	(!(in) || \
 	(((struct inode *)in)->i_sb && \
 	(((struct inode *)in)->i_sb->s_flags & MS_TAGXID)))
 
@@ -114,7 +114,7 @@ static inline gid_t vx_map_gid(gid_t gid)
 }
 
 
-#ifdef	CONFIG_VSERVER_LEGACY		
+#ifdef	CONFIG_VSERVER_LEGACY
 #define FIOC_GETXID	_IOR('x', 1, long)
 #define FIOC_SETXID	_IOW('x', 2, long)
 #define FIOC_SETXIDJ	_IOW('x', 3, long)

@@ -69,6 +69,68 @@ static int devpts_remount(struct super_block *sb, int *flags, char *data)
 	return 0;
 }
 
+static int devpts_readdir(struct file * filp, void * dirent, filldir_t filldir)
+{
+	struct dentry *dentry = filp->f_dentry;
+	struct dentry *cursor = filp->private_data;
+	struct list_head *p, *q = &cursor->d_child;
+	ino_t ino;
+	int i = filp->f_pos;
+
+	switch (i) {
+		case 0:
+			ino = dentry->d_inode->i_ino;
+			if (filldir(dirent, ".", 1, i, ino, DT_DIR) < 0)
+				break;
+			filp->f_pos++;
+			i++;
+			/* fallthrough */
+		case 1:
+			ino = parent_ino(dentry);
+			if (filldir(dirent, "..", 2, i, ino, DT_DIR) < 0)
+				break;
+			filp->f_pos++;
+			i++;
+			/* fallthrough */
+		default:
+			spin_lock(&dcache_lock);
+			if (filp->f_pos == 2) {
+				list_del(q);
+				list_add(q, &dentry->d_subdirs);
+			}
+			for (p=q->next; p != &dentry->d_subdirs; p=p->next) {
+				struct dentry *next;
+				next = list_entry(p, struct dentry, d_child);
+				if (d_unhashed(next) || !next->d_inode)
+					continue;
+				if (!vx_check(next->d_inode->i_xid, VX_IDENT))
+					continue;
+
+				spin_unlock(&dcache_lock);
+				if (filldir(dirent, next->d_name.name,
+					next->d_name.len, filp->f_pos,
+					next->d_inode->i_ino, DT_CHR) < 0)
+					return 0;
+				spin_lock(&dcache_lock);
+				/* next is still alive */
+				list_del(q);
+				list_add(q, p);
+				p = q;
+				filp->f_pos++;
+			}
+			spin_unlock(&dcache_lock);
+	}
+	return 0;
+}
+
+static struct file_operations devpts_dir_operations = {
+	.open		= dcache_dir_open,
+	.release	= dcache_dir_close,
+	.llseek		= dcache_dir_lseek,
+	.read		= generic_read_dir,
+	.readdir	= devpts_readdir,
+};
+
 static struct super_operations devpts_sops = {
 	.statfs		= simple_statfs,
 	.remount_fs	= devpts_remount,
@@ -94,7 +156,7 @@ devpts_fill_super(struct super_block *s, void *data, int silent)
 	inode->i_uid = inode->i_gid = 0;
 	inode->i_mode = S_IFDIR | S_IRUGO | S_IXUGO | S_IWUSR;
 	inode->i_op = &simple_dir_inode_operations;
-	inode->i_fop = &simple_dir_operations;
+	inode->i_fop = &devpts_dir_operations;
 	inode->i_nlink = 2;
 	inode->i_xid = vx_current_xid();
 
@@ -137,7 +199,7 @@ static struct dentry *get_node(int num)
 static int devpts_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
 	int ret = -EACCES;
-	
+
 	if (vx_check(inode->i_xid, VX_IDENT))
 		ret = vfs_permission(inode, mask);
 	return ret;
@@ -190,8 +252,12 @@ struct tty_struct *devpts_get_tty(int number)
 	struct dentry *dentry = get_node(number);
 	struct tty_struct *tty;
 
-	tty = (IS_ERR(dentry) || !dentry->d_inode) ? NULL :
-			dentry->d_inode->u.generic_ip;
+	tty = NULL;
+	if (!IS_ERR(dentry)) {
+		if (dentry->d_inode)
+			tty = dentry->d_inode->u.generic_ip;
+		dput(dentry);
+	}
 
 	up(&devpts_root->d_inode->i_sem);
 

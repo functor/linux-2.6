@@ -301,6 +301,9 @@ MODULE_AUTHOR("Eric Youngdale, Andi Kleen");
 
 #define elf_addr_t __u32
 
+#undef TASK_SIZE
+#define TASK_SIZE 0xffffffff
+
 static void elf32_init(struct pt_regs *);
 
 #include "../../../fs/binfmt_elf.c" 
@@ -368,9 +371,9 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
  		mpnt->vm_page_prot = (mpnt->vm_flags & VM_EXEC) ? 
  			PAGE_COPY_EXEC : PAGE_COPY;
 		insert_vm_struct(mm, mpnt);
-		// mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
-		vx_vmpages_sub(mm, mm->total_vm -
-			((mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT));
+		// mm->stack_vm = mm->total_vm = vma_pages(mpnt);
+		vx_vmpages_sub(mm, mm->total_vm - vma_pages(mpnt));
+		mm->stack_vm = mm->total_vm;
 	} 
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {

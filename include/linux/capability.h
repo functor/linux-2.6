@@ -288,7 +288,7 @@ typedef __u32 kernel_cap_t;
 /* Allow context manipulations */
 /* Allow changing context info on files */
 
-#define CAP_CONTEXT          29
+#define CAP_CONTEXT	     29
 
 #ifdef __KERNEL__
 /* 

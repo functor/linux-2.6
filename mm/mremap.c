@@ -226,6 +226,7 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 
 	// mm->total_vm += new_len >> PAGE_SHIFT;
 	vx_vmpages_add(mm, new_len >> PAGE_SHIFT);
+	__vm_stat_account(mm, vma->vm_flags, vma->vm_file, new_len>>PAGE_SHIFT);
 	if (vm_flags & VM_LOCKED) {
 		// mm->locked_vm += new_len >> PAGE_SHIFT;
 		vx_vmlocked_add(mm, new_len >> PAGE_SHIFT);
@@ -327,10 +328,12 @@ unsigned long do_mremap(unsigned long addr,
 			goto out;
 	}
 	if (vma->vm_flags & VM_LOCKED) {
-		unsigned long locked = current->mm->locked_vm << PAGE_SHIFT;
+		unsigned long locked, lock_limit;
+		locked = current->mm->locked_vm << PAGE_SHIFT;
+		lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
 		locked += new_len - old_len;
 		ret = -EAGAIN;
-		if (locked > current->rlim[RLIMIT_MEMLOCK].rlim_cur)
+		if (locked > lock_limit && !capable(CAP_IPC_LOCK))
 			goto out;
 		ret = -ENOMEM;
 		if (!vx_vmlocked_avail(current->mm,
@@ -369,6 +372,8 @@ unsigned long do_mremap(unsigned long addr,
 
 			// current->mm->total_vm += pages;
 			vx_vmpages_add(current->mm, pages);
+			__vm_stat_account(vma->vm_mm, vma->vm_flags,
+							vma->vm_file, pages);
 			if (vma->vm_flags & VM_LOCKED) {
 				// current->mm->locked_vm += pages;
 				vx_vmlocked_add(vma->vm_mm, pages);

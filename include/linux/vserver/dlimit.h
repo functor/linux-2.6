@@ -13,12 +13,12 @@
 #define VCMD_get_dlimit		VC_CMD(DLIMIT, 6, 0)
 
 
-struct  vcmd_ctx_dlimit_base_v0 {
+struct	vcmd_ctx_dlimit_base_v0 {
 	const char __user *name;
 	uint32_t flags;
 };
 
-struct  vcmd_ctx_dlimit_v0 {
+struct	vcmd_ctx_dlimit_v0 {
 	const char __user *name;
 	uint32_t space_used;			/* used space in kbytes */
 	uint32_t space_total;			/* maximum space in kbytes */
@@ -28,9 +28,9 @@ struct  vcmd_ctx_dlimit_v0 {
 	uint32_t flags;
 };
 
-#define CDLIM_UNSET             (0ULL)
-#define CDLIM_INFINITY          (~0ULL)
-#define CDLIM_KEEP              (~1ULL)
+#define CDLIM_UNSET		(0ULL)
+#define CDLIM_INFINITY		(~0ULL)
+#define CDLIM_KEEP		(~1ULL)
 
 
 #ifdef	__KERNEL__
@@ -77,7 +77,7 @@ extern int vc_set_dlimit(uint32_t, void __user *);
 extern int vc_get_dlimit(uint32_t, void __user *);
 
 
-typedef	uint64_t dlsize_t;
+typedef uint64_t dlsize_t;
 
 
 #endif	/* __KERNEL__ */

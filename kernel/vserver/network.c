@@ -16,8 +16,8 @@
 #include <linux/slab.h>
 #include <linux/vserver.h>
 #include <linux/vs_base.h>
-#include <linux/vs_network.h>
 #include <linux/rcupdate.h>
+#include <net/tcp.h>
 
 #include <asm/errno.h>
 
@@ -30,14 +30,14 @@
 static struct nx_info *__alloc_nx_info(nid_t nid)
 {
 	struct nx_info *new = NULL;
-	
+
 	vxdprintk(VXD_CBIT(nid, 1), "alloc_nx_info(%d)*", nid);
 
 	/* would this benefit from a slab cache? */
 	new = kmalloc(sizeof(struct nx_info), GFP_KERNEL);
 	if (!new)
 		return 0;
-	
+
 	memset (new, 0, sizeof(struct nx_info));
 	new->nx_id = nid;
 	INIT_RCU_HEAD(&new->nx_rcu);
@@ -46,7 +46,7 @@ static struct nx_info *__alloc_nx_info(nid_t nid)
 	atomic_set(&new->nx_usecnt, 0);
 
 	/* rest of init goes here */
-	
+
 	vxdprintk(VXD_CBIT(nid, 0),
 		"alloc_nx_info() = %p", new);
 	return new;
@@ -63,7 +63,7 @@ static void __dealloc_nx_info(struct nx_info *nxi)
 
 	nxi->nx_hlist.next = LIST_POISON1;
 	nxi->nx_id = -1;
-	
+
 	BUG_ON(atomic_read(&nxi->nx_usecnt));
 	BUG_ON(atomic_read(&nxi->nx_refcnt));
 
@@ -73,7 +73,7 @@ static void __dealloc_nx_info(struct nx_info *nxi)
 
 /*	hash table for nx_info hash */
 
-#define	NX_HASH_SIZE	13
+#define NX_HASH_SIZE	13
 
 struct hlist_head nx_info_hash[NX_HASH_SIZE];
 
@@ -95,7 +95,7 @@ static inline unsigned int __hashval(nid_t nid)
 static inline void __hash_nx_info(struct nx_info *nxi)
 {
 	struct hlist_head *head;
-	
+
 	vxdprintk(VXD_CBIT(nid, 4),
 		"__hash_nx_info: %p[#%d]", nxi, nxi->nx_id);
 	get_nx_info(nxi);
@@ -148,7 +148,7 @@ static inline nid_t __nx_dynamic_id(void)
 {
 	static nid_t seq = MAX_N_CONTEXT;
 	nid_t barrier = seq;
-	
+
 	do {
 		if (++seq > MAX_N_CONTEXT)
 			seq = MIN_D_CONTEXT;
@@ -169,7 +169,7 @@ static inline nid_t __nx_dynamic_id(void)
 static struct nx_info * __loc_nx_info(int id, int *err)
 {
 	struct nx_info *new, *nxi = NULL;
-	
+
 	vxdprintk(VXD_CBIT(nid, 1), "loc_nx_info(%d)*", id);
 
 	if (!(new = __alloc_nx_info(id))) {
@@ -256,13 +256,13 @@ void unhash_nx_info(struct nx_info *nxi)
 
 /*	locate_nx_info()
 
-	* search for a nx_info and get() it			
+	* search for a nx_info and get() it
 	* negative id means current				*/
 
 struct nx_info *locate_nx_info(int id)
 {
 	struct nx_info *nxi;
-	
+
 	if (id < 0) {
 		nxi = get_nx_info(current->nx_info);
 	} else {
@@ -300,7 +300,7 @@ struct nx_info *create_nx_info(void)
 {
 	struct nx_info *new;
 	int err;
-	
+
 	vxdprintk(VXD_CBIT(nid, 5), "create_nx_info(%s)", "void");
 	if (!(new = __loc_nx_info(NX_DYNAMIC_ID, &err)))
 		return NULL;
@@ -311,10 +311,6 @@ struct nx_info *create_nx_info(void)
 #endif
 
 #ifdef	CONFIG_PROC_FS
-
-#define hlist_for_each_rcu(pos, head) \
-        for (pos = (head)->first; pos && ({ prefetch(pos->next); 1;}); \
-		pos = pos->next, ({ smp_read_barrier_depends(); 0;}))
 
 int get_nid_list(int index, unsigned int *nids, int size)
 {
@@ -332,7 +328,7 @@ int get_nid_list(int index, unsigned int *nids, int size)
 				continue;
 
 			nxi = hlist_entry(pos, struct nx_info, nx_hlist);
-			nids[nr_nids] = nxi->nx_id;			
+			nids[nr_nids] = nxi->nx_id;
 			if (++nr_nids >= size)
 				goto out;
 		}
@@ -352,7 +348,7 @@ int nx_migrate_task(struct task_struct *p, struct nx_info *nxi)
 {
 	struct nx_info *old_nxi;
 	int ret = 0;
-	
+
 	if (!p || !nxi)
 		BUG();
 
@@ -385,22 +381,14 @@ out:
 #include <linux/netdevice.h>
 #include <linux/inetdevice.h>
 
-static inline int __addr_in_nx_info(u32 addr, struct nx_info *nxi)
-{
-	int i, nbip;
-
-	nbip = nxi->nbipv4;
-	for (i=0; i<nbip; i++)
-		if (nxi->ipv4[i] == addr)
-			return 1;
-	return 0;
-}
 
 int ifa_in_nx_info(struct in_ifaddr *ifa, struct nx_info *nxi)
 {
-	if (nxi && ifa)
-		return __addr_in_nx_info(ifa->ifa_address, nxi);
-	return 1;
+	if (!nxi)
+		return 1;
+	if (!ifa)
+		return 0;
+	return addr_in_nx_info(nxi, ifa->ifa_address);
 }
 
 int dev_in_nx_info(struct net_device *dev, struct nx_info *nxi)
@@ -416,13 +404,63 @@ int dev_in_nx_info(struct net_device *dev, struct nx_info *nxi)
 
 	for (ifap = &in_dev->ifa_list; (ifa = *ifap) != NULL;
 		ifap = &ifa->ifa_next) {
-		if (__addr_in_nx_info(ifa->ifa_address, nxi))
+		if (addr_in_nx_info(nxi, ifa->ifa_address))
 			return 1;
 	}
 	return 0;
 }
 
+/*
+ *	check if address is covered by socket
+ *
+ *	sk:	the socket to check against
+ *	addr:	the address in question (must be != 0)
+ */
+static inline int __addr_in_socket(struct sock *sk, uint32_t addr)
+{
+	struct nx_info *nxi = sk->sk_nx_info;
+	uint32_t saddr = tcp_v4_rcv_saddr(sk);
 
+	vxdprintk(VXD_CBIT(net, 5),
+		"__addr_in_socket(%p,%d.%d.%d.%d) %p:%d.%d.%d.%d %p;%lx",
+		sk, VXD_QUAD(addr), nxi, VXD_QUAD(saddr), sk->sk_socket,
+		(sk->sk_socket?sk->sk_socket->flags:0));
+
+	if (saddr) {
+		/* direct address match */
+		return (saddr == addr);
+	} else if (nxi) {
+		/* match against nx_info */
+		return addr_in_nx_info(nxi, addr);
+	} else {
+		/* unrestricted any socket */
+		return 1;
+	}
+}
+
+
+int nx_addr_conflict(struct nx_info *nxi, uint32_t addr, struct sock *sk)
+{
+	vxdprintk(VXD_CBIT(net, 2),
+		"nx_addr_conflict(%p,%p) %d.%d,%d.%d",
+		nxi, sk, VXD_QUAD(addr));
+
+	if (addr) {
+		/* check real address */
+		return __addr_in_socket(sk, addr);
+	} else if (nxi) {
+		/* check against nx_info */
+		int i, n = nxi->nbipv4;
+
+		for (i=0; i<n; i++)
+			if (__addr_in_socket(sk, nxi->ipv4[i]))
+				return 1;
+		return 0;
+	} else {
+		/* check against any */
+		return 1;
+	}
+}
 
 
 /* vserver syscall commands below here */
@@ -434,22 +472,22 @@ int dev_in_nx_info(struct net_device *dev, struct nx_info *nxi)
 
 int vc_task_nid(uint32_t id, void __user *data)
 {
-        nid_t nid;
+	nid_t nid;
 
-        if (id) {
-                struct task_struct *tsk;
+	if (id) {
+		struct task_struct *tsk;
 
-                if (!vx_check(0, VX_ADMIN|VX_WATCH))
-                        return -EPERM;
+		if (!vx_check(0, VX_ADMIN|VX_WATCH))
+			return -EPERM;
 
-                read_lock(&tasklist_lock);
-                tsk = find_task_by_pid(id);
-                nid = (tsk) ? tsk->nid : -ESRCH;
-                read_unlock(&tasklist_lock);
-        }
-        else
-                nid = current->nid;
-        return nid;
+		read_lock(&tasklist_lock);
+		tsk = find_task_by_real_pid(id);
+		nid = (tsk) ? tsk->nid : -ESRCH;
+		read_unlock(&tasklist_lock);
+	}
+	else
+		nid = current->nid;
+	return nid;
 }
 
 
@@ -480,7 +518,7 @@ int vc_nx_info(uint32_t id, void __user *data)
 
 int vc_net_create(uint32_t nid, void __user *data)
 {
-        // int ret = -ENOMEM;
+	// int ret = -ENOMEM;
 	struct nx_info *new_nxi;
 	int ret;
 
@@ -512,7 +550,7 @@ out_put:
 int vc_net_migrate(uint32_t id, void __user *data)
 {
 	struct nx_info *nxi;
-	
+
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 

@@ -67,6 +67,8 @@ int ext3_forget(handle_t *handle, int is_metadata,
 {
 	int err;
 
+	might_sleep();
+
 	BUFFER_TRACE(bh, "enter");
 
 	jbd_debug(4, "forgetting bh %p: is_metadata = %d, mode %o, "
@@ -306,12 +308,12 @@ static int ext3_alloc_block (handle_t *handle,
 
 
 typedef struct {
-	u32	*p;
-	u32	key;
+	__le32	*p;
+	__le32	key;
 	struct buffer_head *bh;
 } Indirect;
 
-static inline void add_chain(Indirect *p, struct buffer_head *bh, u32 *v)
+static inline void add_chain(Indirect *p, struct buffer_head *bh, __le32 *v)
 {
 	p->key = *(p->p = v);
 	p->bh = bh;
@@ -442,7 +444,7 @@ static Indirect *ext3_get_branch(struct inode *inode, int depth, int *offsets,
 		/* Reader: pointers */
 		if (!verify_chain(chain, p))
 			goto changed;
-		add_chain(++p, bh, (u32*)bh->b_data + *++offsets);
+		add_chain(++p, bh, (__le32*)bh->b_data + *++offsets);
 		/* Reader: end */
 		if (!p->key)
 			goto no_block;
@@ -483,8 +485,8 @@ no_block:
 static unsigned long ext3_find_near(struct inode *inode, Indirect *ind)
 {
 	struct ext3_inode_info *ei = EXT3_I(inode);
-	u32 *start = ind->bh ? (u32*) ind->bh->b_data : ei->i_data;
-	u32 *p;
+	__le32 *start = ind->bh ? (__le32*) ind->bh->b_data : ei->i_data;
+	__le32 *p;
 	unsigned long bg_start;
 	unsigned long colour;
 
@@ -612,7 +614,7 @@ static int ext3_alloc_branch(handle_t *handle, struct inode *inode,
 			}
 
 			memset(bh->b_data, 0, blocksize);
-			branch[n].p = (u32*) bh->b_data + offsets[n];
+			branch[n].p = (__le32*) bh->b_data + offsets[n];
 			*branch[n].p = branch[n].key;
 			BUFFER_TRACE(bh, "marking uptodate");
 			set_buffer_uptodate(bh);
@@ -1580,6 +1582,12 @@ static ssize_t ext3_direct_IO(int rw, struct kiocb *iocb,
 				 offset, nr_segs,
 				 ext3_direct_io_get_blocks, NULL);
 
+	/*
+	 * Reacquire the handle: ext3_direct_io_get_block() can restart the
+	 * transaction
+	 */
+	handle = journal_current_handle();
+
 out_stop:
 	if (handle) {
 		int err;
@@ -1768,7 +1776,7 @@ unlock:
  * or memcmp with zero_page, whatever is better for particular architecture.
  * Linus?
  */
-static inline int all_zeroes(u32 *p, u32 *q)
+static inline int all_zeroes(__le32 *p, __le32 *q)
 {
 	while (p < q)
 		if (*p++)
@@ -1815,7 +1823,7 @@ static Indirect *ext3_find_shared(struct inode *inode,
 				int depth,
 				int offsets[4],
 				Indirect chain[4],
-				u32 *top)
+				__le32 *top)
 {
 	Indirect *partial, *p;
 	int k, err;
@@ -1835,7 +1843,7 @@ static Indirect *ext3_find_shared(struct inode *inode,
 	if (!partial->key && *partial->p)
 		/* Writer: end */
 		goto no_top;
-	for (p=partial; p>chain && all_zeroes((u32*)p->bh->b_data,p->p); p--)
+	for (p=partial; p>chain && all_zeroes((__le32*)p->bh->b_data,p->p); p--)
 		;
 	/*
 	 * OK, we've found the last block that must survive. The rest of our
@@ -1874,9 +1882,9 @@ no_top:
 static void
 ext3_clear_blocks(handle_t *handle, struct inode *inode, struct buffer_head *bh,
 		unsigned long block_to_free, unsigned long count,
-		u32 *first, u32 *last)
+		__le32 *first, __le32 *last)
 {
-	u32 *p;
+	__le32 *p;
 	if (try_to_extend_transaction(handle, inode)) {
 		if (bh) {
 			BUFFER_TRACE(bh, "call ext3_journal_dirty_metadata");
@@ -1932,15 +1940,16 @@ ext3_clear_blocks(handle_t *handle, struct inode *inode, struct buffer_head *bh,
  * block pointers.
  */
 static void ext3_free_data(handle_t *handle, struct inode *inode,
-			   struct buffer_head *this_bh, u32 *first, u32 *last)
+			   struct buffer_head *this_bh,
+			   __le32 *first, __le32 *last)
 {
 	unsigned long block_to_free = 0;    /* Starting block # of a run */
 	unsigned long count = 0;	    /* Number of blocks in the run */ 
-	u32 *block_to_free_p = NULL;	    /* Pointer into inode/ind
+	__le32 *block_to_free_p = NULL;	    /* Pointer into inode/ind
 					       corresponding to
 					       block_to_free */
 	unsigned long nr;		    /* Current block # */
-	u32 *p;				    /* Pointer into inode/ind
+	__le32 *p;			    /* Pointer into inode/ind
 					       for current block */
 	int err;
 
@@ -1999,10 +2008,10 @@ static void ext3_free_data(handle_t *handle, struct inode *inode,
  */
 static void ext3_free_branches(handle_t *handle, struct inode *inode,
 			       struct buffer_head *parent_bh,
-			       u32 *first, u32 *last, int depth)
+			       __le32 *first, __le32 *last, int depth)
 {
 	unsigned long nr;
-	u32 *p;
+	__le32 *p;
 
 	if (is_handle_aborted(handle))
 		return;
@@ -2032,8 +2041,9 @@ static void ext3_free_branches(handle_t *handle, struct inode *inode,
 
 			/* This zaps the entire block.  Bottom up. */
 			BUFFER_TRACE(bh, "free child branches");
-			ext3_free_branches(handle, inode, bh, (u32*)bh->b_data,
-					   (u32*)bh->b_data + addr_per_block,
+			ext3_free_branches(handle, inode, bh,
+					   (__le32*)bh->b_data,
+					   (__le32*)bh->b_data + addr_per_block,
 					   depth);
 
 			/*
@@ -2138,13 +2148,13 @@ void ext3_truncate_nocheck(struct inode * inode)
 {
 	handle_t *handle;
 	struct ext3_inode_info *ei = EXT3_I(inode);
-	u32 *i_data = ei->i_data;
+	__le32 *i_data = ei->i_data;
 	int addr_per_block = EXT3_ADDR_PER_BLOCK(inode->i_sb);
 	struct address_space *mapping = inode->i_mapping;
 	int offsets[4];
 	Indirect chain[4];
 	Indirect *partial;
-	int nr = 0;
+	__le32 nr = 0;
 	int n;
 	long last_block;
 	unsigned blocksize = inode->i_sb->s_blocksize;
@@ -2249,7 +2259,7 @@ void ext3_truncate_nocheck(struct inode * inode)
 	/* Clear the ends of indirect blocks on the shared branch */
 	while (partial > chain) {
 		ext3_free_branches(handle, inode, partial->bh, partial->p + 1,
-				   (u32*)partial->bh->b_data + addr_per_block,
+				   (__le32*)partial->bh->b_data+addr_per_block,
 				   (chain+n-1) - partial);
 		BUFFER_TRACE(partial->bh, "call brelse");
 		brelse (partial->bh);
@@ -2767,21 +2777,21 @@ out_brelse:
  * `stuff()' is running, and the new i_size will be lost.  Plus the inode
  * will no longer be on the superblock's dirty inode list.
  */
-void ext3_write_inode(struct inode *inode, int wait)
+int ext3_write_inode(struct inode *inode, int wait)
 {
 	if (current->flags & PF_MEMALLOC)
-		return;
+		return 0;
 
 	if (ext3_journal_current_handle()) {
 		jbd_debug(0, "called recursively, non-PF_MEMALLOC!\n");
 		dump_stack();
-		return;
+		return -EIO;
 	}
 
 	if (!wait)
-		return;
+		return 0;
 
-	ext3_force_commit(inode->i_sb);
+	return ext3_force_commit(inode->i_sb);
 }
 
 int ext3_setattr_flags(struct inode *inode, unsigned int flags)
@@ -2791,7 +2801,7 @@ int ext3_setattr_flags(struct inode *inode, unsigned int flags)
 
 	oldflags = EXT3_I(inode)->i_flags;
 	newflags = oldflags &
-		~(EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL | EXT3_BARRIER_FL);	
+		~(EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL | EXT3_BARRIER_FL);
 	if (flags & ATTR_FLAG_IMMUTABLE)
 		newflags |= EXT3_IMMUTABLE_FL;
 	if (flags & ATTR_FLAG_IUNLINK)
@@ -2811,7 +2821,7 @@ int ext3_setattr_flags(struct inode *inode, unsigned int flags)
 		err = ext3_reserve_inode_write(handle, inode, &iloc);
 		if (err)
 			goto flags_err;
-		
+
 		EXT3_I(inode)->i_flags = newflags;
 		inode->i_ctime = CURRENT_TIME;
 
@@ -3039,6 +3049,7 @@ int ext3_mark_inode_dirty(handle_t *handle, struct inode *inode)
 	struct ext3_iloc iloc;
 	int err;
 
+	might_sleep();
 	err = ext3_reserve_inode_write(handle, inode, &iloc);
 	if (!err)
 		err = ext3_mark_iloc_dirty(handle, inode, &iloc);

@@ -28,8 +28,7 @@ static inline struct vx_info *__get_vx_info(struct vx_info *vxi,
 }
 
 
-#define	free_vx_info(i)	\
-	call_rcu(&i->vx_rcu, rcu_free_vx_info);
+extern void free_vx_info(struct vx_info *);
 
 #define put_vx_info(i)	__put_vx_info(i,__FILE__,__LINE__)
 
@@ -49,35 +48,40 @@ static inline void __put_vx_info(struct vx_info *vxi, const char *_file, int _li
 static inline void __set_vx_info(struct vx_info **vxp, struct vx_info *vxi,
 	const char *_file, int _line)
 {
-	BUG_ON(*vxp);
+	struct vx_info *vxo;
+
 	if (!vxi)
 		return;
+
 	vxlprintk(VXD_CBIT(xid, 3), "set_vx_info(%p[#%d.%d.%d])",
 		vxi, vxi?vxi->vx_id:0,
 		vxi?atomic_read(&vxi->vx_usecnt):0,
 		vxi?atomic_read(&vxi->vx_refcnt):0,
 		_file, _line);
+
 	atomic_inc(&vxi->vx_refcnt);
-	*vxp = __get_vx_info(vxi, _file, _line);
+	vxo = xchg(vxp, __get_vx_info(vxi, _file, _line));
+	BUG_ON(vxo);
 }
 
-#define	clr_vx_info(p)	__clr_vx_info(p,__FILE__,__LINE__)
+#define clr_vx_info(p)	__clr_vx_info(p,__FILE__,__LINE__)
 
 static inline void __clr_vx_info(struct vx_info **vxp,
 	const char *_file, int _line)
 {
-	struct vx_info *vxo = *vxp;
+	struct vx_info *vxo;
 
+	vxo = xchg(vxp, NULL);
 	if (!vxo)
 		return;
+
 	vxlprintk(VXD_CBIT(xid, 3), "clr_vx_info(%p[#%d.%d.%d])",
 		vxo, vxo?vxo->vx_id:0,
 		vxo?atomic_read(&vxo->vx_usecnt):0,
 		vxo?atomic_read(&vxo->vx_refcnt):0,
 		_file, _line);
-	*vxp = NULL;
-	wmb();
-	if (vxo && atomic_dec_and_test(&vxo->vx_refcnt))
+
+	if (atomic_dec_and_test(&vxo->vx_refcnt))
 		unhash_vx_info(vxo);
 	__put_vx_info(vxo, _file, _line);
 }
@@ -89,7 +93,7 @@ static __inline__ struct vx_info *__task_get_vx_info(struct task_struct *p,
 	const char *_file, int _line)
 {
 	struct vx_info *vxi;
-	
+
 	task_lock(p);
 	vxlprintk(VXD_CBIT(xid, 5), "task_get_vx_info(%p)",
 		p, _file, _line);

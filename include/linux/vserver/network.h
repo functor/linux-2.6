@@ -60,6 +60,10 @@ struct net_device;
 int ifa_in_nx_info(struct in_ifaddr *, struct nx_info *);
 int dev_in_nx_info(struct net_device *, struct nx_info *);
 
+struct sock;
+
+int nx_addr_conflict(struct nx_info *, uint32_t, struct sock *);
+
 
 #endif	/* __KERNEL__ */
 
@@ -76,9 +80,9 @@ extern int vc_task_nid(uint32_t, void __user *);
 
 #define VCMD_nx_info		VC_CMD(VINFO, 6, 0)
 
-struct  vcmd_nx_info_v0 {
+struct	vcmd_nx_info_v0 {
 	uint32_t nid;
-	/* more to come */	
+	/* more to come */
 };
 
 #ifdef	__KERNEL__
@@ -92,15 +96,15 @@ extern int vc_nx_info(uint32_t, void __user *);
 #define VCMD_net_add		VC_CMD(NETALT, 1, 0)
 #define VCMD_net_remove		VC_CMD(NETALT, 2, 0)
 
-struct  vcmd_net_nx_v0 {
+struct	vcmd_net_nx_v0 {
 	uint16_t type;
 	uint16_t count;
 	uint32_t ip[4];
 	uint32_t mask[4];
-	/* more to come */	
+	/* more to come */
 };
 
-//	IPN_TYPE_IPV4	
+//	IPN_TYPE_IPV4
 
 
 #ifdef	__KERNEL__
@@ -112,7 +116,7 @@ extern int vc_net_migrate(uint32_t, void __user *);
 #define VCMD_get_nflags		VC_CMD(FLAGS, 5, 0)
 #define VCMD_set_nflags		VC_CMD(FLAGS, 6, 0)
 
-struct  vcmd_net_flags_v0 {
+struct	vcmd_net_flags_v0 {
 	uint64_t flagword;
 	uint64_t mask;
 };
@@ -131,7 +135,7 @@ extern int vc_set_nflags(uint32_t, void __user *);
 #define VCMD_get_ncaps		VC_CMD(FLAGS, 7, 0)
 #define VCMD_set_ncaps		VC_CMD(FLAGS, 8, 0)
 
-struct  vcmd_net_caps_v0 {
+struct	vcmd_net_caps_v0 {
 	uint64_t ncaps;
 	uint64_t cmask;
 };

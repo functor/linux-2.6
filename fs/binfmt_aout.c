@@ -308,7 +308,7 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		(current->mm->start_data = N_DATADDR(ex));
 	current->mm->brk = ex.a_bss +
 		(current->mm->start_brk = N_BSSADDR(ex));
-	current->mm->free_area_cache = TASK_UNMAPPED_BASE;
+	current->mm->free_area_cache = current->mm->mmap_base;
 
 	// current->mm->rss = 0;
 	vx_rsspages_sub(current->mm, current->mm->rss);

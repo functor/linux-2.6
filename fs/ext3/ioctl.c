@@ -59,8 +59,8 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		 * This test looks nicer. Thanks to Pauline Middelink
 		 */
 		if ((oldflags & EXT3_IMMUTABLE_FL) ||
-			((flags ^ oldflags) &
-			(EXT3_APPEND_FL | EXT3_IMMUTABLE_FL))) {
+			((flags ^ oldflags) & (EXT3_APPEND_FL |
+			EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL))) {
 			if (!capable(CAP_LINUX_IMMUTABLE))
 				return -EPERM;
 		}
@@ -169,7 +169,7 @@ flags_err:
 		if (!(inode->i_sb->s_flags & MS_TAGXID))
 			return -ENOSYS;
 		if (get_user(xid, (int *) arg))
-			return -EFAULT;	
+			return -EFAULT;
 
 		handle = ext3_journal_start(inode, 1);
 		if (IS_ERR(handle))

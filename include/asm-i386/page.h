@@ -94,13 +94,13 @@ typedef struct { unsigned long pgprot; } pgprot_t;
  * and CONFIG_HIGHMEM64G options in the kernel configuration.
  */
 
+#ifndef __ASSEMBLY__
+
 /*
  * This much address space is reserved for vmalloc() and iomap()
  * as well as fixmap mappings.
  */
-#define __VMALLOC_RESERVE	(128 << 20)
-
-#ifndef __ASSEMBLY__
+extern unsigned int __VMALLOC_RESERVE;
 
 /* Pure 2^n version of get_order */
 static __inline__ int get_order(unsigned long size)
@@ -116,18 +116,27 @@ static __inline__ int get_order(unsigned long size)
 	return order;
 }
 
+extern int sysctl_legacy_va_layout;
+
 #endif /* __ASSEMBLY__ */
 
-#ifdef __ASSEMBLY__
+#if   defined(CONFIG_SPLIT_3GB)
 #define __PAGE_OFFSET		(0xC0000000)
-#else
-#define __PAGE_OFFSET		(0xC0000000UL)
+#elif defined(CONFIG_SPLIT_25GB)
+#define __PAGE_OFFSET		(0xA0000000)
+#elif defined(CONFIG_SPLIT_2GB)
+#define __PAGE_OFFSET		(0x80000000)
+#elif defined(CONFIG_SPLIT_15GB)
+#define __PAGE_OFFSET		(0x60000000)
+#elif defined(CONFIG_SPLIT_1GB)
+#define __PAGE_OFFSET		(0x40000000)
 #endif
-
 
 #define PAGE_OFFSET		((unsigned long)__PAGE_OFFSET)
 #define VMALLOC_RESERVE		((unsigned long)__VMALLOC_RESERVE)
-#define MAXMEM			(-__PAGE_OFFSET-__VMALLOC_RESERVE)
+#define __MAXMEM		(-__PAGE_OFFSET-__VMALLOC_RESERVE)
+#define MAXMEM			((unsigned long)(-PAGE_OFFSET-VMALLOC_RESERVE))
+
 #define __pa(x)			((unsigned long)(x)-PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
 #define pfn_to_kaddr(pfn)      __va((pfn) << PAGE_SHIFT)

@@ -22,6 +22,7 @@
 #include <linux/security.h>
 #include <linux/mount.h>
 #include <linux/vs_base.h>
+#include <linux/vserver/namespace.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -243,6 +244,8 @@ static int show_vfsmnt(struct seq_file *m, void *v)
 	struct proc_fs_info *fs_infop;
 
 	if (vx_flags(VXF_HIDE_MOUNT, 0))
+		return 0;
+	if (!vx_check_vfsmount(current->vx_info, mnt))
 		return 0;
 
 	mangle(m, mnt->mnt_devname ? mnt->mnt_devname : "none");
@@ -699,7 +702,7 @@ static int do_remount(struct nameidata *nd, int flags, int mnt_flags,
 	int err;
 	struct super_block * sb = nd->mnt->mnt_sb;
 
-	if (!capable(CAP_SYS_ADMIN))
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SECURE_REMOUNT))
 		return -EPERM;
 
 	if (!check_mnt(nd->mnt))
@@ -708,6 +711,8 @@ static int do_remount(struct nameidata *nd, int flags, int mnt_flags,
 	if (nd->dentry != nd->mnt->mnt_root)
 		return -EINVAL;
 
+	if (vx_ccaps(VXC_SECURE_REMOUNT))
+		mnt_flags |= MNT_NODEV;
 	down_write(&sb->s_umount);
 	err = do_remount_sb(sb, flags, data, 0);
 	if (!err)
@@ -723,7 +728,7 @@ static int do_move_mount(struct nameidata *nd, char *old_name)
 	struct nameidata old_nd, parent_nd;
 	struct vfsmount *p;
 	int err = 0;
-	if (!capable(CAP_SYS_ADMIN))
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SECURE_MOUNT))
 		return -EPERM;
 	if (!old_name || !*old_name)
 		return -EINVAL;
@@ -956,7 +961,35 @@ void mark_mounts_for_expiry(struct list_head *mounts)
 
 EXPORT_SYMBOL_GPL(mark_mounts_for_expiry);
 
-int copy_mount_options (const void __user *data, unsigned long *where)
+/*
+ * Some copy_from_user() implementations do not return the exact number of
+ * bytes remaining to copy on a fault.  But copy_mount_options() requires that.
+ * Note that this function differs from copy_from_user() in that it will oops
+ * on bad values of `to', rather than returning a short copy.
+ */
+static long
+exact_copy_from_user(void *to, const void __user *from, unsigned long n)
+{
+	char *t = to;
+	const char __user *f = from;
+	char c;
+
+	if (!access_ok(VERIFY_READ, from, n))
+		return n;
+
+	while (n) {
+		if (__get_user(c, f)) {
+			memset(t, 0, n);
+			break;
+		}
+		*t++ = c;
+		f++;
+		n--;
+	}
+	return n;
+}
+
+int copy_mount_options(const void __user *data, unsigned long *where)
 {
 	int i;
 	unsigned long page;
@@ -978,7 +1011,7 @@ int copy_mount_options (const void __user *data, unsigned long *where)
 	if (size > PAGE_SIZE)
 		size = PAGE_SIZE;
 
-	i = size - copy_from_user((void *)page, data, size);
+	i = size - exact_copy_from_user((void *)page, data, size);
 	if (!i) {
 		free_page(page); 
 		return -EFAULT;
@@ -1076,7 +1109,7 @@ int copy_namespace(int flags, struct task_struct *tsk)
 	if (!(flags & CLONE_NEWNS))
 		return 0;
 
-	if (!capable(CAP_SYS_ADMIN)) {
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SECURE_MOUNT)) {
 		put_namespace(namespace);
 		return -EPERM;
 	}

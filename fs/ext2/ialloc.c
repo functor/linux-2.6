@@ -60,8 +60,8 @@ read_inode_bitmap(struct super_block * sb, unsigned long block_group)
 	if (!bh)
 		ext2_error(sb, "read_inode_bitmap",
 			    "Cannot read inode bitmap - "
-			    "block_group = %lu, inode_bitmap = %lu",
-			    block_group, (unsigned long) desc->bg_inode_bitmap);
+			    "block_group = %lu, inode_bitmap = %u",
+			    block_group, le32_to_cpu(desc->bg_inode_bitmap));
 error_out:
 	return bh;
 }
@@ -469,7 +469,7 @@ struct inode *ext2_new_inode(struct inode *dir, int mode)
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
 
-        if (sb->s_flags & MS_TAGXID)
+	if (sb->s_flags & MS_TAGXID)
 		inode->i_xid = current->xid;
 	else
 		inode->i_xid = 0;
@@ -634,14 +634,14 @@ got:
 	return inode;
 
 fail2:
-	DLIMIT_FREE_INODE(sb, inode->i_xid);	
+	DLIMIT_FREE_INODE(sb, inode->i_xid);
 	inode->i_flags |= S_NOQUOTA;
 	inode->i_nlink = 0;
 	iput(inode);
 	return ERR_PTR(err);
 
 fail:
-	DLIMIT_FREE_INODE(sb, inode->i_xid);	
+	DLIMIT_FREE_INODE(sb, inode->i_xid);
 fail_dlim:
 	make_bad_inode(inode);
 	iput(inode);

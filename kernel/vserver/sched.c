@@ -33,7 +33,7 @@ int vx_tokens_recalc(struct vx_info *vxi)
 {
 	long delta, tokens = 0;
 
-	if (__vx_flags(vxi->vx_flags, VXF_SCHED_PAUSE, 0))
+	if (vx_info_flags(vxi, VXF_SCHED_PAUSE, 0))
 		/* we are paused */
 		return 0;
 
@@ -52,7 +52,7 @@ int vx_tokens_recalc(struct vx_info *vxi)
 		atomic_add(tokens, &vxi->sched.tokens);
 		vxi->sched.jiffies += delta;
 		tokens = atomic_read(&vxi->sched.tokens);
-	
+
 		if (tokens > vxi->sched.tokens_max) {
 			tokens = vxi->sched.tokens_max;
 			atomic_set(&vxi->sched.tokens, tokens);
@@ -60,7 +60,10 @@ int vx_tokens_recalc(struct vx_info *vxi)
 		spin_unlock(&vxi->sched.tokens_lock);
 	} else {
 		/* no new tokens */
-		if ((tokens = vx_tokens_avail(vxi)) < vxi->sched.tokens_min) {
+		tokens = vx_tokens_avail(vxi);
+		if (tokens <= 0)
+			vxi->vx_state |= VXS_ONHOLD;
+		if (tokens < vxi->sched.tokens_min) {
 			/* enough tokens will be available in */
 			if (vxi->sched.tokens_min == 0)
 				return delta - vxi->sched.interval;
@@ -68,7 +71,14 @@ int vx_tokens_recalc(struct vx_info *vxi)
 				vxi->sched.tokens_min / vxi->sched.fill_rate;
 		}
 	}
+
 	/* we have some tokens left */
+	if (vx_info_state(vxi, VXS_ONHOLD) &&
+		(tokens >= vxi->sched.tokens_min))
+		vxi->vx_state &= ~VXS_ONHOLD;
+	if (vx_info_state(vxi, VXS_ONHOLD))
+		tokens -= vxi->sched.tokens_min;
+
 	return tokens;
 }
 
@@ -119,14 +129,14 @@ int effective_vavavoom(task_t *p, int max_prio)
 }
 
 
-int vc_set_sched(uint32_t xid, void __user *data)
+int vc_set_sched_v2(uint32_t xid, void __user *data)
 {
 	struct vcmd_set_sched_v2 vc_data;
 	struct vx_info *vxi;
 
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
-	
+
 	vxi = locate_vx_info(xid);
 	if (!vxi)
 		return -EINVAL;
@@ -155,6 +165,58 @@ int vc_set_sched(uint32_t xid, void __user *data)
 		atomic_set(&vxi->sched.tokens, vxi->sched.tokens_max);
 	if (vxi->sched.tokens_min > vxi->sched.tokens_max)
 		vxi->sched.tokens_min = vxi->sched.tokens_max;
+
+	spin_unlock(&vxi->sched.tokens_lock);
+	put_vx_info(vxi);
+	return 0;
+}
+
+
+int vc_set_sched(uint32_t xid, void __user *data)
+{
+	struct vcmd_set_sched_v3 vc_data;
+	struct vx_info *vxi;
+	unsigned int set_mask;
+
+	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
+		return -EFAULT;
+
+	vxi = locate_vx_info(xid);
+	if (!vxi)
+		return -EINVAL;
+
+	set_mask = vc_data.set_mask;
+
+	spin_lock(&vxi->sched.tokens_lock);
+
+	if (set_mask & VXSM_FILL_RATE)
+		vxi->sched.fill_rate = vc_data.fill_rate;
+	if (set_mask & VXSM_INTERVAL)
+		vxi->sched.interval = vc_data.interval;
+	if (set_mask & VXSM_TOKENS)
+		atomic_set(&vxi->sched.tokens, vc_data.tokens);
+	if (set_mask & VXSM_TOKENS_MIN)
+		vxi->sched.tokens_min = vc_data.tokens_min;
+	if (set_mask & VXSM_TOKENS_MAX)
+		vxi->sched.tokens_max = vc_data.tokens_max;
+	if (set_mask & VXSM_PRIO_BIAS)
+		vxi->sched.priority_bias = vc_data.priority_bias;
+
+	/* Sanity check the resultant values */
+	if (vxi->sched.fill_rate <= 0)
+		vxi->sched.fill_rate = 1;
+	if (vxi->sched.interval <= 0)
+		vxi->sched.interval = HZ;
+	if (vxi->sched.tokens_max == 0)
+		vxi->sched.tokens_max = 1;
+	if (atomic_read(&vxi->sched.tokens) > vxi->sched.tokens_max)
+		atomic_set(&vxi->sched.tokens, vxi->sched.tokens_max);
+	if (vxi->sched.tokens_min > vxi->sched.tokens_max)
+		vxi->sched.tokens_min = vxi->sched.tokens_max;
+	if (vxi->sched.priority_bias > MAX_PRIO_BIAS)
+		vxi->sched.priority_bias = MAX_PRIO_BIAS;
+	if (vxi->sched.priority_bias < MIN_PRIO_BIAS)
+		vxi->sched.priority_bias = MIN_PRIO_BIAS;
 
 	spin_unlock(&vxi->sched.tokens_lock);
 	put_vx_info(vxi);

@@ -44,6 +44,10 @@
 #include <linux/smp_lock.h>
 #include <linux/notifier.h>
 #include <linux/security.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
+#include <linux/vs_limit.h>
 #include <net/sock.h>
 #include <net/scm.h>
 
@@ -242,6 +246,12 @@ static int netlink_create(struct socket *sock, int protocol)
 	sk->sk_destruct = netlink_sock_destruct;
 	atomic_inc(&netlink_sock_nr);
 
+	set_vx_info(&sk->sk_vx_info, current->vx_info);
+	sk->sk_xid = vx_current_xid();
+	vx_sock_inc(sk);
+	set_nx_info(&sk->sk_nx_info, current->nx_info);
+	sk->sk_nid = nx_current_nid();
+
 	sk->sk_protocol = protocol;
 	return 0;
 }
@@ -283,6 +293,12 @@ static int netlink_release(struct socket *sock)
 		notifier_call_chain(&netlink_chain, NETLINK_URELEASE, &n);
 	}	
 	
+	vx_sock_dec(sk);
+	clr_vx_info(&sk->sk_vx_info);
+	sk->sk_xid = -1;
+	clr_nx_info(&sk->sk_nx_info);
+	sk->sk_nid = -1;
+
 	sock_put(sk);
 	return 0;
 }
@@ -536,11 +552,30 @@ void netlink_detachskb(struct sock *sk, struct sk_buff *skb)
 	sock_put(sk);
 }
 
+static inline void netlink_trim(struct sk_buff *skb, int allocation)
+{
+	int delta = skb->end - skb->tail;
+
+	/* If the packet is charged to a socket, the modification
+	 * of truesize below is illegal and will corrupt socket
+	 * buffer accounting state.
+	 */
+	BUG_ON(skb->list != NULL);
+
+	if (delta * 2 < skb->truesize)
+		return;
+	if (pskb_expand_head(skb, 0, -delta, allocation))
+		return;
+	skb->truesize -= delta;
+}
+
 int netlink_unicast(struct sock *ssk, struct sk_buff *skb, u32 pid, int nonblock)
 {
 	struct sock *sk;
 	int err;
 	long timeo;
+
+	netlink_trim(skb, gfp_any());
 
 	timeo = sock_sndtimeo(ssk, nonblock);
 retry:
@@ -587,6 +622,8 @@ int netlink_broadcast(struct sock *ssk, struct sk_buff *skb, u32 pid,
 	struct sk_buff *skb2 = NULL;
 	int protocol = ssk->sk_protocol;
 	int failure = 0, delivered = 0;
+
+	netlink_trim(skb, allocation);
 
 	/* While we sleep in clone, do not allow to change socket list */
 
@@ -1220,7 +1257,6 @@ MODULE_ALIAS_NETPROTO(PF_NETLINK);
 
 EXPORT_SYMBOL(netlink_ack);
 EXPORT_SYMBOL(netlink_broadcast);
-EXPORT_SYMBOL(netlink_broadcast_deliver);
 EXPORT_SYMBOL(netlink_dump_start);
 EXPORT_SYMBOL(netlink_kernel_create);
 EXPORT_SYMBOL(netlink_register_notifier);
