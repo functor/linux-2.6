@@ -14,6 +14,7 @@
 #include <linux/swapops.h>
 #include <linux/rmap.h>
 #include <linux/module.h>
+#include <linux/ckrm_mem_inline.h>
 
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
@@ -83,6 +84,7 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	mm->rss++;
 	flush_icache_page(vma, page);
 	set_pte(pte, mk_pte(page, prot));
+	ckrm_mem_evaluate_page_byadd(page, mm);
 	page_add_file_rmap(page);
 	pte_val = *pte;
 	pte_unmap(pte);

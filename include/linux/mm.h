@@ -228,6 +228,9 @@ struct page {
 	void *virtual;			/* Kernel virtual address (NULL if
 					   not kmapped, ie. highmem) */
 #endif /* WANT_PAGE_VIRTUAL */
+#ifdef CONFIG_CKRM_RES_MEM
+	void *memclass;
+#endif // CONFIG_CKRM_RES_MEM
 };
 
 /*

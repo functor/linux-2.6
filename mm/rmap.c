@@ -33,6 +33,7 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/rmap.h>
+#include <linux/ckrm_mem_inline.h>
 
 #include <asm/tlbflush.h>
 
@@ -360,6 +361,7 @@ void page_add_anon_rmap(struct page *page,
 	 */
 	page_map_lock(page);
 	if (!page->mapcount) {
+		ckrm_mem_evaluate_page_byadd(page, vma->vm_mm);
 		BUG_ON(PageAnon(page));
 		BUG_ON(page->mapping);
 		SetPageAnon(page);
