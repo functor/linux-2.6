@@ -70,6 +70,9 @@
 #include <linux/poll.h>
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
 
 #ifdef CONFIG_INET
 #include <net/inet_common.h>
@@ -451,7 +454,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,  struct packe
 	sk = pt->af_packet_priv;
 	po = pkt_sk(sk);
 
-	if ((int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
+	if (sk->sk_xid && sk->sk_xid != skb->xid)
 		goto drop;
 
 	skb->dev = dev;

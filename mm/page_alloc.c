@@ -33,7 +33,6 @@
 #include <linux/cpu.h>
 #include <linux/vs_base.h>
 #include <linux/vs_limit.h>
-#include <linux/ckrm_mem_inline.h>
 
 #include <asm/tlbflush.h>
 
@@ -277,7 +276,6 @@ free_pages_bulk(struct zone *zone, int count,
 		/* have to delete it as __free_pages_bulk list manipulates */
 		list_del(&page->lru);
 		__free_pages_bulk(page, base, zone, area, order);
-		ckrm_clear_page_class(page);
 		ret++;
 	}
 	spin_unlock_irqrestore(&zone->lock, flags);
@@ -624,10 +622,6 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 
 	might_sleep_if(wait);
 
-	if (!ckrm_class_limit_ok((GET_MEM_CLASS(current)))) {
-		return NULL;
-	}
-
 	zones = zonelist->zones;  /* the list of zones suitable for gfp_mask */
 	if (zones[0] == NULL)     /* no zones in the zonelist */
 		return NULL;
@@ -757,7 +751,6 @@ nopage:
 	return NULL;
 got_pg:
 	kernel_map_pages(page, 1 << order, 1);
-	ckrm_set_pages_class(page, 1 << order, GET_MEM_CLASS(current));
 	return page;
 }
 
@@ -843,6 +836,17 @@ unsigned int nr_free_pages(void)
 }
 
 EXPORT_SYMBOL(nr_free_pages);
+
+unsigned int nr_used_zone_pages(void)
+{
+	unsigned int pages = 0;
+	struct zone *zone;
+
+	for_each_zone(zone)
+		pages += zone->nr_active + zone->nr_inactive;
+
+	return pages;
+}
 
 #ifdef CONFIG_NUMA
 unsigned int nr_free_pages_pgdat(pg_data_t *pgdat)
@@ -1391,7 +1395,7 @@ static void __init calculate_zone_totalpages(struct pglist_data *pgdat,
 		for (i = 0; i < MAX_NR_ZONES; i++)
 			realtotalpages -= zholes_size[i];
 	pgdat->node_present_pages = realtotalpages;
-	printk(KERN_DEBUG "On node %d totalpages: %lu\n", pgdat->node_id, realtotalpages);
+	printk("On node %d totalpages: %lu\n", pgdat->node_id, realtotalpages);
 }
 
 
@@ -1412,7 +1416,7 @@ void __init memmap_init_zone(struct page *start, unsigned long size, int nid,
 		INIT_LIST_HEAD(&page->lru);
 #ifdef WANT_PAGE_VIRTUAL
 		/* The shift won't overflow because ZONE_NORMAL is below 4G. */
-		if (!is_highmem_idx(zone))
+		if (!is_highmem(zone))
 			set_page_address(page, __va(start_pfn << PAGE_SHIFT));
 #endif
 		start_pfn++;
@@ -1497,7 +1501,7 @@ static void __init free_area_init_core(struct pglist_data *pgdat,
 			pcp->batch = 1 * batch;
 			INIT_LIST_HEAD(&pcp->list);
 		}
-		printk(KERN_DEBUG "  %s zone: %lu pages, LIFO batch:%lu\n",
+		printk("  %s zone: %lu pages, LIFO batch:%lu\n",
 				zone_names[j], realsize, batch);
 		INIT_LIST_HEAD(&zone->active_list);
 		INIT_LIST_HEAD(&zone->inactive_list);
@@ -1976,9 +1980,9 @@ module_init(init_per_zone_pages_min)
  *	changes.
  */
 int min_free_kbytes_sysctl_handler(ctl_table *table, int write, 
-		struct file *file, void __user *buffer, size_t *length, loff_t *ppos)
+		struct file *file, void __user *buffer, size_t *length)
 {
-	proc_dointvec(table, write, file, buffer, length, ppos);
+	proc_dointvec(table, write, file, buffer, length);
 	setup_per_zone_pages_min();
 	setup_per_zone_protection();
 	return 0;
@@ -1990,9 +1994,9 @@ int min_free_kbytes_sysctl_handler(ctl_table *table, int write,
  *	whenever sysctl_lower_zone_protection changes.
  */
 int lower_zone_protection_sysctl_handler(ctl_table *table, int write,
-		 struct file *file, void __user *buffer, size_t *length, loff_t *ppos)
+		 struct file *file, void __user *buffer, size_t *length)
 {
-	proc_dointvec_minmax(table, write, file, buffer, length, ppos);
+	proc_dointvec_minmax(table, write, file, buffer, length);
 	setup_per_zone_protection();
 	return 0;
 }

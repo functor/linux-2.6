@@ -53,8 +53,7 @@ struct rpc_clnt {
 				cl_autobind : 1,/* use getport() */
 				cl_droppriv : 1,/* enable NFS suid hack */
 				cl_oneshot  : 1,/* dispose after use */
-				cl_dead     : 1,/* abandoned */
-				cl_tagxid   : 1;/* do xid tagging */
+				cl_dead     : 1;/* abandoned */
 
 	struct rpc_rtt *	cl_rtt;		/* RTO estimator data */
 	struct rpc_portmap *	cl_pmap;	/* port mapping */

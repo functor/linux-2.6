@@ -193,7 +193,7 @@ static int i8xx_tco_open (struct inode *inode, struct file *file)
 	 */
 	tco_timer_keepalive ();
 	tco_timer_start ();
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int i8xx_tco_release (struct inode *inode, struct file *file)
@@ -215,6 +215,10 @@ static int i8xx_tco_release (struct inode *inode, struct file *file)
 static ssize_t i8xx_tco_write (struct file *file, const char __user *data,
 			      size_t len, loff_t * ppos)
 {
+	/*  Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	/* See if we got the magic character 'V' and reload the timer */
 	if (len) {
 		if (!nowayout) {

@@ -800,11 +800,11 @@ static struct nf_hook_ops br_nf_ops[] = {
 #ifdef CONFIG_SYSCTL
 static
 int brnf_sysctl_call_tables(ctl_table *ctl, int write, struct file * filp,
-			void __user *buffer, size_t *lenp, loff_t *ppos)
+			void __user *buffer, size_t *lenp)
 {
 	int ret;
 
-	ret = proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
+	ret = proc_dointvec(ctl, write, filp, buffer, lenp);
 
 	if (write && *(int *)(ctl->data))
 		*(int *)(ctl->data) = 1;
