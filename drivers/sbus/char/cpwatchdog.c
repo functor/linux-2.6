@@ -324,7 +324,7 @@ static int wd_open(struct inode *inode, struct file *f)
 		wd_dev.initialized = 1;
 	}
 
-	return(nonseekable_open(inode, f));
+	return(0);
 }
 
 static int wd_release(struct inode *inode, struct file *file)
@@ -418,6 +418,9 @@ static ssize_t wd_write(struct file 	*file,
 	if(NULL == pTimer) {
 		return(-EINVAL);
 	}
+
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 
 	if (count) {
 		wd_pingtimer(pTimer);

@@ -44,18 +44,18 @@ choice
 	default 6xx
 
 config 6xx
-	bool "6xx/7xx/74xx/52xx/8260"
+	bool "6xx/7xx/74xx/8260"
 	help
 	  There are four types of PowerPC chips supported.  The more common
 	  types (601, 603, 604, 740, 750, 7400), the Motorola embedded
-	  versions (821, 823, 850, 855, 860, 52xx, 8260), the IBM embedded
-	  versions (403 and 405) and the high end 64 bit Power processors 
-	  (POWER 3, POWER4, and IBM 970 also known as G5)
+	  versions (821, 823, 850, 855, 860, 8260), the IBM embedded versions
+	  (403 and 405) and the high end 64 bit Power processors (POWER 3,
+	  POWER4, and IBM 970 also known as G5)
 	  Unless you are building a kernel for one of the embedded processor
 	  systems, 64 bit IBM RS/6000 or an Apple G5, choose 6xx.
 	  Note that the kernel runs in 32-bit mode even on 64-bit chips.
-	  Also note that because the 52xx & 82xx family has a 603e core,
-	  specific support for that chipset is asked later on.
+	  Also note that because the 82xx family has a 603e core, specific
+	  support for that chipset is asked later on.
 
 config 40x
 	bool "40x"
@@ -191,7 +191,7 @@ config CPU_FREQ
 	  fly. This is a nice method to save battery power on notebooks,
 	  because the lower the clock speed, the less power the CPU consumes.
 
-	  For more information, take a look at <file:Documentation/cpu-freq> or
+	  For more information, take a look at linux/Documentation/cpu-freq or
 	  at <http://www.brodo.de/cpufreq/>
 
 	  If in doubt, say N.
@@ -507,6 +507,12 @@ config APUS
 	  More information is available at:
 	  <http://linux-apus.sourceforge.net/>.
 
+config KATANA
+	bool "Artesyn-Katana"
+
+config DMV182
+	bool "Dy-4 SVME/DMV-182"
+
 config WILLOW
 	bool "Cogent-Willow"
 
@@ -517,7 +523,10 @@ config POWERPMC250
 	bool "Force-PowerPMC250"
 
 config EV64260
-	bool "Galileo-EV-64260-BP"
+	bool "Marvell-EV64260BP"
+	help
+	  Select EV64260 if configuring of a Marvell (formerly Galileo)
+	  EV64260BP Evaluation platofm.
 
 config SPRUCE
 	bool "IBM-Spruce"
@@ -583,7 +592,7 @@ config SBC82xx
 config SBS8260
 	bool "SBS8260"
 
-config RPX8260
+config RPX6
 	bool "RPXSUPER"
 
 config TQM8260
@@ -601,15 +610,6 @@ config TQM8260
 config ADS8272
 	bool "ADS8272"
 
-config LITE5200
-	bool "Freescale LITE5200 / (IceCube)"
-	select PPC_MPC52xx
-	help
-	  Support for the LITE5200 dev board for the MPC5200 from Freescale.
-	  This is for the LITE5200 version 2.0 board. Don't know if it changes
-	  much but it's only been tested on this board version. I think this
-	  board is also known as IceCube.
-
 endchoice
 
 config PQ2ADS
@@ -626,14 +626,11 @@ config EMBEDDEDBOOT
 	bool
 	depends on 8xx || 8260
 	default y
-	
-config PPC_MPC52xx
-	bool
 
 config 8260
 	bool "CPM2 Support" if WILLOW
 	depends on 6xx
-	default y if TQM8260 || RPX8260 || EST8260 || SBS8260 || SBC82xx
+	default y if TQM8260 || RPXSUPER || EST8260 || SBS8260 || SBC82xx
 	help
 	  The MPC8260 is a typical embedded CPU made by Motorola.  Selecting
 	  this option means that you wish to build a kernel for a machine with
@@ -650,7 +647,7 @@ config 8272
 
 config CPM2
 	bool
-	depends on 8260 || MPC8560
+	depends on 8260
 	default y
 	help
 	  The CPM2 (Communications Processor Module) is a coprocessor on
@@ -683,9 +680,29 @@ config PPC_OF
 	depends on PPC_PMAC || PPC_CHRP
 	default y
 
+menu "Set bridge options"
+	depends on MV64X60
+
+config MV64X60_BASE
+	hex "Set bridge base used by firmware"
+	default "0xf1000000"
+	help
+	  A firmware can leave the base address of the bridge's registers at
+	  a non-standard location.  If so, set this value to reflect the
+	  address of that non-standard location.
+
+config MV64X60_NEW_BASE
+	hex "Set bridge base used by kernel"
+	default "0xf1000000"
+	help
+	  If the current base address of the bridge's registers is not where
+	  you want it, set this value to the address that you want it moved to.
+
+endmenu
+
 config PPC_GEN550
 	bool
-	depends on SANDPOINT || MCPN765 || SPRUCE || PPLUS || PCORE || PRPMC750 || K2 || PRPMC800
+	depends on SANDPOINT || MCPN765 || SPRUCE || PPLUS || PCORE || PRPMC750 || K2 || PRPMC800 || (EV64260 && !MV64X60_MPSC) || DMV182
 	default y
 
 config FORCE
@@ -696,6 +713,16 @@ config FORCE
 config GT64260
 	bool
 	depends on EV64260
+	default y
+
+config MV64360
+	bool
+	depends on KATANA || DMV182
+	default y
+
+config MV64X60
+	bool
+	depends on (GT64260 || MV64360)
 	default y
 
 config NONMONARCH_SUPPORT
@@ -719,7 +746,7 @@ config MPC10X_BRIDGE
 
 config FSL_OCP
 	bool
-	depends on MPC10X_BRIDGE || PPC_MPC52xx
+	depends on MPC10X_BRIDGE
 	default y
 
 config MPC10X_OPENPIC
@@ -755,11 +782,6 @@ config SERIAL_CONSOLE
 	bool
 	depends on 8xx
 	default y
-
-config SERIAL_CONSOLE_BAUD
-	int
-	depends on EV64260
-	default "115200"
 
 config PPCBUG_NVRAM
 	bool "Enable reading PPCBUG NVRAM during boot" if PPLUS || LOPEC
@@ -824,6 +846,39 @@ config PROC_DEVICETREE
 	  This option adds a device-tree directory under /proc which contains
 	  an image of the device tree that the kernel copies from Open
 	  Firmware. If unsure, say Y here.
+
+config PPC_RTAS
+	bool "Support for RTAS (RunTime Abstraction Services) in /proc"
+	depends on PPC_OF && PROC_FS
+	---help---
+	  When you use this option, you will be able to use RTAS from
+	  userspace.
+
+	  RTAS stands for RunTime Abstraction Services and should
+	  provide a portable way to access and set system information. This is
+	  commonly used on RS/6000 (pSeries) computers.
+
+	  You can access RTAS via the special proc file system entry rtas.
+	  Don't confuse this rtas entry with the one in /proc/device-tree/rtas
+	  which is readonly.
+
+	  If you don't know if you can use RTAS look into
+	  /proc/device-tree/rtas. If there are some entries, it is very likely
+	  that you will be able to use RTAS.
+
+	  You can do cool things with rtas. To print out information about
+	  various sensors in the system, just do a
+
+	  $ cat /proc/rtas/sensors
+
+	  or if you power off your machine at night but want it running when
+	  you enter your office at 7:45 am, do a
+
+	  # date -d 'tomorrow 7:30' +%s > /proc/rtas/poweron
+
+	  and shutdown.
+
+	  If unsure, say Y.
 
 config PREP_RESIDUAL
 	bool "Support for PReP Residual Data"
@@ -1274,7 +1329,7 @@ config DEBUG_SPINLOCK_SLEEP
 
 config KGDB
 	bool "Include kgdb kernel debugger"
-	depends on DEBUG_KERNEL && (BROKEN || PPC_GEN550 || 4xx)
+	depends on DEBUG_KERNEL
 	select DEBUG_INFO
 	help
 	  Include in-kernel hooks for kgdb, the Linux kernel source level
@@ -1342,11 +1397,11 @@ config BOOTX_TEXT
 
 config SERIAL_TEXT_DEBUG
 	bool "Support for early boot texts over serial port"
-	depends on 4xx || GT64260 || LOPEC || PPLUS || PRPMC800 || PPC_GEN550 || PPC_MPC52xx
+	depends on 4xx || LOPEC || MV64X60 || PPLUS || PRPMC800 || PPC_GEN550
 
 config PPC_OCP
 	bool
-	depends on IBM_OCP || FSL_OCP
+	depends on IBM_OCP || FSL_OCP || MV64X60
 	default y
 
 endmenu

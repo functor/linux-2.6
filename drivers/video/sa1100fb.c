@@ -1074,7 +1074,7 @@ static int sa1100fb_blank(int blank, struct fb_info *info)
 	case VESA_NO_BLANKING:
 		if (fbi->fb.fix.visual == FB_VISUAL_PSEUDOCOLOR ||
 		    fbi->fb.fix.visual == FB_VISUAL_STATIC_PSEUDOCOLOR)
-			fb_set_cmap(&fbi->fb.cmap, info);
+			fb_set_cmap(&fbi->fb.cmap, 1, info);
 		sa1100fb_schedule_work(fbi, C_ENABLE);
 	}
 	return 0;
@@ -1291,7 +1291,8 @@ static void sa1100fb_enable_controller(struct sa1100fb_info *fbi)
 #error Where is GPIO24 set as an output?  Can we fit this in somewhere else?
 	if (machine_is_graphicsclient()) {
 		// From ADS doc again...same as disable
-		msleep(20);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(20 * HZ / 1000);
 		GPSR |= GPIO_GPIO24;
 	}
 #endif
@@ -1326,7 +1327,8 @@ static void sa1100fb_disable_controller(struct sa1100fb_info *fbi)
 		 * We'll wait 20msec.
 		 */
 		GPCR |= GPIO_GPIO24;
-		msleep(20);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(20 * HZ / 1000);
 	}
 #endif
 #ifdef CONFIG_SA1100_HUW_WEBPANEL

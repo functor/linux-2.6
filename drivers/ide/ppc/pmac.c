@@ -1126,9 +1126,11 @@ pmac_ide_do_resume(ide_hwif_t *hwif)
 	if (!pmif->mediabay) {
 		ppc_md.feature_call(PMAC_FTR_IDE_RESET, pmif->node, pmif->aapl_bus_id, 1);
 		ppc_md.feature_call(PMAC_FTR_IDE_ENABLE, pmif->node, pmif->aapl_bus_id, 1);
-		msleep(10);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ/100);
 		ppc_md.feature_call(PMAC_FTR_IDE_RESET, pmif->node, pmif->aapl_bus_id, 0);
-		msleep(jiffies_to_msecs(IDE_WAKEUP_DELAY));
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(IDE_WAKEUP_DELAY);
 	}
 
 	/* Sanitize drive timings */
@@ -1206,9 +1208,11 @@ pmac_ide_setup_device(pmac_ide_hwif_t *pmif, ide_hwif_t *hwif)
  		/* This is necessary to enable IDE when net-booting */
 		ppc_md.feature_call(PMAC_FTR_IDE_RESET, np, pmif->aapl_bus_id, 1);
 		ppc_md.feature_call(PMAC_FTR_IDE_ENABLE, np, pmif->aapl_bus_id, 1);
-		msleep(10);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ/100);
 		ppc_md.feature_call(PMAC_FTR_IDE_RESET, np, pmif->aapl_bus_id, 0);
-		msleep(jiffies_to_msecs(IDE_WAKEUP_DELAY));
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(IDE_WAKEUP_DELAY);		
 	}
 
 	/* Setup MMIO ops */

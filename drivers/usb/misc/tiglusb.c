@@ -10,7 +10,7 @@
  *
  * Based on dabusb.c, printer.c & scanner.c
  *
- * Please see the file: Documentation/usb/silverlink.txt
+ * Please see the file: linux/Documentation/usb/SilverLink.txt
  * and the website at:  http://lpg.ticalc.org/prj_usb/
  * for more info.
  *
@@ -132,7 +132,7 @@ tiglusb_open (struct inode *inode, struct file *filp)
 	filp->f_pos = 0;
 	filp->private_data = s;
 
-	return nonseekable_open(inode, filp);
+	return 0;
 }
 
 static int

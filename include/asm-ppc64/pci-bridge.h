@@ -47,6 +47,7 @@ struct pci_controller {
 	 * the PCI memory space in the CPU bus space
 	 */
 	unsigned long pci_mem_offset;
+	unsigned long pci_io_offset;
 
 	struct pci_ops *ops;
 	volatile unsigned int *cfg_addr;

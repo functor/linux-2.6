@@ -16,7 +16,6 @@
 #include "init.h"
 #include "user.h"
 #include "kern_util.h"
-#include "user_util.h"
 #include "sigio.h"
 #include "helper.h"
 #include "os.h"
@@ -51,6 +50,7 @@ static void openpty_cb(void *arg)
 void __init check_one_sigio(void (*proc)(int, int))
 {
 	struct sigaction old, new;
+	struct termios tt;
 	struct openpty_arg pty = { .master = -1, .slave = -1 };
 	int master, slave, err;
 
@@ -68,10 +68,12 @@ void __init check_one_sigio(void (*proc)(int, int))
 		return;
 	}
 
-	/* Not now, but complain so we now where we failed. */
-	err = raw(master);
-	if (err < 0)
-		panic("check_sigio : __raw failed, errno = %d\n", -err);
+	/* XXX These can fail with EINTR */
+	if(tcgetattr(master, &tt) < 0)
+		panic("check_sigio : tcgetattr failed, errno = %d\n", errno);
+	cfmakeraw(&tt);
+	if(tcsetattr(master, TCSADRAIN, &tt) < 0)
+		panic("check_sigio : tcsetattr failed, errno = %d\n", errno);
 
 	err = os_sigio_async(master, slave);
 	if(err < 0)

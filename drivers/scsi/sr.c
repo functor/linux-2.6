@@ -504,7 +504,7 @@ static int sr_block_ioctl(struct inode *inode, struct file *file, unsigned cmd,
                 case SCSI_IOCTL_GET_BUS_NUMBER:
                         return scsi_ioctl(sdev, cmd, (void __user *)arg);
 	}
-	return cdrom_ioctl(file, &cd->cdi, inode, cmd, arg);
+	return cdrom_ioctl(&cd->cdi, inode, cmd, arg);
 }
 
 static int sr_block_media_changed(struct gendisk *disk)
@@ -775,6 +775,9 @@ static void get_capabilities(struct scsi_cd *cd)
 		""
 	};
 
+	/* Set read only initially */
+	set_disk_ro(cd->disk, 1);
+
 	/* allocate a request for the TEST_UNIT_READY */
 	SRpnt = scsi_allocate_request(cd->device, GFP_KERNEL);
 	if (!SRpnt) {
@@ -882,6 +885,7 @@ static void get_capabilities(struct scsi_cd *cd)
 	if ((cd->cdi.mask & (CDC_DVD_RAM | CDC_MRW_W | CDC_RAM)) !=
 			(CDC_DVD_RAM | CDC_MRW_W | CDC_RAM)) {
 		cd->device->writeable = 1;
+		set_disk_ro(cd->disk, 0);
 	}
 
 	scsi_release_request(SRpnt);

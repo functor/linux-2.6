@@ -76,17 +76,12 @@ void port_free(void *d)
 int port_open(int input, int output, int primary, void *d, char **dev_out)
 {
 	struct port_chan *data = d;
-	int fd, err;
+	int fd;
 
 	fd = port_wait(data->kernel_data);
 	if((fd >= 0) && data->raw){
-		CATCH_EINTR(err = tcgetattr(fd, &data->tt));
-		if(err)
-			return(err);
-
-		err = raw(fd);
-		if(err)
-			return(err);
+		tcgetattr(fd, &data->tt);
+		raw(fd, 0);
 	}
 	*dev_out = data->dev;
 	return(fd);
@@ -123,17 +118,11 @@ struct chan_ops port_ops = {
 int port_listen_fd(int port)
 {
 	struct sockaddr_in addr;
-	int fd, err, arg;
+	int fd, err;
 
 	fd = socket(PF_INET, SOCK_STREAM, 0);
 	if(fd == -1) 
 		return(-errno);
-
-	arg = 1;
-	if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &arg, sizeof(arg)) < 0){
-		err = -errno;
-		goto out;
-	}
 
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(port);

@@ -56,10 +56,12 @@ DECLARE_MUTEX(rtnl_sem);
 void rtnl_lock(void)
 {
 	rtnl_shlock();
+	rtnl_exlock();
 }
  
 void rtnl_unlock(void)
 {
+	rtnl_exunlock();
 	rtnl_shunlock();
 
 	netdev_run_todo();
@@ -335,6 +337,7 @@ rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh, int *errp)
 	struct rtnetlink_link *link_tab;
 	struct rtattr	*rta[RTATTR_MAX];
 
+	int exclusive = 0;
 	int sz_idx, kind;
 	int min_len;
 	int family;
@@ -401,6 +404,14 @@ rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh, int *errp)
 		return -1;
 	}
 
+	if (kind != 2) {
+		if (rtnl_exlock_nowait()) {
+			*errp = 0;
+			return -1;
+		}
+		exclusive = 1;
+	}
+
 	memset(&rta, 0, sizeof(rta));
 
 	min_len = rtm_min[sz_idx];
@@ -428,10 +439,14 @@ rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh, int *errp)
 		goto err_inval;
 	err = link->doit(skb, nlh, (void *)&rta);
 
+	if (exclusive)
+		rtnl_exunlock();
 	*errp = err;
 	return err;
 
 err_inval:
+	if (exclusive)
+		rtnl_exunlock();
 	*errp = -EINVAL;
 	return -1;
 }

@@ -136,12 +136,12 @@ inline static void bitvector_print(int flag, bitvector_t * vec)
 		return;
 	}
 	if (vec == NULL) {
-		printk(KERN_DEBUG "v<0>-NULL\n");
+		printk("v<0>-NULL\n");
 		return;
 	}
-	printk(KERN_DEBUG "v<%d>-", sz = vec->size);
+	printk("v<%d>-", sz = vec->size);
 	for (i = 0; i < sz; i++) {
-		printk(KERN_DEBUG "%c", test_bit(i, vec->bits) ? '1' : '0');
+		printk("%c", test_bit(i, vec->bits) ? '1' : '0');
 	}
 	return;
 }

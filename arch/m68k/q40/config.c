@@ -122,7 +122,7 @@ static void q40_heartbeat(int on)
 }
 #endif
 
-void q40_reset(void)
+void q40_reset()
 {
         halted=1;
         printk ("\n\n*******************************************\n"
@@ -131,7 +131,7 @@ void q40_reset(void)
 	Q40_LED_ON();
 	while(1) ;
 }
-void q40_halt(void)
+void q40_halt()
 {
         halted=1;
         printk ("\n\n*******************\n"
@@ -295,7 +295,7 @@ int q40_hwclk(int op, struct rtc_time *t)
 	return 0;
 }
 
-unsigned int q40_get_ss(void)
+unsigned int q40_get_ss()
 {
 	return bcd2bin(Q40_RTC_SECS);
 }

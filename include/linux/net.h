@@ -143,7 +143,6 @@ struct net_proto_family {
 };
 
 struct iovec;
-struct kvec;
 
 extern int	     sock_wake_async(struct socket *sk, int how, int band);
 extern int	     sock_register(struct net_proto_family *fam);
@@ -170,12 +169,6 @@ extern struct socket *sockfd_lookup(int fd, int *err);
 extern int	     net_ratelimit(void);
 extern unsigned long net_random(void);
 extern void	     net_srandom(unsigned long);
-
-extern int   	     kernel_sendmsg(struct socket *sock, struct msghdr *msg,
-				    struct kvec *vec, size_t num, size_t len);
-extern int   	     kernel_recvmsg(struct socket *sock, struct msghdr *msg,
-				    struct kvec *vec, size_t num,
-				    size_t len, int flags);
 
 #ifndef CONFIG_SMP
 #define SOCKOPS_WRAPPED(name) name
