@@ -9,4 +9,5 @@ endif
     obj-$(CONFIG_CKRM_RES_NUMTASKS) 	+= ckrm_tasks.o
     obj-$(CONFIG_CKRM_TYPE_SOCKETCLASS) += ckrm_sockc.o
     obj-$(CONFIG_CKRM_RES_LISTENAQ) 	+= ckrm_listenaq.o
-    obj-$(CONFIG_CKRM_CPU_SCHEDULE) 	+= ckrm_cpu_class.o ckrm_cpu_monitor.o
+    obj-$(CONFIG_CKRM_CPU_SCHEDULE) += ckrm_cpu_class.o
+    obj-$(CONFIG_CKRM_CPU_MONITOR) += ckrm_cpu_monitor.o

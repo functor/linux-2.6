@@ -490,7 +490,6 @@ static void ckrm_reclassify_all_tasks(void)
 				} else {
 					read_unlock(&tasklist_lock);
 				}
-				pos++;
 			}
 		}
 

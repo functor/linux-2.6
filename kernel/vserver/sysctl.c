@@ -158,6 +158,3 @@ static ctl_table vserver_table[] = {
         { .ctl_name = 0 }
 };
 
-#include <linux/module.h>
-
-EXPORT_SYMBOL_GPL(vx_debug_dlimit);

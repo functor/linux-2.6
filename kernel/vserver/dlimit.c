@@ -437,7 +437,3 @@ no_blim:
 	return;	
 }
 
-#include <linux/module.h>
-
-EXPORT_SYMBOL_GPL(locate_dl_info);
-EXPORT_SYMBOL_GPL(rcu_free_dl_info);

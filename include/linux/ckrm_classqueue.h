@@ -116,7 +116,7 @@ void classqueue_update_prio(struct classqueue_struct *cq, cq_node_t * node, int 
 cq_node_t *classqueue_get_head(struct classqueue_struct *cq);
 
 /*update the base priority of the classqueue*/
-void classqueue_update_base(struct classqueue_struct *cq);
+void classqueue_update_base(struct classqueue_struct *cq, int new_base);
 
 /**
  * class_compare_prio: compare the priority of this two nodes
