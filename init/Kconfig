@@ -175,6 +175,16 @@ config CKRM_TYPE_TASKCLASS
 	
 	  Say N if unsure 
 
+config CKRM_RES_NULL
+	tristate "Null Tasks Resource Manager"
+	depends on CKRM_TYPE_TASKCLASS
+	default m
+	help
+	  Provides a Null Resource Controller for CKRM that is purely for
+	  demonstration purposes.
+	
+	  Say N if unsure, Y to use the feature.
+
 config CKRM_RES_NUMTASKS
 	tristate "Number of Tasks Resource Manager"
 	depends on CKRM_TYPE_TASKCLASS
