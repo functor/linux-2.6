@@ -94,8 +94,8 @@ static inline int cki_div(int *a, int b, int c);
 static void cki_recalc_propagate(cki_icls_t *res, cki_icls_t *parres);
 
 /* External functions e.g. interface to ioscheduler */
-void *cki_tsk_icls(struct task_struct *tsk);
-int cki_tsk_ioprio(struct task_struct *tsk);
+void *cki_tsk_icls (struct task_struct *tsk);
+int cki_tsk_ioprio (struct task_struct *tsk);
 
 extern void cki_cfq_set(icls_tsk_t tskicls, icls_ioprio_t tskioprio);
 
@@ -523,7 +523,7 @@ static void cki_chgcls(void *tsk, void *oldres, void *newres)
 
 
 struct ckrm_res_ctlr cki_rcbs = {
-	.res_name = "cki",
+	.res_name = "io",
 	.res_hdepth = 1,
 	.resid = -1,
 	.res_alloc = cki_alloc,

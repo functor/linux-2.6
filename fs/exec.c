@@ -47,7 +47,6 @@
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
 #include <linux/ckrm.h>
-#include <linux/ckrm_mem.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -548,18 +547,6 @@ static int exec_mmap(struct mm_struct *mm)
 	tsk->active_mm = mm;
 	activate_mm(active_mm, mm);
 	task_unlock(tsk);
-#ifdef CONFIG_CKRM_RES_MEM
-	if (old_mm) {
-		spin_lock(&old_mm->peertask_lock);
-		list_del(&tsk->mm_peers);
-		ckrm_mem_evaluate_mm(old_mm);
-		spin_unlock(&old_mm->peertask_lock);
-	}
-	spin_lock(&mm->peertask_lock);
-	list_add_tail(&tsk->mm_peers, &mm->tasklist);
-	ckrm_mem_evaluate_mm(mm);
-	spin_unlock(&mm->peertask_lock);
-#endif
 	if (old_mm) {
 		if (active_mm != old_mm) BUG();
 		mmput(old_mm);

@@ -38,7 +38,6 @@
 #include <linux/rmap.h>
 #include <linux/ckrm.h>
 #include <linux/ckrm_tsk.h>
-#include <linux/ckrm_mem_inline.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -266,9 +265,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	ckrm_cb_newtask(tsk);
 	/* One for us, one for whoever does the "release_task()" (usually parent) */
 	atomic_set(&tsk->usage,2);
-#ifdef CONFIG_CKRM_RES_MEM	
-	INIT_LIST_HEAD(&tsk->mm_peers);
-#endif
 	return tsk;
 }
 
@@ -421,10 +417,6 @@ static struct mm_struct * mm_init(struct mm_struct * mm)
 	mm->ioctx_list = NULL;
 	mm->default_kioctx = (struct kioctx)INIT_KIOCTX(mm->default_kioctx, *mm);
 	mm->free_area_cache = TASK_UNMAPPED_BASE;
-#ifdef CONFIG_CKRM_RES_MEM
-	INIT_LIST_HEAD(&mm->tasklist);
-	mm->peertask_lock = SPIN_LOCK_UNLOCKED;
-#endif
 
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
@@ -445,10 +437,6 @@ struct mm_struct * mm_alloc(void)
 	if (mm) {
 		memset(mm, 0, sizeof(*mm));
 		mm = mm_init(mm);
-#ifdef CONFIG_CKRM_RES_MEM
-		mm->memclass = GET_MEM_CLASS(current);
-		mem_class_get(mm->memclass);
-#endif
 	}
 	return mm;
 }
@@ -463,13 +451,6 @@ void fastcall __mmdrop(struct mm_struct *mm)
 	BUG_ON(mm == &init_mm);
 	mm_free_pgd(mm);
 	destroy_context(mm);
-#ifdef CONFIG_CKRM_RES_MEM
-	/* class can be null and mm's tasklist can be empty here */
-	if (mm->memclass) {
-		mem_class_put(mm->memclass);
-		mm->memclass = NULL;
-	}
-#endif
 	free_mm(mm);
 }
 
@@ -597,7 +578,6 @@ static int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 good_mm:
 	tsk->mm = mm;
 	tsk->active_mm = mm;
-	ckrm_init_mm_to_task(mm, tsk);
 	return 0;
 
 free_pt:
@@ -1116,6 +1096,7 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	} else
 		link_pid(p, p->pids + PIDTYPE_TGID, &p->group_leader->pids[PIDTYPE_TGID].pid);
 
+	p->ioprio = current->ioprio;
 	nr_threads++;
 	write_unlock_irq(&tasklist_lock);
 	retval = 0;

@@ -9,4 +9,3 @@ endif
     obj-$(CONFIG_CKRM_RES_NUMTASKS) 	+= ckrm_numtasks.o
     obj-$(CONFIG_CKRM_TYPE_SOCKETCLASS) += ckrm_sockc.o
     obj-$(CONFIG_CKRM_RES_LISTENAQ) 	+= ckrm_laq.o
-    obj-$(CONFIG_CKRM_RES_MEM) 			+= ckrm_mem.o
