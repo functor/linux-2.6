@@ -26,6 +26,7 @@
 #include <linux/kallsyms.h>
 #include <linux/ptrace.h>
 #include <linux/version.h>
+#include <linux/dump.h>
 
 #ifdef CONFIG_EISA
 #include <linux/ioport.h>
@@ -324,6 +325,7 @@ void die(const char * str, struct pt_regs * regs, long err)
 	show_registers(regs);
 	if (netdump_func)
 		netdump_func(regs);
+	dump((char *)str, regs);
 	bust_spinlocks(0);
 	die_owner = -1;
 	spin_unlock_irq(&die_lock);

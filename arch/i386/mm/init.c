@@ -93,6 +93,13 @@ int page_is_ram(unsigned long pagenr)
 	return 0;
 }
 
+/* To enable modules to check if a page is in RAM */
+int pfn_is_ram(unsigned long pfn)
+{
+	return (page_is_ram(pfn));
+}
+
+
 pte_t *kmap_pte;
 
 EXPORT_SYMBOL(kmap_pte);

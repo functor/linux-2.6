@@ -52,6 +52,10 @@
 #define cpu_to_node_mask(cpu) (cpu_online_map)
 #endif
 
+/* used to soft spin in sched while dump is in progress */
+unsigned long dump_oncpu;
+EXPORT_SYMBOL(dump_oncpu);
+
 /*
  * Convert user-nice values [ -20 ... 0 ... 19 ]
  * to static priority [ MAX_RT_PRIO..MAX_PRIO-1 ],
@@ -181,84 +185,7 @@ static unsigned int task_timeslice(task_t *p)
 
 #define task_hot(p, now, sd) ((now) - (p)->timestamp < (sd)->cache_hot_time)
 
-/*
- * These are the runqueue data structures:
- */
-typedef struct runqueue runqueue_t;
-
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-#include <linux/ckrm_classqueue.h>
-#endif
-
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-
-/**
- *  if belong to different class, compare class priority
- *  otherwise compare task priority 
- */
-#define TASK_PREEMPTS_CURR(p, rq) \
-	(((p)->cpu_class != (rq)->curr->cpu_class) && ((rq)->curr != (rq)->idle))? class_preempts_curr((p),(rq)->curr) : ((p)->prio < (rq)->curr->prio)
-#else
-#define BITMAP_SIZE ((((MAX_PRIO+1+7)/8)+sizeof(long)-1)/sizeof(long))
-struct prio_array {
-	unsigned int nr_active;
-	unsigned long bitmap[BITMAP_SIZE];
-	struct list_head queue[MAX_PRIO];
-};
-#define rq_active(p,rq)   (rq->active)
-#define rq_expired(p,rq)  (rq->expired)
-#define ckrm_rebalance_tick(j,this_cpu) do {} while (0)
-#define TASK_PREEMPTS_CURR(p, rq) \
-	((p)->prio < (rq)->curr->prio)
-#endif
-
-/*
- * This is the main, per-CPU runqueue data structure.
- *
- * Locking rule: those places that want to lock multiple runqueues
- * (such as the load balancing or the thread migration code), lock
- * acquire operations must be ordered by ascending &runqueue.
- */
-struct runqueue {
-	spinlock_t lock;
-
-	/*
-	 * nr_running and cpu_load should be in the same cacheline because
-	 * remote CPUs use both these fields when doing load calculation.
-	 */
-	unsigned long nr_running;
-#if defined(CONFIG_SMP)
-	unsigned long cpu_load;
-#endif
-	unsigned long long nr_switches, nr_preempt;
-	unsigned long expired_timestamp, nr_uninterruptible;
-	unsigned long long timestamp_last_tick;
-	task_t *curr, *idle;
-	struct mm_struct *prev_mm;
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-	unsigned long ckrm_cpu_load;
-	struct classqueue_struct classqueue;   
-#else
-        prio_array_t *active, *expired, arrays[2];
-#endif
-	int best_expired_prio;
-	atomic_t nr_iowait;
-
-#ifdef CONFIG_SMP
-	struct sched_domain *sd;
-
-	/* For active balancing */
-	int active_balance;
-	int push_cpu;
-
-	task_t *migration_thread;
-	struct list_head migration_queue;
-#endif
-	struct list_head hold_queue;
-	int idle_tokens;
-};
-
-static DEFINE_PER_CPU(struct runqueue, runqueues);
+DEFINE_PER_CPU(struct runqueue, runqueues);
 
 #define for_each_domain(cpu, domain) \
 	for (domain = cpu_rq(cpu)->sd; domain; domain = domain->parent)
@@ -1952,6 +1879,15 @@ nextgroup:
 			100*max_load <= sd->imbalance_pct*this_load)
 		goto out_balanced;
 
+ 	/*
+	 * If crash dump is in progress, this other cpu's
+	 * need to wait until it completes.
+	 * NB: this code is optimized away for kernels without
+	 * dumping enabled.
+	 */
+	if (unlikely(dump_oncpu))
+		goto dump_scheduling_disabled;
+
 	/*
 	 * We're trying to get all the cpus to the average_load, so we don't
 	 * want to push ourselves above the average load, nor do we wish to
@@ -2771,6 +2707,16 @@ switch_tasks:
 	preempt_enable_no_resched();
 	if (test_thread_flag(TIF_NEED_RESCHED))
 		goto need_resched;
+
+	return;
+
+ dump_scheduling_disabled:
+	/* allow scheduling only if this is the dumping cpu */
+	if (dump_oncpu != smp_processor_id()+1) {
+		while (dump_oncpu)
+			cpu_relax();
+	}
+	return;
 }
 
 EXPORT_SYMBOL(schedule);

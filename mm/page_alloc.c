@@ -47,6 +47,11 @@ int sysctl_lower_zone_protection = 0;
 EXPORT_SYMBOL(totalram_pages);
 EXPORT_SYMBOL(nr_swap_pages);
 
+#ifdef CONFIG_CRASH_DUMP_MODULE
+/* This symbol has to be exported to use 'for_each_pgdat' macro by modules. */
+EXPORT_SYMBOL(pgdat_list);
+#endif
+
 /*
  * Used by page_zone() to look up the address of the struct zone whose
  * id is encoded in the upper bits of page->flags
@@ -98,7 +103,8 @@ static void bad_page(const char *function, struct page *page)
 	page->mapcount = 0;
 }
 
-#ifndef CONFIG_HUGETLB_PAGE
+#if !defined(CONFIG_HUGETLB_PAGE) && !defined(CONFIG_CRASH_DUMP) \
+	&& !defined(CONFIG_CRASH_DUMP_MODULE)
 #define prep_compound_page(page, order) do { } while (0)
 #define destroy_compound_page(page, order) do { } while (0)
 #else
