@@ -18,17 +18,15 @@
 #include <asm/acpi.h>
 #include <asm/apicdef.h>
 #include <asm/page.h>
-#ifdef CONFIG_HIGHMEM
 #include <linux/threads.h>
 #include <asm/kmap_types.h>
-#endif
 
 /*
  * Here we define all the compile-time 'special' virtual
  * addresses. The point is to have a constant address at
  * compile time, but to set the physical address only
- * in the boot process. We allocate these special addresses
- * from the end of virtual memory (0xfffff000) backwards.
+ * in the boot process. We allocate these special  addresses
+ * from the end of virtual memory (0xffffe000) backwards.
  * Also this lets us do fail-safe vmalloc(), we
  * can guarantee that these special addresses and
  * vmalloc()-ed addresses never overlap.
@@ -41,11 +39,20 @@
  * TLB entries of such buffers will not be flushed across
  * task switches.
  */
+
+/*
+ * on UP currently we will have no trace of the fixmap mechanizm,
+ * no page table allocations, etc. This might change in the
+ * future, say framebuffers for the console driver(s) could be
+ * fix-mapped?
+ */
 enum fixed_addresses {
 	FIX_HOLE,
 	FIX_VSYSCALL,
 #ifdef CONFIG_X86_LOCAL_APIC
 	FIX_APIC_BASE,	/* local (CPU) APIC) -- required for SMP or not */
+#else
+	FIX_VSTACK_HOLE_1,
 #endif
 #ifdef CONFIG_X86_IO_APIC
 	FIX_IO_APIC_BASE_0,
@@ -57,16 +64,21 @@ enum fixed_addresses {
 	FIX_LI_PCIA,	/* Lithium PCI Bridge A */
 	FIX_LI_PCIB,	/* Lithium PCI Bridge B */
 #endif
-#ifdef CONFIG_X86_F00F_BUG
-	FIX_F00F_IDT,	/* Virtual mapping for IDT */
-#endif
+	FIX_IDT,
+	FIX_GDT_1,
+	FIX_GDT_0,
+	FIX_TSS_3,
+	FIX_TSS_2,
+	FIX_TSS_1,
+	FIX_TSS_0,
+	FIX_ENTRY_TRAMPOLINE_1,
+	FIX_ENTRY_TRAMPOLINE_0,
 #ifdef CONFIG_X86_CYCLONE_TIMER
 	FIX_CYCLONE_TIMER, /*cyclone timer register*/
+	FIX_VSTACK_HOLE_2,
 #endif 
-#ifdef CONFIG_HIGHMEM
 	FIX_KMAP_BEGIN,	/* reserved pte's for temporary kernel mappings */
 	FIX_KMAP_END = FIX_KMAP_BEGIN+(KM_TYPE_NR*NR_CPUS)-1,
-#endif
 #ifdef CONFIG_ACPI_BOOT
 	FIX_ACPI_BEGIN,
 	FIX_ACPI_END = FIX_ACPI_BEGIN + FIX_ACPI_PAGES - 1,
@@ -98,12 +110,15 @@ extern void __set_fixmap (enum fixed_addresses idx,
 		__set_fixmap(idx, 0, __pgprot(0))
 
 /*
- * used by vmalloc.c.
+ * used by vmalloc.c and various other places.
  *
  * Leave one empty page between vmalloc'ed areas and
  * the start of the fixmap.
+ *
+ * IMPORTANT: we have to align FIXADDR_TOP so that the virtual stack
+ * is THREAD_SIZE aligned.
  */
-#define FIXADDR_TOP	(0xfffff000UL)
+#define FIXADDR_TOP	(0xffffe000UL & ~(THREAD_SIZE-1))
 #define __FIXADDR_SIZE	(__end_of_permanent_fixed_addresses << PAGE_SHIFT)
 #define FIXADDR_START	(FIXADDR_TOP - __FIXADDR_SIZE)
 

@@ -395,6 +395,21 @@ static struct dentry * real_lookup(struct dentry * parent, struct qstr * name, s
 	return result;
 }
 
+inline void nd_set_link(struct nameidata *nd, char *path)
+{
+	nd->saved_names[current->link_count] = path;
+}
+
+inline char *nd_get_link(struct nameidata *nd)
+{
+	return nd->saved_names[current->link_count];
+}
+
+EXPORT_SYMBOL(nd_set_link);
+EXPORT_SYMBOL(nd_get_link);
+
+static inline int __vfs_follow_link(struct nameidata *, const char *);
+
 /*
  * This limits recursive symlink follows to 8, while
  * limiting consecutive symlinks to 40.
@@ -405,7 +420,7 @@ static struct dentry * real_lookup(struct dentry * parent, struct qstr * name, s
 static inline int do_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	int err = -ELOOP;
-	if (current->link_count >= 5)
+	if (current->link_count >= MAX_NESTED_LINKS)
 		goto loop;
 	if (current->total_link_count >= 40)
 		goto loop;
@@ -416,7 +431,15 @@ static inline int do_follow_link(struct dentry *dentry, struct nameidata *nd)
 	current->link_count++;
 	current->total_link_count++;
 	touch_atime(nd->mnt, dentry);
+	nd_set_link(nd, NULL);
 	err = dentry->d_inode->i_op->follow_link(dentry, nd);
+	if (!err) {
+		char *s = nd_get_link(nd);
+		if (s)
+			err = __vfs_follow_link(nd, s);
+		if (dentry->d_inode->i_op->put_link)
+			dentry->d_inode->i_op->put_link(dentry, nd);
+	}
 	current->link_count--;
 	return err;
 loop:
@@ -578,9 +601,11 @@ int fastcall link_path_walk(const char * name, struct nameidata *nd)
 {
 	struct path next;
 	struct inode *inode;
-	int err;
+	int err, atomic;
 	unsigned int lookup_flags = nd->flags;
-	
+
+	atomic = (lookup_flags & LOOKUP_ATOMIC);
+
 	while (*name=='/')
 		name++;
 	if (!*name)
@@ -648,6 +673,9 @@ int fastcall link_path_walk(const char * name, struct nameidata *nd)
 			if (err < 0)
 				break;
 		}
+		err = -EWOULDBLOCKIO;
+		if (atomic)
+			break;
 		nd->flags |= LOOKUP_CONTINUE;
 		/* This does the actual lookups.. */
 		err = do_lookup(nd, &this, &next);
@@ -712,6 +740,9 @@ last_component:
 			if (err < 0)
 				break;
 		}
+		err = -EWOULDBLOCKIO;
+		if (atomic)
+			break;
 		err = do_lookup(nd, &this, &next);
 		if (err)
 			break;
@@ -1031,8 +1062,11 @@ static inline int check_sticky(struct inode *dir, struct inode *inode)
 static inline int may_delete(struct inode *dir,struct dentry *victim,int isdir)
 {
 	int error;
-	if (!victim->d_inode || victim->d_parent->d_inode != dir)
+	if (!victim->d_inode)
 		return -ENOENT;
+	if (victim->d_parent->d_inode != dir)
+	        BUG();
+	                
 	error = permission(dir,MAY_WRITE | MAY_EXEC, NULL);
 	if (error)
 		return error;
@@ -1091,6 +1125,8 @@ static inline int lookup_flags(unsigned int f)
 	
 	if (f & O_DIRECTORY)
 		retval |= LOOKUP_DIRECTORY;
+	if (f & O_ATOMICLOOKUP)
+		retval |= LOOKUP_ATOMIC;
 
 	return retval;
 }
@@ -1380,7 +1416,15 @@ do_link:
 	if (error)
 		goto exit_dput;
 	touch_atime(nd->mnt, dentry);
+	nd_set_link(nd, NULL);
 	error = dentry->d_inode->i_op->follow_link(dentry, nd);
+	if (!error) {
+		char *s = nd_get_link(nd);
+		if (s)
+			error = __vfs_follow_link(nd, s);
+		if (dentry->d_inode->i_op->put_link)
+			dentry->d_inode->i_op->put_link(dentry, nd);
+	}
 	dput(dentry);
 	if (error)
 		return error;
@@ -1759,7 +1803,7 @@ slashes:
 	goto exit2;
 }
 
-int vfs_symlink(struct inode *dir, struct dentry *dentry, const char *oldname)
+int vfs_symlink(struct inode *dir, struct dentry *dentry, const char *oldname, int mode)
 {
 	int error = may_create(dir, dentry, NULL);
 
@@ -1803,7 +1847,7 @@ asmlinkage long sys_symlink(const char __user * oldname, const char __user * new
 		dentry = lookup_create(&nd, 0);
 		error = PTR_ERR(dentry);
 		if (!IS_ERR(dentry)) {
-			error = vfs_symlink(nd.dentry->d_inode, dentry, from);
+			error = vfs_symlink(nd.dentry->d_inode, dentry, from, S_IALLUGO);
 			dput(dentry);
 		}
 		up(&nd.dentry->d_inode->i_sem);
@@ -2161,6 +2205,23 @@ out:
 	return len;
 }
 
+/*
+ * A helper for ->readlink().  This should be used *ONLY* for symlinks that
+ * have ->follow_link() touching nd only in nd_set_link().  Using (or not
+ * using) it for any given inode is up to filesystem.
+ */
+int generic_readlink(struct dentry *dentry, char __user *buffer, int buflen)
+{
+	struct nameidata nd;
+	int res = dentry->d_inode->i_op->follow_link(dentry, &nd);
+	if (!res) {
+		res = vfs_readlink(dentry, buffer, buflen, nd_get_link(&nd));
+		if (dentry->d_inode->i_op->put_link)
+			dentry->d_inode->i_op->put_link(dentry, &nd);
+	}
+	return res;
+}
+
 static inline int
 __vfs_follow_link(struct nameidata *nd, const char *link)
 {
@@ -2237,6 +2298,30 @@ int page_readlink(struct dentry *dentry, char __user *buffer, int buflen)
 	return res;
 }
 
+int page_follow_link_light(struct dentry *dentry, struct nameidata *nd)
+{
+	struct page *page;
+	char *s = page_getlink(dentry, &page);
+	if (!IS_ERR(s)) {
+		nd_set_link(nd, s);
+		s = NULL;
+	}
+	return PTR_ERR(s);
+}
+
+void page_put_link(struct dentry *dentry, struct nameidata *nd)
+{
+	if (!IS_ERR(nd_get_link(nd))) {
+		struct page *page;
+		page = find_get_page(dentry->d_inode->i_mapping, 0);
+		if (!page)
+			BUG();
+		kunmap(page);
+		page_cache_release(page);
+		page_cache_release(page);
+	}
+}
+
 int page_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	struct page *page = NULL;
@@ -2291,8 +2376,9 @@ fail:
 }
 
 struct inode_operations page_symlink_inode_operations = {
-	.readlink	= page_readlink,
-	.follow_link	= page_follow_link,
+	.readlink	= generic_readlink,
+	.follow_link	= page_follow_link_light,
+	.put_link	= page_put_link,
 };
 
 EXPORT_SYMBOL(__user_walk);
@@ -2305,6 +2391,8 @@ EXPORT_SYMBOL(lookup_create);
 EXPORT_SYMBOL(lookup_hash);
 EXPORT_SYMBOL(lookup_one_len);
 EXPORT_SYMBOL(page_follow_link);
+EXPORT_SYMBOL(page_follow_link_light);
+EXPORT_SYMBOL(page_put_link);
 EXPORT_SYMBOL(page_readlink);
 EXPORT_SYMBOL(page_symlink);
 EXPORT_SYMBOL(page_symlink_inode_operations);
@@ -2324,3 +2412,4 @@ EXPORT_SYMBOL(vfs_rename);
 EXPORT_SYMBOL(vfs_rmdir);
 EXPORT_SYMBOL(vfs_symlink);
 EXPORT_SYMBOL(vfs_unlink);
+EXPORT_SYMBOL(generic_readlink);

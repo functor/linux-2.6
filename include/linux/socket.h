@@ -288,6 +288,11 @@ extern int move_addr_to_user(void *kaddr, int klen, void __user *uaddr, int __us
 extern int move_addr_to_kernel(void __user *uaddr, int ulen, void *kaddr);
 extern int put_cmsg(struct msghdr*, int level, int type, int len, void *data);
 
+struct socket;
+struct file * sock_map_file(struct socket *sock);
+extern int sock_map_fd(struct socket *sock);
+extern struct socket *sockfd_lookup(int fd, int *err);
+
 #endif
 #endif /* not kernel and not glibc */
 #endif /* _LINUX_SOCKET_H */

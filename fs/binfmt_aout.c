@@ -308,7 +308,8 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	current->mm->brk = ex.a_bss +
 		(current->mm->start_brk = N_BSSADDR(ex));
 	current->mm->free_area_cache = TASK_UNMAPPED_BASE;
-
+	/* unlimited stack is larger than TASK_SIZE */
+	current->mm->non_executable_cache = current->mm->mmap_top;
 	current->mm->rss = 0;
 	current->mm->mmap = NULL;
 	compute_creds(bprm);
@@ -521,6 +522,6 @@ static void __exit exit_aout_binfmt(void)
 	unregister_binfmt(&aout_format);
 }
 
-module_init(init_aout_binfmt);
+core_initcall(init_aout_binfmt);
 module_exit(exit_aout_binfmt);
 MODULE_LICENSE("GPL");

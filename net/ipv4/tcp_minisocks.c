@@ -725,6 +725,9 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		if ((filter = newsk->sk_filter) != NULL)
 			sk_filter_charge(newsk, filter);
 
+		if (sk->sk_create_child)
+			sk->sk_create_child(sk, newsk);
+
 		if (unlikely(xfrm_sk_clone_policy(newsk))) {
 			/* It is still raw copy of parent, so invalidate
 			 * destructor and make plain sk_free() */

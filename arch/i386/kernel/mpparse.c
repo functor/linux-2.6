@@ -675,7 +675,7 @@ void __init get_smp_config (void)
 		 * Read the physical hardware table.  Anything here will
 		 * override the defaults.
 		 */
-		if (!smp_read_mpc((void *)mpf->mpf_physptr)) {
+		if (!smp_read_mpc((void *)phys_to_virt(mpf->mpf_physptr))) {
 			smp_found_config = 0;
 			printk(KERN_ERR "BIOS bug, MP table errors detected!...\n");
 			printk(KERN_ERR "... disabling SMP support. (tell your hw vendor)\n");
@@ -1029,6 +1029,8 @@ extern FADT_DESCRIPTOR acpi_fadt;
 
 #ifdef CONFIG_ACPI_PCI
 
+int (*platform_rename_gsi)(int ioapic, int gsi);
+
 void __init mp_parse_prt (void)
 {
 	struct list_head	*node = NULL;
@@ -1072,10 +1074,8 @@ void __init mp_parse_prt (void)
 			continue;
 		ioapic_pin = gsi - mp_ioapic_routing[ioapic].gsi_base;
 
-		if (es7000_plat) {
-			if (!ioapic && (gsi < 16))
-				gsi += 16;
-		}
+		if (platform_rename_gsi)
+			gsi = platform_rename_gsi(ioapic, gsi);
 
 		/* 
 		 * Avoid pin reprogramming.  PRTs typically include entries  

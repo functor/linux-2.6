@@ -214,17 +214,24 @@ out_no_clnt:
 int
 rpc_shutdown_client(struct rpc_clnt *clnt)
 {
+	wait_queue_t __wait;
+	init_waitqueue_entry(&__wait, current);
 	dprintk("RPC: shutting down %s client for %s, tasks=%d\n",
 			clnt->cl_protname, clnt->cl_server,
 			atomic_read(&clnt->cl_users));
 
+	add_wait_queue(&destroy_wait, &__wait);
+	set_current_state(TASK_UNINTERRUPTIBLE);
 	while (atomic_read(&clnt->cl_users) > 0) {
 		/* Don't let rpc_release_client destroy us */
 		clnt->cl_oneshot = 0;
 		clnt->cl_dead = 0;
 		rpc_killall_tasks(clnt);
-		sleep_on_timeout(&destroy_wait, 1*HZ);
+		schedule_timeout(1*HZ);
+		set_current_state(TASK_UNINTERRUPTIBLE);
 	}
+	current->state = TASK_RUNNING;
+	remove_wait_queue(&destroy_wait, &__wait);
 
 	if (atomic_read(&clnt->cl_users) < 0) {
 		printk(KERN_ERR "RPC: rpc_shutdown_client clnt %p tasks=%d\n",
@@ -788,13 +795,11 @@ static void
 call_timeout(struct rpc_task *task)
 {
 	struct rpc_clnt	*clnt = task->tk_client;
-	struct rpc_timeout *to = &task->tk_rqstp->rq_timeout;
 
-	if (xprt_adjust_timeout(to)) {
+	if (xprt_adjust_timeout(task->tk_rqstp) == 0) {
 		dprintk("RPC: %4d call_timeout (minor)\n", task->tk_pid);
 		goto retry;
 	}
-	to->to_retries = clnt->cl_timeout.to_retries;
 
 	dprintk("RPC: %4d call_timeout (major)\n", task->tk_pid);
 	if (RPC_IS_SOFT(task)) {
