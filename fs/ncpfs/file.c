@@ -170,7 +170,7 @@ ncp_file_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 
 	*ppos = pos;
 
-#warning MEF removed some READONLY MOUNT support -- look for it again in vs1.9.3
+	if (!IS_RDONLY(inode) || (file && MNT_IS_RDONLY(file->f_vfsmnt))) {
 	file_accessed(file);
 
 	DPRINTK("ncp_file_read: exit %s/%s\n",

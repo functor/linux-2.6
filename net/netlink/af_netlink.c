@@ -800,8 +800,6 @@ int netlink_broadcast(struct sock *ssk, struct sk_buff *skb, u32 pid,
 
 	netlink_trim(skb, allocation);
 
-	netlink_trim(skb, allocation);
-
 	/* While we sleep in clone, do not allow to change socket list */
 
 	netlink_lock_table();

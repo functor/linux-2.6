@@ -1046,7 +1046,6 @@ static int inet_dump_ifaddr(struct sk_buff *skb, struct netlink_callback *cb)
 	struct net_device *dev;
 	struct in_device *in_dev;
 	struct in_ifaddr *ifa;
-	struct sock *sk = skb->sk;
 	int s_ip_idx, s_idx = cb->args[0];
 
 	s_ip_idx = ip_idx = cb->args[1];

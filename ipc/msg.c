@@ -763,6 +763,7 @@ asmlinkage long sys_msgrcv (int msqid, struct msgbuf __user *msgp, size_t msgsz,
 			cpu_relax();
 			msg = (struct msg_msg*) msr_d.r_msg;
 		}
+
 		/* Lockless receive, part 3:
 		 * If there is a message or an error then accept it without
 		 * locking.

@@ -533,10 +533,6 @@ asmlinkage void __init start_kernel(void)
 	rcu_init();
 	init_IRQ();
 	pidhash_init();
-	/* MEF: In 2.6.5. ckrm_init was right after pidhash_init() but 
-                before sched_init(). Will leave it after pidhash_init()
-                and cross finger.
-	*/
 	ckrm_init();
 	init_timers();
 	softirq_init();
@@ -588,7 +584,6 @@ asmlinkage void __init start_kernel(void)
 #ifdef CONFIG_PROC_FS
 	proc_root_init();
 #endif
-
 	check_bugs();
 
 	acpi_early_init(); /* before LAPIC and SMP init */
@@ -731,7 +726,6 @@ static int init(void * unused)
 	 * firmware files.
 	 */
 	populate_rootfs();
-
 	do_basic_setup();
 
 	init_ckrm_sched_res();
