@@ -73,7 +73,7 @@ static struct irq_pin_list {
 } irq_2_pin[PIN_MAP_SIZE];
 
 int vector_irq[NR_VECTORS] = { [0 ... NR_VECTORS - 1] = -1};
-#ifdef CONFIG_PCI_MSI
+#ifdef CONFIG_PCI_USE_VECTOR
 #define vector_to_irq(vector) 	\
 	(platform_legacy_irq(vector) ? vector : vector_irq[vector])
 #else
@@ -224,7 +224,7 @@ static void set_ioapic_affinity_irq(unsigned int irq, cpumask_t cpumask)
 	struct irq_pin_list *entry = irq_2_pin + irq;
 	unsigned int apicid_value;
 	
-	apicid_value = cpu_mask_to_apicid(cpumask);
+	apicid_value = cpu_mask_to_apicid(mk_cpumask_const(cpumask));
 	/* Prepare to do the io_apic_write */
 	apicid_value = apicid_value << 24;
 	spin_lock_irqsave(&ioapic_lock, flags);
@@ -555,7 +555,7 @@ not_worth_the_effort:
 	return;
 }
 
-static int balanced_irq(void *unused)
+int balanced_irq(void *unused)
 {
 	int i;
 	unsigned long prev_balance_time = jiffies;
@@ -568,17 +568,17 @@ static int balanced_irq(void *unused)
 		pending_irq_balance_cpumask[i] = cpumask_of_cpu(0);
 	}
 
-	for ( ; ; ) {
-		set_current_state(TASK_INTERRUPTIBLE);
-		time_remaining = schedule_timeout(time_remaining);
-		if (time_after(jiffies,
-				prev_balance_time+balanced_irq_interval)) {
-			do_irq_balance();
-			prev_balance_time = jiffies;
-			time_remaining = balanced_irq_interval;
-		}
+repeat:
+	set_current_state(TASK_INTERRUPTIBLE);
+	time_remaining = schedule_timeout(time_remaining);
+	if (time_after(jiffies, prev_balance_time+balanced_irq_interval)) {
+		Dprintk("balanced_irq: calling do_irq_balance() %lu\n",
+					jiffies);
+		do_irq_balance();
+		prev_balance_time = jiffies;
+		time_remaining = balanced_irq_interval;
 	}
-	return 0;
+	goto repeat;
 }
 
 static int __init balanced_irq_init(void)
@@ -1114,7 +1114,7 @@ static inline int IO_APIC_irq_trigger(int irq)
 /* irq_vectors is indexed by the sum of all RTEs in all I/O APICs. */
 u8 irq_vector[NR_IRQ_VECTORS] = { FIRST_DEVICE_VECTOR , 0 };
 
-#ifdef CONFIG_PCI_MSI
+#ifdef CONFIG_PCI_USE_VECTOR
 int assign_irq_vector(int irq)
 #else
 int __init assign_irq_vector(int irq)
@@ -1411,17 +1411,12 @@ void __init print_IO_APIC(void)
 		);
 	}
 	}
-	if (use_pci_vector())
-		printk(KERN_INFO "Using vector-based indexing\n");
 	printk(KERN_DEBUG "IRQ to pin mappings:\n");
 	for (i = 0; i < NR_IRQS; i++) {
 		struct irq_pin_list *entry = irq_2_pin + i;
 		if (entry->pin < 0)
 			continue;
- 		if (use_pci_vector() && !platform_legacy_irq(i))
-			printk(KERN_DEBUG "IRQ%d ", IO_APIC_VECTOR(i));
-		else
-			printk(KERN_DEBUG "IRQ%d ", i);
+		printk(KERN_DEBUG "IRQ%d ", i);
 		for (;;) {
 			printk("-> %d:%d", entry->apic, entry->pin);
 			if (!entry->next)
@@ -1714,7 +1709,7 @@ static void __init setup_ioapic_ids_from_mpc(void)
 		reg_00.raw = io_apic_read(apic, 0);
 		spin_unlock_irqrestore(&ioapic_lock, flags);
 		if (reg_00.bits.ID != mp_ioapics[apic].mpc_apicid)
-			printk("could not set ID!\n");
+			panic("could not set ID!\n");
 		else
 			printk(" ok.\n");
 	}
@@ -1868,7 +1863,7 @@ static void end_level_ioapic_irq (unsigned int irq)
 	}
 }
 
-#ifdef CONFIG_PCI_MSI
+#ifdef CONFIG_PCI_USE_VECTOR
 static unsigned int startup_edge_ioapic_vector(unsigned int vector)
 {
 	int irq = vector_to_irq(vector);
@@ -2212,7 +2207,7 @@ static inline void check_timer(void)
 		return;
 	}
 	printk(" failed :(.\n");
-	panic("IO-APIC + timer doesn't work! Try using the 'noapic' kernel parameter\n");
+	panic("IO-APIC + timer doesn't work! pester mingo@redhat.com");
 }
 
 /*

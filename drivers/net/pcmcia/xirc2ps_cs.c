@@ -668,9 +668,6 @@ xirc2ps_detach(dev_link_t * link)
 	return;
     }
 
-    if (link->dev)
-	unregister_netdev(dev);
-
     /*
      * If the device is currently configured and active, we won't
      * actually delete it yet.	Instead, it is marked so that when
@@ -686,6 +683,8 @@ xirc2ps_detach(dev_link_t * link)
 
     /* Unlink device structure, free it */
     *linkp = link->next;
+    if (link->dev)
+	unregister_netdev(dev);
     free_netdev(dev);
 } /* xirc2ps_detach */
 
@@ -815,7 +814,7 @@ xirc2ps_config(dev_link_t * link)
     cistpl_lan_node_id_t *node_id = (cistpl_lan_node_id_t*)parse.funce.data;
     cistpl_cftable_entry_t *cf = &parse.cftable_entry;
 
-    local->dingo_ccr = NULL;
+    local->dingo_ccr = 0;
 
     DEBUG(0, "config(0x%p)\n", link);
 
@@ -1204,8 +1203,10 @@ xirc2ps_event(event_t event, int priority,
 	break;
     case CS_EVENT_CARD_REMOVAL:
 	link->state &= ~DEV_PRESENT;
-	if (link->state & DEV_CONFIG)
+	if (link->state & DEV_CONFIG) {
 	    netif_device_detach(dev);
+	    xirc2ps_release(link);
+	}
 	break;
     case CS_EVENT_CARD_INSERTION:
 	link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;

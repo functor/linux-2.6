@@ -231,9 +231,6 @@ static void axnet_detach(dev_link_t *link)
     if (*linkp == NULL)
 	return;
 
-    if (link->dev)
-	unregister_netdev(dev);
-
     if (link->state & DEV_CONFIG)
 	axnet_release(link);
 
@@ -242,6 +239,8 @@ static void axnet_detach(dev_link_t *link)
 
     /* Unlink device structure, free bits */
     *linkp = link->next;
+    if (link->dev)
+	unregister_netdev(dev);
     free_netdev(dev);
 } /* axnet_detach */
 
@@ -526,8 +525,10 @@ static int axnet_event(event_t event, int priority,
     switch (event) {
     case CS_EVENT_CARD_REMOVAL:
 	link->state &= ~DEV_PRESENT;
-	if (link->state & DEV_CONFIG)
+	if (link->state & DEV_CONFIG) {
 	    netif_device_detach(dev);
+	    axnet_release(link);
+	}
 	break;
     case CS_EVENT_CARD_INSERTION:
 	link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
@@ -1178,7 +1179,7 @@ static int ei_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 	else if (ei_local->tx2 == 0) 
 	{
-		output_page = ei_local->tx_start_page + TX_PAGES/2;
+		output_page = ei_local->tx_start_page + TX_1X_PAGES;
 		ei_local->tx2 = send_length;
 		if (ei_debug  &&  ei_local->tx1 > 0)
 			printk(KERN_DEBUG "%s: idle transmitter, tx1=%d, lasttx=%d, txing=%d.\n",

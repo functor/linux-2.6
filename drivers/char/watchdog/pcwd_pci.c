@@ -261,6 +261,10 @@ static int pcipcwd_get_temperature(int *temperature)
 static ssize_t pcipcwd_write(struct file *file, const char __user *data,
 			      size_t len, loff_t *ppos)
 {
+	/* Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	/* See if we got the magic character 'V' and reload the timer */
 	if (len) {
 		if (!nowayout) {
@@ -388,7 +392,7 @@ static int pcipcwd_open(struct inode *inode, struct file *file)
 	/* Activate */
 	pcipcwd_start();
 	pcipcwd_keepalive();
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int pcipcwd_release(struct inode *inode, struct file *file)
@@ -416,6 +420,10 @@ static ssize_t pcipcwd_temp_read(struct file *file, char __user *data,
 {
 	int temperature;
 
+	/* Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	if (pcipcwd_get_temperature(&temperature))
 		return -EFAULT;
 
@@ -430,7 +438,7 @@ static int pcipcwd_temp_open(struct inode *inode, struct file *file)
 	if (!pcipcwd_private.supports_temp)
 		return -ENODEV;
 
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int pcipcwd_temp_release(struct inode *inode, struct file *file)

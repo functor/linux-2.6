@@ -133,7 +133,8 @@ ssize_t dvb_ringbuffer_read(struct dvb_ringbuffer *rbuf, u8 *buf, size_t len, in
 
 
 
-ssize_t dvb_ringbuffer_write(struct dvb_ringbuffer *rbuf, const u8 *buf, size_t len)
+ssize_t dvb_ringbuffer_write(struct dvb_ringbuffer *rbuf, const u8 *buf,
+                             size_t len, int usermem)
 {
         size_t todo = len;
         size_t split;
@@ -141,18 +142,28 @@ ssize_t dvb_ringbuffer_write(struct dvb_ringbuffer *rbuf, const u8 *buf, size_t 
         split = (rbuf->pwrite + len > rbuf->size) ? rbuf->size - rbuf->pwrite : 0;
 
         if (split > 0) {
-		memcpy(rbuf->data+rbuf->pwrite, buf, split);
+                if (!usermem) 
+                        memcpy(rbuf->data+rbuf->pwrite, buf, split);
+                else
+                        if (copy_from_user(rbuf->data+rbuf->pwrite, 
+                                           buf, split))
+                                return -EFAULT;
                 buf += split;
                 todo -= split;
                 rbuf->pwrite = 0;
         }
-	memcpy(rbuf->data+rbuf->pwrite, buf, todo);
+        if (!usermem) 
+                memcpy(rbuf->data+rbuf->pwrite, buf, todo);
+        else
+                if (copy_from_user(rbuf->data+rbuf->pwrite, buf, todo)) 
+                        return -EFAULT;
+
         rbuf->pwrite = (rbuf->pwrite + todo) % rbuf->size;
 
 	return len;
 }
 
-ssize_t dvb_ringbuffer_pkt_write(struct dvb_ringbuffer *rbuf, u8* buf, size_t len)
+ssize_t dvb_ringbuffer_pkt_write(struct dvb_ringbuffer *rbuf, u8* buf, size_t len, int usermem)
 {
         int status;
         ssize_t oldpwrite = rbuf->pwrite;
@@ -160,7 +171,7 @@ ssize_t dvb_ringbuffer_pkt_write(struct dvb_ringbuffer *rbuf, u8* buf, size_t le
         DVB_RINGBUFFER_WRITE_BYTE(rbuf, len >> 8);
         DVB_RINGBUFFER_WRITE_BYTE(rbuf, len & 0xff);
         DVB_RINGBUFFER_WRITE_BYTE(rbuf, PKT_READY);
-        status = dvb_ringbuffer_write(rbuf, buf, len);
+        status = dvb_ringbuffer_write(rbuf, buf, len, usermem);
 
         if (status < 0) rbuf->pwrite = oldpwrite;
         return status;

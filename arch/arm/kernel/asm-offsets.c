@@ -12,7 +12,6 @@
  */
 #include <linux/sched.h>
 #include <linux/mm.h>
-#include <asm/mach/arch.h>
 
 /*
  * Make sure that the compiler and target are compatible.
@@ -60,7 +59,5 @@ int main(void)
   DEFINE(PAGE_SZ,	       	PAGE_SIZE);
   BLANK();
   DEFINE(SYS_ERROR0,		0x9f0000);
-  BLANK();
-  DEFINE(SIZEOF_MACHINE_DESC,	sizeof(struct machine_desc));
   return 0; 
 }

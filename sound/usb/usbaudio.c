@@ -898,11 +898,11 @@ static void release_urb_ctx(snd_urb_ctx_t *u)
 {
 	if (u->urb) {
 		usb_free_urb(u->urb);
-		u->urb = NULL;
+		u->urb = 0;
 	}
 	if (u->buf) {
 		kfree(u->buf);
-		u->buf = NULL;
+		u->buf = 0;
 	}
 }
 
@@ -923,7 +923,7 @@ static void release_substream_urbs(snd_usb_substream_t *subs, int force)
 		release_urb_ctx(&subs->syncurb[i]);
 	if (subs->tmpbuf) {
 		kfree(subs->tmpbuf);
-		subs->tmpbuf = NULL;
+		subs->tmpbuf = 0;
 	}
 	subs->nurbs = 0;
 }

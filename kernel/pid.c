@@ -275,7 +275,7 @@ void __init pidhash_init(void)
 	int i, j, pidhash_size;
 	unsigned long megabytes = max_pfn >> (20 - PAGE_SHIFT);
 
-	pidhash_shift = max(10, fls(megabytes * 4));
+	pidhash_shift = max(4, fls(megabytes * 4));
 	pidhash_shift = min(12, pidhash_shift);
 	pidhash_size = 1 << pidhash_shift;
 

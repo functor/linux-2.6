@@ -47,7 +47,6 @@
 #include <asm/hardirq.h>
 #include <asm/machines.h>
 #include <asm/cpudata.h>
-#include <asm/setup.h>
 
 struct screen_info screen_info = {
 	0, 0,			/* orig-x, orig-y */
@@ -234,6 +233,7 @@ extern void sun4c_probe_vac(void);
 extern char cputypval;
 extern unsigned long start, end;
 extern void panic_setup(char *, int *);
+extern void srmmu_end_memory(unsigned long, unsigned long *);
 
 extern unsigned short root_flags;
 extern unsigned short root_dev;
@@ -244,7 +244,8 @@ extern unsigned short ram_flags;
 
 extern int root_mountflags;
 
-char reboot_command[COMMAND_LINE_SIZE];
+char saved_command_line[256];
+char reboot_command[256];
 enum sparc_cpu sparc_cpu_model;
 
 struct tt_entry *sparc_ttable;

@@ -646,6 +646,9 @@ static ssize_t usb_midi_read(struct file *file, char __user *buffer, size_t coun
 	ssize_t ret;
 	DECLARE_WAITQUEUE(wait, current);
 
+	if ( ppos != &file->f_pos ) {
+		return -ESPIPE;
+	}
 	if ( !access_ok(VERIFY_READ, buffer, count) ) {
 		return -EFAULT;
 	}
@@ -725,6 +728,9 @@ static ssize_t usb_midi_write(struct file *file, const char __user *buffer, size
 	ssize_t ret;
 	unsigned long int flags;
 
+	if ( ppos != &file->f_pos ) {
+		return -ESPIPE;
+	}
 	if ( !access_ok(VERIFY_READ, buffer, count) ) {
 		return -EFAULT;
 	}
@@ -914,7 +920,7 @@ static int usb_midi_open(struct inode *inode, struct file *file)
 	printk(KERN_INFO "usb-midi: Open Succeeded. minor= %d.\n", minor);
 #endif
 
-	return nonseekable_open(inode, file); /** Success. **/
+	return 0; /** Success. **/
 }
 
 
@@ -945,7 +951,7 @@ static int usb_midi_release(struct inode *inode, struct file *file)
 	if ( m->open_mode & FMODE_READ ) {
 	        unsigned long int flagsep;
 	        spin_lock_irqsave( &m->min.ep->lock, flagsep );
-                m->min.ep->cables[m->min.cableId] = NULL; // discard cable
+                m->min.ep->cables[m->min.cableId] = 0; // discard cable
                 m->min.ep->readers -= 1;
 		m->open_mode &= ~FMODE_READ;
 		if ( m->min.ep->readers == 0 &&
@@ -961,7 +967,7 @@ static int usb_midi_release(struct inode *inode, struct file *file)
 	up(&open_sem);
 	wake_up(&open_wait);
 
-	file->private_data = NULL;
+	file->private_data = 0;
 	return 0;
 }
 
@@ -1288,7 +1294,7 @@ static struct usb_midi_device *parse_descriptor( struct usb_device *d, unsigned 
 	unsigned char jack2string[256];
 #endif
 
-	u = NULL;
+	u = 0;
 	/* find audiocontrol interface */
 	p1 = find_csinterface_descriptor( buffer, bufSize, NULL,
 					  MS_HEADER, ifnum, altSetting);
@@ -1308,7 +1314,7 @@ static struct usb_midi_device *parse_descriptor( struct usb_device *d, unsigned 
 	if ( !u ) {
 		return NULL;
 	}
-	u->deviceName = NULL;
+	u->deviceName = 0;
 	u->idVendor = d->descriptor.idVendor;
 	u->idProduct = d->descriptor.idProduct;
 	u->interface = ifnum;
@@ -1382,7 +1388,7 @@ static struct usb_midi_device *parse_descriptor( struct usb_device *d, unsigned 
 
 	if (quirks==0) {
 		/* MIDISTREAM */
-		p2 = NULL;
+		p2 = 0;
 		for (p1 = find_descriptor(buffer, bufSize, NULL, USB_DT_ENDPOINT,
 					  ifnum, altSetting ); p1; p1 = next ) {
 			next = find_descriptor(buffer, bufSize, p1, USB_DT_ENDPOINT,
@@ -1391,7 +1397,7 @@ static struct usb_midi_device *parse_descriptor( struct usb_device *d, unsigned 
 					     ifnum, altSetting ); 
 
 			if ( p2 && next && ( p2 > next ) )
-				p2 = NULL;
+				p2 = 0;
 
 			if ( p1[0] < 9 || !p2 || p2[0] < 4 )
 				continue;
@@ -1934,8 +1940,8 @@ static int detect_by_hand(struct usb_device *d, unsigned int ifnum, struct usb_m
 	if ( ucable < 0 || ucable > 15 )
 		ucable = 0;
 
-	u.deviceName = NULL; /* A flag for alloc_usb_midi_device to get device
-				name from device. */
+	u.deviceName = 0; /* A flag for alloc_usb_midi_device to get device name
+			     from device. */
 	u.idVendor   = uvendor;
 	u.idProduct  = uproduct;
 	u.interface  = uinterface;

@@ -33,7 +33,7 @@ void radeonfb_fillrect(struct fb_info *info, const struct fb_fillrect *region)
   
 	if (info->state != FBINFO_STATE_RUNNING)
 		return;
-	if (info->flags & FBINFO_HWACCEL_DISABLED) {
+	if (radeon_accel_disabled()) {
 		cfb_fillrect(info, region);
 		return;
 	}
@@ -71,10 +71,9 @@ static void radeonfb_prim_copyarea(struct radeonfb_info *rinfo,
 	radeon_fifo_wait(3);
 	OUTREG(DP_GUI_MASTER_CNTL,
 		rinfo->dp_gui_master_cntl /* i.e. GMC_DST_32BPP */
-		| GMC_BRUSH_NONE
 		| GMC_SRC_DSTCOLOR
 		| ROP3_S 
-		| DP_SRC_SOURCE_MEMORY );
+		| DP_SRC_RECT );
 	OUTREG(DP_WRITE_MSK, 0xffffffff);
 	OUTREG(DP_CNTL, (xdir>=0 ? DST_X_LEFT_TO_RIGHT : 0)
 			| (ydir>=0 ? DST_Y_TOP_TO_BOTTOM : 0));
@@ -100,7 +99,7 @@ void radeonfb_copyarea(struct fb_info *info, const struct fb_copyarea *area)
   
 	if (info->state != FBINFO_STATE_RUNNING)
 		return;
-	if (info->flags & FBINFO_HWACCEL_DISABLED) {
+	if (radeon_accel_disabled()) {
 		cfb_copyarea(info, area);
 		return;
 	}

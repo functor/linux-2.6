@@ -64,7 +64,6 @@ void sync_inodes(int wait);
 /* writeback.h requires fs.h; it, too, is not included from here. */
 static inline void wait_on_inode(struct inode *inode)
 {
-	might_sleep();
 	if (inode->i_state & I_LOCK)
 		__wait_on_inode(inode);
 }
@@ -87,7 +86,7 @@ extern int laptop_mode;
 struct ctl_table;
 struct file;
 int dirty_writeback_centisecs_handler(struct ctl_table *, int, struct file *,
-				      void __user *, size_t *, loff_t *);
+				      void __user *, size_t *);
 
 void page_writeback_init(void);
 void balance_dirty_pages_ratelimited(struct address_space *mapping);

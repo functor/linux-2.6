@@ -60,7 +60,7 @@ void show_mem(void)
 
 	printk("Mem-info:\n");
 	show_free_areas();
-	printk("Free swap:       %6ldkB\n", nr_swap_pages<<(PAGE_SHIFT-10));
+	printk("Free swap:       %6dkB\n",nr_swap_pages<<(PAGE_SHIFT-10));
 
 	for_each_pgdat(pgdat) {
                for (i = 0; i < pgdat->node_spanned_pages; ++i) {
@@ -374,7 +374,7 @@ void __init clear_kernel_mapping(unsigned long address, unsigned long size)
 	__flush_tlb_all();
 } 
 
-static inline int page_is_ram (unsigned long pagenr)
+int page_is_ram (unsigned long pagenr)
 {
 	int i;
 
@@ -395,26 +395,6 @@ static inline int page_is_ram (unsigned long pagenr)
 	}
 	return 0;
 }
-
-/*
- * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
- * valid. The argument is a physical page number.
- *
- *
- * On x86-64, access has to be given to the first megabyte of ram because that area
- * contains bios code and data regions used by X and dosemu and similar apps.
- * Access has to be given to non-kernel-ram areas as well, these contain the PCI
- * mmio resources as well as potential bios/acpi data regions.
- */
-int devmem_is_allowed(unsigned long pagenr)
-{
-	if (pagenr <= 256)
-		return 1;
-	if (!page_is_ram(pagenr))
-		return 1;
-	return 0;
-}
-
 
 static struct kcore_list kcore_mem, kcore_vmalloc, kcore_kernel, kcore_modules,
 			 kcore_vsyscall;

@@ -196,7 +196,8 @@ config NET_IPIP
 	  can be useful if you want to make your (or some other) machine
 	  appear on a different network than it physically is, or to use
 	  mobile-IP facilities (allowing laptops to seamlessly move between
-	  networks without changing their IP addresses).
+	  networks without changing their IP addresses; check out
+	  <http://anchor.cs.binghamton.edu/~mobileip/LJ/index.html>).
 
 	  Saying Y to this option will produce two modules ( = code which can
 	  be inserted in and removed from the running kernel whenever you
@@ -384,14 +385,3 @@ config ACCEPT_QUEUES
 
 source "net/ipv4/ipvs/Kconfig"
 
-#
-# Emulab special
-#
-
-config ICMP_IPOD
-	bool "ICMP: ICMP Ping-of-Death (Emulab)"
-	depends on INET && SYSCTL
-	---help---
-          Support immediately rebooting upon receiving a specially
-	  formed ICMP type 6 packet whose payload matches a string
-	  configured by the administrator.

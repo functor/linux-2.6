@@ -8,7 +8,6 @@
 #include <linux/netfilter_ipv4/ip_conntrack_tuple.h>
 #include <linux/bitops.h>
 #include <linux/compiler.h>
-#include <linux/vserver/context.h>
 #include <asm/atomic.h>
 
 enum ip_conntrack_info
@@ -104,7 +103,7 @@ union ip_conntrack_nat_help {
 #include <linux/types.h>
 #include <linux/skbuff.h>
 
-#ifdef CONFIG_NETFILTER_DEBUG
+#ifdef CONFIG_NF_DEBUG
 #define IP_NF_ASSERT(x)							\
 do {									\
 	if (!(x))							\
@@ -207,9 +206,6 @@ struct ip_conntrack
 #endif
 	} nat;
 #endif /* CONFIG_IP_NF_NAT_NEEDED */
-
-	/* VServer context id */
-	xid_t xid[IP_CT_DIR_MAX];
 
 };
 

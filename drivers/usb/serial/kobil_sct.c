@@ -48,10 +48,18 @@
 #include <asm/uaccess.h>
 #include <linux/usb.h>
 #include <linux/ioctl.h>
-#include "usb-serial.h"
-#include "kobil_sct.h"
 
-static int debug;
+
+#include "kobil_sct.h"
+//#include "../core/usb-debug.c"
+
+#ifdef CONFIG_USB_SERIAL_DEBUG
+	static int debug = 1;
+#else
+	static int debug;
+#endif
+
+#include "usb-serial.h"
 
 /* Version Information */
 #define DRIVER_VERSION "21/05/2004"
@@ -353,7 +361,7 @@ static void kobil_close (struct usb_serial_port *port, struct file *filp)
 	if (port->write_urb){
 		usb_unlink_urb( port->write_urb );
 		usb_free_urb( port->write_urb );
-		port->write_urb = NULL;
+		port->write_urb = 0;
 	}
 	if (port->interrupt_in_urb){
 		usb_unlink_urb (port->interrupt_in_urb);
@@ -448,7 +456,7 @@ static int kobil_write (struct usb_serial_port *port, int from_user,
 		memcpy (priv->buf + priv->filled, buf, count);
 	}
 
-	usb_serial_debug_data(debug, &port->dev, __FUNCTION__, count, priv->buf + priv->filled);
+	usb_serial_debug_data (__FILE__, __FUNCTION__, count, priv->buf + priv->filled);
 
 	priv->filled = priv->filled + count;
 
@@ -780,5 +788,5 @@ MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE( "GPL" );
 
-module_param(debug, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM(debug, "i");
 MODULE_PARM_DESC(debug, "Debug enabled or not");

@@ -16,11 +16,7 @@
 #define FBIOGETCMAP		0x4604
 #define FBIOPUTCMAP		0x4605
 #define FBIOPAN_DISPLAY		0x4606
-#ifdef __KERNEL__
-#define FBIO_CURSOR            _IOWR('F', 0x08, struct fb_cursor_user)
-#else
 #define FBIO_CURSOR            _IOWR('F', 0x08, struct fb_cursor)
-#endif
 /* 0x4607-0x460B are defined below */
 /* #define FBIOGET_MONITORSPEC	0x460C */
 /* #define FBIOPUT_MONITORSPEC	0x460D */
@@ -401,36 +397,6 @@ struct fb_info;
 struct device;
 struct file;
 
-struct fb_cmap_user {
-	__u32 start;			/* First entry	*/
-	__u32 len;			/* Number of entries */
-	__u16 __user *red;		/* Red values	*/
-	__u16 __user *green;
-	__u16 __user *blue;
-	__u16 __user *transp;		/* transparency, can be NULL */
-};
-
-struct fb_image_user {
-	__u32 dx;			/* Where to place image */
-	__u32 dy;
-	__u32 width;			/* Size of image */
-	__u32 height;
-	__u32 fg_color;			/* Only used when a mono bitmap */
-	__u32 bg_color;
-	__u8  depth;			/* Depth of the image */
-	const char __user *data;	/* Pointer to image data */
-	struct fb_cmap_user cmap;	/* color map info */
-};
-
-struct fb_cursor_user {
-	__u16 set;			/* what to set */
-	__u16 enable;			/* cursor on/off */
-	__u16 rop;			/* bitop operation */
-	const char __user *mask;	/* cursor mask bits */
-	struct fbcurpos hot;		/* cursor hot spot */
-	struct fb_image_user image;	/* Cursor image */
-};
-
 /*
  * Register/unregister for framebuffer events
  */
@@ -564,10 +530,6 @@ struct fb_ops {
 #define FBINFO_HWACCEL_YPAN		0x2000 /* optional */
 #define FBINFO_HWACCEL_YWRAP		0x4000 /* optional */
 
-#define FBINFO_MISC_MODECHANGEUSER     0x10000 /* mode change request
-						  from userspace */
-#define FBINFO_MISC_MODESWITCH         0x20000 /* mode switch */
-#define FBINFO_MISC_MODESWITCHLATE     0x40000 /* init hardware later */
 
 struct fb_info {
 	int node;
@@ -577,7 +539,6 @@ struct fb_info {
 	struct fb_monspecs monspecs;	/* Current Monitor specs */
 	struct fb_cursor cursor;	/* Current cursor */	
 	struct work_struct queue;	/* Framebuffer event queue */
-	struct timer_list cursor_timer; /* Cursor timer */
 	struct fb_pixmap pixmap;	/* Image hardware mapper */
 	struct fb_pixmap sprite;	/* Cursor hardware mapper */
 	struct fb_cmap cmap;		/* Current cmap */
@@ -629,7 +590,7 @@ struct fb_info {
 #define fb_writeq sbus_writeq
 #define fb_memset sbus_memset_io
 
-#elif defined(__i386__) || defined(__alpha__) || defined(__x86_64__) || defined(__hppa__) || (defined(__sh__) && !defined(__SH5__)) || defined(__powerpc__)
+#elif defined(__i386__) || defined(__alpha__) || defined(__x86_64__) || defined(__hppa__) || defined(__sh__) || defined(__powerpc__)
 
 #define fb_readb __raw_readb
 #define fb_readw __raw_readw
@@ -673,16 +634,10 @@ extern int unregister_framebuffer(struct fb_info *fb_info);
 extern int fb_prepare_logo(struct fb_info *fb_info);
 extern int fb_show_logo(struct fb_info *fb_info);
 extern char* fb_get_buffer_offset(struct fb_info *info, struct fb_pixmap *buf, u32 size);
-extern void fb_iomove_buf_unaligned(struct fb_info *info, struct fb_pixmap *buf,
+extern void fb_move_buf_unaligned(struct fb_info *info, struct fb_pixmap *buf,
 				u8 *dst, u32 d_pitch, u8 *src, u32 idx,
 				u32 height, u32 shift_high, u32 shift_low, u32 mod);
-extern void fb_iomove_buf_aligned(struct fb_info *info, struct fb_pixmap *buf,
-				u8 *dst, u32 d_pitch, u8 *src, u32 s_pitch,
-				u32 height);
-extern void fb_sysmove_buf_unaligned(struct fb_info *info, struct fb_pixmap *buf,
-				u8 *dst, u32 d_pitch, u8 *src, u32 idx,
-				u32 height, u32 shift_high, u32 shift_low, u32 mod);
-extern void fb_sysmove_buf_aligned(struct fb_info *info, struct fb_pixmap *buf,
+extern void fb_move_buf_aligned(struct fb_info *info, struct fb_pixmap *buf,
 				u8 *dst, u32 d_pitch, u8 *src, u32 s_pitch,
 				u32 height);
 extern void fb_load_cursor_image(struct fb_info *);
@@ -730,10 +685,8 @@ extern const struct fb_videomode vesa_modes[];
 /* drivers/video/fbcmap.c */
 extern int fb_alloc_cmap(struct fb_cmap *cmap, int len, int transp);
 extern void fb_dealloc_cmap(struct fb_cmap *cmap);
-extern int fb_copy_cmap(struct fb_cmap *from, struct fb_cmap *to);
-extern int fb_cmap_to_user(struct fb_cmap *from, struct fb_cmap_user *to);
-extern int fb_set_cmap(struct fb_cmap *cmap, struct fb_info *fb_info);
-extern int fb_set_user_cmap(struct fb_cmap_user *cmap, struct fb_info *fb_info);
+extern int fb_copy_cmap(struct fb_cmap *from, struct fb_cmap *to, int fsfromto);
+extern int fb_set_cmap(struct fb_cmap *cmap, int kspc, struct fb_info *fb_info);
 extern struct fb_cmap *fb_default_cmap(int len);
 extern void fb_invert_cmaps(void);
 

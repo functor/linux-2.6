@@ -27,7 +27,6 @@
 #include <linux/highmem.h>
 #include <linux/poll.h>
 #include <linux/net.h>
-#include <net/checksum.h>
 
 #define HAVE_ALLOC_SKB		/* For the drivers to know */
 #define HAVE_ALIGNABLE_SKB	/* Ditto 8)		   */
@@ -156,7 +155,6 @@ struct skb_shared_info {
  *	@sk: Socket we are owned by
  *	@stamp: Time we arrived
  *	@dev: Device we arrived on/are leaving by
- *	@input_dev: Device we arrived on
  *      @real_dev: The real device we are using
  *	@h: Transport layer header
  *	@nh: Network layer header
@@ -199,7 +197,6 @@ struct sk_buff {
 	struct sock		*sk;
 	struct timeval		stamp;
 	struct net_device	*dev;
-	struct net_device	*input_dev;
 	struct net_device	*real_dev;
 
 	union {
@@ -233,7 +230,7 @@ struct sk_buff {
 	 * want to keep them across layers you have to do a skb_clone()
 	 * first. This is owned by whoever has the skb queued ATM.
 	 */
-	char			cb[40];
+	char			cb[48];
 
 	unsigned int		len,
 				data_len,
@@ -265,15 +262,8 @@ struct sk_buff {
 	} private;
 #endif
 #ifdef CONFIG_NET_SCHED
-       __u32			tc_index;        /* traffic control index */
-#ifdef CONFIG_NET_CLS_ACT
-	__u32           tc_verd;               /* traffic control verdict */
-	__u32           tc_classid;            /* traffic control classid */
- #endif
-
+       __u32			tc_index;               /* traffic control index */
 #endif
-	xid_t			xid;			/* VServer context ID */
-
 
 	/* These elements must be at the end, see alloc_skb() for details.  */
 	unsigned int		truesize;
@@ -673,15 +663,13 @@ static inline int skb_pagelen(const struct sk_buff *skb)
 	return len + skb_headlen(skb);
 }
 
-static inline void skb_fill_page_desc(struct sk_buff *skb, int i,
-				      struct page *page, int off, int size)
+static inline void skb_fill_page_desc(struct sk_buff *skb, int i, struct page *page, int off, int size)
 {
 	skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
-
-	frag->page		  = page;
-	frag->page_offset	  = off;
-	frag->size		  = size;
-	skb_shinfo(skb)->nr_frags = i + 1;
+	frag->page = page;
+	frag->page_offset = off;
+	frag->size = size;
+	skb_shinfo(skb)->nr_frags = i+1;
 }
 
 #define SKB_PAGE_ASSERT(skb) 	BUG_ON(skb_shinfo(skb)->nr_frags)
@@ -1007,39 +995,6 @@ static inline struct sk_buff *skb_padto(struct sk_buff *skb, unsigned int len)
 	return skb_pad(skb, len-size);
 }
 
-static inline int skb_add_data(struct sk_buff *skb,
-			       char __user *from, int copy)
-{
-	const int off = skb->len;
-
-	if (skb->ip_summed == CHECKSUM_NONE) {
-		int err = 0;
-		unsigned int csum = csum_and_copy_from_user(from,
-							    skb_put(skb, copy),
-							    copy, 0, &err);
-		if (!err) {
-			skb->csum = csum_block_add(skb->csum, csum, off);
-			return 0;
-		}
-	} else if (!copy_from_user(skb_put(skb, copy), from, copy))
-		return 0;
-
-	__skb_trim(skb, off);
-	return -EFAULT;
-}
-
-static inline int skb_can_coalesce(struct sk_buff *skb, int i,
-				   struct page *page, int off)
-{
-	if (i) {
-		struct skb_frag_struct *frag = &skb_shinfo(skb)->frags[i - 1];
-
-		return page == frag->page &&
-		       off == frag->page_offset + frag->size;
-	}
-	return 0;
-}
-
 /**
  *	skb_linearize - convert paged skb to linear one
  *	@skb: buffer to linarize
@@ -1103,27 +1058,9 @@ extern unsigned int    skb_copy_and_csum_bits(const struct sk_buff *skb,
 					      int offset, u8 *to, int len,
 					      unsigned int csum);
 extern void	       skb_copy_and_csum_dev(const struct sk_buff *skb, u8 *to);
-extern void	       skb_split(struct sk_buff *skb,
-				 struct sk_buff *skb1, const u32 len);
 
 extern void skb_init(void);
 extern void skb_add_mtu(int mtu);
-
-struct skb_iter {
-	/* Iteration functions set these */
-	unsigned char *data;
-	unsigned int len;
-
-	/* Private to iteration */
-	unsigned int nextfrag;
-	struct sk_buff *fraglist;
-};
-
-/* Keep iterating until skb_iter_next returns false. */
-extern void skb_iter_first(const struct sk_buff *skb, struct skb_iter *i);
-extern int skb_iter_next(const struct sk_buff *skb, struct skb_iter *i);
-/* Call this if aborting loop before !skb_iter_next */
-extern void skb_iter_abort(const struct sk_buff *skb, struct skb_iter *i);
 
 struct tux_req_struct;
 
@@ -1138,14 +1075,6 @@ static inline void nf_conntrack_get(struct nf_ct_info *nfct)
 	if (nfct)
 		atomic_inc(&nfct->master->use);
 }
-static inline void nf_reset(struct sk_buff *skb)
-{
-	nf_conntrack_put(skb->nfct);
-	skb->nfct = NULL;
-#ifdef CONFIG_NETFILTER_DEBUG
-	skb->nf_debug = 0;
-#endif
-}
 
 #ifdef CONFIG_BRIDGE_NETFILTER
 static inline void nf_bridge_put(struct nf_bridge_info *nf_bridge)
@@ -1158,10 +1087,9 @@ static inline void nf_bridge_get(struct nf_bridge_info *nf_bridge)
 	if (nf_bridge)
 		atomic_inc(&nf_bridge->use);
 }
-#endif /* CONFIG_BRIDGE_NETFILTER */
-#else /* CONFIG_NETFILTER */
-static inline void nf_reset(struct sk_buff *skb) {}
-#endif /* CONFIG_NETFILTER */
+#endif
+
+#endif
 
 #endif	/* __KERNEL__ */
 #endif	/* _LINUX_SKBUFF_H */

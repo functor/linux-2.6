@@ -35,7 +35,6 @@
 #include <linux/circ_buf.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
-#include <linux/device.h>
 
 #include <asm/io.h>
 #include <asm/hardware.h>
@@ -572,9 +571,14 @@ serial_pxa_pm(struct uart_port *port, unsigned int state,
 	      unsigned int oldstate)
 {
 	struct uart_pxa_port *up = (struct uart_pxa_port *)port;
-	pxa_set_cken(up->cken, !state);
-	if (!state)
+	if (state) {
+		/* sleep */
+		CKEN &= ~up->cken;
+	} else {
+		/* wake */
+		CKEN |= up->cken;
 		udelay(1);
+	}
 }
 
 static void serial_pxa_release_port(struct uart_port *port)
@@ -805,76 +809,26 @@ static struct uart_driver serial_pxa_reg = {
 	.cons		= PXA_CONSOLE,
 };
 
-static int serial_pxa_suspend(struct device *_dev, u32 state, u32 level)
+static int __init serial_pxa_init(void)
 {
-        struct uart_pxa_port *sport = dev_get_drvdata(_dev);
-
-        if (sport && level == SUSPEND_DISABLE)
-                uart_suspend_port(&serial_pxa_reg, &sport->port);
-
-        return 0;
-}
-
-static int serial_pxa_resume(struct device *_dev, u32 level)
-{
-        struct uart_pxa_port *sport = dev_get_drvdata(_dev);
-
-        if (sport && level == RESUME_ENABLE)
-                uart_resume_port(&serial_pxa_reg, &sport->port);
-
-        return 0;
-}
-
-static int serial_pxa_probe(struct device *_dev)
-{
-	struct platform_device *dev = to_platform_device(_dev);
-
-	serial_pxa_ports[dev->id].port.dev = _dev;
-	uart_add_one_port(&serial_pxa_reg, &serial_pxa_ports[dev->id].port);
-	dev_set_drvdata(_dev, &serial_pxa_ports[dev->id]);
-	return 0;
-}
-
-static int serial_pxa_remove(struct device *_dev)
-{
-	struct uart_pxa_port *sport = dev_get_drvdata(_dev);
-
-	dev_set_drvdata(_dev, NULL);
-
-	if (sport)
-		uart_remove_one_port(&serial_pxa_reg, &sport->port);
-
-	return 0;
-}
-
-static struct device_driver serial_pxa_driver = {
-        .name           = "pxa2xx-uart",
-        .bus            = &platform_bus_type,
-        .probe          = serial_pxa_probe,
-        .remove         = serial_pxa_remove,
-
-	.suspend	= serial_pxa_suspend,
-	.resume		= serial_pxa_resume,
-};
-
-int __init serial_pxa_init(void)
-{
-	int ret;
+	int i, ret;
 
 	ret = uart_register_driver(&serial_pxa_reg);
-	if (ret != 0)
+	if (ret)
 		return ret;
 
-	ret = driver_register(&serial_pxa_driver);
-	if (ret != 0)
-		uart_unregister_driver(&serial_pxa_reg);
+	for (i = 0; i < ARRAY_SIZE(serial_pxa_ports); i++)
+		uart_add_one_port(&serial_pxa_reg, &serial_pxa_ports[i].port);
 
-	return ret;
+	return 0;
 }
 
-void __exit serial_pxa_exit(void)
+static void __exit serial_pxa_exit(void)
 {
-        driver_unregister(&serial_pxa_driver);
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(serial_pxa_ports); i++)
+		uart_remove_one_port(&serial_pxa_reg, &serial_pxa_ports[i].port);
 	uart_unregister_driver(&serial_pxa_reg);
 }
 

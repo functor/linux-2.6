@@ -1093,7 +1093,7 @@ struct file_operations irias_seq_fops = {
 	.open           = irias_seq_open,
 	.read           = seq_read,
 	.llseek         = seq_lseek,
-	.release	= seq_release,
+	.release	= seq_release_private,
 };
 
 #endif /* PROC_FS */

@@ -231,6 +231,8 @@ xfs_acl_vget(
 	int			flags = 0;
 
 	VN_HOLD(vp);
+	if ((error = _MAC_VACCESS(vp, NULL, VREAD)))
+		goto out;
 	if(size) {
 		if (!(_ACL_ALLOC(xfs_acl))) {
 			error = ENOMEM;
@@ -393,6 +395,8 @@ xfs_acl_allow_set(
 		return ENOTDIR;
 	if (vp->v_vfsp->vfs_flag & VFS_RDONLY)
 		return EROFS;
+	if ((error = _MAC_VACCESS(vp, NULL, VWRITE)))
+		return error;
 	va.va_mask = XFS_AT_UID;
 	VOP_GETATTR(vp, &va, 0, NULL, error);
 	if (error)

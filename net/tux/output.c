@@ -82,7 +82,7 @@ typedef struct sock_send_desc
 static int sock_send_actor (read_descriptor_t * desc, struct page *page,
 				unsigned long offset, unsigned long orig_size)
 {
-	sock_send_desc_t *sock_desc = (sock_send_desc_t *)desc->arg.buf;
+	sock_send_desc_t *sock_desc = (sock_send_desc_t *)desc->buf;
 	struct socket *sock = sock_desc->sock;
 	tux_req_t *req = sock_desc->req;
 	unsigned int flags;
@@ -255,7 +255,7 @@ repeat:
 	else
 		want = req->output_len;
 	req->desc.count = want;
-	req->desc.arg.buf = (char *) &sock_desc;
+	req->desc.buf = (char *) &sock_desc;
 	req->desc.error = 0;
 	Dprintk("sendfile(), desc.count: %d.\n", req->desc.count);
 	do_generic_file_read(&req->in_file, &req->in_file.f_pos, &req->desc, sock_send_actor, nonblock);
@@ -336,7 +336,7 @@ int tux_fetch_file (tux_req_t *req, int nonblock)
 
 	req->desc.written = 0;
 	req->desc.count = req->output_len;
-	req->desc.arg.buf = NULL;
+	req->desc.buf = NULL;
 	req->desc.error = 0;
 
 	do_generic_file_read(&req->in_file, &req->in_file.f_pos, &req->desc,

@@ -264,7 +264,7 @@ void pi_unregister(PIP * pr)
 		printk("paride: %s not registered\n", pr->name);
 		return;
 	}
-	protocols[pr->index] = NULL;
+	protocols[pr->index] = 0;
 }
 
 EXPORT_SYMBOL(pi_unregister);

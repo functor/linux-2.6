@@ -1071,10 +1071,8 @@ xtSplitUp(tid_t tid,
 		 */
 		/* get/pin the parent page <sp> */
 		XT_GETPAGE(ip, parent->bn, smp, PSIZE, sp, rc);
-		if (rc) {
-			XT_PUTPAGE(rcmp);
-			return rc;
-		}
+		if (rc)
+			goto errout2;
 
 		/*
 		 * The new key entry goes ONE AFTER the index of parent entry,
@@ -1108,10 +1106,8 @@ xtSplitUp(tid_t tid,
 			rc = (sp->header.flag & BT_ROOT) ?
 			    xtSplitRoot(tid, ip, split, &rmp) :
 			    xtSplitPage(tid, ip, split, &rmp, &rbn);
-			if (rc) {
-				XT_PUTPAGE(smp);
-				return rc;
-			}
+			if (rc)
+				goto errout1;
 
 			XT_PUTPAGE(smp);
 			/* keep new child page <rp> pinned */
@@ -1174,6 +1170,19 @@ xtSplitUp(tid_t tid,
 	XT_PUTPAGE(rmp);
 
 	return 0;
+
+	/*
+	 * If something fails in the above loop we were already walking back
+	 * up the tree and the tree is now inconsistent.
+	 * release all pages we're holding.
+	 */
+      errout1:
+	XT_PUTPAGE(smp);
+
+      errout2:
+	XT_PUTPAGE(rcmp);
+
+	return rc;
 }
 
 
@@ -1213,7 +1222,7 @@ xtSplitPage(tid_t tid, struct inode *ip,
 	struct pxdlist *pxdlist;
 	pxd_t *pxd;
 	struct tlock *tlck;
-	struct xtlock *sxtlck = NULL, *rxtlck = NULL;
+	struct xtlock *sxtlck = 0, *rxtlck = 0;
 
 	smp = split->mp;
 	sp = XT_PAGE(ip, smp);
@@ -1594,7 +1603,7 @@ int xtExtend(tid_t tid,		/* transaction id */
 	xad_t *xad;
 	s64 xaddr;
 	struct tlock *tlck;
-	struct xtlock *xtlck = NULL;
+	struct xtlock *xtlck = 0;
 	int rootsplit = 0;
 
 	jfs_info("xtExtend: nxoff:0x%lx nxlen:0x%x", (ulong) xoff, xlen);
@@ -1948,7 +1957,7 @@ int xtUpdate(tid_t tid, struct inode *ip, xad_t * nxad)
 	int nxlen, xlen, lxlen, rxlen;
 	s64 nxaddr, xaddr;
 	struct tlock *tlck;
-	struct xtlock *xtlck = NULL;
+	struct xtlock *xtlck = 0;
 	int rootsplit = 0, newpage = 0;
 
 	/* there must exist extent to be tailgated */
@@ -3407,9 +3416,9 @@ s64 xtTruncate(tid_t tid, struct inode *ip, s64 newsize, int flag)
 	int xlen, len, freexlen;
 	struct btstack btstack;
 	struct btframe *parent;
-	struct tblock *tblk = NULL;
-	struct tlock *tlck = NULL;
-	struct xtlock *xtlck = NULL;
+	struct tblock *tblk = 0;
+	struct tlock *tlck = 0;
+	struct xtlock *xtlck = 0;
 	struct xdlistlock xadlock;	/* maplock for COMMIT_WMAP */
 	struct pxd_lock *pxdlock;		/* maplock for COMMIT_WMAP */
 	s64 nfreed;
@@ -3495,17 +3504,7 @@ s64 xtTruncate(tid_t tid, struct inode *ip, s64 newsize, int flag)
 	 * a page that was formerly to the right, let's make sure that the
 	 * next pointer is zero.
 	 */
-	if (p->header.next) {
-		if (log)
-			/*
-			 * Make sure this change to the header is logged.
-			 * If we really truncate this leaf, the flag
-			 * will be changed to tlckTRUNCATE
-			 */
-			tlck = txLock(tid, ip, mp, tlckXTREE|tlckGROW);
-		BT_MARK_DIRTY(mp, ip);
-		p->header.next = 0;
-	}
+	p->header.next = 0;
 
 	freed = 0;
 
@@ -3615,7 +3614,7 @@ s64 xtTruncate(tid_t tid, struct inode *ip, s64 newsize, int flag)
 				pxdlock->flag = mlckFREEPXD;
 				PXDaddress(&pxdlock->pxd, xaddr);
 				PXDlength(&pxdlock->pxd, freexlen);
-				txFreeMap(ip, pxdlock, NULL, COMMIT_WMAP);
+				txFreeMap(ip, pxdlock, 0, COMMIT_WMAP);
 
 				/* reset map lock */
 				xadlock.flag = mlckFREEXADLIST;
@@ -3643,8 +3642,8 @@ s64 xtTruncate(tid_t tid, struct inode *ip, s64 newsize, int flag)
 				xadlock.count =
 				    le16_to_cpu(p->header.nextindex) -
 				    nextindex;
-				txFreeMap(ip, (struct maplock *) & xadlock,
-					  NULL, COMMIT_WMAP);
+				txFreeMap(ip, (struct maplock *) & xadlock, 0,
+					  COMMIT_WMAP);
 			}
 			p->header.nextindex = cpu_to_le16(nextindex);
 		}
@@ -3673,7 +3672,7 @@ s64 xtTruncate(tid_t tid, struct inode *ip, s64 newsize, int flag)
 		xadlock.xdlist = &p->xad[XTENTRYSTART];
 		xadlock.count =
 		    le16_to_cpu(p->header.nextindex) - XTENTRYSTART;
-		txFreeMap(ip, (struct maplock *) & xadlock, NULL, COMMIT_WMAP);
+		txFreeMap(ip, (struct maplock *) & xadlock, 0, COMMIT_WMAP);
 	}
 
 	if (p->header.flag & BT_ROOT) {
@@ -3748,8 +3747,8 @@ s64 xtTruncate(tid_t tid, struct inode *ip, s64 newsize, int flag)
 				xadlock.count =
 				    le16_to_cpu(p->header.nextindex) -
 				    index - 1;
-				txFreeMap(ip, (struct maplock *) & xadlock,
-					  NULL, COMMIT_WMAP);
+				txFreeMap(ip, (struct maplock *) & xadlock, 0,
+					  COMMIT_WMAP);
 			}
 			BT_MARK_DIRTY(mp, ip);
 
@@ -3820,7 +3819,7 @@ s64 xtTruncate(tid_t tid, struct inode *ip, s64 newsize, int flag)
 			xadlock.count =
 			    le16_to_cpu(p->header.nextindex) -
 			    XTENTRYSTART;
-			txFreeMap(ip, (struct maplock *) & xadlock, NULL,
+			txFreeMap(ip, (struct maplock *) & xadlock, 0,
 				  COMMIT_WMAP);
 		}
 		BT_MARK_DIRTY(mp, ip);
@@ -3957,11 +3956,11 @@ s64 xtTruncate_pmap(tid_t tid, struct inode *ip, s64 committed_size)
 	struct btframe *parent;
 	int rc;
 	struct tblock *tblk;
-	struct tlock *tlck = NULL;
+	struct tlock *tlck = 0;
 	xad_t *xad;
 	int xlen;
 	s64 xoff;
-	struct xtlock *xtlck = NULL;
+	struct xtlock *xtlck = 0;
 
 	/* save object truncation type */
 	tblk = tid_to_tblock(tid);

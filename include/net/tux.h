@@ -738,7 +738,7 @@ extern int nr_requests_used (void);
 
 #define req_err(req) do { (req)->error = 1; Dprintk("request %p error at %s:%d.\n", req, __FILE__, __LINE__); } while (0)
 
-#define enough_wspace(sk) (sk_stream_wspace(sk) >= sk_stream_min_wspace(sk))
+#define enough_wspace(sk) (tcp_wspace(sk) >= tcp_min_write_space(sk))
 #define clear_keepalive(req) do { (req)->keep_alive = 0; Dprintk("keepalive cleared for req %p.\n", req); } while (0)
 
 extern int print_all_requests (threadinfo_t *ti);

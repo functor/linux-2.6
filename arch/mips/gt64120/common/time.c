@@ -80,7 +80,7 @@ void gt64120_time_init(void)
 	timer.name = "timer";
 	timer.dev_id = NULL;
 	timer.next = NULL;
-	timer.mask = CPU_MASK_NONE;
+	timer.mask = 0;
 	irq_desc[GT_TIMER].action = &timer;
 
 	enable_irq(GT_TIMER);

@@ -1,5 +1,5 @@
 /*
- * $Id: ixp4xx.c,v 1.3 2004/07/12 22:38:29 dwmw2 Exp $
+ * $Id: ixp4xx.c,v 1.1 2004/05/13 22:21:26 dsaxena Exp $
  *
  * drivers/mtd/maps/ixp4xx.c
  *
@@ -39,11 +39,10 @@
 #define	BYTE1(h)	((h) & 0xFF)
 #endif
 
-static map_word ixp4xx_read16(struct map_info *map, unsigned long ofs)
+static __u16
+ixp4xx_read16(struct map_info *map, unsigned long ofs)
 {
-	map_word val;
-	val.x[0] = *(__u16 *) (map->map_priv_1 + ofs);
-	return val;
+	return *(__u16 *) (map->map_priv_1 + ofs);
 }
 
 /*
@@ -51,8 +50,9 @@ static map_word ixp4xx_read16(struct map_info *map, unsigned long ofs)
  * when attached to a 16-bit wide device (such as the 28F128J3A),
  * so we can't just memcpy_fromio().
  */
-static void ixp4xx_copy_from(struct map_info *map, void *to,
-			     unsigned long from, ssize_t len)
+static void
+ixp4xx_copy_from(struct map_info *map, void *to,
+		 unsigned long from, ssize_t len)
 {
 	int i;
 	u8 *dest = (u8 *) to;
@@ -69,9 +69,10 @@ static void ixp4xx_copy_from(struct map_info *map, void *to,
 		dest[len - 1] = BYTE0(src[i]);
 }
 
-static void ixp4xx_write16(struct map_info *map, map_word d, unsigned long adr)
+static void
+ixp4xx_write16(struct map_info *map, __u16 d, unsigned long adr)
 {
-	*(__u16 *) (map->map_priv_1 + adr) = d.x[0];
+	*(__u16 *) (map->map_priv_1 + adr) = d;
 }
 
 struct ixp4xx_flash_info {
@@ -83,7 +84,8 @@ struct ixp4xx_flash_info {
 
 static const char *probes[] = { "RedBoot", "cmdlinepart", NULL };
 
-static int ixp4xx_flash_remove(struct device *_dev)
+static int
+ixp4xx_flash_remove(struct device *_dev)
 {
 	struct platform_device *dev = to_platform_device(_dev);
 	struct flash_platform_data *plat = dev->dev.platform_data;
@@ -166,10 +168,10 @@ static int ixp4xx_flash_probe(struct device *_dev)
 	 * any board use 8-bit access, we'll fixup the driver to
 	 * handle that.
 	 */
-	info->map.bankwidth = 2;
+	info->map.buswidth = 2;
 	info->map.name = dev->dev.bus_id;
-	info->map.read = ixp4xx_read16,
-	info->map.write = ixp4xx_write16,
+	info->map.read16 = ixp4xx_read16,
+	info->map.write16 = ixp4xx_write16,
 	info->map.copy_from = ixp4xx_copy_from,
 
 	info->res = request_mem_region(dev->resource->start, 

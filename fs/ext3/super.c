@@ -356,7 +356,7 @@ static int ext3_blkdev_remove(struct ext3_sb_info *sbi)
 	bdev = sbi->journal_bdev;
 	if (bdev) {
 		ret = ext3_blkdev_put(bdev);
-		sbi->journal_bdev = NULL;
+		sbi->journal_bdev = 0;
 	}
 	return ret;
 }
@@ -587,7 +587,7 @@ enum {
 	Opt_abort, Opt_data_journal, Opt_data_ordered, Opt_data_writeback,
 	Opt_usrjquota, Opt_grpjquota, Opt_offusrjquota, Opt_offgrpjquota,
 	Opt_jqfmt_vfsold, Opt_jqfmt_vfsv0,
-	Opt_tagxid, Opt_ignore, Opt_err
+	Opt_tagxid, Opt_ignore, Opt_err, Opt_resize,
 };
 
 static match_table_t tokens = {
@@ -724,11 +724,6 @@ static int parse_options (char * options, struct super_block *sb,
 			break;
 #ifndef CONFIG_INOXID_NONE
 		case Opt_tagxid:
-			if (is_remount) {
-				printk(KERN_ERR "EXT3-fs: cannot specify "
-				       "tagxid on remount\n");
-				return 0;
-			}
 			set_opt (sbi->s_mount_opt, TAG_XID);
 			break;
 #endif
@@ -1212,7 +1207,7 @@ static unsigned long descriptor_loc(struct super_block *sb,
 static int ext3_fill_super (struct super_block *sb, void *data, int silent)
 {
 	struct buffer_head * bh;
-	struct ext3_super_block *es = NULL;
+	struct ext3_super_block *es = 0;
 	struct ext3_sb_info *sbi;
 	unsigned long block;
 	unsigned long sb_block = get_sb_block(&data);
@@ -1486,7 +1481,7 @@ static int ext3_fill_super (struct super_block *sb, void *data, int silent)
 #endif
 	INIT_LIST_HEAD(&sbi->s_orphan); /* unlinked but open files */
 
-	sb->s_root = NULL;
+	sb->s_root = 0;
 
 	needs_recovery = (es->s_last_orphan != 0 ||
 			  EXT3_HAS_INCOMPAT_FEATURE(sb,

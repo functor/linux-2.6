@@ -174,7 +174,7 @@ static int handle_send_req(ipmi_user_t     user,
 {
 	int              rv;
 	struct ipmi_addr addr;
-	struct kernel_ipmi_msg msg;
+	unsigned char    *msgdata;
 
 	if (req->addr_len > sizeof(struct ipmi_addr))
 		return -EINVAL;
@@ -182,11 +182,8 @@ static int handle_send_req(ipmi_user_t     user,
 	if (copy_from_user(&addr, req->addr, req->addr_len))
 		return -EFAULT;
 
-	msg.netfn = req->msg.netfn;
-	msg.cmd = req->msg.cmd;
-	msg.data_len = req->msg.data_len;
-	msg.data = kmalloc(IPMI_MAX_MSG_LENGTH, GFP_KERNEL);
-	if (!msg.data)
+	msgdata = kmalloc(IPMI_MAX_MSG_LENGTH, GFP_KERNEL);
+	if (!msgdata)
 		return -ENOMEM;
 
 	/* From here out we cannot return, we must jump to "out" for
@@ -202,7 +199,7 @@ static int handle_send_req(ipmi_user_t     user,
 			goto out;
 		}
 
-		if (copy_from_user(msg.data,
+		if (copy_from_user(msgdata,
 				   req->msg.data,
 				   req->msg.data_len))
 		{
@@ -210,19 +207,20 @@ static int handle_send_req(ipmi_user_t     user,
 			goto out;
 		}
 	} else {
-		msg.data_len = 0;
+		req->msg.data_len = 0;
 	}
+	req->msg.data = msgdata;
 
 	rv = ipmi_request_settime(user,
 				  &addr,
 				  req->msgid,
-				  &msg,
+				  &(req->msg),
 				  NULL,
 				  0,
 				  retries,
 				  retry_time_ms);
  out:
-	kfree(msg.data);
+	kfree(msgdata);
 	return rv;
 }
 

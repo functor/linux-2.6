@@ -131,7 +131,7 @@ int reiserfs_allocate_blocks_for_region(
     struct buffer_head *bh; // Buffer head that contains items that we are going to deal with
     __u32 * item; // pointer to item we are going to deal with
     INITIALIZE_PATH(path); // path to item, that we are going to deal with.
-    b_blocknr_t *allocated_blocks; // Pointer to a place where allocated blocknumbers would be stored.
+    b_blocknr_t allocated_blocks[blocks_to_allocate]; // Pointer to a place where allocated blocknumbers would be stored. Right now statically allocated, later that will change.
     reiserfs_blocknr_hint_t hint; // hint structure for block allocator.
     size_t res; // return value of various functions that we call.
     int curr_block; // current block used to keep track of unmapped blocks.
@@ -144,19 +144,9 @@ int reiserfs_allocate_blocks_for_region(
     int modifying_this_item = 0; // Flag for items traversal code to keep track
 				 // of the fact that we already prepared
 				 // current block for journal
-    int will_prealloc = 0;
+
 
     RFALSE(!blocks_to_allocate, "green-9004: tried to allocate zero blocks?");
-
-    /* only preallocate if this is a small write */
-    if (REISERFS_I(inode)->i_prealloc_count ||
-       (!(write_bytes & (inode->i_sb->s_blocksize -1)) &&
-        blocks_to_allocate <
-        REISERFS_SB(inode->i_sb)->s_alloc_options.preallocsize))
-        will_prealloc = REISERFS_SB(inode->i_sb)->s_alloc_options.preallocsize;
-
-    allocated_blocks = kmalloc((blocks_to_allocate + will_prealloc) *
-    					sizeof(b_blocknr_t), GFP_NOFS);
 
     /* First we compose a key to point at the writing position, we want to do
        that outside of any locking region. */
@@ -184,8 +174,15 @@ int reiserfs_allocate_blocks_for_region(
     hint.key = key.on_disk_key; // on disk key of file.
     hint.block = inode->i_blocks>>(inode->i_sb->s_blocksize_bits-9); // Number of disk blocks this file occupies already.
     hint.formatted_node = 0; // We are allocating blocks for unformatted node.
-    hint.preallocate = will_prealloc;
 
+    /* only preallocate if this is a small write */
+    if (REISERFS_I(inode)->i_prealloc_count ||
+       (!(write_bytes & (inode->i_sb->s_blocksize -1)) &&
+        blocks_to_allocate <
+        REISERFS_SB(inode->i_sb)->s_alloc_options.preallocsize))
+        hint.preallocate = 1;
+    else
+        hint.preallocate = 0;
     /* Call block allocator to allocate blocks */
     res = reiserfs_allocate_blocknrs(&hint, allocated_blocks, blocks_to_allocate, blocks_to_allocate);
     if ( res != CARRY_ON ) {
@@ -514,7 +511,6 @@ retry:
 
     RFALSE( curr_block > blocks_to_allocate, "green-9007: Used too many blocks? weird");
 
-    kfree(allocated_blocks);
     return 0;
 
 // Need to deal with transaction here.
@@ -528,7 +524,6 @@ error_exit:
     reiserfs_update_sd(th, inode); // update any changes we made to blk count
     journal_end(th, inode->i_sb, JOURNAL_PER_BALANCE_CNT * 3 + 1);
     reiserfs_write_unlock(inode->i_sb);
-    kfree(allocated_blocks);
 
     return res;
 }
@@ -832,7 +827,7 @@ int reiserfs_prepare_file_region_for_write(
     struct item_head *ih = NULL; // pointer to item head that we are going to deal with
     struct buffer_head *itembuf=NULL; // Buffer head that contains items that we are going to deal with
     INITIALIZE_PATH(path); // path to item, that we are going to deal with.
-    __u32 * item=NULL; // pointer to item we are going to deal with
+    __u32 * item=0; // pointer to item we are going to deal with
     int item_pos=-1; /* Position in indirect item */
 
 
@@ -1160,7 +1155,7 @@ ssize_t reiserfs_file_write( struct file *file, /* the file we are going to writ
     if (res)
 	goto out;
 
-    inode_update_time(inode, file->f_vfsmnt, 1); /* Both mtime and ctime */
+    inode_update_time(inode, 1); /* Both mtime and ctime */
 
     // Ok, we are done with all the checks.
 

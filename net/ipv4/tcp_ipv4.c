@@ -74,7 +74,6 @@
 #include <linux/stddef.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
-#include <linux/vserver/debug.h>
 
 extern int sysctl_ip_dynaddr;
 int sysctl_tcp_tw_reuse;
@@ -180,9 +179,63 @@ void tcp_bind_hash(struct sock *sk, struct tcp_bind_bucket *tb,
 	tcp_sk(sk)->bind_hash = tb;
 }
 
+/*
+	Return 1 if addr match the socket IP list
+	or the socket is INADDR_ANY
+*/
+static inline int tcp_in_list(struct sock *sk, u32 addr)
+{
+	struct nx_info *nxi = sk->sk_nx_info;
+
+	vxdprintk("tcp_in_list(%p) %p,%p;%lx\n",
+		sk, nxi, sk->sk_socket,
+		(sk->sk_socket?sk->sk_socket->flags:0));
+
+	if (nxi) {
+		int n = nxi->nbipv4;
+		int i;
+
+		for (i=0; i<n; i++)
+			if (nxi->ipv4[i] == addr)
+				return 1;
+	}
+	else if (!tcp_v4_rcv_saddr(sk) || tcp_v4_rcv_saddr(sk) == addr)
+		return 1;
+	return 0;
+}
+	
+/*
+	Check if the addresses in sk1 conflict with those in sk2
+*/
+int tcp_ipv4_addr_conflict(struct sock *sk1, struct sock *sk2)
+{
+	if (sk1 && sk2)
+	nxdprintk("inet_bind(%p,%p) %p,%p;%lx %p,%p;%lx\n",
+		sk1, sk2,
+		sk1->sk_nx_info, sk1->sk_socket,
+		(sk1->sk_socket?sk1->sk_socket->flags:0),
+		sk2->sk_nx_info, sk2->sk_socket,
+		(sk2->sk_socket?sk2->sk_socket->flags:0));
+
+	if (tcp_v4_rcv_saddr(sk1)) {
+		/* Bind to one address only */
+		return tcp_in_list (sk2, tcp_v4_rcv_saddr(sk1));
+	} else if (sk1->sk_nx_info) {
+		/* A restricted bind(any) */
+		struct nx_info *nxi = sk1->sk_nx_info;
+		int n = nxi->nbipv4;
+		int i;
+
+		for (i=0; i<n; i++)
+			if (tcp_in_list (sk2, nxi->ipv4[i]))
+				return 1;
+	} else	/* A bind(any) do not allow other bind on the same port */
+		return 1;
+	return 0;
+}
+
 static inline int tcp_bind_conflict(struct sock *sk, struct tcp_bind_bucket *tb)
 {
-	const u32 sk_rcv_saddr = tcp_v4_rcv_saddr(sk);
 	struct sock *sk2;
 	struct hlist_node *node;
 	int reuse = sk->sk_reuse;
@@ -195,9 +248,7 @@ static inline int tcp_bind_conflict(struct sock *sk, struct tcp_bind_bucket *tb)
 		     sk->sk_bound_dev_if == sk2->sk_bound_dev_if)) {
 			if (!reuse || !sk2->sk_reuse ||
 			    sk2->sk_state == TCP_LISTEN) {
-				const u32 sk2_rcv_saddr = tcp_v4_rcv_saddr(sk2);
-				if (!sk2_rcv_saddr || !sk_rcv_saddr ||
-				    sk2_rcv_saddr == sk_rcv_saddr)
+				if (tcp_ipv4_addr_conflict(sk, sk2))
 					break;
 			}
 		}
@@ -406,6 +457,34 @@ void tcp_unhash(struct sock *sk)
 		wake_up(&tcp_lhash_wait);
 }
 
+/*
+	Check if an address is in the list
+*/
+static inline int tcp_addr_in_list(
+	u32 rcv_saddr,
+	u32 daddr,
+	struct nx_info *nx_info)
+{
+	if (rcv_saddr == daddr)
+		return 1;
+	else if (rcv_saddr == 0) {
+		/* Accept any address or check the list */
+		if (!nx_info)
+			return 1;
+		else {
+			int n = nx_info->nbipv4;
+			int i;
+
+			for (i=0; i<n; i++)
+				if (nx_info->ipv4[i] == daddr)
+					return 1;
+		}
+	}
+	return 0;
+}
+
+
+
 /* Don't inline this cruft.  Here are some nice properties to
  * exploit here.  The BSD API does not allow a listening TCP
  * to specify the remote port nor the remote address for the
@@ -427,11 +506,10 @@ static struct sock *__tcp_v4_lookup_listener(struct hlist_head *head, u32 daddr,
 			__u32 rcv_saddr = inet->rcv_saddr;
 
 			score = (sk->sk_family == PF_INET ? 1 : 0);
-			if (rcv_saddr) {
-				if (rcv_saddr != daddr)
-					continue;
+			if (tcp_addr_in_list(rcv_saddr, daddr, sk->sk_nx_info))
 				score+=2;
-			}
+			else
+				continue;
 			if (sk->sk_bound_dev_if) {
 				if (sk->sk_bound_dev_if != dif)
 					continue;
@@ -460,8 +538,8 @@ inline struct sock *tcp_v4_lookup_listener(u32 daddr, unsigned short hnum,
 	if (!hlist_empty(head)) {
 		struct inet_opt *inet = inet_sk((sk = __sk_head(head)));
 		if (inet->num == hnum && !sk->sk_node.next &&
-		    (!inet->rcv_saddr || inet->rcv_saddr == daddr) &&
 		    (sk->sk_family == PF_INET || !ipv6_only_sock(sk)) &&
+		    tcp_addr_in_list(inet->rcv_saddr, daddr, sk->sk_nx_info) &&
 		    !sk->sk_bound_dev_if)
 			goto sherry_cache;
 		sk = __tcp_v4_lookup_listener(head, daddr, hnum, dif);
@@ -618,11 +696,11 @@ unique:
 
 	if (twp) {
 		*twp = tw;
-		NET_INC_STATS_BH(LINUX_MIB_TIMEWAITRECYCLED);
+		NET_INC_STATS_BH(TimeWaitRecycled);
 	} else if (tw) {
 		/* Silly. Should hash-dance instead... */
 		tcp_tw_deschedule(tw);
-		NET_INC_STATS_BH(LINUX_MIB_TIMEWAITRECYCLED);
+		NET_INC_STATS_BH(TimeWaitRecycled);
 
 		tcp_tw_put(tw);
 	}
@@ -1002,14 +1080,14 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 	int err;
 
 	if (skb->len < (iph->ihl << 2) + 8) {
-		ICMP_INC_STATS_BH(ICMP_MIB_INERRORS);
+		ICMP_INC_STATS_BH(IcmpInErrors);
 		return;
 	}
 
 	sk = tcp_v4_lookup(iph->daddr, th->dest, iph->saddr,
 			   th->source, tcp_v4_iif(skb));
 	if (!sk) {
-		ICMP_INC_STATS_BH(ICMP_MIB_INERRORS);
+		ICMP_INC_STATS_BH(IcmpInErrors);
 		return;
 	}
 	if (sk->sk_state == TCP_TIME_WAIT) {
@@ -1022,7 +1100,7 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 	 * servers this needs to be solved differently.
 	 */
 	if (sock_owned_by_user(sk))
-		NET_INC_STATS_BH(LINUX_MIB_LOCKDROPPEDICMPS);
+		NET_INC_STATS_BH(LockDroppedIcmps);
 
 	if (sk->sk_state == TCP_CLOSE)
 		goto out;
@@ -1031,7 +1109,7 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 	seq = ntohl(th->seq);
 	if (sk->sk_state != TCP_LISTEN &&
 	    !between(seq, tp->snd_una, tp->snd_nxt)) {
-		NET_INC_STATS(LINUX_MIB_OUTOFWINDOWICMPS);
+		NET_INC_STATS(OutOfWindowIcmps);
 		goto out;
 	}
 
@@ -1082,7 +1160,7 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 		BUG_TRAP(!req->sk);
 
 		if (seq != req->snt_isn) {
-			NET_INC_STATS_BH(LINUX_MIB_OUTOFWINDOWICMPS);
+			NET_INC_STATS_BH(OutOfWindowIcmps);
 			goto out;
 		}
 
@@ -1100,7 +1178,7 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 			       It can f.e. if SYNs crossed.
 			     */
 		if (!sock_owned_by_user(sk)) {
-			TCP_INC_STATS_BH(TCP_MIB_ATTEMPTFAILS);
+			TCP_INC_STATS_BH(TcpAttemptFails);
 			sk->sk_err = err;
 
 			sk->sk_error_report(sk);
@@ -1209,8 +1287,8 @@ static void tcp_v4_send_reset(struct sk_buff *skb)
 
 	ip_send_reply(tcp_socket->sk, skb, &arg, sizeof rth);
 
-	TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
-	TCP_INC_STATS_BH(TCP_MIB_OUTRSTS);
+	TCP_INC_STATS_BH(TcpOutSegs);
+	TCP_INC_STATS_BH(TcpOutRsts);
 }
 
 /* The code following below sending ACKs in SYN-RECV and TIME-WAIT states
@@ -1257,7 +1335,7 @@ static void tcp_v4_send_ack(struct sk_buff *skb, u32 seq, u32 ack,
 
 	ip_send_reply(tcp_socket->sk, skb, &arg, arg.iov[0].iov_len);
 
-	TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
+	TCP_INC_STATS_BH(TcpOutSegs);
 }
 
 static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
@@ -1294,12 +1372,12 @@ static struct dst_entry* tcp_v4_route_req(struct sock *sk,
 					 .dport = req->rmt_port } } };
 
 	if (ip_route_output_flow(&rt, &fl, sk, 0)) {
-		IP_INC_STATS_BH(IPSTATS_MIB_OUTNOROUTES);
+		IP_INC_STATS_BH(OutNoRoutes);
 		return NULL;
 	}
 	if (opt && opt->is_strictroute && rt->rt_dst != rt->rt_gateway) {
 		ip_rt_put(rt);
-		IP_INC_STATS_BH(IPSTATS_MIB_OUTNOROUTES);
+		IP_INC_STATS_BH(OutNoRoutes);
 		return NULL;
 	}
 	return &rt->u.dst;
@@ -1534,7 +1612,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 			if (xtime.tv_sec < peer->tcp_ts_stamp + TCP_PAWS_MSL &&
 			    (s32)(peer->tcp_ts - req->ts_recent) >
 							TCP_PAWS_WINDOW) {
-				NET_INC_STATS_BH(LINUX_MIB_PAWSPASSIVEREJECTED);
+				NET_INC_STATS_BH(PAWSPassiveRejected);
 				dst_release(dst);
 				goto drop_and_free;
 			}
@@ -1579,7 +1657,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 drop_and_free:
 	tcp_openreq_free(req);
 drop:
-	TCP_INC_STATS_BH(TCP_MIB_ATTEMPTFAILS);
+	TCP_INC_STATS_BH(TcpAttemptFails);
 	return 0;
 }
 
@@ -1638,9 +1716,9 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	return newsk;
 
 exit_overflow:
-	NET_INC_STATS_BH(LINUX_MIB_LISTENOVERFLOWS);
+	NET_INC_STATS_BH(ListenOverflows);
 exit:
-	NET_INC_STATS_BH(LINUX_MIB_LISTENDROPS);
+	NET_INC_STATS_BH(ListenDrops);
 	dst_release(dst);
 	return NULL;
 }
@@ -1758,13 +1836,9 @@ discard:
 	return 0;
 
 csum_err:
-	TCP_INC_STATS_BH(TCP_MIB_INERRS);
+	TCP_INC_STATS_BH(TcpInErrs);
 	goto discard;
 }
-
-extern struct proto_ops inet_stream_ops;
-
-extern int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len);
 
 /*
  *	From tcp_input.c
@@ -1780,7 +1854,7 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		goto discard_it;
 
 	/* Count it even if it's bad */
-	TCP_INC_STATS_BH(TCP_MIB_INSEGS);
+	TCP_INC_STATS_BH(TcpInSegs);
 
 	if (!pskb_may_pull(skb, sizeof(struct tcphdr)))
 		goto discard_it;
@@ -1817,14 +1891,6 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		goto no_tcp_socket;
 
 process:
-	/* Silently drop if VNET is active (if INET bind() has been
-	 * overridden) and the context is not entitled to read the
-	 * packet.
-	 */
-	if (inet_stream_ops.bind != inet_bind &&
-	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
-		goto discard_it;
-
 	if (sk->sk_state == TCP_TIME_WAIT)
 		goto do_time_wait;
 
@@ -1855,7 +1921,7 @@ no_tcp_socket:
 
 	if (skb->len < (th->doff << 2) || tcp_checksum_complete(skb)) {
 bad_packet:
-		TCP_INC_STATS_BH(TCP_MIB_INERRS);
+		TCP_INC_STATS_BH(TcpInErrs);
 	} else {
 		tcp_v4_send_reset(skb);
 	}
@@ -1876,7 +1942,7 @@ do_time_wait:
 	}
 
 	if (skb->len < (th->doff << 2) || tcp_checksum_complete(skb)) {
-		TCP_INC_STATS_BH(TCP_MIB_INERRS);
+		TCP_INC_STATS_BH(TcpInErrs);
 		tcp_tw_put((struct tcp_tw_bucket *) sk);
 		goto discard_it;
 	}
@@ -2139,14 +2205,14 @@ static int tcp_v4_init_sock(struct sock *sk)
 	return 0;
 }
 
-int tcp_v4_destroy_sock(struct sock *sk)
+static int tcp_v4_destroy_sock(struct sock *sk)
 {
 	struct tcp_opt *tp = tcp_sk(sk);
 
 	tcp_clear_xmit_timers(sk);
 
 	/* Cleanup up the write buffer. */
-  	sk_stream_writequeue_purge(sk);
+  	tcp_writequeue_purge(sk);
 
 	/* Cleans up our, hopefully empty, out_of_order_queue. */
   	__skb_queue_purge(&tp->out_of_order_queue);
@@ -2158,20 +2224,14 @@ int tcp_v4_destroy_sock(struct sock *sk)
 	if (tp->bind_hash)
 		tcp_put_port(sk);
 
-	/*
-	 * If sendmsg cached page exists, toss it.
-	 */
-	if (sk->sk_sndmsg_page) {
-		__free_page(sk->sk_sndmsg_page);
-		sk->sk_sndmsg_page = NULL;
-	}
+	/* If sendmsg cached page exists, toss it. */
+	if (inet_sk(sk)->sndmsg_page)
+		__free_page(inet_sk(sk)->sndmsg_page);
 
 	atomic_dec(&tcp_sockets_allocated);
 
 	return 0;
 }
-
-EXPORT_SYMBOL(tcp_v4_destroy_sock);
 
 #ifdef CONFIG_PROC_FS
 /* Proc filesystem TCP sock list dumping. */
@@ -2210,9 +2270,6 @@ static void *listening_get_next(struct seq_file *seq, void *cur)
 		req = req->dl_next;
 		while (1) {
 			while (req) {
-				vxdprintk(VXD_CBIT(net, 6),
-					"sk,req: %p [#%d] (from %d)",
-					req->sk, req->sk->sk_xid, current->xid);
 				if (!vx_check(req->sk->sk_xid, VX_IDENT|VX_WATCH))
 					continue;
 				if (req->class->family == st->family) {
@@ -2233,8 +2290,6 @@ get_req:
 		sk = sk_next(sk);
 get_sk:
 	sk_for_each_from(sk, node) {
-		vxdprintk(VXD_CBIT(net, 6), "sk: %p [#%d] (from %d)",
-			sk, sk->sk_xid, current->xid);
 		if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
 			continue;
 		if (sk->sk_family == st->family) {
@@ -2284,9 +2339,6 @@ static void *established_get_first(struct seq_file *seq)
 	       
 		read_lock(&tcp_ehash[st->bucket].lock);
 		sk_for_each(sk, node, &tcp_ehash[st->bucket].chain) {
-			vxdprintk(VXD_CBIT(net, 6),
-				"sk,egf: %p [#%d] (from %d)",
-				sk, sk->sk_xid, current->xid);
 			if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
 				continue;
 			if (sk->sk_family != st->family)
@@ -2297,9 +2349,6 @@ static void *established_get_first(struct seq_file *seq)
 		st->state = TCP_SEQ_STATE_TIME_WAIT;
 		tw_for_each(tw, node,
 			    &tcp_ehash[st->bucket + tcp_ehash_size].chain) {
-			vxdprintk(VXD_CBIT(net, 6),
-				"tw: %p [#%d] (from %d)",
-				tw, tw->tw_xid, current->xid);
 			if (!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH))
 				continue;
 			if (tw->tw_family != st->family)
@@ -2327,8 +2376,8 @@ static void *established_get_next(struct seq_file *seq, void *cur)
 		tw = cur;
 		tw = tw_next(tw);
 get_tw:
-		while (tw && (tw->tw_family != st->family ||
-			!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH))) {
+		while (tw && tw->tw_family != st->family &&
+			!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH)) {
 			tw = tw_next(tw);
 		}
 		if (tw) {
@@ -2348,9 +2397,6 @@ get_tw:
 		sk = sk_next(sk);
 
 	sk_for_each_from(sk, node) {
-		vxdprintk(VXD_CBIT(net, 6),
-			"sk,egn: %p [#%d] (from %d)",
-			sk, sk->sk_xid, current->xid);
 		if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
 			continue;
 		if (sk->sk_family == st->family)
@@ -2660,31 +2706,23 @@ void tcp4_proc_exit(void)
 #endif /* CONFIG_PROC_FS */
 
 struct proto tcp_prot = {
-	.name			= "TCP",
-	.close			= tcp_close,
-	.connect		= tcp_v4_connect,
-	.disconnect		= tcp_disconnect,
-	.accept			= tcp_accept,
-	.ioctl			= tcp_ioctl,
-	.init			= tcp_v4_init_sock,
-	.destroy		= tcp_v4_destroy_sock,
-	.shutdown		= tcp_shutdown,
-	.setsockopt		= tcp_setsockopt,
-	.getsockopt		= tcp_getsockopt,
-	.sendmsg		= tcp_sendmsg,
-	.recvmsg		= tcp_recvmsg,
-	.backlog_rcv		= tcp_v4_do_rcv,
-	.hash			= tcp_v4_hash,
-	.unhash			= tcp_unhash,
-	.get_port		= tcp_v4_get_port,
-	.enter_memory_pressure	= tcp_enter_memory_pressure,
-	.sockets_allocated	= &tcp_sockets_allocated,
-	.memory_allocated	= &tcp_memory_allocated,
-	.memory_pressure	= &tcp_memory_pressure,
-	.sysctl_mem		= sysctl_tcp_mem,
-	.sysctl_wmem		= sysctl_tcp_wmem,
-	.sysctl_rmem		= sysctl_tcp_rmem,
-	.max_header		= MAX_TCP_HEADER,
+	.name		=	"TCP",
+	.close		=	tcp_close,
+	.connect	=	tcp_v4_connect,
+	.disconnect	=	tcp_disconnect,
+	.accept		=	tcp_accept,
+	.ioctl		=	tcp_ioctl,
+	.init		=	tcp_v4_init_sock,
+	.destroy	=	tcp_v4_destroy_sock,
+	.shutdown	=	tcp_shutdown,
+	.setsockopt	=	tcp_setsockopt,
+	.getsockopt	=	tcp_getsockopt,
+	.sendmsg	=	tcp_sendmsg,
+	.recvmsg	=	tcp_recvmsg,
+	.backlog_rcv	=	tcp_v4_do_rcv,
+	.hash		=	tcp_v4_hash,
+	.unhash		=	tcp_unhash,
+	.get_port	=	tcp_v4_get_port,
 };
 
 

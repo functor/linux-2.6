@@ -35,7 +35,6 @@
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 
-#include <net/ip.h>
 #include <net/sock.h>
 #include <net/snmp.h>
 
@@ -43,7 +42,6 @@
 #include <net/ndisc.h>
 #include <net/protocol.h>
 #include <net/ip6_route.h>
-#include <net/ip6_checksum.h>
 #include <net/addrconf.h>
 #include <net/transp_v6.h>
 #include <net/udp.h>
@@ -419,10 +417,7 @@ static int rawv6_recvmsg(struct kiocb *iocb, struct sock *sk,
 
 	if (np->rxopt.all)
 		datagram_recv_ctl(sk, msg, skb);
-
 	err = copied;
-	if (flags & MSG_TRUNC)
-		err = skb->len;
 
 out_free:
 	skb_free_datagram(sk, skb);
@@ -538,7 +533,7 @@ static int rawv6_send_hdrinc(struct sock *sk, void *from, int length,
 	if (err)
 		goto error_fault;
 
-	IP6_INC_STATS(IPSTATS_MIB_OUTREQUESTS);		
+	IP6_INC_STATS(OutRequests);		
 	err = NF_HOOK(PF_INET6, NF_IP6_LOCAL_OUT, skb, NULL, rt->u.dst.dev,
 		      dst_output);
 	if (err > 0)
@@ -552,7 +547,7 @@ error_fault:
 	err = -EFAULT;
 	kfree_skb(skb);
 error:
-	IP6_INC_STATS(IPSTATS_MIB_OUTDISCARDS);
+	IP6_INC_STATS(OutDiscards);
 	return err; 
 }
 static int rawv6_sendmsg(struct kiocb *iocb, struct sock *sk,
@@ -903,7 +898,7 @@ static void rawv6_close(struct sock *sk, long timeout)
 	if (inet_sk(sk)->num == IPPROTO_RAW)
 		ip6_ra_control(sk, -1, NULL);
 
-	sk_common_release(sk);
+	inet_sock_release(sk);
 }
 
 static int rawv6_init_sk(struct sock *sk)
@@ -919,7 +914,7 @@ static int rawv6_init_sk(struct sock *sk)
 struct proto rawv6_prot = {
 	.name =		"RAW",
 	.close =	rawv6_close,
-	.connect =	ip6_datagram_connect,
+	.connect =	udpv6_connect,
 	.disconnect =	udp_disconnect,
 	.ioctl =	rawv6_ioctl,
 	.init =		rawv6_init_sk,

@@ -11,7 +11,7 @@
 
 struct remapper {
 	struct list_head list;
-	int (*proc)(int, unsigned long, int, __u64, int);
+	int (*proc)(int, unsigned long, int, __u64);
 };
 
 extern void register_remapper(struct remapper *info);
