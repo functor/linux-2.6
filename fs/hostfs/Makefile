@@ -1,4 +1,4 @@
-# 
+#
 # Copyright (C) 2000 Jeff Dike (jdike@karaya.com)
 # Licensed under the GPL
 #
@@ -12,7 +12,7 @@ STAT64_INO_FIELD := $(shell grep -q __st_ino /usr/include/bits/stat.h && \
 
 hostfs-objs := hostfs_kern.o hostfs_user.o
 
-obj-y = 
+obj-y =
 obj-$(CONFIG_HOSTFS) += hostfs.o
 
 SINGLE_OBJS = $(foreach f,$(patsubst %.o,%,$(obj-y) $(obj-m)),$($(f)-objs))
