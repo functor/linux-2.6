@@ -1086,10 +1086,8 @@ static inline int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	 * packet.
 	 */
 	if (inet_stream_ops.bind != inet_bind &&
-	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid) {
-		err = -EPERM;
+	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
 		goto out;
-	}
 
 	/* Cast skb->rcvbuf to unsigned... It's pointless, but reduces
 	   number of warnings when compiling with -W --ANK
