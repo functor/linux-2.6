@@ -25,6 +25,7 @@
 #define	OCP_VENDOR_ARM		0x0004
 #define OCP_VENDOR_FREESCALE	0x1057
 #define OCP_VENDOR_IBM		0x1014
+#define OCP_VENDOR_MARVELL	0x11ab
 #define OCP_VENDOR_MOTOROLA	OCP_VENDOR_FREESCALE
 #define	OCP_VENDOR_XILINX	0x10ee
 #define	OCP_VENDOR_UNKNOWN	0xFFFF
@@ -42,7 +43,9 @@
 #define OCP_FUNC_16550		0x0031
 #define OCP_FUNC_IIC		0x0032
 #define OCP_FUNC_USB		0x0033
-#define OCP_FUNC_PSC_UART	0x0034
+#define	OCP_FUNC_MPSC		0x0034
+#define	OCP_FUNC_COMM_MPSC	0x0035
+#define	OCP_FUNC_SDMA		0x0036
 
 /* Memory devices 0x0090 - 0x009F */
 #define OCP_FUNC_MAL		0x0090
@@ -61,12 +64,18 @@
 #define OCP_FUNC_PERFMON	0x00D2	/* Performance Monitor */
 #define OCP_FUNC_RGMII		0x00D3
 #define OCP_FUNC_TAH		0x00D4
+#define	OCP_FUNC_I2C		0x00D5	/* I2C Controller */
+#define	OCP_FUNC_BRG		0x00D6	/* Baud Rate Generator */
+#define	OCP_FUNC_PIC		0x00D7	/* Programmable Interrupt Controller */
 
 /* Network 0x0200 - 0x02FF */
 #define OCP_FUNC_EMAC		0x0200
-#define OCP_FUNC_GFAR		0x0201	/* TSEC & FEC */
+#define OCP_FUNC_ENET		0x0201	/* TSEC & FEC */
+#define	OCP_FUNC_COMM_EMAC	0x0202
+#define OCP_FUNC_GFAR		0x0203	/* TSEC & FEC */
 
 /* Bridge devices 0xE00 - 0xEFF */
 #define OCP_FUNC_OPB		0x0E00
+#define	OCP_FUNC_HB		0x0E01	/* Host bridge */
 
 #define OCP_FUNC_UNKNOWN	0xFFFF

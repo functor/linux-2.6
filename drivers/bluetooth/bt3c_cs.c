@@ -25,11 +25,12 @@
 #include <linux/module.h>
 
 #include <linux/kernel.h>
+#include <linux/kmod.h>
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/delay.h>
 #include <linux/types.h>
 #include <linux/sched.h>
-#include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/ptrace.h>
 #include <linux/ioport.h>
@@ -638,7 +639,8 @@ int bt3c_open(bt3c_info_t *info)
 	}
 
 	/* Timeout before it is safe to send the first HCI packet */
-	msleep(1000);
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule_timeout(HZ);
 
 	/* Register HCI device */
 	err = hci_register_dev(hdev);

@@ -14,9 +14,6 @@
 #include <linux/fcntl.h>
 #include <linux/quotaops.h>
 #include <linux/security.h>
-#include <linux/vs_base.h>
-#include <linux/proc_fs.h>
-#include <linux/devpts_fs.h>
 
 /* Taken over from the old code... */
 
@@ -57,31 +54,6 @@ int inode_change_ok(struct inode *inode, struct iattr *attr)
 	if (ia_valid & (ATTR_MTIME_SET | ATTR_ATIME_SET)) {
 		if (current->fsuid != inode->i_uid && !capable(CAP_FOWNER))
 			goto error;
-	}
-
-	/* Check for evil vserver activity */
-	if (vx_check(0, VX_ADMIN))
-		goto fine;
-
-	if (IS_BARRIER(inode)) {
-		printk(KERN_WARNING
-			"VSW: xid=%d messing with the barrier.\n",
-			vx_current_xid());
-		goto error;
-	}
-	switch (inode->i_sb->s_magic) {
-		case PROC_SUPER_MAGIC:
-			printk(KERN_WARNING
-				"VSW: xid=%d messing with the procfs.\n",
-				vx_current_xid());
-			goto error;
-		case DEVPTS_SUPER_MAGIC:
-			if (vx_check(inode->i_xid, VX_IDENT))
-				goto fine;
-			printk(KERN_WARNING
-				"VSW: xid=%d messing with the devpts.\n",
-				vx_current_xid());
-			goto error;	
 	}
 fine:
 	retval = 0;

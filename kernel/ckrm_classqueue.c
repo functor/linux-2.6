@@ -133,42 +133,11 @@ void classqueue_update_prio(struct classqueue_struct *cq,
 	
 	//add to new positon, round robin for classes with same priority
 	list_add_tail(&(node->list), &cq->array.queue[index]);
-	__set_bit(index, cq->array.bitmap);	
+	__set_bit(index, cq->array.bitmap);
+	
 	node->index = index;
 }
 
-/**
- *classqueue_get_min_prio: return the priority of the last node in queue
- *
- * this function can be called without runqueue lock held
- */
-static inline int classqueue_get_min_prio(struct classqueue_struct *cq)
-{
-	cq_node_t *result = NULL;
-	int pos;
-
-	/* 
-	 * search over the bitmap to get the first class in the queue
-	 */
-	pos = find_next_bit(cq->array.bitmap, CLASSQUEUE_SIZE, cq->base_offset);
-	//do circular search from the beginning
-	if (pos >= CLASSQUEUE_SIZE) 
-		pos = find_first_bit(cq->array.bitmap, CLASSQUEUE_SIZE);
-
-	if (pos < CLASSQUEUE_SIZE) {
-		result = list_entry(cq->array.queue[pos].next, cq_node_t, list);
-		if (list_empty(&cq->array.queue[pos]))
-			result = NULL;
-	}
-	if (result)
-		return result->prio;
-	else 
-		return 0;
-}
-
-/**
- * this function must be called with runqueue lock held
- */
 cq_node_t *classqueue_get_head(struct classqueue_struct *cq)
 {
 	cq_node_t *result = NULL;
@@ -178,9 +147,9 @@ cq_node_t *classqueue_get_head(struct classqueue_struct *cq)
 	 * search over the bitmap to get the first class in the queue
 	 */
 	pos = find_next_bit(cq->array.bitmap, CLASSQUEUE_SIZE, cq->base_offset);
-	//do circular search from the beginning
-	if (pos >= CLASSQUEUE_SIZE) 
+	if (pos >= CLASSQUEUE_SIZE) {	//do circular search from the beginning
 		pos = find_first_bit(cq->array.bitmap, CLASSQUEUE_SIZE);
+	}
 
 	if (pos < CLASSQUEUE_SIZE) {
 		BUG_ON(list_empty(&cq->array.queue[pos]));
@@ -193,17 +162,15 @@ cq_node_t *classqueue_get_head(struct classqueue_struct *cq)
  * Moving the end of queue forward
  * the new_base here is logical, we need to translate to the abosule position
  */
-void classqueue_update_base(struct classqueue_struct *cq)
+void classqueue_update_base(struct classqueue_struct *cq, int new_base)
 {
-	int new_base;
-	
-	if (! cq_nr_member(cq)) {
+	if (!cq_nr_member(cq)) {
 		cq->base_offset = -1;	//not defined
 		return;
 	}
 
-	new_base = classqueue_get_min_prio(cq);
-	
+	//	assert(new_base >= cq->base);
+
 	if (new_base > cq->base) {
 		cq->base_offset = get_index(cq, &new_base);
 		cq->base = new_base;

@@ -1004,7 +1004,7 @@ static int prepare_request(struct request *req, struct io_thread_req *io_req)
 		 * to write the data to disk first, then we can map the disk
 		 * page in and continue normally from there.
 		 */
-		if((rq_data_dir(req) == WRITE) && !is_remapped(req->buffer, dev->fd, io_req->offset + dev->cow.data_offset)){
+		if((rq_data_dir(req) == WRITE) && !is_remapped(req->buffer)){
 			io_req->map_fd = dev->fd;
 			io_req->map_offset = io_req->offset + 
 				dev->cow.data_offset;
@@ -1134,19 +1134,11 @@ static int ubd_ioctl(struct inode * inode, struct file * file,
 }
 
 static int ubd_check_remapped(int fd, unsigned long address, int is_write,
-			      __u64 offset, int is_user)
+			      __u64 offset)
 {
 	__u64 bitmap_offset;
 	unsigned long new_bitmap[2];
 	int i, err, n;
-
-	/* This can only fix kernelspace faults */
-	if(is_user)
-		return(0);
-
-	/* ubd-mmap is only enabled in skas mode */
-	if(CHOOSE_MODE(1, 0))
-		return(0);
 
 	/* If it's not a write access, we can't do anything about it */
 	if(!is_write)

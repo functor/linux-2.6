@@ -371,7 +371,7 @@ static int ppp_release(struct inode *inode, struct file *file)
 	struct ppp *ppp;
 
 	if (pf != 0) {
-		file->private_data = NULL;
+		file->private_data = 0;
 		if (pf->kind == INTERFACE) {
 			ppp = PF_TO_PPP(pf);
 			if (file == ppp->owner)
@@ -397,7 +397,7 @@ static ssize_t ppp_read(struct file *file, char __user *buf,
 	struct ppp_file *pf = file->private_data;
 	DECLARE_WAITQUEUE(wait, current);
 	ssize_t ret;
-	struct sk_buff *skb = NULL;
+	struct sk_buff *skb = 0;
 
 	ret = count;
 
@@ -1026,7 +1026,11 @@ ppp_send_frame(struct ppp *ppp, struct sk_buff *skb)
 		/* check if we should pass this packet */
 		/* the filter instructions are constructed assuming
 		   a four-byte PPP header on each packet */
-		*skb_push(skb, 2) = 1;
+		{
+			u_int16_t *p = (u_int16_t *) skb_push(skb, 2);
+
+			*p = htons(4); /* indicate outbound in DLT_LINUX_SLL */;
+		}
 		if (ppp->pass_filter
 		    && sk_run_filter(skb, ppp->pass_filter,
 				     ppp->pass_len) == 0) {
@@ -1157,7 +1161,7 @@ ppp_push(struct ppp *ppp)
 	list = &ppp->channels;
 	if (list_empty(list)) {
 		/* nowhere to send the packet, just drop it */
-		ppp->xmit_pending = NULL;
+		ppp->xmit_pending = 0;
 		kfree_skb(skb);
 		return;
 	}
@@ -1170,11 +1174,11 @@ ppp_push(struct ppp *ppp)
 		spin_lock_bh(&pch->downl);
 		if (pch->chan) {
 			if (pch->chan->ops->start_xmit(pch->chan, skb))
-				ppp->xmit_pending = NULL;
+				ppp->xmit_pending = 0;
 		} else {
 			/* channel got unregistered */
 			kfree_skb(skb);
-			ppp->xmit_pending = NULL;
+			ppp->xmit_pending = 0;
 		}
 		spin_unlock_bh(&pch->downl);
 		return;
@@ -1187,7 +1191,7 @@ ppp_push(struct ppp *ppp)
 		return;
 #endif /* CONFIG_PPP_MULTILINK */
 
-	ppp->xmit_pending = NULL;
+	ppp->xmit_pending = 0;
 	kfree_skb(skb);
 }
 
@@ -1569,7 +1573,11 @@ ppp_receive_nonmp_frame(struct ppp *ppp, struct sk_buff *skb)
 		/* check if the packet passes the pass and active filters */
 		/* the filter instructions are constructed assuming
 		   a four-byte PPP header on each packet */
-		*skb_push(skb, 2) = 0;
+		{
+			u_int16_t *p = (u_int16_t *) skb_push(skb, 2);
+
+			*p = 0; /* indicate inbound in DLT_LINUX_SLL */
+		}
 		if (ppp->pass_filter
 		    && sk_run_filter(skb, ppp->pass_filter,
 				     ppp->pass_len) == 0) {
@@ -1968,7 +1976,7 @@ ppp_unregister_channel(struct ppp_channel *chan)
 
 	if (pch == 0)
 		return;		/* should never happen */
-	chan->ppp = NULL;
+	chan->ppp = 0;
 
 	/*
 	 * This ensures that we have returned from any calls into the
@@ -1976,7 +1984,7 @@ ppp_unregister_channel(struct ppp_channel *chan)
 	 */
 	down_write(&pch->chan_sem);
 	spin_lock_bh(&pch->downl);
-	pch->chan = NULL;
+	pch->chan = 0;
 	spin_unlock_bh(&pch->downl);
 	up_write(&pch->chan_sem);
 	ppp_disconnect_channel(pch);
@@ -2179,11 +2187,11 @@ ppp_ccp_closed(struct ppp *ppp)
 	ppp->xstate = 0;
 	xcomp = ppp->xcomp;
 	xstate = ppp->xc_state;
-	ppp->xc_state = NULL;
+	ppp->xc_state = 0;
 	ppp->rstate = 0;
 	rcomp = ppp->rcomp;
 	rstate = ppp->rc_state;
-	ppp->rc_state = NULL;
+	ppp->rc_state = 0;
 	ppp_unlock(ppp);
 
 	if (xstate) {
@@ -2216,7 +2224,7 @@ find_comp_entry(int proto)
 		if (ce->comp->compress_proto == proto)
 			return ce;
 	}
-	return NULL;
+	return 0;
 }
 
 /* Register a compressor */
@@ -2261,7 +2269,7 @@ static struct compressor *
 find_compressor(int type)
 {
 	struct compressor_entry *ce;
-	struct compressor *cp = NULL;
+	struct compressor *cp = 0;
 
 	spin_lock(&compressor_list_lock);
 	ce = find_comp_entry(type);
@@ -2405,7 +2413,7 @@ static void ppp_shutdown_interface(struct ppp *ppp)
 	down(&all_ppp_sem);
 	ppp_lock(ppp);
 	dev = ppp->dev;
-	ppp->dev = NULL;
+	ppp->dev = 0;
 	ppp_unlock(ppp);
 	/* This will call dev_close() for us. */
 	if (dev) {
@@ -2439,7 +2447,7 @@ static void ppp_destroy_interface(struct ppp *ppp)
 	ppp_ccp_closed(ppp);
 	if (ppp->vj) {
 		slhc_free(ppp->vj);
-		ppp->vj = NULL;
+		ppp->vj = 0;
 	}
 	skb_queue_purge(&ppp->file.xq);
 	skb_queue_purge(&ppp->file.rq);
@@ -2453,7 +2461,7 @@ static void ppp_destroy_interface(struct ppp *ppp)
 	}
 	if (ppp->active_filter) {
 		kfree(ppp->active_filter);
-		ppp->active_filter = NULL;
+		ppp->active_filter = 0;
 	}
 #endif /* CONFIG_PPP_FILTER */
 
@@ -2499,7 +2507,7 @@ ppp_find_channel(int unit)
 		if (pch->file.index == unit)
 			return pch;
 	}
-	return NULL;
+	return 0;
 }
 
 /*

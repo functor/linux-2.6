@@ -23,9 +23,6 @@
 #define EJUKEBOX	528	/* Request initiated, but will not complete before timeout */
 #define EIOCBQUEUED	529	/* iocb queued, will get completion event */
 
-/* Defined for TUX async IO */
-#define EWOULDBLOCKIO	530	/* Would block due to block-IO */
-
 #endif
 
 #endif

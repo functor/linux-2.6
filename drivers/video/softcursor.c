@@ -43,7 +43,7 @@ int soft_cursor(struct fb_info *info, struct fb_cursor *cursor)
 			info->cursor.image.fg_color = cursor->image.fg_color;
 		} else {
 			if (cursor->image.cmap.len)
-				fb_copy_cmap(&cursor->image.cmap, &info->cursor.image.cmap);
+				fb_copy_cmap(&cursor->image.cmap, &info->cursor.image.cmap, 0);
 		}
 		info->cursor.image.depth = cursor->image.depth;
 	}	

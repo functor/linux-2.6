@@ -28,6 +28,8 @@
     
 */  
 
+
+#define __KERNEL_SYSCALLS__
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/vmalloc.h>
@@ -149,13 +151,13 @@ static int sp8870_read_firmware_file (const char *fn, char **fp)
 	loff_t filesize;
 	char *dp;
 
-	fd = sys_open(fn, 0, 0);
+	fd = open(fn, 0, 0);
 	if (fd == -1) {
                 printk("%s: unable to open '%s'.\n", __FUNCTION__, fn);
 		return -EIO;
 	}
 
-	filesize = sys_lseek(fd, 0L, 2);
+	filesize = lseek(fd, 0L, 2);
 	if (filesize <= 0 || filesize < SP8870_FIRMWARE_OFFSET + SP8870_FIRMWARE_SIZE) {
 	        printk("%s: firmware filesize to small '%s'\n", __FUNCTION__, fn);
 		sys_close(fd);
@@ -169,8 +171,8 @@ static int sp8870_read_firmware_file (const char *fn, char **fp)
 		return -EIO;
 	}
 
-	sys_lseek(fd, SP8870_FIRMWARE_OFFSET, 0);
-	if (sys_read(fd, dp, SP8870_FIRMWARE_SIZE) != SP8870_FIRMWARE_SIZE) {
+	lseek(fd, SP8870_FIRMWARE_OFFSET, 0);
+	if (read(fd, dp, SP8870_FIRMWARE_SIZE) != SP8870_FIRMWARE_SIZE) {
 		printk("%s: failed to read '%s'.\n",__FUNCTION__, fn);
 		vfree(dp);
 		sys_close(fd);

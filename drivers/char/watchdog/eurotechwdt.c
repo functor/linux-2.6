@@ -199,6 +199,10 @@ static void eurwdt_ping(void)
 static ssize_t eurwdt_write(struct file *file, const char __user *buf,
 size_t count, loff_t *ppos)
 {
+	/*  Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+	return -ESPIPE;
+
 	if (count) 	{
 		if (!nowayout) {
 			size_t i;
@@ -306,7 +310,7 @@ static int eurwdt_open(struct inode *inode, struct file *file)
 	eurwdt_timeout = WDT_TIMEOUT;	/* initial timeout */
 	/* Activate the WDT */
 	eurwdt_activate_timer();
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 /**

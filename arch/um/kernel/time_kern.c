@@ -20,7 +20,6 @@
 #include "user_util.h"
 #include "time_user.h"
 #include "mode.h"
-#include "os.h"
 
 u64 jiffies_64;
 
@@ -43,10 +42,10 @@ unsigned long long sched_clock(void)
 int timer_irq_inited = 0;
 
 static int first_tick;
-static unsigned long long prev_usecs;
+static unsigned long long prev_tsc;
 static long long delta;   		/* Deviation per interval */
 
-#define MILLION 1000000
+extern unsigned long long host_hz;
 
 void timer_irq(union uml_pt_regs *regs)
 {
@@ -61,24 +60,21 @@ void timer_irq(union uml_pt_regs *regs)
 
 	if(first_tick){
 #if defined(CONFIG_UML_REAL_TIME_CLOCK)
+		unsigned long long tsc;
 		/* We've had 1 tick */
-		unsigned long long usecs = os_usecs();
+		tsc = time_stamp();
 
-		delta += usecs - prev_usecs;
-		prev_usecs = usecs;
+		delta += tsc - prev_tsc;
+		prev_tsc = tsc;
 
-		/* Protect against the host clock being set backwards */
-		if(delta < 0)
-			delta = 0;
-
-		ticks += (delta * HZ) / MILLION;
-		delta -= (ticks * MILLION) / HZ;
+		ticks += (delta * HZ) / host_hz;
+		delta -= (ticks * host_hz) / HZ;
 #else
 		ticks = 1;
 #endif
 	}
 	else {
-		prev_usecs = os_usecs();
+		prev_tsc = time_stamp();
 		first_tick = 1;
 	}
 
@@ -153,7 +149,7 @@ void __udelay(um_udelay_t usecs)
 {
 	int i, n;
 
-	n = (loops_per_jiffy * HZ * usecs) / MILLION;
+	n = (loops_per_jiffy * HZ * usecs) / 1000000;
 	for(i=0;i<n;i++) ;
 }
 
@@ -161,7 +157,7 @@ void __const_udelay(um_udelay_t usecs)
 {
 	int i, n;
 
-	n = (loops_per_jiffy * HZ * usecs) / MILLION;
+	n = (loops_per_jiffy * HZ * usecs) / 1000000;
 	for(i=0;i<n;i++) ;
 }
 

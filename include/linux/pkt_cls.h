@@ -117,6 +117,17 @@ enum
 struct tc_police
 {
 	__u32			index;
+#ifdef CONFIG_NET_CLS_ACT
+	int 			refcnt;
+	int 			bindcnt;
+#endif
+/* Turned off because it requires new tc
+ * to work (for now maintain ABI)
+ *
+#ifdef CONFIG_NET_CLS_ACT
+	__u32			capab;
+#endif
+*/
 	int			action;
 #define TC_POLICE_UNSPEC	TC_ACT_UNSPEC
 #define TC_POLICE_OK		TC_ACT_OK
@@ -129,9 +140,6 @@ struct tc_police
 	__u32			mtu;
 	struct tc_ratespec	rate;
 	struct tc_ratespec	peakrate;
-	int 			refcnt;
-	int 			bindcnt;
-	__u32			capab;
 };
 
 struct tcf_t
@@ -187,9 +195,12 @@ enum
 	TCA_U32_DIVISOR,
 	TCA_U32_SEL,
 	TCA_U32_POLICE,
+#ifdef CONFIG_NET_CLS_ACT
 	TCA_U32_ACT,   
+#endif
+#ifdef CONFIG_NET_CLS_IND
 	TCA_U32_INDEV,
-	TCA_U32_PCNT,
+#endif
 	__TCA_U32_MAX
 };
 
@@ -201,6 +212,9 @@ struct tc_u32_key
 	__u32		val;
 	int		off;
 	int		offmask;
+#ifdef CONFIG_CLS_U32_PERF
+	unsigned long	kcnt;
+#endif
 };
 
 struct tc_u32_sel
@@ -215,17 +229,13 @@ struct tc_u32_sel
 
 	short			hoff;
 	__u32			hmask;
+#ifdef CONFIG_CLS_U32_PERF
+	unsigned long		rcnt;
+	unsigned long		rhit;
+#endif
 	struct tc_u32_key	keys[0];
 };
 
-#ifdef CONFIG_CLS_U32_PERF
-struct tc_u32_pcnt
-{
-	__u64 rcnt;
-	__u64 rhit;
-	__u64 kcnts[0];
-};
-#endif
 /* Flags */
 
 #define TC_U32_TERMINAL		1
@@ -290,8 +300,12 @@ enum
 	TCA_FW_UNSPEC,
 	TCA_FW_CLASSID,
 	TCA_FW_POLICE,
-	TCA_FW_INDEV, /*  used by CONFIG_NET_CLS_IND */
-	TCA_FW_ACT, /* used by CONFIG_NET_CLS_ACT */
+#ifdef CONFIG_NET_CLS_IND
+	TCA_FW_INDEV,
+#endif
+#ifdef CONFIG_NET_CLS_ACT
+	TCA_FW_ACT,
+#endif
 	__TCA_FW_MAX
 };
 
