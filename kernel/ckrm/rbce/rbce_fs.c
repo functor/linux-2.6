@@ -422,7 +422,7 @@ static struct inode_operations rbce_dir_inode_operations = {
 static void rbce_put_super(struct super_block *sb)
 {
 	module_put(THIS_MODULE);
-	printk(KERN_DEBUG "rbce_put_super called\n");
+	printk("rbce_put_super called\n");
 }
 
 static struct super_operations rbce_ops = {

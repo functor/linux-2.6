@@ -331,18 +331,6 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 				clear_bit(SOCK_PASS_CRED, &sock->flags);
 			break;
 
-		case SO_SETXID:
-			if (current->xid) {
-				ret = -EPERM;
-				break;
-			}
-			if (val < 0 || val > MAX_S_CONTEXT) {
-				ret = -EINVAL;
-				break;
-			}
-			sk->sk_xid = val;
-			break;
-
 		case SO_TIMESTAMP:
 			sk->sk_rcvtstamp = valbool;
 			if (valbool) 
