@@ -1879,15 +1879,6 @@ nextgroup:
 			100*max_load <= sd->imbalance_pct*this_load)
 		goto out_balanced;
 
- 	/*
-	 * If crash dump is in progress, this other cpu's
-	 * need to wait until it completes.
-	 * NB: this code is optimized away for kernels without
-	 * dumping enabled.
-	 */
-	if (unlikely(dump_oncpu))
-		goto dump_scheduling_disabled;
-
 	/*
 	 * We're trying to get all the cpus to the average_load, so we don't
 	 * want to push ourselves above the average load, nor do we wish to
@@ -2534,6 +2525,15 @@ asmlinkage void __sched schedule(void)
 	struct vx_info *vxi;
 	int maxidle = -HZ;
 #endif
+
+ 	/*
+	 * If crash dump is in progress, this other cpu's
+	 * need to wait until it completes.
+	 * NB: this code is optimized away for kernels without
+	 * dumping enabled.
+	 */
+	if (unlikely(dump_oncpu))
+		goto dump_scheduling_disabled;
 
 	//WARN_ON(system_state == SYSTEM_BOOTING);
 	/*
