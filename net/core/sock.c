@@ -7,7 +7,7 @@
  *		handler for protocols to use and generic option handler.
  *
  *
- * Version:	$Id: sock.c,v 1.117 2002/02/01 22:01:03 davem Exp $
+ * Version:	$Id$
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -331,6 +331,7 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 				clear_bit(SOCK_PASS_CRED, &sock->flags);
 			break;
 
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 		case SO_SETXID:
 			if (current->xid) {
 				ret = -EPERM;
@@ -342,6 +343,7 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 			}
 			sk->sk_xid = val;
 			break;
+#endif
 
 		case SO_TIMESTAMP:
 			sk->sk_rcvtstamp = valbool;
