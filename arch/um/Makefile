@@ -48,7 +48,7 @@ endif
 include $(ARCH_DIR)/Makefile-$(SUBARCH)
 include $(ARCH_DIR)/Makefile-os-$(OS)
 
-EXTRAVERSION := $(EXTRAVERSION)-2um
+EXTRAVERSION := $(EXTRAVERSION)-1um
 
 ARCH_INCLUDE = -I$(ARCH_DIR)/include
 
