@@ -55,7 +55,7 @@
 
 static int hangcheck_tick = DEFAULT_IOFENCE_TICK;
 static int hangcheck_margin = DEFAULT_IOFENCE_MARGIN;
-static int hangcheck_reboot;  /* Defaults to not reboot */
+static int hangcheck_reboot = 1;  /* Defaults to reboot */
 
 /* Driver options */
 module_param(hangcheck_tick, int, 0);
