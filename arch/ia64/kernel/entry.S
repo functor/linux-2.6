@@ -1362,7 +1362,15 @@ sys_call_table:
 	data8 sys_syslog
 	data8 sys_setitimer
 	data8 sys_getitimer
+#ifdef CONFIG_TUX
+	data8 __sys_tux				// 1120		/* was: ia64_oldstat */
+#else
+# ifdef CONFIG_TUX_MODULE
+	data8 sys_tux				// 1120		/* was: ia64_oldstat */
+# else
 	data8 sys_ni_syscall			// 1120		/* was: ia64_oldstat */
+# endif
+#endif
 	data8 sys_ni_syscall					/* was: ia64_oldlstat */
 	data8 sys_ni_syscall					/* was: ia64_oldfstat */
 	data8 sys_vhangup
@@ -1429,7 +1437,7 @@ sys_call_table:
 	data8 sys_getcwd
 	data8 sys_capget			// 1185
 	data8 sys_capset
-	data8 sys_sendfile
+	data8 sys_sendfile64
 	data8 sys_ni_syscall		// sys_getpmsg (STREAMS)
 	data8 sys_ni_syscall		// sys_putpmsg (STREAMS)
 	data8 sys_socket			// 1190
@@ -1501,16 +1509,16 @@ sys_call_table:
 	data8 sys_clock_nanosleep
 	data8 sys_fstatfs64
 	data8 sys_statfs64
-	data8 sys_ni_syscall
-	data8 sys_ni_syscall			// 1260
-	data8 sys_ni_syscall
+	data8 sys_mbind
+	data8 sys_get_mempolicy			// 1260
+	data8 sys_set_mempolicy
 	data8 sys_mq_open
 	data8 sys_mq_unlink
 	data8 sys_mq_timedsend
 	data8 sys_mq_timedreceive		// 1265
 	data8 sys_mq_notify
 	data8 sys_mq_getsetattr
-	data8 sys_ni_syscall
+	data8 sys_ni_syscall			// reserved for kexec_load
 	data8 sys_ni_syscall
 	data8 sys_ni_syscall			// 1270
 	data8 sys_ni_syscall

@@ -548,6 +548,12 @@ acpi_ec_remove_fs (
 {
 	ACPI_FUNCTION_TRACE("acpi_ec_remove_fs");
 
+	if (acpi_device_dir(device)) {
+		remove_proc_entry(ACPI_EC_FILE_INFO, acpi_device_dir(device));
+		remove_proc_entry(acpi_device_bid(device), acpi_ec_dir);
+		acpi_device_dir(device) = NULL;
+	}
+
 	return_VALUE(0);
 }
 
@@ -594,7 +600,7 @@ acpi_ec_add (
 	
 		acpi_remove_gpe_handler(NULL, ec_ecdt->gpe_bit, &acpi_ec_gpe_handler);
 
-		kfree(ec_ecdt);
+//		kfree(ec_ecdt);
 	}
 
 	/* Get GPE bit assignment (EC events). */

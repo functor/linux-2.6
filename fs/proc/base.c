@@ -111,7 +111,7 @@ static struct pid_entry tgid_base_stuff[] = {
 	E(PROC_TGID_CMDLINE,   "cmdline", S_IFREG|S_IRUGO),
 	E(PROC_TGID_STAT,      "stat",    S_IFREG|S_IRUGO),
 	E(PROC_TGID_STATM,     "statm",   S_IFREG|S_IRUGO),
-	E(PROC_TGID_MAPS,      "maps",    S_IFREG|S_IRUGO),
+	E(PROC_TGID_MAPS,      "maps",    S_IFREG|S_IRUSR),
 	E(PROC_TGID_MEM,       "mem",     S_IFREG|S_IRUSR|S_IWUSR),
 	E(PROC_TGID_CWD,       "cwd",     S_IFLNK|S_IRWXUGO),
 	E(PROC_TGID_ROOT,      "root",    S_IFLNK|S_IRWXUGO),
@@ -133,7 +133,7 @@ static struct pid_entry tid_base_stuff[] = {
 	E(PROC_TID_CMDLINE,    "cmdline", S_IFREG|S_IRUGO),
 	E(PROC_TID_STAT,       "stat",    S_IFREG|S_IRUGO),
 	E(PROC_TID_STATM,      "statm",   S_IFREG|S_IRUGO),
-	E(PROC_TID_MAPS,       "maps",    S_IFREG|S_IRUGO),
+	E(PROC_TID_MAPS,       "maps",    S_IFREG|S_IRUSR),
 	E(PROC_TID_MEM,        "mem",     S_IFREG|S_IRUSR|S_IWUSR),
 	E(PROC_TID_CWD,        "cwd",     S_IFLNK|S_IRWXUGO),
 	E(PROC_TID_ROOT,       "root",    S_IFLNK|S_IRWXUGO),
@@ -511,7 +511,7 @@ static struct file_operations proc_mounts_operations = {
 
 #define PROC_BLOCK_SIZE	(3*1024)		/* 4K page size but our output routines use some slack for overruns */
 
-static ssize_t proc_info_read(struct file * file, char * buf,
+static ssize_t proc_info_read(struct file * file, char __user * buf,
 			  size_t count, loff_t *ppos)
 {
 	struct inode * inode = file->f_dentry->d_inode;
@@ -557,7 +557,7 @@ static int mem_open(struct inode* inode, struct file* file)
 	return 0;
 }
 
-static ssize_t mem_read(struct file * file, char * buf,
+static ssize_t mem_read(struct file * file, char __user * buf,
 			size_t count, loff_t *ppos)
 {
 	struct task_struct *task = proc_task(file->f_dentry->d_inode);
@@ -710,7 +710,7 @@ out:
 }
 
 static int do_proc_readlink(struct dentry *dentry, struct vfsmount *mnt,
-			    char *buffer, int buflen)
+			    char __user *buffer, int buflen)
 {
 	struct inode * inode;
 	char *tmp = (char*)__get_free_page(GFP_KERNEL), *path;
@@ -735,7 +735,7 @@ static int do_proc_readlink(struct dentry *dentry, struct vfsmount *mnt,
 	return len;
 }
 
-static int proc_pid_readlink(struct dentry * dentry, char * buffer, int buflen)
+static int proc_pid_readlink(struct dentry * dentry, char __user * buffer, int buflen)
 {
 	int error = -EACCES;
 	struct inode *inode = dentry->d_inode;

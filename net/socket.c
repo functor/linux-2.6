@@ -68,6 +68,7 @@
 #include <linux/netdevice.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <net/tux.h>
 #include <linux/wanrouter.h>
 #include <linux/if_bridge.h>
 #include <linux/init.h>
@@ -87,6 +88,8 @@
 #endif	/* CONFIG_NET_RADIO */
 
 #include <asm/uaccess.h>
+#include <asm/unistd.h>
+
 #include <net/compat.h>
 
 #include <net/sock.h>
@@ -118,7 +121,7 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
  *	in the operation structures but are done directly via the socketcall() multiplexor.
  */
 
-static struct file_operations socket_file_ops = {
+struct file_operations socket_file_ops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
 	.aio_read =	sock_aio_read,
@@ -308,9 +311,9 @@ static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 static int init_inodecache(void)
 {
 	sock_inode_cachep = kmem_cache_create("sock_inode_cache",
-					     sizeof(struct socket_alloc),
-					     0, SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT,
-					     init_once, NULL);
+				sizeof(struct socket_alloc),
+				0, SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT,
+				init_once, NULL);
 	if (sock_inode_cachep == NULL)
 		return -ENOMEM;
 	return 0;
@@ -360,52 +363,63 @@ static struct dentry_operations sockfs_dentry_operations = {
  *	but we take care of internal coherence yet.
  */
 
-int sock_map_fd(struct socket *sock)
+struct file * sock_map_file(struct socket *sock)
 {
-	int fd;
+	struct file *file;
 	struct qstr this;
 	char name[32];
 
+	file = get_empty_filp();
+
+	if (!file)
+		return ERR_PTR(-ENFILE);
+
+	sprintf(name, "[%lu]", SOCK_INODE(sock)->i_ino);
+	this.name = name;
+	this.len = strlen(name);
+	this.hash = SOCK_INODE(sock)->i_ino;
+
+	file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
+	if (!file->f_dentry) {
+		put_filp(file);
+		return ERR_PTR(-ENOMEM);
+	}
+	file->f_dentry->d_op = &sockfs_dentry_operations;
+	d_add(file->f_dentry, SOCK_INODE(sock));
+	file->f_vfsmnt = mntget(sock_mnt);
+file->f_mapping = file->f_dentry->d_inode->i_mapping;
+
+	if (sock->file)
+		BUG();
+	sock->file = file;
+	file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
+	file->f_mode = 3;
+	file->f_flags = O_RDWR;
+	file->f_pos = 0;
+
+	return file;
+}
+
+int sock_map_fd(struct socket *sock)
+{
+	int fd;
+	struct file *file;
+ 
 	/*
 	 *	Find a file descriptor suitable for return to the user. 
 	 */
-
+  
 	fd = get_unused_fd();
-	if (fd >= 0) {
-		struct file *file = get_empty_filp();
-
-		if (!file) {
-			put_unused_fd(fd);
-			fd = -ENFILE;
-			goto out;
-		}
-
-		sprintf(name, "[%lu]", SOCK_INODE(sock)->i_ino);
-		this.name = name;
-		this.len = strlen(name);
-		this.hash = SOCK_INODE(sock)->i_ino;
-
-		file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
-		if (!file->f_dentry) {
-			put_filp(file);
-			put_unused_fd(fd);
-			fd = -ENOMEM;
-			goto out;
-		}
-		file->f_dentry->d_op = &sockfs_dentry_operations;
-		d_add(file->f_dentry, SOCK_INODE(sock));
-		file->f_vfsmnt = mntget(sock_mnt);
-		file->f_mapping = file->f_dentry->d_inode->i_mapping;
-
-		sock->file = file;
-		file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
-		file->f_mode = 3;
-		file->f_flags = O_RDWR;
-		file->f_pos = 0;
-		fd_install(fd, file);
+	if (fd < 0)
+		return fd;
+  
+	file = sock_map_file(sock);
+	if (IS_ERR(file)) {
+		put_unused_fd(fd);
+		return PTR_ERR(file);
 	}
-
-out:
+	fd_install(fd, file);
+  
 	return fd;
 }
 
@@ -727,9 +741,9 @@ static ssize_t sock_writev(struct file *file, const struct iovec *vector,
  */
 
 static DECLARE_MUTEX(br_ioctl_mutex);
-static int (*br_ioctl_hook)(unsigned long arg) = NULL;
+static int (*br_ioctl_hook)(unsigned int cmd, unsigned long arg) = NULL;
 
-void brioctl_set(int (*hook)(unsigned long))
+void brioctl_set(int (*hook)(unsigned int, unsigned long))
 {
 	down(&br_ioctl_mutex);
 	br_ioctl_hook = hook;
@@ -773,34 +787,36 @@ static int sock_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 	unlock_kernel();
 	sock = SOCKET_I(inode);
 	if (cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15)) {
-		err = dev_ioctl(cmd, (void *)arg);
+		err = dev_ioctl(cmd, (void __user *)arg);
 	} else
 #ifdef WIRELESS_EXT
 	if (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST) {
-		err = dev_ioctl(cmd, (void *)arg);
+		err = dev_ioctl(cmd, (void __user *)arg);
 	} else
 #endif	/* WIRELESS_EXT */
 	switch (cmd) {
 		case FIOSETOWN:
 		case SIOCSPGRP:
 			err = -EFAULT;
-			if (get_user(pid, (int *)arg))
+			if (get_user(pid, (int __user *)arg))
 				break;
 			err = f_setown(sock->file, pid, 1);
 			break;
 		case FIOGETOWN:
 		case SIOCGPGRP:
-			err = put_user(sock->file->f_owner.pid, (int *)arg);
+			err = put_user(sock->file->f_owner.pid, (int __user *)arg);
 			break;
 		case SIOCGIFBR:
 		case SIOCSIFBR:
+		case SIOCBRADDBR:
+		case SIOCBRDELBR:
 			err = -ENOPKG;
 			if (!br_ioctl_hook)
 				request_module("bridge");
 
 			down(&br_ioctl_mutex);
 			if (br_ioctl_hook) 
-				err = br_ioctl_hook(arg);
+				err = br_ioctl_hook(cmd, arg);
 			up(&br_ioctl_mutex);
 			break;
 		case SIOCGIFVLAN:
@@ -973,6 +989,8 @@ static int sock_fasync(int fd, struct file *filp, int on)
 	}
 
 out:
+	if (sock->sk != sk)
+		BUG();
 	release_sock(sock->sk);
 	return 0;
 }
@@ -1817,6 +1835,8 @@ out:
 	return err;
 }
 
+#ifdef __ARCH_WANT_SYS_SOCKETCALL
+
 /* Argument list sizes for sys_socketcall */
 #define AL(x) ((x) * sizeof(unsigned long))
 static unsigned char nargs[18]={AL(0),AL(3),AL(3),AL(3),AL(2),AL(3),
@@ -1910,6 +1930,8 @@ asmlinkage long sys_socketcall(int call, unsigned long __user *args)
 	return err;
 }
 
+#endif /* __ARCH_WANT_SYS_SOCKETCALL */
+
 /*
  *	This function is called by a protocol handler that wants to
  *	advertise its address family, and have it linked into the
@@ -1998,6 +2020,51 @@ void __init sock_init(void)
 #endif
 }
 
+int tux_Dprintk;
+int tux_TDprintk;
+
+#ifdef CONFIG_TUX_MODULE
+
+asmlinkage long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info) = NULL;
+
+struct module *tux_module = NULL;
+spinlock_t tux_module_lock = SPIN_LOCK_UNLOCKED;
+
+asmlinkage long sys_tux (unsigned int action, user_req_t *u_info)
+{
+	int ret;
+
+	if (current->tux_info)
+		return sys_tux_ptr(action, u_info);
+
+	ret = -ENOSYS;
+	spin_lock(&tux_module_lock);
+	if (!tux_module)
+		goto out_unlock;
+	if (!try_module_get(tux_module))
+		goto out_unlock;
+	spin_unlock(&tux_module_lock);
+
+	if (!sys_tux_ptr)
+		TUX_BUG();
+	ret = sys_tux_ptr(action, u_info);
+
+	spin_lock(&tux_module_lock);
+	module_put(tux_module);
+out_unlock:
+	spin_unlock(&tux_module_lock);
+
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(tux_module);
+EXPORT_SYMBOL_GPL(tux_module_lock);
+EXPORT_SYMBOL_GPL(sys_tux_ptr);
+
+EXPORT_SYMBOL_GPL(tux_Dprintk);
+EXPORT_SYMBOL_GPL(tux_TDprintk);
+
+#endif
 #ifdef CONFIG_PROC_FS
 void socket_seq_show(struct seq_file *seq)
 {

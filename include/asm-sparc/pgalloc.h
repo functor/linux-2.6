@@ -66,4 +66,8 @@ BTFIXUPDEF_CALL(void, pte_free, struct page *)
 #define pte_free(pte)		BTFIXUP_CALL(pte_free)(pte)
 #define __pte_free_tlb(tlb, pte)	pte_free(pte)
 
+#define arch_add_exec_range(mm, limit)		do { ; } while (0)
+#define arch_flush_exec_range(mm)		do { ; } while (0)
+#define arch_remove_exec_range(mm, limit)	do { ; } while (0)
+
 #endif /* _SPARC_PGALLOC_H */
