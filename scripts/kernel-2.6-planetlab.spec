@@ -23,8 +23,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define rpmversion 2.6.%{sublevel}
 %define rhbsys  %([ -r /etc/beehive-root ] && echo  || echo .`whoami`)
 %define release 1.planetlab%{?date:.%{date}}
-# For Mandrake
-%define _enable_debug_packages 1
+%define signmodules 0
 
 %define KVERREL %{PACKAGE_VERSION}-%{PACKAGE_RELEASE}
 
@@ -73,7 +72,6 @@ Group: System Environment/Kernel
 License: GPLv2
 Version: %{rpmversion}
 Release: %{release}
-ExclusiveArch: %{all_x86}
 ExclusiveOS: Linux
 Provides: kernel = %{version}
 Provides: kernel-drm = 4.3.0
@@ -203,13 +201,13 @@ BuildKernel() {
 
     # Pick the right config file for the kernel we're building
     if [ -n "$1" ] ; then
-	Config=kernel-%{kversion}-%{_target_cpu}-$1-planetlab.config
+	Config=kernel-%{kversion}-i686-$1-planetlab.config
     else
-	Config=kernel-%{kversion}-%{_target_cpu}-planetlab.config
+	Config=kernel-%{kversion}-i686-planetlab.config
     fi
 
     KernelVer=%{version}-%{release}$1
-    echo BUILDING A KERNEL FOR $1 %{_target_cpu}...
+    echo BUILDING A KERNEL FOR $1 i686...
 
     # make sure EXTRAVERSION says what we want it to say
     perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = -%{release}$1/" Makefile
@@ -229,8 +227,7 @@ BuildKernel() {
 
     make -s %{?_smp_mflags} bzImage 
     make -s %{?_smp_mflags} modules || exit 1
-    # XXX This causes all sorts of errors. Need to debug.
-#    make buildcheck
+    make buildcheck
     
     # Start installing the results
 
@@ -402,6 +399,18 @@ pushd /lib/modules/%{KVERREL}/build > /dev/null ; {
 }
 popd
 fi
+
+# make some useful links
+pushd /boot > /dev/null ; {
+	ln -sf System.map-%{KVERREL} System.map
+	ln -sf initrd-%{KVERREL}.img initrd-boot
+	ln -sf vmlinuz-%{KVERREL} kernel-boot
+}
+popd
+
+# ask for a reboot
+mkdir -p /etc/planetlab
+touch /etc/planetlab/update-reboot
 
 %post smp
 [ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}smp
