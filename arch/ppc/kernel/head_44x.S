@@ -177,11 +177,11 @@ skpinv:	addi	r4,r4,1				/* Increment */
 	rfi
 
 	/* If necessary, invalidate original entry we used */
-3:	cmpwi	r23,62
+3:	cmpwi	r23,63
 	beq	4f
 	li	r6,0
 	tlbwe   r6,r23,PPC44x_TLB_PAGEID
-	sync
+	isync
 
 4:
 #ifdef CONFIG_SERIAL_TEXT_DEBUG
@@ -204,14 +204,6 @@ skpinv:	addi	r4,r4,1				/* Increment */
 	ori	r5,r5,(PPC44x_TLB_SW | PPC44x_TLB_SR | PPC44x_TLB_I | PPC44x_TLB_G)
 
         li      r0,1                    /* TLB slot 1 */
-
-	tlbwe	r3,r0,PPC44x_TLB_PAGEID	/* Load the pageid fields */
-	tlbwe	r4,r0,PPC44x_TLB_XLAT	/* Load the translation fields */
-	tlbwe	r5,r0,PPC44x_TLB_ATTRIB	/* Load the attrib/access fields */
-
-	ori	r3,r3,PPC44x_TLB_TS	/* Translation state 1 */
-
-        li      r0,1			/* TLB slot 1 */
 
 	tlbwe	r3,r0,PPC44x_TLB_PAGEID	/* Load the pageid fields */
 	tlbwe	r4,r0,PPC44x_TLB_XLAT	/* Load the translation fields */
@@ -680,7 +672,7 @@ interrupt_base:
 	mfspr	r4,SPRN_ESR		/* Grab the ESR and save it */
 	stw	r4,_ESR(r11)
 	addi	r3,r1,STACK_FRAME_OVERHEAD
-	EXC_XFER_EE(0x700, ProgramCheckException)
+	EXC_XFER_STD(0x700, ProgramCheckException)
 
 	/* Floating Point Unavailable Interrupt */
 	EXCEPTION(0x2010, FloatingPointUnavailable, UnknownException, EXC_XFER_EE)

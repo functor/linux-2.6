@@ -87,8 +87,6 @@
 		"rtl8139-diag -mmmaaavvveefN" output
 		enable RTL8139_DEBUG below, and look at 'dmesg' or kernel log
 
-		See 8139too.txt for more details.
-
 */
 
 #define DRV_NAME	"8139too"
@@ -779,7 +777,7 @@ static int __devinit rtl8139_init_board (struct pci_dev *pdev,
 	u8 tmp8;
 	int rc;
 	unsigned int i;
-	u32 pio_start, pio_end, pio_flags, pio_len;
+	unsigned long pio_start, pio_end, pio_flags, pio_len;
 	unsigned long mmio_start, mmio_end, mmio_flags, mmio_len;
 	u32 version;
 

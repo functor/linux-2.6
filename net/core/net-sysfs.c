@@ -356,7 +356,7 @@ static int netdev_hotplug(struct class_device *cd, char **envp,
 	if ((size <= 0) || (i >= num_envp))
 		return -ENOMEM;
 
-	envp[i] = 0;
+	envp[i] = NULL;
 	return 0;
 }
 #endif
@@ -414,7 +414,7 @@ int netdev_register_sysfs(struct net_device *net)
 	if ((ret = class_device_register(class_dev)))
 		goto out;
 
-	for (i = 0; (attr = net_class_attributes[i]); i++) {
+	for (i = 0; (attr = net_class_attributes[i]) != NULL; i++) {
 		if ((ret = class_device_create_file(class_dev, attr)))
 		    goto out_unreg;
 	}

@@ -287,7 +287,7 @@ static int ext3_alloc_block (handle_t *handle,
 				 &ei->i_prealloc_count,
 				 &ei->i_prealloc_block, err);
 		else
-			result = ext3_new_block (inode, goal, 0, 0, err);
+			result = ext3_new_block(inode, goal, NULL, NULL, err);
 		/*
 		 * AKPM: this is somewhat sticky.  I'm not surprised it was
 		 * disabled in 2.2's ext3.  Need to integrate b_committed_data
@@ -296,7 +296,7 @@ static int ext3_alloc_block (handle_t *handle,
 		 */
 	}
 #else
-	result = ext3_new_block (handle, inode, goal, 0, 0, err);
+	result = ext3_new_block(handle, inode, goal, NULL, NULL, err);
 #endif
 	return result;
 }
@@ -859,7 +859,7 @@ changed:
 static int ext3_get_block(struct inode *inode, sector_t iblock,
 			struct buffer_head *bh_result, int create)
 {
-	handle_t *handle = 0;
+	handle_t *handle = NULL;
 	int ret;
 
 	if (create) {
@@ -881,25 +881,41 @@ ext3_direct_io_get_blocks(struct inode *inode, sector_t iblock,
 	handle_t *handle = journal_current_handle();
 	int ret = 0;
 
-	if (handle && handle->h_buffer_credits <= EXT3_RESERVE_TRANS_BLOCKS) {
+	if (!handle)
+		goto get_block;		/* A read */
+
+	if (handle->h_transaction->t_state == T_LOCKED) {
+		/*
+		 * Huge direct-io writes can hold off commits for long
+		 * periods of time.  Let this commit run.
+		 */
+		ext3_journal_stop(handle);
+		handle = ext3_journal_start(inode, DIO_CREDITS);
+		if (IS_ERR(handle))
+			ret = PTR_ERR(handle);
+		goto get_block;
+	}
+
+	if (handle->h_buffer_credits <= EXT3_RESERVE_TRANS_BLOCKS) {
 		/*
 		 * Getting low on buffer credits...
 		 */
-		if (!ext3_journal_extend(handle, DIO_CREDITS)) {
+		ret = ext3_journal_extend(handle, DIO_CREDITS);
+		if (ret > 0) {
 			/*
-			 * Couldn't extend the transaction.  Start a new one
+			 * Couldn't extend the transaction.  Start a new one.
 			 */
 			ret = ext3_journal_restart(handle, DIO_CREDITS);
 		}
 	}
+
+get_block:
 	if (ret == 0)
 		ret = ext3_get_block_handle(handle, inode, iblock,
 					bh_result, create, 0);
-	if (ret == 0)
-		bh_result->b_size = (1 << inode->i_blkbits);
+	bh_result->b_size = (1 << inode->i_blkbits);
 	return ret;
 }
-
 
 /*
  * `handle' can be NULL if create is zero
@@ -1080,7 +1096,7 @@ static int ext3_prepare_write(struct file *file, struct page *page,
 	struct inode *inode = page->mapping->host;
 	int ret, needed_blocks = ext3_writepage_trans_blocks(inode);
 	handle_t *handle;
-	int tried_commit = 0;
+	int retries = 0;
 
 retry:
 	handle = ext3_journal_start(inode, needed_blocks);
@@ -1089,19 +1105,8 @@ retry:
 		goto out;
 	}
 	ret = block_prepare_write(page, from, to, ext3_get_block);
-	if (ret) {
-		if (ret != -ENOSPC || tried_commit)
-			goto prepare_write_failed;
-		/*
-		 * It could be that there _is_ free space, but it's all tied up
-		 * in uncommitted bitmaps.  So force a commit here, which makes
-		 * those blocks allocatable and try again.
-		 */
-		tried_commit = 1;
-		handle->h_sync = 1;
-		ext3_journal_stop(handle);
-		goto retry;
-	}
+	if (ret)
+		goto prepare_write_failed;
 
 	if (ext3_should_journal_data(inode)) {
 		ret = walk_page_buffers(handle, page_buffers(page),
@@ -1110,6 +1115,8 @@ retry:
 prepare_write_failed:
 	if (ret)
 		ext3_journal_stop(handle);
+	if (ret == -ENOSPC && ext3_should_retry_alloc(inode->i_sb, &retries))
+		goto retry;
 out:
 	return ret;
 }

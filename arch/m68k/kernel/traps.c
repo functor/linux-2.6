@@ -329,7 +329,8 @@ static inline void access_error060 (struct frame *fp)
 		 * fault during mem_read/mem_write in ifpsp060/os.S
 		 */
 		send_fault_sig(&fp->ptregs);
-	} else {
+	} else if (!(fslw & (MMU060_RE|MMU060_WE)) ||
+		   send_fault_sig(&fp->ptregs) > 0) {
 		printk("pc=%#lx, fa=%#lx\n", fp->ptregs.pc, fp->un.fmt4.effaddr);
 		printk( "68060 access error, fslw=%lx\n", fslw );
 		trap_c( fp );
@@ -517,7 +518,7 @@ static inline void access_error040(struct frame *fp)
 			if (fp->un.fmt7.wb2a == fp->un.fmt7.faddr)
 				fp->un.fmt7.wb2s &= ~WBV_040;
 		}
-	} else {
+	} else if (send_fault_sig(&fp->ptregs) > 0) {
 		printk("68040 access error, ssw=%x\n", ssw);
 		trap_c(fp);
 	}
@@ -540,7 +541,7 @@ static inline void bus_error030 (struct frame *fp)
 	unsigned short ssw = fp->un.fmtb.ssw;
 	extern unsigned long _sun3_map_test_start, _sun3_map_test_end;
 
-#if DEBUG
+#ifdef DEBUG
 	if (ssw & (FC | FB))
 		printk ("Instruction fault at %#010lx\n",
 			ssw & FC ?
@@ -669,7 +670,7 @@ static inline void bus_error030 (struct frame *fp)
 	unsigned short mmusr;
 	unsigned long addr, errorcode;
 	unsigned short ssw = fp->un.fmtb.ssw;
-#if DEBUG
+#ifdef DEBUG
 	unsigned long desc;
 
 	printk ("pid = %x  ", current->pid);
@@ -695,7 +696,7 @@ static inline void bus_error030 (struct frame *fp)
 	if (ssw & DF) {
 		addr = fp->un.fmtb.daddr;
 
-#if DEBUG
+#ifdef DEBUG
 		asm volatile ("ptestr %3,%2@,#7,%0\n\t"
 			      "pmove %%psr,%1@"
 			      : "=a&" (desc)
@@ -707,7 +708,7 @@ static inline void bus_error030 (struct frame *fp)
 #endif
 		mmusr = temp;
 
-#if DEBUG
+#ifdef DEBUG
 		printk("mmusr is %#x for addr %#lx in task %p\n",
 		       mmusr, addr, current);
 		printk("descriptor address is %#lx, contents %#lx\n",
@@ -732,7 +733,7 @@ static inline void bus_error030 (struct frame *fp)
 				return;
 		} else if (!(mmusr & MMU_I)) {
 			/* probably a 020 cas fault */
-			if (!(ssw & RM))
+			if (!(ssw & RM) && send_fault_sig(&fp->ptregs) > 0)
 				printk("unexpected bus error (%#x,%#x)\n", ssw, mmusr);
 		} else if (mmusr & (MMU_B|MMU_L|MMU_S)) {
 			printk("invalid %s access at %#lx from pc %#lx\n",
@@ -766,7 +767,7 @@ static inline void bus_error030 (struct frame *fp)
 				      : "a" (&tlong));
 			printk("tt1 is %#lx\n", tlong);
 #endif
-#if DEBUG
+#ifdef DEBUG
 			printk("Unknown SIGSEGV - 1\n");
 #endif
 			die_if_kernel("Oops",&fp->ptregs,mmusr);
@@ -811,7 +812,7 @@ static inline void bus_error030 (struct frame *fp)
 		   should still create the ATC entry.  */
 		goto create_atc_entry;
 
-#if DEBUG
+#ifdef DEBUG
 	asm volatile ("ptestr #1,%2@,#7,%0\n\t"
 		      "pmove %%psr,%1@"
 		      : "=a&" (desc)
@@ -835,7 +836,7 @@ static inline void bus_error030 (struct frame *fp)
 	else if (mmusr & (MMU_B|MMU_L|MMU_S)) {
 		printk ("invalid insn access at %#lx from pc %#lx\n",
 			addr, fp->ptregs.pc);
-#if DEBUG
+#ifdef DEBUG
 		printk("Unknown SIGSEGV - 2\n");
 #endif
 		die_if_kernel("Oops",&fp->ptregs,mmusr);
@@ -857,7 +858,7 @@ asmlinkage void buserr_c(struct frame *fp)
 	if (user_mode(&fp->ptregs))
 		current->thread.esp0 = (unsigned long) fp;
 
-#if DEBUG
+#ifdef DEBUG
 	printk ("*** Bus Error *** Format is %x\n", fp->ptregs.format);
 #endif
 
@@ -880,7 +881,7 @@ asmlinkage void buserr_c(struct frame *fp)
 #endif
 	default:
 	  die_if_kernel("bad frame format",&fp->ptregs,0);
-#if DEBUG
+#ifdef DEBUG
 	  printk("Unknown SIGSEGV - 4\n");
 #endif
 	  force_sig(SIGSEGV, current);
@@ -910,7 +911,7 @@ void show_trace(unsigned long *stack)
 		 * down the cause of the crash will be able to figure
 		 * out the call path that was taken.
 		 */
-		if (kernel_text_address(addr)) {
+		if (__kernel_text_address(addr)) {
 #ifndef CONFIG_KALLSYMS
 			if (i % 5 == 0)
 				printk("\n       ");
@@ -989,7 +990,7 @@ void show_registers(struct pt_regs *regs)
 	printk ("\n");
 }
 
-extern void show_stack(struct task_struct *task, unsigned long *stack)
+void show_stack(struct task_struct *task, unsigned long *stack)
 {
 	unsigned long *endstack;
 	int i;

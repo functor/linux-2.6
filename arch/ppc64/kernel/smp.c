@@ -52,6 +52,7 @@
 #include <asm/xics.h>
 #include <asm/cputable.h>
 #include <asm/system.h>
+#include <asm/rtas.h>
 
 int smp_threads_ready;
 unsigned long cache_decay_ticks;
@@ -119,12 +120,10 @@ static void smp_iSeries_message_pass(int target, int msg)
 static int smp_iSeries_numProcs(void)
 {
 	unsigned np, i;
-	struct ItLpPaca * lpPaca;
 
 	np = 0;
         for (i=0; i < NR_CPUS; ++i) {
-                lpPaca = paca[i].xLpPacaPtr;
-                if ( lpPaca->xDynProcStatus < 2 ) {
+                if (paca[i].lppaca.xDynProcStatus < 2) {
 			cpu_set(i, cpu_available_map);
 			cpu_set(i, cpu_possible_map);
 			cpu_set(i, cpu_present_at_boot);
@@ -138,11 +137,9 @@ static int smp_iSeries_probe(void)
 {
 	unsigned i;
 	unsigned np = 0;
-	struct ItLpPaca *lpPaca;
 
 	for (i=0; i < NR_CPUS; ++i) {
-		lpPaca = paca[i].xLpPacaPtr;
-		if (lpPaca->xDynProcStatus < 2) {
+		if (paca[i].lppaca.xDynProcStatus < 2) {
 			/*paca[i].active = 1;*/
 			++np;
 		}
@@ -153,21 +150,18 @@ static int smp_iSeries_probe(void)
 
 static void smp_iSeries_kick_cpu(int nr)
 {
-	struct ItLpPaca *lpPaca;
-
 	BUG_ON(nr < 0 || nr >= NR_CPUS);
 
 	/* Verify that our partition has a processor nr */
-	lpPaca = paca[nr].xLpPacaPtr;
-	if (lpPaca->xDynProcStatus >= 2)
+	if (paca[nr].lppaca.xDynProcStatus >= 2)
 		return;
 
 	/* The processor is currently spinning, waiting
-	 * for the xProcStart field to become non-zero
-	 * After we set xProcStart, the processor will
+	 * for the cpu_start field to become non-zero
+	 * After we set cpu_start, the processor will
 	 * continue on to secondary_start in iSeries_head.S
 	 */
-	paca[nr].xProcStart = 1;
+	paca[nr].cpu_start = 1;
 }
 
 static void __devinit smp_iSeries_setup_cpu(int nr)
@@ -241,7 +235,7 @@ static void __devinit smp_openpic_setup_cpu(int cpu)
  */
 static int query_cpu_stopped(unsigned int pcpu)
 {
-	long cpu_status;
+	int cpu_status;
 	int status, qcss_tok;
 
 	qcss_tok = rtas_token("query-cpu-stopped-state");
@@ -296,7 +290,7 @@ void __cpu_die(unsigned int cpu)
 	 * done here.  Change isolate state to Isolate and
 	 * change allocation-state to Unusable.
 	 */
-	paca[cpu].xProcStart = 0;
+	paca[cpu].cpu_start = 0;
 
 	/* So we can recognize if it fails to come up next time. */
 	cpu_callin_map[cpu] = 0;
@@ -306,6 +300,10 @@ void __cpu_die(unsigned int cpu)
 void cpu_die(void)
 {
 	local_irq_disable();
+	/* Some hardware requires clearing the CPPR, while other hardware does not
+	 * it is safe either way
+	 */
+	pSeriesLP_cppr_info(0, 0);
 	rtas_stop_self();
 	/* Should never get here... */
 	BUG();
@@ -390,12 +388,10 @@ static inline int __devinit smp_startup_cpu(unsigned int lcpu)
 	}
 
 	/* Fixup atomic count: it exited inside IRQ handler. */
-	paca[lcpu].xCurrent->thread_info->preempt_count	= 0;
-	/* Fixup SLB round-robin so next segment (kernel) goes in segment 0 */
-	paca[lcpu].xStab_data.next_round_robin = 0;
+	paca[lcpu].__current->thread_info->preempt_count	= 0;
 
 	/* At boot this is done in prom.c. */
-	paca[lcpu].xHwProcNum = pcpu;
+	paca[lcpu].hw_cpu_id = pcpu;
 
 	status = rtas_call(rtas_token("start-cpu"), 3, 1, NULL,
 			   pcpu, start_here, lcpu);
@@ -428,7 +424,11 @@ static inline void look_for_more_cpus(void)
 	}
 
 	maxcpus = ireg[num_addr_cell + num_size_cell];
-	/* DRENG need to account for threads here too */
+
+	/* Double maxcpus for processors which have SMT capability */
+	if (cur_cpu_spec->cpu_features & CPU_FTR_SMT)
+		maxcpus *= 2;
+
 
 	if (maxcpus > NR_CPUS) {
 		printk(KERN_WARNING
@@ -460,12 +460,12 @@ static void smp_pSeries_kick_cpu(int nr)
 	if (!smp_startup_cpu(nr))
 		return;
 
-	/* The processor is currently spinning, waiting
-	 * for the xProcStart field to become non-zero
-	 * After we set xProcStart, the processor will
-	 * continue on to secondary_start
+	/*
+	 * The processor is currently spinning, waiting for the
+	 * cpu_start field to become non-zero After we set cpu_start,
+	 * the processor will continue on to secondary_start
 	 */
-	paca[nr].xProcStart = 1;
+	paca[nr].cpu_start = 1;
 }
 #endif /* CONFIG_PPC_PSERIES */
 
@@ -490,10 +490,8 @@ void vpa_init(int cpu)
 	unsigned long flags;
 
 	/* Register the Virtual Processor Area (VPA) */
-	printk(KERN_INFO "register_vpa: cpu 0x%x\n", cpu);
 	flags = 1UL << (63 - 18);
-	paca[cpu].xLpPaca.xSLBCount = 64; /* SLB restore highwater mark */
-	register_vpa(flags, cpu, __pa((unsigned long)&(paca[cpu].xLpPaca))); 
+	register_vpa(flags, cpu, __pa((unsigned long)&(paca[cpu].lppaca)));
 }
 
 static inline void smp_xics_do_message(int cpu, int msg)
@@ -723,7 +721,7 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 			printk("smp_call_function on cpu %d: other cpus not "
 			       "responding (%d)\n", smp_processor_id(),
 			       atomic_read(&data.started));
-			debugger(0);
+			debugger(NULL);
 			goto out;
 		}
 	}
@@ -738,7 +736,7 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 				       smp_processor_id(),
 				       atomic_read(&data.finished),
 				       atomic_read(&data.started));
-				debugger(0);
+				debugger(NULL);
 				goto out;
 			}
 		}
@@ -816,7 +814,7 @@ static void __init smp_create_idle(unsigned int cpu)
 	init_idle(p, cpu);
 	unhash_process(p);
 
-	paca[cpu].xCurrent = p;
+	paca[cpu].__current = p;
 	current_set[cpu] = p->thread_info;
 }
 
@@ -868,7 +866,7 @@ void __devinit smp_prepare_boot_cpu(void)
 	/* cpu_possible is set up in prom.c */
 	cpu_set(boot_cpuid, cpu_online_map);
 
-	paca[boot_cpuid].xCurrent = current;
+	paca[boot_cpuid].__current = current;
 	current_set[boot_cpuid] = current->thread_info;
 }
 
@@ -893,8 +891,8 @@ int __devinit __cpu_up(unsigned int cpu)
 
 		tmp = &stab_array[PAGE_SIZE * cpu];
 		memset(tmp, 0, PAGE_SIZE); 
-		paca[cpu].xStab_data.virt = (unsigned long)tmp;
-		paca[cpu].xStab_data.real = virt_to_abs(tmp);
+		paca[cpu].stab_addr = (unsigned long)tmp;
+		paca[cpu].stab_real = virt_to_abs(tmp);
 	}
 
 	/* The information for processor bringup must
@@ -935,7 +933,11 @@ int __devinit __cpu_up(unsigned int cpu)
 
 	if (smp_ops->give_timebase)
 		smp_ops->give_timebase();
-	cpu_set(cpu, cpu_online_map);
+
+	/* Wait until cpu puts itself in the online map */
+	while (!cpu_online(cpu))
+		cpu_relax();
+
 	return 0;
 }
 
@@ -956,8 +958,6 @@ int __devinit start_secondary(void *unused)
 	if (smp_ops->take_timebase)
 		smp_ops->take_timebase();
 
-	get_paca()->yielded = 0;
-
 #ifdef CONFIG_PPC_PSERIES
 	if (cur_cpu_spec->firmware_features & FW_FEATURE_SPLPAR) {
 		vpa_init(cpu); 
@@ -972,6 +972,10 @@ int __devinit start_secondary(void *unused)
 	rtas_set_indicator(9005, default_distrib_server, 1);
 #endif
 #endif
+
+	spin_lock(&call_lock);
+	cpu_set(cpu, cpu_online_map);
+	spin_unlock(&call_lock);
 
 	local_irq_enable();
 

@@ -225,6 +225,22 @@ struct module_kobject
 	struct module_attribute attr[0];
 };
 
+/* Similar stuff for section attributes. */
+#define MODULE_SECT_NAME_LEN 32
+struct module_sect_attr
+{
+	struct attribute attr;
+	char name[MODULE_SECT_NAME_LEN];
+	unsigned long address;
+};
+
+struct module_sections
+{
+	struct kobject kobj;
+	struct module_sect_attr attrs[0];
+};
+
+
 struct module
 {
 	enum module_state state;
@@ -298,6 +314,9 @@ struct module
 	Elf_Sym *symtab;
 	unsigned long num_symtab;
 	char *strtab;
+
+	/* Section attributes */
+	struct module_sections *sect_attrs;
 #endif
 
 	/* Per-cpu data. */
@@ -316,8 +335,9 @@ static inline int module_is_live(struct module *mod)
 	return mod->state != MODULE_STATE_GOING;
 }
 
-/* Is this address in a module? */
+/* Is this address in a module? (second is with no locks, for oops) */
 struct module *module_text_address(unsigned long addr);
+struct module *__module_text_address(unsigned long addr);
 
 /* Returns module and fills in value, defined and namebuf, or NULL if
    symnum out of range. */
@@ -439,6 +459,12 @@ search_module_extables(unsigned long addr)
 
 /* Is this address in a module? */
 static inline struct module *module_text_address(unsigned long addr)
+{
+	return NULL;
+}
+
+/* Is this address in a module? (don't take a lock, we're oopsing) */
+static inline struct module *__module_text_address(unsigned long addr)
 {
 	return NULL;
 }

@@ -67,12 +67,6 @@
 
 #include <linux/sched.h>
 
-/* Certain architectures need to do special things when pte's
- * within a page table are directly modified.  Thus, the following
- * hook is made available.
- */
-#define set_pte(pteptr, pteval) ((*(pteptr)) = (pteval))
-
 /* Entries per page directory level. */
 #define PTRS_PER_PTE		(1UL << (PAGE_SHIFT-3))
 
@@ -80,9 +74,12 @@
  * is different so we can optimize correctly for 32-bit tasks.
  */
 #define REAL_PTRS_PER_PMD	(1UL << PMD_BITS)
-#define PTRS_PER_PMD		((const int)(test_thread_flag(TIF_32BIT) ? \
-				 (1UL << (32 - (PAGE_SHIFT-3) - PAGE_SHIFT)) : \
-				 (REAL_PTRS_PER_PMD)))
+
+/* This is gross, but unless we do this gcc retests the
+ * thread flag every interation in pmd traversal loops.
+ */
+extern unsigned long __ptrs_per_pmd(void) __attribute_const__;
+#define PTRS_PER_PMD		__ptrs_per_pmd()
 
 /*
  * We cannot use the top address range because VPTE table lives there. This
@@ -106,33 +103,49 @@
 #endif /* !(__ASSEMBLY__) */
 
 /* Spitfire/Cheetah TTE bits. */
-#define _PAGE_VALID	_AC(0x8000000000000000,UL) /* Valid TTE               */
-#define _PAGE_R		_AC(0x8000000000000000,UL) /* Keep ref bit up to date */
-#define _PAGE_SZ4MB	_AC(0x6000000000000000,UL) /* 4MB Page                */
-#define _PAGE_SZ512K	_AC(0x4000000000000000,UL) /* 512K Page               */
-#define _PAGE_SZ64K	_AC(0x2000000000000000,UL) /* 64K Page                */
-#define _PAGE_SZ8K	_AC(0x0000000000000000,UL) /* 8K Page                 */
-#define _PAGE_NFO	_AC(0x1000000000000000,UL) /* No Fault Only           */
-#define _PAGE_IE	_AC(0x0800000000000000,UL) /* Invert Endianness       */
-#define _PAGE_SN	_AC(0x0000800000000000,UL) /* (Cheetah) Snoop         */
-#define _PAGE_PADDR_SF	_AC(0x000001FFFFFFE000,UL) /* (Spitfire) paddr [40:13]*/
-#define _PAGE_PADDR	_AC(0x000007FFFFFFE000,UL) /* (Cheetah) paddr [42:13] */
-#define _PAGE_SOFT	_AC(0x0000000000001F80,UL) /* Software bits           */
-#define _PAGE_L		_AC(0x0000000000000040,UL) /* Locked TTE              */
-#define _PAGE_CP	_AC(0x0000000000000020,UL) /* Cacheable in P-Cache    */
-#define _PAGE_CV	_AC(0x0000000000000010,UL) /* Cacheable in V-Cache    */
-#define _PAGE_E		_AC(0x0000000000000008,UL) /* side-Effect             */
-#define _PAGE_P		_AC(0x0000000000000004,UL) /* Privileged Page         */
-#define _PAGE_W		_AC(0x0000000000000002,UL) /* Writable                */
-#define _PAGE_G		_AC(0x0000000000000001,UL) /* Global                  */
+#define _PAGE_VALID	_AC(0x8000000000000000,UL) /* Valid TTE              */
+#define _PAGE_R		_AC(0x8000000000000000,UL) /* Keep ref bit up to date*/
+#define _PAGE_SZ4MB	_AC(0x6000000000000000,UL) /* 4MB Page               */
+#define _PAGE_SZ512K	_AC(0x4000000000000000,UL) /* 512K Page              */
+#define _PAGE_SZ64K	_AC(0x2000000000000000,UL) /* 64K Page               */
+#define _PAGE_SZ8K	_AC(0x0000000000000000,UL) /* 8K Page                */
+#define _PAGE_NFO	_AC(0x1000000000000000,UL) /* No Fault Only          */
+#define _PAGE_IE	_AC(0x0800000000000000,UL) /* Invert Endianness      */
+#define _PAGE_SOFT2	_AC(0x07FC000000000000,UL) /* Software bits, set 2   */
+#define _PAGE_RES1	_AC(0x0003000000000000,UL) /* Reserved               */
+#define _PAGE_SN	_AC(0x0000800000000000,UL) /* (Cheetah) Snoop        */
+#define _PAGE_RES2	_AC(0x0000780000000000,UL) /* Reserved               */
+#define _PAGE_PADDR_SF	_AC(0x000001FFFFFFE000,UL) /* (Spitfire) paddr[40:13]*/
+#define _PAGE_PADDR	_AC(0x000007FFFFFFE000,UL) /* (Cheetah) paddr[42:13] */
+#define _PAGE_SOFT	_AC(0x0000000000001F80,UL) /* Software bits          */
+#define _PAGE_L		_AC(0x0000000000000040,UL) /* Locked TTE             */
+#define _PAGE_CP	_AC(0x0000000000000020,UL) /* Cacheable in P-Cache   */
+#define _PAGE_CV	_AC(0x0000000000000010,UL) /* Cacheable in V-Cache   */
+#define _PAGE_E		_AC(0x0000000000000008,UL) /* side-Effect            */
+#define _PAGE_P		_AC(0x0000000000000004,UL) /* Privileged Page        */
+#define _PAGE_W		_AC(0x0000000000000002,UL) /* Writable               */
+#define _PAGE_G		_AC(0x0000000000000001,UL) /* Global                 */
 
-/* Here are the SpitFire software bits we use in the TTE's. */
-#define _PAGE_FILE	_AC(0x0000000000001000,UL)	/* Pagecache page     */
-#define _PAGE_MODIFIED	_AC(0x0000000000000800,UL)	/* Modified (dirty)   */
-#define _PAGE_ACCESSED	_AC(0x0000000000000400,UL)	/* Accessed (ref'd)   */
-#define _PAGE_READ	_AC(0x0000000000000200,UL)	/* Readable SW Bit    */
-#define _PAGE_WRITE	_AC(0x0000000000000100,UL)	/* Writable SW Bit    */
-#define _PAGE_PRESENT	_AC(0x0000000000000080,UL)	/* Present            */
+/* Here are the SpitFire software bits we use in the TTE's.
+ *
+ * WARNING: If you are going to try and start using some
+ *          of the soft2 bits, you will need to make
+ *          modifications to the swap entry implementation.
+ *	    For example, one thing that could happen is that
+ *          swp_entry_to_pte() would BUG_ON() if you tried
+ *          to use one of the soft2 bits for _PAGE_FILE.
+ *
+ * Like other architectures, I have aliased _PAGE_FILE with
+ * _PAGE_MODIFIED.  This works because _PAGE_FILE is never
+ * interpreted that way unless _PAGE_PRESENT is clear.
+ */
+#define _PAGE_EXEC	_AC(0x0000000000001000,UL)	/* Executable SW bit */
+#define _PAGE_MODIFIED	_AC(0x0000000000000800,UL)	/* Modified (dirty)  */
+#define _PAGE_FILE	_AC(0x0000000000000800,UL)	/* Pagecache page    */
+#define _PAGE_ACCESSED	_AC(0x0000000000000400,UL)	/* Accessed (ref'd)  */
+#define _PAGE_READ	_AC(0x0000000000000200,UL)	/* Readable SW Bit   */
+#define _PAGE_WRITE	_AC(0x0000000000000100,UL)	/* Writable SW Bit   */
+#define _PAGE_PRESENT	_AC(0x0000000000000080,UL)	/* Present           */
 
 #if PAGE_SHIFT == 13
 #define _PAGE_SZBITS	_PAGE_SZ8K
@@ -164,16 +177,27 @@
 
 /* Don't set the TTE _PAGE_W bit here, else the dirty bit never gets set. */
 #define PAGE_SHARED	__pgprot (_PAGE_PRESENT | _PAGE_VALID | _PAGE_CACHE | \
-				  __ACCESS_BITS | _PAGE_WRITE)
+				  __ACCESS_BITS | _PAGE_WRITE | _PAGE_EXEC)
 
 #define PAGE_COPY	__pgprot (_PAGE_PRESENT | _PAGE_VALID | _PAGE_CACHE | \
-				  __ACCESS_BITS)
+				  __ACCESS_BITS | _PAGE_EXEC)
 
 #define PAGE_READONLY	__pgprot (_PAGE_PRESENT | _PAGE_VALID | _PAGE_CACHE | \
-				  __ACCESS_BITS)
+				  __ACCESS_BITS | _PAGE_EXEC)
 
 #define PAGE_KERNEL	__pgprot (_PAGE_PRESENT | _PAGE_VALID | _PAGE_CACHE | \
-				  __PRIV_BITS | __ACCESS_BITS | __DIRTY_BITS)
+				  __PRIV_BITS | \
+				  __ACCESS_BITS | __DIRTY_BITS | _PAGE_EXEC)
+
+#define PAGE_SHARED_NOEXEC	__pgprot (_PAGE_PRESENT | _PAGE_VALID | \
+					  _PAGE_CACHE | \
+					  __ACCESS_BITS | _PAGE_WRITE)
+
+#define PAGE_COPY_NOEXEC	__pgprot (_PAGE_PRESENT | _PAGE_VALID | \
+					  _PAGE_CACHE | __ACCESS_BITS)
+
+#define PAGE_READONLY_NOEXEC	__pgprot (_PAGE_PRESENT | _PAGE_VALID | \
+					  _PAGE_CACHE | __ACCESS_BITS)
 
 #define _PFN_MASK	_PAGE_PADDR
 
@@ -181,18 +205,18 @@
 		   __ACCESS_BITS | _PAGE_E)
 
 #define __P000	PAGE_NONE
-#define __P001	PAGE_READONLY
-#define __P010	PAGE_COPY
-#define __P011	PAGE_COPY
+#define __P001	PAGE_READONLY_NOEXEC
+#define __P010	PAGE_COPY_NOEXEC
+#define __P011	PAGE_COPY_NOEXEC
 #define __P100	PAGE_READONLY
 #define __P101	PAGE_READONLY
 #define __P110	PAGE_COPY
 #define __P111	PAGE_COPY
 
 #define __S000	PAGE_NONE
-#define __S001	PAGE_READONLY
-#define __S010	PAGE_SHARED
-#define __S011	PAGE_SHARED
+#define __S001	PAGE_READONLY_NOEXEC
+#define __S010	PAGE_SHARED_NOEXEC
+#define __S011	PAGE_SHARED_NOEXEC
 #define __S100	PAGE_READONLY
 #define __S101	PAGE_READONLY
 #define __S110	PAGE_SHARED
@@ -246,7 +270,6 @@ static inline pte_t pte_modify(pte_t orig_pte, pgprot_t new_prot)
 	((unsigned long) __va((((unsigned long)pgd_val(pgd))<<11UL)))
 #define pte_none(pte) 			(!pte_val(pte))
 #define pte_present(pte)		(pte_val(pte) & _PAGE_PRESENT)
-#define pte_clear(pte)			(pte_val(*(pte)) = 0UL)
 #define pmd_none(pmd)			(!pmd_val(pmd))
 #define pmd_bad(pmd)			(0)
 #define pmd_present(pmd)		(pmd_val(pmd) != 0U)
@@ -260,7 +283,7 @@ static inline pte_t pte_modify(pte_t orig_pte, pgprot_t new_prot)
  * Undefined behaviour if not..
  */
 #define pte_read(pte)		(pte_val(pte) & _PAGE_READ)
-#define pte_exec(pte)		pte_read(pte)
+#define pte_exec(pte)		(pte_val(pte) & _PAGE_EXEC)
 #define pte_write(pte)		(pte_val(pte) & _PAGE_WRITE)
 #define pte_dirty(pte)		(pte_val(pte) & _PAGE_MODIFIED)
 #define pte_young(pte)		(pte_val(pte) & _PAGE_ACCESSED)
@@ -301,6 +324,20 @@ static inline pte_t pte_modify(pte_t orig_pte, pgprot_t new_prot)
 #define pte_offset_map_nested		pte_index
 #define pte_unmap(pte)			do { } while (0)
 #define pte_unmap_nested(pte)		do { } while (0)
+
+/* Actual page table PTE updates.  */
+extern void tlb_batch_add(pte_t *ptep, pte_t orig);
+
+static inline void set_pte(pte_t *ptep, pte_t pte)
+{
+	pte_t orig = *ptep;
+
+	*ptep = pte;
+	if (pte_present(orig))
+		tlb_batch_add(ptep, orig);
+}
+
+#define pte_clear(ptep)		set_pte((ptep), __pte(0UL))
 
 extern pgd_t swapper_pg_dir[1];
 
@@ -351,7 +388,7 @@ sun4u_get_pte (unsigned long addr)
 	if (addr >= PAGE_OFFSET)
 		return addr & _PAGE_PADDR;
 	if ((addr >= LOW_OBP_ADDRESS) && (addr < HI_OBP_ADDRESS))
-		return prom_virt_to_phys(addr, 0);
+		return prom_virt_to_phys(addr, NULL);
 	pgdp = pgd_offset_k(addr);
 	pmdp = pmd_offset(pgdp, addr);
 	ptep = pte_offset_kernel(pmdp, addr);

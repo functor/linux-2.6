@@ -32,7 +32,7 @@
 
 spinlock_t swaplock = SPIN_LOCK_UNLOCKED;
 unsigned int nr_swapfiles;
-int total_swap_pages;
+long total_swap_pages;
 static int swap_overflow;
 
 EXPORT_SYMBOL(total_swap_pages);
@@ -110,7 +110,7 @@ static inline int scan_swap_map(struct swap_info_struct *si)
  check_next_cluster:
 	if (offset+SWAPFILE_CLUSTER-1 <= si->highest_bit)
 	{
-		int nr;
+		unsigned long nr;
 		for (nr = offset; nr < offset+SWAPFILE_CLUSTER; nr++)
 			if (si->swap_map[nr])
 			{
@@ -467,6 +467,13 @@ static unsigned long unuse_pmd(struct vm_area_struct * vma, pmd_t *dir,
 		if (unlikely(pte_same(*pte, swp_pte))) {
 			unuse_pte(vma, offset + address, pte, entry, page);
 			pte_unmap(pte);
+
+			/*
+			 * Move the page to the active list so it is not
+			 * immediately swapped out again after swapon.
+			 */
+			activate_page(page);
+
 			/* add 1 since address may be 0 */
 			return 1 + offset + address;
 		}
@@ -541,7 +548,15 @@ static int unuse_process(struct mm_struct * mm,
 	/*
 	 * Go through process' page directory.
 	 */
-	down_read(&mm->mmap_sem);
+	if (!down_read_trylock(&mm->mmap_sem)) {
+		/*
+		 * Our reference to the page stops try_to_unmap_one from
+		 * unmapping its ptes, so swapoff can make progress.
+		 */
+		unlock_page(page);
+		down_read(&mm->mmap_sem);
+		lock_page(page);
+	}
 	spin_lock(&mm->page_table_lock);
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		if (!is_vm_hugetlb_page(vma)) {
@@ -645,7 +660,7 @@ static int try_to_unuse(unsigned int type)
 	 * open() method called) - so swap entries may be invisible
 	 * to swapoff for a while, then reappear - but that is rare.
 	 */
-	while ((i = find_next_to_unuse(si, i))) {
+	while ((i = find_next_to_unuse(si, i)) != 0) {
 		if (signal_pending(current)) {
 			retval = -EINTR;
 			break;
@@ -1065,6 +1080,7 @@ asmlinkage long sys_swapoff(const char __user * specialfile)
 	unsigned short *swap_map;
 	struct file *swap_file, *victim;
 	struct address_space *mapping;
+	struct inode *inode;
 	char * pathname;
 	int i, type, prev;
 	int err;
@@ -1077,7 +1093,7 @@ asmlinkage long sys_swapoff(const char __user * specialfile)
 	if (IS_ERR(pathname))
 		goto out;
 
-	victim = filp_open(pathname, O_RDWR, 0);
+	victim = filp_open(pathname, O_RDWR|O_LARGEFILE, 0);
 	putname(pathname);
 	err = PTR_ERR(victim);
 	if (IS_ERR(victim))
@@ -1158,12 +1174,15 @@ asmlinkage long sys_swapoff(const char __user * specialfile)
 	swap_list_unlock();
 	up(&swapon_sem);
 	vfree(swap_map);
-	if (S_ISBLK(mapping->host->i_mode)) {
-		struct block_device *bdev = I_BDEV(mapping->host);
+	inode = mapping->host;
+	if (S_ISBLK(inode->i_mode)) {
+		struct block_device *bdev = I_BDEV(inode);
 		set_blocksize(bdev, p->old_block_size);
 		bd_release(bdev);
 	} else {
-		up(&mapping->host->i_sem);
+		down(&inode->i_sem);
+		inode->i_flags &= ~S_SWAPFILE;
+		up(&inode->i_sem);
 	}
 	filp_close(swap_file, NULL);
 	err = 0;
@@ -1282,7 +1301,7 @@ asmlinkage long sys_swapon(const char __user * specialfile, int swap_flags)
 	int i, prev;
 	int error;
 	static int least_priority;
-	union swap_header *swap_header = 0;
+	union swap_header *swap_header = NULL;
 	int swap_header_version;
 	int nr_good_pages = 0;
 	unsigned long maxpages = 1;
@@ -1343,7 +1362,7 @@ asmlinkage long sys_swapon(const char __user * specialfile, int swap_flags)
 		name = NULL;
 		goto bad_swap_2;
 	}
-	swap_file = filp_open(name, O_RDWR, 0);
+	swap_file = filp_open(name, O_RDWR|O_LARGEFILE, 0);
 	error = PTR_ERR(swap_file);
 	if (IS_ERR(swap_file)) {
 		swap_file = NULL;
@@ -1381,6 +1400,10 @@ asmlinkage long sys_swapon(const char __user * specialfile, int swap_flags)
 		p->bdev = inode->i_sb->s_bdev;
 		down(&inode->i_sem);
 		did_down = 1;
+		if (IS_SWAPFILE(inode)) {
+			error = -EBUSY;
+			goto bad_swap;
+		}
 	} else {
 		goto bad_swap;
 	}
@@ -1553,8 +1576,11 @@ out:
 	}
 	if (name)
 		putname(name);
-	if (error && did_down)
+	if (did_down) {
+		if (!error)
+			inode->i_flags |= S_SWAPFILE;
 		up(&inode->i_sem);
+	}
 	return error;
 }
 

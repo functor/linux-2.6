@@ -10,7 +10,7 @@
  * NO WARRANTY
  *
  * For a list of known bugs (errata) and documentation,
- * see via-audio.pdf in linux/Documentation/DocBook.
+ * see via-audio.pdf in Documentation/DocBook.
  * If this documentation does not exist, run "make pdfdocs".
  */
 
@@ -1580,7 +1580,7 @@ match:
 	file->private_data = card->ac97;
 
 	DPRINTK ("EXIT, returning 0\n");
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int via_mixer_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
@@ -2401,11 +2401,6 @@ static ssize_t via_dsp_read(struct file *file, char __user *buffer, size_t count
 	card = file->private_data;
 	assert (card != NULL);
 
-	if (ppos != &file->f_pos) {
-		DPRINTK ("EXIT, returning -ESPIPE\n");
-		return -ESPIPE;
-	}
-
 	rc = via_syscall_down (card, nonblock);
 	if (rc) goto out;
 
@@ -2588,11 +2583,6 @@ static ssize_t via_dsp_write(struct file *file, const char __user *buffer, size_
 	assert (file != NULL);
 	card = file->private_data;
 	assert (card != NULL);
-
-	if (ppos != &file->f_pos) {
-		DPRINTK ("EXIT, returning -ESPIPE\n");
-		return -ESPIPE;
-	}
 
 	rc = via_syscall_down (card, nonblock);
 	if (rc) goto out;
@@ -3345,7 +3335,7 @@ match:
 	}
 
 	DPRINTK ("EXIT, returning 0\n");
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 

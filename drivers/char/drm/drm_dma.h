@@ -152,7 +152,7 @@ void DRM(free_buffer)(drm_device_t *dev, drm_buf_t *buf)
 
 	buf->waiting  = 0;
 	buf->pending  = 0;
-	buf->filp     = 0;
+	buf->filp     = NULL;
 	buf->used     = 0;
 
 	if ( __HAVE_DMA_WAITQUEUE && waitqueue_active(&buf->dma_wait)) {
@@ -214,7 +214,7 @@ int DRM(control)( struct inode *inode, struct file *filp,
 {
 	drm_control_t ctl;
 
-	if ( copy_from_user( &ctl, (drm_control_t *)arg, sizeof(ctl) ) )
+	if ( copy_from_user( &ctl, (drm_control_t __user *)arg, sizeof(ctl) ) )
 		return -EFAULT;
 
 	switch ( ctl.func ) {

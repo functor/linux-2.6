@@ -1050,7 +1050,7 @@ static int tdfxfb_cursor(struct fb_info *info, struct fb_cursor *cursor)
 		bg_color = ((cmap.red[cmap.start+1] << 16) |
 			    (cmap.green[cmap.start+1] << 8) |
 			    (cmap.blue[cmap.start+1]));
-		fb_copy_cmap(&cmap, &info->cursor.image.cmap, 0);
+		fb_copy_cmap(&cmap, &info->cursor.image.cmap);
 		spin_lock_irqsave(&par->DAClock, flags);
 		banshee_make_room(par, 2);
 		tdfx_outl(par, HWCURC0, bg_color);
@@ -1101,7 +1101,7 @@ static int tdfxfb_cursor(struct fb_info *info, struct fb_cursor *cursor)
 		 */
 		u8 *cursorbase = (u8 *) info->cursor.image.data;
 		char *bitmap = (char *)cursor->image.data;
-		char *mask = cursor->mask;
+		const char *mask = cursor->mask;
 		int i, j, k, h = 0;
 
 		for (i = 0; i < 64; i++) {

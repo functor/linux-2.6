@@ -703,7 +703,7 @@ static int
 snd_nm256_capture_copy(snd_pcm_substream_t *substream,
 		       int channel, /* not used (interleaved data) */
 		       snd_pcm_uframes_t pos,
-		       void *dst,
+		       void __user *dst,
 		       snd_pcm_uframes_t count)
 {
 	snd_pcm_runtime_t *runtime = substream->runtime;
@@ -1507,6 +1507,10 @@ snd_nm256_create(snd_card_t *card, struct pci_dev *pci,
 	pci_read_config_word(pci, PCI_SUBSYSTEM_ID, &subsystem_device);
 	if (subsystem_vendor == 0x104d && subsystem_device == 0x8041) {
 		/* this workaround will cause lock-up after suspend/resume on Sony PCG-F305 */
+		chip->latitude_workaround = 0;
+	}
+	if (subsystem_vendor == 0x1028 && subsystem_device == 0x0080) {
+		/* this workaround will cause lock-up after suspend/resume on a Dell laptop */
 		chip->latitude_workaround = 0;
 	}
 

@@ -27,6 +27,7 @@
 #include <linux/aio.h>
 #include <linux/highmem.h>
 #include <linux/workqueue.h>
+#include <linux/security.h>
 
 #include <asm/kmap_types.h>
 #include <asm/uaccess.h>
@@ -395,6 +396,8 @@ static struct kiocb fastcall *__aio_get_req(struct kioctx *ctx)
 	req->ki_cancel = NULL;
 	req->ki_retry = NULL;
 	req->ki_obj.user = NULL;
+	req->ki_dtor = NULL;
+	req->private = NULL;
 
 	/* Check if the completion queue has enough free space to
 	 * accept an event from this io.
@@ -435,9 +438,13 @@ static inline struct kiocb *aio_get_req(struct kioctx *ctx)
 
 static inline void really_put_req(struct kioctx *ctx, struct kiocb *req)
 {
+	if (req->ki_dtor)
+		req->ki_dtor(req);
 	req->ki_ctx = NULL;
 	req->ki_filp = NULL;
 	req->ki_obj.user = NULL;
+	req->ki_dtor = NULL;
+	req->private = NULL;
 	kmem_cache_free(kiocb_cachep, req);
 	ctx->reqs_active--;
 
@@ -617,6 +624,7 @@ void fastcall kick_iocb(struct kiocb *iocb)
 		queue_work(aio_wq, &ctx->wq);
 	}
 }
+EXPORT_SYMBOL(kick_iocb);
 
 /* aio_complete
  *	Called when the io request on the given iocb is complete.
@@ -1036,6 +1044,9 @@ int fastcall io_submit_one(struct kioctx *ctx, struct iocb __user *user_iocb,
 		ret = -EFAULT;
 		if (unlikely(!access_ok(VERIFY_WRITE, buf, iocb->aio_nbytes)))
 			goto out_put_req;
+		ret = security_file_permission (file, MAY_READ);
+		if (ret)
+			goto out_put_req;
 		ret = -EINVAL;
 		if (file->f_op->aio_read)
 			ret = file->f_op->aio_read(req, buf,
@@ -1047,6 +1058,9 @@ int fastcall io_submit_one(struct kioctx *ctx, struct iocb __user *user_iocb,
 			goto out_put_req;
 		ret = -EFAULT;
 		if (unlikely(!access_ok(VERIFY_READ, buf, iocb->aio_nbytes)))
+			goto out_put_req;
+		ret = security_file_permission (file, MAY_WRITE);
+		if (ret)
 			goto out_put_req;
 		ret = -EINVAL;
 		if (file->f_op->aio_write)

@@ -20,7 +20,6 @@
 #include <linux/blkdev.h>
 #include <linux/backing-dev.h>
 
-#include <asm/pgalloc.h>
 #include <asm/uaccess.h>
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
@@ -572,6 +571,6 @@ unsigned long get_unmapped_area(struct file *file, unsigned long addr,
 	return -ENOMEM;
 }
 
-void swap_unplug_io_fn(struct backing_dev_info *)
+void swap_unplug_io_fn(struct backing_dev_info *bdi, struct page *page)
 {
 }

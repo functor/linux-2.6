@@ -253,12 +253,6 @@
 #include <asm/uaccess.h>
 #include <linux/usb.h>
 #include <linux/serial.h>
-#ifdef CONFIG_USB_SERIAL_DEBUG
-	static int debug = 1;
-#else
-	static int debug;
-#endif
-
 #include "usb-serial.h"
 #include "ftdi_sio.h"
 
@@ -268,6 +262,8 @@
 #define DRIVER_VERSION "v1.4.0"
 #define DRIVER_AUTHOR "Greg Kroah-Hartman <greg@kroah.com>, Bill Ryder <bryder@sgi.com>, Kuba Ober <kuba@mareimbrium.org>"
 #define DRIVER_DESC "USB FTDI Serial Converters Driver"
+
+static int debug;
 
 static struct usb_device_id id_table_sio [] = {
 	{ USB_DEVICE(FTDI_VID, FTDI_SIO_PID) },
@@ -296,6 +292,8 @@ static struct usb_device_id id_table_8U232AM [] = {
 	{ USB_DEVICE_VER(FTDI_VID, FTDI_8U232AM_PID, 0, 0x3ff) },
 	{ USB_DEVICE_VER(FTDI_VID, FTDI_8U232AM_ALT_PID, 0, 0x3ff) },
 	{ USB_DEVICE_VER(FTDI_VID, FTDI_RELAIS_PID, 0, 0x3ff) },
+	{ USB_DEVICE(INTERBIOMETRICS_VID, INTERBIOMETRICS_IOBOARD_PID) },
+	{ USB_DEVICE(INTERBIOMETRICS_VID, INTERBIOMETRICS_MINI_IOBOARD_PID) },
 	{ USB_DEVICE_VER(FTDI_NF_RIC_VID, FTDI_NF_RIC_PID, 0, 0x3ff) },
 	{ USB_DEVICE_VER(FTDI_VID, FTDI_XF_632_PID, 0, 0x3ff) },
 	{ USB_DEVICE_VER(FTDI_VID, FTDI_XF_634_PID, 0, 0x3ff) },
@@ -361,6 +359,10 @@ static struct usb_device_id id_table_8U232AM [] = {
 	{ USB_DEVICE_VER(FTDI_VID, PROTEGO_SPECIAL_4, 0, 0x3ff) },
 	{ USB_DEVICE_VER(FTDI_VID, FTDI_ELV_UO100_PID, 0, 0x3ff) },
 	{ USB_DEVICE_VER(FTDI_VID, INSIDE_ACCESSO, 0, 0x3ff) },
+	{ USB_DEVICE_VER(INTREPID_VID, INTREPID_VALUECAN_PID, 0, 0x3ff) },
+	{ USB_DEVICE_VER(INTREPID_VID, INTREPID_NEOVI_PID, 0, 0x3ff) },
+	{ USB_DEVICE_VER(FALCOM_VID, FALCOM_TWIST_PID, 0, 0x3ff) },
+	{ USB_DEVICE_VER(FTDI_VID, FTDI_SUUNTO_SPORTS_PID, 0, 0x3ff) },
 	{ }						/* Terminating entry */
 };
 
@@ -466,6 +468,11 @@ static struct usb_device_id id_table_FT232BM [] = {
  	{ USB_DEVICE_VER(FTDI_VID, LINX_FUTURE_2_PID, 0x400, 0xffff) },
 	{ USB_DEVICE(FTDI_VID, FTDI_CCSICDU20_0_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_CCSICDU40_1_PID) },
+	{ USB_DEVICE_VER(FTDI_VID, INSIDE_ACCESSO, 0x400, 0xffff) },
+	{ USB_DEVICE_VER(INTREPID_VID, INTREPID_VALUECAN_PID, 0x400, 0xffff) },
+	{ USB_DEVICE_VER(INTREPID_VID, INTREPID_NEOVI_PID, 0x400, 0xffff) },
+	{ USB_DEVICE_VER(FALCOM_VID, FALCOM_TWIST_PID, 0x400, 0xffff) },
+	{ USB_DEVICE_VER(FTDI_VID, FTDI_SUUNTO_SPORTS_PID, 0x400, 0xffff) },
 	{ }						/* Terminating entry */
 };
 
@@ -488,6 +495,8 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(FTDI_VID, FTDI_8U232AM_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_8U232AM_ALT_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_RELAIS_PID) },
+	{ USB_DEVICE(INTERBIOMETRICS_VID, INTERBIOMETRICS_IOBOARD_PID) },
+	{ USB_DEVICE(INTERBIOMETRICS_VID, INTERBIOMETRICS_MINI_IOBOARD_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_XF_632_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_XF_634_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_XF_547_PID) },
@@ -570,6 +579,10 @@ static struct usb_device_id id_table_combined [] = {
  	{ USB_DEVICE(FTDI_VID, FTDI_CCSICDU20_0_PID) },
  	{ USB_DEVICE(FTDI_VID, FTDI_CCSICDU40_1_PID) },
 	{ USB_DEVICE(FTDI_VID, INSIDE_ACCESSO) },
+	{ USB_DEVICE(INTREPID_VID, INTREPID_VALUECAN_PID) },
+	{ USB_DEVICE(INTREPID_VID, INTREPID_NEOVI_PID) },
+	{ USB_DEVICE(FALCOM_VID, FALCOM_TWIST_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_SUUNTO_SPORTS_PID) },
 	{ }						/* Terminating entry */
 };
 
@@ -1022,7 +1035,7 @@ static __u32 get_ftdi_divisor(struct usb_serial_port * port)
 }
 
 
-static int get_serial_info(struct usb_serial_port * port, struct serial_struct * retinfo)
+static int get_serial_info(struct usb_serial_port * port, struct serial_struct __user * retinfo)
 {
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
 	struct serial_struct tmp;
@@ -1039,7 +1052,7 @@ static int get_serial_info(struct usb_serial_port * port, struct serial_struct *
 } /* get_serial_info */
 
 
-static int set_serial_info(struct usb_serial_port * port, struct serial_struct * newinfo)
+static int set_serial_info(struct usb_serial_port * port, struct serial_struct __user * newinfo)
 { /* set_serial_info */
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
 	struct serial_struct new_serial;
@@ -1492,7 +1505,7 @@ static int ftdi_write (struct usb_serial_port *port, int from_user,
 		}
 	}
 
-	usb_serial_debug_data (__FILE__, __FUNCTION__, transfer_size, buffer);
+	usb_serial_debug_data(debug, &port->dev, __FUNCTION__, transfer_size, buffer);
 
 	/* fill the buffer and send it */
 	usb_fill_bulk_urb(urb, port->serial->dev, 
@@ -1504,6 +1517,7 @@ static int ftdi_write (struct usb_serial_port *port, int from_user,
 	if (status) {
 		err("%s - failed submitting write urb, error %d", __FUNCTION__, status);
 		count = status;
+		kfree (buffer);
 	}
 
 	/* we are done with this urb, so let the host driver
@@ -1657,7 +1671,7 @@ static void ftdi_process_read (struct usb_serial_port *port)
 
         /* The first two bytes of every read packet are status */
 	if (urb->actual_length > 2) {
-		usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, data);
+		usb_serial_debug_data(debug, &port->dev, __FUNCTION__, urb->actual_length, data);
 	} else {
                 dbg("Status only: %03oo %03oo",data[0],data[1]);
         }
@@ -2000,6 +2014,7 @@ static int ftdi_tiocmset(struct usb_serial_port *port, struct file * file, unsig
 {
 	int ret;
 	
+	dbg("%s TIOCMSET", __FUNCTION__);
 	if (set & TIOCM_DTR){
 		if ((ret = set_dtr(port, HIGH)) < 0) {
 			err("Urb to set DTR failed");
@@ -2042,7 +2057,7 @@ static int ftdi_ioctl (struct usb_serial_port *port, struct file * file, unsigne
 
 	case TIOCMBIS: /* turns on (Sets) the lines as specified by the mask */
 		dbg("%s TIOCMBIS", __FUNCTION__);
- 	        if (get_user(mask, (unsigned long *) arg))
+ 	        if (get_user(mask, (unsigned long __user *) arg))
 			return -EFAULT;
   	        if (mask & TIOCM_DTR){
 			if ((ret = set_dtr(port, HIGH)) < 0) {
@@ -2061,7 +2076,7 @@ static int ftdi_ioctl (struct usb_serial_port *port, struct file * file, unsigne
 
 	case TIOCMBIC: /* turns off (Clears) the lines as specified by the mask */
 		dbg("%s TIOCMBIC", __FUNCTION__);
- 	        if (get_user(mask, (unsigned long *) arg))
+ 	        if (get_user(mask, (unsigned long __user *) arg))
 			return -EFAULT;
   	        if (mask & TIOCM_DTR){
 			if ((ret = set_dtr(port, LOW)) < 0){
@@ -2088,10 +2103,10 @@ static int ftdi_ioctl (struct usb_serial_port *port, struct file * file, unsigne
 		 */
 
 	case TIOCGSERIAL: /* gets serial port data */
-		return get_serial_info(port, (struct serial_struct *) arg);
+		return get_serial_info(port, (struct serial_struct __user *) arg);
 
 	case TIOCSSERIAL: /* sets serial port data */
-		return set_serial_info(port, (struct serial_struct *) arg);
+		return set_serial_info(port, (struct serial_struct __user *) arg);
 
 	/*
 	 * Wait for any of the 4 modem inputs (DCD,RI,DSR,CTS) to change
@@ -2240,6 +2255,6 @@ MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(debug, "i");
+module_param(debug, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "Debug enabled or not");
 

@@ -17,9 +17,9 @@
 #include <linux/highmem.h>
 #include <linux/security.h>
 #include <linux/mempolicy.h>
+#include <linux/personality.h>
 
 #include <asm/uaccess.h>
-#include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
@@ -207,6 +207,12 @@ do_mprotect(struct mm_struct *mm, unsigned long start, size_t len,
 		return -EINVAL;
 	if (end == start)
 		return 0;
+	/*
+	 * Does the application expect PROT_READ to imply PROT_EXEC:
+	 */
+	if (unlikely((prot & PROT_READ) &&
+			(current->personality & READ_IMPLIES_EXEC)))
+		prot |= PROT_EXEC;
 
 	vm_flags = calc_vm_prot_bits(prot);
 

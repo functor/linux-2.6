@@ -18,14 +18,11 @@
  */
 
 /*
- * Locking:
- * - the page->mapcount field is protected by the PG_maplock bit,
- *   which nests within the mm->page_table_lock,
- *   which nests within the page lock.
- * - because swapout locking is opposite to the locking order
- *   in the page fault path, the swapout path uses trylocks
- *   on the mm->page_table_lock
+ * Locking: see "Lock ordering" summary in filemap.c.
+ * In swapout, page_map_lock is held on entry to page_referenced and
+ * try_to_unmap, so they trylock for i_mmap_lock and page_table_lock.
  */
+
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/swap.h>
@@ -79,8 +76,12 @@ int anon_vma_prepare(struct vm_area_struct *vma)
 		/* page_table_lock to protect against threads */
 		spin_lock(&mm->page_table_lock);
 		if (likely(!vma->anon_vma)) {
+			if (!allocated)
+				spin_lock(&anon_vma->lock);
 			vma->anon_vma = anon_vma;
 			list_add(&vma->anon_vma_node, &anon_vma->head);
+			if (!allocated)
+				spin_unlock(&anon_vma->lock);
 			allocated = NULL;
 		}
 		spin_unlock(&mm->page_table_lock);
@@ -226,7 +227,7 @@ static int page_referenced_one(struct page *page,
 	if (page_to_pfn(page) != pte_pfn(*pte))
 		goto out_unmap;
 
-	if (ptep_test_and_clear_young(pte))
+	if (ptep_clear_flush_young(vma, address, pte))
 		referenced++;
 
 	(*mapcount)--;
@@ -465,7 +466,7 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	 * skipped over this mm) then we should reactivate it.
 	 */
 	if ((vma->vm_flags & (VM_LOCKED|VM_RESERVED)) ||
-			ptep_test_and_clear_young(pte)) {
+			ptep_clear_flush_young(vma, address, pte)) {
 		ret = SWAP_FAIL;
 		goto out_unmap;
 	}
@@ -480,6 +481,10 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	 * an exclusive swap page, do_wp_page will replace it by a copy
 	 * page, and the user never get to see the data GUP was holding
 	 * the original page for.
+	 *
+	 * This test is also useful for when swapoff (unuse_process) has
+	 * to drop page lock: its reference to the page stops existing
+	 * ptes from being unmapped, so swapoff can make progress.
 	 */
 	if (PageSwapCache(page) &&
 	    page_count(page) != page->mapcount + 2) {
@@ -592,7 +597,7 @@ static int try_to_unmap_cluster(unsigned long cursor,
 		if (PageReserved(page))
 			continue;
 
-		if (ptep_test_and_clear_young(pte))
+		if (ptep_clear_flush_young(vma, address, pte))
 			continue;
 
 		/* Nuke the page table entry. */
@@ -739,7 +744,7 @@ static inline int try_to_unmap_file(struct page *page)
 	list_for_each_entry(vma, &mapping->i_mmap_nonlinear,
 						shared.vm_set.list) {
 		if (!(vma->vm_flags & VM_RESERVED))
-			vma->vm_private_data = 0;
+			vma->vm_private_data = NULL;
 	}
 relock:
 	page_map_lock(page);

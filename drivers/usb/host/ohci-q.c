@@ -174,8 +174,8 @@ static int ed_schedule (struct ohci_hcd *ohci, struct ed *ed)
 		return -EAGAIN;
 
 	ed->state = ED_OPER;
-	ed->ed_prev = 0;
-	ed->ed_next = 0;
+	ed->ed_prev = NULL;
+	ed->ed_next = NULL;
 	ed->hwNextED = 0;
 	wmb ();
 
@@ -321,7 +321,7 @@ static void ed_deschedule (struct ohci_hcd *ohci, struct ed *ed)
 			if (!ed->hwNextED) {
 				ohci->hc_control &= ~OHCI_CTRL_CLE;
 				writel (ohci->hc_control, &ohci->regs->control);
-				// a readl() later syncs CLE with the HC
+				// a ohci_readl() later syncs CLE with the HC
 			} else
 				writel (le32_to_cpup (&ed->hwNextED),
 					&ohci->regs->ed_controlhead);
@@ -333,7 +333,7 @@ static void ed_deschedule (struct ohci_hcd *ohci, struct ed *ed)
 		if (ohci->ed_controltail == ed) {
 			ohci->ed_controltail = ed->ed_prev;
 			if (ohci->ed_controltail)
-				ohci->ed_controltail->ed_next = 0;
+				ohci->ed_controltail->ed_next = NULL;
 		} else if (ed->ed_next) {
 			ed->ed_next->ed_prev = ed->ed_prev;
 		}
@@ -345,7 +345,7 @@ static void ed_deschedule (struct ohci_hcd *ohci, struct ed *ed)
 			if (!ed->hwNextED) {
 				ohci->hc_control &= ~OHCI_CTRL_BLE;
 				writel (ohci->hc_control, &ohci->regs->control);
-				// a readl() later syncs BLE with the HC
+				// a ohci_readl() later syncs BLE with the HC
 			} else
 				writel (le32_to_cpup (&ed->hwNextED),
 					&ohci->regs->ed_bulkhead);
@@ -357,7 +357,7 @@ static void ed_deschedule (struct ohci_hcd *ohci, struct ed *ed)
 		if (ohci->ed_bulktail == ed) {
 			ohci->ed_bulktail = ed->ed_prev;
 			if (ohci->ed_bulktail)
-				ohci->ed_bulktail->ed_next = 0;
+				ohci->ed_bulktail->ed_next = NULL;
 		} else if (ed->ed_next) {
 			ed->ed_next->ed_prev = ed->ed_prev;
 		}
@@ -412,7 +412,7 @@ static struct ed *ed_get (
  		if (!td) {
 			/* out of memory */
 			ed_free (ohci, ed);
-			ed = 0;
+			ed = NULL;
 			goto done;
 		}
 		ed->dummy = td;
@@ -474,14 +474,14 @@ static void start_ed_unlink (struct ohci_hcd *ohci, struct ed *ed)
 
 	/* rm_list is just singly linked, for simplicity */
 	ed->ed_next = ohci->ed_rm_list;
-	ed->ed_prev = 0;
+	ed->ed_prev = NULL;
 	ohci->ed_rm_list = ed;
 
 	/* enable SOF interrupt */
 	writel (OHCI_INTR_SF, &ohci->regs->intrstatus);
 	writel (OHCI_INTR_SF, &ohci->regs->intrenable);
 	// flush those writes, and get latest HCCA contents
-	(void) readl (&ohci->regs->control);
+	(void) ohci_readl (&ohci->regs->control);
 
 	/* SF interrupt might get delayed; record the frame counter value that
 	 * indicates when the HC isn't looking at it, so concurrent unlinks
@@ -924,7 +924,7 @@ rescan_all:
 		/* only take off EDs that the HC isn't using, accounting for
 		 * frame counter wraps and EDs with partially retired TDs
 		 */
-		if (likely (HCD_IS_RUNNING(ohci->hcd.state))) {
+		if (likely (regs && HCD_IS_RUNNING(ohci->hcd.state))) {
 			if (tick_before (tick, ed->tick)) {
 skip_ed:
 				last = &ed->ed_next;
@@ -950,7 +950,7 @@ skip_ed:
 		 * entries (which we'd ignore), but paranoia won't hurt.
 		 */
 		*last = ed->ed_next;
-		ed->ed_next = 0;
+		ed->ed_next = NULL;
 		modified = 0;
 
 		/* unlink urbs as requested, but rescan the list after
