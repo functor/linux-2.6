@@ -221,31 +221,6 @@ static int __init idle_setup (char *str)
 
 __setup("idle=", idle_setup);
 
-void stack_overflow(void)
-{
-        unsigned long esp = current_stack_pointer();
-	int panicing = ((esp&(THREAD_SIZE-1)) <= STACK_PANIC);
-
-	oops_in_progress = 1;
-	printk( "esp: 0x%lx masked: 0x%lx STACK_PANIC:0x%lx %d %d\n",
-		esp, (esp&(THREAD_SIZE-1)), STACK_PANIC, 
-		(((esp&(THREAD_SIZE-1)) <= STACK_PANIC)), panicing);
-	show_trace(current,(void*)esp);
-
-	if (panicing)
-	  panic("stack overflow\n");
-
-	oops_in_progress = 0;
-
-	/* Just let it happen once per task, as otherwise it goes nuts
-	 * in printing stack traces.  This means that I need to dump
-	 * the stack_overflowed boolean into the task or thread_info
-	 * structure.  For now just turn it off all together.
-	 */
-
-	/* stack_overflowed = 0; */
-}
-
 void show_regs(struct pt_regs * regs)
 {
 	unsigned long cr0 = 0L, cr2 = 0L, cr3 = 0L, cr4 = 0L;
