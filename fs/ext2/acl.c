@@ -9,7 +9,6 @@
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/namei.h> 
-#include <linux/vs_base.h>
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"
@@ -292,9 +291,6 @@ ext2_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
 	int mode = inode->i_mode;
 
-	/* Prevent vservers from escaping chroot() barriers */
-	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
-		return -EACCES;
 	/* Nobody gets write access to a read-only fs */
 	if ((mask & MAY_WRITE) && (IS_RDONLY(inode) ||
 	    (nd && MNT_IS_RDONLY(nd->mnt))) &&
