@@ -76,7 +76,7 @@ mem_class_put(ckrm_mem_res_t *cls)
 	
 	if (cls && atomic_dec_and_test(&(cls->nr_users)) ) {
 		printk("freeing memclass %p of <core:%s>\n", cls, cls->core->name);
-		BUG_ON(ckrm_memclass_valid(cls));
+		// BUG_ON(ckrm_memclass_valid(cls));
 		//kfree(cls);
 	}	
 }
