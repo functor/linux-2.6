@@ -1,7 +1,7 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 8
-EXTRAVERSION = -1.521.3.planetlab
+EXTRAVERSION = -1.521.3.planetlab.2004.12.14
 NAME=Zonked Quokka
 
 # *DOCUMENTATION*
@@ -451,6 +451,10 @@ endif
 
 ifndef CONFIG_FRAME_POINTER
 CFLAGS		+= -fomit-frame-pointer
+endif
+
+ifdef CONFIG_X86_STACK_CHECK
+CFLAGS		+= -p
 endif
 
 ifdef CONFIG_DEBUG_INFO

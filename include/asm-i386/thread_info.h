@@ -56,6 +56,7 @@ struct thread_info {
 #define PREEMPT_ACTIVE		0x4000000
 #define THREAD_SIZE            (1<<CONFIG_STACK_SIZE_SHIFT)
 #define STACK_WARN             (CONFIG_STACK_WARN)
+#define STACK_PANIC            (0x200ul)
 
 /*
  * macros/functions for gaining access to the thread information structure
