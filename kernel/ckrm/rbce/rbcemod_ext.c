@@ -3,7 +3,7 @@
  * Copyright (C) Hubertus Franke, IBM Corp. 2003
  *
  * Extension to be included into RBCE to collect delay and sample information
- * requires user daemon <crbcedmn> to activate.
+ * Requires user daemon e.g. crbcedmn to activate.
  *
  * Latest version, more details at http://ckrm.sf.net
  *
@@ -12,7 +12,12 @@
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  *
+ * This program is distributed in the hope that it would be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
  */
+
 
 /*******************************************************************************
  *

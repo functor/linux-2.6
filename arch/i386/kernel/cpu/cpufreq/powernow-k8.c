@@ -1024,7 +1024,7 @@ err_out:
 	return -ENODEV;
 }
 
-static int powernowk8_cpu_exit (struct cpufreq_policy *pol)
+static int __exit powernowk8_cpu_exit (struct cpufreq_policy *pol)
 {
 	struct powernow_k8_data *data = powernow_data[pol->cpu];
 
@@ -1076,7 +1076,7 @@ static struct cpufreq_driver cpufreq_amd64_driver = {
 	.verify = powernowk8_verify,
 	.target = powernowk8_target,
 	.init = powernowk8_cpu_init,
-	.exit = __devexit_p(powernowk8_cpu_exit),
+	.exit = powernowk8_cpu_exit,
 	.get = powernowk8_get,
 	.name = "powernow-k8",
 	.owner = THIS_MODULE,
@@ -1105,7 +1105,7 @@ static int __init powernowk8_init(void)
 }
 
 /* driver entry point for term */
-static void powernowk8_exit(void)
+static void __exit powernowk8_exit(void)
 {
 	dprintk(KERN_INFO PFX "exit\n");
 

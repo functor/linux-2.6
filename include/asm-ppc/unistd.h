@@ -273,10 +273,8 @@
 #define __NR_mq_notify		266
 #define __NR_mq_getsetattr	267
 #define __NR_kexec_load		268
-#define __NR_ioprio_set		269
-#define __NR_ioprio_get		270
 
-#define __NR_syscalls		271
+#define __NR_syscalls		269
 
 #define __NR(n)	#n
 

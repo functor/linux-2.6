@@ -1,3 +1,24 @@
+/* Tokens for Rule-based Classification Engine (RBCE) and
+ * Consolidated RBCE module code (combined)
+ *
+ * Copyright (C) Hubertus Franke, IBM Corp. 2003
+ *           (C) Chandra Seetharaman, IBM Corp. 2003
+ *           (C) Vivek Kashyap, IBM Corp. 2004 
+ * 
+ * Latest version, more details at http://ckrm.sf.net
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it would be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * 
+ *
+ */
+
 #include <linux/parser.h>
 #include <linux/ctype.h>
 
@@ -160,7 +181,7 @@ rules_parse(char *rule_defn, struct rbce_rule_term **rterms, int *term_mask)
 
 	nterms = 0;
 	while (*rp++) {
-		if (*rp == '>' || *rp == '<' || *rp == '=') {
+		if (*rp == '>' || *rp == '<' || *rp == '=' || *rp == '!') {
 			nterms++;
 		}
 	}

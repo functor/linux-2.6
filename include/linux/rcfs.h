@@ -71,6 +71,7 @@ extern struct file_operations shares_fileops;
 extern struct file_operations stats_fileops;
 extern struct file_operations config_fileops;
 extern struct file_operations members_fileops;
+extern struct file_operations reclassify_fileops;
 extern struct file_operations rcfs_file_operations;
 
 // Callbacks into rcfs from ckrm 

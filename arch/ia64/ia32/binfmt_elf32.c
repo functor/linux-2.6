@@ -41,6 +41,8 @@ static void elf32_set_personality (void);
 #undef SET_PERSONALITY
 #define SET_PERSONALITY(ex, ibcs2)	elf32_set_personality()
 
+#define elf_read_implies_exec(ex, have_pt_gnu_stack)	(!(have_pt_gnu_stack))
+
 /* Ugly but avoids duplication */
 #include "../../../fs/binfmt_elf.c"
 
@@ -146,7 +148,7 @@ ia64_elf32_init (struct pt_regs *regs)
 int
 ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 {
-	unsigned long stack_base, grow;
+	unsigned long stack_base;
 	struct vm_area_struct *mpnt;
 	struct mm_struct *mm = current->mm;
 	int i;
@@ -163,10 +165,8 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt)
 		return -ENOMEM;
 
-	grow = (IA32_STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))
-		>> PAGE_SHIFT;
-	if (security_vm_enough_memory(grow) ||
-		!vx_vmpages_avail(mm, grow)) {
+	if (security_vm_enough_memory((IA32_STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))
+				      >> PAGE_SHIFT)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
@@ -187,9 +187,7 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 		mpnt->vm_page_prot = (mpnt->vm_flags & VM_EXEC)?
 					PAGE_COPY_EXEC: PAGE_COPY;
 		insert_vm_struct(current->mm, mpnt);
-		// current->mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
-		vx_vmpages_sub(current->mm, current->mm->total_vm -
-			((mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT));
+		current->mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
 	}
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
@@ -215,12 +213,11 @@ elf32_set_personality (void)
 	set_personality(PER_LINUX32);
 	current->thread.map_base  = IA32_PAGE_OFFSET/3;
 	current->thread.task_size = IA32_PAGE_OFFSET;	/* use what Linux/x86 uses... */
-	current->thread.flags |= IA64_THREAD_XSTACK;	/* data must be executable */
 	set_fs(USER_DS);				/* set addr limit for new TASK_SIZE */
 }
 
 static unsigned long
-elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type, unsigned long unused)
+elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type)
 {
 	unsigned long pgoff = (eppnt->p_vaddr) & ~IA32_PAGE_MASK;
 

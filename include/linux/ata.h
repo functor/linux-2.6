@@ -78,9 +78,11 @@ enum {
 	ATA_NIEN		= (1 << 1),	/* disable-irq flag */
 	ATA_LBA			= (1 << 6),	/* LBA28 selector */
 	ATA_DEV1		= (1 << 4),	/* Select Device 1 (slave) */
-	ATA_BUSY		= (1 << 7),	/* BSY status bit */
 	ATA_DEVICE_OBS		= (1 << 7) | (1 << 5), /* obs bits in dev reg */
 	ATA_DEVCTL_OBS		= (1 << 3),	/* obsolete bit in devctl reg */
+	ATA_BUSY		= (1 << 7),	/* BSY status bit */
+	ATA_DRDY		= (1 << 6),	/* device ready */
+	ATA_DF			= (1 << 5),	/* device fault */
 	ATA_DRQ			= (1 << 3),	/* data request i/o */
 	ATA_ERR			= (1 << 0),	/* have an error */
 	ATA_SRST		= (1 << 2),	/* software reset */
@@ -207,8 +209,8 @@ struct ata_taskfile {
 #define ata_id_has_lba48(dev)	((dev)->id[83] & (1 << 10))
 #define ata_id_has_wcache(dev)	((dev)->id[82] & (1 << 5))
 #define ata_id_has_pm(dev)	((dev)->id[82] & (1 << 3))
-#define ata_id_has_lba(dev)	((dev)->id[49] & (1 << 8))
-#define ata_id_has_dma(dev)	((dev)->id[49] & (1 << 9))
+#define ata_id_has_lba(dev)	((dev)->id[49] & (1 << 9))
+#define ata_id_has_dma(dev)	((dev)->id[49] & (1 << 8))
 #define ata_id_removeable(dev)	((dev)->id[0] & (1 << 7))
 #define ata_id_u32(dev,n)	\
 	(((u32) (dev)->id[(n) + 1] << 16) | ((u32) (dev)->id[(n)]))
@@ -222,6 +224,12 @@ static inline int is_atapi_taskfile(struct ata_taskfile *tf)
 {
 	return (tf->protocol == ATA_PROT_ATAPI) ||
 	       (tf->protocol == ATA_PROT_ATAPI_DMA);
+}
+
+static inline int ata_ok(u8 status)
+{
+	return ((status & (ATA_BUSY | ATA_DRDY | ATA_DF | ATA_DRQ | ATA_ERR))
+			== ATA_DRDY);
 }
 
 #endif /* __LINUX_ATA_H__ */

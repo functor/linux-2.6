@@ -16,7 +16,7 @@
 #endif
 #ifdef CONFIG_8260
 #include <asm/mpc8260.h>
-#include <asm/immap_8260.h>
+#include <asm/immap_cpm2.h>
 #endif
 #ifdef CONFIG_40x
 #include <asm/io.h>
@@ -97,7 +97,7 @@ embed_config(bd_t **bdp)
 #endif /* CONFIG_MBX */
 
 #if defined(CONFIG_RPXLITE) || defined(CONFIG_RPXCLASSIC) || \
-	defined(CONFIG_RPX6) || defined(CONFIG_EP405)
+	defined(CONFIG_RPX8260) || defined(CONFIG_EP405)
 /* Helper functions for Embedded Planet boards.
 */
 /* Because I didn't find anything that would do this.......
@@ -147,7 +147,7 @@ rpx_eth(bd_t *bd, u_char *cp)
 	}
 }
 
-#ifdef CONFIG_RPX6
+#ifdef CONFIG_RPX8260
 static uint
 rpx_baseten(u_char *cp)
 {
@@ -415,9 +415,9 @@ clk_8260(bd_t *bd)
 {
 	uint	scmr, vco_out, clkin;
 	uint	plldf, pllmf, corecnf;
-	volatile immap_t	*ip;
+	volatile cpm2_map_t	*ip;
 
-	ip = (immap_t *)IMAP_ADDR;
+	ip = (cpm2_map_t *)CPM_MAP_ADDR;
 	scmr = ip->im_clkrst.car_scmr;
 
 	/* The clkin is always bus frequency.
@@ -457,9 +457,9 @@ clk_8280(bd_t *bd)
 {
 	uint	scmr, main_clk, clkin;
 	uint	pllmf, corecnf;
-	volatile immap_t	*ip;
+	volatile cpm2_map_t	*ip;
 
-	ip = (immap_t *)IMAP_ADDR;
+	ip = (cpm2_map_t *)CPM_MAP_ADDR;
 	scmr = ip->im_clkrst.car_scmr;
 
 	/* The clkin is always bus frequency.
@@ -588,7 +588,7 @@ embed_config(bd_t **bdp)
 }
 #endif /* SBS8260 */
 
-#ifdef CONFIG_RPX6
+#ifdef CONFIG_RPX8260
 void
 embed_config(bd_t **bdp)
 {

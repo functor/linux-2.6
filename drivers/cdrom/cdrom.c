@@ -508,6 +508,8 @@ int cdrom_is_mrw(struct cdrom_device_info *cdi, int *write)
 	unsigned char buffer[16];
 	int ret;
 
+	*write = 0;
+
 	init_cdrom_command(&cgc, buffer, sizeof(buffer), CGC_DATA_READ);
 
 	cgc.cmd[0] = GPCMD_GET_CONFIGURATION;
@@ -521,8 +523,10 @@ int cdrom_is_mrw(struct cdrom_device_info *cdi, int *write)
 	mfd = (struct mrw_feature_desc *)&buffer[sizeof(struct feature_header)];
 	*write = mfd->write;
 
-	if ((ret = cdrom_mrw_probe_pc(cdi)))
+	if ((ret = cdrom_mrw_probe_pc(cdi))) {
+		*write = 0;
 		return ret;
+	}
 
 	return 0;
 }
@@ -822,14 +826,39 @@ static int cdrom_ram_open_write(struct cdrom_device_info *cdi)
  */
 static int cdrom_open_write(struct cdrom_device_info *cdi)
 {
+	int mrw, mrw_write, ram_write;
 	int ret = 1;
+
+	mrw = 0;
+	if (!cdrom_is_mrw(cdi, &mrw_write))
+		mrw = 1;
+
+	if (CDROM_CAN(CDC_MO_DRIVE))
+		ram_write = 1;
+	else
+		(void) cdrom_is_random_writable(cdi, &ram_write);
+	
+	if (mrw)
+		cdi->mask &= ~CDC_MRW;
+	else
+		cdi->mask |= CDC_MRW;
+
+	if (mrw_write)
+		cdi->mask &= ~CDC_MRW_W;
+	else
+		cdi->mask |= CDC_MRW_W;
+
+	if (ram_write)
+		cdi->mask &= ~CDC_RAM;
+	else
+		cdi->mask |= CDC_RAM;
 
 	if (CDROM_CAN(CDC_MRW_W))
 		ret = cdrom_mrw_open_write(cdi);
 	else if (CDROM_CAN(CDC_DVD_RAM))
 		ret = cdrom_dvdram_open_write(cdi);
  	else if (CDROM_CAN(CDC_RAM) &&
- 		 !CDROM_CAN(CDC_CD_R|CDC_CD_RW|CDC_DVD|CDC_DVD_R|CDC_MRW))
+ 		 !CDROM_CAN(CDC_CD_R|CDC_CD_RW|CDC_DVD|CDC_DVD_R|CDC_MRW|CDC_MO_DRIVE))
  		ret = cdrom_ram_open_write(cdi);
 	else if (CDROM_CAN(CDC_MO_DRIVE))
 		ret = mo_open_write(cdi);
@@ -866,14 +895,17 @@ int cdrom_open(struct cdrom_device_info *cdi, struct inode *ip, struct file *fp)
 	if ((fp->f_flags & O_NONBLOCK) && (cdi->options & CDO_USE_FFLAGS)) {
 		ret = cdi->ops->open(cdi, 1);
 	} else {
+		ret = open_for_data(cdi);
+		if (ret)
+			goto err;
 		if (fp->f_mode & FMODE_WRITE) {
 			ret = -EROFS;
-			if (!CDROM_CAN(CDC_RAM))
-				goto err;
 			if (cdrom_open_write(cdi))
 				goto err;
+			if (!CDROM_CAN(CDC_RAM))
+				goto err;
+			ret = 0;
 		}
-		ret = open_for_data(cdi);
 	}
 
 	if (ret)
@@ -1448,6 +1480,7 @@ static int dvd_do_auth(struct cdrom_device_info *cdi, dvd_authinfo *ai)
 	/* LU data send */
 	case DVD_LU_SEND_AGID:
 		cdinfo(CD_DVD, "entering DVD_LU_SEND_AGID\n"); 
+		cgc.quiet = 1;
 		setup_report_key(&cgc, ai->lsa.agid, 0);
 
 		if ((ret = cdo->generic_packet(cdi, &cgc)))
@@ -1482,6 +1515,7 @@ static int dvd_do_auth(struct cdrom_device_info *cdi, dvd_authinfo *ai)
 	/* Post-auth key */
 	case DVD_LU_SEND_TITLE_KEY:
 		cdinfo(CD_DVD, "entering DVD_LU_SEND_TITLE_KEY\n"); 
+		cgc.quiet = 1;
 		setup_report_key(&cgc, ai->lstk.agid, 4);
 		cgc.cmd[5] = ai->lstk.lba;
 		cgc.cmd[4] = ai->lstk.lba >> 8;
@@ -1890,6 +1924,8 @@ static int cdrom_read_cdda_old(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 	struct packet_command cgc;
 	int nr, ret;
 
+	cdi->last_sense = 0;
+
 	memset(&cgc, 0, sizeof(cgc));
 
 	/*
@@ -1941,6 +1977,8 @@ static int cdrom_read_cdda_bpc(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 	if (!q)
 		return -ENXIO;
 
+	cdi->last_sense = 0;
+
 	while (nframes) {
 		nr = nframes;
 		if (cdi->cdda_method == CDDA_BPC_SINGLE)
@@ -1971,13 +2009,16 @@ static int cdrom_read_cdda_bpc(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 		rq->timeout = 60 * HZ;
 		bio = rq->bio;
 
+		if (rq->bio)
+			blk_queue_bounce(q, &rq->bio);
+
 		if (blk_execute_rq(q, cdi->disk, rq)) {
 			struct request_sense *s = rq->sense;
 			ret = -EIO;
 			cdi->last_sense = s->sense_key;
 		}
 
-		if (blk_rq_unmap_user(rq, ubuf, bio, len))
+		if (blk_rq_unmap_user(rq, bio, len))
 			ret = -EFAULT;
 
 		if (ret)
@@ -1985,6 +2026,7 @@ static int cdrom_read_cdda_bpc(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 
 		nframes -= nr;
 		lba += nr;
+		ubuf += len;
 	}
 
 	return ret;
@@ -2033,14 +2075,14 @@ retry:
  * these days. ATAPI / SCSI specific code now mainly resides in
  * mmc_ioct().
  */
-int cdrom_ioctl(struct cdrom_device_info *cdi, struct inode *ip,
-		unsigned int cmd, unsigned long arg)
+int cdrom_ioctl(struct file * file, struct cdrom_device_info *cdi,
+		struct inode *ip, unsigned int cmd, unsigned long arg)
 {
 	struct cdrom_device_ops *cdo = cdi->ops;
 	int ret;
 
 	/* Try the generic SCSI command ioctl's first.. */
-	ret = scsi_cmd_ioctl(ip->i_bdev->bd_disk, cmd, (void __user *)arg);
+	ret = scsi_cmd_ioctl(file, ip->i_bdev->bd_disk, cmd, (void __user *)arg);
 	if (ret != -ENOTTY)
 		return ret;
 
@@ -2894,13 +2936,13 @@ struct cdrom_sysctl_settings {
 } cdrom_sysctl_settings;
 
 int cdrom_sysctl_info(ctl_table *ctl, int write, struct file * filp,
-                           void __user *buffer, size_t *lenp)
+                           void __user *buffer, size_t *lenp, loff_t *ppos)
 {
         int pos;
 	struct cdrom_device_info *cdi;
 	char *info = cdrom_sysctl_settings.info;
 	
-	if (!*lenp || (filp->f_pos && !write)) {
+	if (!*lenp || (*ppos && !write)) {
 		*lenp = 0;
 		return 0;
 	}
@@ -2989,7 +3031,7 @@ int cdrom_sysctl_info(ctl_table *ctl, int write, struct file * filp,
 
 	strcpy(info+pos,"\n\n");
 		
-        return proc_dostring(ctl, write, filp, buffer, lenp);
+        return proc_dostring(ctl, write, filp, buffer, lenp, ppos);
 }
 
 /* Unfortunately, per device settings are not implemented through
@@ -3021,13 +3063,13 @@ void cdrom_update_settings(void)
 }
 
 static int cdrom_sysctl_handler(ctl_table *ctl, int write, struct file * filp,
-				void __user *buffer, size_t *lenp)
+				void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int *valp = ctl->data;
 	int val = *valp;
 	int ret;
 	
-	ret = proc_dointvec(ctl, write, filp, buffer, lenp);
+	ret = proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
 
 	if (write && *valp != val) {
 	

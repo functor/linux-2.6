@@ -484,7 +484,7 @@ acpi_scan_rsdp (
 	 * RSDP signature.
 	 */
 	for (offset = 0; offset < length; offset += 16) {
-		if (strncmp((char *) __va(start + offset), "RSD PTR ", sig_len))
+		if (strncmp((char *) (start + offset), "RSD PTR ", sig_len))
 			continue;
 		return (start + offset);
 	}

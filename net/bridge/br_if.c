@@ -41,7 +41,7 @@ static int br_initial_port_cost(struct net_device *dev)
 	int err;
 
 	strncpy(ifr.ifr_name, dev->name, IFNAMSIZ);
-	ifr.ifr_data = (void *) &ecmd;
+	ifr.ifr_data = (void __user *) &ecmd;
 
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
@@ -75,9 +75,8 @@ static int br_initial_port_cost(struct net_device *dev)
 	return 100;	/* assume old 10Mbps */
 }
 
-static void destroy_nbp(void *arg)
+static void destroy_nbp(struct net_bridge_port *p)
 {
-	struct net_bridge_port *p = arg;
 	struct net_device *dev = p->dev;
 
 	dev->br_port = NULL;
@@ -86,6 +85,13 @@ static void destroy_nbp(void *arg)
 	dev_put(dev);
 
 	br_sysfs_freeif(p);
+}
+
+static void destroy_nbp_rcu(struct rcu_head *head)
+{
+	struct net_bridge_port *p =
+			container_of(head, struct net_bridge_port, rcu);
+	destroy_nbp(p);
 }
 
 /* called with RTNL */
@@ -108,7 +114,7 @@ static void del_nbp(struct net_bridge_port *p)
 	del_timer_sync(&p->forward_delay_timer);
 	del_timer_sync(&p->hold_timer);
 	
-	call_rcu(&p->rcu, destroy_nbp, p);
+	call_rcu(&p->rcu, destroy_nbp_rcu);
 }
 
 /* called with RTNL */
@@ -143,7 +149,7 @@ static struct net_device *new_bridge_dev(const char *name)
 
 	br->lock = SPIN_LOCK_UNLOCKED;
 	INIT_LIST_HEAD(&br->port_list);
-	br->hash_lock = RW_LOCK_UNLOCKED;
+	br->hash_lock = SPIN_LOCK_UNLOCKED;
 
 	br->bridge_id.prio[0] = 0x80;
 	br->bridge_id.prio[1] = 0x00;
@@ -289,6 +295,25 @@ int br_del_bridge(const char *name)
 	return ret;
 }
 
+/* Mtu of the bridge pseudo-device 1500 or the minimum of the ports */
+int br_min_mtu(const struct net_bridge *br)
+{
+	const struct net_bridge_port *p;
+	int mtu = 0;
+
+	ASSERT_RTNL();
+
+	if (list_empty(&br->port_list))
+		mtu = 1500;
+	else {
+		list_for_each_entry(p, &br->port_list, list) {
+			if (!mtu  || p->dev->mtu < mtu)
+				mtu = p->dev->mtu;
+		}
+	}
+	return mtu;
+}
+
 /* called with RTNL */
 int br_add_if(struct net_bridge *br, struct net_device *dev)
 {
@@ -319,9 +344,12 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 
 		spin_lock_bh(&br->lock);
 		br_stp_recalculate_bridge_id(br);
-		if ((br->dev->flags & IFF_UP) && (dev->flags & IFF_UP))
+		if ((br->dev->flags & IFF_UP) 
+		    && (dev->flags & IFF_UP) && netif_carrier_ok(dev))
 			br_stp_enable_port(p);
 		spin_unlock_bh(&br->lock);
+
+		dev_set_mtu(br->dev, br_min_mtu(br));
 	}
 
 	return err;

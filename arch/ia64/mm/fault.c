@@ -34,19 +34,12 @@ expand_backing_store (struct vm_area_struct *vma, unsigned long address)
 
 	grow = PAGE_SIZE >> PAGE_SHIFT;
 	if (address - vma->vm_start > current->rlim[RLIMIT_STACK].rlim_cur
-	    || (((vma->vm_mm->total_vm + grow) << PAGE_SHIFT) >
-		current->rlim[RLIMIT_AS].rlim_cur))
-		return -ENOMEM;
-	if (!vx_vmpages_avail(vma->vm_mm, grow) ||
-		((vma->vm_flags & VM_LOCKED) &&
-		!vx_vmlocked_avail(vma->vm_mm, grow)))
+	    || (((vma->vm_mm->total_vm + grow) << PAGE_SHIFT) > current->rlim[RLIMIT_AS].rlim_cur))
 		return -ENOMEM;
 	vma->vm_end += PAGE_SIZE;
-	// vma->vm_mm->total_vm += grow;
-	vx_vmpages_add(vma->vm_mm, grow);
+	vma->vm_mm->total_vm += grow;
 	if (vma->vm_flags & VM_LOCKED)
-		// vma->vm_mm->locked_vm += grow;
-		vx_vmlocked_add(vma->vm_mm, grow);
+		vma->vm_mm->locked_vm += grow;
 	return 0;
 }
 

@@ -19,29 +19,13 @@ extern void zap_low_mappings(void);
 
 extern unsigned long FASTCALL(acpi_copy_wakeup_routine(unsigned long));
 
-static void map_low(pgd_t *pgd_base, unsigned long start, unsigned long end)
+static void init_low_mapping(pgd_t *pgd, int pgd_limit)
 {
-	unsigned long vaddr;
-	pmd_t *pmd;
-	pgd_t *pgd;
-	int i, j;
+	int pgd_ofs = 0;
 
-	pgd = pgd_base;
-
-	for (i = 0; i < PTRS_PER_PGD; pgd++, i++) {
-		vaddr = i*PGDIR_SIZE;
-		if (end && (vaddr >= end))
-			break;
-		pmd = pmd_offset(pgd, 0);
-		for (j = 0; j < PTRS_PER_PMD; pmd++, j++) {
-			vaddr = i*PGDIR_SIZE + j*PMD_SIZE;
-			if (end && (vaddr >= end))
-				break;
-			if (vaddr < start)
-				continue;
-			set_pmd(pmd, __pmd(_KERNPG_TABLE + _PAGE_PSE +
-								vaddr - start));
-		}
+	while ((pgd_ofs < pgd_limit) && (pgd_ofs + USER_PTRS_PER_PGD < PTRS_PER_PGD)) {
+		set_pgd(pgd, *(pgd+USER_PTRS_PER_PGD));
+		pgd_ofs++, pgd++;
 	}
 }
 
@@ -55,9 +39,7 @@ int acpi_save_state_mem (void)
 {
 	if (!acpi_wakeup_address)
 		return 1;
-	if (!cpu_has_pse)
-		return 1;
-	map_low(swapper_pg_dir, 0, LOW_MAPPINGS_SIZE);
+	init_low_mapping(swapper_pg_dir, USER_PTRS_PER_PGD);
 	memcpy((void *) acpi_wakeup_address, &wakeup_start, &wakeup_end - &wakeup_start);
 	acpi_copy_wakeup_routine(acpi_wakeup_address);
 

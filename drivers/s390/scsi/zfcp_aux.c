@@ -29,7 +29,7 @@
  */
 
 /* this drivers version (do not edit !!! generated and updated by cvs) */
-#define ZFCP_AUX_REVISION "$Revision: 1.108 $"
+#define ZFCP_AUX_REVISION "$Revision: 1.115 $"
 
 #include "zfcp_ext.h"
 
@@ -40,8 +40,6 @@ static char *device;
 
 /* written against the module interface */
 static int __init  zfcp_module_init(void);
-
-int zfcp_reboot_handler(struct notifier_block *, unsigned long, void *);
 
 /* FCP related */
 static void zfcp_ns_gid_pn_handler(unsigned long);
@@ -310,6 +308,10 @@ zfcp_module_init(void)
 	/* initialize adapters to be removed list head */
 	INIT_LIST_HEAD(&zfcp_data.adapter_remove_lh);
 
+	zfcp_transport_template = fc_attach_transport(&zfcp_transport_functions);
+	if (!zfcp_transport_template)
+		return -ENODEV;
+
 #ifdef CONFIG_S390_SUPPORT
 	retval = register_ioctl32_conversion(zfcp_ioctl_trans.cmd,
 					     zfcp_ioctl_trans.handler);
@@ -334,9 +336,6 @@ zfcp_module_init(void)
 	/* initialise configuration rw lock */
 	rwlock_init(&zfcp_data.config_lock);
 
-	zfcp_data.reboot_notifier.notifier_call = zfcp_reboot_handler;
-	register_reboot_notifier(&zfcp_data.reboot_notifier);
-
 	/* save address of data structure managing the driver module */
 	zfcp_data.scsi_host_template.module = THIS_MODULE;
 
@@ -353,7 +352,6 @@ zfcp_module_init(void)
 	goto out;
 
  out_ccw_register:
-	unregister_reboot_notifier(&zfcp_data.reboot_notifier);
 	misc_deregister(&zfcp_cfdc_misc);
  out_misc_register:
 #ifdef CONFIG_S390_SUPPORT
@@ -364,23 +362,6 @@ zfcp_module_init(void)
  out:
 	return retval;
 }
-
-/*
- * This function is called automatically by the kernel whenever a reboot or a 
- * shut-down is initiated and zfcp is still loaded
- *
- * locks:       zfcp_data.config_sema is taken prior to shutting down the module
- *              and removing all structures
- * returns:     NOTIFY_DONE in all cases
- */
-int
-zfcp_reboot_handler(struct notifier_block *notifier, unsigned long code,
-		    void *ptr)
-{
-	zfcp_ccw_unregister();
-	return NOTIFY_DONE;
-}
-
 
 /*
  * function:    zfcp_cfdc_dev_ioctl
@@ -414,7 +395,7 @@ zfcp_cfdc_dev_ioctl(struct inode *inode, struct file *file,
 		retval = -ENOMEM;
 		goto out;
 	}
-	sg_list->count = 0;
+	memset(sg_list, 0, sizeof(*sg_list));
 
 	if (command != ZFCP_CFDC_IOC) {
 		ZFCP_LOG_INFO("IOC request code 0x%x invalid\n", command);
@@ -599,6 +580,7 @@ zfcp_sg_list_alloc(struct zfcp_sg_list *sg_list, size_t size)
 	sg_list->sg = kmalloc(sg_list->count * sizeof(struct scatterlist),
 			      GFP_KERNEL);
 	if (sg_list->sg == NULL) {
+		sg_list->count = 0;
 		retval = -ENOMEM;
 		goto out;
 	}
@@ -635,10 +617,12 @@ zfcp_sg_list_free(struct zfcp_sg_list *sg_list)
 	unsigned int i;
 	int retval = 0;
 
-	BUG_ON((sg_list->sg == NULL) || (sg_list == NULL));
+	BUG_ON(sg_list == NULL);
 
 	for (i = 0, sg = sg_list->sg; i < sg_list->count; i++, sg++)
 		__free_pages(sg->page, 0);
+
+	kfree(sg_list->sg);
 
 	return retval;
 }

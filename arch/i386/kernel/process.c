@@ -36,8 +36,6 @@
 #include <linux/module.h>
 #include <linux/kallsyms.h>
 #include <linux/ptrace.h>
-#include <linux/mman.h>
-#include <linux/random.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -48,7 +46,6 @@
 #include <asm/i387.h>
 #include <asm/irq.h>
 #include <asm/desc.h>
-#include <asm/atomic_kmap.h>
 #ifdef CONFIG_MATH_EMULATION
 #include <asm/math_emu.h>
 #endif
@@ -252,8 +249,6 @@ void show_regs(struct pt_regs * regs)
 	show_trace(NULL, &regs->esp);
 }
 
-EXPORT_SYMBOL_GPL(show_regs);
-
 /*
  * This gets run with %ebx containing the
  * function to call, and %edx containing
@@ -316,9 +311,6 @@ void flush_thread(void)
 	struct task_struct *tsk = current;
 
 	memset(tsk->thread.debugreg, 0, sizeof(unsigned long)*8);
-#ifdef CONFIG_X86_HIGH_ENTRY
-	clear_thread_flag(TIF_DB7);
-#endif
 	memset(tsk->thread.tls_array, 0, sizeof(tsk->thread.tls_array));	
 	/*
 	 * Forget coprocessor state..
@@ -332,8 +324,9 @@ void release_thread(struct task_struct *dead_task)
 	if (dead_task->mm) {
 		// temporary debugging check
 		if (dead_task->mm->context.size) {
-			printk("WARNING: dead process %8s still has LDT? <%d>\n",
+			printk("WARNING: dead process %8s still has LDT? <%p/%d>\n",
 					dead_task->comm,
+					dead_task->mm->context.ldt,
 					dead_task->mm->context.size);
 			BUG();
 		}
@@ -357,7 +350,7 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 {
 	struct pt_regs * childregs;
 	struct task_struct *tsk;
-	int err, i;
+	int err;
 
 	childregs = ((struct pt_regs *) (THREAD_SIZE + (unsigned long) p->thread_info)) - 1;
 	*childregs = *regs;
@@ -368,18 +361,7 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 	p->thread.esp = (unsigned long) childregs;
 	p->thread.esp0 = (unsigned long) (childregs+1);
 
-	/*
-	 * get the two stack pages, for the virtual stack.
-	 *
-	 * IMPORTANT: this code relies on the fact that the task
-	 * structure is an THREAD_SIZE aligned piece of physical memory.
-	 */
-	for (i = 0; i < ARRAY_SIZE(p->thread.stack_page); i++)
-		p->thread.stack_page[i] =
-				virt_to_page((unsigned long)p->thread_info + (i*PAGE_SIZE));
-
 	p->thread.eip = (unsigned long) ret_from_fork;
-	p->thread_info->real_stack = p->thread_info;
 
 	savesegment(fs,p->thread.fs);
 	savesegment(gs,p->thread.gs);
@@ -530,45 +512,11 @@ struct task_struct fastcall * __switch_to(struct task_struct *prev_p, struct tas
 	/* never put a printk in __switch_to... printk() calls wake_up*() indirectly */
 
 	__unlazy_fpu(prev_p);
-	if (next_p->mm)
-		load_user_cs_desc(cpu, next_p->mm);
 
-#ifdef CONFIG_X86_HIGH_ENTRY
-{
-	int i;
-	/*
-	 * Set the ptes of the virtual stack. (NOTE: a one-page TLB flush is
-	 * needed because otherwise NMIs could interrupt the
-	 * user-return code with a virtual stack and stale TLBs.)
-	 */
-	for (i = 0; i < ARRAY_SIZE(next->stack_page); i++) {
-		__kunmap_atomic_type(KM_VSTACK_TOP-i);
-		__kmap_atomic(next->stack_page[i], KM_VSTACK_TOP-i);
-	}
-	/*
-	 * NOTE: here we rely on the task being the stack as well
-	 */
-	next_p->thread_info->virtual_stack =
-			(void *)__kmap_atomic_vaddr(KM_VSTACK_TOP);
-}
-#if defined(CONFIG_PREEMPT) && defined(CONFIG_SMP)
-	/*
-	 * If next was preempted on entry from userspace to kernel,
-	 * and now it's on a different cpu, we need to adjust %esp.
-	 * This assumes that entry.S does not copy %esp while on the
-	 * virtual stack (with interrupts enabled): which is so,
-	 * except within __SWITCH_KERNELSPACE itself.
-	 */
-	if (unlikely(next->esp >= TASK_SIZE)) {
-		next->esp &= THREAD_SIZE - 1;
-		next->esp |= (unsigned long) next_p->thread_info->virtual_stack;
-	}
-#endif
-#endif
 	/*
 	 * Reload esp0, LDT and the page table pointer:
 	 */
-	load_virtual_esp0(tss, next_p);
+	load_esp0(tss, next);
 
 	/*
 	 * Load the per-thread Thread-Local Storage descriptor.
@@ -826,305 +774,5 @@ asmlinkage int sys_get_thread_area(struct user_desc __user *u_info)
 	if (copy_to_user(u_info, &info, sizeof(info)))
 		return -EFAULT;
 	return 0;
-}
-
-/*
- * Get a random word:
- */
-static inline unsigned int get_random_int(void)
-{
-	unsigned int val = 0;
-
-	if (!exec_shield_randomize)
-		return 0;
-
-#ifdef CONFIG_X86_HAS_TSC
-	rdtscl(val);
-#endif
-	val += current->pid + jiffies + (int)&val;
-
-	/*
-	 * Use IP's RNG. It suits our purpose perfectly: it re-keys itself
-	 * every second, from the entropy pool (and thus creates a limited
-	 * drain on it), and uses halfMD4Transform within the second. We
-	 * also spice it with the TSC (if available), jiffies, PID and the
-	 * stack address:
-	 */
-	return secure_ip_id(val);
-}
-
-unsigned long arch_align_stack(unsigned long sp)
-{
-	if (current->flags & PF_RELOCEXEC)
-		sp -= ((get_random_int() % 65536) << 4);
-	return sp & ~0xf;
-}
-
-#if SHLIB_BASE >= 0x01000000
-# error SHLIB_BASE must be under 16MB!
-#endif
-
-static unsigned long
-arch_get_unmapped_nonexecutable_area(struct mm_struct *mm, unsigned long addr, unsigned long len)
-{
-	struct vm_area_struct *vma, *prev_vma;
-	unsigned long stack_limit;
-	int first_time = 1;	
-
-	if (!mm->mmap_top) {
-		printk("hm, %s:%d, !mmap_top.\n", current->comm, current->pid);
-		mm->mmap_top = mmap_top();
-	}
-	stack_limit = mm->mmap_top;
-
-	/* requested length too big for entire address space */
-	if (len > TASK_SIZE) 
-		return -ENOMEM;
-
-	/* dont allow allocations above current stack limit */
-	if (mm->non_executable_cache > stack_limit)
-		mm->non_executable_cache = stack_limit;
-
-	/* requesting a specific address */
-        if (addr) {
-                addr = PAGE_ALIGN(addr);
-                vma = find_vma(mm, addr);
-		if (TASK_SIZE - len >= addr && 
-		    (!vma || addr + len <= vma->vm_start))
-			return addr;
-        }
-
-	/* make sure it can fit in the remaining address space */
-	if (mm->non_executable_cache < len)
-		return -ENOMEM;
-
-	/* either no address requested or cant fit in requested address hole */
-try_again:
-        addr = (mm->non_executable_cache - len)&PAGE_MASK;
-	do {
-       	 	if (!(vma = find_vma_prev(mm, addr, &prev_vma)))
-                        return -ENOMEM;
-
-		/* new region fits between prev_vma->vm_end and vma->vm_start, use it */
-		if (addr+len <= vma->vm_start && (!prev_vma || (addr >= prev_vma->vm_end))) {
-			/* remember the address as a hint for next time */
-			mm->non_executable_cache = addr;
-			return addr;
-
-		/* pull non_executable_cache down to the first hole */
-		} else if (mm->non_executable_cache == vma->vm_end)
-				mm->non_executable_cache = vma->vm_start;	
-
-		/* try just below the current vma->vm_start */
-		addr = vma->vm_start-len;
-        } while (len <= vma->vm_start);
-	/* if hint left us with no space for the requested mapping try again */
-	if (first_time) {
-		first_time = 0;
-		mm->non_executable_cache = stack_limit;
-		goto try_again;
-	}
-	return -ENOMEM;
-}
-
-static unsigned long randomize_range(unsigned long start, unsigned long end, unsigned long len)
-{
-	unsigned long range = end - len - start;
-	if (end <= start + len)
-		return 0;
-	return PAGE_ALIGN(get_random_int() % range + start);
-}
-
-static inline unsigned long
-stock_arch_get_unmapped_area(struct file *filp, unsigned long addr,
-		unsigned long len, unsigned long pgoff, unsigned long flags)
-{
-	struct mm_struct *mm = current->mm;
-	struct vm_area_struct *vma;
-	unsigned long start_addr;
-
-	if (len > TASK_SIZE)
-		return -ENOMEM;
-
-	if (addr) {
-		addr = PAGE_ALIGN(addr);
-		vma = find_vma(mm, addr);
-		if (TASK_SIZE - len >= addr &&
-		    (!vma || addr + len <= vma->vm_start))
-			return addr;
-	}
-	start_addr = addr = mm->free_area_cache;
-
-full_search:
-	for (vma = find_vma(mm, addr); ; vma = vma->vm_next) {
-		/* At this point:  (!vma || addr < vma->vm_end). */
-		if (TASK_SIZE - len < addr) {
-			/*
-			 * Start a new search - just in case we missed
-			 * some holes.
-			 */
-			if (start_addr != TASK_UNMAPPED_BASE) {
-				start_addr = addr = TASK_UNMAPPED_BASE;
-				goto full_search;
-			}
-			return -ENOMEM;
-		}
-		if (!vma || addr + len <= vma->vm_start) {
-			/*
-			 * Remember the place where we stopped the search:
-			 */
-			mm->free_area_cache = addr + len;
-			return addr;
-		}
-		addr = vma->vm_end;
-	}
-}
-
-unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr0,
-		unsigned long len0, unsigned long pgoff, unsigned long flags,
-		unsigned long prot)
-{
-	unsigned long addr = addr0, len = len0;
-	struct mm_struct *mm = current->mm;
-	struct vm_area_struct *vma;
-	int ascii_shield = 0;
-	unsigned long tmp;
-
-	/*
-	 * Fall back to the old layout:
-	 */
-	if (!(current->flags & PF_RELOCEXEC))
-	       return stock_arch_get_unmapped_area(filp, addr0, len0, pgoff, flags);
-	if (len > TASK_SIZE)
-		return -ENOMEM;
-
-	if (!addr && (prot & PROT_EXEC) && !(flags & MAP_FIXED))
-		addr = randomize_range(SHLIB_BASE, 0x01000000, len);
-
-	if (addr) {
-		addr = PAGE_ALIGN(addr);
-		vma = find_vma(mm, addr);
-		if (TASK_SIZE - len >= addr &&
-		    (!vma || addr + len <= vma->vm_start)) {
-			return addr;
-		}
-	}
-
-	if (prot & PROT_EXEC) {
-		ascii_shield = 1;
-		addr = SHLIB_BASE;
-	} else {
-		/* this can fail if the stack was unlimited */
-		if ((tmp = arch_get_unmapped_nonexecutable_area(mm, addr, len)) != -ENOMEM)
-			return tmp;
-search_upper:
-		addr = PAGE_ALIGN(arch_align_stack(TASK_UNMAPPED_BASE));
-	}
-
-	for (vma = find_vma(mm, addr); ; vma = vma->vm_next) {
-		/* At this point:  (!vma || addr < vma->vm_end). */
-		if (TASK_SIZE - len < addr) {
-			return -ENOMEM;
-		}
-		if (!vma || addr + len <= vma->vm_start) {
-			/*
-			 * Must not let a PROT_EXEC mapping get into the
-			 * brk area:
-			 */
-			if (ascii_shield && (addr + len > mm->brk)) {
-				ascii_shield = 0;
-				goto search_upper;
-			}
-			/*
-			 * Up until the brk area we randomize addresses
-			 * as much as possible:
-			 */
-			if (ascii_shield && (addr >= 0x01000000)) {
-				tmp = randomize_range(0x01000000, mm->brk, len);
-				vma = find_vma(mm, tmp);
-				if (TASK_SIZE - len >= tmp &&
-				    (!vma || tmp + len <= vma->vm_start))
-					return tmp;
-			}
-			/*
-			 * Ok, randomization didnt work out - return
-			 * the result of the linear search:
-			 */
-			return addr;
-		}
-		addr = vma->vm_end;
-	}
-}
-
-void arch_add_exec_range(struct mm_struct *mm, unsigned long limit)
-{
-	if (limit > mm->context.exec_limit) {
-		mm->context.exec_limit = limit;
-		set_user_cs(&mm->context.user_cs, limit);
-		if (mm == current->mm)
-			load_user_cs_desc(smp_processor_id(), mm);
-	}
-}
-
-void arch_remove_exec_range(struct mm_struct *mm, unsigned long old_end)
-{
-	struct vm_area_struct *vma;
-	unsigned long limit = 0;
-
-	if (old_end == mm->context.exec_limit) {
-		for (vma = mm->mmap; vma; vma = vma->vm_next)
-			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
-				limit = vma->vm_end;
-
-		mm->context.exec_limit = limit;
-		set_user_cs(&mm->context.user_cs, limit);
-		if (mm == current->mm)
-			load_user_cs_desc(smp_processor_id(), mm);
-	}
-}
-
-void arch_flush_exec_range(struct mm_struct *mm)
-{
-	mm->context.exec_limit = 0;
-	set_user_cs(&mm->context.user_cs, 0);
-}
-
-/*
- * Generate random brk address between 128MB and 196MB. (if the layout
- * allows it.)
- */
-void randomize_brk(unsigned long old_brk)
-{
-	unsigned long new_brk, range_start, range_end;
-
-	range_start = 0x08000000;
-	if (current->mm->brk >= range_start)
-		range_start = current->mm->brk;
-	range_end = range_start + 0x02000000;
-	new_brk = randomize_range(range_start, range_end, 0);
-	if (new_brk)
-		current->mm->brk = new_brk;
-}
-
-/*
- * Top of mmap area (just below the process stack).
- * leave an at least ~128 MB hole. Randomize it.
- */
-#define MIN_GAP (128*1024*1024)
-#define MAX_GAP (TASK_SIZE/6*5)
-
-unsigned long mmap_top(void)
-{
-	unsigned long gap = 0;
-
-	gap = current->rlim[RLIMIT_STACK].rlim_cur;
-	if (gap < MIN_GAP)
-		gap = MIN_GAP;
-	else if (gap > MAX_GAP)
-		gap = MAX_GAP;
-
-	gap = arch_align_stack(gap) & PAGE_MASK;
-
-	return TASK_SIZE - gap;
 }
 

@@ -142,7 +142,7 @@ EXPORT_SYMBOL(ckrm_classobj);
 
 static inline void set_callbacks_active(struct ckrm_classtype *ctype)
 {
-	ctype->ce_cb_active = ((atomic_read(&ctype->ce_nr_users) > 0) &&
+	ctype->ce_cb_active = ((atomic_read(&ctype->ce_regd) > 0) &&
 			       (ctype->ce_callbacks.always_callback
 				|| (ctype->num_classes > 1)));
 }
@@ -176,10 +176,11 @@ int ckrm_register_engine(const char *typename, ckrm_eng_callback_t * ecbs)
 	if (ctype == NULL)
 		return (-ENOENT);
 
-	ce_protect(ctype);
-	if (atomic_read(&ctype->ce_nr_users) != 1) {
-		// Some engine is acive, deregister it first.
-		ce_release(ctype);
+	atomic_inc(&ctype->ce_regd);
+
+	/* another engine registered or trying to register ? */
+	if (atomic_read(&ctype->ce_regd) != 1) {
+		atomic_dec(&ctype->ce_regd);
 		return (-EBUSY);
 	}
 
@@ -192,17 +193,10 @@ int ckrm_register_engine(const char *typename, ckrm_eng_callback_t * ecbs)
 	if (!(((ecbs->classify) && (ecbs->class_delete)) || (ecbs->notify)) ||
 	    (ecbs->c_interest && ecbs->classify == NULL) ||
 	    (ecbs->n_interest && ecbs->notify == NULL)) {
-		ce_release(ctype);
+		atomic_dec(&ctype->ce_regd);
 		return (-EINVAL);
 	}
 
-	/* Is any other engine registered for this classtype ? */
-	if (ctype->ce_regd) {
-		ce_release(ctype);
-		return (-EINVAL);
-	}
-
-	ctype->ce_regd = 1;
 	ctype->ce_callbacks = *ecbs;
 	set_callbacks_active(ctype);
 
@@ -235,13 +229,12 @@ int ckrm_unregister_engine(const char *typename)
 
 	ctype->ce_cb_active = 0;
 
-	if (atomic_dec_and_test(&ctype->ce_nr_users) != 1) {
+	if (atomic_read(&ctype->ce_nr_users) > 1) {
 		// Somebody is currently using the engine, cannot deregister.
-		atomic_inc(&ctype->ce_nr_users);
-		return (-EBUSY);
+		return (-EAGAIN);
 	}
 
-	ctype->ce_regd = 0;
+	atomic_set(&ctype->ce_regd, 0);
 	memset(&ctype->ce_callbacks, 0, sizeof(ckrm_eng_callback_t));
 	return 0;
 }

@@ -1,12 +1,6 @@
 static char *info =
     "1. Magic files\n"
     "\t|--rbce_info - read only file detailing how to setup and use RBCE.\n\n"
-    "\t|--rbce_reclassify - contains nothing. Writing a pid to it" 
-	"reclassifies\n"
-    "\tthe given task according to the current set of rules.\n"
-    "\tWriting 0 to it reclassifies all tasks in the system according to the \n"
-    "\tsurrent set of rules. This is typically done by the user/sysadmin \n"
-    "\tafter changing/creating rules. \n\n"
     "\t|--rbce_state - determines whether RBCE is currently active"
 	" or inactive.\n"
     "\tWriting 1 (0) activates (deactivates) the CE. Reading the file\n"

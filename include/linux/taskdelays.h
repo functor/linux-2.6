@@ -5,7 +5,7 @@
 #include <linux/types.h>
 
 struct task_delay_info {
-#ifdef CONFIG_DELAY_ACCT
+#if defined CONFIG_DELAY_ACCT 
 	/* delay statistics in usecs */
 	uint64_t waitcpu_total;
 	uint64_t runcpu_total;
@@ -14,7 +14,7 @@ struct task_delay_info {
 	uint32_t runs;
 	uint32_t num_iowaits;
 	uint32_t num_memwaits;
-#endif
+#endif				
 };
 
 #endif				// _LINUX_TASKDELAYS_H

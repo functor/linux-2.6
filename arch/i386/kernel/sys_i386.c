@@ -19,7 +19,6 @@
 #include <linux/mman.h>
 #include <linux/file.h>
 #include <linux/utsname.h>
-#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/ipc.h>
@@ -58,7 +57,7 @@ static inline long do_mmap2(
 	}
 
 	down_write(&current->mm->mmap_sem);
-	error = do_mmap_pgoff(current->mm, file, addr, len, prot, flags, pgoff);
+	error = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
 	up_write(&current->mm->mmap_sem);
 
 	if (file)
@@ -150,7 +149,7 @@ asmlinkage int sys_ipc (uint call, int first, int second,
 		union semun fourth;
 		if (!ptr)
 			return -EINVAL;
-		if (get_user(fourth.__pad, (void * __user *) ptr))
+		if (get_user(fourth.__pad, (void __user * __user *) ptr))
 			return -EFAULT;
 		return sys_semctl (first, second, third, fourth);
 	}
@@ -218,7 +217,7 @@ asmlinkage int sys_uname(struct old_utsname __user * name)
 	if (!name)
 		return -EFAULT;
 	down_read(&uts_sem);
-	err=copy_to_user(name, vx_new_utsname(), sizeof (*name));
+	err=copy_to_user(name, &system_utsname, sizeof (*name));
 	up_read(&uts_sem);
 	return err?-EFAULT:0;
 }
@@ -226,7 +225,6 @@ asmlinkage int sys_uname(struct old_utsname __user * name)
 asmlinkage int sys_olduname(struct oldold_utsname __user * name)
 {
 	int error;
-	struct new_utsname *ptr;
 
 	if (!name)
 		return -EFAULT;
@@ -235,16 +233,15 @@ asmlinkage int sys_olduname(struct oldold_utsname __user * name)
   
   	down_read(&uts_sem);
 	
-	ptr = vx_new_utsname();
-	error = __copy_to_user(&name->sysname,ptr->sysname,__OLD_UTS_LEN);
+	error = __copy_to_user(&name->sysname,&system_utsname.sysname,__OLD_UTS_LEN);
 	error |= __put_user(0,name->sysname+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->nodename,ptr->nodename,__OLD_UTS_LEN);
+	error |= __copy_to_user(&name->nodename,&system_utsname.nodename,__OLD_UTS_LEN);
 	error |= __put_user(0,name->nodename+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->release,ptr->release,__OLD_UTS_LEN);
+	error |= __copy_to_user(&name->release,&system_utsname.release,__OLD_UTS_LEN);
 	error |= __put_user(0,name->release+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->version,ptr->version,__OLD_UTS_LEN);
+	error |= __copy_to_user(&name->version,&system_utsname.version,__OLD_UTS_LEN);
 	error |= __put_user(0,name->version+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->machine,ptr->machine,__OLD_UTS_LEN);
+	error |= __copy_to_user(&name->machine,&system_utsname.machine,__OLD_UTS_LEN);
 	error |= __put_user(0,name->machine+__OLD_UTS_LEN);
 	
 	up_read(&uts_sem);

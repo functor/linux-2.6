@@ -100,7 +100,7 @@ do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm, struct kbd_str
 			/* disallocate map */
 			key_map = key_maps[s];
 			if (s && key_map) {
-			    key_maps[s] = 0;
+			    key_maps[s] = NULL;
 			    if (key_map[0] == U(K_ALLOCATED)) {
 					kfree(key_map);
 					keymap_count--;
@@ -915,7 +915,7 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		op.width = 8;
 		op.height = 0;
 		op.charcount = 256;
-		op.data = (char *) arg;
+		op.data = up;
 		return con_font_op(fg_console, &op);
 	}
 
@@ -925,7 +925,7 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		op.width = 8;
 		op.height = 32;
 		op.charcount = 256;
-		op.data = (char *) arg;
+		op.data = up;
 		return con_font_op(fg_console, &op);
 	}
 

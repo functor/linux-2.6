@@ -2,7 +2,7 @@
  * ichxrom.c
  *
  * Normal mappings of chips in physical memory
- * $Id: ichxrom.c,v 1.7 2004/07/14 18:14:09 eric Exp $
+ * $Id: ichxrom.c,v 1.8 2004/07/16 17:43:11 dwmw2 Exp $
  */
 
 #include <linux/module.h>
@@ -286,7 +286,7 @@ static int __devinit ichxrom_init_one (struct pci_dev *pdev,
 		info->mtd->unlock = ichxrom_unlock;
 	}
 	if (info->mtd->size > info->map.size) {
-		printk(KERN_WARNING MOD_NAME " rom(%u) larger than window(%u). fixing...\n",
+		printk(KERN_WARNING MOD_NAME " rom(%u) larger than window(%lu). fixing...\n",
 		       info->mtd->size, info->map.size);
 		info->mtd->size = info->map.size;
 	}

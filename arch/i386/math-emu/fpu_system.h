@@ -15,7 +15,6 @@
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
-#include <asm/atomic_kmap.h>
 
 /* This sets the pointer FPU_info to point to the argument part
    of the stack frame of math_emulate() */
@@ -23,7 +22,7 @@
 
 /* s is always from a cpu register, and the cpu does bounds checking
  * during register load --> no further bounds checks needed */
-#define LDT_DESCRIPTOR(s)	(((struct desc_struct *)__kmap_atomic_vaddr(KM_LDT_PAGE0))[(s) >> 3])
+#define LDT_DESCRIPTOR(s)	(((struct desc_struct *)current->mm->context.ldt)[(s) >> 3])
 #define SEG_D_SIZE(x)		((x).b & (3 << 21))
 #define SEG_G_BIT(x)		((x).b & (1 << 23))
 #define SEG_GRANULARITY(x)	(((x).b & (1 << 23)) ? 4096 : 1)

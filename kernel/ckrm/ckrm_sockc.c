@@ -59,7 +59,7 @@ struct ckrm_sock_class {
 static struct ckrm_sock_class sockclass_dflt_class = {
 };
 
-#define SOCKET_CLASS_TYPE_NAME  "socket_class"
+#define SOCKET_CLASS_TYPE_NAME  "socketclass"
 
 const char *dflt_sockclass_name = SOCKET_CLASS_TYPE_NAME;
 
@@ -463,6 +463,16 @@ sock_forced_reclassify(struct ckrm_core_class *target, const char *options)
 
 	if (!options)
 		return -EINVAL;
+
+	if (target == NULL) {
+		unsigned long id = simple_strtol(options,NULL,0);
+		if (!capable(CAP_NET_ADMIN))
+			return -EPERM;
+		if (id != 0) 
+			return -EINVAL;
+		printk("sock_class: reclassify all not net implemented\n");
+		return 0;
+	}
 
 	while ((p = strsep((char **)&options, ",")) != NULL) {
 		substring_t args[MAX_OPT_ARGS];

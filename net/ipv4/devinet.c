@@ -699,6 +699,20 @@ int devinet_ioctl(unsigned int cmd, void __user *arg)
 			inet_del_ifa(in_dev, ifap, 0);
 			ifa->ifa_mask = sin->sin_addr.s_addr;
 			ifa->ifa_prefixlen = inet_mask_len(ifa->ifa_mask);
+
+			/* See if current broadcast address matches
+			 * with current netmask, then recalculate
+			 * the broadcast address. Otherwise it's a
+			 * funny address, so don't touch it since
+			 * the user seems to know what (s)he's doing...
+			 */
+			if ((dev->flags & IFF_BROADCAST) &&
+			    (ifa->ifa_prefixlen < 31) &&
+			    (ifa->ifa_broadcast ==
+			     (ifa->ifa_local|~ifa->ifa_mask))) {
+				ifa->ifa_broadcast = (ifa->ifa_local |
+						      ~sin->sin_addr.s_addr);
+			}
 			inet_insert_ifa(ifa);
 		}
 		break;
@@ -1137,11 +1151,11 @@ void inet_forward_change(void)
 
 static int devinet_sysctl_forward(ctl_table *ctl, int write,
 				  struct file* filp, void __user *buffer,
-				  size_t *lenp)
+				  size_t *lenp, loff_t *ppos)
 {
 	int *valp = ctl->data;
 	int val = *valp;
-	int ret = proc_dointvec(ctl, write, filp, buffer, lenp);
+	int ret = proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
 
 	if (write && *valp != val) {
 		if (valp == &ipv4_devconf.forwarding)
@@ -1155,11 +1169,11 @@ static int devinet_sysctl_forward(ctl_table *ctl, int write,
 
 int ipv4_doint_and_flush(ctl_table *ctl, int write,
 			 struct file* filp, void __user *buffer,
-			 size_t *lenp)
+			 size_t *lenp, loff_t *ppos)
 {
 	int *valp = ctl->data;
 	int val = *valp;
-	int ret = proc_dointvec(ctl, write, filp, buffer, lenp);
+	int ret = proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
 
 	if (write && *valp != val)
 		rt_cache_flush(0);

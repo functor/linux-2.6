@@ -20,6 +20,7 @@
 #include <linux/security.h>
 #include <linux/pagemap.h>
 #include <linux/cdev.h>
+#include <linux/bootmem.h>
 
 /*
  * This is needed for the following functions:
@@ -89,7 +90,7 @@ spinlock_t inode_lock = SPIN_LOCK_UNLOCKED;
  * from its final dispose_list, the struct super_block they refer to
  * (for inode->i_sb->s_op) may already have been freed and reused.
  */
-static DECLARE_MUTEX(iprune_sem);
+DECLARE_MUTEX(iprune_sem);
 
 /*
  * Statistics gathering..
@@ -487,7 +488,7 @@ static int shrink_icache_memory(int nr, unsigned int gfp_mask)
 		if (gfp_mask & __GFP_FS)
 			prune_icache(nr);
 	}
-	return inodes_stat.nr_unused;
+	return (inodes_stat.nr_unused / 100) * sysctl_vfs_cache_pressure;
 }
 
 static void __wait_on_freeing_inode(struct inode *inode);
@@ -1234,26 +1235,26 @@ void remove_dquot_ref(struct super_block *sb, int type, struct list_head *tofree
 	if (!sb->dq_op)
 		return;	/* nothing to do */
 	spin_lock(&inode_lock);	/* This lock is for inodes code */
-	/* We don't have to lock against quota code - test IS_QUOTAINIT is just for speedup... */
- 
+
+	/* We hold dqptr_sem so we are safe against the quota code */
 	list_for_each(act_head, &inode_in_use) {
 		inode = list_entry(act_head, struct inode, i_list);
-		if (inode->i_sb == sb && IS_QUOTAINIT(inode))
+		if (inode->i_sb == sb && !IS_NOQUOTA(inode))
 			remove_inode_dquot_ref(inode, type, tofree_head);
 	}
 	list_for_each(act_head, &inode_unused) {
 		inode = list_entry(act_head, struct inode, i_list);
-		if (inode->i_sb == sb && IS_QUOTAINIT(inode))
+		if (inode->i_sb == sb && !IS_NOQUOTA(inode))
 			remove_inode_dquot_ref(inode, type, tofree_head);
 	}
 	list_for_each(act_head, &sb->s_dirty) {
 		inode = list_entry(act_head, struct inode, i_list);
-		if (IS_QUOTAINIT(inode))
+		if (!IS_NOQUOTA(inode))
 			remove_inode_dquot_ref(inode, type, tofree_head);
 	}
 	list_for_each(act_head, &sb->s_io) {
 		inode = list_entry(act_head, struct inode, i_list);
-		if (IS_QUOTAINIT(inode))
+		if (!IS_NOQUOTA(inode))
 			remove_inode_dquot_ref(inode, type, tofree_head);
 	}
 	spin_unlock(&inode_lock);
@@ -1345,54 +1346,29 @@ __setup("ihash_entries=", set_ihash_entries);
 /*
  * Initialize the waitqueues and inode hash table.
  */
+void __init inode_init_early(void)
+{
+	int loop;
+
+	inode_hashtable =
+		alloc_large_system_hash("Inode-cache",
+					sizeof(struct hlist_head),
+					ihash_entries,
+					14,
+					0,
+					&i_hash_shift,
+					&i_hash_mask);
+
+	for (loop = 0; loop < (1 << i_hash_shift); loop++)
+		INIT_HLIST_HEAD(&inode_hashtable[loop]);
+}
+
 void __init inode_init(unsigned long mempages)
 {
-	struct hlist_head *head;
-	unsigned long order;
-	unsigned int nr_hash;
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(i_wait_queue_heads); i++)
 		init_waitqueue_head(&i_wait_queue_heads[i].wqh);
-
-	if (!ihash_entries)
-		ihash_entries = PAGE_SHIFT < 14 ?
-				mempages >> (14 - PAGE_SHIFT) :
-				mempages << (PAGE_SHIFT - 14);
-
-	ihash_entries *= sizeof(struct hlist_head);
-	for (order = 0; ((1UL << order) << PAGE_SHIFT) < ihash_entries; order++)
-		;
-
-	do {
-		unsigned long tmp;
-
-		nr_hash = (1UL << order) * PAGE_SIZE /
-			sizeof(struct hlist_head);
-		i_hash_mask = (nr_hash - 1);
-
-		tmp = nr_hash;
-		i_hash_shift = 0;
-		while ((tmp >>= 1UL) != 0UL)
-			i_hash_shift++;
-
-		inode_hashtable = (struct hlist_head *)
-			__get_free_pages(GFP_ATOMIC, order);
-	} while (inode_hashtable == NULL && --order >= 0);
-
-	printk("Inode-cache hash table entries: %d (order: %ld, %ld bytes)\n",
-			nr_hash, order, (PAGE_SIZE << order));
-
-	if (!inode_hashtable)
-		panic("Failed to allocate inode hash table\n");
-
-	head = inode_hashtable;
-	i = nr_hash;
-	do {
-		INIT_HLIST_HEAD(head);
-		head++;
-		i--;
-	} while (i);
 
 	/* inode slab cache */
 	inode_cachep = kmem_cache_create("inode_cache", sizeof(struct inode),

@@ -978,7 +978,6 @@ struct task_struct *copy_process(unsigned long clone_flags,
  	}
 #endif
 
-	retval = -ENOMEM;
 	if ((retval = security_task_alloc(p)))
 		goto bad_fork_cleanup_policy;
 	if ((retval = audit_alloc(p)))
@@ -1097,7 +1096,6 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	} else
 		link_pid(p, p->pids + PIDTYPE_TGID, &p->group_leader->pids[PIDTYPE_TGID].pid);
 
-	p->ioprio = current->ioprio;
 	nr_threads++;
 	write_unlock_irq(&tasklist_lock);
 	retval = 0;

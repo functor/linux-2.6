@@ -55,12 +55,6 @@ static int int_timeout = 0;
 /* Time in jiffies before concluding the transmitter is hung. */
 #define TX_TIMEOUT  (2*HZ)
 
-#if !defined(__OPTIMIZE__)  ||  !defined(__KERNEL__)
-#warning  You must compile this file with the correct options!
-#warning  See the last lines of the source file.
-#error  You must compile this driver with "-O".
-#endif
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
@@ -2900,15 +2894,15 @@ static void __exit
 sbmac_cleanup_module(void)
 {
 	struct net_device *dev;
-	sbmac_port_t port;
 	int idx;
 
 	for (idx = 0; idx < MAX_UNITS; idx++) {
+		struct sbmac_softc *sc;
 		dev = dev_sbmac[idx];
 		if (!dev)
 			continue;
 
-		struct sbmac_softc *sc = netdev_priv(dev);
+		sc = netdev_priv(dev);
 		unregister_netdev(dev);
 		sbmac_uninitctx(sc);
 		free_netdev(dev);

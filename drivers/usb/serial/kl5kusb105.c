@@ -56,16 +56,10 @@
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-
-#ifdef CONFIG_USB_SERIAL_DEBUG
- 	static int debug = 1;
-#else
- 	static int debug;
-#endif
-
 #include "usb-serial.h"
 #include "kl5kusb105.h"
 
+static int debug;
 
 /*
  * Version Information
@@ -659,7 +653,8 @@ static void klsi_105_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 	} else if (urb->actual_length <= 2) {
 		dbg("%s - size %d URB not understood", __FUNCTION__,
 		    urb->actual_length);
-		usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, data);
+		usb_serial_debug_data(debug, &port->dev, __FUNCTION__,
+				      urb->actual_length, data);
 	} else {
 		int i;
 		int bytes_sent = ((__u8 *) data)[0] +
@@ -671,8 +666,8 @@ static void klsi_105_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 		 * intermixed tty_flip_buffer_push()s
 		 * FIXME
 		 */ 
-		usb_serial_debug_data (__FILE__, __FUNCTION__,
-				       urb->actual_length, data);
+		usb_serial_debug_data(debug, &port->dev, __FUNCTION__,
+				      urb->actual_length, data);
 
 		if (bytes_sent + 2 > urb->actual_length) {
 			dbg("%s - trying to read more data than available"
@@ -926,6 +921,7 @@ static int klsi_105_ioctl (struct usb_serial_port *port, struct file * file,
 			   unsigned int cmd, unsigned long arg)
 {
 	struct klsi_105_private *priv = usb_get_serial_port_data(port);
+	void __user *user_arg = (void __user *)arg;
 	
 	dbg("%scmd=0x%x", __FUNCTION__, cmd);
 
@@ -948,13 +944,12 @@ static int klsi_105_ioctl (struct usb_serial_port *port, struct file * file,
 
 	     dbg("%s - TCGETS data faked/incomplete", __FUNCTION__);
 
-	     retval = verify_area(VERIFY_WRITE, (void *)arg,
+	     retval = verify_area(VERIFY_WRITE, user_arg,
 				  sizeof(struct termios));
-
 	     if (retval)
-			 return(retval);
+			 return retval;
 
-	     if (kernel_termios_to_user_termios((struct termios *)arg,  
+	     if (kernel_termios_to_user_termios((struct termios __user *)arg,
 						&priv->termios))
 		     return -EFAULT;
 	     return(0);
@@ -965,14 +960,13 @@ static int klsi_105_ioctl (struct usb_serial_port *port, struct file * file,
 
 		dbg("%s - TCSETS not handled", __FUNCTION__);
 
-		retval = verify_area(VERIFY_READ, (void *)arg,
+		retval = verify_area(VERIFY_READ, user_arg,
 				     sizeof(struct termios));
-
 		if (retval)
-			    return(retval);
+			    return retval;
 
 		if (user_termios_to_kernel_termios(&priv->termios,
-						  (struct termios *)arg))
+						  (struct termios __user *)arg))
 			return -EFAULT;
 		klsi_105_set_termios(port, &priv->termios);
 		return(0);
@@ -1052,11 +1046,7 @@ MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL"); 
 
 
-MODULE_PARM(debug, "i");
+module_param(debug, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "enable extensive debugging messages");
-/* FIXME: implement
-MODULE_PARM(num_urbs, "i");
-MODULE_PARM_DESC(num_urbs, "number of URBs to use in write pool");
-*/
 
 /* vim: set sts=8 ts=8 sw=8: */

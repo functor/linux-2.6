@@ -126,12 +126,8 @@ video:	pushw	%ds		# We use different segments
 	call	mode_set			# Set the mode
 	jc	vid1
 
-#if 0
 	leaw	badmdt, %si			# Invalid mode ID
 	call	prtstr
-#else
-	jmp	vid1
-#endif /* CONFIG_VIDEO_IGNORE_BAD_MODE */
 vid2:	call	mode_menu
 vid1:
 #ifdef CONFIG_VIDEO_RETAIN

@@ -155,13 +155,6 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-
-#ifdef CONFIG_USB_SERIAL_DEBUG
-	static int debug = 1;
-#else
-	static int debug;
-#endif
-
 #include "usb-serial.h"
 #include "visor.h"
 
@@ -195,6 +188,7 @@ static int palm_os_3_probe (struct usb_serial *serial, const struct usb_device_i
 static int palm_os_4_probe (struct usb_serial *serial, const struct usb_device_id *id);
 
 /* Parameters that may be passed into the module. */
+static int debug;
 static __u16 vendor;
 static __u16 product;
 
@@ -247,6 +241,8 @@ static struct usb_device_id id_table [] = {
 		.driver_info = (kernel_ulong_t)&palm_os_4_probe },
 	{ USB_DEVICE(ACEECA_VENDOR_ID, ACEECA_MEZ1000_ID),
 		.driver_info = (kernel_ulong_t)&palm_os_4_probe },
+	{ USB_DEVICE(KYOCERA_VENDOR_ID, KYOCERA_7135_ID),
+		.driver_info = (kernel_ulong_t)&palm_os_4_probe },
 	{ },					/* optional parameter entry */
 	{ }					/* Terminating entry */
 };
@@ -290,6 +286,7 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(SAMSUNG_VENDOR_ID, SAMSUNG_SPH_I500_ID) },
 	{ USB_DEVICE(GARMIN_VENDOR_ID, GARMIN_IQUE_3600_ID) },
 	{ USB_DEVICE(ACEECA_VENDOR_ID, ACEECA_MEZ1000_ID) },
+	{ USB_DEVICE(KYOCERA_VENDOR_ID, KYOCERA_7135_ID) },
 	{ },					/* optional parameter entry */
 	{ }					/* Terminating entry */
 };
@@ -501,7 +498,7 @@ static int visor_write (struct usb_serial_port *port, int from_user, const unsig
 		memcpy (buffer, buf, count);
 	}
 
-	usb_serial_debug_data (__FILE__, __FUNCTION__, count, buffer);
+	usb_serial_debug_data(debug, &port->dev, __FUNCTION__, count, buffer);
 
 	usb_fill_bulk_urb (urb, serial->dev,
 			   usb_sndbulkpipe (serial->dev,
@@ -515,6 +512,7 @@ static int visor_write (struct usb_serial_port *port, int from_user, const unsig
 		dev_err(&port->dev, "%s - usb_submit_urb(write bulk) failed with status = %d\n",
 			__FUNCTION__, status);
 		count = status;
+		kfree (buffer);
 	} else {
 		bytes_out += count;
 	}
@@ -586,7 +584,7 @@ static void visor_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 		return;
 	}
 
-	usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, data);
+	usb_serial_debug_data(debug, &port->dev, __FUNCTION__, urb->actual_length, data);
 
 	tty = port->tty;
 	if (tty && urb->actual_length) {
@@ -617,6 +615,7 @@ static void visor_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 
 static void visor_read_int_callback (struct urb *urb, struct pt_regs *regs)
 {
+	struct usb_serial_port *port = (struct usb_serial_port *)urb->context;
 	int result;
 
 	switch (urb->status) {
@@ -643,8 +642,8 @@ static void visor_read_int_callback (struct urb *urb, struct pt_regs *regs)
 	 * Rumor has it this endpoint is used to notify when data
 	 * is ready to be read from the bulk ones.
 	 */
-	usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length,
-			       urb->transfer_buffer);
+	usb_serial_debug_data(debug, &port->dev, __FUNCTION__,
+			      urb->actual_length, urb->transfer_buffer);
 
 exit:
 	result = usb_submit_urb (urb, GFP_ATOMIC);
@@ -795,7 +794,8 @@ static int palm_os_4_probe (struct usb_serial *serial, const struct usb_device_i
 		dev_err(dev, "%s - error %d getting connection info\n",
 			__FUNCTION__, retval);
 	else
-		usb_serial_debug_data (__FILE__, __FUNCTION__, 0x14, transfer_buffer);
+		usb_serial_debug_data(debug, &serial->dev->dev, __FUNCTION__,
+				      retval, transfer_buffer);
 
 	kfree (transfer_buffer);
 	return 0;
@@ -881,18 +881,19 @@ static int treo_attach (struct usb_serial *serial)
 
 	/* Only do this endpoint hack for the Handspring devices with
 	 * interrupt in endpoints, which for now are the Treo devices. */
-	if ((serial->dev->descriptor.idVendor != HANDSPRING_VENDOR_ID) ||
+	if (!((serial->dev->descriptor.idVendor == HANDSPRING_VENDOR_ID) ||
+	      (serial->dev->descriptor.idVendor == KYOCERA_VENDOR_ID)) ||
 	    (serial->num_interrupt_in == 0))
 		return 0;
 
 	dbg("%s", __FUNCTION__);
 
 	/*
-	* It appears that Treos want to use the 1st interrupt endpoint to
-	* communicate with the 2nd bulk out endpoint, so let's swap the 1st
-	* and 2nd bulk in and interrupt endpoints.  Note that swapping the
-	* bulk out endpoints would break lots of apps that want to communicate
-	* on the second port.
+	* It appears that Treos and Kyoceras want to use the 
+	* 1st bulk in endpoint to communicate with the 2nd bulk out endpoint, 
+	* so let's swap the 1st and 2nd bulk in and interrupt endpoints.  
+	* Note that swapping the bulk out endpoints would break lots of 
+	* apps that want to communicate on the second port.
 	*/
 #define COPY_PORT(dest, src)						\
 	dest->read_urb = src->read_urb;					\

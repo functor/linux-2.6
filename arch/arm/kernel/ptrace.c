@@ -485,7 +485,7 @@ void ptrace_break(struct task_struct *tsk, struct pt_regs *regs)
 	info.si_signo = SIGTRAP;
 	info.si_errno = 0;
 	info.si_code  = TRAP_BRKPT;
-	info.si_addr  = (void *)instruction_pointer(regs);
+	info.si_addr  = (void __user *)instruction_pointer(regs);
 
 	force_sig_info(SIGTRAP, &info, tsk);
 }
@@ -754,8 +754,6 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 	read_unlock(&tasklist_lock);
 	if (!child)
 		goto out;
-	if (!vx_check(vx_task_xid(child), VX_WATCH|VX_IDENT))
-		goto out_tsk;
 
 	ret = -EPERM;
 	if (pid == 1)		/* you may not mess with init */

@@ -24,8 +24,8 @@
 #include <platforms/sbs8260.h>
 #endif
 
-#ifdef CONFIG_RPX6
-#include <platforms/rpxsuper.h>
+#ifdef CONFIG_RPX8260
+#include <platforms/rpx8260.h>
 #endif
 
 #ifdef CONFIG_WILLOW
@@ -34,6 +34,10 @@
 
 #ifdef CONFIG_TQM8260
 #include <platforms/tqm8260.h>
+#endif
+
+#ifdef CONFIG_PQ2ADS
+#include <platforms/pq2ads.h>
 #endif
 
 /* Make sure the memory translation stuff is there if PCI not used.

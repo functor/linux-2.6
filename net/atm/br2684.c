@@ -558,12 +558,12 @@ Note: we do not have explicit unassign, but look at _push()
 	atmvcc->push = br2684_push;
 	skb_queue_head_init(&copy);
 	skb_migrate(&atmvcc->sk->sk_receive_queue, &copy);
-	while ((skb = skb_dequeue(&copy))) {
+	while ((skb = skb_dequeue(&copy)) != NULL) {
 		BRPRIV(skb->dev)->stats.rx_bytes -= skb->len;
 		BRPRIV(skb->dev)->stats.rx_packets--;
 		br2684_push(atmvcc, skb);
 	}
-	(void) try_module_get(THIS_MODULE);
+	__module_get(THIS_MODULE);
 	return 0;
     error:
 	write_unlock_irq(&devs_lock);

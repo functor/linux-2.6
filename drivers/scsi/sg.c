@@ -42,7 +42,6 @@ static int sg_version_num = 30531;	/* 2 digits for each component */
 #include <linux/fcntl.h>
 #include <linux/init.h>
 #include <linux/poll.h>
-#include <linux/vmalloc.h>
 #include <linux/smp_lock.h>
 #include <linux/moduleparam.h>
 #include <linux/devfs_fs_kernel.h>
@@ -51,7 +50,7 @@ static int sg_version_num = 30531;	/* 2 digits for each component */
 
 #include <linux/blkdev.h>
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include <scsi/scsi_driver.h>
 #include <scsi/scsi_ioctl.h>
 #include <scsi/sg.h>
@@ -60,7 +59,7 @@ static int sg_version_num = 30531;	/* 2 digits for each component */
 
 #ifdef CONFIG_SCSI_PROC_FS
 #include <linux/proc_fs.h>
-static char *sg_version_date = "20040513";
+static char *sg_version_date = "20040516";
 
 static int sg_proc_init(void);
 static void sg_proc_cleanup(void);
@@ -73,7 +72,7 @@ static void sg_proc_cleanup(void);
 #define SG_ALLOW_DIO_DEF 0
 #define SG_ALLOW_DIO_CODE /* compile out by commenting this define */
 
-#define SG_MAX_DEVS 8192
+#define SG_MAX_DEVS 32768
 
 /*
  * Suppose you want to calculate the formula muldiv(x,m,d)=int(x * m / d)
@@ -235,6 +234,7 @@ sg_open(struct inode *inode, struct file *filp)
 	int res;
 	int retval;
 
+	nonseekable_open(inode, filp);
 	SCSI_LOG_TIMEOUT(3, printk("sg_open: dev=%d, flags=0x%x\n", dev, flags));
 	sdp = sg_get_dev(dev);
 	if ((!sdp) || (!sdp->device))
@@ -344,7 +344,6 @@ sg_read(struct file *filp, char __user *buf, size_t count, loff_t * ppos)
 		return -ENXIO;
 	SCSI_LOG_TIMEOUT(3, printk("sg_read: %s, count=%d\n",
 				   sdp->disk->disk_name, (int) count));
-	if (ppos != &filp->f_pos) ;	/* FIXME: Hmm.  Seek to the right place, or fail?  */
 	if ((k = verify_area(VERIFY_WRITE, buf, count)))
 		return k;
 	if (sfp->force_packid && (count >= SZ_SG_HEADER)) {
@@ -502,7 +501,6 @@ sg_write(struct file *filp, const char __user *buf, size_t count, loff_t * ppos)
 	if (!((filp->f_flags & O_NONBLOCK) ||
 	      scsi_block_when_processing_errors(sdp->device)))
 		return -ENXIO;
-	if (ppos != &filp->f_pos) ;	/* FIXME: Hmm.  Seek to the right place, or fail?  */
 
 	if ((k = verify_area(VERIFY_READ, buf, count)))
 		return k;	/* protects following copy_from_user()s + get_user()s */
@@ -718,8 +716,20 @@ sg_common_write(Sg_fd * sfp, Sg_request * srp,
 		    (void *) SRpnt->sr_buffer, hp->dxfer_len,
 		    sg_cmd_done, timeout, SG_DEFAULT_RETRIES);
 	/* dxfer_len overwrites SRpnt->sr_bufflen, hence need for b_malloc_len */
-	generic_unplug_device(q);
 	return 0;
+}
+
+static inline unsigned
+sg_jif_to_ms(int jifs)
+{
+	if (jifs <= 0)
+		return 0U;
+	else {
+		unsigned int j = (unsigned int) jifs;
+		return (j <
+			(UINT_MAX / 1000)) ? ((j * 1000) / HZ) : ((j / HZ) *
+								  1000);
+	}
 }
 
 static int
@@ -1331,9 +1341,11 @@ static int sg_alloc(struct gendisk *disk, struct scsi_device *scsidp)
 	void *old_sg_dev_arr = NULL;
 	int k, error;
 
-	sdp = vmalloc(sizeof(Sg_device));
-	if (!sdp)
+	sdp = kmalloc(sizeof(Sg_device), GFP_KERNEL);
+	if (!sdp) {
+		printk(KERN_WARNING "kmalloc Sg_device failure\n");
 		return -ENOMEM;
+	}
 
 	write_lock_irqsave(&sg_dev_arr_lock, iflags);
 	if (unlikely(sg_nr_dev >= sg_dev_max)) {	/* try to resize */
@@ -1341,7 +1353,7 @@ static int sg_alloc(struct gendisk *disk, struct scsi_device *scsidp)
 		int tmp_dev_max = sg_nr_dev + SG_DEV_ARR_LUMP;
 		write_unlock_irqrestore(&sg_dev_arr_lock, iflags);
 
-		tmp_da = vmalloc(tmp_dev_max * sizeof(Sg_device *));
+		tmp_da = kmalloc(tmp_dev_max * sizeof(Sg_device *), GFP_KERNEL);
 		if (unlikely(!tmp_da))
 			goto expand_failed;
 
@@ -1375,12 +1387,12 @@ static int sg_alloc(struct gendisk *disk, struct scsi_device *scsidp)
 
  out:
 	if (error < 0)
-		vfree(sdp);
-	vfree(old_sg_dev_arr);
+		kfree(sdp);
+	kfree(old_sg_dev_arr);
 	return error;
 
  expand_failed:
-	printk(KERN_ERR "sg_alloc: device array cannot be resized\n");
+	printk(KERN_WARNING "sg_alloc: device array cannot be resized\n");
 	error = -ENOMEM;
 	goto out;
 
@@ -1404,20 +1416,26 @@ sg_add(struct class_device *cl_dev)
 	int error, k;
 
 	disk = alloc_disk(1);
-	if (!disk)
+	if (!disk) {
+		printk(KERN_WARNING "alloc_disk failed\n");
 		return -ENOMEM;
+	}
 	disk->major = SCSI_GENERIC_MAJOR;
 
 	error = -ENOMEM;
 	cdev = cdev_alloc();
-	if (!cdev)
+	if (!cdev) {
+		printk(KERN_WARNING "cdev_alloc failed\n");
 		goto out;
+	}
 	cdev->owner = THIS_MODULE;
 	cdev->ops = &sg_fops;
 
 	error = sg_alloc(disk, scsidp);
-	if (error < 0)
+	if (error < 0) {
+		printk(KERN_WARNING "sg_alloc failed\n");
 		goto out;
+	}
 	k = error;
 	sdp = sg_dev_arr[k];
 
@@ -1525,7 +1543,7 @@ sg_remove(struct class_device *cl_dev)
 		put_disk(sdp->disk);
 		sdp->disk = NULL;
 		if (NULL == sdp->headfp)
-			vfree((char *) sdp);
+			kfree((char *) sdp);
 	}
 
 	if (delay)
@@ -1590,7 +1608,7 @@ exit_sg(void)
 	unregister_chrdev_region(MKDEV(SCSI_GENERIC_MAJOR, 0),
 				 SG_MAX_DEVS);
 	if (sg_dev_arr != NULL) {
-		vfree((char *) sg_dev_arr);
+		kfree((char *) sg_dev_arr);
 		sg_dev_arr = NULL;
 	}
 	sg_dev_max = 0;
@@ -2398,7 +2416,7 @@ sg_add_sfp(Sg_device * sdp, int dev)
 	Sg_fd *sfp;
 	unsigned long iflags;
 
-	sfp = (Sg_fd *) sg_page_malloc(sizeof (Sg_fd), 0, 0);
+	sfp = (Sg_fd *) sg_page_malloc(sizeof (Sg_fd), 0, NULL);
 	if (!sfp)
 		return NULL;
 	memset(sfp, 0, sizeof (Sg_fd));
@@ -2492,7 +2510,7 @@ sg_remove_sfp(Sg_device * sdp, Sg_fd * sfp)
 			}
 			if (k < maxd)
 				sg_dev_arr[k] = NULL;
-			vfree((char *) sdp);
+			kfree((char *) sdp);
 			res = 1;
 		}
 		write_unlock_irqrestore(&sg_dev_arr_lock, iflags);
@@ -2578,19 +2596,6 @@ sg_ms_to_jif(unsigned int msecs)
 		return ((int) msecs <
 			(INT_MAX / 1000)) ? (((int) msecs * HZ) / 1000)
 		    : (((int) msecs / 1000) * HZ);
-}
-
-static inline unsigned
-sg_jif_to_ms(int jifs)
-{
-	if (jifs <= 0)
-		return 0U;
-	else {
-		unsigned int j = (unsigned int) jifs;
-		return (j <
-			(UINT_MAX / 1000)) ? ((j * 1000) / HZ) : ((j / HZ) *
-								  1000);
-	}
 }
 
 static unsigned char allow_ops[] = { TEST_UNIT_READY, REQUEST_SENSE,
@@ -2808,7 +2813,7 @@ sg_proc_write_adio(struct file *filp, const char __user *buffer,
 	if (copy_from_user(buff, buffer, num))
 		return -EFAULT;
 	buff[num] = '\0';
-	sg_allow_dio = simple_strtoul(buff, 0, 10) ? 1 : 0;
+	sg_allow_dio = simple_strtoul(buff, NULL, 10) ? 1 : 0;
 	return count;
 }
 
@@ -2831,7 +2836,7 @@ sg_proc_write_dressz(struct file *filp, const char __user *buffer,
 	if (copy_from_user(buff, buffer, num))
 		return -EFAULT;
 	buff[num] = '\0';
-	k = simple_strtoul(buff, 0, 10);
+	k = simple_strtoul(buff, NULL, 10);
 	if (k <= 1048576) {	/* limit "big buff" to 1 MB */
 		sg_big_buff = k;
 		return count;

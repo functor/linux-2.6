@@ -16,6 +16,7 @@
  *
  */
 
+#include "prismcompat.h"
 #include "islpci_dev.h"
 #include "islpci_mgt.h"
 #include "isl_oid.h"
@@ -27,10 +28,6 @@ const int frequency_list_bg[] = { 2412, 2417, 2422, 2427, 2432, 2437, 2442,
 	2447, 2452, 2457, 2462, 2467, 2472, 2484
 };
 
-const int frequency_list_a[] = { 5170, 5180, 5190, 5200, 5210, 5220, 5230,
-	5240, 5260, 5280, 5300, 5320
-};
-
 int
 channel_of_freq(int f)
 {
@@ -39,17 +36,11 @@ channel_of_freq(int f)
 	if ((f >= 2412) && (f <= 2484)) {
 		while ((c < 14) && (f != frequency_list_bg[c]))
 			c++;
-		if (c >= 14)
-			return 0;
-	} else if ((f >= (int) 5170) && (f <= (int) 5320)) {
-		while ((c < 12) && (f != frequency_list_a[c]))
-			c++;
-		if (c >= 12)
-			return 0;
+		return (c >= 14) ? 0 : ++c;
+	} else if ((f >= (int) 5000) && (f <= (int) 6000)) {
+		return ( (f - 5000) / 5 );
 	} else
 		return 0;
-
-	return ++c;
 }
 
 #define OID_STRUCT(name,oid,s,t) [name] = {oid, 0, sizeof(s), t}
@@ -71,7 +62,7 @@ struct oid_t isl_oid[] = {
 
 	/* 802.11 */
 	OID_U32_C(DOT11_OID_BSSTYPE, 0x10000000),
-	OID_STRUCT_C(DOT11_OID_BSSID, 0x10000001, u8[6], OID_TYPE_SSID),
+	OID_STRUCT_C(DOT11_OID_BSSID, 0x10000001, u8[6], OID_TYPE_RAW),
 	OID_STRUCT_C(DOT11_OID_SSID, 0x10000002, struct obj_ssid,
 		     OID_TYPE_SSID),
 	OID_U32(DOT11_OID_STATE, 0x10000003),
@@ -228,7 +219,7 @@ struct oid_t isl_oid[] = {
 	OID_UNKNOWN(OID_INL_MEMORY, 0xFF020002),
 	OID_U32_C(OID_INL_MODE, 0xFF020003),
 	OID_UNKNOWN(OID_INL_COMPONENT_NR, 0xFF020004),
-	OID_UNKNOWN(OID_INL_VERSION, 0xFF020005),
+	OID_STRUCT(OID_INL_VERSION, 0xFF020005, u8[8], OID_TYPE_RAW),
 	OID_UNKNOWN(OID_INL_INTERFACE_ID, 0xFF020006),
 	OID_UNKNOWN(OID_INL_COMPONENT_ID, 0xFF020007),
 	OID_U32_C(OID_INL_CONFIG, 0xFF020008),
@@ -417,7 +408,7 @@ int
 mgt_set_request(islpci_private *priv, enum oid_num_t n, int extra, void *data)
 {
 	int ret = 0;
-	struct islpci_mgmtframe *response;
+	struct islpci_mgmtframe *response = NULL;
 	int response_op = PIMFOR_OP_ERROR;
 	int dlen;
 	void *cache, *_data = data;
@@ -449,7 +440,7 @@ mgt_set_request(islpci_private *priv, enum oid_num_t n, int extra, void *data)
 	if (cache)
 		down_write(&priv->mib_sem);
 
-	if (islpci_get_state(priv) >= PRV_STATE_INIT) {
+	if (islpci_get_state(priv) >= PRV_STATE_READY) {
 		ret = islpci_mgt_transaction(priv->ndev, PIMFOR_OP_SET, oid,
 					     _data, dlen, &response);
 		if (!ret) {
@@ -457,7 +448,7 @@ mgt_set_request(islpci_private *priv, enum oid_num_t n, int extra, void *data)
 			islpci_mgt_release(response);
 		}
 		if (ret || response_op == PIMFOR_OP_ERROR)
-		        ret = -EIO;
+			ret = -EIO;
 	} else if (!cache)
 		ret = -EIO;
 
@@ -482,13 +473,15 @@ mgt_get_request(islpci_private *priv, enum oid_num_t n, int extra, void *data,
 	int ret = -EIO;
 	int reslen = 0;
 	struct islpci_mgmtframe *response = NULL;
-	
+
 	int dlen;
 	void *cache, *_res = NULL;
 	u32 oid;
 
 	BUG_ON(OID_NUM_LAST <= n);
 	BUG_ON(extra > isl_oid[n].range);
+
+	res->ptr = NULL;
 
 	if (!priv->mib)
 		/* memory has been freed */
@@ -503,11 +496,11 @@ mgt_get_request(islpci_private *priv, enum oid_num_t n, int extra, void *data,
 	if (cache)
 		down_read(&priv->mib_sem);
 
-	if (islpci_get_state(priv) >= PRV_STATE_INIT) {
+	if (islpci_get_state(priv) >= PRV_STATE_READY) {
 		ret = islpci_mgt_transaction(priv->ndev, PIMFOR_OP_GET,
 					     oid, data, dlen, &response);
 		if (ret || !response ||
-			response->header->operation == PIMFOR_OP_ERROR) {
+		    response->header->operation == PIMFOR_OP_ERROR) {
 			if (response)
 				islpci_mgt_release(response);
 			ret = -EIO;
@@ -542,9 +535,9 @@ mgt_get_request(islpci_private *priv, enum oid_num_t n, int extra, void *data,
 	if (reslen > isl_oid[n].size)
 		printk(KERN_DEBUG
 		       "mgt_get_request(0x%x): received data length was bigger "
-		       "than expected (%d > %d). Memory is probably corrupted... ",
+		       "than expected (%d > %d). Memory is probably corrupted...",
 		       oid, reslen, isl_oid[n].size);
-	
+
 	return ret;
 }
 
@@ -564,11 +557,11 @@ mgt_commit_list(islpci_private *priv, enum oid_num_t *l, int n)
 		while (j <= t->range) {
 			response = NULL;
 			ret |= islpci_mgt_transaction(priv->ndev, PIMFOR_OP_SET,
-			                              oid, data, t->size,
+						      oid, data, t->size,
 						      &response);
 			if (response) {
 				ret |= (response->header->operation ==
-				        PIMFOR_OP_ERROR);
+					PIMFOR_OP_ERROR);
 				islpci_mgt_release(response);
 			}
 			j++;
@@ -622,15 +615,37 @@ static enum oid_num_t commit_part2[] = {
 	DOT11_OID_DEFKEYID,
 	DOT11_OID_DOT1XENABLE,
 	OID_INL_DOT11D_CONFORMANCE,
+	/* Do not initialize this - fw < 1.0.4.3 rejects it
 	OID_INL_OUTPUTPOWER,
+	*/
 };
+
+/* update the MAC addr. */
+static int
+mgt_update_addr(islpci_private *priv)
+{
+	struct islpci_mgmtframe *res = NULL;
+	int ret;
+
+	ret = islpci_mgt_transaction(priv->ndev, PIMFOR_OP_GET,
+				     isl_oid[GEN_OID_MACADDRESS].oid, NULL,
+				     isl_oid[GEN_OID_MACADDRESS].size, &res);
+
+	if ((ret == 0) && res && (res->header->operation != PIMFOR_OP_ERROR))
+		memcpy(priv->ndev->dev_addr, res->data, 6);
+	else
+		ret = -EIO;
+	if (res)
+		islpci_mgt_release(res);
+
+	return ret;
+}
 
 void
 mgt_commit(islpci_private *priv)
 {
 	int rvalue;
 	u32 u;
-	union oid_res_t r;
 
 	if (islpci_get_state(priv) < PRV_STATE_INIT)
 		return;
@@ -646,26 +661,19 @@ mgt_commit(islpci_private *priv)
 
 	u = OID_INL_MODE;
 	rvalue |= mgt_commit_list(priv, &u, 1);
+	rvalue |= mgt_update_addr(priv);
 
 	if (rvalue) {
 		/* some request have failed. The device might be in an
 		   incoherent state. We should reset it ! */
 		printk(KERN_DEBUG "%s: mgt_commit has failed. Restart the "
-                "device \n", priv->ndev->name);
+		       "device \n", priv->ndev->name);
 	}
-
-	/* update the MAC addr. As it's not cached, no lock will be acquired by
-	 * the mgt_get_request
-	 */
-	mgt_get_request(priv, GEN_OID_MACADDRESS, 0, NULL, &r);
-	memcpy(priv->ndev->dev_addr, r.ptr, 6);
-	kfree(r.ptr);
-
 }
 
 /* This will tell you if you are allowed to answer a mlme(ex) request .*/
 
-inline int
+int
 mgt_mlme_answer(islpci_private *priv)
 {
 	u32 mlmeautolevel;
@@ -682,18 +690,18 @@ mgt_mlme_answer(islpci_private *priv)
 		(mlmeautolevel >= DOT11_MLME_INTERMEDIATE));
 }
 
-inline enum oid_num_t
+enum oid_num_t
 mgt_oidtonum(u32 oid)
 {
 	int i;
 
-	for (i = 0; i < OID_NUM_LAST - 1; i++)
+	for (i = 0; i < OID_NUM_LAST; i++)
 		if (isl_oid[i].oid == oid)
 			return i;
 
 	printk(KERN_DEBUG "looking for an unknown oid 0x%x", oid);
 
-	return 0;
+	return OID_NUM_LAST;
 }
 
 int
@@ -713,8 +721,11 @@ mgt_response_to_str(enum oid_num_t n, union oid_res_t *r, char *str)
 	case OID_TYPE_BSS:{
 			struct obj_bss *bss = r->ptr;
 			return snprintf(str, PRIV_STR_SIZE,
-					"age=%u\nchannel=%u\n\
-				        capinfo=0x%X\nrates=0x%X\nbasic_rates=0x%X\n", bss->age, bss->channel, bss->capinfo, bss->rates, bss->basic_rates);
+					"age=%u\nchannel=%u\n"
+					"capinfo=0x%X\nrates=0x%X\n"
+					"basic_rates=0x%X\n", bss->age,
+					bss->channel, bss->capinfo,
+					bss->rates, bss->basic_rates);
 		}
 		break;
 	case OID_TYPE_BSSLIST:{
@@ -723,7 +734,9 @@ mgt_response_to_str(enum oid_num_t n, union oid_res_t *r, char *str)
 			k = snprintf(str, PRIV_STR_SIZE, "nr=%u\n", list->nr);
 			for (i = 0; i < list->nr; i++)
 				k += snprintf(str + k, PRIV_STR_SIZE - k,
-					      "bss[%u] : \nage=%u\nchannel=%u\ncapinfo=0x%X\nrates=0x%X\nbasic_rates=0x%X\n",
+					      "bss[%u] : \nage=%u\nchannel=%u\n"
+					      "capinfo=0x%X\nrates=0x%X\n"
+					      "basic_rates=0x%X\n",
 					      i, list->bsslist[i].age,
 					      list->bsslist[i].channel,
 					      list->bsslist[i].capinfo,
@@ -745,23 +758,25 @@ mgt_response_to_str(enum oid_num_t n, union oid_res_t *r, char *str)
 		break;
 	case OID_TYPE_MLME:{
 			struct obj_mlme *mlme = r->ptr;
-			return snprintf(str, PRIV_STR_SIZE, "id=0x%X\nstate=0x%X\n\
-			         code=0x%X\n", mlme->id, mlme->state,
-					mlme->code);
+			return snprintf(str, PRIV_STR_SIZE,
+					"id=0x%X\nstate=0x%X\ncode=0x%X\n",
+					mlme->id, mlme->state, mlme->code);
 		}
 		break;
 	case OID_TYPE_MLMEEX:{
 			struct obj_mlmeex *mlme = r->ptr;
-			return snprintf(str, PRIV_STR_SIZE, "id=0x%X\nstate=0x%X\n\
-			         code=0x%X\nsize=0x%X\n", mlme->id, mlme->state,
-					mlme->code, mlme->size);
+			return snprintf(str, PRIV_STR_SIZE,
+					"id=0x%X\nstate=0x%X\n"
+					"code=0x%X\nsize=0x%X\n", mlme->id,
+					mlme->state, mlme->code, mlme->size);
 		}
 		break;
 	case OID_TYPE_SSID:{
 			struct obj_ssid *ssid = r->ptr;
 			return snprintf(str, PRIV_STR_SIZE,
-					"length=%u\noctets=%s\n",
-					ssid->length, ssid->octets);
+					"length=%u\noctets=%.*s\n",
+					ssid->length, ssid->length,
+					ssid->octets);
 		}
 		break;
 	case OID_TYPE_KEY:{

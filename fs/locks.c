@@ -60,7 +60,7 @@
  *
  *  Initial implementation of mandatory locks. SunOS turned out to be
  *  a rotten model, so I implemented the "obvious" semantics.
- *  See 'linux/Documentation/mandatory.txt' for details.
+ *  See 'Documentation/mandatory.txt' for details.
  *  Andy Walker (andy@lysaker.kvaerner.no), April 06, 1996.
  *
  *  Don't allow mandatory locks on mmap()'ed files. Added simple functions to
@@ -177,7 +177,7 @@ void locks_init_lock(struct file_lock *fl)
 	init_waitqueue_head(&fl->fl_wait);
 	fl->fl_next = NULL;
 	fl->fl_fasync = NULL;
-	fl->fl_owner = 0;
+	fl->fl_owner = NULL;
 	fl->fl_pid = 0;
 	fl->fl_file = NULL;
 	fl->fl_flags = 0;

@@ -867,138 +867,6 @@ asmlinkage long sys32_ftruncate64(unsigned int fd, unsigned long high, unsigned 
 		return sys_ftruncate(fd, (high << 32) | low);
 }
 
-/* readdir & getdents */
-
-#define NAME_OFFSET(de) ((int) ((de)->d_name - (char __user *) (de)))
-#define ROUND_UP(x) (((x)+sizeof(u32)-1) & ~(sizeof(u32)-1))
-
-struct old_linux_dirent32 {
-	u32		d_ino;
-	u32		d_offset;
-	unsigned short	d_namlen;
-	char		d_name[1];
-};
-
-struct readdir_callback32 {
-	struct old_linux_dirent32 __user * dirent;
-	int count;
-};
-
-static int fillonedir(void * __buf, const char * name, int namlen,
-		      loff_t offset, ino_t ino, unsigned int d_type)
-{
-	struct readdir_callback32 * buf = (struct readdir_callback32 *) __buf;
-	struct old_linux_dirent32 __user * dirent;
-
-	if (buf->count)
-		return -EINVAL;
-	buf->count++;
-	dirent = buf->dirent;
-	put_user(ino, &dirent->d_ino);
-	put_user(offset, &dirent->d_offset);
-	put_user(namlen, &dirent->d_namlen);
-	copy_to_user(dirent->d_name, name, namlen);
-	put_user(0, dirent->d_name + namlen);
-	return 0;
-}
-
-asmlinkage long old32_readdir(unsigned int fd, struct old_linux_dirent32 __user *dirent, unsigned int count)
-{
-	int error = -EBADF;
-	struct file * file;
-	struct readdir_callback32 buf;
-
-	file = fget(fd);
-	if (!file)
-		goto out;
-
-	buf.count = 0;
-	buf.dirent = dirent;
-
-	error = vfs_readdir(file, fillonedir, &buf);
-	if (error < 0)
-		goto out_putf;
-	error = buf.count;
-
-out_putf:
-	fput(file);
-out:
-	return error;
-}
-
-struct linux_dirent32 {
-	u32		d_ino;
-	u32		d_off;
-	unsigned short	d_reclen;
-	char		d_name[1];
-};
-
-struct getdents_callback32 {
-	struct linux_dirent32 __user *current_dir;
-	struct linux_dirent32 __user *previous;
-	int count;
-	int error;
-};
-
-static int filldir(void * __buf, const char * name, int namlen, loff_t offset, ino_t ino,
-		   unsigned int d_type)
-{
-	struct linux_dirent32 __user * dirent;
-	struct getdents_callback32 * buf = (struct getdents_callback32 *) __buf;
-	int reclen = ROUND_UP(NAME_OFFSET(dirent) + namlen + 2);
-
-	buf->error = -EINVAL;	/* only used if we fail.. */
-	if (reclen > buf->count)
-		return -EINVAL;
-	dirent = buf->previous;
-	if (dirent)
-		put_user(offset, &dirent->d_off);
-	dirent = buf->current_dir;
-	buf->previous = dirent;
-	put_user(ino, &dirent->d_ino);
-	put_user(reclen, &dirent->d_reclen);
-	copy_to_user(dirent->d_name, name, namlen);
-	put_user(0, dirent->d_name + namlen);
-	put_user(d_type, (char __user *) dirent + reclen - 1);
-	dirent = (void __user *) dirent + reclen;
-	buf->current_dir = dirent;
-	buf->count -= reclen;
-	return 0;
-}
-
-asmlinkage long sys32_getdents(unsigned int fd, struct linux_dirent32 __user *dirent, unsigned int count)
-{
-	struct file * file;
-	struct linux_dirent32 __user *lastdirent;
-	struct getdents_callback32 buf;
-	int error = -EBADF;
-
-	file = fget(fd);
-	if (!file)
-		goto out;
-
-	buf.current_dir = dirent;
-	buf.previous = NULL;
-	buf.count = count;
-	buf.error = 0;
-
-	error = vfs_readdir(file, filldir, &buf);
-	if (error < 0)
-		goto out_putf;
-	lastdirent = buf.previous;
-	error = buf.error;
-	if (lastdirent) {
-		put_user(file->f_pos, &lastdirent->d_off);
-		error = count - buf.count;
-	}
-out_putf:
-	fput(file);
-out:
-	return error;
-}
-
-/* end of readdir & getdents */
-
 int cp_compat_stat(struct kstat *stat, struct compat_stat __user *statbuf)
 {
 	int err;
@@ -1293,9 +1161,9 @@ asmlinkage long compat_sys_sigaction(int sig, struct old_sigaction32 __user *act
 		u32 u_handler, u_restorer;
 		
 		ret = get_user(u_handler, &act->sa_handler);
-		new_ka.sa.sa_handler = (void *) (long) u_handler;
+		new_ka.sa.sa_handler =  compat_ptr(u_handler);
 		ret |= __get_user(u_restorer, &act->sa_restorer);
-		new_ka.sa.sa_restorer = (void *) (long) u_restorer;
+		new_ka.sa.sa_restorer = compat_ptr(u_restorer);
 		ret |= __get_user(new_ka.sa.sa_flags, &act->sa_flags);
 		ret |= __get_user(mask, &act->sa_mask);
 		if (ret)
@@ -1340,7 +1208,7 @@ asmlinkage long compat_sys_rt_sigaction(int sig,
 
 		new_ka.ka_restorer = restorer;
 		ret = get_user(u_handler, &act->sa_handler);
-		new_ka.sa.sa_handler = (void *) (long) u_handler;
+		new_ka.sa.sa_handler =  compat_ptr(u_handler);
 		ret |= __copy_from_user(&set32, &act->sa_mask, sizeof(compat_sigset_t));
 		switch (_NSIG_WORDS) {
 		case 4: new_ka.sa.sa_mask.sig[3] = set32.sig[6] | (((long)set32.sig[7]) << 32);
@@ -1350,7 +1218,7 @@ asmlinkage long compat_sys_rt_sigaction(int sig,
 		}
 		ret |= __get_user(new_ka.sa.sa_flags, &act->sa_flags);
 		ret |= __get_user(u_restorer, &act->sa_restorer);
-		new_ka.sa.sa_restorer = (void *) (long) u_restorer;
+		new_ka.sa.sa_restorer = compat_ptr(u_restorer);
                 if (ret)
                 	return -EFAULT;
 	}

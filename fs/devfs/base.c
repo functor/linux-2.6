@@ -857,12 +857,14 @@ static int devfsd_close(struct inode *inode, struct file *file);
 static ssize_t stat_read(struct file *file, char __user *buf, size_t len,
 			 loff_t * ppos);
 static struct file_operations stat_fops = {
+	.open = nonseekable_open,
 	.read = stat_read,
 };
 #endif
 
 /*  Devfs daemon file operations  */
 static struct file_operations devfsd_fops = {
+	.open = nonseekable_open,
 	.read = devfsd_read,
 	.ioctl = devfsd_ioctl,
 	.release = devfsd_close,
@@ -2490,28 +2492,11 @@ static int devfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
 	return 0;
 }				/*  End Function devfs_mknod  */
 
-static int devfs_readlink(struct dentry *dentry, char *buffer, int buflen)
-{
-	int err;
-	struct devfs_entry *de;
-
-	de = get_devfs_entry_from_vfs_inode(dentry->d_inode);
-	if (!de)
-		return -ENODEV;
-	err = vfs_readlink(dentry, buffer, buflen, de->u.symlink.linkname);
-	return err;
-}				/*  End Function devfs_readlink  */
-
 static int devfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
-	int err;
-	struct devfs_entry *de;
-
-	de = get_devfs_entry_from_vfs_inode(dentry->d_inode);
-	if (!de)
-		return -ENODEV;
-	err = vfs_follow_link(nd, de->u.symlink.linkname);
-	return err;
+	struct devfs_entry *p = get_devfs_entry_from_vfs_inode(dentry->d_inode);
+	nd_set_link(nd, p ? p->u.symlink.linkname : ERR_PTR(-ENODEV));
+	return 0;
 }				/*  End Function devfs_follow_link  */
 
 static struct inode_operations devfs_iops = {
@@ -2529,7 +2514,7 @@ static struct inode_operations devfs_dir_iops = {
 };
 
 static struct inode_operations devfs_symlink_iops = {
-	.readlink = devfs_readlink,
+	.readlink = generic_readlink,
 	.follow_link = devfs_follow_link,
 	.setattr = devfs_notify_change,
 };
@@ -2591,9 +2576,6 @@ static ssize_t devfsd_read(struct file *file, char __user *buf, size_t len,
 	struct devfsd_notify_struct *info = fs_info->devfsd_info;
 	DECLARE_WAITQUEUE(wait, current);
 
-	/*  Can't seek (pread) on this device  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 	/*  Verify the task has grabbed the queue  */
 	if (fs_info->devfsd_task != current)
 		return -EPERM;
@@ -2780,9 +2762,6 @@ static ssize_t stat_read(struct file *file, char __user *buf, size_t len,
 
 	num = sprintf(txt, "Number of entries: %u  number of bytes: %u\n",
 		      stat_num_entries, stat_num_bytes) + 1;
-	/*  Can't seek (pread) on this device  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 	if (*ppos >= num)
 		return 0;
 	if (*ppos + len > num)

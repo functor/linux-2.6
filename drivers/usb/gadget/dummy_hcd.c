@@ -146,8 +146,6 @@ struct dummy {
 	u8				fifo_buf [FIFO_SIZE];
 	u16				devstatus;
 
-	struct hcd_dev			*hdev;
-
 	/*
 	 * MASTER/HOST side support
 	 */
@@ -159,6 +157,8 @@ struct dummy {
 	struct completion		released;
 	unsigned			resuming:1;
 	unsigned long			re_timeout;
+
+	struct usb_device		*udev;
 };
 
 static struct dummy	*the_controller;
@@ -739,11 +739,9 @@ stop_activity (struct dummy *dum, struct usb_gadget_driver *driver)
 	struct dummy_ep	*ep;
 
 	/* prevent any more requests */
-	dum->hdev = 0;
 	dum->address = 0;
 
-	/* this might not succeed ... */
-	del_timer (&dum->timer);
+	/* The timer is left running so that outstanding URBs can fail */
 
 	/* nuke any pending requests first, so driver i/o is quiesced */
 	list_for_each_entry (ep, &dum->gadget.ep_list, ep.ep_list)
@@ -784,7 +782,6 @@ usb_gadget_unregister_driver (struct usb_gadget_driver *driver)
 
 	driver_unregister (&driver->driver);
 
-	del_timer_sync (&dum->timer);
 	return 0;
 }
 EXPORT_SYMBOL (usb_gadget_unregister_driver);
@@ -825,8 +822,12 @@ static int dummy_urb_enqueue (
 	dum = container_of (hcd, struct dummy, hcd);
 	spin_lock_irqsave (&dum->lock, flags);
 
-	if (!dum->hdev)
-		dum->hdev = urb->dev->hcpriv;
+	if (!dum->udev) {
+		dum->udev = urb->dev;
+		usb_get_dev (dum->udev);
+	} else if (unlikely (dum->udev != urb->dev))
+		dev_err (hardware, "usb_device address has changed!\n");
+
 	urb->hcpriv = dum;
 	if (usb_pipetype (urb->pipe) == PIPE_CONTROL)
 		urb->error_count = 1;		/* mark as a new urb */
@@ -994,10 +995,17 @@ static int periodic_bytes (struct dummy *dum, struct dummy_ep *ep)
 	return limit;
 }
 
+#define is_active(dum)	((dum->port_status & \
+		(USB_PORT_STAT_CONNECTION | USB_PORT_STAT_ENABLE | \
+			USB_PORT_STAT_SUSPEND)) \
+		== (USB_PORT_STAT_CONNECTION | USB_PORT_STAT_ENABLE))
+
 static struct dummy_ep *find_endpoint (struct dummy *dum, u8 address)
 {
 	int		i;
 
+	if (!is_active (dum))
+		return NULL;
 	if ((address & ~USB_DIR_IN) == 0)
 		return &dum->ep [0];
 	for (i = 1; i < DUMMY_ENDPOINTS; i++) {
@@ -1010,6 +1018,8 @@ static struct dummy_ep *find_endpoint (struct dummy *dum, u8 address)
 	}
 	return NULL;
 }
+
+#undef is_active
 
 #define Dev_Request	(USB_TYPE_STANDARD | USB_RECIP_DEVICE)
 #define Dev_InRequest	(Dev_Request | USB_DIR_IN)
@@ -1024,16 +1034,11 @@ static struct dummy_ep *find_endpoint (struct dummy *dum, u8 address)
 static void dummy_timer (unsigned long _dum)
 {
 	struct dummy		*dum = (struct dummy *) _dum;
-	struct hcd_dev		*hdev = dum->hdev;
+	struct hcd_dev		*hdev;
 	struct list_head	*entry, *tmp;
 	unsigned long		flags;
 	int			limit, total;
 	int			i;
-
-	if (!hdev) {
-		dev_err (hardware, "timer fired with device gone?\n");
-		return;
-	}
 
 	/* simplistic model for one frame's bandwidth */
 	switch (dum->gadget.speed) {
@@ -1055,6 +1060,14 @@ static void dummy_timer (unsigned long _dum)
 
 	/* look at each urb queued by the host side driver */
 	spin_lock_irqsave (&dum->lock, flags);
+
+	if (!dum->udev) {
+		dev_err (hardware, "timer fired with no URBs pending?\n");
+		spin_unlock_irqrestore (&dum->lock, flags);
+		return;
+	}
+	hdev = dum->udev->hcpriv;
+
 	for (i = 0; i < DUMMY_ENDPOINTS; i++) {
 		if (!ep_name [i])
 			break;
@@ -1152,11 +1165,6 @@ restart:
 			case USB_REQ_SET_ADDRESS:
 				if (setup.bRequestType != Dev_Request)
 					break;
-				if (dum->address != 0) {
-					maybe_set_status (urb, -ETIMEDOUT);
-					urb->actual_length = 0;
-					goto return_urb;
-				}
 				dum->address = setup.wValue;
 				maybe_set_status (urb, 0);
 				dev_dbg (hardware, "set_address = %d\n",
@@ -1331,7 +1339,11 @@ return_urb:
 
 	/* want a 1 msec delay here */
 	if (!list_empty (&hdev->urb_list))
-		mod_timer (&dum->timer, jiffies + 1);
+		mod_timer (&dum->timer, jiffies + msecs_to_jiffies(1));
+	else {
+		usb_put_dev (dum->udev);
+		dum->udev = NULL;
+	}
 
 	spin_unlock_irqrestore (&dum->lock, flags);
 }
@@ -1404,9 +1416,8 @@ static int dummy_hub_control (
 			break;
 		case USB_PORT_FEAT_POWER:
 			dum->port_status = 0;
-			dum->address = 0;
-			dum->hdev = 0;
 			dum->resuming = 0;
+			stop_activity(dum, dum->driver);
 			break;
 		default:
 			dum->port_status &= ~(1 << wValue);
@@ -1569,10 +1580,12 @@ show_urbs (struct device *dev, char *buf)
 	struct urb		*urb;
 	size_t			size = 0;
 	unsigned long		flags;
+	struct hcd_dev		*hdev;
 
 	spin_lock_irqsave (&dum->lock, flags);
-	if (dum->hdev) {
-		list_for_each_entry (urb, &dum->hdev->urb_list, urb_list) {
+	if (dum->udev) {
+		hdev = dum->udev->hcpriv;
+		list_for_each_entry (urb, &hdev->urb_list, urb_list) {
 			size_t		temp;
 
 			temp = show_urb (buf, PAGE_SIZE - size, urb);
@@ -1657,7 +1670,7 @@ clean0:
 	INIT_LIST_HEAD (&hcd->dev_list);
 	usb_register_bus (bus);
 
-	bus->root_hub = root = usb_alloc_dev (0, bus, 0);
+	root = usb_alloc_dev (0, bus, 0);
 	if (!root) {
 		retval = -ENOMEM;
 clean1:
@@ -1671,13 +1684,15 @@ clean1:
 	root->speed = USB_SPEED_HIGH;
 
 	/* ...then configured, so khubd sees us. */
-	if ((retval = hcd_register_root (&dum->hcd)) != 0) {
-		bus->root_hub = 0;
+	if ((retval = hcd_register_root (root, &dum->hcd)) != 0) {
 		usb_put_dev (root);
 clean2:
 		dum->hcd.state = USB_STATE_QUIESCING;
 		goto clean1;
 	}
+
+	/* only show a low-power port: just 8mA */
+	hub_set_power_budget (root, 8);
 
 	dum->started = 1;
 

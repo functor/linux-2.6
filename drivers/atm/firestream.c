@@ -1000,7 +1000,7 @@ static int fs_open(struct atm_vcc *atm_vcc)
 				} else {
 					r = ROUND_UP;
 				}
-				error = make_rate (pcr, r, &tmc0, 0);
+				error = make_rate (pcr, r, &tmc0, NULL);
 			}
 			fs_dprintk (FS_DEBUG_OPEN, "pcr = %d.\n", pcr);
 		}
@@ -1380,7 +1380,7 @@ static void __devinit *aligned_kmalloc (int size, int flags, int alignment)
 
 	if (alignment <= 0x10) {
 		t = kmalloc (size, flags);
-		if ((unsigned int)t & (alignment-1)) {
+		if ((unsigned long)t & (alignment-1)) {
 			printk ("Kmalloc doesn't align things correctly! %p\n", t);
 			kfree (t);
 			return aligned_kmalloc (size, flags, alignment * 4);

@@ -257,6 +257,11 @@ typedef struct _mgslpc_info {
     
 #define CHA     0x00   /* channel A offset */
 #define CHB     0x40   /* channel B offset */
+
+/*
+ *  FIXME: PPC has PVR defined in asm/reg.h.  For now we just undef it.
+ */
+#undef PVR
     
 #define RXFIFO  0
 #define TXFIFO  0
@@ -849,9 +854,8 @@ static inline int mgslpc_paranoia_check(MGSLPC_INFO *info,
 static BOOLEAN wait_command_complete(MGSLPC_INFO *info, unsigned char channel) 
 {
 	int i = 0;
-	unsigned char status;
 	/* wait for command completion */ 
-	while ((status = read_reg(info, (unsigned char)(channel+STAR)) & BIT2)) {
+	while (read_reg(info, (unsigned char)(channel+STAR)) & BIT2) {
 		udelay(1);
 		if (i++ == 1000)
 			return FALSE;
@@ -1513,7 +1517,7 @@ static void shutdown(MGSLPC_INFO * info)
 
 	if (info->tx_buf) {
 		free_page((unsigned long) info->tx_buf);
-		info->tx_buf = 0;
+		info->tx_buf = NULL;
 	}
 
 	spin_lock_irqsave(&info->lock,flags);
@@ -2591,7 +2595,7 @@ static void mgslpc_close(struct tty_struct *tty, struct file * filp)
 	shutdown(info);
 	
 	tty->closing = 0;
-	info->tty = 0;
+	info->tty = NULL;
 	
 	if (info->blocked_open) {
 		if (info->close_delay) {
@@ -2695,7 +2699,7 @@ static void mgslpc_hangup(struct tty_struct *tty)
 	
 	info->count = 0;	
 	info->flags &= ~ASYNC_NORMAL_ACTIVE;
-	info->tty = 0;
+	info->tty = NULL;
 
 	wake_up_interruptible(&info->open_wait);
 }
@@ -2872,7 +2876,7 @@ static int mgslpc_open(struct tty_struct *tty, struct file * filp)
 cleanup:			
 	if (retval) {
 		if (tty->count == 1)
-			info->tty = 0; /* tty layer will release tty struct */
+			info->tty = NULL;/* tty layer will release tty struct */
 		if(info->count)
 			info->count--;
 	}

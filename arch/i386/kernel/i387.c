@@ -227,7 +227,6 @@ void set_fpu_twd( struct task_struct *tsk, unsigned short twd )
 static int convert_fxsr_to_user( struct _fpstate __user *buf,
 					struct i387_fxsave_struct *fxsave )
 {
-	struct _fpreg tmp[8]; /* 80 bytes scratch area */
 	unsigned long env[7];
 	struct _fpreg __user *to;
 	struct _fpxreg *from;
@@ -244,33 +243,29 @@ static int convert_fxsr_to_user( struct _fpstate __user *buf,
 	if ( __copy_to_user( buf, env, 7 * sizeof(unsigned long) ) )
 		return 1;
 
-	to = tmp;
+	to = &buf->_st[0];
 	from = (struct _fpxreg *) &fxsave->st_space[0];
 	for ( i = 0 ; i < 8 ; i++, to++, from++ ) {
 		unsigned long __user *t = (unsigned long __user *)to;
 		unsigned long *f = (unsigned long *)from;
 
-		*t = *f;
-		*(t + 1) = *(f+1);
-		to->exponent = from->exponent;
+		if (__put_user(*f, t) ||
+				__put_user(*(f + 1), t + 1) ||
+				__put_user(from->exponent, &to->exponent))
+			return 1;
 	}
-	if (copy_to_user(buf->_st, tmp, sizeof(struct _fpreg [8])))
-		return 1;
 	return 0;
 }
 
 static int convert_fxsr_from_user( struct i387_fxsave_struct *fxsave,
 					  struct _fpstate __user *buf )
 {
-	struct _fpreg tmp[8]; /* 80 bytes scratch area */
 	unsigned long env[7];
 	struct _fpxreg *to;
 	struct _fpreg __user *from;
 	int i;
 
 	if ( __copy_from_user( env, buf, 7 * sizeof(long) ) )
-		return 1;
-	if (copy_from_user(tmp, buf->_st, sizeof(struct _fpreg [8])))
 		return 1;
 
 	fxsave->cwd = (unsigned short)(env[0] & 0xffff);
@@ -283,14 +278,15 @@ static int convert_fxsr_from_user( struct i387_fxsave_struct *fxsave,
 	fxsave->fos = env[6];
 
 	to = (struct _fpxreg *) &fxsave->st_space[0];
-	from = tmp;
+	from = &buf->_st[0];
 	for ( i = 0 ; i < 8 ; i++, to++, from++ ) {
 		unsigned long *t = (unsigned long *)to;
 		unsigned long __user *f = (unsigned long __user *)from;
 
-		*t = *f;
-		*(t + 1) = *(f + 1);
-		to->exponent = from->exponent;
+		if (__get_user(*t, f) ||
+				__get_user(*(t + 1), f + 1) ||
+				__get_user(to->exponent, &from->exponent))
+			return 1;
 	}
 	return 0;
 }

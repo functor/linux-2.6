@@ -19,7 +19,6 @@
 #include <linux/mc146818rtc.h>
 #include <linux/cache.h>
 #include <linux/interrupt.h>
-#include <linux/dump.h>
 
 #include <asm/mtrr.h>
 #include <asm/tlbflush.h>
@@ -144,13 +143,6 @@ inline void __send_IPI_shortcut(unsigned int shortcut, int vector)
 	 */
 	cfg = __prepare_ICR(shortcut, vector);
 
-	if (vector == DUMP_VECTOR) {
-		/*
-		 * Setup DUMP IPI to be delivered as an NMI
-		 */
-		cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
-	}
-
 	/*
 	 * Send the IPI. The write to APIC_ICR fires this off.
 	 */
@@ -228,13 +220,7 @@ inline void send_IPI_mask_sequence(cpumask_t mask, int vector)
 			 * program the ICR 
 			 */
 			cfg = __prepare_ICR(0, vector);
-		
-			if (vector == DUMP_VECTOR) {
-				/*
-				 * Setup DUMP IPI to be delivered as an NMI
-				 */
-				cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
-			}	
+			
 			/*
 			 * Send the IPI. The write to APIC_ICR fires this off.
 			 */
@@ -340,12 +326,10 @@ asmlinkage void smp_invalidate_interrupt (void)
 		 
 	if (flush_mm == cpu_tlbstate[cpu].active_mm) {
 		if (cpu_tlbstate[cpu].state == TLBSTATE_OK) {
-#ifndef CONFIG_X86_SWITCH_PAGETABLES
 			if (flush_va == FLUSH_ALL)
 				local_flush_tlb();
 			else
 				__flush_tlb_one(flush_va);
-#endif
 		} else
 			leave_mm(cpu);
 	}
@@ -411,6 +395,21 @@ static void flush_tlb_others(cpumask_t cpumask, struct mm_struct *mm,
 	spin_unlock(&tlbstate_lock);
 }
 	
+void flush_tlb_current_task(void)
+{
+	struct mm_struct *mm = current->mm;
+	cpumask_t cpu_mask;
+
+	preempt_disable();
+	cpu_mask = mm->cpu_vm_mask;
+	cpu_clear(smp_processor_id(), cpu_mask);
+
+	local_flush_tlb();
+	if (!cpus_empty(cpu_mask))
+		flush_tlb_others(cpu_mask, mm, FLUSH_ALL);
+	preempt_enable();
+}
+
 void flush_tlb_mm (struct mm_struct * mm)
 {
 	cpumask_t cpu_mask;
@@ -442,10 +441,7 @@ void flush_tlb_page(struct vm_area_struct * vma, unsigned long va)
 
 	if (current->active_mm == mm) {
 		if(current->mm)
-#ifndef CONFIG_X86_SWITCH_PAGETABLES
-			__flush_tlb_one(va)
-#endif
-				;
+			__flush_tlb_one(va);
 		 else
 		 	leave_mm(smp_processor_id());
 	}
@@ -468,11 +464,6 @@ static void do_flush_tlb_all(void* info)
 void flush_tlb_all(void)
 {
 	on_each_cpu(do_flush_tlb_all, NULL, 1, 1);
-}
-
-void dump_send_ipi(void)
-{
-	send_IPI_allbutself(DUMP_VECTOR);
 }
 
 /*
@@ -513,10 +504,7 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
  * <func> The function to run. This must be fast and non-blocking.
  * <info> An arbitrary pointer to pass to the function.
  * <nonatomic> currently unused.
- * <wait> If 1, wait (atomically) until function has completed on other CPUs.
- *        If 0, wait for the IPI to be received by other CPUs, but do not wait 
- *        for the completion of the function on each CPU.  
- *        If -1, do not wait for other CPUs to receive IPI.
+ * <wait> If true, wait (atomically) until function has completed on other CPUs.
  * [RETURNS] 0 on success, else a negative status code. Does not return until
  * remote CPUs are nearly ready to execute <<func>> or are or have executed.
  *
@@ -531,14 +519,13 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 		return 0;
 
 	/* Can deadlock when called with interrupts disabled */
-	/* Only if we are waiting for other CPU to ack */
-	WARN_ON(irqs_disabled() && wait >= 0);
+	WARN_ON(irqs_disabled());
 
 	data.func = func;
 	data.info = info;
 	atomic_set(&data.started, 0);
-	data.wait = wait > 0 ? wait : 0;
-	if (wait > 0)
+	data.wait = wait;
+	if (wait)
 		atomic_set(&data.finished, 0);
 
 	spin_lock(&call_lock);
@@ -549,11 +536,10 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 	send_IPI_allbutself(CALL_FUNCTION_VECTOR);
 
 	/* Wait for response */
-	if (wait >= 0)
-		while (atomic_read(&data.started) != cpus)
-			barrier();
+	while (atomic_read(&data.started) != cpus)
+		barrier();
 
-	if (wait > 0)
+	if (wait)
 		while (atomic_read(&data.finished) != cpus)
 			barrier();
 	spin_unlock(&call_lock);
@@ -561,7 +547,7 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 	return 0;
 }
 
-void stop_this_cpu (void * dummy)
+static void stop_this_cpu (void * dummy)
 {
 	/*
 	 * Remove this CPU:
@@ -586,8 +572,6 @@ void smp_send_stop(void)
 	disable_local_APIC();
 	local_irq_enable();
 }
-
-EXPORT_SYMBOL(smp_send_stop);
 
 /*
  * Reschedule call back. Nothing to do,
@@ -624,3 +608,4 @@ asmlinkage void smp_call_function_interrupt(void)
 		atomic_inc(&call_data->finished);
 	}
 }
+

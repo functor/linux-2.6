@@ -12,11 +12,6 @@
 	.type __kernel_vsyscall,@function
 __kernel_vsyscall:
 .LSTART_vsyscall:
-	cmpl $192, %eax
-	jne 1f
-	int $0x80
-	ret
-1:
 	push %ecx
 .Lpush_ecx:
 	push %edx
@@ -29,11 +24,11 @@ __kernel_vsyscall:
 	/* 7: align return point with nop's to make disassembly easier */
 	.space 7,0x90
 
-	/* 14: System call restart point is here! (SYSENTER_RETURN_OFFSET-2) */
+	/* 14: System call restart point is here! (SYSENTER_RETURN - 2) */
 	jmp .Lenter_kernel
 	/* 16: System call normal return point is here! */
-	.globl SYSENTER_RETURN_OFFSET	/* Symbol used by sysenter.c  */
-SYSENTER_RETURN_OFFSET:
+	.globl SYSENTER_RETURN	/* Symbol used by entry.S.  */
+SYSENTER_RETURN:
 	pop %ebp
 .Lpop_ebp:
 	pop %edx

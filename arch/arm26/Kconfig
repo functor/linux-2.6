@@ -327,8 +327,6 @@ config DEBUG_LL
 
 endmenu
 
-source "kernel/vserver/Kconfig"
-
 source "security/Kconfig"
 
 source "crypto/Kconfig"

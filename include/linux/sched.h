@@ -169,8 +169,6 @@ long io_schedule_timeout(long timeout);
 extern void cpu_init (void);
 extern void trap_init(void);
 extern void update_process_times(int user);
-extern void update_one_process(struct task_struct *p, unsigned long user,
-			       unsigned long system, int cpu);
 extern void scheduler_tick(int user_tick, int system);
 extern unsigned long cache_decay_ticks;
 
@@ -218,9 +216,6 @@ struct mm_struct {
 	unsigned long saved_auxv[40]; /* for /proc/PID/auxv */
 
 	unsigned dumpable:1;
-#ifdef CONFIG_HUGETLB_PAGE
-	int used_hugetlb;
-#endif
 	cpumask_t cpu_vm_mask;
 
 	/* Architecture-specific MM context */
@@ -315,6 +310,9 @@ struct user_struct {
 	atomic_t __count;	/* reference count */
 	atomic_t processes;	/* How many processes does this user have? */
 	atomic_t files;		/* How many open files does this user have? */
+	atomic_t sigpending;	/* How many pending signals does this user have? */
+	/* protected by mq_lock	*/
+	unsigned long mq_bytes;	/* How many bytes can be allocated to mqueue? */
 
 	/* Hash table maintenance information */
 	struct list_head uidhash_list;
@@ -346,6 +344,8 @@ struct k_itimer {
 	struct task_struct *it_process;	/* process to send signal to */
 	struct timer_list it_timer;
 	struct sigqueue *sigq;		/* signal queue entry. */
+	struct list_head abs_timer_entry; /* clock abs_timer_list */
+	struct timespec wall_to_prev;   /* wall_to_monotonic used when set */
 };
 
 
@@ -362,6 +362,12 @@ struct group_info {
 	gid_t *blocks[0];
 };
 
+/*
+ * get_group_info() must be called with the owning task locked (via task_lock())
+ * when task != current.  The reason being that the vast majority of callers are
+ * looking at current->group_info, which can not be changed except by the
+ * current task.  Changing current->group_info requires the task lock, too.
+ */
 #define get_group_info(group_info) do { \
 	atomic_inc(&(group_info)->usage); \
 } while (0)
@@ -405,6 +411,10 @@ struct task_struct {
 	unsigned int time_slice, first_time_slice;
 
 	struct list_head tasks;
+	/*
+	 * ptrace_list/ptrace_children forms the list of my children
+	 * that were stolen by a ptracer.
+	 */
 	struct list_head ptrace_children;
 	struct list_head ptrace_list;
 
@@ -426,6 +436,10 @@ struct task_struct {
 	 */
 	struct task_struct *real_parent; /* real parent process (when being debugged) */
 	struct task_struct *parent;	/* parent process */
+	/*
+	 * children/sibling forms the list of my children plus the
+	 * tasks I'm ptracing.
+	 */
 	struct list_head children;	/* list of my children */
 	struct list_head sibling;	/* linkage in my parent's children list */
 	struct task_struct *group_leader;	/* threadgroup leader */
@@ -506,8 +520,6 @@ struct task_struct {
 	struct backing_dev_info *backing_dev_info;
 
 	struct io_context *io_context;
-
-	int ioprio;
 
 	unsigned long ptrace_message;
 	siginfo_t *last_siginfo; /* For ptrace use.  */
@@ -699,9 +711,9 @@ extern void sched_balance_exec(void);
 
 extern void sched_idle_next(void);
 extern void set_user_nice(task_t *p, long nice);
-extern int task_prio(task_t *p);
-extern int task_nice(task_t *p);
-extern int task_curr(task_t *p);
+extern int task_prio(const task_t *p);
+extern int task_nice(const task_t *p);
+extern int task_curr(const task_t *p);
 extern int idle_cpu(int cpu);
 
 void yield(void);
@@ -737,6 +749,11 @@ extern void __set_special_pids(pid_t session, pid_t pgrp);
 
 /* per-UID process charging. */
 extern struct user_struct * alloc_uid(uid_t);
+static inline struct user_struct *get_uid(struct user_struct *u)
+{
+	atomic_inc(&u->__count);
+	return u;
+}
 extern void free_uid(struct user_struct *);
 extern void switch_uid(struct user_struct *);
 
@@ -923,7 +940,7 @@ extern void wait_task_inactive(task_t * p);
 #define while_each_thread(g, t) \
 	while ((t = next_thread(t)) != g)
 
-extern task_t * FASTCALL(next_thread(task_t *p));
+extern task_t * FASTCALL(next_thread(const task_t *p));
 
 #define thread_group_leader(p)	(p->pid == p->tgid)
 
@@ -940,7 +957,9 @@ static inline int thread_group_empty(task_t *p)
 extern void unhash_process(struct task_struct *p);
 
 /*
- * Protects ->fs, ->files, ->mm, ->ptrace and synchronises with wait4().
+ * Protects ->fs, ->files, ->mm, ->ptrace, ->group_info and synchronises with
+ * wait4().
+ *
  * Nests both inside and outside of read_lock(&tasklist_lock).
  * It must not be nested with write_lock_irq(&tasklist_lock),
  * neither inside nor outside.
@@ -1062,7 +1081,7 @@ extern void signal_wake_up(struct task_struct *t, int resume_stopped);
  */
 #ifdef CONFIG_SMP
 
-static inline unsigned int task_cpu(struct task_struct *p)
+static inline unsigned int task_cpu(const struct task_struct *p)
 {
 	return p->thread_info->cpu;
 }
@@ -1074,7 +1093,7 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 
 #else
 
-static inline unsigned int task_cpu(struct task_struct *p)
+static inline unsigned int task_cpu(const struct task_struct *p)
 {
 	return 0;
 }
@@ -1095,19 +1114,43 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 
 #define def_delay_var(var)		        unsigned long long var
 #define get_delay(tsk,field)                    ((tsk)->delays.field)
-#define delay_value(x)				(((unsigned long)(x))/1000)
 
 #define start_delay(var)                        ((var) = sched_clock())
 #define start_delay_set(var,flg)                (set_delay_flag(current,flg),(var) = sched_clock())
 
 #define inc_delay(tsk,field) (((tsk)->delays.field)++)
-#define add_delay_ts(tsk,field,start_ts,end_ts) ((tsk)->delays.field += delay_value((end_ts)-(start_ts)))
-#define add_delay_clear(tsk,field,start_ts,flg) (add_delay_ts(tsk,field,start_ts,sched_clock()),clear_delay_flag(tsk,flg))
 
-static inline void add_io_delay(unsigned long dstart) 
+/* because of hardware timer drifts in SMPs and task continue on different cpu
+ * then where the start_ts was taken there is a possibility that
+ * end_ts < start_ts by some usecs. In this case we ignore the diff
+ * and add nothing to the total.
+ */
+#ifdef CONFIG_SMP
+#define test_ts_integrity(start_ts,end_ts)  (likely((end_ts) > (start_ts)))
+#else
+#define test_ts_integrity(start_ts,end_ts)  (1)
+#endif
+
+#define add_delay_ts(tsk,field,start_ts,end_ts) \
+	do { if (test_ts_integrity(start_ts,end_ts)) (tsk)->delays.field += ((end_ts)-(start_ts)); } while (0)
+
+#define add_delay_clear(tsk,field,start_ts,flg)        \
+	do {                                           \
+		unsigned long long now = sched_clock();\
+           	add_delay_ts(tsk,field,start_ts,now);  \
+           	clear_delay_flag(tsk,flg);             \
+        } while (0)
+
+static inline void add_io_delay(unsigned long long dstart) 
 {
 	struct task_struct * tsk = current;
-	unsigned long val = delay_value(sched_clock()-dstart);
+	unsigned long long now = sched_clock();
+	unsigned long long val;
+
+	if (test_ts_integrity(dstart,now))
+		val = now - dstart;
+	else
+		val = 0;
 	if (test_delay_flag(tsk,PF_MEMIO)) {
 		tsk->delays.mem_iowait_total += val;
 		tsk->delays.num_memwaits++;

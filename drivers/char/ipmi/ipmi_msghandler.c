@@ -46,7 +46,7 @@
 #include <linux/init.h>
 #include <linux/proc_fs.h>
 
-#define IPMI_MSGHANDLER_VERSION "v31"
+#define IPMI_MSGHANDLER_VERSION "v32"
 
 struct ipmi_recv_msg *ipmi_alloc_recv_msg(void);
 static int ipmi_init_msghandler(void);
@@ -907,7 +907,7 @@ ipmb_checksum(unsigned char *data, int size)
 }
 
 static inline void format_ipmb_msg(struct ipmi_smi_msg   *smi_msg,
-				   struct ipmi_msg       *msg,
+				   struct kernel_ipmi_msg *msg,
 				   struct ipmi_ipmb_addr *ipmb_addr,
 				   long                  msgid,
 				   unsigned char         ipmb_seq,
@@ -949,7 +949,7 @@ static inline void format_ipmb_msg(struct ipmi_smi_msg   *smi_msg,
 }
 
 static inline void format_lan_msg(struct ipmi_smi_msg   *smi_msg,
-				  struct ipmi_msg       *msg,
+				  struct kernel_ipmi_msg *msg,
 				  struct ipmi_lan_addr  *lan_addr,
 				  long                  msgid,
 				  unsigned char         ipmb_seq,
@@ -993,7 +993,7 @@ static inline int i_ipmi_request(ipmi_user_t          user,
 				 ipmi_smi_t           intf,
 				 struct ipmi_addr     *addr,
 				 long                 msgid,
-				 struct ipmi_msg      *msg,
+				 struct kernel_ipmi_msg *msg,
 				 void                 *user_msg_data,
 				 void                 *supplied_smi,
 				 struct ipmi_recv_msg *supplied_recv,
@@ -1335,7 +1335,7 @@ static inline int i_ipmi_request(ipmi_user_t          user,
 		goto out_err;
 	}
 
-#if DEBUG_MSGING
+#ifdef DEBUG_MSGING
 	{
 		int m;
 		for (m=0; m<smi_msg->data_size; m++)
@@ -1356,7 +1356,7 @@ static inline int i_ipmi_request(ipmi_user_t          user,
 int ipmi_request(ipmi_user_t      user,
 		 struct ipmi_addr *addr,
 		 long             msgid,
-		 struct ipmi_msg  *msg,
+		 struct kernel_ipmi_msg  *msg,
 		 void             *user_msg_data,
 		 int              priority)
 {
@@ -1376,7 +1376,7 @@ int ipmi_request(ipmi_user_t      user,
 int ipmi_request_settime(ipmi_user_t      user,
 			 struct ipmi_addr *addr,
 			 long             msgid,
-			 struct ipmi_msg  *msg,
+			 struct kernel_ipmi_msg  *msg,
 			 void             *user_msg_data,
 			 int              priority,
 			 int              retries,
@@ -1399,7 +1399,7 @@ int ipmi_request_settime(ipmi_user_t      user,
 int ipmi_request_supply_msgs(ipmi_user_t          user,
 			     struct ipmi_addr     *addr,
 			     long                 msgid,
-			     struct ipmi_msg      *msg,
+			     struct kernel_ipmi_msg *msg,
 			     void                 *user_msg_data,
 			     void                 *supplied_smi,
 			     struct ipmi_recv_msg *supplied_recv,
@@ -1422,7 +1422,7 @@ int ipmi_request_supply_msgs(ipmi_user_t          user,
 int ipmi_request_with_source(ipmi_user_t      user,
 			     struct ipmi_addr *addr,
 			     long             msgid,
-			     struct ipmi_msg  *msg,
+			     struct kernel_ipmi_msg  *msg,
 			     void             *user_msg_data,
 			     int              priority,
 			     unsigned char    source_address,
@@ -1609,7 +1609,7 @@ static void remove_proc_entries(ipmi_smi_t smi)
 static int
 send_channel_info_cmd(ipmi_smi_t intf, int chan)
 {
-	struct ipmi_msg                   msg;
+	struct kernel_ipmi_msg            msg;
 	unsigned char                     data[1];
 	struct ipmi_system_interface_addr si;
 
@@ -1648,6 +1648,22 @@ channel_handler(ipmi_smi_t intf, struct ipmi_smi_msg *msg)
 		/* It's the one we want */
 		if (msg->rsp[2] != 0) {
 			/* Got an error from the channel, just go on. */
+
+			if (msg->rsp[2] == IPMI_INVALID_COMMAND_ERR) {
+				/* If the MC does not support this
+				   command, that is legal.  We just
+				   assume it has one IPMB at channel
+				   zero. */
+				intf->channels[0].medium
+					= IPMI_CHANNEL_MEDIUM_IPMB;
+				intf->channels[0].protocol
+					= IPMI_CHANNEL_PROTOCOL_IPMB;
+				rv = -ENOSYS;
+
+				intf->curr_channel = IPMI_MAX_CHANNELS;
+				wake_up(&intf->waitq);
+				goto out;
+			}
 			goto next_channel;
 		}
 		if (msg->rsp_size < 6) {
@@ -1671,10 +1687,20 @@ channel_handler(ipmi_smi_t intf, struct ipmi_smi_msg *msg)
 			wake_up(&intf->waitq);
 
 			printk(KERN_WARNING "ipmi_msghandler: Error sending"
-			       "channel information: 0x%x\n",
+			       "channel information: %d\n",
 			       rv);
 		}
 	}
+ out:
+	return;
+}
+
+void ipmi_poll_interface(ipmi_user_t user)
+{
+	ipmi_smi_t intf = user->intf;
+
+	if (intf->handlers->poll)
+		intf->handlers->poll(intf->send_info);
 }
 
 int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
@@ -2007,7 +2033,7 @@ static int handle_ipmb_get_msg_cmd(ipmi_smi_t          intf,
 		msg->data[10] = ipmb_checksum(&(msg->data[6]), 4);
 		msg->data_size = 11;
 
-#if DEBUG_MSGING
+#ifdef DEBUG_MSGING
 	{
 		int m;
 		printk("Invalid command:");
@@ -2398,7 +2424,7 @@ static int handle_new_recv_msg(ipmi_smi_t          intf,
 	int requeue;
 	int chan;
 
-#if DEBUG_MSGING
+#ifdef DEBUG_MSGING
 	int m;
 	printk("Recv:");
 	for (m=0; m<msg->rsp_size; m++)
@@ -2613,7 +2639,7 @@ send_from_recv_msg(ipmi_smi_t intf, struct ipmi_recv_msg *recv_msg,
 	   MC, which don't get resent. */
 	intf->handlers->sender(intf->send_info, smi_msg, 0);
 
-#if DEBUG_MSGING
+#ifdef DEBUG_MSGING
 	{
 		int m;
 		printk("Resend: ");
@@ -2847,7 +2873,7 @@ static void device_id_fetcher(ipmi_smi_t intf, struct ipmi_smi_msg *msg)
 
 static void send_panic_events(char *str)
 {
-	struct ipmi_msg                   msg;
+	struct kernel_ipmi_msg            msg;
 	ipmi_smi_t                        intf;
 	unsigned char                     data[16];
 	int                               i;
@@ -3072,7 +3098,7 @@ static struct notifier_block panic_block = {
 	200   /* priority: INT_MAX >= x >= 0 */
 };
 
-static __init int ipmi_init_msghandler(void)
+static int ipmi_init_msghandler(void)
 {
 	int i;
 
@@ -3086,7 +3112,7 @@ static __init int ipmi_init_msghandler(void)
 		ipmi_interfaces[i] = NULL;
 	}
 
-	proc_ipmi_root = proc_mkdir("ipmi", 0);
+	proc_ipmi_root = proc_mkdir("ipmi", NULL);
 	if (!proc_ipmi_root) {
 	    printk("Unable to create IPMI proc dir");
 	    return -ENOMEM;
@@ -3104,6 +3130,12 @@ static __init int ipmi_init_msghandler(void)
 
 	initialized = 1;
 
+	return 0;
+}
+
+static __init int ipmi_init_msghandler_mod(void)
+{
+	ipmi_init_msghandler();
 	return 0;
 }
 
@@ -3143,7 +3175,7 @@ static __exit void cleanup_ipmi(void)
 }
 module_exit(cleanup_ipmi);
 
-module_init(ipmi_init_msghandler);
+module_init(ipmi_init_msghandler_mod);
 MODULE_LICENSE("GPL");
 
 EXPORT_SYMBOL(ipmi_alloc_recv_msg);
@@ -3154,6 +3186,7 @@ EXPORT_SYMBOL(ipmi_request);
 EXPORT_SYMBOL(ipmi_request_settime);
 EXPORT_SYMBOL(ipmi_request_supply_msgs);
 EXPORT_SYMBOL(ipmi_request_with_source);
+EXPORT_SYMBOL(ipmi_poll_interface);
 EXPORT_SYMBOL(ipmi_register_smi);
 EXPORT_SYMBOL(ipmi_unregister_smi);
 EXPORT_SYMBOL(ipmi_register_for_cmd);

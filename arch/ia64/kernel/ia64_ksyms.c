@@ -103,9 +103,6 @@ EXPORT_SYMBOL(ia64_save_scratch_fpregs);
 #include <asm/unwind.h>
 EXPORT_SYMBOL(unw_init_running);
 
-#include <linux/efi.h>
-EXPORT_SYMBOL(efi_mem_type);
-
 #ifdef ASM_SUPPORTED
 # ifdef CONFIG_SMP
 #  if __GNUC__ < 3 || (__GNUC__ == 3 && __GNUC_MINOR__ < 3)
