@@ -245,7 +245,7 @@ BuildKernel() {
 	 grep "__crc_$i\$" System.map >> $RPM_BUILD_ROOT/boot/System.map-$KernelVer ||:
     done
     rm -f exported
-    install -m 644 init/kerntypes.o $RPM_BUILD_ROOT/boot/Kerntypes-$KernelVer
+#    install -m 644 init/kerntypes.o $RPM_BUILD_ROOT/boot/Kerntypes-$KernelVer
     install -m 644 .config $RPM_BUILD_ROOT/boot/config-$KernelVer
     rm -f System.map
     cp arch/*/boot/bzImage $RPM_BUILD_ROOT/%{image_install_path}/vmlinuz-$KernelVer
@@ -416,7 +416,7 @@ fi
 # make some useful links
 pushd /boot > /dev/null ; {
 	ln -sf System.map-%{KVERREL} System.map
-	ln -sf Kerntypes-%{KVERREL} Kerntypes
+#	ln -sf Kerntypes-%{KVERREL} Kerntypes
 	ln -sf config-%{KVERREL} config
 	ln -sf initrd-%{KVERREL}.img initrd-boot
 	ln -sf vmlinuz-%{KVERREL} kernel-boot
@@ -455,7 +455,7 @@ fi
 %files 
 %defattr(-,root,root)
 /%{image_install_path}/vmlinuz-%{KVERREL}
-/boot/Kerntypes-%{KVERREL}
+#/boot/Kerntypes-%{KVERREL}
 /boot/System.map-%{KVERREL}
 /boot/config-%{KVERREL}
 %dir /lib/modules/%{KVERREL}
@@ -468,7 +468,7 @@ fi
 %files smp
 %defattr(-,root,root)
 /%{image_install_path}/vmlinuz-%{KVERREL}smp
-/boot/Kerntypes-%{KVERREL}smp
+#/boot/Kerntypes-%{KVERREL}smp
 /boot/System.map-%{KVERREL}smp
 /boot/config-%{KVERREL}smp
 %dir /lib/modules/%{KVERREL}smp
