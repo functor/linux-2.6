@@ -254,7 +254,7 @@ int rbcedebug = 0x00;
 #define DBG_RULE             ( 0x20 )
 #define DBG_POLICY           ( 0x40 )
 
-#define DPRINTK(x, y...)   if (rbcedebug & (x)) printk(KERN_DEBUG y)
+#define DPRINTK(x, y...)   if (rbcedebug & (x)) printk(y)
 	// debugging selectively enabled through /proc/sys/debug/rbce
 
 static void print_context_vectors(void)
@@ -265,9 +265,9 @@ static void print_context_vectors(void)
 		return;
 	}
 	for (i = 0; i < NUM_TERM_MASK_VECTOR; i++) {
-		printk(KERN_DEBUG "%d: ", i);
+		printk("%d: ", i);
 		bitvector_print(DBG_OPTIMIZATION, gl_mask_vecs[i]);
-		printk(KERN_DEBUG "\n");
+		printk("\n");
 	}
 }
 #else
@@ -506,7 +506,7 @@ rbce_class_deletecb(const char *classname, void *classobj, int classtype)
 		}
 		notify_class_action(cls, 0);
 		cls->classobj = NULL;
-		list_for_each_entry(pos, &rules_list[classtype], link) {
+		list_for_each_entry(pos, &rules_list[cls->classtype], link) {
 			rule = (struct rbce_rule *)pos;
 			if (rule->target_class) {
 				if (!strcmp
@@ -1816,7 +1816,7 @@ static inline int valid_pdata(struct rbce_private_data *pdata)
 		}
 	}
 	spin_unlock(&pdata_lock);
-	printk(KERN_WARNING "INVALID/CORRUPT PDATA %p\n", pdata);
+	printk("INVALID/CORRUPT PDATA %p\n", pdata);
 	return 0;
 }
 
@@ -1829,7 +1829,7 @@ static inline void store_pdata(struct rbce_private_data *pdata)
 
 		while (i < MAX_PDATA) {
 			if (pdata_arr[pdata_next] == NULL) {
-				printk(KERN_DEBUG "storing %p at %d, count %d\n", pdata,
+				printk("storing %p at %d, count %d\n", pdata,
 				       pdata_next, pdata_count);
 				pdata_arr[pdata_next++] = pdata;
 				if (pdata_next == MAX_PDATA) {
@@ -1844,7 +1844,7 @@ static inline void store_pdata(struct rbce_private_data *pdata)
 		spin_unlock(&pdata_lock);
 	}
 	if (i == MAX_PDATA) {
-		printk(KERN_DEBUG "PDATA BUFFER FULL pdata_count %d pdata %p\n",
+		printk("PDATA BUFFER FULL pdata_count %d pdata %p\n",
 		       pdata_count, pdata);
 	}
 }
@@ -1856,7 +1856,7 @@ static inline void unstore_pdata(struct rbce_private_data *pdata)
 		spin_lock(&pdata_lock);
 		for (i = 0; i < MAX_PDATA; i++) {
 			if (pdata_arr[i] == pdata) {
-				printk(KERN_DEBUG "unstoring %p at %d, count %d\n", pdata,
+				printk("unstoring %p at %d, count %d\n", pdata,
 				       i, pdata_count);
 				pdata_arr[i] = NULL;
 				pdata_count--;
@@ -1866,7 +1866,7 @@ static inline void unstore_pdata(struct rbce_private_data *pdata)
 		}
 		spin_unlock(&pdata_lock);
 		if (i == MAX_PDATA) {
-			printk(KERN_DEBUG "pdata %p not found in the stored array\n",
+			printk("pdata %p not found in the stored array\n",
 			       pdata);
 		}
 	}
@@ -1929,7 +1929,7 @@ static struct rbce_private_data *create_private_data(struct rbce_private_data
 		//      pdata->evaluate = src->evaluate;
 		//      if(src->app_tag) {
 		//              int len = strlen(src->app_tag)+1;
-		//              printk(KERN_DEBUG "CREATE_PRIVATE: apptag %s len %d\n",
+		//              printk("CREATE_PRIVATE: apptag %s len %d\n",
 		//                          src->app_tag,len);
 		//              pdata->app_tag = kmalloc(len, GFP_ATOMIC);
 		//              if (pdata->app_tag) {
@@ -2262,7 +2262,7 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 	 * [ CKRM_LATCHABLE_EVENTS .. CKRM_NONLATCHABLE_EVENTS ) 
 	 */
 
-	// printk(KERN_DEBUG "tc_classify %p:%d:%s '%s'\n",tsk,tsk->pid,
+	// printk("tc_classify %p:%d:%s '%s'\n",tsk,tsk->pid,
 	// 			tsk->comm,event_names[event]);
 
 	switch (event) {
@@ -2314,7 +2314,7 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 		break;
 
 	}
-	// printk(KERN_DEBUG "tc_classify %p:%d:%s '%s' ==> %p\n",tsk,tsk->pid,
+	// printk("tc_classify %p:%d:%s '%s' ==> %p\n",tsk,tsk->pid,
 	//			tsk->comm,event_names[event],cls);
 
 	return cls;
@@ -2323,7 +2323,7 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 #ifndef RBCE_EXTENSION
 static void rbce_tc_notify(int event, void *core, struct task_struct *tsk)
 {
-	printk(KERN_DEBUG "tc_manual %p:%d:%s '%s'\n", tsk, tsk->pid, tsk->comm,
+	printk("tc_manual %p:%d:%s '%s'\n", tsk, tsk->pid, tsk->comm,
 	       event_names[event]);
 	if (event != CKRM_EVENT_MANUAL)
 		return;
@@ -2409,10 +2409,10 @@ static void unregister_classtype_engines(void)
 
 	while (ceptr->name) {
 		if (*ceptr->clsvar >= 0) {
-			printk(KERN_DEBUG "ce unregister with <%s>\n",ceptr->name);
+			printk("ce unregister with <%s>\n",ceptr->name);
 			while ((rc = ckrm_unregister_engine(ceptr->name)) == -EAGAIN)
 				;
-			printk(KERN_DEBUG "ce unregister with <%s> rc=%d\n",ceptr->name,rc);
+			printk("ce unregister with <%s> rc=%d\n",ceptr->name,rc);
 			*ceptr->clsvar = -1;
 		}
 		ceptr++;
@@ -2426,7 +2426,7 @@ static int register_classtype_engines(void)
 
 	while (ceptr->name) {
 		rc = ckrm_register_engine(ceptr->name, ceptr->cbs);
-		printk(KERN_DEBUG "ce register with <%s> typeId=%d\n",ceptr->name,rc);
+		printk("ce register with <%s> typeId=%d\n",ceptr->name,rc);
 		if ((rc < 0) && (rc != -ENOENT)) {
 			unregister_classtype_engines();
 			return (rc);
@@ -2506,7 +2506,7 @@ int init_rbce(void)
 {
 	int rc, i, line;
 
-	printk(KERN_DEBUG "<1>\nInstalling \'%s\' module\n", modname);
+	printk("<1>\nInstalling \'%s\' module\n", modname);
 
 	for (i = 0; i < CKRM_MAX_CLASSTYPES; i++) {
 		INIT_LIST_HEAD(&rules_list[i]);
@@ -2555,7 +2555,7 @@ int init_rbce(void)
 	exit_rbce_ext();
       out:
 
-	printk(KERN_DEBUG "<1>%s: error installing rc=%d line=%d\n", __FUNCTION__, rc,
+	printk("<1>%s: error installing rc=%d line=%d\n", __FUNCTION__, rc,
 	       line);
 	return rc;
 }
@@ -2564,19 +2564,19 @@ void exit_rbce(void)
 {
 	int i;
 
-	printk(KERN_DEBUG "<1>Removing \'%s\' module\n", modname);
+	printk("<1>Removing \'%s\' module\n", modname);
 
 	stop_debug();
 	exit_rbce_ext();
 
 	// Print warnings if lists are not empty, which is a bug
 	if (!list_empty(&class_list)) {
-		printk(KERN_DEBUG "exit_rbce: Class list is not empty\n");
+		printk("exit_rbce: Class list is not empty\n");
 	}
 
 	for (i = 0; i < CKRM_MAX_CLASSTYPES; i++) {
 		if (!list_empty(&rules_list[i])) {
-			printk(KERN_DEBUG "exit_rbce: Rules list for classtype %d"
+			printk("exit_rbce: Rules list for classtype %d"
 			     " is not empty\n", i);
 		}
 	}

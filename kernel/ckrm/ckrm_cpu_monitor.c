@@ -763,7 +763,7 @@ static int ckrm_cpu_idled(void *nothing)
 	set_user_nice(current,19);
 	daemonize("ckrm_idle_task");
 
-	//deactivate it, it will be awakened by ckrm_cpu_monitor
+	//deactivate it, it will be waked up by ckrm_cpu_monitor
 	current->state = TASK_INTERRUPTIBLE;
 	schedule();		
 
@@ -918,7 +918,7 @@ void ckrm_cpu_monitor(int check_min)
 	now = sched_clock();
 
 	//consecutive check should be at least 100ms apart
-	if (check_min && ((now - last_check) < MIN_CPU_MONITOR_INTERVAL))
+	if (check_min && (now - last_check < MIN_CPU_MONITOR_INTERVAL))
 		goto outunlock;
 
 	last_check = now;
@@ -929,12 +929,8 @@ void ckrm_cpu_monitor(int check_min)
 	if (update_max_demand(root_core) != 0)
 		goto outunlock;
 	
-#ifndef ALLOC_SURPLUS_SUPPORT
-#warning "MEF taking out alloc_surplus"
-#else
 	if (alloc_surplus(root_core) != 0)
 		goto outunlock;
-#endif
 	
 	adjust_local_weight();
 
@@ -963,7 +959,7 @@ static int ckrm_cpu_monitord(void *nothing)
 	}
 	cpu_monitor_pid = -1;
 	thread_exit = 2;
-	printk(KERN_DEBUG "cpu_monitord exit\n");
+	printk("cpu_monitord exit\n");
 	return 0;
 }
 
@@ -971,13 +967,13 @@ void ckrm_start_monitor(void)
 {
 	cpu_monitor_pid = kernel_thread(ckrm_cpu_monitord, 0, CLONE_KERNEL);
 	if (cpu_monitor_pid < 0) {
-		printk(KERN_DEBUG "ckrm_cpu_monitord for failed\n");
+		printk("ckrm_cpu_monitord for failed\n");
 	}
 }
 
 void ckrm_kill_monitor(void)
 {
-	printk(KERN_DEBUG "killing process %d\n", cpu_monitor_pid);
+	printk("killing process %d\n", cpu_monitor_pid);
 	if (cpu_monitor_pid > 0) {
 		thread_exit = 1;
 		while (thread_exit != 2) {
