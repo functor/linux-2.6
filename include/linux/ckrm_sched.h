@@ -293,7 +293,7 @@ void adjust_local_weight(void);
 #define CLASS_QUANTIZER 16 	//shift from ns to increase class bonus
 #define PRIORITY_QUANTIZER 2	//controls how much a high prio task can borrow
 
-#define CKRM_SHARE_ACCURACY 10
+#define CKRM_SHARE_ACCURACY 13
 #define NSEC_PER_MS 1000000
 #define NSEC_PER_JIFFIES (NSEC_PER_SEC/HZ)
 
