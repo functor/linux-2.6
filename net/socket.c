@@ -563,12 +563,13 @@ static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 		else
 			vx_sock_fail(sock->sk, size);
 	}
-	vxdprintk("__sock_sendmsg: %p[%p,%p,%p;%d]:%d/%d\n",
+	vxdprintk(VXD_CBIT(net, 7),
+		"__sock_sendmsg: %p[%p,%p,%p;%d]:%d/%d",
 		sock, sock->sk,
 		(sock->sk)?sock->sk->sk_nx_info:0,
 		(sock->sk)?sock->sk->sk_vx_info:0,
 		(sock->sk)?sock->sk->sk_xid:0,
-		size, len);
+		(unsigned int)size, len);
 	return len;
 }
 
@@ -623,12 +624,13 @@ static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 	len = sock->ops->recvmsg(iocb, sock, msg, size, flags);
 	if ((len >= 0) && sock->sk)
 		vx_sock_recv(sock->sk, len);
-	vxdprintk("__sock_recvmsg: %p[%p,%p,%p;%d]:%d/%d\n",
+	vxdprintk(VXD_CBIT(net, 7),
+		"__sock_recvmsg: %p[%p,%p,%p;%d]:%d/%d",
 		sock, sock->sk,
 		(sock->sk)?sock->sk->sk_nx_info:0,
 		(sock->sk)?sock->sk->sk_vx_info:0,
 		(sock->sk)?sock->sk->sk_xid:0,
-		size, len);
+		(unsigned int)size, len);
 	return len;
 }
 

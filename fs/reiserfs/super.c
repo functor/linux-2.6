@@ -703,6 +703,7 @@ static int reiserfs_parse_options (struct super_block * s, char * options, /* st
 	{"noattrs",	.clrmask = 1<<REISERFS_ATTRS},
 	{"user_xattr",	.setmask = 1<<REISERFS_XATTRS_USER},
 	{"nouser_xattr",.clrmask = 1<<REISERFS_XATTRS_USER},
+	{"tagxid",	.setmask = 1<<REISERFS_TAGXID},
 #ifdef CONFIG_REISERFS_FS_POSIX_ACL
 	{"acl",		.setmask = 1<<REISERFS_POSIXACL},
 	{"noacl",	.clrmask = 1<<REISERFS_POSIXACL},
@@ -717,7 +718,6 @@ static int reiserfs_parse_options (struct super_block * s, char * options, /* st
 	{"commit",	.arg_required = 'c', .values = NULL},
 	{"usrquota",},
 	{"grpquota",},
-	{"tagxid",	.setmask = 1<<REISERFS_TAGXID},
 	{NULL,}
     };
 	

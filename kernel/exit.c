@@ -43,8 +43,7 @@ static void __unhash_process(struct task_struct *p)
 	/* tasklist_lock is held, is this sufficient? */
 	if (p->vx_info) {
 		atomic_dec(&p->vx_info->cacct.nr_threads);
-		vx_nproc_dec(p->vx_info);
-		// atomic_dec(&p->vx_info->limit.res[RLIMIT_NPROC]);
+		atomic_dec(&p->vx_info->limit.rcur[RLIMIT_NPROC]);
 	}
 	detach_pid(p, PIDTYPE_PID);
 	detach_pid(p, PIDTYPE_TGID);
@@ -392,7 +391,7 @@ static inline void close_files(struct files_struct * files)
 					filp_close(file, files);
 					cond_resched();
 				}
-				vx_openfd_dec(fd);
+				// vx_openfd_dec(fd);
 			}
 			i++;
 			set >>= 1;

@@ -74,8 +74,7 @@
 #include <linux/stddef.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
-
-#include <linux/vs_base.h>
+#include <linux/vserver/debug.h>
 
 extern int sysctl_ip_dynaddr;
 int sysctl_tcp_tw_reuse;
@@ -2211,6 +2210,9 @@ static void *listening_get_next(struct seq_file *seq, void *cur)
 		req = req->dl_next;
 		while (1) {
 			while (req) {
+				vxdprintk(VXD_CBIT(net, 6),
+					"sk,req: %p [#%d] (from %d)",
+					req->sk, req->sk->sk_xid, current->xid);
 				if (!vx_check(req->sk->sk_xid, VX_IDENT|VX_WATCH))
 					continue;
 				if (req->class->family == st->family) {
@@ -2231,6 +2233,8 @@ get_req:
 		sk = sk_next(sk);
 get_sk:
 	sk_for_each_from(sk, node) {
+		vxdprintk(VXD_CBIT(net, 6), "sk: %p [#%d] (from %d)",
+			sk, sk->sk_xid, current->xid);
 		if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
 			continue;
 		if (sk->sk_family == st->family) {
@@ -2280,6 +2284,9 @@ static void *established_get_first(struct seq_file *seq)
 	       
 		read_lock(&tcp_ehash[st->bucket].lock);
 		sk_for_each(sk, node, &tcp_ehash[st->bucket].chain) {
+			vxdprintk(VXD_CBIT(net, 6),
+				"sk,egf: %p [#%d] (from %d)",
+				sk, sk->sk_xid, current->xid);
 			if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
 				continue;
 			if (sk->sk_family != st->family)
@@ -2290,6 +2297,9 @@ static void *established_get_first(struct seq_file *seq)
 		st->state = TCP_SEQ_STATE_TIME_WAIT;
 		tw_for_each(tw, node,
 			    &tcp_ehash[st->bucket + tcp_ehash_size].chain) {
+			vxdprintk(VXD_CBIT(net, 6),
+				"tw: %p [#%d] (from %d)",
+				tw, tw->tw_xid, current->xid);
 			if (!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH))
 				continue;
 			if (tw->tw_family != st->family)
@@ -2317,8 +2327,8 @@ static void *established_get_next(struct seq_file *seq, void *cur)
 		tw = cur;
 		tw = tw_next(tw);
 get_tw:
-		while (tw && tw->tw_family != st->family &&
-			!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH)) {
+		while (tw && (tw->tw_family != st->family ||
+			!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH))) {
 			tw = tw_next(tw);
 		}
 		if (tw) {
@@ -2338,6 +2348,9 @@ get_tw:
 		sk = sk_next(sk);
 
 	sk_for_each_from(sk, node) {
+		vxdprintk(VXD_CBIT(net, 6),
+			"sk,egn: %p [#%d] (from %d)",
+			sk, sk->sk_xid, current->xid);
 		if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
 			continue;
 		if (sk->sk_family == st->family)

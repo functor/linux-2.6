@@ -724,6 +724,11 @@ static int parse_options (char * options, struct super_block *sb,
 			break;
 #ifndef CONFIG_INOXID_NONE
 		case Opt_tagxid:
+			if (is_remount) {
+				printk(KERN_ERR "EXT3-fs: cannot specify "
+				       "tagxid on remount\n");
+				return 0;
+			}
 			set_opt (sbi->s_mount_opt, TAG_XID);
 			break;
 #endif

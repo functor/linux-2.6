@@ -9,6 +9,8 @@
 #ifndef _SYSFS_H_
 #define _SYSFS_H_
 
+#define SYSFS_SUPER_MAGIC	0x62656572
+
 struct kobject;
 struct module;
 

@@ -25,9 +25,8 @@
 #include <linux/module.h>
 #include <linux/sysctl.h>
 #include <linux/workqueue.h>
+#include <linux/vs_limit.h>
 #include <linux/vs_socket.h>
-#include <linux/vs_context.h>
-#include <linux/vs_network.h>
 #include <net/tcp.h>
 #include <net/inet_common.h>
 #include <net/xfrm.h>
@@ -818,6 +817,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 
 		set_vx_info(&newsk->sk_vx_info, sk->sk_vx_info);
 		newsk->sk_xid = sk->sk_xid;
+		vx_sock_inc(newsk);
 		set_nx_info(&newsk->sk_nx_info, sk->sk_nx_info);
 		newsk->sk_nid = sk->sk_nid;
 #ifdef INET_REFCNT_DEBUG

@@ -273,7 +273,6 @@ static struct sigqueue *__sigqueue_alloc(void)
 		INIT_LIST_HEAD(&q->list);
 		q->flags = 0;
 		q->lock = NULL;
-#warning MEF PLANETLAB: q->user = get_uid(current->user); is something new in Fedora Core.
 		q->user = get_uid(current->user);
 		atomic_inc(&q->user->sigpending);
 	}
@@ -728,7 +727,6 @@ static int send_signal(int sig, struct siginfo *info, struct task_struct *t,
 
 	if (q) {
 		q->flags = 0;
-#warning MEF PLANETLAB: q->user = get_uid(t->user); is something new in Fedora Core.
 		q->user = get_uid(t->user);
 		atomic_inc(&q->user->sigpending);
 		list_add_tail(&q->list, &signals->list);

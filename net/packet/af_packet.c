@@ -70,9 +70,6 @@
 #include <linux/poll.h>
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/vs_base.h>
-#include <linux/vs_context.h>
-#include <linux/vs_network.h>
 
 #ifdef CONFIG_INET
 #include <net/inet_common.h>

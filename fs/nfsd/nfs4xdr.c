@@ -1562,7 +1562,8 @@ nfsd4_encode_fattr(struct svc_fh *fhp, struct svc_export *exp,
 	}
 	if (bmval1 & FATTR4_WORD1_OWNER) {
 		status = nfsd4_encode_user(rqstp,
-			XIDINO_UID(stat.uid, stat.xid), &p, &buflen);
+			XIDINO_UID(XID_TAG(dentry->d_inode),
+			stat.uid, stat.xid), &p, &buflen);
 		if (status == nfserr_resource)
 			goto out_resource;
 		if (status)
@@ -1570,7 +1571,8 @@ nfsd4_encode_fattr(struct svc_fh *fhp, struct svc_export *exp,
 	}
 	if (bmval1 & FATTR4_WORD1_OWNER_GROUP) {
 		status = nfsd4_encode_group(rqstp,
-			XIDINO_GID(stat.gid, stat.xid), &p, &buflen);
+			XIDINO_GID(XID_TAG(dentry->d_inode),
+			stat.gid, stat.xid), &p, &buflen);
 		if (status == nfserr_resource)
 			goto out_resource;
 		if (status)

@@ -36,6 +36,7 @@
 #include <linux/personality.h>
 #include <linux/init.h>
 #include <linux/flat.h>
+#include <linux/vs_memory.h>
 
 #include <asm/byteorder.h>
 #include <asm/system.h>

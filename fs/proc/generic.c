@@ -17,9 +17,9 @@
 #include <linux/smp_lock.h>
 #include <linux/init.h>
 #include <linux/idr.h>
+#include <linux/namei.h>
 #include <linux/vs_base.h>
 #include <linux/vserver/inode.h>
-#include <linux/namei.h>
 #include <asm/uaccess.h>
 #include <asm/bitops.h>
 
@@ -388,6 +388,7 @@ struct dentry *proc_lookup(struct inode * dir, struct dentry *dentry, struct nam
 
 				error = -EINVAL;
 				inode = proc_get_inode(dir->i_sb, ino, de);
+				inode->i_xid = vx_current_xid();
 				break;
 			}
 		}

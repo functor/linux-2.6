@@ -469,6 +469,11 @@ struct inode *ext2_new_inode(struct inode *dir, int mode)
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
 
+        if (sb->s_flags & MS_TAGXID)
+		inode->i_xid = current->xid;
+	else
+		inode->i_xid = 0;
+
 	if (DLIMIT_ALLOC_INODE(sb, inode->i_xid)) {
 		err = -ENOSPC;
 		goto fail_dlim;

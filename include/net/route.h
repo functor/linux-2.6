@@ -33,6 +33,9 @@
 #include <linux/route.h>
 #include <linux/ip.h>
 #include <linux/cache.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
 
 #ifndef __KERNEL__
 #warning This file is not supposed to be used outside of kernel.

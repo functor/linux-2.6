@@ -14,6 +14,7 @@
 #include <linux/types.h>
 #include <linux/mm.h>
 #include <linux/security.h>
+#include <linux/vs_memory.h>
 
 #include <asm/param.h>
 #include <asm/signal.h>

@@ -21,8 +21,6 @@
 #include <linux/vs_base.h>
 #include "xattr.h"
 
-#define DEVPTS_SUPER_MAGIC 0x1cd1
-
 static struct vfsmount *devpts_mnt;
 static struct dentry *devpts_root;
 
@@ -98,6 +96,7 @@ devpts_fill_super(struct super_block *s, void *data, int silent)
 	inode->i_op = &simple_dir_inode_operations;
 	inode->i_fop = &simple_dir_operations;
 	inode->i_nlink = 2;
+	inode->i_xid = vx_current_xid();
 
 	devpts_root = s->s_root = d_alloc_root(inode);
 	if (s->s_root)

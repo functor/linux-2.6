@@ -97,6 +97,8 @@ static inline u32 *
 decode_sattr(u32 *p, struct iattr *iap)
 {
 	u32	tmp, tmp1;
+	uid_t	uid = 0;
+	gid_t	gid = 0;
 
 	iap->ia_valid = 0;
 
@@ -110,12 +112,15 @@ decode_sattr(u32 *p, struct iattr *iap)
 	}
 	if ((tmp = ntohl(*p++)) != (u32)-1) {
 		iap->ia_valid |= ATTR_UID;
-		iap->ia_uid = tmp;
+		uid = tmp;
 	}
 	if ((tmp = ntohl(*p++)) != (u32)-1) {
 		iap->ia_valid |= ATTR_GID;
-		iap->ia_gid = tmp;
+		gid = tmp;
 	}
+	iap->ia_uid = INOXID_UID(1, uid, gid);
+	iap->ia_gid = INOXID_GID(1, uid, gid);
+	iap->ia_xid = INOXID_XID(1, uid, gid, 0);
 	if ((tmp = ntohl(*p++)) != (u32)-1) {
 		iap->ia_valid |= ATTR_SIZE;
 		iap->ia_size = tmp;
@@ -162,9 +167,9 @@ encode_fattr(struct svc_rqst *rqstp, u32 *p, struct svc_fh *fhp)
 	*p++ = htonl((u32) stat.mode);
 	*p++ = htonl((u32) stat.nlink);
 	*p++ = htonl((u32) nfsd_ruid(rqstp,
-		XIDINO_UID(stat.uid, stat.xid)));
+		XIDINO_UID(XID_TAG(dentry->d_inode), stat.uid, stat.xid)));
 	*p++ = htonl((u32) nfsd_rgid(rqstp,
-		XIDINO_GID(stat.gid, stat.xid)));
+		XIDINO_GID(XID_TAG(dentry->d_inode), stat.gid, stat.xid)));
 
 	if (S_ISLNK(type) && stat.size > NFS_MAXPATHLEN) {
 		*p++ = htonl(NFS_MAXPATHLEN);

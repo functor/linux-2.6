@@ -62,6 +62,8 @@ struct vx_info {
 #define VX_ATR_MASK	0x0F00
 
 
+struct rcu_head;
+
 extern void rcu_free_vx_info(struct rcu_head *);
 extern void unhash_vx_info(struct vx_info *);
 
