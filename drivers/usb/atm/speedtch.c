@@ -816,6 +816,9 @@ static void speedtch_usb_disconnect(struct usb_interface *intf)
 		return;
 	}
 
+/*QQ need to handle disconnects on interface #2 while uploading firmware */
+/*QQ and what about interface #1? */
+
 	if (instance->int_urb) {
 		struct urb *int_urb = instance->int_urb;
 		instance->int_urb = NULL;
