@@ -175,18 +175,9 @@ config CKRM_RES_NUMTASKS
 config CKRM_CPU_SCHEDULE
 	bool "CKRM CPU scheduler"
 	depends on CKRM_TYPE_TASKCLASS
-	default m
+	default y
 	help
 	  Use CKRM CPU scheduler instead of Linux Scheduler
-	
-	  Say N if unsure, Y to use the feature.
-
-config CKRM_CPU_MONITOR
-	bool "CKRM CPU Resoure Monitor"
-	depends on CKRM_CPU_SCHEDULE
-	default m
-	help
-	  Monitor CPU Resource Usage of the classes
 	
 	  Say N if unsure, Y to use the feature.
 

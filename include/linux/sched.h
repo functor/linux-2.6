@@ -94,7 +94,7 @@ extern unsigned long avenrun[];		/* Load averages */
 extern int nr_threads;
 extern int last_pid;
 DECLARE_PER_CPU(unsigned long, process_counts);
-DECLARE_PER_CPU(struct runqueue, runqueues);
+// DECLARE_PER_CPU(struct runqueue, runqueues); -- removed after ckrm cpu v7 merge
 extern int nr_processes(void);
 extern unsigned long nr_running(void);
 extern unsigned long nr_uninterruptible(void);
@@ -429,6 +429,25 @@ int set_current_groups(struct group_info *group_info);
 struct audit_context;		/* See audit.c */
 struct mempolicy;
 
+#ifdef CONFIG_CKRM_CPU_SCHEDULE
+/**
+ * ckrm_cpu_demand_stat - used to track the cpu demand of a task/class
+ * @run: how much time it has been running since the counter started
+ * @total: total time since the counter started
+ * @last_sleep: the last time it sleeps, last_sleep = 0 when not sleeping
+ * @recalc_interval: how often do we recalculate the cpu_demand
+ * @cpu_demand: moving average of run/total
+ */
+struct ckrm_cpu_demand_stat {
+	unsigned long long run;
+	unsigned long long total;
+	unsigned long long last_sleep;
+	unsigned long long recalc_interval;
+	unsigned long cpu_demand; /*estimated cpu demand */
+};
+#endif
+
+
 struct task_struct {
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	struct thread_info *thread_info;
@@ -528,7 +547,6 @@ struct task_struct {
 /* signal handlers */
 	struct signal_struct *signal;
 	struct sighand_struct *sighand;
-
 	sigset_t blocked, real_blocked;
 	struct sigpending pending;
 
@@ -594,7 +612,9 @@ struct task_struct {
 	struct list_head        taskclass_link;
 #ifdef CONFIG_CKRM_CPU_SCHEDULE
         struct ckrm_cpu_class *cpu_class;
-#endif
+	//track cpu demand of this task
+	struct ckrm_cpu_demand_stat demand_stat;
+#endif //CONFIG_CKRM_CPU_SCHEDULE
 #endif // CONFIG_CKRM_TYPE_TASKCLASS
 #ifdef CONFIG_CKRM_RES_MEM
 	struct list_head	mm_peers; // list of tasks using same mm_struct
@@ -782,83 +802,6 @@ extern int idle_cpu(int cpu);
 void yield(void);
 
 /*
- * These are the runqueue data structures:
- */
-typedef struct runqueue runqueue_t;
-
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-#include <linux/ckrm_classqueue.h>
-#endif
-
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-
-/**
- *  if belong to different class, compare class priority
- *  otherwise compare task priority 
- */
-#define TASK_PREEMPTS_CURR(p, rq) \
-	(((p)->cpu_class != (rq)->curr->cpu_class) && ((rq)->curr != (rq)->idle))? class_preempts_curr((p),(rq)->curr) : ((p)->prio < (rq)->curr->prio)
-#else
-#define BITMAP_SIZE ((((MAX_PRIO+1+7)/8)+sizeof(long)-1)/sizeof(long))
-struct prio_array {
-	unsigned int nr_active;
-	unsigned long bitmap[BITMAP_SIZE];
-	struct list_head queue[MAX_PRIO];
-};
-#define rq_active(p,rq)   (rq->active)
-#define rq_expired(p,rq)  (rq->expired)
-#define ckrm_rebalance_tick(j,this_cpu) do {} while (0)
-#define TASK_PREEMPTS_CURR(p, rq) \
-	((p)->prio < (rq)->curr->prio)
-#endif
-
-/*
- * This is the main, per-CPU runqueue data structure.
- *
- * Locking rule: those places that want to lock multiple runqueues
- * (such as the load balancing or the thread migration code), lock
- * acquire operations must be ordered by ascending &runqueue.
- */
-struct runqueue {
-	spinlock_t lock;
-
-	/*
-	 * nr_running and cpu_load should be in the same cacheline because
-	 * remote CPUs use both these fields when doing load calculation.
-	 */
-	unsigned long nr_running;
-#if defined(CONFIG_SMP)
-	unsigned long cpu_load;
-#endif
-	unsigned long long nr_switches, nr_preempt;
-	unsigned long expired_timestamp, nr_uninterruptible;
-	unsigned long long timestamp_last_tick;
-	task_t *curr, *idle;
-	struct mm_struct *prev_mm;
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-	unsigned long ckrm_cpu_load;
-	struct classqueue_struct classqueue;   
-#else
-        prio_array_t *active, *expired, arrays[2];
-#endif
-	int best_expired_prio;
-	atomic_t nr_iowait;
-
-#ifdef CONFIG_SMP
-	struct sched_domain *sd;
-
-	/* For active balancing */
-	int active_balance;
-	int push_cpu;
-
-	task_t *migration_thread;
-	struct list_head migration_queue;
-#endif
-	struct list_head hold_queue;
-	int idle_tokens;
-};
-
-/*
  * The default (Linux) execution domain.
  */
 extern struct exec_domain	default_exec_domain;
@@ -894,6 +837,7 @@ static inline struct user_struct *get_uid(struct user_struct *u)
 	atomic_inc(&u->__count);
 	return u;
 }
+
 extern void free_uid(struct user_struct *);
 extern void switch_uid(struct user_struct *);
 
@@ -998,6 +942,7 @@ static inline int capable(int cap)
 	return 0;
 }
 #endif
+
 
 /*
  * Routines for handling mm_structs
@@ -1132,7 +1077,7 @@ static inline struct mm_struct * get_task_mm(struct task_struct * task)
 
 	return mm;
 }
-
+ 
 /* set thread flags in other task's structures
  * - see asm/thread_info.h for TIF_xxxx flags available
  */
