@@ -160,7 +160,6 @@ static struct inode *mqueue_get_inode(struct super_block *sb, int mode,
 				goto out_inode;
 			}
 			/* all is ok */
-#warning MEF PLANETLAB: info->user = get_uid(u); is something new in Fedora Core.
 			info->user = get_uid(u);
 		} else if (S_ISDIR(mode)) {
 			inode->i_nlink++;
