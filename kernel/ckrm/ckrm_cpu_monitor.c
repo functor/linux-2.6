@@ -910,7 +910,7 @@ void ckrm_start_monitor(void)
 
 void ckrm_kill_monitor(void)
 {
-	int interval = HZ;
+	// int interval = HZ;
 
 	printk("killing process %d\n", cpu_monitor_pid);
 	if (cpu_monitor_pid > 0) {

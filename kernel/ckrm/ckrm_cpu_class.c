@@ -269,7 +269,7 @@ int ckrm_cpu_get_stats(void *my_res, struct seq_file * sfile)
 		   );
 	for_each_online_cpu(i) {
 		lrq = get_ckrm_lrq(cls,i);		
-		seq_printf(sfile, "\tlrq %d demand= %lu weight= %d lrq_load= %lu cvt= %llu sav=%lu\n",i,stat->local_stats[i].cpu_demand,local_class_weight(lrq),lrq->lrq_load,lrq->local_cvt,lrq->savings);
+		seq_printf(sfile, "\tlrq %d demand= %lu weight= %d lrq_load= %lu cvt= %llu sav=%llu\n",i,stat->local_stats[i].cpu_demand,local_class_weight(lrq),lrq->lrq_load,lrq->local_cvt,lrq->savings);
 	}
 
 	seq_printf(sfile, "-------- CPU Class Status END ---------\n");
