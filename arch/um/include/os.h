@@ -130,7 +130,6 @@ extern int os_get_ifname(int fd, char *namebuf);
 extern int os_set_slip(int fd);
 extern int os_set_owner(int fd, int pid);
 extern int os_sigio_async(int master, int slave);
-extern int os_make_pty_raw(int master);
 extern int os_mode_fd(int fd, int mode);
 
 extern int os_seek_file(int fd, __u64 offset);

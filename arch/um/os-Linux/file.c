@@ -8,7 +8,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <termios.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -131,32 +130,6 @@ int os_new_tty_pgrp(int fd, int pid)
 	}
 
 	return(0);
-}
-
-int os_make_pty_raw(int master)
-{
-	struct termios tt;
-	int err;
-
-	while (((err = tcgetattr(master, &tt)) < 0) && errno == EINTR)
-		;
-	if(err < 0) {
-		printk("os_make_pty_raw : tcgetattr failed, errno = %d\n", errno);
-		goto fail;
-	}
-
-	cfmakeraw(&tt);
-
-	while (((err = tcsetattr(master, TCSADRAIN, &tt)) < 0) && errno == EINTR)
-		;
-	if(err < 0) {
-		printk("os_make_pty_raw : tcsetattr failed, errno = %d\n", errno);
-		goto fail;
-	}
-
-	return 0;
-fail:
-	return -errno;
 }
 
 /* FIXME: ensure namebuf in os_get_if_name is big enough */
