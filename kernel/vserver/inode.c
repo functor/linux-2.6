@@ -178,8 +178,8 @@ int vc_iattr_ioctl(struct dentry *de, unsigned int cmd, unsigned long arg)
 
 	/*
 	 * I don't think we need any dget/dput pairs in here as long as
-	 * this function is always called from sys_ioctl i.e., the big
-	 * kernel lock is held.
+	 * this function is always called from sys_ioctl i.e., de is
+         * a field of a struct file that is guaranteed not to be freed.
 	 */
 	if (cmd == FIOC_SETIATTR) {
 		if (!capable(CAP_SYS_ADMIN) || !capable(CAP_LINUX_IMMUTABLE))
