@@ -128,9 +128,10 @@ static int ct_seq_real_show(const struct ip_conntrack_tuple_hash *hash,
 			proto))
 		return 1;
 
-#warning MEF should make this seq_printf conditional on xid support
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	if (seq_printf(s, "xid=%d\n", conntrack->xid[IP_CT_DIR_ORIGINAL]))
 		return 1;
+#endif
 
  	if (seq_print_counters(s, &conntrack->counters[IP_CT_DIR_ORIGINAL]))
 		return 1;
@@ -143,9 +144,10 @@ static int ct_seq_real_show(const struct ip_conntrack_tuple_hash *hash,
 			proto))
 		return 1;
 
-#warning MEF should make this seq_printf conditional on xid support
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	if (seq_printf(s, "xid=%d\n", conntrack->xid[IP_CT_DIR_REPLY]))
 		return 1;
+#endif
 
  	if (seq_print_counters(s, &conntrack->counters[IP_CT_DIR_REPLY]))
 		return 1;
