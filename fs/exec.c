@@ -1052,6 +1052,7 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 					fput(bprm->file);
 				bprm->file = NULL;
 				current->did_exec = 1;
+				ckrm_cb_exec(bprm->filename);
 				return retval;
 			}
 			read_lock(&binfmt_lock);
@@ -1156,8 +1157,6 @@ int do_execve(char * filename,
 	retval = search_binary_handler(&bprm,regs);
 	if (retval >= 0) {
 		free_arg_pages(&bprm);
-
-		ckrm_cb_exec(filename);
 
 		/* execve success */
 		security_bprm_free(&bprm);

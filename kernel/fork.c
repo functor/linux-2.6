@@ -968,6 +968,7 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	if (p->binfmt && !try_module_get(p->binfmt->module))
 		goto bad_fork_cleanup_put_domain;
 
+	init_delays(p);
 	p->did_exec = 0;
 	copy_flags(clone_flags, p);
 	if (clone_flags & CLONE_IDLETASK)
@@ -1228,9 +1229,11 @@ long do_fork(unsigned long clone_flags,
 			clone_flags |= CLONE_PTRACE;
 	}
 
+#ifdef CONFIG_CKRM_TYPE_TASKCLASS
 	if (numtasks_get_ref(current->taskclass, 0) == 0) {
 		return -ENOMEM;
 	}
+#endif
 
 	p = copy_process(clone_flags, stack_start, regs, stack_size, parent_tidptr, child_tidptr);
 	/*
@@ -1300,7 +1303,9 @@ long do_fork(unsigned long clone_flags,
 			 */
 			set_need_resched();
 	} else {
+#ifdef CONFIG_CKRM_TYPE_TASKCLASS
 		numtasks_put_ref(current->taskclass);
+#endif
 	}
 	return pid;
 }

@@ -409,6 +409,7 @@ static inline int sock_flag(struct sock *sk, enum sock_flags flag)
 	return test_bit(flag, &sk->sk_flags);
 }
 
+#ifndef CONFIG_ACCEPT_QUEUES
 static inline void sk_acceptq_removed(struct sock *sk)
 {
 	sk->sk_ack_backlog--;
@@ -423,6 +424,8 @@ static inline int sk_acceptq_is_full(struct sock *sk)
 {
 	return sk->sk_ack_backlog > sk->sk_max_ack_backlog;
 }
+
+#endif
 
 /*
  * Compute minimal free write space needed to queue new packets.

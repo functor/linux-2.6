@@ -46,6 +46,8 @@
 
 #include <asm/unistd.h>
 
+#include <asm/unistd.h>
+
 #ifdef CONFIG_NUMA
 #define cpu_to_node_mask(cpu) node_to_cpumask(cpu_to_node(cpu))
 #else
@@ -1879,6 +1881,7 @@ static void active_load_balance(runqueue_t *busiest, int busiest_cpu)
 next_group:
 		group = group->next;
 	} while (group != sd->groups);
+>>>>>>> 1.1.9.3
 }
 
 /*

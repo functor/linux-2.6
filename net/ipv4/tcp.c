@@ -256,7 +256,10 @@
 #include <linux/smp_lock.h>
 #include <linux/fs.h>
 #include <linux/random.h>
+
+#ifdef CONFIG_CKRM
 #include <linux/ckrm.h>
+#endif
 
 #include <net/icmp.h>
 #include <net/tcp.h>
@@ -278,7 +281,6 @@ kmem_cache_t *tcp_timewait_cachep;
 atomic_t tcp_orphan_count = ATOMIC_INIT(0);
 
 int sysctl_tcp_default_win_scale = 7;
-
 int sysctl_tcp_mem[3];
 int sysctl_tcp_wmem[3] = { 4 * 1024, 16 * 1024, 128 * 1024 };
 int sysctl_tcp_rmem[3] = { 4 * 1024, 87380, 87380 * 2 };
@@ -528,25 +530,11 @@ int tcp_listen_start(struct sock *sk)
 
 	sk->sk_max_ack_backlog = 0;
 	sk->sk_ack_backlog = 0;
-	tp->accept_queue = NULL;
 #ifdef CONFIG_ACCEPT_QUEUES
-	tp->class_index = 0;
-	for (i=0; i < NUM_ACCEPT_QUEUES; i++) {
-		tp->acceptq[i].aq_tail = NULL;
-		tp->acceptq[i].aq_head = NULL;
-		tp->acceptq[i].aq_wait_time = 0; 
-		tp->acceptq[i].aq_qcount = 0; 
-		tp->acceptq[i].aq_count = 0; 
-		if (i == 0) {
-			tp->acceptq[i].aq_valid = 1; 
-			tp->acceptq[i].aq_ratio = 1; 
-		}
-		else {
-			tp->acceptq[i].aq_valid = 0; 
-			tp->acceptq[i].aq_ratio = 0; 
-		}
-	}
-#endif
+	tp->accept_queue = NULL;
+#else
+	tp->accept_queue = tp->accept_queue_tail = NULL;
+#endif 
 	tp->syn_wait_lock = RW_LOCK_UNLOCKED;
 	tcp_delack_init(tp);
 
@@ -559,6 +547,23 @@ int tcp_listen_start(struct sock *sk)
 		if ((1 << lopt->max_qlen_log) >= sysctl_max_syn_backlog)
 			break;
 	get_random_bytes(&lopt->hash_rnd, 4);
+
+#ifdef CONFIG_ACCEPT_QUEUES
+	tp->class_index = 0;
+	for (i=0; i < NUM_ACCEPT_QUEUES; i++) {
+		tp->acceptq[i].aq_tail = NULL;
+		tp->acceptq[i].aq_head = NULL;
+		tp->acceptq[i].aq_wait_time = 0; 
+		tp->acceptq[i].aq_qcount = 0; 
+		tp->acceptq[i].aq_count = 0; 
+		if (i == 0) {
+			tp->acceptq[i].aq_ratio = 1; 
+		}
+		else {
+			tp->acceptq[i].aq_ratio = 0; 
+		}
+	}
+#endif
 
 	write_lock_bh(&tp->syn_wait_lock);
 	tp->listen_opt = lopt;
@@ -668,7 +673,7 @@ static void tcp_listen_stop (struct sock *sk)
 		sock_put(child);
 
 #ifdef CONFIG_ACCEPT_QUEUES
-		tcp_acceptq_removed(sk, req->acceptq_class);
+		sk_acceptq_removed(sk, req->acceptq_class);
 #else
 		sk_acceptq_removed(sk);
 #endif
@@ -2250,8 +2255,8 @@ struct sock *tcp_accept(struct sock *sk, int flags, int *err)
 	req = tp->accept_queue;
 	if ((tp->accept_queue = req->dl_next) == NULL)
 		tp->accept_queue_tail = NULL;
-
-	tcp_acceptq_removed(sk);
+	newsk = req->sk;
+	sk_acceptq_removed(sk);
 #else
 	first = tp->class_index;
 	/* We should always have  request queued here. The accept_queue
@@ -2281,17 +2286,11 @@ struct sock *tcp_accept(struct sock *sk, int flags, int *err)
 
 	if((++(tp->acceptq[first].aq_cnt)) >= tp->acceptq[first].aq_ratio){
 		tp->acceptq[first].aq_cnt = 0;
-		tp->class_index = ++first & ~NUM_ACCEPT_QUEUES;
+		tp->class_index = ++first & (NUM_ACCEPT_QUEUES-1);
 	}	
-	tcp_acceptq_removed(sk, req->acceptq_class);
-#endif
  	newsk = req->sk;
-
-	/* MEF REVISIT: The following sk_acceptq_removed(sk); wasn't
-	   in CKRM E13, but a latter patch should fix this
-	   properly.
-	 */
-	sk_acceptq_removed(sk);
+	sk_acceptq_removed(sk, req->acceptq_class);
+#endif
 	tcp_openreq_fastfree(req);
 	BUG_TRAP(newsk->sk_state != TCP_SYN_RECV);
 	release_sock(sk);
@@ -2302,6 +2301,7 @@ out:
 	*err = error;
 	return NULL;
 }
+
 
 /*
  *	Socket option code for TCP.
@@ -2464,6 +2464,12 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 		
 #ifdef CONFIG_ACCEPT_QUEUES
 	case TCP_ACCEPTQ_SHARE:
+#ifdef CONFIG_CKRM
+		// If CKRM is set then the shares are set through rcfs.
+		// Get shares will still succeed.
+		err = -EOPNOTSUPP;
+		break;
+#else		
 		{
 			char share_wt[NUM_ACCEPT_QUEUES];
 			int i,j;
@@ -2483,10 +2489,9 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 					else if (share_wt[i] < j) {
 						j = share_wt[i];
 					}
-					tp->acceptq[i].aq_valid = 1;
 				}
 				else
-					tp->acceptq[i].aq_valid = 0;
+					tp->acceptq[i].aq_ratio = 0;
 					
 			}
 			if (j == 0) {
@@ -2494,7 +2499,6 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 				 * specified set class 0 as 1.
 				 */
 				share_wt[0] = 1;
-				tp->acceptq[0].aq_valid = 1;
 				j = 1;
 			}
 			for (i=0; i < NUM_ACCEPT_QUEUES; i++)  {
@@ -2504,7 +2508,7 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 		}
 		break;
 #endif
-
+#endif
 	default:
 		err = -ENOPROTOOPT;
 		break;
@@ -2587,7 +2591,8 @@ int tcp_getsockopt(struct sock *sk, int level, int optname, char __user *optval,
 		break;
 
 #ifdef CONFIG_ACCEPT_QUEUES
-	case TCP_ACCEPTQ_SHARE: {
+	case TCP_ACCEPTQ_SHARE: 
+	{
 		struct tcp_acceptq_info tinfo[NUM_ACCEPT_QUEUES];
 		int i;
 
@@ -2601,13 +2606,10 @@ int tcp_getsockopt(struct sock *sk, int level, int optname, char __user *optval,
 
 		for(i=0; i < NUM_ACCEPT_QUEUES; i++) {
 			tinfo[i].acceptq_wait_time = 
-				tp->acceptq[i].aq_wait_time/(HZ/USER_HZ);
+			     jiffies_to_msecs(tp->acceptq[i].aq_wait_time);
 			tinfo[i].acceptq_qcount = tp->acceptq[i].aq_qcount;
 			tinfo[i].acceptq_count = tp->acceptq[i].aq_count;
-			if (tp->acceptq[i].aq_valid) 
-				tinfo[i].acceptq_shares=tp->acceptq[i].aq_ratio;
-			else
-				tinfo[i].acceptq_shares = 0;
+			tinfo[i].acceptq_shares=tp->acceptq[i].aq_ratio;
 		}
 
 		len = min_t(unsigned int, len, sizeof(tinfo));
@@ -2619,6 +2621,7 @@ int tcp_getsockopt(struct sock *sk, int level, int optname, char __user *optval,
 		
 		return 0;
 	}
+	break;
 #endif
 	default:
 		return -ENOPROTOOPT;

@@ -1154,6 +1154,10 @@ static inline void add_io_delay(unsigned long dstart)
 	clear_delay_flag(tsk,PF_IOWAIT);
 }
 
+inline static void init_delays(struct task_struct *tsk)
+{
+	memset((void*)&tsk->delays,0,sizeof(tsk->delays));
+}
 
 #else
 
@@ -1171,6 +1175,7 @@ static inline void add_io_delay(unsigned long dstart)
 #define add_delay_ts(tsk,field,start_ts,now)    do { } while (0)
 #define add_delay_clear(tsk,field,start_ts,flg) do { } while (0)
 #define add_io_delay(dstart)			do { } while (0) 
+#define init_delays(tsk)                        do { } while (0)
 #endif
 
 

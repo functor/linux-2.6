@@ -454,8 +454,7 @@ struct tcp_opt {
 		unsigned int             aq_qcount;
 		unsigned int             aq_backlog;
 		unsigned int             aq_wait_time;
-		int			 aq_valid;
- 	} acceptq[NUM_ACCEPT_QUEUES];
+	} acceptq[NUM_ACCEPT_QUEUES];
 #endif
 };
 

@@ -1529,8 +1529,8 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	 * Accept only if the class has shares set or if the default class
 	 * i.e. class 0 has shares
 	 */
-	if (!(tcp_sk(sk)->acceptq[class].aq_valid)) {
-		if (tcp_sk(sk)->acceptq[0].aq_valid) 
+	if (!(tcp_sk(sk)->acceptq[class].aq_ratio)) {
+		if (tcp_sk(sk)->acceptq[0].aq_ratio) 
 			class = 0;
 		else
 			goto drop;
@@ -1543,7 +1543,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	 * timeout.
 	 */
 #ifdef CONFIG_ACCEPT_QUEUES
-	if (tcp_acceptq_is_full(sk, class) && tcp_synq_young(sk, class) > 1)
+	if (sk_acceptq_is_full(sk, class) && tcp_synq_young(sk, class) > 1)
 #else
 	if (sk_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
 #endif
@@ -1675,7 +1675,7 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	struct sock *newsk;
 
 #ifdef CONFIG_ACCEPT_QUEUES
-	if (tcp_acceptq_is_full(sk, req->acceptq_class))
+	if (sk_acceptq_is_full(sk, req->acceptq_class))
 #else
 	if (sk_acceptq_is_full(sk))
 #endif

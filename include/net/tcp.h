@@ -1788,18 +1788,32 @@ static inline int tcp_full_space( struct sock *sk)
 	return tcp_win_from_space(sk->sk_rcvbuf); 
 }
 
+struct tcp_listen_opt
+{
+	u8			max_qlen_log;	/* log_2 of maximal queued SYNs */
+	int			qlen;
 #ifdef CONFIG_ACCEPT_QUEUES
-static inline void tcp_acceptq_removed(struct sock *sk, int class)
+	int			qlen_young[NUM_ACCEPT_QUEUES];
+#else
+	int			qlen_young;
+#endif
+	int			clock_hand;
+	u32			hash_rnd;
+	struct open_request	*syn_table[TCP_SYNQ_HSIZE];
+};
+
+#ifdef CONFIG_ACCEPT_QUEUES
+static inline void sk_acceptq_removed(struct sock *sk, int class)
 {
 	tcp_sk(sk)->acceptq[class].aq_backlog--;
 }
 
-static inline void tcp_acceptq_added(struct sock *sk, int class)
+static inline void sk_acceptq_added(struct sock *sk, int class)
 {
 	tcp_sk(sk)->acceptq[class].aq_backlog++;
 }
 
-static inline int tcp_acceptq_is_full(struct sock *sk, int class)
+static inline int sk_acceptq_is_full(struct sock *sk, int class)
 {
 	return tcp_sk(sk)->acceptq[class].aq_backlog >
 		sk->sk_max_ack_backlog;
@@ -1847,25 +1861,10 @@ static inline void tcp_acceptq_queue(struct sock *sk, struct open_request *req,
 {
 	tcp_set_acceptq(tcp_sk(sk),req);
 	req->sk = child;
-	tcp_acceptq_added(sk,req->acceptq_class);
+	sk_acceptq_added(sk,req->acceptq_class);
 }
 
 #else
-static inline void tcp_acceptq_removed(struct sock *sk)
-{
-	sk->sk_ack_backlog--;
-}
-
-static inline void tcp_acceptq_added(struct sock *sk)
-{
-	sk->sk_ack_backlog++;
-}
-
-static inline int tcp_acceptq_is_full(struct sock *sk)
-{
-	return sk->sk_ack_backlog > sk->sk_max_ack_backlog;
-}
-
 static inline void tcp_acceptq_queue(struct sock *sk, struct open_request *req,
 					 struct sock *child)
 {
@@ -1885,19 +1884,6 @@ static inline void tcp_acceptq_queue(struct sock *sk, struct open_request *req,
 
 #endif
 
-struct tcp_listen_opt
-{
-	u8			max_qlen_log;	/* log_2 of maximal queued SYNs */
-	int			qlen;
-#ifdef CONFIG_ACCEPT_QUEUES
-	int			qlen_young[NUM_ACCEPT_QUEUES];
-#else
-	int			qlen_young;
-#endif
-	int			clock_hand;
-	u32			hash_rnd;
-	struct open_request	*syn_table[TCP_SYNQ_HSIZE];
-};
 
 #ifdef CONFIG_ACCEPT_QUEUES
 static inline void
