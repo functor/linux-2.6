@@ -1035,7 +1035,7 @@ int icmp_rcv(struct sk_buff *skb)
 
 #if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	/* VNET: Bypass stack if the echo ID was bound to a (presumably raw) socket */
-	if (skb->sk) {
+	if (vnet_active && skb->sk) {
 		switch (icmph->type) {
 		case ICMP_ECHOREPLY:
 		case ICMP_ECHO:
