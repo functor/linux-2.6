@@ -734,9 +734,62 @@ ENTRY(spurious_interrupt_bug)
 	pushl $do_spurious_interrupt_bug
 	jmp error_code
 
+#ifdef CONFIG_X86_STACK_CHECK
+ENTRY(mcount)
+	push %eax
+	movl $(THREAD_SIZE - 1),%eax
+	andl %esp,%eax
+	cmpl $STACK_WARN,%eax /* esp reaches into STACK_WARN space */
+	jle 1f
+2:
+	popl %eax
+	ret
+1:
+	lock; btsl $0,stack_overflowed
+	jc 2b
+
+	# switch to overflow stack
+	movl %esp,%eax
+	movl $(stack_overflow_stack + THREAD_SIZE - 4),%esp
+	
+	pushf
+	cli
+	pushl %eax
+
+	# push eip then esp of error for stack_overflow_panic
+	pushl 4(%eax)
+	pushl %eax
+
+	# update the task pointer and cpu in the overflow stack's thread_info.
+	GET_THREAD_INFO_WITH_ESP(%eax)
+	movl TI_task(%eax),%ebx
+	movl %ebx,stack_overflow_stack+TI_task
+	movl TI_cpu(%eax),%ebx
+	movl %ebx,stack_overflow_stack+TI_cpu
+
+	call stack_overflow
+
+	# pop off call arguments
+	addl $8,%esp
+
+	popl %eax
+	popf
+	movl %eax,%esp
+	popl %eax
+	movl $0,stack_overflowed
+	ret
+#warning stack check enabled
+#endif
+
 .previous
 
 .data
+#ifdef CONFIG_X86_STACK_CHECK
+ 	.globl stack_overflowed
+stack_overflowed:
+	.long 0
+#endif
+
 ENTRY(sys_call_table)
 	.long sys_restart_syscall	/* 0 - old "setup()" system call, used for restarting */
 	.long sys_exit
@@ -1029,7 +1082,7 @@ ENTRY(sys_call_table)
 	.long sys_mq_timedreceive	/* 280 */
 	.long sys_mq_notify
 	.long sys_mq_getsetattr
-	.long sys_ni_syscall		/* reserved for kexec */
+	.long sys_kexec_load
 	.long sys_ioprio_set
 	.long sys_ioprio_get		/* 285 */
 
