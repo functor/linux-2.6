@@ -235,12 +235,12 @@ static int sg_scsi_ioctl(request_queue_t *q, struct gendisk *bd_disk,
 		return -EFAULT;
 	if (in_len > PAGE_SIZE || out_len > PAGE_SIZE)
 		return -EINVAL;
-	if (get_user(opcode, sic->data))
+	if (get_user(opcode, (int *)sic->data))
 		return -EFAULT;
 
 	bytes = max(in_len, out_len);
 	if (bytes) {
-		buffer = kmalloc(bytes, q->bounce_gfp | GFP_USER);
+		buffer = kmalloc(bytes, q->bounce_gfp | GFP_USER | __GFP_NOWARN);
 		if (!buffer)
 			return -ENOMEM;
 

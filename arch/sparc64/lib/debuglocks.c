@@ -55,7 +55,7 @@ void _do_spin_lock(spinlock_t *lock, char *str)
 {
 	unsigned long caller, val;
 	int stuck = INIT_STUCK;
-	int cpu = get_cpu();
+	int cpu = smp_processor_id();
 	int shown = 0;
 
 	GET_CALLER(caller);
@@ -80,14 +80,12 @@ again:
 	lock->owner_cpu = cpu;
 	current->thread.smp_lock_count++;
 	current->thread.smp_lock_pc = ((unsigned int)caller);
-
-	put_cpu();
 }
 
 int _spin_trylock(spinlock_t *lock)
 {
 	unsigned long val, caller;
-	int cpu = get_cpu();
+	int cpu = smp_processor_id();
 
 	GET_CALLER(caller);
 	__asm__ __volatile__("ldstub [%1], %0"
@@ -101,9 +99,6 @@ int _spin_trylock(spinlock_t *lock)
 		current->thread.smp_lock_count++;
 		current->thread.smp_lock_pc = ((unsigned int)caller);
 	}
-
-	put_cpu();
-
 	return val == 0;
 }
 
@@ -122,7 +117,7 @@ void _do_read_lock (rwlock_t *rw, char *str)
 {
 	unsigned long caller, val;
 	int stuck = INIT_STUCK;
-	int cpu = get_cpu();
+	int cpu = smp_processor_id();
 	int shown = 0;
 
 	GET_CALLER(caller);
@@ -153,15 +148,13 @@ wlock_again:
 	rw->reader_pc[cpu] = ((unsigned int)caller);
 	current->thread.smp_lock_count++;
 	current->thread.smp_lock_pc = ((unsigned int)caller);
-
-	put_cpu();
 }
 
 void _do_read_unlock (rwlock_t *rw, char *str)
 {
 	unsigned long caller, val;
 	int stuck = INIT_STUCK;
-	int cpu = get_cpu();
+	int cpu = smp_processor_id();
 	int shown = 0;
 
 	GET_CALLER(caller);
@@ -188,15 +181,13 @@ runlock_again:
 		}
 		goto runlock_again;
 	}
-
-	put_cpu();
 }
 
 void _do_write_lock (rwlock_t *rw, char *str)
 {
 	unsigned long caller, val;
 	int stuck = INIT_STUCK;
-	int cpu = get_cpu();
+	int cpu = smp_processor_id();
 	int shown = 0;
 
 	GET_CALLER(caller);
@@ -272,8 +263,6 @@ wlock_again:
 	rw->writer_cpu = cpu;
 	current->thread.smp_lock_count++;
 	current->thread.smp_lock_pc = ((unsigned int)caller);
-
-	put_cpu();
 }
 
 void _do_write_unlock(rwlock_t *rw)
@@ -313,7 +302,7 @@ wlock_again:
 int _do_write_trylock (rwlock_t *rw, char *str)
 {
 	unsigned long caller, val;
-	int cpu = get_cpu();
+	int cpu = smp_processor_id();
 
 	GET_CALLER(caller);
 
@@ -333,10 +322,8 @@ int _do_write_trylock (rwlock_t *rw, char *str)
 	: "0" (&(rw->lock))
 	: "g3", "g5", "g7", "memory");
 
-	if (val) {
-		put_cpu();
+	if (val)
 		return 0;
-	}
 
 	if ((rw->lock & ((1UL<<63)-1UL)) != 0UL) {
 		/* Readers still around, drop the write
@@ -355,8 +342,6 @@ int _do_write_trylock (rwlock_t *rw, char *str)
 		: "r" (&(rw->lock))
 		: "g3", "g5", "g7", "cc", "memory");
 
-		put_cpu();
-
 		return 0;
 	}
 
@@ -365,8 +350,6 @@ int _do_write_trylock (rwlock_t *rw, char *str)
 	rw->writer_cpu = cpu;
 	current->thread.smp_lock_count++;
 	current->thread.smp_lock_pc = ((unsigned int)caller);
-
-	put_cpu();
 
 	return 1;
 }

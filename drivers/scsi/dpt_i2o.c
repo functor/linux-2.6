@@ -69,7 +69,7 @@ MODULE_DESCRIPTION("Adaptec I2O RAID Driver");
 #include <asm/io.h>		/* for virt_to_bus, etc. */
 
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 
 #include "dpt/dptsig.h"
 #include "dpti.h"

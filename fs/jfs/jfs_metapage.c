@@ -239,7 +239,6 @@ again:
 		spin_unlock(&meta_lock);
 		if (test_bit(META_stale, &mp->flag)) {
 			release_metapage(mp);
-			yield();	/* Let other waiters release it, too */
 			goto again;
 		}
 		if (test_bit(META_discard, &mp->flag)) {

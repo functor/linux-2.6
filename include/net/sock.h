@@ -50,6 +50,7 @@
 #include <linux/security.h>
 
 #include <linux/filter.h>
+#include <linux/vinline.h>
 
 #include <asm/atomic.h>
 #include <net/dst.h>
@@ -61,7 +62,7 @@
  */
 
 /* Define this to get the sk->sk_debug debugging facility. */
-#define SOCK_DEBUGGING
+//#define SOCK_DEBUGGING
 #ifdef SOCK_DEBUGGING
 #define SOCK_DEBUG(sk, msg...) do { if ((sk) && ((sk)->sk_debug)) \
 					printk(KERN_DEBUG msg); } while (0)
@@ -109,6 +110,10 @@ struct sock_common {
 	struct hlist_node	skc_node;
 	struct hlist_node	skc_bind_node;
 	atomic_t		skc_refcnt;
+	xid_t			skc_xid;
+	struct vx_info		*skc_vx_info;
+	nid_t			skc_nid;
+	struct nx_info		*skc_nx_info;
 };
 
 /**
@@ -164,12 +169,13 @@ struct sock_common {
   *	@sk_timer - sock cleanup timer
   *	@sk_stamp - time stamp of last packet received
   *	@sk_socket - Identd and reporting IO signals
-  *	@sk_user_data - RPC layer private data
+  *	@sk_user_data - RPC and Tux layer private data
   *	@sk_owner - module that owns this socket
   *	@sk_state_change - callback to indicate change in the state of the sock
   *	@sk_data_ready - callback to indicate there is data to be processed
   *	@sk_write_space - callback to indicate there is bf sending space available
   *	@sk_error_report - callback to indicate errors (e.g. %MSG_ERRQUEUE)
+  *	@sk_create_child - callback to get new socket events
   *	@sk_backlog_rcv - callback to process the backlog
   *	@sk_destruct - called at sock freeing time, i.e. when all refcnt == 0
  */
@@ -186,6 +192,10 @@ struct sock {
 #define sk_node			__sk_common.skc_node
 #define sk_bind_node		__sk_common.skc_bind_node
 #define sk_refcnt		__sk_common.skc_refcnt
+#define sk_xid			__sk_common.skc_xid
+#define sk_vx_info		__sk_common.skc_vx_info
+#define sk_nid			__sk_common.skc_nid
+#define sk_nx_info		__sk_common.skc_nx_info
 	volatile unsigned char	sk_zapped;
 	unsigned char		sk_shutdown;
 	unsigned char		sk_use_write_queue;
@@ -245,6 +255,7 @@ struct sock {
 	struct timeval		sk_stamp;
 	struct socket		*sk_socket;
 	void			*sk_user_data;
+	void                    *sk_ns;        // For use by CKRM
 	struct module		*sk_owner;
 	void			*sk_security;
 	void			(*sk_state_change)(struct sock *sk);
@@ -253,6 +264,7 @@ struct sock {
 	void			(*sk_error_report)(struct sock *sk);
   	int			(*sk_backlog_rcv)(struct sock *sk,
 						  struct sk_buff *skb);  
+	void			(*sk_create_child)(struct sock *sk, struct sock *newsk);
 	void                    (*sk_destruct)(struct sock *sk);
 };
 
@@ -398,21 +410,6 @@ static inline int sock_flag(struct sock *sk, enum sock_flags flag)
 	return test_bit(flag, &sk->sk_flags);
 }
 
-static inline void sk_acceptq_removed(struct sock *sk)
-{
-	sk->sk_ack_backlog--;
-}
-
-static inline void sk_acceptq_added(struct sock *sk)
-{
-	sk->sk_ack_backlog++;
-}
-
-static inline int sk_acceptq_is_full(struct sock *sk)
-{
-	return sk->sk_ack_backlog > sk->sk_max_ack_backlog;
-}
-
 /* The per-socket spinlock must be held here. */
 #define sk_add_backlog(__sk, __skb)				\
 do {	if (!(__sk)->sk_backlog.tail) {				\
@@ -424,20 +421,6 @@ do {	if (!(__sk)->sk_backlog.tail) {				\
 	}							\
 	(__skb)->next = NULL;					\
 } while(0)
-
-#define sk_wait_event(__sk, __timeo, __condition)		\
-({	int rc;							\
-	release_sock(__sk);					\
-	rc = __condition;					\
-	if (!rc) {						\
-		*(__timeo) = schedule_timeout(*(__timeo));	\
-		rc = __condition;				\
-	}							\
-	lock_sock(__sk);					\
-	rc;							\
-})
-
-extern int sk_wait_data(struct sock *sk, long *timeo);
 
 /* IP protocol blocks we attach to sockets.
  * socket layer -> transport layer interface
@@ -927,11 +910,6 @@ static inline void skb_set_owner_r(struct sk_buff *skb, struct sock *sk)
 	atomic_add(skb->truesize, &sk->sk_rmem_alloc);
 }
 
-extern void sk_reset_timer(struct sock *sk, struct timer_list* timer,
-			   unsigned long expires);
-
-extern void sk_stop_timer(struct sock *sk, struct timer_list* timer);
-
 static inline int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
 	int err = 0;
@@ -1067,20 +1045,6 @@ sock_recv_timestamp(struct msghdr *msg, struct sock *sk, struct sk_buff *skb)
 			 stamp);
 	} else
 		sk->sk_stamp = *stamp;
-}
-
-/**
- * sk_eat_skb - Release a skb if it is no longer needed
- * @sk - socket to eat this skb from
- * @skb - socket buffer to eat
- *
- * This routine must be called with interrupts disabled or with the socket
- * locked so that the sk_buff queue operation is ok.
-*/
-static inline void sk_eat_skb(struct sock *sk, struct sk_buff *skb)
-{
-	__skb_unlink(skb, &sk->sk_receive_queue);
-	__kfree_skb(skb);
 }
 
 extern atomic_t netstamp_needed;

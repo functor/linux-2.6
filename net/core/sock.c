@@ -323,7 +323,10 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 			break;
 
 		case SO_PASSCRED:
-			sock->passcred = valbool;
+			if (valbool)
+				set_bit(SOCK_PASS_CRED, &sock->flags);
+			else
+				clear_bit(SOCK_PASS_CRED, &sock->flags);
 			break;
 
 		case SO_TIMESTAMP:
@@ -546,7 +549,7 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
 			break; 
 
 		case SO_PASSCRED:
-			v.val = sock->passcred;
+			v.val = test_bit(SOCK_PASS_CRED, &sock->flags)?1:0;
 			break;
 
 		case SO_PEERCRED:
@@ -621,6 +624,8 @@ struct sock *sk_alloc(int family, int priority, int zero_it, kmem_cache_t *slab)
 			sock_lock_init(sk);
 		}
 		sk->sk_slab = slab;
+		sock_vx_init(sk);
+		sock_nx_init(sk);
 		
 		if (security_sk_alloc(sk, family, priority)) {
 			kmem_cache_free(slab, sk);
@@ -651,6 +656,10 @@ void sk_free(struct sock *sk)
 		       __FUNCTION__, atomic_read(&sk->sk_omem_alloc));
 
 	security_sk_free(sk);
+	BUG_ON(sk->sk_vx_info);
+	BUG_ON(sk->sk_nx_info);
+/*	clr_vx_info(&sk->sk_vx_info);
+	clr_nx_info(&sk->sk_nx_info);	*/
 	kmem_cache_free(sk->sk_slab, sk);
 	module_put(owner);
 }
@@ -917,31 +926,6 @@ void __release_sock(struct sock *sk)
 	} while((skb = sk->sk_backlog.head) != NULL);
 }
 
-/**
- * sk_wait_data - wait for data to arrive at sk_receive_queue
- * sk - sock to wait on
- * timeo - for how long
- *
- * Now socket state including sk->sk_err is changed only under lock,
- * hence we may omit checks after joining wait queue.
- * We check receive queue before schedule() only as optimization;
- * it is very likely that release_sock() added new data.
- */
-int sk_wait_data(struct sock *sk, long *timeo)
-{
-	int rc;
-	DEFINE_WAIT(wait);
-
-	prepare_to_wait(sk->sk_sleep, &wait, TASK_INTERRUPTIBLE);
-	set_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);
-	rc = sk_wait_event(sk, timeo, !skb_queue_empty(&sk->sk_receive_queue));
-	clear_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);
-	finish_wait(sk->sk_sleep, &wait);
-	return rc;
-}
-
-EXPORT_SYMBOL(sk_wait_data);
-
 /*
  * Set of default routines for initialising struct proto_ops when
  * the protocol does not support a particular function. In certain
@@ -1124,23 +1108,6 @@ void sk_send_sigurg(struct sock *sk)
 			sk_wake_async(sk, 3, POLL_PRI);
 }
 
-void sk_reset_timer(struct sock *sk, struct timer_list* timer,
-		    unsigned long expires)
-{
-	if (!mod_timer(timer, expires))
-		sock_hold(sk);
-}
-
-EXPORT_SYMBOL(sk_reset_timer);
-
-void sk_stop_timer(struct sock *sk, struct timer_list* timer)
-{
-	if (timer_pending(timer) && del_timer(timer))
-		__sock_put(sk);
-}
-
-EXPORT_SYMBOL(sk_stop_timer);
-
 void sock_init_data(struct socket *sock, struct sock *sk)
 {
 	skb_queue_head_init(&sk->sk_receive_queue);
@@ -1183,6 +1150,11 @@ void sock_init_data(struct socket *sock, struct sock *sk)
 
 	sk->sk_stamp.tv_sec     = -1L;
 	sk->sk_stamp.tv_usec    = -1L;
+
+	sk->sk_vx_info		=	NULL;
+	sk->sk_xid		=	0;
+	sk->sk_nx_info		=	NULL;
+	sk->sk_nid		=	0;
 
 	atomic_set(&sk->sk_refcnt, 1);
 }

@@ -9,7 +9,7 @@
 #include <scsi/scsi_devinfo.h>
 
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include "scsi_priv.h"
 
 /*
@@ -117,8 +117,10 @@ static struct {
 	 */
 	{"ADAPTEC", "AACRAID", NULL, BLIST_FORCELUN},
 	{"ADAPTEC", "Adaptec 5400S", NULL, BLIST_FORCELUN},
+	{"AFT PRO", "-IX CF", "0.0>", BLIST_FORCELUN},
 	{"BELKIN", "USB 2 HS-CF", "1.95",  BLIST_SPARSELUN},
 	{"CANON", "IPUBJD", NULL, BLIST_SPARSELUN},
+	{"CBOX3", "USB Storage-SMC", "300A", BLIST_FORCELUN},
 	{"CMD", "CRA-7280", NULL, BLIST_SPARSELUN},	/* CMD RAID Controller */
 	{"CNSI", "G7324", NULL, BLIST_SPARSELUN},	/* Chaparral G7324 RAID */
 	{"CNSi", "G8324", NULL, BLIST_SPARSELUN},	/* Chaparral G8324 RAID */
@@ -139,6 +141,8 @@ static struct {
 	{"EMC", "SYMMETRIX", NULL, BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_FORCELUN},
 	{"EMULEX", "MD21/S2     ESDI", NULL, BLIST_SINGLELUN},
 	{"FSC", "CentricStor", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"Generic", "USB SD Reader", "1.00", BLIST_FORCELUN},
+	{"Generic", "USB Storage-SMC", "0090", BLIST_FORCELUN},
 	{"Generic", "USB Storage-SMC", "0180", BLIST_FORCELUN},
 	{"Generic", "USB Storage-SMC", "0207", BLIST_FORCELUN},
 	{"HITACHI", "DF400", "*", BLIST_SPARSELUN},
@@ -151,6 +155,7 @@ static struct {
 	{"HP", "C1557A", NULL, BLIST_FORCELUN},
 	{"IBM", "AuSaV1S2", NULL, BLIST_FORCELUN},
 	{"IBM", "ProFibre 4000R", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"ICSI", "SD Card", "2.7C", BLIST_FORCELUN},
 	{"iomega", "jaz 1GB", "J.86", BLIST_NOTQ | BLIST_NOLUN},
 	{"IOMEGA", "Io20S         *F", NULL, BLIST_KEY},
 	{"INSITE", "Floptical   F*8I", NULL, BLIST_KEY},
@@ -171,6 +176,7 @@ static struct {
 	{"PIONEER", "CD-ROM DRM-602X", NULL, BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"PIONEER", "CD-ROM DRM-604X", NULL, BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"REGAL", "CDC-4X", NULL, BLIST_MAX5LUN | BLIST_SINGLELUN},
+	{"SanDisk", "ImageMate CF-SD1", NULL, BLIST_FORCELUN},
 	{"SGI", "RAID3", "*", BLIST_SPARSELUN},
 	{"SGI", "RAID5", "*", BLIST_SPARSELUN},
 	{"SGI", "TP9100", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
@@ -182,6 +188,7 @@ static struct {
 	{"TEXEL", "CD-ROM", "1.06", BLIST_BORKEN},
 	{"TOSHIBA", "CDROM", NULL, BLIST_ISROM},
 	{"TOSHIBA", "CD-ROM", NULL, BLIST_ISROM},
+	{"USB2.0", "SMARTMEDIA/XD", NULL, BLIST_FORCELUN},
 	{"XYRATEX", "RS", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"Zzyzx", "RocketStor 500S", NULL, BLIST_SPARSELUN},
 	{"Zzyzx", "RocketStor 2000", NULL, BLIST_SPARSELUN},

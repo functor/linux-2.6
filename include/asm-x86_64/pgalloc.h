@@ -7,6 +7,11 @@
 #include <linux/threads.h>
 #include <linux/mm.h>
 
+#define arch_add_exec_range(mm, limit) do { ; } while (0)
+#define arch_flush_exec_range(mm)      do { ; } while (0)
+#define arch_remove_exec_range(mm, limit) do { ; } while (0)
+
+
 #define pmd_populate_kernel(mm, pmd, pte) \
 		set_pmd(pmd, __pmd(_PAGE_TABLE | __pa(pte)))
 #define pgd_populate(mm, pgd, pmd) \

@@ -52,6 +52,7 @@ void foo(void)
 	OFFSET(TI_preempt_count, thread_info, preempt_count);
 	OFFSET(TI_addr_limit, thread_info, addr_limit);
 	OFFSET(TI_restart_block, thread_info, restart_block);
+	OFFSET(TI_sysenter_return, thread_info, sysenter_return);
 	BLANK();
 
 	OFFSET(EXEC_DOMAIN_handler, exec_domain, handler);
@@ -61,5 +62,21 @@ void foo(void)
 	DEFINE(TSS_sysenter_esp0, offsetof(struct tss_struct, esp0) -
 		 sizeof(struct tss_struct));
 
+	DEFINE(TI_task, offsetof (struct thread_info, task));
+	DEFINE(TI_exec_domain, offsetof (struct thread_info, exec_domain));
+	DEFINE(TI_flags, offsetof (struct thread_info, flags));
+	DEFINE(TI_preempt_count, offsetof (struct thread_info, preempt_count));
+	DEFINE(TI_addr_limit, offsetof (struct thread_info, addr_limit));
+	DEFINE(TI_sysenter_return,
+			offsetof (struct thread_info, sysenter_return));
+	DEFINE(TI_real_stack, offsetof (struct thread_info, real_stack));
+	DEFINE(TI_virtual_stack, offsetof (struct thread_info, virtual_stack));
+	DEFINE(TI_user_pgd, offsetof (struct thread_info, user_pgd));
+
+	DEFINE(FIX_ENTRY_TRAMPOLINE_0_addr,
+			__fix_to_virt(FIX_ENTRY_TRAMPOLINE_0));
+	DEFINE(FIX_VSYSCALL_addr, __fix_to_virt(FIX_VSYSCALL));
 	DEFINE(PAGE_SIZE_asm, PAGE_SIZE);
+	DEFINE(task_thread_db7,
+		offsetof (struct task_struct, thread.debugreg[7]));
 }

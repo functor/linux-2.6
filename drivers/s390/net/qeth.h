@@ -23,7 +23,7 @@
 
 #include "qeth_mpc.h"
 
-#define VERSION_QETH_H 		"$Revision: 1.110 $"
+#define VERSION_QETH_H 		"$Revision: 1.108 $"
 
 #ifdef CONFIG_QETH_IPV6
 #define QETH_VERSION_IPV6 	":IPv6"
@@ -91,14 +91,10 @@
 		debug_event(qeth_dbf_##name,level,(void*)(addr),len); \
 	} while (0)
 
-extern DEFINE_PER_CPU(char[256], qeth_dbf_txt_buf);
-
-#define QETH_DBF_TEXT_(name,level,text...)				\
-	do {								\
-		char* dbf_txt_buf = get_cpu_var(qeth_dbf_txt_buf);	\
-		sprintf(dbf_txt_buf, text);			  	\
-		debug_text_event(qeth_dbf_##name,level,dbf_txt_buf);	\
-		put_cpu_var(qeth_dbf_txt_buf);				\
+#define QETH_DBF_TEXT_(name,level,text...)				  \
+	do {								  \
+		sprintf(qeth_dbf_text_buf, text);			  \
+		debug_text_event(qeth_dbf_##name,level,qeth_dbf_text_buf);\
 	} while (0)
 
 #define QETH_DBF_SPRINTF(name,level,text...) \
@@ -380,6 +376,11 @@ enum qeth_qdio_buffer_states {
 	 * outbound: filled by driver; owned by hardware in order to be sent
 	 */
 	QETH_QDIO_BUF_PRIMED,
+	/*
+	 * inbound only: an error condition has been detected for a buffer
+	 *     the buffer will be discarded (not read out)
+	 */
+	QETH_QDIO_BUF_ERROR,
 };
 
 enum qeth_qdio_info_states {
@@ -418,7 +419,7 @@ struct qeth_qdio_q {
 
 struct qeth_qdio_out_buffer {
 	struct qdio_buffer *buffer;
-	atomic_t state;
+	volatile enum qeth_qdio_buffer_states state;
 	volatile int next_element_to_fill;
 	struct sk_buff_head skb_list;
 };

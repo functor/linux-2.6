@@ -68,13 +68,18 @@ void tcp_clear_xmit_timers(struct sock *sk)
 	struct tcp_opt *tp = tcp_sk(sk);
 
 	tp->pending = 0;
-	sk_stop_timer(sk, &tp->retransmit_timer);
+	if (timer_pending(&tp->retransmit_timer) &&
+	    del_timer(&tp->retransmit_timer))
+		__sock_put(sk);
 
 	tp->ack.pending = 0;
 	tp->ack.blocked = 0;
-	sk_stop_timer(sk, &tp->delack_timer);
+	if (timer_pending(&tp->delack_timer) &&
+	    del_timer(&tp->delack_timer))
+		__sock_put(sk);
 
-	sk_stop_timer(sk, &sk->sk_timer);
+	if (timer_pending(&sk->sk_timer) && del_timer(&sk->sk_timer))
+		__sock_put(sk);
 }
 
 static void tcp_write_err(struct sock *sk)
@@ -213,7 +218,8 @@ static void tcp_delack_timer(unsigned long data)
 		/* Try again later. */
 		tp->ack.blocked = 1;
 		NET_INC_STATS_BH(DelayedACKLocked);
-		sk_reset_timer(sk, &tp->delack_timer, jiffies + TCP_DELACK_MIN);
+		if (!mod_timer(&tp->delack_timer, jiffies + TCP_DELACK_MIN))
+			sock_hold(sk);
 		goto out_unlock;
 	}
 
@@ -223,7 +229,8 @@ static void tcp_delack_timer(unsigned long data)
 		goto out;
 
 	if (time_after(tp->ack.timeout, jiffies)) {
-		sk_reset_timer(sk, &tp->delack_timer, tp->ack.timeout);
+		if (!mod_timer(&tp->delack_timer, tp->ack.timeout))
+			sock_hold(sk);
 		goto out;
 	}
 	tp->ack.pending &= ~TCP_ACK_TIMER;
@@ -422,7 +429,8 @@ static void tcp_write_timer(unsigned long data)
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk)) {
 		/* Try again later */
-		sk_reset_timer(sk, &tp->retransmit_timer, jiffies + (HZ / 20));
+		if (!mod_timer(&tp->retransmit_timer, jiffies + (HZ/20)))
+			sock_hold(sk);
 		goto out_unlock;
 	}
 
@@ -430,7 +438,8 @@ static void tcp_write_timer(unsigned long data)
 		goto out;
 
 	if (time_after(tp->timeout, jiffies)) {
-		sk_reset_timer(sk, &tp->retransmit_timer, tp->timeout);
+		if (!mod_timer(&tp->retransmit_timer, tp->timeout))
+			sock_hold(sk);
 		goto out;
 	}
 
@@ -489,7 +498,16 @@ static void tcp_synack_timer(struct sock *sk)
 	 * ones are about to clog our table.
 	 */
 	if (lopt->qlen>>(lopt->max_qlen_log-1)) {
+#ifdef CONFIG_ACCEPT_QUEUES
+		int young = 0;
+	       
+		for(i=0; i < NUM_ACCEPT_QUEUES; i++) 
+			young += lopt->qlen_young[i];
+		
+		young <<= 1;
+#else
 		int young = (lopt->qlen_young<<1);
+#endif
 
 		while (thresh > 2) {
 			if (lopt->qlen < young)
@@ -515,9 +533,12 @@ static void tcp_synack_timer(struct sock *sk)
 					unsigned long timeo;
 
 					if (req->retrans++ == 0)
-						lopt->qlen_young--;
-					timeo = min((TCP_TIMEOUT_INIT << req->retrans),
-						    TCP_RTO_MAX);
+#ifdef CONFIG_ACCEPT_QUEUES
+			         		lopt->qlen_young[req->acceptq_class]--;
+#else
+			         		lopt->qlen_young--;
+#endif
+					timeo = min((TCP_TIMEOUT_INIT << req->retrans), TCP_RTO_MAX);
 					req->expires = now + timeo;
 					reqp = &req->dl_next;
 					continue;
@@ -529,7 +550,11 @@ static void tcp_synack_timer(struct sock *sk)
 				write_unlock(&tp->syn_wait_lock);
 				lopt->qlen--;
 				if (req->retrans == 0)
-					lopt->qlen_young--;
+#ifdef CONFIG_ACCEPT_QUEUES
+			         		lopt->qlen_young[req->acceptq_class]--;
+#else
+			         		lopt->qlen_young--;
+#endif
 				tcp_openreq_free(req);
 				continue;
 			}
@@ -548,12 +573,14 @@ static void tcp_synack_timer(struct sock *sk)
 
 void tcp_delete_keepalive_timer (struct sock *sk)
 {
-	sk_stop_timer(sk, &sk->sk_timer);
+	if (timer_pending(&sk->sk_timer) && del_timer (&sk->sk_timer))
+		__sock_put(sk);
 }
 
 void tcp_reset_keepalive_timer (struct sock *sk, unsigned long len)
 {
-	sk_reset_timer(sk, &sk->sk_timer, jiffies + len);
+	if (!mod_timer(&sk->sk_timer, jiffies + len))
+		sock_hold(sk);
 }
 
 void tcp_set_keepalive(struct sock *sk, int val)

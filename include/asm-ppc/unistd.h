@@ -261,7 +261,7 @@
 #define __NR_fadvise64_64	254
 #define __NR_rtas		255
 /* Number 256 is reserved for sys_debug_setcontext */
-/* Number 257 is reserved for vserver */
+#define __NR_vserver		257
 /* Number 258 is reserved for new sys_remap_file_pages */
 /* Number 259 is reserved for new sys_mbind */
 /* Number 260 is reserved for new sys_get_mempolicy */
@@ -402,7 +402,6 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5)	\
 #define __ARCH_WANT_SYS_OLDUMOUNT
 #define __ARCH_WANT_SYS_SIGPENDING
 #define __ARCH_WANT_SYS_SIGPROCMASK
-#define __ARCH_WANT_SYS_RT_SIGACTION
 
 /*
  * Forking from kernel space will result in the child getting a new,

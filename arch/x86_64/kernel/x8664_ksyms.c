@@ -219,3 +219,6 @@ EXPORT_SYMBOL_GPL(flush_tlb_all);
 #endif
 
 EXPORT_SYMBOL(sys_ioctl);
+
+EXPORT_SYMBOL(memcpy_toio);
+EXPORT_SYMBOL(memcpy_fromio);

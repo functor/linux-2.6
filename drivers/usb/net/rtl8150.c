@@ -776,13 +776,13 @@ static int rtl8150_close(struct net_device *netdev)
 	return res;
 }
 
-static int rtl8150_ethtool_ioctl(struct net_device *netdev, void __user *uaddr)
+static int rtl8150_ethtool_ioctl(struct net_device *netdev, void *uaddr)
 {
 	rtl8150_t *dev;
 	int cmd;
 
 	dev = netdev->priv;
-	if (get_user(cmd, (int __user *) uaddr))
+	if (get_user(cmd, (int *) uaddr))
 		return -EFAULT;
 
 	switch (cmd) {
@@ -856,7 +856,7 @@ static int rtl8150_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	int res;
 
 	dev = netdev->priv;
-	data = (u16 *) & rq->ifr_ifru;
+	data = (u16 *) & rq->ifr_data;
 	res = 0;
 
 	switch (cmd) {

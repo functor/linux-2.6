@@ -898,10 +898,8 @@ static snd_emu10k1_fx8010_ctl_t *snd_emu10k1_look_for_ctl(emu10k1_t *emu, snd_ct
 static int snd_emu10k1_verify_controls(emu10k1_t *emu, emu10k1_fx8010_code_t *icode)
 {
 	unsigned int i;
-	snd_ctl_elem_id_t __user *_id;
-	snd_ctl_elem_id_t id;
-	emu10k1_fx8010_control_gpr_t __user *_gctl;
-	emu10k1_fx8010_control_gpr_t gctl;
+	snd_ctl_elem_id_t *_id, id;
+	emu10k1_fx8010_control_gpr_t *_gctl, gctl;
 	
 	for (i = 0, _id = icode->gpr_del_controls;
 	     i < icode->gpr_del_control_count; i++, _id++) {
@@ -948,8 +946,7 @@ static void snd_emu10k1_ctl_private_free(snd_kcontrol_t *kctl)
 static void snd_emu10k1_add_controls(emu10k1_t *emu, emu10k1_fx8010_code_t *icode)
 {
 	unsigned int i, j;
-	emu10k1_fx8010_control_gpr_t __user *_gctl;
-	emu10k1_fx8010_control_gpr_t gctl;
+	emu10k1_fx8010_control_gpr_t *_gctl, gctl;
 	snd_emu10k1_fx8010_ctl_t *ctl, nctl;
 	snd_kcontrol_new_t knew;
 	snd_kcontrol_t *kctl;
@@ -1015,8 +1012,7 @@ static void snd_emu10k1_add_controls(emu10k1_t *emu, emu10k1_fx8010_code_t *icod
 static void snd_emu10k1_del_controls(emu10k1_t *emu, emu10k1_fx8010_code_t *icode)
 {
 	unsigned int i;
-	snd_ctl_elem_id_t id;
-	snd_ctl_elem_id_t __user *_id;
+	snd_ctl_elem_id_t *_id, id;
 	snd_emu10k1_fx8010_ctl_t *ctl;
 	snd_card_t *card = emu->card;
 	
@@ -1035,8 +1031,7 @@ static int snd_emu10k1_list_controls(emu10k1_t *emu, emu10k1_fx8010_code_t *icod
 {
 	unsigned int i = 0, j;
 	unsigned int total = 0;
-	emu10k1_fx8010_control_gpr_t gctl;
-	emu10k1_fx8010_control_gpr_t __user *_gctl;
+	emu10k1_fx8010_control_gpr_t *_gctl, gctl;
 	snd_emu10k1_fx8010_ctl_t *ctl;
 	snd_ctl_elem_id_t *id;
 	struct list_head *list;
@@ -2302,7 +2297,6 @@ static int snd_emu10k1_fx8010_ioctl(snd_hwdep_t * hw, struct file *file, unsigne
 	emu10k1_fx8010_code_t *icode;
 	emu10k1_fx8010_pcm_t *ipcm;
 	unsigned int addr;
-	void __user *argp = (void __user *)arg;
 	int res;
 	
 	switch (cmd) {
@@ -2314,7 +2308,7 @@ static int snd_emu10k1_fx8010_ioctl(snd_hwdep_t * hw, struct file *file, unsigne
 			kfree(info);
 			return res;
 		}
-		if (copy_to_user(argp, info, sizeof(*info))) {
+		if (copy_to_user((void *)arg, info, sizeof(*info))) {
 			kfree(info);
 			return -EFAULT;
 		}
@@ -2326,7 +2320,7 @@ static int snd_emu10k1_fx8010_ioctl(snd_hwdep_t * hw, struct file *file, unsigne
 		icode = (emu10k1_fx8010_code_t *)kmalloc(sizeof(*icode), GFP_KERNEL);
 		if (icode == NULL)
 			return -ENOMEM;
-		if (copy_from_user(icode, argp, sizeof(*icode))) {
+		if (copy_from_user(icode, (void *)arg, sizeof(*icode))) {
 			kfree(icode);
 			return -EFAULT;
 		}
@@ -2337,12 +2331,12 @@ static int snd_emu10k1_fx8010_ioctl(snd_hwdep_t * hw, struct file *file, unsigne
 		icode = (emu10k1_fx8010_code_t *)kmalloc(sizeof(*icode), GFP_KERNEL);
 		if (icode == NULL)
 			return -ENOMEM;
-		if (copy_from_user(icode, argp, sizeof(*icode))) {
+		if (copy_from_user(icode, (void *)arg, sizeof(*icode))) {
 			kfree(icode);
 			return -EFAULT;
 		}
 		res = snd_emu10k1_icode_peek(emu, icode);
-		if (res == 0 && copy_to_user(argp, icode, sizeof(*icode))) {
+		if (res == 0 && copy_to_user((void *)arg, icode, sizeof(*icode))) {
 			kfree(icode);
 			return -EFAULT;
 		}
@@ -2354,7 +2348,7 @@ static int snd_emu10k1_fx8010_ioctl(snd_hwdep_t * hw, struct file *file, unsigne
 		ipcm = (emu10k1_fx8010_pcm_t *)kmalloc(sizeof(*ipcm), GFP_KERNEL);
 		if (ipcm == NULL)
 			return -ENOMEM;
-		if (copy_from_user(ipcm, argp, sizeof(*ipcm))) {
+		if (copy_from_user(ipcm, (void *)arg, sizeof(*ipcm))) {
 			kfree(ipcm);
 			return -EFAULT;
 		}
@@ -2367,12 +2361,12 @@ static int snd_emu10k1_fx8010_ioctl(snd_hwdep_t * hw, struct file *file, unsigne
 		ipcm = (emu10k1_fx8010_pcm_t *)snd_kcalloc(sizeof(*ipcm), GFP_KERNEL);
 		if (ipcm == NULL)
 			return -ENOMEM;
-		if (copy_from_user(ipcm, argp, sizeof(*ipcm))) {
+		if (copy_from_user(ipcm, (void *)arg, sizeof(*ipcm))) {
 			kfree(ipcm);
 			return -EFAULT;
 		}
 		res = snd_emu10k1_ipcm_peek(emu, ipcm);
-		if (res == 0 && copy_to_user(argp, ipcm, sizeof(*ipcm))) {
+		if (res == 0 && copy_to_user((void *)arg, ipcm, sizeof(*ipcm))) {
 			kfree(ipcm);
 			return -EFAULT;
 		}
@@ -2383,7 +2377,7 @@ static int snd_emu10k1_fx8010_ioctl(snd_hwdep_t * hw, struct file *file, unsigne
 			return -EINVAL;
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
-		if (get_user(addr, (unsigned int __user *)argp))
+		if (get_user(addr, (unsigned int *)arg))
 			return -EFAULT;
 		down(&emu->fx8010.lock);
 		res = snd_emu10k1_fx8010_tram_setup(emu, addr);
@@ -2421,7 +2415,7 @@ static int snd_emu10k1_fx8010_ioctl(snd_hwdep_t * hw, struct file *file, unsigne
 	case SNDRV_EMU10K1_IOCTL_SINGLE_STEP:
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
-		if (get_user(addr, (unsigned int __user *)argp))
+		if (get_user(addr, (unsigned int *)arg))
 			return -EFAULT;
 		if (addr > 0x1ff)
 			return -EINVAL;
@@ -2440,7 +2434,7 @@ static int snd_emu10k1_fx8010_ioctl(snd_hwdep_t * hw, struct file *file, unsigne
 			addr = snd_emu10k1_ptr_read(emu, A_DBG, 0);
 		else
 			addr = snd_emu10k1_ptr_read(emu, DBG, 0);
-		if (put_user(addr, (unsigned int __user *)argp))
+		if (put_user(addr, (unsigned int *)arg))
 			return -EFAULT;
 		return 0;
 	}

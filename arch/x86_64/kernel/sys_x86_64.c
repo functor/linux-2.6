@@ -25,7 +25,7 @@
  * sys_pipe() is the normal C calling standard for creating
  * a pipe. It's not the way Unix traditionally does this, though.
  */
-asmlinkage long sys_pipe(int __user *fildes)
+asmlinkage long sys_pipe(int *fildes)
 {
 	int fd[2];
 	int error;
@@ -142,24 +142,24 @@ full_search:
 	}
 }
 
-asmlinkage long sys_uname(struct new_utsname __user * name)
+asmlinkage long sys_uname(struct new_utsname * name)
 {
 	int err;
 	down_read(&uts_sem);
-	err = copy_to_user(name, &system_utsname, sizeof (*name));
+	err = copy_to_user(name, vx_new_utsname(), sizeof (*name));
 	up_read(&uts_sem);
 	if (personality(current->personality) == PER_LINUX32) 
 		err |= copy_to_user(&name->machine, "i686", 5); 		
 	return err ? -EFAULT : 0;
 }
 
-asmlinkage long wrap_sys_shmat(int shmid, char __user *shmaddr, int shmflg)
+asmlinkage long wrap_sys_shmat(int shmid, char *shmaddr, int shmflg)
 {
 	unsigned long raddr;
 	return do_shmat(shmid,shmaddr,shmflg,&raddr) ?: (long)raddr;
 }
 
-asmlinkage long sys_time64(long __user * tloc)
+asmlinkage long sys_time64(long * tloc)
 {
 	struct timeval now; 
 	int i; 

@@ -36,6 +36,10 @@
 #include <linux/mount.h>
 #include <linux/audit.h>
 #include <linux/rmap.h>
+#include <linux/vinline.h>
+#include <linux/ninline.h>
+#include <linux/ckrm.h>
+#include <linux/ckrm_tsk.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -78,6 +82,9 @@ static kmem_cache_t *task_struct_cachep;
 static void free_task(struct task_struct *tsk)
 {
 	free_thread_info(tsk->thread_info);
+	vxdprintk("freeing up task %p\n", tsk);
+	clr_vx_info(&tsk->vx_info);
+	clr_nx_info(&tsk->nx_info);
 	free_task_struct(tsk);
 }
 
@@ -260,6 +267,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->thread_info = ti;
 	ti->task = tsk;
 
+	ckrm_cb_newtask(tsk);
 	/* One for us, one for whoever does the "release_task()" (usually parent) */
 	atomic_set(&tsk->usage,2);
 	return tsk;
@@ -271,7 +279,7 @@ static inline int dup_mmap(struct mm_struct * mm, struct mm_struct * oldmm)
 	struct vm_area_struct * mpnt, *tmp, **pprev;
 	struct rb_node **rb_link, *rb_parent;
 	int retval;
-	unsigned long charge;
+	unsigned long charge = 0;
 	struct mempolicy *pol;
 
 	down_write(&oldmm->mmap_sem);
@@ -304,12 +312,11 @@ static inline int dup_mmap(struct mm_struct * mm, struct mm_struct * oldmm)
 
 		if(mpnt->vm_flags & VM_DONTCOPY)
 			continue;
-		charge = 0;
 		if (mpnt->vm_flags & VM_ACCOUNT) {
 			unsigned int len = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
 			if (security_vm_enough_memory(len))
 				goto fail_nomem;
-			charge = len;
+			charge += len;
 		}
 		tmp = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
 		if (!tmp)
@@ -361,7 +368,7 @@ static inline int dup_mmap(struct mm_struct * mm, struct mm_struct * oldmm)
 			tmp->vm_ops->open(tmp);
 
 		if (retval)
-			goto out;
+			goto fail;
 	}
 	retval = 0;
 
@@ -373,10 +380,10 @@ fail_nomem_policy:
 	kmem_cache_free(vm_area_cachep, tmp);
 fail_nomem:
 	retval = -ENOMEM;
+fail:
 	vm_unacct_memory(charge);
 	goto out;
 }
-
 static inline int mm_alloc_pgd(struct mm_struct * mm)
 {
 	mm->pgd = pgd_alloc(mm);
@@ -417,6 +424,10 @@ static struct mm_struct * mm_init(struct mm_struct * mm)
 
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
+#ifdef __HAVE_ARCH_MMAP_TOP
+		mm->mmap_top = mmap_top();
+#endif
+		set_vx_info(&mm->mm_vx_info, current->vx_info);
 		return mm;
 	}
 	free_mm(mm);
@@ -448,6 +459,7 @@ void fastcall __mmdrop(struct mm_struct *mm)
 	BUG_ON(mm == &init_mm);
 	mm_free_pgd(mm);
 	destroy_context(mm);
+	clr_vx_info(&mm->mm_vx_info);
 	free_mm(mm);
 }
 
@@ -517,7 +529,7 @@ void mm_release(struct task_struct *tsk, struct mm_struct *mm)
 		 * not set up a proper pointer then tough luck.
 		 */
 		put_user(0, tidptr);
-		sys_futex(tidptr, FUTEX_WAKE, 1, NULL, NULL, 0);
+		sys_futex(tidptr, FUTEX_WAKE, 1, NULL, NULL);
 	}
 }
 
@@ -562,6 +574,7 @@ static int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 
 	/* Copy the current MM stuff.. */
 	memcpy(mm, oldmm, sizeof(*mm));
+	mm->mm_vx_info = NULL;
 	if (!mm_init(mm))
 		goto fail_nomem;
 
@@ -873,6 +886,7 @@ struct task_struct *copy_process(unsigned long clone_flags,
 {
 	int retval;
 	struct task_struct *p = NULL;
+	struct vx_info *vxi;
 
 	if ((clone_flags & (CLONE_NEWNS|CLONE_FS)) == (CLONE_NEWNS|CLONE_FS))
 		return ERR_PTR(-EINVAL);
@@ -897,11 +911,35 @@ struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	retval = -ENOMEM;
+
 	p = dup_task_struct(current);
 	if (!p)
 		goto fork_out;
+	p->tux_info = NULL;
+
+	p->vx_info = NULL;
+	set_vx_info(&p->vx_info, current->vx_info);
+	p->nx_info = NULL;
+	set_nx_info(&p->nx_info, current->nx_info);
+
+	/* check vserver memory */
+	if (p->mm && !(clone_flags & CLONE_VM)) {
+		if (vx_vmpages_avail(p->mm, p->mm->total_vm))
+			vx_pages_add(p->mm->mm_vx_info, RLIMIT_AS, p->mm->total_vm);
+		else
+			goto bad_fork_free;
+	}
+	if (p->mm && vx_flags(VXF_FORK_RSS, 0)) {
+		if (!vx_rsspages_avail(p->mm, p->mm->rss))
+			goto bad_fork_free;
+	}
 
 	retval = -EAGAIN;
+	vxi = current->vx_info;
+	if (vxi && (atomic_read(&vxi->limit.res[RLIMIT_NPROC])
+		>= vxi->limit.rlim[RLIMIT_NPROC]))
+		goto bad_fork_free;
+
 	if (atomic_read(&p->user->processes) >=
 			p->rlim[RLIMIT_NPROC].rlim_cur) {
 		if (!capable(CAP_SYS_ADMIN) && !capable(CAP_SYS_RESOURCE) &&
@@ -1094,6 +1132,10 @@ struct task_struct *copy_process(unsigned long clone_flags,
 		link_pid(p, p->pids + PIDTYPE_TGID, &p->group_leader->pids[PIDTYPE_TGID].pid);
 
 	nr_threads++;
+	if (vxi) {
+		atomic_inc(&vxi->cacct.nr_threads);
+		atomic_inc(&vxi->limit.res[RLIMIT_NPROC]);
+	}
 	write_unlock_irq(&tasklist_lock);
 	retval = 0;
 
@@ -1181,6 +1223,10 @@ long do_fork(unsigned long clone_flags,
 			clone_flags |= CLONE_PTRACE;
 	}
 
+	if (numtasks_get_ref(current->taskclass, 0) == 0) {
+		return -ENOMEM;
+	}
+
 	p = copy_process(clone_flags, stack_start, regs, stack_size, parent_tidptr, child_tidptr);
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
@@ -1190,6 +1236,8 @@ long do_fork(unsigned long clone_flags,
 
 	if (!IS_ERR(p)) {
 		struct completion vfork;
+
+		ckrm_cb_fork(p);
 
 		if (clone_flags & CLONE_VFORK) {
 			p->vfork_done = &vfork;
@@ -1246,6 +1294,8 @@ long do_fork(unsigned long clone_flags,
 			 * COW overhead when the child exec()s afterwards.
 			 */
 			set_need_resched();
+	} else {
+		numtasks_put_ref(current->taskclass);
 	}
 	return pid;
 }

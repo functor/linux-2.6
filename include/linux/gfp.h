@@ -46,7 +46,7 @@ struct vm_area_struct;
 			__GFP_COLD|__GFP_NOWARN|__GFP_REPEAT| \
 			__GFP_NOFAIL|__GFP_NORETRY|__GFP_NO_GROW|__GFP_COMP)
 
-#define GFP_ATOMIC	(__GFP_HIGH)
+#define GFP_ATOMIC	(__GFP_HIGH | __GFP_NOWARN)
 #define GFP_NOIO	(__GFP_WAIT)
 #define GFP_NOFS	(__GFP_WAIT | __GFP_IO)
 #define GFP_KERNEL	(__GFP_WAIT | __GFP_IO | __GFP_FS)
@@ -73,6 +73,11 @@ struct vm_area_struct;
  * For the normal case of non-DISCONTIGMEM systems the NODE_DATA() gets
  * optimized to &contig_page_data at compile-time.
  */
+
+#ifndef HAVE_ARCH_FREE_PAGE
+static inline void arch_free_page(struct page *page, int order) { }
+#endif
+
 extern struct page *
 FASTCALL(__alloc_pages(unsigned int, unsigned int, struct zonelist *));
 

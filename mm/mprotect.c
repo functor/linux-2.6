@@ -21,6 +21,7 @@
 #include <asm/uaccess.h>
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
+#include <asm/pgalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
@@ -113,8 +114,9 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	unsigned long start, unsigned long end, unsigned int newflags)
 {
 	struct mm_struct * mm = vma->vm_mm;
-	unsigned long charged = 0;
+	unsigned long charged = 0, old_end = vma->vm_end;
 	pgprot_t newprot;
+	unsigned int oldflags;
 	pgoff_t pgoff;
 	int error;
 
@@ -175,8 +177,11 @@ success:
 	 * vm_flags and vm_page_prot are protected by the mmap_sem
 	 * held in write mode.
 	 */
+	oldflags = vma->vm_flags;
 	vma->vm_flags = newflags;
 	vma->vm_page_prot = newprot;
+	if (oldflags & VM_EXEC)
+		arch_remove_exec_range(current->mm, old_end);
 	change_protection(vma, start, end, newprot);
 	return 0;
 
@@ -186,7 +191,8 @@ fail:
 }
 
 asmlinkage long
-sys_mprotect(unsigned long start, size_t len, unsigned long prot)
+do_mprotect(struct mm_struct *mm, unsigned long start, size_t len, 
+	     unsigned long prot)
 {
 	unsigned long vm_flags, nstart, end, tmp;
 	struct vm_area_struct *vma, *prev;
@@ -209,9 +215,9 @@ sys_mprotect(unsigned long start, size_t len, unsigned long prot)
 
 	vm_flags = calc_vm_prot_bits(prot);
 
-	down_write(&current->mm->mmap_sem);
+	down_write(&mm->mmap_sem);
 
-	vma = find_vma_prev(current->mm, start, &prev);
+	vma = find_vma_prev(mm, start, &prev);
 	error = -ENOMEM;
 	if (!vma)
 		goto out;
@@ -277,6 +283,11 @@ sys_mprotect(unsigned long start, size_t len, unsigned long prot)
 		}
 	}
 out:
-	up_write(&current->mm->mmap_sem);
+	up_write(&mm->mmap_sem);
 	return error;
+}
+
+asmlinkage long sys_mprotect(unsigned long start, size_t len, unsigned long prot)
+{
+        return(do_mprotect(current->mm, start, len, prot));
 }

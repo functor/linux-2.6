@@ -599,7 +599,7 @@ pfm_do_munmap(struct mm_struct *mm, unsigned long addr, size_t len, int acct)
 static inline unsigned long 
 pfm_get_unmapped_area(struct file *file, unsigned long addr, unsigned long len, unsigned long pgoff, unsigned long flags, unsigned long exec)
 {
-	return get_unmapped_area(file, addr, len, pgoff, flags);
+	return get_unmapped_area(file, addr, len, pgoff, flags, 0);
 }
 
 
@@ -2361,7 +2361,8 @@ pfm_smpl_buffer_alloc(struct task_struct *task, pfm_context_t *ctx, unsigned lon
 	 */
 	insert_vm_struct(mm, vma);
 
-	mm->total_vm  += size >> PAGE_SHIFT;
+	// mm->total_vm  += size >> PAGE_SHIFT;
+	vx_vmpages_add(mm, size >> PAGE_SHIFT);
 
 	up_write(&task->mm->mmap_sem);
 

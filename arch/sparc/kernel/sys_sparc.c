@@ -332,7 +332,7 @@ asmlinkage unsigned long sparc_mremap(unsigned long addr,
 
 		new_addr = get_unmapped_area(file, addr, new_len,
 				     vma ? vma->vm_pgoff : 0,
-				     map_flags);
+				     map_flags, vma->vm_flags & VM_EXEC);
 		ret = new_addr;
 		if (new_addr & ~PAGE_MASK)
 			goto out_sem;
@@ -471,13 +471,13 @@ asmlinkage int sys_getdomainname(char __user *name, int len)
  	
  	down_read(&uts_sem);
  	
-	nlen = strlen(system_utsname.domainname) + 1;
+	nlen = strlen(vx_new_uts(domainname)) + 1;
 
 	if (nlen < len)
 		len = nlen;
 	if (len > __NEW_UTS_LEN)
 		goto done;
-	if (copy_to_user(name, system_utsname.domainname, len))
+	if (copy_to_user(name, vx_new_uts(domainname), len))
 		goto done;
 	err = 0;
 done:

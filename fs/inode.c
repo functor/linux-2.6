@@ -98,13 +98,36 @@ struct inodes_stat_t inodes_stat;
 
 static kmem_cache_t * inode_cachep;
 
+static void prune_icache(int nr_to_scan);
+
+
+#define INODE_UNUSED_THRESHOLD 15000
+#define PRUNE_BATCH_COUNT 32
+
+void try_to_clip_inodes(void)
+{
+	unsigned long count = 0; 
+	/* if there are a LOT of unused inodes in cache, better shrink a few first */
+	
+	/* check lockless first to not take the lock always here; racing occasionally isn't a big deal */
+	if (inodes_stat.nr_unused > INODE_UNUSED_THRESHOLD) {
+		spin_lock(&inode_lock);
+		if (inodes_stat.nr_unused > INODE_UNUSED_THRESHOLD)
+			count = inodes_stat.nr_unused - INODE_UNUSED_THRESHOLD;
+		spin_unlock(&inode_lock);
+		if (count)
+			prune_icache(count);
+	}
+}
+
+
 static struct inode *alloc_inode(struct super_block *sb)
 {
 	static struct address_space_operations empty_aops;
 	static struct inode_operations empty_iops;
 	static struct file_operations empty_fops;
 	struct inode *inode;
-
+	
 	if (sb->s_op->alloc_inode)
 		inode = sb->s_op->alloc_inode(sb);
 	else
@@ -114,6 +137,11 @@ static struct inode *alloc_inode(struct super_block *sb)
 		struct address_space * const mapping = &inode->i_data;
 
 		inode->i_sb = sb;
+		if (sb->s_flags & MS_TAGXID)
+			inode->i_xid = current->xid;
+		else
+			inode->i_xid = 0;       /* maybe xid -1 would be better? */
+		// inode->i_dqh = dqhget(sb->s_dqh);
 		inode->i_blkbits = sb->s_blocksize_bits;
 		inode->i_flags = 0;
 		atomic_set(&inode->i_count, 1);
@@ -133,6 +161,7 @@ static struct inode *alloc_inode(struct super_block *sb)
 		inode->i_bdev = NULL;
 		inode->i_cdev = NULL;
 		inode->i_rdev = 0;
+		// inode->i_xid = 0;	/* maybe not too wise ... */
 		inode->i_security = NULL;
 		inode->dirtied_when = 0;
 		if (security_inode_alloc(inode)) {
@@ -1363,6 +1392,9 @@ void __init inode_init(unsigned long mempages)
 	ihash_entries *= sizeof(struct hlist_head);
 	for (order = 0; ((1UL << order) << PAGE_SHIFT) < ihash_entries; order++)
 		;
+		
+	if (order > 5)
+		order = 5;
 
 	do {
 		unsigned long tmp;

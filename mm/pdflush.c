@@ -88,6 +88,8 @@ struct pdflush_work {
 	unsigned long when_i_went_to_sleep;
 };
 
+void try_to_clip_inodes(void);
+
 static int __pdflush(struct pdflush_work *my_work)
 {
 	current->flags |= PF_FLUSHER;
@@ -125,6 +127,8 @@ static int __pdflush(struct pdflush_work *my_work)
 		spin_unlock_irq(&pdflush_lock);
 
 		(*my_work->fn)(my_work->arg0);
+		
+		try_to_clip_inodes();
 
 		/*
 		 * Thread creation: For how long have there been zero

@@ -17,6 +17,8 @@
 #include <linux/smp_lock.h>
 #include <linux/init.h>
 #include <linux/idr.h>
+#include <linux/vinline.h>
+#include <linux/vserver/inode.h>
 #include <asm/uaccess.h>
 #include <asm/bitops.h>
 
@@ -319,21 +321,14 @@ static void release_inode_number(unsigned int inum)
 	spin_unlock(&proc_inum_lock);
 }
 
-static int
-proc_readlink(struct dentry *dentry, char __user *buffer, int buflen)
-{
-	char *s = PDE(dentry->d_inode)->data;
-	return vfs_readlink(dentry, buffer, buflen, s);
-}
-
 static int proc_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
-	char *s = PDE(dentry->d_inode)->data;
-	return vfs_follow_link(nd, s);
+	nd_set_link(nd, PDE(dentry->d_inode)->data);
+	return 0;
 }
 
 static struct inode_operations proc_link_inode_operations = {
-	.readlink	= proc_readlink,
+	.readlink	= generic_readlink,
 	.follow_link	= proc_follow_link,
 };
 
@@ -348,8 +343,15 @@ static int proc_delete_dentry(struct dentry * dentry)
 	return 1;
 }
 
+static int proc_revalidate_dentry(struct dentry *de, struct nameidata *nd)
+{
+	/* maybe add a check if it's really necessary? */
+	return 0;
+}
+
 static struct dentry_operations proc_dentry_operations =
 {
+	.d_revalidate	= proc_revalidate_dentry,
 	.d_delete	= proc_delete_dentry,
 };
 
@@ -368,6 +370,8 @@ struct dentry *proc_lookup(struct inode * dir, struct dentry *dentry, struct nam
 	if (de) {
 		for (de = de->subdir; de ; de = de->next) {
 			if (de->namelen != dentry->d_name.len)
+				continue;
+			if (!vx_hide_check(0, de->vx_flags))
 				continue;
 			if (!memcmp(dentry->d_name.name, de->name, de->namelen)) {
 				unsigned int ino = de->low_ino;
@@ -445,9 +449,12 @@ int proc_readdir(struct file * filp,
 			}
 
 			do {
+				if (!vx_hide_check(0, de->vx_flags))
+					goto skip;
 				if (filldir(dirent, de->name, de->namelen, filp->f_pos,
 					    de->low_ino, de->mode >> 12) < 0)
 					goto out;
+			skip:
 				filp->f_pos++;
 				de = de->next;
 			} while (de);
@@ -559,6 +566,7 @@ static struct proc_dir_entry *proc_create(struct proc_dir_entry **parent,
 	ent->namelen = len;
 	ent->mode = mode;
 	ent->nlink = nlink;
+	ent->vx_flags = IATTR_PROC_DEFAULT;
  out:
 	return ent;
 }
@@ -579,7 +587,8 @@ struct proc_dir_entry *proc_symlink(const char *name,
 				kfree(ent->data);
 				kfree(ent);
 				ent = NULL;
-			}
+			} else
+				ent->vx_flags = IATTR_PROC_SYMLINK;
 		} else {
 			kfree(ent);
 			ent = NULL;
@@ -682,7 +691,7 @@ void remove_proc_entry(const char *name, struct proc_dir_entry *parent)
 			parent->nlink--;
 		proc_kill_inodes(de);
 		de->nlink = 0;
-		WARN_ON(de->subdir);
+		BUG_ON(de->subdir);
 		if (!atomic_read(&de->count))
 			free_proc_entry(de);
 		else {

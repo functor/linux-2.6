@@ -897,7 +897,7 @@ typedef struct aironet_ioctl {
 	unsigned short command;		// What to do
 	unsigned short len;		// Len of data
 	unsigned short ridnum;		// rid number
-	unsigned char __user *data;	// d-data
+	unsigned char *data;		// d-data
 } aironet_ioctl;
 
 static char *swversion = "2.1";
@@ -4272,12 +4272,12 @@ static int transmit_802_11_packet(struct airo_info *ai, int len, char *pPacket)
  */
 
 static ssize_t proc_read( struct file *file,
-			  char __user *buffer,
+			  char *buffer,
 			  size_t len,
 			  loff_t *offset);
 
 static ssize_t proc_write( struct file *file,
-			   const char __user *buffer,
+			   const char *buffer,
 			   size_t len,
 			   loff_t *offset );
 static int proc_close( struct inode *inode, struct file *file );
@@ -4482,26 +4482,23 @@ static int takedown_proc_entry( struct net_device *dev,
  *  to supply the data.
  */
 static ssize_t proc_read( struct file *file,
-			  char __user *buffer,
+			  char *buffer,
 			  size_t len,
 			  loff_t *offset )
 {
-	loff_t pos = *offset;
+	int i;
+	int pos;
 	struct proc_data *priv = (struct proc_data*)file->private_data;
 
-	if (!priv->rbuffer)
-		return -EINVAL;
+	if( !priv->rbuffer ) return -EINVAL;
 
-	if (pos < 0)
-		return -EINVAL;
-	if (pos >= priv->readlen)
-		return 0;
-	if (len > priv->readlen - pos)
-		len = priv->readlen - pos;
-	if (copy_to_user(buffer, priv->rbuffer + pos, len))
-		return -EFAULT;
-	*offset = pos + len;
-	return len;
+	pos = *offset;
+	for( i = 0; i+pos < priv->readlen && i < len; i++ ) {
+		if (put_user( priv->rbuffer[i+pos], buffer+i ))
+			return -EFAULT;
+	}
+	*offset += i;
+	return i;
 }
 
 /*
@@ -4509,26 +4506,28 @@ static ssize_t proc_read( struct file *file,
  *  to supply the data.
  */
 static ssize_t proc_write( struct file *file,
-			   const char __user *buffer,
+			   const char *buffer,
 			   size_t len,
 			   loff_t *offset )
 {
-	loff_t pos = *offset;
+	int i;
+	int pos;
 	struct proc_data *priv = (struct proc_data*)file->private_data;
 
-	if (!priv->wbuffer)
+	if ( !priv->wbuffer ) {
 		return -EINVAL;
+	}
 
-	if (pos < 0)
-		return -EINVAL;
-	if (pos >= priv->maxwritelen)
-		return 0;
-	if (len > priv->maxwritelen - pos)
-		len = priv->maxwritelen - pos;
-	if (copy_from_user(priv->wbuffer + pos, buffer, len))
-		return -EFAULT;
-	*offset = pos + len;
-	return len;
+	pos = *offset;
+
+	for( i = 0; i + pos <  priv->maxwritelen &&
+		     i < len; i++ ) {
+		if (get_user( priv->wbuffer[i+pos], buffer + i ))
+			return -EFAULT;
+	}
+	if ( i+pos > priv->writelen ) priv->writelen = i+file->f_pos;
+	*offset += i;
+	return i;
 }
 
 static int proc_status_open( struct inode *inode, struct file *file ) {

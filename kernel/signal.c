@@ -417,6 +417,7 @@ flush_signal_handlers(struct task_struct *t, int force_default)
 	}
 }
 
+EXPORT_SYMBOL_GPL(flush_signal_handlers);
 
 /* Notify the system that a driver wants to block all signals for this
  * process, and wants to be notified if any signals at all were to be
@@ -1051,6 +1052,9 @@ int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 	unsigned long flags;
 	int ret;
 
+	if (!vx_check(vx_task_xid(p), VX_ADMIN|VX_WATCH|VX_IDENT))
+		return -ESRCH;
+
 	ret = check_kill_permission(sig, info, p);
 	if (!ret && sig && p->sighand) {
 		spin_lock_irqsave(&p->sighand->siglock, flags);
@@ -1546,6 +1550,34 @@ do_notify_parent_cldstop(struct task_struct *tsk, struct task_struct *parent)
 	spin_unlock_irqrestore(&sighand->siglock, flags);
 }
 
+int print_fatal_signals = 0;
+
+static void print_fatal_signal(struct pt_regs *regs, int signr)
+{
+	int i;
+	unsigned char insn;
+	printk("%s/%d: potentially unexpected fatal signal %d.\n",
+		current->comm, current->pid, signr);
+		
+#ifdef __i386__
+	printk("code at %08lx: ", regs->eip);
+	for (i = 0; i < 16; i++) {
+		__get_user(insn, (unsigned char *)(regs->eip + i));
+		printk("%02x ", insn);
+	}
+#endif	
+	printk("\n");
+	show_regs(regs);
+}
+
+static int __init setup_print_fatal_signals(char *str)
+{
+	get_option (&str, &print_fatal_signals);
+
+	return 1;
+}
+
+__setup("print-fatal-signals=", setup_print_fatal_signals);
 
 #ifndef HAVE_ARCH_GET_SIGNAL_TO_DELIVER
 
@@ -1737,6 +1769,11 @@ relock:
 		if (!signr)
 			break; /* will return 0 */
 
+		if ((signr == SIGSEGV) && print_fatal_signals) {
+			spin_unlock_irq(&current->sighand->siglock);
+			print_fatal_signal(regs, signr);
+			spin_lock_irq(&current->sighand->siglock);
+		}
 		if ((current->ptrace & PT_PTRACED) && signr != SIGKILL) {
 			ptrace_signal_deliver(regs, cookie);
 
@@ -1841,6 +1878,8 @@ relock:
 		 * Anything else is fatal, maybe with a core dump.
 		 */
 		current->flags |= PF_SIGNALED;
+		if (print_fatal_signals)
+			print_fatal_signal(regs, signr);
 		if (sig_kernel_coredump(signr) &&
 		    do_coredump((long)signr, signr, regs)) {
 			/*
@@ -2475,9 +2514,10 @@ sys_sigprocmask(int how, old_sigset_t __user *set, old_sigset_t __user *oset)
 out:
 	return error;
 }
-#endif /* __ARCH_WANT_SYS_SIGPROCMASK */
 
-#ifdef __ARCH_WANT_SYS_RT_SIGACTION
+#endif /* SIGPROCMASK */
+
+#ifndef __sparc__
 asmlinkage long
 sys_rt_sigaction(int sig,
 		 const struct sigaction __user *act,
@@ -2505,7 +2545,7 @@ sys_rt_sigaction(int sig,
 out:
 	return ret;
 }
-#endif /* __ARCH_WANT_SYS_RT_SIGACTION */
+#endif /* __sparc__ */
 
 #ifdef __ARCH_WANT_SYS_SGETMASK
 

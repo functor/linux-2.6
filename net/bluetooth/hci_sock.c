@@ -186,7 +186,7 @@ static inline int hci_sock_bound_ioctl(struct sock *sk, unsigned int cmd, unsign
 		return 0;
 
 	case HCIGETCONNINFO:
-		return hci_get_conn_info(hdev, (void __user *)arg);
+		return hci_get_conn_info(hdev, arg);
 
 	default:
 		if (hdev->ioctl)
@@ -198,20 +198,19 @@ static inline int hci_sock_bound_ioctl(struct sock *sk, unsigned int cmd, unsign
 static int hci_sock_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 {
 	struct sock *sk = sock->sk;
-	void __user *argp = (void __user *)arg;
 	int err;
 
 	BT_DBG("cmd %x arg %lx", cmd, arg);
 
 	switch (cmd) {
 	case HCIGETDEVLIST:
-		return hci_get_dev_list(argp);
+		return hci_get_dev_list(arg);
 
 	case HCIGETDEVINFO:
-		return hci_get_dev_info(argp);
+		return hci_get_dev_info(arg);
 
 	case HCIGETCONNLIST:
-		return hci_get_conn_list(argp);
+		return hci_get_conn_list(arg);
 
 	case HCIDEVUP:
 		if (!capable(CAP_NET_ADMIN))
@@ -243,10 +242,10 @@ static int hci_sock_ioctl(struct socket *sock, unsigned int cmd, unsigned long a
 	case HCISETSCOMTU:
 		if (!capable(CAP_NET_ADMIN))
 			return -EACCES;
-		return hci_dev_cmd(cmd, argp);
+		return hci_dev_cmd(cmd, arg);
 
 	case HCIINQUIRY:
-		return hci_inquiry(argp);
+		return hci_inquiry(arg);
 
 	default:
 		lock_sock(sk);

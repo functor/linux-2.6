@@ -182,7 +182,7 @@ asmlinkage long compat_sys_sigpending(compat_old_sigset_t __user *set)
 	mm_segment_t old_fs = get_fs();
 
 	set_fs(KERNEL_DS);
-	ret = sys_sigpending((old_sigset_t __user *) &s);
+	ret = sys_sigpending(&s);
 	set_fs(old_fs);
 	if (ret == 0)
 		ret = put_user(s, set);
@@ -200,9 +200,7 @@ asmlinkage long compat_sys_sigprocmask(int how, compat_old_sigset_t __user *set,
 		return -EFAULT;
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
-	ret = sys_sigprocmask(how,
-			      set ? (old_sigset_t __user *) &s : NULL,
-			      oset ? (old_sigset_t __user *) &s : NULL);
+	ret = sys_sigprocmask(how, set ? &s : NULL, oset ? &s : NULL);
 	set_fs(old_fs);
 	if (ret == 0)
 		if (oset)
@@ -225,7 +223,7 @@ asmlinkage long compat_sys_futex(u32 __user *uaddr, int op, int val,
 		timeout = timespec_to_jiffies(&t) + 1;
 	}
 	if (op >= FUTEX_REQUEUE)
-		val2 = (int) (unsigned long) utime;
+		val2 = (int) (long) utime;
 
 	return do_futex((unsigned long)uaddr, op, val, timeout,
 			(unsigned long)uaddr2, val2, val3);
@@ -252,7 +250,7 @@ asmlinkage long compat_sys_setrlimit(unsigned int resource,
 	if (r.rlim_max == COMPAT_RLIM_INFINITY)
 		r.rlim_max = RLIM_INFINITY;
 	set_fs(KERNEL_DS);
-	ret = sys_setrlimit(resource, (struct rlimit __user *) &r);
+	ret = sys_setrlimit(resource, &r);
 	set_fs(old_fs);
 	return ret;
 }
@@ -294,7 +292,7 @@ asmlinkage long compat_sys_getrlimit (unsigned int resource,
 	mm_segment_t old_fs = get_fs();
 
 	set_fs(KERNEL_DS);
-	ret = sys_getrlimit(resource, (struct rlimit __user *) &r);
+	ret = sys_getrlimit(resource, &r);
 	set_fs(old_fs);
 	if (!ret) {
 		if (r.rlim_cur > COMPAT_RLIM_INFINITY)
@@ -342,7 +340,7 @@ asmlinkage long compat_sys_getrusage(int who, struct compat_rusage __user *ru)
 	mm_segment_t old_fs = get_fs();
 
 	set_fs(KERNEL_DS);
-	ret = sys_getrusage(who, (struct rusage __user *) &r);
+	ret = sys_getrusage(who, &r);
 	set_fs(old_fs);
 
 	if (ret)
@@ -367,10 +365,7 @@ compat_sys_wait4(compat_pid_t pid, compat_uint_t __user *stat_addr, int options,
 		mm_segment_t old_fs = get_fs();
 
 		set_fs (KERNEL_DS);
-		ret = sys_wait4(pid,
-				(stat_addr ?
-				 (unsigned int __user *) &status : NULL),
-				options, (struct rusage __user *) &r);
+		ret = sys_wait4(pid, stat_addr ? &status : NULL, options, &r);
 		set_fs (old_fs);
 
 		if (ret > 0) {
@@ -387,18 +382,18 @@ asmlinkage long compat_sys_sched_setaffinity(compat_pid_t pid,
 					     unsigned int len,
 					     compat_ulong_t __user *user_mask_ptr)
 {
-	unsigned long kern_mask;
+	unsigned long kernel_mask;
 	mm_segment_t old_fs;
 	int ret;
 
-	if (get_user(kern_mask, user_mask_ptr))
+	if (get_user(kernel_mask, user_mask_ptr))
 		return -EFAULT;
 
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 	ret = sys_sched_setaffinity(pid,
-				    sizeof(kern_mask),
-				    (unsigned long __user *) &kern_mask);
+				    sizeof(kernel_mask),
+				    &kernel_mask);
 	set_fs(old_fs);
 
 	return ret;
@@ -407,20 +402,20 @@ asmlinkage long compat_sys_sched_setaffinity(compat_pid_t pid,
 asmlinkage long compat_sys_sched_getaffinity(compat_pid_t pid, unsigned int len,
 					     compat_ulong_t __user *user_mask_ptr)
 {
-	unsigned long kern_mask;
+	unsigned long kernel_mask;
 	mm_segment_t old_fs;
 	int ret;
 
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 	ret = sys_sched_getaffinity(pid,
-				    sizeof(kern_mask),
-				    (unsigned long __user *) &kern_mask);
+				    sizeof(kernel_mask),
+				    &kernel_mask);
 	set_fs(old_fs);
 
 	if (ret > 0) {
 		ret = sizeof(compat_ulong_t);
-		if (put_user(kern_mask, user_mask_ptr))
+		if (put_user(kernel_mask, user_mask_ptr))
 			return -EFAULT;
 	}
 
@@ -459,9 +454,7 @@ long compat_timer_settime(timer_t timer_id, int flags,
 		return -EFAULT;	
 	oldfs = get_fs();
 	set_fs(KERNEL_DS);
-	err = sys_timer_settime(timer_id, flags,
-				(struct itimerspec __user *) &newts,
-				(struct itimerspec __user *) &oldts);
+	err = sys_timer_settime(timer_id, flags, &newts, &oldts);
 	set_fs(oldfs); 
 	if (!err && old && put_compat_itimerspec(old, &oldts))
 		return -EFAULT;
@@ -474,11 +467,9 @@ long compat_timer_gettime(timer_t timer_id,
 	long err;
 	mm_segment_t oldfs;
 	struct itimerspec ts; 
-
 	oldfs = get_fs();
 	set_fs(KERNEL_DS);
-	err = sys_timer_gettime(timer_id,
-				(struct itimerspec __user *) &ts); 
+	err = sys_timer_gettime(timer_id, &ts); 
 	set_fs(oldfs); 
 	if (!err && put_compat_itimerspec(setting, &ts))
 		return -EFAULT;
@@ -491,13 +482,11 @@ long compat_clock_settime(clockid_t which_clock,
 	long err;
 	mm_segment_t oldfs;
 	struct timespec ts; 
-
 	if (get_compat_timespec(&ts, tp))
 		return -EFAULT; 
 	oldfs = get_fs();
 	set_fs(KERNEL_DS);	
-	err = sys_clock_settime(which_clock,
-				(struct timespec __user *) &ts);
+	err = sys_clock_settime(which_clock, &ts); 
 	set_fs(oldfs);
 	return err;
 } 
@@ -508,11 +497,9 @@ long compat_clock_gettime(clockid_t which_clock,
 	long err;
 	mm_segment_t oldfs;
 	struct timespec ts; 
-
 	oldfs = get_fs();
 	set_fs(KERNEL_DS);
-	err = sys_clock_gettime(which_clock,
-				(struct timespec __user *) &ts);
+	err = sys_clock_gettime(which_clock, &ts); 
 	set_fs(oldfs);
 	if (!err && put_compat_timespec(&ts, tp))
 		return -EFAULT; 
@@ -525,11 +512,9 @@ long compat_clock_getres(clockid_t which_clock,
 	long err;
 	mm_segment_t oldfs;
 	struct timespec ts; 
-
 	oldfs = get_fs();
 	set_fs(KERNEL_DS);
-	err = sys_clock_getres(which_clock,
-			       (struct timespec __user *) &ts);
+	err = sys_clock_getres(which_clock, &ts); 
 	set_fs(oldfs);
 	if (!err && put_compat_timespec(&ts, tp))
 		return -EFAULT; 
@@ -543,15 +528,11 @@ long compat_clock_nanosleep(clockid_t which_clock, int flags,
 	long err;
 	mm_segment_t oldfs;
 	struct timespec in, out; 
-
 	if (get_compat_timespec(&in, rqtp)) 
 		return -EFAULT;
-
 	oldfs = get_fs();
-	set_fs(KERNEL_DS);
-	err = sys_clock_nanosleep(which_clock, flags,
-				  (struct timespec __user *) &in,
-				  (struct timespec __user *) &out);
+	set_fs(KERNEL_DS);	
+	err = sys_clock_nanosleep(which_clock, flags, &in, &out);  
 	set_fs(oldfs);
 	if ((err == -ERESTART_RESTARTBLOCK) && rmtp &&
 	    put_compat_timespec(&out, rmtp))

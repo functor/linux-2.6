@@ -54,8 +54,9 @@ static void mp_pool_free(void *mpb, void *data)
 	kfree(mpb);
 }
 
-static int multipath_map (multipath_conf_t *conf)
+static int multipath_map (mddev_t *mddev, mdk_rdev_t **rdevp)
 {
+	multipath_conf_t *conf = mddev_to_conf(mddev);
 	int i, disks = conf->raid_disks;
 
 	/*
@@ -67,9 +68,10 @@ static int multipath_map (multipath_conf_t *conf)
 	for (i = 0; i < disks; i++) {
 		mdk_rdev_t *rdev = conf->multipaths[i].rdev;
 		if (rdev && rdev->in_sync) {
+			*rdevp = rdev;
 			atomic_inc(&rdev->nr_pending);
 			spin_unlock_irq(&conf->device_lock);
-			return i;
+			return 0;
 		}
 	}
 	spin_unlock_irq(&conf->device_lock);
@@ -131,7 +133,25 @@ int multipath_end_request(struct bio *bio, unsigned int bytes_done, int error)
 		       (unsigned long long)bio->bi_sector);
 		multipath_reschedule_retry(mp_bh);
 	}
-	rdev_dec_pending(rdev, conf->mddev);
+	atomic_dec(&rdev->nr_pending);
+	return 0;
+}
+
+/*
+ * This routine returns the disk from which the requested read should
+ * be done.
+ */
+
+static int multipath_read_balance (multipath_conf_t *conf)
+{
+	int disk;
+
+	for (disk = 0; disk < conf->raid_disks; disk++) {
+		mdk_rdev_t *rdev = conf->multipaths[disk].rdev;
+		if (rdev && rdev->in_sync)
+			return disk;
+	}
+	BUG();
 	return 0;
 }
 
@@ -184,14 +204,14 @@ static int multipath_make_request (request_queue_t *q, struct bio * bio)
 		disk_stat_inc(mddev->gendisk, reads);
 		disk_stat_add(mddev->gendisk, read_sectors, bio_sectors(bio));
 	}
-
-	mp_bh->path = multipath_map(conf);
-	if (mp_bh->path < 0) {
-		bio_endio(bio, bio->bi_size, -EIO);
-		mempool_free(mp_bh, conf->pool);
-		return 0;
-	}
+	/*
+	 * read balancing logic:
+	 */
+	spin_lock_irq(&conf->device_lock);
+	mp_bh->path = multipath_read_balance(conf);
 	multipath = conf->multipaths + mp_bh->path;
+	atomic_inc(&multipath->rdev->nr_pending);
+	spin_unlock_irq(&conf->device_lock);
 
 	mp_bh->bio = *bio;
 	mp_bh->bio.bi_bdev = multipath->rdev->bdev;
@@ -355,7 +375,7 @@ static void multipathd (mddev_t *mddev)
 	struct multipath_bh *mp_bh;
 	struct bio *bio;
 	unsigned long flags;
-	multipath_conf_t *conf = mddev_to_conf(mddev);
+	mdk_rdev_t *rdev;
 
 	md_check_recovery(mddev);
 	for (;;) {
@@ -371,7 +391,8 @@ static void multipathd (mddev_t *mddev)
 		bio = &mp_bh->bio;
 		bio->bi_sector = mp_bh->master_bio->bi_sector;
 		
-		if ((mp_bh->path = multipath_map (conf))<0) {
+		rdev = NULL;
+		if (multipath_map (mddev, &rdev)<0) {
 			printk(KERN_ALERT "multipath: %s: unrecoverable IO read"
 				" error for block %llu\n",
 				bdevname(bio->bi_bdev,b),
@@ -382,7 +403,7 @@ static void multipathd (mddev_t *mddev)
 				" to another IO path\n",
 				bdevname(bio->bi_bdev,b),
 				(unsigned long long)bio->bi_sector);
-			bio->bi_bdev = conf->multipaths[mp_bh->path].rdev->bdev;
+			bio->bi_bdev = rdev->bdev;
 			generic_make_request(bio);
 		}
 	}

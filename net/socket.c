@@ -68,6 +68,7 @@
 #include <linux/netdevice.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <net/tux.h>
 #include <linux/wanrouter.h>
 #include <linux/if_bridge.h>
 #include <linux/init.h>
@@ -120,7 +121,7 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
  *	in the operation structures but are done directly via the socketcall() multiplexor.
  */
 
-static struct file_operations socket_file_ops = {
+struct file_operations socket_file_ops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
 	.aio_read =	sock_aio_read,
@@ -287,7 +288,7 @@ static struct inode *sock_alloc_inode(struct super_block *sb)
 	ei->socket.ops = NULL;
 	ei->socket.sk = NULL;
 	ei->socket.file = NULL;
-	ei->socket.passcred = 0;
+	ei->socket.flags = 0;
 
 	return &ei->vfs_inode;
 }
@@ -362,52 +363,63 @@ static struct dentry_operations sockfs_dentry_operations = {
  *	but we take care of internal coherence yet.
  */
 
-int sock_map_fd(struct socket *sock)
+struct file * sock_map_file(struct socket *sock)
 {
-	int fd;
+	struct file *file;
 	struct qstr this;
 	char name[32];
 
+	file = get_empty_filp();
+
+	if (!file)
+		return ERR_PTR(-ENFILE);
+
+	sprintf(name, "[%lu]", SOCK_INODE(sock)->i_ino);
+	this.name = name;
+	this.len = strlen(name);
+	this.hash = SOCK_INODE(sock)->i_ino;
+
+	file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
+	if (!file->f_dentry) {
+		put_filp(file);
+		return ERR_PTR(-ENOMEM);
+	}
+	file->f_dentry->d_op = &sockfs_dentry_operations;
+	d_add(file->f_dentry, SOCK_INODE(sock));
+	file->f_vfsmnt = mntget(sock_mnt);
+file->f_mapping = file->f_dentry->d_inode->i_mapping;
+
+	if (sock->file)
+		BUG();
+	sock->file = file;
+	file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
+	file->f_mode = 3;
+	file->f_flags = O_RDWR;
+	file->f_pos = 0;
+
+	return file;
+}
+
+int sock_map_fd(struct socket *sock)
+{
+	int fd;
+	struct file *file;
+ 
 	/*
 	 *	Find a file descriptor suitable for return to the user. 
 	 */
-
+  
 	fd = get_unused_fd();
-	if (fd >= 0) {
-		struct file *file = get_empty_filp();
-
-		if (!file) {
-			put_unused_fd(fd);
-			fd = -ENFILE;
-			goto out;
-		}
-
-		sprintf(name, "[%lu]", SOCK_INODE(sock)->i_ino);
-		this.name = name;
-		this.len = strlen(name);
-		this.hash = SOCK_INODE(sock)->i_ino;
-
-		file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
-		if (!file->f_dentry) {
-			put_filp(file);
-			put_unused_fd(fd);
-			fd = -ENOMEM;
-			goto out;
-		}
-		file->f_dentry->d_op = &sockfs_dentry_operations;
-		d_add(file->f_dentry, SOCK_INODE(sock));
-		file->f_vfsmnt = mntget(sock_mnt);
-		file->f_mapping = file->f_dentry->d_inode->i_mapping;
-
-		sock->file = file;
-		file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
-		file->f_mode = 3;
-		file->f_flags = O_RDWR;
-		file->f_pos = 0;
-		fd_install(fd, file);
+	if (fd < 0)
+		return fd;
+  
+	file = sock_map_file(sock);
+	if (IS_ERR(file)) {
+		put_unused_fd(fd);
+		return PTR_ERR(file);
 	}
-
-out:
+	fd_install(fd, file);
+  
 	return fd;
 }
 
@@ -531,7 +543,7 @@ static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 				 struct msghdr *msg, size_t size)
 {
 	struct sock_iocb *si = kiocb_to_siocb(iocb);
-	int err;
+	int err, len;
 
 	si->sock = sock;
 	si->scm = NULL;
@@ -542,7 +554,20 @@ static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 	if (err)
 		return err;
 
-	return sock->ops->sendmsg(iocb, sock, msg, size);
+	len = sock->ops->sendmsg(iocb, sock, msg, size);
+	if (sock->sk) {
+		if (len == size)
+			vx_sock_send(sock->sk, size);
+		else
+			vx_sock_fail(sock->sk, size);
+	}
+	vxdprintk("__sock_sendmsg: %p[%p,%p,%p;%d]:%d/%d\n",
+		sock, sock->sk,
+		(sock->sk)?sock->sk->sk_nx_info:0,
+		(sock->sk)?sock->sk->sk_vx_info:0,
+		(sock->sk)?sock->sk->sk_xid:0,
+		size, len);
+	return len;
 }
 
 int sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
@@ -561,7 +586,7 @@ int sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock, 
 				 struct msghdr *msg, size_t size, int flags)
 {
-	int err;
+	int err, len;
 	struct sock_iocb *si = kiocb_to_siocb(iocb);
 
 	si->sock = sock;
@@ -574,7 +599,16 @@ static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 	if (err)
 		return err;
 
-	return sock->ops->recvmsg(iocb, sock, msg, size, flags);
+	len = sock->ops->recvmsg(iocb, sock, msg, size, flags);
+	if ((len >= 0) && sock->sk)
+		vx_sock_recv(sock->sk, len);
+	vxdprintk("__sock_recvmsg: %p[%p,%p,%p;%d]:%d/%d\n",
+		sock, sock->sk,
+		(sock->sk)?sock->sk->sk_nx_info:0,
+		(sock->sk)?sock->sk->sk_vx_info:0,
+		(sock->sk)?sock->sk->sk_xid:0,
+		size, len);
+	return len;
 }
 
 int sock_recvmsg(struct socket *sock, struct msghdr *msg, 
@@ -729,9 +763,9 @@ static ssize_t sock_writev(struct file *file, const struct iovec *vector,
  */
 
 static DECLARE_MUTEX(br_ioctl_mutex);
-static int (*br_ioctl_hook)(unsigned int cmd, void __user *arg) = NULL;
+static int (*br_ioctl_hook)(unsigned int cmd, unsigned long arg) = NULL;
 
-void brioctl_set(int (*hook)(unsigned int, void __user *))
+void brioctl_set(int (*hook)(unsigned int, unsigned long))
 {
 	down(&br_ioctl_mutex);
 	br_ioctl_hook = hook;
@@ -740,9 +774,9 @@ void brioctl_set(int (*hook)(unsigned int, void __user *))
 EXPORT_SYMBOL(brioctl_set);
 
 static DECLARE_MUTEX(vlan_ioctl_mutex);
-static int (*vlan_ioctl_hook)(void __user *arg);
+static int (*vlan_ioctl_hook)(unsigned long arg);
 
-void vlan_ioctl_set(int (*hook)(void __user *))
+void vlan_ioctl_set(int (*hook)(unsigned long))
 {
 	down(&vlan_ioctl_mutex);
 	vlan_ioctl_hook = hook;
@@ -751,9 +785,9 @@ void vlan_ioctl_set(int (*hook)(void __user *))
 EXPORT_SYMBOL(vlan_ioctl_set);
 
 static DECLARE_MUTEX(dlci_ioctl_mutex);
-static int (*dlci_ioctl_hook)(unsigned int, void __user *);
+static int (*dlci_ioctl_hook)(unsigned int, void *);
 
-void dlci_ioctl_set(int (*hook)(unsigned int, void __user *))
+void dlci_ioctl_set(int (*hook)(unsigned int, void *))
 {
 	down(&dlci_ioctl_mutex);
 	dlci_ioctl_hook = hook;
@@ -770,30 +804,29 @@ static int sock_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		      unsigned long arg)
 {
 	struct socket *sock;
-	void __user *argp = (void __user *)arg;
 	int pid, err;
 
 	unlock_kernel();
 	sock = SOCKET_I(inode);
 	if (cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15)) {
-		err = dev_ioctl(cmd, argp);
+		err = dev_ioctl(cmd, (void __user *)arg);
 	} else
 #ifdef WIRELESS_EXT
 	if (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST) {
-		err = dev_ioctl(cmd, argp);
+		err = dev_ioctl(cmd, (void __user *)arg);
 	} else
 #endif	/* WIRELESS_EXT */
 	switch (cmd) {
 		case FIOSETOWN:
 		case SIOCSPGRP:
 			err = -EFAULT;
-			if (get_user(pid, (int __user *)argp))
+			if (get_user(pid, (int __user *)arg))
 				break;
 			err = f_setown(sock->file, pid, 1);
 			break;
 		case FIOGETOWN:
 		case SIOCGPGRP:
-			err = put_user(sock->file->f_owner.pid, (int __user *)argp);
+			err = put_user(sock->file->f_owner.pid, (int __user *)arg);
 			break;
 		case SIOCGIFBR:
 		case SIOCSIFBR:
@@ -805,7 +838,7 @@ static int sock_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 			down(&br_ioctl_mutex);
 			if (br_ioctl_hook) 
-				err = br_ioctl_hook(cmd, argp);
+				err = br_ioctl_hook(cmd, arg);
 			up(&br_ioctl_mutex);
 			break;
 		case SIOCGIFVLAN:
@@ -816,13 +849,13 @@ static int sock_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 			down(&vlan_ioctl_mutex);
 			if (vlan_ioctl_hook)
-				err = vlan_ioctl_hook(argp);
+				err = vlan_ioctl_hook(arg);
 			up(&vlan_ioctl_mutex);
 			break;
 		case SIOCGIFDIVERT:
 		case SIOCSIFDIVERT:
 		/* Convert this to call through a hook */
-			err = divert_ioctl(cmd, argp);
+			err = divert_ioctl(cmd, (struct divert_cf *)arg);
 			break;
 		case SIOCADDDLCI:
 		case SIOCDELDLCI:
@@ -832,7 +865,7 @@ static int sock_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 			if (dlci_ioctl_hook) {
 				down(&dlci_ioctl_mutex);
-				err = dlci_ioctl_hook(cmd, argp);
+				err = dlci_ioctl_hook(cmd, (void *)arg);
 				up(&dlci_ioctl_mutex);
 			}
 			break;
@@ -978,6 +1011,8 @@ static int sock_fasync(int fd, struct file *filp, int on)
 	}
 
 out:
+	if (sock->sk != sk)
+		BUG();
 	release_sock(sock->sk);
 	return 0;
 }
@@ -1022,6 +1057,10 @@ static int __sock_create(int family, int type, int protocol, struct socket **res
 		return -EAFNOSUPPORT;
 	if (type < 0 || type >= SOCK_MAX)
 		return -EINVAL;
+
+	/* disable IPv6 inside vservers for now */
+	if (family == PF_INET6 && !vx_check(0, VX_ADMIN))
+		return -EAFNOSUPPORT;
 
 	/* Compatibility.
 
@@ -1131,6 +1170,7 @@ asmlinkage long sys_socket(int family, int type, int protocol)
 	if (retval < 0)
 		goto out;
 
+	set_bit(SOCK_USER_SOCKET, &sock->flags);
 	retval = sock_map_fd(sock);
 	if (retval < 0)
 		goto out_release;
@@ -1161,10 +1201,12 @@ asmlinkage long sys_socketpair(int family, int type, int protocol, int __user *u
 	err = sock_create(family, type, protocol, &sock1);
 	if (err < 0)
 		goto out;
+	set_bit(SOCK_USER_SOCKET, &sock1->flags);
 
 	err = sock_create(family, type, protocol, &sock2);
 	if (err < 0)
 		goto out_release_1;
+	set_bit(SOCK_USER_SOCKET, &sock2->flags);
 
 	err = sock1->ops->socketpair(sock1, sock2);
 	if (err < 0) 
@@ -2007,6 +2049,51 @@ void __init sock_init(void)
 #endif
 }
 
+int tux_Dprintk;
+int tux_TDprintk;
+
+#ifdef CONFIG_TUX_MODULE
+
+asmlinkage long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info) = NULL;
+
+struct module *tux_module = NULL;
+spinlock_t tux_module_lock = SPIN_LOCK_UNLOCKED;
+
+asmlinkage long sys_tux (unsigned int action, user_req_t *u_info)
+{
+	int ret;
+
+	if (current->tux_info)
+		return sys_tux_ptr(action, u_info);
+
+	ret = -ENOSYS;
+	spin_lock(&tux_module_lock);
+	if (!tux_module)
+		goto out_unlock;
+	if (!try_module_get(tux_module))
+		goto out_unlock;
+	spin_unlock(&tux_module_lock);
+
+	if (!sys_tux_ptr)
+		TUX_BUG();
+	ret = sys_tux_ptr(action, u_info);
+
+	spin_lock(&tux_module_lock);
+	module_put(tux_module);
+out_unlock:
+	spin_unlock(&tux_module_lock);
+
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(tux_module);
+EXPORT_SYMBOL_GPL(tux_module_lock);
+EXPORT_SYMBOL_GPL(sys_tux_ptr);
+
+EXPORT_SYMBOL_GPL(tux_Dprintk);
+EXPORT_SYMBOL_GPL(tux_TDprintk);
+
+#endif
 #ifdef CONFIG_PROC_FS
 void socket_seq_show(struct seq_file *seq)
 {

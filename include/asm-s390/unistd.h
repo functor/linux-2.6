@@ -255,7 +255,7 @@
 #define __NR_clock_gettime	(__NR_timer_create+6)
 #define __NR_clock_getres	(__NR_timer_create+7)
 #define __NR_clock_nanosleep	(__NR_timer_create+8)
-/* Number 263 is reserved for vserver */
+#define __NR_vserver		263
 #define __NR_fadvise64_64	264
 #define __NR_statfs64		265
 #define __NR_fstatfs64		266
@@ -530,7 +530,6 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4,    \
 #define __ARCH_WANT_SYS_OLDUMOUNT
 #define __ARCH_WANT_SYS_SIGPENDING
 #define __ARCH_WANT_SYS_SIGPROCMASK
-#define __ARCH_WANT_SYS_RT_SIGACTION
 # ifndef CONFIG_ARCH_S390X
 #   define __ARCH_WANT_STAT64
 # endif

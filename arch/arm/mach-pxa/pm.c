@@ -19,7 +19,6 @@
 #include <asm/hardware.h>
 #include <asm/memory.h>
 #include <asm/system.h>
-#include <asm/arch/lubbock.h>
 
 
 /*

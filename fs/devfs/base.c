@@ -848,13 +848,13 @@ static unsigned int boot_options = OPTION_NONE;
 static devfs_handle_t _devfs_walk_path(struct devfs_entry *dir,
 				       const char *name, int namelen,
 				       int traverse_symlink);
-static ssize_t devfsd_read(struct file *file, char __user *buf, size_t len,
+static ssize_t devfsd_read(struct file *file, char *buf, size_t len,
 			   loff_t * ppos);
 static int devfsd_ioctl(struct inode *inode, struct file *file,
 			unsigned int cmd, unsigned long arg);
 static int devfsd_close(struct inode *inode, struct file *file);
 #ifdef CONFIG_DEVFS_DEBUG
-static ssize_t stat_read(struct file *file, char __user *buf, size_t len,
+static ssize_t stat_read(struct file *file, char *buf, size_t len,
 			 loff_t * ppos);
 static struct file_operations stat_fops = {
 	.read = stat_read,
@@ -2490,28 +2490,11 @@ static int devfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
 	return 0;
 }				/*  End Function devfs_mknod  */
 
-static int devfs_readlink(struct dentry *dentry, char *buffer, int buflen)
-{
-	int err;
-	struct devfs_entry *de;
-
-	de = get_devfs_entry_from_vfs_inode(dentry->d_inode);
-	if (!de)
-		return -ENODEV;
-	err = vfs_readlink(dentry, buffer, buflen, de->u.symlink.linkname);
-	return err;
-}				/*  End Function devfs_readlink  */
-
 static int devfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
-	int err;
-	struct devfs_entry *de;
-
-	de = get_devfs_entry_from_vfs_inode(dentry->d_inode);
-	if (!de)
-		return -ENODEV;
-	err = vfs_follow_link(nd, de->u.symlink.linkname);
-	return err;
+	struct devfs_entry *p = get_devfs_entry_from_vfs_inode(dentry->d_inode);
+	nd_set_link(nd, p ? p->u.symlink.linkname : ERR_PTR(-ENODEV));
+	return 0;
 }				/*  End Function devfs_follow_link  */
 
 static struct inode_operations devfs_iops = {
@@ -2529,7 +2512,7 @@ static struct inode_operations devfs_dir_iops = {
 };
 
 static struct inode_operations devfs_symlink_iops = {
-	.readlink = devfs_readlink,
+	.readlink = generic_readlink,
 	.follow_link = devfs_follow_link,
 	.setattr = devfs_notify_change,
 };
@@ -2579,7 +2562,7 @@ static struct file_system_type devfs_fs_type = {
 
 /*  File operations for devfsd follow  */
 
-static ssize_t devfsd_read(struct file *file, char __user *buf, size_t len,
+static ssize_t devfsd_read(struct file *file, char *buf, size_t len,
 			   loff_t * ppos)
 {
 	int done = FALSE;
@@ -2693,7 +2676,7 @@ static int devfsd_ioctl(struct inode *inode, struct file *file,
 	switch (cmd) {
 	case DEVFSDIOC_GET_PROTO_REV:
 		ival = DEVFSD_PROTOCOL_REVISION_KERNEL;
-		if (copy_to_user((void __user *)arg, &ival, sizeof ival))
+		if (copy_to_user((void *)arg, &ival, sizeof ival))
 			return -EFAULT;
 		break;
 	case DEVFSDIOC_SET_EVENT_MASK:
@@ -2732,7 +2715,7 @@ static int devfsd_ioctl(struct inode *inode, struct file *file,
 		/*break; */
 #ifdef CONFIG_DEVFS_DEBUG
 	case DEVFSDIOC_SET_DEBUG_MASK:
-		if (copy_from_user(&ival, (void __user *)arg, sizeof ival))
+		if (copy_from_user(&ival, (void *)arg, sizeof ival))
 			return -EFAULT;
 		devfs_debug = ival;
 		break;
@@ -2772,7 +2755,7 @@ static int devfsd_close(struct inode *inode, struct file *file)
 }				/*  End Function devfsd_close  */
 
 #ifdef CONFIG_DEVFS_DEBUG
-static ssize_t stat_read(struct file *file, char __user *buf, size_t len,
+static ssize_t stat_read(struct file *file, char *buf, size_t len,
 			 loff_t * ppos)
 {
 	ssize_t num;

@@ -17,7 +17,7 @@ KERNELLOAD	:= 0xc000000000000000
 
 HAS_BIARCH      := $(shell if $(CC) -m64 -S -o /dev/null -xc /dev/null > /dev/null 2>&1; then echo y; else echo n; fi;)
 ifeq ($(HAS_BIARCH),y)
-AS              := $(AS) -a64
+AS              := $(AS) -64
 LD              := $(LD) -m elf64ppc
 CC		:= $(CC) -m64
 endif
@@ -48,6 +48,8 @@ core-$(CONFIG_XMON)		+= arch/ppc64/xmon/
 drivers-$(CONFIG_OPROFILE)	+= arch/ppc64/oprofile/
 
 boot := arch/ppc64/boot
+bzImage: vmlinux
+	cp vmlinux arch/ppc64/boot/bzImage
 
 boottarget-$(CONFIG_PPC_PSERIES) := zImage zImage.initrd
 boottarget-$(CONFIG_PPC_ISERIES) := vmlinux.sminitrd vmlinux.initrd vmlinux.sm

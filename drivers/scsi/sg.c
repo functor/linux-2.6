@@ -51,7 +51,7 @@ static int sg_version_num = 30531;	/* 2 digits for each component */
 
 #include <linux/blkdev.h>
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include <scsi/scsi_driver.h>
 #include <scsi/scsi_ioctl.h>
 #include <scsi/sg.h>
@@ -241,6 +241,12 @@ sg_open(struct inode *inode, struct file *filp)
 		return -ENXIO;
 	if (sdp->detached)
 		return -ENODEV;
+		
+	/* scsi generic is only for non-disk, non-cd, non-tape devices */	
+	if ( (sdp->device->type == TYPE_DISK) || (sdp->device->type == TYPE_MOD) || (sdp->device->type == TYPE_ROM) 
+	   || (sdp->device->type == TYPE_WORM) || ( sdp->device->type == TYPE_TAPE))
+		printk(KERN_WARNING "%s: Using deprecated /dev/sg mechanism instead of SG_IO on the actual device\n",current->comm);
+		
 
 	/* This driver's module count bumped by fops_get in <linux/fs.h> */
 	/* Prevent the device driver from vanishing while we sleep */

@@ -926,8 +926,8 @@ _GLOBAL(do_hash_page_DSI)
 	stb	r0,PACAPROCENABLED(r20)	/* Soft Disabled */
 
 	mfmsr	r0
-	ori	r0,r0,MSR_EE
-	mtmsrd	r0,1			/* Hard Enable */
+	ori	r0,r0,MSR_EE+MSR_RI
+	mtmsrd	r0			/* Hard Enable, RI on */
 #endif
 
 	/*
@@ -946,9 +946,9 @@ _GLOBAL(do_hash_page_DSI)
 	 */
 	mfmsr	r0
 	li	r4,0
-	ori	r4,r4,MSR_EE
+	ori	r4,r4,MSR_EE+MSR_RI
 	andc	r0,r0,r4
-	mtmsrd	r0,1			/* Hard Disable */
+	mtmsrd	r0			/* Hard Disable, RI off */
 
 	ld	r0,SOFTE(r1)
 	cmpdi	0,r0,0			/* See if we will soft enable in */

@@ -722,12 +722,7 @@ int __cpufreq_driver_target(struct cpufreq_policy *policy,
 			    unsigned int target_freq,
 			    unsigned int relation)
 {
-	int retval = -EINVAL;
-	lock_cpu_hotplug();
-	if (cpu_online(policy->cpu))
-		retval = cpufreq_driver->target(policy, target_freq, relation);
-	unlock_cpu_hotplug();
-	return retval;
+	return cpufreq_driver->target(policy, target_freq, relation);
 }
 EXPORT_SYMBOL_GPL(__cpufreq_driver_target);
 

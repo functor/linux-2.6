@@ -65,6 +65,29 @@ extern int min_free_kbytes;
 extern int printk_ratelimit_jiffies;
 extern int printk_ratelimit_burst;
 
+extern unsigned int vdso_enabled;
+
+int exec_shield = 1;
+int exec_shield_randomize = 1;
+
+static int __init setup_exec_shield(char *str)
+{
+        get_option (&str, &exec_shield);
+
+        return 1;
+}
+
+__setup("exec-shield=", setup_exec_shield);
+
+static int __init setup_exec_shield_randomize(char *str)
+{
+        get_option (&str, &exec_shield_randomize);
+
+        return 1;
+}
+
+__setup("exec-shield-randomize=", setup_exec_shield_randomize);
+
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
 static int minolduid;
@@ -77,6 +100,7 @@ extern char modprobe_path[];
 #ifdef CONFIG_HOTPLUG
 extern char hotplug_path[];
 #endif
+extern char vshelper_path[];
 #ifdef CONFIG_CHR_DEV_SG
 extern int sg_big_buff;
 #endif
@@ -218,7 +242,7 @@ static ctl_table kern_table[] = {
 		.ctl_name	= KERN_OSTYPE,
 		.procname	= "ostype",
 		.data		= system_utsname.sysname,
-		.maxlen		= sizeof(system_utsname.sysname),
+		.maxlen		= 64,
 		.mode		= 0444,
 		.proc_handler	= &proc_doutsstring,
 		.strategy	= &sysctl_string,
@@ -227,7 +251,7 @@ static ctl_table kern_table[] = {
 		.ctl_name	= KERN_OSRELEASE,
 		.procname	= "osrelease",
 		.data		= system_utsname.release,
-		.maxlen		= sizeof(system_utsname.release),
+		.maxlen		= 64,
 		.mode		= 0444,
 		.proc_handler	= &proc_doutsstring,
 		.strategy	= &sysctl_string,
@@ -236,7 +260,7 @@ static ctl_table kern_table[] = {
 		.ctl_name	= KERN_VERSION,
 		.procname	= "version",
 		.data		= system_utsname.version,
-		.maxlen		= sizeof(system_utsname.version),
+		.maxlen		= 64,
 		.mode		= 0444,
 		.proc_handler	= &proc_doutsstring,
 		.strategy	= &sysctl_string,
@@ -245,7 +269,7 @@ static ctl_table kern_table[] = {
 		.ctl_name	= KERN_NODENAME,
 		.procname	= "hostname",
 		.data		= system_utsname.nodename,
-		.maxlen		= sizeof(system_utsname.nodename),
+		.maxlen		= 64,
 		.mode		= 0644,
 		.proc_handler	= &proc_doutsstring,
 		.strategy	= &sysctl_string,
@@ -254,7 +278,7 @@ static ctl_table kern_table[] = {
 		.ctl_name	= KERN_DOMAINNAME,
 		.procname	= "domainname",
 		.data		= system_utsname.domainname,
-		.maxlen		= sizeof(system_utsname.domainname),
+		.maxlen		= 64,
 		.mode		= 0644,
 		.proc_handler	= &proc_doutsstring,
 		.strategy	= &sysctl_string,
@@ -267,6 +291,40 @@ static ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 	},
+	{
+		.ctl_name	= KERN_PANIC,
+		.procname	= "exec-shield",
+		.data		= &exec_shield,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= KERN_PANIC,
+		.procname	= "exec-shield-randomize",
+		.data		= &exec_shield_randomize,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= KERN_PANIC,
+		.procname	= "print-fatal-signals",
+		.data		= &print_fatal_signals,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+#if __i386__
+	{
+		.ctl_name	= KERN_PANIC,
+		.procname	= "vdso",
+		.data		= &vdso_enabled,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+#endif
 	{
 		.ctl_name	= KERN_CORE_USES_PID,
 		.procname	= "core_uses_pid",
@@ -392,7 +450,7 @@ static ctl_table kern_table[] = {
 		.ctl_name	= KERN_MODPROBE,
 		.procname	= "modprobe",
 		.data		= &modprobe_path,
-		.maxlen		= KMOD_PATH_LEN,
+		.maxlen		= 256,
 		.mode		= 0644,
 		.proc_handler	= &proc_dostring,
 		.strategy	= &sysctl_string,
@@ -403,12 +461,21 @@ static ctl_table kern_table[] = {
 		.ctl_name	= KERN_HOTPLUG,
 		.procname	= "hotplug",
 		.data		= &hotplug_path,
-		.maxlen		= KMOD_PATH_LEN,
+		.maxlen		= 256,
 		.mode		= 0644,
 		.proc_handler	= &proc_dostring,
 		.strategy	= &sysctl_string,
 	},
 #endif
+	{
+		.ctl_name	= KERN_VSHELPER,
+		.procname	= "vshelper",
+		.data		= &vshelper_path,
+		.maxlen		= 256,
+		.mode		= 0644,
+		.proc_handler	= &proc_dostring,
+		.strategy	= &sysctl_string,
+	},
 #ifdef CONFIG_CHR_DEV_SG
 	{
 		.ctl_name	= KERN_SG_BIG_BUFF,
@@ -737,14 +804,6 @@ static ctl_table vm_table[] = {
 		.proc_handler	= &hugetlb_sysctl_handler,
 		.extra1		= (void *)&hugetlb_zero,
 		.extra2		= (void *)&hugetlb_infinity,
-	 },
-	 {
-		.ctl_name	= VM_HUGETLB_GROUP,
-		.procname	= "hugetlb_shm_group",
-		.data		= &sysctl_hugetlb_shm_group,
-		.maxlen		= sizeof(gid_t),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
 	 },
 #endif
 	{
@@ -1917,56 +1976,56 @@ int proc_dointvec_userhz_jiffies(ctl_table *table, int write, struct file *filp,
 #else /* CONFIG_PROC_FS */
 
 int proc_dostring(ctl_table *table, int write, struct file *filp,
-		  void __user *buffer, size_t *lenp)
+		  void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
 }
 
 static int proc_doutsstring(ctl_table *table, int write, struct file *filp,
-			    void __user *buffer, size_t *lenp)
+			    void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
 }
 
 int proc_dointvec(ctl_table *table, int write, struct file *filp,
-		  void __user *buffer, size_t *lenp)
+		  void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
 }
 
 int proc_dointvec_bset(ctl_table *table, int write, struct file *filp,
-			void __user *buffer, size_t *lenp)
+			void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
 }
 
 int proc_dointvec_minmax(ctl_table *table, int write, struct file *filp,
-		    void __user *buffer, size_t *lenp)
+		    void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
 }
 
 int proc_dointvec_jiffies(ctl_table *table, int write, struct file *filp,
-		    void __user *buffer, size_t *lenp)
+		    void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
 }
 
 int proc_dointvec_userhz_jiffies(ctl_table *table, int write, struct file *filp,
-		    void __user *buffer, size_t *lenp)
+		    void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
 }
 
 int proc_doulongvec_minmax(ctl_table *table, int write, struct file *filp,
-		    void __user *buffer, size_t *lenp)
+		    void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
 }
 
 int proc_doulongvec_ms_jiffies_minmax(ctl_table *table, int write,
 				      struct file *filp,
-				      void __user *buffer, size_t *lenp)
+				      void *buffer, size_t *lenp)
 {
     return -ENOSYS;
 }
@@ -2141,13 +2200,13 @@ int proc_dointvec_minmax(ctl_table *table, int write, struct file *filp,
 }
 
 int proc_dointvec_jiffies(ctl_table *table, int write, struct file *filp,
-			  void __user *buffer, size_t *lenp)
+			  void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
 }
 
 int proc_dointvec_userhz_jiffies(ctl_table *table, int write, struct file *filp,
-			  void __user *buffer, size_t *lenp)
+			  void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
 }

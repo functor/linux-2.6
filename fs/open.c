@@ -22,6 +22,7 @@
 #include <asm/uaccess.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
+#include <linux/vserver/xid.h>
 
 #include <asm/unistd.h>
 
@@ -607,6 +608,9 @@ asmlinkage long sys_fchmod(unsigned int fd, mode_t mode)
 	dentry = file->f_dentry;
 	inode = dentry->d_inode;
 
+	err = -EPERM;
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
+		goto out_putf;
 	err = -EROFS;
 	if (IS_RDONLY(inode))
 		goto out_putf;
@@ -638,6 +642,10 @@ asmlinkage long sys_chmod(const char __user * filename, mode_t mode)
 	if (error)
 		goto out;
 	inode = nd.dentry->d_inode;
+
+	error = -EPERM;
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
+		goto dput_and_out;
 
 	error = -EROFS;
 	if (IS_RDONLY(inode))
@@ -678,14 +686,15 @@ static int chown_common(struct dentry * dentry, uid_t user, gid_t group)
 	error = -EPERM;
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
 		goto out;
+
 	newattrs.ia_valid =  ATTR_CTIME;
 	if (user != (uid_t) -1) {
 		newattrs.ia_valid |= ATTR_UID;
-		newattrs.ia_uid = user;
+		newattrs.ia_uid = vx_map_uid(user);
 	}
 	if (group != (gid_t) -1) {
 		newattrs.ia_valid |= ATTR_GID;
-		newattrs.ia_gid = group;
+		newattrs.ia_gid = vx_map_gid(group);
 	}
 	if (!S_ISDIR(inode->i_mode))
 		newattrs.ia_valid |= ATTR_KILL_SUID|ATTR_KILL_SGID;
@@ -880,6 +889,7 @@ repeat:
 	FD_SET(fd, files->open_fds);
 	FD_CLR(fd, files->close_on_exec);
 	files->next_fd = fd + 1;
+	vx_openfd_inc(fd);
 #if 1
 	/* Sanity check */
 	if (files->fd[fd] != NULL) {
@@ -967,7 +977,6 @@ out_error:
 	fd = error;
 	goto out;
 }
-EXPORT_SYMBOL_GPL(sys_open);
 
 #ifndef __alpha__
 
@@ -1034,6 +1043,7 @@ asmlinkage long sys_close(unsigned int fd)
 	FD_CLR(fd, files->close_on_exec);
 	__put_unused_fd(files, fd);
 	spin_unlock(&files->file_lock);
+	vx_openfd_dec(fd);
 	return filp_close(filp, files);
 
 out_unlock:
@@ -1041,7 +1051,6 @@ out_unlock:
 	return -EBADF;
 }
 
-EXPORT_SYMBOL(sys_close);
 
 /*
  * This routine simulates a hangup on the tty, to arrange that users

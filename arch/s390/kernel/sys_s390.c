@@ -37,7 +37,7 @@
  * sys_pipe() is the normal C calling standard for creating
  * a pipe. It's not the way Unix traditionally does this, though.
  */
-asmlinkage long sys_pipe(unsigned long __user *fildes)
+asmlinkage long sys_pipe(unsigned long * fildes)
 {
 	int fd[2];
 	int error;
@@ -92,7 +92,7 @@ struct mmap_arg_struct {
 	unsigned long offset;
 };
 
-asmlinkage long sys_mmap2(struct mmap_arg_struct __user  *arg)
+asmlinkage long sys_mmap2(struct mmap_arg_struct *arg)
 {
 	struct mmap_arg_struct a;
 	int error = -EFAULT;
@@ -104,7 +104,7 @@ out:
 	return error;
 }
 
-asmlinkage long old_mmap(struct mmap_arg_struct __user *arg)
+asmlinkage long old_mmap(struct mmap_arg_struct *arg)
 {
 	struct mmap_arg_struct a;
 	long error = -EFAULT;
@@ -128,7 +128,7 @@ struct sel_arg_struct {
 	struct timeval *tvp;
 };
 
-asmlinkage long old_select(struct sel_arg_struct __user *arg)
+asmlinkage long old_select(struct sel_arg_struct *arg)
 {
 	struct sel_arg_struct a;
 
@@ -145,37 +145,37 @@ asmlinkage long old_select(struct sel_arg_struct __user *arg)
  *
  * This is really horribly ugly.
  */
-asmlinkage long sys_ipc(uint call, int first, int second,
-				  unsigned long third, void __user *ptr)
+asmlinkage long sys_ipc (uint call, int first, int second,
+				  unsigned long third, void *ptr)
 {
         struct ipc_kludge tmp;
 	int ret;
 
         switch (call) {
         case SEMOP:
-		return sys_semtimedop (first, (struct sembuf __user *) ptr, second,
+		return sys_semtimedop (first, (struct sembuf *) ptr, second,
 				       NULL);
 	case SEMTIMEDOP:
-		return sys_semtimedop (first, (struct sembuf __user *) ptr, second,
-				       (const struct timespec __user *) third);
+		return sys_semtimedop (first, (struct sembuf *) ptr, second,
+				       (const struct timespec *) third);
         case SEMGET:
                 return sys_semget (first, second, third);
         case SEMCTL: {
                 union semun fourth;
                 if (!ptr)
                         return -EINVAL;
-                if (get_user(fourth.__pad, (void __user * __user *) ptr))
+                if (get_user(fourth.__pad, (void **) ptr))
                         return -EFAULT;
                 return sys_semctl (first, second, third, fourth);
-        }
+        } 
         case MSGSND:
-		return sys_msgsnd (first, (struct msgbuf __user *) ptr,
+		return sys_msgsnd (first, (struct msgbuf *) ptr, 
                                    second, third);
 		break;
         case MSGRCV:
                 if (!ptr)
                         return -EINVAL;
-                if (copy_from_user (&tmp, (struct ipc_kludge __user *) ptr,
+                if (copy_from_user (&tmp, (struct ipc_kludge *) ptr,
                                     sizeof (struct ipc_kludge)))
                         return -EFAULT;
                 return sys_msgrcv (first, tmp.msgp,
@@ -183,33 +183,33 @@ asmlinkage long sys_ipc(uint call, int first, int second,
         case MSGGET:
                 return sys_msgget ((key_t) first, second);
         case MSGCTL:
-                return sys_msgctl (first, second, (struct msqid_ds __user *) ptr);
-
+                return sys_msgctl (first, second, (struct msqid_ds *) ptr);
+                
 	case SHMAT: {
 		ulong raddr;
-		ret = do_shmat (first, (char __user *) ptr, second, &raddr);
+		ret = do_shmat (first, (char *) ptr, second, &raddr);
 		if (ret)
 			return ret;
-		return put_user (raddr, (ulong __user *) third);
+		return put_user (raddr, (ulong *) third);
 		break;
         }
-	case SHMDT:
-		return sys_shmdt ((char __user *)ptr);
+	case SHMDT: 
+		return sys_shmdt ((char *)ptr);
 	case SHMGET:
 		return sys_shmget (first, second, third);
 	case SHMCTL:
 		return sys_shmctl (first, second,
-                                   (struct shmid_ds __user *) ptr);
+                                   (struct shmid_ds *) ptr);
 	default:
 		return -ENOSYS;
 
 	}
-
+        
 	return -EINVAL;
 }
 
 #ifdef CONFIG_ARCH_S390X
-asmlinkage long s390x_newuname(struct new_utsname __user *name)
+asmlinkage long s390x_newuname(struct new_utsname * name)
 {
 	int ret = sys_newuname(name);
 
@@ -256,7 +256,7 @@ struct fadvise64_64_args {
 };
 
 asmlinkage long
-s390_fadvise64_64(struct fadvise64_64_args __user *args)
+s390_fadvise64_64(struct fadvise64_64_args *args)
 {
 	struct fadvise64_64_args a;
 

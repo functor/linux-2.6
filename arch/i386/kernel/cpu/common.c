@@ -379,6 +379,9 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 	if (disable_pse)
 		clear_bit(X86_FEATURE_PSE, c->x86_capability);
 
+	/* hack: disable SEP unconditionally. */
+	clear_bit(X86_FEATURE_SEP, c->x86_capability);
+
 	/* If the model name is still unset, do table lookup. */
 	if ( !c->x86_model_id[0] ) {
 		char *p;
@@ -554,11 +557,15 @@ void __init cpu_init (void)
 	set_tss_desc(cpu,t);
 	cpu_gdt_table[cpu][GDT_ENTRY_TSS].b &= 0xfffffdff;
 	load_TR_desc();
-	load_LDT(&init_mm.context);
+	if (cpu)
+		load_LDT(&init_mm.context);
 
 	/* Set up doublefault TSS pointer in the GDT */
 	__set_tss_desc(cpu, GDT_ENTRY_DOUBLEFAULT_TSS, &doublefault_tss);
 	cpu_gdt_table[cpu][GDT_ENTRY_DOUBLEFAULT_TSS].b &= 0xfffffdff;
+
+	if (cpu)
+		trap_init_virtual_GDT();
 
 	/* Clear %fs and %gs. */
 	asm volatile ("xorl %eax, %eax; movl %eax, %fs; movl %eax, %gs");

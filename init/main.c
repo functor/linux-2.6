@@ -47,6 +47,8 @@
 #include <asm/io.h>
 #include <asm/bugs.h>
 
+#include <linux/ckrm.h>
+
 /*
  * This is one of the first .c files built. Error out early
  * if we have compiler trouble..
@@ -186,7 +188,7 @@ void __devinit calibrate_delay(void)
 	loops_per_jiffy = (1<<12);
 
 	printk("Calibrating delay loop... ");
-	while ((loops_per_jiffy <<= 1) != 0) {
+	while (loops_per_jiffy <<= 1) {
 		/* wait for "start of" clock tick */
 		ticks = jiffies;
 		while (ticks == jiffies)
@@ -432,6 +434,11 @@ asmlinkage void __init start_kernel(void)
 	rcu_init();
 	init_IRQ();
 	pidhash_init();
+	/* MEF: In 2.6.5. ckrm_init was right after pidhash_init() but 
+                before sched_init(). Will leave it after pidhash_init()
+                and cross finger.
+	*/
+	ckrm_init();
 	init_timers();
 	softirq_init();
 	time_init();
@@ -480,6 +487,7 @@ asmlinkage void __init start_kernel(void)
 #ifdef CONFIG_PROC_FS
 	proc_root_init();
 #endif
+
 	check_bugs();
 
 	/* 
@@ -632,7 +640,7 @@ static int init(void * unused)
 	 * check if there is an early userspace init.  If yes, let it do all
 	 * the work
 	 */
-	if (sys_access((const char __user *) "/init", 0) == 0)
+	if (sys_access("/init", 0) == 0)
 		execute_command = "/init";
 	else
 		prepare_namespace();
@@ -646,7 +654,7 @@ static int init(void * unused)
 	unlock_kernel();
 	system_state = SYSTEM_RUNNING;
 
-	if (sys_open((const char __user *) "/dev/console", O_RDWR, 0) < 0)
+	if (sys_open("/dev/console", O_RDWR, 0) < 0)
 		printk("Warning: unable to open an initial console.\n");
 
 	(void) sys_dup(0);

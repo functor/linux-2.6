@@ -1180,46 +1180,28 @@ void dev_queue_xmit_nit(struct sk_buff *skb, struct net_device *dev)
 	rcu_read_unlock();
 }
 
-/*
- * Invalidate hardware checksum when packet is to be mangled, and
- * complete checksum manually on outgoing path.
+/* Calculate csum in the case, when packet is misrouted.
+ * If it failed by some reason, ignore and send skb with wrong
+ * checksum.
  */
-int skb_checksum_help(struct sk_buff **pskb, int inward)
+struct sk_buff *skb_checksum_help(struct sk_buff *skb)
 {
 	unsigned int csum;
-	int ret = 0, offset = (*pskb)->h.raw - (*pskb)->data;
+	int offset = skb->h.raw - skb->data;
 
-	if (inward) {
-		(*pskb)->ip_summed = CHECKSUM_NONE;
-		goto out;
-	}
-
-	if (skb_shared(*pskb)  || skb_cloned(*pskb)) {
-		struct sk_buff *newskb = skb_copy(*pskb, GFP_ATOMIC);
-		if (!newskb) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		if ((*pskb)->sk)
-			skb_set_owner_w(newskb, (*pskb)->sk);
-		kfree_skb(*pskb);
-		*pskb = newskb;
-	}
-
-	if (offset > (int)(*pskb)->len)
+	if (offset > (int)skb->len)
 		BUG();
-	csum = skb_checksum(*pskb, offset, (*pskb)->len-offset, 0);
+	csum = skb_checksum(skb, offset, skb->len-offset, 0);
 
-	offset = (*pskb)->tail - (*pskb)->h.raw;
+	offset = skb->tail - skb->h.raw;
 	if (offset <= 0)
 		BUG();
-	if ((*pskb)->csum + 2 > offset)
+	if (skb->csum + 2 > offset)
 		BUG();
 
-	*(u16*)((*pskb)->h.raw + (*pskb)->csum) = csum_fold(csum);
-	(*pskb)->ip_summed = CHECKSUM_NONE;
-out:	
-	return ret;
+	*(u16*)(skb->h.raw + skb->csum) = csum_fold(csum);
+	skb->ip_summed = CHECKSUM_NONE;
+	return skb;
 }
 
 #ifdef CONFIG_HIGHMEM
@@ -1344,9 +1326,10 @@ int dev_queue_xmit(struct sk_buff *skb)
 	if (skb->ip_summed == CHECKSUM_HW &&
 	    (!(dev->features & (NETIF_F_HW_CSUM | NETIF_F_NO_CSUM)) &&
 	     (!(dev->features & NETIF_F_IP_CSUM) ||
-	      skb->protocol != htons(ETH_P_IP))))
-	      	if (skb_checksum_help(&skb, 0))
-	      		goto out_kfree_skb;
+	      skb->protocol != htons(ETH_P_IP)))) {
+		if ((skb = skb_checksum_help(skb)) == NULL)
+			goto out;
+	}
 
 	/* Grab device queue */
 	spin_lock_bh(&dev->queue_lock);
@@ -1996,6 +1979,8 @@ static int dev_ifconf(char __user *arg)
 
 	total = 0;
 	for (dev = dev_base; dev; dev = dev->next) {
+		if (!dev_in_nx_info(dev, current->nx_info))
+			continue;
 		for (i = 0; i < NPROTO; i++) {
 			if (gifconf_list[i]) {
 				int done;
@@ -2056,6 +2041,10 @@ void dev_seq_stop(struct seq_file *seq, void *v)
 
 static void dev_seq_printf_stats(struct seq_file *seq, struct net_device *dev)
 {
+	struct nx_info *nxi = current->nx_info;
+
+	if (!dev_in_nx_info(dev, nxi))
+		return;
 	if (dev->get_stats) {
 		struct net_device_stats *stats = dev->get_stats(dev);
 

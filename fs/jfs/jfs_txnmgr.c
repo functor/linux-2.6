@@ -1747,10 +1747,7 @@ static void xtLog(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 
 		if (lwm == next)
 			goto out;
-		if (lwm > next) {
-			jfs_err("xtLog: lwm > next\n");
-			goto out;
-		}
+		assert(lwm < next);
 		tlck->flag |= tlckUPDATEMAP;
 		xadlock->flag = mlckALLOCXADLIST;
 		xadlock->count = next - lwm;
@@ -1916,18 +1913,25 @@ static void xtLog(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 		/*
 		 *      write log records
 		 */
-		/* log after-image for logredo():
-		 *
-		 * logredo() will update bmap for alloc of new/extended
-		 * extents (XAD_NEW|XAD_EXTEND) of XAD[lwm:next) from
-		 * after-image of XADlist;
-		 * logredo() resets (XAD_NEW|XAD_EXTEND) flag when
-		 * applying the after-image to the meta-data page.
+		/*
+		 * allocate entries XAD[lwm:next]:
 		 */
-		lrd->type = cpu_to_le16(LOG_REDOPAGE);
-		PXDaddress(pxd, mp->index);
-		PXDlength(pxd, mp->logical_size >> tblk->sb->s_blocksize_bits);
-		lrd->backchain = cpu_to_le32(lmLog(log, tblk, lrd, tlck));
+		if (lwm < next) {
+			/* log after-image for logredo():
+			 * logredo() will update bmap for alloc of new/extended
+			 * extents (XAD_NEW|XAD_EXTEND) of XAD[lwm:next) from
+			 * after-image of XADlist;
+			 * logredo() resets (XAD_NEW|XAD_EXTEND) flag when
+			 * applying the after-image to the meta-data page.
+			 */
+			lrd->type = cpu_to_le16(LOG_REDOPAGE);
+			PXDaddress(pxd, mp->index);
+			PXDlength(pxd,
+				  mp->logical_size >> tblk->sb->
+				  s_blocksize_bits);
+			lrd->backchain =
+			    cpu_to_le32(lmLog(log, tblk, lrd, tlck));
+		}
 
 		/*
 		 * truncate entry XAD[twm == next - 1]:
@@ -2620,7 +2624,6 @@ void txAbort(tid_t tid, int dirty)
 	lid_t lid, next;
 	struct metapage *mp;
 	struct tblock *tblk = tid_to_tblock(tid);
-	struct tlock *tlck;
 
 	jfs_warn("txAbort: tid:%d dirty:0x%x", tid, dirty);
 
@@ -2628,10 +2631,9 @@ void txAbort(tid_t tid, int dirty)
 	 * free tlocks of the transaction
 	 */
 	for (lid = tblk->next; lid; lid = next) {
-		tlck = lid_to_tlock(lid);
-		next = tlck->next;
-		mp = tlck->mp;
-		JFS_IP(tlck->ip)->xtlid = 0;
+		next = lid_to_tlock(lid)->next;
+
+		mp = lid_to_tlock(lid)->mp;
 
 		if (mp) {
 			mp->lid = 0;

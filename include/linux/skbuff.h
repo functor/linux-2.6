@@ -1038,6 +1038,8 @@ extern void	       skb_copy_and_csum_dev(const struct sk_buff *skb, u8 *to);
 extern void skb_init(void);
 extern void skb_add_mtu(int mtu);
 
+struct tux_req_struct;
+
 #ifdef CONFIG_NETFILTER
 static inline void nf_conntrack_put(struct nf_ct_info *nfct)
 {

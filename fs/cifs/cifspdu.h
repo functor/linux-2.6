@@ -862,10 +862,6 @@ typedef struct smb_com_create_directory_rsp {
 	__u16 ByteCount;	/* bct = 0 */
 } CREATE_DIRECTORY_RSP;
 
-/***************************************************/
-/* NT Transact structure defintions follow         */
-/* Currently only ioctl and notify are implemented */
-/***************************************************/
 typedef struct smb_com_transaction_ioctl_req {
 	struct smb_hdr hdr;	/* wct = 23 */
 	__u8 MaxSetupCount;
@@ -908,45 +904,29 @@ typedef struct smb_com_transaction_ioctl_rsp {
 } TRANSACT_IOCTL_RSP;
 
 typedef struct smb_com_transaction_change_notify_req {
-	struct smb_hdr hdr;     /* wct = 23 */
-	__u8 MaxSetupCount;
-	__u16 Reserved;
-	__u32 TotalParameterCount;
-	__u32 TotalDataCount;
-	__u32 MaxParameterCount;
-	__u32 MaxDataCount;
-	__u32 ParameterCount;
-	__u32 ParameterOffset;
-	__u32 DataCount;
-	__u32 DataOffset;
-	__u8 SetupCount; /* four setup words follow subcommand */
-	/* SNIA spec incorrectly included spurious pad here */
-	__u16 SubCommand;/* 4 = Change Notify */
+        struct smb_hdr hdr;     /* wct = 23 */
+        __u8 MaxSetupCount;
+        __u16 Reserved;
+        __u32 TotalParameterCount;
+        __u32 TotalDataCount;
+        __u32 MaxParameterCount;
+        __u32 MaxDataCount;
+        __u32 ParameterCount;
+        __u32 ParameterOffset;
+        __u32 DataCount;
+        __u32 DataOffset;
+        __u8 SetupCount; /* four setup words follow subcommand */
+        /* SNIA spec incorrectly included spurious pad here */
+        __u16 SubCommand;/* 4 = Change Notify */
 	__u32 CompletionFilter;  /* operation to monitor */
 	__u16 Fid;
 	__u8 WatchTree;  /* 1 = Monitor subdirectories */
-	__u8 Reserved2;
 	__u16 ByteCount;
-/* __u8 Pad[3];*/
-/*	__u8 Data[1];*/
+	__u8 Pad[3];
+	__u8 Data[1];
 } TRANSACT_CHANGE_NOTIFY_REQ;
 
-typedef struct smb_com_transaction_change_notify_rsp {
-	struct smb_hdr hdr;	/* wct = 18 */
-	__u8 Reserved[3];
-	__u32 TotalParameterCount;
-	__u32 TotalDataCount;
-	__u32 ParameterCount;
-	__u32 ParameterOffset;
-	__u32 ParameterDisplacement;
-	__u32 DataCount;
-	__u32 DataOffset;
-	__u32 DataDisplacement;
-	__u8 SetupCount;   /* 0 */
-	__u16 ByteCount;
-	/* __u8 Pad[3]; */
-} TRANSACT_CHANGE_NOTIFY_RSP;
-/* Completion Filter flags for Notify */
+/* Completion Filter flags */
 #define FILE_NOTIFY_CHANGE_FILE_NAME    0x00000001
 #define FILE_NOTIFY_CHANGE_DIR_NAME     0x00000002
 #define FILE_NOTIFY_CHANGE_NAME         0x00000003
@@ -1046,12 +1026,9 @@ typedef union smb_com_transaction2 {
 
 /* PathInfo/FileInfo infolevels */
 #define SMB_INFO_STANDARD                   1
-#define SMB_INFO_QUERY_EAS_FROM_LIST        3
-#define SMB_INFO_QUERY_ALL_EAS              4
 #define SMB_INFO_IS_NAME_VALID              6
 #define SMB_QUERY_FILE_BASIC_INFO       0x101
 #define SMB_QUERY_FILE_STANDARD_INFO    0x102
-#define SMB_QUERY_FILE_EA_INFO          0x103
 #define SMB_QUERY_FILE_NAME_INFO        0x104
 #define SMB_QUERY_FILE_ALLOCATION_INFO  0x105
 #define SMB_QUERY_FILE_END_OF_FILEINFO  0x106
@@ -1690,17 +1667,16 @@ struct gealist {
 };
 
 struct fea {
-	unsigned char EA_flags;
-	__u8 name_len;
-	__u16 value_len;
+	unsigned char fEA;
+	unsigned char cbName;
+	unsigned short cbValue;
 	char szName[1];
-	/* optionally followed by value */
 };
 /* flags for _FEA.fEA */
 #define FEA_NEEDEA         0x80	/* need EA bit */
 
 struct fealist {
-	__u32 list_len;
+	unsigned long cbList;
 	struct fea list[1];
 };
 

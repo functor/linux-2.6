@@ -58,6 +58,8 @@ struct rtas_t rtas = {
 	.lock = SPIN_LOCK_UNLOCKED
 };
 
+EXPORT_SYMBOL_GPL(rtas);
+
 char rtas_err_buf[RTAS_ERROR_LOG_MAX];
 
 extern unsigned long reloc_offset(void);

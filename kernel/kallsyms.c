@@ -318,7 +318,5 @@ int __init kallsyms_init(void)
 		entry->proc_fops = &kallsyms_operations;
 	return 0;
 }
-__initcall(kallsyms_init);
 
-EXPORT_SYMBOL(kallsyms_lookup);
 EXPORT_SYMBOL(__print_symbol);

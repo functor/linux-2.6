@@ -684,7 +684,7 @@ static int
 snd_nm256_playback_copy(snd_pcm_substream_t *substream,
 			int channel, /* not used (interleaved data) */
 			snd_pcm_uframes_t pos,
-			void __user *src,
+			void *src,
 			snd_pcm_uframes_t count)
 {
 	snd_pcm_runtime_t *runtime = substream->runtime;

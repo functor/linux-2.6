@@ -97,7 +97,10 @@ int ide_end_request (ide_drive_t *drive, int uptodate, int nr_sectors)
 
 	if (!end_that_request_first(rq, uptodate, nr_sectors)) {
 		add_disk_randomness(rq->rq_disk);
-		blkdev_dequeue_request(rq);
+		if (!blk_rq_tagged(rq))
+			blkdev_dequeue_request(rq);
+		else
+			blk_queue_end_tag(drive->queue, rq);
 		HWGROUP(drive)->rq = NULL;
 		end_that_request_last(rq);
 		ret = 0;
@@ -852,7 +855,18 @@ void ide_do_request (ide_hwgroup_t *hwgroup, int masked_irq)
 		drive->sleep = 0;
 		drive->service_start = jiffies;
 
+queue_next:
+		if (!ata_can_queue(drive)) {
+			if (!ata_pending_commands(drive))
+				hwgroup->busy = 0;
+
+			break;
+		}
+
 		if (blk_queue_plugged(drive->queue)) {
+			if (drive->using_tcq)
+				break;
+
 			printk(KERN_ERR "ide: huh? queue was plugged!\n");
 			break;
 		}
@@ -863,7 +877,7 @@ void ide_do_request (ide_hwgroup_t *hwgroup, int masked_irq)
 		 */
 		rq = elv_next_request(drive->queue);
 		if (!rq) {
-			hwgroup->busy = 0;
+			hwgroup->busy = !!ata_pending_commands(drive);
 			break;
 		}
 
@@ -886,6 +900,9 @@ void ide_do_request (ide_hwgroup_t *hwgroup, int masked_irq)
 			break;
 		}
 
+		if (!rq->bio && ata_pending_commands(drive))
+			break;
+
 		hwgroup->rq = rq;
 
 		/*
@@ -905,6 +922,8 @@ void ide_do_request (ide_hwgroup_t *hwgroup, int masked_irq)
 		spin_lock_irq(&ide_lock);
 		if (hwif->irq != masked_irq)
 			enable_irq(hwif->irq);
+		if (startstop == ide_released)
+			goto queue_next;
 		if (startstop == ide_stopped)
 			hwgroup->busy = 0;
 	}

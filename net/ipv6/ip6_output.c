@@ -55,7 +55,7 @@
 #include <net/icmp.h>
 #include <net/xfrm.h>
 
-static int ip6_fragment(struct sk_buff **pskb, int (*output)(struct sk_buff**));
+static int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff*));
 
 static __inline__ void ipv6_select_ident(struct sk_buff *skb, struct frag_hdr *fhdr)
 {
@@ -107,9 +107,8 @@ static int ip6_dev_loopback_xmit(struct sk_buff *newskb)
 }
 
 
-static int ip6_output2(struct sk_buff **pskb)
+int ip6_output2(struct sk_buff *skb)
 {
-	struct sk_buff *skb = *pskb;
 	struct dst_entry *dst = skb->dst;
 	struct net_device *dev = dst->dev;
 
@@ -122,7 +121,7 @@ static int ip6_output2(struct sk_buff **pskb)
 		if (!(dev->flags & IFF_LOOPBACK) && (!np || np->mc_loop) &&
 		    ipv6_chk_mcast_addr(dev, &skb->nh.ipv6h->daddr,
 				&skb->nh.ipv6h->saddr)) {
-			struct sk_buff *newskb = skb_clone(skb, GFP_ATOMIC);
+			struct sk_buff *newskb = skb_copy(skb, GFP_ATOMIC);
 
 			/* Do not check for IFF_ALLMULTI; multicast routing
 			   is not supported in any case.
@@ -145,14 +144,12 @@ static int ip6_output2(struct sk_buff **pskb)
 	return NF_HOOK(PF_INET6, NF_IP6_POST_ROUTING, skb,NULL, skb->dev,ip6_output_finish);
 }
 
-int ip6_output(struct sk_buff **pskb)
+int ip6_output(struct sk_buff *skb)
 {
-	struct sk_buff *skb = *pskb;
-
 	if ((skb->len > dst_pmtu(skb->dst) || skb_shinfo(skb)->frag_list))
-		return ip6_fragment(pskb, ip6_output2);
+		return ip6_fragment(skb, ip6_output2);
 	else
-		return ip6_output2(pskb);
+		return ip6_output2(skb);
 }
 
 #ifdef CONFIG_NETFILTER
@@ -349,7 +346,7 @@ int ip6_forward(struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb->dst;
 	struct ipv6hdr *hdr = skb->nh.ipv6h;
-	struct inet6_skb_parm *opt = IP6CB(skb);
+	struct inet6_skb_parm *opt =(struct inet6_skb_parm*)skb->cb;
 	
 	if (ipv6_devconf.forwarding == 0)
 		goto error;
@@ -516,11 +513,11 @@ int ip6_find_1stfragopt(struct sk_buff *skb, u8 **nexthdr)
 	return offset;
 }
 
-static int ip6_fragment(struct sk_buff **pskb, int (*output)(struct sk_buff**))
+static int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff*))
 {
 	struct net_device *dev;
-	struct sk_buff *frag, *skb = *pskb;
 	struct rt6_info *rt = (struct rt6_info*)skb->dst;
+	struct sk_buff *frag;
 	struct ipv6hdr *tmp_hdr;
 	struct frag_hdr *fh;
 	unsigned int mtu, hlen, left, len;
@@ -607,13 +604,11 @@ static int ip6_fragment(struct sk_buff **pskb, int (*output)(struct sk_buff**))
 				frag->nh.ipv6h->payload_len = htons(frag->len - sizeof(struct ipv6hdr));
 				ip6_copy_metadata(frag, skb);
 			}
-			err = output(pskb);
-			if (err || !frag) {
-				if (unlikely(skb != *pskb))
-					skb = *pskb;
+			err = output(skb);
+
+			if (err || !frag)
 				break;
-			}
-			
+
 			skb = frag;
 			frag = skb->next;
 			skb->next = NULL;
@@ -726,7 +721,7 @@ slow_path:
 
 		IP6_INC_STATS(FragCreates);
 
-		err = output(&frag);
+		err = output(frag);
 		if (err)
 			goto fail;
 	}

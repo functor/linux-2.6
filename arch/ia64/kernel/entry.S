@@ -21,7 +21,7 @@
  * Jonathan Nicklin	<nicklin@missioncriticallinux.com>
  * Patrick O'Rourke	<orourke@missioncriticallinux.com>
  * 11/07/2000
- */
+ /
 /*
  * Global (preserved) predicate usage on syscall entry/exit path:
  *
@@ -1362,7 +1362,15 @@ sys_call_table:
 	data8 sys_syslog
 	data8 sys_setitimer
 	data8 sys_getitimer
+#ifdef CONFIG_TUX
+	data8 __sys_tux				// 1120		/* was: ia64_oldstat */
+#else
+# ifdef CONFIG_TUX_MODULE
+	data8 sys_tux				// 1120		/* was: ia64_oldstat */
+# else
 	data8 sys_ni_syscall			// 1120		/* was: ia64_oldstat */
+# endif
+#endif
 	data8 sys_ni_syscall					/* was: ia64_oldlstat */
 	data8 sys_ni_syscall					/* was: ia64_oldfstat */
 	data8 sys_vhangup

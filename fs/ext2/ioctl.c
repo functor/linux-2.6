@@ -49,7 +49,9 @@ int ext2_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		 *
 		 * This test looks nicer. Thanks to Pauline Middelink
 		 */
-		if ((flags ^ oldflags) & (EXT2_APPEND_FL | EXT2_IMMUTABLE_FL)) {
+		if ((oldflags & EXT2_IMMUTABLE_FL) ||
+			((flags ^ oldflags) &
+			(EXT2_APPEND_FL | EXT2_IMMUTABLE_FL))) {
 			if (!capable(CAP_LINUX_IMMUTABLE))
 				return -EPERM;
 		}

@@ -428,10 +428,7 @@ static inline void __ptep_set_access_flags(pte_t *ptep, pte_t entry, int dirty)
 	:"cc");
 }
 #define  ptep_set_access_flags(__vma, __address, __ptep, __entry, __dirty) \
-	do {								   \
-		__ptep_set_access_flags(__ptep, __entry, __dirty);	   \
-		flush_tlb_page_nohash(__vma, __address);	       	   \
-	} while(0)
+        __ptep_set_access_flags(__ptep, __entry, __dirty)
 
 /*
  * Macro to mark a page protection value as "uncacheable".

@@ -12,6 +12,7 @@
 #include <linux/mmzone.h>
 #include <linux/rbtree.h>
 #include <linux/prio_tree.h>
+#include <linux/vinline.h>
 #include <linux/fs.h>
 
 struct mempolicy;
@@ -495,8 +496,18 @@ int shmem_set_policy(struct vm_area_struct *vma, struct mempolicy *new);
 struct mempolicy *shmem_get_policy(struct vm_area_struct *vma,
 					unsigned long addr);
 struct file *shmem_file_setup(char * name, loff_t size, unsigned long flags);
-void shmem_lock(struct file * file, int lock);
+int shmem_lock(struct file * file, int lock);
 int shmem_zero_setup(struct vm_area_struct *);
+
+static inline int can_do_mlock(void)
+{
+	if (capable(CAP_IPC_LOCK))
+		return 1;
+	if (current->rlim[RLIMIT_MEMLOCK].rlim_cur != 0)
+		return 1;
+	return 0;
+}
+
 
 /*
  * Parameter block passed down to zap_pte_range in exceptional cases.
@@ -564,6 +575,9 @@ int clear_page_dirty_for_io(struct page *page);
  */
 typedef int (*shrinker_t)(int nr_to_scan, unsigned int gfp_mask);
 
+extern long do_mprotect(struct mm_struct *mm, unsigned long start, 
+			size_t len, unsigned long prot);
+
 /*
  * Add an aging callback.  The int is the number of 'seeks' it takes
  * to recreate one of the objects that these functions age.
@@ -630,11 +644,12 @@ extern struct vm_area_struct *copy_vma(struct vm_area_struct **,
 	unsigned long addr, unsigned long len, pgoff_t pgoff);
 extern void exit_mmap(struct mm_struct *);
 
-extern unsigned long get_unmapped_area(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
+extern unsigned long get_unmapped_area(struct file *, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long);
 
-extern unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
-	unsigned long len, unsigned long prot,
-	unsigned long flag, unsigned long pgoff);
+extern unsigned long do_mmap_pgoff(struct mm_struct *mm, struct file *file, 
+				   unsigned long addr, unsigned long len,
+				   unsigned long prot, unsigned long flag,
+				   unsigned long pgoff);
 
 static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
@@ -644,7 +659,8 @@ static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	if ((offset + PAGE_ALIGN(len)) < offset)
 		goto out;
 	if (!(offset & ~PAGE_MASK))
-		ret = do_mmap_pgoff(file, addr, len, prot, flag, offset >> PAGE_SHIFT);
+		ret = do_mmap_pgoff(current->mm, file, addr, len, prot, flag, 
+				    offset >> PAGE_SHIFT);
 out:
 	return ret;
 }
@@ -710,6 +726,8 @@ extern unsigned int nr_used_zone_pages(void);
 extern struct page * vmalloc_to_page(void *addr);
 extern struct page * follow_page(struct mm_struct *mm, unsigned long address,
 		int write);
+extern struct page * follow_page_pfn(struct mm_struct *mm,
+		unsigned long address, int write, unsigned long *pfn);
 extern int remap_page_range(struct vm_area_struct *vma, unsigned long from,
 		unsigned long to, unsigned long size, pgprot_t prot);
 

@@ -109,7 +109,7 @@
 #define __NR_syslog			1117
 #define __NR_setitimer			1118
 #define __NR_getitimer			1119
-/* 1120 was __NR_old_stat */
+#define __NR_tux			1120 /* was __NR_old_stat */
 /* 1121 was __NR_old_lstat */
 /* 1122 was __NR_old_fstat */
 #define __NR_vhangup			1123
@@ -258,7 +258,6 @@
 #define __NR_mq_notify			1266
 #define __NR_mq_getsetattr		1267
 #define __NR_kexec_load			1268
-#define __NR_vserver			1269
 
 #ifdef __KERNEL__
 
@@ -275,7 +274,6 @@
 # define __ARCH_WANT_SYS_OLDUMOUNT
 # define __ARCH_WANT_SYS_SIGPENDING
 # define __ARCH_WANT_SYS_SIGPROCMASK
-# define __ARCH_WANT_SYS_RT_SIGACTION
 #endif
 
 #if !defined(__ASSEMBLY__) && !defined(ASSEMBLER)

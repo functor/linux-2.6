@@ -581,7 +581,7 @@ config LEDS_CPU
 config ALIGNMENT_TRAP
 	bool
 	depends on CPU_32
-	default y if !ARCH_EBSA110
+	default y
 	help
 	  ARM processors can not fetch/store information which is not
 	  naturally aligned on the bus, i.e., a 4 byte fetch must start at an
@@ -807,6 +807,8 @@ config DEBUG_S3C2410_UART
 	  initalised by the boot-loader before use.
 
 endmenu
+
+source "kernel/vserver/Kconfig"
 
 source "security/Kconfig"
 

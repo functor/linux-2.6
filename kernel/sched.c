@@ -25,6 +25,7 @@
 #include <asm/uaccess.h>
 #include <linux/highmem.h>
 #include <linux/smp_lock.h>
+#include <linux/pagemap.h>
 #include <asm/mmu_context.h>
 #include <linux/interrupt.h>
 #include <linux/completion.h>
@@ -40,6 +41,8 @@
 #include <linux/cpu.h>
 #include <linux/percpu.h>
 #include <linux/kthread.h>
+#include <linux/vserver/sched.h>
+#include <linux/vinline.h>
 
 #include <asm/unistd.h>
 
@@ -232,6 +235,8 @@ struct runqueue {
 	task_t *migration_thread;
 	struct list_head migration_queue;
 #endif
+	struct list_head hold_queue;
+	int idle_tokens;
 };
 
 static DEFINE_PER_CPU(struct runqueue, runqueues);
@@ -353,6 +358,9 @@ static int effective_prio(task_t *p)
 	bonus = CURRENT_BONUS(p) - MAX_BONUS / 2;
 
 	prio = p->static_prio - bonus;
+	if (__vx_task_flags(p, VXF_SCHED_PRIO, 0))
+		prio += effective_vavavoom(p, MAX_USER_PRIO);
+
 	if (prio < MAX_RT_PRIO)
 		prio = MAX_RT_PRIO;
 	if (prio > MAX_PRIO-1)
@@ -761,13 +769,6 @@ static int try_to_wake_up(task_t * p, unsigned int state, int sync)
 
 	load = source_load(cpu);
 	this_load = target_load(this_cpu);
-
-	/*
-	 * If sync wakeup then subtract the (maximum possible) effect of
-	 * the currently running task from the load of the current CPU:
-	 */
-	if (sync)
-		this_load -= SCHED_LOAD_SCALE;
 
 	/* Don't pull the task off an idle CPU to a busy one */
 	if (load < SCHED_LOAD_SCALE/2 && this_load > SCHED_LOAD_SCALE/2)
@@ -2000,6 +2001,9 @@ void scheduler_tick(int user_ticks, int sys_ticks)
 	}
 
 	if (p == rq->idle) {
+		if (!--rq->idle_tokens && !list_empty(&rq->hold_queue))
+			set_need_resched();	
+
 		if (atomic_read(&rq->nr_iowait) > 0)
 			cpustat->iowait += sys_ticks;
 		else
@@ -2044,7 +2048,7 @@ void scheduler_tick(int user_ticks, int sys_ticks)
 		}
 		goto out_unlock;
 	}
-	if (!--p->time_slice) {
+	if (vx_need_resched(p)) {
 		dequeue_task(p, rq->active);
 		set_tsk_need_resched(p);
 		p->prio = effective_prio(p);
@@ -2191,6 +2195,10 @@ asmlinkage void __sched schedule(void)
 	unsigned long long now;
 	unsigned long run_time;
 	int cpu, idx;
+#ifdef	CONFIG_VSERVER_HARDCPU		
+	struct vx_info *vxi;
+	int maxidle = -HZ;
+#endif
 
 	/*
 	 * Test if we are atomic.  Since do_exit() needs to call into
@@ -2241,6 +2249,37 @@ need_resched:
 	}
 
 	cpu = smp_processor_id();
+#ifdef	CONFIG_VSERVER_HARDCPU		
+	if (!list_empty(&rq->hold_queue)) {
+		struct list_head *l, *n;
+		int ret;
+
+		vxi = NULL;
+		list_for_each_safe(l, n, &rq->hold_queue) {
+			next = list_entry(l, task_t, run_list);
+			if (vxi == next->vx_info)
+				continue;
+
+			vxi = next->vx_info;
+			ret = vx_tokens_recalc(vxi);
+			// tokens = vx_tokens_avail(next);
+
+			if (ret > 0) {
+				list_del(&next->run_list);
+				next->state &= ~TASK_ONHOLD;
+				recalc_task_prio(next, now);
+				__activate_task(next, rq);
+				// printk("··· unhold %p\n", next);
+				break;
+			}
+			if ((ret < 0) && (maxidle < ret))
+				maxidle = ret;
+		}	
+	}
+	rq->idle_tokens = -maxidle;
+
+pick_next:
+#endif
 	if (unlikely(!rq->nr_running)) {
 		idle_balance(cpu, rq);
 		if (!rq->nr_running) {
@@ -2272,6 +2311,23 @@ need_resched:
 		goto switch_tasks;
 	}
 
+#ifdef	CONFIG_VSERVER_HARDCPU		
+	vxi = next->vx_info;
+	if (vxi && __vx_flags(vxi->vx_flags,
+		VXF_SCHED_PAUSE|VXF_SCHED_HARD, 0)) {
+		int ret = vx_tokens_recalc(vxi);
+
+		if (unlikely(ret <= 0)) {
+			if (ret && (rq->idle_tokens > -ret))
+				rq->idle_tokens = -ret;
+			deactivate_task(next, rq);
+			list_add_tail(&next->run_list, &rq->hold_queue);
+			next->state |= TASK_ONHOLD;			
+			goto pick_next;
+		}
+	}
+#endif
+
 	if (!rt_task(next) && next->activated > 0) {
 		unsigned long long delta = now - next->timestamp;
 
@@ -2295,9 +2351,12 @@ switch_tasks:
 		if (!(HIGH_CREDIT(prev) || LOW_CREDIT(prev)))
 			prev->interactive_credit--;
 	}
+	add_delay_ts(prev,runcpu_total,prev->timestamp,now);
 	prev->timestamp = now;
 
 	if (likely(prev != next)) {
+		add_delay_ts(next,waitcpu_total,next->timestamp,now);
+		inc_delay(next,runs);
 		next->timestamp = now;
 		rq->nr_switches++;
 		rq->curr = next;
@@ -2501,9 +2560,20 @@ EXPORT_SYMBOL(wait_for_completion);
 	__remove_wait_queue(q, &wait);			\
 	spin_unlock_irqrestore(&q->lock, flags);
 
+#define SLEEP_ON_BKLCHECK				\
+	if (unlikely(!kernel_locked()) &&		\
+	    sleep_on_bkl_warnings < 10) {		\
+		sleep_on_bkl_warnings++;		\
+		WARN_ON(1);				\
+	}
+
+static int sleep_on_bkl_warnings;
+
 void fastcall __sched interruptible_sleep_on(wait_queue_head_t *q)
 {
 	SLEEP_ON_VAR
+
+	SLEEP_ON_BKLCHECK
 
 	current->state = TASK_INTERRUPTIBLE;
 
@@ -2518,6 +2588,8 @@ long fastcall __sched interruptible_sleep_on_timeout(wait_queue_head_t *q, long 
 {
 	SLEEP_ON_VAR
 
+	SLEEP_ON_BKLCHECK
+
 	current->state = TASK_INTERRUPTIBLE;
 
 	SLEEP_ON_HEAD
@@ -2529,22 +2601,11 @@ long fastcall __sched interruptible_sleep_on_timeout(wait_queue_head_t *q, long 
 
 EXPORT_SYMBOL(interruptible_sleep_on_timeout);
 
-void fastcall __sched sleep_on(wait_queue_head_t *q)
-{
-	SLEEP_ON_VAR
-
-	current->state = TASK_UNINTERRUPTIBLE;
-
-	SLEEP_ON_HEAD
-	schedule();
-	SLEEP_ON_TAIL
-}
-
-EXPORT_SYMBOL(sleep_on);
-
 long fastcall __sched sleep_on_timeout(wait_queue_head_t *q, long timeout)
 {
 	SLEEP_ON_VAR
+
+	SLEEP_ON_BKLCHECK
 
 	current->state = TASK_UNINTERRUPTIBLE;
 
@@ -3050,10 +3111,13 @@ EXPORT_SYMBOL(yield);
 void __sched io_schedule(void)
 {
 	struct runqueue *rq = this_rq();
+	def_delay_var(dstart);
 
+	start_delay_set(dstart,PF_IOWAIT);
 	atomic_inc(&rq->nr_iowait);
 	schedule();
 	atomic_dec(&rq->nr_iowait);
+	add_io_delay(dstart);
 }
 
 EXPORT_SYMBOL(io_schedule);
@@ -3062,10 +3126,13 @@ long __sched io_schedule_timeout(long timeout)
 {
 	struct runqueue *rq = this_rq();
 	long ret;
+	def_delay_var(dstart);
 
+	start_delay_set(dstart,PF_IOWAIT);
 	atomic_inc(&rq->nr_iowait);
 	ret = schedule_timeout(timeout);
 	atomic_dec(&rq->nr_iowait);
+	add_io_delay(dstart);
 	return ret;
 }
 
@@ -3933,6 +4000,7 @@ void __init sched_init(void)
 		rq->migration_thread = NULL;
 		INIT_LIST_HEAD(&rq->migration_queue);
 #endif
+		INIT_LIST_HEAD(&rq->hold_queue);
 		atomic_set(&rq->nr_iowait, 0);
 
 		for (j = 0; j < 2; j++) {
@@ -4029,3 +4097,12 @@ void __sched __preempt_write_lock(rwlock_t *lock)
 
 EXPORT_SYMBOL(__preempt_write_lock);
 #endif /* defined(CONFIG_SMP) && defined(CONFIG_PREEMPT) */
+
+#ifdef CONFIG_DELAY_ACCT
+int task_running_sys(struct task_struct *p)
+{
+       return task_running(task_rq(p),p);
+}
+EXPORT_SYMBOL(task_running_sys);
+#endif
+

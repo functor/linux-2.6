@@ -10,6 +10,7 @@
 #include <asm/processor.h>
 #include <asm/msr.h>
 #include <asm/uaccess.h>
+#include <asm/desc.h>
 
 #include "cpu.h"
 
@@ -18,8 +19,6 @@
 #include <asm/apic.h>
 #include <mach_apic.h>
 #endif
-
-extern int trap_init_f00f_bug(void);
 
 #ifdef CONFIG_X86_INTEL_USERCOPY
 /*
@@ -147,7 +146,7 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 
 		c->f00f_bug = 1;
 		if ( !f00f_workaround_enabled ) {
-			trap_init_f00f_bug();
+			trap_init_virtual_IDT();
 			printk(KERN_NOTICE "Intel Pentium with F0 0F bug - workaround enabled.\n");
 			f00f_workaround_enabled = 1;
 		}

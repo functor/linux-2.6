@@ -333,7 +333,6 @@ rsc_init(struct rsc *new, struct rsc *tmp)
 	new->handle.data = tmp->handle.data;
 	tmp->handle.data = NULL;
 	new->mechctx = NULL;
-	new->cred.cr_group_info = NULL;
 }
 
 static inline void
@@ -454,11 +453,8 @@ gss_svc_searchbyctx(struct xdr_netobj *handle)
 	struct rsc rsci;
 	struct rsc *found;
 
-	memset(&rsci, 0, sizeof(rsci));
-	if (dup_to_netobj(&rsci.handle, handle->data, handle->len))
-		return NULL;
+	rsci.handle = *handle;
 	found = rsc_lookup(&rsci, 0);
-	rsc_free(&rsci);
 	if (!found)
 		return NULL;
 	if (cache_check(&rsc_cache, &found->h, NULL))
@@ -1049,7 +1045,6 @@ svcauth_gss_domain_release(struct auth_domain *dom)
 
 struct auth_ops svcauthops_gss = {
 	.name		= "rpcsec_gss",
-	.owner		= THIS_MODULE,
 	.flavour	= RPC_AUTH_GSS,
 	.accept		= svcauth_gss_accept,
 	.release	= svcauth_gss_release,
@@ -1059,12 +1054,10 @@ struct auth_ops svcauthops_gss = {
 int
 gss_svc_init(void)
 {
-	int rv = svc_auth_register(RPC_AUTH_GSS, &svcauthops_gss);
-	if (rv == 0) {
-		cache_register(&rsc_cache);
-		cache_register(&rsi_cache);
-	}
-	return rv;
+	cache_register(&rsc_cache);
+	cache_register(&rsi_cache);
+	svc_auth_register(RPC_AUTH_GSS, &svcauthops_gss);
+	return 0;
 }
 
 void
@@ -1072,5 +1065,4 @@ gss_svc_shutdown(void)
 {
 	cache_unregister(&rsc_cache);
 	cache_unregister(&rsi_cache);
-	svc_auth_unregister(RPC_AUTH_GSS);
 }

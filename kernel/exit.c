@@ -23,6 +23,8 @@
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
 #include <linux/mempolicy.h>
+#include <linux/ckrm.h>
+#include <linux/ckrm_tsk.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -37,6 +39,11 @@ int getrusage(struct task_struct *, int, struct rusage __user *);
 static void __unhash_process(struct task_struct *p)
 {
 	nr_threads--;
+	/* tasklist_lock is held, is this sufficient? */
+	if (p->vx_info) {
+		atomic_dec(&p->vx_info->cacct.nr_threads);
+		atomic_dec(&p->vx_info->limit.res[RLIMIT_NPROC]);
+	}
 	detach_pid(p, PIDTYPE_PID);
 	detach_pid(p, PIDTYPE_TGID);
 	if (thread_group_leader(p)) {
@@ -236,6 +243,7 @@ void reparent_to_init(void)
 	ptrace_unlink(current);
 	/* Reparent to init */
 	REMOVE_LINKS(current);
+	/* FIXME handle vchild_reaper/initpid */
 	current->parent = child_reaper;
 	current->real_parent = child_reaper;
 	SET_LINKS(current);
@@ -380,6 +388,7 @@ static inline void close_files(struct files_struct * files)
 				struct file * file = xchg(&files->fd[i], NULL);
 				if (file)
 					filp_close(file, files);
+				vx_openfd_dec(fd);
 			}
 			i++;
 			set >>= 1;
@@ -599,6 +608,7 @@ static inline void forget_original_parent(struct task_struct * father)
 	struct task_struct *p, *reaper = father;
 	struct list_head *_p, *_n;
 
+	/* FIXME handle vchild_reaper/initpid */
 	reaper = father->group_leader;
 	if (reaper == father)
 		reaper = child_reaper;
@@ -638,6 +648,8 @@ static void exit_notify(struct task_struct *tsk)
 {
 	int state;
 	struct task_struct *t;
+
+	ckrm_cb_exit(tsk);
 
 	if (signal_pending(tsk) && !tsk->signal->group_exit
 	    && !thread_group_empty(tsk)) {
@@ -740,7 +752,7 @@ static void exit_notify(struct task_struct *tsk)
 	 * Clear these here so that update_process_times() won't try to deliver
 	 * itimer, profile or rlimit signals to this task while it is in late exit.
 	 */
-	tsk->it_virt_value = 0;
+	tsk->it_virt_incr = 0;
 	tsk->it_prof_value = 0;
 	tsk->rlim[RLIMIT_CPU].rlim_cur = RLIM_INFINITY;
 
@@ -793,6 +805,13 @@ asmlinkage NORET_TYPE void do_exit(long code)
 	}
 
 	acct_process(code);
+	if (current->tux_info) {
+#ifdef CONFIG_TUX_DEBUG
+		printk("Possibly unexpected TUX-thread exit(%ld) at %p?\n",
+			code, __builtin_return_address(0));
+#endif
+		current->tux_exit();
+	}
 	__exit_mm(tsk);
 
 	exit_sem(tsk);
@@ -812,6 +831,7 @@ asmlinkage NORET_TYPE void do_exit(long code)
 		module_put(tsk->binfmt->module);
 
 	tsk->exit_code = code;
+	numtasks_put_ref(tsk->taskclass);
 	exit_notify(tsk);
 	schedule();
 	BUG();

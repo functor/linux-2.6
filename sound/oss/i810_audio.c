@@ -1393,7 +1393,7 @@ static irqreturn_t i810_interrupt(int irq, void *dev_id, struct pt_regs *regs)
    waiting to be copied to the user's buffer.  It is filled by the dma
    machine and drained by this loop. */
 
-static ssize_t i810_read(struct file *file, char __user *buffer, size_t count, loff_t *ppos)
+static ssize_t i810_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 {
 	struct i810_state *state = (struct i810_state *)file->private_data;
 	struct i810_card *card=state ? state->card : 0;
@@ -1533,7 +1533,7 @@ static ssize_t i810_read(struct file *file, char __user *buffer, size_t count, l
 
 /* in this loop, dmabuf.count signifies the amount of data that is waiting to be dma to
    the soundcard.  it is drained by the dma machine and filled by this loop. */
-static ssize_t i810_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos)
+static ssize_t i810_write(struct file *file, const char *buffer, size_t count, loff_t *ppos)
 {
 	struct i810_state *state = (struct i810_state *)file->private_data;
 	struct i810_card *card=state ? state->card : 0;
@@ -1755,11 +1755,9 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 	unsigned int i_glob_cnt;
 	int val = 0, ret;
 	struct ac97_codec *codec = state->card->ac97_codec[0];
-	void __user *argp = (void __user *)arg;
-	int __user *p = argp;
 
 #ifdef DEBUG
-	printk("i810_audio: i810_ioctl, arg=0x%x, cmd=", arg ? *p : 0);
+	printk("i810_audio: i810_ioctl, arg=0x%x, cmd=", arg ? *(int *)arg : 0);
 #endif
 
 	switch (cmd) 
@@ -1768,7 +1766,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 #ifdef DEBUG
 		printk("OSS_GETVERSION\n");
 #endif
-		return put_user(SOUND_VERSION, p);
+		return put_user(SOUND_VERSION, (int *)arg);
 
 	case SNDCTL_DSP_RESET:
 #ifdef DEBUG
@@ -1815,7 +1813,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 #ifdef DEBUG
 		printk("SNDCTL_DSP_SPEED\n");
 #endif
-		if (get_user(val, p))
+		if (get_user(val, (int *)arg))
 			return -EFAULT;
 		if (val >= 0) {
 			if (file->f_mode & FMODE_WRITE) {
@@ -1853,7 +1851,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 				spin_unlock_irqrestore(&state->card->lock, flags);
 			}
 		}
-		return put_user(dmabuf->rate, p);
+		return put_user(dmabuf->rate, (int *)arg);
 
 	case SNDCTL_DSP_STEREO: /* set stereo or mono channel */
 #ifdef DEBUG
@@ -1865,7 +1863,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		if (dmabuf->enable & ADC_RUNNING) {
 			stop_adc(state);
 		}
-		return put_user(1, p);
+		return put_user(1, (int *)arg);
 
 	case SNDCTL_DSP_GETBLKSIZE:
 		if (file->f_mode & FMODE_WRITE) {
@@ -1879,25 +1877,25 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 #ifdef DEBUG
 		printk("SNDCTL_DSP_GETBLKSIZE %d\n", dmabuf->userfragsize);
 #endif
-		return put_user(dmabuf->userfragsize, p);
+		return put_user(dmabuf->userfragsize, (int *)arg);
 
 	case SNDCTL_DSP_GETFMTS: /* Returns a mask of supported sample format*/
 #ifdef DEBUG
 		printk("SNDCTL_DSP_GETFMTS\n");
 #endif
-		return put_user(AFMT_S16_LE, p);
+		return put_user(AFMT_S16_LE, (int *)arg);
 
 	case SNDCTL_DSP_SETFMT: /* Select sample format */
 #ifdef DEBUG
 		printk("SNDCTL_DSP_SETFMT\n");
 #endif
-		return put_user(AFMT_S16_LE, p);
+		return put_user(AFMT_S16_LE, (int *)arg);
 
 	case SNDCTL_DSP_CHANNELS:
 #ifdef DEBUG
 		printk("SNDCTL_DSP_CHANNELS\n");
 #endif
-		if (get_user(val, p))
+		if (get_user(val, (int *)arg))
 			return -EFAULT;
 
 		if (val > 0) {
@@ -1908,13 +1906,13 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 				stop_adc(state);
 			}
 		} else {
-			return put_user(state->card->channels, p);
+			return put_user(state->card->channels, (int *)arg);
 		}
 
 		/* ICH and ICH0 only support 2 channels */
 		if ( state->card->pci_id == PCI_DEVICE_ID_INTEL_82801AA_5
 		     || state->card->pci_id == PCI_DEVICE_ID_INTEL_82801AB_5) 
-			return put_user(2, p);
+			return put_user(2, (int *)arg);
 	
 		/* Multi-channel support was added with ICH2. Bits in */
 		/* Global Status and Global Control register are now  */
@@ -1959,7 +1957,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 				break;
 		}
 
-		return put_user(val, p);
+		return put_user(val, (int *)arg);
 
 	case SNDCTL_DSP_POST: /* the user has sent all data and is notifying us */
 		/* we update the swptr to the end of the last sg segment then return */
@@ -1978,7 +1976,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 	case SNDCTL_DSP_SUBDIVIDE:
 		if (dmabuf->subdivision)
 			return -EINVAL;
-		if (get_user(val, p))
+		if (get_user(val, (int *)arg))
 			return -EFAULT;
 		if (val != 1 && val != 2 && val != 4)
 			return -EINVAL;
@@ -1990,7 +1988,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		return 0;
 
 	case SNDCTL_DSP_SETFRAGMENT:
-		if (get_user(val, p))
+		if (get_user(val, (int *)arg))
 			return -EFAULT;
 
 		dmabuf->ossfragsize = 1<<(val & 0xffff);
@@ -2063,7 +2061,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		printk("SNDCTL_DSP_GETOSPACE %d, %d, %d, %d\n", abinfo.bytes,
 			abinfo.fragsize, abinfo.fragments, abinfo.fragstotal);
 #endif
-		return copy_to_user(argp, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
+		return copy_to_user((void *)arg, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
 
 	case SNDCTL_DSP_GETOPTR:
 		if (!(file->f_mode & FMODE_WRITE))
@@ -2085,7 +2083,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		printk("SNDCTL_DSP_GETOPTR %d, %d, %d, %d\n", cinfo.bytes,
 			cinfo.blocks, cinfo.ptr, dmabuf->count);
 #endif
-		return copy_to_user(argp, &cinfo, sizeof(cinfo)) ? -EFAULT : 0;
+		return copy_to_user((void *)arg, &cinfo, sizeof(cinfo)) ? -EFAULT : 0;
 
 	case SNDCTL_DSP_GETISPACE:
 		if (!(file->f_mode & FMODE_READ))
@@ -2102,7 +2100,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		printk("SNDCTL_DSP_GETISPACE %d, %d, %d, %d\n", abinfo.bytes,
 			abinfo.fragsize, abinfo.fragments, abinfo.fragstotal);
 #endif
-		return copy_to_user(argp, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
+		return copy_to_user((void *)arg, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
 
 	case SNDCTL_DSP_GETIPTR:
 		if (!(file->f_mode & FMODE_READ))
@@ -2124,7 +2122,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		printk("SNDCTL_DSP_GETIPTR %d, %d, %d, %d\n", cinfo.bytes,
 			cinfo.blocks, cinfo.ptr, dmabuf->count);
 #endif
-		return copy_to_user(argp, &cinfo, sizeof(cinfo)) ? -EFAULT : 0;
+		return copy_to_user((void *)arg, &cinfo, sizeof(cinfo)) ? -EFAULT : 0;
 
 	case SNDCTL_DSP_NONBLOCK:
 #ifdef DEBUG
@@ -2138,17 +2136,17 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		printk("SNDCTL_DSP_GETCAPS\n");
 #endif
 	    return put_user(DSP_CAP_REALTIME|DSP_CAP_TRIGGER|DSP_CAP_MMAP|DSP_CAP_BIND,
-			    p);
+			    (int *)arg);
 
 	case SNDCTL_DSP_GETTRIGGER:
 		val = 0;
 #ifdef DEBUG
 		printk("SNDCTL_DSP_GETTRIGGER 0x%x\n", dmabuf->trigger);
 #endif
-		return put_user(dmabuf->trigger, p);
+		return put_user(dmabuf->trigger, (int *)arg);
 
 	case SNDCTL_DSP_SETTRIGGER:
-		if (get_user(val, p))
+		if (get_user(val, (int *)arg))
 			return -EFAULT;
 #if defined(DEBUG) || defined(DEBUG_MMAP)
 		printk("SNDCTL_DSP_SETTRIGGER 0x%x\n", val);
@@ -2225,31 +2223,31 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 #ifdef DEBUG
 		printk("SNDCTL_DSP_GETODELAY %d\n", dmabuf->count);
 #endif
-		return put_user(val, p);
+		return put_user(val, (int *)arg);
 
 	case SOUND_PCM_READ_RATE:
 #ifdef DEBUG
 		printk("SOUND_PCM_READ_RATE %d\n", dmabuf->rate);
 #endif
-		return put_user(dmabuf->rate, p);
+		return put_user(dmabuf->rate, (int *)arg);
 
 	case SOUND_PCM_READ_CHANNELS:
 #ifdef DEBUG
 		printk("SOUND_PCM_READ_CHANNELS\n");
 #endif
-		return put_user(2, p);
+		return put_user(2, (int *)arg);
 
 	case SOUND_PCM_READ_BITS:
 #ifdef DEBUG
 		printk("SOUND_PCM_READ_BITS\n");
 #endif
-		return put_user(AFMT_S16_LE, p);
+		return put_user(AFMT_S16_LE, (int *)arg);
 
 	case SNDCTL_DSP_SETSPDIF: /* Set S/PDIF Control register */
 #ifdef DEBUG
 		printk("SNDCTL_DSP_SETSPDIF\n");
 #endif
-		if (get_user(val, p))
+		if (get_user(val, (int *)arg))
 			return -EFAULT;
 
 		/* Check to make sure the codec supports S/PDIF transmitter */
@@ -2272,13 +2270,13 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		else 
 			printk(KERN_WARNING "i810_audio: S/PDIF transmitter not avalible.\n");
 #endif
-		return put_user(val, p);
+		return put_user(val, (int *)arg);
 
 	case SNDCTL_DSP_GETSPDIF: /* Get S/PDIF Control register */
 #ifdef DEBUG
 		printk("SNDCTL_DSP_GETSPDIF\n");
 #endif
-		if (get_user(val, p))
+		if (get_user(val, (int *)arg))
 			return -EFAULT;
 
 		/* Check to make sure the codec supports S/PDIF transmitter */
@@ -2291,14 +2289,14 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		} else {
 			val = i810_ac97_get(codec, AC97_SPDIF_CONTROL);
 		}
-		//return put_user((val & 0xcfff), p);
-		return put_user(val, p);
+		//return put_user((val & 0xcfff), (int *)arg);
+		return put_user(val, (int *)arg);
    			
 	case SNDCTL_DSP_GETCHANNELMASK:
 #ifdef DEBUG
 		printk("SNDCTL_DSP_GETCHANNELMASK\n");
 #endif
-		if (get_user(val, p))
+		if (get_user(val, (int *)arg))
 			return -EFAULT;
 		
 		/* Based on AC'97 DAC support, not ICH hardware */
@@ -2311,13 +2309,13 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		if ( state->card->ac97_features & 0x0140 )
 			val |= DSP_BIND_CENTER_LFE;
 
-		return put_user(val, p);
+		return put_user(val, (int *)arg);
 
 	case SNDCTL_DSP_BIND_CHANNEL:
 #ifdef DEBUG
 		printk("SNDCTL_DSP_BIND_CHANNEL\n");
 #endif
-		if (get_user(val, p))
+		if (get_user(val, (int *)arg))
 			return -EFAULT;
 		if ( val == DSP_BIND_QUERY ) {
 			val = DSP_BIND_FRONT; /* Always report this as being enabled */
@@ -2385,7 +2383,7 @@ static int i810_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 					val &= ~DSP_BIND_CENTER_LFE;
 			}
 		}
-		return put_user(val, p);
+		return put_user(val, (int *)arg);
 		
 	case SNDCTL_DSP_MAPINBUF:
 	case SNDCTL_DSP_MAPOUTBUF:

@@ -1161,17 +1161,36 @@ shmem_get_policy(struct vm_area_struct *vma, unsigned long addr)
 }
 #endif
 
-void shmem_lock(struct file *file, int lock)
+int shmem_lock(struct file *file, int lock)
 {
 	struct inode *inode = file->f_dentry->d_inode;
 	struct shmem_inode_info *info = SHMEM_I(inode);
+	struct mm_struct *mm = current->mm;
+	unsigned long lock_limit, locked;
+	int retval = -ENOMEM;
 
 	spin_lock(&info->lock);
+	if (lock && !(info->flags & VM_LOCKED)) {
+		locked = inode->i_size >> PAGE_SHIFT;
+		locked += mm->locked_vm;
+		lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+		lock_limit >>= PAGE_SHIFT;
+		if ((locked > lock_limit) && !capable(CAP_IPC_LOCK))
+			goto out_nomem;
+		mm->locked_vm = locked;
+	}
+	if (!lock && (info->flags & VM_LOCKED) && mm) {
+		locked = inode->i_size >> PAGE_SHIFT;
+		mm->locked_vm -= locked;
+	}
 	if (lock)
 		info->flags |= VM_LOCKED;
 	else
 		info->flags &= ~VM_LOCKED;
+	retval = 0;
+out_nomem:
 	spin_unlock(&info->lock);
+	return retval;
 }
 
 static int shmem_mmap(struct file *file, struct vm_area_struct *vma)
@@ -1676,51 +1695,45 @@ static int shmem_symlink(struct inode *dir, struct dentry *dentry, const char *s
 	return 0;
 }
 
-static int shmem_readlink_inline(struct dentry *dentry, char __user *buffer, int buflen)
-{
-	return vfs_readlink(dentry, buffer, buflen, (const char *)SHMEM_I(dentry->d_inode));
-}
-
 static int shmem_follow_link_inline(struct dentry *dentry, struct nameidata *nd)
 {
-	return vfs_follow_link(nd, (const char *)SHMEM_I(dentry->d_inode));
-}
-
-static int shmem_readlink(struct dentry *dentry, char __user *buffer, int buflen)
-{
-	struct page *page = NULL;
-	int res = shmem_getpage(dentry->d_inode, 0, &page, SGP_READ, NULL);
-	if (res)
-		return res;
-	res = vfs_readlink(dentry, buffer, buflen, kmap(page));
-	kunmap(page);
-	mark_page_accessed(page);
-	page_cache_release(page);
-	return res;
+	nd_set_link(nd, (char *)SHMEM_I(dentry->d_inode));
+	return 0;
 }
 
 static int shmem_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	struct page *page = NULL;
 	int res = shmem_getpage(dentry->d_inode, 0, &page, SGP_READ, NULL);
-	if (res)
-		return res;
-	res = vfs_follow_link(nd, kmap(page));
-	kunmap(page);
-	mark_page_accessed(page);
-	page_cache_release(page);
-	return res;
+	nd_set_link(nd, res ? ERR_PTR(res) : kmap(page));
+	return 0;
+}
+
+static void shmem_put_link(struct dentry *dentry, struct nameidata *nd)
+{
+	if (!IS_ERR(nd_get_link(nd))) {
+		struct page *page;
+
+		page = find_get_page(dentry->d_inode->i_mapping, 0);
+		if (!page)
+			BUG();
+		kunmap(page);
+		mark_page_accessed(page);
+		page_cache_release(page);
+		page_cache_release(page);
+	}
 }
 
 static struct inode_operations shmem_symlink_inline_operations = {
-	.readlink	= shmem_readlink_inline,
+	.readlink	= generic_readlink,
 	.follow_link	= shmem_follow_link_inline,
 };
 
 static struct inode_operations shmem_symlink_inode_operations = {
 	.truncate	= shmem_truncate,
-	.readlink	= shmem_readlink,
+	.readlink	= generic_readlink,
 	.follow_link	= shmem_follow_link,
+	.put_link	= shmem_put_link,
 };
 
 static int shmem_parse_options(char *options, int *mode, uid_t *uid, gid_t *gid, unsigned long *blocks, unsigned long *inodes)

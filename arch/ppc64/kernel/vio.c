@@ -32,9 +32,7 @@
 
 extern struct subsystem devices_subsys; /* needed for vio_find_name() */
 
-static struct iommu_table *vio_build_iommu_table(struct vio_dev *);
-static const struct vio_device_id *vio_match_device(
-		const struct vio_device_id *, const struct vio_dev *);
+struct iommu_table *vio_build_iommu_table(struct vio_dev *dev);
 
 #ifdef CONFIG_PPC_PSERIES
 static int vio_num_address_cells;
@@ -138,15 +136,15 @@ EXPORT_SYMBOL(vio_unregister_driver);
  * system is in its list of supported devices. Returns the matching
  * vio_device_id structure or NULL if there is no match.
  */
-static const struct vio_device_id * vio_match_device(const struct vio_device_id *ids,
+const struct vio_device_id * vio_match_device(const struct vio_device_id *ids,
 	const struct vio_dev *dev)
 {
 	DBGENTER();
 
 #ifdef CONFIG_PPC_PSERIES
 	while (ids->type) {
-		if ((strncmp(((struct device_node *)dev->dev.platform_data)->type, ids->type, strlen(ids->type)) == 0) &&
-			device_is_compatible(dev->dev.platform_data, ids->compat))
+		if ((strncmp(dev->archdata->type, ids->type, strlen(ids->type)) == 0) &&
+			device_is_compatible((struct device_node*)dev->archdata, ids->compat))
 			return ids;
 		ids++;
 	}
@@ -265,13 +263,14 @@ static void __devinit vio_dev_release(struct device *dev)
 	DBGENTER();
 
 	/* XXX free TCE table */
-	of_node_put(viodev->dev.platform_data);
+	of_node_put(viodev->archdata);
 	kfree(viodev);
 }
 
 static ssize_t viodev_show_devspec(struct device *dev, char *buf)
 {
-	struct device_node *of_node = dev->platform_data;
+	struct vio_dev *viodev = to_vio_dev(dev);
+	struct device_node *of_node = viodev->archdata;
 
 	return sprintf(buf, "%s\n", of_node->full_name);
 }
@@ -279,7 +278,8 @@ DEVICE_ATTR(devspec, S_IRUSR | S_IRGRP | S_IROTH, viodev_show_devspec, NULL);
 
 static ssize_t viodev_show_name(struct device *dev, char *buf)
 {
-	struct device_node *of_node = dev->platform_data;
+	struct vio_dev *viodev = to_vio_dev(dev);
+	struct device_node *of_node = viodev->archdata;
 
 	return sprintf(buf, "%s\n", of_node->name);
 }
@@ -290,7 +290,7 @@ DEVICE_ATTR(name, S_IRUSR | S_IRGRP | S_IROTH, viodev_show_name, NULL);
  * @of_node:	The OF node for this device.
  *
  * Creates and initializes a vio_dev structure from the data in
- * of_node (dev.platform_data) and adds it to the list of virtual devices.
+ * of_node (archdata) and adds it to the list of virtual devices.
  * Returns a pointer to the created vio_dev or NULL if node has
  * NULL device_type or compatible fields.
  */
@@ -324,7 +324,7 @@ struct vio_dev * __devinit vio_register_device(struct device_node *of_node)
 	}
 	memset(viodev, 0, sizeof(struct vio_dev));
 
-	viodev->dev.platform_data = of_node_get(of_node);
+	viodev->archdata = (void *)of_node_get(of_node);
 	viodev->unit_address = *unit_address;
 	viodev->iommu_table = vio_build_iommu_table(viodev);
 
@@ -380,7 +380,7 @@ EXPORT_SYMBOL(vio_unregister_device);
 */
 const void * vio_get_attribute(struct vio_dev *vdev, void* which, int* length)
 {
-	return get_property(vdev->dev.platform_data, (char*)which, length);
+	return get_property((struct device_node *)vdev->archdata, (char*)which, length);
 }
 EXPORT_SYMBOL(vio_get_attribute);
 
@@ -427,7 +427,7 @@ EXPORT_SYMBOL(vio_find_node);
  * Returns a pointer to the built tce tree, or NULL if it can't
  * find property.
 */
-static struct iommu_table * vio_build_iommu_table(struct vio_dev *dev)
+struct iommu_table * vio_build_iommu_table(struct vio_dev *dev)
 {
 	unsigned int *dma_window;
 	struct iommu_table *newTceTable;
@@ -435,7 +435,7 @@ static struct iommu_table * vio_build_iommu_table(struct vio_dev *dev)
 	unsigned long size;
 	int dma_window_property_size;
 
-	dma_window = (unsigned int *) get_property(dev->dev.platform_data, "ibm,my-dma-window", &dma_window_property_size);
+	dma_window = (unsigned int *) get_property((struct device_node *)dev->archdata, "ibm,my-dma-window", &dma_window_property_size);
 	if(!dma_window) {
 		return NULL;
 	}

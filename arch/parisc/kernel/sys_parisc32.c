@@ -676,6 +676,7 @@ asmlinkage int sys32_sysinfo(struct sysinfo32 *info)
 
 	do {
 		seq = read_seqbegin(&xtime_lock);
+		/* requires vx virtualization */
 		val.uptime = jiffies / HZ;
 
 		val.loads[0] = avenrun[0] << (SI_LOAD_SHIFT - FSHIFT);

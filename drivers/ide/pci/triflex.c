@@ -41,6 +41,8 @@
 #include <linux/ide.h>
 #include <linux/init.h>
 
+#include "triflex.h"
+
 static struct pci_dev *triflex_dev;
 
 #ifdef CONFIG_PROC_FS
@@ -215,31 +217,14 @@ static unsigned int __init init_chipset_triflex(struct pci_dev *dev,
 	return 0;	
 }
 
-static ide_pci_device_t triflex_device __devinitdata = {
-	.name		= "TRIFLEX",
-	.init_chipset	= init_chipset_triflex,
-	.init_hwif	= init_hwif_triflex,
-	.channels	= 2,
-	.autodma	= AUTODMA,
-	.enablebits	= {{0x80, 0x01, 0x01}, {0x80, 0x02, 0x02}},
-	.bootable	= ON_BOARD,
-};
-
 static int __devinit triflex_init_one(struct pci_dev *dev, 
 		const struct pci_device_id *id)
 {
-	ide_setup_pci_device(dev, &triflex_device);
+	ide_setup_pci_device(dev, &triflex_devices[id->driver_data]);
 	triflex_dev = dev;
 
 	return 0;
 }
-
-static struct pci_device_id triflex_pci_tbl[] = {
-	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_TRIFLEX_IDE,
-	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
-	{ 0, },
-};
-MODULE_DEVICE_TABLE(pci, triflex_pci_tbl);
 
 static struct pci_driver driver = {
 	.name		= "TRIFLEX IDE",

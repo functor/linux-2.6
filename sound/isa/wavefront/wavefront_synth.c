@@ -861,7 +861,7 @@ wavefront_freemem (snd_wavefront_t *dev)
 static int
 wavefront_send_sample (snd_wavefront_t *dev, 
 		       wavefront_patch_info *header,
-		       u16 __user *dataptr,
+		       u16 *dataptr,
 		       int data_is_unsigned)
 
 {
@@ -876,7 +876,7 @@ wavefront_send_sample (snd_wavefront_t *dev,
 
 	u16 sample_short;
 	u32 length;
-	u16 __user *data_end = 0;
+	u16 *data_end = 0;
 	unsigned int i;
 	const unsigned int max_blksize = 4096/2;
 	unsigned int written;
@@ -1355,7 +1355,7 @@ wavefront_find_free_patch (snd_wavefront_t *dev)
 #endif
 
 static int
-wavefront_load_patch (snd_wavefront_t *dev, const char __user *addr)
+wavefront_load_patch (snd_wavefront_t *dev, const char *addr)
 
 {
 	wavefront_patch_info header;
@@ -1377,7 +1377,8 @@ wavefront_load_patch (snd_wavefront_t *dev, const char __user *addr)
 	switch (header.subkey) {
 	case WF_ST_SAMPLE:  /* sample or sample_header, based on patch->size */
 
-		if (copy_from_user (&header.hdr.s, header.hdrptr,
+		if (copy_from_user ((unsigned char *) &header.hdr.s,
+				    (unsigned char *) header.hdrptr,
 				    sizeof (wavefront_sample)))
 			return -EFAULT;
 
@@ -1385,7 +1386,8 @@ wavefront_load_patch (snd_wavefront_t *dev, const char __user *addr)
 
 	case WF_ST_MULTISAMPLE:
 
-		if (copy_from_user (&header.hdr.s, header.hdrptr,
+		if (copy_from_user ((unsigned char *) &header.hdr.s,
+				    (unsigned char *) header.hdrptr,
 				    sizeof (wavefront_multisample)))
 			return -EFAULT;
 
@@ -1394,28 +1396,32 @@ wavefront_load_patch (snd_wavefront_t *dev, const char __user *addr)
 
 	case WF_ST_ALIAS:
 
-		if (copy_from_user (&header.hdr.a, header.hdrptr,
+		if (copy_from_user ((unsigned char *) &header.hdr.a,
+				    (unsigned char *) header.hdrptr,
 				    sizeof (wavefront_alias)))
 			return -EFAULT;
 
 		return wavefront_send_alias (dev, &header);
 
 	case WF_ST_DRUM:
-		if (copy_from_user (&header.hdr.d, header.hdrptr,
+		if (copy_from_user ((unsigned char *) &header.hdr.d, 
+				    (unsigned char *) header.hdrptr,
 				    sizeof (wavefront_drum)))
 			return -EFAULT;
 
 		return wavefront_send_drum (dev, &header);
 
 	case WF_ST_PATCH:
-		if (copy_from_user (&header.hdr.p, header.hdrptr,
+		if (copy_from_user ((unsigned char *) &header.hdr.p, 
+				    (unsigned char *) header.hdrptr,
 				    sizeof (wavefront_patch)))
 			return -EFAULT;
 
 		return wavefront_send_patch (dev, &header);
 
 	case WF_ST_PROGRAM:
-		if (copy_from_user (&header.hdr.pr, header.hdrptr,
+		if (copy_from_user ((unsigned char *) &header.hdr.pr, 
+				    (unsigned char *) header.hdrptr,
 				    sizeof (wavefront_program)))
 			return -EFAULT;
 
@@ -1621,7 +1627,6 @@ snd_wavefront_synth_ioctl (snd_hwdep_t *hw, struct file *file,
 	snd_wavefront_t *dev;
 	snd_wavefront_card_t *acard;
 	wavefront_control wc;
-	void __user *argp = (void __user *)arg;
 
 	card = (snd_card_t *) hw->card;
 
@@ -1634,18 +1639,18 @@ snd_wavefront_synth_ioctl (snd_hwdep_t *hw, struct file *file,
 	
 	switch (cmd) {
 	case WFCTL_LOAD_SPP:
-		if (wavefront_load_patch (dev, argp) != 0) {
+		if (wavefront_load_patch (dev, (char *) arg) != 0) {
 			return -EIO;
 		}
 		break;
 
 	case WFCTL_WFCMD:
-		if (copy_from_user (&wc, argp, sizeof (wc)))
+		if (copy_from_user (&wc, (void *) arg, sizeof (wc)))
 			return -EFAULT;
 		if (wavefront_synth_control (acard, &wc) < 0) {
 			return -EIO;
 		}
-		if (copy_to_user (argp, &wc, sizeof (wc)))
+		if (copy_to_user ((void *) arg, &wc, sizeof (wc)))
 			return -EFAULT;
 		break;
 

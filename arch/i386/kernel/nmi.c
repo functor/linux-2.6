@@ -477,7 +477,7 @@ void nmi_watchdog_tick (struct pt_regs * regs)
 		 * wait a few IRQs (5 seconds) before doing the oops ...
 		 */
 		alert_counter[cpu]++;
-		if (alert_counter[cpu] == 5*nmi_hz) {
+		if (alert_counter[cpu] == 60*nmi_hz) {
 			spin_lock(&nmi_print_lock);
 			/*
 			 * We are in trouble anyway, lets at least try

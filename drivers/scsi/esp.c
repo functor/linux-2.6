@@ -25,7 +25,6 @@
 #include <linux/init.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
-#include <linux/module.h>
 
 #include "esp.h"
 
@@ -37,17 +36,13 @@
 #include <asm/oplib.h>
 #include <asm/io.h>
 #include <asm/irq.h>
+
 #ifndef __sparc_v9__
 #include <asm/machines.h>
 #include <asm/idprom.h>
 #endif
 
-#include <scsi/scsi.h>
-#include <scsi/scsi_cmnd.h>
-#include <scsi/scsi_device.h>
-#include <scsi/scsi_eh.h>
-#include <scsi/scsi_host.h>
-#include <scsi/scsi_tcq.h>
+#include <linux/module.h>
 
 #define DEBUG_ESP
 /* #define DEBUG_ESP_HME */

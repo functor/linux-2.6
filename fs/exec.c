@@ -46,6 +46,7 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
+#include <linux/ckrm.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgalloc.h>
@@ -320,7 +321,8 @@ void install_arg_page(struct vm_area_struct *vma,
 		pte_unmap(pte);
 		goto out;
 	}
-	mm->rss++;
+	// mm->rss++;
+	vx_rsspages_inc(mm);
 	lru_cache_add_active(page);
 	set_pte(pte, pte_mkdirty(pte_mkwrite(mk_pte(
 					page, vma->vm_page_prot))));
@@ -390,7 +392,12 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	while (i < MAX_ARG_PAGES)
 		bprm->page[i++] = NULL;
 #else
+#ifdef __HAVE_ARCH_ALIGN_STACK
+	stack_base = arch_align_stack(STACK_TOP - MAX_ARG_PAGES*PAGE_SIZE);
+	stack_base = PAGE_ALIGN(stack_base);
+#else
 	stack_base = STACK_TOP - MAX_ARG_PAGES * PAGE_SIZE;
+#endif
 	mm->arg_start = bprm->p + stack_base;
 	arg_size = STACK_TOP - (PAGE_MASK & (unsigned long) mm->arg_start);
 #endif
@@ -404,7 +411,8 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt)
 		return -ENOMEM;
 
-	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT)) {
+	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT) ||
+		!vx_vmpages_avail(mm, arg_size >> PAGE_SHIFT)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
@@ -433,7 +441,9 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 			mpnt->vm_flags = VM_STACK_FLAGS;
 		mpnt->vm_page_prot = protection_map[mpnt->vm_flags & 0x7];
 		insert_vm_struct(mm, mpnt);
-		mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		// mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		vx_vmpages_sub(mm, mm->total_vm -
+			((mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT));
 	}
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
@@ -836,6 +846,7 @@ int flush_old_exec(struct linux_binprm * bprm)
 	}
 	current->comm[i] = '\0';
 
+	current->flags &= ~PF_RELOCEXEC;
 	flush_thread();
 
 	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid || 
@@ -886,8 +897,13 @@ int prepare_binprm(struct linux_binprm *bprm)
 
 	if(!(bprm->file->f_vfsmnt->mnt_flags & MNT_NOSUID)) {
 		/* Set-uid? */
-		if (mode & S_ISUID)
+		if (mode & S_ISUID) {
 			bprm->e_uid = inode->i_uid;
+#ifdef __i386__
+			/* reset personality */
+			current->personality = PER_LINUX;
+#endif
+		}
 
 		/* Set-gid? */
 		/*
@@ -895,8 +911,13 @@ int prepare_binprm(struct linux_binprm *bprm)
 		 * is a candidate for mandatory locking, not a setgid
 		 * executable.
 		 */
-		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP))
+		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
 			bprm->e_gid = inode->i_gid;
+#ifdef __i386__
+			/* reset personality */
+			current->personality = PER_LINUX;
+#endif
+		}
 	}
 
 	/* fill in binprm security blob */
@@ -1074,13 +1095,13 @@ int do_execve(char * filename,
 	int retval;
 	int i;
 
+	sched_balance_exec();
+
 	file = open_exec(filename);
 
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
 		return retval;
-
-	sched_balance_exec();
 
 	bprm.p = PAGE_SIZE*MAX_ARG_PAGES-sizeof(void *);
 	memset(bprm.page, 0, MAX_ARG_PAGES*sizeof(bprm.page[0]));
@@ -1133,6 +1154,8 @@ int do_execve(char * filename,
 	retval = search_binary_handler(&bprm,regs);
 	if (retval >= 0) {
 		free_arg_pages(&bprm);
+
+		ckrm_cb_exec(filename);
 
 		/* execve success */
 		security_bprm_free(&bprm);

@@ -140,6 +140,8 @@
 
 #include <asm/io.h>
 
+#include "trm290.h"
+
 static void trm290_prepare_drive (ide_drive_t *drive, unsigned int use_dma)
 {
 	ide_hwif_t *hwif = HWIF(drive);
@@ -300,7 +302,7 @@ static int trm290_ide_dma_test_irq (ide_drive_t *drive)
 /*
  * Invoked from ide-dma.c at boot time.
  */
-void __devinit init_hwif_trm290(ide_hwif_t *hwif)
+void __init init_hwif_trm290 (ide_hwif_t *hwif)
 {
 	unsigned int cfgbase = 0;
 	unsigned long flags;
@@ -393,17 +395,9 @@ void __devinit init_hwif_trm290(ide_hwif_t *hwif)
 #endif
 }
 
-static ide_pci_device_t trm290_chipset __devinitdata = {
-	.name		= "TRM290",
-	.init_hwif	= init_hwif_trm290,
-	.channels	= 2,
-	.autodma	= NOAUTODMA,
-	.bootable	= ON_BOARD,
-};
-
 static int __devinit trm290_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	ide_setup_pci_device(dev, &trm290_chipset);
+	ide_setup_pci_device(dev, &trm290_chipsets[id->driver_data]);
 	return 0;
 }
 

@@ -2915,7 +2915,7 @@ w9968cf_v4l_ioctl(struct inode* inode, struct file* filp,
                   unsigned int cmd, void* arg)
 {
 	struct w9968cf_device* cam;
-	const char* v4l1_ioctls[] = {
+	static const char* v4l1_ioctls[] = {
 		"?", "CGAP", "GCHAN", "SCHAN", "GTUNER", "STUNER", 
 		"GPICT", "SPICT", "CCAPTURE", "GWIN", "SWIN", "GFBUF",
 		"SFBUF", "KEY", "GFREQ", "SFREQ", "GAUDIO", "SAUDIO",
@@ -2923,6 +2923,8 @@ w9968cf_v4l_ioctl(struct inode* inode, struct file* filp,
 		"SPLAYMODE", "SWRITEMODE", "GPLAYINFO", "SMICROCODE", 
 		"GVBIFMT", "SVBIFMT" 
 	};
+	struct video_tuner tuner;
+	struct video_channel chan;
 
 	#define V4L1_IOCTL(cmd) \
 	        ((_IOC_NR((cmd)) < sizeof(v4l1_ioctls)/sizeof(char*)) ? \
@@ -2957,7 +2959,6 @@ w9968cf_v4l_ioctl(struct inode* inode, struct file* filp,
 
 	case VIDIOCGCHAN: /* get video channel informations */
 	{
-		struct video_channel chan;
 		if (copy_from_user(&chan, arg, sizeof(chan)))
 			return -EFAULT;
 
@@ -2979,8 +2980,6 @@ w9968cf_v4l_ioctl(struct inode* inode, struct file* filp,
 
 	case VIDIOCSCHAN: /* set active channel */
 	{
-		struct video_channel chan;
-
 		if (copy_from_user(&chan, arg, sizeof(chan)))
 			return -EFAULT;
 
@@ -3369,7 +3368,6 @@ w9968cf_v4l_ioctl(struct inode* inode, struct file* filp,
 
 	case VIDIOCGTUNER:
 	{
-		struct video_tuner tuner;
 		if (copy_from_user(&tuner, arg, sizeof(tuner)))
 			return -EFAULT;
 
@@ -3392,7 +3390,6 @@ w9968cf_v4l_ioctl(struct inode* inode, struct file* filp,
 
 	case VIDIOCSTUNER:
 	{
-		struct video_tuner tuner;
 		if (copy_from_user(&tuner, arg, sizeof(tuner)))
 			return -EFAULT;
 

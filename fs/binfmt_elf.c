@@ -46,7 +46,7 @@
 
 static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs);
 static int load_elf_library(struct file*);
-static unsigned long elf_map (struct file *, unsigned long, struct elf_phdr *, int, int);
+static unsigned long elf_map (struct file *, unsigned long, struct elf_phdr *, int, int, unsigned long);
 extern int dump_fpu (struct pt_regs *, elf_fpregset_t *);
 
 #ifndef elf_addr_t
@@ -156,20 +156,8 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr * exec,
 	if (k_platform) {
 		size_t len = strlen(k_platform) + 1;
 
-#ifdef CONFIG_X86_HT
-		/*
-		 * In some cases (e.g. Hyper-Threading), we want to avoid L1
-		 * evictions by the processes running on the same package. One
-		 * thing we can do is to shuffle the initial stack for them.
-		 *
-		 * The conditionals here are unneeded, but kept in to make the
-		 * code behaviour the same as pre change unless we have
-		 * hyperthreaded processors. This should be cleaned up
-		 * before 2.6
-		 */
-	 
-		if (smp_num_siblings > 1)
-			STACK_ALLOC(p, ((current->pid % 64) << 7));
+#ifdef __HAVE_ARCH_ALIGN_STACK
+		p = (unsigned long)arch_align_stack((unsigned long)p);
 #endif
 		u_platform = (elf_addr_t __user *)STACK_ALLOC(p, len);
 		__copy_to_user(u_platform, k_platform, len);
@@ -273,19 +261,58 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr * exec,
 #ifndef elf_map
 
 static unsigned long elf_map(struct file *filep, unsigned long addr,
-			struct elf_phdr *eppnt, int prot, int type)
+			     struct elf_phdr *eppnt, int prot, int type,
+			     unsigned long total_size)
 {
 	unsigned long map_addr;
+	unsigned long size = eppnt->p_filesz + ELF_PAGEOFFSET(eppnt->p_vaddr);
+	unsigned long off = eppnt->p_offset - ELF_PAGEOFFSET(eppnt->p_vaddr);
+
+	addr = ELF_PAGESTART(addr);
+	size = ELF_PAGEALIGN(size);
 
 	down_write(&current->mm->mmap_sem);
-	map_addr = do_mmap(filep, ELF_PAGESTART(addr),
-			   eppnt->p_filesz + ELF_PAGEOFFSET(eppnt->p_vaddr), prot, type,
-			   eppnt->p_offset - ELF_PAGEOFFSET(eppnt->p_vaddr));
+
+	/*
+	 * total_size is the size of the ELF (interpreter) image.
+	 * The _first_ mmap needs to know the full size, otherwise
+	 * randomization might put this image into an overlapping
+	 * position with the ELF binary image. (since size < total_size)
+	 * So we first map the 'big' image - and unmap the remainder at
+	 * the end. (which unmap is needed for ELF images with holes.)
+	 */
+	if (total_size) {
+		total_size = ELF_PAGEALIGN(total_size);
+		map_addr = do_mmap(filep, addr, total_size, prot, type, off);
+		if (!BAD_ADDR(map_addr))
+			do_munmap(current->mm, map_addr+size, total_size-size);
+	} else
+		map_addr = do_mmap(filep, addr, size, prot, type, off);
+		
 	up_write(&current->mm->mmap_sem);
-	return(map_addr);
+
+	return map_addr;
 }
 
 #endif /* !elf_map */
+
+static inline unsigned long total_mapping_size(struct elf_phdr *cmds, int nr)
+{
+	int i, first_idx = -1, last_idx = -1;
+
+	for (i = 0; i < nr; i++)
+		if (cmds[i].p_type == PT_LOAD) {
+			last_idx = i;
+			if (first_idx == -1)
+				first_idx = i;
+		}
+
+	if (first_idx == -1)
+		return 0;
+
+	return cmds[last_idx].p_vaddr + cmds[last_idx].p_memsz -
+				ELF_PAGESTART(cmds[first_idx].p_vaddr);
+}
 
 /* This is much more generalized than the library routine read function,
    so we keep this separate.  Technically the library read function
@@ -294,7 +321,8 @@ static unsigned long elf_map(struct file *filep, unsigned long addr,
 
 static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 				     struct file * interpreter,
-				     unsigned long *interp_load_addr)
+				     unsigned long *interp_load_addr,
+				     unsigned long no_base)
 {
 	struct elf_phdr *elf_phdata;
 	struct elf_phdr *eppnt;
@@ -302,6 +330,7 @@ static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 	int load_addr_set = 0;
 	unsigned long last_bss = 0, elf_bss = 0;
 	unsigned long error = ~0UL;
+	unsigned long total_size;
 	int retval, i, size;
 
 	/* First of all, some simple consistency checks */
@@ -336,6 +365,10 @@ static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 	if (retval < 0)
 		goto out_close;
 
+	total_size = total_mapping_size(elf_phdata, interp_elf_ex->e_phnum);
+	if (!total_size)
+		goto out_close;
+
 	eppnt = elf_phdata;
 	for (i=0; i<interp_elf_ex->e_phnum; i++, eppnt++) {
 	  if (eppnt->p_type == PT_LOAD) {
@@ -350,8 +383,11 @@ static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 	    vaddr = eppnt->p_vaddr;
 	    if (interp_elf_ex->e_type == ET_EXEC || load_addr_set)
 	    	elf_type |= MAP_FIXED;
+	    else if (no_base && interp_elf_ex->e_type == ET_DYN)
+		load_addr = -vaddr;
 
-	    map_addr = elf_map(interpreter, load_addr + vaddr, eppnt, elf_prot, elf_type);
+	    map_addr = elf_map(interpreter, load_addr + vaddr, eppnt, elf_prot, elf_type, total_size);
+	    total_size = 0;
 	    error = map_addr;
 	    if (BAD_ADDR(map_addr))
 	    	goto out_close;
@@ -490,7 +526,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
   	struct exec interp_ex;
 	char passed_fileno[6];
 	struct files_struct *files;
-	int executable_stack = EXSTACK_DEFAULT;
+	int executable_stack, relocexec, old_relocexec = current->flags & PF_RELOCEXEC;
 	
 	/* Get the exec-header */
 	elf_ex = *((struct elfhdr *) bprm->buf);
@@ -616,13 +652,34 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	}
 
 	elf_ppnt = elf_phdata;
+	executable_stack = EXSTACK_DEFAULT;
+
 	for (i = 0; i < elf_ex.e_phnum; i++, elf_ppnt++)
 		if (elf_ppnt->p_type == PT_GNU_STACK) {
 			if (elf_ppnt->p_flags & PF_X)
 				executable_stack = EXSTACK_ENABLE_X;
 			else
 				executable_stack = EXSTACK_DISABLE_X;
+			break;
 		}
+
+	relocexec = 0;
+
+	if (current->personality == PER_LINUX)
+	switch (exec_shield) {
+	case 1:
+		if (executable_stack != EXSTACK_DEFAULT) {
+			current->flags |= PF_RELOCEXEC;
+			relocexec = PF_RELOCEXEC;
+		}
+		break;
+
+	case 2:
+		executable_stack = EXSTACK_DISABLE_X;
+		current->flags |= PF_RELOCEXEC;
+		relocexec = PF_RELOCEXEC;
+		break;
+	}
 
 	/* Some simple consistency checks for the interpreter */
 	if (elf_interpreter) {
@@ -676,6 +733,16 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	retval = flush_old_exec(bprm);
 	if (retval)
 		goto out_free_dentry;
+	current->flags |= relocexec;
+
+#ifdef __i386__
+	/*
+	 * Turn off the CS limit completely if exec-shield disabled or
+	 * NX active:
+	 */
+	if (!exec_shield || use_nx)
+		arch_add_exec_range(current->mm, -1);
+#endif
 
 	/* Discard our unneeded old files struct */
 	if (files) {
@@ -689,6 +756,9 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	current->mm->end_data = 0;
 	current->mm->end_code = 0;
 	current->mm->mmap = NULL;
+#ifdef __HAVE_ARCH_MMAP_TOP
+	current->mm->mmap_top = mmap_top();
+#endif
 	current->flags &= ~PF_FORKNOEXEC;
 
 	/* Do this immediately, since STACK_TOP as used in setup_arg_pages
@@ -697,8 +767,10 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 	/* Do this so that we can load the interpreter, if need be.  We will
 	   change some of these later */
-	current->mm->rss = 0;
+	// current->mm->rss = 0;
+	vx_rsspages_sub(current->mm, current->mm->rss);
 	current->mm->free_area_cache = TASK_UNMAPPED_BASE;
+	current->mm->non_executable_cache = current->mm->mmap_top;
 	retval = setup_arg_pages(bprm, executable_stack);
 	if (retval < 0) {
 		send_sig(SIGKILL, current, 0);
@@ -707,10 +779,10 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	
 	current->mm->start_stack = bprm->p;
 
+
 	/* Now we do a little grungy work by mmaping the ELF image into
-	   the correct location in memory.  At this point, we assume that
-	   the image should be loaded at fixed address, not at a variable
-	   address. */
+	   the correct location in memory.
+	 */
 
 	for(i = 0, elf_ppnt = elf_phdata; i < elf_ex.e_phnum; i++, elf_ppnt++) {
 		int elf_prot = 0, elf_flags;
@@ -747,16 +819,16 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		elf_flags = MAP_PRIVATE|MAP_DENYWRITE|MAP_EXECUTABLE;
 
 		vaddr = elf_ppnt->p_vaddr;
-		if (elf_ex.e_type == ET_EXEC || load_addr_set) {
+		if (elf_ex.e_type == ET_EXEC || load_addr_set)
 			elf_flags |= MAP_FIXED;
-		} else if (elf_ex.e_type == ET_DYN) {
-			/* Try and get dynamic programs out of the way of the default mmap
-			   base, as well as whatever program they might try to exec.  This
-			   is because the brk will follow the loader, and is not movable.  */
+		else if (elf_ex.e_type == ET_DYN)
+#ifdef __i386__
+			load_bias = 0;
+#else
 			load_bias = ELF_PAGESTART(ELF_ET_DYN_BASE - vaddr);
-		}
+#endif
 
-		error = elf_map(bprm->file, load_bias + vaddr, elf_ppnt, elf_prot, elf_flags);
+		error = elf_map(bprm->file, load_bias + vaddr, elf_ppnt, elf_prot, elf_flags, 0);
 		if (BAD_ADDR(error))
 			continue;
 
@@ -827,7 +899,8 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		else
 			elf_entry = load_elf_interp(&interp_elf_ex,
 						    interpreter,
-						    &interp_load_addr);
+						    &interp_load_addr,
+						    load_bias);
 		if (BAD_ADDR(elf_entry)) {
 			printk(KERN_ERR "Unable to load interpreter\n");
 			send_sig(SIGSEGV, current, 0);
@@ -850,6 +923,14 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 	set_binfmt(&elf_format);
 
+	/*
+	 * Map the vsyscall trampoline. This address is then passed via
+	 * AT_SYSINFO.
+	 */
+#ifdef __HAVE_ARCH_VSYSCALL
+	map_vsyscall();
+#endif
+
 	compute_creds(bprm);
 	current->flags &= ~PF_FORKNOEXEC;
 	create_elf_tables(bprm, &elf_ex, (interpreter_type == INTERPRETER_AOUT),
@@ -863,6 +944,10 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	current->mm->end_data = end_data;
 	current->mm->start_stack = bprm->p;
 
+#ifdef __HAVE_ARCH_RANDOMIZE_BRK
+	if (current->flags & PF_RELOCEXEC)
+		randomize_brk(elf_brk);
+#endif
 	if (current->personality & MMAP_PAGE_ZERO) {
 		/* Why this, you ask???  Well SVr4 maps page 0 as read-only,
 		   and some applications "depend" upon this behavior.
@@ -916,6 +1001,8 @@ out_free_fh:
 	}
 out_free_ph:
 	kfree(elf_phdata);
+	current->flags &= ~PF_RELOCEXEC;
+	current->flags |= old_relocexec;
 	goto out;
 }
 

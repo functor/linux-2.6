@@ -43,7 +43,7 @@
 
 #include <linux/blkdev.h>
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include <scsi/scsicam.h>
 
 #include <linux/stat.h>
@@ -1461,7 +1461,7 @@ static ssize_t sdebug_add_host_store(struct device_driver * ddp,
 DRIVER_ATTR(add_host, S_IRUGO | S_IWUSR, sdebug_add_host_show, 
 	    sdebug_add_host_store)
 
-static void do_create_driverfs_files(void)
+static void do_create_driverfs_files()
 {
 	driver_create_file(&sdebug_driverfs_driver, &driver_attr_delay);
 	driver_create_file(&sdebug_driverfs_driver, &driver_attr_opts);
@@ -1473,7 +1473,7 @@ static void do_create_driverfs_files(void)
 	driver_create_file(&sdebug_driverfs_driver, &driver_attr_add_host);
 }
 
-static void do_remove_driverfs_files(void)
+static void do_remove_driverfs_files()
 {
 	driver_remove_file(&sdebug_driverfs_driver, &driver_attr_add_host);
 	driver_remove_file(&sdebug_driverfs_driver, &driver_attr_scsi_level);
@@ -1594,7 +1594,7 @@ static void sdebug_release_adapter(struct device * dev)
         kfree(sdbg_host);
 }
 
-static int sdebug_add_adapter(void)
+static int sdebug_add_adapter()
 {
 	int k, devs_per_host;
         int error = 0;
@@ -1657,7 +1657,7 @@ clean:
         return error;
 }
 
-static void sdebug_remove_adapter(void)
+static void sdebug_remove_adapter()
 {
         struct sdebug_host_info * sdbg_host = NULL;
 

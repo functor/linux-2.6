@@ -59,6 +59,9 @@ static unsigned int d_hash_shift;
 static struct hlist_head *dentry_hashtable;
 static LIST_HEAD(dentry_unused);
 
+static void prune_dcache(int count);
+
+
 /* Statistics gathering. */
 struct dentry_stat_t dentry_stat = {
 	.age_limit = 45,
@@ -81,6 +84,10 @@ static void d_free(struct dentry *dentry)
 {
 	if (dentry->d_op && dentry->d_op->d_release)
 		dentry->d_op->d_release(dentry);
+	if (dentry->d_extra_attributes) {
+		kfree(dentry->d_extra_attributes);
+		dentry->d_extra_attributes = NULL;
+	}
  	call_rcu(&dentry->d_rcu, d_callback, dentry);
 }
 
@@ -681,6 +688,19 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	struct dentry *dentry;
 	char *dname;
 
+#define DENTRY_UNUSED_THRESHOLD 30000
+#define DENTRY_BATCH_COUNT 32
+ 
+	if (dentry_stat.nr_unused > DENTRY_UNUSED_THRESHOLD) {
+		int doit = 1;
+		spin_lock(&dcache_lock);
+		if (dentry_stat.nr_unused < DENTRY_UNUSED_THRESHOLD)
+			doit = 0;
+		spin_unlock(&dcache_lock);
+		if (doit)
+			prune_dcache(DENTRY_BATCH_COUNT);
+	}
+
 	dentry = kmem_cache_alloc(dentry_cache, GFP_KERNEL); 
 	if (!dentry)
 		return NULL;
@@ -709,6 +729,7 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	dentry->d_sb = NULL;
 	dentry->d_op = NULL;
 	dentry->d_fsdata = NULL;
+	dentry->d_extra_attributes = NULL;
 	dentry->d_mounted = 0;
 	dentry->d_cookie = NULL;
 	dentry->d_bucket = NULL;
@@ -1231,6 +1252,16 @@ already_unhashed:
 	/* Unhash the target: dput() will then get rid of it */
 	__d_drop(target);
 
+	/* flush any possible attributes */
+	if (dentry->d_extra_attributes) {
+		kfree(dentry->d_extra_attributes);
+		dentry->d_extra_attributes = NULL;
+	}
+	if (target->d_extra_attributes) {
+		kfree(target->d_extra_attributes);
+		target->d_extra_attributes = NULL;
+	}
+
 	list_del(&dentry->d_child);
 	list_del(&target->d_child);
 
@@ -1275,7 +1306,7 @@ already_unhashed:
  *
  * "buflen" should be positive. Caller holds the dcache_lock.
  */
-static char * __d_path( struct dentry *dentry, struct vfsmount *vfsmnt,
+char * __d_path( struct dentry *dentry, struct vfsmount *vfsmnt,
 			struct dentry *root, struct vfsmount *rootmnt,
 			char *buffer, int buflen)
 {
@@ -1342,6 +1373,8 @@ global_root:
 Elong:
 	return ERR_PTR(-ENAMETOOLONG);
 }
+
+EXPORT_SYMBOL_GPL(__d_path);
 
 /* write full pathname into buffer and return start of pathname */
 char * d_path(struct dentry *dentry, struct vfsmount *vfsmnt,
@@ -1561,6 +1594,23 @@ static int __init set_dhash_entries(char *str)
 }
 __setup("dhash_entries=", set_dhash_entries);
 
+void flush_dentry_attributes (void)
+{
+	struct hlist_node *tmp;
+	struct dentry *dentry;
+	int i;
+
+	spin_lock(&dcache_lock);
+	for (i = 0; i <= d_hash_mask; i++)
+		hlist_for_each_entry(dentry, tmp, dentry_hashtable+i, d_hash) {
+			kfree(dentry->d_extra_attributes);
+			dentry->d_extra_attributes = NULL;
+		}
+	spin_unlock(&dcache_lock);
+}
+
+EXPORT_SYMBOL_GPL(flush_dentry_attributes);
+
 static void __init dcache_init(unsigned long mempages)
 {
 	struct hlist_head *d;
@@ -1589,6 +1639,9 @@ static void __init dcache_init(unsigned long mempages)
 	dhash_entries *= sizeof(struct hlist_head);
 	for (order = 0; ((1UL << order) << PAGE_SHIFT) < dhash_entries; order++)
 		;
+		
+	if (order > 5)
+		order = 5;
 
 	do {
 		unsigned long tmp;

@@ -103,7 +103,7 @@ static inline void pp_enable_irq (struct pp_struct *pp)
 	port->ops->enable_irq (port);
 }
 
-static ssize_t pp_read (struct file * file, char __user * buf, size_t count,
+static ssize_t pp_read (struct file * file, char * buf, size_t count,
 			loff_t * ppos)
 {
 	unsigned int minor = iminor(file->f_dentry->d_inode);
@@ -186,8 +186,8 @@ static ssize_t pp_read (struct file * file, char __user * buf, size_t count,
 	return bytes_read;
 }
 
-static ssize_t pp_write (struct file * file, const char __user * buf,
-			 size_t count, loff_t * ppos)
+static ssize_t pp_write (struct file * file, const char * buf, size_t count,
+			 loff_t * ppos)
 {
 	unsigned int minor = iminor(file->f_dentry->d_inode);
 	struct pp_struct *pp = file->private_data;
@@ -335,7 +335,6 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 	unsigned int minor = iminor(inode);
 	struct pp_struct *pp = file->private_data;
 	struct parport * port;
-	void __user *argp = (void __user *)arg;
 
 	/* First handle the cases that don't take arguments. */
 	switch (cmd) {
@@ -397,7 +396,7 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 	case PPSETMODE:
 	    {
 		int mode;
-		if (copy_from_user (&mode, argp, sizeof (mode)))
+		if (copy_from_user (&mode, (int *) arg, sizeof (mode)))
 			return -EFAULT;
 		/* FIXME: validate mode */
 		pp->state.mode = mode;
@@ -419,7 +418,7 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 		} else {
 			mode = pp->state.mode;
 		}
-		if (copy_to_user (argp, &mode, sizeof (mode))) {
+		if (copy_to_user ((int *)arg, &mode, sizeof (mode))) {
 			return -EFAULT;
 		}
 		return 0;
@@ -427,7 +426,7 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 	case PPSETPHASE:
 	    {
 		int phase;
-		if (copy_from_user (&phase, argp, sizeof (phase))) {
+		if (copy_from_user (&phase, (int *) arg, sizeof (phase))) {
 			return -EFAULT;
 		}
 		/* FIXME: validate phase */
@@ -448,7 +447,7 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 		} else {
 			phase = pp->state.phase;
 		}
-		if (copy_to_user (argp, &phase, sizeof (phase))) {
+		if (copy_to_user ((int *)arg, &phase, sizeof (phase))) {
 			return -EFAULT;
 		}
 		return 0;
@@ -462,7 +461,7 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 			return -ENODEV;
 
 		modes = port->modes;
-		if (copy_to_user (argp, &modes, sizeof (modes))) {
+		if (copy_to_user ((unsigned int *)arg, &modes, sizeof (modes))) {
 			return -EFAULT;
 		}
 		return 0;
@@ -471,7 +470,7 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 	    {
 		int uflags;
 
-		if (copy_from_user (&uflags, argp, sizeof (uflags))) {
+		if (copy_from_user (&uflags, (int *)arg, sizeof (uflags))) {
 			return -EFAULT;
 		}
 		pp->flags &= ~PP_FLAGMASK;
@@ -483,7 +482,7 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 		int uflags;
 
 		uflags = pp->flags & PP_FLAGMASK;
-		if (copy_to_user (argp, &uflags, sizeof (uflags))) {
+		if (copy_to_user ((int *)arg, &uflags, sizeof (uflags))) {
 			return -EFAULT;
 		}
 		return 0;
@@ -510,17 +509,17 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 
 	case PPRSTATUS:
 		reg = parport_read_status (port);
-		if (copy_to_user (argp, &reg, sizeof (reg)))
+		if (copy_to_user ((unsigned char *) arg, &reg, sizeof (reg)))
 			return -EFAULT;
 		return 0;
 	case PPRDATA:
 		reg = parport_read_data (port);
-		if (copy_to_user (argp, &reg, sizeof (reg)))
+		if (copy_to_user ((unsigned char *) arg, &reg, sizeof (reg)))
 			return -EFAULT;
 		return 0;
 	case PPRCONTROL:
 		reg = parport_read_control (port);
-		if (copy_to_user (argp, &reg, sizeof (reg)))
+		if (copy_to_user ((unsigned char *) arg, &reg, sizeof (reg)))
 			return -EFAULT;
 		return 0;
 	case PPYIELD:
@@ -539,29 +538,29 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 		return 0;
 
 	case PPWCONTROL:
-		if (copy_from_user (&reg, argp, sizeof (reg)))
+		if (copy_from_user (&reg, (unsigned char *) arg, sizeof (reg)))
 			return -EFAULT;
 		parport_write_control (port, reg);
 		return 0;
 
 	case PPWDATA:
-		if (copy_from_user (&reg, argp, sizeof (reg)))
+		if (copy_from_user (&reg, (unsigned char *) arg, sizeof (reg)))
 			return -EFAULT;
 		parport_write_data (port, reg);
 		return 0;
 
 	case PPFCONTROL:
-		if (copy_from_user (&mask, argp,
+		if (copy_from_user (&mask, (unsigned char *) arg,
 				    sizeof (mask)))
 			return -EFAULT;
-		if (copy_from_user (&reg, 1 + (unsigned char __user *) arg,
+		if (copy_from_user (&reg, 1 + (unsigned char *) arg,
 				    sizeof (reg)))
 			return -EFAULT;
 		parport_frob_control (port, mask, reg);
 		return 0;
 
 	case PPDATADIR:
-		if (copy_from_user (&mode, argp, sizeof (mode)))
+		if (copy_from_user (&mode, (int *) arg, sizeof (mode)))
 			return -EFAULT;
 		if (mode)
 			port->ops->data_reverse (port);
@@ -570,7 +569,7 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 		return 0;
 
 	case PPNEGOT:
-		if (copy_from_user (&mode, argp, sizeof (mode)))
+		if (copy_from_user (&mode, (int *) arg, sizeof (mode)))
 			return -EFAULT;
 		switch ((ret = parport_negotiate (port, mode))) {
 		case 0: break;
@@ -585,7 +584,8 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 		return ret;
 
 	case PPWCTLONIRQ:
-		if (copy_from_user (&reg, argp, sizeof (reg)))
+		if (copy_from_user (&reg, (unsigned char *) arg,
+				    sizeof (reg)))
 			return -EFAULT;
 
 		/* Remember what to set the control lines to, for next
@@ -596,13 +596,14 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 
 	case PPCLRIRQ:
 		ret = atomic_read (&pp->irqc);
-		if (copy_to_user (argp, &ret, sizeof (ret)))
+		if (copy_to_user ((int *) arg, &ret, sizeof (ret)))
 			return -EFAULT;
 		atomic_sub (ret, &pp->irqc);
 		return 0;
 
 	case PPSETTIME:
-		if (copy_from_user (&par_timeout, argp, sizeof(struct timeval))) {
+		if (copy_from_user (&par_timeout, (struct timeval *)arg,
+				    sizeof(struct timeval))) {
 			return -EFAULT;
 		}
 		/* Convert to jiffies, place in pp->pdev->timeout */
@@ -621,8 +622,10 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 		to_jiffies = pp->pdev->timeout;
 		par_timeout.tv_sec = to_jiffies / HZ;
 		par_timeout.tv_usec = (to_jiffies % (long)HZ) * (1000000/HZ);
-		if (copy_to_user (argp, &par_timeout, sizeof(struct timeval)))
+		if (copy_to_user ((struct timeval *)arg, &par_timeout,
+				  sizeof(struct timeval))) {
 			return -EFAULT;
+		}
 		return 0;
 
 	default:

@@ -12,7 +12,7 @@ static inline int is_vm_hugetlb_page(struct vm_area_struct *vma)
 	return vma->vm_flags & VM_HUGETLB;
 }
 
-int hugetlb_sysctl_handler(struct ctl_table *, int, struct file *, void __user *, size_t *);
+int hugetlb_sysctl_handler(struct ctl_table *, int, struct file *, void *, size_t *);
 int copy_hugetlb_page_range(struct mm_struct *, struct mm_struct *, struct vm_area_struct *);
 int follow_hugetlb_page(struct mm_struct *, struct vm_area_struct *, struct page **, struct vm_area_struct **, unsigned long *, int *, int);
 void zap_hugepage_range(struct vm_area_struct *, unsigned long, unsigned long);
@@ -32,7 +32,6 @@ void free_huge_page(struct page *);
 
 extern unsigned long max_huge_pages;
 extern const unsigned long hugetlb_zero, hugetlb_infinity;
-extern int sysctl_hugetlb_shm_group;
 
 static inline void
 mark_mm_hugetlb(struct mm_struct *mm, struct vm_area_struct *vma)

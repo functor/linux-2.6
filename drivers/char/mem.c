@@ -115,6 +115,34 @@ static inline int valid_phys_addr_range(unsigned long addr, size_t *count)
 }
 #endif
 
+extern int page_is_ram(unsigned long pagenr);
+
+static inline int page_is_allowed(unsigned long pagenr)
+{ 
+ #ifdef CONFIG_X86
+	if (pagenr <= 256)
+		return 1;
+	if (!page_is_ram(pagenr))
+		return 1;
+	printk("Access to 0x%lx by %s denied \n", pagenr << PAGE_SHIFT, current->comm);
+	return 0;
+ #else
+       return 1;
+ #endif
+}
+
+static inline int range_is_allowed(unsigned long from, unsigned long to)
+{
+	unsigned long cursor;
+	
+	cursor = from >> PAGE_SHIFT;
+	while ( (cursor << PAGE_SHIFT) < to) {
+		if (!page_is_allowed(cursor))
+			return 0;
+		cursor++;
+	}
+	return 1;
+}
 static ssize_t do_write_mem(void *p, unsigned long realp,
 			    const char __user * buf, size_t count, loff_t *ppos)
 {
@@ -134,6 +162,8 @@ static ssize_t do_write_mem(void *p, unsigned long realp,
 		written+=sz;
 	}
 #endif
+	if (!range_is_allowed(realp, realp+count))
+		return -EFAULT;
 	copied = copy_from_user(p, buf, count);
 	if (copied) {
 		ssize_t ret = written + (count - copied);
@@ -177,6 +207,8 @@ static ssize_t read_mem(struct file * file, char __user * buf,
 		}
 	}
 #endif
+	if (!range_is_allowed(p, p+count))
+		return -EFAULT;
 	if (copy_to_user(buf, __va(p), count))
 		return -EFAULT;
 	read += count;
@@ -198,6 +230,7 @@ static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 {
 	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 	int uncached;
+	unsigned long cursor;
 
 	uncached = uncached_access(file, offset);
 #ifdef pgprot_noncached
@@ -213,6 +246,13 @@ static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 	 */
 	if (uncached)
 		vma->vm_flags |= VM_IO;
+		
+	cursor = vma->vm_pgoff;
+	while ((cursor << PAGE_SHIFT) < offset + vma->vm_end-vma->vm_start) {
+		if (!page_is_allowed(cursor))
+			return -EFAULT;
+		cursor++;
+	}
 
 	if (remap_page_range(vma, vma->vm_start, offset, vma->vm_end-vma->vm_start,
 			     vma->vm_page_prot))
@@ -233,6 +273,8 @@ static ssize_t read_kmem(struct file *file, char __user *buf,
 	ssize_t read = 0;
 	ssize_t virtr = 0;
 	char * kbuf; /* k-addr because vread() takes vmlist_lock rwlock */
+	
+	return -EPERM;
 		
 	if (p < (unsigned long) high_memory) {
 		read = count;
@@ -297,6 +339,8 @@ static ssize_t write_kmem(struct file * file, const char __user * buf,
 	ssize_t virtr = 0;
 	ssize_t written;
 	char * kbuf; /* k-addr because vwrite() takes vmlist_lock rwlock */
+	
+	return -EPERM;
 
 	if (p < (unsigned long) high_memory) {
 

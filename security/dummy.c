@@ -688,7 +688,7 @@ static int dummy_shm_shmctl (struct shmid_kernel *shp, int cmd)
 	return 0;
 }
 
-static int dummy_shm_shmat (struct shmid_kernel *shp, char __user *shmaddr,
+static int dummy_shm_shmat (struct shmid_kernel *shp, char *shmaddr,
 			    int shmflg)
 {
 	return 0;

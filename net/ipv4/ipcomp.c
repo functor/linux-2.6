@@ -143,10 +143,10 @@ static void ipcomp_tunnel_encap(struct xfrm_state *x, struct sk_buff *skb)
 	skb->nh.raw = skb->data;
 }
 
-static int ipcomp_output(struct sk_buff **pskb)
+static int ipcomp_output(struct sk_buff *skb)
 {
 	int err;
-	struct dst_entry *dst = (*pskb)->dst;
+	struct dst_entry *dst = skb->dst;
 	struct xfrm_state *x = dst->xfrm;
 	struct iphdr *iph, *top_iph;
 	struct ip_comp_hdr *ipch;
@@ -157,26 +157,25 @@ static int ipcomp_output(struct sk_buff **pskb)
 	} tmp_iph;
 	int hdr_len = 0;
 
-	if ((*pskb)->ip_summed == CHECKSUM_HW) {
-		err = skb_checksum_help(pskb, 0);
-		if (err)
-			goto error_nolock;
+	if (skb->ip_summed == CHECKSUM_HW && skb_checksum_help(skb) == NULL) {
+		err = -EINVAL;
+		goto error_nolock;
 	}
 
 	spin_lock_bh(&x->lock);
-	err = xfrm_check_output(x, *pskb, AF_INET);
+	err = xfrm_check_output(x, skb, AF_INET);
 	if (err)
 		goto error;
 
 	/* Don't bother compressing */
 	if (!x->props.mode) {
-		iph = (*pskb)->nh.iph;
+		iph = skb->nh.iph;
 		hdr_len = iph->ihl * 4;
 	}
-	if (((*pskb)->len - hdr_len) < ipcd->threshold) {
+	if ((skb->len - hdr_len) < ipcd->threshold) {
 		if (x->props.mode) {
-			ipcomp_tunnel_encap(x, *pskb);
-			iph = (*pskb)->nh.iph;
+			ipcomp_tunnel_encap(x, skb);
+			iph = skb->nh.iph;
 			iph->protocol = IPPROTO_IPIP;
 			ip_send_check(iph);
 		}
@@ -184,19 +183,19 @@ static int ipcomp_output(struct sk_buff **pskb)
 	}
 
 	if (x->props.mode) 
-		ipcomp_tunnel_encap(x, *pskb);
+		ipcomp_tunnel_encap(x, skb);
 
-	if ((skb_is_nonlinear(*pskb) || skb_cloned(*pskb)) &&
-	    skb_linearize(*pskb, GFP_ATOMIC) != 0) {
+	if ((skb_is_nonlinear(skb) || skb_cloned(skb)) &&
+	    skb_linearize(skb, GFP_ATOMIC) != 0) {
 	    	err = -ENOMEM;
 	    	goto error;
 	}
 	
-	err = ipcomp_compress(x, *pskb);
+	err = ipcomp_compress(x, skb);
 	if (err) {
 		if (err == -EMSGSIZE) {
 			if (x->props.mode) {
-				iph = (*pskb)->nh.iph;
+				iph = skb->nh.iph;
 				iph->protocol = IPPROTO_IPIP;
 				ip_send_check(iph);
 			}
@@ -206,14 +205,14 @@ static int ipcomp_output(struct sk_buff **pskb)
 	}
 
 	/* Install ipcomp header, convert into ipcomp datagram. */
-	iph = (*pskb)->nh.iph;
+	iph = skb->nh.iph;
 	memcpy(&tmp_iph, iph, iph->ihl * 4);
-	top_iph = (struct iphdr *)skb_push(*pskb, sizeof(struct ip_comp_hdr));
+	top_iph = (struct iphdr *)skb_push(skb, sizeof(struct ip_comp_hdr));
 	memcpy(top_iph, &tmp_iph, iph->ihl * 4);
 	iph = top_iph;
 	if (x->props.mode && (x->props.flags & XFRM_STATE_NOECN))
 		IP_ECN_clear(iph);
-	iph->tot_len = htons((*pskb)->len);
+	iph->tot_len = htons(skb->len);
 	iph->protocol = IPPROTO_COMP;
 	iph->check = 0;
 	ipch = (struct ip_comp_hdr *)((char *)iph + iph->ihl * 4);
@@ -221,14 +220,14 @@ static int ipcomp_output(struct sk_buff **pskb)
 	ipch->flags = 0;
 	ipch->cpi = htons((u16 )ntohl(x->id.spi));
 	ip_send_check(iph);
-	(*pskb)->nh.raw = (*pskb)->data;
+	skb->nh.raw = skb->data;
 
 out_ok:
-	x->curlft.bytes += (*pskb)->len;
+	x->curlft.bytes += skb->len;
 	x->curlft.packets++;
 	spin_unlock_bh(&x->lock);
 	
-	if (((*pskb)->dst = dst_pop(dst)) == NULL) {
+	if ((skb->dst = dst_pop(dst)) == NULL) {
 		err = -EHOSTUNREACH;
 		goto error_nolock;
 	}
@@ -239,7 +238,7 @@ out_exit:
 error:
 	spin_unlock_bh(&x->lock);
 error_nolock:
-	kfree_skb(*pskb);
+	kfree_skb(skb);
 	goto out_exit;
 }
 

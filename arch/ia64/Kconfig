@@ -44,10 +44,7 @@ choice
 
 config IA64_GENERIC
 	bool "generic"
-	select NUMA
-	select ACPI_NUMA
 	select VIRTUAL_MEM_MAP
-	select DISCONTIGMEM
 	help
 	  This selects the system type of your hardware.  A "generic" kernel
 	  will run on any supported IA-64 system.  However, if you configure
@@ -77,6 +74,15 @@ config IA64_HP_SIM
 	bool "Ski-simulator"
 
 endchoice
+
+config HOTPLUG_CPU
+    bool "Support for hot-pluggable CPUs (EXPERIMENTAL)"
+    depends on SMP && HOTPLUG && EXPERIMENTAL
+	default n
+    ---help---
+      Say Y here to experiment with turning CPUs off and on.  CPUs
+      can be controlled through /sys/devices/system/cpu/cpu#.
+      Say N if you want to disable cpu hotplug.
 
 choice
 	prompt "Processor type"
@@ -243,15 +249,6 @@ config NR_CPUS
 	  only use 2 CPUs on a >2 CPU system.  Setting this to a value larger
 	  than 64 will cause the use of a CPU mask array, causing a small
 	  performance hit.
-
-config HOTPLUG_CPU
-    bool "Support for hot-pluggable CPUs (EXPERIMENTAL)"
-    depends on SMP && HOTPLUG && EXPERIMENTAL
-	default n
-    ---help---
-      Say Y here to experiment with turning CPUs off and on.  CPUs
-      can be controlled through /sys/devices/system/cpu/cpu#.
-      Say N if you want to disable CPU hotplug.
 
 config PREEMPT
 	bool "Preemptible Kernel"
@@ -499,6 +496,8 @@ config SYSVIPC_COMPAT
 	depends on COMPAT && SYSVIPC
 	default y
 endmenu
+
+source "kernel/vserver/Kconfig"
 
 source "security/Kconfig"
 

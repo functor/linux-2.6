@@ -279,6 +279,8 @@ void __free_pages_ok(struct page *page, unsigned int order)
 	LIST_HEAD(list);
 	int i;
 
+	arch_free_page(page, order);
+
 	mod_page_state(pgfree, 1 << order);
 	for (i = 0 ; i < (1 << order) ; ++i)
 		free_pages_check(__FUNCTION__, page + i);
@@ -496,6 +498,8 @@ static void fastcall free_hot_cold_page(struct page *page, int cold)
 	struct zone *zone = page_zone(page);
 	struct per_cpu_pages *pcp;
 	unsigned long flags;
+
+	arch_free_page(page, 0);
 
 	kernel_map_pages(page, 1, 0);
 	inc_page_state(pgfree);
@@ -988,23 +992,6 @@ void get_full_page_state(struct page_state *ret)
 	__get_page_state(ret, sizeof(*ret) / sizeof(unsigned long));
 }
 
-unsigned long __read_page_state(unsigned offset)
-{
-	unsigned long ret = 0;
-	int cpu;
-
-	for (cpu = 0; cpu < NR_CPUS; cpu++) {
-		unsigned long in;
-
-		if (!cpu_possible(cpu))
-			continue;
-
-		in = (unsigned long)&per_cpu(page_states, cpu) + offset;
-		ret += *((unsigned long *)in);
-	}
-	return ret;
-}
-
 void get_zone_counts(unsigned long *active,
 		unsigned long *inactive, unsigned long *free)
 {
@@ -1034,6 +1021,8 @@ void si_meminfo(struct sysinfo *val)
 	val->freehigh = 0;
 #endif
 	val->mem_unit = PAGE_SIZE;
+	if (vx_flags(VXF_VIRT_MEM, 0))
+		vx_vsi_meminfo(val);
 }
 
 EXPORT_SYMBOL(si_meminfo);

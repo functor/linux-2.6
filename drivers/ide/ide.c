@@ -188,6 +188,7 @@ int noautodma = 1;
 #endif
 
 EXPORT_SYMBOL(noautodma);
+EXPORT_SYMBOL(ide_bus_type);
 
 /*
  * This is declared extern in ide.h, for access by other IDE modules:
@@ -553,6 +554,8 @@ control_region_busy:
 	return -EBUSY;
 }
 
+EXPORT_SYMBOL(ide_hwif_request_regions);
+
 /**
  *	ide_hwif_release_regions - free IDE resources
  *
@@ -580,6 +583,8 @@ void ide_hwif_release_regions(ide_hwif_t *hwif)
 		if (hwif->io_ports[i])
 			release_region(hwif->io_ports[i], 1);
 }
+
+EXPORT_SYMBOL(ide_hwif_release_regions);
 
 /* restore hwif to a sane state */
 static void ide_hwif_restore(ide_hwif_t *hwif, ide_hwif_t *tmp_hwif)
@@ -931,6 +936,8 @@ void ide_setup_ports (	hw_regs_t *hw,
  */
 }
 
+EXPORT_SYMBOL(ide_setup_ports);
+
 /*
  * Register an IDE interface, specifying exactly the registers etc
  * Set init=1 iff calling before probes have taken place.
@@ -991,6 +998,7 @@ EXPORT_SYMBOL(ide_register_hw);
  */
 
 DECLARE_MUTEX(ide_setting_sem);
+EXPORT_SYMBOL(ide_setting_sem);
 
 /**
  *	ide_add_setting	-	add an ide setting option
@@ -1082,6 +1090,26 @@ static void __ide_remove_setting (ide_drive_t *drive, char *name)
 	kfree(setting->name);
 	kfree(setting);
 }
+
+/**
+ *	ide_remove_setting	-	remove an ide setting option
+ *	@drive: drive to use
+ *	@name: setting name
+ *
+ *	Removes the setting named from the device if it is present.
+ *	The function takes the settings_lock to protect against 
+ *	parallel changes. This function must not be called from IRQ
+ *	context.
+ */
+ 
+void ide_remove_setting (ide_drive_t *drive, char *name)
+{
+	down(&ide_setting_sem);
+	__ide_remove_setting(drive, name);
+	up(&ide_setting_sem);
+}
+
+EXPORT_SYMBOL(ide_remove_setting);
 
 /**
  *	ide_find_setting_by_ioctl	-	find a drive specific ioctl
@@ -1264,6 +1292,8 @@ int ide_write_setting (ide_drive_t *drive, ide_settings_t *setting, int val)
 	return 0;
 }
 
+EXPORT_SYMBOL(ide_write_setting);
+
 static int set_io_32bit(ide_drive_t *drive, int arg)
 {
 	drive->io_32bit = arg;
@@ -1391,6 +1421,8 @@ abort:
 	return 1;
 }
 
+EXPORT_SYMBOL(ide_replace_subdriver);
+
 int ata_attach(ide_drive_t *drive)
 {
 	struct list_head *p;
@@ -1414,6 +1446,8 @@ int ata_attach(ide_drive_t *drive)
 		panic("ide: default attach failed");
 	return 1;
 }
+
+EXPORT_SYMBOL(ata_attach);
 
 static int generic_ide_suspend(struct device *dev, u32 state)
 {
@@ -1772,7 +1806,7 @@ int __init ide_setup (char *s)
 	if (s[0] == 'h' && s[1] == 'd' && s[2] >= 'a' && s[2] <= max_drive) {
 		const char *hd_words[] = {
 			"none", "noprobe", "nowerr", "cdrom", "serialize",
-			"autotune", "noautotune", "stroke", "swapdata", "bswap",
+			"autotune", "noautotune", "minus8", "swapdata", "bswap",
 			"minus11", "remap", "remap63", "scsi", NULL };
 		unit = s[2] - 'a';
 		hw   = unit / MAX_DRIVES;
@@ -1805,9 +1839,6 @@ int __init ide_setup (char *s)
 				goto done;
 			case -7: /* "noautotune" */
 				drive->autotune = IDE_TUNE_NOAUTO;
-				goto done;
-			case -8: /* stroke */
-				drive->stroke = 1;
 				goto done;
 			case -9: /* "swapdata" */
 			case -10: /* "bswap" */
@@ -2003,7 +2034,6 @@ done:
 	return 1;
 }
 
-extern void pnpide_init(void);
 extern void h8300_ide_init(void);
 
 /*
@@ -2070,9 +2100,12 @@ static void __init probe_for_hwifs (void)
 		buddha_init();
 	}
 #endif /* CONFIG_BLK_DEV_BUDDHA */
-#ifdef CONFIG_BLK_DEV_IDEPNP
-	pnpide_init();
-#endif
+#if defined(CONFIG_BLK_DEV_IDEPNP) && defined(CONFIG_PNP)
+	{
+		extern void pnpide_init(int enable);
+		pnpide_init(1);
+	}
+#endif /* CONFIG_BLK_DEV_IDEPNP */
 #ifdef CONFIG_H8300
 	h8300_ide_init();
 #endif
@@ -2210,6 +2243,9 @@ int ide_unregister_subdriver (ide_drive_t *drive)
 		up(&ide_setting_sem);
 		return 1;
 	}
+#if defined(CONFIG_BLK_DEV_IDEPNP) && defined(CONFIG_PNP) && defined(MODULE)
+	pnpide_init(0);
+#endif /* CONFIG_BLK_DEV_IDEPNP */
 #ifdef CONFIG_PROC_FS
 	ide_remove_proc_entries(drive->proc, DRIVER(drive)->proc);
 	ide_remove_proc_entries(drive->proc, generic_subdriver_entries);

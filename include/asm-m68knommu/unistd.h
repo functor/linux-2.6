@@ -221,7 +221,9 @@
 #define __NR_setfsuid32		215
 #define __NR_setfsgid32		216
 
-#define	NR_syscalls		256
+#define __NR_vserver		273
+
+#define NR_syscalls		274
 
 /* user-visible error numbers are in the range -1 - -122: see
    <asm-m68k/errno.h> */
@@ -394,7 +396,6 @@ type name(atype a, btype b, ctype c, dtype d, etype e)				\
 #define __ARCH_WANT_SYS_OLDUMOUNT
 #define __ARCH_WANT_SYS_SIGPENDING
 #define __ARCH_WANT_SYS_SIGPROCMASK
-#define __ARCH_WANT_SYS_RT_SIGACTION
 #endif
 
 #ifdef __KERNEL_SYSCALLS__

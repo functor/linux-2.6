@@ -373,7 +373,7 @@ config AU1000_UART
 
 config SGI_L1_SERIAL
 	bool "SGI Altix L1 serial support"
-	depends on SERIAL_NONSTANDARD && IA64
+	depends on SERIAL_NONSTANDARD && IA64 && DISCONTIGMEM
 	help
 	  If you have an SGI Altix and you want to use the serial port
 	  connected to the system controller (you want this!), say Y.
@@ -482,6 +482,8 @@ config LEGACY_PTYS
 	  security.  This option enables these legacy devices; on most
 	  systems, it is safe to say N.
 
+config CRASH
+        tristate "Crash Utility memory driver"
 
 config LEGACY_PTY_COUNT
 	int "Maximum number of legacy PTY in use"

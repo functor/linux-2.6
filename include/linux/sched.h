@@ -31,6 +31,9 @@
 #include <linux/percpu.h>
 
 struct exec_domain;
+extern int exec_shield;
+extern int exec_shield_randomize;
+extern int print_fatal_signals;
 
 /*
  * cloning flags:
@@ -102,6 +105,7 @@ extern unsigned long nr_iowait(void);
 #include <linux/timer.h>
 
 #include <asm/processor.h>
+#include <linux/vserver/context.h>
 
 #define TASK_RUNNING		0
 #define TASK_INTERRUPTIBLE	1
@@ -109,6 +113,7 @@ extern unsigned long nr_iowait(void);
 #define TASK_STOPPED		4
 #define TASK_ZOMBIE		8
 #define TASK_DEAD		16
+#define TASK_ONHOLD		32
 
 #define __set_task_state(tsk, state_value)		\
 	do { (tsk)->state = (state_value); } while (0)
@@ -133,6 +138,7 @@ struct sched_param {
 
 #ifdef __KERNEL__
 
+#include <linux/taskdelays.h>
 #include <linux/spinlock.h>
 
 /*
@@ -196,6 +202,8 @@ struct mm_struct {
 	struct rb_root mm_rb;
 	struct vm_area_struct * mmap_cache;	/* last find_vma result */
 	unsigned long free_area_cache;		/* first hole */
+	unsigned long non_executable_cache;	/* last hole top */
+	unsigned long mmap_top;			/* top of mmap area */
 	pgd_t * pgd;
 	atomic_t mm_users;			/* How many users with user space? */
 	atomic_t mm_count;			/* How many references to "struct mm_struct" (users count as 1) */
@@ -224,6 +232,7 @@ struct mm_struct {
 
 	/* Architecture-specific MM context */
 	mm_context_t context;
+	struct vx_info *mm_vx_info;
 
 	/* coredumping support */
 	int core_waiters;
@@ -318,9 +327,10 @@ struct user_struct {
 	/* Hash table maintenance information */
 	struct list_head uidhash_list;
 	uid_t uid;
+	xid_t xid;
 };
 
-extern struct user_struct *find_user(uid_t);
+extern struct user_struct *find_user(xid_t, uid_t);
 
 extern struct user_struct root_user;
 #define INIT_USER (&root_user)
@@ -481,9 +491,22 @@ struct task_struct {
 	int (*notifier)(void *priv);
 	void *notifier_data;
 	sigset_t *notifier_mask;
+
+	/* TUX state */
+	void *tux_info;
+	void (*tux_exit)(void);
+
 	
 	void *security;
 	struct audit_context *audit_context;
+
+/* vserver context data */
+	xid_t xid;
+	struct vx_info *vx_info;
+
+/* vserver network data */
+	nid_t nid;
+	struct nx_info *nx_info;
 
 /* Thread group tracking */
    	u32 parent_exec_id;
@@ -513,6 +536,18 @@ struct task_struct {
   	struct mempolicy *mempolicy;
   	short il_next;		/* could be shared with used_math */
 #endif
+
+#ifdef CONFIG_CKRM
+	spinlock_t  ckrm_tsklock; 
+	void       *ce_data;
+#ifdef CONFIG_CKRM_TYPE_TASKCLASS
+	// .. Hubertus should change to CONFIG_CKRM_TYPE_TASKCLASS 
+	struct ckrm_task_class *taskclass;
+	struct list_head        taskclass_link;
+#endif // CONFIG_CKRM_TYPE_TASKCLASS
+#endif // CONFIG_CKRM
+
+	struct task_delay_info  delays;
 };
 
 static inline pid_t process_group(struct task_struct *tsk)
@@ -549,6 +584,11 @@ do { if (atomic_dec_and_test(&(tsk)->usage)) __put_task_struct(tsk); } while(0)
 #define PF_SWAPOFF	0x00080000	/* I am in swapoff */
 #define PF_LESS_THROTTLE 0x00100000	/* Throttle me less: I clean memory */
 #define PF_SYNCWRITE	0x00200000	/* I am doing a sync write */
+#define PF_RELOCEXEC	0x00400000	/* relocate shared libraries */
+
+
+#define PF_MEMIO   	0x00400000      /* I am  potentially doing I/O for mem */
+#define PF_IOWAIT       0x00800000      /* I am waiting on disk I/O */
 
 #ifdef CONFIG_SMP
 #define SCHED_LOAD_SCALE	128UL	/* increase resolution of load */
@@ -718,7 +758,7 @@ extern void set_special_pids(pid_t session, pid_t pgrp);
 extern void __set_special_pids(pid_t session, pid_t pgrp);
 
 /* per-UID process charging. */
-extern struct user_struct * alloc_uid(uid_t);
+extern struct user_struct * alloc_uid(xid_t, uid_t);
 extern void free_uid(struct user_struct *);
 extern void switch_uid(struct user_struct *);
 
@@ -738,7 +778,7 @@ extern void FASTCALL(wake_up_forked_process(struct task_struct * tsk));
  static inline void kick_process(struct task_struct *tsk) { }
  static inline void wake_up_forked_thread(struct task_struct * tsk)
  {
-	wake_up_forked_process(tsk);
+	return wake_up_forked_process(tsk);
  }
 #endif
 extern void FASTCALL(sched_fork(task_t * p));
@@ -1066,6 +1106,60 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 }
 
 #endif /* CONFIG_SMP */
+
+
+/* API for registering delay info */
+#ifdef CONFIG_DELAY_ACCT
+
+#define test_delay_flag(tsk,flg)                ((tsk)->flags & (flg))
+#define set_delay_flag(tsk,flg)                 ((tsk)->flags |= (flg))
+#define clear_delay_flag(tsk,flg)               ((tsk)->flags &= ~(flg))
+
+#define def_delay_var(var)		        unsigned long long var
+#define get_delay(tsk,field)                    ((tsk)->delays.field)
+#define delay_value(x)				(((unsigned long)(x))/1000)
+
+#define start_delay(var)                        ((var) = sched_clock())
+#define start_delay_set(var,flg)                (set_delay_flag(current,flg),(var) = sched_clock())
+
+#define inc_delay(tsk,field) (((tsk)->delays.field)++)
+#define add_delay_ts(tsk,field,start_ts,end_ts) ((tsk)->delays.field += delay_value((end_ts)-(start_ts)))
+#define add_delay_clear(tsk,field,start_ts,flg) (add_delay_ts(tsk,field,start_ts,sched_clock()),clear_delay_flag(tsk,flg))
+
+static inline void add_io_delay(unsigned long dstart) 
+{
+	struct task_struct * tsk = current;
+	unsigned long val = delay_value(sched_clock()-dstart);
+	if (test_delay_flag(tsk,PF_MEMIO)) {
+		tsk->delays.mem_iowait_total += val;
+		tsk->delays.num_memwaits++;
+	} else {
+		tsk->delays.iowait_total += val;
+		tsk->delays.num_iowaits++;
+	}
+	clear_delay_flag(tsk,PF_IOWAIT);
+}
+
+
+#else
+
+#define test_delay_flag(tsk,flg)                (0)
+#define set_delay_flag(tsk,flg)                 do { } while (0)
+#define clear_delay_flag(tsk,flg)               do { } while (0)
+
+#define def_delay_var(var)			      
+#define get_delay(tsk,field)                    (0)
+
+#define start_delay(var)                        do { } while (0)
+#define start_delay_set(var,flg)                do { } while (0)
+
+#define inc_delay(tsk,field)                    do { } while (0)
+#define add_delay_ts(tsk,field,start_ts,now)    do { } while (0)
+#define add_delay_clear(tsk,field,start_ts,flg) do { } while (0)
+#define add_io_delay(dstart)			do { } while (0) 
+#endif
+
+
 
 #endif /* __KERNEL__ */
 

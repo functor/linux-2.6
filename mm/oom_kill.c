@@ -54,6 +54,7 @@ static int badness(struct task_struct *p)
 	 * The memory size of the process is the basis for the badness.
 	 */
 	points = p->mm->total_vm;
+	/* add vserver badness ;) */
 
 	/*
 	 * CPU time is in seconds and run time is in minutes. There is no
@@ -245,6 +246,7 @@ void out_of_memory(void)
 	 * If it's been a long time since last failure,
 	 * we're not oom.
 	 */
+	last = now;
 	if (since > 5*HZ)
 		goto reset;
 

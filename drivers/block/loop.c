@@ -308,9 +308,7 @@ lo_read_actor(read_descriptor_t *desc, struct page *page,
 		       page->index);
 		desc->error = -EINVAL;
 	}
-
-	flush_dcache_page(p->page);
-
+	
 	desc->count = count - size;
 	desc->written += size;
 	p->offset += size;

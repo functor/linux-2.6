@@ -1750,7 +1750,7 @@ asmlinkage unsigned long sys32_mremap(unsigned long addr,
 		/* MREMAP_FIXED checked above. */
 		new_addr = get_unmapped_area(file, addr, new_len,
 				    vma ? vma->vm_pgoff : 0,
-				    map_flags);
+				    map_flags, vma->vm_flags & VM_EXEC);
 		ret = new_addr;
 		if (new_addr & ~PAGE_MASK)
 			goto out_sem;
