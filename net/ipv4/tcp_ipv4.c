@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_ipv4.c,v 1.240 2002/02/01 22:01:04 davem Exp $
+ * Version:	$Id$
  *
  *		IPv4 specific functions
  *
@@ -1813,9 +1813,16 @@ process:
 	/* Silently drop if VNET is active and the context is not
 	 * entitled to read the packet.
 	 */
-	if (vnet_active &&
-	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
-		goto discard_it;
+	if (vnet_active) {
+		/* Transfer ownership of reusable TIME_WAIT buckets to
+		 * whomever VNET decided should own the packet.
+		 */
+		if (sk->sk_state == TCP_TIME_WAIT)
+			sk->sk_xid = skb->xid;
+
+		if ((int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
+			goto discard_it;
+	}
 #endif
 
 	if (sk->sk_state == TCP_TIME_WAIT)
