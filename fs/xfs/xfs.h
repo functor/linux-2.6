@@ -35,6 +35,5 @@
 #include <linux-2.6/xfs_linux.h>
 
 #include <xfs_fs.h> 
-#include <xfs_macros.h>
 
 #endif	/* __XFS_H__ */

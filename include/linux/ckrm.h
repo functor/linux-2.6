@@ -9,13 +9,10 @@
  *
  * Latest version, more details at http://ckrm.sf.net
  * 
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2.1 of the GNU Lesser General Public License
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it would be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  */
 
@@ -69,7 +66,6 @@ enum ckrm_event {
 	CKRM_EVENT_EXEC,
 	CKRM_EVENT_UID,
 	CKRM_EVENT_GID,
-	CKRM_EVENT_XID,
 	CKRM_EVENT_LOGIN,
 	CKRM_EVENT_USERADD,
 	CKRM_EVENT_USERDEL,
@@ -140,7 +136,6 @@ CKRM_DEF_CB_ARG(FORK, fork, struct task_struct *);
 CKRM_DEF_CB_ARG(EXEC, exec, const char *);
 CKRM_DEF_CB(UID, uid);
 CKRM_DEF_CB(GID, gid);
-CKRM_DEF_CB_ARG(XID, xid, struct task_struct *);
 CKRM_DEF_CB(APPTAG, apptag);
 CKRM_DEF_CB(LOGIN, login);
 CKRM_DEF_CB_ARG(USERADD, useradd, struct user_struct *);

@@ -555,15 +555,25 @@ static struct socket * make_receive_sock(void)
 static int
 ip_vs_send_async(struct socket *sock, const char *buffer, const size_t length)
 {
-	struct msghdr	msg = {.msg_flags = MSG_DONTWAIT|MSG_NOSIGNAL};
-	struct kvec	iov;
+	struct msghdr	msg;
+	mm_segment_t	oldfs;
+	struct iovec	iov;
 	int		len;
 
 	EnterFunction(7);
 	iov.iov_base     = (void *)buffer;
 	iov.iov_len      = length;
+	msg.msg_name     = 0;
+	msg.msg_namelen  = 0;
+	msg.msg_iov	 = &iov;
+	msg.msg_iovlen   = 1;
+	msg.msg_control  = NULL;
+	msg.msg_controllen = 0;
+	msg.msg_flags    = MSG_DONTWAIT|MSG_NOSIGNAL;
 
-	len = kernel_sendmsg(sock, &msg, &iov, 1, (size_t)(length));
+	oldfs = get_fs(); set_fs(KERNEL_DS);
+	len = sock_sendmsg(sock, &msg, (size_t)(length));
+	set_fs(oldfs);
 
 	LeaveFunction(7);
 	return len;
@@ -573,17 +583,27 @@ ip_vs_send_async(struct socket *sock, const char *buffer, const size_t length)
 static int
 ip_vs_receive(struct socket *sock, char *buffer, const size_t buflen)
 {
-	struct msghdr		msg = {NULL,};
-	struct kvec		iov;
+	struct msghdr		msg;
+	struct iovec		iov;
 	int			len;
+	mm_segment_t		oldfs;
 
 	EnterFunction(7);
 
 	/* Receive a packet */
 	iov.iov_base     = buffer;
 	iov.iov_len      = (size_t)buflen;
+	msg.msg_name     = 0;
+	msg.msg_namelen  = 0;
+	msg.msg_iov	 = &iov;
+	msg.msg_iovlen   = 1;
+	msg.msg_control  = NULL;
+	msg.msg_controllen = 0;
+	msg.msg_flags    = 0;
 
-	len = kernel_recvmsg(sock, &msg, &iov, 1, buflen, 0);
+	oldfs = get_fs(); set_fs(KERNEL_DS);
+	len = sock_recvmsg(sock, &msg, buflen, 0);
+	set_fs(oldfs);
 
 	if (len < 0)
 		return -1;

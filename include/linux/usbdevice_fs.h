@@ -63,7 +63,7 @@ struct usbdevfs_setinterface {
 
 struct usbdevfs_disconnectsignal {
 	unsigned int signr;
-	void __user *context;
+	void *context;
 };
 
 #define USBDEVFS_MAXDRIVERNAME 255
@@ -162,7 +162,7 @@ struct dev_state {
 	wait_queue_head_t wait;     /* wake up if a request completed */
 	unsigned int discsignr;
 	struct task_struct *disctask;
-	void __user *disccontext;
+	void *disccontext;
 	unsigned long ifclaimed;
 };
 

@@ -24,7 +24,6 @@
 #include <linux/sem.h>
 #include <linux/msg.h>
 #include <linux/shm.h>
-#include <linux/vs_cvirt.h>
 
 #include <asm/branch.h>
 #include <asm/cachectl.h>
@@ -37,7 +36,7 @@
 #include <asm/sysmips.h>
 #include <asm/uaccess.h>
 
-asmlinkage int sys_pipe(nabi_no_regargs volatile struct pt_regs regs)
+asmlinkage int sys_pipe(nabi_no_regargs struct pt_regs regs)
 {
 	int fd[2];
 	int error, res;

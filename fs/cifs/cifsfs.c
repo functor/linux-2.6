@@ -41,10 +41,14 @@
 #include "cifs_fs_sb.h"
 #include <linux/mm.h>
 #define CIFS_MAGIC_NUMBER 0xFF534D42	/* the first four bytes of SMB PDUs */
+/* BB when mempool_resize is added back in, we will resize pool on new mount */
+#define CIFS_MIN_RCV_POOL 11 /* enough for progress to five servers */
 
 #ifdef CONFIG_CIFS_QUOTA
 static struct quotactl_ops cifs_quotactl_ops;
 #endif
+
+extern struct file_system_type cifs_fs_type;
 
 int cifsFYI = 0;
 int cifsERROR = 1;
@@ -190,11 +194,15 @@ cifs_statfs(struct super_block *sb, struct kstatfs *buf)
 
 static int cifs_permission(struct inode * inode, int mask, struct nameidata *nd)
 {
-	struct cifs_sb_info *cifs_sb;
+        struct cifs_sb_info *cifs_sb;
 
-	cifs_sb = CIFS_SB(inode->i_sb);
+        cifs_sb = CIFS_SB(inode->i_sb);
 
-	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NO_PERM) {
+        if (cifs_sb->tcon->ses->capabilities & CAP_UNIX) {
+		/* the server supports the Unix-like mode bits and does its
+		own permission checks, and therefore we do not allow the file
+		mode to be overriden on these mounts - so do not do perm
+		check on client side */
 		return 0;
 	} else /* file mode might have been restricted at mount time 
 		on the client (above and beyond ACL on servers) for  
@@ -512,7 +520,6 @@ struct inode_operations cifs_file_inode_ops = {
 struct inode_operations cifs_symlink_inode_ops = {
 	.readlink = cifs_readlink,
 	.follow_link = cifs_follow_link,
-	.put_link = cifs_put_link,
 	.permission = cifs_permission,
 	/* BB add the following two eventually */
 	/* revalidate: cifs_revalidate,
@@ -535,14 +542,18 @@ struct file_operations cifs_file_ops = {
 	.flush = cifs_flush,
 	.mmap  = cifs_file_mmap,
 	.sendfile = generic_file_sendfile,
-	.dir_notify = cifs_dir_notify,
+#ifdef CONFIG_CIFS_FCNTL
+	.fcntl = cifs_fcntl,
+#endif
 };
 
 struct file_operations cifs_dir_ops = {
 	.readdir = cifs_readdir,
 	.release = cifs_closedir,
 	.read    = generic_read_dir,
-	.dir_notify = cifs_dir_notify,
+#ifdef CONFIG_CIFS_FCNTL
+	.fcntl   = cifs_fcntl,
+#endif
 };
 
 static void
@@ -737,7 +748,6 @@ init_cifs(void)
  */
 	atomic_set(&sesInfoAllocCount, 0);
 	atomic_set(&tconInfoAllocCount, 0);
-	atomic_set(&tcpSesAllocCount,0);
 	atomic_set(&tcpSesReconnectCount, 0);
 	atomic_set(&tconInfoReconnectCount, 0);
 

@@ -46,14 +46,11 @@
 #include <linux/blkdev.h>
 #include <asm/uaccess.h>
 
-#include <scsi/scsi.h>
-#include <scsi/scsi_dbg.h>
-#include <scsi/scsi_device.h>
-#include <scsi/scsi_driver.h>
-#include <scsi/scsi_eh.h>
+#include "scsi.h"
 #include <scsi/scsi_host.h>
+
+#include <scsi/scsi_driver.h>
 #include <scsi/scsi_ioctl.h>	/* For the door lock/unlock commands */
-#include <scsi/scsi_request.h>
 
 #include "scsi_logging.h"
 #include "sr.h"
@@ -183,7 +180,7 @@ int sr_media_change(struct cdrom_device_info *cdi, int slot)
 		return -EINVAL;
 	}
 
-	retval = scsi_ioctl(cd->device, SCSI_IOCTL_TEST_UNIT_READY, NULL);
+	retval = scsi_ioctl(cd->device, SCSI_IOCTL_TEST_UNIT_READY, 0);
 	if (retval) {
 		/* Unable to test, unit probably not ready.  This usually
 		 * means there is no disc in the drive.  Mark as changed,
@@ -285,7 +282,7 @@ static void rw_intr(struct scsi_cmnd * SCpnt)
 			 * user, but make sure that it's not treated as a
 			 * hard error.
 			 */
-			scsi_print_sense("sr", SCpnt);
+			print_sense("sr", SCpnt);
 			SCpnt->result = 0;
 			SCpnt->sense_buffer[0] = 0x0;
 			good_bytes = this_count;
@@ -338,11 +335,11 @@ static int sr_init_command(struct scsi_cmnd * SCpnt)
 
 		memcpy(SCpnt->cmnd, rq->cmd, sizeof(SCpnt->cmnd));
 		if (!rq->data_len)
-			SCpnt->sc_data_direction = DMA_NONE;
+			SCpnt->sc_data_direction = SCSI_DATA_NONE;
 		else if (rq_data_dir(rq) == WRITE)
-			SCpnt->sc_data_direction = DMA_TO_DEVICE;
+			SCpnt->sc_data_direction = SCSI_DATA_WRITE;
 		else
-			SCpnt->sc_data_direction = DMA_FROM_DEVICE;
+			SCpnt->sc_data_direction = SCSI_DATA_READ;
 
 		this_count = rq->data_len;
 		if (rq->timeout)
@@ -378,10 +375,10 @@ static int sr_init_command(struct scsi_cmnd * SCpnt)
 		if (!cd->device->writeable)
 			return 0;
 		SCpnt->cmnd[0] = WRITE_10;
-		SCpnt->sc_data_direction = DMA_TO_DEVICE;
+		SCpnt->sc_data_direction = SCSI_DATA_WRITE;
 	} else if (rq_data_dir(SCpnt->request) == READ) {
 		SCpnt->cmnd[0] = READ_10;
-		SCpnt->sc_data_direction = DMA_FROM_DEVICE;
+		SCpnt->sc_data_direction = SCSI_DATA_READ;
 	} else {
 		blk_dump_rq_flags(SCpnt->request, "Unknown sr command");
 		return 0;
@@ -504,7 +501,7 @@ static int sr_block_ioctl(struct inode *inode, struct file *file, unsigned cmd,
                 case SCSI_IOCTL_GET_BUS_NUMBER:
                         return scsi_ioctl(sdev, cmd, (void __user *)arg);
 	}
-	return cdrom_ioctl(file, &cd->cdi, inode, cmd, arg);
+	return cdrom_ioctl(&cd->cdi, inode, cmd, arg);
 }
 
 static int sr_block_media_changed(struct gendisk *disk)
@@ -677,7 +674,7 @@ static void get_sectorsize(struct scsi_cd *cd)
 		memset(buffer, 0, 8);
 
 		/* Do the command and wait.. */
-		SRpnt->sr_data_direction = DMA_FROM_DEVICE;
+		SRpnt->sr_data_direction = SCSI_DATA_READ;
 		scsi_wait_req(SRpnt, (void *) cmd, (void *) buffer,
 			      8, SR_TIMEOUT, MAX_RETRIES);
 
@@ -774,6 +771,9 @@ static void get_capabilities(struct scsi_cd *cd)
 		"",
 		""
 	};
+
+	/* Set read only initially */
+	set_disk_ro(cd->disk, 1);
 
 	/* allocate a request for the TEST_UNIT_READY */
 	SRpnt = scsi_allocate_request(cd->device, GFP_KERNEL);
@@ -882,6 +882,7 @@ static void get_capabilities(struct scsi_cd *cd)
 	if ((cd->cdi.mask & (CDC_DVD_RAM | CDC_MRW_W | CDC_RAM)) !=
 			(CDC_DVD_RAM | CDC_MRW_W | CDC_RAM)) {
 		cd->device->writeable = 1;
+		set_disk_ro(cd->disk, 0);
 	}
 
 	scsi_release_request(SRpnt);

@@ -6,7 +6,6 @@
  */
 
 #include "sysv.h"
-#include <linux/namei.h>
 
 static int sysv_follow_link(struct dentry *dentry, struct nameidata *nd)
 {

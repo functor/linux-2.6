@@ -57,6 +57,8 @@ unsigned long init_pg_tables_end __initdata = ~0UL;
 
 int disable_pse __initdata = 0;
 
+static inline char * __init machine_specific_memory_setup(void);
+
 /*
  * Machine setup..
  */
@@ -127,6 +129,7 @@ unsigned long saved_videomode;
 #define RAMDISK_LOAD_FLAG		0x4000	
 
 static char command_line[COMMAND_LINE_SIZE];
+       char saved_command_line[COMMAND_LINE_SIZE];
 
 unsigned char __initdata boot_params[PARAM_SIZE];
 
@@ -628,9 +631,13 @@ static int __init copy_e820_map(struct e820entry * biosmap, int nr_map)
 }
 
 #if defined(CONFIG_EDD) || defined(CONFIG_EDD_MODULE)
-struct edd edd;
+unsigned char eddnr;
+struct edd_info edd[EDDMAXNR];
+unsigned int edd_disk80_sig;
 #ifdef CONFIG_EDD_MODULE
+EXPORT_SYMBOL(eddnr);
 EXPORT_SYMBOL(edd);
+EXPORT_SYMBOL(edd_disk80_sig);
 #endif
 /**
  * copy_edd() - Copy the BIOS EDD information
@@ -639,15 +646,12 @@ EXPORT_SYMBOL(edd);
  */
 static inline void copy_edd(void)
 {
-     memcpy(edd.mbr_signature, EDD_MBR_SIGNATURE, sizeof(edd.mbr_signature));
-     memcpy(edd.edd_info, EDD_BUF, sizeof(edd.edd_info));
-     edd.mbr_signature_nr = EDD_MBR_SIG_NR;
-     edd.edd_info_nr = EDD_NR;
+     eddnr = EDD_NR;
+     memcpy(edd, EDD_BUF, sizeof(edd));
+     edd_disk80_sig = DISK80_SIGNATURE;
 }
 #else
-static inline void copy_edd(void)
-{
-}
+#define copy_edd() do {} while (0)
 #endif
 
 /*
@@ -656,7 +660,13 @@ static inline void copy_edd(void)
  */
 #define LOWMEMSIZE()	(0x9f000)
 
-unsigned long crashdump_addr = 0xdeadbeef;
+static void __init setup_memory_region(void)
+{
+	char *who = machine_specific_memory_setup();
+	printk(KERN_INFO "BIOS-provided physical RAM map:\n");
+	print_memory_map(who);
+} /* setup_memory_region */
+
 
 static void __init parse_cmdline_early (char ** cmdline_p)
 {
@@ -811,9 +821,6 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 		if (c == ' ' && !memcmp(from, "highmem=", 8))
 			highmem_pages = memparse(from+8, &from) >> PAGE_SHIFT;
 	
-		if (c == ' ' && !memcmp(from, "crashdump=", 10))
-			crashdump_addr = memparse(from+10, &from); 
-			
 		c = *(from++);
 		if (!c)
 			break;
@@ -1209,7 +1216,7 @@ static struct nop {
 } noptypes[] = { 
      { X86_FEATURE_K8, k8_nops }, 
      { X86_FEATURE_K7, k7_nops }, 
-     { -1, NULL }
+     { -1, 0 }
 }; 
 
 /* Replace instructions with better alternatives for this CPU type.
@@ -1263,12 +1270,6 @@ static int __init noreplacement_setup(char *s)
 
 __setup("noreplacement", noreplacement_setup); 
 
-static char * __init machine_specific_memory_setup(void);
-
-#ifdef CONFIG_CRASH_DUMP_SOFTBOOT
-extern void crashdump_reserve(void);
-#endif
-
 /*
  * Determine if we were loaded by an EFI loader.  If so, then we have also been
  * passed the efi memmap, systab, etc., so we should use these data structures
@@ -1319,10 +1320,8 @@ void __init setup_arch(char **cmdline_p)
 	ARCH_SETUP
 	if (efi_enabled)
 		efi_init();
-	else {
-		printk(KERN_INFO "BIOS-provided physical RAM map:\n");
-		print_memory_map(machine_specific_memory_setup());
-	}
+	else
+		setup_memory_region();
 
 	copy_edd();
 
@@ -1364,10 +1363,6 @@ void __init setup_arch(char **cmdline_p)
 	}
 #endif
 
-
-#ifdef CONFIG_CRASH_DUMP_SOFTBOOT
-	crashdump_reserve(); /* Preserve crash dump state from prev boot */
-#endif
 
 	dmi_scan_machine();
 

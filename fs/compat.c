@@ -269,7 +269,7 @@ static void ioctl32_insert_translation(struct ioctl_trans *trans)
 		t = ioctl32_hash_table[hash];
 		while (t->next)
 			t = t->next;
-		trans->next = NULL;
+		trans->next = 0;
 		t->next = trans;
 	}
 }
@@ -824,7 +824,7 @@ static int compat_fillonedir(void *__buf, const char *name, int namlen,
 		return -EINVAL;
 	buf->result++;
 	dirent = buf->dirent;
-	if (!access_ok(VERIFY_WRITE, dirent,
+	if (!access_ok(VERIFY_WRITE, (unsigned long)dirent,
 			(unsigned long)(dirent->d_name + namlen + 1) -
 				(unsigned long)dirent))
 		goto efault;

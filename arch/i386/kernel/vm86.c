@@ -394,7 +394,6 @@ static inline unsigned long get_vflags(struct kernel_vm86_regs * regs)
 
 	if (VEFLAGS & VIF_MASK)
 		flags |= IF_MASK;
-	flags |= IOPL_MASK;
 	return flags | (VEFLAGS & current->thread.v86mask);
 }
 
@@ -733,8 +732,8 @@ static inline void free_vm86_irq(int irqnumber)
 {
 	unsigned long flags;
 
-	free_irq(irqnumber, NULL);
-	vm86_irqs[irqnumber].tsk = NULL;
+	free_irq(irqnumber,0);
+	vm86_irqs[irqnumber].tsk = 0;
 
 	spin_lock_irqsave(&irqbits_lock, flags);	
 	irqbits &= ~(1 << irqnumber);
@@ -784,7 +783,7 @@ static int do_vm86_irq_handling(int subfunction, int irqnumber)
 			if (!((1 << sig) & ALLOWED_SIGS)) return -EPERM;
 			if (invalid_vm86_irq(irq)) return -EPERM;
 			if (vm86_irqs[irq].tsk) return -EPERM;
-			ret = request_irq(irq, &irq_handler, 0, VM86_IRQNAME, NULL);
+			ret = request_irq(irq, &irq_handler, 0, VM86_IRQNAME, 0);
 			if (ret) return ret;
 			vm86_irqs[irq].sig = sig;
 			vm86_irqs[irq].tsk = current;

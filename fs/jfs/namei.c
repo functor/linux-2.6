@@ -1,5 +1,5 @@
 /*
- *   Copyright (C) International Business Machines Corp., 2000-2004
+ *   Copyright (C) International Business Machines Corp., 2000-2003
  *   Portions Copyright (C) Christoph Hellwig, 2001-2002
  *
  *   This program is free software;  you can redistribute it and/or modify
@@ -18,7 +18,6 @@
  */
 
 #include <linux/fs.h>
-#include <linux/ctype.h>
 #include "jfs_incore.h"
 #include "jfs_superblock.h"
 #include "jfs_inode.h"
@@ -44,7 +43,6 @@ extern int jfs_init_acl(struct inode *, struct inode *);
  */
 struct inode_operations jfs_dir_inode_operations;
 struct file_operations jfs_dir_operations;
-struct dentry_operations jfs_ci_dentry_operations;
 
 static s64 commitZeroLink(tid_t, struct inode *);
 
@@ -704,7 +702,7 @@ int freeZeroLink(struct inode *ip)
 		pxdlock->flag = mlckFREEPXD;
 		PXDaddress(&pxdlock->pxd, xaddr);
 		PXDlength(&pxdlock->pxd, xlen);
-		txFreeMap(ip, pxdlock, NULL, COMMIT_WMAP);
+		txFreeMap(ip, pxdlock, 0, COMMIT_WMAP);
 	}
 
 	/*
@@ -724,7 +722,7 @@ int freeZeroLink(struct inode *ip)
 		pxdlock->flag = mlckFREEPXD;
 		PXDaddress(&pxdlock->pxd, xaddr);
 		PXDlength(&pxdlock->pxd, xlen);
-		txFreeMap(ip, pxdlock, NULL, COMMIT_WMAP);
+		txFreeMap(ip, pxdlock, 0, COMMIT_WMAP);
 	}
 
 	/*
@@ -1424,15 +1422,7 @@ static struct dentry *jfs_lookup(struct inode *dip, struct dentry *dentry, struc
 		return ERR_PTR(-EACCES);
 	}
 
-	if (JFS_SBI(dip->i_sb)->mntflag & JFS_OS2)
-		dentry->d_op = &jfs_ci_dentry_operations;
-
-	dentry = d_splice_alias(ip, dentry);
-
-	if (dentry && (JFS_SBI(dip->i_sb)->mntflag & JFS_OS2))
-		dentry->d_op = &jfs_ci_dentry_operations;
-
-	return dentry;
+	return d_splice_alias(ip, dentry);
 }
 
 struct dentry *jfs_get_parent(struct dentry *dentry)
@@ -1485,47 +1475,4 @@ struct file_operations jfs_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= jfs_readdir,
 	.fsync		= jfs_fsync,
-};
-
-static int jfs_ci_hash(struct dentry *dir, struct qstr *this)
-{
-	unsigned long hash;
-	int i;
-
-	hash = init_name_hash();
-	for (i=0; i < this->len; i++)
-		hash = partial_name_hash(tolower(this->name[i]), hash);
-	this->hash = end_name_hash(hash);
-
-	return 0;
-}
-
-static int jfs_ci_compare(struct dentry *dir, struct qstr *a, struct qstr *b)
-{
-	int i, result = 1;
-
-	if (a->len != b->len)
-		goto out;
-	for (i=0; i < a->len; i++) {
-		if (tolower(a->name[i]) != tolower(b->name[i]))
-			goto out;
-	}
-	result = 0;
-
-	/*
-	 * We want creates to preserve case.  A negative dentry, a, that
-	 * has a different case than b may cause a new entry to be created
-	 * with the wrong case.  Since we can't tell if a comes from a negative
-	 * dentry, we blindly replace it with b.  This should be harmless if
-	 * a is not a negative dentry.
-	 */
-	memcpy((unsigned char *)a->name, b->name, a->len);
-out:
-	return result;
-}
-
-struct dentry_operations jfs_ci_dentry_operations =
-{
-	.d_hash = jfs_ci_hash,
-	.d_compare = jfs_ci_compare,
 };

@@ -92,7 +92,8 @@ acpi_system_read_dsdt (
 {
 	acpi_status		status = AE_OK;
 	struct acpi_buffer	dsdt = {ACPI_ALLOCATE_BUFFER, NULL};
-	ssize_t			res;
+	void			*data = 0;
+	size_t			size = 0;
 
 	ACPI_FUNCTION_TRACE("acpi_system_read_dsdt");
 
@@ -100,11 +101,22 @@ acpi_system_read_dsdt (
 	if (ACPI_FAILURE(status))
 		return_VALUE(-ENODEV);
 
-	res = simple_read_from_buffer(buffer, count, ppos,
-				      dsdt.pointer, dsdt.length);
+	if (*ppos < dsdt.length) {
+		data = dsdt.pointer + file->f_pos;
+		size = dsdt.length - file->f_pos;
+		if (size > count)
+			size = count;
+		if (copy_to_user(buffer, data, size)) {
+			acpi_os_free(dsdt.pointer);
+			return_VALUE(-EFAULT);
+		}
+	}
+
 	acpi_os_free(dsdt.pointer);
 
-	return_VALUE(res);
+	*ppos += size;
+
+	return_VALUE(size);
 }
 
 
@@ -123,7 +135,8 @@ acpi_system_read_fadt (
 {
 	acpi_status		status = AE_OK;
 	struct acpi_buffer	fadt = {ACPI_ALLOCATE_BUFFER, NULL};
-	ssize_t			res;
+	void			*data = 0;
+	size_t			size = 0;
 
 	ACPI_FUNCTION_TRACE("acpi_system_read_fadt");
 
@@ -131,11 +144,22 @@ acpi_system_read_fadt (
 	if (ACPI_FAILURE(status))
 		return_VALUE(-ENODEV);
 
-	res = simple_read_from_buffer(buffer, count, ppos,
-				      fadt.pointer, fadt.length);
+	if (*ppos < fadt.length) {
+		data = fadt.pointer + file->f_pos;
+		size = fadt.length - file->f_pos;
+		if (size > count)
+			size = count;
+		if (copy_to_user(buffer, data, size)) {
+			acpi_os_free(fadt.pointer);
+			return_VALUE(-EFAULT);
+		}
+	}
+
 	acpi_os_free(fadt.pointer);
 
-	return_VALUE(res);
+	*ppos += size;
+
+	return_VALUE(size);
 }
 
 

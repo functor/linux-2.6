@@ -129,10 +129,6 @@
 #define ARCH_KMALLOC_MINALIGN 0
 #endif
 
-#ifndef ARCH_KMALLOC_FLAGS
-#define ARCH_KMALLOC_FLAGS SLAB_HWCACHE_ALIGN
-#endif
-
 /* Legal flag mask for kmem_cache_create(). */
 #if DEBUG
 # define CREATE_MASK	(SLAB_DEBUG_INITIAL | SLAB_RED_ZONE | \
@@ -384,12 +380,12 @@ struct kmem_cache_s {
  * cachep->objsize - 2* BYTES_PER_WORD: redzone word [BYTES_PER_WORD long]
  * cachep->objsize - 1* BYTES_PER_WORD: last caller address [BYTES_PER_WORD long]
  */
-static int obj_dbghead(kmem_cache_t *cachep)
+static inline int obj_dbghead(kmem_cache_t *cachep)
 {
 	return cachep->dbghead;
 }
 
-static int obj_reallen(kmem_cache_t *cachep)
+static inline int obj_reallen(kmem_cache_t *cachep)
 {
 	return cachep->reallen;
 }
@@ -413,15 +409,30 @@ static void **dbg_userword(kmem_cache_t *cachep, void *objp)
 	BUG_ON(!(cachep->flags & SLAB_STORE_USER));
 	return (void**)(objp+cachep->objsize-BYTES_PER_WORD);
 }
-
 #else
-
-#define obj_dbghead(x)			0
-#define obj_reallen(cachep)		(cachep->objsize)
-#define dbg_redzone1(cachep, objp)	({BUG(); (unsigned long *)NULL;})
-#define dbg_redzone2(cachep, objp)	({BUG(); (unsigned long *)NULL;})
-#define dbg_userword(cachep, objp)	({BUG(); (void **)NULL;})
-
+static inline int obj_dbghead(kmem_cache_t *cachep)
+{
+	return 0;
+}
+static inline int obj_reallen(kmem_cache_t *cachep)
+{
+	return cachep->objsize;
+}
+static inline unsigned long *dbg_redzone1(kmem_cache_t *cachep, void *objp)
+{
+	BUG();
+	return 0;
+}
+static inline unsigned long *dbg_redzone2(kmem_cache_t *cachep, void *objp)
+{
+	BUG();
+	return 0;
+}
+static inline void **dbg_userword(kmem_cache_t *cachep, void *objp)
+{
+	BUG();
+	return 0;
+}
 #endif
 
 /*
@@ -474,7 +485,7 @@ struct cache_names {
 static struct cache_names __initdata cache_names[] = {
 #define CACHE(x) { .name = "size-" #x, .name_dma = "size-" #x "(DMA)" },
 #include <linux/kmalloc_sizes.h>
-	{ NULL, }
+	{ 0, }
 #undef CACHE
 };
 
@@ -747,7 +758,7 @@ void __init kmem_cache_init(void)
 		 * allow tighter packing of the smaller caches. */
 		sizes->cs_cachep = kmem_cache_create(names->name,
 			sizes->cs_size, ARCH_KMALLOC_MINALIGN,
-			(ARCH_KMALLOC_FLAGS | SLAB_PANIC), NULL, NULL);
+			SLAB_PANIC, NULL, NULL);
 
 		/* Inc off-slab bufctl limit until the ceiling is hit. */
 		if (!(OFF_SLAB(sizes->cs_cachep))) {
@@ -757,8 +768,7 @@ void __init kmem_cache_init(void)
 
 		sizes->cs_dmacachep = kmem_cache_create(names->name_dma,
 			sizes->cs_size, ARCH_KMALLOC_MINALIGN,
-			(ARCH_KMALLOC_FLAGS | SLAB_CACHE_DMA | SLAB_PANIC),
-			NULL, NULL);
+			(SLAB_CACHE_DMA | SLAB_PANIC), NULL, NULL);
 
 		sizes++;
 		names++;
@@ -864,7 +874,7 @@ static void *kmem_getpages(kmem_cache_t *cachep, int flags, int nodeid)
 /*
  * Interface to system's page release.
  */
-static void kmem_freepages(kmem_cache_t *cachep, void *addr)
+static inline void kmem_freepages(kmem_cache_t *cachep, void *addr)
 {
 	unsigned long i = (1<<cachep->gfporder);
 	struct page *page = virt_to_page(addr);
@@ -1106,9 +1116,8 @@ static void slab_destroy (kmem_cache_t *cachep, struct slab *slabp)
  * %SLAB_NO_REAP - Don't automatically reap this cache when we're under
  * memory pressure.
  *
- * %SLAB_HWCACHE_ALIGN - Align the objects in this cache to a hardware
- * cacheline.  This can be beneficial if you're counting cycles as closely
- * as davem.
+ * %SLAB_HWCACHE_ALIGN - This flag has no effect and will be removed soon.
+ *
  */
 kmem_cache_t *
 kmem_cache_create (const char *name, size_t size, size_t align,
@@ -1125,7 +1134,8 @@ kmem_cache_create (const char *name, size_t size, size_t align,
 		in_interrupt() ||
 		(size < BYTES_PER_WORD) ||
 		(size > (1<<MAX_OBJ_ORDER)*PAGE_SIZE) ||
-		(dtor && !ctor)) {
+		(dtor && !ctor) ||
+		(align < 0)) {
 			printk(KERN_ERR "%s: Early error in slab %s\n",
 					__FUNCTION__, name);
 			BUG();
@@ -1408,29 +1418,27 @@ opps:
 }
 EXPORT_SYMBOL(kmem_cache_create);
 
+static inline void check_irq_off(void)
+{
 #if DEBUG
-static void check_irq_off(void)
-{
 	BUG_ON(!irqs_disabled());
+#endif
 }
 
-static void check_irq_on(void)
+static inline void check_irq_on(void)
 {
+#if DEBUG
 	BUG_ON(irqs_disabled());
+#endif
 }
 
-static void check_spinlock_acquired(kmem_cache_t *cachep)
+static inline void check_spinlock_acquired(kmem_cache_t *cachep)
 {
 #ifdef CONFIG_SMP
 	check_irq_off();
 	BUG_ON(spin_trylock(&cachep->spinlock));
 #endif
 }
-#else
-#define check_irq_off()	do { } while(0)
-#define check_irq_on()	do { } while(0)
-#define check_spinlock_acquired(x) do { } while(0)
-#endif
 
 /*
  * Waits for all CPUs to execute func().
@@ -1593,7 +1601,7 @@ int kmem_cache_destroy (kmem_cache_t * cachep)
 EXPORT_SYMBOL(kmem_cache_destroy);
 
 /* Get the memory for a slab management obj. */
-static struct slab* alloc_slabmgmt (kmem_cache_t *cachep,
+static inline struct slab* alloc_slabmgmt (kmem_cache_t *cachep,
 			void *objp, int colour_off, int local_flags)
 {
 	struct slab *slabp;
@@ -1776,16 +1784,15 @@ failed:
 	return 0;
 }
 
-#if DEBUG
-
 /*
  * Perform extra freeing checks:
  * - detect bad pointers.
  * - POISON/RED_ZONE checking
  * - destructor calls, for caches with POISON+dtor
  */
-static void kfree_debugcheck(const void *objp)
+static inline void kfree_debugcheck(const void *objp)
 {
+#if DEBUG
 	struct page *page;
 
 	if (!virt_addr_valid(objp)) {
@@ -1798,10 +1805,12 @@ static void kfree_debugcheck(const void *objp)
 		printk(KERN_ERR "kfree_debugcheck: bad ptr %lxh.\n", (unsigned long)objp);
 		BUG();
 	}
+#endif 
 }
 
-static void *cache_free_debugcheck (kmem_cache_t * cachep, void * objp, void *caller)
+static inline void *cache_free_debugcheck (kmem_cache_t * cachep, void * objp, void *caller)
 {
+#if DEBUG
 	struct page *page;
 	unsigned int objnr;
 	struct slab *slabp;
@@ -1863,11 +1872,13 @@ static void *cache_free_debugcheck (kmem_cache_t * cachep, void * objp, void *ca
 		poison_obj(cachep, objp, POISON_FREE);
 #endif
 	}
+#endif
 	return objp;
 }
 
-static void check_slabp(kmem_cache_t *cachep, struct slab *slabp)
+static inline void check_slabp(kmem_cache_t *cachep, struct slab *slabp)
 {
+#if DEBUG
 	int i;
 	int entries = 0;
 	
@@ -1891,12 +1902,8 @@ bad:
 		printk("\n");
 		BUG();
 	}
-}
-#else
-#define kfree_debugcheck(x) do { } while(0)
-#define cache_free_debugcheck(x,objp,z) (objp)
-#define check_slabp(x,y) do { } while(0)
 #endif
+}
 
 static void* cache_alloc_refill(kmem_cache_t* cachep, int flags)
 {
@@ -2003,11 +2010,11 @@ cache_alloc_debugcheck_before(kmem_cache_t *cachep, int flags)
 #endif
 }
 
-#if DEBUG
-static void *
+static inline void *
 cache_alloc_debugcheck_after(kmem_cache_t *cachep,
 			unsigned long flags, void *objp, void *caller)
 {
+#if DEBUG
 	if (!objp)	
 		return objp;
  	if (cachep->flags & SLAB_POISON) {
@@ -2043,11 +2050,9 @@ cache_alloc_debugcheck_after(kmem_cache_t *cachep,
 
 		cachep->ctor(objp, cachep, ctor_flags);
 	}	
+#endif
 	return objp;
 }
-#else
-#define cache_alloc_debugcheck_after(a,b,objp,d) (objp)
-#endif
 
 
 static inline void * __cache_alloc (kmem_cache_t *cachep, int flags)
@@ -2693,7 +2698,7 @@ static void drain_array_locked(kmem_cache_t *cachep,
  * If we cannot acquire the cache chain semaphore then just give up - we'll
  * try again next timer interrupt.
  */
-static void cache_reap (void)
+static inline void cache_reap (void)
 {
 	struct list_head *walk;
 
@@ -2844,6 +2849,8 @@ static int s_show(struct seq_file *m, void *p)
 	unsigned long	num_slabs;
 	const char *name; 
 	char *error = NULL;
+	mm_segment_t old_fs;
+	char tmp; 
 
 	check_irq_on();
 	spin_lock_irq(&cachep->spinlock);
@@ -2877,6 +2884,17 @@ static int s_show(struct seq_file *m, void *p)
 		error = "free_objects accounting error";
 
 	name = cachep->name; 
+
+	/*
+	 * Check to see if `name' resides inside a module which has been
+	 * unloaded (someone forgot to destroy their cache)
+	 */
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	if (__get_user(tmp, name)) 
+		name = "broken"; 
+	set_fs(old_fs);
+
 	if (error)
 		printk(KERN_ERR "slab: cache %s error: %s\n", name, error);
 

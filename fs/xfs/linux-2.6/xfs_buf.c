@@ -65,8 +65,7 @@
  */
 
 STATIC kmem_cache_t *pagebuf_cache;
-STATIC kmem_shaker_t pagebuf_shake;
-STATIC int pagebuf_daemon_wakeup(int, unsigned int);
+STATIC void pagebuf_daemon_wakeup(void);
 STATIC void pagebuf_delwri_queue(xfs_buf_t *, int);
 STATIC struct workqueue_struct *pagebuf_logio_workqueue;
 STATIC struct workqueue_struct *pagebuf_dataio_workqueue;
@@ -385,13 +384,13 @@ _pagebuf_lookup_pages(
 			 * But until all the XFS lowlevel code is revamped to
 			 * handle buffer allocation failures we can't do much.
 			 */
-			if (!(++retries % 100))
-				printk(KERN_ERR
-					"possible deadlock in %s (mode:0x%x)\n",
-					__FUNCTION__, gfp_mask);
+			if (!(++retries % 100)) {
+				printk(KERN_ERR "possibly deadlocking in %s\n",
+						__FUNCTION__);
+			}
 
 			XFS_STATS_INC(pb_page_retries);
-			pagebuf_daemon_wakeup(0, gfp_mask);
+			pagebuf_daemon_wakeup();
 			set_current_state(TASK_UNINTERRUPTIBLE);
 			schedule_timeout(10);
 			goto retry;
@@ -1567,20 +1566,11 @@ void
 pagebuf_delwri_dequeue(
 	xfs_buf_t		*pb)
 {
-	int			dequeued = 0;
-
+	PB_TRACE(pb, "delwri_uq", 0);
 	spin_lock(&pbd_delwrite_lock);
-	if ((pb->pb_flags & PBF_DELWRI) && !list_empty(&pb->pb_list)) {
-		list_del_init(&pb->pb_list);
-		dequeued = 1;
-	}
+	list_del_init(&pb->pb_list);
 	pb->pb_flags &= ~PBF_DELWRI;
 	spin_unlock(&pbd_delwrite_lock);
-
-	if (dequeued)
-		pagebuf_rele(pb);
-
-	PB_TRACE(pb, "delwri_dq", (long)dequeued);
 }
 
 STATIC void
@@ -1596,16 +1586,12 @@ STATIC struct task_struct *pagebuf_daemon_task;
 STATIC int pagebuf_daemon_active;
 STATIC int force_flush;
 
-
-STATIC int
-pagebuf_daemon_wakeup(
-	int			priority,
-	unsigned int		mask)
+STATIC void
+pagebuf_daemon_wakeup(void)
 {
 	force_flush = 1;
 	barrier();
 	wake_up_process(pagebuf_daemon_task);
-	return 0;
 }
 
 STATIC int
@@ -1614,7 +1600,6 @@ pagebuf_daemon(
 {
 	struct list_head	tmp;
 	unsigned long		age;
-	xfs_buftarg_t		*target;
 	xfs_buf_t		*pb, *n;
 
 	/*  Set up the thread  */
@@ -1657,12 +1642,9 @@ pagebuf_daemon(
 
 		while (!list_empty(&tmp)) {
 			pb = list_entry(tmp.next, xfs_buf_t, pb_list);
-			target = pb->pb_target;
-
 			list_del_init(&pb->pb_list);
 			pagebuf_iostrategy(pb);
-
-			blk_run_address_space(target->pbr_mapping);
+			blk_run_address_space(pb->pb_target->pbr_mapping);
 		}
 
 		if (as_list_len > 0)
@@ -1793,19 +1775,7 @@ pagebuf_init(void)
 	pagebuf_cache = kmem_cache_create("xfs_buf_t", sizeof(xfs_buf_t), 0,
 			SLAB_HWCACHE_ALIGN, NULL, NULL);
 	if (pagebuf_cache == NULL) {
-		printk("XFS: couldn't init xfs_buf_t cache\n");
-		pagebuf_terminate();
-		return -ENOMEM;
-	}
-
-#ifdef PAGEBUF_TRACE
-	pagebuf_trace_buf = ktrace_alloc(PAGEBUF_TRACE_SIZE, KM_SLEEP);
-#endif
-
-	pagebuf_daemon_start();
-
-	pagebuf_shake = kmem_shake_register(pagebuf_daemon_wakeup);
-	if (pagebuf_shake == NULL) {
+		printk("pagebuf: couldn't init pagebuf cache\n");
 		pagebuf_terminate();
 		return -ENOMEM;
 	}
@@ -1815,6 +1785,11 @@ pagebuf_init(void)
 		INIT_LIST_HEAD(&pbhash[i].pb_hash);
 	}
 
+#ifdef PAGEBUF_TRACE
+	pagebuf_trace_buf = ktrace_alloc(PAGEBUF_TRACE_SIZE, KM_SLEEP);
+#endif
+
+	pagebuf_daemon_start();
 	return 0;
 }
 
@@ -1833,6 +1808,5 @@ pagebuf_terminate(void)
 	ktrace_free(pagebuf_trace_buf);
 #endif
 
-	kmem_zone_destroy(pagebuf_cache);
-	kmem_shake_deregister(pagebuf_shake);
+	kmem_cache_destroy(pagebuf_cache);
 }

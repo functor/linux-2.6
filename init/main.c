@@ -47,15 +47,10 @@
 
 #include <asm/io.h>
 #include <asm/bugs.h>
-#include <asm/setup.h>
 
 #include <linux/ckrm.h>
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
 int __init init_ckrm_sched_res(void);
-#else
-#define init_ckrm_sched_res() ((void)0)
-#endif
-//#include <linux/ckrm_sched.h>
+
 
 /*
  * This is one of the first .c files built. Error out early
@@ -110,16 +105,6 @@ enum system_states system_state;
 EXPORT_SYMBOL(system_state);
 
 /*
- * The kernel_magic value represents the address of _end, which allows
- * namelist tools to "match" each other respectively.  That way a tool
- * that looks at /dev/mem can verify that it is using the right System.map
- * file -- if kernel_magic doesn't equal the namelist value of _end,
- * something's wrong.
- */
-extern unsigned long _end;
-unsigned long *kernel_magic = &_end;
-
-/*
  * Boot command-line arguments
  */
 #define MAX_INIT_ARGS 8
@@ -129,9 +114,6 @@ extern void time_init(void);
 /* Default late time init is NULL. archs can override this later. */
 void (*late_time_init)(void);
 extern void softirq_init(void);
-
-/* Untouched command line (eg. for /proc) saved by arch-specific code. */
-char saved_command_line[COMMAND_LINE_SIZE];
 
 static char *execute_command;
 
@@ -179,14 +161,8 @@ static int __init obsolete_checksetup(char *line)
 	do {
 		int n = strlen(p->str);
 		if (!strncmp(line, p->str, n)) {
-			if (p->early) {
-				/* Already done in parse_early_param?  (Needs
-				 * exact match on param part) */
-				if (line[n] == '\0' || line[n] == '=')
-					return 1;
-			} else if (!p->setup_func) {
-				printk(KERN_WARNING "Parameter %s is obsolete,"
-				       " ignored\n", p->str);
+			if (!p->setup_func) {
+				printk(KERN_WARNING "Parameter %s is obsolete, ignored\n", p->str);
 				return 1;
 			} else if (p->setup_func(line + n))
 				return 1;
@@ -417,42 +393,9 @@ static void noinline rest_init(void)
 {
 	kernel_thread(init, NULL, CLONE_FS | CLONE_SIGHAND);
 	numa_default_policy();
-	system_state = SYSTEM_BOOTING_SCHEDULER_OK;
 	unlock_kernel();
  	cpu_idle();
 } 
-
-/* Check for early params. */
-static int __init do_early_param(char *param, char *val)
-{
-	struct obs_kernel_param *p;
-	extern struct obs_kernel_param __setup_start, __setup_end;
-
-	for (p = &__setup_start; p < &__setup_end; p++) {
-		if (p->early && strcmp(param, p->str) == 0) {
-			if (p->setup_func(val) != 0)
-				printk(KERN_WARNING
-				       "Malformed early option '%s'\n", param);
-		}
-	}
-	/* We accept everything at this stage. */
-	return 0;
-}
-
-/* Arch code calls this early on, or if not, just before other parsing. */
-void __init parse_early_param(void)
-{
-	static __initdata int done = 0;
-	static __initdata char tmp_cmdline[COMMAND_LINE_SIZE];
-
-	if (done)
-		return;
-
-	/* All fall through to do_early_param. */
-	strlcpy(tmp_cmdline, saved_command_line, COMMAND_LINE_SIZE);
-	parse_args("early options", tmp_cmdline, NULL, 0, do_early_param);
-	done = 1;
-}
 
 /*
  *	Activate the first processor.
@@ -461,6 +404,7 @@ void __init parse_early_param(void)
 asmlinkage void __init start_kernel(void)
 {
 	char * command_line;
+	extern char saved_command_line[];
 	extern struct kernel_param __start___param[], __stop___param[];
 /*
  * Interrupts are still disabled. Do necessary setups, then
@@ -477,7 +421,6 @@ asmlinkage void __init start_kernel(void)
 	 * printk() and can access its per-cpu storage.
 	 */
 	smp_prepare_boot_cpu();
-
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
 	 * timer interrupt). Full topology setup happens at smp_init()
@@ -488,7 +431,6 @@ asmlinkage void __init start_kernel(void)
 	build_all_zonelists();
 	page_alloc_init();
 	printk("Kernel command line: %s\n", saved_command_line);
-	parse_early_param();
 	parse_args("Booting kernel", command_line, __start___param,
 		   __stop___param - __start___param,
 		   &unknown_bootoption);
@@ -524,7 +466,6 @@ asmlinkage void __init start_kernel(void)
 		initrd_start = 0;
 	}
 #endif
-	vfs_caches_init_early();
 	mem_init();
 	kmem_cache_init();
 	numa_policy_init();
@@ -691,18 +632,15 @@ static int init(void * unused)
 
 	fixup_cpu_present_map();
 	smp_init();
+	sched_init_smp();
 
 	/*
 	 * Do this before initcalls, because some drivers want to access
 	 * firmware files.
 	 */
 	populate_rootfs();
-
 	do_basic_setup();
-
 	init_ckrm_sched_res();
-
-	sched_init_smp();
 
 	/*
 	 * check if there is an early userspace init.  If yes, let it do all
@@ -746,16 +684,3 @@ static int init(void * unused)
 
 	panic("No init found.  Try passing init= option to kernel.");
 }
-
-static int early_param_test(char *rest)
-{
-	printk("early_parm_test: %s\n", rest ?: "(null)");
-	return rest ? 0 : -EINVAL;
-}
-early_param("testsetup", early_param_test);
-static int early_setup_test(char *rest)
-{
-	printk("early_setup_test: %s\n", rest ?: "(null)");
-	return 0;
-}
-__setup("testsetup_long", early_setup_test);

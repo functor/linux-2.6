@@ -56,7 +56,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/types.h>
@@ -1356,7 +1355,7 @@ static int __init init(void)
 		pginfos[i].udp_dst_max = 9;
 		
 		sprintf(pginfos[i].fname, "net/%s/pg%i", PG_PROC_DIR, i);
-		pginfos[i].proc_ent = create_proc_entry(pginfos[i].fname, 0600, NULL);
+		pginfos[i].proc_ent = create_proc_entry(pginfos[i].fname, 0600, 0);
 		if (!pginfos[i].proc_ent) {
 			printk("pktgen: Error: cannot create net/%s/pg procfs entry.\n", PG_PROC_DIR);
 			goto cleanup_mem;
@@ -1367,7 +1366,7 @@ static int __init init(void)
 		pginfos[i].proc_ent->owner = THIS_MODULE;
 
 		sprintf(pginfos[i].busy_fname, "net/%s/pg_busy%i",  PG_PROC_DIR, i);
-		pginfos[i].busy_proc_ent = create_proc_entry(pginfos[i].busy_fname, 0, NULL);
+		pginfos[i].busy_proc_ent = create_proc_entry(pginfos[i].busy_fname, 0, 0);
 		if (!pginfos[i].busy_proc_ent) {
 			printk("pktgen: Error: cannot create net/%s/pg_busy procfs entry.\n", PG_PROC_DIR);
 			goto cleanup_mem;
@@ -1410,7 +1409,7 @@ module_exit(cleanup);
 MODULE_AUTHOR("Robert Olsson <robert.olsson@its.uu.se");
 MODULE_DESCRIPTION("Packet Generator tool");
 MODULE_LICENSE("GPL");
-module_param(count_d, int, 0);
-module_param(ipg_d, int, 0);
-module_param(cpu_speed, int, 0);
-module_param(clone_skb_d, int, 0);
+MODULE_PARM(count_d, "i");
+MODULE_PARM(ipg_d, "i");
+MODULE_PARM(cpu_speed, "i");
+MODULE_PARM(clone_skb_d, "i");

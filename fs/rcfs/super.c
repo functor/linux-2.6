@@ -164,7 +164,7 @@ static int rcfs_fill_super(struct super_block *sb, void *data, int silent)
 		clstype = ckrm_classtypes[i];
 		if (clstype == NULL)
 			continue;
-		printk(KERN_DEBUG "A non null classtype\n");
+		printk("A non null classtype\n");
 
 		if ((rc = rcfs_register_classtype(clstype)))
 			continue;	// could return with an error too 

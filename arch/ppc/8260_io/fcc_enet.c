@@ -35,13 +35,13 @@
 #include <linux/skbuff.h>
 #include <linux/spinlock.h>
 
-#include <asm/immap_cpm2.h>
+#include <asm/immap_8260.h>
 #include <asm/pgtable.h>
 #include <asm/mpc8260.h>
 #include <asm/irq.h>
 #include <asm/bitops.h>
 #include <asm/uaccess.h>
-#include <asm/cpm2.h>
+#include <asm/cpm_8260.h>
 
 /* The transmitter timeout
  */
@@ -159,23 +159,20 @@ static int fcc_enet_set_mac_address(struct net_device *dev, void *addr);
 #define PA1_DIRA1	(PA1_TXDAT | PA1_TXEN | PA1_TXER)
 
 #ifdef CONFIG_SBC82xx
-/* rx is clk9, tx is clk10 */
+/* rx is clk9, tx is clk10
+ */
 #define PC_F1RXCLK     ((uint)0x00000100)
 #define PC_F1TXCLK     ((uint)0x00000200)
 #define CMX1_CLK_ROUTE ((uint)0x25000000)
 #define CMX1_CLK_MASK  ((uint)0xff000000)
-#elif defined(CONFIG_ADS8272)
-#define PC_F1RXCLK	((uint)0x00000400)
-#define PC_F1TXCLK	((uint)0x00000200)
-#define CMX1_CLK_ROUTE	((uint)0x36000000)
-#define CMX1_CLK_MASK	((uint)0xff000000)
-#else /* other boards */
-/* CLK12 is receive, CLK11 is transmit.  These are board specific. */
+#else
+/* CLK12 is receive, CLK11 is transmit.  These are board specific.
+*/
 #define PC_F1RXCLK	((uint)0x00000800)
 #define PC_F1TXCLK	((uint)0x00000400)
 #define CMX1_CLK_ROUTE	((uint)0x3e000000)
 #define CMX1_CLK_MASK	((uint)0xff000000)
-#endif
+#endif /* !CONFIG_SBC82xx */
 
 /* I/O Pin assignment for FCC2.  I don't yet know the best way to do this,
  * but there is little variation among the choices.
@@ -196,17 +193,10 @@ static int fcc_enet_set_mac_address(struct net_device *dev, void *addr);
 
 /* CLK13 is receive, CLK14 is transmit.  These are board dependent.
 */
-#ifdef CONFIG_ADS8272
-#define PC_F2RXCLK	((uint)0x00004000)
-#define PC_F2TXCLK	((uint)0x00008000)
-#define CMX2_CLK_ROUTE	((uint)0x00370000)
-#define CMX2_CLK_MASK	((uint)0x00ff0000)
-#else
 #define PC_F2RXCLK	((uint)0x00001000)
 #define PC_F2TXCLK	((uint)0x00002000)
 #define CMX2_CLK_ROUTE	((uint)0x00250000)
 #define CMX2_CLK_MASK	((uint)0x00ff0000)
-#endif
 
 /* I/O Pin assignment for FCC3.  I don't yet know the best way to do this,
  * but there is little variation among the choices.
@@ -238,9 +228,6 @@ static int fcc_enet_set_mac_address(struct net_device *dev, void *addr);
 /* TQM8260 has MDIO and MDCK on PC30 and PC31 respectively */
 #define PC_MDIO		((uint)0x00000002)
 #define PC_MDCK		((uint)0x00000001)
-#elif defined(CONFIG_ADS8272)
-#define PC_MDIO		((uint)0x00002000)
-#define PC_MDCK		((uint)0x00001000)
 #else
 #define PC_MDIO		((uint)0x00000004)
 #define PC_MDCK		((uint)0x00000020)
@@ -268,7 +255,7 @@ static fcc_info_t fcc_ports[] = {
 #ifdef CONFIG_FCC1_ENET
 	{ 0, CPM_CR_FCC1_SBLOCK, CPM_CR_FCC1_PAGE, PROFF_FCC1, SIU_INT_FCC1,
 		(PC_F1RXCLK | PC_F1TXCLK), CMX1_CLK_ROUTE, CMX1_CLK_MASK,
-# if defined(CONFIG_TQM8260) || defined(CONFIG_ADS8272)
+# if defined(CONFIG_TQM8260)
 		PC_MDIO, PC_MDCK },
 # else
 		0x00000004, 0x00000100 },
@@ -277,7 +264,7 @@ static fcc_info_t fcc_ports[] = {
 #ifdef CONFIG_FCC2_ENET
 	{ 1, CPM_CR_FCC2_SBLOCK, CPM_CR_FCC2_PAGE, PROFF_FCC2, SIU_INT_FCC2,
 		(PC_F2RXCLK | PC_F2TXCLK), CMX2_CLK_ROUTE, CMX2_CLK_MASK,
-# if defined(CONFIG_TQM8260) || defined(CONFIG_ADS8272)
+# if defined(CONFIG_TQM8260)
 		PC_MDIO, PC_MDCK },
 # elif defined(CONFIG_EST8260) || defined(CONFIG_ADS8260)
 		0x00400000, 0x00200000 },
@@ -288,7 +275,7 @@ static fcc_info_t fcc_ports[] = {
 #ifdef CONFIG_FCC3_ENET
 	{ 2, CPM_CR_FCC3_SBLOCK, CPM_CR_FCC3_PAGE, PROFF_FCC3, SIU_INT_FCC3,
 		(PC_F3RXCLK | PC_F3TXCLK), CMX3_CLK_ROUTE, CMX3_CLK_MASK,
-# if defined(CONFIG_TQM8260) || defined(CONFIG_ADS8272)
+# if defined(CONFIG_TQM8260)
 		PC_MDIO, PC_MDCK },
 # else
 		0x00000001, 0x00000040 },
@@ -344,12 +331,12 @@ struct fcc_enet_private {
 };
 
 static void init_fcc_shutdown(fcc_info_t *fip, struct fcc_enet_private *cep,
-	volatile cpm2_map_t *immap);
+	volatile immap_t *immap);
 static void init_fcc_startup(fcc_info_t *fip, struct net_device *dev);
-static void init_fcc_ioports(fcc_info_t *fip, volatile iop_cpm2_t *io,
-	volatile cpm2_map_t *immap);
+static void init_fcc_ioports(fcc_info_t *fip, volatile iop8260_t *io,
+	volatile immap_t *immap);
 static void init_fcc_param(fcc_info_t *fip, struct net_device *dev,
-	volatile cpm2_map_t *immap);
+	volatile immap_t *immap);
 
 #ifdef	CONFIG_USE_MDIO
 static int	mii_queue(struct net_device *dev, int request, void (*func)(uint, struct net_device *));
@@ -599,7 +586,7 @@ fcc_enet_interrupt(int irq, void * dev_id, struct pt_regs * regs)
 	    }
 
 	    if (must_restart) {
-		volatile cpm_cpm2_t *cp;
+		volatile cpm8260_t *cp;
 
 		/* Some transmit errors cause the transmitter to shut
 		 * down.  We now issue a restart transmit.  Since the
@@ -1065,75 +1052,6 @@ static phy_info_t phy_info_qs6612 = {
 #endif /* CONFIG_FEC_QS6612 */
 
 
-/* ------------------------------------------------------------------------- */
-/* The Davicom DM9131 is used on the HYMOD board			     */
-
-#ifdef CONFIG_FCC_DM9131
-
-/* register definitions */
-
-#define MII_DM9131_ACR		16	/* Aux. Config Register		*/
-#define MII_DM9131_ACSR		17	/* Aux. Config/Status Register	*/
-#define MII_DM9131_10TCSR	18	/* 10BaseT Config/Status Reg.	*/
-#define MII_DM9131_INTR		21	/* Interrupt Register		*/
-#define MII_DM9131_RECR		22	/* Receive Error Counter Reg.	*/
-#define MII_DM9131_DISCR	23	/* Disconnect Counter Register	*/
-
-static void mii_parse_dm9131_acsr(uint mii_reg, struct net_device *dev)
-{
-	volatile struct fcc_enet_private *fep = dev->priv;
-	uint s = fep->phy_status;
-
-	s &= ~(PHY_STAT_SPMASK);
-
-	switch ((mii_reg >> 12) & 0xf) {
-	case 1: s |= PHY_STAT_10HDX;  break;
-	case 2: s |= PHY_STAT_10FDX;  break;
-	case 4: s |= PHY_STAT_100HDX; break;
-	case 8: s |= PHY_STAT_100FDX; break;
-	}
-
-	fep->phy_status = s;
-}
-
-static phy_info_t phy_info_dm9131 = {
-	0x00181b80,
-	"DM9131",
-
-	(const phy_cmd_t []) {  /* config */
-		/* parse cr and anar to get some info */
-		{ mk_mii_read(MII_REG_CR), mii_parse_cr },
-		{ mk_mii_read(MII_REG_ANAR), mii_parse_anar },
-		{ mk_mii_end, }
-	},
-	(const phy_cmd_t []) {  /* startup - enable interrupts */
-		{ mk_mii_write(MII_DM9131_INTR, 0x0002), NULL },
-		{ mk_mii_write(MII_REG_CR, 0x1200), NULL }, /* autonegotiate */
-		{ mk_mii_end, }
-	},
-	(const phy_cmd_t []) { /* ack_int */
-
-		/* we need to read INTR, SR and ANER to acknowledge */
-
-		{ mk_mii_read(MII_DM9131_INTR), NULL },
-		{ mk_mii_read(MII_REG_SR), mii_parse_sr },
-		{ mk_mii_read(MII_REG_ANER), NULL },
-
-		/* read acsr to get info */
-
-		{ mk_mii_read(MII_DM9131_ACSR), mii_parse_dm9131_acsr },
-		{ mk_mii_end, }
-	},
-	(const phy_cmd_t []) {  /* shutdown - disable interrupts */
-		{ mk_mii_write(MII_DM9131_INTR, 0x0f00), NULL },
-		{ mk_mii_end, }
-	},
-};
-
-
-#endif /* CONFIG_FEC_DM9131 */
-
-
 static phy_info_t *phy_info[] = {
 
 #ifdef CONFIG_FCC_LXT970
@@ -1146,11 +1064,7 @@ static phy_info_t *phy_info[] = {
 
 #ifdef CONFIG_FCC_QS6612
 	&phy_info_qs6612,
-#endif /* CONFIG_FEC_QS6612 */
-
-#ifdef CONFIG_FCC_DM9131
-	&phy_info_dm9131,
-#endif /* CONFIG_FEC_DM9131 */
+#endif /* CONFIG_FEC_LXT971 */
 
 	NULL
 };
@@ -1447,10 +1361,10 @@ static int __init fec_enet_init(void)
 	struct fcc_enet_private *cep;
 	fcc_info_t	*fip;
 	int	i, np, err;
-	volatile	cpm2_map_t		*immap;
-	volatile	iop_cpm2_t	*io;
+	volatile	immap_t		*immap;
+	volatile	iop8260_t	*io;
 
-	immap = (cpm2_map_t *)CPM_MAP_ADDR;	/* and to internal registers */
+	immap = (immap_t *)IMAP_ADDR;	/* and to internal registers */
 	io = &immap->im_ioport;
 
 	np = sizeof(fcc_ports) / sizeof(fcc_info_t);
@@ -1517,7 +1431,7 @@ module_init(fec_enet_init);
 */
 static void __init
 init_fcc_shutdown(fcc_info_t *fip, struct fcc_enet_private *cep,
-						volatile cpm2_map_t *immap)
+						volatile immap_t *immap)
 {
 	volatile	fcc_enet_t	*ep;
 	volatile	fcc_t		*fccp;
@@ -1540,8 +1454,8 @@ init_fcc_shutdown(fcc_info_t *fip, struct fcc_enet_private *cep,
 /* Initialize the I/O pins for the FCC Ethernet.
 */
 static void __init
-init_fcc_ioports(fcc_info_t *fip, volatile iop_cpm2_t *io,
-						volatile cpm2_map_t *immap)
+init_fcc_ioports(fcc_info_t *fip, volatile iop8260_t *io,
+						volatile immap_t *immap)
 {
 
 	/* FCC1 pins are on port A/C.  FCC2/3 are port B/C.
@@ -1599,7 +1513,7 @@ init_fcc_ioports(fcc_info_t *fip, volatile iop_cpm2_t *io,
 
 static void __init
 init_fcc_param(fcc_info_t *fip, struct net_device *dev,
-						volatile cpm2_map_t *immap)
+						volatile immap_t *immap)
 {
 	unsigned char	*eap;
 	unsigned long	mem_addr;
@@ -1608,7 +1522,7 @@ init_fcc_param(fcc_info_t *fip, struct net_device *dev,
 	struct		fcc_enet_private *cep;
 	volatile	fcc_enet_t	*ep;
 	volatile	cbd_t		*bdp;
-	volatile	cpm_cpm2_t	*cp;
+	volatile	cpm8260_t	*cp;
 
 	cep = (struct fcc_enet_private *)(dev->priv);
 	ep = cep->ep;
@@ -1621,15 +1535,28 @@ init_fcc_param(fcc_info_t *fip, struct net_device *dev,
 	 */
 	memset((char *)ep, 0, sizeof(fcc_enet_t));
 
-	/* Allocate space for the buffer descriptors from regular memory.
+	/* Allocate space for the buffer descriptors in the DP ram.
+	 * These are relative offsets in the DP ram address space.
 	 * Initialize base addresses for the buffer descriptors.
 	 */
-	cep->rx_bd_base = (cbd_t *)kmalloc(sizeof(cbd_t) * RX_RING_SIZE,
-			GFP_KERNEL | GFP_DMA);
+#if 0
+	/* I really want to do this, but for some reason it doesn't
+	 * work with the data cache enabled, so I allocate from the
+	 * main memory instead.
+	 */
+	i = m8260_cpm_dpalloc(sizeof(cbd_t) * RX_RING_SIZE, 8);
+	ep->fen_genfcc.fcc_rbase = (uint)&immap->im_dprambase[i];
+	cep->rx_bd_base = (cbd_t *)&immap->im_dprambase[i];
+
+	i = m8260_cpm_dpalloc(sizeof(cbd_t) * TX_RING_SIZE, 8);
+	ep->fen_genfcc.fcc_tbase = (uint)&immap->im_dprambase[i];
+	cep->tx_bd_base = (cbd_t *)&immap->im_dprambase[i];
+#else
+	cep->rx_bd_base = (cbd_t *)m8260_cpm_hostalloc(sizeof(cbd_t) * RX_RING_SIZE, 8);
 	ep->fen_genfcc.fcc_rbase = __pa(cep->rx_bd_base);
-	cep->tx_bd_base = (cbd_t *)kmalloc(sizeof(cbd_t) * TX_RING_SIZE,
-			GFP_KERNEL | GFP_DMA);
+	cep->tx_bd_base = (cbd_t *)m8260_cpm_hostalloc(sizeof(cbd_t) * TX_RING_SIZE, 8);
 	ep->fen_genfcc.fcc_tbase = __pa(cep->tx_bd_base);
+#endif
 
 	cep->dirty_tx = cep->cur_tx = cep->tx_bd_base;
 	cep->cur_rx = cep->rx_bd_base;
@@ -1846,11 +1773,11 @@ init_fcc_startup(fcc_info_t *fip, struct net_device *dev)
 	 */
 	fccp->fcc_fpsmr = FCC_PSMR_ENCRC;
 
-#ifdef CONFIG_PQ2ADS
+#ifdef CONFIG_ADS8260
 	/* Enable the PHY.
 	*/
-        *(volatile uint *)(BCSR_ADDR + 4) &= ~BCSR1_FETHIEN;
-        *(volatile uint *)(BCSR_ADDR + 4) |=  BCSR1_FETH_RST;
+	ads_csr_addr[1] |= BCSR1_FETH_RST;	/* Remove reset */
+	ads_csr_addr[1] &= ~BCSR1_FETHIEN;	/* Enable */
 #endif
 
 #if defined(CONFIG_USE_MDIO) || defined(CONFIG_TQM8260)
@@ -1890,10 +1817,10 @@ mii_send_receive(fcc_info_t *fip, uint cmd)
 {
 	uint		retval;
 	int		read_op, i, off;
-	volatile	cpm2_map_t		*immap;
-	volatile	iop_cpm2_t	*io;
+	volatile	immap_t		*immap;
+	volatile	iop8260_t	*io;
 
-	immap = (cpm2_map_t *)CPM_MAP_ADDR;
+	immap = (immap_t *)IMAP_ADDR;
 	io = &immap->im_ioport;
 
 	io->iop_pdirc |= (fip->fc_mdio | fip->fc_mdck);

@@ -187,9 +187,9 @@ int __init journal_init_revoke_caches(void)
 void journal_destroy_revoke_caches(void)
 {
 	kmem_cache_destroy(revoke_record_cache);
-	revoke_record_cache = NULL;
+	revoke_record_cache = 0;
 	kmem_cache_destroy(revoke_table_cache);
-	revoke_table_cache = NULL;
+	revoke_table_cache = 0;
 }
 
 /* Initialise the revoke table for a given journal to a given size. */
@@ -332,7 +332,6 @@ int journal_revoke(handle_t *handle, unsigned long blocknr,
 	struct block_device *bdev;
 	int err;
 
-	might_sleep();
 	if (bh_in)
 		BUFFER_TRACE(bh_in, "enter");
 

@@ -837,7 +837,7 @@ static void adpt_i2o_sys_shutdown(void)
 		kfree(p1);
 	}
 //	spin_unlock_irqrestore(&adpt_post_wait_lock, flags);
-	adpt_post_wait_queue = NULL;
+	adpt_post_wait_queue = 0;
 
 	 printk(KERN_INFO "Adaptec I2O controllers down.\n");
 }
@@ -1635,21 +1635,21 @@ static int adpt_close(struct inode *inode, struct file *file)
 }
 
 
-static int adpt_i2o_passthru(adpt_hba* pHba, u32 __user *arg)
+static int adpt_i2o_passthru(adpt_hba* pHba, u32* arg)
 {
 	u32 msg[MAX_MESSAGE_SIZE];
 	u32* reply = NULL;
 	u32 size = 0;
 	u32 reply_size = 0;
-	u32 __user *user_msg = arg;
-	u32 __user * user_reply = NULL;
-	void *sg_list[pHba->sg_tablesize];
+	u32* user_msg = (u32*)arg;
+	u32* user_reply = NULL;
+	ulong sg_list[pHba->sg_tablesize];
 	u32 sg_offset = 0;
 	u32 sg_count = 0;
 	int sg_index = 0;
 	u32 i = 0;
 	u32 rcode = 0;
-	void *p = NULL;
+	ulong p = 0;
 	ulong flags = 0;
 
 	memset(&msg, 0, MAX_MESSAGE_SIZE*4);
@@ -1666,7 +1666,7 @@ static int adpt_i2o_passthru(adpt_hba* pHba, u32 __user *arg)
 	size *= 4; // Convert to bytes
 
 	/* Copy in the user's I2O command */
-	if(copy_from_user(msg, user_msg, size)) {
+	if(copy_from_user((void*)msg, (void*)user_msg, size)) {
 		return -EFAULT;
 	}
 	get_user(reply_size, &user_reply[0]);
@@ -1705,8 +1705,8 @@ static int adpt_i2o_passthru(adpt_hba* pHba, u32 __user *arg)
 			}
 			sg_size = sg[i].flag_count & 0xffffff;      
 			/* Allocate memory for the transfer */
-			p = kmalloc(sg_size, GFP_KERNEL|ADDR32);
-			if(!p) {
+			p = (ulong)kmalloc(sg_size, GFP_KERNEL|ADDR32);
+			if(p == 0) {
 				printk(KERN_DEBUG"%s: Could not allocate SG buffer - size = %d buffer number %d of %d\n",
 						pHba->name,sg_size,i,sg_count);
 				rcode = -ENOMEM;
@@ -1716,14 +1716,14 @@ static int adpt_i2o_passthru(adpt_hba* pHba, u32 __user *arg)
 			/* Copy in the user's SG buffer if necessary */
 			if(sg[i].flag_count & 0x04000000 /*I2O_SGL_FLAGS_DIR*/) {
 				// TODO 64bit fix
-				if (copy_from_user(p,(void __user *)sg[i].addr_bus, sg_size)) {
+				if (copy_from_user((void*)p,(void*)sg[i].addr_bus, sg_size)) {
 					printk(KERN_DEBUG"%s: Could not copy SG buf %d FROM user\n",pHba->name,i);
 					rcode = -EFAULT;
 					goto cleanup;
 				}
 			}
 			//TODO 64bit fix
-			sg[i].addr_bus = (u32)virt_to_bus(p);
+			sg[i].addr_bus = (u32)virt_to_bus((void*)p);
 		}
 	}
 
@@ -1765,7 +1765,7 @@ static int adpt_i2o_passthru(adpt_hba* pHba, u32 __user *arg)
 		size = size>>16;
 		size *= 4;
 		/* Copy in the user's I2O command */
-		if (copy_from_user (msg, user_msg, size)) {
+		if (copy_from_user ((void*)msg, (void*)user_msg, size)) {
 			rcode = -EFAULT;
 			goto cleanup;
 		}
@@ -1778,8 +1778,8 @@ static int adpt_i2o_passthru(adpt_hba* pHba, u32 __user *arg)
 			if(! (sg[j].flag_count & 0x4000000 /*I2O_SGL_FLAGS_DIR*/)) {
 				sg_size = sg[j].flag_count & 0xffffff; 
 				// TODO 64bit fix
-				if (copy_to_user((void __user *)sg[j].addr_bus,sg_list[j], sg_size)) {
-					printk(KERN_WARNING"%s: Could not copy %p TO user %x\n",pHba->name, sg_list[j], sg[j].addr_bus);
+				if (copy_to_user((void*)sg[j].addr_bus,(void*)sg_list[j], sg_size)) {
+					printk(KERN_WARNING"%s: Could not copy %lx TO user %x\n",pHba->name, sg_list[j], sg[j].addr_bus);
 					rcode = -EFAULT;
 					goto cleanup;
 				}
@@ -1807,7 +1807,7 @@ cleanup:
 	while(sg_index) {
 		if(sg_list[--sg_index]) {
 			if (rcode != -ETIME && rcode != -EINTR)
-				kfree(sg_list[sg_index]);
+				kfree((void*)(sg_list[sg_index]));
 		}
 	}
 	return rcode;
@@ -1820,7 +1820,7 @@ cleanup:
  */
 
 /* Get all the info we can not get from kernel services */
-static int adpt_system_info(void __user *buffer)
+static int adpt_system_info(void *buffer)
 {
 	sysInfo_S si;
 
@@ -1916,7 +1916,6 @@ static int adpt_ioctl(struct inode *inode, struct file *file, uint cmd,
 	int error = 0;
 	adpt_hba* pHba;
 	ulong flags = 0;
-	void __user *argp = (void __user *)arg;
 
 	minor = iminor(inode);
 	if (minor >= DPTI_MAX_HBA){
@@ -1942,12 +1941,13 @@ static int adpt_ioctl(struct inode *inode, struct file *file, uint cmd,
 	switch (cmd) {
 	// TODO: handle 3 cases
 	case DPT_SIGNATURE:
-		if (copy_to_user(argp, &DPTI_sig, sizeof(DPTI_sig))) {
+		if (copy_to_user((char*)arg, &DPTI_sig, sizeof(DPTI_sig))) {
 			return -EFAULT;
 		}
 		break;
 	case I2OUSRCMD:
-		return adpt_i2o_passthru(pHba, argp);
+		return	adpt_i2o_passthru(pHba,(u32*)arg);
+		break;
 
 	case DPT_CTRLINFO:{
 		drvrHBAinfo_S HbaInfo;
@@ -1963,18 +1963,19 @@ static int adpt_ioctl(struct inode *inode, struct file *file, uint cmd,
 		HbaInfo.pciDeviceNum=PCI_SLOT(pHba->pDev->devfn); 
 		HbaInfo.Interrupt = pHba->pDev->irq; 
 		HbaInfo.hbaFlags = FLG_OSD_PCI_VALID | FLG_OSD_DMA | FLG_OSD_I2O;
-		if(copy_to_user(argp, &HbaInfo, sizeof(HbaInfo))){
+		if(copy_to_user((void *) arg, &HbaInfo, sizeof(HbaInfo))){
 			printk(KERN_WARNING"%s: Could not copy HbaInfo TO user\n",pHba->name);
 			return -EFAULT;
 		}
 		break;
 		}
 	case DPT_SYSINFO:
-		return adpt_system_info(argp);
+		return adpt_system_info((void*)arg);
+		break;
 	case DPT_BLINKLED:{
 		u32 value;
 		value = (u32)adpt_read_blink_led(pHba);
-		if (copy_to_user(argp, &value, sizeof(value))) {
+		if (copy_to_user((char*)arg, &value, sizeof(value))) {
 			return -EFAULT;
 		}
 		break;

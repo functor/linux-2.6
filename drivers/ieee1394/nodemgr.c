@@ -1075,7 +1075,7 @@ do {								\
 
 #undef PUT_ENVP
 
-	envp[i] = NULL;
+	envp[i] = 0;
 
 	return 0;
 }

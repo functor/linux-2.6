@@ -234,7 +234,6 @@ sg_open(struct inode *inode, struct file *filp)
 	int res;
 	int retval;
 
-	nonseekable_open(inode, filp);
 	SCSI_LOG_TIMEOUT(3, printk("sg_open: dev=%d, flags=0x%x\n", dev, flags));
 	sdp = sg_get_dev(dev);
 	if ((!sdp) || (!sdp->device))
@@ -350,6 +349,7 @@ sg_read(struct file *filp, char __user *buf, size_t count, loff_t * ppos)
 		return -ENXIO;
 	SCSI_LOG_TIMEOUT(3, printk("sg_read: %s, count=%d\n",
 				   sdp->disk->disk_name, (int) count));
+	if (ppos != &filp->f_pos) ;	/* FIXME: Hmm.  Seek to the right place, or fail?  */
 	if ((k = verify_area(VERIFY_WRITE, buf, count)))
 		return k;
 	if (sfp->force_packid && (count >= SZ_SG_HEADER)) {
@@ -507,6 +507,7 @@ sg_write(struct file *filp, const char __user *buf, size_t count, loff_t * ppos)
 	if (!((filp->f_flags & O_NONBLOCK) ||
 	      scsi_block_when_processing_errors(sdp->device)))
 		return -ENXIO;
+	if (ppos != &filp->f_pos) ;	/* FIXME: Hmm.  Seek to the right place, or fail?  */
 
 	if ((k = verify_area(VERIFY_READ, buf, count)))
 		return k;	/* protects following copy_from_user()s + get_user()s */
@@ -723,19 +724,6 @@ sg_common_write(Sg_fd * sfp, Sg_request * srp,
 		    sg_cmd_done, timeout, SG_DEFAULT_RETRIES);
 	/* dxfer_len overwrites SRpnt->sr_bufflen, hence need for b_malloc_len */
 	return 0;
-}
-
-static inline unsigned
-sg_jif_to_ms(int jifs)
-{
-	if (jifs <= 0)
-		return 0U;
-	else {
-		unsigned int j = (unsigned int) jifs;
-		return (j <
-			(UINT_MAX / 1000)) ? ((j * 1000) / HZ) : ((j / HZ) *
-								  1000);
-	}
 }
 
 static int
@@ -2422,7 +2410,7 @@ sg_add_sfp(Sg_device * sdp, int dev)
 	Sg_fd *sfp;
 	unsigned long iflags;
 
-	sfp = (Sg_fd *) sg_page_malloc(sizeof (Sg_fd), 0, NULL);
+	sfp = (Sg_fd *) sg_page_malloc(sizeof (Sg_fd), 0, 0);
 	if (!sfp)
 		return NULL;
 	memset(sfp, 0, sizeof (Sg_fd));
@@ -2602,6 +2590,19 @@ sg_ms_to_jif(unsigned int msecs)
 		return ((int) msecs <
 			(INT_MAX / 1000)) ? (((int) msecs * HZ) / 1000)
 		    : (((int) msecs / 1000) * HZ);
+}
+
+static inline unsigned
+sg_jif_to_ms(int jifs)
+{
+	if (jifs <= 0)
+		return 0U;
+	else {
+		unsigned int j = (unsigned int) jifs;
+		return (j <
+			(UINT_MAX / 1000)) ? ((j * 1000) / HZ) : ((j / HZ) *
+								  1000);
+	}
 }
 
 static unsigned char allow_ops[] = { TEST_UNIT_READY, REQUEST_SENSE,
@@ -2819,7 +2820,7 @@ sg_proc_write_adio(struct file *filp, const char __user *buffer,
 	if (copy_from_user(buff, buffer, num))
 		return -EFAULT;
 	buff[num] = '\0';
-	sg_allow_dio = simple_strtoul(buff, NULL, 10) ? 1 : 0;
+	sg_allow_dio = simple_strtoul(buff, 0, 10) ? 1 : 0;
 	return count;
 }
 
@@ -2842,7 +2843,7 @@ sg_proc_write_dressz(struct file *filp, const char __user *buffer,
 	if (copy_from_user(buff, buffer, num))
 		return -EFAULT;
 	buff[num] = '\0';
-	k = simple_strtoul(buff, NULL, 10);
+	k = simple_strtoul(buff, 0, 10);
 	if (k <= 1048576) {	/* limit "big buff" to 1 MB */
 		sg_big_buff = k;
 		return count;

@@ -70,11 +70,11 @@ static loff_t vcs_lseek(struct file *file, loff_t offset, int orig)
 {
 	int size;
 
-	down(&con_buf_sem);
+	lock_kernel();
 	size = vcs_size(file->f_dentry->d_inode);
 	switch (orig) {
 		default:
-			up(&con_buf_sem);
+			unlock_kernel();
 			return -EINVAL;
 		case 2:
 			offset += size;
@@ -85,29 +85,34 @@ static loff_t vcs_lseek(struct file *file, loff_t offset, int orig)
 			break;
 	}
 	if (offset < 0 || offset > size) {
-		up(&con_buf_sem);
+		unlock_kernel();
 		return -EINVAL;
 	}
 	file->f_pos = offset;
-	up(&con_buf_sem);
+	unlock_kernel();
 	return file->f_pos;
 }
 
+/* We share this temporary buffer with the console write code
+ * so that we can easily avoid touching user space while holding the
+ * console spinlock.
+ */
+extern char con_buf[PAGE_SIZE];
+#define CON_BUF_SIZE	PAGE_SIZE
+extern struct semaphore con_buf_sem;
 
 static ssize_t
 vcs_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
 	struct inode *inode = file->f_dentry->d_inode;
 	unsigned int currcons = iminor(inode);
-	long pos;
+	long pos = *ppos;
 	long viewed, attr, read;
 	int col, maxcol;
 	unsigned short *org = NULL;
 	ssize_t ret;
 
 	down(&con_buf_sem);
-
-	pos = *ppos;
 
 	/* Select the proper current console and verify
 	 * sanity of the situation under the console lock.
@@ -270,7 +275,7 @@ vcs_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
 	struct inode *inode = file->f_dentry->d_inode;
 	unsigned int currcons = iminor(inode);
-	long pos;
+	long pos = *ppos;
 	long viewed, attr, size, written;
 	char *con_buf0;
 	int col, maxcol;
@@ -278,8 +283,6 @@ vcs_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 	size_t ret;
 
 	down(&con_buf_sem);
-
-	pos = *ppos;
 
 	/* Select the proper current console and verify
 	 * sanity of the situation under the console lock.

@@ -217,14 +217,6 @@ vn_revalidate(
 			inode->i_flags |= S_IMMUTABLE;
 		else
 			inode->i_flags &= ~S_IMMUTABLE;
-		if (va.va_xflags & XFS_XFLAG_IUNLINK)
-			inode->i_flags |= S_IUNLINK;
-		else
-			inode->i_flags &= ~S_IUNLINK;
-		if (va.va_xflags & XFS_XFLAG_BARRIER)
-			inode->i_flags |= S_BARRIER;
-		else
-			inode->i_flags &= ~S_BARRIER;
 		if (va.va_xflags & XFS_XFLAG_APPEND)
 			inode->i_flags |= S_APPEND;
 		else

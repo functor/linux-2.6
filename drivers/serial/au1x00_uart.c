@@ -969,7 +969,9 @@ static int serial8250_request_port(struct uart_port *port)
 	struct resource *res = NULL, *res_rsa = NULL;
 	int ret = 0;
 
-	ret = serial8250_request_std_resource(up, &res);
+	if (up->port.flags & UPF_RESOURCES) {
+		ret = serial8250_request_std_resource(up, &res);
+	}
 
 	/*
 	 * If we have a mapbase, then request that as well.
@@ -1070,7 +1072,8 @@ static void __init serial8250_isa_init_ports(void)
 		up->port.iobase   = old_serial_port[i].port;
 		up->port.irq      = old_serial_port[i].irq;
 		up->port.uartclk  = get_au1x00_uart_baud_base();
-		up->port.flags    = old_serial_port[i].flags;
+		up->port.flags    = old_serial_port[i].flags |
+				    UPF_RESOURCES;
 		up->port.hub6     = old_serial_port[i].hub6;
 		up->port.membase  = old_serial_port[i].iomem_base;
 		up->port.iotype   = old_serial_port[i].io_type;

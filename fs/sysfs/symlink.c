@@ -5,14 +5,12 @@
 #include <linux/fs.h>
 #include <linux/module.h>
 #include <linux/kobject.h>
-#include <linux/namei.h>
 
 #include "sysfs.h"
 
 static struct inode_operations sysfs_symlink_inode_operations = {
-	.readlink = generic_readlink,
+	.readlink = sysfs_readlink,
 	.follow_link = sysfs_follow_link,
-	.put_link = sysfs_put_link,
 };
 
 static int init_symlink(struct inode * inode)
@@ -142,21 +140,38 @@ static int sysfs_getlink(struct dentry *dentry, char * path)
 
 }
 
-int sysfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+int sysfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
 {
-	int error = -ENOMEM;
+	int error = 0;
 	unsigned long page = get_zeroed_page(GFP_KERNEL);
-	if (page)
-		error = sysfs_getlink(dentry, (char *) page); 
-	nd_set_link(nd, error ? ERR_PTR(error) : (char *)page);
-	return 0;
+
+	if (!page)
+		return -ENOMEM;
+
+	error = sysfs_getlink(dentry, (char *) page);
+	if (!error)
+	        error = vfs_readlink(dentry, buffer, buflen, (char *) page);
+
+	free_page(page);
+
+	return error;
 }
 
-void sysfs_put_link(struct dentry *dentry, struct nameidata *nd)
+int sysfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
-	char *page = nd_get_link(nd);
-	if (!IS_ERR(page))
-		free_page((unsigned long)page);
+	int error = 0;
+	unsigned long page = get_zeroed_page(GFP_KERNEL);
+
+	if (!page)
+		return -ENOMEM;
+
+	error = sysfs_getlink(dentry, (char *) page); 
+	if (!error)
+	        error = vfs_follow_link(nd, (char *) page);
+
+	free_page(page);
+
+	return error;
 }
 
 EXPORT_SYMBOL(sysfs_create_link);

@@ -1311,8 +1311,8 @@ dgrs_found_device(
 		*privN = *priv;
 
 			/* ... and zero out VM areas */
-		privN->vmem = NULL;
-		privN->vplxdma = NULL;
+		privN->vmem = 0;
+		privN->vplxdma = 0;
 			/* ... and zero out IRQ */
 		devN->irq = 0;
 			/* ... and base MAC address off address of 1st port */

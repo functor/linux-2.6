@@ -32,8 +32,7 @@ struct user_struct root_user = {
 	.processes	= ATOMIC_INIT(1),
 	.files		= ATOMIC_INIT(0),
 	.sigpending	= ATOMIC_INIT(0),
-	.mq_bytes	= 0,
-	.locked_shm     = 0
+	.mq_bytes	= 0
 };
 
 /*
@@ -115,7 +114,6 @@ struct user_struct * alloc_uid(xid_t xid, uid_t uid)
 		atomic_set(&new->sigpending, 0);
 
 		new->mq_bytes = 0;
-		new->locked_shm = 0;
 
 		/*
 		 * Before adding this, check whether we raced
