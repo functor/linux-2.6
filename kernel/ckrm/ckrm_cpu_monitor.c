@@ -962,7 +962,7 @@ static int ckrm_cpu_monitord(void *nothing)
 	daemonize("ckrm_cpu_ctrld");
 	for (;;) {
 		/*sleep for sometime before next try*/
-		set_current_state(TASK_INTERRUPTIBLE);
+		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(CPU_MONITOR_INTERVAL);
 		ckrm_cpu_monitor(1);
 		if (thread_exit) {
