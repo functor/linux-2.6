@@ -116,7 +116,6 @@ extern struct group_info init_groups;
 	.vx_info	= NULL,						\
 	.nid		= 0,						\
 	.nx_info	= NULL,						\
-	.ioprio		= IOPRIO_NORM,					\
 }
 
 

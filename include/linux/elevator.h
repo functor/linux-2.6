@@ -17,7 +17,6 @@ typedef void (elevator_requeue_req_fn) (request_queue_t *, struct request *);
 typedef struct request *(elevator_request_list_fn) (request_queue_t *, struct request *);
 typedef void (elevator_completed_req_fn) (request_queue_t *, struct request *);
 typedef int (elevator_may_queue_fn) (request_queue_t *, int);
-typedef void (elevator_set_congested_fn) (request_queue_t *);
 
 typedef int (elevator_set_req_fn) (request_queue_t *, struct request *, int);
 typedef void (elevator_put_req_fn) (request_queue_t *, struct request *);
@@ -46,7 +45,6 @@ struct elevator_s
 	elevator_put_req_fn *elevator_put_req_fn;
 
 	elevator_may_queue_fn *elevator_may_queue_fn;
-	elevator_set_congested_fn *elevator_set_congested_fn;
 
 	elevator_init_fn *elevator_init_fn;
 	elevator_exit_fn *elevator_exit_fn;
@@ -76,7 +74,6 @@ extern struct request *elv_latter_request(request_queue_t *, struct request *);
 extern int elv_register_queue(request_queue_t *q);
 extern void elv_unregister_queue(request_queue_t *q);
 extern int elv_may_queue(request_queue_t *, int);
-extern void elv_set_congested(request_queue_t *);
 extern void elv_completed_request(request_queue_t *, struct request *);
 extern int elv_set_request(request_queue_t *, struct request *, int);
 extern void elv_put_request(request_queue_t *, struct request *);
@@ -121,7 +118,5 @@ extern int elv_try_last_merge(request_queue_t *, struct bio *);
 #define ELEVATOR_INSERT_FRONT	1
 #define ELEVATOR_INSERT_BACK	2
 #define ELEVATOR_INSERT_SORT	3
-
-#define RQ_ELV_DATA(rq)		(rq)->elevator_private
 
 #endif
