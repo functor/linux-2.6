@@ -43,7 +43,8 @@ endif
 
 ifeq ($(GCC_VERSION),3)
  ifeq ($(GCC_MINOR_VERSION),4)
-	cflags-$(CONFIG_ITANIUM)	+= -mtune=merced
+# Workaround Itanium 1 bugs in gcc 3.4.
+#	cflags-$(CONFIG_ITANIUM)	+= -mtune=merced
 	cflags-$(CONFIG_MCKINLEY)	+= -mtune=mckinley
  endif
 endif
@@ -59,12 +60,16 @@ core-$(CONFIG_IA32_SUPPORT)	+= arch/ia64/ia32/
 core-$(CONFIG_IA64_DIG) 	+= arch/ia64/dig/
 core-$(CONFIG_IA64_GENERIC) 	+= arch/ia64/dig/
 core-$(CONFIG_IA64_HP_ZX1)	+= arch/ia64/dig/
-core-$(CONFIG_IA64_SGI_SN2)	+= arch/ia64/sn/
-
+ifeq ($(CONFIG_DISCONTIGMEM),y)
+	core-$(CONFIG_IA64_SGI_SN2)	+= arch/ia64/sn/
+endif
 drivers-$(CONFIG_PCI)		+= arch/ia64/pci/
 drivers-$(CONFIG_IA64_HP_SIM)	+= arch/ia64/hp/sim/
 drivers-$(CONFIG_IA64_HP_ZX1)	+= arch/ia64/hp/common/ arch/ia64/hp/zx1/
-drivers-$(CONFIG_IA64_GENERIC)	+= arch/ia64/hp/common/ arch/ia64/hp/zx1/ arch/ia64/hp/sim/ arch/ia64/sn/
+drivers-$(CONFIG_IA64_GENERIC)	+= arch/ia64/hp/common/ arch/ia64/hp/zx1/ arch/ia64/hp/sim/
+ifeq ($(CONFIG_DISCONTIGMEM),y)
+drivers-$(CONFIG_IA64_GENERIC)	+=   arch/ia64/sn/
+endif
 drivers-$(CONFIG_OPROFILE)	+= arch/ia64/oprofile/
 
 boot := arch/ia64/hp/sim/boot
@@ -72,6 +77,10 @@ boot := arch/ia64/hp/sim/boot
 .PHONY: boot compressed check
 
 all: compressed unwcheck
+
+bzImage: compressed
+	mkdir -p arch/ia64/boot
+	cp vmlinux.gz arch/ia64/boot/bzImage
 
 compressed: vmlinux.gz
 

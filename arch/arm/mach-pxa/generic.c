@@ -59,6 +59,24 @@ void pxa_gpio_mode(int gpio_mode)
 EXPORT_SYMBOL(pxa_gpio_mode);
 
 /*
+ * Routine to safely enable or disable a clock in the CKEN
+ */
+void pxa_set_cken(int clock, int enable)
+{
+	unsigned long flags;
+	local_irq_save(flags);
+
+	if (enable)
+		CKEN |= clock;
+	else
+		CKEN &= ~clock;
+
+	local_irq_restore(flags);
+}
+
+EXPORT_SYMBOL(pxa_set_cken);
+
+/*
  * Intel PXA2xx internal register mapping.
  *
  * Note 1: not all PXA2xx variants implement all those addresses.
@@ -100,8 +118,8 @@ static struct resource pxamci_resources[] = {
 static u64 pxamci_dmamask = 0xffffffffUL;
 
 static struct platform_device pxamci_device = {
-	.name		= "pxamci",
-	.id		= 0,
+	.name		= "pxa2xx-mci",
+	.id		= -1,
 	.dev		= {
 		.dma_mask = &pxamci_dmamask,
 		.coherent_dma_mask = 0xffffffff,
@@ -135,8 +153,8 @@ static struct resource pxa2xx_udc_resources[] = {
 static u64 udc_dma_mask = ~(u32)0;
 
 static struct platform_device udc_device = {
-	.name		= "pxa2xx_udc",
-	.id		= 0,
+	.name		= "pxa2xx-udc",
+	.id		= -1,
 	.resource	= pxa2xx_udc_resources,
 	.num_resources	= ARRAY_SIZE(pxa2xx_udc_resources),
 	.dev		=  {
@@ -169,8 +187,8 @@ static struct resource pxafb_resources[] = {
 static u64 fb_dma_mask = ~(u64)0;
 
 static struct platform_device pxafb_device = {
-	.name		= "pxafb",
-	.id		= 0,
+	.name		= "pxa2xx-fb",
+	.id		= -1,
 	.dev		= {
  		.platform_data	= &pxa_fb_info,
 		.dma_mask	= &fb_dma_mask,
@@ -180,10 +198,26 @@ static struct platform_device pxafb_device = {
 	.resource	= pxafb_resources,
 };
 
+static struct platform_device ffuart_device = {
+	.name		= "pxa2xx-uart",
+	.id		= 0,
+};
+static struct platform_device btuart_device = {
+	.name		= "pxa2xx-uart",
+	.id		= 1,
+};
+static struct platform_device stuart_device = {
+	.name		= "pxa2xx-uart",
+	.id		= 2,
+};
+
 static struct platform_device *devices[] __initdata = {
 	&pxamci_device,
 	&udc_device,
 	&pxafb_device,
+	&ffuart_device,
+	&btuart_device,
+	&stuart_device,
 };
 
 static int __init pxa_init(void)

@@ -7,7 +7,7 @@ extra-y := head.o init_task.o vmlinux.lds.s
 obj-y	:= process.o semaphore.o signal.o entry.o traps.o irq.o vm86.o \
 		ptrace.o i8259.o ioport.o ldt.o setup.o time.o sys_i386.o \
 		pci-dma.o i386_ksyms.o i387.o dmi_scan.o bootflag.o \
-		doublefault.o
+		doublefault.o entry_trampoline.o
 
 obj-y				+= cpu/
 obj-y				+= timers/
@@ -31,9 +31,8 @@ obj-$(CONFIG_ACPI_SRAT) 	+= srat.o
 obj-$(CONFIG_HPET_TIMER) 	+= time_hpet.o
 obj-$(CONFIG_EFI) 		+= efi.o efi_stub.o
 obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
-obj-$(CONFIG_X86_STD_RESOURCES)	+= std_resources.o
 
-EXTRA_AFLAGS   := -traditional
+EXTRA_AFLAGS   := -traditional -m32
 
 obj-$(CONFIG_SCx200)		+= scx200.o
 
@@ -48,7 +47,7 @@ quiet_cmd_syscall = SYSCALL $@
       cmd_syscall = $(CC) -nostdlib $(SYSCFLAGS_$(@F)) \
 		          -Wl,-T,$(filter-out FORCE,$^) -o $@
 
-vsyscall-flags = -shared -s -Wl,-soname=linux-gate.so.1
+vsyscall-flags = -m32 -shared -s -Wl,-soname=linux-gate.so.1
 SYSCFLAGS_vsyscall-sysenter.so	= $(vsyscall-flags)
 SYSCFLAGS_vsyscall-int80.so	= $(vsyscall-flags)
 
@@ -63,6 +62,6 @@ extra-y += vsyscall-syms.o
 $(obj)/built-in.o: $(obj)/vsyscall-syms.o
 $(obj)/built-in.o: ld_flags += -R $(obj)/vsyscall-syms.o
 
-SYSCFLAGS_vsyscall-syms.o = -r
+SYSCFLAGS_vsyscall-syms.o = -m32 -r
 $(obj)/vsyscall-syms.o: $(src)/vsyscall.lds $(obj)/vsyscall-sysenter.o FORCE
 	$(call if_changed,syscall)

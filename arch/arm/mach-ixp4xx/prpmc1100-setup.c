@@ -63,7 +63,7 @@ static struct resource prpmc1100_flash_resource = {
 	.flags		= IORESOURCE_MEM,
 };
 
-static struct platform_device prpmc1100_flash_device = {
+static struct platform_device prpmc1100_flash = {
 	.name		= "IXP4XX-Flash",
 	.id		= 0,
 	.dev		= {
@@ -73,9 +73,13 @@ static struct platform_device prpmc1100_flash_device = {
 	.resource	= &prpmc1100_flash_resource,
 };
 
+static struct platform_device *prpmc1100_devices[] __initdata = {
+	&prpmc1100_flash
+};
+
 static void __init prpmc1100_init(void)
 {
-	platform_add_device(&prpmc1100_flash_device);
+	platform_add_devices(&prpmc1100_devices, ARRAY_SIZE(prpmc1100_devices));
 }
 
 MACHINE_START(PRPMC1100, "Motorola PrPMC1100")
@@ -84,6 +88,7 @@ MACHINE_START(PRPMC1100, "Motorola PrPMC1100")
                 IXP4XX_PERIPHERAL_BASE_VIRT)
         MAPIO(prpmc1100_map_io)
         INITIRQ(ixp4xx_init_irq)
+	INITTIME(ixp4xx_init_time)
         BOOT_PARAMS(0x0100)
 	INIT_MACHINE(prpmc1100_init)
 MACHINE_END

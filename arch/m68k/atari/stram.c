@@ -635,7 +635,8 @@ static inline void unswap_pte(struct vm_area_struct * vma, unsigned long
 	set_pte(dir, pte_mkdirty(mk_pte(page, vma->vm_page_prot)));
 	swap_free(entry);
 	get_page(page);
-	++vma->vm_mm->rss;
+	// ++vma->vm_mm->rss;
+	vx_rsspages_inc(vma->vm_mm);
 }
 
 static inline void unswap_pmd(struct vm_area_struct * vma, pmd_t *dir,
@@ -743,7 +744,7 @@ static int unswap_by_read(unsigned short *map, unsigned long max,
 
 		if (map[i]) {
 			entry = swp_entry(stram_swap_type, i);
-			DPRINTK("unswap: map[i=%lu]=%u nr_swap=%u\n",
+			DPRINTK("unswap: map[i=%lu]=%u nr_swap=%ld\n",
 				i, map[i], nr_swap_pages);
 
 			swap_device_lock(stram_swap_info);
@@ -772,7 +773,7 @@ static int unswap_by_read(unsigned short *map, unsigned long max,
 	#endif
 		}
 
-		DPRINTK( "unswap: map[i=%lu]=%u nr_swap=%u\n",
+		DPRINTK( "unswap: map[i=%lu]=%u nr_swap=%ld\n",
 				 i, map[i], nr_swap_pages );
 		swap_list_lock();
 		swap_device_lock(stram_swap_info);

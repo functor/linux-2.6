@@ -126,7 +126,7 @@ static struct resource sa1111_resources[] = {
 
 static struct platform_device sa1111_device = {
 	.name		= "sa1111",
-	.id		= 0,
+	.id		= -1,
 	.num_resources	= ARRAY_SIZE(sa1111_resources),
 	.resource	= sa1111_resources,
 };
@@ -151,7 +151,7 @@ static struct resource smc91x_resources[] = {
 
 static struct platform_device smc91x_device = {
 	.name		= "smc91x",
-	.id		= 0,
+	.id		= -1,
 	.num_resources	= ARRAY_SIZE(smc91x_resources),
 	.resource	= smc91x_resources,
 };
@@ -220,5 +220,6 @@ MACHINE_START(LUBBOCK, "Intel DBPXA250 Development Platform (aka Lubbock)")
 	BOOT_MEM(0xa0000000, 0x40000000, io_p2v(0x40000000))
 	MAPIO(lubbock_map_io)
 	INITIRQ(lubbock_init_irq)
+	INITTIME(pxa_init_time)
 	INIT_MACHINE(lubbock_init)
 MACHINE_END

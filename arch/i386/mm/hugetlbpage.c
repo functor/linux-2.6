@@ -15,7 +15,6 @@
 #include <linux/err.h>
 #include <linux/sysctl.h>
 #include <asm/mman.h>
-#include <asm/pgalloc.h>
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 
@@ -43,7 +42,8 @@ static void set_huge_pte(struct mm_struct *mm, struct vm_area_struct *vma, struc
 {
 	pte_t entry;
 
-	mm->rss += (HPAGE_SIZE / PAGE_SIZE);
+	// mm->rss += (HPAGE_SIZE / PAGE_SIZE);
+	vx_rsspages_add(mm, HPAGE_SIZE / PAGE_SIZE);
 	if (write_access) {
 		entry =
 		    pte_mkwrite(pte_mkdirty(mk_pte(page, vma->vm_page_prot)));
@@ -83,7 +83,8 @@ int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
 		ptepage = pte_page(entry);
 		get_page(ptepage);
 		set_pte(dst_pte, entry);
-		dst->rss += (HPAGE_SIZE / PAGE_SIZE);
+		// dst->rss += (HPAGE_SIZE / PAGE_SIZE);
+		vx_rsspages_add(dst, HPAGE_SIZE / PAGE_SIZE);
 		addr += HPAGE_SIZE;
 	}
 	return 0;
@@ -146,9 +147,6 @@ follow_huge_addr(struct mm_struct *mm, unsigned long address, int write)
 	int nr;
 	struct page *page;
 	struct vm_area_struct *vma;
-
-	if (! mm->used_hugetlb)
-		return ERR_PTR(-EINVAL);
 
 	vma = find_vma(mm, addr);
 	if (!vma || !is_vm_hugetlb_page(vma))
@@ -222,7 +220,8 @@ void unmap_hugepage_range(struct vm_area_struct *vma,
 		page = pte_page(pte);
 		put_page(page);
 	}
-	mm->rss -= (end - start) >> PAGE_SHIFT;
+	// mm->rss -= (end - start) >> PAGE_SHIFT;
+	vx_rsspages_sub(mm, (end - start) >> PAGE_SHIFT);
 	flush_tlb_range(vma, start, end);
 }
 
@@ -245,8 +244,15 @@ int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)
 			ret = -ENOMEM;
 			goto out;
 		}
-		if (!pte_none(*pte))
-			continue;
+
+		if (!pte_none(*pte)) {
+			pmd_t *pmd = (pmd_t *) pte;
+
+			page = pmd_page(*pmd);
+			pmd_clear(pmd);
+			dec_page_state(nr_page_table_pages);
+			page_cache_release(page);
+		}
 
 		idx = ((addr - vma->vm_start) >> HPAGE_SHIFT)
 			+ (vma->vm_pgoff >> (HPAGE_SHIFT - PAGE_SHIFT));

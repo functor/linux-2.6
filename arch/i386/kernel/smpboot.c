@@ -47,7 +47,6 @@
 
 #include <linux/delay.h>
 #include <linux/mc146818rtc.h>
-#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm/desc.h>
 #include <asm/arch_hooks.h>
@@ -83,6 +82,7 @@ int smp_threads_ready;
 extern unsigned char trampoline_data [];
 extern unsigned char trampoline_end  [];
 static unsigned char *trampoline_base;
+static int trampoline_exec;
 
 /*
  * Currently trivial. Write the real->protected mode
@@ -109,6 +109,10 @@ void __init smp_alloc_memory(void)
 	 */
 	if (__pa(trampoline_base) >= 0x9F000)
 		BUG();
+	/*
+	 * Make the SMP trampoline executable:
+	 */
+	trampoline_exec = set_kernel_exec((unsigned long)trampoline_base, 1);
 }
 
 /*
@@ -1193,7 +1197,9 @@ __init void arch_init_sched_domains(void)
 		int j;
 		cpumask_t nodemask;
 		struct sched_group *node = &sched_group_nodes[i];
-		cpus_and(nodemask, node_to_cpumask(i), cpu_possible_map);
+		cpumask_t node_cpumask = node_to_cpumask(i);
+
+		cpus_and(nodemask, node_cpumask, cpu_possible_map);
 
 		if (cpus_empty(nodemask))
 			continue;
@@ -1229,7 +1235,9 @@ __init void arch_init_sched_domains(void)
 	for (i = 0; i < MAX_NUMNODES; i++) {
 		struct sched_group *cpu = &sched_group_nodes[i];
 		cpumask_t nodemask;
-		cpus_and(nodemask, node_to_cpumask(i), cpu_possible_map);
+		cpumask_t node_cpumask = node_to_cpumask(i);
+
+		cpus_and(nodemask, node_cpumask, cpu_possible_map);
 
 		if (cpus_empty(nodemask))
 			continue;
@@ -1372,6 +1380,10 @@ void __init smp_cpus_done(unsigned int max_cpus)
 	setup_ioapic_dest();
 #endif
 	zap_low_mappings();
+	/*
+	 * Disable executability of the SMP trampoline:
+	 */
+	set_kernel_exec((unsigned long)trampoline_base, trampoline_exec);
 }
 
 void __init smp_intr_init(void)
