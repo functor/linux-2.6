@@ -23,32 +23,17 @@
 #include <linux/ckrm_classqueue.h>
 #include <linux/seq_file.h>
 
-struct ckrm_res_ctlr cpu_rcbs;
 
-/**
- * insert_cpu_class - insert a class to active_cpu_class list
- *
- * insert the class in decreasing order of class weight
- */
-static inline void insert_cpu_class(struct ckrm_cpu_class *cls)
-{
-	list_add(&cls->links,&active_cpu_classes);
-}
+struct ckrm_res_ctlr cpu_rcbs;
 
 /*
  *  initialize a class object and its local queues
  */
-void init_cpu_class(struct ckrm_cpu_class *cls,ckrm_shares_t* shares) 
+ static void init_cpu_class(struct ckrm_cpu_class *cls,ckrm_shares_t* shares) 
 {
 	int i,j,k;      
 	prio_array_t *array; 	
-	ckrm_lrq_t* queue;
-
-	cls->shares = *shares;
-	cls->cnt_lock = SPIN_LOCK_UNLOCKED;
-	ckrm_cpu_stat_init(&cls->stat);
-	ckrm_usage_init(&cls->usage);
-	cls->magic = CKRM_CPU_CLASS_MAGIC;
+	struct ckrm_local_runqueue* queue;
 
 	for (i = 0 ; i < NR_CPUS ; i++) {
 		queue = &cls->local_queues[i];
@@ -73,37 +58,34 @@ void init_cpu_class(struct ckrm_cpu_class *cls,ckrm_shares_t* shares)
 		queue->top_priority = MAX_PRIO;
 		cq_node_init(&queue->classqueue_linkobj);
 		queue->local_cvt = 0;
-		queue->lrq_load = 0;
-		queue->local_weight = cpu_class_weight(cls);
+		queue->uncounted_cvt = 0;
 		queue->uncounted_ns = 0;
-		queue->savings = 0;
 		queue->magic = 0x43FF43D7;
 	}
 
+	cls->shares = *shares;
+	cls->global_cvt = 0;
+	cls->cnt_lock = SPIN_LOCK_UNLOCKED;
+	ckrm_cpu_stat_init(&cls->stat);
+
 	// add to class list
 	write_lock(&class_list_lock);
-	insert_cpu_class(cls);
+	list_add(&cls->links,&active_cpu_classes);
 	write_unlock(&class_list_lock);
 }
 
 static inline void set_default_share(ckrm_shares_t *shares)
 {
 	shares->my_guarantee     = 0;
-	shares->total_guarantee  = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
-	shares->unused_guarantee = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
 	shares->my_limit         = CKRM_SHARE_DFLT_MAX_LIMIT;
+	shares->total_guarantee  = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
 	shares->max_limit        = CKRM_SHARE_DFLT_MAX_LIMIT;
-	shares->cur_max_limit    = 0;
+	shares->unused_guarantee = CKRM_SHARE_DFLT_TOTAL_GUARANTEE;
+	shares->cur_max_limit    = CKRM_SHARE_DFLT_MAX_LIMIT;
 }
 
-struct ckrm_cpu_class * ckrm_get_cpu_class(struct ckrm_core_class *core)
-{
-	struct ckrm_cpu_class * cls;
-	cls = ckrm_get_res_class(core, cpu_rcbs.resid, struct ckrm_cpu_class);
-	if (valid_cpu_class(cls))
-		return cls;
-	else
-		return NULL;
+struct ckrm_cpu_class * ckrm_get_cpu_class(struct ckrm_core_class *core) {
+	return ckrm_get_res_class(core, cpu_rcbs.resid, struct ckrm_cpu_class);
 }
 
 
@@ -112,7 +94,7 @@ void* ckrm_alloc_cpu_class(struct ckrm_core_class *core, struct ckrm_core_class 
 	struct ckrm_cpu_class *cls;
 
 	if (! parent) /*root class*/
-		cls =  get_default_cpu_class();
+		cls =  default_cpu_class;
 	else
 		cls = (struct ckrm_cpu_class *) kmalloc(sizeof(struct ckrm_cpu_class),GFP_ATOMIC);
 
@@ -131,7 +113,7 @@ void* ckrm_alloc_cpu_class(struct ckrm_core_class *core, struct ckrm_core_class 
 			cls->parent = parent;
 		}
 	} else
-		printk(KERN_ERR"alloc_cpu_class failed\n");
+		printk("alloc_cpu_class failed GFP_ATOMIC\n");
 
 	return cls;
 }		
@@ -150,7 +132,7 @@ static void ckrm_free_cpu_class(void *my_res)
 		return;
 
 	/*the default class can't be freed*/
-	if (cls == get_default_cpu_class()) 
+	if (cls == default_cpu_class) 
 		return;
 
 	// Assuming there will be no children when this function is called
@@ -180,9 +162,6 @@ static void ckrm_free_cpu_class(void *my_res)
 	write_unlock(&class_list_lock);
 
 	kfree(cls);
-
-	//call ckrm_cpu_monitor after class removed
-	ckrm_cpu_monitor(0);
 }				
 
 /*
@@ -208,28 +187,18 @@ int ckrm_cpu_set_share(void *my_res, struct ckrm_shares *new_share)
                 parres = NULL;
         }
 
-	/*
-	 * hzheng: CKRM_SHARE_DONTCARE should be handled
-	 */
-	if (new_share->my_guarantee == CKRM_SHARE_DONTCARE)
-		new_share->my_guarantee = 0;
-
 	rc = set_shares(new_share, cur, par);
-	if (cur->my_limit == CKRM_SHARE_DONTCARE)
-		cur->my_limit = cur->max_limit;
-
 
 	spin_unlock(&cls->cnt_lock);
 	if (cls->parent) {
 		spin_unlock(&parres->cnt_lock);
 	}
-
-	//call ckrm_cpu_monitor after changes are changed
-	ckrm_cpu_monitor(0);
-
 	return rc;
 }							
 			
+/*
+ * translate the global_CVT to ticks
+ */
 static int ckrm_cpu_get_share(void *my_res,
 			      struct ckrm_shares *shares)
 {			
@@ -244,42 +213,35 @@ static int ckrm_cpu_get_share(void *my_res,
 int ckrm_cpu_get_stats(void *my_res, struct seq_file * sfile)
 {
 	struct ckrm_cpu_class *cls = my_res;
-	struct ckrm_cpu_class_stat* stat = &cls->stat;
-	ckrm_lrq_t* lrq;
-	int i;
 
 	if (!cls) 
 		return -EINVAL;
 
 	seq_printf(sfile, "-------- CPU Class Status Start---------\n");
-	seq_printf(sfile, "Share:\n\tgrt= %d limit= %d total_grt= %d max_limit= %d\n",
+	seq_printf(sfile, "  gua= %d limit= %d\n",
 		   cls->shares.my_guarantee,
-		   cls->shares.my_limit,
+		   cls->shares.my_limit);
+	seq_printf(sfile, "  total_gua= %d limit= %d\n",
 		   cls->shares.total_guarantee,
 		   cls->shares.max_limit);
-	seq_printf(sfile, "\tunused_grt= %d cur_max_limit= %d\n",
+	seq_printf(sfile, "  used_gua= %d cur_limit= %d\n",
 		   cls->shares.unused_guarantee,
 		   cls->shares.cur_max_limit);
 
-	seq_printf(sfile, "Effective:\n\tegrt= %d\n",stat->egrt);
-	seq_printf(sfile, "\tmegrt= %d\n",stat->megrt);
-	seq_printf(sfile, "\tehl= %d\n",stat->ehl);
-	seq_printf(sfile, "\tmehl= %d\n",stat->mehl);
-	seq_printf(sfile, "\teshare= %d\n",stat->eshare);
-	seq_printf(sfile, "\tmeshare= %d\n",cpu_class_weight(cls));
-	seq_printf(sfile, "\tmax_demand= %lu\n",stat->max_demand);
-	seq_printf(sfile, "\ttotal_ns= %llu\n",stat->total_ns);
-	seq_printf(sfile, "\tusage(2,10,60)= %d %d %d\n",
-		   get_ckrm_usage(cls,2*HZ),
-		   get_ckrm_usage(cls,10*HZ),
-		   get_ckrm_usage(cls,60*HZ)
-		   );
-	for_each_online_cpu(i) {
-		lrq = get_ckrm_lrq(cls,i);		
-		seq_printf(sfile, "\tlrq %d demand= %lu weight= %d lrq_load= %lu cvt= %llu sav= %llu\n",i,stat->local_stats[i].cpu_demand,local_class_weight(lrq),lrq->lrq_load,lrq->local_cvt,lrq->savings);
-	}
+	seq_printf(sfile, "  Share= %d\n",cpu_class_weight(cls));
+	seq_printf(sfile, "  cvt= %llu\n",cls->local_queues[0].local_cvt);
+	seq_printf(sfile, "  total_ns= %llu\n",cls->stat.total_ns);
+	seq_printf(sfile, "  prio= %d\n",cls->local_queues[0].classqueue_linkobj.prio);
+	seq_printf(sfile, "  index= %d\n",cls->local_queues[0].classqueue_linkobj.index);
+	seq_printf(sfile, "  run= %llu\n",cls->stat.local_stats[0].run);
+	seq_printf(sfile, "  total= %llu\n",cls->stat.local_stats[0].total);
+	seq_printf(sfile, "  cpu_demand= %lu\n",cls->stat.cpu_demand);
 
+	seq_printf(sfile, "  effective_guarantee= %d\n",cls->stat.effective_guarantee);
+	seq_printf(sfile, "  effective_limit= %d\n",cls->stat.effective_limit);
+	seq_printf(sfile, "  effective_share= %d\n",cls->stat.effective_share);
 	seq_printf(sfile, "-------- CPU Class Status END ---------\n");
+
 
 	return 0;
 }
@@ -287,16 +249,28 @@ int ckrm_cpu_get_stats(void *my_res, struct seq_file * sfile)
 /*
  * task will remain in the same cpu but on a different local runqueue
  */
-void ckrm_cpu_change_class(void *task, void *old, void *new)
+static void ckrm_cpu_change_class(void *task, void *old, void *new)
 {		
 	struct task_struct *tsk = task;			   
 	struct ckrm_cpu_class *newcls = new;
+	unsigned long flags;
+	struct runqueue *rq;
+	prio_array_t *array;
 
 	/*sanity checking*/
 	if (!task || ! old || !new)
 		return; 
 
-	_ckrm_cpu_change_class(tsk,newcls);
+	rq = task_rq_lock(tsk,&flags); 
+	array = tsk->array;
+	if (array) {
+		dequeue_task(tsk,array);
+		tsk->cpu_class = newcls;
+		enqueue_task(tsk,rq_active(tsk,rq));
+	} else {
+		tsk->cpu_class = newcls;
+	}
+	task_rq_unlock(rq,&flags);
 }							
 
 /*dummy function, not used*/
@@ -318,12 +292,12 @@ static int ckrm_cpu_set_config(void *my_res, const char *cfgstr)
 
 	if (!cls) 
 		return -EINVAL;
-	printk(KERN_DEBUG "ckrm_cpu config='%s'\n",cfgstr);
+	printk("ckrm_cpu config='%s'\n",cfgstr);
 	return 0;
 }
 	
 struct ckrm_res_ctlr cpu_rcbs = {
-	.res_name          = "cpu",
+	.res_name          = "CKRM CPU Class",
 	.res_hdepth        = 1,
 	.resid             = -1,
 	.res_alloc         = ckrm_alloc_cpu_class,
@@ -349,7 +323,7 @@ int __init init_ckrm_sched_res(void)
 
 	if (resid == -1) { /*not registered */
 		resid = ckrm_register_res_ctlr(clstype,&cpu_rcbs);
-		printk(KERN_DEBUG "........init_ckrm_sched_res , resid= %d\n",resid);
+		printk("........init_ckrm_sched_res , resid= %d\n",resid);
 	}
 	return 0;
 }
@@ -365,11 +339,10 @@ void init_cpu_classes(void)
 	//init classqueues for each processor
 	for (i=0; i < NR_CPUS; i++)
 		classqueue_init(get_cpu_classqueue(i)); 
-
-	/*
-	 * hzheng: initialize the default cpu class
-	 *  required for E14/E15 since ckrm_init is called after sched_init
-	 */
+/*
+ * hzheng: initialize the default cpu class
+ *         required for E14 since ckrm_init is called after sched_init
+ */
 	ckrm_alloc_cpu_class(NULL,NULL);
 }
 

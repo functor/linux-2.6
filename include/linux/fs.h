@@ -42,7 +42,7 @@ struct vfsmount;
 /* Fixed constants first: */
 #undef NR_OPEN
 #define NR_OPEN (1024*1024)	/* Absolute upper limit on fd num */
-#define INR_OPEN 4096		/* Initial setting for nfile rlimits */
+#define INR_OPEN 1024		/* Initial setting for nfile rlimits */
 
 #define BLOCK_SIZE_BITS 10
 #define BLOCK_SIZE (1<<BLOCK_SIZE_BITS)
@@ -1591,18 +1591,6 @@ static inline char *alloc_secdata(void)
 static inline void free_secdata(void *secdata)
 { }
 #endif	/* CONFIG_SECURITY */
-
-/* io priorities */
-
-#define IOPRIO_NR      21
-
-#define IOPRIO_IDLE	0
-#define IOPRIO_NORM	10
-#define IOPRIO_RT	20
-
-asmlinkage int sys_ioprio_set(int ioprio);
-asmlinkage int sys_ioprio_get(void);
-
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_FS_H */
