@@ -284,10 +284,10 @@ static void __init pci_process_bridge_OF_ranges(struct pci_controller *hose,
 				isa_dn = of_find_node_by_type(NULL, "isa");
 				if (isa_dn) {
 					isa_io_base = pci_io_base;
+					of_node_put(isa_dn);
 					pci_process_ISA_OF_ranges(isa_dn,
 						hose->io_base_phys,
 						hose->io_base_virt);
-					of_node_put(isa_dn);
                                         /* Allow all IO */
                                         io_page_mask = -1;
 				}
@@ -600,9 +600,8 @@ void __devinit pcibios_fixup_bus(struct pci_bus *bus)
 			BUG();	/* No I/O resource for this PHB? */
 
 		if (request_resource(&ioport_resource, res))
-			printk(KERN_ERR "Failed to request IO on "
-					"PCI domain %d\n", pci_domain_nr(bus));
-
+			printk(KERN_ERR "Failed to request IO"
+					"on hose %d\n", 0 /* FIXME */);
 
 		for (i = 0; i < 3; ++i) {
 			res = &hose->mem_resources[i];
@@ -610,9 +609,8 @@ void __devinit pcibios_fixup_bus(struct pci_bus *bus)
 				BUG();	/* No memory resource for this PHB? */
 			bus->resource[i+1] = res;
 			if (res->flags && request_resource(&iomem_resource, res))
-				printk(KERN_ERR "Failed to request MEM on "
-						"PCI domain %d\n",
-						pci_domain_nr(bus));
+				printk(KERN_ERR "Failed to request MEM"
+						"on hose %d\n", 0 /* FIXME */);
 		}
 	} else if (pci_probe_only &&
 		   (dev->class >> 8) == PCI_CLASS_BRIDGE_PCI) {

@@ -29,7 +29,6 @@
 #include <linux/fs.h>
 #include <linux/cpu.h>
 #include <linux/security.h>
-#include <linux/swap.h>
 #include <linux/syscalls.h>
 #include <linux/jiffies.h>
 #include <linux/futex.h>
@@ -37,12 +36,14 @@
 #include <linux/mount.h>
 #include <linux/audit.h>
 #include <linux/rmap.h>
+
 #include <linux/vs_network.h>
-#include <linux/vs_limit.h>
 #include <linux/vs_memory.h>
+#include <linux/vs_limit.h>
+#include <linux/vs_base.h>
+
 #include <linux/ckrm.h>
 #include <linux/ckrm_tsk.h>
-#include <linux/ckrm_mem_inline.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -85,6 +86,7 @@ static kmem_cache_t *task_struct_cachep;
 static void free_task(struct task_struct *tsk)
 {
 	free_thread_info(tsk->thread_info);
+	vxdprintk("freeing up task %p\n", tsk);
 	clr_vx_info(&tsk->vx_info);
 	clr_nx_info(&tsk->nx_info);
 	free_task_struct(tsk);
@@ -272,9 +274,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	ckrm_cb_newtask(tsk);
 	/* One for us, one for whoever does the "release_task()" (usually parent) */
 	atomic_set(&tsk->usage,2);
-#ifdef CONFIG_CKRM_RES_MEM	
-	INIT_LIST_HEAD(&tsk->mm_peers);
-#endif
 	return tsk;
 }
 
@@ -292,7 +291,7 @@ static inline int dup_mmap(struct mm_struct * mm, struct mm_struct * oldmm)
 	mm->locked_vm = 0;
 	mm->mmap = NULL;
 	mm->mmap_cache = NULL;
-	mm->free_area_cache = oldmm->mmap_base;
+	mm->free_area_cache = TASK_UNMAPPED_BASE;
 	mm->map_count = 0;
 	mm->rss = 0;
 	cpus_clear(mm->cpu_vm_mask);
@@ -427,13 +426,12 @@ static struct mm_struct * mm_init(struct mm_struct * mm)
 	mm->ioctx_list = NULL;
 	mm->default_kioctx = (struct kioctx)INIT_KIOCTX(mm->default_kioctx, *mm);
 	mm->free_area_cache = TASK_UNMAPPED_BASE;
-#ifdef CONFIG_CKRM_RES_MEM
-	INIT_LIST_HEAD(&mm->tasklist);
-	mm->peertask_lock = SPIN_LOCK_UNLOCKED;
-#endif
 
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
+#ifdef __HAVE_ARCH_MMAP_TOP
+		mm->mmap_top = mmap_top();
+#endif
 		set_vx_info(&mm->mm_vx_info, current->vx_info);
 		return mm;
 	}
@@ -452,10 +450,6 @@ struct mm_struct * mm_alloc(void)
 	if (mm) {
 		memset(mm, 0, sizeof(*mm));
 		mm = mm_init(mm);
-#ifdef CONFIG_CKRM_RES_MEM
-		mm->memclass = GET_MEM_CLASS(current);
-		mem_class_get(mm->memclass);
-#endif
 	}
 	return mm;
 }
@@ -471,13 +465,6 @@ void fastcall __mmdrop(struct mm_struct *mm)
 	mm_free_pgd(mm);
 	destroy_context(mm);
 	clr_vx_info(&mm->mm_vx_info);
-#ifdef CONFIG_CKRM_RES_MEM
-	/* class can be null and mm's tasklist can be empty here */
-	if (mm->memclass) {
-		mem_class_put(mm->memclass);
-		mm->memclass = NULL;
-	}
-#endif
 	free_mm(mm);
 }
 
@@ -492,7 +479,6 @@ void mmput(struct mm_struct *mm)
 		spin_unlock(&mmlist_lock);
 		exit_aio(mm);
 		exit_mmap(mm);
-		put_swap_token(mm);
 		mmdrop(mm);
 	}
 }
@@ -607,7 +593,6 @@ static int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 good_mm:
 	tsk->mm = mm;
 	tsk->active_mm = mm;
-	ckrm_init_mm_to_task(mm, tsk);
 	return 0;
 
 free_pt:
@@ -931,10 +916,10 @@ struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	retval = -ENOMEM;
+
 	p = dup_task_struct(current);
 	if (!p)
 		goto fork_out;
-	p->tux_info = NULL;
 
 	p->vx_info = NULL;
 	set_vx_info(&p->vx_info, current->vx_info);
@@ -950,18 +935,18 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	}
 	if (p->mm && vx_flags(VXF_FORK_RSS, 0)) {
 		if (!vx_rsspages_avail(p->mm, p->mm->rss))
-			goto bad_fork_cleanup_vm;
+			goto bad_fork_free;
 	}
 
 	retval = -EAGAIN;
         if (!vx_nproc_avail(1))
-                goto bad_fork_cleanup_vm;
+                goto bad_fork_free;
 
 	if (atomic_read(&p->user->processes) >=
 			p->rlim[RLIMIT_NPROC].rlim_cur) {
 		if (!capable(CAP_SYS_ADMIN) && !capable(CAP_SYS_RESOURCE) &&
 				p->user != &root_user)
-			goto bad_fork_cleanup_vm;
+			goto bad_fork_free;
 	}
 
 	atomic_inc(&p->user->__count);
@@ -1030,6 +1015,7 @@ struct task_struct *copy_process(unsigned long clone_flags,
  	}
 #endif
 
+	retval = -ENOMEM;
 	if ((retval = security_task_alloc(p)))
 		goto bad_fork_cleanup_policy;
 	if ((retval = audit_alloc(p)))
@@ -1148,14 +1134,13 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	} else
 		link_pid(p, p->pids + PIDTYPE_TGID, &p->group_leader->pids[PIDTYPE_TGID].pid);
 
-	p->ioprio = current->ioprio;
 	nr_threads++;
-	/* p is copy of current */
-	vxi = p->vx_info;
+	vxi = current->vx_info;
 	if (vxi) {
 		atomic_inc(&vxi->cacct.nr_threads);
-		atomic_inc(&vxi->limit.rcur[RLIMIT_NPROC]);
+		// atomic_inc(&vxi->limit.res[RLIMIT_NPROC]);
 	}
+	vx_nproc_inc();
 	write_unlock_irq(&tasklist_lock);
 	retval = 0;
 
@@ -1199,9 +1184,6 @@ bad_fork_cleanup_count:
 	put_group_info(p->group_info);
 	atomic_dec(&p->user->processes);
 	free_uid(p->user);
-bad_fork_cleanup_vm:
-	if (p->mm && !(clone_flags & CLONE_VM))
-		vx_pages_sub(p->mm->mm_vx_info, RLIMIT_AS, p->mm->total_vm);
 bad_fork_free:
 	free_task(p);
 	goto fork_out;

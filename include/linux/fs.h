@@ -18,7 +18,6 @@
 #include <linux/cache.h>
 #include <linux/prio_tree.h>
 #include <linux/kobject.h>
-#include <linux/mount.h>
 #include <asm/atomic.h>
 
 struct iovec;
@@ -42,7 +41,7 @@ struct vfsmount;
 /* Fixed constants first: */
 #undef NR_OPEN
 #define NR_OPEN (1024*1024)	/* Absolute upper limit on fd num */
-#define INR_OPEN 4096		/* Initial setting for nfile rlimits */
+#define INR_OPEN 1024		/* Initial setting for nfile rlimits */
 
 #define BLOCK_SIZE_BITS 10
 #define BLOCK_SIZE (1<<BLOCK_SIZE_BITS)
@@ -75,11 +74,6 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 
 #define FMODE_READ 1
 #define FMODE_WRITE 2
-
-/* Internal kernel extensions */
-#define FMODE_LSEEK	4
-#define FMODE_PREAD	8
-#define FMODE_PWRITE	FMODE_PREAD	/* These go hand in hand */
 
 #define RW_MASK		1
 #define RWA_MASK	2
@@ -165,7 +159,7 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
  */
 #define __IS_FLG(inode,flg) ((inode)->i_sb->s_flags & (flg))
 
-#define IS_RDONLY(inode)	__IS_FLG(inode, MS_RDONLY)
+#define IS_RDONLY(inode) ((inode)->i_sb->s_flags & MS_RDONLY)
 #define IS_SYNC(inode)		(__IS_FLG(inode, MS_SYNCHRONOUS) || \
 					((inode)->i_flags & S_SYNC))
 #define IS_DIRSYNC(inode)	(__IS_FLG(inode, MS_SYNCHRONOUS|MS_DIRSYNC) || \
@@ -264,7 +258,6 @@ typedef void (dio_iodone_t)(struct inode *inode, loff_t offset,
 #define ATTR_ATTR_FLAG	1024
 #define ATTR_KILL_SUID	2048
 #define ATTR_KILL_SGID	4096
-#define ATTR_XID	8192
 
 /*
  * This is the Inode Attributes structure, used for notify_change().  It
@@ -280,7 +273,6 @@ struct iattr {
 	umode_t		ia_mode;
 	uid_t		ia_uid;
 	gid_t		ia_gid;
-	xid_t		ia_xid;
 	loff_t		ia_size;
 	struct timespec	ia_atime;
 	struct timespec	ia_mtime;
@@ -373,7 +365,6 @@ struct block_device {
 	struct block_device *	bd_contains;
 	unsigned		bd_block_size;
 	struct hd_struct *	bd_part;
-	/* number of times partitions within this device have been opened. */
 	unsigned		bd_part_count;
 	int			bd_invalidated;
 	struct gendisk *	bd_disk;
@@ -678,6 +669,9 @@ extern struct list_head file_lock_list;
 
 #include <linux/fcntl.h>
 
+extern long generic_file_fcntl(int fd, unsigned int cmd,
+				unsigned long arg, struct file *filp);
+
 extern int fcntl_getlk(struct file *, struct flock __user *);
 extern int fcntl_setlk(struct file *, unsigned int, struct flock __user *);
 
@@ -905,8 +899,8 @@ struct file_operations {
 	ssize_t (*sendfile) (struct file *, loff_t *, size_t, read_actor_t, void *);
 	ssize_t (*sendpage) (struct file *, struct page *, int, size_t, loff_t *, int);
 	unsigned long (*get_unmapped_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
-	int (*check_flags)(int);
-	int (*dir_notify)(struct file *filp, unsigned long arg);
+	long (*fcntl)(int fd, unsigned int cmd,
+			unsigned long arg, struct file *filp);
 };
 
 struct inode_operations {
@@ -994,16 +988,8 @@ static inline void mark_inode_dirty_sync(struct inode *inode)
 
 static inline void touch_atime(struct vfsmount *mnt, struct dentry *dentry)
 {
-	struct inode *inode = dentry->d_inode;
-
-	if (MNT_IS_NOATIME(mnt))
-		return;
-	if (S_ISDIR(inode->i_mode) && MNT_IS_NODIRATIME(mnt))
-		return;
-	if (IS_RDONLY(inode) || MNT_IS_RDONLY(mnt))
-		return;
-
-	update_atime(inode);
+	/* per-mountpoint checks will go here */
+	update_atime(dentry->d_inode);
 }
 
 static inline void file_accessed(struct file *file)
@@ -1440,7 +1426,7 @@ ssize_t generic_file_write_nolock(struct file *file, const struct iovec *iov,
 extern ssize_t generic_file_sendfile(struct file *, loff_t *, size_t, read_actor_t, void *);
 extern void do_generic_mapping_read(struct address_space *mapping,
 				    struct file_ra_state *, struct file *,
-				    loff_t *, read_descriptor_t *, read_actor_t, int);
+				    loff_t *, read_descriptor_t *, read_actor_t);
 extern void
 file_ra_state_init(struct file_ra_state *ra, struct address_space *mapping);
 extern ssize_t generic_file_direct_IO(int rw, struct kiocb *iocb,
@@ -1453,19 +1439,17 @@ extern loff_t no_llseek(struct file *file, loff_t offset, int origin);
 extern loff_t generic_file_llseek(struct file *file, loff_t offset, int origin);
 extern loff_t remote_llseek(struct file *file, loff_t offset, int origin);
 extern int generic_file_open(struct inode * inode, struct file * filp);
-extern int nonseekable_open(struct inode * inode, struct file * filp);
 
 static inline void do_generic_file_read(struct file * filp, loff_t *ppos,
 					read_descriptor_t * desc,
-					read_actor_t actor, int nonblock)
+					read_actor_t actor)
 {
 	do_generic_mapping_read(filp->f_mapping,
 				&filp->f_ra,
 				filp,
 				ppos,
 				desc,
-				actor,
-				nonblock);
+				actor);
 }
 
 ssize_t __blockdev_direct_IO(int rw, struct kiocb *iocb, struct inode *inode,
@@ -1552,12 +1536,10 @@ extern int simple_fill_super(struct super_block *, int, struct tree_descr *);
 extern int simple_pin_fs(char *name, struct vfsmount **mount, int *count);
 extern void simple_release_fs(struct vfsmount **mount, int *count);
 
-extern ssize_t simple_read_from_buffer(void __user *, size_t, loff_t *, const void *, size_t);
-
 extern int inode_change_ok(struct inode *, struct iattr *);
 extern int __must_check inode_setattr(struct inode *, struct iattr *);
 
-extern void inode_update_time(struct inode *inode, struct vfsmount *mnt, int ctime_too);
+extern void inode_update_time(struct inode *inode, int ctime_too);
 
 static inline ino_t parent_ino(struct dentry *dentry)
 {
@@ -1591,18 +1573,6 @@ static inline char *alloc_secdata(void)
 static inline void free_secdata(void *secdata)
 { }
 #endif	/* CONFIG_SECURITY */
-
-/* io priorities */
-
-#define IOPRIO_NR      21
-
-#define IOPRIO_IDLE	0
-#define IOPRIO_NORM	10
-#define IOPRIO_RT	20
-
-asmlinkage int sys_ioprio_set(int ioprio);
-asmlinkage int sys_ioprio_get(void);
-
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_FS_H */

@@ -1435,7 +1435,7 @@ static int auerchar_open (struct inode *inode, struct file *file)
 	/* file IO stuff */
 	file->f_pos = 0;
 	file->private_data = ccp;
-	return nonseekable_open(inode, file);
+	return 0;
 
 	/* Error exit */
 ofail:	up (&cp->mutex);

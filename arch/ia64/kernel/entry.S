@@ -1377,15 +1377,7 @@ sys_call_table:
 	data8 sys_syslog
 	data8 sys_setitimer
 	data8 sys_getitimer
-#ifdef CONFIG_TUX
-	data8 __sys_tux				// 1120		/* was: ia64_oldstat */
-#else
-# ifdef CONFIG_TUX_MODULE
-	data8 sys_tux				// 1120		/* was: ia64_oldstat */
-# else
 	data8 sys_ni_syscall			// 1120		/* was: ia64_oldstat */
-# endif
-#endif
 	data8 sys_ni_syscall					/* was: ia64_oldlstat */
 	data8 sys_ni_syscall					/* was: ia64_oldfstat */
 	data8 sys_vhangup
@@ -1534,7 +1526,7 @@ sys_call_table:
 	data8 sys_mq_notify
 	data8 sys_mq_getsetattr
 	data8 sys_ni_syscall			// reserved for kexec_load
-	data8 sys_vserver
+	data8 sys_ni_syscall
 	data8 sys_ni_syscall			// 1270
 	data8 sys_ni_syscall
 	data8 sys_ni_syscall

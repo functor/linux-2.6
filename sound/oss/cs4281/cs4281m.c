@@ -2592,7 +2592,7 @@ static int cs4281_open_mixdev(struct inode *inode, struct file *file)
 	CS_DBGOUT(CS_FUNCTION | CS_OPEN, 4,
 		  printk(KERN_INFO "cs4281: cs4281_open_mixdev()- 0\n"));
 
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 
@@ -2874,6 +2874,8 @@ static ssize_t cs4281_read(struct file *file, char __user *buffer, size_t count,
 		  printk(KERN_INFO "cs4281: cs4281_read()+ %Zu \n", count));
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (s->dma_adc.mapped)
 		return -ENXIO;
 	if (!s->dma_adc.ready && (ret = prog_dmabuf_adc(s)))
@@ -2988,6 +2990,8 @@ static ssize_t cs4281_write(struct file *file, const char __user *buffer,
 			 count));
 	VALIDATE_STATE(s);
 
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (s->dma_dac.mapped)
 		return -ENXIO;
 	if (!s->dma_dac.ready && (ret = prog_dmabuf_dac(s)))
@@ -3721,7 +3725,7 @@ static int cs4281_open(struct inode *inode, struct file *file)
 	}
 	CS_DBGOUT(CS_FUNCTION | CS_OPEN, 2,
 		  printk(KERN_INFO "cs4281: cs4281_open()- 0\n"));
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 
@@ -3838,6 +3842,8 @@ static ssize_t cs4281_midi_read(struct file *file, char __user *buffer,
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (!access_ok(VERIFY_WRITE, buffer, count))
 		return -EFAULT;
 	ret = 0;
@@ -3884,6 +3890,8 @@ static ssize_t cs4281_midi_write(struct file *file, const char __user *buffer,
 	int cnt;
 
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (!access_ok(VERIFY_READ, buffer, count))
 		return -EFAULT;
 	ret = 0;
@@ -4017,7 +4025,7 @@ static int cs4281_midi_open(struct inode *inode, struct file *file)
 	     f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ |
 					    FMODE_MIDI_WRITE);
 	up(&s->open_sem);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 

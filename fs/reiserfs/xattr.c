@@ -1338,15 +1338,11 @@ __reiserfs_permission (struct inode *inode, int mask, struct nameidata *nd,
 {
 	umode_t			mode = inode->i_mode;
 
-	/* Prevent vservers from escaping chroot() barriers */
-	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
-		return -EACCES;
-
 	if (mask & MAY_WRITE) {
 		/*
 		 * Nobody gets write access to a read-only fs.
 		 */
-		if ((IS_RDONLY(inode) || (nd && MNT_IS_RDONLY(nd->mnt))) &&
+		if (IS_RDONLY(inode) &&
 		    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 			return -EROFS;
 
@@ -1401,9 +1397,7 @@ __reiserfs_permission (struct inode *inode, int mask, struct nameidata *nd,
                 }
 #endif
 	} else {
-#ifdef CONFIG_REISERFS_FS_POSIX_ACL
 check_groups:
-#endif
 		if (in_group_p(inode->i_gid))
 			mode >>= 3;
 	}
@@ -1414,9 +1408,7 @@ check_groups:
 	if (((mode & mask & (MAY_READ|MAY_WRITE|MAY_EXEC)) == mask))
 		return 0;
 
-#ifdef CONFIG_REISERFS_FS_POSIX_ACL
 check_capabilities:
-#endif
 	/*
 	 * Read/write DACs are always overridable.
 	 * Executable DACs are overridable if at least one exec bit is set.

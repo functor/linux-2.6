@@ -1181,7 +1181,8 @@ static void __exit envctrl_cleanup(void)
 			if (!found)
 				break;
 
-			msleep(1000);
+			current->state = TASK_INTERRUPTIBLE;
+			schedule_timeout(HZ);
 		}
 		kenvctrld_task = NULL;
 	}

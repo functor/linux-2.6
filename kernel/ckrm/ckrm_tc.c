@@ -318,7 +318,7 @@ static void cb_taskclass_fork(struct task_struct *tsk)
 		ckrm_task_unlock(tsk->parent);
 	}
 	if (!list_empty(&tsk->taskclass_link))
-		printk(KERN_WARNING "BUG in cb_fork.. tsk (%s:%d> already linked\n",
+		printk("BUG in cb_fork.. tsk (%s:%d> already linked\n",
 		       tsk->comm, tsk->pid);
 
 	ckrm_set_taskclass(tsk, cls, NULL, CKRM_EVENT_FORK);
@@ -350,13 +350,6 @@ static void cb_taskclass_gid(void)
 	CE_CLASSIFY_TASK_PROTECT(CKRM_EVENT_GID, current);
 }
 
-static void
-cb_taskclass_xid(struct task_struct *tsk)
-{
-	ECB_PRINTK("%p:%d:%s\n",current,current->pid,current->comm);
-	CE_CLASSIFY_TASK_PROTECT(CKRM_EVENT_XID, tsk);
-}
-
 static struct ckrm_event_spec taskclass_events_callbacks[] = {
 	CKRM_EVENT_SPEC(NEWTASK, cb_taskclass_newtask),
 	CKRM_EVENT_SPEC(EXEC, cb_taskclass_exec),
@@ -364,7 +357,6 @@ static struct ckrm_event_spec taskclass_events_callbacks[] = {
 	CKRM_EVENT_SPEC(EXIT, cb_taskclass_exit),
 	CKRM_EVENT_SPEC(UID, cb_taskclass_uid),
 	CKRM_EVENT_SPEC(GID, cb_taskclass_gid),
- 	CKRM_EVENT_SPEC(XID, cb_taskclass_xid),
 	{-1}
 };
 
@@ -397,7 +389,7 @@ DECLARE_MUTEX(async_serializer);	// serialize all async functions
  * We use a hybrid by comparing ratio nr_threads/pidmax
  */
 
-static int ckrm_reclassify_all_tasks(void)
+static void ckrm_reclassify_all_tasks(void)
 {
 	extern int pid_max;
 
@@ -406,11 +398,6 @@ static int ckrm_reclassify_all_tasks(void)
 	int curpidmax = pid_max;
 	int ratio;
 	int use_bitmap;
-
-	/* Check permissions */
-	if ((!capable(CAP_SYS_NICE)) && (!capable(CAP_SYS_RESOURCE))) {
-		return -EPERM;
-	}
 
 	ratio = curpidmax / nr_threads;
 	if (curpidmax <= PID_MAX_DEFAULT) {
@@ -422,7 +409,6 @@ static int ckrm_reclassify_all_tasks(void)
 	ce_protect(&CT_taskclass);
 
       retry:
-
 	if (use_bitmap == 0) {
 		// go through it in one walk
 		read_lock(&tasklist_lock);
@@ -496,13 +482,40 @@ static int ckrm_reclassify_all_tasks(void)
 				} else {
 					read_unlock(&tasklist_lock);
 				}
-				pos++;
 			}
 		}
 
 	}
 	ce_release(&CT_taskclass);
-	return 0;
+}
+
+int ckrm_reclassify(int pid)
+{
+	struct task_struct *tsk;
+	int rc = 0;
+
+	down(&async_serializer);	// protect again race condition
+	if (pid < 0) {
+		// do we want to treat this as process group .. should YES ToDo
+		rc = -EINVAL;
+	} else if (pid == 0) {
+		// reclassify all tasks in the system
+		ckrm_reclassify_all_tasks();
+	} else {
+		// reclassify particular pid
+		read_lock(&tasklist_lock);
+		if ((tsk = find_task_by_pid(pid)) != NULL) {
+			get_task_struct(tsk);
+			read_unlock(&tasklist_lock);
+			CE_CLASSIFY_TASK_PROTECT(CKRM_EVENT_RECLASSIFY, tsk);
+			put_task_struct(tsk);
+		} else {
+			read_unlock(&tasklist_lock);
+			rc = -EINVAL;
+		}
+	}
+	up(&async_serializer);
+	return rc;
 }
 
 /*
@@ -525,7 +538,7 @@ static void ckrm_reclassify_class_tasks(struct ckrm_task_class *cls)
 		 atomic_read(&cls->core.hnode.parent->refcnt));
 	// If no CE registered for this classtype, following will be needed 
 	// repeatedly;
-	ce_regd = atomic_read(&class_core(cls)->classtype->ce_regd);
+	ce_regd = class_core(cls)->classtype->ce_regd;
 	cnode = &(class_core(cls)->hnode);
 	parcls = class_type(ckrm_task_class_t, cnode->parent);
 
@@ -574,21 +587,20 @@ static void ckrm_reclassify_class_tasks(struct ckrm_task_class *cls)
 }
 
 /*
- * Change the core class of the given task
+ * Change the core class of the given task.
  */
 
 int ckrm_forced_reclassify_pid(pid_t pid, struct ckrm_task_class *cls)
 {
 	struct task_struct *tsk;
 
-	if (cls && !ckrm_validate_and_grab_core(class_core(cls)))
+	if (!ckrm_validate_and_grab_core(class_core(cls)))
 		return -EINVAL;
 
 	read_lock(&tasklist_lock);
 	if ((tsk = find_task_by_pid(pid)) == NULL) {
 		read_unlock(&tasklist_lock);
-		if (cls) 
-			ckrm_core_drop(class_core(cls));
+		ckrm_core_drop(class_core(cls));
 		return -EINVAL;
 	}
 	get_task_struct(tsk);
@@ -597,21 +609,19 @@ int ckrm_forced_reclassify_pid(pid_t pid, struct ckrm_task_class *cls)
 	/* Check permissions */
 	if ((!capable(CAP_SYS_NICE)) &&
 	    (!capable(CAP_SYS_RESOURCE)) && (current->user != tsk->user)) {
-		if (cls) 
-			ckrm_core_drop(class_core(cls));
+		ckrm_core_drop(class_core(cls));
 		put_task_struct(tsk);
 		return -EPERM;
 	}
 
-	ce_protect(&CT_taskclass);
-	if (cls == NULL)
-		CE_CLASSIFY_TASK(CKRM_EVENT_RECLASSIFY,tsk);
-	else 
-		ckrm_set_taskclass(tsk, cls, NULL, CKRM_EVENT_MANUAL);
+	down(&async_serializer);	// protect again race condition
 
+	ce_protect(&CT_taskclass);
+	ckrm_set_taskclass(tsk, cls, NULL, CKRM_EVENT_MANUAL);
 	ce_release(&CT_taskclass);
 	put_task_struct(tsk);
 
+	up(&async_serializer);
 	return 0;
 }
 
@@ -669,7 +679,7 @@ static int ckrm_free_task_class(struct ckrm_core_class *core)
 
 void __init ckrm_meta_init_taskclass(void)
 {
-	printk(KERN_DEBUG "...... Initializing ClassType<%s> ........\n",
+	printk("...... Initializing ClassType<%s> ........\n",
 	       CT_taskclass.name);
 	// intialize the default class
 	ckrm_init_core_class(&CT_taskclass, class_core(&taskclass_dflt_class),
@@ -703,25 +713,16 @@ static int tc_forced_reclassify(struct ckrm_core_class *target, const char *obj)
 	pid_t pid;
 	int rc = -EINVAL;
 
-	pid = (pid_t) simple_strtol(obj, NULL, 0);
-
-	down(&async_serializer);	// protect again race condition with reclassify_class
-	if (pid < 0) {
-		// do we want to treat this as process group .. TBD
-		rc = -EINVAL;
-	} else if (pid == 0) {
-		rc = (target == NULL) ? ckrm_reclassify_all_tasks() : -EINVAL;
-	} else {
-		struct ckrm_task_class *cls = NULL;
-		if (target) 
-			cls = class_type(ckrm_task_class_t,target);
-		rc = ckrm_forced_reclassify_pid(pid,cls);
+	pid = (pid_t) simple_strtoul(obj, NULL, 10);
+	if (pid > 0) {
+		rc = ckrm_forced_reclassify_pid(pid,
+						class_type(ckrm_task_class_t,
+							   target));
 	}
-	up(&async_serializer);
 	return rc;
 }
 
-#if 0
+#if 1
 
 /******************************************************************************
  * Debugging Task Classes:  Utility functions
@@ -737,7 +738,7 @@ void check_tasklist_sanity(struct ckrm_task_class *cls)
 		class_lock(core);
 		if (list_empty(&core->objlist)) {
 			class_lock(core);
-			printk(KERN_DEBUG "check_tasklist_sanity: class %s empty list\n",
+			printk("check_tasklist_sanity: class %s empty list\n",
 			       core->name);
 			return;
 		}
@@ -746,14 +747,14 @@ void check_tasklist_sanity(struct ckrm_task_class *cls)
 			    container_of(lh1, struct task_struct,
 					 taskclass_link);
 			if (count++ > 20000) {
-				printk(KERN_WARNING "list is CORRUPTED\n");
+				printk("list is CORRUPTED\n");
 				break;
 			}
 			if (tsk->taskclass != cls) {
 				const char *tclsname;
 				tclsname = (tsk->taskclass) ? 
 					class_core(tsk->taskclass)->name:"NULL";
-				printk(KERN_WARNING "sanity: task %s:%d has ckrm_core "
+				printk("sanity: task %s:%d has ckrm_core "
 				       "|%s| but in list |%s|\n", tsk->comm, 
 				       tsk->pid, tclsname, core->name);
 			}
@@ -767,7 +768,7 @@ void ckrm_debug_free_task_class(struct ckrm_task_class *tskcls)
 	struct task_struct *proc, *thread;
 	int count = 0;
 
-	printk(KERN_DEBUG "Analyze Error <%s> %d\n",
+	printk("Analyze Error <%s> %d\n",
 	       class_core(tskcls)->name,
 	       atomic_read(&(class_core(tskcls)->refcnt)));
 
@@ -779,7 +780,7 @@ void ckrm_debug_free_task_class(struct ckrm_task_class *tskcls)
 			const char *tclsname;
 			tclsname = (thread->taskclass) ? 
 				class_core(thread->taskclass)->name :"NULL";
-			printk(KERN_DEBUG "%d thread=<%s:%d>  -> <%s> <%lx>\n", count,
+			printk("%d thread=<%s:%d>  -> <%s> <%lx>\n", count,
 			       thread->comm, thread->pid, tclsname,
 			       thread->flags & PF_EXITING);
 		}
@@ -787,7 +788,7 @@ void ckrm_debug_free_task_class(struct ckrm_task_class *tskcls)
 	class_unlock(class_core(tskcls));
 	read_unlock(&tasklist_lock);
 
-	printk(KERN_DEBUG "End Analyze Error <%s> %d\n",
+	printk("End Analyze Error <%s> %d\n",
 	       class_core(tskcls)->name,
 	       atomic_read(&(class_core(tskcls)->refcnt)));
 }

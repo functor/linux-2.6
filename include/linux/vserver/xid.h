@@ -1,21 +1,15 @@
-#ifndef _VX_XID_H
-#define _VX_XID_H
-
-
-#define	XID_TAG(in)	(!(in) || \
-	(((struct inode *)in)->i_sb && \
-	(((struct inode *)in)->i_sb->s_flags & MS_TAGXID)))
-
+#ifndef _LINUX_XID_H_
+#define _LINUX_XID_H_
 
 #ifdef CONFIG_INOXID_NONE
 
 #define MAX_UID		0xFFFFFFFF
 #define MAX_GID		0xFFFFFFFF
 
-#define INOXID_XID(tag, uid, gid, xid)	(0)
+#define INOXID_XID(uid, gid, xid)	(0)
 
-#define XIDINO_UID(tag, uid, xid)	(uid)
-#define XIDINO_GID(tag, gid, xid)	(gid)
+#define XIDINO_UID(uid, xid)		(uid)
+#define XIDINO_GID(gid, xid)		(gid)
 
 #endif
 
@@ -25,57 +19,37 @@
 #define MAX_UID		0xFFFFFFFF
 #define MAX_GID		0x0000FFFF
 
-#define INOXID_XID(tag, uid, gid, xid)	\
-	((tag) ? (((gid) >> 16) & 0xFFFF) : 0)
+#define INOXID_XID(uid, gid, xid)	(((gid) >> 16) & 0xFFFF)
 
-#define XIDINO_UID(tag, uid, xid)	(uid)
-#define XIDINO_GID(tag, gid, xid)	\
-	((tag) ? (((gid) & 0xFFFF) | ((xid) << 16)) : (gid))
+#define XIDINO_UID(uid, xid)		(uid)
+#define XIDINO_GID(gid, xid)		(((gid) & 0xFFFF) | ((xid) << 16))
+
 
 #endif
 
 
-#ifdef CONFIG_INOXID_UGID24
+#ifdef CONFIG_INOXID_GID24
 
 #define MAX_UID		0x00FFFFFF
 #define MAX_GID		0x00FFFFFF
 
-#define INOXID_XID(tag, uid, gid, xid)	\
-	((tag) ? ((((uid) >> 16) & 0xFF00) | (((gid) >> 24) & 0xFF)) : 0)
+#define INOXID_XID(uid, gid, xid)	((((uid) >> 16) & 0xFF00) | (((gid) >> 24) & 0xFF))
 
-#define XIDINO_UID(tag, uid, xid)	\
-	((tag) ? (((uid) & 0xFFFFFF) | (((xid) & 0xFF00) << 16)) : (uid))
-#define XIDINO_GID(tag, gid, xid)	\
-	((tag) ? (((gid) & 0xFFFFFF) | (((xid) & 0x00FF) << 24)) : (gid))
+#define XIDINO_UID(uid, xid)		(((uid) & 0xFFFFFF) | (((xid) & 0xFF00) << 16))
+#define XIDINO_GID(gid, xid)		(((gid) & 0xFFFFFF) | (((xid) & 0x00FF) << 24))
 
 #endif
 
 
-#ifdef CONFIG_INOXID_UID16
-
-#define MAX_UID		0x0000FFFF
-#define MAX_GID		0xFFFFFFFF
-
-#define INOXID_XID(tag, uid, gid, xid)	\
-	((tag) ? ((uid) >> 16) & 0xFFFF) : 0)
-
-#define XIDINO_UID(tag, uid, xid)	\
-	((tag) ? (((uid) & 0xFFFF) | ((xid) << 16)) : (uid))
-#define XIDINO_GID(tag, gid, xid)	(gid)
-
-#endif
-
-
-#ifdef CONFIG_INOXID_INTERN
+#ifdef CONFIG_INOXID_GID32
 
 #define MAX_UID		0xFFFFFFFF
 #define MAX_GID		0xFFFFFFFF
 
-#define INOXID_XID(tag, uid, gid, xid)	\
-	((tag) ? (xid) : 0)
+#define INOXID_XID(uid, gid, xid)	(xid)
 
-#define XIDINO_UID(tag, uid, xid)	(uid)
-#define XIDINO_GID(tag, gid, xid)	(gid)
+#define XIDINO_UID(uid, xid)		(uid)
+#define XIDINO_GID(gid, xid)		(gid)
 
 #endif
 
@@ -85,19 +59,16 @@
 #define MAX_UID		0xFFFFFFFF
 #define MAX_GID		0xFFFFFFFF
 
-#define INOXID_XID(tag, uid, gid, xid)	(0)
+#define INOXID_XID(uid, gid, xid)	(0)
 
-#define XIDINO_UID(tag, uid, xid)	(uid)
-#define XIDINO_GID(tag, gid, xid)	(gid)
+#define XIDINO_UID(uid, xid)		(uid)
+#define XIDINO_GID(gid, xid)		(gid)
 
 #endif
 
 
-#define INOXID_UID(tag, uid, gid)	\
-	((tag) ? ((uid) & MAX_UID) : (uid))
-#define INOXID_GID(tag, uid, gid)	\
-	((tag) ? ((gid) & MAX_GID) : (gid))
-
+#define INOXID_UID(uid, gid)		((uid) & MAX_UID)
+#define INOXID_GID(uid, gid)		((gid) & MAX_GID)
 
 static inline uid_t vx_map_uid(uid_t uid)
 {
@@ -120,4 +91,4 @@ static inline gid_t vx_map_gid(gid_t gid)
 #define FIOC_SETXIDJ	_IOW('x', 3, long)
 #endif
 
-#endif /* _VX_XID_H */
+#endif /* _LINUX_XID_H_ */

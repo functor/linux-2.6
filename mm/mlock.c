@@ -50,8 +50,7 @@ static int mlock_fixup(struct vm_area_struct * vma,
 		ret = make_pages_present(start, end);
 	}
 
-	// vma->vm_mm->locked_vm -= pages;
-	vx_vmlocked_sub(vma->vm_mm, pages);
+	vma->vm_mm->locked_vm -= pages;
 out:
 	return ret;
 }
@@ -184,6 +183,7 @@ asmlinkage long sys_mlockall(int flags)
 	ret = -ENOMEM;
 	if (!vx_vmlocked_avail(current->mm, current->mm->total_vm))
 		goto out;
+	/* check vserver lock limits? */
 	if ((current->mm->total_vm <= lock_limit) || capable(CAP_IPC_LOCK))
 		ret = do_mlockall(flags);
 out:
@@ -199,37 +199,4 @@ asmlinkage long sys_munlockall(void)
 	ret = do_mlockall(0);
 	up_write(&current->mm->mmap_sem);
 	return ret;
-}
-
-/*
- * Objects with different lifetime than processes (SHM_LOCK and SHM_HUGETLB
- * shm segments) get accounted against the user_struct instead.
- */
-static spinlock_t shmlock_user_lock = SPIN_LOCK_UNLOCKED;
-
-int user_shm_lock(size_t size, struct user_struct *user)
-{
-	unsigned long lock_limit, locked;
-	int allowed = 0;
-
-	spin_lock(&shmlock_user_lock);
-	locked = size >> PAGE_SHIFT;
-	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
-	lock_limit >>= PAGE_SHIFT;
-	if (locked + user->locked_shm > lock_limit && !capable(CAP_IPC_LOCK))
-		goto out;
-	get_uid(user);
-	user->locked_shm += locked;
-	allowed = 1;
-out:
-	spin_unlock(&shmlock_user_lock);
-	return allowed;
-}
-
-void user_shm_unlock(size_t size, struct user_struct *user)
-{
-	spin_lock(&shmlock_user_lock);
-	user->locked_shm -= (size >> PAGE_SHIFT);
-	spin_unlock(&shmlock_user_lock);
-	free_uid(user);
 }

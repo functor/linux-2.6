@@ -8,8 +8,6 @@
 
 #include "sysdep/ptrace.h"
 
-#define CATCH_EINTR(expr) while (((expr) < 0) && (errno == EINTR))
-
 extern int mode_tt;
 
 extern int grantpt(int __fd);
@@ -64,6 +62,7 @@ extern void set_cmdline(char *cmd);
 extern void input_cb(void (*proc)(void *), void *arg, int arg_len);
 extern int get_pty(void);
 extern void *um_kmalloc(int size);
+extern int raw(int fd, int complain);
 extern int switcheroo(int fd, int prot, void *from, void *to, int size);
 extern void setup_machinename(char *machine_out);
 extern void setup_hostinfo(void);
@@ -74,6 +73,7 @@ extern void do_exec(int old_pid, int new_pid);
 extern void tracer_panic(char *msg, ...);
 extern char *get_umid(int only_if_set);
 extern void do_longjmp(void *p, int val);
+extern void suspend_new_thread(int fd);
 extern int detach(int pid, int sig);
 extern int attach(int pid);
 extern void kill_child_dead(int pid);
@@ -89,8 +89,6 @@ extern int arch_fixup(unsigned long address, void *sc_ptr);
 extern void forward_pending_sigio(int target);
 extern int can_do_skas(void);
 extern void arch_init_thread(void);
-extern int setjmp_wrapper(void (*proc)(void *, void *), ...);
-extern int raw(int fd);
 
 #endif
 

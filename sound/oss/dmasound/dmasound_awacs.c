@@ -1,10 +1,10 @@
 /*
- *  linux/sound/oss/dmasound/dmasound_awacs.c
+ *  linux/drivers/sound/dmasound/dmasound_awacs.c
  *
  *  PowerMac `AWACS' and `Burgundy' DMA Sound Driver
  *  with some limited support for DACA & Tumbler
  *
- *  See linux/sound/oss/dmasound/dmasound_core.c for copyright and
+ *  See linux/drivers/sound/dmasound/dmasound_core.c for copyright and
  *  history prior to 2001/01/26.
  *
  *	26/01/2001 ed 0.1 Iain Sandoe
@@ -326,12 +326,12 @@ extern int daca_leave_sleep(void);
 #undef IOCTL_OUT
 
 #define IOCTL_IN(arg, ret)	\
-	rc = get_user(ret, (int __user *)(arg)); \
+	rc = get_user(ret, (int *)(arg)); \
 	if (rc) break;
 #define IOCTL_OUT(arg, ret)	\
-	ioctl_return2((int __user *)(arg), ret)
+	ioctl_return2((int *)(arg), ret)
 
-static inline int ioctl_return2(int __user *addr, int value)
+static inline int ioctl_return2(int *addr, int value)
 {
 	return value < 0 ? value : put_user(value, addr);
 }
@@ -461,7 +461,7 @@ tas_dmasound_init(void)
 	write_audio_gpio(gpio_audio_reset, !gpio_audio_reset_pol);
 	msleep(100);
   	if (gpio_headphone_irq) {
-		if (request_irq(gpio_headphone_irq,headphone_intr,0,"Headphone detect",NULL) < 0) {
+		if (request_irq(gpio_headphone_irq,headphone_intr,0,"Headphone detect",0) < 0) {
     			printk(KERN_ERR "tumbler: Can't request headphone interrupt\n");
     			gpio_headphone_irq = 0;
     		} else {
@@ -470,7 +470,7 @@ tas_dmasound_init(void)
 			val = pmac_call_feature(PMAC_FTR_READ_GPIO, NULL, gpio_headphone_detect, 0);
 			pmac_call_feature(PMAC_FTR_WRITE_GPIO, NULL, gpio_headphone_detect, val | 0x80);
 			/* Trigger it */
-  			headphone_intr(0,NULL,NULL);
+  			headphone_intr(0,0,0);
   		}
   	}
   	if (!gpio_headphone_irq) {
@@ -487,7 +487,7 @@ static int
 tas_dmasound_cleanup(void)
 {
 	if (gpio_headphone_irq)
-		free_irq(gpio_headphone_irq, NULL);
+		free_irq(gpio_headphone_irq, 0);
 	return 0;
 }
 
@@ -514,7 +514,6 @@ tas_set_frame_rate(void)
 static int
 tas_mixer_ioctl(u_int cmd, u_long arg)
 {
-	int __user *argp = (int __user *)arg;
 	int data;
 	int rc;
 
@@ -525,16 +524,16 @@ tas_mixer_ioctl(u_int cmd, u_long arg)
 
         if ((cmd & ~0xff) == MIXER_WRITE(0) &&
             tas_supported_mixers() & (1<<(cmd & 0xff))) {
-		rc = get_user(data, argp);
+		rc = get_user(data, (int *)(arg));
                 if (rc<0) return rc;
 		tas_set_mixer_level(cmd & 0xff, data);
 		tas_get_mixer_level(cmd & 0xff, &data);
-		return ioctl_return2(argp, data);
+		return ioctl_return2((int *)(arg), data);
         }
         if ((cmd & ~0xff) == MIXER_READ(0) &&
             tas_supported_mixers() & (1<<(cmd & 0xff))) {
 		tas_get_mixer_level(cmd & 0xff, &data);
-		return ioctl_return2(argp, data);
+		return ioctl_return2((int *)(arg), data);
         }
 
 	switch(cmd) {
@@ -628,10 +627,10 @@ static void PMacFree(void *ptr, unsigned int size)
 static int __init PMacIrqInit(void)
 {
 	if (awacs)
-		if (request_irq(awacs_irq, pmac_awacs_intr, 0, "Built-in Sound misc", NULL))
+		if (request_irq(awacs_irq, pmac_awacs_intr, 0, "Built-in Sound misc", 0))
 			return 0;
-	if (request_irq(awacs_tx_irq, pmac_awacs_tx_intr, 0, "Built-in Sound out", NULL)
-	    || request_irq(awacs_rx_irq, pmac_awacs_rx_intr, 0, "Built-in Sound in", NULL))
+	if (request_irq(awacs_tx_irq, pmac_awacs_tx_intr, 0, "Built-in Sound out", 0)
+	    || request_irq(awacs_rx_irq, pmac_awacs_rx_intr, 0, "Built-in Sound in", 0))
 		return 0;
 	return 1;
 }
@@ -657,9 +656,9 @@ static void PMacIrqCleanup(void)
 		msleep(200);
 	}
 	if (awacs)
-		free_irq(awacs_irq, NULL);
-	free_irq(awacs_tx_irq, NULL);
-	free_irq(awacs_rx_irq, NULL);
+		free_irq(awacs_irq, 0);
+	free_irq(awacs_tx_irq, 0);
+	free_irq(awacs_rx_irq, 0);
 	
 	if (awacs)
 		iounmap((void *)awacs);
@@ -1505,7 +1504,7 @@ static int awacs_sleep_notify(struct pmu_sleep_notifier *self, int when)
 				write_audio_gpio(gpio_audio_reset, !gpio_audio_reset_pol);
 				msleep(150);
 				tas_leave_sleep(); /* Stub for now */
-				headphone_intr(0,NULL,NULL);
+				headphone_intr(0,0,0);
 				break;
 			case AWACS_DACA:
 				msleep(10); /* Check this !!! */
@@ -2970,7 +2969,7 @@ printk("dmasound_pmac: Awacs/Screamer Codec Mfct: %d Rev %d\n", mfg, rev);
 
 		sound_device_id = 0;
 		/* device ID appears post g3 b&w */
-		prop = (unsigned int *)get_property(info, "device-id", NULL);
+		prop = (unsigned int *)get_property(info, "device-id", 0);
 		if (prop != 0)
 			sound_device_id = *prop;
 
@@ -3081,7 +3080,7 @@ printk("dmasound_pmac: Awacs/Screamer Codec Mfct: %d Rev %d\n", mfg, rev);
 
 	} else if (is_pbook_g3) {
 		struct device_node* mio;
-		macio_base = NULL;
+		macio_base = 0;
 		for (mio = io->parent; mio; mio = mio->parent) {
 			if (strcmp(mio->name, "mac-io") == 0
 			    && mio->n_addrs > 0) {

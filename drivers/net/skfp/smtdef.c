@@ -262,7 +262,7 @@ static void smt_init_mib(struct s_smc *smc, int level)
 		 */
 		/* Attention: don't initialize mib pointer here! */
 		/*  It must be initialized during phase 2 */
-		smc->y[port].mib = NULL;
+		smc->y[port].mib = 0 ;
 		mib->fddiSMTPORTIndexes[port] = port+INDEX_PORT ;
 
 		pm->fddiPORTIndex = port+INDEX_PORT ;
