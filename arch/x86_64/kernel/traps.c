@@ -256,8 +256,8 @@ void show_registers(struct pt_regs *regs)
 
 	printk("CPU %d ", cpu);
 	__show_regs(regs);
-	printk("Process %s (pid: %d, stackpage=%08lx)\n",
-		cur->comm, cur->pid, 4096+(unsigned long)cur);
+	printk("Process %s (pid: %d, threadinfo %p, task %p)\n",
+		cur->comm, cur->pid, cur->thread_info, cur);
 
 	/*
 	 * When in-kernel, we also print out the stack and code at the
@@ -302,7 +302,7 @@ void handle_BUG(struct pt_regs *regs)
 	if (__get_user(tmp, f.filename))
 		f.filename = "unmapped filename"; 
 	printk("----------- [cut here ] --------- [please bite here ] ---------\n");
-	printk("Kernel BUG at %.50s:%d\n", f.filename, f.line); 	
+	printk(KERN_ALERT "Kernel BUG at %.50s:%d\n", f.filename, f.line);
 } 
 
 void out_of_line_bug(void)
@@ -356,7 +356,7 @@ void __die(const char * str, struct pt_regs * regs, long err)
 	notify_die(DIE_OOPS, (char *)str, regs, err, 255, SIGSEGV);
 	show_registers(regs);
 	/* Executive summary in case the oops scrolled away */
-	printk("RIP "); 
+	printk(KERN_ALERT "RIP ");
 	printk_address(regs->rip); 
 	printk(" RSP <%016lx>\n", regs->rsp); 
 }

@@ -16,7 +16,7 @@
 
 #include <linux/config.h>
 #include <linux/kernel.h>
-#include <linux/module.h> 
+#include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
 #include <linux/cpufreq.h>
@@ -28,7 +28,7 @@
 #include <asm/io.h>
 #include <asm/system.h>
 
-#ifdef CONFIG_ACPI_PROCESSOR
+#if defined(CONFIG_ACPI_PROCESSOR) || defined(CONFIG_ACPI_PROCESSOR_MODULE)
 #include <linux/acpi.h>
 #include <acpi/processor.h>
 #endif
@@ -63,7 +63,7 @@ struct pst_s {
 	u8 numpstates;
 };
 
-#ifdef CONFIG_ACPI_PROCESSOR
+#if defined(CONFIG_ACPI_PROCESSOR) || defined(CONFIG_ACPI_PROCESSOR_MODULE)
 union powernow_acpi_control_t {
 	struct {
 		unsigned long fid:5,
@@ -86,7 +86,7 @@ static int mobile_vid_table[32] = {
 /* divide by 10 to get FID. */
 static int fid_codes[32] = {
     110, 115, 120, 125, 50, 55, 60, 65,
-    70, 75, 80, 85, 90, 95, 100, 105, 
+    70, 75, 80, 85, 90, 95, 100, 105,
     30, 190, 40, 200, 130, 135, 140, 210,
     150, 225, 160, 165, 170, 180, -1, -1,
 };
@@ -95,7 +95,7 @@ static int fid_codes[32] = {
  * configuration purpose.
  */
 
-static int powernow_acpi_force;
+static int acpi_force;
 
 static struct cpufreq_frequency_table *powernow_table;
 
@@ -144,6 +144,11 @@ static int check_powernow(void)
 	}
 
 	cpuid(0x80000007, &eax, &ebx, &ecx, &edx);
+
+	/* Check we can actually do something before we say anything.*/
+	if (!(edx & (1 << 1 | 1 << 2)))
+		return 0;
+
 	printk (KERN_INFO PFX "PowerNOW! Technology present. Can scale: ");
 
 	if (edx & 1 << 1) {
@@ -157,11 +162,6 @@ static int check_powernow(void)
 	if (edx & 1 << 2) {
 		printk ("voltage");
 		can_scale_vid=1;
-	}
-
-	if (!(edx & (1 << 1 | 1 << 2))) {
-		printk ("nothing.\n");
-		return 0;
 	}
 
 	printk (".\n");
@@ -293,7 +293,7 @@ static void change_speed (unsigned int index)
 }
 
 
-#ifdef CONFIG_ACPI_PROCESSOR
+#if defined(CONFIG_ACPI_PROCESSOR) || defined(CONFIG_ACPI_PROCESSOR_MODULE)
 
 struct acpi_processor_performance *acpi_processor_perf;
 
@@ -540,6 +540,20 @@ static int __init fixup_sgtc(void)
 	return sgtc;
 }
 
+static unsigned int powernow_get(unsigned int cpu)
+{
+	union msr_fidvidstatus fidvidstatus;
+	unsigned int cfid;
+
+	if (cpu)
+		return 0;
+	rdmsrl (MSR_K7_FID_VID_STATUS, fidvidstatus.val);
+	cfid = fidvidstatus.bits.CFID;
+
+	return (fsb * fid_codes[cfid] / 10);
+}
+
+
 static int __init powernow_cpu_init (struct cpufreq_policy *policy)
 {
 	union msr_fidvidstatus fidvidstatus;
@@ -558,7 +572,7 @@ static int __init powernow_cpu_init (struct cpufreq_policy *policy)
 	}
 	dprintk(KERN_INFO PFX "FSB: %3d.%03d MHz\n", fsb/1000, fsb%1000);
 
-	if ((dmi_broken & BROKEN_CPUFREQ) || powernow_acpi_force) {
+	if ((dmi_broken & BROKEN_CPUFREQ) || acpi_force) {
 		printk (KERN_INFO PFX "PSB/PST known to be broken.  Trying ACPI instead\n");
 		result = powernow_acpi_init();
 	} else {
@@ -590,7 +604,7 @@ static int __init powernow_cpu_init (struct cpufreq_policy *policy)
 
 	policy->cpuinfo.transition_latency = 20 * latency / fsb;
 
-	policy->cur = maximum_speed;
+	policy->cur = powernow_get(0);
 
 	cpufreq_frequency_table_get_attr(powernow_table, policy->cpu);
 
@@ -610,6 +624,7 @@ static struct freq_attr* powernow_table_attr[] = {
 static struct cpufreq_driver powernow_driver = {
 	.verify 	= powernow_verify,
 	.target 	= powernow_target,
+	.get		= powernow_get,	
 	.init		= powernow_cpu_init,
 	.exit		= powernow_cpu_exit,
 	.name		= "powernow-k7",
@@ -627,7 +642,7 @@ static int __init powernow_init (void)
 
 static void __exit powernow_exit (void)
 {
-#ifdef CONFIG_ACPI_PROCESSOR
+#if defined(CONFIG_ACPI_PROCESSOR) || defined(CONFIG_ACPI_PROCESSOR_MODULE)
 	if (acpi_processor_perf) {
 		acpi_processor_unregister_performance(acpi_processor_perf, 0);
 		kfree(acpi_processor_perf);
@@ -638,8 +653,7 @@ static void __exit powernow_exit (void)
 		kfree(powernow_table);
 }
 
-module_param(powernow_acpi_force,  int, 0444);
-
+module_param(acpi_force,  int, 0444);
 MODULE_PARM_DESC(acpi_force, "Force ACPI to be used");
 
 MODULE_AUTHOR ("Dave Jones <davej@codemonkey.org.uk>");

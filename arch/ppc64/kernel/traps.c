@@ -44,6 +44,7 @@ extern int fwnmi_active;
 
 #ifdef CONFIG_DEBUGGER
 int (*__debugger)(struct pt_regs *regs);
+int (*__debugger_ipi)(struct pt_regs *regs);
 int (*__debugger_bpt)(struct pt_regs *regs);
 int (*__debugger_sstep)(struct pt_regs *regs);
 int (*__debugger_iabr_match)(struct pt_regs *regs);
@@ -51,6 +52,7 @@ int (*__debugger_dabr_match)(struct pt_regs *regs);
 int (*__debugger_fault_handler)(struct pt_regs *regs);
 
 EXPORT_SYMBOL(__debugger);
+EXPORT_SYMBOL(__debugger_ipi);
 EXPORT_SYMBOL(__debugger_bpt);
 EXPORT_SYMBOL(__debugger_sstep);
 EXPORT_SYMBOL(__debugger_iabr_match);
@@ -68,9 +70,6 @@ int die(const char *str, struct pt_regs *regs, long err)
 {
 	static int die_counter;
 	int nl = 0;
-
-	if (debugger_fault_handler(regs))
-		return 1;
 
 	if (debugger(regs))
 		return 1;
@@ -266,6 +265,8 @@ MachineCheckException(struct pt_regs *regs)
 	}
 #endif
 
+	if (debugger_fault_handler(regs))
+		return;
 	die("Machine check", regs, 0);
 
 	/* Must die if the interrupt is not recoverable */
@@ -465,6 +466,18 @@ SingleStepException(struct pt_regs *regs)
 	_exception(SIGTRAP, &info, regs);	
 }
 
+/*
+ * After we have successfully emulated an instruction, we have to
+ * check if the instruction was being single-stepped, and if so,
+ * pretend we got a single-step exception.  This was pointed out
+ * by Kumar Gala.  -- paulus
+ */
+static inline void emulate_single_step(struct pt_regs *regs)
+{
+	if (regs->msr & MSR_SE)
+		SingleStepException(regs);
+}
+
 static void dummy_perf(struct pt_regs *regs)
 {
 }
@@ -486,10 +499,8 @@ AlignmentException(struct pt_regs *regs)
 	fixed = fix_alignment(regs);
 
 	if (fixed == 1) {
-		if (!user_mode(regs))
-			PPCDBG(PPCDBG_ALIGNFIXUP, "fix alignment at %lx\n",
-			       regs->nip);
 		regs->nip += 4;	/* skip over emulated instruction */
+		emulate_single_step(regs);
 		return;
 	}
 

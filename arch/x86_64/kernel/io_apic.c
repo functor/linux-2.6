@@ -237,6 +237,7 @@ void __init check_ioapic(void)
 			for (func = 0; func < 8; func++) { 
 				u32 class;
 				u32 vendor;
+				u8 type;
 				class = read_pci_config(num,slot,func,
 							PCI_CLASS_REVISION);
 				if (class == 0xffffffff)
@@ -251,14 +252,15 @@ void __init check_ioapic(void)
 				switch (vendor) { 
 				case PCI_VENDOR_ID_VIA:
 #ifdef CONFIG_GART_IOMMU
-					if (end_pfn >= (0xffffffff>>PAGE_SHIFT) &&
+					if ((end_pfn >= (0xffffffff>>PAGE_SHIFT) ||
+					     force_iommu) &&
 					    !iommu_aperture_allowed) {
 						printk(KERN_INFO
     "Looks like a VIA chipset. Disabling IOMMU. Overwrite with \"iommu=allowed\"\n");
 						iommu_aperture_disabled = 1;
 					}
 #endif
-					/* FALL THROUGH */
+					return;
 				case PCI_VENDOR_ID_NVIDIA:
 #ifndef CONFIG_SMP
 					printk(KERN_INFO 
@@ -270,8 +272,8 @@ void __init check_ioapic(void)
 				} 
 
 				/* No multi-function device? */
-				u8 type = read_pci_config_byte(num,slot,func,
-							       PCI_HEADER_TYPE);
+				type = read_pci_config_byte(num,slot,func,
+							    PCI_HEADER_TYPE);
 				if (!(type & 0x80))
 					break;
 			} 

@@ -27,7 +27,7 @@
 /**
  * The little endian Unicode string $I30 as a global constant.
  */
-uchar_t I30[5] = { const_cpu_to_le16('$'), const_cpu_to_le16('I'),
+ntfschar I30[5] = { const_cpu_to_le16('$'), const_cpu_to_le16('I'),
 		const_cpu_to_le16('3'),	const_cpu_to_le16('0'),
 		const_cpu_to_le16(0) };
 
@@ -64,7 +64,7 @@ uchar_t I30[5] = { const_cpu_to_le16('$'), const_cpu_to_le16('I'),
  * work but we don't care for how quickly one can access them. This also fixes
  * the dcache aliasing issues.
  */
-MFT_REF ntfs_lookup_inode_by_name(ntfs_inode *dir_ni, const uchar_t *uname,
+MFT_REF ntfs_lookup_inode_by_name(ntfs_inode *dir_ni, const ntfschar *uname,
 		const int uname_len, ntfs_name **res)
 {
 	ntfs_volume *vol = dir_ni->vol;
@@ -135,7 +135,7 @@ MFT_REF ntfs_lookup_inode_by_name(ntfs_inode *dir_ni, const uchar_t *uname,
 		 * returning.
 		 */
 		if (ntfs_are_names_equal(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length,
 				CASE_SENSITIVE, vol->upcase, vol->upcase_len)) {
 found_it:
@@ -186,7 +186,7 @@ found_it:
 		if (!NVolCaseSensitive(vol) &&
 				ie->key.file_name.file_name_type &&
 				ntfs_are_names_equal(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length,
 				IGNORE_CASE, vol->upcase, vol->upcase_len)) {
 			int name_size = sizeof(ntfs_name);
@@ -206,7 +206,7 @@ found_it:
 			}
 
 			if (type != FILE_NAME_DOS)
-				name_size += len * sizeof(uchar_t);
+				name_size += len * sizeof(ntfschar);
 			name = kmalloc(name_size, GFP_NOFS);
 			if (!name) {
 				err = -ENOMEM;
@@ -217,7 +217,7 @@ found_it:
 			if (type != FILE_NAME_DOS) {
 				name->len = len;
 				memcpy(name->name, ie->key.file_name.file_name,
-						len * sizeof(uchar_t));
+						len * sizeof(ntfschar));
 			} else
 				name->len = 0;
 			*res = name;
@@ -227,7 +227,7 @@ found_it:
 		 * know which way in the B+tree we have to go.
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length, 1,
 				IGNORE_CASE, vol->upcase, vol->upcase_len);
 		/*
@@ -246,7 +246,7 @@ found_it:
 		 * collation.
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length, 1,
 				CASE_SENSITIVE, vol->upcase, vol->upcase_len);
 		if (rc == -1)
@@ -395,7 +395,7 @@ fast_descend_into_child_node:
 		 * returning.
 		 */
 		if (ntfs_are_names_equal(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length,
 				CASE_SENSITIVE, vol->upcase, vol->upcase_len)) {
 found_it2:
@@ -445,7 +445,7 @@ found_it2:
 		if (!NVolCaseSensitive(vol) &&
 				ie->key.file_name.file_name_type &&
 				ntfs_are_names_equal(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length,
 				IGNORE_CASE, vol->upcase, vol->upcase_len)) {
 			int name_size = sizeof(ntfs_name);
@@ -466,7 +466,7 @@ found_it2:
 			}
 
 			if (type != FILE_NAME_DOS)
-				name_size += len * sizeof(uchar_t);
+				name_size += len * sizeof(ntfschar);
 			name = kmalloc(name_size, GFP_NOFS);
 			if (!name) {
 				err = -ENOMEM;
@@ -477,7 +477,7 @@ found_it2:
 			if (type != FILE_NAME_DOS) {
 				name->len = len;
 				memcpy(name->name, ie->key.file_name.file_name,
-						len * sizeof(uchar_t));
+						len * sizeof(ntfschar));
 			} else
 				name->len = 0;
 			*res = name;
@@ -487,7 +487,7 @@ found_it2:
 		 * know which way in the B+tree we have to go.
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length, 1,
 				IGNORE_CASE, vol->upcase, vol->upcase_len);
 		/*
@@ -506,7 +506,7 @@ found_it2:
 		 * collation.
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length, 1,
 				CASE_SENSITIVE, vol->upcase, vol->upcase_len);
 		if (rc == -1)
@@ -607,7 +607,7 @@ dir_err_out:
  *
  * Note, @uname_len does not include the (optional) terminating NULL character.
  */
-u64 ntfs_lookup_inode_by_name(ntfs_inode *dir_ni, const uchar_t *uname,
+u64 ntfs_lookup_inode_by_name(ntfs_inode *dir_ni, const ntfschar *uname,
 		const int uname_len)
 {
 	ntfs_volume *vol = dir_ni->vol;
@@ -689,7 +689,7 @@ u64 ntfs_lookup_inode_by_name(ntfs_inode *dir_ni, const uchar_t *uname,
 		 * convert it to cpu format before returning.
 		 */
 		if (ntfs_are_names_equal(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length, ic,
 				vol->upcase, vol->upcase_len)) {
 found_it:
@@ -703,7 +703,7 @@ found_it:
 		 * know which way in the B+tree we have to go.
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length, 1,
 				IGNORE_CASE, vol->upcase, vol->upcase_len);
 		/*
@@ -722,7 +722,7 @@ found_it:
 		 * collation.
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length, 1,
 				CASE_SENSITIVE, vol->upcase, vol->upcase_len);
 		if (rc == -1)
@@ -875,7 +875,7 @@ fast_descend_into_child_node:
 		 * convert it to cpu format before returning.
 		 */
 		if (ntfs_are_names_equal(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length, ic,
 				vol->upcase, vol->upcase_len)) {
 found_it2:
@@ -888,7 +888,7 @@ found_it2:
 		 * know which way in the B+tree we have to go.
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length, 1,
 				IGNORE_CASE, vol->upcase, vol->upcase_len);
 		/*
@@ -907,7 +907,7 @@ found_it2:
 		 * collation.
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
-				(uchar_t*)&ie->key.file_name.file_name,
+				(ntfschar*)&ie->key.file_name.file_name,
 				ie->key.file_name.file_name_length, 1,
 				CASE_SENSITIVE, vol->upcase, vol->upcase_len);
 		if (rc == -1)
@@ -1027,7 +1027,7 @@ static inline int ntfs_filldir(ntfs_volume *vol, loff_t *fpos,
 		ntfs_debug("Skipping system file.");
 		return 0;
 	}
-	name_len = ntfs_ucstonls(vol, (uchar_t*)&ie->key.file_name.file_name,
+	name_len = ntfs_ucstonls(vol, (ntfschar*)&ie->key.file_name.file_name,
 			ie->key.file_name.file_name_length, &name,
 			NTFS_MAX_NAME_LEN * NLS_MAX_CHARSET_SIZE + 1);
 	if (name_len <= 0) {
@@ -1067,7 +1067,7 @@ static int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	ntfs_inode *ndir = NTFS_I(vdir);
 	ntfs_volume *vol = NTFS_SB(sb);
 	MFT_RECORD *m;
-	INDEX_ROOT *ir;
+	INDEX_ROOT *ir = NULL;
 	INDEX_ENTRY *ie;
 	INDEX_ALLOCATION *ia;
 	u8 *name = NULL;
@@ -1139,9 +1139,29 @@ static int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 				"inode 0x%lx.", vdir->i_ino);
 		goto err_out;
 	}
-	/* Get to the index root value (it's been verified in read_inode). */
-	ir = (INDEX_ROOT*)((u8*)ctx->attr +
-			le16_to_cpu(ctx->attr->data.resident.value_offset));
+	/*
+	 * Copy the index root attribute value to a buffer so that we can put
+	 * the search context and unmap the mft record before calling the
+	 * filldir() callback.  We need to do this because of NFSd which calls
+	 * ->lookup() from its filldir callback() and this causes NTFS to
+	 * deadlock as ntfs_lookup() maps the mft record of the directory and
+	 * we have got it mapped here already.  The only solution is for us to
+	 * unmap the mft record here so that a call to ntfs_lookup() is able to
+	 * map the mft record without deadlocking.
+	 */
+	rc = le32_to_cpu(ctx->attr->data.resident.value_length);
+	ir = (INDEX_ROOT*)kmalloc(rc, GFP_NOFS);
+	if (unlikely(!ir)) {
+		err = -ENOMEM;
+		goto err_out;
+	}
+	/* Copy the index root value (it has been verified in read_inode). */
+	memcpy(ir, (u8*)ctx->attr +
+			le16_to_cpu(ctx->attr->data.resident.value_offset), rc);
+	put_attr_search_ctx(ctx);
+	unmap_mft_record(ndir);
+	ctx = NULL;
+	m = NULL;
 	index_end = (u8*)&ir->index + le32_to_cpu(ir->index.index_length);
 	/* The first index entry. */
 	ie = (INDEX_ENTRY*)((u8*)&ir->index +
@@ -1154,7 +1174,7 @@ static int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	for (;; ie = (INDEX_ENTRY*)((u8*)ie + le16_to_cpu(ie->length))) {
 		ntfs_debug("In index root, offset 0x%x.", (u8*)ie - (u8*)ir);
 		/* Bounds checks. */
-		if (unlikely((u8*)ie < (u8*)ctx->mrec || (u8*)ie +
+		if (unlikely((u8*)ie < (u8*)ir || (u8*)ie +
 				sizeof(INDEX_ENTRY_HEADER) > index_end ||
 				(u8*)ie + le16_to_cpu(ie->key_length) >
 				index_end))
@@ -1169,20 +1189,13 @@ static int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		rc = ntfs_filldir(vol, &fpos, ndir, INDEX_TYPE_ROOT, ir, ie,
 				name, dirent, filldir);
 		if (rc) {
-			put_attr_search_ctx(ctx);
-			unmap_mft_record(ndir);
+			kfree(ir);
 			goto abort;
 		}
 	}
-	/*
-	 * We are done with the index root and the mft record for that matter.
-	 * We need to release it, otherwise we deadlock on ntfs_attr_iget()
-	 * and/or ntfs_read_page().
-	 */
-	put_attr_search_ctx(ctx);
-	unmap_mft_record(ndir);
-	m = NULL;
-	ctx = NULL;
+	/* We are done with the index root and can free the buffer. */
+	kfree(ir);
+	ir = NULL;
 	/* If there is no index allocation attribute we are finished. */
 	if (!NInoIndexAllocPresent(ndir))
 		goto EOD;
@@ -1196,7 +1209,7 @@ skip_index_root:
 	ia_mapping = vdir->i_mapping;
 	bmp_vi = ndir->itype.index.bmp_ino;
 	if (unlikely(!bmp_vi)) {
-		ntfs_debug("Inode %lu, regetting index bitmap.", vdir->i_ino);
+		ntfs_debug("Inode 0x%lx, regetting index bitmap.", vdir->i_ino);
 		bmp_vi = ntfs_attr_iget(vdir, AT_BITMAP, I30, 4);
 		if (unlikely(IS_ERR(bmp_vi))) {
 			ntfs_error(sb, "Failed to get bitmap attribute.");
@@ -1379,6 +1392,8 @@ err_out:
 		ntfs_unmap_page(bmp_page);
 	if (ia_page)
 		ntfs_unmap_page(ia_page);
+	if (ir)
+		kfree(ir);
 	if (name)
 		kfree(name);
 	if (ctx)

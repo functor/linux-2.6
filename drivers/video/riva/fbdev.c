@@ -492,17 +492,17 @@ static inline void reverse_order(u32 *l)
  * CALLED FROM:
  * rivafb_cursor()
  */
-static void rivafb_load_cursor_image(struct riva_par *par, u8 *data, 
-				     u8 *mask, u16 bg, u16 fg, u32 w, u32 h)
+static void rivafb_load_cursor_image(struct riva_par *par, u8 *data8,
+				     u8 *mask8, u16 bg, u16 fg, u32 w, u32 h)
 {
 	int i, j, k = 0;
 	u32 b, m, tmp;
+	u32 *data = (u32 *)data8;
+	u32 *mask = (u32 *)mask8;
 
 	for (i = 0; i < h; i++) {
-		b = *((u32 *)data);
-		b = (u32)((u32 *)b + 1);
-		m = *((u32 *)mask);
-		m = (u32)((u32 *)m + 1);
+		b = *data++;
+		m = *mask++;
 		reverse_order(&b);
 		
 		for (j = 0; j < w/2; j++) {
@@ -1620,14 +1620,27 @@ static int riva_get_EDID_OF(struct fb_info *info, struct pci_dev *pd)
 	struct riva_par *par = (struct riva_par *) info->par;
 	struct device_node *dp;
 	unsigned char *pedid = NULL;
+	unsigned char *disptype = NULL;
+	static char *propnames[] = {
+		"DFP,EDID", "LCD,EDID", "EDID", "EDID1", "EDID,B", "EDID,A", NULL };
+	int i;
 
 	dp = pci_device_to_OF_node(pd);
-	pedid = (unsigned char *)get_property(dp, "EDID,B", 0);
-
-	if (pedid) {
+	for (; dp != NULL; dp = dp->child) {
+		disptype = (unsigned char *)get_property(dp, "display-type", NULL);
+		if (disptype == NULL)
+			continue;
+		if (strncmp(disptype, "LCD", 3) != 0)
+			continue;
+		for (i = 0; propnames[i] != NULL; ++i) {
+			pedid = (unsigned char *)
+				get_property(dp, propnames[i], NULL);
+			if (pedid != NULL) {
 		par->EDID = pedid;
 		return 1;
-	} else
+			}
+		}
+	}
 		return 0;
 }
 #endif /* CONFIG_PPC_OF */

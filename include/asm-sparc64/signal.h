@@ -212,7 +212,7 @@ struct __new_sigaction32 {
 
 struct k_sigaction {
 	struct __new_sigaction 	sa;
-	void			*ka_restorer;
+	void __user		*ka_restorer;
 };
 #endif
 
@@ -252,8 +252,6 @@ struct signal_deliver_cookie {
 
 struct pt_regs;
 extern void ptrace_signal_deliver(struct pt_regs *regs, void *cookie);
-
-#define HAVE_ARCH_SYS_PAUSE
 
 #endif /* !(__KERNEL__) */
 

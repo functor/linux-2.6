@@ -521,6 +521,8 @@ static void ext3_clear_inode(struct inode *inode)
 static int ext3_dquot_initialize(struct inode *inode, int type);
 static int ext3_dquot_drop(struct inode *inode);
 static int ext3_write_dquot(struct dquot *dquot);
+static int ext3_acquire_dquot(struct dquot *dquot);
+static int ext3_release_dquot(struct dquot *dquot);
 static int ext3_mark_dquot_dirty(struct dquot *dquot);
 static int ext3_write_info(struct super_block *sb, int type);
 static int ext3_quota_on(struct super_block *sb, int type, int format_id, char *path);
@@ -536,6 +538,8 @@ static struct dquot_operations ext3_quota_operations = {
 	.free_inode	= dquot_free_inode,
 	.transfer	= dquot_transfer,
 	.write_dquot	= ext3_write_dquot,
+	.acquire_dquot	= ext3_acquire_dquot,
+	.release_dquot	= ext3_release_dquot,
 	.mark_dirty	= ext3_mark_dquot_dirty,
 	.write_info	= ext3_write_info
 };
@@ -1639,6 +1643,7 @@ static journal_t *ext3_get_journal(struct super_block *sb, int journal_inum)
 	if (!journal) {
 		printk(KERN_ERR "EXT3-fs: Could not load journal inode\n");
 		iput(journal_inode);
+		return NULL;
 	}
 	journal->j_private = sb;
 	ext3_init_journal_params(EXT3_SB(sb), journal);
@@ -1870,13 +1875,17 @@ static void ext3_commit_super (struct super_block * sb,
 static void ext3_mark_recovery_complete(struct super_block * sb,
 					struct ext3_super_block * es)
 {
-	journal_flush(EXT3_SB(sb)->s_journal);
+	journal_t *journal = EXT3_SB(sb)->s_journal;
+
+	journal_lock_updates(journal);
+	journal_flush(journal);
 	if (EXT3_HAS_INCOMPAT_FEATURE(sb, EXT3_FEATURE_INCOMPAT_RECOVER) &&
 	    sb->s_flags & MS_RDONLY) {
 		EXT3_CLEAR_INCOMPAT_FEATURE(sb, EXT3_FEATURE_INCOMPAT_RECOVER);
 		sb->s_dirt = 0;
 		ext3_commit_super(sb, es, 1);
 	}
+	journal_unlock_updates(journal);
 }
 
 /*
@@ -2175,6 +2184,38 @@ static int ext3_write_dquot(struct dquot *dquot)
 	if (IS_ERR(handle))
 		return PTR_ERR(handle);
 	ret = dquot_commit(dquot);
+	err = ext3_journal_stop(handle);
+	if (!ret)
+		ret = err;
+	return ret;
+}
+
+static int ext3_acquire_dquot(struct dquot *dquot)
+{
+	int ret, err;
+	handle_t *handle;
+
+	handle = ext3_journal_start(dquot_to_inode(dquot),
+					EXT3_QUOTA_INIT_BLOCKS);
+	if (IS_ERR(handle))
+		return PTR_ERR(handle);
+	ret = dquot_acquire(dquot);
+	err = ext3_journal_stop(handle);
+	if (!ret)
+		ret = err;
+	return ret;
+}
+
+static int ext3_release_dquot(struct dquot *dquot)
+{
+	int ret, err;
+	handle_t *handle;
+
+	handle = ext3_journal_start(dquot_to_inode(dquot),
+					EXT3_QUOTA_INIT_BLOCKS);
+	if (IS_ERR(handle))
+		return PTR_ERR(handle);
+	ret = dquot_release(dquot);
 	err = ext3_journal_stop(handle);
 	if (!ret)
 		ret = err;

@@ -133,7 +133,6 @@ struct sched_param {
 
 #ifdef __KERNEL__
 
-#include <linux/taskdelays.h>
 #include <linux/spinlock.h>
 
 /*
@@ -148,9 +147,10 @@ extern spinlock_t mmlist_lock;
 typedef struct task_struct task_t;
 
 extern void sched_init(void);
+extern void sched_init_smp(void);
 extern void init_idle(task_t *idle, int cpu);
 
-extern cpumask_t idle_cpu_mask;
+extern cpumask_t nohz_cpu_mask;
 
 extern void show_state(void);
 extern void show_regs(struct pt_regs *);
@@ -172,9 +172,11 @@ extern void update_one_process(struct task_struct *p, unsigned long user,
 			       unsigned long system, int cpu);
 extern void scheduler_tick(int user_tick, int system);
 extern unsigned long cache_decay_ticks;
-extern const unsigned long scheduling_functions_start_here;
-extern const unsigned long scheduling_functions_end_here;
 
+/* Attach to any functions which should be ignored in wchan output. */
+#define __sched		__attribute__((__section__(".sched.text")))
+/* Is this address in the __sched functions? */
+extern int in_sched_functions(unsigned long addr);
 
 #define	MAX_SCHEDULE_TIMEOUT	LONG_MAX
 extern signed long FASTCALL(schedule_timeout(signed long timeout));
@@ -291,7 +293,7 @@ struct signal_struct {
  * in the range MAX_RT_PRIO..MAX_PRIO-1. Priority values
  * are inverted: lower p->prio value means higher priority.
  *
- * The MAX_RT_USER_PRIO value allows the actual maximum
+ * The MAX_USER_RT_PRIO value allows the actual maximum
  * RT priority to be separate from the value exported to
  * user-space.  This allows kernel threads to set their
  * priority to a value higher than any user task. Note:
@@ -350,7 +352,7 @@ struct io_context;			/* See blkdev.h */
 void exit_io_context(void);
 
 #define NGROUPS_SMALL		32
-#define NGROUPS_PER_BLOCK	((int)(EXEC_PAGESIZE / sizeof(gid_t)))
+#define NGROUPS_PER_BLOCK	((int)(PAGE_SIZE / sizeof(gid_t)))
 struct group_info {
 	int ngroups;
 	atomic_t usage;
@@ -377,6 +379,7 @@ int set_current_groups(struct group_info *group_info);
 
 
 struct audit_context;		/* See audit.c */
+struct mempolicy;
 
 struct task_struct {
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
@@ -506,17 +509,10 @@ struct task_struct {
 	unsigned long ptrace_message;
 	siginfo_t *last_siginfo; /* For ptrace use.  */
 
-#ifdef CONFIG_CKRM
-	spinlock_t  ckrm_tsklock; 
-	void       *ce_data;
-#ifdef CONFIG_CKRM_TYPE_TASKCLASS
-	// .. Hubertus should change to CONFIG_CKRM_TYPE_TASKCLASS 
-	struct ckrm_task_class *taskclass;
-	struct list_head        taskclass_link;
-#endif // CONFIG_CKRM_TYPE_TASKCLASS
-#endif // CONFIG_CKRM
-
-	struct task_delay_info  delays;
+#ifdef CONFIG_NUMA
+  	struct mempolicy *mempolicy;
+  	short il_next;		/* could be shared with used_math */
+#endif
 };
 
 static inline pid_t process_group(struct task_struct *tsk)
@@ -554,10 +550,119 @@ do { if (atomic_dec_and_test(&(tsk)->usage)) __put_task_struct(tsk); } while(0)
 #define PF_LESS_THROTTLE 0x00100000	/* Throttle me less: I clean memory */
 #define PF_SYNCWRITE	0x00200000	/* I am doing a sync write */
 
-#define PF_MEMIO   	0x00400000      /* I am  potentially doing I/O for mem */
-#define PF_IOWAIT       0x00800000      /* I am waiting on disk I/O */
-
 #ifdef CONFIG_SMP
+#define SCHED_LOAD_SCALE	128UL	/* increase resolution of load */
+
+#define SD_BALANCE_NEWIDLE	1	/* Balance when about to become idle */
+#define SD_BALANCE_EXEC		2	/* Balance on exec */
+#define SD_BALANCE_CLONE	4	/* Balance on clone */
+#define SD_WAKE_IDLE		8	/* Wake to idle CPU on task wakeup */
+#define SD_WAKE_AFFINE		16	/* Wake task to waking CPU */
+#define SD_WAKE_BALANCE		32	/* Perform balancing at task wakeup */
+#define SD_SHARE_CPUPOWER	64	/* Domain members share cpu power */
+
+struct sched_group {
+	struct sched_group *next;	/* Must be a circular list */
+	cpumask_t cpumask;
+
+	/*
+	 * CPU power of this group, SCHED_LOAD_SCALE being max power for a
+	 * single CPU. This should be read only (except for setup). Although
+	 * it will need to be written to at cpu hot(un)plug time, perhaps the
+	 * cpucontrol semaphore will provide enough exclusion?
+	 */
+	unsigned long cpu_power;
+};
+
+struct sched_domain {
+	/* These fields must be setup */
+	struct sched_domain *parent;	/* top domain must be null terminated */
+	struct sched_group *groups;	/* the balancing groups of the domain */
+	cpumask_t span;			/* span of all CPUs in this domain */
+	unsigned long min_interval;	/* Minimum balance interval ms */
+	unsigned long max_interval;	/* Maximum balance interval ms */
+	unsigned int busy_factor;	/* less balancing by factor if busy */
+	unsigned int imbalance_pct;	/* No balance until over watermark */
+	unsigned long long cache_hot_time; /* Task considered cache hot (ns) */
+	unsigned int cache_nice_tries;	/* Leave cache hot tasks for # tries */
+	unsigned int per_cpu_gain;	/* CPU % gained by adding domain cpus */
+	int flags;			/* See SD_* */
+
+	/* Runtime fields. */
+	unsigned long last_balance;	/* init to jiffies. units in jiffies */
+	unsigned int balance_interval;	/* initialise to 1. units in ms. */
+	unsigned int nr_balance_failed; /* initialise to 0 */
+};
+
+/* Common values for SMT siblings */
+#define SD_SIBLING_INIT (struct sched_domain) {		\
+	.span			= CPU_MASK_NONE,	\
+	.parent			= NULL,			\
+	.groups			= NULL,			\
+	.min_interval		= 1,			\
+	.max_interval		= 2,			\
+	.busy_factor		= 8,			\
+	.imbalance_pct		= 110,			\
+	.cache_hot_time		= 0,			\
+	.cache_nice_tries	= 0,			\
+	.per_cpu_gain		= 15,			\
+	.flags			= SD_BALANCE_NEWIDLE	\
+				| SD_BALANCE_EXEC	\
+				| SD_BALANCE_CLONE	\
+				| SD_WAKE_AFFINE	\
+				| SD_WAKE_IDLE		\
+				| SD_SHARE_CPUPOWER,	\
+	.last_balance		= jiffies,		\
+	.balance_interval	= 1,			\
+	.nr_balance_failed	= 0,			\
+}
+
+/* Common values for CPUs */
+#define SD_CPU_INIT (struct sched_domain) {		\
+	.span			= CPU_MASK_NONE,	\
+	.parent			= NULL,			\
+	.groups			= NULL,			\
+	.min_interval		= 1,			\
+	.max_interval		= 4,			\
+	.busy_factor		= 64,			\
+	.imbalance_pct		= 125,			\
+	.cache_hot_time		= (5*1000000/2),	\
+	.cache_nice_tries	= 1,			\
+	.per_cpu_gain		= 100,			\
+	.flags			= SD_BALANCE_NEWIDLE	\
+				| SD_BALANCE_EXEC	\
+				| SD_BALANCE_CLONE	\
+				| SD_WAKE_AFFINE	\
+				| SD_WAKE_BALANCE,	\
+	.last_balance		= jiffies,		\
+	.balance_interval	= 1,			\
+	.nr_balance_failed	= 0,			\
+}
+
+#ifdef CONFIG_NUMA
+/* Common values for NUMA nodes */
+#define SD_NODE_INIT (struct sched_domain) {		\
+	.span			= CPU_MASK_NONE,	\
+	.parent			= NULL,			\
+	.groups			= NULL,			\
+	.min_interval		= 8,			\
+	.max_interval		= 32,			\
+	.busy_factor		= 32,			\
+	.imbalance_pct		= 125,			\
+	.cache_hot_time		= (10*1000000),		\
+	.cache_nice_tries	= 1,			\
+	.per_cpu_gain		= 100,			\
+	.flags			= SD_BALANCE_EXEC	\
+				| SD_BALANCE_CLONE	\
+				| SD_WAKE_BALANCE,	\
+	.last_balance		= jiffies,		\
+	.balance_interval	= 1,			\
+	.nr_balance_failed	= 0,			\
+}
+#endif
+
+extern void cpu_attach_domain(struct sched_domain *sd, int cpu);
+
 extern int set_cpus_allowed(task_t *p, cpumask_t new_mask);
 #else
 static inline int set_cpus_allowed(task_t *p, cpumask_t new_mask)
@@ -568,16 +673,13 @@ static inline int set_cpus_allowed(task_t *p, cpumask_t new_mask)
 
 extern unsigned long long sched_clock(void);
 
-#ifdef CONFIG_NUMA
+#ifdef CONFIG_SMP
 extern void sched_balance_exec(void);
-extern void node_nr_running_init(void);
 #else
 #define sched_balance_exec()   {}
-#define node_nr_running_init() {}
 #endif
 
-/* Move tasks off this (offline) CPU onto another. */
-extern void migrate_all_tasks(void);
+extern void sched_idle_next(void);
 extern void set_user_nice(task_t *p, long nice);
 extern int task_prio(task_t *p);
 extern int task_nice(task_t *p);
@@ -628,12 +730,17 @@ extern void do_timer(struct pt_regs *);
 
 extern int FASTCALL(wake_up_state(struct task_struct * tsk, unsigned int state));
 extern int FASTCALL(wake_up_process(struct task_struct * tsk));
+extern void FASTCALL(wake_up_forked_process(struct task_struct * tsk));
 #ifdef CONFIG_SMP
  extern void kick_process(struct task_struct *tsk);
+ extern void FASTCALL(wake_up_forked_thread(struct task_struct * tsk));
 #else
  static inline void kick_process(struct task_struct *tsk) { }
+ static inline void wake_up_forked_thread(struct task_struct * tsk)
+ {
+	wake_up_forked_process(tsk);
+ }
 #endif
-extern void FASTCALL(wake_up_forked_process(struct task_struct * tsk));
 extern void FASTCALL(sched_fork(task_t * p));
 extern void FASTCALL(sched_exit(task_t * p));
 
@@ -959,60 +1066,6 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 }
 
 #endif /* CONFIG_SMP */
-
-
-/* API for registering delay info */
-#ifdef CONFIG_DELAY_ACCT
-
-#define test_delay_flag(tsk,flg)                ((tsk)->flags & (flg))
-#define set_delay_flag(tsk,flg)                 ((tsk)->flags |= (flg))
-#define clear_delay_flag(tsk,flg)               ((tsk)->flags &= ~(flg))
-
-#define def_delay_var(var)		        unsigned long long var
-#define get_delay(tsk,field)                    ((tsk)->delays.field)
-#define delay_value(x)				(((unsigned long)(x))/1000)
-
-#define start_delay(var)                        ((var) = sched_clock())
-#define start_delay_set(var,flg)                (set_delay_flag(current,flg),(var) = sched_clock())
-
-#define inc_delay(tsk,field) (((tsk)->delays.field)++)
-#define add_delay_ts(tsk,field,start_ts,end_ts) ((tsk)->delays.field += delay_value((end_ts)-(start_ts)))
-#define add_delay_clear(tsk,field,start_ts,flg) (add_delay_ts(tsk,field,start_ts,sched_clock()),clear_delay_flag(tsk,flg))
-
-static inline void add_io_delay(unsigned long dstart) 
-{
-	struct task_struct * tsk = current;
-	unsigned long val = delay_value(sched_clock()-dstart);
-	if (test_delay_flag(tsk,PF_MEMIO)) {
-		tsk->delays.mem_iowait_total += val;
-		tsk->delays.num_memwaits++;
-	} else {
-		tsk->delays.iowait_total += val;
-		tsk->delays.num_iowaits++;
-	}
-	clear_delay_flag(tsk,PF_IOWAIT);
-}
-
-
-#else
-
-#define test_delay_flag(tsk,flg)                (0)
-#define set_delay_flag(tsk,flg)                 do { } while (0)
-#define clear_delay_flag(tsk,flg)               do { } while (0)
-
-#define def_delay_var(var)			      
-#define get_delay(tsk,field)                    (0)
-
-#define start_delay(var)                        do { } while (0)
-#define start_delay_set(var,flg)                do { } while (0)
-
-#define inc_delay(tsk,field)                    do { } while (0)
-#define add_delay_ts(tsk,field,start_ts,now)    do { } while (0)
-#define add_delay_clear(tsk,field,start_ts,flg) do { } while (0)
-#define add_io_delay(dstart)			do { } while (0) 
-#endif
-
-
 
 #endif /* __KERNEL__ */
 

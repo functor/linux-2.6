@@ -90,10 +90,6 @@ enum pid_directory_inos {
 	PROC_TID_ATTR_EXEC,
 	PROC_TID_ATTR_FSCREATE,
 #endif
-#ifdef CONFIG_DELAY_ACCT
-        PROC_TID_DELAY_ACCT,
-        PROC_TGID_DELAY_ACCT,
-#endif
 	PROC_TID_FD_DIR = 0x8000,	/* 0x8000-0xffff */
 };
 
@@ -124,9 +120,6 @@ static struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_SECURITY
 	E(PROC_TGID_ATTR,      "attr",    S_IFDIR|S_IRUGO|S_IXUGO),
 #endif
-#ifdef CONFIG_DELAY_ACCT
-	E(PROC_TGID_DELAY_ACCT,"delay",   S_IFREG|S_IRUGO),
-#endif
 #ifdef CONFIG_KALLSYMS
 	E(PROC_TGID_WCHAN,     "wchan",   S_IFREG|S_IRUGO),
 #endif
@@ -148,9 +141,6 @@ static struct pid_entry tid_base_stuff[] = {
 	E(PROC_TID_MOUNTS,     "mounts",  S_IFREG|S_IRUGO),
 #ifdef CONFIG_SECURITY
 	E(PROC_TID_ATTR,       "attr",    S_IFDIR|S_IRUGO|S_IXUGO),
-#endif
-#ifdef CONFIG_DELAY_ACCT
-	E(PROC_TGID_DELAY_ACCT,"delay",   S_IFREG|S_IRUGO),
 #endif
 #ifdef CONFIG_KALLSYMS
 	E(PROC_TID_WCHAN,      "wchan",   S_IFREG|S_IRUGO),
@@ -191,7 +181,6 @@ int proc_pid_stat(struct task_struct*,char*);
 int proc_pid_status(struct task_struct*,char*);
 int proc_pid_statm(struct task_struct*,char*);
 int proc_pid_cpu(struct task_struct*,char*);
-int proc_pid_delay(struct task_struct*,char*);
 
 static int proc_fd_link(struct inode *inode, struct dentry **dentry, struct vfsmount **mnt)
 {
@@ -522,7 +511,7 @@ static struct file_operations proc_mounts_operations = {
 
 #define PROC_BLOCK_SIZE	(3*1024)		/* 4K page size but our output routines use some slack for overruns */
 
-static ssize_t proc_info_read(struct file * file, char * buf,
+static ssize_t proc_info_read(struct file * file, char __user * buf,
 			  size_t count, loff_t *ppos)
 {
 	struct inode * inode = file->f_dentry->d_inode;
@@ -568,7 +557,7 @@ static int mem_open(struct inode* inode, struct file* file)
 	return 0;
 }
 
-static ssize_t mem_read(struct file * file, char * buf,
+static ssize_t mem_read(struct file * file, char __user * buf,
 			size_t count, loff_t *ppos)
 {
 	struct task_struct *task = proc_task(file->f_dentry->d_inode);
@@ -721,7 +710,7 @@ out:
 }
 
 static int do_proc_readlink(struct dentry *dentry, struct vfsmount *mnt,
-			    char *buffer, int buflen)
+			    char __user *buffer, int buflen)
 {
 	struct inode * inode;
 	char *tmp = (char*)__get_free_page(GFP_KERNEL), *path;
@@ -746,7 +735,7 @@ static int do_proc_readlink(struct dentry *dentry, struct vfsmount *mnt,
 	return len;
 }
 
-static int proc_pid_readlink(struct dentry * dentry, char * buffer, int buflen)
+static int proc_pid_readlink(struct dentry * dentry, char __user * buffer, int buflen)
 {
 	int error = -EACCES;
 	struct inode *inode = dentry->d_inode;
@@ -1173,7 +1162,7 @@ static struct inode_operations proc_task_inode_operations = {
 };
 
 #ifdef CONFIG_SECURITY
-static ssize_t proc_pid_attr_read(struct file * file, char * buf,
+static ssize_t proc_pid_attr_read(struct file * file, char __user * buf,
 				  size_t count, loff_t *ppos)
 {
 	struct inode * inode = file->f_dentry->d_inode;
@@ -1210,7 +1199,7 @@ static ssize_t proc_pid_attr_read(struct file * file, char * buf,
 	return count;
 }
 
-static ssize_t proc_pid_attr_write(struct file * file, const char * buf,
+static ssize_t proc_pid_attr_write(struct file * file, const char __user * buf,
 				   size_t count, loff_t *ppos)
 { 
 	struct inode * inode = file->f_dentry->d_inode;
@@ -1384,13 +1373,6 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 		case PROC_TGID_WCHAN:
 			inode->i_fop = &proc_info_file_operations;
 			ei->op.proc_read = proc_pid_wchan;
-			break;
-#endif
-#ifdef CONFIG_DELAY_ACCT
-		case PROC_TID_DELAY_ACCT:
-		case PROC_TGID_DELAY_ACCT:
-			inode->i_fop = &proc_info_file_operations;
-			ei->op.proc_read = proc_pid_delay;
 			break;
 #endif
 		default:

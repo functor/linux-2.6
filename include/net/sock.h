@@ -245,7 +245,6 @@ struct sock {
 	struct timeval		sk_stamp;
 	struct socket		*sk_socket;
 	void			*sk_user_data;
-	void                    *sk_ns;        // For use by CKRM
 	struct module		*sk_owner;
 	void			*sk_security;
 	void			(*sk_state_change)(struct sock *sk);
@@ -399,6 +398,21 @@ static inline int sock_flag(struct sock *sk, enum sock_flags flag)
 	return test_bit(flag, &sk->sk_flags);
 }
 
+static inline void sk_acceptq_removed(struct sock *sk)
+{
+	sk->sk_ack_backlog--;
+}
+
+static inline void sk_acceptq_added(struct sock *sk)
+{
+	sk->sk_ack_backlog++;
+}
+
+static inline int sk_acceptq_is_full(struct sock *sk)
+{
+	return sk->sk_ack_backlog > sk->sk_max_ack_backlog;
+}
+
 /* The per-socket spinlock must be held here. */
 #define sk_add_backlog(__sk, __skb)				\
 do {	if (!(__sk)->sk_backlog.tail) {				\
@@ -410,6 +424,20 @@ do {	if (!(__sk)->sk_backlog.tail) {				\
 	}							\
 	(__skb)->next = NULL;					\
 } while(0)
+
+#define sk_wait_event(__sk, __timeo, __condition)		\
+({	int rc;							\
+	release_sock(__sk);					\
+	rc = __condition;					\
+	if (!rc) {						\
+		*(__timeo) = schedule_timeout(*(__timeo));	\
+		rc = __condition;				\
+	}							\
+	lock_sock(__sk);					\
+	rc;							\
+})
+
+extern int sk_wait_data(struct sock *sk, long *timeo);
 
 /* IP protocol blocks we attach to sockets.
  * socket layer -> transport layer interface
@@ -431,10 +459,11 @@ struct proto {
 	int			(*destroy)(struct sock *sk);
 	void			(*shutdown)(struct sock *sk, int how);
 	int			(*setsockopt)(struct sock *sk, int level, 
-					int optname, char *optval, int optlen);
+					int optname, char __user *optval,
+					int optlen);
 	int			(*getsockopt)(struct sock *sk, int level, 
-					int optname, char *optval, 
-					int *option);  	 
+					int optname, char __user *optval, 
+					int __user *option);  	 
 	int			(*sendmsg)(struct kiocb *iocb, struct sock *sk,
 					   struct msghdr *msg, size_t len);
 	int			(*recvmsg)(struct kiocb *iocb, struct sock *sk,
@@ -898,6 +927,11 @@ static inline void skb_set_owner_r(struct sk_buff *skb, struct sock *sk)
 	atomic_add(skb->truesize, &sk->sk_rmem_alloc);
 }
 
+extern void sk_reset_timer(struct sock *sk, struct timer_list* timer,
+			   unsigned long expires);
+
+extern void sk_stop_timer(struct sock *sk, struct timer_list* timer);
+
 static inline int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
 	int err = 0;
@@ -1035,6 +1069,20 @@ sock_recv_timestamp(struct msghdr *msg, struct sock *sk, struct sk_buff *skb)
 		sk->sk_stamp = *stamp;
 }
 
+/**
+ * sk_eat_skb - Release a skb if it is no longer needed
+ * @sk - socket to eat this skb from
+ * @skb - socket buffer to eat
+ *
+ * This routine must be called with interrupts disabled or with the socket
+ * locked so that the sk_buff queue operation is ok.
+*/
+static inline void sk_eat_skb(struct sock *sk, struct sk_buff *skb)
+{
+	__skb_unlink(skb, &sk->sk_receive_queue);
+	__kfree_skb(skb);
+}
+
 extern atomic_t netstamp_needed;
 extern void sock_enable_timestamp(struct sock *sk);
 extern void sock_disable_timestamp(struct sock *sk);
@@ -1049,7 +1097,7 @@ static inline void net_timestamp(struct timeval *stamp)
 	}		
 } 
 
-extern int sock_get_timestamp(struct sock *, struct timeval *);
+extern int sock_get_timestamp(struct sock *, struct timeval __user *);
 
 /* 
  *	Enable debug/info messages 

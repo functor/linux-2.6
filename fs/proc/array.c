@@ -149,6 +149,7 @@ static inline const char * get_task_state(struct task_struct *tsk)
 
 static inline char * task_state(struct task_struct *p, char *buffer)
 {
+	struct group_info *group_info;
 	int g;
 
 	read_lock(&tasklist_lock);
@@ -174,12 +175,14 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		"FDSize:\t%d\n"
 		"Groups:\t",
 		p->files ? p->files->max_fds : 0);
+
+	group_info = p->group_info;
+	get_group_info(group_info);
 	task_unlock(p);
 
-	get_group_info(p->group_info);
-	for (g = 0; g < min(p->group_info->ngroups,NGROUPS_SMALL); g++)
-		buffer += sprintf(buffer, "%d ", GROUP_AT(p->group_info,g));
-	put_group_info(p->group_info);
+	for (g = 0; g < min(group_info->ngroups,NGROUPS_SMALL); g++)
+		buffer += sprintf(buffer, "%d ", GROUP_AT(group_info,g));
+	put_group_info(group_info);
 
 	buffer += sprintf(buffer, "\n");
 	return buffer;
@@ -424,22 +427,3 @@ int proc_pid_statm(struct task_struct *task, char *buffer)
 	return sprintf(buffer,"%d %d %d %d %d %d %d\n",
 		       size, resident, shared, text, lib, data, 0);
 }
-
-
-int proc_pid_delay(struct task_struct *task, char * buffer)
-{
-	int res;
-
-	res  = sprintf(buffer,"%lu %lu %lu %lu %lu %lu %lu\n",
-		       get_delay(task,runs),
-		       get_delay(task,runcpu_total),
-		       get_delay(task,waitcpu_total),
-		       get_delay(task,iowait_total),
-		       get_delay(task,num_iowaits),
-		       get_delay(task,mem_iowait_total),
-		       get_delay(task,num_memwaits)
-		       
-		);
-	return res;
-}
-
