@@ -48,6 +48,7 @@
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
 #include <linux/ckrm_events.h>
+#include <linux/ckrm_mem_inline.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -547,6 +548,7 @@ static int exec_mmap(struct mm_struct *mm)
 	activate_mm(active_mm, mm);
 	task_unlock(tsk);
 	arch_pick_mmap_layout(mm);
+	ckrm_task_mm_change(tsk, old_mm, mm);
 	if (old_mm) {
 		if (active_mm != old_mm) BUG();
 		mmput(old_mm);

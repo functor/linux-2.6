@@ -75,6 +75,7 @@
 #define PG_mappedtodisk		17	/* Has blocks allocated on-disk */
 #define PG_reclaim		18	/* To be reclaimed asap */
 
+#define PG_ckrm_account		20	/* CKRM accounting */
 
 /*
  * Global page accounting.  One instance per CPU.  Only unsigned longs are
@@ -296,6 +297,12 @@ extern unsigned long __read_page_state(unsigned offset);
 #define ClearPageSwapCache(page) clear_bit(PG_swapcache, &(page)->flags)
 #else
 #define PageSwapCache(page)	0
+#endif
+
+#ifdef CONFIG_CKRM_RES_MEM
+#define PageCkrmAccount(page)		test_bit(PG_ckrm_account, &(page)->flags)
+#define SetPageCkrmAccount(page)	set_bit(PG_ckrm_account, &(page)->flags)
+#define ClearPageCkrmAccount(page) 	clear_bit(PG_ckrm_account, &(page)->flags)
 #endif
 
 struct page;	/* forward declaration */

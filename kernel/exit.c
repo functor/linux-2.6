@@ -27,6 +27,7 @@
 #include <linux/mempolicy.h>
 #include <linux/ckrm_events.h>
 #include <linux/syscalls.h>
+#include <linux/ckrm_mem_inline.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -502,6 +503,7 @@ static inline void __exit_mm(struct task_struct * tsk)
 	task_lock(tsk);
 	tsk->mm = NULL;
 	up_read(&mm->mmap_sem);
+	ckrm_task_mm_clear(tsk, mm);
 	enter_lazy_tlb(mm, current);
 	task_unlock(tsk);
 	mmput(mm);

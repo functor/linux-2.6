@@ -16,20 +16,21 @@ For brevity, unless otherwise specified all the following commands are
 executed in the default class (/rcfs/taskclass).
 
 Initially, the systemwide default class gets 100% of the LRU pages, and the
-config file displays the total number of physical pages.
+stats file at the /rcfs/taskclass level displays the total number of
+physical pages.
 
    # cd /rcfs/taskclass
-   # cat config
-   res=mem;tot_pages=239778,active=60473,inactive=135285,free=44555
+   # grep System stats
+   System: tot_pages=239778,active=60473,inactive=135285,free=44555
    # cat shares
    res=mem,guarantee=-2,limit=-2,total_guarantee=100,max_limit=100
 
    tot_pages - total number of pages
    active    - number of pages in the active list ( sum of all zones)
-   inactive  - number of pages in the inactive list ( sum of all zones )
-   free      -  number of free pages (sum of all pages)
+   inactive  - number of pages in the inactive list ( sum of all zones)
+   free      - number of free pages (sum of all zones)
 
-   By making total_guarantee and max_limit to be same as tot_pages, one make 
+   By making total_guarantee and max_limit to be same as tot_pages, one can 
    make the numbers in shares file be same as the number of pages for a
    class.
 
@@ -37,13 +38,51 @@ config file displays the total number of physical pages.
    # cat shares
    res=mem,guarantee=-2,limit=-2,total_guarantee=239778,max_limit=239778
 
+Changing configuration parameters:
+----------------------------------
+For description of the paramters read the file mem_rc.design in this same directory.
+
+Following is the default values for the configuration parameters:
+
+   localhost:~ # cd /rcfs/taskclass
+   localhost:/rcfs/taskclass # cat config
+   res=mem,fail_over=110,shrink_at=90,shrink_to=80,num_shrinks=10,shrink_interval=10
+
+Here is how to change a specific configuration parameter. Note that more than one 
+configuration parameter can be changed in a single echo command though for simplicity
+we show one per echo.
+
+ex: Changing fail_over: 
+   localhost:/rcfs/taskclass # echo "res=mem,fail_over=120" > config
+   localhost:/rcfs/taskclass # cat config
+   res=mem,fail_over=120,shrink_at=90,shrink_to=80,num_shrinks=10,shrink_interval=10
+
+ex: Changing shrink_at: 
+   localhost:/rcfs/taskclass # echo "res=mem,shrink_at=85" > config
+   localhost:/rcfs/taskclass # cat config
+   res=mem,fail_over=120,shrink_at=85,shrink_to=80,num_shrinks=10,shrink_interval=10
+
+ex: Changing shrink_to: 
+   localhost:/rcfs/taskclass # echo "res=mem,shrink_to=75" > config
+   localhost:/rcfs/taskclass # cat config
+   res=mem,fail_over=120,shrink_at=85,shrink_to=75,num_shrinks=10,shrink_interval=10
+
+ex: Changing num_shrinks: 
+   localhost:/rcfs/taskclass # echo "res=mem,num_shrinks=20" > config
+   localhost:/rcfs/taskclass # cat config
+   res=mem,fail_over=120,shrink_at=85,shrink_to=75,num_shrinks=20,shrink_interval=10
+
+ex: Changing shrink_interval: 
+   localhost:/rcfs/taskclass # echo "res=mem,shrink_interval=15" > config
+   localhost:/rcfs/taskclass # cat config
+   res=mem,fail_over=120,shrink_at=85,shrink_to=75,num_shrinks=20,shrink_interval=15
 
 Class creation 
 --------------
 
    # mkdir c1
 
-Its initial share is don't care. The parent's share values will be unchanged.
+Its initial share is DONT_CARE. The parent's share values will be unchanged.
 
 Setting a new class share
 -------------------------
@@ -62,6 +101,7 @@ Monitoring
 stats file shows statistics of the page usage of a class
    # cat stats
    ----------- Memory Resource stats start -----------
+   System: tot_pages=239778,active=60473,inactive=135285,free=44555
    Number of pages used(including pages lent to children): 196654
    Number of pages guaranteed: 239778
    Maximum limit of pages: 239778

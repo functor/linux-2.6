@@ -30,6 +30,7 @@
 #include <linux/pid.h>
 #include <linux/percpu.h>
 #include <linux/topology.h>
+#include <linux/taskdelays.h>
 
 struct exec_domain;
 
@@ -250,6 +251,12 @@ struct mm_struct {
 	struct kioctx		*ioctx_list;
 
 	struct kioctx		default_kioctx;
+
+#ifdef CONFIG_CKRM_RES_MEM
+	struct ckrm_mem_res *memclass;
+	struct list_head tasklist;	/* tasks sharing this address space */
+	spinlock_t peertask_lock;	/* protect tasklist above */
+#endif
 };
 
 struct sighand_struct {
@@ -664,6 +671,20 @@ struct task_struct {
   	struct mempolicy *mempolicy;
   	short il_next;		/* could be shared with used_math */
 #endif
+#ifdef CONFIG_CKRM
+	spinlock_t  ckrm_tsklock;
+	void       *ce_data;
+#ifdef CONFIG_CKRM_TYPE_TASKCLASS
+	struct ckrm_task_class *taskclass;
+	struct list_head taskclass_link;
+#endif /* CONFIG_CKRM_TYPE_TASKCLASS */
+#ifdef CONFIG_CKRM_RES_MEM
+	struct list_head mm_peers; /* list of tasks using same mm_struct */
+#endif
+#endif /* CONFIG_CKRM */
+#ifdef CONFIG_DELAY_ACCT
+	struct task_delay_info delays;
+#endif
 };
 
 static inline pid_t process_group(struct task_struct *tsk)
@@ -925,6 +946,9 @@ task_t *fork_idle(int);
 extern void set_task_comm(struct task_struct *tsk, char *from);
 extern void get_task_comm(char *to, struct task_struct *tsk);
 
+#define PF_MEMIO   	0x00400000      /* I am  potentially doing I/O for mem */
+#define PF_IOWAIT       0x00800000      /* I am waiting on disk I/O */
+
 #ifdef CONFIG_SMP
 extern void wait_task_inactive(task_t * p);
 #else
@@ -1122,6 +1146,86 @@ extern long sched_getaffinity(pid_t pid, cpumask_t *mask);
 
 extern void normalize_rt_tasks(void);
 
+#endif
+
+/* API for registering delay info */
+#ifdef CONFIG_DELAY_ACCT
+
+#define test_delay_flag(tsk,flg)                ((tsk)->flags & (flg))
+#define set_delay_flag(tsk,flg)                 ((tsk)->flags |= (flg))
+#define clear_delay_flag(tsk,flg)               ((tsk)->flags &= ~(flg))
+
+#define def_delay_var(var)		        unsigned long long var
+#define get_delay(tsk,field)                    ((tsk)->delays.field)
+
+#define start_delay(var)                        ((var) = sched_clock())
+#define start_delay_set(var,flg)                (set_delay_flag(current,flg),(var) = sched_clock())
+
+#define inc_delay(tsk,field) (((tsk)->delays.field)++)
+
+/* because of hardware timer drifts in SMPs and task continue on different cpu
+ * then where the start_ts was taken there is a possibility that
+ * end_ts < start_ts by some usecs. In this case we ignore the diff
+ * and add nothing to the total.
+ */
+#ifdef CONFIG_SMP
+#define test_ts_integrity(start_ts,end_ts)  (likely((end_ts) > (start_ts)))
+#else
+#define test_ts_integrity(start_ts,end_ts)  (1)
+#endif
+
+#define add_delay_ts(tsk,field,start_ts,end_ts) \
+	do { if (test_ts_integrity(start_ts,end_ts)) (tsk)->delays.field += ((end_ts)-(start_ts)); } while (0)
+
+#define add_delay_clear(tsk,field,start_ts,flg)        \
+	do {                                           \
+		unsigned long long now = sched_clock();\
+           	add_delay_ts(tsk,field,start_ts,now);  \
+           	clear_delay_flag(tsk,flg);             \
+        } while (0)
+
+static inline void add_io_delay(unsigned long long dstart) 
+{
+	struct task_struct * tsk = current;
+	unsigned long long now = sched_clock();
+	unsigned long long val;
+
+	if (test_ts_integrity(dstart,now))
+		val = now - dstart;
+	else
+		val = 0;
+	if (test_delay_flag(tsk,PF_MEMIO)) {
+		tsk->delays.mem_iowait_total += val;
+		tsk->delays.num_memwaits++;
+	} else {
+		tsk->delays.iowait_total += val;
+		tsk->delays.num_iowaits++;
+	}
+	clear_delay_flag(tsk,PF_IOWAIT);
+}
+
+inline static void init_delays(struct task_struct *tsk)
+{
+	memset((void*)&tsk->delays,0,sizeof(tsk->delays));
+}
+
+#else
+
+#define test_delay_flag(tsk,flg)                (0)
+#define set_delay_flag(tsk,flg)                 do { } while (0)
+#define clear_delay_flag(tsk,flg)               do { } while (0)
+
+#define def_delay_var(var)			      
+#define get_delay(tsk,field)                    (0)
+
+#define start_delay(var)                        do { } while (0)
+#define start_delay_set(var,flg)                do { } while (0)
+
+#define inc_delay(tsk,field)                    do { } while (0)
+#define add_delay_ts(tsk,field,start_ts,now)    do { } while (0)
+#define add_delay_clear(tsk,field,start_ts,flg) do { } while (0)
+#define add_io_delay(dstart)			do { } while (0) 
+#define init_delays(tsk)                        do { } while (0)
 #endif
 
 #endif /* __KERNEL__ */

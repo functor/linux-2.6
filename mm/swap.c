@@ -30,6 +30,7 @@
 #include <linux/cpu.h>
 #include <linux/notifier.h>
 #include <linux/init.h>
+#include <linux/ckrm_mem_inline.h>
 
 /* How many pages do we try to swap or page in/out together? */
 int page_cluster;
@@ -87,7 +88,7 @@ int rotate_reclaimable_page(struct page *page)
 	spin_lock_irqsave(&zone->lru_lock, flags);
 	if (PageLRU(page) && !PageActive(page)) {
 		list_del(&page->lru);
-		list_add_tail(&page->lru, &zone->inactive_list);
+		ckrm_add_tail_inactive(page);
 		inc_page_state(pgrotated);
 	}
 	if (!test_clear_page_writeback(page))

@@ -9,11 +9,15 @@ These are the events in a page's lifecycle:
    - freeing the page
      there are multiple high level page free functions; free_pages_bulk()
 	 is the lowest level function that does the real free.
-
+   
 When the memory subsystem runs low on LRU pages, pages are reclaimed by
     - moving pages from active list to inactive list (refill_inactive_zone())
-	- freeing pages from the inactive list (shrink_zone)
+    - freeing pages from the inactive list (shrink_zone)
 depending on the recent usage of the page(approximately).
+
+In the process of the life cycle a page can move from the lru list to swap
+and back. For this document's purpose, we treat it same as freeing and
+allocating the page, respectfully.
 
 1. Introduction
 ---------------
@@ -40,26 +44,26 @@ memory allocation logic.
 Note that the numbers that are specified in the shares file, doesn't
 directly correspond to the number of pages. But, the user can make
 it so by making the total_guarantee and max_limit of the default class
-(/rcfs/taskclass) to be the total number of pages(given in config file)
+(/rcfs/taskclass) to be the total number of pages(given in stats file)
 available in the system.
 
   for example: 
    # cd /rcfs/taskclass
-   # cat config
-   res=mem;tot_pages=239778,active=60473,inactive=135285,free=44555
+   # grep System stats
+   System: tot_pages=257512,active=5897,inactive=2931,free=243991
    # cat shares
    res=mem,guarantee=-2,limit=-2,total_guarantee=100,max_limit=100
 
-  "tot_pages=239778" above mean there are 239778 lru pages in
+  "tot_pages=257512" above mean there are 257512 lru pages in
   the system.
   
   By making total_guarantee and max_limit to be same as this number at 
   this level (/rcfs/taskclass), one can make guarantee and limit in all 
   classes refer to the number of pages.
 
-  # echo 'res=mem,total_guarantee=239778,max_limit=239778' > shares
+  # echo 'res=mem,total_guarantee=257512,max_limit=257512' > shares
   # cat shares
-  res=mem,guarantee=-2,limit=-2,total_guarantee=239778,max_limit=239778
+  res=mem,guarantee=-2,limit=-2,total_guarantee=257512,max_limit=257512
 
 
 The number of pages a class can use be anywhere between its guarantee and
@@ -68,60 +72,100 @@ to choose a victim page to swap out. While the number of pages a class can
 have allocated may be anywhere between its guarantee and limit, victim
 pages will be choosen from classes that are above their guarantee.
 
-Pages will be freed from classes that are close to their "limit" before
-freeing pages from the classes that are close to their guarantee. Pages
-belonging to classes that are below their guarantee will not be chosen as
-a victim.
+Victim class will be chosen by the number pages a class is using over its
+guarantee. i.e a class that is using 10000 pages over its guarantee will be
+chosen against a class that is using 1000 pages over its guarantee.
+Pages belonging to classes that are below their guarantee will not be
+chosen as a victim.
 
-2. Core Design
+2. Configuaration parameters
+---------------------------
+
+Memory controller provides the following configuration parameters. Usage of
+these parameters will be made clear in the following section.
+
+fail_over: When pages are being allocated, if the class is over fail_over % of
+    its limit, then fail the memory allocation. Default is 110.
+    ex: If limit of a class is 30000 and fail_over is 110, then memory
+    allocations would start failing once the class is using more than 33000
+    pages.
+
+shrink_at: When a class is using shrink_at % of its limit, then start
+    shrinking the class, i.e start freeing the page to make more free pages
+    available for this class. Default is 90.
+    ex: If limit of a class is 30000 and shrink_at is 90, then pages from this
+    class will start to get freed when the class's usage is above 27000
+
+shrink_to: When a class reached shrink_at % of its limit, ckrm will try to
+    shrink the class's usage to shrink_to %. Defalut is 80.
+    ex: If limit of a class is 30000 with shrink_at being 90 and shrink_to
+    being 80, then ckrm will try to free pages from the class when its
+    usage reaches 27000 and will try to bring it down to 24000.
+
+num_shrinks: Number of shrink attempts ckrm will do within shrink_interval
+    seconds. After this many attempts in a period, ckrm will not attempt a
+    shrink even if the class's usage goes over shrink_at %. Default is 10.
+
+shrink_interval: Number of seconds in a shrink period. Default is 10.
+
+3. Design
 --------------------------
 
 CKRM memory resource controller taps at appropriate low level memory 
 management functions to associate a page with a class and to charge
 a class that brings the page to the LRU list.
 
-2.1 Changes in page allocation function(__alloc_pages())
+CKRM maintains lru lists per-class instead of keeping it system-wide, so
+that reducing a class's usage doesn't involve going through the system-wide
+lru lists.
+
+3.1 Changes in page allocation function(__alloc_pages())
 --------------------------------------------------------
-- If the class that the current task belong to is over 110% of its 'limit',
-  allocation of page(s) fail.
-- After succesful allocation of a page, the page is attached with the class
-  to which the current task belongs to.
+- If the class that the current task belong to is over 'fail_over' % of its
+  'limit', allocation of page(s) fail. Otherwise, the page allocation will
+  proceed as before.
 - Note that the class is _not_ charged for the page(s) here.
 
-2.2 Changes in page free(free_pages_bulk())
+3.2 Changes in page free(free_pages_bulk())
 -------------------------------------------
-- page is freed from the class it belongs to.
+- If the page still belong to a class, the class will be credited for this
+  page.
 
-2.3 Adding/Deleting page to active/inactive list
+3.3 Adding/Deleting page to active/inactive list
 -------------------------------------------------
 When a page is added to the active or inactive list, the class that the
-page belongs to is charged for the page usage.
+task belongs to is charged for the page usage.
 
 When a page is deleted from the active or inactive list, the class that the
 page belongs to is credited back.
 
-If a class uses upto its limit, attempt is made to shrink the class's usage
-to 90% of its limit, in order to help the class stay within its limit.
+If a class uses 'shrink_at' % of its limit, attempt is made to shrink
+the class's usage to 'shrink_to' % of its limit, in order to help the class
+stay within its limit.
 But, if the class is aggressive, and keep getting over the class's limit
-often(more than 10 shrink events in 10 seconds), then the memory resource
-controller gives up on the class and doesn't try to shrink the class, which
-will eventually lead the class to reach its 110% of its limit and then the
-page allocations will start failing.
+often(more than such 'num_shrinks' events in 'shrink_interval' seconds),
+then the memory resource controller gives up on the class and doesn't try
+to shrink the class, which will eventually lead the class to reach
+fail_over % and then the page allocations will start failing.
 
-2.4 Chages in the page reclaimation path (refill_inactive_zone and shrink_zone)
+3.4 Changes in the page reclaimation path (refill_inactive_zone and shrink_zone)
 -------------------------------------------------------------------------------
 Pages will be moved from active to inactive list(refill_inactive_zone) and
-pages from inactive list will be freed in the following order:
-(range is calculated by subtracting 'guarantee' from 'limit')
-  - Classes that are over 110% of their range
-  - Classes that are over 100% of their range
-  - Classes that are over 75%  of their range
-  - Classes that are over 50%  of their range
-  - Classes that are over 25%  of their range
-  - Classes whose parent is over 110% of its range
-  - Classes that are over their guarantee
+pages from inactive list by choosing victim classes. Victim classes are
+chosen depending on their usage over their guarantee.
 
-2.5 Handling of Shared pages
+Classes with DONT_CARE guarantee are assumed an implicit guarantee which is
+based on the number of children(with DONT_CARE guarantee) its parent has
+(including the default class) and the unused pages its parent still has.
+ex1: If a default root class /rcfs/taskclass has 3 children c1, c2 and c3
+and has 200000 pages, and all the classes have DONT_CARE guarantees, then
+all the classes (c1, c2, c3 and the default class of /rcfs/taskclass) will 
+get 50000 (200000 / 4) pages each.
+ex2: If, in the above example c1 is set with a guarantee of 80000 pages,
+then the other classes (c2, c3 and the default class of /rcfs/taskclass)
+will get 40000 ((200000 - 80000) / 3) pages each.
+
+3.5 Handling of Shared pages
 ----------------------------
 Even if a mm is shared by tasks, the pages that belong to the mm will be
 charged against the individual tasks that bring the page into LRU. 

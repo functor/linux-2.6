@@ -173,6 +173,15 @@ config CKRM_TYPE_TASKCLASS
 	
 	  Say N if unsure 
 
+config CKRM_RES_MEM
+	bool "Class based physical memory controller"
+	default y
+	depends on CKRM
+	help
+	  Provide the basic support for collecting physical memory usage
+	  information among classes. Say Y if you want to know the memory
+	  usage of each class.
+
 config CKRM_TYPE_SOCKETCLASS
 	bool "Class Manager for socket groups"
 	depends on CKRM && RCFS_FS

@@ -9,3 +9,4 @@ obj-$(CONFIG_CKRM_TYPE_TASKCLASS)  += ckrm_tc.o
 obj-$(CONFIG_CKRM_TYPE_SOCKETCLASS)  += ckrm_sockc.o
 obj-$(CONFIG_CKRM_RES_NUMTASKS)     += ckrm_numtasks.o
 obj-$(CONFIG_CKRM_RES_LISTENAQ)     += ckrm_listenaq.o
+obj-$(CONFIG_CKRM_RES_MEM) += ckrm_memcore.o ckrm_memctlr.o

@@ -33,6 +33,7 @@
 #include <linux/cpu.h>
 #include <linux/notifier.h>
 #include <linux/rwsem.h>
+#include <linux/ckrm_mem.h>
 
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
@@ -535,11 +536,23 @@ keep:
  * For pagecache intensive workloads, the first loop here is the hottest spot
  * in the kernel (apart from the copy_*_user functions).
  */
+#ifdef CONFIG_CKRM_RES_MEM
+static void shrink_cache(struct ckrm_zone *ckrm_zone, struct scan_control *sc)
+#else
 static void shrink_cache(struct zone *zone, struct scan_control *sc)
+#endif
 {
 	LIST_HEAD(page_list);
 	struct pagevec pvec;
 	int max_scan = sc->nr_to_scan;
+#ifdef CONFIG_CKRM_RES_MEM
+	struct zone *zone = ckrm_zone->zone;
+	struct list_head *inactive_list = &ckrm_zone->inactive_list;
+	struct list_head *active_list = &ckrm_zone->active_list;
+#else
+	struct list_head *inactive_list = &zone->inactive_list;
+	struct list_head *active_list = &zone->active_list;
+#endif
 
 	pagevec_init(&pvec, 1);
 
@@ -552,11 +565,11 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 		int nr_freed;
 
 		while (nr_scan++ < SWAP_CLUSTER_MAX &&
-				!list_empty(&zone->inactive_list)) {
-			page = lru_to_page(&zone->inactive_list);
+				!list_empty(inactive_list)) {
+			page = lru_to_page(inactive_list);
 
 			prefetchw_prev_lru_page(page,
-						&zone->inactive_list, flags);
+						inactive_list, flags);
 
 			if (!TestClearPageLRU(page))
 				BUG();
@@ -567,13 +580,14 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 				 */
 				__put_page(page);
 				SetPageLRU(page);
-				list_add(&page->lru, &zone->inactive_list);
+				list_add(&page->lru, inactive_list);
 				continue;
 			}
 			list_add(&page->lru, &page_list);
 			nr_taken++;
 		}
 		zone->nr_inactive -= nr_taken;
+ 		ckrm_zone_sub_inactive(ckrm_zone, nr_taken);
 		spin_unlock_irq(&zone->lru_lock);
 
 		if (nr_taken == 0)
@@ -599,10 +613,15 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 			if (TestSetPageLRU(page))
 				BUG();
 			list_del(&page->lru);
-			if (PageActive(page))
-				add_page_to_active_list(zone, page);
-			else
-				add_page_to_inactive_list(zone, page);
+			if (PageActive(page)) {
+				ckrm_zone_add_active(ckrm_zone, 1);
+				zone->nr_active++;
+				list_add(&page->lru, active_list);
+			} else {
+				ckrm_zone_add_inactive(ckrm_zone, 1);
+				zone->nr_inactive++;
+				list_add(&page->lru, inactive_list);
+			}
 			if (!pagevec_add(&pvec, page)) {
 				spin_unlock_irq(&zone->lru_lock);
 				__pagevec_release(&pvec);
@@ -633,7 +652,11 @@ done:
  * But we had to alter page->flags anyway.
  */
 static void
+#ifdef CONFIG_CKRM_RES_MEM
+refill_inactive_zone(struct ckrm_zone *ckrm_zone, struct scan_control *sc)
+#else
 refill_inactive_zone(struct zone *zone, struct scan_control *sc)
+#endif
 {
 	int pgmoved;
 	int pgdeactivate = 0;
@@ -648,13 +671,21 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 	long mapped_ratio;
 	long distress;
 	long swap_tendency;
+#ifdef CONFIG_CKRM_RES_MEM
+	struct zone *zone = ckrm_zone->zone;
+	struct list_head *active_list = &ckrm_zone->active_list;
+	struct list_head *inactive_list = &ckrm_zone->inactive_list;
+#else
+	struct list_head *active_list = &zone->active_list;
+	struct list_head *inactive_list = &zone->inactive_list;
+#endif
 
 	lru_add_drain();
 	pgmoved = 0;
 	spin_lock_irq(&zone->lru_lock);
-	while (pgscanned < nr_pages && !list_empty(&zone->active_list)) {
-		page = lru_to_page(&zone->active_list);
-		prefetchw_prev_lru_page(page, &zone->active_list, flags);
+	while (pgscanned < nr_pages && !list_empty(active_list)) {
+		page = lru_to_page(active_list);
+		prefetchw_prev_lru_page(page, active_list, flags);
 		if (!TestClearPageLRU(page))
 			BUG();
 		list_del(&page->lru);
@@ -667,7 +698,7 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 			 */
 			__put_page(page);
 			SetPageLRU(page);
-			list_add(&page->lru, &zone->active_list);
+			list_add(&page->lru, active_list);
 		} else {
 			list_add(&page->lru, &l_hold);
 			pgmoved++;
@@ -676,6 +707,7 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 	}
 	zone->pages_scanned += pgscanned;
 	zone->nr_active -= pgmoved;
+	ckrm_zone_sub_active(ckrm_zone, pgmoved);
 	spin_unlock_irq(&zone->lru_lock);
 
 	/*
@@ -733,10 +765,11 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 			BUG();
 		if (!TestClearPageActive(page))
 			BUG();
-		list_move(&page->lru, &zone->inactive_list);
+		list_move(&page->lru, inactive_list);
 		pgmoved++;
 		if (!pagevec_add(&pvec, page)) {
 			zone->nr_inactive += pgmoved;
+			ckrm_zone_add_inactive(ckrm_zone, pgmoved);
 			spin_unlock_irq(&zone->lru_lock);
 			pgdeactivate += pgmoved;
 			pgmoved = 0;
@@ -747,6 +780,7 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 		}
 	}
 	zone->nr_inactive += pgmoved;
+	ckrm_zone_add_inactive(ckrm_zone, pgmoved);
 	pgdeactivate += pgmoved;
 	if (buffer_heads_over_limit) {
 		spin_unlock_irq(&zone->lru_lock);
@@ -761,10 +795,11 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 		if (TestSetPageLRU(page))
 			BUG();
 		BUG_ON(!PageActive(page));
-		list_move(&page->lru, &zone->active_list);
+		list_move(&page->lru, active_list);
 		pgmoved++;
 		if (!pagevec_add(&pvec, page)) {
 			zone->nr_active += pgmoved;
+			ckrm_zone_add_active(ckrm_zone, pgmoved);
 			pgmoved = 0;
 			spin_unlock_irq(&zone->lru_lock);
 			__pagevec_release(&pvec);
@@ -772,12 +807,126 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 		}
 	}
 	zone->nr_active += pgmoved;
+	ckrm_zone_add_active(ckrm_zone, pgmoved);
 	spin_unlock_irq(&zone->lru_lock);
 	pagevec_release(&pvec);
 
 	mod_page_state_zone(zone, pgrefill, pgscanned);
 	mod_page_state(pgdeactivate, pgdeactivate);
 }
+
+#ifdef CONFIG_CKRM_RES_MEM
+static void
+shrink_ckrmzone(struct ckrm_zone *czone, struct scan_control *sc)
+{
+	while (czone->shrink_active || czone->shrink_inactive) {
+		if (czone->shrink_active) {
+			sc->nr_to_scan = min(czone->shrink_active,
+					(unsigned long)SWAP_CLUSTER_MAX);
+			czone->shrink_active -= sc->nr_to_scan;
+			refill_inactive_zone(czone, sc);
+		}
+		if (czone->shrink_inactive) {
+			sc->nr_to_scan = min(czone->shrink_inactive,
+					(unsigned long)SWAP_CLUSTER_MAX);
+			czone->shrink_inactive -= sc->nr_to_scan;
+			shrink_cache(czone, sc);
+			if (sc->nr_to_reclaim <= 0) {
+				czone->shrink_active = 0;
+				czone->shrink_inactive = 0;
+				break;
+			}
+		}
+	}
+}
+
+/* FIXME: This function needs to be given more thought. */
+static void
+ckrm_shrink_class(struct ckrm_mem_res *cls)
+{
+	struct scan_control sc;
+	struct zone *zone;
+	int zindex = 0, cnt, act_credit = 0, inact_credit = 0;
+
+	sc.nr_mapped = read_page_state(nr_mapped);
+	sc.nr_scanned = 0;
+	sc.nr_reclaimed = 0;
+	sc.priority = 0; // always very high priority
+
+	for_each_zone(zone) {
+		int zone_total, zone_limit, active_limit,
+					inactive_limit, clszone_limit;
+		struct ckrm_zone *czone;
+		u64 temp;
+
+		czone = &cls->ckrm_zone[zindex];
+		if (ckrm_test_set_shrink(czone))
+			continue;
+
+		zone->temp_priority = zone->prev_priority;
+		zone->prev_priority = sc.priority;
+
+		zone_total = zone->nr_active + zone->nr_inactive 
+						+ zone->free_pages;
+
+		temp = (u64) cls->pg_limit * zone_total;
+		do_div(temp, ckrm_tot_lru_pages);
+		zone_limit = (int) temp;
+		clszone_limit = (ckrm_mem_shrink_to * zone_limit) / 100;
+		active_limit = (2 * clszone_limit) / 3; // 2/3rd in active list
+		inactive_limit = clszone_limit / 3; // 1/3rd in inactive list
+
+		czone->shrink_active = 0;
+		cnt = czone->nr_active + act_credit - active_limit;
+		if (cnt > 0) {
+			czone->shrink_active = (unsigned long) cnt;
+			act_credit = 0;
+		} else {
+			act_credit += cnt;
+		}
+
+		czone->shrink_inactive = 0;
+		cnt = czone->shrink_active + inact_credit +
+					(czone->nr_inactive - inactive_limit);
+		if (cnt > 0) {
+			czone->shrink_inactive = (unsigned long) cnt;
+			inact_credit = 0;
+		} else {
+			inact_credit += cnt;
+		}
+
+
+		if (czone->shrink_active || czone->shrink_inactive) {
+			sc.nr_to_reclaim = czone->shrink_inactive;
+			shrink_ckrmzone(czone, &sc);
+		}
+		zone->prev_priority = zone->temp_priority;
+		zindex++;
+		ckrm_clear_shrink(czone);
+	}
+}
+
+static void
+ckrm_shrink_classes(void)
+{
+	struct ckrm_mem_res *cls;
+
+	spin_lock(&ckrm_mem_lock);
+	while (!ckrm_shrink_list_empty()) {
+		cls =  list_entry(ckrm_shrink_list.next, struct ckrm_mem_res,
+				shrink_list);
+		list_del(&cls->shrink_list);
+		cls->flags &= ~CLS_AT_LIMIT;
+		spin_unlock(&ckrm_mem_lock);
+		ckrm_shrink_class(cls);
+		spin_lock(&ckrm_mem_lock);
+	}
+	spin_unlock(&ckrm_mem_lock);
+}
+
+#else
+#define ckrm_shrink_classes()	do { } while(0)
+#endif
 
 /*
  * This is a basic per-zone page freer.  Used by both kswapd and direct reclaim.
@@ -787,6 +936,10 @@ shrink_zone(struct zone *zone, struct scan_control *sc)
 {
 	unsigned long nr_active;
 	unsigned long nr_inactive;
+#ifdef CONFIG_CKRM_RES_MEM
+	struct ckrm_zone *czone;
+#endif
+
 
 	/*
 	 * Add one to `nr_to_scan' just to make sure that the kernel will
@@ -808,6 +961,24 @@ shrink_zone(struct zone *zone, struct scan_control *sc)
 
 	sc->nr_to_reclaim = SWAP_CLUSTER_MAX;
 
+#ifdef CONFIG_CKRM_RES_MEM
+	if (nr_active || nr_inactive) {
+		struct list_head *pos, *next;
+		LIST_HEAD(victims);
+
+		shrink_get_victims(zone, nr_active, nr_inactive, &victims);
+		pos = victims.next;
+		while (pos != &victims) {
+			czone = list_entry(pos, struct ckrm_zone, victim_list);
+			next = pos->next;
+			list_del_init(pos);
+			sc->nr_to_reclaim = czone->shrink_inactive;
+			shrink_ckrmzone(czone, sc);
+			ckrm_clear_shrink(czone);
+			pos = next;
+		}
+	}
+#else 
 	while (nr_active || nr_inactive) {
 		if (nr_active) {
 			sc->nr_to_scan = min(nr_active,
@@ -825,6 +996,7 @@ shrink_zone(struct zone *zone, struct scan_control *sc)
 				break;
 		}
 	}
+#endif
 }
 
 /*
@@ -1161,7 +1333,10 @@ static int kswapd(void *p)
 		schedule();
 		finish_wait(&pgdat->kswapd_wait, &wait);
 
-		balance_pgdat(pgdat, 0);
+		if (!ckrm_shrink_list_empty())
+			ckrm_shrink_classes();
+		else 
+			balance_pgdat(pgdat, 0);
 	}
 	return 0;
 }

@@ -3,23 +3,17 @@
  * Copyright (C) Jiantao Kong, IBM Corp. 2003
  *           (C) Shailabh Nagar, IBM Corp. 2003
  *           (C) Chandra Seetharaman, IBM Corp. 2004
- * 
- * 
- * Memory control functions of the CKRM kernel API 
+ *
+ *
+ * Memory control functions of the CKRM kernel API
  *
  * Latest version, more details at http://ckrm.sf.net
- * 
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  *
- */
-
-/* Changes
- *
- * 28 Aug 2003
- *        Created.
  */
 
 #ifndef _LINUX_CKRM_MEM_H
@@ -29,79 +23,87 @@
 
 #include <linux/list.h>
 #include <linux/ckrm_rc.h>
+#include <linux/kref.h>
 
-typedef struct ckrm_mem_res {
-	unsigned long reclaim_flags; 
-	unsigned long flags; 
-	struct ckrm_core_class *core; // the core i am part of...
-	struct ckrm_core_class *parent; // parent of the core i am part of....
-	struct ckrm_shares shares;
-	struct list_head mcls_list; // list of all 1-level classes
-	struct list_head shrink_list; // list of classes need to be shrunk
-	atomic_t nr_users; // # of references to this class/data structure
-	atomic_t pg_total;  // # of pages used by this class
-	int pg_guar; // # of pages this class is guaranteed
-	int pg_limit; // max # of pages this class can get
-	int pg_borrowed; // # of pages this class borrowed from its parent
-	int pg_lent; // # of pages this class lent to its children
-	int pg_unused; // # of pages left to this class (after giving the
-				// guarantees to children. need to borrow from parent if
-				// more than this is needed.
-	int nr_active[MAX_NR_ZONES];
-	int nr_inactive[MAX_NR_ZONES];
-	int tmp_cnt;
+struct ckrm_zone {
+	struct list_head active_list;
+	struct list_head inactive_list;
+
+	unsigned long nr_active;
+	unsigned long nr_inactive;
+	unsigned long active_over;
+	unsigned long inactive_over;
+
+	unsigned long shrink_active;
+	unsigned long shrink_inactive;
+	long shrink_weight;
+	unsigned long shrink_flag;
+	struct list_head victim_list;	/* list of ckrm_zones chosen for
+					 * shrinking. These are over their
+					 * 'guarantee'
+					 */
+	struct zone *zone;
+	struct ckrm_mem_res *memcls;
+};
+
+struct ckrm_mem_res {
+	unsigned long flags;
+	struct ckrm_core_class *core;	/* the core i am part of... */
+	struct ckrm_core_class *parent;	/* parent of the core i am part of */
+	struct ckrm_shares shares;	
+	struct list_head mcls_list;	/* list of all 1-level classes */
+	struct kref nr_users;		/* ref count */
+	atomic_t pg_total;		/* # of pages used by this class */
+	int pg_guar;			/* absolute # of guarantee */
+	int pg_limit;			/* absolute # of limit */
+	int pg_borrowed;		/* # of pages borrowed from parent */
+	int pg_lent;			/* # of pages lent to children */
+	int pg_unused;			/* # of pages left to this class
+					 * (after giving the guarantees to
+					 * children. need to borrow from
+					 * parent if more than this is needed.
+					 */
+	int hier;			/* hiearchy level, root = 0 */
+	int impl_guar;			/* for classes with don't care guar */
+	int nr_dontcare;		/* # of dont care children */
+
+	struct ckrm_zone ckrm_zone[MAX_NR_ZONES];
+
+	struct list_head shrink_list;	/* list of classes that are near
+				 	 * limit and need to be shrunk
+					 */
 	int shrink_count;
 	unsigned long last_shrink;
-	int over_limit_failures;
-	int hier; // hiearchy, root = 0
-} ckrm_mem_res_t;
+};
+
+#define CLS_SHRINK_BIT		(1)
+
+#define CLS_AT_LIMIT		(1)
 
 extern atomic_t ckrm_mem_real_count;
-extern unsigned int ckrm_tot_lru_pages;
+extern struct ckrm_res_ctlr mem_rcbs;
+extern struct ckrm_mem_res *ckrm_mem_root_class;
+extern struct list_head ckrm_memclass_list;
 extern struct list_head ckrm_shrink_list;
 extern spinlock_t ckrm_mem_lock;
-extern struct ckrm_res_ctlr mem_rcbs;
+extern int ckrm_nr_mem_classes;
+extern unsigned int ckrm_tot_lru_pages;
+extern int ckrm_mem_shrink_count;
+extern int ckrm_mem_shrink_to;
+extern int ckrm_mem_shrink_interval ;
 
-#define page_class(page)	((ckrm_mem_res_t*)((page)->memclass))
-
-// used to fill reclaim_flags, used only when memory is low in the system
-#define CLS_CLEAR		(0)      // class under its guarantee
-#define CLS_OVER_GUAR	(1 << 0) // class is over its guarantee
-#define CLS_PARENT_OVER	(1 << 1) // parent is over 110% mark over limit
-#define CLS_OVER_25		(1 << 2) // class over 25% mark bet guar(0) & limit(100)
-#define CLS_OVER_50		(1 << 3) // class over 50% mark bet guar(0) & limit(100)
-#define CLS_OVER_75		(1 << 4) // class over 75% mark bet guar(0) & limit(100)
-#define CLS_OVER_100	(1 << 5) // class over its limit
-#define CLS_OVER_110	(1 << 6) // class over 110% mark over limit
-#define CLS_FLAGS_ALL	( CLS_OVER_GUAR | CLS_PARENT_OVER | CLS_OVER_25 | \
-					CLS_OVER_50 | CLS_OVER_75 | CLS_OVER_100 | CLS_OVER_110 )
-#define CLS_SHRINK_BIT	(31)	  // used to both lock and set the bit
-#define CLS_SHRINK		(1 << CLS_SHRINK_BIT) // shrink the given class
-
-// used in flags. set when a class is more than 90% of its maxlimit
-#define MEM_AT_LIMIT 1
-
-extern void ckrm_set_aggressive(ckrm_mem_res_t *);
-extern unsigned int ckrm_setup_reclamation(void);
-extern void ckrm_teardown_reclamation(void);
-extern void ckrm_get_reclaim_bits(unsigned int *, unsigned int *);
-extern void ckrm_init_mm_to_task(struct mm_struct *, struct task_struct *);
-extern void ckrm_mem_evaluate_mm(struct mm_struct *);
-extern void ckrm_at_limit(ckrm_mem_res_t *);
-extern int ckrm_memclass_valid(ckrm_mem_res_t *);
-#define ckrm_get_reclaim_flags(cls)	((cls)->reclaim_flags)
-
+extern void ckrm_mem_migrate_mm(struct mm_struct *, struct ckrm_mem_res *);
+extern void ckrm_mem_migrate_all_pages(struct ckrm_mem_res *,
+						struct ckrm_mem_res *);
+extern void memclass_release(struct kref *);
+extern void shrink_get_victims(struct zone *, unsigned long ,
+				unsigned long, struct list_head *);
+extern void ckrm_shrink_atlimit(struct ckrm_mem_res *);
 #else
 
-#define ckrm_init_mm_to_current(a)			do {} while (0)
-#define ckrm_mem_evaluate_mm(a)				do {} while (0)
-#define ckrm_get_reclaim_flags(a)			(0)
-#define ckrm_setup_reclamation()			(0)
-#define ckrm_teardown_reclamation()			do {} while (0)
-#define ckrm_get_reclaim_bits(a, b)			do { *(a) = 0; *(b)= 0; } while (0)
-#define ckrm_init_mm_to_task(a,b)			do {} while (0)
+#define ckrm_mem_migrate_mm(a, b)			do {} while (0)
+#define ckrm_mem_migrate_all_pages(a, b)		do {} while (0)
 
-#endif // CONFIG_CKRM_RES_MEM
+#endif /* CONFIG_CKRM_RES_MEM */
 
-#endif //_LINUX_CKRM_MEM_H
-
+#endif /* _LINUX_CKRM_MEM_H */
