@@ -89,14 +89,11 @@ AutoReqProv: no
 #
 # List the packages used during the kernel build
 #
-BuildPreReq: patch >= 2.5.4, bash >= 2.03, sh-utils, tar
-#BuildPreReq: module-init-tools
-BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg
-#BuildPreReq: kernel-utils >= 2.4-12.1.139
+BuildPreReq: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
+BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg, kernel-utils >= 2.4-12.1.139
 # temporary req since modutils changed output format 
 #BuildPreReq: modutils >= 2.4.26-14
-BuildRequires: gcc >= 2.96-98, binutils >= 2.12
-#BuildRequires: redhat-rpm-config
+BuildRequires: gcc >= 2.96-98, binutils >= 2.12, redhat-rpm-config
 BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 
 
@@ -185,8 +182,7 @@ This package includes a user mode version of the Linux kernel.
 
 %prep
 
-%setup -q -n %{name}-%{version} -c
-cd linux-%{kversion}
+%setup -n linux-%{kversion}
 
 # make sure the kernel has the sublevel we know it has. This looks weird
 # but for -pre and -rc versions we need it since we only want to use
@@ -202,10 +198,6 @@ find . -name "*~" -exec rm -fv {} \;
 ### build
 ###
 %build
-
-cd linux-%{kversion}
-
-
 
 BuildKernel() {
 
@@ -339,8 +331,6 @@ BuildKernel uml
 ###
 
 %install
-
-cd linux-%{kversion}
 
 # architectures that don't get kernel-source (i586/i686/athlon) dont need
 # much of an install because the build phase already copied the needed files
