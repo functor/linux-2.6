@@ -76,6 +76,8 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 	read_unlock(&tasklist_lock);
 	if (!child)
 		goto out;
+	if (!vx_check(vx_task_xid(child), VX_WATCH|VX_IDENT))
+		goto out_tsk;
 
 	ret = -EPERM;
 	if (pid == 1)		/* you may not mess with init */
@@ -303,8 +305,17 @@ out:
  * Notification of system call entry/exit
  * - triggered by current->work.syscall_trace
  */
-asmlinkage void do_syscall_trace(void)
+asmlinkage void do_syscall_trace(struct pt_regs *regs, int entryexit)
 {
+	if (unlikely(current->audit_context)) {
+		if (!entryexit)
+			audit_syscall_entry(current, regs->orig_eax,
+			                    regs->regs[4], regs->regs[5],
+			                    regs->regs[6], regs->regs[7]);
+		else
+			audit_syscall_exit(current, regs->regs[2]);
+	}
+
 	if (!test_thread_flag(TIF_SYSCALL_TRACE))
 		return;
 	if (!(current->ptrace & PT_PTRACED))

@@ -239,8 +239,9 @@ release_thread(struct task_struct *dead_task)
  * with parameters (SIGCHLD, 0).
  */
 int
-alpha_clone(unsigned long clone_flags, unsigned long usp, int *parent_tid,
-	    int *child_tid, unsigned long tls_value, struct pt_regs *regs)
+alpha_clone(unsigned long clone_flags, unsigned long usp,
+	    int __user *parent_tid, int __user *child_tid,
+	    unsigned long tls_value, struct pt_regs *regs)
 {
 	if (!usp)
 		usp = rdusp();
@@ -464,7 +465,8 @@ dump_elf_task_fp(elf_fpreg_t *dest, struct task_struct *task)
  * Don't do this at home.
  */
 asmlinkage int
-sys_execve(char *ufilename, char **argv, char **envp,
+sys_execve(char __user *ufilename, char __user * __user *argv,
+	   char __user * __user *envp,
 	   unsigned long a3, unsigned long a4, unsigned long a5,
 	   struct pt_regs regs)
 {
@@ -510,12 +512,6 @@ thread_saved_pc(task_t *t)
 	return 0;
 }
 
-/*
- * These bracket the sleeping functions..
- */
-#define first_sched	((unsigned long) scheduling_functions_start_here)
-#define last_sched	((unsigned long) scheduling_functions_end_here)
-
 unsigned long
 get_wchan(struct task_struct *p)
 {
@@ -534,7 +530,7 @@ get_wchan(struct task_struct *p)
 	 */
 
 	pc = thread_saved_pc(p);
-	if (pc >= first_sched && pc < last_sched) {
+	if (in_sched_functions(pc)) {
 		schedule_frame = ((unsigned long *)p->thread_info->pcb.ksp)[6];
 		return ((unsigned long *)schedule_frame)[12];
 	}

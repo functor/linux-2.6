@@ -25,6 +25,8 @@
 #include <linux/rcupdate.h>
 #include <linux/workqueue.h>
 
+#include <asm/unistd.h>
+
 #include "util.h"
 
 /**
@@ -103,8 +105,10 @@ int ipc_findkey(struct ipc_ids* ids, key_t key)
 	 */
 	for (id = 0; id <= max_id; id++) {
 		p = ids->entries[id].p;
-		if(p==NULL)
+		if (p==NULL)
 			continue;
+		if (!vx_check(p->xid, VX_IDENT))
+			continue;	
 		if (key == p->key)
 			return id;
 	}
@@ -367,6 +371,8 @@ int ipcperms (struct kern_ipc_perm *ipcp, short flag)
 {	/* flag will most probably be 0 or S_...UGO from <linux/stat.h> */
 	int requested_mode, granted_mode;
 
+	if (!vx_check(ipcp->xid, VX_ADMIN|VX_IDENT)) /* maybe just VX_IDENT? */
+		return -1;
 	requested_mode = (flag >> 6) | (flag >> 3) | flag;
 	granted_mode = ipcp->mode;
 	if (current->euid == ipcp->cuid || current->euid == ipcp->uid)
@@ -507,7 +513,8 @@ int ipc_checkid(struct ipc_ids* ids, struct kern_ipc_perm* ipcp, int uid)
 	return 0;
 }
 
-#if !defined(__ia64__) && !defined(__x86_64__) && !defined(__hppa__)
+#ifdef __ARCH_WANT_IPC_PARSE_VERSION
+
 
 /**
  *	ipc_parse_version	-	IPC call version
@@ -528,4 +535,4 @@ int ipc_parse_version (int *cmd)
 	}
 }
 
-#endif /* __ia64__ */
+#endif /* __ARCH_WANT_IPC_PARSE_VERSION */

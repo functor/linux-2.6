@@ -18,6 +18,7 @@
 #include <linux/mount.h>
 #include <linux/tty.h>
 #include <linux/devpts_fs.h>
+#include <linux/vinline.h>
 #include "xattr.h"
 
 #define DEVPTS_SUPER_MAGIC 0x1cd1
@@ -134,11 +135,21 @@ static struct dentry *get_node(int num)
 	return lookup_one_len(s, root, sprintf(s, "%d", num));
 }
 
+static int devpts_permission(struct inode *inode, int mask, struct nameidata *nd)
+{
+	int ret = -EACCES;
+	
+	if (vx_check(inode->i_xid, VX_IDENT))
+		ret = vfs_permission(inode, mask);
+	return ret;
+}
+
 static struct inode_operations devpts_file_inode_operations = {
 	.setxattr	= devpts_setxattr,
 	.getxattr	= devpts_getxattr,
 	.listxattr	= devpts_listxattr,
 	.removexattr	= devpts_removexattr,
+	.permission	= devpts_permission,
 };
 
 int devpts_pty_new(struct tty_struct *tty)
@@ -162,6 +173,7 @@ int devpts_pty_new(struct tty_struct *tty)
 	inode->i_gid = config.setgid ? config.gid : current->fsgid;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	init_special_inode(inode, S_IFCHR|config.mode, device);
+	inode->i_xid = vx_current_xid();
 	inode->i_op = &devpts_file_inode_operations;
 	inode->u.generic_ip = tty;
 

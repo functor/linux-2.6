@@ -170,6 +170,7 @@ struct buffer_head *__bread(struct block_device *, sector_t block, int size);
 struct buffer_head *alloc_buffer_head(int gfp_flags);
 void free_buffer_head(struct buffer_head * bh);
 void FASTCALL(unlock_buffer(struct buffer_head *bh));
+void FASTCALL(__lock_buffer(struct buffer_head *bh));
 void ll_rw_block(int, int, struct buffer_head * bh[]);
 void sync_dirty_buffer(struct buffer_head *bh);
 void submit_bh(int, struct buffer_head *);
@@ -193,6 +194,7 @@ int cont_prepare_write(struct page*, unsigned, unsigned, get_block_t*,
 int generic_cont_expand(struct inode *inode, loff_t size) ;
 int block_commit_write(struct page *page, unsigned from, unsigned to);
 int block_sync_page(struct page *);
+void flush_inode_pages (struct inode * inode);
 sector_t generic_block_bmap(struct address_space *, sector_t, get_block_t *);
 int generic_commit_write(struct file *, struct page *, unsigned, unsigned);
 int block_truncate_page(struct address_space *, loff_t, get_block_t *);
@@ -279,8 +281,8 @@ static inline void wait_on_buffer(struct buffer_head *bh)
 
 static inline void lock_buffer(struct buffer_head *bh)
 {
-	while (test_set_buffer_locked(bh))
-		__wait_on_buffer(bh);
+	if (test_set_buffer_locked(bh))
+		__lock_buffer(bh);
 }
 
 #endif /* _LINUX_BUFFER_HEAD_H */
