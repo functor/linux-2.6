@@ -56,6 +56,8 @@ struct rtable
 		struct rtable		*rt_next;
 	} u;
 
+	struct in_device	*idev;
+	
 	unsigned		rt_flags;
 	unsigned		rt_type;
 

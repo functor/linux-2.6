@@ -29,10 +29,7 @@ enum km_type {
 	KM_IRQ1,
 	KM_SOFTIRQ0,
 	KM_SOFTIRQ1,
-	/*
-	 * Be wary when adding entries:
-	 * the 4G/4G virtual stack must be THREAD_SIZE aligned on each cpu.
-	 */
 	KM_TYPE_NR
 };
+
 #endif

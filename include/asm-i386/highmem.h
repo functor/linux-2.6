@@ -53,6 +53,7 @@ extern void FASTCALL(kunmap_high(struct page *page));
 void *kmap(struct page *page);
 void kunmap(struct page *page);
 void *kmap_atomic(struct page *page, enum km_type type);
+void *kmap_atomic_nocache_pfn(unsigned long pfn, enum km_type type);
 void kunmap_atomic(void *kvaddr, enum km_type type);
 struct page *kmap_atomic_to_page(void *ptr);
 

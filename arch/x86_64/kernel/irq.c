@@ -833,8 +833,7 @@ static int irq_affinity_read_proc (char *page, char **start, off_t off,
 	return len;
 }
 
-static int irq_affinity_write_proc (struct file *file,
-					const char __user *buffer,
+static int irq_affinity_write_proc (struct file *file, const char *buffer,
 					unsigned long count, void *data)
 {
 	int irq = (long) data, full_count = count, err;
@@ -872,8 +871,7 @@ static int prof_cpu_mask_read_proc (char *page, char **start, off_t off,
 	return len;
 }
 
-static int prof_cpu_mask_write_proc (struct file *file,
-					const char __user *buffer,
+static int prof_cpu_mask_write_proc (struct file *file, const char *buffer,
 					unsigned long count, void *data)
 {
 	unsigned long full_count = count, err;

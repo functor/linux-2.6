@@ -1233,7 +1233,7 @@ static int find_i810(u16 device, const char *name)
 				name);
 		return 0;
 	}
-	
+
 	intel_i810_private.i810_dev = i810_dev;
 	return 1;
 }
@@ -1382,8 +1382,10 @@ static int __devinit agp_intel_probe(struct pci_dev *pdev,
 		name = "E7205";
 		break;
 	default:
-		printk(KERN_ERR PFX "Unsupported Intel chipset (device id: %04x)\n",
+		if (cap_ptr)
+			printk(KERN_WARNING PFX "Unsupported Intel chipset (device id: %04x)\n",
 			    pdev->device);
+		agp_put_bridge(bridge);
 		return -ENODEV;
 	};
 
@@ -1406,7 +1408,8 @@ static int __devinit agp_intel_probe(struct pci_dev *pdev,
 	if (!r->start && r->end) {
 		if(pci_assign_resource(pdev, 0)) {
 			printk(KERN_ERR PFX "could not assign resource 0\n");
-			return (-ENODEV);
+			agp_put_bridge(bridge);
+			return -ENODEV;
 		}
 	}
 
@@ -1417,7 +1420,8 @@ static int __devinit agp_intel_probe(struct pci_dev *pdev,
 	*/
 	if (pci_enable_device(pdev)) {
 		printk(KERN_ERR PFX "Unable to Enable PCI device\n");
-		return (-ENODEV);
+		agp_put_bridge(bridge);
+		return -ENODEV;
 	}
 
 	/* Fill in the mode register */
@@ -1459,14 +1463,36 @@ static int agp_intel_resume(struct pci_dev *pdev)
 }
 
 static struct pci_device_id agp_intel_pci_table[] = {
-	{
-	.class		= (PCI_CLASS_BRIDGE_HOST << 8),
-	.class_mask	= ~0,
-	.vendor		= PCI_VENDOR_ID_INTEL,
-	.device		= PCI_ANY_ID,
-	.subvendor	= PCI_ANY_ID,
-	.subdevice	= PCI_ANY_ID,
-	},
+#define ID(x)						\
+	{ 						\
+	.class		= (PCI_CLASS_BRIDGE_HOST << 8),	\
+	.class_mask	= ~0,				\
+	.vendor		= PCI_VENDOR_ID_INTEL,		\
+	.device		= x,				\
+	.subvendor	= PCI_ANY_ID,			\
+	.subdevice	= PCI_ANY_ID,			\
+	}
+	ID(PCI_DEVICE_ID_INTEL_82443LX_0),
+	ID(PCI_DEVICE_ID_INTEL_82443BX_0),
+	ID(PCI_DEVICE_ID_INTEL_82443GX_0),
+	ID(PCI_DEVICE_ID_INTEL_82810_MC1),
+	ID(PCI_DEVICE_ID_INTEL_82810_MC3),
+	ID(PCI_DEVICE_ID_INTEL_82810E_MC),
+	ID(PCI_DEVICE_ID_INTEL_82815_MC),
+	ID(PCI_DEVICE_ID_INTEL_82820_HB),
+	ID(PCI_DEVICE_ID_INTEL_82820_UP_HB),
+	ID(PCI_DEVICE_ID_INTEL_82830_HB),
+	ID(PCI_DEVICE_ID_INTEL_82840_HB),
+	ID(PCI_DEVICE_ID_INTEL_82845_HB),
+	ID(PCI_DEVICE_ID_INTEL_82845G_HB),
+	ID(PCI_DEVICE_ID_INTEL_82850_HB),
+	ID(PCI_DEVICE_ID_INTEL_82855PM_HB),
+	ID(PCI_DEVICE_ID_INTEL_82855GM_HB),
+	ID(PCI_DEVICE_ID_INTEL_82860_HB),
+	ID(PCI_DEVICE_ID_INTEL_82865_HB),
+	ID(PCI_DEVICE_ID_INTEL_82875_HB),
+	ID(PCI_DEVICE_ID_INTEL_7505_0),
+	ID(PCI_DEVICE_ID_INTEL_7205_0),	
 	{ }
 };
 

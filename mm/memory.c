@@ -667,6 +667,64 @@ out:
 	return NULL;
 }
 
+struct page *
+follow_page_pfn(struct mm_struct *mm, unsigned long address, int write,
+		unsigned long *pfn_ptr)
+{
+	pgd_t *pgd;
+	pmd_t *pmd;
+	pte_t *ptep, pte;
+	unsigned long pfn;
+	struct page *page;
+
+	*pfn_ptr = 0;
+	page = follow_huge_addr(mm, address, write);
+	if (!IS_ERR(page))
+		return page;
+
+	pgd = pgd_offset(mm, address);
+	if (pgd_none(*pgd) || pgd_bad(*pgd))
+		goto out;
+
+	pmd = pmd_offset(pgd, address);
+	if (pmd_none(*pmd))
+		goto out;
+	if (pmd_huge(*pmd))
+		return follow_huge_pmd(mm, address, pmd, write);
+	if (pmd_bad(*pmd))
+		goto out;
+
+	ptep = pte_offset_map(pmd, address);
+	if (!ptep)
+		goto out;
+
+	pte = *ptep;
+	pte_unmap(ptep);
+	if (pte_present(pte)) {
+		if (write && !pte_write(pte))
+			goto out;
+		if (write && !pte_dirty(pte)) {
+			struct page *page = pte_page(pte);
+			if (!PageDirty(page))
+				set_page_dirty(page);
+		}
+		pfn = pte_pfn(pte);
+		if (pfn_valid(pfn)) {
+			struct page *page = pfn_to_page(pfn);
+			
+			mark_page_accessed(page);
+			return page;
+		} else {
+			*pfn_ptr = pfn;
+			return NULL;
+		}
+	}
+
+out:
+	return NULL;
+}
+
+
 /* 
  * Given a physical address, is there a useful struct page pointing to
  * it?  This may become more complex in the future if we start dealing

@@ -35,10 +35,6 @@
 
 #define segment_eq(a,b)	((a).seg == (b).seg)
 
-extern long not_a_user_address;
-#define check_user_ptr(x) \
-	(void) ({ void __user * __userptr = (__typeof__(*(x)) *)&not_a_user_address; __userptr; })
-
 /*
  * movsl can be slow when source and dest are not both 8-byte aligned
  */
@@ -61,7 +57,7 @@ extern struct movsl_mask {
  */
 #define __range_ok(addr,size) ({ \
 	unsigned long flag,sum; \
-	check_user_ptr(addr); \
+	__chk_user_ptr(addr); \
 	asm("addl %3,%1 ; sbbl %0,%0; cmpl %1,%4; sbbl $0,%0" \
 		:"=&r" (flag), "=r" (sum) \
 		:"1" (addr),"g" ((int)(size)),"g" (current_thread_info()->addr_limit.seg)); \
@@ -215,7 +211,7 @@ extern int zero_user_size(unsigned int size, void *ptr);
  */
 #define direct_get_user(x,ptr)						\
 ({	int __ret_gu,__val_gu;						\
-	check_user_ptr(ptr);						\
+	__chk_user_ptr(ptr);						\
 	switch(sizeof (*(ptr))) {					\
 	case 1:  __get_user_x(1,__ret_gu,__val_gu,ptr); break;		\
 	case 2:  __get_user_x(2,__ret_gu,__val_gu,ptr); break;		\
@@ -334,7 +330,7 @@ extern void __put_user_bad(void);
 #define __put_user_size(x,ptr,size,retval,errret)			\
 do {									\
 	retval = 0;							\
-	check_user_ptr(ptr);						\
+	__chk_user_ptr(ptr);						\
 	switch (size) {							\
 	case 1: __put_user_asm(x,ptr,retval,"b","b","iq",errret);break;	\
 	case 2: __put_user_asm(x,ptr,retval,"w","w","ir",errret);break; \
@@ -393,7 +389,7 @@ extern long __get_user_bad(void);
 #define __get_user_size(x,ptr,size,retval,errret)			\
 do {									\
 	retval = 0;							\
-	check_user_ptr(ptr);						\
+	__chk_user_ptr(ptr);						\
 	switch (size) {							\
 	case 1: __get_user_asm(x,ptr,retval,"b","b","=q",errret);break;	\
 	case 2: __get_user_asm(x,ptr,retval,"w","w","=r",errret);break;	\

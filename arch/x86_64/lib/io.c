@@ -2,14 +2,12 @@
 #include <asm/io.h>
 #include <linux/module.h>
 
-void *__memcpy_toio(unsigned long dst,const void*src,unsigned len)
+void *memcpy_toio(void *dst,const void*src,unsigned len)
 {
-	return __inline_memcpy((void *) dst,src,len);
+	return __inline_memcpy(dst,src,len);
 }
-EXPORT_SYMBOL(__memcpy_toio);
 
-void *__memcpy_fromio(void *dst,unsigned long src,unsigned len)
+void *memcpy_fromio(void *dst,const void*src,unsigned len)
 {
-	return __inline_memcpy(dst,(const void *) src,len);
+	return __inline_memcpy(dst,src,len);
 }
-EXPORT_SYMBOL(__memcpy_fromio);

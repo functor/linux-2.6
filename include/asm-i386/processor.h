@@ -473,6 +473,8 @@ load_esp0(struct tss_struct *tss, struct thread_struct *thread)
 	}
 }
 
+extern int use_nx;
+
 #define start_thread(regs, new_eip, new_esp) do {		\
 	__asm__("movl %0,%%fs ; movl %0,%%gs": :"r" (0));	\
 	set_fs(USER_DS);					\

@@ -59,6 +59,9 @@ static unsigned int d_hash_shift;
 static struct hlist_head *dentry_hashtable;
 static LIST_HEAD(dentry_unused);
 
+static void prune_dcache(int count);
+
+
 /* Statistics gathering. */
 struct dentry_stat_t dentry_stat = {
 	.age_limit = 45,
@@ -684,6 +687,19 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 {
 	struct dentry *dentry;
 	char *dname;
+
+#define DENTRY_UNUSED_THRESHOLD 30000
+#define DENTRY_BATCH_COUNT 32
+ 
+	if (dentry_stat.nr_unused > DENTRY_UNUSED_THRESHOLD) {
+		int doit = 1;
+		spin_lock(&dcache_lock);
+		if (dentry_stat.nr_unused < DENTRY_UNUSED_THRESHOLD)
+			doit = 0;
+		spin_unlock(&dcache_lock);
+		if (doit)
+			prune_dcache(DENTRY_BATCH_COUNT);
+	}
 
 	dentry = kmem_cache_alloc(dentry_cache, GFP_KERNEL); 
 	if (!dentry)

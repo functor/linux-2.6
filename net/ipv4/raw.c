@@ -352,7 +352,7 @@ error_fault:
 	err = -EFAULT;
 	kfree_skb(skb);
 error:
-	IP_INC_STATS(IpOutDiscards);
+	IP_INC_STATS(OutDiscards);
 	return err; 
 }
 

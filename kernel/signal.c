@@ -2214,7 +2214,7 @@ sys_kill(int pid, int sig)
 }
 
 /**
- *  sys_tkill - send signal to one specific thread
+ *  sys_tgkill - send signal to one specific thread
  *  @tgid: the thread group ID of the thread
  *  @pid: the PID of the thread
  *  @sig: signal to be sent
@@ -2515,6 +2515,8 @@ out:
 	return error;
 }
 
+#endif /* SIGPROCMASK */
+
 #ifndef __sparc__
 asmlinkage long
 sys_rt_sigaction(int sig,
@@ -2544,7 +2546,6 @@ out:
 	return ret;
 }
 #endif /* __sparc__ */
-#endif
 
 #ifdef __ARCH_WANT_SYS_SGETMASK
 
