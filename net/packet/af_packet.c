@@ -453,8 +453,11 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,  struct packe
 	sk = pt->af_packet_priv;
 	po = pkt_sk(sk);
 
-	if ((int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	if (vnet_active &&
+	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
 		goto drop;
+#endif
 
 	skb->dev = dev;
 
@@ -1801,14 +1804,19 @@ struct proto_ops packet_ops = {
 	.mmap =		packet_mmap,
 	.sendpage =	sock_no_sendpage,
 };
-EXPORT_SYMBOL(packet_ops);
 
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+EXPORT_SYMBOL(packet_ops);
+struct net_proto_family packet_family_ops;
+EXPORT_SYMBOL(packet_family_ops);
+#else
+static
+#endif
 struct net_proto_family packet_family_ops = {
 	.family =	PF_PACKET,
 	.create =	packet_create,
 	.owner	=	THIS_MODULE,
 };
-EXPORT_SYMBOL(packet_family_ops);
 
 static struct notifier_block packet_netdev_notifier = {
 	.notifier_call =packet_notifier,
