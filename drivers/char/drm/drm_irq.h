@@ -65,10 +65,9 @@ int DRM(irq_by_busid)(struct inode *inode, struct file *filp,
 {
 	drm_file_t *priv = filp->private_data;
 	drm_device_t *dev = priv->dev;
-	drm_irq_busid_t __user *argp = (void __user *)arg;
 	drm_irq_busid_t p;
 
-	if (copy_from_user(&p, argp, sizeof(p)))
+	if (copy_from_user(&p, (drm_irq_busid_t *)arg, sizeof(p)))
 		return -EFAULT;
 
 	if ((p.busnum >> 8) != dev->pci_domain ||
@@ -81,7 +80,7 @@ int DRM(irq_by_busid)(struct inode *inode, struct file *filp,
 
 	DRM_DEBUG("%d:%d:%d => IRQ %d\n",
 		  p.busnum, p.devnum, p.funcnum, p.irq);
-	if (copy_to_user(argp, &p, sizeof(p)))
+	if (copy_to_user((drm_irq_busid_t *)arg, &p, sizeof(p)))
 		return -EFAULT;
 	return 0;
 }
@@ -128,11 +127,11 @@ int DRM(irq_install)( drm_device_t *dev )
 	dev->dma->this_buffer = NULL;
 #endif
 
-#ifdef __HAVE_IRQ_BH
+#if __HAVE_IRQ_BH
 	INIT_WORK(&dev->work, DRM(irq_immediate_bh), dev);
 #endif
 
-#ifdef __HAVE_VBL_IRQ
+#if __HAVE_VBL_IRQ
 	init_waitqueue_head(&dev->vbl_queue);
 
 	spin_lock_init( &dev->vbl_lock );
@@ -207,7 +206,7 @@ int DRM(control)( struct inode *inode, struct file *filp,
 	drm_device_t *dev = priv->dev;
 	drm_control_t ctl;
 
-	if ( copy_from_user( &ctl, (drm_control_t __user *)arg, sizeof(ctl) ) )
+	if ( copy_from_user( &ctl, (drm_control_t *)arg, sizeof(ctl) ) )
 		return -EFAULT;
 
 	switch ( ctl.func ) {
@@ -223,7 +222,7 @@ int DRM(control)( struct inode *inode, struct file *filp,
 	}
 }
 
-#ifdef __HAVE_VBL_IRQ
+#if __HAVE_VBL_IRQ
 
 /**
  * Wait for VBLANK.
@@ -248,7 +247,6 @@ int DRM(wait_vblank)( DRM_IOCTL_ARGS )
 {
 	drm_file_t *priv = filp->private_data;
 	drm_device_t *dev = priv->dev;
-	drm_wait_vblank_t __user *argp = (void __user *)data;
 	drm_wait_vblank_t vblwait;
 	struct timeval now;
 	int ret = 0;
@@ -257,7 +255,8 @@ int DRM(wait_vblank)( DRM_IOCTL_ARGS )
 	if (!dev->irq)
 		return -EINVAL;
 
-	DRM_COPY_FROM_USER_IOCTL( vblwait, argp, sizeof(vblwait) );
+	DRM_COPY_FROM_USER_IOCTL( vblwait, (drm_wait_vblank_t *)data,
+				  sizeof(vblwait) );
 
 	switch ( vblwait.request.type & ~_DRM_VBLANK_FLAGS_MASK ) {
 	case _DRM_VBLANK_RELATIVE:
@@ -326,7 +325,8 @@ int DRM(wait_vblank)( DRM_IOCTL_ARGS )
 	}
 
 done:
-	DRM_COPY_TO_USER_IOCTL( argp, vblwait, sizeof(vblwait) );
+	DRM_COPY_TO_USER_IOCTL( (drm_wait_vblank_t *)data, vblwait,
+				sizeof(vblwait) );
 
 	return ret;
 }

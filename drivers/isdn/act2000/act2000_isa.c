@@ -405,7 +405,7 @@ act2000_isa_getid(act2000_card * card)
  * Download microcode into card, check Firmware signature.
  */
 int
-act2000_isa_download(act2000_card * card, act2000_ddef __user * cb)
+act2000_isa_download(act2000_card * card, act2000_ddef * cb)
 {
         unsigned int length;
         int ret;
@@ -413,18 +413,18 @@ act2000_isa_download(act2000_card * card, act2000_ddef __user * cb)
         int c;
         long timeout;
         u_char *b;
-        u_char __user *p;
+        u_char *p;
         u_char *buf;
         act2000_ddef cblock;
 
         if (!act2000_isa_reset(card->port))
                 return -ENXIO;
         act2000_isa_delay(HZ / 2);
-        if(copy_from_user(&cblock, cb, sizeof(cblock)))
+        if(copy_from_user(&cblock, (char *) cb, sizeof(cblock)))
         	return -EFAULT;
         length = cblock.length;
         p = cblock.buffer;
-        if ((ret = verify_area(VERIFY_READ, p, length)))
+        if ((ret = verify_area(VERIFY_READ, (void *) p, length)))
                 return ret;
         buf = (u_char *) kmalloc(1024, GFP_KERNEL);
         if (!buf)

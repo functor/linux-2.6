@@ -148,7 +148,6 @@ extern __inline__ int get_order(unsigned long size)
 struct task_struct;
 struct vm_area_struct *get_gate_vma(struct task_struct *tsk);
 int in_gate_area(struct task_struct *task, unsigned long addr);
-extern int devmem_is_allowed(unsigned long pagenr);
 #endif
 
 #endif /* __KERNEL__ */

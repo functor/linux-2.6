@@ -77,8 +77,6 @@ static int tvmixer_ioctl(struct inode *inode, struct file *file, unsigned int cm
 	int left,right,ret,val = 0;
         struct TVMIXER *mix = file->private_data;
 	struct i2c_client *client = mix->dev;
-	void __user *argp = (void __user *)arg;
-	int __user *p = argp;
 
 	if (NULL == client)
 		return -ENODEV;
@@ -88,7 +86,7 @@ static int tvmixer_ioctl(struct inode *inode, struct file *file, unsigned int cm
                 strlcpy(info.id, "tv card", sizeof(info.id));
                 strlcpy(info.name, i2c_clientname(client), sizeof(info.name));
                 info.modify_counter = 42 /* FIXME */;
-                if (copy_to_user(argp, &info, sizeof(info)))
+                if (copy_to_user((void *)arg, &info, sizeof(info)))
                         return -EFAULT;
                 return 0;
         }
@@ -96,15 +94,15 @@ static int tvmixer_ioctl(struct inode *inode, struct file *file, unsigned int cm
                 _old_mixer_info info;
                 strlcpy(info.id, "tv card", sizeof(info.id));
                 strlcpy(info.name, i2c_clientname(client), sizeof(info.name));
-                if (copy_to_user(argp, &info, sizeof(info)))
+                if (copy_to_user((void *)arg, &info, sizeof(info)))
                         return -EFAULT;
                 return 0;
         }
         if (cmd == OSS_GETVERSION)
-                return put_user(SOUND_VERSION, p);
+                return put_user(SOUND_VERSION, (int *)arg);
 
 	if (_SIOC_DIR(cmd) & _SIOC_WRITE)
-		if (get_user(val, p))
+		if (get_user(val, (int *)arg))
 			return -EFAULT;
 
 	/* read state */
@@ -170,7 +168,7 @@ static int tvmixer_ioctl(struct inode *inode, struct file *file, unsigned int cm
 	default:
 		return -EINVAL;
 	}
-	if (put_user(ret, p))
+	if (put_user(ret, (int *)arg))
 		return -EFAULT;
 	return 0;
 }

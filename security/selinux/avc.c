@@ -71,33 +71,15 @@ struct avc_callback_node {
 };
 
 static spinlock_t avc_lock = SPIN_LOCK_UNLOCKED;
-static struct avc_node *avc_node_freelist;
+static struct avc_node *avc_node_freelist = NULL;
 static struct avc_cache avc_cache;
 static unsigned avc_cache_stats[AVC_NSTATS];
-static struct avc_callback_node *avc_callbacks;
+static struct avc_callback_node *avc_callbacks = NULL;
 
 static inline int avc_hash(u32 ssid, u32 tsid, u16 tclass)
 {
 	return (ssid ^ (tsid<<2) ^ (tclass<<4)) & (AVC_CACHE_SLOTS - 1);
 }
-
-#ifdef AVC_CACHE_STATS
-static inline void avc_cache_stats_incr(int type)
-{
-	avc_cache_stats[type]++;
-}
-
-static inline void avc_cache_stats_add(int type, unsigned val)
-{
-	avc_cache_stats[type] += val;
-}
-#else
-static inline void avc_cache_stats_incr(int type)
-{ }
-
-static inline void avc_cache_stats_add(int type, unsigned val)
-{ }
-#endif
 
 /**
  * avc_dump_av - Display an access vector in human-readable form.
@@ -106,7 +88,7 @@ static inline void avc_cache_stats_add(int type, unsigned val)
  */
 void avc_dump_av(struct audit_buffer *ab, u16 tclass, u32 av)
 {
-	char **common_pts = NULL;
+	char **common_pts = 0;
 	u32 common_base = 0;
 	int i, i2, perm;
 
@@ -190,6 +172,15 @@ void __init avc_init(void)
 {
 	struct avc_node	*new;
 	int i;
+
+	for (i = 0; i < AVC_NSTATS; i++)
+		avc_cache_stats[i] = 0;
+
+	for (i = 0; i < AVC_CACHE_SLOTS; i++)
+		avc_cache.slots[i] = 0;
+	avc_cache.lru_hint = 0;
+	avc_cache.active_nodes = 0;
+	avc_cache.latest_notif = 0;
 
 	for (i = 0; i < AVC_CACHE_MAXNODES; i++) {
 		new = kmalloc(sizeof(*new), GFP_ATOMIC);
@@ -734,7 +725,7 @@ static int avc_update_cache(u32 event, u32 ssid, u32 tsid,
 		}
 	} else {
 		/* apply to one node */
-		node = avc_search_node(ssid, tsid, tclass, NULL);
+		node = avc_search_node(ssid, tsid, tclass, 0);
 		if (node) {
 			avc_update_node(event,node,perms);
 		}
@@ -808,7 +799,7 @@ int avc_ss_grant(u32 ssid, u32 tsid, u16 tclass,
                  u32 perms, u32 seqno)
 {
 	return avc_control(AVC_CALLBACK_GRANT,
-			   ssid, tsid, tclass, perms, seqno, NULL);
+			   ssid, tsid, tclass, perms, seqno, 0);
 }
 
 /**
@@ -846,7 +837,7 @@ int avc_ss_revoke(u32 ssid, u32 tsid, u16 tclass,
                   u32 perms, u32 seqno)
 {
 	return avc_control(AVC_CALLBACK_REVOKE,
-			   ssid, tsid, tclass, perms, seqno, NULL);
+			   ssid, tsid, tclass, perms, seqno, 0);
 }
 
 /**
@@ -878,7 +869,7 @@ int avc_ss_reset(u32 seqno)
 			avc_node_freelist = tmp;
 			avc_cache.active_nodes--;
 		}
-		avc_cache.slots[i] = NULL;
+		avc_cache.slots[i] = 0;
 	}
 	avc_cache.lru_hint = 0;
 
@@ -890,7 +881,7 @@ int avc_ss_reset(u32 seqno)
 	for (c = avc_callbacks; c; c = c->next) {
 		if (c->events & AVC_CALLBACK_RESET) {
 			rc = c->callback(AVC_CALLBACK_RESET,
-					 0, 0, 0, 0, NULL);
+					 0, 0, 0, 0, 0);
 			if (rc)
 				goto out;
 		}
@@ -918,10 +909,10 @@ int avc_ss_set_auditallow(u32 ssid, u32 tsid, u16 tclass,
 {
 	if (enable)
 		return avc_control(AVC_CALLBACK_AUDITALLOW_ENABLE,
-				   ssid, tsid, tclass, perms, seqno, NULL);
+				   ssid, tsid, tclass, perms, seqno, 0);
 	else
 		return avc_control(AVC_CALLBACK_AUDITALLOW_DISABLE,
-				   ssid, tsid, tclass, perms, seqno, NULL);
+				   ssid, tsid, tclass, perms, seqno, 0);
 }
 
 /**
@@ -938,10 +929,10 @@ int avc_ss_set_auditdeny(u32 ssid, u32 tsid, u16 tclass,
 {
 	if (enable)
 		return avc_control(AVC_CALLBACK_AUDITDENY_ENABLE,
-				   ssid, tsid, tclass, perms, seqno, NULL);
+				   ssid, tsid, tclass, perms, seqno, 0);
 	else
 		return avc_control(AVC_CALLBACK_AUDITDENY_DISABLE,
-				   ssid, tsid, tclass, perms, seqno, NULL);
+				   ssid, tsid, tclass, perms, seqno, 0);
 }
 
 /**
@@ -993,7 +984,7 @@ int avc_has_perm_noaudit(u32 ssid, u32 tsid,
 			ae->used = 1;
 		} else {
 			avc_cache_stats_incr(AVC_ENTRY_DISCARDS);
-			ae = NULL;
+			ae = 0;
 		}
 	}
 

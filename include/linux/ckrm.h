@@ -9,13 +9,10 @@
  *
  * Latest version, more details at http://ckrm.sf.net
  * 
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2.1 of the GNU Lesser General Public License
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it would be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  */
 
@@ -48,16 +45,16 @@
 
 enum ckrm_event {
 	/* we distinguish various events types
-	 *
+         *
 	 * (a) CKRM_LATCHABLE_EVENTS
-	 *      events can be latched for event callbacks by classtypes
-	 *
+         *      events can be latched for event callbacks by classtypes
+         *
 	 * (b) CKRM_NONLATACHBLE_EVENTS
-	 *     events can not be latched but can be used to call classification
-	 * 
+         *     events can not be latched but can be used to call classification
+         * 
 	 * (c) event that are used for notification purposes
 	 *     range: [ CKRM_EVENT_CANNOT_CLASSIFY .. )
-	 */
+         */
 
 	/* events (a) */
 
@@ -69,7 +66,6 @@ enum ckrm_event {
 	CKRM_EVENT_EXEC,
 	CKRM_EVENT_UID,
 	CKRM_EVENT_GID,
-	CKRM_EVENT_XID,
 	CKRM_EVENT_LOGIN,
 	CKRM_EVENT_USERADD,
 	CKRM_EVENT_USERDEL,
@@ -87,7 +83,7 @@ enum ckrm_event {
 	CKRM_NOTCLASSIFY_EVENTS,
 
 	CKRM_EVENT_MANUAL = CKRM_NOTCLASSIFY_EVENTS,
-
+	
 	CKRM_NUM_EVENTS
 };
 #endif
@@ -97,7 +93,7 @@ enum ckrm_event {
 
 extern void ckrm_invoke_event_cb_chain(enum ckrm_event ev, void *arg);
 
-typedef void (*ckrm_event_cb) (void *arg);
+typedef void (*ckrm_event_cb)(void *arg);
 
 struct ckrm_hook_cb {
 	ckrm_event_cb fct;
@@ -116,7 +112,7 @@ static inline void ckrm_cb_##fct(argtp arg)				\
          ckrm_invoke_event_cb_chain(CKRM_EVENT_##EV,(void*)arg);	\
 }
 
-#else				// !CONFIG_CKRM
+#else // !CONFIG_CKRM
 
 #define CKRM_DEF_CB(EV,fct)			\
 static inline void ckrm_cb_##fct(void)  { }
@@ -124,7 +120,11 @@ static inline void ckrm_cb_##fct(void)  { }
 #define CKRM_DEF_CB_ARG(EV,fct,argtp)		\
 static inline void ckrm_cb_##fct(argtp arg) { }
 
-#endif				// CONFIG_CKRM
+#define ckrm_cb_newtask(task_struct)
+#define ckrm_cb_exit(task_struct)
+#define ckrm_init()
+
+#endif // CONFIG_CKRM
 
 /*-----------------------------------------------------------------
  *   define the CKRM event functions 
@@ -136,31 +136,27 @@ struct task_struct;
 struct sock;
 struct user_struct;
 
-CKRM_DEF_CB_ARG(FORK, fork, struct task_struct *);
-CKRM_DEF_CB_ARG(EXEC, exec, const char *);
-CKRM_DEF_CB(UID, uid);
-CKRM_DEF_CB(GID, gid);
-CKRM_DEF_CB_ARG(XID, xid, struct task_struct *);
-CKRM_DEF_CB(APPTAG, apptag);
-CKRM_DEF_CB(LOGIN, login);
-CKRM_DEF_CB_ARG(USERADD, useradd, struct user_struct *);
-CKRM_DEF_CB_ARG(USERDEL, userdel, struct user_struct *);
-CKRM_DEF_CB_ARG(LISTEN_START, listen_start, struct sock *);
-CKRM_DEF_CB_ARG(LISTEN_STOP, listen_stop, struct sock *);
+CKRM_DEF_CB_ARG( FORK         , fork,         struct task_struct *);
+CKRM_DEF_CB_ARG( EXEC         , exec,         const char*         );
+CKRM_DEF_CB    ( UID          , uid                               );
+CKRM_DEF_CB    ( GID          , gid                               );
+CKRM_DEF_CB    ( APPTAG       , apptag                            );
+CKRM_DEF_CB    ( LOGIN        , login                             );
+CKRM_DEF_CB_ARG( USERADD      , useradd,      struct user_struct *);
+CKRM_DEF_CB_ARG( USERDEL      , userdel,      struct user_struct *);
+CKRM_DEF_CB_ARG( LISTEN_START , listen_start, struct sock *       );
+CKRM_DEF_CB_ARG( LISTEN_STOP  , listen_stop,  struct sock *       );
 
-// some other functions required
 #ifdef CONFIG_CKRM
-extern void ckrm_init(void);
+// and a few special one's
 void ckrm_cb_newtask(struct task_struct *);
 void ckrm_cb_exit(struct task_struct *);
-#else
-#define ckrm_init(x)		do { } while (0)
-#define ckrm_cb_newtask(x)	do { } while (0)
-#define ckrm_cb_exit(x)		do { } while (0)
-#endif
 
+// some other functions required
+extern void ckrm_init(void);
 extern int get_exe_path_name(struct task_struct *, char *, int);
+#endif // CONFIG_CKRM
 
-#endif				// __KERNEL__
+#endif // __KERNEL__
 
-#endif				// _LINUX_CKRM_H
+#endif // _LINUX_CKRM_H

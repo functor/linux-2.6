@@ -52,11 +52,8 @@ typedef struct bd_info {
 	unsigned long	bi_flashoffset; /* reserved area for startup monitor */
 	unsigned long	bi_sramstart;	/* start of SRAM memory */
 	unsigned long	bi_sramsize;	/* size	 of SRAM memory */
-#if defined(CONFIG_8xx) || defined(CONFIG_CPM2) || defined(CONFIG_85xx)
+#if defined(CONFIG_8xx) || defined(CONFIG_8260) || defined(CONFIG_85xx)
 	unsigned long	bi_immr_base;	/* base of IMMR register */
-#endif
-#if defined(CONFIG_PPC_MPC52xx)
-	unsigned long   bi_mbar_base;   /* base of internal registers */
 #endif
 	unsigned long	bi_bootflags;	/* boot / reboot flag (for LynxOS) */
 	unsigned long	bi_ip_addr;	/* IP Address */
@@ -64,15 +61,11 @@ typedef struct bd_info {
 	unsigned short	bi_ethspeed;	/* Ethernet speed in Mbps */
 	unsigned long	bi_intfreq;	/* Internal Freq, in MHz */
 	unsigned long	bi_busfreq;	/* Bus Freq, in MHz */
-#if defined(CONFIG_CPM2)
+#if defined(CONFIG_8260)
 	unsigned long	bi_cpmfreq;	/* CPM_CLK Freq, in MHz */
 	unsigned long	bi_brgfreq;	/* BRG_CLK Freq, in MHz */
 	unsigned long	bi_sccfreq;	/* SCC_CLK Freq, in MHz */
 	unsigned long	bi_vco;		/* VCO Out from PLL, in MHz */
-#endif
-#if defined(CONFIG_PPC_MPC52xx)
-	unsigned long   bi_ipbfreq;     /* IPB Bus Freq, in MHz */
-	unsigned long   bi_pcifreq;     /* PCI Bus Freq, in MHz */
 #endif
 	unsigned long	bi_baudrate;	/* Console Baudrate */
 #if defined(CONFIG_405GP)

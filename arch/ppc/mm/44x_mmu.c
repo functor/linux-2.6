@@ -93,14 +93,10 @@ ppc44x_pin_tlb(int slot, unsigned int virt, unsigned int phys)
 }
 
 /*
- * MMU_init_hw does the chip-specific initialization of the MMU hardware.
+ * Configure PPC44x TLB for AS0 exception processing.
  */
-void __init MMU_init_hw(void)
-{
-	flush_instruction_cache();
-}
-
-unsigned long __init mmu_mapin_ram(void)
+static void __init
+ppc44x_tlb_config(void)
 {
 	unsigned int pinned_tlbs = 1;
 	int i;
@@ -128,6 +124,39 @@ unsigned long __init mmu_mapin_ram(void)
 			unsigned int phys_addr = (PPC44x_LOW_SLOT-i) * PPC44x_PIN_SIZE;
 			ppc44x_pin_tlb(i, phys_addr+PAGE_OFFSET, phys_addr);
 		}
+}
 
-	return total_lowmem;
+/*
+ * MMU_init_hw does the chip-specific initialization of the MMU hardware.
+ */
+void __init MMU_init_hw(void)
+{
+	flush_instruction_cache();
+
+	ppc44x_tlb_config();
+}
+
+/* TODO: Add large page lowmem mapping support */
+unsigned long __init mmu_mapin_ram(void)
+{
+	unsigned long v, s, f = _PAGE_GUARDED;
+	phys_addr_t p;
+
+	v = KERNELBASE;
+	p = PPC_MEMSTART;
+
+	for (s = 0; s < total_lowmem; s += PAGE_SIZE) {
+		if ((char *) v >= _stext && (char *) v < etext)
+			f |= _PAGE_RAM_TEXT;
+		else
+			f |= _PAGE_RAM;
+		map_page(v, p, f);
+		v += PAGE_SIZE;
+		p += PAGE_SIZE;
+	}
+
+	if (ppc_md.progress)
+		ppc_md.progress("MMU:mmu_mapin_ram done", 0x401);
+
+	return s;
 }

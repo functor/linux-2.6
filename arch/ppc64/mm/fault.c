@@ -93,15 +93,13 @@ int do_page_fault(struct pt_regs *regs, unsigned long address,
 	unsigned long is_write = error_code & 0x02000000;
 	unsigned long trap = TRAP(regs);
 
-	BUG_ON((trap == 0x380) || (trap == 0x480));
-
-	if (trap == 0x300) {
+	if (trap == 0x300 || trap == 0x380) {
 		if (debugger_fault_handler(regs))
 			return 0;
 	}
 
 	/* On a kernel SLB miss we can only check for a valid exception entry */
-	if (!user_mode(regs) && (address >= TASK_SIZE))
+	if (!user_mode(regs) && (trap == 0x380 || address >= TASK_SIZE))
 		return SIGSEGV;
 
 	if (error_code & 0x00400000) {
@@ -121,28 +119,7 @@ int do_page_fault(struct pt_regs *regs, unsigned long address,
 		die("Weird page fault", regs, SIGSEGV);
 	}
 
-	/* When running in the kernel we expect faults to occur only to
-	 * addresses in user space.  All other faults represent errors in the
-	 * kernel and should generate an OOPS.  Unfortunatly, in the case of an
-	 * erroneous fault occuring in a code path which already holds mmap_sem
-	 * we will deadlock attempting to validate the fault against the
-	 * address space.  Luckily the kernel only validly references user
-	 * space from well defined areas of code, which are listed in the
-	 * exceptions table.
-	 *
-	 * As the vast majority of faults will be valid we will only perform
-	 * the source reference check when there is a possibilty of a deadlock.
-	 * Attempt to lock the address space, if we cannot we then validate the
-	 * source.  If this is invalid we can skip the address space check,
-	 * thus avoiding the deadlock.
-	 */
-	if (!down_read_trylock(&mm->mmap_sem)) {
-		if (!user_mode(regs) && !search_exception_tables(regs->nip))
-			goto bad_area_nosemaphore;
-
-		down_read(&mm->mmap_sem);
-	}
-
+	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, address);
 	if (!vma)
 		goto bad_area;
@@ -232,13 +209,12 @@ good_area:
 bad_area:
 	up_read(&mm->mmap_sem);
 
-bad_area_nosemaphore:
 	/* User mode accesses cause a SIGSEGV */
 	if (user_mode(regs)) {
 		info.si_signo = SIGSEGV;
 		info.si_errno = 0;
 		info.si_code = code;
-		info.si_addr = (void __user *) address;
+		info.si_addr = (void *) address;
 		force_sig_info(SIGSEGV, &info, current);
 		return 0;
 	}
@@ -267,7 +243,7 @@ do_sigbus:
 		info.si_signo = SIGBUS;
 		info.si_errno = 0;
 		info.si_code = BUS_ADRERR;
-		info.si_addr = (void __user *)address;
+		info.si_addr = (void *)address;
 		force_sig_info(SIGBUS, &info, current);
 		return 0;
 	}

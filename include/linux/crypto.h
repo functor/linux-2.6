@@ -156,8 +156,6 @@ struct digest_tfm {
 	void (*dit_init)(struct crypto_tfm *tfm);
 	void (*dit_update)(struct crypto_tfm *tfm,
 	                   struct scatterlist *sg, unsigned int nsg);
-	void (*dit_update_kernel)(struct crypto_tfm *tfm,
-				  const void *data, size_t count);
 	void (*dit_final)(struct crypto_tfm *tfm, u8 *out);
 	void (*dit_digest)(struct crypto_tfm *tfm, struct scatterlist *sg,
 	                   unsigned int nsg, u8 *out);
@@ -204,14 +202,10 @@ struct crypto_tfm {
  * will then attempt to load a module of the same name or alias.  A refcount
  * is grabbed on the algorithm which is then associated with the new transform.
  *
- * crypto_alloc_tfm2() is similar, but allows module loading to be suppressed.
- *
  * crypto_free_tfm() frees up the transform and any associated resources,
  * then drops the refcount on the associated algorithm.
  */
 struct crypto_tfm *crypto_alloc_tfm(const char *alg_name, u32 tfm_flags);
-struct crypto_tfm *crypto_alloc_tfm2(const char *alg_name, u32 tfm_flags,
-				     int nomodload);
 void crypto_free_tfm(struct crypto_tfm *tfm);
 
 /*
@@ -276,14 +270,6 @@ static inline void crypto_digest_update(struct crypto_tfm *tfm,
 {
 	BUG_ON(crypto_tfm_alg_type(tfm) != CRYPTO_ALG_TYPE_DIGEST);
 	tfm->crt_digest.dit_update(tfm, sg, nsg);
-}
-
-static inline void crypto_digest_update_kernel(struct crypto_tfm *tfm,
-					       const void *data,
-					       size_t count)
-{
-	BUG_ON(crypto_tfm_alg_type(tfm) != CRYPTO_ALG_TYPE_DIGEST);
-	tfm->crt_digest.dit_update_kernel(tfm, data, count);
 }
 
 static inline void crypto_digest_final(struct crypto_tfm *tfm, u8 *out)

@@ -60,7 +60,6 @@
  *      ->swap_list_lock
  *        ->swap_device_lock	(exclusive_swap_page, others)
  *          ->mapping->tree_lock
- *    ->page_map_lock()		(try_to_unmap_file)
  *
  *  ->i_sem
  *    ->i_mmap_lock		(truncate->unmap_mapping_range)
@@ -88,13 +87,6 @@
  *    ->private_lock		(try_to_unmap_one)
  *    ->tree_lock		(try_to_unmap_one)
  *    ->zone.lru_lock		(follow_page->mark_page_accessed)
- *    ->page_map_lock()		(page_add_anon_rmap)
- *      ->tree_lock		(page_remove_rmap->set_page_dirty)
- *      ->private_lock		(page_remove_rmap->set_page_dirty)
- *      ->inode_lock		(page_remove_rmap->set_page_dirty)
- *    ->anon_vma.lock		(anon_vma_prepare)
- *    ->inode_lock		(zap_pte_range->set_page_dirty)
- *    ->private_lock		(zap_pte_range->__set_page_dirty_buffers)
  *
  *  ->task->proc_lock
  *    ->dcache_lock		(proc_pid_lookup)
@@ -200,7 +192,7 @@ static int wait_on_page_writeback_range(struct address_space *mapping,
 	index = start;
 	while ((nr_pages = pagevec_lookup_tag(&pvec, mapping, &index,
 			PAGECACHE_TAG_WRITEBACK,
-			min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1)) != 0) {
+			min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1))) {
 		unsigned i;
 
 		for (i = 0; i < nr_pages; i++) {
@@ -440,6 +432,10 @@ struct page * find_get_page(struct address_space *mapping, unsigned long offset)
 {
 	struct page *page;
 
+	/*
+	 * We scan the hash list read-only. Addition to and removal from
+	 * the hash-list needs a held write-lock.
+	 */
 	spin_lock_irq(&mapping->tree_lock);
 	page = radix_tree_lookup(&mapping->page_tree, offset);
 	if (page)
@@ -843,9 +839,9 @@ int file_read_actor(read_descriptor_t *desc, struct page *page,
 	 * Faults on the destination of a read are common, so do it before
 	 * taking the kmap.
 	 */
-	if (!fault_in_pages_writeable(desc->arg.buf, size)) {
+	if (!fault_in_pages_writeable(desc->buf, size)) {
 		kaddr = kmap_atomic(page, KM_USER0);
-		left = __copy_to_user_inatomic(desc->arg.buf, kaddr + offset, size);
+		left = __copy_to_user(desc->buf, kaddr + offset, size);
 		kunmap_atomic(kaddr, KM_USER0);
 		if (left == 0)
 			goto success;
@@ -853,7 +849,7 @@ int file_read_actor(read_descriptor_t *desc, struct page *page,
 
 	/* Do it the slow way */
 	kaddr = kmap(page);
-	left = __copy_to_user(desc->arg.buf, kaddr + offset, size);
+	left = __copy_to_user(desc->buf, kaddr + offset, size);
 	kunmap(page);
 
 	if (left) {
@@ -863,7 +859,7 @@ int file_read_actor(read_descriptor_t *desc, struct page *page,
 success:
 	desc->count = count - size;
 	desc->written += size;
-	desc->arg.buf += size;
+	desc->buf += size;
 	return size;
 }
 
@@ -930,7 +926,7 @@ __generic_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 			read_descriptor_t desc;
 
 			desc.written = 0;
-			desc.arg.buf = iov[seg].iov_base;
+			desc.buf = iov[seg].iov_base;
 			desc.count = iov[seg].iov_len;
 			if (desc.count == 0)
 				continue;
@@ -980,7 +976,7 @@ int file_send_actor(read_descriptor_t * desc, struct page *page, unsigned long o
 {
 	ssize_t written;
 	unsigned long count = desc->count;
-	struct file *file = desc->arg.data;
+	struct file *file = (struct file *) desc->buf;
 
 	if (size > count)
 		size = count;
@@ -997,7 +993,7 @@ int file_send_actor(read_descriptor_t * desc, struct page *page, unsigned long o
 }
 
 ssize_t generic_file_sendfile(struct file *in_file, loff_t *ppos,
-			 size_t count, read_actor_t actor, void *target)
+			 size_t count, read_actor_t actor, void __user *target)
 {
 	read_descriptor_t desc;
 
@@ -1006,7 +1002,7 @@ ssize_t generic_file_sendfile(struct file *in_file, loff_t *ppos,
 
 	desc.written = 0;
 	desc.count = count;
-	desc.arg.data = target;
+	desc.buf = target;
 	desc.error = 0;
 
 	do_generic_file_read(in_file, ppos, &desc, actor, 0);
@@ -1162,11 +1158,12 @@ retry_find:
 		did_readaround = 1;
 		ra_pages = max_sane_readahead(file->f_ra.ra_pages);
 		if (ra_pages) {
-			pgoff_t start = 0;
+			long start;
 
-			if (pgoff > ra_pages / 2)
-				start = pgoff - ra_pages / 2;
-			do_page_cache_readahead(mapping, file, start, ra_pages);
+			start = pgoff - ra_pages / 2;
+			if (pgoff < 0)
+				pgoff = 0;
+			do_page_cache_readahead(mapping, file, pgoff, ra_pages);
 		}
 		page = find_get_page(mapping, pgoff);
 		if (!page)
@@ -1206,7 +1203,6 @@ no_cached_page:
 	 * effect.
 	 */
 	error = page_cache_read(file, pgoff);
-	grab_swap_token();
 
 	/*
 	 * The page we want has now been added to the page cache.
@@ -1429,9 +1425,15 @@ repeat:
 			return err;
 		}
 	} else {
-		err = install_file_pte(mm, vma, addr, pgoff, prot);
-		if (err)
-			return err;
+	    	/*
+		 * If a nonlinear mapping then store the file page offset
+		 * in the pte.
+		 */
+		if (pgoff != linear_page_index(vma, addr)) {
+	    		err = install_file_pte(mm, vma, addr, pgoff, prot);
+			if (err)
+		    		return err;
+		}
 	}
 
 	len -= PAGE_SIZE;
@@ -1642,7 +1644,7 @@ filemap_copy_from_user(struct page *page, unsigned long offset,
 	int left;
 
 	kaddr = kmap_atomic(page, KM_USER0);
-	left = __copy_from_user_inatomic(kaddr + offset, buf, bytes);
+	left = __copy_from_user(kaddr + offset, buf, bytes);
 	kunmap_atomic(kaddr, KM_USER0);
 
 	if (left != 0) {
@@ -1665,7 +1667,7 @@ __filemap_copy_from_user_iovec(char *vaddr,
 		int copy = min(bytes, iov->iov_len - base);
 
 		base = 0;
-		left = __copy_from_user_inatomic(vaddr, buf, copy);
+		left = __copy_from_user(vaddr, buf, copy);
 		copied += copy;
 		bytes -= copy;
 		vaddr += copy;
@@ -1887,7 +1889,7 @@ generic_file_aio_write_nolock(struct kiocb *iocb, const struct iovec *iov,
 	if (err)
 		goto out;
 
-	inode_update_time(inode, file->f_vfsmnt, 1);
+	inode_update_time(inode, 1);
 
 	/* coalesce the iovecs and go direct-to-BIO for O_DIRECT */
 	if (unlikely(file->f_flags & O_DIRECT)) {
@@ -2022,7 +2024,7 @@ out_status:
 	err = written ? written : status;
 out:
 	pagevec_lru_add(&lru_pvec);
-	current->backing_dev_info = NULL;
+	current->backing_dev_info = 0;
 	return err;
 }
 

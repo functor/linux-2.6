@@ -362,7 +362,7 @@ write_out_data:
 	 */
 	commit_transaction->t_state = T_COMMIT;
 
-	descriptor = NULL;
+	descriptor = 0;
 	bufs = 0;
 	while (commit_transaction->t_buffers) {
 
@@ -503,7 +503,7 @@ write_out_data:
 start_journal_io:
 			for (i = 0; i < bufs; i++) {
 				struct buffer_head *bh = wbuf[i];
-				lock_buffer(bh);
+				set_buffer_locked(bh);
 				clear_buffer_dirty(bh);
 				set_buffer_uptodate(bh);
 				bh->b_end_io = journal_end_buffer_io_sync;
@@ -545,7 +545,6 @@ wait_for_iobuf:
 			wait_on_buffer(bh);
 			goto wait_for_iobuf;
 		}
-		cond_resched();
 
 		if (unlikely(!buffer_uptodate(bh)))
 			err = -EIO;
@@ -600,7 +599,6 @@ wait_for_iobuf:
 			wait_on_buffer(bh);
 			goto wait_for_ctlbuf;
 		}
-		cond_resched();
 
 		if (unlikely(!buffer_uptodate(bh)))
 			err = -EIO;
@@ -766,7 +764,6 @@ skip_commit: /* The journal should be unlocked by now. */
 			release_buffer_page(bh);
 		}
 		spin_unlock(&journal->j_list_lock);
-		cond_resched();
 	}
 
 	/* Done with this transaction! */

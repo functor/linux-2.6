@@ -2,7 +2,6 @@
 #define _ASMPPC64_SIGNAL_H
 
 #include <linux/types.h>
-#include <linux/compiler.h>
 #include <asm/siginfo.h>
 
 /* Avoid too many header ordering problems.  */
@@ -115,12 +114,7 @@ typedef struct {
 #define SIG_SETMASK        2	/* for setting the signal mask */
 
 /* Type of a signal handler.  */
-typedef void __sigfunction(int);
-typedef __sigfunction __user * __sighandler_t;
-
-/* Type of the restorer function */
-typedef void __sigrestorer(void);
-typedef __sigrestorer __user * __sigrestorer_t;
+typedef void (*__sighandler_t)(int);
 
 #define SIG_DFL	((__sighandler_t)0)	/* default signal handling */
 #define SIG_IGN	((__sighandler_t)1)	/* ignore signal */
@@ -130,13 +124,13 @@ struct old_sigaction {
 	__sighandler_t sa_handler;
 	old_sigset_t sa_mask;
 	unsigned long sa_flags;
-	__sigrestorer_t sa_restorer;
+	void (*sa_restorer)(void);
 };
 
 struct sigaction {
 	__sighandler_t sa_handler;
 	unsigned long sa_flags;
-	__sigrestorer_t sa_restorer;
+	void (*sa_restorer)(void);
 	sigset_t sa_mask;		/* mask last for extensibility */
 };
 
@@ -145,7 +139,7 @@ struct k_sigaction {
 };
 
 typedef struct sigaltstack {
-	void __user *ss_sp;
+	void *ss_sp;
 	int ss_flags;
 	size_t ss_size;
 } stack_t;

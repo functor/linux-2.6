@@ -488,6 +488,33 @@ static __inline__ int inet_abc_len(u32 addr)
   	return rc;
 }
 
+/*
+	Check that a device is not member of the ipv4root assigned to the process
+	Return true if this is the case
+
+	If the process is not bound to specific IP, then it returns 0 (all
+	interface are fine).
+*/
+static inline int devinet_notiproot (struct in_ifaddr *ifa)
+{
+	int ret = 0;
+	struct nx_info *nxi;
+
+	if ((nxi = current->nx_info)) {
+		int i;
+		int nbip = nxi->nbipv4;
+		__u32 addr = ifa->ifa_local;
+		ret = 1;
+		for (i=0; i<nbip; i++) {
+			if(nxi->ipv4[i] == addr) {
+				ret = 0;
+				break;
+			}
+		}
+	}
+	return ret;
+}
+
 
 int devinet_ioctl(unsigned int cmd, void __user *arg)
 {
@@ -595,6 +622,8 @@ int devinet_ioctl(unsigned int cmd, void __user *arg)
 	ret = -EADDRNOTAVAIL;
 	if (!ifa && cmd != SIOCSIFADDR && cmd != SIOCSIFFLAGS)
 		goto done;
+	if (!ifa_in_nx_info(ifa, current->nx_info))
+		goto done;
 
 	switch(cmd) {
 	case SIOCGIFADDR:	/* Get interface address */
@@ -699,20 +728,6 @@ int devinet_ioctl(unsigned int cmd, void __user *arg)
 			inet_del_ifa(in_dev, ifap, 0);
 			ifa->ifa_mask = sin->sin_addr.s_addr;
 			ifa->ifa_prefixlen = inet_mask_len(ifa->ifa_mask);
-
-			/* See if current broadcast address matches
-			 * with current netmask, then recalculate
-			 * the broadcast address. Otherwise it's a
-			 * funny address, so don't touch it since
-			 * the user seems to know what (s)he's doing...
-			 */
-			if ((dev->flags & IFF_BROADCAST) &&
-			    (ifa->ifa_prefixlen < 31) &&
-			    (ifa->ifa_broadcast ==
-			     (ifa->ifa_local|~ifa->ifa_mask))) {
-				ifa->ifa_broadcast = (ifa->ifa_local |
-						      ~sin->sin_addr.s_addr);
-			}
 			inet_insert_ifa(ifa);
 		}
 		break;
@@ -738,6 +753,8 @@ static int inet_gifconf(struct net_device *dev, char __user *buf, int len)
 		goto out;
 
 	for (; ifa; ifa = ifa->ifa_next) {
+		if (!ifa_in_nx_info(ifa, current->nx_info))
+			continue;
 		if (!buf) {
 			done += sizeof(ifr);
 			continue;
@@ -1073,6 +1090,8 @@ static int inet_dump_ifaddr(struct sk_buff *skb, struct netlink_callback *cb)
 		read_lock(&in_dev->lock);
 		for (ifa = in_dev->ifa_list, ip_idx = 0; ifa;
 		     ifa = ifa->ifa_next, ip_idx++) {
+			if (!ifa_in_nx_info(ifa, current->nx_info))
+				continue;
 			if (ip_idx < s_ip_idx)
 				continue;
 			if (inet_fill_ifaddr(skb, ifa, NETLINK_CB(cb->skb).pid,
@@ -1151,11 +1170,11 @@ void inet_forward_change(void)
 
 static int devinet_sysctl_forward(ctl_table *ctl, int write,
 				  struct file* filp, void __user *buffer,
-				  size_t *lenp, loff_t *ppos)
+				  size_t *lenp)
 {
 	int *valp = ctl->data;
 	int val = *valp;
-	int ret = proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
+	int ret = proc_dointvec(ctl, write, filp, buffer, lenp);
 
 	if (write && *valp != val) {
 		if (valp == &ipv4_devconf.forwarding)
@@ -1169,11 +1188,11 @@ static int devinet_sysctl_forward(ctl_table *ctl, int write,
 
 int ipv4_doint_and_flush(ctl_table *ctl, int write,
 			 struct file* filp, void __user *buffer,
-			 size_t *lenp, loff_t *ppos)
+			 size_t *lenp)
 {
 	int *valp = ctl->data;
 	int val = *valp;
-	int ret = proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
+	int ret = proc_dointvec(ctl, write, filp, buffer, lenp);
 
 	if (write && *valp != val)
 		rt_cache_flush(0);

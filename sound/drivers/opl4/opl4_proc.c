@@ -50,42 +50,41 @@ static int snd_opl4_mem_proc_release(snd_info_entry_t *entry,
 }
 
 static long snd_opl4_mem_proc_read(snd_info_entry_t *entry, void *file_private_data,
-				   struct file *file, char __user *_buf,
-				   unsigned long count, unsigned long pos)
+				   struct file *file, char __user *_buf, long count)
 {
 	opl4_t *opl4 = snd_magic_cast(opl4_t, entry->private_data, return -ENXIO);
 	long size;
 	char* buf;
 
 	size = count;
-	if (pos + size > entry->size)
-		size = entry->size - pos;
+	if (file->f_pos + size > entry->size)
+		size = entry->size - file->f_pos;
 	if (size > 0) {
 		buf = vmalloc(size);
 		if (!buf)
 			return -ENOMEM;
-		snd_opl4_read_memory(opl4, buf, pos, size);
+		snd_opl4_read_memory(opl4, buf, file->f_pos, size);
 		if (copy_to_user(_buf, buf, size)) {
 			vfree(buf);
 			return -EFAULT;
 		}
 		vfree(buf);
+		file->f_pos += size;
 		return size;
 	}
 	return 0;
 }
 
 static long snd_opl4_mem_proc_write(snd_info_entry_t *entry, void *file_private_data,
-				    struct file *file, const char __user *_buf,
-				    unsigned long count, unsigned long pos)
+				    struct file *file, const char __user *_buf, long count)
 {
 	opl4_t *opl4 = snd_magic_cast(opl4_t, entry->private_data, return -ENXIO);
 	long size;
 	char *buf;
 
 	size = count;
-	if (pos + size > entry->size)
-		size = entry->size - pos;
+	if (file->f_pos + size > entry->size)
+		size = entry->size - file->f_pos;
 	if (size > 0) {
 		buf = vmalloc(size);
 		if (!buf)
@@ -94,8 +93,9 @@ static long snd_opl4_mem_proc_write(snd_info_entry_t *entry, void *file_private_
 			vfree(buf);
 			return -EFAULT;
 		}
-		snd_opl4_write_memory(opl4, buf, pos, size);
+		snd_opl4_write_memory(opl4, buf, file->f_pos, size);
 		vfree(buf);
+		file->f_pos += size;
 		return size;
 	}
 	return 0;

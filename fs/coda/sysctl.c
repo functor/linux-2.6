@@ -69,12 +69,12 @@ void reset_coda_cache_inv_stats( void )
 }
 
 int do_reset_coda_vfs_stats( ctl_table * table, int write, struct file * filp,
-			     void __user * buffer, size_t * lenp, loff_t * ppos )
+			     void __user * buffer, size_t * lenp )
 {
 	if ( write ) {
 		reset_coda_vfs_stats();
 
-		*ppos += *lenp;
+		filp->f_pos += *lenp;
 	} else {
 		*lenp = 0;
 	}
@@ -84,12 +84,12 @@ int do_reset_coda_vfs_stats( ctl_table * table, int write, struct file * filp,
 
 int do_reset_coda_cache_inv_stats( ctl_table * table, int write, 
 				   struct file * filp, void __user * buffer, 
-				   size_t * lenp, loff_t * ppos )
+				   size_t * lenp )
 {
 	if ( write ) {
 		reset_coda_cache_inv_stats();
 
-		*ppos += *lenp;
+		filp->f_pos += *lenp;
 	} else {
 		*lenp = 0;
 	}
@@ -240,7 +240,7 @@ void coda_sysctl_clean(void)
 #ifdef CONFIG_SYSCTL
 	if ( fs_table_header ) {
 		unregister_sysctl_table(fs_table_header);
-		fs_table_header = NULL;
+		fs_table_header = 0;
 	}
 #endif
 

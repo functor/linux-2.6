@@ -62,7 +62,7 @@ void __init shm_init (void)
 {
 	ipc_init_ids(&shm_ids, 1);
 #ifdef CONFIG_PROC_FS
-	create_proc_read_entry("sysvipc/shm", 0, NULL, sysvipc_shm_read_proc, NULL);
+	create_proc_read_entry("sysvipc/shm", 0, 0, sysvipc_shm_read_proc, NULL);
 #endif
 }
 
@@ -116,10 +116,7 @@ static void shm_destroy (struct shmid_kernel *shp)
 	shm_rmid (shp->id);
 	shm_unlock(shp);
 	if (!is_file_hugepages(shp->shm_file))
-		shmem_lock(shp->shm_file, 0, shp->mlock_user);
-	else
-		user_shm_unlock(shp->shm_file->f_dentry->d_inode->i_size,
-						shp->mlock_user);
+		shmem_lock(shp->shm_file, 0);
 	fput (shp->shm_file);
 	security_shm_free(shp);
 	ipc_rcu_free(shp, sizeof(struct shmid_kernel));
@@ -196,7 +193,6 @@ static int newseg (key_t key, int shmflg, size_t size)
 	shp->shm_perm.key = key;
 	shp->shm_perm.xid = current->xid;
 	shp->shm_flags = (shmflg & S_IRWXUGO);
-	shp->mlock_user = NULL;
 
 	shp->shm_perm.security = NULL;
 	error = security_shm_alloc(shp);
@@ -205,11 +201,9 @@ static int newseg (key_t key, int shmflg, size_t size)
 		return error;
 	}
 
-	if (shmflg & SHM_HUGETLB) {
-		/* hugetlb_zero_setup takes care of mlock user accounting */
+	if (shmflg & SHM_HUGETLB)
 		file = hugetlb_zero_setup(size);
-		shp->mlock_user = current->user;
-	} else {
+	else {
 		sprintf (name, "SYSV%08x", key);
 		file = shmem_file_setup(name, size, VM_ACCOUNT);
 	}
@@ -513,11 +507,14 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 	case SHM_LOCK:
 	case SHM_UNLOCK:
 	{
-		/* Allow superuser to lock segment in memory */
-		if (!can_do_mlock() && cmd == SHM_LOCK) {
+/* Allow superuser to lock segment in memory */
+/* Should the pages be faulted in here or leave it to user? */
+/* need to determine interaction with current->swappable */
+		if (!capable(CAP_IPC_LOCK)) {
 			err = -EPERM;
 			goto out;
 		}
+
 		shp = shm_lock(shmid);
 		if(shp==NULL) {
 			err = -EINVAL;
@@ -532,18 +529,13 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 			goto out_unlock;
 		
 		if(cmd==SHM_LOCK) {
-			struct user_struct * user = current->user;
-			if (!is_file_hugepages(shp->shm_file)) {
-				err = shmem_lock(shp->shm_file, 1, user);
-				if (!err) {
-					shp->shm_flags |= SHM_LOCKED;
-					shp->mlock_user = user;
-				}
-			}
-		} else if (!is_file_hugepages(shp->shm_file)) {
-			shmem_lock(shp->shm_file, 0, shp->mlock_user);
+			if (!is_file_hugepages(shp->shm_file))
+				shmem_lock(shp->shm_file, 1);
+			shp->shm_flags |= SHM_LOCKED;
+		} else {
+			if (!is_file_hugepages(shp->shm_file))
+				shmem_lock(shp->shm_file, 0);
 			shp->shm_flags &= ~SHM_LOCKED;
-			shp->mlock_user = NULL;
 		}
 		shm_unlock(shp);
 		goto out;

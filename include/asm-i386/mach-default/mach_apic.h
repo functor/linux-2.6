@@ -6,12 +6,12 @@
 
 #define APIC_DFR_VALUE	(APIC_DFR_FLAT)
 
-static inline cpumask_t target_cpus(void)
+static inline cpumask_const_t target_cpus(void)
 { 
 #ifdef CONFIG_SMP
-	return cpu_online_map;
+	return mk_cpumask_const(cpu_online_map);
 #else
-	return cpumask_of_cpu(0);
+	return mk_cpumask_const(cpumask_of_cpu(0));
 #endif
 } 
 #define TARGET_CPUS (target_cpus())
@@ -116,9 +116,9 @@ static inline int apic_id_registered(void)
 	return physid_isset(GET_APIC_ID(apic_read(APIC_ID)), phys_cpu_present_map);
 }
 
-static inline unsigned int cpu_mask_to_apicid(cpumask_t cpumask)
+static inline unsigned int cpu_mask_to_apicid(cpumask_const_t cpumask)
 {
-	return cpus_addr(cpumask)[0];
+	return cpus_coerce_const(cpumask);
 }
 
 static inline void enable_apic_mode(void)

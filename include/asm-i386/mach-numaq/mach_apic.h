@@ -8,7 +8,8 @@
 
 static inline cpumask_t target_cpus(void)
 {
-	return CPU_MASK_ALL;
+	cpumask_t tmp = CPU_MASK_ALL;
+	return tmp;
 }
 
 #define TARGET_CPUS (target_cpus())
@@ -134,7 +135,7 @@ static inline void enable_apic_mode(void)
  * We use physical apicids here, not logical, so just return the default
  * physical broadcast to stop people from breaking us
  */
-static inline unsigned int cpu_mask_to_apicid(cpumask_t cpumask)
+static inline unsigned int cpu_mask_to_apicid(cpumask_const_t cpumask)
 {
 	return (int) 0xF;
 }

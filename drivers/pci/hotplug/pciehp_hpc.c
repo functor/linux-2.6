@@ -237,8 +237,8 @@ struct php_ctlr_state_s {
 static spinlock_t hpc_event_lock;
 
 DEFINE_DBG_BUFFER		/* Debug string buffer for entire HPC defined here */
-static struct php_ctlr_state_s *php_ctlr_list_head;	/* HPC state linked list */
-static int ctlr_seq_num;	/* Controller sequence # */
+static struct php_ctlr_state_s *php_ctlr_list_head = 0;	/* HPC state linked list */
+static int ctlr_seq_num = 0;	/* Controller sequence # */
 static spinlock_t list_lock;
 
 static irqreturn_t pcie_isr(int IRQ, void *dev_id, struct pt_regs *regs);
@@ -349,9 +349,7 @@ static int hpc_check_lnk_status(struct controller *ctrl)
 		return retval;
 	}
 
-	dbg("%s: lnk_status = %x\n", __FUNCTION__, lnk_status);
-	if ( (lnk_status & LNK_TRN) || (lnk_status & LNK_TRN_ERR) || 
-		!(lnk_status & NEG_LINK_WD)) {
+	if ( (lnk_status & (LNK_TRN | LNK_TRN_ERR)) == 0x0C00) {
 		err("%s : Link Training Error occurs \n", __FUNCTION__);
 		retval = -1;
 		return retval;
@@ -744,7 +742,7 @@ static void hpc_release_ctlr(struct controller *ctrl)
 		}
 	}
 	if (php_ctlr->pci_dev) 
-		php_ctlr->pci_dev = NULL;
+		php_ctlr->pci_dev = 0;
 
 	spin_lock(&list_lock);
 	p = php_ctlr_list_head;
@@ -1467,7 +1465,7 @@ int pcie_init(struct controller * ctrl,
 	if (php_ctlr_list_head == 0) {
 		php_ctlr_list_head = php_ctlr;
 		p = php_ctlr_list_head;
-		p->pnext = NULL;
+		p->pnext = 0;
 	} else {
 		p = php_ctlr_list_head;
 

@@ -142,8 +142,12 @@ static void send_reset(struct sk_buff *oldskb, int hook)
 	nskb->dst = &rt->u.dst;
 
 	/* This packet will not be the same as the other: clear nf fields */
-	nf_reset(nskb);
+	nf_conntrack_put(nskb->nfct);
+	nskb->nfct = NULL;
 	nskb->nfcache = 0;
+#ifdef CONFIG_NETFILTER_DEBUG
+	nskb->nf_debug = 0;
+#endif
 	nskb->nfmark = 0;
 #ifdef CONFIG_BRIDGE_NETFILTER
 	nf_bridge_put(nskb->nf_bridge);

@@ -65,6 +65,7 @@ static int kthread(void *_create)
 	void *data;
 	sigset_t blocked;
 	int ret = -EINTR;
+	cpumask_t mask = CPU_MASK_ALL;
 
 	kthread_exit_files();
 
@@ -78,7 +79,7 @@ static int kthread(void *_create)
 	flush_signals(current);
 
 	/* By default we can run anywhere, unlike keventd. */
-	set_cpus_allowed(current, CPU_MASK_ALL);
+	set_cpus_allowed(current, mask);
 
 	/* OK, tell user we're spawned, wait for stop or wakeup */
 	__set_current_state(TASK_INTERRUPTIBLE);

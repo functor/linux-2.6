@@ -1,5 +1,5 @@
 /*
- * include/linux/idr.h
+ * include/linux/id.h
  * 
  * 2002-10-18  written by Jim Houston jim.houston@ccur.com
  *	Copyright (C) 2002 by Concurrent Computer Corporation
@@ -76,3 +76,5 @@ int idr_get_new(struct idr *idp, void *ptr, int *id);
 int idr_get_new_above(struct idr *idp, void *ptr, int starting_id, int *id);
 void idr_remove(struct idr *idp, int id);
 void idr_init(struct idr *idp);
+
+extern kmem_cache_t *idr_layer_cache;

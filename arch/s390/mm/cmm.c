@@ -19,7 +19,6 @@
 
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>
-#include <asm/smp.h>
 
 #include "../../../drivers/s390/net/smsgiucv.h"
 
@@ -256,13 +255,13 @@ static struct ctl_table cmm_table[];
 
 static int
 cmm_pages_handler(ctl_table *ctl, int write, struct file *filp,
-		  void *buffer, size_t *lenp, loff_t *ppos)
+		  void *buffer, size_t *lenp)
 {
 	char buf[16], *p;
 	long pages;
 	int len;
 
-	if (!*lenp || (*ppos && !write)) {
+	if (!*lenp || (filp->f_pos && !write)) {
 		*lenp = 0;
 		return 0;
 	}
@@ -291,19 +290,19 @@ cmm_pages_handler(ctl_table *ctl, int write, struct file *filp,
 			return -EFAULT;
 	}
 	*lenp = len;
-	*ppos += len;
+	filp->f_pos += len;
 	return 0;
 }
 
 static int
 cmm_timeout_handler(ctl_table *ctl, int write, struct file *filp,
-		    void *buffer, size_t *lenp, loff_t *ppos)
+		    void *buffer, size_t *lenp)
 {
 	char buf[64], *p;
 	long pages, seconds;
 	int len;
 
-	if (!*lenp || (*ppos && !write)) {
+	if (!*lenp || (filp->f_pos && !write)) {
 		*lenp = 0;
 		return 0;
 	}
@@ -328,7 +327,7 @@ cmm_timeout_handler(ctl_table *ctl, int write, struct file *filp,
 			return -EFAULT;
 	}
 	*lenp = len;
-	*ppos += len;
+	filp->f_pos += len;
 	return 0;
 }
 
@@ -408,14 +407,6 @@ struct ctl_table_header *cmm_sysctl_header;
 static int
 cmm_init (void)
 {
-	int rc;
-
-	/* Prevent logical cpu 0 from being set offline. */
-	rc = smp_get_cpu(cpumask_of_cpu(0));
-	if (rc) {
-		printk(KERN_ERR "CMM: unable to reserve cpu 0\n");
-		return rc;
-	}
 #ifdef CONFIG_CMM_PROC
 	cmm_sysctl_header = register_sysctl_table(cmm_dir_table, 1);
 #endif
@@ -439,8 +430,6 @@ cmm_exit(void)
 #ifdef CONFIG_CMM_IUCV
 	smsg_unregister_callback(SMSG_PREFIX, cmm_smsg_target);
 #endif
-	/* Allow logical cpu 0 to be set offline again. */
-	smp_put_cpu(0);
 }
 
 module_init(cmm_init);

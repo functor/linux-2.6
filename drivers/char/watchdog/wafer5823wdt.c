@@ -97,6 +97,10 @@ wafwdt_stop(void)
 
 static ssize_t wafwdt_write(struct file *file, const char __user *buf, size_t count, loff_t * ppos)
 {
+	/*  Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	/* See if we got the magic character 'V' and reload the timer */
 	if (count) {
 		if (!nowayout) {
@@ -193,7 +197,7 @@ static int wafwdt_open(struct inode *inode, struct file *file)
 	 *      Activate
 	 */
 	wafwdt_start();
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int

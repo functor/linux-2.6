@@ -155,9 +155,10 @@ int __init hpet_enable(void)
 		hd.hd_address = hpet_virt_address;
 		hd.hd_nirqs = ntimer;
 		hd.hd_flags = HPET_DATA_PLATFORM;
-		hpet_reserve_timer(&hd, 0);
-#ifdef	CONFIG_HPET_EMULATE_RTC
-		hpet_reserve_timer(&hd, 1);
+#ifndef	CONFIG_HPET_EMULATE_RTC
+		hd.hd_state = 0x1;
+#else
+		hd.hd_state = 0x3;
 #endif
 		hd.hd_irq[0] = HPET_LEGACY_8254;
 		hd.hd_irq[1] = HPET_LEGACY_RTC;

@@ -436,7 +436,7 @@ prism54_get_range(struct net_device *ndev, struct iw_request_info *info,
 {
 	struct iw_range *range = (struct iw_range *) extra;
 	islpci_private *priv = netdev_priv(ndev);
-	u8 *data;
+	char *data;
 	int i, m, rvalue;
 	struct obj_frequencies *freq;
 	union oid_res_t r;
@@ -513,7 +513,8 @@ prism54_get_range(struct net_device *ndev, struct iw_request_info *info,
 	i = 0;
 	while ((i < IW_MAX_BITRATES) && (*data != 0)) {
 		/*       the result must be in bps. The card gives us 500Kbps */
-		range->bitrate[i] = *data * 500000;
+		range->bitrate[i] = (__s32) (*data >> 1);
+		range->bitrate[i] *= 1000000;
 		i++;
 		data++;
 	}
@@ -576,7 +577,7 @@ prism54_set_scan(struct net_device *dev, struct iw_request_info *info,
  * the "Aironet driver for 4500 and 4800 series cards" (GPL)
  */
 
-static char *
+inline char *
 prism54_translate_bss(struct net_device *ndev, char *current_ev,
 		      char *end_buf, struct obj_bss *bss, char noise)
 {
@@ -819,11 +820,9 @@ prism54_set_rate(struct net_device *ndev,
 		return mgt_set_request(priv, DOT11_OID_PROFILES, 0, &profile);
 	}
 
-	ret = mgt_get_request(priv, DOT11_OID_SUPPORTEDRATES, 0, NULL, &r);
-	if (ret) {
-		kfree(r.ptr);
+	if ((ret =
+	     mgt_get_request(priv, DOT11_OID_SUPPORTEDRATES, 0, NULL, &r)))
 		return ret;
-	}
 
 	rate = (u32) (vwrq->value / 500000);
 	data = r.ptr;
@@ -841,7 +840,6 @@ prism54_set_rate(struct net_device *ndev,
 	}
 
 	if (!data[i]) {
-		kfree(r.ptr);
 		return -EINVAL;
 	}
 
@@ -890,11 +888,8 @@ prism54_get_rate(struct net_device *ndev,
 	vwrq->value = r.u * 500000;
 
 	/* request the device for the enabled rates */
-	rvalue = mgt_get_request(priv, DOT11_OID_RATES, 0, NULL, &r);
-	if (rvalue) {
-		kfree(r.ptr);
+	if ((rvalue = mgt_get_request(priv, DOT11_OID_RATES, 0, NULL, &r)))
 		return rvalue;
-	}
 	data = r.ptr;
 	vwrq->fixed = (data[0] != 0) && (data[1] == 0);
 	kfree(r.ptr);
@@ -1507,7 +1502,7 @@ prism54_kick_mac(struct net_device *ndev, struct iw_request_info *info,
 
 /* Translate a TRAP oid into a wireless event. Called in islpci_mgt_receive. */
 
-static void
+static inline void
 format_event(islpci_private *priv, char *dest, const char *str,
 	     const struct obj_mlme *mlme, u16 *length, int error)
 {
@@ -1947,7 +1942,7 @@ prism54_debug_get_oid(struct net_device *ndev, struct iw_request_info *info,
 {
 	islpci_private *priv = netdev_priv(ndev);
 	struct islpci_mgmtframe *response = NULL;
-	int ret = -EIO;
+	int ret = -EIO, response_op = PIMFOR_OP_ERROR;
 
 	printk("%s: get_oid 0x%08X\n", ndev->name, priv->priv_oid);
 	data->length = 0;
@@ -1957,7 +1952,9 @@ prism54_debug_get_oid(struct net_device *ndev, struct iw_request_info *info,
 		    islpci_mgt_transaction(priv->ndev, PIMFOR_OP_GET,
 					   priv->priv_oid, extra, 256,
 					   &response);
+		response_op = response->header->operation;
 		printk("%s: ret: %i\n", ndev->name, ret);
+		printk("%s: response_op: %i\n", ndev->name, response_op);
 		if (ret || !response
 		    || response->header->operation == PIMFOR_OP_ERROR) {
 			if (response) {
@@ -1994,19 +1991,15 @@ prism54_debug_set_oid(struct net_device *ndev, struct iw_request_info *info,
 					   priv->priv_oid, extra, data->length,
 					   &response);
 		printk("%s: ret: %i\n", ndev->name, ret);
-		if (ret || !response
-		    || response->header->operation == PIMFOR_OP_ERROR) {
-			if (response) {
-				islpci_mgt_release(response);
-			}
-			printk("%s: EIO\n", ndev->name);
-			ret = -EIO;
-		}
 		if (!ret) {
 			response_op = response->header->operation;
 			printk("%s: response_op: %i\n", ndev->name,
 			       response_op);
 			islpci_mgt_release(response);
+		}
+		if (ret || response_op == PIMFOR_OP_ERROR) {
+			printk("%s: EIO\n", ndev->name);
+			ret = -EIO;
 		}
 	}
 

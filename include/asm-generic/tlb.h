@@ -15,9 +15,9 @@
 
 #include <linux/config.h>
 #include <linux/swap.h>
-#include <linux/vs_memory.h>
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
+#include <linux/vs_memory.h>
 
 /*
  * For UP we don't need to worry about TLB flush
@@ -148,7 +148,5 @@ static inline void tlb_remove_page(struct mmu_gather *tlb, struct page *page)
 		tlb->need_flush = 1;				\
 		__pmd_free_tlb(tlb, pmdp);			\
 	} while (0)
-
-#define tlb_migrate_finish(mm) do {} while (0)
 
 #endif /* _ASM_GENERIC__TLB_H */

@@ -369,7 +369,7 @@ static void input_call_hotplug(char *verb, struct input_dev *dev)
 
 	argv[0] = hotplug_path;
 	argv[1] = "input";
-	argv[2] = NULL;
+	argv[2] = 0;
 
 	envp[i++] = "HOME=/";
 	envp[i++] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
@@ -402,7 +402,7 @@ static void input_call_hotplug(char *verb, struct input_dev *dev)
 	SPRINTF_BIT_A2(sndbit, "SND=", SND_MAX, EV_SND);
 	SPRINTF_BIT_A2(ffbit,  "FF=",  FF_MAX, EV_FF);
 
-	envp[i++] = NULL;
+	envp[i++] = 0;
 
 #ifdef INPUT_DEBUG
 	printk(KERN_DEBUG "input.c: calling %s %s [%s %s %s %s %s]\n",

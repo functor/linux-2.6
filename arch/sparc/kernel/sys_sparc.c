@@ -21,7 +21,6 @@
 #include <linux/utsname.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
-#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/ipc.h>
@@ -333,7 +332,7 @@ asmlinkage unsigned long sparc_mremap(unsigned long addr,
 
 		new_addr = get_unmapped_area(file, addr, new_len,
 				     vma ? vma->vm_pgoff : 0,
-				     map_flags);
+				     map_flags, vma->vm_flags & VM_EXEC);
 		ret = new_addr;
 		if (new_addr & ~PAGE_MASK)
 			goto out_sem;
@@ -376,7 +375,7 @@ sparc_breakpoint (struct pt_regs *regs)
 	info.si_signo = SIGTRAP;
 	info.si_errno = 0;
 	info.si_code = TRAP_BRKPT;
-	info.si_addr = (void __user *)regs->pc;
+	info.si_addr = (void *)regs->pc;
 	info.si_trapno = 0;
 	force_sig_info(SIGTRAP, &info, current);
 

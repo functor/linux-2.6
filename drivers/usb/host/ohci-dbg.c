@@ -266,11 +266,11 @@ static void ohci_dump (struct ohci_hcd *controller, int verbose)
 	ohci_dbg (controller, "OHCI controller state\n");
 
 	// dumps some of the state we know about
-	ohci_dump_status (controller, NULL, NULL);
+	ohci_dump_status (controller, NULL, 0);
 	if (controller->hcca)
 		ohci_dbg (controller,
 			"hcca frame #%04x\n", OHCI_FRAME_NO(controller->hcca));
-	ohci_dump_roothub (controller, 1, NULL, NULL);
+	ohci_dump_roothub (controller, 1, NULL, 0);
 }
 
 static const char data0 [] = "DATA0";
@@ -574,7 +574,7 @@ show_periodic (struct class_device *class_dev, char *buf)
 			} else {
 				/* we've seen it and what's after */
 				temp = 0;
-				ed = NULL;
+				ed = 0;
 			}
 
 		} while (ed);

@@ -426,6 +426,8 @@ salinfo_log_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 	struct inode *inode = file->f_dentry->d_inode;
 	struct proc_dir_entry *entry = PDE(inode);
 	struct salinfo_data *data = entry->data;
+	void *saldata;
+	size_t size;
 	u8 *buf;
 	u64 bufsize;
 
@@ -439,7 +441,18 @@ salinfo_log_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 		buf = NULL;
 		bufsize = 0;
 	}
-	return simple_read_from_buffer(buffer, count, ppos, buf, bufsize);
+	if (*ppos >= bufsize)
+		return 0;
+
+	saldata = buf + file->f_pos;
+	size = bufsize - file->f_pos;
+	if (size > count)
+		size = count;
+	if (copy_to_user(buffer, saldata, size))
+		return -EFAULT;
+
+	*ppos += size;
+	return size;
 }
 
 static void

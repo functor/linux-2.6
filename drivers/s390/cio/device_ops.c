@@ -1,7 +1,7 @@
 /*
  *  drivers/s390/cio/device_ops.c
  *
- *   $Revision: 1.50 $
+ *   $Revision: 1.34 $
  *
  *    Copyright (C) 2002 IBM Deutschland Entwicklung GmbH,
  *			 IBM Corporation
@@ -15,7 +15,6 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/device.h>
-#include <linux/delay.h>
 
 #include <asm/ccwdev.h>
 #include <asm/idals.h>
@@ -269,7 +268,7 @@ __ccw_device_retry_loop(struct ccw_device *cdev, struct ccw1 *ccw, long magic)
 		if ((ret == -EBUSY) || (ret == -EACCES)) {
 			/* Try again later. */
 			spin_unlock_irq(&sch->lock);
-			msleep(10);
+			schedule_timeout(1);
 			spin_lock_irq(&sch->lock);
 			continue;
 		}
@@ -295,7 +294,7 @@ __ccw_device_retry_loop(struct ccw_device *cdev, struct ccw1 *ccw, long magic)
 			break;
 		/* Try again later. */
 		spin_unlock_irq(&sch->lock);
-		msleep(10);
+		schedule_timeout(1);
 		spin_lock_irq(&sch->lock);
 	} while (1);
 

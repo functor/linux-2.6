@@ -792,7 +792,7 @@ static int __init relocate_pagedir(void)
 	}
 
 	err = -ENOMEM;
-	while ((m = (void *) __get_free_pages(GFP_ATOMIC, pagedir_order)) != NULL) {
+	while ((m = (void *) __get_free_pages(GFP_ATOMIC, pagedir_order))) {
 		if (!does_collide_order(old_pagedir, (unsigned long)m,
 					pagedir_order)) {
 			pm_pagedir_nosave =
@@ -953,7 +953,7 @@ static const char * __init sanity_check(void)
 		return "machine";
 	if(pmdisk_info.cpus != num_online_cpus())
 		return "number of cpus";
-	return NULL;
+	return 0;
 }
 
 
