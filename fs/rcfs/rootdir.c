@@ -91,7 +91,7 @@ int rcfs_mkroot(struct rcfs_magf *mfdesc, int mfcount, struct dentry **rootde)
 		return -EINVAL;
 
 	rootdesc = &mfdesc[0];
-	printk(KERN_DEBUG "allocating classtype root <%s>\n", rootdesc->name);
+	printk("allocating classtype root <%s>\n", rootdesc->name);
 	dentry = rcfs_create_internal(rcfs_rootde, rootdesc, 0);
 
 	if (!dentry) {
