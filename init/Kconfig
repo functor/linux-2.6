@@ -353,6 +353,22 @@ config IKCONFIG_PROC
 	  This option enables access to the kernel configuration file
 	  through /proc/config.gz.
 
+config OOM_PANIC
+	bool "OOM Panic"
+	default y
+	---help---
+	  This option enables panic() to be called when a system is out of
+	  memory. This feature along with /proc/sys/kernel/panic allows a
+	  different behavior on out-of-memory conditions when the standard
+	  behavior (killing processes in an attempt to recover) does not
+	  make sense.
+
+	  If unsure, say N.
+
+config OOM_KILL
+	bool
+	depends on !OOM_PANIC
+	default y
 
 menuconfig EMBEDDED
 	bool "Configure standard kernel features (for small systems)"
