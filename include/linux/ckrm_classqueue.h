@@ -19,7 +19,17 @@
  * Aug 28, 2003
  *        Created.
  * July 07, 2004
- *   clean up, add comments     
+ *   clean up, add comments
+ *
+ *
+ * Overview:
+ * ---------
+ *
+ * Please read Documentation/ckrm/cpu_sched for a general overview of
+ * how the O(1) CKRM scheduler.
+ *
+ * ckrm_classqueue.h provides the definition to maintain the 
+ * per cpu class runqueue.
  *   
  */
 
@@ -28,14 +38,13 @@
 
 #include <linux/list.h>
 
-#define CLASSQUEUE_SIZE 1024   // acb: changed from 128
-//#define CLASSQUEUE_SIZE 128
+#warning mef: is classqueue_size big enough for PlanetLab
+#define CLASSQUEUE_SIZE_SHIFT 	7
+#define CLASSQUEUE_SIZE ( 1 << CLASSQUEUE_SIZE_SHIFT )
 #define CQ_BITMAP_SIZE ((((CLASSQUEUE_SIZE+1+7)/8)+sizeof(long)-1)/sizeof(long))
 
 /**
  * struct cq_prio_array: duplicates prio_array defined in sched.c 
- *
- * I duplicate this data structure to make ckrm_classqueue implementation more modular
  */
 struct cq_prio_array {
 	int nr_active;
@@ -49,42 +58,50 @@ struct cq_prio_array {
  * @base: base priority
  * @base_offset: index in array for the base
  *
- * classqueue can be thought of as runqueue of classes (instead of runqueue of tasks)
- * as task runqueue, each processor has a classqueue
- * a class enters the classqueue when the first task in this class local runqueue shows up
- * a class enters the classqueue when the last task in the local runqueue leaves
- * class local runqueues are ordered based their priority
- *
- * status:
- *   hzheng: is 32bit base long enough?
+ * classqueue can be thought of as runqueue of lrq's (per cpu object of
+ * a CKRM class as task runqueue (instead of runqueue of tasks)
+ * - a class's local lrq is enqueued into the local classqueue when a
+ *   first task is enqueued lrq.
+ * - a class's local lrq is removed from the local classqueue when the 
+ *   last task is dequeued from the lrq.
+ * - lrq's are ordered based on their priority (determined elsewhere)
+ *   ( CKRM: caculated based on it's progress (cvt) and urgency (top_priority)
  */
+
 struct classqueue_struct {
-	struct cq_prio_array array;
+	int enabled;                   // support dynamic on/off
 	unsigned long base;
 	unsigned long base_offset;
+	struct cq_prio_array array;
 };
 
 /** 
- * struct cq_node_struct - the link object between class local runqueue and classqueue
+ * struct cq_node_struct:
+ * - the link object between class local runqueue and classqueue
  * @list: links the class local runqueue to classqueue
- * @prio: class priority, which is caculated based on it's progress (cvt) and urgency (top_priority)
+ * @prio: class priority
  * @index: real index into the classqueue array, calculated based on priority
- *
- * NOTE: make sure list is empty when it's not in classqueue
  */
 struct cq_node_struct {
 	struct list_head list;
 	int prio;
 	int index;
+	/*
+	 * set when the class jump out of the class queue window
+	 * class with this value set should be repositioned whenever classqueue slides window
+	 * real_prio is valid when need_repos is set
+	 */
+	int real_prio;
+	int need_repos; 
 };
 typedef struct cq_node_struct cq_node_t;
-
-typedef unsigned long long CVT_t;	// cummulative virtual time
 
 static inline void cq_node_init(cq_node_t * node)
 {
 	node->prio = 0;
 	node->index = -1;
+	node->real_prio = 0;
+	node->need_repos = 0;
 	INIT_LIST_HEAD(&node->list);
 }
 
@@ -95,23 +112,18 @@ static inline int cls_in_classqueue(cq_node_t * node)
 }
 
 /*initialize the data structure*/
-int classqueue_init(struct classqueue_struct *cq);
+int classqueue_init(struct classqueue_struct *cq, int enabled);
 
-/*add the class to classqueue*/
-void classqueue_enqueue(struct classqueue_struct *cq, cq_node_t * node, int prio);
+/*add the class to classqueue at given priority */
+void classqueue_enqueue(struct classqueue_struct *cq, 
+			cq_node_t * node, int prio);
 
-/**
- * classqueue_dequeue - remove the class from classqueue
- * 
- * internal:
- *   called when the last task is removed from the queue
- *   checked on load balancing and schedule
- *   hzheng: why don't I call it on class_dequeue_task?
- */
+/*remove the class from classqueue */
 void classqueue_dequeue(struct classqueue_struct *cq, cq_node_t * node);
 
 /*change the position of the class in classqueue*/
-void classqueue_update_prio(struct classqueue_struct *cq, cq_node_t * node, int new_prio);
+void classqueue_update_prio(struct classqueue_struct *cq, 
+			    cq_node_t * node, int new_prio);
 
 /*return the first class in classqueue*/
 cq_node_t *classqueue_get_head(struct classqueue_struct *cq);
@@ -122,7 +134,8 @@ void classqueue_update_base(struct classqueue_struct *cq);
 /**
  * class_compare_prio: compare the priority of this two nodes
  */
-static inline int class_compare_prio(struct cq_node_struct* node1, struct cq_node_struct* node2)
+static inline int class_compare_prio(struct cq_node_struct* node1, 
+				     struct cq_node_struct* node2)
 {
 	return ( node1->prio - node2->prio);
 }

@@ -90,7 +90,7 @@ typedef struct rbce_eng_callback {
 extern int ckrm_register_engine(const char *name, ckrm_eng_callback_t *);
 extern int ckrm_unregister_engine(const char *name);
 
-extern void *ckrm_classobj(char *, int *classtype);
+extern void *ckrm_classobj(const char *, int *classtype);
 extern int get_exe_path_name(struct task_struct *t, char *filename,
 			     int max_size);
 

@@ -113,7 +113,6 @@ typedef struct ckrm_res_ctlr {
 #define CKRM_MAX_TYPENAME_LEN       32
 
 typedef struct ckrm_classtype {
-	/* Hubertus:   Rearrange slots later for cache friendliness */
 
 	/* resource controllers */
 	spinlock_t res_ctlrs_lock;  // protect res ctlr related data
@@ -238,27 +237,6 @@ extern int ckrm_init_core_class(struct ckrm_classtype *clstype,
 				struct ckrm_core_class *parent,
 				const char *name);
 extern int ckrm_release_core_class(struct ckrm_core_class *);	
-// Hubertus .. can disappear after cls del debugging
-extern struct ckrm_res_ctlr *ckrm_resctlr_lookup(struct ckrm_classtype *type,
-						 const char *resname);
-
-#if 0
-
-// Hubertus ... need to straighten out all these I don't think we will even 
-// call this or are we 
-
-/* interface to the RCFS filesystem */
-extern struct ckrm_core_class *ckrm_alloc_core_class(struct ckrm_core_class *,
-						     const char *, int);
-
-// Reclassify the given pid to the given core class by force
-extern void ckrm_forced_reclassify_pid(int, struct ckrm_core_class *);
-
-// Reclassify the given net_struct  to the given core class by force
-extern void ckrm_forced_reclassify_laq(struct ckrm_net_struct *,
-				       struct ckrm_core_class *);
-
-#endif
 
 extern void ckrm_lock_hier(struct ckrm_core_class *);
 extern void ckrm_unlock_hier(struct ckrm_core_class *);
@@ -289,12 +267,6 @@ extern int ckrm_class_set_shares(struct ckrm_core_class *core,
 				 struct ckrm_shares *shares);
 extern int ckrm_class_reset_stats(struct ckrm_core_class *core,
 				  const char *resname, const char *unused);
-
-#if 0
-extern void ckrm_ns_hold(struct ckrm_net_struct *);
-extern void ckrm_ns_put(struct ckrm_net_struct *);
-extern void *ckrm_set_rootcore_byname(char *, void *);
-#endif
 
 static inline void ckrm_core_grab(struct ckrm_core_class *core)
 {
@@ -329,7 +301,6 @@ static inline unsigned int ckrm_is_core_valid(ckrm_core_class_t * core)
            )
 
 extern struct ckrm_classtype *ckrm_classtypes[];	
-/* should provide a different interface */
 
 /*-----------------------------------------------------------------------------
  * CKRM event callback specification for the classtypes or resource controllers 

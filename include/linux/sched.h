@@ -607,7 +607,6 @@ struct task_struct {
 	spinlock_t  ckrm_tsklock; 
 	void       *ce_data;
 #ifdef CONFIG_CKRM_TYPE_TASKCLASS
-	// .. Hubertus should change to CONFIG_CKRM_TYPE_TASKCLASS 
 	struct ckrm_task_class *taskclass;
 	struct list_head        taskclass_link;
 #ifdef CONFIG_CKRM_CPU_SCHEDULE

@@ -380,3 +380,6 @@ asmlinkage int decompress_kernel(struct moveparams *mv, void *rmode)
 	if (high_loaded) close_output_buffer_if_we_run_high(mv);
 	return high_loaded;
 }
+
+/* We don't actually check for stack overflows this early. */
+__asm__(".globl mcount ; mcount: ret\n");
