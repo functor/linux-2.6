@@ -37,18 +37,12 @@ static inline void check_inactive_class(ckrm_lrq_t * lrq,CVT_t cur_cvt)
 	if (unlikely(! cur_cvt))
 		return; 
 
-#ifndef INTERACTIVE_BONUS_SUPPORT
-#warning "ACB taking out interactive bonus calculation"	
-	bonus = 0;
-#else
 	/*
 	 * Always leaving a small bonus for inactive classes 
 	 * allows them to compete for cycles immediately when the become
 	 * active. This should improve interactive behavior
 	 */
 	bonus = INTERACTIVE_BONUS(lrq);
-#endif
-
 	//cvt can't be negative
 	if (cur_cvt > bonus)
 		min_cvt = cur_cvt - bonus;
@@ -83,11 +77,7 @@ static inline void check_inactive_class(ckrm_lrq_t * lrq,CVT_t cur_cvt)
 		lrq->savings -= savings_used;
 		unscale_cvt(savings_used,lrq);
 		BUG_ON(lrq->local_cvt < savings_used);
-#ifndef CVT_SAVINGS_SUPPORT
-#warning "ACB taking out cvt saving"
-#else
 		lrq->local_cvt -= savings_used;
-#endif
 	}		
 }
 

@@ -477,7 +477,7 @@ int __init init_ckrm_laq_res(void)
 		resid = ckrm_register_res_ctlr(clstype, &laq_rcbs);
 		if (resid >= 0)
 			my_resid = resid;
-		printk(KERN_DEBUG "........init_ckrm_listen_aq_res -> %d\n", my_resid);
+		printk("........init_ckrm_listen_aq_res -> %d\n", my_resid);
 	}
 	return 0;
 
