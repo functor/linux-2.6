@@ -93,7 +93,7 @@ void ckrm_cpu_stat_init(struct ckrm_cpu_class_stat *stat)
 	stat->total_ns = 0;
 	stat->max_demand = 0;
 
-	for (i=0; i< NR_CPUS; i++) {
+	for (i=0; i<NR_CPUS; i++) {
 		cpu_demand_stat_init(&stat->local_stats[i],CPU_DEMAND_TP_CLASS);
 	}
 
@@ -831,7 +831,7 @@ static void adjust_lrq_weight(struct ckrm_cpu_class *clsptr, int cpu_online)
 	int i;
 	unsigned long class_weight;
 	unsigned long long lw;	
-
+	
 	//get total pressure
 	for_each_online_cpu(i) {
 		lrq = get_ckrm_lrq(clsptr,i);
@@ -858,8 +858,8 @@ static void adjust_lrq_weight(struct ckrm_cpu_class *clsptr, int cpu_online)
 				lw = 1;
 			else if (lw > CKRM_SHARE_MAX)
 				lw = CKRM_SHARE_MAX;
-		}
-		
+		}	
+
 		lrq->local_weight = lw;
 	}
 }
@@ -867,6 +867,7 @@ static void adjust_lrq_weight(struct ckrm_cpu_class *clsptr, int cpu_online)
 /*
  * assume called with class_list_lock read lock held
  */
+
 void adjust_local_weight(void)
 {
 	static spinlock_t lock = SPIN_LOCK_UNLOCKED; 

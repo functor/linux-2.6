@@ -1,0 +1,86 @@
+CKRM CPU Scheduling 
+===================
+
+Overview
+--------
+
+In CKRM, cpu scheduling is based on a two level scheduling decision.
+Every time a new task is to be selected, the scheduler first determines
+which class to run next and then schedules the next task in selected
+task.
+
+The scheduling within a class is performed using the default Linux
+O(1) scheduler.
+
+The class scheduler also follows the O(1) principle and works as
+follows: 
+
+Each class maintains a local runqueue per cpu aka <struct
+ckrm_runqueue> or short lrq. The existing O(1) scheduler is used to
+schedule within an <lrq>.
+
+Weights are assigned to each lrq that mirror the effectives shares of
+that class. Every time a task executes, its weighted cycles are
+charged against its class. Thus classes progress in time called
+cummulative virtual time (CVT). In essence the class with the smallest
+CVT is selected next. Provisions are made to keep interactivity and
+avoid starvation by longer sleeping classes.
+
+Load balancing across an SMP is performed by balancing the load of
+each class across CPUs such that they produce equal load and thus 
+on the whole system maintain their share.
+
+Due to the fact that CKRM uses a class hierarchy, cycles that are unused
+by a class are redistributed to among busy siblings.
+Enabling the CKRM CPU scheduler
+-------------------------------
+
+The scheduler is integrated into the linux scheduler and therefore
+can not be loaded dynamically like other CKRM schedulers
+
+However it can be selected at boot time or dynamically at run time.
+
+The boot options "ckrmcpu" OR "nockrmcpu" enable / disable the CKRM
+cpu scheduler at boot time. Currently by default the scheduler is
+disabled.
+
+# cat /rcfs/taskclass/config 
+
+"res=cpu,mode=enabled" indicates that the CKRM cpu scheduler is
+enabled
+
+"res=cpu,mode=disabled" indicates that the CKRM cpu scheduler is
+disabled
+
+The strings can also be used to dynamically change the scheduling modus
+at runtime. For example, to dynamically activate the scheduler.
+
+# echo "res=cpu,mode=enabled" > /rcfs/taskclass/config
+
+# cat /rcfs/taskclass/*/stats
+
+The cpu portion of the scheduler is shown
+
+    "cpu-usage(2,10,60)= 290 340 510"
+
+The 3 numbers represent the load for the 2 second, 10 second 
+and 60 seconds. The base = 1000.
+Hence the system has 29.0%, 33.5% and 49.8% respectively
+
+For debugging purposes additional information can be printed out but
+that format should not be relied upon. 
+
+Use `echo "res=cpu,usage_detail=3" for the highest detail on usage.
+Please consult the source code for the specifics.
+
+Assigning shares
+----------------
+
+Follows the general approach described under ckrm_basics.
+
+# echo "res=cpu,guarantee=val" > shares   
+
+sets the minimum guarantee of a class.
+
+
+

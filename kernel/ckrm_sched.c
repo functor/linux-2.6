@@ -54,15 +54,15 @@ static inline void check_inactive_class(ckrm_lrq_t * lrq,CVT_t cur_cvt)
 		min_cvt = cur_cvt - bonus;
 	else
 		min_cvt = 0;
-	
-	if (lrq->local_cvt < min_cvt) {
+
+	if (lrq->local_cvt < min_cvt) {	
 		CVT_t lost_cvt;
 
 		lost_cvt = scale_cvt(min_cvt - lrq->local_cvt,lrq);
 		lrq->local_cvt = min_cvt;
 
 		/* add what the class lost to its savings*/
-		lrq->savings += lost_cvt;
+		lrq->savings += lost_cvt;	       
 		if (lrq->savings > MAX_SAVINGS)
 			lrq->savings = MAX_SAVINGS; 
 	} else if (lrq->savings) {
@@ -88,7 +88,7 @@ static inline void check_inactive_class(ckrm_lrq_t * lrq,CVT_t cur_cvt)
 #else
 		lrq->local_cvt -= savings_used;
 #endif
-	}		
+	}
 }
 
 /*
@@ -186,6 +186,7 @@ void update_class_cputime(int this_cpu)
 /**
  * sample pid load periodically
  */
+
 void ckrm_load_sample(ckrm_load_t* pid,int cpu)
 {
 	long load;
