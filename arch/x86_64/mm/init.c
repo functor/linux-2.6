@@ -374,7 +374,7 @@ void __init clear_kernel_mapping(unsigned long address, unsigned long size)
 	__flush_tlb_all();
 } 
 
-static inline int page_is_ram (unsigned long pagenr)
+int page_is_ram (unsigned long pagenr)
 {
 	int i;
 
@@ -512,9 +512,7 @@ void __init reserve_bootmem_generic(unsigned long phys, unsigned len)
 	/* Should check here against the e820 map to avoid double free */ 
 #ifdef CONFIG_DISCONTIGMEM
 	int nid = phys_to_nid(phys);
-	if (phys < HIGH_MEMORY && nid) 
-		panic("reserve of %lx at node %d", phys, nid);
-	reserve_bootmem_node(NODE_DATA(nid), phys, len);
+  	reserve_bootmem_node(NODE_DATA(nid), phys, len);
 #else       		
 	reserve_bootmem(phys, len);    
 #endif

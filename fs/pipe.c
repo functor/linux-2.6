@@ -688,6 +688,8 @@ no_files:
 	return error;	
 }
 
+EXPORT_SYMBOL_GPL(do_pipe);
+
 /*
  * pipefs should _never_ be mounted by userland - too much of security hassle,
  * no real gain from having the whole whorehouse mounted. So we don't need

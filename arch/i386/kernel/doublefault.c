@@ -8,12 +8,13 @@
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/desc.h>
+#include <asm/fixmap.h>
 
 #define DOUBLEFAULT_STACKSIZE (1024)
 static unsigned long doublefault_stack[DOUBLEFAULT_STACKSIZE];
 #define STACK_START (unsigned long)(doublefault_stack+DOUBLEFAULT_STACKSIZE)
 
-#define ptr_ok(x) ((x) > 0xc0000000 && (x) < 0xc1000000)
+#define ptr_ok(x) (((x) > __PAGE_OFFSET && (x) < (__PAGE_OFFSET + 0x01000000)) || ((x) >= FIXADDR_START))
 
 static void doublefault_fn(void)
 {
@@ -39,8 +40,8 @@ static void doublefault_fn(void)
 
 			printk("eax = %08lx, ebx = %08lx, ecx = %08lx, edx = %08lx\n",
 				t->eax, t->ebx, t->ecx, t->edx);
-			printk("esi = %08lx, edi = %08lx\n",
-				t->esi, t->edi);
+			printk("esi = %08lx, edi = %08lx, ebp = %08lx\n",
+				t->esi, t->edi, t->ebp);
 		}
 	}
 

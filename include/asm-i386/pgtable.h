@@ -16,32 +16,30 @@
 #include <asm/processor.h>
 #include <asm/fixmap.h>
 #include <linux/threads.h>
+#include <linux/slab.h>
 
 #ifndef _I386_BITOPS_H
 #include <asm/bitops.h>
 #endif
 
-#include <linux/slab.h>
-#include <linux/list.h>
-#include <linux/spinlock.h>
+extern pgd_t swapper_pg_dir[1024];
+extern kmem_cache_t *pgd_cache, *pmd_cache, *kpmd_cache;
+extern spinlock_t pgd_lock;
+extern struct page *pgd_list;
+void pmd_ctor(void *, kmem_cache_t *, unsigned long);
+void kpmd_ctor(void *, kmem_cache_t *, unsigned long);
+void pgd_ctor(void *, kmem_cache_t *, unsigned long);
+void pgd_dtor(void *, kmem_cache_t *, unsigned long);
+void pgtable_cache_init(void);
+extern void paging_init(void);
+void setup_identity_mappings(pgd_t *pgd_base, unsigned long start, unsigned long end);
 
 /*
  * ZERO_PAGE is a global shared page that is always zero: used
  * for zero-mapped memory areas etc..
  */
-#define ZERO_PAGE(vaddr) (virt_to_page(empty_zero_page))
 extern unsigned long empty_zero_page[1024];
-extern pgd_t swapper_pg_dir[1024];
-extern kmem_cache_t *pgd_cache;
-extern kmem_cache_t *pmd_cache;
-extern spinlock_t pgd_lock;
-extern struct page *pgd_list;
-
-void pmd_ctor(void *, kmem_cache_t *, unsigned long);
-void pgd_ctor(void *, kmem_cache_t *, unsigned long);
-void pgd_dtor(void *, kmem_cache_t *, unsigned long);
-void pgtable_cache_init(void);
-void paging_init(void);
+#define ZERO_PAGE(vaddr) (virt_to_page(empty_zero_page))
 
 #endif /* !__ASSEMBLY__ */
 
@@ -51,6 +49,11 @@ void paging_init(void);
  * newer 3-level PAE-mode page tables.
  */
 #ifndef __ASSEMBLY__
+
+extern void set_system_gate(unsigned int n, void *addr);
+extern void init_entry_mappings(void);
+extern void entry_trampoline_setup(void);
+
 #ifdef CONFIG_X86_PAE
 # include <asm/pgtable-3level.h>
 #else
@@ -63,7 +66,12 @@ void paging_init(void);
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
-#define USER_PTRS_PER_PGD	(TASK_SIZE/PGDIR_SIZE)
+#if defined(CONFIG_X86_PAE) && defined(CONFIG_X86_4G_VM_LAYOUT)
+# define USER_PTRS_PER_PGD	4
+#else
+# define USER_PTRS_PER_PGD	((TASK_SIZE/PGDIR_SIZE) + ((TASK_SIZE % PGDIR_SIZE) + PGDIR_SIZE-1)/PGDIR_SIZE)
+#endif
+
 #define FIRST_USER_PGD_NR	0
 
 #define USER_PGD_PTRS (PAGE_OFFSET >> PGDIR_SHIFT)
@@ -239,6 +247,7 @@ static inline void ptep_mkdirty(pte_t *ptep)			{ set_bit(_PAGE_BIT_DIRTY, &ptep-
 
 #define mk_pte(page, pgprot)	pfn_pte(page_to_pfn(page), (pgprot))
 #define mk_pte_huge(entry) ((entry).pte_low |= _PAGE_PRESENT | _PAGE_PSE)
+#define mk_pte_phys(physpage, pgprot) pfn_pte((physpage) >> PAGE_SHIFT, pgprot)
 
 static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 {
@@ -314,23 +323,25 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 #define pte_unmap_nested(pte) do { } while (0)
 #endif
 
-#if defined(CONFIG_HIGHPTE) && defined(CONFIG_HIGHMEM4G)
-typedef u32 pte_addr_t;
-#endif
-
-#if defined(CONFIG_HIGHPTE) && defined(CONFIG_HIGHMEM64G)
-typedef u64 pte_addr_t;
-#endif
-
-#if !defined(CONFIG_HIGHPTE)
-typedef pte_t *pte_addr_t;
-#endif
-
 /*
  * The i386 doesn't have any external MMU info: the kernel page
  * tables contain all the necessary information.
+ *
+ * Also, we only update the dirty/accessed state if we set
+ * the dirty bit by hand in the kernel, since the hardware
+ * will do the accessed bit for us, and we don't want to
+ * race with other CPU's that might be updating the dirty
+ * bit at the same time.
  */
 #define update_mmu_cache(vma,address,pte) do { } while (0)
+#define  __HAVE_ARCH_PTEP_SET_ACCESS_FLAGS
+#define ptep_set_access_flags(__vma, __address, __ptep, __entry, __dirty) \
+	do {								  \
+		if (__dirty) {						  \
+			(__ptep)->pte_low = (__entry).pte_low;	  	  \
+			flush_tlb_page(__vma, __address);		  \
+		}							  \
+	} while (0)
 
 /* Encode and de-code a swap entry */
 #define __swp_type(x)			(((x).val >> 1) & 0x1f)
@@ -354,5 +365,12 @@ typedef pte_t *pte_addr_t;
 #define __HAVE_ARCH_PTEP_MKDIRTY
 #define __HAVE_ARCH_PTE_SAME
 #include <asm-generic/pgtable.h>
+
+/*
+ * The size of the low 1:1 mappings we use during bootup,
+ * SMP-boot and ACPI-sleep:
+ */
+#define LOW_MAPPINGS_SIZE (16*1024*1024)
+
 
 #endif /* _I386_PGTABLE_H */

@@ -140,6 +140,41 @@ void __init e820_bootmem_free(pg_data_t *pgdat, unsigned long start,unsigned lon
 	}
 }
 
+int __get_cpu_vendor(void)
+{
+	char v[16];
+	int cpuid_level;
+	memset(v, 0, 16);
+	cpuid(0x00000000, &cpuid_level,
+		(int *)&v[0],
+	        (int *)&v[8],
+	        (int *)&v[4]);
+	if (!strcmp(v, "GenuineIntel"))
+		return X86_VENDOR_INTEL;
+	else if (!strcmp(v, "AuthenticAMD"))
+		return X86_VENDOR_AMD;
+	else if (!strcmp(v, "CyrixInstead"))
+		return X86_VENDOR_CYRIX;
+//	else if (!strcmp(v, "Geode by NSC"))
+//		return X86_VENDOR_NSC;
+	else if (!strcmp(v, "UMC UMC UMC "))
+		return X86_VENDOR_UMC;
+	else if (!strcmp(v, "CentaurHauls"))
+		return X86_VENDOR_CENTAUR;
+	else if (!strcmp(v, "NexGenDriven"))
+		return X86_VENDOR_NEXGEN;
+	else if (!strcmp(v, "RiseRiseRise"))
+		return X86_VENDOR_RISE;
+	else if (!strcmp(v, "GenuineTMx86") ||
+		 !strcmp(v, "TransmetaCPU"))
+		return X86_VENDOR_TRANSMETA;
+//	else if (!strcmp(v, "SiS SiS SiS "))
+//		return X86_VENDOR_SIS;
+	else
+		return X86_VENDOR_UNKNOWN;
+}
+
+
 /*
  * Find the highest page frame number we have available
  */
@@ -154,6 +189,9 @@ unsigned long __init e820_end_of_ram(void)
 
 		start = round_up(ei->addr, PAGE_SIZE); 
 		end = round_down(ei->addr + ei->size, PAGE_SIZE); 
+		if (__get_cpu_vendor() != X86_VENDOR_AMD)
+			end = round_down(min(end, 0xffffffff),PAGE_SIZE);
+		
 		if (start >= end)
 			continue;
 		if (ei->type == E820_RAM) { 
