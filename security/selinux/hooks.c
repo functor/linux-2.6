@@ -83,7 +83,7 @@ __setup("enforcing=", enforcing_setup);
 #endif
 
 #ifdef CONFIG_SECURITY_SELINUX_BOOTPARAM
-int selinux_enabled = 0;
+int selinux_enabled = 1;
 
 static int __init selinux_enabled_setup(char *str)
 {

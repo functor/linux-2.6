@@ -114,7 +114,7 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	unsigned long start, unsigned long end, unsigned int newflags)
 {
 	struct mm_struct * mm = vma->vm_mm;
-	unsigned long charged = 0;
+	unsigned long charged = 0, old_end = vma->vm_end;
 	pgprot_t newprot;
 	unsigned int oldflags;
 	pgoff_t pgoff;
@@ -181,7 +181,7 @@ success:
 	vma->vm_flags = newflags;
 	vma->vm_page_prot = newprot;
 	if (oldflags & VM_EXEC)
-		arch_remove_exec_range(current->mm, vma->vm_end);
+		arch_remove_exec_range(current->mm, old_end);
 	change_protection(vma, start, end, newprot);
 	return 0;
 

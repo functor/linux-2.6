@@ -737,10 +737,10 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 #ifdef __i386__
 	/*
-	 * In the exec-shield-disabled case turn off the CS limit
-	 * completely:
+	 * Turn off the CS limit completely if exec-shield disabled or
+	 * NX active:
 	 */
-	if (!exec_shield)
+	if (!exec_shield || use_nx)
 		arch_add_exec_range(current->mm, -1);
 #endif
 

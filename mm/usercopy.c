@@ -24,7 +24,8 @@
 /*
  * Get kernel address of the user page and pin it.
  */
-static inline struct page *pin_page(unsigned long addr, int write)
+static inline struct page *pin_page(unsigned long addr, int write,
+					unsigned long *pfn)
 {
 	struct mm_struct *mm = current->mm ? : &init_mm;
 	struct page *page = NULL;
@@ -34,13 +35,14 @@ static inline struct page *pin_page(unsigned long addr, int write)
 	 * Do a quick atomic lookup first - this is the fastpath.
 	 */
 retry:
-	page = follow_page(mm, addr, write);
+	page = follow_page_pfn(mm, addr, write, pfn);
 	if (likely(page != NULL)) {
 		if (!PageReserved(page))
 			get_page(page);
 		return page;
 	}
-
+	if (*pfn)
+		return NULL;
 	/*
 	 * No luck - bad address or need to fault in the page:
 	 */
@@ -95,11 +97,12 @@ static int rw_vm(unsigned long addr, void *buf, int len, int write)
 	/* ignore errors, just check how much was sucessfully transfered */
 	while (len) {
 		struct page *page = NULL;
+		unsigned long pfn = 0;
 		int bytes, offset;
 		void *maddr;
 
-		page = pin_page(addr, write);
-		if (!page)
+		page = pin_page(addr, write, &pfn);
+		if (!page && !pfn)
 			break;
 
 		bytes = len;
@@ -107,7 +110,10 @@ static int rw_vm(unsigned long addr, void *buf, int len, int write)
 		if (bytes > PAGE_SIZE-offset)
 			bytes = PAGE_SIZE-offset;
 
-		maddr = kmap_atomic(page, KM_USER_COPY);
+		if (page)
+			maddr = kmap_atomic(page, KM_USER_COPY);
+		else
+			maddr = kmap_atomic_nocache_pfn(pfn, KM_USER_COPY);
 
 #define HANDLE_TYPE(type) \
 	case sizeof(type): *(type *)(maddr+offset) = *(type *)(buf); break;
@@ -134,7 +140,8 @@ static int rw_vm(unsigned long addr, void *buf, int len, int write)
 #undef HANDLE_TYPE
 		}
 		kunmap_atomic(maddr, KM_USER_COPY);
-		unpin_page(page);
+		if (page)
+			unpin_page(page);
 		len -= bytes;
 		buf += bytes;
 		addr += bytes;
@@ -158,10 +165,11 @@ static int str_vm(unsigned long addr, void *buf0, int len, int copy)
 	/* ignore errors, just check how much was sucessfully transfered */
 	while (len) {
 		int bytes, offset, left, copied;
+		unsigned long pfn = 0;
 		char *maddr;
 
-		page = pin_page(addr, copy == 2);
-		if (!page) {
+		page = pin_page(addr, copy == 2, &pfn);
+		if (!page && !pfn) {
 			spin_unlock(&mm->page_table_lock);
 			return -EFAULT;
 		}
@@ -170,7 +178,10 @@ static int str_vm(unsigned long addr, void *buf0, int len, int copy)
 		if (bytes > PAGE_SIZE-offset)
 			bytes = PAGE_SIZE-offset;
 
-		maddr = kmap_atomic(page, KM_USER_COPY);
+		if (page)
+			maddr = kmap_atomic(page, KM_USER_COPY);
+		else
+			maddr = kmap_atomic_nocache_pfn(pfn, KM_USER_COPY);
 		if (copy == 2) {
 			memset(maddr + offset, 0, bytes);
 			copied = bytes;
@@ -184,7 +195,8 @@ static int str_vm(unsigned long addr, void *buf0, int len, int copy)
 		}
 		BUG_ON(bytes < 0 || copied < 0);
 		kunmap_atomic(maddr, KM_USER_COPY);
-		unpin_page(page);
+		if (page)
+			unpin_page(page);
 		len -= copied;
 		buf += copied;
 		addr += copied;

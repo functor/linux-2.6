@@ -137,7 +137,8 @@ extern void set_highmem_pages_init(int);
 # define set_highmem_pages_init(bad_ppro) do { } while (0)
 #endif
 
-unsigned long __PAGE_KERNEL = _PAGE_KERNEL;
+unsigned long long __PAGE_KERNEL = _PAGE_KERNEL;
+unsigned long long __PAGE_KERNEL_EXEC = _PAGE_KERNEL_EXEC;
 
 #ifndef CONFIG_DISCONTIGMEM
 #define remap_numa_kva() do {} while (0)
@@ -208,7 +209,7 @@ void setup_identity_mappings(pgd_t *pgd_base, unsigned long start, unsigned long
 			if (!pmd_present(*pmd))
 				pte_base = (pte_t *) alloc_bootmem_low_pages(PAGE_SIZE);
 			else
-				pte_base = (pte_t *) pte_offset_kernel(pmd, 0);
+				pte_base = pte_offset_kernel(pmd, 0);
 			pte = pte_base;
 			for (k = 0; k < PTRS_PER_PTE; pte++, k++) {
 				vaddr = i*PGDIR_SIZE + j*PMD_SIZE + k*PAGE_SIZE;
@@ -293,24 +294,6 @@ static void __init pagetable_init (void)
 #endif
 }
 
-#if defined(CONFIG_PM_DISK) || defined(CONFIG_SOFTWARE_SUSPEND)
-/*
- * Swap suspend & friends need this for resume because things like the intel-agp
- * driver might have split up a kernel 4MB mapping.
- */
-char __nosavedata swsusp_pg_dir[PAGE_SIZE]
-	__attribute__ ((aligned (PAGE_SIZE)));
-
-static inline void save_pg_dir(void)
-{
-	memcpy(swsusp_pg_dir, swapper_pg_dir, PAGE_SIZE);
-}
-#else
-static inline void save_pg_dir(void)
-{
-}
-#endif
-
 /*
  * Clear kernel pagetables in a PMD_SIZE-aligned range.
  */
@@ -343,9 +326,6 @@ static void clear_mappings(pgd_t *pgd_base, unsigned long start, unsigned long e
 void zap_low_mappings(void)
 {
 	printk("zapping low mappings.\n");
-
-	save_pg_dir();
-
 	/*
 	 * Zap initial low-memory mappings.
 	 */
@@ -377,6 +357,53 @@ void __init zone_sizes_init(void)
 extern void zone_sizes_init(void);
 #endif /* !CONFIG_DISCONTIGMEM */
 
+static int disable_nx __initdata = 0;
+u64 __supported_pte_mask = ~_PAGE_NX;
+
+/*
+ * noexec = on|off
+ *
+ * Control non executable mappings.
+ *
+ * on      Enable
+ * off     Disable (disables exec-shield too)
+ */
+static int __init noexec_setup(char *str)
+{
+	if (!strncmp(str, "on",2) && cpu_has_nx) {
+		__supported_pte_mask |= _PAGE_NX;
+		disable_nx = 0;
+	} else if (!strncmp(str,"off",3)) {
+		disable_nx = 1;
+		__supported_pte_mask &= ~_PAGE_NX;
+		exec_shield = 0;
+	}
+	return 1;
+}
+
+__setup("noexec=", noexec_setup);
+
+int use_nx = 0;
+#ifdef CONFIG_X86_PAE
+
+static void __init set_nx(void)
+{
+	unsigned int v[4], l, h;
+
+	if (cpu_has_pae && (cpuid_eax(0x80000000) > 0x80000001)) {
+		cpuid(0x80000001, &v[0], &v[1], &v[2], &v[3]);
+		if ((v[3] & (1 << 20)) && !disable_nx) {
+			rdmsr(MSR_EFER, l, h);
+			l |= EFER_NX;
+			wrmsr(MSR_EFER, l, h);
+			use_nx = 1;
+			__supported_pte_mask |= _PAGE_NX;
+		}
+	}
+}
+
+#endif
+
 /*
  * paging_init() sets up the page tables - note that the first 8MB are
  * already mapped by head.S.
@@ -386,6 +413,17 @@ extern void zone_sizes_init(void);
  */
 void __init paging_init(void)
 {
+#ifdef CONFIG_X86_PAE
+	set_nx();
+	if (use_nx)
+		printk("NX (Execute Disable) protection: active\n");
+	else {
+		printk("NX (Execute Disable) protection: not present!\n");
+		if (exec_shield)
+			printk("Using x86 segment limits to approximate NX protection\n");
+	}
+#endif
+
 	pagetable_init();
 
 	load_cr3(swapper_pg_dir);
@@ -411,7 +449,6 @@ void __init paging_init(void)
 	kmap_init();
 	zone_sizes_init();
 }
-
 /*
  * Test if the WP bit works in supervisor mode. It isn't supported on 386's
  * and also on some strange 486's (NexGen etc.). All 586+'s are OK. This

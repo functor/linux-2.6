@@ -45,6 +45,11 @@
 int vm_swappiness = 60;
 static long total_memory;
 
+
+
+void try_to_clip_inodes(void);
+
+
 #define lru_to_page(_head) (list_entry((_head)->prev, struct page, lru))
 
 #ifdef ARCH_HAS_PREFETCH
@@ -1089,6 +1094,7 @@ int kswapd(void *p)
 		prepare_to_wait(&pgdat->kswapd_wait, &wait, TASK_INTERRUPTIBLE);
 		schedule();
 		finish_wait(&pgdat->kswapd_wait, &wait);
+		try_to_clip_inodes();		
 		get_page_state(&ps);
 		balance_pgdat(pgdat, 0, &ps);
 	}

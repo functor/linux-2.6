@@ -20,6 +20,7 @@
 
 extern pte_t *kmap_pte;
 #define kmap_prot PAGE_KERNEL
+#define kmap_prot_nocache PAGE_KERNEL_NOCACHE
 
 #define PKMAP_BASE (0xff000000UL)
 #define NR_SHARED_PMDS ((0xffffffff-PKMAP_BASE+1)/PMD_SIZE)
