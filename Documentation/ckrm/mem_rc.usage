@@ -1,0 +1,72 @@
+Installation
+------------
+
+1. Configure "Class based physical memory controller" under CKRM (see
+      Documentation/ckrm/installation) 
+
+2. Reboot the system with the new kernel.
+
+3. Verify that the memory controller is present by reading the file
+   /rcfs/taskclass/config (should show a line with res=mem)
+
+Usage
+-----
+
+For brevity, unless otherwise specified all the following commands are
+executed in the default class (/rcfs/taskclass).
+
+Initially, the systemwide default class gets 100% of the LRU pages, and the
+config file displays the total number of physical pages.
+
+   # cd /rcfs/taskclass
+   # cat config
+   res=mem;tot_pages=239778,active=60473,inactive=135285,free=44555
+   # cat shares
+   res=mem,guarantee=-2,limit=-2,total_guarantee=100,max_limit=100
+
+   tot_pages - total number of pages
+   active    - number of pages in the active list ( sum of all zones)
+   inactive  - number of pages in the inactive list ( sum of all zones )
+   free      -  number of free pages (sum of all pages)
+
+   By making total_guarantee and max_limit to be same as tot_pages, one make 
+   make the numbers in shares file be same as the number of pages for a
+   class.
+
+   # echo 'res=mem,total_guarantee=239778,max_limit=239778' > shares
+   # cat shares
+   res=mem,guarantee=-2,limit=-2,total_guarantee=239778,max_limit=239778
+
+
+Class creation 
+--------------
+
+   # mkdir c1
+
+Its initial share is don't care. The parent's share values will be unchanged.
+
+Setting a new class share
+-------------------------
+	
+   # echo 'res=mem,guarantee=25000,limit=50000' > c1/shares
+
+   # cat c1/shares	
+   res=mem,guarantee=25000,limit=50000,total_guarantee=100,max_limit=100
+	
+   'guarantee' specifies the number of pages this class entitled to get
+   'limit' is the maximum number of pages this class can get.
+
+Monitoring
+----------
+
+stats file shows statistics of the page usage of a class
+   # cat stats
+   ----------- Memory Resource stats start -----------
+   Number of pages used(including pages lent to children): 196654
+   Number of pages guaranteed: 239778
+   Maximum limit of pages: 239778
+   Total number of pages available(after serving guarantees to children): 214778
+   Number of pages lent to children: 0
+   Number of pages borrowed from the parent: 0
+   ----------- Memory Resource stats end -----------
+
