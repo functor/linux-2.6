@@ -412,9 +412,9 @@ int inet_release(struct socket *sock)
 		sock->sk = NULL;
 		vx_sock_dec(sk);
 		clr_vx_info(&sk->sk_vx_info);
-	sk->sk_xid = -1;
+		//sk->sk_xid = -1;
 		clr_nx_info(&sk->sk_nx_info);
-	sk->sk_nid = -1;
+		//sk->sk_nid = -1;
 		sk->sk_prot->close(sk, timeout);
 	}
 	return 0;
