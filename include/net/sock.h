@@ -62,7 +62,7 @@
  */
 
 /* Define this to get the sk->sk_debug debugging facility. */
-#define SOCK_DEBUGGING
+//#define SOCK_DEBUGGING
 #ifdef SOCK_DEBUGGING
 #define SOCK_DEBUG(sk, msg...) do { if ((sk) && ((sk)->sk_debug)) \
 					printk(KERN_DEBUG msg); } while (0)
@@ -169,7 +169,7 @@ struct sock_common {
   *	@sk_timer - sock cleanup timer
   *	@sk_stamp - time stamp of last packet received
   *	@sk_socket - Identd and reporting IO signals
-  *	@sk_user_data - RPC layer private data
+  *	@sk_user_data - RPC and Tux layer private data
   *	@sk_owner - module that owns this socket
   *	@sk_sndmsg_page - cached page for sendmsg
   *	@sk_sndmsg_off - cached offset for sendmsg
@@ -180,6 +180,7 @@ struct sock_common {
   *	@sk_data_ready - callback to indicate there is data to be processed
   *	@sk_write_space - callback to indicate there is bf sending space available
   *	@sk_error_report - callback to indicate errors (e.g. %MSG_ERRQUEUE)
+  *	@sk_create_child - callback to get new socket events
   *	@sk_backlog_rcv - callback to process the backlog
   *	@sk_destruct - called at sock freeing time, i.e. when all refcnt == 0
  */
@@ -274,6 +275,7 @@ struct sock {
 	void			(*sk_error_report)(struct sock *sk);
   	int			(*sk_backlog_rcv)(struct sock *sk,
 						  struct sk_buff *skb);  
+	void			(*sk_create_child)(struct sock *sk, struct sock *newsk);
 	void                    (*sk_destruct)(struct sock *sk);
 };
 

@@ -29,6 +29,7 @@
 #include <linux/fs.h>
 #include <linux/cpu.h>
 #include <linux/security.h>
+#include <linux/swap.h>
 #include <linux/syscalls.h>
 #include <linux/jiffies.h>
 #include <linux/futex.h>
@@ -287,7 +288,7 @@ static inline int dup_mmap(struct mm_struct * mm, struct mm_struct * oldmm)
 	mm->locked_vm = 0;
 	mm->mmap = NULL;
 	mm->mmap_cache = NULL;
-	mm->free_area_cache = TASK_UNMAPPED_BASE;
+	mm->free_area_cache = oldmm->mmap_base;
 	mm->map_count = 0;
 	mm->rss = 0;
 	cpus_clear(mm->cpu_vm_mask);
@@ -425,9 +426,6 @@ static struct mm_struct * mm_init(struct mm_struct * mm)
 
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
-#ifdef __HAVE_ARCH_MMAP_TOP
-		mm->mmap_top = mmap_top();
-#endif
 		set_vx_info(&mm->mm_vx_info, current->vx_info);
 		return mm;
 	}
@@ -475,6 +473,7 @@ void mmput(struct mm_struct *mm)
 		spin_unlock(&mmlist_lock);
 		exit_aio(mm);
 		exit_mmap(mm);
+		put_swap_token(mm);
 		mmdrop(mm);
 	}
 }
@@ -916,6 +915,7 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	p = dup_task_struct(current);
 	if (!p)
 		goto fork_out;
+	p->tux_info = NULL;
 
 	p->vx_info = NULL;
 	set_vx_info(&p->vx_info, current->vx_info);
@@ -1011,7 +1011,6 @@ struct task_struct *copy_process(unsigned long clone_flags,
  	}
 #endif
 
-	retval = -ENOMEM;
 	if ((retval = security_task_alloc(p)))
 		goto bad_fork_cleanup_policy;
 	if ((retval = audit_alloc(p)))

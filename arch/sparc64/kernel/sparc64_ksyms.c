@@ -135,6 +135,7 @@ EXPORT_SYMBOL(__write_lock);
 EXPORT_SYMBOL(__write_unlock);
 EXPORT_SYMBOL(__write_trylock);
 /* Out of line spin-locking implementation. */
+EXPORT_SYMBOL(_raw_spin_lock);
 EXPORT_SYMBOL(_raw_spin_lock_flags);
 #endif
 
@@ -142,8 +143,8 @@ EXPORT_SYMBOL(_raw_spin_lock_flags);
 EXPORT_SYMBOL(synchronize_irq);
 
 #if defined(CONFIG_MCOUNT)
-extern void mcount(void);
-EXPORT_SYMBOL_NOVERS(mcount);
+extern void _mcount(void);
+EXPORT_SYMBOL_NOVERS(_mcount);
 #endif
 
 /* CPU online map and active count.  */
@@ -258,7 +259,7 @@ EXPORT_SYMBOL(verify_compat_iovec);
 
 EXPORT_SYMBOL(dump_thread);
 EXPORT_SYMBOL(dump_fpu);
-EXPORT_SYMBOL(pte_alloc_one_kernel);
+EXPORT_SYMBOL(__pte_alloc_one_kernel);
 #ifndef CONFIG_SMP
 EXPORT_SYMBOL(pgt_quicklists);
 #endif
@@ -333,7 +334,6 @@ EXPORT_SYMBOL(sys_close);
 #endif
 
 /* Special internal versions of library functions. */
-EXPORT_SYMBOL(__memcpy);
 EXPORT_SYMBOL(__memset);
 EXPORT_SYMBOL(_clear_page);
 EXPORT_SYMBOL(clear_user_page);
@@ -350,9 +350,10 @@ EXPORT_SYMBOL(csum_partial);
 EXPORT_SYMBOL(csum_partial_copy_sparc64);
 EXPORT_SYMBOL(ip_fast_csum);
 
-/* Moving data to/from userspace. */
+/* Moving data to/from/in userspace. */
 EXPORT_SYMBOL(__copy_to_user);
 EXPORT_SYMBOL(__copy_from_user);
+EXPORT_SYMBOL(__copy_in_user);
 EXPORT_SYMBOL(__strncpy_from_user);
 EXPORT_SYMBOL(__bzero_noasi);
 

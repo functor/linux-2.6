@@ -4,8 +4,6 @@
 #  $Id: Makefile,v 1.8 2002/07/21 21:32:30 rmk Exp $
 #
 
-obj-$(CONFIG_SERIAL_MPSC) += mpsc/
-
 serial-8250-y :=
 serial-8250-$(CONFIG_SERIAL_8250_ACPI) += 8250_acpi.o
 serial-8250-$(CONFIG_GSC) += 8250_gsc.o
@@ -40,4 +38,6 @@ obj-$(CONFIG_SERIAL_AU1X00) += au1x00_uart.o
 obj-$(CONFIG_SERIAL_DZ) += dz.o
 obj-$(CONFIG_SERIAL_SH_SCI) += sh-sci.o
 obj-$(CONFIG_SERIAL_BAST_SIO) += bast_sio.o
+obj-$(CONFIG_SERIAL_SGI_L1_CONSOLE) += sn_console.o
 obj-$(CONFIG_SERIAL_CPM) += cpm_uart/
+obj-$(CONFIG_SERIAL_MPC52xx) += mpc52xx_uart.o

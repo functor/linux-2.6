@@ -65,7 +65,7 @@ zimageinitrd-$(CONFIG_OCOTEA)		:= zImage.initrd-TREE
          end-$(CONFIG_OCOTEA)		:= ocotea
   entrypoint-$(CONFIG_OCOTEA)		:= 0x01000000
 
-     extra.o-$(CONFIG_EV64260)		:= misc-ev64260.o
+     extra.o-$(CONFIG_EV64260)		:= direct.o misc-ev64260.o
          end-$(CONFIG_EV64260)		:= ev64260
    cacheflag-$(CONFIG_EV64260)		:= -include $(clear_L2_L3)
 
@@ -113,6 +113,12 @@ zimageinitrd-$(CONFIG_SPRUCE)		:= zImage.initrd-TREE
   entrypoint-$(CONFIG_SPRUCE)		:= 0x00800000
         misc-$(CONFIG_SPRUCE)		+= misc-spruce.o
 
+      zimage-$(CONFIG_LITE5200)		:= zImage-STRIPELF
+zimageinitrd-$(CONFIG_LITE5200)		:= zImage.initrd-STRIPELF
+         end-$(CONFIG_LITE5200)		:= lite5200
+   cacheflag-$(CONFIG_LITE5200)		:= -include $(clear_L2_L3)
+
+
 # SMP images should have a '.smp' suffix.
          end-$(CONFIG_SMP)             := $(end-y).smp
 
@@ -136,16 +142,15 @@ boot-$(CONFIG_8xx)		+= embed_config.o
 boot-$(CONFIG_8260)		+= embed_config.o
 boot-$(CONFIG_BSEIP)		+= iic.o
 boot-$(CONFIG_MBX)		+= iic.o pci.o qspan_pci.o
-boot-$(CONFIG_MV64X60)		+= misc-mv64x60.o
-boot-$(CONFIG_DMV182)		+= mv64x60_stub.o
 boot-$(CONFIG_RPXCLASSIC)	+= iic.o pci.o qspan_pci.o
 boot-$(CONFIG_RPXLITE)		+= iic.o
 # Different boards need different serial implementations.
-ifeq ($(CONFIG_SERIAL_CONSOLE),y)
+ifeq ($(CONFIG_SERIAL_CPM_CONSOLE),y)
 boot-$(CONFIG_8xx)		+= m8xx_tty.o
 boot-$(CONFIG_8260)		+= m8260_tty.o
 endif
-boot-$(CONFIG_SERIAL_MPSC_CONSOLE)	+= mv64x60_tty.o
+boot-$(CONFIG_SERIAL_MPC52xx_CONSOLE) += mpc52xx_tty.o
+boot-$(CONFIG_GT64260_CONSOLE)	+= gt64260_tty.o
 
 LIBS				:= $(common)/lib.a $(bootlib)/lib.a
 ifeq ($(CONFIG_PPC_PREP),y)

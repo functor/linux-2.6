@@ -308,9 +308,8 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		(current->mm->start_data = N_DATADDR(ex));
 	current->mm->brk = ex.a_bss +
 		(current->mm->start_brk = N_BSSADDR(ex));
-	current->mm->free_area_cache = TASK_UNMAPPED_BASE;
-	/* unlimited stack is larger than TASK_SIZE */
-	current->mm->non_executable_cache = current->mm->mmap_top;
+	current->mm->free_area_cache = current->mm->mmap_base;
+
 	// current->mm->rss = 0;
 	vx_rsspages_sub(current->mm, current->mm->rss);
 	current->mm->mmap = NULL;
@@ -351,7 +350,8 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 			return error;
 		}
 
-		error = bprm->file->f_op->read(bprm->file, (char *)text_addr,
+		error = bprm->file->f_op->read(bprm->file,
+			  (char __user *)text_addr,
 			  ex.a_text+ex.a_data, &pos);
 		if ((signed long)error < 0) {
 			send_sig(SIGKILL, current, 0);
@@ -380,7 +380,8 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		if (!bprm->file->f_op->mmap||((fd_offset & ~PAGE_MASK) != 0)) {
 			loff_t pos = fd_offset;
 			do_brk(N_TXTADDR(ex), ex.a_text+ex.a_data);
-			bprm->file->f_op->read(bprm->file,(char *)N_TXTADDR(ex),
+			bprm->file->f_op->read(bprm->file,
+					(char __user *)N_TXTADDR(ex),
 					ex.a_text+ex.a_data, &pos);
 			flush_icache_range((unsigned long) N_TXTADDR(ex),
 					   (unsigned long) N_TXTADDR(ex) +
@@ -482,7 +483,7 @@ static int load_aout_library(struct file *file)
 
 		do_brk(start_addr, ex.a_text + ex.a_data + ex.a_bss);
 		
-		file->f_op->read(file, (char *)start_addr,
+		file->f_op->read(file, (char __user *)start_addr,
 			ex.a_text + ex.a_data, &pos);
 		flush_icache_range((unsigned long) start_addr,
 				   (unsigned long) start_addr + ex.a_text + ex.a_data);

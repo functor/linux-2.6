@@ -128,7 +128,7 @@ unsigned long get_fb_unmapped_area(struct file *filp, unsigned long orig_addr, u
 
 	if (flags & MAP_FIXED) {
 		/* Ok, don't mess with it. */
-		return get_unmapped_area(NULL, addr, len, pgoff, flags, 0);
+		return get_unmapped_area(NULL, addr, len, pgoff, flags);
 	}
 	flags &= ~MAP_SHARED;
 
@@ -141,7 +141,7 @@ unsigned long get_fb_unmapped_area(struct file *filp, unsigned long orig_addr, u
 		align_goal = (64UL * 1024);
 
 	do {
-		addr = get_unmapped_area(NULL, orig_addr, len + (align_goal - PAGE_SIZE), pgoff, flags, 0);
+		addr = get_unmapped_area(NULL, orig_addr, len + (align_goal - PAGE_SIZE), pgoff, flags);
 		if (!(addr & ~PAGE_MASK)) {
 			addr = (addr + (align_goal - 1UL)) & ~(align_goal - 1UL);
 			break;
@@ -159,7 +159,7 @@ unsigned long get_fb_unmapped_area(struct file *filp, unsigned long orig_addr, u
 	 * be obtained.
 	 */
 	if (addr & ~PAGE_MASK)
-		addr = get_unmapped_area(NULL, orig_addr, len, pgoff, flags, 0);
+		addr = get_unmapped_area(NULL, orig_addr, len, pgoff, flags);
 
 	return addr;
 }
@@ -403,7 +403,7 @@ asmlinkage unsigned long sys64_mremap(unsigned long addr,
 		/* MREMAP_FIXED checked above. */
 		new_addr = get_unmapped_area(file, addr, new_len,
 				    vma ? vma->vm_pgoff : 0,
-				    map_flags, vma->vm_flags & VM_EXEC);
+				    map_flags);
 		ret = new_addr;
 		if (new_addr & ~PAGE_MASK)
 			goto out_sem;

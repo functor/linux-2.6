@@ -27,7 +27,6 @@
 #include <asm/naca.h>
 #include <asm/rtas.h>
 #include <asm/xics.h>
-#include <asm/ppcdebug.h>
 #include <asm/hvcall.h>
 #include <asm/machdep.h>
 
@@ -190,7 +189,7 @@ static void pSeriesLP_xirr_info_set(int n_cpu, int value)
 		      val64); 
 }
 
-static void pSeriesLP_cppr_info(int n_cpu, u8 value)
+void pSeriesLP_cppr_info(int n_cpu, u8 value)
 {
 	unsigned long lpar_rc;
 
@@ -239,13 +238,13 @@ static unsigned int real_irq_to_virt(unsigned int real_irq)
 #ifdef CONFIG_SMP
 static int get_irq_server(unsigned int irq)
 {
-	cpumask_t cpumask = irq_affinity[irq];
-	cpumask_t tmp = CPU_MASK_NONE;
 	unsigned int server;
 
 #ifdef CONFIG_IRQ_ALL_CPUS
 	/* For the moment only implement delivery to all cpus or one cpu */
 	if (smp_threads_ready) {
+		cpumask_t cpumask = irq_affinity[irq];
+		cpumask_t tmp = CPU_MASK_NONE;
 		if (cpus_equal(cpumask, CPU_MASK_ALL)) {
 			server = default_distrib_server;
 		} else {
@@ -286,7 +285,7 @@ static void xics_enable_irq(unsigned int virq)
 	call_status = rtas_call(ibm_set_xive, 3, 1, NULL, irq, server,
 				DEFAULT_PRIORITY);
 	if (call_status != 0) {
-		printk(KERN_ERR "xics_enable_irq: irq=%x: ibm_set_xive "
+		printk(KERN_ERR "xics_enable_irq: irq=%d: ibm_set_xive "
 		       "returned %x\n", irq, call_status);
 		return;
 	}
@@ -294,7 +293,7 @@ static void xics_enable_irq(unsigned int virq)
 	/* Now unmask the interrupt (often a no-op) */
 	call_status = rtas_call(ibm_int_on, 1, 1, NULL, irq);
 	if (call_status != 0) {
-		printk(KERN_ERR "xics_enable_irq: irq=%x: ibm_int_on "
+		printk(KERN_ERR "xics_enable_irq: irq=%d: ibm_int_on "
 		       "returned %x\n", irq, call_status);
 		return;
 	}
@@ -310,7 +309,7 @@ static void xics_disable_real_irq(unsigned int irq)
 
 	call_status = rtas_call(ibm_int_off, 1, 1, NULL, irq);
 	if (call_status != 0) {
-		printk(KERN_ERR "xics_disable_real_irq: irq=%x: "
+		printk(KERN_ERR "xics_disable_real_irq: irq=%d: "
 		       "ibm_int_off returned %x\n", irq, call_status);
 		return;
 	}
@@ -319,7 +318,7 @@ static void xics_disable_real_irq(unsigned int irq)
 	/* Have to set XIVE to 0xff to be able to remove a slot */
 	call_status = rtas_call(ibm_set_xive, 3, 1, NULL, irq, server, 0xff);
 	if (call_status != 0) {
-		printk(KERN_ERR "xics_disable_irq: irq=%x: ibm_set_xive(0xff)"
+		printk(KERN_ERR "xics_disable_irq: irq=%d: ibm_set_xive(0xff)"
 		       " returned %x\n", irq, call_status);
 		return;
 	}
@@ -356,8 +355,6 @@ static void xics_mask_and_ack_irq(unsigned int irq)
 	}
 }
 
-extern unsigned int real_irq_to_virt_slowpath(unsigned int real_irq);
-
 int xics_get_irq(struct pt_regs *regs)
 {
 	unsigned int cpu = smp_processor_id();
@@ -384,7 +381,7 @@ int xics_get_irq(struct pt_regs *regs)
 		if (irq == NO_IRQ)
 			irq = real_irq_to_virt_slowpath(vec);
 		if (irq == NO_IRQ) {
-			printk(KERN_ERR "Interrupt 0x%x (real) is invalid,"
+			printk(KERN_ERR "Interrupt %d (real) is invalid,"
 			       " disabling it.\n", vec);
 			xics_disable_real_irq(vec);
 		} else
@@ -394,8 +391,6 @@ int xics_get_irq(struct pt_regs *regs)
 }
 
 #ifdef CONFIG_SMP
-
-extern struct xics_ipi_struct xics_ipi_message[NR_CPUS] __cacheline_aligned;
 
 irqreturn_t xics_ipi_action(int irq, void *dev_id, struct pt_regs *regs)
 {
@@ -469,13 +464,11 @@ void xics_init_IRQ(void)
 	ibm_int_off = rtas_token("ibm,int-off");
 
 	np = of_find_node_by_type(NULL, "PowerPC-External-Interrupt-Presentation");
-	if (!np) {
-		printk(KERN_WARNING "Can't find Interrupt Presentation\n");
-		udbg_printf("Can't find Interrupt Presentation\n");
-		while (1);
-	}
+	if (!np)
+		panic("xics_init_IRQ: can't find interrupt presentation");
+
 nextnode:
-	ireg = (uint *)get_property(np, "ibm,interrupt-server-ranges", 0);
+	ireg = (uint *)get_property(np, "ibm,interrupt-server-ranges", NULL);
 	if (ireg) {
 		/*
 		 * set node starting index for this node
@@ -484,11 +477,8 @@ nextnode:
 	}
 
 	ireg = (uint *)get_property(np, "reg", &ilen);
-	if (!ireg) {
-		printk(KERN_WARNING "Can't find Interrupt Reg Property\n");
-		udbg_printf("Can't find Interrupt Reg Property\n");
-		while (1);
-	}
+	if (!ireg)
+		panic("xics_init_IRQ: can't find interrupt reg property");
 	
 	while (ilen) {
 		inodes[indx].addr = (unsigned long long)*ireg++ << 32;
@@ -528,16 +518,14 @@ nextnode:
 
 	np = of_find_node_by_type(NULL, "interrupt-controller");
 	if (!np) {
-		printk(KERN_WARNING "xics:  no ISA Interrupt Controller\n");
+		printk(KERN_WARNING "xics: no ISA interrupt controller\n");
 		xics_irq_8259_cascade_real = -1;
 		xics_irq_8259_cascade = -1;
 	} else {
-		ireg = (uint *) get_property(np, "interrupts", 0);
-		if (!ireg) {
-			printk(KERN_WARNING "Can't find ISA Interrupts Property\n");
-			udbg_printf("Can't find ISA Interrupts Property\n");
-			while (1);
-		}
+		ireg = (uint *) get_property(np, "interrupts", NULL);
+		if (!ireg)
+			panic("xics_init_IRQ: can't find ISA interrupts property");
+
 		xics_irq_8259_cascade_real = *ireg;
 		xics_irq_8259_cascade
 			= virt_irq_create_mapping(xics_irq_8259_cascade_real);
@@ -558,13 +546,8 @@ nextnode:
 		xics_per_cpu[0] = __ioremap((ulong)intr_base, intr_size,
 					    _PAGE_NO_CACHE);
 #endif /* CONFIG_SMP */
-#ifdef CONFIG_PPC_PSERIES
-	/* actually iSeries does not use any of xics...but it has link dependencies
-	 * for now, except this new one...
-	 */
 	} else if (systemcfg->platform == PLATFORM_PSERIES_LPAR) {
 		ops = &pSeriesLP_ops;
-#endif
 	}
 
 	xics_8259_pic.enable = i8259_pic.enable;
@@ -589,8 +572,9 @@ static int __init xics_setup_i8259(void)
 	if (naca->interrupt_controller == IC_PPC_XIC &&
 	    xics_irq_8259_cascade != -1) {
 		if (request_irq(irq_offset_up(xics_irq_8259_cascade),
-				no_action, 0, "8259 cascade", 0))
-			printk(KERN_ERR "xics_init_IRQ: couldn't get 8259 cascade\n");
+				no_action, 0, "8259 cascade", NULL))
+			printk(KERN_ERR "xics_setup_i8259: couldn't get 8259 "
+					"cascade\n");
 		i8259_init();
 	}
 	return 0;
@@ -604,7 +588,7 @@ void xics_request_IPIs(void)
 
 	/* IPIs are marked SA_INTERRUPT as they must run with irqs disabled */
 	request_irq(irq_offset_up(XICS_IPI), xics_ipi_action, SA_INTERRUPT,
-		    "IPI", 0);
+		    "IPI", NULL);
 	get_irq_desc(irq_offset_up(XICS_IPI))->status |= IRQ_PER_CPU;
 }
 #endif
@@ -643,7 +627,7 @@ static void xics_set_affinity(unsigned int virq, cpumask_t cpumask)
 				irq, newmask, xics_status[1]);
 
 	if (status) {
-		printk(KERN_ERR "xics_set_affinity irq=%d ibm,set-xive "
+		printk(KERN_ERR "xics_set_affinity: irq=%d ibm,set-xive "
 		       "returns %d\n", irq, status);
 		return;
 	}
@@ -657,9 +641,7 @@ void xics_migrate_irqs_away(void)
 	int set_indicator = rtas_token("set-indicator");
 	const unsigned int giqs = 9005UL; /* Global Interrupt Queue Server */
 	int status = 0;
-	unsigned int irq, cpu = smp_processor_id();
-	int xics_status[2];
-	unsigned long flags;
+	unsigned int irq, virq, cpu = smp_processor_id();
 
 	BUG_ON(set_indicator == RTAS_UNKNOWN_SERVICE);
 
@@ -676,12 +658,20 @@ void xics_migrate_irqs_away(void)
 	ops->cppr_info(cpu, DEFAULT_PRIORITY);
 	iosync();
 
-	printk(KERN_WARNING "HOTPLUG: Migrating IRQs away\n");
-	for_each_irq(irq) {
-		irq_desc_t *desc = get_irq_desc(irq);
+	for_each_irq(virq) {
+		irq_desc_t *desc;
+		int xics_status[2];
+		unsigned long flags;
+
+		/* We cant set affinity on ISA interrupts */
+		if (virq < irq_offset_value())
+			continue;
+
+		desc = get_irq_desc(virq);
+		irq = virt_irq_to_real(irq_offset_down(virq));
 
 		/* We need to get IPIs still. */
-		if (irq_offset_down(irq) == XICS_IPI)
+		if (irq == XICS_IPI || irq == NO_IRQ)
 			continue;
 
 		/* We only need to migrate enabled IRQS */
@@ -696,7 +686,7 @@ void xics_migrate_irqs_away(void)
 		if (status) {
 			printk(KERN_ERR "migrate_irqs_away: irq=%d "
 					"ibm,get-xive returns %d\n",
-					irq, status);
+					virq, status);
 			goto unlock;
 		}
 
@@ -709,21 +699,20 @@ void xics_migrate_irqs_away(void)
 			goto unlock;
 
 		printk(KERN_WARNING "IRQ %d affinity broken off cpu %u\n",
-		       irq, cpu);
+		       virq, cpu);
 
 		/* Reset affinity to all cpus */
 		xics_status[0] = default_distrib_server;
 
-		status = rtas_call(ibm_set_xive, 3, 1, NULL,
-				irq, xics_status[0], xics_status[1]);
+		status = rtas_call(ibm_set_xive, 3, 1, NULL, irq,
+				xics_status[0], xics_status[1]);
 		if (status)
-			printk(KERN_ERR "migrate_irqs_away irq=%d "
+			printk(KERN_ERR "migrate_irqs_away: irq=%d "
 					"ibm,set-xive returns %d\n",
-					irq, status);
+					virq, status);
 
 unlock:
 		spin_unlock_irqrestore(&desc->lock, flags);
 	}
-
 }
 #endif

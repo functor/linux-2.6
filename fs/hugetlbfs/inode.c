@@ -50,6 +50,9 @@ static int hugetlbfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	loff_t len, vma_len;
 	int ret;
 
+	if (vma->vm_pgoff & (HPAGE_SIZE / PAGE_SIZE - 1))
+		return -EINVAL;
+
 	if (vma->vm_start & ~HPAGE_MASK)
 		return -EINVAL;
 
@@ -276,15 +279,15 @@ hugetlb_vmtruncate_list(struct prio_tree_root *root, unsigned long h_pgoff)
 		unsigned long v_length;
 		unsigned long v_offset;
 
-		h_vm_pgoff = vma->vm_pgoff << (HPAGE_SHIFT - PAGE_SHIFT);
-		v_length = vma->vm_end - vma->vm_start;
+		h_vm_pgoff = vma->vm_pgoff >> (HPAGE_SHIFT - PAGE_SHIFT);
 		v_offset = (h_pgoff - h_vm_pgoff) << HPAGE_SHIFT;
-
 		/*
 		 * Is this VMA fully outside the truncation point?
 		 */
 		if (h_vm_pgoff >= h_pgoff)
 			v_offset = 0;
+
+		v_length = vma->vm_end - vma->vm_start;
 
 		zap_hugepage_range(vma,
 				vma->vm_start + v_offset,
@@ -715,17 +718,20 @@ static unsigned long hugetlbfs_counter(void)
 
 struct file *hugetlb_zero_setup(size_t size)
 {
-	int error;
+	int error = -ENOMEM;
 	struct file *file;
 	struct inode *inode;
 	struct dentry *dentry, *root;
 	struct qstr quick_string;
 	char buf[16];
 
-	if (!can_do_mlock())
+	if (!capable(CAP_IPC_LOCK))
 		return ERR_PTR(-EPERM);
 
 	if (!is_hugepage_mem_enough(size))
+		return ERR_PTR(-ENOMEM);
+
+	if (!user_shm_lock(size, current->user))
 		return ERR_PTR(-ENOMEM);
 
 	root = hugetlbfs_vfsmount->mnt_root;
@@ -735,7 +741,7 @@ struct file *hugetlb_zero_setup(size_t size)
 	quick_string.hash = 0;
 	dentry = d_alloc(root, &quick_string);
 	if (!dentry)
-		return ERR_PTR(-ENOMEM);
+		goto out_shm_unlock;
 
 	error = -ENFILE;
 	file = get_empty_filp();
@@ -762,6 +768,8 @@ out_file:
 	put_filp(file);
 out_dentry:
 	dput(dentry);
+out_shm_unlock:
+	user_shm_unlock(size, current->user);
 	return ERR_PTR(error);
 }
 

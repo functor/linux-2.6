@@ -28,6 +28,7 @@
 #include <linux/pagemap.h>
 #include <linux/ctype.h>
 #include <linux/utsname.h>
+#include <linux/mempool.h>
 #include <asm/uaccess.h>
 #include <asm/processor.h>
 #include "cifspdu.h"
@@ -49,6 +50,8 @@ extern void SMBNTencrypt(unsigned char *passwd, unsigned char *c8,
 			 unsigned char *p24);
 extern int cifs_inet_pton(int, const char *, void *dst);
 
+extern mempool_t *cifs_req_poolp;
+
 struct smb_vol {
 	char *username;
 	char *password;
@@ -64,6 +67,8 @@ struct smb_vol {
 	int rw:1;
 	int retry:1;
 	int intr:1;
+	int setuids:1;
+	int noperm:1;
 	unsigned int rsize;
 	unsigned int wsize;
 	unsigned int sockopt;
@@ -189,8 +194,7 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 	unsigned int pdu_length, total_read;
 	struct smb_hdr *smb_buffer = NULL;
 	struct msghdr smb_msg;
-	mm_segment_t temp_fs;
-	struct iovec iov;
+	struct kvec iov;
 	struct socket *csocket = server->ssocket;
 	struct list_head *tmp;
 	struct cifsSesInfo *ses;
@@ -203,9 +207,15 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 	current->flags |= PF_MEMALLOC;
 	server->tsk = current;	/* save process info to wake at shutdown */
 	cFYI(1, ("Demultiplex PID: %d", current->pid));
-
-	temp_fs = get_fs();	/* we must turn off socket api parm checking */
-	set_fs(get_ds());
+	write_lock(&GlobalSMBSeslock);
+	atomic_inc(&tcpSesAllocCount);
+	length = tcpSesAllocCount.counter;
+	write_unlock(&GlobalSMBSeslock);
+	if(length  > 1) {
+		mempool_resize(cifs_req_poolp,
+			length + CIFS_MIN_RCV_POOL,
+			GFP_KERNEL);
+	}
 
 	while (server->tcpStatus != CifsExiting) {
 		if (smb_buffer == NULL)
@@ -222,16 +232,15 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 		iov.iov_base = smb_buffer;
 		iov.iov_len = sizeof (struct smb_hdr) - 1;	
         /* 1 byte less above since wct is not always returned in error cases */
-		smb_msg.msg_iov = &iov;
-		smb_msg.msg_iovlen = 1;
 		smb_msg.msg_control = NULL;
 		smb_msg.msg_controllen = 0;
 
 		length =
-		    sock_recvmsg(csocket, &smb_msg,
-				 sizeof (struct smb_hdr) -
-				 1 /* RFC1001 header and SMB header */ ,
-				 MSG_PEEK /* flags see socket.h */ );
+		    kernel_recvmsg(csocket, &smb_msg,
+				   &iov, 1,
+				   sizeof (struct smb_hdr) -
+				   1 /* RFC1001 header and SMB header */ ,
+				   MSG_PEEK /* flags see socket.h */ );
 
 		if(server->tcpStatus == CifsExiting) {
 			break;
@@ -276,12 +285,14 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 			if (temp[0] == (char) RFC1002_SESSION_KEEP_ALIVE) {
 				iov.iov_base = smb_buffer;
 				iov.iov_len = 4;
-				length = sock_recvmsg(csocket, &smb_msg, 4, 0);
+				length = kernel_recvmsg(csocket, &smb_msg,
+							&iov, 1, 4, 0);
 				cFYI(0,("Received 4 byte keep alive packet"));
 			} else if (temp[0] == (char) RFC1002_POSITIVE_SESSION_RESPONSE) {
-					iov.iov_base = smb_buffer;
-					iov.iov_len = 4;
-					length = sock_recvmsg(csocket, &smb_msg, 4, 0);
+				iov.iov_base = smb_buffer;
+				iov.iov_len = 4;
+				length = kernel_recvmsg(csocket, &smb_msg,
+							&iov, 1, 4, 0);
 					cFYI(1,("Good RFC 1002 session rsp"));
 			} else if ((temp[0] == (char)RFC1002_NEGATIVE_SESSION_RESPONSE)
 				   && (length == 5)) {
@@ -341,7 +352,8 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 					for (total_read = 0; 
 					     total_read < pdu_length;
 					     total_read += length) {	
-						length = sock_recvmsg(csocket, &smb_msg, 
+						length = kernel_recvmsg(csocket, &smb_msg, 
+							&iov, 1,
 							pdu_length - total_read, 0);
 						if (length == 0) {
 							cERROR(1,
@@ -392,7 +404,9 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 			     ("Frame less than four bytes received  %d bytes long.",
 			      length));
 			if (length > 0) {
-				length = sock_recvmsg(csocket, &smb_msg, length, 0);	/* throw away junk frame */
+				length = kernel_recvmsg(csocket, &smb_msg,
+					&iov, 1,
+					length, 0);	/* throw away junk frame */
 				cFYI(1,
 				     (" with junk  0x%x in it ",
 				      *(__u32 *) smb_buffer));
@@ -418,7 +432,6 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 		sock_release(csocket);
 		server->ssocket = NULL;
 	}
-	set_fs(temp_fs);
 	if (smb_buffer) /* buffer usually freed in free_mid - need to free it on error or exit */
 		cifs_buf_release(smb_buffer);
 
@@ -465,6 +478,16 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 		coming home not much else we can do but free the memory */
 	}
 	kfree(server);
+
+	write_lock(&GlobalSMBSeslock);
+	atomic_dec(&tcpSesAllocCount);
+	length = tcpSesAllocCount.counter;
+	write_unlock(&GlobalSMBSeslock);
+	if(length  > 0) {
+		mempool_resize(cifs_req_poolp,
+			length + CIFS_MIN_RCV_POOL,
+			GFP_KERNEL);
+	}
 
 	set_current_state(TASK_INTERRUPTIBLE);
 	schedule_timeout(HZ/4);
@@ -741,6 +764,14 @@ cifs_parse_mount_options(char *options, const char *devname, struct smb_vol *vol
 			vol->retry = 1;
 		} else if (strnicmp(data, "soft", 4) == 0) {
 			vol->retry = 0;
+		} else if (strnicmp(data, "perm", 4) == 0) {
+			vol->noperm = 0;
+		} else if (strnicmp(data, "noperm", 6) == 0) {
+			vol->noperm = 1;
+		} else if (strnicmp(data, "setuids", 7) == 0) {
+			vol->setuids = 1;
+		} else if (strnicmp(data, "nosetuids", 9) == 0) {
+			vol->setuids = 0;
 		} else if (strnicmp(data, "nohard", 6) == 0) {
 			vol->retry = 0;
 		} else if (strnicmp(data, "nosoft", 6) == 0) {
@@ -1315,6 +1346,12 @@ cifs_mount(struct super_block *sb, struct cifs_sb_info *cifs_sb,
 		cifs_sb->mnt_file_mode = volume_info.file_mode;
 		cifs_sb->mnt_dir_mode = volume_info.dir_mode;
 		cFYI(1,("file mode: 0x%x  dir mode: 0x%x",cifs_sb->mnt_file_mode,cifs_sb->mnt_dir_mode));
+
+		if(volume_info.noperm)
+			cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_NO_PERM;
+		if(volume_info.setuids)
+			cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_SET_UID;
+
 		tcon =
 		    find_unc(sin_server.sin_addr.s_addr, volume_info.UNC,
 			     volume_info.username);

@@ -1729,17 +1729,6 @@ static int ip_route_input_slow(struct sk_buff *skb, u32 daddr, u32 saddr,
 
 	rth->rt_flags = flags;
 
-#ifdef CONFIG_NET_FASTROUTE
-	if (netdev_fastroute && !(flags&(RTCF_NAT|RTCF_MASQ|RTCF_DOREDIRECT))) {
-		struct net_device *odev = rth->u.dst.dev;
-		if (odev != dev &&
-		    dev->accept_fastpath &&
-		    odev->mtu >= dev->mtu &&
-		    dev->accept_fastpath(dev, &rth->u.dst) == 0)
-			rth->rt_flags |= RTCF_FAST;
-	}
-#endif
-
 intern:
 	err = rt_intern_hash(hash, rth, (struct rtable**)&skb->dst);
 done:
@@ -2509,10 +2498,10 @@ static int flush_delay;
 
 static int ipv4_sysctl_rtcache_flush(ctl_table *ctl, int write,
 					struct file *filp, void __user *buffer,
-					size_t *lenp)
+					size_t *lenp, loff_t *ppos)
 {
 	if (write) {
-		proc_dointvec(ctl, write, filp, buffer, lenp);
+		proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
 		rt_cache_flush(flush_delay);
 		return 0;
 	} 

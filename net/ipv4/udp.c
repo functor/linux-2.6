@@ -328,7 +328,7 @@ void udp_err(struct sk_buff *skb, u32 info)
 
 	sk = udp_v4_lookup(iph->daddr, uh->dest, iph->saddr, uh->source, skb->dev->ifindex);
 	if (sk == NULL) {
-		ICMP_INC_STATS_BH(IcmpInErrors);
+		ICMP_INC_STATS_BH(ICMP_MIB_INERRORS);
     	  	return;	/* No socket for error */
 	}
 
@@ -655,7 +655,7 @@ out:
 	if (free)
 		kfree(ipc.opt);
 	if (!err) {
-		UDP_INC_STATS_USER(UdpOutDatagrams);
+		UDP_INC_STATS_USER(UDP_MIB_OUTDATAGRAMS);
 		return len;
 	}
 	return err;
@@ -829,7 +829,10 @@ try_again:
   	}
 	if (inet->cmsg_flags)
 		ip_cmsg_recv(msg, skb);
+
 	err = copied;
+	if (flags & MSG_TRUNC)
+		err = skb->len - sizeof(struct udphdr);
   
 out_free:
   	skb_free_datagram(sk, skb);
@@ -837,7 +840,7 @@ out:
   	return err;
 
 csum_copy_err:
-	UDP_INC_STATS_BH(UdpInErrors);
+	UDP_INC_STATS_BH(UDP_MIB_INERRORS);
 
 	/* Clear queue. */
 	if (flags&MSG_PEEK) {
@@ -859,54 +862,6 @@ csum_copy_err:
 	goto try_again;
 }
 
-int udp_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
-{
-	struct inet_opt *inet = inet_sk(sk);
-	struct sockaddr_in *usin = (struct sockaddr_in *) uaddr;
-	struct rtable *rt;
-	u32 saddr;
-	int oif;
-	int err;
-
-	
-	if (addr_len < sizeof(*usin)) 
-	  	return -EINVAL;
-
-	if (usin->sin_family != AF_INET) 
-	  	return -EAFNOSUPPORT;
-
-	sk_dst_reset(sk);
-
-	oif = sk->sk_bound_dev_if;
-	saddr = inet->saddr;
-	if (MULTICAST(usin->sin_addr.s_addr)) {
-		if (!oif)
-			oif = inet->mc_index;
-		if (!saddr)
-			saddr = inet->mc_addr;
-	}
-	err = ip_route_connect(&rt, usin->sin_addr.s_addr, saddr,
-			       RT_CONN_FLAGS(sk), oif,
-			       IPPROTO_UDP,
-			       inet->sport, usin->sin_port, sk);
-	if (err)
-		return err;
-	if ((rt->rt_flags & RTCF_BROADCAST) && !sock_flag(sk, SOCK_BROADCAST)) {
-		ip_rt_put(rt);
-		return -EACCES;
-	}
-  	if (!inet->saddr)
-	  	inet->saddr = rt->rt_src;	/* Update source address */
-	if (!inet->rcv_saddr)
-		inet->rcv_saddr = rt->rt_src;
-	inet->daddr = rt->rt_dst;
-	inet->dport = usin->sin_port;
-	sk->sk_state = TCP_ESTABLISHED;
-	inet->id = jiffies;
-
-	sk_dst_set(sk, &rt->u.dst);
-	return(0);
-}
 
 int udp_disconnect(struct sock *sk, int flags)
 {
@@ -976,7 +931,7 @@ static int udp_encap_rcv(struct sock * sk, struct sk_buff *skb)
 		} else
 			/* Must be an IKE packet.. pass it through */
 			return 1;
-
+		break;
 	case UDP_ENCAP_ESPINUDP_NON_IKE:
 		/* Check if this is a keepalive packet.  If so, eat it. */
 		if (len == 1 && udpdata[0] == 0xff) {
@@ -989,6 +944,7 @@ static int udp_encap_rcv(struct sock * sk, struct sk_buff *skb)
 		} else
 			/* Must be an IKE packet.. pass it through */
 			return 1;
+		break;
 	}
 
 	/* At this point we are sure that this is an ESPinUDP packet,
@@ -1061,7 +1017,7 @@ static int udp_queue_rcv_skb(struct sock * sk, struct sk_buff *skb)
 		if (ret < 0) {
 			/* process the ESP packet */
 			ret = xfrm4_rcv_encap(skb, up->encap_type);
-			UDP_INC_STATS_BH(UdpInDatagrams);
+			UDP_INC_STATS_BH(UDP_MIB_INDATAGRAMS);
 			return -ret;
 		}
 		/* FALLTHROUGH -- it's a UDP Packet */
@@ -1069,7 +1025,7 @@ static int udp_queue_rcv_skb(struct sock * sk, struct sk_buff *skb)
 
 	if (sk->sk_filter && skb->ip_summed != CHECKSUM_UNNECESSARY) {
 		if (__udp_checksum_complete(skb)) {
-			UDP_INC_STATS_BH(UdpInErrors);
+			UDP_INC_STATS_BH(UDP_MIB_INERRORS);
 			kfree_skb(skb);
 			return -1;
 		}
@@ -1077,11 +1033,11 @@ static int udp_queue_rcv_skb(struct sock * sk, struct sk_buff *skb)
 	}
 
 	if (sock_queue_rcv_skb(sk,skb)<0) {
-		UDP_INC_STATS_BH(UdpInErrors);
+		UDP_INC_STATS_BH(UDP_MIB_INERRORS);
 		kfree_skb(skb);
 		return -1;
 	}
-	UDP_INC_STATS_BH(UdpInDatagrams);
+	UDP_INC_STATS_BH(UDP_MIB_INDATAGRAMS);
 	return 0;
 }
 
@@ -1209,7 +1165,7 @@ int udp_rcv(struct sk_buff *skb)
 	if (udp_checksum_complete(skb))
 		goto csum_error;
 
-	UDP_INC_STATS_BH(UdpNoPorts);
+	UDP_INC_STATS_BH(UDP_MIB_NOPORTS);
 	icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
 
 	/*
@@ -1229,7 +1185,7 @@ short_packet:
 			NIPQUAD(daddr),
 			ntohs(uh->dest)));
 no_header:
-	UDP_INC_STATS_BH(UdpInErrors);
+	UDP_INC_STATS_BH(UDP_MIB_INERRORS);
 	kfree_skb(skb);
 	return(0);
 
@@ -1246,7 +1202,7 @@ csum_error:
 			ntohs(uh->dest),
 			ulen));
 drop:
-	UDP_INC_STATS_BH(UdpInErrors);
+	UDP_INC_STATS_BH(UDP_MIB_INERRORS);
 	kfree_skb(skb);
 	return(0);
 }
@@ -1352,7 +1308,7 @@ static int udp_getsockopt(struct sock *sk, int level, int optname,
 struct proto udp_prot = {
  	.name =		"UDP",
 	.close =	udp_close,
-	.connect =	udp_connect,
+	.connect =	ip4_datagram_connect,
 	.disconnect =	udp_disconnect,
 	.ioctl =	udp_ioctl,
 	.destroy =	udp_destroy_sock,
@@ -1556,7 +1512,6 @@ void udp4_proc_exit(void)
 }
 #endif /* CONFIG_PROC_FS */
 
-EXPORT_SYMBOL(udp_connect);
 EXPORT_SYMBOL(udp_disconnect);
 EXPORT_SYMBOL(udp_hash);
 EXPORT_SYMBOL(udp_hash_lock);

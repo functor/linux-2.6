@@ -131,7 +131,7 @@ out:
 	return error;
 }
 
-static int dupfd(struct file *file, unsigned int start)
+int dupfd(struct file *file, unsigned int start)
 {
 	struct files_struct * files = current->files;
 	int fd;
@@ -151,6 +151,8 @@ static int dupfd(struct file *file, unsigned int start)
 
 	return fd;
 }
+
+EXPORT_SYMBOL_GPL(dupfd);
 
 asmlinkage long sys_dup2(unsigned int oldfd, unsigned int newfd)
 {
@@ -244,6 +246,11 @@ static int setfl(int fd, struct file * filp, unsigned long arg)
 				return -EINVAL;
 	}
 
+	if (filp->f_op && filp->f_op->check_flags)
+		error = filp->f_op->check_flags(arg);
+	if (error)
+		return error;
+
 	lock_kernel();
 	if ((arg ^ filp->f_flags) & FASYNC) {
 		if (filp->f_op && filp->f_op->fasync) {
@@ -292,8 +299,8 @@ void f_delown(struct file *filp)
 
 EXPORT_SYMBOL(f_delown);
 
-long generic_file_fcntl(int fd, unsigned int cmd,
-			unsigned long arg, struct file *filp)
+static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
+		struct file *filp)
 {
 	long err = -EINVAL;
 
@@ -360,15 +367,6 @@ long generic_file_fcntl(int fd, unsigned int cmd,
 		break;
 	}
 	return err;
-}
-EXPORT_SYMBOL(generic_file_fcntl);
-
-static long do_fcntl(int fd, unsigned int cmd,
-			unsigned long arg, struct file *filp)
-{
-	if (filp->f_op && filp->f_op->fcntl)
-		return filp->f_op->fcntl(fd, cmd, arg, filp);
-	return generic_file_fcntl(fd, cmd, arg, filp);
 }
 
 asmlinkage long sys_fcntl(int fd, unsigned int cmd, unsigned long arg)

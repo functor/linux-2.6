@@ -32,14 +32,10 @@
 #define TRUE 1
 #endif
 
-extern int map_cifs_error(int error_class, int error_code,
-			  int status_codes_negotiated);
-
 extern struct address_space_operations cifs_addr_ops;
 
 /* Functions related to super block operations */
 extern struct super_operations cifs_super_ops;
-extern void cifs_put_inode(struct inode *);
 extern void cifs_read_inode(struct inode *);
 extern void cifs_delete_inode(struct inode *);
 /* extern void cifs_write_inode(struct inode *); *//* BB not needed yet */
@@ -78,7 +74,7 @@ extern int cifs_file_mmap(struct file * , struct vm_area_struct *);
 extern struct file_operations cifs_dir_ops;
 extern int cifs_dir_open(struct inode *inode, struct file *file);
 extern int cifs_readdir(struct file *file, void *direntry, filldir_t filldir);
-extern long cifs_fcntl(int, unsigned int, unsigned long, struct file *);
+extern int cifs_dir_notify(struct file *, unsigned long arg);
 
 /* Functions related to dir entries */
 extern struct dentry_operations cifs_dentry_ops;

@@ -142,6 +142,7 @@ static ssize_t tty_write(struct file *, const char __user *, size_t, loff_t *);
 ssize_t redirected_tty_write(struct file *, const char __user *, size_t, loff_t *);
 static unsigned int tty_poll(struct file *, poll_table *);
 static int tty_open(struct inode *, struct file *);
+static int ptmx_open(struct inode *, struct file *);
 static int tty_release(struct inode *, struct file *);
 int tty_ioctl(struct inode * inode, struct file * file,
 	      unsigned int cmd, unsigned long arg);
@@ -345,18 +346,12 @@ EXPORT_SYMBOL(tty_check_change);
 static ssize_t hung_up_tty_read(struct file * file, char __user * buf,
 				size_t count, loff_t *ppos)
 {
-	/* Can't seek (pread) on ttys.  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 	return 0;
 }
 
 static ssize_t hung_up_tty_write(struct file * file, const char __user * buf,
 				 size_t count, loff_t *ppos)
 {
-	/* Can't seek (pwrite) on ttys.  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 	return -EIO;
 }
 
@@ -382,6 +377,19 @@ static struct file_operations tty_fops = {
 	.release	= tty_release,
 	.fasync		= tty_fasync,
 };
+
+#ifdef CONFIG_UNIX98_PTYS
+static struct file_operations ptmx_fops = {
+	.llseek		= no_llseek,
+	.read		= tty_read,
+	.write		= tty_write,
+	.poll		= tty_poll,
+	.ioctl		= tty_ioctl,
+	.open		= ptmx_open,
+	.release	= tty_release,
+	.fasync		= tty_fasync,
+};
+#endif
 
 static struct file_operations console_fops = {
 	.llseek		= no_llseek,
@@ -648,10 +656,6 @@ static ssize_t tty_read(struct file * file, char __user * buf, size_t count,
 	struct tty_struct * tty;
 	struct inode *inode;
 
-	/* Can't seek (pread) on ttys.  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
-
 	tty = (struct tty_struct *)file->private_data;
 	inode = file->f_dentry->d_inode;
 	if (tty_paranoia_check(tty, inode, "tty_read"))
@@ -726,10 +730,6 @@ static ssize_t tty_write(struct file * file, const char __user * buf, size_t cou
 	struct tty_struct * tty;
 	struct inode *inode = file->f_dentry->d_inode;
 
-	/* Can't seek (pwrite) on ttys.  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
-
 	tty = (struct tty_struct *)file->private_data;
 	if (tty_paranoia_check(tty, inode, "tty_write"))
 		return -EIO;
@@ -755,9 +755,6 @@ ssize_t redirected_tty_write(struct file * file, const char __user * buf, size_t
 
 	if (p) {
 		ssize_t res;
-		/* Can't seek (pwrite) on ttys.  */
-		if (ppos != &file->f_pos)
-			return -ESPIPE;
 		res = vfs_write(p, buf, count, &p->f_pos);
 		fput(p);
 		return res;
@@ -1068,7 +1065,7 @@ static void release_dev(struct file * filp)
 {
 	struct tty_struct *tty, *o_tty;
 	int	pty_master, tty_closing, o_tty_closing, do_sleep;
-	int	devpts_master;
+	int	devpts_master, devpts;
 	int	idx;
 	char	buf[64];
 	
@@ -1083,7 +1080,8 @@ static void release_dev(struct file * filp)
 	idx = tty->index;
 	pty_master = (tty->driver->type == TTY_DRIVER_TYPE_PTY &&
 		      tty->driver->subtype == PTY_TYPE_MASTER);
-	devpts_master = pty_master && (tty->driver->flags & TTY_DRIVER_DEVPTS_MEM);
+	devpts = (tty->driver->flags & TTY_DRIVER_DEVPTS_MEM) != 0;
+	devpts_master = pty_master && devpts;
 	o_tty = tty->link;
 
 #ifdef TTY_PARANOIA_CHECK
@@ -1308,7 +1306,7 @@ static void release_dev(struct file * filp)
 
 #ifdef CONFIG_UNIX98_PTYS
 	/* Make this pty number available for reallocation */
-	if (devpts_master) {
+	if (devpts) {
 		down(&allocated_ptys_lock);
 		idr_remove(&allocated_ptys, idx);
 		up(&allocated_ptys_lock);
@@ -1338,6 +1336,7 @@ static int tty_open(struct inode * inode, struct file * filp)
 	dev_t device = inode->i_rdev;
 	unsigned short saved_flags = filp->f_flags;
 
+	nonseekable_open(inode, filp);
 retry_open:
 	noctty = filp->f_flags & O_NOCTTY;
 	index  = -1;
@@ -1373,53 +1372,13 @@ retry_open:
 		return -ENODEV;
 	}
 
-#ifdef CONFIG_UNIX98_PTYS
-	if (device == MKDEV(TTYAUX_MAJOR,2)) {
-		int idr_ret;
-
-		/* find a device that is not in use. */
-		down(&allocated_ptys_lock);
-		if (!idr_pre_get(&allocated_ptys, GFP_KERNEL)) {
-			up(&allocated_ptys_lock);
-			return -ENOMEM;
-		}
-		idr_ret = idr_get_new(&allocated_ptys, NULL, &index);
-		if (idr_ret < 0) {
-			up(&allocated_ptys_lock);
-			if (idr_ret == -EAGAIN)
-				return -ENOMEM;
-			return -EIO;
-		}
-		if (index >= pty_limit) {
-			idr_remove(&allocated_ptys, index);
-			up(&allocated_ptys_lock);
-			return -EIO;
-		}
-		up(&allocated_ptys_lock);
-
-		driver = ptm_driver;
-		retval = init_dev(driver, index, &tty);
-		if (retval) {
-			down(&allocated_ptys_lock);
-			idr_remove(&allocated_ptys, index);
-			up(&allocated_ptys_lock);
-			return retval;
-		}
-
-		set_bit(TTY_PTY_LOCK, &tty->flags); /* LOCK THE SLAVE */
-		if (devpts_pty_new(tty->link))
-			retval = -ENOMEM;
-	} else
-#endif
-	{
-		driver = get_tty_driver(device, &index);
-		if (!driver)
-			return -ENODEV;
+	driver = get_tty_driver(device, &index);
+	if (!driver)
+		return -ENODEV;
 got_driver:
-		retval = init_dev(driver, index, &tty);
-		if (retval)
-			return retval;
-	}
+	retval = init_dev(driver, index, &tty);
+	if (retval)
+		return retval;
 
 	filp->private_data = tty;
 	file_move(filp, &tty->tty_files);
@@ -1446,15 +1405,6 @@ got_driver:
 		printk(KERN_DEBUG "error %d in opening %s...", retval,
 		       tty->name);
 #endif
-
-#ifdef CONFIG_UNIX98_PTYS
-		if (index != -1) {
-			down(&allocated_ptys_lock);
-			idr_remove(&allocated_ptys, index);
-			up(&allocated_ptys_lock);
-		}
-#endif
-
 		release_dev(filp);
 		if (retval != -ERESTARTSYS)
 			return retval;
@@ -1481,6 +1431,62 @@ got_driver:
 	}
 	return 0;
 }
+
+#ifdef CONFIG_UNIX98_PTYS
+static int ptmx_open(struct inode * inode, struct file * filp)
+{
+	struct tty_struct *tty;
+	int retval;
+	int index;
+	int idr_ret;
+
+	nonseekable_open(inode, filp);
+
+	/* find a device that is not in use. */
+	down(&allocated_ptys_lock);
+	if (!idr_pre_get(&allocated_ptys, GFP_KERNEL)) {
+		up(&allocated_ptys_lock);
+		return -ENOMEM;
+	}
+	idr_ret = idr_get_new(&allocated_ptys, NULL, &index);
+	if (idr_ret < 0) {
+		up(&allocated_ptys_lock);
+		if (idr_ret == -EAGAIN)
+			return -ENOMEM;
+		return -EIO;
+	}
+	if (index >= pty_limit) {
+		idr_remove(&allocated_ptys, index);
+		up(&allocated_ptys_lock);
+		return -EIO;
+	}
+	up(&allocated_ptys_lock);
+
+	retval = init_dev(ptm_driver, index, &tty);
+	if (retval)
+		goto out;
+
+	set_bit(TTY_PTY_LOCK, &tty->flags); /* LOCK THE SLAVE */
+	filp->private_data = tty;
+	file_move(filp, &tty->tty_files);
+
+	retval = -ENOMEM;
+	if (devpts_pty_new(tty->link))
+		goto out1;
+
+	check_tty_count(tty, "tty_open");
+	retval = ptm_driver->open(tty, filp);
+	if (!retval)
+		return 0;
+out1:
+	release_dev(filp);
+out:
+	down(&allocated_ptys_lock);
+	idr_remove(&allocated_ptys, index);
+	up(&allocated_ptys_lock);
+	return retval;
+}
+#endif
 
 static int tty_release(struct inode * inode, struct file * filp)
 {
@@ -2456,7 +2462,7 @@ static int __init tty_init(void)
 	class_simple_device_add(tty_class, MKDEV(TTYAUX_MAJOR, 1), NULL, "console");
 
 #ifdef CONFIG_UNIX98_PTYS
-	cdev_init(&ptmx_cdev, &tty_fops);
+	cdev_init(&ptmx_cdev, &ptmx_fops);
 	if (cdev_add(&ptmx_cdev, MKDEV(TTYAUX_MAJOR, 2), 1) ||
 	    register_chrdev_region(MKDEV(TTYAUX_MAJOR, 2), 1, "/dev/ptmx") < 0)
 		panic("Couldn't register /dev/ptmx driver\n");

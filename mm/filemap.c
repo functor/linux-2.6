@@ -440,10 +440,6 @@ struct page * find_get_page(struct address_space *mapping, unsigned long offset)
 {
 	struct page *page;
 
-	/*
-	 * We scan the hash list read-only. Addition to and removal from
-	 * the hash-list needs a held write-lock.
-	 */
 	spin_lock_irq(&mapping->tree_lock);
 	page = radix_tree_lookup(&mapping->page_tree, offset);
 	if (page)
@@ -655,7 +651,8 @@ void do_generic_mapping_read(struct address_space *mapping,
 			     struct file * filp,
 			     loff_t *ppos,
 			     read_descriptor_t * desc,
-			     read_actor_t actor)
+			     read_actor_t actor,
+			     int nonblock)
 {
 	struct inode *inode = mapping->host;
 	unsigned long index, end_index, offset;
@@ -683,11 +680,21 @@ void do_generic_mapping_read(struct address_space *mapping,
 find_page:
 		page = find_get_page(mapping, index);
 		if (unlikely(page == NULL)) {
+			if (nonblock) {
+				desc->error = -EWOULDBLOCKIO;
+				break;
+			}
 			handle_ra_miss(mapping, &ra, index);
 			goto no_cached_page;
 		}
-		if (!PageUptodate(page))
+		if (!PageUptodate(page)) {
+			if (nonblock) {
+				page_cache_release(page);
+				desc->error = -EWOULDBLOCKIO;
+				break;
+			}
 			goto page_not_up_to_date;
+		}
 page_ok:
 		/* nr is the maximum number of bytes to copy from this page */
 		nr = PAGE_CACHE_SIZE;
@@ -928,7 +935,7 @@ __generic_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 			if (desc.count == 0)
 				continue;
 			desc.error = 0;
-			do_generic_file_read(filp,ppos,&desc,file_read_actor);
+			do_generic_file_read(filp,ppos,&desc,file_read_actor,0);
 			retval += desc.written;
 			if (!retval) {
 				retval = desc.error;
@@ -1002,7 +1009,7 @@ ssize_t generic_file_sendfile(struct file *in_file, loff_t *ppos,
 	desc.arg.data = target;
 	desc.error = 0;
 
-	do_generic_file_read(in_file, ppos, &desc, actor);
+	do_generic_file_read(in_file, ppos, &desc, actor, 0);
 	if (desc.written)
 		return desc.written;
 	return desc.error;
@@ -1199,6 +1206,7 @@ no_cached_page:
 	 * effect.
 	 */
 	error = page_cache_read(file, pgoff);
+	grab_swap_token();
 
 	/*
 	 * The page we want has now been added to the page cache.
@@ -1421,15 +1429,9 @@ repeat:
 			return err;
 		}
 	} else {
-	    	/*
-		 * If a nonlinear mapping then store the file page offset
-		 * in the pte.
-		 */
-		if (pgoff != linear_page_index(vma, addr)) {
-	    		err = install_file_pte(mm, vma, addr, pgoff, prot);
-			if (err)
-		    		return err;
-		}
+		err = install_file_pte(mm, vma, addr, pgoff, prot);
+		if (err)
+			return err;
 	}
 
 	len -= PAGE_SIZE;

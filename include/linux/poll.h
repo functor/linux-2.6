@@ -82,14 +82,10 @@ int get_fd_set(unsigned long nr, void __user *ufdset, unsigned long *fdset)
 }
 
 static inline
-int set_fd_set(unsigned long nr, void __user *ufdset, unsigned long *fdset)
+void set_fd_set(unsigned long nr, void __user *ufdset, unsigned long *fdset)
 {
-	int ret = 0;
 	if (ufdset)
-		ret = __copy_to_user(ufdset, fdset, FDS_BYTES(nr));
-	if (ret)
-		return -EFAULT;
-	return 0;
+		__copy_to_user(ufdset, fdset, FDS_BYTES(nr));
 }
 
 static inline

@@ -231,6 +231,9 @@ static int page_referenced_one(struct page *page,
 	if (ptep_clear_flush_young(vma, address, pte))
 		referenced++;
 
+	if (mm != current->mm && has_swap_token(mm))
+		referenced++;
+
 	(*mapcount)--;
 
 out_unmap:
@@ -482,6 +485,10 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	 * an exclusive swap page, do_wp_page will replace it by a copy
 	 * page, and the user never get to see the data GUP was holding
 	 * the original page for.
+	 *
+	 * This test is also useful for when swapoff (unuse_process) has
+	 * to drop page lock: its reference to the page stops existing
+	 * ptes from being unmapped, so swapoff can make progress.
 	 */
 	if (PageSwapCache(page) &&
 	    page_count(page) != page->mapcount + 2) {

@@ -619,11 +619,11 @@ unique:
 
 	if (twp) {
 		*twp = tw;
-		NET_INC_STATS_BH(TimeWaitRecycled);
+		NET_INC_STATS_BH(LINUX_MIB_TIMEWAITRECYCLED);
 	} else if (tw) {
 		/* Silly. Should hash-dance instead... */
 		tcp_tw_deschedule(tw);
-		NET_INC_STATS_BH(TimeWaitRecycled);
+		NET_INC_STATS_BH(LINUX_MIB_TIMEWAITRECYCLED);
 
 		tcp_tw_put(tw);
 	}
@@ -1003,14 +1003,14 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 	int err;
 
 	if (skb->len < (iph->ihl << 2) + 8) {
-		ICMP_INC_STATS_BH(IcmpInErrors);
+		ICMP_INC_STATS_BH(ICMP_MIB_INERRORS);
 		return;
 	}
 
 	sk = tcp_v4_lookup(iph->daddr, th->dest, iph->saddr,
 			   th->source, tcp_v4_iif(skb));
 	if (!sk) {
-		ICMP_INC_STATS_BH(IcmpInErrors);
+		ICMP_INC_STATS_BH(ICMP_MIB_INERRORS);
 		return;
 	}
 	if (sk->sk_state == TCP_TIME_WAIT) {
@@ -1023,7 +1023,7 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 	 * servers this needs to be solved differently.
 	 */
 	if (sock_owned_by_user(sk))
-		NET_INC_STATS_BH(LockDroppedIcmps);
+		NET_INC_STATS_BH(LINUX_MIB_LOCKDROPPEDICMPS);
 
 	if (sk->sk_state == TCP_CLOSE)
 		goto out;
@@ -1032,7 +1032,7 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 	seq = ntohl(th->seq);
 	if (sk->sk_state != TCP_LISTEN &&
 	    !between(seq, tp->snd_una, tp->snd_nxt)) {
-		NET_INC_STATS(OutOfWindowIcmps);
+		NET_INC_STATS(LINUX_MIB_OUTOFWINDOWICMPS);
 		goto out;
 	}
 
@@ -1083,7 +1083,7 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 		BUG_TRAP(!req->sk);
 
 		if (seq != req->snt_isn) {
-			NET_INC_STATS_BH(OutOfWindowIcmps);
+			NET_INC_STATS_BH(LINUX_MIB_OUTOFWINDOWICMPS);
 			goto out;
 		}
 
@@ -1101,7 +1101,7 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 			       It can f.e. if SYNs crossed.
 			     */
 		if (!sock_owned_by_user(sk)) {
-			TCP_INC_STATS_BH(TcpAttemptFails);
+			TCP_INC_STATS_BH(TCP_MIB_ATTEMPTFAILS);
 			sk->sk_err = err;
 
 			sk->sk_error_report(sk);
@@ -1210,8 +1210,8 @@ static void tcp_v4_send_reset(struct sk_buff *skb)
 
 	ip_send_reply(tcp_socket->sk, skb, &arg, sizeof rth);
 
-	TCP_INC_STATS_BH(TcpOutSegs);
-	TCP_INC_STATS_BH(TcpOutRsts);
+	TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
+	TCP_INC_STATS_BH(TCP_MIB_OUTRSTS);
 }
 
 /* The code following below sending ACKs in SYN-RECV and TIME-WAIT states
@@ -1258,7 +1258,7 @@ static void tcp_v4_send_ack(struct sk_buff *skb, u32 seq, u32 ack,
 
 	ip_send_reply(tcp_socket->sk, skb, &arg, arg.iov[0].iov_len);
 
-	TCP_INC_STATS_BH(TcpOutSegs);
+	TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
 }
 
 static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
@@ -1295,12 +1295,12 @@ static struct dst_entry* tcp_v4_route_req(struct sock *sk,
 					 .dport = req->rmt_port } } };
 
 	if (ip_route_output_flow(&rt, &fl, sk, 0)) {
-		IP_INC_STATS_BH(OutNoRoutes);
+		IP_INC_STATS_BH(IPSTATS_MIB_OUTNOROUTES);
 		return NULL;
 	}
 	if (opt && opt->is_strictroute && rt->rt_dst != rt->rt_gateway) {
 		ip_rt_put(rt);
-		IP_INC_STATS_BH(OutNoRoutes);
+		IP_INC_STATS_BH(IPSTATS_MIB_OUTNOROUTES);
 		return NULL;
 	}
 	return &rt->u.dst;
@@ -1535,7 +1535,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 			if (xtime.tv_sec < peer->tcp_ts_stamp + TCP_PAWS_MSL &&
 			    (s32)(peer->tcp_ts - req->ts_recent) >
 							TCP_PAWS_WINDOW) {
-				NET_INC_STATS_BH(PAWSPassiveRejected);
+				NET_INC_STATS_BH(LINUX_MIB_PAWSPASSIVEREJECTED);
 				dst_release(dst);
 				goto drop_and_free;
 			}
@@ -1580,7 +1580,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 drop_and_free:
 	tcp_openreq_free(req);
 drop:
-	TCP_INC_STATS_BH(TcpAttemptFails);
+	TCP_INC_STATS_BH(TCP_MIB_ATTEMPTFAILS);
 	return 0;
 }
 
@@ -1639,9 +1639,9 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	return newsk;
 
 exit_overflow:
-	NET_INC_STATS_BH(ListenOverflows);
+	NET_INC_STATS_BH(LINUX_MIB_LISTENOVERFLOWS);
 exit:
-	NET_INC_STATS_BH(ListenDrops);
+	NET_INC_STATS_BH(LINUX_MIB_LISTENDROPS);
 	dst_release(dst);
 	return NULL;
 }
@@ -1759,7 +1759,7 @@ discard:
 	return 0;
 
 csum_err:
-	TCP_INC_STATS_BH(TcpInErrs);
+	TCP_INC_STATS_BH(TCP_MIB_INERRS);
 	goto discard;
 }
 
@@ -1781,7 +1781,7 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		goto discard_it;
 
 	/* Count it even if it's bad */
-	TCP_INC_STATS_BH(TcpInSegs);
+	TCP_INC_STATS_BH(TCP_MIB_INSEGS);
 
 	if (!pskb_may_pull(skb, sizeof(struct tcphdr)))
 		goto discard_it;
@@ -1856,7 +1856,7 @@ no_tcp_socket:
 
 	if (skb->len < (th->doff << 2) || tcp_checksum_complete(skb)) {
 bad_packet:
-		TCP_INC_STATS_BH(TcpInErrs);
+		TCP_INC_STATS_BH(TCP_MIB_INERRS);
 	} else {
 		tcp_v4_send_reset(skb);
 	}
@@ -1877,7 +1877,7 @@ do_time_wait:
 	}
 
 	if (skb->len < (th->doff << 2) || tcp_checksum_complete(skb)) {
-		TCP_INC_STATS_BH(TcpInErrs);
+		TCP_INC_STATS_BH(TCP_MIB_INERRS);
 		tcp_tw_put((struct tcp_tw_bucket *) sk);
 		goto discard_it;
 	}
@@ -2158,6 +2158,14 @@ int tcp_v4_destroy_sock(struct sock *sk)
 	/* Clean up a referenced TCP bind bucket. */
 	if (tp->bind_hash)
 		tcp_put_port(sk);
+
+	/*
+	 * If sendmsg cached page exists, toss it.
+	 */
+	if (sk->sk_sndmsg_page) {
+		__free_page(sk->sk_sndmsg_page);
+		sk->sk_sndmsg_page = NULL;
+	}
 
 	atomic_dec(&tcp_sockets_allocated);
 

@@ -114,29 +114,13 @@ static inline int valid_phys_addr_range(unsigned long addr, size_t *count)
 }
 #endif
 
-extern int page_is_ram(unsigned long pagenr);
-
-static inline int page_is_allowed(unsigned long pagenr)
-{ 
- #ifdef CONFIG_X86
-	if (pagenr <= 256)
-		return 1;
-	if (!page_is_ram(pagenr))
-		return 1;
-	printk("Access to 0x%lx by %s denied \n", pagenr << PAGE_SHIFT, current->comm);
-	return 0;
- #else
-       return 1;
- #endif
-}
-
 static inline int range_is_allowed(unsigned long from, unsigned long to)
 {
 	unsigned long cursor;
 	
 	cursor = from >> PAGE_SHIFT;
-	while ( (cursor << PAGE_SHIFT) < to) {
-		if (!page_is_allowed(cursor))
+	while ((cursor << PAGE_SHIFT) < to) {
+		if (!devmem_is_allowed(cursor))
 			return 0;
 		cursor++;
 	}
@@ -162,7 +146,7 @@ static ssize_t do_write_mem(void *p, unsigned long realp,
 	}
 #endif
 	if (!range_is_allowed(realp, realp+count))
-		return -EFAULT;
+		return -EPERM;
 	copied = copy_from_user(p, buf, count);
 	if (copied) {
 		ssize_t ret = written + (count - copied);
@@ -207,7 +191,7 @@ static ssize_t read_mem(struct file * file, char __user * buf,
 	}
 #endif
 	if (!range_is_allowed(p, p+count))
-		return -EFAULT;
+		return -EPERM;
 	if (copy_to_user(buf, __va(p), count))
 		return -EFAULT;
 	read += count;
@@ -248,8 +232,8 @@ static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 		
 	cursor = vma->vm_pgoff;
 	while ((cursor << PAGE_SHIFT) < offset + vma->vm_end-vma->vm_start) {
-		if (!page_is_allowed(cursor))
-			return -EFAULT;
+		if (!devmem_is_allowed(cursor))
+			return -EPERM;
 		cursor++;
 	}
 
@@ -325,67 +309,6 @@ static ssize_t read_kmem(struct file *file, char __user *buf,
 	}
  	*ppos = p;
  	return virtr + read;
-}
-
-/*
- * This function writes to the *virtual* memory as seen by the kernel.
- */
-static ssize_t write_kmem(struct file * file, const char __user * buf, 
-			  size_t count, loff_t *ppos)
-{
-	unsigned long p = *ppos;
-	ssize_t wrote = 0;
-	ssize_t virtr = 0;
-	ssize_t written;
-	char * kbuf; /* k-addr because vwrite() takes vmlist_lock rwlock */
-	
-	return -EPERM;
-
-	if (p < (unsigned long) high_memory) {
-
-		wrote = count;
-		if (count > (unsigned long) high_memory - p)
-			wrote = (unsigned long) high_memory - p;
-
-		written = do_write_mem((void*)p, p, buf, wrote, ppos);
-		if (written != wrote)
-			return written;
-		wrote = written;
-		p += wrote;
-		buf += wrote;
-		count -= wrote;
-	}
-
-	if (count > 0) {
-		kbuf = (char *)__get_free_page(GFP_KERNEL);
-		if (!kbuf)
-			return wrote ? wrote : -ENOMEM;
-		while (count > 0) {
-			int len = count;
-
-			if (len > PAGE_SIZE)
-				len = PAGE_SIZE;
-			if (len) {
-				written = copy_from_user(kbuf, buf, len);
-				if (written) {
-					ssize_t ret;
-
-					free_page((unsigned long)kbuf);
-					ret = wrote + virtr + (len - written);
-					return ret ? ret : -EFAULT;
-				}
-			}
-			len = vwrite(kbuf, (char *)p, len);
-			count -= len;
-			buf += len;
-			virtr += len;
-			p += len;
-		}
-		free_page((unsigned long)kbuf);
-	}
-
- 	*ppos = p;
- 	return virtr + wrote;
 }
 
 #if defined(CONFIG_ISA) || !defined(__mc68000__)
@@ -638,7 +561,6 @@ static struct file_operations mem_fops = {
 static struct file_operations kmem_fops = {
 	.llseek		= memory_lseek,
 	.read		= read_kmem,
-	.write		= write_kmem,
 	.mmap		= mmap_kmem,
 	.open		= open_kmem,
 };

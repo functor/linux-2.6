@@ -18,7 +18,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # that the kernel isn't the stock distribution kernel, for example by
 # adding some text to the end of the version number.
 #
-%define sublevel 7
+%define sublevel 8
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
 %define rhbsys  %([ -r /etc/beehive-root ] && echo  || echo .`whoami`)
@@ -83,9 +83,7 @@ AutoReqProv: no
 # List the packages used during the kernel build
 #
 BuildPreReq: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
-BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg, kernel-utils >= 2.4-12.1.139
-# temporary req since modutils changed output format 
-#BuildPreReq: modutils >= 2.4.26-14
+BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg, kernel-utils >= 1:2.4-12.1.142
 BuildRequires: gcc >= 2.96-98, binutils >= 2.12, redhat-rpm-config
 BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 BuildArchitectures: i686
@@ -495,9 +493,59 @@ fi
 %endif
 
 %changelog
+* Thu Sep 16 2004 Mark Huang <mlhuang@cs.princeton.edu>
+- merge to Fedora Core 2 2.6.8-1.521
+
+* Tue Aug 31 2004 Arjan van de Ven <arjanv@redhat.com>
+- fix execshield buglet with legacy binaries
+- 2.6.9-rc1-bk7
+
+* Mon Aug 30 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.9-rc1-bk6
+
+* Sat Aug 28 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.9-rc1-bk4, now with i915 DRM driver
+
+* Fri Aug 27 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.9-rc1-bk2 
+
+* Mon Aug 23 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.8.1-bk2
+
+* Sat Aug 21 2004 Arjan van de Ven <arjanv@redhat.com>
+- attempt to fix early-udev bug
+
+* Fri Aug 13 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.8-rc4-bk3
+- split execshield up some more
+
+* Fri Aug 13 2004 Dave Jones <davej@redhat.com>
+- Update SCSI whitelist again with some more card readers.
+
+* Mon Aug 9 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.8-rc3-bk3
+
 * Thu Aug  5 2004 Mark Huang <mlhuang@cs.princeton.edu>
 - adapt for Fedora Core 2 based PlanetLab 3.0 (remove Source and Patch
   sections, most non-x86 sections, and GPG sections)
+
+* Wed Aug 4 2004 Arjan van de Ven <arjanv@redhat.com>
+- Add the flex-mmap bits for s390/s390x (Pete Zaitcev)
+- Add flex-mmap for x86-64 32 bit emulation
+- 2.6.8-rc3
+
+* Mon Aug 2 2004 Arjan van de Ven <arjanv@redhat.com>
+- Add Rik's token trashing control patch
+
+* Sun Aug 1 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.8-rc2-bk11
+
+* Fri Jul 30 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.8-rc2-bk8
+
+* Wed Jul 28 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.8-rc2-bk6
+- make a start at splitting up the execshield patchkit
 
 * Fri Jul 16 2004 Arjan van de Ven <arjanv@redhat.com>
 - ppc32 embedded updates

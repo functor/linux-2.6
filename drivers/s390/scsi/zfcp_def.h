@@ -33,7 +33,7 @@
 #define ZFCP_DEF_H
 
 /* this drivers version (do not edit !!! generated and updated by cvs) */
-#define ZFCP_DEF_REVISION "$Revision: 1.75 $"
+#define ZFCP_DEF_REVISION "$Revision: 1.81 $"
 
 /*************************** INCLUDES *****************************************/
 
@@ -42,6 +42,7 @@
 #include <linux/miscdevice.h>
 #include <linux/major.h>
 #include <linux/blkdev.h>
+#include <linux/delay.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_tcq.h>
 #include <scsi/scsi_cmnd.h>
@@ -55,7 +56,6 @@
 #include <asm/qdio.h>
 #include <asm/debug.h>
 #include <asm/ebcdic.h>
-#include <linux/reboot.h>
 #include <linux/mempool.h>
 #include <linux/syscalls.h>
 #include <linux/ioctl.h>
@@ -70,7 +70,7 @@
 /********************* GENERAL DEFINES *********************************/
 
 /* zfcp version number, it consists of major, minor, and patch-level number */
-#define ZFCP_VERSION		"4.0.0"
+#define ZFCP_VERSION		"4.1.3"
 
 static inline void *
 zfcp_sg_to_address(struct scatterlist *list)
@@ -1074,8 +1074,6 @@ struct zfcp_data {
 						       lists */
 	struct semaphore        config_sema;        /* serialises configuration
 						       changes */
-	struct notifier_block	reboot_notifier;     /* used to register cleanup
-							functions */
 	atomic_t		loglevel;            /* current loglevel */
 	char                    init_busid[BUS_ID_SIZE];
 	wwn_t                   init_wwpn;
@@ -1125,32 +1123,6 @@ extern void _zfcp_hex_dump(char *, int);
 		if (ZFCP_LOG_CHECK(level)) { \
 			_zfcp_hex_dump(addr, count); \
 		}
-/*
- * Not yet optimal but useful:
- * Waits until the condition is met or the timeout occurs.
- * The condition may be a function call. This allows to
- * execute some additional instructions in addition
- * to a simple condition check.
- * The timeout is modified on exit and holds the remaining time.
- * Thus it is zero if a timeout ocurred, i.e. the condition was 
- * not met in the specified interval.
- */
-#define __ZFCP_WAIT_EVENT_TIMEOUT(timeout, condition) \
-do { \
-	set_current_state(TASK_UNINTERRUPTIBLE); \
-	while (!(condition) && timeout) \
-		timeout = schedule_timeout(timeout); \
-	current->state = TASK_RUNNING; \
-} while (0);
-
-#define ZFCP_WAIT_EVENT_TIMEOUT(waitqueue, timeout, condition) \
-do { \
-	wait_queue_t entry; \
-	init_waitqueue_entry(&entry, current); \
-	add_wait_queue(&waitqueue, &entry); \
-	__ZFCP_WAIT_EVENT_TIMEOUT(timeout, condition) \
-	remove_wait_queue(&waitqueue, &entry); \
-} while (0);
 
 #define zfcp_get_busid_by_adapter(adapter) (adapter->ccw_device->dev.bus_id)
 #define zfcp_get_busid_by_port(port) (zfcp_get_busid_by_adapter(port->adapter))

@@ -27,6 +27,7 @@
  */
 #if !defined(IN_STRING_C)
 
+#define __HAVE_ARCH_STRCPY
 static inline char * strcpy(char * dest,const char *src)
 {
 int d0, d1, d2;
@@ -40,6 +41,7 @@ __asm__ __volatile__(
 return dest;
 }
 
+#define __HAVE_ARCH_STRNCPY
 static inline char * strncpy(char * dest,const char *src,size_t count)
 {
 int d0, d1, d2, d3;
@@ -81,6 +83,7 @@ static inline size_t strncpy_count(char * dest,const char *src,size_t count)
 	return count;
 }
 
+#define __HAVE_ARCH_STRCAT
 static inline char * strcat(char * dest,const char * src)
 {
 int d0, d1, d2, d3;
@@ -97,6 +100,7 @@ __asm__ __volatile__(
 return dest;
 }
 
+#define __HAVE_ARCH_STRNCAT
 static inline char * strncat(char * dest,const char * src,size_t count)
 {
 int d0, d1, d2, d3;
@@ -119,6 +123,7 @@ __asm__ __volatile__(
 return dest;
 }
 
+#define __HAVE_ARCH_STRCMP
 static inline int strcmp(const char * cs,const char * ct)
 {
 int d0, d1;
@@ -139,6 +144,7 @@ __asm__ __volatile__(
 return __res;
 }
 
+#define __HAVE_ARCH_STRNCMP
 static inline int strncmp(const char * cs,const char * ct,size_t count)
 {
 register int __res;
@@ -161,6 +167,7 @@ __asm__ __volatile__(
 return __res;
 }
 
+#define __HAVE_ARCH_STRCHR
 static inline char * strchr(const char * s, int c)
 {
 int d0;
@@ -179,6 +186,7 @@ __asm__ __volatile__(
 return __res;
 }
 
+#define __HAVE_ARCH_STRRCHR
 static inline char * strrchr(const char * s, int c)
 {
 int d0, d1;

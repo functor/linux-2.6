@@ -234,7 +234,7 @@ config BMAC
 
 config OAKNET
 	tristate "National DP83902AV (Oak ethernet) support"
-	depends on NET_ETHERNET && PPC
+	depends on NET_ETHERNET && PPC && BROKEN
 	select CRC32
 	help
 	  Say Y if your machine has this type of Ethernet network card.
@@ -1075,6 +1075,7 @@ config ETH16I
 
 config NE2000
 	tristate "NE2000/NE1000 support"
+	depends on ISA || (Q40 && m)
 	select CRC32
 	---help---
 	  If you have a network (Ethernet) card of this type, say Y and read
@@ -2129,17 +2130,6 @@ config TIGON3
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called tg3.  This is recommended.
-
-config GIANFAR
-	tristate "Gianfar Ethernet"
-	depends on 85xx
-	help
-	  This driver supports the Gigabit TSEC on the MPC85xx 
-	  family of chips, and the FEC on the 8540
-
-config GFAR_NAPI
-	bool "NAPI Support"
-	depends on GIANFAR
 
 endmenu
 

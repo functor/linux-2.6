@@ -23,6 +23,7 @@
 #include <linux/mount.h>
 #include <linux/mempolicy.h>
 #include <linux/rmap.h>
+#include <linux/random.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
@@ -757,6 +758,13 @@ unsigned long do_mmap_pgoff(struct mm_struct *mm, struct file * file,
 	int accountable = 1;
 	unsigned long charged = 0;
 
+	/*
+	 * Does the application expect PROT_READ to imply PROT_EXEC:
+	 */
+	if (unlikely((prot & PROT_READ) &&
+			(current->personality & READ_IMPLIES_EXEC)))
+		prot |= PROT_EXEC;
+
 	if (file) {
 		if (is_file_hugepages(file))
 			accountable = 0;
@@ -788,7 +796,7 @@ unsigned long do_mmap_pgoff(struct mm_struct *mm, struct file * file,
 	/* Obtain the address to map to. we verify (or select) it and ensure
 	 * that it represents a valid section of the address space.
 	 */
-	addr = get_unmapped_area(file, addr, len, pgoff, flags, prot & PROT_EXEC);
+	addr = get_unmapped_area_prot(file, addr, len, pgoff, flags, prot & PROT_EXEC);
 	if (addr & ~PAGE_MASK)
 		return addr;
 
@@ -1028,9 +1036,9 @@ EXPORT_SYMBOL(do_mmap_pgoff);
  * This function "knows" that -ENOMEM has the bits set.
  */
 #ifndef HAVE_ARCH_UNMAPPED_AREA
-static inline unsigned long
+unsigned long
 arch_get_unmapped_area(struct file *filp, unsigned long addr,
-		unsigned long len, unsigned long pgoff, unsigned long flags, unsigned long exec)
+		unsigned long len, unsigned long pgoff, unsigned long flags)
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
@@ -1072,15 +1080,120 @@ full_search:
 		addr = vma->vm_end;
 	}
 }
-#else
-extern unsigned long
-arch_get_unmapped_area(struct file *, unsigned long, unsigned long,
-			unsigned long, unsigned long, unsigned long);
 #endif	
 
+void arch_unmap_area(struct vm_area_struct *area)
+{
+	/*
+	 * Is this a new hole at the lowest possible address?
+	 */
+	if (area->vm_start >= TASK_UNMAPPED_BASE &&
+			area->vm_start < area->vm_mm->free_area_cache)
+		area->vm_mm->free_area_cache = area->vm_start;
+}
+
+/*
+ * This mmap-allocator allocates new areas top-down from below the
+ * stack's low limit (the base):
+ */
 unsigned long
-get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
-		unsigned long pgoff, unsigned long flags, unsigned long exec)
+arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
+			  const unsigned long len, const unsigned long pgoff,
+			  const unsigned long flags)
+{
+	struct vm_area_struct *vma, *prev_vma;
+	struct mm_struct *mm = current->mm;
+	unsigned long base = mm->mmap_base, addr = addr0;
+	int first_time = 1;
+
+	/* requested length too big for entire address space */
+	if (len > TASK_SIZE)
+		return -ENOMEM;
+
+	/* dont allow allocations above current base */
+	if (mm->free_area_cache > base)
+		mm->free_area_cache = base;
+
+	/* requesting a specific address */
+	if (addr) {
+		addr = PAGE_ALIGN(addr);
+		vma = find_vma(mm, addr);
+		if (TASK_SIZE - len >= addr &&
+				(!vma || addr + len <= vma->vm_start))
+			return addr;
+	}
+
+try_again:
+	/* make sure it can fit in the remaining address space */
+	if (mm->free_area_cache < len)
+		goto fail;
+
+	/* either no address requested or cant fit in requested address hole */
+	addr = (mm->free_area_cache - len) & PAGE_MASK;
+	do {
+		/*
+		 * Lookup failure means no vma is above this address,
+		 * i.e. return with success:
+		 */
+ 	 	if (!(vma = find_vma_prev(mm, addr, &prev_vma)))
+			return addr;
+
+		/*
+		 * new region fits between prev_vma->vm_end and
+		 * vma->vm_start, use it:
+		 */
+		if (addr+len <= vma->vm_start &&
+				(!prev_vma || (addr >= prev_vma->vm_end)))
+			/* remember the address as a hint for next time */
+			return (mm->free_area_cache = addr);
+		else
+			/* pull free_area_cache down to the first hole */
+			if (mm->free_area_cache == vma->vm_end)
+				mm->free_area_cache = vma->vm_start;
+
+		/* try just below the current vma->vm_start */
+		addr = vma->vm_start-len;
+	} while (len <= vma->vm_start);
+
+fail:
+	/*
+	 * if hint left us with no space for the requested
+	 * mapping then try again:
+	 */
+	if (first_time) {
+		mm->free_area_cache = base;
+		first_time = 0;
+		goto try_again;
+	}
+	/*
+	 * A failed mmap() very likely causes application failure,
+	 * so fall back to the bottom-up function here. This scenario
+	 * can happen with large stack limits and large mmap()
+	 * allocations.
+	 */
+	mm->free_area_cache = TASK_UNMAPPED_BASE;
+	addr = arch_get_unmapped_area(filp, addr0, len, pgoff, flags);
+	/*
+	 * Restore the topdown base:
+	 */
+	mm->free_area_cache = base;
+
+	return addr;
+}
+
+void arch_unmap_area_topdown(struct vm_area_struct *area)
+{
+	/*
+	 * Is this a new hole at the highest possible address?
+	 */
+	if (area->vm_end > area->vm_mm->free_area_cache)
+		area->vm_mm->free_area_cache = area->vm_end;
+}
+
+
+unsigned long
+get_unmapped_area_prot(struct file *file, unsigned long addr, unsigned long len,
+		unsigned long pgoff, unsigned long flags, int exec)
 {
 	if (flags & MAP_FIXED) {
 		unsigned long ret;
@@ -1112,10 +1225,80 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 		return file->f_op->get_unmapped_area(file, addr, len,
 						pgoff, flags);
 
-	return arch_get_unmapped_area(file, addr, len, pgoff, flags, exec);
+	if (exec && current->mm->get_unmapped_exec_area)
+		return current->mm->get_unmapped_exec_area(file, addr, len, pgoff, flags);
+	else
+		return current->mm->get_unmapped_area(file, addr, len, pgoff, flags);
 }
 
-EXPORT_SYMBOL(get_unmapped_area);
+EXPORT_SYMBOL(get_unmapped_area_prot);
+
+
+#define SHLIB_BASE             0x00111000
+
+unsigned long arch_get_unmapped_exec_area(struct file *filp, unsigned long addr0,
+		unsigned long len0, unsigned long pgoff, unsigned long flags)
+{
+	unsigned long addr = addr0, len = len0;
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+	unsigned long tmp;
+
+	if (len > TASK_SIZE)
+		return -ENOMEM;
+		
+	if (!addr && !(flags & MAP_FIXED))
+		addr = randomize_range(SHLIB_BASE, 0x01000000, len);
+
+	if (addr) {
+		addr = PAGE_ALIGN(addr);
+		vma = find_vma(mm, addr);
+		if (TASK_SIZE - len >= addr &&
+		    (!vma || addr + len <= vma->vm_start)) {
+			return addr;
+		}
+	}
+
+	addr = SHLIB_BASE;
+
+	for (vma = find_vma(mm, addr); ; vma = vma->vm_next) {
+		/* At this point:  (!vma || addr < vma->vm_end). */
+		if (TASK_SIZE - len < addr) {
+			return -ENOMEM;
+		}
+		if (!vma || addr + len <= vma->vm_start) {
+			/*
+			 * Must not let a PROT_EXEC mapping get into the
+			 * brk area:
+			 */
+			if (addr + len > mm->brk)
+				goto failed;
+			
+			/*
+			 * Up until the brk area we randomize addresses
+			 * as much as possible:
+			 */
+			if (addr >= 0x01000000) {
+				tmp = randomize_range(0x01000000, mm->brk, len);
+				vma = find_vma(mm, tmp);
+				if (TASK_SIZE - len >= tmp &&
+				    (!vma || tmp + len <= vma->vm_start))
+					return tmp;
+			}
+			/*
+			 * Ok, randomization didnt work out - return
+			 * the result of the linear search:
+			 */
+			return addr;
+		}
+		addr = vma->vm_end;
+	}
+	
+failed:
+	return current->mm->get_unmapped_area(filp, addr0, len0, pgoff, flags);
+}
+
+
 
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
 struct vm_area_struct * find_vma(struct mm_struct * mm, unsigned long addr)
@@ -1412,7 +1595,6 @@ no_mmaps:
 static void unmap_vma(struct mm_struct *mm, struct vm_area_struct *area)
 {
 	size_t len = area->vm_end - area->vm_start;
-	unsigned long old_end = area->vm_end;
 
 	// area->vm_mm->total_vm -= len >> PAGE_SHIFT;
 	vx_vmpages_sub(area->vm_mm, len >> PAGE_SHIFT);
@@ -1420,20 +1602,8 @@ static void unmap_vma(struct mm_struct *mm, struct vm_area_struct *area)
 	if (area->vm_flags & VM_LOCKED)
 		// area->vm_mm->locked_vm -= len >> PAGE_SHIFT;
 		vx_vmlocked_sub(area->vm_mm, len >> PAGE_SHIFT);
-	/*
-	 * Is this a new hole at the lowest possible address?
-	 */
-	if (area->vm_start >= TASK_UNMAPPED_BASE &&
-				area->vm_start < area->vm_mm->free_area_cache)
-	      area->vm_mm->free_area_cache = area->vm_start;
-	/*
-	 * Is this a new hole at the highest possible address?
-	 */
-	if (area->vm_start > area->vm_mm->non_executable_cache)
-		area->vm_mm->non_executable_cache = area->vm_start;
+	area->vm_mm->unmap_area(area);
 	remove_vm_struct(area);
-	if (unlikely(area->vm_flags & VM_EXEC))
-		arch_remove_exec_range(mm, old_end);
 }
 
 /*
