@@ -1440,8 +1440,7 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 	address &= PAGE_MASK;
 	grow = (address - vma->vm_end) >> PAGE_SHIFT;
 
-	/* Someone beat us to it */
-	if (grow <= 0) {
+	if (address < vma->vm_end) {
 		anon_vma_unlock(vma);
 		return 0;
 	}
@@ -1517,8 +1516,7 @@ int expand_stack(struct vm_area_struct *vma, unsigned long address)
 	address &= PAGE_MASK;
 	grow = (vma->vm_start - address) >> PAGE_SHIFT;
 
-	/* Someone beat us to it */
-	if (grow <= 0) {
+	if (address >= vma->vm_start) {
 		anon_vma_unlock(vma);
 		return 0;
 	}
