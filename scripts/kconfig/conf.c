@@ -20,6 +20,7 @@ enum {
 	ask_all,
 	ask_new,
 	ask_silent,
+	dont_ask,
 	set_default,
 	set_yes,
 	set_mod,
@@ -35,6 +36,8 @@ static char line[128];
 static struct menu *rootEntry;
 
 static char nohelp_text[] = "Sorry, no help available for this option yet.\n";
+
+static int return_value = 0;
 
 static void strip(char *str)
 {
@@ -92,6 +95,12 @@ static void conf_askvalue(struct symbol *sym, const char *def)
 	case ask_all:
 		fflush(stdout);
 		fgets(line, 128, stdin);
+		return;
+	case dont_ask:
+		if (!sym_has_value(sym)) {
+			fprintf(stderr,"CONFIG_%s\n",sym->name);
+			return_value++;
+		}
 		return;
 	case set_default:
 		printf("%s\n", def);
@@ -337,6 +346,10 @@ static int conf_choice(struct menu *menu)
 			printf("?");
 		printf("]: ");
 		switch (input_mode) {
+		case dont_ask:
+			cnt = def;
+			printf("%d\n", cnt);
+			break;
 		case ask_new:
 		case ask_silent:
 			if (!is_new) {
@@ -472,7 +485,10 @@ static void check_conf(struct menu *menu)
 			if (!conf_cnt++)
 				printf("*\n* Restart config...\n*\n");
 			rootEntry = menu_get_parent_menu(menu);
-			conf(rootEntry);
+			if (input_mode == dont_ask)
+				fprintf(stderr,"CONFIG_%s\n",sym->name);
+			else
+				conf(rootEntry);
 		}
 		if (sym_is_choice(sym) && sym_get_tristate_value(sym) != mod)
 			return;
@@ -492,6 +508,9 @@ int main(int ac, char **av)
 		switch (av[i++][1]) {
 		case 'o':
 			input_mode = ask_new;
+			break;
+		case 'b':
+			input_mode = dont_ask;
 			break;
 		case 's':
 			input_mode = ask_silent;
@@ -557,6 +576,7 @@ int main(int ac, char **av)
 		}
 	case ask_all:
 	case ask_new:
+	case dont_ask:
 		conf_read(NULL);
 		break;
 	default:
@@ -574,10 +594,10 @@ int main(int ac, char **av)
 	do {
 		conf_cnt = 0;
 		check_conf(&rootmenu);
-	} while (conf_cnt);
+	} while ((conf_cnt) && (input_mode != dont_ask));
 	if (conf_write(NULL)) {
 		fprintf(stderr, "\n*** Error during writing of the kernel configuration.\n\n");
 		return 1;
 	}
-	return 0;
+	return return_value;
 }

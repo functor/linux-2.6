@@ -73,9 +73,9 @@ static void bad_page(const char *function, struct page *page)
 {
 	printk(KERN_EMERG "Bad page state at %s (in process '%s', page %p)\n",
 		function, current->comm, page);
-	printk(KERN_EMERG "flags:0x%08lx mapping:%p mapped:%d count:%d\n",
+	printk(KERN_EMERG "flags:0x%08lx mapping:%p mapcount:%d count:%d\n",
 		(unsigned long)page->flags, page->mapping,
-		page_mapped(page), page_count(page));
+		(int)page->mapcount, page_count(page));
 	printk(KERN_EMERG "Backtrace:\n");
 	dump_stack();
 	printk(KERN_EMERG "Trying to fix it up, but a reboot is needed\n");
@@ -90,6 +90,7 @@ static void bad_page(const char *function, struct page *page)
 			1 << PG_writeback);
 	set_page_count(page, 0);
 	page->mapping = NULL;
+	page->mapcount = 0;
 }
 
 #ifndef CONFIG_HUGETLB_PAGE
@@ -278,6 +279,8 @@ void __free_pages_ok(struct page *page, unsigned int order)
 	LIST_HEAD(list);
 	int i;
 
+	arch_free_page(page, order);
+
 	mod_page_state(pgfree, 1 << order);
 	for (i = 0 ; i < (1 << order) ; ++i)
 		free_pages_check(__FUNCTION__, page + i);
@@ -460,6 +463,32 @@ void drain_local_pages(void)
 }
 #endif /* CONFIG_PM */
 
+static void zone_statistics(struct zonelist *zonelist, struct zone *z)
+{
+#ifdef CONFIG_NUMA
+	unsigned long flags;
+	int cpu;
+	pg_data_t *pg = z->zone_pgdat;
+	pg_data_t *orig = zonelist->zones[0]->zone_pgdat;
+	struct per_cpu_pageset *p;
+
+	local_irq_save(flags);
+	cpu = smp_processor_id();
+	p = &z->pageset[cpu];
+	if (pg == orig) {
+		z->pageset[cpu].numa_hit++;
+	} else {
+		p->numa_miss++;
+		zonelist->zones[0]->pageset[cpu].numa_foreign++;
+	}
+	if (pg == NODE_DATA(numa_node_id()))
+		p->local_node++;
+	else
+		p->other_node++;
+	local_irq_restore(flags);
+#endif
+}
+
 /*
  * Free a 0-order page
  */
@@ -469,6 +498,8 @@ static void fastcall free_hot_cold_page(struct page *page, int cold)
 	struct zone *zone = page_zone(page);
 	struct per_cpu_pages *pcp;
 	unsigned long flags;
+
+	arch_free_page(page, 0);
 
 	kernel_map_pages(page, 1, 0);
 	inc_page_state(pgfree);
@@ -593,8 +624,10 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 		if (z->free_pages >= min ||
 				(!wait && z->free_pages >= z->pages_high)) {
 			page = buffered_rmqueue(z, order, gfp_mask);
-			if (page)
+			if (page) {
+				zone_statistics(zonelist, z);
 				goto got_pg;
+			}
 		}
 	}
 
@@ -616,8 +649,10 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 		if (z->free_pages >= min ||
 				(!wait && z->free_pages >= z->pages_high)) {
 			page = buffered_rmqueue(z, order, gfp_mask);
-			if (page)
+			if (page) {
+				zone_statistics(zonelist, z);
 				goto got_pg;
+			}
 		}
 	}
 
@@ -630,8 +665,10 @@ rebalance:
 			struct zone *z = zones[i];
 
 			page = buffered_rmqueue(z, order, gfp_mask);
-			if (page)
+			if (page) {
+				zone_statistics(zonelist, z);
 				goto got_pg;
+			}
 		}
 		goto nopage;
 	}
@@ -658,8 +695,10 @@ rebalance:
 		if (z->free_pages >= min ||
 				(!wait && z->free_pages >= z->pages_high)) {
 			page = buffered_rmqueue(z, order, gfp_mask);
-			if (page)
+			if (page) {
+ 				zone_statistics(zonelist, z);
 				goto got_pg;
+			}
 		}
 	}
 
@@ -982,6 +1021,8 @@ void si_meminfo(struct sysinfo *val)
 	val->freehigh = 0;
 #endif
 	val->mem_unit = PAGE_SIZE;
+	if (vx_flags(VXF_VIRT_MEM, 0))
+		vx_vsi_meminfo(val);
 }
 
 EXPORT_SYMBOL(si_meminfo);
@@ -1284,7 +1325,7 @@ static void __init build_zonelists(pg_data_t *pgdat)
  		for (node = 0; node < local_node; node++)
  			j = build_zonelists_node(NODE_DATA(node), zonelist, j, k);
  
-		zonelist->zones[j++] = NULL;
+		zonelist->zones[j] = NULL;
 	}
 }
 

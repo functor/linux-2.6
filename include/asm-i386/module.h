@@ -60,11 +60,7 @@ struct mod_arch_specific
 #define MODULE_REGPARM ""
 #endif
 
-#ifdef CONFIG_4KSTACKS
 #define MODULE_STACKSIZE "4KSTACKS "
-#else
-#define MODULE_STACKSIZE ""
-#endif
 
 #define MODULE_ARCH_VERMAGIC MODULE_PROC_FAMILY MODULE_REGPARM MODULE_STACKSIZE
 

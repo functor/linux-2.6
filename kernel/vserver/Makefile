@@ -1,0 +1,12 @@
+#
+# Makefile for the Linux vserver routines.
+#
+
+
+obj-y		+= vserver.o
+
+vserver-y	:= switch.o context.o namespace.o sched.o network.o inode.o \
+		   limit.o cvirt.o signal.o proc.o sysctl.o init.o
+
+vserver-$(CONFIG_VSERVER_LEGACY) += legacy.o
+

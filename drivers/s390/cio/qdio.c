@@ -1301,7 +1301,7 @@ next:
 
 	}
 	kfree(irq_ptr->qdr);
-	kfree(irq_ptr);
+	kfree(irq_ptr->actual_alloc);	/* This frees irq_ptr itself. */
 }
 
 static void
@@ -2565,6 +2565,8 @@ qdio_initialize(struct qdio_initialize *init_data)
 int
 qdio_allocate(struct qdio_initialize *init_data)
 {
+	char *mem;
+	unsigned off;
 	struct qdio_irq *irq_ptr;
 	char dbf_text[15];
 
@@ -2586,17 +2588,21 @@ qdio_allocate(struct qdio_initialize *init_data)
 	qdio_allocate_do_dbf(init_data);
 
 	/* create irq */
-	irq_ptr=kmalloc(sizeof(struct qdio_irq), GFP_KERNEL | GFP_DMA);
+	mem = kmalloc(sizeof(struct qdio_irq) + 0xff, GFP_KERNEL | GFP_DMA);
 
 	QDIO_DBF_TEXT0(0,setup,"irq_ptr:");
 	QDIO_DBF_HEX0(0,setup,&irq_ptr,sizeof(void*));
 
-	if (!irq_ptr) {
+	if (!mem) {
 		QDIO_PRINT_ERR("kmalloc of irq_ptr failed!\n");
 		return -ENOMEM;
 	}
 
+	irq_ptr = (struct qdio_irq *) mem;
+	if ((off = ((unsigned long) mem) & 0xff) != 0)
+		irq_ptr = (struct qdio_irq *)(mem + 0x100 - off);
 	memset(irq_ptr,0,sizeof(struct qdio_irq));
+	irq_ptr->actual_alloc = mem;
 
 	init_MUTEX(&irq_ptr->setting_up_sema);
 

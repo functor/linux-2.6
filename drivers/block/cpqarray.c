@@ -418,7 +418,8 @@ static int cpqarray_register_ctlr( int i, struct pci_dev *pdev)
 	}
 	hba[i]->access.set_intr_mask(hba[i], 0);
 	if (request_irq(hba[i]->intr, do_ida_intr,
-		SA_INTERRUPT|SA_SHIRQ, hba[i]->devname, hba[i]))
+		SA_INTERRUPT|SA_SHIRQ|SA_SAMPLE_RANDOM,
+		hba[i]->devname, hba[i]))
 	{
 		printk(KERN_ERR "cpqarray: Unable to get irq %d for %s\n",
 				hba[i]->intr, hba[i]->devname);
@@ -1193,7 +1194,7 @@ static int ida_ioctl(struct inode *inode, struct file *filep, unsigned int cmd, 
 		if (error)
 			goto out_passthru;
 		error = -EFAULT;
-		if (copy_to_user(io, &my_io, sizeof(*my_io)))
+		if (copy_to_user(io, my_io, sizeof(*my_io)))
 			goto out_passthru;
 		error = 0;
 out_passthru:

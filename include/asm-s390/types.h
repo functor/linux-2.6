@@ -94,6 +94,9 @@ typedef u64 sector_t;
 #endif
 
 #endif /* ! __s390x__   */
+
+typedef unsigned int kmem_bufctl_t;
+
 #endif /* __ASSEMBLY__  */
 #endif /* __KERNEL__    */
 #endif /* _S390_TYPES_H */

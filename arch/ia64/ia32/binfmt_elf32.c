@@ -73,15 +73,13 @@ ia64_elf32_init (struct pt_regs *regs)
 	 */
 	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
 	if (vma) {
+		memset(vma, 0, sizeof(*vma));
 		vma->vm_mm = current->mm;
 		vma->vm_start = IA32_GDT_OFFSET;
 		vma->vm_end = vma->vm_start + PAGE_SIZE;
 		vma->vm_page_prot = PAGE_SHARED;
-		vma->vm_flags = VM_READ|VM_MAYREAD;
+		vma->vm_flags = VM_READ|VM_MAYREAD|VM_RESERVED;
 		vma->vm_ops = &ia32_shared_page_vm_ops;
-		vma->vm_pgoff = 0;
-		vma->vm_file = NULL;
-		vma->vm_private_data = NULL;
 		down_write(&current->mm->mmap_sem);
 		{
 			insert_vm_struct(current->mm, vma);
@@ -95,15 +93,12 @@ ia64_elf32_init (struct pt_regs *regs)
 	 */
 	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
 	if (vma) {
+		memset(vma, 0, sizeof(*vma));
 		vma->vm_mm = current->mm;
 		vma->vm_start = IA32_LDT_OFFSET;
 		vma->vm_end = vma->vm_start + PAGE_ALIGN(IA32_LDT_ENTRIES*IA32_LDT_ENTRY_SIZE);
 		vma->vm_page_prot = PAGE_SHARED;
 		vma->vm_flags = VM_READ|VM_WRITE|VM_MAYREAD|VM_MAYWRITE;
-		vma->vm_ops = NULL;
-		vma->vm_pgoff = 0;
-		vma->vm_file = NULL;
-		vma->vm_private_data = NULL;
 		down_write(&current->mm->mmap_sem);
 		{
 			insert_vm_struct(current->mm, vma);
@@ -151,7 +146,7 @@ ia64_elf32_init (struct pt_regs *regs)
 int
 ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 {
-	unsigned long stack_base;
+	unsigned long stack_base, grow;
 	struct vm_area_struct *mpnt;
 	struct mm_struct *mm = current->mm;
 	int i;
@@ -168,10 +163,15 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt)
 		return -ENOMEM;
 
-	if (security_vm_enough_memory((IA32_STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))>>PAGE_SHIFT)) {
+	grow = (IA32_STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))
+		>> PAGE_SHIFT;
+	if (security_vm_enough_memory(grow) ||
+		!vx_vmpages_avail(mm, grow)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
+
+	memset(mpnt, 0, sizeof(*mpnt));
 
 	down_write(&current->mm->mmap_sem);
 	{
@@ -186,19 +186,17 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 			mpnt->vm_flags = VM_STACK_FLAGS;
 		mpnt->vm_page_prot = (mpnt->vm_flags & VM_EXEC)?
 					PAGE_COPY_EXEC: PAGE_COPY;
-		mpnt->vm_ops = NULL;
-		mpnt->vm_pgoff = 0;
-		mpnt->vm_file = NULL;
-		mpnt->vm_private_data = 0;
 		insert_vm_struct(current->mm, mpnt);
-		current->mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		// current->mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		vx_vmpages_sub(current->mm, current->mm->total_vm -
+			((mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT));
 	}
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
 		struct page *page = bprm->page[i];
 		if (page) {
 			bprm->page[i] = NULL;
-			put_dirty_page(current, page, stack_base, mpnt->vm_page_prot);
+			install_arg_page(mpnt, page, stack_base);
 		}
 		stack_base += PAGE_SIZE;
 	}
@@ -218,7 +216,7 @@ elf32_set_personality (void)
 }
 
 static unsigned long
-elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type)
+elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type, unsigned long unused)
 {
 	unsigned long pgoff = (eppnt->p_vaddr) & ~IA32_PAGE_MASK;
 

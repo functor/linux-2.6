@@ -5,7 +5,9 @@
 #include <linux/sched.h>
 #include <linux/spinlock.h>
 
-#if defined(CONFIG_SMP) || defined(CONFIG_PREEMPT)
+#define BKL_DEBUG /* For testing for sleep_on() abuse */
+
+#if defined(CONFIG_SMP) || defined(CONFIG_PREEMPT) || defined(BKL_DEBUG)
 
 extern spinlock_t kernel_flag;
 

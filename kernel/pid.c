@@ -224,7 +224,8 @@ void fastcall detach_pid(task_t *task, enum pid_type type)
 
 task_t *find_task_by_pid(int nr)
 {
-	struct pid *pid = find_pid(PIDTYPE_PID, nr);
+	struct pid *pid = find_pid(PIDTYPE_PID,
+		vx_rmap_tgid(current->vx_info, nr));
 
 	if (!pid)
 		return NULL;

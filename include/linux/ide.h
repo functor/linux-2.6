@@ -305,20 +305,25 @@ static inline void ide_std_init_ports(hw_regs_t *hw,
 
 #include <asm/ide.h>
 
+/* needed on alpha, x86/x86_64, ia64, mips, ppc32 and sh */
+#ifndef IDE_ARCH_OBSOLETE_DEFAULTS
+# define ide_default_io_base(index)	(0)
+# define ide_default_irq(base)		(0)
+# define ide_init_default_irq(base)	(0)
+#endif
+
 /*
  * ide_init_hwif_ports() is OBSOLETE and will be removed in 2.7 series.
- *
- * arm26, arm, h8300, m68k, m68knommu (broken) and i386-pc9800 (broken)
- * still have their own versions.
+ * New ports shouldn't define IDE_ARCH_OBSOLETE_INIT in <asm/ide.h>.
  */
-#if !defined(CONFIG_ARM) && !defined(CONFIG_H8300) && !defined(CONFIG_M68K)
+#ifdef IDE_ARCH_OBSOLETE_INIT
 static inline void ide_init_hwif_ports(hw_regs_t *hw,
 				       unsigned long io_addr,
 				       unsigned long ctl_addr,
 				       int *irq)
 {
 	if (!ctl_addr)
-		ide_std_init_ports(hw, io_addr, io_addr + 0x206);
+		ide_std_init_ports(hw, io_addr, ide_default_io_ctl(io_addr));
 	else
 		ide_std_init_ports(hw, io_addr, ctl_addr);
 
@@ -332,7 +337,16 @@ static inline void ide_init_hwif_ports(hw_regs_t *hw,
 		ppc_ide_md.ide_init_hwif(hw, io_addr, ctl_addr, irq);
 #endif
 }
-#endif /* !ARM && !H8300 && !M68K */
+#else
+static inline void ide_init_hwif_ports(hw_regs_t *hw,
+				       unsigned long io_addr,
+				       unsigned long ctl_addr,
+				       int *irq)
+{
+	if (io_addr || ctl_addr)
+		printk(KERN_WARNING "%s: must not be called\n", __FUNCTION__);
+}
+#endif /* IDE_ARCH_OBSOLETE_INIT */
 
 /* Currently only m68k, apus and m8xx need it */
 #ifndef IDE_ARCH_ACK_INTR
@@ -1472,7 +1486,6 @@ int ide_taskfile_ioctl(ide_drive_t *, unsigned int, unsigned long);
 int ide_cmd_ioctl(ide_drive_t *, unsigned int, unsigned long);
 int ide_task_ioctl(ide_drive_t *, unsigned int, unsigned long);
 
-extern void ide_delay_50ms(void);
 extern int system_bus_clock(void);
 
 extern u8 ide_auto_reduce_xfer(ide_drive_t *);
@@ -1541,7 +1554,6 @@ int ide_replace_subdriver(ide_drive_t *drive, const char *driver);
 #define NODMA 0
 #define NOAUTODMA 1
 #define AUTODMA 2
-#define EOL 255
 
 typedef struct ide_pci_enablebit_s {
 	u8	reg;	/* byte pci reg holding the enable-bit */
@@ -1549,9 +1561,15 @@ typedef struct ide_pci_enablebit_s {
 	u8	val;	/* value of masked reg when "enabled" */
 } ide_pci_enablebit_t;
 
+enum {
+	/* Uses ISA control ports not PCI ones. */
+	IDEPCI_FLAG_ISA_PORTS		= (1 << 0),
+
+	IDEPCI_FLAG_FORCE_MASTER	= (1 << 1),
+	IDEPCI_FLAG_FORCE_PDC		= (1 << 2),
+};
+
 typedef struct ide_pci_device_s {
-	u16			vendor;
-	u16			device;
 	char			*name;
 	void			(*init_setup)(struct pci_dev *, struct ide_pci_device_s *);
 	void			(*init_setup_dma)(struct pci_dev *, struct ide_pci_device_s *, ide_hwif_t *);
@@ -1565,7 +1583,7 @@ typedef struct ide_pci_device_s {
 	u8			bootable;
 	unsigned int		extra;
 	struct ide_pci_device_s	*next;
-	u8			isa_ports; 	/* Uses ISA control ports not PCI ones */
+	u8			flags;
 } ide_pci_device_t;
 
 extern void ide_setup_pci_device(struct pci_dev *, ide_pci_device_t *);

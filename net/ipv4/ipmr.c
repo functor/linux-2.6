@@ -844,7 +844,7 @@ static void mrtsock_destruct(struct sock *sk)
  *	MOSPF/PIM router set up we can clean this up.
  */
  
-int ip_mroute_setsockopt(struct sock *sk,int optname,char *optval,int optlen)
+int ip_mroute_setsockopt(struct sock *sk,int optname,char __user *optval,int optlen)
 {
 	int ret;
 	struct vifctl vif;
@@ -925,7 +925,7 @@ int ip_mroute_setsockopt(struct sock *sk,int optname,char *optval,int optlen)
 		case MRT_ASSERT:
 		{
 			int v;
-			if(get_user(v,(int *)optval))
+			if(get_user(v,(int __user *)optval))
 				return -EFAULT;
 			mroute_do_assert=(v)?1:0;
 			return 0;
@@ -934,7 +934,7 @@ int ip_mroute_setsockopt(struct sock *sk,int optname,char *optval,int optlen)
 		case MRT_PIM:
 		{
 			int v, ret;
-			if(get_user(v,(int *)optval))
+			if(get_user(v,(int __user *)optval))
 				return -EFAULT;
 			v = (v)?1:0;
 			rtnl_lock();
@@ -970,7 +970,7 @@ int ip_mroute_setsockopt(struct sock *sk,int optname,char *optval,int optlen)
  *	Getsock opt support for the multicast routing system.
  */
  
-int ip_mroute_getsockopt(struct sock *sk,int optname,char *optval,int *optlen)
+int ip_mroute_getsockopt(struct sock *sk,int optname,char __user *optval,int __user *optlen)
 {
 	int olr;
 	int val;
@@ -1115,7 +1115,7 @@ static inline int ipmr_forward_finish(struct sk_buff *skb)
 {
 	struct ip_options * opt	= &(IPCB(skb)->opt);
 
-	IP_INC_STATS_BH(IpForwDatagrams);
+	IP_INC_STATS_BH(OutForwDatagrams);
 
 	if (unlikely(opt->optlen))
 		ip_forward_options(skb);
@@ -1178,7 +1178,7 @@ static void ipmr_queue_xmit(struct sk_buff *skb, struct mfc_cache *c, int vifi)
 		   to blackhole.
 		 */
 
-		IP_INC_STATS_BH(IpFragFails);
+		IP_INC_STATS_BH(FragFails);
 		ip_rt_put(rt);
 		goto out_free;
 	}
