@@ -22,7 +22,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
 %define rhbsys  %([ -r /etc/beehive-root ] && echo  || echo .`whoami`)
-%define release 1.521.2.6.planetlab%{?date:.%{date}}
+%define release 1.521.2.2.planetlab%{?date:.%{date}}
 %define signmodules 0
 
 %define KVERREL %{PACKAGE_VERSION}-%{PACKAGE_RELEASE}
