@@ -23,6 +23,7 @@
 #include <linux/ptrace.h>
 #include <asm/param.h>
 #include <asm/uaccess.h>
+#include <asm/unistd.h>
 #include <asm/siginfo.h>
 
 /*
@@ -416,6 +417,7 @@ flush_signal_handlers(struct task_struct *t, int force_default)
 	}
 }
 
+EXPORT_SYMBOL_GPL(flush_signal_handlers);
 
 /* Notify the system that a driver wants to block all signals for this
  * process, and wants to be notified if any signals at all were to be
@@ -1050,6 +1052,9 @@ int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 	unsigned long flags;
 	int ret;
 
+	if (!vx_check(vx_task_xid(p), VX_ADMIN|VX_WATCH|VX_IDENT))
+		return -ESRCH;
+
 	ret = check_kill_permission(sig, info, p);
 	if (!ret && sig && p->sighand) {
 		spin_lock_irqsave(&p->sighand->siglock, flags);
@@ -1403,12 +1408,12 @@ static void __wake_up_parent(struct task_struct *p,
 	 * Fortunately this is not necessary for thread groups:
 	 */
 	if (p->tgid == tsk->tgid) {
-		wake_up_interruptible(&tsk->wait_chldexit);
+		wake_up_interruptible_sync(&tsk->wait_chldexit);
 		return;
 	}
 
 	do {
-		wake_up_interruptible(&tsk->wait_chldexit);
+		wake_up_interruptible_sync(&tsk->wait_chldexit);
 		tsk = next_thread(tsk);
 		if (tsk->signal != parent->signal)
 			BUG();
@@ -1545,6 +1550,34 @@ do_notify_parent_cldstop(struct task_struct *tsk, struct task_struct *parent)
 	spin_unlock_irqrestore(&sighand->siglock, flags);
 }
 
+int print_fatal_signals = 0;
+
+static void print_fatal_signal(struct pt_regs *regs, int signr)
+{
+	int i;
+	unsigned char insn;
+	printk("%s/%d: potentially unexpected fatal signal %d.\n",
+		current->comm, current->pid, signr);
+		
+#ifdef __i386__
+	printk("code at %08lx: ", regs->eip);
+	for (i = 0; i < 16; i++) {
+		__get_user(insn, (unsigned char *)(regs->eip + i));
+		printk("%02x ", insn);
+	}
+#endif	
+	printk("\n");
+	show_regs(regs);
+}
+
+static int __init setup_print_fatal_signals(char *str)
+{
+	get_option (&str, &print_fatal_signals);
+
+	return 1;
+}
+
+__setup("print-fatal-signals=", setup_print_fatal_signals);
 
 #ifndef HAVE_ARCH_GET_SIGNAL_TO_DELIVER
 
@@ -1736,6 +1769,11 @@ relock:
 		if (!signr)
 			break; /* will return 0 */
 
+		if ((signr == SIGSEGV) && print_fatal_signals) {
+			spin_unlock_irq(&current->sighand->siglock);
+			print_fatal_signal(regs, signr);
+			spin_lock_irq(&current->sighand->siglock);
+		}
 		if ((current->ptrace & PT_PTRACED) && signr != SIGKILL) {
 			ptrace_signal_deliver(regs, cookie);
 
@@ -1840,6 +1878,8 @@ relock:
 		 * Anything else is fatal, maybe with a core dump.
 		 */
 		current->flags |= PF_SIGNALED;
+		if (print_fatal_signals)
+			print_fatal_signal(regs, signr);
 		if (sig_kernel_coredump(signr) &&
 		    do_coredump((long)signr, signr, regs)) {
 			/*
@@ -2174,7 +2214,7 @@ sys_kill(int pid, int sig)
 }
 
 /**
- *  sys_tkill - send signal to one specific thread
+ *  sys_tgkill - send signal to one specific thread
  *  @tgid: the thread group ID of the thread
  *  @pid: the PID of the thread
  *  @sig: signal to be sent
@@ -2412,14 +2452,19 @@ out:
 	return error;
 }
 
+#ifdef __ARCH_WANT_SYS_SIGPENDING
+
 asmlinkage long
 sys_sigpending(old_sigset_t __user *set)
 {
 	return do_sigpending(set, sizeof(*set));
 }
 
-#if !defined(__alpha__)
-/* Alpha has its own versions with special arguments.  */
+#endif
+
+#ifdef __ARCH_WANT_SYS_SIGPROCMASK
+/* Some platforms have their own version with special arguments others
+   support only sys_rt_sigprocmask.  */
 
 asmlinkage long
 sys_sigprocmask(int how, old_sigset_t __user *set, old_sigset_t __user *oset)
@@ -2470,6 +2515,8 @@ out:
 	return error;
 }
 
+#endif /* SIGPROCMASK */
+
 #ifndef __sparc__
 asmlinkage long
 sys_rt_sigaction(int sig,
@@ -2499,10 +2546,9 @@ out:
 	return ret;
 }
 #endif /* __sparc__ */
-#endif
 
-#if !defined(__alpha__) && !defined(__ia64__) && \
-    !defined(__arm__) && !defined(__s390__)
+#ifdef __ARCH_WANT_SYS_SGETMASK
+
 /*
  * For backwards compatibility.  Functionality superseded by sigprocmask.
  */
@@ -2528,10 +2574,9 @@ sys_ssetmask(int newmask)
 
 	return old;
 }
-#endif /* !defined(__alpha__) */
+#endif /* __ARCH_WANT_SGETMASK */
 
-#if !defined(__alpha__) && !defined(__ia64__) && !defined(__mips__) && \
-    !defined(__arm__)
+#ifdef __ARCH_WANT_SYS_SIGNAL
 /*
  * For backwards compatibility.  Functionality superseded by sigaction.
  */
@@ -2548,9 +2593,9 @@ sys_signal(int sig, __sighandler_t handler)
 
 	return ret ? ret : (unsigned long)old_sa.sa.sa_handler;
 }
-#endif /* !alpha && !__ia64__ && !defined(__mips__) && !defined(__arm__) */
+#endif /* __ARCH_WANT_SYS_SIGNAL */
 
-#ifndef HAVE_ARCH_SYS_PAUSE
+#ifdef __ARCH_WANT_SYS_PAUSE
 
 asmlinkage long
 sys_pause(void)
@@ -2560,7 +2605,7 @@ sys_pause(void)
 	return -ERESTARTNOHAND;
 }
 
-#endif /* HAVE_ARCH_SYS_PAUSE */
+#endif
 
 void __init signals_init(void)
 {
@@ -2568,7 +2613,5 @@ void __init signals_init(void)
 		kmem_cache_create("sigqueue",
 				  sizeof(struct sigqueue),
 				  __alignof__(struct sigqueue),
-				  0, NULL, NULL);
-	if (!sigqueue_cachep)
-		panic("signals_init(): cannot create sigqueue SLAB cache");
+				  SLAB_PANIC, NULL, NULL);
 }

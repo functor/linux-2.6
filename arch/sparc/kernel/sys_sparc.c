@@ -136,7 +136,8 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void __user
 			if (!ptr)
 				goto out;
 			err = -EFAULT;
-			if(get_user(fourth.__pad, (void __user **)ptr))
+			if (get_user(fourth.__pad,
+				     (void __user * __user *)ptr))
 				goto out;
 			err = sys_semctl (first, second, third, fourth);
 			goto out;
@@ -165,7 +166,9 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void __user
 				goto out;
 				}
 			case 1: default:
-				err = sys_msgrcv (first, (struct msgbuf *) ptr, second, fifth, third);
+				err = sys_msgrcv (first,
+						  (struct msgbuf __user *) ptr,
+						  second, fifth, third);
 				goto out;
 			}
 		case MSGGET:
@@ -194,7 +197,8 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void __user
 				goto out;
 				}
 			case 1:	/* iBCS2 emulator entry point */
-				err = do_shmat (first, (char __user *) ptr, second, (ulong __user *) third);
+				err = do_shmat (first, (char __user *) ptr,
+						second, (ulong *) third);
 				goto out;
 			}
 		case SHMDT: 
@@ -328,7 +332,7 @@ asmlinkage unsigned long sparc_mremap(unsigned long addr,
 
 		new_addr = get_unmapped_area(file, addr, new_len,
 				     vma ? vma->vm_pgoff : 0,
-				     map_flags);
+				     map_flags, vma->vm_flags & VM_EXEC);
 		ret = new_addr;
 		if (new_addr & ~PAGE_MASK)
 			goto out_sem;
@@ -467,13 +471,13 @@ asmlinkage int sys_getdomainname(char __user *name, int len)
  	
  	down_read(&uts_sem);
  	
-	nlen = strlen(system_utsname.domainname) + 1;
+	nlen = strlen(vx_new_uts(domainname)) + 1;
 
 	if (nlen < len)
 		len = nlen;
 	if (len > __NEW_UTS_LEN)
 		goto done;
-	if (copy_to_user(name, system_utsname.domainname, len))
+	if (copy_to_user(name, vx_new_uts(domainname), len))
 		goto done;
 	err = 0;
 done:

@@ -28,9 +28,10 @@ static inline void *kmap(struct page *page)
 
 #define kunmap(page) do { (void) (page); } while (0)
 
-#define kmap_atomic(page, idx)		page_address(page)
-#define kunmap_atomic(addr, idx)	do { } while (0)
-#define kmap_atomic_to_page(ptr)	virt_to_page(ptr)
+#define kmap_atomic(page, idx)			page_address(page)
+#define kmap_atomic_nocache_pfn(pfn, idx)	pfn_to_kaddr(pfn)
+#define kunmap_atomic(addr, idx)		do { } while (0)
+#define kmap_atomic_to_page(ptr)		virt_to_page(ptr)
 
 #endif /* CONFIG_HIGHMEM */
 

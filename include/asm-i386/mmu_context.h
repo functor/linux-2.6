@@ -29,6 +29,10 @@ static inline void switch_mm(struct mm_struct *prev,
 {
 	int cpu = smp_processor_id();
 
+#ifdef CONFIG_X86_SWITCH_PAGETABLES
+	if (tsk->mm)
+		tsk->thread_info->user_pgd = (void *)__pa(tsk->mm->pgd);
+#endif
 	if (likely(prev != next)) {
 		/* stop flush ipis for the previous mm */
 		cpu_clear(cpu, prev->cpu_vm_mask);
@@ -39,12 +43,14 @@ static inline void switch_mm(struct mm_struct *prev,
 		cpu_set(cpu, next->cpu_vm_mask);
 
 		/* Re-load page tables */
+#if !defined(CONFIG_X86_SWITCH_PAGETABLES)
 		load_cr3(next->pgd);
+#endif
 
 		/*
 		 * load the LDT, if the LDT is different:
 		 */
-		if (unlikely(prev->context.ldt != next->context.ldt))
+		if (unlikely(prev->context.size + next->context.size))
 			load_LDT_nolock(&next->context, cpu);
 	}
 #ifdef CONFIG_SMP
@@ -56,7 +62,9 @@ static inline void switch_mm(struct mm_struct *prev,
 			/* We were in lazy tlb mode and leave_mm disabled 
 			 * tlb flush IPI delivery. We must reload %cr3.
 			 */
+#if !defined(CONFIG_X86_SWITCH_PAGETABLES)
 			load_cr3(next->pgd);
+#endif
 			load_LDT_nolock(&next->context, cpu);
 		}
 	}
@@ -67,6 +75,6 @@ static inline void switch_mm(struct mm_struct *prev,
 	asm("movl %0,%%fs ; movl %0,%%gs": :"r" (0))
 
 #define activate_mm(prev, next) \
-	switch_mm((prev),(next),NULL)
+	switch_mm((prev),(next),current)
 
 #endif
