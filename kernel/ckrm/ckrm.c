@@ -142,7 +142,7 @@ EXPORT_SYMBOL(ckrm_classobj);
 
 static inline void set_callbacks_active(struct ckrm_classtype *ctype)
 {
-	ctype->ce_cb_active = ((atomic_read(&ctype->ce_regd) > 0) &&
+	ctype->ce_cb_active = ((atomic_read(&ctype->ce_nr_users) > 0) &&
 			       (ctype->ce_callbacks.always_callback
 				|| (ctype->num_classes > 1)));
 }
@@ -176,11 +176,10 @@ int ckrm_register_engine(const char *typename, ckrm_eng_callback_t * ecbs)
 	if (ctype == NULL)
 		return (-ENOENT);
 
-	atomic_inc(&ctype->ce_regd);
-
-	/* another engine registered or trying to register ? */
-	if (atomic_read(&ctype->ce_regd) != 1) {
-		atomic_dec(&ctype->ce_regd);
+	ce_protect(ctype);
+	if (atomic_read(&ctype->ce_nr_users) != 1) {
+		// Some engine is acive, deregister it first.
+		ce_release(ctype);
 		return (-EBUSY);
 	}
 
@@ -193,10 +192,17 @@ int ckrm_register_engine(const char *typename, ckrm_eng_callback_t * ecbs)
 	if (!(((ecbs->classify) && (ecbs->class_delete)) || (ecbs->notify)) ||
 	    (ecbs->c_interest && ecbs->classify == NULL) ||
 	    (ecbs->n_interest && ecbs->notify == NULL)) {
-		atomic_dec(&ctype->ce_regd);
+		ce_release(ctype);
 		return (-EINVAL);
 	}
 
+	/* Is any other engine registered for this classtype ? */
+	if (ctype->ce_regd) {
+		ce_release(ctype);
+		return (-EINVAL);
+	}
+
+	ctype->ce_regd = 1;
 	ctype->ce_callbacks = *ecbs;
 	set_callbacks_active(ctype);
 
@@ -229,12 +235,13 @@ int ckrm_unregister_engine(const char *typename)
 
 	ctype->ce_cb_active = 0;
 
-	if (atomic_read(&ctype->ce_nr_users) > 1) {
+	if (atomic_dec_and_test(&ctype->ce_nr_users) != 1) {
 		// Somebody is currently using the engine, cannot deregister.
-		return (-EAGAIN);
+		atomic_inc(&ctype->ce_nr_users);
+		return (-EBUSY);
 	}
 
-	atomic_set(&ctype->ce_regd, 0);
+	ctype->ce_regd = 0;
 	memset(&ctype->ce_callbacks, 0, sizeof(ckrm_eng_callback_t));
 	return 0;
 }
@@ -444,7 +451,7 @@ ckrm_init_core_class(struct ckrm_classtype *clstype,
 	CLS_DEBUG("name %s => %p\n", name ? name : "default", dcore);
 
 	if ((dcore != clstype->default_class) && (!ckrm_is_core_valid(parent))){
-		printk(KERN_DEBUG "error not a valid parent %p\n", parent);
+		printk("error not a valid parent %p\n", parent);
 		return -EINVAL;
 	}
 #if 0  
@@ -456,7 +463,7 @@ ckrm_init_core_class(struct ckrm_classtype *clstype,
 		    (void **)kmalloc(clstype->max_resid * sizeof(void *),
 				     GFP_KERNEL);
 		if (dcore->res_class == NULL) {
-			printk(KERN_DEBUG "error no mem\n");
+			printk("error no mem\n");
 			return -ENOMEM;
 		}
 	}
@@ -532,10 +539,10 @@ void ckrm_free_core_class(struct ckrm_core_class *core)
 		  parent->name);
 	if (core->delayed) {
 		/* this core was marked as late */
-		printk(KERN_DEBUG "class <%s> finally deleted %lu\n", core->name, jiffies);
+		printk("class <%s> finally deleted %lu\n", core->name, jiffies);
 	}
 	if (ckrm_remove_child(core) == 0) {
-		printk(KERN_DEBUG "Core class removal failed. Chilren present\n");
+		printk("Core class removal failed. Chilren present\n");
 	}
 
 	for (i = 0; i < clstype->max_resid; i++) {
@@ -656,7 +663,7 @@ ckrm_register_res_ctlr(struct ckrm_classtype *clstype, ckrm_res_ctlr_t * rcbs)
 		 */
 		read_lock(&ckrm_class_lock);
 		list_for_each_entry(core, &clstype->classes, clslist) {
-			printk(KERN_INFO "CKRM .. create res clsobj for resouce <%s>"
+			printk("CKRM .. create res clsobj for resouce <%s>"
 			       "class <%s> par=%p\n", rcbs->res_name, 
 			       core->name, core->hnode.parent);
 			ckrm_alloc_res_class(core, core->hnode.parent, resid);
@@ -833,7 +840,7 @@ int ckrm_unregister_event_set(struct ckrm_event_spec especs[])
 }
 
 #define ECC_PRINTK(fmt, args...) \
-// printk(KERN_DEBUG "%s: " fmt, __FUNCTION__ , ## args)
+// printk("%s: " fmt, __FUNCTION__ , ## args)
 
 void ckrm_invoke_event_cb_chain(enum ckrm_event ev, void *arg)
 {
@@ -978,7 +985,7 @@ void ckrm_cb_exit(struct task_struct *tsk)
 
 void __init ckrm_init(void)
 {
-	printk(KERN_DEBUG "CKRM Initialization\n");
+	printk("CKRM Initialization\n");
 
 	// register/initialize the Metatypes
 
@@ -996,7 +1003,7 @@ void __init ckrm_init(void)
 #endif
 	// prepare init_task and then rely on inheritance of properties
 	ckrm_cb_newtask(&init_task);
-	printk(KERN_DEBUG "CKRM Initialization done\n");
+	printk("CKRM Initialization done\n");
 }
 
 EXPORT_SYMBOL(ckrm_register_engine);

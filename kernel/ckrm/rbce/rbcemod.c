@@ -1,5 +1,4 @@
-/* Rule-based Classification Engine (RBCE) and
- * Consolidated RBCE module code (combined)
+/* Rule-based Classification Engine (RBCE) module
  *
  * Copyright (C) Hubertus Franke, IBM Corp. 2003
  *           (C) Chandra Seetharaman, IBM Corp. 2003
@@ -14,10 +13,6 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it would be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  *
  */
 
@@ -54,7 +49,7 @@
 #include <linux/ckrm_ce.h>
 #include <linux/ckrm_net.h>
 #include "bitvector.h"
-#include <linux/rbce.h>
+#include "rbce.h"
 
 #define DEBUG
 
@@ -91,7 +86,6 @@ typedef enum {
 	RBCE_RULE_APP_TAG,	// task's application tag
 	RBCE_RULE_IPV4,		// IP address of listen(), ipv4 format
 	RBCE_RULE_IPV6,		// IP address of listen(), ipv6 format
- 	RBCE_RULE_XID,          // VSERVER 
 	RBCE_RULE_DEP_RULE,	// dependent rule; must be the first term
 	RBCE_RULE_INVALID,	// invalid, for filler
 	RBCE_RULE_INVALID2,	// invalid, for filler
@@ -140,9 +134,8 @@ struct rbce_rule {
 #define RBCE_TERM_TAG   (3)
 #define RBCE_TERM_IPV4  (4)
 #define RBCE_TERM_IPV6  (5)
-#define RBCE_TERM_XID   (6)
 
-#define NUM_TERM_MASK_VECTOR  (7)     // must be one more the last RBCE_TERM_...
+#define NUM_TERM_MASK_VECTOR  (6)
 
 // Rule flags. 1 bit for each type of rule term
 #define RBCE_TERMFLAG_CMD   (1 << RBCE_TERM_CMD)
@@ -151,10 +144,9 @@ struct rbce_rule {
 #define RBCE_TERMFLAG_TAG   (1 << RBCE_TERM_TAG)
 #define RBCE_TERMFLAG_IPV4  (1 << RBCE_TERM_IPV4)
 #define RBCE_TERMFLAG_IPV6  (1 << RBCE_TERM_IPV6)
-#define RBCE_TERMFLAG_XID   (1 << RBCE_TERM_XID)
-#define RBCE_TERMFLAG_ALL (RBCE_TERMFLAG_CMD | RBCE_TERMFLAG_UID |			\
-   			   RBCE_TERMFLAG_GID | RBCE_TERMFLAG_TAG | RBCE_TERMFLAG_XID |	\
-			   RBCE_TERMFLAG_IPV4 | RBCE_TERMFLAG_IPV6)
+#define RBCE_TERMFLAG_ALL      (RBCE_TERMFLAG_CMD | RBCE_TERMFLAG_UID |	\
+				RBCE_TERMFLAG_GID | RBCE_TERMFLAG_TAG |	\
+				RBCE_TERMFLAG_IPV4 | RBCE_TERMFLAG_IPV6)
 
 int termop_2_vecidx[RBCE_RULE_INVALID] = {
 	[RBCE_RULE_CMD_PATH] = RBCE_TERM_CMD,
@@ -164,7 +156,6 @@ int termop_2_vecidx[RBCE_RULE_INVALID] = {
 	[RBCE_RULE_REAL_GID] = RBCE_TERM_GID,
 	[RBCE_RULE_EFFECTIVE_UID] = RBCE_TERM_UID,
 	[RBCE_RULE_EFFECTIVE_GID] = RBCE_TERM_GID,
-	[RBCE_RULE_XID] = RBCE_TERM_XID,
 	[RBCE_RULE_APP_TAG] = RBCE_TERM_TAG,
 	[RBCE_RULE_IPV4] = RBCE_TERM_IPV4,
 	[RBCE_RULE_IPV6] = RBCE_TERM_IPV6,
@@ -178,8 +169,6 @@ int termop_2_vecidx[RBCE_RULE_INVALID] = {
 #define POLICY_ACTION_NEW_VERSION	0x01	// Force reallocation
 #define POLICY_ACTION_REDO_ALL		0x02	// Recompute all rule flags
 #define POLICY_ACTION_PACK_TERMS	0x04	// Time to pack the terms
-
-const int use_persistent_state = 1;
 
 struct ckrm_eng_callback ckrm_ecbs;
 
@@ -254,7 +243,7 @@ int rbcedebug = 0x00;
 #define DBG_RULE             ( 0x20 )
 #define DBG_POLICY           ( 0x40 )
 
-#define DPRINTK(x, y...)   if (rbcedebug & (x)) printk(KERN_DEBUG y)
+#define DPRINTK(x, y...)   if (rbcedebug & (x)) printk(y)
 	// debugging selectively enabled through /proc/sys/debug/rbce
 
 static void print_context_vectors(void)
@@ -265,9 +254,9 @@ static void print_context_vectors(void)
 		return;
 	}
 	for (i = 0; i < NUM_TERM_MASK_VECTOR; i++) {
-		printk(KERN_DEBUG "%d: ", i);
+		printk("%d: ", i);
 		bitvector_print(DBG_OPTIMIZATION, gl_mask_vecs[i]);
-		printk(KERN_DEBUG "\n");
+		printk("\n");
 	}
 }
 #else
@@ -275,15 +264,6 @@ static void print_context_vectors(void)
 #define DPRINTK(x, y...)
 #define print_context_vectors(x)
 #endif
-
-/* ====================== VSERVER support ========================== */
-#define CONFIG_VSERVER
-#ifdef CONFIG_VSERVER 
-#include <linux/vs_base.h>
-#else
-typedef unsigned int xid_t;
-#define vx_task_xid(t)	(0)
-#endif 
 
 /* ======================= Helper Functions ========================= */
 
@@ -506,7 +486,7 @@ rbce_class_deletecb(const char *classname, void *classobj, int classtype)
 		}
 		notify_class_action(cls, 0);
 		cls->classobj = NULL;
-		list_for_each_entry(pos, &rules_list[classtype], link) {
+		list_for_each_entry(pos, &rules_list[cls->classtype], link) {
 			rule = (struct rbce_rule *)pos;
 			if (rule->target_class) {
 				if (!strcmp
@@ -517,6 +497,7 @@ rbce_class_deletecb(const char *classname, void *classobj, int classtype)
 				}
 			}
 		}
+		put_class(cls);
 		if ((cls = find_class_name(classname)) != NULL) {
 			printk(KERN_ERR
 			       "rbce ERROR: class %s exists in rbce after "
@@ -968,7 +949,6 @@ fill_rule(struct rbce_rule *newrule, struct rbce_rule_term *terms, int nterms)
 		case RBCE_RULE_REAL_GID:
 		case RBCE_RULE_EFFECTIVE_UID:
 		case RBCE_RULE_EFFECTIVE_GID:
-		case RBCE_RULE_XID:
 			term->u.id = terms[i].u.id;
 			break;
 
@@ -1225,9 +1205,6 @@ void get_rule(const char *rname, char *result)
 				goto handleid;
 			case RBCE_RULE_EFFECTIVE_GID:
 				strcpy(idtype, "eg");
-				goto handleid;
-			case RBCE_RULE_XID:
-				strcpy(idtype, "x");
 			      handleid:
 				if (term->operator == RBCE_LESS_THAN) {
 					oper = '<';
@@ -1343,49 +1320,65 @@ int rule_exists(const char *rname)
 static struct rbce_private_data *create_private_data(struct rbce_private_data *,
 						     int);
 
-static inline
-void reset_evaluation(struct rbce_private_data *pdata,int termflag)
+int rbce_ckrm_reclassify(int pid)
 {
-	/* reset TAG ruleterm evaluation results to pick up 
- 	 * on next classification event
- 	 */
- 	if (use_persistent_state && gl_mask_vecs[termflag]) {
- 		bitvector_and_not( pdata->eval, pdata->eval, 
- 				   gl_mask_vecs[termflag] );
- 		bitvector_and_not( pdata->true, pdata->true, 
- 				   gl_mask_vecs[termflag] );
- 	}
+	printk("ckrm_reclassify_pid ignored\n");
+	return -EINVAL;
 }
-  
-int set_tasktag(int pid, char *tag)
-{
-	char *tp;
-	int rc = 0;
-	struct task_struct *tsk;
-	struct rbce_private_data *pdata;
-	int len;
 
-	if (!tag) {
+int reclassify_pid(int pid)
+{
+	struct task_struct *tsk;
+
+	// FIXME: Need to treat -pid as process group
+	if (pid < 0) {
 		return -EINVAL;
 	}
-	len = strlen(tag) + 1;
-	tp = kmalloc(len, GFP_ATOMIC);
-	if (!tp) {
-		return -ENOMEM;
-	}
-	strncpy(tp,tag,len);
 
-	read_lock(&tasklist_lock);
+	if (pid == 0) {
+		rbce_ckrm_reclassify(0);	// just reclassify all tasks.
+	}
+	// if pid is +ve take control of the task, start evaluating it
 	if ((tsk = find_task_by_pid(pid)) == NULL) {
-		rc = -EINVAL;
-		goto out;
+		return -EINVAL;
 	}
 
 	if (unlikely(!RBCE_DATA(tsk))) {
 		RBCE_DATAP(tsk) = create_private_data(NULL, 0);
 		if (!RBCE_DATA(tsk)) {
-			rc = -ENOMEM;
-			goto out;
+			return -ENOMEM;
+		}
+	}
+	RBCE_DATA(tsk)->evaluate = 1;
+	rbce_ckrm_reclassify(pid);
+	return 0;
+}
+
+int set_tasktag(int pid, char *tag)
+{
+	char *tp;
+	struct task_struct *tsk;
+	struct rbce_private_data *pdata;
+
+	if (!tag) {
+		return -EINVAL;
+	}
+
+	if ((tsk = find_task_by_pid(pid)) == NULL) {
+		return -EINVAL;
+	}
+
+	tp = kmalloc(strlen(tag) + 1, GFP_ATOMIC);
+
+	if (!tp) {
+		return -ENOMEM;
+	}
+
+	if (unlikely(!RBCE_DATA(tsk))) {
+		RBCE_DATAP(tsk) = create_private_data(NULL, 0);
+		if (!RBCE_DATA(tsk)) {
+			kfree(tp);
+			return -ENOMEM;
 		}
 	}
 	pdata = RBCE_DATA(tsk);
@@ -1393,13 +1386,10 @@ int set_tasktag(int pid, char *tag)
 		kfree(pdata->app_tag);
 	}
 	pdata->app_tag = tp;
-	reset_evaluation(pdata,RBCE_TERMFLAG_TAG);
-	
- out:
-	read_unlock(&tasklist_lock);
-	if (rc != 0) 
-		kfree(tp);
-	return rc;
+	strcpy(pdata->app_tag, tag);
+	rbce_ckrm_reclassify(pid);
+
+	return 0;
 }
 
 /*====================== Classification Functions =======================*/
@@ -1755,22 +1745,6 @@ __evaluate_rule(struct task_struct *tsk, struct ckrm_net_struct *ns,
 				no_ip = 0;
 				break;
 
-			case RBCE_RULE_XID:
-			{
-				xid_t xid = vx_task_xid(tsk);
-
-				if (term->operator == RBCE_LESS_THAN) {
-					rc = (xid < term->u.id);
-				} else if (term->operator == RBCE_GREATER_THAN) {
-					rc = (xid > term->u.id);
-				} else if (term->operator == RBCE_NOT) {
-					rc = (xid != term->u.id);
-				} else {
-					rc = (xid == term->u.id);
-				}
-				break;
-			}
-				
 			default:
 				rc = 0;
 				printk(KERN_ERR "Error evaluate term op=%d\n",
@@ -1816,7 +1790,7 @@ static inline int valid_pdata(struct rbce_private_data *pdata)
 		}
 	}
 	spin_unlock(&pdata_lock);
-	printk(KERN_WARNING "INVALID/CORRUPT PDATA %p\n", pdata);
+	printk("INVALID/CORRUPT PDATA %p\n", pdata);
 	return 0;
 }
 
@@ -1829,7 +1803,7 @@ static inline void store_pdata(struct rbce_private_data *pdata)
 
 		while (i < MAX_PDATA) {
 			if (pdata_arr[pdata_next] == NULL) {
-				printk(KERN_DEBUG "storing %p at %d, count %d\n", pdata,
+				printk("storing %p at %d, count %d\n", pdata,
 				       pdata_next, pdata_count);
 				pdata_arr[pdata_next++] = pdata;
 				if (pdata_next == MAX_PDATA) {
@@ -1844,7 +1818,7 @@ static inline void store_pdata(struct rbce_private_data *pdata)
 		spin_unlock(&pdata_lock);
 	}
 	if (i == MAX_PDATA) {
-		printk(KERN_DEBUG "PDATA BUFFER FULL pdata_count %d pdata %p\n",
+		printk("PDATA BUFFER FULL pdata_count %d pdata %p\n",
 		       pdata_count, pdata);
 	}
 }
@@ -1856,7 +1830,7 @@ static inline void unstore_pdata(struct rbce_private_data *pdata)
 		spin_lock(&pdata_lock);
 		for (i = 0; i < MAX_PDATA; i++) {
 			if (pdata_arr[i] == pdata) {
-				printk(KERN_DEBUG "unstoring %p at %d, count %d\n", pdata,
+				printk("unstoring %p at %d, count %d\n", pdata,
 				       i, pdata_count);
 				pdata_arr[i] = NULL;
 				pdata_count--;
@@ -1866,7 +1840,7 @@ static inline void unstore_pdata(struct rbce_private_data *pdata)
 		}
 		spin_unlock(&pdata_lock);
 		if (i == MAX_PDATA) {
-			printk(KERN_DEBUG "pdata %p not found in the stored array\n",
+			printk("pdata %p not found in the stored array\n",
 			       pdata);
 		}
 	}
@@ -1880,6 +1854,8 @@ static inline void unstore_pdata(struct rbce_private_data *pdata)
 #define unstore_pdata(pdata)
 
 #endif				// PDATA_DEBUG
+
+const int use_persistent_state = 1;
 
 /*
  * Allocate and initialize a rbce_private_data data structure.
@@ -1929,7 +1905,7 @@ static struct rbce_private_data *create_private_data(struct rbce_private_data
 		//      pdata->evaluate = src->evaluate;
 		//      if(src->app_tag) {
 		//              int len = strlen(src->app_tag)+1;
-		//              printk(KERN_DEBUG "CREATE_PRIVATE: apptag %s len %d\n",
+		//              printk("CREATE_PRIVATE: apptag %s len %d\n",
 		//                          src->app_tag,len);
 		//              pdata->app_tag = kmalloc(len, GFP_ATOMIC);
 		//              if (pdata->app_tag) {
@@ -2236,7 +2212,6 @@ static const char *event_names[CKRM_NUM_EVENTS] = {
 	AENT(EXEC),
 	AENT(UID),
 	AENT(GID),
-	AENT(XID),
 	AENT(LOGIN),
 	AENT(USERADD),
 	AENT(USERDEL),
@@ -2252,7 +2227,6 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 	va_list args;
 	void *cls = NULL;
 	struct task_struct *tsk;
-	struct rbce_private_data *pdata;
 
 	va_start(args, event);
 	tsk = va_arg(args, struct task_struct *);
@@ -2262,7 +2236,7 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 	 * [ CKRM_LATCHABLE_EVENTS .. CKRM_NONLATCHABLE_EVENTS ) 
 	 */
 
-	// printk(KERN_DEBUG "tc_classify %p:%d:%s '%s'\n",tsk,tsk->pid,
+	// printk("tc_classify %p:%d:%s '%s'\n",tsk,tsk->pid,
 	// 			tsk->comm,event_names[event]);
 
 	switch (event) {
@@ -2289,10 +2263,6 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 		cls = rbce_classify(tsk, NULL, RBCE_TERMFLAG_GID, tc_classtype);
 		break;
 
-	case CKRM_EVENT_XID:
-		cls = rbce_classify(tsk, NULL, RBCE_TERMFLAG_XID, tc_classtype);
-		break;
-
 	case CKRM_EVENT_LOGIN:
 	case CKRM_EVENT_USERADD:
 	case CKRM_EVENT_USERDEL:
@@ -2307,14 +2277,11 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 		break;
 
 	case CKRM_EVENT_RECLASSIFY:
-		if ((pdata = (RBCE_DATA(tsk)))) {
-			pdata->evaluate = 1;
-		}
 		cls = rbce_classify(tsk, NULL, RBCE_TERMFLAG_ALL, tc_classtype);
 		break;
 
 	}
-	// printk(KERN_DEBUG "tc_classify %p:%d:%s '%s' ==> %p\n",tsk,tsk->pid,
+	// printk("tc_classify %p:%d:%s '%s' ==> %p\n",tsk,tsk->pid,
 	//			tsk->comm,event_names[event],cls);
 
 	return cls;
@@ -2323,7 +2290,7 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 #ifndef RBCE_EXTENSION
 static void rbce_tc_notify(int event, void *core, struct task_struct *tsk)
 {
-	printk(KERN_DEBUG "tc_manual %p:%d:%s '%s'\n", tsk, tsk->pid, tsk->comm,
+	printk("tc_manual %p:%d:%s '%s'\n", tsk, tsk->pid, tsk->comm,
 	       event_names[event]);
 	if (event != CKRM_EVENT_MANUAL)
 		return;
@@ -2402,23 +2369,6 @@ struct ce_regtable_struct ce_regtable[] = {
 	{NULL}
 };
 
-static void unregister_classtype_engines(void)
-  {
-	int rc;
-	struct ce_regtable_struct *ceptr = ce_regtable;
-
-	while (ceptr->name) {
-		if (*ceptr->clsvar >= 0) {
-			printk(KERN_DEBUG "ce unregister with <%s>\n",ceptr->name);
-			while ((rc = ckrm_unregister_engine(ceptr->name)) == -EAGAIN)
-				;
-			printk(KERN_DEBUG "ce unregister with <%s> rc=%d\n",ceptr->name,rc);
-			*ceptr->clsvar = -1;
-		}
-		ceptr++;
-	}
-  }
-
 static int register_classtype_engines(void)
 {
 	int rc;
@@ -2426,16 +2376,31 @@ static int register_classtype_engines(void)
 
 	while (ceptr->name) {
 		rc = ckrm_register_engine(ceptr->name, ceptr->cbs);
-		printk(KERN_DEBUG "ce register with <%s> typeId=%d\n",ceptr->name,rc);
-		if ((rc < 0) && (rc != -ENOENT)) {
-			unregister_classtype_engines();
+		printk("ce register with <%s> typeId=%d\n", ceptr->name, rc);
+		if ((rc < 0) && (rc != -ENOENT))
 			return (rc);
-		}
-		if (rc != -ENOENT) 
+		if (rc != -ENOENT)
 			*ceptr->clsvar = rc;
 		ceptr++;
 	}
 	return 0;
+}
+
+static void unregister_classtype_engines(void)
+{
+	int rc;
+	struct ce_regtable_struct *ceptr = ce_regtable;
+
+	while (ceptr->name) {
+		if (*ceptr->clsvar >= 0) {
+			printk("ce unregister with <%s>\n", ceptr->name);
+			rc = ckrm_unregister_engine(ceptr->name);
+			printk("ce unregister with <%s> rc=%d\n", ceptr->name,
+			       rc);
+			*ceptr->clsvar = -1;
+		}
+		ceptr++;
+	}
 }
 
 // =========== /proc/sysctl/debug/rbce debug stuff =============
@@ -2506,7 +2471,7 @@ int init_rbce(void)
 {
 	int rc, i, line;
 
-	printk(KERN_DEBUG "<1>\nInstalling \'%s\' module\n", modname);
+	printk("<1>\nInstalling \'%s\' module\n", modname);
 
 	for (i = 0; i < CKRM_MAX_CLASSTYPES; i++) {
 		INIT_LIST_HEAD(&rules_list[i]);
@@ -2555,7 +2520,7 @@ int init_rbce(void)
 	exit_rbce_ext();
       out:
 
-	printk(KERN_DEBUG "<1>%s: error installing rc=%d line=%d\n", __FUNCTION__, rc,
+	printk("<1>%s: error installing rc=%d line=%d\n", __FUNCTION__, rc,
 	       line);
 	return rc;
 }
@@ -2564,19 +2529,19 @@ void exit_rbce(void)
 {
 	int i;
 
-	printk(KERN_DEBUG "<1>Removing \'%s\' module\n", modname);
+	printk("<1>Removing \'%s\' module\n", modname);
 
 	stop_debug();
 	exit_rbce_ext();
 
 	// Print warnings if lists are not empty, which is a bug
 	if (!list_empty(&class_list)) {
-		printk(KERN_DEBUG "exit_rbce: Class list is not empty\n");
+		printk("exit_rbce: Class list is not empty\n");
 	}
 
 	for (i = 0; i < CKRM_MAX_CLASSTYPES; i++) {
 		if (!list_empty(&rules_list[i])) {
-			printk(KERN_DEBUG "exit_rbce: Rules list for classtype %d"
+			printk("exit_rbce: Rules list for classtype %d"
 			     " is not empty\n", i);
 		}
 	}
@@ -2594,9 +2559,8 @@ EXPORT_SYMBOL(rule_exists);
 EXPORT_SYMBOL(change_rule);
 EXPORT_SYMBOL(delete_rule);
 EXPORT_SYMBOL(rename_rule);
+EXPORT_SYMBOL(reclassify_pid);
 EXPORT_SYMBOL(set_tasktag);
 
 module_init(init_rbce);
 module_exit(exit_rbce);
-
-

@@ -65,7 +65,7 @@ void smbiod_wake_up(void)
 /*
  * start smbiod if none is running
  */
-static int smbiod_start(void)
+static int smbiod_start()
 {
 	pid_t pid;
 	if (smbiod_state != SMBIOD_DEAD)

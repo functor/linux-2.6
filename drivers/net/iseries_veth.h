@@ -43,4 +43,6 @@ struct VethLpEvent {
 
 };
 
+#define HVMAXARCHITECTEDVIRTUALLANS (16)
+
 #endif	/* _ISERIES_VETH_H */

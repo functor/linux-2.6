@@ -10,19 +10,15 @@
 #define _ASM_PAGE_H
 
 #include <linux/config.h>
+#include <spaces.h>
 
 #ifdef __KERNEL__
-
-#include <spaces.h>
 
 /*
  * PAGE_SHIFT determines the page size
  */
 #ifdef CONFIG_PAGE_SIZE_4KB
 #define PAGE_SHIFT	12
-#endif
-#ifdef CONFIG_PAGE_SIZE_8KB
-#define PAGE_SHIFT	13
 #endif
 #ifdef CONFIG_PAGE_SIZE_16KB
 #define PAGE_SHIFT	14
@@ -136,7 +132,5 @@ static __inline__ int get_order(unsigned long size)
 #ifdef CONFIG_LIMITED_DMA
 #define WANT_PAGE_VIRTUAL
 #endif
-
-#define devmem_is_allowed(x) 1
 
 #endif /* _ASM_PAGE_H */

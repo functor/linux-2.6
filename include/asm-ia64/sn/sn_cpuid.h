@@ -84,6 +84,7 @@
  */
 
 #ifndef CONFIG_SMP
+#define cpu_logical_id(cpu)				0
 #define cpu_physical_id(cpuid)			((ia64_getreg(_IA64_REG_CR_LID) >> 16) & 0xffff)
 #endif
 

@@ -65,7 +65,7 @@ static int mtu;
 static int bogus_rx;
 static int dma_ctrl = 0x004A0263; 			/* Constrained by errata */
 static int fifo_cfg = 0x0020;				/* Bypass external Tx FIFO. */
-#elif defined(YF_NEW)					/* A future perfect board :->.  */
+#elif YF_NEW					/* A future perfect board :->.  */
 static int dma_ctrl = 0x00CAC277;			/* Override when loading module! */
 static int fifo_cfg = 0x0028;
 #else
@@ -107,6 +107,12 @@ static int gx_fix;
 #define PKT_BUF_SZ		1536			/* Size of each temporary Rx buffer.*/
 
 #define yellowfin_debug debug
+
+#if !defined(__OPTIMIZE__)
+#warning  You must compile this file with the correct options!
+#warning  See the last lines of the source file.
+#error You must compile this driver with "-O".
+#endif
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -286,7 +292,7 @@ static struct pci_id_info pci_id_tbl[] = {
 	 FullTxStatus | IsGigabit | HasMulticastBug | HasMACAddrBug | DontUseEeprom},
 	{"Symbios SYM83C885", { 0x07011000, 0xffffffff},
 	 PCI_IOTYPE, YELLOWFIN_SIZE, HasMII | DontUseEeprom },
-	{NULL,},
+	{0,},
 };
 
 static struct pci_device_id yellowfin_pci_tbl[] = {
@@ -805,7 +811,7 @@ static void yellowfin_init_ring(struct net_device *dev)
 #ifdef NO_TXSTATS
 	/* In this mode the Tx ring needs only a single descriptor. */
 	for (i = 0; i < TX_RING_SIZE; i++) {
-		yp->tx_skbuff[i] = NULL;
+		yp->tx_skbuff[i] = 0;
 		yp->tx_ring[i].dbdma_cmd = cpu_to_le32(CMD_STOP);
 		yp->tx_ring[i].branch_addr = cpu_to_le32(yp->tx_ring_dma +
 			((i+1)%TX_RING_SIZE)*sizeof(struct yellowfin_desc));
@@ -987,7 +993,7 @@ static irqreturn_t yellowfin_interrupt(int irq, void *dev_instance, struct pt_re
 			pci_unmap_single(yp->pci_dev, yp->tx_ring[entry].addr,
 				skb->len, PCI_DMA_TODEVICE);
 			dev_kfree_skb_irq(skb);
-			yp->tx_skbuff[entry] = NULL;
+			yp->tx_skbuff[entry] = 0;
 		}
 		if (yp->tx_full
 			&& yp->cur_tx - yp->dirty_tx < TX_QUEUE_SIZE - 4) {
@@ -1320,12 +1326,12 @@ static int yellowfin_close(struct net_device *dev)
 		if (yp->rx_skbuff[i]) {
 			dev_kfree_skb(yp->rx_skbuff[i]);
 		}
-		yp->rx_skbuff[i] = NULL;
+		yp->rx_skbuff[i] = 0;
 	}
 	for (i = 0; i < TX_RING_SIZE; i++) {
 		if (yp->tx_skbuff[i])
 			dev_kfree_skb(yp->tx_skbuff[i]);
-		yp->tx_skbuff[i] = NULL;
+		yp->tx_skbuff[i] = 0;
 	}
 
 #ifdef YF_PROTOTYPE			/* Support for prototype hardware errata. */

@@ -6,10 +6,9 @@
  * @offset: The bitnumber to start searching at
  * @size: The maximum size to search
  */
-unsigned long find_next_bit(const unsigned long *addr, unsigned long size,
-				unsigned long offset)
+unsigned long find_next_bit(unsigned long *addr, unsigned long size, unsigned long offset)
 {
-	const unsigned long *p = addr + (offset >> 6);
+	unsigned long *p = addr + (offset >> 6);
 	unsigned long result = offset & ~63UL;
 	unsigned long tmp;
 

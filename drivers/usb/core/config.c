@@ -414,7 +414,7 @@ void usb_destroy_configuration(struct usb_device *dev)
 			kfree(dev->rawdescriptors[i]);
 
 		kfree(dev->rawdescriptors);
-		dev->rawdescriptors = NULL;
+		dev->rawdescriptors = 0;
 	}
 
 	for (c = 0; c < dev->descriptor.bNumConfigurations; c++) {
@@ -426,7 +426,7 @@ void usb_destroy_configuration(struct usb_device *dev)
 		}
 	}
 	kfree(dev->config);
-	dev->config = NULL;
+	dev->config = 0;
 }
 
 

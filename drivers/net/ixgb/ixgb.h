@@ -77,7 +77,7 @@ struct ixgb_adapter;
 #include "ixgb_ee.h"
 #include "ixgb_ids.h"
 
-#ifdef _DEBUG_DRIVER_
+#if _DEBUG_DRIVER_
 #define IXGB_DBG(args...) printk(KERN_DEBUG "ixgb: " args)
 #else
 #define IXGB_DBG(args...)

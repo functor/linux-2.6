@@ -20,11 +20,9 @@ extern cpumask_t     node_to_cpumask[];
 #define node_to_first_cpu(node) 	(__ffs(node_to_cpumask[node]))
 #define node_to_cpumask(node)		(node_to_cpumask[node])
 
-static inline cpumask_t pcibus_to_cpumask(int bus)
+static inline unsigned long pcibus_to_cpumask(int bus)
 {
-	cpumask_t res;
-	cpus_and(res,  pci_bus_to_cpumask[bus], cpu_online_map);
-	return res;
+	return mp_bus_to_cpumask[bus] & cpu_online_map; 
 }
 
 #define NODE_BALANCE_RATE 30	/* CHECKME */ 

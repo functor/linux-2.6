@@ -12,7 +12,6 @@
 #include <sys/wait.h>
 #include "user.h"
 #include "kern_util.h"
-#include "user_util.h"
 #include "os.h"
 
 struct helper_data {
@@ -94,20 +93,24 @@ int run_helper(void (*pre_exec)(void *), void *pre_data, char **argv,
 	if(n < 0){
 		printk("run_helper : read on pipe failed, err = %d\n", -n);
 		err = n;
-		os_kill_process(pid, 1);
+		goto out_kill;
 	}
 	else if(n != 0){
-		CATCH_EINTR(n = waitpid(pid, NULL, 0));
+		waitpid(pid, NULL, 0);
 		pid = -errno;
 	}
-	err = pid;
 
+	if(stack_out == NULL) free_stack(stack, 0);
+        else *stack_out = stack;
+	return(pid);
+
+ out_kill:
+	os_kill_process(pid, 1);
  out_close:
 	os_close_file(fds[0]);
+	os_close_file(fds[1]);
  out_free:
-	if(stack_out == NULL) 
-		free_stack(stack, 0);
-        else *stack_out = stack;
+	free_stack(stack, 0);
 	return(err);
 }
 

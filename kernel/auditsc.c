@@ -177,10 +177,9 @@ static inline int audit_add_rule(struct audit_entry *entry,
 	return 0;
 }
 
-static void audit_free_rule(struct rcu_head *head)
+static void audit_free_rule(void *arg)
 {
-	struct audit_entry *e = container_of(head, struct audit_entry, rcu);
-	kfree(e);
+	kfree(arg);
 }
 
 /* Note that audit_add_rule and audit_del_rule are called via
@@ -196,7 +195,7 @@ static inline int audit_del_rule(struct audit_rule *rule,
 	list_for_each_entry(e, list, list) {
 		if (!audit_compare_rule(rule, &e->rule)) {
 			list_del_rcu(&e->list);
-			call_rcu(&e->rcu, audit_free_rule);
+			call_rcu(&e->rcu, audit_free_rule, e);
 			return 0;
 		}
 	}

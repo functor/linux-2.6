@@ -25,7 +25,6 @@
 #include <linux/module.h>
 #include <linux/sysctl.h>
 #include <linux/workqueue.h>
-#include <linux/vs_limit.h>
 #include <linux/vs_socket.h>
 #include <net/tcp.h>
 #include <net/inet_common.h>
@@ -268,7 +267,7 @@ kill:
 	}
 
 	if (paws_reject)
-		NET_INC_STATS_BH(LINUX_MIB_PAWSESTABREJECTED);
+		NET_INC_STATS_BH(PAWSEstabRejected);
 
 	if(!th->rst) {
 		/* In this case we must reset the TIMEWAIT timer.
@@ -469,7 +468,7 @@ rescan:
 	}
 
 	tcp_tw_count -= killed;
-	NET_ADD_STATS_BH(LINUX_MIB_TIMEWAITED, killed);
+	NET_ADD_STATS_BH(TimeWaited, killed);
 
 	return ret;
 }
@@ -679,7 +678,7 @@ void tcp_twcal_tick(unsigned long dummy)
 out:
 	if ((tcp_tw_count -= killed) == 0)
 		del_timer(&tcp_tw_timer);
-	NET_ADD_STATS_BH(LINUX_MIB_TIMEWAITKILLED, killed);
+	NET_ADD_STATS_BH(TimeWaitKilled, killed);
 	spin_unlock(&tw_death_lock);
 }
 
@@ -727,7 +726,6 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		sock_reset_flag(newsk, SOCK_DONE);
 		newsk->sk_userlocks = sk->sk_userlocks & ~SOCK_BINDPORT_LOCK;
 		newsk->sk_backlog.head = newsk->sk_backlog.tail = NULL;
-		newsk->sk_send_head = NULL;
 		newsk->sk_callback_lock = RW_LOCK_UNLOCKED;
 		skb_queue_head_init(&newsk->sk_error_queue);
 		newsk->sk_write_space = sk_stream_write_space;
@@ -779,12 +777,16 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newtp->snd_cwnd = 2;
 		newtp->snd_cwnd_cnt = 0;
 
+		newtp->bictcp.cnt = 0;
+		newtp->bictcp.last_max_cwnd = newtp->bictcp.last_cwnd = 0;
+
 		newtp->frto_counter = 0;
 		newtp->frto_highmark = 0;
 
 		tcp_set_ca_state(newtp, TCP_CA_Open);
 		tcp_init_xmit_timers(newsk);
 		skb_queue_head_init(&newtp->out_of_order_queue);
+		newtp->send_head = NULL;
 		newtp->rcv_wup = req->rcv_isn + 1;
 		newtp->write_seq = req->snt_isn + 1;
 		newtp->pushed_seq = newtp->write_seq;
@@ -815,11 +817,9 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newsk->sk_priority = 0;
 		atomic_set(&newsk->sk_refcnt, 2);
 
-		set_vx_info(&newsk->sk_vx_info, sk->sk_vx_info);
-		newsk->sk_xid = sk->sk_xid;
-		vx_sock_inc(newsk);
-		set_nx_info(&newsk->sk_nx_info, sk->sk_nx_info);
-		newsk->sk_nid = sk->sk_nid;
+		/* hmm, maybe from socket? */
+		set_vx_info(&newsk->sk_vx_info, current->vx_info);
+		set_nx_info(&newsk->sk_nx_info, current->nx_info);
 #ifdef INET_REFCNT_DEBUG
 		atomic_inc(&inet_sock_nr);
 #endif
@@ -867,7 +867,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 			newsk->sk_no_largesend = 1;
 
 		tcp_vegas_init(newtp);
-		TCP_INC_STATS_BH(TCP_MIB_PASSIVEOPENS);
+		TCP_INC_STATS_BH(TcpPassiveOpens);
 	}
 	return newsk;
 }
@@ -998,7 +998,7 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 		if (!(flg & TCP_FLAG_RST))
 			req->class->send_ack(skb, req);
 		if (paws_reject)
-			NET_INC_STATS_BH(LINUX_MIB_PAWSESTABREJECTED);
+			NET_INC_STATS_BH(PAWSEstabRejected);
 		return NULL;
 	}
 
@@ -1055,7 +1055,7 @@ listen_overflow:
 	}
 
 embryonic_reset:
-	NET_INC_STATS_BH(LINUX_MIB_EMBRYONICRSTS);
+	NET_INC_STATS_BH(EmbryonicRsts);
 	if (!(flg & TCP_FLAG_RST))
 		req->class->send_reset(skb);
 

@@ -385,10 +385,9 @@ unw_access_gr (struct unw_frame_info *info, int regnum, unsigned long *val, char
 	}
 
 	if (write) {
-		if (read_only(addr)) {
-			UNW_DPRINT(0, "unwind.%s: ignoring attempt to write read-only location\n",
-				__FUNCTION__);
-		} else {
+		if (read_only(addr))
+			UNW_DPRINT(0, "unwind.%s: ignoring attempt to write read-only location\n");
+		else {
 			*addr = *val;
 			if (*nat)
 				*nat_addr |= nat_mask;
@@ -433,10 +432,9 @@ unw_access_br (struct unw_frame_info *info, int regnum, unsigned long *val, int 
 		return -1;
 	}
 	if (write)
-		if (read_only(addr)) {
-			UNW_DPRINT(0, "unwind.%s: ignoring attempt to write read-only location\n",
-				__FUNCTION__);
-		} else
+		if (read_only(addr))
+			UNW_DPRINT(0, "unwind.%s: ignoring attempt to write read-only location\n");
+		else
 			*addr = *val;
 	else
 		*val = *addr;
@@ -482,10 +480,9 @@ unw_access_fr (struct unw_frame_info *info, int regnum, struct ia64_fpreg *val, 
 	}
 
 	if (write)
-		if (read_only(addr)) {
-			UNW_DPRINT(0, "unwind.%s: ignoring attempt to write read-only location\n",
-				__FUNCTION__);
-		} else
+		if (read_only(addr))
+			UNW_DPRINT(0, "unwind.%s: ignoring attempt to write read-only location\n");
+		else
 			*addr = *val;
 	else
 		*val = *addr;
@@ -579,10 +576,9 @@ unw_access_ar (struct unw_frame_info *info, int regnum, unsigned long *val, int 
 	}
 
 	if (write) {
-		if (read_only(addr)) {
-			UNW_DPRINT(0, "unwind.%s: ignoring attempt to write read-only location\n",
-				__FUNCTION__);
-		} else
+		if (read_only(addr))
+			UNW_DPRINT(0, "unwind.%s: ignoring attempt to write read-only location\n");
+		else
 			*addr = *val;
 	} else
 		*val = *addr;
@@ -600,10 +596,9 @@ unw_access_pr (struct unw_frame_info *info, unsigned long *val, int write)
 		addr = &info->sw->pr;
 
 	if (write) {
-		if (read_only(addr)) {
-			UNW_DPRINT(0, "unwind.%s: ignoring attempt to write read-only location\n",
-				__FUNCTION__);
-		} else
+		if (read_only(addr))
+			UNW_DPRINT(0, "unwind.%s: ignoring attempt to write read-only location\n");
+		else
 			*addr = *val;
 	} else
 		*val = *addr;

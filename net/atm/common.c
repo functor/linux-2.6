@@ -187,7 +187,7 @@ static void vcc_destroy_socket(struct sock *sk)
 
 		vcc_remove_socket(sk);	/* no more receive */
 
-		while ((skb = skb_dequeue(&vcc->sk->sk_receive_queue)) != NULL) {
+		while ((skb = skb_dequeue(&vcc->sk->sk_receive_queue))) {
 			atm_return(vcc,skb->truesize);
 			kfree_skb(skb);
 		}

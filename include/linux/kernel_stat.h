@@ -35,7 +35,6 @@ DECLARE_PER_CPU(struct kernel_stat, kstat);
 #define kstat_this_cpu	__get_cpu_var(kstat)
 
 extern unsigned long long nr_context_switches(void);
-extern unsigned long long nr_preempt(void);
 
 /*
  * Number of interrupts per specific IRQ source, since bootup

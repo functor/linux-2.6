@@ -23,14 +23,6 @@
 #include <linux/parser.h>
 #include <asm/unaligned.h>
 
-#ifndef CONFIG_FAT_DEFAULT_IOCHARSET
-/* if user don't select VFAT, this is undefined. */
-#define CONFIG_FAT_DEFAULT_IOCHARSET	""
-#endif
-
-static int fat_default_codepage = CONFIG_FAT_DEFAULT_CODEPAGE;
-static char fat_default_iocharset[] = CONFIG_FAT_DEFAULT_IOCHARSET;
-
 /*
  * New FAT inode stuff. We do the following:
  *	a) i_ino is constant and has nothing with on-disk location.
@@ -174,17 +166,20 @@ void fat_put_super(struct super_block *sb)
 	if (sbi->nls_disk) {
 		unload_nls(sbi->nls_disk);
 		sbi->nls_disk = NULL;
-		sbi->options.codepage = fat_default_codepage;
+		sbi->options.codepage = 0;
 	}
 	if (sbi->nls_io) {
 		unload_nls(sbi->nls_io);
 		sbi->nls_io = NULL;
 	}
-	if (sbi->options.iocharset != fat_default_iocharset) {
+	/*
+	 * Note: the iocharset option might have been specified
+	 * without enabling nls_io, so check for it here.
+	 */
+	if (sbi->options.iocharset) {
 		kfree(sbi->options.iocharset);
-		sbi->options.iocharset = fat_default_iocharset;
+		sbi->options.iocharset = NULL;
 	}
-
 	sb->s_fs_info = NULL;
 	kfree(sbi);
 }
@@ -201,11 +196,11 @@ static int fat_show_options(struct seq_file *m, struct vfsmount *mnt)
 		seq_printf(m, ",gid=%u", opts->fs_gid);
 	seq_printf(m, ",fmask=%04o", opts->fs_fmask);
 	seq_printf(m, ",dmask=%04o", opts->fs_dmask);
-	if (sbi->nls_disk && opts->codepage != fat_default_codepage)
+	if (sbi->nls_disk)
 		seq_printf(m, ",codepage=%s", sbi->nls_disk->charset);
 	if (isvfat) {
-		if (sbi->nls_io &&
-		    strcmp(opts->iocharset, fat_default_iocharset))
+		if (sbi->nls_io
+		    && strcmp(sbi->nls_io->charset, CONFIG_NLS_DEFAULT))
 			seq_printf(m, ",iocharset=%s", sbi->nls_io->charset);
 
 		switch (opts->shortname) {
@@ -336,15 +331,14 @@ static int parse_options(char *options, int is_vfat, int *debug,
 	char *p;
 	substring_t args[MAX_OPT_ARGS];
 	int option;
-	char *iocharset;
 
 	opts->isvfat = is_vfat;
 
 	opts->fs_uid = current->uid;
 	opts->fs_gid = current->gid;
 	opts->fs_fmask = opts->fs_dmask = current->fs->umask;
-	opts->codepage = fat_default_codepage;
-	opts->iocharset = fat_default_iocharset;
+	opts->codepage = 0;
+	opts->iocharset = NULL;
 	if (is_vfat)
 		opts->shortname = VFAT_SFN_DISPLAY_LOWER|VFAT_SFN_CREATE_WIN95;
 	else
@@ -357,7 +351,7 @@ static int parse_options(char *options, int is_vfat, int *debug,
 	*debug = 0;
 
 	if (!options)
-		return 0;
+		return 1;
 
 	while ((p = strsep(&options, ",")) != NULL) {
 		int token;
@@ -443,12 +437,10 @@ static int parse_options(char *options, int is_vfat, int *debug,
 
 		/* vfat specific */
 		case Opt_charset:
-			if (opts->iocharset != fat_default_iocharset)
-				kfree(opts->iocharset);
-			iocharset = match_strdup(&args[0]);
-			if (!iocharset)
-				return -ENOMEM;
-			opts->iocharset = iocharset;
+			kfree(opts->iocharset);
+			opts->iocharset = match_strdup(&args[0]);
+			if (!opts->iocharset)
+				return 0;
 			break;
 		case Opt_shortname_lower:
 			opts->shortname = VFAT_SFN_DISPLAY_LOWER
@@ -494,19 +486,14 @@ static int parse_options(char *options, int is_vfat, int *debug,
 		default:
 			printk(KERN_ERR "FAT: Unrecognized mount option \"%s\" "
 			       "or missing value\n", p);
-			return -EINVAL;
+			return 0;
 		}
-	}
-	/* UTF8 doesn't provide FAT semantics */
-	if (!strcmp(opts->iocharset, "utf8")) {
-		printk(KERN_ERR "FAT: utf8 is not a recommended IO charset"
-		       " for FAT filesystems, filesystem will be case sensitive!\n");
 	}
 
 	if (opts->unicode_xlate)
 		opts->utf8 = 0;
 	
-	return 0;
+	return 1;
 }
 
 static int fat_calc_dir_size(struct inode *inode)
@@ -797,7 +784,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent,
 	struct msdos_sb_info *sbi;
 	u16 logical_sector_size;
 	u32 total_sectors, total_clusters, fat_clusters, rootdir_sectors;
-	int debug, first;
+	int debug, cp, first;
 	unsigned int media;
 	long error;
 	char buf[50];
@@ -814,8 +801,8 @@ int fat_fill_super(struct super_block *sb, void *data, int silent,
 	sb->s_export_op = &fat_export_ops;
 	sbi->dir_ops = fs_dir_inode_ops;
 
-	error = parse_options(data, isvfat, &debug, &sbi->options);
-	if (error)
+	error = -EINVAL;
+	if (!parse_options(data, isvfat, &debug, &sbi->options))
 		goto out_fail;
 
 	fat_cache_init(sb);
@@ -843,12 +830,18 @@ int fat_fill_super(struct super_block *sb, void *data, int silent,
 		brelse(bh);
 		goto out_invalid;
 	}
-
-	/*
-	 * Earlier we checked here that b->secs_track and b->head are nonzero,
-	 * but it turns out valid FAT filesystems can have zero there.
-	 */
-
+	if (!b->secs_track) {
+		if (!silent)
+			printk(KERN_ERR "FAT: bogus sectors-per-track value\n");
+		brelse(bh);
+		goto out_invalid;
+	}
+	if (!b->heads) {
+		if (!silent)
+			printk(KERN_ERR "FAT: bogus number-of-heads value\n");
+		brelse(bh);
+		goto out_invalid;
+	}
 	media = b->media;
 	if (!FAT_VALID_MEDIA(media)) {
 		if (!silent)
@@ -1016,21 +1009,31 @@ int fat_fill_super(struct super_block *sb, void *data, int silent,
 	}
 
 	error = -EINVAL;
-	sprintf(buf, "cp%d", sbi->options.codepage);
+	cp = sbi->options.codepage ? sbi->options.codepage : 437;
+	sprintf(buf, "cp%d", cp);
 	sbi->nls_disk = load_nls(buf);
 	if (!sbi->nls_disk) {
-		printk(KERN_ERR "FAT: codepage %s not found\n", buf);
-		goto out_fail;
+		/* Fail only if explicit charset specified */
+		if (sbi->options.codepage != 0) {
+			printk(KERN_ERR "FAT: codepage %s not found\n", buf);
+			goto out_fail;
+		}
+		sbi->options.codepage = 0; /* already 0?? */
+		sbi->nls_disk = load_nls_default();
 	}
 
 	/* FIXME: utf8 is using iocharset for upper/lower conversion */
 	if (sbi->options.isvfat) {
-		sbi->nls_io = load_nls(sbi->options.iocharset);
-		if (!sbi->nls_io) {
-			printk(KERN_ERR "FAT: IO charset %s not found\n",
-			       sbi->options.iocharset);
-			goto out_fail;
-		}
+		if (sbi->options.iocharset != NULL) {
+			sbi->nls_io = load_nls(sbi->options.iocharset);
+			if (!sbi->nls_io) {
+				printk(KERN_ERR
+				       "FAT: IO charset %s not found\n",
+				       sbi->options.iocharset);
+				goto out_fail;
+			}
+		} else
+			sbi->nls_io = load_nls_default();
 	}
 
 	error = -ENOMEM;
@@ -1065,7 +1068,7 @@ out_fail:
 		unload_nls(sbi->nls_io);
 	if (sbi->nls_disk)
 		unload_nls(sbi->nls_disk);
-	if (sbi->options.iocharset != fat_default_iocharset)
+	if (sbi->options.iocharset)
 		kfree(sbi->options.iocharset);
 	sb->s_fs_info = NULL;
 	kfree(sbi);

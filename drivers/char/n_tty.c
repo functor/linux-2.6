@@ -62,12 +62,17 @@
 
 static inline unsigned char *alloc_buf(void)
 {
+	unsigned char *p;
 	int prio = in_interrupt() ? GFP_ATOMIC : GFP_KERNEL;
 
-	if (PAGE_SIZE != N_TTY_BUF_SIZE)
-		return kmalloc(N_TTY_BUF_SIZE, prio);
-	else
-		return (unsigned char *)__get_free_page(prio);
+	if (PAGE_SIZE != N_TTY_BUF_SIZE) {
+		p = kmalloc(N_TTY_BUF_SIZE, prio);
+		if (p)
+			memset(p, 0, N_TTY_BUF_SIZE);
+	} else
+		p = (unsigned char *)get_zeroed_page(prio);
+
+	return p;
 }
 
 static inline void free_buf(unsigned char *buf)
@@ -898,7 +903,7 @@ static void n_tty_close(struct tty_struct *tty)
 	n_tty_flush_buffer(tty);
 	if (tty->read_buf) {
 		free_buf(tty->read_buf);
-		tty->read_buf = NULL;
+		tty->read_buf = 0;
 	}
 }
 
@@ -915,7 +920,7 @@ static int n_tty_open(struct tty_struct *tty)
 	memset(tty->read_buf, 0, N_TTY_BUF_SIZE);
 	reset_buffer_flags(tty);
 	tty->column = 0;
-	n_tty_set_termios(tty, NULL);
+	n_tty_set_termios(tty, 0);
 	tty->minimum_to_wake = 1;
 	tty->closing = 0;
 	return 0;

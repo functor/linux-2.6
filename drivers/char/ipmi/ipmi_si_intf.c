@@ -51,7 +51,7 @@
 #include <linux/list.h>
 #include <linux/pci.h>
 #include <linux/ioport.h>
-#include <asm/irq.h>
+#include <linux/irq.h>
 #ifdef CONFIG_HIGH_RES_TIMERS
 #include <linux/hrtime.h>
 # if defined(schedule_next_int)
@@ -1780,7 +1780,7 @@ static int init_one_smi(int intf_num, struct smi_info **smi)
 	/* So we know not to free it unless we have allocated one. */
 	new_smi->intf = NULL;
 	new_smi->si_sm = NULL;
-	new_smi->handlers = NULL;
+	new_smi->handlers = 0;
 
 	if (!new_smi->irq_setup) {
 		new_smi->irq = irqs[intf_num];

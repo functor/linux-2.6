@@ -22,7 +22,6 @@
 #include <linux/ip.h>
 #include <linux/skbuff.h>
 #endif
-#include <linux/compiler.h>
 #include <linux/netfilter_ipv4.h>
 
 #define IPT_FUNCTION_MAXNAMELEN 30
@@ -284,6 +283,8 @@ struct ipt_get_entries
 	struct ipt_entry entrytable[0];
 };
 
+extern struct semaphore ipt_mutex;
+
 /* Standard return verdict, or do jump. */
 #define IPT_STANDARD_TARGET ""
 /* Error verdict. */
@@ -335,8 +336,8 @@ ipt_get_target(struct ipt_entry *e)
 /*
  *	Main firewall chains definitions and global var's definitions.
  */
-#ifdef __KERNEL__
 static DECLARE_MUTEX(ipt_mutex);
+#ifdef __KERNEL__
 
 #include <linux/init.h>
 extern void ipt_init(void) __init;

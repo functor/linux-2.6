@@ -243,7 +243,6 @@ int do_select(int n, fd_set_bits *fds, long *timeout)
 						retval++;
 					}
 				}
-				cond_resched();
 			}
 			if (res_in)
 				*rinp = res_in;

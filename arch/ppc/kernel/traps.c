@@ -103,7 +103,8 @@ void die(const char * str, struct pt_regs * fp, long err)
 	do_exit(err);
 }
 
-void _exception(int signr, struct pt_regs *regs, int code, unsigned long addr)
+void
+_exception(int signr, struct pt_regs *regs, int code, unsigned long addr)
 {
 	siginfo_t info;
 
@@ -114,7 +115,7 @@ void _exception(int signr, struct pt_regs *regs, int code, unsigned long addr)
 	info.si_signo = signr;
 	info.si_errno = 0;
 	info.si_code = code;
-	info.si_addr = (void __user *) addr;
+	info.si_addr = (void *) addr;
 	force_sig_info(signr, &info, current);
 }
 
@@ -199,7 +200,8 @@ static inline int check_io_access(struct pt_regs *regs)
 #define clear_single_step(regs)	((regs)->msr &= ~MSR_SE)
 #endif
 
-void MachineCheckException(struct pt_regs *regs)
+void
+MachineCheckException(struct pt_regs *regs)
 {
 	unsigned long reason = get_mc_reason(regs);
 
@@ -327,7 +329,8 @@ void MachineCheckException(struct pt_regs *regs)
 	die("machine check", regs, SIGBUS);
 }
 
-void SMIException(struct pt_regs *regs)
+void
+SMIException(struct pt_regs *regs)
 {
 	debugger(regs);
 #if !(defined(CONFIG_XMON) || defined(CONFIG_KGDB))
@@ -336,21 +339,24 @@ void SMIException(struct pt_regs *regs)
 #endif
 }
 
-void UnknownException(struct pt_regs *regs)
+void
+UnknownException(struct pt_regs *regs)
 {
 	printk("Bad trap at PC: %lx, MSR: %lx, vector=%lx    %s\n",
 	       regs->nip, regs->msr, regs->trap, print_tainted());
 	_exception(SIGTRAP, regs, 0, 0);
 }
 
-void InstructionBreakpoint(struct pt_regs *regs)
+void
+InstructionBreakpoint(struct pt_regs *regs)
 {
 	if (debugger_iabr_match(regs))
 		return;
 	_exception(SIGTRAP, regs, TRAP_BRKPT, 0);
 }
 
-void RunModeException(struct pt_regs *regs)
+void
+RunModeException(struct pt_regs *regs)
 {
 	_exception(SIGTRAP, regs, 0, 0);
 }
@@ -368,7 +374,8 @@ void RunModeException(struct pt_regs *regs)
 #define INST_MFSPR_PVR		0x7c1f42a6
 #define INST_MFSPR_PVR_MASK	0xfc1fffff
 
-static int emulate_instruction(struct pt_regs *regs)
+static int
+emulate_instruction(struct pt_regs *regs)
 {
 	u32 instword;
 	u32 rd;
@@ -431,7 +438,8 @@ static struct bug_entry *find_bug(unsigned long bugaddr)
 	return module_find_bug(bugaddr);
 }
 
-int check_bug_trap(struct pt_regs *regs)
+int
+check_bug_trap(struct pt_regs *regs)
 {
 	struct bug_entry *bug;
 	unsigned long addr;
@@ -468,7 +476,8 @@ int check_bug_trap(struct pt_regs *regs)
 	return 0;
 }
 
-void ProgramCheckException(struct pt_regs *regs)
+void
+ProgramCheckException(struct pt_regs *regs)
 {
 	unsigned int reason = get_reason(regs);
 	extern int do_mathemu(struct pt_regs *regs);
@@ -541,7 +550,8 @@ void ProgramCheckException(struct pt_regs *regs)
 	_exception(SIGILL, regs, ILL_ILLOPC, regs->nip);
 }
 
-void SingleStepException(struct pt_regs *regs)
+void
+SingleStepException(struct pt_regs *regs)
 {
 	regs->msr &= ~MSR_SE;  /* Turn off 'trace' bit */
 	if (debugger_sstep(regs))
@@ -549,7 +559,8 @@ void SingleStepException(struct pt_regs *regs)
 	_exception(SIGTRAP, regs, TRAP_TRACE, 0);
 }
 
-void AlignmentException(struct pt_regs *regs)
+void
+AlignmentException(struct pt_regs *regs)
 {
 	int fixed;
 
@@ -569,7 +580,8 @@ void AlignmentException(struct pt_regs *regs)
 	_exception(SIGBUS, regs, BUS_ADRALN, regs->dar);
 }
 
-void StackOverflow(struct pt_regs *regs)
+void
+StackOverflow(struct pt_regs *regs)
 {
 	printk(KERN_CRIT "Kernel stack overflow in process %p, r1=%lx\n",
 	       current, regs->gpr[1]);
@@ -586,7 +598,8 @@ void nonrecoverable_exception(struct pt_regs *regs)
 	die("nonrecoverable exception", regs, SIGKILL);
 }
 
-void trace_syscall(struct pt_regs *regs)
+void
+trace_syscall(struct pt_regs *regs)
 {
 	printk("Task: %p(%d), PC: %08lX/%08lX, Syscall: %3ld, Result: %s%ld    %s\n",
 	       current, current->pid, regs->nip, regs->link, regs->gpr[0],
@@ -594,7 +607,8 @@ void trace_syscall(struct pt_regs *regs)
 }
 
 #ifdef CONFIG_8xx
-void SoftwareEmulation(struct pt_regs *regs)
+void
+SoftwareEmulation(struct pt_regs *regs)
 {
 	extern int do_mathemu(struct pt_regs *);
 	extern int Soft_emulate_8xx(struct pt_regs *);
@@ -646,7 +660,8 @@ void DebugException(struct pt_regs *regs, unsigned long debug_status)
 #endif /* CONFIG_4xx || CONFIG_BOOKE */
 
 #if !defined(CONFIG_TAU_INT)
-void TAUException(struct pt_regs *regs)
+void
+TAUException(struct pt_regs *regs)
 {
 	printk("TAU trap at PC: %lx, MSR: %lx, vector=%lx    %s\n",
 	       regs->nip, regs->msr, regs->trap, print_tainted());
@@ -668,13 +683,14 @@ void AltivecUnavailException(struct pt_regs *regs)
 	/* The kernel has executed an altivec instruction without
 	   first enabling altivec.  Whinge but let it do it. */
 	if (++kernel_altivec_count < 10)
-		printk(KERN_ERR "AltiVec used in kernel (task=%p, pc=%lx)\n",
+		printk(KERN_ERR "AltiVec used in kernel (task=%p, pc=%x)\n",
 		       current, regs->nip);
 	regs->msr |= MSR_VEC;
 }
 
 #ifdef CONFIG_ALTIVEC
-void AltivecAssistException(struct pt_regs *regs)
+void
+AltivecAssistException(struct pt_regs *regs)
 {
 	int err;
 
@@ -718,7 +734,8 @@ void CacheLockingException(struct pt_regs *regs, unsigned long address,
 #endif /* CONFIG_FSL_BOOKE */
 
 #ifdef CONFIG_SPE
-void SPEFloatingPointException(struct pt_regs *regs)
+void
+SPEFloatingPointException(struct pt_regs *regs)
 {
 	unsigned long spefscr;
 	int fpexc_mode;

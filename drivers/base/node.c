@@ -7,7 +7,6 @@
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/node.h>
-#include <linux/hugetlb.h>
 #include <linux/cpumask.h>
 #include <linux/topology.h>
 
@@ -30,7 +29,13 @@ static ssize_t node_read_cpumap(struct sys_device * dev, char * buf)
 	return len;
 }
 
-static SYSDEV_ATTR(cpumap, S_IRUGO, node_read_cpumap, NULL);
+static SYSDEV_ATTR(cpumap,S_IRUGO,node_read_cpumap,NULL);
+
+/* Can be overwritten by architecture specific code. */
+int __attribute__((weak)) hugetlb_report_node_meminfo(int node, char *buf)
+{
+	return 0;
+}
 
 #define K(x) ((x) << (PAGE_SHIFT - 10))
 static ssize_t node_read_meminfo(struct sys_device * dev, char * buf)
@@ -49,17 +54,17 @@ static ssize_t node_read_meminfo(struct sys_device * dev, char * buf)
 		       "Node %d LowFree:      %8lu kB\n",
 		       nid, K(i.totalram),
 		       nid, K(i.freeram),
-		       nid, K(i.totalram - i.freeram),
+		       nid, K(i.totalram-i.freeram),
 		       nid, K(i.totalhigh),
 		       nid, K(i.freehigh),
-		       nid, K(i.totalram - i.totalhigh),
-		       nid, K(i.freeram - i.freehigh));
+		       nid, K(i.totalram-i.totalhigh),
+		       nid, K(i.freeram-i.freehigh));
 	n += hugetlb_report_node_meminfo(nid, buf + n);
 	return n;
 }
 
-#undef K
-static SYSDEV_ATTR(meminfo, S_IRUGO, node_read_meminfo, NULL);
+#undef K 
+static SYSDEV_ATTR(meminfo,S_IRUGO,node_read_meminfo,NULL);
 
 static ssize_t node_read_numastat(struct sys_device * dev, char * buf)
 {
@@ -99,7 +104,7 @@ static ssize_t node_read_numastat(struct sys_device * dev, char * buf)
 		       local_node,
 		       other_node);
 }
-static SYSDEV_ATTR(numastat, S_IRUGO, node_read_numastat, NULL);
+static SYSDEV_ATTR(numastat,S_IRUGO,node_read_numastat,NULL);
 
 /*
  * register_node - Setup a driverfs device for a node.

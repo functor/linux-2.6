@@ -157,7 +157,7 @@ static kmem_cache_t *sigqueue_cachep;
 
 static int sig_ignored(struct task_struct *t, int sig)
 {
-	void __user * handler;
+	void * handler;
 
 	/*
 	 * Tracers always want to know about signals..
@@ -264,7 +264,7 @@ next_signal(struct sigpending *pending, sigset_t *mask)
 
 static struct sigqueue *__sigqueue_alloc(void)
 {
-	struct sigqueue *q = NULL;
+	struct sigqueue *q = 0;
 
 	if (atomic_read(&current->user->sigpending) <
 			current->rlim[RLIMIT_SIGPENDING].rlim_cur)
@@ -272,7 +272,8 @@ static struct sigqueue *__sigqueue_alloc(void)
 	if (q) {
 		INIT_LIST_HEAD(&q->list);
 		q->flags = 0;
-		q->lock = NULL;
+		q->lock = 0;
+#warning MEF PLANETLAB: q->user = get_uid(current->user); is something new in Fedora Core.
 		q->user = get_uid(current->user);
 		atomic_inc(&q->user->sigpending);
 	}
@@ -455,7 +456,7 @@ unblock_all_signals(void)
 
 static inline int collect_signal(int sig, struct sigpending *list, siginfo_t *info)
 {
-	struct sigqueue *q, *first = NULL;
+	struct sigqueue *q, *first = 0;
 	int still_pending = 0;
 
 	if (unlikely(!sigismember(&list->signal, sig)))
@@ -603,28 +604,17 @@ static int check_kill_permission(int sig, struct siginfo *info,
 				 struct task_struct *t)
 {
 	int error = -EINVAL;
-	int user;
-
 	if (sig < 0 || sig > _NSIG)
 		return error;
-
-	user = (!info ||
-		(info != SEND_SIG_PRIV &&
-		 info != SEND_SIG_FORCED &&
-		 SI_FROMUSER(info)));
-
 	error = -EPERM;
-	if (user && (sig != SIGCONT ||
-		     current->signal->session != t->signal->session)
+	if ((!info || ((unsigned long)info != 1 &&
+			(unsigned long)info != 2 && SI_FROMUSER(info)))
+	    && ((sig != SIGCONT) ||
+		(current->signal->session != t->signal->session))
 	    && (current->euid ^ t->suid) && (current->euid ^ t->uid)
 	    && (current->uid ^ t->suid) && (current->uid ^ t->uid)
 	    && !capable(CAP_KILL))
 		return error;
-
-	error = -ESRCH;
-	if (user && !vx_check(vx_task_xid(t), VX_ADMIN|VX_IDENT))
-		return error;
-
 	return security_task_kill(t, info, sig);
 }
 
@@ -738,6 +728,7 @@ static int send_signal(int sig, struct siginfo *info, struct task_struct *t,
 
 	if (q) {
 		q->flags = 0;
+#warning MEF PLANETLAB: q->user = get_uid(t->user); is something new in Fedora Core.
 		q->user = get_uid(t->user);
 		atomic_inc(&q->user->sigpending);
 		list_add_tail(&q->list, &signals->list);
@@ -1066,6 +1057,9 @@ int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 	unsigned long flags;
 	int ret;
 
+	if (!vx_check(vx_task_xid(p), VX_ADMIN|VX_WATCH|VX_IDENT))
+		return -ESRCH;
+
 	ret = check_kill_permission(sig, info, p);
 	if (!ret && sig && p->sighand) {
 		spin_lock_irqsave(&p->sighand->siglock, flags);
@@ -1207,13 +1201,6 @@ send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 {
 	int ret;
 	unsigned long flags;
-
-	/*
-	 * Make sure legacy kernel users don't send in bad values
-	 * (normal paths check this in check_kill_permission).
-	 */
-	if (sig < 0 || sig > _NSIG)
-		return -EINVAL;
 
 	/*
 	 * We need the tasklist lock even for the specific
@@ -2409,13 +2396,13 @@ do_sigaltstack (const stack_t __user *uss, stack_t __user *uoss, unsigned long s
 	int error;
 
 	if (uoss) {
-		oss.ss_sp = (void __user *) current->sas_ss_sp;
+		oss.ss_sp = (void *) current->sas_ss_sp;
 		oss.ss_size = current->sas_ss_size;
 		oss.ss_flags = sas_ss_flags(sp);
 	}
 
 	if (uss) {
-		void __user *ss_sp;
+		void *ss_sp;
 		size_t ss_size;
 		int ss_flags;
 

@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <limits.h>
-#include <setjmp.h>
 #include <sys/mman.h> 
 #include <sys/stat.h>
 #include <sys/ptrace.h>
@@ -34,6 +33,7 @@
 #define COMMAND_LINE_SIZE _POSIX_ARG_MAX
 
 /* Changed in linux_main and setup_arch, which run before SMP is started */
+char saved_command_line[COMMAND_LINE_SIZE] = { 0 };
 char command_line[COMMAND_LINE_SIZE] = { 0 };
 
 void add_arg(char *cmd_line, char *arg)
@@ -81,19 +81,20 @@ int wait_for_stop(int pid, int sig, int cont_type, void *relay)
 	int status, ret;
 
 	while(1){
-		CATCH_EINTR(ret = waitpid(pid, &status, WUNTRACED));
+		ret = waitpid(pid, &status, WUNTRACED);
 		if((ret < 0) ||
 		   !WIFSTOPPED(status) || (WSTOPSIG(status) != sig)){
 			if(ret < 0){
+				if(errno == EINTR) continue;
 				printk("wait failed, errno = %d\n",
 				       errno);
 			}
 			else if(WIFEXITED(status)) 
-				printk("process %d exited with status %d\n", 
-				       pid, WEXITSTATUS(status));
+				printk("process exited with status %d\n", 
+				       WEXITSTATUS(status));
 			else if(WIFSIGNALED(status))
-				printk("process %d exited with signal %d\n", 
-				       pid, WTERMSIG(status));
+				printk("process exited with signal %d\n", 
+				       WTERMSIG(status));
 			else if((WSTOPSIG(status) == SIGVTALRM) ||
 				(WSTOPSIG(status) == SIGALRM) ||
 				(WSTOPSIG(status) == SIGIO) ||
@@ -109,8 +110,8 @@ int wait_for_stop(int pid, int sig, int cont_type, void *relay)
 				ptrace(cont_type, pid, 0, WSTOPSIG(status));
 				continue;
 			}
-			else printk("process %d stopped with signal %d\n", 
-				    pid, WSTOPSIG(status));
+			else printk("process stopped with signal %d\n", 
+				    WSTOPSIG(status));
 			panic("wait_for_stop failed to wait for %d to stop "
 			      "with %d\n", pid, sig);
 		}
@@ -118,27 +119,18 @@ int wait_for_stop(int pid, int sig, int cont_type, void *relay)
 	}
 }
 
-int raw(int fd)
+int raw(int fd, int complain)
 {
 	struct termios tt;
 	int err;
 
-	CATCH_EINTR(err = tcgetattr(fd, &tt));
-	if (err < 0) {
-		printk("tcgetattr failed, errno = %d\n", errno);
-		return(-errno);
-	}
-
+	tcgetattr(fd, &tt);
 	cfmakeraw(&tt);
-
- 	CATCH_EINTR(err = tcsetattr(fd, TCSADRAIN, &tt));
-	if (err < 0) {
+	err = tcsetattr(fd, TCSANOW, &tt);
+	if((err < 0) && complain){
 		printk("tcsetattr failed, errno = %d\n", errno);
 		return(-errno);
 	}
-
-	/* XXX tcsetattr could have applied only some changes
-	 * (and cfmakeraw() is a set of changes) */
 	return(0);
 }
 
@@ -159,21 +151,6 @@ void setup_hostinfo(void)
 	uname(&host);
 	sprintf(host_info, "%s %s %s %s %s", host.sysname, host.nodename,
 		host.release, host.version, host.machine);
-}
-
-int setjmp_wrapper(void (*proc)(void *, void *), ...)
-{
-        va_list args;
-	sigjmp_buf buf;
-	int n;
-
-	n = sigsetjmp(buf, 1);
-	if(n == 0){
-		va_start(args, proc);
-		(*proc)(&buf, &args);
-	}
-	va_end(args);
-	return(n);
 }
 
 /*

@@ -165,6 +165,8 @@ ccw_device_handle_oper(struct ccw_device *cdev)
 		return;
 	}
 	cdev->private->flags.donotify = 1;
+	/* Get device online again. */
+	ccw_device_online(cdev);
 }
 
 /*
@@ -231,24 +233,15 @@ ccw_device_recog_done(struct ccw_device *cdev, int state)
 			  cdev->private->devno, sch->irq);
 		break;
 	case DEV_STATE_OFFLINE:
-		if (cdev->private->state == DEV_STATE_DISCONNECTED_SENSE_ID) {
-			ccw_device_handle_oper(cdev);
+		if (cdev->private->state == DEV_STATE_DISCONNECTED_SENSE_ID)
 			notify = 1;
-		}
-		/* fill out sense information */
-		cdev->id = (struct ccw_device_id) {
-			.cu_type   = cdev->private->senseid.cu_type,
-			.cu_model  = cdev->private->senseid.cu_model,
-			.dev_type  = cdev->private->senseid.dev_type,
-			.dev_model = cdev->private->senseid.dev_model,
-		};
-		if (notify) {
-			/* Get device online again. */
-			cdev->private->state = DEV_STATE_OFFLINE;
-			ccw_device_online(cdev);
-			wake_up(&cdev->private->wait_q);
-			return;
-		}
+		else  /* fill out sense information */
+			cdev->id = (struct ccw_device_id) {
+				.cu_type   = cdev->private->senseid.cu_type,
+				.cu_model  = cdev->private->senseid.cu_model,
+				.dev_type  = cdev->private->senseid.dev_type,
+				.dev_model = cdev->private->senseid.dev_model,
+			};
 		/* Issue device info message. */
 		CIO_DEBUG(KERN_INFO, 2, "SenseID : device %04x reports: "
 			  "CU  Type/Mod = %04X/%02X, Dev Type/Mod = "
@@ -263,7 +256,10 @@ ccw_device_recog_done(struct ccw_device *cdev, int state)
 		break;
 	}
 	cdev->private->state = state;
-	io_subchannel_recog_done(cdev);
+	if (notify && state == DEV_STATE_OFFLINE)
+		ccw_device_handle_oper(cdev);
+	else
+		io_subchannel_recog_done(cdev);
 	if (state != DEV_STATE_NOT_OPER)
 		wake_up(&cdev->private->wait_q);
 }
@@ -676,20 +672,8 @@ ccw_device_irq(struct ccw_device *cdev, enum dev_event dev_event)
 
 	irb = (struct irb *) __LC_IRB;
 	/* Check for unsolicited interrupt. */
-	if ((irb->scsw.stctl ==
-	    		(SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS))
-	    && (!irb->scsw.cc)) {
-		if ((irb->scsw.dstat & DEV_STAT_UNIT_CHECK) &&
-		    !irb->esw.esw0.erw.cons) {
-			/* Unit check but no sense data. Need basic sense. */
-			if (ccw_device_do_sense(cdev, irb) != 0)
-				goto call_handler_unsol;
-			memcpy(irb, &cdev->private->irb, sizeof(struct irb));
-			cdev->private->state = DEV_STATE_W4SENSE;
-			cdev->private->intparm = 0;
-			return;
-		}
-call_handler_unsol:
+	if (irb->scsw.stctl ==
+	    		(SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS)) {
 		if (cdev->handler)
 			cdev->handler (cdev, 0, irb);
 		return;
@@ -751,15 +735,11 @@ ccw_device_w4sense(struct ccw_device *cdev, enum dev_event dev_event)
 	/* Check for unsolicited interrupt. */
 	if (irb->scsw.stctl ==
 	    		(SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS)) {
+		if (cdev->handler)
+			cdev->handler (cdev, 0, irb);
 		if (irb->scsw.cc == 1)
 			/* Basic sense hasn't started. Try again. */
 			ccw_device_do_sense(cdev, irb);
-		else {
-			printk("Huh? %s(%s): unsolicited interrupt...\n",
-			       __FUNCTION__, cdev->dev.bus_id);
-			if (cdev->handler)
-				cdev->handler (cdev, 0, irb);
-		}
 		return;
 	}
 	/* Add basic sense info to irb. */
@@ -782,6 +762,13 @@ ccw_device_clear_verify(struct ccw_device *cdev, enum dev_event dev_event)
 	struct irb *irb;
 
 	irb = (struct irb *) __LC_IRB;
+	/* Check for unsolicited interrupt. */
+	if (irb->scsw.stctl ==
+	    		(SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS)) {
+		if (cdev->handler)
+			cdev->handler (cdev, 0, irb);
+		return;
+	}
 	/* Accumulate status. We don't do basic sense. */
 	ccw_device_accumulate_irb(cdev, irb);
 	/* Try to start delayed device verification. */
@@ -847,6 +834,15 @@ ccw_device_wait4io_irq(struct ccw_device *cdev, enum dev_event dev_event)
 	struct subchannel *sch;
 
 	irb = (struct irb *) __LC_IRB;
+	/* Check for unsolicited interrupt. */
+	if (irb->scsw.stctl ==
+	    		(SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS)) {
+		if (cdev->handler)
+			cdev->handler (cdev, 0, irb);
+		if (irb->scsw.cc == 1)
+			goto call_handler;
+		return;
+	}
 	/*
 	 * Accumulate status and find out if a basic sense is needed.
 	 * This is fine since we have already adapted the lpm.
@@ -858,7 +854,7 @@ ccw_device_wait4io_irq(struct ccw_device *cdev, enum dev_event dev_event)
 		}
 		return;
 	}
-
+call_handler:
 	/* Iff device is idle, reset timeout. */
 	sch = to_subchannel(cdev->dev.parent);
 	if (!stsch(sch->irq, &sch->schib))
@@ -927,9 +923,8 @@ ccw_device_stlck_done(struct ccw_device *cdev, enum dev_event dev_event)
 	case DEV_EVENT_INTERRUPT:
 		irb = (struct irb *) __LC_IRB;
 		/* Check for unsolicited interrupt. */
-		if ((irb->scsw.stctl ==
-		     (SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS)) &&
-		    (!irb->scsw.cc))
+		if (irb->scsw.stctl ==
+		    (SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS))
 			/* FIXME: we should restart stlck here, but this
 			 * is extremely unlikely ... */
 			goto out_wakeup;

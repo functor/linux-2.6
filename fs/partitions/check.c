@@ -137,14 +137,25 @@ const char *bdevname(struct block_device *bdev, char *buf)
 EXPORT_SYMBOL(bdevname);
 
 /*
- * There's very little reason to use this, you should really
- * have a struct block_device just about everywhere and use
- * bdevname() instead.
+ * NOTE: this cannot be called from interrupt context.
+ *
+ * But in interrupt context you should really have a struct
+ * block_device anyway and use bdevname() above.
  */
 const char *__bdevname(dev_t dev, char *buffer)
 {
-	scnprintf(buffer, BDEVNAME_SIZE, "unknown-block(%u,%u)",
+	struct gendisk *disk;
+	int part;
+
+	disk = get_gendisk(dev, &part);
+	if (disk) {
+		buffer = disk_name(disk, part, buffer);
+		put_disk(disk);
+	} else {
+		snprintf(buffer, BDEVNAME_SIZE, "unknown-block(%u,%u)",
 				MAJOR(dev), MINOR(dev));
+	}
+
 	return buffer;
 }
 
@@ -395,7 +406,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 	if (disk->fops->revalidate_disk)
 		disk->fops->revalidate_disk(disk);
 	if (!get_capacity(disk) || !(state = check_partition(disk, bdev)))
-		return -EIO;
+		return res;
 	for (p = 1; p < state->limit; p++) {
 		sector_t size = state->parts[p].size;
 		sector_t from = state->parts[p].from;
@@ -408,7 +419,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 #endif
 	}
 	kfree(state);
-	return 0;
+	return res;
 }
 
 unsigned char *read_dev_sector(struct block_device *bdev, sector_t n, Sector *p)

@@ -228,7 +228,7 @@ void sendf(APPL * appl, word command, dword Id, word Number, byte * format, ...)
 	word length = 12, dlength = 0;
 	byte *write;
 	CAPI_MSG msg;
-	byte *string = NULL;
+	byte *string = 0;
 	va_list ap;
 	diva_os_message_buffer_s *dmb;
 	diva_card *card = NULL;
@@ -1072,7 +1072,7 @@ static int divacapi_connect_didd(void)
 			req.didd_notify.e.Rc =
 			    IDI_SYNC_REQ_DIDD_REGISTER_ADAPTER_NOTIFY;
 			req.didd_notify.info.callback = (void *)didd_callback;
-			req.didd_notify.info.context = NULL;
+			req.didd_notify.info.context = 0;
 			DAdapter.request((ENTITY *) & req);
 			if (req.didd_notify.e.Rc != 0xff) {
 				stop_dbg();

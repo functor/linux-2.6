@@ -100,6 +100,7 @@
 #endif
 
 static spinlock_t iosapic_lock = SPIN_LOCK_UNLOCKED;
+extern cpumask_t	__cacheline_aligned pending_irq_cpumask[NR_IRQS];
 
 /* These tables map IA-64 vectors to the IOSAPIC pin that generates this vector. */
 
@@ -217,8 +218,10 @@ set_rte (unsigned int vector, unsigned int dest, int mask)
 
 	spin_lock_irqsave(&iosapic_lock, flags);
 	{
-		iosapic_write(addr, IOSAPIC_RTE_HIGH(rte_index), high32);
-		iosapic_write(addr, IOSAPIC_RTE_LOW(rte_index), low32);
+		writel(IOSAPIC_RTE_HIGH(rte_index), addr + IOSAPIC_REG_SELECT);
+		writel(high32, addr + IOSAPIC_WINDOW);
+		writel(IOSAPIC_RTE_LOW(rte_index), addr + IOSAPIC_REG_SELECT);
+		writel(low32, addr + IOSAPIC_WINDOW);
 		iosapic_intr_info[vector].low32 = low32;
 	}
 	spin_unlock_irqrestore(&iosapic_lock, flags);
@@ -247,9 +250,12 @@ mask_irq (unsigned int irq)
 
 	spin_lock_irqsave(&iosapic_lock, flags);
 	{
+		writel(IOSAPIC_RTE_LOW(rte_index), addr + IOSAPIC_REG_SELECT);
+
 		/* set only the mask bit */
 		low32 = iosapic_intr_info[vec].low32 |= IOSAPIC_MASK;
-		iosapic_write(addr, IOSAPIC_RTE_LOW(rte_index), low32);
+
+		writel(low32, addr + IOSAPIC_WINDOW);
 	}
 	spin_unlock_irqrestore(&iosapic_lock, flags);
 }
@@ -270,8 +276,9 @@ unmask_irq (unsigned int irq)
 
 	spin_lock_irqsave(&iosapic_lock, flags);
 	{
+		writel(IOSAPIC_RTE_LOW(rte_index), addr + IOSAPIC_REG_SELECT);
 		low32 = iosapic_intr_info[vec].low32 &= ~IOSAPIC_MASK;
-		iosapic_write(addr, IOSAPIC_RTE_LOW(rte_index), low32);
+		writel(low32, addr + IOSAPIC_WINDOW);
 	}
 	spin_unlock_irqrestore(&iosapic_lock, flags);
 }
@@ -319,11 +326,28 @@ iosapic_set_affinity (unsigned int irq, cpumask_t mask)
 			low32 |= (IOSAPIC_FIXED << IOSAPIC_DELIVERY_SHIFT);
 
 		iosapic_intr_info[vec].low32 = low32;
-		iosapic_write(addr, IOSAPIC_RTE_HIGH(rte_index), high32);
-		iosapic_write(addr, IOSAPIC_RTE_LOW(rte_index), low32);
+		writel(IOSAPIC_RTE_HIGH(rte_index), addr + IOSAPIC_REG_SELECT);
+		writel(high32, addr + IOSAPIC_WINDOW);
+		writel(IOSAPIC_RTE_LOW(rte_index), addr + IOSAPIC_REG_SELECT);
+		writel(low32, addr + IOSAPIC_WINDOW);
 	}
 	spin_unlock_irqrestore(&iosapic_lock, flags);
 #endif
+}
+
+static inline void move_irq(int irq)
+{
+	/* note - we hold desc->lock */
+	cpumask_t tmp;
+	irq_desc_t *desc = irq_descp(irq);
+
+	if (!cpus_empty(pending_irq_cpumask[irq])) {
+		cpus_and(tmp, pending_irq_cpumask[irq], cpu_online_map);
+		if (unlikely(!cpus_empty(tmp))) {
+			desc->handler->set_affinity(irq, pending_irq_cpumask[irq]);
+		}
+		cpus_clear(pending_irq_cpumask[irq]);
+	}
 }
 
 /*
@@ -343,7 +367,7 @@ iosapic_end_level_irq (unsigned int irq)
 	ia64_vector vec = irq_to_vector(irq);
 
 	move_irq(irq);
-	iosapic_eoi(iosapic_intr_info[vec].addr, vec);
+	writel(vec, iosapic_intr_info[vec].addr + IOSAPIC_EOI);
 }
 
 #define iosapic_shutdown_level_irq	mask_irq
@@ -420,7 +444,8 @@ iosapic_version (char *addr)
 	 *	unsigned int reserved2 : 8;
 	 * }
 	 */
-	return iosapic_read(addr, IOSAPIC_VERSION);
+	writel(IOSAPIC_VERSION, addr + IOSAPIC_REG_SELECT);
+	return readl(IOSAPIC_WINDOW + addr);
 }
 
 /*

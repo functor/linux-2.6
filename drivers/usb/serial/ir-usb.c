@@ -58,6 +58,13 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
+
+#ifdef CONFIG_USB_SERIAL_DEBUG
+	static int debug = 1;
+#else
+	static int debug;
+#endif
+
 #include "usb-serial.h"
 
 /*
@@ -94,11 +101,9 @@ struct irda_class_desc {
 	u8	bMaxUnicastList;
 } __attribute__ ((packed));
 
-static int debug;
-
 /* if overridden by the user, then use their value for the size of the read and
  * write urbs */
-static int buffer_size;
+static int buffer_size = 0;
 /* if overridden by the user, then use the specified number of XBOFs */
 static int xbof = -1;
 
@@ -399,8 +404,7 @@ static void ir_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 	}
 
 	usb_serial_debug_data (
-		debug,
-		&port->dev,
+		__FILE__,
 		__FUNCTION__,
 		urb->actual_length,
 		urb->transfer_buffer);
@@ -435,8 +439,7 @@ static void ir_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 				ir_baud = *data & 0x0f;
 
 			usb_serial_debug_data (
-				debug,
-				&port->dev,
+				__FILE__,
 				__FUNCTION__,
 				urb->actual_length,
 				data);
@@ -611,10 +614,10 @@ MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
 
-module_param(debug, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM(debug, "i");
 MODULE_PARM_DESC(debug, "Debug enabled or not");
-module_param(xbof, int, 0);
+MODULE_PARM(xbof, "i");
 MODULE_PARM_DESC(xbof, "Force specific number of XBOFs");
-module_param(buffer_size, int, 0);
+MODULE_PARM(buffer_size, "i");
 MODULE_PARM_DESC(buffer_size, "Size of the transfer buffers");
 

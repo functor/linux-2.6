@@ -157,7 +157,7 @@ void ppc64_enable_pmcs(void)
 
 	/* instruct hypervisor to maintain PMCs */
 	if (cur_cpu_spec->firmware_features & FW_FEATURE_SPLPAR) {
-		char *ptr = (char *)&paca[smp_processor_id()].lppaca;
+		char *ptr = (char *)&paca[smp_processor_id()].xLpPaca;
 		ptr[0xBB] = 1;
 	}
 
@@ -211,8 +211,8 @@ static ssize_t show_##NAME(struct sys_device *dev, char *buf) \
 	unsigned long val = run_on_cpu(cpu->sysdev.id, read_##NAME, 0); \
 	return sprintf(buf, "%lx\n", val); \
 } \
-static ssize_t __attribute_used__ \
-	store_##NAME(struct sys_device *dev, const char *buf, size_t count) \
+static ssize_t store_##NAME(struct sys_device *dev, const char *buf, \
+			    size_t count) \
 { \
 	struct cpu *cpu = container_of(dev, struct cpu, sysdev); \
 	unsigned long val; \

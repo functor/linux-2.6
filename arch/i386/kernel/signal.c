@@ -116,14 +116,11 @@ sys_sigaction(int sig, const struct old_sigaction __user *act,
 }
 
 asmlinkage int
-sys_sigaltstack(unsigned long ebx)
+sys_sigaltstack(struct pt_regs regs)
 {
-	/* This is needed to make gcc realize it doesn't own the "struct pt_regs" */
-	struct pt_regs *regs = (struct pt_regs *)&ebx;
-	const stack_t __user *uss = (const stack_t __user *)ebx;
-	stack_t __user *uoss = (stack_t __user *)regs->ecx;
-
-	return do_sigaltstack(uss, uoss, regs->esp);
+	const stack_t __user *uss = (const stack_t __user *)regs.ebx;
+	stack_t __user *uoss = (stack_t __user *)regs.ecx;
+	return do_sigaltstack(uss, uoss, regs.esp);
 }
 
 
@@ -334,13 +331,12 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs * regs, size_t frame_size)
 
 /* These symbols are defined with the addresses in the vsyscall page.
    See vsyscall-sigreturn.S.  */
-extern void __user __kernel_sigreturn;
-extern void __user __kernel_rt_sigreturn;
+extern char __kernel_sigreturn, __kernel_rt_sigreturn, SYSENTER_RETURN;
 
 static void setup_frame(int sig, struct k_sigaction *ka,
 			sigset_t *set, struct pt_regs * regs)
 {
-	void __user *restorer;
+	void *restorer;
 	struct sigframe __user *frame;
 	int err = 0;
 
@@ -417,7 +413,7 @@ give_sigsegv:
 static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 			   sigset_t *set, struct pt_regs * regs)
 {
-	void __user *restorer;
+	void *restorer;
 	struct rt_sigframe __user *frame;
 	int err = 0;
 

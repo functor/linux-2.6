@@ -72,14 +72,18 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-#include "usb-serial.h"
 
 
+#ifndef CONFIG_USB_SERIAL_DEBUG
+#define CONFIG_USB_SERIAL_DEBUG 0
+#endif
 #ifndef CONFIG_USB_SAFE_PADDED
 #define CONFIG_USB_SAFE_PADDED 0
 #endif
 
-static int debug;
+static int debug = CONFIG_USB_SERIAL_DEBUG;
+#include "usb-serial.h"		// must follow the declaration of debug
+
 static int safe = 1;
 static int padded = CONFIG_USB_SAFE_PADDED;
 
@@ -98,20 +102,19 @@ MODULE_LICENSE("GPL");
 #if ! defined(CONFIG_USBD_SAFE_SERIAL_VENDOR)
 static __u16 vendor;		// no default
 static __u16 product;		// no default
-module_param(vendor, ushort, 0);
-MODULE_PARM_DESC(vendor, "User specified USB idVendor (required)");
-module_param(product, ushort, 0);
-MODULE_PARM_DESC(product, "User specified USB idProduct (required)");
+MODULE_PARM (vendor, "i");
+MODULE_PARM (product, "i");
+MODULE_PARM_DESC (vendor, "User specified USB idVendor (required)");
+MODULE_PARM_DESC (product, "User specified USB idProduct (required)");
 #endif
 
-module_param(debug, bool, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(debug, "Debug enabled or not");
+MODULE_PARM (debug, "i");
+MODULE_PARM (safe, "i");
+MODULE_PARM (padded, "i");
 
-module_param(safe, bool, 0);
-MODULE_PARM_DESC(safe, "Turn Safe Encapsulation On/Off");
-
-module_param(padded, bool, 0);
-MODULE_PARM_DESC(padded, "Pad to full wMaxPacketSize On/Off");
+MODULE_PARM_DESC (debug, "Debug enabled or not");
+MODULE_PARM_DESC (safe, "Turn Safe Encapsulation On/Off");
+MODULE_PARM_DESC (padded, "Pad to full wMaxPacketSize On/Off");
 
 #define CDC_DEVICE_CLASS                        0x02
 
@@ -343,7 +346,7 @@ static int safe_write (struct usb_serial_port *port, int from_user, const unsign
 		port->write_urb->transfer_buffer_length = count;
 	}
 
-	usb_serial_debug_data(debug, &port->dev, __FUNCTION__, count, port->write_urb->transfer_buffer);
+	usb_serial_debug_data (__FILE__, __FUNCTION__, count, port->write_urb->transfer_buffer);
 #ifdef ECHO_TX
 	{
 		int i;
