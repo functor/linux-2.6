@@ -1,12 +1,20 @@
 #ifndef _NX_VS_NETWORK_H
 #define _NX_VS_NETWORK_H
 
+
+// #define NX_DEBUG
+
 #include <linux/kernel.h>
 #include <linux/rcupdate.h>
 #include <linux/sched.h>
 
 #include "vserver/network.h"
-#include "vserver/debug.h"
+
+#if defined(NX_DEBUG)
+#define nxdprintk(x...) printk("nxd: " x)
+#else
+#define nxdprintk(x...)
+#endif
 
 
 extern int proc_pid_nx_info(struct task_struct *, char *);
@@ -19,7 +27,7 @@ static inline struct nx_info *__get_nx_info(struct nx_info *nxi,
 {
 	if (!nxi)
 		return NULL;
-	vxlprintk(VXD_CBIT(nid, 2), "get_nx_info(%p[#%d.%d])",
+	nxdprintk("get_nx_info(%p[#%d.%d])\t%s:%d\n",
 		nxi, nxi?nxi->nx_id:0, nxi?atomic_read(&nxi->nx_usecnt):0,
 		_file, _line);
 	atomic_inc(&nxi->nx_usecnt);
@@ -27,8 +35,8 @@ static inline struct nx_info *__get_nx_info(struct nx_info *nxi,
 }
 
 
-#define	free_nx_info(i)	\
-	call_rcu(&i->nx_rcu, rcu_free_nx_info);
+#define	free_nx_info(nxi)	\
+	call_rcu(&nxi->nx_rcu, rcu_free_nx_info);
 
 #define put_nx_info(i)	__put_nx_info(i,__FILE__,__LINE__)
 
@@ -36,7 +44,7 @@ static inline void __put_nx_info(struct nx_info *nxi, const char *_file, int _li
 {
 	if (!nxi)
 		return;
-	vxlprintk(VXD_CBIT(nid, 2), "put_nx_info(%p[#%d.%d])",
+	nxdprintk("put_nx_info(%p[#%d.%d])\t%s:%d\n",
 		nxi, nxi?nxi->nx_id:0, nxi?atomic_read(&nxi->nx_usecnt):0,
 		_file, _line);
 	if (atomic_dec_and_test(&nxi->nx_usecnt))
@@ -52,7 +60,7 @@ static inline void __set_nx_info(struct nx_info **nxp, struct nx_info *nxi,
 	BUG_ON(*nxp);
 	if (!nxi)
 		return;
-	vxlprintk(VXD_CBIT(nid, 3), "set_nx_info(%p[#%d.%d.%d])",
+	nxdprintk("set_nx_info(%p[#%d.%d.%d])\t%s:%d\n",
 		nxi, nxi?nxi->nx_id:0,
 		nxi?atomic_read(&nxi->nx_usecnt):0,
 		nxi?atomic_read(&nxi->nx_refcnt):0,
@@ -70,7 +78,7 @@ static inline void __clr_nx_info(struct nx_info **nxp,
 
 	if (!nxo)
 		return;
-	vxlprintk(VXD_CBIT(nid, 3), "clr_nx_info(%p[#%d.%d.%d])",
+	nxdprintk("clr_nx_info(%p[#%d.%d.%d])\t%s:%d\n",
 		nxo, nxo?nxo->nx_id:0,
 		nxo?atomic_read(&nxo->nx_usecnt):0,
 		nxo?atomic_read(&nxo->nx_refcnt):0,
@@ -92,8 +100,6 @@ static __inline__ struct nx_info *__task_get_nx_info(struct task_struct *p,
 	
 	task_lock(p);
 	nxi = __get_nx_info(p->nx_info, _file, _line);
-	vxlprintk(VXD_CBIT(nid, 5), "task_get_nx_info(%p)",
-		p, _file, _line);
 	task_unlock(p);
 	return nxi;
 }
@@ -119,6 +125,9 @@ static __inline__ void __nx_verify_info(
 #define nx_check(c,m)	__nx_check(nx_current_nid(),c,m)
 
 #define nx_weak_check(c,m)	((m) ? nx_check(c,m) : 1)
+
+#undef nxdprintk
+#define nxdprintk(x...)
 
 
 #define __nx_flags(v,m,f)	(((v) & (m)) ^ (f))

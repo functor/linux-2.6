@@ -191,9 +191,9 @@ static unsigned long set_max_huge_pages(unsigned long count)
 #ifdef CONFIG_SYSCTL
 int hugetlb_sysctl_handler(struct ctl_table *table, int write,
 			   struct file *file, void __user *buffer,
-			   size_t *length, loff_t *ppos)
+			   size_t *length)
 {
-	proc_doulongvec_minmax(table, write, file, buffer, length, ppos);
+	proc_doulongvec_minmax(table, write, file, buffer, length);
 	max_huge_pages = set_max_huge_pages(max_huge_pages);
 	return 0;
 }

@@ -1,6 +1,6 @@
 /**
  *
- * $Id: phram.c,v 1.2 2004/08/09 13:19:44 dwmw2 Exp $
+ * $Id: phram.c,v 1.1 2003/08/21 17:52:30 joern Exp $
  *
  * Copyright (c) Jochen Schaeuble <psionic@psionic.de>
  * 07/2003	rewritten by Joern Engel <joern@wh.fh-wedel.de>
@@ -55,7 +55,10 @@ int phram_erase(struct mtd_info *mtd, struct erase_info *instr)
 
 	instr->state = MTD_ERASE_DONE;
 
-	mtd_erase_callback(instr);
+	if (instr->callback)
+		(*(instr->callback))(instr);
+	else
+		kfree(instr);
 
 	return 0;
 }

@@ -26,7 +26,6 @@
  */
 unsigned long max_low_pfn;
 unsigned long min_low_pfn;
-EXPORT_SYMBOL(min_low_pfn);
 unsigned long max_pfn;
 
 EXPORT_SYMBOL(max_pfn);		/* This is exported so

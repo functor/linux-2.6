@@ -74,7 +74,13 @@ int handle_page_fault(unsigned long address, unsigned long ip,
 			err = -ENOMEM;
 			goto out_of_memory;
 		default:
-			BUG();
+			if (current->pid == 1) {
+				up_read(&mm->mmap_sem);
+				yield();
+				down_read(&mm->mmap_sem);
+				goto survive;
+			}
+			goto out;
 		}
 		pte = pte_offset_kernel(pmd, page);
 	} while(!pte_present(*pte));
@@ -97,6 +103,7 @@ out_of_memory:
 		down_read(&mm->mmap_sem);
 		goto survive;
 	}
+	err = -ENOMEM;
 	goto out;
 }
 
@@ -107,7 +114,7 @@ void register_remapper(struct remapper *info)
 	list_add(&info->list, &physmem_remappers);
 }
 
-static int check_remapped_addr(unsigned long address, int is_write, int is_user)
+static int check_remapped_addr(unsigned long address, int is_write)
 {
 	struct remapper *remapper;
 	struct list_head *ele;
@@ -120,7 +127,7 @@ static int check_remapped_addr(unsigned long address, int is_write, int is_user)
 
 	list_for_each(ele, &physmem_remappers){
 		remapper = list_entry(ele, struct remapper, list);
-		if((*remapper->proc)(fd, address, is_write, offset, is_user))
+		if((*remapper->proc)(fd, address, is_write, offset))
 			return(1);
 	}
 
@@ -138,7 +145,7 @@ unsigned long segv(unsigned long address, unsigned long ip, int is_write,
                 flush_tlb_kernel_vm();
                 return(0);
         }
-	else if(check_remapped_addr(address & PAGE_MASK, is_write, is_user))
+	else if(check_remapped_addr(address & PAGE_MASK, is_write))
 		return(0);
 	else if(current->mm == NULL)
 		panic("Segfault with no mm");

@@ -7,7 +7,7 @@
  *
  * This code is GPL
  *
- * $Id: mtdconcat.c,v 1.9 2004/06/30 15:17:41 dbrown Exp $
+ * $Id: mtdconcat.c,v 1.8 2003/06/30 11:01:26 dwmw2 Exp $
  */
 
 #include <linux/module.h>
@@ -391,7 +391,7 @@ static int concat_erase(struct mtd_info *mtd, struct erase_info *instr)
 	struct mtd_concat *concat = CONCAT(mtd);
 	struct mtd_info *subdev;
 	int i, err;
-	u_int32_t length, offset = 0;
+	u_int32_t length;
 	struct erase_info *erase;
 
 	if (!(mtd->flags & MTD_WRITEABLE))
@@ -450,8 +450,6 @@ static int concat_erase(struct mtd_info *mtd, struct erase_info *instr)
 			return -EINVAL;
 	}
 
-	instr->fail_addr = 0xffffffff;
-
 	/* make a local copy of instr to avoid modifying the caller's struct */
 	erase = kmalloc(sizeof (struct erase_info), GFP_KERNEL);
 
@@ -467,12 +465,10 @@ static int concat_erase(struct mtd_info *mtd, struct erase_info *instr)
 	 */
 	for (i = 0; i < concat->num_subdev; i++) {
 		subdev = concat->subdev[i];
-		if (subdev->size <= erase->addr) {
+		if (subdev->size <= erase->addr)
 			erase->addr -= subdev->size;
-			offset += subdev->size;
-		} else {
+		else
 			break;
-		}
 	}
 
 	/* must never happen since size limit has been verified above */
@@ -501,8 +497,6 @@ static int concat_erase(struct mtd_info *mtd, struct erase_info *instr)
 			 * block alignment has been checked above */
 			if (err == -EINVAL)
 				BUG();
-			if (erase->fail_addr != 0xffffffff)
-				instr->fail_addr = erase->fail_addr + offset;
 			break;
 		}
 		/*
@@ -514,13 +508,12 @@ static int concat_erase(struct mtd_info *mtd, struct erase_info *instr)
 		 * current subdevice, i.e. at offset zero.
 		 */
 		erase->addr = 0;
-		offset += subdev->size;
 	}
-	instr->state = erase->state;
 	kfree(erase);
 	if (err)
 		return err;
 
+	instr->state = MTD_ERASE_DONE;
 	if (instr->callback)
 		instr->callback(instr);
 	return 0;

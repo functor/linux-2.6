@@ -702,7 +702,7 @@ follow_page_pfn(struct mm_struct *mm, unsigned long address, int write,
 		goto out;
 	if (pmd_huge(*pmd))
 		return follow_huge_pmd(mm, address, pmd, write);
-	if (pmd_bad(*pmd))
+	if (unlikely(pmd_bad(*pmd)))
 		goto out;
 
 	ptep = pte_offset_map(pmd, address);
@@ -714,15 +714,11 @@ follow_page_pfn(struct mm_struct *mm, unsigned long address, int write,
 	if (pte_present(pte)) {
 		if (write && !pte_write(pte))
 			goto out;
-		if (write && !pte_dirty(pte)) {
-			struct page *page = pte_page(pte);
-			if (!PageDirty(page))
-				set_page_dirty(page);
-		}
 		pfn = pte_pfn(pte);
 		if (pfn_valid(pfn)) {
-			struct page *page = pfn_to_page(pfn);
-			
+			page = pfn_to_page(pfn);
+			if (write && !pte_dirty(pte) && !PageDirty(page))
+				set_page_dirty(page);
 			mark_page_accessed(page);
 			return page;
 		} else {
@@ -805,7 +801,7 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			pte_t *pte;
 			if (write) /* user gate pages are read-only */
 				return i ? : -EFAULT;
-			pgd = pgd_offset_gate(mm, pg);
+			pgd = pgd_offset(mm, pg);
 			if (!pgd)
 				return i ? : -EFAULT;
 			pmd = pmd_offset(pgd, pg);
@@ -1439,7 +1435,6 @@ static int do_swap_page(struct mm_struct * mm,
 		/* Had to read the page from swap area: Major fault */
 		ret = VM_FAULT_MAJOR;
 		inc_page_state(pgmajfault);
-		grab_swap_token();
 	}
 
 	if (!vx_rsspages_avail(mm, 1)) {
@@ -1511,6 +1506,11 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	pte_t entry;
 	struct page * page = ZERO_PAGE(addr);
 
+	if (!vx_rsspages_avail(mm, 1)) {
+		spin_unlock(&mm->page_table_lock);
+		return VM_FAULT_OOM;
+	}
+
 	/* Read-only mapping of ZERO_PAGE. */
 	entry = pte_wrprotect(mk_pte(ZERO_PAGE(addr), vma->vm_page_prot));
 
@@ -1522,9 +1522,6 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 		if (unlikely(anon_vma_prepare(vma)))
 			goto no_mem;
-		if (!vx_rsspages_avail(mm, 1))
-			goto no_mem;
-
 		page = alloc_page_vma(GFP_HIGHUSER, vma, addr);
 		if (!page)
 			goto no_mem;
@@ -1650,9 +1647,9 @@ retry:
 	 */
 	/* Only go through if we didn't race with anybody else... */
 	if (pte_none(*page_table)) {
-	        if (!PageReserved(new_page)) 
-		        //++mm->rss;
-		        vx_rsspages_inc(mm);
+		if (!PageReserved(new_page))
+			// ++mm->rss;
+			vx_rsspages_inc(mm);
 		flush_icache_page(vma, new_page);
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		if (write_access)

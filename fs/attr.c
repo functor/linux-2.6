@@ -14,9 +14,6 @@
 #include <linux/fcntl.h>
 #include <linux/quotaops.h>
 #include <linux/security.h>
-#include <linux/vs_base.h>
-#include <linux/proc_fs.h>
-#include <linux/devpts_fs.h>
 
 /* Taken over from the old code... */
 
@@ -57,31 +54,6 @@ int inode_change_ok(struct inode *inode, struct iattr *attr)
 	if (ia_valid & (ATTR_MTIME_SET | ATTR_ATIME_SET)) {
 		if (current->fsuid != inode->i_uid && !capable(CAP_FOWNER))
 			goto error;
-	}
-
-	/* Check for evil vserver activity */
-	if (vx_check(0, VX_ADMIN))
-		goto fine;
-
-	if (IS_BARRIER(inode)) {
-		printk(KERN_WARNING
-			"VSW: xid=%d messing with the barrier.\n",
-			vx_current_xid());
-		goto error;
-	}
-	switch (inode->i_sb->s_magic) {
-		case PROC_SUPER_MAGIC:
-			printk(KERN_WARNING
-				"VSW: xid=%d messing with the procfs.\n",
-				vx_current_xid());
-			goto error;
-		case DEVPTS_SUPER_MAGIC:
-			if (vx_check(inode->i_xid, VX_IDENT))
-				goto fine;
-			printk(KERN_WARNING
-				"VSW: xid=%d messing with the devpts.\n",
-				vx_current_xid());
-			goto error;	
 	}
 fine:
 	retval = 0;
@@ -132,8 +104,6 @@ int inode_setattr(struct inode * inode, struct iattr * attr)
 		inode->i_uid = attr->ia_uid;
 	if (ia_valid & ATTR_GID)
 		inode->i_gid = attr->ia_gid;
-	if (ia_valid & ATTR_XID)
-		inode->i_xid = attr->ia_xid;
 	if (ia_valid & ATTR_ATIME)
 		inode->i_atime = attr->ia_atime;
 	if (ia_valid & ATTR_MTIME)
@@ -163,8 +133,6 @@ int setattr_mask(unsigned int ia_valid)
 	if (ia_valid & ATTR_UID)
 		dn_mask |= DN_ATTRIB;
 	if (ia_valid & ATTR_GID)
-		dn_mask |= DN_ATTRIB;
-	if (ia_valid & ATTR_XID)
 		dn_mask |= DN_ATTRIB;
 	if (ia_valid & ATTR_SIZE)
 		dn_mask |= DN_MODIFY;
@@ -229,8 +197,7 @@ int notify_change(struct dentry * dentry, struct iattr * attr)
 			error = security_inode_setattr(dentry, attr);
 		if (!error) {
 			if ((ia_valid & ATTR_UID && attr->ia_uid != inode->i_uid) ||
-			    (ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid) ||
-			    (ia_valid & ATTR_XID && attr->ia_xid != inode->i_xid))
+			    (ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid))
 				error = DQUOT_TRANSFER(inode, attr) ? -EDQUOT : 0;
 			if (!error)
 				error = inode_setattr(inode, attr);

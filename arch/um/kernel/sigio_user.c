@@ -16,7 +16,6 @@
 #include "init.h"
 #include "user.h"
 #include "kern_util.h"
-#include "user_util.h"
 #include "sigio.h"
 #include "helper.h"
 #include "os.h"
@@ -68,10 +67,9 @@ void __init check_one_sigio(void (*proc)(int, int))
 		return;
 	}
 
-	/* Not now, but complain so we now where we failed. */
-	err = raw(master);
+	err = os_make_pty_raw(master);
 	if (err < 0)
-		panic("check_sigio : __raw failed, errno = %d\n", -err);
+		panic("check_sigio : os_make_pty_raw failed, errno = %d\n", -err);
 
 	err = os_sigio_async(master, slave);
 	if(err < 0)

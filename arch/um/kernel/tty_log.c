@@ -205,8 +205,6 @@ static int __init set_tty_log_fd(char *name, int *add)
 		printf("set_tty_log_fd - strtoul failed on '%s'\n", name);
 		tty_log_fd = -1;
 	}
-
-	*add = 0;
 	return 0;
 }
 

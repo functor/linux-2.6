@@ -911,7 +911,7 @@ static void build_fake_packet(struct lance_private *lp)
 	lp->tx_new = TX_NEXT(entry);
 }
 
-struct net_device *last_dev;
+struct net_device *last_dev = 0;
 
 static int lance_open(struct net_device *dev)
 {
@@ -1550,8 +1550,8 @@ static int __init sparc_lance_probe(void)
 static int __init sparc_lance_probe(void)
 {
 	struct sbus_bus *bus;
-	struct sbus_dev *sdev = NULL;
-	struct sbus_dma *ledma = NULL;
+	struct sbus_dev *sdev = 0;
+	struct sbus_dma *ledma = 0;
 	static int called;
 	int cards = 0, v;
 
@@ -1565,7 +1565,7 @@ static int __init sparc_lance_probe(void)
 		for_each_sbusdev (sdev, bus) {
 			if (strcmp(sdev->prom_name, "le") == 0) {
 				cards++;
-				if ((v = sparc_lance_init(sdev, NULL, NULL)))
+				if ((v = sparc_lance_init(sdev, 0, 0)))
 					return v;
 				continue;
 			}
@@ -1573,14 +1573,14 @@ static int __init sparc_lance_probe(void)
 				cards++;
 				ledma = find_ledma(sdev);
 				if ((v = sparc_lance_init(sdev->child,
-							  ledma, NULL)))
+							  ledma, 0)))
 					return v;
 				continue;
 			}
 			if (strcmp(sdev->prom_name, "lebuffer") == 0){
 				cards++;
 				if ((v = sparc_lance_init(sdev->child,
-							  NULL, sdev)))
+							  0, sdev)))
 					return v;
 				continue;
 			}

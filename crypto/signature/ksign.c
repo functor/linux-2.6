@@ -29,7 +29,7 @@ static int ksign_signature_check(const struct ksign_signature *sig,
 	struct ksign_public_key *pk;
 	uint8_t sha1[SHA1_DIGEST_SIZE];
 	MPI result = NULL;
-	int rc = 0;
+	int rc = 0, i;
 
 	pk = ksign_get_public_key(sig->keyid);
 	if (!pk) {

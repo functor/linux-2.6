@@ -31,7 +31,7 @@ static struct nx_info *__alloc_nx_info(nid_t nid)
 {
 	struct nx_info *new = NULL;
 	
-	vxdprintk(VXD_CBIT(nid, 1), "alloc_nx_info(%d)*", nid);
+	nxdprintk("alloc_nx_info()\n");
 
 	/* would this benefit from a slab cache? */
 	new = kmalloc(sizeof(struct nx_info), GFP_KERNEL);
@@ -47,8 +47,7 @@ static struct nx_info *__alloc_nx_info(nid_t nid)
 
 	/* rest of init goes here */
 	
-	vxdprintk(VXD_CBIT(nid, 0),
-		"alloc_nx_info() = %p", new);
+	nxdprintk("alloc_nx_info() = %p\n", new);
 	return new;
 }
 
@@ -58,8 +57,7 @@ static struct nx_info *__alloc_nx_info(nid_t nid)
 
 static void __dealloc_nx_info(struct nx_info *nxi)
 {
-	vxdprintk(VXD_CBIT(nid, 0),
-		"dealloc_nx_info(%p)", nxi);
+	nxdprintk("dealloc_nx_info(%p)\n", nxi);
 
 	nxi->nx_hlist.next = LIST_POISON1;
 	nxi->nx_id = -1;
@@ -96,8 +94,7 @@ static inline void __hash_nx_info(struct nx_info *nxi)
 {
 	struct hlist_head *head;
 	
-	vxdprintk(VXD_CBIT(nid, 4),
-		"__hash_nx_info: %p[#%d]", nxi, nxi->nx_id);
+	nxdprintk("__hash_nx_info: %p[#%d]\n", nxi, nxi->nx_id);
 	get_nx_info(nxi);
 	head = &nx_info_hash[__hashval(nxi->nx_id)];
 	hlist_add_head_rcu(&nxi->nx_hlist, head);
@@ -110,8 +107,7 @@ static inline void __hash_nx_info(struct nx_info *nxi)
 
 static inline void __unhash_nx_info(struct nx_info *nxi)
 {
-	vxdprintk(VXD_CBIT(nid, 4),
-		"__unhash_nx_info: %p[#%d]", nxi, nxi->nx_id);
+	nxdprintk("__unhash_nx_info: %p[#%d]\n", nxi, nxi->nx_id);
 	hlist_del_rcu(&nxi->nx_hlist);
 	put_nx_info(nxi);
 }
@@ -152,11 +148,8 @@ static inline nid_t __nx_dynamic_id(void)
 	do {
 		if (++seq > MAX_N_CONTEXT)
 			seq = MIN_D_CONTEXT;
-		if (!__lookup_nx_info(seq)) {
-			vxdprintk(VXD_CBIT(nid, 4),
-				"__nx_dynamic_id: [#%d]", seq);
+		if (!__lookup_nx_info(seq))
 			return seq;
-		}
 	} while (barrier != seq);
 	return 0;
 }
@@ -170,7 +163,7 @@ static struct nx_info * __loc_nx_info(int id, int *err)
 {
 	struct nx_info *new, *nxi = NULL;
 	
-	vxdprintk(VXD_CBIT(nid, 1), "loc_nx_info(%d)*", id);
+	nxdprintk("loc_nx_info(%d)\n", id);
 
 	if (!(new = __alloc_nx_info(id))) {
 		*err = -ENOMEM;
@@ -192,13 +185,11 @@ static struct nx_info * __loc_nx_info(int id, int *err)
 	else if ((nxi = __lookup_nx_info(id))) {
 		/* context in setup is not available */
 		if (nxi->nx_flags & VXF_STATE_SETUP) {
-			vxdprintk(VXD_CBIT(nid, 0),
-				"loc_nx_info(%d) = %p (not available)", id, nxi);
+			nxdprintk("loc_nx_info(%d) = %p (not available)\n", id, nxi);
 			nxi = NULL;
 			*err = -EBUSY;
 		} else {
-			vxdprintk(VXD_CBIT(nid, 0),
-				"loc_nx_info(%d) = %p (found)", id, nxi);
+			nxdprintk("loc_nx_info(%d) = %p (found)\n", id, nxi);
 			get_nx_info(nxi);
 			*err = 0;
 		}
@@ -206,8 +197,7 @@ static struct nx_info * __loc_nx_info(int id, int *err)
 	}
 
 	/* new context requested */
-	vxdprintk(VXD_CBIT(nid, 0),
-		"loc_nx_info(%d) = %p (new)", id, new);
+	nxdprintk("loc_nx_info(%d) = %p (new)\n", id, new);
 	__hash_nx_info(get_nx_info(new));
 	nxi = new, new = NULL;
 	*err = 1;
@@ -228,7 +218,7 @@ out_unlock:
 
 void rcu_free_nx_info(struct rcu_head *head)
 {
-	struct nx_info *nxi = container_of(head, struct nx_info, nx_rcu);
+        struct nx_info *nxi = container_of(head, struct nx_info, nx_rcu);
 	int usecnt, refcnt;
 
 	BUG_ON(!nxi || !head);
@@ -239,8 +229,6 @@ void rcu_free_nx_info(struct rcu_head *head)
 	refcnt = atomic_read(&nxi->nx_refcnt);
 	BUG_ON(refcnt < 0);
 
-	vxdprintk(VXD_CBIT(nid, 3),
-		"rcu_free_nx_info(%p): uc=%d", nxi, usecnt);
 	if (!usecnt)
 		__dealloc_nx_info(nxi);
 	else
@@ -301,7 +289,7 @@ struct nx_info *create_nx_info(void)
 	struct nx_info *new;
 	int err;
 	
-	vxdprintk(VXD_CBIT(nid, 5), "create_nx_info(%s)", "void");
+	nxdprintk("create_nx_info()\n");
 	if (!(new = __loc_nx_info(NX_DYNAMIC_ID, &err)))
 		return NULL;
 	return new;
@@ -356,8 +344,7 @@ int nx_migrate_task(struct task_struct *p, struct nx_info *nxi)
 	if (!p || !nxi)
 		BUG();
 
-	vxdprintk(VXD_CBIT(nid, 5),
-		"nx_migrate_task(%p,%p[#%d.%d.%d])",
+	nxdprintk("nx_migrate_task(%p,%p[#%d.%d.%d])\n",
 		p, nxi, nxi->nx_id,
 		atomic_read(&nxi->nx_usecnt),
 		atomic_read(&nxi->nx_refcnt));

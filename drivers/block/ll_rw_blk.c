@@ -632,8 +632,6 @@ int blk_queue_resize_tags(request_queue_t *q, int new_depth)
 	return 0;
 }
 
-EXPORT_SYMBOL(blk_queue_resize_tags);
-
 /**
  * blk_queue_end_tag - end tag operations for a request
  * @q:  the request queue for the device
@@ -1467,6 +1465,9 @@ request_queue_t *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock)
 		printk("Using %s io scheduler\n", chosen_elevator->elevator_name);
 	}
 
+	if (elevator_init(q, chosen_elevator))
+		goto out_elv;
+
 	q->request_fn		= rfn;
 	q->back_merge_fn       	= ll_back_merge_fn;
 	q->front_merge_fn      	= ll_front_merge_fn;
@@ -1484,12 +1485,8 @@ request_queue_t *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock)
 	blk_queue_max_hw_segments(q, MAX_HW_SEGMENTS);
 	blk_queue_max_phys_segments(q, MAX_PHYS_SEGMENTS);
 
-	/*
-	 * all done
-	 */
-	if (!elevator_init(q, chosen_elevator))
-		return q;
-
+	return q;
+out_elv:
 	blk_cleanup_queue(q);
 out_init:
 	kmem_cache_free(requestq_cachep, q);
@@ -1594,10 +1591,6 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 	struct io_context *ioc = get_io_context(gfp_mask);
 
 	spin_lock_irq(q->queue_lock);
-
-	if (!elv_may_queue(q, rw))
-		goto out_lock;
-
 	if (rl->count[rw]+1 >= q->nr_requests) {
 		/*
 		 * The queue will fill after this allocation, so set it as
@@ -1611,12 +1604,15 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 		}
 	}
 
-	/*
-	 * The queue is full and the allocating process is not a
-	 * "batcher", and not exempted by the IO scheduler
-	 */
-	if (blk_queue_full(q, rw) && !ioc_batching(ioc))
-		goto out_lock;
+	if (blk_queue_full(q, rw)
+			&& !ioc_batching(ioc) && !elv_may_queue(q, rw)) {
+		/*
+		 * The queue is full and the allocating process is not a
+		 * "batcher", and not exempted by the IO scheduler
+		 */
+		spin_unlock_irq(q->queue_lock);
+		goto out;
+	}
 
 	rl->count[rw]++;
 	if (rl->count[rw] >= queue_congestion_on_threshold(q))
@@ -1634,7 +1630,8 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 		 */
 		spin_lock_irq(q->queue_lock);
 		freed_request(q, rw);
-		goto out_lock;
+		spin_unlock_irq(q->queue_lock);
+		goto out;
 	}
 
 	if (ioc_batching(ioc))
@@ -1664,11 +1661,6 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 out:
 	put_io_context(ioc);
 	return rq;
-out_lock:
-	if (!rq)
-		elv_set_congested(q);
-	spin_unlock_irq(q->queue_lock);
-	goto out;
 }
 
 /*
@@ -1821,53 +1813,54 @@ EXPORT_SYMBOL(blk_insert_request);
  *
  *    A matching blk_rq_unmap_user() must be issued at the end of io, while
  *    still in process context.
- *
- *    Note: The mapped bio may need to be bounced through blk_queue_bounce()
- *    before being submitted to the device, as pages mapped may be out of
- *    reach. It's the callers responsibility to make sure this happens. The
- *    original bio must be passed back in to blk_rq_unmap_user() for proper
- *    unmapping.
  */
 struct request *blk_rq_map_user(request_queue_t *q, int rw, void __user *ubuf,
 				unsigned int len)
 {
-	unsigned long uaddr;
-	struct request *rq;
+	struct request *rq = NULL;
+	char *buf = NULL;
 	struct bio *bio;
-
-	if (len > (q->max_sectors << 9))
-		return ERR_PTR(-EINVAL);
-	if ((!len && ubuf) || (len && !ubuf))
-		return ERR_PTR(-EINVAL);
+	int ret;
 
 	rq = blk_get_request(q, rw, __GFP_WAIT);
 	if (!rq)
 		return ERR_PTR(-ENOMEM);
 
-	/*
-	 * if alignment requirement is satisfied, map in user pages for
-	 * direct dma. else, set up kernel bounce buffers
-	 */
-	uaddr = (unsigned long) ubuf;
-	if (!(uaddr & queue_dma_alignment(q)) && !(len & queue_dma_alignment(q)))
-		bio = bio_map_user(q, NULL, uaddr, len, rw == READ);
-	else
-		bio = bio_copy_user(q, uaddr, len, rw == READ);
+	bio = bio_map_user(q, NULL, (unsigned long) ubuf, len, rw == READ);
+	if (!bio) {
+		int bytes = (len + 511) & ~511;
 
-	if (!IS_ERR(bio)) {
-		rq->bio = rq->biotail = bio;
-		blk_rq_bio_prep(q, rq, bio);
+		buf = kmalloc(bytes, q->bounce_gfp | GFP_USER);
+		if (!buf) {
+			ret = -ENOMEM;
+			goto fault;
+		}
 
-		rq->buffer = rq->data = NULL;
-		rq->data_len = len;
-		return rq;
+		if (rw == WRITE) {
+			if (copy_from_user(buf, ubuf, len)) {
+				ret = -EFAULT;
+				goto fault;
+			}
+		} else
+			memset(buf, 0, len);
 	}
 
-	/*
-	 * bio is the err-ptr
-	 */
-	blk_put_request(rq);
-	return (struct request *) bio;
+	rq->bio = rq->biotail = bio;
+	if (rq->bio)
+		blk_rq_bio_prep(q, rq, bio);
+
+	rq->buffer = rq->data = buf;
+	rq->data_len = len;
+	return rq;
+fault:
+	if (buf)
+		kfree(buf);
+	if (bio)
+		bio_unmap_user(bio, 1);
+	if (rq)
+		blk_put_request(rq);
+
+	return ERR_PTR(ret);
 }
 
 EXPORT_SYMBOL(blk_rq_map_user);
@@ -1881,15 +1874,18 @@ EXPORT_SYMBOL(blk_rq_map_user);
  * Description:
  *    Unmap a request previously mapped by blk_rq_map_user().
  */
-int blk_rq_unmap_user(struct request *rq, struct bio *bio, unsigned int ulen)
+int blk_rq_unmap_user(struct request *rq, void __user *ubuf, struct bio *bio,
+		      unsigned int ulen)
 {
+	const int read = rq_data_dir(rq) == READ;
 	int ret = 0;
 
-	if (bio) {
-		if (bio_flagged(bio, BIO_USER_MAPPED))
-			bio_unmap_user(bio);
-		else
-			ret = bio_uncopy_user(bio);
+	if (bio)
+		bio_unmap_user(bio, read);
+	if (rq->buffer) {
+		if (read && copy_to_user(ubuf, rq->buffer, ulen))
+			ret = -EFAULT;
+		kfree(rq->buffer);
 	}
 
 	blk_put_request(rq);
@@ -2874,8 +2870,6 @@ int kblockd_schedule_work(struct work_struct *work)
 	return queue_work(kblockd_workqueue, work);
 }
 
-EXPORT_SYMBOL(kblockd_schedule_work);
-
 void kblockd_flush(void)
 {
 	flush_workqueue(kblockd_workqueue);
@@ -3173,21 +3167,3 @@ void blk_unregister_queue(struct gendisk *disk)
 		kobject_put(&disk->kobj);
 	}
 }
-
-asmlinkage int sys_ioprio_set(int ioprio)
-{
-	if (ioprio < IOPRIO_IDLE || ioprio > IOPRIO_RT)
-		return -EINVAL;
-	if (ioprio == IOPRIO_RT && !capable(CAP_SYS_ADMIN))
-		return -EACCES;
-
-	printk("%s: set ioprio %d\n", current->comm, ioprio);
-	current->ioprio = ioprio;
-	return 0;
-}
-
-asmlinkage int sys_ioprio_get(void)
-{
-	return current->ioprio;
-}
-

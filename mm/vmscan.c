@@ -37,13 +37,6 @@
 #include <asm/div64.h>
 
 #include <linux/swapops.h>
-#include <linux/ckrm_mem.h>
-
-#ifndef AT_LIMIT_SUPPORT
-#warning "ckrm_at_limit disabled due to problems with memory hog tests -- seting ckrm_shrink_list_empty to true"
-#undef ckrm_shrink_list_empty
-#define ckrm_shrink_list_empty()		(1)
-#endif
 
 /* possible outcome of pageout() */
 typedef enum {
@@ -77,9 +70,6 @@ struct scan_control {
 
 	/* This context's GFP mask */
 	unsigned int gfp_mask;
-
-	/* Flag used by CKRM */
-	unsigned int ckrm_flags;
 
 	int may_writepage;
 };
@@ -184,25 +174,22 @@ EXPORT_SYMBOL(remove_shrinker);
  * slab to avoid swapping.
  *
  * We do weird things to avoid (scanned*seeks*entries) overflowing 32 bits.
- *
- * `lru_pages' represents the number of on-LRU pages in all the zones which
- * are eligible for the caller's allocation attempt.  It is used for balancing
- * slab reclaim versus page reclaim.
  */
-static int shrink_slab(unsigned long scanned, unsigned int gfp_mask,
-			unsigned long lru_pages)
+static int shrink_slab(unsigned long scanned, unsigned int gfp_mask)
 {
 	struct shrinker *shrinker;
+	long pages;
 
 	if (down_trylock(&shrinker_sem))
 		return 0;
 
+	pages = nr_used_zone_pages();
 	list_for_each_entry(shrinker, &shrinker_list, list) {
 		unsigned long long delta;
 
 		delta = (4 * scanned) / shrinker->seeks;
 		delta *= (*shrinker->shrinker)(0, gfp_mask);
-		do_div(delta, lru_pages + 1);
+		do_div(delta, pages + 1);
 		shrinker->nr += delta;
 		if (shrinker->nr < 0)
 			shrinker->nr = LONG_MAX;	/* It wrapped! */
@@ -559,23 +546,19 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 {
 	LIST_HEAD(page_list);
 	struct pagevec pvec;
-	int max_scan = sc->nr_to_scan, nr_pass;
-	unsigned int ckrm_flags = sc->ckrm_flags, bit_flag;
+	int max_scan = sc->nr_to_scan;
 
 	pagevec_init(&pvec, 1);
 
 	lru_add_drain();
 	spin_lock_irq(&zone->lru_lock);
-redo:
-	ckrm_get_reclaim_bits(&ckrm_flags, &bit_flag);
-	nr_pass = zone->nr_inactive;
 	while (max_scan > 0) {
 		struct page *page;
 		int nr_taken = 0;
 		int nr_scan = 0;
 		int nr_freed;
 
-		while (nr_pass-- && nr_scan++ < SWAP_CLUSTER_MAX &&
+		while (nr_scan++ < SWAP_CLUSTER_MAX &&
 				!list_empty(&zone->inactive_list)) {
 			page = lru_to_page(&zone->inactive_list);
 
@@ -593,25 +576,15 @@ redo:
 				SetPageLRU(page);
 				list_add(&page->lru, &zone->inactive_list);
 				continue;
-			} else if (bit_flag && !ckrm_kick_page(page, bit_flag)) {
-				__put_page(page);
-				SetPageLRU(page);
-#ifdef CONFIG_CKRM_MEM_LRUORDER_CHANGE
-				list_add_tail(&page->lru, &zone->inactive_list);
-#else
-				list_add(&page->lru, &zone->inactive_list);
-#endif
-				continue;
 			}
 			list_add(&page->lru, &page_list);
-			ckrm_mem_dec_inactive(page);
 			nr_taken++;
 		}
 		zone->nr_inactive -= nr_taken;
 		zone->pages_scanned += nr_taken;
 		spin_unlock_irq(&zone->lru_lock);
 
-		if ((bit_flag == 0) && (nr_taken == 0))
+		if (nr_taken == 0)
 			goto done;
 
 		max_scan -= nr_scan;
@@ -643,9 +616,6 @@ redo:
 				__pagevec_release(&pvec);
 				spin_lock_irq(&zone->lru_lock);
 			}
-		}
-		if (ckrm_flags && (nr_pass <= 0)) {
-			goto redo;
 		}
   	}
 	spin_unlock_irq(&zone->lru_lock);
@@ -686,17 +656,11 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 	long mapped_ratio;
 	long distress;
 	long swap_tendency;
-	unsigned int ckrm_flags = sc->ckrm_flags, bit_flag;
-	int nr_pass;
 
 	lru_add_drain();
 	pgmoved = 0;
 	spin_lock_irq(&zone->lru_lock);
-redo:
-	ckrm_get_reclaim_bits(&ckrm_flags, &bit_flag);
-	nr_pass = zone->nr_active;
-	while (pgscanned < nr_pages && !list_empty(&zone->active_list) &&
-						nr_pass) {
+	while (pgscanned < nr_pages && !list_empty(&zone->active_list)) {
 		page = lru_to_page(&zone->active_list);
 		prefetchw_prev_lru_page(page, &zone->active_list, flags);
 		if (!TestClearPageLRU(page))
@@ -712,24 +676,11 @@ redo:
 			__put_page(page);
 			SetPageLRU(page);
 			list_add(&page->lru, &zone->active_list);
-			pgscanned++;
-		} else if (bit_flag && !ckrm_kick_page(page, bit_flag)) {
-			__put_page(page);
-			SetPageLRU(page);
-#ifdef CONFIG_CKRM_MEM_LRUORDER_CHANGE
-			list_add_tail(&page->lru, &zone->active_list);
-#else
-			list_add(&page->lru, &zone->active_list);
-#endif
 		} else {
 			list_add(&page->lru, &l_hold);
-			ckrm_mem_dec_active(page);
 			pgmoved++;
-			pgscanned++;
 		}
-		if (!--nr_pass && ckrm_flags) {
-			goto redo;
-		}
+		pgscanned++;
 	}
 	zone->nr_active -= pgmoved;
 	spin_unlock_irq(&zone->lru_lock);
@@ -804,7 +755,6 @@ redo:
 		if (!TestClearPageActive(page))
 			BUG();
 		list_move(&page->lru, &zone->inactive_list);
-		ckrm_mem_inc_inactive(page);
 		pgmoved++;
 		if (!pagevec_add(&pvec, page)) {
 			zone->nr_inactive += pgmoved;
@@ -833,7 +783,6 @@ redo:
 			BUG();
 		BUG_ON(!PageActive(page));
 		list_move(&page->lru, &zone->active_list);
-		ckrm_mem_inc_active(page);
 		pgmoved++;
 		if (!pagevec_add(&pvec, page)) {
 			zone->nr_active += pgmoved;
@@ -881,7 +830,6 @@ shrink_zone(struct zone *zone, struct scan_control *sc)
 	sc->nr_to_reclaim = SWAP_CLUSTER_MAX;
 
 	while (nr_active || nr_inactive) {
-		sc->ckrm_flags = ckrm_setup_reclamation();
 		if (nr_active) {
 			sc->nr_to_scan = min(nr_active,
 					(unsigned long)SWAP_CLUSTER_MAX);
@@ -897,117 +845,8 @@ shrink_zone(struct zone *zone, struct scan_control *sc)
 			if (sc->nr_to_reclaim <= 0)
 				break;
 		}
-		ckrm_teardown_reclamation();
 	}
 }
-
-#if defined(CONFIG_CKRM_RES_MEM) && defined(AT_LIMIT_SUPPORT)
-// This function needs to be given more thought.
-// Shrink the class to be at 90% of its limit
-static void
-ckrm_shrink_class(ckrm_mem_res_t *cls)
-{
-	struct scan_control sc;
-	struct zone *zone;
-	int zindex = 0, active_credit = 0, inactive_credit = 0;
-
-	if (ckrm_test_set_shrink(cls)) { // set the SHRINK bit atomically
-		// if it is already set somebody is working on it. so... leave
-		return;
-	}
-	sc.nr_mapped = read_page_state(nr_mapped);
-	sc.nr_scanned = 0;
-	sc.ckrm_flags = ckrm_get_reclaim_flags(cls);
-	sc.nr_reclaimed = 0;
-	sc.priority = 0; // always very high priority
-
-	for_each_zone(zone) {
-		int zone_total, zone_limit, active_limit, inactive_limit;
-		int active_over, inactive_over;
-		unsigned long nr_active, nr_inactive;
-		u64 temp;
-
-		zone->temp_priority = zone->prev_priority;
-		zone->prev_priority = sc.priority;
-
-		zone_total = zone->nr_active + zone->nr_inactive + zone->free_pages;
-
-		temp = (u64) cls->pg_limit * zone_total;
-		do_div(temp, ckrm_tot_lru_pages);
-		zone_limit = (int) temp;
-		active_limit = (6 * zone_limit) / 10; // 2/3rd in active list
-		inactive_limit = (3 * zone_limit) / 10; // 1/3rd in inactive list
-
-		active_over = cls->nr_active[zindex] - active_limit + active_credit;
-		inactive_over = active_over +
-				(cls->nr_inactive[zindex] - inactive_limit) + inactive_credit;
-
-		if (active_over > 0) {
-			zone->nr_scan_active += active_over + 1;
-			nr_active = zone->nr_scan_active;
-			active_credit = 0;
-		} else {
-			active_credit += active_over;
-			nr_active = 0;
-		}
-
-		if (inactive_over > 0) {
-			zone->nr_scan_inactive += inactive_over;
-			nr_inactive = zone->nr_scan_inactive;
-			inactive_credit = 0;
-		} else {
-			inactive_credit += inactive_over;
-			nr_inactive = 0;
-		}
-		while (nr_active || nr_inactive) {
-			if (nr_active) {
-				sc.nr_to_scan = min(nr_active,
-						(unsigned long)SWAP_CLUSTER_MAX);
-				nr_active -= sc.nr_to_scan;
-				refill_inactive_zone(zone, &sc);
-			}
-	
-			if (nr_inactive) {
-				sc.nr_to_scan = min(nr_inactive,
-						(unsigned long)SWAP_CLUSTER_MAX);
-				nr_inactive -= sc.nr_to_scan;
-				shrink_cache(zone, &sc);
-				if (sc.nr_to_reclaim <= 0)
-					break;
-			}
-		}
-		zone->prev_priority = zone->temp_priority;
-		zindex++;
-	}
-	ckrm_clear_shrink(cls);
-}
-
-static void
-ckrm_shrink_classes(void)
-{
-	ckrm_mem_res_t *cls;
-
-	spin_lock(&ckrm_mem_lock);
-	while (!ckrm_shrink_list_empty()) {
-		cls =  list_entry(ckrm_shrink_list.next, ckrm_mem_res_t,
-				shrink_list);
-		spin_unlock(&ckrm_mem_lock);
-		ckrm_shrink_class(cls);
-		spin_lock(&ckrm_mem_lock);
-		list_del(&cls->shrink_list);
-		cls->flags &= ~MEM_AT_LIMIT;
-	}
-	spin_unlock(&ckrm_mem_lock);
-}
-
-#else
-
-#if defined(CONFIG_CKRM_RES_MEM) && !defined(AT_LIMIT_SUPPORT)
-#warning "disabling ckrm_at_limit -- setting ckrm_shrink_classes to noop "
-#endif
-
-#define ckrm_shrink_classes()	do { } while(0)
-#endif
 
 /*
  * This is the direct reclaim path, for page-allocating processes.  We only
@@ -1065,7 +904,6 @@ int try_to_free_pages(struct zone **zones,
 	int total_scanned = 0, total_reclaimed = 0;
 	struct reclaim_state *reclaim_state = current->reclaim_state;
 	struct scan_control sc;
-	unsigned long lru_pages = 0;
 	int i;
 
 	sc.gfp_mask = gfp_mask;
@@ -1073,12 +911,8 @@ int try_to_free_pages(struct zone **zones,
 
 	inc_page_state(allocstall);
 
-	for (i = 0; zones[i] != NULL; i++) {
-		struct zone *zone = zones[i];
-
-		zone->temp_priority = DEF_PRIORITY;
-		lru_pages += zone->nr_active + zone->nr_inactive;
-	}
+	for (i = 0; zones[i] != 0; i++)
+		zones[i]->temp_priority = DEF_PRIORITY;
 
 	for (priority = DEF_PRIORITY; priority >= 0; priority--) {
 		sc.nr_mapped = read_page_state(nr_mapped);
@@ -1086,7 +920,7 @@ int try_to_free_pages(struct zone **zones,
 		sc.nr_reclaimed = 0;
 		sc.priority = priority;
 		shrink_caches(zones, &sc);
-		shrink_slab(sc.nr_scanned, gfp_mask, lru_pages);
+		shrink_slab(sc.nr_scanned, gfp_mask);
 		if (reclaim_state) {
 			sc.nr_reclaimed += reclaim_state->reclaimed_slab;
 			reclaim_state->reclaimed_slab = 0;
@@ -1115,7 +949,7 @@ int try_to_free_pages(struct zone **zones,
 			blk_congestion_wait(WRITE, HZ/10);
 	}
 	if ((gfp_mask & __GFP_FS) && !(gfp_mask & __GFP_NORETRY))
-		out_of_memory(gfp_mask);
+		out_of_memory();
 out:
 	for (i = 0; zones[i] != 0; i++)
 		zones[i]->prev_priority = zones[i]->temp_priority;
@@ -1171,7 +1005,7 @@ static int balance_pgdat(pg_data_t *pgdat, int nr_pages)
 	for (priority = DEF_PRIORITY; priority >= 0; priority--) {
 		int all_zones_ok = 1;
 		int end_zone = 0;	/* Inclusive.  0 = ZONE_DMA */
-		unsigned long lru_pages = 0;
+
 
 		if (nr_pages == 0) {
 			/*
@@ -1195,12 +1029,6 @@ static int balance_pgdat(pg_data_t *pgdat, int nr_pages)
 			end_zone = pgdat->nr_zones - 1;
 		}
 scan:
-		for (i = 0; i <= end_zone; i++) {
-			struct zone *zone = pgdat->node_zones + i;
-
-			lru_pages += zone->nr_active + zone->nr_inactive;
-		}
-
 		/*
 		 * Now scan the zone in the dma->highmem direction, stopping
 		 * at the last zone which needs scanning.
@@ -1228,7 +1056,7 @@ scan:
 			sc.priority = priority;
 			shrink_zone(zone, &sc);
 			reclaim_state->reclaimed_slab = 0;
-			shrink_slab(sc.nr_scanned, GFP_KERNEL, lru_pages);
+			shrink_slab(sc.nr_scanned, GFP_KERNEL);
 			sc.nr_reclaimed += reclaim_state->reclaimed_slab;
 			total_reclaimed += sc.nr_reclaimed;
 			if (zone->all_unreclaimable)
@@ -1315,9 +1143,6 @@ static int kswapd(void *p)
 		finish_wait(&pgdat->kswapd_wait, &wait);
 		try_to_clip_inodes();		
 
-		if (!ckrm_shrink_list_empty())
-			ckrm_shrink_classes();
-		else
 		balance_pgdat(pgdat, 0);
 	}
 	return 0;
@@ -1328,7 +1153,7 @@ static int kswapd(void *p)
  */
 void wakeup_kswapd(struct zone *zone)
 {
-	if ((zone->free_pages > zone->pages_low) && ckrm_shrink_list_empty())
+	if (zone->free_pages > zone->pages_low)
 		return;
 	if (!waitqueue_active(&zone->zone_pgdat->kswapd_wait))
 		return;

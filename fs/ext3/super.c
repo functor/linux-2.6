@@ -587,7 +587,7 @@ enum {
 	Opt_abort, Opt_data_journal, Opt_data_ordered, Opt_data_writeback,
 	Opt_usrjquota, Opt_grpjquota, Opt_offusrjquota, Opt_offgrpjquota,
 	Opt_jqfmt_vfsold, Opt_jqfmt_vfsv0,
-	Opt_tagxid, Opt_ignore, Opt_err
+	Opt_tagxid, Opt_ignore, Opt_err, Opt_resize,
 };
 
 static match_table_t tokens = {
@@ -724,11 +724,6 @@ static int parse_options (char * options, struct super_block *sb,
 			break;
 #ifndef CONFIG_INOXID_NONE
 		case Opt_tagxid:
-			if (is_remount) {
-				printk(KERN_ERR "EXT3-fs: cannot specify "
-				       "tagxid on remount\n");
-				return 0;
-			}
 			set_opt (sbi->s_mount_opt, TAG_XID);
 			break;
 #endif

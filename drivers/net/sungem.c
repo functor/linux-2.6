@@ -2024,7 +2024,8 @@ static void gem_stop_phy(struct gem *gp)
 	/* Let the chip settle down a bit, it seems that helps
 	 * for sleep mode on some models
 	 */
-	msleep(10);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(HZ/100);
 
 	/* Make sure we aren't polling PHY status change. We
 	 * don't currently use that feature though
@@ -2042,7 +2043,8 @@ static void gem_stop_phy(struct gem *gp)
 		 * dont wait a bit here, looks like the chip takes
 		 * some time to really shut down
 		 */
-		msleep(10);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ/100);
 	}
 
 	writel(0, gp->regs + MAC_TXCFG);
