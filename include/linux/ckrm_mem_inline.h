@@ -203,10 +203,9 @@ static inline void
 ckrm_mem_inc_active(struct page *page)
 {
 	ckrm_mem_res_t *cls = page_class(page), *curcls;
-	if (mem_rcbs.resid == -1) {
+	if (!cls) {
 		return;
 	}
-	BUG_ON(cls == NULL);
 	BUG_ON(test_bit(PG_ckrm_account, &page->flags));
 	if (unlikely(cls != (curcls = GET_MEM_CLASS(current)))) {
 		cls = curcls;
@@ -221,10 +220,9 @@ static inline void
 ckrm_mem_dec_active(struct page *page)
 {
 	ckrm_mem_res_t *cls = page_class(page);
-	if (mem_rcbs.resid == -1) {
+	if (!cls) {
 		return;
 	}
-	BUG_ON(cls == NULL);
 	BUG_ON(!test_bit(PG_ckrm_account, &page->flags));
 	cls->nr_active[page_zonenum(page)]--;
 	decr_use_count(cls, 0);
@@ -235,10 +233,9 @@ static inline void
 ckrm_mem_inc_inactive(struct page *page)
 {
 	ckrm_mem_res_t *cls = page_class(page), *curcls;
-	if (mem_rcbs.resid == -1) {
+	if (!cls) {
 		return;
 	}
-	BUG_ON(cls == NULL);
 	BUG_ON(test_bit(PG_ckrm_account, &page->flags));
 	if (unlikely(cls != (curcls = GET_MEM_CLASS(current)))) {
 		cls = curcls;
@@ -253,10 +250,9 @@ static inline void
 ckrm_mem_dec_inactive(struct page *page)
 {
 	ckrm_mem_res_t *cls = page_class(page);
-	if (mem_rcbs.resid == -1) {
+	if (!cls) {
 		return;
 	}
-	BUG_ON(cls == NULL);
 	BUG_ON(!test_bit(PG_ckrm_account, &page->flags));
 	cls->nr_inactive[page_zonenum(page)]--;
 	decr_use_count(cls, 0);

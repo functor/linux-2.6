@@ -77,6 +77,7 @@
 #define PG_compound		19	/* Part of a compound page */
 
 #define PG_anon			20	/* Anonymous: anon_vma in mapping */
+#define PG_ckrm_account	21	/* This page is accounted by CKRM */
 
 
 /*
