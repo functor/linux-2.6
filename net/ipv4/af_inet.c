@@ -320,7 +320,7 @@ override:
 	inet->id = 0;
 
 	sock_init_data(sock, sk);
-	sk_set_owner(sk, THIS_MODULE);
+	sk_set_owner(sk, sk->sk_prot->owner);
 
 	sk->sk_destruct	   = inet_sock_destruct;
 	sk->sk_family	   = PF_INET;
@@ -831,6 +831,31 @@ struct proto_ops inet_dgram_ops = {
 	.socketpair =	sock_no_socketpair,
 	.accept =	sock_no_accept,
 	.getname =	inet_getname,
+	.poll =		udp_poll,
+	.ioctl =	inet_ioctl,
+	.listen =	sock_no_listen,
+	.shutdown =	inet_shutdown,
+	.setsockopt =	sock_common_setsockopt,
+	.getsockopt =	sock_common_getsockopt,
+	.sendmsg =	inet_sendmsg,
+	.recvmsg =	sock_common_recvmsg,
+	.mmap =		sock_no_mmap,
+	.sendpage =	inet_sendpage,
+};
+
+/*
+ * For SOCK_RAW sockets; should be the same as inet_dgram_ops but without
+ * udp_poll
+ */
+static struct proto_ops inet_sockraw_ops = {
+	.family =	PF_INET,
+	.owner =	THIS_MODULE,
+	.release =	inet_release,
+	.bind =		inet_bind,
+	.connect =	inet_dgram_connect,
+	.socketpair =	sock_no_socketpair,
+	.accept =	sock_no_accept,
+	.getname =	inet_getname,
 	.poll =		datagram_poll,
 	.ioctl =	inet_ioctl,
 	.listen =	sock_no_listen,
@@ -891,7 +916,7 @@ static struct inet_protosw inetsw_array[] =
                .type =       SOCK_RAW,
                .protocol =   IPPROTO_IP,	/* wild card */
                .prot =       &raw_prot,
-               .ops =        &inet_dgram_ops,
+               .ops =        &inet_sockraw_ops,
                .capability = CAP_NET_RAW,
                .no_check =   UDP_CSUM_DEFAULT,
                .flags =      INET_PROTOSW_REUSE,

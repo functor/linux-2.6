@@ -46,22 +46,14 @@ extern int console_printk[];
 
 struct completion;
 
-#ifdef CONFIG_PREEMPT_VOLUNTARY
-extern void __cond_resched(void);
-# define might_resched() __cond_resched()
-#else
-# define might_resched() do { } while (0)
-#endif
-
 #ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
-  void __might_sleep(char *file, int line, int atomic_depth);
-# define might_sleep() \
-	do { __might_sleep(__FILE__, __LINE__, 0); might_resched(); } while (0)
-#else
-# define might_sleep() do { might_resched(); } while (0)
-#endif
-
+void __might_sleep(char *file, int line);
+#define might_sleep() __might_sleep(__FILE__, __LINE__)
 #define might_sleep_if(cond) do { if (unlikely(cond)) might_sleep(); } while (0)
+#else
+#define might_sleep() do {} while(0)
+#define might_sleep_if(cond) do {} while (0)
+#endif
 
 #define abs(x) ({				\
 		int __x = (x);			\
@@ -77,7 +69,7 @@ extern struct notifier_block *panic_notifier_list;
 extern long (*panic_blink)(long time);
 NORET_TYPE void panic(const char * fmt, ...)
 	__attribute__ ((NORET_AND format (printf, 1, 2)));
-asmlinkage NORET_TYPE void do_exit(long error_code)
+fastcall NORET_TYPE void do_exit(long error_code)
 	ATTRIB_NORET;
 NORET_TYPE void complete_and_exit(struct completion *, long)
 	ATTRIB_NORET;
@@ -147,18 +139,25 @@ extern int tainted;
 extern const char *print_tainted(void);
 extern void add_taint(unsigned);
 
+#define crashdump_mode()       unlikely(netdump_mode || diskdump_mode)
+
 struct pt_regs;
+extern void try_crashdump(struct pt_regs *);
 extern void (*netdump_func) (struct pt_regs *regs);
 extern int netdump_mode;
+extern void (*diskdump_func) (struct pt_regs *regs);
+extern int diskdump_mode;
+
+#define crashdump_func()	unlikely(netdump_func || diskdump_func)
 
 /* Values used for system_state */
 extern enum system_states {
 	SYSTEM_BOOTING,
-	SYSTEM_BOOTING_SCHEDULER_OK,
 	SYSTEM_RUNNING,
 	SYSTEM_HALT,
 	SYSTEM_POWER_OFF,
 	SYSTEM_RESTART,
+	SYSTEM_DUMPING,
 } system_state;
 
 #define TAINT_PROPRIETARY_MODULE	(1<<0)
@@ -180,6 +179,12 @@ extern void dump_stack(void);
 
 #define pr_info(fmt,arg...) \
 	printk(KERN_INFO fmt,##arg)
+
+#define pr_err(fmt,arg...) \
+	printk(KERN_ERR fmt,##arg)
+
+#define pr_warn(fmt,arg...) \
+	printk(KERN_WARNING fmt,##arg)
 
 /*
  *      Display an IP address in readable format.

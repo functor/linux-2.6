@@ -250,6 +250,7 @@ int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)
 
 			page = pmd_page(*pmd);
 			pmd_clear(pmd);
+			mm->nr_ptes--;
 			dec_page_state(nr_page_table_pages);
 			page_cache_release(page);
 		}

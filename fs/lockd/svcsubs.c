@@ -90,7 +90,7 @@ nlm_lookup_file(struct svc_rqst *rqstp, struct nlm_file **result,
 	 * the file.
 	 */
 	if ((nfserr = nlmsvc_ops->fopen(rqstp, f, &file->f_file)) != 0) {
-		dprintk("lockd: open failed (nfserr %d)\n", nfserr);
+		dprintk("lockd: open failed (nfserr %d)\n", ntohl(nfserr));
 		goto out_free;
 	}
 
@@ -114,10 +114,7 @@ out_free:
 		nfserr = nlm4_stale_fh;
 	else
 #endif
-	if (nfserr == 2)
-		nfserr = nlm_lck_dropit;
-	else
-		nfserr = nlm_lck_denied;
+	nfserr = nlm_lck_denied;
 	goto out_unlock;
 }
 

@@ -72,8 +72,10 @@ nfs_get_user_pages(int rw, unsigned long user_addr, size_t size,
 	size_t array_size;
 
 	/* set an arbitrary limit to prevent arithmetic overflow */
-	if (size > MAX_DIRECTIO_SIZE)
+	if (size > MAX_DIRECTIO_SIZE) {
+		*pages = NULL;
 		return -EFBIG;
+	}
 
 	page_count = (user_addr + size + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	page_count -= user_addr >> PAGE_SHIFT;
@@ -545,7 +547,7 @@ nfs_file_direct_write(struct kiocb *iocb, const char __user *buf, size_t count, 
 {
 	ssize_t retval = -EINVAL;
 	loff_t *ppos = &iocb->ki_pos;
-	unsigned long limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
+	unsigned long limit = current->signal->rlim[RLIMIT_FSIZE].rlim_cur;
 	struct file *file = iocb->ki_filp;
 	struct nfs_open_context *ctx =
 			(struct nfs_open_context *) file->private_data;

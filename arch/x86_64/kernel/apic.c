@@ -32,6 +32,7 @@
 #include <asm/mtrr.h>
 #include <asm/mpspec.h>
 #include <asm/pgalloc.h>
+#include <asm/mach_apic.h>
 
 int apic_verbosity;
 
@@ -143,36 +144,6 @@ void disconnect_bsp_APIC(void)
 		apic_printk(APIC_QUIET, "disabling APIC mode, entering PIC mode.\n");
 		outb(0x70, 0x22);
 		outb(0x00, 0x23);
-	}
-	else {
-		/* Go back to Virtual Wire compatibility mode */
-		unsigned long value;
-
-		/* For the spurious interrupt use vector F, and enable it */
-		value = apic_read(APIC_SPIV);
-		value &= ~APIC_VECTOR_MASK;
-		value |= APIC_SPIV_APIC_ENABLED;
-		value |= 0xf;
-		apic_write_around(APIC_SPIV, value);
-
-		/* For LVT0 make it edge triggered, active high, external and enabled */
-		value = apic_read(APIC_LVT0);
-		value &= ~(APIC_MODE_MASK | APIC_SEND_PENDING |
-			APIC_INPUT_POLARITY | APIC_LVT_REMOTE_IRR |
-			APIC_LVT_LEVEL_TRIGGER | APIC_LVT_MASKED );
-		value |= APIC_LVT_REMOTE_IRR | APIC_SEND_PENDING;
-		value = SET_APIC_DELIVERY_MODE(value, APIC_MODE_EXINT);
-		apic_write_around(APIC_LVT0, value);
-
-		/* For LVT1 make it edge triggered, active high, nmi and enabled */
-		value = apic_read(APIC_LVT1);
-		value &= ~(
-			APIC_MODE_MASK | APIC_SEND_PENDING |
-			APIC_INPUT_POLARITY | APIC_LVT_REMOTE_IRR |
-			APIC_LVT_LEVEL_TRIGGER | APIC_LVT_MASKED);
-		value |= APIC_LVT_REMOTE_IRR | APIC_SEND_PENDING;
-		value = SET_APIC_DELIVERY_MODE(value, APIC_MODE_NMI);
-		apic_write_around(APIC_LVT1, value);
 	}
 }
 
@@ -330,8 +301,7 @@ void __init setup_local_APIC (void)
 	 * Double-check whether this APIC is really registered.
 	 * This is meaningless in clustered apic mode, so we skip it.
 	 */
-	if (!clustered_apic_mode &&
-		!physid_isset(GET_APIC_ID(apic_read(APIC_ID)), phys_cpu_present_map))
+	if (!apic_id_registered())
 		BUG();
 
 	/*
@@ -339,23 +309,7 @@ void __init setup_local_APIC (void)
 	 * an APIC.  See e.g. "AP-388 82489DX User's Manual" (Intel
 	 * document number 292116).  So here it goes...
 	 */
-
-	if (!clustered_apic_mode) {
-		/*
-		 * In clustered apic mode, the firmware does this for us 
-		 * Put the APIC into flat delivery mode.
-		 * Must be "all ones" explicitly for 82489DX.
-		 */
-		apic_write_around(APIC_DFR, 0xffffffff);
-
-		/*
-		 * Set up the logical destination ID.
-		 */
-		value = apic_read(APIC_LDR);
-		value &= ~APIC_LDR_MASK;
-		value |= (1<<(smp_processor_id()+24));
-		apic_write_around(APIC_LDR, value);
-	}
+	init_apic_ldr();
 
 	/*
 	 * Set Task Priority to 'accept all'. We never change this
@@ -949,6 +903,54 @@ void smp_apic_timer_interrupt(struct pt_regs *regs)
 	irq_enter();
 	smp_local_timer_interrupt(regs);
 	irq_exit();
+}
+
+/*
+ * oem_force_hpet_timer -- force HPET mode for some boxes.
+ *
+ * Thus far, the major user of this is IBM's Summit2 series:
+ *
+ * Clustered boxes may have unsynced TSC problems if they are
+ * multi-chassis. Use available data to take a good guess.
+ * If in doubt, go HPET.
+ */
+__init int oem_force_hpet_timer(void)
+{
+	int i, clusters, zeros;
+	unsigned id;
+	DECLARE_BITMAP(clustermap, NUM_APIC_CLUSTERS);
+
+	bitmap_empty(clustermap, NUM_APIC_CLUSTERS);
+
+	for (i = 0; i < NR_CPUS; i++) {
+		id = bios_cpu_apicid[i];
+		if (id != BAD_APICID)
+			__set_bit(APIC_CLUSTERID(id), clustermap);
+	}
+
+	/* Problem:  Partially populated chassis may not have CPUs in some of
+	 * the APIC clusters they have been allocated.  Only present CPUs have
+	 * bios_cpu_apicid entries, thus causing zeroes in the bitmap.  Since
+	 * clusters are allocated sequentially, count zeros only if they are
+	 * bounded by ones.
+	 */
+	clusters = 0;
+	zeros = 0;
+	for (i = 0; i < NUM_APIC_CLUSTERS; i++) {
+		if (test_bit(i, clustermap)) {
+			clusters += 1 + zeros;
+			zeros = 0;
+		} else
+			++zeros;
+	}
+
+	/*
+	 * If clusters > 2, then should be multi-chassis.  Return 1 for HPET.
+	 * Else return 0 to use TSC.
+	 * May have to revisit this when multi-core + hyperthreaded CPUs come
+	 * out, but AFAIK this will work even for them.
+	 */
+	return (clusters > 2);
 }
 
 /*

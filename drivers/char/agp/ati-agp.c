@@ -61,6 +61,7 @@ static int ati_create_page_map(ati_page_map *page_map)
 
 	SetPageReserved(virt_to_page(page_map->real));
 	err = map_page_into_agp(virt_to_page(page_map->real));
+
 	page_map->remapped = ioremap_nocache(virt_to_phys(page_map->real),
 					    PAGE_SIZE);
 	if (page_map->remapped == NULL || err) {
@@ -529,6 +530,8 @@ static struct pci_driver agp_ati_pci_driver = {
 
 static int __init agp_ati_init(void)
 {
+	if (agp_off)
+		return -EINVAL;
 	return pci_module_init(&agp_ati_pci_driver);
 }
 

@@ -19,9 +19,11 @@
 #include <linux/netpoll.h>
 #include <linux/sched.h>
 #include <linux/rcupdate.h>
+#include <linux/nmi.h>
 #include <net/tcp.h>
 #include <net/udp.h>
 #include <asm/unaligned.h>
+#include <asm/byteorder.h>
 
 /*
  * We maintain a small pool of fully-sized skbs, to make sure the
@@ -65,27 +67,25 @@ static int checksum_udp(struct sk_buff *skb, struct udphdr *uh,
 	return csum_fold(skb_checksum(skb, 0, skb->len, skb->csum));
 }
 
-void netpoll_poll(struct netpoll *np)
+/*
+ * Check whether delayed processing was scheduled for our current CPU,
+ * and then manually invoke NAPI polling to pump data off the card.
+ *
+ * In cases where there is bi-directional communications, reading only
+ * one message at a time can lead to packets being dropped by the
+ * network adapter, forcing superfluous retries and possibly timeouts.
+ * Thus, we set our budget to greater than 1.
+ */
+static void poll_napi(struct netpoll *np)
 {
-	/*
-	 * In cases where there is bi-directional communications, reading
-	 * only one message at a time can lead to packets being dropped by
-	 * the network adapter, forcing superfluous retries and possibly
-	 * timeouts.  Thus, we set our budget to a more reasonable value.
-	 */
-	int budget = 16;
+	int budget = netdump_mode ? 64 : 16;
 	unsigned long flags;
+	struct softnet_data *queue;
 
-	if(!np->dev || !netif_running(np->dev) || !np->dev->poll_controller)
-		return;
-
-	/* Process pending work on NIC */
-	np->dev->poll_controller(np->dev);
-
-	/* If scheduling is stopped, tickle NAPI bits */
 	spin_lock_irqsave(&netpoll_poll_lock, flags);
-	if (np->dev->poll &&
-	    test_bit(__LINK_STATE_RX_SCHED, &np->dev->state)) {
+	queue = &__get_cpu_var(softnet_data);
+	if (test_bit(__LINK_STATE_RX_SCHED, &np->dev->state) &&
+	    !list_empty(&queue->poll_list)) {
 		np->dev->netpoll_rx |= NETPOLL_RX_DROP;
 		atomic_inc(&trapped);
 
@@ -95,6 +95,17 @@ void netpoll_poll(struct netpoll *np)
 		np->dev->netpoll_rx &= ~NETPOLL_RX_DROP;
 	}
 	spin_unlock_irqrestore(&netpoll_poll_lock, flags);
+}
+
+void netpoll_poll(struct netpoll *np)
+{
+	if(!np->dev || !netif_running(np->dev) || !np->dev->poll_controller)
+		return;
+
+	/* Process pending work on NIC */
+	np->dev->poll_controller(np->dev);
+	if (np->dev->poll)
+		poll_napi(np);
 
 	zap_completion_queue();
 }
@@ -138,6 +149,7 @@ static void zap_completion_queue(void)
 	}
 
 	put_cpu_var(softnet_data);
+	touch_nmi_watchdog();
 }
 
 static struct sk_buff * find_skb(struct netpoll *np, int len, int reserve)
@@ -252,7 +264,7 @@ void netpoll_send_udp(struct netpoll *np, const char *msg, int len)
 	iph->check    = 0;
 	put_unaligned(htonl(np->local_ip), &(iph->saddr));
 	put_unaligned(htonl(np->remote_ip), &(iph->daddr));
-	iph->check    = ip_fast_csum((unsigned char *)iph, iph->ihl);
+	iph->check    = ip_fast_csum((unsigned char *)iph, 5);
 
 	eth = (struct ethhdr *) skb_push(skb, ETH_HLEN);
 
@@ -367,6 +379,9 @@ int netpoll_rx(struct sk_buff *skb)
 	struct netpoll *np;
 	struct list_head *p;
 	unsigned long flags;
+
+	if (!(skb->dev->netpoll_rx & NETPOLL_RX_ENABLED))
+		return 1;
 
 	if (skb->dev->type != ARPHRD_ETHER)
 		goto out;
@@ -565,7 +580,7 @@ int netpoll_setup(struct netpoll *np)
 		goto release;
 	}
 
-	if (!(ndev->flags & IFF_UP)) {
+	if (!netif_running(ndev)) {
 		unsigned short oflags;
 		unsigned long atmost, atleast;
 
@@ -611,7 +626,7 @@ int netpoll_setup(struct netpoll *np)
 		rcu_read_lock();
 		in_dev = __in_dev_get(ndev);
 
-		if (!in_dev) {
+		if (!in_dev || !in_dev->ifa_list) {
 			rcu_read_unlock();
 			printk(KERN_ERR "%s: no IP address for %s, aborting\n",
 			       np->name, np->dev_name);
@@ -635,6 +650,9 @@ int netpoll_setup(struct netpoll *np)
 		list_add(&np->rx_list, &rx_list);
 		spin_unlock_irqrestore(&rx_list_lock, flags);
 	}
+
+	if(np->dump_func)
+		netdump_func = np->dump_func;
 
 	return 0;
  release:
@@ -671,6 +689,13 @@ void netpoll_set_trap(int trap)
 		atomic_dec(&trapped);
 }
 
+void netpoll_reset_locks(struct netpoll *np)
+{
+	spin_lock_init(&rx_list_lock);
+	spin_lock_init(&skb_list_lock);
+	spin_lock_init(&np->dev->xmit_lock);
+}
+
 EXPORT_SYMBOL(netpoll_set_trap);
 EXPORT_SYMBOL(netpoll_trap);
 EXPORT_SYMBOL(netpoll_parse_options);
@@ -679,3 +704,4 @@ EXPORT_SYMBOL(netpoll_cleanup);
 EXPORT_SYMBOL(netpoll_send_skb);
 EXPORT_SYMBOL(netpoll_send_udp);
 EXPORT_SYMBOL(netpoll_poll);
+EXPORT_SYMBOL_GPL(netpoll_reset_locks);

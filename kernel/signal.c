@@ -20,6 +20,7 @@
 #include <linux/tty.h>
 #include <linux/binfmts.h>
 #include <linux/security.h>
+#include <linux/syscalls.h>
 #include <linux/ptrace.h>
 #include <asm/param.h>
 #include <asm/uaccess.h>
@@ -264,18 +265,18 @@ next_signal(struct sigpending *pending, sigset_t *mask)
 	return sig;
 }
 
-static struct sigqueue *__sigqueue_alloc(void)
+static struct sigqueue *__sigqueue_alloc(struct task_struct *t, int flags)
 {
 	struct sigqueue *q = NULL;
 
-	if (atomic_read(&current->user->sigpending) <
-			current->rlim[RLIMIT_SIGPENDING].rlim_cur)
-		q = kmem_cache_alloc(sigqueue_cachep, GFP_ATOMIC);
+	if (atomic_read(&t->user->sigpending) <
+			t->signal->rlim[RLIMIT_SIGPENDING].rlim_cur)
+		q = kmem_cache_alloc(sigqueue_cachep, flags);
 	if (q) {
 		INIT_LIST_HEAD(&q->list);
 		q->flags = 0;
 		q->lock = NULL;
-		q->user = get_uid(current->user);
+		q->user = get_uid(t->user);
 		atomic_inc(&q->user->sigpending);
 	}
 	return(q);
@@ -775,14 +776,8 @@ static int send_signal(int sig, struct siginfo *info, struct task_struct *t,
 	   make sure at least one signal gets delivered and don't
 	   pass on the info struct.  */
 
-	if (atomic_read(&t->user->sigpending) <
-			t->rlim[RLIMIT_SIGPENDING].rlim_cur)
-		q = kmem_cache_alloc(sigqueue_cachep, GFP_ATOMIC);
-
+	q = __sigqueue_alloc(t, GFP_ATOMIC);
 	if (q) {
-		q->flags = 0;
-		q->user = get_uid(t->user);
-		atomic_inc(&q->user->sigpending);
 		list_add_tail(&q->list, &signals->list);
 		switch ((unsigned long) info) {
 		case 0:
@@ -1126,7 +1121,7 @@ int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 
 int __kill_pg_info(int sig, struct siginfo *info, pid_t pgrp)
 {
-	struct task_struct *p;
+	struct task_struct *p = NULL;
 	int retval, success;
 
 	if (pgrp <= 0)
@@ -1169,34 +1164,6 @@ kill_proc_info(int sig, struct siginfo *info, pid_t pid)
 	return error;
 }
 
-int print_fatal_signals = 0;
-
-static void print_fatal_signal(struct pt_regs *regs, int signr)
-{
-	int i;
-	unsigned char insn;
-	printk("%s/%d: potentially unexpected fatal signal %d.\n",
-		current->comm, current->pid, signr);
-		
-#ifdef __i386__
-	printk("code at %08lx: ", regs->eip);
-	for (i = 0; i < 16; i++) {
-		__get_user(insn, (unsigned char *)(regs->eip + i));
-		printk("%02x ", insn);
-	}
-#endif	
-	printk("\n");
-	show_regs(regs);
-}
-
-static int __init setup_print_fatal_signals(char *str)
-{
-	get_option (&str, &print_fatal_signals);
-
-	return 1;
-}
-
-__setup("print-fatal-signals=", setup_print_fatal_signals);
 
 /*
  * kill_something_info() interprets pid in interesting ways just like kill(2).
@@ -1337,7 +1304,7 @@ struct sigqueue *sigqueue_alloc(void)
 {
 	struct sigqueue *q;
 
-	if ((q = __sigqueue_alloc()))
+	if ((q = __sigqueue_alloc(current, GFP_KERNEL)))
 		q->flags |= SIGQUEUE_PREALLOC;
 	return(q);
 }
@@ -1652,6 +1619,35 @@ void ptrace_notify(int exit_code)
 	spin_unlock_irq(&current->sighand->siglock);
 }
 
+int print_fatal_signals = 0;
+
+static void print_fatal_signal(struct pt_regs *regs, int signr)
+{
+	int i;
+	unsigned char insn;
+	printk("%s/%d: potentially unexpected fatal signal %d.\n",
+		current->comm, current->pid, signr);
+
+#ifdef __i386__
+	printk("code at %08lx: ", regs->eip);
+	for (i = 0; i < 16; i++) {
+		__get_user(insn, (unsigned char *)(regs->eip + i));
+		printk("%02x ", insn);
+	}
+#endif
+	printk("\n");
+	show_regs(regs);
+}
+
+static int __init setup_print_fatal_signals(char *str)
+{
+	get_option (&str, &print_fatal_signals);
+
+	return 1;
+}
+
+__setup("print-fatal-signals=", setup_print_fatal_signals);
+
 #ifndef HAVE_ARCH_GET_SIGNAL_TO_DELIVER
 
 static void
@@ -1857,6 +1853,7 @@ relock:
 			print_fatal_signal(regs, signr);
 			spin_lock_irq(&current->sighand->siglock);
 		}
+
 		if ((current->ptrace & PT_PTRACED) && signr != SIGKILL) {
 			ptrace_signal_deliver(regs, cookie);
 
@@ -1955,22 +1952,16 @@ relock:
 		current->flags |= PF_SIGNALED;
 		if (print_fatal_signals)
 			print_fatal_signal(regs, signr);
-		if (sig_kernel_coredump(signr) &&
-		    do_coredump((long)signr, signr, regs)) {
+		if (sig_kernel_coredump(signr)) {
 			/*
-			 * That killed all other threads in the group and
-			 * synchronized with their demise, so there can't
-			 * be any more left to kill now.  The group_exit
-			 * flags are set by do_coredump.  Note that
-			 * thread_group_empty won't always be true yet,
-			 * because those threads were blocked in __exit_mm
-			 * and we just let them go to finish dying.
+			 * If it was able to dump core, this kills all
+			 * other threads in the group and synchronizes with
+			 * their demise.  If we lost the race with another
+			 * thread getting here, it set group_exit_code
+			 * first and our do_group_exit call below will use
+			 * that value and ignore the one we pass it.
 			 */
-			const int code = signr | 0x80;
-			BUG_ON(!current->signal->group_exit);
-			BUG_ON(current->signal->group_exit_code != code);
-			do_exit(code);
-			/* NOTREACHED */
+			do_coredump((long)signr, signr, regs);
 		}
 
 		/*

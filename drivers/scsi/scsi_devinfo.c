@@ -83,6 +83,7 @@ static struct {
 	{"SONY", "CD-ROM CDU-55S", "1.0i", BLIST_NOLUN},
 	{"SONY", "CD-ROM CDU-561", "1.7x", BLIST_NOLUN},
 	{"SONY", "CD-ROM CDU-8012", NULL, BLIST_NOLUN},
+	{"SONY", "SDT-5000", "3.17", BLIST_SELECT_NO_ATN},
 	{"TANDBERG", "TDC 3600", "U07", BLIST_NOLUN},	/* locks up */
 	{"TEAC", "CD-R55S", "1.0H", BLIST_NOLUN},	/* locks up */
 	/*
@@ -115,7 +116,9 @@ static struct {
 
 	/*
 	 * Other types of devices that have special flags.
+	 * Note that all USB devices should have the BLIST_INQUIRY_36 flag.
 	 */
+	{"3PARdata", "VV", NULL, BLIST_REPORTLUN2},
 	{"ADAPTEC", "AACRAID", NULL, BLIST_FORCELUN},
 	{"ADAPTEC", "Adaptec 5400S", NULL, BLIST_FORCELUN},
 	{"CANON", "IPUBJD", NULL, BLIST_SPARSELUN},
@@ -147,6 +150,7 @@ static struct {
 	{"HP", "NetRAID-4M", NULL, BLIST_FORCELUN},
 	{"HP", "HSV100", NULL, BLIST_REPORTLUN2 | BLIST_NOSTARTONADD},
 	{"HP", "C1557A", NULL, BLIST_FORCELUN},
+	{"HP", "C3323-300", "4269", BLIST_NOTQ},
 	{"IBM", "AuSaV1S2", NULL, BLIST_FORCELUN},
 	{"IBM", "ProFibre 4000R", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"iomega", "jaz 1GB", "J.86", BLIST_NOTQ | BLIST_NOLUN},
@@ -158,6 +162,7 @@ static struct {
 	{"MATSHITA", "PD-1", NULL, BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"MATSHITA", "DMC-LC5", NULL, BLIST_NOT_LOCKABLE | BLIST_INQUIRY_36},
 	{"MATSHITA", "DMC-LC40", NULL, BLIST_NOT_LOCKABLE | BLIST_INQUIRY_36},
+	{"Medion", "Flash XL  MMC/SD", "2.6D", BLIST_FORCELUN},
 	{"MegaRAID", "LD", NULL, BLIST_FORCELUN},
 	{"MICROP", "4110", NULL, BLIST_NOTQ},
 	{"MYLEX", "DACARMRB", "*", BLIST_REPORTLUN2},
@@ -167,13 +172,17 @@ static struct {
 	{"NEC", "PD-1 ODX654P", NULL, BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"NRC", "MBR-7", NULL, BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"NRC", "MBR-7.4", NULL, BLIST_FORCELUN | BLIST_SINGLELUN},
+	{"OTi", "CF CARD Reader", "2.00", BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"PIONEER", "CD-ROM DRM-600", NULL, BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"PIONEER", "CD-ROM DRM-602X", NULL, BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"PIONEER", "CD-ROM DRM-604X", NULL, BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"REGAL", "CDC-4X", NULL, BLIST_MAX5LUN | BLIST_SINGLELUN},
+	{"SEAGATE", "ST34555N", "0930", BLIST_NOTQ},	/* Chokes on tagged INQUIRY */
+	{"SEAGATE", "ST3390N", "9546", BLIST_NOTQ},
 	{"SGI", "RAID3", "*", BLIST_SPARSELUN},
 	{"SGI", "RAID5", "*", BLIST_SPARSELUN},
 	{"SGI", "TP9100", "*", BLIST_REPORTLUN2},
+	{"SGI", "Universal Xport", "*", BLIST_NO_ULD_ATTACH},
 	{"SONY", "CD-ROM CDU-8001", NULL, BLIST_BORKEN},
 	{"SONY", "TSL", NULL, BLIST_FORCELUN},		/* DDS3 & DDS4 autoloaders */
 	{"SUN", "T300", "*", BLIST_SPARSELUN},
@@ -181,40 +190,47 @@ static struct {
 	{"TEXEL", "CD-ROM", "1.06", BLIST_BORKEN},
 	{"TOSHIBA", "CDROM", NULL, BLIST_ISROM},
 	{"TOSHIBA", "CD-ROM", NULL, BLIST_ISROM},
+	{"WangDAT", "Model 2600", "01.7", BLIST_SELECT_NO_ATN},
+	{"WangDAT", "Model 3200", "02.2", BLIST_SELECT_NO_ATN},
+	{"WangDAT", "Model 1300", "02.4", BLIST_SELECT_NO_ATN},
 	{"XYRATEX", "RS", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"Zzyzx", "RocketStor 500S", NULL, BLIST_SPARSELUN},
 	{"Zzyzx", "RocketStor 2000", NULL, BLIST_SPARSELUN},
 
 	/*
-	 * USB multi card readers. Only these should use BLIST_FORCELUN.
+	 * USB multi card readers.
 	 */
-	{"AFT PRO", "-IX CF", "0.0>", BLIST_FORCELUN},
-	{"BELKIN", "USB 2 HS-CF", "1.95",  BLIST_FORCELUN},
-	{"CBOX3", "USB Storage-SMC", "300A", BLIST_FORCELUN},
-	{"DMI", "MultiFlash", "3.00", BLIST_FORCELUN},
-	{"eUSB", "Compact Flash", NULL, BLIST_FORCELUN},
-	{"GENERIC", "Card Reader   CF", "v26F", BLIST_FORCELUN},
-	{"Generic", "USB SD Reader", "1.00", BLIST_FORCELUN},
-	{"Generic", "USB Storage-SMC", "0090", BLIST_FORCELUN},
-	{"Generic", "USB Storage-SMC", "0180", BLIST_FORCELUN},
-	{"Generic", "USB Storage-SMC", "0207", BLIST_FORCELUN},
-	{"generic", "USB Storage-SMC", "0207", BLIST_FORCELUN},
-	{"IC", "USB Storage-CFC", "322E", BLIST_FORCELUN},
-	{"ICSI", "SD Card", "2.7C", BLIST_FORCELUN},
-	{"IOI", "Media Bay", "*", BLIST_FORCELUN},
-	{"Lexar", "Media Inc. SM/xD", "009E", BLIST_FORCELUN},
-	{"Medion", "Flash XL  MMC/SD", "2.6D", BLIST_FORCELUN},
-	{"OEI-USB2", "CompactFlash", "2.00", BLIST_FORCELUN},
-	{"SanDisk", "ImageMate CF-SD1", NULL, BLIST_FORCELUN},
-	{"SMSC", "223 U HS-CF", "1.95", BLIST_FORCELUN},
-	{"SMSC", "USB 2 HS-CF", NULL, BLIST_FORCELUN},
-	{"TwinMOS", "7-in-1 Card RWCF", "0100", BLIST_FORCELUN},
-	{"USB2.0", "CardReader SM RW", "0814", BLIST_FORCELUN},
-	{"USB2.0", "CardReader CF RW", "0.0>", BLIST_FORCELUN},
-	{"USB2.0", "CF  CardReader", NULL, BLIST_FORCELUN},
-	{"USB2.0", "SMARTMEDIA/XD", NULL, BLIST_FORCELUN},
-	{"Y-E DATA", "CF Card Reader", "1.03", BLIST_FORCELUN},
-	{"Zynet", "USB Storage-SMC", "I03A", BLIST_FORCELUN},
+	{"AFT", "CF  PRO-9XP", "9144", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"AFT PRO", "-IX CF", "0.0>", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"BELKIN", "USB 2 HS-CF", "1.95",  BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"CBOX3", "USB Storage-SMC", "300A", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"DMI", "MultiFlash", "3.00", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"eUSB", "Compact Flash", NULL, BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"GENERIC", "Card Reader   CF", "v26F", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"General", "USB Disk Drive","1.00", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"Generic", "USB SD Reader", "1.00", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"Generic", "USB Storage-SMC", "0090", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"Generic", "USB Storage-SMC", "0180", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"Generic", "USB Storage-SMC", "0207", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"generic", "USB Storage-SMC", "0207", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"IC", "USB Storage-CFC", "322E", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"ICSI", "SD Card", "2.7C", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"IOI", "Media Bay", "*", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"Lexar", "Media Inc. SM/xD", "009E", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"Lexar", "USB Storage-SMC", "I18A", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"Medion", "Flash XL  MMC/SD", "2.6D", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"OEI-USB", "CompactFlash", "1.01", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"OEI-USB2", "CompactFlash", "2.00", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"SanDisk", "ImageMate CF-SD1", NULL, BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"SMSC", "223 U HS-CF", "1.95", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"SMSC", "USB 2 HS-CF", NULL, BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"TwinMOS", "7-in-1 Card RWCF", "0100", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"USB2.0", "CardReader CF RW", "0.0>", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"USB2.0", "CardReader SM RW", "0814", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"USB2.0", "CF  CardReader", NULL, BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"USB2.0", "SMARTMEDIA/XD", NULL, BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"Y-E DATA", "CF Card Reader", "1.03", BLIST_FORCELUN | BLIST_INQUIRY_36},
+	{"Zynet", "USB Storage-SMC", "I03A", BLIST_FORCELUN | BLIST_INQUIRY_36},
 
 	{ NULL, NULL, NULL, 0 },
 };
@@ -532,7 +548,7 @@ void scsi_exit_devinfo(void)
  * 	Add command line @dev_list entries, then add
  * 	scsi_static_device_list entries to the scsi device info list.
  **/
-int scsi_init_devinfo(void)
+int __init scsi_init_devinfo(void)
 {
 #ifdef CONFIG_SCSI_PROC_FS
 	struct proc_dir_entry *p;

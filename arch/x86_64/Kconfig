@@ -72,7 +72,8 @@ config HPET_TIMER
 	  If unsure, say Y.
 
 config HPET_EMULATE_RTC
-	def_bool HPET_TIMER && RTC=y
+	bool "Provide RTC interrupt"
+	depends on HPET_TIMER && RTC=y
 
 config GENERIC_ISA_DMA
 	bool
@@ -255,6 +256,7 @@ config SCHED_SMT
 
 config K8_NUMA
        bool "K8 NUMA support"
+       select NUMA
        depends on SMP
        help
 	  Enable NUMA (Non Unified Memory Architecture) support for
@@ -264,15 +266,23 @@ config K8_NUMA
 	  This code is recommended on all multiprocessor Opteron systems
 	  and normally doesn't hurt on others.
 
+config NUMA_EMU
+	bool "NUMA emulation support"
+	select NUMA
+	depends on SMP
+	help
+	  Enable NUMA emulation. A flat machine will be split
+	  into virtual nodes when booted with "numa=fake=N", where N is the
+	  number of nodes. This is only useful for debugging.
+
 config DISCONTIGMEM
        bool
-       depends on K8_NUMA
+       depends on NUMA
        default y
 
 config NUMA
        bool
-       depends on K8_NUMA
-       default y
+       default n
 
 config HAVE_DEC_LOCK
 	bool
@@ -296,6 +306,7 @@ config NR_CPUS
 
 config GART_IOMMU
 	bool "IOMMU support"
+	depends on PCI
 	help
 	  Support the K8 IOMMU. Needed to run systems with more than 4GB of memory
 	  properly with 32-bit PCI devices that do not support DAC (Double Address
@@ -329,6 +340,16 @@ config X86_MCE
 
 endmenu
 
+#
+# Use the generic interrupt handling code in kernel/irq/:
+#
+config GENERIC_HARDIRQS
+	bool
+	default y
+
+config GENERIC_IRQ_PROBE
+	bool
+	default y
 
 menu "Power management options"
 
@@ -406,23 +427,6 @@ config UID16
 	bool
 	depends on IA32_EMULATION
 	default y
-
-config KEXEC
-	bool "kexec system call (EXPERIMENTAL)"
-	depends on EXPERIMENTAL
-	help
-	  kexec is a system call that implements the ability to shutdown your
-	  current kernel, and to start another kernel.  It is like a reboot
-	  but it is indepedent of the system firmware.   And like a reboot
-	  you can start any kernel with it, not just Linux.
-
-	  The name comes from the similiarity to the exec system call.
-
-	  It is an ongoing process to be certain the hardware in a machine
-	  is properly shutdown, so do not be surprised if this code does not
-	  initially work for you.  It may help to enable device hotplugging
-	  support.  As of this writing the exact hardware interface is
-	  strongly in flux, so no good recommendation can be made.
 
 endmenu
 

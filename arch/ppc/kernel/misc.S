@@ -1447,9 +1447,6 @@ _GLOBAL(sys_call_table)
 	.long sys_mq_notify
 	.long sys_mq_getsetattr
 	.long sys_kexec_load		/* 268 reserved for sys_kexec_load */
-#ifdef USE_IOPRIO_SYSCALLS	
-	.long sys_ioprio_set
-	.long sys_ioprio_get		
-#else
-#warning MEF not including sys_ioprio_{set,get} syscalls
-#endif	
+	.long sys_add_key
+	.long sys_request_key		/* 270 */
+	.long sys_keyctl

@@ -138,8 +138,6 @@ int mpt_stm_index = -1;
 
 struct proc_dir_entry *mpt_proc_root_dir;
 
-DmpServices_t *DmpService;
-
 #define WHOINIT_UNKNOWN		0xAA
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -158,7 +156,6 @@ static MPT_EVHANDLER		 MptEvHandlers[MPT_MAX_PROTOCOL_DRIVERS];
 static MPT_RESETHANDLER		 MptResetHandlers[MPT_MAX_PROTOCOL_DRIVERS];
 static struct mpt_pci_driver 	*MptDeviceDriverHandlers[MPT_MAX_PROTOCOL_DRIVERS];
 
-static int	FusionInitCalled = 0;
 static int	mpt_base_index = -1;
 static int	last_drv_idx = -1;
 
@@ -170,7 +167,9 @@ static DECLARE_WAIT_QUEUE_HEAD(mpt_waitq);
  */
 static irqreturn_t mpt_interrupt(int irq, void *bus_id, struct pt_regs *r);
 static int	mpt_base_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *req, MPT_FRAME_HDR *reply);
-
+static int	mpt_handshake_req_reply_wait(MPT_ADAPTER *ioc, int reqBytes,
+			u32 *req, int replyBytes, u16 *u16reply, int maxwait,
+			int sleepFlag);
 static int	mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag);
 static void	mpt_detect_bound_ports(MPT_ADAPTER *ioc, struct pci_dev *pdev);
 static void	mpt_adapter_disable(MPT_ADAPTER *ioc);
@@ -338,15 +337,13 @@ mpt_interrupt(int irq, void *bus_id, struct pt_regs *r)
 			ioc_stat = le16_to_cpu(mr->u.reply.IOCStatus);
 			if (ioc_stat & MPI_IOCSTATUS_FLAG_LOG_INFO_AVAILABLE) {
 				u32	 log_info = le32_to_cpu(mr->u.reply.IOCLogInfo);
-				if ((int)ioc->chip_type <= (int)FC929)
+				if (ioc->bus_type == FC)
 					mpt_fc_log_info(ioc, log_info);
-				else
+				else if (ioc->bus_type == SCSI)
 					mpt_sp_log_info(ioc, log_info);
 			}
 			if (ioc_stat & MPI_IOCSTATUS_MASK) {
-				if ((int)ioc->chip_type <= (int)FC929)
-						;
-				else
+				if (ioc->bus_type == SCSI)
 					mpt_sp_ioc_info(ioc, (u32)ioc_stat, mf);
 			}
 		} else {
@@ -393,7 +390,7 @@ mpt_interrupt(int irq, void *bus_id, struct pt_regs *r)
 		}
 
 #ifdef MPT_DEBUG_IRQ
-		if ((int)ioc->chip_type > (int)FC929) {
+		if (ioc->bus_type == SCSI) {
 			/* Verify mf, mr are reasonable.
 			 */
 			if ((mf) && ((mf >= MPT_INDEX_2_MFPTR(ioc, ioc->req_depth))
@@ -438,7 +435,7 @@ mpt_interrupt(int irq, void *bus_id, struct pt_regs *r)
 
 			/*  Put Request back on FreeQ!  */
 			spin_lock_irqsave(&ioc->FreeQlock, flags);
-			Q_ADD_TAIL(&ioc->FreeQ, &mf->u.frame.linkage, MPT_FRAME_HDR);
+			list_add_tail(&mf->u.frame.linkage.list, &ioc->FreeQ);
 #ifdef MFCNT
 			ioc->mfcnt--;
 #endif
@@ -534,7 +531,7 @@ mpt_base_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 			del_timer(&pCfg->timer);
 
 			spin_lock_irqsave(&ioc->FreeQlock, flags);
-			Q_DEL_ITEM(&pCfg->linkage);
+			list_del(&pCfg->linkage);
 			spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 			/*
@@ -603,22 +600,6 @@ mpt_register(MPT_CALLBACK cbfunc, MPT_DRIVER_CLASS dclass)
 	int i;
 
 	last_drv_idx = -1;
-
-#ifndef MODULE
-	/*
-	 *  Handle possibility of the mptscsih_detect() routine getting
-	 *  called *before* fusion_init!
-	 */
-	if (!FusionInitCalled) {
-		dprintk((KERN_INFO MYNAM ": Hmmm, calling fusion_init from mpt_register!\n"));
-		/*
-		 *  NOTE! We'll get recursion here, as fusion_init()
-		 *  calls mpt_register()!
-		 */
-		fusion_init();
-		FusionInitCalled++;
-	}
-#endif
 
 	/*
 	 *  Search for empty callback slot in this order: {N,...,7,6,5,...,1}
@@ -820,11 +801,12 @@ mpt_get_msg_frame(int handle, MPT_ADAPTER *ioc)
 		return NULL;
 
 	spin_lock_irqsave(&ioc->FreeQlock, flags);
-	if (! Q_IS_EMPTY(&ioc->FreeQ)) {
+	if (!list_empty(&ioc->FreeQ)) {
 		int req_offset;
 
-		mf = ioc->FreeQ.head;
-		Q_DEL_ITEM(&mf->u.frame.linkage);
+		mf = list_entry(ioc->FreeQ.next, MPT_FRAME_HDR,
+				u.frame.linkage.list);
+		list_del(&mf->u.frame.linkage.list);
 		mf->u.frame.hwhdr.msgctxu.fld.cb_idx = handle;	/* byte */
 		req_offset = (u8 *)mf - (u8 *)ioc->req_frames;
 								/* u16! */
@@ -920,7 +902,7 @@ mpt_free_msg_frame(MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf)
 
 	/*  Put Request back on FreeQ!  */
 	spin_lock_irqsave(&ioc->FreeQlock, flags);
-	Q_ADD_TAIL(&ioc->FreeQ, &mf->u.frame.linkage, MPT_FRAME_HDR);
+	list_add_tail(&mf->u.frame.linkage.list, &ioc->FreeQ);
 #ifdef MFCNT
 	ioc->mfcnt--;
 #endif
@@ -953,41 +935,6 @@ mpt_add_sge(char *pAddr, u32 flagslength, dma_addr_t dma_addr)
 		SGESimple32_t *pSge = (SGESimple32_t *) pAddr;
 		pSge->FlagsLength = cpu_to_le32(flagslength);
 		pSge->Address = cpu_to_le32(dma_addr);
-	}
-}
-
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-/**
- *	mpt_add_chain - Place a chain SGE at address pAddr.
- *	@pAddr: virtual address for SGE
- *	@next: nextChainOffset value (u32's)
- *	@length: length of next SGL segment
- *	@dma_addr: Physical address
- *
- *	This routine places a MPT request frame back on the MPT adapter's
- *	FreeQ.
- */
-void
-mpt_add_chain(char *pAddr, u8 next, u16 length, dma_addr_t dma_addr)
-{
-	if (sizeof(dma_addr_t) == sizeof(u64)) {
-		SGEChain64_t *pChain = (SGEChain64_t *) pAddr;
-		u32 tmp = dma_addr & 0xFFFFFFFF;
-
-		pChain->Length = cpu_to_le16(length);
-		pChain->Flags = MPI_SGE_FLAGS_CHAIN_ELEMENT | mpt_addr_size();
-
-		pChain->NextChainOffset = next;
-
-		pChain->Address.Low = cpu_to_le32(tmp);
-		tmp = (u32) ((u64)dma_addr >> 32);
-		pChain->Address.High = cpu_to_le32(tmp);
-	} else {
-		SGEChain32_t *pChain = (SGEChain32_t *) pAddr;
-		pChain->Length = cpu_to_le16(length);
-		pChain->Flags = MPI_SGE_FLAGS_CHAIN_ELEMENT | mpt_addr_size();
-		pChain->NextChainOffset = next;
-		pChain->Address = cpu_to_le32(dma_addr);
 	}
 }
 
@@ -1131,7 +1078,7 @@ static int __devinit
 mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	MPT_ADAPTER	*ioc;
-	u8		*mem;
+	u8		__iomem *mem;
 	unsigned long	 mem_phys;
 	unsigned long	 port;
 	u32		 msize;
@@ -1199,7 +1146,7 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* Initialize the running configQ head.
 	 */
-	Q_INIT(&ioc->configQ, Q_ITEM);
+	INIT_LIST_HEAD(&ioc->configQ);
 
 	/* Find lookup slot. */
 	INIT_LIST_HEAD(&ioc->list);
@@ -1246,31 +1193,30 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			&ioc->facts, &ioc->pfacts[0]));
 
 	ioc->mem_phys = mem_phys;
-	ioc->chip = (SYSIF_REGS*)mem;
+	ioc->chip = (SYSIF_REGS __iomem *)mem;
 
 	/* Save Port IO values in case we need to do downloadboot */
 	{
 		u8 *pmem = (u8*)port;
 		ioc->pio_mem_phys = port;
-		ioc->pio_chip = (SYSIF_REGS*)pmem;
+		ioc->pio_chip = (SYSIF_REGS __iomem *)pmem;
 	}
 
-	ioc->chip_type = FCUNK;
 	if (pdev->device == MPI_MANUFACTPAGE_DEVICEID_FC909) {
-		ioc->chip_type = FC909;
 		ioc->prod_name = "LSIFC909";
+		ioc->bus_type = FC;
 	}
 	if (pdev->device == MPI_MANUFACTPAGE_DEVICEID_FC929) {
-		ioc->chip_type = FC929;
 		ioc->prod_name = "LSIFC929";
+		ioc->bus_type = FC;
 	}
 	else if (pdev->device == MPI_MANUFACTPAGE_DEVICEID_FC919) {
-		ioc->chip_type = FC919;
 		ioc->prod_name = "LSIFC919";
+		ioc->bus_type = FC;
 	}
 	else if (pdev->device == MPI_MANUFACTPAGE_DEVICEID_FC929X) {
-		ioc->chip_type = FC929X;
 		pci_read_config_byte(pdev, PCI_CLASS_REVISION, &revision);
+		ioc->bus_type = FC;
 		if (revision < XL_929) {
 			ioc->prod_name = "LSIFC929X";
 			/* 929X Chip Fix. Set Split transactions level
@@ -1289,8 +1235,8 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		}
 	}
 	else if (pdev->device == MPI_MANUFACTPAGE_DEVICEID_FC919X) {
-		ioc->chip_type = FC919X;
 		ioc->prod_name = "LSIFC919X";
+		ioc->bus_type = FC;
 		/* 919X Chip Fix. Set Split transactions level
 		 * for PCIX. Set MOST bits to zero.
 		 */
@@ -1299,8 +1245,8 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		pci_write_config_byte(pdev, 0x6a, pcixcmd);
 	}
 	else if (pdev->device == MPI_MANUFACTPAGE_DEVID_53C1030) {
-		ioc->chip_type = C1030;
 		ioc->prod_name = "LSI53C1030";
+		ioc->bus_type = SCSI;
 		/* 1030 Chip Fix. Disable Split transactions
 		 * for PCIX. Set MOST bits to zero if Rev < C0( = 8).
 		 */
@@ -1312,8 +1258,8 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		}
 	}
 	else if (pdev->device == MPI_MANUFACTPAGE_DEVID_1030_53C1035) {
-		ioc->chip_type = C1035;
 		ioc->prod_name = "LSI53C1035";
+		ioc->bus_type = SCSI;
 	}
 
 	sprintf(ioc->name, "ioc%d", ioc->id);
@@ -1361,9 +1307,7 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* NEW!  20010220 -sralston
 	 * Check for "bound ports" (929, 929X, 1030, 1035) to reduce redundant resets.
 	 */
-	if ((ioc->chip_type == FC929) || (ioc->chip_type == C1030)
-			|| (ioc->chip_type == C1035) || (ioc->chip_type == FC929X))
-		mpt_detect_bound_ports(ioc, pdev);
+	mpt_detect_bound_ports(ioc, pdev);
 
 	if ((r = mpt_do_ioc_recovery(ioc,
 	  MPT_HOSTEVENT_IOC_BRINGUP, CAN_SLEEP)) != 0) {
@@ -1518,7 +1462,7 @@ mptbase_suspend(struct pci_dev *pdev, u32 state)
 		}
 	}
 
-	pci_save_state(pdev, ioc->PciState);
+	pci_save_state(pdev);
 
 	/* put ioc into READY_STATE */
 	if(SendIocReset(ioc, MPI_FUNCTION_IOC_MESSAGE_UNIT_RESET, CAN_SLEEP)) {
@@ -1558,7 +1502,7 @@ mptbase_resume(struct pci_dev *pdev)
 		ioc->name, pdev, pci_name(pdev), device_state);
 
 	pci_set_power_state(pdev, 0);
-	pci_restore_state(pdev, ioc->PciState);
+	pci_restore_state(pdev);
 	pci_enable_device(pdev);
 
 	/* enable interrupts */
@@ -1795,7 +1739,7 @@ mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag)
 	 *	and we try GetLanConfigPages again...
 	 */
 	if ((ret == 0) && (reason == MPT_HOSTEVENT_IOC_BRINGUP)) {
-		if ((int)ioc->chip_type <= (int)FC929) {
+		if (ioc->bus_type == FC) {
 			/*
 			 *  Pre-fetch FC port WWN and stuff...
 			 *  (FCPortPage0_t stuff)
@@ -2035,7 +1979,7 @@ mpt_adapter_dispose(MPT_ADAPTER *ioc)
 		}
 
 		if (ioc->memmap != NULL)
-			iounmap((u8 *) ioc->memmap);
+			iounmap(ioc->memmap);
 
 #if defined(CONFIG_MTRR) && 0
 		if (ioc->mtrr_reg > 0) {
@@ -2138,20 +2082,8 @@ MakeIocReady(MPT_ADAPTER *ioc, int force, int sleepFlag)
 	}
 
 	/* Is it already READY? */
-	if (!statefault && (ioc_state & MPI_IOC_STATE_MASK) == MPI_IOC_STATE_READY) {
-		if ((int)ioc->chip_type <= (int)FC929)
-			return 0;
-		else {
-			return 0;
-			/* Workaround from broken 1030 FW.
-			 * Force a diagnostic reset if fails.
-			 */
-/*			if ((r = SendIocReset(ioc, MPI_FUNCTION_IOC_MESSAGE_UNIT_RESET, sleepFlag)) == 0)
-				return 0;
-			else
-				statefault = 4; */
-		}
-	}
+	if (!statefault && (ioc_state & MPI_IOC_STATE_MASK) == MPI_IOC_STATE_READY) 
+		return 0;
 
 	/*
 	 *	Check to see if IOC is in FAULT state.
@@ -2230,8 +2162,7 @@ MakeIocReady(MPT_ADAPTER *ioc, int force, int sleepFlag)
 		}
 
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1 * HZ / 1000);
+			msleep_interruptible(1);
 		} else {
 			mdelay (1);	/* 1 msec delay */
 		}
@@ -2549,11 +2480,11 @@ SendIocInit(MPT_ADAPTER *ioc, int sleepFlag)
 	ddlprintk((MYIOC_s_INFO_FMT "upload_fw %d facts.Flags=%x\n",
 		   ioc->name, ioc->upload_fw, ioc->facts.Flags));
 
-	if ((int)ioc->chip_type <= (int)FC929) {
+	if (ioc->bus_type == FC)
 		ioc_init.MaxDevices = MPT_MAX_FC_DEVICES;
-	} else {
+	else
 		ioc_init.MaxDevices = MPT_MAX_SCSI_DEVICES;
-	}
+	
 	ioc_init.MaxBuses = MPT_MAX_BUS;
 
 	ioc_init.ReplyFrameSize = cpu_to_le16(ioc->reply_sz);	/* in BYTES */
@@ -2600,8 +2531,7 @@ SendIocInit(MPT_ADAPTER *ioc, int sleepFlag)
 	state = mpt_GetIocState(ioc, 1);
 	while (state != MPI_IOC_STATE_OPERATIONAL && --cntdn) {
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1 * HZ / 1000);
+			msleep_interruptible(1);
 		} else {
 			mdelay(1);
 		}
@@ -2659,7 +2589,7 @@ SendPortEnable(MPT_ADAPTER *ioc, int portnum, int sleepFlag)
 
 	/* RAID FW may take a long time to enable
 	 */
-	if ((int)ioc->chip_type <= (int)FC929) {
+	if (ioc->bus_type == FC) {
 		ii = mpt_handshake_req_reply_wait(ioc, req_sz, (u32*)&port_enable,
 				reply_sz, (u16*)&reply_buf, 65 /*seconds*/, sleepFlag);
 	} else {
@@ -2868,8 +2798,7 @@ mpt_downloadboot(MPT_ADAPTER *ioc, int sleepFlag)
 
 	/* wait 1 msec */
 	if (sleepFlag == CAN_SLEEP) {
-		set_current_state(TASK_INTERRUPTIBLE);
-		schedule_timeout(1 * HZ / 1000);
+		msleep_interruptible(1);
 	} else {
 		mdelay (1);
 	}
@@ -2886,8 +2815,7 @@ mpt_downloadboot(MPT_ADAPTER *ioc, int sleepFlag)
 		}
 		/* wait 1 sec */
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1000 * HZ / 1000);
+			msleep_interruptible (1000);
 		} else {
 			mdelay (1000);
 		}
@@ -2987,8 +2915,7 @@ mpt_downloadboot(MPT_ADAPTER *ioc, int sleepFlag)
 			return 0;
 		}
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(10 * HZ / 1000);
+			msleep_interruptible (10);
 		} else {
 			mdelay (10);
 		}
@@ -3032,15 +2959,14 @@ KickStart(MPT_ADAPTER *ioc, int force, int sleepFlag)
 	int cnt,cntdn;
 
 	dinitprintk((KERN_WARNING MYNAM ": KickStarting %s!\n", ioc->name));
-	if ((int)ioc->chip_type > (int)FC929) {
+	if (ioc->bus_type == SCSI) {
 		/* Always issue a Msg Unit Reset first. This will clear some
 		 * SCSI bus hang conditions.
 		 */
 		SendIocReset(ioc, MPI_FUNCTION_IOC_MESSAGE_UNIT_RESET, sleepFlag);
 
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1000 * HZ / 1000);
+			msleep_interruptible (1000);
 		} else {
 			mdelay (1000);
 		}
@@ -3062,8 +2988,7 @@ KickStart(MPT_ADAPTER *ioc, int force, int sleepFlag)
 			return hard_reset_done;
 		}
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(10 * HZ / 1000);
+			msleep_interruptible (10);
 		} else {
 			mdelay (10);
 		}
@@ -3134,8 +3059,7 @@ mpt_diag_reset(MPT_ADAPTER *ioc, int ignore, int sleepFlag)
 
 			/* wait 100 msec */
 			if (sleepFlag == CAN_SLEEP) {
-				set_current_state(TASK_INTERRUPTIBLE);
-				schedule_timeout(100 * HZ / 1000);
+				msleep_interruptible (100);
 			} else {
 				mdelay (100);
 			}
@@ -3242,8 +3166,7 @@ mpt_diag_reset(MPT_ADAPTER *ioc, int ignore, int sleepFlag)
 
 				/* wait 1 sec */
 				if (sleepFlag == CAN_SLEEP) {
-					set_current_state(TASK_INTERRUPTIBLE);
-					schedule_timeout(1000 * HZ / 1000);
+					msleep_interruptible (1000);
 				} else {
 					mdelay (1000);
 				}
@@ -3277,8 +3200,7 @@ mpt_diag_reset(MPT_ADAPTER *ioc, int ignore, int sleepFlag)
 
 		/* wait 100 msec */
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(100 * HZ / 1000);
+			msleep_interruptible (100);
 		} else {
 			mdelay (100);
 		}
@@ -3372,8 +3294,7 @@ SendIocReset(MPT_ADAPTER *ioc, u8 reset_type, int sleepFlag)
 		}
 
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1 * HZ / 1000);
+			msleep_interruptible(1);
 		} else {
 			mdelay (1);	/* 1 msec delay */
 		}
@@ -3466,7 +3387,7 @@ initChainBuffers(MPT_ADAPTER *ioc)
 	dinitprintk((KERN_INFO MYNAM ": %s Now numSGE=%d num_sge=%d num_chain=%d\n",
 		ioc->name, numSGE, num_sge, num_chain));
 
-	if ((int) ioc->chip_type > (int) FC929)
+	if (ioc->bus_type == SCSI)
 		num_chain *= MPT_SCSI_CAN_QUEUE;
 	else
 		num_chain *= MPT_FC_CAN_QUEUE;
@@ -3593,14 +3514,14 @@ PrimeIocFifos(MPT_ADAPTER *ioc)
 		/* Initialize the free chain Q.
 	 	*/
 
-		Q_INIT(&ioc->FreeChainQ, MPT_FRAME_HDR);
+		INIT_LIST_HEAD(&ioc->FreeChainQ);
 
 		/* Post the chain buffers to the FreeChainQ.
 	 	*/
 		mem = (u8 *)ioc->ChainBuffer;
 		for (i=0; i < num_chain; i++) {
 			mf = (MPT_FRAME_HDR *) mem;
-			Q_ADD_TAIL(&ioc->FreeChainQ.head, &mf->u.frame.linkage, MPT_FRAME_HDR);
+			list_add_tail(&mf->u.frame.linkage.list, &ioc->FreeChainQ);
 			mem += ioc->req_sz;
 		}
 
@@ -3610,12 +3531,13 @@ PrimeIocFifos(MPT_ADAPTER *ioc)
 		mem = (u8 *) ioc->req_frames;
 
 		spin_lock_irqsave(&ioc->FreeQlock, flags);
-		Q_INIT(&ioc->FreeQ, MPT_FRAME_HDR);
+		INIT_LIST_HEAD(&ioc->FreeQ);
 		for (i = 0; i < ioc->req_depth; i++) {
 			mf = (MPT_FRAME_HDR *) mem;
 
 			/*  Queue REQUESTs *internally*!  */
-			Q_ADD_TAIL(&ioc->FreeQ.head, &mf->u.frame.linkage, MPT_FRAME_HDR);
+			list_add_tail(&mf->u.frame.linkage.list, &ioc->FreeQ);
+
 			mem += ioc->req_sz;
 		}
 		spin_unlock_irqrestore(&ioc->FreeQlock, flags);
@@ -3689,7 +3611,7 @@ out_fail:
  *
  *	Returns 0 for success, non-zero for failure.
  */
-int
+static int
 mpt_handshake_req_reply_wait(MPT_ADAPTER *ioc, int reqBytes, u32 *req,
 				int replyBytes, u16 *u16reply, int maxwait, int sleepFlag)
 {
@@ -3809,8 +3731,7 @@ WaitForDoorbellAck(MPT_ADAPTER *ioc, int howlong, int sleepFlag)
 			intstat = CHIPREG_READ32(&ioc->chip->IntStatus);
 			if (! (intstat & MPI_HIS_IOP_DOORBELL_STATUS))
 				break;
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1 * HZ / 1000);
+			msleep_interruptible (1);
 			count++;
 		}
 	} else {
@@ -3859,8 +3780,7 @@ WaitForDoorbellInt(MPT_ADAPTER *ioc, int howlong, int sleepFlag)
 			intstat = CHIPREG_READ32(&ioc->chip->IntStatus);
 			if (intstat & MPI_HIS_DOORBELL_INTERRUPT)
 				break;
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1 * HZ / 1000);
+			msleep_interruptible(1);
 			count++;
 		}
 	} else {
@@ -4904,7 +4824,7 @@ mpt_config(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 
 	/* Add to end of Q, set timer and then issue this command */
 	spin_lock_irqsave(&ioc->FreeQlock, flags);
-	Q_ADD_TAIL(&ioc->configQ.head, &pCfg->linkage, Q_ITEM);
+	list_add_tail(&pCfg->linkage, &ioc->configQ);
 	spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 	add_timer(&pCfg->timer);
@@ -5015,7 +4935,7 @@ mpt_toolbox(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 
 	/* Add to end of Q, set timer and then issue this command */
 	spin_lock_irqsave(&ioc->FreeQlock, flags);
-	Q_ADD_TAIL(&ioc->configQ.head, &pCfg->linkage, Q_ITEM);
+	list_add_tail(&pCfg->linkage, &ioc->configQ);
 	spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 	add_timer(&pCfg->timer);
@@ -5082,13 +5002,8 @@ mpt_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 		 * the FIFO's are primed.
 		 */
 		spin_lock_irqsave(&ioc->FreeQlock, flags);
-		if (! Q_IS_EMPTY(&ioc->configQ)){
-			pCfg = (CONFIGPARMS *)ioc->configQ.head;
-			do {
-				del_timer(&pCfg->timer);
-				pCfg = (CONFIGPARMS *) (pCfg->linkage.forw);
-			} while (pCfg != (CONFIGPARMS *)&ioc->configQ);
-		}
+		list_for_each_entry(pCfg, &ioc->configQ, linkage)
+			del_timer(&pCfg->timer);
 		spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 	} else {
@@ -5098,19 +5013,12 @@ mpt_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 		 * Flush the Q, and wake up all suspended threads.
 		 */
 		spin_lock_irqsave(&ioc->FreeQlock, flags);
-		if (! Q_IS_EMPTY(&ioc->configQ)){
-			pCfg = (CONFIGPARMS *)ioc->configQ.head;
-			do {
-				pNext = (CONFIGPARMS *) pCfg->linkage.forw;
+		list_for_each_entry_safe(pCfg, pNext, &ioc->configQ, linkage) {
+			list_del(&pCfg->linkage);
 
-				Q_DEL_ITEM(&pCfg->linkage);
-
-				pCfg->status = MPT_CONFIG_ERROR;
-				pCfg->wait_done = 1;
-				wake_up(&mpt_waitq);
-
-				pCfg = pNext;
-			} while (pCfg != (CONFIGPARMS *)&ioc->configQ);
+			pCfg->status = MPT_CONFIG_ERROR;
+			pCfg->wait_done = 1;
+			wake_up(&mpt_waitq);
 		}
 		spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 	}
@@ -5248,9 +5156,6 @@ procmpt_version_read(char *buf, char **start, off_t offset, int request, int *eo
 			case MPTCTL_DRIVER:
 				if (!ctl++) drvname = "ioctl";
 				break;
-			case MPTDMP_DRIVER:
-				if (!dmp++) drvname = "DMP";
-				break;
 			}
 
 			if (drvname)
@@ -5339,7 +5244,7 @@ procmpt_iocinfo_read(char *buf, char **start, off_t offset, int request, int *eo
 		len += sprintf(buf+len, "  PortNumber = %d (of %d)\n",
 				p+1,
 				ioc->facts.NumberOfPorts);
-		if ((int)ioc->chip_type <= (int)FC929) {
+		if (ioc->bus_type == FC) {
 			if (ioc->pfacts[p].ProtocolFlags & MPI_PORTFACTS_PROTOCOL_LAN) {
 				u8 *a = (u8*)&ioc->lan_cnfg_page1.HardwareAddressLow;
 				len += sprintf(buf+len, "    LanAddr = %02X:%02X:%02X:%02X:%02X:%02X\n",
@@ -5931,7 +5836,6 @@ mpt_sp_ioc_info(MPT_ADAPTER *ioc, u32 ioc_status, MPT_FRAME_HDR *mf)
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 EXPORT_SYMBOL(ioc_list);
 EXPORT_SYMBOL(mpt_proc_root_dir);
-EXPORT_SYMBOL(DmpService);
 EXPORT_SYMBOL(mpt_register);
 EXPORT_SYMBOL(mpt_deregister);
 EXPORT_SYMBOL(mpt_event_register);
@@ -5944,9 +5848,7 @@ EXPORT_SYMBOL(mpt_get_msg_frame);
 EXPORT_SYMBOL(mpt_put_msg_frame);
 EXPORT_SYMBOL(mpt_free_msg_frame);
 EXPORT_SYMBOL(mpt_add_sge);
-EXPORT_SYMBOL(mpt_add_chain);
 EXPORT_SYMBOL(mpt_send_handshake_request);
-EXPORT_SYMBOL(mpt_handshake_req_reply_wait);
 EXPORT_SYMBOL(mpt_verify_adapter);
 EXPORT_SYMBOL(mpt_GetIocState);
 EXPORT_SYMBOL(mpt_print_ioc_summary);
@@ -5986,11 +5888,6 @@ fusion_init(void)
 	int i;
 	int r;
 
-	if (FusionInitCalled++) {
-		dprintk((KERN_INFO MYNAM ": INFO - Driver late-init entry point called\n"));
-		return 0;
-	}
-
 	show_mptmod_ver(my_NAME, my_VERSION);
 	printk(KERN_INFO COPYRIGHT "\n");
 
@@ -6000,8 +5897,6 @@ fusion_init(void)
 		MptEvHandlers[i] = NULL;
 		MptResetHandlers[i] = NULL;
 	}
-
-	DmpService = NULL;
 
 	/* NEW!  20010120 -sralston
 	 *  Register ourselves (mptbase) in order to facilitate

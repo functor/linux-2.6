@@ -16,7 +16,6 @@
 #include <linux/notifier.h>
 #include <linux/init.h>
 #include <linux/sysrq.h>
-#include <linux/syscalls.h>
 #include <linux/interrupt.h>
 #include <linux/nmi.h>
 #ifdef CONFIG_KEXEC
@@ -48,7 +47,7 @@ static long no_blink(long time)
 }
 
 /* Returns how long it waited in ms */
-long (*panic_blink)(long time) = no_blink;
+long (*panic_blink)(long time);
 EXPORT_SYMBOL(panic_blink);
 
 /**
@@ -74,19 +73,9 @@ NORET_TYPE void panic(const char * fmt, ...)
 	va_start(args, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
-
-	printk(KERN_EMERG "Kernel panic: %s\n",buf);
-#warning MEF netdump_func not part of 2.6.9-1.11-FC2; taking out call for now
-#if 0
-	if (netdump_func)
+	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
+	if (crashdump_func())
 		BUG();
-#endif
-	if (in_interrupt())
-		printk(KERN_EMERG "In interrupt handler - not syncing\n");
-	else if (!current->pid)
-		printk(KERN_EMERG "In idle task - not syncing\n");
-	else
-		sys_sync();
 	bust_spinlocks(0);
 
         notifier_call_chain(&panic_notifier_list, 0, buf);
@@ -96,6 +85,9 @@ NORET_TYPE void panic(const char * fmt, ...)
 #endif
 
 	notifier_call_chain(&panic_notifier_list, 0, buf);
+
+	if (!panic_blink)
+		panic_blink = no_blink;
 
 	if (panic_timeout > 0)
 	{
@@ -140,10 +132,10 @@ NORET_TYPE void panic(const char * fmt, ...)
         disabled_wait(caller);
 #endif
 	local_irq_enable();
-	for (i = 0;;) { 
+	for (i = 0;;) {
 		i += panic_blink(i);
-		mdelay(1); 
-		i++; 
+		mdelay(1);
+		i++;
 	}
 }
 

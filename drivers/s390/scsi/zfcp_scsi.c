@@ -12,6 +12,7 @@
  *            Wolfgang Taphorn
  *            Stefan Bader <stefan.bader@de.ibm.com> 
  *            Heiko Carstens <heiko.carstens@de.ibm.com> 
+ *            Andreas Herrmann <aherrman@de.ibm.com>
  * 
  * This program is free software; you can redistribute it and/or modify 
  * it under the terms of the GNU General Public License as published by 
@@ -30,8 +31,7 @@
 
 #define ZFCP_LOG_AREA			ZFCP_LOG_AREA_SCSI
 
-/* this drivers version (do not edit !!! generated and updated by cvs) */
-#define ZFCP_SCSI_REVISION "$Revision: 1.68 $"
+#define ZFCP_SCSI_REVISION "$Revision: 1.74 $"
 
 #include "zfcp_ext.h"
 
@@ -48,8 +48,8 @@ static int zfcp_task_management_function(struct zfcp_unit *, u8);
 
 static struct zfcp_unit *zfcp_unit_lookup(struct zfcp_adapter *, int, scsi_id_t,
 					  scsi_lun_t);
-static struct zfcp_port * zfcp_port_lookup(struct zfcp_adapter *, int,
-					 scsi_id_t);
+static struct zfcp_port *zfcp_port_lookup(struct zfcp_adapter *, int,
+					  scsi_id_t);
 
 static struct device_attribute *zfcp_sysfs_sdev_attrs[];
 
@@ -81,7 +81,8 @@ struct zfcp_data zfcp_data = {
 	      unchecked_isa_dma:       0,
 	      use_clustering:          1,
 	      sdev_attrs:              zfcp_sysfs_sdev_attrs,
-	}
+	},
+	.driver_version = ZFCP_VERSION,
 	/* rest initialised with zeros */
 };
 
@@ -333,8 +334,8 @@ zfcp_scsi_command_sync(struct zfcp_unit *unit, struct scsi_cmnd *scpnt,
 	scpnt->SCp.ptr = (void *) &wait;  /* silent re-use */
 	scpnt->scsi_done = zfcp_scsi_command_sync_handler;
 	ret = zfcp_scsi_command_async(unit->port->adapter, unit, scpnt, timer);
-	if ((ret == 0) && (scpnt->result == 0))
-	wait_for_completion(&wait);
+	if (ret == 0)
+		wait_for_completion(&wait);
 
 	scpnt->SCp.ptr = NULL;
 
@@ -400,15 +401,7 @@ zfcp_unit_lookup(struct zfcp_adapter *adapter, int channel, scsi_id_t id,
  out:
 	return retval;
 }
-/*
- * function:    zfcp_unit_tgt_lookup
- *
- * purpose:
- *
- * returns:
- *
- * context:	
- */
+
 static struct zfcp_port *
 zfcp_port_lookup(struct zfcp_adapter *adapter, int channel, scsi_id_t id)
 {
@@ -418,7 +411,7 @@ zfcp_port_lookup(struct zfcp_adapter *adapter, int channel, scsi_id_t id)
 		if (id == port->scsi_id)
 			return port;
 	}
-	return (struct zfcp_port *)NULL;
+	return (struct zfcp_port *) NULL;
 }
 
 /*
@@ -651,7 +644,7 @@ zfcp_scsi_eh_device_reset_handler(struct scsi_cmnd *scpnt)
 	if (!atomic_test_mask(ZFCP_STATUS_UNIT_NOTSUPPUNITRESET,
 			      &unit->status)) {
 		retval =
-		    zfcp_task_management_function(unit, LOGICAL_UNIT_RESET);
+		    zfcp_task_management_function(unit, FCP_LOGICAL_UNIT_RESET);
 		if (retval) {
 			ZFCP_LOG_DEBUG("unit reset failed (unit=%p)\n", unit);
 			if (retval == -ENOTSUPP)
@@ -667,7 +660,7 @@ zfcp_scsi_eh_device_reset_handler(struct scsi_cmnd *scpnt)
 			goto out;
 		}
 	}
-	retval = zfcp_task_management_function(unit, TARGET_RESET);
+	retval = zfcp_task_management_function(unit, FCP_TARGET_RESET);
 	if (retval) {
 		ZFCP_LOG_DEBUG("target reset failed (unit=%p)\n", unit);
 		retval = FAILED;

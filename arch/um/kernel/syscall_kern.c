@@ -105,11 +105,11 @@ struct mmap_arg_struct {
 	unsigned long offset;
 };
 
-int old_mmap(unsigned long addr, unsigned long len,
+long old_mmap(unsigned long addr, unsigned long len,
 	     unsigned long prot, unsigned long flags,
 	     unsigned long fd, unsigned long offset)
 {
-	int err = -EINVAL;
+	long err = -EINVAL;
 	if (offset & ~PAGE_MASK)
 		goto out;
 
@@ -122,10 +122,10 @@ int old_mmap(unsigned long addr, unsigned long len,
  * sys_pipe() is the normal C calling standard for creating
  * a pipe. It's not the way unix traditionally does this, though.
  */
-int sys_pipe(unsigned long * fildes)
+long sys_pipe(unsigned long * fildes)
 {
         int fd[2];
-        int error;
+        long error;
 
         error = do_pipe(fd);
         if (!error) {
@@ -220,9 +220,9 @@ int sys_ipc (uint call, int first, int second,
 	}
 }
 
-int sys_uname(struct old_utsname * name)
+long sys_uname(struct old_utsname * name)
 {
-	int err;
+	long err;
 	if (!name)
 		return -EFAULT;
 	down_read(&uts_sem);
@@ -231,9 +231,9 @@ int sys_uname(struct old_utsname * name)
 	return err?-EFAULT:0;
 }
 
-int sys_olduname(struct oldold_utsname * name)
+long sys_olduname(struct oldold_utsname * name)
 {
-	int error;
+	long error;
 	struct new_utsname *ptr;
 
 	if (!name)

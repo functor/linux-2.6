@@ -156,7 +156,7 @@ struct cosa_data {
 	unsigned short startaddr;	/* Firmware start address */
 	unsigned short busmaster;	/* Use busmastering? */
 	int nchannels;			/* # of channels on this card */
-	int driver_status;		/* For communicating with firware */
+	int driver_status;		/* For communicating with firmware */
 	int firmware_status;		/* Downloaded, reseted, etc. */
 	long int rxbitmap, txbitmap;	/* Bitmap of channels who are willing to send/receive data */
 	long int rxtx;			/* RX or TX in progress? */
@@ -642,11 +642,11 @@ static void sppp_channel_init(struct channel_data *chan)
 		return;
 	}
 	chan->pppdev.dev = d;
-	sppp_attach(&chan->pppdev);
 	d->base_addr = chan->cosa->datareg;
 	d->irq = chan->cosa->irq;
 	d->dma = chan->cosa->dma;
 	d->priv = chan;
+	sppp_attach(&chan->pppdev);
 	if (register_netdev(d)) {
 		printk(KERN_WARNING "%s: register_netdev failed.\n", d->name);
 		sppp_detach(d);

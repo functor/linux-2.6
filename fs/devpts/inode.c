@@ -214,7 +214,7 @@ static int devpts_permission(struct inode *inode, int mask, struct nameidata *nd
 	int ret = -EACCES;
 
 	if (vx_check(inode->i_xid, VX_IDENT))
-		ret = vfs_permission(inode, mask);
+		ret = generic_permission(inode, mask, NULL);
 	return ret;
 }
 #endif

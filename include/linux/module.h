@@ -44,6 +44,20 @@ struct modversion_info
 	char name[MODULE_NAME_LEN];
 };
 
+struct module;
+
+struct module_attribute {
+        struct attribute attr;
+        ssize_t (*show)(struct module *, char *);
+        ssize_t (*store)(struct module *, const char *, size_t count);
+};
+
+struct module_kobject
+{
+	struct kobject kobj;
+	struct module *mod;
+};
+
 /* These are either module local, or the kernel's dummy ones. */
 extern int init_module(void);
 extern void cleanup_module(void);
@@ -58,6 +72,8 @@ search_extable(const struct exception_table_entry *first,
 void sort_extable(struct exception_table_entry *start,
 		  struct exception_table_entry *finish);
 void sort_main_extable(void);
+
+extern struct subsystem module_subsys;
 
 #ifdef MODULE
 #define ___module_cat(a,b) __mod_ ## a ## b
@@ -141,11 +157,9 @@ extern struct module __this_module;
            customizations, eg "rh3" or "rusty1".
 
   Using this automatically adds a checksum of the .c files and the
-  local headers to the end.  Use MODULE_VERSION("") if you want just
-  this.  Macro includes room for this.
+  local headers in "srcversion".
 */
-#define MODULE_VERSION(_version) \
-  MODULE_INFO(version, _version "\0xxxxxxxxxxxxxxxxxxxxxxxx")
+#define MODULE_VERSION(_version) MODULE_INFO(version, _version)
 
 /* Given an address, look for it in the exception tables */
 const struct exception_table_entry *search_exception_tables(unsigned long add);
@@ -208,23 +222,6 @@ enum module_state
 	MODULE_STATE_GOING,
 };
 
-/* sysfs stuff */
-struct module_attribute
-{
-	struct attribute attr;
-	struct kernel_param *param;
-};
-
-struct module_kobject
-{
-	/* Everyone should have one of these. */
-	struct kobject kobj;
-
-	/* We always have refcnt, we may have others from module_param(). */
-	unsigned int num_attributes;
-	struct module_attribute attr[0];
-};
-
 /* Similar stuff for section attributes. */
 #define MODULE_SECT_NAME_LEN 32
 struct module_sect_attr
@@ -240,6 +237,7 @@ struct module_sections
 	struct module_sect_attr attrs[0];
 };
 
+struct param_kobject;
 
 struct module
 {
@@ -253,6 +251,7 @@ struct module
 
 	/* Sysfs stuff. */
 	struct module_kobject *mkobj;
+	struct param_kobject *params_kobject;
 
 	/* Exported symbols */
 	const struct kernel_symbol *syms;
@@ -307,9 +306,6 @@ struct module
 
 	/* Destruction function. */
 	void (*exit)(void);
-
-	/* Fake kernel param for refcnt. */
-	struct kernel_param refcnt_param;
 #endif
 
 #ifdef CONFIG_KALLSYMS
@@ -448,6 +444,11 @@ int register_module_notifier(struct notifier_block * nb);
 int unregister_module_notifier(struct notifier_block * nb);
 
 extern void print_modules(void);
+
+struct device_driver;
+void module_add_driver(struct module *, struct device_driver *);
+void module_remove_driver(struct device_driver *);
+
 #else /* !CONFIG_MODULES... */
 #define EXPORT_SYMBOL(sym)
 #define EXPORT_SYMBOL_GPL(sym)
@@ -537,6 +538,18 @@ static inline int unregister_module_notifier(struct notifier_block * nb)
 static inline void print_modules(void)
 {
 }
+
+struct device_driver;
+struct module;
+
+static inline void module_add_driver(struct module *module, struct device_driver *driver)
+{
+}
+
+static inline void module_remove_driver(struct device_driver *driver)
+{
+}
+
 #endif /* CONFIG_MODULES */
 
 #define symbol_request(x) try_then_request_module(symbol_get(x), "symbol:" #x)
@@ -549,7 +562,7 @@ struct obsolete_modparm {
 	void *addr;
 };
 
-static inline void __deprecated MODULE_PARM_(void) { }
+static inline void MODULE_PARM_(void) { }
 #ifdef MODULE
 /* DEPRECATED: Do not use. */
 #define MODULE_PARM(var,type)						    \

@@ -916,20 +916,17 @@ struct buffer_head *ext3_bread(handle_t *handle, struct inode * inode,
 			       int block, int create, int *err)
 {
 	struct buffer_head * bh;
-	int prev_blocks;
 
-	prev_blocks = inode->i_blocks;
-
-	bh = ext3_getblk (handle, inode, block, create, err);
+	bh = ext3_getblk(handle, inode, block, create, err);
 	if (!bh)
 		return bh;
 	if (buffer_uptodate(bh))
 		return bh;
-	ll_rw_block (READ, 1, &bh);
-	wait_on_buffer (bh);
+	ll_rw_block(READ, 1, &bh);
+	wait_on_buffer(bh);
 	if (buffer_uptodate(bh))
 		return bh;
-	brelse (bh);
+	put_bh(bh);
 	*err = -EIO;
 	return NULL;
 }
@@ -1497,16 +1494,21 @@ out_stop:
 	if (handle) {
 		int err;
 
-		if (orphan) 
+		if (orphan && inode->i_nlink)
 			ext3_orphan_del(handle, inode);
 		if (orphan && ret > 0) {
 			loff_t end = offset + ret;
 			if (end > inode->i_size) {
 				ei->i_disksize = end;
 				i_size_write(inode, end);
-				err = ext3_mark_inode_dirty(handle, inode);
-				if (!ret) 
-					ret = err;
+				/*
+				 * We're going to return a positive `ret'
+				 * here due to non-zero-length I/O, so there's
+				 * no way of reporting error returns from
+				 * ext3_mark_inode_dirty() to userspace.  So
+				 * ignore it.
+				 */
+				ext3_mark_inode_dirty(handle, inode);
 			}
 		}
 		err = ext3_journal_stop(handle);

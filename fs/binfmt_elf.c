@@ -352,7 +352,8 @@ static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 	 */
 	if (interp_elf_ex->e_phentsize != sizeof(struct elf_phdr))
 		goto out;
-	if (interp_elf_ex->e_phnum > 65536U / sizeof(struct elf_phdr))
+	if (interp_elf_ex->e_phnum < 1 ||
+		interp_elf_ex->e_phnum > 65536U / sizeof(struct elf_phdr))
 		goto out;
 
 	/* Now read in all of the header information */
@@ -561,12 +562,13 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 	/* Now read in all of the header information */
 
-	retval = -ENOMEM;
 	if (loc->elf_ex.e_phentsize != sizeof(struct elf_phdr))
 		goto out;
-	if (loc->elf_ex.e_phnum > 65536U / sizeof(struct elf_phdr))
+	if (loc->elf_ex.e_phnum < 1 ||
+	 	loc->elf_ex.e_phnum > 65536U / sizeof(struct elf_phdr))
 		goto out;
 	size = loc->elf_ex.e_phnum * sizeof(struct elf_phdr);
+	retval = -ENOMEM;
 	elf_phdata = (struct elf_phdr *) kmalloc(size, GFP_KERNEL);
 	if (!elf_phdata)
 		goto out;
@@ -612,10 +614,12 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 			 * is an a.out format binary
 			 */
 
-			retval = -ENOMEM;
+			retval = -ENOEXEC;
 			if (elf_ppnt->p_filesz > PATH_MAX || 
-			    elf_ppnt->p_filesz == 0)
+			    elf_ppnt->p_filesz < 2)
 				goto out_free_file;
+
+			retval = -ENOMEM;
 			elf_interpreter = (char *) kmalloc(elf_ppnt->p_filesz,
 							   GFP_KERNEL);
 			if (!elf_interpreter)
@@ -630,7 +634,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 				goto out_free_interp;
 			}
 			/* make sure path is NULL terminated */
-			retval = -EINVAL;
+			retval = -ENOEXEC;
 			if (elf_interpreter[elf_ppnt->p_filesz - 1] != '\0')
 				goto out_free_interp;
 
@@ -937,8 +941,9 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 						    &interp_load_addr,
 						    load_bias);
 		if (BAD_ADDR(elf_entry)) {
-			printk(KERN_ERR "Unable to load interpreter\n");
-			send_sig(SIGSEGV, current, 0);
+			printk(KERN_ERR "Unable to load interpreter %.128s\n",
+				elf_interpreter);
+			force_sig(SIGSEGV, current);
 			retval = -ENOEXEC; /* Nobody gets to see this, but.. */
 			goto out_free_dentry;
 		}
@@ -1157,22 +1162,14 @@ static int dump_seek(struct file *file, off_t off)
  */
 static int maydump(struct vm_area_struct *vma)
 {
-	/*
-	 * If we may not read the contents, don't allow us to dump
-	 * them either. "dump_write()" can't handle it anyway.
-	 */
-	if (!(vma->vm_flags & VM_READ))
+	/* Do not dump I/O mapped devices, shared memory, or special mappings */
+	if (vma->vm_flags & (VM_IO | VM_SHARED | VM_RESERVED))
 		return 0;
 
-	/* Do not dump I/O mapped devices! -DaveM */
-	if (vma->vm_flags & VM_IO)
+	/* If it hasn't been written to, don't write it out */
+	if (!vma->anon_vma)
 		return 0;
-#if 1
-	if (vma->vm_flags & (VM_WRITE|VM_GROWSUP|VM_GROWSDOWN))
-		return 1;
-	if (vma->vm_flags & (VM_READ|VM_EXEC|VM_EXECUTABLE|VM_SHARED))
-		return 0;
-#endif
+
 	return 1;
 }
 
@@ -1417,7 +1414,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 	struct vm_area_struct *vma;
 	struct elfhdr *elf = NULL;
 	off_t offset = 0, dataoff;
-	unsigned long limit = current->rlim[RLIMIT_CORE].rlim_cur;
+	unsigned long limit = current->signal->rlim[RLIMIT_CORE].rlim_cur;
 	int numnote;
 	struct memelfnote *notes = NULL;
 	struct elf_prstatus *prstatus = NULL;	/* NT_PRSTATUS */

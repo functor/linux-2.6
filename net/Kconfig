@@ -234,6 +234,10 @@ config VNET
 
 endif
 
+config XFRM
+       bool
+       depends on NET
+
 source "net/xfrm/Kconfig"
 
 source "net/sctp/Kconfig"

@@ -761,7 +761,7 @@ start:
 	 */
 	if (!(ioflags & IO_INVIS)) {
 		xfs_ichgtime(xip, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-		inode_update_time(inode, 1);
+		inode_update_time(inode, file->f_vfsmnt, 1); /* Both mtime and ctime */
 	}
 
 	/*

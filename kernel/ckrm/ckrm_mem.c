@@ -668,9 +668,7 @@ ckrm_mem_evaluate_page_file(struct page* page)
 	if (!spin_trylock(&mapping->i_mmap_lock))
 		return;
 
-	while ((vma = vma_prio_tree_next(vma, &mapping->i_mmap,
-					&iter, pgoff, pgoff)) != NULL) {
-		v++;
+	vma_prio_tree_foreach(vma, &iter, &mapping->i_mmap,pgoff,pgoff) {
 		mm = vma->vm_mm;
 		if (!maxshareclass || ckrm_mem_share_compare(maxshareclass,mm->memclass)<0)
 			maxshareclass = mm->memclass;

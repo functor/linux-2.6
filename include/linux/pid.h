@@ -52,6 +52,4 @@ extern void switch_exec_pids(struct task_struct *leader, struct task_struct *thr
 			hlist_unhashed(&(task)->pids[type].pid_chain));	\
 	}								\
 
-extern int pid_alive(struct task_struct *p);
-
 #endif /* _LINUX_PID_H */

@@ -1222,24 +1222,24 @@ static u32 board_added(struct pci_func * func, struct controller * ctrl)
 			}
 		} while (new_func);
 
-		/* 
-		 * Some PCI Express root ports require fixup after hot-plug operation.
-		 */
-		if (pcie_mch_quirk)
-			pci_fixup_device(pci_fixup_final, ctrl->pci_dev);
-
-   		if (PWR_LED(ctrl->ctrlcap)) {
-   			/* Wait for exclusive access to hardware */
-   			down(&ctrl->crit_sect);
-    
-   			p_slot->hpc_ops->green_led_on(p_slot);
+ 		/* 
+ 		 * Some PCI Express root ports require fixup after hot-plug operation.
+ 		 */
+ 		if (pcie_mch_quirk)
+ 			pci_fixup_device(pci_fixup_final, ctrl->pci_dev);
+ 
+  		if (PWR_LED(ctrl->ctrlcap)) {
+  			/* Wait for exclusive access to hardware */
+  			down(&ctrl->crit_sect);
    
-   			/* Wait for the command to complete */
-   			wait_for_ctrl_irq (ctrl);
-   	
-   			/* Done with exclusive hardware access */
-   			up(&ctrl->crit_sect);
-   		}
+  			p_slot->hpc_ops->green_led_on(p_slot);
+  
+  			/* Wait for the command to complete */
+  			wait_for_ctrl_irq (ctrl);
+  	
+  			/* Done with exclusive hardware access */
+  			up(&ctrl->crit_sect);
+  		}
 	} else {
 		set_slot_off(ctrl, p_slot);
 		return -1;

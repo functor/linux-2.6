@@ -131,47 +131,13 @@ VM_MASK		= 0x00020000
 	movl $(__USER_DS), %edx; \
 	movl %edx, %ds; \
 	movl %edx, %es; \
-	pushl $11;	\
+	movl $11,%eax;	\
 	call do_exit;	\
 .previous;		\
 .section __ex_table,"a";\
 	.align 4;	\
 	.long 1b,2b;	\
 .previous
-
-
-
-ENTRY(lcall7)
-	pushfl			# We get a different stack layout with call
-				# gates, which has to be cleaned up later..
-	pushl %eax
-	SAVE_ALL
-	movl %esp, %ebp
-	pushl %ebp
-	pushl $0x7
-do_lcall:
-	movl EIP(%ebp), %eax	# due to call gates, this is eflags, not eip..
-	movl CS(%ebp), %edx	# this is eip..
-	movl EFLAGS(%ebp), %ecx	# and this is cs..
-	movl %eax,EFLAGS(%ebp)	#
-	movl %edx,EIP(%ebp)	# Now we move them to their "normal" places
-	movl %ecx,CS(%ebp)	#
-	GET_THREAD_INFO_WITH_ESP(%ebp)	# GET_THREAD_INFO
-	movl TI_exec_domain(%ebp), %edx	# Get the execution domain
-	call *EXEC_DOMAIN_handler(%edx)	# Call the handler for the domain
-	addl $4, %esp
-	popl %eax
-	jmp resume_userspace
-
-ENTRY(lcall27)
-	pushfl			# We get a different stack layout with call
-				# gates, which has to be cleaned up later..
-	pushl %eax
-	SAVE_ALL
-	movl %esp, %ebp
-	pushl %ebp
-	pushl $0x27
-	jmp do_lcall
 
 
 ENTRY(ret_from_fork)
@@ -221,8 +187,8 @@ need_resched:
 	movl $PREEMPT_ACTIVE,TI_preempt_count(%ebp)
 	sti
 	call schedule
-	movl $0,TI_preempt_count(%ebp)
 	cli
+	movl $0,TI_preempt_count(%ebp)
 	jmp need_resched
 #endif
 
@@ -330,8 +296,8 @@ work_notifysig:				# deal with pending signals and
 
 	ALIGN
 work_notifysig_v86:
-	pushl %ecx
-	call save_v86_state
+	pushl %ecx			# save ti_flags for do_notify_resume
+	call save_v86_state		# %eax contains pt_regs pointer
 	popl %ecx
 	movl %eax, %esp
 	xorl %edx, %edx
@@ -398,6 +364,7 @@ vector=vector+1
 	ALIGN
 common_interrupt:
 	SAVE_ALL
+	movl %esp,%eax
 	call do_IRQ
 	jmp ret_from_intr
 
@@ -405,7 +372,8 @@ common_interrupt:
 ENTRY(name)				\
 	pushl $nr-256;			\
 	SAVE_ALL			\
-	call smp_/**/name;	\
+	movl %esp,%eax;			\
+	call smp_/**/name;		\
 	jmp ret_from_intr;
 
 /* The include is where all of the SMP etc. interrupts come from */
@@ -428,18 +396,15 @@ error_code:
 	pushl %ebx
 	cld
 	movl %es, %ecx
-	movl ORIG_EAX(%esp), %esi	# get the error code
 	movl ES(%esp), %edi		# get the function address
+	movl ORIG_EAX(%esp), %edx	# get the error code
 	movl %eax, ORIG_EAX(%esp)
 	movl %ecx, ES(%esp)
-	movl %esp, %edx
-	pushl %esi			# push the error code
-	pushl %edx			# push the pt_regs pointer
-	movl $(__USER_DS), %edx
-	movl %edx, %ds
-	movl %edx, %es
+	movl $(__USER_DS), %ecx
+	movl %ecx, %ds
+	movl %ecx, %es
+	movl %esp,%eax			# pt_regs pointer
 	call *%edi
-	addl $8, %esp
 	jmp ret_from_exception
 
 ENTRY(coprocessor_error)
@@ -496,11 +461,9 @@ ENTRY(debug)
 debug_stack_correct:
 	pushl $-1			# mark this as an int
 	SAVE_ALL
-	movl %esp,%edx
-  	pushl $0
-	pushl %edx
+	xorl %edx,%edx			# error code 0
+	movl %esp,%eax			# pt_regs pointer
 	call do_debug
-	addl $8,%esp
 	testl %eax,%eax
 	jnz restore_all
 	jmp ret_from_exception
@@ -530,11 +493,9 @@ ENTRY(nmi)
 nmi_stack_correct:
 	pushl %eax
 	SAVE_ALL
-	movl %esp, %edx
-	pushl $0
-	pushl %edx
+	xorl %edx,%edx		# zero error code
+	movl %esp,%eax		# pt_regs pointer
 	call do_nmi
-	addl $8, %esp
 	RESTORE_ALL
 
 nmi_stack_fixup:
@@ -554,11 +515,9 @@ nmi_debug_stack_fixup:
 ENTRY(int3)
 	pushl $-1			# mark this as an int
 	SAVE_ALL
-	movl %esp,%edx
-	pushl $0
-	pushl %edx
+	xorl %edx,%edx		# zero error code
+	movl %esp,%eax		# pt_regs pointer
 	call do_int3
-	addl $8,%esp
 	testl %eax,%eax
 	jnz restore_all
 	jmp ret_from_exception
@@ -912,12 +871,12 @@ ENTRY(sys_call_table)
 	.long sys_mq_timedreceive	/* 280 */
 	.long sys_mq_notify
 	.long sys_mq_getsetattr
-	.long sys_kexec_load
+	.long sys_ni_syscall		/* reserved for kexec */
 	.long sys_waitid
-#ifdef USE_IOPRIO_SYSCALLS
-	.long sys_ioprio_set		/* 285 */
-	.long sys_ioprio_get
-#endif	
+	.long sys_ni_syscall		/* 285 */ /* available */
+	.long sys_add_key
+	.long sys_request_key
+	.long sys_keyctl
 
 syscall_table_size=(.-sys_call_table)
 

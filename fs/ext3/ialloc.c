@@ -23,8 +23,8 @@
 #include <linux/buffer_head.h>
 #include <linux/random.h>
 #include <linux/vs_dlimit.h>
+#include <linux/bitops.h>
 
-#include <asm/bitops.h>
 #include <asm/byteorder.h>
 
 #include "xattr.h"

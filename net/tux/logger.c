@@ -769,7 +769,7 @@ static int logger_thread (void *data)
 	memset(log_buffer, 0, LOG_LEN);
 	log_head = log_tail = 0;
 
-	current->rlim[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
+	current->signal->rlim[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
 
 	add_wait_queue(&log_wait, &wait);
 	for (;;) {

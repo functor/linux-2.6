@@ -204,8 +204,7 @@ struct agp_memory *agp_allocate_memory(size_t page_count, u32 type)
 			agp_free_memory(new);
 			return NULL;
 		}
-		new->memory[i] =
-			agp_bridge->driver->mask_memory(virt_to_phys(addr), type);
+		new->memory[i] = virt_to_phys(addr);
 		new->page_count++;
 	}
 
@@ -530,7 +529,7 @@ u32 agp_collect_device_status(u32 mode, u32 cmd)
 	u32 tmp;
 	u32 agp3;
 
-	while ((device = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, device)) != NULL) {
+	for_each_pci_dev(device) {
 		cap_ptr = pci_find_capability(device, PCI_CAP_ID_AGP);
 		if (!cap_ptr)
 			continue;
@@ -574,7 +573,7 @@ void agp_device_command(u32 command, int agp_v3)
 	if (agp_v3)
 		mode *= 4;
 
-	while ((device = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, device)) != NULL) {
+	for_each_pci_dev(device) {
 		u8 agp = pci_find_capability(device, PCI_CAP_ID_AGP);
 		if (!agp)
 			continue;
@@ -946,7 +945,7 @@ void *agp_generic_alloc_page(void)
 		return NULL;
 
 	map_page_into_agp(page);
-
+	
 	get_page(page);
 	SetPageLocked(page);
 	atomic_inc(&agp_bridge->current_memory_agp);
@@ -964,6 +963,7 @@ void agp_generic_destroy_page(void *addr)
 
 	page = virt_to_page(addr);
 	unmap_page_from_agp(page);
+
 	put_page(page);
 	unlock_page(page);
 	free_page((unsigned long)addr);
@@ -988,21 +988,15 @@ void agp_enable(u32 mode)
 EXPORT_SYMBOL(agp_enable);
 
 
-#ifdef CONFIG_SMP
 static void ipi_handler(void *null)
 {
 	flush_agp_cache();
 }
-#endif
 
 void global_cache_flush(void)
 {
-#ifdef CONFIG_SMP
 	if (on_each_cpu(ipi_handler, NULL, 1, 1) != 0)
 		panic(PFX "timed out waiting for the other CPUs!\n");
-#else
-	flush_agp_cache();
-#endif
 }
 EXPORT_SYMBOL(global_cache_flush);
 

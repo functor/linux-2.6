@@ -45,6 +45,7 @@
 #include <linux/unistd.h>
 #include <linux/rmap.h>
 #include <linux/mempolicy.h>
+#include <linux/key.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -305,8 +306,15 @@ static int __init unknown_bootoption(char *param, char *val)
 {
 	/* Change NUL term back to "=", to make "param" the whole string. */
 	if (val) {
-		if (val[-1] == '"') val[-2] = '=';
-		else val[-1] = '=';
+		/* param=val or param="val"? */
+		if (val == param+strlen(param)+1)
+			val[-1] = '=';
+		else if (val == param+strlen(param)+2) {
+			val[-2] = '=';
+			memmove(val-1, val, strlen(val)+1);
+			val--;
+		} else
+			BUG();
 	}
 
 	/* Handle obsolete-style parameters */
@@ -451,10 +459,10 @@ static void __init smp_init(void)
  */
 
 static void noinline rest_init(void)
+	__releases(kernel_lock)
 {
 	kernel_thread(init, NULL, CLONE_FS | CLONE_SIGHAND);
 	numa_default_policy();
-	system_state = SYSTEM_BOOTING_SCHEDULER_OK;
 	unlock_kernel();
  	cpu_idle();
 } 
@@ -575,7 +583,7 @@ asmlinkage void __init start_kernel(void)
 	proc_caches_init();
 	buffer_init();
 	unnamed_dev_init();
-	security_scaffolding_startup();
+	security_init();
 	vfs_caches_init(num_physpages);
 	radix_tree_init();
 	signals_init();
@@ -615,7 +623,7 @@ static void __init do_initcalls(void)
 
 		if (initcall_debug) {
 			printk(KERN_DEBUG "Calling initcall 0x%p", *call);
-			print_symbol(": %s()", (unsigned long) *call);
+			print_fn_descriptor_symbol(": %s()", (unsigned long) *call);
 			printk("\n");
 		}
 
@@ -652,7 +660,7 @@ static void __init do_basic_setup(void)
 	/* drivers will send hotplug events */
 	init_workqueues();
 	usermodehelper_init();
-
+	key_init();
 	driver_init();
 
 #ifdef CONFIG_SYSCTL

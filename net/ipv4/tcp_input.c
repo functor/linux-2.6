@@ -3028,8 +3028,8 @@ void tcp_parse_options(struct sk_buff *skb, struct tcp_opt *tp, int estab)
 							tp->snd_wscale = *(__u8 *)ptr;
 							if(tp->snd_wscale > 14) {
 								if(net_ratelimit())
-									printk("tcp_parse_options: Illegal window "
-									       "scaling value %d >14 received.",
+									printk(KERN_INFO "tcp_parse_options: Illegal window "
+									       "scaling value %d >14 received.\n",
 									       tp->snd_wscale);
 								tp->snd_wscale = 14;
 							}
@@ -3941,6 +3941,7 @@ void tcp_cwnd_application_limited(struct sock *sk)
 	tp->snd_cwnd_stamp = tcp_time_stamp;
 }
 
+EXPORT_SYMBOL_GPL(tcp_cwnd_application_limited);
 
 /* When incoming ACK allowed to free some skb from write_queue,
  * we remember this event in flag sk->sk_queue_shrunk and wake up socket
@@ -4957,7 +4958,6 @@ discard:
 
 EXPORT_SYMBOL(sysctl_tcp_ecn);
 EXPORT_SYMBOL(sysctl_tcp_reordering);
-EXPORT_SYMBOL_GPL(tcp_cwnd_application_limited);
 EXPORT_SYMBOL(tcp_parse_options);
 EXPORT_SYMBOL(tcp_rcv_established);
 EXPORT_SYMBOL(tcp_rcv_state_process);

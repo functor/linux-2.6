@@ -61,22 +61,21 @@ static int soft_ac3[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS-1)]=1};
 #ifdef SUPPORT_JOYSTICK
 static int joystick_port[SNDRV_CARDS];
 #endif
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for C-Media PCI soundcard.");
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for C-Media PCI soundcard.");
-module_param_array(enable, bool, boot_devs, 0444);
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable C-Media PCI soundcard.");
-module_param_array(mpu_port, long, boot_devs, 0444);
+module_param_array(mpu_port, long, NULL, 0444);
 MODULE_PARM_DESC(mpu_port, "MPU-401 port.");
-module_param_array(fm_port, long, boot_devs, 0444);
+module_param_array(fm_port, long, NULL, 0444);
 MODULE_PARM_DESC(fm_port, "FM port.");
-module_param_array(soft_ac3, bool, boot_devs, 0444);
+module_param_array(soft_ac3, bool, NULL, 0444);
 MODULE_PARM_DESC(soft_ac3, "Sofware-conversion of raw SPDIF packets (model 033 only).");
 #ifdef SUPPORT_JOYSTICK
-module_param_array(joystick_port, int, boot_devs, 0444);
+module_param_array(joystick_port, int, NULL, 0444);
 MODULE_PARM_DESC(joystick_port, "Joystick port address.");
 #endif
 
@@ -2551,6 +2550,7 @@ static int snd_cmipci_free(cmipci_t *cm)
 	}
 #endif
 	pci_release_regions(cm->pci);
+	pci_disable_device(cm->pci);
 	kfree(cm);
 	return 0;
 }
@@ -2573,6 +2573,10 @@ static int __devinit snd_cmipci_create(snd_card_t *card, struct pci_dev *pci,
 	long iomidi = mpu_port[dev];
 	long iosynth = fm_port[dev];
 	int pcm_index, pcm_spdif_index;
+	static struct pci_device_id intel_82437vx[] = {
+		{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82437VX) },
+		{ },
+	};
 
 	*rcmipci = NULL;
 
@@ -2580,8 +2584,10 @@ static int __devinit snd_cmipci_create(snd_card_t *card, struct pci_dev *pci,
 		return err;
 
 	cm = kcalloc(1, sizeof(*cm), GFP_KERNEL);
-	if (cm == NULL)
+	if (cm == NULL) {
+		pci_disable_device(pci);
 		return -ENOMEM;
+	}
 
 	spin_lock_init(&cm->reg_lock);
 	init_MUTEX(&cm->open_mutex);
@@ -2595,14 +2601,15 @@ static int __devinit snd_cmipci_create(snd_card_t *card, struct pci_dev *pci,
 
 	if ((err = pci_request_regions(pci, card->driver)) < 0) {
 		kfree(cm);
+		pci_disable_device(pci);
 		return err;
 	}
 	cm->iobase = pci_resource_start(pci, 0);
 
 	if (request_irq(pci->irq, snd_cmipci_interrupt, SA_INTERRUPT|SA_SHIRQ, card->driver, (void *)cm)) {
 		snd_printk("unable to grab IRQ %d\n", pci->irq);
-		err = -EBUSY;
-		goto __error;
+		snd_cmipci_free(cm);
+		return -EBUSY;
 	}
 	cm->irq = pci->irq;
 
@@ -2648,12 +2655,16 @@ static int __devinit snd_cmipci_create(snd_card_t *card, struct pci_dev *pci,
 	switch (pci->device) {
 	case PCI_DEVICE_ID_CMEDIA_CM8738:
 	case PCI_DEVICE_ID_CMEDIA_CM8738B:
-		/* PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82437VX */
-		if (! pci_find_device(0x8086, 0x7030, NULL))
+		if (!pci_dev_present(intel_82437vx)) 
 			snd_cmipci_set_bit(cm, CM_REG_MISC_CTRL, CM_TXVX);
 		break;
 	default:
 		break;
+	}
+
+	if ((err = snd_device_new(card, SNDRV_DEV_LOWLEVEL, cm, &ops)) < 0) {
+		snd_cmipci_free(cm);
+		return err;
 	}
 
 	/* set MPU address */
@@ -2711,22 +2722,22 @@ static int __devinit snd_cmipci_create(snd_card_t *card, struct pci_dev *pci,
 	/* create pcm devices */
 	pcm_index = pcm_spdif_index = 0;
 	if ((err = snd_cmipci_pcm_new(cm, pcm_index)) < 0)
-		goto __error;
+		return err;
 	pcm_index++;
 	if (cm->has_dual_dac) {
 		if ((err = snd_cmipci_pcm2_new(cm, pcm_index)) < 0)
-			goto __error;
+			return err;
 		pcm_index++;
 	}
 	if (cm->can_ac3_hw || cm->can_ac3_sw) {
 		pcm_spdif_index = pcm_index;
 		if ((err = snd_cmipci_pcm_spdif_new(cm, pcm_index)) < 0)
-			goto __error;
+			return err;
 	}
 
 	/* create mixer interface & switches */
 	if ((err = snd_cmipci_mixer_new(cm, pcm_spdif_index)) < 0)
-		goto __error;
+		return err;
 
 	if (iomidi > 0) {
 		if ((err = snd_mpu401_uart_new(card, 0, MPU401_HW_CMIPCI,
@@ -2736,10 +2747,6 @@ static int __devinit snd_cmipci_create(snd_card_t *card, struct pci_dev *pci,
 		}
 	}
 
-	if ((err = snd_device_new(card, SNDRV_DEV_LOWLEVEL, cm, &ops)) < 0) {
-		snd_cmipci_free(cm);
-		return err;
-	}
 #ifdef USE_VAR48KRATE
 	for (val = 0; val < ARRAY_SIZE(rates); val++)
 		snd_cmipci_set_pll(cm, rates[val], val);
@@ -2779,10 +2786,6 @@ static int __devinit snd_cmipci_create(snd_card_t *card, struct pci_dev *pci,
 
 	*rcmipci = cm;
 	return 0;
-
- __error:
-	snd_cmipci_free(cm);
-	return err;
 }
 
 /*

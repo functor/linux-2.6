@@ -14,6 +14,7 @@
 #include <linux/time.h>
 #include <linux/aio_abi.h>
 #include <linux/module.h>
+#include <linux/syscalls.h>
 
 #define DEBUG 0
 
@@ -116,8 +117,6 @@ static int aio_setup_ring(struct kioctx *ctx)
 
 	if (nr_pages < 0)
 		return -EINVAL;
-
-	info->nr_pages = nr_pages;
 
 	nr_events = (PAGE_SIZE * nr_pages - sizeof(struct aio_ring)) / sizeof(struct io_event);
 
@@ -565,12 +564,13 @@ struct kioctx *lookup_ioctx(unsigned long ctx_id)
  *	(Note: this routine is intended to be called only
  *	from a kernel thread context)
  */
-void use_mm(struct mm_struct *mm)
+static void use_mm(struct mm_struct *mm)
 {
 	struct mm_struct *active_mm;
 	struct task_struct *tsk = current;
 
 	task_lock(tsk);
+	tsk->flags |= PF_BORROWED_MM;
 	active_mm = tsk->active_mm;
 	atomic_inc(&mm->mm_count);
 	tsk->mm = mm;
@@ -597,6 +597,7 @@ void unuse_mm(struct mm_struct *mm)
 	struct task_struct *tsk = current;
 
 	task_lock(tsk);
+	tsk->flags &= ~PF_BORROWED_MM;
 	tsk->mm = NULL;
 	/* active_mm is still 'mm' */
 	enter_lazy_tlb(mm, tsk);

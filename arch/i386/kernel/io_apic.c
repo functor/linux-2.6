@@ -42,6 +42,9 @@
 
 #include "io_ports.h"
 
+int (*ioapic_renumber_irq)(int ioapic, int irq);
+atomic_t irq_mis_count;
+
 static spinlock_t ioapic_lock = SPIN_LOCK_UNLOCKED;
 
 /*
@@ -254,8 +257,6 @@ static void set_ioapic_affinity_irq(unsigned int irq, cpumask_t cpumask)
 #  define TDprintk(x...) 
 #  define Dprintk(x...) 
 # endif
-
-extern cpumask_t irq_affinity[NR_IRQS];
 
 cpumask_t __cacheline_aligned pending_irq_balance_cpumask[NR_IRQS];
 
@@ -1069,8 +1070,13 @@ static int pin_2_irq(int idx, int apic, int pin)
 			while (i < apic)
 				irq += nr_ioapic_registers[i++];
 			irq += pin;
-			if ((!apic) && (irq < 16)) 
-				irq += 16;
+
+			/*
+			 * For MPS mode, so far only needed by ES7000 platform
+			 */
+			if (ioapic_renumber_irq)
+				irq = ioapic_renumber_irq(apic, irq);
+
 			break;
 		}
 		default:
@@ -1622,42 +1628,11 @@ static void __init enable_IO_APIC(void)
  */
 void disable_IO_APIC(void)
 {
-	int pin;
 	/*
 	 * Clear the IO-APIC before rebooting:
 	 */
 	clear_IO_APIC();
 
-	/*
-	 * If the i82559 is routed through an IOAPIC
-	 * Put that IOAPIC in virtual wire mode
-	 * so legacy interrups can be delivered.
-	 */
-	pin = find_isa_irq_pin(0, mp_ExtINT);
-	if (pin != -1) {
-		struct IO_APIC_route_entry entry;
-		unsigned long flags;
-
-		memset(&entry, 0, sizeof(entry));
-		entry.mask            = 0; /* Enabled */
-		entry.trigger         = 0; /* Edge */
-		entry.irr             = 0;
-		entry.polarity        = 0; /* High */
-		entry.delivery_status = 0;
-		entry.dest_mode       = 0; /* Physical */
-		entry.delivery_mode   = 7; /* ExtInt */
-		entry.vector          = 0;
-		entry.dest.physical.physical_dest = 0;
-
-
-		/*
-		 * Add it to the IO-APIC irq-routing table:
-		 */
-		spin_lock_irqsave(&ioapic_lock, flags);
-		io_apic_write(0, 0x11+2*pin, *(((int *)&entry)+1));
-		io_apic_write(0, 0x10+2*pin, *(((int *)&entry)+0));
-		spin_unlock_irqrestore(&ioapic_lock, flags);
-	}
 	disconnect_bsp_APIC();
 }
 
@@ -1910,9 +1885,7 @@ static void end_level_ioapic_irq (unsigned int irq)
 	ack_APIC_irq();
 
 	if (!(v & (1 << (i & 0x1f)))) {
-#ifdef APIC_MISMATCH_DEBUG
 		atomic_inc(&irq_mis_count);
-#endif
 		spin_lock(&ioapic_lock);
 		__mask_and_edge_IO_APIC_irq(irq);
 		__unmask_and_level_IO_APIC_irq(irq);

@@ -8,37 +8,6 @@
 /*
  * This is the /proc/ide/ filesystem implementation.
  *
- * The major reason this exists is to provide sufficient access
- * to driver and config data, such that user-mode programs can
- * be developed to handle chipset tuning for most PCI interfaces.
- * This should provide better utilities, and less kernel bloat.
- *
- * The entire pci config space for a PCI interface chipset can be
- * retrieved by just reading it.  e.g.    "cat /proc/ide3/config"
- *
- * To modify registers *safely*, do something like:
- *   echo "P40:88" >/proc/ide/ide3/config
- * That expression writes 0x88 to pci config register 0x40
- * on the chip which controls ide3.  Multiple tuples can be issued,
- * and the writes will be completed as an atomic set:
- *   echo "P40:88 P41:35 P42:00 P43:00" >/proc/ide/ide3/config
- *
- * All numbers must be specified using pairs of ascii hex digits.
- * It is important to note that these writes will be performed
- * after waiting for the IDE controller (both interfaces)
- * to be completely idle, to ensure no corruption of I/O in progress.
- *
- * Non-PCI registers can also be written, using "R" in place of "P"
- * in the above examples.  The size of the port transfer is determined
- * by the number of pairs of hex digits given for the data.  If a two
- * digit value is given, the write will be a byte operation; if four
- * digits are used, the write will be performed as a 16-bit operation;
- * and if eight digits are specified, a 32-bit "dword" write will be
- * performed.  Odd numbers of digits are not permitted.
- *
- * If there is an error *anywhere* in the string of registers/data
- * then *none* of the writes will be performed.
- *
  * Drive/Driver settings can be retrieved by reading the drive's
  * "settings" files.  e.g.    "cat /proc/ide0/hda/settings"
  * To write a new value "val" into a specific setting "name", use:
@@ -50,10 +19,6 @@
  * SENSE CAPABILITIES command to /dev/hda, and then dump out the
  * returned data as 256 16-bit words.  The "hdparm" utility will
  * be updated someday soon to use this mechanism.
- *
- * Feel free to develop and distribute fancy GUI configuration
- * utilities for your favorite PCI chipsets.  I'll be working on
- * one for the Promise 20246 someday soon.  -ml
  *
  */
 
@@ -74,249 +39,6 @@
 
 #include <asm/io.h>
 
-static int do_proc_ide_write_config(struct file *file, const char __user *buffer,
-				 unsigned long count, void *data)
-{
-	ide_hwif_t	*hwif = ide_hwif_from_key(data);
-	ide_hwgroup_t *mygroup = (ide_hwgroup_t *)(hwif->hwgroup);
-	ide_hwgroup_t *mategroup = NULL;
-	unsigned long timeout;
-	unsigned long flags;
-	const char *start = NULL, *msg = NULL;
-	struct entry { u32 val; u16 reg; u8 size; u8 pci; } *prog, *q, *r;
-	int want_pci = 0;
-	char *buf, *s;
-	int err;
-
-	if (hwif->mate && hwif->mate->hwgroup)
-		mategroup = (ide_hwgroup_t *)(hwif->mate->hwgroup);
-
-	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO))
-		return -EACCES;
-
-	if (count >= PAGE_SIZE)
-		return -EINVAL;
-
-	s = buf = (char *)__get_free_page(GFP_USER);
-	if (!buf)
-		return -ENOMEM;
-
-	err = -ENOMEM;
-	q = prog = (struct entry *)__get_free_page(GFP_USER);
-	if (!prog)
-		goto out;
-
-	err = -EFAULT;
-	if (copy_from_user(buf, buffer, count))
-		goto out1;
-
-	buf[count] = '\0';
-
-	while (isspace(*s))
-		s++;
-
-	while (*s) {
-		char *p;
-		int digits;
-
-		start = s;
-
-		if ((char *)(q + 1) > (char *)prog + PAGE_SIZE) {
-			msg = "too many entries";
-			goto parse_error;
-		}
-
-		switch (*s++) {
-			case 'R':	q->pci = 0;
-					break;
-			case 'P':	q->pci = 1;
-					want_pci = 1;
-					break;
-			default:	msg = "expected 'R' or 'P'";
-					goto parse_error;
-		}
-
-		q->reg = simple_strtoul(s, &p, 16);
-		digits = p - s;
-		if (!digits || digits > 4 || (q->pci && q->reg > 0xff)) {
-			msg = "bad/missing register number";
-			goto parse_error;
-		}
-		if (*p++ != ':') {
-			msg = "missing ':'";
-			goto parse_error;
-		}
-		q->val = simple_strtoul(p, &s, 16);
-		digits = s - p;
-		if (digits != 2 && digits != 4 && digits != 8) {
-			msg = "bad data, 2/4/8 digits required";
-			goto parse_error;
-		}
-		q->size = digits / 2;
-
-		if (q->pci) {
-#ifdef CONFIG_BLK_DEV_IDEPCI
-			if (q->reg & (q->size - 1)) {
-				msg = "misaligned access";
-				goto parse_error;
-			}
-#else
-			msg = "not a PCI device";
-			goto parse_error;
-#endif	/* CONFIG_BLK_DEV_IDEPCI */
-		}
-
-		q++;
-
-		if (*s && !isspace(*s++)) {
-			msg = "expected whitespace after data";
-			goto parse_error;
-		}
-		while (isspace(*s))
-			s++;
-	}
-
-	/*
-	 * What follows below is fucking insane, even for IDE people.
-	 * For now I've dealt with the obvious problems on the parsing
-	 * side, but IMNSHO we should simply remove the write access
-	 * to /proc/ide/.../config, killing that FPOS completely.
-	 */
-
-	err = -EBUSY;
-	timeout = jiffies + (3 * HZ);
-	spin_lock_irqsave(&ide_lock, flags);
-	while (mygroup->busy ||
-	       (mategroup && mategroup->busy)) {
-		spin_unlock_irqrestore(&ide_lock, flags);
-		if (time_after(jiffies, timeout)) {
-			printk("/proc/ide/%s/config: channel(s) busy, cannot write\n", hwif->name);
-			goto out1;
-		}
-		spin_lock_irqsave(&ide_lock, flags);
-	}
-
-#ifdef CONFIG_BLK_DEV_IDEPCI
-	if (want_pci && (!hwif->pci_dev || hwif->pci_dev->vendor)) {
-		spin_unlock_irqrestore(&ide_lock, flags);
-		printk("proc_ide: PCI registers not accessible for %s\n",
-			hwif->name);
-		err = -EINVAL;
-		goto out1;
-	}
-#endif	/* CONFIG_BLK_DEV_IDEPCI */
-
-	for (r = prog; r < q; r++) {
-		unsigned int reg = r->reg, val = r->val;
-		if (r->pci) {
-#ifdef CONFIG_BLK_DEV_IDEPCI
-			int rc = 0;
-			struct pci_dev *dev = hwif->pci_dev;
-			switch (q->size) {
-				case 1:	msg = "byte";
-					rc = pci_write_config_byte(dev, reg, val);
-					break;
-				case 2:	msg = "word";
-					rc = pci_write_config_word(dev, reg, val);
-					break;
-				case 4:	msg = "dword";
-					rc = pci_write_config_dword(dev, reg, val);
-					break;
-			}
-			if (rc) {
-				spin_unlock_irqrestore(&ide_lock, flags);
-				printk("proc_ide_write_config: error writing %s at bus %02x dev %02x reg 0x%x value 0x%x\n",
-					msg, dev->bus->number, dev->devfn, reg, val);
-				printk("proc_ide_write_config: error %d\n", rc);
-				err = -EIO;
-				goto out1;
-			}
-#endif	/* CONFIG_BLK_DEV_IDEPCI */
-		} else {	/* not pci */
-			switch (r->size) {
-				case 1:	hwif->OUTB(val, reg);
-					break;
-				case 2:	hwif->OUTW(val, reg);
-					break;
-				case 4:	hwif->OUTL(val, reg);
-					break;
-			}
-		}
-	}
-	spin_unlock_irqrestore(&ide_lock, flags);
-	err = count;
-out1:
-	free_page((unsigned long)prog);
-out:
-	free_page((unsigned long)buf);
-	return err;
-
-parse_error:
-	printk("parse error\n");
-	printk("proc_ide: error: %s: '%s'\n", msg, start);
-	err = -EINVAL;
-	goto out1;
-}
-
-static int proc_ide_write_config(struct file *file, const char __user *buffer,
-				 unsigned long count, void *data)
-{
-	int ret;
-	down(&ide_cfg_sem);
-	ret = do_proc_ide_write_config(file, buffer, count, data);
-	up(&ide_cfg_sem);
-	return ret;
-}
-
-static int proc_ide_read_config
-	(char *page, char **start, off_t off, int count, int *eof, void *data)
-{
-	char		*out = page;
-	int		len;
-
-#ifdef CONFIG_BLK_DEV_IDEPCI
-	ide_hwif_t	*hwif = ide_hwif_from_key(data);
-
-	down(&ide_cfg_sem);
-	hwif = ide_hwif_from_key(data);
-	
-	if(hwif)
-	{
-		struct pci_dev	*dev = hwif->pci_dev;
-		if ((hwif->pci_dev && hwif->pci_dev->vendor) && dev && dev->bus) 
-		{
-			int reg = 0;
-
-			out += sprintf(out, "pci bus %02x device %02x vendor %04x "
-					"device %04x channel %d\n",
-				dev->bus->number, dev->devfn,
-				hwif->pci_dev->vendor, hwif->pci_dev->device,
-				hwif->channel);
-			do {
-				u8 val;
-				int rc = pci_read_config_byte(dev, reg, &val);
-				if (rc) {
-					printk("proc_ide_read_config: error %d reading"
-						" bus %02x dev %02x reg 0x%02x\n",
-						rc, dev->bus->number, dev->devfn, reg);
-					out += sprintf(out, "??%c",
-						(++reg & 0xf) ? ' ' : '\n');
-				} else
-					out += sprintf(out, "%02x%c",
-						val, (++reg & 0xf) ? ' ' : '\n');
-			} while (reg < 0x100);
-		}
-		else
-			out += sprintf(out, "(none)\n");
-	}
-#else	/* CONFIG_BLK_DEV_IDEPCI */
-	out += sprintf(out, "(none)\n");
-#endif	
-	up(&ide_cfg_sem);
-	len = out - page;
-	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
-}
-
 static int proc_ide_read_imodel
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
@@ -326,12 +48,11 @@ static int proc_ide_read_imodel
 
 	down(&ide_cfg_sem);
 	hwif = ide_hwif_from_key(data);	
-	if(hwif)
-	{
+	if(hwif) {
 		/*
 		 * Neither ide_unknown nor ide_forced should be set at this point.
 		 */
-		switch (hwif->chipset) {
+		switch (hwif->chipset) {	
 			case ide_generic:	name = "generic";	break;
 			case ide_pci:		name = "pci";		break;
 			case ide_cmd640:	name = "cmd640";	break;
@@ -340,7 +61,6 @@ static int proc_ide_read_imodel
 			case ide_qd65xx:	name = "qd65xx";	break;
 			case ide_umc8672:	name = "umc8672";	break;
 			case ide_ht6560b:	name = "ht6560b";	break;
-			case ide_pdc4030:	name = "pdc4030";	break;
 			case ide_rz1000:	name = "rz1000";	break;
 			case ide_trm290:	name = "trm290";	break;
 			case ide_cmd646:	name = "cmd646";	break;
@@ -348,7 +68,7 @@ static int proc_ide_read_imodel
 			case ide_4drives:	name = "4drives";	break;
 			case ide_pmac:		name = "mac-io";	break;
 			default:		name = "(unknown)";	break;
- 		}
+		}
 	}
 	len = sprintf(page, "%s\n", name);
 	up(&ide_cfg_sem);
@@ -361,7 +81,7 @@ static int proc_ide_read_mate
 	ide_hwif_t	*hwif;
 	int		len;
 
- 	down(&ide_cfg_sem);
+	down(&ide_cfg_sem);
 	hwif = ide_hwif_from_key(data);	
 	if (hwif && hwif->mate && hwif->mate->present)
 		len = sprintf(page, "%s\n", hwif->mate->name);
@@ -423,6 +143,18 @@ static int proc_ide_read_identify
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
+static void proc_ide_settings_warn(void)
+{
+	static int warned = 0;
+
+	if (warned)
+		return;
+
+	printk(KERN_WARNING "Warning: /proc/ide/hd?/settings interface is "
+			    "obsolete, and will be removed soon!\n");
+	warned = 1;
+}
+
 static int proc_ide_read_settings
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
@@ -430,12 +162,13 @@ static int proc_ide_read_settings
 	ide_settings_t	*setting;
 	char		*out = page;
 	int		len, rc, mul_factor, div_factor;
-	
+
+	proc_ide_settings_warn();
+
 	down(&ide_cfg_sem);
 	drive = ide_drive_from_key(data);
 	
-	if(drive == NULL)
-	{
+	if(drive == NULL) {
 		up(&ide_cfg_sem);
 		return -EIO;
 	}
@@ -483,6 +216,8 @@ static int do_proc_ide_write_settings(struct file *file, const char __user *buff
 		
 	if (drive == NULL)
 		return -EIO;
+
+	proc_ide_settings_warn();
 
 	if (count >= PAGE_SIZE)
 		return -EINVAL;
@@ -580,10 +315,8 @@ int proc_ide_read_capacity
 	ide_drive_t	*drive;
 	int		len;
 
-	down(&ide_cfg_sem);
 	drive = ide_drive_from_key(data);
-	if(drive == NULL)
-	{
+	if(drive == NULL) {
 		up(&ide_cfg_sem);
 		return -EIO;
 	}
@@ -600,15 +333,13 @@ int proc_ide_read_geometry
 	ide_drive_t	*drive;
 	char		*out = page;
 	int		len;
-	
+
 	down(&ide_cfg_sem);
 	drive = ide_drive_from_key(data);
-	if(drive == NULL)
-	{
+	if(drive == NULL) {
 		up(&ide_cfg_sem);
 		return -EIO;
 	}
-
 	out += sprintf(out,"physical     %d/%d/%d\n",
 			drive->cyl, drive->head, drive->sect);
 	out += sprintf(out,"logical      %d/%d/%d\n",
@@ -630,8 +361,7 @@ static int proc_ide_read_dmodel
 
 	down(&ide_cfg_sem);
 	drive = ide_drive_from_key(data);
-	if(drive == NULL)
-	{
+	if(drive == NULL) {
 		up(&ide_cfg_sem);
 		return -EIO;
 	}
@@ -652,8 +382,7 @@ static int proc_ide_read_driver
 
 	down(&ide_cfg_sem);
 	drive = ide_drive_from_key(data);
-	if(drive == NULL)
-	{
+	if(drive == NULL) {
 		up(&ide_cfg_sem);
 		return -EIO;
 	}
@@ -675,8 +404,7 @@ static int proc_ide_read_media
 
 	down(&ide_cfg_sem);
 	drive = ide_drive_from_key(data);
-	if(drive == NULL)
-	{
+	if(drive == NULL) {
 		up(&ide_cfg_sem);
 		return -EIO;
 	}
@@ -772,7 +500,7 @@ static void destroy_proc_ide_device(ide_hwif_t *hwif, ide_drive_t *drive)
 	}
 }
 
-void destroy_proc_ide_drives(ide_hwif_t *hwif)
+static void destroy_proc_ide_drives(ide_hwif_t *hwif)
 {
 	int	d;
 
@@ -785,7 +513,6 @@ void destroy_proc_ide_drives(ide_hwif_t *hwif)
 
 static ide_proc_entry_t hwif_entries[] = {
 	{ "channel",	S_IFREG|S_IRUGO,	proc_ide_read_channel,	NULL },
-	{ "config",	S_IFREG|S_IRUGO|S_IWUSR,proc_ide_read_config,	proc_ide_write_config },
 	{ "mate",	S_IFREG|S_IRUGO,	proc_ide_read_mate,	NULL },
 	{ "model",	S_IFREG|S_IRUGO,	proc_ide_read_imodel,	NULL },
 	{ NULL,	0, NULL, NULL }
@@ -823,12 +550,7 @@ EXPORT_SYMBOL_GPL(ide_pci_create_host_proc);
 
 void destroy_proc_ide_interface(ide_hwif_t *hwif)
 {
-	int exist = (hwif->proc != NULL);
-#if 0
-	if (!hwif->present)
-		continue;
-#endif
-	if (exist) {
+	if (hwif->proc) {
 		destroy_proc_ide_drives(hwif);
 		ide_remove_proc_entries(hwif->proc, hwif_entries);
 		remove_proc_entry(hwif->name, proc_ide_root);
@@ -844,6 +566,10 @@ static void destroy_proc_ide_interfaces(void)
 
 	for (h = 0; h < MAX_HWIFS; h++) {
 		ide_hwif_t *hwif = &ide_hwifs[h];
+#if 0
+		if (!hwif->present)
+			continue;
+#endif
 		destroy_proc_ide_interface(hwif);
 	}
 }

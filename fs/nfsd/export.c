@@ -509,12 +509,9 @@ exp_find_key(svc_client *clp, int fsid_type, u32 *fsidv, struct cache_req *reqp)
 	memcpy(key.ek_fsid, fsidv, key_len(fsid_type));
 
 	ek = svc_expkey_lookup(&key, 0);
-	if (ek != NULL) {
-		if ((err = cache_check(&svc_expkey_cache, &ek->h, reqp))) {
-			dprintk("exp_find_key: cache_check failed: %d\n", err);
+	if (ek != NULL)
+		if ((err = cache_check(&svc_expkey_cache, &ek->h, reqp)))
 			ek = ERR_PTR(err);
-		}
-	}
 	return ek;
 }
 

@@ -282,64 +282,19 @@ ext2_set_acl(struct inode *inode, int type, struct posix_acl *acl)
 	return error;
 }
 
-/*
- * Inode operation permission().
- *
- * inode->i_sem: don't care
- */
 int
 ext2_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
 	int mode = inode->i_mode;
 
-	/* Prevent vservers from escaping chroot() barriers */
-	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
-		return -EACCES;
+#warning MEF Get new BME patch, which I believe pushes these checks higher
 	/* Nobody gets write access to a read-only fs */
 	if ((mask & MAY_WRITE) && (IS_RDONLY(inode) ||
 	    (nd && MNT_IS_RDONLY(nd->mnt))) &&
 	    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 		return -EROFS;
-	/* Nobody gets write access to an immutable file */
-	if ((mask & MAY_WRITE) && IS_IMMUTABLE(inode))
-	    return -EACCES;
-	if (current->fsuid == inode->i_uid) {
-		mode >>= 6;
-	} else if (test_opt(inode->i_sb, POSIX_ACL)) {
-		struct posix_acl *acl;
 
-		/* The access ACL cannot grant access if the group class
-		   permission bits don't contain all requested permissions. */
-		if (((mode >> 3) & mask & S_IRWXO) != mask)
-			goto check_groups;
-		acl = ext2_get_acl(inode, ACL_TYPE_ACCESS);
-		if (acl) {
-			int error = posix_acl_permission(inode, acl, mask);
-			posix_acl_release(acl);
-			if (error == -EACCES)
-				goto check_capabilities;
-			return error;
-		} else
-			goto check_groups;
-	} else {
-check_groups:
-		if (in_group_p(inode->i_gid))
-			mode >>= 3;
-	}
-	if ((mode & mask & S_IRWXO) == mask)
-		return 0;
-
-check_capabilities:
-	/* Allowed to override Discretionary Access Control? */
-	if (!(mask & MAY_EXEC) ||
-	    (inode->i_mode & S_IXUGO) || S_ISDIR(inode->i_mode))
-		if (capable(CAP_DAC_OVERRIDE))
-			return 0;
-	/* Read and search granted if capable(CAP_DAC_READ_SEARCH) */
-	if (capable(CAP_DAC_READ_SEARCH) && ((mask == MAY_READ) ||
-	    (S_ISDIR(inode->i_mode) && !(mask & MAY_WRITE))))
-		return 0;
-	return -EACCES;
+	return generic_permission(inode, mask, 0);
 }
 
 /*
