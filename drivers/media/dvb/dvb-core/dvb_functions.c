@@ -36,11 +36,7 @@ int dvb_usercopy(struct inode *inode, struct file *file,
         /*  Copy arguments into temp kernel buffer  */
         switch (_IOC_DIR(cmd)) {
         case _IOC_NONE:
-		/*
-		 * For this command, the pointer is actually an integer
-		 * argument.
-		 */
-                parg = (void *) arg;
+                parg = NULL;
                 break;
         case _IOC_READ: /* some v4l ioctls are marked wrong ... */
         case _IOC_WRITE:

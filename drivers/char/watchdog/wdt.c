@@ -288,6 +288,10 @@ static irqreturn_t wdt_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 static ssize_t wdt_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
+	/*  Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	if(count) {
 		if (!nowayout) {
 			size_t i;
@@ -393,7 +397,7 @@ static int wdt_open(struct inode *inode, struct file *file)
 	 *	Activate
 	 */
 	wdt_start();
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 /**
@@ -437,6 +441,10 @@ static ssize_t wdt_temp_read(struct file *file, char __user *buf, size_t count, 
 {
 	int temperature;
 
+	/*  Can't seek (pread) on this device  */
+	if (ptr != &file->f_pos)
+		return -ESPIPE;
+
 	if (wdt_get_temperature(&temperature))
 		return -EFAULT;
 
@@ -456,7 +464,7 @@ static ssize_t wdt_temp_read(struct file *file, char __user *buf, size_t count, 
 
 static int wdt_temp_open(struct inode *inode, struct file *file)
 {
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 /**

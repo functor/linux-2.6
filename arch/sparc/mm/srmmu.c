@@ -1697,7 +1697,9 @@ static void turbosparc_flush_cache_mm(struct mm_struct *mm)
 
 static void turbosparc_flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned long end)
 {
-	FLUSH_BEGIN(vma->vm_mm)
+	struct mm_struct *mm = vma->vm_mm;
+
+	FLUSH_BEGIN(mm)
 	flush_user_windows();
 	turbosparc_idflash_clear();
 	FLUSH_END
@@ -1748,7 +1750,9 @@ static void turbosparc_flush_tlb_mm(struct mm_struct *mm)
 
 static void turbosparc_flush_tlb_range(struct vm_area_struct *vma, unsigned long start, unsigned long end)
 {
-	FLUSH_BEGIN(vma->vm_mm)
+	struct mm_struct *mm = vma->vm_mm;
+
+	FLUSH_BEGIN(mm)
 	srmmu_flush_whole_tlb();
 	FLUSH_END
 }

@@ -141,6 +141,10 @@ ibwdt_ping(void)
 static ssize_t
 ibwdt_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
+	/*  Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	if (count) {
 		if (!nowayout) {
 			size_t i;
@@ -224,7 +228,7 @@ ibwdt_open(struct inode *inode, struct file *file)
 	/* Activate */
 	ibwdt_ping();
 	spin_unlock(&ibwdt_lock);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int

@@ -11,7 +11,7 @@ config	VSERVER_LEGACY
 	  This enables the legacy API used in vs1.xx, which allows
 	  to use older tools (for migration purposes).
 
-config	VSERVER_PROC_SECURE
+config	PROC_SECURE
 	bool	"Enable Proc Security"
 	depends on PROC_FS
 	default y
@@ -27,7 +27,7 @@ config	VSERVER_HARDCPU
 
 choice
 	prompt	"Persistent Inode Context Tagging"
-	default	INOXID_UGID24
+	default	INOXID_GID24
 	help
 	  This adds persistent context information to filesystems
 	  mounted with the tagxid option. Tagging is a requirement
@@ -39,31 +39,26 @@ config	INOXID_NONE
 	help
 	  no context information is store for inodes
 
-config	INOXID_UID16
-	bool	"UID16/GID32"
-	help
-	  reduces UID to 16 bit, but leaves GID at 32 bit.
-
 config	INOXID_GID16
 	bool	"UID32/GID16"
 	help
 	  reduces GID to 16 bit, but leaves UID at 32 bit.
 
-config	INOXID_UGID24
+config	INOXID_GID24
 	bool	"UID24/GID24"
 	help
 	  uses the upper 8bit from UID and GID for XID tagging
 	  which leaves 24bit for UID/GID each, which should be
 	  more than sufficient for normal use.
 
-config	INOXID_INTERN
+config	INOXID_GID32
 	bool	"UID32/GID32"
 	help
 	  this uses otherwise reserved inode fields in the on
 	  disk representation, which limits the use to a few
 	  filesystems (currently ext2 and ext3)
 
-config	INOXID_RUNTIME
+config	INOXID_MAGIC
 	bool	"Runtime"
 	depends on EXPERIMENTAL
 	help
@@ -72,15 +67,6 @@ config	INOXID_RUNTIME
 	  funny results for mixed access.
 
 endchoice
-
-config	VSERVER_DEBUG
-	bool	"Compile Debugging Code"
-	default n
-	help
-	  Set this to yes if you want to be able to activate
-	  debugging output at runtime. It adds a probably small
-	  overhead (~ ??%) to all vserver related functions and
-	  increases the kernel size by about 20k.
 
 endmenu
 

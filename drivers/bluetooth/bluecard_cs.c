@@ -28,7 +28,6 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/sched.h>
-#include <linux/delay.h>
 #include <linux/timer.h>
 #include <linux/errno.h>
 #include <linux/ptrace.h>
@@ -777,7 +776,8 @@ int bluecard_open(bluecard_info_t *info)
 	outb(0x80, iobase + 0x30);
 
 	/* Wait some time */
-	msleep(10);
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule_timeout(HZ / 100);
 
 	/* Turn FPGA on */
 	outb(0x00, iobase + 0x30);
@@ -823,7 +823,8 @@ int bluecard_open(bluecard_info_t *info)
 	outb((0x0f << RTS_LEVEL_SHIFT_BITS) | 1, iobase + REG_RX_CONTROL);
 
 	/* Timeout before it is safe to send the first HCI packet */
-	msleep(1250);
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule_timeout((HZ * 5) / 4);		// or set it to 3/2
 
 	/* Register HCI device */
 	if (hci_register_dev(hdev) < 0) {

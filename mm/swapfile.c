@@ -30,7 +30,6 @@
 #include <asm/tlbflush.h>
 #include <linux/swapops.h>
 #include <linux/vs_base.h>
-#include <linux/vs_memory.h>
 
 spinlock_t swaplock = SPIN_LOCK_UNLOCKED;
 unsigned int nr_swapfiles;
@@ -112,7 +111,7 @@ static inline int scan_swap_map(struct swap_info_struct *si)
  check_next_cluster:
 	if (offset+SWAPFILE_CLUSTER-1 <= si->highest_bit)
 	{
-		unsigned long nr;
+		int nr;
 		for (nr = offset; nr < offset+SWAPFILE_CLUSTER; nr++)
 			if (si->swap_map[nr])
 			{
@@ -551,15 +550,7 @@ static int unuse_process(struct mm_struct * mm,
 	/*
 	 * Go through process' page directory.
 	 */
-	if (!down_read_trylock(&mm->mmap_sem)) {
-		/*
-		 * Our reference to the page stops try_to_unmap_one from
-		 * unmapping its ptes, so swapoff can make progress.
-		 */
-		unlock_page(page);
-		down_read(&mm->mmap_sem);
-		lock_page(page);
-	}
+	down_read(&mm->mmap_sem);
 	spin_lock(&mm->page_table_lock);
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		if (!is_vm_hugetlb_page(vma)) {

@@ -513,7 +513,7 @@ static void mem_parity_error(unsigned char reason, struct pt_regs * regs)
 {
 	printk("Uhhuh. NMI received. Dazed and confused, but trying to continue\n");
 	printk("You probably have a hardware problem with your RAM chips\n");
-	panic("Halting\n");
+
 	/* Clear and disable the memory parity error line. */
 	clear_mem_error(reason);
 }

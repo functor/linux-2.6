@@ -2491,7 +2491,7 @@ static int __init rs_8xx_init(void)
 {
 	struct serial_state * state;
 	ser_info_t	*info;
-	uint		mem_addr, iobits, dp_offset;
+	uint		mem_addr, dp_addr, dp_mem, iobits;
 	int		i, j, idx;
 	ushort		chan;
 	volatile	cbd_t		*bdp;
@@ -2623,7 +2623,8 @@ static int __init rs_8xx_init(void)
 			 * descriptors from dual port ram, and a character
 			 * buffer area from host mem.
 			 */
-			dp_offset = cpm_dpalloc(sizeof(cbd_t) * RX_NUM_FIFO, 8);
+			dp_mem = m8xx_cpm_dpalloc(sizeof(cbd_t) * RX_NUM_FIFO);
+			dp_addr = m8xx_cpm_dpram_offset(dp_mem);
 
 			/* Allocate space for FIFOs in the host memory.
 			*/
@@ -2634,7 +2635,7 @@ static int __init rs_8xx_init(void)
 			 * buffers in the buffer descriptors, and the
 			 * virtual address for us to work with.
 			 */
-			bdp = (cbd_t *)&cp->cp_dpmem[dp_offset];
+			bdp = (cbd_t *)&cp->cp_dpmem[dp_addr];
 			info->rx_cur = info->rx_bd_base = (cbd_t *)bdp;
 
 			for (j=0; j<(RX_NUM_FIFO-1); j++) {
@@ -2650,15 +2651,16 @@ static int __init rs_8xx_init(void)
 			if (info->state->smc_scc_num & NUM_IS_SCC) {
 				scp = &cp->cp_scc[idx];
 				sup = (scc_uart_t *)&cp->cp_dparam[state->port];
-				sup->scc_genscc.scc_rbase = dp_offset;
+				sup->scc_genscc.scc_rbase = dp_mem;
 			}
 			else {
 				sp = &cp->cp_smc[idx];
 				up = (smc_uart_t *)&cp->cp_dparam[state->port];
-				up->smc_rbase = dp_offset;
+				up->smc_rbase = dp_mem;
 			}
 
-			dp_offset = cpm_dpalloc(sizeof(cbd_t) * TX_NUM_FIFO, 8);
+			dp_mem = m8xx_cpm_dpalloc(sizeof(cbd_t) * TX_NUM_FIFO);
+			dp_addr = m8xx_cpm_dpram_offset(dp_mem);
 
 			/* Allocate space for FIFOs in the host memory.
 			*/
@@ -2669,7 +2671,7 @@ static int __init rs_8xx_init(void)
 			 * buffers in the buffer descriptors, and the
 			 * virtual address for us to work with.
 			 */
-			bdp = (cbd_t *)&cp->cp_dpmem[dp_offset];
+			bdp = (cbd_t *)&cp->cp_dpmem[dp_addr];
 			info->tx_cur = info->tx_bd_base = (cbd_t *)bdp;
 
 			for (j=0; j<(TX_NUM_FIFO-1); j++) {
@@ -2682,7 +2684,7 @@ static int __init rs_8xx_init(void)
 			bdp->cbd_sc = (BD_SC_WRAP | BD_SC_INTRPT);
 
 			if (info->state->smc_scc_num & NUM_IS_SCC) {
-				sup->scc_genscc.scc_tbase = dp_offset;
+				sup->scc_genscc.scc_tbase = dp_mem;
 
 				/* Set up the uart parameters in the
 				 * parameter ram.
@@ -2779,7 +2781,7 @@ static int __init rs_8xx_init(void)
 				cp->cp_simode &= ~(0xffff << (idx * 16));
 				cp->cp_simode |= (i << ((idx * 16) + 12));
 
-				up->smc_tbase = dp_offset;
+				up->smc_tbase = dp_mem;
 
 				/* Set up the uart parameters in the
 				 * parameter ram.
@@ -2843,7 +2845,7 @@ module_init(rs_8xx_init);
 static int __init serial_console_setup(struct console *co, char *options)
 {
 	struct		serial_state *ser;
-	uint		mem_addr, bidx, idx, dp_offset;
+	uint		mem_addr, dp_addr, dp_mem, bidx, idx;
 	ushort		chan;
 	volatile	cbd_t		*bdp;
 	volatile	cpm8xx_t	*cp;
@@ -2889,17 +2891,19 @@ static int __init serial_console_setup(struct console *co, char *options)
 	 * memory yet because vm allocator isn't initialized
 	 * during this early console init.
 	 */
-	dp_offset = cpm_dpalloc(8, 8);
-	mem_addr = (uint)(&cpmp->cp_dpmem[dp_offset]);
+	dp_mem = m8xx_cpm_dpalloc(8);
+	dp_addr = m8xx_cpm_dpram_offset(dp_mem);
+	mem_addr = (uint)(&cpmp->cp_dpmem[dp_addr]);
 
 	/* Allocate space for two buffer descriptors in the DP ram.
 	*/
-	dp_offset = cpm_dpalloc(sizeof(cbd_t) * 2, 8);
+	dp_mem = m8xx_cpm_dpalloc(sizeof(cbd_t) * 2);
+	dp_addr = m8xx_cpm_dpram_offset(dp_mem);
 
 	/* Set the physical address of the host memory buffers in
 	 * the buffer descriptors.
 	 */
-	bdp = (cbd_t *)&cp->cp_dpmem[dp_offset];
+	bdp = (cbd_t *)&cp->cp_dpmem[dp_addr];
 	bdp->cbd_bufaddr = iopa(mem_addr);
 	(bdp+1)->cbd_bufaddr = iopa(mem_addr+4);
 
@@ -2918,8 +2922,8 @@ static int __init serial_console_setup(struct console *co, char *options)
 	*/
 	if (ser->smc_scc_num & NUM_IS_SCC) {
 
-		sup->scc_genscc.scc_rbase = dp_offset;
-		sup->scc_genscc.scc_tbase = dp_offset + sizeof(cbd_t);
+		sup->scc_genscc.scc_rbase = dp_mem;
+		sup->scc_genscc.scc_tbase = dp_mem + sizeof(cbd_t);
 
 		/* Set up the uart parameters in the
 		 * parameter ram.
@@ -2977,8 +2981,8 @@ static int __init serial_console_setup(struct console *co, char *options)
 
 	}
 	else {
-		up->smc_rbase = dp_offset;	/* Base of receive buffer desc. */
-		up->smc_tbase = dp_offset+sizeof(cbd_t);	/* Base of xmt buffer desc. */
+		up->smc_rbase = dp_mem;	/* Base of receive buffer desc. */
+		up->smc_tbase = dp_mem+sizeof(cbd_t);	/* Base of xmt buffer desc. */
 		up->smc_rfcr = SMC_EB;
 		up->smc_tfcr = SMC_EB;
 

@@ -9,6 +9,7 @@
 #include <linux/thread_info.h>
 #include <linux/prefetch.h>
 #include <linux/string.h>
+#include <linux/compiler.h>
 #include <asm/page.h>
 
 #define VERIFY_READ 0
@@ -300,7 +301,7 @@ extern void __put_user_bad(void);
 #define __put_user_check(x,ptr,size)					\
 ({									\
 	long __pu_err = -EFAULT;					\
-	__typeof__(*(ptr)) __user *__pu_addr = (ptr);			\
+	__typeof__(*(ptr)) *__pu_addr = (ptr);				\
 	might_sleep();						\
 	if (access_ok(VERIFY_WRITE,__pu_addr,size))			\
 		__put_user_size((x),__pu_addr,(size),__pu_err,-EFAULT);	\
@@ -414,8 +415,8 @@ do {									\
 		: "m"(__m(addr)), "i"(errret), "0"(err))
 
 
-unsigned long __copy_to_user_ll(void __user *to, const void *from, unsigned long n);
-unsigned long __copy_from_user_ll(void *to, const void __user *from, unsigned long n);
+unsigned long __must_check __copy_to_user_ll(void __user *to, const void *from, unsigned long n);
+unsigned long __must_check __copy_from_user_ll(void *to, const void __user *from, unsigned long n);
 
 /*
  * Here we special-case 1, 2 and 4-byte copy_*_user invocations.  On a fault
@@ -438,7 +439,7 @@ unsigned long __copy_from_user_ll(void *to, const void __user *from, unsigned lo
  * Returns number of bytes that could not be copied.
  * On success, this will be zero.
  */
-static inline unsigned long
+static inline unsigned long __must_check
 __direct_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	if (__builtin_constant_p(n)) {
@@ -476,7 +477,7 @@ __direct_copy_to_user(void __user *to, const void *from, unsigned long n)
  * If some data could not be copied, this function will pad the copied
  * data to the requested size using zero bytes.
  */
-static inline unsigned long
+static inline unsigned long __must_check
 __direct_copy_from_user(void *to, const void __user *from, unsigned long n)
 {
 	if (__builtin_constant_p(n)) {
@@ -510,7 +511,7 @@ __direct_copy_from_user(void *to, const void __user *from, unsigned long n)
  * Returns number of bytes that could not be copied.
  * On success, this will be zero.
  */
-static inline unsigned long
+static inline unsigned long __must_check
 direct_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	might_sleep();
@@ -535,7 +536,7 @@ direct_copy_to_user(void __user *to, const void *from, unsigned long n)
  * If some data could not be copied, this function will pad the copied
  * data to the requested size using zero bytes.
  */
-static inline unsigned long
+static inline unsigned long __must_check
 direct_copy_from_user(void *to, const void __user *from, unsigned long n)
 {
 	might_sleep();

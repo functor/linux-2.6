@@ -785,6 +785,14 @@ static int cdrom_decode_status(ide_drive_t *drive, int good_stat, int *stat_ret)
 				do_end_request = 1;
 		} else if (sense_key == ILLEGAL_REQUEST ||
 			   sense_key == DATA_PROTECT) {
+			/*
+			 * check if this was a write protected media
+			 */
+			if (rq_data_dir(rq) == WRITE) {
+				printk("ide-cd: media marked write protected\n");
+				set_disk_ro(drive->disk, 1);
+			}
+
 			/* No point in retrying after an illegal
 			   request or data protect error.*/
 			ide_dump_status (drive, "command error", stat);
@@ -1959,17 +1967,13 @@ static ide_startstop_t cdrom_do_block_pc(ide_drive_t *drive, struct request *rq)
 	 * sg request
 	 */
 	if (rq->bio) {
-		int mask = drive->queue->dma_alignment;
-		unsigned long addr = (unsigned long) page_address(bio_page(rq->bio));
-
-		info->cmd = rq_data_dir(rq);
+		if (rq->data_len & 3) {
+			printk("%s: block pc not aligned, len=%d\n", drive->name, rq->data_len);
+			cdrom_end_request(drive, 0);
+			return ide_stopped;
+		}
 		info->dma = drive->using_dma;
-
-		/*
-		 * check if dma is safe
-		 */
-		if ((rq->data_len & mask) || (addr & mask))
-			info->dma = 0;
+		info->cmd = rq_data_dir(rq);
 	}
 
 	/* Start sending the command to the drive. */
@@ -3137,7 +3141,7 @@ int ide_cdrom_setup (ide_drive_t *drive)
 	int nslots;
 
 	blk_queue_prep_rq(drive->queue, ide_cdrom_prep_fn);
-	blk_queue_dma_alignment(drive->queue, 31);
+	blk_queue_dma_alignment(drive->queue, 3);
 	drive->queue->unplug_delay = (1 * HZ) / 1000;
 	if (!drive->queue->unplug_delay)
 		drive->queue->unplug_delay = 1;
@@ -3244,8 +3248,9 @@ int ide_cdrom_setup (ide_drive_t *drive)
 	nslots = ide_cdrom_probe_capabilities (drive);
 
 	/*
-	 * set correct block size
+	 * set correct block size and read-only for non-ram media
 	 */
+	set_disk_ro(drive->disk, !CDROM_CONFIG_FLAGS(drive)->ram);
 	blk_queue_hardsect_size(drive->queue, CD_FRAMESIZE);
 
 #if 0
@@ -3395,10 +3400,10 @@ static int idecd_ioctl (struct inode *inode, struct file *file,
 {
 	struct block_device *bdev = inode->i_bdev;
 	ide_drive_t *drive = bdev->bd_disk->private_data;
-	int err = generic_ide_ioctl(file, bdev, cmd, arg);
+	int err = generic_ide_ioctl(bdev, cmd, arg);
 	if (err == -EINVAL) {
 		struct cdrom_info *info = drive->driver_data;
-		err = cdrom_ioctl(file, &info->devinfo, inode, cmd, arg);
+		err = cdrom_ioctl(&info->devinfo, inode, cmd, arg);
 	}
 	return err;
 }

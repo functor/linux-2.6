@@ -25,7 +25,7 @@
 
 static inline void cpm_set_brg(int brg, int baud)
 {
-	cpm_setbrg(brg, baud);
+	m8xx_cpm_setbrg(brg, baud);
 }
 
 static inline void cpm_set_scc_fcr(volatile scc_uart_t * sup)
