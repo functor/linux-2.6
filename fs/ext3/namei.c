@@ -872,6 +872,8 @@ restart:
 		wait_on_buffer(bh);
 		if (!buffer_uptodate(bh)) {
 			/* read error, skip block & hope for the best */
+			ext3_error(sb, __FUNCTION__, "reading directory #%lu "
+				   "offset %lu\n", dir->i_ino, block);
 			brelse(bh);
 			goto next;
 		}
@@ -1763,14 +1765,19 @@ static int empty_dir (struct inode * inode)
 	struct buffer_head * bh;
 	struct ext3_dir_entry_2 * de, * de1;
 	struct super_block * sb;
-	int err;
+	int err = 0;
 
 	sb = inode->i_sb;
 	if (inode->i_size < EXT3_DIR_REC_LEN(1) + EXT3_DIR_REC_LEN(2) ||
 	    !(bh = ext3_bread (NULL, inode, 0, 0, &err))) {
-	    	ext3_warning (inode->i_sb, "empty_dir",
-			      "bad directory (dir #%lu) - no data block",
-			      inode->i_ino);
+		if (err)
+			ext3_error(inode->i_sb, __FUNCTION__,
+				   "error %d reading directory #%lu offset 0",
+				   err, inode->i_ino);
+		else
+			ext3_warning(inode->i_sb, __FUNCTION__,
+				     "bad directory (dir #%lu) - no data block",
+				     inode->i_ino);
 		return 1;
 	}
 	de = (struct ext3_dir_entry_2 *) bh->b_data;
@@ -1792,24 +1799,26 @@ static int empty_dir (struct inode * inode)
 	while (offset < inode->i_size ) {
 		if (!bh ||
 			(void *) de >= (void *) (bh->b_data+sb->s_blocksize)) {
+			err = 0;
 			brelse (bh);
 			bh = ext3_bread (NULL, inode,
 				offset >> EXT3_BLOCK_SIZE_BITS(sb), 0, &err);
 			if (!bh) {
-#if 0
-				ext3_error (sb, "empty_dir",
-				"directory #%lu contains a hole at offset %lu",
-					inode->i_ino, offset);
-#endif
+				if (err)
+					ext3_error(sb, __FUNCTION__,
+						   "error %d reading directory"
+						   " #%lu offset %lu",
+						   err, inode->i_ino, offset);
 				offset += sb->s_blocksize;
 				continue;
 			}
 			de = (struct ext3_dir_entry_2 *) bh->b_data;
 		}
-		if (!ext3_check_dir_entry ("empty_dir", inode, de, bh,
-					   offset)) {
-			brelse (bh);
-			return 1;
+		if (!ext3_check_dir_entry("empty_dir", inode, de, bh, offset)) {
+			de = (struct ext3_dir_entry_2 *)(bh->b_data +
+							 sb->s_blocksize);
+			offset = (offset | (sb->s_blocksize - 1)) + 1;
+			continue;
 		}
 		if (le32_to_cpu(de->inode)) {
 			brelse (bh);
@@ -1953,8 +1962,6 @@ int ext3_orphan_del(handle_t *handle, struct inode *inode)
 		goto out_brelse;
 	NEXT_ORPHAN(inode) = 0;
 	err = ext3_mark_iloc_dirty(handle, inode, &iloc);
-	if (err)
-		goto out_brelse;
 
 out_err:
 	ext3_std_error(inode->i_sb, err);
@@ -2255,11 +2262,15 @@ static int ext3_rename (struct inode * old_dir, struct dentry *old_dentry,
 	/*
 	 * ok, that's it
 	 */
-	retval = ext3_delete_entry(handle, old_dir, old_de, old_bh);
-	if (retval == -ENOENT) {
-		/*
-		 * old_de could have moved out from under us.
-		 */
+	if (le32_to_cpu(old_de->inode) != old_inode->i_ino ||
+	    old_de->name_len != old_dentry->d_name.len ||
+	    strncmp(old_de->name, old_dentry->d_name.name, old_de->name_len) ||
+	    (retval = ext3_delete_entry(handle, old_dir,
+					old_de, old_bh)) == -ENOENT) {
+		/* old_de could have moved from under us during htree split, so
+		 * make sure that we are deleting the right entry.  We might
+		 * also be pointing to a stale entry in the unused part of
+		 * old_bh so just checking inum and the name isn't enough. */
 		struct buffer_head *old_bh2;
 		struct ext3_dir_entry_2 *old_de2;
 

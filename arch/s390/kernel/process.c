@@ -16,6 +16,7 @@
  */
 
 #include <linux/config.h>
+#include <linux/compiler.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -292,12 +293,12 @@ asmlinkage long sys_clone(struct pt_regs regs)
 {
         unsigned long clone_flags;
         unsigned long newsp;
-	int *parent_tidptr, *child_tidptr;
+	int __user *parent_tidptr, *child_tidptr;
 
         clone_flags = regs.gprs[3];
         newsp = regs.orig_gpr2;
-	parent_tidptr = (int *) regs.gprs[4];
-	child_tidptr = (int *) regs.gprs[5];
+	parent_tidptr = (int __user *) regs.gprs[4];
+	child_tidptr = (int __user *) regs.gprs[5];
         if (!newsp)
                 newsp = regs.gprs[15];
         return do_fork(clone_flags & ~CLONE_IDLETASK, newsp, &regs, 0,
@@ -328,12 +329,12 @@ asmlinkage long sys_execve(struct pt_regs regs)
         int error;
         char * filename;
 
-        filename = getname((char *) regs.orig_gpr2);
+        filename = getname((char __user *) regs.orig_gpr2);
         error = PTR_ERR(filename);
         if (IS_ERR(filename))
                 goto out;
-        error = do_execve(filename, (char **) regs.gprs[3],
-			  (char **) regs.gprs[4], &regs);
+        error = do_execve(filename, (char __user * __user *) regs.gprs[3],
+			  (char __user * __user *) regs.gprs[4], &regs);
 	if (error == 0) {
 		current->ptrace &= ~PT_DTRACE;
 		current->thread.fp_regs.fpc = 0;
@@ -385,12 +386,6 @@ void dump_thread(struct pt_regs * regs, struct user * dump)
 	dump->regs.per_info = current->thread.per_info;
 }
 
-/*
- * These bracket the sleeping functions..
- */
-#define first_sched	((unsigned long) scheduling_functions_start_here)
-#define last_sched	((unsigned long) scheduling_functions_end_here)
-
 unsigned long get_wchan(struct task_struct *p)
 {
 	unsigned long r14, r15, bc;
@@ -413,12 +408,10 @@ unsigned long get_wchan(struct task_struct *p)
 #else
 		r14 = *(unsigned long *) (bc+112);
 #endif
-		if (r14 < first_sched || r14 >= last_sched)
+		if (!in_sched_functions(r14))
 			return r14;
 		bc = (*(unsigned long *) bc) & PSW_ADDR_INSN;
 	} while (count++ < 16);
 	return 0;
 }
-#undef last_sched
-#undef first_sched
 

@@ -133,6 +133,7 @@ enum
 	KERN_NGROUPS_MAX=63,	/* int: NGROUPS_MAX */
 	KERN_SPARC_SCONS_PWROFF=64, /* int: serial console power-off halt */
 	KERN_HZ_TIMER=65,	/* int: hz timer on or off */
+	KERN_DUMP=66,		/* dir: dump parameters */
 };
 
 
@@ -163,6 +164,7 @@ enum
 	VM_MAX_MAP_COUNT=22,	/* int: Maximum number of mmaps/address-space */
 	VM_LAPTOP_MODE=23,	/* vm laptop mode */
 	VM_BLOCK_DUMP=24,	/* block dump mode */
+	VM_HUGETLB_GROUP=25,	/* permitted hugetlb group */
 };
 
 
@@ -335,6 +337,8 @@ enum
  	NET_TCP_BIC=102,
  	NET_TCP_BIC_FAST_CONVERGENCE=103,
 	NET_TCP_BIC_LOW_WINDOW=104,
+	NET_TCP_DEFAULT_WIN_SCALE=105,
+	NET_TCP_MODERATE_RCVBUF=106,
 };
 
 enum {

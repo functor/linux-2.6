@@ -206,6 +206,13 @@ static inline int page_is_ram(unsigned long pagenr)
 	return 0;
 }
 
+/* To enable modules to check if a page is in RAM */
+int pfn_is_ram(unsigned long pfn)
+{
+	return (page_is_ram(pfn));
+}
+
+
 #ifdef CONFIG_HIGHMEM
 pte_t *kmap_pte;
 pgprot_t kmap_prot;
@@ -328,9 +335,30 @@ static void __init pagetable_init (void)
 #endif
 }
 
+#if defined(CONFIG_PM_DISK) || defined(CONFIG_SOFTWARE_SUSPEND)
+/*
+ * Swap suspend & friends need this for resume because things like the intel-agp
+ * driver might have split up a kernel 4MB mapping.
+ */
+char __nosavedata swsusp_pg_dir[PAGE_SIZE]
+	__attribute__ ((aligned (PAGE_SIZE)));
+
+static inline void save_pg_dir(void)
+{
+	memcpy(swsusp_pg_dir, swapper_pg_dir, PAGE_SIZE);
+}
+#else
+static inline void save_pg_dir(void)
+{
+}
+#endif
+
 void zap_low_mappings (void)
 {
 	int i;
+
+	save_pg_dir();
+
 	/*
 	 * Zap initial low-memory mappings.
 	 *

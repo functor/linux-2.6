@@ -45,6 +45,11 @@ int sysctl_lower_zone_protection = 0;
 EXPORT_SYMBOL(totalram_pages);
 EXPORT_SYMBOL(nr_swap_pages);
 
+#ifdef CONFIG_CRASH_DUMP_MODULE
+/* This symbol has to be exported to use 'for_each_pgdat' macro by modules. */
+EXPORT_SYMBOL(pgdat_list);
+#endif
+
 /*
  * Used by page_zone() to look up the address of the struct zone whose
  * id is encoded in the upper bits of page->flags
@@ -73,9 +78,9 @@ static void bad_page(const char *function, struct page *page)
 {
 	printk(KERN_EMERG "Bad page state at %s (in process '%s', page %p)\n",
 		function, current->comm, page);
-	printk(KERN_EMERG "flags:0x%08lx mapping:%p mapped:%d count:%d\n",
+	printk(KERN_EMERG "flags:0x%08lx mapping:%p mapcount:%d count:%d\n",
 		(unsigned long)page->flags, page->mapping,
-		page_mapped(page), page_count(page));
+		(int)page->mapcount, page_count(page));
 	printk(KERN_EMERG "Backtrace:\n");
 	dump_stack();
 	printk(KERN_EMERG "Trying to fix it up, but a reboot is needed\n");
@@ -90,9 +95,11 @@ static void bad_page(const char *function, struct page *page)
 			1 << PG_writeback);
 	set_page_count(page, 0);
 	page->mapping = NULL;
+	page->mapcount = 0;
 }
 
-#ifndef CONFIG_HUGETLB_PAGE
+#if !defined(CONFIG_HUGETLB_PAGE) && !defined(CONFIG_CRASH_DUMP) \
+	&& !defined(CONFIG_CRASH_DUMP_MODULE)
 #define prep_compound_page(page, order) do { } while (0)
 #define destroy_compound_page(page, order) do { } while (0)
 #else
@@ -460,6 +467,32 @@ void drain_local_pages(void)
 }
 #endif /* CONFIG_PM */
 
+static void zone_statistics(struct zonelist *zonelist, struct zone *z)
+{
+#ifdef CONFIG_NUMA
+	unsigned long flags;
+	int cpu;
+	pg_data_t *pg = z->zone_pgdat;
+	pg_data_t *orig = zonelist->zones[0]->zone_pgdat;
+	struct per_cpu_pageset *p;
+
+	local_irq_save(flags);
+	cpu = smp_processor_id();
+	p = &z->pageset[cpu];
+	if (pg == orig) {
+		z->pageset[cpu].numa_hit++;
+	} else {
+		p->numa_miss++;
+		zonelist->zones[0]->pageset[cpu].numa_foreign++;
+	}
+	if (pg == NODE_DATA(numa_node_id()))
+		p->local_node++;
+	else
+		p->other_node++;
+	local_irq_restore(flags);
+#endif
+}
+
 /*
  * Free a 0-order page
  */
@@ -593,8 +626,10 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 		if (z->free_pages >= min ||
 				(!wait && z->free_pages >= z->pages_high)) {
 			page = buffered_rmqueue(z, order, gfp_mask);
-			if (page)
+			if (page) {
+				zone_statistics(zonelist, z);
 				goto got_pg;
+			}
 		}
 	}
 
@@ -616,8 +651,10 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 		if (z->free_pages >= min ||
 				(!wait && z->free_pages >= z->pages_high)) {
 			page = buffered_rmqueue(z, order, gfp_mask);
-			if (page)
+			if (page) {
+				zone_statistics(zonelist, z);
 				goto got_pg;
+			}
 		}
 	}
 
@@ -630,8 +667,10 @@ rebalance:
 			struct zone *z = zones[i];
 
 			page = buffered_rmqueue(z, order, gfp_mask);
-			if (page)
+			if (page) {
+				zone_statistics(zonelist, z);
 				goto got_pg;
+			}
 		}
 		goto nopage;
 	}
@@ -658,8 +697,10 @@ rebalance:
 		if (z->free_pages >= min ||
 				(!wait && z->free_pages >= z->pages_high)) {
 			page = buffered_rmqueue(z, order, gfp_mask);
-			if (page)
+			if (page) {
+ 				zone_statistics(zonelist, z);
 				goto got_pg;
+			}
 		}
 	}
 
@@ -951,6 +992,23 @@ void get_page_state(struct page_state *ret)
 void get_full_page_state(struct page_state *ret)
 {
 	__get_page_state(ret, sizeof(*ret) / sizeof(unsigned long));
+}
+
+unsigned long __read_page_state(unsigned offset)
+{
+	unsigned long ret = 0;
+	int cpu;
+
+	for (cpu = 0; cpu < NR_CPUS; cpu++) {
+		unsigned long in;
+
+		if (!cpu_possible(cpu))
+			continue;
+
+		in = (unsigned long)&per_cpu(page_states, cpu) + offset;
+		ret += *((unsigned long *)in);
+	}
+	return ret;
 }
 
 void get_zone_counts(unsigned long *active,
@@ -1284,7 +1342,7 @@ static void __init build_zonelists(pg_data_t *pgdat)
  		for (node = 0; node < local_node; node++)
  			j = build_zonelists_node(NODE_DATA(node), zonelist, j, k);
  
-		zonelist->zones[j++] = NULL;
+		zonelist->zones[j] = NULL;
 	}
 }
 

@@ -163,7 +163,7 @@ dump_altivec(struct pt_regs *regs, elf_vrregset_t *vrregs)
 void
 enable_kernel_altivec(void)
 {
-	WARN_ON(current_thread_info()->preempt_count == 0 && !irqs_disabled());
+	WARN_ON(preemptible());
 
 #ifdef CONFIG_SMP
 	if (current->thread.regs && (current->thread.regs->msr & MSR_VEC))
@@ -180,7 +180,7 @@ EXPORT_SYMBOL(enable_kernel_altivec);
 void
 enable_kernel_fp(void)
 {
-	WARN_ON(current_thread_info()->preempt_count == 0 && !irqs_disabled());
+	WARN_ON(preemptible());
 
 #ifdef CONFIG_SMP
 	if (current->thread.regs && (current->thread.regs->msr & MSR_FP))
@@ -668,12 +668,6 @@ void __init ll_puts(const char *s)
 }
 #endif
 
-/*
- * These bracket the sleeping functions..
- */
-#define first_sched    ((unsigned long) scheduling_functions_start_here)
-#define last_sched     ((unsigned long) scheduling_functions_end_here)
-
 unsigned long get_wchan(struct task_struct *p)
 {
 	unsigned long ip, sp;
@@ -688,7 +682,7 @@ unsigned long get_wchan(struct task_struct *p)
 			return 0;
 		if (count > 0) {
 			ip = *(unsigned long *)(sp + 4);
-			if (ip < first_sched || ip >= last_sched)
+			if (!in_sched_functions(ip))
 				return ip;
 		}
 	} while (count++ < 16);

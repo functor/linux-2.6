@@ -65,6 +65,7 @@ static inline char * __init machine_specific_memory_setup(void);
 
 #ifdef CONFIG_EFI
 int efi_enabled = 0;
+EXPORT_SYMBOL(efi_enabled);
 #endif
 
 /* cpu data as detected by the assembly code in head.S */
@@ -471,6 +472,7 @@ static void __init setup_memory_region(void)
 	print_memory_map(who);
 } /* setup_memory_region */
 
+unsigned long crashdump_addr = 0xdeadbeef;
 
 static void __init parse_cmdline_early (char ** cmdline_p)
 {
@@ -625,6 +627,9 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 		if (c == ' ' && !memcmp(from, "highmem=", 8))
 			highmem_pages = memparse(from+8, &from) >> PAGE_SHIFT;
 	
+		if (c == ' ' && !memcmp(from, "crashdump=", 10))
+			crashdump_addr = memparse(from+10, &from); 
+			
 		c = *(from++);
 		if (!c)
 			break;
@@ -1072,6 +1077,10 @@ static int __init noreplacement_setup(char *s)
 
 __setup("noreplacement", noreplacement_setup); 
 
+#ifdef CONFIG_CRASH_DUMP_SOFTBOOT
+extern void crashdump_reserve(void);
+#endif
+
 /*
  * Determine if we were loaded by an EFI loader.  If so, then we have also been
  * passed the efi memmap, systab, etc., so we should use these data structures
@@ -1165,6 +1174,10 @@ void __init setup_arch(char **cmdline_p)
 	}
 #endif
 
+
+#ifdef CONFIG_CRASH_DUMP_SOFTBOOT
+	crashdump_reserve(); /* Preserve crash dump state from prev boot */
+#endif
 
 	dmi_scan_machine();
 

@@ -419,16 +419,13 @@ linvfs_follow_link(
 	ASSERT(nd);
 
 	link = (char *)kmalloc(MAXNAMELEN+1, GFP_KERNEL);
-	if (!link) {
-		nd_set_link(nd, ERR_PTR(-ENOMEM));
-		return 0;
-	}
+	if (!link)
+		return -ENOMEM;
 
 	uio = (uio_t *)kmalloc(sizeof(uio_t), GFP_KERNEL);
 	if (!uio) {
 		kfree(link);
-		nd_set_link(nd, ERR_PTR(-ENOMEM));
-		return 0;
+		return -ENOMEM;
 	}
 
 	vp = LINVFS_GET_VP(dentry->d_inode);
@@ -444,22 +441,18 @@ linvfs_follow_link(
 
 	VOP_READLINK(vp, uio, 0, NULL, error);
 	if (error) {
+		kfree(uio);
 		kfree(link);
-		link = ERR_PTR(-error);
-	} else {
-		link[MAXNAMELEN - uio->uio_resid] = '\0';
+		return -error;
 	}
+
+	link[MAXNAMELEN - uio->uio_resid] = '\0';
 	kfree(uio);
 
-	nd_set_link(nd, link);
-	return 0;
-}
-
-static void linvfs_put_link(struct dentry *dentry, struct nameidata *nd)
-{
-	char *s = nd_get_link(nd);
-	if (!IS_ERR(s))
-		kfree(s);
+	/* vfs_follow_link returns (-) errors */
+	error = vfs_follow_link(nd, link);
+	kfree(link);
+	return error;
 }
 
 #ifdef CONFIG_XFS_POSIX_ACL
@@ -699,7 +692,6 @@ struct inode_operations linvfs_dir_inode_operations = {
 struct inode_operations linvfs_symlink_inode_operations = {
 	.readlink		= linvfs_readlink,
 	.follow_link		= linvfs_follow_link,
-	.put_link		= linvfs_put_link,
 	.permission		= linvfs_permission,
 	.getattr		= linvfs_getattr,
 	.setattr		= linvfs_setattr,

@@ -333,6 +333,7 @@ rsc_init(struct rsc *new, struct rsc *tmp)
 	new->handle.data = tmp->handle.data;
 	tmp->handle.data = NULL;
 	new->mechctx = NULL;
+	new->cred.cr_group_info = NULL;
 }
 
 static inline void
@@ -453,8 +454,11 @@ gss_svc_searchbyctx(struct xdr_netobj *handle)
 	struct rsc rsci;
 	struct rsc *found;
 
-	rsci.handle = *handle;
+	memset(&rsci, 0, sizeof(rsci));
+	if (dup_to_netobj(&rsci.handle, handle->data, handle->len))
+		return NULL;
 	found = rsc_lookup(&rsci, 0);
+	rsc_free(&rsci);
 	if (!found)
 		return NULL;
 	if (cache_check(&rsc_cache, &found->h, NULL))
@@ -570,14 +574,14 @@ gss_verify_header(struct svc_rqst *rqstp, struct rsc *rsci,
 	}
 
 	if (gc->gc_seq > MAXSEQ) {
-		dprintk("svcauth_gss: discarding request with large"
-			" sequence number %d\n", gc->gc_seq);
+		dprintk("RPC:      svcauth_gss: discarding request with large sequence number %d\n",
+				gc->gc_seq);
 		*authp = rpcsec_gsserr_ctxproblem;
 		return SVC_DENIED;
 	}
 	if (!gss_check_seq_num(rsci, gc->gc_seq)) {
-		dprintk("svcauth_gss: discarding request with old"
-				" sequence number %d\n", gc->gc_seq);
+		dprintk("RPC:      svcauth_gss: discarding request with old sequence number %d\n",
+				gc->gc_seq);
 		return SVC_DROP;
 	}
 	return SVC_OK;
@@ -617,19 +621,15 @@ struct gss_domain {
 	u32			pseudoflavor;
 };
 
-/* XXX this should be done in gss_pseudoflavors, and shouldn't be hardcoded: */
 static struct auth_domain *
 find_gss_auth_domain(struct gss_ctx *ctx, u32 svc)
 {
-	switch(gss_get_pseudoflavor(ctx, 0, svc)) {
-		case RPC_AUTH_GSS_KRB5:
-			return auth_domain_find("gss/krb5");
-		case RPC_AUTH_GSS_KRB5I:
-			return auth_domain_find("gss/krb5i");
-		case RPC_AUTH_GSS_KRB5P:
-			return auth_domain_find("gss/krb5p");
-	}
-	return NULL;
+	char *name;
+
+	name = gss_service_to_auth_domain_name(ctx->mech_type, svc);
+	if (!name)
+		return NULL;
+	return auth_domain_find(name);
 }
 
 int
@@ -637,19 +637,17 @@ svcauth_gss_register_pseudoflavor(u32 pseudoflavor, char * name)
 {
 	struct gss_domain	*new;
 	struct auth_domain	*test;
-	static char		*prefix = "gss/";
-	int			stat = -1;
+	int			stat = -ENOMEM;
 
 	new = kmalloc(sizeof(*new), GFP_KERNEL);
 	if (!new)
 		goto out;
 	cache_init(&new->h.h);
 	atomic_inc(&new->h.h.refcnt);
-	new->h.name = kmalloc(strlen(name) + strlen(prefix) + 1, GFP_KERNEL);
+	new->h.name = kmalloc(strlen(name) + 1, GFP_KERNEL);
 	if (!new->h.name)
 		goto out_free_dom;
-	strcpy(new->h.name, prefix);
-	strcat(new->h.name, name);
+	strcpy(new->h.name, name);
 	new->h.flavour = RPC_AUTH_GSS;
 	new->pseudoflavor = pseudoflavor;
 	new->h.h.expiry_time = NEVER;
@@ -669,6 +667,8 @@ out_free_dom:
 out:
 	return stat;
 }
+
+EXPORT_SYMBOL(svcauth_gss_register_pseudoflavor);
 
 static inline int
 read_u32_from_xdr_buf(struct xdr_buf *buf, int base, u32 *obj)
@@ -755,7 +755,7 @@ svcauth_gss_accept(struct svc_rqst *rqstp, u32 *authp)
 	u32		*reject_stat = resv->iov_base + resv->iov_len;
 	int		ret;
 
-	dprintk("RPC: svcauth_gss: argv->iov_len = %zd\n",argv->iov_len);
+	dprintk("RPC:      svcauth_gss: argv->iov_len = %zd\n",argv->iov_len);
 
 	*authp = rpc_autherr_badcred;
 	if (!svcdata)
@@ -1049,6 +1049,7 @@ svcauth_gss_domain_release(struct auth_domain *dom)
 
 struct auth_ops svcauthops_gss = {
 	.name		= "rpcsec_gss",
+	.owner		= THIS_MODULE,
 	.flavour	= RPC_AUTH_GSS,
 	.accept		= svcauth_gss_accept,
 	.release	= svcauth_gss_release,
@@ -1058,10 +1059,12 @@ struct auth_ops svcauthops_gss = {
 int
 gss_svc_init(void)
 {
-	cache_register(&rsc_cache);
-	cache_register(&rsi_cache);
-	svc_auth_register(RPC_AUTH_GSS, &svcauthops_gss);
-	return 0;
+	int rv = svc_auth_register(RPC_AUTH_GSS, &svcauthops_gss);
+	if (rv == 0) {
+		cache_register(&rsc_cache);
+		cache_register(&rsi_cache);
+	}
+	return rv;
 }
 
 void
@@ -1069,4 +1072,5 @@ gss_svc_shutdown(void)
 {
 	cache_unregister(&rsc_cache);
 	cache_unregister(&rsi_cache);
+	svc_auth_unregister(RPC_AUTH_GSS);
 }

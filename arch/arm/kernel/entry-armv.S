@@ -623,10 +623,15 @@ ENTRY(soft_irq_mask)
 		.endm
 
 		.macro	get_irqnr_and_base, irqnr, irqstat, base, tmp
+#ifdef CONFIG_PXA27x
+		mrc	p6, 0, \irqstat, c0, c0, 0		@ ICIP
+		mrc	p6, 0, \irqnr, c1, c0, 0		@ ICMR
+#else
 		mov	\base, #io_p2v(0x40000000)	@ IIR Ctl = 0x40d00000
 		add	\base, \base, #0x00d00000
 		ldr	\irqstat, [\base, #0]		@ ICIP
 		ldr	\irqnr, [\base, #4]		@ ICMR
+#endif
 		ands	\irqnr, \irqstat, \irqnr
 		beq	1001f
 		rsb	\irqstat, \irqnr, #0
@@ -639,6 +644,34 @@ ENTRY(soft_irq_mask)
 		.macro	irq_prio_table
 		.endm
 
+#elif defined (CONFIG_ARCH_IXP4XX)
+
+		.macro	disable_fiq
+		.endm
+		
+		.macro	get_irqnr_and_base, irqnr, irqstat, base, tmp
+		ldr	\irqstat, =(IXP4XX_INTC_BASE_VIRT+IXP4XX_ICIP_OFFSET)
+		ldr	\irqstat, [\irqstat]		@ get interrupts
+		cmp	\irqstat, #0
+		beq	1002f
+		clz     \irqnr, \irqstat
+		mov     \base, #31
+		subs    \irqnr, \base, \irqnr
+		
+/*
+1001:		tst	\irqstat, #1
+		addeq	\irqnr, \irqnr, #1
+		moveq	\irqstat, \irqstat, lsr #1
+		tsteq	\irqnr, #32
+		beq	1001b
+		teq	\irqnr, #32
+*/
+1002:
+		.endm
+
+                .macro  irq_prio_table
+                .endm
+
 #elif defined(CONFIG_ARCH_OMAP)
 
 		.macro	disable_fiq
@@ -646,19 +679,19 @@ ENTRY(soft_irq_mask)
 
 		.macro	get_irqnr_and_base, irqnr, irqstat, base, tmp
 		ldr	\base, =IO_ADDRESS(OMAP_IH1_BASE)
-		ldr	\irqnr, [\base, #IRQ_ITR]
-		ldr	\tmp, [\base, #IRQ_MIR]
+		ldr	\irqnr, [\base, #IRQ_ITR_REG_OFFSET]
+		ldr	\tmp, [\base, #IRQ_MIR_REG_OFFSET]
 		mov	\irqstat, #0xffffffff
 		bic	\tmp, \irqstat, \tmp
 		tst	\irqnr, \tmp
 		beq	1510f
 
-		ldr	\irqnr, [\base, #IRQ_SIR_FIQ]
+		ldr	\irqnr, [\base, #IRQ_SIR_FIQ_REG_OFFSET]
 		cmp	\irqnr, #0
-		ldreq	\irqnr, [\base, #IRQ_SIR_IRQ]
+		ldreq	\irqnr, [\base, #IRQ_SIR_IRQ_REG_OFFSET]
 		cmpeq	\irqnr, #INT_IH2_IRQ
 		ldreq	\base, =IO_ADDRESS(OMAP_IH2_BASE)
-		ldreq	\irqnr, [\base, #IRQ_SIR_IRQ]
+		ldreq	\irqnr, [\base, #IRQ_SIR_IRQ_REG_OFFSET]
 		addeqs	\irqnr, \irqnr, #32
 1510:
 		.endm
@@ -1219,7 +1252,7 @@ ENTRY(ret_from_exception)
 
 /*
  * Register switch for ARMv3 and ARMv4 processors
- * r0 = previous thread_info, r1 = next thread_info
+ * r0 = previous task_struct, r1 = previous thread_info, r2 = next thread_info
  * previous and next are guaranteed not to be the same.
  */
 ENTRY(__switch_to)

@@ -265,6 +265,9 @@ _GLOBAL(__secondary_hold)
 	mfspr	r23,SPRG2;		/* Save r20 in exc. frame      */ \
 	std	r23,EX_R20(r21);	                                  \
                                                                          \
+	mfmsr	r22;			    /* set MSR.RI		   */ \
+	ori	r22,r22,MSR_RI;						      \
+	mtmsrd	r22,1;							      \
 	mfcr    r23;                        /* save CR in r23              */
 
 /*
@@ -923,8 +926,8 @@ _GLOBAL(do_hash_page_DSI)
 	stb	r0,PACAPROCENABLED(r20)	/* Soft Disabled */
 
 	mfmsr	r0
-	ori	r0,r0,MSR_EE+MSR_RI
-	mtmsrd	r0			/* Hard Enable, RI on */
+	ori	r0,r0,MSR_EE
+	mtmsrd	r0,1			/* Hard Enable */
 #endif
 
 	/*
@@ -943,9 +946,9 @@ _GLOBAL(do_hash_page_DSI)
 	 */
 	mfmsr	r0
 	li	r4,0
-	ori	r4,r4,MSR_EE+MSR_RI
+	ori	r4,r4,MSR_EE
 	andc	r0,r0,r4
-	mtmsrd	r0			/* Hard Disable, RI off */
+	mtmsrd	r0,1			/* Hard Disable */
 
 	ld	r0,SOFTE(r1)
 	cmpdi	0,r0,0			/* See if we will soft enable in */
@@ -1120,13 +1123,11 @@ _GLOBAL(do_slb_bolted)
 	 */
 
 	/* r20 = paca */
-	/* use a cpu feature mask if we ever change our slb size */
-SLB_NUM_ENTRIES = 64
 1:	ld	r22,PACASTABRR(r20)
 	addi	r21,r22,1
 	cmpdi	r21,SLB_NUM_ENTRIES
 	blt+	2f
-	li	r21,1			/* dont touch bolted slot 0 */
+	li	r21,2			/* dont touch slot 0 or 1 */
 2:	std	r21,PACASTABRR(r20)
 
 	/* r20 = paca, r22 = entry */
@@ -1277,6 +1278,10 @@ _GLOBAL(save_remaining_regs)
 	SAVE_2GPRS(14, r1)
 	SAVE_4GPRS(16, r1)
 	SAVE_8GPRS(24, r1)
+
+	/* Set the marker value "regshere" just before the reg values */
+	SET_REG_TO_CONST(r22, 0x7265677368657265)
+	std	r22,STACK_FRAME_OVERHEAD-16(r1)
 
 	/*
 	 * Clear the RESULT field
@@ -1948,21 +1953,6 @@ _GLOBAL(enable_64b_mode)
 	li      r12,1
 	rldicr  r12,r12,MSR_ISF_LG,(63-MSR_ISF_LG)
 	or      r11,r11,r12
-	mtmsrd  r11
-	isync
-	blr
-
-/*
- * This subroutine clobbers r11, r12 and the LR
- */
-_GLOBAL(enable_32b_mode)
-	mfmsr   r11                      /* grab the current MSR */
-	li      r12,1
-	rldicr  r12,r12,MSR_SF_LG,(63-MSR_SF_LG)
-	andc	r11,r11,r12
-	li      r12,1
-	rldicr  r12,r12,MSR_ISF_LG,(63-MSR_ISF_LG)
-	andc	r11,r11,r12
 	mtmsrd  r11
 	isync
 	blr

@@ -19,6 +19,7 @@
 #include <linux/mc146818rtc.h>
 #include <linux/cache.h>
 #include <linux/interrupt.h>
+#include <linux/dump.h>
 
 #include <asm/mtrr.h>
 #include <asm/pgalloc.h>
@@ -144,6 +145,13 @@ inline void __send_IPI_shortcut(unsigned int shortcut, int vector)
 	 */
 	cfg = __prepare_ICR(shortcut, vector);
 
+	if (vector == DUMP_VECTOR) {
+		/*
+		 * Setup DUMP IPI to be delivered as an NMI
+		 */
+		cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
+	}
+
 	/*
 	 * Send the IPI. The write to APIC_ICR fires this off.
 	 */
@@ -221,7 +229,13 @@ inline void send_IPI_mask_sequence(cpumask_t mask, int vector)
 			 * program the ICR 
 			 */
 			cfg = __prepare_ICR(0, vector);
-			
+		
+			if (vector == DUMP_VECTOR) {
+				/*
+				 * Setup DUMP IPI to be delivered as an NMI
+				 */
+				cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
+			}	
 			/*
 			 * Send the IPI. The write to APIC_ICR fires this off.
 			 */
@@ -467,6 +481,11 @@ void flush_tlb_all(void)
 	on_each_cpu(do_flush_tlb_all, 0, 1, 1);
 }
 
+void dump_send_ipi(void)
+{
+	send_IPI_allbutself(DUMP_VECTOR);
+}
+
 /*
  * this function sends a 'reschedule' IPI to another CPU.
  * it goes straight through and wastes no time serializing
@@ -519,6 +538,9 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 	if (!cpus)
 		return 0;
 
+	/* Can deadlock when called with interrupts disabled */
+	WARN_ON(irqs_disabled());
+
 	data.func = func;
 	data.info = info;
 	atomic_set(&data.started, 0);
@@ -545,7 +567,7 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 	return 0;
 }
 
-static void stop_this_cpu (void * dummy)
+void stop_this_cpu (void * dummy)
 {
 	/*
 	 * Remove this CPU:
@@ -570,6 +592,8 @@ void smp_send_stop(void)
 	disable_local_APIC();
 	local_irq_enable();
 }
+
+EXPORT_SYMBOL(smp_send_stop);
 
 /*
  * Reschedule call back. Nothing to do,
@@ -606,4 +630,3 @@ asmlinkage void smp_call_function_interrupt(void)
 		atomic_inc(&call_data->finished);
 	}
 }
-
