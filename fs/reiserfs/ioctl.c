@@ -20,7 +20,7 @@
 int reiserfs_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		unsigned long arg)
 {
-	unsigned int flags;
+	unsigned int flags, oldflags;
 
 	switch (cmd) {
 	    case REISERFS_IOC_UNPACK:
@@ -36,7 +36,8 @@ int reiserfs_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 	case REISERFS_IOC_GETFLAGS:
 		flags = REISERFS_I(inode) -> i_attrs;
 		i_attrs_to_sd_attrs( inode, ( __u16 * ) &flags );
-		return put_user(flags, (int *) arg);
+		flags &= REISERFS_FL_USER_VISIBLE;
+		return put_user(flags, (int __user *) arg);
 	case REISERFS_IOC_SETFLAGS: {
 		if (IS_RDONLY(inode))
 			return -EROFS;
@@ -44,10 +45,12 @@ int reiserfs_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
 			return -EPERM;
 
-		if (get_user(flags, (int *) arg))
+		if (get_user(flags, (int __user *) arg))
 			return -EFAULT;
 
-		if ( ( ( flags ^ REISERFS_I(inode) -> i_attrs) & ( REISERFS_IMMUTABLE_FL | REISERFS_APPEND_FL)) &&
+		oldflags = REISERFS_I(inode) -> i_attrs;
+		if ( ( ( flags ^ oldflags) &
+		   ( REISERFS_IMMUTABLE_FL | REISERFS_IUNLINK_FL | REISERFS_APPEND_FL)) &&
 		     !capable( CAP_LINUX_IMMUTABLE ) )
 			return -EPERM;
 			
@@ -59,6 +62,9 @@ int reiserfs_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 				if( result )
 					return result;
 		}
+		
+		flags = flags & REISERFS_FL_USER_MODIFYABLE;
+		flags |= oldflags & ~REISERFS_FL_USER_MODIFYABLE;
 		sd_attrs_to_i_attrs( flags, inode );
 		REISERFS_I(inode) -> i_attrs = flags;
 		inode->i_ctime = CURRENT_TIME;
@@ -66,13 +72,13 @@ int reiserfs_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		return 0;
 	}
 	case REISERFS_IOC_GETVERSION:
-		return put_user(inode->i_generation, (int *) arg);
+		return put_user(inode->i_generation, (int __user *) arg);
 	case REISERFS_IOC_SETVERSION:
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
 			return -EPERM;
 		if (IS_RDONLY(inode))
 			return -EROFS;
-		if (get_user(inode->i_generation, (int *) arg))
+		if (get_user(inode->i_generation, (int __user *) arg))
 			return -EFAULT;	
 		inode->i_ctime = CURRENT_TIME;
 		mark_inode_dirty(inode);

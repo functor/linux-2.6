@@ -102,6 +102,38 @@ static void raw_v4_unhash(struct sock *sk)
 	write_unlock_bh(&raw_v4_lock);
 }
 
+
+/*
+	Check if an address is in the list
+*/
+static inline int raw_addr_in_list (
+	u32 rcv_saddr1,
+	u32 rcv_saddr2,
+	u32 loc_addr,
+	struct nx_info *nx_info)
+{
+	int ret = 0;
+	if (loc_addr != 0 &&
+		(rcv_saddr1 == loc_addr || rcv_saddr2 == loc_addr))
+		ret = 1;
+	else if (rcv_saddr1 == 0) {
+		/* Accept any address or only the one in the list */
+		if (nx_info == NULL)
+			ret = 1;
+		else {
+			int n = nx_info->nbipv4;
+			int i;
+			for (i=0; i<n; i++) {
+				if (nx_info->ipv4[i] == loc_addr) {
+					ret = 1;
+					break;
+				}
+			}
+		}
+	}
+	return ret;
+}
+
 struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
 			     unsigned long raddr, unsigned long laddr,
 			     int dif)
@@ -113,7 +145,8 @@ struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
 
 		if (inet->num == num 					&&
 		    !(inet->daddr && inet->daddr != raddr) 		&&
-		    !(inet->rcv_saddr && inet->rcv_saddr != laddr)	&&
+		    raw_addr_in_list(inet->rcv_saddr, inet->rcv_saddr2,
+			laddr, sk->sk_nx_info) &&
 		    !(sk->sk_bound_dev_if && sk->sk_bound_dev_if != dif))
 			goto found; /* gotcha */
 	}
@@ -568,7 +601,7 @@ static int raw_init(struct sock *sk)
 	return 0;
 }
 
-static int raw_seticmpfilter(struct sock *sk, char *optval, int optlen)
+static int raw_seticmpfilter(struct sock *sk, char __user *optval, int optlen)
 {
 	if (optlen > sizeof(struct icmp_filter))
 		optlen = sizeof(struct icmp_filter);
@@ -577,7 +610,7 @@ static int raw_seticmpfilter(struct sock *sk, char *optval, int optlen)
 	return 0;
 }
 
-static int raw_geticmpfilter(struct sock *sk, char *optval, int *optlen)
+static int raw_geticmpfilter(struct sock *sk, char __user *optval, int __user *optlen)
 {
 	int len, ret = -EFAULT;
 
@@ -597,7 +630,7 @@ out:	return ret;
 }
 
 static int raw_setsockopt(struct sock *sk, int level, int optname, 
-			  char *optval, int optlen)
+			  char __user *optval, int optlen)
 {
 	if (level != SOL_RAW)
 		return ip_setsockopt(sk, level, optname, optval, optlen);
@@ -612,7 +645,7 @@ static int raw_setsockopt(struct sock *sk, int level, int optname,
 }
 
 static int raw_getsockopt(struct sock *sk, int level, int optname, 
-			  char *optval, int *optlen)
+			  char __user *optval, int __user *optlen)
 {
 	if (level != SOL_RAW)
 		return ip_getsockopt(sk, level, optname, optval, optlen);
@@ -631,7 +664,7 @@ static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 	switch (cmd) {
 		case SIOCOUTQ: {
 			int amount = atomic_read(&sk->sk_wmem_alloc);
-			return put_user(amount, (int *)arg);
+			return put_user(amount, (int __user *)arg);
 		}
 		case SIOCINQ: {
 			struct sk_buff *skb;
@@ -642,7 +675,7 @@ static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 			if (skb != NULL)
 				amount = skb->len;
 			spin_unlock_irq(&sk->sk_receive_queue.lock);
-			return put_user(amount, (int *)arg);
+			return put_user(amount, (int __user *)arg);
 		}
 
 		default:
@@ -687,7 +720,8 @@ static struct sock *raw_get_first(struct seq_file *seq)
 		struct hlist_node *node;
 
 		sk_for_each(sk, node, &raw_v4_htable[state->bucket])
-			if (sk->sk_family == PF_INET)
+			if (sk->sk_family == PF_INET &&
+				vx_check(sk->sk_xid, VX_WATCH|VX_IDENT))
 				goto found;
 	}
 	sk = NULL;
@@ -703,7 +737,8 @@ static struct sock *raw_get_next(struct seq_file *seq, struct sock *sk)
 		sk = sk_next(sk);
 try_again:
 		;
-	} while (sk && sk->sk_family != PF_INET);
+	} while (sk && (sk->sk_family != PF_INET ||
+		!vx_check(sk->sk_xid, VX_WATCH|VX_IDENT)));
 
 	if (!sk && ++state->bucket < RAWV4_HTABLE_SIZE) {
 		sk = sk_head(&raw_v4_htable[state->bucket]);

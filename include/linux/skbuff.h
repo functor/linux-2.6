@@ -1014,13 +1014,13 @@ extern struct sk_buff *skb_recv_datagram(struct sock *sk, unsigned flags,
 extern unsigned int    datagram_poll(struct file *file, struct socket *sock,
 				     struct poll_table_struct *wait);
 extern int	       skb_copy_datagram(const struct sk_buff *from,
-					 int offset, char *to, int size);
+					 int offset, char __user *to, int size);
 extern int	       skb_copy_datagram_iovec(const struct sk_buff *from,
 					       int offset, struct iovec *to,
 					       int size);
 extern int	       skb_copy_and_csum_datagram(const struct sk_buff *skb,
-						  int offset, u8 *to, int len,
-						  unsigned int *csump);
+						  int offset, u8 __user *to,
+						  int len, unsigned int *csump);
 extern int	       skb_copy_and_csum_datagram_iovec(const
 							struct sk_buff *skb,
 							int hlen,
@@ -1037,6 +1037,8 @@ extern void	       skb_copy_and_csum_dev(const struct sk_buff *skb, u8 *to);
 
 extern void skb_init(void);
 extern void skb_add_mtu(int mtu);
+
+struct tux_req_struct;
 
 #ifdef CONFIG_NETFILTER
 static inline void nf_conntrack_put(struct nf_ct_info *nfct)

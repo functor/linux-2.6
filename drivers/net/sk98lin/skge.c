@@ -788,7 +788,8 @@ static int __init skge_init_module(void)
 	cards = skge_probe();
 	if (cards == 0) {
 		printk("sk98lin: No adapter found.\n");
-	}
+	} else
+	__unsafe(THIS_MODULE);
 	return cards ? 0 : -ENODEV;
 } /* skge_init_module */
 

@@ -488,8 +488,35 @@ static __inline__ int inet_abc_len(u32 addr)
   	return rc;
 }
 
+/*
+	Check that a device is not member of the ipv4root assigned to the process
+	Return true if this is the case
 
-int devinet_ioctl(unsigned int cmd, void *arg)
+	If the process is not bound to specific IP, then it returns 0 (all
+	interface are fine).
+*/
+static inline int devinet_notiproot (struct in_ifaddr *ifa)
+{
+	int ret = 0;
+	struct nx_info *nxi;
+
+	if ((nxi = current->nx_info)) {
+		int i;
+		int nbip = nxi->nbipv4;
+		__u32 addr = ifa->ifa_local;
+		ret = 1;
+		for (i=0; i<nbip; i++) {
+			if(nxi->ipv4[i] == addr) {
+				ret = 0;
+				break;
+			}
+		}
+	}
+	return ret;
+}
+
+
+int devinet_ioctl(unsigned int cmd, void __user *arg)
 {
 	struct ifreq ifr;
 	struct sockaddr_in sin_orig;
@@ -594,6 +621,8 @@ int devinet_ioctl(unsigned int cmd, void *arg)
 
 	ret = -EADDRNOTAVAIL;
 	if (!ifa && cmd != SIOCSIFADDR && cmd != SIOCSIFFLAGS)
+		goto done;
+	if (!ifa_in_nx_info(ifa, current->nx_info))
 		goto done;
 
 	switch(cmd) {
@@ -713,7 +742,7 @@ rarok:
 	goto out;
 }
 
-static int inet_gifconf(struct net_device *dev, char *buf, int len)
+static int inet_gifconf(struct net_device *dev, char __user *buf, int len)
 {
 	struct in_device *in_dev = __in_dev_get(dev);
 	struct in_ifaddr *ifa;
@@ -724,6 +753,8 @@ static int inet_gifconf(struct net_device *dev, char *buf, int len)
 		goto out;
 
 	for (; ifa; ifa = ifa->ifa_next) {
+		if (!ifa_in_nx_info(ifa, current->nx_info))
+			continue;
 		if (!buf) {
 			done += sizeof(ifr);
 			continue;
@@ -1059,6 +1090,8 @@ static int inet_dump_ifaddr(struct sk_buff *skb, struct netlink_callback *cb)
 		read_lock(&in_dev->lock);
 		for (ifa = in_dev->ifa_list, ip_idx = 0; ifa;
 		     ifa = ifa->ifa_next, ip_idx++) {
+			if (!ifa_in_nx_info(ifa, current->nx_info))
+				continue;
 			if (ip_idx < s_ip_idx)
 				continue;
 			if (inet_fill_ifaddr(skb, ifa, NETLINK_CB(cb->skb).pid,
@@ -1136,7 +1169,7 @@ void inet_forward_change(void)
 }
 
 static int devinet_sysctl_forward(ctl_table *ctl, int write,
-				  struct file* filp, void *buffer,
+				  struct file* filp, void __user *buffer,
 				  size_t *lenp)
 {
 	int *valp = ctl->data;
@@ -1154,7 +1187,7 @@ static int devinet_sysctl_forward(ctl_table *ctl, int write,
 }
 
 int ipv4_doint_and_flush(ctl_table *ctl, int write,
-			 struct file* filp, void *buffer,
+			 struct file* filp, void __user *buffer,
 			 size_t *lenp)
 {
 	int *valp = ctl->data;
@@ -1167,9 +1200,9 @@ int ipv4_doint_and_flush(ctl_table *ctl, int write,
 	return ret;
 }
 
-int ipv4_doint_and_flush_strategy(ctl_table *table, int *name, int nlen,
-				  void *oldval, size_t *oldlenp,
-				  void *newval, size_t newlen, 
+int ipv4_doint_and_flush_strategy(ctl_table *table, int __user *name, int nlen,
+				  void __user *oldval, size_t __user *oldlenp,
+				  void __user *newval, size_t newlen, 
 				  void **context)
 {
 	int *valp = table->data;
@@ -1181,7 +1214,7 @@ int ipv4_doint_and_flush_strategy(ctl_table *table, int *name, int nlen,
 	if (newlen != sizeof(int))
 		return -EINVAL;
 
-	if (get_user(new, (int *)newval))
+	if (get_user(new, (int __user *)newval))
 		return -EFAULT;
 
 	if (new == *valp)
