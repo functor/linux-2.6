@@ -200,4 +200,6 @@ static ctl_table vserver_table[] = {
 
 
 EXPORT_SYMBOL_GPL(vx_debug_dlim);
+EXPORT_SYMBOL_GPL(vx_debug_nid);
+EXPORT_SYMBOL_GPL(vx_debug_xid);
 
