@@ -96,6 +96,7 @@ static int newque (key_t key, int msgflg)
 
 	msq->q_perm.mode = (msgflg & S_IRWXUGO);
 	msq->q_perm.key = key;
+	msq->q_perm.xid = current->xid;
 
 	msq->q_perm.security = NULL;
 	retval = security_msg_queue_alloc(msq);
@@ -229,7 +230,7 @@ asmlinkage long sys_msgget (key_t key, int msgflg)
 	return ret;
 }
 
-static inline unsigned long copy_msqid_to_user(void *buf, struct msqid64_ds *in, int version)
+static inline unsigned long copy_msqid_to_user(void __user *buf, struct msqid64_ds *in, int version)
 {
 	switch(version) {
 	case IPC_64:
@@ -280,7 +281,7 @@ struct msq_setbuf {
 	mode_t		mode;
 };
 
-static inline unsigned long copy_msqid_from_user(struct msq_setbuf *out, void *buf, int version)
+static inline unsigned long copy_msqid_from_user(struct msq_setbuf *out, void __user *buf, int version)
 {
 	switch(version) {
 	case IPC_64:
@@ -320,7 +321,7 @@ static inline unsigned long copy_msqid_from_user(struct msq_setbuf *out, void *b
 	}
 }
 
-asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds *buf)
+asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds __user *buf)
 {
 	int err, version;
 	struct msg_queue *msq;
@@ -539,7 +540,7 @@ static inline int pipelined_send(struct msg_queue* msq, struct msg_msg* msg)
 	return 0;
 }
 
-asmlinkage long sys_msgsnd (int msqid, struct msgbuf *msgp, size_t msgsz, int msgflg)
+asmlinkage long sys_msgsnd (int msqid, struct msgbuf __user *msgp, size_t msgsz, int msgflg)
 {
 	struct msg_queue *msq;
 	struct msg_msg *msg;
@@ -645,7 +646,7 @@ static inline int convert_mode(long* msgtyp, int msgflg)
 	return SEARCH_EQUAL;
 }
 
-asmlinkage long sys_msgrcv (int msqid, struct msgbuf *msgp, size_t msgsz,
+asmlinkage long sys_msgrcv (int msqid, struct msgbuf __user *msgp, size_t msgsz,
 			    long msgtyp, int msgflg)
 {
 	struct msg_queue *msq;
@@ -788,7 +789,11 @@ static int sysvipc_msg_read_proc(char *buffer, char **start, off_t offset, int l
 	for(i = 0; i <= msg_ids.max_id; i++) {
 		struct msg_queue * msq;
 		msq = msg_lock(i);
-		if(msq != NULL) {
+		if (msq) {
+			if (!vx_check(msq->q_perm.xid, VX_IDENT)) {
+				msg_unlock(msq);
+				continue;	
+			}
 			len += sprintf(buffer + len, "%10d %10d  %4o  %10lu %10lu %5u %5u %5u %5u %5u %5u %10lu %10lu %10lu\n",
 				msq->q_perm.key,
 				msg_buildid(i,msq->q_perm.seq),

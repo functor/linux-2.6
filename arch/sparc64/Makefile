@@ -8,6 +8,8 @@
 # Copyright (C) 1998 Jakub Jelinek (jj@ultra.linux.cz)
 #
 
+CHECK		:= $(CHECK) -D__sparc__=1 -D__sparc_v9__=1
+
 AFLAGS_vmlinux.lds.o += -Usparc
 
 CC		:= $(shell if $(CC) -m64 -S -o /dev/null -xc /dev/null >/dev/null 2>&1; then echo $(CC); else echo sparc64-linux-gcc; fi )
@@ -66,6 +68,9 @@ libs-y				+= arch/sparc64/prom/ arch/sparc64/lib/
 drivers-$(CONFIG_OPROFILE)	+= arch/sparc64/oprofile/
 
 boot := arch/sparc64/boot
+
+bzImage: image
+	cp $(boot)/image $(boot)/bzImage
 
 image tftpboot.img vmlinux.aout: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@

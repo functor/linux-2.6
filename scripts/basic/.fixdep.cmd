@@ -12,7 +12,7 @@ deps_scripts/basic/fixdep := \
   /usr/include/gnu/stubs.h \
   /usr/include/bits/types.h \
   /usr/include/bits/wordsize.h \
-  /usr/lib/gcc-lib/i586-mandrake-linux-gnu/3.3.2/include/stddef.h \
+  /usr/lib/gcc-lib/i386-redhat-linux/3.2.2/include/stddef.h \
   /usr/include/bits/typesizes.h \
   /usr/include/time.h \
   /usr/include/endian.h \
@@ -45,12 +45,12 @@ deps_scripts/basic/fixdep := \
   /usr/include/wchar.h \
   /usr/include/bits/wchar.h \
   /usr/include/gconv.h \
-  /usr/lib/gcc-lib/i586-mandrake-linux-gnu/3.3.2/include/stdarg.h \
+  /usr/lib/gcc-lib/i386-redhat-linux/3.2.2/include/stdarg.h \
   /usr/include/bits/stdio_lim.h \
   /usr/include/bits/sys_errlist.h \
   /usr/include/bits/stdio.h \
-  /usr/lib/gcc-lib/i586-mandrake-linux-gnu/3.3.2/include/limits.h \
-  /usr/lib/gcc-lib/i586-mandrake-linux-gnu/3.3.2/include/syslimits.h \
+  /usr/lib/gcc-lib/i386-redhat-linux/3.2.2/include/limits.h \
+  /usr/lib/gcc-lib/i386-redhat-linux/3.2.2/include/syslimits.h \
   /usr/include/limits.h \
   /usr/include/bits/posix1_lim.h \
   /usr/include/bits/local_lim.h \
@@ -59,9 +59,6 @@ deps_scripts/basic/fixdep := \
   /usr/include/ctype.h \
   /usr/include/netinet/in.h \
   /usr/include/stdint.h \
-  /usr/include/sys/socket.h \
-  /usr/include/sys/uio.h \
-  /usr/include/bits/uio.h \
   /usr/include/bits/socket.h \
   /usr/include/bits/sockaddr.h \
   /usr/include/asm/socket.h \
