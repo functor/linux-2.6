@@ -164,7 +164,7 @@ pci_find_subsys(unsigned int vendor, unsigned int device,
 	struct list_head *n;
 	struct pci_dev *dev;
 
-	WARN_ON(in_interrupt());
+	BUG_ON(in_interrupt());
 	spin_lock(&pci_bus_lock);
 	n = from ? from->global_list.next : pci_devices.next;
 

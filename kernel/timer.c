@@ -31,8 +31,11 @@
 #include <linux/time.h>
 #include <linux/jiffies.h>
 #include <linux/cpu.h>
+#include <linux/vserver/sched.h>
+#include <linux/vserver/cvirt.h>
 
 #include <asm/uaccess.h>
+#include <asm/unistd.h>
 #include <asm/div64.h>
 #include <asm/timex.h>
 
@@ -317,10 +320,16 @@ EXPORT_SYMBOL(del_timer);
  *
  * Synchronization rules: callers must prevent restarting of the timer,
  * otherwise this function is meaningless. It must not be called from
- * interrupt contexts. Upon exit the timer is not queued and the handler
- * is not running on any CPU.
+ * interrupt contexts. The caller must not hold locks which would prevent
+ * completion of the timer's handler.  Upon exit the timer is not queued and
+ * the handler is not running on any CPU.
  *
  * The function returns whether it has deactivated a pending timer or not.
+ *
+ * del_timer_sync() is slow and complicated because it copes with timer
+ * handlers which re-arm the timer (periodic timers).  If the timer handler
+ * is known to not do this (a single shot timer) then use
+ * del_singleshot_timer_sync() instead.
  */
 int del_timer_sync(struct timer_list *timer)
 {
@@ -332,7 +341,7 @@ int del_timer_sync(struct timer_list *timer)
 del_again:
 	ret += del_timer(timer);
 
-	for_each_cpu(i) {
+	for_each_online_cpu(i) {
 		base = &per_cpu(tvec_bases, i);
 		if (base->running_timer == timer) {
 			while (base->running_timer == timer) {
@@ -348,8 +357,36 @@ del_again:
 
 	return ret;
 }
-
 EXPORT_SYMBOL(del_timer_sync);
+
+/***
+ * del_singleshot_timer_sync - deactivate a non-recursive timer
+ * @timer: the timer to be deactivated
+ *
+ * This function is an optimization of del_timer_sync for the case where the
+ * caller can guarantee the timer does not reschedule itself in its timer
+ * function.
+ *
+ * Synchronization rules: callers must prevent restarting of the timer,
+ * otherwise this function is meaningless. It must not be called from
+ * interrupt contexts. The caller must not hold locks which wold prevent
+ * completion of the timer's handler.  Upon exit the timer is not queued and
+ * the handler is not running on any CPU.
+ *
+ * The function returns whether it has deactivated a pending timer or not.
+ */
+int del_singleshot_timer_sync(struct timer_list *timer)
+{
+	int ret = del_timer(timer);
+
+	if (!ret) {
+		ret = del_timer_sync(timer);
+		BUG_ON(ret);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(del_singleshot_timer_sync);
 #endif
 
 static int cascade(tvec_base_t *base, tvec_t *tv, int index)
@@ -918,7 +955,7 @@ void do_timer(struct pt_regs *regs)
 	update_times();
 }
 
-#if !defined(__alpha__) && !defined(__ia64__)
+#ifdef __ARCH_WANT_SYS_ALARM
 
 /*
  * For backwards compatibility?  This can be done in libc so Alpha
@@ -961,7 +998,7 @@ asmlinkage unsigned long sys_alarm(unsigned int seconds)
  */
 asmlinkage long sys_getpid(void)
 {
-	return current->tgid;
+	return vx_map_tgid(current->vx_info, current->tgid);
 }
 
 /*
@@ -1005,7 +1042,7 @@ asmlinkage long sys_getppid(void)
 #endif
 		break;
 	}
-	return pid;
+	return vx_map_tgid(current->vx_info, pid);
 }
 
 asmlinkage long sys_getuid(void)
@@ -1109,7 +1146,7 @@ fastcall signed long __sched schedule_timeout(signed long timeout)
 
 	add_timer(&timer);
 	schedule();
-	del_timer_sync(&timer);
+	del_singleshot_timer_sync(&timer);
 
 	timeout = expire - jiffies;
 
@@ -1214,6 +1251,8 @@ asmlinkage long sys_sysinfo(struct sysinfo __user *info)
 			tp.tv_nsec = tp.tv_nsec - NSEC_PER_SEC;
 			tp.tv_sec++;
 		}
+		if (vx_flags(VXF_VIRT_UPTIME, 0))
+			vx_vsi_uptime(&tp, NULL);
 		val.uptime = tp.tv_sec + (tp.tv_nsec ? 1 : 0);
 
 		val.loads[0] = avenrun[0] << (SI_LOAD_SHIFT - FSHIFT);
@@ -1223,6 +1262,9 @@ asmlinkage long sys_sysinfo(struct sysinfo __user *info)
 		val.procs = nr_threads;
 	} while (read_seqretry(&xtime_lock, seq));
 
+/*	if (vx_flags(VXF_VIRT_CPU, 0))
+		vx_vsi_cpu(val);
+*/
 	si_meminfo(&val);
 	si_swapinfo(&val);
 
@@ -1451,3 +1493,20 @@ unregister_time_interpolator(struct time_interpolator *ti)
 	spin_unlock(&time_interpolator_lock);
 }
 #endif /* CONFIG_TIME_INTERPOLATION */
+
+/**
+ * msleep - sleep safely even with waitqueue interruptions
+ * @msecs: Time in milliseconds to sleep for
+ */
+void msleep(unsigned int msecs)
+{
+	unsigned long timeout = msecs_to_jiffies(msecs);
+
+	while (timeout) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		timeout = schedule_timeout(timeout);
+	}
+}
+
+EXPORT_SYMBOL(msleep);
+

@@ -37,34 +37,31 @@ config UNIX98_PTYS
 	  Read the instructions in <file:Documentation/Changes> pertaining to
 	  pseudo terminals. It's safe to say N.
 
-config UNIX98_PTY_COUNT
-	int "Maximum number of Unix98 PTYs in use (0-2048)"
-	depends on UNIX98_PTYS
-	default "256"
-	help
-	  The maximum number of Unix98 PTYs that can be used at any one time.
-	  The default is 256, and should be enough for desktop systems. Server
-	  machines which support incoming telnet/rlogin/ssh connections and/or
-	  serve several X terminals may want to increase this: every incoming
-	  connection and every xterm uses up one PTY.
-
-	  When not in use, each additional set of 256 PTYs occupy
-	  approximately 8 KB of kernel memory on 32-bit architectures.
-
 comment "S/390 character device drivers"
 
 config TN3270
-	tristate "Support for locally attached 3270 tubes"
+	tristate "Support for locally attached 3270 terminals"
 	help
-	  Include support for IBM 3270 line-mode terminals.
+	  Include support for IBM 3270 terminals.
+
+config TN3270_TTY
+	tristate "Support for tty input/output on 3270 terminals"
+	depends on TN3270
+	help
+	  Include support for using an IBM 3270 terminal as a Linux tty.
+
+config TN3270_FS
+	tristate "Support for fullscreen applications on 3270 terminals"
+	depends on TN3270
+	help
+	  Include support for fullscreen applications on an IBM 3270 terminal.
 
 config TN3270_CONSOLE
-	bool "Support for console on 3270 line mode terminal"
-	depends on TN3270=y
+	bool "Support for console on 3270 terminal"
+	depends on TN3270=y && TN3270_TTY=y
 	help
-	  Include support for using an IBM 3270 line-mode terminal as a Linux
-	  system console.  Available only if 3270 support is compiled in
-	  statically.
+	  Include support for using an IBM 3270 terminal as a Linux system
+	  console.  Available only if 3270 support is compiled in statically.
 
 config TN3215
 	bool "Support for 3215 line mode terminal"

@@ -66,7 +66,7 @@
 
 void smp_local_timer_interrupt(struct pt_regs *);
 
-u64 jiffies_64 = INITIAL_JIFFIES;
+u64 jiffies_64 __cacheline_aligned_in_smp = INITIAL_JIFFIES;
 
 EXPORT_SYMBOL(jiffies_64);
 
@@ -256,7 +256,7 @@ static void iSeries_tb_recal(void)
  * call will not be needed)
  */
 
-unsigned long tb_last_stamp=0;
+unsigned long tb_last_stamp __cacheline_aligned_in_smp;
 
 /*
  * timer_interrupt - gets called when the decrementer overflows,
@@ -430,7 +430,7 @@ EXPORT_SYMBOL(do_settimeofday);
  * fields itself.  This way, the fields which are used for 
  * do_settimeofday get updated too.
  */
-long ppc64_sys32_stime(int* tptr)
+long ppc64_sys32_stime(int __user * tptr)
 {
 	int value;
 	struct timespec myTimeval;
@@ -455,7 +455,7 @@ long ppc64_sys32_stime(int* tptr)
  * fields itself.  This way, the fields which are used for 
  * do_settimeofday get updated too.
  */
-long ppc64_sys_stime(long* tptr)
+long ppc64_sys_stime(long __user * tptr)
 {
 	long value;
 	struct timespec myTimeval;

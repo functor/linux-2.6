@@ -114,6 +114,11 @@ static struct inode *alloc_inode(struct super_block *sb)
 		struct address_space * const mapping = &inode->i_data;
 
 		inode->i_sb = sb;
+		if (sb->s_flags & MS_TAGXID)
+			inode->i_xid = current->xid;
+		else
+			inode->i_xid = 0;       /* maybe xid -1 would be better? */
+		// inode->i_dqh = dqhget(sb->s_dqh);
 		inode->i_blkbits = sb->s_blocksize_bits;
 		inode->i_flags = 0;
 		atomic_set(&inode->i_count, 1);
@@ -133,6 +138,7 @@ static struct inode *alloc_inode(struct super_block *sb)
 		inode->i_bdev = NULL;
 		inode->i_cdev = NULL;
 		inode->i_rdev = 0;
+		// inode->i_xid = 0;	/* maybe not too wise ... */
 		inode->i_security = NULL;
 		inode->dirtied_when = 0;
 		if (security_inode_alloc(inode)) {
@@ -149,8 +155,20 @@ static struct inode *alloc_inode(struct super_block *sb)
 		mapping_set_gfp_mask(mapping, GFP_HIGHUSER);
 		mapping->assoc_mapping = NULL;
 		mapping->backing_dev_info = &default_backing_dev_info;
-		if (sb->s_bdev)
-			mapping->backing_dev_info = sb->s_bdev->bd_inode->i_mapping->backing_dev_info;
+
+		/*
+		 * If the block_device provides a backing_dev_info for client
+		 * inodes then use that.  Otherwise the inode share the bdev's
+		 * backing_dev_info.
+		 */
+		if (sb->s_bdev) {
+			struct backing_dev_info *bdi;
+
+			bdi = sb->s_bdev->bd_inode_backing_dev_info;
+			if (!bdi)
+				bdi = sb->s_bdev->bd_inode->i_mapping->backing_dev_info;
+			mapping->backing_dev_info = bdi;
+		}
 		memset(&inode->u, 0, sizeof(inode->u));
 		inode->i_mapping = mapping;
 	}
@@ -184,12 +202,12 @@ void inode_init_once(struct inode *inode)
 	init_rwsem(&inode->i_alloc_sem);
 	INIT_RADIX_TREE(&inode->i_data.page_tree, GFP_ATOMIC);
 	spin_lock_init(&inode->i_data.tree_lock);
-	init_MUTEX(&inode->i_data.i_shared_sem);
+	spin_lock_init(&inode->i_data.i_mmap_lock);
 	atomic_set(&inode->i_data.truncate_count, 0);
 	INIT_LIST_HEAD(&inode->i_data.private_list);
 	spin_lock_init(&inode->i_data.private_lock);
-	INIT_LIST_HEAD(&inode->i_data.i_mmap);
-	INIT_LIST_HEAD(&inode->i_data.i_mmap_shared);
+	INIT_PRIO_TREE_ROOT(&inode->i_data.i_mmap);
+	INIT_LIST_HEAD(&inode->i_data.i_mmap_nonlinear);
 	spin_lock_init(&inode->i_lock);
 	i_size_ordered_init(inode);
 }
@@ -671,12 +689,13 @@ static struct inode * get_new_inode_fast(struct super_block *sb, struct hlist_he
 
 static inline unsigned long hash(struct super_block *sb, unsigned long hashval)
 {
-	unsigned long tmp = hashval + ((unsigned long) sb / L1_CACHE_BYTES);
-	tmp = tmp + (tmp >> I_HASHBITS);
+	unsigned long tmp;
+
+	tmp = (hashval * (unsigned long)sb) ^ (GOLDEN_RATIO_PRIME + hashval) /
+			L1_CACHE_BYTES;
+	tmp = tmp ^ ((tmp ^ GOLDEN_RATIO_PRIME) >> I_HASHBITS);
 	return tmp & I_HASHMASK;
 }
-
-/* Yeah, I know about quadratic hash. Maybe, later. */
 
 /**
  *	iunique - get a unique inode number
@@ -1350,6 +1369,9 @@ void __init inode_init(unsigned long mempages)
 	ihash_entries *= sizeof(struct hlist_head);
 	for (order = 0; ((1UL << order) << PAGE_SHIFT) < ihash_entries; order++)
 		;
+		
+	if (order > 5)
+		order = 5;
 
 	do {
 		unsigned long tmp;
@@ -1383,11 +1405,8 @@ void __init inode_init(unsigned long mempages)
 
 	/* inode slab cache */
 	inode_cachep = kmem_cache_create("inode_cache", sizeof(struct inode),
-					 0, SLAB_HWCACHE_ALIGN, init_once,
-					 NULL);
-	if (!inode_cachep)
-		panic("cannot create inode slab cache");
-
+				0, SLAB_HWCACHE_ALIGN|SLAB_PANIC, init_once,
+				NULL);
 	set_shrinker(DEFAULT_SEEKS, shrink_icache_memory);
 }
 
@@ -1408,5 +1427,4 @@ void init_special_inode(struct inode *inode, umode_t mode, dev_t rdev)
 		printk(KERN_DEBUG "init_special_inode: bogus i_mode (%o)\n",
 		       mode);
 }
-
 EXPORT_SYMBOL(init_special_inode);

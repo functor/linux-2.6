@@ -155,12 +155,11 @@ void machine_real_restart(unsigned char *code, int length)
 	CMOS_WRITE(0x00, 0x8f);
 	spin_unlock_irqrestore(&rtc_lock, flags);
 
-	/* Remap the kernel at virtual address zero, as well as offset zero
-	   from the kernel segment.  This assumes the kernel segment starts at
-	   virtual address PAGE_OFFSET. */
-
-	memcpy (swapper_pg_dir, swapper_pg_dir + USER_PGD_PTRS,
-		sizeof (swapper_pg_dir [0]) * KERNEL_PGD_PTRS);
+	/*
+	 * Remap the first 16 MB of RAM (which includes the kernel image)
+	 * at virtual address zero:
+	 */
+	setup_identity_mappings(swapper_pg_dir, 0, LOW_MAPPINGS_SIZE);
 
 	/*
 	 * Use `swapper_pg_dir' as our page directory.
