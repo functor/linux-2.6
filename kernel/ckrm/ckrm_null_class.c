@@ -1,6 +1,10 @@
 /* kernel/ckrm/ckrm_null_class.c - NULL TaskClass controller for CKRM
  *
- * Copyright (C) Marc E. Fiuczynski,  Princeton University 2004
+ * Copyright (C) Haoqiang Zheng,     IBM Corp. 2004
+ *           (C) Hubertus Franke,    IBM Corp. 2004
+ *
+ * Copyright (C) Marc E. Fiuczynski, Princeton University 2005
+ *               Adapted from ckrm_cpu_class.c.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -284,10 +288,12 @@ int __init init_ckrm_null_res(void)
 		return -ENOENT;
 	}
 
+	/* Initialize default class obj before registering with core */
+	ckrm_alloc_null_class(NULL,NULL);
+
 	if (resid == -1) { /*not registered */
 		resid = ckrm_register_res_ctlr(clstype,&null_rcbs);
 		printk(KERN_DEBUG "........init_ckrm_null_res , resid= %d\n",resid);
-		ckrm_alloc_null_class(NULL,NULL);
 	}
 	return 0;
 }
