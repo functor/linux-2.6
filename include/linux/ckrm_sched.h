@@ -15,34 +15,30 @@
 #ifndef _CKRM_SCHED_H
 #define _CKRM_SCHED_H
 
+#define CC_BUG_ON_DO(cond,action)  do { if (cond)  action; BUG_ON(cond); } while(0)
+#define CC_BUG_ON(cond)            BUG_ON(cond)
+
 #include <linux/sched.h>
 #include <linux/ckrm_rc.h>
 #include <linux/ckrm_classqueue.h>
 
-#define BITMAP_SIZE ((((MAX_PRIO+1+7)/8)+sizeof(long)-1)/sizeof(long))
+//update every second
+#define CVT_UPDATE_TICK     (1*HZ/1 ?: 1)
+#define CLASS_BONUS_RATE 22	// shift from ns to increase class bonus
+#define PRIORITY_BONUS_RATE 0	// ??  Hubertus
 
+#define BITMAP_SIZE ((((MAX_PRIO+1+7)/8)+sizeof(long)-1)/sizeof(long))
 struct prio_array {
-	unsigned int nr_active;
+	int nr_active;
 	unsigned long bitmap[BITMAP_SIZE];
 	struct list_head queue[MAX_PRIO];
 };
 
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-#define rq_active(p,rq)   (get_task_lrq(p)->active)
-#define rq_expired(p,rq)  (get_task_lrq(p)->expired)
-int __init init_ckrm_sched_res(void);
-#else
-#define rq_active(p,rq)   (rq->active)
-#define rq_expired(p,rq)  (rq->expired)
-static inline void init_ckrm_sched_res(void) {}
-static inline int ckrm_cpu_monitor_init(void) {return 0;}
-#endif //CONFIG_CKRM_CPU_SCHEDULE
-
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-struct ckrm_runqueue {
+struct ckrm_local_runqueue {
 	cq_node_t classqueue_linkobj;	/*links in classqueue */
 	struct ckrm_cpu_class *cpu_class;	// class it belongs to
 	struct classqueue_struct *classqueue;	// classqueue it belongs tow
+	CVT_t uncounted_cvt;
 	unsigned long long uncounted_ns;
 
 	prio_array_t *active, *expired, arrays[2];
@@ -59,25 +55,19 @@ struct ckrm_runqueue {
 	 * updated on enqueue, dequeue
 	 */
 	int top_priority;
-	CVT_t local_cvt;
-
-	unsigned long lrq_load;
-	int local_weight; 
-
-
-	/*
-	 * unused CPU time accumulated while thoe class 
-	 * is inactive goes to savings
-	 * 
-	 * initialized to be 0
-	 * a class can't accumulate more than SAVING_THRESHOLD of savings
-	 */
-	unsigned long long savings;
-
+	CVT_t local_cvt;	// snapshot of local_cvt, update on every loadbalance
 	unsigned long magic;	//for debugging
 };
 
-typedef struct ckrm_runqueue ckrm_lrq_t;
+/**
+ * @last_sleep: the last time it sleeps, last_sleep = 0 when not sleeping
+ */
+struct ckrm_cpu_class_local_stat {
+	unsigned long long run;
+	unsigned long long total;
+	unsigned long long last_sleep;
+	unsigned long cpu_demand; /*estimated cpu demand */
+};
 
 /**
  * ckrm_cpu_class_stat - cpu usage statistics maintained for each class
@@ -88,35 +78,22 @@ struct ckrm_cpu_class_stat {
 
 	unsigned long long total_ns;	/*how much nano-secs it has consumed */
 
-	struct ckrm_cpu_demand_stat local_stats[NR_CPUS];
+	struct ckrm_cpu_class_local_stat local_stats[NR_CPUS];
+	unsigned long cpu_demand;
 
-	/* 
-	 * 
-	 */
-	unsigned long max_demand; /* the maximun a class can consume */
-	int egrt,megrt; /*effective guarantee*/
-	int ehl,mehl; /*effective hard limit, my effective hard limit*/
-
+	/*temp stat used by cpu monitor */
+	int effective_guarantee;
+	int effective_limit;
+	int glut;		//true or false
 	/*
-	 * eshare: for both default class and its children
-	 * meshare: just for the default class
+	 * effective_share: for both default class and its children
+	 * self_effective_share: just for the default class
 	 */
-	int eshare;
-	int meshare;
+	int effective_share;
+	int self_effective_share;
 };
 
-#define CKRM_CPU_CLASS_MAGIC 0x7af2abe3
-
-#define USAGE_SAMPLE_FREQ HZ  //sample every 1 seconds
-#define NS_PER_SAMPLE (USAGE_SAMPLE_FREQ*(NSEC_PER_SEC/HZ))
-#define USAGE_WINDOW_SIZE 60  //keep the last 60 sample
-
-struct ckrm_usage {
-	unsigned long samples[USAGE_WINDOW_SIZE]; //record usages 
-	unsigned long sample_pointer; //pointer for the sliding window
-	unsigned long long last_ns; //ns for last sample
-	long long last_sample_jiffies; //in number of jiffies
-};
+typedef struct ckrm_cpu_class_stat ckrm_stat_t;
 
 /*
  * manages the class status
@@ -127,224 +104,72 @@ struct ckrm_cpu_class {
 	struct ckrm_core_class *parent;
 	struct ckrm_shares shares;
 	spinlock_t cnt_lock;	// always grab parent's lock first and then child's
+	CVT_t global_cvt;	// total cummulative virtual time
 	struct ckrm_cpu_class_stat stat;
 	struct list_head links;	// for linking up in cpu classes
-	ckrm_lrq_t local_queues[NR_CPUS];	// runqueues 
-	struct ckrm_usage usage;
-	unsigned long magic;	//for debugging
+	struct ckrm_local_runqueue local_queues[NR_CPUS];	// runqueues 
 };
 
-#define cpu_class_weight(cls) (cls->stat.meshare)
-#define local_class_weight(lrq) (lrq->local_weight)
+#if CONFIG_CKRM_CPU_SCHEDULE
+#define rq_active(p,rq)   (get_task_class_queue(p)->active)
+#define rq_expired(p,rq)  (get_task_class_queue(p)->expired)
+#else
+#define rq_active(p,rq)   (rq->active)
+#define rq_expired(p,rq)  (rq->expired)
+#endif
 
-static inline int valid_cpu_class(struct ckrm_cpu_class * cls)
-{
-	return (cls && cls->magic == CKRM_CPU_CLASS_MAGIC);
-}
+//#define cpu_class_weight(cls) (cls->shares.my_guarantee)
+#define cpu_class_weight(cls) (cls->stat.self_effective_share)
+
+#define bpt_queue(cpu) (& (cpu_rq(cpu)->classqueue) )
+CVT_t get_min_cvt(int cpu);
 
 struct classqueue_struct *get_cpu_classqueue(int cpu);
-struct ckrm_cpu_class * get_default_cpu_class(void);
 
+extern struct ckrm_cpu_class default_cpu_class_obj;
+#define default_cpu_class (&default_cpu_class_obj)
 
-static inline void ckrm_usage_init(struct ckrm_usage* usage)
-{
-	int i;
+#define local_queue_nr_running(local_queue) \
+             (local_queue->active->nr_active + local_queue->expired->nr_active)
 
-	for (i=0; i < USAGE_WINDOW_SIZE; i++)
-		usage->samples[i] = 0;
-	usage->sample_pointer = 0;
-	usage->last_ns = 0;
-	usage->last_sample_jiffies = 0;
-}
-
-/*
- * this function can be called at any frequency
- * it's self-contained
- */
-static inline void ckrm_sample_usage(struct ckrm_cpu_class* clsptr)
-{
-	struct ckrm_usage* usage = &clsptr->usage;
-	unsigned long long cur_sample;
-	int duration = jiffies - usage->last_sample_jiffies;
-
-	//jiffies wasn't start from 0
-	//so it need to be properly handled
-	if (unlikely(!usage->last_sample_jiffies)) 
-		usage->last_sample_jiffies = jiffies;
-
-	//called too frequenctly
-	if (duration < USAGE_SAMPLE_FREQ)
-		return;
-
-	usage->last_sample_jiffies = jiffies;
-
-	cur_sample = clsptr->stat.total_ns - usage->last_ns; 
-	usage->last_ns = clsptr->stat.total_ns;
-
-	//scale it based on the sample duration
-	cur_sample *= ((USAGE_SAMPLE_FREQ<< 15)/duration);
-	cur_sample >>= 15;
-	usage->samples[usage->sample_pointer] = cur_sample;
-	//	printk("sample = %llu jiffies=%lu \n",cur_sample, jiffies);
-
-	usage->sample_pointer ++;
-	if (usage->sample_pointer >= USAGE_WINDOW_SIZE)
-		usage->sample_pointer = 0;
-}
-
-//duration is specified in number of jiffies
-//return the usage in percentage
-static inline int get_ckrm_usage(struct ckrm_cpu_class* clsptr, int duration)
-{
-	int nr_samples = duration/USAGE_SAMPLE_FREQ?:1;
-	struct ckrm_usage* usage = &clsptr->usage;
-	unsigned long long total = 0;
-	int i, idx;
-
-	if (nr_samples > USAGE_WINDOW_SIZE)
-		nr_samples = USAGE_WINDOW_SIZE;
-
-	idx = usage->sample_pointer;	
-	for (i = 0; i< nr_samples; i++) {
-		if (! idx)
-			idx = USAGE_WINDOW_SIZE;
-		idx --;
-		total += usage->samples[idx];
-	}
-        total *= 100;
-        do_div(total,nr_samples);
-        do_div(total,NS_PER_SAMPLE);
-	do_div(total,cpus_weight(cpu_online_map));
-        return total;
-}
-
-
-#define lrq_nr_running(lrq) \
-             (lrq->active->nr_active + lrq->expired->nr_active)
-
-static inline ckrm_lrq_t *
-get_ckrm_lrq(struct ckrm_cpu_class*cls, int cpu)
+static inline struct ckrm_local_runqueue *
+get_ckrm_local_runqueue(struct ckrm_cpu_class*cls, int cpu)
 {
 	return &(cls->local_queues[cpu]);
 }
 
-static inline ckrm_lrq_t *get_task_lrq(struct task_struct *p)
+static inline struct ckrm_local_runqueue *get_task_class_queue(struct task_struct *p)
 {
 	return &(p->cpu_class->local_queues[task_cpu(p)]);
 }
 
 #define task_list_entry(list)  list_entry(list,struct task_struct,run_list)
-#define class_list_entry(list) list_entry(list,struct ckrm_runqueue,classqueue_linkobj)
+#define class_list_entry(list) list_entry(list,struct ckrm_local_runqueue,classqueue_linkobj)
 
 /* some additional interfaces exported from sched.c */
 struct runqueue;
+void dequeue_task(struct task_struct *p, prio_array_t * array);
+void enqueue_task(struct task_struct *p, prio_array_t * array);
+struct runqueue *task_rq_lock(task_t * p, unsigned long *flags);
+void task_rq_unlock(struct runqueue *rq, unsigned long *flags);
+extern spinlock_t cvt_lock;
 extern rwlock_t class_list_lock;
 extern struct list_head active_cpu_classes;
-unsigned int task_timeslice(task_t *p);
-void _ckrm_cpu_change_class(task_t *task, struct ckrm_cpu_class *newcls);
 
+/*functions exported by ckrm_cpu_class.c*/
+int __init init_ckrm_sched_res(void);
 void init_cpu_classes(void);
-void init_cpu_class(struct ckrm_cpu_class *cls,ckrm_shares_t* shares);
-void ckrm_cpu_change_class(void *task, void *old, void *new);
 
-
+/*functions exported by ckrm_cpu_monitor.c*/
+void ckrm_cpu_monitor(void);
+void ckrm_cpu_stat_init(struct ckrm_cpu_class_stat *stat);
 #define CPU_DEMAND_ENQUEUE 0
 #define CPU_DEMAND_DEQUEUE 1
 #define CPU_DEMAND_DESCHEDULE 2
-#define CPU_DEMAND_INIT 3
+void cpu_demand_event(struct ckrm_cpu_class_local_stat* local_stat, int event, unsigned long long len);
 
-/*functions exported by ckrm_cpu_monitor.c*/
-void ckrm_cpu_monitor(int check_min);
-int ckrm_cpu_monitor_init(void);
-void ckrm_cpu_stat_init(struct ckrm_cpu_class_stat *stat);
-void cpu_demand_event(struct ckrm_cpu_demand_stat* local_stat, int event, unsigned long long len);
-void adjust_local_weight(void);
-
-#define get_task_lrq_stat(p) (&(p)->cpu_class->stat.local_stats[task_cpu(p)])
-#define get_cls_local_stat(cls,cpu) (&(cls)->stat.local_stats[cpu])
-#define get_rq_local_stat(lrq,cpu) (get_cls_local_stat((lrq)->cpu_class,cpu))
-
-/********************************************************************
- * Parameters that determine how quickly CVT's progress and how
- * priority can impact a LRQ's runqueue position. See also
- * get_effective_prio(). These parameters need to adjusted
- * in accordance to the following example and understanding.
- * 
- * CLASS_QUANTIZER:
- * 
- * A class with 50% share, can execute 500 ms / per sec ~ 2^29 ns.
- * It's share will be set to 512 = 2^9. The globl CLASSQUEUE_SIZE is set to 2^7.
- * With CLASS_QUANTIZER=16, the local_cvt of this class will increase
- * by 2^29/2^9 = 2^20 = 1024K.
- * Setting CLASS_QUANTIZER to 16, 2^(20-16) = 16 slots / per second.
-  * Do the same math, a class with any share value, will cover 16 slots / per second. 
- * So 2^8 total slots is good track for 8 seconds of system execution
- *
- * PRIORITY_QUANTIZER:
- *
- * How much can top priorities of class impact slot bonus.
- * There are 40 nice priorities, range from -20 to 19, with default nice = 0
- * "2" will allow upto 5 slots improvement 
- * when certain task within the class  has a nice value of -20 
- * in the RQ thus for 50% class it can perform ~300 msec starvation.
- *
- *******************************************************************/
-
-#define CLASS_QUANTIZER 16 	//shift from ns to increase class bonus
-#define PRIORITY_QUANTIZER 2	//controls how much a high prio task can borrow
-
-#define CKRM_SHARE_ACCURACY 13
-#define NSEC_PER_MS 1000000
-#define NSEC_PER_JIFFIES (NSEC_PER_SEC/HZ)
-
-
-#define MAX_SAVINGS_ABSOLUTE (10LLU*NSEC_PER_SEC)  // 10 seconds
-
-#define CVT_UPDATE_TICK     ((HZ/2)?:1)
-
-// ABSOLUTE_CKRM_TUNING determines whether classes can make up
-// lost time in absolute time or in relative values
-
-#define ABSOLUTE_CKRM_TUNING         // preferred due to more predictable behavior
-
-#ifdef ABSOLUTE_CKRM_TUNING
-
-#define MAX_SAVINGS        MAX_SAVINGS_ABSOLUTE
-//an absolute bonus of 200ms for classes when reactivated
-#define INTERACTIVE_BONUS(lrq) ((200*NSEC_PER_MS)/local_class_weight(lrq))
-#define SAVINGS_LEAK_SPEED (CVT_UPDATE_TICK/10*NSEC_PER_JIFFIES)
-
-#define scale_cvt(val,lrq)   ((val)*local_class_weight(lrq))
-#define unscale_cvt(val,lrq) (do_div(val,local_class_weight(lrq)))
-
-#else
-
-#define MAX_SAVINGS (MAX_SAVINGS_ABSOLUTE >> CKRM_SHARE_ACCURACY) 
-/*
- * to improve system responsiveness
- * an inactive class is put a little bit ahead of the current class when it wakes up
- * the amount is set in normalized term to simplify the calculation
- * for class with 100% share, it can be 2s ahead
- * while for class with 10% share, it can be 200ms ahead
- */
-#define INTERACTIVE_BONUS(lrq) (2*NSEC_PER_MS)  
-
-/*
- * normalized savings can't be more than MAX_NORMALIZED_SAVINGS
- * based on the current configuration
- * this means that a class with share 100% will accumulate 10s at most
- * while a class with 1% of the share can only accumulate 100ms
- */
-
-//a class with share 100% can get 100ms every 500ms
-//while a class with share 10% can only get 10ms every 500ms
-#define SAVINGS_LEAK_SPEED ((CVT_UPDATE_TICK/5*NSEC_PER_JIFFIES) >> CKRM_SHARE_ACCURACY)
-
-#define scale_cvt(val,lrq)   (val)
-#define unscale_cvt(val,lrq) (val)
-
-#endif
-
+#define get_task_local_stat(p) (&(p)->cpu_class->stat.local_stats[task_cpu(p)])
+#define get_rq_local_stat(lrq,cpu) (&(lrq)->cpu_class->stat.local_stats[cpu])
 
 /**
  * get_effective_prio: return the effective priority of a class local queue
@@ -356,21 +181,17 @@ void adjust_local_weight(void);
  * currently, prio increases by 1 if either: top_priority increase by one
  *                                   or, local_cvt increases by 4ms
  */
-static inline int get_effective_prio(ckrm_lrq_t * lrq)
+static inline int get_effective_prio(struct ckrm_local_runqueue * lcq)
 {
 	int prio;
 
-	prio = lrq->local_cvt >> CLASS_QUANTIZER;  // cumulative usage
-#ifndef URGENCY_SUPPORT
-#warning "ACB removing urgency calculation from get_effective_prio"
-#else
-	prio += lrq->top_priority >> PRIORITY_QUANTIZER; // queue urgency
-#endif
+	// cumulative usage
+	prio = lcq->local_cvt >> CLASS_BONUS_RATE;
+	// queue urgency
+	prio += lcq->top_priority >> PRIORITY_BONUS_RATE;
 
 	return prio;
 }
-
-CVT_t get_local_cur_cvt(int cpu);
 
 /** 
  * update_class_priority:
@@ -385,8 +206,9 @@ CVT_t get_local_cur_cvt(int cpu);
  *      -- rq_get_next_task (queue switch)
  *   -- update_local_cvt
  *      -- schedule
+ *   -- update_global_cvt
  */
-static inline void update_class_priority(ckrm_lrq_t *local_rq)
+static inline void update_class_priority(struct ckrm_local_runqueue *local_rq)
 {
 	int effective_prio = get_effective_prio(local_rq);
 	classqueue_update_prio(local_rq->classqueue,
@@ -398,80 +220,42 @@ static inline void update_class_priority(ckrm_lrq_t *local_rq)
  *  set the new top priority and reposition the queue
  *  called when: task enqueue/dequeue and queue switch
  */
-static inline void set_top_priority(ckrm_lrq_t *lrq,
+static inline void set_top_priority(struct ckrm_local_runqueue *class_queue,
 				    int new_priority)
 {
-	lrq->top_priority = new_priority;
-	update_class_priority(lrq);
-}
-
-/*
- * task_load: how much load this task counts
- */
-static inline unsigned long task_load(struct task_struct* p)
-{
-	return (task_timeslice(p) * p->demand_stat.cpu_demand);
-}
-
-/*
- * runqueue load is the local_weight of all the classes on this cpu
- * must be called with class_list_lock held
- */
-static inline unsigned long ckrm_cpu_load(int cpu)
-{
-	struct ckrm_cpu_class *clsptr;
-	ckrm_lrq_t* lrq;
-	struct ckrm_cpu_demand_stat* l_stat;
-	int total_load = 0;
-	int load;
-
-	list_for_each_entry(clsptr,&active_cpu_classes,links) {
-		lrq =  get_ckrm_lrq(clsptr,cpu);
-		l_stat = get_cls_local_stat(clsptr,cpu);
-		load = lrq->local_weight;
-		if (l_stat->cpu_demand < load)
-			load = l_stat->cpu_demand;
-		total_load += load;
-	}	
-	return total_load;
+	class_queue->top_priority = new_priority;
+	update_class_priority(class_queue);
 }
 
 static inline void class_enqueue_task(struct task_struct *p,
 				      prio_array_t * array)
 {
-	ckrm_lrq_t *lrq;
+	struct ckrm_local_runqueue *queue;
 	int effective_prio;
 
-	lrq = get_task_lrq(p);
+	queue = get_task_class_queue(p);
 
-	cpu_demand_event(&p->demand_stat,CPU_DEMAND_ENQUEUE,0);
-	lrq->lrq_load += task_load(p);
-
-	if ((p->prio < lrq->top_priority) && (array == lrq->active))
-		set_top_priority(lrq, p->prio);	
-
-	if (! cls_in_classqueue(&lrq->classqueue_linkobj)) {
-		cpu_demand_event(get_task_lrq_stat(p),CPU_DEMAND_ENQUEUE,0);
-		effective_prio = get_effective_prio(lrq);
-		classqueue_enqueue(lrq->classqueue, &lrq->classqueue_linkobj, effective_prio);
+	if (! cls_in_classqueue(&queue->classqueue_linkobj)) {
+		cpu_demand_event(get_task_local_stat(p),CPU_DEMAND_ENQUEUE,0);
+		/*make sure the cvt of this class is up to date*/
+		queue->local_cvt = get_min_cvt(task_cpu(p));
+		effective_prio = get_effective_prio(queue);
+		classqueue_enqueue(queue->classqueue, &queue->classqueue_linkobj, effective_prio);
 	} 
+	
+	if ((p->prio < queue->top_priority) && (array == queue->active))
+		set_top_priority(queue, p->prio);	
 
 }
 
 static inline void class_dequeue_task(struct task_struct *p,
 				      prio_array_t * array)
 {
-	ckrm_lrq_t *lrq = get_task_lrq(p);
-	unsigned long load = task_load(p);
+	struct ckrm_local_runqueue *queue = get_task_class_queue(p);
 
-	BUG_ON(lrq->lrq_load < load);
-	lrq->lrq_load -= load;
-
-	cpu_demand_event(&p->demand_stat,CPU_DEMAND_DEQUEUE,0);
-
-	if ((array == lrq->active) && (p->prio == lrq->top_priority)
+	if ((array == queue->active) && (p->prio == queue->top_priority)
 	    && list_empty(&(array->queue[p->prio])))
-		set_top_priority(lrq,
+		set_top_priority(queue,
 				 find_next_bit(array->bitmap, MAX_PRIO,
 					       p->prio));
 }
@@ -482,82 +266,32 @@ static inline void class_dequeue_task(struct task_struct *p,
  */
 static inline void update_local_cvt(struct task_struct *p, unsigned long nsec)
 {
-	ckrm_lrq_t * lrq = get_task_lrq(p);
+	struct ckrm_local_runqueue *class_queue = get_task_class_queue(p);
+	struct ckrm_cpu_class *cls = class_queue->cpu_class;
 
-	unsigned long cvt_inc = nsec / local_class_weight(lrq);
+	unsigned long cvt_inc = nsec / cpu_class_weight(cls);
 
-	lrq->local_cvt += cvt_inc;
-	lrq->uncounted_ns += nsec;
+	class_queue->local_cvt += cvt_inc;
+	class_queue->uncounted_cvt += cvt_inc;
 
-	update_class_priority(lrq);
-}
-
-static inline int class_preempts_curr(struct task_struct * p, struct task_struct* curr)
-{
-	struct cq_node_struct* node1 = &(get_task_lrq(p)->classqueue_linkobj);
-	struct cq_node_struct* node2 = &(get_task_lrq(curr)->classqueue_linkobj);
-
-	return (class_compare_prio(node1,node2) < 0);
+	class_queue->uncounted_ns += nsec;
+	update_class_priority(class_queue);
 }
 
 /*
- * return a random value with range [0, (val-1)]
+ * called during loadbalancing 
+ * to charge the class with locally accumulated cvt
  */
-static inline int get_ckrm_rand(unsigned long val)
+void update_global_cvts(int this_cpu);
+
+/**
+ * 
+ */
+static inline int class_preempts_curr(struct task_struct * p, struct task_struct* curr)
 {
-	int rand;
-	static int last_rand[NR_CPUS];
-	int cpu = smp_processor_id();
+	struct cq_node_struct* node1 = &(get_task_class_queue(p)->classqueue_linkobj);
+	struct cq_node_struct* node2 = &(get_task_class_queue(curr)->classqueue_linkobj);
 
-	rand = last_rand[cpu];
-	rand ++;
-	if (rand >= val)
-		rand = 0; 
-	
-	last_rand[cpu] = rand;
-	return rand;
+	return (class_compare_prio(node1,node2) < 0);
 }
-
-void update_class_cputime(int this_cpu);
-
-/**********************************************/
-/*          PID_LOAD_BALANCING                */
-/**********************************************/
-struct ckrm_load_struct {
-	unsigned long load_p; 	/*propotional*/
-	unsigned long load_i;   /*integral   */
-	long load_d;   /*derivative */
-};
-
-typedef struct ckrm_load_struct ckrm_load_t;
-
-static inline void ckrm_load_init(ckrm_load_t* ckrm_load) {
-	ckrm_load->load_p = 0;
-	ckrm_load->load_i = 0;
-	ckrm_load->load_d = 0;
-}
-
-void ckrm_load_sample(ckrm_load_t* ckrm_load,int cpu);
-long pid_get_pressure(ckrm_load_t* ckrm_load, int local_group);
-#define rq_ckrm_load(rq) (&((rq)->ckrm_load))
-
-static inline void ckrm_sched_tick(unsigned long j,int this_cpu,struct ckrm_load_struct* ckrm_load)
-{
-	read_lock(&class_list_lock);
-       
-#ifdef CONFIG_SMP
-	ckrm_load_sample(ckrm_load,this_cpu);
-#endif
-
-	if (! (j % CVT_UPDATE_TICK)) {
-		//		printk("ckrm_sched j=%lu\n",j);
-		classqueue_update_base(get_cpu_classqueue(this_cpu));
-		update_class_cputime(this_cpu);
-	}
-
-	read_unlock(&class_list_lock);
-}
-
-#endif //CONFIG_CKRM_CPU_SCHEDULE
-
 #endif

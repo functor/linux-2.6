@@ -305,6 +305,10 @@ static void zf_ping(unsigned long data)
 static ssize_t zf_write(struct file *file, const char __user *buf, size_t count,
 								loff_t *ppos)
 {
+	/*  Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	/* See if we got the magic character */
 	if(count){
 
@@ -385,7 +389,7 @@ static int zf_open(struct inode *inode, struct file *file)
 
 	zf_timer_on();
 
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int zf_close(struct inode *inode, struct file *file)

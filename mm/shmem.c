@@ -46,6 +46,7 @@
 #include <asm/pgtable.h>
 
 /* This magic number is used in glibc for posix shared memory */
+#define TMPFS_MAGIC	0x01021994
 
 #define ENTRIES_PER_PAGE (PAGE_CACHE_SIZE/sizeof(unsigned long))
 #define ENTRIES_PER_PAGEPAGE (ENTRIES_PER_PAGE*ENTRIES_PER_PAGE)
@@ -336,6 +337,7 @@ static swp_entry_t *shmem_swp_alloc(struct shmem_inode_info *info, unsigned long
 	struct shmem_sb_info *sbinfo = SHMEM_SB(inode->i_sb);
 	struct page *page = NULL;
 	swp_entry_t *entry;
+	static const swp_entry_t unswapped = { 0 };
 
 	if (sgp != SGP_WRITE &&
 	    ((loff_t) index << PAGE_CACHE_SHIFT) >= i_size_read(inode))
@@ -343,7 +345,7 @@ static swp_entry_t *shmem_swp_alloc(struct shmem_inode_info *info, unsigned long
 
 	while (!(entry = shmem_swp_entry(info, index, &page))) {
 		if (sgp == SGP_READ)
-			return shmem_swp_map(ZERO_PAGE(0));
+			return (swp_entry_t *) &unswapped;
 		/*
 		 * Test free_blocks against 1 not 0, since we have 1 data
 		 * page (and perhaps indirect index pages) yet to allocate:
@@ -1120,9 +1122,15 @@ static int shmem_populate(struct vm_area_struct *vma,
 				return err;
 			}
 		} else if (nonblock) {
-    			err = install_file_pte(mm, vma, addr, pgoff, prot);
-			if (err)
-	    			return err;
+	    		/*
+		 	 * If a nonlinear mapping then store the file page
+			 * offset in the pte.
+			 */
+			if (pgoff != linear_page_index(vma, addr)) {
+	    			err = install_file_pte(mm, vma, addr, pgoff, prot);
+				if (err)
+		    			return err;
+			}
 		}
 
 		len -= PAGE_SIZE;
@@ -1150,24 +1158,41 @@ shmem_get_policy(struct vm_area_struct *vma, unsigned long addr)
 }
 #endif
 
-int shmem_lock(struct file *file, int lock, struct user_struct *user)
+/* Protects current->user->locked_shm from concurrent access */
+static spinlock_t shmem_lock_user = SPIN_LOCK_UNLOCKED;
+
+int shmem_lock(struct file *file, int lock, struct user_struct * user)
 {
 	struct inode *inode = file->f_dentry->d_inode;
 	struct shmem_inode_info *info = SHMEM_I(inode);
+	unsigned long lock_limit, locked;
 	int retval = -ENOMEM;
 
 	spin_lock(&info->lock);
+	spin_lock(&shmem_lock_user);
 	if (lock && !(info->flags & VM_LOCKED)) {
-		if (!user_shm_lock(inode->i_size, user))
+		locked = inode->i_size >> PAGE_SHIFT;
+		locked += user->locked_shm;
+		lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+		lock_limit >>= PAGE_SHIFT;
+		if ((locked > lock_limit) && !capable(CAP_IPC_LOCK))
 			goto out_nomem;
-		info->flags |= VM_LOCKED;
+		/* for this branch user == current->user so it won't go away under us */
+		atomic_inc(&user->__count);
+		user->locked_shm = locked;
 	}
 	if (!lock && (info->flags & VM_LOCKED) && user) {
-		user_shm_unlock(inode->i_size, user);
-		info->flags &= ~VM_LOCKED;
+		locked = inode->i_size >> PAGE_SHIFT;
+		user->locked_shm -= locked;
+		free_uid(user);
 	}
+	if (lock)
+		info->flags |= VM_LOCKED;
+	else
+		info->flags &= ~VM_LOCKED;
 	retval = 0;
 out_nomem:
+	spin_unlock(&shmem_lock_user);
 	spin_unlock(&info->lock);
 	return retval;
 }
@@ -1507,7 +1532,7 @@ static int shmem_statfs(struct super_block *sb, struct kstatfs *buf)
 {
 	struct shmem_sb_info *sbinfo = SHMEM_SB(sb);
 
-	buf->f_type = TMPFS_SUPER_MAGIC;
+	buf->f_type = TMPFS_MAGIC;
 	buf->f_bsize = PAGE_CACHE_SIZE;
 	spin_lock(&sbinfo->stat_lock);
 	buf->f_blocks = sbinfo->max_blocks;
@@ -1837,7 +1862,7 @@ static int shmem_fill_super(struct super_block *sb,
 	sb->s_maxbytes = SHMEM_MAX_BYTES;
 	sb->s_blocksize = PAGE_CACHE_SIZE;
 	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
-	sb->s_magic = TMPFS_SUPER_MAGIC;
+	sb->s_magic = TMPFS_MAGIC;
 	sb->s_op = &shmem_ops;
 	inode = shmem_get_inode(sb, S_IFDIR | mode, 0);
 	if (!inode)

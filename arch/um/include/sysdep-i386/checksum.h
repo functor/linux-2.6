@@ -5,7 +5,6 @@
 #ifndef __UM_SYSDEP_CHECKSUM_H
 #define __UM_SYSDEP_CHECKSUM_H
 
-#include "linux/in6.h"
 #include "linux/string.h"
 
 /*

@@ -44,9 +44,7 @@ static int same_backing_files(char *from_cmdline, char *from_cow, char *cow)
 		printk("Couldn't stat '%s', err = %d\n", from_cow, -err);
 		return(1);
 	}
-	if((buf1.ust_major == buf2.ust_major) && 
-	   (buf1.ust_minor == buf2.ust_minor) && 
-	   (buf1.ust_ino == buf2.ust_ino))
+	if((buf1.ust_dev == buf2.ust_dev) && (buf1.ust_ino == buf2.ust_ino))
 		return(1);
 
 	printk("Backing file mismatch - \"%s\" requested,\n"
@@ -191,7 +189,6 @@ int create_cow_file(char *cow_file, char *backing_file, struct openflags flags,
 			    data_offset_out);
 	if(!err)
 		return(fd);
-
 	os_close_file(fd);
  out:
 	return(err);

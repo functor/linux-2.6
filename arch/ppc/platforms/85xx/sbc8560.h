@@ -16,9 +16,8 @@
 #define __MACH_SBC8560_H__
  
 #include <linux/config.h>
+#include <linux/serial.h>
 #include <platforms/85xx/sbc85xx.h>
-
-#define CPM_MAP_ADDR    (CCSRBAR + MPC85xx_CPM_OFFSET)
  
 #ifdef CONFIG_SERIAL_MANY_PORTS
 #define RS_TABLE_SIZE  64
@@ -30,11 +29,11 @@
 #define BASE_BAUD ( 1843200 / 16 )
  
 #ifdef CONFIG_SERIAL_DETECT_IRQ
-#define STD_COM_FLAGS (ASYNC_SKIP_TEST|ASYNC_AUTO_IRQ)
+#define STD_COM_FLAGS (ASYNC_BOOT_AUTOCONF|ASYNC_SKIP_TEST|ASYNC_AUTO_IRQ)
 #else
-#define STD_COM_FLAGS (ASYNC_SKIP_TEST)
+#define STD_COM_FLAGS (ASYNC_BOOT_AUTOCONF|ASYNC_SKIP_TEST)
 #endif
-
+ 
 #define STD_SERIAL_PORT_DFNS \
         { 0, BASE_BAUD, UARTA_ADDR, MPC85xx_IRQ_EXT9, STD_COM_FLAGS, /* ttyS0 */ \
                 iomem_base: (u8 *)UARTA_ADDR,                       \

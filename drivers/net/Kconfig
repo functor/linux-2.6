@@ -234,7 +234,7 @@ config BMAC
 
 config OAKNET
 	tristate "National DP83902AV (Oak ethernet) support"
-	depends on NET_ETHERNET && PPC && BROKEN
+	depends on NET_ETHERNET && PPC
 	select CRC32
 	help
 	  Say Y if your machine has this type of Ethernet network card.
@@ -1075,7 +1075,6 @@ config ETH16I
 
 config NE2000
 	tristate "NE2000/NE1000 support"
-	depends on ISA || (Q40 && m)
 	select CRC32
 	---help---
 	  If you have a network (Ethernet) card of this type, say Y and read

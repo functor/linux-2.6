@@ -1,12 +1,10 @@
-/* _VX_SCHED_H defined below */
-
 #if	defined(__KERNEL__) && defined(_VX_INFO_DEF_)
 
 #include <linux/spinlock.h>
 #include <linux/jiffies.h>
-#include <linux/cpumask.h>
 #include <asm/atomic.h>
 #include <asm/param.h>
+#include <linux/cpumask.h>
 
 /* context sub struct */
 

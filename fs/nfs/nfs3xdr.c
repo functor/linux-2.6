@@ -21,7 +21,6 @@
 #include <linux/nfs.h>
 #include <linux/nfs3.h>
 #include <linux/nfs_fs.h>
-#include <linux/vserver/xid.h>
 
 #define NFSDBG_FACILITY		NFSDBG_XDR
 
@@ -178,7 +177,7 @@ xdr_decode_fattr(u32 *p, struct nfs_fattr *fattr)
 }
 
 static inline u32 *
-xdr_encode_sattr(u32 *p, struct iattr *attr, int tagxid)
+xdr_encode_sattr(u32 *p, struct iattr *attr)
 {
 	if (attr->ia_valid & ATTR_MODE) {
 		*p++ = xdr_one;
@@ -186,17 +185,15 @@ xdr_encode_sattr(u32 *p, struct iattr *attr, int tagxid)
 	} else {
 		*p++ = xdr_zero;
 	}
-	if (attr->ia_valid & ATTR_UID ||
-		(tagxid && (attr->ia_valid & ATTR_XID))) {
+	if (attr->ia_valid & ATTR_UID) {
 		*p++ = xdr_one;
-		*p++ = htonl(XIDINO_UID(tagxid, attr->ia_uid, attr->ia_xid));
+		*p++ = htonl(attr->ia_uid);
 	} else {
 		*p++ = xdr_zero;
 	}
-	if (attr->ia_valid & ATTR_GID ||
-		(tagxid && (attr->ia_valid & ATTR_XID))) {
+	if (attr->ia_valid & ATTR_GID) {
 		*p++ = xdr_one;
-		*p++ = htonl(XIDINO_GID(tagxid, attr->ia_gid, attr->ia_xid));
+		*p++ = htonl(attr->ia_gid);
 	} else {
 		*p++ = xdr_zero;
 	}
@@ -281,8 +278,7 @@ static int
 nfs3_xdr_sattrargs(struct rpc_rqst *req, u32 *p, struct nfs3_sattrargs *args)
 {
 	p = xdr_encode_fhandle(p, args->fh);
-	p = xdr_encode_sattr(p, args->sattr,
-		req->rq_task->tk_client->cl_tagxid);
+	p = xdr_encode_sattr(p, args->sattr);
 	*p++ = htonl(args->guard);
 	if (args->guard)
 		p = xdr_encode_time3(p, &args->guardtime);
@@ -373,8 +369,7 @@ nfs3_xdr_createargs(struct rpc_rqst *req, u32 *p, struct nfs3_createargs *args)
 		*p++ = args->verifier[0];
 		*p++ = args->verifier[1];
 	} else
-		p = xdr_encode_sattr(p, args->sattr,
-			req->rq_task->tk_client->cl_tagxid);
+		p = xdr_encode_sattr(p, args->sattr);
 
 	req->rq_slen = xdr_adjust_iovec(req->rq_svec, p);
 	return 0;
@@ -388,8 +383,7 @@ nfs3_xdr_mkdirargs(struct rpc_rqst *req, u32 *p, struct nfs3_mkdirargs *args)
 {
 	p = xdr_encode_fhandle(p, args->fh);
 	p = xdr_encode_array(p, args->name, args->len);
-	p = xdr_encode_sattr(p, args->sattr,
-		req->rq_task->tk_client->cl_tagxid);
+	p = xdr_encode_sattr(p, args->sattr);
 	req->rq_slen = xdr_adjust_iovec(req->rq_svec, p);
 	return 0;
 }
@@ -402,8 +396,7 @@ nfs3_xdr_symlinkargs(struct rpc_rqst *req, u32 *p, struct nfs3_symlinkargs *args
 {
 	p = xdr_encode_fhandle(p, args->fromfh);
 	p = xdr_encode_array(p, args->fromname, args->fromlen);
-	p = xdr_encode_sattr(p, args->sattr,
-		req->rq_task->tk_client->cl_tagxid);
+	p = xdr_encode_sattr(p, args->sattr);
 	p = xdr_encode_array(p, args->topath, args->tolen);
 	req->rq_slen = xdr_adjust_iovec(req->rq_svec, p);
 	return 0;
@@ -418,8 +411,7 @@ nfs3_xdr_mknodargs(struct rpc_rqst *req, u32 *p, struct nfs3_mknodargs *args)
 	p = xdr_encode_fhandle(p, args->fh);
 	p = xdr_encode_array(p, args->name, args->len);
 	*p++ = htonl(args->type);
-	p = xdr_encode_sattr(p, args->sattr,
-		req->rq_task->tk_client->cl_tagxid);
+	p = xdr_encode_sattr(p, args->sattr);
 	if (args->type == NF3CHR || args->type == NF3BLK) {
 		*p++ = htonl(MAJOR(args->rdev));
 		*p++ = htonl(MINOR(args->rdev));
@@ -492,7 +484,7 @@ static int
 nfs3_xdr_readdirres(struct rpc_rqst *req, u32 *p, struct nfs3_readdirres *res)
 {
 	struct xdr_buf *rcvbuf = &req->rq_rcv_buf;
-	struct kvec *iov = rcvbuf->head;
+	struct iovec *iov = rcvbuf->head;
 	struct page **page;
 	int hdrlen, recvd;
 	int status, nr;
@@ -729,7 +721,7 @@ static int
 nfs3_xdr_readlinkres(struct rpc_rqst *req, u32 *p, struct nfs_fattr *fattr)
 {
 	struct xdr_buf *rcvbuf = &req->rq_rcv_buf;
-	struct kvec *iov = rcvbuf->head;
+	struct iovec *iov = rcvbuf->head;
 	unsigned int hdrlen;
 	u32	*strlen, len;
 	char	*string;
@@ -769,7 +761,7 @@ nfs3_xdr_readlinkres(struct rpc_rqst *req, u32 *p, struct nfs_fattr *fattr)
 static int
 nfs3_xdr_readres(struct rpc_rqst *req, u32 *p, struct nfs_readres *res)
 {
-	struct kvec *iov = req->rq_rcv_buf.head;
+	struct iovec *iov = req->rq_rcv_buf.head;
 	int	status, count, ocount, recvd, hdrlen;
 
 	status = ntohl(*p++);

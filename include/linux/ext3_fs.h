@@ -189,13 +189,8 @@ struct ext3_group_desc
 #define EXT3_IUNLINK_FL			0x08000000 /* Immutable unlink */
 #define EXT3_RESERVED_FL		0x80000000 /* reserved for ext3 lib */
 
-#ifdef CONFIG_VSERVER_LEGACY
-#define EXT3_FL_USER_VISIBLE		0x0C03DFFF /* User visible flags */
-#define EXT3_FL_USER_MODIFIABLE		0x0C0380FF /* User modifiable flags */
-#else
 #define EXT3_FL_USER_VISIBLE		0x0003DFFF /* User visible flags */
 #define EXT3_FL_USER_MODIFIABLE		0x000380FF /* User modifiable flags */
-#endif
 
 /*
  * Inode dynamic state flags
@@ -215,6 +210,8 @@ struct ext3_group_desc
 #ifdef CONFIG_JBD_DEBUG
 #define EXT3_IOC_WAIT_FOR_READONLY	_IOR('f', 99, long)
 #endif
+#define EXT3_IOC_GETRSVSZ		_IOR('r', 1, long)
+#define EXT3_IOC_SETRSVSZ		_IOW('r', 2, long)
 #ifdef	CONFIG_VSERVER_LEGACY		
 #define EXT3_IOC_SETXID			FIOC_SETXIDJ
 #endif
@@ -317,24 +314,25 @@ struct ext3_inode {
 /*
  * Mount flags
  */
-#define EXT3_MOUNT_CHECK		0x0001	/* Do mount-time checks */
-#define EXT3_MOUNT_OLDALLOC		0x0002  /* Don't use the new Orlov allocator */
-#define EXT3_MOUNT_GRPID		0x0004	/* Create files with directory's group */
-#define EXT3_MOUNT_DEBUG		0x0008	/* Some debugging messages */
-#define EXT3_MOUNT_ERRORS_CONT		0x0010	/* Continue on errors */
-#define EXT3_MOUNT_ERRORS_RO		0x0020	/* Remount fs ro on errors */
-#define EXT3_MOUNT_ERRORS_PANIC		0x0040	/* Panic on errors */
-#define EXT3_MOUNT_MINIX_DF		0x0080	/* Mimics the Minix statfs */
-#define EXT3_MOUNT_NOLOAD		0x0100	/* Don't use existing journal*/
-#define EXT3_MOUNT_ABORT		0x0200	/* Fatal error detected */
-#define EXT3_MOUNT_DATA_FLAGS		0x0C00	/* Mode for data writes: */
-  #define EXT3_MOUNT_JOURNAL_DATA	0x0400	/* Write data to journal */
-  #define EXT3_MOUNT_ORDERED_DATA	0x0800	/* Flush data before commit */
-  #define EXT3_MOUNT_WRITEBACK_DATA	0x0C00	/* No data ordering */
-#define EXT3_MOUNT_UPDATE_JOURNAL	0x1000	/* Update the journal format */
-#define EXT3_MOUNT_NO_UID32		0x2000  /* Disable 32-bit UIDs */
-#define EXT3_MOUNT_XATTR_USER		0x4000	/* Extended user attributes */
-#define EXT3_MOUNT_POSIX_ACL		0x8000	/* POSIX Access Control Lists */
+#define EXT3_MOUNT_CHECK		0x00001	/* Do mount-time checks */
+#define EXT3_MOUNT_OLDALLOC		0x00002  /* Don't use the new Orlov allocator */
+#define EXT3_MOUNT_GRPID		0x00004	/* Create files with directory's group */
+#define EXT3_MOUNT_DEBUG		0x00008	/* Some debugging messages */
+#define EXT3_MOUNT_ERRORS_CONT		0x00010	/* Continue on errors */
+#define EXT3_MOUNT_ERRORS_RO		0x00020	/* Remount fs ro on errors */
+#define EXT3_MOUNT_ERRORS_PANIC		0x00040	/* Panic on errors */
+#define EXT3_MOUNT_MINIX_DF		0x00080	/* Mimics the Minix statfs */
+#define EXT3_MOUNT_NOLOAD		0x00100	/* Don't use existing journal*/
+#define EXT3_MOUNT_ABORT		0x00200	/* Fatal error detected */
+#define EXT3_MOUNT_DATA_FLAGS		0x00C00	/* Mode for data writes: */
+#define EXT3_MOUNT_JOURNAL_DATA		0x00400	/* Write data to journal */
+#define EXT3_MOUNT_ORDERED_DATA		0x00800	/* Flush data before commit */
+#define EXT3_MOUNT_WRITEBACK_DATA	0x00C00	/* No data ordering */
+#define EXT3_MOUNT_UPDATE_JOURNAL	0x01000	/* Update the journal format */
+#define EXT3_MOUNT_NO_UID32		0x02000  /* Disable 32-bit UIDs */
+#define EXT3_MOUNT_XATTR_USER		0x04000	/* Extended user attributes */
+#define EXT3_MOUNT_POSIX_ACL		0x08000	/* POSIX Access Control Lists */
+#define EXT3_MOUNT_RESERVATION		0x10000	/* Preallocation */
 #define EXT3_MOUNT_TAG_XID		0x20000 /* Enable Context Tags */
 
 /* Compatibility, for having both ext2_fs.h and ext3_fs.h included at once */

@@ -1030,7 +1030,7 @@ void ext2_set_inode_flags(struct inode *inode)
 {
 	unsigned int flags = EXT2_I(inode)->i_flags;
 
-	inode->i_flags &= ~(S_SYNC|S_APPEND|S_IMMUTABLE|S_IUNLINK|S_BARRIER|S_NOATIME|S_DIRSYNC);
+	inode->i_flags &= ~(S_SYNC|S_APPEND|S_IMMUTABLE|S_NOATIME|S_DIRSYNC);
 	if (flags & EXT2_SYNC_FL)
 		inode->i_flags |= S_SYNC;
 	if (flags & EXT2_APPEND_FL)
@@ -1071,10 +1071,10 @@ void ext2_read_inode (struct inode * inode)
 		uid |= le16_to_cpu(raw_inode->i_uid_high) << 16;
 		gid |= le16_to_cpu(raw_inode->i_gid_high) << 16;
 	}
-	inode->i_uid = INOXID_UID(XID_TAG(inode), uid, gid);
-	inode->i_gid = INOXID_GID(XID_TAG(inode), uid, gid);
-	inode->i_xid = INOXID_XID(XID_TAG(inode), uid, gid,
-		le16_to_cpu(raw_inode->i_raw_xid));
+	inode->i_uid = INOXID_UID(uid, gid);
+	inode->i_gid = INOXID_GID(uid, gid);
+	if (inode->i_sb->s_flags & MS_TAGXID)
+		inode->i_xid = INOXID_XID(uid, gid, le16_to_cpu(raw_inode->i_raw_xid));
 
 	inode->i_nlink = le16_to_cpu(raw_inode->i_links_count);
 	inode->i_size = le32_to_cpu(raw_inode->i_size);
@@ -1168,8 +1168,8 @@ static int ext2_update_inode(struct inode * inode, int do_sync)
 	struct ext2_inode_info *ei = EXT2_I(inode);
 	struct super_block *sb = inode->i_sb;
 	ino_t ino = inode->i_ino;
-	uid_t uid = XIDINO_UID(XID_TAG(inode), inode->i_uid, inode->i_xid);
-	gid_t gid = XIDINO_GID(XID_TAG(inode), inode->i_gid, inode->i_xid);
+	uid_t uid = XIDINO_UID(inode->i_uid, inode->i_xid);
+	gid_t gid = XIDINO_GID(inode->i_gid, inode->i_xid);
 	struct buffer_head * bh;
 	struct ext2_inode * raw_inode = ext2_get_inode(sb, ino, &bh);
 	int n;
@@ -1314,15 +1314,11 @@ int ext2_setattr(struct dentry *dentry, struct iattr *iattr)
 	if (error)
 		return error;
 	if ((iattr->ia_valid & ATTR_UID && iattr->ia_uid != inode->i_uid) ||
-	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid) ||
-	    (iattr->ia_valid & ATTR_XID && iattr->ia_xid != inode->i_xid)) {
+	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid)) {
 		error = DQUOT_TRANSFER(inode, iattr) ? -EDQUOT : 0;
 		if (error)
 			return error;
 	}
-	if (iattr->ia_valid & ATTR_ATTR_FLAG)
-		ext2_setattr_flags(inode, iattr->ia_attr_flags);
-
 	error = inode_setattr(inode, iattr);
 	if (!error && (iattr->ia_valid & ATTR_MODE))
 		error = ext2_acl_chmod(inode);

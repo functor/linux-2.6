@@ -3,7 +3,7 @@
  * Copyright (C) Hubertus Franke, IBM Corp. 2003
  *
  * Extension to be included into RBCE to collect delay and sample information
- * Requires user daemon e.g. crbcedmn to activate.
+ * requires user daemon <crbcedmn> to activate.
  *
  * Latest version, more details at http://ckrm.sf.net
  *
@@ -12,12 +12,7 @@
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  *
- * This program is distributed in the hope that it would be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- *
  */
-
 
 /*******************************************************************************
  *
@@ -62,10 +57,10 @@ static int ukcc_fileop_notify(int rchan_id,
 {
 	static int readers = 0;
 	if (fileop == RELAY_FILE_OPEN) {
-		// printk(KERN_DEBUG "got fileop_notify RELAY_FILE_OPEN for file %p\n", 
+		// printk("got fileop_notify RELAY_FILE_OPEN for file %p\n", 
 		//		filp);
 		if (readers) {
-			printk(KERN_DEBUG "only one client allowed, backoff .... \n");
+			printk("only one client allowed, backoff .... \n");
 			return -EPERM;
 		}
 		if (!try_module_get(THIS_MODULE))
@@ -74,7 +69,7 @@ static int ukcc_fileop_notify(int rchan_id,
 		client_attached();
 
 	} else if (fileop == RELAY_FILE_CLOSE) {
-		// printk(KERN_DEBUG "got fileop_notify RELAY_FILE_CLOSE for file %p\n", 
+		// printk("got fileop_notify RELAY_FILE_CLOSE for file %p\n", 
 		//		filp);
 		client_detached();
 		readers--;
@@ -109,10 +104,10 @@ static int create_ukcc_channel(void)
 				  channel_flags,
 				  &ukcc_callbacks, 0, 0, 0, 0, 0, 0, NULL, 0);
 	if (ukcc_channel < 0)
-		printk(KERN_DEBUG "crbce: ukcc creation failed, errcode: %d\n",
+		printk("crbce: ukcc creation failed, errcode: %d\n",
 		       ukcc_channel);
 	else
-		printk(KERN_DEBUG "crbce: ukcc created (%u KB)\n",
+		printk("crbce: ukcc created (%u KB)\n",
 		       UKCC_TOTAL_BUFFER_SIZE >> 10);
 	return ukcc_channel;
 }
@@ -144,9 +139,9 @@ static inline void close_ukcc_channel(void)
 					     (r),(l),-1,NULL) > 0);	\
 		chan_state = chan_isok ? UKCC_OK : UKCC_STANDBY;	\
 		if (chan_wasok && !chan_isok) {				\
-			printk(KERN_DEBUG "Channel stalled\n");			\
+			printk("Channel stalled\n");			\
 		} else if (!chan_wasok && chan_isok) {			\
-			printk(KERN_DEBUG "Channel continues\n");			\
+			printk("Channel continues\n");			\
 		}							\
 	} while (0)
 
@@ -288,7 +283,7 @@ send_task_record(struct task_struct *tsk, int event,
 		return 0;
 	pdata = RBCE_DATA(tsk);
 	if (pdata == NULL) {
-		// printk(KERN_DEBUG "send [%d]<%s>: no pdata\n",tsk->pid,tsk->comm);
+		// printk("send [%d]<%s>: no pdata\n",tsk->pid,tsk->comm);
 		return 0;
 	}
 	if (send_forced || (delta_mode == 0)
@@ -384,7 +379,7 @@ static void send_task_data(void)
 	rec_set_timehdr(&limrec, CRBCE_REC_DATA_DELIMITER, 0, 0);
 	rec_send(&limrec);
 
-	// printk(KERN_DEBUG "send_task_data mode=%d t#=%d s#=%d\n",
+	// printk("send_task_data mode=%d t#=%d s#=%d\n",
 	// 		delta_mode,taskcnt,sendcnt);
 }
 
@@ -503,7 +498,7 @@ static void sample_task_data(unsigned long unused)
 	}
 	while_each_thread(proc, thread);
 	read_unlock(&tasklist_lock);
-//      printk(KERN_DEBUG "sample_timer: run=%d wait=%d\n",run,wait);
+//      printk("sample_timer: run=%d wait=%d\n",run,wait);
 	start_sample_timer();
 }
 
@@ -513,7 +508,7 @@ static void ukcc_cmd_deliver(int rchan_id, char *from, u32 len)
 	struct crbce_cmd_done cmdret;
 	int rc = 0;
 
-//      printk(KERN_DEBUG "ukcc_cmd_deliver: %d %d len=%d:%d\n",cmdrec->type, 
+//      printk("ukcc_cmd_deliver: %d %d len=%d:%d\n",cmdrec->type, 
 //		cmdrec->cmd,cmdrec->len,len);
 
 	cmdrec->len = len;	// add this to reflection so the user doesn't 
@@ -578,20 +573,20 @@ static void ukcc_cmd_deliver(int rchan_id, char *from, u32 len)
 	cmdret.hdr.cmd = cmdrec->cmd;
 	cmdret.rc = rc;
 	rec_send(&cmdret);
-//      printk(KERN_DEBUG "ukcc_cmd_deliver ACK: %d %d rc=%d %d\n",cmdret.hdr.type,
+//      printk("ukcc_cmd_deliver ACK: %d %d rc=%d %d\n",cmdret.hdr.type,
 //			cmdret.hdr.cmd,rc,sizeof(cmdret));
 }
 
 static void client_attached(void)
 {
-	printk(KERN_DEBUG "client [%d]<%s> attached to UKCC\n", current->pid,
+	printk("client [%d]<%s> attached to UKCC\n", current->pid,
 	       current->comm);
 	relay_reset(ukcc_channel);
 }
 
 static void client_detached(void)
 {
-	printk(KERN_DEBUG "client [%d]<%s> detached to UKCC\n", current->pid,
+	printk("client [%d]<%s> detached to UKCC\n", current->pid,
 	       current->comm);
 	chan_state = UKCC_STANDBY;
 	stop_sample_timer();
