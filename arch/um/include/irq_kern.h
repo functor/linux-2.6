@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2001, 2002 Jeff Dike (jdike@karaya.com)
  * Licensed under the GPL
  */
@@ -9,7 +9,7 @@
 #include "linux/interrupt.h"
 
 extern int um_request_irq(unsigned int irq, int fd, int type,
-			  irqreturn_t (*handler)(int, void *, 
+			  irqreturn_t (*handler)(int, void *,
 						 struct pt_regs *),
 			  unsigned long irqflags,  const char * devname,
 			  void *dev_id);

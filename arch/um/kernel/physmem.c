@@ -1,13 +1,14 @@
-/* 
+/*
  * Copyright (C) 2000 - 2003 Jeff Dike (jdike@addtoit.com)
  * Licensed under the GPL
  */
 
 #include "linux/mm.h"
-#include "linux/ghash.h"
+#include "linux/rbtree.h"
 #include "linux/slab.h"
 #include "linux/vmalloc.h"
 #include "linux/bootmem.h"
+#include "linux/module.h"
 #include "asm/types.h"
 #include "asm/pgtable.h"
 #include "kern_util.h"
@@ -19,36 +20,8 @@
 #include "kern.h"
 #include "init.h"
 
-#if 0
-static pgd_t physmem_pgd[PTRS_PER_PGD];
-
-static struct phys_desc *lookup_mapping(void *addr)
-{
-	pgd = &physmem_pgd[pgd_index(addr)];
-	if(pgd_none(pgd))
-		return(NULL);
-
-	pmd = pmd_offset(pgd, addr);
-	if(pmd_none(pmd))
-		return(NULL);
-
-	pte = pte_offset_kernel(pmd, addr);
-	return((struct phys_desc *) pte_val(pte));
-}
-
-static struct add_mapping(void *addr, struct phys_desc *new)
-{
-}
-#endif
-
-#define PHYS_HASHSIZE (8192)
-
-struct phys_desc;
-
-DEF_HASH_STRUCTS(virtmem, PHYS_HASHSIZE, struct phys_desc);
-
 struct phys_desc {
-	struct virtmem_ptrs virt_ptrs;
+	struct rb_node rb;
 	int fd;
 	__u64 offset;
 	void *virt;
@@ -56,21 +29,48 @@ struct phys_desc {
 	struct list_head list;
 };
 
-struct virtmem_table virtmem_hash;
+static struct rb_root phys_mappings = RB_ROOT;
 
-static int virt_cmp(void *virt1, void *virt2)
+static struct rb_node **find_rb(void *virt)
 {
-	return(virt1 != virt2);
+	struct rb_node **n = &phys_mappings.rb_node;
+	struct phys_desc *d;
+
+	while(*n != NULL){
+		d = rb_entry(*n, struct phys_desc, rb);
+		if(d->virt == virt)
+			return(n);
+
+		if(d->virt > virt)
+			n = &(*n)->rb_left;
+		else
+			n = &(*n)->rb_right;
+	}
+
+	return(n);
 }
 
-static int virt_hash(void *virt)
+static struct phys_desc *find_phys_mapping(void *virt)
 {
-	unsigned long addr = ((unsigned long) virt) >> PAGE_SHIFT;
-	return(addr % PHYS_HASHSIZE);
+	struct rb_node **n = find_rb(virt);
+
+	if(*n == NULL)
+		return(NULL);
+
+	return(rb_entry(*n, struct phys_desc, rb));
 }
 
-DEF_HASH(static, virtmem, struct phys_desc, virt_ptrs, void *, virt, virt_cmp, 
-	 virt_hash);
+static void insert_phys_mapping(struct phys_desc *desc)
+{
+	struct rb_node **n = find_rb(desc->virt);
+
+	if(*n != NULL)
+		panic("Physical remapping for %p already present",
+		      desc->virt);
+
+	rb_link_node(&desc->rb, (*n)->rb_parent, n);
+	rb_insert_color(&desc->rb, &phys_mappings);
+}
 
 LIST_HEAD(descriptor_mappings);
 
@@ -106,7 +106,7 @@ static struct desc_mapping *descriptor_mapping(int fd)
 	if(desc == NULL)
 		return(NULL);
 
-	*desc = ((struct desc_mapping) 
+	*desc = ((struct desc_mapping)
 		{ .fd =		fd,
 		  .list =	LIST_HEAD_INIT(desc->list),
 		  .pages =	LIST_HEAD_INIT(desc->pages) });
@@ -127,7 +127,8 @@ int physmem_subst_mapping(void *virt, int fd, __u64 offset, int w)
 		return(-ENOMEM);
 
 	phys = __pa(virt);
-	if(find_virtmem_hash(&virtmem_hash, virt) != NULL)
+	desc = find_phys_mapping(virt);
+  	if(desc != NULL)
 		panic("Address 0x%p is already substituted\n", virt);
 
 	err = -ENOMEM;
@@ -135,14 +136,13 @@ int physmem_subst_mapping(void *virt, int fd, __u64 offset, int w)
 	if(desc == NULL)
 		goto out;
 
-	*desc = ((struct phys_desc) 
-		{ .virt_ptrs =	{ NULL, NULL },
-		  .fd =		fd,
+	*desc = ((struct phys_desc)
+		{ .fd =			fd,
 		  .offset =		offset,
 		  .virt =		virt,
 		  .phys =		__pa(virt),
 		  .list = 		LIST_HEAD_INIT(desc->list) });
-	insert_virtmem_hash(&virtmem_hash, desc);
+	insert_phys_mapping(desc);
 
 	list_add(&desc->list, &fd_maps->pages);
 
@@ -151,7 +151,7 @@ int physmem_subst_mapping(void *virt, int fd, __u64 offset, int w)
 	if(!err)
 		goto out;
 
-	remove_virtmem_hash(&virtmem_hash, desc);
+	rb_erase(&desc->rb, &phys_mappings);
 	kfree(desc);
  out:
 	return(err);
@@ -164,7 +164,7 @@ static void remove_mapping(struct phys_desc *desc)
 	void *virt = desc->virt;
 	int err;
 
-	remove_virtmem_hash(&virtmem_hash, desc);
+	rb_erase(&desc->rb, &phys_mappings);
 	list_del(&desc->list);
 	kfree(desc);
 
@@ -179,7 +179,7 @@ int physmem_remove_mapping(void *virt)
 	struct phys_desc *desc;
 
 	virt = (void *) ((unsigned long) virt & PAGE_MASK);
-	desc = find_virtmem_hash(&virtmem_hash, virt);
+	desc = find_phys_mapping(virt);
 	if(desc == NULL)
 		return(0);
 
@@ -221,6 +221,10 @@ void physmem_forget_descriptor(int fd)
 	kfree(desc);
 }
 
+EXPORT_SYMBOL(physmem_forget_descriptor);
+EXPORT_SYMBOL(physmem_remove_mapping);
+EXPORT_SYMBOL(physmem_subst_mapping);
+
 void arch_free_page(struct page *page, int order)
 {
 	void *virt;
@@ -234,7 +238,9 @@ void arch_free_page(struct page *page, int order)
 
 int is_remapped(void *virt)
 {
-	return(find_virtmem_hash(&virtmem_hash, virt) != NULL);
+  	struct phys_desc *desc = find_phys_mapping(virt);
+
+	return(desc != NULL);
 }
 
 /* Changed during early boot */
@@ -273,7 +279,7 @@ int init_maps(unsigned long physmem, unsigned long iomem, unsigned long highmem)
 
 	if(kmalloc_ok){
 		map = kmalloc(total_len, GFP_KERNEL);
-		if(map == NULL) 
+		if(map == NULL)
 			map = vmalloc(total_len);
 	}
 	else map = alloc_bootmem_low_pages(total_len);
@@ -322,12 +328,12 @@ static unsigned long kmem_top = 0;
 
 unsigned long get_kmem_end(void)
 {
-	if(kmem_top == 0) 
+	if(kmem_top == 0)
 		kmem_top = CHOOSE_MODE(kmem_end_tt, kmem_end_skas);
 	return(kmem_top);
 }
 
-void map_memory(unsigned long virt, unsigned long phys, unsigned long len, 
+void map_memory(unsigned long virt, unsigned long phys, unsigned long len,
 		int r, int w, int x)
 {
 	__u64 offset;
@@ -335,9 +341,14 @@ void map_memory(unsigned long virt, unsigned long phys, unsigned long len,
 
 	fd = phys_mapping(phys, &offset);
 	err = os_map_memory((void *) virt, fd, offset, len, r, w, x);
-	if(err)
+	if(err) {
+		if(err == -ENOMEM)
+			printk("try increasing the host's "
+			       "/proc/sys/vm/max_map_count to <physical "
+			       "memory size>/4096\n");
 		panic("map_memory(0x%lx, %d, 0x%llx, %ld, %d, %d, %d) failed, "
 		      "err = %d\n", virt, fd, offset, len, r, w, x, err);
+	}
 }
 
 #define PFN_UP(x) (((x) + PAGE_SIZE-1) >> PAGE_SHIFT)
@@ -353,7 +364,7 @@ void setup_physmem(unsigned long start, unsigned long reserve_end,
 	physmem_fd = create_mem_file(len + highmem);
 
 	offset = uml_reserved - uml_physmem;
-	err = os_map_memory((void *) uml_reserved, physmem_fd, offset, 
+	err = os_map_memory((void *) uml_reserved, physmem_fd, offset,
 			    len - offset, 1, 1, 0);
 	if(err < 0){
 		os_print_error(err, "Mapping memory");
@@ -367,8 +378,7 @@ void setup_physmem(unsigned long start, unsigned long reserve_end,
 
 int phys_mapping(unsigned long phys, __u64 *offset_out)
 {
-	struct phys_desc *desc = find_virtmem_hash(&virtmem_hash, 
-						   __va(phys & PAGE_MASK));
+	struct phys_desc *desc = find_phys_mapping(__va(phys & PAGE_MASK));
 	int fd = -1;
 
 	if(desc != NULL){
@@ -381,9 +391,9 @@ int phys_mapping(unsigned long phys, __u64 *offset_out)
 	}
 	else if(phys < __pa(end_iomem)){
 		struct iomem_region *region = iomem_regions;
-	
+
 		while(region != NULL){
-			if((phys >= region->phys) && 
+			if((phys >= region->phys) &&
 			   (phys < region->phys + region->size)){
 				fd = region->fd;
 				*offset_out = phys - region->phys;
@@ -419,7 +429,7 @@ __uml_setup("mem=", uml_mem_setup,
 unsigned long find_iomem(char *driver, unsigned long *len_out)
 {
 	struct iomem_region *region = iomem_regions;
-	
+
 	while(region != NULL){
 		if(!strcmp(region->driver, driver)){
 			*len_out = region->size;
@@ -437,7 +447,7 @@ int setup_iomem(void)
 	int err;
 
 	while(region != NULL){
-		err = os_map_memory((void *) iomem_start, region->fd, 0, 
+		err = os_map_memory((void *) iomem_start, region->fd, 0,
 				    region->size, 1, 1, 0);
 		if(err)
 			printk("Mapping iomem region for driver '%s' failed, "
