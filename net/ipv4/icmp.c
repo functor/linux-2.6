@@ -1035,6 +1035,21 @@ int icmp_rcv(struct sk_buff *skb)
   		}
 	}
 
+	/* VNET: Bypass stack if the echo ID was bound to a (presumably raw) socket */
+	if (skb->sk) {
+		switch (icmph->type) {
+		case ICMP_ECHOREPLY:
+		case ICMP_ECHO:
+		case ICMP_TIMESTAMP:
+		case ICMP_TIMESTAMPREPLY:
+		case ICMP_INFO_REQUEST:
+		case ICMP_INFO_REPLY:
+		case ICMP_ADDRESS:
+		case ICMP_ADDRESSREPLY:
+			goto drop;
+		}
+	}
+
 	ICMP_INC_STATS_BH(icmp_pointers[icmph->type].input_entry);
 	icmp_pointers[icmph->type].handler(skb);
 
