@@ -446,9 +446,15 @@ struct inode *ext3_new_inode(handle_t *handle, struct inode * dir, int mode)
 	inode = new_inode(sb);
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
+
+	if (sb->s_flags & MS_TAGXID)
+		inode->i_xid = current->xid;
+	else
+		inode->i_xid = 0;
+
 	if (DLIMIT_ALLOC_INODE(sb, inode->i_xid)) {
 		err = -ENOSPC;
-		goto fail_dlim;
+		goto out;
 	}
 	ei = EXT3_I(inode);
 
@@ -626,7 +632,6 @@ got:
 	goto really_out;
 fail:
 	DLIMIT_FREE_INODE(sb, inode->i_xid);
-fail_dlim:
 	ext3_std_error(sb, err);
 out:
 	iput(inode);

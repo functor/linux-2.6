@@ -1,5 +1,5 @@
-#ifndef _VX_VS_LIMIT_H
-#define _VX_VS_LIMIT_H
+#ifndef _VX_VS_SOCKET_H
+#define _VX_VS_SOCKET_H
 
 
 // #define VX_DEBUG
@@ -10,6 +10,7 @@
 
 #include "vserver/context.h"
 #include "vserver/network.h"
+#include "vserver/debug.h"
 
 
 /* socket accounting */

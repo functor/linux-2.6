@@ -94,8 +94,8 @@ static int mwave_open(struct inode *inode, struct file *file)
 	unsigned int retval = 0;
 
 	PRINTK_3(TRACE_MWAVE,
-		"mwavedd::mwave_open, entry inode %x file %x\n",
-		(int) inode, (int) file);
+		"mwavedd::mwave_open, entry inode %p file %p\n",
+		 inode, file);
 	PRINTK_2(TRACE_MWAVE,
 		"mwavedd::mwave_open, exit return retval %x\n", retval);
 
@@ -107,8 +107,8 @@ static int mwave_close(struct inode *inode, struct file *file)
 	unsigned int retval = 0;
 
 	PRINTK_3(TRACE_MWAVE,
-		"mwavedd::mwave_close, entry inode %x file %x\n",
-		(int) inode, (int) file);
+		"mwavedd::mwave_close, entry inode %p file %p\n",
+		 inode,  file);
 
 	PRINTK_2(TRACE_MWAVE, "mwavedd::mwave_close, exit retval %x\n",
 		retval);
@@ -121,10 +121,11 @@ static int mwave_ioctl(struct inode *inode, struct file *file,
 {
 	unsigned int retval = 0;
 	pMWAVE_DEVICE_DATA pDrvData = &mwave_s_mdd;
+	void __user *arg = (void __user *)ioarg;
 
 	PRINTK_5(TRACE_MWAVE,
-		"mwavedd::mwave_ioctl, entry inode %x file %x cmd %x arg %x\n",
-		(int) inode, (int) file, iocmd, (int) ioarg);
+		"mwavedd::mwave_ioctl, entry inode %p file %p cmd %x arg %x\n",
+		 inode,  file, iocmd, (int) ioarg);
 
 	switch (iocmd) {
 
@@ -164,8 +165,7 @@ static int mwave_ioctl(struct inode *inode, struct file *file,
 				" retval %x from tp3780I_QueryAbilities\n",
 				retval);
 			if (retval == 0) {
-				if( copy_to_user((char *) ioarg,
-							(char *) &rAbilities,
+				if( copy_to_user(arg, &rAbilities,
 							sizeof(MW_ABILITIES)) )
 					return -EFAULT;
 			}
@@ -179,13 +179,12 @@ static int mwave_ioctl(struct inode *inode, struct file *file,
 		case IOCTL_MW_READ_DATA:
 		case IOCTL_MW_READCLEAR_DATA: {
 			MW_READWRITE rReadData;
-			unsigned short *pusBuffer = 0;
+			unsigned short __user *pusBuffer = NULL;
 	
-			if( copy_from_user((char *) &rReadData,
-						(char *) ioarg,
+			if( copy_from_user(&rReadData, arg,
 						sizeof(MW_READWRITE)) )
 				return -EFAULT;
-			pusBuffer = (unsigned short *) (rReadData.pBuf);
+			pusBuffer = (unsigned short __user *) (rReadData.pBuf);
 	
 			PRINTK_4(TRACE_MWAVE,
 				"mwavedd::mwave_ioctl IOCTL_MW_READ_DATA,"
@@ -193,7 +192,7 @@ static int mwave_ioctl(struct inode *inode, struct file *file,
 				rReadData.ulDataLength, ioarg, pusBuffer);
 			retval = tp3780I_ReadWriteDspDStore(&pDrvData->rBDData,
 					iocmd,
-					(void *) pusBuffer,
+					pusBuffer,
 					rReadData.ulDataLength,
 					rReadData.usDspAddress);
 		}
@@ -201,12 +200,12 @@ static int mwave_ioctl(struct inode *inode, struct file *file,
 	
 		case IOCTL_MW_READ_INST: {
 			MW_READWRITE rReadData;
-			unsigned short *pusBuffer = 0;
+			unsigned short __user *pusBuffer = NULL;
 	
-			if( copy_from_user((char *) &rReadData, (char *) ioarg,
+			if( copy_from_user(&rReadData, arg,
 						sizeof(MW_READWRITE)) )
 				return -EFAULT;
-			pusBuffer = (unsigned short *) (rReadData.pBuf);
+			pusBuffer = (unsigned short __user *) (rReadData.pBuf);
 	
 			PRINTK_4(TRACE_MWAVE,
 				"mwavedd::mwave_ioctl IOCTL_MW_READ_INST,"
@@ -222,13 +221,12 @@ static int mwave_ioctl(struct inode *inode, struct file *file,
 	
 		case IOCTL_MW_WRITE_DATA: {
 			MW_READWRITE rWriteData;
-			unsigned short *pusBuffer = 0;
+			unsigned short __user *pusBuffer = NULL;
 	
-			if( copy_from_user((char *) &rWriteData,
-						(char *) ioarg,
+			if( copy_from_user(&rWriteData, arg,
 						sizeof(MW_READWRITE)) )
 				return -EFAULT;
-			pusBuffer = (unsigned short *) (rWriteData.pBuf);
+			pusBuffer = (unsigned short __user *) (rWriteData.pBuf);
 	
 			PRINTK_4(TRACE_MWAVE,
 				"mwavedd::mwave_ioctl IOCTL_MW_WRITE_DATA,"
@@ -244,13 +242,12 @@ static int mwave_ioctl(struct inode *inode, struct file *file,
 	
 		case IOCTL_MW_WRITE_INST: {
 			MW_READWRITE rWriteData;
-			unsigned short *pusBuffer = 0;
+			unsigned short __user *pusBuffer = NULL;
 	
-			if( copy_from_user((char *) &rWriteData,
-						(char *) ioarg,
+			if( copy_from_user(&rWriteData, arg,
 						sizeof(MW_READWRITE)) )
 				return -EFAULT;
-			pusBuffer = (unsigned short *) (rWriteData.pBuf);
+			pusBuffer = (unsigned short __user *)(rWriteData.pBuf);
 	
 			PRINTK_4(TRACE_MWAVE,
 				"mwavedd::mwave_ioctl IOCTL_MW_WRITE_INST,"
@@ -388,23 +385,23 @@ static int mwave_ioctl(struct inode *inode, struct file *file,
 }
 
 
-static ssize_t mwave_read(struct file *file, char *buf, size_t count,
+static ssize_t mwave_read(struct file *file, char __user *buf, size_t count,
                           loff_t * ppos)
 {
 	PRINTK_5(TRACE_MWAVE,
-		"mwavedd::mwave_read entry file %p, buf %p, count %x ppos %p\n",
+		"mwavedd::mwave_read entry file %p, buf %p, count %zx ppos %p\n",
 		file, buf, count, ppos);
 
 	return -EINVAL;
 }
 
 
-static ssize_t mwave_write(struct file *file, const char *buf,
+static ssize_t mwave_write(struct file *file, const char __user *buf,
                            size_t count, loff_t * ppos)
 {
 	PRINTK_5(TRACE_MWAVE,
 		"mwavedd::mwave_write entry file %p, buf %p,"
-		" count %x ppos %p\n",
+		" count %zx ppos %p\n",
 		file, buf, count, ppos);
 
 	return -EINVAL;

@@ -3,15 +3,6 @@
 
 #include "vserver/context.h"
 
-// #define VX_DEBUG
-
-
-#if defined(VX_DEBUG)
-#define vxdprintk(x...) printk("vxd: " x)
-#else
-#define vxdprintk(x...)
-#endif
-
 
 #define vx_task_xid(t)	((t)->xid)
 

@@ -348,7 +348,7 @@
 #define	PVR	SPRN_PVR	/* Processor Version */
 #define	PIR	SPRN_PIR	/* Processor ID */
 #define	PURR	SPRN_PURR	/* Processor Utilization of Resource Register */
-#define	RPA	SPRN_RPA	/* Required Physical Address Register */
+//#define	RPA	SPRN_RPA	/* Required Physical Address Register */
 #define	SDR1	SPRN_SDR1      	/* MMU hash base register */
 #define	SPR0	SPRN_SPRG0	/* Supervisor Private Registers */
 #define	SPR1	SPRN_SPRG1
@@ -382,10 +382,10 @@
 #define	PV_ICESTAR	0x0036
 #define	PV_SSTAR	0x0037
 #define	PV_POWER4p	0x0038
-#define PV_GPUL		0x0039
+#define PV_970		0x0039
 #define	PV_POWER5	0x003A
 #define PV_POWER5p	0x003B
-#define PV_GPULp	0x003C
+#define PV_970FX	0x003C
 #define	PV_630        	0x0040
 #define	PV_630p	        0x0041
 
@@ -543,8 +543,7 @@ struct thread_struct {
 	double		fpr[32];	/* Complete floating point set */
 	unsigned long	fpscr;		/* Floating point status (plus pad) */
 	unsigned long	fpexc_mode;	/* Floating-point exception mode */
-	unsigned long	saved_msr;	/* Save MSR across signal handlers */
-	unsigned long	saved_softe;	/* Ditto for Soft Enable/Disable */
+	unsigned long	pad[3];		/* was saved_msr, saved_softe */
 #ifdef CONFIG_ALTIVEC
 	/* Complete AltiVec register set */
 	vector128	vr[32] __attribute((aligned(16)));

@@ -33,13 +33,13 @@ void radeonfb_fillrect(struct fb_info *info, const struct fb_fillrect *region)
   
 	if (info->state != FBINFO_STATE_RUNNING)
 		return;
-	if (radeon_accel_disabled()) {
+	if (info->flags & FBINFO_HWACCEL_DISABLED) {
 		cfb_fillrect(info, region);
 		return;
 	}
 
-	vxres = info->var.xres;
-	vyres = info->var.yres;
+	vxres = info->var.xres_virtual;
+	vyres = info->var.yres_virtual;
 
 	memcpy(&modded, region, sizeof(struct fb_fillrect));
 
@@ -71,9 +71,10 @@ static void radeonfb_prim_copyarea(struct radeonfb_info *rinfo,
 	radeon_fifo_wait(3);
 	OUTREG(DP_GUI_MASTER_CNTL,
 		rinfo->dp_gui_master_cntl /* i.e. GMC_DST_32BPP */
+		| GMC_BRUSH_NONE
 		| GMC_SRC_DSTCOLOR
 		| ROP3_S 
-		| DP_SRC_RECT );
+		| DP_SRC_SOURCE_MEMORY );
 	OUTREG(DP_WRITE_MSK, 0xffffffff);
 	OUTREG(DP_CNTL, (xdir>=0 ? DST_X_LEFT_TO_RIGHT : 0)
 			| (ydir>=0 ? DST_Y_TOP_TO_BOTTOM : 0));
@@ -99,13 +100,13 @@ void radeonfb_copyarea(struct fb_info *info, const struct fb_copyarea *area)
   
 	if (info->state != FBINFO_STATE_RUNNING)
 		return;
-	if (radeon_accel_disabled()) {
+	if (info->flags & FBINFO_HWACCEL_DISABLED) {
 		cfb_copyarea(info, area);
 		return;
 	}
 
-	vxres = info->var.xres;
-	vyres = info->var.yres;
+	vxres = info->var.xres_virtual;
+	vyres = info->var.yres_virtual;
 
 	if(!modded.width || !modded.height ||
 	   modded.sx >= vxres || modded.sy >= vyres ||

@@ -132,7 +132,7 @@ extern void		ip_rt_send_redirect(struct sk_buff *skb);
 
 extern unsigned		inet_addr_type(u32 addr);
 extern void		ip_rt_multicast_event(struct in_device *);
-extern int		ip_rt_ioctl(unsigned int cmd, void *arg);
+extern int		ip_rt_ioctl(unsigned int cmd, void __user *arg);
 extern void		ip_rt_get_source(u8 *src, struct rtable *rt);
 extern int		ip_rt_dump(struct sk_buff *skb,  struct netlink_callback *cb);
 
@@ -222,7 +222,8 @@ static inline int ip_route_connect(struct rtable **rp, u32 dst,
 
 	if (sk)
 		nx_info = sk->sk_nx_info;
-	vxdprintk("ip_route_connect(%p) %p,%p;%lx\n",
+	vxdprintk(VXD_CBIT(net, 4),
+		"ip_route_connect(%p) %p,%p;%lx",
 		sk, nx_info, sk->sk_socket,
 		(sk->sk_socket?sk->sk_socket->flags:0));
 

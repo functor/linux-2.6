@@ -68,7 +68,6 @@ extern int sys_sigreturn(struct pt_regs *regs);
 long long __ashrdi3(long long, int);
 long long __ashldi3(long long, int);
 long long __lshrdi3(long long, int);
-int abs(int);
 
 extern unsigned long mm_ptov (unsigned long paddr);
 
@@ -199,6 +198,10 @@ EXPORT_SYMBOL(flush_tlb_page);
 EXPORT_SYMBOL(last_task_used_altivec);
 EXPORT_SYMBOL(giveup_altivec);
 #endif /* CONFIG_ALTIVEC */
+#ifdef CONFIG_SPE
+EXPORT_SYMBOL(last_task_used_spe);
+EXPORT_SYMBOL(giveup_spe);
+#endif /* CONFIG_SPE */
 #ifdef CONFIG_SMP
 EXPORT_SYMBOL(smp_call_function);
 EXPORT_SYMBOL(smp_hw_index);
@@ -272,8 +275,6 @@ EXPORT_SYMBOL(memscan);
 EXPORT_SYMBOL(memcmp);
 EXPORT_SYMBOL(memchr);
 
-EXPORT_SYMBOL(abs);
-
 #if defined(CONFIG_FB_VGA16_MODULE)
 EXPORT_SYMBOL(screen_info);
 #endif
@@ -324,7 +325,7 @@ EXPORT_SYMBOL(debugger_fault_handler);
 EXPORT_SYMBOL(cpm_install_handler);
 EXPORT_SYMBOL(cpm_free_handler);
 #endif /* CONFIG_8xx */
-#if defined(CONFIG_8xx) || defined(CONFIG_40x)
+#if defined(CONFIG_8xx) || defined(CONFIG_40x) || defined(CONFIG_85xx)
 EXPORT_SYMBOL(__res);
 #endif
 #if defined(CONFIG_8xx)

@@ -357,15 +357,14 @@ void __init iSeries_init(unsigned long r3, unsigned long r4, unsigned long r5,
 	HvCallEvent_dmaToSp(cmd_line, 2 * 64* 1024, 256,
 			HvLpDma_Direction_RemoteToLocal);
 
-	p = q = cmd_line + 255;
-	while (p > cmd_line) {
-		if ((*p == 0) || (*p == ' ') || (*p == '\n'))
-			--p;
-		else
+	p = cmd_line;
+	q = cmd_line + 255;
+	while( p < q ) {
+		if (!*p || *p == '\n')
 			break;
+		++p;
 	}
-	if (p < q)
-		*(p + 1) = 0;
+	*p = 0;
 
         if (strstr(cmd_line, "dprofile=")) {
                 for (q = cmd_line; (p = strstr(q, "dprofile=")) != 0; ) {
@@ -572,7 +571,7 @@ static void __init build_iSeries_Memory_Map(void)
 static void __init setup_iSeries_cache_sizes(void)
 {
 	unsigned int i, n;
-	unsigned int procIx = get_paca()->xLpPaca.xDynHvPhysicalProcIndex;
+	unsigned int procIx = get_paca()->lppaca.xDynHvPhysicalProcIndex;
 
 	systemcfg->iCacheL1Size =
 		xIoHriProcessorVpd[procIx].xInstCacheSize * 1024;
@@ -666,7 +665,7 @@ extern unsigned long ppc_tb_freq;
 void __init iSeries_setup_arch(void)
 {
 	void *eventStack;
-	unsigned procIx = get_paca()->xLpPaca.xDynHvPhysicalProcIndex;
+	unsigned procIx = get_paca()->lppaca.xDynHvPhysicalProcIndex;
 
 	/* Add an eye catcher and the systemcfg layout version number */
 	strcpy(systemcfg->eye_catcher, "SYSTEMCFG:PPC64");

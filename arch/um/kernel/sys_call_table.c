@@ -237,6 +237,8 @@ extern syscall_handler_t sys_epoll_wait;
 extern syscall_handler_t sys_remap_file_pages;
 extern syscall_handler_t sys_set_tid_address;
 
+extern syscall_handler_t sys_vserver;
+
 #ifdef CONFIG_NFSD
 #define NFSSERVCTL sys_nfsservctl
 #else
@@ -489,6 +491,7 @@ syscall_handler_t *sys_call_table[] = {
 	[ __NR_epoll_wait ] = sys_epoll_wait,
         [ __NR_remap_file_pages ] = sys_remap_file_pages,
         [ __NR_set_tid_address ] = sys_set_tid_address,
+        [ __NR_vserver ] = sys_vserver,
 
 	ARCH_SYSCALLS
 	[ LAST_SYSCALL + 1 ... NR_syscalls ] = 

@@ -38,7 +38,7 @@ static struct vx_info *__alloc_vx_info(xid_t xid)
 {
 	struct vx_info *new = NULL;
 	
-	vxdprintk("alloc_vx_info(%d)\n", xid);
+	vxdprintk(VXD_CBIT(xid, 0), "alloc_vx_info(%d)*", xid);
 
 	/* would this benefit from a slab cache? */
 	new = kmalloc(sizeof(struct vx_info), GFP_KERNEL);
@@ -62,7 +62,8 @@ static struct vx_info *__alloc_vx_info(xid_t xid)
 	new->vx_bcaps = CAP_INIT_EFF_SET;
 	new->vx_ccaps = 0;
 
-	vxdprintk("alloc_vx_info(%d) = %p\n", xid, new);
+	vxdprintk(VXD_CBIT(xid, 0),
+		"alloc_vx_info(%d) = %p", xid, new);
 	return new;
 }
 
@@ -72,7 +73,8 @@ static struct vx_info *__alloc_vx_info(xid_t xid)
 
 static void __dealloc_vx_info(struct vx_info *vxi)
 {
-	vxdprintk("dealloc_vx_info(%p)\n", vxi);
+	vxdprintk(VXD_CBIT(xid, 0),
+		"dealloc_vx_info(%p)", vxi);
 
 	vxi->vx_hlist.next = LIST_POISON1;
 	vxi->vx_id = -1;
@@ -119,7 +121,8 @@ static inline void __hash_vx_info(struct vx_info *vxi)
 {
 	struct hlist_head *head;
 	
-	vxdprintk("__hash_vx_info: %p[#%d]\n", vxi, vxi->vx_id);
+	vxdprintk(VXD_CBIT(xid, 4),
+		"__hash_vx_info: %p[#%d]", vxi, vxi->vx_id);
 	get_vx_info(vxi);
 	head = &vx_info_hash[__hashval(vxi->vx_id)];
 	hlist_add_head_rcu(&vxi->vx_hlist, head);
@@ -132,7 +135,8 @@ static inline void __hash_vx_info(struct vx_info *vxi)
 
 static inline void __unhash_vx_info(struct vx_info *vxi)
 {
-	vxdprintk("__unhash_vx_info: %p[#%d]\n", vxi, vxi->vx_id);
+	vxdprintk(VXD_CBIT(xid, 4),
+		"__unhash_vx_info: %p[#%d]", vxi, vxi->vx_id);
 	hlist_del_rcu(&vxi->vx_hlist);
 	put_vx_info(vxi);
 }
@@ -173,8 +177,11 @@ static inline xid_t __vx_dynamic_id(void)
 	do {
 		if (++seq > MAX_S_CONTEXT)
 			seq = MIN_D_CONTEXT;
-		if (!__lookup_vx_info(seq))
+		if (!__lookup_vx_info(seq)) {
+			vxdprintk(VXD_CBIT(xid, 4),
+				"__vx_dynamic_id: [#%d]", seq);
 			return seq;
+		}
 	} while (barrier != seq);
 	return 0;
 }
@@ -188,7 +195,7 @@ static struct vx_info * __loc_vx_info(int id, int *err)
 {
 	struct vx_info *new, *vxi = NULL;
 	
-	vxdprintk("loc_vx_info(%d)\n", id);
+	vxdprintk(VXD_CBIT(xid, 1), "loc_vx_info(%d)*", id);
 
 	if (!(new = __alloc_vx_info(id))) {
 		*err = -ENOMEM;
@@ -210,11 +217,13 @@ static struct vx_info * __loc_vx_info(int id, int *err)
 	else if ((vxi = __lookup_vx_info(id))) {
 		/* context in setup is not available */
 		if (vxi->vx_flags & VXF_STATE_SETUP) {
-			vxdprintk("loc_vx_info(%d) = %p (not available)\n", id, vxi);
+			vxdprintk(VXD_CBIT(xid, 0),
+				"loc_vx_info(%d) = %p (not available)", id, vxi);
 			vxi = NULL;
 			*err = -EBUSY;
 		} else {
-			vxdprintk("loc_vx_info(%d) = %p (found)\n", id, vxi);
+			vxdprintk(VXD_CBIT(xid, 0),
+				"loc_vx_info(%d) = %p (found)", id, vxi);
 			get_vx_info(vxi);
 			*err = 0;
 		}
@@ -222,7 +231,8 @@ static struct vx_info * __loc_vx_info(int id, int *err)
 	}
 
 	/* new context requested */
-	vxdprintk("loc_vx_info(%d) = %p (new)\n", id, new);
+	vxdprintk(VXD_CBIT(xid, 0),
+		"loc_vx_info(%d) = %p (new)", id, new);
 	__hash_vx_info(get_vx_info(new));
 	vxi = new, new = NULL;
 	*err = 1;
@@ -240,12 +250,12 @@ out_unlock:
 
 
 
-void rcu_free_vx_info(void *obj)
+void rcu_free_vx_info(struct rcu_head *head)
 {
-	struct vx_info *vxi = obj;
+	struct vx_info *vxi = container_of(head, struct vx_info, vx_rcu);
 	int usecnt, refcnt;
 
-	BUG_ON(!vxi);
+	BUG_ON(!vxi || !head);
 
 	usecnt = atomic_read(&vxi->vx_usecnt);
 	BUG_ON(usecnt < 0);
@@ -253,6 +263,8 @@ void rcu_free_vx_info(void *obj)
 	refcnt = atomic_read(&vxi->vx_refcnt);
 	BUG_ON(refcnt < 0);
 
+	vxdprintk(VXD_CBIT(xid, 3),
+		"rcu_free_vx_info(%p): uc=%d", vxi, usecnt);
 	if (!usecnt)
 		__dealloc_vx_info(vxi);
 	else
@@ -385,24 +397,22 @@ void vx_mask_bcaps(struct task_struct *p)
 static inline int vx_nofiles_task(struct task_struct *tsk)
 {
 	struct files_struct *files = tsk->files;
-	const unsigned long *obptr, *cbptr;
+	const unsigned long *obptr;
 	int count, total;
 
 	spin_lock(&files->file_lock);
 	obptr = files->open_fds->fds_bits;
-	cbptr = files->close_on_exec->fds_bits;
 	count = files->max_fds / (sizeof(unsigned long) * 8);
 	for (total = 0; count > 0; count--) {
 		if (*obptr)
 			total += hweight_long(*obptr);
 		obptr++;
-	/*	if (*cbptr)
-			total += hweight_long(*cbptr);
-		cbptr++; */
 	}
 	spin_unlock(&files->file_lock);
 	return total;
 }
+
+#if 0
 
 static inline int vx_openfd_task(struct task_struct *tsk)
 {
@@ -422,6 +432,8 @@ static inline int vx_openfd_task(struct task_struct *tsk)
 	return total;
 }
 
+#endif
+
 /*
  *	migrate task to new context
  *	gets vxi, puts old_vxi on change
@@ -439,26 +451,32 @@ int vx_migrate_task(struct task_struct *p, struct vx_info *vxi)
 	if (old_vxi == vxi)
 		goto out;
 
-	vxdprintk("vx_migrate_task(%p,%p[#%d.%d)\n", p, vxi,
+	vxdprintk(VXD_CBIT(xid, 5),
+		"vx_migrate_task(%p,%p[#%d.%d])", p, vxi,
 		vxi->vx_id, atomic_read(&vxi->vx_usecnt));
 
 	if (!(ret = vx_migrate_user(p, vxi))) {
-		int openfd, nofiles;
+		int nofiles;
 
 		task_lock(p);
-		openfd = vx_openfd_task(p);
+		// openfd = vx_openfd_task(p);
 		nofiles = vx_nofiles_task(p);
 
 		if (old_vxi) {
 			atomic_dec(&old_vxi->cacct.nr_threads);
 			atomic_dec(&old_vxi->limit.rcur[RLIMIT_NPROC]);
-			atomic_sub(nofiles, &vxi->limit.rcur[RLIMIT_NOFILE]);
-			atomic_sub(openfd, &vxi->limit.rcur[RLIMIT_OPENFD]);
+			atomic_sub(nofiles, &old_vxi->limit.rcur[RLIMIT_NOFILE]);
+			// atomic_sub(openfd, &old_vxi->limit.rcur[RLIMIT_OPENFD]);
 		}		
 		atomic_inc(&vxi->cacct.nr_threads);
 		atomic_inc(&vxi->limit.rcur[RLIMIT_NPROC]);
 		atomic_add(nofiles, &vxi->limit.rcur[RLIMIT_NOFILE]);
-		atomic_add(openfd, &vxi->limit.rcur[RLIMIT_OPENFD]);
+		// atomic_add(openfd, &vxi->limit.rcur[RLIMIT_OPENFD]);
+
+		vxdprintk(VXD_CBIT(xid, 5),
+			"moved task %p into vxi:%p[#%d]",
+			p, vxi, vxi->vx_id);
+
 		/* should be handled in set_vx_info !! */
 		if (old_vxi)
 			clr_vx_info(&p->vx_info);

@@ -19,6 +19,7 @@
 #include <asm/thread_info.h>
 #include <asm/glue.h>
 #include <asm/ptrace.h>
+#include <asm/vfpmacros.h>
 
 #include "entry-header.S"
 
@@ -561,7 +562,7 @@ ENTRY(soft_irq_mask)
 		.macro	irq_prio_table
 		.endm
 
-#elif defined(CONFIG_ARCH_IOP310) || defined(CONFIG_ARCH_ADIFCC)
+#elif defined(CONFIG_ARCH_IOP310)
 
 		.macro	disable_fiq
 		.endm
@@ -951,7 +952,7 @@ __dabt_svc:	sub	sp, sp, #S_FRAME_SIZE
 		bl	do_DataAbort
 		disable_irq r0
 		ldr	r0, [sp, #S_PSR]
-		msr	spsr, r0
+		msr	spsr_cxsf, r0
 		ldmia	sp, {r0 - pc}^			@ load r0 - pc, cpsr
 
 		.align	5
@@ -987,7 +988,7 @@ preempt_return:
 		strne	r0, [r0, -r0]			@ bug()
 #endif
 		ldr	r0, [sp, #S_PSR]		@ irqs are already disabled
-		msr	spsr, r0
+		msr	spsr_cxsf, r0
 		ldmia	sp, {r0 - pc}^			@ load r0 - pc, cpsr
 
 		.ltorg
@@ -1030,7 +1031,7 @@ __und_svc:	sub	sp, sp, #S_FRAME_SIZE
 
 1:		disable_irq r0
 		ldr	lr, [sp, #S_PSR]		@ Get SVC cpsr
-		msr	spsr, lr
+		msr	spsr_cxsf, lr
 		ldmia	sp, {r0 - pc}^			@ Restore SVC registers
 
 		.align	5
@@ -1051,7 +1052,7 @@ __pabt_svc:	sub	sp, sp, #S_FRAME_SIZE
 		bl	do_PrefetchAbort		@ call abort handler
 		disable_irq r0
 		ldr	r0, [sp, #S_PSR]
-		msr	spsr, r0
+		msr	spsr_cxsf, r0
 		ldmia	sp, {r0 - pc}^			@ load r0 - pc, cpsr
 
 		.align	5
@@ -1198,8 +1199,13 @@ call_fpe:	enable_irq r10				@ Enable interrupts
 		mov	pc, lr				@ CP#7
 		mov	pc, lr				@ CP#8
 		mov	pc, lr				@ CP#9
+#ifdef CONFIG_VFP
+		b	do_vfp				@ CP#10 (VFP)
+		b	do_vfp				@ CP#11 (VFP)
+#else
 		mov	pc, lr				@ CP#10 (VFP)
 		mov	pc, lr				@ CP#11 (VFP)
+#endif
 		mov	pc, lr				@ CP#12
 		mov	pc, lr				@ CP#13
 		mov	pc, lr				@ CP#14 (Debug)
@@ -1260,6 +1266,13 @@ ENTRY(__switch_to)
 		ldr	r3, [r2, #TI_CPU_DOMAIN]!
 		stmia	ip, {r4 - sl, fp, sp, lr}	@ Store most regs on stack
 		mcr	p15, 0, r3, c3, c0, 0		@ Set domain register
+#ifdef CONFIG_VFP
+		@ Always disable VFP so we can lazily save/restore the old
+		@ state. This occurs in the context of the previous thread.
+		VFPFMRX	r4, FPEXC
+		bic	r4, r4, #FPEXC_ENABLE
+		VFPFMXR	FPEXC, r4
+#endif
 		ldmib	r2, {r4 - sl, fp, sp, pc}	@ Load all regs saved previously
 
 		__INIT
@@ -1290,7 +1303,7 @@ vector_IRQ:	@
 		mrs	r13, cpsr
 		bic	r13, r13, #MODE_MASK
 		orr	r13, r13, #MODE_SVC
-		msr	spsr, r13			@ switch to SVC_32 mode
+		msr	spsr_cxsf, r13			@ switch to SVC_32 mode
 
 		and	lr, lr, #15
 		ldr	lr, [pc, lr, lsl #2]
@@ -1333,7 +1346,7 @@ vector_data:	@
 		mrs	r13, cpsr
 		bic	r13, r13, #MODE_MASK
 		orr	r13, r13, #MODE_SVC
-		msr	spsr, r13			@ switch to SVC_32 mode
+		msr	spsr_cxsf, r13			@ switch to SVC_32 mode
 
 		and	lr, lr, #15
 		ldr	lr, [pc, lr, lsl #2]
@@ -1377,7 +1390,7 @@ vector_prefetch:
 		mrs	r13, cpsr
 		bic	r13, r13, #MODE_MASK
 		orr	r13, r13, #MODE_SVC
-		msr	spsr, r13			@ switch to SVC_32 mode
+		msr	spsr_cxsf, r13			@ switch to SVC_32 mode
 
 		ands	lr, lr, #15
 		ldr	lr, [pc, lr, lsl #2]
@@ -1420,7 +1433,7 @@ vector_undefinstr:
 		mrs	r13, cpsr
 		bic	r13, r13, #MODE_MASK
 		orr	r13, r13, #MODE_SVC
-		msr	spsr, r13			@ switch to SVC_32 mode
+		msr	spsr_cxsf, r13			@ switch to SVC_32 mode
 
 		and	lr, lr, #15
 		ldr	lr, [pc, lr, lsl #2]

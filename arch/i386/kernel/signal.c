@@ -56,16 +56,15 @@ sys_sigsuspend(int history0, int history1, old_sigset_t mask)
 }
 
 asmlinkage int
-sys_rt_sigsuspend(sigset_t __user *unewset, size_t sigsetsize)
+sys_rt_sigsuspend(struct pt_regs regs)
 {
-	struct pt_regs * regs = (struct pt_regs *) &unewset;
 	sigset_t saveset, newset;
 
 	/* XXX: Don't preclude handling different sized sigset_t's.  */
-	if (sigsetsize != sizeof(sigset_t))
+	if (regs.ecx != sizeof(sigset_t))
 		return -EINVAL;
 
-	if (copy_from_user(&newset, unewset, sizeof(newset)))
+	if (copy_from_user(&newset, (sigset_t __user *)regs.ebx, sizeof(newset)))
 		return -EFAULT;
 	sigdelsetmask(&newset, ~_BLOCKABLE);
 
@@ -75,11 +74,11 @@ sys_rt_sigsuspend(sigset_t __user *unewset, size_t sigsetsize)
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
 
-	regs->eax = -EINTR;
+	regs.eax = -EINTR;
 	while (1) {
 		current->state = TASK_INTERRUPTIBLE;
 		schedule();
-		if (do_signal(regs, &saveset))
+		if (do_signal(&regs, &saveset))
 			return -EINTR;
 	}
 }
@@ -117,9 +116,13 @@ sys_sigaction(int sig, const struct old_sigaction __user *act,
 }
 
 asmlinkage int
-sys_sigaltstack(const stack_t __user *uss, stack_t __user *uoss)
+sys_sigaltstack(unsigned long ebx)
 {
-	struct pt_regs *regs = (struct pt_regs *) &uss;
+	/* This is needed to make gcc realize it doesn't own the "struct pt_regs" */
+	struct pt_regs *regs = (struct pt_regs *)&ebx;
+	const stack_t __user *uss = (const stack_t __user *)ebx;
+	stack_t __user *uoss = (stack_t __user *)regs->ecx;
+
 	return do_sigaltstack(uss, uoss, regs->esp);
 }
 
@@ -333,12 +336,13 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs * regs, size_t frame_size)
 
 /* These symbols are defined with the addresses in the vsyscall page.
    See vsyscall-sigreturn.S.  */
-extern void __kernel_sigreturn, __kernel_rt_sigreturn;
+extern void __user __kernel_sigreturn;
+extern void __user __kernel_rt_sigreturn;
 
 static void setup_frame(int sig, struct k_sigaction *ka,
 			sigset_t *set, struct pt_regs * regs)
 {
-	void *restorer;
+	void __user *restorer;
 	struct sigframe __user *frame;
 	int err = 0;
 
@@ -415,7 +419,7 @@ give_sigsegv:
 static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 			   sigset_t *set, struct pt_regs * regs)
 {
-	void *restorer;
+	void __user *restorer;
 	struct rt_sigframe __user *frame;
 	int err = 0;
 

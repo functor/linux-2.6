@@ -131,7 +131,6 @@ nfs_delete_inode(struct inode * inode)
 		printk(KERN_ERR "nfs_delete_inode: inode %ld has pending RPC requests\n", inode->i_ino);
 	}
 
-//	DLIMIT_FREE_INODE(inode->i_sb, inode->i_xid);
 	clear_inode(inode);
 }
 
@@ -391,6 +390,7 @@ nfs_create_client(struct nfs_server *server, const struct nfs_mount_data *data)
 	clnt->cl_intr     = (server->flags & NFS_MOUNT_INTR) ? 1 : 0;
 	clnt->cl_softrtry = (server->flags & NFS_MOUNT_SOFT) ? 1 : 0;
 	clnt->cl_droppriv = (server->flags & NFS_MOUNT_BROKEN_SUID) ? 1 : 0;
+	clnt->cl_tagxid   = (server->flags & NFS_MOUNT_TAGXID) ? 1 : 0;
 	clnt->cl_chatty   = 1;
 
 	return clnt;
@@ -461,7 +461,7 @@ nfs_fill_super(struct super_block *sb, struct nfs_mount_data *data, int silent)
 
 	/* Create RPC client handles */
 	server->client = nfs_create_client(server, data);
-	if (server->client == NULL)
+	if (IS_ERR(server->client))
 		goto out_fail;
 	/* RFC 2623, sec 2.3.2 */
 	if (authflavor != RPC_AUTH_UNIX) {
@@ -700,11 +700,6 @@ nfs_fhget(struct super_block *sb, struct nfs_fh *fh, struct nfs_fattr *fattr)
 	if (inode->i_state & I_NEW) {
 		struct nfs_inode *nfsi = NFS_I(inode);
 
-/*		if (DLIMIT_ALLOC_INODE(sb, inode->i_xid)) {
-			err = -ENOSPC;
-			goto fail_dlim;
-		}
-*/
 		/* We set i_ino for the few things that still rely on it,
 		 * such as stat(2) */
 		inode->i_ino = hash;
@@ -739,10 +734,9 @@ nfs_fhget(struct super_block *sb, struct nfs_fh *fh, struct nfs_fattr *fattr)
 			nfsi->change_attr = fattr->change_attr;
 		inode->i_size = nfs_size_to_loff_t(fattr->size);
 		inode->i_nlink = fattr->nlink;
-		inode->i_uid = INOXID_UID(fattr->uid, fattr->gid);
-		inode->i_gid = INOXID_GID(fattr->uid, fattr->gid);
-		if (inode->i_sb->s_flags & MS_TAGXID)
-			inode->i_xid = INOXID_XID(fattr->uid, fattr->gid, 0);
+		inode->i_uid = INOXID_UID(XID_TAG(inode), fattr->uid, fattr->gid);
+		inode->i_gid = INOXID_GID(XID_TAG(inode), fattr->uid, fattr->gid);
+		inode->i_xid = INOXID_XID(XID_TAG(inode), fattr->uid, fattr->gid, 0);
 					 /* maybe fattr->xid someday */
 		if (fattr->valid & (NFS_ATTR_FATTR_V3 | NFS_ATTR_FATTR_V4)) {
 			/*
@@ -1131,10 +1125,9 @@ int nfs_refresh_inode(struct inode *inode, struct nfs_fattr *fattr)
 	} else if (S_ISREG(inode->i_mode) && new_isize > cur_size)
 			nfsi->flags |= NFS_INO_INVALID_ATTR;
 
-	uid = INOXID_UID(fattr->uid, fattr->gid);
-	gid = INOXID_GID(fattr->uid, fattr->gid);
-	if (inode->i_sb->s_flags & MS_TAGXID)
-		xid = INOXID_XID(fattr->uid, fattr->gid, 0);
+	uid = INOXID_UID(XID_TAG(inode), fattr->uid, fattr->gid);
+	gid = INOXID_GID(XID_TAG(inode), fattr->uid, fattr->gid);
+	xid = INOXID_XID(XID_TAG(inode), fattr->uid, fattr->gid, 0);
 
 	/* Have any file permissions changed? */
 	if ((inode->i_mode & S_IALLUGO) != (fattr->mode & S_IALLUGO)
@@ -1259,10 +1252,9 @@ static int nfs_update_inode(struct inode *inode, struct nfs_fattr *fattr, unsign
 	memcpy(&inode->i_ctime, &fattr->ctime, sizeof(inode->i_ctime));
 	memcpy(&inode->i_atime, &fattr->atime, sizeof(inode->i_atime));
 
-	uid = INOXID_UID(fattr->uid, fattr->gid);
-	gid = INOXID_GID(fattr->uid, fattr->gid);
-	if (inode->i_sb->s_flags & MS_TAGXID)
-		xid = INOXID_XID(fattr->uid, fattr->gid, 0);
+	uid = INOXID_UID(XID_TAG(inode), fattr->uid, fattr->gid);
+	gid = INOXID_GID(XID_TAG(inode), fattr->uid, fattr->gid);
+	xid = INOXID_XID(XID_TAG(inode), fattr->uid, fattr->gid, 0);
 
 	if ((inode->i_mode & S_IALLUGO) != (fattr->mode & S_IALLUGO) ||
 	    inode->i_uid != uid ||
@@ -1591,15 +1583,16 @@ static int nfs4_fill_super(struct super_block *sb, struct nfs4_mount_data *data,
 		err = PTR_ERR(clnt);
 		goto out_remove_list;
 	}
+
+	clnt->cl_intr     = (server->flags & NFS4_MOUNT_INTR) ? 1 : 0;
+	clnt->cl_softrtry = (server->flags & NFS4_MOUNT_SOFT) ? 1 : 0;
+	server->client    = clnt;
+
 	err = -ENOMEM;
 	if (server->nfs4_state->cl_idmap == NULL) {
 		printk(KERN_WARNING "NFS: failed to create idmapper.\n");
 		goto out_shutdown;
 	}
-
-	clnt->cl_intr     = (server->flags & NFS4_MOUNT_INTR) ? 1 : 0;
-	clnt->cl_softrtry = (server->flags & NFS4_MOUNT_SOFT) ? 1 : 0;
-	server->client    = clnt;
 
 	if (clnt->cl_auth->au_flavor != authflavour) {
 		if (rpcauth_create(authflavour, clnt) == NULL) {

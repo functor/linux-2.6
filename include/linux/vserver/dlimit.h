@@ -57,7 +57,9 @@ struct dl_info {
 	unsigned int dl_nrlmult;		/* non root limit mult */
 };
 
-extern void rcu_free_dl_info(void *);
+struct rcu_head;
+
+extern void rcu_free_dl_info(struct rcu_head *);
 extern void unhash_dl_info(struct dl_info *);
 
 extern struct dl_info *locate_dl_info(struct super_block *, xid_t);

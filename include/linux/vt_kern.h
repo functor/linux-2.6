@@ -11,6 +11,7 @@
 #include <linux/kd.h>
 #include <linux/tty.h>
 #include <linux/console_struct.h>
+#include <linux/mm.h>
 
 /*
  * Presently, a lot of graphics programs do not restore the contents of
@@ -49,6 +50,10 @@ void do_unblank_screen(int leaving_gfx);
 void unblank_screen(void);
 void poke_blanked_console(void);
 int con_font_op(int currcons, struct console_font_op *op);
+int con_font_set(int currcons, struct console_font_op *op);
+int con_font_get(int currcons, struct console_font_op *op);
+int con_font_default(int currcons, struct console_font_op *op);
+int con_font_copy(int currcons, struct console_font_op *op);
 int con_set_cmap(unsigned char __user *cmap);
 int con_get_cmap(unsigned char __user *cmap);
 void scrollback(int);
@@ -83,5 +88,13 @@ void complete_change_console(unsigned int new_console);
 int vt_waitactive(int vt);
 void change_console(unsigned int);
 void reset_vc(unsigned int new_console);
+
+/*
+ * vc_screen.c shares this temporary buffer with the console write code so that
+ * we can easily avoid touching user space while holding the console spinlock.
+ */
+extern char con_buf[PAGE_SIZE];
+#define CON_BUF_SIZE	PAGE_SIZE
+extern struct semaphore con_buf_sem;
 
 #endif /* _VT_KERN_H */

@@ -21,6 +21,19 @@
 #include <asm/uaccess.h>
 
 
+const char *vlimit_name[NUM_LIMITS] = {
+	[RLIMIT_CPU]		= "CPU",
+	[RLIMIT_RSS]		= "RSS",
+	[RLIMIT_NPROC]		= "NPROC",
+	[RLIMIT_NOFILE]	= "NOFILE",
+	[RLIMIT_MEMLOCK]	= "VML",
+	[RLIMIT_AS]		= "VM",
+	[RLIMIT_LOCKS]		= "LOCKS",
+	[RLIMIT_MSGQUEUE]	= "MSGQ",
+	[VLIMIT_NSOCK]		= "NSOCK",
+};
+
+
 static int is_valid_rlimit(int id)
 {
 	int valid = 0;

@@ -1,26 +1,14 @@
 #ifndef _VX_VS_MEMORY_H
 #define _VX_VS_MEMORY_H
 
-
-// #define VX_DEBUG
-
 #include <linux/kernel.h>
 #include <linux/rcupdate.h>
 #include <linux/sched.h>
 
 #include "vserver/context.h"
 #include "vserver/limit.h"
+#include "vserver/debug.h"
 
-
-#define VX_DEBUG_ACC_RSS   0
-#define VX_DEBUG_ACC_VM    0
-#define VX_DEBUG_ACC_VML   0
-
-#if	(VX_DEBUG_ACC_RSS) || (VX_DEBUG_ACC_VM) || (VX_DEBUG_ACC_VML)
-#define vxdprintk(x...) printk("vxd: " x)
-#else
-#define vxdprintk(x...)
-#endif
 
 #define vx_acc_page(m, d, v, r) \
 	__vx_acc_page(&(m->v), m->mm_vx_info, r, d, __FILE__, __LINE__)
@@ -28,6 +16,13 @@
 static inline void __vx_acc_page(unsigned long *v, struct vx_info *vxi,
                 int res, int dir, char *file, int line)
 {
+	if (VXD_RLIMIT(res, RLIMIT_RSS) ||
+		VXD_RLIMIT(res, RLIMIT_AS) ||
+		VXD_RLIMIT(res, RLIMIT_MEMLOCK))
+		vxlprintk(1, "vx_acc_page[%5d,%s,%2d]: %5d%s",
+			(vxi?vxi->vx_id:-1), vlimit_name[res], res,
+			(vxi?atomic_read(&vxi->limit.rcur[res]):0),
+			(dir?"++":"--"), file, line);
         if (v) {
                 if (dir > 0)
                         ++(*v);
@@ -47,15 +42,15 @@ static inline void __vx_acc_page(unsigned long *v, struct vx_info *vxi,
 	__vx_acc_pages(&(m->v), m->mm_vx_info, r, p, __FILE__, __LINE__)
 
 static inline void __vx_acc_pages(unsigned long *v, struct vx_info *vxi,
-                int res, int pages, char *file, int line)
+                int res, int pages, char *_file, int _line)
 {
-        if ((res == RLIMIT_RSS && VX_DEBUG_ACC_RSS) ||
-		(res == RLIMIT_AS && VX_DEBUG_ACC_VM) ||
-		(res == RLIMIT_MEMLOCK && VX_DEBUG_ACC_VML))
-		vxdprintk("vx_acc_pages  [%5d,%2d]: %5d += %5d in %s:%d\n",
-			(vxi?vxi->vx_id:-1), res,
-			(vxi?atomic_read(&vxi->limit.res[res]):0),
-			pages, file, line);
+	if (VXD_RLIMIT(res, RLIMIT_RSS) ||
+		VXD_RLIMIT(res, RLIMIT_AS) ||
+		VXD_RLIMIT(res, RLIMIT_MEMLOCK))
+		vxlprintk(1, "vx_acc_pages[%5d,%s,%2d]: %5d += %5d",
+			(vxi?vxi->vx_id:-1), vlimit_name[res], res,
+			(vxi?atomic_read(&vxi->limit.rcur[res]):0),
+			pages, _file, _line);
         if (pages == 0)
                 return;
         if (v)
@@ -75,7 +70,7 @@ static inline void __vx_acc_pages(unsigned long *v, struct vx_info *vxi,
 #define vx_acc_rsspages(m,p)   vx_acc_pages(m, p, rss,       RLIMIT_RSS)
 
 #define vx_pages_add(s,r,p)    __vx_acc_pages(0, s, r, p, __FILE__, __LINE__)
-#define vx_pages_sub(s,r,p)    __vx_pages_add(s, r, -(p))
+#define vx_pages_sub(s,r,p)    vx_pages_add(s, r, -(p))
 
 #define vx_vmpages_inc(m)      vx_acc_vmpage(m, 1)
 #define vx_vmpages_dec(m)      vx_acc_vmpage(m,-1)
@@ -98,18 +93,18 @@ static inline void __vx_acc_pages(unsigned long *v, struct vx_info *vxi,
         __vx_pages_avail((m)->mm_vx_info, (r), (p), __FILE__, __LINE__)
 
 static inline int __vx_pages_avail(struct vx_info *vxi,
-                int res, int pages, char *file, int line)
+                int res, int pages, char *_file, int _line)
 {
 	unsigned long value;
 
-        if ((res == RLIMIT_RSS && VX_DEBUG_ACC_RSS) ||
-                (res == RLIMIT_AS && VX_DEBUG_ACC_VM) ||
-                (res == RLIMIT_MEMLOCK && VX_DEBUG_ACC_VML))
-                printk("vx_pages_avail[%5d,%2d]: %5ld > %5d + %5d in %s:%d\n",
-                        (vxi?vxi->vx_id:-1), res,
+	if (VXD_RLIMIT(res, RLIMIT_RSS) ||
+		VXD_RLIMIT(res, RLIMIT_AS) ||
+		VXD_RLIMIT(res, RLIMIT_MEMLOCK))
+		vxlprintk(1, "vx_pages_avail[%5d,%s,%2d]: %5ld > %5d + %5d",
+                        (vxi?vxi->vx_id:-1), vlimit_name[res], res,
 			(vxi?vxi->limit.rlim[res]:1),
                         (vxi?atomic_read(&vxi->limit.rcur[res]):0),
-			pages, file, line);
+			pages, _file, _line);
         if (!vxi)
                 return 1;
 	value = atomic_read(&vxi->limit.rcur[res]);	

@@ -49,9 +49,11 @@ int reiserfs_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 			return -EFAULT;
 
 		oldflags = REISERFS_I(inode) -> i_attrs;
-		if ( (oldflags & REISERFS_IMMUTABLE_FL) || ( ( (flags ^ oldflags) &
-		   (REISERFS_IMMUTABLE_FL | REISERFS_IUNLINK_FL | REISERFS_APPEND_FL)) &&
-		     !capable( CAP_LINUX_IMMUTABLE ) ) )
+		if ( ( (oldflags & REISERFS_IMMUTABLE_FL) ||
+			( (flags ^ oldflags) &
+			(REISERFS_IMMUTABLE_FL | REISERFS_IUNLINK_FL |
+			 REISERFS_APPEND_FL) ) ) &&
+			!capable( CAP_LINUX_IMMUTABLE ) )
 			return -EPERM;
 			
 		if( ( flags & REISERFS_NOTAIL_FL ) &&

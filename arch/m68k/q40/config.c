@@ -64,7 +64,6 @@ void q40_set_vectors (void);
 
 extern void q40_mksound(unsigned int /*freq*/, unsigned int /*ticks*/ );
 
-extern char *saved_command_line;
 extern char m68k_debug_device[];
 static void q40_mem_console_write(struct console *co, const char *b,
 				    unsigned int count);
@@ -123,7 +122,7 @@ static void q40_heartbeat(int on)
 }
 #endif
 
-void q40_reset()
+void q40_reset(void)
 {
         halted=1;
         printk ("\n\n*******************************************\n"
@@ -132,7 +131,7 @@ void q40_reset()
 	Q40_LED_ON();
 	while(1) ;
 }
-void q40_halt()
+void q40_halt(void)
 {
         halted=1;
         printk ("\n\n*******************\n"
@@ -296,7 +295,7 @@ int q40_hwclk(int op, struct rtc_time *t)
 	return 0;
 }
 
-unsigned int q40_get_ss()
+unsigned int q40_get_ss(void)
 {
 	return bcd2bin(Q40_RTC_SECS);
 }

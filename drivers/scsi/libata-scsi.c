@@ -182,7 +182,8 @@ int ata_scsi_slave_config(struct scsi_device *sdev)
 		 * 65534 when Jens Axboe's patch for dynamically
 		 * determining max_sectors is merged.
 		 */
-		if (dev->flags & ATA_DFLAG_LBA48) {
+		if ((dev->flags & ATA_DFLAG_LBA48) &&
+		    ((dev->flags & ATA_DFLAG_LOCK_SECTORS) == 0)) {
 			sdev->host->max_sectors = 2048;
 			blk_queue_max_sectors(sdev->request_queue, 2048);
 		}
@@ -334,6 +335,24 @@ static unsigned int ata_scsi_rw_xlat(struct ata_queued_cmd *qc, u8 *scsicmd)
 	return 1;
 }
 
+static int ata_scsi_qc_complete(struct ata_queued_cmd *qc, u8 drv_stat)
+{
+	struct scsi_cmnd *cmd = qc->scsicmd;
+
+	if (unlikely(drv_stat & (ATA_ERR | ATA_BUSY | ATA_DRQ))) {
+		if (is_atapi_taskfile(&qc->tf))
+			cmd->result = SAM_STAT_CHECK_CONDITION;
+		else
+			ata_to_sense_error(qc);
+	} else {
+		cmd->result = SAM_STAT_GOOD;
+	}
+
+	qc->scsidone(cmd);
+
+	return 0;
+}
+
 /**
  *	ata_scsi_translate - Translate then issue SCSI command to ATA device
  *	@ap: ATA port to which the command is addressed
@@ -367,6 +386,7 @@ static void ata_scsi_translate(struct ata_port *ap, struct ata_device *dev,
 	if (!qc)
 		return;
 
+	/* data is present; dma-map it */
 	if (cmd->sc_data_direction == SCSI_DATA_READ ||
 	    cmd->sc_data_direction == SCSI_DATA_WRITE) {
 		if (unlikely(cmd->request_bufflen < 1)) {
@@ -375,8 +395,16 @@ static void ata_scsi_translate(struct ata_port *ap, struct ata_device *dev,
 			goto err_out;
 		}
 
-		qc->flags |= ATA_QCFLAG_SG; /* data is present; dma-map it */
+		if (cmd->use_sg)
+			ata_sg_init(qc, cmd->request_buffer, cmd->use_sg);
+		else
+			ata_sg_init_one(qc, cmd->request_buffer,
+					cmd->request_bufflen);
+
+		qc->pci_dma_dir = scsi_to_pci_dma_dir(cmd->sc_data_direction);
 	}
+
+	qc->complete_fn = ata_scsi_qc_complete;
 
 	if (xlat_func(qc, scsicmd))
 		goto err_out;

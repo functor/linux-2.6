@@ -23,7 +23,9 @@ static int __init init_vserver(void)
 {
 	int ret = 0;
 
+#ifdef	CONFIG_VSERVER_DEBUG
 	vserver_register_sysctl();
+#endif
 	return ret;
 }
 
@@ -31,7 +33,9 @@ static int __init init_vserver(void)
 static void __exit exit_vserver(void)
 {
 
+#ifdef	CONFIG_VSERVER_DEBUG
 	vserver_unregister_sysctl();
+#endif
 	return;
 }
 

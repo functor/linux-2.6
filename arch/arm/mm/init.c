@@ -24,13 +24,7 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
-#ifdef CONFIG_CPU_32
-#define TABLE_OFFSET	(PTRS_PER_PTE)
-#else
-#define TABLE_OFFSET	0
-#endif
-
-#define TABLE_SIZE	((TABLE_OFFSET + PTRS_PER_PTE) * sizeof(pte_t))
+#define TABLE_SIZE	(2 * PTRS_PER_PTE * sizeof(pte_t))
 
 DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
 
@@ -58,7 +52,7 @@ void show_mem(void)
 
 	printk("Mem-info:\n");
 	show_free_areas();
-	printk("Free swap:       %6dkB\n",nr_swap_pages<<(PAGE_SHIFT-10));
+	printk("Free swap:       %6ldkB\n", nr_swap_pages<<(PAGE_SHIFT-10));
 
 	for (node = 0; node < numnodes; node++) {
 		struct page *page, *end;
@@ -289,14 +283,13 @@ static __init void reserve_node_zero(unsigned int bootmap_pfn, unsigned int boot
 	 */
 	reserve_bootmem_node(pgdat, __pa(&_stext), &_end - &_stext);
 
-#ifdef CONFIG_CPU_32
 	/*
 	 * Reserve the page tables.  These are already in use,
 	 * and can only be in node 0.
 	 */
 	reserve_bootmem_node(pgdat, __pa(swapper_pg_dir),
 			     PTRS_PER_PGD * sizeof(pgd_t));
-#endif
+
 	/*
 	 * And don't forget to reserve the allocator bitmap,
 	 * which will be freed later.
@@ -502,7 +495,7 @@ void __init paging_init(struct meminfo *mi, struct machine_desc *mdesc)
 		 */
 		arch_adjust_zones(node, zone_size, zhole_size);
 
-		free_area_init_node(node, pgdat, 0, zone_size,
+		free_area_init_node(node, pgdat, NULL, zone_size,
 				bdata->node_boot_start >> PAGE_SHIFT, zhole_size);
 	}
 

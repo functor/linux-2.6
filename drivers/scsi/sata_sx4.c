@@ -153,7 +153,7 @@ static void pdc_eng_timeout(struct ata_port *ap);
 static void pdc_20621_phy_reset (struct ata_port *ap);
 static int pdc_port_start(struct ata_port *ap);
 static void pdc_port_stop(struct ata_port *ap);
-static void pdc20621_fill_sg(struct ata_queued_cmd *qc);
+static void pdc20621_qc_prep(struct ata_queued_cmd *qc);
 static void pdc_tf_load_mmio(struct ata_port *ap, struct ata_taskfile *tf);
 static void pdc_exec_command_mmio(struct ata_port *ap, struct ata_taskfile *tf);
 static void pdc20621_host_stop(struct ata_host_set *host_set);
@@ -171,6 +171,7 @@ static void pdc20621_get_from_dimm(struct ata_probe_ent *pe,
 #endif
 static void pdc20621_put_to_dimm(struct ata_probe_ent *pe, 
 				 void *psource, u32 offset, u32 size);
+static void pdc20621_irq_clear(struct ata_port *ap);
 
 
 static Scsi_Host_Template pdc_sata_sht = {
@@ -200,9 +201,11 @@ static struct ata_port_operations pdc_20621_ops = {
 	.phy_reset		= pdc_20621_phy_reset,
 	.bmdma_setup            = pdc20621_dma_setup,
 	.bmdma_start            = pdc20621_dma_start,
-	.fill_sg		= pdc20621_fill_sg,
+	.qc_prep		= pdc20621_qc_prep,
+	.qc_issue		= ata_qc_issue_prot,
 	.eng_timeout		= pdc_eng_timeout,
 	.irq_handler		= pdc20621_interrupt,
+	.irq_clear		= pdc20621_irq_clear,
 	.port_start		= pdc_port_start,
 	.port_stop		= pdc_port_stop,
 	.host_stop		= pdc20621_host_stop,
@@ -434,7 +437,7 @@ static inline void pdc20621_host_pkt(struct ata_taskfile *tf, u8 *buf,
 		buf32[dw + 3]);
 }
 
-static void pdc20621_fill_sg(struct ata_queued_cmd *qc)
+static void pdc20621_qc_prep(struct ata_queued_cmd *qc)
 {
 	struct scatterlist *sg = qc->sg;
 	struct ata_port *ap = qc->ap;
@@ -445,6 +448,9 @@ static void pdc20621_fill_sg(struct ata_queued_cmd *qc)
 	unsigned int portno = ap->port_no;
 	unsigned int i, last, idx, total_len = 0, sgt_len;
 	u32 *buf = (u32 *) &pp->dimm_buf[PDC_DIMM_HEADER_SZ];
+
+	if (!(qc->flags & ATA_QCFLAG_DMAMAP))
+		return;
 
 	VPRINTK("ata%u: ENTER\n", ap->id);
 
@@ -697,6 +703,16 @@ static inline unsigned int pdc20621_host_intr( struct ata_port *ap,
 	}
 
 	return handled;
+}
+
+static void pdc20621_irq_clear(struct ata_port *ap)
+{
+	struct ata_host_set *host_set = ap->host_set;
+	void *mmio = host_set->mmio_base;
+
+	mmio += PDC_CHIP0_OFS;
+
+	readl(mmio + PDC_20621_SEQMASK);
 }
 
 static irqreturn_t pdc20621_interrupt (int irq, void *dev_instance, struct pt_regs *regs)

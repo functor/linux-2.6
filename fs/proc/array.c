@@ -142,6 +142,7 @@ static inline const char * get_task_state(struct task_struct *tsk)
 					   TASK_INTERRUPTIBLE |
 					   TASK_UNINTERRUPTIBLE |
 					   TASK_ZOMBIE |
+					   TASK_DEAD |
 					   TASK_STOPPED |
 					   TASK_ONHOLD);
 	const char **p = &task_state_array[0];
@@ -157,9 +158,11 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 {
 	struct group_info *group_info;
 	int g;
-	pid_t ppid;
+	pid_t pid, ppid, tgid;
 
 	read_lock(&tasklist_lock);
+	tgid = vx_map_tgid(current->vx_info, p->tgid);
+	pid = vx_map_tgid(current->vx_info, p->pid);
 	ppid = vx_map_tgid(current->vx_info, p->real_parent->pid);
 	buffer += sprintf(buffer,
 		"State:\t%s\n"
@@ -172,8 +175,7 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		"Gid:\t%d\t%d\t%d\t%d\n",
 		get_task_state(p),
 		(p->sleep_avg/1024)*100/(1020000000/1024),
-	       	p->tgid,
-		p->pid, p->pid ? ppid : 0,
+		tgid, pid, p->pid ? ppid : 0,
 		p->pid && p->ptrace ? p->parent->pid : 0,
 		p->uid, p->euid, p->suid, p->fsuid,
 		p->gid, p->egid, p->sgid, p->fsgid);
@@ -350,7 +352,7 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 	sigset_t sigign, sigcatch;
 	char state;
 	int res;
- 	pid_t ppid, pgid = -1, sid = -1;
+	pid_t pid, ppid, pgid = -1, sid = -1;
 	int num_threads = 0;
 	struct mm_struct *mm;
 	unsigned long long start_time;
@@ -366,6 +368,7 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 		if (bias_jiffies > task->start_time)
 			bias_jiffies = task->start_time;
 	}
+	pid = vx_map_tgid(task->vx_info, task->pid);
 
 	mm = task->mm;
 	if(mm)
@@ -415,7 +418,7 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 	res = sprintf(buffer,"%d (%s) %c %d %d %d %d %d %lu %lu \
 %lu %lu %lu %lu %lu %ld %ld %ld %ld %d %ld %llu %lu %ld %lu %lu %lu %lu %lu \
 %lu %lu %lu %lu %lu %lu %lu %lu %d %d %lu %lu\n",
-		task->pid,
+		pid,
 		task->comm,
 		state,
 		ppid,

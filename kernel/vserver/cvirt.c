@@ -24,10 +24,13 @@
 void vx_vsi_uptime(struct timespec *uptime, struct timespec *idle)
 {
 	struct vx_info *vxi = current->vx_info;
+	struct timeval bias;
+
+	jiffies_to_timeval(vxi->cvirt.bias_jiffies - INITIAL_JIFFIES, &bias);
 
 	set_normalized_timespec(uptime,
-		uptime->tv_sec - vxi->cvirt.bias_tp.tv_sec,
-		uptime->tv_nsec - vxi->cvirt.bias_tp.tv_nsec);
+		uptime->tv_sec - bias.tv_sec,
+		uptime->tv_nsec - bias.tv_usec*1000);
 	if (!idle)
 		return;
 	set_normalized_timespec(idle,

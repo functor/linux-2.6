@@ -221,7 +221,7 @@ retry:
 /**
  * out_of_memory - is the system out of memory?
  */
-void out_of_memory(void)
+void out_of_memory(int gfp_mask)
 {
 	/*
 	 * oom_lock protects out_of_memory()'s static variables.
@@ -230,12 +230,6 @@ void out_of_memory(void)
 	static spinlock_t oom_lock = SPIN_LOCK_UNLOCKED;
 	static unsigned long first, last, count, lastkill;
 	unsigned long now, since;
-
-	/*
-	 * Enough swap space left?  Not OOM.
-	 */
-	if (nr_swap_pages > 0)
-		return;
 
 	spin_lock(&oom_lock);
 	now = jiffies;
@@ -277,6 +271,9 @@ void out_of_memory(void)
 	 * Ok, really out of memory. Kill something.
 	 */
 	lastkill = now;
+
+	printk("oom-killer: gfp_mask=0x%x\n", gfp_mask);
+	show_free_areas();
 
 	/* oom_kill() sleeps */
 	spin_unlock(&oom_lock);

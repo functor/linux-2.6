@@ -32,6 +32,8 @@
 				   termination then *2 for unicode versions */
 #define MAX_PASSWORD_SIZE 16
 
+#define CIFS_MIN_RCV_POOL 4
+
 /*
  * MAX_REQ is the maximum number of requests that WE will send
  * on one socket concurently. It also matches the most common
@@ -211,6 +213,8 @@ struct cifsTconInfo {
 	atomic_t num_deletes;
 	atomic_t num_mkdirs;
 	atomic_t num_rmdirs;
+	atomic_t num_renames;
+	atomic_t num_t2renames;
 	__u64    bytes_read;
 	__u64    bytes_written;
 	spinlock_t stat_lock;
@@ -389,7 +393,7 @@ GLOBAL_EXTERN char Local_System_Name[15];
  */
 GLOBAL_EXTERN atomic_t sesInfoAllocCount;
 GLOBAL_EXTERN atomic_t tconInfoAllocCount;
-
+GLOBAL_EXTERN atomic_t tcpSesAllocCount;
 GLOBAL_EXTERN atomic_t tcpSesReconnectCount;
 GLOBAL_EXTERN atomic_t tconInfoReconnectCount;
 

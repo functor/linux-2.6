@@ -36,11 +36,11 @@
 #include <linux/personality.h>
 #include <linux/init.h>
 #include <linux/flat.h>
+#include <linux/vs_memory.h>
 
 #include <asm/byteorder.h>
 #include <asm/system.h>
 #include <asm/uaccess.h>
-#include <asm/pgalloc.h>
 #include <asm/unaligned.h>
 #include <asm/cacheflush.h>
 

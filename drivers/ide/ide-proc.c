@@ -321,7 +321,6 @@ static int proc_ide_read_imodel
 		case ide_cy82c693:	name = "cy82c693";	break;
 		case ide_4drives:	name = "4drives";	break;
 		case ide_pmac:		name = "mac-io";	break;
-		case ide_pc9800:	name = "pc9800";	break;
 		default:		name = "(unknown)";	break;
 	}
 	len = sprintf(page, "%s\n", name);
@@ -791,5 +790,5 @@ void proc_ide_destroy(void)
 {
 	remove_proc_entry("ide/drivers", proc_ide_root);
 	destroy_proc_ide_interfaces();
-	remove_proc_entry("ide", 0);
+	remove_proc_entry("ide", NULL);
 }

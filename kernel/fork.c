@@ -38,6 +38,7 @@
 #include <linux/rmap.h>
 #include <linux/vs_network.h>
 #include <linux/vs_limit.h>
+#include <linux/vs_memory.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -80,7 +81,6 @@ static kmem_cache_t *task_struct_cachep;
 static void free_task(struct task_struct *tsk)
 {
 	free_thread_info(tsk->thread_info);
-	vxdprintk("freeing up task %p\n", tsk);
 	clr_vx_info(&tsk->vx_info);
 	clr_nx_info(&tsk->nx_info);
 	free_task_struct(tsk);
@@ -906,7 +906,6 @@ struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	retval = -ENOMEM;
-
 	p = dup_task_struct(current);
 	if (!p)
 		goto fork_out;
@@ -925,18 +924,18 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	}
 	if (p->mm && vx_flags(VXF_FORK_RSS, 0)) {
 		if (!vx_rsspages_avail(p->mm, p->mm->rss))
-			goto bad_fork_free;
+			goto bad_fork_cleanup_vm;
 	}
 
 	retval = -EAGAIN;
         if (!vx_nproc_avail(1))
-                goto bad_fork_free;
+                goto bad_fork_cleanup_vm;
 
 	if (atomic_read(&p->user->processes) >=
 			p->rlim[RLIMIT_NPROC].rlim_cur) {
 		if (!capable(CAP_SYS_ADMIN) && !capable(CAP_SYS_RESOURCE) &&
 				p->user != &root_user)
-			goto bad_fork_free;
+			goto bad_fork_cleanup_vm;
 	}
 
 	atomic_inc(&p->user->__count);
@@ -1004,7 +1003,6 @@ struct task_struct *copy_process(unsigned long clone_flags,
  	}
 #endif
 
-	retval = -ENOMEM;
 	if ((retval = security_task_alloc(p)))
 		goto bad_fork_cleanup_policy;
 	if ((retval = audit_alloc(p)))
@@ -1124,12 +1122,12 @@ struct task_struct *copy_process(unsigned long clone_flags,
 		link_pid(p, p->pids + PIDTYPE_TGID, &p->group_leader->pids[PIDTYPE_TGID].pid);
 
 	nr_threads++;
-	vxi = current->vx_info;
+	/* p is copy of current */
+	vxi = p->vx_info;
 	if (vxi) {
 		atomic_inc(&vxi->cacct.nr_threads);
-		// atomic_inc(&vxi->limit.rcur[RLIMIT_NPROC]);
+		atomic_inc(&vxi->limit.rcur[RLIMIT_NPROC]);
 	}
-	vx_nproc_inc();
 	write_unlock_irq(&tasklist_lock);
 	retval = 0;
 
@@ -1173,6 +1171,9 @@ bad_fork_cleanup_count:
 	put_group_info(p->group_info);
 	atomic_dec(&p->user->processes);
 	free_uid(p->user);
+bad_fork_cleanup_vm:
+	if (p->mm && !(clone_flags & CLONE_VM))
+		vx_pages_sub(p->mm->mm_vx_info, RLIMIT_AS, p->mm->total_vm);
 bad_fork_free:
 	free_task(p);
 	goto fork_out;

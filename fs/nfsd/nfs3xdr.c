@@ -75,7 +75,7 @@ decode_fh(u32 *p, struct svc_fh *fhp)
 static inline u32 *
 encode_fh(u32 *p, struct svc_fh *fhp)
 {
-	int size = fhp->fh_handle.fh_size;
+	unsigned int size = fhp->fh_handle.fh_size;
 	*p++ = htonl(size);
 	if (size) p[XDR_QUADLEN(size)-1]=0;
 	memcpy(p, &fhp->fh_handle.fh_base, size);
@@ -122,6 +122,8 @@ static inline u32 *
 decode_sattr3(u32 *p, struct iattr *iap)
 {
 	u32	tmp;
+	uid_t	uid = 0;
+	gid_t	gid = 0;
 
 	iap->ia_valid = 0;
 
@@ -131,12 +133,15 @@ decode_sattr3(u32 *p, struct iattr *iap)
 	}
 	if (*p++) {
 		iap->ia_valid |= ATTR_UID;
-		iap->ia_uid = ntohl(*p++);
+		uid = ntohl(*p++);
 	}
 	if (*p++) {
 		iap->ia_valid |= ATTR_GID;
-		iap->ia_gid = ntohl(*p++);
+		gid = ntohl(*p++);
 	}
+	iap->ia_uid = INOXID_UID(1, uid, gid);
+	iap->ia_gid = INOXID_GID(1, uid, gid);
+	iap->ia_xid = INOXID_XID(1, uid, gid, 0);
 	if (*p++) {
 		u64	newsize;
 
@@ -178,9 +183,9 @@ encode_fattr3(struct svc_rqst *rqstp, u32 *p, struct svc_fh *fhp)
 	*p++ = htonl((u32) stat.mode);
 	*p++ = htonl((u32) stat.nlink);
 	*p++ = htonl((u32) nfsd_ruid(rqstp,
-		XIDINO_UID(stat.uid, stat.xid)));
+		XIDINO_UID(XID_TAG(dentry->d_inode), stat.uid, stat.xid)));
 	*p++ = htonl((u32) nfsd_rgid(rqstp,
-		XIDINO_GID(stat.gid, stat.xid)));
+		XIDINO_GID(XID_TAG(dentry->d_inode), stat.gid, stat.xid)));
 	if (S_ISLNK(stat.mode) && stat.size > NFS3_MAXPATHLEN) {
 		p = xdr_encode_hyper(p, (u64) NFS3_MAXPATHLEN);
 	} else {
@@ -331,7 +336,7 @@ int
 nfs3svc_decode_readargs(struct svc_rqst *rqstp, u32 *p,
 					struct nfsd3_readargs *args)
 {
-	int len;
+	unsigned int len;
 	int v,pn;
 
 	if (!(p = decode_fh(p, &args->fh))
@@ -343,15 +348,15 @@ nfs3svc_decode_readargs(struct svc_rqst *rqstp, u32 *p,
 	if (len > NFSSVC_MAXBLKSIZE)
 		len = NFSSVC_MAXBLKSIZE;
 
-	/* set up the iovec */
+	/* set up the kvec */
 	v=0;
 	while (len > 0) {
 		pn = rqstp->rq_resused;
 		svc_take_page(rqstp);
 		args->vec[v].iov_base = page_address(rqstp->rq_respages[pn]);
 		args->vec[v].iov_len = len < PAGE_SIZE? len : PAGE_SIZE;
+		len -= args->vec[v].iov_len;
 		v++;
-		len -= PAGE_SIZE;
 	}
 	args->vlen = v;
 	return xdr_argsize_check(rqstp, p);
@@ -361,7 +366,7 @@ int
 nfs3svc_decode_writeargs(struct svc_rqst *rqstp, u32 *p,
 					struct nfsd3_writeargs *args)
 {
-	int len, v;
+	unsigned int len, v, hdr;
 
 	if (!(p = decode_fh(p, &args->fh))
 	 || !(p = xdr_decode_hyper(p, &args->offset)))
@@ -371,9 +376,12 @@ nfs3svc_decode_writeargs(struct svc_rqst *rqstp, u32 *p,
 	args->stable = ntohl(*p++);
 	len = args->len = ntohl(*p++);
 
+	hdr = (void*)p - rqstp->rq_arg.head[0].iov_base;
+	if (rqstp->rq_arg.len < len + hdr)
+		return 0;
+
 	args->vec[0].iov_base = (void*)p;
-	args->vec[0].iov_len = rqstp->rq_arg.head[0].iov_len -
-		(((void*)p) - rqstp->rq_arg.head[0].iov_base);
+	args->vec[0].iov_len = rqstp->rq_arg.head[0].iov_len - hdr;
 
 	if (len > NFSSVC_MAXBLKSIZE)
 		len = NFSSVC_MAXBLKSIZE;
@@ -430,10 +438,10 @@ int
 nfs3svc_decode_symlinkargs(struct svc_rqst *rqstp, u32 *p,
 					struct nfsd3_symlinkargs *args)
 {
-	int len;
+	unsigned int len;
 	int avail;
 	char *old, *new;
-	struct iovec *vec;
+	struct kvec *vec;
 
 	if (!(p = decode_fh(p, &args->ffh))
 	 || !(p = decode_filename(p, &args->fname, &args->flen))
@@ -447,7 +455,7 @@ nfs3svc_decode_symlinkargs(struct svc_rqst *rqstp, u32 *p,
 	 */
 	svc_take_page(rqstp);
 	len = ntohl(*p++);
-	if (len <= 0 || len > NFS3_MAXPATHLEN || len >= PAGE_SIZE)
+	if (len == 0 || len > NFS3_MAXPATHLEN || len >= PAGE_SIZE)
 		return 0;
 	args->tname = new = page_address(rqstp->rq_respages[rqstp->rq_resused-1]);
 	args->tlen = len;

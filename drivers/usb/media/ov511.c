@@ -16,7 +16,7 @@
  * Based on the Linux CPiA driver written by Peter Pregler,
  * Scott J. Bertin and Johannes Erdfelt.
  * 
- * Please see the file: linux/Documentation/usb/ov511.txt 
+ * Please see the file: Documentation/usb/ov511.txt
  * and the website at:  http://alpha.dyndns.org/ov511
  * for more info.
  *
@@ -1900,7 +1900,7 @@ sensor_get_exposure(struct usb_ov511 *ov, unsigned char *val)
 	case SEN_KS0127:
 	case SEN_KS0127B:
 	case SEN_SAA7111A:
-		val = 0;
+		val = NULL;
 		PDEBUG(3, "Unsupported with this sensor");
 		return -EPERM;
 	default:
@@ -4593,7 +4593,7 @@ ov51x_v4l1_ioctl(struct inode *inode, struct file *file,
 }
 
 static ssize_t
-ov51x_v4l1_read(struct file *file, char *buf, size_t cnt, loff_t *ppos)
+ov51x_v4l1_read(struct file *file, char __user *buf, size_t cnt, loff_t *ppos)
 {
 	struct video_device *vdev = file->private_data;
 	int noblock = file->f_flags&O_NONBLOCK;

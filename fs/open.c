@@ -613,9 +613,6 @@ asmlinkage long sys_fchmod(unsigned int fd, mode_t mode)
 	dentry = file->f_dentry;
 	inode = dentry->d_inode;
 
-	err = -EPERM;
-	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
-		goto out_putf;
 	err = -EROFS;
 	if (IS_RDONLY(inode))
 		goto out_putf;
@@ -647,10 +644,6 @@ asmlinkage long sys_chmod(const char __user * filename, mode_t mode)
 	if (error)
 		goto out;
 	inode = nd.dentry->d_inode;
-
-	error = -EPERM;
-	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
-		goto dput_and_out;
 
 	error = -EROFS;
 	if (IS_RDONLY(inode))
@@ -795,7 +788,7 @@ struct file *dentry_open(struct dentry *dentry, struct vfsmount *mnt, int flags)
 	if (!f)
 		goto cleanup_dentry;
 	f->f_flags = flags;
-	f->f_mode = (flags+1) & O_ACCMODE;
+	f->f_mode = ((flags+1) & O_ACCMODE) | FMODE_LSEEK | FMODE_PREAD | FMODE_PWRITE;
 	inode = dentry->d_inode;
 	if (f->f_mode & FMODE_WRITE) {
 		error = get_write_access(inode);
@@ -894,7 +887,7 @@ repeat:
 	FD_SET(fd, files->open_fds);
 	FD_CLR(fd, files->close_on_exec);
 	files->next_fd = fd + 1;
-	vx_openfd_inc(fd);
+	// vx_openfd_inc(fd);
 #if 1
 	/* Sanity check */
 	if (files->fd[fd] != NULL) {
@@ -916,7 +909,7 @@ static inline void __put_unused_fd(struct files_struct *files, unsigned int fd)
 	__FD_CLR(fd, files->open_fds);
 	if (fd < files->next_fd)
 		files->next_fd = fd;
-	vx_openfd_dec(fd);
+	// vx_openfd_dec(fd);
 }
 
 void fastcall put_unused_fd(unsigned int fd)
@@ -1086,3 +1079,15 @@ int generic_file_open(struct inode * inode, struct file * filp)
 }
 
 EXPORT_SYMBOL(generic_file_open);
+
+/*
+ * This is used by subsystems that don't want seekable
+ * file descriptors
+ */
+int nonseekable_open(struct inode *inode, struct file *filp)
+{
+	filp->f_mode &= ~(FMODE_LSEEK | FMODE_PREAD | FMODE_PWRITE);
+	return 0;
+}
+
+EXPORT_SYMBOL(nonseekable_open);

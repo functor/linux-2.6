@@ -28,6 +28,7 @@ CONFIG_LOG_BUF_SHIFT=14
 # CONFIG_IKCONFIG is not set
 CONFIG_EMBEDDED=y
 CONFIG_KALLSYMS=y
+# CONFIG_KALLSYMS_EXTRA_PASS is not set
 CONFIG_FUTEX=y
 CONFIG_EPOLL=y
 CONFIG_IOSCHED_NOOP=y
@@ -80,7 +81,6 @@ CONFIG_DMA_NONCOHERENT=y
 CONFIG_I8259=y
 CONFIG_CPU_LITTLE_ENDIAN=y
 CONFIG_IRQ_CPU=y
-CONFIG_DUMMY_KEYB=y
 CONFIG_DDB5XXX_COMMON=y
 CONFIG_MIPS_L1_CACHE_SHIFT=5
 # CONFIG_FB is not set
@@ -106,6 +106,7 @@ CONFIG_CPU_R5432=y
 # CONFIG_CPU_RM9000 is not set
 # CONFIG_CPU_SB1 is not set
 CONFIG_PAGE_SIZE_4KB=y
+# CONFIG_PAGE_SIZE_8KB is not set
 # CONFIG_PAGE_SIZE_16KB is not set
 # CONFIG_PAGE_SIZE_64KB is not set
 # CONFIG_CPU_ADVANCED is not set
@@ -118,6 +119,7 @@ CONFIG_CPU_HAS_SYNC=y
 #
 # Bus options (PCI, PCMCIA, EISA, ISA, TC)
 #
+CONFIG_HW_HAS_PCI=y
 CONFIG_PCI=y
 CONFIG_PCI_LEGACY_PROC=y
 CONFIG_PCI_NAMES=y
@@ -137,6 +139,7 @@ CONFIG_TRAD_SIGNALS=y
 #
 # Generic Driver Options
 #
+CONFIG_PREVENT_FIRMWARE_BUILD=y
 
 #
 # Memory Technology Devices (MTD)
@@ -162,7 +165,7 @@ CONFIG_TRAD_SIGNALS=y
 # CONFIG_BLK_DEV_UMEM is not set
 # CONFIG_BLK_DEV_LOOP is not set
 # CONFIG_BLK_DEV_NBD is not set
-# CONFIG_BLK_DEV_CARMEL is not set
+# CONFIG_BLK_DEV_SX8 is not set
 # CONFIG_BLK_DEV_RAM is not set
 # CONFIG_LBD is not set
 
@@ -184,7 +187,6 @@ CONFIG_TRAD_SIGNALS=y
 #
 # Fusion MPT device support
 #
-# CONFIG_FUSION is not set
 
 #
 # IEEE 1394 (FireWire) support
@@ -244,13 +246,13 @@ CONFIG_XFRM=y
 # CONFIG_NET_DIVERT is not set
 # CONFIG_ECONET is not set
 # CONFIG_WAN_ROUTER is not set
-# CONFIG_NET_FASTROUTE is not set
 # CONFIG_NET_HW_FLOWCONTROL is not set
 
 #
 # QoS and/or fair queueing
 #
 # CONFIG_NET_SCHED is not set
+# CONFIG_NET_CLS_ROUTE is not set
 
 #
 # Network testing
@@ -306,6 +308,7 @@ CONFIG_PCNET32=y
 # CONFIG_SUNDANCE is not set
 # CONFIG_TLAN is not set
 # CONFIG_VIA_RHINE is not set
+# CONFIG_VIA_VELOCITY is not set
 # CONFIG_LAN_SAA9730 is not set
 
 #
@@ -345,7 +348,6 @@ CONFIG_PCNET32=y
 # CONFIG_HIPPI is not set
 # CONFIG_PPP is not set
 # CONFIG_SLIP is not set
-# CONFIG_RCPCI is not set
 # CONFIG_SHAPER is not set
 # CONFIG_NETCONSOLE is not set
 
@@ -567,7 +569,6 @@ CONFIG_SUNRPC=y
 # CONFIG_CIFS is not set
 # CONFIG_NCP_FS is not set
 # CONFIG_CODA_FS is not set
-# CONFIG_INTERMEZZO_FS is not set
 # CONFIG_AFS_FS is not set
 
 #
@@ -601,4 +602,6 @@ CONFIG_CMDLINE="ip=any"
 #
 # Library routines
 #
+CONFIG_CRC16=y
 CONFIG_CRC32=y
+# CONFIG_LIBCRC32C is not set

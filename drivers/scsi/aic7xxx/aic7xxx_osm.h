@@ -85,7 +85,7 @@
 /* Core SCSI definitions */
 #define AIC_LIB_PREFIX ahc
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 
 /* Name space conflict with BSD queue macros */
 #ifdef LIST_HEAD
@@ -940,7 +940,7 @@ ahc_get_pci_bus(ahc_dev_softc_t pci)
 }
 #else
 static inline int ahc_linux_pci_init(void) {
-	return -ENODEV;
+	return 0;
 }
 static inline void ahc_linux_pci_exit(void) {
 }
