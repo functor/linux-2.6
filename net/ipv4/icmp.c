@@ -3,7 +3,7 @@
  *
  *		Alan Cox, <alan@redhat.com>
  *
- *	Version: $Id: icmp.c,v 1.85 2002/02/01 22:01:03 davem Exp $
+ *	Version: $Id$
  *
  *	This program is free software; you can redistribute it and/or
  *	modify it under the terms of the GNU General Public License
@@ -1035,8 +1035,9 @@ int icmp_rcv(struct sk_buff *skb)
   		}
 	}
 
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	/* VNET: Bypass stack if the echo ID was bound to a (presumably raw) socket */
-	if (skb->sk) {
+	if (vnet_active && skb->sk) {
 		switch (icmph->type) {
 		case ICMP_ECHOREPLY:
 		case ICMP_ECHO:
@@ -1049,6 +1050,7 @@ int icmp_rcv(struct sk_buff *skb)
 			goto drop;
 		}
 	}
+#endif
 
 	ICMP_INC_STATS_BH(icmp_pointers[icmph->type].input_entry);
 	icmp_pointers[icmph->type].handler(skb);
