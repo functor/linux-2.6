@@ -165,6 +165,10 @@ int vfs_permission(struct inode * inode, int mask)
 {
 	umode_t			mode = inode->i_mode;
 
+	/* Prevent vservers from escaping chroot() barriers */
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
+		return -EACCES;
+
 	if (mask & MAY_WRITE) {
 		/*
 		 * Nobody gets write access to a read-only fs.
@@ -210,20 +214,6 @@ int vfs_permission(struct inode * inode, int mask)
 	return -EACCES;
 }
 
-static inline int xid_permission(struct inode *inode, int mask, struct nameidata *nd)
-{
-	if (inode->i_xid == 0)
-		return 0;
-	if (vx_check(inode->i_xid, VX_ADMIN|VX_WATCH|VX_IDENT))
-		return 0;
-/*
-	printk("VSW: xid=%d denied access to %p[#%d,%lu] »%*s«.\n",
-		vx_current_xid(), inode, inode->i_xid, inode->i_ino,
-		nd->dentry->d_name.len, nd->dentry->d_name.name);
-*/
-	return -EACCES;
-}
-
 int permission(struct inode * inode,int mask, struct nameidata *nd)
 {
 	int retval;
@@ -237,8 +227,6 @@ int permission(struct inode * inode,int mask, struct nameidata *nd)
 		(S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 		return -EROFS;
 
-	if ((retval = xid_permission(inode, mask, nd)))
-		return retval;
 	if (inode->i_op && inode->i_op->permission)
 		retval = inode->i_op->permission(inode, submask, nd);
 	else
