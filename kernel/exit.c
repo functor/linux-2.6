@@ -859,9 +859,6 @@ asmlinkage NORET_TYPE void do_exit(long code)
 		module_put(tsk->binfmt->module);
 
 	tsk->exit_code = code;
-#ifdef CONFIG_CKRM_TYPE_TASKCLASS
-	numtasks_put_ref(tsk->taskclass);
-#endif
 	exit_notify(tsk);
 #ifdef CONFIG_NUMA
 	mpol_free(tsk->mempolicy);

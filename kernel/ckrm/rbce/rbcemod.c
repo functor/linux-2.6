@@ -1,4 +1,5 @@
-/* Rule-based Classification Engine (RBCE) module
+/* Rule-based Classification Engine (RBCE) and
+ * Consolidated RBCE module code (combined)
  *
  * Copyright (C) Hubertus Franke, IBM Corp. 2003
  *           (C) Chandra Seetharaman, IBM Corp. 2003
@@ -13,6 +14,10 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it would be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  *
  */
 
@@ -49,7 +54,7 @@
 #include <linux/ckrm_ce.h>
 #include <linux/ckrm_net.h>
 #include "bitvector.h"
-#include "rbce.h"
+#include <linux/rbce.h>
 
 #define DEBUG
 
@@ -173,6 +178,8 @@ int termop_2_vecidx[RBCE_RULE_INVALID] = {
 #define POLICY_ACTION_NEW_VERSION	0x01	// Force reallocation
 #define POLICY_ACTION_REDO_ALL		0x02	// Recompute all rule flags
 #define POLICY_ACTION_PACK_TERMS	0x04	// Time to pack the terms
+
+const int use_persistent_state = 1;
 
 struct ckrm_eng_callback ckrm_ecbs;
 
@@ -510,7 +517,6 @@ rbce_class_deletecb(const char *classname, void *classobj, int classtype)
 				}
 			}
 		}
-		put_class(cls);
 		if ((cls = find_class_name(classname)) != NULL) {
 			printk(KERN_ERR
 			       "rbce ERROR: class %s exists in rbce after "
@@ -1337,65 +1343,49 @@ int rule_exists(const char *rname)
 static struct rbce_private_data *create_private_data(struct rbce_private_data *,
 						     int);
 
-int rbce_ckrm_reclassify(int pid)
+static inline
+void reset_evaluation(struct rbce_private_data *pdata,int termflag)
 {
-	printk("ckrm_reclassify_pid ignored\n");
-	return -EINVAL;
+	/* reset TAG ruleterm evaluation results to pick up 
+ 	 * on next classification event
+ 	 */
+ 	if (use_persistent_state && gl_mask_vecs[termflag]) {
+ 		bitvector_and_not( pdata->eval, pdata->eval, 
+ 				   gl_mask_vecs[termflag] );
+ 		bitvector_and_not( pdata->true, pdata->true, 
+ 				   gl_mask_vecs[termflag] );
+ 	}
 }
-
-int reclassify_pid(int pid)
-{
-	struct task_struct *tsk;
-
-	// FIXME: Need to treat -pid as process group
-	if (pid < 0) {
-		return -EINVAL;
-	}
-
-	if (pid == 0) {
-		rbce_ckrm_reclassify(0);	// just reclassify all tasks.
-	}
-	// if pid is +ve take control of the task, start evaluating it
-	if ((tsk = find_task_by_pid(pid)) == NULL) {
-		return -EINVAL;
-	}
-
-	if (unlikely(!RBCE_DATA(tsk))) {
-		RBCE_DATAP(tsk) = create_private_data(NULL, 0);
-		if (!RBCE_DATA(tsk)) {
-			return -ENOMEM;
-		}
-	}
-	RBCE_DATA(tsk)->evaluate = 1;
-	rbce_ckrm_reclassify(pid);
-	return 0;
-}
-
+  
 int set_tasktag(int pid, char *tag)
 {
 	char *tp;
+	int rc = 0;
 	struct task_struct *tsk;
 	struct rbce_private_data *pdata;
+	int len;
 
 	if (!tag) {
 		return -EINVAL;
 	}
-
-	if ((tsk = find_task_by_pid(pid)) == NULL) {
-		return -EINVAL;
-	}
-
-	tp = kmalloc(strlen(tag) + 1, GFP_ATOMIC);
-
+	len = strlen(tag) + 1;
+	tp = kmalloc(len, GFP_ATOMIC);
 	if (!tp) {
 		return -ENOMEM;
+	}
+	strncpy(tp,tag,len);
+
+	read_lock(&tasklist_lock);
+	if ((tsk = find_task_by_pid(pid)) == NULL) {
+		rc = -EINVAL;
+		goto out;
 	}
 
 	if (unlikely(!RBCE_DATA(tsk))) {
 		RBCE_DATAP(tsk) = create_private_data(NULL, 0);
 		if (!RBCE_DATA(tsk)) {
-			kfree(tp);
-			return -ENOMEM;
+			rc = -ENOMEM;
+			goto out;
 		}
 	}
 	pdata = RBCE_DATA(tsk);
@@ -1403,10 +1393,13 @@ int set_tasktag(int pid, char *tag)
 		kfree(pdata->app_tag);
 	}
 	pdata->app_tag = tp;
-	strcpy(pdata->app_tag, tag);
-	rbce_ckrm_reclassify(pid);
-
-	return 0;
+	reset_evaluation(pdata,RBCE_TERMFLAG_TAG);
+	
+ out:
+	read_unlock(&tasklist_lock);
+	if (rc != 0) 
+		kfree(tp);
+	return rc;
 }
 
 /*====================== Classification Functions =======================*/
@@ -1888,8 +1881,6 @@ static inline void unstore_pdata(struct rbce_private_data *pdata)
 
 #endif				// PDATA_DEBUG
 
-const int use_persistent_state = 1;
-
 /*
  * Allocate and initialize a rbce_private_data data structure.
  *
@@ -2261,6 +2252,7 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 	va_list args;
 	void *cls = NULL;
 	struct task_struct *tsk;
+	struct rbce_private_data *pdata;
 
 	va_start(args, event);
 	tsk = va_arg(args, struct task_struct *);
@@ -2315,6 +2307,9 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 		break;
 
 	case CKRM_EVENT_RECLASSIFY:
+		if ((pdata = (RBCE_DATA(tsk)))) {
+			pdata->evaluate = 1;
+		}
 		cls = rbce_classify(tsk, NULL, RBCE_TERMFLAG_ALL, tc_classtype);
 		break;
 
@@ -2407,6 +2402,23 @@ struct ce_regtable_struct ce_regtable[] = {
 	{NULL}
 };
 
+static void unregister_classtype_engines(void)
+  {
+	int rc;
+	struct ce_regtable_struct *ceptr = ce_regtable;
+
+	while (ceptr->name) {
+		if (*ceptr->clsvar >= 0) {
+			printk("ce unregister with <%s>\n",ceptr->name);
+			while ((rc = ckrm_unregister_engine(ceptr->name)) == -EAGAIN)
+				;
+			printk("ce unregister with <%s> rc=%d\n",ceptr->name,rc);
+			*ceptr->clsvar = -1;
+		}
+		ceptr++;
+	}
+  }
+
 static int register_classtype_engines(void)
 {
 	int rc;
@@ -2414,31 +2426,16 @@ static int register_classtype_engines(void)
 
 	while (ceptr->name) {
 		rc = ckrm_register_engine(ceptr->name, ceptr->cbs);
-		printk("ce register with <%s> typeId=%d\n", ceptr->name, rc);
-		if ((rc < 0) && (rc != -ENOENT))
+		printk("ce register with <%s> typeId=%d\n",ceptr->name,rc);
+		if ((rc < 0) && (rc != -ENOENT)) {
+			unregister_classtype_engines();
 			return (rc);
-		if (rc != -ENOENT)
+		}
+		if (rc != -ENOENT) 
 			*ceptr->clsvar = rc;
 		ceptr++;
 	}
 	return 0;
-}
-
-static void unregister_classtype_engines(void)
-{
-	int rc;
-	struct ce_regtable_struct *ceptr = ce_regtable;
-
-	while (ceptr->name) {
-		if (*ceptr->clsvar >= 0) {
-			printk("ce unregister with <%s>\n", ceptr->name);
-			rc = ckrm_unregister_engine(ceptr->name);
-			printk("ce unregister with <%s> rc=%d\n", ceptr->name,
-			       rc);
-			*ceptr->clsvar = -1;
-		}
-		ceptr++;
-	}
 }
 
 // =========== /proc/sysctl/debug/rbce debug stuff =============
@@ -2597,7 +2594,6 @@ EXPORT_SYMBOL(rule_exists);
 EXPORT_SYMBOL(change_rule);
 EXPORT_SYMBOL(delete_rule);
 EXPORT_SYMBOL(rename_rule);
-EXPORT_SYMBOL(reclassify_pid);
 EXPORT_SYMBOL(set_tasktag);
 
 module_init(init_rbce);

@@ -1249,19 +1249,43 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 
 #define def_delay_var(var)		        unsigned long long var
 #define get_delay(tsk,field)                    ((tsk)->delays.field)
-#define delay_value(x)				(((unsigned long)(x))/1000)
 
 #define start_delay(var)                        ((var) = sched_clock())
 #define start_delay_set(var,flg)                (set_delay_flag(current,flg),(var) = sched_clock())
 
 #define inc_delay(tsk,field) (((tsk)->delays.field)++)
-#define add_delay_ts(tsk,field,start_ts,end_ts) ((tsk)->delays.field += delay_value((end_ts)-(start_ts)))
-#define add_delay_clear(tsk,field,start_ts,flg) (add_delay_ts(tsk,field,start_ts,sched_clock()),clear_delay_flag(tsk,flg))
 
-static inline void add_io_delay(unsigned long dstart) 
+/* because of hardware timer drifts in SMPs and task continue on different cpu
+ * then where the start_ts was taken there is a possibility that
+ * end_ts < start_ts by some usecs. In this case we ignore the diff
+ * and add nothing to the total.
+ */
+#ifdef CONFIG_SMP
+#define test_ts_integrity(start_ts,end_ts)  (likely((end_ts) > (start_ts)))
+#else
+#define test_ts_integrity(start_ts,end_ts)  (1)
+#endif
+
+#define add_delay_ts(tsk,field,start_ts,end_ts) \
+	do { if (test_ts_integrity(start_ts,end_ts)) (tsk)->delays.field += ((end_ts)-(start_ts)); } while (0)
+
+#define add_delay_clear(tsk,field,start_ts,flg)        \
+	do {                                           \
+		unsigned long long now = sched_clock();\
+           	add_delay_ts(tsk,field,start_ts,now);  \
+           	clear_delay_flag(tsk,flg);             \
+        } while (0)
+
+static inline void add_io_delay(unsigned long long dstart) 
 {
 	struct task_struct * tsk = current;
-	unsigned long val = delay_value(sched_clock()-dstart);
+	unsigned long long now = sched_clock();
+	unsigned long long val;
+
+	if (test_ts_integrity(dstart,now))
+		val = now - dstart;
+	else
+		val = 0;
 	if (test_delay_flag(tsk,PF_MEMIO)) {
 		tsk->delays.mem_iowait_total += val;
 		tsk->delays.num_memwaits++;

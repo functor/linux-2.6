@@ -2370,7 +2370,6 @@ void scheduler_tick(int user_ticks, int sys_ticks)
 		}
 		goto out_unlock;
 	}
-#warning MEF PLANETLAB: "if (vx_need_resched(p)) was if (!--p->time_slice) */"
 	if (vx_need_resched(p)) {
 #ifdef CONFIG_CKRM_CPU_SCHEDULE
 		/* Hubertus ... we can abstract this out */
