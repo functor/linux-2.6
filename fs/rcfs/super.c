@@ -45,7 +45,7 @@
 
 static kmem_cache_t *rcfs_inode_cachep;
 
-inline struct rcfs_inode_info *RCFS_I(struct inode *inode)
+struct rcfs_inode_info *RCFS_I(struct inode *inode)
 {
 	return container_of(inode, struct rcfs_inode_info, vfs_inode);
 }
