@@ -55,9 +55,8 @@ MODULE_DESCRIPTION("netfilter connection tracking protocol helper for GRE");
 #define GRE_STREAM_TIMEOUT	(180*HZ)
 
 #if 0
-#define DEBUGP(format, args...) printk(KERN_DEBUG __FILE__ ":" __FUNCTION__ \
-				       ": " format, ## args)
-#define DUMP_TUPLE_GRE(x) printk("%u.%u.%u.%u:0x%x -> %u.%u.%u.%u:0x%x:%u:0x%x\n", \
+#define DEBUGP(format, args...)	printk(KERN_DEBUG "%s:%s: " format, __FILE__, __FUNCTION__, ## args)
+#define DUMP_TUPLE_GRE(x) printk("%u.%u.%u.%u:0x%x -> %u.%u.%u.%u:0x%x\n", \
 			NIPQUAD((x)->src.ip), ntohl((x)->src.u.gre.key), \
 			NIPQUAD((x)->dst.ip), ntohl((x)->dst.u.gre.key))
 #else
@@ -222,21 +221,21 @@ static int gre_pkt_to_tuple(const struct sk_buff *skb,
 }
 
 /* print gre part of tuple */
-static int gre_print_tuple(struct seq_file *s,
-			   const struct ip_conntrack_tuple *tuple)
+static unsigned int gre_print_tuple(char *buffer,
+				    const struct ip_conntrack_tuple *tuple)
 {
-	return seq_printf(s, "srckey=0x%x dstkey=0x%x ", 
-			  ntohl(tuple->src.u.gre.key),
-			  ntohl(tuple->dst.u.gre.key));
+	return sprintf(buffer, "srckey=0x%x dstkey=0x%x ", 
+		       ntohl(tuple->src.u.gre.key),
+		       ntohl(tuple->dst.u.gre.key));
 }
 
 /* print private data for conntrack */
-static int gre_print_conntrack(struct seq_file *s,
-			       const struct ip_conntrack *ct)
+static unsigned int gre_print_conntrack(char *buffer,
+					const struct ip_conntrack *ct)
 {
-	return seq_printf(s, "timeout=%u, stream_timeout=%u ",
-			  (ct->proto.gre.timeout / HZ),
-			  (ct->proto.gre.stream_timeout / HZ));
+	return sprintf(buffer, "timeout=%u, stream_timeout=%u ",
+		       (ct->proto.gre.timeout / HZ),
+		       (ct->proto.gre.stream_timeout / HZ));
 }
 
 /* Returns verdict for packet, and may modify conntrack */
