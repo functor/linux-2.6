@@ -27,6 +27,7 @@
 #include <linux/delay.h>
 #include <linux/time.h>
 #include <linux/wait.h>
+#include <linux/moduleparam.h>
 #include <sound/core.h>
 #include <sound/snd_wavefront.h>
 #include <sound/initval.h>
@@ -83,25 +84,25 @@ int ramcheck_time = 20;    /* time in seconds to wait while ROM code
 int osrun_time = 10;       /* time in seconds we wait for the OS to
 			      start running.
 			   */
-MODULE_PARM(wf_raw,"i");
+module_param(wf_raw, int, 0444);
 MODULE_PARM_DESC(wf_raw, "if non-zero, assume that we need to boot the OS");
-MODULE_PARM(fx_raw,"i");
+module_param(fx_raw, int, 0444);
 MODULE_PARM_DESC(fx_raw, "if non-zero, assume that the FX process needs help");
-MODULE_PARM(debug_default,"i");
+module_param(debug_default, int, 0444);
 MODULE_PARM_DESC(debug_default, "debug parameters for card initialization");
-MODULE_PARM(wait_usecs,"i");
+module_param(wait_usecs, int, 0444);
 MODULE_PARM_DESC(wait_usecs, "how long to wait without sleeping, usecs");
-MODULE_PARM(sleep_interval,"i");
+module_param(sleep_interval, int, 0444);
 MODULE_PARM_DESC(sleep_interval, "how long to sleep when waiting for reply");
-MODULE_PARM(sleep_tries,"i");
+module_param(sleep_tries, int, 0444);
 MODULE_PARM_DESC(sleep_tries, "how many times to try sleeping during a wait");
-MODULE_PARM(ospath,"s");
+module_param(ospath, charp, 0444);
 MODULE_PARM_DESC(ospath, "full pathname to processed ICS2115 OS firmware");
-MODULE_PARM(reset_time,"i");
+module_param(reset_time, int, 0444);
 MODULE_PARM_DESC(reset_time, "how long to wait for a reset to take effect");
-MODULE_PARM(ramcheck_time,"i");
+module_param(ramcheck_time, int, 0444);
 MODULE_PARM_DESC(ramcheck_time, "how many seconds to wait for the RAM test");
-MODULE_PARM(osrun_time,"i");
+module_param(osrun_time, int, 0444);
 MODULE_PARM_DESC(osrun_time, "how many seconds to wait for the ICS2115 OS");
 
 /* if WF_DEBUG not defined, no run-time debugging messages will
@@ -860,7 +861,7 @@ wavefront_freemem (snd_wavefront_t *dev)
 static int
 wavefront_send_sample (snd_wavefront_t *dev, 
 		       wavefront_patch_info *header,
-		       u16 *dataptr,
+		       u16 __user *dataptr,
 		       int data_is_unsigned)
 
 {
@@ -875,7 +876,7 @@ wavefront_send_sample (snd_wavefront_t *dev,
 
 	u16 sample_short;
 	u32 length;
-	u16 *data_end = 0;
+	u16 __user *data_end = 0;
 	unsigned int i;
 	const unsigned int max_blksize = 4096/2;
 	unsigned int written;
@@ -1354,7 +1355,7 @@ wavefront_find_free_patch (snd_wavefront_t *dev)
 #endif
 
 static int
-wavefront_load_patch (snd_wavefront_t *dev, const char *addr)
+wavefront_load_patch (snd_wavefront_t *dev, const char __user *addr)
 
 {
 	wavefront_patch_info header;
@@ -1376,8 +1377,7 @@ wavefront_load_patch (snd_wavefront_t *dev, const char *addr)
 	switch (header.subkey) {
 	case WF_ST_SAMPLE:  /* sample or sample_header, based on patch->size */
 
-		if (copy_from_user ((unsigned char *) &header.hdr.s,
-				    (unsigned char *) header.hdrptr,
+		if (copy_from_user (&header.hdr.s, header.hdrptr,
 				    sizeof (wavefront_sample)))
 			return -EFAULT;
 
@@ -1385,8 +1385,7 @@ wavefront_load_patch (snd_wavefront_t *dev, const char *addr)
 
 	case WF_ST_MULTISAMPLE:
 
-		if (copy_from_user ((unsigned char *) &header.hdr.s,
-				    (unsigned char *) header.hdrptr,
+		if (copy_from_user (&header.hdr.s, header.hdrptr,
 				    sizeof (wavefront_multisample)))
 			return -EFAULT;
 
@@ -1395,32 +1394,28 @@ wavefront_load_patch (snd_wavefront_t *dev, const char *addr)
 
 	case WF_ST_ALIAS:
 
-		if (copy_from_user ((unsigned char *) &header.hdr.a,
-				    (unsigned char *) header.hdrptr,
+		if (copy_from_user (&header.hdr.a, header.hdrptr,
 				    sizeof (wavefront_alias)))
 			return -EFAULT;
 
 		return wavefront_send_alias (dev, &header);
 
 	case WF_ST_DRUM:
-		if (copy_from_user ((unsigned char *) &header.hdr.d, 
-				    (unsigned char *) header.hdrptr,
+		if (copy_from_user (&header.hdr.d, header.hdrptr,
 				    sizeof (wavefront_drum)))
 			return -EFAULT;
 
 		return wavefront_send_drum (dev, &header);
 
 	case WF_ST_PATCH:
-		if (copy_from_user ((unsigned char *) &header.hdr.p, 
-				    (unsigned char *) header.hdrptr,
+		if (copy_from_user (&header.hdr.p, header.hdrptr,
 				    sizeof (wavefront_patch)))
 			return -EFAULT;
 
 		return wavefront_send_patch (dev, &header);
 
 	case WF_ST_PROGRAM:
-		if (copy_from_user ((unsigned char *) &header.hdr.pr, 
-				    (unsigned char *) header.hdrptr,
+		if (copy_from_user (&header.hdr.pr, header.hdrptr,
 				    sizeof (wavefront_program)))
 			return -EFAULT;
 
@@ -1626,6 +1621,7 @@ snd_wavefront_synth_ioctl (snd_hwdep_t *hw, struct file *file,
 	snd_wavefront_t *dev;
 	snd_wavefront_card_t *acard;
 	wavefront_control wc;
+	void __user *argp = (void __user *)arg;
 
 	card = (snd_card_t *) hw->card;
 
@@ -1638,18 +1634,18 @@ snd_wavefront_synth_ioctl (snd_hwdep_t *hw, struct file *file,
 	
 	switch (cmd) {
 	case WFCTL_LOAD_SPP:
-		if (wavefront_load_patch (dev, (char *) arg) != 0) {
+		if (wavefront_load_patch (dev, argp) != 0) {
 			return -EIO;
 		}
 		break;
 
 	case WFCTL_WFCMD:
-		if (copy_from_user (&wc, (void *) arg, sizeof (wc)))
+		if (copy_from_user (&wc, argp, sizeof (wc)))
 			return -EFAULT;
 		if (wavefront_synth_control (acard, &wc) < 0) {
 			return -EIO;
 		}
-		if (copy_to_user ((void *) arg, &wc, sizeof (wc)))
+		if (copy_to_user (argp, &wc, sizeof (wc)))
 			return -EFAULT;
 		break;
 

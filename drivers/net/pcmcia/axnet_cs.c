@@ -778,7 +778,7 @@ static struct ethtool_ops netdev_ethtool_ops = {
 static int axnet_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
     axnet_dev_t *info = PRIV(dev);
-    u16 *data = (u16 *)&rq->ifr_data;
+    u16 *data = (u16 *)&rq->ifr_ifru;
     ioaddr_t mii_addr = dev->base_addr + AXNET_MII_EEP;
     switch (cmd) {
     case SIOCGMIIPHY:
@@ -937,7 +937,6 @@ module_exit(exit_axnet_cs);
 static const char *version_8390 =
     "8390.c:v1.10cvs 9/23/94 Donald Becker (becker@scyld.com)\n";
 
-#include <asm/uaccess.h>
 #include <asm/bitops.h>
 #include <asm/irq.h>
 #include <linux/fcntl.h>

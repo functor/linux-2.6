@@ -1290,12 +1290,12 @@ static struct dst_entry* tcp_v4_route_req(struct sock *sk,
 					 .dport = req->rmt_port } } };
 
 	if (ip_route_output_flow(&rt, &fl, sk, 0)) {
-		IP_INC_STATS_BH(IpOutNoRoutes);
+		IP_INC_STATS_BH(OutNoRoutes);
 		return NULL;
 	}
 	if (opt && opt->is_strictroute && rt->rt_dst != rt->rt_gateway) {
 		ip_rt_put(rt);
-		IP_INC_STATS_BH(IpOutNoRoutes);
+		IP_INC_STATS_BH(OutNoRoutes);
 		return NULL;
 	}
 	return &rt->u.dst;
@@ -1442,7 +1442,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	 * clogging syn queue with openreqs with exponentially increasing
 	 * timeout.
 	 */
-	if (tcp_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
+	if (sk_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
 		goto drop;
 
 	req = tcp_openreq_alloc();
@@ -1567,7 +1567,7 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	struct tcp_opt *newtp;
 	struct sock *newsk;
 
-	if (tcp_acceptq_is_full(sk))
+	if (sk_acceptq_is_full(sk))
 		goto exit_overflow;
 
 	if (!dst && (dst = tcp_v4_route_req(sk, req)) == NULL)
@@ -2452,7 +2452,7 @@ static void get_openreq4(struct sock *sk, struct open_request *req,
 	int ttd = req->expires - jiffies;
 
 	sprintf(tmpbuf, "%4d: %08X:%04X %08X:%04X"
-		" %02X %08X:%08X %02X:%08X %08X %5d %8d %u %d %p",
+		" %02X %08X:%08X %02X:%08lX %08X %5d %8d %u %d %p",
 		i,
 		req->af.v4_req.loc_addr,
 		ntohs(inet_sk(sk)->sport),
@@ -2526,7 +2526,7 @@ static void get_timewait4_sock(struct tcp_tw_bucket *tw, char *tmpbuf, int i)
 	srcp  = ntohs(tw->tw_sport);
 
 	sprintf(tmpbuf, "%4d: %08X:%04X %08X:%04X"
-		" %02X %08X:%08X %02X:%08X %08X %5d %8d %d %d %p",
+		" %02X %08X:%08X %02X:%08lX %08X %5d %8d %d %d %p",
 		i, src, srcp, dest, destp, tw->tw_substate, 0, 0,
 		3, jiffies_to_clock_t(ttd), 0, 0, 0, 0,
 		atomic_read(&tw->tw_refcnt), tw);

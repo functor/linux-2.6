@@ -127,7 +127,6 @@ static int uml_net_open(struct net_device *dev)
 	spin_lock(&opened_lock);
 	list_add(&lp->list, &opened);
 	spin_unlock(&opened_lock);
-	MOD_INC_USE_COUNT;
  out:
 	spin_unlock(&lp->lock);
 	return(err);
@@ -147,7 +146,6 @@ static int uml_net_close(struct net_device *dev)
 	list_del(&lp->list);
 	spin_unlock(&opened_lock);
 
-	MOD_DEC_USE_COUNT;
 	spin_unlock(&lp->lock);
 	return 0;
 }

@@ -23,6 +23,8 @@
 # endif
 #endif
 
+#define IDE_ARCH_OBSOLETE_DEFAULTS
+
 static __inline__ int ide_default_irq(unsigned long base)
 {
 	switch (base) {
@@ -84,6 +86,9 @@ static __inline__ void ide_init_hwif_ports(hw_regs_t *hw, unsigned long data_por
 	hw->io_ports[IDE_IRQ_OFFSET] = 0;
 }
 #endif
+
+#define IDE_ARCH_OBSOLETE_INIT
+#define ide_default_io_ctl(base)	((base) + 0x206) /* obsolete */
 
 #ifdef CONFIG_BLK_DEV_IDEPCI
 #define ide_init_default_irq(base)	(0)

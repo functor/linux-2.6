@@ -120,7 +120,6 @@ static int options[] = {-1, -1, -1, -1, -1, -1, -1, -1};
 #include <linux/rtnetlink.h>
 #include <linux/skbuff.h>
 #include <linux/ethtool.h>
-#include <linux/mii.h>
 
 /* enable PIO instead of MMIO, if CONFIG_EEPRO100_PIO is selected */
 #ifdef CONFIG_EEPRO100_PIO
@@ -2018,7 +2017,7 @@ speedo_get_stats(struct net_device *dev)
 	return &sp->stats;
 }
 
-static int netdev_ethtool_ioctl(struct net_device *dev, void *useraddr)
+static int netdev_ethtool_ioctl(struct net_device *dev, void __user *useraddr)
 {
 	u32 ethcmd;
 	struct speedo_private *sp = netdev_priv(dev);
@@ -2097,7 +2096,7 @@ static int netdev_ethtool_ioctl(struct net_device *dev, void *useraddr)
 static int speedo_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct speedo_private *sp = netdev_priv(dev);
-	struct mii_ioctl_data *data = (struct mii_ioctl_data *)&rq->ifr_data;
+	struct mii_ioctl_data *data = if_mii(rq);
 	int phy = sp->phy[0] & 0x1f;
 	int saved_acpi;
 	int t;
@@ -2130,7 +2129,7 @@ static int speedo_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 		pci_set_power_state(sp->pdev, saved_acpi);
 		return 0;
 	case SIOCETHTOOL:
-		return netdev_ethtool_ioctl(dev, (void *) rq->ifr_data);
+		return netdev_ethtool_ioctl(dev, rq->ifr_data);
 	default:
 		return -EOPNOTSUPP;
 	}

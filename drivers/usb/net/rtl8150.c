@@ -167,7 +167,7 @@ struct rtl8150 {
 
 typedef struct rtl8150 rtl8150_t;
 
-unsigned long multicast_filter_limit = 32;
+static unsigned long multicast_filter_limit = 32;
 
 static void fill_skb_pool(rtl8150_t *);
 static void free_skb_pool(rtl8150_t *);
@@ -516,7 +516,7 @@ static void write_bulk_callback(struct urb *urb, struct pt_regs *regs)
 	netif_wake_queue(dev->netdev);
 }
 
-void intr_callback(struct urb *urb, struct pt_regs *regs)
+static void intr_callback(struct urb *urb, struct pt_regs *regs)
 {
 	rtl8150_t *dev;
 	__u8 *d;
@@ -776,13 +776,13 @@ static int rtl8150_close(struct net_device *netdev)
 	return res;
 }
 
-static int rtl8150_ethtool_ioctl(struct net_device *netdev, void *uaddr)
+static int rtl8150_ethtool_ioctl(struct net_device *netdev, void __user *uaddr)
 {
 	rtl8150_t *dev;
 	int cmd;
 
 	dev = netdev->priv;
-	if (get_user(cmd, (int *) uaddr))
+	if (get_user(cmd, (int __user *) uaddr))
 		return -EFAULT;
 
 	switch (cmd) {
@@ -856,7 +856,7 @@ static int rtl8150_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	int res;
 
 	dev = netdev->priv;
-	data = (u16 *) & rq->ifr_data;
+	data = (u16 *) & rq->ifr_ifru;
 	res = 0;
 
 	switch (cmd) {
@@ -977,13 +977,13 @@ static void rtl8150_disconnect(struct usb_interface *intf)
 	}
 }
 
-int __init usb_rtl8150_init(void)
+static int __init usb_rtl8150_init(void)
 {
 	info(DRIVER_DESC " " DRIVER_VERSION);
 	return usb_register(&rtl8150_driver);
 }
 
-void __exit usb_rtl8150_exit(void)
+static void __exit usb_rtl8150_exit(void)
 {
 	usb_deregister(&rtl8150_driver);
 }
