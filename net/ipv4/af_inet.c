@@ -396,9 +396,9 @@ int inet_release(struct socket *sock)
 		sock->sk = NULL;
 		vx_sock_dec(sk);
 		clr_vx_info(&sk->sk_vx_info);
-	sk->sk_xid = -1;
+		//sk->sk_xid = -1;
 		clr_nx_info(&sk->sk_nx_info);
-	sk->sk_nid = -1;
+		//sk->sk_nid = -1;
 		sk->sk_prot->close(sk, timeout);
 	}
 	return 0;
@@ -843,7 +843,15 @@ struct proto_ops inet_dgram_ops = {
 	.sendpage =	inet_sendpage,
 };
 
-static struct net_proto_family inet_family_ops = {
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+int vnet_active = 0;
+EXPORT_SYMBOL(vnet_active);
+struct net_proto_family inet_family_ops;
+EXPORT_SYMBOL(inet_family_ops);
+#else
+static
+#endif
+struct net_proto_family inet_family_ops = {
 	.family = PF_INET,
 	.create = inet_create,
 	.owner	= THIS_MODULE,
