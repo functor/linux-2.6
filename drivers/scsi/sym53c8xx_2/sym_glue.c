@@ -2387,10 +2387,6 @@ static void sym2_set_width(struct scsi_target *starget, int width)
 	if (width == 0)
 		tp->tinfo.goal.options &= ~PPR_OPT_DT;
 
-	/* It is illegal to have DT set on narrow transfers */
-	if (width == 0)
-		tp->tinfo.goal.options &= ~PPR_OPT_DT;
-
 	tp->tinfo.goal.width = width;
 }
 
