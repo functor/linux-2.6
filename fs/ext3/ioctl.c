@@ -59,11 +59,11 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		 *
 		 * This test looks nicer. Thanks to Pauline Middelink
 		 */
-		if ((oldflags & EXT3_IMMUTABLE_FL) ||
+		if (((oldflags & EXT3_IMMUTABLE_FL) ||
 			((flags ^ oldflags) &
-			(EXT3_APPEND_FL | EXT3_IMMUTABLE_FL))) {
-			if (!capable(CAP_LINUX_IMMUTABLE))
-				return -EPERM;
+			 (EXT3_APPEND_FL | EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL)))
+		    && !capable(CAP_LINUX_IMMUTABLE)) {
+			return -EPERM;		
 		}
 
 		/*
