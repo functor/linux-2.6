@@ -5,7 +5,7 @@
  *
  *		PF_INET protocol family socket handler.
  *
- * Version:	$Id: af_inet.c,v 1.137 2002/02/01 22:01:03 davem Exp $
+ * Version:	$Id$
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -859,6 +859,10 @@ struct proto_ops inet_dgram_ops = {
 	.sendpage =	inet_sendpage,
 };
 
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+int vnet_active = 0;
+EXPORT_SYMBOL(vnet_active);
+#endif
 struct net_proto_family inet_family_ops = {
 	.family = PF_INET,
 	.create = inet_create,
