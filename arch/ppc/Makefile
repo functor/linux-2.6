@@ -43,7 +43,6 @@ core-$(CONFIG_APUS)		+= arch/ppc/amiga/
 drivers-$(CONFIG_8xx)		+= arch/ppc/8xx_io/
 drivers-$(CONFIG_4xx)		+= arch/ppc/4xx_io/
 drivers-$(CONFIG_8260)		+= arch/ppc/8260_io/
-drivers-$(CONFIG_OCP)		+= arch/ppc/ocp/
 
 BOOT_TARGETS = zImage zImage.initrd znetboot znetboot.initrd vmlinux.sm
 
@@ -87,7 +86,7 @@ include/asm-$(ARCH)/offsets.h: arch/$(ARCH)/kernel/asm-offsets.s
 
 ifdef CONFIG_6xx
 # Ensure this is binutils 2.12.1 (or 2.12.90.0.7) or later
-NEW_AS	:= $(shell echo dssall | $(AS) -o /dev/null >/dev/null 2>&1 ; echo $$?)
+NEW_AS	:= $(shell echo dssall | $(AS) -many -o /dev/null >/dev/null 2>&1 ; echo $$?)
 GOODVER	:= 2.12.1
 else
 NEW_AS	:= 0
@@ -95,7 +94,7 @@ endif
 
 ifneq ($(NEW_AS),0)
 checkbin:
-	@echo -n '*** ${VERSION}.${PATCHLEVEL} kernels no longer build'
+	@echo -n '*** ${VERSION}.${PATCHLEVEL} kernels no longer build '
 	@echo 'correctly with old versions of binutils.'
 	@echo '*** Please upgrade your binutils to ${GOODVER} or newer'
 	@false

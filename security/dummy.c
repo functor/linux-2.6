@@ -99,7 +99,7 @@ static int dummy_quota_on (struct file *f)
 
 static int dummy_syslog (int type)
 {
-	if ((type != 3) && current->euid)
+	if ((type != 3 && type != 10) && current->euid)
 		return -EPERM;
 	return 0;
 }
@@ -688,7 +688,7 @@ static int dummy_shm_shmctl (struct shmid_kernel *shp, int cmd)
 	return 0;
 }
 
-static int dummy_shm_shmat (struct shmid_kernel *shp, char *shmaddr,
+static int dummy_shm_shmat (struct shmid_kernel *shp, char __user *shmaddr,
 			    int shmflg)
 {
 	return 0;

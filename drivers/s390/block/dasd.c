@@ -7,7 +7,7 @@
  * Bugreports.to..: <Linux390@de.ibm.com>
  * (C) IBM Corporation, IBM Deutschland Entwicklung GmbH, 1999-2001
  *
- * $Revision: 1.139 $
+ * $Revision: 1.142 $
  */
 
 #include <linux/config.h>
@@ -37,6 +37,7 @@
  * SECTION: exported variables of dasd.c
  */
 debug_info_t *dasd_debug_area;
+struct dasd_discipline *dasd_diag_discipline_pointer;
 
 MODULE_AUTHOR("Holger Smolinski <Holger.Smolinski@de.ibm.com>");
 MODULE_DESCRIPTION("Linux on S/390 DASD device driver,"
@@ -751,16 +752,16 @@ dasd_start_IO(struct dasd_ccw_req * cqr)
 		break;
 	case -EBUSY:
 		DBF_DEV_EVENT(DBF_ERR, device, "%s",
-			      "device busy, retry later");
+			      "start_IO: device busy, retry later");
 		break;
 	case -ETIMEDOUT:
 		DBF_DEV_EVENT(DBF_ERR, device, "%s",
-			      "request timeout - terminated");
+			      "start_IO: request timeout, retry later");
+		break;
 	case -ENODEV:
 	case -EIO:
-		cqr->status = DASD_CQR_FAILED;
-		cqr->stopclk = cqr->startclk;
-		dasd_schedule_bh(device);
+		DBF_DEV_EVENT(DBF_ERR, device, "%s",
+			      "start_IO: device gone, retry");
 		break;
 	default:
 		DEV_MESSAGE(KERN_ERR, device,
@@ -1008,8 +1009,9 @@ dasd_int_handler(struct ccw_device *cdev, unsigned long intparm,
 				if (device->discipline->start_IO(next) == 0)
 					expires = next->expires;
 				else
-					MESSAGE(KERN_WARNING, "%s",
-						"Interrupt fastpath failed!");
+					DEV_MESSAGE(KERN_DEBUG, device, "%s",
+						    "Interrupt fastpath "
+						    "failed!");
 			}
 		}
 	} else {		/* error */
@@ -1018,8 +1020,8 @@ dasd_int_handler(struct ccw_device *cdev, unsigned long intparm,
 		if (cqr->dstat)
 			memcpy(cqr->dstat, irb, sizeof (struct irb));
 		else
-			MESSAGE(KERN_ERR, "%s",
-				"no memory for dstat...ignoring");
+			DEV_MESSAGE(KERN_ERR, device, "%s",
+				    "no memory for dstat...ignoring");
 #ifdef ERP_DEBUG
 		/* dump sense data */
 		dasd_log_sense(cqr, irb);
@@ -1989,6 +1991,8 @@ dasd_init(void)
 
 	DBF_EVENT(DBF_EMERG, "%s", "debug area created");
 
+	dasd_diag_discipline_pointer = NULL;
+
 	rc = devfs_mk_dir("dasd");
 	if (rc)
 		goto failed;
@@ -2021,6 +2025,7 @@ module_init(dasd_init);
 module_exit(dasd_exit);
 
 EXPORT_SYMBOL(dasd_debug_area);
+EXPORT_SYMBOL(dasd_diag_discipline_pointer);
 
 EXPORT_SYMBOL(dasd_add_request_head);
 EXPORT_SYMBOL(dasd_add_request_tail);

@@ -116,7 +116,7 @@ static inline int gamma_dma_is_ready(drm_device_t *dev)
 	return (!GAMMA_READ(GAMMA_DMACOUNT));
 }
 
-irqreturn_t gamma_dma_service( DRM_IRQ_ARGS )
+irqreturn_t gamma_irq_handler( DRM_IRQ_ARGS )
 {
 	drm_device_t	 *dev = (drm_device_t *)arg;
 	drm_device_dma_t *dma = dev->dma;
@@ -262,7 +262,7 @@ static void gamma_dma_timer_bh(unsigned long dev)
 	gamma_dma_schedule((drm_device_t *)dev, 0);
 }
 
-void gamma_dma_immediate_bh(void *dev)
+void gamma_irq_immediate_bh(void *dev)
 {
 	gamma_dma_schedule(dev, 0);
 }
@@ -346,6 +346,9 @@ static int gamma_dma_priority(struct file *filp,
 	drm_buf_t	  *buf;
 	drm_buf_t	  *last_buf = NULL;
 	drm_device_dma_t  *dma	    = dev->dma;
+	int		  *send_indices = NULL;
+	int		  *send_sizes = NULL;
+
 	DECLARE_WAITQUEUE(entry, current);
 
 				/* Turn off interrupt handling */
@@ -365,11 +368,31 @@ static int gamma_dma_priority(struct file *filp,
 		++must_free;
 	}
 
+	send_indices = DRM(alloc)(d->send_count * sizeof(*send_indices),
+				  DRM_MEM_DRIVER);
+	if (send_indices == NULL)
+		return -ENOMEM;
+	if (copy_from_user(send_indices, d->send_indices, 
+			   d->send_count * sizeof(*send_indices))) {
+		retcode = -EFAULT;
+                goto cleanup;
+	}
+	
+	send_sizes = DRM(alloc)(d->send_count * sizeof(*send_sizes),
+				DRM_MEM_DRIVER);
+	if (send_sizes == NULL)
+		return -ENOMEM;
+	if (copy_from_user(send_sizes, d->send_sizes, 
+			   d->send_count * sizeof(*send_sizes))) {
+		retcode = -EFAULT;
+                goto cleanup;
+	}
+
 	for (i = 0; i < d->send_count; i++) {
-		idx = d->send_indices[i];
+		idx = send_indices[i];
 		if (idx < 0 || idx >= dma->buf_count) {
 			DRM_ERROR("Index %d (of %d max)\n",
-				  d->send_indices[i], dma->buf_count - 1);
+				  send_indices[i], dma->buf_count - 1);
 			continue;
 		}
 		buf = dma->buflist[ idx ];
@@ -391,7 +414,7 @@ static int gamma_dma_priority(struct file *filp,
 				   process closes the /dev/drm? handle, so
 				   it can't also be doing DMA. */
 		buf->list	  = DRM_LIST_PRIO;
-		buf->used	  = d->send_sizes[i];
+		buf->used	  = send_sizes[i];
 		buf->context	  = d->context;
 		buf->while_locked = d->flags & _DRM_DMA_WHILE_LOCKED;
 		address		  = (unsigned long)buf->address;
@@ -402,14 +425,14 @@ static int gamma_dma_priority(struct file *filp,
 		if (buf->pending) {
 			DRM_ERROR("Sending pending buffer:"
 				  " buffer %d, offset %d\n",
-				  d->send_indices[i], i);
+				  send_indices[i], i);
 			retcode = -EINVAL;
 			goto cleanup;
 		}
 		if (buf->waiting) {
 			DRM_ERROR("Sending waiting buffer:"
 				  " buffer %d, offset %d\n",
-				  d->send_indices[i], i);
+				  send_indices[i], i);
 			retcode = -EINVAL;
 			goto cleanup;
 		}
@@ -458,6 +481,12 @@ cleanup:
 		gamma_dma_ready(dev);
 		gamma_free_buffer(dev, last_buf);
 	}
+	if (send_indices)
+		DRM(free)(send_indices, d->send_count * sizeof(*send_indices), 
+			  DRM_MEM_DRIVER);
+	if (send_sizes)
+		DRM(free)(send_sizes, d->send_count * sizeof(*send_sizes), 
+			  DRM_MEM_DRIVER);
 
 	if (must_free && !dev->context_flag) {
 		if (gamma_lock_free(dev, &dev->lock.hw_lock->lock,
@@ -476,9 +505,13 @@ static int gamma_dma_send_buffers(struct file *filp,
 	drm_buf_t	  *last_buf = NULL;
 	int		  retcode   = 0;
 	drm_device_dma_t  *dma	    = dev->dma;
+	int               send_index;
+
+	if (get_user(send_index, &d->send_indices[d->send_count-1]))
+		return -EFAULT;
 
 	if (d->flags & _DRM_DMA_BLOCK) {
-		last_buf = dma->buflist[d->send_indices[d->send_count-1]];
+		last_buf = dma->buflist[send_index];
 		add_wait_queue(&last_buf->dma_wait, &entry);
 	}
 
@@ -656,12 +689,12 @@ int gamma_do_cleanup_dma( drm_device_t *dev )
 {
 	DRM_DEBUG( "%s\n", __FUNCTION__ );
 
-#if _HAVE_DMA_IRQ
+#if __HAVE_IRQ
 	/* Make sure interrupts are disabled here because the uninstall ioctl
 	 * may not have been called from userspace and after dev_private
 	 * is freed, it's too late.
 	 */
-	if ( dev->irq ) DRM(irq_uninstall)(dev);
+	if ( dev->irq_enabled ) DRM(irq_uninstall)(dev);
 #endif
 
 	if ( dev->dev_private ) {
