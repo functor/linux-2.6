@@ -120,6 +120,10 @@ static inline void ckrm_cb_##fct(void)  { }
 #define CKRM_DEF_CB_ARG(EV,fct,argtp)		\
 static inline void ckrm_cb_##fct(argtp arg) { }
 
+#define ckrm_cb_newtask(task_struct)
+#define ckrm_cb_exit(task_struct)
+#define ckrm_init()
+
 #endif // CONFIG_CKRM
 
 /*-----------------------------------------------------------------
@@ -143,6 +147,7 @@ CKRM_DEF_CB_ARG( USERDEL      , userdel,      struct user_struct *);
 CKRM_DEF_CB_ARG( LISTEN_START , listen_start, struct sock *       );
 CKRM_DEF_CB_ARG( LISTEN_STOP  , listen_stop,  struct sock *       );
 
+#ifdef CONFIG_CKRM
 // and a few special one's
 void ckrm_cb_newtask(struct task_struct *);
 void ckrm_cb_exit(struct task_struct *);
@@ -150,6 +155,7 @@ void ckrm_cb_exit(struct task_struct *);
 // some other functions required
 extern void ckrm_init(void);
 extern int get_exe_path_name(struct task_struct *, char *, int);
+#endif // CONFIG_CKRM
 
 #endif // __KERNEL__
 
