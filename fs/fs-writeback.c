@@ -213,9 +213,8 @@ __sync_single_inode(struct inode *inode, struct writeback_control *wbc)
 		} else if (inode->i_state & I_DIRTY) {
 			/*
 			 * Someone redirtied the inode while were writing back
-			 * the pages.
+			 * the pages: nothing to do.
 			 */
-			list_move(&inode->i_list, &sb->s_dirty);
 		} else if (atomic_read(&inode->i_count)) {
 			/*
 			 * The inode is clean, inuse

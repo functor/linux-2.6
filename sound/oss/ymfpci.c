@@ -1231,6 +1231,8 @@ ymf_read(struct file *file, char __user *buffer, size_t count, loff_t *ppos)
 	unsigned int swptr;
 	int cnt;			/* This many to go in this revolution */
 
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (dmabuf->mapped)
 		return -ENXIO;
 	if (!dmabuf->ready && (ret = prog_dmabuf(state, 1)))
@@ -1348,6 +1350,8 @@ ymf_write(struct file *file, const char __user *buffer, size_t count, loff_t *pp
 
 	YMFDBGW("ymf_write: count %d\n", count);
 
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (dmabuf->mapped)
 		return -ENXIO;
 	if (!dmabuf->ready && (ret = prog_dmabuf(state, 0)))
@@ -1961,7 +1965,7 @@ static int ymf_open(struct inode *inode, struct file *file)
 #endif
 	up(&unit->open_sem);
 
-	return nonseekable_open(inode, file);
+	return 0;
 
 out_nodma:
 	/*
@@ -2039,7 +2043,7 @@ static int ymf_open_mixdev(struct inode *inode, struct file *file)
  match:
 	file->private_data = unit->ac97_codec[i];
 
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int ymf_ioctl_mixdev(struct inode *inode, struct file *file,
@@ -2361,8 +2365,7 @@ static int ymfpci_memalloc(ymfpci_t *codec)
 	codec->dma_area_ba = pba;
 	codec->dma_area_size = size + 0xff;
 
-	off = (unsigned long)ptr & 0xff;
-	if (off) {
+	if ((off = ((uint) ptr) & 0xff) != 0) {
 		ptr += 0x100 - off;
 		pba += 0x100 - off;
 	}

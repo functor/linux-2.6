@@ -729,9 +729,7 @@ AVM_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 	return(0);
 }
 
-#ifdef CONFIG_PCI
 static struct pci_dev *dev_avm __initdata = NULL;
-#endif
 #ifdef __ISAPNP__
 static struct pnp_card *pnp_avm_c __initdata = NULL;
 #endif
@@ -790,7 +788,7 @@ setup_avm_pcipnp(struct IsdnCard *card)
 			printk(KERN_INFO "FritzPnP: no ISA PnP present\n");
 		}
 #endif
-#ifdef CONFIG_PCI
+#if CONFIG_PCI
 		if ((dev_avm = pci_find_device(PCI_VENDOR_ID_AVM,
 			PCI_DEVICE_ID_AVM_A1,  dev_avm))) {
 			cs->irq = dev_avm->irq;

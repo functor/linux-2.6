@@ -1,5 +1,3 @@
-/* _VX_LIMIT_H defined below */
-
 #if	defined(__KERNEL__) && defined(_VX_INFO_DEF_)
 
 #include <asm/atomic.h>
@@ -7,26 +5,27 @@
 
 /* context sub struct */
 
-#define NUM_LIMITS	20
+#define	RLIMIT_OPENFD	12
 
-#define VLIMIT_NSOCK	16
+#define NUM_RLIMITS	16
 
-extern const char *vlimit_name[NUM_LIMITS];
+#define VLIMIT_SOCK	16
+
 
 struct _vx_limit {
 	atomic_t ticks;
 
-	unsigned long rlim[NUM_LIMITS];		/* Context limit */
-	unsigned long rmax[NUM_LIMITS];		/* Context maximum */
-	atomic_t rcur[NUM_LIMITS];		/* Current value */
-	atomic_t lhit[NUM_LIMITS];		/* Limit hits */
+	unsigned long rlim[NUM_RLIMITS];	/* Context limit */
+	unsigned long rmax[NUM_RLIMITS];	/* Context maximum */
+	atomic_t rcur[NUM_RLIMITS];		/* Current value */
+	atomic_t lhit[NUM_RLIMITS];		/* Limit hits */
 };
 
 static inline void vx_info_init_limit(struct _vx_limit *limit)
 {
 	int lim;
 
-	for (lim=0; lim<NUM_LIMITS; lim++) {
+	for (lim=0; lim<NUM_RLIMITS; lim++) {
 		limit->rlim[lim] = RLIM_INFINITY;
 		limit->rmax[lim] = 0;
 		atomic_set(&limit->rcur[lim], 0);
@@ -34,19 +33,21 @@ static inline void vx_info_init_limit(struct _vx_limit *limit)
 	}
 }
 
+extern unsigned int vx_debug_limit;
+
 static inline void vx_info_exit_limit(struct _vx_limit *limit)
 {
-#ifdef	CONFIG_VSERVER_DEBUG
 	unsigned long value;
 	unsigned int lim;
 
-	for (lim=0; lim<NUM_LIMITS; lim++) {
+	if (!vx_debug_limit)
+		return;
+	for (lim=0; lim<NUM_RLIMITS; lim++) {
 		value = atomic_read(&limit->rcur[lim]);
 		if (value)
-			printk("!!! limit: %p[%s,%d] = %ld on exit.\n",
-				limit, vlimit_name[lim], lim, value);
+			printk("!!! limit: %p[%d] = %ld on exit.\n",
+				limit, lim, value);
 	}
-#endif
 }
 
 static inline void vx_limit_fixup(struct _vx_limit *limit)
@@ -54,7 +55,7 @@ static inline void vx_limit_fixup(struct _vx_limit *limit)
 	unsigned long value;
 	unsigned int lim;
 	
-        for (lim=0; lim<NUM_LIMITS; lim++) {
+        for (lim=0; lim<NUM_RLIMITS; lim++) {
                 value = atomic_read(&limit->rcur[lim]);
                 if (value > limit->rmax[lim])
 			limit->rmax[lim] = value;
@@ -80,13 +81,13 @@ static inline int vx_info_proc_limit(struct _vx_limit *limit, char *buffer)
 		"VML"	VX_LIMIT_FMT
 		"RSS"	VX_LIMIT_FMT
 		"FILES"	VX_LIMIT_FMT
-		"SOCK"	VX_LIMIT_FMT
+		"OFD"	VX_LIMIT_FMT
 		VX_LIMIT_ARG(RLIMIT_NPROC)
 		VX_LIMIT_ARG(RLIMIT_AS)
 		VX_LIMIT_ARG(RLIMIT_MEMLOCK)
 		VX_LIMIT_ARG(RLIMIT_RSS)
 		VX_LIMIT_ARG(RLIMIT_NOFILE)
-		VX_LIMIT_ARG(VLIMIT_NSOCK)
+		VX_LIMIT_ARG(RLIMIT_OPENFD)
 		);
 }
 
@@ -95,8 +96,6 @@ static inline int vx_info_proc_limit(struct _vx_limit *limit, char *buffer)
 #define _VX_LIMIT_H
 
 #include "switch.h"
-
-#define	VXD_RLIMIT(r,l)		(VXD_CBIT(limit, (l)) && ((r) == (l)))
 
 /*  rlimit vserver commands */
 
@@ -139,5 +138,3 @@ void vx_vsi_swapinfo(struct sysinfo *);
 
 #endif	/* _VX_LIMIT_H */
 #endif
-
-

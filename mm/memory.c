@@ -805,7 +805,7 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			pte_t *pte;
 			if (write) /* user gate pages are read-only */
 				return i ? : -EFAULT;
-			pgd = pgd_offset_gate(mm, pg);
+			pgd = pgd_offset(mm, pg);
 			if (!pgd)
 				return i ? : -EFAULT;
 			pmd = pmd_offset(pgd, pg);
@@ -1439,7 +1439,6 @@ static int do_swap_page(struct mm_struct * mm,
 		/* Had to read the page from swap area: Major fault */
 		ret = VM_FAULT_MAJOR;
 		inc_page_state(pgmajfault);
-		grab_swap_token();
 	}
 
 	if (!vx_rsspages_avail(mm, 1)) {
@@ -1650,9 +1649,8 @@ retry:
 	 */
 	/* Only go through if we didn't race with anybody else... */
 	if (pte_none(*page_table)) {
-	        if (!PageReserved(new_page)) 
-		        //++mm->rss;
-		        vx_rsspages_inc(mm);
+		if (!PageReserved(new_page))
+			++mm->rss;
 		flush_icache_page(vma, new_page);
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		if (write_access)

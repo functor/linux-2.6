@@ -485,6 +485,10 @@ static int pcwd_ioctl(struct inode *inode, struct file *file,
 static ssize_t pcwd_write(struct file *file, const char __user *buf, size_t len,
 			  loff_t *ppos)
 {
+	/*  Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	if (len) {
 		if (!nowayout) {
 			size_t i;
@@ -519,7 +523,7 @@ static int pcwd_open(struct inode *inode, struct file *file)
 	/* Activate */
 	pcwd_start();
 	pcwd_keepalive();
-	return nonseekable_open(inode, file);
+	return(0);
 }
 
 static int pcwd_close(struct inode *inode, struct file *file)
@@ -544,6 +548,10 @@ static ssize_t pcwd_temp_read(struct file *file, char __user *buf, size_t count,
 {
 	int temperature;
 
+	/* Can't seek (pread) on this device */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	if (pcwd_get_temperature(&temperature))
 		return -EFAULT;
 
@@ -558,7 +566,7 @@ static int pcwd_temp_open(struct inode *inode, struct file *file)
 	if (!supports_temp)
 		return -ENODEV;
 
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int pcwd_temp_close(struct inode *inode, struct file *file)

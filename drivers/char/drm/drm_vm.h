@@ -75,7 +75,7 @@ static __inline__ struct page *DRM(do_vm_nopage)(struct vm_area_struct *vma,
 		struct drm_agp_mem *agpmem;
 		struct page *page;
 
-#ifdef __alpha__
+#if __alpha__
 		/*
                  * Adjust to a bus-relative address
                  */

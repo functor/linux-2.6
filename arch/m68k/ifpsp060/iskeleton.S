@@ -204,12 +204,11 @@ _060_real_cas2:
 _060_real_lock_page:
 	move.l	%d2,-(%sp)
 	| load sfc/dfc
+	moveq	#5,%d0
 	tst.b	%d0
 	jne	1f
 	moveq	#1,%d0
-	jra	2f
-1:	moveq	#5,%d0
-2:	movec.l	%dfc,%d2
+1:	movec.l	%dfc,%d2
 	movec.l	%d0,%dfc
 	movec.l	%d0,%sfc
 

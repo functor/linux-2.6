@@ -343,7 +343,7 @@ typedef struct _drm_mga_blit {
 
 typedef struct drm_mga_getparam {
 	int param;
-	void __user *value;
+	void *value;
 } drm_mga_getparam_t;
 
 #endif

@@ -257,11 +257,6 @@ typedef struct _mgslpc_info {
     
 #define CHA     0x00   /* channel A offset */
 #define CHB     0x40   /* channel B offset */
-
-/*
- *  FIXME: PPC has PVR defined in asm/reg.h.  For now we just undef it.
- */
-#undef PVR
     
 #define RXFIFO  0
 #define TXFIFO  0
@@ -854,8 +849,9 @@ static inline int mgslpc_paranoia_check(MGSLPC_INFO *info,
 static BOOLEAN wait_command_complete(MGSLPC_INFO *info, unsigned char channel) 
 {
 	int i = 0;
+	unsigned char status;
 	/* wait for command completion */ 
-	while (read_reg(info, (unsigned char)(channel+STAR)) & BIT2) {
+	while ((status = read_reg(info, (unsigned char)(channel+STAR)) & BIT2)) {
 		udelay(1);
 		if (i++ == 1000)
 			return FALSE;
