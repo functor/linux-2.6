@@ -208,7 +208,7 @@ static int cciss_proc_get_info(char *buffer, char **start, off_t offset,
         ctlr_info_t *h = (ctlr_info_t*)data;
         drive_info_struct *drv;
 	unsigned long flags;
-	unsigned int vol_sz, vol_sz_frac;
+	sector_t vol_sz, vol_sz_frac;
 
         ctlr = h->ctlr;
 

@@ -29,6 +29,8 @@ enum km_type {
 	KM_IRQ1,
 	KM_SOFTIRQ0,
 	KM_SOFTIRQ1,
+	KM_NETDUMP,
+	KM_UNUSED,
 	KM_TYPE_NR
 };
 

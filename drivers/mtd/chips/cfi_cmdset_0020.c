@@ -38,7 +38,7 @@
 
 static int cfi_staa_read(struct mtd_info *, loff_t, size_t, size_t *, u_char *);
 static int cfi_staa_write_buffers(struct mtd_info *, loff_t, size_t, size_t *, const u_char *);
-static int cfi_staa_writev(struct mtd_info *mtd, const struct iovec *vecs,
+static int cfi_staa_writev(struct mtd_info *mtd, const struct kvec *vecs,
 		unsigned long count, loff_t to, size_t *retlen);
 static int cfi_staa_erase_varsize(struct mtd_info *, struct erase_info *);
 static void cfi_staa_sync (struct mtd_info *);
@@ -489,7 +489,7 @@ static inline int do_write_buffer(struct map_info *map, struct flchip *chip,
 		/* Urgh. Chip not yet ready to talk to us. */
 		if (time_after(jiffies, timeo)) {
 			spin_unlock_bh(chip->mutex);
-                        printk(KERN_ERR "waiting for chip to be ready timed out in buffer write Xstatus = %x, status = %x\n",
+                        printk(KERN_ERR "waiting for chip to be ready timed out in buffer write Xstatus = %x, status = %llx\n",
                                status, cfi_read(map, cmd_adr));
 			return -EIO;
 		}
@@ -700,7 +700,7 @@ static int cfi_staa_write_buffers (struct mtd_info *mtd, loff_t to,
 #define ECCBUF_DIV(x) ((x) & ~(ECCBUF_SIZE - 1))
 #define ECCBUF_MOD(x) ((x) &  (ECCBUF_SIZE - 1))
 static int
-cfi_staa_writev(struct mtd_info *mtd, const struct iovec *vecs,
+cfi_staa_writev(struct mtd_info *mtd, const struct kvec *vecs,
 		unsigned long count, loff_t to, size_t *retlen)
 {
 	unsigned long i;
@@ -859,7 +859,7 @@ retry:
 		if (time_after(jiffies, timeo)) {
 			cfi_write(map, CMD(0x70), adr);
 			chip->state = FL_STATUS;
-			printk(KERN_ERR "waiting for erase to complete timed out. Xstatus = %x, status = %x.\n", status, cfi_read(map, adr));
+			printk(KERN_ERR "waiting for erase to complete timed out. Xstatus = %x, status = %llx.\n", status, cfi_read(map, adr));
 			DISABLE_VPP(map);
 			spin_unlock_bh(chip->mutex);
 			return -EIO;
@@ -1145,7 +1145,7 @@ retry:
 		if (time_after(jiffies, timeo)) {
 			cfi_write(map, CMD(0x70), adr);
 			chip->state = FL_STATUS;
-			printk(KERN_ERR "waiting for lock to complete timed out. Xstatus = %x, status = %x.\n", status, cfi_read(map, adr));
+			printk(KERN_ERR "waiting for lock to complete timed out. Xstatus = %x, status = %llx.\n", status, cfi_read(map, adr));
 			DISABLE_VPP(map);
 			spin_unlock_bh(chip->mutex);
 			return -EIO;
@@ -1294,7 +1294,7 @@ retry:
 		if (time_after(jiffies, timeo)) {
 			cfi_write(map, CMD(0x70), adr);
 			chip->state = FL_STATUS;
-			printk(KERN_ERR "waiting for unlock to complete timed out. Xstatus = %x, status = %x.\n", status, cfi_read(map, adr));
+			printk(KERN_ERR "waiting for unlock to complete timed out. Xstatus = %x, status = %llx.\n", status, cfi_read(map, adr));
 			DISABLE_VPP(map);
 			spin_unlock_bh(chip->mutex);
 			return -EIO;

@@ -320,11 +320,11 @@ void init_8259A(int auto_eoi)
 
 static irqreturn_t math_error_irq(int cpl, void *dev_id, struct pt_regs *regs)
 {
-	extern void math_error(void *);
+	extern void math_error(void __user *);
 	outb(0,0xF0);
 	if (ignore_fpu_irq || !boot_cpu_data.hard_math)
 		return IRQ_NONE;
-	math_error((void *)regs->eip);
+	math_error((void __user *)regs->eip);
 	return IRQ_HANDLED;
 }
 
@@ -332,7 +332,7 @@ static irqreturn_t math_error_irq(int cpl, void *dev_id, struct pt_regs *regs)
  * New motherboards sometimes make IRQ 13 be a PCI interrupt,
  * so allow interrupt sharing.
  */
-static struct irqaction fpu_irq = { math_error_irq, 0, 0, "fpu", NULL, NULL };
+static struct irqaction fpu_irq = { math_error_irq, 0, CPU_MASK_NONE, "fpu", NULL, NULL };
 
 void __init init_ISA_irqs (void)
 {
@@ -345,7 +345,7 @@ void __init init_ISA_irqs (void)
 
 	for (i = 0; i < NR_IRQS; i++) {
 		irq_desc[i].status = IRQ_DISABLED;
-		irq_desc[i].action = 0;
+		irq_desc[i].action = NULL;
 		irq_desc[i].depth = 1;
 
 		if (i < 16) {

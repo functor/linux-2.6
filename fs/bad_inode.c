@@ -13,6 +13,7 @@
 #include <linux/stat.h>
 #include <linux/time.h>
 #include <linux/smp_lock.h>
+#include <linux/namei.h>
 
 /*
  * The follow_link operation is special: it must behave as a no-op

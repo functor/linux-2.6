@@ -109,7 +109,7 @@
 #define __NR_syslog			1117
 #define __NR_setitimer			1118
 #define __NR_getitimer			1119
-#define __NR_tux			1120 /* was __NR_old_stat */
+/* 1120 was __NR_old_stat */
 /* 1121 was __NR_old_lstat */
 /* 1122 was __NR_old_fstat */
 #define __NR_vhangup			1123
@@ -266,6 +266,8 @@
 
 #define NR_syscalls			256 /* length of syscall table */
 
+#define __ARCH_WANT_SYS_RT_SIGACTION
+
 #ifdef CONFIG_IA32_SUPPORT
 # define __ARCH_WANT_SYS_FADVISE64
 # define __ARCH_WANT_SYS_GETPGRP
@@ -276,7 +278,6 @@
 # define __ARCH_WANT_SYS_SIGPENDING
 # define __ARCH_WANT_SYS_SIGPROCMASK
 #endif
-# define __ARCH_WANT_SYS_RT_SIGACTION
 
 #if !defined(__ASSEMBLY__) && !defined(ASSEMBLER)
 

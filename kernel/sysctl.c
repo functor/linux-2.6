@@ -39,6 +39,8 @@
 #include <linux/initrd.h>
 #include <linux/times.h>
 #include <linux/limits.h>
+#include <linux/dcache.h>
+
 #include <asm/uaccess.h>
 
 #ifdef CONFIG_ROOT_NFS
@@ -821,6 +823,16 @@ static ctl_table vm_table[] = {
 		.procname	= "block_dump",
 		.data		= &block_dump,
 		.maxlen		= sizeof(block_dump),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+		.strategy	= &sysctl_intvec,
+		.extra1		= &zero,
+	},
+	{
+		.ctl_name	= VM_VFS_CACHE_PRESSURE,
+		.procname	= "vfs_cache_pressure",
+		.data		= &sysctl_vfs_cache_pressure,
+		.maxlen		= sizeof(sysctl_vfs_cache_pressure),
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 		.strategy	= &sysctl_intvec,
@@ -2199,7 +2211,7 @@ int proc_doulongvec_ms_jiffies_minmax(ctl_table *table, int write,
 struct ctl_table_header * register_sysctl_table(ctl_table * table, 
 						int insert_at_head)
 {
-	return 0;
+	return NULL;
 }
 
 void unregister_sysctl_table(struct ctl_table_header * table)

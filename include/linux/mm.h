@@ -23,6 +23,7 @@ extern unsigned long max_mapnr;
 
 extern unsigned long num_physpages;
 extern void * high_memory;
+extern unsigned long vmalloc_earlyreserve;
 extern int page_cluster;
 
 #include <asm/page.h>
@@ -495,8 +496,18 @@ int shmem_set_policy(struct vm_area_struct *vma, struct mempolicy *new);
 struct mempolicy *shmem_get_policy(struct vm_area_struct *vma,
 					unsigned long addr);
 struct file *shmem_file_setup(char * name, loff_t size, unsigned long flags);
-void shmem_lock(struct file * file, int lock);
+int shmem_lock(struct file * file, int lock, struct user_struct *);
 int shmem_zero_setup(struct vm_area_struct *);
+
+static inline int can_do_mlock(void)
+{
+	if (capable(CAP_IPC_LOCK))
+		return 1;
+	if (current->rlim[RLIMIT_MEMLOCK].rlim_cur != 0)
+		return 1;
+	return 0;
+}
+
 
 /*
  * Parameter block passed down to zap_pte_range in exceptional cases.

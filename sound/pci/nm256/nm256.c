@@ -1188,7 +1188,7 @@ snd_nm256_ac97_reset(ac97_t *ac97)
 	/* Reset the mixer.  'Tis magic!  */
 	snd_nm256_writeb(chip, 0x6c0, 1);
 	if (chip->latitude_workaround) {
-		/* Dell latitude LS will lock up by this */
+		/* Dell Latitude LS will lock up on this */
 		snd_nm256_writeb(chip, 0x6cc, 0x87);
 	}
 	snd_nm256_writeb(chip, 0x6cc, 0x80);
@@ -1505,8 +1505,14 @@ snd_nm256_create(snd_card_t *card, struct pci_dev *pci,
 	chip->latitude_workaround = 1;
 	pci_read_config_word(pci, PCI_SUBSYSTEM_VENDOR_ID, &subsystem_vendor);
 	pci_read_config_word(pci, PCI_SUBSYSTEM_ID, &subsystem_device);
-	if (subsystem_vendor == 0x104d && subsystem_device == 0x8041) {
+	if (   (subsystem_vendor == 0x104d && subsystem_device == 0x8041)
+	    || (subsystem_vendor == 0x1028 && subsystem_device == 0x0080)) {
 		/* this workaround will cause lock-up after suspend/resume on Sony PCG-F305 */
+		/* It will also cause a lock-up on Latitude LS (PP01S Rev A2) whenever sound devices are accessed */
+		chip->latitude_workaround = 0;
+	}
+	if (subsystem_vendor == 0x1028 && subsystem_device == 0x0080) {
+		/* this workaround will cause lock-up after suspend/resume on a Dell laptop */
 		chip->latitude_workaround = 0;
 	}
 

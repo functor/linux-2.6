@@ -20,6 +20,7 @@
 #include <linux/fs.h>
 #include <linux/jbd.h>
 #include <linux/ext3_fs.h>
+#include <linux/namei.h>
 #include "xattr.h"
 
 static int ext3_follow_link(struct dentry *dentry, struct nameidata *nd)

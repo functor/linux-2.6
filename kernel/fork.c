@@ -903,7 +903,6 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	p = dup_task_struct(current);
 	if (!p)
 		goto fork_out;
-	p->tux_info = NULL;
 
 	retval = -EAGAIN;
 	if (atomic_read(&p->user->processes) >=

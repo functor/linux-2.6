@@ -48,8 +48,6 @@
 static struct quotactl_ops cifs_quotactl_ops;
 #endif
 
-extern struct file_system_type cifs_fs_type;
-
 int cifsFYI = 0;
 int cifsERROR = 1;
 int traceSMB = 0;
@@ -520,6 +518,7 @@ struct inode_operations cifs_file_inode_ops = {
 struct inode_operations cifs_symlink_inode_ops = {
 	.readlink = cifs_readlink,
 	.follow_link = cifs_follow_link,
+	.put_link = cifs_put_link,
 	.permission = cifs_permission,
 	/* BB add the following two eventually */
 	/* revalidate: cifs_revalidate,

@@ -49,6 +49,7 @@ deps_config := \
 	drivers/media/video/Kconfig \
 	drivers/media/Kconfig \
 	drivers/misc/Kconfig \
+	drivers/w1/Kconfig \
 	drivers/i2c/chips/Kconfig \
 	drivers/i2c/busses/Kconfig \
 	drivers/i2c/algos/Kconfig \
@@ -90,12 +91,13 @@ deps_config := \
 	drivers/net/pcmcia/Kconfig \
 	drivers/net/wireless/Kconfig \
 	drivers/net/tokenring/Kconfig \
+	drivers/net/fec_8xx/Kconfig \
 	drivers/net/tulip/Kconfig \
 	drivers/net/arm/Kconfig \
 	drivers/net/arcnet/Kconfig \
 	drivers/net/Kconfig \
-	net/tux/Kconfig \
 	drivers/bluetooth/Kconfig \
+	net/bluetooth/hidp/Kconfig \
 	net/bluetooth/cmtp/Kconfig \
 	net/bluetooth/bnep/Kconfig \
 	net/bluetooth/rfcomm/Kconfig \

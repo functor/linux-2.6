@@ -16,6 +16,7 @@
 #include <linux/pagemap.h>
 #include <linux/smp_lock.h>
 #include <linux/net.h>
+#include <linux/namei.h>
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -44,7 +45,7 @@ static int smb_follow_link(struct dentry *dentry, struct nameidata *nd)
 		int len = smb_proc_read_link(server_from_dentry(dentry),
 						dentry, link, PATH_MAX - 1);
 		if (len < 0) {
-			kfree(link);
+			putname(link);
 			link = ERR_PTR(len);
 		} else {
 			link[len] = 0;

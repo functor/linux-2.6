@@ -24,6 +24,7 @@
 #include <linux/socket.h>
 #include <linux/syscalls.h>
 #include <linux/percpu.h>
+#include <linux/init.h>
 #include <net/compat.h>
 
 #include <asm/oplib.h>
@@ -76,7 +77,6 @@ extern int __memcmp(const void *, const void *, __kernel_size_t);
 extern int __strncmp(const char *, const char *, __kernel_size_t);
 extern __kernel_size_t __strlen(const char *);
 extern __kernel_size_t strlen(const char *);
-extern char saved_command_line[];
 extern void linux_sparc_syscall(void);
 extern void rtrap(void);
 extern void show_regs(struct pt_regs *);
@@ -327,7 +327,6 @@ EXPORT_SYMBOL(sys_getegid);
 EXPORT_SYMBOL(sys_getgid);
 EXPORT_SYMBOL(svr4_getcontext);
 EXPORT_SYMBOL(svr4_setcontext);
-EXPORT_SYMBOL(sys_ioctl);
 EXPORT_SYMBOL(compat_sys_ioctl);
 EXPORT_SYMBOL(sparc32_open);
 EXPORT_SYMBOL(sys_close);
@@ -361,6 +360,8 @@ EXPORT_SYMBOL(__bzero_noasi);
 EXPORT_SYMBOL(phys_base);
 EXPORT_SYMBOL(pfn_base);
 EXPORT_SYMBOL(sparc64_valid_addr_bitmap);
+EXPORT_SYMBOL(page_to_pfn);
+EXPORT_SYMBOL(pfn_to_page);
 
 /* No version information on this, heavily used in inline asm,
  * and will always be 'void __ret_efault(void)'.

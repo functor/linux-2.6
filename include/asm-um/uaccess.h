@@ -34,6 +34,9 @@
 
 #define __copy_to_user(to, from, n) copy_to_user(to, from, n)
 
+#define __copy_to_user_inatomic __copy_to_user
+#define __copy_from_user_inatomic __copy_from_user
+
 #define __get_user(x, ptr) \
 ({ \
         const __typeof__(ptr) __private_ptr = ptr; \

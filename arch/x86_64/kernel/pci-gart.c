@@ -148,7 +148,7 @@ static void flush_gart(struct pci_dev *dev)
 { 
 	unsigned long flags;
 	int bus = dev ? dev->bus->number : -1;
-	cpumask_const_t bus_cpumask = pcibus_to_cpumask(bus);
+	cpumask_t bus_cpumask = pcibus_to_cpumask(bus);
 	int flushed = 0;
 	int i;
 
@@ -158,7 +158,7 @@ static void flush_gart(struct pci_dev *dev)
 			u32 w;
 			if (!northbridges[i]) 
 				continue;
-			if (bus >= 0 && !(cpu_isset_const(i, bus_cpumask)))
+			if (bus >= 0 && !(cpu_isset(i, bus_cpumask)))
 				continue;
 			pci_write_config_dword(northbridges[i], 0x9c, 
 					       northbridge_flush_word[i] | 1); 
@@ -255,7 +255,7 @@ void pci_free_consistent(struct pci_dev *hwdev, size_t size,
 #define SET_LEAK(x) if (iommu_leak_tab) \
 			iommu_leak_tab[x] = __builtin_return_address(0);
 #define CLEAR_LEAK(x) if (iommu_leak_tab) \
-			iommu_leak_tab[x] = 0;
+			iommu_leak_tab[x] = NULL;
 
 /* Debugging aid for drivers that don't free their IOMMU tables */
 static void **iommu_leak_tab; 

@@ -11,11 +11,15 @@
 #include <linux/netdevice.h>
 #include <linux/types.h>
 #include <linux/pkt_sched.h>
+#include <linux/rcupdate.h>
 #include <net/pkt_cls.h>
+#include <linux/module.h>
+#include <linux/rtnetlink.h>
 
 #ifdef CONFIG_X86_TSC
 #include <asm/msr.h>
 #endif
+
 
 struct rtattr;
 struct Qdisc;
@@ -92,6 +96,8 @@ struct Qdisc
 	struct net_device	*dev;
 
 	struct tc_stats		stats;
+	spinlock_t		*stats_lock;
+	struct rcu_head 	q_rcu;
 	int			(*reshape_fail)(struct sk_buff *skb, struct Qdisc *q);
 
 	/* This field is deprecated, but it is still used by CBQ
@@ -205,11 +211,7 @@ typedef long		psched_tdiff_t;
 #define PSCHED_US2JIFFIE(usecs) (((usecs)+(1000000/HZ-1))/(1000000/HZ))
 #define PSCHED_JIFFIE2US(delay) ((delay)*(1000000/HZ))
 
-#define PSCHED_EXPORTLIST EXPORT_SYMBOL(psched_tod_diff);
-
 #else /* PSCHED_CLOCK_SOURCE != PSCHED_GETTIMEOFDAY */
-
-#define PSCHED_EXPORTLIST PSCHED_EXPORTLIST_1 PSCHED_EXPORTLIST_2
 
 typedef u64	psched_time_t;
 typedef long	psched_tdiff_t;
@@ -230,27 +232,7 @@ extern psched_time_t	psched_time_base;
 #define PSCHED_JSCALE 10
 #endif
 
-#define PSCHED_EXPORTLIST_2
-
-#if BITS_PER_LONG <= 32
-
-#define PSCHED_WATCHER unsigned long
-
-extern PSCHED_WATCHER psched_time_mark;
-
-#define PSCHED_GET_TIME(stamp) ((stamp) = psched_time_base + (((unsigned long)(jiffies-psched_time_mark))<<PSCHED_JSCALE))
-
-#define PSCHED_EXPORTLIST_1 EXPORT_SYMBOL(psched_time_base); \
-                            EXPORT_SYMBOL(psched_time_mark);
-
-#else
-
-#define PSCHED_GET_TIME(stamp) ((stamp) = (jiffies<<PSCHED_JSCALE))
-
-#define PSCHED_EXPORTLIST_1 
-
-#endif
-
+#define PSCHED_GET_TIME(stamp) ((stamp) = (get_jiffies_64()<<PSCHED_JSCALE))
 #define PSCHED_US2JIFFIE(delay) (((delay)+(1<<PSCHED_JSCALE)-1)>>PSCHED_JSCALE)
 #define PSCHED_JIFFIE2US(delay) ((delay)<<PSCHED_JSCALE)
 
@@ -258,9 +240,6 @@ extern PSCHED_WATCHER psched_time_mark;
 
 extern psched_tdiff_t psched_clock_per_hz;
 extern int psched_clock_scale;
-
-#define PSCHED_EXPORTLIST_2 EXPORT_SYMBOL(psched_clock_per_hz); \
-                            EXPORT_SYMBOL(psched_clock_scale);
 
 #define PSCHED_US2JIFFIE(delay) (((delay)+psched_clock_per_hz-1)/psched_clock_per_hz)
 #define PSCHED_JIFFIE2US(delay) ((delay)*psched_clock_per_hz)
@@ -272,8 +251,6 @@ extern int psched_clock_scale;
    rdtscll(__cur); \
    (stamp) = __cur>>psched_clock_scale; \
 })
-
-#define PSCHED_EXPORTLIST_1
 
 #elif defined (__alpha__)
 
@@ -288,9 +265,6 @@ extern PSCHED_WATCHER psched_time_mark;
    psched_time_mark = __res; \
    (stamp) = (psched_time_base + __res)>>psched_clock_scale; \
 })
-
-#define PSCHED_EXPORTLIST_1 EXPORT_SYMBOL(psched_time_base); \
-                            EXPORT_SYMBOL(psched_time_mark);
 
 #else
 
@@ -322,13 +296,13 @@ extern PSCHED_WATCHER psched_time_mark;
 
 extern int psched_tod_diff(int delta_sec, int bound);
 
-#define PSCHED_TDIFF_SAFE(tv1, tv2, bound, guard) \
+#define PSCHED_TDIFF_SAFE(tv1, tv2, bound) \
 ({ \
 	   int __delta_sec = (tv1).tv_sec - (tv2).tv_sec; \
 	   int __delta = (tv1).tv_usec - (tv2).tv_usec; \
 	   switch (__delta_sec) { \
 	   default: \
-		   __delta = psched_tod_diff(__delta_sec, bound); guard; break; \
+		   __delta = psched_tod_diff(__delta_sec, bound);  break; \
 	   case 2: \
 		   __delta += 1000000; \
 	   case 1: \
@@ -369,12 +343,8 @@ extern int psched_tod_diff(int delta_sec, int bound);
 #else
 
 #define PSCHED_TDIFF(tv1, tv2) (long)((tv1) - (tv2))
-#define PSCHED_TDIFF_SAFE(tv1, tv2, bound, guard) \
-({ \
-	   long long __delta = (tv1) - (tv2); \
-	   if ( __delta > (long long)(bound)) {  __delta = (bound); guard; } \
-	   __delta; \
-})
+#define PSCHED_TDIFF_SAFE(tv1, tv2, bound) \
+	min_t(long long, (tv1) - (tv2), bound)
 
 
 #define PSCHED_TLESS(tv1, tv2) ((tv1) < (tv2))
@@ -390,14 +360,15 @@ struct tcf_police
 {
 	struct tcf_police *next;
 	int		refcnt;
+#ifdef CONFIG_NET_CLS_ACT
+	int		bindcnt;
+#endif
 	u32		index;
-
 	int		action;
 	int		result;
 	u32		ewma_rate;
 	u32		burst;
 	u32		mtu;
-
 	u32		toks;
 	u32		ptoks;
 	psched_time_t	t_c;
@@ -406,18 +377,93 @@ struct tcf_police
 	struct qdisc_rate_table *P_tab;
 
 	struct tc_stats	stats;
+	spinlock_t	*stats_lock;
 };
 
-extern int qdisc_copy_stats(struct sk_buff *skb, struct tc_stats *st);
+#ifdef CONFIG_NET_CLS_ACT
+
+#define ACT_P_CREATED 1
+#define ACT_P_DELETED 1
+#define tca_gen(name) \
+struct tcf_##name *next; \
+	u32 index; \
+	int refcnt; \
+	int bindcnt; \
+	u32 capab; \
+	int action; \
+	struct tcf_t tm; \
+	struct tc_stats stats; \
+	spinlock_t *stats_lock; \
+	spinlock_t lock
+
+
+struct tc_action
+{
+	void *priv;
+	struct tc_action_ops *ops;
+	__u32   type;   /* for backward compat(TCA_OLD_COMPAT) */
+	__u32   order; 
+	struct tc_action *next;
+};
+
+#define TCA_CAP_NONE 0
+struct tc_action_ops
+{
+	struct tc_action_ops *next;
+	char    kind[IFNAMSIZ];
+	__u32   type; /* TBD to match kind */
+	__u32 	capab;  /* capabilities includes 4 bit version */
+	struct module		*owner;
+	int     (*act)(struct sk_buff **, struct tc_action *);
+	int     (*get_stats)(struct sk_buff *, struct tc_action *);
+	int     (*dump)(struct sk_buff *, struct tc_action *,int , int);
+	int     (*cleanup)(struct tc_action *, int bind);
+	int     (*lookup)(struct tc_action *, u32 );
+	int     (*init)(struct rtattr *,struct rtattr *,struct tc_action *, int , int );
+	int     (*walk)(struct sk_buff *, struct netlink_callback *, int , struct tc_action *);
+};
+
+extern int tcf_register_action(struct tc_action_ops *a);
+extern int tcf_unregister_action(struct tc_action_ops *a);
+extern void tcf_action_destroy(struct tc_action *a, int bind);
+extern int tcf_action_exec(struct sk_buff *skb, struct tc_action *a);
+extern int tcf_action_init(struct rtattr *rta, struct rtattr *est, struct tc_action *a,char *n, int ovr, int bind);
+extern int tcf_action_init_1(struct rtattr *rta, struct rtattr *est, struct tc_action *a,char *n, int ovr, int bind);
+extern int tcf_action_dump(struct sk_buff *skb, struct tc_action *a, int, int);
+extern int tcf_action_dump_old(struct sk_buff *skb, struct tc_action *a, int, int);
+extern int tcf_action_dump_1(struct sk_buff *skb, struct tc_action *a, int, int);
+extern int tcf_action_copy_stats (struct sk_buff *,struct tc_action *);
+extern int tcf_act_police_locate(struct rtattr *rta, struct rtattr *est,struct tc_action *,int , int );
+extern int tcf_act_police_dump(struct sk_buff *, struct tc_action *, int, int);
+extern int tcf_act_police(struct sk_buff **skb, struct tc_action *a);
+#endif
+
+extern int tcf_police(struct sk_buff *skb, struct tcf_police *p);
+extern int qdisc_copy_stats(struct sk_buff *skb, struct tc_stats *st, spinlock_t *lock);
 extern void tcf_police_destroy(struct tcf_police *p);
 extern struct tcf_police * tcf_police_locate(struct rtattr *rta, struct rtattr *est);
 extern int tcf_police_dump(struct sk_buff *skb, struct tcf_police *p);
-extern int tcf_police(struct sk_buff *skb, struct tcf_police *p);
 
-static inline void tcf_police_release(struct tcf_police *p)
+static inline int tcf_police_release(struct tcf_police *p, int bind)
 {
+	int ret = 0;
+#ifdef CONFIG_NET_CLS_ACT
+	if (p) {
+		if (bind) {
+			 p->bindcnt--;
+		}
+		p->refcnt--;
+		if (p->refcnt <= 0 && !p->bindcnt) {
+			tcf_police_destroy(p);
+			ret = 1;
+		}
+	}
+#else
 	if (p && --p->refcnt == 0)
 		tcf_police_destroy(p);
+
+#endif
+	return ret;
 }
 
 extern struct Qdisc noop_qdisc;
@@ -436,7 +482,7 @@ void dev_deactivate(struct net_device *dev);
 void qdisc_reset(struct Qdisc *qdisc);
 void qdisc_destroy(struct Qdisc *qdisc);
 struct Qdisc * qdisc_create_dflt(struct net_device *dev, struct Qdisc_ops *ops);
-int qdisc_new_estimator(struct tc_stats *stats, struct rtattr *opt);
+int qdisc_new_estimator(struct tc_stats *stats, spinlock_t *stats_lock, struct rtattr *opt);
 void qdisc_kill_estimator(struct tc_stats *stats);
 struct qdisc_rate_table *qdisc_get_rtab(struct tc_ratespec *r, struct rtattr *tab);
 void qdisc_put_rtab(struct qdisc_rate_table *tab);

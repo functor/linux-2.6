@@ -57,8 +57,6 @@ unsigned long init_pg_tables_end __initdata = ~0UL;
 
 int disable_pse __initdata = 0;
 
-static inline char * __init machine_specific_memory_setup(void);
-
 /*
  * Machine setup..
  */
@@ -129,7 +127,6 @@ unsigned long saved_videomode;
 #define RAMDISK_LOAD_FLAG		0x4000	
 
 static char command_line[COMMAND_LINE_SIZE];
-       char saved_command_line[COMMAND_LINE_SIZE];
 
 unsigned char __initdata boot_params[PARAM_SIZE];
 
@@ -631,13 +628,9 @@ static int __init copy_e820_map(struct e820entry * biosmap, int nr_map)
 }
 
 #if defined(CONFIG_EDD) || defined(CONFIG_EDD_MODULE)
-unsigned char eddnr;
-struct edd_info edd[EDDMAXNR];
-unsigned int edd_disk80_sig;
+struct edd edd;
 #ifdef CONFIG_EDD_MODULE
-EXPORT_SYMBOL(eddnr);
 EXPORT_SYMBOL(edd);
-EXPORT_SYMBOL(edd_disk80_sig);
 #endif
 /**
  * copy_edd() - Copy the BIOS EDD information
@@ -646,12 +639,15 @@ EXPORT_SYMBOL(edd_disk80_sig);
  */
 static inline void copy_edd(void)
 {
-     eddnr = EDD_NR;
-     memcpy(edd, EDD_BUF, sizeof(edd));
-     edd_disk80_sig = DISK80_SIGNATURE;
+     memcpy(edd.mbr_signature, EDD_MBR_SIGNATURE, sizeof(edd.mbr_signature));
+     memcpy(edd.edd_info, EDD_BUF, sizeof(edd.edd_info));
+     edd.mbr_signature_nr = EDD_MBR_SIG_NR;
+     edd.edd_info_nr = EDD_NR;
 }
 #else
-#define copy_edd() do {} while (0)
+static inline void copy_edd(void)
+{
+}
 #endif
 
 /*
@@ -659,14 +655,6 @@ static inline void copy_edd(void)
  * It does not work on many machines.
  */
 #define LOWMEMSIZE()	(0x9f000)
-
-static void __init setup_memory_region(void)
-{
-	char *who = machine_specific_memory_setup();
-	printk(KERN_INFO "BIOS-provided physical RAM map:\n");
-	print_memory_map(who);
-} /* setup_memory_region */
-
 
 static void __init parse_cmdline_early (char ** cmdline_p)
 {
@@ -1216,7 +1204,7 @@ static struct nop {
 } noptypes[] = { 
      { X86_FEATURE_K8, k8_nops }, 
      { X86_FEATURE_K7, k7_nops }, 
-     { -1, 0 }
+     { -1, NULL }
 }; 
 
 /* Replace instructions with better alternatives for this CPU type.
@@ -1270,6 +1258,8 @@ static int __init noreplacement_setup(char *s)
 
 __setup("noreplacement", noreplacement_setup); 
 
+static char * __init machine_specific_memory_setup(void);
+
 /*
  * Determine if we were loaded by an EFI loader.  If so, then we have also been
  * passed the efi memmap, systab, etc., so we should use these data structures
@@ -1320,8 +1310,10 @@ void __init setup_arch(char **cmdline_p)
 	ARCH_SETUP
 	if (efi_enabled)
 		efi_init();
-	else
-		setup_memory_region();
+	else {
+		printk(KERN_INFO "BIOS-provided physical RAM map:\n");
+		print_memory_map(machine_specific_memory_setup());
+	}
 
 	copy_edd();
 

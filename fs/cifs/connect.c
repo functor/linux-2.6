@@ -175,7 +175,7 @@ cifs_reconnect(struct TCP_Server_Info *server)
 			if(server->tcpStatus != CifsExiting)
 				server->tcpStatus = CifsGood;
 			spin_unlock(&GlobalMid_Lock);
-			atomic_set(&server->inFlight,0);
+	/*		atomic_set(&server->inFlight,0);*/
 			wake_up(&server->response_q);
 		}
 	}
@@ -253,13 +253,12 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 				/* some servers kill tcp session rather than returning
 					smb negprot error in which case reconnecting here is
 					not going to help - return error to mount */
-				spin_lock(&GlobalMid_Lock);
-				server->tcpStatus = CifsExiting;
-				spin_unlock(&GlobalMid_Lock);
-				wake_up(&server->response_q);
 				break;
 			}
-
+			if(length == -EINTR) { 
+				cFYI(1,("cifsd thread killed"));
+				break;
+			}
 			cFYI(1,("Reconnecting after unexpected peek error %d",length));
 			cifs_reconnect(server);
 			csocket = server->ssocket;
@@ -292,11 +291,6 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 					/* if nack on negprot (rather than 
 					ret of smb negprot error) reconnecting
 					not going to help, ret error to mount */
-					spin_lock(&GlobalMid_Lock);
-					server->tcpStatus = CifsExiting;
-					spin_unlock(&GlobalMid_Lock);
-					/* wake up thread doing negprot */
-					wake_up(&server->response_q);
 					break;
 				} else {
 					/* give server a second to
@@ -407,15 +401,19 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 	}
 	spin_lock(&GlobalMid_Lock);
 	server->tcpStatus = CifsExiting;
-	spin_unlock(&GlobalMid_Lock);
+	server->tsk = NULL;
 	atomic_set(&server->inFlight, 0);
+	spin_unlock(&GlobalMid_Lock);
 	/* Although there should not be any requests blocked on 
 	this queue it can not hurt to be paranoid and try to wake up requests
 	that may haven been blocked when more than 50 at time were on the wire 
 	to the same server - they now will see the session is in exit state
 	and get out of SendReceive.  */
-	wake_up_all(&server->request_q);   
-	server->tsk = NULL;
+	wake_up_all(&server->request_q);
+	/* give those requests time to exit */
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule_timeout(HZ/8);
+
 	if(server->ssocket) {
 		sock_release(csocket);
 		server->ssocket = NULL;
@@ -453,7 +451,7 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 		spin_unlock(&GlobalMid_Lock);
 		read_unlock(&GlobalSMBSeslock);
 		set_current_state(TASK_INTERRUPTIBLE);
-		/* 1/8th of sec should be more than enough time for them to exit */
+		/* 1/8th of sec is more than enough time for them to exit */
 		schedule_timeout(HZ/8); 
 	}
 
@@ -468,7 +466,8 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 	}
 	kfree(server);
 
-	cFYI(1, ("About to exit from demultiplex thread"));
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule_timeout(HZ/4);
 	return 0;
 }
 
@@ -716,6 +715,8 @@ cifs_parse_mount_options(char *options, const char *devname, struct smb_vol *vol
 				if((i==15) && (value[i] != 0))
 					printk(KERN_WARNING "CIFS: netbiosname longer than 15 and was truncated.\n");
 			}
+		} else if (strnicmp(data, "credentials", 4) == 0) {
+			/* ignore */
 		} else if (strnicmp(data, "version", 3) == 0) {
 			/* ignore */
 		} else if (strnicmp(data, "rw", 2) == 0) {
@@ -1357,31 +1358,37 @@ cifs_mount(struct super_block *sb, struct cifs_sb_info *cifs_sb,
 			}
 		}
 	}
-	if (pSesInfo->capabilities & CAP_LARGE_FILES) {
-		cFYI(0, ("Large files supported "));
-		sb->s_maxbytes = (u64) 1 << 63;
-	} else
-		sb->s_maxbytes = (u64) 1 << 31;	/* 2 GB */
+	if(pSesInfo) {
+		if (pSesInfo->capabilities & CAP_LARGE_FILES) {
+			sb->s_maxbytes = (u64) 1 << 63;
+		} else
+			sb->s_maxbytes = (u64) 1 << 31;	/* 2 GB */
+	}
 
 /* on error free sesinfo and tcon struct if needed */
 	if (rc) {
+		/* if session setup failed, use count is zero but
+		we still need to free cifsd thread */
 		if(atomic_read(&srvTcp->socketUseCount) == 0) {
 			spin_lock(&GlobalMid_Lock);
 			srvTcp->tcpStatus = CifsExiting;
 			spin_unlock(&GlobalMid_Lock);
+			if(srvTcp->tsk)
+				send_sig(SIGKILL,srvTcp->tsk,1);
 		}
 		 /* If find_unc succeeded then rc == 0 so we can not end */
-		if (tcon)  /* up here accidently freeing someone elses tcon struct */
+		if (tcon)  /* up accidently freeing someone elses tcon struct */
 			tconInfoFree(tcon);
 		if (existingCifsSes == 0) {
 			if (pSesInfo) {
-				if (pSesInfo->server) {
-					if (pSesInfo->Suid)
-						CIFSSMBLogoff(xid, pSesInfo);
-					if(pSesInfo->server->tsk)
+				if ((pSesInfo->server) && 
+				    (pSesInfo->status == CifsGood)) {
+					int temp_rc;
+					temp_rc = CIFSSMBLogoff(xid, pSesInfo);
+					/* if the socketUseCount is now zero */
+					if((temp_rc == -ESHUTDOWN) &&
+					   (pSesInfo->server->tsk))
 						send_sig(SIGKILL,pSesInfo->server->tsk,1);
-					set_current_state(TASK_INTERRUPTIBLE);
-					schedule_timeout(HZ / 4);	/* give captive thread time to exit */
 				} else
 					cFYI(1, ("No session or bad tcon"));
 				sesInfoFree(pSesInfo);
@@ -1438,7 +1445,7 @@ CIFSSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 
 	/* send SMBsessionSetup here */
 	header_assemble(smb_buffer, SMB_COM_SESSION_SETUP_ANDX,
-			0 /* no tCon exists yet */ , 13 /* wct */ );
+			NULL /* no tCon exists yet */ , 13 /* wct */ );
 
 	pSMB->req_no_secext.AndXCommand = 0xFF;
 	pSMB->req_no_secext.MaxBufferSize = cpu_to_le16(ses->server->maxBuf);
@@ -1694,7 +1701,7 @@ CIFSSpnegoSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 
 	/* send SMBsessionSetup here */
 	header_assemble(smb_buffer, SMB_COM_SESSION_SETUP_ANDX,
-			0 /* no tCon exists yet */ , 12 /* wct */ );
+			NULL /* no tCon exists yet */ , 12 /* wct */ );
 	pSMB->req.hdr.Flags2 |= SMBFLG2_EXT_SEC;
 	pSMB->req.AndXCommand = 0xFF;
 	pSMB->req.MaxBufferSize = cpu_to_le16(ses->server->maxBuf);
@@ -1956,7 +1963,7 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 
 	/* send SMBsessionSetup here */
 	header_assemble(smb_buffer, SMB_COM_SESSION_SETUP_ANDX,
-			0 /* no tCon exists yet */ , 12 /* wct */ );
+			NULL /* no tCon exists yet */ , 12 /* wct */ );
 	pSMB->req.hdr.Flags2 |= SMBFLG2_EXT_SEC;
 	pSMB->req.hdr.Flags |= (SMBFLG_CASELESS | SMBFLG_CANONICAL_PATH_FORMAT);
 
@@ -2296,7 +2303,7 @@ CIFSNTLMSSPAuthSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 
 	/* send SMBsessionSetup here */
 	header_assemble(smb_buffer, SMB_COM_SESSION_SETUP_ANDX,
-			0 /* no tCon exists yet */ , 12 /* wct */ );
+			NULL /* no tCon exists yet */ , 12 /* wct */ );
 	pSMB->req.hdr.Flags |= (SMBFLG_CASELESS | SMBFLG_CANONICAL_PATH_FORMAT);
 	pSMB->req.hdr.Flags2 |= SMBFLG2_EXT_SEC;
 	pSMB->req.AndXCommand = 0xFF;
@@ -2669,7 +2676,7 @@ CIFSTCon(unsigned int xid, struct cifsSesInfo *ses,
 	smb_buffer_response = smb_buffer;
 
 	header_assemble(smb_buffer, SMB_COM_TREE_CONNECT_ANDX,
-			0 /*no tid */ , 4 /*wct */ );
+			NULL /*no tid */ , 4 /*wct */ );
 	smb_buffer->Uid = ses->Suid;
 	pSMB = (TCONX_REQ *) smb_buffer;
 	pSMBr = (TCONX_RSP *) smb_buffer_response;
@@ -2769,6 +2776,7 @@ cifs_umount(struct super_block *sb, struct cifs_sb_info *cifs_sb)
 	int rc = 0;
 	int xid;
 	struct cifsSesInfo *ses = NULL;
+	struct task_struct *cifsd_task;
 
 	xid = GetXid();
 
@@ -2781,19 +2789,19 @@ cifs_umount(struct super_block *sb, struct cifs_sb_info *cifs_sb)
 		}
 		tconInfoFree(cifs_sb->tcon);
 		if ((ses) && (ses->server)) {
+			/* save off task so we do not refer to ses later */
+			cifsd_task = ses->server->tsk;
 			cFYI(1, ("About to do SMBLogoff "));
 			rc = CIFSSMBLogoff(xid, ses);
 			if (rc == -EBUSY) {
 				FreeXid(xid);
 				return 0;
-			}
- 
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(HZ / 4);	/* give captive thread time to exit */
-			if((ses->server) && (ses->server->ssocket)) {            
-				cFYI(1,("Waking up socket by sending it signal "));
-				send_sig(SIGKILL,ses->server->tsk,1);
-			}
+			} else if (rc == -ESHUTDOWN) {
+				cFYI(1,("Waking up socket by sending it signal"));
+				send_sig(SIGKILL,cifsd_task,1);
+				rc = 0;
+			} /* else - we have an smb session
+				left on this socket do not kill cifsd */
 		} else
 			cFYI(1, ("No session or bad tcon"));
 	}

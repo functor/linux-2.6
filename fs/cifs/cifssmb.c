@@ -190,7 +190,7 @@ CIFSSMBNegotiate(unsigned int xid, struct cifsSesInfo *ses)
 		rc = -EIO;
 		return rc;
 	}
-	rc = smb_init(SMB_COM_NEGOTIATE, 0, 0 /* no tcon yet */ ,
+	rc = smb_init(SMB_COM_NEGOTIATE, 0, NULL /* no tcon yet */ ,
 		      (void **) &pSMB, (void **) &pSMBr);
 	if (rc)
 		return rc;
@@ -315,8 +315,6 @@ CIFSSMBTDis(const int xid, struct cifsTconInfo *tcon)
 		return 0;  
 	}
 
-/* BB remove (from server) list of shares - but with smp safety  BB */
-/* BB is ses active - do we need to check here - but how? BB */
 	if((tcon->ses == 0) || (tcon->ses->server == 0)) {    
 		up(&tcon->tconSem);
 		return -EIO;
@@ -365,7 +363,7 @@ CIFSSMBLogoff(const int xid, struct cifsSesInfo *ses)
 		return -EBUSY;
 	}
 
-	rc = smb_init(SMB_COM_LOGOFF_ANDX, 2, 0 /* no tcon anymore */,
+	rc = smb_init(SMB_COM_LOGOFF_ANDX, 2, NULL /* no tcon anymore */,
 		 (void **) &pSMB, (void **) &smb_buffer_response);
 
 	if(ses->server->secMode & (SECMODE_SIGN_REQUIRED | SECMODE_SIGN_ENABLED))
@@ -387,6 +385,7 @@ CIFSSMBLogoff(const int xid, struct cifsSesInfo *ses)
 			spin_lock(&GlobalMid_Lock);
 			ses->server->tcpStatus = CifsExiting;
 			spin_unlock(&GlobalMid_Lock);
+			rc = -ESHUTDOWN;
 		}
 	}
 	if (pSMB)
@@ -819,14 +818,20 @@ CIFSSMBLock(const int xid, struct cifsTconInfo *tcon,
 	pSMB->AndXCommand = 0xFF;	/* none */
 	pSMB->Fid = smb_file_id; /* netfid stays le */
 
-	pSMB->Locks[0].Pid = cpu_to_le16(current->tgid);
-	temp = cpu_to_le64(len);
-	pSMB->Locks[0].LengthLow = (__u32)(len & 0xFFFFFFFF);
-	pSMB->Locks[0].LengthHigh =  (__u32)(len>>32);
-	temp = cpu_to_le64(offset);
-	pSMB->Locks[0].OffsetLow = (__u32)(offset & 0xFFFFFFFF);
-	pSMB->Locks[0].OffsetHigh = (__u32)(offset>>32);
-	pSMB->ByteCount = sizeof (LOCKING_ANDX_RANGE);
+	if(numLock != 0) {
+		pSMB->Locks[0].Pid = cpu_to_le16(current->tgid);
+		/* BB where to store pid high? */
+		temp = cpu_to_le64(len);
+		pSMB->Locks[0].LengthLow = (__u32)(temp & 0xFFFFFFFF);
+		pSMB->Locks[0].LengthHigh =  (__u32)(temp>>32);
+		temp = cpu_to_le64(offset);
+		pSMB->Locks[0].OffsetLow = (__u32)(temp & 0xFFFFFFFF);
+		pSMB->Locks[0].OffsetHigh = (__u32)(temp>>32);
+		pSMB->ByteCount = sizeof (LOCKING_ANDX_RANGE);
+	} else {
+		/* oplock break */
+		pSMB->ByteCount = 0;
+	}
 	pSMB->hdr.smb_buf_length += pSMB->ByteCount;
 	pSMB->ByteCount = cpu_to_le16(pSMB->ByteCount);
 
@@ -941,7 +946,14 @@ renameRetry:
 			 (struct smb_hdr *) pSMBr, &bytes_returned, 0);
 	if (rc) {
 		cFYI(1, ("Send error in rename = %d", rc));
+	} 
+
+#ifdef CONFIG_CIFS_STATS
+	  else {
+		atomic_inc(&tcon->num_renames);
 	}
+#endif
+
 	if (pSMB)
 		cifs_buf_release(pSMB);
 
@@ -1017,7 +1029,11 @@ int CIFSSMBRenameOpenFile(const int xid,struct cifsTconInfo *pTcon,
 	if (rc) {
 		cFYI(1,("Send error in Rename (by file handle) = %d", rc));
 	}
-
+#ifdef CONFIG_CIFS_STATS
+	  else {
+		atomic_inc(&pTcon->num_t2renames);
+	}
+#endif
 	if (pSMB)
 		cifs_buf_release(pSMB);
 
@@ -2051,7 +2067,7 @@ CIFSGetDFSRefer(const int xid, struct cifsSesInfo *ses,
 	if (ses == NULL)
 		return -ENODEV;
 getDFSRetry:
-	rc = smb_init(SMB_COM_TRANSACTION2, 15, 0, (void **) &pSMB,
+	rc = smb_init(SMB_COM_TRANSACTION2, 15, NULL, (void **) &pSMB,
 		      (void **) &pSMBr);
 	if (rc)
 		return rc;
@@ -2820,6 +2836,23 @@ setPermsRetry:
 	data_offset->DevMajor = cpu_to_le64(MAJOR(device));
 	data_offset->DevMinor = cpu_to_le64(MINOR(device));
 	data_offset->Permissions = cpu_to_le64(mode);
+    
+	if(S_ISREG(mode))
+		data_offset->Type = cpu_to_le32(UNIX_FILE);
+	else if(S_ISDIR(mode))
+		data_offset->Type = cpu_to_le32(UNIX_DIR);
+	else if(S_ISLNK(mode))
+		data_offset->Type = cpu_to_le32(UNIX_SYMLINK);
+	else if(S_ISCHR(mode))
+		data_offset->Type = cpu_to_le32(UNIX_CHARDEV);
+	else if(S_ISBLK(mode))
+		data_offset->Type = cpu_to_le32(UNIX_BLOCKDEV);
+	else if(S_ISFIFO(mode))
+		data_offset->Type = cpu_to_le32(UNIX_FIFO);
+	else if(S_ISSOCK(mode))
+		data_offset->Type = cpu_to_le32(UNIX_SOCKET);
+
+
 	pSMB->ByteCount = cpu_to_le16(pSMB->ByteCount);
 	rc = SendReceive(xid, tcon->ses, (struct smb_hdr *) pSMB,
 			 (struct smb_hdr *) pSMBr, &bytes_returned, 0);

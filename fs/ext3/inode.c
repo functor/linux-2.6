@@ -66,6 +66,8 @@ int ext3_forget(handle_t *handle, int is_metadata,
 {
 	int err;
 
+	might_sleep();
+
 	BUFFER_TRACE(bh, "enter");
 
 	jbd_debug(4, "forgetting bh %p: is_metadata = %d, mode %o, "
@@ -287,7 +289,7 @@ static int ext3_alloc_block (handle_t *handle,
 				 &ei->i_prealloc_count,
 				 &ei->i_prealloc_block, err);
 		else
-			result = ext3_new_block (inode, goal, 0, 0, err);
+			result = ext3_new_block(inode, goal, NULL, NULL, err);
 		/*
 		 * AKPM: this is somewhat sticky.  I'm not surprised it was
 		 * disabled in 2.2's ext3.  Need to integrate b_committed_data
@@ -296,7 +298,7 @@ static int ext3_alloc_block (handle_t *handle,
 		 */
 	}
 #else
-	result = ext3_new_block (handle, inode, goal, 0, 0, err);
+	result = ext3_new_block(handle, inode, goal, NULL, NULL, err);
 #endif
 	return result;
 }
@@ -859,7 +861,7 @@ changed:
 static int ext3_get_block(struct inode *inode, sector_t iblock,
 			struct buffer_head *bh_result, int create)
 {
-	handle_t *handle = 0;
+	handle_t *handle = NULL;
 	int ret;
 
 	if (create) {
@@ -881,25 +883,41 @@ ext3_direct_io_get_blocks(struct inode *inode, sector_t iblock,
 	handle_t *handle = journal_current_handle();
 	int ret = 0;
 
-	if (handle && handle->h_buffer_credits <= EXT3_RESERVE_TRANS_BLOCKS) {
+	if (!handle)
+		goto get_block;		/* A read */
+
+	if (handle->h_transaction->t_state == T_LOCKED) {
+		/*
+		 * Huge direct-io writes can hold off commits for long
+		 * periods of time.  Let this commit run.
+		 */
+		ext3_journal_stop(handle);
+		handle = ext3_journal_start(inode, DIO_CREDITS);
+		if (IS_ERR(handle))
+			ret = PTR_ERR(handle);
+		goto get_block;
+	}
+
+	if (handle->h_buffer_credits <= EXT3_RESERVE_TRANS_BLOCKS) {
 		/*
 		 * Getting low on buffer credits...
 		 */
-		if (!ext3_journal_extend(handle, DIO_CREDITS)) {
+		ret = ext3_journal_extend(handle, DIO_CREDITS);
+		if (ret > 0) {
 			/*
-			 * Couldn't extend the transaction.  Start a new one
+			 * Couldn't extend the transaction.  Start a new one.
 			 */
 			ret = ext3_journal_restart(handle, DIO_CREDITS);
 		}
 	}
+
+get_block:
 	if (ret == 0)
 		ret = ext3_get_block_handle(handle, inode, iblock,
 					bh_result, create, 0);
-	if (ret == 0)
-		bh_result->b_size = (1 << inode->i_blkbits);
+	bh_result->b_size = (1 << inode->i_blkbits);
 	return ret;
 }
-
 
 /*
  * `handle' can be NULL if create is zero
@@ -2950,6 +2968,7 @@ int ext3_mark_inode_dirty(handle_t *handle, struct inode *inode)
 	struct ext3_iloc iloc;
 	int err;
 
+	might_sleep();
 	err = ext3_reserve_inode_write(handle, inode, &iloc);
 	if (!err)
 		err = ext3_mark_iloc_dirty(handle, inode, &iloc);

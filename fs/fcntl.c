@@ -128,7 +128,7 @@ out:
 	return error;
 }
 
-int dupfd(struct file *file, unsigned int start)
+static int dupfd(struct file *file, unsigned int start)
 {
 	struct files_struct * files = current->files;
 	int fd;
@@ -147,8 +147,6 @@ int dupfd(struct file *file, unsigned int start)
 
 	return fd;
 }
-
-EXPORT_SYMBOL_GPL(dupfd);
 
 asmlinkage long sys_dup2(unsigned int oldfd, unsigned int newfd)
 {
@@ -214,7 +212,7 @@ asmlinkage long sys_dup(unsigned int fildes)
 	return ret;
 }
 
-#define SETFL_MASK (O_APPEND | O_NONBLOCK | O_NDELAY | FASYNC | O_DIRECT)
+#define SETFL_MASK (O_APPEND | O_NONBLOCK | O_NDELAY | FASYNC | O_DIRECT | O_NOATIME)
 
 static int setfl(int fd, struct file * filp, unsigned long arg)
 {
@@ -224,6 +222,11 @@ static int setfl(int fd, struct file * filp, unsigned long arg)
 	/* O_APPEND cannot be cleared if the file is marked as append-only */
 	if (!(arg & O_APPEND) && IS_APPEND(inode))
 		return -EPERM;
+
+	/* O_NOATIME can only be set by the owner or superuser */
+	if ((arg & O_NOATIME) && !(filp->f_flags & O_NOATIME))
+		if (current->fsuid != inode->i_uid && !capable(CAP_FOWNER))
+			return -EPERM;
 
 	/* required for strict SunOS emulation */
 	if (O_NONBLOCK != O_NDELAY)

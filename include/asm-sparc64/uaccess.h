@@ -264,6 +264,8 @@ extern unsigned long __copy_in_user(void __user *to, const void __user *from,
 #define copy_from_user __copy_from_user
 #define copy_to_user __copy_to_user
 #define copy_in_user __copy_in_user
+#define __copy_to_user_inatomic __copy_to_user
+#define __copy_from_user_inatomic __copy_from_user
 
 extern unsigned long __bzero_noasi(void __user *, unsigned long);
 

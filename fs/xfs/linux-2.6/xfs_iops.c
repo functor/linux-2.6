@@ -67,6 +67,7 @@
 #include "xfs_utils.h"
 
 #include <linux/xattr.h>
+#include <linux/namei.h>
 
 
 /*

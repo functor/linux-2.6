@@ -37,6 +37,9 @@ static int __init panic_setup(char *str)
 }
 __setup("panic=", panic_setup);
 
+int netdump_mode = 0;
+EXPORT_SYMBOL_GPL(netdump_mode);
+
 /**
  *	panic - halt the system
  *	@fmt: The text string to print
@@ -60,6 +63,8 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic: %s\n",buf);
+	if (netdump_func)
+		BUG();
 	if (in_interrupt())
 		printk(KERN_EMERG "In interrupt handler - not syncing\n");
 	else if (!current->pid)

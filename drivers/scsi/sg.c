@@ -726,6 +726,19 @@ sg_common_write(Sg_fd * sfp, Sg_request * srp,
 	return 0;
 }
 
+static inline unsigned
+sg_jif_to_ms(int jifs)
+{
+	if (jifs <= 0)
+		return 0U;
+	else {
+		unsigned int j = (unsigned int) jifs;
+		return (j <
+			(UINT_MAX / 1000)) ? ((j * 1000) / HZ) : ((j / HZ) *
+								  1000);
+	}
+}
+
 static int
 sg_ioctl(struct inode *inode, struct file *filp,
 	 unsigned int cmd_in, unsigned long arg)
@@ -2410,7 +2423,7 @@ sg_add_sfp(Sg_device * sdp, int dev)
 	Sg_fd *sfp;
 	unsigned long iflags;
 
-	sfp = (Sg_fd *) sg_page_malloc(sizeof (Sg_fd), 0, 0);
+	sfp = (Sg_fd *) sg_page_malloc(sizeof (Sg_fd), 0, NULL);
 	if (!sfp)
 		return NULL;
 	memset(sfp, 0, sizeof (Sg_fd));
@@ -2590,19 +2603,6 @@ sg_ms_to_jif(unsigned int msecs)
 		return ((int) msecs <
 			(INT_MAX / 1000)) ? (((int) msecs * HZ) / 1000)
 		    : (((int) msecs / 1000) * HZ);
-}
-
-static inline unsigned
-sg_jif_to_ms(int jifs)
-{
-	if (jifs <= 0)
-		return 0U;
-	else {
-		unsigned int j = (unsigned int) jifs;
-		return (j <
-			(UINT_MAX / 1000)) ? ((j * 1000) / HZ) : ((j / HZ) *
-								  1000);
-	}
 }
 
 static unsigned char allow_ops[] = { TEST_UNIT_READY, REQUEST_SENSE,
@@ -2820,7 +2820,7 @@ sg_proc_write_adio(struct file *filp, const char __user *buffer,
 	if (copy_from_user(buff, buffer, num))
 		return -EFAULT;
 	buff[num] = '\0';
-	sg_allow_dio = simple_strtoul(buff, 0, 10) ? 1 : 0;
+	sg_allow_dio = simple_strtoul(buff, NULL, 10) ? 1 : 0;
 	return count;
 }
 
@@ -2843,7 +2843,7 @@ sg_proc_write_dressz(struct file *filp, const char __user *buffer,
 	if (copy_from_user(buff, buffer, num))
 		return -EFAULT;
 	buff[num] = '\0';
-	k = simple_strtoul(buff, 0, 10);
+	k = simple_strtoul(buff, NULL, 10);
 	if (k <= 1048576) {	/* limit "big buff" to 1 MB */
 		sg_big_buff = k;
 		return count;

@@ -138,7 +138,7 @@ static void set_port_led(
 static void led_work (void *__hub)
 {
 	struct usb_hub		*hub = __hub;
-	struct usb_device	*hdev = interface_to_usbdev (hub->intf);
+	struct usb_device	*hdev = hub->hdev;
 	unsigned		i;
 	unsigned		changed = 0;
 	int			cursor = -1;
@@ -234,18 +234,11 @@ static void hub_irq(struct urb *urb, struct pt_regs *regs)
 	int i;
 	unsigned long bits;
 
-	spin_lock(&hub_event_lock);
-	hub->urb_active = 0;
-	if (hub->urb_complete) {	/* disconnect or rmmod */
-		complete(hub->urb_complete);
-		goto done;
-	}
-
 	switch (urb->status) {
 	case -ENOENT:		/* synchronous unlink */
 	case -ECONNRESET:	/* async unlink */
 	case -ESHUTDOWN:	/* hardware going away */
-		goto done;
+		return;
 
 	default:		/* presumably an error */
 		/* Cause a hub reset after 10 consecutive errors */
@@ -268,29 +261,26 @@ static void hub_irq(struct urb *urb, struct pt_regs *regs)
 	hub->nerrors = 0;
 
 	/* Something happened, let khubd figure it out */
+	spin_lock(&hub_event_lock);
 	if (list_empty(&hub->event_list)) {
 		list_add_tail(&hub->event_list, &hub_event_list);
 		wake_up(&khubd_wait);
 	}
+	spin_unlock(&hub_event_lock);
 
 resubmit:
 	if ((status = usb_submit_urb (hub->urb, GFP_ATOMIC)) != 0
-			/* ENODEV means we raced disconnect() */
-			&& status != -ENODEV)
+			&& status != -ENODEV && status != -EPERM)
 		dev_err (&hub->intf->dev, "resubmit --> %d\n", status);
-	if (status == 0)
-		hub->urb_active = 1;
-done:
-	spin_unlock(&hub_event_lock);
 }
 
 /* USB 2.0 spec Section 11.24.2.3 */
 static inline int
 hub_clear_tt_buffer (struct usb_device *hdev, u16 devinfo, u16 tt)
 {
-	return usb_control_msg (hdev, usb_rcvctrlpipe (hdev, 0),
-		HUB_CLEAR_TT_BUFFER, USB_RT_PORT,
-		devinfo, tt, 0, 0, HZ);
+	return usb_control_msg(hdev, usb_rcvctrlpipe(hdev, 0),
+			       HUB_CLEAR_TT_BUFFER, USB_RT_PORT, devinfo,
+			       tt, NULL, 0, HZ);
 }
 
 /*
@@ -308,7 +298,7 @@ static void hub_tt_kevent (void *arg)
 	while (!list_empty (&hub->tt.clear_list)) {
 		struct list_head	*temp;
 		struct usb_tt_clear	*clear;
-		struct usb_device	*hdev;
+		struct usb_device	*hdev = hub->hdev;
 		int			status;
 
 		temp = hub->tt.clear_list.next;
@@ -317,7 +307,6 @@ static void hub_tt_kevent (void *arg)
 
 		/* drop lock so HCD can concurrently report other TT errors */
 		spin_unlock_irqrestore (&hub->tt.lock, flags);
-		hdev = interface_to_usbdev (hub->intf);
 		status = hub_clear_tt_buffer (hdev, clear->devinfo, clear->tt);
 		spin_lock_irqsave (&hub->tt.lock, flags);
 
@@ -378,15 +367,14 @@ void usb_hub_tt_clear_buffer (struct usb_device *udev, int pipe)
 
 static void hub_power_on(struct usb_hub *hub)
 {
-	struct usb_device *hdev;
 	int i;
 
 	/* if hub supports power switching, enable power on each port */
 	if ((hub->descriptor->wHubCharacteristics & HUB_CHAR_LPSM) < 2) {
 		dev_dbg(&hub->intf->dev, "enabling power on all ports\n");
-		hdev = interface_to_usbdev(hub->intf);
 		for (i = 0; i < hub->descriptor->bNbrPorts; i++)
-			set_port_feature(hdev, i + 1, USB_PORT_FEAT_POWER);
+			set_port_feature(hub->hdev, i + 1,
+					USB_PORT_FEAT_POWER);
 	}
 
 	/* Wait for power to be enabled */
@@ -396,10 +384,9 @@ static void hub_power_on(struct usb_hub *hub)
 static int hub_hub_status(struct usb_hub *hub,
 		u16 *status, u16 *change)
 {
-	struct usb_device *hdev = interface_to_usbdev (hub->intf);
 	int ret;
 
-	ret = get_hub_status(hdev, &hub->status->hub);
+	ret = get_hub_status(hub->hdev, &hub->status->hub);
 	if (ret < 0)
 		dev_err (&hub->intf->dev,
 			"%s failed (err = %d)\n", __FUNCTION__, ret);
@@ -414,7 +401,7 @@ static int hub_hub_status(struct usb_hub *hub,
 static int hub_configure(struct usb_hub *hub,
 	struct usb_endpoint_descriptor *endpoint)
 {
-	struct usb_device *hdev = interface_to_usbdev (hub->intf);
+	struct usb_device *hdev = hub->hdev;
 	struct device *hub_dev = &hub->intf->dev;
 	u16 hubstatus, hubchange;
 	unsigned int pipe;
@@ -612,7 +599,6 @@ static int hub_configure(struct usb_hub *hub,
 		message = "couldn't submit status urb";
 		goto fail;
 	}
-	hub->urb_active = 1;
 
 	/* Wake up khubd */
 	wake_up(&khubd_wait);
@@ -640,21 +626,25 @@ static unsigned highspeed_hubs;
 static void hub_disconnect(struct usb_interface *intf)
 {
 	struct usb_hub *hub = usb_get_intfdata (intf);
-	DECLARE_COMPLETION(urb_complete);
+	struct usb_device *hdev;
 
 	if (!hub)
 		return;
+	hdev = hub->hdev;
 
-	if (interface_to_usbdev(intf)->speed == USB_SPEED_HIGH)
+	if (hdev->speed == USB_SPEED_HIGH)
 		highspeed_hubs--;
 
 	usb_set_intfdata (intf, NULL);
+
+	if (hub->urb) {
+		usb_kill_urb(hub->urb);
+		usb_free_urb(hub->urb);
+		hub->urb = NULL;
+	}
+
 	spin_lock_irq(&hub_event_lock);
-	hub->urb_complete = &urb_complete;
-
-	/* Delete it and then reset it */
 	list_del_init(&hub->event_list);
-
 	spin_unlock_irq(&hub_event_lock);
 
 	/* assuming we used keventd, it must quiesce too */
@@ -662,14 +652,6 @@ static void hub_disconnect(struct usb_interface *intf)
 		cancel_delayed_work (&hub->leds);
 	if (hub->has_indicators || hub->tt.hub)
 		flush_scheduled_work ();
-
-	if (hub->urb) {
-		usb_unlink_urb(hub->urb);
-		if (hub->urb_active)
-			wait_for_completion(&urb_complete);
-		usb_free_urb(hub->urb);
-		hub->urb = NULL;
-	}
 
 	if (hub->descriptor) {
 		kfree(hub->descriptor);
@@ -682,8 +664,7 @@ static void hub_disconnect(struct usb_interface *intf)
 	}
 
 	if (hub->buffer) {
-		usb_buffer_free(interface_to_usbdev(intf),
-				sizeof(*hub->buffer), hub->buffer,
+		usb_buffer_free(hdev, sizeof(*hub->buffer), hub->buffer,
 				hub->buffer_dma);
 		hub->buffer = NULL;
 	}
@@ -741,6 +722,7 @@ descriptor_error:
 
 	INIT_LIST_HEAD(&hub->event_list);
 	hub->intf = intf;
+	hub->hdev = hdev;
 	INIT_WORK(&hub->leds, led_work, hub);
 
 	usb_set_intfdata (intf, hub);
@@ -792,7 +774,7 @@ hub_ioctl(struct usb_interface *intf, unsigned int code, void *user_data)
 
 static int hub_reset(struct usb_hub *hub)
 {
-	struct usb_device *hdev = interface_to_usbdev(hub->intf);
+	struct usb_device *hdev = hub->hdev;
 	int i;
 
 	/* Disconnect any attached devices */
@@ -803,7 +785,7 @@ static int hub_reset(struct usb_hub *hub)
 
 	/* Attempt to reset the hub */
 	if (hub->urb)
-		usb_unlink_urb(hub->urb);
+		usb_kill_urb(hub->urb);
 	else
 		return -1;
 
@@ -1034,7 +1016,7 @@ static inline void show_string(struct usb_device *udev, char *id, int index)
 {}
 #endif
 
-/*
+/**
  * usb_new_device - perform initial device setup (usbcore-internal)
  * @udev: newly addressed device (in ADDRESS state)
  *
@@ -1255,6 +1237,33 @@ static int hub_port_disable(struct usb_device *hdev, int port)
 	return ret;
 }
 
+#ifdef	CONFIG_USB_SUSPEND
+
+	/* no USB_SUSPEND yet! */
+
+#else	/* !CONFIG_USB_SUSPEND */
+
+int usb_suspend_device(struct usb_device *udev, u32 state)
+{
+	return 0;
+}
+
+int usb_resume_device(struct usb_device *udev)
+{
+	return 0;
+}
+
+#define	hub_suspend		0
+#define	hub_resume		0
+#define	remote_wakeup(x)	0
+
+#endif	/* CONFIG_USB_SUSPEND */
+
+EXPORT_SYMBOL(usb_suspend_device);
+EXPORT_SYMBOL(usb_resume_device);
+
+
+
 /* USB 2.0 spec, 7.1.7.3 / fig 7-29:
  *
  * Between connect detection and reset signaling there must be a delay
@@ -1333,13 +1342,14 @@ static int hub_set_address(struct usb_device *udev)
 	return retval;
 }
 
-/* reset device, (re)assign address, get device descriptor.
- * device connection is stable, no more debouncing needed.
- * returns device in USB_STATE_ADDRESS, except on error.
- * on error return, device is no longer usable (ref dropped).
+/* Reset device, (re)assign address, get device descriptor.
+ * Device connection must be stable, no more debouncing needed.
+ * Returns device in USB_STATE_ADDRESS, except on error.
  *
- * caller owns dev->serialize for the device, guarding against
- * config changes and disconnect processing.
+ * If this is called for an already-existing device (as part of
+ * usb_reset_device), the caller must own the device lock.  For a
+ * newly detected device that is not accessible through any global
+ * pointers, it's not necessary to lock the device.
  */
 static int
 hub_port_init (struct usb_device *hdev, struct usb_device *udev, int port)
@@ -1353,8 +1363,11 @@ hub_port_init (struct usb_device *hdev, struct usb_device *udev, int port)
 	/* root hub ports have a slightly longer reset period
 	 * (from USB 2.0 spec, section 7.1.7.5)
 	 */
-	if (!hdev->parent)
+	if (!hdev->parent) {
 		delay = HUB_ROOT_RESET_TIME;
+		if (port + 1 == hdev->bus->otg_port)
+			hdev->bus->b_hnp_enable = 0;
+	}
 
 	/* Some low speed devices have problems with the quick delay, so */
 	/*  be a bit pessimistic with those devices. RHbug #23670 */
@@ -1513,8 +1526,9 @@ check_highspeed (struct usb_hub *hub, struct usb_device *udev, int port)
 }
 
 static unsigned
-hub_power_remaining (struct usb_hub *hub, struct usb_device *hdev)
+hub_power_remaining (struct usb_hub *hub)
 {
+	struct usb_device *hdev = hub->hdev;
 	int remaining;
 	unsigned i;
 
@@ -1524,16 +1538,25 @@ hub_power_remaining (struct usb_hub *hub, struct usb_device *hdev)
 
 	for (i = 0; i < hdev->maxchild; i++) {
 		struct usb_device	*udev = hdev->children[i];
-		int			delta;
+		int			delta, ceiling;
 
 		if (!udev)
 			continue;
 
+		/* 100mA per-port ceiling, or 8mA for OTG ports */
+		if (i != (udev->bus->otg_port - 1) || hdev->parent)
+			ceiling = 50;
+		else
+			ceiling = 4;
+
 		if (udev->actconfig)
 			delta = udev->actconfig->desc.bMaxPower;
 		else
-			delta = 50;
+			delta = ceiling;
 		// dev_dbg(&udev->dev, "budgeted %dmA\n", 2 * delta);
+		if (delta > ceiling)
+			dev_warn(&udev->dev, "%dmA over %dmA budget!\n",
+				2 * (delta - ceiling), 2 * ceiling);
 		remaining -= delta;
 	}
 	if (remaining < 0) {
@@ -1555,7 +1578,7 @@ hub_power_remaining (struct usb_hub *hub, struct usb_device *hdev)
 static void hub_port_connect_change(struct usb_hub *hub, int port,
 					u16 portstatus, u16 portchange)
 {
-	struct usb_device *hdev = interface_to_usbdev(hub->intf);
+	struct usb_device *hdev = hub->hdev;
 	struct device *hub_dev = &hub->intf->dev;
 	int status, i;
  
@@ -1571,6 +1594,7 @@ static void hub_port_connect_change(struct usb_hub *hub, int port,
 	/* Disconnect any existing devices under this port */
 	if (hdev->children[port])
 		usb_disconnect(&hdev->children[port]);
+	clear_bit(port, hub->change_bits);
 
 	if (portchange & USB_PORT_STAT_C_CONNECTION) {
 		status = hub_port_debounce(hdev, port);
@@ -1611,12 +1635,7 @@ static void hub_port_connect_change(struct usb_hub *hub, int port,
 		}
 
 		usb_set_device_state(udev, USB_STATE_POWERED);
-
-		/* hub can tell if it's lowspeed already:  D- pullup (not D+) */
-		if (portstatus & USB_PORT_STAT_LOW_SPEED)
-			udev->speed = USB_SPEED_LOW;
-		else
-			udev->speed = USB_SPEED_UNKNOWN;
+		udev->speed = USB_SPEED_UNKNOWN;
  
 		/* set the address */
 		choose_address(udev);
@@ -1699,7 +1718,7 @@ static void hub_port_connect_change(struct usb_hub *hub, int port,
 		if (status)
 			goto loop;
 
-		status = hub_power_remaining(hub, hdev);
+		status = hub_power_remaining(hub);
 		if (status)
 			dev_dbg(hub_dev,
 				"%dmA power budget left\n",
@@ -1753,7 +1772,7 @@ static void hub_events(void)
 		list_del_init(tmp);
 
 		hub = list_entry(tmp, struct usb_hub, event_list);
-		hdev = interface_to_usbdev(hub->intf);
+		hdev = hub->hdev;
 		hub_dev = &hub->intf->dev;
 
 		usb_get_dev(hdev);
@@ -1785,12 +1804,15 @@ static void hub_events(void)
 
 		/* deal with port status changes */
 		for (i = 0; i < hub->descriptor->bNbrPorts; i++) {
-			if (!test_and_clear_bit(i+1, hub->event_bits))
+			connect_change = test_bit(i, hub->change_bits);
+			if (!test_and_clear_bit(i+1, hub->event_bits) &&
+					!connect_change)
 				continue;
-			ret = hub_port_status(hdev, i, &portstatus, &portchange);
+
+			ret = hub_port_status(hdev, i,
+					&portstatus, &portchange);
 			if (ret < 0)
 				continue;
-			connect_change = 0;
 
 			if (portchange & USB_PORT_STAT_C_CONNECTION) {
 				clear_port_feature(hdev,
@@ -1819,18 +1841,24 @@ static void hub_events(void)
 					dev_err (hub_dev,
 					    "port %i "
 					    "disabled by hub (EMI?), "
-					    "re-enabling...",
+					    "re-enabling...\n",
 						i + 1);
 					connect_change = 1;
 				}
 			}
 
 			if (portchange & USB_PORT_STAT_C_SUSPEND) {
+				clear_port_feature(hdev, i + 1,
+					USB_PORT_FEAT_C_SUSPEND);
+				if (hdev->children[i])
+					ret = remote_wakeup(hdev->children[i]);
+				else
+					ret = -ENODEV;
 				dev_dbg (hub_dev,
-					"suspend change on port %d\n",
-					i + 1);
-				clear_port_feature(hdev,
-					i + 1,  USB_PORT_FEAT_C_SUSPEND);
+					"resume on port %d, status %d\n",
+					i + 1, ret);
+				if (ret < 0)
+					ret = hub_port_disable(hdev, i);
 			}
 			
 			if (portchange & USB_PORT_STAT_C_OVERCURRENT) {
@@ -1917,6 +1945,8 @@ static struct usb_driver hub_driver = {
 	.name =		"hub",
 	.probe =	hub_probe,
 	.disconnect =	hub_disconnect,
+	.suspend =	hub_suspend,
+	.resume =	hub_resume,
 	.ioctl =	hub_ioctl,
 	.id_table =	hub_id_table,
 };
@@ -1996,23 +2026,34 @@ static int config_descriptors_changed(struct usb_device *udev)
 				!= 0) {
 			dev_dbg(&udev->dev, "config index %d changed (#%d)\n",
 				index, buf->bConfigurationValue);
-/* FIXME enable this when we can re-enumerate after reset;
- * until then DFU-ish drivers need this and other workarounds
- */
-//			break;
+			break;
 		}
 	}
 	kfree(buf);
 	return index != udev->descriptor.bNumConfigurations;
 }
 
-/*
+/**
+ * usb_reset_devce - perform a USB port reset to reinitialize a device
+ * @udev: device to reset (not in SUSPENDED or NOTATTACHED state)
+ *
  * WARNING - don't reset any device unless drivers for all of its
  * interfaces are expecting that reset!  Maybe some driver->reset()
  * method should eventually help ensure sufficient cooperation.
  *
- * This is the same as usb_reset_device() except that the caller
- * already holds dev->serialize.  For example, it's safe to use
+ * Do a port reset, reassign the device's address, and establish its
+ * former operating configuration.  If the reset fails, or the device's
+ * descriptors change from their values before the reset, or the original
+ * configuration and altsettings cannot be restored, a flag will be set
+ * telling khubd to pretend the device has been disconnected and then
+ * re-connected.  All drivers will be unbound, and the device will be
+ * re-enumerated and probed all over again.
+ *
+ * Returns 0 if the reset succeeded, -ENODEV if the device has been
+ * flagged for logical disconnection, or some other negative error code
+ * if the reset wasn't even attempted.
+ *
+ * The caller must own the device lock.  For example, it's safe to use
  * this from a driver probe() routine after downloading new firmware.
  */
 int __usb_reset_device(struct usb_device *udev)
@@ -2020,13 +2061,23 @@ int __usb_reset_device(struct usb_device *udev)
 	struct usb_device *parent = udev->parent;
 	struct usb_device_descriptor descriptor = udev->descriptor;
 	int i, ret, port = -1;
+	struct usb_hub *hub;
 
+	if (udev->state == USB_STATE_NOTATTACHED ||
+			udev->state == USB_STATE_SUSPENDED) {
+		dev_dbg(&udev->dev, "device reset not allowed in state %d\n",
+				udev->state);
+		return -EINVAL;
+	}
+
+	/* FIXME: This should be legal for regular hubs.  Root hubs may
+	 * have special requirements. */
 	if (udev->maxchild) {
 		/* this requires hub- or hcd-specific logic;
 		 * see hub_reset() and OHCI hc_restart()
 		 */
 		dev_dbg(&udev->dev, "%s for hub!\n", __FUNCTION__);
-		return -EINVAL;
+		return -EISDIR;
 	}
 
 	for (i = 0; i < parent->maxchild; i++)
@@ -2035,8 +2086,11 @@ int __usb_reset_device(struct usb_device *udev)
 			break;
 		}
 
-	if (port < 0)
+	if (port < 0) {
+		/* If this ever happens, it's very bad */
+		dev_err(&udev->dev, "Can't locate device's port!\n");
 		return -ENOENT;
+	}
 
 	ret = hub_port_init(parent, udev, port);
 	if (ret < 0)
@@ -2088,8 +2142,18 @@ int __usb_reset_device(struct usb_device *udev)
 	return 0;
  
 re_enumerate:
-	/* FIXME make some task re-enumerate; don't just mark unusable */
 	hub_port_disable(parent, port);
+
+	hub = usb_get_intfdata(parent->actconfig->interface[0]);
+	set_bit(port, hub->change_bits);
+
+	spin_lock_irq(&hub_event_lock);
+	if (list_empty(&hub->event_list)) {
+		list_add_tail(&hub->event_list, &hub_event_list);
+		wake_up(&khubd_wait);
+	}
+	spin_unlock_irq(&hub_event_lock);
+
 	return -ENODEV;
 }
 EXPORT_SYMBOL(__usb_reset_device);

@@ -101,6 +101,7 @@ cifs_bp_rename_retry:
 	return full_path;
 }
 
+/* Note: caller must free return buffer */
 char *
 build_wildcard_path_from_dentry(struct dentry *direntry)
 {
@@ -108,18 +109,28 @@ build_wildcard_path_from_dentry(struct dentry *direntry)
 	int namelen = 0;
 	char *full_path;
 
+	if(direntry == NULL)
+		return NULL;  /* not much we can do if dentry is freed and
+		we need to reopen the file after it was closed implicitly
+		when the server crashed */
+
+cifs_bwp_rename_retry:
 	for (temp = direntry; !IS_ROOT(temp);) {
 		namelen += (1 + temp->d_name.len);
 		temp = temp->d_parent;
+		if(temp == NULL) {
+			cERROR(1,("corrupt dentry"));
+			return NULL;
+		}
 	}
-	namelen += 3;		/* allow for trailing null and wildcard (slash and *) */
-	full_path = kmalloc(namelen, GFP_KERNEL);
-	namelen--;
-	full_path[namelen] = 0;	/* trailing null */
-	namelen--;
-	full_path[namelen] = '*';
-	namelen--;
+
+	full_path = kmalloc(namelen+3, GFP_KERNEL);
+	if(full_path == NULL)
+		return full_path;
+
 	full_path[namelen] = '\\';
+	full_path[namelen+1] = '*';
+	full_path[namelen+2] = 0;  /* trailing null */
 
 	for (temp = direntry; !IS_ROOT(temp);) {
 		namelen -= 1 + temp->d_name.len;
@@ -129,13 +140,26 @@ build_wildcard_path_from_dentry(struct dentry *direntry)
 			full_path[namelen] = '\\';
 			strncpy(full_path + namelen + 1, temp->d_name.name,
 				temp->d_name.len);
+			cFYI(0, (" name: %s ", full_path + namelen));
 		}
 		temp = temp->d_parent;
+		if(temp == NULL) {
+			cERROR(1,("corrupt dentry"));
+			kfree(full_path);
+			return NULL;
+		}
 	}
-	if (namelen != 0)
+	if (namelen != 0) {
 		cERROR(1,
 		       ("We did not end path lookup where we expected namelen is %d",
 			namelen));
+		/* presumably this is only possible if we were racing with a rename 
+		of one of the parent directories  (we can not lock the dentries
+		above us to prevent this, but retrying should be harmless) */
+		kfree(full_path);
+		namelen = 0;
+		goto cifs_bwp_rename_retry;
+	}
 
 	return full_path;
 }
@@ -233,10 +257,10 @@ cifs_create(struct inode *inode, struct dentry *direntry, int mode,
 	/* BB server might mask mode so we have to query for Unix case*/
 		if (pTcon->ses->capabilities & CAP_UNIX)
 			rc = cifs_get_inode_info_unix(&newinode, full_path,
-						 inode->i_sb);
+						 inode->i_sb,xid);
 		else {
 			rc = cifs_get_inode_info(&newinode, full_path,
-						 buf, inode->i_sb);
+						 buf, inode->i_sb,xid);
 			if(newinode)
 				newinode->i_mode = mode;
 		}
@@ -329,7 +353,7 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, int mode, dev_t dev
 			device_number, cifs_sb->local_nls);
 		if(!rc) {
 			rc = cifs_get_inode_info_unix(&newinode, full_path,
-						inode->i_sb);
+						inode->i_sb,xid);
 			direntry->d_op = &cifs_dentry_ops;
 			if(rc == 0)
 				d_instantiate(direntry, newinode);
@@ -389,10 +413,10 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry, struct name
 
 	if (pTcon->ses->capabilities & CAP_UNIX)
 		rc = cifs_get_inode_info_unix(&newInode, full_path,
-					      parent_dir_inode->i_sb);
+					      parent_dir_inode->i_sb,xid);
 	else
 		rc = cifs_get_inode_info(&newInode, full_path, NULL,
-					 parent_dir_inode->i_sb);
+					 parent_dir_inode->i_sb,xid);
 
 	if ((rc == 0) && (newInode != NULL)) {
 		direntry->d_op = &cifs_dentry_ops;
@@ -431,9 +455,16 @@ cifs_dir_open(struct inode *inode, struct file *file)
 	cifs_sb = CIFS_SB(inode->i_sb);
 	pTcon = cifs_sb->tcon;
 
-	full_path = build_wildcard_path_from_dentry(file->f_dentry);
+	if(file->f_dentry) {
+		down(&file->f_dentry->d_sb->s_vfs_rename_sem);
+		full_path = build_wildcard_path_from_dentry(file->f_dentry);
+		up(&file->f_dentry->d_sb->s_vfs_rename_sem);
+	} else {
+		FreeXid(xid);
+		return -EIO;
+	}
 
-	cFYI(1, (" inode = 0x%p and full path is %s", inode, full_path));
+	cFYI(1, ("inode = 0x%p and full path is %s", inode, full_path));
 
 	if (full_path)
 		kfree(full_path);

@@ -60,7 +60,7 @@ static int alloc_ldt(mm_context_t *pc, int mincount, int reload)
 		load_LDT(pc);
 		mask = cpumask_of_cpu(smp_processor_id());
 		if (!cpus_equal(current->mm->cpu_vm_mask, mask))
-			smp_call_function(flush_ldt, 0, 1, 1);
+			smp_call_function(flush_ldt, NULL, 1, 1);
 		preempt_enable();
 #else
 		load_LDT(pc);
@@ -150,7 +150,7 @@ static int read_ldt(void __user * ptr, unsigned long bytecount)
 		bytes = size - i;
 		if (bytes > PAGE_SIZE)
 			bytes = PAGE_SIZE;
-		if (copy_to_user(ptr + i, kaddr, size - i))
+		if (copy_to_user(ptr + i, kaddr, bytes))
 			err = -EFAULT;
 		kunmap(mm->context.ldt_pages[nr]);
 	}

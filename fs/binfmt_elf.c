@@ -191,6 +191,9 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr * exec,
 	if (k_platform) {
 		NEW_AUX_ENT(AT_PLATFORM, (elf_addr_t)(long)u_platform);
 	}
+	if (bprm->interp_flags & BINPRM_FLAGS_EXECFD) {
+		NEW_AUX_ENT(AT_EXECFD, (elf_addr_t) bprm->interp_data);
+	}
 #undef NEW_AUX_ENT
 	/* AT_NULL is zero; clear the rest too */
 	memset(&elf_info[ei_index], 0,
@@ -526,6 +529,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	char passed_fileno[6];
 	struct files_struct *files;
 	int executable_stack, relocexec, old_relocexec = current->flags & PF_RELOCEXEC;
+	unsigned long def_flags = 0;
 	
 	/* Get the exec-header */
 	elf_ex = *((struct elfhdr *) bprm->buf);
@@ -661,6 +665,8 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 				executable_stack = EXSTACK_DISABLE_X;
 			break;
 		}
+	if (i == elf_ex.e_phnum)
+		def_flags |= VM_EXEC | VM_MAYEXEC;
 
 	relocexec = 0;
 
@@ -739,7 +745,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	 * Turn off the CS limit completely if exec-shield disabled or
 	 * NX active:
 	 */
-	if (!exec_shield || use_nx)
+	if (!exec_shield)
 		arch_add_exec_range(current->mm, -1);
 #endif
 
@@ -759,6 +765,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	current->mm->mmap_top = mmap_top();
 #endif
 	current->flags &= ~PF_FORKNOEXEC;
+	current->mm->def_flags = def_flags;
 
 	/* Do this immediately, since STACK_TOP as used in setup_arg_pages
 	   may depend on the personality.  */

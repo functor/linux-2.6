@@ -24,6 +24,7 @@
 #include <linux/init.h>
 
 struct pci_dev;
+struct device_node;
 
 /* I/O addresses are converted to EEH "tokens" such that a driver will cause
  * a bad page fault if the address is used directly (i.e. these addresses are
@@ -55,6 +56,7 @@ void __init pci_addr_cache_build(void);
  * device (including config space i/o).  Call eeh_add_device_late
  * to finish the eeh setup for this device.
  */
+struct device_node;
 void eeh_add_device_early(struct device_node *);
 void eeh_add_device_late(struct pci_dev *);
 

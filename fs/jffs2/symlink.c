@@ -15,6 +15,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
+#include <linux/namei.h>
 #include "nodelist.h"
 
 static int jffs2_follow_link(struct dentry *dentry, struct nameidata *nd);

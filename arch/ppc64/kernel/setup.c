@@ -44,7 +44,9 @@
 #include <asm/sections.h>
 #include <asm/btext.h>
 #include <asm/nvram.h>
+#include <asm/setup.h>
 #include <asm/system.h>
+#include <asm/rtas.h>
 
 extern unsigned long klimit;
 /* extern void *stab; */
@@ -82,7 +84,6 @@ unsigned long decr_overclock_proc0_set = 0;
 
 int powersave_nap;
 
-char saved_command_line[COMMAND_LINE_SIZE];
 unsigned char aux_device_present;
 
 void parse_cmd_line(unsigned long r3, unsigned long r4, unsigned long r5,
@@ -165,7 +166,7 @@ void setup_system(unsigned long r3, unsigned long r4, unsigned long r5,
 		  unsigned long r6, unsigned long r7)
 {
 #if defined(CONFIG_SMP) && defined(CONFIG_PPC_PSERIES)
-	unsigned int ret, i;
+	int ret, i;
 #endif
 
 #ifdef CONFIG_XMON_DEFAULT
@@ -233,12 +234,11 @@ void setup_system(unsigned long r3, unsigned long r4, unsigned long r5,
 #ifdef CONFIG_SMP
 		/* Start secondary threads on SMT systems */
 		for (i = 0; i < NR_CPUS; i++) {
-			if(cpu_available(i)  && !cpu_possible(i)) {
+			if (cpu_available(i) && !cpu_possible(i)) {
 				printk("%16.16x : starting thread\n", i);
-				rtas_call(rtas_token("start-cpu"), 3, 1, 
-					  (void *)&ret,
+				rtas_call(rtas_token("start-cpu"), 3, 1, &ret,
 					  get_hard_smp_processor_id(i), 
-					  *((unsigned long *)pseries_secondary_smp_init),
+					  (u32)*((unsigned long *)pseries_secondary_smp_init),
 					  i);
 				cpu_set(i, cpu_possible_map);
 				systemcfg->processorCount++;
@@ -254,6 +254,10 @@ void setup_system(unsigned long r3, unsigned long r4, unsigned long r5,
 		pmac_init(r3, r4, r5, r6, r7);
 	}
 #endif /* CONFIG_PPC_PMAC */
+
+#if defined(CONFIG_HOTPLUG_CPU) &&  !defined(CONFIG_PPC_PMAC)
+	rtas_stop_self_args.token = rtas_token("stop-self");
+#endif /* CONFIG_HOTPLUG_CPU && !CONFIG_PPC_PMAC */
 
 	/* Finish initializing the hash table (do the dynamic
 	 * patching for the fast-path hashtable.S code)
@@ -631,7 +635,7 @@ void __init setup_arch(char **cmdline_p)
 	init_mm.brk = klimit;
 	
 	/* Save unparsed command line copy for /proc/cmdline */
-	strlcpy(saved_command_line, cmd_line, sizeof(saved_command_line));
+	strlcpy(saved_command_line, cmd_line, COMMAND_LINE_SIZE);
 	*cmdline_p = cmd_line;
 
 	irqstack_early_init();
@@ -699,7 +703,7 @@ int set_spread_lpevents( char * str )
 	unsigned long val = simple_strtoul( str, NULL, 0 );
 	if ( ( val > 0 ) && ( val <= NR_CPUS ) ) {
 		for ( i=1; i<val; ++i )
-			paca[i].lpQueuePtr = paca[0].lpQueuePtr;
+			paca[i].lpqueue_ptr = paca[0].lpqueue_ptr;
 		printk("lpevent processing spread over %ld processors\n", val);
 	}
 	else
