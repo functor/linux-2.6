@@ -1210,14 +1210,14 @@ EXPORT_SYMBOL(update_atime);
  *	When ctime_too is specified update the ctime too.
  */
 
-void inode_update_time(struct inode *inode, int ctime_too)
+void inode_update_time(struct inode *inode, struct vfsmount *mnt, int ctime_too)
 {
 	struct timespec now;
 	int sync_it = 0;
 
 	if (IS_NOCMTIME(inode))
 		return;
-	if (IS_RDONLY(inode))
+	if (IS_RDONLY(inode) || MNT_IS_RDONLY(mnt))
 		return;
 
 	now = current_kernel_time();

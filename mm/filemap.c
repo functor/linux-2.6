@@ -1887,7 +1887,7 @@ generic_file_aio_write_nolock(struct kiocb *iocb, const struct iovec *iov,
 	if (err)
 		goto out;
 
-	inode_update_time(inode, 1);
+	inode_update_time(inode, file->f_vfsmnt, 1);
 
 	/* coalesce the iovecs and go direct-to-BIO for O_DIRECT */
 	if (unlikely(file->f_flags & O_DIRECT)) {
