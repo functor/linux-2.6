@@ -228,9 +228,6 @@ int generic_permission(struct inode *inode, int mask,
 	return -EACCES;
 }
 
-#warning MEF: need to make CONFIG_VSERVER_FILESHARING a Kconfig option
-#define CONFIG_VSERVER_FILESHARING 1
-
 static inline int xid_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
 	if (inode->i_xid == 0)
