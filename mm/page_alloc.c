@@ -31,7 +31,6 @@
 #include <linux/topology.h>
 #include <linux/sysctl.h>
 #include <linux/cpu.h>
-#include <linux/ckrm_mem_inline.h>
 
 #include <asm/tlbflush.h>
 
@@ -268,7 +267,6 @@ free_pages_bulk(struct zone *zone, int count,
 		page = list_entry(list->prev, struct page, lru);
 		/* have to delete it as __free_pages_bulk list manipulates */
 		list_del(&page->lru);
-		ckrm_clear_page_class(page);
 		__free_pages_bulk(page, base, zone, area, mask, order);
 		ret++;
 	}
@@ -600,10 +598,6 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 
 	might_sleep_if(wait);
 
-	if (!ckrm_class_limit_ok((GET_MEM_CLASS(current)))) {
-		return NULL;
-	}
-
 	zones = zonelist->zones;  /* the list of zones suitable for gfp_mask */
 	if (zones[0] == NULL)     /* no zones in the zonelist */
 		return NULL;
@@ -733,7 +727,6 @@ nopage:
 	return NULL;
 got_pg:
 	kernel_map_pages(page, 1 << order, 1);
-	ckrm_set_pages_class(page, 1 << order, GET_MEM_CLASS(current));
 	return page;
 }
 

@@ -497,6 +497,7 @@ rbce_class_deletecb(const char *classname, void *classobj, int classtype)
 				}
 			}
 		}
+		put_class(cls);
 		if ((cls = find_class_name(classname)) != NULL) {
 			printk(KERN_ERR
 			       "rbce ERROR: class %s exists in rbce after "

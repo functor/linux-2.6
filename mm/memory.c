@@ -55,7 +55,6 @@
 
 #include <linux/swapops.h>
 #include <linux/elf.h>
-#include <linux/ckrm_mem_inline.h>
 
 #ifndef CONFIG_DISCONTIGMEM
 /* use the per-pgdat data instead for discontigmem - mbligh */
@@ -1535,7 +1534,6 @@ retry:
 		if (write_access)
 			entry = maybe_mkwrite(pte_mkdirty(entry), vma);
 		set_pte(page_table, entry);
-		ckrm_mem_evaluate_page_byadd(new_page, mm);
 		if (anon) {
 			lru_cache_add_active(new_page);
 			page_add_anon_rmap(new_page, vma, address);
