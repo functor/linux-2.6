@@ -49,6 +49,7 @@ typedef struct ckrm_mem_res {
 				// more than this is needed.
 	int nr_active[MAX_NR_ZONES];
 	int nr_inactive[MAX_NR_ZONES];
+	int tmp_cnt;
 	int shrink_count;
 	unsigned long last_shrink;
 	int over_limit_failures;
@@ -66,17 +67,19 @@ extern struct ckrm_res_ctlr mem_rcbs;
 // used to fill reclaim_flags, used only when memory is low in the system
 #define CLS_CLEAR		(0)      // class under its guarantee
 #define CLS_OVER_GUAR	(1 << 0) // class is over its guarantee
-#define CLS_PARENT_OVER	(1 << 1) // parent is over 120% mark over limit
-#define CLS_OVER_75		(1 << 2) // class over 75% mark bet guar(0) & limit(100)
-#define CLS_OVER_100	(1 << 3) // class over its limit
-#define CLS_OVER_110	(1 << 4) // class over 110% mark over limit
-#define CLS_FLAGS_ALL	( CLS_OVER_GUAR | CLS_PARENT_OVER | CLS_OVER_75 | \
-					CLS_OVER_100 | CLS_OVER_110 )
+#define CLS_PARENT_OVER	(1 << 1) // parent is over 110% mark over limit
+#define CLS_OVER_25		(1 << 2) // class over 25% mark bet guar(0) & limit(100)
+#define CLS_OVER_50		(1 << 3) // class over 50% mark bet guar(0) & limit(100)
+#define CLS_OVER_75		(1 << 4) // class over 75% mark bet guar(0) & limit(100)
+#define CLS_OVER_100	(1 << 5) // class over its limit
+#define CLS_OVER_110	(1 << 6) // class over 110% mark over limit
+#define CLS_FLAGS_ALL	( CLS_OVER_GUAR | CLS_PARENT_OVER | CLS_OVER_25 | \
+					CLS_OVER_50 | CLS_OVER_75 | CLS_OVER_100 | CLS_OVER_110 )
 #define CLS_SHRINK_BIT	(31)	  // used to both lock and set the bit
 #define CLS_SHRINK		(1 << CLS_SHRINK_BIT) // shrink the given class
 
 // used in flags. set when a class is more than 90% of its maxlimit
-#define MEM_NEAR_LIMIT 1
+#define MEM_AT_LIMIT 1
 
 extern void ckrm_set_aggressive(ckrm_mem_res_t *);
 extern unsigned int ckrm_setup_reclamation(void);
@@ -84,16 +87,14 @@ extern void ckrm_teardown_reclamation(void);
 extern void ckrm_get_reclaim_bits(unsigned int *, unsigned int *);
 extern void ckrm_init_mm_to_task(struct mm_struct *, struct task_struct *);
 extern void ckrm_mem_evaluate_mm(struct mm_struct *);
-extern void ckrm_mem_evaluate_page_byadd(struct page *, struct mm_struct *);
-extern void ckrm_near_limit(ckrm_mem_res_t *);
+extern void ckrm_at_limit(ckrm_mem_res_t *);
+extern int ckrm_memclass_valid(ckrm_mem_res_t *);
 #define ckrm_get_reclaim_flags(cls)	((cls)->reclaim_flags)
 
 #else
 
 #define ckrm_init_mm_to_current(a)			do {} while (0)
 #define ckrm_mem_evaluate_mm(a)				do {} while (0)
-#define ckrm_mem_evaluate_page_byadd(a,b)	do {} while (0)
-#define page_class(page)					(NULL)
 #define ckrm_get_reclaim_flags(a)			(0)
 #define ckrm_setup_reclamation()			(0)
 #define ckrm_teardown_reclamation()			do {} while (0)

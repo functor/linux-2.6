@@ -1594,10 +1594,6 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 	struct io_context *ioc = get_io_context(gfp_mask);
 
 	spin_lock_irq(q->queue_lock);
-
-	if (!elv_may_queue(q, rw))
-		goto out_lock;
-
 	if (rl->count[rw]+1 >= q->nr_requests) {
 		/*
 		 * The queue will fill after this allocation, so set it as
@@ -1611,12 +1607,15 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 		}
 	}
 
-	/*
-	 * The queue is full and the allocating process is not a
-	 * "batcher", and not exempted by the IO scheduler
-	 */
-	if (blk_queue_full(q, rw) && !ioc_batching(ioc))
-		goto out_lock;
+	if (blk_queue_full(q, rw)
+			&& !ioc_batching(ioc) && !elv_may_queue(q, rw)) {
+		/*
+		 * The queue is full and the allocating process is not a
+		 * "batcher", and not exempted by the IO scheduler
+		 */
+		spin_unlock_irq(q->queue_lock);
+		goto out;
+	}
 
 	rl->count[rw]++;
 	if (rl->count[rw] >= queue_congestion_on_threshold(q))
@@ -1634,7 +1633,8 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 		 */
 		spin_lock_irq(q->queue_lock);
 		freed_request(q, rw);
-		goto out_lock;
+		spin_unlock_irq(q->queue_lock);
+		goto out;
 	}
 
 	if (ioc_batching(ioc))
@@ -1664,11 +1664,6 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 out:
 	put_io_context(ioc);
 	return rq;
-out_lock:
-	if (!rq)
-		elv_set_congested(q);
-	spin_unlock_irq(q->queue_lock);
-	goto out;
 }
 
 /*
@@ -3172,21 +3167,3 @@ void blk_unregister_queue(struct gendisk *disk)
 		kobject_put(&disk->kobj);
 	}
 }
-
-asmlinkage int sys_ioprio_set(int ioprio)
-{
-	if (ioprio < IOPRIO_IDLE || ioprio > IOPRIO_RT)
-		return -EINVAL;
-	if (ioprio == IOPRIO_RT && !capable(CAP_SYS_ADMIN))
-		return -EACCES;
-
-	printk("%s: set ioprio %d\n", current->comm, ioprio);
-	current->ioprio = ioprio;
-	return 0;
-}
-
-asmlinkage int sys_ioprio_get(void)
-{
-	return current->ioprio;
-}
-

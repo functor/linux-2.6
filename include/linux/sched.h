@@ -230,6 +230,11 @@ struct mm_struct {
 	struct kioctx		*ioctx_list;
 
 	struct kioctx		default_kioctx;
+#ifdef CONFIG_CKRM_RES_MEM
+	struct ckrm_mem_res *memclass;
+	struct list_head	tasklist; /* list of all tasks sharing this address space */
+	spinlock_t		peertask_lock; /* protect above tasklist */
+#endif
 };
 
 extern int mmlist_nr;
@@ -521,8 +526,6 @@ struct task_struct {
 
 	struct io_context *io_context;
 
-	int ioprio;
-
 	unsigned long ptrace_message;
 	siginfo_t *last_siginfo; /* For ptrace use.  */
 
@@ -539,8 +542,10 @@ struct task_struct {
 	struct ckrm_task_class *taskclass;
 	struct list_head        taskclass_link;
 #endif // CONFIG_CKRM_TYPE_TASKCLASS
+#ifdef CONFIG_CKRM_RES_MEM
+	struct list_head	mm_peers; // list of tasks using same mm_struct
+#endif // CONFIG_CKRM_RES_MEM
 #endif // CONFIG_CKRM
-
 	struct task_delay_info  delays;
 };
 

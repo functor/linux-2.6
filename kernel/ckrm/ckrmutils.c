@@ -96,7 +96,6 @@ void child_maxlimit_changed(struct ckrm_shares *parent, int new_limit)
 	return;
 }
 
-
 /*
  * Caller is responsible for holding any lock to protect the data
  * structures passed to this function
@@ -111,26 +110,18 @@ set_shares(struct ckrm_shares *new, struct ckrm_shares *cur,
 
 	// Check total_guarantee for correctness
 	if (new->total_guarantee <= CKRM_SHARE_DONTCARE) {
-		printk(KERN_ERR "new->total_guarantee %d <= CKRM_SHARE_DONTCARE\n",
-		    new->total_guarantee);
 		goto set_share_err;
 	} else if (new->total_guarantee == CKRM_SHARE_UNCHANGED) {
 		;		// do nothing
 	} else if (cur_usage_guar > new->total_guarantee) {
-		printk(KERN_ERR "cur_usage_guar %d > new->total_guarantee %d\n",
-		    cur_usage_guar,new->total_guarantee);
 		goto set_share_err;
 	}
 	// Check max_limit for correctness
 	if (new->max_limit <= CKRM_SHARE_DONTCARE) {
-		printk(KERN_ERR "new->max_limit %d <= CKRM_SHARE_DONTCARE\n",
-		    new->max_limit);
 		goto set_share_err;
 	} else if (new->max_limit == CKRM_SHARE_UNCHANGED) {
 		;		// do nothing
 	} else if (cur->cur_max_limit > new->max_limit) {
-		printk(KERN_ERR "cur->cur_max_limit %d > new->max_limit %d\n",
-		    cur->cur_max_limit, new->max_limit);
 		goto set_share_err;
 	}
 	// Check my_guarantee for correctness
@@ -139,8 +130,6 @@ set_shares(struct ckrm_shares *new, struct ckrm_shares *cur,
 	} else if (new->my_guarantee == CKRM_SHARE_DONTCARE) {
 		;		// do nothing
 	} else if (par && increase_by > par->unused_guarantee) {
-		printk(KERN_ERR "increase_by %d > par->unused_guarantee %d\n",
-		    increase_by, par->unused_guarantee);
 		goto set_share_err;
 	}
 	// Check my_limit for correctness
@@ -150,8 +139,6 @@ set_shares(struct ckrm_shares *new, struct ckrm_shares *cur,
 		;		// do nothing
 	} else if (par && new->my_limit > par->max_limit) {
 		// I can't get more limit than my parent's limit
-		printk(KERN_ERR "new->my_limit %d > par->max_limit %d\n",
-		    new->my_limit,par->max_limit);
 		goto set_share_err;
 
 	}
@@ -165,8 +152,6 @@ set_shares(struct ckrm_shares *new, struct ckrm_shares *cur,
 			;	// do nothing earlier setting would've 
 			        // taken care of it
 		} else if (new->my_guarantee > cur->my_limit) {
-			printk(KERN_ERR "new->my_guarantee %d > cur->my_limit %d\n",
-			    new->my_guarantee,par->max_limit);
 			goto set_share_err;
 		}
 	} else {		// new->my_limit has a valid value
@@ -174,13 +159,9 @@ set_shares(struct ckrm_shares *new, struct ckrm_shares *cur,
 			;	// do nothing
 		} else if (new->my_guarantee == CKRM_SHARE_UNCHANGED) {
 			if (cur->my_guarantee > new->my_limit) {
-				printk(KERN_ERR "cur->my_guarantee %d > new->my_limit %d\n",
-				    cur->my_guarantee,new->my_limit);
 				goto set_share_err;
 			}
 		} else if (new->my_guarantee > new->my_limit) {
-			printk(KERN_ERR "new->my_guarantee %d > new->my_limit %d\n",
-			    new->my_guarantee,new->my_limit);
 			goto set_share_err;
 		}
 	}

@@ -52,6 +52,7 @@ EXPORT_SYMBOL(ckrm_tot_lru_pages);
 static ckrm_mem_res_t *ckrm_mem_root_class;
 atomic_t ckrm_mem_real_count = ATOMIC_INIT(0);
 EXPORT_SYMBOL(ckrm_mem_real_count);
+static void ckrm_mem_evaluate_all_pages(void);
 
 /* Initialize rescls values
  * May be called on each rcfs unmount or as part of error recovery
@@ -89,7 +90,7 @@ mem_res_initcls_one(void *my_res)
 
 	res->pg_guar = CKRM_SHARE_DONTCARE;
 	res->pg_limit = CKRM_SHARE_DONTCARE;
-	res->pg_unused = CKRM_SHARE_DONTCARE;
+	res->pg_unused = 0;
 }
 
 static void *
@@ -179,20 +180,23 @@ mem_res_free(void *my_res)
 	if (!res) 
 		return;
 
-	parres = ckrm_get_res_class(res->parent, mem_rcbs.resid, ckrm_mem_res_t);
+	res->shares.my_guarantee = 0;
+	res->shares.my_limit = 0;
+	res->pg_guar = 0;
+	res->pg_limit = 0;
+	res->pg_unused = 0;
 
+	parres = ckrm_get_res_class(res->parent, mem_rcbs.resid, ckrm_mem_res_t);
 	// return child's limit/guarantee to parent node
 	if (parres) {
 		child_guarantee_changed(&parres->shares, res->shares.my_guarantee, 0);
 		child_maxlimit_changed_local(parres);
 	}
-	res->shares.my_guarantee = 0;
-	res->shares.my_limit = 0;
 	spin_lock(&ckrm_mem_lock);
 	list_del(&res->mcls_list);
 	spin_unlock(&ckrm_mem_lock);
 	mem_class_put(res);
-
+	ckrm_mem_evaluate_all_pages();
 	return;
 }
 
@@ -355,8 +359,14 @@ mem_change_resclass(void *tsk, void *old, void *new)
 		}
 	}
 
-	ckrm_mem_evaluate_mm(mm);
 	spin_unlock(&mm->peertask_lock);
+	ckrm_mem_evaluate_mm(mm);
+	/*
+	printk("chg_cls: task <%s:%d> mm %p oldmm %s newmm %s o %s n %s\n",
+		task->comm, task->pid, mm, prev_mmcls ? prev_mmcls->core->name:
+		"NULL", mm->memclass ? mm->memclass->core->name : "NULL",
+		o ? o->core->name: "NULL", n ? n->core->name: "NULL");	
+	*/
 	return;
 }
 
@@ -485,7 +495,7 @@ set_usage_flags(ckrm_mem_res_t *res)
 	guar = (res->pg_guar > 0) ? res->pg_guar : 0;
 	range = res->pg_limit - guar;
 
-	if ((tot_usage > (guar + ((120 * range) / 100))) &&
+	if ((tot_usage > (guar + ((110 * range) / 100))) &&
 				(res->pg_lent > (guar + ((25 * range) / 100)))) {
 		set_flags_of_children(res, CLS_PARENT_OVER);
 	}
@@ -496,6 +506,10 @@ set_usage_flags(ckrm_mem_res_t *res)
 		res->reclaim_flags |= CLS_OVER_100;
 	} else if (cls_usage > (guar + ((3 * range) / 4))) {
 		res->reclaim_flags |= CLS_OVER_75;
+	} else if (cls_usage > (guar + (range / 2))) {
+		res->reclaim_flags |= CLS_OVER_50;
+	} else if (cls_usage > (guar + (range / 4))) {
+		res->reclaim_flags |= CLS_OVER_25;
 	} else if (cls_usage > guar) {
 		res->reclaim_flags |= CLS_OVER_GUAR;
 	} else {
@@ -566,12 +580,13 @@ ckrm_get_reclaim_bits(unsigned int *flags, unsigned int *extract)
 }
 
 void
-ckrm_near_limit(ckrm_mem_res_t *cls)
+ckrm_at_limit(ckrm_mem_res_t *cls)
 {
 	struct zone *zone;
 	unsigned long now = jiffies;
 
-	if (!cls || ((cls->flags & MEM_NEAR_LIMIT) == MEM_NEAR_LIMIT)) {
+	if (!cls || (cls->pg_limit == CKRM_SHARE_DONTCARE) || 
+			((cls->flags & MEM_AT_LIMIT) == MEM_AT_LIMIT)) {
 		return;
 	}
 	if ((cls->last_shrink + (10 * HZ)) < now) { // 10 seconds since last ?
@@ -585,14 +600,16 @@ ckrm_near_limit(ckrm_mem_res_t *cls)
 	spin_lock(&ckrm_mem_lock);
 	list_add(&cls->shrink_list, &ckrm_shrink_list);
 	spin_unlock(&ckrm_mem_lock);
-	cls->flags |= MEM_NEAR_LIMIT;
+	cls->flags |= MEM_AT_LIMIT;
 	for_each_zone(zone) {
 		wakeup_kswapd(zone);
 		break; // only once is enough
 	}
 }
 
-static int
+static int unmapped = 0, changed = 0, unchanged = 0, maxnull = 0,
+anovma = 0, fnovma = 0;
+static void
 ckrm_mem_evaluate_page_anon(struct page* page)
 {
 	ckrm_mem_res_t* pgcls = page_class(page);
@@ -600,10 +617,12 @@ ckrm_mem_evaluate_page_anon(struct page* page)
 	struct anon_vma *anon_vma = (struct anon_vma *) page->mapping;
 	struct vm_area_struct *vma;
 	struct mm_struct* mm;
+	int v = 0;
 
 	spin_lock(&anon_vma->lock);
 	BUG_ON(list_empty(&anon_vma->head));
 	list_for_each_entry(vma, &anon_vma->head, anon_vma_node) {
+		v++;
 		mm = vma->vm_mm;
 		if (!maxshareclass ||
 				ckrm_mem_share_compare(maxshareclass, mm->memclass) < 0) {
@@ -611,15 +630,20 @@ ckrm_mem_evaluate_page_anon(struct page* page)
 		}
 	}
 	spin_unlock(&anon_vma->lock);
+	if (!v)
+		anovma++;
 
+	if (!maxshareclass)
+		maxnull++;
 	if (maxshareclass && (pgcls != maxshareclass)) {
 		ckrm_change_page_class(page, maxshareclass);
-		return 1;
-	}
-	return 0;
+		changed++;
+	} else 
+		unchanged++;
+	return;
 }
 
-static int
+static void
 ckrm_mem_evaluate_page_file(struct page* page) 
 {
 	ckrm_mem_res_t* pgcls = page_class(page);
@@ -629,69 +653,132 @@ ckrm_mem_evaluate_page_file(struct page* page)
 	pgoff_t pgoff = page->index << (PAGE_CACHE_SHIFT - PAGE_SHIFT);
 	struct prio_tree_iter iter;
 	struct mm_struct* mm;
+	int v = 0;
 
 	if (!mapping)
-		return 0;
+		return;
 
 	if (!spin_trylock(&mapping->i_mmap_lock))
-		return 0;
+		return;
 
 	while ((vma = vma_prio_tree_next(vma, &mapping->i_mmap,
 					&iter, pgoff, pgoff)) != NULL) {
+		v++;
 		mm = vma->vm_mm;
 		if (!maxshareclass || ckrm_mem_share_compare(maxshareclass,mm->memclass)<0)
 			maxshareclass = mm->memclass;
 	}
 	spin_unlock(&mapping->i_mmap_lock);
 
+	if (!v)
+		fnovma++;
+	if (!maxshareclass)
+		maxnull++;
+
 	if (maxshareclass && pgcls != maxshareclass) {
 		ckrm_change_page_class(page, maxshareclass);
-		return 1;
-	}
-	return 0;
+		changed++;
+	} else 
+		unchanged++;
+	return;
 }
 
-static int
+static void
 ckrm_mem_evaluate_page(struct page* page) 
 {
-	int changed = 0;
-
 	if (page->mapping) {
 		if (PageAnon(page))
-			changed = ckrm_mem_evaluate_page_anon(page);
+			ckrm_mem_evaluate_page_anon(page);
 		else
-			changed = ckrm_mem_evaluate_page_file(page);
-	}
-	return changed;
+			ckrm_mem_evaluate_page_file(page);
+	} else
+		unmapped++;
+	return;
 }
 
-static inline int
+static void
+ckrm_mem_evaluate_all_pages()
+{
+	struct page *page;
+	struct zone *zone;
+	int active = 0, inactive = 0, cleared = 0;
+	int act_cnt, inact_cnt, idx;
+	ckrm_mem_res_t *res;
+
+	spin_lock(&ckrm_mem_lock);
+	list_for_each_entry(res, &ckrm_memclass_list, mcls_list) {
+		res->tmp_cnt = 0;
+	}
+	spin_unlock(&ckrm_mem_lock);
+
+	for_each_zone(zone) {
+		spin_lock_irq(&zone->lru_lock);
+		list_for_each_entry(page, &zone->inactive_list, lru) {
+			ckrm_mem_evaluate_page(page);
+			active++;
+			page_class(page)->tmp_cnt++;
+			if (!test_bit(PG_ckrm_account, &page->flags))
+				cleared++;
+		}
+		list_for_each_entry(page, &zone->active_list, lru) {
+			ckrm_mem_evaluate_page(page);
+			inactive++;
+			page_class(page)->tmp_cnt++;
+			if (!test_bit(PG_ckrm_account, &page->flags))
+				cleared++;
+		}
+		spin_unlock_irq(&zone->lru_lock);
+	}
+	printk("all_pages: active %d inactive %d cleared %d\n", 
+			active, inactive, cleared);
+	spin_lock(&ckrm_mem_lock);
+	list_for_each_entry(res, &ckrm_memclass_list, mcls_list) {
+		act_cnt = 0; inact_cnt = 0; idx = 0;
+		for_each_zone(zone) {
+			act_cnt += res->nr_active[idx];
+			inact_cnt += res->nr_inactive[idx];
+			idx++;
+		}
+		printk("all_pages: %s: tmp_cnt %d; act_cnt %d inact_cnt %d\n",
+			res->core->name, res->tmp_cnt, act_cnt, inact_cnt);
+	}
+	spin_unlock(&ckrm_mem_lock);
+
+	// check all mm's in the system to see which memclass they are attached
+	// to.
+	return;
+}
+
+static /*inline*/ int
 class_migrate_pmd(struct mm_struct* mm, struct vm_area_struct* vma,
 		pmd_t* pmdir, unsigned long address, unsigned long end)
 {
-	pte_t* pte;
+	pte_t *pte, *orig_pte;
 	unsigned long pmd_end;
 	
 	if (pmd_none(*pmdir))
 		return 0;
 	BUG_ON(pmd_bad(*pmdir));
 	
-	pte = pte_offset_map(pmdir,address);
+	orig_pte = pte = pte_offset_map(pmdir,address);
 	pmd_end = (address+PMD_SIZE)&PMD_MASK;
 	if (end>pmd_end)
 		end = pmd_end;
 	
 	do {
 		if (pte_present(*pte)) {
-			ckrm_mem_evaluate_page(pte_page(*pte));
+			BUG_ON(mm->memclass == NULL);
+			ckrm_change_page_class(pte_page(*pte), mm->memclass);
+			// ckrm_mem_evaluate_page(pte_page(*pte));
 		}
 		address += PAGE_SIZE;
 		pte++;
 	} while(address && (address<end));
+	pte_unmap(orig_pte);
 	return 0;
 }
 
-static inline int
+static /*inline*/ int
 class_migrate_pgd(struct mm_struct* mm, struct vm_area_struct* vma,
 		pgd_t* pgdir, unsigned long address, unsigned long end)
 {
@@ -716,7 +803,7 @@ class_migrate_pgd(struct mm_struct* mm, struct vm_area_struct* vma,
 	return 0;
 }
 
-static inline int
+static /*inline*/ int
 class_migrate_vma(struct mm_struct* mm, struct vm_area_struct* vma)
 {
 	pgd_t* pgdir;
@@ -758,11 +845,11 @@ ckrm_mem_evaluate_mm(struct mm_struct* mm)
 			maxshareclass = cls;
 	}
 
-	if (mm->memclass != (void *)maxshareclass) {
-		mem_class_get(maxshareclass);
+	if (maxshareclass && (mm->memclass != (void *)maxshareclass)) {
 		if (mm->memclass)
 			mem_class_put(mm->memclass);
 		mm->memclass = maxshareclass;
+		mem_class_get(maxshareclass);
 		
 		/* Go through all VMA to migrate pages */
 		down_read(&mm->mmap_sem);
@@ -777,26 +864,6 @@ ckrm_mem_evaluate_mm(struct mm_struct* mm)
 }
 
 void
-ckrm_mem_evaluate_page_byadd(struct page* page, struct mm_struct* mm)
-{
-	ckrm_mem_res_t *pgcls = page_class(page);
-	ckrm_mem_res_t *chgcls = mm->memclass ? mm->memclass : GET_MEM_CLASS(current);
-
-	if (!chgcls || pgcls == chgcls)
-		return;
-
-	if (!page->mapcount) {
-		ckrm_change_page_class(page, chgcls);
-		return;
-	}
-	if (ckrm_mem_share_compare(pgcls, chgcls) < 0) {
-		ckrm_change_page_class(page, chgcls);
-		return;
-	}
-	return;
-}
-
-void
 ckrm_init_mm_to_task(struct mm_struct * mm, struct task_struct *task)
 {
 	spin_lock(&mm->peertask_lock);
@@ -805,10 +872,26 @@ ckrm_init_mm_to_task(struct mm_struct * mm, struct task_struct *task)
 		list_del_init(&task->mm_peers);
 	}
 	list_add_tail(&task->mm_peers, &mm->tasklist);
+	spin_unlock(&mm->peertask_lock);
 	if (mm->memclass != GET_MEM_CLASS(task))
 		ckrm_mem_evaluate_mm(mm);
-	spin_unlock(&mm->peertask_lock);
 	return;
+}
+
+int
+ckrm_memclass_valid(ckrm_mem_res_t *cls)
+{
+	ckrm_mem_res_t *tmp;
+
+	spin_lock(&ckrm_mem_lock);
+	list_for_each_entry(tmp, &ckrm_memclass_list, mcls_list) {
+		if (tmp == cls) {
+			spin_unlock(&ckrm_mem_lock);
+			return 1;
+		}
+	}
+	spin_unlock(&ckrm_mem_lock);
+	return 0;
 }
 
 MODULE_LICENSE("GPL");

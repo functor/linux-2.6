@@ -56,6 +56,10 @@ ckrm_mem_share_compare(ckrm_mem_res_t *a, ckrm_mem_res_t *b)
 		return -(b != NULL) ;
 	if (b == NULL)
 		return 0;
+	if (a->pg_guar == CKRM_SHARE_DONTCARE)
+		return 1;
+	if (b->pg_guar == CKRM_SHARE_DONTCARE)
+		return -1;
 	return (a->pg_unused - b->pg_unused);
 }
 
@@ -69,34 +73,38 @@ mem_class_get(ckrm_mem_res_t *cls)
 static inline void
 mem_class_put(ckrm_mem_res_t *cls)
 {
+	
 	if (cls && atomic_dec_and_test(&(cls->nr_users)) ) {
 		printk("freeing memclass %p of <core:%s>\n", cls, cls->core->name);
+		BUG_ON(ckrm_memclass_valid(cls));
 		//kfree(cls);
 	}	
 }
 
-static inline int
+static inline void
 incr_use_count(ckrm_mem_res_t *cls, int borrow)
 {
-	int over_limit;
-
 	atomic_inc(&cls->pg_total);
-	over_limit = (atomic_read(&cls->pg_total) > ((9 * cls->pg_limit) / 10));
 
 	if (borrow) 
 		cls->pg_lent++;
-	if ((cls->pg_guar != CKRM_SHARE_DONTCARE) &&
+	if ((cls->pg_guar == CKRM_SHARE_DONTCARE) ||
 				(atomic_read(&cls->pg_total) > cls->pg_unused)) {
 		ckrm_mem_res_t *parcls = ckrm_get_res_class(cls->parent,
 				mem_rcbs.resid, ckrm_mem_res_t);
 		if (parcls) {
-			over_limit |= incr_use_count(parcls, 1);
+			incr_use_count(parcls, 1);
 			cls->pg_borrowed++;
-			return over_limit;
 		}
+	} else {
+		atomic_inc(&ckrm_mem_real_count);
 	}
-	atomic_inc(&ckrm_mem_real_count);
-	return over_limit;
+	if ((cls->pg_limit != CKRM_SHARE_DONTCARE) && 
+			(atomic_read(&cls->pg_total) >= cls->pg_limit) &&
+			((cls->flags & MEM_AT_LIMIT) != MEM_AT_LIMIT)) {
+		ckrm_at_limit(cls);
+	}
+	return;
 }
 
 static inline void
@@ -159,10 +167,26 @@ ckrm_clear_pages_class(struct page *pages, int numpages)
 }
 
 static inline void
-ckrm_change_page_class(struct page *page, ckrm_mem_res_t *cls)
+ckrm_change_page_class(struct page *page, ckrm_mem_res_t *newcls)
 {
+	ckrm_mem_res_t *oldcls = page_class(page);
+
+	if (!newcls || oldcls == newcls)
+		return;
+
 	ckrm_clear_page_class(page);
-	ckrm_set_page_class(page, cls);
+	ckrm_set_page_class(page, newcls);
+	if (test_bit(PG_ckrm_account, &page->flags)) {
+		decr_use_count(oldcls, 0);
+		incr_use_count(newcls, 0);
+		if (PageActive(page)) {
+			oldcls->nr_active[page_zonenum(page)]--;
+			newcls->nr_active[page_zonenum(page)]++;
+		} else {
+			oldcls->nr_inactive[page_zonenum(page)]--;
+			newcls->nr_inactive[page_zonenum(page)]++;
+		}
+	}
 }
 
 static inline void
@@ -178,42 +202,65 @@ ckrm_change_pages_class(struct page *pages, int numpages,
 static inline void
 ckrm_mem_inc_active(struct page *page)
 {
-	ckrm_mem_res_t *cls = page_class(page);
-	BUG_ON(cls == NULL);
-	cls->nr_active[page_zonenum(page)]++;
-	if (incr_use_count(cls, 0)) {
-		ckrm_near_limit(cls);
+	ckrm_mem_res_t *cls = page_class(page), *curcls;
+	if (mem_rcbs.resid == -1) {
+		return;
 	}
+	BUG_ON(cls == NULL);
+	BUG_ON(test_bit(PG_ckrm_account, &page->flags));
+	if (unlikely(cls != (curcls = GET_MEM_CLASS(current)))) {
+		cls = curcls;
+		ckrm_change_page_class(page, cls);
+	}
+	cls->nr_active[page_zonenum(page)]++;
+	incr_use_count(cls, 0);
+	set_bit(PG_ckrm_account, &page->flags);
 }
 
 static inline void
 ckrm_mem_dec_active(struct page *page)
 {
 	ckrm_mem_res_t *cls = page_class(page);
+	if (mem_rcbs.resid == -1) {
+		return;
+	}
 	BUG_ON(cls == NULL);
+	BUG_ON(!test_bit(PG_ckrm_account, &page->flags));
 	cls->nr_active[page_zonenum(page)]--;
 	decr_use_count(cls, 0);
+	clear_bit(PG_ckrm_account, &page->flags);
 }
 
 static inline void
 ckrm_mem_inc_inactive(struct page *page)
 {
-	ckrm_mem_res_t *cls = page_class(page);
-	BUG_ON(cls == NULL);
-	cls->nr_inactive[page_zonenum(page)]++;
-	if (incr_use_count(cls, 0) &&
-			((cls->flags & MEM_NEAR_LIMIT) != MEM_NEAR_LIMIT)) {
-		ckrm_near_limit(cls);
+	ckrm_mem_res_t *cls = page_class(page), *curcls;
+	if (mem_rcbs.resid == -1) {
+		return;
 	}
+	BUG_ON(cls == NULL);
+	BUG_ON(test_bit(PG_ckrm_account, &page->flags));
+	if (unlikely(cls != (curcls = GET_MEM_CLASS(current)))) {
+		cls = curcls;
+		ckrm_change_page_class(page, cls);
+	}
+	cls->nr_inactive[page_zonenum(page)]++;
+	incr_use_count(cls, 0);
+	set_bit(PG_ckrm_account, &page->flags);
 }
 
 static inline void
 ckrm_mem_dec_inactive(struct page *page)
 {
 	ckrm_mem_res_t *cls = page_class(page);
+	if (mem_rcbs.resid == -1) {
+		return;
+	}
 	BUG_ON(cls == NULL);
+	BUG_ON(!test_bit(PG_ckrm_account, &page->flags));
 	cls->nr_inactive[page_zonenum(page)]--;
 	decr_use_count(cls, 0);
+	clear_bit(PG_ckrm_account, &page->flags);
 }
 
 static inline int
@@ -232,7 +279,13 @@ ckrm_class_limit_ok(ckrm_mem_res_t *cls)
 	if ((mem_rcbs.resid == -1) || !cls) {
 		return 1;
 	}
-	return (atomic_read(&cls->pg_total) <= (11 * cls->pg_limit) / 10);
+	if (cls->pg_limit == CKRM_SHARE_DONTCARE) {
+		ckrm_mem_res_t *parcls = ckrm_get_res_class(cls->parent,
+						mem_rcbs.resid, ckrm_mem_res_t);
+		return (!parcls ?: ckrm_class_limit_ok(parcls));
+	} else {
+		return (atomic_read(&cls->pg_total) <= (11 * cls->pg_limit) / 10);
+	}
 }
 
 #else // !CONFIG_CKRM_RES_MEM
