@@ -245,7 +245,7 @@ static inline long do_sys_truncate(const char __user * path, loff_t length)
 		goto dput_and_out;
 
 	error = -EROFS;
-	if (IS_RDONLY(inode) || MNT_IS_RDONLY(nd.mnt))
+	if (IS_RDONLY(inode))
 		goto dput_and_out;
 
 	error = -EPERM;
@@ -369,7 +369,7 @@ asmlinkage long sys_utime(char __user * filename, struct utimbuf __user * times)
 	inode = nd.dentry->d_inode;
 
 	error = -EROFS;
-	if (IS_RDONLY(inode) || MNT_IS_RDONLY(nd.mnt))
+	if (IS_RDONLY(inode))
 		goto dput_and_out;
 
 	/* Don't worry, the checks are done in inode_change_ok() */
@@ -426,7 +426,7 @@ long do_utimes(char __user * filename, struct timeval * times)
 	inode = nd.dentry->d_inode;
 
 	error = -EROFS;
-	if (IS_RDONLY(inode) || MNT_IS_RDONLY(nd.mnt))
+	if (IS_RDONLY(inode))
 		goto dput_and_out;
 
 	/* Don't worry, the checks are done in inode_change_ok() */
@@ -508,8 +508,7 @@ asmlinkage long sys_access(const char __user * filename, int mode)
 	if (!res) {
 		res = permission(nd.dentry->d_inode, mode, &nd);
 		/* SuS v2 requires we report a read only fs too */
-		if(!res && (mode & S_IWOTH)
-		   && (IS_RDONLY(nd.dentry->d_inode) || MNT_IS_RDONLY(nd.mnt))
+		if(!res && (mode & S_IWOTH) && IS_RDONLY(nd.dentry->d_inode)
 		   && !special_file(nd.dentry->d_inode->i_mode))
 			res = -EROFS;
 		path_release(&nd);
@@ -615,7 +614,7 @@ asmlinkage long sys_fchmod(unsigned int fd, mode_t mode)
 	inode = dentry->d_inode;
 
 	err = -EROFS;
-	if (IS_RDONLY(inode) || (file && MNT_IS_RDONLY(file->f_vfsmnt)))
+	if (IS_RDONLY(inode))
 		goto out_putf;
 	err = -EPERM;
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
@@ -647,7 +646,7 @@ asmlinkage long sys_chmod(const char __user * filename, mode_t mode)
 	inode = nd.dentry->d_inode;
 
 	error = -EROFS;
-	if (IS_RDONLY(inode) || MNT_IS_RDONLY(nd.mnt))
+	if (IS_RDONLY(inode))
 		goto dput_and_out;
 
 	error = -EPERM;
@@ -668,8 +667,7 @@ out:
 	return error;
 }
 
-static int chown_common(struct dentry *dentry, struct vfsmount *mnt,
-	uid_t user, gid_t group)
+static int chown_common(struct dentry * dentry, uid_t user, gid_t group)
 {
 	struct inode * inode;
 	int error;
@@ -681,7 +679,7 @@ static int chown_common(struct dentry *dentry, struct vfsmount *mnt,
 		goto out;
 	}
 	error = -EROFS;
-	if (IS_RDONLY(inode) || MNT_IS_RDONLY(mnt))
+	if (IS_RDONLY(inode))
 		goto out;
 	error = -EPERM;
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
@@ -712,7 +710,7 @@ asmlinkage long sys_chown(const char __user * filename, uid_t user, gid_t group)
 
 	error = user_path_walk(filename, &nd);
 	if (!error) {
-		error = chown_common(nd.dentry, nd.mnt, user, group);
+		error = chown_common(nd.dentry, user, group);
 		path_release(&nd);
 	}
 	return error;
@@ -725,7 +723,7 @@ asmlinkage long sys_lchown(const char __user * filename, uid_t user, gid_t group
 
 	error = user_path_walk_link(filename, &nd);
 	if (!error) {
-		error = chown_common(nd.dentry, nd.mnt, user, group);
+		error = chown_common(nd.dentry, user, group);
 		path_release(&nd);
 	}
 	return error;
@@ -739,7 +737,7 @@ asmlinkage long sys_fchown(unsigned int fd, uid_t user, gid_t group)
 
 	file = fget(fd);
 	if (file) {
-		error = chown_common(file->f_dentry, file->f_vfsmnt, user, group);
+		error = chown_common(file->f_dentry, user, group);
 		fput(file);
 	}
 	return error;

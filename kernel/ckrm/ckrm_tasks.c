@@ -25,7 +25,6 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <asm/errno.h>
-#include <asm/div64.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
 #include <linux/ckrm.h>
@@ -191,11 +190,6 @@ static void numtasks_put_ref_local(void *arg)
 	res = ckrm_get_res_class(core, resid, ckrm_numtasks_t);
 	if (res == NULL)
 		return;
-	if (unlikely(atomic_read(&res->cnt_cur_alloc) == 0)) {
-		printk(KERN_WARNING "numtasks_put_ref: Trying to decrement "
-					"counter below 0\n");
-		return;
-	}
 	atomic_dec(&res->cnt_cur_alloc);
 	if (atomic_read(&res->cnt_borrowed) > 0) {
 		atomic_dec(&res->cnt_borrowed);
@@ -249,13 +243,10 @@ static void numtasks_res_free(void *my_res)
 
 	parres = ckrm_get_res_class(res->parent, resid, ckrm_numtasks_t);
 
-	if (unlikely(atomic_read(&res->cnt_cur_alloc) < 0)) {
-		printk(KERN_WARNING "numtasks_res: counter below 0\n");
-	}
-	if (unlikely(atomic_read(&res->cnt_cur_alloc) > 0 ||
-				atomic_read(&res->cnt_borrowed) > 0)) {
-		printk(KERN_WARNING "numtasks_res_free: resource still "
-		       "alloc'd %p\n", res);
+	if (unlikely(atomic_read(&res->cnt_cur_alloc) != 0 ||
+		     atomic_read(&res->cnt_borrowed))) {
+		printk(KERN_ERR
+		       "numtasks_res_free: resource still alloc'd %p\n", res);
 		if ((borrowed = atomic_read(&res->cnt_borrowed)) > 0) {
 			for (i = 0; i < borrowed; i++) {
 				numtasks_put_ref_local(parres->core);
@@ -307,9 +298,9 @@ recalc_and_propagate(ckrm_numtasks_t * res, ckrm_numtasks_t * parres)
 		if (parres->cnt_guarantee == CKRM_SHARE_DONTCARE) {
 			res->cnt_guarantee = CKRM_SHARE_DONTCARE;
 		} else if (par->total_guarantee) {
-			u64 temp = (u64) self->my_guarantee * parres->cnt_guarantee;
-			do_div(temp, par->total_guarantee);
-			res->cnt_guarantee = (int) temp;
+			res->cnt_guarantee =
+			    (self->my_guarantee * parres->cnt_guarantee)
+			    / par->total_guarantee;
 		} else {
 			res->cnt_guarantee = 0;
 		}
@@ -317,9 +308,8 @@ recalc_and_propagate(ckrm_numtasks_t * res, ckrm_numtasks_t * parres)
 		if (parres->cnt_limit == CKRM_SHARE_DONTCARE) {
 			res->cnt_limit = CKRM_SHARE_DONTCARE;
 		} else if (par->max_limit) {
-			u64 temp = (u64) self->my_limit * parres->cnt_limit;
-			do_div(temp, par->max_limit);
-			res->cnt_limit = (int) temp;
+			res->cnt_limit = (self->my_limit * parres->cnt_limit)
+			    / par->max_limit;
 		} else {
 			res->cnt_limit = 0;
 		}
@@ -328,9 +318,9 @@ recalc_and_propagate(ckrm_numtasks_t * res, ckrm_numtasks_t * parres)
 		if (res->cnt_guarantee == CKRM_SHARE_DONTCARE) {
 			res->cnt_unused = CKRM_SHARE_DONTCARE;
 		} else if (self->total_guarantee) {
-			u64 temp = (u64) self->unused_guarantee * res->cnt_guarantee;
-			do_div(temp, self->total_guarantee);
-			res->cnt_unused = (int) temp;
+			res->cnt_unused = (self->unused_guarantee *
+					   res->cnt_guarantee) /
+			    self->total_guarantee;
 		} else {
 			res->cnt_unused = 0;
 		}
@@ -376,9 +366,9 @@ static int numtasks_set_share_values(void *my_res, struct ckrm_shares *new)
 		if (parres->cnt_guarantee == CKRM_SHARE_DONTCARE) {
 			parres->cnt_unused = CKRM_SHARE_DONTCARE;
 		} else if (par->total_guarantee) {
-			u64 temp = (u64) par->unused_guarantee * parres->cnt_guarantee;
-			do_div(temp, par->total_guarantee);
-			parres->cnt_unused = (int) temp;
+			parres->cnt_unused = (par->unused_guarantee *
+					      parres->cnt_guarantee) /
+			    par->total_guarantee;
 		} else {
 			parres->cnt_unused = 0;
 		}
@@ -425,11 +415,10 @@ static int numtasks_get_stats(void *my_res, struct seq_file *sfile)
 #ifdef NUMTASKS_DEBUG
 	seq_printf(sfile,
 		   "cur_alloc %d; borrowed %d; cnt_guar %d; cnt_limit %d "
-		   "cnt_unused %d, unused_guarantee %d, cur_max_limit %d\n",
+		   "unused_guarantee %d, cur_max_limit %d\n",
 		   atomic_read(&res->cnt_cur_alloc),
 		   atomic_read(&res->cnt_borrowed), res->cnt_guarantee,
-		   res->cnt_limit, res->cnt_unused,
-		   res->shares.unused_guarantee,
+		   res->cnt_limit, res->shares.unused_guarantee,
 		   res->shares.cur_max_limit);
 #endif
 
@@ -453,7 +442,7 @@ static int numtasks_set_config(void *my_res, const char *cfgstr)
 
 	if (!res)
 		return -EINVAL;
-	printk(KERN_DEBUG "numtasks config='%s'\n", cfgstr);
+	printk("numtasks config='%s'\n", cfgstr);
 	return 0;
 }
 
@@ -505,7 +494,7 @@ int __init init_ckrm_numtasks_res(void)
 
 	if (resid == -1) {
 		resid = ckrm_register_res_ctlr(clstype, &numtasks_rcbs);
-		printk(KERN_DEBUG "........init_ckrm_numtasks_res -> %d\n", resid);
+		printk("........init_ckrm_numtasks_res -> %d\n", resid);
 		if (resid != -1) {
 			ckrm_numtasks_register(numtasks_get_ref_local,
 					       numtasks_put_ref_local);

@@ -113,12 +113,6 @@ struct rcfs_magf sock_rootdesc[] = {
 	 .i_op = &my_iops,
 	 .i_fop = &target_fileops,
 	 },
-	{
-	 .name = "reclassify",
-	 .mode = RCFS_DEFAULT_FILE_MODE,
-	 .i_op = &my_iops,
-	 .i_fop = &reclassify_fileops,
-	 },
 };
 
 struct rcfs_magf sock_magf[] = {
