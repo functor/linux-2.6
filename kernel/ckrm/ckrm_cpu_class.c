@@ -180,6 +180,9 @@ static void ckrm_free_cpu_class(void *my_res)
 	write_unlock(&class_list_lock);
 
 	kfree(cls);
+
+	//call ckrm_cpu_monitor after class removed
+	ckrm_cpu_monitor(0);
 }				
 
 /*
@@ -220,6 +223,10 @@ int ckrm_cpu_set_share(void *my_res, struct ckrm_shares *new_share)
 	if (cls->parent) {
 		spin_unlock(&parres->cnt_lock);
 	}
+
+	//call ckrm_cpu_monitor after changes are changed
+	ckrm_cpu_monitor(0);
+
 	return rc;
 }							
 			
@@ -269,7 +276,7 @@ int ckrm_cpu_get_stats(void *my_res, struct seq_file * sfile)
 		   );
 	for_each_online_cpu(i) {
 		lrq = get_ckrm_lrq(cls,i);		
-		seq_printf(sfile, "\tlrq %d demand= %lu weight= %d lrq_load= %lu cvt= %llu sav=%llu\n",i,stat->local_stats[i].cpu_demand,local_class_weight(lrq),lrq->lrq_load,lrq->local_cvt,lrq->savings);
+		seq_printf(sfile, "\tlrq %d demand= %lu weight= %d lrq_load= %lu cvt= %llu sav= %llu\n",i,stat->local_stats[i].cpu_demand,local_class_weight(lrq),lrq->lrq_load,lrq->local_cvt,lrq->savings);
 	}
 
 	seq_printf(sfile, "-------- CPU Class Status END ---------\n");

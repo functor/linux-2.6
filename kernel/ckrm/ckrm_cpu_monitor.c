@@ -357,6 +357,10 @@ static int update_child_effective(struct ckrm_core_class *parent)
 		    c_cls->stat.ehl *
 		    get_myhard_limit(c_cls) / c_cls->shares.total_guarantee;
 
+		set_eshare(&c_cls->stat,c_cls->stat.egrt);
+		set_meshare(&c_cls->stat,c_cls->stat.megrt);
+
+
 		child_core = ckrm_get_next_child(parent, child_core);
 	};
 	return 0;
@@ -386,15 +390,18 @@ static int update_effectives(struct ckrm_core_class *root_core)
 		/ cls->shares.total_guarantee;
 	cls->stat.mehl = cls->stat.ehl * get_myhard_limit(cls)
 		/ cls->shares.total_guarantee;
-	
+	set_eshare(&cls->stat,cls->stat.egrt);
+	set_meshare(&cls->stat,cls->stat.megrt);
+
  repeat:
 	//check exit
 	if (!cur_core)
 		return 0;
 
-	//visit this node
-	if (update_child_effective(cur_core) < 0)
-		return ret; //invalid cur_core node
+	//visit this node only once
+	if (! child_core)
+		if (update_child_effective(cur_core) < 0)
+			return ret; //invalid cur_core node
 	
 	//next child
 	child_core = ckrm_get_next_child(cur_core, child_core);
@@ -439,37 +446,30 @@ static inline int get_my_node_surplus(struct ckrm_cpu_class *cls)
 }
 
 /**
- * node_surplus_consume: consume the surplus
- * @ckeck_sl: if check_sl is set, then check soft_limit
- * @total_grt: total guarantee 
+ * consume_surplus: decides how much surplus a node can consume
+ * @ckeck_sl: if check_sl is set, then check soft_limitx
  * return how much consumed
- * return -1 on error
  *
  * implements all the CKRM Scheduling Requirement
- * update total_grt if necessary 
+ * assume c_cls is valid
  */
-static inline int node_surplus_consume(int surplus,
-				       struct ckrm_core_class *child_core,
+static inline int consume_surplus(int surplus,
+				       struct ckrm_cpu_class *c_cls,
 				       struct ckrm_cpu_class *p_cls,
 				       int check_sl
 				       )
 {
 	int consumed = 0;
 	int inc_limit;
-	int glut = 1;
-
-	struct ckrm_cpu_class *c_cls = ckrm_get_cpu_class(child_core);
 	int total_grt = p_cls->shares.total_guarantee;
 
  	BUG_ON(surplus < 0);
-
-	if (! c_cls || ! total_grt)
-		goto out;
 
 	/*can't consume more than demand or hard limit*/
 	if (c_cls->stat.eshare >= c_cls->stat.max_demand)
 		goto out;
 
+	//the surplus allocation is propotional to grt
 	consumed =
 		surplus * c_cls->shares.my_guarantee / total_grt;
 
@@ -481,23 +481,104 @@ static inline int node_surplus_consume(int surplus,
 
 	if (check_sl) {
 		int esl = p_cls->stat.eshare * get_soft_limit(c_cls)
-			/p_cls->shares.total_guarantee;
+			/total_grt;
 		if (esl < c_cls->stat.max_demand)
 			inc_limit = esl - c_cls->stat.eshare;
 	}
 
+	if (consumed > inc_limit)
+		consumed = inc_limit;
+
+        BUG_ON(consumed < 0);
+ out:		
+	return consumed;
+}
+
+/*
+ * how much a node can consume for itself?
+ */
+static inline int consume_self_surplus(int surplus,
+				       struct ckrm_cpu_class *p_cls,
+				       int check_sl
+				       )
+{
+	int consumed = 0;
+	int inc_limit;
+	int total_grt = p_cls->shares.total_guarantee;
+	int max_demand = get_mmax_demand(&p_cls->stat);
+
+ 	BUG_ON(surplus < 0);
+
+	/*can't consume more than demand or hard limit*/
+	if (p_cls->stat.meshare >= max_demand)
+		goto out;
+
+	//the surplus allocation is propotional to grt
+	consumed =
+		surplus * p_cls->shares.unused_guarantee / total_grt;
+
+	if (! consumed) //no more share
+		goto out;
+
+	//hard limit and demand limit
+	inc_limit = max_demand - p_cls->stat.meshare;
+
+	if (check_sl) {
+		int mesl = p_cls->stat.eshare * get_mysoft_limit(p_cls)
+			/total_grt;
+		if (mesl < max_demand)
+			inc_limit = mesl - p_cls->stat.meshare;
+	}
 
 	if (consumed > inc_limit)
 		consumed = inc_limit;
-	else
-		glut = 0;
 
         BUG_ON(consumed < 0);
-	set_eshare(&c_cls->stat,c_cls->stat.eshare + consumed);
-        BUG_ON(c_cls->stat.eshare < 0);
-
  out:		
 	return consumed;
+}
+
+
+/*
+ * allocate surplus to all its children and also its default class
+ */
+static int alloc_surplus_single_round(
+				      int surplus,
+				      struct ckrm_core_class *parent,
+				      struct ckrm_cpu_class *p_cls,
+				      int check_sl)
+{
+	struct ckrm_cpu_class *c_cls;
+	struct ckrm_core_class *child_core = NULL;
+	int total_consumed = 0,consumed;
+
+	//first allocate to the default class
+	consumed  =
+		consume_self_surplus(surplus,p_cls,check_sl);
+
+	if (consumed > 0) {
+		set_meshare(&p_cls->stat,p_cls->stat.meshare + consumed);
+		total_consumed += consumed;
+	}
+
+	do {
+		child_core = ckrm_get_next_child(parent, child_core);
+		if (child_core)  {
+			c_cls = ckrm_get_cpu_class(child_core);
+			if (! c_cls)
+				return -1;
+
+			consumed    =
+				consume_surplus(surplus, c_cls,
+						     p_cls,check_sl);
+			if (consumed > 0) {
+				set_eshare(&c_cls->stat,c_cls->stat.eshare + consumed);
+				total_consumed += consumed;
+			}
+		}
+	} while (child_core);
+
+	return total_consumed;
 }
 
 /**
@@ -512,80 +593,63 @@ static inline int node_surplus_consume(int surplus,
  */
 static int alloc_surplus_node(struct ckrm_core_class *parent)
 {
-	int total_surplus , old_surplus;
-	struct ckrm_cpu_class *p_cls = ckrm_get_cpu_class(parent);
-	struct ckrm_core_class *child_core = NULL;
-	int self_share;
+	struct ckrm_cpu_class *p_cls,*c_cls;
+	int total_surplus,consumed;
 	int check_sl;
 	int ret = -1;
+	struct ckrm_core_class *child_core = NULL;
 
+	p_cls = ckrm_get_cpu_class(parent);
 	if (! p_cls)
-		return ret;
-
-	total_surplus = get_my_node_surplus(p_cls);
+		goto realloc_out;
 
 	/*
-	 * initialize effective_share
+	 * get total surplus
 	 */
+	total_surplus = p_cls->stat.eshare - p_cls->stat.egrt;
+	BUG_ON(total_surplus < 0);
+	total_surplus += get_my_node_surplus(p_cls);
+
 	do {
 		child_core = ckrm_get_next_child(parent, child_core);
 		if (child_core) {
-			struct ckrm_cpu_class *c_cls;
-
 			c_cls = ckrm_get_cpu_class(child_core);				
 			if (! c_cls)
-				return ret; 
+				goto realloc_out;
 
 			total_surplus += get_node_surplus(c_cls);
-
-		 	set_eshare(&c_cls->stat, c_cls->stat.egrt);
 		}
 	} while (child_core);
 
-	if (! total_surplus)
+
+	if (! total_surplus) {
+		ret = 0;
 		goto realloc_out;
-
-	/* distribute the surplus */
-	child_core = NULL;
-	check_sl = 1;
-	old_surplus = 0;
-	do {
-		if (!child_core) {//start a new round
-
-			//ok, everybody reached the soft limit
-			if (old_surplus == total_surplus) 
-				check_sl = 0;
-			old_surplus = total_surplus;
-		}
-
-		child_core = ckrm_get_next_child(parent, child_core);
-		if (child_core)  {
-			int consumed = 0;
-			consumed -=
-				node_surplus_consume(old_surplus, child_core,
-						     p_cls,check_sl);
-			if (consumed >= 0) 
-				total_surplus -= consumed;
-			else
-				return ret;	
-		}
-		//start a new round if something is allocated in the last round
-	} while (child_core || check_sl || total_surplus != old_surplus);
-
- realloc_out:
-	/*how much for itself*/
-	self_share = p_cls->stat.eshare *
-	    p_cls->shares.unused_guarantee / p_cls->shares.total_guarantee;
-
-	if (self_share < p_cls->stat.max_demand) {
-		/*any remaining surplus goes to the default class*/
-		self_share += total_surplus;	
-		if (self_share > p_cls->stat.max_demand)
-			self_share = p_cls->stat.max_demand;
 	}
+
+	/* 
+	 * distributing the surplus 
+	 * first with the check_sl enabled
+	 * once all the tasks has research the soft limit, disable check_sl and try again
+	 */
 	
-	set_meshare(&p_cls->stat, self_share);
-	return 0;
+	check_sl = 1;
+	do {
+		consumed = alloc_surplus_single_round(total_surplus,parent,p_cls,check_sl);
+		if (consumed < 0) //something is wrong
+			goto realloc_out;
+
+		if (! consumed)
+			check_sl = 0;
+		else
+			total_surplus -= consumed;
+
+	} while ((total_surplus > 0) && (consumed || check_sl) );
+
+	ret = 0;
+	
+ realloc_out:
+	return ret;
 }
 
 /**
@@ -597,29 +661,27 @@ static int alloc_surplus_node(struct ckrm_core_class *parent)
 static int alloc_surplus(struct ckrm_core_class *root_core)
 {
 	struct ckrm_core_class *cur_core, *child_core;
-	struct ckrm_cpu_class *cls;
+	//	struct ckrm_cpu_class *cls;
 	int ret = -1;
 
 	/*initialize*/
 	cur_core = root_core;
 	child_core = NULL;
-	cls = ckrm_get_cpu_class(cur_core);
-
-	//set root eshare
-	set_eshare(&cls->stat, cls->stat.egrt);
+	//	cls = ckrm_get_cpu_class(cur_core);
 
 	/*the ckrm idle tasks get all what's remaining*/
 	/*hzheng: uncomment the following like for hard limit support */
 	//	update_ckrm_idle(CKRM_SHARE_MAX - cls->stat.max_demand);
 	
-      repeat:
+ repeat:
 	//check exit
 	if (!cur_core)
 		return 0;
 
-	//visit this node
-	if ( alloc_surplus_node(cur_core) < 0 )
-		return ret;
+	//visit this node only once
+	if (! child_core) 
+		if ( alloc_surplus_node(cur_core) < 0 )
+			return ret;
 
 	//next child
 	child_core = ckrm_get_next_child(cur_core, child_core);
@@ -708,7 +770,7 @@ static int ckrm_cpu_idled(void *nothing)
 	/*similar to cpu_idle */
 	while (1) {
 		while (!need_resched()) {
-			ckrm_cpu_monitor();
+			ckrm_cpu_monitor(1);
 			if (current_cpu_data.hlt_works_ok) {
 				local_irq_disable();
 				if (!need_resched()) {
@@ -830,12 +892,13 @@ void adjust_local_weight(void)
 /**********************************************/
 /**
  *ckrm_cpu_monitor - adjust relative shares of the classes based on their progress
+ *@check_min: if check_min is set, the call can't be within 100ms of last call
  *
  * this function is called every CPU_MONITOR_INTERVAL
  * it computes the cpu demand of each class
  * and re-allocate the un-used shares to other classes
  */
-void ckrm_cpu_monitor(void)
+void ckrm_cpu_monitor(int check_min)
 {
 	static spinlock_t lock = SPIN_LOCK_UNLOCKED; 
 	static unsigned long long last_check = 0;
@@ -855,9 +918,9 @@ void ckrm_cpu_monitor(void)
 	now = sched_clock();
 
 	//consecutive check should be at least 100ms apart
-	if (now - last_check < MIN_CPU_MONITOR_INTERVAL) {
+	if (check_min && (now - last_check < MIN_CPU_MONITOR_INTERVAL))
 		goto outunlock;
-	}
+
 	last_check = now;
 
 	if (update_effectives(root_core) != 0)
@@ -889,7 +952,7 @@ static int ckrm_cpu_monitord(void *nothing)
 		/*sleep for sometime before next try*/
 		set_current_state(TASK_INTERRUPTIBLE);
 		schedule_timeout(CPU_MONITOR_INTERVAL);
-		ckrm_cpu_monitor();
+		ckrm_cpu_monitor(1);
 		if (thread_exit) {
 			break;
 		}
@@ -910,8 +973,6 @@ void ckrm_start_monitor(void)
 
 void ckrm_kill_monitor(void)
 {
-	// int interval = HZ;
-
 	printk("killing process %d\n", cpu_monitor_pid);
 	if (cpu_monitor_pid > 0) {
 		thread_exit = 1;
