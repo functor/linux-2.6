@@ -2361,7 +2361,8 @@ pfm_smpl_buffer_alloc(struct task_struct *task, pfm_context_t *ctx, unsigned lon
 	 */
 	insert_vm_struct(mm, vma);
 
-	mm->total_vm  += size >> PAGE_SHIFT;
+	// mm->total_vm  += size >> PAGE_SHIFT;
+	vx_vmpages_add(mm, size >> PAGE_SHIFT);
 
 	up_write(&task->mm->mmap_sem);
 

@@ -310,7 +310,8 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	current->mm->free_area_cache = TASK_UNMAPPED_BASE;
 	/* unlimited stack is larger than TASK_SIZE */
 	current->mm->non_executable_cache = current->mm->mmap_top;
-	current->mm->rss = 0;
+	// current->mm->rss = 0;
+	vx_rsspages_sub(current->mm, current->mm->rss);
 	current->mm->mmap = NULL;
 	compute_creds(bprm);
  	current->flags &= ~PF_FORKNOEXEC;

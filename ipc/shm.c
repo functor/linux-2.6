@@ -189,6 +189,7 @@ static int newseg (key_t key, int shmflg, size_t size)
 		return -ENOMEM;
 
 	shp->shm_perm.key = key;
+	shp->shm_perm.xid = current->xid;
 	shp->shm_flags = (shmflg & S_IRWXUGO);
 
 	shp->shm_perm.security = NULL;
@@ -847,11 +848,15 @@ static int sysvipc_shm_read_proc(char *buffer, char **start, off_t offset, int l
 		struct shmid_kernel* shp;
 
 		shp = shm_lock(i);
-		if(shp!=NULL) {
+		if (shp) {
 #define SMALL_STRING "%10d %10d  %4o %10u %5u %5u  %5d %5u %5u %5u %5u %10lu %10lu %10lu\n"
 #define BIG_STRING   "%10d %10d  %4o %21u %5u %5u  %5d %5u %5u %5u %5u %10lu %10lu %10lu\n"
 			char *format;
 
+			if (!vx_check(shp->shm_perm.xid, VX_IDENT)) {
+				shm_unlock(shp);
+				continue;	
+			}
 			if (sizeof(size_t) <= sizeof(int))
 				format = SMALL_STRING;
 			else

@@ -38,7 +38,8 @@ static inline void zap_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 					set_page_dirty(page);
 				page_remove_rmap(page);
 				page_cache_release(page);
-				mm->rss--;
+				// mm->rss--;
+				vx_rsspages_dec(mm);
 			}
 		}
 	} else {
@@ -64,6 +65,9 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	pgd = pgd_offset(mm, addr);
 	spin_lock(&mm->page_table_lock);
 
+	if (!vx_rsspages_avail(mm, 1))
+		goto err_unlock;
+
 	pmd = pmd_alloc(mm, pgd, addr);
 	if (!pmd)
 		goto err_unlock;
@@ -74,7 +78,8 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	zap_pte(mm, vma, addr, pte);
 
-	mm->rss++;
+	// mm->rss++;
+	vx_rsspages_inc(mm);
 	flush_icache_page(vma, page);
 	set_pte(pte, mk_pte(page, prot));
 	page_add_file_rmap(page);

@@ -320,7 +320,8 @@ void install_arg_page(struct vm_area_struct *vma,
 		pte_unmap(pte);
 		goto out;
 	}
-	mm->rss++;
+	// mm->rss++;
+	vx_rsspages_inc(mm);
 	lru_cache_add_active(page);
 	set_pte(pte, pte_mkdirty(pte_mkwrite(mk_pte(
 					page, vma->vm_page_prot))));
@@ -409,7 +410,8 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt)
 		return -ENOMEM;
 
-	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT)) {
+	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT) ||
+		!vx_vmpages_avail(mm, arg_size >> PAGE_SHIFT)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
@@ -438,7 +440,9 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 			mpnt->vm_flags = VM_STACK_FLAGS;
 		mpnt->vm_page_prot = protection_map[mpnt->vm_flags & 0x7];
 		insert_vm_struct(mm, mpnt);
-		mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		// mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		vx_vmpages_sub(mm, mm->total_vm -
+			((mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT));
 	}
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {

@@ -437,6 +437,8 @@ config SPINLINE
 
 	  If in doubt, say N.
 
+source "kernel/vserver/Kconfig"
+
 source "security/Kconfig"
 
 source "crypto/Kconfig"

@@ -3,6 +3,7 @@ deps_config := \
 	crypto/Kconfig \
 	security/selinux/Kconfig \
 	security/Kconfig \
+	kernel/vserver/Kconfig \
 	arch/i386/oprofile/Kconfig \
 	fs/nls/Kconfig \
 	fs/partitions/Kconfig \

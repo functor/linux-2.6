@@ -1345,6 +1345,8 @@ config X86_MPPARSE
 
 endmenu
 
+source "kernel/vserver/Kconfig"
+
 source "security/Kconfig"
 
 source "crypto/Kconfig"

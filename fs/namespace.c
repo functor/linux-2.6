@@ -234,6 +234,9 @@ static int show_vfsmnt(struct seq_file *m, void *v)
 	};
 	struct proc_fs_info *fs_infop;
 
+	if (vx_flags(VXF_HIDE_MOUNT, 0))
+		return 0;
+
 	mangle(m, mnt->mnt_devname ? mnt->mnt_devname : "none");
 	seq_putc(m, ' ');
 	seq_path(m, mnt, mnt->mnt_root, " \t\n\\");
@@ -333,18 +336,10 @@ int may_umount(struct vfsmount *mnt)
 
 EXPORT_SYMBOL(may_umount);
 
-void umount_tree(struct vfsmount *mnt)
+static inline void __umount_tree(struct vfsmount *mnt, struct list_head *kill)
 {
-	struct vfsmount *p;
-	LIST_HEAD(kill);
-
-	for (p = mnt; p; p = next_mnt(p, mnt)) {
-		list_del(&p->mnt_list);
-		list_add(&p->mnt_list, &kill);
-	}
-
-	while (!list_empty(&kill)) {
-		mnt = list_entry(kill.next, struct vfsmount, mnt_list);
+	while (!list_empty(kill)) {
+		mnt = list_entry(kill->next, struct vfsmount, mnt_list);
 		list_del_init(&mnt->mnt_list);
 		if (mnt->mnt_parent == mnt) {
 			spin_unlock(&vfsmount_lock);
@@ -357,6 +352,32 @@ void umount_tree(struct vfsmount *mnt)
 		mntput(mnt);
 		spin_lock(&vfsmount_lock);
 	}
+}
+
+void umount_tree(struct vfsmount *mnt)
+{
+	struct vfsmount *p;
+	LIST_HEAD(kill);
+
+	for (p = mnt; p; p = next_mnt(p, mnt)) {
+		list_del(&p->mnt_list);
+		list_add(&p->mnt_list, &kill);
+	}
+	__umount_tree(mnt, &kill);
+}
+
+void umount_unused(struct vfsmount *mnt, struct fs_struct *fs)
+{
+	struct vfsmount *p;
+	LIST_HEAD(kill);
+
+	for (p = mnt; p; p = next_mnt(p, mnt)) {
+		if (p == fs->rootmnt || p == fs->pwdmnt)
+			continue;
+		list_del(&p->mnt_list);
+		list_add(&p->mnt_list, &kill);
+	}
+	__umount_tree(mnt, &kill);
 }
 
 static int do_umount(struct vfsmount *mnt, int flags)
@@ -456,7 +477,7 @@ asmlinkage long sys_umount(char __user * name, int flags)
 		goto dput_and_out;
 
 	retval = -EPERM;
-	if (!capable(CAP_SYS_ADMIN))
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SECURE_MOUNT))
 		goto dput_and_out;
 
 	retval = do_umount(nd.mnt, flags);
@@ -482,6 +503,8 @@ asmlinkage long sys_oldumount(char __user * name)
 static int mount_is_safe(struct nameidata *nd)
 {
 	if (capable(CAP_SYS_ADMIN))
+		return 0;
+	if (vx_ccaps(VXC_SECURE_MOUNT))
 		return 0;
 	return -EPERM;
 #ifdef notyet
@@ -842,6 +865,9 @@ long do_mount(char * dev_name, char * dir_name, char *type_page,
 	if (flags & MS_NOEXEC)
 		mnt_flags |= MNT_NOEXEC;
 	flags &= ~(MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_ACTIVE);
+
+	if (vx_ccaps(VXC_SECURE_MOUNT))
+		mnt_flags |= MNT_NODEV;
 
 	/* ... and get the mountpoint */
 	retval = path_lookup(dir_name, LOOKUP_FOLLOW, &nd);

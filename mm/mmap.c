@@ -853,6 +853,10 @@ munmap_back:
 	    > current->rlim[RLIMIT_AS].rlim_cur)
 		return -ENOMEM;
 
+	/* check context space, maybe only Private writable mapping? */
+	if (!vx_vmpages_avail(mm, len >> PAGE_SHIFT))
+		return -ENOMEM;
+
 	if (accountable && (!(flags & MAP_NORESERVE) ||
 			sysctl_overcommit_memory > 1)) {
 		if (vm_flags & VM_SHARED) {
@@ -949,9 +953,11 @@ munmap_back:
 		kmem_cache_free(vm_area_cachep, vma);
 	}
 out:	
-	mm->total_vm += len >> PAGE_SHIFT;
+	// mm->total_vm += len >> PAGE_SHIFT;
+	vx_vmpages_add(mm, len >> PAGE_SHIFT);
 	if (vm_flags & VM_LOCKED) {
-		mm->locked_vm += len >> PAGE_SHIFT;
+		// mm->locked_vm += len >> PAGE_SHIFT;
+		vx_vmlocked_add(mm, len >> PAGE_SHIFT);
 		make_pages_present(addr, addr + len);
 	}
 	if (flags & MAP_POPULATE) {
@@ -1191,7 +1197,8 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 	grow = (address - vma->vm_end) >> PAGE_SHIFT;
 
 	/* Overcommit.. */
-	if (security_vm_enough_memory(grow)) {
+	if (security_vm_enough_memory(grow) ||
+		!vx_vmpages_avail(vma->vm_mm, grow)) {
 		anon_vma_unlock(vma);
 		return -ENOMEM;
 	}
@@ -1203,10 +1210,13 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 		vm_unacct_memory(grow);
 		return -ENOMEM;
 	}
+
 	vma->vm_end = address;
-	vma->vm_mm->total_vm += grow;
+	// vma->vm_mm->total_vm += grow;
+	vx_vmpages_add(vma->vm_mm, grow);
 	if (vma->vm_flags & VM_LOCKED)
-		vma->vm_mm->locked_vm += grow;
+		// vma->vm_mm->locked_vm += grow;
+		vx_vmlocked_add(vma->vm_mm, grow);
 	anon_vma_unlock(vma);
 	return 0;
 }
@@ -1252,7 +1262,8 @@ int expand_stack(struct vm_area_struct *vma, unsigned long address)
 	grow = (vma->vm_start - address) >> PAGE_SHIFT;
 
 	/* Overcommit.. */
-	if (security_vm_enough_memory(grow)) {
+	if (security_vm_enough_memory(grow) ||
+		!vx_vmpages_avail(vma->vm_mm, grow)) {
 		anon_vma_unlock(vma);
 		return -ENOMEM;
 	}
@@ -1264,11 +1275,14 @@ int expand_stack(struct vm_area_struct *vma, unsigned long address)
 		vm_unacct_memory(grow);
 		return -ENOMEM;
 	}
+
 	vma->vm_start = address;
 	vma->vm_pgoff -= grow;
-	vma->vm_mm->total_vm += grow;
+	// vma->vm_mm->total_vm += grow;
+	vx_vmpages_add(vma->vm_mm, grow);
 	if (vma->vm_flags & VM_LOCKED)
-		vma->vm_mm->locked_vm += grow;
+		// vma->vm_mm->locked_vm += grow;
+		vx_vmlocked_add(vma->vm_mm, grow);
 	anon_vma_unlock(vma);
 	return 0;
 }
@@ -1371,9 +1385,12 @@ static void unmap_vma(struct mm_struct *mm, struct vm_area_struct *area)
 {
 	size_t len = area->vm_end - area->vm_start;
 
-	area->vm_mm->total_vm -= len >> PAGE_SHIFT;
+	// area->vm_mm->total_vm -= len >> PAGE_SHIFT;
+	vx_vmpages_sub(area->vm_mm, len >> PAGE_SHIFT);
+	
 	if (area->vm_flags & VM_LOCKED)
-		area->vm_mm->locked_vm -= len >> PAGE_SHIFT;
+		// area->vm_mm->locked_vm -= len >> PAGE_SHIFT;
+		vx_vmlocked_sub(area->vm_mm, len >> PAGE_SHIFT);
 	/*
 	 * Is this a new hole at the lowest possible address?
 	 */
@@ -1623,6 +1640,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 		locked += len;
 		if (locked > current->rlim[RLIMIT_MEMLOCK].rlim_cur)
 			return -EAGAIN;
+		/* vserver checks ? */
 	}
 
 	/*
@@ -1644,7 +1662,8 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	if (mm->map_count > sysctl_max_map_count)
 		return -ENOMEM;
 
-	if (security_vm_enough_memory(len >> PAGE_SHIFT))
+	if (security_vm_enough_memory(len >> PAGE_SHIFT) ||
+		!vx_vmpages_avail(mm, len >> PAGE_SHIFT))
 		return -ENOMEM;
 
 	flags = VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags;
@@ -1672,9 +1691,11 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	vma->vm_page_prot = protection_map[flags & 0x0f];
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 out:
-	mm->total_vm += len >> PAGE_SHIFT;
+	// mm->total_vm += len >> PAGE_SHIFT;
+	vx_vmpages_add(mm, len >> PAGE_SHIFT);
 	if (flags & VM_LOCKED) {
-		mm->locked_vm += len >> PAGE_SHIFT;
+		// mm->locked_vm += len >> PAGE_SHIFT;
+		vx_vmlocked_add(mm, len >> PAGE_SHIFT);
 		make_pages_present(addr, addr + len);
 	}
 	return addr;
@@ -1708,9 +1729,12 @@ void exit_mmap(struct mm_struct *mm)
 	vma = mm->mmap;
 	mm->mmap = mm->mmap_cache = NULL;
 	mm->mm_rb = RB_ROOT;
-	mm->rss = 0;
-	mm->total_vm = 0;
-	mm->locked_vm = 0;
+	// mm->rss = 0;
+	vx_rsspages_sub(mm, mm->rss);
+	// mm->total_vm = 0;
+	vx_vmpages_sub(mm, mm->total_vm);
+	// mm->locked_vm = 0;
+	vx_vmlocked_sub(mm, mm->locked_vm);
 	arch_flush_exec_range(mm);
 
 	spin_unlock(&mm->page_table_lock);

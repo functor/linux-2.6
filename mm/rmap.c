@@ -505,7 +505,8 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 		BUG_ON(pte_file(*pte));
 	}
 
-	mm->rss--;
+	// mm->rss--;
+	vx_rsspages_dec(mm);
 	BUG_ON(!page->mapcount);
 	page->mapcount--;
 	page_cache_release(page);

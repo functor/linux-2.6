@@ -247,7 +247,10 @@ int do_syslog(int type, char __user * buf, int len)
 	unsigned long i, j, limit, count;
 	int do_clear = 0;
 	char c;
-	int error = 0;
+	int error = -EPERM;
+
+	if (!vx_check(0, VX_ADMIN|VX_WATCH))
+		return error;
 
 	error = security_syslog(type);
 	if (error)

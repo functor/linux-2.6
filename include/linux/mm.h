@@ -12,6 +12,7 @@
 #include <linux/mmzone.h>
 #include <linux/rbtree.h>
 #include <linux/prio_tree.h>
+#include <linux/vinline.h>
 #include <linux/fs.h>
 
 struct mempolicy;

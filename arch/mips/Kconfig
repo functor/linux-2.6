@@ -1646,6 +1646,8 @@ config DEBUG_HIGHMEM
 
 endmenu
 
+source "kernel/vserver/Kconfig"
+
 source "security/Kconfig"
 
 source "crypto/Kconfig"

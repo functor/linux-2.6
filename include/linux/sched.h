@@ -105,6 +105,7 @@ extern unsigned long nr_iowait(void);
 #include <linux/timer.h>
 
 #include <asm/processor.h>
+#include <linux/vserver/context.h>
 
 #define TASK_RUNNING		0
 #define TASK_INTERRUPTIBLE	1
@@ -112,6 +113,7 @@ extern unsigned long nr_iowait(void);
 #define TASK_STOPPED		4
 #define TASK_ZOMBIE		8
 #define TASK_DEAD		16
+#define TASK_ONHOLD		32
 
 #define __set_task_state(tsk, state_value)		\
 	do { (tsk)->state = (state_value); } while (0)
@@ -229,6 +231,7 @@ struct mm_struct {
 
 	/* Architecture-specific MM context */
 	mm_context_t context;
+	struct vx_info *mm_vx_info;
 
 	/* coredumping support */
 	int core_waiters;
@@ -323,9 +326,10 @@ struct user_struct {
 	/* Hash table maintenance information */
 	struct list_head uidhash_list;
 	uid_t uid;
+	xid_t xid;
 };
 
-extern struct user_struct *find_user(uid_t);
+extern struct user_struct *find_user(xid_t, uid_t);
 
 extern struct user_struct root_user;
 #define INIT_USER (&root_user)
@@ -494,6 +498,14 @@ struct task_struct {
 	
 	void *security;
 	struct audit_context *audit_context;
+
+/* vserver context data */
+	xid_t xid;
+	struct vx_info *vx_info;
+
+/* vserver network data */
+	nid_t nid;
+	struct nx_info *nx_info;
 
 /* Thread group tracking */
    	u32 parent_exec_id;
@@ -730,7 +742,7 @@ extern void set_special_pids(pid_t session, pid_t pgrp);
 extern void __set_special_pids(pid_t session, pid_t pgrp);
 
 /* per-UID process charging. */
-extern struct user_struct * alloc_uid(uid_t);
+extern struct user_struct * alloc_uid(xid_t, uid_t);
 extern void free_uid(struct user_struct *);
 extern void switch_uid(struct user_struct *);
 

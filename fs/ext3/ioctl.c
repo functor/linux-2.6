@@ -12,6 +12,7 @@
 #include <linux/ext3_fs.h>
 #include <linux/ext3_jbd.h>
 #include <linux/time.h>
+#include <linux/vserver/xid.h>
 #include <asm/uaccess.h>
 
 
@@ -220,6 +221,38 @@ flags_err:
 	}
 
 
+#if defined(CONFIG_VSERVER_LEGACY) && !defined(CONFIG_INOXID_NONE)
+	case EXT3_IOC_SETXID: {
+		handle_t *handle;
+		struct ext3_iloc iloc;
+		int xid;
+		int err;
+
+		/* fixme: if stealth, return -ENOTTY */
+		if (!capable(CAP_CONTEXT))
+			return -EPERM;
+		if (IS_RDONLY(inode))
+			return -EROFS;
+		if (!(inode->i_sb->s_flags & MS_TAGXID))
+			return -ENOSYS;
+		if (get_user(xid, (int *) arg))
+			return -EFAULT;	
+
+		handle = ext3_journal_start(inode, 1);
+		if (IS_ERR(handle))
+			return PTR_ERR(handle);
+		err = ext3_reserve_inode_write(handle, inode, &iloc);
+		if (err)
+			return err;
+
+		inode->i_xid = (xid & 0xFFFF);
+		inode->i_ctime = CURRENT_TIME;
+
+		err = ext3_mark_iloc_dirty(handle, inode, &iloc);
+		ext3_journal_stop(handle);
+		return err;
+	}
+#endif
 	default:
 		return -ENOTTY;
 	}

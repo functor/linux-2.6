@@ -1052,6 +1052,9 @@ int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 	unsigned long flags;
 	int ret;
 
+	if (!vx_check(vx_task_xid(p), VX_ADMIN|VX_WATCH|VX_IDENT))
+		return -ESRCH;
+
 	ret = check_kill_permission(sig, info, p);
 	if (!ret && sig && p->sighand) {
 		spin_lock_irqsave(&p->sighand->siglock, flags);

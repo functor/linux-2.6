@@ -179,9 +179,63 @@ void tcp_bind_hash(struct sock *sk, struct tcp_bind_bucket *tb,
 	tcp_sk(sk)->bind_hash = tb;
 }
 
+/*
+	Return 1 if addr match the socket IP list
+	or the socket is INADDR_ANY
+*/
+static inline int tcp_in_list(struct sock *sk, u32 addr)
+{
+	struct nx_info *nxi = sk->sk_nx_info;
+
+	vxdprintk("tcp_in_list(%p) %p,%p;%lx\n",
+		sk, nxi, sk->sk_socket,
+		(sk->sk_socket?sk->sk_socket->flags:0));
+
+	if (nxi) {
+		int n = nxi->nbipv4;
+		int i;
+
+		for (i=0; i<n; i++)
+			if (nxi->ipv4[i] == addr)
+				return 1;
+	}
+	else if (!tcp_v4_rcv_saddr(sk) || tcp_v4_rcv_saddr(sk) == addr)
+		return 1;
+	return 0;
+}
+	
+/*
+	Check if the addresses in sk1 conflict with those in sk2
+*/
+int tcp_ipv4_addr_conflict(struct sock *sk1, struct sock *sk2)
+{
+	if (sk1 && sk2)
+	nxdprintk("inet_bind(%p,%p) %p,%p;%lx %p,%p;%lx\n",
+		sk1, sk2,
+		sk1->sk_nx_info, sk1->sk_socket,
+		(sk1->sk_socket?sk1->sk_socket->flags:0),
+		sk2->sk_nx_info, sk2->sk_socket,
+		(sk2->sk_socket?sk2->sk_socket->flags:0));
+
+	if (tcp_v4_rcv_saddr(sk1)) {
+		/* Bind to one address only */
+		return tcp_in_list (sk2, tcp_v4_rcv_saddr(sk1));
+	} else if (sk1->sk_nx_info) {
+		/* A restricted bind(any) */
+		struct nx_info *nxi = sk1->sk_nx_info;
+		int n = nxi->nbipv4;
+		int i;
+
+		for (i=0; i<n; i++)
+			if (tcp_in_list (sk2, nxi->ipv4[i]))
+				return 1;
+	} else	/* A bind(any) do not allow other bind on the same port */
+		return 1;
+	return 0;
+}
+
 static inline int tcp_bind_conflict(struct sock *sk, struct tcp_bind_bucket *tb)
 {
-	const u32 sk_rcv_saddr = tcp_v4_rcv_saddr(sk);
 	struct sock *sk2;
 	struct hlist_node *node;
 	int reuse = sk->sk_reuse;
@@ -194,9 +248,7 @@ static inline int tcp_bind_conflict(struct sock *sk, struct tcp_bind_bucket *tb)
 		     sk->sk_bound_dev_if == sk2->sk_bound_dev_if)) {
 			if (!reuse || !sk2->sk_reuse ||
 			    sk2->sk_state == TCP_LISTEN) {
-				const u32 sk2_rcv_saddr = tcp_v4_rcv_saddr(sk2);
-				if (!sk2_rcv_saddr || !sk_rcv_saddr ||
-				    sk2_rcv_saddr == sk_rcv_saddr)
+				if (tcp_ipv4_addr_conflict(sk, sk2))
 					break;
 			}
 		}
@@ -405,6 +457,34 @@ void tcp_unhash(struct sock *sk)
 		wake_up(&tcp_lhash_wait);
 }
 
+/*
+	Check if an address is in the list
+*/
+static inline int tcp_addr_in_list(
+	u32 rcv_saddr,
+	u32 daddr,
+	struct nx_info *nx_info)
+{
+	if (rcv_saddr == daddr)
+		return 1;
+	else if (rcv_saddr == 0) {
+		/* Accept any address or check the list */
+		if (!nx_info)
+			return 1;
+		else {
+			int n = nx_info->nbipv4;
+			int i;
+
+			for (i=0; i<n; i++)
+				if (nx_info->ipv4[i] == daddr)
+					return 1;
+		}
+	}
+	return 0;
+}
+
+
+
 /* Don't inline this cruft.  Here are some nice properties to
  * exploit here.  The BSD API does not allow a listening TCP
  * to specify the remote port nor the remote address for the
@@ -426,11 +506,10 @@ static struct sock *__tcp_v4_lookup_listener(struct hlist_head *head, u32 daddr,
 			__u32 rcv_saddr = inet->rcv_saddr;
 
 			score = (sk->sk_family == PF_INET ? 1 : 0);
-			if (rcv_saddr) {
-				if (rcv_saddr != daddr)
-					continue;
+			if (tcp_addr_in_list(rcv_saddr, daddr, sk->sk_nx_info))
 				score+=2;
-			}
+			else
+				continue;
 			if (sk->sk_bound_dev_if) {
 				if (sk->sk_bound_dev_if != dif)
 					continue;
@@ -460,8 +539,8 @@ inline struct sock *tcp_v4_lookup_listener(u32 daddr, unsigned short hnum,
 		struct inet_opt *inet = inet_sk((sk = __sk_head(head)));
 
 		if (inet->num == hnum && !sk->sk_node.next &&
-		    (!inet->rcv_saddr || inet->rcv_saddr == daddr) &&
 		    (sk->sk_family == PF_INET || !ipv6_only_sock(sk)) &&
+		    tcp_addr_in_list(inet->rcv_saddr, daddr, sk->sk_nx_info) &&
 		    !sk->sk_bound_dev_if)
 			goto sherry_cache;
 		sk = __tcp_v4_lookup_listener(head, daddr, hnum, dif);
@@ -2159,6 +2238,8 @@ static void *listening_get_next(struct seq_file *seq, void *cur)
 		req = req->dl_next;
 		while (1) {
 			while (req) {
+				if (!vx_check(req->sk->sk_xid, VX_IDENT|VX_WATCH))
+					continue;
 				if (req->class->family == st->family) {
 					cur = req;
 					goto out;
@@ -2177,6 +2258,8 @@ get_req:
 		sk = sk_next(sk);
 get_sk:
 	sk_for_each_from(sk, node) {
+		if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
+			continue;
 		if (sk->sk_family == st->family) {
 			cur = sk;
 			goto out;
@@ -2224,18 +2307,20 @@ static void *established_get_first(struct seq_file *seq)
 	       
 		read_lock(&tcp_ehash[st->bucket].lock);
 		sk_for_each(sk, node, &tcp_ehash[st->bucket].chain) {
-			if (sk->sk_family != st->family) {
+			if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
 				continue;
-			}
+			if (sk->sk_family != st->family)
+				continue;
 			rc = sk;
 			goto out;
 		}
 		st->state = TCP_SEQ_STATE_TIME_WAIT;
 		tw_for_each(tw, node,
 			    &tcp_ehash[st->bucket + tcp_ehash_size].chain) {
-			if (tw->tw_family != st->family) {
+			if (!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH))
 				continue;
-			}
+			if (tw->tw_family != st->family)
+				continue;
 			rc = tw;
 			goto out;
 		}
@@ -2259,7 +2344,8 @@ static void *established_get_next(struct seq_file *seq, void *cur)
 		tw = cur;
 		tw = tw_next(tw);
 get_tw:
-		while (tw && tw->tw_family != st->family) {
+		while (tw && tw->tw_family != st->family &&
+			!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH)) {
 			tw = tw_next(tw);
 		}
 		if (tw) {
@@ -2279,6 +2365,8 @@ get_tw:
 		sk = sk_next(sk);
 
 	sk_for_each_from(sk, node) {
+		if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
+			continue;
 		if (sk->sk_family == st->family)
 			goto found;
 	}

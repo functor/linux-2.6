@@ -1269,6 +1269,8 @@ config PPC_OCP
 
 endmenu
 
+source "kernel/vserver/Kconfig"
+
 source "security/Kconfig"
 
 source "crypto/Kconfig"
