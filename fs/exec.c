@@ -564,7 +564,7 @@ static int exec_mmap(struct mm_struct *mm)
 	activate_mm(active_mm, mm);
 	task_unlock(tsk);
 	arch_pick_mmap_layout(mm);
-	ckrm_task_change_mm(tsk, old_mm, mm);
+	ckrm_task_mm_change(tsk, old_mm, mm);
 	if (old_mm) {
 		if (active_mm != old_mm) BUG();
 		mmput(old_mm);
