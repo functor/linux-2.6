@@ -7,6 +7,7 @@
 
 #include <linux/mman.h>
 #include <linux/mm.h>
+#include <linux/vs_memory.h>
 
 
 static int mlock_fixup(struct vm_area_struct * vma, 
@@ -32,10 +33,13 @@ static int mlock_fixup(struct vm_area_struct * vma,
 			goto out;
 		}
 	}
-	
-	spin_lock(&mm->page_table_lock);
+
+	/*
+	 * vm_flags is protected by the mmap_sem held in write mode.
+	 * It's okay if try_to_unmap_one unmaps a page just after we
+	 * set VM_LOCKED, make_pages_present below will bring it back.
+	 */
 	vma->vm_flags = newflags;
-	spin_unlock(&mm->page_table_lock);
 
 	/*
 	 * Keep track of amount of locked VM.
@@ -46,7 +50,8 @@ static int mlock_fixup(struct vm_area_struct * vma,
 		ret = make_pages_present(start, end);
 	}
 
-	vma->vm_mm->locked_vm -= pages;
+	// vma->vm_mm->locked_vm -= pages;
+	vx_vmlocked_sub(vma->vm_mm, pages);
 out:
 	return ret;
 }
@@ -179,7 +184,6 @@ asmlinkage long sys_mlockall(int flags)
 	ret = -ENOMEM;
 	if (!vx_vmlocked_avail(current->mm, current->mm->total_vm))
 		goto out;
-	/* check vserver lock limits? */
 	if (current->mm->total_vm <= lock_limit)
 		ret = do_mlockall(flags);
 out:

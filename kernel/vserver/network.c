@@ -14,8 +14,9 @@
 
 #include <linux/config.h>
 #include <linux/slab.h>
-#include <linux/vserver/network.h>
-#include <linux/ninline.h>
+#include <linux/vserver.h>
+#include <linux/vs_base.h>
+#include <linux/vs_network.h>
 #include <linux/rcupdate.h>
 
 #include <asm/errno.h>
@@ -122,7 +123,7 @@ static inline struct nx_info *__lookup_nx_info(nid_t nid)
 	struct hlist_head *head = &nx_info_hash[__hashval(nid)];
 	struct hlist_node *pos;
 
-	hlist_for_each(pos, head) {
+	hlist_for_each_rcu(pos, head) {
 		struct nx_info *nxi =
 			hlist_entry(pos, struct nx_info, nx_hlist);
 
@@ -335,7 +336,7 @@ out:
 
 int nx_migrate_task(struct task_struct *p, struct nx_info *nxi)
 {
-	struct nx_info *old_nxi = task_get_nx_info(p);
+	struct nx_info *old_nxi;
 	int ret = 0;
 	
 	if (!p || !nxi)
@@ -345,6 +346,8 @@ int nx_migrate_task(struct task_struct *p, struct nx_info *nxi)
 		p, nxi, nxi->nx_id,
 		atomic_read(&nxi->nx_usecnt),
 		atomic_read(&nxi->nx_refcnt));
+
+	old_nxi = task_get_nx_info(p);
 	if (old_nxi == nxi)
 		goto out;
 
@@ -356,6 +359,7 @@ int nx_migrate_task(struct task_struct *p, struct nx_info *nxi)
 	p->nid = nxi->nx_id;
 	task_unlock(p);
 
+	/* obsoleted by clr/set */
 	// put_nx_info(old_nxi);
 out:
 	put_nx_info(old_nxi);
@@ -641,4 +645,5 @@ int vc_set_ncaps(uint32_t id, void __user *data)
 
 EXPORT_SYMBOL_GPL(rcu_free_nx_info);
 EXPORT_SYMBOL_GPL(nx_info_hash_lock);
+EXPORT_SYMBOL_GPL(unhash_nx_info);
 

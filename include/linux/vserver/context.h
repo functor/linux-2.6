@@ -149,6 +149,7 @@ extern int vc_set_cflags(uint32_t, void __user *);
 #define VXF_STATE_INIT		(1ULL<<33)
 
 #define	VXF_FORK_RSS		(1ULL<<48)
+#define	VXF_PROLIFIC		(1ULL<<49)
 
 #define VXF_ONE_TIME		(0x0003ULL<<32)
 
@@ -170,7 +171,7 @@ extern int vc_set_ccaps(uint32_t, void __user *);
 #define VXC_SET_UTSNAME		0x00000001
 #define VXC_SET_RLIMIT		0x00000002
 
-#define VXC_ICMP_PING		0x00000100
+#define VXC_RAW_ICMP		0x00000100
 
 #define VXC_SECURE_MOUNT	0x00010000
 

@@ -36,6 +36,7 @@
 #include <linux/utsname.h>
 #include <linux/file.h>
 #include <linux/unistd.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/ipc.h>

@@ -71,6 +71,8 @@
 #include <linux/time.h>
 #include <linux/smp_lock.h>
 #include <linux/security.h>
+#include <linux/vs_base.h>
+
 #include <asm/uaccess.h>
 #include "util.h"
 
@@ -611,7 +613,7 @@ static int semctl_main(int semid, int semnum, int cmd, int version, union semun 
 	switch (cmd) {
 	case GETALL:
 	{
-		ushort *array = arg.array;
+		ushort __user *array = arg.array;
 		int i;
 
 		if(nsems > SEMMSL_FAST) {

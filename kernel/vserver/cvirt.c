@@ -13,7 +13,9 @@
 #include <linux/vserver/cvirt.h>
 #include <linux/vserver/context.h>
 #include <linux/vserver/switch.h>
-#include <linux/vinline.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>

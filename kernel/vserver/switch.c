@@ -16,8 +16,9 @@
 #include <linux/linkage.h>
 #include <asm/errno.h>
 
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
 #include <linux/vserver/switch.h>
-#include <linux/vinline.h>
 
 
 static inline int
@@ -35,6 +36,7 @@ vc_get_version(uint32_t id)
 #include <linux/vserver/limit.h>
 #include <linux/vserver/inode.h>
 #include <linux/vserver/signal.h>
+#include <linux/vserver/dlimit.h>
 
 
 extern unsigned int vx_debug_switch;
@@ -125,6 +127,15 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 
 	case VCMD_set_sched:
 		return vc_set_sched(id, data);
+
+	case VCMD_add_dlimit:
+		return vc_add_dlimit(id, data);
+	case VCMD_rem_dlimit:
+		return vc_rem_dlimit(id, data);
+	case VCMD_set_dlimit:
+		return vc_set_dlimit(id, data);
+	case VCMD_get_dlimit:
+		return vc_get_dlimit(id, data);
 	}
 
 	/* below here only with VX_ADMIN */

@@ -22,7 +22,12 @@
 #include <asm/uaccess.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
+#include <linux/vs_base.h>
+#include <linux/vs_limit.h>
+#include <linux/vs_dlimit.h>
 #include <linux/vserver/xid.h>
+
+#include <asm/unistd.h>
 
 int vfs_statfs(struct super_block *sb, struct kstatfs *buf)
 {
@@ -39,6 +44,8 @@ int vfs_statfs(struct super_block *sb, struct kstatfs *buf)
 			if (retval == 0 && buf->f_frsize == 0)
 				buf->f_frsize = buf->f_bsize;
 		}
+		if (!vx_check(0, VX_ADMIN|VX_WATCH))
+			vx_vsi_statfs(sb, buf);
 	}
 	return retval;
 }
@@ -336,7 +343,7 @@ asmlinkage long sys_ftruncate64(unsigned int fd, loff_t length)
 }
 #endif
 
-#if !(defined(__alpha__) || defined(__ia64__))
+#ifdef __ARCH_WANT_SYS_UTIME
 
 /*
  * sys_utime() can be implemented in user-level using sys_utimes().
@@ -797,7 +804,6 @@ struct file *dentry_open(struct dentry *dentry, struct vfsmount *mnt, int flags)
 	}
 
 	f->f_mapping = inode->i_mapping;
-	file_ra_state_init(&f->f_ra, f->f_mapping);
 	f->f_dentry = dentry;
 	f->f_vfsmnt = mnt;
 	f->f_pos = 0;
@@ -811,12 +817,13 @@ struct file *dentry_open(struct dentry *dentry, struct vfsmount *mnt, int flags)
 	}
 	f->f_flags &= ~(O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC);
 
+	file_ra_state_init(&f->f_ra, f->f_mapping->host->i_mapping);
+
 	/* NB: we're sure to have correct a_ops only after f_op->open */
 	if (f->f_flags & O_DIRECT) {
-		if (!f->f_mapping || !f->f_mapping->a_ops ||
-			!f->f_mapping->a_ops->direct_IO) {
-				fput(f);
-				f = ERR_PTR(-EINVAL);
+		if (!f->f_mapping->a_ops || !f->f_mapping->a_ops->direct_IO) {
+			fput(f);
+			f = ERR_PTR(-EINVAL);
 		}
 	}
 
@@ -909,6 +916,7 @@ static inline void __put_unused_fd(struct files_struct *files, unsigned int fd)
 	__FD_CLR(fd, files->open_fds);
 	if (fd < files->next_fd)
 		files->next_fd = fd;
+	vx_openfd_dec(fd);
 }
 
 void fastcall put_unused_fd(unsigned int fd)
@@ -1042,7 +1050,6 @@ asmlinkage long sys_close(unsigned int fd)
 	FD_CLR(fd, files->close_on_exec);
 	__put_unused_fd(files, fd);
 	spin_unlock(&files->file_lock);
-	vx_openfd_dec(fd);
 	return filp_close(filp, files);
 
 out_unlock:

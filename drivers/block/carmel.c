@@ -413,7 +413,7 @@ static unsigned long carm_major_alloc;
 static int carm_bdev_ioctl(struct inode *ino, struct file *fil,
 			   unsigned int cmd, unsigned long arg)
 {
-	void __user *usermem = (void *) arg;
+	void __user *usermem = (void __user *) arg;
 	struct carm_port *port = ino->i_bdev->bd_disk->private_data;
 	struct hd_geometry geom;
 
@@ -436,17 +436,6 @@ static int carm_bdev_ioctl(struct inode *ino, struct file *fil,
 	}
 
 	return -EOPNOTSUPP;
-}
-
-static inline unsigned long msecs_to_jiffies(unsigned long msecs)
-{
-	return ((HZ * msecs + 999) / 1000);
-}
-
-static void msleep(unsigned long msecs)
-{
-	set_current_state(TASK_UNINTERRUPTIBLE);
-	schedule_timeout(msecs_to_jiffies(msecs));
 }
 
 static const u32 msg_sizes[] = { 32, 64, 128, CARM_MSG_SIZE };

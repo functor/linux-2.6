@@ -239,8 +239,16 @@ extern int CIFSSMBSeek(int xid,
 			int whence, unsigned long offset, long long *newoffset);
 
 extern int CIFSSMBCopy(int xid,
-			struct cifsTconInfo *ftcon,
-			char *fromName,
-			struct cifsTconInfo *ttcon,
-			char *toName, int ofun, int flags);
+			struct cifsTconInfo *source_tcon,
+			const char *fromName,
+			const __u16 target_tid,
+			const char *toName, const int flags,
+			const struct nls_table *nls_codepage);
+extern int CIFSSMBNotify(const int xid, struct cifsTconInfo *tcon, 
+			const int notify_subdirs,const __u16 netfid,__u32 filter,
+			const struct nls_table *nls_codepage);
+extern int CIFSSMBQAllEAs(const int xid, struct cifsTconInfo *tcon,
+		 const unsigned char *searchName,
+		 char * EAData, size_t size,
+		 const struct nls_table *nls_codepage);
 #endif			/* _CIFSPROTO_H */

@@ -27,6 +27,8 @@
 #include <linux/security.h>
 #include <linux/mount.h>
 #include <linux/audit.h>
+#include <linux/vs_base.h>
+
 #include <asm/namei.h>
 #include <asm/uaccess.h>
 
@@ -1773,7 +1775,7 @@ slashes:
 	goto exit2;
 }
 
-int vfs_symlink(struct inode *dir, struct dentry *dentry, const char *oldname)
+int vfs_symlink(struct inode *dir, struct dentry *dentry, const char *oldname, int mode)
 {
 	int error = may_create(dir, dentry, NULL);
 
@@ -1817,7 +1819,7 @@ asmlinkage long sys_symlink(const char __user * oldname, const char __user * new
 		dentry = lookup_create(&nd, 0);
 		error = PTR_ERR(dentry);
 		if (!IS_ERR(dentry)) {
-			error = vfs_symlink(nd.dentry->d_inode, dentry, from);
+			error = vfs_symlink(nd.dentry->d_inode, dentry, from, S_IALLUGO);
 			dput(dentry);
 		}
 		up(&nd.dentry->d_inode->i_sem);

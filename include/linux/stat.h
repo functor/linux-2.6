@@ -60,9 +60,10 @@ struct kstat {
 	unsigned long	ino;
 	dev_t		dev;
 	umode_t		mode;
-	nlink_t		nlink;
+	unsigned int	nlink;
 	uid_t		uid;
 	gid_t		gid;
+	xid_t		xid;
 	dev_t		rdev;
 	loff_t		size;
 	struct timespec  atime;

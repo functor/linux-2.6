@@ -27,7 +27,7 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 	switch (cmd) {
 	case EXT3_IOC_GETFLAGS:
 		flags = ei->i_flags & EXT3_FL_USER_VISIBLE;
-		return put_user(flags, (int *) arg);
+		return put_user(flags, (int __user *) arg);
 	case EXT3_IOC_SETFLAGS: {
 		handle_t *handle = NULL;
 		int err;
@@ -41,7 +41,7 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
 			return -EACCES;
 
-		if (get_user(flags, (int *) arg))
+		if (get_user(flags, (int __user *) arg))
 			return -EFAULT;
 
 		if (!S_ISDIR(inode->i_mode))
@@ -103,7 +103,7 @@ flags_err:
 	}
 	case EXT3_IOC_GETVERSION:
 	case EXT3_IOC_GETVERSION_OLD:
-		return put_user(inode->i_generation, (int *) arg);
+		return put_user(inode->i_generation, (int __user *) arg);
 	case EXT3_IOC_SETVERSION:
 	case EXT3_IOC_SETVERSION_OLD: {
 		handle_t *handle;
@@ -115,7 +115,7 @@ flags_err:
 			return -EPERM;
 		if (IS_RDONLY(inode))
 			return -EROFS;
-		if (get_user(generation, (int *) arg))
+		if (get_user(generation, (int __user *) arg))
 			return -EFAULT;
 
 		handle = ext3_journal_start(inode, 1);

@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/security.h>
 #include <linux/ptrace.h>
+#include <linux/vs_limit.h>
 
 #include <asm/poll.h>
 #include <asm/siginfo.h>
@@ -631,15 +632,12 @@ void kill_fasync(struct fasync_struct **fp, int sig, int band)
 		read_unlock(&fasync_lock);
 	}
 }
-
 EXPORT_SYMBOL(kill_fasync);
 
 static int __init fasync_init(void)
 {
 	fasync_cache = kmem_cache_create("fasync_cache",
-		sizeof(struct fasync_struct), 0, 0, NULL, NULL);
-	if (!fasync_cache)
-		panic("cannot create fasync slab cache");
+		sizeof(struct fasync_struct), 0, SLAB_PANIC, NULL, NULL);
 	return 0;
 }
 

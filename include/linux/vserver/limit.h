@@ -15,8 +15,10 @@
 struct _vx_limit {
 	atomic_t ticks;
 
-	unsigned long rlim[NUM_RLIMITS];	/* Per context limit */
-	atomic_t res[NUM_RLIMITS];		/* Current value */
+	unsigned long rlim[NUM_RLIMITS];	/* Context limit */
+	unsigned long rmax[NUM_RLIMITS];	/* Context maximum */
+	atomic_t rcur[NUM_RLIMITS];		/* Current value */
+	atomic_t lhit[NUM_RLIMITS];		/* Limit hits */
 };
 
 static inline void vx_info_init_limit(struct _vx_limit *limit)
@@ -25,7 +27,9 @@ static inline void vx_info_init_limit(struct _vx_limit *limit)
 
 	for (lim=0; lim<NUM_RLIMITS; lim++) {
 		limit->rlim[lim] = RLIM_INFINITY;
-		atomic_set(&limit->res[lim], 0);
+		limit->rmax[lim] = 0;
+		atomic_set(&limit->rcur[lim], 0);
+		atomic_set(&limit->lhit[lim], 0);
 	}
 }
 
@@ -33,38 +37,57 @@ extern unsigned int vx_debug_limit;
 
 static inline void vx_info_exit_limit(struct _vx_limit *limit)
 {
-	int lim, value;
+	unsigned long value;
+	unsigned int lim;
 
+	if (!vx_debug_limit)
+		return;
 	for (lim=0; lim<NUM_RLIMITS; lim++) {
-		value = atomic_read(&limit->res[lim]);
-		if (value && vx_debug_limit)
-			printk("!!! limit: %p[%d] = %d on exit.\n",
+		value = atomic_read(&limit->rcur[lim]);
+		if (value)
+			printk("!!! limit: %p[%d] = %ld on exit.\n",
 				limit, lim, value);
 	}
 }
 
+static inline void vx_limit_fixup(struct _vx_limit *limit)
+{
+	unsigned long value;
+	unsigned int lim;
+	
+        for (lim=0; lim<NUM_RLIMITS; lim++) {
+                value = atomic_read(&limit->rcur[lim]);
+                if (value > limit->rmax[lim])
+			limit->rmax[lim] = value;
+		if (limit->rmax[lim] > limit->rlim[lim])
+			limit->rmax[lim] = limit->rlim[lim];
+        }
+}
+
+#define	VX_LIMIT_FMT	":\t%10d\t%10ld\t%10ld\t%6d\n"
+
+#define	VX_LIMIT_ARG(r)				\
+		,atomic_read(&limit->rcur[r])	\
+		,limit->rmax[r]			\
+		,limit->rlim[r]			\
+		,atomic_read(&limit->lhit[r])
 
 static inline int vx_info_proc_limit(struct _vx_limit *limit, char *buffer)
 {
+	vx_limit_fixup(limit);
 	return sprintf(buffer,
-		"PROC:\t%8d/%ld\n"
-		"VM:\t%8d/%ld\n"
-		"VML:\t%8d/%ld\n"		
-		"RSS:\t%8d/%ld\n"
-		"FILES:\t%8d/%ld\n"
-		"OFD:\t%8d/%ld\n"
-		,atomic_read(&limit->res[RLIMIT_NPROC])
-		,limit->rlim[RLIMIT_NPROC]
-		,atomic_read(&limit->res[RLIMIT_AS])
-		,limit->rlim[RLIMIT_AS]
-		,atomic_read(&limit->res[RLIMIT_MEMLOCK])
-		,limit->rlim[RLIMIT_MEMLOCK]
-		,atomic_read(&limit->res[RLIMIT_RSS])
-		,limit->rlim[RLIMIT_RSS]
-		,atomic_read(&limit->res[RLIMIT_NOFILE])
-		,limit->rlim[RLIMIT_NOFILE]
-		,atomic_read(&limit->res[RLIMIT_OPENFD])
-		,limit->rlim[RLIMIT_OPENFD]
+		"PROC"	VX_LIMIT_FMT
+		"VM"	VX_LIMIT_FMT
+		"VML"	VX_LIMIT_FMT
+		"RSS"	VX_LIMIT_FMT
+		"FILES"	VX_LIMIT_FMT
+		"OFD"	VX_LIMIT_FMT
+		VX_LIMIT_ARG(RLIMIT_NPROC)
+		VX_LIMIT_ARG(RLIMIT_AS)
+		VX_LIMIT_ARG(RLIMIT_MEMLOCK)
+		VX_LIMIT_ARG(RLIMIT_RSS)
+		VX_LIMIT_ARG(RLIMIT_NOFILE)
+		VX_LIMIT_ARG(RLIMIT_OPENFD)
 		);
 }
 

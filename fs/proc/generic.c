@@ -17,7 +17,7 @@
 #include <linux/smp_lock.h>
 #include <linux/init.h>
 #include <linux/idr.h>
-#include <linux/vinline.h>
+#include <linux/vs_base.h>
 #include <linux/vserver/inode.h>
 #include <asm/uaccess.h>
 #include <asm/bitops.h>

@@ -12,7 +12,8 @@
 
 #include <linux/config.h>
 #include <linux/sched.h>
-#include <linux/vinline.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
 #include <linux/vserver/context.h>
 #include <linux/vserver/sched.h>
 

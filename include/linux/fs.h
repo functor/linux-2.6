@@ -13,14 +13,12 @@
 #include <linux/types.h>
 #include <linux/kdev_t.h>
 #include <linux/ioctl.h>
-#include <linux/list.h>
 #include <linux/dcache.h>
 #include <linux/stat.h>
 #include <linux/cache.h>
-#include <linux/radix-tree.h>
+#include <linux/prio_tree.h>
 #include <linux/kobject.h>
 #include <asm/atomic.h>
-#include <linux/audit.h>
 
 struct iovec;
 struct nameidata;
@@ -219,6 +217,9 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 
 #ifdef __KERNEL__
 
+#include <linux/list.h>
+#include <linux/radix-tree.h>
+#include <linux/audit.h>
 #include <asm/semaphore.h>
 #include <asm/byteorder.h>
 
@@ -255,6 +256,7 @@ typedef void (dio_iodone_t)(struct inode *inode, loff_t offset,
 #define ATTR_ATTR_FLAG	1024
 #define ATTR_KILL_SUID	2048
 #define ATTR_KILL_SGID	4096
+#define	ATTR_XID	8192
 
 /*
  * This is the Inode Attributes structure, used for notify_change().  It
@@ -270,6 +272,7 @@ struct iattr {
 	umode_t		ia_mode;
 	uid_t		ia_uid;
 	gid_t		ia_gid;
+	xid_t		ia_xid;
 	loff_t		ia_size;
 	struct timespec	ia_atime;
 	struct timespec	ia_mtime;
@@ -338,9 +341,10 @@ struct address_space {
 	unsigned long		nrpages;	/* number of total pages */
 	pgoff_t			writeback_index;/* writeback starts here */
 	struct address_space_operations *a_ops;	/* methods */
-	struct list_head	i_mmap;		/* list of private mappings */
-	struct list_head	i_mmap_shared;	/* list of shared mappings */
-	struct semaphore	i_shared_sem;	/* protect both above lists */
+	struct prio_tree_root	i_mmap;		/* tree of private mappings */
+	unsigned int		i_mmap_writable;/* count VM_SHARED mappings */
+	struct list_head	i_mmap_nonlinear;/*list VM_NONLINEAR mappings */
+	spinlock_t		i_mmap_lock;	/* protect tree, count, list */
 	atomic_t		truncate_count;	/* Cover race condition with truncate */
 	unsigned long		flags;		/* error bits/gfp mask */
 	struct backing_dev_info *backing_dev_info; /* device readahead, etc */
@@ -365,6 +369,7 @@ struct block_device {
 	int			bd_invalidated;
 	struct gendisk *	bd_disk;
 	struct list_head	bd_list;
+	struct backing_dev_info *bd_inode_backing_dev_info;
 	/*
 	 * Private data.  You must have bd_claim'ed the block_device
 	 * to use this.  NOTE:  bd_claim allows an owner to claim
@@ -388,19 +393,19 @@ int mapping_tagged(struct address_space *mapping, int tag);
  */
 static inline int mapping_mapped(struct address_space *mapping)
 {
-	return	!list_empty(&mapping->i_mmap) ||
-		!list_empty(&mapping->i_mmap_shared);
+	return	!prio_tree_empty(&mapping->i_mmap) ||
+		!list_empty(&mapping->i_mmap_nonlinear);
 }
 
 /*
  * Might pages of this file have been modified in userspace?
- * Note that i_mmap_shared holds all the VM_SHARED vmas: do_mmap_pgoff
+ * Note that i_mmap_writable counts all VM_SHARED vmas: do_mmap_pgoff
  * marks vma as VM_SHARED if it is shared, and the file was opened for
  * writing i.e. vma may be mprotected writable even if now readonly.
  */
 static inline int mapping_writably_mapped(struct address_space *mapping)
 {
-	return	!list_empty(&mapping->i_mmap_shared);
+	return mapping->i_mmap_writable != 0;
 }
 
 /*
@@ -539,8 +544,8 @@ struct fown_struct {
 	rwlock_t lock;          /* protects pid, uid, euid fields */
 	int pid;		/* pid or -pgrp where SIGIO should be sent */
 	uid_t uid, euid;	/* uid/euid of process setting the owner */
-	int signum;		/* posix.1b rt signal to be delivered on IO */
 	void *security;
+	int signum;		/* posix.1b rt signal to be delivered on IO */
 };
 
 /*
@@ -568,10 +573,10 @@ struct file {
 	atomic_t		f_count;
 	unsigned int 		f_flags;
 	mode_t			f_mode;
+	int			f_error;
 	loff_t			f_pos;
 	struct fown_struct	f_owner;
 	unsigned int		f_uid, f_gid;
-	int			f_error;
 	struct file_ra_state	f_ra;
 
 	unsigned long		f_version;
@@ -606,7 +611,7 @@ extern void close_private_file(struct file *file);
 #if BITS_PER_LONG==32
 #define MAX_LFS_FILESIZE	(((u64)PAGE_CACHE_SIZE << (BITS_PER_LONG-1))-1) 
 #elif BITS_PER_LONG==64
-#define MAX_LFS_FILESIZE 	0x7fffffffffffffff
+#define MAX_LFS_FILESIZE 	0x7fffffffffffffffUL
 #endif
 
 #define FL_POSIX	1
@@ -805,7 +810,7 @@ static inline void unlock_super(struct super_block * sb)
 extern int vfs_create(struct inode *, struct dentry *, int, struct nameidata *);
 extern int vfs_mkdir(struct inode *, struct dentry *, int);
 extern int vfs_mknod(struct inode *, struct dentry *, int, dev_t);
-extern int vfs_symlink(struct inode *, struct dentry *, const char *);
+extern int vfs_symlink(struct inode *, struct dentry *, const char *, int);
 extern int vfs_link(struct dentry *, struct inode *, struct dentry *);
 extern int vfs_rmdir(struct inode *, struct dentry *);
 extern int vfs_unlink(struct inode *, struct dentry *);
@@ -1124,6 +1129,7 @@ struct super_block *sget(struct file_system_type *type,
 			void *data);
 struct super_block *get_sb_pseudo(struct file_system_type *, char *,
 			struct super_operations *ops, unsigned long);
+int __put_super(struct super_block *sb);
 void unnamed_dev_init(void);
 
 /* Alas, no aliases. Too much hassle with bringing module.h everywhere */
@@ -1135,6 +1141,7 @@ void unnamed_dev_init(void);
 extern int register_filesystem(struct file_system_type *);
 extern int unregister_filesystem(struct file_system_type *);
 extern struct vfsmount *kern_mount(struct file_system_type *);
+extern int may_umount_tree(struct vfsmount *);
 extern int may_umount(struct vfsmount *);
 extern long do_mount(char *, char *, char *, unsigned long, void *);
 
@@ -1239,7 +1246,6 @@ extern int blkdev_get(struct block_device *, mode_t, unsigned);
 extern int blkdev_put(struct block_device *);
 extern int bd_claim(struct block_device *, void *);
 extern void bd_release(struct block_device *);
-extern void blk_run_queues(void);
 
 /* fs/char_dev.c */
 extern int alloc_chrdev_region(dev_t *, unsigned, unsigned, char *);

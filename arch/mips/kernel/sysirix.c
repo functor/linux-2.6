@@ -30,6 +30,7 @@
 #include <linux/socket.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/ptrace.h>
 #include <asm/page.h>
@@ -235,7 +236,7 @@ asmlinkage int irix_prctl(struct pt_regs *regs)
 #undef DEBUG_PROCGRPS
 
 extern unsigned long irix_mapelf(int fd, struct elf_phdr *user_phdrp, int cnt);
-extern int getrusage(struct task_struct *p, int who, struct rusage *ru);
+extern int getrusage(struct task_struct *p, int who, struct rusage __user *ru);
 extern char *prom_getenv(char *name);
 extern long prom_setenv(char *name, char *value);
 

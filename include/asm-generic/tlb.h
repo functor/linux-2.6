@@ -15,7 +15,7 @@
 
 #include <linux/config.h>
 #include <linux/swap.h>
-#include <linux/vinline.h>
+#include <linux/vs_memory.h>
 #include <asm/tlbflush.h>
 
 /*

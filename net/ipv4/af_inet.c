@@ -159,8 +159,11 @@ void inet_sock_destruct(struct sock *sk)
 	if (inet->opt)
 		kfree(inet->opt);
 	
-	BUG_ON(sk->sk_nx_info);
-	BUG_ON(sk->sk_vx_info);
+	clr_vx_info(&sk->sk_vx_info);
+	sk->sk_xid = -1;
+	clr_nx_info(&sk->sk_nx_info);
+	sk->sk_nid = -1;
+
 	dst_release(sk->sk_dst_cache);
 #ifdef INET_REFCNT_DEBUG
 	atomic_dec(&inet_sock_nr);
@@ -219,7 +222,7 @@ void inet_sock_release(struct sock *sk)
  *	Set socket options on an inet socket.
  */
 int inet_setsockopt(struct socket *sock, int level, int optname,
-		    char *optval, int optlen)
+		    char __user *optval, int optlen)
 {
 	struct sock *sk = sock->sk;
 
@@ -235,7 +238,7 @@ int inet_setsockopt(struct socket *sock, int level, int optname,
  */
 
 int inet_getsockopt(struct socket *sock, int level, int optname,
-		    char *optval, int *optlen)
+		    char __user *optval, int __user *optlen)
 {
 	struct sock *sk = sock->sk;
 
@@ -364,8 +367,11 @@ static int inet_create(struct socket *sock, int protocol)
 	if (!answer)
 		goto out_sk_free;
 	err = -EPERM;
+	if ((protocol == IPPROTO_ICMP) && vx_ccaps(VXC_RAW_ICMP))
+		goto override;
 	if (answer->capability > 0 && !capable(answer->capability))
 		goto out_sk_free;
+override:
 	err = -EPROTONOSUPPORT;
 	if (!protocol)
 		goto out_sk_free;
@@ -429,13 +435,8 @@ static int inet_create(struct socket *sock, int protocol)
 
 	if (sk->sk_prot->init) {
 		err = sk->sk_prot->init(sk);
-		if (err) {
-/*			sk->sk_vx_info = NULL;
-			put_vx_info(current->vx_info);
-			sk->sk_nx_info = NULL;
-			put_nx_info(current->nx_info);
-*/			inet_sock_release(sk);
-		}
+		if (err)
+			inet_sock_release(sk);
 	}
 out:
 	return err;
@@ -474,7 +475,9 @@ int inet_release(struct socket *sock)
 			timeout = sk->sk_lingertime;
 		sock->sk = NULL;
 		clr_vx_info(&sk->sk_vx_info);
+	sk->sk_xid = -1;
 		clr_nx_info(&sk->sk_nx_info);
+	sk->sk_nid = -1;
 		sk->sk_prot->close(sk, timeout);
 	}
 	return 0;
@@ -892,7 +895,7 @@ int inet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 		case SIOCGSTAMP:
-			err = sock_get_timestamp(sk, (struct timeval *)arg);
+			err = sock_get_timestamp(sk, (struct timeval __user *)arg);
 			break;
 		case SIOCADDRT:
 		case SIOCDELRT:
@@ -902,7 +905,7 @@ int inet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		case SIOCDARP:
 		case SIOCGARP:
 		case SIOCSARP:
-			err = arp_ioctl(cmd, (void *)arg);
+			err = arp_ioctl(cmd, (void __user *)arg);
 			break;
 		case SIOCGIFADDR:
 		case SIOCSIFADDR:
@@ -915,13 +918,13 @@ int inet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		case SIOCSIFPFLAGS:
 		case SIOCGIFPFLAGS:
 		case SIOCSIFFLAGS:
-			err = devinet_ioctl(cmd, (void *)arg);
+			err = devinet_ioctl(cmd, (void __user *)arg);
 			break;
 		default:
 			if (!sk->sk_prot->ioctl ||
 			    (err = sk->sk_prot->ioctl(sk, cmd, arg)) ==
 			    					-ENOIOCTLCMD)
-				err = dev_ioctl(cmd, (void *)arg);
+				err = dev_ioctl(cmd, (void __user *)arg);
 			break;
 	}
 	return err;
@@ -1027,7 +1030,7 @@ void inet_register_protosw(struct inet_protosw *p)
 
 	spin_lock_bh(&inetsw_lock);
 
-	if (p->type > SOCK_MAX)
+	if (p->type >= SOCK_MAX)
 		goto out_illegal;
 
 	/* If we are trying to override a permanent protocol, bail. */
@@ -1115,8 +1118,8 @@ static int __init init_ipv4_mibs(void)
 {
 	net_statistics[0] = alloc_percpu(struct linux_mib);
 	net_statistics[1] = alloc_percpu(struct linux_mib);
-	ip_statistics[0] = alloc_percpu(struct ip_mib);
-	ip_statistics[1] = alloc_percpu(struct ip_mib);
+	ip_statistics[0] = alloc_percpu(struct ipstats_mib);
+	ip_statistics[1] = alloc_percpu(struct ipstats_mib);
 	icmp_statistics[0] = alloc_percpu(struct icmp_mib);
 	icmp_statistics[1] = alloc_percpu(struct icmp_mib);
 	tcp_statistics[0] = alloc_percpu(struct tcp_mib);

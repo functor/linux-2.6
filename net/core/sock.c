@@ -121,6 +121,7 @@
 #include <linux/ipsec.h>
 
 #include <linux/filter.h>
+#include <linux/vs_socket.h>
 
 #ifdef CONFIG_INET
 #include <net/tcp.h>
@@ -658,8 +659,6 @@ void sk_free(struct sock *sk)
 	security_sk_free(sk);
 	BUG_ON(sk->sk_vx_info);
 	BUG_ON(sk->sk_nx_info);
-/*	clr_vx_info(&sk->sk_vx_info);
-	clr_nx_info(&sk->sk_nx_info);	*/
 	kmem_cache_free(sk->sk_slab, sk);
 	module_put(owner);
 }
@@ -926,6 +925,31 @@ void __release_sock(struct sock *sk)
 	} while((skb = sk->sk_backlog.head) != NULL);
 }
 
+/**
+ * sk_wait_data - wait for data to arrive at sk_receive_queue
+ * sk - sock to wait on
+ * timeo - for how long
+ *
+ * Now socket state including sk->sk_err is changed only under lock,
+ * hence we may omit checks after joining wait queue.
+ * We check receive queue before schedule() only as optimization;
+ * it is very likely that release_sock() added new data.
+ */
+int sk_wait_data(struct sock *sk, long *timeo)
+{
+	int rc;
+	DEFINE_WAIT(wait);
+
+	prepare_to_wait(sk->sk_sleep, &wait, TASK_INTERRUPTIBLE);
+	set_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);
+	rc = sk_wait_event(sk, timeo, !skb_queue_empty(&sk->sk_receive_queue));
+	clear_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);
+	finish_wait(sk->sk_sleep, &wait);
+	return rc;
+}
+
+EXPORT_SYMBOL(sk_wait_data);
+
 /*
  * Set of default routines for initialising struct proto_ops when
  * the protocol does not support a particular function. In certain
@@ -1108,6 +1132,23 @@ void sk_send_sigurg(struct sock *sk)
 			sk_wake_async(sk, 3, POLL_PRI);
 }
 
+void sk_reset_timer(struct sock *sk, struct timer_list* timer,
+		    unsigned long expires)
+{
+	if (!mod_timer(timer, expires))
+		sock_hold(sk);
+}
+
+EXPORT_SYMBOL(sk_reset_timer);
+
+void sk_stop_timer(struct sock *sk, struct timer_list* timer)
+{
+	if (timer_pending(timer) && del_timer(timer))
+		__sock_put(sk);
+}
+
+EXPORT_SYMBOL(sk_stop_timer);
+
 void sock_init_data(struct socket *sock, struct sock *sk)
 {
 	skb_queue_head_init(&sk->sk_receive_queue);
@@ -1186,7 +1227,7 @@ EXPORT_SYMBOL(release_sock);
 /* When > 0 there are consumers of rx skb time stamps */
 atomic_t netstamp_needed = ATOMIC_INIT(0); 
 
-int sock_get_timestamp(struct sock *sk, struct timeval *userstamp)
+int sock_get_timestamp(struct sock *sk, struct timeval __user *userstamp)
 { 
 	if (!sock_flag(sk, SOCK_TIMESTAMP))
 		sock_enable_timestamp(sk);

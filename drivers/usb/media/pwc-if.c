@@ -129,7 +129,6 @@ static struct {
 
 static int pwc_video_open(struct inode *inode, struct file *file);
 static int pwc_video_close(struct inode *inode, struct file *file);
-static int pwc_video_release(struct video_device *);			  
 static ssize_t pwc_video_read(struct file *file, char *buf,
 			  size_t count, loff_t *ppos);
 static unsigned int pwc_video_poll(struct file *file, poll_table *wait);
@@ -789,7 +788,8 @@ static int pwc_isoc_init(struct pwc_device *pdev)
 	struct urb *urb;
 	int i, j, ret;
 
-	struct usb_host_interface *idesc;
+	struct usb_interface *intf;
+	struct usb_host_interface *idesc = NULL;
 
 	if (pdev == NULL)
 		return -EFAULT;
@@ -801,7 +801,9 @@ static int pwc_isoc_init(struct pwc_device *pdev)
 	/* Get the current alternate interface, adjust packet size */
 	if (!udev->actconfig)
 		return -EFAULT;
-	idesc = &udev->actconfig->interface[0]->altsetting[pdev->valternate];
+	intf = usb_ifnum_to_if(udev, 0);
+	if (intf)
+		idesc = usb_altnum_to_altsetting(intf, pdev->valternate);
 	if (!idesc)
 		return -EFAULT;
 
@@ -1117,12 +1119,6 @@ static int pwc_video_close(struct inode *inode, struct file *file)
 	Trace(TRACE_OPEN, "<< video_close()\n");
 	return 0;
 }
-
-static int pwc_video_release(struct video_device *vfd)
-{
-	Trace(TRACE_OPEN, "pwc_video_release() called. Now what?\n");
-}
-		
 
 /*
  *	FIXME: what about two parallel reads ????
@@ -1852,7 +1848,7 @@ static int usb_pwc_probe(struct usb_interface *intf, const struct usb_device_id 
 		}
 	}
 
-	pdev->vdev.release = pwc_video_release;
+	pdev->vdev.release = video_device_release;
 	i = video_register_device(&pdev->vdev, VFL_TYPE_GRABBER, video_nr);
 	if (i < 0) {
 		Err("Failed to register as video device (%d).\n", i);

@@ -587,6 +587,7 @@ out:
 	if (err == -EAGAIN)
 		goto changed;
 
+	goal = 0;
 	if (ext2_find_goal(inode, iblock, chain, partial, &goal) < 0)
 		goto changed;
 
@@ -1313,7 +1314,8 @@ int ext2_setattr(struct dentry *dentry, struct iattr *iattr)
 	if (error)
 		return error;
 	if ((iattr->ia_valid & ATTR_UID && iattr->ia_uid != inode->i_uid) ||
-	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid)) {
+	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid) ||
+	    (iattr->ia_valid & ATTR_XID && iattr->ia_xid != inode->i_xid)) {
 		error = DQUOT_TRANSFER(inode, iattr) ? -EDQUOT : 0;
 		if (error)
 			return error;

@@ -208,8 +208,6 @@ void ext3_delete_inode (struct inode * inode)
 		 * need to make sure that the in-core orphan linked list
 		 * is properly cleaned up. */
 		ext3_orphan_del(NULL, inode);
-
-		ext3_std_error(inode->i_sb, PTR_ERR(handle));
 		goto no_delete;
 	}
 
@@ -814,6 +812,7 @@ out:
 	if (err == -EAGAIN)
 		goto changed;
 
+	goal = 0;
 	down(&ei->truncate_sem);
 	if (ext3_find_goal(inode, iblock, chain, partial, &goal) < 0) {
 		up(&ei->truncate_sem);
@@ -1084,15 +1083,28 @@ static int ext3_prepare_write(struct file *file, struct page *page,
 	struct inode *inode = page->mapping->host;
 	int ret, needed_blocks = ext3_writepage_trans_blocks(inode);
 	handle_t *handle;
+	int tried_commit = 0;
 
+retry:
 	handle = ext3_journal_start(inode, needed_blocks);
 	if (IS_ERR(handle)) {
 		ret = PTR_ERR(handle);
 		goto out;
 	}
 	ret = block_prepare_write(page, from, to, ext3_get_block);
-	if (ret != 0)
-		goto prepare_write_failed;
+	if (ret) {
+		if (ret != -ENOSPC || tried_commit)
+			goto prepare_write_failed;
+		/*
+		 * It could be that there _is_ free space, but it's all tied up
+		 * in uncommitted bitmaps.  So force a commit here, which makes
+		 * those blocks allocatable and try again.
+		 */
+		tried_commit = 1;
+		handle->h_sync = 1;
+		ext3_journal_stop(handle);
+		goto retry;
+	}
 
 	if (ext3_should_journal_data(inode)) {
 		ret = walk_page_buffers(handle, page_buffers(page),
@@ -2831,7 +2843,8 @@ int ext3_setattr(struct dentry *dentry, struct iattr *attr)
 		return error;
 
 	if ((ia_valid & ATTR_UID && attr->ia_uid != inode->i_uid) ||
-		(ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid)) {
+		(ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid) ||
+		(ia_valid & ATTR_XID && attr->ia_xid != inode->i_xid)) {
 		handle_t *handle;
 
 		/* (user+group)*(old+new) structure, inode write (sb,
@@ -2852,6 +2865,8 @@ int ext3_setattr(struct dentry *dentry, struct iattr *attr)
 			inode->i_uid = attr->ia_uid;
 		if (attr->ia_valid & ATTR_GID)
 			inode->i_gid = attr->ia_gid;
+		if (attr->ia_valid & ATTR_XID)
+			inode->i_xid = attr->ia_xid;
 		error = ext3_mark_inode_dirty(handle, inode);
 		ext3_journal_stop(handle);
 	}

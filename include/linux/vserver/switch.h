@@ -12,7 +12,7 @@
 
 /*
 
-  Syscall Matrix V2.6
+  Syscall Matrix V2.7
 
          |VERSION|CREATE |MODIFY |MIGRATE|CONTROL|EXPERIM| |SPECIAL|SPECIAL|
          |STATS  |DESTROY|ALTER  |CHANGE |LIMIT  |TEST   | |       |       |
@@ -30,7 +30,7 @@
   NETWORK|       |VNET   |NETALT |NETMIG |NETCTL |       | |SERIAL |       |
          |     24|     25|     26|     27|     28|     29| |     30|     31|
   -------+-------+-------+-------+-------+-------+-------+ +-------+-------+
-  DISK   |       |       |       |       |       |       | |INODE  |       |
+  DISK   |       |       |       |       |DLIMIT |       | |INODE  |       |
   VFS    |     32|     33|     34|     35|     36|     37| |     38|     39|
   -------+-------+-------+-------+-------+-------+-------+ +-------+-------+
   OTHER  |       |       |       |       |       |       | |VINFO  |       |
@@ -62,6 +62,7 @@
 #define VC_CAT_NETMIG		27
 #define VC_CAT_NETCTRL		28
 
+#define VC_CAT_DLIMIT		36
 #define VC_CAT_INODE		38
 
 #define VC_CAT_VINFO		46

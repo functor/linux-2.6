@@ -19,6 +19,9 @@
 #include <linux/errno.h>
 #include <linux/proc_fs.h>
 #include <linux/vserver.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>

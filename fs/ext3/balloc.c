@@ -19,6 +19,7 @@
 #include <linux/ext3_jbd.h>
 #include <linux/quotaops.h>
 #include <linux/buffer_head.h>
+#include <linux/vs_dlimit.h>
 
 /*
  * balloc.c contains the blocks allocation and deallocation routines
@@ -275,8 +276,10 @@ do_more:
 error_return:
 	brelse(bitmap_bh);
 	ext3_std_error(sb, err);
-	if (dquot_freed_blocks)
+	if (dquot_freed_blocks) {
+		DLIMIT_FREE_BLOCK(sb, inode->i_xid, dquot_freed_blocks);
 		DQUOT_FREE_BLOCK(inode, dquot_freed_blocks);
+	}
 	return;
 }
 
@@ -507,6 +510,8 @@ ext3_new_block(handle_t *handle, struct inode *inode, unsigned long goal,
 		*errp = -EDQUOT;
 		return 0;
 	}
+	if (DLIMIT_ALLOC_BLOCK(sb, inode->i_xid, 1))
+		goto out_dlimit;
 
 	sbi = EXT3_SB(sb);
 	es = EXT3_SB(sb)->s_es;
@@ -514,6 +519,9 @@ ext3_new_block(handle_t *handle, struct inode *inode, unsigned long goal,
 
 	free_blocks = percpu_counter_read_positive(&sbi->s_freeblocks_counter);
 	root_blocks = le32_to_cpu(es->s_r_blocks_count);
+
+	DLIMIT_ADJUST_BLOCK(sb, vx_current_xid(), &free_blocks, &root_blocks);
+
 	if (free_blocks < root_blocks + 1 && !capable(CAP_SYS_RESOURCE) &&
 		sbi->s_resuid != current->fsuid &&
 		(sbi->s_resgid == 0 || !in_group_p (sbi->s_resgid))) {
@@ -671,6 +679,8 @@ allocated:
 io_error:
 	*errp = -EIO;
 out:
+	DLIMIT_FREE_BLOCK(sb, inode->i_xid, 1);
+out_dlimit:
 	if (fatal) {
 		*errp = fatal;
 		ext3_std_error(sb, fatal);
@@ -678,8 +688,10 @@ out:
 	/*
 	 * Undo the block allocation
 	 */
-	if (!performed_allocation)
+	if (!performed_allocation) {
+		DLIMIT_FREE_BLOCK(sb, inode->i_xid, 1);
 		DQUOT_FREE_BLOCK(inode, 1);
+	}
 	brelse(bitmap_bh);
 	return 0;
 }

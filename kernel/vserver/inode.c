@@ -10,7 +10,8 @@
  */
 
 #include <linux/config.h>
-#include <linux/vinline.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/namei.h>

@@ -27,11 +27,13 @@
 enum {
         CTL_DEBUG_SWITCH = 1,
         CTL_DEBUG_LIMIT,
+        CTL_DEBUG_DLIMIT,
 };
 
 
 unsigned int vx_debug_switch = 0;
 unsigned int vx_debug_limit = 0;
+unsigned int vx_debug_dlimit = 0;
 
 
 static struct ctl_table_header *vserver_table_header;
@@ -131,6 +133,14 @@ static ctl_table debug_table[] = {
                 .ctl_name       = CTL_DEBUG_LIMIT,
                 .procname       = "debug_limit",
                 .data           = &vx_debug_limit,
+                .maxlen         = sizeof(int),
+                .mode           = 0644,
+                .proc_handler   = &proc_dodebug
+        },
+        {
+                .ctl_name       = CTL_DEBUG_DLIMIT,
+                .procname       = "debug_dlimit",
+                .data           = &vx_debug_dlimit,
                 .maxlen         = sizeof(int),
                 .mode           = 0644,
                 .proc_handler   = &proc_dodebug

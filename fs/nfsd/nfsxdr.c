@@ -15,6 +15,7 @@
 #include <linux/nfsd/nfsd.h>
 #include <linux/nfsd/xdr.h>
 #include <linux/mm.h>
+#include <linux/vserver/xid.h>
 
 #define NFSDDBG_FACILITY		NFSDDBG_XDR
 
@@ -160,8 +161,10 @@ encode_fattr(struct svc_rqst *rqstp, u32 *p, struct svc_fh *fhp)
 	*p++ = htonl(nfs_ftypes[type >> 12]);
 	*p++ = htonl((u32) stat.mode);
 	*p++ = htonl((u32) stat.nlink);
-	*p++ = htonl((u32) nfsd_ruid(rqstp, stat.uid));
-	*p++ = htonl((u32) nfsd_rgid(rqstp, stat.gid));
+	*p++ = htonl((u32) nfsd_ruid(rqstp,
+		XIDINO_UID(stat.uid, stat.xid)));
+	*p++ = htonl((u32) nfsd_rgid(rqstp,
+		XIDINO_GID(stat.gid, stat.xid)));
 
 	if (S_ISLNK(type) && stat.size > NFS_MAXPATHLEN) {
 		*p++ = htonl(NFS_MAXPATHLEN);

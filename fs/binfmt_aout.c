@@ -24,6 +24,7 @@
 #include <linux/binfmts.h>
 #include <linux/personality.h>
 #include <linux/init.h>
+#include <linux/vs_memory.h>
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
@@ -522,6 +523,6 @@ static void __exit exit_aout_binfmt(void)
 	unregister_binfmt(&aout_format);
 }
 
-module_init(init_aout_binfmt);
+core_initcall(init_aout_binfmt);
 module_exit(exit_aout_binfmt);
 MODULE_LICENSE("GPL");

@@ -1015,7 +1015,7 @@ static int nfs_create(struct inode *dir, struct dentry *dentry, int mode,
 	int error;
 	int open_flags = 0;
 
-	dfprintk(VFS, "NFS: create(%s/%ld, %s\n", dir->i_sb->s_id, 
+	dfprintk(VFS, "NFS: create(%s/%ld, %s)\n", dir->i_sb->s_id,
 		dir->i_ino, dentry->d_name.name);
 
 	attr.ia_mode = mode;
@@ -1032,9 +1032,12 @@ static int nfs_create(struct inode *dir, struct dentry *dentry, int mode,
 	 */
 	lock_kernel();
 	nfs_begin_data_update(dir);
+	dfprintk(VFS, "NFS: attr %d.%d #%d\n", attr.ia_uid, attr.ia_gid, attr.ia_xid);
 	inode = NFS_PROTO(dir)->create(dir, &dentry->d_name, &attr, open_flags);
 	nfs_end_data_update(dir);
 	if (!IS_ERR(inode)) {
+		dfprintk(VFS, "NFS: inode=%p %d.%d #%d\n", inode,
+			inode->i_uid, inode->i_gid, inode->i_xid);
 		d_instantiate(dentry, inode);
 		nfs_renew_times(dentry);
 		nfs_set_verifier(dentry, nfs_save_change_attribute(dir));

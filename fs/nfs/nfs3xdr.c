@@ -21,6 +21,7 @@
 #include <linux/nfs.h>
 #include <linux/nfs3.h>
 #include <linux/nfs_fs.h>
+#include <linux/vserver/xid.h>
 
 #define NFSDBG_FACILITY		NFSDBG_XDR
 
@@ -185,15 +186,15 @@ xdr_encode_sattr(u32 *p, struct iattr *attr)
 	} else {
 		*p++ = xdr_zero;
 	}
-	if (attr->ia_valid & ATTR_UID) {
+	if (attr->ia_valid & ATTR_UID || attr->ia_valid & ATTR_XID) {
 		*p++ = xdr_one;
-		*p++ = htonl(attr->ia_uid);
+		*p++ = htonl(XIDINO_UID(attr->ia_uid, attr->ia_xid));
 	} else {
 		*p++ = xdr_zero;
 	}
-	if (attr->ia_valid & ATTR_GID) {
+	if (attr->ia_valid & ATTR_GID || attr->ia_valid & ATTR_XID) {
 		*p++ = xdr_one;
-		*p++ = htonl(attr->ia_gid);
+		*p++ = htonl(XIDINO_GID(attr->ia_gid, attr->ia_xid));
 	} else {
 		*p++ = xdr_zero;
 	}
@@ -702,8 +703,8 @@ static int
 nfs3_xdr_readlinkargs(struct rpc_rqst *req, u32 *p, struct nfs3_readlinkargs *args)
 {
 	struct rpc_auth *auth = req->rq_task->tk_auth;
+	unsigned int count = args->count - 5;
 	unsigned int replen;
-	u32 count = args->count - 4;
 
 	p = xdr_encode_fhandle(p, args->fh);
 	req->rq_slen = xdr_adjust_iovec(req->rq_svec, p);
@@ -742,12 +743,15 @@ nfs3_xdr_readlinkres(struct rpc_rqst *req, u32 *p, struct nfs_fattr *fattr)
 	strlen = (u32*)kmap_atomic(rcvbuf->pages[0], KM_USER0);
 	/* Convert length of symlink */
 	len = ntohl(*strlen);
-	if (len > rcvbuf->page_len)
-		len = rcvbuf->page_len;
+	if (len > rcvbuf->page_len) {
+		dprintk(KERN_WARNING "nfs: server returned giant symlink!\n");
+		kunmap_atomic(strlen, KM_USER0);
+		return -ENAMETOOLONG;
+	}
 	*strlen = len;
 	/* NULL terminate the string we got */
 	string = (char *)(strlen + 1);
-	string[len] = 0;
+	string[len] = '\0';
 	kunmap_atomic(strlen, KM_USER0);
 	return 0;
 }

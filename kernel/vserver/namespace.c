@@ -13,7 +13,8 @@
 #include <linux/config.h>
 #include <linux/utsname.h>
 #include <linux/vserver/namespace.h>
-#include <linux/vinline.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
 #include <linux/namespace.h>
 #include <linux/dcache.h>
 

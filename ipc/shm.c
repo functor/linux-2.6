@@ -26,6 +26,8 @@
 #include <linux/proc_fs.h>
 #include <linux/shmem_fs.h>
 #include <linux/security.h>
+#include <linux/vs_base.h>
+
 #include <asm/uaccess.h>
 
 #include "util.h"
@@ -163,6 +165,10 @@ static struct vm_operations_struct shm_vm_ops = {
 	.open	= shm_open,	/* callback for a new vm-area open */
 	.close	= shm_close,	/* callback for when the vm-area is released */
 	.nopage	= shmem_nopage,
+#ifdef CONFIG_NUMA
+	.set_policy = shmem_set_policy,
+	.get_policy = shmem_get_policy,
+#endif
 };
 
 static int newseg (key_t key, int shmflg, size_t size)

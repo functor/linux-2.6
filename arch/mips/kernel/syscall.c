@@ -24,6 +24,7 @@
 #include <linux/sem.h>
 #include <linux/msg.h>
 #include <linux/shm.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/branch.h>
 #include <asm/cachectl.h>

@@ -11,12 +11,14 @@
  */
 
 #include <linux/config.h>
-#include <linux/vserver/legacy.h>
-#include <linux/vserver/context.h>
-#include <linux/vserver/namespace.h>
-#include <linux/vserver.h>
 #include <linux/sched.h>
 #include <linux/namespace.h>
+#include <linux/vserver/legacy.h>
+#include <linux/vserver/namespace.h>
+#include <linux/vserver.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>

@@ -56,7 +56,7 @@
 #include <asm/dma.h>
 
 #include "scsi.h"
-#include <scsi/scsi_host.h>
+#include "hosts.h"
 #include "qlogicfas408.h"
 
 /*----------------------------------------------------------------*/

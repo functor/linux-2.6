@@ -18,9 +18,10 @@
 
 #include <linux/config.h>
 #include <linux/slab.h>
-#include <linux/vserver/context.h>
+#include <linux/vserver.h>
 #include <linux/vserver/legacy.h>
-#include <linux/vinline.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
 #include <linux/kernel_stat.h>
 #include <linux/namespace.h>
 #include <linux/rcupdate.h>
@@ -147,7 +148,7 @@ static inline struct vx_info *__lookup_vx_info(xid_t xid)
 	struct hlist_head *head = &vx_info_hash[__hashval(xid)];
 	struct hlist_node *pos;
 
-	hlist_for_each(pos, head) {
+	hlist_for_each_rcu(pos, head) {
 		struct vx_info *vxi =
 			hlist_entry(pos, struct vx_info, vx_hlist);
 
@@ -243,6 +244,8 @@ void rcu_free_vx_info(void *obj)
 {
 	struct vx_info *vxi = obj;
 	int usecnt, refcnt;
+
+	BUG_ON(!vxi);
 
 	usecnt = atomic_read(&vxi->vx_usecnt);
 	BUG_ON(usecnt < 0);
@@ -440,15 +443,22 @@ int vx_migrate_task(struct task_struct *p, struct vx_info *vxi)
 		vxi->vx_id, atomic_read(&vxi->vx_usecnt));
 
 	if (!(ret = vx_migrate_user(p, vxi))) {
+		int openfd, nofiles;
+
 		task_lock(p);
+		openfd = vx_openfd_task(p);
+		nofiles = vx_nofiles_task(p);
+
 		if (old_vxi) {
 			atomic_dec(&old_vxi->cacct.nr_threads);
-			atomic_dec(&old_vxi->limit.res[RLIMIT_NPROC]);
+			atomic_dec(&old_vxi->limit.rcur[RLIMIT_NPROC]);
+			atomic_sub(nofiles, &vxi->limit.rcur[RLIMIT_NOFILE]);
+			atomic_sub(openfd, &vxi->limit.rcur[RLIMIT_OPENFD]);
 		}		
 		atomic_inc(&vxi->cacct.nr_threads);
-		atomic_inc(&vxi->limit.res[RLIMIT_NPROC]);
-		atomic_add(vx_nofiles_task(p), &vxi->limit.res[RLIMIT_NOFILE]);
-		atomic_add(vx_openfd_task(p), &vxi->limit.res[RLIMIT_OPENFD]);
+		atomic_inc(&vxi->limit.rcur[RLIMIT_NPROC]);
+		atomic_add(nofiles, &vxi->limit.rcur[RLIMIT_NOFILE]);
+		atomic_add(openfd, &vxi->limit.rcur[RLIMIT_OPENFD]);
 		/* should be handled in set_vx_info !! */
 		if (old_vxi)
 			clr_vx_info(&p->vx_info);
@@ -457,7 +467,8 @@ int vx_migrate_task(struct task_struct *p, struct vx_info *vxi)
 		vx_mask_bcaps(p);
 		task_unlock(p);
 
-		put_vx_info(old_vxi);
+		/* obsoleted by clr/set */
+		// put_vx_info(old_vxi);
 	}
 out:
 	put_vx_info(old_vxi);
@@ -685,4 +696,5 @@ int vc_set_ccaps(uint32_t id, void __user *data)
 
 EXPORT_SYMBOL_GPL(rcu_free_vx_info);
 EXPORT_SYMBOL_GPL(vx_info_hash_lock);
+EXPORT_SYMBOL_GPL(unhash_vx_info);
 

@@ -103,6 +103,8 @@ int inode_setattr(struct inode * inode, struct iattr * attr)
 		inode->i_uid = attr->ia_uid;
 	if (ia_valid & ATTR_GID)
 		inode->i_gid = attr->ia_gid;
+	if (ia_valid & ATTR_XID)
+		inode->i_xid = attr->ia_xid;
 	if (ia_valid & ATTR_ATIME)
 		inode->i_atime = attr->ia_atime;
 	if (ia_valid & ATTR_MTIME)
@@ -132,6 +134,8 @@ int setattr_mask(unsigned int ia_valid)
 	if (ia_valid & ATTR_UID)
 		dn_mask |= DN_ATTRIB;
 	if (ia_valid & ATTR_GID)
+		dn_mask |= DN_ATTRIB;
+	if (ia_valid & ATTR_XID)
 		dn_mask |= DN_ATTRIB;
 	if (ia_valid & ATTR_SIZE)
 		dn_mask |= DN_MODIFY;
@@ -196,7 +200,8 @@ int notify_change(struct dentry * dentry, struct iattr * attr)
 			error = security_inode_setattr(dentry, attr);
 		if (!error) {
 			if ((ia_valid & ATTR_UID && attr->ia_uid != inode->i_uid) ||
-			    (ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid))
+			    (ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid) ||
+			    (ia_valid & ATTR_XID && attr->ia_xid != inode->i_xid))
 				error = DQUOT_TRANSFER(inode, attr) ? -EDQUOT : 0;
 			if (!error)
 				error = inode_setattr(inode, attr);

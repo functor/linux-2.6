@@ -31,10 +31,12 @@
 #include <linux/time.h>
 #include <linux/jiffies.h>
 #include <linux/cpu.h>
+#include <linux/vs_base.h>
+#include <linux/vs_cvirt.h>
 #include <linux/vserver/sched.h>
-#include <linux/vserver/cvirt.h>
 
 #include <asm/uaccess.h>
+#include <asm/unistd.h>
 #include <asm/div64.h>
 #include <asm/timex.h>
 
@@ -319,10 +321,16 @@ EXPORT_SYMBOL(del_timer);
  *
  * Synchronization rules: callers must prevent restarting of the timer,
  * otherwise this function is meaningless. It must not be called from
- * interrupt contexts. Upon exit the timer is not queued and the handler
- * is not running on any CPU.
+ * interrupt contexts. The caller must not hold locks which would prevent
+ * completion of the timer's handler.  Upon exit the timer is not queued and
+ * the handler is not running on any CPU.
  *
  * The function returns whether it has deactivated a pending timer or not.
+ *
+ * del_timer_sync() is slow and complicated because it copes with timer
+ * handlers which re-arm the timer (periodic timers).  If the timer handler
+ * is known to not do this (a single shot timer) then use
+ * del_singleshot_timer_sync() instead.
  */
 int del_timer_sync(struct timer_list *timer)
 {
@@ -334,7 +342,7 @@ int del_timer_sync(struct timer_list *timer)
 del_again:
 	ret += del_timer(timer);
 
-	for_each_cpu(i) {
+	for_each_online_cpu(i) {
 		base = &per_cpu(tvec_bases, i);
 		if (base->running_timer == timer) {
 			while (base->running_timer == timer) {
@@ -350,8 +358,36 @@ del_again:
 
 	return ret;
 }
-
 EXPORT_SYMBOL(del_timer_sync);
+
+/***
+ * del_singleshot_timer_sync - deactivate a non-recursive timer
+ * @timer: the timer to be deactivated
+ *
+ * This function is an optimization of del_timer_sync for the case where the
+ * caller can guarantee the timer does not reschedule itself in its timer
+ * function.
+ *
+ * Synchronization rules: callers must prevent restarting of the timer,
+ * otherwise this function is meaningless. It must not be called from
+ * interrupt contexts. The caller must not hold locks which wold prevent
+ * completion of the timer's handler.  Upon exit the timer is not queued and
+ * the handler is not running on any CPU.
+ *
+ * The function returns whether it has deactivated a pending timer or not.
+ */
+int del_singleshot_timer_sync(struct timer_list *timer)
+{
+	int ret = del_timer(timer);
+
+	if (!ret) {
+		ret = del_timer_sync(timer);
+		BUG_ON(ret);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(del_singleshot_timer_sync);
 #endif
 
 static int cascade(tvec_base_t *base, tvec_t *tv, int index)
@@ -920,7 +956,7 @@ void do_timer(struct pt_regs *regs)
 	update_times();
 }
 
-#if !defined(__alpha__) && !defined(__ia64__)
+#ifdef __ARCH_WANT_SYS_ALARM
 
 /*
  * For backwards compatibility?  This can be done in libc so Alpha
@@ -1111,7 +1147,7 @@ fastcall signed long __sched schedule_timeout(signed long timeout)
 
 	add_timer(&timer);
 	schedule();
-	del_timer_sync(&timer);
+	del_singleshot_timer_sync(&timer);
 
 	timeout = expire - jiffies;
 
@@ -1458,3 +1494,20 @@ unregister_time_interpolator(struct time_interpolator *ti)
 	spin_unlock(&time_interpolator_lock);
 }
 #endif /* CONFIG_TIME_INTERPOLATION */
+
+/**
+ * msleep - sleep safely even with waitqueue interruptions
+ * @msecs: Time in milliseconds to sleep for
+ */
+void msleep(unsigned int msecs)
+{
+	unsigned long timeout = msecs_to_jiffies(msecs);
+
+	while (timeout) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		timeout = schedule_timeout(timeout);
+	}
+}
+
+EXPORT_SYMBOL(msleep);
+

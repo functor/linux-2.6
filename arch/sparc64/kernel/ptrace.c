@@ -53,11 +53,15 @@ static inline void
 pt_succ_return_linux(struct pt_regs *regs, unsigned long value, long *addr)
 {
 	if (test_thread_flag(TIF_32BIT)) {
-		if (put_user(value, (unsigned int *)addr))
-			return pt_error_return(regs, EFAULT);
+		if (put_user(value, (unsigned int __user *) addr)) {
+			pt_error_return(regs, EFAULT);
+			return;
+		}
 	} else {
-		if (put_user(value, addr))
-			return pt_error_return(regs, EFAULT);
+		if (put_user(value, (long __user *) addr)) {
+			pt_error_return(regs, EFAULT);
+			return;
+		}
 	}
 	regs->u_regs[UREG_I0] = 0;
 	regs->tstate &= ~(TSTATE_ICARRY | TSTATE_XCARRY);
@@ -257,7 +261,8 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 	}
 
 	case PTRACE_GETREGS: {
-		struct pt_regs32 *pregs = (struct pt_regs32 *) addr;
+		struct pt_regs32 __user *pregs =
+			(struct pt_regs32 __user *) addr;
 		struct pt_regs *cregs = child->thread_info->kregs;
 		int rval;
 
@@ -281,7 +286,7 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 	}
 
 	case PTRACE_GETREGS64: {
-		struct pt_regs *pregs = (struct pt_regs *) addr;
+		struct pt_regs __user *pregs = (struct pt_regs __user *) addr;
 		struct pt_regs *cregs = child->thread_info->kregs;
 		unsigned long tpc = cregs->tpc;
 		int rval;
@@ -308,7 +313,8 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 	}
 
 	case PTRACE_SETREGS: {
-		struct pt_regs32 *pregs = (struct pt_regs32 *) addr;
+		struct pt_regs32 __user *pregs =
+			(struct pt_regs32 __user *) addr;
 		struct pt_regs *cregs = child->thread_info->kregs;
 		unsigned int psr, pc, npc, y;
 		int i;
@@ -341,7 +347,7 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 	}
 
 	case PTRACE_SETREGS64: {
-		struct pt_regs *pregs = (struct pt_regs *) addr;
+		struct pt_regs __user *pregs = (struct pt_regs __user *) addr;
 		struct pt_regs *cregs = child->thread_info->kregs;
 		unsigned long tstate, tpc, tnpc, y;
 		int i;
@@ -389,7 +395,8 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 				unsigned int insnaddr;
 				unsigned int insn;
 			} fpq[16];
-		} *fps = (struct fps *) addr;
+		};
+		struct fps __user *fps = (struct fps __user *) addr;
 		unsigned long *fpregs = child->thread_info->fpregs;
 
 		if (copy_to_user(&fps->regs[0], fpregs,
@@ -410,7 +417,8 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 		struct fps {
 			unsigned int regs[64];
 			unsigned long fsr;
-		} *fps = (struct fps *) addr;
+		};
+		struct fps __user *fps = (struct fps __user *) addr;
 		unsigned long *fpregs = child->thread_info->fpregs;
 
 		if (copy_to_user(&fps->regs[0], fpregs,
@@ -434,7 +442,8 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 				unsigned int insnaddr;
 				unsigned int insn;
 			} fpq[16];
-		} *fps = (struct fps *) addr;
+		};
+		struct fps __user *fps = (struct fps __user *) addr;
 		unsigned long *fpregs = child->thread_info->fpregs;
 		unsigned fsr;
 
@@ -457,7 +466,8 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 		struct fps {
 			unsigned int regs[64];
 			unsigned long fsr;
-		} *fps = (struct fps *) addr;
+		};
+		struct fps __user *fps = (struct fps __user *) addr;
 		unsigned long *fpregs = child->thread_info->fpregs;
 
 		if (copy_from_user(fpregs, &fps->regs[0],
@@ -476,7 +486,7 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 	case PTRACE_READTEXT:
 	case PTRACE_READDATA: {
 		int res = ptrace_readdata(child, addr,
-					  (void *)addr2, data);
+					  (char __user *)addr2, data);
 		if (res == data) {
 			pt_succ_return(regs, 0);
 			goto flush_and_out;
@@ -489,7 +499,7 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 
 	case PTRACE_WRITETEXT:
 	case PTRACE_WRITEDATA: {
-		int res = ptrace_writedata(child, (void *) addr2,
+		int res = ptrace_writedata(child, (char __user *) addr2,
 					   addr, data);
 		if (res == data) {
 			pt_succ_return(regs, 0);

@@ -13,7 +13,9 @@
 #include <linux/vserver/limit.h>
 #include <linux/vserver/context.h>
 #include <linux/vserver/switch.h>
-#include <linux/vinline.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_limit.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>
@@ -124,7 +126,7 @@ void vx_vsi_meminfo(struct sysinfo *val)
 	v = vxi->limit.rlim[RLIMIT_RSS];
 	if (v != RLIM_INFINITY)
 		val->totalram = min(val->totalram, v);
-	v = atomic_read(&vxi->limit.res[RLIMIT_RSS]);
+	v = atomic_read(&vxi->limit.rcur[RLIMIT_RSS]);
 	val->freeram = (v < val->totalram) ? val->totalram - v : 0;
 	val->bufferram = 0;
         val->totalhigh = 0;
@@ -142,7 +144,7 @@ void vx_vsi_swapinfo(struct sysinfo *val)
 	if (w != RLIM_INFINITY)
 		val->totalswap = min(val->totalswap, w -
 		((v != RLIM_INFINITY) ? v : 0));
-	w = atomic_read(&vxi->limit.res[RLIMIT_AS]);
+	w = atomic_read(&vxi->limit.rcur[RLIMIT_AS]);
 	val->freeswap = (w < val->totalswap) ? val->totalswap - w : 0;
 	return;
 }
