@@ -1082,7 +1082,7 @@ ENTRY(sys_call_table)
 	.long sys_mq_timedreceive	/* 280 */
 	.long sys_mq_notify
 	.long sys_mq_getsetattr
-	.long sys_ni_syscall		/* reserved for kexec */
+	.long sys_kexec_load
 	.long sys_ioprio_set
 	.long sys_ioprio_get		/* 285 */
 
