@@ -1822,7 +1822,7 @@ process:
 	 * packet.
 	 */
 	if (inet_stream_ops.bind != inet_bind &&
-	    (int) sk->sk_xid >= 0 && sk->sk_xid != skb->xid)
+	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
 		goto discard_it;
 
 	if (sk->sk_state == TCP_TIME_WAIT)

@@ -451,7 +451,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,  struct packe
 	sk = pt->af_packet_priv;
 	po = pkt_sk(sk);
 
-	if (sk->sk_xid && sk->sk_xid != skb->xid)
+	if ((int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
 		goto drop;
 
 	skb->dev = dev;
