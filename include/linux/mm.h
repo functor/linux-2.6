@@ -581,7 +581,7 @@ int clear_page_dirty_for_io(struct page *page);
  */
 typedef int (*shrinker_t)(int nr_to_scan, unsigned int gfp_mask);
 
-extern long do_mprotect(struct mm_struct *mm, unsigned long start, 
+asmlinkage long do_mprotect(struct mm_struct *mm, unsigned long start, 
 			size_t len, unsigned long prot);
 
 /*
