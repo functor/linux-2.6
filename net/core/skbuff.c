@@ -333,7 +333,6 @@ struct sk_buff *skb_clone(struct sk_buff *skb, int gfp_mask)
 #endif
 
 #endif
-	C(xid);
 	C(truesize);
 	atomic_set(&n->users, 1);
 	C(head);
@@ -392,7 +391,6 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 #endif
 	new->tc_index	= old->tc_index;
 #endif
-	new->xid	= old->xid;
 	atomic_set(&new->users, 1);
 }
 
@@ -931,70 +929,6 @@ fault:
 	return -EFAULT;
 }
 
-/* Keep iterating until skb_iter_next returns false. */
-void skb_iter_first(const struct sk_buff *skb, struct skb_iter *i)
-{
-	i->len = skb_headlen(skb);
-	i->data = (unsigned char *)skb->data;
-	i->nextfrag = 0;
-	i->fraglist = NULL;
-}
-
-int skb_iter_next(const struct sk_buff *skb, struct skb_iter *i)
-{
-	/* Unmap previous, if not head fragment. */
-	if (i->nextfrag)
-		kunmap_skb_frag(i->data);
-
-	if (i->fraglist) {
-	fraglist:
-		/* We're iterating through fraglist. */
-		if (i->nextfrag < skb_shinfo(i->fraglist)->nr_frags) {
-			i->data = kmap_skb_frag(&skb_shinfo(i->fraglist)
-						->frags[i->nextfrag]);
-			i->len = skb_shinfo(i->fraglist)->frags[i->nextfrag]
-				.size;
-			i->nextfrag++;
-			return 1;
-		}
-		/* Fragments with fragments?  Too hard! */
-		BUG_ON(skb_shinfo(i->fraglist)->frag_list);
-		i->fraglist = i->fraglist->next;
-		if (!i->fraglist)
-			goto end;
-
-		i->len = skb_headlen(i->fraglist);
-		i->data = i->fraglist->data;
-		i->nextfrag = 0;
-		return 1;
-	}
-
-	if (i->nextfrag < skb_shinfo(skb)->nr_frags) {
-		i->data = kmap_skb_frag(&skb_shinfo(skb)->frags[i->nextfrag]);
-		i->len = skb_shinfo(skb)->frags[i->nextfrag].size;
-		i->nextfrag++;
-		return 1;
-	}
-
-	i->fraglist = skb_shinfo(skb)->frag_list;
-	if (i->fraglist)
-		goto fraglist;
-
-end:
-	/* Bug trap for callers */
-	i->data = NULL;
-	return 0;
-}
-
-void skb_iter_abort(const struct sk_buff *skb, struct skb_iter *i)
-{
-	/* Unmap previous, if not head fragment. */
-	if (i->data && i->nextfrag)
-		kunmap_skb_frag(i->data);
-	/* Bug trap for callers */
-	i->data = NULL;
-}
-
 /* Checksum skb data. */
 
 unsigned int skb_checksum(const struct sk_buff *skb, int offset,
@@ -1465,6 +1399,3 @@ EXPORT_SYMBOL(skb_queue_tail);
 EXPORT_SYMBOL(skb_unlink);
 EXPORT_SYMBOL(skb_append);
 EXPORT_SYMBOL(skb_split);
-EXPORT_SYMBOL(skb_iter_first);
-EXPORT_SYMBOL(skb_iter_next);
-EXPORT_SYMBOL(skb_iter_abort);

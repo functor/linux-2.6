@@ -162,14 +162,13 @@ static int dn_node_address_strategy(ctl_table *table, int __user *name, int nlen
 
 static int dn_node_address_handler(ctl_table *table, int write, 
 				struct file *filp,
-				void __user *buffer,
-				size_t *lenp, loff_t *ppos)
+				void __user *buffer, size_t *lenp)
 {
 	char addr[DN_ASCBUF_LEN];
 	size_t len;
 	dn_address dnaddr;
 
-	if (!*lenp || (*ppos && !write)) {
+	if (!*lenp || (filp->f_pos && !write)) {
 		*lenp = 0;
 		return 0;
 	}
@@ -192,7 +191,7 @@ static int dn_node_address_handler(ctl_table *table, int write,
 
 		dn_dev_devices_on();
 
-		*ppos += len;
+		filp->f_pos += len;
 
 		return 0;
 	}
@@ -207,7 +206,7 @@ static int dn_node_address_handler(ctl_table *table, int write,
 		return -EFAULT;
 
 	*lenp = len;
-	*ppos += len;
+	filp->f_pos += len;
 
 	return 0;
 }
@@ -274,14 +273,13 @@ static int dn_def_dev_strategy(ctl_table *table, int __user *name, int nlen,
 
 static int dn_def_dev_handler(ctl_table *table, int write, 
 				struct file * filp,
-				void __user *buffer,
-				size_t *lenp, loff_t *ppos)
+				void __user *buffer, size_t *lenp)
 {
 	size_t len;
 	struct net_device *dev;
 	char devname[17];
 
-	if (!*lenp || (*ppos && !write)) {
+	if (!*lenp || (filp->f_pos && !write)) {
 		*lenp = 0;
 		return 0;
 	}
@@ -309,7 +307,7 @@ static int dn_def_dev_handler(ctl_table *table, int write,
 			dev_put(dev);
 			return -ENODEV;
 		}
-		*ppos += *lenp;
+		filp->f_pos += *lenp;
 
 		return 0;
 	}
@@ -331,7 +329,7 @@ static int dn_def_dev_handler(ctl_table *table, int write,
 		return -EFAULT;
 
 	*lenp = len;
-	*ppos += len;
+	filp->f_pos += len;
 
 	return 0;
 }

@@ -85,12 +85,11 @@ static void snd_tea575x_set_freq(tea575x_t *tea)
  * Linux Video interface
  */
 
-static int snd_tea575x_ioctl(struct inode *inode, struct file *file,
-			     unsigned int cmd, unsigned long data)
+static int snd_tea575x_do_ioctl(struct inode *inode, struct file *file,
+			        unsigned int cmd, void *arg)
 {
 	struct video_device *dev = video_devdata(file);
 	tea575x_t *tea = video_get_drvdata(dev);
-	void __user *arg = (void __user *)data;
 	
 	switch(cmd) {
 		case VIDIOCGCAP:
@@ -166,6 +165,12 @@ static int snd_tea575x_ioctl(struct inode *inode, struct file *file,
 		default:
 			return -ENOIOCTLCMD;
 	}
+}
+
+static int snd_tea575x_ioctl(struct inode *inode, struct file *file,
+			     unsigned int cmd, unsigned long arg)
+{
+	return video_usercopy(inode, file, cmd, arg, snd_tea575x_do_ioctl);
 }
 
 /*

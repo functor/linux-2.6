@@ -308,10 +308,12 @@ static void bounce_end_io(struct bio *bio, mempool_t *pool)
 {
 	struct bio *bio_orig = bio->bi_private;
 	struct bio_vec *bvec, *org_vec;
-	int i, err = 0;
+	int i;
 
 	if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
-		err = -EIO;
+		goto out_eio;
+
+	set_bit(BIO_UPTODATE, &bio_orig->bi_flags);
 
 	/*
 	 * free up bounce indirect pages used
@@ -324,7 +326,8 @@ static void bounce_end_io(struct bio *bio, mempool_t *pool)
 		mempool_free(bvec->bv_page, pool);	
 	}
 
-	bio_endio(bio_orig, bio_orig->bi_size, err);
+out_eio:
+	bio_endio(bio_orig, bio_orig->bi_size, 0);
 	bio_put(bio);
 }
 

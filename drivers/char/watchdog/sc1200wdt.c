@@ -157,8 +157,6 @@ static inline int sc1200wdt_status(void)
 
 static int sc1200wdt_open(struct inode *inode, struct file *file)
 {
-	nonseekable_open(inode, file);
-
 	/* allow one at a time */
 	if (down_trylock(&open_sem))
 		return -EBUSY;
@@ -260,6 +258,9 @@ static int sc1200wdt_release(struct inode *inode, struct file *file)
 
 static ssize_t sc1200wdt_write(struct file *file, const char __user *data, size_t len, loff_t *ppos)
 {
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	if (len) {
 		if (!nowayout) {
 			size_t i;

@@ -29,7 +29,7 @@
  */
 
 /* this drivers version (do not edit !!! generated and updated by cvs) */
-#define ZFCP_FSF_C_REVISION "$Revision: 1.55 $"
+#define ZFCP_FSF_C_REVISION "$Revision: 1.49 $"
 
 #include "zfcp_ext.h"
 
@@ -180,7 +180,8 @@ zfcp_fsf_req_dismiss_all(struct zfcp_adapter *adapter)
 		ZFCP_LOG_DEBUG("fsf req list of adapter %s not yet empty\n",
 			       zfcp_get_busid_by_adapter(adapter));
 		/* wait for woken intiators to clean up their requests */
-		msleep(jiffies_to_msecs(ZFCP_FSFREQ_CLEANUP_TIMEOUT));
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(ZFCP_FSFREQ_CLEANUP_TIMEOUT);
 	}
 
 	/* consistency check */
@@ -2619,7 +2620,6 @@ zfcp_fsf_close_physical_port(struct zfcp_erp_action *erp_action)
 {
 	int retval = 0;
 	unsigned long lock_flags;
-	volatile struct qdio_buffer_element *sbale;
 
 	/* setup new FSF request */
 	retval = zfcp_fsf_req_create(erp_action->adapter,
@@ -2635,11 +2635,6 @@ zfcp_fsf_close_physical_port(struct zfcp_erp_action *erp_action)
 
 		goto out;
 	}
-
-	sbale = zfcp_qdio_sbale_req(erp_action->fsf_req,
-				    erp_action->fsf_req->sbal_curr, 0);
-	sbale[0].flags |= SBAL_FLAGS0_TYPE_READ;
-	sbale[1].flags |= SBAL_FLAGS_LAST_ENTRY;
 
 	/* mark port as being closed */
 	atomic_set_mask(ZFCP_STATUS_PORT_PHYS_CLOSING,
@@ -4722,14 +4717,14 @@ zfcp_fsf_req_sbal_get(struct zfcp_adapter *adapter, int req_flags,
 		      unsigned long *lock_flags)
 {
         int condition;
+        unsigned long timeout = ZFCP_SBAL_TIMEOUT;
         struct zfcp_qdio_queue *req_queue = &adapter->request_queue;
 
         if (unlikely(req_flags & ZFCP_WAIT_FOR_SBAL)) {
-                wait_event_interruptible_timeout(adapter->request_wq,
-						 (condition =
-						  zfcp_fsf_req_create_sbal_check
-						  (lock_flags, req_queue, 1)),
-						 ZFCP_SBAL_TIMEOUT);
+                ZFCP_WAIT_EVENT_TIMEOUT(adapter->request_wq, timeout,
+                                        (condition =
+                                         (zfcp_fsf_req_create_sbal_check)
+                                         (lock_flags, req_queue, 1)));
                 if (!condition) {
                         return -EIO;
 		}
@@ -4793,7 +4788,6 @@ zfcp_fsf_req_create(struct zfcp_adapter *adapter, u32 fsf_cmd, int req_flags,
 
 	if (!atomic_test_mask(ZFCP_STATUS_ADAPTER_QDIOUP, &adapter->status)) {
 		write_unlock_irqrestore(&req_queue->queue_lock, *lock_flags);
-		ret = -EIO;
 		goto failed_sbals;
 	}
 

@@ -254,7 +254,6 @@ __dma_alloc_coherent(size_t size, dma_addr_t *handle, int gfp)
  no_page:
 	return NULL;
 }
-EXPORT_SYMBOL(__dma_alloc_coherent);
 
 /*
  * free a page as defined by the above mapping.
@@ -318,7 +317,7 @@ void __dma_free_coherent(size_t size, void *vaddr)
 	       __func__, vaddr);
 	dump_stack();
 }
-EXPORT_SYMBOL(__dma_free_coherent);
+EXPORT_SYMBOL(dma_free_coherent);
 
 /*
  * Initialise the consistent memory allocation.

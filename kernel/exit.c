@@ -26,7 +26,6 @@
 #include <linux/ckrm.h>
 #include <linux/ckrm_tsk.h>
 #include <linux/vs_limit.h>
-#include <linux/ckrm_mem.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -44,7 +43,8 @@ static void __unhash_process(struct task_struct *p)
 	/* tasklist_lock is held, is this sufficient? */
 	if (p->vx_info) {
 		atomic_dec(&p->vx_info->cacct.nr_threads);
-		atomic_dec(&p->vx_info->limit.rcur[RLIMIT_NPROC]);
+		vx_nproc_dec(p->vx_info);
+		// atomic_dec(&p->vx_info->limit.res[RLIMIT_NPROC]);
 	}
 	detach_pid(p, PIDTYPE_PID);
 	detach_pid(p, PIDTYPE_TGID);
@@ -392,7 +392,7 @@ static inline void close_files(struct files_struct * files)
 					filp_close(file, files);
 					cond_resched();
 				}
-				// vx_openfd_dec(fd);
+				vx_openfd_dec(fd);
 			}
 			i++;
 			set >>= 1;
@@ -524,12 +524,6 @@ static inline void __exit_mm(struct task_struct * tsk)
 	task_lock(tsk);
 	tsk->mm = NULL;
 	up_read(&mm->mmap_sem);
-#ifdef CONFIG_CKRM_RES_MEM
-	spin_lock(&mm->peertask_lock);
-	list_del_init(&tsk->mm_peers);
-	ckrm_mem_evaluate_mm(mm);
-	spin_unlock(&mm->peertask_lock);
-#endif
 	enter_lazy_tlb(mm, current);
 	task_unlock(tsk);
 	mmput(mm);
@@ -843,13 +837,6 @@ asmlinkage NORET_TYPE void do_exit(long code)
 	}
 
 	acct_process(code);
-	if (current->tux_info) {
-#ifdef CONFIG_TUX_DEBUG
-		printk("Possibly unexpected TUX-thread exit(%ld) at %p?\n",
-			code, __builtin_return_address(0));
-#endif
-		current->tux_exit();
-	}
 	__exit_mm(tsk);
 
 	exit_sem(tsk);
@@ -866,6 +853,9 @@ asmlinkage NORET_TYPE void do_exit(long code)
 		module_put(tsk->binfmt->module);
 
 	tsk->exit_code = code;
+#ifdef CONFIG_CKRM_TYPE_TASKCLASS
+	numtasks_put_ref(tsk->taskclass);
+#endif
 	exit_notify(tsk);
 #ifdef CONFIG_NUMA
 	mpol_free(tsk->mempolicy);
@@ -1047,17 +1037,20 @@ static int wait_task_zombie(task_t *p, unsigned int __user *stat_addr, struct ru
 		if (p->real_parent != p->parent) {
 			__ptrace_unlink(p);
 			p->state = TASK_ZOMBIE;
-			/*
-			 * If this is not a detached task, notify the parent.  If it's
-			 * still not detached after that, don't release it now.
-			 */
-			if (p->exit_signal != -1) {
-				do_notify_parent(p, p->exit_signal);
-				if (p->exit_signal != -1)
-					p = NULL;
+			/* If this is a detached thread, this is where it goes away.  */
+			if (p->exit_signal == -1) {
+				/* release_task takes the lock itself.  */
+				write_unlock_irq(&tasklist_lock);
+				release_task (p);
 			}
+			else {
+				do_notify_parent(p, p->exit_signal);
+				write_unlock_irq(&tasklist_lock);
+			}
+			p = NULL;
 		}
-		write_unlock_irq(&tasklist_lock);
+		else
+			write_unlock_irq(&tasklist_lock);
 	}
 	if (p != NULL)
 		release_task(p);

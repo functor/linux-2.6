@@ -1145,10 +1145,11 @@ static int __init probe_multisound(void)
 	char *pinfiji = "Pinnacle/Fiji";
 #endif
 
-	if (!request_region(dev.io, dev.numio, "probing")) {
+	if (check_region(dev.io, dev.numio)) {
 		printk(KERN_ERR LOGNAME ": I/O port conflict\n");
 		return -ENODEV;
 	}
+	request_region(dev.io, dev.numio, "probing");
 
 	if (reset_dsp() < 0) {
 		release_region(dev.io, dev.numio);
@@ -1832,11 +1833,12 @@ static int __init msnd_init(void)
 		/* Joystick */
 		pinnacle_devs[3].io0 = joystick_io;
 
-		if (!request_region(cfg, 2, "Pinnacle/Fiji Config")) {
+		if (check_region(cfg, 2)) {
 			printk(KERN_ERR LOGNAME ": Config port 0x%x conflict\n", cfg);
 			return -EIO;
 		}
 
+		request_region(cfg, 2, "Pinnacle/Fiji Config");
 		if (msnd_pinnacle_cfg_devices(cfg, reset, pinnacle_devs)) {
 			printk(KERN_ERR LOGNAME ": Device configuration error\n");
 			release_region(cfg, 2);

@@ -553,12 +553,7 @@ alloc_new:
 			bh = bh->b_this_page;
 		} while (bh != head);
 
-		/*
-		 * we cannot drop the bh if the page is not uptodate
-		 * or a concurrent readpage would fail to serialize with the bh
-		 * and it would read from disk before we reach the platter.
-		 */
-		if (buffer_heads_over_limit && PageUptodate(page))
+		if (buffer_heads_over_limit)
 			try_to_free_buffers(page);
 	}
 

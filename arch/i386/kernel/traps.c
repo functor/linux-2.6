@@ -26,7 +26,6 @@
 #include <linux/kallsyms.h>
 #include <linux/ptrace.h>
 #include <linux/version.h>
-#include <linux/dump.h>
 
 #ifdef CONFIG_EISA
 #include <linux/ioport.h>
@@ -325,7 +324,6 @@ void die(const char * str, struct pt_regs * regs, long err)
 	show_registers(regs);
 	if (netdump_func)
 		netdump_func(regs);
-	dump((char *)str, regs);
 	bust_spinlocks(0);
 	die_owner = -1;
 	spin_unlock_irq(&die_lock);
@@ -513,7 +511,7 @@ static void mem_parity_error(unsigned char reason, struct pt_regs * regs)
 {
 	printk("Uhhuh. NMI received. Dazed and confused, but trying to continue\n");
 	printk("You probably have a hardware problem with your RAM chips\n");
-	panic("Halting\n");
+
 	/* Clear and disable the memory parity error line. */
 	clear_mem_error(reason);
 }
