@@ -29,8 +29,7 @@ int ext2_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 	case EXT2_IOC_SETFLAGS: {
 		unsigned int oldflags;
 
-		if (IS_RDONLY(inode) ||
-			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
+		if (IS_RDONLY(inode))
 			return -EROFS;
 
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
@@ -50,11 +49,11 @@ int ext2_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		 *
 		 * This test looks nicer. Thanks to Pauline Middelink
 		 */
-		if (((oldflags & EXT2_IMMUTABLE_FL) ||
+		if ((oldflags & EXT2_IMMUTABLE_FL) ||
 			((flags ^ oldflags) &
-			 (EXT2_APPEND_FL | EXT2_IMMUTABLE_FL | EXT2_IUNLINK_FL)))
-		    && !capable(CAP_LINUX_IMMUTABLE)) {
-			return -EPERM;		
+			(EXT2_APPEND_FL | EXT2_IMMUTABLE_FL))) {
+			if (!capable(CAP_LINUX_IMMUTABLE))
+				return -EPERM;
 		}
 
 		flags = flags & EXT2_FL_USER_MODIFIABLE;
@@ -71,8 +70,7 @@ int ext2_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 	case EXT2_IOC_SETVERSION:
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
 			return -EPERM;
-		if (IS_RDONLY(inode) ||
-			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
+		if (IS_RDONLY(inode))
 			return -EROFS;
 		if (get_user(inode->i_generation, (int __user *) arg))
 			return -EFAULT;	
