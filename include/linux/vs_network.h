@@ -36,7 +36,7 @@ static inline struct nx_info *__get_nx_info(struct nx_info *nxi,
 
 
 #define	free_nx_info(nxi)	\
-	call_rcu(&nxi->nx_rcu, rcu_free_nx_info, nxi);
+	call_rcu(&nxi->nx_rcu, rcu_free_nx_info);
 
 #define put_nx_info(i)	__put_nx_info(i,__FILE__,__LINE__)
 

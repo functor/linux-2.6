@@ -21,6 +21,7 @@
 #include <linux/sysdev.h>
 #include <linux/pm.h>
 #include <linux/serio.h>
+#include <linux/pci.h>
 
 #include <asm/io.h>
 
@@ -131,6 +132,7 @@ static int i8042_flush(void)
 	spin_lock_irqsave(&i8042_lock, flags);
 
 	while ((i8042_read_status() & I8042_STR_OBF) && (i++ < I8042_BUFFER_SIZE)) {
+		udelay(50);
 		data = i8042_read_data();
 		dbg("%02x <- i8042 (flush, %s)", data,
 			i8042_read_status() & I8042_STR_AUXDATA ? "aux" : "kbd");
@@ -669,6 +671,69 @@ static void i8042_timer_func(unsigned long data)
 }
 
 
+static int i8042_spank_usb(void)
+{
+	struct pci_dev *usb = NULL;
+	int found = 0;
+	u16 word;
+	unsigned long addr;
+	unsigned long len;
+	int i;
+	
+	while((usb = pci_find_class((PCI_CLASS_SERIAL_USB << 8), usb)) != NULL)
+	{
+		/* UHCI controller not in legacy ? */
+		
+		pci_read_config_word(usb, 0xC0, &word);
+		if(word & 0x2000)
+			continue;
+			
+		/* Check it is enabled. If the port is active in legacy mode
+		   then this will be mapped already */
+		   
+		for(i = 0; i < PCI_ROM_RESOURCE; i++)
+		{
+			if (!(pci_resource_flags (usb, i) & IORESOURCE_IO))
+				continue;
+		}
+		if(i == PCI_ROM_RESOURCE)
+			continue;
+		
+		/*
+		 *	Retrieve the bits
+		 */
+		    
+		addr = pci_resource_start(usb, i);
+		len = pci_resource_len (usb, i);
+		
+		/*
+		 *	Check its configured and not in use
+		 */
+		if(addr == 0)
+			continue;
+		if (request_region(addr, len, "usb whackamole"))
+			continue;
+				
+		/*
+		 *	Kick the problem controller out of legacy mode
+		 *	so things like the E750x don't break
+		 */
+		
+		outw(0, addr + 4);		/* IRQ Mask */
+		outw(4, addr);			/* Reset */
+		msleep(20);
+		outw(0, addr);
+		
+		msleep(20);
+		/* Now take if off the BIOS */
+		pci_write_config_word(usb, 0xC0, 0x2000);
+		release_region(addr, len);
+
+		found = 1;
+	}
+	return found;
+}
+
 /*
  * i8042_controller init initializes the i8042 controller, and,
  * most importantly, sets it into non-xlated mode if that's
@@ -677,6 +742,7 @@ static void i8042_timer_func(unsigned long data)
 
 static int i8042_controller_init(void)
 {
+	int tries = 0;
 
 /*
  * Test the i8042. We need to know if it thinks it's working correctly
@@ -705,9 +771,15 @@ static int i8042_controller_init(void)
  * Save the CTR for restoral on unload / reboot.
  */
 
-	if (i8042_command(&i8042_ctr, I8042_CMD_CTL_RCTR)) {
-		printk(KERN_ERR "i8042.c: Can't read CTR while initializing i8042.\n");
-		return -1;
+	while(i8042_command(&i8042_ctr, I8042_CMD_CTL_RCTR)) {
+		if(tries > 3 || !i8042_spank_usb())
+		{
+			printk(KERN_ERR "i8042.c: Can't read CTR while initializing i8042.\n");
+			return -1;
+		}
+		printk(KERN_WARNING "i8042.c: Can't read CTR, disabling USB legacy and retrying.\n");
+		i8042_flush();
+		tries++;
 	}
 
 	i8042_initial_ctr = i8042_ctr;

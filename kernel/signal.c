@@ -157,7 +157,7 @@ static kmem_cache_t *sigqueue_cachep;
 
 static int sig_ignored(struct task_struct *t, int sig)
 {
-	void * handler;
+	void __user * handler;
 
 	/*
 	 * Tracers always want to know about signals..
@@ -264,7 +264,7 @@ next_signal(struct sigpending *pending, sigset_t *mask)
 
 static struct sigqueue *__sigqueue_alloc(void)
 {
-	struct sigqueue *q = 0;
+	struct sigqueue *q = NULL;
 
 	if (atomic_read(&current->user->sigpending) <
 			current->rlim[RLIMIT_SIGPENDING].rlim_cur)
@@ -272,7 +272,7 @@ static struct sigqueue *__sigqueue_alloc(void)
 	if (q) {
 		INIT_LIST_HEAD(&q->list);
 		q->flags = 0;
-		q->lock = 0;
+		q->lock = NULL;
 #warning MEF PLANETLAB: q->user = get_uid(current->user); is something new in Fedora Core.
 		q->user = get_uid(current->user);
 		atomic_inc(&q->user->sigpending);
@@ -418,7 +418,6 @@ flush_signal_handlers(struct task_struct *t, int force_default)
 	}
 }
 
-EXPORT_SYMBOL_GPL(flush_signal_handlers);
 
 /* Notify the system that a driver wants to block all signals for this
  * process, and wants to be notified if any signals at all were to be
@@ -456,7 +455,7 @@ unblock_all_signals(void)
 
 static inline int collect_signal(int sig, struct sigpending *list, siginfo_t *info)
 {
-	struct sigqueue *q, *first = 0;
+	struct sigqueue *q, *first = NULL;
 	int still_pending = 0;
 
 	if (unlikely(!sigismember(&list->signal, sig)))
@@ -1201,6 +1200,13 @@ send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 {
 	int ret;
 	unsigned long flags;
+
+	/*
+	 * Make sure legacy kernel users don't send in bad values
+	 * (normal paths check this in check_kill_permission).
+	 */
+	if (sig < 0 || sig > _NSIG)
+		return -EINVAL;
 
 	/*
 	 * We need the tasklist lock even for the specific
@@ -2396,13 +2402,13 @@ do_sigaltstack (const stack_t __user *uss, stack_t __user *uoss, unsigned long s
 	int error;
 
 	if (uoss) {
-		oss.ss_sp = (void *) current->sas_ss_sp;
+		oss.ss_sp = (void __user *) current->sas_ss_sp;
 		oss.ss_size = current->sas_ss_size;
 		oss.ss_flags = sas_ss_flags(sp);
 	}
 
 	if (uss) {
-		void *ss_sp;
+		void __user *ss_sp;
 		size_t ss_size;
 		int ss_flags;
 

@@ -23,6 +23,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/smp_lock.h>
+#include <linux/namei.h>
 
 /* Symlink caching in the page cache is even more simplistic
  * and straight-forward than readdir caching.
@@ -50,8 +51,13 @@ error:
 	return -EIO;
 }
 
-static char *nfs_getlink(struct inode *inode, struct page **ppage)
+enum {
+	Page_Offset = (PAGE_SIZE - sizeof(void *)) / 4
+};
+
+static int nfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
+	struct inode *inode = dentry->d_inode;
 	struct page *page;
 	u32 *p;
 
@@ -64,47 +70,44 @@ static char *nfs_getlink(struct inode *inode, struct page **ppage)
 		goto read_failed;
 	if (!PageUptodate(page))
 		goto getlink_read_error;
-	*ppage = page;
 	p = kmap(page);
-	return (char*)(p+1);
+	if (*p > Page_Offset * 4 - 1 - 4)
+		goto too_long;
+	*(struct page **)(p + Page_Offset) = page;
 
+	nd_set_link(nd, (char *)(p+1));
+	return 0;
+
+too_long:
+	kunmap(page);
+	page_cache_release(page);
+	page = ERR_PTR(-ENAMETOOLONG);
+	goto read_failed;
 getlink_read_error:
 	page_cache_release(page);
 	page = ERR_PTR(-EIO);
 read_failed:
-	return (char*)page;
+	nd_set_link(nd, (char*)page);
+	return 0;
 }
 
-static int nfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
+static void nfs_put_link(struct dentry *dentry, struct nameidata *nd)
 {
-	struct inode *inode = dentry->d_inode;
-	struct page *page = NULL;
-	int res = vfs_readlink(dentry,buffer,buflen,nfs_getlink(inode,&page));
-	if (page) {
+	u32 *s = (u32 *)nd_get_link(nd);
+	if (!IS_ERR(s)) {
+		struct page *page = *(struct page **)(s + Page_Offset - 1);
 		kunmap(page);
 		page_cache_release(page);
 	}
-	return res;
-}
-
-static int nfs_follow_link(struct dentry *dentry, struct nameidata *nd)
-{
-	struct inode *inode = dentry->d_inode;
-	struct page *page = NULL;
-	int res = vfs_follow_link(nd, nfs_getlink(inode,&page));
-	if (page) {
-		kunmap(page);
-		page_cache_release(page);
-	}
-	return res;
 }
 
 /*
  * symlinks can't do much...
  */
 struct inode_operations nfs_symlink_inode_operations = {
-	.readlink	= nfs_readlink,
+	.readlink	= generic_readlink,
 	.follow_link	= nfs_follow_link,
+	.put_link	= nfs_put_link,
 	.getattr	= nfs_getattr,
 	.setattr	= nfs_setattr,
 };

@@ -1075,6 +1075,15 @@ static struct xfrm_state * pfkey_msg2xfrm_state(struct sadb_msg *hdr,
 		n_type = ext_hdrs[SADB_X_EXT_NAT_T_TYPE-1];
 		natt->encap_type = n_type->sadb_x_nat_t_type_type;
 
+		switch (natt->encap_type) {
+		case UDP_ENCAP_ESPINUDP:
+		case UDP_ENCAP_ESPINUDP_NON_IKE:
+			break;
+		default:
+			err = -ENOPROTOOPT;
+			goto out;
+		}
+
 		if (ext_hdrs[SADB_X_EXT_NAT_T_SPORT-1]) {
 			struct sadb_x_nat_t_port* n_port =
 				ext_hdrs[SADB_X_EXT_NAT_T_SPORT-1];
@@ -2848,7 +2857,7 @@ static struct xfrm_mgr pfkeyv2_mgr =
 static void __exit ipsec_pfkey_exit(void)
 {
 	xfrm_unregister_km(&pfkeyv2_mgr);
-	remove_proc_entry("net/pfkey", 0);
+	remove_proc_entry("net/pfkey", NULL);
 	sock_unregister(PF_KEY);
 }
 
@@ -2856,7 +2865,7 @@ static int __init ipsec_pfkey_init(void)
 {
 	sock_register(&pfkey_family_ops);
 #ifdef CONFIG_PROC_FS
-	create_proc_read_entry("net/pfkey", 0, 0, pfkey_read_proc, NULL);
+	create_proc_read_entry("net/pfkey", 0, NULL, pfkey_read_proc, NULL);
 #endif
 	xfrm_register_km(&pfkeyv2_mgr);
 	return 0;

@@ -66,12 +66,21 @@ EXPORT_SYMBOL(mem_map);
 #endif
 
 unsigned long num_physpages;
+/*
+ * A number of key systems in x86 including ioremap() rely on the assumption
+ * that high_memory defines the upper bound on direct map memory, then end
+ * of ZONE_NORMAL.  Under CONFIG_DISCONTIG this means that max_low_pfn and
+ * highstart_pfn must be the same; there must be no gap between ZONE_NORMAL
+ * and ZONE_HIGHMEM.
+ */
 void * high_memory;
 struct page *highmem_start_page;
+unsigned long vmalloc_earlyreserve;
 
 EXPORT_SYMBOL(num_physpages);
 EXPORT_SYMBOL(highmem_start_page);
 EXPORT_SYMBOL(high_memory);
+EXPORT_SYMBOL(vmalloc_earlyreserve);
 
 /*
  * We special-case the C-O-W ZERO_PAGE, because it's such
@@ -418,7 +427,7 @@ static void zap_pte_range(struct mmu_gather *tlb,
 				set_pte(ptep, pgoff_to_pte(page->index));
 			if (pte_dirty(pte))
 				set_page_dirty(page);
-			if (pte_young(pte) && page_mapping(page))
+			if (pte_young(pte) && !PageAnon(page))
 				mark_page_accessed(page);
 			tlb->freed++;
 			page_remove_rmap(page);
@@ -481,6 +490,10 @@ static void unmap_page_range(struct mmu_gather *tlb,
 	tlb_end_vma(tlb, vma);
 }
 
+#ifdef CONFIG_PREEMPT_VOLUNTARY
+# define ZAP_BLOCK_SIZE (128 * PAGE_SIZE)
+#else
+
 /* Dispose of an entire struct mmu_gather per rescheduling point */
 #if defined(CONFIG_SMP) && defined(CONFIG_PREEMPT)
 #define ZAP_BLOCK_SIZE	(FREE_PTE_NR * PAGE_SIZE)
@@ -494,6 +507,8 @@ static void unmap_page_range(struct mmu_gather *tlb,
 /* No preempt: go for improved straight-line efficiency */
 #if !defined(CONFIG_PREEMPT)
 #define ZAP_BLOCK_SIZE	(1024 * PAGE_SIZE)
+#endif
+
 #endif
 
 /**
@@ -568,8 +583,6 @@ int unmap_vmas(struct mmu_gather **tlbp, struct mm_struct *mm,
 
 			start += block;
 			zap_bytes -= block;
-			if ((long)zap_bytes > 0)
-				continue;
 			if (!atomic && need_resched()) {
 				int fullmm = tlb_is_full_mm(*tlbp);
 				tlb_finish_mmu(*tlbp, tlb_start, start);
@@ -577,6 +590,8 @@ int unmap_vmas(struct mmu_gather **tlbp, struct mm_struct *mm,
 				*tlbp = tlb_gather_mmu(mm, fullmm);
 				tlb_start_valid = 0;
 			}
+			if ((long)zap_bytes > 0)
+				continue;
 			zap_bytes = ZAP_BLOCK_SIZE;
 		}
 	}
@@ -726,7 +741,7 @@ out:
 static inline struct page *get_page_map(struct page *page)
 {
 	if (!pfn_valid(page_to_pfn(page)))
-		return 0;
+		return NULL;
 	return page;
 }
 
@@ -786,19 +801,24 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			pte_t *pte;
 			if (write) /* user gate pages are read-only */
 				return i ? : -EFAULT;
-			pgd = pgd_offset_k(pg);
+			pgd = pgd_offset(mm, pg);
 			if (!pgd)
 				return i ? : -EFAULT;
 			pmd = pmd_offset(pgd, pg);
 			if (!pmd)
 				return i ? : -EFAULT;
-			pte = pte_offset_kernel(pmd, pg);
-			if (!pte || !pte_present(*pte))
+			pte = pte_offset_map(pmd, pg);
+			if (!pte)
 				return i ? : -EFAULT;
+			if (!pte_present(*pte)) {
+				pte_unmap(pte);
+				return i ? : -EFAULT;
+			}
 			if (pages) {
 				pages[i] = pte_page(*pte);
 				get_page(pages[i]);
 			}
+			pte_unmap(pte);
 			if (vmas)
 				vmas[i] = gate_vma;
 			i++;
@@ -1141,7 +1161,8 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	/*
 	 * Ok, we need to copy. Oh, well..
 	 */
-	page_cache_get(old_page);
+	if (!PageReserved(old_page))
+		page_cache_get(old_page);
 	spin_unlock(&mm->page_table_lock);
 
 	if (unlikely(anon_vma_prepare(vma)))
@@ -1287,6 +1308,12 @@ int vmtruncate(struct inode * inode, loff_t offset)
 
 	if (inode->i_size < offset)
 		goto do_expand;
+	/*
+	 * truncation of in-use swapfiles is disallowed - it would cause
+	 * subsequent swapout to scribble on the now-freed blocks.
+	 */
+	if (IS_SWAPFILE(inode))
+		goto out_busy;
 	i_size_write(inode, offset);
 	unmap_mapping_range(mapping, offset + PAGE_SIZE - 1, 0, 1);
 	truncate_inode_pages(mapping, offset);
@@ -1297,7 +1324,7 @@ do_expand:
 	if (limit != RLIM_INFINITY && offset > limit)
 		goto out_sig;
 	if (offset > inode->i_sb->s_maxbytes)
-		goto out;
+		goto out_big;
 	i_size_write(inode, offset);
 
 out_truncate:
@@ -1306,8 +1333,10 @@ out_truncate:
 	return 0;
 out_sig:
 	send_sig(SIGXFSZ, current, 0);
-out:
+out_big:
 	return -EFBIG;
+out_busy:
+	return -ETXTBSY;
 }
 
 EXPORT_SYMBOL(vmtruncate);
@@ -1880,7 +1909,7 @@ struct vm_area_struct *get_gate_vma(struct task_struct *tsk)
 #ifdef AT_SYSINFO_EHDR
 	return &gate_vma;
 #else
-	return 0;
+	return NULL;
 #endif
 }
 

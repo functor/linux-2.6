@@ -366,6 +366,8 @@ struct net_device
 	struct Qdisc		*qdisc_ingress;
 	unsigned long		tx_queue_len;	/* Max frames per queue allowed */
 
+	/* ingress path synchronizer */
+	spinlock_t		ingress_lock;
 	/* hard_start_xmit synchronizer */
 	spinlock_t		xmit_lock;
 	/* cpu id of processor entered to hard_start_xmit or -1,
@@ -405,6 +407,7 @@ struct net_device
 #define NETIF_F_HW_VLAN_FILTER	512	/* Receive filtering on VLAN */
 #define NETIF_F_VLAN_CHALLENGED	1024	/* Device cannot handle VLAN packets */
 #define NETIF_F_TSO		2048	/* Can offload TCP/IP segmentation */
+#define NETIF_F_LLTX		4096	/* LockLess TX */
 
 	/* Called after device is detached from network. */
 	void			(*uninit)(struct net_device *dev);
@@ -459,7 +462,7 @@ struct net_device
 						     unsigned char *haddr);
 	int			(*neigh_setup)(struct net_device *dev, struct neigh_parms *);
 	int			(*accept_fastpath)(struct net_device *, struct dst_entry*);
-#ifdef CONFIG_NETPOLL_RX
+#ifdef CONFIG_NETPOLL
 	int			netpoll_rx;
 #endif
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -562,7 +565,7 @@ typedef int gifconf_func_t(struct net_device * dev, char __user * bufptr, int le
 extern int		register_gifconf(unsigned int family, gifconf_func_t * gifconf);
 static inline int unregister_gifconf(unsigned int family)
 {
-	return register_gifconf(family, 0);
+	return register_gifconf(family, NULL);
 }
 
 /*
@@ -686,6 +689,12 @@ extern void		dev_queue_xmit_nit(struct sk_buff *skb, struct net_device *dev);
 extern void		dev_init(void);
 
 extern int		netdev_nit;
+
+/* netconsole rx hook registration */
+extern int netdump_register_hooks(int (*)(struct sk_buff *),
+				  int (*)(struct sk_buff *),
+				  void (*)(struct pt_regs *));
+extern void netdump_unregister_hooks(void);
 
 /* Post buffer to the network code from _non interrupt_ context.
  * see net/core/dev.c for netif_rx description.

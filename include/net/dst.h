@@ -142,15 +142,16 @@ struct dst_entry * dst_clone(struct dst_entry * dst)
 	return dst;
 }
 
+extern const char dst_underflow_bug_msg[];
+
 static inline
 void dst_release(struct dst_entry * dst)
 {
 	if (dst) {
-		if (atomic_read(&dst->__refcnt) < 1) {
-			printk("BUG: dst underflow %d: %p\n",
-			       atomic_read(&dst->__refcnt),
-			       current_text_addr());
-		}
+		if (atomic_read(&dst->__refcnt) < 1)
+			printk(dst_underflow_bug_msg, 
+			       atomic_read(&dst->__refcnt), 
+			       dst, current_text_addr());
 		atomic_dec(&dst->__refcnt);
 	}
 }
@@ -181,6 +182,12 @@ static inline void dst_free(struct dst_entry * dst)
 			return;
 	}
 	__dst_free(dst);
+}
+
+static inline void dst_rcu_free(struct rcu_head *head)
+{
+	struct dst_entry *dst = container_of(head, struct dst_entry, rcu_head);
+	dst_free(dst);
 }
 
 static inline void dst_confirm(struct dst_entry *dst)

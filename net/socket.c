@@ -68,7 +68,6 @@
 #include <linux/netdevice.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
-#include <net/tux.h>
 #include <linux/wanrouter.h>
 #include <linux/if_bridge.h>
 #include <linux/init.h>
@@ -123,7 +122,7 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
  *	in the operation structures but are done directly via the socketcall() multiplexor.
  */
 
-struct file_operations socket_file_ops = {
+static struct file_operations socket_file_ops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
 	.aio_read =	sock_aio_read,
@@ -365,63 +364,52 @@ static struct dentry_operations sockfs_dentry_operations = {
  *	but we take care of internal coherence yet.
  */
 
-struct file * sock_map_file(struct socket *sock)
-{
-	struct file *file;
-	struct qstr this;
-	char name[32];
-
-	file = get_empty_filp();
-
-	if (!file)
-		return ERR_PTR(-ENFILE);
-
-	sprintf(name, "[%lu]", SOCK_INODE(sock)->i_ino);
-	this.name = name;
-	this.len = strlen(name);
-	this.hash = SOCK_INODE(sock)->i_ino;
-
-	file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
-	if (!file->f_dentry) {
-		put_filp(file);
-		return ERR_PTR(-ENOMEM);
-	}
-	file->f_dentry->d_op = &sockfs_dentry_operations;
-	d_add(file->f_dentry, SOCK_INODE(sock));
-	file->f_vfsmnt = mntget(sock_mnt);
-file->f_mapping = file->f_dentry->d_inode->i_mapping;
-
-	if (sock->file)
-		BUG();
-	sock->file = file;
-	file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
-	file->f_mode = 3;
-	file->f_flags = O_RDWR;
-	file->f_pos = 0;
-
-	return file;
-}
-
 int sock_map_fd(struct socket *sock)
 {
 	int fd;
-	struct file *file;
- 
+	struct qstr this;
+	char name[32];
+
 	/*
 	 *	Find a file descriptor suitable for return to the user. 
 	 */
-  
+
 	fd = get_unused_fd();
-	if (fd < 0)
-		return fd;
-  
-	file = sock_map_file(sock);
-	if (IS_ERR(file)) {
-		put_unused_fd(fd);
-		return PTR_ERR(file);
+	if (fd >= 0) {
+		struct file *file = get_empty_filp();
+
+		if (!file) {
+			put_unused_fd(fd);
+			fd = -ENFILE;
+			goto out;
+		}
+
+		sprintf(name, "[%lu]", SOCK_INODE(sock)->i_ino);
+		this.name = name;
+		this.len = strlen(name);
+		this.hash = SOCK_INODE(sock)->i_ino;
+
+		file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
+		if (!file->f_dentry) {
+			put_filp(file);
+			put_unused_fd(fd);
+			fd = -ENOMEM;
+			goto out;
+		}
+		file->f_dentry->d_op = &sockfs_dentry_operations;
+		d_add(file->f_dentry, SOCK_INODE(sock));
+		file->f_vfsmnt = mntget(sock_mnt);
+		file->f_mapping = file->f_dentry->d_inode->i_mapping;
+
+		sock->file = file;
+		file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
+		file->f_mode = 3;
+		file->f_flags = O_RDWR;
+		file->f_pos = 0;
+		fd_install(fd, file);
 	}
-	fd_install(fd, file);
-  
+
+out:
 	return fd;
 }
 
@@ -575,9 +563,11 @@ static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 int sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 {
 	struct kiocb iocb;
+	struct sock_iocb siocb;
 	int ret;
 
 	init_sync_kiocb(&iocb, NULL);
+	iocb.private = &siocb;
 	ret = __sock_sendmsg(&iocb, sock, msg, size);
 	if (-EIOCBQUEUED == ret)
 		ret = wait_on_sync_kiocb(&iocb);
@@ -617,13 +607,20 @@ int sock_recvmsg(struct socket *sock, struct msghdr *msg,
 		 size_t size, int flags)
 {
 	struct kiocb iocb;
+	struct sock_iocb siocb;
 	int ret;
 
         init_sync_kiocb(&iocb, NULL);
+	iocb.private = &siocb;
 	ret = __sock_recvmsg(&iocb, sock, msg, size, flags);
 	if (-EIOCBQUEUED == ret)
 		ret = wait_on_sync_kiocb(&iocb);
 	return ret;
+}
+
+static void sock_aio_dtor(struct kiocb *iocb)
+{
+	kfree(iocb->private);
 }
 
 /*
@@ -634,7 +631,7 @@ int sock_recvmsg(struct socket *sock, struct msghdr *msg,
 static ssize_t sock_aio_read(struct kiocb *iocb, char __user *ubuf,
 			 size_t size, loff_t pos)
 {
-	struct sock_iocb *x = kiocb_to_siocb(iocb);
+	struct sock_iocb *x, siocb;
 	struct socket *sock;
 	int flags;
 
@@ -643,6 +640,16 @@ static ssize_t sock_aio_read(struct kiocb *iocb, char __user *ubuf,
 	if (size==0)		/* Match SYS5 behaviour */
 		return 0;
 
+	if (is_sync_kiocb(iocb))
+		x = &siocb;
+	else {
+		x = kmalloc(sizeof(struct sock_iocb), GFP_KERNEL);
+		if (!x)
+			return -ENOMEM;
+		iocb->ki_dtor = sock_aio_dtor;
+	}
+	iocb->private = x;
+	x->kiocb = iocb;
 	sock = SOCKET_I(iocb->ki_filp->f_dentry->d_inode); 
 
 	x->async_msg.msg_name = NULL;
@@ -667,7 +674,7 @@ static ssize_t sock_aio_read(struct kiocb *iocb, char __user *ubuf,
 static ssize_t sock_aio_write(struct kiocb *iocb, const char __user *ubuf,
 			  size_t size, loff_t pos)
 {
-	struct sock_iocb *x = kiocb_to_siocb(iocb);
+	struct sock_iocb *x, siocb;
 	struct socket *sock;
 	
 	if (pos != 0)
@@ -675,6 +682,16 @@ static ssize_t sock_aio_write(struct kiocb *iocb, const char __user *ubuf,
 	if(size==0)		/* Match SYS5 behaviour */
 		return 0;
 
+	if (is_sync_kiocb(iocb))
+		x = &siocb;
+	else {
+		x = kmalloc(sizeof(struct sock_iocb), GFP_KERNEL);
+		if (!x)
+			return -ENOMEM;
+		iocb->ki_dtor = sock_aio_dtor;
+	}
+	iocb->private = x;
+	x->kiocb = iocb;
 	sock = SOCKET_I(iocb->ki_filp->f_dentry->d_inode); 
 
 	x->async_msg.msg_name = NULL;
@@ -1014,8 +1031,6 @@ static int sock_fasync(int fd, struct file *filp, int on)
 	}
 
 out:
-	if (sock->sk != sk)
-		BUG();
 	release_sock(sock->sk);
 	return 0;
 }
@@ -2052,51 +2067,6 @@ void __init sock_init(void)
 #endif
 }
 
-int tux_Dprintk;
-int tux_TDprintk;
-
-#ifdef CONFIG_TUX_MODULE
-
-asmlinkage long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info) = NULL;
-
-struct module *tux_module = NULL;
-spinlock_t tux_module_lock = SPIN_LOCK_UNLOCKED;
-
-asmlinkage long sys_tux (unsigned int action, user_req_t *u_info)
-{
-	int ret;
-
-	if (current->tux_info)
-		return sys_tux_ptr(action, u_info);
-
-	ret = -ENOSYS;
-	spin_lock(&tux_module_lock);
-	if (!tux_module)
-		goto out_unlock;
-	if (!try_module_get(tux_module))
-		goto out_unlock;
-	spin_unlock(&tux_module_lock);
-
-	if (!sys_tux_ptr)
-		TUX_BUG();
-	ret = sys_tux_ptr(action, u_info);
-
-	spin_lock(&tux_module_lock);
-	module_put(tux_module);
-out_unlock:
-	spin_unlock(&tux_module_lock);
-
-	return ret;
-}
-
-EXPORT_SYMBOL_GPL(tux_module);
-EXPORT_SYMBOL_GPL(tux_module_lock);
-EXPORT_SYMBOL_GPL(sys_tux_ptr);
-
-EXPORT_SYMBOL_GPL(tux_Dprintk);
-EXPORT_SYMBOL_GPL(tux_TDprintk);
-
-#endif
 #ifdef CONFIG_PROC_FS
 void socket_seq_show(struct seq_file *seq)
 {

@@ -627,5 +627,8 @@ extern int indirect_uaccess;
 #define strncpy_from_user direct_strncpy_from_user
 
 #endif /* CONFIG_X86_UACCESS_INDIRECT */
+#define __copy_to_user_inatomic __copy_to_user
+#define __copy_from_user_inatomic __copy_from_user
+
 
 #endif /* __i386_UACCESS_H */

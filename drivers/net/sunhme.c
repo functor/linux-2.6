@@ -528,8 +528,10 @@ static void happy_meal_tcvr_write(struct happy_meal *hp,
 	ASD(("happy_meal_tcvr_write: reg=0x%02x value=%04x\n", reg, value));
 
 	/* Welcome to Sun Microsystems, can I take your order please? */
-	if (!(hp->happy_flags & HFLAG_FENABLE))
-		return happy_meal_bb_write(hp, tregs, reg, value);
+	if (!(hp->happy_flags & HFLAG_FENABLE)) {
+		happy_meal_bb_write(hp, tregs, reg, value);
+		return;
+	}
 
 	/* Would you like fries with that? */
 	hme_write32(hp, tregs + TCVR_FRAME,
@@ -2922,7 +2924,8 @@ static int is_quattro_p(struct pci_dev *pdev)
 	struct list_head *tmp;
 	int n_hmes;
 
-	if (busdev->vendor != PCI_VENDOR_ID_DEC ||
+	if (busdev == NULL ||
+	    busdev->vendor != PCI_VENDOR_ID_DEC ||
 	    busdev->device != PCI_DEVICE_ID_DEC_21153)
 		return 0;
 

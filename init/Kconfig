@@ -77,6 +77,7 @@ config SWAP
 
 config SYSVIPC
 	bool "System V IPC"
+	depends on MMU
 	---help---
 	  Inter Process Communication is a suite of library functions and
 	  system calls which let processes (running programs) synchronize and
@@ -275,7 +276,7 @@ config AUDIT
 
 config AUDITSYSCALL
 	bool "Enable system-call auditing support"
-	depends on AUDIT && (X86 || PPC64 || ARCH_S390)
+	depends on AUDIT && (X86 || PPC64 || ARCH_S390 || IA64)
 	default y if SECURITY_SELINUX
 	default n
 	help
@@ -323,26 +324,20 @@ config IKCONFIG
 	bool "Kernel .config support"
 	---help---
 	  This option enables the complete Linux kernel ".config" file
-	  contents, information on compiler used to build the kernel,
-	  kernel running when this kernel was built and kernel version
-	  from Makefile to be saved in the kernel. It provides documentation
+	  contents to be saved in the kernel. It provides documentation
 	  of which kernel options are used in a running kernel or in an
 	  on-disk kernel.  This information can be extracted from the kernel
 	  image file with the script scripts/extract-ikconfig and used as
 	  input to rebuild the current kernel or to build another kernel.
 	  It can also be extracted from a running kernel by reading
-	  /proc/config.gz and /proc/config_built_with, if enabled (below).
-	  /proc/config.gz will list the configuration that was used
-	  to build the kernel and /proc/config_built_with will list
-	  information on the compiler and host machine that was used to
-	  build the kernel.
+	  /proc/config.gz if enabled (below).
 
 config IKCONFIG_PROC
 	bool "Enable access to .config through /proc/config.gz"
 	depends on IKCONFIG && PROC_FS
 	---help---
-	  This option enables access to kernel configuration file and build
-	  information through /proc/config.gz.
+	  This option enables access to the kernel configuration file
+	  through /proc/config.gz.
 
 
 menuconfig EMBEDDED
@@ -380,6 +375,17 @@ config KALLSYMS_ALL
 	   don't care about adding 300k to the size of your kernel.
 
 	   Say N.
+
+config KALLSYMS_EXTRA_PASS
+	bool "Do an extra kallsyms pass"
+	depends on KALLSYMS
+	help
+	   If kallsyms is not working correctly, the build will fail with
+	   inconsistent kallsyms data.  If that occurs, log a bug report and
+	   turn on KALLSYMS_EXTRA_PASS which should result in a stable build.
+	   Always say N here unless you find a bug in kallsyms, which must be
+	   reported.  KALLSYMS_EXTRA_PASS is only a temporary workaround while
+	   you wait for kallsyms to be fixed.
 
 config FUTEX
 	bool "Enable futex support" if EMBEDDED
@@ -474,6 +480,21 @@ config MODVERSIONS
 	  to the modules to (hopefully) spot any changes which would
 	  make them incompatible with the kernel you are running.  If
 	  unsure, say N.
+
+config MODULE_SIG
+	bool "Module signature verification (EXPERIMENTAL)"
+	depends on MODULES && EXPERIMENTAL
+	select CRYPTO_SHA1
+	select CRYPTO_SIGNATURE
+	help
+	  Check modules for valid signatures upon load.
+
+config MODULE_SIG_FORCE
+	bool "Required modules to be validly signed (EXPERIMENTAL)"
+	depends on MODULE_SIG
+	help
+	  Reject unsigned modules or signed modules for which we don't have a
+	  key.
 
 config KMOD
 	bool "Automatic kernel module loading"

@@ -2205,14 +2205,14 @@ static int tcp_v4_init_sock(struct sock *sk)
 	return 0;
 }
 
-static int tcp_v4_destroy_sock(struct sock *sk)
+int tcp_v4_destroy_sock(struct sock *sk)
 {
 	struct tcp_opt *tp = tcp_sk(sk);
 
 	tcp_clear_xmit_timers(sk);
 
 	/* Cleanup up the write buffer. */
-  	tcp_writequeue_purge(sk);
+  	sk_stream_writequeue_purge(sk);
 
 	/* Cleans up our, hopefully empty, out_of_order_queue. */
   	__skb_queue_purge(&tp->out_of_order_queue);
@@ -2224,14 +2224,12 @@ static int tcp_v4_destroy_sock(struct sock *sk)
 	if (tp->bind_hash)
 		tcp_put_port(sk);
 
-	/* If sendmsg cached page exists, toss it. */
-	if (inet_sk(sk)->sndmsg_page)
-		__free_page(inet_sk(sk)->sndmsg_page);
-
 	atomic_dec(&tcp_sockets_allocated);
 
 	return 0;
 }
+
+EXPORT_SYMBOL(tcp_v4_destroy_sock);
 
 #ifdef CONFIG_PROC_FS
 /* Proc filesystem TCP sock list dumping. */
@@ -2706,23 +2704,31 @@ void tcp4_proc_exit(void)
 #endif /* CONFIG_PROC_FS */
 
 struct proto tcp_prot = {
-	.name		=	"TCP",
-	.close		=	tcp_close,
-	.connect	=	tcp_v4_connect,
-	.disconnect	=	tcp_disconnect,
-	.accept		=	tcp_accept,
-	.ioctl		=	tcp_ioctl,
-	.init		=	tcp_v4_init_sock,
-	.destroy	=	tcp_v4_destroy_sock,
-	.shutdown	=	tcp_shutdown,
-	.setsockopt	=	tcp_setsockopt,
-	.getsockopt	=	tcp_getsockopt,
-	.sendmsg	=	tcp_sendmsg,
-	.recvmsg	=	tcp_recvmsg,
-	.backlog_rcv	=	tcp_v4_do_rcv,
-	.hash		=	tcp_v4_hash,
-	.unhash		=	tcp_unhash,
-	.get_port	=	tcp_v4_get_port,
+	.name			= "TCP",
+	.close			= tcp_close,
+	.connect		= tcp_v4_connect,
+	.disconnect		= tcp_disconnect,
+	.accept			= tcp_accept,
+	.ioctl			= tcp_ioctl,
+	.init			= tcp_v4_init_sock,
+	.destroy		= tcp_v4_destroy_sock,
+	.shutdown		= tcp_shutdown,
+	.setsockopt		= tcp_setsockopt,
+	.getsockopt		= tcp_getsockopt,
+	.sendmsg		= tcp_sendmsg,
+	.recvmsg		= tcp_recvmsg,
+	.backlog_rcv		= tcp_v4_do_rcv,
+	.hash			= tcp_v4_hash,
+	.unhash			= tcp_unhash,
+	.get_port		= tcp_v4_get_port,
+	.enter_memory_pressure	= tcp_enter_memory_pressure,
+	.sockets_allocated	= &tcp_sockets_allocated,
+	.memory_allocated	= &tcp_memory_allocated,
+	.memory_pressure	= &tcp_memory_pressure,
+	.sysctl_mem		= sysctl_tcp_mem,
+	.sysctl_wmem		= sysctl_tcp_wmem,
+	.sysctl_rmem		= sysctl_tcp_rmem,
+	.max_header		= MAX_TCP_HEADER,
 };
 
 

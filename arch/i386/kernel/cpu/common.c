@@ -329,7 +329,7 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 
 	generic_identify(c);
 
-	printk(KERN_DEBUG "CPU:     After generic identify, caps: %08lx %08lx %08lx %08lx\n",
+	printk(KERN_DEBUG "CPU: After generic identify, caps: %08lx %08lx %08lx %08lx\n",
 		c->x86_capability[0],
 		c->x86_capability[1],
 		c->x86_capability[2],
@@ -338,7 +338,7 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 	if (this_cpu->c_identify) {
 		this_cpu->c_identify(c);
 
-	printk(KERN_DEBUG "CPU:     After vendor identify, caps: %08lx %08lx %08lx %08lx\n",
+	printk(KERN_DEBUG "CPU: After vendor identify, caps:  %08lx %08lx %08lx %08lx\n",
 		c->x86_capability[0],
 		c->x86_capability[1],
 		c->x86_capability[2],
@@ -379,8 +379,9 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 	if (disable_pse)
 		clear_bit(X86_FEATURE_PSE, c->x86_capability);
 
-	/* hack: disable SEP unconditionally. */
-	clear_bit(X86_FEATURE_SEP, c->x86_capability);
+	/* hack: disable SEP for non-NX cpus; SEP breaks Execshield. */
+	if (!test_bit(X86_FEATURE_NX, c->x86_capability)) 
+		clear_bit(X86_FEATURE_SEP, c->x86_capability);
 
 	/* If the model name is still unset, do table lookup. */
 	if ( !c->x86_model_id[0] ) {
@@ -396,7 +397,7 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 
 	/* Now the feature flags better reflect actual CPU features! */
 
-	printk(KERN_DEBUG "CPU:     After all inits, caps: %08lx %08lx %08lx %08lx\n",
+	printk(KERN_DEBUG "CPU: After all inits, caps:        %08lx %08lx %08lx %08lx\n",
 	       c->x86_capability[0],
 	       c->x86_capability[1],
 	       c->x86_capability[2],
@@ -476,7 +477,6 @@ void early_cpu_detect(void);
 
 void __init early_cpu_init(void)
 {
-	early_cpu_detect();
 	intel_cpu_init();
 	cyrix_init_cpu();
 	nsc_init_cpu();
@@ -486,6 +486,7 @@ void __init early_cpu_init(void)
 	rise_init_cpu();
 	nexgen_init_cpu();
 	umc_init_cpu();
+	early_cpu_detect();
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 	/* pse is not compatible with on-the-fly unmapping,

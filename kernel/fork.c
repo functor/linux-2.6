@@ -920,7 +920,6 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	p = dup_task_struct(current);
 	if (!p)
 		goto fork_out;
-	p->tux_info = NULL;
 
 	p->vx_info = NULL;
 	set_vx_info(&p->vx_info, current->vx_info);

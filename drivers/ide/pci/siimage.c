@@ -21,6 +21,7 @@
  *	if neccessary
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -1006,7 +1007,7 @@ static void __devinit init_iops_siimage(ide_hwif_t *hwif)
 	pci_read_config_dword(dev, PCI_CLASS_REVISION, &class_rev);
 	class_rev &= 0xff;
 	
-	hwif->hwif_data = 0;
+	hwif->hwif_data = NULL;
 
 	hwif->rqsize = 128;
 	if (is_sata(hwif) && is_dev_seagate_sata(&hwif->drives[0]))
@@ -1127,8 +1128,10 @@ static int __devinit siimage_init_one(struct pci_dev *dev, const struct pci_devi
 
 static struct pci_device_id siimage_pci_tbl[] = {
 	{ PCI_VENDOR_ID_CMD, PCI_DEVICE_ID_SII_680,  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+#ifdef CONFIG_BLK_DEV_IDE_SATA
 	{ PCI_VENDOR_ID_CMD, PCI_DEVICE_ID_SII_3112, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 1},
 	{ PCI_VENDOR_ID_CMD, PCI_DEVICE_ID_SII_1210SA, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 2},
+#endif
 	{ 0, },
 };
 MODULE_DEVICE_TABLE(pci, siimage_pci_tbl);

@@ -1634,7 +1634,7 @@ static void ace_tasklet(unsigned long dev)
 	cur_size = atomic_read(&ap->cur_rx_bufs);
 	if ((cur_size < RX_LOW_STD_THRES) &&
 	    !test_and_set_bit(0, &ap->std_refill_busy)) {
-#if DEBUG
+#ifdef DEBUG
 		printk("refilling buffers (current %i)\n", cur_size);
 #endif
 		ace_load_std_rx_ring(ap, RX_RING_SIZE - cur_size);
@@ -1644,7 +1644,7 @@ static void ace_tasklet(unsigned long dev)
 		cur_size = atomic_read(&ap->cur_mini_bufs);
 		if ((cur_size < RX_LOW_MINI_THRES) &&
 		    !test_and_set_bit(0, &ap->mini_refill_busy)) {
-#if DEBUG
+#ifdef DEBUG
 			printk("refilling mini buffers (current %i)\n",
 			       cur_size);
 #endif
@@ -1655,7 +1655,7 @@ static void ace_tasklet(unsigned long dev)
 	cur_size = atomic_read(&ap->cur_jumbo_bufs);
 	if (ap->jumbo && (cur_size < RX_LOW_JUMBO_THRES) &&
 	    !test_and_set_bit(0, &ap->jumbo_refill_busy)) {
-#if DEBUG
+#ifdef DEBUG
 		printk("refilling jumbo buffers (current %i)\n", cur_size);
 #endif
 		ace_load_jumbo_rx_ring(ap, RX_JUMBO_SIZE - cur_size);
@@ -2007,6 +2007,11 @@ static void ace_rx_int(struct net_device *dev, u32 rxretprd, u32 rxretcsm)
 		int bd_flags, desc_type, mapsize;
 		u16 csum;
 
+
+		/* make sure the rx descriptor isn't read before rxretprd */
+		if (idx == rxretcsm) 
+			rmb();
+
 		retdesc = &ap->rx_return_ring[idx];
 		skbidx = retdesc->idx;
 		bd_flags = retdesc->flags;
@@ -2255,7 +2260,7 @@ static irqreturn_t ace_interrupt(int irq, void *dev_id, struct pt_regs *ptregs)
 		if (cur_size < RX_LOW_STD_THRES) {
 			if ((cur_size < RX_PANIC_STD_THRES) &&
 			    !test_and_set_bit(0, &ap->std_refill_busy)) {
-#if DEBUG
+#ifdef DEBUG
 				printk("low on std buffers %i\n", cur_size);
 #endif
 				ace_load_std_rx_ring(ap,
@@ -2270,7 +2275,7 @@ static irqreturn_t ace_interrupt(int irq, void *dev_id, struct pt_regs *ptregs)
 				if ((cur_size < RX_PANIC_MINI_THRES) &&
 				    !test_and_set_bit(0,
 						      &ap->mini_refill_busy)) {
-#if DEBUG
+#ifdef DEBUG
 					printk("low on mini buffers %i\n",
 					       cur_size);
 #endif
@@ -2286,7 +2291,7 @@ static irqreturn_t ace_interrupt(int irq, void *dev_id, struct pt_regs *ptregs)
 				if ((cur_size < RX_PANIC_JUMBO_THRES) &&
 				    !test_and_set_bit(0,
 						      &ap->jumbo_refill_busy)){
-#if DEBUG
+#ifdef DEBUG
 					printk("low on jumbo buffers %i\n",
 					       cur_size);
 #endif

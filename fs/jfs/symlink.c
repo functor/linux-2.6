@@ -17,6 +17,7 @@
  */
 
 #include <linux/fs.h>
+#include <linux/namei.h>
 #include "jfs_incore.h"
 #include "jfs_xattr.h"
 

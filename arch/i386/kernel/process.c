@@ -252,6 +252,8 @@ void show_regs(struct pt_regs * regs)
 	show_trace(NULL, &regs->esp);
 }
 
+EXPORT_SYMBOL_GPL(show_regs);
+
 /*
  * This gets run with %ebx containing the
  * function to call, and %edx containing
@@ -358,7 +360,7 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 	int err, i;
 
 	childregs = ((struct pt_regs *) (THREAD_SIZE + (unsigned long) p->thread_info)) - 1;
-	struct_cpy(childregs, regs);
+	*childregs = *regs;
 	childregs->eax = 0;
 	childregs->esp = esp;
 	p->set_child_tid = p->clear_child_tid = NULL;

@@ -38,7 +38,7 @@ static inline struct vx_info *__get_vx_info(struct vx_info *vxi,
 
 
 #define	free_vx_info(i)	\
-	call_rcu(&i->vx_rcu, rcu_free_vx_info, i);
+	call_rcu(&i->vx_rcu, rcu_free_vx_info);
 
 #define put_vx_info(i)	__put_vx_info(i,__FILE__,__LINE__)
 

@@ -288,26 +288,26 @@
 #define __NR_clock_nanosleep		(__NR_Linux + 265)
 #define __NR_tgkill			(__NR_Linux + 266)
 #define __NR_utimes			(__NR_Linux + 267)
-#define __NR_vserver			(__NR_Linux + 273)
-#define __NR_mbind			(__NR_Linux + 274)
-#define __NR_get_mempolicy		(__NR_Linux + 275)
-#define __NR_set_mempolicy		(__NR_Linux + 276)
-#define __NR_mq_open			(__NR_Linux + 277)
-#define __NR_mq_unlink			(__NR_Linux + 278)
-#define __NR_mq_timedsend		(__NR_Linux + 279)
-#define __NR_mq_timedreceive		(__NR_Linux + 280)
-#define __NR_mq_notify			(__NR_Linux + 281)
-#define __NR_mq_getsetattr		(__NR_Linux + 282)
+#define __NR_mbind			(__NR_Linux + 268)
+#define __NR_get_mempolicy		(__NR_Linux + 269)
+#define __NR_set_mempolicy		(__NR_Linux + 270)
+#define __NR_mq_open			(__NR_Linux + 271)
+#define __NR_mq_unlink			(__NR_Linux + 272)
+#define __NR_mq_timedsend		(__NR_Linux + 273)
+#define __NR_mq_timedreceive		(__NR_Linux + 274)
+#define __NR_mq_notify			(__NR_Linux + 275)
+#define __NR_mq_getsetattr		(__NR_Linux + 276)
+#define __NR_vserver			(__NR_Linux + 277)
 
 /*
  * Offset of the last Linux o32 flavoured syscall
  */
-#define __NR_Linux_syscalls		282
+#define __NR_Linux_syscalls		277
 
 #endif /* _MIPS_SIM == _MIPS_SIM_ABI32 */
 
 #define __NR_O32_Linux			4000
-#define __NR_O32_Linux_syscalls		276
+#define __NR_O32_Linux_syscalls		277
 
 #if _MIPS_SIM == _MIPS_SIM_ABI64
 
@@ -551,16 +551,17 @@
 #define __NR_mq_timedreceive		(__NR_Linux + 233)
 #define __NR_mq_notify			(__NR_Linux + 234)
 #define __NR_mq_getsetattr		(__NR_Linux + 235)
+#define __NR_vserver			(__NR_Linux + 236)
 
 /*
  * Offset of the last Linux flavoured syscall
  */
-#define __NR_Linux_syscalls		235
+#define __NR_Linux_syscalls		236
 
 #endif /* _MIPS_SIM == _MIPS_SIM_ABI64 */
 
 #define __NR_64_Linux			5000
-#define __NR_64_Linux_syscalls		235
+#define __NR_64_Linux_syscalls		236
 
 #if _MIPS_SIM == _MIPS_SIM_NABI32
 
@@ -808,16 +809,17 @@
 #define __NR_mq_timedreceive		(__NR_Linux + 237)
 #define __NR_mq_notify			(__NR_Linux + 238)
 #define __NR_mq_getsetattr		(__NR_Linux + 239)
+#define __NR_vserver			(__NR_Linux + 240)
 
 /*
  * Offset of the last N32 flavoured syscall
  */
-#define __NR_Linux_syscalls		239
+#define __NR_Linux_syscalls		240
 
 #endif /* _MIPS_SIM == _MIPS_SIM_NABI32 */
 
 #define __NR_N32_Linux			6000
-#define __NR_N32_Linux_syscalls		239
+#define __NR_N32_Linux_syscalls		240
 
 #ifndef __ASSEMBLY__
 

@@ -276,7 +276,7 @@ static void wake_futex(struct futex_q *q)
 	 * The waiting task can free the futex_q as soon as this is written,
 	 * without taking any locks.  This must come last.
 	 */
-	q->lock_ptr = 0;
+	q->lock_ptr = NULL;
 }
 
 /*
@@ -704,7 +704,7 @@ asmlinkage long sys_futex(u32 __user *uaddr, int op, int val,
 	 * requeue parameter in 'utime' if op == FUTEX_REQUEUE.
 	 */
 	if (op >= FUTEX_REQUEUE)
-		val2 = (int) (long) utime;
+		val2 = (int) (unsigned long) utime;
 
 	return do_futex((unsigned long)uaddr, op, val, timeout,
 			(unsigned long)uaddr2, val2, val3);

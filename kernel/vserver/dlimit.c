@@ -153,12 +153,12 @@ struct dl_info *locate_dl_info(struct super_block *sb, xid_t xid)
         return dli;
 }
 
-void rcu_free_dl_info(void *obj)
+void rcu_free_dl_info(struct rcu_head *head)
 {
-	struct dl_info *dli = obj;
+        struct dl_info *dli = container_of(head, struct dl_info, dl_rcu);
 	int usecnt, refcnt;
 
-	BUG_ON(!dli);
+	BUG_ON(!dli || !head);
 
 	usecnt = atomic_read(&dli->dl_usecnt);
 	BUG_ON(usecnt < 0);

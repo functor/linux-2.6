@@ -235,8 +235,9 @@ static void ncp_set_attr(struct inode *inode, struct ncp_entry_info *nwinfo)
 
 #if defined(CONFIG_NCPFS_EXTRAS) || defined(CONFIG_NCPFS_NFS_NS)
 static struct inode_operations ncp_symlink_inode_operations = {
-	.readlink	= page_readlink,
-	.follow_link	= page_follow_link,
+	.readlink	= generic_readlink,
+	.follow_link	= page_follow_link_light,
+	.put_link	= page_put_link,
 	.setattr	= ncp_notify_change,
 };
 #endif
@@ -873,7 +874,9 @@ int ncp_notify_change(struct dentry *dentry, struct iattr *attr)
 				tmpattr.ia_valid = ATTR_MODE;
 				tmpattr.ia_mode = attr->ia_mode;
 
-				inode_setattr(inode, &tmpattr);
+				result = inode_setattr(inode, &tmpattr);
+				if (result)
+					goto out;
 			}
 		}
 #endif
@@ -899,13 +902,17 @@ int ncp_notify_change(struct dentry *dentry, struct iattr *attr)
 		   closing the file */
 		ncp_inode_close(inode);
 		result = ncp_make_closed(inode);
+		if (result)
+			goto out;
 		{
 			struct iattr tmpattr;
 			
 			tmpattr.ia_valid = ATTR_SIZE;
 			tmpattr.ia_size = attr->ia_size;
 			
-			inode_setattr(inode, &tmpattr);
+			result = inode_setattr(inode, &tmpattr);
+			if (result)
+				goto out;
 		}
 	}
 	if ((attr->ia_valid & ATTR_CTIME) != 0) {

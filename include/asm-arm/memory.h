@@ -60,6 +60,20 @@
 #ifndef __ASSEMBLY__
 
 /*
+ * The DMA mask corresponding to the maximum bus address allocatable
+ * using GFP_DMA.  The default here places no restriction on DMA
+ * allocations.  This must be the smallest DMA mask in the system,
+ * so a successful GFP_DMA allocation will always satisfy this.
+ */
+#ifndef ISA_DMA_THRESHOLD
+#define ISA_DMA_THRESHOLD	(0xffffffffULL)
+#endif
+
+#ifndef arch_adjust_zones
+#define arch_adjust_zones(node,size,holes) do { } while (0)
+#endif
+
+/*
  * PFNs are used to describe any physical page; this means
  * PFN 0 == physical address 0.
  *
@@ -159,9 +173,18 @@ static inline void *phys_to_virt(unsigned long x)
 #define page_to_phys(page)	(page_to_pfn(page) << PAGE_SHIFT)
 
 /*
+ * Optional device DMA address remapping. Do _not_ use directly!
  * We should really eliminate virt_to_bus() here - it's deprecated.
  */
-#define page_to_bus(page)	(virt_to_bus(page_address(page)))
+#ifndef __arch_page_to_dma
+#define page_to_dma(dev, page)		((dma_addr_t)__virt_to_bus(page_address(page)))
+#define dma_to_virt(dev, addr)		(__bus_to_virt(addr))
+#define virt_to_dma(dev, addr)		(__virt_to_bus(addr))
+#else
+#define page_to_dma(dev, page)		(__arch_page_to_dma(dev, page))
+#define dma_to_virt(dev, addr)		(__arch_dma_to_virt(dev, addr))
+#define virt_to_dma(dev, addr)		(__arch_virt_to_dma(dev, addr))
+#endif
 
 #endif
 

@@ -4,7 +4,7 @@
 #include <linux/jiffies.h>
 #include <asm/atomic.h>
 #include <asm/param.h>
-#include <asm/cpumask.h>
+#include <linux/cpumask.h>
 
 /* context sub struct */
 
@@ -24,15 +24,15 @@ struct _vx_sched {
 
 static inline void vx_info_init_sched(struct _vx_sched *sched)
 {
-        /* scheduling; hard code starting values as constants */
-        sched->fill_rate	= 1;
-        sched->interval		= 4;
-        sched->tokens_min	= HZ >> 4;
-        sched->tokens_max	= HZ >> 1;
-        sched->jiffies		= jiffies;
-        sched->tokens_lock	= SPIN_LOCK_UNLOCKED;
+	/* scheduling; hard code starting values as constants */
+	sched->fill_rate	= 1;
+	sched->interval		= 4;
+	sched->tokens_min	= HZ >> 4;
+	sched->tokens_max	= HZ >> 1;
+	sched->jiffies		= jiffies;
+	sched->tokens_lock	= SPIN_LOCK_UNLOCKED;
 
-        atomic_set(&sched->tokens, HZ >> 2);
+	atomic_set(&sched->tokens, HZ >> 2);
 	sched->cpus_allowed	= CPU_MASK_ALL;
 }
 
@@ -50,7 +50,7 @@ static inline int vx_info_proc_sched(struct _vx_sched *sched, char *buffer)
 		"Interval:\t%8d\n"		
 		"TokensMin:\t%8d\n"
 		"TokensMax:\t%8d\n"
-		,sched->ticks
+		,(unsigned long long)sched->ticks
 		,atomic_read(&sched->tokens)
 		,sched->fill_rate
 		,sched->interval
@@ -119,9 +119,9 @@ static inline int vx_need_resched(struct task_struct *p)
 		int tokens;
 
 		p->time_slice--;
-		if (atomic_read(&vxi->vx_refcount) < 1)
+		if (atomic_read(&vxi->vx_usecnt) < 1)
 			printk("need_resched: p=%p, s=%ld, ref=%d, id=%d/%d\n",
-				p, p->state, atomic_read(&vxi->vx_refcount),
+				p, p->state, atomic_read(&vxi->vx_usecnt),
 				vxi->vx_id, p->xid);
 		if ((tokens = vx_tokens_avail(vxi)) > 0)
 			vx_consume_token(vxi);

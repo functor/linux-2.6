@@ -32,12 +32,9 @@
 #include <linux/in_route.h>
 #include <net/route.h>
 #include <net/arp.h>
-
-#ifndef _SNMP_H
 #include <net/snmp.h>
-#endif
 
-#include <net/sock.h>	/* struct sock */
+struct sock;
 
 struct inet_skb_parm
 {

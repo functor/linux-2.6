@@ -8,127 +8,139 @@
  *  V0.01  broken out from vcontext V0.05
  *  V0.02  cleaned up implementation
  *  V0.03  added equiv nx commands
+ *  V0.04  switch to RCU based hash
  *
  */
 
 #include <linux/config.h>
 #include <linux/slab.h>
-#include <linux/vserver/network.h>
-#include <linux/ninline.h>
+#include <linux/vserver.h>
+#include <linux/vs_base.h>
+#include <linux/vs_network.h>
+#include <linux/rcupdate.h>
 
 #include <asm/errno.h>
 
 
-LIST_HEAD(nx_infos);
+/*	__alloc_nx_info()
 
-spinlock_t nxlist_lock
-	__cacheline_aligned_in_smp = SPIN_LOCK_UNLOCKED;
+	* allocate an initialized nx_info struct
+	* doesn't make it visible (hash)			*/
 
-
-/*
- *	struct nx_info allocation and deallocation
- */
-
-static struct nx_info *alloc_nx_info(void)
+static struct nx_info *__alloc_nx_info(nid_t nid)
 {
 	struct nx_info *new = NULL;
 	
 	nxdprintk("alloc_nx_info()\n");
+
 	/* would this benefit from a slab cache? */
 	new = kmalloc(sizeof(struct nx_info), GFP_KERNEL);
 	if (!new)
 		return 0;
 	
 	memset (new, 0, sizeof(struct nx_info));
+	new->nx_id = nid;
+	INIT_RCU_HEAD(&new->nx_rcu);
+	INIT_HLIST_NODE(&new->nx_hlist);
+	atomic_set(&new->nx_refcnt, 0);
+	atomic_set(&new->nx_usecnt, 0);
+
 	/* rest of init goes here */
 	
 	nxdprintk("alloc_nx_info() = %p\n", new);
 	return new;
 }
 
-void free_nx_info(struct nx_info *nxi)
+/*	__dealloc_nx_info()
+
+	* final disposal of nx_info				*/
+
+static void __dealloc_nx_info(struct nx_info *nxi)
 {
-	nxdprintk("free_nx_info(%p)\n", nxi);
+	nxdprintk("dealloc_nx_info(%p)\n", nxi);
+
+	nxi->nx_hlist.next = LIST_POISON1;
+	nxi->nx_id = -1;
+	
+	BUG_ON(atomic_read(&nxi->nx_usecnt));
+	BUG_ON(atomic_read(&nxi->nx_refcnt));
+
 	kfree(nxi);
 }
 
-struct nx_info *create_nx_info(void)
+
+/*	hash table for nx_info hash */
+
+#define	NX_HASH_SIZE	13
+
+struct hlist_head nx_info_hash[NX_HASH_SIZE];
+
+static spinlock_t nx_info_hash_lock = SPIN_LOCK_UNLOCKED;
+
+
+static inline unsigned int __hashval(nid_t nid)
 {
-	struct nx_info *new;
-	static int gnid = 1;
-	
-	nxdprintk("create_nx_info()\n");
-	if (!(new = alloc_nx_info()))
-		return 0;
-
-	spin_lock(&nxlist_lock);
-
-	/* new ip info */
-	atomic_set(&new->nx_refcount, 1);
-	new->nx_id = gnid++;
-	list_add(&new->nx_list, &nx_infos);
-
-	spin_unlock(&nxlist_lock);
-	return new;
+	return (nid % NX_HASH_SIZE);
 }
 
 
-/*
- *	struct nx_info search by id
- *	assumes nxlist_lock is held
- */
 
-static __inline__ struct nx_info *__find_nx_info(int id)
+/*	__hash_nx_info()
+
+	* add the nxi to the global hash table
+	* requires the hash_lock to be held			*/
+
+static inline void __hash_nx_info(struct nx_info *nxi)
 {
-	struct nx_info *nxi;
+	struct hlist_head *head;
+	
+	nxdprintk("__hash_nx_info: %p[#%d]\n", nxi, nxi->nx_id);
+	get_nx_info(nxi);
+	head = &nx_info_hash[__hashval(nxi->nx_id)];
+	hlist_add_head_rcu(&nxi->nx_hlist, head);
+}
 
-	list_for_each_entry(nxi, &nx_infos, nx_list)
-		if (nxi->nx_id == id)
+/*	__unhash_nx_info()
+
+	* remove the nxi from the global hash table
+	* requires the hash_lock to be held			*/
+
+static inline void __unhash_nx_info(struct nx_info *nxi)
+{
+	nxdprintk("__unhash_nx_info: %p[#%d]\n", nxi, nxi->nx_id);
+	hlist_del_rcu(&nxi->nx_hlist);
+	put_nx_info(nxi);
+}
+
+
+/*	__lookup_nx_info()
+
+	* requires the rcu_read_lock()
+	* doesn't increment the nx_refcnt			*/
+
+static inline struct nx_info *__lookup_nx_info(nid_t nid)
+{
+	struct hlist_head *head = &nx_info_hash[__hashval(nid)];
+	struct hlist_node *pos;
+
+	hlist_for_each_rcu(pos, head) {
+		struct nx_info *nxi =
+			hlist_entry(pos, struct nx_info, nx_hlist);
+
+		if (nxi->nx_id == nid) {
 			return nxi;
-	return 0;
-}
-
-
-/*
- *	struct nx_info ref stuff
- */
-
-struct nx_info *find_nx_info(int id)
-{
-	struct nx_info *nxi;
-	
-	if (id < 0) {
-		nxi = current->nx_info;
-		get_nx_info(nxi);
-	} else {
-		spin_lock(&nxlist_lock);
-		if ((nxi = __find_nx_info(id)))
-			get_nx_info(nxi);
-		spin_unlock(&nxlist_lock);
+		}
 	}
-	return nxi;
-}
-
-/*
- *      verify that id is a valid nid
- */
-
-int nx_info_id_valid(int id)
-{
-	int valid;
-	
-	spin_lock(&nxlist_lock);
-	valid = (__find_nx_info(id) != NULL);
-	spin_unlock(&nxlist_lock);
-	return valid;
+	return NULL;
 }
 
 
-/*
- *	dynamic context id ...
- */
+/*	__nx_dynamic_id()
 
-static __inline__ nid_t __nx_dynamic_id(void)
+	* find unused dynamic nid
+	* requires the hash_lock to be held			*/
+
+static inline nid_t __nx_dynamic_id(void)
 {
 	static nid_t seq = MAX_N_CONTEXT;
 	nid_t barrier = seq;
@@ -136,27 +148,32 @@ static __inline__ nid_t __nx_dynamic_id(void)
 	do {
 		if (++seq > MAX_N_CONTEXT)
 			seq = MIN_D_CONTEXT;
-		if (!__find_nx_info(seq))
+		if (!__lookup_nx_info(seq))
 			return seq;
 	} while (barrier != seq);
 	return 0;
 }
 
-static struct nx_info * __foc_nx_info(int id, int *err)
+/*	__loc_nx_info()
+
+	* locate or create the requested context
+	* get() it and if new hash it				*/
+
+static struct nx_info * __loc_nx_info(int id, int *err)
 {
 	struct nx_info *new, *nxi = NULL;
 	
-	nxdprintk("foc_nx_info(%d)\n", id);
-	// if (!(new = alloc_nx_info(id))) {
-	if (!(new = alloc_nx_info())) {
+	nxdprintk("loc_nx_info(%d)\n", id);
+
+	if (!(new = __alloc_nx_info(id))) {
 		*err = -ENOMEM;
 		return NULL;
 	}
 
-	spin_lock(&nxlist_lock);
+	spin_lock(&nx_info_hash_lock);
 
 	/* dynamic context requested */
-	if (id == IP_DYNAMIC_ID) {
+	if (id == NX_DYNAMIC_ID) {
 		id = __nx_dynamic_id();
 		if (!id) {
 			printk(KERN_ERR "no dynamic context available.\n");
@@ -165,14 +182,14 @@ static struct nx_info * __foc_nx_info(int id, int *err)
 		new->nx_id = id;
 	}
 	/* existing context requested */
-	else if ((nxi = __find_nx_info(id))) {
+	else if ((nxi = __lookup_nx_info(id))) {
 		/* context in setup is not available */
 		if (nxi->nx_flags & VXF_STATE_SETUP) {
-			nxdprintk("foc_nx_info(%d) = %p (not available)\n", id, nxi);
+			nxdprintk("loc_nx_info(%d) = %p (not available)\n", id, nxi);
 			nxi = NULL;
 			*err = -EBUSY;
 		} else {
-			nxdprintk("foc_nx_info(%d) = %p (found)\n", id, nxi);
+			nxdprintk("loc_nx_info(%d) = %p (found)\n", id, nxi);
 			get_nx_info(nxi);
 			*err = 0;
 		}
@@ -180,26 +197,140 @@ static struct nx_info * __foc_nx_info(int id, int *err)
 	}
 
 	/* new context requested */
-	nxdprintk("foc_nx_info(%d) = %p (new)\n", id, new);
-	atomic_set(&new->nx_refcount, 1);
-	list_add(&new->nx_list, &nx_infos);
+	nxdprintk("loc_nx_info(%d) = %p (new)\n", id, new);
+	__hash_nx_info(get_nx_info(new));
 	nxi = new, new = NULL;
 	*err = 1;
 
 out_unlock:
-	spin_unlock(&nxlist_lock);
+	spin_unlock(&nx_info_hash_lock);
 	if (new)
-		free_nx_info(new);
+		__dealloc_nx_info(new);
 	return nxi;
 }
 
 
-struct nx_info *find_or_create_nx_info(int id)
+
+/*	exported stuff						*/
+
+
+
+
+void rcu_free_nx_info(struct rcu_head *head)
+{
+        struct nx_info *nxi = container_of(head, struct nx_info, nx_rcu);
+	int usecnt, refcnt;
+
+	BUG_ON(!nxi || !head);
+
+	usecnt = atomic_read(&nxi->nx_usecnt);
+	BUG_ON(usecnt < 0);
+
+	refcnt = atomic_read(&nxi->nx_refcnt);
+	BUG_ON(refcnt < 0);
+
+	if (!usecnt)
+		__dealloc_nx_info(nxi);
+	else
+		printk("!!! rcu didn't free\n");
+}
+
+void unhash_nx_info(struct nx_info *nxi)
+{
+	spin_lock(&nx_info_hash_lock);
+	__unhash_nx_info(nxi);
+	spin_unlock(&nx_info_hash_lock);
+}
+
+/*	locate_nx_info()
+
+	* search for a nx_info and get() it			
+	* negative id means current				*/
+
+struct nx_info *locate_nx_info(int id)
+{
+	struct nx_info *nxi;
+	
+	if (id < 0) {
+		nxi = get_nx_info(current->nx_info);
+	} else {
+		rcu_read_lock();
+		nxi = get_nx_info(__lookup_nx_info(id));
+		rcu_read_unlock();
+	}
+	return nxi;
+}
+
+/*	nx_info_is_hashed()
+
+	* verify that nid is still hashed			*/
+
+int nx_info_is_hashed(nid_t nid)
+{
+	int hashed;
+
+	rcu_read_lock();
+	hashed = (__lookup_nx_info(nid) != NULL);
+	rcu_read_unlock();
+	return hashed;
+}
+
+#ifdef	CONFIG_VSERVER_LEGACY
+
+struct nx_info *locate_or_create_nx_info(int id)
 {
 	int err;
 
-	return __foc_nx_info(id, &err);
+	return __loc_nx_info(id, &err);
 }
+
+struct nx_info *create_nx_info(void)
+{
+	struct nx_info *new;
+	int err;
+	
+	nxdprintk("create_nx_info()\n");
+	if (!(new = __loc_nx_info(NX_DYNAMIC_ID, &err)))
+		return NULL;
+	return new;
+}
+
+
+#endif
+
+#ifdef	CONFIG_PROC_FS
+
+#define hlist_for_each_rcu(pos, head) \
+        for (pos = (head)->first; pos && ({ prefetch(pos->next); 1;}); \
+		pos = pos->next, ({ smp_read_barrier_depends(); 0;}))
+
+int get_nid_list(int index, unsigned int *nids, int size)
+{
+	int hindex, nr_nids = 0;
+
+	rcu_read_lock();
+	for (hindex = 0; hindex < NX_HASH_SIZE; hindex++) {
+		struct hlist_head *head = &nx_info_hash[hindex];
+		struct hlist_node *pos;
+
+		hlist_for_each_rcu(pos, head) {
+			struct nx_info *nxi;
+
+			if (--index > 0)
+				continue;
+
+			nxi = hlist_entry(pos, struct nx_info, nx_hlist);
+			nids[nr_nids] = nxi->nx_id;			
+			if (++nr_nids >= size)
+				goto out;
+		}
+	}
+out:
+	rcu_read_unlock();
+	return nr_nids;
+}
+#endif
+
 
 /*
  *	migrate task to new network
@@ -207,23 +338,31 @@ struct nx_info *find_or_create_nx_info(int id)
 
 int nx_migrate_task(struct task_struct *p, struct nx_info *nxi)
 {
-	struct nx_info *old_nxi = task_get_nx_info(p);
+	struct nx_info *old_nxi;
 	int ret = 0;
 	
 	if (!p || !nxi)
 		BUG();
 
-	nxdprintk("nx_migrate_task(%p,%p[#%d.%d)\n", p, nxi,
-		nxi->nx_id, atomic_read(&nxi->nx_refcount));
+	nxdprintk("nx_migrate_task(%p,%p[#%d.%d.%d])\n",
+		p, nxi, nxi->nx_id,
+		atomic_read(&nxi->nx_usecnt),
+		atomic_read(&nxi->nx_refcnt));
+
+	old_nxi = task_get_nx_info(p);
 	if (old_nxi == nxi)
 		goto out;
 
 	task_lock(p);
+	/* should be handled in set_nx_info !! */
+	if (old_nxi)
+		clr_nx_info(&p->nx_info);
 	set_nx_info(&p->nx_info, nxi);
 	p->nid = nxi->nx_id;
 	task_unlock(p);
 
-	put_nx_info(old_nxi);
+	/* obsoleted by clr/set */
+	// put_nx_info(old_nxi);
 out:
 	put_nx_info(old_nxi);
 	return ret;
@@ -246,10 +385,9 @@ static inline int __addr_in_nx_info(u32 addr, struct nx_info *nxi)
 
 int ifa_in_nx_info(struct in_ifaddr *ifa, struct nx_info *nxi)
 {
-	if (!nxi)
-		return 1;
-	
-	return __addr_in_nx_info(ifa->ifa_address, nxi);
+	if (nxi && ifa)
+		return __addr_in_nx_info(ifa->ifa_address, nxi);
+	return 1;
 }
 
 int dev_in_nx_info(struct net_device *dev, struct nx_info *nxi)
@@ -312,7 +450,7 @@ int vc_nx_info(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RESOURCE))
 		return -EPERM;
 
-	nxi = find_nx_info(id);
+	nxi = locate_nx_info(id);
 	if (!nxi)
 		return -ESRCH;
 
@@ -342,7 +480,7 @@ int vc_net_create(uint32_t nid, void __user *data)
 	if (nid < 1)
 		return -EINVAL;
 
-	new_nxi = __foc_nx_info(nid, &ret);
+	new_nxi = __loc_nx_info(nid, &ret);
 	if (!new_nxi)
 		return ret;
 	if (!(new_nxi->nx_flags & VXF_STATE_SETUP)) {
@@ -365,7 +503,7 @@ int vc_net_migrate(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	nxi = find_nx_info(id);
+	nxi = locate_nx_info(id);
 	if (!nxi)
 		return -ESRCH;
 	nx_migrate_task(current, nxi);
@@ -383,7 +521,7 @@ int vc_net_add(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	nxi = find_nx_info(id);
+	nxi = locate_nx_info(id);
 	if (!nxi)
 		return -ESRCH;
 
@@ -402,7 +540,7 @@ int vc_net_remove(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	nxi = find_nx_info(id);
+	nxi = locate_nx_info(id);
 	if (!nxi)
 		return -ESRCH;
 
@@ -421,13 +559,12 @@ int vc_get_nflags(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	nxi = find_nx_info(id);
+	nxi = locate_nx_info(id);
 	if (!nxi)
 		return -ESRCH;
 
 	vc_data.flagword = nxi->nx_flags;
 
-	// vc_data.mask = ~0UL;
 	/* special STATE flag handling */
 	vc_data.mask = vx_mask_flags(~0UL, nxi->nx_flags, IPF_ONE_TIME);
 
@@ -449,7 +586,7 @@ int vc_set_nflags(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	nxi = find_nx_info(id);
+	nxi = locate_nx_info(id);
 	if (!nxi)
 		return -ESRCH;
 
@@ -472,7 +609,7 @@ int vc_get_ncaps(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	nxi = find_nx_info(id);
+	nxi = locate_nx_info(id);
 	if (!nxi)
 		return -ESRCH;
 
@@ -495,7 +632,7 @@ int vc_set_ncaps(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	nxi = find_nx_info(id);
+	nxi = locate_nx_info(id);
 	if (!nxi)
 		return -ESRCH;
 
@@ -508,6 +645,7 @@ int vc_set_ncaps(uint32_t id, void __user *data)
 
 #include <linux/module.h>
 
-EXPORT_SYMBOL_GPL(free_nx_info);
-EXPORT_SYMBOL_GPL(nxlist_lock);
+EXPORT_SYMBOL_GPL(rcu_free_nx_info);
+EXPORT_SYMBOL_GPL(nx_info_hash_lock);
+EXPORT_SYMBOL_GPL(unhash_nx_info);
 

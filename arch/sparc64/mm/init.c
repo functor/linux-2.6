@@ -137,13 +137,13 @@ __inline__ void flush_dcache_page_impl(struct page *page)
 #endif
 
 #if (L1DCACHE_SIZE > PAGE_SIZE)
-	__flush_dcache_page(page->virtual,
+	__flush_dcache_page(page_address(page),
 			    ((tlb_type == spitfire) &&
 			     page_mapping(page) != NULL));
 #else
 	if (page_mapping(page) != NULL &&
 	    tlb_type == spitfire)
-		__flush_icache_page(__pa(page->virtual));
+		__flush_icache_page(__pa(page_address(page)));
 #endif
 }
 
@@ -344,11 +344,21 @@ void flush_icache_range(unsigned long start, unsigned long end)
 	}
 }
 
+unsigned long page_to_pfn(struct page *page)
+{
+	return (unsigned long) ((page - mem_map) + pfn_base);
+}
+
+struct page *pfn_to_page(unsigned long pfn)
+{
+	return (mem_map + (pfn - pfn_base));
+}
+
 void show_mem(void)
 {
 	printk("Mem-info:\n");
 	show_free_areas();
-	printk("Free swap:       %6dkB\n",
+	printk("Free swap:       %6ldkB\n",
 	       nr_swap_pages << (PAGE_SHIFT-10));
 	printk("%ld pages of RAM\n", num_physpages);
 	printk("%d free pages\n", nr_free_pages());

@@ -55,6 +55,7 @@
 #include <asm/bootsetup.h>
 #include <asm/smp.h>
 #include <asm/proto.h>
+#include <asm/setup.h>
 
 /*
  * Machine setup..
@@ -100,7 +101,6 @@ extern int root_mountflags;
 extern char _text, _etext, _edata, _end;
 
 char command_line[COMMAND_LINE_SIZE];
-char saved_command_line[COMMAND_LINE_SIZE];
 
 struct resource standard_io_resources[] = {
 	{ "dma1", 0x00, 0x1f, IORESOURCE_BUSY | IORESOURCE_IO },
@@ -401,27 +401,26 @@ static int __init noreplacement_setup(char *s)
 __setup("noreplacement", noreplacement_setup); 
 
 #if defined(CONFIG_EDD) || defined(CONFIG_EDD_MODULE)
-unsigned char eddnr;
-struct edd_info edd[EDDMAXNR];
-unsigned int edd_disk80_sig;
+struct edd edd;
 #ifdef CONFIG_EDD_MODULE
-EXPORT_SYMBOL(eddnr);
 EXPORT_SYMBOL(edd);
-EXPORT_SYMBOL(edd_disk80_sig);
 #endif
 /**
  * copy_edd() - Copy the BIOS EDD information
- *              from empty_zero_page into a safe place.
+ *              from boot_params into a safe place.
  *
  */
 static inline void copy_edd(void)
 {
-     eddnr = EDD_NR;
-     memcpy(edd, EDD_BUF, sizeof(edd));
-     edd_disk80_sig = DISK80_SIGNATURE;
+     memcpy(edd.mbr_signature, EDD_MBR_SIGNATURE, sizeof(edd.mbr_signature));
+     memcpy(edd.edd_info, EDD_BUF, sizeof(edd.edd_info));
+     edd.mbr_signature_nr = EDD_MBR_SIG_NR;
+     edd.edd_info_nr = EDD_NR;
 }
 #else
-#define copy_edd() do {} while (0)
+static inline void copy_edd(void)
+{
+}
 #endif
 
 void __init setup_arch(char **cmdline_p)

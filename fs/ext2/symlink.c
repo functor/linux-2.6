@@ -19,6 +19,7 @@
 
 #include "ext2.h"
 #include "xattr.h"
+#include <linux/namei.h>
 
 static int ext2_follow_link(struct dentry *dentry, struct nameidata *nd)
 {

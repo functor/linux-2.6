@@ -223,9 +223,6 @@ struct mm_struct {
 	unsigned long saved_auxv[40]; /* for /proc/PID/auxv */
 
 	unsigned dumpable:1;
-#ifdef CONFIG_HUGETLB_PAGE
-	int used_hugetlb;
-#endif
 	cpumask_t cpu_vm_mask;
 
 	/* Architecture-specific MM context */
@@ -324,6 +321,7 @@ struct user_struct {
 	atomic_t sigpending;	/* How many pending signals does this user have? */
 	/* protected by mq_lock	*/
 	unsigned long mq_bytes;	/* How many bytes can be allocated to mqueue? */
+	unsigned long locked_shm; /* How many pages of mlocked shm ? */
 
 	/* Hash table maintenance information */
 	struct list_head uidhash_list;
@@ -356,6 +354,8 @@ struct k_itimer {
 	struct task_struct *it_process;	/* process to send signal to */
 	struct timer_list it_timer;
 	struct sigqueue *sigq;		/* signal queue entry. */
+	struct list_head abs_timer_entry; /* clock abs_timer_list */
+	struct timespec wall_to_prev;   /* wall_to_monotonic used when set */
 };
 
 
@@ -498,11 +498,6 @@ struct task_struct {
 	int (*notifier)(void *priv);
 	void *notifier_data;
 	sigset_t *notifier_mask;
-
-	/* TUX state */
-	void *tux_info;
-	void (*tux_exit)(void);
-
 	
 	void *security;
 	struct audit_context *audit_context;
@@ -1062,10 +1057,13 @@ static inline int need_resched(void)
 }
 
 extern void __cond_resched(void);
+
 static inline void cond_resched(void)
 {
-	if (need_resched())
-		__cond_resched();
+#ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
+	__might_sleep(__FILE__, __LINE__, 0);
+#endif
+	__cond_resched();
 }
 
 /*
@@ -1076,14 +1074,14 @@ static inline void cond_resched(void)
  * operations here to prevent schedule() from being called twice (once via
  * spin_unlock(), once by hand).
  */
+extern void __cond_resched_lock(spinlock_t * lock);
+
 static inline void cond_resched_lock(spinlock_t * lock)
 {
-	if (need_resched()) {
-		_raw_spin_unlock(lock);
-		preempt_enable_no_resched();
-		__cond_resched();
-		spin_lock(lock);
-	}
+#ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
+	__might_sleep(__FILE__, __LINE__, 1);
+#endif
+	__cond_resched_lock(lock);
 }
 
 /* Reevaluate whether the task has signals pending delivery.

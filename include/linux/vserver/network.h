@@ -3,7 +3,7 @@
 
 #define MAX_N_CONTEXT	65535	/* Arbitrary limit */
 
-#define IP_DYNAMIC_ID	((uint32_t)-1)		/* id for dynamic context */
+#define NX_DYNAMIC_ID	((uint32_t)-1)		/* id for dynamic context */
 
 #define NB_IPV4ROOT	16
 
@@ -12,14 +12,17 @@
 #include <linux/list.h>
 #include <linux/spinlock.h>
 #include <linux/utsname.h>
+#include <linux/rcupdate.h>
 #include <asm/resource.h>
 #include <asm/atomic.h>
 
 
 struct nx_info {
-	struct list_head nx_list;	/* linked list of nxinfos */
+	struct hlist_node nx_hlist;	/* linked list of nxinfos */
+	struct rcu_head nx_rcu;		/* the rcu head */
 	nid_t nx_id;			/* vnet id */
-	atomic_t nx_refcount;
+	atomic_t nx_usecnt;		/* usage count */
+	atomic_t nx_refcnt;		/* reference count */
 
 	uint64_t nx_flags;		/* network flag word */
 	uint64_t nx_ncaps;		/* network capabilities */
@@ -38,15 +41,16 @@ struct nx_info {
 };
 
 
-extern spinlock_t nxlist_lock;
-extern struct list_head nx_infos;
+extern void rcu_free_nx_info(struct rcu_head *);
+extern void unhash_nx_info(struct nx_info *);
 
+extern struct nx_info *locate_nx_info(int);
+extern struct nx_info *locate_or_create_nx_info(int);
 
-void free_nx_info(struct nx_info *);
-struct nx_info *create_nx_info(void);
+extern int get_nid_list(int, unsigned int *, int);
+extern int nx_info_is_hashed(nid_t);
 
-extern struct nx_info *find_nx_info(int);
-extern int nx_info_id_valid(int);
+extern int nx_migrate_task(struct task_struct *, struct nx_info *);
 
 struct in_ifaddr;
 struct net_device;

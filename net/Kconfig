@@ -672,8 +672,6 @@ source "net/irda/Kconfig"
 
 source "net/bluetooth/Kconfig"
 
-source "net/tux/Kconfig"
-
 source "drivers/net/Kconfig"
 
 endmenu

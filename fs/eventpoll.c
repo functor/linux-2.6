@@ -716,7 +716,7 @@ static int ep_getfd(int *efd, struct inode **einode, struct file **efile)
 	dentry->d_op = &eventpollfs_dentry_operations;
 	d_add(dentry, inode);
 	file->f_vfsmnt = mntget(eventpoll_mnt);
-	file->f_dentry = dget(dentry);
+	file->f_dentry = dentry;
 	file->f_mapping = inode->i_mapping;
 
 	file->f_pos = 0;
@@ -802,7 +802,7 @@ static void ep_free(struct eventpoll *ep)
 	 * write-holding "sem" we can be sure that no file cleanup code will hit
 	 * us during this operation. So we can avoid the lock on "ep->lock".
 	 */
-	while ((rbp = rb_first(&ep->rbr))) {
+	while ((rbp = rb_first(&ep->rbr)) != 0) {
 		epi = rb_entry(rbp, struct epitem, rbn);
 		ep_remove(ep, epi);
 	}

@@ -152,6 +152,20 @@ config CRYPTO_CAST6
 	  The CAST6 encryption algorithm (synonymous with CAST-256) is
 	  described in RFC2612.
 
+config CRYPTO_TEA
+	tristate "TEA and XTEA cipher algorithms"
+	depends on CRYPTO
+	help
+	  TEA cipher algorithm.
+
+	  Tiny Encryption Algorithm is a simple cipher that uses
+	  many rounds for security.  It is very fast and uses
+	  little memory.
+
+	  Xtendend Tiny Encryption Algorithm is a modifcation to
+	  the TEA algorithm to address a potential key weakness
+	  in the TEA algorithm.
+
 config CRYPTO_ARC4
 	tristate "ARC4 cipher algorithm"
 	depends on CRYPTO
@@ -198,6 +212,26 @@ config CRYPTO_TEST
 	depends on CRYPTO
 	help
 	  Quick & dirty crypto test module.
+
+config CRYPTO_SIGNATURE
+	bool "In-kernel signature checker (EXPERIMENTAL)"
+	depends on CRYPTO
+	help
+	  Signature checker (used for module sig checking).
+
+config CRYPTO_SIGNATURE_DSA
+	bool "Handle DSA signatures (EXPERIMENTAL)"
+	depends on CRYPTO_SIGNATURE
+	select CRYPTO_MPILIB
+	help
+	  DSA Signature checker.
+
+config CRYPTO_MPILIB
+	bool "Multiprecision maths library (EXPERIMENTAL)"
+	depends on CRYPTO
+	help
+	  Multiprecision maths library from GnuPG
+	
 
 endmenu
 

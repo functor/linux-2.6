@@ -218,9 +218,9 @@ static void do_fault_siginfo(int code, int sig, struct pt_regs *regs,
 	info.si_signo = sig;
 	info.si_errno = 0;
 	if (fault_code & FAULT_CODE_ITLB)
-		info.si_addr = (void *) regs->tpc;
+		info.si_addr = (void __user *) regs->tpc;
 	else
-		info.si_addr = (void *)
+		info.si_addr = (void __user *)
 			compute_effective_address(regs, insn, 0);
 	info.si_trapno = 0;
 	force_sig_info(sig, &info, current);
@@ -257,7 +257,7 @@ static void do_kernel_fault(struct pt_regs *regs, int si_code, int fault_code,
 	 * in that case.
 	 */
 
-	if (!(fault_code & FAULT_CODE_WRITE) &&
+	if (!(fault_code & (FAULT_CODE_WRITE|FAULT_CODE_ITLB)) &&
 	    (insn & 0xc0800000) == 0xc0800000) {
 		if (insn & 0x2000)
 			asi = (regs->tstate >> 24);
@@ -408,6 +408,16 @@ continue_fault:
 	 */
 good_area:
 	si_code = SEGV_ACCERR;
+
+	/* If we took a ITLB miss on a non-executable page, catch
+	 * that here.
+	 */
+	if ((fault_code & FAULT_CODE_ITLB) && !(vma->vm_flags & VM_EXEC)) {
+		BUG_ON(address != regs->tpc);
+		BUG_ON(regs->tstate & TSTATE_PRIV);
+		goto bad_area;
+	}
+
 	if (fault_code & FAULT_CODE_WRITE) {
 		if (!(vma->vm_flags & VM_WRITE))
 			goto bad_area;

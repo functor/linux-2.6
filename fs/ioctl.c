@@ -4,6 +4,7 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
 
+#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/smp_lock.h>
 #include <linux/file.h>
@@ -12,6 +13,7 @@
 #include <linux/proc_fs.h>
 #include <linux/vserver/inode.h>
 #include <linux/vserver/xid.h>
+#include <linux/module.h>
 
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
@@ -183,3 +185,11 @@ asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 out:
 	return error;
 }
+
+/*
+ * Platforms implementing 32 bit compatibility ioctl handlers in
+ * modules need this exported
+ */
+#ifdef CONFIG_COMPAT
+EXPORT_SYMBOL(sys_ioctl);
+#endif

@@ -744,7 +744,7 @@ static int unswap_by_read(unsigned short *map, unsigned long max,
 
 		if (map[i]) {
 			entry = swp_entry(stram_swap_type, i);
-			DPRINTK("unswap: map[i=%lu]=%u nr_swap=%u\n",
+			DPRINTK("unswap: map[i=%lu]=%u nr_swap=%ld\n",
 				i, map[i], nr_swap_pages);
 
 			swap_device_lock(stram_swap_info);
@@ -773,7 +773,7 @@ static int unswap_by_read(unsigned short *map, unsigned long max,
 	#endif
 		}
 
-		DPRINTK( "unswap: map[i=%lu]=%u nr_swap=%u\n",
+		DPRINTK( "unswap: map[i=%lu]=%u nr_swap=%ld\n",
 				 i, map[i], nr_swap_pages );
 		swap_list_lock();
 		swap_device_lock(stram_swap_info);

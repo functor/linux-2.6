@@ -119,6 +119,10 @@
 #include <net/checksum.h>
 #include <linux/security.h>
 
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
+
+
 int sysctl_unix_max_dgram_qlen = 10;
 
 kmem_cache_t *unix_sk_cachep;
@@ -2042,7 +2046,7 @@ static int __init af_unix_init(void)
         /* allocate our sock slab cache */
         unix_sk_cachep = kmem_cache_create("unix_sock",
 					   sizeof(struct unix_sock), 0,
-					   SLAB_HWCACHE_ALIGN, 0, 0);
+					   SLAB_HWCACHE_ALIGN, NULL, NULL);
         if (!unix_sk_cachep)
                 printk(KERN_CRIT
                         "af_unix_init: Cannot create unix_sock SLAB cache!\n");

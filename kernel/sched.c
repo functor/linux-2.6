@@ -40,10 +40,9 @@
 #include <linux/cpu.h>
 #include <linux/percpu.h>
 #include <linux/kthread.h>
+#include <asm/tlb.h>
 #include <linux/vserver/sched.h>
 #include <linux/vs_base.h>
-
-#include <asm/unistd.h>
 
 #include <asm/unistd.h>
 
@@ -222,7 +221,7 @@ struct runqueue {
 #if defined(CONFIG_SMP)
 	unsigned long cpu_load;
 #endif
-	unsigned long long nr_switches;
+	unsigned long long nr_switches, nr_preempt;
 	unsigned long expired_timestamp, nr_uninterruptible;
 	unsigned long long timestamp_last_tick;
 	task_t *curr, *idle;
@@ -868,10 +867,9 @@ static int wake_idle(int cpu, task_t *p)
 		return cpu;
 
 	cpus_and(tmp, sd->span, cpu_online_map);
-	for_each_cpu_mask(i, tmp) {
-		if (!cpu_isset(i, p->cpus_allowed))
-			continue;
+	cpus_and(tmp, tmp, p->cpus_allowed);
 
+	for_each_cpu_mask(i, tmp) {
 		if (idle_cpu(i))
 			return i;
 	}
@@ -1326,6 +1324,16 @@ static void double_rq_unlock(runqueue_t *rq1, runqueue_t *rq2)
 	spin_unlock(&rq1->lock);
 	if (rq1 != rq2)
 		spin_unlock(&rq2->lock);
+}
+
+unsigned long long nr_preempt(void)
+{
+	unsigned long long i, sum = 0;
+
+	for_each_online_cpu(i)
+		sum += cpu_rq(i)->nr_preempt;
+
+	return sum;
 }
 
 enum idle_type
@@ -2583,6 +2591,7 @@ asmlinkage void __sched schedule(void)
 	int maxidle = -HZ;
 #endif
 
+	//WARN_ON(system_state == SYSTEM_BOOTING);
 	/*
 	 * Test if we are atomic.  Since do_exit() needs to call into
 	 * schedule() atomically, we ignore that path for now.
@@ -2713,7 +2722,8 @@ pick_next:
 	next->activated = 0;
 switch_tasks:
 	prefetch(next);
-	clear_tsk_need_resched(prev);
+	if (test_and_clear_tsk_thread_flag(prev,TIF_NEED_RESCHED))
+		rq->nr_preempt++;
 	RCU_qsctr(task_cpu(prev))++;
 
 #ifdef CONFIG_CKRM_CPU_SCHEDULE
@@ -3381,6 +3391,21 @@ out_unlock:
 	return retval;
 }
 
+/*
+ * Represents all cpu's present in the system
+ * In systems capable of hotplug, this map could dynamically grow
+ * as new cpu's are detected in the system via any platform specific
+ * method, such as ACPI for e.g.
+ */
+
+cpumask_t cpu_present_map;
+EXPORT_SYMBOL(cpu_present_map);
+
+#ifndef CONFIG_SMP
+cpumask_t cpu_online_map = CPU_MASK_ALL;
+cpumask_t cpu_possible_map = CPU_MASK_ALL;
+#endif
+
 /**
  * sys_sched_getaffinity - get the cpu affinity of a process
  * @pid: pid of the process
@@ -3460,11 +3485,33 @@ asmlinkage long sys_sched_yield(void)
 
 void __sched __cond_resched(void)
 {
-	set_current_state(TASK_RUNNING);
-	schedule();
+#ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
+	__might_sleep(__FILE__, __LINE__, 0);
+#endif
+	/*
+	 * The system_state check is somewhat ugly but we might be
+	 * called during early boot when we are not yet ready to reschedule.
+	 */
+	if (need_resched() && system_state >= SYSTEM_BOOTING_SCHEDULER_OK) {
+		set_current_state(TASK_RUNNING);
+		schedule();
+	}
 }
 
 EXPORT_SYMBOL(__cond_resched);
+
+void __sched __cond_resched_lock(spinlock_t * lock)
+{
+        if (need_resched()) {
+                _raw_spin_unlock(lock);
+                preempt_enable_no_resched();
+		set_current_state(TASK_RUNNING);
+		schedule();
+                spin_lock(lock);
+        }
+}
+
+EXPORT_SYMBOL(__cond_resched_lock);
 
 /**
  * yield - yield the current processor to other threads.
@@ -3697,6 +3744,8 @@ void show_state(void)
 	read_unlock(&tasklist_lock);
 }
 
+EXPORT_SYMBOL_GPL(show_state);
+
 void __devinit init_idle(task_t *idle, int cpu)
 {
 	runqueue_t *idle_rq = cpu_rq(cpu), *rq = cpu_rq(task_cpu(idle));
@@ -3766,7 +3815,7 @@ int set_cpus_allowed(task_t *p, cpumask_t new_mask)
 	runqueue_t *rq;
 
 	rq = task_rq_lock(p, &flags);
-	if (any_online_cpu(new_mask) == NR_CPUS) {
+	if (!cpus_intersects(new_mask, cpu_online_map)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -3781,6 +3830,7 @@ int set_cpus_allowed(task_t *p, cpumask_t new_mask)
 		task_rq_unlock(rq, &flags);
 		wake_up_process(rq->migration_thread);
 		wait_for_completion(&req.done);
+		tlb_migrate_finish(p->mm);
 		return 0;
 	}
 out:
@@ -3943,8 +3993,7 @@ static void migrate_all_tasks(int src_cpu)
 		if (dest_cpu == NR_CPUS)
 			dest_cpu = any_online_cpu(tsk->cpus_allowed);
 		if (dest_cpu == NR_CPUS) {
-			cpus_clear(tsk->cpus_allowed);
-			cpus_complement(tsk->cpus_allowed);
+			cpus_setall(tsk->cpus_allowed);
 			dest_cpu = any_online_cpu(tsk->cpus_allowed);
 
 			/* Don't tell them about moving exiting tasks
@@ -4006,6 +4055,7 @@ static int migration_call(struct notifier_block *nfb, unsigned long action,
 		p = kthread_create(migration_thread, hcpu, "migration/%d",cpu);
 		if (IS_ERR(p))
 			return NOTIFY_BAD;
+		p->flags |= PF_NOFREEZE;
 		kthread_bind(p, cpu);
 		/* Must be high prio: stop_machine expects to yield to it. */
 		rq = task_rq_lock(p, &flags);
@@ -4253,14 +4303,14 @@ void sched_domain_debug(void)
 
 		sd = rq->sd;
 
-		printk(KERN_WARNING "CPU%d: %s\n",
+		printk(KERN_DEBUG "CPU%d: %s\n",
 				i, (cpu_online(i) ? " online" : "offline"));
 
 		do {
 			int j;
 			char str[NR_CPUS];
 			struct sched_group *group = sd->groups;
-			cpumask_t groupmask, tmp;
+			cpumask_t groupmask;
 
 			cpumask_scnprintf(str, NR_CPUS, sd->span);
 			cpus_clear(groupmask);
@@ -4271,13 +4321,13 @@ void sched_domain_debug(void)
 			printk("domain %d: span %s\n", level, str);
 
 			if (!cpu_isset(i, sd->span))
-				printk(KERN_WARNING "ERROR domain->span does not contain CPU%d\n", i);
+				printk(KERN_DEBUG "ERROR domain->span does not contain CPU%d\n", i);
 			if (!cpu_isset(i, group->cpumask))
-				printk(KERN_WARNING "ERROR domain->groups does not contain CPU%d\n", i);
+				printk(KERN_DEBUG "ERROR domain->groups does not contain CPU%d\n", i);
 			if (!group->cpu_power)
-				printk(KERN_WARNING "ERROR domain->cpu_power not set\n");
+				printk(KERN_DEBUG "ERROR domain->cpu_power not set\n");
 
-			printk(KERN_WARNING);
+			printk(KERN_DEBUG);
 			for (j = 0; j < level + 2; j++)
 				printk(" ");
 			printk("groups:");
@@ -4290,8 +4340,7 @@ void sched_domain_debug(void)
 				if (!cpus_weight(group->cpumask))
 					printk(" ERROR empty group:");
 
-				cpus_and(tmp, groupmask, group->cpumask);
-				if (cpus_weight(tmp) > 0)
+				if (cpus_intersects(groupmask, group->cpumask))
 					printk(" ERROR repeated CPUs:");
 
 				cpus_or(groupmask, groupmask, group->cpumask);
@@ -4310,9 +4359,8 @@ void sched_domain_debug(void)
 			sd = sd->parent;
 
 			if (sd) {
-				cpus_and(tmp, groupmask, sd->span);
-				if (!cpus_equal(tmp, groupmask))
-					printk(KERN_WARNING "ERROR parent span is not a superset of domain->span\n");
+				if (!cpus_subset(groupmask, sd->span))
+					printk(KERN_DEBUG "ERROR parent span is not a superset of domain->span\n");
 			}
 
 		} while (sd);
@@ -4353,16 +4401,15 @@ void __init sched_init(void)
 	/* Set up an initial dummy domain for early boot */
 	static struct sched_domain sched_domain_init;
 	static struct sched_group sched_group_init;
-	cpumask_t cpu_mask_all = CPU_MASK_ALL;
 
 	memset(&sched_domain_init, 0, sizeof(struct sched_domain));
-	sched_domain_init.span = cpu_mask_all;
+	sched_domain_init.span = CPU_MASK_ALL;
 	sched_domain_init.groups = &sched_group_init;
 	sched_domain_init.last_balance = jiffies;
 	sched_domain_init.balance_interval = INT_MAX; /* Don't balance */
 
 	memset(&sched_group_init, 0, sizeof(struct sched_group));
-	sched_group_init.cpumask = cpu_mask_all;
+	sched_group_init.cpumask = CPU_MASK_ALL;
 	sched_group_init.next = &sched_group_init;
 	sched_group_init.cpu_power = SCHED_LOAD_SCALE;
 #endif
@@ -4430,20 +4477,23 @@ void __init sched_init(void)
 }
 
 #ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
-void __might_sleep(char *file, int line)
+void __might_sleep(char *file, int line, int atomic_depth)
 {
 #if defined(in_atomic)
 	static unsigned long prev_jiffy;	/* ratelimiting */
 
-	if ((in_atomic() || irqs_disabled()) &&
+#ifndef CONFIG_PREEMPT
+	atomic_depth = 0;
+#endif
+	if (((in_atomic() != atomic_depth) || irqs_disabled()) &&
 	    system_state == SYSTEM_RUNNING) {
 		if (time_before(jiffies, prev_jiffy + HZ) && prev_jiffy)
 			return;
 		prev_jiffy = jiffies;
 		printk(KERN_ERR "Debug: sleeping function called from invalid"
 				" context at %s:%d\n", file, line);
-		printk("in_atomic():%d, irqs_disabled():%d\n",
-			in_atomic(), irqs_disabled());
+		printk("in_atomic():%d[expected: %d], irqs_disabled():%d\n",
+			in_atomic(), atomic_depth, irqs_disabled());
 		dump_stack();
 	}
 #endif

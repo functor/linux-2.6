@@ -34,7 +34,7 @@ static inline struct dl_info *__get_dl_info(struct dl_info *dli,
 
 
 #define	free_dl_info(i)	\
-	call_rcu(&i->dl_rcu, rcu_free_dl_info, i);
+	call_rcu(&i->dl_rcu, rcu_free_dl_info);
 
 #define put_dl_info(i)	__put_dl_info(i,__FILE__,__LINE__)
 

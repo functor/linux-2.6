@@ -242,8 +242,6 @@ static int force_measure_pll = 0;
 static int nomtrr = 0;
 #endif
 
-int radeonfb_noaccel = 0;
-
 /*
  * prototypes
  */
@@ -810,9 +808,8 @@ static int radeonfb_check_var (struct fb_var_screeninfo *var, struct fb_info *in
 	/* XXX I'm adjusting xres_virtual to the pitch, that may help XFree
 	 * with some panels, though I don't quite like this solution
 	 */
-  	if (radeon_accel_disabled()) {
+  	if (rinfo->info->flags & FBINFO_HWACCEL_DISABLED) {
 		v.xres_virtual = v.xres_virtual & ~7ul;
-		v.accel_flags = 0;
 	} else {
 		pitch = ((v.xres_virtual * ((v.bits_per_pixel + 1) / 8) + 0x3f)
  				& ~(0x3f)) >> 6;
@@ -1539,7 +1536,7 @@ int radeonfb_set_par(struct fb_info *info)
 	newmode->crtc_v_sync_strt_wid = (((vSyncStart - 1) & 0xfff) |
 					 (vsync_wid << 16) | (v_sync_pol  << 23));
 
-	if (!radeon_accel_disabled()) {
+	if (!(info->flags & FBINFO_HWACCEL_DISABLED)) {
 		/* We first calculate the engine pitch */
 		rinfo->pitch = ((mode->xres_virtual * ((mode->bits_per_pixel + 1) / 8) + 0x3f)
  				& ~(0x3f)) >> 6;
@@ -1687,12 +1684,11 @@ int radeonfb_set_par(struct fb_info *info)
 	if (!rinfo->asleep) {
 		radeon_write_mode (rinfo, newmode);
 		/* (re)initialize the engine */
-		if (!radeon_accel_disabled())
+		if (!(info->flags & FBINFO_HWACCEL_DISABLED))
 			radeonfb_engine_init (rinfo);
-	
 	}
 	/* Update fix */
-	if (!radeon_accel_disabled())
+	if (!(info->flags & FBINFO_HWACCEL_DISABLED))
         	info->fix.line_length = rinfo->pitch*64;
         else
 		info->fix.line_length = mode->xres_virtual
@@ -1798,9 +1794,13 @@ static int __devinit radeon_set_fbinfo (struct radeonfb_info *rinfo)
 	info->currcon = -1;
 	info->par = rinfo;
 	info->pseudo_palette = rinfo->pseudo_palette;
-        info->flags = FBINFO_FLAG_DEFAULT;
-        info->fbops = &radeonfb_ops;
-        info->screen_base = (char *)rinfo->fb_base;
+	info->flags = FBINFO_DEFAULT
+		    | FBINFO_HWACCEL_COPYAREA
+		    | FBINFO_HWACCEL_FILLRECT
+		    | FBINFO_HWACCEL_XPAN
+		    | FBINFO_HWACCEL_YPAN;
+	info->fbops = &radeonfb_ops;
+	info->screen_base = (char *)rinfo->fb_base;
 
 	/* Fill fix common fields */
 	strlcpy(info->fix.id, rinfo->name, sizeof(info->fix.id));
@@ -1814,17 +1814,11 @@ static int __devinit radeon_set_fbinfo (struct radeonfb_info *rinfo)
         info->fix.type_aux = 0;
         info->fix.mmio_start = rinfo->mmio_base_phys;
         info->fix.mmio_len = RADEON_REGSIZE;
-	if (radeon_accel_disabled())
-	        info->fix.accel = FB_ACCEL_NONE;
-	else
-		info->fix.accel = FB_ACCEL_ATI_RADEON;
 
 	fb_alloc_cmap(&info->cmap, 256, 0);
 
-	if (radeon_accel_disabled())
-		info->var.accel_flags &= ~FB_ACCELF_TEXT;
-	else
-		info->var.accel_flags |= FB_ACCELF_TEXT;
+	if (noaccel)
+		info->flags |= FBINFO_HWACCEL_DISABLED;
 
         return 0;
 }
@@ -2273,9 +2267,17 @@ static int radeonfb_pci_register (struct pci_dev *pdev,
 
 	/*
 	 * Map the BIOS ROM if any and retreive PLL parameters from
-	 * either BIOS or Open Firmware
+	 * the BIOS. We skip that on mobility chips as the real panel
+	 * values we need aren't in the ROM but in the BIOS image in
+	 * memory. This is definitely not the best meacnism though,
+	 * we really need the arch code to tell us which is the "primary"
+	 * video adapter to use the memory image (or better, the arch
+	 * should provide us a copy of the BIOS image to shield us from
+	 * archs who would store that elsewhere and/or could initialize
+	 * more than one adapter during boot).
 	 */
-	radeon_map_ROM(rinfo, pdev);
+	if (!rinfo->is_mobility)
+		radeon_map_ROM(rinfo, pdev);
 
 	/*
 	 * On x86, the primary display on laptop may have it's BIOS
@@ -2287,6 +2289,12 @@ static int radeonfb_pci_register (struct pci_dev *pdev,
 	if (rinfo->bios_seg == NULL)
 		radeon_find_mem_vbios(rinfo);
 #endif /* __i386__ */
+
+	/* If both above failed, try the BIOS ROM again for mobility
+	 * chips
+	 */
+	if (rinfo->bios_seg == NULL && rinfo->is_mobility)
+		radeon_map_ROM(rinfo, pdev);
 
 	/* Get informations about the board's PLL */
 	radeon_get_pllinfo(rinfo);
@@ -2442,7 +2450,6 @@ static struct pci_driver radeonfb_driver = {
 
 int __init radeonfb_init (void)
 {
-	radeonfb_noaccel = noaccel;
 	return pci_module_init (&radeonfb_driver);
 }
 
@@ -2464,7 +2471,7 @@ int __init radeonfb_setup (char *options)
 			continue;
 
 		if (!strncmp(this_opt, "noaccel", 7)) {
-			noaccel = radeonfb_noaccel = 1;
+			noaccel = 1;
 		} else if (!strncmp(this_opt, "mirror", 6)) {
 			mirror = 1;
 		} else if (!strncmp(this_opt, "force_dfp", 9)) {
