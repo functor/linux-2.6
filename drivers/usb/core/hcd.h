@@ -142,7 +142,7 @@ struct usb_operations {
 	int (*deallocate)(struct usb_device *);
 	int (*get_frame_number) (struct usb_device *usb_dev);
 	int (*submit_urb) (struct urb *urb, int mem_flags);
-	int (*unlink_urb) (struct urb *urb);
+	int (*unlink_urb) (struct urb *urb, int status);
 
 	/* allocate dma-consistent buffer for URB_DMA_NOMAPPING */
 	void *(*buffer_alloc)(struct usb_bus *bus, size_t size,
@@ -152,6 +152,10 @@ struct usb_operations {
 			void *addr, dma_addr_t dma);
 
 	void (*disable)(struct usb_device *udev, int bEndpointAddress);
+
+	/* global suspend/resume of bus */
+	int (*hub_suspend)(struct usb_bus *);
+	int (*hub_resume)(struct usb_bus *);
 };
 
 /* each driver provides one of these, and hardware init support */
@@ -173,6 +177,9 @@ struct hc_driver {
 	int	(*reset) (struct usb_hcd *hcd);
 	int	(*start) (struct usb_hcd *hcd);
 
+	/* NOTE:  these suspend/resume calls relate to the HC as
+	 * a whole, not just the root hub; they're for bus glue.
+	 */
 	/* called after all devices were suspended */
 	int	(*suspend) (struct usb_hcd *hcd, u32 state);
 
@@ -203,11 +210,13 @@ struct hc_driver {
 	int		(*hub_control) (struct usb_hcd *hcd,
 				u16 typeReq, u16 wValue, u16 wIndex,
 				char *buf, u16 wLength);
+	int		(*hub_suspend)(struct usb_hcd *);
+	int		(*hub_resume)(struct usb_hcd *);
 };
 
 extern void usb_hcd_giveback_urb (struct usb_hcd *hcd, struct urb *urb, struct pt_regs *regs);
 extern void usb_bus_init (struct usb_bus *bus);
-extern void usb_rh_status_dequeue (struct usb_hcd *hcd, struct urb *urb);
+extern int usb_rh_status_dequeue (struct usb_hcd *hcd, struct urb *urb);
 
 #ifdef CONFIG_PCI
 struct pci_dev;
@@ -244,16 +253,9 @@ extern struct usb_device *usb_alloc_dev(struct usb_device *parent,
 					struct usb_bus *, unsigned port);
 extern int usb_new_device(struct usb_device *dev);
 extern void usb_disconnect(struct usb_device **);
-extern void usb_choose_address(struct usb_device *dev);
-extern void usb_release_address(struct usb_device *dev);
 
-/* exported to hub driver ONLY to support usb_reset_device () */
 extern int usb_get_configuration(struct usb_device *dev);
 extern void usb_destroy_configuration(struct usb_device *dev);
-
-/* use these only before the device's address has been set */
-#define usb_snddefctrl(dev)		((PIPE_CONTROL << 30))
-#define usb_rcvdefctrl(dev)		((PIPE_CONTROL << 30) | USB_DIR_IN)
 
 /*-------------------------------------------------------------------------*/
 
@@ -346,7 +348,8 @@ extern void usb_deregister_bus (struct usb_bus *);
 extern int usb_register_root_hub (struct usb_device *usb_dev,
 		struct device *parent_dev);
 
-static inline int hcd_register_root (struct usb_hcd *hcd)
+static inline int hcd_register_root (struct usb_device *usb_dev,
+		struct usb_hcd *hcd)
 {
 	/* hcd->driver->start() reported can_wakeup, probably with
 	 * assistance from board's boot firmware.
@@ -356,8 +359,7 @@ static inline int hcd_register_root (struct usb_hcd *hcd)
 		dev_dbg (hcd->self.controller, "supports USB remote wakeup\n");
 	hcd->remote_wakeup = hcd->can_wakeup;
 
-	return usb_register_root_hub (
-		hcd_to_bus (hcd)->root_hub, hcd->self.controller);
+	return usb_register_root_hub (usb_dev, hcd->self.controller);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -366,6 +368,7 @@ static inline int hcd_register_root (struct usb_hcd *hcd)
 
 extern struct list_head usb_bus_list;
 extern struct semaphore usb_bus_list_lock;
+extern wait_queue_head_t usb_kill_urb_queue;
 
 extern struct usb_bus *usb_bus_get (struct usb_bus *bus);
 extern void usb_bus_put (struct usb_bus *bus);

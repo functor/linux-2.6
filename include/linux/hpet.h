@@ -54,12 +54,6 @@ struct hpet {
 #define	HPET_LEG_RT_CNF_MASK		(2UL)
 #define	HPET_ENABLE_CNF_MASK		(1UL)
 
-/*
- * HPET interrupt status register
- */
-
-#define	HPET_ISR_CLEAR(HPET, TIMER)				\
-		(HPET)->hpet_isr |= (1UL << TIMER)
 
 /*
  * Timer configuration register
@@ -124,6 +118,12 @@ struct hpet_data {
 };
 
 #define	HPET_DATA_PLATFORM	0x0001	/* platform call to hpet_alloc */
+
+static inline void hpet_reserve_timer(struct hpet_data *hd, int timer)
+{
+	hd->hd_state |= (1 << timer);
+	return;
+}
 
 int hpet_alloc(struct hpet_data *);
 int hpet_register(struct hpet_task *, int);

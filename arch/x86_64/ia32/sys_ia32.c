@@ -885,7 +885,7 @@ sys32_sysctl(struct sysctl_ia32 __user *args32)
 	oldvalp = (void *) A(a32.oldval);
 	newvalp = (void *) A(a32.newval);
 
-	if ((oldvalp && get_user(oldlen, (int *) A(a32.oldlenp)))
+	if ((oldvalp && get_user(oldlen, (int __user *)compat_ptr(a32.oldlenp)))
 	    || !access_ok(VERIFY_WRITE, namep, 0)
 	    || !access_ok(VERIFY_WRITE, oldvalp, 0)
 	    || !access_ok(VERIFY_WRITE, newvalp, 0))
@@ -897,7 +897,7 @@ sys32_sysctl(struct sysctl_ia32 __user *args32)
 	unlock_kernel();
 	set_fs(old_fs);
 
-	if (oldvalp && put_user (oldlen, (int *) A(a32.oldlenp)))
+	if (oldvalp && put_user (oldlen, (int __user *)compat_ptr(a32.oldlenp)))
 		return -EFAULT;
 
 	return ret;
@@ -1288,28 +1288,20 @@ sys_timer_create(clockid_t which_clock,
 long
 sys32_timer_create(u32 clock, struct sigevent32 __user *se32, timer_t __user *timer_id)
 {
-	struct sigevent se;
-	mm_segment_t oldfs;
-	long err;
-
+	struct sigevent __user *p = NULL;
 	if (se32) { 
+		struct sigevent se;
+		p = compat_alloc_user_space(sizeof(struct sigevent));
 		memset(&se, 0, sizeof(struct sigevent)); 
 		if (get_user(se.sigev_value.sival_int,  &se32->sigev_value) ||
 		    __get_user(se.sigev_signo, &se32->sigev_signo) ||
 		    __get_user(se.sigev_notify, &se32->sigev_notify) ||
 		    __copy_from_user(&se._sigev_un._pad, &se32->payload, 
-				     sizeof(se32->payload)))
+				     sizeof(se32->payload)) ||
+		    copy_to_user(p, &se, sizeof(se)))
 			return -EFAULT;
 	} 
-	if (!access_ok(VERIFY_WRITE,timer_id,sizeof(timer_t)))
-		return -EFAULT;
-
-	oldfs = get_fs();
-	set_fs(KERNEL_DS);
-	err = sys_timer_create(clock, se32 ? &se : NULL, timer_id);
-	set_fs(oldfs); 
-	
-	return err; 
+	return sys_timer_create(clock, p, timer_id);
 } 
 
 long sys32_fadvise64_64(int fd, __u32 offset_low, __u32 offset_high, 

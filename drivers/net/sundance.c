@@ -148,15 +148,6 @@ static char *media[MAX_UNITS];
 #define TX_TIMEOUT  (4*HZ)
 #define PKT_BUF_SZ		1536	/* Size of each temporary Rx buffer.*/
 
-#ifndef __KERNEL__
-#define __KERNEL__
-#endif
-#if !defined(__OPTIMIZE__)
-#warning  You must compile this file with the correct options!
-#warning  See the last lines of the source file.
-#error You must compile this driver with "-O".
-#endif
-
 /* Include files, designed to support most kernel versions 2.0.0 and later. */
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -309,7 +300,7 @@ static struct pci_id_info pci_id_tbl[] = {
 	{"D-Link DFE-530TXS FAST Ethernet Adapter"},
 	{"D-Link DL10050-based FAST Ethernet Adapter"},
 	{"Sundance Technology Alta"},
-	{0,},			/* 0 terminated list. */
+	{NULL,},			/* 0 terminated list. */
 };
 
 /* This driver was written to use PCI memory space, however x86-oriented
@@ -1039,7 +1030,7 @@ static void init_ring(struct net_device *dev)
 			((i+1)%RX_RING_SIZE)*sizeof(*np->rx_ring));
 		np->rx_ring[i].status = 0;
 		np->rx_ring[i].frag[0].length = 0;
-		np->rx_skbuff[i] = 0;
+		np->rx_skbuff[i] = NULL;
 	}
 
 	/* Fill in the Rx buffers.  Handle allocation failure gracefully. */
@@ -1058,7 +1049,7 @@ static void init_ring(struct net_device *dev)
 	np->dirty_rx = (unsigned int)(i - RX_RING_SIZE);
 
 	for (i = 0; i < TX_RING_SIZE; i++) {
-		np->tx_skbuff[i] = 0;
+		np->tx_skbuff[i] = NULL;
 		np->tx_ring[i].status = 0;
 	}
 	return;
@@ -1162,7 +1153,7 @@ reset_tx (struct net_device *dev)
 				dev_kfree_skb_irq (skb);
 			else
 				dev_kfree_skb (skb);
-			np->tx_skbuff[i] = 0;
+			np->tx_skbuff[i] = NULL;
 			np->stats.tx_dropped++;
 		}
 	}
@@ -1265,7 +1256,7 @@ static irqreturn_t intr_handler(int irq, void *dev_instance, struct pt_regs *rgs
 					np->tx_ring[entry].frag[0].addr,
 					skb->len, PCI_DMA_TODEVICE);
 				dev_kfree_skb_irq (np->tx_skbuff[entry]);
-				np->tx_skbuff[entry] = 0;
+				np->tx_skbuff[entry] = NULL;
 				np->tx_ring[entry].frag[0].addr = 0;
 				np->tx_ring[entry].frag[0].length = 0;
 			}
@@ -1284,7 +1275,7 @@ static irqreturn_t intr_handler(int irq, void *dev_instance, struct pt_regs *rgs
 					np->tx_ring[entry].frag[0].addr,
 					skb->len, PCI_DMA_TODEVICE);
 				dev_kfree_skb_irq (np->tx_skbuff[entry]);
-				np->tx_skbuff[entry] = 0;
+				np->tx_skbuff[entry] = NULL;
 				np->tx_ring[entry].frag[0].addr = 0;
 				np->tx_ring[entry].frag[0].length = 0;
 			}
@@ -1762,7 +1753,7 @@ static int netdev_close(struct net_device *dev)
 				np->rx_ring[i].frag[0].addr, np->rx_buf_sz,
 				PCI_DMA_FROMDEVICE);
 			dev_kfree_skb(skb);
-			np->rx_skbuff[i] = 0;
+			np->rx_skbuff[i] = NULL;
 		}
 	}
 	for (i = 0; i < TX_RING_SIZE; i++) {
@@ -1772,7 +1763,7 @@ static int netdev_close(struct net_device *dev)
 				np->tx_ring[i].frag[0].addr, skb->len,
 				PCI_DMA_TODEVICE);
 			dev_kfree_skb(skb);
-			np->tx_skbuff[i] = 0;
+			np->tx_skbuff[i] = NULL;
 		}
 	}
 

@@ -44,6 +44,10 @@
 #define	RTM_DELTFILTER	(RTM_BASE+29)
 #define	RTM_GETTFILTER	(RTM_BASE+30)
 
+#define RTM_NEWACTION   (RTM_BASE+32)
+#define RTM_DELACTION   (RTM_BASE+33)
+#define RTM_GETACTION   (RTM_BASE+34)
+
 #define RTM_NEWPREFIX	(RTM_BASE+36)
 #define RTM_GETPREFIX	(RTM_BASE+38)
 
@@ -69,7 +73,8 @@ struct rtattr
 
 #define RTA_ALIGNTO	4
 #define RTA_ALIGN(len) ( ((len)+RTA_ALIGNTO-1) & ~(RTA_ALIGNTO-1) )
-#define RTA_OK(rta,len) ((len) > 0 && (rta)->rta_len >= sizeof(struct rtattr) && \
+#define RTA_OK(rta,len) ((len) >= (int)sizeof(struct rtattr) && \
+			 (rta)->rta_len >= sizeof(struct rtattr) && \
 			 (rta)->rta_len <= (len))
 #define RTA_NEXT(rta,attrlen)	((attrlen) -= RTA_ALIGN((rta)->rta_len), \
 				 (struct rtattr*)(((char*)(rta)) + RTA_ALIGN((rta)->rta_len)))
@@ -639,6 +644,7 @@ enum
 	TCA_STATS,
 	TCA_XSTATS,
 	TCA_RATE,
+	TCA_FCNT,
 	__TCA_MAX
 };
 
@@ -672,6 +678,18 @@ enum
 #define RTMGRP_DECnet_ROUTE     0x4000
 
 #define RTMGRP_IPV6_PREFIX	0x20000
+
+/* TC action piece */
+struct tcamsg
+{
+	unsigned char	tca_family;
+	unsigned char	tca__pad1;
+	unsigned short	tca__pad2;
+};
+#define TA_RTA(r)  ((struct rtattr*)(((char*)(r)) + NLMSG_ALIGN(sizeof(struct tcamsg))))
+#define TA_PAYLOAD(n) NLMSG_PAYLOAD(n,sizeof(struct tcamsg))
+#define TCA_ACT_TAB 1 /* attr type must be >=1 */	
+#define TCAA_MAX 1
 
 /* End of information exported to user level */
 
@@ -727,10 +745,6 @@ __rta_reserve(struct sk_buff *skb, int attrtype, int attrlen)
 extern void rtmsg_ifinfo(int type, struct net_device *dev, unsigned change);
 
 extern struct semaphore rtnl_sem;
-
-#define rtnl_exlock()		do { } while(0)
-#define rtnl_exunlock()		do { } while(0)
-#define rtnl_exlock_nowait()	(0)
 
 #define rtnl_shlock()		down(&rtnl_sem)
 #define rtnl_shlock_nowait()	down_trylock(&rtnl_sem)

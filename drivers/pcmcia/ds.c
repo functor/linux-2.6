@@ -941,6 +941,7 @@ static int ds_ioctl(struct inode * inode, struct file * file,
 	ret = pcmcia_get_configuration_info(s->handle, &buf.config);
 	break;
     case DS_GET_FIRST_TUPLE:
+	pcmcia_validate_mem(s->parent);
 	ret = pcmcia_get_first_tuple(s->handle, &buf.tuple);
 	break;
     case DS_GET_NEXT_TUPLE:
@@ -962,6 +963,7 @@ static int ds_ioctl(struct inode * inode, struct file * file,
 	ret = pcmcia_get_status(s->handle, &buf.status);
 	break;
     case DS_VALIDATE_CIS:
+	pcmcia_validate_mem(s->parent);
 	ret = pcmcia_validate_cis(s->handle, &buf.cisinfo);
 	break;
     case DS_SUSPEND_CARD:
@@ -971,10 +973,10 @@ static int ds_ioctl(struct inode * inode, struct file * file,
 	ret = pcmcia_resume_card(s->parent);
 	break;
     case DS_EJECT_CARD:
-	ret = pcmcia_eject_card(s->parent);
+	err = pcmcia_eject_card(s->parent);
 	break;
     case DS_INSERT_CARD:
-	ret = pcmcia_insert_card(s->parent);
+	err = pcmcia_insert_card(s->parent);
 	break;
     case DS_ACCESS_CONFIGURATION_REGISTER:
 	if ((buf.conf_reg.Action == CS_WRITE) && !capable(CAP_SYS_ADMIN))

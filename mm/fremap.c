@@ -55,17 +55,13 @@ static inline void zap_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		unsigned long addr, struct page *page, pgprot_t prot)
 {
+	struct inode *inode;
+	pgoff_t size;
 	int err = -ENOMEM;
 	pte_t *pte;
 	pgd_t *pgd;
 	pmd_t *pmd;
 	pte_t pte_val;
-
-	/*
-	 * We use page_add_file_rmap below: if install_page is
-	 * ever extended to anonymous pages, this will warn us.
-	 */
-	BUG_ON(!page_mapping(page));
 
 	pgd = pgd_offset(mm, addr);
 	spin_lock(&mm->page_table_lock);
@@ -76,6 +72,16 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	pte = pte_alloc_map(mm, pmd, addr);
 	if (!pte)
+		goto err_unlock;
+
+	/*
+	 * This page may have been truncated. Tell the
+	 * caller about it.
+	 */
+	err = -EINVAL;
+	inode = vma->vm_file->f_mapping->host;
+	size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+	if (!page->mapping || page->index >= size)
 		goto err_unlock;
 
 	zap_pte(mm, vma, addr, pte);
@@ -161,6 +167,7 @@ asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 	unsigned long end = start + size;
 	struct vm_area_struct *vma;
 	int err = -EINVAL;
+	int has_write_lock = 0;
 
 	if (__prot)
 		return err;
@@ -181,7 +188,8 @@ asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 #endif
 
 	/* We need down_write() to change vma->vm_flags. */
-	down_write(&mm->mmap_sem);
+	down_read(&mm->mmap_sem);
+ retry:
 	vma = find_vma(mm, start);
 
 	/*
@@ -192,7 +200,8 @@ asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 	 * or VM_LOCKED, but VM_LOCKED could be revoked later on).
 	 */
 	if (vma && (vma->vm_flags & VM_SHARED) &&
-		(!vma->vm_private_data || (vma->vm_flags & VM_RESERVED)) &&
+		(!vma->vm_private_data ||
+			(vma->vm_flags & (VM_NONLINEAR|VM_RESERVED))) &&
 		vma->vm_ops && vma->vm_ops->populate &&
 			end > start && start >= vma->vm_start &&
 				end <= vma->vm_end) {
@@ -200,6 +209,12 @@ asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 		/* Must set VM_NONLINEAR before any pages are populated. */
 		if (pgoff != linear_page_index(vma, start) &&
 		    !(vma->vm_flags & VM_NONLINEAR)) {
+			if (!has_write_lock) {
+				up_read(&mm->mmap_sem);
+				down_write(&mm->mmap_sem);
+				has_write_lock = 1;
+				goto retry;
+			}
 			mapping = vma->vm_file->f_mapping;
 			spin_lock(&mapping->i_mmap_lock);
 			flush_dcache_mmap_lock(mapping);
@@ -212,8 +227,6 @@ asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 			spin_unlock(&mapping->i_mmap_lock);
 		}
 
-		/* ->populate can take a long time, so downgrade the lock. */
-		downgrade_write(&mm->mmap_sem);
 		err = vma->vm_ops->populate(vma, start, size,
 					    vma->vm_page_prot,
 					    pgoff, flags & MAP_NONBLOCK);
@@ -223,10 +236,11 @@ asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 		 * it after ->populate completes, and that would prevent
 		 * downgrading the lock.  (Locks can't be upgraded).
 		 */
-		up_read(&mm->mmap_sem);
-	} else {
-		up_write(&mm->mmap_sem);
 	}
+	if (likely(!has_write_lock))
+		up_read(&mm->mmap_sem);
+	else
+		up_write(&mm->mmap_sem);
 
 	return err;
 }

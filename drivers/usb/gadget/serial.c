@@ -249,6 +249,20 @@ static const char EP_IN_NAME[] =	"ep1in-bulk";
 #define hw_optimize(g)			do {} while (0)
 #endif
 
+#ifdef	CONFIG_USB_GADGET_OMAP
+#define CHIP			"omap"
+#define EP0_MAXPACKET			64
+static const char EP_OUT_NAME [] = "ep2out-bulk";
+#define EP_OUT_NUM	2
+static const char EP_IN_NAME [] = "ep1in-bulk";
+#define EP_IN_NUM	1
+#define SELFPOWER 			USB_CONFIG_ATT_SELFPOWER
+/* supports remote wakeup, but this driver doesn't */
+
+/* no hw optimizations to apply */
+#define hw_optimize(g) do {} while (0)
+#endif
+
 
 /*
  * SA-1100 UDC:  widely used in first gen Linux-capable PDAs.
@@ -1573,6 +1587,8 @@ static int gs_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctr
 	/* respond with data transfer before status phase? */
 	if (ret >= 0) {
 		req->length = ret;
+		req->zero = ret < ctrl->wLength
+				&& (ret % gadget->ep0->maxpacket) == 0;
 		ret = usb_ep_queue(gadget->ep0, req, GFP_ATOMIC);
 		if (ret < 0) {
 			printk(KERN_ERR

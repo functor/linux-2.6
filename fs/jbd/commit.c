@@ -362,7 +362,7 @@ write_out_data:
 	 */
 	commit_transaction->t_state = T_COMMIT;
 
-	descriptor = 0;
+	descriptor = NULL;
 	bufs = 0;
 	while (commit_transaction->t_buffers) {
 
@@ -503,7 +503,7 @@ write_out_data:
 start_journal_io:
 			for (i = 0; i < bufs; i++) {
 				struct buffer_head *bh = wbuf[i];
-				set_buffer_locked(bh);
+				lock_buffer(bh);
 				clear_buffer_dirty(bh);
 				set_buffer_uptodate(bh);
 				bh->b_end_io = journal_end_buffer_io_sync;

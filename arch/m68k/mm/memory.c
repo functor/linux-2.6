@@ -54,7 +54,7 @@ void __init init_pointer_table(unsigned long ptable)
 
 	/* unreserve the page so it's possible to free that page */
 	PD_PAGE(dp)->flags &= ~(1 << PG_reserved);
-	atomic_set(&PD_PAGE(dp)->count, 1);
+	set_page_count(PD_PAGE(dp), 1);
 
 	return;
 }
@@ -129,7 +129,7 @@ int free_pointer_table (pmd_t *ptable)
 	return 0;
 }
 
-#if DEBUG_INVALID_PTOV
+#ifdef DEBUG_INVALID_PTOV
 int mm_inv_cnt = 5;
 #endif
 
@@ -179,7 +179,7 @@ unsigned long mm_ptov (unsigned long paddr)
 		voff += m68k_memory[i].size;
 	} while (++i < m68k_num_memory);
 
-#if DEBUG_INVALID_PTOV
+#ifdef DEBUG_INVALID_PTOV
 	if (mm_inv_cnt > 0) {
 		mm_inv_cnt--;
 		printk("Invalid use of phys_to_virt(0x%lx) at 0x%p!\n",

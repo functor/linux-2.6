@@ -973,7 +973,7 @@ static int
 tcp_data_recv(read_descriptor_t *rd_desc, struct sk_buff *skb,
 		unsigned int offset, size_t len)
 {
-	struct rpc_xprt *xprt = (struct rpc_xprt *)rd_desc->buf;
+	struct rpc_xprt *xprt = rd_desc->arg.data;
 	skb_reader_t desc = {
 		.skb	= skb,
 		.offset	= offset,
@@ -1021,7 +1021,7 @@ static void tcp_data_ready(struct sock *sk, int bytes)
 		goto out;
 
 	/* We use rd_desc to pass struct xprt to tcp_data_recv */
-	rd_desc.buf = (char *)xprt;
+	rd_desc.arg.data = xprt;
 	rd_desc.count = 65536;
 	tcp_read_sock(sk, &rd_desc, tcp_data_recv);
 out:
@@ -1086,8 +1086,8 @@ xprt_write_space(struct sock *sk)
 
 	/* Wait until we have enough socket memory */
 	if (xprt->stream) {
-		/* from net/ipv4/tcp.c:tcp_write_space */
-		if (tcp_wspace(sk) < tcp_min_write_space(sk))
+		/* from net/core/stream.c:sk_stream_write_space */
+		if (sk_stream_wspace(sk) < sk_stream_min_wspace(sk))
 			goto out;
 	} else {
 		/* from net/core/sock.c:sock_def_write_space */
@@ -1296,21 +1296,6 @@ xprt_transmit(struct rpc_task *task)
 /*
  * Reserve an RPC call slot.
  */
-void
-xprt_reserve(struct rpc_task *task)
-{
-	struct rpc_xprt	*xprt = task->tk_xprt;
-
-	task->tk_status = -EIO;
-	if (!xprt->shutdown) {
-		spin_lock(&xprt->xprt_lock);
-		do_xprt_reserve(task);
-		spin_unlock(&xprt->xprt_lock);
-		if (task->tk_rqstp)
-			del_timer_sync(&xprt->timer);
-	}
-}
-
 static inline void
 do_xprt_reserve(struct rpc_task *task)
 {
@@ -1330,6 +1315,21 @@ do_xprt_reserve(struct rpc_task *task)
 	task->tk_status = -EAGAIN;
 	task->tk_timeout = 0;
 	rpc_sleep_on(&xprt->backlog, task, NULL, NULL);
+}
+
+void
+xprt_reserve(struct rpc_task *task)
+{
+	struct rpc_xprt	*xprt = task->tk_xprt;
+
+	task->tk_status = -EIO;
+	if (!xprt->shutdown) {
+		spin_lock(&xprt->xprt_lock);
+		do_xprt_reserve(task);
+		spin_unlock(&xprt->xprt_lock);
+		if (task->tk_rqstp)
+			del_timer_sync(&xprt->timer);
+	}
 }
 
 /*

@@ -48,7 +48,6 @@
 #include <linux/rmap.h>
 
 #include <asm/uaccess.h>
-#include <asm/pgalloc.h>
 #include <asm/mmu_context.h>
 
 #ifdef CONFIG_KMOD
@@ -431,6 +430,7 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 			mpnt->vm_flags = VM_STACK_FLAGS & ~VM_EXEC;
 		else
 			mpnt->vm_flags = VM_STACK_FLAGS;
+		mpnt->vm_flags |= mm->def_flags;
 		mpnt->vm_page_prot = protection_map[mpnt->vm_flags & 0x7];
 		insert_vm_struct(mm, mpnt);
 		mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
@@ -839,7 +839,8 @@ int flush_old_exec(struct linux_binprm * bprm)
 	flush_thread();
 
 	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid || 
-	    permission(bprm->file->f_dentry->d_inode,MAY_READ, NULL))
+	    permission(bprm->file->f_dentry->d_inode,MAY_READ, NULL) ||
+	    (bprm->interp_flags & BINPRM_FLAGS_ENFORCE_NONDUMP))
 		current->mm->dumpable = 0;
 
 	/* An exec changes our domain. We are no longer part of the thread
@@ -886,8 +887,10 @@ int prepare_binprm(struct linux_binprm *bprm)
 
 	if(!(bprm->file->f_vfsmnt->mnt_flags & MNT_NOSUID)) {
 		/* Set-uid? */
-		if (mode & S_ISUID)
+		if (mode & S_ISUID) {
+			current->personality &= ~PER_CLEAR_ON_SETID;
 			bprm->e_uid = inode->i_uid;
+		}
 
 		/* Set-gid? */
 		/*
@@ -895,8 +898,10 @@ int prepare_binprm(struct linux_binprm *bprm)
 		 * is a candidate for mandatory locking, not a setgid
 		 * executable.
 		 */
-		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP))
+		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
+			current->personality &= ~PER_CLEAR_ON_SETID;
 			bprm->e_gid = inode->i_gid;
+		}
 	}
 
 	/* fill in binprm security blob */
@@ -1088,6 +1093,8 @@ int do_execve(char * filename,
 	bprm.file = file;
 	bprm.filename = filename;
 	bprm.interp = filename;
+	bprm.interp_flags = 0;
+	bprm.interp_data = 0;
 	bprm.sh_bang = 0;
 	bprm.loader = 0;
 	bprm.exec = 0;

@@ -792,12 +792,12 @@ static inline void do_process_times(struct task_struct *p,
 
 	psecs = (p->utime += user);
 	psecs += (p->stime += system);
-	if (psecs / HZ > p->rlim[RLIMIT_CPU].rlim_cur) {
+	if (psecs / HZ >= p->rlim[RLIMIT_CPU].rlim_cur) {
 		/* Send SIGXCPU every second.. */
 		if (!(psecs % HZ))
 			send_sig(SIGXCPU, p, 1);
 		/* and SIGKILL when we go over max.. */
-		if (psecs / HZ > p->rlim[RLIMIT_CPU].rlim_max)
+		if (psecs / HZ >= p->rlim[RLIMIT_CPU].rlim_max)
 			send_sig(SIGKILL, p, 1);
 	}
 }
@@ -829,7 +829,7 @@ static inline void do_it_prof(struct task_struct *p)
 	}
 }
 
-void update_one_process(struct task_struct *p, unsigned long user,
+static void update_one_process(struct task_struct *p, unsigned long user,
 			unsigned long system, int cpu)
 {
 	do_process_times(p, user, system);

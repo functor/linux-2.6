@@ -40,6 +40,7 @@
 #include <linux/cpu.h>
 #include <linux/percpu.h>
 #include <linux/kthread.h>
+#include <asm/tlb.h>
 
 #include <asm/unistd.h>
 
@@ -546,7 +547,7 @@ static inline void resched_task(task_t *p)
  * task_curr - is this task currently executing on a CPU?
  * @p: the task in question.
  */
-inline int task_curr(task_t *p)
+inline int task_curr(const task_t *p)
 {
 	return cpu_curr(task_cpu(p)) == p;
 }
@@ -696,10 +697,9 @@ static int wake_idle(int cpu, task_t *p)
 		return cpu;
 
 	cpus_and(tmp, sd->span, cpu_online_map);
-	for_each_cpu_mask(i, tmp) {
-		if (!cpu_isset(i, p->cpus_allowed))
-			continue;
+	cpus_and(tmp, tmp, p->cpus_allowed);
 
+	for_each_cpu_mask(i, tmp) {
 		if (idle_cpu(i))
 			return i;
 	}
@@ -1095,7 +1095,7 @@ unsigned long nr_uninterruptible(void)
 {
 	unsigned long i, sum = 0;
 
-	for_each_online_cpu(i)
+	for_each_cpu(i)
 		sum += cpu_rq(i)->nr_uninterruptible;
 
 	return sum;
@@ -1105,7 +1105,7 @@ unsigned long long nr_context_switches(void)
 {
 	unsigned long long i, sum = 0;
 
-	for_each_online_cpu(i)
+	for_each_cpu(i)
 		sum += cpu_rq(i)->nr_switches;
 
 	return sum;
@@ -1115,7 +1115,7 @@ unsigned long nr_iowait(void)
 {
 	unsigned long i, sum = 0;
 
-	for_each_online_cpu(i)
+	for_each_cpu(i)
 		sum += atomic_read(&cpu_rq(i)->nr_iowait);
 
 	return sum;
@@ -2658,7 +2658,7 @@ asmlinkage long sys_nice(int increment)
  * RT tasks are offset by -200. Normal tasks are centered
  * around 0, value goes from -16 to +15.
  */
-int task_prio(task_t *p)
+int task_prio(const task_t *p)
 {
 	return p->prio - MAX_RT_PRIO;
 }
@@ -2667,7 +2667,7 @@ int task_prio(task_t *p)
  * task_nice - return the nice value of a given task.
  * @p: the task in question.
  */
-int task_nice(task_t *p)
+int task_nice(const task_t *p)
 {
 	return TASK_NICE(p);
 }
@@ -2940,6 +2940,21 @@ out_unlock:
 	unlock_cpu_hotplug();
 	return retval;
 }
+
+/*
+ * Represents all cpu's present in the system
+ * In systems capable of hotplug, this map could dynamically grow
+ * as new cpu's are detected in the system via any platform specific
+ * method, such as ACPI for e.g.
+ */
+
+cpumask_t cpu_present_map;
+EXPORT_SYMBOL(cpu_present_map);
+
+#ifndef CONFIG_SMP
+cpumask_t cpu_online_map = CPU_MASK_ALL;
+cpumask_t cpu_possible_map = CPU_MASK_ALL;
+#endif
 
 /**
  * sys_sched_getaffinity - get the cpu affinity of a process
@@ -3320,7 +3335,7 @@ int set_cpus_allowed(task_t *p, cpumask_t new_mask)
 	runqueue_t *rq;
 
 	rq = task_rq_lock(p, &flags);
-	if (any_online_cpu(new_mask) == NR_CPUS) {
+	if (!cpus_intersects(new_mask, cpu_online_map)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -3335,6 +3350,7 @@ int set_cpus_allowed(task_t *p, cpumask_t new_mask)
 		task_rq_unlock(rq, &flags);
 		wake_up_process(rq->migration_thread);
 		wait_for_completion(&req.done);
+		tlb_migrate_finish(p->mm);
 		return 0;
 	}
 out:
@@ -3495,8 +3511,7 @@ static void migrate_all_tasks(int src_cpu)
 		if (dest_cpu == NR_CPUS)
 			dest_cpu = any_online_cpu(tsk->cpus_allowed);
 		if (dest_cpu == NR_CPUS) {
-			cpus_clear(tsk->cpus_allowed);
-			cpus_complement(tsk->cpus_allowed);
+			cpus_setall(tsk->cpus_allowed);
 			dest_cpu = any_online_cpu(tsk->cpus_allowed);
 
 			/* Don't tell them about moving exiting tasks
@@ -3558,6 +3573,7 @@ static int migration_call(struct notifier_block *nfb, unsigned long action,
 		p = kthread_create(migration_thread, hcpu, "migration/%d",cpu);
 		if (IS_ERR(p))
 			return NOTIFY_BAD;
+		p->flags |= PF_NOFREEZE;
 		kthread_bind(p, cpu);
 		/* Must be high prio: stop_machine expects to yield to it. */
 		rq = task_rq_lock(p, &flags);
@@ -3812,7 +3828,7 @@ void sched_domain_debug(void)
 			int j;
 			char str[NR_CPUS];
 			struct sched_group *group = sd->groups;
-			cpumask_t groupmask, tmp;
+			cpumask_t groupmask;
 
 			cpumask_scnprintf(str, NR_CPUS, sd->span);
 			cpus_clear(groupmask);
@@ -3842,8 +3858,7 @@ void sched_domain_debug(void)
 				if (!cpus_weight(group->cpumask))
 					printk(" ERROR empty group:");
 
-				cpus_and(tmp, groupmask, group->cpumask);
-				if (cpus_weight(tmp) > 0)
+				if (cpus_intersects(groupmask, group->cpumask))
 					printk(" ERROR repeated CPUs:");
 
 				cpus_or(groupmask, groupmask, group->cpumask);
@@ -3862,8 +3877,7 @@ void sched_domain_debug(void)
 			sd = sd->parent;
 
 			if (sd) {
-				cpus_and(tmp, groupmask, sd->span);
-				if (!cpus_equal(tmp, groupmask))
+				if (!cpus_subset(groupmask, sd->span))
 					printk(KERN_DEBUG "ERROR parent span is not a superset of domain->span\n");
 			}
 
@@ -3902,16 +3916,16 @@ void __init sched_init(void)
 	/* Set up an initial dummy domain for early boot */
 	static struct sched_domain sched_domain_init;
 	static struct sched_group sched_group_init;
-	cpumask_t cpu_mask_all = CPU_MASK_ALL;
 
 	memset(&sched_domain_init, 0, sizeof(struct sched_domain));
-	sched_domain_init.span = cpu_mask_all;
+	sched_domain_init.span = CPU_MASK_ALL;
 	sched_domain_init.groups = &sched_group_init;
 	sched_domain_init.last_balance = jiffies;
 	sched_domain_init.balance_interval = INT_MAX; /* Don't balance */
+	sched_domain_init.busy_factor = 1;
 
 	memset(&sched_group_init, 0, sizeof(struct sched_group));
-	sched_group_init.cpumask = cpu_mask_all;
+	sched_group_init.cpumask = CPU_MASK_ALL;
 	sched_group_init.next = &sched_group_init;
 	sched_group_init.cpu_power = SCHED_LOAD_SCALE;
 #endif

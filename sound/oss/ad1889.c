@@ -338,7 +338,7 @@ int ad1889_read_proc (char *page, char **start, off_t off,
 		{ "AC97_3D_CONTROL", 0x100 + AC97_3D_CONTROL, 16 },
 		{ "AC97_MODEM_RATE", 0x100 + AC97_MODEM_RATE, 16 },
 		{ "AC97_POWER_CONTROL", 0x100 + AC97_POWER_CONTROL, 16 },
-		{ 0 }
+		{ NULL }
 	};
 
 	if (dev == NULL)
@@ -451,9 +451,6 @@ static ssize_t ad1889_write(struct file *file, const char __user *buffer, size_t
 	volatile struct dmabuf *dmabuf = &state->dmabuf;
 	ssize_t ret = 0;
 	DECLARE_WAITQUEUE(wait, current);
-
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 
 	down(&state->sem);
 #if 0
@@ -764,7 +761,7 @@ static int ad1889_open(struct inode *inode, struct file *file)
 	ad1889_set_wav_rate(ad1889_dev, 44100);
 	ad1889_set_wav_fmt(ad1889_dev, AFMT_S16_LE);
 	AD1889_WRITEW(ad1889_dev, AD_DSWADA, 0x0404); /* attenuation */
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int ad1889_release(struct inode *inode, struct file *file)
@@ -851,7 +848,7 @@ static int ad1889_ac97_init(ad1889_dev_t *dev, int id)
 	}
 
 	eid = ad1889_codec_read(ac97, AC97_EXTENDED_ID);
-	if (eid == 0xffffff) {
+	if (eid == 0xffff) {
 		printk(KERN_WARNING DEVNAME ": no codec attached?\n");
 		goto out_free;
 	}
@@ -1017,7 +1014,7 @@ static int __devinit ad1889_probe(struct pci_dev *pcidev, const struct pci_devic
 	if ((err = ad1889_ac97_init(dev, 0)) != 0)
 		goto err_free_dsp;
 
-	if (((proc_root = proc_mkdir("driver/ad1889", 0)) == NULL) ||
+	if (((proc_root = proc_mkdir("driver/ad1889", NULL)) == NULL) ||
 	    create_proc_read_entry("ac97", S_IFREG|S_IRUGO, proc_root, ac97_read_proc, dev->ac97_codec) == NULL ||
 	    create_proc_read_entry("info", S_IFREG|S_IRUGO, proc_root, ad1889_read_proc, dev) == NULL) 
 		goto err_free_dsp;
@@ -1038,7 +1035,7 @@ err_free_irq:
 
 err_free_mem:
 	ad1889_free_dev(dev);
-	pci_set_drvdata(pcidev, 0);
+	pci_set_drvdata(pcidev, NULL);
 
 	return -ENODEV;
 }

@@ -42,9 +42,11 @@
 #define OCP_FUNC_16550		0x0031
 #define OCP_FUNC_IIC		0x0032
 #define OCP_FUNC_USB		0x0033
+#define OCP_FUNC_PSC_UART	0x0034
 
 /* Memory devices 0x0090 - 0x009F */
 #define OCP_FUNC_MAL		0x0090
+#define OCP_FUNC_DMA		0x0091
 
 /* Display 0x00A0 - 0x00AF */
 
@@ -62,7 +64,7 @@
 
 /* Network 0x0200 - 0x02FF */
 #define OCP_FUNC_EMAC		0x0200
-#define OCP_FUNC_ENET		0x0201	/* TSEC & FEC */
+#define OCP_FUNC_GFAR		0x0201	/* TSEC & FEC */
 
 /* Bridge devices 0xE00 - 0xEFF */
 #define OCP_FUNC_OPB		0x0E00

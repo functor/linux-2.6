@@ -227,7 +227,7 @@ config SCSI_DECSII
 	depends on DECSTATION && SCSI
 
 config BLK_DEV_3W_XXXX_RAID
-	tristate "3ware Hardware ATA-RAID support"
+	tristate "3ware 5/6/7/8xxx ATA-RAID support"
 	depends on PCI && SCSI
 	help
 	  3ware is the only hardware ATA-Raid product in Linux to date.
@@ -238,6 +238,17 @@ config BLK_DEV_3W_XXXX_RAID
 
 	  Please read the comments at the top of
 	  <file:drivers/scsi/3w-xxxx.c>.
+
+config SCSI_3W_9XXX
+	tristate "3ware 9xxx SATA-RAID support"
+	depends on PCI && SCSI
+	help
+	  This driver supports the 9000 series 3ware SATA-RAID cards.
+
+	  <http://www.amcc.com>
+
+	  Please read the comments at the top of
+	  <file:drivers/scsi/3w-9xxx.c>.
 
 config SCSI_7000FASST
 	tristate "7000FASST SCSI support"
@@ -363,7 +374,7 @@ config SCSI_DPT_I2O
 
 config SCSI_ADVANSYS
 	tristate "AdvanSys SCSI support"
-	depends on (ISA || EISA || PCI) && SCSI
+	depends on (ISA || EISA || PCI) && SCSI && BROKEN
 	help
 	  This is a driver for all SCSI host adapters manufactured by
 	  AdvanSys. It is documented in the kernel source in
@@ -422,6 +433,14 @@ config SCSI_ATA_PIIX
 
 	  If unsure, say N.
 
+config SCSI_SATA_NV
+	tristate "NVIDIA SATA support"
+	depends on SCSI_SATA && PCI && EXPERIMENTAL
+	help
+	  This option enables support for NVIDIA Serial ATA.
+
+	  If unsure, say N.
+
 config SCSI_SATA_PROMISE
 	tristate "Promise SATA TX2/TX4 support"
 	depends on SCSI_SATA && PCI
@@ -472,15 +491,13 @@ config SCSI_SATA_VITESSE
 
 config SCSI_BUSLOGIC
 	tristate "BusLogic SCSI support"
-	depends on (PCI || ISA || MCA) && SCSI
+	depends on (PCI || ISA || MCA) && SCSI && (BROKEN || !SPARC64)
 	---help---
 	  This is support for BusLogic MultiMaster and FlashPoint SCSI Host
 	  Adapters. Consult the SCSI-HOWTO, available from
 	  <http://www.tldp.org/docs.html#howto>, and the files
 	  <file:Documentation/scsi/BusLogic.txt> and
-	  <file:Documentation/scsi/FlashPoint.txt> for more information. If this
-	  driver does not work correctly without modification, please contact
-	  the author, Leonard N. Zubkoff, by email to lnz@dandelion.com.
+	  <file:Documentation/scsi/FlashPoint.txt> for more information.
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called BusLogic.
@@ -530,7 +547,7 @@ config SCSI_DTC3280
 
 config SCSI_EATA
 	tristate "EATA ISA/EISA/PCI (DPT and generic EATA/DMA-compliant boards) support"
-	depends on (ISA || EISA || PCI) && SCSI
+	depends on (ISA || EISA || PCI) && SCSI && (BROKEN || !SPARC64)
 	---help---
 	  This driver supports all EATA/DMA-compliant SCSI host adapters.  DPT
 	  ISA and all EISA I/O addresses are probed looking for the "EATA"
@@ -611,7 +628,7 @@ config SCSI_FUTURE_DOMAIN
 
 config SCSI_FD_MCS
 	tristate "Future Domain MCS-600/700 SCSI support"
-	depends on MCA && SCSI
+	depends on MCA_LEGACY && SCSI
 	---help---
 	  This is support for Future Domain MCS 600/700 MCA SCSI adapters.
 	  Some PS/2 computers are equipped with IBM Fast SCSI Adapter/A which
@@ -624,7 +641,7 @@ config SCSI_FD_MCS
 
 config SCSI_GDTH
 	tristate "Intel/ICP (former GDT SCSI Disk Array) RAID Controller support"
-	depends on (ISA || EISA || PCI) && SCSI
+	depends on (ISA || EISA || PCI) && SCSI && (BROKEN || !SPARC64)
 	---help---
 	  Formerly called GDT SCSI Disk Array Controller Support.
 
@@ -682,7 +699,7 @@ config SCSI_GENERIC_NCR53C400
 
 config SCSI_IBMMCA
 	tristate "IBMMCA SCSI support"
-	depends on MCA && SCSI
+	depends on MCA_LEGACY && SCSI
 	---help---
 	  This is support for the IBM SCSI adapter found in many of the PS/2
 	  series computers.  These machines have an MCA bus, so you need to
@@ -1716,23 +1733,12 @@ config SCSI_SUNESP
 	  To compile this driver as a module, choose M here: the
 	  module will be called esp.
 
-config SCSI_PC980155
-	tristate "NEC PC-9801-55 SCSI support"
-	depends on X86_PC9800 && SCSI
-	help
-	  If you have the NEC PC-9801-55 SCSI interface card or compatibles
-	  for NEC PC-9801/PC-9821, say Y.
-
-config WD33C93_PIO
-	bool
-	depends on SCSI_PC980155
-	default y
-
 #      bool 'Cyberstorm Mk III SCSI support (EXPERIMENTAL)' CONFIG_CYBERSTORMIII_SCSI
 
 config ZFCP
 	tristate "FCP host bus adapter driver for IBM eServer zSeries"
 	depends on ARCH_S390 && SCSI
+	select SCSI_FC_ATTRS
 	help
           If you want to access SCSI devices attached to your IBM eServer
           zSeries by means of Fibre Channel interfaces say Y.

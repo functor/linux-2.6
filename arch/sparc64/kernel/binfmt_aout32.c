@@ -112,9 +112,9 @@ static int aout32_core_dump(long signr, struct pt_regs *regs, struct file *file)
 
 /* make sure we actually have a data and stack area to dump */
 	set_fs(USER_DS);
-	if (verify_area(VERIFY_READ, (void *) START_DATA(dump), dump.u_dsize))
+	if (verify_area(VERIFY_READ, (void __user *) START_DATA(dump), dump.u_dsize))
 		dump.u_dsize = 0;
-	if (verify_area(VERIFY_READ, (void *) START_STACK(dump), dump.u_ssize))
+	if (verify_area(VERIFY_READ, (void __user *) START_STACK(dump), dump.u_ssize))
 		dump.u_ssize = 0;
 
 	set_fs(KERNEL_DS);
@@ -148,24 +148,25 @@ end_coredump:
  * addresses on the "stack", returning the new stack pointer value.
  */
 
-static u32 *create_aout32_tables(char * p, struct linux_binprm * bprm)
+static u32 __user *create_aout32_tables(char __user *p, struct linux_binprm *bprm)
 {
-	u32 *argv, *envp;
-	u32 *sp;
+	u32 __user *argv;
+	u32 __user *envp;
+	u32 __user *sp;
 	int argc = bprm->argc;
 	int envc = bprm->envc;
 
-	sp = (u32 *) ((-(unsigned long)sizeof(char *)) & (unsigned long) p);
+	sp = (u32 __user *)((-(unsigned long)sizeof(char *))&(unsigned long)p);
 
 	/* This imposes the proper stack alignment for a new process. */
-	sp = (u32 *) (((unsigned long) sp) & ~7);
+	sp = (u32 __user *) (((unsigned long) sp) & ~7);
 	if ((envc+argc+3)&1)
 		--sp;
 
 	sp -= envc+1;
-	envp = (u32 *) sp;
+	envp = sp;
 	sp -= argc+1;
-	argv = (u32 *) sp;
+	argv = sp;
 	put_user(argc,--sp);
 	current->mm->arg_start = (unsigned long) p;
 	while (argc-->0) {
@@ -246,10 +247,10 @@ static int load_aout32_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		loff_t pos = fd_offset;
 		/* Fuck me plenty... */
 		error = do_brk(N_TXTADDR(ex), ex.a_text);
-		bprm->file->f_op->read(bprm->file, (char *) N_TXTADDR(ex),
+		bprm->file->f_op->read(bprm->file, (char __user *)N_TXTADDR(ex),
 			  ex.a_text, &pos);
 		error = do_brk(N_DATADDR(ex), ex.a_data);
-		bprm->file->f_op->read(bprm->file, (char *) N_DATADDR(ex),
+		bprm->file->f_op->read(bprm->file, (char __user *)N_DATADDR(ex),
 			  ex.a_data, &pos);
 		goto beyond_if;
 	}
@@ -258,7 +259,7 @@ static int load_aout32_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		loff_t pos = fd_offset;
 		do_brk(N_TXTADDR(ex) & PAGE_MASK,
 			ex.a_text+ex.a_data + PAGE_SIZE - 1);
-		bprm->file->f_op->read(bprm->file, (char *) N_TXTADDR(ex),
+		bprm->file->f_op->read(bprm->file, (char __user *)N_TXTADDR(ex),
 			  ex.a_text+ex.a_data, &pos);
 	} else {
 		static unsigned long error_time;
@@ -272,7 +273,8 @@ static int load_aout32_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		if (!bprm->file->f_op->mmap) {
 			loff_t pos = fd_offset;
 			do_brk(0, ex.a_text+ex.a_data);
-			bprm->file->f_op->read(bprm->file,(char *)N_TXTADDR(ex),
+			bprm->file->f_op->read(bprm->file,
+				  (char __user *)N_TXTADDR(ex),
 				  ex.a_text+ex.a_data, &pos);
 			goto beyond_if;
 		}
@@ -319,7 +321,7 @@ beyond_if:
 	}
 
 	current->mm->start_stack =
-		(unsigned long) create_aout32_tables((char *)bprm->p, bprm);
+		(unsigned long) create_aout32_tables((char __user *)bprm->p, bprm);
 	if (!(orig_thr_flags & _TIF_32BIT)) {
 		unsigned long pgd_cache;
 

@@ -47,7 +47,6 @@
 #include <asm/nmi.h>
 
 #include <asm/smp.h>
-#include <asm/pgalloc.h>
 #include <asm/arch_hooks.h>
 
 #include <linux/irq.h>
@@ -104,7 +103,7 @@ static int valid_stack_ptr(struct task_struct *task, void *p)
 }
 
 #ifdef CONFIG_FRAME_POINTER
-void print_context_stack(struct task_struct *task, unsigned long *stack,
+static void print_context_stack(struct task_struct *task, unsigned long *stack,
 			 unsigned long ebp)
 {
 	unsigned long addr;
@@ -118,16 +117,17 @@ void print_context_stack(struct task_struct *task, unsigned long *stack,
 	}
 }
 #else
-void print_context_stack(struct task_struct *task, unsigned long *stack,
+static void print_context_stack(struct task_struct *task, unsigned long *stack,
 			 unsigned long ebp)
 {
 	unsigned long addr;
 
 	while (!kstack_end(stack)) {
 		addr = *stack++;
-		if (kernel_text_address(addr)) {
-			printk(" [<%08lx>] ", addr);
-			print_symbol("%s\n", addr);
+		if (__kernel_text_address(addr)) {
+			printk(" [<%08lx>]", addr);
+			print_symbol(" %s", addr);
+			printk("\n");
 		}
 	}
 }
@@ -163,7 +163,6 @@ void show_trace(struct task_struct *task, unsigned long * stack)
 			break;
 		printk(" =======================\n");
 	}
-	printk("\n");
 }
 
 void show_stack(struct task_struct *task, unsigned long *esp)
@@ -398,7 +397,7 @@ asmlinkage void do_##name(struct pt_regs * regs, long error_code) \
 	info.si_signo = signr; \
 	info.si_errno = 0; \
 	info.si_code = sicode; \
-	info.si_addr = (void *)siaddr; \
+	info.si_addr = (void __user *)siaddr; \
 	do_trap(trapnr, signr, str, 0, regs, error_code, &info); \
 }
 
@@ -415,7 +414,7 @@ asmlinkage void do_##name(struct pt_regs * regs, long error_code) \
 	info.si_signo = signr; \
 	info.si_errno = 0; \
 	info.si_code = sicode; \
-	info.si_addr = (void *)siaddr; \
+	info.si_addr = (void __user *)siaddr; \
 	do_trap(trapnr, signr, str, 1, regs, error_code, &info); \
 }
 
@@ -631,8 +630,8 @@ asmlinkage void do_debug(struct pt_regs * regs, long error_code)
 	/* If this is a kernel mode trap, save the user PC on entry to 
 	 * the kernel, that's what the debugger can make sense of.
 	 */
-	info.si_addr = ((regs->xcs & 3) == 0) ? (void *)tsk->thread.eip : 
-	                                        (void *)regs->eip;
+	info.si_addr = ((regs->xcs & 3) == 0) ? (void __user *)tsk->thread.eip
+	                                      : (void __user *)regs->eip;
 	force_sig_info(SIGTRAP, &info, tsk);
 
 	/* Disable additional traps. They'll be re-enabled when
@@ -660,7 +659,7 @@ clear_TF:
  * the correct behaviour even in the presence of the asynchronous
  * IRQ13 behaviour
  */
-void math_error(void *eip)
+void math_error(void __user *eip)
 {
 	struct task_struct * task;
 	siginfo_t info;
@@ -719,10 +718,10 @@ void math_error(void *eip)
 asmlinkage void do_coprocessor_error(struct pt_regs * regs, long error_code)
 {
 	ignore_fpu_irq = 1;
-	math_error((void *)regs->eip);
+	math_error((void __user *)regs->eip);
 }
 
-void simd_math_error(void *eip)
+void simd_math_error(void __user *eip)
 {
 	struct task_struct * task;
 	siginfo_t info;
@@ -776,7 +775,7 @@ asmlinkage void do_simd_coprocessor_error(struct pt_regs * regs,
 	if (cpu_has_xmm) {
 		/* Handle SIMD FPU exceptions on PIII+ processors. */
 		ignore_fpu_irq = 1;
-		simd_math_error((void *)regs->eip);
+		simd_math_error((void __user *)regs->eip);
 	} else {
 		/*
 		 * Handle strange cache flush from user space exception

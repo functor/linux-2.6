@@ -439,6 +439,10 @@ copy_thread (int nr, unsigned long clone_flags,
 		ia32_save_state(p);
 		if (clone_flags & CLONE_SETTLS)
 			retval = ia32_clone_tls(p, child_ptregs);
+
+		/* Copy partially mapped page list */
+		if (!retval)
+			retval = ia32_copy_partial_page_list(p, clone_flags);
 	}
 #endif
 
@@ -612,16 +616,6 @@ out:
 	return error;
 }
 
-void
-ia64_set_personality (struct elf64_hdr *elf_ex, int ibcs2_interpreter)
-{
-	set_personality(PER_LINUX);
-	if (elf_ex->e_flags & EF_IA_64_LINUX_EXECUTABLE_STACK)
-		current->thread.flags |= IA64_THREAD_XSTACK;
-	else
-		current->thread.flags &= ~IA64_THREAD_XSTACK;
-}
-
 pid_t
 kernel_thread (int (*fn)(void *), void *arg, unsigned long flags)
 {
@@ -672,6 +666,8 @@ flush_thread (void)
 	/* drop floating-point and debug-register state if it exists: */
 	current->thread.flags &= ~(IA64_THREAD_FPH_VALID | IA64_THREAD_DBG_VALID);
 	ia64_drop_fpu(current);
+	if (IS_IA32_PROCESS(ia64_task_regs(current)))
+		ia32_drop_partial_page_list(current);
 }
 
 /*
@@ -691,6 +687,8 @@ exit_thread (void)
 	if (current->thread.flags & IA64_THREAD_DBG_VALID)
 		pfm_release_debug_registers(current);
 #endif
+	if (IS_IA32_PROCESS(ia64_task_regs(current)))
+		ia32_drop_partial_page_list(current);
 }
 
 unsigned long

@@ -11,7 +11,7 @@
  *			  Frank Pavlic (pavlic@de.ibm.com) and
  *		 	  Martin Schwidefsky <schwidefsky@de.ibm.com>
  *
- *    $Revision: 1.81 $	 $Date: 2004/05/14 13:54:33 $
+ *    $Revision: 1.85 $	 $Date: 2004/08/04 11:05:43 $
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -37,6 +37,7 @@
 #include <linux/inetdevice.h>
 #include <linux/in.h>
 #include <linux/igmp.h>
+#include <linux/delay.h>
 #include <net/arp.h>
 #include <net/ip.h>
 
@@ -58,7 +59,7 @@
 /**
  * initialization string for output
  */
-#define VERSION_LCS_C  "$Revision: 1.81 $"
+#define VERSION_LCS_C  "$Revision: 1.85 $"
 
 static char version[] __initdata = "LCS driver ("VERSION_LCS_C "/" VERSION_LCS_H ")";
 static char debug_buffer[255];
@@ -1046,8 +1047,8 @@ lcs_register_mc_addresses(void *data)
 	}
 	spin_unlock(&card->ipm_lock);
 	read_unlock(&in4_dev->lock);
-	lcs_fix_multicast_list(card);
 	in_dev_put(in4_dev);
+	lcs_fix_multicast_list(card);
 	return 0;
 }
 /**
@@ -1420,7 +1421,7 @@ lcs_resetcard(struct lcs_card *card)
 				   card->dev->name);
 			return 0;
 		}
-		schedule_timeout(3 * HZ);
+		msleep(3000);
 	}
 	PRINT_ERR("Error in Reseting LCS card!\n");
 	return -EIO;

@@ -432,6 +432,7 @@ static int __init do_lance_probe(struct net_device *dev)
 	return -ENODEV;
 }
 
+#ifndef MODULE
 struct net_device * __init lance_probe(int unit)
 {
 	struct net_device *dev = alloc_etherdev(0);
@@ -456,6 +457,7 @@ out:
 	free_netdev(dev);
 	return ERR_PTR(err);
 }
+#endif
 
 static int __init lance_probe1(struct net_device *dev, int ioaddr, int irq, int options)
 {
@@ -832,7 +834,7 @@ lance_purge_ring(struct net_device *dev)
 	/* Free all the skbuffs in the Rx and Tx queues. */
 	for (i = 0; i < RX_RING_SIZE; i++) {
 		struct sk_buff *skb = lp->rx_skbuff[i];
-		lp->rx_skbuff[i] = 0;
+		lp->rx_skbuff[i] = NULL;
 		lp->rx_ring[i].base = 0;		/* Not owned by LANCE chip. */
 		if (skb)
 			dev_kfree_skb_any(skb);
@@ -876,7 +878,7 @@ lance_init_ring(struct net_device *dev, int gfp)
 	/* The Tx buffer address is filled in as needed, but we do need to clear
 	   the upper ownership bit. */
 	for (i = 0; i < TX_RING_SIZE; i++) {
-		lp->tx_skbuff[i] = 0;
+		lp->tx_skbuff[i] = NULL;
 		lp->tx_ring[i].base = 0;
 	}
 
@@ -1081,7 +1083,7 @@ lance_interrupt(int irq, void *dev_id, struct pt_regs * regs)
 				   in the bounce buffer. */
 				if (lp->tx_skbuff[entry]) {
 					dev_kfree_skb_irq(lp->tx_skbuff[entry]);
-					lp->tx_skbuff[entry] = 0;
+					lp->tx_skbuff[entry] = NULL;
 				}
 				dirty_tx++;
 			}

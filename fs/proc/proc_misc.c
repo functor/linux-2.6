@@ -47,7 +47,6 @@
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/io.h>
-#include <asm/pgalloc.h>
 #include <asm/tlb.h>
 #include <asm/div64.h>
 
@@ -67,9 +66,6 @@ extern int get_filesystem_list(char *);
 extern int get_exec_domain_list(char *);
 extern int get_dma_list(char *);
 extern int get_locks_status (char *, char **, off_t, int);
-#ifdef CONFIG_SGI_DS1286
-extern int get_ds1286_status(char *);
-#endif
 
 static int proc_calc_metrics(char *page, char **start, off_t off,
 				 int count, int *eof, int len)
@@ -522,21 +518,11 @@ static int filesystems_read_proc(char *page, char **start, off_t off,
 static int cmdline_read_proc(char *page, char **start, off_t off,
 				 int count, int *eof, void *data)
 {
-	extern char saved_command_line[];
 	int len;
 
 	len = sprintf(page, "%s\n", saved_command_line);
 	return proc_calc_metrics(page, start, off, count, eof, len);
 }
-
-#ifdef CONFIG_SGI_DS1286
-static int ds1286_read_proc(char *page, char **start, off_t off,
-				 int count, int *eof, void *data)
-{
-	int len = get_ds1286_status(page);
-	return proc_calc_metrics(page, start, off, count, eof, len);
-}
-#endif
 
 static int locks_read_proc(char *page, char **start, off_t off,
 				 int count, int *eof, void *data)
@@ -671,9 +657,6 @@ void __init proc_misc_init(void)
 		{"devices",	devices_read_proc},
 		{"filesystems",	filesystems_read_proc},
 		{"cmdline",	cmdline_read_proc},
-#ifdef CONFIG_SGI_DS1286
-		{"rtc",		ds1286_read_proc},
-#endif
 		{"locks",	locks_read_proc},
 		{"execdomains",	execdomains_read_proc},
 		{NULL,}

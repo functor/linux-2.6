@@ -62,7 +62,6 @@ struct mem_info m68k_memory[NUM_MEMINFO];
 static struct mem_info m68k_ramdisk;
 
 static char m68k_command_line[CL_SIZE];
-char saved_command_line[CL_SIZE];
 
 char m68k_debug_device[6] = "";
 
@@ -237,6 +236,18 @@ void __init setup_arch(char **cmdline_p)
 		asm __volatile__ ("frestore %0" : : "m" (zero));
 	}
 #endif
+
+	if (CPU_IS_060) {
+		u32 pcr;
+
+		asm (".chip 68060; movec %%pcr,%0; .chip 68k"
+		     : "=d" (pcr));
+		if (((pcr >> 8) & 0xff) <= 5) {
+			printk("Enabling workaround for errata I14\n");
+			asm (".chip 68060; movec %0,%%pcr; .chip 68k"
+			     : : "d" (pcr | 0x20));
+		}
+	}
 
 	init_mm.start_code = PAGE_OFFSET;
 	init_mm.end_code = (unsigned long) &_etext;

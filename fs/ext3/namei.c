@@ -557,6 +557,8 @@ static int htree_dirblock_to_tree(struct file *dir_file,
 		    ((hinfo->hash == start_hash) &&
 		     (hinfo->minor_hash < start_minor_hash)))
 			continue;
+		if (de->inode == 0)
+			continue;
 		if ((err = ext3_htree_store_dirent(dir_file,
 				   hinfo->hash, hinfo->minor_hash, de)) != 0) {
 			brelse(bh);
@@ -602,7 +604,7 @@ int ext3_htree_fill_tree(struct file *dir_file, __u32 start_hash,
 	}
 	hinfo.hash = start_hash;
 	hinfo.minor_hash = 0;
-	frame = dx_probe(0, dir_file->f_dentry->d_inode, &hinfo, frames, &err);
+	frame = dx_probe(NULL, dir_file->f_dentry->d_inode, &hinfo, frames, &err);
 	if (!frame)
 		return err;
 
@@ -928,7 +930,7 @@ static struct buffer_head * ext3_dx_find_entry(struct dentry *dentry,
 	struct inode *dir = dentry->d_parent->d_inode;
 
 	sb = dir->i_sb;
-	if (!(frame = dx_probe (dentry, 0, &hinfo, frames, err)))
+	if (!(frame = dx_probe(dentry, NULL, &hinfo, frames, err)))
 		return NULL;
 	hash = hinfo.hash;
 	do {
@@ -954,7 +956,7 @@ static struct buffer_head * ext3_dx_find_entry(struct dentry *dentry,
 		brelse (bh);
 		/* Check to see if we should continue to search */
 		retval = ext3_htree_next_block(dir, hash, frame,
-					       frames, 0);
+					       frames, NULL);
 		if (retval < 0) {
 			ext3_warning(sb, __FUNCTION__,
 			     "error reading index page in directory #%lu",
@@ -1390,7 +1392,7 @@ static int ext3_add_entry (handle_t *handle, struct dentry *dentry,
 		bh = ext3_bread(handle, dir, block, 0, &retval);
 		if(!bh)
 			return retval;
-		retval = add_dirent_to_buf(handle, dentry, inode, 0, bh);
+		retval = add_dirent_to_buf(handle, dentry, inode, NULL, bh);
 		if (retval != -ENOSPC)
 			return retval;
 
@@ -1427,7 +1429,7 @@ static int ext3_dx_add_entry(handle_t *handle, struct dentry *dentry,
 	struct ext3_dir_entry_2 *de;
 	int err;
 
-	frame = dx_probe(dentry, 0, &hinfo, frames, &err);
+	frame = dx_probe(dentry, NULL, &hinfo, frames, &err);
 	if (!frame)
 		return err;
 	entries = frame->entries;
@@ -1441,9 +1443,9 @@ static int ext3_dx_add_entry(handle_t *handle, struct dentry *dentry,
 	if (err)
 		goto journal_error;
 
-	err = add_dirent_to_buf(handle, dentry, inode, 0, bh);
+	err = add_dirent_to_buf(handle, dentry, inode, NULL, bh);
 	if (err != -ENOSPC) {
-		bh = 0;
+		bh = NULL;
 		goto cleanup;
 	}
 
@@ -1535,7 +1537,7 @@ static int ext3_dx_add_entry(handle_t *handle, struct dentry *dentry,
 	if (!de)
 		goto cleanup;
 	err = add_dirent_to_buf(handle, dentry, inode, de, bh);
-	bh = 0;
+	bh = NULL;
 	goto cleanup;
 
 journal_error:
@@ -1630,8 +1632,9 @@ static int ext3_create (struct inode * dir, struct dentry * dentry, int mode,
 {
 	handle_t *handle; 
 	struct inode * inode;
-	int err;
+	int err, retries = 0;
 
+retry:
 	handle = ext3_journal_start(dir, EXT3_DATA_TRANS_BLOCKS +
 					EXT3_INDEX_EXTRA_TRANS_BLOCKS + 3 +
 					2*EXT3_QUOTA_INIT_BLOCKS);
@@ -1650,6 +1653,8 @@ static int ext3_create (struct inode * dir, struct dentry * dentry, int mode,
 		err = ext3_add_nondir(handle, dentry, inode);
 	}
 	ext3_journal_stop(handle);
+	if (err == -ENOSPC && ext3_should_retry_alloc(dir->i_sb, &retries))
+		goto retry;
 	return err;
 }
 
@@ -1658,11 +1663,12 @@ static int ext3_mknod (struct inode * dir, struct dentry *dentry,
 {
 	handle_t *handle;
 	struct inode *inode;
-	int err;
+	int err, retries = 0;
 
 	if (!new_valid_dev(rdev))
 		return -EINVAL;
 
+retry:
 	handle = ext3_journal_start(dir, EXT3_DATA_TRANS_BLOCKS +
 			 		EXT3_INDEX_EXTRA_TRANS_BLOCKS + 3 +
 					2*EXT3_QUOTA_INIT_BLOCKS);
@@ -1682,6 +1688,8 @@ static int ext3_mknod (struct inode * dir, struct dentry *dentry,
 		err = ext3_add_nondir(handle, dentry, inode);
 	}
 	ext3_journal_stop(handle);
+	if (err == -ENOSPC && ext3_should_retry_alloc(dir->i_sb, &retries))
+		goto retry;
 	return err;
 }
 
@@ -1691,11 +1699,12 @@ static int ext3_mkdir(struct inode * dir, struct dentry * dentry, int mode)
 	struct inode * inode;
 	struct buffer_head * dir_block;
 	struct ext3_dir_entry_2 * de;
-	int err;
+	int err, retries = 0;
 
 	if (dir->i_nlink >= EXT3_LINK_MAX)
 		return -EMLINK;
 
+retry:
 	handle = ext3_journal_start(dir, EXT3_DATA_TRANS_BLOCKS +
 					EXT3_INDEX_EXTRA_TRANS_BLOCKS + 3 +
 					2*EXT3_QUOTA_INIT_BLOCKS);
@@ -1753,6 +1762,8 @@ static int ext3_mkdir(struct inode * dir, struct dentry * dentry, int mode)
 	d_instantiate(dentry, inode);
 out_stop:
 	ext3_journal_stop(handle);
+	if (err == -ENOSPC && ext3_should_retry_alloc(dir->i_sb, &retries))
+		goto retry;
 	return err;
 }
 
@@ -2092,12 +2103,13 @@ static int ext3_symlink (struct inode * dir,
 {
 	handle_t *handle;
 	struct inode * inode;
-	int l, err;
+	int l, err, retries = 0;
 
 	l = strlen(symname)+1;
 	if (l > dir->i_sb->s_blocksize)
 		return -ENAMETOOLONG;
 
+retry:
 	handle = ext3_journal_start(dir, EXT3_DATA_TRANS_BLOCKS +
 			 		EXT3_INDEX_EXTRA_TRANS_BLOCKS + 5 +
 					2*EXT3_QUOTA_INIT_BLOCKS);
@@ -2136,6 +2148,8 @@ static int ext3_symlink (struct inode * dir,
 	err = ext3_add_nondir(handle, dentry, inode);
 out_stop:
 	ext3_journal_stop(handle);
+	if (err == -ENOSPC && ext3_should_retry_alloc(dir->i_sb, &retries))
+		goto retry;
 	return err;
 }
 
@@ -2144,11 +2158,12 @@ static int ext3_link (struct dentry * old_dentry,
 {
 	handle_t *handle;
 	struct inode *inode = old_dentry->d_inode;
-	int err;
+	int err, retries = 0;
 
 	if (inode->i_nlink >= EXT3_LINK_MAX)
 		return -EMLINK;
 
+retry:
 	handle = ext3_journal_start(dir, EXT3_DATA_TRANS_BLOCKS +
 					EXT3_INDEX_EXTRA_TRANS_BLOCKS);
 	if (IS_ERR(handle))
@@ -2163,6 +2178,8 @@ static int ext3_link (struct dentry * old_dentry,
 
 	err = ext3_add_nondir(handle, dentry, inode);
 	ext3_journal_stop(handle);
+	if (err == -ENOSPC && ext3_should_retry_alloc(dir->i_sb, &retries))
+		goto retry;
 	return err;
 }
 

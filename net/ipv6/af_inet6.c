@@ -250,7 +250,7 @@ static int inet6_create(struct socket *sock, int protocol)
 	if (sk->sk_prot->init) {
 		int err = sk->sk_prot->init(sk);
 		if (err != 0) {
-			inet_sock_release(sk);
+			sk_common_release(sk);
 			return err;
 		}
 	}
@@ -510,10 +510,10 @@ struct proto_ops inet6_stream_ops = {
 	.ioctl =	inet6_ioctl,			/* must change  */
 	.listen =	inet_listen,			/* ok		*/
 	.shutdown =	inet_shutdown,			/* ok		*/
-	.setsockopt =	inet_setsockopt,		/* ok		*/
-	.getsockopt =	inet_getsockopt,		/* ok		*/
+	.setsockopt =	sock_common_setsockopt,		/* ok		*/
+	.getsockopt =	sock_common_getsockopt,		/* ok		*/
 	.sendmsg =	inet_sendmsg,			/* ok		*/
-	.recvmsg =	inet_recvmsg,			/* ok		*/
+	.recvmsg =	sock_common_recvmsg,		/* ok		*/
 	.mmap =		sock_no_mmap,
 	.sendpage =	tcp_sendpage
 };
@@ -531,10 +531,10 @@ struct proto_ops inet6_dgram_ops = {
 	.ioctl =	inet6_ioctl,			/* must change  */
 	.listen =	sock_no_listen,			/* ok		*/
 	.shutdown =	inet_shutdown,			/* ok		*/
-	.setsockopt =	inet_setsockopt,		/* ok		*/
-	.getsockopt =	inet_getsockopt,		/* ok		*/
+	.setsockopt =	sock_common_setsockopt,		/* ok		*/
+	.getsockopt =	sock_common_getsockopt,		/* ok		*/
 	.sendmsg =	inet_sendmsg,			/* ok		*/
-	.recvmsg =	inet_recvmsg,			/* ok		*/
+	.recvmsg =	sock_common_recvmsg,		/* ok		*/
 	.mmap =		sock_no_mmap,
 	.sendpage =	sock_no_sendpage,
 };
@@ -559,8 +559,6 @@ static struct inet_protosw rawv6_protosw = {
 	.no_check	= UDP_CSUM_DEFAULT,
 	.flags		= INET_PROTOSW_REUSE,
 };
-
-#define INETSW6_ARRAY_LEN (sizeof(inetsw6_array) / sizeof(struct inet_protosw))
 
 void
 inet6_register_protosw(struct inet_protosw *p)
@@ -719,13 +717,13 @@ static int __init inet6_init(void)
 	/* allocate our sock slab caches */
         tcp6_sk_cachep = kmem_cache_create("tcp6_sock",
 					   sizeof(struct tcp6_sock), 0,
-                                           SLAB_HWCACHE_ALIGN, 0, 0);
+                                           SLAB_HWCACHE_ALIGN, NULL, NULL);
         udp6_sk_cachep = kmem_cache_create("udp6_sock",
 					   sizeof(struct udp6_sock), 0,
-                                           SLAB_HWCACHE_ALIGN, 0, 0);
+                                           SLAB_HWCACHE_ALIGN, NULL, NULL);
         raw6_sk_cachep = kmem_cache_create("raw6_sock",
 					   sizeof(struct raw6_sock), 0,
-                                           SLAB_HWCACHE_ALIGN, 0, 0);
+                                           SLAB_HWCACHE_ALIGN, NULL, NULL);
         if (!tcp6_sk_cachep || !udp6_sk_cachep || !raw6_sk_cachep)
                 printk(KERN_CRIT "%s: Can't create protocol sock SLAB "
 		       "caches!\n", __FUNCTION__);

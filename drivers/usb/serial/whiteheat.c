@@ -80,16 +80,11 @@
 #include <linux/usb.h>
 #include <linux/serial_reg.h>
 #include <linux/serial.h>
-
-#ifdef CONFIG_USB_SERIAL_DEBUG
-	static int debug = 1;
-#else
-	static int debug;
-#endif
-
 #include "usb-serial.h"
 #include "whiteheat_fw.h"		/* firmware for the ConnectTech WhiteHEAT device */
 #include "whiteheat.h"			/* WhiteHEAT specific commands */
+
+static int debug;
 
 #ifndef CMSPAR
 #define CMSPAR 0
@@ -747,7 +742,7 @@ static int whiteheat_write(struct usb_serial_port *port, int from_user, const un
 			memcpy (urb->transfer_buffer, buf + sent, bytes);
 		}
 
-		usb_serial_debug_data (__FILE__, __FUNCTION__, bytes, urb->transfer_buffer);
+		usb_serial_debug_data(debug, &port->dev, __FUNCTION__, bytes, urb->transfer_buffer);
 
 		urb->dev = serial->dev;
 		urb->transfer_buffer_length = bytes;
@@ -835,6 +830,7 @@ static int whiteheat_tiocmset (struct usb_serial_port *port, struct file *file,
 static int whiteheat_ioctl (struct usb_serial_port *port, struct file * file, unsigned int cmd, unsigned long arg)
 {
 	struct serial_struct serstruct;
+	void __user *user_arg = (void __user *)arg;
 
 	dbg("%s - port %d, cmd 0x%.4x", __FUNCTION__, port->number, cmd);
 
@@ -851,13 +847,13 @@ static int whiteheat_ioctl (struct usb_serial_port *port, struct file * file, un
 			serstruct.close_delay = CLOSING_DELAY;
 			serstruct.closing_wait = CLOSING_DELAY;
 
-			if (copy_to_user((void *)arg, &serstruct, sizeof(serstruct)))
+			if (copy_to_user(user_arg, &serstruct, sizeof(serstruct)))
 				return -EFAULT;
 
 			break;
 
 		case TIOCSSERIAL:
-			if (copy_from_user(&serstruct, (void *)arg, sizeof(serstruct)))
+			if (copy_from_user(&serstruct, user_arg, sizeof(serstruct)))
 				return -EFAULT;
 
 			/*
@@ -974,10 +970,6 @@ static void command_port_write_callback (struct urb *urb, struct pt_regs *regs)
 		dbg ("nonzero urb status: %d", urb->status);
 		return;
 	}
-
-	usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, urb->transfer_buffer);
-
-	return;
 }
 
 
@@ -996,7 +988,7 @@ static void command_port_read_callback (struct urb *urb, struct pt_regs *regs)
 		return;
 	}
 
-	usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, data);
+	usb_serial_debug_data(debug, &command_port->dev, __FUNCTION__, urb->actual_length, data);
 
 	command_info = usb_get_serial_port_data(command_port);
 	if (!command_info) {
@@ -1058,7 +1050,7 @@ static void whiteheat_read_callback(struct urb *urb, struct pt_regs *regs)
 		return;
 	}
 
-	usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, data);
+	usb_serial_debug_data(debug, &port->dev, __FUNCTION__, urb->actual_length, data);
 
 	spin_lock(&info->lock);
 	list_add_tail(&wrap->list, &info->rx_urb_q);
@@ -1518,8 +1510,8 @@ MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(urb_pool_size, "i");
+module_param(urb_pool_size, int, 0);
 MODULE_PARM_DESC(urb_pool_size, "Number of urbs to use for buffering");
 
-MODULE_PARM(debug, "i");
+module_param(debug, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "Debug enabled or not");

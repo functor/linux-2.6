@@ -32,9 +32,6 @@
 
 static kmem_cache_t *sigqueue_cachep;
 
-atomic_t nr_queued_signals;
-int max_queued_signals = 1024;
-
 /*
  * In POSIX a signal is sent either to a specific thread (Linux task)
  * or to the process as a whole (Linux thread group).  How the signal
@@ -160,7 +157,7 @@ int max_queued_signals = 1024;
 
 static int sig_ignored(struct task_struct *t, int sig)
 {
-	void * handler;
+	void __user * handler;
 
 	/*
 	 * Tracers always want to know about signals..
@@ -265,17 +262,19 @@ next_signal(struct sigpending *pending, sigset_t *mask)
 	return sig;
 }
 
-struct sigqueue *__sigqueue_alloc(void)
+static struct sigqueue *__sigqueue_alloc(void)
 {
-	struct sigqueue *q = 0;
+	struct sigqueue *q = NULL;
 
-	if (atomic_read(&nr_queued_signals) < max_queued_signals)
+	if (atomic_read(&current->user->sigpending) <
+			current->rlim[RLIMIT_SIGPENDING].rlim_cur)
 		q = kmem_cache_alloc(sigqueue_cachep, GFP_ATOMIC);
 	if (q) {
-		atomic_inc(&nr_queued_signals);
 		INIT_LIST_HEAD(&q->list);
 		q->flags = 0;
-		q->lock = 0;
+		q->lock = NULL;
+		q->user = get_uid(current->user);
+		atomic_inc(&q->user->sigpending);
 	}
 	return(q);
 }
@@ -284,8 +283,9 @@ static inline void __sigqueue_free(struct sigqueue *q)
 {
 	if (q->flags & SIGQUEUE_PREALLOC)
 		return;
+	atomic_dec(&q->user->sigpending);
+	free_uid(q->user);
 	kmem_cache_free(sigqueue_cachep, q);
-	atomic_dec(&nr_queued_signals);
 }
 
 static void flush_sigqueue(struct sigpending *queue)
@@ -454,7 +454,7 @@ unblock_all_signals(void)
 
 static inline int collect_signal(int sig, struct sigpending *list, siginfo_t *info)
 {
-	struct sigqueue *q, *first = 0;
+	struct sigqueue *q, *first = NULL;
 	int still_pending = 0;
 
 	if (unlikely(!sigismember(&list->signal, sig)))
@@ -699,7 +699,8 @@ static void handle_stop_signal(int sig, struct task_struct *p)
 	}
 }
 
-static int send_signal(int sig, struct siginfo *info, struct sigpending *signals)
+static int send_signal(int sig, struct siginfo *info, struct task_struct *t,
+			struct sigpending *signals)
 {
 	struct sigqueue * q = NULL;
 	int ret = 0;
@@ -719,12 +720,14 @@ static int send_signal(int sig, struct siginfo *info, struct sigpending *signals
 	   make sure at least one signal gets delivered and don't
 	   pass on the info struct.  */
 
-	if (atomic_read(&nr_queued_signals) < max_queued_signals)
+	if (atomic_read(&t->user->sigpending) <
+			t->rlim[RLIMIT_SIGPENDING].rlim_cur)
 		q = kmem_cache_alloc(sigqueue_cachep, GFP_ATOMIC);
 
 	if (q) {
-		atomic_inc(&nr_queued_signals);
 		q->flags = 0;
+		q->user = get_uid(t->user);
+		atomic_inc(&q->user->sigpending);
 		list_add_tail(&q->list, &signals->list);
 		switch ((unsigned long) info) {
 		case 0:
@@ -798,7 +801,7 @@ specific_send_sig_info(int sig, struct siginfo *info, struct task_struct *t)
 	if (LEGACY_QUEUE(&t->pending, sig))
 		goto out;
 
-	ret = send_signal(sig, info, &t->pending);
+	ret = send_signal(sig, info, t, &t->pending);
 	if (!ret && !sigismember(&t->blocked, sig))
 		signal_wake_up(t, sig == SIGKILL);
 out:
@@ -999,7 +1002,7 @@ __group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 	 * We always use the shared queue for process-wide signals,
 	 * to avoid several races.
 	 */
-	ret = send_signal(sig, info, &p->signal->shared_pending);
+	ret = send_signal(sig, info, p, &p->signal->shared_pending);
 	if (unlikely(ret))
 		return ret;
 
@@ -1071,23 +1074,19 @@ int __kill_pg_info(int sig, struct siginfo *info, pid_t pgrp)
 	struct task_struct *p;
 	struct list_head *l;
 	struct pid *pid;
-	int retval;
-	int found;
+	int retval, success;
 
 	if (pgrp <= 0)
 		return -EINVAL;
 
-	found = 0;
-	retval = 0;
+	success = 0;
+	retval = -ESRCH;
 	for_each_task_pid(pgrp, PIDTYPE_PGID, p, l, pid) {
-		int err;
-
-		found = 1;
-		err = group_send_sig_info(sig, info, p);
-		if (!retval)
-			retval = err;
+		int err = group_send_sig_info(sig, info, p);
+		success |= !err;
+		retval = err;
 	}
-	return found ? retval : -ESRCH;
+	return success ? 0 : retval;
 }
 
 int
@@ -1196,6 +1195,13 @@ send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 {
 	int ret;
 	unsigned long flags;
+
+	/*
+	 * Make sure legacy kernel users don't send in bad values
+	 * (normal paths check this in check_kill_permission).
+	 */
+	if (sig < 0 || sig > _NSIG)
+		return -EINVAL;
 
 	/*
 	 * We need the tasklist lock even for the specific
@@ -2356,13 +2362,13 @@ do_sigaltstack (const stack_t __user *uss, stack_t __user *uoss, unsigned long s
 	int error;
 
 	if (uoss) {
-		oss.ss_sp = (void *) current->sas_ss_sp;
+		oss.ss_sp = (void __user *) current->sas_ss_sp;
 		oss.ss_size = current->sas_ss_size;
 		oss.ss_flags = sas_ss_flags(sp);
 	}
 
 	if (uss) {
-		void *ss_sp;
+		void __user *ss_sp;
 		size_t ss_size;
 		int ss_flags;
 

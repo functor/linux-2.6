@@ -1583,7 +1583,7 @@ static ssize_t ali_read(struct file *file, char __user *buffer,
 			size_t count, loff_t * ppos)
 {
 	struct ali_state *state = (struct ali_state *) file->private_data;
-	struct ali_card *card = state ? state->card : 0;
+	struct ali_card *card = state ? state->card : NULL;
 	struct dmabuf *dmabuf = &state->dmabuf;
 	ssize_t ret;
 	unsigned long flags;
@@ -1593,8 +1593,6 @@ static ssize_t ali_read(struct file *file, char __user *buffer,
 #ifdef DEBUG2
 	printk("ali_audio: ali_read called, count = %d\n", count);
 #endif
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 	if (dmabuf->mapped)
 		return -ENXIO;
 	if (dmabuf->enable & DAC_RUNNING)
@@ -1724,7 +1722,7 @@ static ssize_t ali_write(struct file *file,
 			 const char __user *buffer, size_t count, loff_t * ppos)
 {
 	struct ali_state *state = (struct ali_state *) file->private_data;
-	struct ali_card *card = state ? state->card : 0;
+	struct ali_card *card = state ? state->card : NULL;
 	struct dmabuf *dmabuf = &state->dmabuf;
 	ssize_t ret;
 	unsigned long flags;
@@ -1734,8 +1732,6 @@ static ssize_t ali_write(struct file *file,
 #ifdef DEBUG2
 	printk("ali_audio: ali_write called, count = %d\n", count);
 #endif
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 	if (dmabuf->mapped)
 		return -ENXIO;
 	if (dmabuf->enable & ADC_RUNNING)
@@ -2890,7 +2886,7 @@ found_virt:
 	state->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
 	outl(0x00000000, card->iobase + ALI_INTERRUPTCR);
 	outl(0x00000000, card->iobase + ALI_INTERRUPTSR);
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int ali_release(struct inode *inode, struct file *file)
@@ -3047,7 +3043,7 @@ static int ali_open_mixdev(struct inode *inode, struct file *file)
 			if (card->ac97_codec[i] != NULL
 			    && card->ac97_codec[i]->dev_mixer == minor) {
 				file->private_data = card->ac97_codec[i];
-				return 0;
+				return nonseekable_open(inode, file);
 			}
 	}
 	return -ENODEV;
