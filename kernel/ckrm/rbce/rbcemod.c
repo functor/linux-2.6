@@ -86,6 +86,7 @@ typedef enum {
 	RBCE_RULE_APP_TAG,	// task's application tag
 	RBCE_RULE_IPV4,		// IP address of listen(), ipv4 format
 	RBCE_RULE_IPV6,		// IP address of listen(), ipv6 format
+ 	RBCE_RULE_XID,          // VSERVER 
 	RBCE_RULE_DEP_RULE,	// dependent rule; must be the first term
 	RBCE_RULE_INVALID,	// invalid, for filler
 	RBCE_RULE_INVALID2,	// invalid, for filler
@@ -134,8 +135,9 @@ struct rbce_rule {
 #define RBCE_TERM_TAG   (3)
 #define RBCE_TERM_IPV4  (4)
 #define RBCE_TERM_IPV6  (5)
+#define RBCE_TERM_XID   (6)
 
-#define NUM_TERM_MASK_VECTOR  (6)
+#define NUM_TERM_MASK_VECTOR  (7)     // must be one more the last RBCE_TERM_...
 
 // Rule flags. 1 bit for each type of rule term
 #define RBCE_TERMFLAG_CMD   (1 << RBCE_TERM_CMD)
@@ -144,9 +146,10 @@ struct rbce_rule {
 #define RBCE_TERMFLAG_TAG   (1 << RBCE_TERM_TAG)
 #define RBCE_TERMFLAG_IPV4  (1 << RBCE_TERM_IPV4)
 #define RBCE_TERMFLAG_IPV6  (1 << RBCE_TERM_IPV6)
-#define RBCE_TERMFLAG_ALL      (RBCE_TERMFLAG_CMD | RBCE_TERMFLAG_UID |	\
-				RBCE_TERMFLAG_GID | RBCE_TERMFLAG_TAG |	\
-				RBCE_TERMFLAG_IPV4 | RBCE_TERMFLAG_IPV6)
+#define RBCE_TERMFLAG_XID   (1 << RBCE_TERM_XID)
+#define RBCE_TERMFLAG_ALL (RBCE_TERMFLAG_CMD | RBCE_TERMFLAG_UID |			\
+   			   RBCE_TERMFLAG_GID | RBCE_TERMFLAG_TAG | RBCE_TERMFLAG_XID |	\
+			   RBCE_TERMFLAG_IPV4 | RBCE_TERMFLAG_IPV6)
 
 int termop_2_vecidx[RBCE_RULE_INVALID] = {
 	[RBCE_RULE_CMD_PATH] = RBCE_TERM_CMD,
@@ -156,6 +159,7 @@ int termop_2_vecidx[RBCE_RULE_INVALID] = {
 	[RBCE_RULE_REAL_GID] = RBCE_TERM_GID,
 	[RBCE_RULE_EFFECTIVE_UID] = RBCE_TERM_UID,
 	[RBCE_RULE_EFFECTIVE_GID] = RBCE_TERM_GID,
+	[RBCE_RULE_XID] = RBCE_TERM_XID,
 	[RBCE_RULE_APP_TAG] = RBCE_TERM_TAG,
 	[RBCE_RULE_IPV4] = RBCE_TERM_IPV4,
 	[RBCE_RULE_IPV6] = RBCE_TERM_IPV6,
@@ -264,6 +268,15 @@ static void print_context_vectors(void)
 #define DPRINTK(x, y...)
 #define print_context_vectors(x)
 #endif
+
+/* ====================== VSERVER support ========================== */
+#define CONFIG_VSERVER
+#ifdef CONFIG_VSERVER 
+#include <linux/vs_base.h>
+#else
+typedef unsigned int xid_t;
+#define vx_task_xid(t)	(0)
+#endif 
 
 /* ======================= Helper Functions ========================= */
 
@@ -949,6 +962,7 @@ fill_rule(struct rbce_rule *newrule, struct rbce_rule_term *terms, int nterms)
 		case RBCE_RULE_REAL_GID:
 		case RBCE_RULE_EFFECTIVE_UID:
 		case RBCE_RULE_EFFECTIVE_GID:
+		case RBCE_RULE_XID:
 			term->u.id = terms[i].u.id;
 			break;
 
@@ -1205,6 +1219,9 @@ void get_rule(const char *rname, char *result)
 				goto handleid;
 			case RBCE_RULE_EFFECTIVE_GID:
 				strcpy(idtype, "eg");
+				goto handleid;
+			case RBCE_RULE_XID:
+				strcpy(idtype, "x");
 			      handleid:
 				if (term->operator == RBCE_LESS_THAN) {
 					oper = '<';
@@ -1745,6 +1762,22 @@ __evaluate_rule(struct task_struct *tsk, struct ckrm_net_struct *ns,
 				no_ip = 0;
 				break;
 
+			case RBCE_RULE_XID:
+			{
+				xid_t xid = vx_task_xid(tsk);
+
+				if (term->operator == RBCE_LESS_THAN) {
+					rc = (xid < term->u.id);
+				} else if (term->operator == RBCE_GREATER_THAN) {
+					rc = (xid > term->u.id);
+				} else if (term->operator == RBCE_NOT) {
+					rc = (xid != term->u.id);
+				} else {
+					rc = (xid == term->u.id);
+				}
+				break;
+			}
+				
 			default:
 				rc = 0;
 				printk(KERN_ERR "Error evaluate term op=%d\n",
@@ -2212,6 +2245,7 @@ static const char *event_names[CKRM_NUM_EVENTS] = {
 	AENT(EXEC),
 	AENT(UID),
 	AENT(GID),
+	AENT(XID),
 	AENT(LOGIN),
 	AENT(USERADD),
 	AENT(USERDEL),
@@ -2261,6 +2295,10 @@ void *rbce_tc_classify(enum ckrm_event event, ...)
 
 	case CKRM_EVENT_GID:
 		cls = rbce_classify(tsk, NULL, RBCE_TERMFLAG_GID, tc_classtype);
+		break;
+
+	case CKRM_EVENT_XID:
+		cls = rbce_classify(tsk, NULL, RBCE_TERMFLAG_XID, tc_classtype);
 		break;
 
 	case CKRM_EVENT_LOGIN:
@@ -2564,3 +2602,5 @@ EXPORT_SYMBOL(set_tasktag);
 
 module_init(init_rbce);
 module_exit(exit_rbce);
+
+

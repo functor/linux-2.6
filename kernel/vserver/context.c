@@ -26,6 +26,11 @@
 #include <linux/namespace.h>
 #include <linux/rcupdate.h>
 
+#define CKRM_VSERVER_INTEGRATION
+#ifdef CKRM_VSERVER_INTEGRATION
+#include <linux/ckrm.h>
+#endif //CKRM_VSERVER_INTEGRATION
+
 #include <asm/errno.h>
 
 
@@ -471,6 +476,15 @@ int vx_migrate_task(struct task_struct *p, struct vx_info *vxi)
 		// put_vx_info(old_vxi);
 	}
 out:
+
+
+#ifdef CKRM_VSERVER_INTEGRATION
+	do {
+	  ckrm_cb_xid(p);
+	} while (0);
+#endif //CKRM_VSERVER_INTEGRATION
+
+
 	put_vx_info(old_vxi);
 	return ret;
 }

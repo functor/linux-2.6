@@ -66,6 +66,7 @@ enum ckrm_event {
 	CKRM_EVENT_EXEC,
 	CKRM_EVENT_UID,
 	CKRM_EVENT_GID,
+	CKRM_EVENT_XID,
 	CKRM_EVENT_LOGIN,
 	CKRM_EVENT_USERADD,
 	CKRM_EVENT_USERDEL,
@@ -136,6 +137,7 @@ CKRM_DEF_CB_ARG(FORK, fork, struct task_struct *);
 CKRM_DEF_CB_ARG(EXEC, exec, const char *);
 CKRM_DEF_CB(UID, uid);
 CKRM_DEF_CB(GID, gid);
+CKRM_DEF_CB_ARG(XID, xid, struct task_struct *);
 CKRM_DEF_CB(APPTAG, apptag);
 CKRM_DEF_CB(LOGIN, login);
 CKRM_DEF_CB_ARG(USERADD, useradd, struct user_struct *);

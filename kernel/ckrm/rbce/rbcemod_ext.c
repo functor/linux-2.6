@@ -139,7 +139,7 @@ static inline void close_ukcc_channel(void)
 					     (r),(l),-1,NULL) > 0);	\
 		chan_state = chan_isok ? UKCC_OK : UKCC_STANDBY;	\
 		if (chan_wasok && !chan_isok) {				\
-			printk("Channel stalled\n");			\ 
+			printk("Channel stalled\n");			\
 		} else if (!chan_wasok && chan_isok) {			\
 			printk("Channel continues\n");			\
 		}							\

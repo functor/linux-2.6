@@ -21,6 +21,10 @@ enum rule_token_t {
 	TOKEN_EGID_LT,
 	TOKEN_EGID_GT,
 	TOKEN_EGID_NOT,
+	TOKEN_XID_EQ,
+	TOKEN_XID_LT,
+	TOKEN_XID_GT,
+	TOKEN_XID_NOT,
 	TOKEN_TAG,
 	TOKEN_IPV4,
 	TOKEN_IPV6,
@@ -53,6 +57,10 @@ int token_to_ruleop[TOKEN_INVALID + 1] = {
 	[TOKEN_EGID_LT] = RBCE_RULE_EFFECTIVE_GID,
 	[TOKEN_EGID_GT] = RBCE_RULE_EFFECTIVE_GID,
 	[TOKEN_EGID_NOT] = RBCE_RULE_EFFECTIVE_GID,
+	[TOKEN_XID_EQ]	= RBCE_RULE_XID,
+	[TOKEN_XID_LT]	= RBCE_RULE_XID,
+	[TOKEN_XID_GT]	= RBCE_RULE_XID,
+	[TOKEN_XID_NOT]	= RBCE_RULE_XID,
 	[TOKEN_TAG] = RBCE_RULE_APP_TAG,
 	[TOKEN_IPV4] = RBCE_RULE_IPV4,
 	[TOKEN_IPV6] = RBCE_RULE_IPV6,
@@ -97,6 +105,10 @@ enum op_token token_to_operator[TOKEN_INVALID + 1] = {
 	[TOKEN_EGID_LT] = TOKEN_OP_LESS_THAN,
 	[TOKEN_EGID_GT] = TOKEN_OP_GREATER_THAN,
 	[TOKEN_EGID_NOT] = TOKEN_OP_NOT,
+	[TOKEN_XID_EQ]	= TOKEN_OP_EQUAL,
+	[TOKEN_XID_LT]	= TOKEN_OP_LESS_THAN,
+	[TOKEN_XID_GT]	= TOKEN_OP_GREATER_THAN,
+	[TOKEN_XID_NOT]	= TOKEN_OP_NOT,
 	[TOKEN_TAG] = TOKEN_OP_EQUAL,
 	[TOKEN_IPV4] = TOKEN_OP_EQUAL,
 	[TOKEN_IPV6] = TOKEN_OP_EQUAL,
@@ -128,6 +140,10 @@ static match_table_t tokens = {
 	{TOKEN_EGID_LT, "egid<%d"},
 	{TOKEN_EGID_GT, "egid>%d"},
 	{TOKEN_EGID_NOT, "egid!%d"},
+	{TOKEN_XID_EQ,	"xid=%d"},
+	{TOKEN_XID_LT,	"xid<%d"},
+	{TOKEN_XID_GT,	"xid>%d"},
+	{TOKEN_XID_NOT, "xid!%d"},
 	{TOKEN_TAG, "tag=%s"},
 	{TOKEN_IPV4, "ipv4=%s"},
 	{TOKEN_IPV6, "ipv6=%s"},
@@ -224,6 +240,10 @@ rules_parse(char *rule_defn, struct rbce_rule_term **rterms, int *term_mask)
 		case TOKEN_EGID_LT:
 		case TOKEN_EGID_GT:
 		case TOKEN_EGID_NOT:
+		case TOKEN_XID_EQ:
+		case TOKEN_XID_LT:
+		case TOKEN_XID_GT:
+		case TOKEN_XID_NOT:
 			// all these tokens can be specified only once
 			if (*term_mask & (1 << terms[i].op)) {
 				nterms = -EINVAL;
