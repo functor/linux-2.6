@@ -583,6 +583,9 @@ ckrm_get_reclaim_bits(unsigned int *flags, unsigned int *extract)
 void
 ckrm_at_limit(ckrm_mem_res_t *cls)
 {
+#ifndef AT_LIMIT_SUPPORT
+#warning "ckrm_at_limit disabled due to problems with memory hog tests"
+#else
 	struct zone *zone;
 	unsigned long now = jiffies;
 
@@ -606,6 +609,7 @@ ckrm_at_limit(ckrm_mem_res_t *cls)
 		wakeup_kswapd(zone);
 		break; // only once is enough
 	}
+#endif // AT_LIMIT_SUPPORT
 }
 
 static int unmapped = 0, changed = 0, unchanged = 0, maxnull = 0,

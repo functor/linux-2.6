@@ -39,6 +39,12 @@
 #include <linux/swapops.h>
 #include <linux/ckrm_mem.h>
 
+#ifndef AT_LIMIT_SUPPORT
+#warning "ckrm_at_limit disabled due to problems with memory hog tests -- seting ckrm_shrink_list_empty to true"
+#undef ckrm_shrink_list_empty
+#define ckrm_shrink_list_empty()		(1)
+#endif
+
 /* possible outcome of pageout() */
 typedef enum {
 	/* failed to write page out, page is locked */
@@ -719,8 +725,8 @@ redo:
 			list_add(&page->lru, &l_hold);
 			ckrm_mem_dec_active(page);
 			pgmoved++;
-		pgscanned++;
-	}
+			pgscanned++;
+		}
 		if (!--nr_pass && ckrm_flags) {
 			goto redo;
 		}
@@ -895,7 +901,7 @@ shrink_zone(struct zone *zone, struct scan_control *sc)
 	}
 }
 
-#ifdef CONFIG_CKRM_RES_MEM
+#if defined(CONFIG_CKRM_RES_MEM) && defined(AT_LIMIT_SUPPORT)
 // This function needs to be given more thought.
 // Shrink the class to be at 90% of its limit
 static void
@@ -995,6 +1001,11 @@ ckrm_shrink_classes(void)
 }
 
 #else
+
+#if defined(CONFIG_CKRM_RES_MEM) && !defined(AT_LIMIT_SUPPORT)
+#warning "disabling ckrm_at_limit -- setting ckrm_shrink_classes to noop "
+#endif
+
 #define ckrm_shrink_classes()	do { } while(0)
 #endif
 
