@@ -1010,8 +1010,6 @@ static unsigned fib_flag_trans(int type, int dead, u32 mask, struct fib_info *fi
 	return flags;
 }
 
-extern int dev_in_nx_info(struct net_device *, struct nx_info *);
-
 /* 
  *	This outputs /proc/net/route.
  *
@@ -1041,7 +1039,7 @@ static int fib_seq_show(struct seq_file *seq, void *v)
 	mask	= FZ_MASK(iter->zone);
 	flags	= fib_flag_trans(f->fn_type, f->fn_state & FN_S_ZOMBIE,
 				 mask, fi);
-	if (fi && dev_in_nx_info(fi->fib_dev, current->nx_info))
+	if (fi)
 		snprintf(bf, sizeof(bf),
 			 "%s\t%08X\t%08X\t%04X\t%d\t%u\t%d\t%08X\t%d\t%u\t%u",
 			 fi->fib_dev ? fi->fib_dev->name : "*", prefix,

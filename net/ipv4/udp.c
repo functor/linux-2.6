@@ -107,6 +107,7 @@
 #include <net/inet_common.h>
 #include <net/checksum.h>
 #include <net/xfrm.h>
+#include <linux/vs_base.h>
 
 /*
  *	Snmp MIB for the UDP layer
@@ -119,8 +120,6 @@ rwlock_t udp_hash_lock = RW_LOCK_UNLOCKED;
 
 /* Shared by v4/v6 udp. */
 int udp_port_rover;
-
-int tcp_ipv4_addr_conflict(struct sock *sk1, struct sock *sk2);
 
 static int udp_v4_get_port(struct sock *sk, unsigned short snum)
 {
@@ -181,7 +180,9 @@ gotit:
 			    (!sk2->sk_bound_dev_if ||
 			     !sk->sk_bound_dev_if ||
 			     sk2->sk_bound_dev_if == sk->sk_bound_dev_if) &&
-			    tcp_ipv4_addr_conflict(sk2, sk) &&
+			    (!inet2->rcv_saddr ||
+			     !inet->rcv_saddr ||
+			     inet2->rcv_saddr == inet->rcv_saddr) &&
 			    (!sk2->sk_reuse || !sk->sk_reuse))
 				goto fail;
 		}
@@ -216,17 +217,6 @@ static void udp_v4_unhash(struct sock *sk)
 	write_unlock_bh(&udp_hash_lock);
 }
 
-static inline int udp_in_list(struct nx_info *nx_info, u32 addr)
-{
-	int n = nx_info->nbipv4;
-	int i;
-
-	for (i=0; i<n; i++)
-		if (nx_info->ipv4[i] == addr)
-			return 1;
-	return 0;
-}
-
 /* UDP is nearly always wildcards out the wazoo, it makes no sense to try
  * harder than this. -DaveM
  */
@@ -246,11 +236,6 @@ struct sock *udp_v4_lookup_longway(u32 saddr, u16 sport, u32 daddr, u16 dport, i
 				if (inet->rcv_saddr != daddr)
 					continue;
 				score+=2;
-			} else if (sk->sk_nx_info) {
-				if (udp_in_list(sk->sk_nx_info, daddr))
-					score+=2;
-				else
-					continue;
 			}
 			if (inet->daddr) {
 				if (inet->daddr != saddr)
@@ -306,8 +291,7 @@ static inline struct sock *udp_v4_mcast_next(struct sock *sk,
 		if (inet->num != hnum					||
 		    (inet->daddr && inet->daddr != rmt_addr)		||
 		    (inet->dport != rmt_port && inet->dport)		||
-		    (inet->rcv_saddr && inet->rcv_saddr != loc_addr &&
-		     inet->rcv_saddr2 && inet->rcv_saddr2 != loc_addr)	||
+		    (inet->rcv_saddr && inet->rcv_saddr != loc_addr)	||
 		    ipv6_only_sock(s)					||
 		    (s->sk_bound_dev_if && s->sk_bound_dev_if != dif))
 			continue;
@@ -616,15 +600,6 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				    .uli_u = { .ports =
 					       { .sport = inet->sport,
 						 .dport = dport } } };
-		struct nx_info *nxi = sk->sk_nx_info;
-
-		if (nxi) {
-			err = ip_find_src(nxi, &rt, &fl);
-			if (err)
-				goto out;
-			if (daddr == IPI_LOOPBACK && !vx_check(0, VX_ADMIN))
-				daddr = fl.fl4_dst = nxi->ipv4[0];
-		}
 		err = ip_route_output_flow(&rt, &fl, sk, !(msg->msg_flags&MSG_DONTWAIT));
 		if (err)
 			goto out;

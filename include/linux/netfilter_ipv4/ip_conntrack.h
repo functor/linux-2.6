@@ -8,6 +8,7 @@
 #include <linux/netfilter_ipv4/ip_conntrack_tuple.h>
 #include <linux/bitops.h>
 #include <linux/compiler.h>
+#include <linux/vserver/context.h>
 #include <asm/atomic.h>
 
 enum ip_conntrack_info
@@ -206,6 +207,9 @@ struct ip_conntrack
 #endif
 	} nat;
 #endif /* CONFIG_IP_NF_NAT_NEEDED */
+
+	/* VServer context id */
+	xid_t xid;
 
 };
 

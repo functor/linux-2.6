@@ -112,6 +112,9 @@
 #ifdef CONFIG_IP_MROUTE
 #include <linux/mroute.h>
 #endif
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
 
 DEFINE_SNMP_STAT(struct linux_mib, net_statistics);
 
@@ -427,10 +430,6 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	unsigned short snum;
 	int chk_addr_ret;
 	int err;
-	__u32 s_addr;	/* Address used for validation */
-	__u32 s_addr1;
-	__u32 s_addr2 = 0xffffffffl;	/* Optional address of the socket */
-	struct nx_info *nxi = sk->sk_nx_info;
 
 	/* If the socket has its own bind function then use it. (RAW) */
 	if (sk->sk_prot->bind) {
@@ -441,36 +440,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	if (addr_len < sizeof(struct sockaddr_in))
 		goto out;
 
-	s_addr = s_addr1 = addr->sin_addr.s_addr;
-	nxdprintk("inet_bind(%p) %p,%p;%lx\n",
-		sk, nx_info, sk->sk_socket,
-		(sk->sk_socket?sk->sk_socket->flags:0));
-	if (nxi) {
-		__u32 v4_bcast = nxi->v4_bcast;
-		__u32 ipv4root = nxi->ipv4[0];
-		int nbipv4 = nxi->nbipv4;
-		if (s_addr == 0) {
-			s_addr = ipv4root;
-			if (nbipv4 > 1)
-				s_addr1 = 0;
-			else {
-				s_addr1 = ipv4root;
-			}
-			s_addr2 = v4_bcast;
-		} else if (s_addr == 0x0100007f) {
-			s_addr = s_addr1 = ipv4root;
-		} else if (s_addr != v4_bcast) {
-			int i;
-			for (i=0; i<nbipv4; i++) {
-				if (s_addr == nxi->ipv4[i])
-					break;
-			}
-			if (i == nbipv4) {
-				return -EADDRNOTAVAIL;
-			}
-		}
-	}
-	chk_addr_ret = inet_addr_type(s_addr);
+	chk_addr_ret = inet_addr_type(addr->sin_addr.s_addr);
 
 	/* Not specified by any standard per-se, however it breaks too
 	 * many applications when removed.  It is unfortunate since
@@ -482,7 +452,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	err = -EADDRNOTAVAIL;
 	if (!sysctl_ip_nonlocal_bind &&
 	    !inet->freebind &&
-	    s_addr != INADDR_ANY &&
+	    addr->sin_addr.s_addr != INADDR_ANY &&
 	    chk_addr_ret != RTN_LOCAL &&
 	    chk_addr_ret != RTN_MULTICAST &&
 	    chk_addr_ret != RTN_BROADCAST)
@@ -507,8 +477,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	if (sk->sk_state != TCP_CLOSE || inet->num)
 		goto out_release_sock;
 
-	inet->rcv_saddr = inet->saddr = s_addr1;
-	inet->rcv_saddr2 = s_addr2;
+	inet->rcv_saddr = inet->saddr = addr->sin_addr.s_addr;
 	if (chk_addr_ret == RTN_MULTICAST || chk_addr_ret == RTN_BROADCAST)
 		inet->saddr = 0;  /* Use device */
 

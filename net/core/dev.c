@@ -108,7 +108,6 @@
 #include <linux/kallsyms.h>
 #include <linux/netpoll.h>
 #include <linux/rcupdate.h>
-#include <linux/vserver/network.h>
 #ifdef CONFIG_NET_RADIO
 #include <linux/wireless.h>		/* Note : will define WIRELESS_EXT */
 #include <net/iw_handler.h>
@@ -2096,8 +2095,6 @@ static int dev_ifconf(char __user *arg)
 
 	total = 0;
 	for (dev = dev_base; dev; dev = dev->next) {
-		if (!dev_in_nx_info(dev, current->nx_info))
-			continue;
 		for (i = 0; i < NPROTO; i++) {
 			if (gifconf_list[i]) {
 				int done;
@@ -2158,10 +2155,6 @@ void dev_seq_stop(struct seq_file *seq, void *v)
 
 static void dev_seq_printf_stats(struct seq_file *seq, struct net_device *dev)
 {
-	struct nx_info *nxi = current->nx_info;
-
-	if (!dev_in_nx_info(dev, nxi))
-		return;
 	if (dev->get_stats) {
 		struct net_device_stats *stats = dev->get_stats(dev);
 

@@ -272,6 +272,7 @@ struct sk_buff {
  #endif
 
 #endif
+	xid_t			xid;			/* VServer context ID */
 
 
 	/* These elements must be at the end, see alloc_skb() for details.  */

@@ -26,6 +26,8 @@
 #include <linux/sysctl.h>
 #include <linux/workqueue.h>
 #include <linux/vs_socket.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
 #include <net/tcp.h>
 #include <net/inet_common.h>
 #include <net/xfrm.h>

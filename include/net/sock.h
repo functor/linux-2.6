@@ -1075,6 +1075,12 @@ static inline int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	int err = 0;
 	int skb_len;
 
+	/* Silently drop if the context is not entitled to read the
+	 * packet.
+	 */
+	if (sk->sk_xid && sk->sk_xid != skb->xid)
+		goto out;
+
 	/* Cast skb->rcvbuf to unsigned... It's pointless, but reduces
 	   number of warnings when compiling with -W --ANK
 	 */
