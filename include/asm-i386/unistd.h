@@ -297,8 +297,6 @@
 #define __NR_ioprio_set		284
 #define __NR_ioprio_get		285
 #define NR_syscalls 286
-#else
-#warning MEF not includig sys_ioprio_{set,get} syscalls
 #endif	
 
 #ifndef __KERNEL_SYSCALLS_NO_ERRNO__

@@ -304,8 +304,6 @@ extern unsigned long arch_align_stack(unsigned long sp);
 
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
 
-#define HAVE_ARCH_PICK_MMAP_LAYOUT
-
 /*
  * Size of io_bitmap.
  */

@@ -64,7 +64,7 @@ struct thread_info {
  */
 #ifndef __ASSEMBLY__
 
-#define INIT_THREAD_INFO(tsk)           	\
+#define INIT_THREAD_INFO(tsk)			\
 {						\
 	.task		= &tsk,			\
 	.exec_domain	= &default_exec_domain,	\
