@@ -9,21 +9,19 @@
  * File operations for common magic files in rcfs, 
  * the user interface for CKRM. 
  * 
- * 
  * Latest version, more details at http://ckrm.sf.net
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- *
  */
 
-/* Changes
+/*
+ * Changes
  *
  * 23 Apr 2004
  *        Created from code kept earlier in fs/rcfs/magic_*.c
- *
  */
 
 #include <linux/module.h>
@@ -40,12 +38,12 @@
 
 #include <linux/rcfs.h>
 
-/******************************************************
+/*
  * Macros
  *
  * generic macros to assist in writing magic fileops
  *
- *****************************************************/
+ */
 
 #define MAGIC_SHOW(FUNC)                                               \
 static int                                                             \
@@ -209,16 +207,14 @@ struct file_operations FUNC ## _fileops = {                            \
 };                                                                     \
 EXPORT_SYMBOL(FUNC ## _fileops);
 
-/******************************************************************************
- * Shared function used by Target / Reclassify
- *
- *
- *****************************************************************************/
+/*
+ * Shared function used by Members / Reclassify
+ */
 
-#define TARGET_MAX_INPUT_SIZE 100
+#define MEMBERS_MAX_INPUT_SIZE 100
 
 static ssize_t
-target_reclassify_write(struct file *file, const char __user * buf,
+members_reclassify_write(struct file *file, const char __user * buf,
 			size_t count, loff_t * ppos, int manual)
 {
 	struct rcfs_inode_info *ri = RCFS_I(file->f_dentry->d_inode);
@@ -226,77 +222,51 @@ target_reclassify_write(struct file *file, const char __user * buf,
 	int rc = -EINVAL;
 	ckrm_classtype_t *clstype;
 
-	if ((ssize_t) count < 0 || (ssize_t) count > TARGET_MAX_INPUT_SIZE)
+	if ((ssize_t) count < 0 || (ssize_t) count > MEMBERS_MAX_INPUT_SIZE)
 		return -EINVAL;
-
 	if (!access_ok(VERIFY_READ, buf, count))
 		return -EFAULT;
-
 	down(&(ri->vfs_inode.i_sem));
-
-	optbuf = kmalloc(TARGET_MAX_INPUT_SIZE, GFP_KERNEL);
+	optbuf = kmalloc(MEMBERS_MAX_INPUT_SIZE, GFP_KERNEL);
 	__copy_from_user(optbuf, buf, count);
 	if (optbuf[count - 1] == '\n')
 		optbuf[count - 1] = '\0';
-
 	clstype = ri->core->classtype;
 	if (clstype->forced_reclassify)
 		rc = (*clstype->forced_reclassify) (manual ? ri->core: NULL, optbuf);
-
 	up(&(ri->vfs_inode.i_sem));
 	kfree(optbuf);
 	return (!rc ? count : rc);
 
 }
 
-/******************************************************************************
- * Target
- *
- * pseudo file for manually reclassifying members to a class
- *
- *****************************************************************************/
-
-static ssize_t
-target_write(struct file *file, const char __user * buf,
-	     size_t count, loff_t * ppos)
-{
-	return target_reclassify_write(file,buf,count,ppos,1);
-}
-
-struct file_operations target_fileops = {
-	.write = target_write,
-};
-
-EXPORT_SYMBOL(target_fileops);
-
-/******************************************************************************
+/*
  * Reclassify
  *
  * pseudo file for reclassification of an object through CE
- *
- *****************************************************************************/
+ */
 
 static ssize_t
 reclassify_write(struct file *file, const char __user * buf,
 		 size_t count, loff_t * ppos)
 {
-	return target_reclassify_write(file,buf,count,ppos,0);
+	return members_reclassify_write(file,buf,count,ppos,0);
 }
 
 struct file_operations reclassify_fileops = {
 	.write = reclassify_write,
 };
 
-EXPORT_SYMBOL(reclassify_fileops);
+EXPORT_SYMBOL_GPL(reclassify_fileops);
 
-/******************************************************************************
+/*
  * Config
  *
  * Set/get configuration parameters of a class. 
- *
- *****************************************************************************/
+ */
 
-/* Currently there are no per-class config parameters defined.
+/*
+ * Currently there are no per-class config parameters defined.
  * Use existing code as a template
  */
 
@@ -319,27 +289,32 @@ MAGIC_CLOSE(config);
 
 MAGIC_RDWR_FILEOPS(config);
 
-/******************************************************************************
+/*
  * Members
  *
  * List members of a class
- *
- *****************************************************************************/
+ */
 
 MAGIC_SHOW(members);
 MAGIC_OPEN(members);
 MAGIC_CLOSE(members);
 
-MAGIC_RD_FILEOPS(members);
+static ssize_t
+members_write(struct file *file, const char __user * buf,
+	     size_t count, loff_t * ppos)
+{
+	return members_reclassify_write(file,buf,count,ppos,1);
+}
 
-/******************************************************************************
+MAGIC_RDWR_FILEOPS(members);
+
+/*
  * Stats
  *
  * Get/reset class statistics
  * No standard set of stats defined. Each resource controller chooses
  * its own set of statistics to maintain and export.
- *
- *****************************************************************************/
+ */
 
 #define stats_max_input_size  50
 
@@ -361,21 +336,22 @@ MAGIC_CLOSE(stats);
 
 MAGIC_RDWR_FILEOPS(stats);
 
-/******************************************************************************
+/*
  * Shares
  *
  * Set/get shares of a taskclass.
  * Share types and semantics are defined by rcfs and ckrm core 
- * 
- *****************************************************************************/
+ */
 
 #define SHARES_MAX_INPUT_SIZE  300
 
-/* The enums for the share types should match the indices expected by
-   array parameter to ckrm_set_resshare */
-
-/* Note only the first NUM_SHAREVAL enums correspond to share types,
-   the remaining ones are for token matching purposes */
+/*
+ * The enums for the share types should match the indices expected by
+ * array parameter to ckrm_set_resshare
+ *
+ * Note only the first NUM_SHAREVAL enums correspond to share types,
+ * the remaining ones are for token matching purposes
+ */
 
 enum share_token_t {
 	MY_GUAR, MY_LIM, TOT_GUAR, MAX_LIM, SHARE_RES_TYPE, SHARE_ERR
@@ -399,15 +375,12 @@ shares_parse(char *options, char **resstr, struct ckrm_shares *shares)
 
 	if (!options)
 		return 1;
-
 	while ((p = strsep(&options, ",")) != NULL) {
-
 		substring_t args[MAX_OPT_ARGS];
 		int token;
 
 		if (!*p)
 			continue;
-
 		token = match_token(p, shares_tokens, args);
 		switch (token) {
 		case SHARE_RES_TYPE:
@@ -436,7 +409,6 @@ shares_parse(char *options, char **resstr, struct ckrm_shares *shares)
 		default:
 			return 0;
 		}
-
 	}
 	return 1;
 }
@@ -461,40 +433,31 @@ shares_write(struct file *file, const char __user * buf,
 		CKRM_SHARE_UNCHANGED,
 		CKRM_SHARE_UNCHANGED
 	};
-
 	if ((ssize_t) count < 0 || (ssize_t) count > SHARES_MAX_INPUT_SIZE)
 		return -EINVAL;
-
 	if (!access_ok(VERIFY_READ, buf, count))
 		return -EFAULT;
-
 	ri = RCFS_I(file->f_dentry->d_parent->d_inode);
-
 	if (!ri || !ckrm_is_core_valid((ckrm_core_class_t *) (ri->core))) {
 		printk(KERN_ERR "shares_write: Error accessing core class\n");
 		return -EFAULT;
 	}
-
 	down(&inode->i_sem);
-
 	core = ri->core;
 	optbuf = kmalloc(SHARES_MAX_INPUT_SIZE, GFP_KERNEL);
 	if (!optbuf) {
 		up(&inode->i_sem);
 		return -ENOMEM;
 	}
-
 	__copy_from_user(optbuf, buf, count);
 	if (optbuf[count - 1] == '\n')
 		optbuf[count - 1] = '\0';
-
 	done = shares_parse(optbuf, &resname, &newshares);
 	if (!done) {
 		printk(KERN_ERR "Error parsing shares\n");
 		rc = -EINVAL;
 		goto write_out;
 	}
-
 	if (core->classtype->set_shares) {
 		rc = (*core->classtype->set_shares) (core, resname, &newshares);
 		if (rc) {
@@ -503,17 +466,14 @@ shares_write(struct file *file, const char __user * buf,
 			goto write_out;
 		}
 	}
-
-	printk(KERN_DEBUG "Set %s shares to %d %d %d %d\n",
+	printk(KERN_ERR "Set %s shares to %d %d %d %d\n",
 	       resname,
 	       newshares.my_guarantee,
 	       newshares.my_limit,
 	       newshares.total_guarantee, newshares.max_limit);
-
 	rc = count;
 
-      write_out:
-
+write_out:
 	up(&inode->i_sem);
 	kfree(optbuf);
 	kfree(resname);
@@ -528,7 +488,6 @@ MAGIC_RDWR_FILEOPS(shares);
 
 /*
  * magic file creation/deletion
- *
  */
 
 int rcfs_clear_magic(struct dentry *parent)
@@ -536,20 +495,16 @@ int rcfs_clear_magic(struct dentry *parent)
 	struct dentry *mftmp, *mfdentry;
 
 	list_for_each_entry_safe(mfdentry, mftmp, &parent->d_subdirs, d_child) {
-
 		if (!rcfs_is_magic(mfdentry))
 			continue;
-
 		if (rcfs_delete_internal(mfdentry))
 			printk(KERN_ERR
 			       "rcfs_clear_magic: error deleting one\n");
 	}
-
 	return 0;
-
 }
 
-EXPORT_SYMBOL(rcfs_clear_magic);
+EXPORT_SYMBOL_GPL(rcfs_clear_magic);
 
 int rcfs_create_magic(struct dentry *parent, struct rcfs_magf magf[], int count)
 {
@@ -572,4 +527,4 @@ int rcfs_create_magic(struct dentry *parent, struct rcfs_magf magf[], int count)
 	return 0;
 }
 
-EXPORT_SYMBOL(rcfs_create_magic);
+EXPORT_SYMBOL_GPL(rcfs_create_magic);

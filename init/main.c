@@ -46,18 +46,12 @@
 #include <linux/rmap.h>
 #include <linux/mempolicy.h>
 #include <linux/key.h>
+#include <linux/ckrm_events.h>
+#include <linux/ckrm_sched.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
 #include <asm/setup.h>
-
-#include <linux/ckrm.h>
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-int __init init_ckrm_sched_res(void);
-#else
-#define init_ckrm_sched_res() ((void)0)
-#endif
-//#include <linux/ckrm_sched.h>
 
 /*
  * This is one of the first .c files built. Error out early

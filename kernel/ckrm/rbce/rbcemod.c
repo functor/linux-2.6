@@ -382,10 +382,12 @@ static int insert_rule(struct rbce_rule *rule, int order)
  */
 static int reinsert_rule(struct rbce_rule *rule, int order)
 {
-	list_del(&rule->obj.link);
-	gl_num_rules--;
-	gl_rules_version++;
-	module_put(THIS_MODULE);
+	if (!list_empty(&rule->obj.link)) {
+		list_del_init(&rule->obj.link);
+		gl_num_rules--;
+		gl_rules_version++;
+		module_put(THIS_MODULE);
+	}
 	return insert_rule(rule, order);
 }
 
@@ -426,7 +428,7 @@ static struct rbce_class *create_rbce_class(const char *classname,
 	return cls;
 }
 
-static struct rbce_class *get_class(char *classname, int *classtype)
+static struct rbce_class *get_class(const char *classname, int *classtype)
 {
 	struct rbce_class *cls;
 	void *classobj;
@@ -478,14 +480,11 @@ static void rbce_class_addcb(const char *classname, void *clsobj, int classtype)
 	struct rbce_class *cls;
 
 	write_lock(&global_rwlock);
-	cls = find_class_name((char *)classname);
+	cls = get_class(classname, &classtype);
 	if (cls) {
 		cls->classobj = clsobj;
-	} else {
-		cls = create_rbce_class(classname, classtype, clsobj);
-	}
-	if (cls)
 		notify_class_action(cls, 1);
+	}
 	write_unlock(&global_rwlock);
 	return;
 }
@@ -504,6 +503,9 @@ rbce_class_deletecb(const char *classname, void *classobj, int classtype)
 	write_lock(&global_rwlock);
 	cls = find_class_name(classname);
 	if (cls) {
+#ifdef RBCE_EXTENSION
+		put_class(cls);
+#endif
 		if (cls->classobj != classobj) {
 			printk(KERN_ERR "rbce: class %s changed identity\n",
 			       classname);
@@ -629,13 +631,16 @@ static void __release_rule(struct rbce_rule *rule)
 static inline int __delete_rule(struct rbce_rule *rule)
 {
 	// make sure we are not referenced by other rules
+	if (list_empty(&rule->obj.link)) {
+		return 0;
+	}
 	if (GET_REF(rule)) {
 		return -EBUSY;
 	}
 	__release_rule(rule);
 	put_class(rule->target_class);
 	release_term_index(rule->index);
-	list_del(&rule->obj.link);
+	list_del_init(&rule->obj.link);
 	gl_num_rules--;
 	gl_rules_version++;
 	module_put(THIS_MODULE);

@@ -39,7 +39,7 @@
 #include <linux/audit.h>
 #include <linux/profile.h>
 #include <linux/rmap.h>
-#include <linux/ckrm.h>
+#include <linux/ckrm_events.h>
 #include <linux/ckrm_tsk.h>
 #include <linux/ckrm_mem_inline.h>
 #include <linux/vs_network.h>
@@ -1195,13 +1195,11 @@ long do_fork(unsigned long clone_flags,
 			clone_flags |= CLONE_PTRACE;
 	}
 
-#ifdef CONFIG_CKRM_TYPE_TASKCLASS
 	if (numtasks_get_ref(current->taskclass, 0) == 0) {
 		return -ENOMEM;
 	}
-#endif
-
 	p = copy_process(clone_flags, stack_start, regs, stack_size, parent_tidptr, child_tidptr, pid);
+
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.
@@ -1241,9 +1239,7 @@ long do_fork(unsigned long clone_flags,
 				ptrace_notify ((PTRACE_EVENT_VFORK_DONE << 8) | SIGTRAP);
 		}
 	} else {
-#ifdef CONFIG_CKRM_TYPE_TASKCLASS
 		numtasks_put_ref(current->taskclass);
-#endif
 		free_pidmap(pid);
 		pid = PTR_ERR(p);
 	}

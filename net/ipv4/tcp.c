@@ -258,7 +258,7 @@
 #include <linux/random.h>
 
 #ifdef CONFIG_CKRM
-#include <linux/ckrm.h>
+#include <linux/ckrm_events.h>
 #endif
 
 #include <net/icmp.h>

@@ -28,14 +28,25 @@
 #include <asm/div64.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
-#include <linux/ckrm.h>
+#include <linux/parser.h>
 #include <linux/ckrm_rc.h>
 #include <linux/ckrm_tc.h>
 #include <linux/ckrm_tsk.h>
 
-#define TOTAL_NUM_TASKS (131072)	// 128 K
+#define DEF_TOTAL_NUM_TASKS (131072)	// 128 K
+#define DEF_FORKRATE (1000000)			// 1 million tasks
+#define DEF_FORKRATE_INTERVAL (3600)    // per hour
 #define NUMTASKS_DEBUG
 #define NUMTASKS_NAME "numtasks"
+#define SYS_TOTAL_TASKS "sys_total_tasks"
+#define FORKRATE "forkrate"
+#define FORKRATE_INTERVAL "forkrate_interval"
+
+static int total_numtasks = DEF_TOTAL_NUM_TASKS;
+static int total_cnt_alloc = 0;
+static int forkrate = DEF_FORKRATE;
+static int forkrate_interval = DEF_FORKRATE_INTERVAL;
+static ckrm_core_class_t *root_core;
 
 typedef struct ckrm_numtasks {
 	struct ckrm_core_class *core;	// the core i am part of...
@@ -65,6 +76,10 @@ typedef struct ckrm_numtasks {
 	int tot_limit_failures;
 	int tot_borrow_sucesses;
 	int tot_borrow_failures;
+
+	// fork rate fields
+	int forks_in_period;
+	unsigned long period_start;
 } ckrm_numtasks_t;
 
 struct ckrm_res_ctlr numtasks_rcbs;
@@ -101,6 +116,9 @@ static void numtasks_res_initcls_one(ckrm_numtasks_t * res)
 	res->tot_borrow_sucesses = 0;
 	res->tot_borrow_failures = 0;
 
+	res->forks_in_period = 0;
+	res->period_start = jiffies;
+
 	atomic_set(&res->cnt_cur_alloc, 0);
 	atomic_set(&res->cnt_borrowed, 0);
 	return;
@@ -119,7 +137,8 @@ static void numtasks_res_initcls(void *my_res)
 
 static int numtasks_get_ref_local(void *arg, int force)
 {
-	int rc, resid = numtasks_rcbs.resid;
+	int rc, resid = numtasks_rcbs.resid, borrowed = 0;
+	unsigned long now = jiffies, chg_at;
 	ckrm_numtasks_t *res;
 	ckrm_core_class_t *core = arg;
 
@@ -129,6 +148,25 @@ static int numtasks_get_ref_local(void *arg, int force)
 	res = ckrm_get_res_class(core, resid, ckrm_numtasks_t);
 	if (res == NULL)
 		return 1;
+
+	// force is not associated with fork. So, if force is specified
+	// we don't have to bother about forkrate.
+	if (!force) {
+		// Take care of wraparound situation
+		chg_at = res->period_start + forkrate_interval * HZ;
+		if (chg_at < res->period_start) {
+			chg_at += forkrate_interval * HZ;
+			now += forkrate_interval * HZ;
+		}
+		if (chg_at <= now) {
+			res->period_start = now;
+			res->forks_in_period = 0;
+		}
+	
+		if (res->forks_in_period >= forkrate) {
+			return 0;
+		}
+	}
 
 	atomic_inc(&res->cnt_cur_alloc);
 
@@ -148,6 +186,7 @@ static int numtasks_get_ref_local(void *arg, int force)
 				res->borrow_sucesses++;
 				res->tot_borrow_sucesses++;
 				res->over_guarantee = 1;
+				borrowed++;
 			} else {
 				res->borrow_failures++;
 				res->tot_borrow_failures++;
@@ -174,6 +213,11 @@ static int numtasks_get_ref_local(void *arg, int force)
 
 	if (!rc) {
 		atomic_dec(&res->cnt_cur_alloc);
+	} else if (!borrowed) { 
+		total_cnt_alloc++;
+		if (!force) { // force is not associated with a real fork.
+			res->forks_in_period++;
+		}
 	}
 	return rc;
 }
@@ -200,7 +244,10 @@ static void numtasks_put_ref_local(void *arg)
 	if (atomic_read(&res->cnt_borrowed) > 0) {
 		atomic_dec(&res->cnt_borrowed);
 		numtasks_put_ref_local(res->parent);
+	} else {
+		total_cnt_alloc--;
 	}
+		
 	return;
 }
 
@@ -220,9 +267,10 @@ static void *numtasks_res_alloc(struct ckrm_core_class *core,
 		if (parent == NULL) {
 			// I am part of root class. So set the max tasks 
 			// to available default
-			res->cnt_guarantee = TOTAL_NUM_TASKS;
-			res->cnt_unused = TOTAL_NUM_TASKS;
-			res->cnt_limit = TOTAL_NUM_TASKS;
+			res->cnt_guarantee = total_numtasks;
+			res->cnt_unused = total_numtasks;
+			res->cnt_limit = total_numtasks;
+			root_core = core; // store the root core.
 		}
 		try_module_get(THIS_MODULE);
 	} else {
@@ -286,6 +334,7 @@ static void numtasks_res_free(void *my_res)
 	return;
 }
 
+
 /*
  * Recalculate the guarantee and limit in real units... and propagate the
  * same to children.
@@ -339,10 +388,13 @@ recalc_and_propagate(ckrm_numtasks_t * res, ckrm_numtasks_t * parres)
 	ckrm_lock_hier(res->core);
 	while ((child = ckrm_get_next_child(res->core, child)) != NULL) {
 		childres = ckrm_get_res_class(child, resid, ckrm_numtasks_t);
-
-		spin_lock(&childres->cnt_lock);
-		recalc_and_propagate(childres, res);
-		spin_unlock(&childres->cnt_lock);
+		if (childres) {
+		    spin_lock(&childres->cnt_lock);
+		    recalc_and_propagate(childres, res);
+		    spin_unlock(&childres->cnt_lock);
+		} else {
+			printk(KERN_ERR "%s: numtasks resclass missing\n",__FUNCTION__);
+		}
 	}
 	ckrm_unlock_hier(res->core);
 	return;
@@ -443,18 +495,103 @@ static int numtasks_show_config(void *my_res, struct seq_file *sfile)
 	if (!res)
 		return -EINVAL;
 
-	seq_printf(sfile, "res=%s,parameter=somevalue\n", NUMTASKS_NAME);
+	seq_printf(sfile, "res=%s,%s=%d,%s=%d,%s=%d\n", NUMTASKS_NAME,
+			SYS_TOTAL_TASKS, total_numtasks,
+			FORKRATE, forkrate,
+			FORKRATE_INTERVAL, forkrate_interval);
 	return 0;
+}
+
+enum numtasks_token_t {
+	numtasks_token_total,
+	numtasks_token_forkrate,
+	numtasks_token_interval,
+	numtasks_token_err
+};
+
+static match_table_t numtasks_tokens = {
+	{numtasks_token_total, SYS_TOTAL_TASKS "=%d"},
+	{numtasks_token_forkrate, FORKRATE "=%d"},
+	{numtasks_token_interval, FORKRATE_INTERVAL "=%d"},
+	{numtasks_token_err, NULL},
+};
+
+static void reset_forkrates(ckrm_core_class_t *parent, unsigned long now)
+{
+	ckrm_numtasks_t *parres;
+	ckrm_core_class_t *child = NULL;
+
+	parres = ckrm_get_res_class(parent, numtasks_rcbs.resid,
+				 ckrm_numtasks_t);
+	if (!parres) {
+		return;
+	}
+	parres->forks_in_period = 0;
+	parres->period_start = now;
+
+	ckrm_lock_hier(parent);
+	while ((child = ckrm_get_next_child(parent, child)) != NULL) {
+		reset_forkrates(child, now);
+	}
+	ckrm_unlock_hier(parent);
 }
 
 static int numtasks_set_config(void *my_res, const char *cfgstr)
 {
+	char *p;
 	ckrm_numtasks_t *res = my_res;
+	int new_total, fr = 0, itvl = 0, err = 0;
 
 	if (!res)
 		return -EINVAL;
-	printk(KERN_DEBUG "numtasks config='%s'\n", cfgstr);
-	return 0;
+
+	while ((p = strsep((char**)&cfgstr, ",")) != NULL) {
+		substring_t args[MAX_OPT_ARGS];
+		int token;
+		if (!*p)
+			continue;
+
+		token = match_token(p, numtasks_tokens, args);
+		switch (token) {
+		case numtasks_token_total:
+			if (match_int(args, &new_total) ||
+						(new_total < total_cnt_alloc)) {
+				err = -EINVAL;
+			} else {
+				total_numtasks = new_total;
+			
+				// res is the default class, as config is present only
+				// in that directory
+				spin_lock(&res->cnt_lock);
+				res->cnt_guarantee = total_numtasks;
+				res->cnt_unused = total_numtasks;
+				res->cnt_limit = total_numtasks;
+				recalc_and_propagate(res, NULL);
+				spin_unlock(&res->cnt_lock);
+			}
+			break;
+		case numtasks_token_forkrate:
+			if (match_int(args, &fr) || (fr <= 0)) {
+				err = -EINVAL;
+			} else {
+				forkrate = fr;
+			}
+			break;
+		case numtasks_token_interval:
+			if (match_int(args, &itvl) || (itvl <= 0)) {
+				err = -EINVAL;
+			} else {
+				forkrate_interval = itvl;
+			}
+			break;
+		default:
+			err = -EINVAL;
+		}
+	}
+	if ((fr > 0) || (itvl > 0)) {
+		reset_forkrates(root_core, jiffies);
+	}
+	return err;
 }
 
 static void numtasks_change_resclass(void *task, void *old, void *new)

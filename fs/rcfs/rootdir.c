@@ -16,7 +16,8 @@
  *
  */
 
-/* Changes
+/*
+ * Changes
  *
  * 08 April 2004
  *        Created.
@@ -54,7 +55,7 @@ int rcfs_register_engine(rbce_eng_callback_t * rcbs)
 	return 0;
 }
 
-EXPORT_SYMBOL(rcfs_register_engine);
+EXPORT_SYMBOL_GPL(rcfs_register_engine);
 
 int rcfs_unregister_engine(rbce_eng_callback_t * rcbs)
 {
@@ -70,7 +71,8 @@ int rcfs_unregister_engine(rbce_eng_callback_t * rcbs)
 
 EXPORT_SYMBOL(rcfs_unregister_engine);
 
-/* rcfs_mkroot
+/*
+ * rcfs_mkroot
  * Create and return a "root" dentry under /rcfs. 
  * Also create associated magic files 
  *
@@ -98,7 +100,6 @@ int rcfs_mkroot(struct rcfs_magf *mfdesc, int mfcount, struct dentry **rootde)
 		printk(KERN_ERR "Could not create %s\n", rootdesc->name);
 		return -ENOMEM;
 	}
-
 	rootri = RCFS_I(dentry->d_inode);
 	sz = strlen(rootdesc->name) + strlen(RCFS_ROOT) + 2;
 	rootri->name = kmalloc(sz, GFP_KERNEL);
@@ -109,19 +110,18 @@ int rcfs_mkroot(struct rcfs_magf *mfdesc, int mfcount, struct dentry **rootde)
 		return -ENOMEM;
 	}
 	snprintf(rootri->name, sz, "%s/%s", RCFS_ROOT, rootdesc->name);
-
 	if (rootdesc->i_fop)
 		dentry->d_inode->i_fop = rootdesc->i_fop;
 	if (rootdesc->i_op)
 		dentry->d_inode->i_op = rootdesc->i_op;
 
-	// set output parameters
+	/* set output parameters */
 	*rootde = dentry;
 
 	return 0;
 }
 
-EXPORT_SYMBOL(rcfs_mkroot);
+EXPORT_SYMBOL_GPL(rcfs_mkroot);
 
 int rcfs_rmroot(struct dentry *rootde)
 {
@@ -138,7 +138,7 @@ int rcfs_rmroot(struct dentry *rootde)
 	return 0;
 }
 
-EXPORT_SYMBOL(rcfs_rmroot);
+EXPORT_SYMBOL_GPL(rcfs_rmroot);
 
 int rcfs_register_classtype(ckrm_classtype_t * clstype)
 {
@@ -146,7 +146,10 @@ int rcfs_register_classtype(ckrm_classtype_t * clstype)
 	struct rcfs_inode_info *rootri;
 	struct rcfs_magf *mfdesc;
 
-	// Initialize mfdesc, mfcount 
+	if (genmfdesc[clstype->mfidx] == NULL) {
+		return -ENOMEM;
+	}
+
 	clstype->mfdesc = (void *)genmfdesc[clstype->mfidx]->rootmf;
 	clstype->mfcount = genmfdesc[clstype->mfidx]->rootmflen;
 
@@ -159,13 +162,12 @@ int rcfs_register_classtype(ckrm_classtype_t * clstype)
 			 (struct dentry **)&(clstype->rootde));
 	if (rc)
 		return rc;
-
 	rootri = RCFS_I(((struct dentry *)(clstype->rootde))->d_inode);
 	rootri->core = clstype->default_class;
 	clstype->default_class->name = rootri->name;
 	ckrm_core_grab(clstype->default_class);
 
-	// Create magic files under root 
+	/* Create magic files under root */
 	if ((rc = rcfs_create_magic(clstype->rootde, &mfdesc[1],
 				    clstype->mfcount - 1))) {
 		kfree(rootri->name);
@@ -173,11 +175,10 @@ int rcfs_register_classtype(ckrm_classtype_t * clstype)
 		rcfs_delete_internal(clstype->rootde);
 		return rc;
 	}
-
 	return rc;
 }
 
-EXPORT_SYMBOL(rcfs_register_classtype);
+EXPORT_SYMBOL_GPL(rcfs_register_classtype);
 
 int rcfs_deregister_classtype(ckrm_classtype_t * clstype)
 {
@@ -191,29 +192,27 @@ int rcfs_deregister_classtype(ckrm_classtype_t * clstype)
 	return rc;
 }
 
-EXPORT_SYMBOL(rcfs_deregister_classtype);
-
-// Common root and magic file entries.
-// root name, root permissions, magic file names and magic file permissions 
-// are needed by all entities (classtypes and classification engines) existing 
-// under the rcfs mount point
-
-// The common sets of these attributes are listed here as a table. Individual 
-// classtypes and classification engines can simple specify the index into the 
-// table to initialize their magf entries. 
-//
+EXPORT_SYMBOL_GPL(rcfs_deregister_classtype);
 
 #ifdef CONFIG_CKRM_TYPE_TASKCLASS
 extern struct rcfs_mfdesc tc_mfdesc;
 #endif
 
-#ifdef CONFIG_CKRM_TYPE_TASKCLASS
+#ifdef CONFIG_CKRM_TYPE_SOCKETCLASS
 extern struct rcfs_mfdesc sock_mfdesc;
 #endif
 
-// extern struct rcfs_magf rbce_mfdesc;
+/* Common root and magic file entries.
+ * root name, root permissions, magic file names and magic file permissions 
+ * are needed by all entities (classtypes and classification engines) existing 
+ * under the rcfs mount point
+ *
+ * The common sets of these attributes are listed here as a table. Individual 
+ * classtypes and classification engines can simple specify the index into the 
+ * table to initialize their magf entries. 
+ */
 
-struct rcfs_mfdesc *genmfdesc[] = {
+struct rcfs_mfdesc *genmfdesc[CKRM_MAX_CLASSTYPES] = {
 #ifdef CONFIG_CKRM_TYPE_TASKCLASS
 	&tc_mfdesc,
 #else
@@ -224,4 +223,5 @@ struct rcfs_mfdesc *genmfdesc[] = {
 #else
 	NULL,
 #endif
+
 };

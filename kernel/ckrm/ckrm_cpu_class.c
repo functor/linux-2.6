@@ -16,7 +16,7 @@
 #include <linux/slab.h>
 #include <asm/errno.h>
 #include <linux/sched.h>
-#include <linux/ckrm.h>
+#include <linux/ckrm_events.h>
 #include <linux/ckrm_rc.h>
 #include <linux/ckrm_tc.h>
 #include <linux/ckrm_sched.h>

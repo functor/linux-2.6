@@ -22,7 +22,7 @@
 #include <asm/errno.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
-#include <linux/ckrm.h>
+#include <linux/ckrm_events.h>
 #include <linux/ckrm_rc.h>
 #include <linux/ckrm_tc.h>
 #include <asm/div64.h>

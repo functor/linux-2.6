@@ -25,7 +25,7 @@
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
 #include <linux/mempolicy.h>
-#include <linux/ckrm.h>
+#include <linux/ckrm_events.h>
 #include <linux/ckrm_tsk.h>
 #include <linux/ckrm_mem_inline.h>
 #include <linux/syscalls.h>

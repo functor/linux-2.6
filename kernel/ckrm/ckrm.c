@@ -19,7 +19,8 @@
  *
  */
 
-/* Changes
+/*
+ * Changes
  *
  * 28 Aug 2003
  *        Created.
@@ -52,24 +53,19 @@
 #include <net/sock.h>
 #include <linux/ip.h>
 
-rwlock_t ckrm_class_lock = RW_LOCK_UNLOCKED;	// protect classlists 
+rwlock_t ckrm_class_lock = RW_LOCK_UNLOCKED;	/* protects classlists */
 
 struct rcfs_functions rcfs_fn;
-EXPORT_SYMBOL(rcfs_fn);
+EXPORT_SYMBOL_GPL(rcfs_fn);
 
-// rcfs state needed by another module
-int rcfs_engine_regd;
-EXPORT_SYMBOL(rcfs_engine_regd);
+int rcfs_engine_regd;		/* rcfs state needed by another module */
+EXPORT_SYMBOL_GPL(rcfs_engine_regd);
 
 int rcfs_mounted;
-EXPORT_SYMBOL(rcfs_mounted);
-
-/**************************************************************************
- *                   Helper Functions                                     *
- **************************************************************************/
+EXPORT_SYMBOL_GPL(rcfs_mounted);
 
 /*
- * Return TRUE if the given core class pointer is valid.
+ * Helper Functions
  */
 
 /*
@@ -82,7 +78,10 @@ inline unsigned int is_res_regd(struct ckrm_classtype *clstype, int resid)
 	    );
 }
 
-struct ckrm_res_ctlr *ckrm_resctlr_lookup(struct ckrm_classtype *clstype,
+/*
+ * Return TRUE if the given core class pointer is valid.
+ */
+static struct ckrm_res_ctlr *ckrm_resctlr_lookup(struct ckrm_classtype *clstype,
 					  const char *resname)
 {
 	int resid = -1;
@@ -101,10 +100,9 @@ struct ckrm_res_ctlr *ckrm_resctlr_lookup(struct ckrm_classtype *clstype,
 	return NULL;
 }
 
-EXPORT_SYMBOL(ckrm_resctlr_lookup);
 
 /* given a classname return the class handle and its classtype*/
-void *ckrm_classobj(char *classname, int *classTypeID)
+void *ckrm_classobj(const char *classname, int *classTypeID)
 {
 	int i;
 
@@ -133,12 +131,12 @@ void *ckrm_classobj(char *classname, int *classTypeID)
 	return NULL;
 }
 
-EXPORT_SYMBOL(is_res_regd);
-EXPORT_SYMBOL(ckrm_classobj);
+EXPORT_SYMBOL_GPL(is_res_regd);
+EXPORT_SYMBOL_GPL(ckrm_classobj);
 
-/**************************************************************************
- *                   Internal Functions/macros                            *
- **************************************************************************/
+/*
+ * Internal Functions/macros
+ */
 
 static inline void set_callbacks_active(struct ckrm_classtype *ctype)
 {
@@ -159,9 +157,9 @@ int ckrm_validate_and_grab_core(struct ckrm_core_class *core)
 	return rc;
 }
 
-/****************************************************************************
- *           Interfaces for classification engine                           *
- ****************************************************************************/
+/*
+ * Interfaces for classification engine
+ */
 
 /*
  * Registering a callback structure by the classification engine.
@@ -184,12 +182,12 @@ int ckrm_register_engine(const char *typename, ckrm_eng_callback_t * ecbs)
 		return (-EBUSY);
 	}
 
-	/* One of the following must be set: 
-	   classify, class_delete (due to object reference) or 
-	   notify (case where notification supported but not classification)
-	   The function pointer must be set the momement the mask is non-null
+	/*
+	 * One of the following must be set: 
+	 * classify, class_delete (due to object reference) or 
+	 * notify (case where notification supported but not classification)
+	 * The function pointer must be set the momement the mask is non-null
 	 */
-
 	if (!(((ecbs->classify) && (ecbs->class_delete)) || (ecbs->notify)) ||
 	    (ecbs->c_interest && ecbs->classify == NULL) ||
 	    (ecbs->n_interest && ecbs->notify == NULL)) {
@@ -204,7 +202,6 @@ int ckrm_register_engine(const char *typename, ckrm_eng_callback_t * ecbs)
 		struct ckrm_core_class *core;
 
 		read_lock(&ckrm_class_lock);
-
 		list_for_each_entry(core, &ctype->classes, clslist) {
 			(*ctype->ce_callbacks.class_add) (core->name, core,
 							  ctype->typeID);
@@ -228,23 +225,19 @@ int ckrm_unregister_engine(const char *typename)
 		return (-ENOENT);
 
 	ctype->ce_cb_active = 0;
-
 	if (atomic_read(&ctype->ce_nr_users) > 1) {
-		// Somebody is currently using the engine, cannot deregister.
+		/* Somebody is currently using the engine, cannot deregister. */
 		return (-EAGAIN);
 	}
-
 	atomic_set(&ctype->ce_regd, 0);
 	memset(&ctype->ce_callbacks, 0, sizeof(ckrm_eng_callback_t));
 	return 0;
 }
 
-/****************************************************************************
- *           Interfaces to manipulate class (core or resource) hierarchies 
- ****************************************************************************/
-
-/* 
+/*
+ * Interfaces to manipulate class (core or resource) hierarchies
  */
+
 static void
 ckrm_add_child(struct ckrm_core_class *parent, struct ckrm_core_class *child)
 {
@@ -255,7 +248,6 @@ ckrm_add_child(struct ckrm_core_class *parent, struct ckrm_core_class *child)
 		       child);
 		return;
 	}
-
 	class_lock(child);
 	INIT_LIST_HEAD(&cnode->children);
 	INIT_LIST_HEAD(&cnode->siblings);
@@ -280,8 +272,6 @@ ckrm_add_child(struct ckrm_core_class *parent, struct ckrm_core_class *child)
 	return;
 }
 
-/* 
- */
 static int ckrm_remove_child(struct ckrm_core_class *child)
 {
 	struct ckrm_hnode *cnode, *pnode;
@@ -355,7 +345,6 @@ struct ckrm_core_class *ckrm_get_next_child(struct ckrm_core_class *parent,
 	if (list_empty(&parent->hnode.children)) {
 		return NULL;
 	}
-
 	if (child) {
 		if (!ckrm_is_core_valid(child)) {
 			printk(KERN_ERR
@@ -368,7 +357,7 @@ struct ckrm_core_class *ckrm_get_next_child(struct ckrm_core_class *parent,
 		cnode = parent->hnode.children.next;
 	}
 
-	if (cnode == &parent->hnode.children) {	// back at the anchor
+	if (cnode == &parent->hnode.children) {	/* back at the anchor */
 		return NULL;
 	}
 
@@ -384,9 +373,9 @@ struct ckrm_core_class *ckrm_get_next_child(struct ckrm_core_class *parent,
 	return next_childcore;
 }
 
-EXPORT_SYMBOL(ckrm_lock_hier);
-EXPORT_SYMBOL(ckrm_unlock_hier);
-EXPORT_SYMBOL(ckrm_get_next_child);
+EXPORT_SYMBOL_GPL(ckrm_lock_hier);
+EXPORT_SYMBOL_GPL(ckrm_unlock_hier);
+EXPORT_SYMBOL_GPL(ckrm_get_next_child);
 
 static void
 ckrm_alloc_res_class(struct ckrm_core_class *core,
@@ -394,15 +383,12 @@ ckrm_alloc_res_class(struct ckrm_core_class *core,
 {
 
 	struct ckrm_classtype *clstype;
-
 	/* 
 	 * Allocate a resource class only if the resource controller has
 	 * registered with core and the engine requests for the class.
 	 */
-
 	if (!ckrm_is_core_valid(core))
 		return;
-
 	clstype = core->classtype;
 	core->res_class[resid] = NULL;
 
@@ -436,32 +422,15 @@ ckrm_init_core_class(struct ckrm_classtype *clstype,
 		     struct ckrm_core_class *dcore,
 		     struct ckrm_core_class *parent, const char *name)
 {
-	// Hubertus   ... should replace name with dentry or add dentry ?
+	/* TODO:  Should replace name with dentry or add dentry? */
 	int i;
 
-	// Hubertus .. how is this used in initialization 
-
+	/* TODO:  How is this used in initialization? */
 	CLS_DEBUG("name %s => %p\n", name ? name : "default", dcore);
-
 	if ((dcore != clstype->default_class) && (!ckrm_is_core_valid(parent))){
 		printk(KERN_DEBUG "error not a valid parent %p\n", parent);
 		return -EINVAL;
 	}
-#if 0  
-// Hubertus .. dynamic allocation still breaks when RCs registers. 
-// See def in ckrm_rc.h
-	dcore->res_class = NULL;
-	if (clstype->max_resid > 0) {
-		dcore->res_class =
-		    (void **)kmalloc(clstype->max_resid * sizeof(void *),
-				     GFP_KERNEL);
-		if (dcore->res_class == NULL) {
-			printk(KERN_DEBUG "error no mem\n");
-			return -ENOMEM;
-		}
-	}
-#endif
-
 	dcore->classtype = clstype;
 	dcore->magic = CKRM_CORE_MAGIC;
 	dcore->name = name;
@@ -484,7 +453,7 @@ ckrm_init_core_class(struct ckrm_classtype *clstype,
 	for (i = 0; i < clstype->max_resid; i++)
 		ckrm_alloc_res_class(dcore, parent, i);
 
-	// fix for race condition seen in stress with numtasks
+	/* fix for race condition seen in stress with numtasks */
 	if (parent)
 		ckrm_core_grab(parent);
 
@@ -537,25 +506,23 @@ void ckrm_free_core_class(struct ckrm_core_class *core)
 	if (ckrm_remove_child(core) == 0) {
 		printk(KERN_DEBUG "Core class removal failed. Chilren present\n");
 	}
-
 	for (i = 0; i < clstype->max_resid; i++) {
 		ckrm_free_res_class(core, i);
 	}
 
 	write_lock(&ckrm_class_lock);
-
-	// Clear the magic, so we would know if this core is reused.
+	/* Clear the magic, so we would know if this core is reused. */
 	core->magic = 0;
-#if 0				// Dynamic not yet enabled
+#if 0				/* Dynamic not yet enabled */
 	core->res_class = NULL;
 #endif
-	// Remove this core class from its linked list.
+	/* Remove this core class from its linked list. */
 	list_del(&core->clslist);
 	clstype->num_classes--;
 	set_callbacks_active(clstype);
 	write_unlock(&ckrm_class_lock);
 
-	// fix for race condition seen in stress with numtasks
+	/* fix for race condition seen in stress with numtasks */
 	if (parent)
 		ckrm_core_drop(parent);
 
@@ -582,9 +549,9 @@ int ckrm_release_core_class(struct ckrm_core_class *core)
 	return 0;
 }
 
-/****************************************************************************
- *           Interfaces for the resource controller                         *
- ****************************************************************************/
+/*
+ * Interfaces for the resource controller
+ */
 /*
  * Registering a callback structure by the resource controller.
  *
@@ -602,10 +569,8 @@ ckrm_register_res_ctlr_intern(struct ckrm_classtype *clstype,
 	resid = rcbs->resid;
 
 	spin_lock(&clstype->res_ctlrs_lock);
-
 	printk(KERN_WARNING "resid is %d name is %s %s\n",
 	       resid, rcbs->res_name, clstype->res_ctlrs[resid]->res_name);
-
 	if (resid >= 0) {
 		if ((resid < CKRM_MAX_RES_CTLRS)
 		    && (clstype->res_ctlrs[resid] == NULL)) {
@@ -622,7 +587,6 @@ ckrm_register_res_ctlr_intern(struct ckrm_classtype *clstype,
 		spin_unlock(&clstype->res_ctlrs_lock);
 		return ret;
 	}
-
 	for (i = clstype->resid_reserved; i < clstype->max_res_ctlrs; i++) {
 		if (clstype->res_ctlrs[i] == NULL) {
 			clstype->res_ctlrs[i] = rcbs;
@@ -636,7 +600,6 @@ ckrm_register_res_ctlr_intern(struct ckrm_classtype *clstype,
 			return i;
 		}
 	}
-
 	spin_unlock(&clstype->res_ctlrs_lock);
 	return (-ENOMEM);
 }
@@ -662,7 +625,7 @@ ckrm_register_res_ctlr(struct ckrm_classtype *clstype, ckrm_res_ctlr_t * rcbs)
 			ckrm_alloc_res_class(core, core->hnode.parent, resid);
 
 			if (clstype->add_resctrl) { 
-				// FIXME: this should be mandatory
+				/* FIXME: this should be mandatory */
 				(*clstype->add_resctrl) (core, resid);
 			}
 		}
@@ -685,10 +648,10 @@ int ckrm_unregister_res_ctlr(struct ckrm_res_ctlr *rcbs)
 	if ((clstype == NULL) || (resid < 0)) {
 		return -EINVAL;
 	}
-	// FIXME: probably need to also call deregistration function
+	/* TODO: probably need to also call deregistration function */
 
 	read_lock(&ckrm_class_lock);
-	// free up this resource from all the classes
+	/* free up this resource from all the classes */
 	list_for_each_entry(core, &clstype->classes, clslist) {
 		ckrm_free_res_class(core, resid);
 	}
@@ -708,16 +671,14 @@ int ckrm_unregister_res_ctlr(struct ckrm_res_ctlr *rcbs)
 	return 0;
 }
 
-/*******************************************************************
- *   Class Type Registration
- *******************************************************************/
+/*
+ * Class Type Registration
+ */
 
-/* Hubertus ... we got to do some locking here */
-
+/* TODO: What locking is needed here?*/
 
 struct ckrm_classtype *ckrm_classtypes[CKRM_MAX_CLASSTYPES];
-// really should build a better interface for this
-EXPORT_SYMBOL(ckrm_classtypes);	
+EXPORT_SYMBOL_GPL(ckrm_classtypes);	
 
 int ckrm_register_classtype(struct ckrm_classtype *clstype)
 {
@@ -741,12 +702,11 @@ int ckrm_register_classtype(struct ckrm_classtype *clstype)
 	clstype->typeID = tid;
 	ckrm_classtypes[tid] = clstype;
 
-	/* Hubertus .. we need to call the callbacks of the RCFS client */
+	/* TODO: Need to call the callbacks of the RCFS client */
 	if (rcfs_fn.register_classtype) {
 		(*rcfs_fn.register_classtype) (clstype);
-		// No error return for now ;
+		/* No error return for now. */
 	}
-
 	return tid;
 }
 
@@ -779,79 +739,12 @@ struct ckrm_classtype *ckrm_find_classtype_by_name(const char *name)
 	return NULL;
 }
 
-/*******************************************************************
- *   Event callback invocation
- *******************************************************************/
-
-struct ckrm_hook_cb *ckrm_event_callbacks[CKRM_NONLATCHABLE_EVENTS];
-
-/* Registration / Deregistration / Invocation functions */
-
-int ckrm_register_event_cb(enum ckrm_event ev, struct ckrm_hook_cb *cb)
-{
-	struct ckrm_hook_cb **cbptr;
-
-	if ((ev < CKRM_LATCHABLE_EVENTS) || (ev >= CKRM_NONLATCHABLE_EVENTS))
-		return 1;
-	cbptr = &ckrm_event_callbacks[ev];
-	while (*cbptr != NULL)
-		cbptr = &((*cbptr)->next);
-	*cbptr = cb;
-	return 0;
-}
-
-int ckrm_unregister_event_cb(enum ckrm_event ev, struct ckrm_hook_cb *cb)
-{
-	struct ckrm_hook_cb **cbptr;
-
-	if ((ev < CKRM_LATCHABLE_EVENTS) || (ev >= CKRM_NONLATCHABLE_EVENTS))
-		return -1;
-	cbptr = &ckrm_event_callbacks[ev];
-	while ((*cbptr != NULL) && (*cbptr != cb))
-		cbptr = &((*cbptr)->next);
-	if (*cbptr)
-		(*cbptr)->next = cb->next;
-	return (*cbptr == NULL);
-}
-
-int ckrm_register_event_set(struct ckrm_event_spec especs[])
-{
-	struct ckrm_event_spec *espec = especs;
-
-	for (espec = especs; espec->ev != -1; espec++)
-		ckrm_register_event_cb(espec->ev, &espec->cb);
-	return 0;
-}
-
-int ckrm_unregister_event_set(struct ckrm_event_spec especs[])
-{
-	struct ckrm_event_spec *espec = especs;
-
-	for (espec = especs; espec->ev != -1; espec++)
-		ckrm_unregister_event_cb(espec->ev, &espec->cb);
-	return 0;
-}
-
-#define ECC_PRINTK(fmt, args...) \
-// printk(KERN_DEBUG "%s: " fmt, __FUNCTION__ , ## args)
-
-void ckrm_invoke_event_cb_chain(enum ckrm_event ev, void *arg)
-{
-	struct ckrm_hook_cb *cb, *anchor;
-
-	ECC_PRINTK("%d %x\n", current, ev, arg);
-	if ((anchor = ckrm_event_callbacks[ev]) != NULL) {
-		for (cb = anchor; cb; cb = cb->next)
-			(*cb->fct) (arg);
-	}
-}
-
-/*******************************************************************
+/*
  *   Generic Functions that can be used as default functions 
  *   in almost all classtypes
  *     (a) function iterator over all resource classes of a class
  *     (b) function invoker on a named resource
- *******************************************************************/
+ */
 
 int ckrm_class_show_shares(struct ckrm_core_class *core, struct seq_file *seq)
 {
@@ -933,7 +826,7 @@ int ckrm_class_set_shares(struct ckrm_core_class *core, const char *resname,
 	struct ckrm_res_ctlr *rcbs;
 	int rc;
 
-	// Check for legal values
+	/* Check for legal values */
 	if (!legalshare(shares->my_guarantee) || !legalshare(shares->my_limit)
 	    || !legalshare(shares->total_guarantee)
 	    || !legalshare(shares->max_limit))
@@ -959,9 +852,9 @@ int ckrm_class_reset_stats(struct ckrm_core_class *core, const char *resname,
 	return rc;
 }
 
-/*******************************************************************
- *   Initialization 
- *******************************************************************/
+/*
+ * Initialization
+ */
 
 void ckrm_cb_newtask(struct task_struct *tsk)
 {
@@ -980,6 +873,9 @@ void __init ckrm_init(void)
 {
 	printk(KERN_DEBUG "CKRM Initialization\n");
 
+	// prepare init_task and then rely on inheritance of properties
+	ckrm_cb_newtask(&init_task);
+
 	// register/initialize the Metatypes
 
 #ifdef CONFIG_CKRM_TYPE_TASKCLASS
@@ -994,40 +890,38 @@ void __init ckrm_init(void)
 		ckrm_meta_init_sockclass();
 	}
 #endif
-	// prepare init_task and then rely on inheritance of properties
-	ckrm_cb_newtask(&init_task);
-	printk(KERN_DEBUG "CKRM Initialization done\n");
+	printk("CKRM Initialization done\n");
 }
 
-EXPORT_SYMBOL(ckrm_register_engine);
-EXPORT_SYMBOL(ckrm_unregister_engine);
+EXPORT_SYMBOL_GPL(ckrm_register_engine);
+EXPORT_SYMBOL_GPL(ckrm_unregister_engine);
 
-EXPORT_SYMBOL(ckrm_register_res_ctlr);
-EXPORT_SYMBOL(ckrm_unregister_res_ctlr);
+EXPORT_SYMBOL_GPL(ckrm_register_res_ctlr);
+EXPORT_SYMBOL_GPL(ckrm_unregister_res_ctlr);
 
-EXPORT_SYMBOL(ckrm_init_core_class);
-EXPORT_SYMBOL(ckrm_free_core_class);
-EXPORT_SYMBOL(ckrm_release_core_class);
+EXPORT_SYMBOL_GPL(ckrm_init_core_class);
+EXPORT_SYMBOL_GPL(ckrm_free_core_class);
+EXPORT_SYMBOL_GPL(ckrm_release_core_class);
 
-EXPORT_SYMBOL(ckrm_register_classtype);
-EXPORT_SYMBOL(ckrm_unregister_classtype);
-EXPORT_SYMBOL(ckrm_find_classtype_by_name);
+EXPORT_SYMBOL_GPL(ckrm_register_classtype);
+EXPORT_SYMBOL_GPL(ckrm_unregister_classtype);
+EXPORT_SYMBOL_GPL(ckrm_find_classtype_by_name);
 
-EXPORT_SYMBOL(ckrm_core_grab);
-EXPORT_SYMBOL(ckrm_core_drop);
-EXPORT_SYMBOL(ckrm_is_core_valid);
-EXPORT_SYMBOL(ckrm_validate_and_grab_core);
+EXPORT_SYMBOL_GPL(ckrm_core_grab);
+EXPORT_SYMBOL_GPL(ckrm_core_drop);
+EXPORT_SYMBOL_GPL(ckrm_is_core_valid);
+EXPORT_SYMBOL_GPL(ckrm_validate_and_grab_core);
 
-EXPORT_SYMBOL(ckrm_register_event_set);
-EXPORT_SYMBOL(ckrm_unregister_event_set);
-EXPORT_SYMBOL(ckrm_register_event_cb);
-EXPORT_SYMBOL(ckrm_unregister_event_cb);
+EXPORT_SYMBOL_GPL(ckrm_register_event_set);
+EXPORT_SYMBOL_GPL(ckrm_unregister_event_set);
+EXPORT_SYMBOL_GPL(ckrm_register_event_cb);
+EXPORT_SYMBOL_GPL(ckrm_unregister_event_cb);
 
-EXPORT_SYMBOL(ckrm_class_show_stats);
-EXPORT_SYMBOL(ckrm_class_show_config);
-EXPORT_SYMBOL(ckrm_class_show_shares);
+EXPORT_SYMBOL_GPL(ckrm_class_show_stats);
+EXPORT_SYMBOL_GPL(ckrm_class_show_config);
+EXPORT_SYMBOL_GPL(ckrm_class_show_shares);
 
-EXPORT_SYMBOL(ckrm_class_set_config);
-EXPORT_SYMBOL(ckrm_class_set_shares);
+EXPORT_SYMBOL_GPL(ckrm_class_set_config);
+EXPORT_SYMBOL_GPL(ckrm_class_set_shares);
 
-EXPORT_SYMBOL(ckrm_class_reset_stats);
+EXPORT_SYMBOL_GPL(ckrm_class_reset_stats);
