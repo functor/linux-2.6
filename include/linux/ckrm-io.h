@@ -30,10 +30,13 @@
 typedef void *(*icls_tsk_t) (struct task_struct *tsk);
 typedef int (*icls_ioprio_t) (struct task_struct *tsk);
 
+
 #ifdef CONFIG_CKRM_RES_BLKIO
 
-extern void *cki_tsk_icls (struct task_struct *tsk);
-extern int cki_tsk_ioprio (struct task_struct *tsk);
+#ifdef DOES_NOT_WORK_AND_NOT_NEEDED
+extern inline icls_tsk_t cki_tsk_icls;
+extern inline icls_ioprio_t cki_tsk_ioprio;
+#endif
 
 #endif /* CONFIG_CKRM_RES_BLKIO */
 
