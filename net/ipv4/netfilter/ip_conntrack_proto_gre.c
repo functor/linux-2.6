@@ -55,8 +55,9 @@ MODULE_DESCRIPTION("netfilter connection tracking protocol helper for GRE");
 #define GRE_STREAM_TIMEOUT	(180*HZ)
 
 #if 0
-#define DEBUGP(format, args...)	printk(KERN_DEBUG "%s:%s: " format, __FILE__, __FUNCTION__, ## args)
-#define DUMP_TUPLE_GRE(x) printk("%u.%u.%u.%u:0x%x -> %u.%u.%u.%u:0x%x\n", \
+#define DEBUGP(format, args...) printk(KERN_DEBUG __FILE__ ":" __FUNCTION__ \
+				       ": " format, ## args)
+#define DUMP_TUPLE_GRE(x) printk("%u.%u.%u.%u:0x%x -> %u.%u.%u.%u:0x%x:%u:0x%x\n", \
 			NIPQUAD((x)->src.ip), ntohl((x)->src.u.gre.key), \
 			NIPQUAD((x)->dst.ip), ntohl((x)->dst.u.gre.key))
 #else
@@ -130,13 +131,6 @@ int ip_ct_gre_keymap_add(struct ip_conntrack_expect *exp,
 void ip_ct_gre_keymap_change(struct ip_ct_gre_keymap *km,
 			     struct ip_conntrack_tuple *t)
 {
-        if (!km)
-        {
-                printk(KERN_WARNING
-                        "NULL GRE conntrack keymap change requested\n");
-                return;
-        }
-
 	DEBUGP("changing entry %p to: ", km);
 	DUMP_TUPLE_GRE(t);
 
@@ -188,8 +182,7 @@ static int gre_pkt_to_tuple(const struct sk_buff *skb,
 	u_int32_t srckey;
 
 	grehdr = skb_header_pointer(skb, dataoff, sizeof(_grehdr), &_grehdr);
-	/* PPTP header is variable length, only need up to the call_id field */
-	pgrehdr = skb_header_pointer(skb, dataoff, 8, &_pgrehdr);
+	pgrehdr = skb_header_pointer(skb, dataoff, sizeof(_pgrehdr), &_pgrehdr);
 
 	if (!grehdr || !pgrehdr)
 		return 0;
@@ -219,31 +212,31 @@ static int gre_pkt_to_tuple(const struct sk_buff *skb,
 
 	srckey = gre_keymap_lookup(tuple);
 
-	tuple->src.u.gre.key = srckey;
 #if 0
 	DEBUGP("found src key %x for tuple ", ntohl(srckey));
 	DUMP_TUPLE_GRE(tuple);
 #endif
+	tuple->src.u.gre.key = srckey;
 
 	return 1;
 }
 
 /* print gre part of tuple */
-static unsigned int gre_print_tuple(char *buffer,
-				    const struct ip_conntrack_tuple *tuple)
+static int gre_print_tuple(struct seq_file *s,
+			   const struct ip_conntrack_tuple *tuple)
 {
-	return sprintf(buffer, "srckey=0x%x dstkey=0x%x ", 
-		       ntohl(tuple->src.u.gre.key),
-		       ntohl(tuple->dst.u.gre.key));
+	return seq_printf(s, "srckey=0x%x dstkey=0x%x ", 
+			  ntohl(tuple->src.u.gre.key),
+			  ntohl(tuple->dst.u.gre.key));
 }
 
 /* print private data for conntrack */
-static unsigned int gre_print_conntrack(char *buffer,
-					const struct ip_conntrack *ct)
+static int gre_print_conntrack(struct seq_file *s,
+			       const struct ip_conntrack *ct)
 {
-	return sprintf(buffer, "timeout=%u, stream_timeout=%u ",
-		       (ct->proto.gre.timeout / HZ),
-		       (ct->proto.gre.stream_timeout / HZ));
+	return seq_printf(s, "timeout=%u, stream_timeout=%u ",
+			  (ct->proto.gre.timeout / HZ),
+			  (ct->proto.gre.stream_timeout / HZ));
 }
 
 /* Returns verdict for packet, and may modify conntrack */

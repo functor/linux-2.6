@@ -18,6 +18,8 @@
 #include <linux/init.h>
 #include <linux/highuid.h>
 #include <linux/fs.h>
+#include <linux/kernel.h>
+#include <linux/kexec.h>
 #include <linux/workqueue.h>
 #include <linux/device.h>
 #include <linux/times.h>
@@ -511,6 +513,25 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 		machine_restart(buffer);
 		break;
 
+#ifdef CONFIG_KEXEC
+	case LINUX_REBOOT_CMD_KEXEC:
+	{
+		struct kimage *image;
+		image = xchg(&kexec_image, 0);
+		if (!image) {
+			unlock_kernel();
+			return -EINVAL;
+		}
+		notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
+		system_state = SYSTEM_RESTART;
+		device_shutdown();
+		system_state = SYSTEM_BOOTING;
+		printk(KERN_EMERG "Starting new kernel\n");
+		machine_shutdown();
+		machine_kexec(image);
+		break;
+	}
+#endif
 #ifdef CONFIG_SOFTWARE_SUSPEND
 	case LINUX_REBOOT_CMD_SW_SUSPEND:
 		{
