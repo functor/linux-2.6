@@ -43,8 +43,10 @@
 #include <linux/config.h>
 #include <linux/linkage.h>
 #include <asm/thread_info.h>
+#include <asm/asm_offsets.h>
 #include <asm/errno.h>
 #include <asm/segment.h>
+#include <asm/page.h>
 #include <asm/smp.h>
 #include <asm/page.h>
 #include "irq_vectors.h"
@@ -74,12 +76,6 @@ DF_MASK		= 0x00000400
 NT_MASK		= 0x00004000
 VM_MASK		= 0x00020000
 
-/*
- * ESP0 is at offset 4. 0x200 is the size of the TSS, and
- * also thus the top-of-stack pointer offset of SYSENTER_ESP
- */
-TSS_ESP0_OFFSET = (4 - 0x200)
-
 #ifdef CONFIG_PREEMPT
 #define preempt_stop		cli
 #else
@@ -87,7 +83,102 @@ TSS_ESP0_OFFSET = (4 - 0x200)
 #define resume_kernel		restore_all
 #endif
 
-#define SAVE_ALL \
+#ifdef CONFIG_X86_HIGH_ENTRY
+
+#ifdef CONFIG_X86_SWITCH_PAGETABLES
+
+#if defined(CONFIG_PREEMPT) && defined(CONFIG_SMP)
+/*
+ * If task is preempted in __SWITCH_KERNELSPACE, and moved to another cpu,
+ * __switch_to repoints %esp to the appropriate virtual stack; but %ebp is
+ * left stale, so we must check whether to repeat the real stack calculation.
+ */
+#define repeat_if_esp_changed				\
+	xorl %esp, %ebp;				\
+	testl $-THREAD_SIZE, %ebp;			\
+	jnz 0b
+#else
+#define repeat_if_esp_changed
+#endif
+
+/* clobbers ebx, edx and ebp */
+
+#define __SWITCH_KERNELSPACE				\
+	cmpl $0xff000000, %esp;				\
+	jb 1f;						\
+							\
+	/*						\
+	 * switch pagetables and load the real stack,	\
+	 * keep the stack offset:			\
+	 */						\
+							\
+	movl $swapper_pg_dir-__PAGE_OFFSET, %edx;	\
+							\
+	/* GET_THREAD_INFO(%ebp) intermixed */		\
+0:							\
+	movl %esp, %ebp;				\
+	movl %esp, %ebx;				\
+	andl $(-THREAD_SIZE), %ebp;				\
+	andl $(THREAD_SIZE-1), %ebx;				\
+	orl TI_real_stack(%ebp), %ebx;			\
+	repeat_if_esp_changed;				\
+							\
+	movl %edx, %cr3;				\
+	movl %ebx, %esp;				\
+1:
+
+#endif
+
+
+#define __SWITCH_USERSPACE \
+	/* interrupted any of the user return paths? */	\
+							\
+	movl EIP(%esp), %eax;				\
+							\
+	cmpl $int80_ret_start_marker, %eax;		\
+	jb 33f; /* nope - continue with sysexit check */\
+	cmpl $int80_ret_end_marker, %eax;		\
+	jb 22f; /* yes - switch to virtual stack */	\
+33:							\
+	cmpl $sysexit_ret_start_marker, %eax;		\
+	jb 44f; /* nope - continue with user check */	\
+	cmpl $sysexit_ret_end_marker, %eax;		\
+	jb 22f; /* yes - switch to virtual stack */	\
+	/* return to userspace? */			\
+44:							\
+	movl EFLAGS(%esp),%ecx;				\
+	movb CS(%esp),%cl;				\
+	testl $(VM_MASK | 3),%ecx;			\
+	jz 2f;						\
+22:							\
+	/*						\
+	 * switch to the virtual stack, then switch to	\
+	 * the userspace pagetables.			\
+	 */						\
+							\
+	GET_THREAD_INFO(%ebp);				\
+	movl TI_virtual_stack(%ebp), %edx;		\
+	movl TI_user_pgd(%ebp), %ecx;			\
+							\
+	movl %esp, %ebx;				\
+	andl $(THREAD_SIZE-1), %ebx;				\
+	orl %ebx, %edx;					\
+int80_ret_start_marker:					\
+	movl %edx, %esp; 				\
+	movl %ecx, %cr3;				\
+							\
+	__RESTORE_ALL;					\
+int80_ret_end_marker:					\
+2:
+
+#else /* !CONFIG_X86_HIGH_ENTRY */
+
+#define __SWITCH_KERNELSPACE
+#define __SWITCH_USERSPACE
+
+#endif
+
+#define __SAVE_ALL \
 	cld; \
 	pushl %es; \
 	pushl %ds; \
@@ -102,7 +193,7 @@ TSS_ESP0_OFFSET = (4 - 0x200)
 	movl %edx, %ds; \
 	movl %edx, %es;
 
-#define RESTORE_INT_REGS \
+#define __RESTORE_INT_REGS \
 	popl %ebx;	\
 	popl %ecx;	\
 	popl %edx;	\
@@ -111,29 +202,28 @@ TSS_ESP0_OFFSET = (4 - 0x200)
 	popl %ebp;	\
 	popl %eax
 
-#define RESTORE_REGS	\
-	RESTORE_INT_REGS; \
-1:	popl %ds;	\
-2:	popl %es;	\
+#define __RESTORE_REGS	\
+	__RESTORE_INT_REGS; \
+111:	popl %ds;	\
+222:	popl %es;	\
 .section .fixup,"ax";	\
-3:	movl $0,(%esp);	\
-	jmp 1b;		\
-4:	movl $0,(%esp);	\
-	jmp 2b;		\
+444:	movl $0,(%esp);	\
+	jmp 111b;	\
+555:	movl $0,(%esp);	\
+	jmp 222b;	\
 .previous;		\
 .section __ex_table,"a";\
 	.align 4;	\
-	.long 1b,3b;	\
-	.long 2b,4b;	\
+	.long 111b,444b;\
+	.long 222b,555b;\
 .previous
 
-
-#define RESTORE_ALL	\
-	RESTORE_REGS	\
+#define __RESTORE_ALL	\
+	__RESTORE_REGS	\
 	addl $4, %esp;	\
-1:	iret;		\
+333:	iret;		\
 .section .fixup,"ax";   \
-2:	sti;		\
+666:	sti;		\
 	movl $(__USER_DS), %edx; \
 	movl %edx, %ds; \
 	movl %edx, %es; \
@@ -142,10 +232,18 @@ TSS_ESP0_OFFSET = (4 - 0x200)
 .previous;		\
 .section __ex_table,"a";\
 	.align 4;	\
-	.long 1b,2b;	\
+	.long 333b,666b;\
 .previous
 
+#define SAVE_ALL \
+	__SAVE_ALL;					\
+	__SWITCH_KERNELSPACE;
 
+#define RESTORE_ALL					\
+	__SWITCH_USERSPACE;				\
+	__RESTORE_ALL;
+
+.section .entry.text,"ax"
 
 ENTRY(lcall7)
 	pushfl			# We get a different stack layout with call
@@ -163,8 +261,8 @@ do_lcall:
 	movl %edx,EIP(%ebp)	# Now we move them to their "normal" places
 	movl %ecx,CS(%ebp)	#
 	GET_THREAD_INFO_WITH_ESP(%ebp)	# GET_THREAD_INFO
-	movl TI_EXEC_DOMAIN(%ebp), %edx	# Get the execution domain
-	call *4(%edx)		# Call the lcall7 handler for the domain
+	movl TI_exec_domain(%ebp), %edx	# Get the execution domain
+	call *EXEC_DOMAIN_handler(%edx)	# Call the handler for the domain
 	addl $4, %esp
 	popl %eax
 	jmp resume_userspace
@@ -208,7 +306,7 @@ ENTRY(resume_userspace)
  	cli				# make sure we don't miss an interrupt
 					# setting need_resched or sigpending
 					# between sampling and the iret
-	movl TI_FLAGS(%ebp), %ecx
+	movl TI_flags(%ebp), %ecx
 	andl $_TIF_WORK_MASK, %ecx	# is there any work to be done on
 					# int/exception return?
 	jne work_pending
@@ -216,18 +314,18 @@ ENTRY(resume_userspace)
 
 #ifdef CONFIG_PREEMPT
 ENTRY(resume_kernel)
-	cmpl $0,TI_PRE_COUNT(%ebp)	# non-zero preempt_count ?
+	cmpl $0,TI_preempt_count(%ebp)	# non-zero preempt_count ?
 	jnz restore_all
 need_resched:
-	movl TI_FLAGS(%ebp), %ecx	# need_resched set ?
+	movl TI_flags(%ebp), %ecx	# need_resched set ?
 	testb $_TIF_NEED_RESCHED, %cl
 	jz restore_all
 	testl $IF_MASK,EFLAGS(%esp)     # interrupts off (exception path) ?
 	jz restore_all
-	movl $PREEMPT_ACTIVE,TI_PRE_COUNT(%ebp)
+	movl $PREEMPT_ACTIVE,TI_preempt_count(%ebp)
 	sti
 	call schedule
-	movl $0,TI_PRE_COUNT(%ebp)
+	movl $0,TI_preempt_count(%ebp)
 	cli
 	jmp need_resched
 #endif
@@ -237,47 +335,64 @@ need_resched:
 
 	# sysenter call handler stub
 ENTRY(sysenter_entry)
-	movl TSS_ESP0_OFFSET(%esp),%esp
+	movl TSS_sysenter_esp0(%esp),%esp
 sysenter_past_esp:
 	sti
 	pushl $(__USER_DS)
 	pushl %ebp
 	pushfl
 	pushl $(__USER_CS)
-	pushl $SYSENTER_RETURN
-
-/*
- * Load the potential sixth argument from user stack.
- * Careful about security.
- */
-	cmpl $__PAGE_OFFSET-3,%ebp
-	jae syscall_fault
-1:	movl (%ebp),%ebp
-.section __ex_table,"a"
-	.align 4
-	.long 1b,syscall_fault
-.previous
-
+	/*
+	 * Push current_thread_info()->sysenter_return to the stack.
+	 * A tiny bit of offset fixup is necessary - 4*4 means the 4 words
+	 * pushed above, and the word being pushed now:
+	 */
+	pushl (TI_sysenter_return-THREAD_SIZE+4*4)(%esp)
+	/*
+	 * No six-argument syscall is ever used with sysenter.
+	 */
 	pushl %eax
 	SAVE_ALL
 	GET_THREAD_INFO(%ebp)
 	cmpl $(nr_syscalls), %eax
 	jae syscall_badsys
 
-	testb $(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT),TI_FLAGS(%ebp)
+	testb $(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT),TI_flags(%ebp)
 	jnz syscall_trace_entry
 	call *sys_call_table(,%eax,4)
 	movl %eax,EAX(%esp)
 	cli
-	movl TI_FLAGS(%ebp), %ecx
+	movl TI_flags(%ebp), %ecx
 	testw $_TIF_ALLWORK_MASK, %cx
 	jne syscall_exit_work
+
+#ifdef CONFIG_X86_SWITCH_PAGETABLES
+
+	GET_THREAD_INFO(%ebp)
+	movl TI_virtual_stack(%ebp), %edx
+	movl TI_user_pgd(%ebp), %ecx
+	movl %esp, %ebx
+	andl $(THREAD_SIZE-1), %ebx
+	orl %ebx, %edx
+sysexit_ret_start_marker:
+	movl %edx, %esp
+	movl %ecx, %cr3
+	/*
+	 * only ebx is not restored by the userspace sysenter vsyscall
+	 * code, it assumes it to be callee-saved.
+	 */
+	movl EBX(%esp), %ebx
+#endif
+
 /* if something modifies registers it must also disable sysexit */
 	movl EIP(%esp), %edx
 	movl OLDESP(%esp), %ecx
 	sti
 	sysexit
-
+#ifdef CONFIG_X86_SWITCH_PAGETABLES
+sysexit_ret_end_marker:
+	nop
+#endif
 
 	# system call handler stub
 ENTRY(system_call)
@@ -287,7 +402,7 @@ ENTRY(system_call)
 	cmpl $(nr_syscalls), %eax
 	jae syscall_badsys
 					# system call tracing in operation
-	testb $(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT),TI_FLAGS(%ebp)
+	testb $(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT),TI_flags(%ebp)
 	jnz syscall_trace_entry
 syscall_call:
 	call *sys_call_table(,%eax,4)
@@ -296,7 +411,7 @@ syscall_exit:
 	cli				# make sure we don't miss an interrupt
 					# setting need_resched or sigpending
 					# between sampling and the iret
-	movl TI_FLAGS(%ebp), %ecx
+	movl TI_flags(%ebp), %ecx
 	testw $_TIF_ALLWORK_MASK, %cx	# current->work
 	jne syscall_exit_work
 restore_all:
@@ -312,7 +427,7 @@ work_resched:
 	cli				# make sure we don't miss an interrupt
 					# setting need_resched or sigpending
 					# between sampling and the iret
-	movl TI_FLAGS(%ebp), %ecx
+	movl TI_flags(%ebp), %ecx
 	andl $_TIF_WORK_MASK, %ecx	# is there any work to be done other
 					# than syscall tracing?
 	jz restore_all
@@ -327,6 +442,22 @@ work_notifysig:				# deal with pending signals and
 					# vm86-space
 	xorl %edx, %edx
 	call do_notify_resume
+
+#if CONFIG_X86_HIGH_ENTRY
+	/*
+	 * Reload db7 if necessary:
+	 */
+	movl TI_flags(%ebp), %ecx
+	testb $_TIF_DB7, %cl
+	jnz work_db7
+
+	jmp restore_all
+
+work_db7:
+	movl TI_task(%ebp), %edx;
+	movl task_thread_db7(%edx), %edx;
+	movl %edx, %db7;
+#endif
 	jmp restore_all
 
 	ALIGN
@@ -364,14 +495,6 @@ syscall_exit_work:
 	jmp resume_userspace
 
 	ALIGN
-syscall_fault:
-	pushl %eax			# save orig_eax
-	SAVE_ALL
-	GET_THREAD_INFO(%ebp)
-	movl $-EFAULT,EAX(%esp)
-	jmp resume_userspace
-
-	ALIGN
 syscall_badsys:
 	movl $-ENOSYS,EAX(%esp)
 	jmp resume_userspace
@@ -382,7 +505,7 @@ syscall_badsys:
  */
 .data
 ENTRY(interrupt)
-.text
+.previous
 
 vector=0
 ENTRY(irq_entries_start)
@@ -392,7 +515,7 @@ ENTRY(irq_entries_start)
 	jmp common_interrupt
 .data
 	.long 1b
-.text
+.previous
 vector=vector+1
 .endr
 
@@ -433,12 +556,17 @@ error_code:
 	movl ES(%esp), %edi		# get the function address
 	movl %eax, ORIG_EAX(%esp)
 	movl %ecx, ES(%esp)
-	movl %esp, %edx
 	pushl %esi			# push the error code
-	pushl %edx			# push the pt_regs pointer
 	movl $(__USER_DS), %edx
 	movl %edx, %ds
 	movl %edx, %es
+
+/* clobbers edx, ebx and ebp */
+	__SWITCH_KERNELSPACE
+
+	leal 4(%esp), %edx		# prepare pt_regs
+	pushl %edx			# push pt_regs
+
 	call *%edi
 	addl $8, %esp
 	jmp ret_from_exception
@@ -473,7 +601,7 @@ device_not_available_emulate:
  * that sets up the real kernel stack. Check here, since we can't
  * allow the wrong stack to be used.
  *
- * "TSS_ESP0_OFFSET+12" is because the NMI/debug handler will have
+ * "TSS_sysenter_esp0+12" is because the NMI/debug handler will have
  * already pushed 3 words if it hits on the sysenter instruction:
  * eflags, cs and eip.
  *
@@ -485,7 +613,7 @@ device_not_available_emulate:
 	cmpw $__KERNEL_CS,4(%esp);		\
 	jne ok;					\
 label:						\
-	movl TSS_ESP0_OFFSET+offset(%esp),%esp;	\
+	movl TSS_sysenter_esp0+offset(%esp),%esp;	\
 	pushfl;					\
 	pushl $__KERNEL_CS;			\
 	pushl $sysenter_past_esp
@@ -529,7 +657,7 @@ nmi_stack_correct:
 	pushl %edx
 	call do_nmi
 	addl $8, %esp
-	RESTORE_ALL
+	jmp restore_all
 
 nmi_stack_fixup:
 	FIX_STACK(12,nmi_stack_correct, 1)
@@ -605,6 +733,8 @@ ENTRY(spurious_interrupt_bug)
 	pushl $0
 	pushl $do_spurious_interrupt_bug
 	jmp error_code
+
+.previous
 
 .data
 ENTRY(sys_call_table)
@@ -830,7 +960,15 @@ ENTRY(sys_call_table)
 	.long sys_madvise
 	.long sys_getdents64	/* 220 */
 	.long sys_fcntl64
-	.long sys_ni_syscall	/* reserved for TUX */
+#ifdef CONFIG_TUX
+	.long __sys_tux
+#else
+# ifdef CONFIG_TUX_MODULE
+	.long sys_tux
+# else
+	.long sys_ni_syscall
+# endif
+#endif
 	.long sys_ni_syscall
 	.long sys_gettid
 	.long sys_readahead	/* 225 */
@@ -881,15 +1019,16 @@ ENTRY(sys_call_table)
 	.long sys_tgkill	/* 270 */
 	.long sys_utimes
  	.long sys_fadvise64_64
-	.long sys_ni_syscall	/* sys_vserver */
-	.long sys_ni_syscall	/* sys_mbind */
-	.long sys_ni_syscall	/* 275 sys_get_mempolicy */
-	.long sys_ni_syscall	/* sys_set_mempolicy */
+	.long sys_vserver
+	.long sys_mbind
+	.long sys_get_mempolicy
+	.long sys_set_mempolicy
 	.long sys_mq_open
 	.long sys_mq_unlink
 	.long sys_mq_timedsend
 	.long sys_mq_timedreceive	/* 280 */
 	.long sys_mq_notify
 	.long sys_mq_getsetattr
+	.long sys_ni_syscall		/* reserved for kexec */
 
 syscall_table_size=(.-sys_call_table)

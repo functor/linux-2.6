@@ -246,25 +246,10 @@ xfs_getattr(
 		goto all_done;
 
 	/*
-	 * convert di_flags to xflags
+	 * Convert di_flags to xflags.
 	 */
-	vap->va_xflags = 0;
-	if (ip->i_d.di_flags & XFS_DIFLAG_REALTIME)
-		vap->va_xflags |= XFS_XFLAG_REALTIME;
-	if (ip->i_d.di_flags & XFS_DIFLAG_PREALLOC)
-		vap->va_xflags |= XFS_XFLAG_PREALLOC;
-	if (ip->i_d.di_flags & XFS_DIFLAG_IMMUTABLE)
-		vap->va_xflags |= XFS_XFLAG_IMMUTABLE;
-	if (ip->i_d.di_flags & XFS_DIFLAG_APPEND)
-		vap->va_xflags |= XFS_XFLAG_APPEND;
-	if (ip->i_d.di_flags & XFS_DIFLAG_SYNC)
-		vap->va_xflags |= XFS_XFLAG_SYNC;
-	if (ip->i_d.di_flags & XFS_DIFLAG_NOATIME)
-		vap->va_xflags |= XFS_XFLAG_NOATIME;
-	if (ip->i_d.di_flags & XFS_DIFLAG_NODUMP)
-		vap->va_xflags |= XFS_XFLAG_NODUMP;
-	if (XFS_IFORK_Q(ip))
-		vap->va_xflags |= XFS_XFLAG_HASATTR;
+	vap->va_xflags = xfs_dic2xflags(&ip->i_d, ARCH_NOCONVERT);
+
 	/*
 	 * Exit for inode revalidate.  See if any of the rest of
 	 * the fields to be filled in are needed.
@@ -850,6 +835,10 @@ xfs_setattr(
 			}
 			if (vap->va_xflags & XFS_XFLAG_IMMUTABLE)
 				ip->i_d.di_flags |= XFS_DIFLAG_IMMUTABLE;
+			if (vap->va_xflags & XFS_XFLAG_IUNLINK)
+				ip->i_d.di_flags |= XFS_DIFLAG_IUNLINK;
+			if (vap->va_xflags & XFS_XFLAG_BARRIER)
+				ip->i_d.di_flags |= XFS_DIFLAG_BARRIER;
 			if (vap->va_xflags & XFS_XFLAG_APPEND)
 				ip->i_d.di_flags |= XFS_DIFLAG_APPEND;
 			if (vap->va_xflags & XFS_XFLAG_SYNC)

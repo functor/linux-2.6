@@ -327,10 +327,12 @@ asmlinkage void smp_invalidate_interrupt (void)
 		 
 	if (flush_mm == cpu_tlbstate[cpu].active_mm) {
 		if (cpu_tlbstate[cpu].state == TLBSTATE_OK) {
+#ifndef CONFIG_X86_SWITCH_PAGETABLES
 			if (flush_va == FLUSH_ALL)
 				local_flush_tlb();
 			else
 				__flush_tlb_one(flush_va);
+#endif
 		} else
 			leave_mm(cpu);
 	}
@@ -396,21 +398,6 @@ static void flush_tlb_others(cpumask_t cpumask, struct mm_struct *mm,
 	spin_unlock(&tlbstate_lock);
 }
 	
-void flush_tlb_current_task(void)
-{
-	struct mm_struct *mm = current->mm;
-	cpumask_t cpu_mask;
-
-	preempt_disable();
-	cpu_mask = mm->cpu_vm_mask;
-	cpu_clear(smp_processor_id(), cpu_mask);
-
-	local_flush_tlb();
-	if (!cpus_empty(cpu_mask))
-		flush_tlb_others(cpu_mask, mm, FLUSH_ALL);
-	preempt_enable();
-}
-
 void flush_tlb_mm (struct mm_struct * mm)
 {
 	cpumask_t cpu_mask;
@@ -442,7 +429,10 @@ void flush_tlb_page(struct vm_area_struct * vma, unsigned long va)
 
 	if (current->active_mm == mm) {
 		if(current->mm)
-			__flush_tlb_one(va);
+#ifndef CONFIG_X86_SWITCH_PAGETABLES
+			__flush_tlb_one(va)
+#endif
+				;
 		 else
 		 	leave_mm(smp_processor_id());
 	}
@@ -518,6 +508,9 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 
 	if (!cpus)
 		return 0;
+
+	/* Can deadlock when called with interrupts disabled */
+	WARN_ON(irqs_disabled());
 
 	data.func = func;
 	data.info = info;

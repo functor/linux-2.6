@@ -41,7 +41,7 @@ config INPUT_MOUSEDEV
 	  module will be called mousedev.
 
 config INPUT_MOUSEDEV_PSAUX
-	bool "Provide legacy /dev/psaux device" if EMBEDDED
+	bool "Provide legacy /dev/psaux device"
 	default y
 	depends on INPUT_MOUSEDEV
 

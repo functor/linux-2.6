@@ -37,6 +37,8 @@ struct thread_info {
 					 	   0-0xBFFFFFFF for user-thead
 						   0-0xFFFFFFFF for kernel-thread
 						*/
+	void			*sysenter_return;
+	void			*real_stack, *virtual_stack, *user_pgd;
 	struct restart_block    restart_block;
 
 	unsigned long           previous_esp;   /* ESP of the previous stack in case
@@ -47,24 +49,12 @@ struct thread_info {
 
 #else /* !__ASSEMBLY__ */
 
-/* offsets into the thread_info struct for assembly code access */
-#define TI_TASK		0x00000000
-#define TI_EXEC_DOMAIN	0x00000004
-#define TI_FLAGS	0x00000008
-#define TI_STATUS	0x0000000C
-#define TI_CPU		0x00000010
-#define TI_PRE_COUNT	0x00000014
-#define TI_ADDR_LIMIT	0x00000018
-#define TI_RESTART_BLOCK 0x000001C
+#include <asm/asm_offsets.h>
 
 #endif
 
 #define PREEMPT_ACTIVE		0x4000000
-#ifdef CONFIG_4KSTACKS
 #define THREAD_SIZE            (4096)
-#else
-#define THREAD_SIZE		(8192)
-#endif
 
 #define STACK_WARN             (THREAD_SIZE/8)
 /*
@@ -74,7 +64,7 @@ struct thread_info {
  */
 #ifndef __ASSEMBLY__
 
-#define INIT_THREAD_INFO(tsk)			\
+#define INIT_THREAD_INFO(tsk, thread_info)	\
 {						\
 	.task		= &tsk,			\
 	.exec_domain	= &default_exec_domain,	\
@@ -85,6 +75,7 @@ struct thread_info {
 	.restart_block = {			\
 		.fn = do_no_restart_syscall,	\
 	},					\
+	.real_stack	= &thread_info,		\
 }
 
 #define init_thread_info	(init_thread_union.thread_info)
@@ -151,6 +142,7 @@ static inline unsigned long current_stack_pointer(void)
 #define TIF_NEED_RESCHED	3	/* rescheduling necessary */
 #define TIF_SINGLESTEP		4	/* restore singlestep on return to user mode */
 #define TIF_IRET		5	/* return with iret */
+#define TIF_DB7			6	/* has debug registers */
 #define TIF_SYSCALL_AUDIT	7	/* syscall auditing active */
 #define TIF_POLLING_NRFLAG	16	/* true if poll_idle() is polling TIF_NEED_RESCHED */
 
@@ -161,6 +153,7 @@ static inline unsigned long current_stack_pointer(void)
 #define _TIF_SINGLESTEP		(1<<TIF_SINGLESTEP)
 #define _TIF_IRET		(1<<TIF_IRET)
 #define _TIF_SYSCALL_AUDIT	(1<<TIF_SYSCALL_AUDIT)
+#define _TIF_DB7		(1<<TIF_DB7)
 #define _TIF_POLLING_NRFLAG	(1<<TIF_POLLING_NRFLAG)
 
 /* work to do on interrupt/exception return */
