@@ -225,9 +225,6 @@ asmlinkage int handle_IRQ_event(unsigned int irq,
 	if (!(action->flags & SA_INTERRUPT))
 		local_irq_enable();
 
-	if (!(action->flags & SA_INTERRUPT))
-		local_irq_enable();
-
 	do {
 		ret = action->handler(irq, action->dev_id, regs);
 		if (ret == IRQ_HANDLED)
