@@ -39,12 +39,17 @@ union irq_ctx {
 	u32                     stack[THREAD_SIZE/sizeof(u32)];
 };
 
+#ifdef CONFIG_IRQSTACKS
 extern union irq_ctx *hardirq_ctx[NR_CPUS];
 extern union irq_ctx *softirq_ctx[NR_CPUS];
 
 extern void irq_ctx_init(int cpu);
 
 #define __ARCH_HAS_DO_SOFTIRQ
+
+#else
+#define irq_ctx_init(cpu) do { ; } while (0)
+#endif
 
 struct irqaction;
 struct pt_regs;

@@ -25,13 +25,14 @@ static spinlock_t stub_lock = SPIN_LOCK_UNLOCKED;
 
 static icls_tsk_t tskiclstub;
 static icls_ioprio_t tskiopriostub;
+static icls_tsk_t tskcfqprivstub;
 
-
-void cki_cfq_set(icls_tsk_t tskicls, icls_ioprio_t tskioprio)
+void cki_cfq_set(icls_tsk_t tskicls, icls_ioprio_t tskioprio, icls_tsk_t tskcfqpriv)
 {
 	spin_lock(&stub_lock);
 	tskiclstub = tskicls;
 	tskiopriostub = tskioprio;
+	tskcfqprivstub = tskcfqpriv;
 	spin_unlock(&stub_lock);
 }
 
@@ -59,6 +60,19 @@ int cki_ioprio(struct task_struct *tsk)
 	return ret;
 }
 
+void *cki_cfqpriv(struct task_struct *tsk)
+{
+	void *ret;
+	spin_lock(&stub_lock);
+	if (tskiclstub)
+		ret = (*tskcfqprivstub)(tsk);
+	else 
+		ret = NULL;
+	spin_unlock(&stub_lock);
+	return ret;
+}    
+
 EXPORT_SYMBOL(cki_cfq_set);
 EXPORT_SYMBOL(cki_hash_key);
 EXPORT_SYMBOL(cki_ioprio);
+EXPORT_SYMBOL(cki_cfqpriv);
