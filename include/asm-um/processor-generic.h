@@ -1,5 +1,5 @@
 /* 
- * Copyright (C) 2000, 2001, 2002 Jeff Dike (jdike@karaya.com)
+ * Copyright (C) 2000 - 2004 Jeff Dike (jdike@addtoit.com)
  * Licensed under the GPL
  */
 
@@ -24,7 +24,6 @@ struct mm_struct;
 
 struct thread_struct {
 	int forking;
-	unsigned long kernel_stack;
 	int nsyscalls;
 	struct pt_regs regs;
 	unsigned long cr2;
@@ -75,7 +74,6 @@ struct thread_struct {
 #define INIT_THREAD \
 { \
 	.forking		= 0, \
-	.kernel_stack		= 0, \
 	.nsyscalls		= 0, \
         .regs		   	= EMPTY_REGS, \
 	.cr2			= 0, \

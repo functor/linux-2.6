@@ -1,5 +1,5 @@
 obj-y = bugs.o checksum.o fault.o ksyms.o ldt.o ptrace.o ptrace_user.o \
-	semaphore.o bitops.o sigcontext.o syscalls.o sysrq.o time.o
+	semaphore.o bitops.o sigcontext.o syscalls.o sysrq.o
 
 obj-$(CONFIG_HIGHMEM) += highmem.o
 obj-$(CONFIG_MODULES) += module.o

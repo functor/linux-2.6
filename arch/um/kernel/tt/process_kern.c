@@ -116,6 +116,17 @@ void exit_thread_tt(void)
 	os_close_file(current->thread.mode.tt.switch_pipe[1]);
 }
 
+void suspend_new_thread(int fd)
+{
+	int err;
+	char c;
+
+	os_stop_process(os_getpid());
+	err = os_read_file(fd, &c, sizeof(c));
+	if(err != sizeof(c))
+		panic("read failed in suspend_new_thread, err = %d", -err);
+}
+
 void schedule_tail(task_t *prev);
 
 static void new_thread_handler(int sig)
@@ -150,6 +161,12 @@ static void new_thread_handler(int sig)
 	local_irq_enable();
 	if(!run_kernel_thread(fn, arg, &current->thread.exec_buf))
 		do_exit(0);
+	
+	/* XXX No set_user_mode here because a newly execed process will
+	 * immediately segfault on its non-existent IP, coming straight back
+	 * to the signal handler, which will call set_user_mode on its way
+	 * out.  This should probably change since it's confusing.
+	 */
 }
 
 static int new_thread_proc(void *stack)
@@ -172,6 +189,7 @@ static int new_thread_proc(void *stack)
 	local_irq_disable();
 	init_new_thread_stack(stack, new_thread_handler);
 	os_usr1_process(os_getpid());
+	change_sig(SIGUSR1, 1);
 	return(0);
 }
 
@@ -215,6 +233,7 @@ int fork_tramp(void *stack)
 	init_new_thread_stack(stack, finish_fork_handler);
 
 	os_usr1_process(os_getpid());
+	change_sig(SIGUSR1, 1);
 	return(0);
 }
 
@@ -236,7 +255,7 @@ int copy_thread_tt(int nr, unsigned long clone_flags, unsigned long sp,
 	err = os_pipe(p->thread.mode.tt.switch_pipe, 1, 1);
 	if(err < 0){
 		printk("copy_thread : pipe failed, err = %d\n", -err);
-		return(err);
+		goto out;
 	}
 
 	stack = alloc_stack(0, 0);
@@ -248,8 +267,7 @@ int copy_thread_tt(int nr, unsigned long clone_flags, unsigned long sp,
 
 	clone_flags &= CLONE_VM;
 	p->thread.temp_stack = stack;
-	new_pid = start_fork_tramp((void *) p->thread.kernel_stack, stack,
-				   clone_flags, tramp);
+	new_pid = start_fork_tramp(p->thread_info, stack, clone_flags, tramp);
 	if(new_pid < 0){
 		printk(KERN_ERR "copy_thread : clone failed - errno = %d\n", 
 		       -new_pid);
@@ -267,19 +285,30 @@ int copy_thread_tt(int nr, unsigned long clone_flags, unsigned long sp,
 	current->thread.request.op = OP_FORK;
 	current->thread.request.u.fork.pid = new_pid;
 	os_usr1_process(os_getpid());
-	return(0);
+
+	/* Enable the signal and then disable it to ensure that it is handled
+	 * here, and nowhere else.
+	 */
+	change_sig(SIGUSR1, 1);
+
+	change_sig(SIGUSR1, 0);
+	err = 0;
+ out:
+	return(err);
 }
 
 void reboot_tt(void)
 {
 	current->thread.request.op = OP_REBOOT;
 	os_usr1_process(os_getpid());
+	change_sig(SIGUSR1, 1);
 }
 
 void halt_tt(void)
 {
 	current->thread.request.op = OP_HALT;
 	os_usr1_process(os_getpid());
+	change_sig(SIGUSR1, 1);
 }
 
 void kill_off_processes_tt(void)
@@ -306,6 +335,9 @@ void initial_thread_cb_tt(void (*proc)(void *), void *arg)
 		current->thread.request.u.cb.proc = proc;
 		current->thread.request.u.cb.arg = arg;
 		os_usr1_process(os_getpid());
+		change_sig(SIGUSR1, 1);
+
+		change_sig(SIGUSR1, 0);
 	}
 }
 
@@ -475,7 +507,7 @@ void set_init_pid(int pid)
 
 	init_task.thread.mode.tt.extern_pid = pid;
 	err = os_pipe(init_task.thread.mode.tt.switch_pipe, 1, 1);
-	if(err)	
+	if(err)
 		panic("Can't create switch pipe for init_task, errno = %d", 
 		      -err);
 }
@@ -501,9 +533,9 @@ int start_uml_tt(void)
 	void *sp;
 	int pages;
 
-	pages = (1 << CONFIG_KERNEL_STACK_ORDER) - 2;
-	sp = (void *) init_task.thread.kernel_stack + pages * PAGE_SIZE - 
-		sizeof(unsigned long);
+	pages = (1 << CONFIG_KERNEL_STACK_ORDER);
+	sp = (void *) ((unsigned long) init_task.thread_info) + 
+		pages * PAGE_SIZE - sizeof(unsigned long);
 	return(tracer(start_kernel_proc, sp));
 }
 

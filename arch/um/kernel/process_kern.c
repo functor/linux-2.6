@@ -16,6 +16,7 @@
 #include "linux/module.h"
 #include "linux/init.h"
 #include "linux/capability.h"
+#include "linux/vmalloc.h"
 #include "linux/spinlock.h"
 #include "asm/unistd.h"
 #include "asm/mman.h"
@@ -164,8 +165,6 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long sp,
 		struct pt_regs *regs)
 {
 	p->thread = (struct thread_struct) INIT_THREAD;
-	p->thread.kernel_stack = 
-		(unsigned long) p->thread_info + 2 * PAGE_SIZE;
 	return(CHOOSE_MODE_PROC(copy_thread_tt, copy_thread_skas, nr, 
 				clone_flags, sp, stack_top, p, regs));
 }
@@ -301,6 +300,11 @@ void *um_kmalloc_atomic(int size)
 	return(kmalloc(size, GFP_ATOMIC));
 }
 
+void *um_vmalloc(int size)
+{
+	return(vmalloc(size));
+}
+
 unsigned long get_fault_addr(void)
 {
 	return((unsigned long) current->thread.fault_addr);
@@ -320,8 +324,7 @@ int user_context(unsigned long sp)
 	unsigned long stack;
 
 	stack = sp & (PAGE_MASK << CONFIG_KERNEL_STACK_ORDER);
-	stack += 2 * PAGE_SIZE;
-	return(stack != current->thread.kernel_stack);
+	return(stack != (unsigned long) current_thread);
 }
 
 extern void remove_umid_dir(void);

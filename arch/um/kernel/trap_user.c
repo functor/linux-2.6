@@ -32,7 +32,14 @@ void kill_child_dead(int pid)
 {
 	kill(pid, SIGKILL);
 	kill(pid, SIGCONT);
-	while(waitpid(pid, NULL, 0) > 0) kill(pid, SIGCONT);
+	do {
+		int n;
+		CATCH_EINTR(n = waitpid(pid, NULL, 0));
+		if (n > 0)
+			kill(pid, SIGCONT);
+		else
+			break;
+	} while(1);
 }
 
 /* Unlocked - don't care if this is a bit off */
@@ -120,7 +127,7 @@ void alarm_handler(int sig, struct sigcontext sc)
 
 void do_longjmp(void *b, int val)
 {
-	jmp_buf *buf = b;
+	sigjmp_buf *buf = b;
 
 	siglongjmp(*buf, val);
 }
