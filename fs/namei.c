@@ -2025,8 +2025,13 @@ asmlinkage long sys_link(const char __user * oldname, const char __user * newnam
 	error = path_lookup(to, LOOKUP_PARENT, &nd);
 	if (error)
 		goto out;
-	error = -EXDEV;
-	if (old_nd.mnt != nd.mnt)
+	/*
+	 * We allow hard-links to be created to a bind-mount as long
+	 * as the bind-mount is not read-only.  Checking for cross-dev
+	 * links is subsumed by the superblock check in vfs_link().
+	 */
+	error = -EROFS;
+	if (MNT_IS_RDONLY(old_nd.mnt))
 		goto out_release;
 	new_dentry = lookup_create(&nd, 0);
 	error = PTR_ERR(new_dentry);
