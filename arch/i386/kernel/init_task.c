@@ -29,6 +29,13 @@ union thread_union init_thread_union
 	__attribute__((__section__(".data.init_task"))) =
 		{ INIT_THREAD_INFO(init_task, init_thread_union) };
 
+#ifdef CONFIG_X86_STACK_CHECK
+union thread_union stack_overflow_stack
+ __attribute__((__section__(".data.init_task"))) =
+		{ INIT_THREAD_INFO(init_task, stack_overflow_stack) };
+#endif
+
+
 /*
  * Initial task structure.
  *

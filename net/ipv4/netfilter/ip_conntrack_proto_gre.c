@@ -130,13 +130,6 @@ int ip_ct_gre_keymap_add(struct ip_conntrack_expect *exp,
 void ip_ct_gre_keymap_change(struct ip_ct_gre_keymap *km,
 			     struct ip_conntrack_tuple *t)
 {
-        if (!km)
-        {
-                printk(KERN_WARNING
-                        "NULL GRE conntrack keymap change requested\n");
-                return;
-        }
-
 	DEBUGP("changing entry %p to: ", km);
 	DUMP_TUPLE_GRE(t);
 
@@ -188,8 +181,7 @@ static int gre_pkt_to_tuple(const struct sk_buff *skb,
 	u_int32_t srckey;
 
 	grehdr = skb_header_pointer(skb, dataoff, sizeof(_grehdr), &_grehdr);
-	/* PPTP header is variable length, only need up to the call_id field */
-	pgrehdr = skb_header_pointer(skb, dataoff, 8, &_pgrehdr);
+	pgrehdr = skb_header_pointer(skb, dataoff, sizeof(_pgrehdr), &_pgrehdr);
 
 	if (!grehdr || !pgrehdr)
 		return 0;
@@ -219,11 +211,11 @@ static int gre_pkt_to_tuple(const struct sk_buff *skb,
 
 	srckey = gre_keymap_lookup(tuple);
 
-	tuple->src.u.gre.key = srckey;
 #if 0
 	DEBUGP("found src key %x for tuple ", ntohl(srckey));
 	DUMP_TUPLE_GRE(tuple);
 #endif
+	tuple->src.u.gre.key = srckey;
 
 	return 1;
 }
