@@ -725,7 +725,7 @@ static int idescsi_ide_open(struct inode *inode, struct file *filp)
 	drive->usage++;
 	if (!ide_scsi_warned++) {
 		printk(KERN_WARNING "ide-scsi: Warning this device driver is only intended for specialist devices.\n");
-		printk(KERN_WARNING "ide-scsi: Do not use for cd burning, use /dev/hdc directly instead.\n");
+		printk(KERN_WARNING "ide-scsi: Do not use for cd burning, use /dev/hdX directly instead.\n");
 	}
 	return 0;
 }
