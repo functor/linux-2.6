@@ -57,6 +57,7 @@
 #include <net/xfrm.h>
 #include <net/addrconf.h>
 #include <net/snmp.h>
+#include <net/dsfield.h>
 
 #include <asm/uaccess.h>
 
@@ -261,7 +262,7 @@ static struct sock *tcp_v6_lookup_listener(struct in6_addr *daddr, unsigned shor
 			
 			score = 1;
 			if (!ipv6_addr_any(&np->rcv_saddr)) {
-				if (ipv6_addr_cmp(&np->rcv_saddr, daddr))
+				if (!ipv6_addr_equal(&np->rcv_saddr, daddr))
 					continue;
 				score++;
 			}
@@ -320,8 +321,8 @@ static inline struct sock *__tcp_v6_lookup_established(struct in6_addr *saddr, u
 
 		if(*((__u32 *)&(tw->tw_dport))	== ports	&&
 		   sk->sk_family		== PF_INET6) {
-			if(!ipv6_addr_cmp(&tw->tw_v6_daddr, saddr)	&&
-			   !ipv6_addr_cmp(&tw->tw_v6_rcv_saddr, daddr)	&&
+			if(ipv6_addr_equal(&tw->tw_v6_daddr, saddr)	&&
+			   ipv6_addr_equal(&tw->tw_v6_rcv_saddr, daddr)	&&
 			   (!sk->sk_bound_dev_if || sk->sk_bound_dev_if == dif))
 				goto hit;
 		}
@@ -363,6 +364,8 @@ inline struct sock *tcp_v6_lookup(struct in6_addr *saddr, u16 sport,
 	return sk;
 }
 
+EXPORT_SYMBOL_GPL(tcp_v6_lookup);
+
 
 /*
  * Open request hash tables.
@@ -403,8 +406,8 @@ static struct open_request *tcp_v6_search_req(struct tcp_opt *tp,
 	     prev = &req->dl_next) {
 		if (req->rmt_port == rport &&
 		    req->class->family == AF_INET6 &&
-		    !ipv6_addr_cmp(&req->af.v6_req.rmt_addr, raddr) &&
-		    !ipv6_addr_cmp(&req->af.v6_req.loc_addr, laddr) &&
+		    ipv6_addr_equal(&req->af.v6_req.rmt_addr, raddr) &&
+		    ipv6_addr_equal(&req->af.v6_req.loc_addr, laddr) &&
 		    (!req->af.v6_req.iif || req->af.v6_req.iif == iif)) {
 			BUG_TRAP(req->sk == NULL);
 			*prevp = prev;
@@ -460,8 +463,8 @@ static int tcp_v6_check_established(struct sock *sk)
 
 		if(*((__u32 *)&(tw->tw_dport))	== ports	&&
 		   sk2->sk_family		== PF_INET6	&&
-		   !ipv6_addr_cmp(&tw->tw_v6_daddr, saddr)	&&
-		   !ipv6_addr_cmp(&tw->tw_v6_rcv_saddr, daddr)	&&
+		   ipv6_addr_equal(&tw->tw_v6_daddr, saddr)	&&
+		   ipv6_addr_equal(&tw->tw_v6_rcv_saddr, daddr)	&&
 		   sk2->sk_bound_dev_if == sk->sk_bound_dev_if) {
 			struct tcp_opt *tp = tcp_sk(sk);
 
@@ -549,7 +552,7 @@ static int tcp_v6_connect(struct sock *sk, struct sockaddr *uaddr,
 	struct inet_opt *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct tcp_opt *tp = tcp_sk(sk);
-	struct in6_addr *saddr = NULL;
+	struct in6_addr *saddr = NULL, *final_p = NULL, final;
 	struct flowi fl;
 	struct dst_entry *dst;
 	int addr_type;
@@ -607,7 +610,7 @@ static int tcp_v6_connect(struct sock *sk, struct sockaddr *uaddr,
 	}
 
 	if (tp->ts_recent_stamp &&
-	    ipv6_addr_cmp(&np->daddr, &usin->sin6_addr)) {
+	    !ipv6_addr_equal(&np->daddr, &usin->sin6_addr)) {
 		tp->ts_recent = 0;
 		tp->ts_recent_stamp = 0;
 		tp->write_seq = 0;
@@ -666,13 +669,21 @@ static int tcp_v6_connect(struct sock *sk, struct sockaddr *uaddr,
 
 	if (np->opt && np->opt->srcrt) {
 		struct rt0_hdr *rt0 = (struct rt0_hdr *)np->opt->srcrt;
+		ipv6_addr_copy(&final, &fl.fl6_dst);
 		ipv6_addr_copy(&fl.fl6_dst, rt0->addr);
+		final_p = &final;
 	}
 
 	err = ip6_dst_lookup(sk, &dst, &fl);
-
 	if (err)
 		goto failure;
+	if (final_p)
+		ipv6_addr_copy(&fl.fl6_dst, final_p);
+
+	if ((err = xfrm_lookup(&dst, &fl, sk, 0)) < 0) {
+		dst_release(dst);
+		goto failure;
+	}
 
 	if (saddr == NULL) {
 		saddr = &fl.fl6_src;
@@ -793,6 +804,12 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 				sk->sk_err_soft = -err;
 				goto out;
 			}
+
+			if ((err = xfrm_lookup(&dst, &fl, sk, 0)) < 0) {
+				sk->sk_err_soft = -err;
+				goto out;
+			}
+
 		} else
 			dst_hold(dst);
 
@@ -863,6 +880,7 @@ static int tcp_v6_send_synack(struct sock *sk, struct open_request *req,
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct sk_buff * skb;
 	struct ipv6_txoptions *opt = NULL;
+	struct in6_addr * final_p = NULL, final;
 	struct flowi fl;
 	int err = -1;
 
@@ -888,11 +906,17 @@ static int tcp_v6_send_synack(struct sock *sk, struct open_request *req,
 
 		if (opt && opt->srcrt) {
 			struct rt0_hdr *rt0 = (struct rt0_hdr *) opt->srcrt;
+			ipv6_addr_copy(&final, &fl.fl6_dst);
 			ipv6_addr_copy(&fl.fl6_dst, rt0->addr);
+			final_p = &final;
 		}
 
 		err = ip6_dst_lookup(sk, &dst, &fl);
 		if (err)
+			goto done;
+		if (final_p)
+			ipv6_addr_copy(&fl.fl6_dst, final_p);
+		if ((err = xfrm_lookup(&dst, &fl, sk, 0)) < 0)
 			goto done;
 	}
 
@@ -981,11 +1005,12 @@ static void tcp_v6_send_reset(struct sk_buff *skb)
 	 * and then put it into the queue to be sent.
 	 */
 
-	buff = alloc_skb(MAX_HEADER + sizeof(struct ipv6hdr), GFP_ATOMIC);
+	buff = alloc_skb(MAX_HEADER + sizeof(struct ipv6hdr) + sizeof(struct tcphdr),
+			 GFP_ATOMIC);
 	if (buff == NULL) 
 	  	return;
 
-	skb_reserve(buff, MAX_HEADER + sizeof(struct ipv6hdr));
+	skb_reserve(buff, MAX_HEADER + sizeof(struct ipv6hdr) + sizeof(struct tcphdr));
 
 	t1 = (struct tcphdr *) skb_push(buff,sizeof(struct tcphdr));
 
@@ -1021,6 +1046,12 @@ static void tcp_v6_send_reset(struct sk_buff *skb)
 
 	/* sk = NULL, but it is safe for now. RST socket required. */
 	if (!ip6_dst_lookup(NULL, &buff->dst, &fl)) {
+
+		if ((xfrm_lookup(&buff->dst, &fl, NULL, 0)) < 0) {
+			dst_release(buff->dst);
+			return;
+		}
+
 		ip6_xmit(NULL, buff, &fl, NULL, 0);
 		TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
 		TCP_INC_STATS_BH(TCP_MIB_OUTRSTS);
@@ -1037,14 +1068,15 @@ static void tcp_v6_send_ack(struct sk_buff *skb, u32 seq, u32 ack, u32 win, u32 
 	struct flowi fl;
 	int tot_len = sizeof(struct tcphdr);
 
-	buff = alloc_skb(MAX_HEADER + sizeof(struct ipv6hdr), GFP_ATOMIC);
+	if (ts)
+		tot_len += 3*4;
+
+	buff = alloc_skb(MAX_HEADER + sizeof(struct ipv6hdr) + tot_len,
+			 GFP_ATOMIC);
 	if (buff == NULL)
 		return;
 
-	skb_reserve(buff, MAX_HEADER + sizeof(struct ipv6hdr));
-
-	if (ts)
-		tot_len += 3*4;
+	skb_reserve(buff, MAX_HEADER + sizeof(struct ipv6hdr) + tot_len);
 
 	t1 = (struct tcphdr *) skb_push(buff,tot_len);
 
@@ -1082,6 +1114,10 @@ static void tcp_v6_send_ack(struct sk_buff *skb, u32 seq, u32 ack, u32 win, u32 
 	fl.fl_ip_sport = t1->source;
 
 	if (!ip6_dst_lookup(NULL, &buff->dst, &fl)) {
+		if ((xfrm_lookup(&buff->dst, &fl, NULL, 0)) < 0) {
+			dst_release(buff->dst);
+			return;
+		}
 		ip6_xmit(NULL, buff, &fl, NULL, 0);
 		TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
 		return;
@@ -1156,11 +1192,7 @@ static void tcp_v6_synq_add(struct sock *sk, struct open_request *req)
 	lopt->syn_table[h] = req;
 	write_unlock(&tp->syn_wait_lock);
 
-#ifdef CONFIG_ACCEPT_QUEUES
-	tcp_synq_added(sk, req);
-#else
 	tcp_synq_added(sk);
-#endif
 }
 
 
@@ -1173,16 +1205,12 @@ static int tcp_v6_conn_request(struct sock *sk, struct sk_buff *skb)
 	struct tcp_opt tmptp, *tp = tcp_sk(sk);
 	struct open_request *req = NULL;
 	__u32 isn = TCP_SKB_CB(skb)->when;
-#ifdef CONFIG_ACCEPT_QUEUES
-	int class = 0;
-#endif
 
 	if (skb->protocol == htons(ETH_P_IP))
 		return tcp_v4_conn_request(sk, skb);
 
 	if (!ipv6_unicast_destination(skb))
 		goto drop; 
-
 
 	/*
 	 *	There are no SYN attacks on IPv6, yet...	
@@ -1193,26 +1221,8 @@ static int tcp_v6_conn_request(struct sock *sk, struct sk_buff *skb)
 		goto drop;		
 	}
 
-#ifdef CONFIG_ACCEPT_QUEUES
-        class = (skb->nfmark <= 0) ? 0 :
-	                ((skb->nfmark >= NUM_ACCEPT_QUEUES) ? 0: skb->nfmark);
-        /*
-	 * Accept only if the class has shares set or if the default class
-	 * i.e. class 0 has shares
-	 */
-        if (!(tcp_sk(sk)->acceptq[class].aq_ratio)) {
-		if (tcp_sk(sk)->acceptq[0].aq_ratio) 
-			class = 0; 
-		else 
-			goto drop;
-	}
-
-	if (sk_acceptq_is_full(sk, class) && tcp_synq_young(sk, class) > 1)
-#else
 	if (sk_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
-#endif
 		goto drop;
-
 
 	req = tcp_openreq_alloc();
 	if (req == NULL)
@@ -1226,10 +1236,7 @@ static int tcp_v6_conn_request(struct sock *sk, struct sk_buff *skb)
 
 	tmptp.tstamp_ok = tmptp.saw_tstamp;
 	tcp_openreq_init(req, &tmptp, skb);
-#ifdef CONFIG_ACCEPT_QUEUES
-	req->acceptq_class = class;
-	req->acceptq_time_stamp = jiffies;
-#endif
+
 	req->class = &or_ipv6;
 	ipv6_addr_copy(&req->af.v6_req.rmt_addr, &skb->nh.ipv6h->saddr);
 	ipv6_addr_copy(&req->af.v6_req.loc_addr, &skb->nh.ipv6h->daddr);
@@ -1331,11 +1338,7 @@ static struct sock * tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 
 	opt = np->opt;
 
-#ifdef CONFIG_ACCEPT_QUEUES
-	if (sk_acceptq_is_full(sk, req->acceptq_class))
-#else
 	if (sk_acceptq_is_full(sk))
-#endif
 		goto out_overflow;
 
 	if (np->rxopt.bits.srcrt == 2 &&
@@ -1346,6 +1349,7 @@ static struct sock * tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	}
 
 	if (dst == NULL) {
+		struct in6_addr *final_p = NULL, final;
 		struct flowi fl;
 
 		memset(&fl, 0, sizeof(fl));
@@ -1353,7 +1357,9 @@ static struct sock * tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 		ipv6_addr_copy(&fl.fl6_dst, &req->af.v6_req.rmt_addr);
 		if (opt && opt->srcrt) {
 			struct rt0_hdr *rt0 = (struct rt0_hdr *) opt->srcrt;
+			ipv6_addr_copy(&final, &fl.fl6_dst);
 			ipv6_addr_copy(&fl.fl6_dst, rt0->addr);
+			final_p = &final;
 		}
 		ipv6_addr_copy(&fl.fl6_src, &req->af.v6_req.loc_addr);
 		fl.oif = sk->sk_bound_dev_if;
@@ -1361,6 +1367,12 @@ static struct sock * tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 		fl.fl_ip_sport = inet_sk(sk)->sport;
 
 		if (ip6_dst_lookup(sk, &dst, &fl))
+			goto out;
+
+		if (final_p)
+			ipv6_addr_copy(&fl.fl6_dst, final_p);
+
+		if ((xfrm_lookup(&dst, &fl, sk, 0)) < 0)
 			goto out;
 	} 
 
@@ -1639,7 +1651,7 @@ static int tcp_v6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 				    skb->len - th->doff*4);
 	TCP_SKB_CB(skb)->ack_seq = ntohl(th->ack_seq);
 	TCP_SKB_CB(skb)->when = 0;
-	TCP_SKB_CB(skb)->flags = ip6_get_dsfield(skb->nh.ipv6h);
+	TCP_SKB_CB(skb)->flags = ipv6_get_dsfield(skb->nh.ipv6h);
 	TCP_SKB_CB(skb)->sacked = 0;
 
 	sk = __tcp_v6_lookup(&skb->nh.ipv6h->saddr, th->source,
@@ -1743,6 +1755,7 @@ static int tcp_v6_rebuild_header(struct sock *sk)
 
 	if (dst == NULL) {
 		struct inet_opt *inet = inet_sk(sk);
+		struct in6_addr *final_p = NULL, final;
 		struct flowi fl;
 
 		memset(&fl, 0, sizeof(fl));
@@ -1756,13 +1769,22 @@ static int tcp_v6_rebuild_header(struct sock *sk)
 
 		if (np->opt && np->opt->srcrt) {
 			struct rt0_hdr *rt0 = (struct rt0_hdr *) np->opt->srcrt;
+			ipv6_addr_copy(&final, &fl.fl6_dst);
 			ipv6_addr_copy(&fl.fl6_dst, rt0->addr);
+			final_p = &final;
 		}
 
 		err = ip6_dst_lookup(sk, &dst, &fl);
-
 		if (err) {
 			sk->sk_route_caps = 0;
+			return err;
+		}
+		if (final_p)
+			ipv6_addr_copy(&fl.fl6_dst, final_p);
+
+		if ((err = xfrm_lookup(&dst, &fl, sk, 0)) < 0) {
+			sk->sk_err_soft = -err;
+			dst_release(dst);
 			return err;
 		}
 
@@ -1782,6 +1804,7 @@ static int tcp_v6_xmit(struct sk_buff *skb, int ipfragok)
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct flowi fl;
 	struct dst_entry *dst;
+	struct in6_addr *final_p = NULL, final;
 
 	memset(&fl, 0, sizeof(fl));
 	fl.proto = IPPROTO_TCP;
@@ -1795,7 +1818,9 @@ static int tcp_v6_xmit(struct sk_buff *skb, int ipfragok)
 
 	if (np->opt && np->opt->srcrt) {
 		struct rt0_hdr *rt0 = (struct rt0_hdr *) np->opt->srcrt;
+		ipv6_addr_copy(&final, &fl.fl6_dst);
 		ipv6_addr_copy(&fl.fl6_dst, rt0->addr);
+		final_p = &final;
 	}
 
 	dst = __sk_dst_check(sk, np->dst_cookie);
@@ -1805,6 +1830,15 @@ static int tcp_v6_xmit(struct sk_buff *skb, int ipfragok)
 
 		if (err) {
 			sk->sk_err_soft = -err;
+			return err;
+		}
+
+		if (final_p)
+			ipv6_addr_copy(&fl.fl6_dst, final_p);
+
+		if ((err = xfrm_lookup(&dst, &fl, sk, 0)) < 0) {
+			sk->sk_route_caps = 0;
+			dst_release(dst);
 			return err;
 		}
 
@@ -1906,7 +1940,7 @@ static int tcp_v6_init_sock(struct sock *sk)
 	 */
 	tp->snd_ssthresh = 0x7fffffff;
 	tp->snd_cwnd_clamp = ~0;
-	tp->mss_cache = 536;
+	tp->mss_cache_std = tp->mss_cache = 536;
 
 	tp->reordering = sysctl_tcp_reordering;
 
@@ -2098,6 +2132,7 @@ void tcp6_proc_exit(void)
 
 struct proto tcpv6_prot = {
 	.name			= "TCPv6",
+	.owner			= THIS_MODULE,
 	.close			= tcp_close,
 	.connect		= tcp_v6_connect,
 	.disconnect		= tcp_disconnect,
@@ -2122,6 +2157,7 @@ struct proto tcpv6_prot = {
 	.sysctl_wmem		= sysctl_tcp_wmem,
 	.sysctl_rmem		= sysctl_tcp_rmem,
 	.max_header		= MAX_TCP_HEADER,
+	.slab_obj_size		= sizeof(struct tcp6_sock),
 };
 
 static struct inet6_protocol tcpv6_protocol = {

@@ -254,7 +254,7 @@ static void __devinit pcibios_assign_resources (void)
 	struct pci_dev *dev = NULL;
 	struct resource *r;
 
-	while ((dev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
+	for_each_pci_dev(dev) {
 		unsigned di_num;
 		unsigned class = dev->class >> 8;
 
@@ -321,8 +321,6 @@ pcibios_resource_to_bus(struct pci_dev *dev, struct pci_bus_region *region,
 
 
 /* Stubs for things we don't use.  */
-
-struct pci_fixup pcibios_fixups[] = { { 0 } };
 
 /* Called after each bus is probed, but before its children are examined. */
 void pcibios_fixup_bus(struct pci_bus *b)

@@ -76,7 +76,7 @@ static struct fb_var_screeninfo kyro_var __initdata = {
 static struct kyrofb_info *currentpar;
 
 typedef struct {
-	STG4000REG *pSTGReg;	/* Virtual address of PCI register region */
+	STG4000REG __iomem *pSTGReg;	/* Virtual address of PCI register region */
 	u32 ulNextFreeVidMem;	/* Offset from start of vid mem to next free region */
 	u32 ulOverlayOffset;	/* Offset from start of vid mem to overlay */
 	u32 ulOverlayStride;	/* Interleaved YUV and 422 mode Y stride */
@@ -712,7 +712,7 @@ static int __devinit kyrofb_probe(struct pci_dev *pdev,
 	info->fix		= kyro_fix;
 	info->par		= currentpar;
 	info->pseudo_palette	= (void *)(currentpar + 1);
-	info->flags		= FBINFO_FLAG_DEFAULT;
+	info->flags		= FBINFO_DEFAULT;
 
 	SetCoreClockPLL(deviceInfo.pSTGReg, pdev);
 
@@ -735,6 +735,7 @@ static int __devinit kyrofb_probe(struct pci_dev *pdev,
 
 	fb_memset(info->screen_base, 0, size);
 
+	info->device = &pdev->dev;
 	if (register_framebuffer(info) < 0)
 		goto out_unmap;
 
@@ -787,6 +788,13 @@ static void __devexit kyrofb_remove(struct pci_dev *pdev)
 
 int __init kyrofb_init(void)
 {
+#ifndef MODULE
+	char *option = NULL;
+
+	if (fb_get_options("kyrofb", &option))
+		return -ENODEV;
+	kyrofb_setup(option);
+#endif
 	return pci_module_init(&kyrofb_pci_driver);
 }
 
@@ -795,8 +803,9 @@ static void __exit kyrofb_exit(void)
 	pci_unregister_driver(&kyrofb_pci_driver);
 }
 
-#ifdef MODULE
 module_init(kyrofb_init);
+
+#ifdef MODULE
 module_exit(kyrofb_exit);
 #endif
 

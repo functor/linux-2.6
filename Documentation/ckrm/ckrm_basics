@@ -33,12 +33,16 @@ shares:  allows to change the shares of different resources managed by the
          class
 stats:   allows to see the statistics associated with each resources managed
          by the class
-target:  allows to assign a task to a class. If a CE is present, assigning
-         a task to a class through this interface will prevent CE from
-		 reassigning the task to any class during reclassification.
-members: allows to see which tasks has been assigned to a class
+target:  obsolete. functionality moved to 'members' file.
+members: allows to assign a task to a class and to see which tasks has
+         been assigned to a class.
+         If a CE is present, assigning a task to a class through this
+         interface will prevent CE from reassigning the task to any class
+         during reclassification.
 config:  allow to view and modify configuration information of different
          resources in a class.
+reclassify: When CE is present, allows a task to be reclassified by CE. In
+         the absence of CE, this file provides no functionality.
 
 Resource allocations for a class is controlled by the parameters:
 

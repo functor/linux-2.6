@@ -477,12 +477,14 @@ static void __init isapnp_parse_irq_resource(struct pnp_option *option,
 {
 	unsigned char tmp[3];
 	struct pnp_irq *irq;
+	unsigned long bits;
 
 	isapnp_peek(tmp, size);
 	irq = isapnp_alloc(sizeof(struct pnp_irq));
 	if (!irq)
 		return;
-	irq->map = (tmp[1] << 8) | tmp[0];
+	bits = (tmp[1] << 8) | tmp[0];
+	bitmap_copy(irq->map, &bits, 16);
 	if (size > 2)
 		irq->flags = tmp[2];
 	else
@@ -655,8 +657,10 @@ static int __init isapnp_create_device(struct pnp_card *card,
 	if ((dev = isapnp_parse_device(card, size, number++)) == NULL)
 		return 1;
 	option = pnp_register_independent_option(dev);
-	if (!option)
+	if (!option) {
+		kfree(dev);
 		return 1;
+	}
 	pnp_add_card_device(card,dev);
 
 	while (1) {

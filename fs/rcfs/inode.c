@@ -4,7 +4,6 @@
  * Copyright (C) Shailabh Nagar,  IBM Corp. 2004
  *               Vivek Kashyap,   IBM Corp. 2004
  *           
- * 
  * Resource class filesystem (rcfs) forming the 
  * user interface to Class-based Kernel Resource Management (CKRM).
  *
@@ -43,8 +42,10 @@
 
 #include <linux/rcfs.h>
 
-// Address of variable used as flag to indicate a magic file, 
-// ; value unimportant 
+/*
+ * Address of variable used as flag to indicate a magic file, 
+ * value unimportant
+ */ 
 int RCFS_IS_MAGIC;
 
 struct inode *rcfs_get_inode(struct super_block *sb, int mode, dev_t dev)
@@ -63,18 +64,19 @@ struct inode *rcfs_get_inode(struct super_block *sb, int mode, dev_t dev)
 			init_special_inode(inode, mode, dev);
 			break;
 		case S_IFREG:
-			// Treat as default assignment */
+			/* Treat as default assignment */
 			inode->i_op = &rcfs_file_inode_operations;
-			// inode->i_fop = &rcfs_file_operations;
+			/* inode->i_fop = &rcfs_file_operations; */
 			break;
 		case S_IFDIR:
-			// inode->i_op = &rcfs_dir_inode_operations;
+			/* inode->i_op = &rcfs_dir_inode_operations; */
 			inode->i_op = &rcfs_rootdir_inode_operations;
 			inode->i_fop = &simple_dir_operations;
 
-			// directory inodes start off with i_nlink == 2 
-			//  (for "." entry)
-
+			/*
+			 * directory inodes start off with i_nlink == 2 
+			 *  (for "." entry)
+			 */
 			inode->i_nlink++;
 			break;
 		case S_IFLNK:
@@ -92,7 +94,6 @@ int _rcfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
 
 	if (dentry->d_inode)
 		return -EEXIST;
-
 	inode = rcfs_get_inode(dir->i_sb, mode, dev);
 	if (inode) {
 		if (dir->i_mode & S_ISGID) {
@@ -104,22 +105,21 @@ int _rcfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
 		dget(dentry);
 		error = 0;
 	}
-
 	return error;
 }
 
-EXPORT_SYMBOL(_rcfs_mknod);
+EXPORT_SYMBOL_GPL(_rcfs_mknod);
 
 int rcfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
 {
-	// User can only create directories, not files
+	/* User can only create directories, not files */
 	if ((mode & S_IFMT) != S_IFDIR)
 		return -EINVAL;
 
 	return dir->i_op->mkdir(dir, dentry, mode);
 }
 
-EXPORT_SYMBOL(rcfs_mknod);
+EXPORT_SYMBOL_GPL(rcfs_mknod);
 
 struct dentry *rcfs_create_internal(struct dentry *parent,
 				    struct rcfs_magf *magf, int magic)
@@ -127,7 +127,7 @@ struct dentry *rcfs_create_internal(struct dentry *parent,
 	struct qstr qstr;
 	struct dentry *mfdentry;
 
-	// Get new dentry for name  
+	/* Get new dentry for name */
 	qstr.name = magf->name;
 	qstr.len = strlen(magf->name);
 	qstr.hash = full_name_hash(magf->name, qstr.len);
@@ -144,12 +144,13 @@ struct dentry *rcfs_create_internal(struct dentry *parent,
 		else {
 			err = _rcfs_mknod(parent->d_inode, mfdentry,
 					  magf->mode, 0);
-			// _rcfs_mknod doesn't increment parent's link count, 
-			// i_op->mkdir does.
+			/*
+			 * _rcfs_mknod doesn't increment parent's link count, 
+			 * i_op->mkdir does.
+			 */
 			parent->d_inode->i_nlink++;
 		}
 		up(&parent->d_inode->i_sem);
-
 		if (err) {
 			dput(mfdentry);
 			return mfdentry;
@@ -158,7 +159,7 @@ struct dentry *rcfs_create_internal(struct dentry *parent,
 	return mfdentry;
 }
 
-EXPORT_SYMBOL(rcfs_create_internal);
+EXPORT_SYMBOL_GPL(rcfs_create_internal);
 
 int rcfs_delete_internal(struct dentry *mfdentry)
 {
@@ -166,9 +167,7 @@ int rcfs_delete_internal(struct dentry *mfdentry)
 
 	if (!mfdentry || !mfdentry->d_parent)
 		return -EINVAL;
-
 	parent = mfdentry->d_parent;
-
 	if (!mfdentry->d_inode) {
 		return 0;
 	}
@@ -178,13 +177,12 @@ int rcfs_delete_internal(struct dentry *mfdentry)
 	else
 		simple_unlink(parent->d_inode, mfdentry);
 	up(&mfdentry->d_inode->i_sem);
-
 	d_delete(mfdentry);
 
 	return 0;
 }
 
-EXPORT_SYMBOL(rcfs_delete_internal);
+EXPORT_SYMBOL_GPL(rcfs_delete_internal);
 
 struct inode_operations rcfs_file_inode_operations = {
 	.getattr = simple_getattr,

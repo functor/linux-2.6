@@ -171,12 +171,12 @@ static struct sock *udp_v6_lookup(struct in6_addr *saddr, u16 sport,
 				score++;
 			}
 			if (!ipv6_addr_any(&np->rcv_saddr)) {
-				if (ipv6_addr_cmp(&np->rcv_saddr, daddr))
+				if (!ipv6_addr_equal(&np->rcv_saddr, daddr))
 					continue;
 				score++;
 			}
 			if (!ipv6_addr_any(&np->daddr)) {
-				if (ipv6_addr_cmp(&np->daddr, saddr))
+				if (!ipv6_addr_equal(&np->daddr, saddr))
 					continue;
 				score++;
 			}
@@ -395,14 +395,14 @@ static struct sock *udp_v6_mcast_next(struct sock *sk,
 					continue;
 			}
 			if (!ipv6_addr_any(&np->daddr) &&
-			    ipv6_addr_cmp(&np->daddr, rmt_addr))
+			    !ipv6_addr_equal(&np->daddr, rmt_addr))
 				continue;
 
 			if (s->sk_bound_dev_if && s->sk_bound_dev_if != dif)
 				continue;
 
 			if (!ipv6_addr_any(&np->rcv_saddr)) {
-				if (!ipv6_addr_cmp(&np->rcv_saddr, loc_addr))
+				if (ipv6_addr_equal(&np->rcv_saddr, loc_addr))
 					return s;
 				continue;
 			}
@@ -627,7 +627,7 @@ static int udpv6_sendmsg(struct kiocb *iocb, struct sock *sk,
 	struct inet_opt *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *) msg->msg_name;
-	struct in6_addr *daddr;
+	struct in6_addr *daddr, *final_p = NULL, final;
 	struct ipv6_txoptions *opt = NULL;
 	struct ip6_flowlabel *flowlabel = NULL;
 	struct flowi *fl = &inet->cork.fl;
@@ -699,7 +699,7 @@ do_udp_sendmsg:
 		if (likely(up->pending)) {
 			if (unlikely(up->pending != AF_INET6)) {
 				release_sock(sk);
-				return -EINVAL;
+				return -EAFNOSUPPORT;
 			}
 			dst = NULL;
 			goto do_append_data;
@@ -732,7 +732,7 @@ do_udp_sendmsg:
 		 * sk->sk_dst_cache.
 		 */
 		if (sk->sk_state == TCP_ESTABLISHED &&
-		    !ipv6_addr_cmp(daddr, &np->daddr))
+		    ipv6_addr_equal(daddr, &np->daddr))
 			daddr = &np->daddr;
 
 		if (addr_len >= sizeof(struct sockaddr_in6) &&
@@ -783,7 +783,9 @@ do_udp_sendmsg:
 	/* merge ip6_build_xmit from ip6_output */
 	if (opt && opt->srcrt) {
 		struct rt0_hdr *rt0 = (struct rt0_hdr *) opt->srcrt;
+		ipv6_addr_copy(&final, &fl->fl6_dst);
 		ipv6_addr_copy(&fl->fl6_dst, rt0->addr);
+		final_p = &final;
 	}
 
 	if (!fl->oif && ipv6_addr_is_multicast(&fl->fl6_dst))
@@ -792,6 +794,13 @@ do_udp_sendmsg:
 	err = ip6_dst_lookup(sk, &dst, fl);
 	if (err)
 		goto out;
+	if (final_p)
+		ipv6_addr_copy(&fl->fl6_dst, final_p);
+
+	if ((err = xfrm_lookup(&dst, fl, sk, 0)) < 0) {
+		dst_release(dst);
+		goto out;
+	}
 
 	if (hlimit < 0) {
 		if (ipv6_addr_is_multicast(&fl->fl6_dst))
@@ -831,7 +840,7 @@ do_append_data:
 
 	if (dst)
 		ip6_dst_store(sk, dst,
-			      !ipv6_addr_cmp(&fl->fl6_dst, &np->daddr) ?
+			      ipv6_addr_equal(&fl->fl6_dst, &np->daddr) ?
 			      &np->daddr : NULL);
 	if (err > 0)
 		err = np->recverr ? net_xmit_errno(err) : 0;
@@ -1024,6 +1033,7 @@ void udp6_proc_exit(void) {
 
 struct proto udpv6_prot = {
 	.name =		"UDP",
+	.owner =	THIS_MODULE,
 	.close =	udpv6_close,
 	.connect =	ip6_datagram_connect,
 	.disconnect =	udp_disconnect,
@@ -1037,6 +1047,7 @@ struct proto udpv6_prot = {
 	.hash =		udp_v6_hash,
 	.unhash =	udp_v6_unhash,
 	.get_port =	udp_v6_get_port,
+	.slab_obj_size = sizeof(struct udp6_sock),
 };
 
 extern struct proto_ops inet6_dgram_ops;

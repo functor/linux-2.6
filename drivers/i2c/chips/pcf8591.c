@@ -27,16 +27,15 @@
 #include <linux/i2c-sensor.h>
 
 /* Addresses to scan */
-static unsigned short normal_i2c[] = { I2C_CLIENT_END };
-static unsigned short normal_i2c_range[] = { 0x48, 0x4f, I2C_CLIENT_END };
+static unsigned short normal_i2c[] = { 0x48, 0x49, 0x4a, 0x4b, 0x4c,
+					0x4d, 0x4e, 0x4f, I2C_CLIENT_END };
 static unsigned int normal_isa[] = { I2C_CLIENT_ISA_END };
-static unsigned int normal_isa_range[] = { I2C_CLIENT_ISA_END };
 
 /* Insmod parameters */
 SENSORS_INSMOD_1(pcf8591);
 
 static int input_mode;
-MODULE_PARM(input_mode, "i");
+module_param(input_mode, int, 0);
 MODULE_PARM_DESC(input_mode,
 	"Analog input mode:\n"
 	" 0 = four single ended inputs\n"
@@ -99,7 +98,7 @@ static struct i2c_driver pcf8591_driver = {
 	.detach_client	= pcf8591_detach_client,
 };
 
-static int pcf8591_id = 0;
+static int pcf8591_id;
 
 /* following are the sysfs callback functions */
 #define show_in_channel(channel)					\

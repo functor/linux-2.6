@@ -292,12 +292,18 @@
 #define __NR_io_cancel		271
 #define __NR_io_getevents	272
 #define __NR_mq_open		273
-#define __NR_mq_unlink		(__NR_mq_open+1)
-#define __NR_mq_timedsend	(__NR_mq_open+2)
-#define __NR_mq_timedreceive	(__NR_mq_open+3)
-#define __NR_mq_notify		(__NR_mq_open+4)
-#define __NR_mq_getsetattr	(__NR_mq_open+5)
-/* WARNING: You MAY NOT add syscall numbers larger than 282, since
+#define __NR_mq_unlink		274
+#define __NR_mq_timedsend	275
+#define __NR_mq_timedreceive	276
+#define __NR_mq_notify		277
+#define __NR_mq_getsetattr	278
+#define __NR_waitid		279
+/*#define __NR_sys_setaltroot	280 available (was setaltroot) */
+#define __NR_add_key		281
+#define __NR_request_key	282
+#define __NR_keyctl		283
+
+/* WARNING: You MAY NOT add syscall numbers larger than 283, since
  *          all of the syscall tables in the Sparc kernel are
  *          sized to have 283 entries (starting at zero).  Therefore
  *          find a free slot in the 0-282 range.

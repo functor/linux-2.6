@@ -124,7 +124,6 @@
 typedef struct snd_usb_audio snd_usb_audio_t;
 
 struct snd_usb_audio {
-	
 	int index;
 	struct usb_device *dev;
 	snd_card_t *card;
@@ -138,15 +137,17 @@ struct snd_usb_audio {
 	int next_midi_device;
 
 	unsigned int ignore_ctl_error;	/* for mixer */
-};  
+};
 
 /*
  * Information about devices with broken descriptors
  */
 
+/* special values for .ifnum */
 #define QUIRK_NO_INTERFACE		-2
 #define QUIRK_ANY_INTERFACE		-1
 
+/* quirk type */
 #define QUIRK_MIDI_FIXED_ENDPOINT	0
 #define QUIRK_MIDI_YAMAHA		1
 #define QUIRK_MIDI_MIDIMAN		2
@@ -154,7 +155,8 @@ struct snd_usb_audio {
 #define QUIRK_AUDIO_FIXED_ENDPOINT	4
 #define QUIRK_AUDIO_STANDARD_INTERFACE	5
 #define QUIRK_MIDI_STANDARD_INTERFACE	6
-#define QUIRK_AUDIO_EDIROL_UA700	7
+#define QUIRK_AUDIO_EDIROL_UA700_UA25	7
+#define QUIRK_AUDIO_EDIROL_UA1000	8
 
 typedef struct snd_usb_audio_quirk snd_usb_audio_quirk_t;
 typedef struct snd_usb_midi_endpoint_info snd_usb_midi_endpoint_info_t;
@@ -186,7 +188,7 @@ struct snd_usb_midi_endpoint_info {
 
 /* for QUIRK_AUDIO/MIDI_STANDARD_INTERFACE, data is NULL */
 
-/* for QUIRK_AUDIO_EDIROL_UA700, data is NULL */
+/* for QUIRK_AUDIO_EDIROL_UA700_UA25/UA1000, data is NULL */
 
 /*
  */
@@ -205,6 +207,8 @@ int snd_usb_ctl_msg(struct usb_device *dev, unsigned int pipe, __u8 request, __u
 int snd_usb_create_mixer(snd_usb_audio_t *chip, int ctrlif);
 
 int snd_usb_create_midi_interface(snd_usb_audio_t *chip, struct usb_interface *iface, const snd_usb_audio_quirk_t *quirk);
+void snd_usbmidi_input_stop(struct list_head* p);
+void snd_usbmidi_input_start(struct list_head* p);
 void snd_usbmidi_disconnect(struct list_head *p, struct usb_driver *driver);
 
 /*

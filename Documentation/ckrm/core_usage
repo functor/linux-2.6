@@ -9,7 +9,7 @@ Usage of CKRM without a classification engine
    creates a socketclass named s1 
 
 The newly created class directory is automatically populated by magic files
-shares, stats, members, target and config.
+shares, stats, members, config and reclassify.
 
 2. View default shares 
 
@@ -34,11 +34,11 @@ shares, stats, members, target and config.
 
 4. Reclassify a task (listening socket)
 
-   write the pid of the process to the destination class' target file
-   # echo 1004 > /rcfs/taskclass/c1/target	
+   write the pid of the process to the destination class' members file
+   # echo 1004 > /rcfs/taskclass/c1/members	
 
-   write the "<ipaddress>\<port>" string to the destination class' target file 
-   # echo "0.0.0.0\32770"  > /rcfs/taskclass/c1/target
+   write the "<ipaddress>\<port>" string to the destination class' members file 
+   # echo "0.0.0.0\32770"  > /rcfs/taskclass/c1/members
 
 5. Get a list of tasks (sockets) assigned to a taskclass (socketclass)
 

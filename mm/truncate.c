@@ -79,6 +79,12 @@ invalidate_complete_page(struct address_space *mapping, struct page *page)
 		spin_unlock_irq(&mapping->tree_lock);
 		return 0;
 	}
+
+	BUG_ON(PagePrivate(page));
+	if (page_count(page) != 2) {
+		spin_unlock_irq(&mapping->tree_lock);
+		return 0;
+	}
 	__remove_from_page_cache(page);
 	spin_unlock_irq(&mapping->tree_lock);
 	ClearPageUptodate(page);
@@ -155,6 +161,7 @@ void truncate_inode_pages(struct address_space *mapping, loff_t lstart)
 
 	next = start;
 	for ( ; ; ) {
+		cond_resched();
 		if (!pagevec_lookup(&pvec, mapping, next, PAGEVEC_SIZE)) {
 			if (next == start)
 				break;
@@ -268,7 +275,11 @@ void invalidate_inode_pages2(struct address_space *mapping)
 					clear_page_dirty(page);
 					ClearPageUptodate(page);
 				} else {
-					invalidate_complete_page(mapping, page);
+					if (!invalidate_complete_page(mapping,
+								      page)) {
+						clear_page_dirty(page);
+						ClearPageUptodate(page);
+					}
 				}
 			}
 			unlock_page(page);

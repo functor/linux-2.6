@@ -30,6 +30,7 @@
 #include <linux/smp.h>
 #include <linux/security.h>
 #include <linux/bootmem.h>
+#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
 
@@ -108,6 +109,7 @@ struct console_cmdline
 #define MAX_CMDLINECONSOLES 8
 
 static struct console_cmdline console_cmdline[MAX_CMDLINECONSOLES];
+static int selected_console = -1;
 static int preferred_console = -1;
 
 /* Flag: console code may call schedule() */
@@ -140,7 +142,7 @@ static int __init console_setup(char *str)
 		strcpy(name, "ttyS1");
 #endif
 	for(s = name; *s; s++)
-		if (*s >= '0' && *s <= '9')
+		if ((*s >= '0' && *s <= '9') || *s == ',')
 			break;
 	idx = simple_strtoul(s, NULL, 10);
 	*s = 0;
@@ -173,12 +175,12 @@ int __init add_preferred_console(char *name, int idx, char *options)
 	for(i = 0; i < MAX_CMDLINECONSOLES && console_cmdline[i].name[0]; i++)
 		if (strcmp(console_cmdline[i].name, name) == 0 &&
 			  console_cmdline[i].index == idx) {
-				preferred_console = i;
+				selected_console = i;
 				return 0;
 		}
 	if (i == MAX_CMDLINECONSOLES)
 		return -E2BIG;
-	preferred_console = i;
+	selected_console = i;
 	c = &console_cmdline[i];
 	memcpy(c->name, name, sizeof(c->name));
 	c->name[sizeof(c->name) - 1] = 0;
@@ -192,6 +194,8 @@ static int __init log_buf_len_setup(char *str)
 	unsigned long size = memparse(str, &str);
 	unsigned long flags;
 
+	if (size)
+		size = roundup_pow_of_two(size);
 	if (size > log_buf_len) {
 		unsigned long start, dest_idx, offset;
 		char * new_log_buf;
@@ -508,6 +512,17 @@ static void zap_locks(void)
 asmlinkage int printk(const char *fmt, ...)
 {
 	va_list args;
+	int r;
+
+	va_start(args, fmt);
+	r = vprintk(fmt, args);
+	va_end(args);
+
+	return r;
+}
+
+asmlinkage int vprintk(const char *fmt, va_list args)
+{
 	unsigned long flags;
 	int printed_len;
 	char *p;
@@ -521,9 +536,7 @@ asmlinkage int printk(const char *fmt, ...)
 	spin_lock_irqsave(&logbuf_lock, flags);
 
 	/* Emit the output into the temporary buffer */
-	va_start(args, fmt);
 	printed_len = vscnprintf(printk_buf, sizeof(printk_buf), fmt, args);
-	va_end(args);
 
 	/*
 	 * Copy the output into log_buf.  If the caller didn't provide
@@ -575,6 +588,7 @@ out:
 	return printed_len;
 }
 EXPORT_SYMBOL(printk);
+EXPORT_SYMBOL(vprintk);
 
 /**
  * acquire_console_sem - lock the console system for exclusive use.
@@ -648,12 +662,10 @@ EXPORT_SYMBOL(release_console_sem);
  *
  * Must be called within acquire_console_sem().
  */
-void console_conditional_schedule(void)
+void __sched console_conditional_schedule(void)
 {
-	if (console_may_schedule && need_resched()) {
-		set_current_state(TASK_RUNNING);
-		schedule();
-	}
+	if (console_may_schedule)
+		cond_resched();
 }
 EXPORT_SYMBOL(console_conditional_schedule);
 
@@ -734,6 +746,9 @@ void register_console(struct console * console)
 {
 	int     i;
 	unsigned long flags;
+
+	if (preferred_console < 0)
+		preferred_console = selected_console;
 
 	/*
 	 *	See if we want to use this console driver. If we
@@ -825,7 +840,7 @@ int unregister_console(struct console * console)
 	 * would prevent fbcon from taking over.
 	 */
 	if (console_drivers == NULL)
-		preferred_console = -1;
+		preferred_console = selected_console;
 		
 
 	release_console_sem();
@@ -843,7 +858,7 @@ EXPORT_SYMBOL(unregister_console);
 void tty_write_message(struct tty_struct *tty, char *msg)
 {
 	if (tty && tty->driver->write)
-		tty->driver->write(tty, 0, msg, strlen(msg));
+		tty->driver->write(tty, msg, strlen(msg));
 	return;
 }
 

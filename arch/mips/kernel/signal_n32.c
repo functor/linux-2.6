@@ -26,9 +26,9 @@
 #include <linux/ptrace.h>
 #include <linux/unistd.h>
 #include <linux/compat.h>
+#include <linux/bitops.h>
 
 #include <asm/asm.h>
-#include <asm/bitops.h>
 #include <asm/cacheflush.h>
 #include <asm/sim.h>
 #include <asm/uaccess.h>
@@ -208,7 +208,5 @@ void setup_rt_frame_n32(struct k_sigaction * ka,
 	return;
 
 give_sigsegv:
-	if (signr == SIGSEGV)
-		ka->sa.sa_handler = SIG_DFL;
-	force_sig(SIGSEGV, current);
+	force_sigsegv(signr, current);
 }

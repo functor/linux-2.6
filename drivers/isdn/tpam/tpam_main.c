@@ -23,7 +23,7 @@
 
 /* Local functions prototypes */
 static int __devinit tpam_probe(struct pci_dev *, const struct pci_device_id *);
-static void __devexit tpam_unregister_card(tpam_card *);
+static void __devexit tpam_unregister_card(struct pci_dev *, tpam_card *);
 static void __devexit tpam_remove(struct pci_dev *);
 static int __init tpam_init(void);
 static void __exit tpam_exit(void);
@@ -86,13 +86,20 @@ u32 tpam_findchannel(tpam_card *card, u32 ncoid) {
  */
 static int __devinit tpam_probe(struct pci_dev *dev, const struct pci_device_id *pci_id) {
 	tpam_card *card, *c;
-	int i;
+	int i, err;
+
+	if ((err = pci_enable_device(dev))) {
+		printk(KERN_ERR "TurboPAM: can't enable PCI device at %s\n",
+			pci_name(dev));
+		return err;
+	}
 
 	/* allocate memory for the board structure */
 	if (!(card = (tpam_card *)kmalloc(sizeof(tpam_card), GFP_KERNEL))) {
 		printk(KERN_ERR "TurboPAM: tpam_register_card: "
 		       "kmalloc failed!\n");
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto err_out_disable_dev;
 	}
 
 	memset((char *)card, 0, sizeof(tpam_card));
@@ -106,30 +113,29 @@ static int __devinit tpam_probe(struct pci_dev *dev, const struct pci_device_id 
 			card->interface.id, card)) {
 		printk(KERN_ERR "TurboPAM: tpam_register_card: "
 		       "could not request irq %d\n", card->irq);
-		kfree(card);
-		return -EIO;
+		err = -EIO;
+		goto err_out_free_card;
 	}
 
 	/* remap board memory */
-	if (!(card->bar0 = (unsigned long) ioremap(pci_resource_start(dev, 0),
+	if (!(card->bar0 = ioremap(pci_resource_start(dev, 0),
 						   0x800000))) {
 		printk(KERN_ERR "TurboPAM: tpam_register_card: "
 		       "unable to remap bar0\n");
-		free_irq(card->irq, card);
-		kfree(card);
-		return -EIO;
+		err = -EIO;
+		goto err_out_free_irq;
 	}
 
 	/* reset the board */
 	readl(card->bar0 + TPAM_RESETPAM_REGISTER);
 
 	/* initialisation magic :-( */
-	copy_to_pam_dword(card, (void *)0x01800008, 0x00000030);
-	copy_to_pam_dword(card, (void *)0x01800010, 0x00000030);
-	copy_to_pam_dword(card, (void *)0x01800014, 0x42240822);
-	copy_to_pam_dword(card, (void *)0x01800018, 0x07114000);
-	copy_to_pam_dword(card, (void *)0x0180001c, 0x00000400);
-	copy_to_pam_dword(card, (void *)0x01840070, 0x00000010);
+	copy_to_pam_dword(card, 0x01800008, 0x00000030);
+	copy_to_pam_dword(card, 0x01800010, 0x00000030);
+	copy_to_pam_dword(card, 0x01800014, 0x42240822);
+	copy_to_pam_dword(card, 0x01800018, 0x07114000);
+	copy_to_pam_dword(card, 0x0180001c, 0x00000400);
+	copy_to_pam_dword(card, 0x01840070, 0x00000010);
 
 	/* fill the ISDN link layer structure */
 	card->interface.owner = THIS_MODULE;
@@ -150,10 +156,8 @@ static int __devinit tpam_probe(struct pci_dev *dev, const struct pci_device_id 
 	if (!register_isdn(&card->interface)) {
 		printk(KERN_ERR "TurboPAM: tpam_register_card: "
 		       "unable to register %s\n", card->interface.id);
-		free_irq(card->irq, card);
-		iounmap((void *)card->bar0);
-		kfree(card);
-		return -EIO;
+		err = -EIO;
+		goto err_out_iounmap;
 	}
 	card->id = card->interface.channels;
 
@@ -195,6 +199,19 @@ static int __devinit tpam_probe(struct pci_dev *dev, const struct pci_device_id 
 	pci_set_drvdata(dev, card);
 
 	return 0;
+
+err_out_iounmap:
+	iounmap(card->bar0);
+
+err_out_free_irq:
+	free_irq(card->irq, card);
+
+err_out_free_card:
+	kfree(card);
+
+err_out_disable_dev:
+	pci_disable_device(dev);
+	return err;
 }
 
 /*
@@ -202,7 +219,7 @@ static int __devinit tpam_probe(struct pci_dev *dev, const struct pci_device_id 
  *
  * 	card: the board.
  */
-static void __devexit tpam_unregister_card(tpam_card *card) {
+static void __devexit tpam_unregister_card(struct pci_dev *pcidev, tpam_card *card) {
 	isdn_ctrl cmd;
 
 	/* prevent the ISDN link layer that the driver will be unloaded */
@@ -214,7 +231,9 @@ static void __devexit tpam_unregister_card(tpam_card *card) {
 	free_irq(card->irq, card);
 
 	/* release mapped memory */
-	iounmap((void *)card->bar0);
+	iounmap(card->bar0);
+
+	pci_disable_device(pcidev);
 }
 
 /*
@@ -235,7 +254,7 @@ static void __devexit tpam_remove(struct pci_dev *pcidev) {
 	}
 	
 	/* unregister each board */
-	tpam_unregister_card(card);
+	tpam_unregister_card(pcidev, card);
 	
 	/* and free the board structure itself */
 	kfree(card);

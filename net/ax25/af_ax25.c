@@ -207,16 +207,8 @@ ax25_cb *ax25_find_cb(ax25_address *src_addr, ax25_address *dest_addr,
 			continue;
 		if (s->ax25_dev == NULL)
 			continue;
-		if (ax25cmp(&s->source_addr, src_addr) == 0 && ax25cmp(&s->dest_addr, dest_addr) == 0 && s->ax25_dev->dev == dev) {
-			if (digi != NULL && digi->ndigi != 0) {
-				if (s->digipeat == NULL)
-					continue;
-				if (ax25digicmp(s->digipeat, digi) != 0)
-					continue;
-			} else {
-				if (s->digipeat != NULL && s->digipeat->ndigi != 0)
-					continue;
-			}
+		if (ax25cmp(&s->source_addr, src_addr) == 0 &&
+		    ax25cmp(&s->dest_addr, dest_addr) == 0) {
 			ax25_cb_hold(s);
 			spin_unlock_bh(&ax25_list_lock);
 
@@ -1176,13 +1168,16 @@ static int ax25_connect(struct socket *sock, struct sockaddr *uaddr,
 		/* check if we can remove this feature. It is broken. */
 		printk(KERN_WARNING "ax25_connect(): %s uses autobind, please contact jreuter@yaina.de\n",
 			current->comm);
-		if ((err = ax25_rt_autobind(ax25, &fsa->fsa_ax25.sax25_call)) < 0)
+		if ((err = ax25_rt_autobind(ax25, &fsa->fsa_ax25.sax25_call)) < 0) {
+			kfree(digi);
 			goto out;
+		}
 
 		ax25_fillin_cb(ax25, ax25->ax25_dev);
 		ax25_cb_add(ax25);
 	} else {
 		if (ax25->ax25_dev == NULL) {
+			kfree(digi);
 			err = -EHOSTUNREACH;
 			goto out;
 		}
@@ -1191,8 +1186,7 @@ static int ax25_connect(struct socket *sock, struct sockaddr *uaddr,
 	if (sk->sk_type == SOCK_SEQPACKET &&
 	    (ax25t=ax25_find_cb(&ax25->source_addr, &fsa->fsa_ax25.sax25_call, digi,
 		    	 ax25->ax25_dev->dev))) {
-		if (digi != NULL)
-			kfree(digi);
+		kfree(digi);
 		err = -EADDRINUSE;		/* Already such a connection */
 		ax25_cb_put(ax25t);
 		goto out;
@@ -1336,7 +1330,6 @@ static int ax25_accept(struct socket *sock, struct socket *newsock, int flags)
 	remove_wait_queue(sk->sk_sleep, &wait);
 
 	newsk		 = skb->sk;
-	newsk->sk_pair	 = NULL;
 	newsk->sk_socket = newsock;
 	newsk->sk_sleep	 = &newsock->wait;
 

@@ -51,7 +51,7 @@
 int ibmphp_debug;
 
 static int debug;
-MODULE_PARM (debug, "i");
+module_param(debug, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC (debug, "Debugging mode enabled or not");
 MODULE_LICENSE ("GPL");
 MODULE_DESCRIPTION (DRIVER_DESC);
@@ -190,7 +190,7 @@ static inline int power_on (struct slot *slot_cur)
 		err ("command not completed successfully in power_on\n");
 		return -EIO;
 	}
-	long_delay (3 * HZ); /* For ServeRAID cards, and some 66 PCI */
+	msleep(3000);	/* For ServeRAID cards, and some 66 PCI */
 	return 0;
 }
 
@@ -838,8 +838,11 @@ static int set_bus (struct slot * slot_cur)
 	int rc;
 	u8 speed;
 	u8 cmd = 0x0;
-	struct pci_dev *dev = NULL;
 	int retval;
+	static struct pci_device_id ciobx[] = {
+		{ PCI_DEVICE(PCI_VENDOR_ID_SERVERWORKS, 0x0101) },
+	        { },
+	};	
 
 	debug ("%s - entry slot # %d\n", __FUNCTION__, slot_cur->number);
 	if (SET_BUS_STATUS (slot_cur->ctrl) && is_bus_empty (slot_cur)) {
@@ -886,8 +889,7 @@ static int set_bus (struct slot * slot_cur)
 				break;
 			case BUS_SPEED_133:
 				/* This is to take care of the bug in CIOBX chip */
-				while ((dev = pci_find_device(PCI_VENDOR_ID_SERVERWORKS,
-							      0x0101, dev)) != NULL)
+				if (pci_dev_present(ciobx))
 					ibmphp_hpc_writeslot (slot_cur, HPC_BUS_100PCIXMODE);
 				cmd = HPC_BUS_133PCIXMODE;
 				break;
@@ -913,7 +915,7 @@ static int set_bus (struct slot * slot_cur)
 	}
 	/* This is for x440, once Brandon fixes the firmware, 
 	will not need this delay */
-	long_delay (1 * HZ);
+	msleep(1000);
 	debug ("%s -Exit\n", __FUNCTION__);
 	return 0;
 }

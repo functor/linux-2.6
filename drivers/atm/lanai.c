@@ -191,7 +191,7 @@
 #define LANAI_EEPROM_SIZE	(128)
 
 typedef int vci_t;
-typedef unsigned long bus_addr_t;
+typedef void __iomem *bus_addr_t;
 
 /* DMA buffer in host memory for TX, RX, or service list. */
 struct lanai_buffer {
@@ -471,7 +471,7 @@ enum lanai_register {
 static inline bus_addr_t reg_addr(const struct lanai_dev *lanai,
 	enum lanai_register reg)
 {
-	return lanai->base + (bus_addr_t) reg;
+	return lanai->base + reg;
 }
 
 static inline u32 reg_read(const struct lanai_dev *lanai,
@@ -651,7 +651,7 @@ static inline u32 cardvcc_read(const struct lanai_vcc *lvcc,
 {
 	u32 val;
 	APRINTK(lvcc->vbase != 0, "cardvcc_read: unbound vcc!\n");
-	val= readl(lvcc->vbase + (bus_addr_t) offset);
+	val= readl(lvcc->vbase + offset);
 	RWDEBUG("VR vci=%04d 0x%02X = 0x%08X\n",
 	    lvcc->vci, (int) offset, val);
 	return val;
@@ -666,7 +666,7 @@ static inline void cardvcc_write(const struct lanai_vcc *lvcc,
 	    (unsigned int) val, lvcc->vci, (unsigned int) offset);
 	RWDEBUG("VW vci=%04d 0x%02X > 0x%08X\n",
 	    lvcc->vci, (unsigned int) offset, (unsigned int) val);
-	writel(val, lvcc->vbase + (bus_addr_t) offset);
+	writel(val, lvcc->vbase + offset);
 }
 
 /* -------------------- COMPUTE SIZE OF AN AAL5 PDU: */
@@ -813,7 +813,7 @@ static void lanai_shutdown_tx_vci(struct lanai_dev *lanai,
 			DPRINTK("read, write = %d, %d\n", read, write);
 			break;
 		}
-		schedule_timeout(HZ / 25);
+		msleep(40);
 	}
 	/* 15.2.2 - clear out all tx registers */
 	cardvcc_write(lvcc, 0, vcc_txreadptr);
@@ -1481,7 +1481,7 @@ static inline struct lanai_vcc *new_lanai_vcc(void)
 	struct lanai_vcc *lvcc;
 	lvcc = (struct lanai_vcc *) kmalloc(sizeof(*lvcc), GFP_KERNEL);
 	if (likely(lvcc != NULL)) {
-		lvcc->vbase = 0;
+		lvcc->vbase = NULL;
 		lvcc->rx.atmvcc = lvcc->tx.atmvcc = NULL;
 		lvcc->nref = 0;
 		memset(&lvcc->stats, 0, sizeof lvcc->stats);
@@ -1565,7 +1565,7 @@ static inline void host_vcc_unbind(struct lanai_dev *lanai,
 	if (lvcc->vbase == 0)
 		return;	/* This vcc was never bound */
 	DPRINTK("Unbinding vci %d\n", lvcc->vci);
-	lvcc->vbase = 0;
+	lvcc->vbase = NULL;
 	lanai->vccs[lvcc->vci] = NULL;
 #ifdef USE_POWERDOWN
 	if (--lanai->nbound == 0) {
@@ -2177,7 +2177,7 @@ static int __init lanai_dev_open(struct atm_dev *atmdev)
 	/* 3.2: PCI initialization */
 	if ((result = lanai_pci_start(lanai)) != 0)
 		goto error;
-	raw_base = (bus_addr_t) lanai->pci->resource[0].start;
+	raw_base = lanai->pci->resource[0].start;
 	lanai->base = (bus_addr_t) ioremap(raw_base, LANAI_MAPPING_SIZE);
 	if (lanai->base == 0) {
 		printk(KERN_ERR DEV_LABEL ": couldn't remap I/O space\n");
@@ -2279,7 +2279,7 @@ static int __init lanai_dev_open(struct atm_dev *atmdev)
 	lanai->conf1 = reg_read(lanai, Config1_Reg) | CONFIG1_POWERDOWN;
 	conf1_write(lanai);
 #endif
-	iounmap((void *) lanai->base);
+	iounmap(lanai->base);
     error_pci:
 	pci_disable_device(lanai->pci);
     error:
@@ -2309,7 +2309,7 @@ static void lanai_dev_close(struct atm_dev *atmdev)
 	pci_disable_device(lanai->pci);
 	vcc_table_deallocate(lanai);
 	service_buffer_deallocate(lanai);
-	iounmap((void *) lanai->base);
+	iounmap(lanai->base);
 	kfree(lanai);
 }
 

@@ -172,8 +172,7 @@ mpc85xx_cds_show_cpuinfo(struct seq_file *m)
 
         seq_printf(m, "Vendor\t\t: Freescale Semiconductor\n");
 	seq_printf(m, "Machine\t\t: CDS (%x)\n", cadmus[CM_VER]);
-        seq_printf(m, "bus freq\t: %u.%.6u MHz\n", freq / 1000000,
-                   freq % 1000000);
+	seq_printf(m, "clock\t\t: %dMHz\n", freq / 1000000);
         seq_printf(m, "PVR\t\t: 0x%x\n", pvid);
         seq_printf(m, "SVR\t\t: 0x%x\n", svid);
 
@@ -191,10 +190,15 @@ mpc85xx_cds_show_cpuinfo(struct seq_file *m)
 static void cpm2_cascade(int irq, void *dev_id, struct pt_regs *regs)
 {
 	while((irq = cpm2_get_irq(regs)) >= 0)
-	{
-		ppc_irq_dispatch_handler(regs,irq);
-	}
+		__do_IRQ(irq, regs);
 }
+
+static struct irqaction cpm2_irqaction = {
+	.handler = cpm2_cascade,
+	.flags = SA_INTERRUPT,
+	.mask = CPU_MASK_NONE,
+	.name = "cpm2_cascade",
+};
 #endif /* CONFIG_CPM2 */
 
 void __init
@@ -237,7 +241,7 @@ mpc85xx_cds_init_IRQ(void)
 	immap->im_intctl.ic_scprrh = 0x05309770;
 	immap->im_intctl.ic_scprrl = 0x05309770;
 
-	request_irq(MPC85xx_IRQ_CPM, cpm2_cascade, SA_INTERRUPT, "cpm2_cascade", NULL);
+	setup_irq(MPC85xx_IRQ_CPM, &cpm2_irqaction);
 #endif
 
         return;
@@ -307,7 +311,7 @@ mpc85xx_exclude_device(u_char bus, u_char devfn)
 {
 	if (bus == 0 && PCI_SLOT(devfn) == 0)
 		return PCIBIOS_DEVICE_NOT_FOUND;
-#if CONFIG_85xx_PCI2
+#ifdef CONFIG_85xx_PCI2
 	/* With the current code we know PCI2 will be bus 2, however this may
 	 * not be guarnteed */
 	if (bus == 2 && PCI_SLOT(devfn) == 0)
@@ -356,10 +360,6 @@ mpc85xx_cds_setup_arch(void)
 #ifdef CONFIG_PCI
         /* setup PCI host bridges */
         mpc85xx_setup_hose();
-#endif
-
-#ifdef CONFIG_DUMMY_CONSOLE
-        conswitchp = &dummy_con;
 #endif
 
 #ifdef CONFIG_SERIAL_8250

@@ -97,6 +97,8 @@ void default_idle(void)
  */
 void cpu_idle(void)
 {
+	local_fiq_enable();
+
 	/* endless idle loop with no priority at all */
 	while (1) {
 		void (*idle)(void) = pm_idle;
@@ -313,6 +315,9 @@ void flush_thread(void)
 
 	memset(thread->used_cp, 0, sizeof(thread->used_cp));
 	memset(&tsk->thread.debug, 0, sizeof(struct debug_info));
+#if defined(CONFIG_IWMMXT)
+	iwmmxt_task_release(thread);
+#endif
 	fp_init(&thread->fpstate);
 #if defined(CONFIG_VFP)
 	vfp_flush_thread(&thread->vfpstate);
@@ -323,6 +328,9 @@ void release_thread(struct task_struct *dead_task)
 {
 #if defined(CONFIG_VFP)
 	vfp_release_thread(&dead_task->thread_info->vfpstate);
+#endif
+#if defined(CONFIG_IWMMXT)
+	iwmmxt_task_release(dead_task->thread_info);
 #endif
 }
 

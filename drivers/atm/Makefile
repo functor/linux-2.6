@@ -3,7 +3,7 @@
 #
 
 fore_200e-objs	:= fore200e.o
-host-progs	:= fore200e_mkfirm
+hostprogs-y	:= fore200e_mkfirm
 
 # Files generated that shall be removed upon make clean
 clean-files := atmsar11.bin atmsar11.bin1 atmsar11.bin2 pca200e.bin \
@@ -68,4 +68,4 @@ $(obj)/fore200e_sba_fw.c: $(patsubst "%", %, $(CONFIG_ATM_FORE200E_SBA_FW)) \
 # deal with the various suffixes of the binary firmware images
 $(obj)/%.bin $(obj)/%.bin1 $(obj)/%.bin2: $(src)/%.data
 	objcopy -Iihex $< -Obinary $@.gz
-	gzip -df $@.gz
+	gzip -n -df $@.gz

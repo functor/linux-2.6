@@ -10,6 +10,7 @@
 #include "linux/major.h"
 #include "linux/mm.h"
 #include "linux/init.h"
+#include "linux/console.h"
 #include "asm/termbits.h"
 #include "asm/irq.h"
 #include "line.h"
@@ -53,8 +54,9 @@ static int ssl_remove(char *str);
 
 static struct line_driver driver = {
 	.name 			= "UML serial line",
-	.devfs_name 		= "tts/%d",
-	.major 			= TTYAUX_MAJOR,
+	.device_name 		= "ttS",
+	.devfs_name 		= "tts/",
+	.major 			= TTY_MAJOR,
 	.minor_start 		= 64,
 	.type 		 	= TTY_DRIVER_TYPE_SERIAL,
 	.subtype 	 	= 0,
@@ -109,15 +111,15 @@ static void ssl_close(struct tty_struct *tty, struct file * filp)
 	line_close(serial_lines, tty);
 }
 
-static int ssl_write(struct tty_struct * tty, int from_user,
+static int ssl_write(struct tty_struct * tty,
 		     const unsigned char *buf, int count)
 {
-	return(line_write(serial_lines, tty, from_user, buf, count));
+	return(line_write(serial_lines, tty, buf, count));
 }
 
 static void ssl_put_char(struct tty_struct *tty, unsigned char ch)
 {
-	line_write(serial_lines, tty, 0, &ch, sizeof(ch));
+	line_write(serial_lines, tty, &ch, sizeof(ch));
 }
 
 static void ssl_flush_chars(struct tty_struct *tty)
@@ -149,6 +151,9 @@ static int ssl_ioctl(struct tty_struct *tty, struct file * file,
 	case TCSETSW:
 	case TCGETA:
 	case TIOCMGET:
+	case TCSBRK:
+	case TCSBRKP:
+	case TIOCMSET:
 		ret = -ENOIOCTLCMD;
 		break;
 	default:
@@ -212,6 +217,37 @@ static struct tty_operations ssl_ops = {
  */
 static int ssl_init_done = 0;
 
+static void ssl_console_write(struct console *c, const char *string,
+			      unsigned len)
+{
+	struct line *line = &serial_lines[c->index];
+	if(ssl_init_done)
+		down(&line->sem);
+	console_write_chan(&line->chan_list, string, len);
+	if(ssl_init_done)
+		up(&line->sem);
+}
+
+static struct tty_driver *ssl_console_device(struct console *c, int *index)
+{
+	*index = c->index;
+	return ssl_driver;
+}
+
+static int ssl_console_setup(struct console *co, char *options)
+{
+	return(0);
+}
+
+static struct console ssl_cons = {
+	name:		"ttyS",
+	write:		ssl_console_write,
+	device:		ssl_console_device,
+	setup:		ssl_console_setup,
+	flags:		CON_PRINTBUFFER,
+	index:		-1,
+};
+
 int ssl_init(void)
 {
 	char *new_title;
@@ -227,17 +263,18 @@ int ssl_init(void)
 	new_title = add_xterm_umid(opts.xterm_title);
 	if(new_title != NULL) opts.xterm_title = new_title;
 
+	register_console(&ssl_cons);
 	ssl_init_done = 1;
 	return(0);
 }
 
-__initcall(ssl_init);
+late_initcall(ssl_init);
 
 static int ssl_chan_setup(char *str)
 {
-	line_setup(serial_lines, sizeof(serial_lines)/sizeof(serial_lines[0]),
-		   str, 1);
-	return(1);
+	return(line_setup(serial_lines,
+			  sizeof(serial_lines)/sizeof(serial_lines[0]),
+			  str, 1));
 }
 
 __setup("ssl", ssl_chan_setup);

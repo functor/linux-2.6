@@ -1,5 +1,5 @@
 /*
- * $Id: edb7312.c,v 1.11 2004/07/14 09:52:55 dwmw2 Exp $
+ * $Id: edb7312.c,v 1.13 2004/11/04 13:24:14 gleixner Exp $
  *
  * Handle mapping of the NOR flash on Cogent EDB7312 boards
  *
@@ -82,8 +82,7 @@ int __init init_edb7312nor(void)
 
        	printk(KERN_NOTICE MSG_PREFIX "0x%08x at 0x%08x\n", 
 	       WINDOW_SIZE, WINDOW_ADDR);
-	edb7312nor_map.virt = (unsigned long)
-	  ioremap(WINDOW_ADDR, WINDOW_SIZE);
+	edb7312nor_map.virt = ioremap(WINDOW_ADDR, WINDOW_SIZE);
 
 	if (!edb7312nor_map.virt) {
 		printk(MSG_PREFIX "failed to ioremap\n");

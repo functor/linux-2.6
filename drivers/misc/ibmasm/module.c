@@ -59,13 +59,20 @@
 
 static int __init ibmasm_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 {
-	int result = -ENOMEM;
+	int err, result = -ENOMEM;
 	struct service_processor *sp;
+
+	if ((err = pci_enable_device(pdev))) {
+		printk(KERN_ERR "%s: can't enable PCI device at %s\n",
+			DRIVER_NAME, pci_name(pdev));
+		return err;
+	}
 
 	sp = kmalloc(sizeof(struct service_processor), GFP_KERNEL);
 	if (sp == NULL) {
 		dev_err(&pdev->dev, "Failed to allocate memory\n");
-		return result;
+		result = -ENOMEM;
+		goto error_kmalloc;
 	}
 	memset(sp, 0, sizeof(struct service_processor));
 
@@ -148,6 +155,8 @@ error_heartbeat:
 	ibmasm_event_buffer_exit(sp);
 error_eventbuffer:
 	kfree(sp);
+error_kmalloc:
+	pci_disable_device(pdev);
 
 	return result;
 }
@@ -166,6 +175,7 @@ static void __exit ibmasm_remove_one(struct pci_dev *pdev)
 	iounmap(sp->base_address);
 	ibmasm_event_buffer_exit(sp);
 	kfree(sp);
+	pci_disable_device(pdev);
 }
 
 static struct pci_device_id ibmasm_pci_table[] =
@@ -199,10 +209,9 @@ static int __init ibmasm_init(void)
 		return result;
 	}
 	result = pci_register_driver(&ibmasm_driver);
-	if (result <= 0) {
-		pci_unregister_driver(&ibmasm_driver);
+	if (result) {
 		ibmasmfs_unregister();
-		return -ENODEV;
+		return result;
 	}
 	ibmasm_register_panic_notifier();
 	info(DRIVER_DESC " version " DRIVER_VERSION " loaded");
@@ -215,3 +224,4 @@ module_exit(ibmasm_exit);
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
+

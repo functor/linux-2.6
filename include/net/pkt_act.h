@@ -3,7 +3,7 @@
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -60,7 +60,7 @@ tcf_hash_destroy(struct tcf_st *p)
 			*p1p = p->next;
 			write_unlock_bh(&tcf_t_lock);
 #ifdef CONFIG_NET_ESTIMATOR
-			qdisc_kill_estimator(&p->stats);
+			gen_kill_estimator(&p->bstats, &p->rate_est);
 #endif
 			kfree(p);
 			return;
@@ -212,9 +212,8 @@ tcf_hash_search(struct tc_action *a, u32 index)
 	if (p != NULL) {
 		a->priv = p;
 		return 1;
-	} else {
-		return 0;
 	}
+	return 0;
 }
 
 #ifdef CONFIG_NET_ACT_INIT
@@ -257,9 +256,8 @@ tcf_hash_create(struct tc_st *parm, struct rtattr *est, struct tc_action *a, int
 	p->tm.install = jiffies;
 	p->tm.lastuse = jiffies;
 #ifdef CONFIG_NET_ESTIMATOR
-	if (est) {
-		qdisc_new_estimator(&p->stats, p->stats_lock, est);
-	}
+	if (est)
+		gen_new_estimator(&p->bstats, &p->rate_est, p->stats_lock, est);
 #endif
 	h = tcf_hash(p->index);
 	write_lock_bh(&tcf_t_lock);
@@ -274,11 +272,11 @@ tcf_hash_create(struct tc_st *parm, struct rtattr *est, struct tc_action *a, int
 static inline struct tcf_st *
 tcf_hash_init(struct tc_st *parm, struct rtattr *est, struct tc_action *a, int size, int ovr, int bind)
 {
-	struct tcf_st *p;
-	p = tcf_hash_check (parm,a,ovr,bind);
-	if (NULL == p) {
-		return tcf_hash_create(parm, est, a, size, ovr, bind);
-	}
+	struct tcf_st *p = tcf_hash_check (parm,a,ovr,bind);
+
+	if (!p)
+		p = tcf_hash_create(parm, est, a, size, ovr, bind);
+	return p;
 }
 
 #endif

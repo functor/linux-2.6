@@ -40,8 +40,6 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/timer.h>
-#include <linux/tty.h>
-#include <linux/serial.h>
 #include <linux/serial_core.h>
 #include <linux/major.h>
 #include <asm/io.h>
@@ -59,7 +57,7 @@
 
 #ifdef PCMCIA_DEBUG
 static int pc_debug = PCMCIA_DEBUG;
-MODULE_PARM(pc_debug, "i");
+module_param(pc_debug, int, 0644);
 #define DEBUG(n, args...) if (pc_debug>(n)) printk(KERN_DEBUG args)
 static char *version = "serial_cs.c 1.134 2002/05/04 05:48:53 (David Hinds)";
 #else
@@ -81,7 +79,7 @@ static int do_sound = 1;
 static int buggy_uart;
 
 module_param(irq_mask, uint, 0444);
-module_param_array(irq_list, int, irq_list_count, 0444);
+module_param_array(irq_list, int, &irq_list_count, 0444);
 module_param(do_sound, int, 0444);
 module_param(buggy_uart, int, 0444);
 
@@ -148,7 +146,7 @@ static void serial_remove(dev_link_t *link)
 	 */
 	if (info->link.state & DEV_CONFIG) {
 		for (i = 0; i < info->ndev; i++)
-			unregister_serial(info->line[i]);
+			serial8250_unregister_port(info->line[i]);
 
 		info->link.dev = NULL;
 
@@ -304,21 +302,22 @@ static void serial_detach(dev_link_t * link)
 
 /*====================================================================*/
 
-static int setup_serial(struct serial_info * info, ioaddr_t port, int irq)
+static int setup_serial(struct serial_info * info, ioaddr_t iobase, int irq)
 {
-	struct serial_struct serial;
+	struct uart_port port;
 	int line;
 
-	memset(&serial, 0, sizeof (serial));
-	serial.port = port;
-	serial.irq = irq;
-	serial.flags = UPF_SKIP_TEST | UPF_SHARE_IRQ;
+	memset(&port, 0, sizeof (struct uart_port));
+	port.iobase = iobase;
+	port.irq = irq;
+	port.flags = UPF_BOOT_AUTOCONF | UPF_SKIP_TEST | UPF_SHARE_IRQ;
+	port.uartclk = 1843200;
 	if (buggy_uart)
-		serial.flags |= UPF_BUGGY_UART;
-	line = register_serial(&serial);
+		port.flags |= UPF_BUGGY_UART;
+	line = serial8250_register_port(&port);
 	if (line < 0) {
-		printk(KERN_NOTICE "serial_cs: register_serial() at 0x%04lx,"
-		       " irq %d failed\n", (u_long) serial.port, serial.irq);
+		printk(KERN_NOTICE "serial_cs: serial8250_register_port() at "
+		       "0x%04lx, irq %d failed\n", (u_long)iobase, irq);
 		return -EINVAL;
 	}
 
@@ -363,9 +362,10 @@ next_tuple(client_handle_t handle, tuple_t * tuple, cisparse_t * parse)
 
 /*====================================================================*/
 
-static int simple_config(dev_link_t * link)
+static int simple_config(dev_link_t *link)
 {
 	static ioaddr_t base[5] = { 0x3f8, 0x2f8, 0x3e8, 0x2e8, 0x0 };
+	static int size_table[2] = { 8, 16 };
 	client_handle_t handle = link->handle;
 	struct serial_info *info = link->priv;
 	tuple_t tuple;
@@ -374,6 +374,7 @@ static int simple_config(dev_link_t * link)
 	cistpl_cftable_entry_t *cf = &parse.cftable_entry;
 	config_info_t config;
 	int i, j, try;
+	int s;
 
 	/* If the card is already configured, look up the port and irq */
 	i = pcmcia_get_configuration_info(handle, &config);
@@ -399,29 +400,30 @@ static int simple_config(dev_link_t * link)
 	tuple.Attributes = 0;
 	tuple.DesiredTuple = CISTPL_CFTABLE_ENTRY;
 	/* Two tries: without IO aliases, then with aliases */
-	for (try = 0; try < 2; try++) {
-		i = first_tuple(handle, &tuple, &parse);
-		while (i != CS_NO_MORE_ITEMS) {
-			if (i != CS_SUCCESS)
-				goto next_entry;
-			if (cf->vpp1.present & (1 << CISTPL_POWER_VNOM))
-				link->conf.Vpp1 = link->conf.Vpp2 =
-				    cf->vpp1.param[CISTPL_POWER_VNOM] / 10000;
-			if ((cf->io.nwin > 0) && (cf->io.win[0].len == 8) &&
-			    (cf->io.win[0].base != 0)) {
-				link->conf.ConfigIndex = cf->index;
-				link->io.BasePort1 = cf->io.win[0].base;
-				link->io.IOAddrLines = (try == 0) ?
-				    16 : cf->io.flags & CISTPL_IO_LINES_MASK;
-				i = pcmcia_request_io(link->handle, &link->io);
-				if (i == CS_SUCCESS)
-					goto found_port;
+	for (s = 0; s < 2; s++) {
+		for (try = 0; try < 2; try++) {
+			i = first_tuple(handle, &tuple, &parse);
+			while (i != CS_NO_MORE_ITEMS) {
+				if (i != CS_SUCCESS)
+					goto next_entry;
+				if (cf->vpp1.present & (1 << CISTPL_POWER_VNOM))
+					link->conf.Vpp1 = link->conf.Vpp2 =
+					    cf->vpp1.param[CISTPL_POWER_VNOM] / 10000;
+				if ((cf->io.nwin > 0) && (cf->io.win[0].len == size_table[s]) &&
+					    (cf->io.win[0].base != 0)) {
+					link->conf.ConfigIndex = cf->index;
+					link->io.BasePort1 = cf->io.win[0].base;
+					link->io.IOAddrLines = (try == 0) ?
+					    16 : cf->io.flags & CISTPL_IO_LINES_MASK;
+					i = pcmcia_request_io(link->handle, &link->io);
+					if (i == CS_SUCCESS)
+						goto found_port;
+				}
+next_entry:
+				i = next_tuple(handle, &tuple, &parse);
 			}
-		      next_entry:
-			i = next_tuple(handle, &tuple, &parse);
 		}
 	}
-
 	/* Second pass: try to find an entry that isn't picky about
 	   its base address, then try to grab any standard serial port
 	   address, and finally try to get any free port. */

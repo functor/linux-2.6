@@ -116,7 +116,7 @@ void k2_pcibios_fixup(void)
 	/*
 	 * Enable DMA support on hdc
 	 */
-	ide_dev = pci_find_device(PCI_VENDOR_ID_AL,
+	ide_dev = pci_get_device(PCI_VENDOR_ID_AL,
 				  PCI_DEVICE_ID_AL_M5229, NULL);
 
 	if (ide_dev) {
@@ -126,6 +126,7 @@ void k2_pcibios_fixup(void)
 		ide_dma_base = pci_resource_start(ide_dev, 4);
 		outb(0x00, ide_dma_base + 0x2);
 		outb(0x20, ide_dma_base + 0xa);
+		pci_dev_put(ide_dev);
 	}
 #endif
 }
@@ -462,10 +463,6 @@ static void __init k2_setup_arch(void)
 		ROOT_DEV = Root_NFS;
 #else
 		ROOT_DEV = Root_HDC1;
-#endif
-
-#ifdef CONFIG_DUMMY_CONSOLE
-	conswitchp = &dummy_con;
 #endif
 
 	/* Identify the system */

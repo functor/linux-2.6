@@ -3,15 +3,14 @@
 
 #include <linux/kernel.h>
 #include <linux/fs.h>
-#include <linux/ckrm.h>
+#include <linux/ckrm_events.h>
 #include <linux/ckrm_rc.h>
 #include <linux/ckrm_ce.h>
 
-/* The following declarations cannot be included in any of ckrm*.h files 
-   without jumping hoops. Remove later when rearrangements done */
-
-// Hubertus .. taken out 
-//extern ckrm_res_callback_t ckrm_res_ctlrs[CKRM_MAX_RES_CTLRS];
+/*
+ * The following declarations cannot be included in any of ckrm*.h files 
+ * without jumping hoops. Remove later when rearrangements done
+ */
 
 #define RCFS_MAGIC	0x4feedbac
 #define RCFS_MAGF_NAMELEN 20
@@ -36,10 +35,12 @@ struct rcfs_magf {
 };
 
 struct rcfs_mfdesc {
-	struct rcfs_magf *rootmf;	// Root directory and its magic files
-	int rootmflen;			// length of above array
-	// Can have a different magf describing magic files 
-	// for non-root entries too
+	struct rcfs_magf *rootmf;	/* Root directory and its magic files */
+	int rootmflen;			/* length of above array */
+	/*
+	 * Can have a different magf describing magic files 
+	 * for non-root entries too.
+	 */
 };
 
 extern struct rcfs_mfdesc *genmfdesc[];
@@ -74,7 +75,7 @@ extern struct file_operations members_fileops;
 extern struct file_operations reclassify_fileops;
 extern struct file_operations rcfs_file_operations;
 
-// Callbacks into rcfs from ckrm 
+/* Callbacks into rcfs from ckrm */
 
 typedef struct rcfs_functions {
 	int (*mkroot) (struct rcfs_magf *, int, struct dentry **);
@@ -88,9 +89,8 @@ int rcfs_deregister_classtype(ckrm_classtype_t *);
 int rcfs_mkroot(struct rcfs_magf *, int, struct dentry **);
 int rcfs_rmroot(struct dentry *);
 
-#define RCFS_ROOT "/rcfs"  	// Hubertus .. we should use the mount point 
-				// instead of hardcoded
+#define RCFS_ROOT "/rcfs"  	/* TODO:  Should use the mount point */
 extern struct dentry *rcfs_rootde;
 extern rbce_eng_callback_t rcfs_eng_callbacks;
 
-#endif				/* _LINUX_RCFS_H */
+#endif	/* _LINUX_RCFS_H */

@@ -1,4 +1,5 @@
-/* ckrm_rc.h - Header file to be used by Resource controllers of CKRM
+/*
+ *  ckrm_rc.h - Header file to be used by Resource controllers of CKRM
  *
  * Copyright (C) Hubertus Franke, IBM Corp. 2003
  *           (C) Shailabh Nagar,  IBM Corp. 2003
@@ -8,7 +9,7 @@
  * Provides data structures, macros and kernel API of CKRM for 
  * resource controllers.
  *
- * Latest version, more details at http://ckrm.sf.net
+ * More details at http://ckrm.sf.net
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,7 +18,8 @@
  *
  */
 
-/* Changes
+/*
+ * Changes
  *
  * 12 Nov 2003
  *        Created.
@@ -31,34 +33,30 @@
 #ifdef CONFIG_CKRM
 
 #include <linux/list.h>
-#include <linux/ckrm.h>
+#include <linux/ckrm_events.h>
 #include <linux/ckrm_ce.h>
 #include <linux/seq_file.h>
 
-/* maximum number of class types */
-#define CKRM_MAX_CLASSTYPES         32
-/* maximum classtype name length */
-#define CKRM_MAX_CLASSTYPE_NAME     32
+#define CKRM_MAX_CLASSTYPES         32	/* maximum number of class types */
+#define CKRM_MAX_CLASSTYPE_NAME     32 	/* maximum classtype name length */
 
-/* maximum resource controllers per classtype */
-#define CKRM_MAX_RES_CTLRS           8
-/* maximum resource controller name length */
-#define CKRM_MAX_RES_NAME          128
+#define CKRM_MAX_RES_CTLRS           8	/* maximum resource controllers per classtype */
+#define CKRM_MAX_RES_NAME          128	/* maximum resource controller name length */
 
 struct ckrm_core_class;
 struct ckrm_classtype;
 
-/*****************************************************************************
+/*
  * Share specifications
- *****************************************************************************/
+ */
 
 typedef struct ckrm_shares {
 	int my_guarantee;
 	int my_limit;
 	int total_guarantee;
 	int max_limit;
-	int unused_guarantee;	// not used as parameters
-	int cur_max_limit;	// not used as parameters
+	int unused_guarantee;	/* not used as parameters */
+	int cur_max_limit;	/* not used as parameters */
 } ckrm_shares_t;
 
 #define CKRM_SHARE_UNCHANGED     (-1)	
@@ -66,17 +64,17 @@ typedef struct ckrm_shares {
 #define CKRM_SHARE_DFLT_TOTAL_GUARANTEE (100) 
 #define CKRM_SHARE_DFLT_MAX_LIMIT     (100)  
 
-/******************************************************************************
+/*
  * RESOURCE CONTROLLERS
- *****************************************************************************/
+ */
 
 /* resource controller callback structure */
 
 typedef struct ckrm_res_ctlr {
 	char res_name[CKRM_MAX_RES_NAME];
-	int res_hdepth;		// maximum hierarchy
-	int resid;		// (for now) same as the enum resid
-	struct ckrm_classtype *classtype;    // classtype owning this res ctlr
+	int res_hdepth;		/* maximum hierarchy */
+	int resid;		/* (for now) same as the enum resid */
+	struct ckrm_classtype *classtype;    /* classtype owning this res ctlr */
 
 	/* allocate/free new resource class object for resource controller */
 	void *(*res_alloc) (struct ckrm_core_class * this,
@@ -94,16 +92,15 @@ typedef struct ckrm_res_ctlr {
 	int (*set_config) (void *, const char *cfgstr);
 
 	void (*change_resclass) (void *, void *, void *);
-
 } ckrm_res_ctlr_t;
 
-/******************************************************************************
+/*
  * CKRM_CLASSTYPE
  *
  * A <struct ckrm_classtype> object describes a dimension for CKRM to classify 
  * along. Need to provide methods to create and manipulate class objects in
  * this dimension
- *****************************************************************************/
+ */
 
 /* list of predefined class types, we always recognize */
 #define CKRM_CLASSTYPE_TASK_CLASS    0
@@ -113,40 +110,42 @@ typedef struct ckrm_res_ctlr {
 #define CKRM_MAX_TYPENAME_LEN       32
 
 typedef struct ckrm_classtype {
+	/* TODO: Review for cache alignment */
 
 	/* resource controllers */
-	spinlock_t res_ctlrs_lock;  // protect res ctlr related data
-	int max_res_ctlrs;          // max number of res ctlrs allowed 
-	int max_resid;              // max resid used                      
-	int resid_reserved;	    // max number of reserved controllers  
-	long bit_res_ctlrs;	    // bitmap of resource ID used              
+
+	spinlock_t res_ctlrs_lock;  /* protect res ctlr related data */
+	int max_res_ctlrs;          /* max number of res ctlrs allowed */
+	int max_resid;              /* max resid used */
+	int resid_reserved;	    /* max number of reserved controllers */
+	long bit_res_ctlrs;	    /* bitmap of resource ID used */
 	atomic_t nr_resusers[CKRM_MAX_RES_CTLRS];
 	ckrm_res_ctlr_t *res_ctlrs[CKRM_MAX_RES_CTLRS];
-
 
 	/* state about my classes */
 
 	struct ckrm_core_class *default_class;	
-	struct list_head classes;  // link all classes of this classtype
+	struct list_head classes;  /* link all classes of this classtype */
 	int num_classes;	 
 
 	/* state about my ce interaction */
-	atomic_t ce_regd;		// if CE registered
-	int ce_cb_active;	// if Callbacks active
-	atomic_t ce_nr_users;	// number of active transient calls 
-	struct ckrm_eng_callback ce_callbacks;	// callback engine
+	atomic_t ce_regd;		/* if CE registered */
+	int ce_cb_active;		/* if Callbacks active */
+	atomic_t ce_nr_users;		/* number of active transient calls */
+	struct ckrm_eng_callback ce_callbacks;	/* callback engine */
 
-	// Begin classtype-rcfs private data. No rcfs/fs specific types used. 
-	int mfidx;		// Index into genmfdesc array used to initialize
-	void *mfdesc;		// Array of descriptors of root and magic files
-	int mfcount;		// length of above array 
-	void *rootde;		// root dentry created by rcfs
-	// End rcfs private data 
+	/* Begin classtype-rcfs private data. No rcfs/fs specific types used.  */
 
-	char name[CKRM_MAX_TYPENAME_LEN]; // currently same as mfdesc[0]->name 
-	                                  // but could be different
-	int typeID;		// unique TypeID
-	int maxdepth;		// maximum depth supported
+	int mfidx;		/* Index into genmfdesc array used to initialize */
+	void *mfdesc;		/* Array of descriptors of root and magic files */
+	int mfcount;		/* length of above array */
+	void *rootde;		/* root dentry created by rcfs */
+	/* End rcfs private data */
+
+	char name[CKRM_MAX_TYPENAME_LEN]; /* currently same as mfdesc[0]->name  */
+	                                  /* but could be different */
+	int typeID;			  /* unique TypeID */
+	int maxdepth;			  /* maximum depth supported */
 
 	/* functions to be called on any class type by external API's */
 
@@ -170,15 +169,15 @@ typedef struct ckrm_classtype {
 
 	/* class initialization for new RC */
 	void (*add_resctrl) (struct ckrm_core_class *, int resid);	
-
 } ckrm_classtype_t;
 
-/******************************************************************************
+/*
  * CKRM CORE CLASS
  *      common part to any class structure (i.e. instance of a classtype)
- ******************************************************************************/
+ */
 
-/* basic definition of a hierarchy that is to be used by the the CORE classes
+/*
+ * basic definition of a hierarchy that is to be used by the the CORE classes
  * and can be used by the resource class objects
  */
 
@@ -192,21 +191,20 @@ typedef struct ckrm_hnode {
 
 typedef struct ckrm_core_class {
 	struct ckrm_classtype *classtype;	
-	void *res_class[CKRM_MAX_RES_CTLRS];	// resource classes 
-	spinlock_t class_lock;	                // protects list,array above 
+	void *res_class[CKRM_MAX_RES_CTLRS];	/* resource classes */
+	spinlock_t class_lock;	                /* protects list,array above */
 
-	
-	struct list_head objlist;		// generic object list 
-	struct list_head clslist;		// peer classtype classes
-	struct dentry *dentry;			// dentry of inode in the RCFS
+	struct list_head objlist;		/* generic object list */
+	struct list_head clslist;		/* peer classtype classes */
+	struct dentry *dentry;			/* dentry of inode in the RCFS */
 	int magic;
 
-	struct ckrm_hnode hnode;		// hierarchy
-	rwlock_t hnode_rwlock;			// protects hnode above.
+	struct ckrm_hnode hnode;		/* hierarchy */
+	rwlock_t hnode_rwlock;			/* protects hnode above. */
 	atomic_t refcnt;
 	const char *name;
-	int delayed;				// core deletion delayed 
-						// because of race conditions
+	int delayed;				/* core deletion delayed  */
+						/* because of race conditions */
 } ckrm_core_class_t;
 
 /* type coerce between derived class types and ckrm core class type */
@@ -218,9 +216,9 @@ typedef struct ckrm_core_class {
 /* what type is a class of ISA */
 #define class_isa(clsptr)          (class_core(clsptr)->classtype)
 
-/******************************************************************************
+/*
  * OTHER
- ******************************************************************************/
+ */
 
 #define ckrm_get_res_class(rescls, resid, type) \
 	((type*) (((resid != -1) && ((rescls) != NULL) \
@@ -237,6 +235,11 @@ extern int ckrm_init_core_class(struct ckrm_classtype *clstype,
 				struct ckrm_core_class *parent,
 				const char *name);
 extern int ckrm_release_core_class(struct ckrm_core_class *);	
+
+/* TODO: can disappear after cls del debugging */
+
+extern struct ckrm_res_ctlr *ckrm_resctlr_lookup(struct ckrm_classtype *type,
+						 const char *resname);
 
 extern void ckrm_lock_hier(struct ckrm_core_class *);
 extern void ckrm_unlock_hier(struct ckrm_core_class *);
@@ -276,7 +279,7 @@ static inline void ckrm_core_grab(struct ckrm_core_class *core)
 
 static inline void ckrm_core_drop(struct ckrm_core_class *core)
 {
-	// only make definition available in this context
+	/* only make definition available in this context */
 	extern void ckrm_free_core_class(struct ckrm_core_class *core);
 	if (core && (atomic_dec_and_test(&core->refcnt)))
 		ckrm_free_core_class(core);
@@ -287,11 +290,14 @@ static inline unsigned int ckrm_is_core_valid(ckrm_core_class_t * core)
 	return (core && (core->magic == CKRM_CORE_MAGIC));
 }
 
-// iterate through all associate resource controllers:
-// requires following arguments (ckrm_core_class *cls, 
-//                               ckrm_res_ctrl   *ctlr,
-//                               void            *robj,
-//                               int              bmap)
+/*
+ * iterate through all associate resource controllers:
+ * requires following arguments (ckrm_core_class *cls, 
+ *                               ckrm_res_ctrl   *ctlr,
+ *                               void            *robj,
+ *                               int              bmap)
+ */
+
 #define forall_class_resobjs(cls,rcbs,robj,bmap)			\
        for ( bmap=((cls->classtype)->bit_res_ctlrs) ;			\
 	     ({ int rid; ((rid=ffs(bmap)-1) >= 0) &&			\
@@ -302,34 +308,14 @@ static inline unsigned int ckrm_is_core_valid(ckrm_core_class_t * core)
 
 extern struct ckrm_classtype *ckrm_classtypes[];	
 
-/*-----------------------------------------------------------------------------
- * CKRM event callback specification for the classtypes or resource controllers 
- *   typically an array is specified using CKRM_EVENT_SPEC terminated with 
- *   CKRM_EVENT_SPEC_LAST and then that array is registered using
- *   ckrm_register_event_set.
- *   Individual registration of event_cb is also possible
- *-----------------------------------------------------------------------------*/
-
-struct ckrm_event_spec {
-	enum ckrm_event ev;
-	struct ckrm_hook_cb cb;
-};
-#define CKRM_EVENT_SPEC(EV,FCT) { CKRM_EVENT_##EV, \
-					{ (ckrm_event_cb)FCT, NULL } }
-
-int ckrm_register_event_set(struct ckrm_event_spec especs[]);
-int ckrm_unregister_event_set(struct ckrm_event_spec especs[]);
-int ckrm_register_event_cb(enum ckrm_event ev, struct ckrm_hook_cb *cb);
-int ckrm_unregister_event_cb(enum ckrm_event ev, struct ckrm_hook_cb *cb);
-
-/******************************************************************************
+/*
  * CE Invocation interface
- ******************************************************************************/
+ */
 
 #define ce_protect(ctype)      (atomic_inc(&((ctype)->ce_nr_users)))
 #define ce_release(ctype)      (atomic_dec(&((ctype)->ce_nr_users)))
 
-// CE Classification callbacks with 
+/* CE Classification callbacks with */
 
 #define CE_CLASSIFY_NORET(ctype, event, objs_to_classify...)		\
 do {									\
@@ -355,17 +341,15 @@ do {									\
 						cls,objs_to_classify);	\
 } while (0)
 
-/***************
+/*
  * RCFS related 
- ***************/
+ */
 
 /* vars needed by other modules/core */
 
 extern int rcfs_mounted;
 extern int rcfs_engine_regd;
 
-#endif				// CONFIG_CKRM
-
-#endif				// __KERNEL__
-
-#endif				// _LINUX_CKRM_RC_H
+#endif /* CONFIG_CKRM */
+#endif /* __KERNEL__ */
+#endif /* _LINUX_CKRM_RC_H */

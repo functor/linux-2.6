@@ -39,6 +39,17 @@ config USB_GADGET
 	   If in doubt, say "N" and don't enable these drivers; most people
 	   don't have this kind of hardware (except maybe inside Linux PDAs).
 
+config USB_GADGET_DEBUG_FILES
+	boolean "Debugging information files"
+	depends on USB_GADGET && PROC_FS
+	help
+	   Some of the drivers in the "gadget" framework can expose
+	   debugging information in files such as /proc/driver/udc
+	   (for a peripheral controller).  The information in these
+	   files may help when you're troubleshooting or bringing up a
+	   driver on a new board.   Enable these files by choosing "Y"
+	   here.  If in doubt, or to conserve kernel memory, say "N".
+
 #
 # USB Peripheral Controller Support
 #
@@ -135,6 +146,18 @@ config USB_SA1100
 	depends on USB_GADGET_SA1100
 	default USB_GADGET
 
+config USB_GADGET_LH7A40X
+	boolean "LH7A40X"
+	depends on ARCH_LH7A40X
+	help
+    This driver provides USB Device Controller driver for LH7A40x
+
+config USB_LH7A40X
+	tristate
+	depends on USB_GADGET_LH7A40X
+	default USB_GADGET
+
+
 config USB_GADGET_DUMMY_HCD
 	boolean "Dummy HCD (DEVELOPMENT)"
 	depends on USB && EXPERIMENTAL
@@ -162,6 +185,37 @@ config USB_DUMMY_HCD
 	tristate
 	depends on USB_GADGET_DUMMY_HCD
 	default USB_GADGET
+
+config USB_GADGET_OMAP
+	boolean "OMAP USB Device Controller"
+	depends on ARCH_OMAP
+	select ISP1301_OMAP if MACH_OMAP_H2
+	help
+	   Many Texas Instruments OMAP processors have flexible full
+	   speed USB device controllers, with support for up to 30
+	   endpoints (plus endpoint zero).  This driver supports the
+	   controller in the OMAP 1611, and should work with controllers
+	   in other OMAP processors too, given minor tweaks.
+
+	   Say "y" to link the driver statically, or "m" to build a
+	   dynamically linked module called "omap_udc" and force all
+	   gadget drivers to also be dynamically linked.
+
+config USB_OMAP
+	tristate
+	depends on USB_GADGET_OMAP
+	default USB_GADGET
+
+config USB_OTG
+	boolean "OTG Support"
+	depends on USB_GADGET_OMAP && ARCH_OMAP_OTG && USB_OHCI_HCD
+	help
+	   The most notable feature of USB OTG is support for a
+	   "Dual-Role" device, which can act as either a device
+	   or a host.  The initial role choice can be changed
+	   later, when two dual-role devices talk to each other.
+
+	   Select this only if your OMAP board has a Mini-AB connector.
 
 endchoice
 
@@ -275,7 +329,7 @@ config USB_GADGETFS
 	  dynamically linked module called "gadgetfs".
 
 config USB_FILE_STORAGE
-	tristate "File-backed Storage Gadget (DEVELOPMENT)"
+	tristate "File-backed Storage Gadget"
 	# we don't support the SA1100 because of its limitations
 	depends on USB_GADGET_SA1100 = n
 	help
@@ -288,7 +342,7 @@ config USB_FILE_STORAGE
 	  dynamically linked module called "g_file_storage".
 
 config USB_FILE_STORAGE_TEST
-	bool "File-backed Storage Gadget test version"
+	bool "File-backed Storage Gadget testing version"
 	depends on USB_FILE_STORAGE
 	default n
 	help

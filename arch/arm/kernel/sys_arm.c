@@ -51,6 +51,13 @@ asmlinkage int sys_pipe(unsigned long __user *fildes)
 	return error;
 }
 
+/*
+ * This is the lowest virtual address we can permit any user space
+ * mapping to be mapped at.  This is particularly important for
+ * non-high vector CPUs.
+ */
+#define MIN_MAP_ADDR	(PAGE_SIZE)
+
 /* common code for old and new mmaps */
 inline long do_mmap2(
 	unsigned long addr, unsigned long len,
@@ -62,11 +69,7 @@ inline long do_mmap2(
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
-	/*
-	 * If we are doing a fixed mapping, and address < PAGE_SIZE,
-	 * then deny it.
-	 */
-	if (flags & MAP_FIXED && addr < PAGE_SIZE && vectors_base() == 0)
+	if (flags & MAP_FIXED && addr < MIN_MAP_ADDR)
 		goto out;
 
 	error = -EBADF;
@@ -119,12 +122,7 @@ sys_arm_mremap(unsigned long addr, unsigned long old_len,
 {
 	unsigned long ret = -EINVAL;
 
-	/*
-	 * If we are doing a fixed mapping, and address < PAGE_SIZE,
-	 * then deny it.
-	 */
-	if (flags & MREMAP_FIXED && new_addr < PAGE_SIZE &&
-	    vectors_base() == 0)
+	if (flags & MREMAP_FIXED && new_addr < MIN_MAP_ADDR)
 		goto out;
 
 	down_write(&current->mm->mmap_sem);
@@ -217,11 +215,8 @@ asmlinkage int sys_ipc(uint call, int first, int second, int third,
 				return ret;
 			return put_user(raddr, (ulong __user *)third);
 		}
-		case 1:	/* iBCS2 emulator entry point */
-			if (!segment_eq(get_fs(), get_ds()))
-				return -EINVAL;
-			return do_shmat(first, (char __user *) ptr,
-					second, (ulong __user *) third);
+		case 1: /* Of course, we don't support iBCS2! */
+			return -EINVAL;
 		}
 	case SHMDT: 
 		return sys_shmdt ((char __user *)ptr);
@@ -257,7 +252,7 @@ asmlinkage int sys_clone(unsigned long clone_flags, unsigned long newsp, struct 
 	if (!newsp)
 		newsp = regs->ARM_sp;
 
-	return do_fork(clone_flags & ~CLONE_IDLETASK, newsp, regs, 0, NULL, NULL);
+	return do_fork(clone_flags, newsp, regs, 0, NULL, NULL);
 }
 
 asmlinkage int sys_vfork(struct pt_regs *regs)

@@ -29,7 +29,7 @@ unsigned long hpet_address;	/* hpet memory map physical address */
 
 static int use_hpet; 		/* can be used for runtime check of hpet */
 static int boot_hpet_disable; 	/* boottime override for HPET timer */
-static unsigned long hpet_virt_address;	/* hpet kernel virtual address */
+static void __iomem * hpet_virt_address;	/* hpet kernel virtual address */
 
 #define FSEC_TO_USEC (1000000000UL)
 
@@ -60,13 +60,46 @@ void __init wait_hpet_tick(void)
 }
 #endif
 
+static int hpet_timer_stop_set_go(unsigned long tick)
+{
+	unsigned int cfg;
+
+	/*
+	 * Stop the timers and reset the main counter.
+	 */
+	cfg = hpet_readl(HPET_CFG);
+	cfg &= ~HPET_CFG_ENABLE;
+	hpet_writel(cfg, HPET_CFG);
+	hpet_writel(0, HPET_COUNTER);
+	hpet_writel(0, HPET_COUNTER + 4);
+
+	/*
+	 * Set up timer 0, as periodic with first interrupt to happen at
+	 * hpet_tick, and period also hpet_tick.
+	 */
+	cfg = hpet_readl(HPET_T0_CFG);
+	cfg |= HPET_TN_ENABLE | HPET_TN_PERIODIC |
+	       HPET_TN_SETVAL | HPET_TN_32BIT;
+	hpet_writel(cfg, HPET_T0_CFG);
+	hpet_writel(tick, HPET_T0_CMP);
+
+	/*
+ 	 * Go!
+ 	 */
+	cfg = hpet_readl(HPET_CFG);
+	cfg |= HPET_CFG_ENABLE | HPET_CFG_LEGACY;
+	hpet_writel(cfg, HPET_CFG);
+
+	return 0;
+}
+
 /*
  * Check whether HPET was found by ACPI boot parse. If yes setup HPET
  * counter 0 for kernel base timer.
  */
 int __init hpet_enable(void)
 {
-	unsigned int cfg, id;
+	unsigned int id;
 	unsigned long tick_fsec_low, tick_fsec_high; /* tick in femto sec */
 	unsigned long hpet_tick_rem;
 
@@ -76,8 +109,7 @@ int __init hpet_enable(void)
 	if (!hpet_address) {
 		return -1;
 	}
-	hpet_virt_address = (unsigned long) ioremap_nocache(hpet_address,
-	                                                    HPET_MMAP_SIZE);
+	hpet_virt_address = ioremap_nocache(hpet_address, HPET_MMAP_SIZE);
 	/*
 	 * Read the period, compute tick and quotient.
 	 */
@@ -109,31 +141,8 @@ int __init hpet_enable(void)
 	if (hpet_tick_rem > (hpet_period >> 1))
 		hpet_tick++; /* rounding the result */
 
-	/*
-	 * Stop the timers and reset the main counter.
-	 */
-	cfg = hpet_readl(HPET_CFG);
-	cfg &= ~HPET_CFG_ENABLE;
-	hpet_writel(cfg, HPET_CFG);
-	hpet_writel(0, HPET_COUNTER);
-	hpet_writel(0, HPET_COUNTER + 4);
-
-	/*
-	 * Set up timer 0, as periodic with first interrupt to happen at
-	 * hpet_tick, and period also hpet_tick.
-	 */
-	cfg = hpet_readl(HPET_T0_CFG);
-	cfg |= HPET_TN_ENABLE | HPET_TN_PERIODIC |
-	       HPET_TN_SETVAL | HPET_TN_32BIT;
-	hpet_writel(cfg, HPET_T0_CFG);
-	hpet_writel(hpet_tick, HPET_T0_CMP);
-
-	/*
- 	 * Go!
- 	 */
-	cfg = hpet_readl(HPET_CFG);
-	cfg |= HPET_CFG_ENABLE | HPET_CFG_LEGACY;
-	hpet_writel(cfg, HPET_CFG);
+	if (hpet_timer_stop_set_go(hpet_tick))
+		return -1;
 
 	use_hpet = 1;
 
@@ -152,6 +161,7 @@ int __init hpet_enable(void)
 		 * Register with driver.
 		 * Timer0 and Timer1 is used by platform.
 		 */
+		hd.hd_phys_address = hpet_address;
 		hd.hd_address = hpet_virt_address;
 		hd.hd_nirqs = ntimer;
 		hd.hd_flags = HPET_DATA_PLATFORM;
@@ -162,11 +172,11 @@ int __init hpet_enable(void)
 		hd.hd_irq[0] = HPET_LEGACY_8254;
 		hd.hd_irq[1] = HPET_LEGACY_RTC;
 		if (ntimer > 2) {
-			struct hpet		*hpet;
-			struct hpet_timer	*timer;
+			struct hpet __iomem	*hpet;
+			struct hpet_timer __iomem *timer;
 			int			i;
 
-			hpet = (struct hpet *) hpet_virt_address;
+			hpet = hpet_virt_address;
 
 			for (i = 2, timer = &hpet->hpet_timers[2]; i < ntimer;
 				timer++, i++)
@@ -184,6 +194,11 @@ int __init hpet_enable(void)
 	wait_timer_tick = wait_hpet_tick;
 #endif
 	return 0;
+}
+
+int hpet_reenable(void)
+{
+	return hpet_timer_stop_set_go(hpet_tick);
 }
 
 int is_hpet_enabled(void)

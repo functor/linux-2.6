@@ -48,6 +48,9 @@ static spinlock_t xfrm_state_gc_lock = SPIN_LOCK_UNLOCKED;
 
 static void __xfrm_state_delete(struct xfrm_state *x);
 
+static struct xfrm_state_afinfo *xfrm_state_get_afinfo(unsigned short family);
+static void xfrm_state_put_afinfo(struct xfrm_state_afinfo *afinfo);
+
 static void xfrm_state_gc_destroy(struct xfrm_state *x)
 {
 	if (del_timer(&x->timer))
@@ -183,7 +186,7 @@ struct xfrm_state *xfrm_state_alloc(void)
 		x->lft.soft_packet_limit = XFRM_INF;
 		x->lft.hard_byte_limit = XFRM_INF;
 		x->lft.hard_packet_limit = XFRM_INF;
-		x->lock = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&x->lock);
 	}
 	return x;
 }
@@ -387,13 +390,17 @@ void xfrm_state_insert(struct xfrm_state *x)
 	spin_unlock_bh(&xfrm_state_lock);
 }
 
+static struct xfrm_state *__xfrm_find_acq_byseq(u32 seq);
+
 int xfrm_state_add(struct xfrm_state *x)
 {
 	struct xfrm_state_afinfo *afinfo;
 	struct xfrm_state *x1;
+	int family;
 	int err;
 
-	afinfo = xfrm_state_get_afinfo(x->props.family);
+	family = x->props.family;
+	afinfo = xfrm_state_get_afinfo(family);
 	if (unlikely(afinfo == NULL))
 		return -EAFNOSUPPORT;
 
@@ -407,9 +414,18 @@ int xfrm_state_add(struct xfrm_state *x)
 		goto out;
 	}
 
-	x1 = afinfo->find_acq(
-		x->props.mode, x->props.reqid, x->id.proto,
-		&x->id.daddr, &x->props.saddr, 0);
+	if (x->km.seq) {
+		x1 = __xfrm_find_acq_byseq(x->km.seq);
+		if (x1 && xfrm_addr_cmp(&x1->id.daddr, &x->id.daddr, family)) {
+			xfrm_state_put(x1);
+			x1 = NULL;
+		}
+	}
+
+	if (!x1)
+		x1 = afinfo->find_acq(
+			x->props.mode, x->props.reqid, x->id.proto,
+			&x->id.daddr, &x->props.saddr, 0);
 
 	__xfrm_state_insert(x);
 	err = 0;
@@ -513,7 +529,7 @@ int xfrm_state_check_expire(struct xfrm_state *x)
 	return 0;
 }
 
-int xfrm_state_check_space(struct xfrm_state *x, struct sk_buff *skb)
+static int xfrm_state_check_space(struct xfrm_state *x, struct sk_buff *skb)
 {
 	int nhead = x->props.header_len + LL_RESERVED_SPACE(skb->dst->dev)
 		- skb_headroom(skb);
@@ -570,23 +586,30 @@ xfrm_find_acq(u8 mode, u32 reqid, u8 proto,
 
 /* Silly enough, but I'm lazy to build resolution list */
 
-struct xfrm_state * xfrm_find_acq_byseq(u32 seq)
+static struct xfrm_state *__xfrm_find_acq_byseq(u32 seq)
 {
 	int i;
 	struct xfrm_state *x;
 
-	spin_lock_bh(&xfrm_state_lock);
 	for (i = 0; i < XFRM_DST_HSIZE; i++) {
 		list_for_each_entry(x, xfrm_state_bydst+i, bydst) {
 			if (x->km.seq == seq) {
 				xfrm_state_hold(x);
-				spin_unlock_bh(&xfrm_state_lock);
 				return x;
 			}
 		}
 	}
-	spin_unlock_bh(&xfrm_state_lock);
 	return NULL;
+}
+
+struct xfrm_state *xfrm_find_acq_byseq(u32 seq)
+{
+	struct xfrm_state *x;
+
+	spin_lock_bh(&xfrm_state_lock);
+	x = __xfrm_find_acq_byseq(seq);
+	spin_unlock_bh(&xfrm_state_lock);
+	return x;
 }
  
 u32 xfrm_get_acqseq(void)
@@ -718,19 +741,6 @@ void xfrm_replay_advance(struct xfrm_state *x, u32 seq)
 		diff = x->replay.seq - seq;
 		x->replay.bitmap |= (1U << diff);
 	}
-}
-
-int xfrm_check_selectors(struct xfrm_state **x, int n, struct flowi *fl)
-{
-	int i;
-
-	for (i=0; i<n; i++) {
-		int match;
-		match = xfrm_selector_match(&x[i]->sel, fl, x[i]->props.family);
-		if (!match)
-			return -EINVAL;
-	}
-	return 0;
 }
 
 static struct list_head xfrm_km_list = LIST_HEAD_INIT(xfrm_km_list);
@@ -894,7 +904,7 @@ int xfrm_state_unregister_afinfo(struct xfrm_state_afinfo *afinfo)
 	return err;
 }
 
-struct xfrm_state_afinfo *xfrm_state_get_afinfo(unsigned short family)
+static struct xfrm_state_afinfo *xfrm_state_get_afinfo(unsigned short family)
 {
 	struct xfrm_state_afinfo *afinfo;
 	if (unlikely(family >= NPROTO))
@@ -907,7 +917,7 @@ struct xfrm_state_afinfo *xfrm_state_get_afinfo(unsigned short family)
 	return afinfo;
 }
 
-void xfrm_state_put_afinfo(struct xfrm_state_afinfo *afinfo)
+static void xfrm_state_put_afinfo(struct xfrm_state_afinfo *afinfo)
 {
 	if (unlikely(afinfo == NULL))
 		return;

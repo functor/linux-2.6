@@ -27,27 +27,19 @@ static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;
 static int pcifix[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 255 };
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for " CARD_NAME " soundcard.");
-MODULE_PARM_SYNTAX(index, SNDRV_INDEX_DESC);
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for " CARD_NAME " soundcard.");
-MODULE_PARM_SYNTAX(id, SNDRV_ID_DESC);
-module_param_array(enable, bool, boot_devs, 0444);
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable " CARD_NAME " soundcard.");
-MODULE_PARM_SYNTAX(enable, SNDRV_ENABLE_DESC);
-module_param_array(pcifix, int, boot_devs, 0444);
+module_param_array(pcifix, int, NULL, 0444);
 MODULE_PARM_DESC(pcifix, "Enable VIA-workaround for " CARD_NAME " soundcard.");
-MODULE_PARM_SYNTAX(pcifix,
-		   SNDRV_ENABLED
-		   ",allows:{{0,Disabled},{1,Latency},{2,Bridge},{3,Both},{255,Auto}},default:4,dialog:check");
 
 MODULE_DESCRIPTION("Aureal vortex");
-MODULE_CLASSES("{sound}");
 MODULE_LICENSE("GPL");
-MODULE_DEVICES("{{Aureal Semiconductor Inc., Aureal Vortex Sound Processor}}");
+MODULE_SUPPORTED_DEVICE("{{Aureal Semiconductor Inc., Aureal Vortex Sound Processor}}");
 
 MODULE_DEVICE_TABLE(pci, snd_vortex_ids);
 
@@ -122,8 +114,7 @@ static void __devinit snd_vortex_workaround(struct pci_dev *vortex, int fix)
 // (see "Management of Cards and Components")
 static int snd_vortex_dev_free(snd_device_t * device)
 {
-	vortex_t *vortex = snd_magic_cast(vortex_t, device->device_data,
-					  return -ENXIO);
+	vortex_t *vortex = device->device_data;
 
 	vortex_gameport_unregister(vortex);
 	vortex_core_shutdown(vortex);
@@ -132,7 +123,7 @@ static int snd_vortex_dev_free(snd_device_t * device)
 	free_irq(vortex->irq, vortex);
 	pci_release_regions(vortex->pci_dev);
 	pci_disable_device(vortex->pci_dev);
-	snd_magic_kfree(vortex);
+	kfree(vortex);
 
 	return 0;
 }
@@ -159,7 +150,7 @@ snd_vortex_create(snd_card_t * card, struct pci_dev *pci, vortex_t ** rchip)
 	}
 	pci_set_dma_mask(pci, VORTEX_DMA_MASK);
 
-	chip = snd_magic_kcalloc(vortex_t, 0, GFP_KERNEL);
+	chip = kcalloc(1, sizeof(*chip), GFP_KERNEL);
 	if (chip == NULL)
 		return -ENOMEM;
 
@@ -224,7 +215,7 @@ snd_vortex_create(snd_card_t * card, struct pci_dev *pci, vortex_t ** rchip)
 	vortex_core_shutdown(chip);
       core_out:
 	//FIXME: the type of chip->mmio might need to be changed??
-	iounmap((void *)chip->mmio);
+	iounmap(chip->mmio);
       ioremap_out:
 	pci_release_regions(chip->pci_dev);
       regions_out:
@@ -324,7 +315,7 @@ snd_vortex_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 #endif
 
 	// (5)
-	strcpy(card->driver, "Aureal Vortex");
+	strcpy(card->driver, CARD_NAME_SHORT);
 	strcpy(card->shortname, CARD_NAME_SHORT);
 	sprintf(card->longname, "%s at 0x%lx irq %i",
 		card->shortname, chip->io, chip->irq);

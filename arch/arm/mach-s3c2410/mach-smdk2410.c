@@ -47,7 +47,8 @@
 #include <asm/arch/regs-serial.h>
 
 #include "s3c2410.h"
-
+#include "devs.h"
+#include "cpu.h"
 
 static struct map_desc smdk2410_iodesc[] __initdata = {
   /* nothing here yet */
@@ -57,14 +58,10 @@ static struct map_desc smdk2410_iodesc[] __initdata = {
 #define ULCON S3C2410_LCON_CS8 | S3C2410_LCON_PNONE | S3C2410_LCON_STOPB
 #define UFCON S3C2410_UFCON_RXTRIG8 | S3C2410_UFCON_FIFOMODE
 
-/* base baud rate for all our UARTs */
-static unsigned long smdk2410_serial_clock = 24*1000*1000;
-
 static struct s3c2410_uartcfg smdk2410_uartcfgs[] = {
 	[0] = {
 		.hwport	     = 0,
 		.flags	     = 0,
-		.clock	     = &smdk2410_serial_clock,
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
@@ -72,7 +69,6 @@ static struct s3c2410_uartcfg smdk2410_uartcfgs[] = {
 	[1] = {
 		.hwport	     = 1,
 		.flags	     = 0,
-		.clock	     = &smdk2410_serial_clock,
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
@@ -80,28 +76,35 @@ static struct s3c2410_uartcfg smdk2410_uartcfgs[] = {
 	[2] = {
 		.hwport	     = 2,
 		.flags	     = 0,
-		.clock	     = &smdk2410_serial_clock,
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
 	}
 };
 
+static struct platform_device *smdk2410_devices[] __initdata = {
+	&s3c_device_usb,
+	&s3c_device_lcd,
+	&s3c_device_wdt,
+	&s3c_device_i2c,
+	&s3c_device_iis,
+};
+
+static struct s3c24xx_board smdk2410_board __initdata = {
+	.devices       = smdk2410_devices,
+	.devices_count = ARRAY_SIZE(smdk2410_devices)
+};
 
 void __init smdk2410_map_io(void)
 {
-	s3c2410_map_io(smdk2410_iodesc, ARRAY_SIZE(smdk2410_iodesc));
-	s3c2410_uartcfgs = smdk2410_uartcfgs;
+	s3c24xx_init_io(smdk2410_iodesc, ARRAY_SIZE(smdk2410_iodesc));
+	s3c2410_init_uarts(smdk2410_uartcfgs, ARRAY_SIZE(smdk2410_uartcfgs));
+	s3c24xx_set_board(&smdk2410_board);
 }
 
 void __init smdk2410_init_irq(void)
 {
 	s3c2410_init_irq();
-}
-
-void __init smdk2410_init_time(void)
-{
-	s3c2410_init_time();
 }
 
 MACHINE_START(SMDK2410, "SMDK2410") /* @TODO: request a new identifier and switch
@@ -111,5 +114,7 @@ MACHINE_START(SMDK2410, "SMDK2410") /* @TODO: request a new identifier and switc
      BOOT_PARAMS(S3C2410_SDRAM_PA + 0x100)
      MAPIO(smdk2410_map_io)
      INITIRQ(smdk2410_init_irq)
-     INITTIME(smdk2410_init_time)
+     .timer		= &s3c2410_timer,
 MACHINE_END
+
+

@@ -49,10 +49,10 @@
 #define W83781D_RT			1
 
 /* Addresses to scan */
-static unsigned short normal_i2c[] = { I2C_CLIENT_END };
-static unsigned short normal_i2c_range[] = { 0x20, 0x2f, I2C_CLIENT_END };
+static unsigned short normal_i2c[] = { 0x20, 0x21, 0x22, 0x23, 0x24, 0x25,
+					0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b,
+					0x2c, 0x2d, 0x2e, 0x2f, I2C_CLIENT_END };
 static unsigned int normal_isa[] = { 0x0290, I2C_CLIENT_ISA_END };
-static unsigned int normal_isa_range[] = { I2C_CLIENT_ISA_END };
 
 /* Insmod parameters */
 SENSORS_INSMOD_6(w83781d, w83782d, w83783s, w83627hf, as99127f, w83697hf);
@@ -60,7 +60,7 @@ I2C_CLIENT_MODULE_PARM(force_subclients, "List of subclient addresses: "
 		    "{bus, clientaddr, subclientaddr1, subclientaddr2}");
 
 static int init = 1;
-MODULE_PARM(init, "i");
+module_param(init, bool, 0);
 MODULE_PARM_DESC(init, "Set to zero to bypass chip initialization");
 
 /* Constants specified below */
@@ -318,18 +318,18 @@ store_in_reg(MAX, max);
 static ssize_t \
 show_regs_in_##offset (struct device *dev, char *buf) \
 { \
-        return show_in(dev, buf, 0x##offset); \
+        return show_in(dev, buf, offset); \
 } \
 static DEVICE_ATTR(in##offset##_input, S_IRUGO, show_regs_in_##offset, NULL);
 
 #define sysfs_in_reg_offset(reg, offset) \
 static ssize_t show_regs_in_##reg##offset (struct device *dev, char *buf) \
 { \
-	return show_in_##reg (dev, buf, 0x##offset); \
+	return show_in_##reg (dev, buf, offset); \
 } \
 static ssize_t store_regs_in_##reg##offset (struct device *dev, const char *buf, size_t count) \
 { \
-	return store_in_##reg (dev, buf, count, 0x##offset); \
+	return store_in_##reg (dev, buf, count, offset); \
 } \
 static DEVICE_ATTR(in##offset##_##reg, S_IRUGO| S_IWUSR, show_regs_in_##reg##offset, store_regs_in_##reg##offset);
 
@@ -384,18 +384,18 @@ store_fan_min(struct device *dev, const char *buf, size_t count, int nr)
 #define sysfs_fan_offset(offset) \
 static ssize_t show_regs_fan_##offset (struct device *dev, char *buf) \
 { \
-	return show_fan(dev, buf, 0x##offset); \
+	return show_fan(dev, buf, offset); \
 } \
 static DEVICE_ATTR(fan##offset##_input, S_IRUGO, show_regs_fan_##offset, NULL);
 
 #define sysfs_fan_min_offset(offset) \
 static ssize_t show_regs_fan_min##offset (struct device *dev, char *buf) \
 { \
-	return show_fan_min(dev, buf, 0x##offset); \
+	return show_fan_min(dev, buf, offset); \
 } \
 static ssize_t store_regs_fan_min##offset (struct device *dev, const char *buf, size_t count) \
 { \
-	return store_fan_min(dev, buf, count, 0x##offset); \
+	return store_fan_min(dev, buf, count, offset); \
 } \
 static DEVICE_ATTR(fan##offset##_min, S_IRUGO | S_IWUSR, show_regs_fan_min##offset, store_regs_fan_min##offset);
 
@@ -464,18 +464,18 @@ store_temp_reg(HYST, max_hyst);
 static ssize_t \
 show_regs_temp_##offset (struct device *dev, char *buf) \
 { \
-	return show_temp(dev, buf, 0x##offset); \
+	return show_temp(dev, buf, offset); \
 } \
 static DEVICE_ATTR(temp##offset##_input, S_IRUGO, show_regs_temp_##offset, NULL);
 
 #define sysfs_temp_reg_offset(reg, offset) \
 static ssize_t show_regs_temp_##reg##offset (struct device *dev, char *buf) \
 { \
-	return show_temp_##reg (dev, buf, 0x##offset); \
+	return show_temp_##reg (dev, buf, offset); \
 } \
 static ssize_t store_regs_temp_##reg##offset (struct device *dev, const char *buf, size_t count) \
 { \
-	return store_temp_##reg (dev, buf, count, 0x##offset); \
+	return store_temp_##reg (dev, buf, count, offset); \
 } \
 static DEVICE_ATTR(temp##offset##_##reg, S_IRUGO| S_IWUSR, show_regs_temp_##reg##offset, store_regs_temp_##reg##offset);
 
@@ -503,9 +503,9 @@ show_vid_reg(struct device *dev, char *buf)
 }
 
 static
-DEVICE_ATTR(in0_ref, S_IRUGO, show_vid_reg, NULL);
+DEVICE_ATTR(cpu0_vid, S_IRUGO, show_vid_reg, NULL);
 #define device_create_file_vid(client) \
-device_create_file(&client->dev, &dev_attr_in0_ref);
+device_create_file(&client->dev, &dev_attr_cpu0_vid);
 static ssize_t
 show_vrm_reg(struct device *dev, char *buf)
 {
@@ -740,22 +740,26 @@ static ssize_t show_regs_pwm_##offset (struct device *dev, char *buf) \
 { \
 	return show_pwm_reg(dev, buf, offset); \
 } \
-static ssize_t store_regs_pwm_##offset (struct device *dev, const char *buf, size_t count) \
+static ssize_t store_regs_pwm_##offset (struct device *dev, \
+		const char *buf, size_t count) \
 { \
 	return store_pwm_reg(dev, buf, count, offset); \
 } \
-static DEVICE_ATTR(fan##offset##_pwm, S_IRUGO | S_IWUSR, show_regs_pwm_##offset, store_regs_pwm_##offset);
+static DEVICE_ATTR(pwm##offset, S_IRUGO | S_IWUSR, \
+		show_regs_pwm_##offset, store_regs_pwm_##offset);
 
 #define sysfs_pwmenable(offset) \
 static ssize_t show_regs_pwmenable_##offset (struct device *dev, char *buf) \
 { \
 	return show_pwmenable_reg(dev, buf, offset); \
 } \
-static ssize_t store_regs_pwmenable_##offset (struct device *dev, const char *buf, size_t count) \
+static ssize_t store_regs_pwmenable_##offset (struct device *dev, \
+		const char *buf, size_t count) \
 { \
 	return store_pwmenable_reg(dev, buf, count, offset); \
 } \
-static DEVICE_ATTR(fan##offset##_pwm_enable, S_IRUGO | S_IWUSR, show_regs_pwmenable_##offset, store_regs_pwmenable_##offset);
+static DEVICE_ATTR(pwm##offset##_enable, S_IRUGO | S_IWUSR, \
+		show_regs_pwmenable_##offset, store_regs_pwmenable_##offset);
 
 sysfs_pwm(1);
 sysfs_pwm(2);
@@ -765,12 +769,12 @@ sysfs_pwm(4);
 
 #define device_create_file_pwm(client, offset) \
 do { \
-device_create_file(&client->dev, &dev_attr_fan##offset##_pwm); \
+device_create_file(&client->dev, &dev_attr_pwm##offset); \
 } while (0)
 
 #define device_create_file_pwmenable(client, offset) \
 do { \
-device_create_file(&client->dev, &dev_attr_fan##offset##_pwm_enable); \
+device_create_file(&client->dev, &dev_attr_pwm##offset##_enable); \
 } while (0)
 
 static ssize_t
@@ -815,8 +819,7 @@ store_sensor_reg(struct device *dev, const char *buf, size_t count, int nr)
 		data->sens[nr - 1] = val;
 		break;
 	default:
-		dev_err(&client->dev,
-		       "Invalid sensor type %ld; must be 1, 2, or %d\n",
+		dev_err(dev, "Invalid sensor type %ld; must be 1, 2, or %d\n",
 		       (long) val, W83781D_DEFAULT_BETA);
 		break;
 	}
@@ -1063,6 +1066,9 @@ w83781d_detect(struct i2c_adapter *adapter, int address, int kind)
 	
 	if (is_isa)
 		if (!request_region(address, W83781D_EXTENT, "w83781d")) {
+			dev_dbg(&adapter->dev, "Request of region "
+				"0x%x-0x%x for w83781d failed\n", address,
+				address + W83781D_EXTENT - 1);
 			err = -EBUSY;
 			goto ERROR0;
 		}
@@ -1076,15 +1082,11 @@ w83781d_detect(struct i2c_adapter *adapter, int address, int kind)
 			/* We need the timeouts for at least some LM78-like
 			   chips. But only if we read 'undefined' registers. */
 			i = inb_p(address + 1);
-			if (inb_p(address + 2) != i) {
-				err = -ENODEV;
-				goto ERROR1;
-			}
-			if (inb_p(address + 3) != i) {
-				err = -ENODEV;
-				goto ERROR1;
-			}
-			if (inb_p(address + 7) != i) {
+			if (inb_p(address + 2) != i
+			 || inb_p(address + 3) != i
+			 || inb_p(address + 7) != i) {
+				dev_dbg(&adapter->dev, "Detection of w83781d "
+					"chip failed at step 1\n");
 				err = -ENODEV;
 				goto ERROR1;
 			}
@@ -1093,8 +1095,13 @@ w83781d_detect(struct i2c_adapter *adapter, int address, int kind)
 			/* Let's just hope nothing breaks here */
 			i = inb_p(address + 5) & 0x7f;
 			outb_p(~i & 0x7f, address + 5);
-			if ((inb_p(address + 5) & 0x7f) != (~i & 0x7f)) {
+			val2 = inb_p(address + 5) & 0x7f;
+			if (val2 != (~i & 0x7f)) {
 				outb_p(i, address + 5);
+				dev_dbg(&adapter->dev, "Detection of w83781d "
+					"chip failed at step 2 (0x%x != "
+					"0x%x at 0x%x)\n", val2, ~i & 0x7f,
+					address + 5);
 				err = -ENODEV;
 				goto ERROR1;
 			}
@@ -1126,7 +1133,9 @@ w83781d_detect(struct i2c_adapter *adapter, int address, int kind)
 	   force_*=... parameter, and the Winbond will be reset to the right
 	   bank. */
 	if (kind < 0) {
-		if (w83781d_read_value(new_client, W83781D_REG_CONFIG) & 0x80){
+		if (w83781d_read_value(new_client, W83781D_REG_CONFIG) & 0x80) {
+			dev_dbg(&new_client->dev, "Detection failed at step "
+				"3\n");
 			err = -ENODEV;
 			goto ERROR2;
 		}
@@ -1136,6 +1145,8 @@ w83781d_detect(struct i2c_adapter *adapter, int address, int kind)
 		if ((!(val1 & 0x07)) &&
 		    (((!(val1 & 0x80)) && (val2 != 0xa3) && (val2 != 0xc3))
 		     || ((val1 & 0x80) && (val2 != 0x5c) && (val2 != 0x12)))) {
+			dev_dbg(&new_client->dev, "Detection failed at step "
+				"4\n");
 			err = -ENODEV;
 			goto ERROR2;
 		}
@@ -1145,6 +1156,8 @@ w83781d_detect(struct i2c_adapter *adapter, int address, int kind)
 				  ((val1 & 0x80) && (val2 == 0x5c)))) {
 			if (w83781d_read_value
 			    (new_client, W83781D_REG_I2C_ADDR) != address) {
+				dev_dbg(&new_client->dev, "Detection failed "
+					"at step 5\n");
 				err = -ENODEV;
 				goto ERROR2;
 			}
@@ -1167,6 +1180,8 @@ w83781d_detect(struct i2c_adapter *adapter, int address, int kind)
 		else if (val2 == 0x12)
 			vendid = asus;
 		else {
+			dev_dbg(&new_client->dev, "Chip was made by neither "
+				"Winbond nor Asus?\n");
 			err = -ENODEV;
 			goto ERROR2;
 		}
@@ -1187,10 +1202,10 @@ w83781d_detect(struct i2c_adapter *adapter, int address, int kind)
 			kind = w83697hf;
 		else {
 			if (kind == 0)
-				dev_warn(&new_client->dev,
-				       "Ignoring 'force' parameter for unknown chip at"
-				       "adapter %d, address 0x%02x\n",
-				       i2c_adapter_id(adapter), address);
+				dev_warn(&new_client->dev, "Ignoring 'force' "
+					 "parameter for unknown chip at "
+					 "adapter %d, address 0x%02x\n",
+					 i2c_adapter_id(adapter), address);
 			err = -EINVAL;
 			goto ERROR2;
 		}
@@ -1513,7 +1528,7 @@ w83781d_init_client(struct i2c_client *client)
 		w83781d_write_value(client, W83781D_REG_BEEP_INTS2, 0);
 	}
 
-	data->vrm = 82;
+	data->vrm = i2c_which_vrm();
 
 	if ((type != w83781d) && (type != as99127f)) {
 		tmp = w83781d_read_value(client, W83781D_REG_SCFG1);
@@ -1593,7 +1608,7 @@ static struct w83781d_data *w83781d_update_device(struct device *dev)
 	if (time_after
 	    (jiffies - data->last_updated, (unsigned long) (HZ + HZ / 2))
 	    || time_before(jiffies, data->last_updated) || !data->valid) {
-		pr_debug("Starting device update\n");
+		dev_dbg(dev, "Starting device update\n");
 
 		for (i = 0; i <= 8; i++) {
 			if ((data->type == w83783s || data->type == w83697hf)

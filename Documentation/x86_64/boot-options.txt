@@ -87,22 +87,8 @@ Non Executable Mappings
 
   noexec=on|off
 
-  on      Enable
+  on      Enable(default)
   off     Disable
-  noforce (default) Don't enable by default for heap/stack/data,
-          but allow PROT_EXEC to be effective
-
-  noexec32=opt{,opt}
-
-  Control the no exec default for 32bit processes.
-  Requires noexec=on or noexec=noforce to be effective.
-
-  Valid options:
-     all,on    Heap,stack,data is non executable.
-     off       (default) Heap,stack,data is executable
-     stack     Stack is non executable, heap/data is.
-     force     Don't imply PROT_EXEC for PROT_READ
-     compat    (default) Imply PROT_EXEC for PROT_READ
 
 SMP
 
@@ -136,17 +122,25 @@ PCI
 
 IOMMU
 
-  iommu=[size][,noagp][,off][,force][,noforce][,leak][,memaper[=order]][,soft]
+ iommu=[size][,noagp][,off][,force][,noforce][,leak][,memaper[=order]][,merge]
+         [,forcesac][,fullflush][,nomerge][,noaperture]
    size  set size of iommu (in bytes)
    noagp don't initialize the AGP driver and use full aperture.
    off   don't use the IOMMU
    leak  turn on simple iommu leak tracing (only when CONFIG_IOMMU_LEAK is on)
    memaper[=order] allocate an own aperture over RAM with size 32MB^order.
    noforce don't force IOMMU usage. Default.
-   force  Force IOMMU
-   soft   Use software bounce buffering for non 32bit IO. Default on Intel
-          machines. 
+   force  Force IOMMU.
+   merge  Do SG merging. Implies force (experimental)
+   nomerge Don't do SG merging.
+   forcesac For SAC mode for masks <40bits  (experimental)
+   fullflush Flush IOMMU on each allocation (default)
+   nofullflush Don't use IOMMU fullflush
+   allowed  overwrite iommu off workarounds for specific chipsets.
+   soft	 Use software bounce buffering (default for Intel machines)
+   noaperture Don't touch the aperture for AGP.
 
-  swiotlb=pages
+  swiotlb=pages[,force]
 
-  Prereserve that many 4K pages for the software IO bounce buffering.
+  pages  Prereserve that many 128K pages for the software IO bounce buffering.
+  force  Force all IO through the software TLB.

@@ -1,4 +1,6 @@
 /*
+    $Id: bttv-gpio.c,v 1.6 2004/11/03 09:04:50 kraxel Exp $
+
     bttv-gpio.c  --  gpio sub drivers
 
     sysfs-based sub driver interface for bttv
@@ -22,7 +24,7 @@
     You should have received a copy of the GNU General Public License
     along with this program; if not, write to the Free Software
     Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-    
+
 */
 
 #include <linux/module.h>
@@ -61,6 +63,7 @@ static void release_sub_device(struct device *dev)
 int bttv_sub_add_device(struct bttv_core *core, char *name)
 {
 	struct bttv_sub_device *sub;
+	int err;
 
 	sub = kmalloc(sizeof(*sub),GFP_KERNEL);
 	if (NULL == sub)
@@ -74,9 +77,13 @@ int bttv_sub_add_device(struct bttv_core *core, char *name)
 	snprintf(sub->dev.bus_id,sizeof(sub->dev.bus_id),"%s%d",
 		 name, core->nr);
 
+	err = device_register(&sub->dev);
+	if (0 != err) {
+		kfree(sub);
+		return err;
+	}
 	printk("bttv%d: add subdevice \"%s\"\n", core->nr, sub->dev.bus_id);
 	list_add_tail(&sub->list,&core->subs);
-	device_register(&sub->dev);
 	return 0;
 }
 
@@ -106,6 +113,20 @@ void bttv_gpio_irq(struct bttv_core *core)
 	}
 }
 
+void bttv_i2c_info(struct bttv_core *core, struct i2c_client *client, int attach)
+{
+	struct bttv_sub_driver *drv;
+	struct bttv_sub_device *dev;
+	struct list_head *item;
+
+	list_for_each(item,&core->subs) {
+		dev = list_entry(item,struct bttv_sub_device,list);
+		drv = to_bttv_sub_drv(dev->dev.driver);
+		if (drv && drv->i2c_info)
+			drv->i2c_info(dev,client,attach);
+	}
+}
+
 /* ----------------------------------------------------------------------- */
 /* external: sub-driver register/unregister                                */
 
@@ -113,8 +134,7 @@ int bttv_sub_register(struct bttv_sub_driver *sub, char *wanted)
 {
 	sub->drv.bus = &bttv_sub_bus_type;
 	snprintf(sub->wanted,sizeof(sub->wanted),"%s",wanted);
-	driver_register(&sub->drv);
-	return 0;
+	return driver_register(&sub->drv);
 }
 EXPORT_SYMBOL(bttv_sub_register);
 

@@ -41,6 +41,10 @@
 #define Dprintk(x...)
 #endif
 
+#ifdef CONFIG_GART_IOMMU
+extern int swiotlb;
+#endif
+
 extern char _stext[];
 
 DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
@@ -396,6 +400,8 @@ static inline int page_is_ram (unsigned long pagenr)
 	return 0;
 }
 
+extern int swiotlb_force;
+
 static struct kcore_list kcore_mem, kcore_vmalloc, kcore_kernel, kcore_modules,
 			 kcore_vsyscall;
 
@@ -405,7 +411,10 @@ void __init mem_init(void)
 	int tmp;
 
 #ifdef CONFIG_SWIOTLB
-	if (!iommu_aperture && end_pfn >= 0xffffffff>>PAGE_SHIFT)
+	if (swiotlb_force)
+		swiotlb = 1;
+	if (!iommu_aperture &&
+	    (end_pfn >= 0xffffffff>>PAGE_SHIFT || force_iommu))
 	       swiotlb = 1;
 	if (swiotlb)
 		swiotlb_init();	
@@ -475,6 +484,8 @@ void __init mem_init(void)
 #endif
 }
 
+extern char __initdata_begin[], __initdata_end[];
+
 void free_initmem(void)
 {
 	unsigned long addr;
@@ -483,12 +494,11 @@ void free_initmem(void)
 	for (; addr < (unsigned long)(&__init_end); addr += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(addr));
 		set_page_count(virt_to_page(addr), 1);
-#ifdef CONFIG_INIT_DEBUG
 		memset((void *)(addr & ~(PAGE_SIZE-1)), 0xcc, PAGE_SIZE); 
-#endif
 		free_page(addr);
 		totalram_pages++;
 	}
+	memset(__initdata_begin, 0xba, __initdata_end - __initdata_begin);
 	printk ("Freeing unused kernel memory: %luk freed\n", (&__init_end - &__init_begin) >> 10);
 }
 
@@ -596,7 +606,16 @@ static struct vm_area_struct gate32_vma = {
 
 struct vm_area_struct *get_gate_vma(struct task_struct *tsk)
 {
-	return test_tsk_thread_flag(tsk, TIF_IA32) ? &gate32_vma : &gate_vma;
+#ifdef CONFIG_IA32_EMULATION
+	if (test_tsk_thread_flag(tsk, TIF_IA32)) {
+		/* lookup code assumes the pages are present. set them up
+		   now */
+		if (__map_syscall32(tsk->mm, 0xfffe000) < 0)
+			return NULL;
+		return &gate32_vma;
+	}
+#endif
+	return &gate_vma;
 }
 
 int in_gate_area(struct task_struct *task, unsigned long addr)

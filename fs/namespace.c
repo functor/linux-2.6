@@ -9,6 +9,7 @@
  */
 
 #include <linux/config.h>
+#include <linux/syscalls.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/smp_lock.h>
@@ -104,8 +105,6 @@ struct vfsmount *lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
 	spin_unlock(&vfsmount_lock);
 	return found;
 }
-
-EXPORT_SYMBOL(lookup_mnt);
 
 static inline int check_mnt(struct vfsmount *mnt)
 {
@@ -424,6 +423,7 @@ static int do_umount(struct vfsmount *mnt, int flags)
 		down_write(&sb->s_umount);
 		if (!(sb->s_flags & MS_RDONLY)) {
 			lock_kernel();
+			DQUOT_OFF(sb);
 			retval = do_remount_sb(sb, MS_RDONLY, NULL, 0);
 			unlock_kernel();
 		}
@@ -930,7 +930,35 @@ void mark_mounts_for_expiry(struct list_head *mounts)
 
 EXPORT_SYMBOL_GPL(mark_mounts_for_expiry);
 
-int copy_mount_options (const void __user *data, unsigned long *where)
+/*
+ * Some copy_from_user() implementations do not return the exact number of
+ * bytes remaining to copy on a fault.  But copy_mount_options() requires that.
+ * Note that this function differs from copy_from_user() in that it will oops
+ * on bad values of `to', rather than returning a short copy.
+ */
+static long
+exact_copy_from_user(void *to, const void __user *from, unsigned long n)
+{
+	char *t = to;
+	const char __user *f = from;
+	char c;
+
+	if (!access_ok(VERIFY_READ, from, n))
+		return n;
+
+	while (n) {
+		if (__get_user(c, f)) {
+			memset(t, 0, n);
+			break;
+		}
+		*t++ = c;
+		f++;
+		n--;
+	}
+	return n;
+}
+
+int copy_mount_options(const void __user *data, unsigned long *where)
 {
 	int i;
 	unsigned long page;
@@ -952,7 +980,7 @@ int copy_mount_options (const void __user *data, unsigned long *where)
 	if (size > PAGE_SIZE)
 		size = PAGE_SIZE;
 
-	i = size - copy_from_user((void *)page, data, size);
+	i = size - exact_copy_from_user((void *)page, data, size);
 	if (!i) {
 		free_page(page); 
 		return -EFAULT;
@@ -1180,8 +1208,6 @@ void set_fs_root(struct fs_struct *fs, struct vfsmount *mnt,
 	}
 }
 
-EXPORT_SYMBOL(set_fs_root);
-
 /*
  * Replace the fs->{pwdmnt,pwd} with {mnt,dentry}. Put the old values.
  * It can block. Requires the big lock held.
@@ -1204,8 +1230,6 @@ void set_fs_pwd(struct fs_struct *fs, struct vfsmount *mnt,
 		mntput(old_pwdmnt);
 	}
 }
-
-EXPORT_SYMBOL(set_fs_pwd);
 
 static void chroot_fs_refs(struct nameidata *old_nd, struct nameidata *new_nd)
 {

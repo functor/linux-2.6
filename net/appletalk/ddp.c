@@ -61,16 +61,6 @@
 #include <net/route.h>
 #include <linux/atalk.h>
 
-extern void aarp_cleanup_module(void);
-
-extern void aarp_probe_network(struct atalk_iface *atif);
-extern int  aarp_proxy_probe_network(struct atalk_iface *atif,
-				     struct atalk_addr *sa);
-extern void aarp_proxy_remove(struct net_device *dev, struct atalk_addr *sa);
-
-extern void atalk_register_sysctl(void);
-extern void atalk_unregister_sysctl(void);
-
 struct datalink_proto *ddp_dl, *aarp_dl;
 static struct proto_ops atalk_dgram_ops;
 
@@ -86,13 +76,6 @@ rwlock_t atalk_sockets_lock = RW_LOCK_UNLOCKED;
 static inline void __atalk_insert_socket(struct sock *sk)
 {
 	sk_add_node(sk, &atalk_sockets);
-}
-
-static inline void atalk_insert_socket(struct sock *sk)
-{
-	write_lock_bh(&atalk_sockets_lock);
-	__atalk_insert_socket(sk);
-	write_unlock_bh(&atalk_sockets_lock);
 }
 
 static inline void atalk_remove_socket(struct sock *sk)
@@ -580,7 +563,7 @@ static int atrtr_create(struct rtentry *r, struct net_device *devhint)
 
 		retval = -ENOBUFS;
 		if (!rt)
-			goto out;
+			goto out_unlock;
 		memset(rt, 0, sizeof(*rt));
 
 		rt->next = atalk_routes;

@@ -41,6 +41,7 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
+#include <linux/module.h>
 
 #include <acpi/acpi.h>
 #include <acpi/acnamesp.h>
@@ -49,6 +50,52 @@
 
 #define _COMPONENT          ACPI_EVENTS
 	 ACPI_MODULE_NAME    ("evxface")
+
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_install_exception_handler
+ *
+ * PARAMETERS:  Handler         - Pointer to the handler function for the
+ *                                event
+ *
+ * RETURN:      Status
+ *
+ * DESCRIPTION: Saves the pointer to the handler function
+ *
+ ******************************************************************************/
+#ifdef ACPI_FUTURE_USAGE
+acpi_status
+acpi_install_exception_handler (
+	acpi_exception_handler          handler)
+{
+	acpi_status                     status;
+
+
+	ACPI_FUNCTION_TRACE ("acpi_install_exception_handler");
+
+
+	status = acpi_ut_acquire_mutex (ACPI_MTX_EVENTS);
+	if (ACPI_FAILURE (status)) {
+		return_ACPI_STATUS (status);
+	}
+
+	/* Don't allow two handlers. */
+
+	if (acpi_gbl_exception_handler) {
+		status = AE_ALREADY_EXISTS;
+		goto cleanup;
+	}
+
+	/* Install the handler */
+
+	acpi_gbl_exception_handler = handler;
+
+cleanup:
+	(void) acpi_ut_release_mutex (ACPI_MTX_EVENTS);
+	return_ACPI_STATUS (status);
+}
+#endif  /*  ACPI_FUTURE_USAGE  */
 
 
 /*******************************************************************************
@@ -121,6 +168,7 @@ cleanup:
 	(void) acpi_ut_release_mutex (ACPI_MTX_EVENTS);
 	return_ACPI_STATUS (status);
 }
+EXPORT_SYMBOL(acpi_install_fixed_event_handler);
 
 
 /*******************************************************************************
@@ -178,6 +226,7 @@ acpi_remove_fixed_event_handler (
 	(void) acpi_ut_release_mutex (ACPI_MTX_EVENTS);
 	return_ACPI_STATUS (status);
 }
+EXPORT_SYMBOL(acpi_remove_fixed_event_handler);
 
 
 /*******************************************************************************
@@ -188,6 +237,7 @@ acpi_remove_fixed_event_handler (
  *              handler_type    - The type of handler:
  *                                  ACPI_SYSTEM_NOTIFY: system_handler (00-7f)
  *                                  ACPI_DEVICE_NOTIFY: driver_handler (80-ff)
+ *                                  ACPI_ALL_NOTIFY:  both system and device
  *              Handler         - Address of the handler
  *              Context         - Value passed to the handler on each GPE
  *
@@ -243,20 +293,21 @@ acpi_install_notify_handler (
 	if (device == ACPI_ROOT_OBJECT) {
 		/* Make sure the handler is not already installed */
 
-		if (((handler_type == ACPI_SYSTEM_NOTIFY) &&
-				acpi_gbl_system_notify.handler)        ||
-			((handler_type == ACPI_DEVICE_NOTIFY) &&
+		if (((handler_type & ACPI_SYSTEM_NOTIFY) &&
+				acpi_gbl_system_notify.handler)     ||
+			((handler_type & ACPI_DEVICE_NOTIFY) &&
 				acpi_gbl_device_notify.handler)) {
 			status = AE_ALREADY_EXISTS;
 			goto unlock_and_exit;
 		}
 
-		if (handler_type == ACPI_SYSTEM_NOTIFY) {
+		if (handler_type & ACPI_SYSTEM_NOTIFY) {
 			acpi_gbl_system_notify.node  = node;
 			acpi_gbl_system_notify.handler = handler;
 			acpi_gbl_system_notify.context = context;
 		}
-		else /* ACPI_DEVICE_NOTIFY */ {
+
+		if (handler_type & ACPI_DEVICE_NOTIFY) {
 			acpi_gbl_device_notify.node  = node;
 			acpi_gbl_device_notify.handler = handler;
 			acpi_gbl_device_notify.context = context;
@@ -284,9 +335,9 @@ acpi_install_notify_handler (
 		if (obj_desc) {
 			/* Object exists - make sure there's no handler */
 
-			if (((handler_type == ACPI_SYSTEM_NOTIFY) &&
+			if (((handler_type & ACPI_SYSTEM_NOTIFY) &&
 					obj_desc->common_notify.system_notify) ||
-				((handler_type == ACPI_DEVICE_NOTIFY) &&
+				((handler_type & ACPI_DEVICE_NOTIFY) &&
 					obj_desc->common_notify.device_notify)) {
 				status = AE_ALREADY_EXISTS;
 				goto unlock_and_exit;
@@ -308,7 +359,6 @@ acpi_install_notify_handler (
 			/* Remove local reference to the object */
 
 			acpi_ut_remove_reference (obj_desc);
-
 			if (ACPI_FAILURE (status)) {
 				goto unlock_and_exit;
 			}
@@ -326,11 +376,18 @@ acpi_install_notify_handler (
 		notify_obj->notify.handler = handler;
 		notify_obj->notify.context = context;
 
-		if (handler_type == ACPI_SYSTEM_NOTIFY) {
+		if (handler_type & ACPI_SYSTEM_NOTIFY) {
 			obj_desc->common_notify.system_notify = notify_obj;
 		}
-		else /* ACPI_DEVICE_NOTIFY */ {
+
+		if (handler_type & ACPI_DEVICE_NOTIFY) {
 			obj_desc->common_notify.device_notify = notify_obj;
+		}
+
+		if (handler_type == ACPI_ALL_NOTIFY) {
+			/* Extra ref if installed in both */
+
+			acpi_ut_add_reference (notify_obj);
 		}
 	}
 
@@ -339,6 +396,7 @@ unlock_and_exit:
 	(void) acpi_ut_release_mutex (ACPI_MTX_NAMESPACE);
 	return_ACPI_STATUS (status);
 }
+EXPORT_SYMBOL(acpi_install_notify_handler);
 
 
 /*******************************************************************************
@@ -349,7 +407,9 @@ unlock_and_exit:
  *              handler_type    - The type of handler:
  *                                  ACPI_SYSTEM_NOTIFY: system_handler (00-7f)
  *                                  ACPI_DEVICE_NOTIFY: driver_handler (80-ff)
+ *                                  ACPI_ALL_NOTIFY:  both system and device
  *              Handler         - Address of the handler
+ *
  * RETURN:      Status
  *
  * DESCRIPTION: Remove a handler for notifies on an ACPI device
@@ -392,15 +452,14 @@ acpi_remove_notify_handler (
 		goto unlock_and_exit;
 	}
 
-	/*
-	 * Root Object
-	 */
+	/* Root Object */
+
 	if (device == ACPI_ROOT_OBJECT) {
 		ACPI_DEBUG_PRINT ((ACPI_DB_INFO, "Removing notify handler for ROOT object.\n"));
 
-		if (((handler_type == ACPI_SYSTEM_NOTIFY) &&
-			  !acpi_gbl_system_notify.handler) ||
-			((handler_type == ACPI_DEVICE_NOTIFY) &&
+		if (((handler_type & ACPI_SYSTEM_NOTIFY) &&
+			  !acpi_gbl_system_notify.handler)      ||
+			((handler_type & ACPI_DEVICE_NOTIFY) &&
 			  !acpi_gbl_device_notify.handler)) {
 			status = AE_NOT_EXIST;
 			goto unlock_and_exit;
@@ -415,21 +474,21 @@ acpi_remove_notify_handler (
 			return_ACPI_STATUS (status);
  		}
 
-		if (handler_type == ACPI_SYSTEM_NOTIFY) {
+		if (handler_type & ACPI_SYSTEM_NOTIFY) {
 			acpi_gbl_system_notify.node  = NULL;
 			acpi_gbl_system_notify.handler = NULL;
 			acpi_gbl_system_notify.context = NULL;
 		}
-		else {
+
+		if (handler_type & ACPI_DEVICE_NOTIFY) {
 			acpi_gbl_device_notify.node  = NULL;
 			acpi_gbl_device_notify.handler = NULL;
 			acpi_gbl_device_notify.context = NULL;
 		}
 	}
 
-	/*
-	 * All Other Objects
-	 */
+	/* All Other Objects */
+
 	else {
 		/* Notifies allowed on this object? */
 
@@ -448,38 +507,47 @@ acpi_remove_notify_handler (
 
 		/* Object exists - make sure there's an existing handler */
 
-		if (handler_type == ACPI_SYSTEM_NOTIFY) {
+		if (handler_type & ACPI_SYSTEM_NOTIFY) {
 			notify_obj = obj_desc->common_notify.system_notify;
-		}
-		else {
-			notify_obj = obj_desc->common_notify.device_notify;
-		}
+			if ((!notify_obj) ||
+				 (notify_obj->notify.handler != handler)) {
+				status = AE_BAD_PARAMETER;
+				goto unlock_and_exit;
+			}
+			/* Make sure all deferred tasks are completed */
 
-		if ((!notify_obj) ||
-			(notify_obj->notify.handler != handler)) {
-			status = AE_BAD_PARAMETER;
-			goto unlock_and_exit;
-		}
+			(void) acpi_ut_release_mutex (ACPI_MTX_NAMESPACE);
+			acpi_os_wait_events_complete(NULL);
+			status = acpi_ut_acquire_mutex (ACPI_MTX_NAMESPACE);
+			if (ACPI_FAILURE (status)) {
+				return_ACPI_STATUS (status);
+ 			}
 
-		/* Make sure all deferred tasks are completed */
-
-		(void) acpi_ut_release_mutex (ACPI_MTX_NAMESPACE);
-		acpi_os_wait_events_complete(NULL);
-		status = acpi_ut_acquire_mutex (ACPI_MTX_NAMESPACE);
-		if (ACPI_FAILURE (status)) {
-			return_ACPI_STATUS (status);
- 		}
-
-		/* Remove the handler */
-
-		if (handler_type == ACPI_SYSTEM_NOTIFY) {
+			/* Remove the handler */
 			obj_desc->common_notify.system_notify = NULL;
-		}
-		else {
-			obj_desc->common_notify.device_notify = NULL;
+			acpi_ut_remove_reference (notify_obj);
 		}
 
-		acpi_ut_remove_reference (notify_obj);
+		if (handler_type & ACPI_DEVICE_NOTIFY) {
+			notify_obj = obj_desc->common_notify.device_notify;
+			if ((!notify_obj) ||
+				 (notify_obj->notify.handler != handler)) {
+				status = AE_BAD_PARAMETER;
+				goto unlock_and_exit;
+			}
+			/* Make sure all deferred tasks are completed */
+
+			(void) acpi_ut_release_mutex (ACPI_MTX_NAMESPACE);
+			acpi_os_wait_events_complete(NULL);
+			status = acpi_ut_acquire_mutex (ACPI_MTX_NAMESPACE);
+			if (ACPI_FAILURE (status)) {
+				return_ACPI_STATUS (status);
+ 			}
+
+			/* Remove the handler */
+			obj_desc->common_notify.device_notify = NULL;
+			acpi_ut_remove_reference (notify_obj);
+		}
 	}
 
 
@@ -487,6 +555,7 @@ unlock_and_exit:
 	(void) acpi_ut_release_mutex (ACPI_MTX_NAMESPACE);
 	return_ACPI_STATUS (status);
 }
+EXPORT_SYMBOL(acpi_remove_notify_handler);
 
 
 /*******************************************************************************
@@ -497,7 +566,7 @@ unlock_and_exit:
  *              gpe_block       - GPE block (NULL == FADT GPEs)
  *              Type            - Whether this GPE should be treated as an
  *                                edge- or level-triggered interrupt.
- *              Handler         - Address of the handler
+ *              Address         - Address of the handler
  *              Context         - Value passed to the handler on each GPE
  *
  * RETURN:      Status
@@ -511,11 +580,12 @@ acpi_install_gpe_handler (
 	acpi_handle                     gpe_device,
 	u32                             gpe_number,
 	u32                             type,
-	acpi_gpe_handler                handler,
+	acpi_event_handler              address,
 	void                            *context)
 {
-	acpi_status                     status;
 	struct acpi_gpe_event_info      *gpe_event_info;
+	struct acpi_handler_info        *handler;
+	acpi_status                     status;
 
 
 	ACPI_FUNCTION_TRACE ("acpi_install_gpe_handler");
@@ -523,7 +593,7 @@ acpi_install_gpe_handler (
 
 	/* Parameter validation */
 
-	if (!handler) {
+	if ((!address) || (type > ACPI_GPE_XRUPT_TYPE_MASK)) {
 		return_ACPI_STATUS (AE_BAD_PARAMETER);
 	}
 
@@ -542,33 +612,48 @@ acpi_install_gpe_handler (
 
 	/* Make sure that there isn't a handler there already */
 
-	if (gpe_event_info->handler) {
+	if ((gpe_event_info->flags & ACPI_GPE_DISPATCH_MASK) == ACPI_GPE_DISPATCH_HANDLER) {
 		status = AE_ALREADY_EXISTS;
+		goto unlock_and_exit;
+	}
+
+	/* Allocate and init handler object */
+
+	handler = ACPI_MEM_CALLOCATE (sizeof (struct acpi_handler_info));
+	if (!handler) {
+		status = AE_NO_MEMORY;
+		goto unlock_and_exit;
+	}
+
+	handler->address    = address;
+	handler->context    = context;
+	handler->method_node = gpe_event_info->dispatch.method_node;
+
+	/* Disable the GPE before installing the handler */
+
+	status = acpi_ev_disable_gpe (gpe_event_info);
+	if (ACPI_FAILURE (status)) {
 		goto unlock_and_exit;
 	}
 
 	/* Install the handler */
 
 	acpi_os_acquire_lock (acpi_gbl_gpe_lock, ACPI_NOT_ISR);
-	gpe_event_info->handler = handler;
-	gpe_event_info->context = context;
-	gpe_event_info->flags = (u8) type;
+	gpe_event_info->dispatch.handler = handler;
+
+	/* Setup up dispatch flags to indicate handler (vs. method) */
+
+	gpe_event_info->flags &= ~(ACPI_GPE_XRUPT_TYPE_MASK | ACPI_GPE_DISPATCH_MASK); /* Clear bits */
+	gpe_event_info->flags |= (u8) (type | ACPI_GPE_DISPATCH_HANDLER);
+
 	acpi_os_release_lock (acpi_gbl_gpe_lock, ACPI_NOT_ISR);
-
-	/* Clear the GPE (of stale events), the enable it */
-
-	status = acpi_hw_clear_gpe (gpe_event_info);
-	if (ACPI_FAILURE (status)) {
-		goto unlock_and_exit;
-	}
-
-	status = acpi_hw_enable_gpe (gpe_event_info);
 
 
 unlock_and_exit:
 	(void) acpi_ut_release_mutex (ACPI_MTX_EVENTS);
 	return_ACPI_STATUS (status);
 }
+EXPORT_SYMBOL(acpi_install_gpe_handler);
 
 
 /*******************************************************************************
@@ -577,7 +662,7 @@ unlock_and_exit:
  *
  * PARAMETERS:  gpe_number      - The event to remove a handler
  *              gpe_block       - GPE block (NULL == FADT GPEs)
- *              Handler         - Address of the handler
+ *              Address         - Address of the handler
  *
  * RETURN:      Status
  *
@@ -589,10 +674,11 @@ acpi_status
 acpi_remove_gpe_handler (
 	acpi_handle                     gpe_device,
 	u32                             gpe_number,
-	acpi_gpe_handler                handler)
+	acpi_event_handler              address)
 {
-	acpi_status                     status;
 	struct acpi_gpe_event_info      *gpe_event_info;
+	struct acpi_handler_info        *handler;
+	acpi_status                     status;
 
 
 	ACPI_FUNCTION_TRACE ("acpi_remove_gpe_handler");
@@ -600,7 +686,7 @@ acpi_remove_gpe_handler (
 
 	/* Parameter validation */
 
-	if (!handler) {
+	if (!address) {
 		return_ACPI_STATUS (AE_BAD_PARAMETER);
 	}
 
@@ -617,18 +703,24 @@ acpi_remove_gpe_handler (
 		goto unlock_and_exit;
 	}
 
-	/* Disable the GPE before removing the handler */
+	/* Make sure that a handler is indeed installed */
 
-	status = acpi_hw_disable_gpe (gpe_event_info);
-	if (ACPI_FAILURE (status)) {
+	if ((gpe_event_info->flags & ACPI_GPE_DISPATCH_MASK) != ACPI_GPE_DISPATCH_HANDLER) {
+		status = AE_NOT_EXIST;
 		goto unlock_and_exit;
 	}
 
 	/* Make sure that the installed handler is the same */
 
-	if (gpe_event_info->handler != handler) {
-		(void) acpi_hw_enable_gpe (gpe_event_info);
+	if (gpe_event_info->dispatch.handler->address != address) {
 		status = AE_BAD_PARAMETER;
+		goto unlock_and_exit;
+	}
+
+	/* Disable the GPE before removing the handler */
+
+	status = acpi_ev_disable_gpe (gpe_event_info);
+	if (ACPI_FAILURE (status)) {
 		goto unlock_and_exit;
 	}
 
@@ -644,15 +736,27 @@ acpi_remove_gpe_handler (
 	/* Remove the handler */
 
 	acpi_os_acquire_lock (acpi_gbl_gpe_lock, ACPI_NOT_ISR);
-	gpe_event_info->handler = NULL;
-	gpe_event_info->context = NULL;
+	handler = gpe_event_info->dispatch.handler;
+
+	/* Restore Method node (if any), set dispatch flags */
+
+	gpe_event_info->dispatch.method_node = handler->method_node;
+	gpe_event_info->flags &= ~ACPI_GPE_DISPATCH_MASK; /* Clear bits */
+	if (handler->method_node) {
+		gpe_event_info->flags |= ACPI_GPE_DISPATCH_METHOD;
+	}
 	acpi_os_release_lock (acpi_gbl_gpe_lock, ACPI_NOT_ISR);
+
+	/* Now we can free the handler object */
+
+	ACPI_MEM_FREE (handler);
 
 
 unlock_and_exit:
 	(void) acpi_ut_release_mutex (ACPI_MTX_EVENTS);
 	return_ACPI_STATUS (status);
 }
+EXPORT_SYMBOL(acpi_remove_gpe_handler);
 
 
 /*******************************************************************************
@@ -695,6 +799,7 @@ acpi_acquire_global_lock (
 
 	return (status);
 }
+EXPORT_SYMBOL(acpi_acquire_global_lock);
 
 
 /*******************************************************************************
@@ -723,5 +828,5 @@ acpi_release_global_lock (
 	status = acpi_ev_release_global_lock ();
 	return (status);
 }
-
+EXPORT_SYMBOL(acpi_release_global_lock);
 

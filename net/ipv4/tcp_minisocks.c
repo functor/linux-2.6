@@ -687,7 +687,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 	/* allocate the newsk from the same slab of the master sock,
 	 * if not, at sk_free time we'll try to free it from the wrong
 	 * slabcache (i.e. is it TCPv4 or v6?) -acme */
-	struct sock *newsk = sk_alloc(PF_INET, GFP_ATOMIC, 0, sk->sk_slab);
+	struct sock *newsk = sk_alloc(PF_INET, GFP_ATOMIC, 0, sk->sk_prot->slab);
 
 	if(newsk != NULL) {
 		struct tcp_opt *newtp;
@@ -706,7 +706,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		sock_lock_init(newsk);
 		bh_lock_sock(newsk);
 
-		newsk->sk_dst_lock = RW_LOCK_UNLOCKED;
+		rwlock_init(&newsk->sk_dst_lock);
 		atomic_set(&newsk->sk_rmem_alloc, 0);
 		skb_queue_head_init(&newsk->sk_receive_queue);
 		atomic_set(&newsk->sk_wmem_alloc, 0);
@@ -719,7 +719,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newsk->sk_userlocks = sk->sk_userlocks & ~SOCK_BINDPORT_LOCK;
 		newsk->sk_backlog.head = newsk->sk_backlog.tail = NULL;
 		newsk->sk_send_head = NULL;
-		newsk->sk_callback_lock = RW_LOCK_UNLOCKED;
+		rwlock_init(&newsk->sk_callback_lock);
 		skb_queue_head_init(&newsk->sk_error_queue);
 		newsk->sk_write_space = sk_stream_write_space;
 
@@ -752,11 +752,11 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newtp->mdev = TCP_TIMEOUT_INIT;
 		newtp->rto = TCP_TIMEOUT_INIT;
 
-		newtp->packets_out = 0;
-		newtp->left_out = 0;
-		newtp->retrans_out = 0;
-		newtp->sacked_out = 0;
-		newtp->fackets_out = 0;
+		tcp_set_pcount(&newtp->packets_out, 0);
+		tcp_set_pcount(&newtp->left_out, 0);
+		tcp_set_pcount(&newtp->retrans_out, 0);
+		tcp_set_pcount(&newtp->sacked_out, 0);
+		tcp_set_pcount(&newtp->fackets_out, 0);
 		newtp->snd_ssthresh = 0x7fffffff;
 
 		/* So many TCP implementations out there (incorrectly) count the
@@ -787,14 +787,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newtp->num_sacks = 0;
 		newtp->urg_data = 0;
 		newtp->listen_opt = NULL;
-#ifdef CONFIG_ACCEPT_QUEUES
-		newtp->accept_queue = NULL;
-		memset(newtp->acceptq, 0,sizeof(newtp->acceptq));
-		newtp->class_index = 0;
-
-#else
 		newtp->accept_queue = newtp->accept_queue_tail = NULL;
-#endif
 		/* Deinitialize syn_wait_lock to trap illegal accesses. */
 		memset(&newtp->syn_wait_lock, 0, sizeof(newtp->syn_wait_lock));
 
@@ -848,7 +841,8 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		if (newtp->ecn_flags&TCP_ECN_OK)
 			newsk->sk_no_largesend = 1;
 
-		tcp_vegas_init(newtp);
+		tcp_ca_init(newtp);
+
 		TCP_INC_STATS_BH(TCP_MIB_PASSIVEOPENS);
 	}
 	return newsk;
@@ -1081,7 +1075,3 @@ EXPORT_SYMBOL(tcp_child_process);
 EXPORT_SYMBOL(tcp_create_openreq_child);
 EXPORT_SYMBOL(tcp_timewait_state_process);
 EXPORT_SYMBOL(tcp_tw_deschedule);
-
-#ifdef CONFIG_SYSCTL
-EXPORT_SYMBOL(sysctl_tcp_tw_recycle);
-#endif

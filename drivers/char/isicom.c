@@ -48,6 +48,7 @@
 #include <linux/miscdevice.h>
 #include <linux/interrupt.h>
 #include <linux/timer.h>
+#include <linux/delay.h>
 #include <linux/ioport.h>
 
 #include <asm/uaccess.h>
@@ -389,7 +390,7 @@ static void isicom_tx(unsigned long _data)
 		
 		tty = port->tty;
 		save_flags(flags); cli();
-		txcount = MIN(TX_SIZE, port->xmit_cnt);
+		txcount = min_t(short, TX_SIZE, port->xmit_cnt);
 		if ((txcount <= 0) || tty->stopped || tty->hw_stopped) {
 			restore_flags(flags);
 			continue;
@@ -421,7 +422,7 @@ static void isicom_tx(unsigned long _data)
 		residue = NO;
 		wrd = 0;			
 		while (1) {
-			cnt = MIN(txcount, (SERIAL_XMIT_SIZE - port->xmit_tail));
+			cnt = min_t(int, txcount, (SERIAL_XMIT_SIZE - port->xmit_tail));
 			if (residue == YES) {
 				residue = NO;
 				if (cnt > 0) {
@@ -484,10 +485,8 @@ static void isicom_bottomhalf(void * data)
 	
 	if (!tty)
 		return;
-	
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-	    tty->ldisc.write_wakeup)
-		(tty->ldisc.write_wakeup)(tty);
+
+	tty_wakeup(tty);	
 	wake_up_interruptible(&tty->write_wait);
 } 		
  		
@@ -650,7 +649,7 @@ static irqreturn_t isicom_interrupt(int irq, void *dev_id,
 		}	 
 	}
 	else {				/* Data   Packet */
-		count = MIN(byte_count, (TTY_FLIPBUF_SIZE - tty->flip.count));
+		count = min_t(unsigned short, byte_count, (TTY_FLIPBUF_SIZE - tty->flip.count));
 #ifdef ISICOM_DEBUG
 		printk(KERN_DEBUG "ISICOM: Intr: Can rx %d of %d bytes.\n", 
 					count, byte_count);
@@ -1119,17 +1118,16 @@ static void isicom_close(struct tty_struct * tty, struct file * filp)
 	isicom_shutdown_port(port);
 	if (tty->driver->flush_buffer)
 		tty->driver->flush_buffer(tty);
-	if (tty->ldisc.flush_buffer)
-		tty->ldisc.flush_buffer(tty);
+		
+	tty_ldisc_flush(tty);
 	tty->closing = 0;
 	port->tty = NULL;
 	if (port->blocked_open) {
 		if (port->close_delay) {
-			set_current_state(TASK_INTERRUPTIBLE);
 #ifdef ISICOM_DEBUG			
 			printk(KERN_DEBUG "ISICOM: scheduling until time out.\n");
 #endif			
-			schedule_timeout(port->close_delay);
+			msleep_interruptible(jiffies_to_msecs(port->close_delay));
 		}
 		wake_up_interruptible(&port->open_wait);
 	}	
@@ -1142,7 +1140,7 @@ static void isicom_close(struct tty_struct * tty, struct file * filp)
 }
 
 /* write et all */
-static int isicom_write(struct tty_struct * tty, int from_user,
+static int isicom_write(struct tty_struct * tty,
 			const unsigned char * buf, int count)
 {
 	struct isi_port * port = (struct isi_port *) tty->driver_data;
@@ -1157,35 +1155,16 @@ static int isicom_write(struct tty_struct * tty, int from_user,
 	
 	if (!tty || !port->xmit_buf || !tmp_buf)
 		return 0;
-	if (from_user)
-		down(&tmp_buf_sem); /* acquire xclusive access to tmp_buf */
 		
 	save_flags(flags);
 	while(1) {	
 		cli();
-		cnt = MIN(count, MIN(SERIAL_XMIT_SIZE - port->xmit_cnt - 1,
-			SERIAL_XMIT_SIZE - port->xmit_head));
+		cnt = min_t(int, count, min(SERIAL_XMIT_SIZE - port->xmit_cnt - 1,
+					    SERIAL_XMIT_SIZE - port->xmit_head));
 		if (cnt <= 0) 
 			break;
 		
-		if (from_user) {
-			/* the following may block for paging... hence 
-			   enabling interrupts but tx routine may have 
-			   created more space in xmit_buf when the ctrl 
-			   gets back here  */
-			sti(); 
-			if (copy_from_user(tmp_buf, buf, cnt)) {
-				up(&tmp_buf_sem);
-				restore_flags(flags);
-				return -EFAULT;
-			}
-			cli();
-			cnt = MIN(cnt, MIN(SERIAL_XMIT_SIZE - port->xmit_cnt - 1,
-			SERIAL_XMIT_SIZE - port->xmit_head));
-			memcpy(port->xmit_buf + port->xmit_head, tmp_buf, cnt);
-		}	
-		else
-			memcpy(port->xmit_buf + port->xmit_head, buf, cnt);
+		memcpy(port->xmit_buf + port->xmit_head, buf, cnt);
 		port->xmit_head = (port->xmit_head + cnt) & (SERIAL_XMIT_SIZE - 1);
 		port->xmit_cnt += cnt;
 		restore_flags(flags);
@@ -1193,8 +1172,6 @@ static int isicom_write(struct tty_struct * tty, int from_user,
 		count -= cnt;
 		total += cnt;
 	}		
-	if (from_user)
-		up(&tmp_buf_sem);
 	if (port->xmit_cnt && !tty->stopped && !tty->hw_stopped)
 		port->status |= ISI_TXOK;
 	restore_flags(flags);
@@ -1563,9 +1540,7 @@ static void isicom_flush_buffer(struct tty_struct * tty)
 	restore_flags(flags);
 	
 	wake_up_interruptible(&tty->write_wait);
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-	    tty->ldisc.write_wakeup)
-		(tty->ldisc.write_wakeup)(tty);
+	tty_wakeup(tty);
 }
 
 
@@ -1798,9 +1773,9 @@ static int irq[4];
 MODULE_AUTHOR("MultiTech");
 MODULE_DESCRIPTION("Driver for the ISI series of cards by MultiTech");
 MODULE_LICENSE("GPL");
-MODULE_PARM(io, "1-4i");
+module_param_array(io, int, NULL, 0);
 MODULE_PARM_DESC(io, "I/O ports for the cards");
-MODULE_PARM(irq, "1-4i");
+module_param_array(irq, int, NULL, 0);
 MODULE_PARM_DESC(irq, "Interrupts for the cards");
 
 int init_module(void)
@@ -1906,8 +1881,7 @@ int init_module(void)
 void cleanup_module(void)
 {
 	re_schedule = 0;
-	set_current_state(TASK_INTERRUPTIBLE);
-	schedule_timeout(HZ);
+	msleep(1000);
 
 #ifdef ISICOM_DEBUG	
 	printk("ISICOM: isicom_tx tx_count = %ld.\n", tx_count);

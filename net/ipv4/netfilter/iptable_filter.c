@@ -11,6 +11,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/netfilter_ipv4/ip_tables.h>
 
 MODULE_LICENSE("GPL");
@@ -43,8 +44,8 @@ static struct
 	struct ipt_replace repl;
 	struct ipt_standard entries[3];
 	struct ipt_error term;
-} initial_table __initdata
-= { { "filter", FILTER_VALID_HOOKS, 4,
+} initial_table = {
+    { "filter", FILTER_VALID_HOOKS, 4,
       sizeof(struct ipt_standard) * 3 + sizeof(struct ipt_error),
       { [NF_IP_LOCAL_IN] = 0,
 	[NF_IP_FORWARD] = sizeof(struct ipt_standard),
@@ -155,7 +156,7 @@ static struct nf_hook_ops ipt_ops[] = {
 
 /* Default to forward because I got too much mail already. */
 static int forward = NF_ACCEPT;
-MODULE_PARM(forward, "i");
+module_param(forward, bool, 0000);
 
 static int __init init(void)
 {

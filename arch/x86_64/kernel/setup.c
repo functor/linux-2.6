@@ -56,6 +56,7 @@
 #include <asm/smp.h>
 #include <asm/proto.h>
 #include <asm/setup.h>
+#include <asm/mach_apic.h>
 
 /*
  * Machine setup..
@@ -71,7 +72,7 @@ EXPORT_SYMBOL(acpi_disabled);
 #ifdef	CONFIG_ACPI_BOOT
 extern int __initdata acpi_ht;
 extern acpi_interrupt_flags	acpi_sci_flags;
-/* int __initdata acpi_force = 0; */
+int __initdata acpi_force = 0;
 #endif
 
 /* For PCI or other memory-mapped resources */
@@ -79,8 +80,10 @@ unsigned long pci_mem_start = 0x10000000;
 
 unsigned long saved_video_mode;
 
+#ifdef CONFIG_SWIOTLB
 int swiotlb;
 EXPORT_SYMBOL(swiotlb);
+#endif
 
 /*
  * Setup options
@@ -105,7 +108,8 @@ char command_line[COMMAND_LINE_SIZE];
 struct resource standard_io_resources[] = {
 	{ "dma1", 0x00, 0x1f, IORESOURCE_BUSY | IORESOURCE_IO },
 	{ "pic1", 0x20, 0x21, IORESOURCE_BUSY | IORESOURCE_IO },
-	{ "timer", 0x40, 0x5f, IORESOURCE_BUSY | IORESOURCE_IO },
+	{ "timer0", 0x40, 0x43, IORESOURCE_BUSY | IORESOURCE_IO },
+	{ "timer1", 0x50, 0x53, IORESOURCE_BUSY | IORESOURCE_IO },
 	{ "keyboard", 0x60, 0x6f, IORESOURCE_BUSY | IORESOURCE_IO },
 	{ "dma page reg", 0x80, 0x8f, IORESOURCE_BUSY | IORESOURCE_IO },
 	{ "pic2", 0xa0, 0xa1, IORESOURCE_BUSY | IORESOURCE_IO },
@@ -248,14 +252,14 @@ static __init void parse_cmdline_early (char ** cmdline_p)
 
 		if (!memcmp(from, "acpi=force", 10)) { 
 			/* add later when we do DMI horrors: */
-			/* acpi_force = 1; */	
+			acpi_force = 1;
 			acpi_disabled = 0;
 		}
 
 		/* acpi=ht just means: do ACPI MADT parsing 
 		   at bootup, but don't enable the full ACPI interpreter */
 		if (!memcmp(from, "acpi=ht", 7)) { 
-			/* if (!acpi_force) */
+			if (!acpi_force)
 				disable_acpi();
 			acpi_ht = 1; 
 		}
@@ -423,6 +427,20 @@ static inline void copy_edd(void)
 }
 #endif
 
+#define EBDA_ADDR_POINTER 0x40E
+static void __init reserve_ebda_region(void)
+{
+	unsigned int addr;
+	/** 
+	 * there is a real-mode segmented pointer pointing to the 
+	 * 4K EBDA area at 0x40E
+	 */
+	addr = *(unsigned short *)phys_to_virt(EBDA_ADDR_POINTER);
+	addr <<= 4;
+	if (addr)
+		reserve_bootmem_generic(addr, PAGE_SIZE);
+}
+
 void __init setup_arch(char **cmdline_p)
 {
 	unsigned long low_mem_size;
@@ -486,6 +504,9 @@ void __init setup_arch(char **cmdline_p)
 	 * enabling clean reboots, SMP operation, laptop functions.
 	 */
 	reserve_bootmem_generic(0, PAGE_SIZE);
+
+	/* reserve ebda region */
+	reserve_ebda_region();
 
 #ifdef CONFIG_SMP
 	/*
@@ -662,6 +683,26 @@ static int __init init_amd(struct cpuinfo_x86 *c)
 		} 
 	} 
 	display_cacheinfo(c);
+
+	if (c->cpuid_level >= 0x80000008) {
+		c->x86_num_cores = (cpuid_ecx(0x80000008) & 0xff) + 1;
+		if (c->x86_num_cores & (c->x86_num_cores - 1))
+			c->x86_num_cores = 1;
+
+#ifdef CONFIG_NUMA
+		/* On a dual core setup the lower bits of apic id
+		   distingush the cores. Fix up the CPU<->node mappings
+		   here based on that.
+		   Assumes number of cores is a power of two. */
+		if (c->x86_num_cores > 1) {
+			int cpu = c->x86_apicid;
+			cpu_to_node[cpu] = cpu >> hweight32(c->x86_num_cores - 1);
+			printk(KERN_INFO "CPU %d -> Node %d\n",
+			       cpu, cpu_to_node[cpu]);
+		}
+#endif
+	}
+
 	return r;
 }
 
@@ -670,7 +711,6 @@ static void __init detect_ht(struct cpuinfo_x86 *c)
 #ifdef CONFIG_SMP
 	u32 	eax, ebx, ecx, edx;
 	int 	index_lsb, index_msb, tmp;
-	int	initial_apic_id;
 	int 	cpu = smp_processor_id();
 	
 	if (!cpu_has(c, X86_FEATURE_HT))
@@ -705,8 +745,7 @@ static void __init detect_ht(struct cpuinfo_x86 *c)
 		}
 		if (index_lsb != index_msb )
 			index_msb++;
-		initial_apic_id = ebx >> 24 & 0xff;
-		phys_proc_id[cpu] = initial_apic_id >> index_msb;
+		phys_proc_id[cpu] = phys_pkg_id(index_msb);
 		
 		printk(KERN_INFO  "CPU: Physical Processor ID: %d\n",
 		       phys_proc_id[cpu]);
@@ -714,133 +753,12 @@ static void __init detect_ht(struct cpuinfo_x86 *c)
 #endif
 }
 	
-#define LVL_1_INST	1
-#define LVL_1_DATA	2
-#define LVL_2		3
-#define LVL_3		4
-#define LVL_TRACE	5
-
-struct _cache_table
-{
-	unsigned char descriptor;
-	char cache_type;
-	short size;
-};
-
-/* all the cache descriptor types we care about (no TLB or trace cache entries) */
-static struct _cache_table cache_table[] __initdata =
-{
-	{ 0x06, LVL_1_INST, 8 },
-	{ 0x08, LVL_1_INST, 16 },
-	{ 0x0a, LVL_1_DATA, 8 },
-	{ 0x0c, LVL_1_DATA, 16 },
-	{ 0x22, LVL_3,      512 },
-	{ 0x23, LVL_3,      1024 },
-	{ 0x25, LVL_3,      2048 },
-	{ 0x29, LVL_3,      4096 },
-	{ 0x2c, LVL_1_DATA, 32 },
-	{ 0x30, LVL_1_INST, 32 },
-	{ 0x39, LVL_2,      128 },
-	{ 0x3b, LVL_2,      128 },
-	{ 0x3c, LVL_2,      256 },
-	{ 0x41, LVL_2,      128 },
-	{ 0x42, LVL_2,      256 },
-	{ 0x43, LVL_2,      512 },
-	{ 0x44, LVL_2,      1024 },
-	{ 0x45, LVL_2,      2048 },
-	{ 0x66, LVL_1_DATA, 8 },
-	{ 0x67, LVL_1_DATA, 16 },
-	{ 0x68, LVL_1_DATA, 32 },
-	{ 0x70, LVL_TRACE,  12 },
-	{ 0x71, LVL_TRACE,  16 },
-	{ 0x72, LVL_TRACE,  32 },
-	{ 0x79, LVL_2,      128 },
-	{ 0x7a, LVL_2,      256 },
-	{ 0x7b, LVL_2,      512 },
-	{ 0x7c, LVL_2,      1024 },
-	{ 0x82, LVL_2,      256 },
-	{ 0x83, LVL_2,      512 },
-	{ 0x84, LVL_2,      1024 },
-	{ 0x85, LVL_2,      2048 },
-	{ 0x86, LVL_2,      512 },
-	{ 0x87, LVL_2,      1024 },
-	{ 0x00, 0, 0}
-};
-
 static void __init init_intel(struct cpuinfo_x86 *c)
 {
 	/* Cache sizes */
-	unsigned int trace = 0, l1i = 0, l1d = 0, l2 = 0, l3 = 0; 
 	unsigned n;
 
-	if (c->cpuid_level > 1) {
-		/* supports eax=2  call */
-		int i, j, n;
-		int regs[4];
-		unsigned char *dp = (unsigned char *)regs;
-
-		/* Number of times to iterate */
-		n = cpuid_eax(2) & 0xFF;
-
-		for ( i = 0 ; i < n ; i++ ) {
-			cpuid(2, &regs[0], &regs[1], &regs[2], &regs[3]);
-			
-			/* If bit 31 is set, this is an unknown format */
-			for ( j = 0 ; j < 3 ; j++ ) {
-				if ( regs[j] < 0 ) regs[j] = 0;
-			}
-
-			/* Byte 0 is level count, not a descriptor */
-			for ( j = 1 ; j < 16 ; j++ ) {
-				unsigned char des = dp[j];
-				unsigned char k = 0;
-
-				/* look up this descriptor in the table */
-				while (cache_table[k].descriptor != 0)
-				{
-					if (cache_table[k].descriptor == des) {
-						switch (cache_table[k].cache_type) {
-						case LVL_1_INST:
-							l1i += cache_table[k].size;
-							break;
-						case LVL_1_DATA:
-							l1d += cache_table[k].size;
-							break;
-						case LVL_2:
-							l2 += cache_table[k].size;
-							break;
-						case LVL_3:
-							l3 += cache_table[k].size;
-							break;
-						case LVL_TRACE:
-							trace += cache_table[k].size;
-							break;
-						}
-
-						break;
-					}
-
-					k++;
-				}
-			}
-		}
-
-		if (trace)
-			printk (KERN_INFO "CPU: Trace cache: %dK uops", trace);
-		else if (l1i)
-			printk (KERN_INFO "CPU: L1 I cache: %dK", l1i);
-		if (l1d)
-			printk(", L1 D cache: %dK\n", l1d);
-		else
-			printk("\n"); 
-		if (l2)
-			printk(KERN_INFO "CPU: L2 cache: %dK\n", l2);
-		if (l3)
-			printk(KERN_INFO "CPU: L3 cache: %dK\n", l3);
-
-		c->x86_cache_size = l2 ? l2 : (l1i+l1d);
-	}
-
+	init_intel_cacheinfo(c);
 	n = cpuid_eax(0x80000000);
 	if (n >= 0x80000008) {
 		unsigned eax = cpuid_eax(0x80000008);
@@ -885,6 +803,8 @@ void __init early_identify_cpu(struct cpuinfo_x86 *c)
 	c->x86_model_id[0] = '\0';  /* Unset */
 	c->x86_clflush_size = 64;
 	c->x86_cache_alignment = c->x86_clflush_size;
+	c->x86_num_cores = 1;
+	c->x86_apicid = c == &boot_cpu_data ? 0 : c - cpu_data;
 	memset(&c->x86_capability, 0, sizeof c->x86_capability);
 
 	/* Get vendor name */
@@ -912,6 +832,7 @@ void __init early_identify_cpu(struct cpuinfo_x86 *c)
 		} 
 		if (c->x86_capability[0] & (1<<19)) 
 			c->x86_clflush_size = ((misc >> 8) & 0xff) * 8;
+		c->x86_apicid = misc >> 24;
 	} else {
 		/* Have CPUID level 0 only - unheard of */
 		c->x86 = 4;
@@ -931,8 +852,10 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 	/* AMD-defined flags: level 0x80000001 */
 	xlvl = cpuid_eax(0x80000000);
 	if ( (xlvl & 0xffff0000) == 0x80000000 ) {
-		if ( xlvl >= 0x80000001 )
+		if ( xlvl >= 0x80000001 ) {
 			c->x86_capability[1] = cpuid_edx(0x80000001);
+			c->x86_capability[5] = cpuid_ecx(0x80000001);
+		}
 		if ( xlvl >= 0x80000004 )
 			get_model_name(c); /* Default name */
 	}
@@ -985,7 +908,9 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 			boot_cpu_data.x86_capability[i] &= c->x86_capability[i];
 	}
 
+#ifdef CONFIG_X86_MCE
 	mcheck_init(c);
+#endif
 }
  
 
@@ -1024,10 +949,10 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	        "fxsr", "sse", "sse2", "ss", "ht", "tm", "ia64", NULL,
 
 		/* AMD-defined */
-		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+		"pni", NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 		NULL, NULL, NULL, "syscall", NULL, NULL, NULL, NULL,
 		NULL, NULL, NULL, NULL, "nx", NULL, "mmxext", NULL,
-		NULL, NULL, NULL, NULL, NULL, "lm", "3dnowext", "3dnow",
+		NULL, "fxsr_opt", NULL, NULL, NULL, "lm", "3dnowext", "3dnow",
 
 		/* Transmeta-defined */
 		"recovery", "longrun", NULL, "lrti", NULL, NULL, NULL, NULL,
@@ -1042,10 +967,16 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 
 		/* Intel-defined (#2) */
-		"pni", NULL, NULL, "monitor", "ds_cpl", NULL, NULL, "tm2",
-		"est", NULL, "cid", NULL, NULL, "cmpxchg16b", NULL, NULL,
+		"pni", NULL, NULL, "monitor", "ds_cpl", NULL, NULL, "est",
+		"tm2", NULL, "cid", NULL, NULL, "cx16", "xtpr", NULL,
 		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+
+		/* AMD-defined (#2) */
+		"lahf_lm", "htvalid", NULL, NULL, NULL, NULL, NULL, NULL,
+		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 	};
 	static char *x86_power_flags[] = { 
 		"ts",	/* temperature sensor */
@@ -1086,7 +1017,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 		seq_printf(m, "cache size\t: %d KB\n", c->x86_cache_size);
 	
 #ifdef CONFIG_X86_HT
-	if (cpu_has_ht) {
+	if (smp_num_siblings > 1) {
 		seq_printf(m, "physical id\t: %d\n", phys_proc_id[c - cpu_data]);
 		seq_printf(m, "siblings\t: %d\n", smp_num_siblings);
 	}
@@ -1131,6 +1062,9 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 					seq_printf(m, " [%d]", i);
 			}
 	}
+
+	if (c->x86_num_cores > 1)
+		seq_printf(m, "cpu cores\t: %d\n", c->x86_num_cores);
 
 	seq_printf(m, "\n\n"); 
 

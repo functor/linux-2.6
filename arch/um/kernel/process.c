@@ -9,18 +9,17 @@
 #include <sched.h>
 #include <errno.h>
 #include <stdarg.h>
-#include <fcntl.h>
 #include <stdlib.h>
 #include <setjmp.h>
 #include <sys/time.h>
 #include <sys/ptrace.h>
-#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <sys/mman.h>
 #include <asm/ptrace.h>
 #include <asm/sigcontext.h>
 #include <asm/unistd.h>
 #include <asm/page.h>
+#include <asm/user.h>
 #include "user_util.h"
 #include "kern_util.h"
 #include "user.h"
@@ -47,7 +46,7 @@ void init_new_thread_stack(void *sig_stack, void (*usr1_handler)(int))
 	int flags = 0, pages;
 
 	if(sig_stack != NULL){
-		pages = (1 << UML_CONFIG_KERNEL_STACK_ORDER) - 2;
+		pages = (1 << UML_CONFIG_KERNEL_STACK_ORDER);
 		set_sigstack(sig_stack, pages * page_size());
 		flags = SA_ONSTACK;
 	}
@@ -71,8 +70,7 @@ void init_new_thread_signals(int altstack)
 	set_handler(SIGWINCH, (__sighandler_t) sig_handler, flags, 
 		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
 	set_handler(SIGUSR2, (__sighandler_t) sig_handler, 
-		    SA_NOMASK | flags, -1);
-	(void) CHOOSE_MODE(signal(SIGCHLD, SIG_IGN), (void *) 0);
+		    flags, SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
 	signal(SIGHUP, SIG_IGN);
 
 	init_irq_signals(altstack);
@@ -122,36 +120,48 @@ int start_fork_tramp(void *thread_arg, unsigned long temp_stack,
 
 	/* Start the process and wait for it to kill itself */
 	new_pid = clone(outer_tramp, (void *) sp, clone_flags, &arg);
-	if(new_pid < 0) return(-errno);
-	while((err = waitpid(new_pid, &status, 0) < 0) && (errno == EINTR)) ;
-	if(err < 0) panic("Waiting for outer trampoline failed - errno = %d", 
-			  errno);
+	if(new_pid < 0)
+		return(new_pid);
+
+	CATCH_EINTR(err = waitpid(new_pid, &status, 0));
+	if(err < 0)
+		panic("Waiting for outer trampoline failed - errno = %d",
+		      errno);
+
 	if(!WIFSIGNALED(status) || (WTERMSIG(status) != SIGKILL))
-		panic("outer trampoline didn't exit with SIGKILL");
+		panic("outer trampoline didn't exit with SIGKILL, "
+		      "status = %d", status);
 
 	return(arg.pid);
 }
 
-void suspend_new_thread(int fd)
-{
-	char c;
-
-	os_stop_process(os_getpid());
-
-	if(read(fd, &c, sizeof(c)) != sizeof(c))
-		panic("read failed in suspend_new_thread");
-}
-
 static int ptrace_child(void *arg)
 {
-	int pid = os_getpid();
+	int ret;
+	int pid = os_getpid(), ppid = getppid();
+	int sc_result;
 
 	if(ptrace(PTRACE_TRACEME, 0, 0, 0) < 0){
 		perror("ptrace");
 		os_kill_process(pid, 0);
 	}
 	os_stop_process(pid);
-	_exit(os_getpid() == pid);
+
+	/*This syscall will be intercepted by the parent. Don't call more than
+	 * once, please.*/
+	sc_result = os_getpid();
+
+	if (sc_result == pid)
+		ret = 1; /*Nothing modified by the parent, we are running
+			   normally.*/
+	else if (sc_result == ppid)
+		ret = 0; /*Expected in check_ptrace and check_sysemu when they
+			   succeed in modifying the stack frame*/
+	else
+		ret = 2; /*Serious trouble! This could be caused by a bug in
+			   host 2.6 SKAS3/2.6 patch before release -V6, together
+			   with a bug in the UML code itself.*/
+	_exit(ret);
 }
 
 static int start_ptraced_child(void **stack_out)
@@ -168,7 +178,7 @@ static int start_ptraced_child(void **stack_out)
 	pid = clone(ptrace_child, (void *) sp, SIGCHLD, NULL);
 	if(pid < 0)
 		panic("check_ptrace : clone failed, errno = %d", errno);
-	n = waitpid(pid, &status, WUNTRACED);
+	CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
 	if(n < 0)
 		panic("check_ptrace : wait failed, errno = %d", errno);
 	if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGSTOP))
@@ -179,18 +189,92 @@ static int start_ptraced_child(void **stack_out)
 	return(pid);
 }
 
-static void stop_ptraced_child(int pid, void *stack, int exitcode)
+/* When testing for SYSEMU support, if it is one of the broken versions, we must
+ * just avoid using sysemu, not panic, but only if SYSEMU features are broken.
+ * So only for SYSEMU features we test mustpanic, while normal host features
+ * must work anyway!*/
+static int stop_ptraced_child(int pid, void *stack, int exitcode, int mustpanic)
 {
-	int status, n;
+	int status, n, ret = 0;
 
 	if(ptrace(PTRACE_CONT, pid, 0, 0) < 0)
 		panic("check_ptrace : ptrace failed, errno = %d", errno);
-	n = waitpid(pid, &status, 0);
-	if(!WIFEXITED(status) || (WEXITSTATUS(status) != exitcode))
-		panic("check_ptrace : child exited with status 0x%x", status);
+	CATCH_EINTR(n = waitpid(pid, &status, 0));
+	if(!WIFEXITED(status) || (WEXITSTATUS(status) != exitcode)) {
+		int exit_with = WEXITSTATUS(status);
+		if (exit_with == 2)
+			printk("check_ptrace : child exited with status 2. "
+			       "Serious trouble happening! Try updating your "
+			       "host skas patch!\nDisabling SYSEMU support.");
+		printk("check_ptrace : child exited with exitcode %d, while "
+		      "expecting %d; status 0x%x", exit_with,
+		      exitcode, status);
+		if (mustpanic)
+			panic("\n");
+		else
+			printk("\n");
+		ret = -1;
+	}
 
 	if(munmap(stack, PAGE_SIZE) < 0)
 		panic("check_ptrace : munmap failed, errno = %d", errno);
+	return ret;
+}
+
+static int force_sysemu_disabled = 0;
+
+static int __init nosysemu_cmd_param(char *str, int* add)
+{
+	force_sysemu_disabled = 1;
+	return 0;
+}
+
+__uml_setup("nosysemu", nosysemu_cmd_param,
+		"nosysemu\n"
+		"    Turns off syscall emulation patch for ptrace (SYSEMU) on.\n"
+		"    SYSEMU is a performance-patch introduced by Laurent Vivier. It changes\n"
+		"    behaviour of ptrace() and helps reducing host context switch rate.\n"
+		"    To make it working, you need a kernel patch for your host, too.\n"
+		"    See http://perso.wanadoo.fr/laurent.vivier/UML/ for further information.\n\n");
+
+static void __init check_sysemu(void)
+{
+	void *stack;
+	int pid, n, status;
+
+	printk("Checking syscall emulation patch for ptrace...");
+	sysemu_supported = 0;
+	pid = start_ptraced_child(&stack);
+
+	if(ptrace(PTRACE_SYSEMU, pid, 0, 0) < 0)
+		goto fail;
+
+	CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
+	if (n < 0)
+		panic("check_sysemu : wait failed, errno = %d", errno);
+	if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP))
+		panic("check_sysemu : expected SIGTRAP, "
+		      "got status = %d", status);
+
+	n = ptrace(PTRACE_POKEUSER, pid, PT_SYSCALL_RET_OFFSET,
+		   os_getpid());
+	if(n < 0)
+		panic("check_sysemu : failed to modify system "
+		      "call return, errno = %d", errno);
+
+	if (stop_ptraced_child(pid, stack, 0, 0) < 0)
+		goto fail_stopped;
+
+	sysemu_supported = 1;
+	printk("OK\n");
+	set_using_sysemu(!force_sysemu_disabled);
+	return;
+
+fail:
+	stop_ptraced_child(pid, stack, 1, 0);
+fail_stopped:
+	sysemu_supported = 0;
+	printk("missing\n");
 }
 
 void __init check_ptrace(void)
@@ -205,7 +289,7 @@ void __init check_ptrace(void)
 		if(ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0)
 			panic("check_ptrace : ptrace failed, errno = %d", 
 			      errno);
-		n = waitpid(pid, &status, WUNTRACED);
+		CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
 		if(n < 0)
 			panic("check_ptrace : wait failed, errno = %d", errno);
 		if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP))
@@ -223,17 +307,18 @@ void __init check_ptrace(void)
 			break;
 		}
 	}
-	stop_ptraced_child(pid, stack, 0);
+	stop_ptraced_child(pid, stack, 0, 1);
 	printk("OK\n");
+	check_sysemu();
 }
 
 int run_kernel_thread(int (*fn)(void *), void *arg, void **jmp_ptr)
 {
-	jmp_buf buf;
+	sigjmp_buf buf;
 	int n;
 
 	*jmp_ptr = &buf;
-	n = setjmp(buf);
+	n = sigsetjmp(buf, 1);
 	if(n != 0)
 		return(n);
 	(*fn)(arg);
@@ -270,10 +355,10 @@ int can_do_skas(void)
 	else printf("found\n");
 
 	init_registers(pid);
-	stop_ptraced_child(pid, stack, 1);
+	stop_ptraced_child(pid, stack, 1, 1);
 
 	printf("Checking for /proc/mm...");
-	if(access("/proc/mm", W_OK)){
+	if(os_access("/proc/mm", OS_ACC_W_OK) < 0){
 		printf("not found\n");
 		ret = 0;
 	}

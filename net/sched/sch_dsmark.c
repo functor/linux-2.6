@@ -241,11 +241,11 @@ static int dsmark_enqueue(struct sk_buff *skb,struct Qdisc *sch)
 #endif
 
 	    ((ret = p->q->enqueue(skb,p->q)) != 0)) {
-		sch->stats.drops++;
+		sch->qstats.drops++;
 		return ret;
 	}
-	sch->stats.bytes += skb->len;
-	sch->stats.packets++;
+	sch->bstats.bytes += skb->len;
+	sch->bstats.packets++;
 	sch->q.qlen++;
 	return ret;
 }
@@ -297,9 +297,10 @@ static int dsmark_requeue(struct sk_buff *skb,struct Qdisc *sch)
 	D2PRINTK("dsmark_requeue(skb %p,sch %p,[qdisc %p])\n",skb,sch,p);
         if ((ret = p->q->ops->requeue(skb, p->q)) == 0) {
 		sch->q.qlen++;
+		sch->qstats.requeues++;
 		return 0;
 	}
-	sch->stats.drops++;
+	sch->qstats.drops++;
 	return ret;
 }
 
@@ -331,8 +332,6 @@ int dsmark_init(struct Qdisc *sch,struct rtattr *opt)
 	    !tb[TCA_DSMARK_INDICES-1] ||
 	    RTA_PAYLOAD(tb[TCA_DSMARK_INDICES-1]) < sizeof(__u16))
                 return -EINVAL;
-	memset(p,0,sizeof(*p));
-	p->filter_list = NULL;
 	p->indices = *(__u16 *) RTA_DATA(tb[TCA_DSMARK_INDICES-1]);
 	if (!p->indices)
 		return -EINVAL;

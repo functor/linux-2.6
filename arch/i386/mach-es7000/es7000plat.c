@@ -51,27 +51,29 @@ struct mip_reg		*host_reg;
 int 			mip_port;
 unsigned long		mip_addr, host_addr;
 
-static int __init
+#if defined(CONFIG_X86_IO_APIC) && (defined(CONFIG_ACPI_INTERPRETER) || defined(CONFIG_ACPI_BOOT))
+
+/*
+ * GSI override for ES7000 platforms.
+ */
+
+static unsigned int base;
+
+static int
 es7000_rename_gsi(int ioapic, int gsi)
 {
-	if (ioapic)
-		return gsi;
-	else {
-		if (gsi == 0)
-			return 13;
-		if (gsi == 1)
-			return 16;
-		if (gsi == 4)
-			return 17;
-		if (gsi == 6)
-			return 18;
-		if (gsi == 7)
-			return 19;
-		if (gsi == 8)
-			return 20;
-		return gsi;
-        }
+	if (!base) {
+		int i;
+		for (i = 0; i < nr_ioapics; i++)
+			base += nr_ioapic_registers[i];
+	}
+
+	if (!ioapic && (gsi < 16)) 
+		gsi += base;
+	return gsi;
 }
+
+#endif // (CONFIG_X86_IO_APIC) && (CONFIG_ACPI_INTERPRETER || CONFIG_ACPI_BOOT)
 
 /*
  * Parse the OEM Table
@@ -137,7 +139,7 @@ parse_unisys_oem (char *oemptr, int oem_entries)
 	} else {
 		printk("\nEnabling ES7000 specific features...\n");
 		es7000_plat = 1;
-		platform_rename_gsi = es7000_rename_gsi;
+		ioapic_renumber_irq = es7000_rename_gsi;
 	}
 	return es7000_plat;
 }
@@ -193,7 +195,7 @@ find_unisys_acpi_oem_table(unsigned long *oem_addr, int *length)
 			}
 		}
 	}
-	printk("ES7000: did not find Unisys ACPI OEM table!\n");
+	Dprintk("ES7000: did not find Unisys ACPI OEM table!\n");
 	return -1;
 }
 
@@ -237,7 +239,7 @@ es7000_mip_write(struct mip_reg *mip_reg)
 	}
 
 	status = ((unsigned long long)mip_reg->off_0 &
-		(unsigned long long)0xffff0000000000) >> 48;
+		(unsigned long long)0xffff0000000000ULL) >> 48;
 	mip_reg->off_38 = ((unsigned long long)mip_reg->off_38 &
 		(unsigned long long)~MIP_VALID);
 	return status;

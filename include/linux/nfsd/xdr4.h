@@ -39,6 +39,8 @@
 #ifndef _LINUX_NFSD_XDR4_H
 #define _LINUX_NFSD_XDR4_H
 
+#include <linux/nfs4.h>
+
 #define NFSD4_MAX_TAGLEN	128
 #define XDR_LEN(n)                     (((n) + 3) & ~3)
 
@@ -95,6 +97,7 @@ struct nfsd4_create {
 	u32		cr_bmval[2];        /* request */
 	struct iattr	cr_iattr;           /* request */
 	struct nfsd4_change_info  cr_cinfo; /* response */
+	struct nfs4_acl *cr_acl;
 };
 #define cr_linklen	u.link.namelen
 #define cr_linkname	u.link.name
@@ -113,6 +116,7 @@ struct nfsd4_link {
 };
 
 struct nfsd4_lock_denied {
+	clientid_t	ld_clientid;
 	struct nfs4_stateowner   *ld_sop;
 	u64             ld_start;
 	u64             ld_length;
@@ -216,7 +220,7 @@ struct nfsd4_open {
 	u32		op_rflags;          /* response */
 	int		op_truncate;        /* used during processing */
 	struct nfs4_stateowner *op_stateowner; /* used during processing */
-
+	struct nfs4_acl *op_acl;
 };
 #define op_iattr	u.iattr
 #define op_verf		u.verf
@@ -291,6 +295,7 @@ struct nfsd4_setattr {
 	stateid_t	sa_stateid;         /* request */
 	u32		sa_bmval[2];        /* request */
 	struct iattr	sa_iattr;           /* request */
+	struct nfs4_acl *sa_acl;
 };
 
 struct nfsd4_setclientid {

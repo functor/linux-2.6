@@ -51,13 +51,13 @@
 #include <linux/irq.h>
 #include <linux/seq_file.h>
 #include <linux/root_dev.h>
+#include <linux/bitops.h>
 
 #include <asm/reg.h>
 #include <asm/sections.h>
 #include <asm/prom.h>
 #include <asm/system.h>
 #include <asm/pgtable.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/pci-bridge.h>
 #include <asm/ohare.h>
@@ -317,9 +317,6 @@ pmac_setup_arch(void)
 #endif
 #ifdef CONFIG_NVRAM
 	pmac_nvram_init();
-#endif
-#ifdef CONFIG_DUMMY_CONSOLE
-	conswitchp = &dummy_con;
 #endif
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start)

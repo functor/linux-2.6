@@ -126,7 +126,7 @@ struct TCP_Server_Info {
 	enum protocolEnum protocolType;	
 	char versionMajor;
 	char versionMinor;
-	int svlocal:1;		/* local server or remote */
+	unsigned svlocal:1;	/* local server or remote */
 	atomic_t socketUseCount; /* number of open cifs sessions on socket */
 	atomic_t inFlight;  /* number of requests on the wire to server */
 	enum statusEnum tcpStatus; /* what we think the status is */
@@ -222,7 +222,7 @@ struct cifsTconInfo {
 	FILE_SYSTEM_DEVICE_INFO fsDevInfo;
 	FILE_SYSTEM_ATTRIBUTE_INFO fsAttrInfo;	/* ok if file system name truncated */
 	FILE_SYSTEM_UNIX_INFO fsUnixInfo;
-	int retry:1;
+	unsigned retry:1;
 	/* BB add field for back pointer to sb struct? */
 };
 
@@ -240,6 +240,20 @@ struct cifsLockInfo {
 /*
  * One of these for each open instance of a file
  */
+struct cifs_search_info {
+	loff_t index_of_last_entry;
+	__u16 entries_in_buffer;
+	__u16 info_level;
+	__u32 resume_key;
+	char * ntwrk_buf_start;
+	char * srch_entries_start;
+	char * presume_name;
+	unsigned int resume_name_len;
+	unsigned endOfSearch:1;
+	unsigned emptyDir:1;
+	unsigned unicode:1;
+};
+
 struct cifsFileInfo {
 	struct list_head tlist;	/* pointer to next fid owned by tcon */
 	struct list_head flist;	/* next fid (file instance) for this inode */
@@ -250,14 +264,12 @@ struct cifsFileInfo {
 	/* lock scope id (0 if none) */
 	struct file * pfile; /* needed for writepage */
 	struct inode * pInode; /* needed for oplock break */
-	int endOfSearch:1;	/* we have reached end of search */
-	int closePend:1;	/* file is marked to close */
-	int emptyDir:1;
-	int invalidHandle:1;  /* file closed via session abend */
+	unsigned closePend:1;	/* file is marked to close */
+	unsigned invalidHandle:1;  /* file closed via session abend */
 	struct semaphore fh_sem; /* prevents reopen race after dead ses*/
-	char * search_resume_name;
-	unsigned int resume_name_length;
-	__u32 resume_key;
+	char * search_resume_name; /* BB removeme BB */
+	unsigned int resume_name_length; /* BB removeme - field renamed and moved BB */
+	struct cifs_search_info srch_inf;
 };
 
 /*
@@ -272,9 +284,9 @@ struct cifsInodeInfo {
 	__u32 cifsAttrs; /* e.g. DOS archive bit, sparse, compressed, system */
 	atomic_t inUse;	 /* num concurrent users (local openers cifs) of file*/
 	unsigned long time;	/* jiffies of last update/check of inode */
-	int clientCanCacheRead:1; /* read oplock */
-	int clientCanCacheAll:1;  /* read and writebehind oplock */
-	int oplockPending:1;
+	unsigned clientCanCacheRead:1; /* read oplock */
+	unsigned clientCanCacheAll:1;  /* read and writebehind oplock */
+	unsigned oplockPending:1;
 	struct inode vfs_inode;
 };
 
@@ -317,6 +329,8 @@ struct oplock_q_entry {
 #define   MID_REQUEST_SUBMITTED 2
 #define   MID_RESPONSE_RECEIVED 4
 #define   MID_RETRY_NEEDED      8 /* session closed while this request out */
+#define   MID_NO_RESP_NEEDED 0x10
+#define   MID_SMALL_BUFFER   0x20 /* 112 byte response buffer instead of 4K */
 
 /*
  *****************************************************************
@@ -399,6 +413,7 @@ GLOBAL_EXTERN atomic_t tconInfoReconnectCount;
 
 /* Various Debug counters to remove someday (BB) */
 GLOBAL_EXTERN atomic_t bufAllocCount;
+GLOBAL_EXTERN atomic_t smBufAllocCount;      
 GLOBAL_EXTERN atomic_t midCount;
 
 /* Misc globals */
@@ -407,11 +422,15 @@ GLOBAL_EXTERN unsigned int multiuser_mount;	/* if enabled allows new sessions
 				have the uid/password or Kerberos credential 
 				or equivalent for current user */
 GLOBAL_EXTERN unsigned int oplockEnabled;
-GLOBAL_EXTERN unsigned int quotaEnabled;
+GLOBAL_EXTERN unsigned int experimEnabled;
 GLOBAL_EXTERN unsigned int lookupCacheEnabled;
 GLOBAL_EXTERN unsigned int extended_security;	/* if on, session setup sent 
 				with more secure ntlmssp2 challenge/resp */
 GLOBAL_EXTERN unsigned int ntlmv2_support;  /* better optional password hash */
 GLOBAL_EXTERN unsigned int sign_CIFS_PDUs;  /* enable smb packet signing */
-GLOBAL_EXTERN unsigned int linuxExtEnabled;  /* enable Linux/Unix CIFS extensions */
+GLOBAL_EXTERN unsigned int linuxExtEnabled;/*enable Linux/Unix CIFS extensions*/
+GLOBAL_EXTERN unsigned int CIFSMaxBufSize;  /* max size not including hdr */
+GLOBAL_EXTERN unsigned int cifs_min_rcv;    /* min size of big ntwrk buf pool */
+GLOBAL_EXTERN unsigned int cifs_min_small;  /* min size of small buf pool */
+GLOBAL_EXTERN unsigned int cifs_max_pending; /* MAX requests at once to server*/
 

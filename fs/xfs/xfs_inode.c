@@ -860,25 +860,32 @@ xfs_dic2xflags(
 	xfs_arch_t		arch)
 {
 	__uint16_t		di_flags;
-	uint			flags = 0;
+	uint			flags;
 
 	di_flags = INT_GET(dic->di_flags, arch);
-	if (di_flags & XFS_DIFLAG_REALTIME)
-		flags |= XFS_XFLAG_REALTIME;
-	if (di_flags & XFS_DIFLAG_PREALLOC)
-		flags |= XFS_XFLAG_PREALLOC;
-	if (di_flags & XFS_DIFLAG_IMMUTABLE)
-		flags |= XFS_XFLAG_IMMUTABLE;
-	if (di_flags & XFS_DIFLAG_APPEND)
-		flags |= XFS_XFLAG_APPEND;
-	if (di_flags & XFS_DIFLAG_SYNC)
-		flags |= XFS_XFLAG_SYNC;
-	if (di_flags & XFS_DIFLAG_NOATIME)
-		flags |= XFS_XFLAG_NOATIME;
-	if (di_flags & XFS_DIFLAG_NODUMP)
-		flags |= XFS_XFLAG_NODUMP;
-	if (XFS_CFORK_Q_ARCH(dic, arch))
-		flags |= XFS_XFLAG_HASATTR;
+	flags = XFS_CFORK_Q_ARCH(dic, arch) ? XFS_XFLAG_HASATTR : 0;
+	if (di_flags & XFS_DIFLAG_ANY) {
+		if (di_flags & XFS_DIFLAG_REALTIME)
+			flags |= XFS_XFLAG_REALTIME;
+		if (di_flags & XFS_DIFLAG_PREALLOC)
+			flags |= XFS_XFLAG_PREALLOC;
+		if (di_flags & XFS_DIFLAG_IMMUTABLE)
+			flags |= XFS_XFLAG_IMMUTABLE;
+		if (di_flags & XFS_DIFLAG_APPEND)
+			flags |= XFS_XFLAG_APPEND;
+		if (di_flags & XFS_DIFLAG_SYNC)
+			flags |= XFS_XFLAG_SYNC;
+		if (di_flags & XFS_DIFLAG_NOATIME)
+			flags |= XFS_XFLAG_NOATIME;
+		if (di_flags & XFS_DIFLAG_NODUMP)
+			flags |= XFS_XFLAG_NODUMP;
+		if (di_flags & XFS_DIFLAG_RTINHERIT)
+			flags |= XFS_XFLAG_RTINHERIT;
+		if (di_flags & XFS_DIFLAG_PROJINHERIT)
+			flags |= XFS_XFLAG_PROJINHERIT;
+		if (di_flags & XFS_DIFLAG_NOSYMLINKS)
+			flags |= XFS_XFLAG_NOSYMLINKS;
+	}
 	return flags;
 }
 
@@ -1156,7 +1163,8 @@ xfs_ialloc(
 	 * This is because we're setting fields here we need
 	 * to prevent others from looking at until we're done.
 	 */
-	error = xfs_trans_iget(tp->t_mountp, tp, ino, XFS_ILOCK_EXCL, &ip);
+	error = xfs_trans_iget(tp->t_mountp, tp, ino,
+			IGET_CREATE, XFS_ILOCK_EXCL, &ip);
 	if (error != 0) {
 		return error;
 	}
@@ -1236,8 +1244,15 @@ xfs_ialloc(
 		break;
 	case S_IFREG:
 	case S_IFDIR:
-		if (pip->i_d.di_flags &
-		    (XFS_DIFLAG_NOATIME|XFS_DIFLAG_NODUMP|XFS_DIFLAG_SYNC)) {
+		if (unlikely(pip->i_d.di_flags & XFS_DIFLAG_ANY)) {
+			if (pip->i_d.di_flags & XFS_DIFLAG_RTINHERIT) {
+				if ((mode & S_IFMT) == S_IFDIR) {
+					ip->i_d.di_flags |= XFS_DIFLAG_RTINHERIT;
+				} else {
+					ip->i_d.di_flags |= XFS_DIFLAG_REALTIME;
+					ip->i_iocore.io_flags |= XFS_IOCORE_RT;
+				}
+			}
 			if ((pip->i_d.di_flags & XFS_DIFLAG_NOATIME) &&
 			    xfs_inherit_noatime)
 				ip->i_d.di_flags |= XFS_DIFLAG_NOATIME;
@@ -1247,7 +1262,11 @@ xfs_ialloc(
 			if ((pip->i_d.di_flags & XFS_DIFLAG_SYNC) &&
 			    xfs_inherit_sync)
 				ip->i_d.di_flags |= XFS_DIFLAG_SYNC;
+			if ((pip->i_d.di_flags & XFS_DIFLAG_NOSYMLINKS) &&
+			    xfs_inherit_nosymlinks)
+				ip->i_d.di_flags |= XFS_DIFLAG_NOSYMLINKS;
 		}
+		/* FALLTHROUGH */
 	case S_IFLNK:
 		ip->i_d.di_format = XFS_DINODE_FMT_EXTENTS;
 		ip->i_df.if_flags = XFS_IFEXTENTS;
@@ -3579,6 +3598,7 @@ corrupt_out:
 	return XFS_ERROR(EFSCORRUPTED);
 }
 
+
 /*
  * Flush all inactive inodes in mp.  Return true if no user references
  * were found, false otherwise.
@@ -3634,7 +3654,6 @@ xfs_iflush_all(
 					continue;
 				}
 				if (!(flag & XFS_FLUSH_ALL)) {
-					ASSERT(0);
 					busy = 1;
 					done = 1;
 					break;
@@ -3851,6 +3870,6 @@ xfs_ilock_trace(xfs_inode_t *ip, int lock, unsigned int lockflags, inst_t *ra)
 		     (void *)ra,		/* caller of ilock */
 		     (void *)(unsigned long)current_cpu(),
 		     (void *)(unsigned long)current_pid(),
-		     0,0,0,0,0,0,0,0,0,0);
+		     NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
 }
 #endif

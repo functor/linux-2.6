@@ -24,8 +24,8 @@
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
-#include <asm/hardirq.h>
 #include <asm/desc.h>
+#include <asm/kdebug.h>
 
 extern void die(const char *,struct pt_regs *,long);
 
@@ -107,7 +107,7 @@ static inline unsigned long get_segment_eip(struct pt_regs *regs,
 		desc = (void *)desc + (seg & ~7);
 	} else {
 		/* Must disable preemption while reading the GDT. */
-		desc = (u32 *)&cpu_gdt_table[get_cpu()];
+		desc = (u32 *)&per_cpu(cpu_gdt_table, get_cpu());
 		desc = (void *)desc + (seg & ~7);
 	}
 
@@ -201,7 +201,7 @@ static inline int is_prefetch(struct pt_regs *regs, unsigned long addr,
 	return 0;
 } 
 
-asmlinkage void do_invalid_op(struct pt_regs *, unsigned long);
+fastcall void do_invalid_op(struct pt_regs *, unsigned long);
 
 /*
  * This routine handles page faults.  It determines the address,
@@ -213,7 +213,7 @@ asmlinkage void do_invalid_op(struct pt_regs *, unsigned long);
  *	bit 1 == 0 means read, 1 means write
  *	bit 2 == 0 means kernel, 1 means user-mode
  */
-asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long error_code)
+fastcall void do_page_fault(struct pt_regs *regs, unsigned long error_code)
 {
 	struct task_struct *tsk;
 	struct mm_struct *mm;
@@ -226,6 +226,9 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	/* get the address */
 	__asm__("movl %%cr2,%0":"=r" (address));
 
+	if (notify_die(DIE_PAGE_FAULT, "page fault", regs, error_code, 14,
+					SIGSEGV) == NOTIFY_STOP)
+		return;
 	/* It's safe to allow irq's after cr2 has been saved */
 	if (regs->eflags & (X86_EFLAGS_IF|VM_MASK))
 		local_irq_enable();
@@ -513,12 +516,13 @@ vmalloc_fault:
 		 * an interrupt in the middle of a task switch..
 		 */
 		int index = pgd_index(address);
+		unsigned long pgd_paddr;
 		pgd_t *pgd, *pgd_k;
 		pmd_t *pmd, *pmd_k;
 		pte_t *pte_k;
 
-		asm("movl %%cr3,%0":"=r" (pgd));
-		pgd = index + (pgd_t *)__va(pgd);
+		asm("movl %%cr3,%0":"=r" (pgd_paddr));
+		pgd = index + (pgd_t *)__va(pgd_paddr);
 		pgd_k = init_mm.pgd + index;
 
 		if (!pgd_present(*pgd_k))

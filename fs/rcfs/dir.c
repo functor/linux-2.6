@@ -16,7 +16,8 @@
  *
  */
 
-/* Changes
+/*
+ * Changes
  *
  * 08 Mar 2004
  *        Created.
@@ -52,7 +53,7 @@ int rcfs_empty(struct dentry *dentry)
 	    if (!rcfs_is_magic(child) && rcfs_positive(child))
 		goto out;
 	ret = 1;
-      out:
+out:
 	spin_unlock(&dcache_lock);
 	return ret;
 }
@@ -66,7 +67,7 @@ rcfs_create(struct inode *dir, struct dentry *dentry, int mode,
 	return rcfs_mknod(dir, dentry, mode | S_IFREG, 0);
 }
 
-EXPORT_SYMBOL(rcfs_create);
+EXPORT_SYMBOL_GPL(rcfs_create);
 
 /* Symlinks permitted ?? */
 int rcfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
@@ -89,7 +90,7 @@ int rcfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 	return error;
 }
 
-EXPORT_SYMBOL(rcfs_symlink);
+EXPORT_SYMBOL_GPL(rcfs_symlink);
 
 int rcfs_create_coredir(struct inode *dir, struct dentry *dentry)
 {
@@ -99,8 +100,7 @@ int rcfs_create_coredir(struct inode *dir, struct dentry *dentry)
 
 	ripar = RCFS_I(dir);
 	ridir = RCFS_I(dentry->d_inode);
-
-	// Inform RC's - do Core operations 
+	/* Inform resource controllers - do Core operations */
 	if (ckrm_is_core_valid(ripar->core)) {
 		sz = strlen(ripar->name) + strlen(dentry->d_name.name) + 2;
 		ridir->name = kmalloc(sz, GFP_KERNEL);
@@ -120,7 +120,7 @@ int rcfs_create_coredir(struct inode *dir, struct dentry *dentry)
 	return 0;
 }
 
-EXPORT_SYMBOL(rcfs_create_coredir);
+EXPORT_SYMBOL_GPL(rcfs_create_coredir);
 
 int rcfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 {
@@ -133,7 +133,7 @@ int rcfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 				       d_alias);
 	if ((!strcmp(pd->d_name.name, "/") &&
 	     !strcmp(dentry->d_name.name, "ce"))) {
-		// Call CE's mkdir if it has registered, else fail.
+		/* Call CE's mkdir if it has registered, else fail. */
 		if (rcfs_eng_callbacks.mkdir) {
 			return (*rcfs_eng_callbacks.mkdir) (dir, dentry, mode);
 		} else {
@@ -141,37 +141,27 @@ int rcfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 		}
 	}
 #endif
-
 	if (_rcfs_mknod(dir, dentry, mode | S_IFDIR, 0)) {
 		printk(KERN_ERR "rcfs_mkdir: error in _rcfs_mknod\n");
 		return retval;
 	}
-
 	dir->i_nlink++;
-
-	// Inherit parent's ops since _rcfs_mknod assigns noperm ops
+	/* Inherit parent's ops since _rcfs_mknod assigns noperm ops. */
 	dentry->d_inode->i_op = dir->i_op;
 	dentry->d_inode->i_fop = dir->i_fop;
-
 	retval = rcfs_create_coredir(dir, dentry);
 	if (retval) {
 		simple_rmdir(dir, dentry);
 		return retval;
-		// goto mkdir_err;
 	}
-	// create the default set of magic files 
+	/* create the default set of magic files */
 	clstype = (RCFS_I(dentry->d_inode))->core->classtype;
 	rcfs_create_magic(dentry, &(((struct rcfs_magf *)clstype->mfdesc)[1]),
 			  clstype->mfcount - 3);
-
-	return retval;
-
-//mkdir_err:
-	dir->i_nlink--;
 	return retval;
 }
 
-EXPORT_SYMBOL(rcfs_mkdir);
+EXPORT_SYMBOL_GPL(rcfs_mkdir);
 
 int rcfs_rmdir(struct inode *dir, struct dentry *dentry)
 {
@@ -193,12 +183,11 @@ int rcfs_rmdir(struct inode *dir, struct dentry *dentry)
 		return -EPERM;
 	}
 #endif
-
 	if (!rcfs_empty(dentry)) {
 		printk(KERN_ERR "rcfs_rmdir: directory not empty\n");
 		return -ENOTEMPTY;
 	}
-	// Core class removal 
+	/* Core class removal  */
 
 	if (ri->core == NULL) {
 		printk(KERN_ERR "rcfs_rmdir: core==NULL\n");
@@ -212,12 +201,12 @@ int rcfs_rmdir(struct inode *dir, struct dentry *dentry)
 	}
 	ri->core = NULL;	// just to be safe 
 
-	// Clear magic files only after core successfully removed 
+	/* Clear magic files only after core successfully removed */
 	rcfs_clear_magic(dentry);
 
 	return simple_rmdir(dir, dentry);
 
-      out:
+out:
 	return -EBUSY;
 }
 
@@ -230,9 +219,9 @@ int rcfs_unlink(struct inode *dir, struct dentry *dentry)
 	return -ENOENT;
 }
 
-EXPORT_SYMBOL(rcfs_unlink);
+EXPORT_SYMBOL_GPL(rcfs_unlink);
 
-// rename is allowed on directories only
+/* rename is allowed on directories only */
 int
 rcfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	    struct inode *new_dir, struct dentry *new_dentry)
@@ -243,7 +232,7 @@ rcfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 		return -EINVAL;
 }
 
-EXPORT_SYMBOL(rcfs_rename);
+EXPORT_SYMBOL_GPL(rcfs_rename);
 
 struct inode_operations rcfs_dir_inode_operations = {
 	.create = rcfs_create,

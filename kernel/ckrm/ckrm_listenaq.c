@@ -22,10 +22,10 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/jiffies.h>
 #include <asm/errno.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
-#include <linux/ckrm.h>
 #include <linux/ckrm_rc.h>
 #include <net/tcp.h>
 
@@ -51,7 +51,7 @@ typedef struct ckrm_laq_res {
 	unsigned int min_ratio;
 } ckrm_laq_res_t;
 
-static int my_resid = -1;
+struct ckrm_res_ctlr laq_rcbs;
 
 extern struct ckrm_core_class *rcfs_create_under_netroot(char *, int, int);
 extern struct ckrm_core_class *rcfs_make_core(struct dentry *,
@@ -107,20 +107,16 @@ static char *laq_get_name(struct ckrm_core_class *c)
 static void *laq_res_alloc(struct ckrm_core_class *core,
 			   struct ckrm_core_class *parent)
 {
-	ckrm_laq_res_t *res, *pres;
+	ckrm_laq_res_t *res;
 	int pdepth;
-
-	if (parent)
-		pres = ckrm_get_res_class(parent, my_resid, ckrm_laq_res_t);
-	else
-		pres = NULL;
 
 	if (core == core->classtype->default_class)
 		pdepth = 1;
 	else {
-		if (!parent)
+		res = ckrm_get_res_class(parent, laq_rcbs.resid,ckrm_laq_res_t);
+		if (!res)
 			return NULL;
-		pdepth = 1 + pres->my_depth;
+		pdepth = 1 + res->my_depth;
 	}
 
 	res = kmalloc(sizeof(ckrm_laq_res_t), GFP_ATOMIC);
@@ -157,7 +153,7 @@ static void laq_res_free(void *my_res)
 		return;
 	}
 
-	parent = ckrm_get_res_class(res->pcore, my_resid, ckrm_laq_res_t);
+	parent = ckrm_get_res_class(res->pcore, laq_rcbs.resid, ckrm_laq_res_t);
 	if (!parent)		// Should never happen
 		return;
 
@@ -212,8 +208,9 @@ static void calculate_aq_ratios(ckrm_laq_res_t * res, unsigned int *aq_ratio)
 	min = aq_ratio[0] = (unsigned int)res->shares.unused_guarantee;
 
 	list_for_each_entry(chnode, &res->core->hnode.children, siblings) {
-		child = hnode_2_core(chnode)->res_class[my_resid];
-
+		child=hnode_2_core(chnode)->res_class[laq_rcbs.resid];
+		if (!child) /* no resource structure allocated */
+			continue;
 		aq_ratio[child->my_id] =
 		    (unsigned int)child->shares.my_guarantee;
 		if (aq_ratio[child->my_id] == CKRM_SHARE_DONTCARE)
@@ -250,7 +247,7 @@ static int laq_set_share_values(void *my_res, struct ckrm_shares *shares)
 		return -EBADF;
 	}
 
-	parent = ckrm_get_res_class(res->pcore, my_resid, ckrm_laq_res_t);
+	parent = ckrm_get_res_class(res->pcore, laq_rcbs.resid, ckrm_laq_res_t);
 	if (!parent)		// socketclass does not have a share interface
 		return -EINVAL;
 
@@ -379,7 +376,7 @@ static int laq_get_stats(void *my_res, struct seq_file *sfile)
 		return -EBADF;
 	}
 
-	parent = ckrm_get_res_class(res->pcore, my_resid, ckrm_laq_res_t);
+	parent = ckrm_get_res_class(res->pcore, laq_rcbs.resid, ckrm_laq_res_t);
 	if (!parent) {		// socketclass does not have a stat interface
 		printk(KERN_ERR "socketaq internal fs inconsistency\n");
 		return -EINVAL;
@@ -465,7 +462,7 @@ struct ckrm_res_ctlr laq_rcbs = {
 int __init init_ckrm_laq_res(void)
 {
 	struct ckrm_classtype *clstype;
-	int resid;
+	int resid = laq_rcbs.resid;
 
 	clstype = ckrm_find_classtype_by_name("socketclass");
 	if (clstype == NULL) {
@@ -473,11 +470,11 @@ int __init init_ckrm_laq_res(void)
 		return -ENOENT;
 	}
 
-	if (my_resid == -1) {
+	if (resid == -1) {
 		resid = ckrm_register_res_ctlr(clstype, &laq_rcbs);
 		if (resid >= 0)
-			my_resid = resid;
-		printk("........init_ckrm_listen_aq_res -> %d\n", my_resid);
+			laq_rcbs.classtype = clstype;
+		printk("........init_ckrm_listen_aq_res -> %d\n",resid);
 	}
 	return 0;
 
@@ -486,7 +483,7 @@ int __init init_ckrm_laq_res(void)
 void __exit exit_ckrm_laq_res(void)
 {
 	ckrm_unregister_res_ctlr(&laq_rcbs);
-	my_resid = -1;
+	laq_rcbs.resid = -1;
 }
 
 module_init(init_ckrm_laq_res)

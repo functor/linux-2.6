@@ -43,6 +43,7 @@
 #include <linux/kd.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_ipv6.h>
+#include <linux/tty.h>
 #include <net/icmp.h>
 #include <net/ip.h>		/* for sysctl_local_port_range[] */
 #include <net/tcp.h>		/* struct or_callable used in sock_rcv_skb */
@@ -62,8 +63,8 @@
 #include <linux/nfs_mount.h>
 #include <net/ipv6.h>
 #include <linux/hugetlb.h>
-#include <linux/major.h>
 #include <linux/personality.h>
+#include <linux/sysctl.h>
 
 #include "avc.h"
 #include "objsec.h"
@@ -87,7 +88,7 @@ __setup("enforcing=", enforcing_setup);
 #endif
 
 #ifdef CONFIG_SECURITY_SELINUX_BOOTPARAM
-int selinux_enabled = 1;
+int selinux_enabled = CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE;
 
 static int __init selinux_enabled_setup(char *str)
 {
@@ -386,13 +387,6 @@ static int try_context_mount(struct super_block *sb, void *data)
 				break;
 
 			case Opt_fscontext:
-				if (sbsec->behavior != SECURITY_FS_USE_XATTR) {
-					rc = -EINVAL;
-					printk(KERN_WARNING "SELinux:  "
-					       "fscontext option is invalid for"
-					       " this filesystem type\n");
-					goto out_free;
-				}
 				if (seen & (Opt_context|Opt_fscontext)) {
 					rc = -EINVAL;
 					printk(KERN_WARNING SEL_MOUNT_FAIL_MSG);
@@ -637,10 +631,12 @@ static inline u16 socket_type_to_security_class(int family, int type, int protoc
 	case PF_UNIX:
 		switch (type) {
 		case SOCK_STREAM:
+		case SOCK_SEQPACKET:
 			return SECCLASS_UNIX_STREAM_SOCKET;
 		case SOCK_DGRAM:
 			return SECCLASS_UNIX_DGRAM_SOCKET;
 		}
+		break;
 	case PF_INET:
 	case PF_INET6:
 		switch (type) {
@@ -651,6 +647,7 @@ static inline u16 socket_type_to_security_class(int family, int type, int protoc
 		case SOCK_RAW:
 			return SECCLASS_RAWIP_SOCKET;
 		}
+		break;
 	case PF_NETLINK:
 		switch (protocol) {
 		case NETLINK_ROUTE:
@@ -1266,6 +1263,12 @@ static inline u32 file_to_av(struct file *file)
 int inode_security_set_sid(struct inode *inode, u32 sid)
 {
 	struct inode_security_struct *isec = inode->i_security;
+	struct superblock_security_struct *sbsec = inode->i_sb->s_security;
+
+	if (!sbsec->initialized) {
+		/* Defer initialization to selinux_complete_init. */
+		return 0;
+	}
 
 	down(&isec->sem);
 	isec->sclass = inode_mode_to_security_class(inode->i_mode);
@@ -1548,10 +1551,10 @@ static int selinux_vm_enough_memory(long pages)
         /*
 	 * Sometimes we want to use more memory than we have
 	 */
-	if (sysctl_overcommit_memory == 1)
+	if (sysctl_overcommit_memory == OVERCOMMIT_ALWAYS)
 		return 0;
 
-	if (sysctl_overcommit_memory == 0) {
+	if (sysctl_overcommit_memory == OVERCOMMIT_GUESS) {
 		free = get_page_cache_size();
 		free += nr_free_pages();
 		free += nr_swap_pages;
@@ -1726,71 +1729,39 @@ static void selinux_bprm_free_security(struct linux_binprm *bprm)
 	kfree(bsec);
 }
 
-/* Create an open file that refers to the null device.
-   Derived from the OpenWall LSM. */
-struct file *open_devnull(void)
-{
-	struct inode *inode;
-	struct dentry *dentry;
-	struct file *file = NULL;
-	struct inode_security_struct *isec;
-	dev_t dev;
-
-	inode = new_inode(current->fs->rootmnt->mnt_sb);
-	if (!inode)
-		goto out;
-
-	dentry = dget(d_alloc_root(inode));
-	if (!dentry)
-		goto out_iput;
-
-	file = get_empty_filp();
-	if (!file)
-		goto out_dput;
-
-	dev = MKDEV(MEM_MAJOR, 3); /* null device */
-
-	inode->i_uid = current->fsuid;
-	inode->i_gid = current->fsgid;
-	inode->i_blksize = PAGE_SIZE;
-	inode->i_blocks = 0;
-	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
-	inode->i_state = I_DIRTY; /* so that mark_inode_dirty won't touch us */
-
-	isec = inode->i_security;
-	isec->sid = SECINITSID_DEVNULL;
-	isec->sclass = SECCLASS_CHR_FILE;
-	isec->initialized = 1;
-
-	file->f_flags = O_RDWR;
-	file->f_mode = FMODE_READ | FMODE_WRITE;
-	file->f_dentry = dentry;
-	file->f_vfsmnt = mntget(current->fs->rootmnt);
-	file->f_pos = 0;
-
-	init_special_inode(inode, S_IFCHR | S_IRUGO | S_IWUGO, dev);
-	if (inode->i_fop->open(inode, file))
-		goto out_fput;
-
-out:
-	return file;
-out_fput:
-	mntput(file->f_vfsmnt);
-	put_filp(file);
-out_dput:
-	dput(dentry);
-out_iput:
-	iput(inode);
-	file = NULL;
-	goto out;
-}
+extern struct vfsmount *selinuxfs_mount;
+extern struct dentry *selinux_null;
 
 /* Derived from fs/exec.c:flush_old_files. */
 static inline void flush_unauthorized_files(struct files_struct * files)
 {
 	struct avc_audit_data ad;
 	struct file *file, *devnull = NULL;
+	struct tty_struct *tty = current->signal->tty;
 	long j = -1;
+
+	if (tty) {
+		file_list_lock();
+		file = list_entry(tty->tty_files.next, typeof(*file), f_list);
+		if (file) {
+			/* Revalidate access to controlling tty.
+			   Use inode_has_perm on the tty inode directly rather
+			   than using file_has_perm, as this particular open
+			   file may belong to another process and we are only
+			   interested in the inode-based check here. */
+			struct inode *inode = file->f_dentry->d_inode;
+			if (inode_has_perm(current, inode,
+					   FILE__READ | FILE__WRITE,
+					   NULL, NULL)) {
+				/* Reset controlling tty. */
+				current->signal->tty = NULL;
+				current->signal->tty_old_pgrp = 0;
+			}
+		}
+		file_list_unlock();
+	}
+
+	/* Revalidate access to inherited open files. */
 
 	AVC_AUDIT_DATA_INIT(&ad,FS);
 
@@ -1826,7 +1797,7 @@ static inline void flush_unauthorized_files(struct files_struct * files)
 					if (devnull) {
 						atomic_inc(&devnull->f_count);
 					} else {
-						devnull = open_devnull();
+						devnull = dentry_open(dget(selinux_null), mntget(selinuxfs_mount), O_RDWR);
 						if (!devnull) {
 							put_unused_fd(fd);
 							fput(file);
@@ -1935,8 +1906,8 @@ static void selinux_bprm_apply_creds(struct linux_binprm *bprm, int unsafe)
 				  PROCESS__RLIMITINH, NULL, NULL);
 		if (rc) {
 			for (i = 0; i < RLIM_NLIMITS; i++) {
-				rlim = current->rlim + i;
-				initrlim = init_task.rlim+i;
+				rlim = current->signal->rlim + i;
+				initrlim = init_task.signal->rlim+i;
 				rlim->rlim_cur = min(rlim->rlim_max,initrlim->rlim_cur);
 			}
 		}
@@ -2269,6 +2240,9 @@ static int selinux_inode_setxattr(struct dentry *dentry, char *name, void *value
 	if (sbsec->behavior == SECURITY_FS_USE_MNTPOINT)
 		return -EOPNOTSUPP;
 
+	if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
+		return -EPERM;
+
 	AVC_AUDIT_DATA_INIT(&ad,FS);
 	ad.u.fs.dentry = dentry;
 
@@ -2357,9 +2331,8 @@ static int selinux_inode_removexattr (struct dentry *dentry, char *name)
 	return -EACCES;
 }
 
-static int selinux_inode_getsecurity(struct dentry *dentry, const char *name, void *buffer, size_t size)
+static int selinux_inode_getsecurity(struct inode *inode, const char *name, void *buffer, size_t size)
 {
-	struct inode *inode = dentry->d_inode;
 	struct inode_security_struct *isec = inode->i_security;
 	char *context;
 	unsigned len;
@@ -2387,10 +2360,9 @@ static int selinux_inode_getsecurity(struct dentry *dentry, const char *name, vo
 	return len;
 }
 
-static int selinux_inode_setsecurity(struct dentry *dentry, const char *name,
+static int selinux_inode_setsecurity(struct inode *inode, const char *name,
                                      const void *value, size_t size, int flags)
 {
-	struct inode *inode = dentry->d_inode;
 	struct inode_security_struct *isec = inode->i_security;
 	u32 newsid;
 	int rc;
@@ -2409,10 +2381,10 @@ static int selinux_inode_setsecurity(struct dentry *dentry, const char *name,
 	return 0;
 }
 
-static int selinux_inode_listsecurity(struct dentry *dentry, char *buffer)
+static int selinux_inode_listsecurity(struct inode *inode, char *buffer, size_t buffer_size)
 {
 	const int len = sizeof(XATTR_NAME_SELINUX);
-	if (buffer)
+	if (buffer && len <= buffer_size)
 		memcpy(buffer, XATTR_NAME_SELINUX, len);
 	return len;
 }
@@ -2492,21 +2464,14 @@ static int selinux_file_ioctl(struct file *file, unsigned int cmd,
 	return error;
 }
 
-static int selinux_file_mmap(struct file *file, unsigned long prot, unsigned long flags)
+static int file_map_prot_check(struct file *file, unsigned long prot, int shared)
 {
-	u32 av;
-	int rc;
-
-	rc = secondary_ops->file_mmap(file, prot, flags);
-	if (rc)
-		return rc;
-
 	if (file) {
 		/* read access is always possible with a mapping */
-		av = FILE__READ;
+		u32 av = FILE__READ;
 
 		/* write access only matters if the mapping is shared */
-		if ((flags & MAP_TYPE) == MAP_SHARED && (prot & PROT_WRITE))
+		if (shared && (prot & PROT_WRITE))
 			av |= FILE__WRITE;
 
 		if (prot & PROT_EXEC)
@@ -2515,6 +2480,18 @@ static int selinux_file_mmap(struct file *file, unsigned long prot, unsigned lon
 		return file_has_perm(current, file, av);
 	}
 	return 0;
+}
+
+static int selinux_file_mmap(struct file *file, unsigned long prot, unsigned long flags)
+{
+	int rc;
+
+	rc = secondary_ops->file_mmap(file, prot, flags);
+	if (rc)
+		return rc;
+
+	return file_map_prot_check(file, prot,
+				   (flags & MAP_TYPE) == MAP_SHARED);
 }
 
 static int selinux_file_mprotect(struct vm_area_struct *vma,
@@ -2526,7 +2503,7 @@ static int selinux_file_mprotect(struct vm_area_struct *vma,
 	if (rc)
 		return rc;
 
-	return selinux_file_mmap(vma->vm_file, prot, vma->vm_flags);
+	return file_map_prot_check(vma->vm_file, prot, vma->vm_flags&VM_SHARED);
 }
 
 static int selinux_file_lock(struct file *file, unsigned int cmd)
@@ -2591,8 +2568,7 @@ static int selinux_file_set_fowner(struct file *file)
 }
 
 static int selinux_file_send_sigiotask(struct task_struct *tsk,
-				       struct fown_struct *fown,
-				       int fd, int reason)
+				       struct fown_struct *fown, int signum)
 {
         struct file *file;
 	u32 perm;
@@ -2605,10 +2581,10 @@ static int selinux_file_send_sigiotask(struct task_struct *tsk,
 	tsec = tsk->security;
 	fsec = file->f_security;
 
-	if (!fown->signum)
+	if (!signum)
 		perm = signal_to_av(SIGIO); /* as per send_sigio_to_task */
 	else
-		perm = signal_to_av(fown->signum);
+		perm = signal_to_av(signum);
 
 	return avc_has_perm(fsec->fown_sid, tsec->sid,
 			    SECCLASS_PROCESS, perm, NULL, NULL);
@@ -2650,6 +2626,11 @@ static int selinux_task_alloc_security(struct task_struct *tsk)
 	/* Retain the exec and create SIDs across fork */
 	tsec2->exec_sid = tsec1->exec_sid;
 	tsec2->create_sid = tsec1->create_sid;
+
+	/* Retain ptracer SID across fork, if any.
+	   This will be reset by the ptrace hook upon any
+	   subsequent ptrace_attach operations. */
+	tsec2->ptrace_sid = tsec1->ptrace_sid;
 
 	return 0;
 }
@@ -2715,7 +2696,7 @@ static int selinux_task_setnice(struct task_struct *p, int nice)
 
 static int selinux_task_setrlimit(unsigned int resource, struct rlimit *new_rlim)
 {
-	struct rlimit *old_rlim = current->rlim + resource;
+	struct rlimit *old_rlim = current->signal->rlim + resource;
 	int rc;
 
 	rc = secondary_ops->task_setrlimit(resource, new_rlim);
@@ -2822,49 +2803,52 @@ static void selinux_task_to_inode(struct task_struct *p,
 /* Returns error only if unable to parse addresses */
 static int selinux_parse_skb_ipv4(struct sk_buff *skb, struct avc_audit_data *ad)
 {
-	int offset, ihlen, ret;
-	struct iphdr iph;
+	int offset, ihlen, ret = -EINVAL;
+	struct iphdr _iph, *ih;
 
 	offset = skb->nh.raw - skb->data;
-	ret = skb_copy_bits(skb, offset, &iph, sizeof(iph));
-	if (ret)
+	ih = skb_header_pointer(skb, offset, sizeof(_iph), &_iph);
+	if (ih == NULL)
 		goto out;
 
-	ihlen = iph.ihl * 4;
-	if (ihlen < sizeof(iph))
+	ihlen = ih->ihl * 4;
+	if (ihlen < sizeof(_iph))
 		goto out;
 
-	ad->u.net.v4info.saddr = iph.saddr;
-	ad->u.net.v4info.daddr = iph.daddr;
+	ad->u.net.v4info.saddr = ih->saddr;
+	ad->u.net.v4info.daddr = ih->daddr;
+	ret = 0;
 
-	switch (iph.protocol) {
+	switch (ih->protocol) {
         case IPPROTO_TCP: {
-        	struct tcphdr tcph;
+        	struct tcphdr _tcph, *th;
 
-        	if (ntohs(iph.frag_off) & IP_OFFSET)
+        	if (ntohs(ih->frag_off) & IP_OFFSET)
         		break;
 
 		offset += ihlen;
-		if (skb_copy_bits(skb, offset, &tcph, sizeof(tcph)) < 0)
+		th = skb_header_pointer(skb, offset, sizeof(_tcph), &_tcph);
+		if (th == NULL)
 			break;
 
-		ad->u.net.sport = tcph.source;
-		ad->u.net.dport = tcph.dest;
+		ad->u.net.sport = th->source;
+		ad->u.net.dport = th->dest;
 		break;
         }
         
         case IPPROTO_UDP: {
-        	struct udphdr udph;
+        	struct udphdr _udph, *uh;
         	
-        	if (ntohs(iph.frag_off) & IP_OFFSET)
+        	if (ntohs(ih->frag_off) & IP_OFFSET)
         		break;
         		
 		offset += ihlen;
-        	if (skb_copy_bits(skb, offset, &udph, sizeof(udph)) < 0)
-        		break;	
+        	uh = skb_header_pointer(skb, offset, sizeof(_udph), &_udph);
+		if (uh == NULL)
+			break;	
 
-        	ad->u.net.sport = udph.source;
-        	ad->u.net.dport = udph.dest;
+        	ad->u.net.sport = uh->source;
+        	ad->u.net.dport = uh->dest;
         	break;
         }
 
@@ -2881,19 +2865,20 @@ out:
 static int selinux_parse_skb_ipv6(struct sk_buff *skb, struct avc_audit_data *ad)
 {
 	u8 nexthdr;
-	int ret, offset;
-	struct ipv6hdr ipv6h;
+	int ret = -EINVAL, offset;
+	struct ipv6hdr _ipv6h, *ip6;
 
 	offset = skb->nh.raw - skb->data;
-	ret = skb_copy_bits(skb, offset, &ipv6h, sizeof(ipv6h));
-	if (ret)
+	ip6 = skb_header_pointer(skb, offset, sizeof(_ipv6h), &_ipv6h);
+	if (ip6 == NULL)
 		goto out;
 
-	ipv6_addr_copy(&ad->u.net.v6info.saddr, &ipv6h.saddr);
-	ipv6_addr_copy(&ad->u.net.v6info.daddr, &ipv6h.daddr);
+	ipv6_addr_copy(&ad->u.net.v6info.saddr, &ip6->saddr);
+	ipv6_addr_copy(&ad->u.net.v6info.daddr, &ip6->daddr);
+	ret = 0;
 
-	nexthdr = ipv6h.nexthdr;
-	offset += sizeof(ipv6h);
+	nexthdr = ip6->nexthdr;
+	offset += sizeof(_ipv6h);
 	offset = ipv6_skip_exthdr(skb, offset, &nexthdr,
 				  skb->tail - skb->head - offset);
 	if (offset < 0)
@@ -2901,24 +2886,26 @@ static int selinux_parse_skb_ipv6(struct sk_buff *skb, struct avc_audit_data *ad
 
 	switch (nexthdr) {
 	case IPPROTO_TCP: {
-        	struct tcphdr tcph;
+        	struct tcphdr _tcph, *th;
 
-		if (skb_copy_bits(skb, offset, &tcph, sizeof(tcph)) < 0)
+		th = skb_header_pointer(skb, offset, sizeof(_tcph), &_tcph);
+		if (th == NULL)
 			break;
 
-		ad->u.net.sport = tcph.source;
-		ad->u.net.dport = tcph.dest;
+		ad->u.net.sport = th->source;
+		ad->u.net.dport = th->dest;
 		break;
 	}
 
 	case IPPROTO_UDP: {
-		struct udphdr udph;
+		struct udphdr _udph, *uh;
 
-		if (skb_copy_bits(skb, offset, &udph, sizeof(udph)) < 0)
+		uh = skb_header_pointer(skb, offset, sizeof(_udph), &_udph);
+		if (uh == NULL)
 			break;
 
-		ad->u.net.sport = udph.source;
-		ad->u.net.dport = udph.dest;
+		ad->u.net.sport = uh->source;
+		ad->u.net.dport = uh->dest;
 		break;
 	}
 
@@ -3078,6 +3065,7 @@ static int selinux_socket_bind(struct socket *sock, struct sockaddr *address, in
 				goto out;
 			AVC_AUDIT_DATA_INIT(&ad,NET);
 			ad.u.net.sport = htons(snum);
+			ad.u.net.family = family;
 			err = avc_has_perm(isec->sid, sid,
 					   isec->sclass,
 					   SOCKET__NAME_BIND, NULL, &ad);
@@ -3258,13 +3246,11 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	u16 family;
 	char *addrp;
 	int len, err = 0;
-	u32 netif_perm, node_perm, node_sid, recv_perm = 0;
+	u32 netif_perm, node_perm, node_sid, if_sid, recv_perm = 0;
 	u32 sock_sid = 0;
 	u16 sock_class = 0;
 	struct socket *sock;
 	struct net_device *dev;
-	struct sel_netif *netif;
-	struct netif_security_struct *nsec;
 	struct avc_audit_data ad;
 
 	family = sk->sk_family;
@@ -3295,13 +3281,9 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	if (!dev)
 		goto out;
 
-	netif = sel_netif_lookup(dev);
-	if (IS_ERR(netif)) {
-		err = PTR_ERR(netif);
+	err = sel_netif_sids(dev, &if_sid, NULL);
+	if (err)
 		goto out;
-	}
-	
-	nsec = &netif->nsec;
 
 	switch (sock_class) {
 	case SECCLASS_UDP_SOCKET:
@@ -3327,14 +3309,11 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	ad.u.net.family = family;
 
 	err = selinux_parse_skb(skb, &ad, &addrp, &len, 1);
-	if (err) {
-		sel_netif_put(netif);
+	if (err)
 		goto out;
-	}
 
-	err = avc_has_perm(sock_sid, nsec->if_sid, SECCLASS_NETIF,
-	                   netif_perm, &nsec->avcr, &ad);
-	sel_netif_put(netif);
+	err = avc_has_perm(sock_sid, if_sid, SECCLASS_NETIF,
+	                   netif_perm, NULL, &ad);
 	if (err)
 		goto out;
 	
@@ -3450,13 +3429,11 @@ static unsigned int selinux_ip_postroute_last(unsigned int hooknum,
 {
 	char *addrp;
 	int len, err = NF_ACCEPT;
-	u32 netif_perm, node_perm, node_sid, send_perm = 0;
+	u32 netif_perm, node_perm, node_sid, if_sid, send_perm = 0;
 	struct sock *sk;
 	struct socket *sock;
 	struct inode *inode;
-	struct sel_netif *netif;
 	struct sk_buff *skb = *pskb;
-	struct netif_security_struct *nsec;
 	struct inode_security_struct *isec;
 	struct avc_audit_data ad;
 	struct net_device *dev = (struct net_device *)out;
@@ -3473,13 +3450,10 @@ static unsigned int selinux_ip_postroute_last(unsigned int hooknum,
 	if (!inode)
 		goto out;
 
-	netif = sel_netif_lookup(dev);
-	if (IS_ERR(netif)) {
-		err = NF_DROP;
+	err = sel_netif_sids(dev, &if_sid, NULL);
+	if (err)
 		goto out;
-	}
-	
-	nsec = &netif->nsec;
+
 	isec = inode->i_security;
 	
 	switch (isec->sclass) {
@@ -3508,14 +3482,11 @@ static unsigned int selinux_ip_postroute_last(unsigned int hooknum,
 
 	err = selinux_parse_skb(skb, &ad, &addrp,
 				&len, 0) ? NF_DROP : NF_ACCEPT;
-	if (err != NF_ACCEPT) {
-		sel_netif_put(netif);
+	if (err != NF_ACCEPT)
 		goto out;
-	}
 
-	err = avc_has_perm(isec->sid, nsec->if_sid, SECCLASS_NETIF,
-	                   netif_perm, &nsec->avcr, &ad) ? NF_DROP : NF_ACCEPT;
-	sel_netif_put(netif);
+	err = avc_has_perm(isec->sid, if_sid, SECCLASS_NETIF,
+	                   netif_perm, NULL, &ad) ? NF_DROP : NF_ACCEPT;
 	if (err != NF_ACCEPT)
 		goto out;
 		

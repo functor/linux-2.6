@@ -29,7 +29,7 @@ struct powernow_k8_data {
 	 * frequency is in kHz */
 	struct cpufreq_frequency_table  *powernow_table;
 
-#if defined(CONFIG_ACPI_PROCESSOR) || defined(CONFIG_ACPI_PROCESSOR_MODULE)
+#ifdef CONFIG_X86_POWERNOW_K8_ACPI
 	/* the acpi table needs to be kept. it's only available if ACPI was
 	 * used to determine valid frequency/vid/fid states */
 	struct acpi_processor_performance acpi_data;
@@ -168,11 +168,7 @@ struct pst_s {
 	u8 vid;
 };
 
-#ifdef DEBUG
-#define dprintk(msg...) printk(msg)
-#else
-#define dprintk(msg...) do { } while(0)
-#endif
+#define dprintk(msg...) cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, "powernow-k8", msg)
 
 static int core_voltage_pre_transition(struct powernow_k8_data *data, u32 reqvid);
 static int core_voltage_post_transition(struct powernow_k8_data *data, u32 reqvid);

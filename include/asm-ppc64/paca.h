@@ -16,6 +16,7 @@
  * 2 of the License, or (at your option) any later version.
  */    
 
+#include	<linux/config.h>
 #include	<asm/types.h>
 #include	<asm/iSeries/ItLpPaca.h>
 #include	<asm/iSeries/ItLpRegSave.h>
@@ -78,7 +79,6 @@ struct paca_struct {
 	u64 exmc[8];		/* used for machine checks */
 	u64 exslb[8];		/* used for SLB/segment table misses
 				 * on the linear mapping */
-	u64 slb_r3;		/* spot to save R3 on SLB miss */
 	mm_context_t context;
 	u16 slb_cache[SLB_CACHE_ENTRIES];
 	u16 slb_cache_ptr;
@@ -99,27 +99,20 @@ struct paca_struct {
 	u64 exdsi[8];		/* used for linear mapping hash table misses */
 
 	/*
-	 * iSeries structues which the hypervisor knows about - Not
-	 * sure if these particularly need to be cacheline aligned.
+	 * iSeries structure which the hypervisor knows about -
+	 * this structure should not cross a page boundary.
+	 * The vpa_init/register_vpa call is now known to fail if the
+	 * lppaca structure crosses a page boundary.
 	 * The lppaca is also used on POWER5 pSeries boxes.
+	 * The lppaca is 640 bytes long, and cannot readily change
+	 * since the hypervisor knows its layout, so a 1kB
+	 * alignment will suffice to ensure that it doesn't
+	 * cross a page boundary.
 	 */
-	struct ItLpPaca lppaca __attribute__((aligned(0x80)));
+	struct ItLpPaca lppaca __attribute__((__aligned__(0x400)));
+#ifdef CONFIG_PPC_ISERIES
 	struct ItLpRegSave reg_save;
-
-	/*
-	 * iSeries profiling support
-	 *
-	 * FIXME: do we still want this, or can we ditch it in favour
-	 * of oprofile?
-	 */
-	u32 *prof_buffer;		/* iSeries profiling buffer */
-	u32 *prof_stext;		/* iSeries start of kernel text */
-	u32 prof_multiplier;
-	u32 prof_counter;
-	u32 prof_shift;			/* iSeries shift for profile
-					 * bucket size */
-	u32 prof_len;			/* iSeries length of profile */
-	u8 prof_enabled;		/* 1=iSeries profiling enabled */
+#endif
 };
 
 #endif /* _PPC64_PACA_H */

@@ -59,7 +59,6 @@ struct bus_type {
 	struct driver_attribute	* drv_attrs;
 
 	int		(*match)(struct device * dev, struct device_driver * drv);
-	struct device * (*add)	(struct device * parent, char * bus_id);
 	int		(*hotplug) (struct device *dev, char **envp, 
 				    int num_envp, char *buffer, int buffer_size);
 	int		(*suspend)(struct device * dev, u32 state);
@@ -106,6 +105,8 @@ struct device_driver {
 	struct semaphore	unload_sem;
 	struct kobject		kobj;
 	struct list_head	devices;
+
+	struct module 		* owner;
 
 	int	(*probe)	(struct device * dev);
 	int 	(*remove)	(struct device * dev);
@@ -267,12 +268,7 @@ struct device {
 	void		*platform_data;	/* Platform specific data (e.g. ACPI,
 					   BIOS data relevant to device) */
 	struct dev_pm_info	power;
-	u32		power_state;	/* Current operating state. In
-					   ACPI-speak, this is D0-D3, D0
-					   being fully functional, and D3
-					   being off. */
 
-	unsigned char *saved_state;	/* saved device state */
 	u32		detach_state;	/* State to enter when device is
 					   detached from its driver. */
 
@@ -284,6 +280,9 @@ struct device {
 					     allocations such descriptors. */
 
 	struct list_head	dma_pools;	/* dma pools (if dma'ble) */
+
+	struct dma_coherent_mem	*dma_mem; /* internal for coherent mem
+					     override */
 
 	void	(*release)(struct device * dev);
 };
@@ -318,11 +317,13 @@ extern int device_for_each_child(struct device *, void *,
 		     int (*fn)(struct device *, void *));
 
 /*
- * Manual binding of a device to driver. See drivers/base/bus.c 
+ * Manual binding of a device to driver. See drivers/base/bus.c
  * for information on use.
  */
+extern int  driver_probe_device(struct device_driver * drv, struct device * dev);
 extern void device_bind_driver(struct device * dev);
 extern void device_release_driver(struct device * dev);
+extern int  device_attach(struct device * dev);
 extern void driver_attach(struct device_driver * drv);
 
 

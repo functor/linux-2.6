@@ -303,7 +303,7 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 		 * that it wants to exit.
 		 */
 		DBG(("sys_ptrace(KILL)\n"));
-		if (child->state == TASK_ZOMBIE)	/* already dead */
+		if (child->exit_state == EXIT_ZOMBIE)	/* already dead */
 			goto out_tsk;
 		child->exit_code = SIGKILL;
 		goto out_wake_notrap;
@@ -379,6 +379,10 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 		ret = ptrace_detach(child, data);
 		goto out_tsk;
 
+	case PTRACE_GETEVENTMSG:
+                ret = put_user(child->ptrace_message, (unsigned int __user *) data);
+		goto out_tsk;
+
 	default:
 		ret = ptrace_request(child, request, addr, data);
 		goto out_tsk;
@@ -404,11 +408,8 @@ void syscall_trace(void)
 		return;
 	if (!(current->ptrace & PT_PTRACED))
 		return;
-	current->exit_code = SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
-					? 0x80 : 0);
-	current->state = TASK_STOPPED;
-	notify_parent(current, SIGCHLD);
-	schedule();
+	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
+				 ? 0x80 : 0));
 	/*
 	 * this isn't the same as continuing with a signal, but it will do
 	 * for normal use.  strace only continues with a signal if the

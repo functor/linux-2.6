@@ -14,6 +14,7 @@
 #include <linux/swapops.h>
 #include <linux/rmap.h>
 #include <linux/module.h>
+#include <linux/syscalls.h>
 
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
@@ -220,9 +221,7 @@ asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 			flush_dcache_mmap_lock(mapping);
 			vma->vm_flags |= VM_NONLINEAR;
 			vma_prio_tree_remove(vma, &mapping->i_mmap);
-			vma_prio_tree_init(vma);
-			list_add_tail(&vma->shared.vm_set.list,
-					&mapping->i_mmap_nonlinear);
+			vma_nonlinear_insert(vma, &mapping->i_mmap_nonlinear);
 			flush_dcache_mmap_unlock(mapping);
 			spin_unlock(&mapping->i_mmap_lock);
 		}

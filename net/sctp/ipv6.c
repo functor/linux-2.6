@@ -78,7 +78,10 @@
 
 #include <asm/uaccess.h>
 
-extern struct notifier_block sctp_inetaddr_notifier;
+extern int sctp_inetaddr_event(struct notifier_block *, unsigned long, void *);
+static struct notifier_block sctp_inet6addr_notifier = {
+	.notifier_call = sctp_inetaddr_event,
+};
 
 /* ICMP error handler. */
 void sctp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
@@ -461,7 +464,7 @@ static int sctp_v6_cmp_addr(const union sctp_addr *addr1,
 		}
 		return 0;
 	}
-	if (ipv6_addr_cmp(&addr1->v6.sin6_addr, &addr2->v6.sin6_addr))
+	if (!ipv6_addr_equal(&addr1->v6.sin6_addr, &addr2->v6.sin6_addr))
 		return 0;
 	/* If this is a linklocal address, compare the scope_id. */
 	if (ipv6_addr_type(&addr1->v6.sin6_addr) & IPV6_ADDR_LINKLOCAL) {
@@ -583,8 +586,8 @@ struct sock *sctp_v6_create_accept_sk(struct sock *sk,
 	struct ipv6_pinfo *newnp, *np = inet6_sk(sk);
 	struct sctp6_sock *newsctp6sk;
 
-	newsk = sk_alloc(PF_INET6, GFP_KERNEL, sizeof(struct sctp6_sock),
-			 sk->sk_slab);
+	newsk = sk_alloc(PF_INET6, GFP_KERNEL, sk->sk_prot->slab_obj_size,
+			 sk->sk_prot->slab);
 	if (!newsk)
 		goto out;
 
@@ -892,7 +895,7 @@ static struct proto_ops inet6_seqpacket_ops = {
 static struct inet_protosw sctpv6_seqpacket_protosw = {
 	.type          = SOCK_SEQPACKET,
 	.protocol      = IPPROTO_SCTP,
-	.prot 	       = &sctp_prot,
+	.prot 	       = &sctpv6_prot,
 	.ops           = &inet6_seqpacket_ops,
 	.capability    = -1,
 	.no_check      = 0,
@@ -901,7 +904,7 @@ static struct inet_protosw sctpv6_seqpacket_protosw = {
 static struct inet_protosw sctpv6_stream_protosw = {
 	.type          = SOCK_STREAM,
 	.protocol      = IPPROTO_SCTP,
-	.prot 	       = &sctp_prot,
+	.prot 	       = &sctpv6_prot,
 	.ops           = &inet6_seqpacket_ops,
 	.capability    = -1,
 	.no_check      = 0,
@@ -963,9 +966,14 @@ static struct sctp_pf sctp_pf_inet6_specific = {
 /* Initialize IPv6 support and register with inet6 stack.  */
 int sctp_v6_init(void)
 {
+	int rc = sk_alloc_slab(&sctpv6_prot, "sctpv6_sock");
+
+	if (rc)
+		goto out;
 	/* Register inet6 protocol. */
+	rc = -EAGAIN;
 	if (inet6_add_protocol(&sctpv6_protocol, IPPROTO_SCTP) < 0)
-		return -EAGAIN;
+		goto out_sctp_free_slab;
 
 	/* Add SCTPv6(UDP and TCP style) to inetsw6 linked list. */
 	inet6_register_protosw(&sctpv6_seqpacket_protosw);
@@ -978,9 +986,13 @@ int sctp_v6_init(void)
 	sctp_register_af(&sctp_ipv6_specific);
 
 	/* Register notifier for inet6 address additions/deletions. */
-	register_inet6addr_notifier(&sctp_inetaddr_notifier);
-
-	return 0;
+	register_inet6addr_notifier(&sctp_inet6addr_notifier);
+	rc = 0;
+out:
+	return rc;
+out_sctp_free_slab:
+	sk_free_slab(&sctpv6_prot);
+	goto out;
 }
 
 /* IPv6 specific exit support. */
@@ -990,5 +1002,6 @@ void sctp_v6_exit(void)
 	inet6_del_protocol(&sctpv6_protocol, IPPROTO_SCTP);
 	inet6_unregister_protosw(&sctpv6_seqpacket_protosw);
 	inet6_unregister_protosw(&sctpv6_stream_protosw);
-	unregister_inet6addr_notifier(&sctp_inetaddr_notifier);
+	unregister_inet6addr_notifier(&sctp_inet6addr_notifier);
+	sk_free_slab(&sctpv6_prot);
 }

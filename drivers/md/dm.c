@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
+ * Copyright (C) 2004 Red Hat, Inc. All rights reserved.
  *
  * This file is released under the GPL.
  */
@@ -15,14 +16,12 @@
 #include <linux/buffer_head.h>
 #include <linux/mempool.h>
 #include <linux/slab.h>
+#include <linux/idr.h>
 
 static const char *_name = DM_NAME;
 
 static unsigned int major = 0;
 static unsigned int _major = 0;
-
-static int realloc_minor_bits(unsigned long requested_minor);
-static void free_minor_bits(void);
 
 /*
  * One of these is allocated per bio.
@@ -60,6 +59,8 @@ struct mapped_device {
 
 	request_queue_t *queue;
 	struct gendisk *disk;
+
+	void *interface_ptr;
 
 	/*
 	 * A list of ios that arrived while we were suspended.
@@ -113,19 +114,11 @@ static int __init local_init(void)
 		return -ENOMEM;
 	}
 
-	r = realloc_minor_bits(1024);
-	if (r < 0) {
-		kmem_cache_destroy(_tio_cache);
-		kmem_cache_destroy(_io_cache);
-		return r;
-	}
-
 	_major = major;
 	r = register_blkdev(_major, _name);
 	if (r < 0) {
 		kmem_cache_destroy(_tio_cache);
 		kmem_cache_destroy(_io_cache);
-		free_minor_bits();
 		return r;
 	}
 
@@ -139,7 +132,6 @@ static void local_exit(void)
 {
 	kmem_cache_destroy(_tio_cache);
 	kmem_cache_destroy(_io_cache);
-	free_minor_bits();
 
 	if (unregister_blkdev(_major, _name) < 0)
 		DMERR("devfs_unregister_blkdev failed");
@@ -149,23 +141,20 @@ static void local_exit(void)
 	DMINFO("cleaned up");
 }
 
-/*
- * We have a lot of init/exit functions, so it seems easier to
- * store them in an array.  The disposable macro 'xx'
- * expands a prefix into a pair of function names.
- */
-static struct {
-	int (*init) (void);
-	void (*exit) (void);
+int (*_inits[])(void) __initdata = {
+	local_init,
+	dm_target_init,
+	dm_linear_init,
+	dm_stripe_init,
+	dm_interface_init,
+};
 
-} _inits[] = {
-#define xx(n) {n ## _init, n ## _exit},
-	xx(local)
-	xx(dm_target)
-	xx(dm_linear)
-	xx(dm_stripe)
-	xx(dm_interface)
-#undef xx
+void (*_exits[])(void) = {
+	local_exit,
+	dm_target_exit,
+	dm_linear_exit,
+	dm_stripe_exit,
+	dm_interface_exit,
 };
 
 static int __init dm_init(void)
@@ -175,7 +164,7 @@ static int __init dm_init(void)
 	int r, i;
 
 	for (i = 0; i < count; i++) {
-		r = _inits[i].init();
+		r = _inits[i]();
 		if (r)
 			goto bad;
 	}
@@ -184,17 +173,17 @@ static int __init dm_init(void)
 
       bad:
 	while (i--)
-		_inits[i].exit();
+		_exits[i]();
 
 	return r;
 }
 
 static void __exit dm_exit(void)
 {
-	int i = ARRAY_SIZE(_inits);
+	int i = ARRAY_SIZE(_exits);
 
 	while (i--)
-		_inits[i].exit();
+		_exits[i]();
 }
 
 /*
@@ -597,6 +586,21 @@ static int dm_request(request_queue_t *q, struct bio *bio)
 	return 0;
 }
 
+static int dm_flush_all(request_queue_t *q, struct gendisk *disk,
+			sector_t *error_sector)
+{
+	struct mapped_device *md = q->queuedata;
+	struct dm_table *map = dm_get_table(md);
+	int ret = -ENXIO;
+
+	if (map) {
+		ret = dm_table_flush_all(md->map);
+		dm_table_put(map);
+	}
+
+	return ret;
+}
+
 static void dm_unplug_all(request_queue_t *q)
 {
 	struct mapped_device *md = q->queuedata;
@@ -624,109 +628,86 @@ static int dm_any_congested(void *congested_data, int bdi_bits)
 }
 
 /*-----------------------------------------------------------------
- * A bitset is used to keep track of allocated minor numbers.
+ * An IDR is used to keep track of allocated minor numbers.
  *---------------------------------------------------------------*/
 static DECLARE_MUTEX(_minor_lock);
-static unsigned long *_minor_bits = NULL;
-static unsigned long _max_minors = 0;
-
-#define MINORS_SIZE(minors) ((minors / BITS_PER_LONG) * sizeof(unsigned long))
-
-static int realloc_minor_bits(unsigned long requested_minor)
-{
-	unsigned long max_minors;
-	unsigned long *minor_bits, *tmp;
-
-	if (requested_minor < _max_minors)
-		return -EINVAL;
-
-	/* Round up the requested minor to the next power-of-2. */
-	max_minors = 1 << fls(requested_minor - 1);
-	if (max_minors > (1 << MINORBITS))
-		return -EINVAL;
-
-	minor_bits = kmalloc(MINORS_SIZE(max_minors), GFP_KERNEL);
-	if (!minor_bits)
-		return -ENOMEM;
-	memset(minor_bits, 0, MINORS_SIZE(max_minors));
-
-	/* Copy the existing bit-set to the new one. */
-	if (_minor_bits)
-		memcpy(minor_bits, _minor_bits, MINORS_SIZE(_max_minors));
-
-	tmp = _minor_bits;
-	_minor_bits = minor_bits;
-	_max_minors = max_minors;
-	if (tmp)
-		kfree(tmp);
-
-	return 0;
-}
-
-static void free_minor_bits(void)
-{
-	down(&_minor_lock);
-	kfree(_minor_bits);
-	_minor_bits = NULL;
-	_max_minors = 0;
-	up(&_minor_lock);
-}
+static DEFINE_IDR(_minor_idr);
 
 static void free_minor(unsigned int minor)
 {
 	down(&_minor_lock);
-	if (minor < _max_minors)
-		clear_bit(minor, _minor_bits);
+	idr_remove(&_minor_idr, minor);
 	up(&_minor_lock);
 }
 
 /*
  * See if the device with a specific minor # is free.
  */
-static int specific_minor(unsigned int minor)
+static int specific_minor(struct mapped_device *md, unsigned int minor)
 {
-	int r = 0;
+	int r, m;
 
-	if (minor > (1 << MINORBITS))
+	if (minor >= (1 << MINORBITS))
 		return -EINVAL;
 
 	down(&_minor_lock);
-	if (minor >= _max_minors) {
-		r = realloc_minor_bits(minor);
-		if (r) {
-			up(&_minor_lock);
-			return r;
-		}
+
+	if (idr_find(&_minor_idr, minor)) {
+		r = -EBUSY;
+		goto out;
 	}
 
-	if (test_and_set_bit(minor, _minor_bits))
-		r = -EBUSY;
-	up(&_minor_lock);
+	r = idr_pre_get(&_minor_idr, GFP_KERNEL);
+	if (!r) {
+		r = -ENOMEM;
+		goto out;
+	}
 
+	r = idr_get_new_above(&_minor_idr, md, minor, &m);
+	if (r) {
+		goto out;
+	}
+
+	if (m != minor) {
+		idr_remove(&_minor_idr, m);
+		r = -EBUSY;
+		goto out;
+	}
+
+out:
+	up(&_minor_lock);
 	return r;
 }
 
-static int next_free_minor(unsigned int *minor)
+static int next_free_minor(struct mapped_device *md, unsigned int *minor)
 {
 	int r;
 	unsigned int m;
 
 	down(&_minor_lock);
-	m = find_first_zero_bit(_minor_bits, _max_minors);
-	if (m >= _max_minors) {
-		r = realloc_minor_bits(_max_minors * 2);
-		if (r) {
-			up(&_minor_lock);
-			return r;
-		}
-		m = find_first_zero_bit(_minor_bits, _max_minors);
+
+	r = idr_pre_get(&_minor_idr, GFP_KERNEL);
+	if (!r) {
+		r = -ENOMEM;
+		goto out;
 	}
 
-	set_bit(m, _minor_bits);
-	*minor = m;
-	up(&_minor_lock);
+	r = idr_get_new(&_minor_idr, md, &m);
+	if (r) {
+		goto out;
+	}
 
-	return 0;
+	if (m >= (1 << MINORBITS)) {
+		idr_remove(&_minor_idr, m);
+		r = -ENOSPC;
+		goto out;
+	}
+
+	*minor = m;
+
+out:
+	up(&_minor_lock);
+	return r;
 }
 
 static struct block_device_operations dm_blk_dops;
@@ -745,7 +726,7 @@ static struct mapped_device *alloc_dev(unsigned int minor, int persistent)
 	}
 
 	/* get a minor number for the dev */
-	r = persistent ? specific_minor(minor) : next_free_minor(&minor);
+	r = persistent ? specific_minor(md, minor) : next_free_minor(md, &minor);
 	if (r < 0)
 		goto bad1;
 
@@ -764,6 +745,7 @@ static struct mapped_device *alloc_dev(unsigned int minor, int persistent)
 	md->queue->backing_dev_info.congested_data = md;
 	blk_queue_make_request(md->queue, dm_request);
 	md->queue->unplug_fn = dm_unplug_all;
+	md->queue->issue_flush_fn = dm_flush_all;
 
 	md->io_pool = mempool_create(MIN_IOS, mempool_alloc_slab,
 				     mempool_free_slab, _io_cache);
@@ -823,7 +805,7 @@ static void event_callback(void *context)
 {
 	struct mapped_device *md = (struct mapped_device *) context;
 
-	atomic_inc(&md->event_nr);;
+	atomic_inc(&md->event_nr);
 	wake_up(&md->eventq);
 }
 
@@ -899,6 +881,32 @@ int dm_create(struct mapped_device **result)
 int dm_create_with_minor(unsigned int minor, struct mapped_device **result)
 {
 	return create_aux(minor, 1, result);
+}
+
+void *dm_get_mdptr(dev_t dev)
+{
+	struct mapped_device *md;
+	void *mdptr = NULL;
+	unsigned minor = MINOR(dev);
+
+	if (MAJOR(dev) != _major || minor >= (1 << MINORBITS))
+		return NULL;
+
+	down(&_minor_lock);
+
+	md = idr_find(&_minor_idr, minor);
+
+	if (md && (dm_disk(md)->first_minor == minor))
+		mdptr = md->interface_ptr;
+
+	up(&_minor_lock);
+
+	return mdptr;
+}
+
+void dm_set_mdptr(struct mapped_device *md, void *ptr)
+{
+	md->interface_ptr = ptr;
 }
 
 void dm_get(struct mapped_device *md)
@@ -1160,5 +1168,5 @@ module_exit(dm_exit);
 module_param(major, uint, 0);
 MODULE_PARM_DESC(major, "The major number of the device mapper");
 MODULE_DESCRIPTION(DM_NAME " driver");
-MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
+MODULE_AUTHOR("Joe Thornber <dm-devel@redhat.com>");
 MODULE_LICENSE("GPL");

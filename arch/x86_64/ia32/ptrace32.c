@@ -109,7 +109,8 @@ static int putreg32(struct task_struct *child, unsigned regno, u32 val)
 
 	case offsetof(struct user32, u_debugreg[7]):
 		val &= ~DR_CONTROL_RESERVED;
-		/* You are not expected to understand this ... I don't neither. */
+		/* See arch/i386/kernel/ptrace.c for an explanation of
+		 * this awkward check.*/
 		for(i=0; i<4; i++)
 			if ((0x5454 >> ((val >> (16 + 4*i)) & 0xf)) & 1)
 			       return -EIO;
@@ -249,8 +250,8 @@ asmlinkage long sys32_ptrace(long request, u32 pid, u32 addr, u32 data)
 	case PTRACE_GETFPREGS:
 	case PTRACE_SETFPXREGS:
 	case PTRACE_GETFPXREGS:
+	case PTRACE_GETEVENTMSG:
 		break;
-		
 	} 
 
 	child = find_target(request, pid, &ret);
@@ -362,6 +363,10 @@ asmlinkage long sys32_ptrace(long request, u32 pid, u32 addr, u32 data)
 		ret = 0; 
 		break;
 	}
+
+	case PTRACE_GETEVENTMSG:
+		ret = put_user(child->ptrace_message,(unsigned int __user *)(u64)data);
+		break;
 
 	default:
 		ret = -EINVAL;

@@ -660,7 +660,7 @@ static unsigned long	stli_atol(char *str);
 int		stli_init(void);
 static int	stli_open(struct tty_struct *tty, struct file *filp);
 static void	stli_close(struct tty_struct *tty, struct file *filp);
-static int	stli_write(struct tty_struct *tty, int from_user, const unsigned char *buf, int count);
+static int	stli_write(struct tty_struct *tty, const unsigned char *buf, int count);
 static void	stli_putchar(struct tty_struct *tty, unsigned char ch);
 static void	stli_flushchars(struct tty_struct *tty);
 static int	stli_writeroom(struct tty_struct *tty);
@@ -691,7 +691,6 @@ static int	stli_rawopen(stlibrd_t *brdp, stliport_t *portp, unsigned long arg, i
 static int	stli_rawclose(stlibrd_t *brdp, stliport_t *portp, unsigned long arg, int wait);
 static int	stli_waitcarrier(stlibrd_t *brdp, stliport_t *portp, struct file *filp);
 static void	stli_dohangup(void *arg);
-static void	stli_delay(int len);
 static int	stli_setport(stliport_t *portp);
 static int	stli_cmdwait(stlibrd_t *brdp, stliport_t *portp, unsigned long cmd, void *arg, int size, int copyback);
 static void	stli_sendcmd(stlibrd_t *brdp, stliport_t *portp, unsigned long cmd, void *arg, int size, int copyback);
@@ -749,17 +748,13 @@ static void	stli_stalreset(stlibrd_t *brdp);
 
 static stliport_t *stli_getport(int brdnr, int panelnr, int portnr);
 
-static inline int	stli_initbrds(void);
-static inline int	stli_initecp(stlibrd_t *brdp);
-static inline int	stli_initonb(stlibrd_t *brdp);
-static inline int	stli_findeisabrds(void);
-static inline int	stli_eisamemprobe(stlibrd_t *brdp);
-static inline int	stli_initports(stlibrd_t *brdp);
-static inline int	stli_getbrdnr(void);
+static int	stli_initecp(stlibrd_t *brdp);
+static int	stli_initonb(stlibrd_t *brdp);
+static int	stli_eisamemprobe(stlibrd_t *brdp);
+static int	stli_initports(stlibrd_t *brdp);
 
 #ifdef	CONFIG_PCI
-static inline int	stli_findpcibrds(void);
-static inline int	stli_initpcibrd(int brdtype, struct pci_dev *devp);
+static int	stli_initpcibrd(int brdtype, struct pci_dev *devp);
 #endif
 
 /*****************************************************************************/
@@ -1184,7 +1179,7 @@ static void stli_close(struct tty_struct *tty, struct file *filp)
 
 	if (portp->openwaitcnt) {
 		if (portp->close_delay)
-			stli_delay(portp->close_delay);
+			msleep_interruptible(jiffies_to_msecs(portp->close_delay));
 		wake_up_interruptible(&portp->open_wait);
 	}
 
@@ -1482,25 +1477,6 @@ static int stli_setport(stliport_t *portp)
 /*****************************************************************************/
 
 /*
- *	Wait for a specified delay period, this is not a busy-loop. It will
- *	give up the processor while waiting. Unfortunately this has some
- *	rather intimate knowledge of the process management stuff.
- */
-
-static void stli_delay(int len)
-{
-#ifdef DEBUG
-	printk("stli_delay(len=%d)\n", len);
-#endif
-	if (len > 0) {
-		set_current_state(TASK_INTERRUPTIBLE);
-		schedule_timeout(len);
-	}
-}
-
-/*****************************************************************************/
-
-/*
  *	Possibly need to wait for carrier (DCD signal) to come high. Say
  *	maybe because if we are clocal then we don't need to wait...
  */
@@ -1567,7 +1543,7 @@ static int stli_waitcarrier(stlibrd_t *brdp, stliport_t *portp, struct file *fil
  *	service bits for this port.
  */
 
-static int stli_write(struct tty_struct *tty, int from_user, const unsigned char *buf, int count)
+static int stli_write(struct tty_struct *tty, const unsigned char *buf, int count)
 {
 	volatile cdkasy_t	*ap;
 	volatile cdkhdr_t	*hdrp;
@@ -1579,8 +1555,8 @@ static int stli_write(struct tty_struct *tty, int from_user, const unsigned char
 	unsigned long		flags;
 
 #ifdef DEBUG
-	printk("stli_write(tty=%x,from_user=%d,buf=%x,count=%d)\n",
-		(int) tty, from_user, (int) buf, count);
+	printk("stli_write(tty=%x,buf=%x,count=%d)\n",
+		(int) tty, (int) buf, count);
 #endif
 
 	if ((tty == (struct tty_struct *) NULL) ||
@@ -1597,38 +1573,6 @@ static int stli_write(struct tty_struct *tty, int from_user, const unsigned char
 	if (brdp == (stlibrd_t *) NULL)
 		return(0);
 	chbuf = (unsigned char *) buf;
-
-/*
- *	If copying direct from user space we need to be able to handle page
- *	faults while we are copying. To do this copy as much as we can now
- *	into a kernel buffer. From there we copy it into shared memory. The
- *	big problem is that we do not want shared memory enabled when we are
- *	sleeping (other boards may be serviced while asleep). Something else
- *	to note here is the reading of the tail twice. Since the boards
- *	shared memory can be on an 8-bit bus then we need to be very careful
- *	reading 16 bit quantities - since both the board (slave) and host
- *	could be writing and reading at the same time.
- */
-	if (from_user) {
-		save_flags(flags);
-		cli();
-		EBRDENABLE(brdp);
-		ap = (volatile cdkasy_t *) EBRDGETMEMPTR(brdp, portp->addr);
-		head = (unsigned int) ap->txq.head;
-		tail = (unsigned int) ap->txq.tail;
-		if (tail != ((unsigned int) ap->txq.tail))
-			tail = (unsigned int) ap->txq.tail;
-		len = (head >= tail) ? (portp->txsize - (head - tail) - 1) :
-			(tail - head - 1);
-		count = MIN(len, count);
-		EBRDDISABLE(brdp);
-		restore_flags(flags);
-
-		down(&stli_tmpwritesem);
-		if (copy_from_user(stli_tmpwritebuf, chbuf, count)) 
-			return -EFAULT;
-		chbuf = &stli_tmpwritebuf[0];
-	}
 
 /*
  *	All data is now local, shove as much as possible into shared memory.
@@ -1680,8 +1624,6 @@ static int stli_write(struct tty_struct *tty, int from_user, const unsigned char
 	set_bit(ST_TXBUSY, &portp->state);
 	EBRDDISABLE(brdp);
 
-	if (from_user)
-		up(&stli_tmpwritesem);
 	restore_flags(flags);
 
 	return(count);
@@ -2508,7 +2450,7 @@ static void stli_waituntilsent(struct tty_struct *tty, int timeout)
 	while (test_bit(ST_TXBUSY, &portp->state)) {
 		if (signal_pending(current))
 			break;
-		stli_delay(2);
+		msleep_interruptible(20);
 		if (time_after_eq(jiffies, tend))
 			break;
 	}
@@ -2751,7 +2693,7 @@ static void stli_sendcmd(stlibrd_t *brdp, stliport_t *portp, unsigned long cmd, 
  *	more chars to unload.
  */
 
-static inline void stli_read(stlibrd_t *brdp, stliport_t *portp)
+static void stli_read(stlibrd_t *brdp, stliport_t *portp)
 {
 	volatile cdkasyrq_t	*rp;
 	volatile char		*shbuf;
@@ -2819,7 +2761,7 @@ static inline void stli_read(stlibrd_t *brdp, stliport_t *portp)
  *	difficult to deal with them here.
  */
 
-static inline void stli_dodelaycmd(stliport_t *portp, volatile cdkctrl_t *cp)
+static void stli_dodelaycmd(stliport_t *portp, volatile cdkctrl_t *cp)
 {
 	int	cmd;
 
@@ -2867,7 +2809,7 @@ static inline void stli_dodelaycmd(stliport_t *portp, volatile cdkctrl_t *cp)
  *	then port is still busy, otherwise no longer busy.
  */
 
-static inline int stli_hostcmd(stlibrd_t *brdp, stliport_t *portp)
+static int stli_hostcmd(stlibrd_t *brdp, stliport_t *portp)
 {
 	volatile cdkasy_t	*ap;
 	volatile cdkctrl_t	*cp;
@@ -3026,7 +2968,7 @@ static inline int stli_hostcmd(stlibrd_t *brdp, stliport_t *portp)
  *	at the cdk header structure.
  */
 
-static inline void stli_brdpoll(stlibrd_t *brdp, volatile cdkhdr_t *hdrp)
+static void stli_brdpoll(stlibrd_t *brdp, volatile cdkhdr_t *hdrp)
 {
 	stliport_t	*portp;
 	unsigned char	hostbits[(STL_MAXCHANS / 8) + 1];
@@ -3299,7 +3241,7 @@ static long stli_mktiocm(unsigned long sigvalue)
  *	we need to do here is set up the appropriate per port data structures.
  */
 
-static inline int stli_initports(stlibrd_t *brdp)
+static int stli_initports(stlibrd_t *brdp)
 {
 	stliport_t	*portp;
 	int		i, panelnr, panelport;
@@ -3911,7 +3853,7 @@ static void stli_stalreset(stlibrd_t *brdp)
  *	board types.
  */
 
-static inline int stli_initecp(stlibrd_t *brdp)
+static int stli_initecp(stlibrd_t *brdp)
 {
 	cdkecpsig_t	sig;
 	cdkecpsig_t	*sigsp;
@@ -4072,7 +4014,7 @@ static inline int stli_initecp(stlibrd_t *brdp)
  *	This handles only these board types.
  */
 
-static inline int stli_initonb(stlibrd_t *brdp)
+static int stli_initonb(stlibrd_t *brdp)
 {
 	cdkonbsig_t	sig;
 	cdkonbsig_t	*sigsp;
@@ -4414,7 +4356,7 @@ static int __init stli_brdinit(stlibrd_t *brdp)
  *	might be. This is a bit if hack, but it is the best we can do.
  */
 
-static inline int stli_eisamemprobe(stlibrd_t *brdp)
+static int stli_eisamemprobe(stlibrd_t *brdp)
 {
 	cdkecpsig_t	ecpsig, *ecpsigp;
 	cdkonbsig_t	onbsig, *onbsigp;
@@ -4506,7 +4448,7 @@ static inline int stli_eisamemprobe(stlibrd_t *brdp)
 	return(0);
 }
 
-static inline int stli_getbrdnr(void)
+static int stli_getbrdnr(void)
 {
 	int i;
 
@@ -4532,7 +4474,7 @@ static inline int stli_getbrdnr(void)
  *	do is go probing around in the usual places hoping we can find it.
  */
 
-static inline int stli_findeisabrds(void)
+static int stli_findeisabrds(void)
 {
 	stlibrd_t	*brdp;
 	unsigned int	iobase, eid;
@@ -4616,7 +4558,7 @@ static inline int stli_findeisabrds(void)
  *	configuration space.
  */
 
-static inline int stli_initpcibrd(int brdtype, struct pci_dev *devp)
+static int stli_initpcibrd(int brdtype, struct pci_dev *devp)
 {
 	stlibrd_t	*brdp;
 
@@ -4662,7 +4604,7 @@ static inline int stli_initpcibrd(int brdtype, struct pci_dev *devp)
  *	one as it is found.
  */
 
-static inline int stli_findpcibrds(void)
+static int stli_findpcibrds(void)
 {
 	struct pci_dev	*dev = NULL;
 	int		rc;
@@ -4711,7 +4653,7 @@ static stlibrd_t *stli_allocbrd(void)
  *	can find.
  */
 
-static inline int stli_initbrds(void)
+static int stli_initbrds(void)
 {
 	stlibrd_t	*brdp, *nxtbrdp;
 	stlconf_t	*confp;

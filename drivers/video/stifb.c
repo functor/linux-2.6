@@ -112,6 +112,7 @@ struct stifb_info {
 	ngle_rom_t ngle_rom;
 	struct sti_struct *sti;
 	int deviceSpecificConfig;
+	u32 pseudo_palette[16];
 };
 
 static int __initdata bpp = 8;	/* parameter from modprobe */
@@ -1030,6 +1031,14 @@ stifb_setcolreg(u_int regno, u_int red, u_int green,
 				/* 0x100 is same as used in WRITE_IMAGE_COLOR() */
 		START_COLORMAPLOAD(fb, lutBltCtl.all);
 		SETUP_FB(fb);
+
+		/* info->var.bits_per_pixel == 32 */
+		if (regno < 16) 
+		  ((u32 *)(info->pseudo_palette))[regno] =
+			(red   << info->var.red.offset)   |
+			(green << info->var.green.offset) |
+			(blue  << info->var.blue.offset);
+
 	} else {
 		/* cleanup colormap hardware */
 		FINISH_IMAGE_COLORMAP_ACCESS(fb);
@@ -1298,6 +1307,7 @@ stifb_init_fb(struct sti_struct *sti, int force_bpp)
 	    case 1:
 		fix->type = FB_TYPE_PLANES;	/* well, sort of */
 		fix->visual = FB_VISUAL_MONO10;
+		var->red.length = var->green.length = var->blue.length = 1;
 		break;
 	    case 8:
 		fix->type = FB_TYPE_PACKED_PIXELS;
@@ -1324,8 +1334,8 @@ stifb_init_fb(struct sti_struct *sti, int force_bpp)
 	strcpy(fix->id, "stifb");
 	info->fbops = &stifb_ops;
 	info->screen_base = (void*) REGION_BASE(fb,1);
-	info->flags = FBINFO_FLAG_DEFAULT;
-	info->currcon = -1;
+	info->flags = FBINFO_DEFAULT;
+	info->pseudo_palette = &fb->pseudo_palette;
 
 	/* This has to been done !!! */
 	fb_alloc_cmap(&info->cmap, 256, 0);
@@ -1376,19 +1386,40 @@ out_err0:
 static int stifb_disabled __initdata;
 
 int __init
+stifb_setup(char *options);
+
+int __init
 stifb_init(void)
 {
 	struct sti_struct *sti;
+	struct sti_struct *def_sti;
 	int i;
 	
+#ifndef MODULE
+	char *option = NULL;
+
+	if (fb_get_options("stifb", &option))
+		return -ENODEV;
+	stifb_setup(option);
+#endif
 	if (stifb_disabled) {
 		printk(KERN_INFO "stifb: disabled by \"stifb=off\" kernel parameter\n");
 		return -ENXIO;
 	}
 	
+	def_sti = sti_get_rom(0);
+	if (def_sti) {
+		for (i = 1; i < MAX_STI_ROMS; i++) {
+			sti = sti_get_rom(i);
+			if (sti == def_sti && bpp > 0)
+				stifb_force_bpp[i] = bpp;
+		}
+		stifb_init_fb(def_sti, stifb_force_bpp[i]);
+	}
+
 	for (i = 1; i < MAX_STI_ROMS; i++) {
 		sti = sti_get_rom(i);
-		if (!sti)
+		if (!sti || sti==def_sti)
 			break;
 		if (bpp > 0)
 			stifb_force_bpp[i] = bpp;
@@ -1451,9 +1482,7 @@ stifb_setup(char *options)
 
 __setup("stifb=", stifb_setup);
 
-#ifdef MODULE
 module_init(stifb_init);
-#endif
 module_exit(stifb_cleanup);
 
 MODULE_AUTHOR("Helge Deller <deller@gmx.de>, Thomas Bogendoerfer <tsbogend@alpha.franken.de>");

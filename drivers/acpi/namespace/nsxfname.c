@@ -42,6 +42,7 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
+#include <linux/module.h>
 
 #include <acpi/acpi.h>
 #include <acpi/acnamesp.h>
@@ -129,6 +130,7 @@ acpi_get_handle (
 
 	return (status);
 }
+EXPORT_SYMBOL(acpi_get_handle);
 
 
 /******************************************************************************
@@ -210,6 +212,7 @@ unlock_and_exit:
 	(void) acpi_ut_release_mutex (ACPI_MTX_NAMESPACE);
 	return (status);
 }
+EXPORT_SYMBOL(acpi_get_name);
 
 
 /******************************************************************************
@@ -281,7 +284,7 @@ acpi_get_object_info (
 	if (info.type == ACPI_TYPE_DEVICE) {
 		/*
 		 * Get extra info for ACPI Devices objects only:
-		 * Run the Device _HID, _UID, _CID, _STA, and _ADR methods.
+		 * Run the Device _HID, _UID, _CID, _STA, _ADR and _sx_d methods.
 		 *
 		 * Note: none of these methods are required, so they may or may
 		 * not be present for this device.  The Info.Valid bitfield is used
@@ -330,7 +333,7 @@ acpi_get_object_info (
 
 		status = acpi_ut_execute_sxds (node, info.highest_dstates);
 		if (ACPI_SUCCESS (status)) {
-			info.valid |= ACPI_VALID_STA;
+			info.valid |= ACPI_VALID_SXDS;
 		}
 
 		status = AE_OK;
@@ -359,4 +362,5 @@ cleanup:
 	}
 	return (status);
 }
+EXPORT_SYMBOL(acpi_get_object_info);
 

@@ -122,7 +122,7 @@ SystemCall_common:
 	andi.	r11,r10,_TIF_SYSCALL_T_OR_A
 	bne-	syscall_dotrace
 syscall_dotrace_cont:
-	cmpli	0,r0,NR_syscalls
+	cmpldi	0,r0,NR_syscalls
 	bge-	syscall_enosys
 
 system_call:			/* label this so stack traces look sane */
@@ -162,7 +162,7 @@ syscall_error_cont:
 
 	/* check for syscall tracing or audit */
 	ld	r9,TI_FLAGS(r12)
-	andi.	r0,r9,_TIF_SYSCALL_T_OR_A
+	andi.	r0,r9,(_TIF_SYSCALL_T_OR_A|_TIF_SINGLESTEP)
 	bne-	syscall_exit_trace
 syscall_exit_trace_cont:
 
@@ -204,7 +204,7 @@ syscall_enosys:
 
 syscall_error:
 	lbz	r11,TI_SC_NOERR(r12)
-	cmpi	0,r11,0
+	cmpwi	0,r11,0
 	bne-	syscall_error_cont
 	neg	r3,r3
 	oris	r5,r5,0x1000	/* Set SO bit in CR */
@@ -265,16 +265,21 @@ _GLOBAL(save_nvgprs)
 _GLOBAL(ppc32_sigsuspend)
 	bl	.save_nvgprs
 	bl	.sys32_sigsuspend
-	b	syscall_exit
+	b	70f
 
 _GLOBAL(ppc64_rt_sigsuspend)
 	bl	.save_nvgprs
 	bl	.sys_rt_sigsuspend
-	b	syscall_exit
+	b	70f
 
 _GLOBAL(ppc32_rt_sigsuspend)
 	bl	.save_nvgprs
 	bl	.sys32_rt_sigsuspend
+	/* If sigsuspend() returns zero, we are going into a signal handler */
+70:	cmpdi	0,r3,0
+	beq	.ret_from_except
+	/* If it returned -EINTR, we need to return via syscall_exit to set
+	   the SO bit in cr0 and potentially stop for ptrace. */
 	b	syscall_exit
 
 _GLOBAL(ppc_fork)
@@ -317,7 +322,7 @@ _GLOBAL(ppc64_rt_sigreturn)
 	blt	syscall_exit
 	clrrdi	r4,r1,THREAD_SHIFT
 	ld	r4,TI_FLAGS(r4)
-	andi.	r4,r4,_TIF_SYSCALL_T_OR_A
+	andi.	r4,r4,(_TIF_SYSCALL_T_OR_A|_TIF_SINGLESTEP)
 	beq+	81f
 	bl	.do_syscall_trace_leave
 81:	b	.ret_from_except
@@ -393,9 +398,17 @@ BEGIN_FTR_SECTION
 	cmpd	cr1,r6,r9	/* or is new ESID the same as current ESID? */
 	cror	eq,4*cr1+eq,eq
 	beq	2f		/* if yes, don't slbie it */
-	oris	r6,r6,0x0800	/* set C (class) bit */
-	slbie	r6
-	slbie	r6		/* Workaround POWER5 < DD2.1 issue */
+	oris	r0,r6,0x0800	/* set C (class) bit */
+
+	/* Bolt in the new stack SLB entry */
+	ld	r7,KSP_VSID(r4)	/* Get new stack's VSID */
+	oris	r6,r6,(SLB_ESID_V)@h
+	ori	r6,r6,(SLB_NUM_BOLTED-1)@l
+	slbie	r0
+	slbie	r0		/* Workaround POWER5 < DD2.1 issue */
+	slbmte	r7,r6
+	isync
+
 2:
 END_FTR_SECTION_IFSET(CPU_FTR_SLB)
 	clrrdi	r7,r8,THREAD_SHIFT	/* base of new stack */
@@ -489,10 +502,11 @@ restore:
 
 	li	r3,0
 	stb	r3,PACAPROCENABLED(r13)	/* ensure we are soft-disabled */
+	ori	r10,r10,MSR_EE
 	mtmsrd	r10			/* hard-enable again */
 	addi	r3,r1,STACK_FRAME_OVERHEAD
 	bl	.do_IRQ
-	b	.ret_from_except		/* loop back and handle more */
+	b	.ret_from_except_lite		/* loop back and handle more */
 
 4:	stb	r5,PACAPROCENABLED(r13)
 #endif
@@ -566,6 +580,7 @@ do_work:
 	li	r0,1
 	stb	r0,PACAPROCENABLED(r13)
 #endif
+	ori	r10,r10,MSR_EE
 	mtmsrd	r10,1		/* reenable interrupts */
 	bl	.schedule
 	mfmsr	r10
@@ -583,6 +598,7 @@ do_work:
 user_work:
 #endif
 	/* Enable interrupts */
+	ori	r10,r10,MSR_EE
 	mtmsrd	r10,1
 
 	andi.	r0,r4,_TIF_NEED_RESCHED
@@ -738,6 +754,10 @@ _STATIC(rtas_restore_regs)
 	mtlr    r0
         blr				/* return to caller */
 
+#endif /* CONFIG_PPC_PSERIES */
+
+#ifdef CONFIG_PPC_MULTIPLATFORM
+
 _GLOBAL(enter_prom)
 	mflr	r0
 	std	r0,16(r1)
@@ -769,11 +789,8 @@ _GLOBAL(enter_prom)
 	std	r11,_MSR(r1)
 
 	/* Get the PROM entrypoint */
-        bl      .reloc_offset
-	LOADADDR(r12,prom)
-	sub	r12,r12,r3
-	ld	r12,PROMENTRY(r12)
-	mtlr	r12
+	ld	r0,GPR4(r1)
+	mtlr	r0
 
 	/* Switch MSR to 32 bits mode
 	 */
@@ -826,4 +843,4 @@ _GLOBAL(enter_prom)
 	mtlr    r0
         blr
 	
-#endif	/* defined(CONFIG_PPC_PSERIES) */
+#endif	/* CONFIG_PPC_MULTIPLATFORM */

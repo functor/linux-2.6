@@ -37,28 +37,23 @@
 MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Sound Core " CARD_NAME);
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_DEVICES("{{Sound Core," CARD_NAME "}}");
+MODULE_SUPPORTED_DEVICE("{{Sound Core," CARD_NAME "}}");
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable switches */
 static unsigned int irq_mask = 0xffff;
 static int irq_list[4] = { -1 };
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for " CARD_NAME " soundcard.");
-MODULE_PARM_SYNTAX(index, SNDRV_INDEX_DESC);
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for " CARD_NAME " soundcard.");
-MODULE_PARM_SYNTAX(id, SNDRV_ID_DESC);
-module_param_array(enable, bool, boot_devs, 0444);
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable " CARD_NAME " soundcard.");
-MODULE_PARM_SYNTAX(enable, SNDRV_ENABLE_DESC);
 module_param(irq_mask, int, 0444);
 MODULE_PARM_DESC(irq_mask, "IRQ bitmask for " CARD_NAME " soundcard.");
-module_param_array(irq_list, int, boot_devs, 0444);
+module_param_array(irq_list, int, NULL, 0444);
 MODULE_PARM_DESC(irq_list, "List of Available interrupts for " CARD_NAME " soundcard.");
  
 
@@ -103,13 +98,13 @@ static int snd_pdacf_free(pdacf_t *pdacf)
 	card_list[pdacf->index] = NULL;
 	pdacf->card = NULL;
 
-	snd_magic_kfree(pdacf);
+	kfree(pdacf);
 	return 0;
 }
 
 static int snd_pdacf_dev_free(snd_device_t *device)
 {
-	pdacf_t *chip = snd_magic_cast(pdacf_t, device->device_data, return -ENXIO);
+	pdacf_t *chip = device->device_data;
 	return snd_pdacf_free(chip);
 }
 
@@ -152,7 +147,7 @@ static dev_link_t *snd_pdacf_attach(void)
 		return NULL;
 
 	if (snd_device_new(card, SNDRV_DEV_LOWLEVEL, pdacf, &ops) < 0) {
-		snd_magic_kfree(pdacf);
+		kfree(pdacf);
 		snd_card_free(card);
 		return NULL;
 	}
@@ -258,7 +253,7 @@ static int snd_pdacf_assign_resources(pdacf_t *pdacf, int port, int irq)
  */
 static void snd_pdacf_detach(dev_link_t *link)
 {
-	pdacf_t *chip = snd_magic_cast(pdacf_t, link->priv, return);
+	pdacf_t *chip = link->priv;
 
 	snd_printdd(KERN_DEBUG "pdacf_detach called\n");
 	/* Remove the interface data from the linked list */
@@ -297,7 +292,7 @@ do { last_fn = (fn); if ((last_ret = (ret)) != 0) goto cs_failed; } while (0)
 static void pdacf_config(dev_link_t *link)
 {
 	client_handle_t handle = link->handle;
-	pdacf_t *pdacf = snd_magic_cast(pdacf_t, link->priv, return);
+	pdacf_t *pdacf = link->priv;
 	tuple_t tuple;
 	cisparse_t parse;
 	config_info_t conf;

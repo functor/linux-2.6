@@ -673,6 +673,9 @@ void __init ckrm_meta_init_taskclass(void)
 
 	// note registeration of all resource controllers will be done 
 	// later dynamically as these are specified as modules
+
+	// prepare init_task and then rely on inheritance of properties
+	ckrm_set_taskclass(&init_task, NULL, NULL, CKRM_EVENT_NEWTASK);
 }
 
 static int tc_show_members(struct ckrm_core_class *core, struct seq_file *seq)

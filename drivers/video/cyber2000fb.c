@@ -66,8 +66,8 @@ struct cfb_info {
 	struct display_switch	*dispsw;
 	struct display		*display;
 	struct pci_dev		*dev;
-	unsigned char 		*region;
-	unsigned char		*regs;
+	unsigned char 		__iomem *region;
+	unsigned char		__iomem *regs;
 	u_int			id;
 	int			func_use_count;
 	u_long			ref_ps;
@@ -1003,16 +1003,16 @@ static int cyber2000fb_blank(int blank, struct fb_info *info)
 	int i;
 
 	switch (blank) {
-	case 4:	/* powerdown - both sync lines down */
+	case FB_BLANK_POWERDOWN:	/* powerdown - both sync lines down */
 		sync = EXT_SYNC_CTL_VS_0 | EXT_SYNC_CTL_HS_0;
 		break;	
-	case 3:	/* hsync off */
+	case FB_BLANK_HSYNC_SUSPEND:	/* hsync off */
 		sync = EXT_SYNC_CTL_VS_NORMAL | EXT_SYNC_CTL_HS_0;
 		break;	
-	case 2:	/* vsync off */
+	case FB_BLANK_VSYNC_SUSPEND:	/* vsync off */
 		sync = EXT_SYNC_CTL_VS_0 | EXT_SYNC_CTL_HS_NORMAL;
 		break;
-	case 1:	/* soft blank */
+	case FB_BLANK_NORMAL:	        /* soft blank */
 	default: /* unblank */
 		break;
 	}
@@ -1166,7 +1166,7 @@ static struct fb_videomode __devinitdata cyber2000fb_default_mode = {
 	.vmode		= FB_VMODE_NONINTERLACED
 };
 
-static char igs_regs[] __devinitdata = {
+static char igs_regs[] = {
 	EXT_CRT_IRQ,		0,
 	EXT_CRT_TEST,		0,
 	EXT_SYNC_CTL,		0,
@@ -1281,7 +1281,7 @@ cyberpro_alloc_fb_info(unsigned int id, char *name)
 	cfb->fb.var.accel_flags	= FB_ACCELF_TEXT;
 
 	cfb->fb.fbops		= &cyber2000fb_ops;
-	cfb->fb.flags		= FBINFO_FLAG_DEFAULT;
+	cfb->fb.flags		= FBINFO_DEFAULT | FBINFO_HWACCEL_YPAN;
 	cfb->fb.pseudo_palette	= (void *)(cfb + 1);
 
 	fb_alloc_cmap(&cfb->fb.cmap, NR_PALETTE, 0);
@@ -1289,7 +1289,7 @@ cyberpro_alloc_fb_info(unsigned int id, char *name)
 	return cfb;
 }
 
-static void __devinit
+static void
 cyberpro_free_fb_info(struct cfb_info *cfb)
 {
 	if (cfb) {
@@ -1399,6 +1399,8 @@ static int __devinit cyberpro_common_probe(struct cfb_info *cfb)
 		cfb->fb.var.xres, cfb->fb.var.yres,
 		h_sync / 1000, h_sync % 1000, v_sync);
 
+	if (cfb->dev)
+		cfb->fb.device = &cfb->dev->dev;
 	err = register_framebuffer(&cfb->fb);
 
 failed:
@@ -1712,10 +1714,20 @@ static struct pci_driver cyberpro_driver = {
  * I don't think we can use the "module_init" stuff here because
  * the fbcon stuff may not be initialised yet.  Hence the #ifdef
  * around module_init.
+ *
+ * Tony: "module_init" is now required
  */
 int __init cyber2000fb_init(void)
 {
 	int ret = -1, err;
+
+#ifndef MODULE
+	char *option = NULL;
+
+	if (fb_get_options("cyber2000fb", &option))
+		return -ENODEV;
+	cyber2000fb_setup(option);
+#endif
 
 #ifdef CONFIG_ARCH_SHARK
 	err = cyberpro_vl_probe();
@@ -1738,9 +1750,7 @@ static void __exit cyberpro_exit(void)
 	pci_unregister_driver(&cyberpro_driver);
 }
 
-#ifdef MODULE
 module_init(cyber2000fb_init);
-#endif
 module_exit(cyberpro_exit);
 
 MODULE_AUTHOR("Russell King");

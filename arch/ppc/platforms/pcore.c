@@ -89,7 +89,7 @@ pcore_pcibios_fixup(void)
 {
 	struct pci_dev *dev;
 
-	if ((dev = pci_find_device(PCI_VENDOR_ID_WINBOND,
+	if ((dev = pci_get_device(PCI_VENDOR_ID_WINBOND,
 				PCI_DEVICE_ID_WINBOND_83C553,
 				0)))
 	{
@@ -108,6 +108,7 @@ pcore_pcibios_fixup(void)
 		 */
  		outb(0x00, PCORE_WINBOND_PRI_EDG_LVL);
 		outb(0x1e, PCORE_WINBOND_SEC_EDG_LVL);
+		pci_dev_put(dev);
 	}
 }
 
@@ -226,10 +227,6 @@ pcore_setup_arch(void)
 		ROOT_DEV = Root_NFS;
 #else
 		ROOT_DEV = Root_SDA2;
-#endif
-
-#ifdef CONFIG_DUMMY_CONSOLE
-	conswitchp = &dummy_con;
 #endif
 
  	printk(KERN_INFO "Force PowerCore ");

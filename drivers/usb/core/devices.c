@@ -149,7 +149,7 @@ static const struct class_info clas_info[] =
 
 /*****************************************************************/
 
-void usbdevfs_conn_disc_event(void)
+void usbfs_conn_disc_event(void)
 {
 	conndiscevcnt++;
 	wake_up(&deviceconndiscwq);
@@ -283,9 +283,8 @@ static char *usb_dump_interface(
 
 /* TBD:
  * 0. TBDs
- * 1. marking active config and ifaces (code lists all, but should mark
+ * 1. marking active interface altsettings (code lists all, but should mark
  *    which ones are active, if any)
- * 2. add <halted> status to each endpoint line
  */
 
 static char *usb_dump_config_descriptor(char *start, char *end, const struct usb_config_descriptor *desc, int active)
@@ -452,7 +451,7 @@ static char *usb_dump_string(char *start, char *end, const struct usb_device *de
  * nbytes - the maximum number of bytes to write
  * skip_bytes - the number of bytes to skip before writing anything
  * file_offset - the offset into the devices file on completion
- * The caller must own the usbdev->serialize semaphore.
+ * The caller must own the device lock.
  */
 static ssize_t usb_device_dump(char __user **buffer, size_t *nbytes, loff_t *skip_bytes, loff_t *file_offset,
 				struct usb_device *usbdev, struct usb_bus *bus, int level, int index, int count)
@@ -570,7 +569,6 @@ static ssize_t usb_device_dump(char __user **buffer, size_t *nbytes, loff_t *ski
 
 static ssize_t usb_device_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 {
-	struct list_head *buslist;
 	struct usb_bus *bus;
 	ssize_t ret, total_written = 0;
 	loff_t skip_bytes = *ppos;
@@ -582,18 +580,15 @@ static ssize_t usb_device_read(struct file *file, char __user *buf, size_t nbyte
 	if (!access_ok(VERIFY_WRITE, buf, nbytes))
 		return -EFAULT;
 
-	/* enumerate busses */
 	down (&usb_bus_list_lock);
-	for (buslist = usb_bus_list.next; buslist != &usb_bus_list; buslist = buslist->next) {
-		/* print devices for this bus */
-		bus = list_entry(buslist, struct usb_bus, bus_list);
-
+	/* print devices for all busses */
+	list_for_each_entry(bus, &usb_bus_list, bus_list) {
 		/* recurse through all children of the root hub */
 		if (!bus->root_hub)
 			continue;
-		down(&bus->root_hub->serialize);
+		usb_lock_device(bus->root_hub);
 		ret = usb_device_dump(&buf, &nbytes, &skip_bytes, ppos, bus->root_hub, bus, 0, 0, 0);
-		up(&bus->root_hub->serialize);
+		usb_unlock_device(bus->root_hub);
 		if (ret < 0) {
 			up(&usb_bus_list_lock);
 			return ret;
@@ -683,7 +678,7 @@ static loff_t usb_device_lseek(struct file * file, loff_t offset, int orig)
 	return ret;
 }
 
-struct file_operations usbdevfs_devices_fops = {
+struct file_operations usbfs_devices_fops = {
 	.llseek =	usb_device_lseek,
 	.read =		usb_device_read,
 	.poll =		usb_device_poll,

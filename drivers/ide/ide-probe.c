@@ -180,12 +180,6 @@ static inline void do_identify (ide_drive_t *drive, u8 cmd)
 	if (cmd == WIN_PIDENTIFY) {
 		u8 type = (id->config >> 8) & 0x1f;
 		printk("ATAPI ");
-#ifdef CONFIG_BLK_DEV_PDC4030
-		if (hwif->channel == 1 && hwif->chipset == ide_pdc4030) {
-			printk(" -- not supported on 2nd Promise port\n");
-			goto err_misc;
-		}
-#endif /* CONFIG_BLK_DEV_PDC4030 */
 		switch (type) {
 			case ide_floppy:
 				if (!strstr(id->model, "CD-ROM")) {
@@ -297,13 +291,9 @@ static int actual_try_to_identify (ide_drive_t *drive, u8 cmd)
 		/* disable dma & overlap */
 		hwif->OUTB(0, IDE_FEATURE_REG);
 
-	if (hwif->identify != NULL) {
-		if (hwif->identify(drive))
-			return 1;
-	} else {
-		/* ask drive for ID */
-		hwif->OUTB(cmd, IDE_COMMAND_REG);
-	}
+	/* ask drive for ID */
+	hwif->OUTB(cmd, IDE_COMMAND_REG);
+
 	timeout = ((cmd == WIN_IDENTIFY) ? WAIT_WORSTCASE : WAIT_PIDENTIFY) / 2;
 	timeout += jiffies;
 	do {
@@ -389,15 +379,6 @@ static int try_to_identify (ide_drive_t *drive, u8 cmd)
 				 */
 				printk("%s: IRQ probe failed (0x%lx)\n",
 					drive->name, cookie);
-#ifdef CONFIG_BLK_DEV_CMD640
-#ifdef CMD640_DUMP_REGS
-				if (hwif->chipset == ide_cmd640) {
-					printk("%s: Hmmm.. probably a driver "
-						"problem.\n", drive->name);
-					CMD640_DUMP_REGS;
-				}
-#endif /* CMD640_DUMP_REGS */
-#endif /* CONFIG_BLK_DEV_CMD640 */
 			}
 		}
 	}
@@ -635,12 +616,11 @@ static void hwif_register (ide_hwif_t *hwif)
 	device_register(&hwif->gendev);
 }
 
-#ifdef CONFIG_PPC
 static int wait_hwif_ready(ide_hwif_t *hwif)
 {
 	int rc;
 
-	printk(KERN_INFO "Probing IDE interface %s...\n", hwif->name);
+	printk(KERN_DEBUG "Probing IDE interface %s...\n", hwif->name);
 
 	/* Let HW settle down a bit from whatever init state we
 	 * come from */
@@ -671,7 +651,43 @@ static int wait_hwif_ready(ide_hwif_t *hwif)
 	
 	return rc;
 }
-#endif
+
+/**
+ *	ide_undecoded_slave	-	look for bad CF adapters
+ *	@hwif: interface
+ *
+ *	Analyse the drives on the interface and attempt to decide if we
+ *	have the same drive viewed twice. This occurs with crap CF adapters
+ *	and PCMCIA sometimes.
+ */
+
+void ide_undecoded_slave(ide_hwif_t *hwif)
+{
+	ide_drive_t *drive0 = &hwif->drives[0];
+	ide_drive_t *drive1 = &hwif->drives[1];
+
+	if (drive0->present == 0 || drive1->present == 0)
+		return;
+
+	/* If the models don't match they are not the same product */
+	if (strcmp(drive0->id->model, drive1->id->model))
+		return;
+
+	/* Serial numbers do not match */
+	if (strncmp(drive0->id->serial_no, drive1->id->serial_no, 20))
+		return;
+
+	/* No serial number, thankfully very rare for CF */
+	if (drive0->id->serial_no[0] == 0)
+		return;
+
+	/* Appears to be an IDE flash adapter with decode bugs */
+	printk(KERN_WARNING "ide-probe: ignoring undecoded slave\n");
+
+	drive1->present = 0;
+}
+
+EXPORT_SYMBOL_GPL(ide_undecoded_slave);
 
 /*
  * This routine only knows how to look for drive units 0 and 1
@@ -687,9 +703,6 @@ static void probe_hwif(ide_hwif_t *hwif)
 		return;
 
 	if ((hwif->chipset != ide_4drives || !hwif->mate || !hwif->mate->present) &&
-#ifdef CONFIG_BLK_DEV_PDC4030
-	    (hwif->chipset != ide_pdc4030 || hwif->channel == 0) &&
-#endif /* CONFIG_BLK_DEV_PDC4030 */
 	    (ide_hwif_request_regions(hwif))) {
 		u16 msgout = 0;
 		for (unit = 0; unit < MAX_DRIVES; ++unit) {
@@ -717,7 +730,6 @@ static void probe_hwif(ide_hwif_t *hwif)
 
 	local_irq_set(flags);
 
-#ifdef CONFIG_PPC
 	/* This is needed on some PPCs and a bunch of BIOS-less embedded
 	 * platforms. Typical cases are:
 	 * 
@@ -738,8 +750,7 @@ static void probe_hwif(ide_hwif_t *hwif)
 	 *  BenH.
 	 */
 	if (wait_hwif_ready(hwif))
-		printk(KERN_WARNING "%s: Wait for ready failed before probe !\n", hwif->name);
-#endif /* CONFIG_PPC */
+		printk(KERN_DEBUG "%s: Wait for ready failed before probe !\n", hwif->name);
 
 	/*
 	 * Second drive should only exist if first drive was found,
@@ -822,9 +833,14 @@ static void probe_hwif(ide_hwif_t *hwif)
 }
 
 static int hwif_init(ide_hwif_t *hwif);
-int probe_hwif_init (ide_hwif_t *hwif)
+
+int probe_hwif_init_with_fixup(ide_hwif_t *hwif, void (*fixup)(ide_hwif_t *hwif))
 {
 	probe_hwif(hwif);
+
+	if (fixup)
+		fixup(hwif);
+
 	hwif_init(hwif);
 
 	if (hwif->present) {
@@ -840,6 +856,11 @@ int probe_hwif_init (ide_hwif_t *hwif)
 		}
 	}
 	return 0;
+}
+
+int probe_hwif_init(ide_hwif_t *hwif)
+{
+	return probe_hwif_init_with_fixup(hwif, NULL);
 }
 
 EXPORT_SYMBOL(probe_hwif_init);
@@ -893,11 +914,15 @@ static int ide_init_queue(ide_drive_t *drive)
 	if (!q)
 		return 1;
 
-	q->queuedata = HWGROUP(drive);
+	q->queuedata = drive;
 	blk_queue_segment_boundary(q, 0xffff);
 
-	if (!hwif->rqsize)
-		hwif->rqsize = hwif->no_lba48 ? 256 : 65536;
+	if (!hwif->rqsize) {
+		if (hwif->no_lba48 || hwif->no_lba48_dma)
+			hwif->rqsize = 256;
+		else
+			hwif->rqsize = 65536;
+	}
 	if (hwif->rqsize < max_sectors)
 		max_sectors = hwif->rqsize;
 	blk_queue_max_sectors(q, max_sectors);
@@ -906,11 +931,11 @@ static int ide_init_queue(ide_drive_t *drive)
 	/* When we have an IOMMU, we may have a problem where pci_map_sg()
 	 * creates segments that don't completely match our boundary
 	 * requirements and thus need to be broken up again. Because it
-	 * doesn't align properly neither, we may actually have to break up
+	 * doesn't align properly either, we may actually have to break up
 	 * to more segments than what was we got in the first place, a max
 	 * worst case is twice as many.
 	 * This will be fixed once we teach pci_map_sg() about our boundary
-	 * requirements, hopefully soon
+	 * requirements, hopefully soon. *FIXME*
 	 */
 	if (!PCI_DMA_BUS_IS_PHYS)
 		max_sg_entries >>= 1;
@@ -1124,7 +1149,7 @@ static int ata_lock(dev_t dev, void *data)
 
 extern ide_driver_t idedefault_driver;
 
-struct kobject *ata_probe(dev_t dev, int *part, void *data)
+static struct kobject *ata_probe(dev_t dev, int *part, void *data)
 {
 	ide_hwif_t *hwif = data;
 	int unit = *part >> PARTN_BITS;
@@ -1243,6 +1268,16 @@ static int hwif_init(ide_hwif_t *hwif)
 	if (register_blkdev(hwif->major, hwif->name))
 		return 0;
 
+	if (!hwif->sg_max_nents)
+		hwif->sg_max_nents = PRD_ENTRIES;
+
+	hwif->sg_table = kmalloc(sizeof(struct scatterlist)*hwif->sg_max_nents,
+				 GFP_KERNEL);
+	if (!hwif->sg_table) {
+		printk(KERN_ERR "%s: unable to allocate SG table.\n", hwif->name);
+		goto out;
+	}
+
 	if (alloc_disks(hwif) < 0)
 		goto out;
 	
@@ -1292,9 +1327,6 @@ int ideprobe_init (void)
 	for (index = 0; index < MAX_HWIFS; ++index)
 		probe[index] = !ide_hwifs[index].present;
 
-	/*
-	 * Probe for drives in the usual way.. CMOS/BIOS, then poke at ports
-	 */
 	for (index = 0; index < MAX_HWIFS; ++index)
 		if (probe[index])
 			probe_hwif(&ide_hwifs[index]);

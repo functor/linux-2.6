@@ -61,6 +61,13 @@ struct usb_host_interface {
 	int extralen;
 };
 
+enum usb_interface_condition {
+	USB_INTERFACE_UNBOUND = 0,
+	USB_INTERFACE_BINDING,
+	USB_INTERFACE_BOUND,
+	USB_INTERFACE_UNBINDING,
+};
+
 /**
  * struct usb_interface - what usb device drivers talk to
  * @altsetting: array of interface structures, one for each alternate
@@ -75,6 +82,8 @@ struct usb_host_interface {
  *	be unused.  The driver should set this value in the probe()
  *	function of the driver, after it has been assigned a minor
  *	number from the USB core by calling usb_register_dev().
+ * @condition: binding state of the interface: not bound, binding
+ *	(in probe()), bound to a driver, or unbinding (in disconnect())
  * @dev: driver model's view of this device
  * @class_dev: driver model's class view of this device.
  *
@@ -113,6 +122,7 @@ struct usb_interface {
 	unsigned num_altsetting;	/* number of alternate settings */
 
 	int minor;			/* minor number this interface is bound to */
+	enum usb_interface_condition condition;		/* state of binding */
 	struct device dev;		/* interface specific device info */
 	struct class_device *class_dev;
 };
@@ -264,7 +274,6 @@ struct usb_bus {
 	int bandwidth_isoc_reqs;	/* number of Isoc. requests */
 
 	struct dentry *usbfs_dentry;	/* usbfs dentry entry for the bus */
-	struct dentry *usbdevfs_dentry;	/* usbdevfs dentry entry for the bus */
 
 	struct class_device class_dev;	/* class device for this bus */
 	void (*release)(struct usb_bus *bus);	/* function to destroy this bus's memory */
@@ -282,6 +291,14 @@ struct usb_bus {
 
 struct usb_tt;
 
+/*
+ * struct usb_device - kernel's representation of a USB device
+ *
+ * FIXME: Write the kerneldoc!
+ *
+ * Usbcore drivers should not set usbdev->state directly.  Instead use
+ * usb_set_device_state().
+ */
 struct usb_device {
 	int		devnum;		/* Address on USB bus */
 	char		devpath [16];	/* Use in messages: /port/port/... */
@@ -294,8 +311,6 @@ struct usb_device {
 	struct semaphore serialize;
 
 	unsigned int toggle[2];		/* one bit for each endpoint ([0] = IN, [1] = OUT) */
-	unsigned int halted[2];		/* endpoint halts; one bit per endpoint # & direction; */
-					/* [0] = IN, [1] = OUT */
 	int epmaxpacketin[16];		/* INput endpoint specific maximums */
 	int epmaxpacketout[16];		/* OUTput endpoint specific maximums */
 
@@ -317,7 +332,6 @@ struct usb_device {
 	
 	struct list_head filelist;
 	struct dentry *usbfs_dentry;	/* usbfs dentry entry for the device */
-	struct dentry *usbdevfs_dentry;	/* usbdevfs dentry entry for the device */
 
 	/*
 	 * Child devices - these can be either new devices
@@ -335,9 +349,14 @@ struct usb_device {
 extern struct usb_device *usb_get_dev(struct usb_device *dev);
 extern void usb_put_dev(struct usb_device *dev);
 
-/* mostly for devices emulating SCSI over USB */
+extern void usb_lock_device(struct usb_device *udev);
+extern int usb_trylock_device(struct usb_device *udev);
+extern int usb_lock_device_for_reset(struct usb_device *udev,
+		struct usb_interface *iface);
+extern void usb_unlock_device(struct usb_device *udev);
+
+/* USB port reset for device reinitialization */
 extern int usb_reset_device(struct usb_device *dev);
-extern int __usb_reset_device(struct usb_device *dev);
 
 extern struct usb_device *usb_find_device(u16 vendor_id, u16 product_id);
 
@@ -653,8 +672,6 @@ typedef void (*usb_complete_t)(struct urb *, struct pt_regs *);
  *	it likes with the URB, including resubmitting or freeing it.
  * @iso_frame_desc: Used to provide arrays of ISO transfer buffers and to 
  *	collect the transfer status for each buffer.
- * @timeout: If set to zero, the urb will never timeout.  Otherwise this is
- *	the time in jiffies that this urb will timeout in.
  *
  * This structure identifies USB transfer requests.  URBs must be allocated by
  * calling usb_alloc_urb() and freed with a call to usb_free_urb().
@@ -684,8 +701,8 @@ typedef void (*usb_complete_t)(struct urb *, struct pt_regs *);
  *
  * Initialization:
  *
- * All URBs submitted must initialize dev, pipe,
- * transfer_flags (may be zero), complete, timeout (may be zero).
+ * All URBs submitted must initialize the dev, pipe, transfer_flags (may be
+ * zero), and complete fields.
  * The URB_ASYNC_UNLINK transfer flag affects later invocations of
  * the usb_unlink_urb() routine.  Note: Failure to set URB_ASYNC_UNLINK
  * with usb_unlink_urb() is deprecated.  For synchronous unlinks use
@@ -785,7 +802,6 @@ struct urb
 	int number_of_packets;		/* (in) number of ISO packets */
 	int interval;			/* (modify) transfer interval (INT/ISO) */
 	int error_count;		/* (return) number of ISO errors */
-	int timeout;			/* (in) timeout, in jiffies */
 	void *context;			/* (in) context for completion */
 	usb_complete_t complete;	/* (in) completion routine */
 	struct usb_iso_packet_descriptor iso_frame_desc[0];	/* (in) ISO ONLY */
@@ -1083,10 +1099,6 @@ void usb_sg_wait (struct usb_sg_request *io);
 #define usb_gettoggle(dev, ep, out) (((dev)->toggle[out] >> (ep)) & 1)
 #define	usb_dotoggle(dev, ep, out)  ((dev)->toggle[out] ^= (1 << (ep)))
 #define usb_settoggle(dev, ep, out, bit) ((dev)->toggle[out] = ((dev)->toggle[out] & ~(1 << (ep))) | ((bit) << (ep)))
-
-/* Endpoint halt control/status ... likewise USE WITH CAUTION */
-#define usb_endpoint_running(dev, ep, out) ((dev)->halted[out] &= ~(1 << (ep)))
-#define usb_endpoint_halted(dev, ep, out) ((dev)->halted[out] & (1 << (ep)))
 
 
 static inline unsigned int __create_pipe(struct usb_device *dev, unsigned int endpoint)

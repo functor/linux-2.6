@@ -1,5 +1,5 @@
 /* 
- * Copyright (C) 2000 Jeff Dike (jdike@karaya.com)
+ * Copyright (C) 2000 - 2003 Jeff Dike (jdike@addtoit.com)
  * Licensed under the GPL
  */
 
@@ -122,12 +122,6 @@ long execute_syscall_tt(void *r)
 	else res = EXECUTE_SYSCALL(syscall, regs);
 
 	set_fs(USER_DS);
-
-	if(current->thread.mode.tt.singlestep_syscall){
-		current->thread.mode.tt.singlestep_syscall = 0;
-		current->ptrace &= ~PT_DTRACE;
-		force_sig(SIGTRAP, current);
-	}
 
 	return(res);
 }

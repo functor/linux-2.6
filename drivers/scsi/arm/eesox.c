@@ -231,7 +231,8 @@ static void eesoxscsi_buffer_in(void *buf, int length, void *base)
 		 * Align buffer.
 		 */
 		if (((u32)buf) & 2 && status >= 2) {
-			*((u16 *)buf)++ = readl(reg_dmadata);
+			*(u16 *)buf = readl(reg_dmadata);
+			buf += 2;
 			status -= 2;
 			length -= 2;
 		}
@@ -243,8 +244,10 @@ static void eesoxscsi_buffer_in(void *buf, int length, void *base)
 			l1 |= readl(reg_dmadata) << 16;
 			l2 = readl(reg_dmadata) & mask;
 			l2 |= readl(reg_dmadata) << 16;
-			*((u32 *)buf)++ = l1;
-			*((u32 *)buf)++ = l2;
+			*(u32 *)buf = l1;
+			buf += 4;
+			*(u32 *)buf = l2;
+			buf += 4;
 			length -= 8;
 			continue;
 		}
@@ -255,13 +258,15 @@ static void eesoxscsi_buffer_in(void *buf, int length, void *base)
 			l1 = readl(reg_dmadata) & mask;
 			l1 |= readl(reg_dmadata) << 16;
 
-			*((u32 *)buf)++ = l1;
+			*(u32 *)buf = l1;
+			buf += 4;
 			length -= 4;
 			continue;
 		}
 
 		if (status >= 2) {
-			*((u16 *)buf)++ = readl(reg_dmadata);
+			*(u16 *)buf = readl(reg_dmadata);
+			buf += 2;
 			length -= 2;
 		}
 	} while (length);
@@ -305,7 +310,8 @@ static void eesoxscsi_buffer_out(void *buf, int length, void *base)
 		 * Align buffer.
 		 */
 		if (((u32)buf) & 2 && status >= 2) {
-			writel(*((u16 *)buf)++ << 16, reg_dmadata);
+			writel(*(u16 *)buf << 16, reg_dmadata);
+			buf += 2;
 			status -= 2;
 			length -= 2;
 		}
@@ -313,8 +319,10 @@ static void eesoxscsi_buffer_out(void *buf, int length, void *base)
 		if (status >= 8) {
 			unsigned long l1, l2;
 
-			l1 = *((u32 *)buf)++;
-			l2 = *((u32 *)buf)++;
+			l1 = *(u32 *)buf;
+			buf += 4;
+			l2 = *(u32 *)buf;
+			buf += 4;
 
 			writel(l1 << 16, reg_dmadata);
 			writel(l1, reg_dmadata);
@@ -327,7 +335,8 @@ static void eesoxscsi_buffer_out(void *buf, int length, void *base)
 		if (status >= 4) {
 			unsigned long l1;
 
-			l1 = *((u32 *)buf)++;
+			l1 = *(u32 *)buf;
+			buf += 4;
 
 			writel(l1 << 16, reg_dmadata);
 			writel(l1, reg_dmadata);
@@ -336,7 +345,8 @@ static void eesoxscsi_buffer_out(void *buf, int length, void *base)
 		}
 
 		if (status >= 2) {
-			writel(*((u16 *)buf)++ << 16, reg_dmadata);
+			writel(*(u16 *)buf << 16, reg_dmadata);
+			buf += 2;
 			length -= 2;
 		}
 	} while (length);
@@ -515,14 +525,12 @@ eesoxscsi_probe(struct expansion_card *ec, const struct ecard_id *id)
 	unsigned char *base;
 	int ret;
 
+	ret = ecard_request_resources(ec);
+	if (ret)
+		goto out;
+
 	resbase = ecard_resource_start(ec, ECARD_RES_IOCFAST);
 	reslen = ecard_resource_len(ec, ECARD_RES_IOCFAST);
-
-	if (!request_mem_region(resbase, reslen, "eesoxscsi")) {
-		ret = -EBUSY;
-		goto out;
-	}
-
 	base = ioremap(resbase, reslen);
 	if (!base) {
 		ret = -ENOMEM;
@@ -612,7 +620,7 @@ eesoxscsi_probe(struct expansion_card *ec, const struct ecard_id *id)
 	iounmap(base);
 
  out_region:
-	release_mem_region(resbase, reslen);
+	ecard_release_resources(ec);
 
  out:
 	return ret;
@@ -622,7 +630,6 @@ static void __devexit eesoxscsi_remove(struct expansion_card *ec)
 {
 	struct Scsi_Host *host = ecard_get_drvdata(ec);
 	struct eesoxscsi_info *info = (struct eesoxscsi_info *)host->hostdata;
-	unsigned long resbase, reslen;
 
 	ecard_set_drvdata(ec, NULL);
 	fas216_remove(host);
@@ -635,13 +642,9 @@ static void __devexit eesoxscsi_remove(struct expansion_card *ec)
 
 	iounmap((void *)host->base);
 
-	resbase = ecard_resource_start(ec, ECARD_RES_IOCFAST);
-	reslen = ecard_resource_len(ec, ECARD_RES_IOCFAST);
-
-	release_mem_region(resbase, reslen);
-
 	fas216_release(host);
 	scsi_host_put(host);
+	ecard_release_resources(ec);
 }
 
 static const struct ecard_id eesoxscsi_cids[] = {

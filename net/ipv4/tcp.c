@@ -257,10 +257,6 @@
 #include <linux/fs.h>
 #include <linux/random.h>
 
-#ifdef CONFIG_CKRM
-#include <linux/ckrm.h>
-#endif
-
 #include <net/icmp.h>
 #include <net/tcp.h>
 #include <net/xfrm.h>
@@ -279,8 +275,6 @@ kmem_cache_t *tcp_bucket_cachep;
 kmem_cache_t *tcp_timewait_cachep;
 
 atomic_t tcp_orphan_count = ATOMIC_INIT(0);
-
-int sysctl_tcp_default_win_scale = 7;
 
 int sysctl_tcp_mem[3];
 int sysctl_tcp_wmem[3] = { 4 * 1024, 16 * 1024, 128 * 1024 };
@@ -466,21 +460,14 @@ int tcp_ioctl(struct sock *sk, int cmd, unsigned long arg)
 
 int tcp_listen_start(struct sock *sk)
 {
-#ifdef CONFIG_ACCEPT_QUEUES
-	int i = 0;
-#endif
 	struct inet_opt *inet = inet_sk(sk);
 	struct tcp_opt *tp = tcp_sk(sk);
 	struct tcp_listen_opt *lopt;
 
 	sk->sk_max_ack_backlog = 0;
 	sk->sk_ack_backlog = 0;
-#ifdef CONFIG_ACCEPT_QUEUES
-	tp->accept_queue = NULL;
-#else
 	tp->accept_queue = tp->accept_queue_tail = NULL;
-#endif 
-	tp->syn_wait_lock = RW_LOCK_UNLOCKED;
+	rwlock_init(&tp->syn_wait_lock);
 	tcp_delack_init(tp);
 
 	lopt = kmalloc(sizeof(struct tcp_listen_opt), GFP_KERNEL);
@@ -492,23 +479,6 @@ int tcp_listen_start(struct sock *sk)
 		if ((1 << lopt->max_qlen_log) >= sysctl_max_syn_backlog)
 			break;
 	get_random_bytes(&lopt->hash_rnd, 4);
-
-#ifdef CONFIG_ACCEPT_QUEUES
-	tp->class_index = 0;
-	for (i=0; i < NUM_ACCEPT_QUEUES; i++) {
-		tp->acceptq[i].aq_tail = NULL;
-		tp->acceptq[i].aq_head = NULL;
-		tp->acceptq[i].aq_wait_time = 0; 
-		tp->acceptq[i].aq_qcount = 0; 
-		tp->acceptq[i].aq_count = 0; 
-		if (i == 0) {
-			tp->acceptq[i].aq_ratio = 1; 
-		}
-		else {
-			tp->acceptq[i].aq_ratio = 0; 
-		}
-	}
-#endif
 
 	write_lock_bh(&tp->syn_wait_lock);
 	tp->listen_opt = lopt;
@@ -525,10 +495,6 @@ int tcp_listen_start(struct sock *sk)
 
 		sk_dst_reset(sk);
 		sk->sk_prot->hash(sk);
-
-#ifdef CONFIG_CKRM
-		ckrm_cb_listen_start(sk);
-#endif
 
 		return 0;
 	}
@@ -560,18 +526,7 @@ static void tcp_listen_stop (struct sock *sk)
 	write_lock_bh(&tp->syn_wait_lock);
 	tp->listen_opt = NULL;
 	write_unlock_bh(&tp->syn_wait_lock);
-
-#ifdef CONFIG_CKRM
-		ckrm_cb_listen_stop(sk);
-#endif
-
-#ifdef CONFIG_ACCEPT_QUEUES
-	for (i = 0; i < NUM_ACCEPT_QUEUES; i++)
-		tp->acceptq[i].aq_head = tp->acceptq[i].aq_tail = NULL;
-#else
-	tp->accept_queue_tail = NULL;
-#endif
-	tp->accept_queue = NULL;
+	tp->accept_queue = tp->accept_queue_tail = NULL;
 
 	if (lopt->qlen) {
 		for (i = 0; i < TCP_SYNQ_HSIZE; i++) {
@@ -617,11 +572,7 @@ static void tcp_listen_stop (struct sock *sk)
 		local_bh_enable();
 		sock_put(child);
 
-#ifdef CONFIG_ACCEPT_QUEUES
-		sk_acceptq_removed(sk, req->acceptq_class);
-#else
 		sk_acceptq_removed(sk);
-#endif
 		tcp_openreq_fastfree(req);
 	}
 	BUG_TRAP(!sk->sk_ack_backlog);
@@ -740,6 +691,7 @@ new_segment:
 		skb->ip_summed = CHECKSUM_HW;
 		tp->write_seq += copy;
 		TCP_SKB_CB(skb)->end_seq += copy;
+		skb_shinfo(skb)->tso_segs = 0;
 
 		if (!copied)
 			TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_PSH;
@@ -986,6 +938,7 @@ new_segment:
 
 			tp->write_seq += copy;
 			TCP_SKB_CB(skb)->end_seq += copy;
+			skb_shinfo(skb)->tso_segs = 0;
 
 			from += copy;
 			copied += copy;
@@ -1640,14 +1593,6 @@ void tcp_destroy_sock(struct sock *sk)
 	/* If it has not 0 inet_sk(sk)->num, it must be bound */
 	BUG_TRAP(!inet_sk(sk)->num || tcp_sk(sk)->bind_hash);
 
-#ifdef TCP_DEBUG
-	if (sk->sk_zapped) {
-		printk(KERN_DEBUG "TCP: double destroy sk=%p\n", sk);
-		sock_hold(sk);
-	}
-	sk->sk_zapped = 1;
-#endif
-
 	sk->sk_prot->destroy(sk);
 
 	sk_stream_kill_queues(sk);
@@ -1867,7 +1812,7 @@ int tcp_disconnect(struct sock *sk, int flags)
 	tp->backoff = 0;
 	tp->snd_cwnd = 2;
 	tp->probes_out = 0;
-	tp->packets_out = 0;
+	tcp_set_pcount(&tp->packets_out, 0);
 	tp->snd_ssthresh = 0x7fffffff;
 	tp->snd_cwnd_cnt = 0;
 	tcp_set_ca_state(tp, TCP_CA_Open);
@@ -1942,10 +1887,6 @@ struct sock *tcp_accept(struct sock *sk, int flags, int *err)
 	struct open_request *req;
 	struct sock *newsk;
 	int error;
-#ifdef CONFIG_ACCEPT_QUEUES	
-	int prev_class = 0;
-	int first;
-#endif
 
 	lock_sock(sk);
 
@@ -1959,6 +1900,7 @@ struct sock *tcp_accept(struct sock *sk, int flags, int *err)
 	/* Find already established connection */
 	if (!tp->accept_queue) {
 		long timeo = sock_rcvtimeo(sk, flags & O_NONBLOCK);
+
 		/* If this is a non blocking socket don't sleep */
 		error = -EAGAIN;
 		if (!timeo)
@@ -1969,46 +1911,12 @@ struct sock *tcp_accept(struct sock *sk, int flags, int *err)
 			goto out;
 	}
 
-#ifndef CONFIG_ACCEPT_QUEUES
 	req = tp->accept_queue;
 	if ((tp->accept_queue = req->dl_next) == NULL)
 		tp->accept_queue_tail = NULL;
-	newsk = req->sk;
-	sk_acceptq_removed(sk);
-#else
-	first = tp->class_index;
-	/* We should always have  request queued here. The accept_queue
-	 * is already checked for NULL above.
-	 */
-	while(!tp->acceptq[first].aq_head) {
-		tp->acceptq[first].aq_cnt = 0;
-		first = (first+1) & ~NUM_ACCEPT_QUEUES; 
-	}
-        req = tp->acceptq[first].aq_head;
-	tp->acceptq[first].aq_qcount--;
-	tp->acceptq[first].aq_count++;
-	tp->acceptq[first].aq_wait_time+=(jiffies - req->acceptq_time_stamp);
 
-	for (prev_class= first-1 ; prev_class >=0; prev_class--)
-		if (tp->acceptq[prev_class].aq_tail)
-			break;
-	if (prev_class>=0)
-		tp->acceptq[prev_class].aq_tail->dl_next = req->dl_next; 
-	else 
-		tp->accept_queue = req->dl_next;
-
-	if (req == tp->acceptq[first].aq_tail) 
-		tp->acceptq[first].aq_head = tp->acceptq[first].aq_tail = NULL;
-	else
-		tp->acceptq[first].aq_head = req->dl_next;
-
-	if((++(tp->acceptq[first].aq_cnt)) >= tp->acceptq[first].aq_ratio){
-		tp->acceptq[first].aq_cnt = 0;
-		tp->class_index = ++first & (NUM_ACCEPT_QUEUES-1);
-	}	
  	newsk = req->sk;
-	sk_acceptq_removed(sk, req->acceptq_class);
-#endif
+	sk_acceptq_removed(sk);
 	tcp_openreq_fastfree(req);
 	BUG_TRAP(newsk->sk_state != TCP_SYN_RECV);
 	release_sock(sk);
@@ -2019,7 +1927,6 @@ out:
 	*err = error;
 	return NULL;
 }
-
 
 /*
  *	Socket option code for TCP.
@@ -2179,54 +2086,7 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 			}
 		}
 		break;
-		
-#ifdef CONFIG_ACCEPT_QUEUES
-	case TCP_ACCEPTQ_SHARE:
-#ifdef CONFIG_CKRM
-		// If CKRM is set then the shares are set through rcfs.
-		// Get shares will still succeed.
-		err = -EOPNOTSUPP;
-		break;
-#else		
-		{
-			char share_wt[NUM_ACCEPT_QUEUES];
-			int i,j;
 
-			if (sk->sk_state != TCP_LISTEN)
-				return -EOPNOTSUPP;
-
-			if (copy_from_user(share_wt,optval, optlen)) {
-				err = -EFAULT;
-				break;
-			}
-			j = 0;
-			for (i = 0; i < NUM_ACCEPT_QUEUES; i++) {
-				if (share_wt[i]) {
-					if (!j)
-						j = share_wt[i];
-					else if (share_wt[i] < j) {
-						j = share_wt[i];
-					}
-				}
-				else
-					tp->acceptq[i].aq_ratio = 0;
-					
-			}
-			if (j == 0) {
-				/* Class 0 is always valid. If nothing is 
-				 * specified set class 0 as 1.
-				 */
-				share_wt[0] = 1;
-				j = 1;
-			}
-			for (i=0; i < NUM_ACCEPT_QUEUES; i++)  {
-				tp->acceptq[i].aq_ratio = share_wt[i]/j;
-				tp->acceptq[i].aq_cnt = 0;
-			}
-		}
-		break;
-#endif
-#endif
 	default:
 		err = -ENOPROTOOPT;
 		break;
@@ -2234,6 +2094,65 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 	release_sock(sk);
 	return err;
 }
+
+/* Return information about state of tcp endpoint in API format. */
+void tcp_get_info(struct sock *sk, struct tcp_info *info)
+{
+	struct tcp_opt *tp = tcp_sk(sk);
+	u32 now = tcp_time_stamp;
+
+	memset(info, 0, sizeof(*info));
+
+	info->tcpi_state = sk->sk_state;
+	info->tcpi_ca_state = tp->ca_state;
+	info->tcpi_retransmits = tp->retransmits;
+	info->tcpi_probes = tp->probes_out;
+	info->tcpi_backoff = tp->backoff;
+
+	if (tp->tstamp_ok)
+		info->tcpi_options |= TCPI_OPT_TIMESTAMPS;
+	if (tp->sack_ok)
+		info->tcpi_options |= TCPI_OPT_SACK;
+	if (tp->wscale_ok) {
+		info->tcpi_options |= TCPI_OPT_WSCALE;
+		info->tcpi_snd_wscale = tp->snd_wscale;
+		info->tcpi_rcv_wscale = tp->rcv_wscale;
+	} 
+
+	if (tp->ecn_flags&TCP_ECN_OK)
+		info->tcpi_options |= TCPI_OPT_ECN;
+
+	info->tcpi_rto = jiffies_to_usecs(tp->rto);
+	info->tcpi_ato = jiffies_to_usecs(tp->ack.ato);
+	info->tcpi_snd_mss = tp->mss_cache_std;
+	info->tcpi_rcv_mss = tp->ack.rcv_mss;
+
+	info->tcpi_unacked = tcp_get_pcount(&tp->packets_out);
+	info->tcpi_sacked = tcp_get_pcount(&tp->sacked_out);
+	info->tcpi_lost = tcp_get_pcount(&tp->lost_out);
+	info->tcpi_retrans = tcp_get_pcount(&tp->retrans_out);
+	info->tcpi_fackets = tcp_get_pcount(&tp->fackets_out);
+
+	info->tcpi_last_data_sent = jiffies_to_msecs(now - tp->lsndtime);
+	info->tcpi_last_data_recv = jiffies_to_msecs(now - tp->ack.lrcvtime);
+	info->tcpi_last_ack_recv = jiffies_to_msecs(now - tp->rcv_tstamp);
+
+	info->tcpi_pmtu = tp->pmtu_cookie;
+	info->tcpi_rcv_ssthresh = tp->rcv_ssthresh;
+	info->tcpi_rtt = jiffies_to_usecs(tp->srtt)>>3;
+	info->tcpi_rttvar = jiffies_to_usecs(tp->mdev)>>2;
+	info->tcpi_snd_ssthresh = tp->snd_ssthresh;
+	info->tcpi_snd_cwnd = tp->snd_cwnd;
+	info->tcpi_advmss = tp->advmss;
+	info->tcpi_reordering = tp->reordering;
+
+	info->tcpi_rcv_rtt = jiffies_to_usecs(tp->rcv_rtt_est.rtt)>>3;
+	info->tcpi_rcv_space = tp->rcvq_space.space;
+
+	info->tcpi_total_retrans = tp->total_retrans;
+}
+
+EXPORT_SYMBOL_GPL(tcp_get_info);
 
 int tcp_getsockopt(struct sock *sk, int level, int optname, char __user *optval,
 		   int __user *optlen)
@@ -2307,40 +2226,6 @@ int tcp_getsockopt(struct sock *sk, int level, int optname, char __user *optval,
 	case TCP_QUICKACK:
 		val = !tp->ack.pingpong;
 		break;
-
-#ifdef CONFIG_ACCEPT_QUEUES
-	case TCP_ACCEPTQ_SHARE: 
-	{
-		struct tcp_acceptq_info tinfo[NUM_ACCEPT_QUEUES];
-		int i;
-
-		if (sk->sk_state != TCP_LISTEN)
-			return -EOPNOTSUPP;
-
-		if (get_user(len, optlen))
-			return -EFAULT;
-
-		memset(tinfo, 0, sizeof(tinfo));
-
-		for(i=0; i < NUM_ACCEPT_QUEUES; i++) {
-			tinfo[i].acceptq_wait_time = 
-			     jiffies_to_msecs(tp->acceptq[i].aq_wait_time);
-			tinfo[i].acceptq_qcount = tp->acceptq[i].aq_qcount;
-			tinfo[i].acceptq_count = tp->acceptq[i].aq_count;
-			tinfo[i].acceptq_shares=tp->acceptq[i].aq_ratio;
-		}
-
-		len = min_t(unsigned int, len, sizeof(tinfo));
-		if (put_user(len, optlen)) 
-			return -EFAULT;
-			
-		if (copy_to_user(optval, (char *)tinfo, len))
-			return -EFAULT;
-		
-		return 0;
-	}
-	break;
-#endif
 	default:
 		return -ENOPROTOOPT;
 	};
@@ -2424,7 +2309,7 @@ void __init tcp_init(void)
 	if (!tcp_ehash)
 		panic("Failed to allocate TCP established hash table\n");
 	for (i = 0; i < (tcp_ehash_size << 1); i++) {
-		tcp_ehash[i].lock = RW_LOCK_UNLOCKED;
+		rwlock_init(&tcp_ehash[i].lock);
 		INIT_HLIST_HEAD(&tcp_ehash[i].chain);
 	}
 
@@ -2440,7 +2325,7 @@ void __init tcp_init(void)
 	if (!tcp_bhash)
 		panic("Failed to allocate TCP bind hash table\n");
 	for (i = 0; i < tcp_bhash_size; i++) {
-		tcp_bhash[i].lock = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&tcp_bhash[i].lock);
 		INIT_HLIST_HEAD(&tcp_bhash[i].chain);
 	}
 
@@ -2475,13 +2360,10 @@ void __init tcp_init(void)
 	printk(KERN_INFO "TCP: Hash tables configured "
 	       "(established %d bind %d)\n",
 	       tcp_ehash_size << 1, tcp_bhash_size);
-
-	tcpdiag_init();
 }
 
 EXPORT_SYMBOL(tcp_accept);
 EXPORT_SYMBOL(tcp_close);
-EXPORT_SYMBOL(tcp_close_state);
 EXPORT_SYMBOL(tcp_destroy_sock);
 EXPORT_SYMBOL(tcp_disconnect);
 EXPORT_SYMBOL(tcp_getsockopt);

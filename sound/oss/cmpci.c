@@ -1393,7 +1393,7 @@ static int prog_dmabuf(struct cm_state *s, unsigned rec)
 		if (!db->rawbuf || !db->dmaaddr)
 			return -ENOMEM;
 		db->buforder = order;
-		/* now mark the pages as reserved; otherwise remap_page_range doesn't do what we want */
+		/* now mark the pages as reserved; otherwise remap_pfn_range doesn't do what we want */
 		pend = virt_to_page(db->rawbuf + (PAGE_SIZE << db->buforder) - 1);
 		for (pstart = virt_to_page(db->rawbuf); pstart <= pend; pstart++)
 			SetPageReserved(pstart);
@@ -2301,7 +2301,9 @@ static int cm_mmap(struct file *file, struct vm_area_struct *vma)
 	if (size > (PAGE_SIZE << db->buforder))
 		goto out;
 	ret = -EINVAL;
-	if (remap_page_range(vma, vma->vm_start, virt_to_phys(db->rawbuf), size, vma->vm_page_prot))
+	if (remap_pfn_range(vma, vma->vm_start,
+				virt_to_phys(db->rawbuf) >> PAGE_SHIFT,
+				size, vma->vm_page_prot))
 		goto out;
 	db->mapped = 1;
 	ret = 0;
@@ -3000,6 +3002,8 @@ static int __devinit cm_probe(struct pci_dev *pcidev, const struct pci_device_id
 	mm_segment_t fs;
 	int i, val, ret;
 	unsigned char reg_mask;
+	int timeout;
+	struct resource *ports;
 	struct {
 		unsigned short	deviceid;
 		char		*devicename;
@@ -3184,54 +3188,55 @@ static int __devinit cm_probe(struct pci_dev *pcidev, const struct pci_device_id
 	}
 #endif
 #ifdef CONFIG_SOUND_CMPCI_MIDI
+	switch (s->iomidi) {
+	    case 0x330:
+		reg_mask = 0;
+		break;
+	    case 0x320:
+		reg_mask = 0x20;
+		break;
+	    case 0x310:
+		reg_mask = 0x40;
+		break;
+	    case 0x300:
+		reg_mask = 0x60;
+		break;
+	    default:
+		s->iomidi = 0;
+		goto skip_mpu;
+	}
+	ports = request_region(s->iomidi, 2, "mpu401");
+	if (!ports)
+		goto skip_mpu;
 	/* disable MPU-401 */
 	maskb(s->iobase + CODEC_CMI_FUNCTRL1, ~0x04, 0);
 	s->mpu_data.name = "cmpci mpu";
 	s->mpu_data.io_base = s->iomidi;
 	s->mpu_data.irq = -s->irq;	// tell mpu401 to share irq
-	if (probe_mpu401(&s->mpu_data))
+	if (probe_mpu401(&s->mpu_data, ports)) {
+		release_region(s->iomidi, 2);
 		s->iomidi = 0;
-	if (s->iomidi) {
-		/* set IO based at 0x330 */
-		switch (s->iomidi) {
-		    case 0x330:
-			reg_mask = 0;
-			break;
-		    case 0x320:
-			reg_mask = 0x20;
-			break;
-		    case 0x310:
-			reg_mask = 0x40;
-			break;
-		    case 0x300:
-			reg_mask = 0x60;
-			break;
-		    default:
-			s->iomidi = 0;
-			break;
-		}
-		maskb(s->iobase + CODEC_CMI_LEGACY_CTRL + 3, ~0x60, reg_mask);
-		/* enable MPU-401 */
-		if (s->iomidi) {
-			int timeout;
-
-			maskb(s->iobase + CODEC_CMI_FUNCTRL1, ~0, 0x04);
-			/* clear all previously received interrupt */
-			for (timeout = 900000; timeout > 0; timeout--) {
-				if ((inb(s->iomidi + 1) && 0x80) == 0)
-					inb(s->iomidi);
-				else
-					break;
-			}
-	    		if (!probe_mpu401(&s->mpu_data)) {
-				s->iomidi = 0;
-				maskb(s->iobase + CODEC_CMI_FUNCTRL1, ~0, 0x04);
-			} else {
-				attach_mpu401(&s->mpu_data, THIS_MODULE);
-				s->midi_devc = s->mpu_data.slots[1];
-			}
-		}
+		goto skip_mpu;
 	}
+	maskb(s->iobase + CODEC_CMI_LEGACY_CTRL + 3, ~0x60, reg_mask);
+	/* enable MPU-401 */
+	maskb(s->iobase + CODEC_CMI_FUNCTRL1, ~0, 0x04);
+	/* clear all previously received interrupt */
+	for (timeout = 900000; timeout > 0; timeout--) {
+		if ((inb(s->iomidi + 1) && 0x80) == 0)
+			inb(s->iomidi);
+		else
+			break;
+	}
+	if (!probe_mpu401(&s->mpu_data, ports)) {
+		release_region(s->iomidi, 2);
+		s->iomidi = 0;
+		maskb(s->iobase + CODEC_CMI_FUNCTRL1, ~0, 0x04);
+	} else {
+		attach_mpu401(&s->mpu_data, THIS_MODULE);
+		s->midi_devc = s->mpu_data.slots[1];
+	}
+skip_mpu:
 #endif
 #ifdef CONFIG_SOUND_CMPCI_JOYSTICK
 	/* enable joystick */

@@ -42,11 +42,13 @@
 #include <linux/genhd.h>
 #include <linux/hdreg.h>
 #include <linux/errno.h>
+#include <linux/idr.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/blkpg.h>
 #include <linux/kref.h>
+#include <linux/delay.h>
 #include <asm/uaccess.h>
 
 #include <scsi/scsi.h>
@@ -62,12 +64,18 @@
 
 #include "scsi_logging.h"
 
-
 /*
- * Remaining dev_t-handling stuff
+ * More than enough for everybody ;)  The huge number of majors
+ * is a leftover from 16bit dev_t days, we don't really need that
+ * much numberspace.
  */
 #define SD_MAJORS	16
-#define SD_DISKS	32768	/* anything between 256 and 262144 */
+
+/*
+ * This is limited by the naming scheme enforced in sd_probe,
+ * add another character to it if you really need more disks.
+ */
+#define SD_MAX_DISKS	(((26 * 26) + 26 + 1) * 26)
 
 /*
  * Time out in seconds for disks and Magneto-opticals (which are slower).
@@ -96,8 +104,7 @@ struct scsi_disk {
 	unsigned	RCD : 1;	/* state of disk RCD bit, unused */
 };
 
-
-static unsigned long sd_index_bits[SD_DISKS / BITS_PER_LONG];
+static DEFINE_IDR(sd_index_idr);
 static spinlock_t sd_index_lock = SPIN_LOCK_UNLOCKED;
 
 /* This semaphore is used to mediate the 0->1 reference get in the
@@ -113,6 +120,7 @@ static int sd_remove(struct device *);
 static void sd_shutdown(struct device *dev);
 static void sd_rescan(struct device *);
 static int sd_init_command(struct scsi_cmnd *);
+static int sd_issue_flush(struct device *, sector_t *);
 static void sd_read_capacity(struct scsi_disk *sdkp, char *diskname,
 		 struct scsi_request *SRpnt, unsigned char *buffer);
 
@@ -126,9 +134,11 @@ static struct scsi_driver sd_template = {
 	},
 	.rescan			= sd_rescan,
 	.init_command		= sd_init_command,
+	.issue_flush		= sd_issue_flush,
 };
 
-/* Device no to disk mapping:
+/*
+ * Device no to disk mapping:
  * 
  *       major         disc2     disc  p1
  *   |............|.............|....|....| <- dev_t
@@ -141,7 +151,6 @@ static struct scsi_driver sd_template = {
  * As we stay compatible with our numbering scheme, we can reuse 
  * the well-know SCSI majors 8, 65--71, 136--143.
  */
-
 static int sd_major(int major_idx)
 {
 	switch (major_idx) {
@@ -156,14 +165,6 @@ static int sd_major(int major_idx)
 		return 0;	/* shut up gcc */
 	}
 }
-
-static unsigned int make_sd_dev(unsigned int sd_nr, unsigned int part)
-{
-	return  (part & 0xf) | ((sd_nr & 0xf) << 4) |
-		(sd_major((sd_nr & 0xf0) >> 4) << 20) | (sd_nr & 0xfff00);
-}
-
-/* reverse mapping dev -> (sd_nr, part) not currently needed */
 
 #define to_scsi_disk(obj) container_of(obj,struct scsi_disk,kref)
 
@@ -180,16 +181,14 @@ static struct scsi_disk *scsi_disk_get(struct gendisk *disk)
 	if (disk->private_data == NULL)
 		goto out;
 	sdkp = scsi_disk(disk);
-	if (!kref_get(&sdkp->kref))
-		goto out_sdkp;
+	kref_get(&sdkp->kref);
 	if (scsi_device_get(sdkp->device))
 		goto out_put;
 	up(&sd_ref_sem);
 	return sdkp;
 
  out_put:
-	kref_put(&sdkp->kref);
- out_sdkp:
+	kref_put(&sdkp->kref, scsi_disk_release);
 	sdkp = NULL;
  out:
 	up(&sd_ref_sem);
@@ -199,8 +198,8 @@ static struct scsi_disk *scsi_disk_get(struct gendisk *disk)
 static void scsi_disk_put(struct scsi_disk *sdkp)
 {
 	down(&sd_ref_sem);
+	kref_put(&sdkp->kref, scsi_disk_release);
 	scsi_device_put(sdkp->device);
-	kref_put(&sdkp->kref);
 	up(&sd_ref_sem);
 }
 
@@ -575,8 +574,9 @@ static int sd_ioctl(struct inode * inode, struct file * filp,
 	 * may try and take the device offline, in which case all further
 	 * access to the device is prohibited.
 	 */
-	if (!scsi_block_when_processing_errors(sdp))
-		return -ENODEV;
+	error = scsi_nonblockable_ioctl(sdp, cmd, p, filp);
+	if (!scsi_block_when_processing_errors(sdp) || !error)
+		return error;
 
 	if (cmd == HDIO_GETGEO) {
 		if (!arg)
@@ -648,7 +648,7 @@ static int sd_media_changed(struct gendisk *disk)
 	 */
 	retval = -ENODEV;
 	if (scsi_block_when_processing_errors(sdp))
-		retval = scsi_ioctl(sdp, SCSI_IOCTL_TEST_UNIT_READY, NULL);
+		retval = scsi_test_unit_ready(sdp, SD_TIMEOUT, SD_MAX_RETRIES);
 
 	/*
 	 * Unable to test, unit probably not ready.   This usually
@@ -674,6 +674,62 @@ static int sd_media_changed(struct gendisk *disk)
 not_present:
 	set_media_not_present(sdkp);
 	return 1;
+}
+
+static int sd_sync_cache(struct scsi_device *sdp)
+{
+	struct scsi_request *sreq;
+	int retries, res;
+
+	if (!scsi_device_online(sdp))
+		return -ENODEV;
+
+	sreq = scsi_allocate_request(sdp, GFP_KERNEL);
+	if (!sreq) {
+		printk("FAILED\n  No memory for request\n");
+		return -ENOMEM;
+	}
+
+	sreq->sr_data_direction = DMA_NONE;
+	for (retries = 3; retries > 0; --retries) {
+		unsigned char cmd[10] = { 0 };
+
+		cmd[0] = SYNCHRONIZE_CACHE;
+		/*
+		 * Leave the rest of the command zero to indicate
+		 * flush everything.
+		 */
+		scsi_wait_req(sreq, cmd, NULL, 0, SD_TIMEOUT, SD_MAX_RETRIES);
+		if (sreq->sr_result == 0)
+			break;
+	}
+
+	res = sreq->sr_result;
+	if (res) {
+		printk(KERN_WARNING "FAILED\n  status = %x, message = %02x, "
+				    "host = %d, driver = %02x\n  ",
+				    status_byte(res), msg_byte(res),
+				    host_byte(res), driver_byte(res));
+			if (driver_byte(res) & DRIVER_SENSE)
+				scsi_print_req_sense("sd", sreq);
+	}
+
+	scsi_release_request(sreq);
+	return res;
+}
+
+static int sd_issue_flush(struct device *dev, sector_t *error_sector)
+{
+	struct scsi_device *sdp = to_scsi_device(dev);
+	struct scsi_disk *sdkp = dev_get_drvdata(dev);
+
+	if (!sdkp)
+               return -ENODEV;
+
+	if (!sdkp->WCE)
+		return 0;
+
+	return sd_sync_cache(sdp);
 }
 
 static void sd_rescan(struct device *dev)
@@ -889,7 +945,6 @@ sd_spinup_disk(struct scsi_disk *sdkp, char *diskname,
 		 * Issue command to spin up drive when not ready
 		 */
 		} else if (SRpnt->sr_sense_buffer[2] == NOT_READY) {
-			unsigned long time1;
 			if (!spintime) {
 				printk(KERN_NOTICE "%s: Spinning up disk...",
 				       diskname);
@@ -908,12 +963,8 @@ sd_spinup_disk(struct scsi_disk *sdkp, char *diskname,
 				spintime_value = jiffies;
 			}
 			spintime = 1;
-			time1 = HZ;
 			/* Wait 1 second for next try */
-			do {
-				current->state = TASK_UNINTERRUPTIBLE;
-				time1 = schedule_timeout(time1);
-			} while(time1);
+			msleep(1000);
 			printk(".");
 		} else {
 			/* we don't understand the sense code, so it's
@@ -1053,6 +1104,11 @@ repeat:
 			(buffer[9] << 16) | (buffer[10] << 8) | buffer[11];
 	}	
 
+	/* Some devices return the total number of sectors, not the
+	 * highest sector number.  Make the necessary adjustment. */
+	if (sdp->fix_capacity)
+		--sdkp->capacity;
+
 got_data:
 	if (sector_size == 0) {
 		sector_size = 512;
@@ -1074,6 +1130,13 @@ got_data:
 		 * For this reason, we leave the thing in the table.
 		 */
 		sdkp->capacity = 0;
+		/*
+		 * set a bogus sector size so the normal read/write
+		 * logic in the block layer will eventually refuse any
+		 * request on this device without tripping over power
+		 * of two sector size assumptions
+		 */
+		sector_size = 512;
 	}
 	{
 		/*
@@ -1347,7 +1410,7 @@ static int sd_probe(struct device *dev)
 	struct scsi_disk *sdkp;
 	struct gendisk *gd;
 	u32 index;
-	int error, devno;
+	int error;
 
 	error = -ENODEV;
 	if ((sdp->type != TYPE_DISK) && (sdp->type != TYPE_MOD))
@@ -1362,27 +1425,23 @@ static int sd_probe(struct device *dev)
 		goto out;
 
 	memset (sdkp, 0, sizeof(*sdkp));
-	kref_init(&sdkp->kref, scsi_disk_release);
+	kref_init(&sdkp->kref);
 
-	/* Note: We can accomodate 64 partitions, but the genhd code
-	 * assumes partitions allocate consecutive minors, which they don't.
-	 * So for now stay with max 16 partitions and leave two spare bits. 
-	 * Later, we may change the genhd code and the alloc_disk() call
-	 * and the ->minors assignment here. 	KG, 2004-02-10
-	 */ 
 	gd = alloc_disk(16);
 	if (!gd)
 		goto out_free;
 
-	spin_lock(&sd_index_lock);
-	index = find_first_zero_bit(sd_index_bits, SD_DISKS);
-	if (index == SD_DISKS) {
-		spin_unlock(&sd_index_lock);
-		error = -EBUSY;
+	if (!idr_pre_get(&sd_index_idr, GFP_KERNEL))
 		goto out_put;
-	}
-	__set_bit(index, sd_index_bits);
+
+	spin_lock(&sd_index_lock);
+	error = idr_get_new(&sd_index_idr, NULL, &index);
 	spin_unlock(&sd_index_lock);
+
+	if (index >= SD_MAX_DISKS)
+		error = -EBUSY;
+	if (error)
+		goto out_put;
 
 	sdkp->device = sdp;
 	sdkp->driver = &sd_template;
@@ -1397,15 +1456,14 @@ static int sd_probe(struct device *dev)
 			sdp->timeout = SD_MOD_TIMEOUT;
 	}
 
-	devno = make_sd_dev(index, 0);
-	gd->major = MAJOR(devno);
-	gd->first_minor = MINOR(devno);
+	gd->major = sd_major((index & 0xf0) >> 4);
+	gd->first_minor = ((index & 0xf) << 4) | (index & 0xfff00);
 	gd->minors = 16;
 	gd->fops = &sd_fops;
 
 	if (index < 26) {
 		sprintf(gd->disk_name, "sd%c", 'a' + index % 26);
-	} else if (index < (26*27)) {
+	} else if (index < (26 + 1) * 26) {
 		sprintf(gd->disk_name, "sd%c%c",
 			'a' + index / 26 - 1,'a' + index % 26);
 	} else {
@@ -1464,7 +1522,7 @@ static int sd_remove(struct device *dev)
 	del_gendisk(sdkp->disk);
 	sd_shutdown(dev);
 	down(&sd_ref_sem);
-	kref_put(&sdkp->kref);
+	kref_put(&sdkp->kref, scsi_disk_release);
 	up(&sd_ref_sem);
 
 	return 0;
@@ -1485,7 +1543,7 @@ static void scsi_disk_release(struct kref *kref)
 	struct gendisk *disk = sdkp->disk;
 	
 	spin_lock(&sd_index_lock);
-	clear_bit(sdkp->index, sd_index_bits);
+	idr_remove(&sd_index_idr, sdkp->index);
 	spin_unlock(&sd_index_lock);
 
 	disk->private_data = NULL;
@@ -1503,52 +1561,17 @@ static void scsi_disk_release(struct kref *kref)
 static void sd_shutdown(struct device *dev)
 {
 	struct scsi_device *sdp = to_scsi_device(dev);
-	struct scsi_disk *sdkp;
-	struct scsi_request *sreq;
-	int retries, res;
+	struct scsi_disk *sdkp = dev_get_drvdata(dev);
 
-	sdkp = dev_get_drvdata(dev);
 	if (!sdkp)
-               return;         /* this can happen */
+		return;         /* this can happen */
 
-	if (!scsi_device_online(sdp) || !sdkp->WCE)
+	if (!sdkp->WCE)
 		return;
 
-	printk(KERN_NOTICE "Synchronizing SCSI cache for disk %s: ",
+	printk(KERN_NOTICE "Synchronizing SCSI cache for disk %s: \n",
 			sdkp->disk->disk_name);
-
-	sreq = scsi_allocate_request(sdp, GFP_KERNEL);
-	if (!sreq) {
-		printk("FAILED\n  No memory for request\n");
-		return;
-	}
-
-	sreq->sr_data_direction = DMA_NONE;
-	for (retries = 3; retries > 0; --retries) {
-		unsigned char cmd[10] = { 0 };
-
-		cmd[0] = SYNCHRONIZE_CACHE;
-		/*
-		 * Leave the rest of the command zero to indicate
-		 * flush everything.
-		 */
-		scsi_wait_req(sreq, cmd, NULL, 0, SD_TIMEOUT, SD_MAX_RETRIES);
-		if (sreq->sr_result == 0)
-			break;
-	}
-
-	res = sreq->sr_result;
-	if (res) {
-		printk(KERN_WARNING "FAILED\n  status = %x, message = %02x, "
-				    "host = %d, driver = %02x\n  ",
-				    status_byte(res), msg_byte(res),
-				    host_byte(res), driver_byte(res));
-			if (driver_byte(res) & DRIVER_SENSE)
-				scsi_print_req_sense("sd", sreq);
-	}
-	
-	scsi_release_request(sreq);
-	printk("\n");
+	sd_sync_cache(sdp);
 }	
 
 /**

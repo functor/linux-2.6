@@ -5,6 +5,8 @@
 CFLAGS_prom_init.o      += -fPIC
 CFLAGS_btext.o          += -fPIC
 
+wdt-mpc8xx-$(CONFIG_8xx_WDT)	+= m8xx_wdt.o
+
 obj-$(CONFIG_PPCBUG_NVRAM)	+= prep_nvram.o
 obj-$(CONFIG_PPC_OCP)		+= ocp.o
 obj-$(CONFIG_IBM_OCP)		+= ibm_ocp.o
@@ -12,17 +14,21 @@ obj-$(CONFIG_44x)		+= ibm44x_common.o
 obj-$(CONFIG_440GP)		+= ibm440gp_common.o
 obj-$(CONFIG_440GX)		+= ibm440gx_common.o
 ifeq ($(CONFIG_4xx),y)
-obj-$(CONFIG_4xx)		+= ppc4xx_pic.o
+ifeq ($(CONFIG_VIRTEX_II_PRO),y)
+obj-$(CONFIG_40x)		+= xilinx_pic.o
+else
+obj-$(CONFIG_40x)		+= ppc4xx_pic.o
+endif
+obj-$(CONFIG_44x)		+= ppc4xx_pic.o
 obj-$(CONFIG_40x)		+= ppc4xx_setup.o
 obj-$(CONFIG_GEN_RTC)		+= todc_time.o
 obj-$(CONFIG_PPC4xx_DMA)	+= ppc4xx_dma.o
 obj-$(CONFIG_PPC4xx_EDMA)	+= ppc4xx_sgdma.o
 ifeq ($(CONFIG_40x),y)
-obj-$(CONFIG_KGDB)		+= ppc4xx_kgdb.o
 obj-$(CONFIG_PCI)		+= indirect_pci.o pci_auto.o ppc405_pci.o
 endif
 endif
-obj-$(CONFIG_8xx)		+= m8xx_setup.o ppc8xx_pic.o
+obj-$(CONFIG_8xx)		+= m8xx_setup.o ppc8xx_pic.o $(wdt-mpc8xx-y)
 ifeq ($(CONFIG_8xx),y)
 obj-$(CONFIG_PCI)		+= qspan_pci.o i8259.o
 endif
@@ -45,7 +51,8 @@ obj-$(CONFIG_MCPN765)		+= todc_time.o indirect_pci.o pci_auto.o \
 obj-$(CONFIG_MENF1)		+= todc_time.o i8259.o mpc10x_common.o \
 					pci_auto.o indirect_pci.o
 obj-$(CONFIG_MVME5100)		+= open_pic.o todc_time.o indirect_pci.o \
-					i8259.o pci_auto.o hawk_common.o
+					pci_auto.o hawk_common.o
+obj-$(CONFIG_MVME5100_IPMC761_PRESENT)	+= i8259.o
 obj-$(CONFIG_OCOTEA)		+= indirect_pci.o pci_auto.o todc_time.o
 obj-$(CONFIG_PAL4)		+= cpc700_pic.o
 obj-$(CONFIG_PCORE)		+= todc_time.o i8259.o pci_auto.o

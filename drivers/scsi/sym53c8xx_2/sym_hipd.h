@@ -22,32 +22,19 @@
  *
  *-----------------------------------------------------------------------------
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
- * Where this Software is combined with software released under the terms of 
- * the GNU Public License ("GPL") and the terms of the GPL would require the 
- * combined work to also be released under the terms of the GPL, the terms
- * and conditions of this License will apply in addition to those of the
- * GPL with the exception of any terms or conditions of this License that
- * conflict with, or are expressly prohibited by, the GPL.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHORS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef SYM_HIPD_H
@@ -69,11 +56,6 @@
  *        When this option is set, the driver will use a queue per 
  *        device and handle QUEUE FULL status requeuing internally.
  *
- *    SYM_OPT_SNIFF_INQUIRY
- *        When this option is set, the driver sniff out successful 
- *        INQUIRY response and performs negotiations accordingly.
- *        (set for Linux)
- *
  *    SYM_OPT_LIMIT_COMMAND_REORDERING
  *        When this option is set, the driver tries to limit tagged 
  *        command reordering to some reasonnable value.
@@ -82,7 +64,6 @@
 #if 0
 #define SYM_OPT_HANDLE_DIR_UNKNOWN
 #define SYM_OPT_HANDLE_DEVICE_QUEUEING
-#define SYM_OPT_SNIFF_INQUIRY
 #define SYM_OPT_LIMIT_COMMAND_REORDERING
 #endif
 
@@ -364,7 +345,6 @@ struct sym_trans {
 struct sym_tinfo {
 	struct sym_trans curr;
 	struct sym_trans goal;
-	struct sym_trans user;
 #ifdef	SYM_OPT_ANNOUNCE_TRANSFER_RATE
 	struct sym_trans prev;
 #endif
@@ -465,18 +445,7 @@ struct sym_tcb {
 	 */
 	u_char	usrflags;
 	u_short	usrtags;
-
-#ifdef	SYM_OPT_SNIFF_INQUIRY
-	/*
-	 *  Some minimal information from INQUIRY response.
-	 */
-	u32	cmdq_map[(SYM_CONF_MAX_LUN+31)/32];
-	u_char	inq_version;
-	u_char	inq_byte7;
-	u_char	inq_byte56;
-	u_char	inq_byte7_valid;
-#endif
-
+	struct scsi_device *sdev;
 };
 
 /*
@@ -1139,12 +1108,7 @@ int sym_abort_scsiio(hcb_p np, cam_ccb_p ccb, int timed_out);
 int sym_abort_ccb(hcb_p np, ccb_p cp, int timed_out);
 int sym_reset_scsi_target(hcb_p np, int target);
 void sym_hcb_free(hcb_p np);
-
-#ifdef SYM_OPT_NVRAM_PRE_READ
 int sym_hcb_attach(hcb_p np, struct sym_fw *fw, struct sym_nvram *nvram);
-#else
-int sym_hcb_attach(hcb_p np, struct sym_fw *fw);
-#endif
 
 /*
  *  Optionnaly, the driver may handle IO timeouts.
@@ -1167,26 +1131,6 @@ void sym_clock(hcb_p np);
 #ifdef	SYM_OPT_ANNOUNCE_TRANSFER_RATE
 void sym_announce_transfer_rate(hcb_p np, int target);
 #endif
-
-/*
- *  Optionnaly, the driver may sniff inquiry data.
- */
-#ifdef	SYM_OPT_SNIFF_INQUIRY
-#define	INQ7_CMDQ	(0x02)
-#define	INQ7_SYNC	(0x10)
-#define	INQ7_WIDE16	(0x20)
-
-#define INQ56_CLOCKING	(3<<2)
-#define INQ56_ST_ONLY	(0<<2)
-#define INQ56_DT_ONLY	(1<<2)
-#define INQ56_ST_DT	(3<<2)
-
-void sym_update_trans_settings(hcb_p np, tcb_p tp);
-int  
-__sym_sniff_inquiry(hcb_p np, u_char tn, u_char ln,
-                    u_char *inq_data, int inq_len);
-#endif
-
 
 /*
  *  Build a scatter/gather entry.
@@ -1388,7 +1332,6 @@ u32 __vtobus_unlocked(m_pool_ident_t dev_dmat, void *m);
 #define PRINT_ADDR	sym_print_addr
 #define PRINT_TARGET	sym_print_target
 #define PRINT_LUN	sym_print_lun
-#define MDELAY		sym_mdelay
 #define UDELAY		sym_udelay
 
 #endif /* SYM_HIPD_H */

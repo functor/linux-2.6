@@ -605,6 +605,7 @@ static int pas16_release(struct Scsi_Host *shost)
 {
 	if (shost->irq)
 		free_irq(shost->irq, NULL);
+	NCR5380_exit(shost);
 	if (shost->dma_channel != 0xff)
 		free_dma(shost->dma_channel);
 	if (shost->io_port && shost->n_io_port)
@@ -632,7 +633,7 @@ static Scsi_Host_Template driver_template = {
 #include "scsi_module.c"
 
 #ifdef MODULE
-MODULE_PARM(pas16_addr, "h");
-MODULE_PARM(pas16_irq, "i");
+module_param(pas16_addr, ushort, 0);
+module_param(pas16_irq, int, 0);
 #endif
 MODULE_LICENSE("GPL");

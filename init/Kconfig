@@ -1,4 +1,3 @@
-
 menu "Code maturity level options"
 
 config EXPERIMENTAL
@@ -51,10 +50,24 @@ config BROKEN_ON_SMP
 	depends on BROKEN || !SMP
 	default y
 
+config LOCK_KERNEL
+	bool
+	depends on SMP || PREEMPT
+	default y
+
 endmenu
 
-
 menu "General setup"
+
+config LOCALVERSION
+	string "Local version - append to kernel release"
+	help
+	  Append an extra string to the end of your kernel version.
+	  This will show up when you type uname, for example.
+	  The string you set here will be appended after the contents of
+	  any files with a filename matching localversion* in your
+	  object and source tree, in that order.  Your total string can
+	  be a maximum of 64 characters.
 
 config SWAP
 	bool "Support for paging of anonymous memory (swap)"
@@ -75,8 +88,6 @@ config SYSVIPC
 	  exchange information. It is generally considered to be a good thing,
 	  and some programs won't run unless you say Y here. In particular, if
 	  you want to run the DOS emulator dosemu under Linux (read the
-	  DOSEMU-HOWTO, available from <http://www.tldp.org/docs.html#howto>),
-	  you'll need to say Y here.
 	  DOSEMU-HOWTO, available from <http://www.tldp.org/docs.html#howto>),
 	  you'll need to say Y here.
 
@@ -125,7 +136,7 @@ config BSD_PROCESS_ACCT_V3
 	  process and it's parent. Note that this file format is incompatible
 	  with previous v0/v1/v2 file formats, so you will need updated tools
 	  for processing it. A preliminary version of these tools is available
-	  at <http://http://www.de.kernel.org/pub/linux/utils/acct/>.
+	  at <http://www.physik3.uni-rostock.de/tim/kernel/utils/acct/>.
 
 menu "Class Based Kernel Resource Management"
 
@@ -142,25 +153,35 @@ config CKRM
 	  one of the resource controllers below. Say N if you are unsure. 
 
 config RCFS_FS
-       tristate "Resource Class File System (User API)"
-       depends on CKRM
-       help
+	tristate "Resource Class File System (User API)"
+	depends on CKRM
+	help
 	  RCFS is the filesystem API for CKRM. This separate configuration 
 	  option is provided only for debugging and will eventually disappear 
 	  since rcfs will be automounted whenever CKRM is configured. 
 
-          Say N if unsure, Y if you've enabled CKRM, M to debug rcfs 
+	  Say N if unsure, Y if you've enabled CKRM, M to debug rcfs 
 	  initialization.
 
 config CKRM_TYPE_TASKCLASS
 	bool "Class Manager for Task Groups"
-	depends on CKRM
+	depends on CKRM && RCFS_FS
 	help
 	  TASKCLASS provides the extensions for CKRM to track task classes
 	  This is the base to enable task class based resource control for
 	  cpu, memory and disk I/O.
 	
 	  Say N if unsure 
+
+config CKRM_TYPE_SOCKETCLASS
+	bool "Class Manager for socket groups"
+	depends on CKRM && RCFS_FS
+	help
+	  SOCKET provides the extensions for CKRM to track per socket
+	  classes.  This is the base to enable socket based resource 
+	  control for inbound connection control, bandwidth control etc.
+	
+	  Say N if unsure.  
 
 config CKRM_RES_NUMTASKS
 	tristate "Number of Tasks Resource Manager"
@@ -171,37 +192,6 @@ config CKRM_RES_NUMTASKS
 	  tasks a task class can have.
 	
 	  Say N if unsure, Y to use the feature.
-
-config CKRM_CPU_SCHEDULE
-	bool "CKRM CPU scheduler"
-	depends on CKRM_TYPE_TASKCLASS
-	default y
-	help
-	  Use CKRM CPU scheduler instead of Linux Scheduler
-	
-	  Say N if unsure, Y to use the feature.
-
-config CKRM_CPU_SCHEDULE_AT_BOOT
-	bool "Turn on at boot time"
-	depends on CKRM_CPU_SCHEDULE
-	default n
-	help
-	  Enable CKRM CPU Scheduler at boot time. Otherwise
-	  it can be turned on dynamically at runtime. If not
-	  turned on the default Linux Scheduler behavior 
-	  will be obtained.
-
-	  Say N if unsure, Y to use this feature
-
-config CKRM_TYPE_SOCKETCLASS
-	bool "Class Manager for socket groups"
-	depends on CKRM
-	help
-	  SOCKET provides the extensions for CKRM to track per socket
-	  classes.  This is the base to enable socket based resource 
-	  control for inbound connection control, bandwidth control etc.
-	
-	  Say N if unsure.  
 
 config CKRM_RES_LISTENAQ
 	tristate "Multiple Accept Queues Resource Manager"
@@ -215,29 +205,48 @@ config CKRM_RES_LISTENAQ
  
 	  If unsure, say N.
 
+choice 
+       prompt "Classification Engine"
+       depends on CKRM && RCFS_FS	      
+       optional
+       help
+	 Select a classification engine (CE) that assists in 
+	 automatic classification of kernel objects managed by CKRM when
+	 they are created. Without a CE, a user must manually 
+	 classify objects into classes. Processes inherit their parent's 
+	 classification.
+
+	 Only one engine can be built into the kernel though all can be
+	 built as modules (only one will load). 
+
+	 If unsure, say N.
+
 config CKRM_RBCE
-	tristate "Vanilla Rule-based Classification Engine (RBCE)"
-	depends on CKRM && RCFS_FS
-	default m
+	tristate "Vanilla RBCE"
 	help
-	  Provides an optional module to support creation of rules for automatic
-	  classification of kernel objects. Rules are created/deleted/modified 
-          through an rcfs interface. RBCE is not required for CKRM. 
- 
-	  If unsure, say N.
+	  Vanilla Rule-based Classification Engine (RBCE). Rules for
+	  classifying kernel objects are created/deleted/modified through
+	  a RCFS directory using a filesystem interface.
+	
+	  Any CE is optional. If unsure, say N.
 
 config CKRM_CRBCE
-	tristate "Enhanced Rule-based Classification Engine (RBCE)"
-	depends on CKRM && RCFS_FS && RELAYFS_FS && DELAY_ACCT
-	default m
+	tristate "Enhanced RBCE"
+	depends on DELAY_ACCT && RELAYFS_FS 
 	help
-	  Provides an optional module to support creation of rules for automatic
-	  classification of kernel objects, just like RBCE above. In addition,
-	  CRBCE provides per-process delay data (requires DELAY_ACCT configured)
-	  enabled) and makes information on significant kernel events available
-	  to userspace tools through relayfs (requires RELAYFS_FS configured). 
+	  Enhanced Rule-based Classification Engine (CRBCE). Like the Vanilla
+	  RBCE, rules for classifying kernel objects are created, deleted and
+	  modified through a RCFS directory using a filesystem interface 
+	  (requires CKRM_RCFS configured).
+ 
+	  In addition, CRBCE provides per-process delay data 
+	  (requires DELAY_ACCT configured) and makes information on significant
+	  kernel events available to userspace tools through relayfs 
+	  (requires RELAYFS_FS configured). 
 	
-	  If unsure, say N.
+	  Any CE is optional. If unsure, say N.
+
+endchoice
 
 endmenu
 
@@ -279,7 +288,7 @@ config AUDITSYSCALL
 
 config LOG_BUF_SHIFT
 	int "Kernel log buffer size (16 => 64KB, 17 => 128KB)" if DEBUG_KERNEL
-	range 12 20
+	range 12 21
 	default 17 if ARCH_S390
 	default 16 if X86_NUMAQ || IA64
 	default 15 if SMP
@@ -312,6 +321,25 @@ config HOTPLUG
 	  Then your kernel will automatically call out to a user mode "policy
 	  agent" (/sbin/hotplug) to load modules and set up software needed
 	  to use devices as you hotplug them.
+
+config KOBJECT_UEVENT
+	bool "Kernel Userspace Events"
+	depends on NET
+	default y
+	help
+	  This option enables the kernel userspace event layer, which is a
+	  simple mechanism for kernel-to-user communication over a netlink
+	  socket.
+	  The goal of the kernel userspace events layer is to provide a simple
+	  and efficient events system, that notifies userspace about kobject
+	  state changes. This will enable applications to just listen for
+	  events instead of polling system devices and files.
+	  Hotplug events (kobject addition and removal) are also available on
+	  the netlink socket in addition to the execution of /sbin/hotplug if
+	  CONFIG_HOTPLUG is enabled.
+
+	  Say Y, unless you are building a system requiring minimal memory
+	  consumption.
 
 config IKCONFIG
 	bool "Kernel .config support"
@@ -348,7 +376,6 @@ config DELAY_ACCT
 	  recorded. CPU delays are specified as cpu-wait and cpu-run. 
 	  I/O delays are recorded for memory and regular I/O.
 	  Information is accessible through /proc/<pid>/delay.
-
 
 config KALLSYMS
 	 bool "Load all symbols for debugging/kksymoops" if EMBEDDED
@@ -395,8 +422,6 @@ config EPOLL
 	  Disabling this option will cause the kernel to be built without
 	  support for epoll family of system calls.
 
-source "drivers/block/Kconfig.iosched"
-
 config CC_OPTIMIZE_FOR_SIZE
 	bool "Optimize for size" if EMBEDDED
 	default y if ARM || H8300
@@ -410,8 +435,58 @@ config CC_OPTIMIZE_FOR_SIZE
 
 	  If unsure, say N.
 
+config SHMEM
+	default y
+	bool "Use full shmem filesystem" if EMBEDDED && MMU
+	help
+	  The shmem is an internal filesystem used to manage shared memory.
+	  It is backed by swap and manages resource limits. It is also exported
+	  to userspace as tmpfs if TMPFS is enabled. Disabling this
+	  option replaces shmem and tmpfs with the much simpler ramfs code,
+	  which may be appropriate on small systems without swap.
+
+config CC_ALIGN_FUNCTIONS
+	int "Function alignment" if EMBEDDED
+	default 0
+	help
+	  Align the start of functions to the next power-of-two greater than n,
+	  skipping up to n bytes.  For instance, 32 aligns functions
+	  to the next 32-byte boundary, but 24 would align to the next
+	  32-byte boundary only if this can be done by skipping 23 bytes or less.
+	  Zero means use compiler's default.
+
+config CC_ALIGN_LABELS
+	int "Label alignment" if EMBEDDED
+	default 0
+	help
+	  Align all branch targets to a power-of-two boundary, skipping
+	  up to n bytes like ALIGN_FUNCTIONS.  This option can easily
+	  make code slower, because it must insert dummy operations for
+	  when the branch target is reached in the usual flow of the code.
+	  Zero means use compiler's default.
+
+config CC_ALIGN_LOOPS
+	int "Loop alignment" if EMBEDDED
+	default 0
+	help
+	  Align loops to a power-of-two boundary, skipping up to n bytes.
+	  Zero means use compiler's default.
+
+config CC_ALIGN_JUMPS
+	int "Jump alignment" if EMBEDDED
+	default 0
+	help
+	  Align branch targets to a power-of-two boundary, for branch
+	  targets where the targets can only be reached by jumping,
+	  skipping up to n bytes like ALIGN_FUNCTIONS.  In this case,
+	  no dummy operations need be executed.
+	  Zero means use compiler's default.
+
 endmenu		# General setup
 
+config TINY_SHMEM
+	default !SHMEM
+	bool
 
 menu "Loadable module support"
 
@@ -473,6 +548,18 @@ config MODVERSIONS
 	  to the modules to (hopefully) spot any changes which would
 	  make them incompatible with the kernel you are running.  If
 	  unsure, say N.
+
+config MODULE_SRCVERSION_ALL
+	bool "Source checksum for all modules"
+	depends on MODULES
+	help
+	  Modules which contain a MODULE_VERSION get an extra "srcversion"
+	  field inserted into their modinfo section, which contains a
+    	  sum of the source files which made it.  This helps maintainers
+	  see exactly which source was used to build a module (since
+	  others sometimes change the module source without updating
+	  the version).  With this option, such a "srcversion" field
+	  will be created for all modules.  If unsure, say N.
 
 config KMOD
 	bool "Automatic kernel module loading"

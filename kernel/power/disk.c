@@ -3,32 +3,35 @@
  *
  * Copyright (c) 2003 Patrick Mochel
  * Copyright (c) 2003 Open Source Development Lab
+ * Copyright (c) 2004 Pavel Machek <pavel@suse.cz>
  *
  * This file is released under the GPLv2.
  *
  */
 
-#define DEBUG
-
-
 #include <linux/suspend.h>
 #include <linux/syscalls.h>
 #include <linux/reboot.h>
 #include <linux/string.h>
+#include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/fs.h>
+#include <linux/device.h>
 #include "power.h"
 
 
-extern u32 pm_disk_mode;
+extern suspend_disk_method_t pm_disk_mode;
 extern struct pm_ops * pm_ops;
 
-extern int pmdisk_save(void);
-extern int pmdisk_write(void);
-extern int pmdisk_read(void);
-extern int pmdisk_restore(void);
-extern int pmdisk_free(void);
+extern int swsusp_suspend(void);
+extern int swsusp_write(void);
+extern int swsusp_read(void);
+extern int swsusp_resume(void);
+extern int swsusp_free(void);
 
+
+static int noresume = 0;
+char resume_file[256] = CONFIG_PM_STD_PARTITION;
 
 /**
  *	power_down - Shut machine down for hibernate.
@@ -40,29 +43,32 @@ extern int pmdisk_free(void);
  *	there ain't no turning back.
  */
 
-static int power_down(u32 mode)
+static void power_down(suspend_disk_method_t mode)
 {
 	unsigned long flags;
 	int error = 0;
 
 	local_irq_save(flags);
-	device_power_down(PM_SUSPEND_DISK);
 	switch(mode) {
 	case PM_DISK_PLATFORM:
+		device_power_down(PM_SUSPEND_DISK);
 		error = pm_ops->enter(PM_SUSPEND_DISK);
 		break;
 	case PM_DISK_SHUTDOWN:
 		printk("Powering off system\n");
+		device_shutdown();
 		machine_power_off();
 		break;
 	case PM_DISK_REBOOT:
+		device_shutdown();
 		machine_restart(NULL);
 		break;
 	}
 	machine_halt();
-	device_power_up();
-	local_irq_restore(flags);
-	return 0;
+	/* Valid image is on the disk, if we continue we risk serious data corruption
+	   after resume. */
+	printk(KERN_CRIT "Please power me down manually\n");
+	while(1);
 }
 
 
@@ -80,10 +86,20 @@ static int in_suspend __nosavedata = 0;
 
 static void free_some_memory(void)
 {
-	printk("Freeing memory: ");
-	while (shrink_all_memory(10000))
-		printk(".");
-	printk("|\n");
+	unsigned int i = 0;
+	unsigned int tmp;
+	unsigned long pages = 0;
+	char *p = "-\\|/";
+
+	printk("Freeing memory...  ");
+	while ((tmp = shrink_all_memory(10000))) {
+		pages += tmp;
+		printk("\b%c", p[i]);
+		i++;
+		if (i > 3)
+			i = 0;
+	}
+	printk("\bdone (%li pages freed)\n", pages);
 }
 
 
@@ -99,6 +115,7 @@ static void finish(void)
 {
 	device_resume();
 	platform_finish();
+	enable_nonboot_cpus();
 	thaw_processes();
 	pm_restore_console();
 }
@@ -126,6 +143,7 @@ static int prepare(void)
 	/* Free memory before shutting down devices. */
 	free_some_memory();
 
+	disable_nonboot_cpus();
 	if ((error = device_suspend(PM_SUSPEND_DISK)))
 		goto Finish;
 
@@ -133,6 +151,7 @@ static int prepare(void)
  Finish:
 	platform_finish();
  Thaw:
+	enable_nonboot_cpus();
 	thaw_processes();
 	pm_restore_console();
 	return error;
@@ -144,7 +163,7 @@ static int prepare(void)
  *
  *	If we're going through the firmware, then get it over with quickly.
  *
- *	If not, then call pmdis to do it's thing, then figure out how
+ *	If not, then call swsusp to do it's thing, then figure out how
  *	to power down the system.
  */
 
@@ -161,26 +180,17 @@ int pm_suspend_disk(void)
 
 	pr_debug("PM: snapshotting memory.\n");
 	in_suspend = 1;
-	if ((error = pmdisk_save()))
+	if ((error = swsusp_suspend()))
 		goto Done;
 
 	if (in_suspend) {
 		pr_debug("PM: writing image.\n");
-
-		/*
-		 * FIXME: Leftover from swsusp. Are they necessary?
-		 */
-		mb();
-		barrier();
-
-		error = pmdisk_write();
-		if (!error) {
-			error = power_down(pm_disk_mode);
-			pr_debug("PM: Power down failed.\n");
-		}
+		error = swsusp_write();
+		if (!error)
+			power_down(pm_disk_mode);
 	} else
 		pr_debug("PM: Image restored successfully.\n");
-	pmdisk_free();
+	swsusp_free();
  Done:
 	finish();
 	return error;
@@ -188,7 +198,7 @@ int pm_suspend_disk(void)
 
 
 /**
- *	pm_resume - Resume from a saved image.
+ *	software_resume - Resume from a saved image.
  *
  *	Called as a late_initcall (so all devices are discovered and
  *	initialized), we call pmdisk to see if we have a saved image or not.
@@ -199,13 +209,21 @@ int pm_suspend_disk(void)
  *
  */
 
-static int pm_resume(void)
+static int software_resume(void)
 {
 	int error;
 
+	if (noresume) {
+		/**
+		 * FIXME: If noresume is specified, we need to find the partition
+		 * and reset it back to normal swap space.
+		 */
+		return 0;
+	}
+
 	pr_debug("PM: Reading pmdisk image.\n");
 
-	if ((error = pmdisk_read()))
+	if ((error = swsusp_read()))
 		goto Done;
 
 	pr_debug("PM: Preparing system for restore.\n");
@@ -216,28 +234,18 @@ static int pm_resume(void)
 	barrier();
 	mb();
 
-	/* FIXME: The following (comment and mdelay()) are from swsusp.
-	 * Are they really necessary?
-	 *
-	 * We do not want some readahead with DMA to corrupt our memory, right?
-	 * Do it with disabled interrupts for best effect. That way, if some
-	 * driver scheduled DMA, we have good chance for DMA to finish ;-).
-	 */
-	pr_debug("PM: Waiting for DMAs to settle down.\n");
-	mdelay(1000);
-
 	pr_debug("PM: Restoring saved image.\n");
-	pmdisk_restore();
+	swsusp_resume();
 	pr_debug("PM: Restore failed, recovering.n");
 	finish();
  Free:
-	pmdisk_free();
+	swsusp_free();
  Done:
 	pr_debug("PM: Resume from disk failed.\n");
 	return 0;
 }
 
-late_initcall(pm_resume);
+late_initcall(software_resume);
 
 
 static char * pm_disk_modes[] = {
@@ -286,7 +294,7 @@ static ssize_t disk_store(struct subsystem * s, const char * buf, size_t n)
 	int i;
 	int len;
 	char *p;
-	u32 mode = 0;
+	suspend_disk_method_t mode = 0;
 
 	p = memchr(buf, '\n', n);
 	len = p ? p - buf : n;
@@ -336,3 +344,22 @@ static int __init pm_disk_init(void)
 }
 
 core_initcall(pm_disk_init);
+
+
+static int __init resume_setup(char *str)
+{
+	if (noresume)
+		return 1;
+
+	strncpy( resume_file, str, 255 );
+	return 1;
+}
+
+static int __init noresume_setup(char *str)
+{
+	noresume = 1;
+	return 1;
+}
+
+__setup("noresume", noresume_setup);
+__setup("resume=", resume_setup);

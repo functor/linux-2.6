@@ -16,6 +16,11 @@
  *   You should have received a copy of the GNU General Public License
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+ *
+ *   Rene Rebe <rene.rebe@gmx.net>:
+ *     * update from shadow registers on wakeup and headphone plug
+ *     * automatically toggle DRC on headphone plug
+ *	
  */
 
 
@@ -35,8 +40,6 @@
 #endif
 #include "pmac.h"
 #include "tumbler_volume.h"
-
-#define chip_t pmac_t
 
 /* i2c address for tumbler */
 #define TAS_I2C_ADDR	0x34
@@ -76,7 +79,7 @@ typedef struct pmac_gpio {
 #ifdef CONFIG_PPC_HAS_FEATURE_CALLS
 	unsigned int addr;
 #else
-	void *addr;
+	void __iomem *addr;
 #endif
 	int active_state;
 } pmac_gpio_t;
@@ -106,7 +109,8 @@ static int send_init_client(pmac_keywest_t *i2c, unsigned int *regs)
 	while (*regs > 0) {
 		int err, count = 10;
 		do {
-			err =  snd_pmac_keywest_write_byte(i2c, regs[0], regs[1]);
+			err = i2c_smbus_write_byte_data(i2c->client,
+							regs[0], regs[1]);
 			if (err >= 0)
 				break;
 			mdelay(10);
@@ -159,7 +163,7 @@ static inline void tumbler_gpio_free(pmac_gpio_t *gp)
 {
 	if (gp->addr) {
 		iounmap(gp->addr);
-		gp->addr = 0;
+		gp->addr = NULL;
 	}
 }
 #endif /* CONFIG_PPC_HAS_FEATURE_CALLS */
@@ -217,9 +221,10 @@ static int tumbler_set_master_volume(pmac_tumbler_t *mix)
 	block[4] = (right_vol >> 8)  & 0xff;
 	block[5] = (right_vol >> 0)  & 0xff;
   
-	if (snd_pmac_keywest_write(&mix->i2c, TAS_REG_VOL, 6, block) < 0) {
-		snd_printk("failed to set volume \n");  
-		return -EINVAL; 
+	if (i2c_smbus_write_block_data(mix->i2c.client, TAS_REG_VOL,
+				       6, block) < 0) {
+		snd_printk("failed to set volume \n");
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -317,9 +322,10 @@ static int tumbler_set_drc(pmac_tumbler_t *mix)
 		val[1] = 0;
 	}
 
-	if (snd_pmac_keywest_write(&mix->i2c, TAS_REG_DRC, 2, val) < 0) {
-		snd_printk("failed to set DRC\n");  
-		return -EINVAL; 
+	if (i2c_smbus_write_block_data(mix->i2c.client, TAS_REG_DRC,
+				       2, val) < 0) {
+		snd_printk("failed to set DRC\n");
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -352,9 +358,10 @@ static int snapper_set_drc(pmac_tumbler_t *mix)
 	val[4] = 0x60;
 	val[5] = 0xa0;
 
-	if (snd_pmac_keywest_write(&mix->i2c, TAS_REG_DRC, 6, val) < 0) {
-		snd_printk("failed to set DRC\n");  
-		return -EINVAL; 
+	if (i2c_smbus_write_block_data(mix->i2c.client, TAS_REG_DRC,
+				       6, val) < 0) {
+		snd_printk("failed to set DRC\n");
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -456,9 +463,10 @@ static int tumbler_set_mono_volume(pmac_tumbler_t *mix, struct tumbler_mono_vol 
 	vol = info->table[vol];
 	for (i = 0; i < info->bytes; i++)
 		block[i] = (vol >> ((info->bytes - i - 1) * 8)) & 0xff;
-	if (snd_pmac_keywest_write(&mix->i2c, info->reg, info->bytes, block) < 0) {
-		snd_printk("failed to set mono volume %d\n", info->index);  
-		return -EINVAL; 
+	if (i2c_smbus_write_block_data(mix->i2c.client, info->reg,
+				       info->bytes, block) < 0) {
+		snd_printk("failed to set mono volume %d\n", info->index);
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -585,9 +593,9 @@ static int snapper_set_mix_vol1(pmac_tumbler_t *mix, int idx, int ch, int reg)
 		for (j = 0; j < 3; j++)
 			block[i * 3 + j] = (vol >> ((2 - j) * 8)) & 0xff;
 	}
-	if (snd_pmac_keywest_write(&mix->i2c, reg, 9, block) < 0) {
-		snd_printk("failed to set mono volume %d\n", reg);  
-		return -EINVAL; 
+	if (i2c_smbus_write_block_data(mix->i2c.client, reg, 9, block) < 0) {
+		snd_printk("failed to set mono volume %d\n", reg);
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -686,8 +694,8 @@ static int snapper_set_capture_source(pmac_tumbler_t *mix)
 {
 	if (! mix->i2c.client)
 		return -ENODEV;
-	return snd_pmac_keywest_write_byte(&mix->i2c, TAS_REG_ACS,
-					   mix->capture_source ? 2 : 0);
+	return i2c_smbus_write_byte_data(mix->i2c.client, TAS_REG_ACS,
+					 mix->capture_source ? 2 : 0);
 }
 
 static int snapper_info_capture_source(snd_kcontrol_t *kcontrol, snd_ctl_elem_info_t *uinfo)
@@ -759,12 +767,6 @@ static snd_kcontrol_new_t tumbler_mixers[] __initdata = {
 	DEFINE_MONO("Tone Control - Treble", treble),
 	DEFINE_MONO("PCM Playback Volume", pcm),
 	{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
-	  .name = "DRC Switch",
-	  .info = snd_pmac_boolean_mono_info,
-	  .get = tumbler_get_drc_switch,
-	  .put = tumbler_put_drc_switch
-	},
-	{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	  .name = "DRC Range",
 	  .info = tumbler_info_drc_value,
 	  .get = tumbler_get_drc_value,
@@ -790,12 +792,6 @@ static snd_kcontrol_new_t snapper_mixers[] __initdata = {
 	DEFINE_SNAPPER_MIX("Monitor Mix Volume", 0, VOL_IDX_ADC),
 	DEFINE_SNAPPER_MONO("Tone Control - Bass", bass),
 	DEFINE_SNAPPER_MONO("Tone Control - Treble", treble),
-	{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
-	  .name = "DRC Switch",
-	  .info = snd_pmac_boolean_mono_info,
-	  .get = tumbler_get_drc_switch,
-	  .put = tumbler_put_drc_switch
-	},
 	{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	  .name = "DRC Range",
 	  .info = tumbler_info_drc_value,
@@ -826,6 +822,14 @@ static snd_kcontrol_new_t tumbler_speaker_sw __initdata = {
 	.put = tumbler_put_mute_switch,
 	.private_value = TUMBLER_MUTE_AMP,
 };
+static snd_kcontrol_new_t tumbler_drc_sw __initdata = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "DRC Switch",
+	.info = snd_pmac_boolean_mono_info,
+	.get = tumbler_get_drc_switch,
+	.put = tumbler_put_drc_switch
+};
+
 
 #ifdef PMAC_SUPPORT_AUTOMUTE
 /*
@@ -847,6 +851,29 @@ static void check_mute(pmac_t *chip, pmac_gpio_t *gp, int val, int do_notify, sn
 	}
 }
 
+static struct work_struct device_change;
+
+static void
+device_change_handler(void *self)
+{
+	pmac_t *chip = (pmac_t*) self;
+	pmac_tumbler_t *mix;
+
+	if (!chip)
+		return;
+
+	mix = chip->mixer_data;
+
+	/* first set the DRC so the speaker do not explode -ReneR */
+	if (chip->model == PMAC_TUMBLER)
+		tumbler_set_drc(mix);
+	else
+		snapper_set_drc(mix);
+
+	/* reset the master volume so the correct amplification is applied */
+	tumbler_set_master_volume(mix);
+}
+
 static void tumbler_update_automute(pmac_t *chip, int do_notify)
 {
 	if (chip->auto_mute) {
@@ -856,14 +883,25 @@ static void tumbler_update_automute(pmac_t *chip, int do_notify)
 			/* mute speaker */
 			check_mute(chip, &mix->amp_mute, 1, do_notify, chip->speaker_sw_ctl);
 			check_mute(chip, &mix->hp_mute, 0, do_notify, chip->master_sw_ctl);
+			mix->drc_enable = 0;
+
 		} else {
 			/* unmute speaker */
 			check_mute(chip, &mix->amp_mute, 0, do_notify, chip->speaker_sw_ctl);
 			check_mute(chip, &mix->hp_mute, 1, do_notify, chip->master_sw_ctl);
+			mix->drc_enable = 1;
 		}
-		if (do_notify)
+		if (do_notify) {
 			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE,
 				       &chip->hp_detect_ctl->id);
+			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE,
+			               &chip->drc_sw_ctl->id);
+		}
+
+		/* finally we need to schedule an update of the mixer values
+		   (master and DRC are enough for now) -ReneR */
+		schedule_work(&device_change);
+
 	}
 }
 #endif /* PMAC_SUPPORT_AUTOMUTE */
@@ -872,7 +910,7 @@ static void tumbler_update_automute(pmac_t *chip, int do_notify)
 /* interrupt - headphone plug changed */
 static irqreturn_t headphone_intr(int irq, void *devid, struct pt_regs *regs)
 {
-	pmac_t *chip = snd_magic_cast(pmac_t, devid, return IRQ_NONE);
+	pmac_t *chip = devid;
 	if (chip->update_automute && chip->initialized) {
 		chip->update_automute(chip, 1);
 		return IRQ_HANDLED;
@@ -935,7 +973,7 @@ static unsigned long tumbler_find_device(const char *device, pmac_gpio_t *gp, in
 #ifdef CONFIG_PPC_HAS_FEATURE_CALLS
 	gp->addr = (*base) & 0x0000ffff;
 #else
-	gp->addr = (void*)ioremap((unsigned long)(*base), 1);
+	gp->addr = ioremap((unsigned long)(*base), 1);
 #endif
 	base = (u32 *)get_property(node, "audio-gpio-active-state", NULL);
 	if (base)
@@ -1114,10 +1152,16 @@ int __init snd_pmac_tumbler_init(pmac_t *chip)
 	chip->speaker_sw_ctl = snd_ctl_new1(&tumbler_speaker_sw, chip);
 	if ((err = snd_ctl_add(chip->card, chip->speaker_sw_ctl)) < 0)
 		return err;
+	chip->drc_sw_ctl = snd_ctl_new1(&tumbler_drc_sw, chip);
+	if ((err = snd_ctl_add(chip->card, chip->drc_sw_ctl)) < 0)
+		return err;
+
 
 #ifdef CONFIG_PMAC_PBOOK
 	chip->resume = tumbler_resume;
 #endif
+
+	INIT_WORK(&device_change, device_change_handler, (void *)chip);
 
 #ifdef PMAC_SUPPORT_AUTOMUTE
 	if (mix->headphone_irq >=0 && (err = snd_pmac_add_automute(chip)) < 0)

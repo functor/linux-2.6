@@ -22,42 +22,24 @@
  *
  *-----------------------------------------------------------------------------
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
- * Where this Software is combined with software released under the terms of 
- * the GNU Public License ("GPL") and the terms of the GPL would require the 
- * combined work to also be released under the terms of the GPL, the terms
- * and conditions of this License will apply in addition to those of the
- * GPL with the exception of any terms or conditions of this License that
- * conflict with, or are expressly prohibited by, the GPL.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHORS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include "sym_glue.h"
 #include "sym_nvram.h"
 
-/*
- *  Some poor and bogus sync table that refers to Tekram NVRAM layout.
- */
-static u_char Tekram_sync[16] =
-	{25,31,37,43, 50,62,75,125, 12,15,18,21, 6,7,9,10};
 #ifdef	SYM_CONF_DEBUG_NVRAM
 static u_char Tekram_boot_delay[7] = {3, 5, 10, 20, 30, 60, 120};
 #endif
@@ -100,8 +82,6 @@ sym_Symbios_setup_target(struct sym_hcb *np, int target, Symbios_nvram *nvram)
 	struct sym_tcb *tp = &np->target[target];
 	Symbios_target *tn = &nvram->target[target];
 
-	tp->tinfo.user.period = tn->sync_period ? (tn->sync_period + 3) / 4 : 0;
-	tp->tinfo.user.width  = tn->bus_width == 0x10 ? BUS_16_BIT : BUS_8_BIT;
 	tp->usrtags =
 		(tn->flags & SYMBIOS_QUEUE_TAGS_ENABLED)? SYM_SETUP_MAX_TAG : 0;
 
@@ -121,15 +101,6 @@ sym_Tekram_setup_target(struct sym_hcb *np, int target, Tekram_nvram *nvram)
 {
 	struct sym_tcb *tp = &np->target[target];
 	struct Tekram_target *tn = &nvram->target[target];
-	int i;
-
-	if (tn->flags & TEKRAM_SYNC_NEGO) {
-		i = tn->sync_index & 0xf;
-		tp->tinfo.user.period = Tekram_sync[i];
-	}
-
-	tp->tinfo.user.width = (tn->flags & TEKRAM_WIDE_NEGO) ?
-		BUS_16_BIT : BUS_8_BIT;
 
 	if (tn->flags & TEKRAM_TAGGED_COMMANDS) {
 		tp->usrtags = 2 << nvram->max_tags_index;

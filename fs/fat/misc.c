@@ -69,13 +69,14 @@ void fat_clusters_flush(struct super_block *sb)
 		printk(KERN_ERR "FAT: Did not find valid FSINFO signature.\n"
 		       "     Found signature1 0x%08x signature2 0x%08x"
 		       " (sector = %lu)\n",
-		       CF_LE_L(fsinfo->signature1), CF_LE_L(fsinfo->signature2),
+		       le32_to_cpu(fsinfo->signature1),
+		       le32_to_cpu(fsinfo->signature2),
 		       sbi->fsinfo_sector);
 	} else {
 		if (sbi->free_clusters != -1)
-			fsinfo->free_clusters = CF_LE_L(sbi->free_clusters);
+			fsinfo->free_clusters = cpu_to_le32(sbi->free_clusters);
 		if (sbi->prev_free != -1)
-			fsinfo->next_cluster = CF_LE_L(sbi->prev_free);
+			fsinfo->next_cluster = cpu_to_le32(sbi->prev_free);
 		mark_buffer_dirty(bh);
 	}
 	brelse(bh);
@@ -155,7 +156,7 @@ int fat_add_cluster(struct inode *inode)
 		ret = fat_access(sb, last, new_dclus);
 		if (ret < 0)
 			return ret;
-		fat_cache_add(inode, new_fclus, new_dclus);
+//		fat_cache_add(inode, new_fclus, new_dclus);
 	} else {
 		MSDOS_I(inode)->i_start = new_dclus;
 		MSDOS_I(inode)->i_logstart = new_dclus;
@@ -243,8 +244,7 @@ int date_dos2unix(unsigned short time,unsigned short date)
 
 /* Convert linear UNIX date to a MS-DOS time/date pair. */
 
-void fat_date_unix2dos(int unix_date,unsigned short *time,
-    unsigned short *date)
+void fat_date_unix2dos(int unix_date,__le16 *time, __le16 *date)
 {
 	int day,year,nl_day,month;
 
@@ -254,8 +254,8 @@ void fat_date_unix2dos(int unix_date,unsigned short *time,
 	if (unix_date < 315532800)
 		unix_date = 315532800;
 
-	*time = (unix_date % 60)/2+(((unix_date/60) % 60) << 5)+
-	    (((unix_date/3600) % 24) << 11);
+	*time = cpu_to_le16((unix_date % 60)/2+(((unix_date/60) % 60) << 5)+
+	    (((unix_date/3600) % 24) << 11));
 	day = unix_date/86400-3652;
 	year = day/365;
 	if ((year+3)/4+365*year > day) year--;
@@ -269,7 +269,7 @@ void fat_date_unix2dos(int unix_date,unsigned short *time,
 		for (month = 0; month < 12; month++)
 			if (day_n[month] > nl_day) break;
 	}
-	*date = nl_day-day_n[month-1]+1+(month << 5)+(year << 9);
+	*date = cpu_to_le16(nl_day-day_n[month-1]+1+(month << 5)+(year << 9));
 }
 
 

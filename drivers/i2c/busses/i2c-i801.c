@@ -98,8 +98,8 @@
 
 /* If force_addr is set to anything different from 0, we forcibly enable
    the I801 at the given address. VERY DANGEROUS! */
-static int force_addr = 0;
-MODULE_PARM(force_addr, "i");
+static u16 force_addr;
+module_param(force_addr, ushort, 0);
 MODULE_PARM_DESC(force_addr,
 		 "Forcibly enable the I801 at the given address. "
 		 "EXTREMELY DANGEROUS!");
@@ -599,6 +599,8 @@ static struct pci_device_id i801_ids[] = {
 	{ 0, }
 };
 
+MODULE_DEVICE_TABLE (pci, i801_ids);
+
 static int __devinit i801_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
 
@@ -623,7 +625,7 @@ static void __devexit i801_remove(struct pci_dev *dev)
 }
 
 static struct pci_driver i801_driver = {
-	.name		= "i801 smbus",
+	.name		= "i801_smbus",
 	.id_table	= i801_ids,
 	.probe		= i801_probe,
 	.remove		= __devexit_p(i801_remove),
@@ -631,7 +633,7 @@ static struct pci_driver i801_driver = {
 
 static int __init i2c_i801_init(void)
 {
-	return pci_module_init(&i801_driver);
+	return pci_register_driver(&i801_driver);
 }
 
 static void __exit i2c_i801_exit(void)

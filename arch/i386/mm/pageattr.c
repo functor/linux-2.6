@@ -114,7 +114,7 @@ __change_page_attr(struct page *page, pgprot_t prot)
 	kpte = lookup_address(address);
 	if (!kpte)
 		return -EINVAL;
-	kpte_page = virt_to_page(((unsigned long)kpte) & PAGE_MASK);
+	kpte_page = virt_to_page(kpte);
 	if (pgprot_val(prot) != pgprot_val(PAGE_KERNEL)) { 
 		if ((pte_val(*kpte) & _PAGE_PSE) == 0) { 
 			pte_t old = *kpte;
@@ -208,7 +208,6 @@ void kernel_map_pages(struct page *page, int numpages, int enable)
 	 */
 	__flush_tlb_all();
 }
-EXPORT_SYMBOL(kernel_map_pages);
 #endif
 
 EXPORT_SYMBOL(change_page_attr);

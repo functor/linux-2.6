@@ -34,6 +34,7 @@
 #include <linux/prctl.h>
 #include <linux/ptrace.h>
 #include <linux/kallsyms.h>
+#include <linux/interrupt.h>
 #include <linux/version.h>
 
 #include <asm/pgtable.h>
@@ -47,7 +48,6 @@
 #include <asm/ppcdebug.h>
 #include <asm/machdep.h>
 #include <asm/iSeries/HvCallHpt.h>
-#include <asm/hardirq.h>
 #include <asm/cputable.h>
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -147,7 +147,6 @@ EXPORT_SYMBOL(enable_kernel_altivec);
  */
 void flush_altivec_to_thread(struct task_struct *tsk)
 {
-#ifdef CONFIG_ALTIVEC
 	if (tsk->thread.regs) {
 		preempt_disable();
 		if (tsk->thread.regs->msr & MSR_VEC) {
@@ -158,7 +157,6 @@ void flush_altivec_to_thread(struct task_struct *tsk)
 		}
 		preempt_enable();
 	}
-#endif
 }
 
 int dump_task_altivec(struct pt_regs *regs, elf_vrregset_t *vrregs)
@@ -317,8 +315,6 @@ copy_thread(int nr, unsigned long clone_flags, unsigned long usp,
 	extern void ret_from_fork(void);
 	unsigned long sp = (unsigned long)p->thread_info + THREAD_SIZE;
 
-	p->set_child_tid = p->clear_child_tid = NULL;
-
 	/* Copy registers */
 	sp -= sizeof(struct pt_regs);
 	childregs = (struct pt_regs *) sp;
@@ -356,6 +352,16 @@ copy_thread(int nr, unsigned long clone_flags, unsigned long usp,
 	kregs = (struct pt_regs *) sp;
 	sp -= STACK_FRAME_OVERHEAD;
 	p->thread.ksp = sp;
+	if (cur_cpu_spec->cpu_features & CPU_FTR_SLB) {
+		unsigned long sp_vsid = get_kernel_vsid(sp);
+
+		sp_vsid <<= SLB_VSID_SHIFT;
+		sp_vsid |= SLB_VSID_KERNEL;
+		if (cur_cpu_spec->cpu_features & CPU_FTR_16M_PAGE)
+			sp_vsid |= SLB_VSID_L;
+
+		p->thread.ksp_vsid = sp_vsid;
+	}
 
 	/*
 	 * The PPC64 ABI makes use of a TOC to contain function 
@@ -387,9 +393,20 @@ void start_thread(struct pt_regs *regs, unsigned long fdptr, unsigned long sp)
 	/* Check whether the e_entry function descriptor entries
 	 * need to be relocated before we can use them.
 	 */
-	if ( load_addr != 0 ) {
+	if (load_addr != 0) {
 		entry += load_addr;
 		toc   += load_addr;
+	}
+
+	/*
+	 * If we exec out of a kernel thread then thread.regs will not be
+	 * set. Do it now.
+	 */
+	if (!current->thread.regs) {
+		unsigned long childregs = (unsigned long)current->thread_info +
+						THREAD_SIZE;
+		childregs -= sizeof(struct pt_regs);
+		current->thread.regs = (struct pt_regs *)childregs;
 	}
 
 	regs->nip = entry;
@@ -458,7 +475,7 @@ int sys_clone(unsigned long clone_flags, unsigned long p2, unsigned long p3,
 		}
 	}
 
-	return do_fork(clone_flags & ~CLONE_IDLETASK, p2, regs, 0,
+	return do_fork(clone_flags, p2, regs, 0,
 		    (int __user *)parent_tidptr, (int __user *)child_tidptr);
 }
 
@@ -493,8 +510,11 @@ int sys_execve(unsigned long a0, unsigned long a1, unsigned long a2,
 	error = do_execve(filename, (char __user * __user *) a1,
 				    (char __user * __user *) a2, regs);
   
-	if (error == 0)
+	if (error == 0) {
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
+	}
 	putname(filename);
 
 out:

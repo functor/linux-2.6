@@ -33,10 +33,10 @@
 #include <linux/kernel_stat.h>
 #include <linux/mm.h>
 #include <linux/delay.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>
 #include <asm/atomic.h>
-#include <asm/bitops.h>
 #include <asm/current.h>
 #include <asm/delay.h>
 #include <asm/pgalloc.h>	/* for flush_tlb_all() proto/macro */
@@ -333,6 +333,7 @@ smp_call_function (void (*func) (void *info), void *info, int retry, int wait)
 	struct smp_call_struct data;
 	unsigned long timeout;
 	static spinlock_t lock = SPIN_LOCK_UNLOCKED;
+	int retries = 0;
 
 	if (num_online_cpus() < 2)
 		return 0;
@@ -365,21 +366,22 @@ smp_call_function (void (*func) (void *info), void *info, int retry, int wait)
 	/*  Send a message to all other CPUs and wait for them to respond  */
 	send_IPI_allbutself(IPI_CALL_FUNC);
 
+ retry:
 	/*  Wait for response  */
 	timeout = jiffies + HZ;
 	while ( (atomic_read (&data.unstarted_count) > 0) &&
 		time_before (jiffies, timeout) )
 		barrier ();
 
+	if (atomic_read (&data.unstarted_count) > 0) {
+		printk(KERN_CRIT "SMP CALL FUNCTION TIMED OUT! (cpu=%d), try %d\n",
+		      smp_processor_id(), ++retries);
+		goto retry;
+	}
 	/* We either got one or timed out. Release the lock */
 
 	mb();
 	smp_call_function_data = NULL;
-	if (atomic_read (&data.unstarted_count) > 0) {
-		printk(KERN_CRIT "SMP CALL FUNCTION TIMED OUT! (cpu=%d)\n",
-		      smp_processor_id());
-		return -ETIMEDOUT;
-	}
 
 	while (wait && atomic_read (&data.unfinished_count) > 0)
 			barrier ();
@@ -486,24 +488,6 @@ void __init smp_callin(void)
 }
 
 /*
- * Create the idle task for a new Slave CPU.  DO NOT use kernel_thread()
- * because that could end up calling schedule(). If it did, the new idle
- * task could get scheduled before we had a chance to remove it from the
- * run-queue...
- */
-static struct task_struct *fork_by_hand(void)
-{
-	struct pt_regs regs;  
-
-	/*
-	 * don't care about the regs settings since
-	 * we'll never reschedule the forked task.
-	 */
-	return copy_process(CLONE_VM|CLONE_IDLETASK, 0, &regs, 0, NULL, NULL);
-}
-
-
-/*
  * Bring one cpu online.
  */
 int __init smp_boot_one_cpu(int cpuid)
@@ -521,13 +505,10 @@ int __init smp_boot_one_cpu(int cpuid)
 	 * Sheesh . . .
 	 */
 
-	idle = fork_by_hand();
+	idle = fork_idle(cpuid);
 	if (IS_ERR(idle))
 		panic("SMP: fork failed for CPU:%d", cpuid);
 
-	wake_up_forked_process(idle);
-	init_idle(idle, cpuid);
-	unhash_process(idle);
 	idle->thread_info->cpu = cpuid;
 
 	/* Let _start know what logical CPU we're booting

@@ -448,8 +448,8 @@ static struct sock *__tcp_v4_lookup_listener(struct hlist_head *head, u32 daddr,
 }
 
 /* Optimize the common listener case. */
-inline struct sock *tcp_v4_lookup_listener(u32 daddr, unsigned short hnum,
-					   int dif)
+static inline struct sock *tcp_v4_lookup_listener(u32 daddr,
+		unsigned short hnum, int dif)
 {
 	struct sock *sk = NULL;
 	struct hlist_head *head;
@@ -458,6 +458,7 @@ inline struct sock *tcp_v4_lookup_listener(u32 daddr, unsigned short hnum,
 	head = &tcp_listening_hash[tcp_lhashfn(hnum)];
 	if (!hlist_empty(head)) {
 		struct inet_opt *inet = inet_sk((sk = __sk_head(head)));
+
 		if (inet->num == hnum && !sk->sk_node.next &&
 		    (!inet->rcv_saddr || inet->rcv_saddr == daddr) &&
 		    (sk->sk_family == PF_INET || !ipv6_only_sock(sk)) &&
@@ -533,6 +534,8 @@ inline struct sock *tcp_v4_lookup(u32 saddr, u16 sport, u32 daddr,
 
 	return sk;
 }
+
+EXPORT_SYMBOL_GPL(tcp_v4_lookup);
 
 static inline __u32 tcp_v4_init_sequence(struct sock *sk, struct sk_buff *skb)
 {
@@ -915,11 +918,7 @@ static void tcp_v4_synq_add(struct sock *sk, struct open_request *req)
 	lopt->syn_table[h] = req;
 	write_unlock(&tp->syn_wait_lock);
 
-#ifdef CONFIG_ACCEPT_QUEUES
-	tcp_synq_added(sk, req);
-#else
 	tcp_synq_added(sk);
-#endif
 }
 
 
@@ -1036,11 +1035,7 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 
 	switch (type) {
 	case ICMP_SOURCE_QUENCH:
-		/* This is deprecated, but if someone generated it,
-		 * we have no reasons to ignore it.
-		 */
-		if (!sock_owned_by_user(sk))
-			tcp_enter_cwr(tp);
+		/* Just silently ignore these. */
 		goto out;
 	case ICMP_PARAMETERPROB:
 		err = EPROTO;
@@ -1416,9 +1411,6 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	__u32 daddr = skb->nh.iph->daddr;
 	__u32 isn = TCP_SKB_CB(skb)->when;
 	struct dst_entry *dst = NULL;
-#ifdef CONFIG_ACCEPT_QUEUES
-	int class = 0;
-#endif
 #ifdef CONFIG_SYN_COOKIES
 	int want_cookie = 0;
 #else
@@ -1443,31 +1435,12 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 		goto drop;
 	}
 
-#ifdef CONFIG_ACCEPT_QUEUES
-	class = (skb->nfmark <= 0) ? 0 :
-		((skb->nfmark >= NUM_ACCEPT_QUEUES) ? 0: skb->nfmark);
-	/*
-	 * Accept only if the class has shares set or if the default class
-	 * i.e. class 0 has shares
-	 */
-	if (!(tcp_sk(sk)->acceptq[class].aq_ratio)) {
-		if (tcp_sk(sk)->acceptq[0].aq_ratio) 
-			class = 0;
-		else
-			goto drop;
-	}
-#endif
-
 	/* Accept backlog is full. If we have already queued enough
 	 * of warm entries in syn queue, drop request. It is better than
 	 * clogging syn queue with openreqs with exponentially increasing
 	 * timeout.
 	 */
-#ifdef CONFIG_ACCEPT_QUEUES
-	if (sk_acceptq_is_full(sk, class) && tcp_synq_young(sk, class) > 1)
-#else
 	if (sk_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
-#endif
 		goto drop;
 
 	req = tcp_openreq_alloc();
@@ -1497,10 +1470,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	tp.tstamp_ok = tp.saw_tstamp;
 
 	tcp_openreq_init(req, &tp, skb);
-#ifdef CONFIG_ACCEPT_QUEUES
-	req->acceptq_class = class;
-	req->acceptq_time_stamp = jiffies;
-#endif
+
 	req->af.v4_req.loc_addr = daddr;
 	req->af.v4_req.rmt_addr = saddr;
 	req->af.v4_req.opt = tcp_v4_save_options(sk, skb);
@@ -1595,11 +1565,7 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	struct tcp_opt *newtp;
 	struct sock *newsk;
 
-#ifdef CONFIG_ACCEPT_QUEUES
-	if (sk_acceptq_is_full(sk, req->acceptq_class))
-#else
 	if (sk_acceptq_is_full(sk))
-#endif
 		goto exit_overflow;
 
 	if (!dst && (dst = tcp_v4_route_req(sk, req)) == NULL)
@@ -2107,7 +2073,7 @@ static int tcp_v4_init_sock(struct sock *sk)
 	 */
 	tp->snd_ssthresh = 0x7fffffff;	/* Infinity */
 	tp->snd_cwnd_clamp = ~0;
-	tp->mss_cache = 536;
+	tp->mss_cache_std = tp->mss_cache = 536;
 
 	tp->reordering = sysctl_tcp_reordering;
 
@@ -2211,8 +2177,14 @@ get_req:
 		sk	  = sk_next(st->syn_wait_sk);
 		st->state = TCP_SEQ_STATE_LISTENING;
 		read_unlock_bh(&tp->syn_wait_lock);
-	} else
+	} else {
+	       	tp = tcp_sk(sk);
+		read_lock_bh(&tp->syn_wait_lock);
+		if (tp->listen_opt && tp->listen_opt->qlen)
+			goto start_req;
+		read_unlock_bh(&tp->syn_wait_lock);
 		sk = sk_next(sk);
+	}
 get_sk:
 	sk_for_each_from(sk, node) {
 		if (sk->sk_family == st->family) {
@@ -2222,6 +2194,7 @@ get_sk:
 	       	tp = tcp_sk(sk);
 		read_lock_bh(&tp->syn_wait_lock);
 		if (tp->listen_opt && tp->listen_opt->qlen) {
+start_req:
 			st->uid		= sock_i_uid(sk);
 			st->syn_wait_sk = sk;
 			st->state	= TCP_SEQ_STATE_OPENREQ;
@@ -2625,6 +2598,7 @@ void tcp4_proc_exit(void)
 
 struct proto tcp_prot = {
 	.name			= "TCP",
+	.owner			= THIS_MODULE,
 	.close			= tcp_close,
 	.connect		= tcp_v4_connect,
 	.disconnect		= tcp_disconnect,
@@ -2649,6 +2623,7 @@ struct proto tcp_prot = {
 	.sysctl_wmem		= sysctl_tcp_wmem,
 	.sysctl_rmem		= sysctl_tcp_rmem,
 	.max_header		= MAX_TCP_HEADER,
+	.slab_obj_size		= sizeof(struct tcp_sock),
 };
 
 
@@ -2681,7 +2656,6 @@ EXPORT_SYMBOL(tcp_unhash);
 EXPORT_SYMBOL(tcp_v4_conn_request);
 EXPORT_SYMBOL(tcp_v4_connect);
 EXPORT_SYMBOL(tcp_v4_do_rcv);
-EXPORT_SYMBOL(tcp_v4_lookup_listener);
 EXPORT_SYMBOL(tcp_v4_rebuild_header);
 EXPORT_SYMBOL(tcp_v4_remember_stamp);
 EXPORT_SYMBOL(tcp_v4_send_check);
@@ -2691,8 +2665,7 @@ EXPORT_SYMBOL(tcp_v4_syn_recv_sock);
 EXPORT_SYMBOL(tcp_proc_register);
 EXPORT_SYMBOL(tcp_proc_unregister);
 #endif
-#ifdef CONFIG_SYSCTL
 EXPORT_SYMBOL(sysctl_local_port_range);
 EXPORT_SYMBOL(sysctl_max_syn_backlog);
 EXPORT_SYMBOL(sysctl_tcp_low_latency);
-#endif
+

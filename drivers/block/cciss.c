@@ -46,14 +46,14 @@
 #include <linux/completion.h>
 
 #define CCISS_DRIVER_VERSION(maj,min,submin) ((maj<<16)|(min<<8)|(submin))
-#define DRIVER_NAME "Compaq CISS Driver (v 2.6.2)"
+#define DRIVER_NAME "HP CISS Driver (v 2.6.2)"
 #define DRIVER_VERSION CCISS_DRIVER_VERSION(2,6,2)
 
 /* Embedded module documentation macros - see modules.h */
 MODULE_AUTHOR("Hewlett-Packard Company");
 MODULE_DESCRIPTION("Driver for HP Controller SA5xxx SA6xxx version 2.6.2");
 MODULE_SUPPORTED_DEVICE("HP SA5i SA5i+ SA532 SA5300 SA5312 SA641 SA642 SA6400"
-			" SA6i");
+			" SA6i V100");
 MODULE_LICENSE("GPL");
 
 #include "cciss_cmd.h"
@@ -82,7 +82,7 @@ const struct pci_device_id cciss_pci_device_id[] = {
 		0x0E11, 0x4091, 0, 0, 0},
 	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_CISSC,
 		0x0E11, 0x409E, 0, 0, 0},
-	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_CISSC,
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISS,
 		0x103C, 0x3211, 0, 0, 0},
 	{0,}
 };
@@ -115,7 +115,7 @@ static struct board_type products[] = {
 /*define how many times we will try a command because of bus resets */
 #define MAX_CMD_RETRIES 3
 
-#define READ_AHEAD 	 256
+#define READ_AHEAD 	 1024
 #define NR_CMDS		 384 /* #commands that can be outstanding */
 #define MAX_CTLR 8
 
@@ -185,17 +185,18 @@ static inline CommandList_struct *removeQ(CommandList_struct **Qptr,
         }
         return c;
 }
-#ifdef CONFIG_PROC_FS
 
 #include "cciss_scsi.c"		/* For SCSI tape support */
+
+#ifdef CONFIG_PROC_FS
 
 /*
  * Report information about this controller.
  */
-#define ENG_GIG 1048576000
+#define ENG_GIG 1000000000
 #define ENG_GIG_FACTOR (ENG_GIG/512)
 #define RAID_UNKNOWN 6
-static const char *raid_label[] = {"0","4","1(0+1)","5","5+1","ADG",
+static const char *raid_label[] = {"0","4","1(1+0)","5","5+1","ADG",
 	                                   "UNKNOWN"};
 
 static struct proc_dir_entry *proc_cciss;
@@ -209,7 +210,7 @@ static int cciss_proc_get_info(char *buffer, char **start, off_t offset,
         ctlr_info_t *h = (ctlr_info_t*)data;
         drive_info_struct *drv;
 	unsigned long flags;
-	unsigned int vol_sz, vol_sz_frac;
+        sector_t vol_sz, vol_sz_frac;
 
         ctlr = h->ctlr;
 
@@ -246,32 +247,21 @@ static int cciss_proc_get_info(char *buffer, char **start, off_t offset,
         pos += size; len += size;
 	cciss_proc_tape_report(ctlr, buffer, &pos, &len);
 	for(i=0; i<=h->highest_lun; i++) {
-		sector_t tmp;
 
                 drv = &h->drv[i];
 		if (drv->block_size == 0)
 			continue;
+
 		vol_sz = drv->nr_blocks;
-		sector_div(vol_sz, ENG_GIG_FACTOR);
-
-		/*
-		 * Awkwardly do this:
-		 * vol_sz_frac =
-		 *     (drv->nr_blocks%ENG_GIG_FACTOR)*100/ENG_GIG_FACTOR;
-		 */
-		tmp = drv->nr_blocks;
-		vol_sz_frac = sector_div(tmp, ENG_GIG_FACTOR);
-
-		/* Now, vol_sz_frac = (drv->nr_blocks%ENG_GIG_FACTOR) */
-
+		vol_sz_frac = sector_div(vol_sz, ENG_GIG_FACTOR);
 		vol_sz_frac *= 100;
 		sector_div(vol_sz_frac, ENG_GIG_FACTOR);
 
 		if (drv->raid_level > 5)
 			drv->raid_level = RAID_UNKNOWN;
 		size = sprintf(buffer+len, "cciss/c%dd%d:"
-				"\t%4d.%02dGB\tRAID %s\n",
-				ctlr, i, vol_sz,vol_sz_frac,
+				"\t%4u.%02uGB\tRAID %s\n",
+				ctlr, i, (int)vol_sz, (int)vol_sz_frac,
 				raid_label[drv->raid_level]);
                 pos += size; len += size;
         }
@@ -449,13 +439,22 @@ static int cciss_open(struct inode *inode, struct file *filep)
 
 	/*
 	 * Root is allowed to open raw volume zero even if it's not configured
-	 * so array config can still work.  I don't think I really like this,
+	 * so array config can still work. Root is also allowed to open any
+	 * volume that has a LUN ID, so it can issue IOCTL to reread the
+	 * disk information.  I don't think I really like this
 	 * but I'm already using way to many device nodes to claim another one
 	 * for "raw controller".
 	 */
 	if (drv->nr_blocks == 0) {
-		if (iminor(inode) != 0)
+		if (iminor(inode) != 0)	{ 	/* not node 0? */
+			/* if not node 0 make sure it is a partition = 0 */
+			if (iminor(inode) & 0x0f) {
 			return -ENXIO;
+				/* if it is, make sure we have a LUN ID */
+			} else if (drv->LunID == 0) {
+				return -ENXIO;
+			}
+		}
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
 	}
@@ -578,7 +577,7 @@ int cciss_ioctl32_passthru(unsigned int fd, unsigned cmd, unsigned long arg,
 	err = sys_ioctl(fd, CCISS_PASSTHRU, (unsigned long) p);
 	if (err)
 		return err;
-	err |= copy_in_user(&arg32->error_info, &p->error_info, sizeof(&arg32->error_info));
+	err |= copy_in_user(&arg32->error_info, &p->error_info, sizeof(arg32->error_info));
 	if (err)
 		return -EFAULT;
 	return err;
@@ -610,7 +609,7 @@ int cciss_ioctl32_big_passthru(unsigned int fd, unsigned cmd, unsigned long arg,
 	err = sys_ioctl(fd, CCISS_BIG_PASSTHRU, (unsigned long) p);
 	if (err)
 		return err;
-	err |= copy_in_user(&arg32->error_info, &p->error_info, sizeof(&arg32->error_info));
+	err |= copy_in_user(&arg32->error_info, &p->error_info, sizeof(arg32->error_info));
 	if (err)
 		return -EFAULT;
 	return err;
@@ -810,7 +809,7 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
  		luninfo.num_opens = drv->usage_count;
  		luninfo.num_parts = 0;
  		/* count partitions 1 to 15 with sizes > 0 */
- 		for(i=1; i <MAX_PART; i++) {
+ 		for (i = 0; i < MAX_PART - 1; i++) {
 			if (!disk->part[i])
 				continue;
 			if (disk->part[i]->nr_sects != 0)
@@ -866,6 +865,8 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
 				kfree(buff);
 				return -EFAULT;
 			}
+		} else {
+			memset(buff, 0, iocommand.buf_size);
 		}
 		if ((c = cmd_alloc(host , 0)) == NULL)
 		{
@@ -1012,6 +1013,8 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
 				copy_from_user(buff[sg_used], data_ptr, sz)) {
 					status = -ENOMEM;
 					goto cleanup1;			
+			} else {
+				memset(buff[sg_used], 0, sz);
 			}
 			left -= sz;
 			data_ptr += sz;
@@ -1097,16 +1100,9 @@ cleanup1:
 		return(status);
 	}
 	default:
-		return -EBADRQC;
+		return -ENOTTY;
 	}
 	
-}
-
-static int cciss_revalidate(struct gendisk *disk)
-{
-	drive_info_struct *drv = disk->private_data;
-	set_capacity(disk, drv->nr_blocks);
-	return 0;
 }
 
 /*
@@ -1160,7 +1156,9 @@ static int revalidate_allvol(ctlr_info_t *host)
 	for (i = 0; i < NWD; i++) {
 		struct gendisk *disk = host->gendisk[i];
 		drive_info_struct *drv = &(host->drv[i]);
-		if (!drv->nr_blocks)
+		/* we must register the controller even if no disks exist */
+		/* this is for the online array utilities */
+		if (!drv->heads && i)
 			continue;
 		blk_queue_hardsect_size(host->queue, drv->block_size);
 		set_capacity(disk, drv->nr_blocks);
@@ -1477,21 +1475,22 @@ static void cciss_geometry_inquiry(int ctlr, int logvol,
 			drv->sectors = 32; // Sectors per track
 			drv->cylinders = total_size / 255 / 32;
 		} else {
+			unsigned int t;
+
 			drv->block_size = block_size;
 			drv->nr_blocks = total_size;
 			drv->heads = inq_buff->data_byte[6];
 			drv->sectors = inq_buff->data_byte[7];
 			drv->cylinders = (inq_buff->data_byte[4] & 0xff) << 8;
 			drv->cylinders += inq_buff->data_byte[5];
+			drv->raid_level = inq_buff->data_byte[8];
+			t = drv->heads * drv->sectors;
+			if (t > 1) {
+				drv->cylinders = total_size/t;
+			}
 		}
 	} else { /* Get geometry failed */
-		printk(KERN_WARNING "cciss: reading geometry failed, "
-			"continuing with default geometry\n");
-		drv->block_size = block_size;
-		drv->nr_blocks = total_size;
-		drv->heads = 255;
-		drv->sectors = 32; // Sectors per track
-		drv->cylinders = total_size / 255 / 32;
+		printk(KERN_WARNING "cciss: reading geometry failed\n");
 	}
 	printk(KERN_INFO "      heads= %d, sectors= %d, cylinders= %d\n\n",
 		drv->heads, drv->sectors, drv->cylinders);
@@ -1509,8 +1508,8 @@ cciss_read_capacity(int ctlr, int logvol, ReadCapdata_struct *buf,
 		return_code = sendcmd(CCISS_READ_CAPACITY,
 			ctlr, buf, sizeof(*buf), 1, logvol, 0, NULL, TYPE_CMD);
 	if (return_code == IO_OK) {
-		*total_size = be32_to_cpu(*((__u32 *) &buf->total_size[0]))+1;
-		*block_size = be32_to_cpu(*((__u32 *) &buf->block_size[0]));
+		*total_size = be32_to_cpu(*((__be32 *) &buf->total_size[0]))+1;
+		*block_size = be32_to_cpu(*((__be32 *) &buf->block_size[0]));
 	} else { /* read capacity command failed */
 		printk(KERN_WARNING "cciss: read capacity failed\n");
 		*total_size = 0;
@@ -1520,6 +1519,7 @@ cciss_read_capacity(int ctlr, int logvol, ReadCapdata_struct *buf,
 		*total_size, *block_size);
 	return;
 }
+
 static int register_new_disk(ctlr_info_t *h)
 {
         struct gendisk *disk;
@@ -1663,7 +1663,9 @@ static int register_new_disk(ctlr_info_t *h)
 	/* setup partitions per disk */
         disk = h->gendisk[logvol];
 	set_capacity(disk, h->drv[logvol].nr_blocks);
-	add_disk(disk);
+	/* if it's the controller it's already added */
+	if(logvol)
+		add_disk(disk);
 freeret:
 	kfree(ld_buff);
 	kfree(size_buff);
@@ -1675,6 +1677,53 @@ free_err:
 	logvol = -1;
 	goto freeret;
 }
+
+static int cciss_revalidate(struct gendisk *disk)
+{
+	ctlr_info_t *h = get_host(disk);
+	drive_info_struct *drv = get_drv(disk);
+	int logvol;
+	int FOUND=0;
+	unsigned int block_size;
+	unsigned int total_size;
+	ReadCapdata_struct *size_buff = NULL;
+	InquiryData_struct *inq_buff = NULL;
+
+	for(logvol=0; logvol < CISS_MAX_LUN; logvol++)
+	{
+		if(h->drv[logvol].LunID == drv->LunID) {
+			FOUND=1;
+			break;
+		}
+	}
+
+	if (!FOUND) return 1;
+
+	size_buff = kmalloc(sizeof( ReadCapdata_struct), GFP_KERNEL);
+        if (size_buff == NULL)
+        {
+                printk(KERN_WARNING "cciss: out of memory\n");
+                return 1;
+        }
+	inq_buff = kmalloc(sizeof( InquiryData_struct), GFP_KERNEL);
+        if (inq_buff == NULL)
+        {
+                printk(KERN_WARNING "cciss: out of memory\n");
+		kfree(size_buff);
+                return 1;
+        }
+
+	cciss_read_capacity(h->ctlr, logvol, size_buff, 1, &total_size, &block_size);
+	cciss_geometry_inquiry(h->ctlr, logvol, 1, total_size, block_size, inq_buff, drv);
+
+	blk_queue_hardsect_size(h->queue, drv->block_size);
+	set_capacity(disk, drv->nr_blocks);
+
+	kfree(size_buff);
+	kfree(inq_buff);
+	return 0;
+}
+
 /*
  *   Wait polling for a command to complete.
  *   The memory mapped FIFO is polled for the completion.
@@ -1844,13 +1893,13 @@ cleanup1:
 /*
  * Map (physical) PCI mem into (virtual) kernel space
  */
-static ulong remap_pci_mem(ulong base, ulong size)
+static void __iomem *remap_pci_mem(ulong base, ulong size)
 {
         ulong page_base        = ((ulong) base) & PAGE_MASK;
         ulong page_offs        = ((ulong) base) - page_base;
-        ulong page_remapped    = (ulong) ioremap(page_base, page_offs+size);
+        void __iomem *page_remapped = ioremap(page_base, page_offs+size);
 
-        return (ulong) (page_remapped ? (page_remapped + page_offs) : 0UL);
+        return page_remapped ? (page_remapped + page_offs) : NULL;
 }
 
 /* 
@@ -2300,7 +2349,6 @@ static int find_PCI_BAR_index(struct pci_dev *pdev,
 static int cciss_pci_init(ctlr_info_t *c, struct pci_dev *pdev)
 {
 	ushort subsystem_vendor_id, subsystem_device_id, command;
-	unchar irq = pdev->irq;
 	__u32 board_id, scratchpad = 0;
 	__u64 cfg_offset;
 	__u32 cfg_base_addr;
@@ -2359,11 +2407,11 @@ static int cciss_pci_init(ctlr_info_t *c, struct pci_dev *pdev)
 
 #ifdef CCISS_DEBUG
 	printk("command = %x\n", command);
-	printk("irq = %x\n", irq);
+	printk("irq = %x\n", pdev->irq);
 	printk("board_id = %x\n", board_id);
 #endif /* CCISS_DEBUG */ 
 
-	c->intr = irq;
+	c->intr = pdev->irq;
 
 	/*
 	 * Memory base addr is first addr , the second points to the config
@@ -2411,9 +2459,9 @@ static int cciss_pci_init(ctlr_info_t *c, struct pci_dev *pdev)
 #ifdef CCISS_DEBUG
 	printk("cfg offset = %x\n", cfg_offset);
 #endif /* CCISS_DEBUG */
-	c->cfgtable = (CfgTable_struct *) 
-		remap_pci_mem(pci_resource_start(pdev, cfg_base_addr_index)
-				+ cfg_offset, sizeof(CfgTable_struct));
+	c->cfgtable =  remap_pci_mem(pci_resource_start(pdev,
+				cfg_base_addr_index) + cfg_offset,
+				sizeof(CfgTable_struct));
 	c->board_id = board_id;
 
 #ifdef CCISS_DEBUG
@@ -2763,7 +2811,9 @@ static int __devinit cciss_init_one(struct pci_dev *pdev,
 		disk->fops = &cciss_fops;
 		disk->queue = hba[i]->queue;
 		disk->private_data = drv;
-		if( !(drv->nr_blocks))
+		/* we must register the controller even if no disks exist */
+		/* this is for the online array utilities */
+		if(!drv->heads && j)
 			continue;
 		blk_queue_hardsect_size(hba[i]->queue, drv->block_size);
 		set_capacity(disk, drv->nr_blocks);
@@ -2825,7 +2875,7 @@ static void __devexit cciss_remove_one (struct pci_dev *pdev)
 	}
 	free_irq(hba[i]->intr, hba[i]);
 	pci_set_drvdata(pdev, NULL);
-	iounmap((void*)hba[i]->vaddr);
+	iounmap(hba[i]->vaddr);
 	cciss_unregister_scsi(i);  /* unhook from SCSI subsystem */
 	unregister_blkdev(COMPAQ_CISS_MAJOR+i, hba[i]->devname);
 	remove_proc_entry(hba[i]->devname, proc_cciss);	

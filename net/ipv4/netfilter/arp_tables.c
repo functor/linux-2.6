@@ -106,7 +106,7 @@ static inline int arp_packet_match(const struct arphdr *arphdr,
 {
 	char *arpptr = (char *)(arphdr + 1);
 	char *src_devaddr, *tgt_devaddr;
-	u32 *src_ipaddr, *tgt_ipaddr;
+	u32 src_ipaddr, tgt_ipaddr;
 	int i, ret;
 
 #define FWINV(bool,invflg) ((bool) ^ !!(arpinfo->invflags & invflg))
@@ -145,11 +145,11 @@ static inline int arp_packet_match(const struct arphdr *arphdr,
 
 	src_devaddr = arpptr;
 	arpptr += dev->addr_len;
-	src_ipaddr = (u32 *) arpptr;
+	memcpy(&src_ipaddr, arpptr, sizeof(u32));
 	arpptr += sizeof(u32);
 	tgt_devaddr = arpptr;
 	arpptr += dev->addr_len;
-	tgt_ipaddr = (u32 *) arpptr;
+	memcpy(&tgt_ipaddr, arpptr, sizeof(u32));
 
 	if (FWINV(arp_devaddr_compare(&arpinfo->src_devaddr, src_devaddr, dev->addr_len),
 		  ARPT_INV_SRCDEVADDR) ||
@@ -160,19 +160,19 @@ static inline int arp_packet_match(const struct arphdr *arphdr,
 		return 0;
 	}
 
-	if (FWINV(((*src_ipaddr) & arpinfo->smsk.s_addr) != arpinfo->src.s_addr,
+	if (FWINV((src_ipaddr & arpinfo->smsk.s_addr) != arpinfo->src.s_addr,
 		  ARPT_INV_SRCIP) ||
-	    FWINV((((*tgt_ipaddr) & arpinfo->tmsk.s_addr) != arpinfo->tgt.s_addr),
+	    FWINV(((tgt_ipaddr & arpinfo->tmsk.s_addr) != arpinfo->tgt.s_addr),
 		  ARPT_INV_TGTIP)) {
 		dprintf("Source or target IP address mismatch.\n");
 
 		dprintf("SRC: %u.%u.%u.%u. Mask: %u.%u.%u.%u. Target: %u.%u.%u.%u.%s\n",
-			NIPQUAD(*src_ipaddr),
+			NIPQUAD(src_ipaddr),
 			NIPQUAD(arpinfo->smsk.s_addr),
 			NIPQUAD(arpinfo->src.s_addr),
 			arpinfo->invflags & ARPT_INV_SRCIP ? " (INV)" : "");
 		dprintf("TGT: %u.%u.%u.%u Mask: %u.%u.%u.%u Target: %u.%u.%u.%u.%s\n",
-			NIPQUAD(*tgt_ipaddr),
+			NIPQUAD(tgt_ipaddr),
 			NIPQUAD(arpinfo->tmsk.s_addr),
 			NIPQUAD(arpinfo->tgt.s_addr),
 			arpinfo->invflags & ARPT_INV_TGTIP ? " (INV)" : "");
@@ -193,7 +193,10 @@ static inline int arp_packet_match(const struct arphdr *arphdr,
 	}
 
 	for (i = 0, ret = 0; i < IFNAMSIZ/sizeof(unsigned long); i++) {
-		ret |= (((const unsigned long *)outdev)[i]
+		unsigned long odev;
+		memcpy(&odev, outdev + i*sizeof(unsigned long),
+		       sizeof(unsigned long));
+		ret |= (odev
 			^ ((const unsigned long *)arpinfo->outiface)[i])
 			& ((const unsigned long *)arpinfo->outiface_mask)[i];
 	}
@@ -392,7 +395,7 @@ static inline struct arpt_table *arpt_find_table_lock(const char *name, int *err
 	return find_inlist_lock(&arpt_tables, name, "arptable_", error, mutex);
 }
 
-struct arpt_target *arpt_find_target_lock(const char *name, int *error, struct semaphore *mutex)
+static struct arpt_target *arpt_find_target_lock(const char *name, int *error, struct semaphore *mutex)
 {
 	return find_inlist_lock(&arpt_target, name, "arpt_", error, mutex);
 }
@@ -1196,7 +1199,7 @@ int arpt_register_table(struct arpt_table *table)
 	/* save number of initial entries */
 	table->private->initial_entries = table->private->number;
 
-	table->lock = RW_LOCK_UNLOCKED;
+	rwlock_init(&table->lock);
 	list_prepend(&arpt_tables, table);
 
  unlock:
@@ -1322,7 +1325,6 @@ static void __exit fini(void)
 EXPORT_SYMBOL(arpt_register_table);
 EXPORT_SYMBOL(arpt_unregister_table);
 EXPORT_SYMBOL(arpt_do_table);
-EXPORT_SYMBOL(arpt_find_target_lock);
 EXPORT_SYMBOL(arpt_register_target);
 EXPORT_SYMBOL(arpt_unregister_target);
 

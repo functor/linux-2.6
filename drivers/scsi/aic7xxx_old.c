@@ -924,7 +924,7 @@ struct aic7xxx_host {
   volatile long            flags;
   ahc_feature              features;         /* chip features */
   unsigned long            base;             /* card base address */
-  volatile unsigned char  *maddr;            /* memory mapped address */
+  volatile unsigned char  __iomem *maddr;            /* memory mapped address */
   unsigned long            isr_count;        /* Interrupt count */
   unsigned long            spurious_int;
   scb_data_type           *scb_data;
@@ -1233,7 +1233,7 @@ static int aic7xxx_seltime = 0x10;
  */
 #ifdef MODULE
 static char * aic7xxx = NULL;
-MODULE_PARM(aic7xxx, "s");
+module_param(aic7xxx, charp, 0);
 #endif
 
 #define VERBOSE_NORMAL         0x0000
@@ -7967,8 +7967,8 @@ aic7xxx_register(Scsi_Host_Template *template, struct aic7xxx_host *p,
     printk(KERN_INFO "(scsi%d) BIOS %sabled, IO Port 0x%lx, IRQ %d\n",
       p->host_no, (p->flags & AHC_BIOS_ENABLED) ? "en" : "dis",
       p->base, p->irq);
-    printk(KERN_INFO "(scsi%d) IO Memory at 0x%lx, MMAP Memory at 0x%lx\n",
-      p->host_no, p->mbase, (unsigned long)p->maddr);
+    printk(KERN_INFO "(scsi%d) IO Memory at 0x%lx, MMAP Memory at %p\n",
+      p->host_no, p->mbase, p->maddr);
   }
 
 #ifdef CONFIG_PCI
@@ -9243,6 +9243,7 @@ aic7xxx_detect(Scsi_Host_Template *template)
 	    {
               /* duplicate PCI entry, skip it */
 	      kfree(temp_p);
+	      temp_p = NULL;
               continue;
 	    }
 	    current_p = current_p->next;
@@ -9310,14 +9311,9 @@ aic7xxx_detect(Scsi_Host_Template *template)
                ((temp_p->chip != (AHC_AIC7870 | AHC_PCI)) &&
                 (temp_p->chip != (AHC_AIC7880 | AHC_PCI))) )
           {
-            unsigned long page_offset, base;
-
-            base = temp_p->mbase & PAGE_MASK;
-            page_offset = temp_p->mbase - base;
-            temp_p->maddr = ioremap_nocache(base, page_offset + 256);
+            temp_p->maddr = ioremap_nocache(temp_p->mbase, 256);
             if(temp_p->maddr)
             {
-              temp_p->maddr += page_offset;
               /*
                * We need to check the I/O with the MMAPed address.  Some machines
                * simply fail to work with MMAPed I/O and certain controllers.
@@ -9334,7 +9330,7 @@ aic7xxx_detect(Scsi_Host_Template *template)
                   PCI_FUNC(temp_p->pci_device_fn));
                 printk(KERN_INFO "aic7xxx: MMAPed I/O failed, reverting to "
                                  "Programmed I/O.\n");
-                iounmap((void *) (((unsigned long) temp_p->maddr) & PAGE_MASK));
+                iounmap(temp_p->maddr);
                 temp_p->maddr = NULL;
                 if(temp_p->base == 0)
                 {
@@ -10489,7 +10485,7 @@ aic7xxx_bus_device_reset(Scsi_Cmnd *cmd)
       aic_outb(p, lastphase | ATNO, SCSISIGO);
       unpause_sequencer(p, FALSE);
       spin_unlock_irq(p->host->host_lock);
-      scsi_sleep(HZ);
+      ssleep(1);
       spin_lock_irq(p->host->host_lock);
       if(aic_dev->flags & BUS_DEVICE_RESET_PENDING)
         return FAILED;
@@ -10548,7 +10544,7 @@ aic7xxx_bus_device_reset(Scsi_Cmnd *cmd)
   aic_outb(p, saved_scbptr, SCBPTR);
   unpause_sequencer(p, FALSE);
   spin_unlock_irq(p->host->host_lock);
-  scsi_sleep(HZ/4);
+  msleep(1000/4);
   spin_lock_irq(p->host->host_lock);
   if(aic_dev->flags & BUS_DEVICE_RESET_PENDING)
     return FAILED;
@@ -10786,7 +10782,7 @@ aic7xxx_abort(Scsi_Cmnd *cmd)
   }
   unpause_sequencer(p, FALSE);
   spin_unlock_irq(p->host->host_lock);
-  scsi_sleep(HZ/4);
+  msleep(1000/4);
   spin_lock_irq(p->host->host_lock);
   if (p->flags & AHC_ABORT_PENDING)
   {
@@ -10887,7 +10883,7 @@ aic7xxx_reset(Scsi_Cmnd *cmd)
   aic7xxx_run_done_queue(p, TRUE);
   unpause_sequencer(p, FALSE);
   spin_unlock_irq(p->host->host_lock);
-  scsi_sleep(2 * HZ);
+  ssleep(2);
   spin_lock_irq(p->host->host_lock);
   return SUCCESS;
 }
@@ -10964,7 +10960,7 @@ aic7xxx_release(struct Scsi_Host *host)
 #ifdef MMAPIO
   if(p->maddr)
   {
-    iounmap((void *) (((unsigned long) p->maddr) & PAGE_MASK));
+    iounmap(p->maddr);
   }
 #endif /* MMAPIO */
   if(!p->pdev)
@@ -11139,6 +11135,7 @@ aic7xxx_print_scratch_ram(struct aic7xxx_host *p)
 #include "aic7xxx_old/aic7xxx_proc.c"
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_VERSION(AIC7XXX_H_VERSION);
 
 
 static Scsi_Host_Template driver_template = {

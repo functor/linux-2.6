@@ -102,7 +102,7 @@ extern void __get_user_8(void);
 
 /* Careful: we have to cast the result to the type of the pointer for sign reasons */
 #define get_user(x,ptr)							\
-({	long __val_gu;							\
+({	unsigned long __val_gu;						\
 	int __ret_gu; 							\
 	__chk_user_ptr(ptr);						\
 	switch(sizeof (*(ptr))) {					\
@@ -136,6 +136,9 @@ extern void __put_user_bad(void);
   __get_user_nocheck((x),(ptr),sizeof(*(ptr)))
 #define __put_user(x,ptr) \
   __put_user_nocheck((__typeof__(*(ptr)))(x),(ptr),sizeof(*(ptr)))
+
+#define __get_user_unaligned __get_user
+#define __put_user_unaligned __put_user
 
 #define __put_user_nocheck(x,ptr,size)			\
 ({							\
@@ -350,5 +353,8 @@ long strnlen_user(const char __user *str, long n);
 long strlen_user(const char __user *str);
 unsigned long clear_user(void __user *mem, unsigned long len);
 unsigned long __clear_user(void __user *mem, unsigned long len);
+
+#define __copy_to_user_inatomic __copy_to_user
+#define __copy_from_user_inatomic __copy_from_user
 
 #endif /* __X86_64_UACCESS_H */

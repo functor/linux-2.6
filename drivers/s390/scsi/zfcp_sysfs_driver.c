@@ -10,6 +10,7 @@
  * Authors:
  *      Martin Peschke <mpeschke@de.ibm.com>
  *	Heiko Carstens <heiko.carstens@de.ibm.com>
+ *      Andreas Herrmann <aherrman@de.ibm.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +27,7 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#define ZFCP_SYSFS_DRIVER_C_REVISION "$Revision: 1.14 $"
+#define ZFCP_SYSFS_DRIVER_C_REVISION "$Revision: 1.17 $"
 
 #include "zfcp_ext.h"
 
@@ -65,7 +66,7 @@ static ssize_t zfcp_sysfs_loglevel_##_name##_store(struct device_driver *drv, \
 static ssize_t zfcp_sysfs_loglevel_##_name##_show(struct device_driver *dev,  \
 						  char *buf)                  \
 {                                                                             \
-	return sprintf(buf,"%d\n",				              \
+	return sprintf(buf,"%d\n", (unsigned int)                             \
 		       ZFCP_GET_LOG_VALUE(ZFCP_LOG_AREA_##_define));          \
 }                                                                             \
                                                                               \
@@ -85,7 +86,7 @@ ZFCP_DEFINE_DRIVER_ATTR(fc, FC);
 static ssize_t zfcp_sysfs_version_show(struct device_driver *dev,
 					      char *buf)
 {
-	return sprintf(buf, "%s\n", ZFCP_VERSION);
+	return sprintf(buf, "%s\n", zfcp_data.driver_version);
 }
 
 static DRIVER_ATTR(version, S_IRUGO, zfcp_sysfs_version_show, NULL);

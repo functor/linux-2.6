@@ -51,7 +51,7 @@
 
 struct uart_sunsab_port {
 	struct uart_port		port;		/* Generic UART port	*/
-	union sab82532_async_regs	*regs;		/* Chip registers	*/
+	union sab82532_async_regs	__iomem *regs;	/* Chip registers	*/
 	unsigned long			irqflags;	/* IRQ state flags	*/
 	int				dsr;		/* Current DSR state	*/
 	unsigned int			cec_timeout;	/* Chip poll timeout... */
@@ -143,6 +143,11 @@ receive_chars(struct uart_sunsab_port *up,
 		writeb(SAB82532_CMDR_RMC, &up->regs->w.cmdr);
 	}
 
+	/* Count may be zero for BRK, so we check for it here */
+	if ((stat->sreg.isr1 & SAB82532_ISR1_BRK) &&
+	    (up->port.line == up->port.cons->index))
+		saw_console_brk = 1;
+
 	for (i = 0; i < count; i++) {
 		unsigned char ch = buf[i];
 
@@ -172,8 +177,6 @@ receive_chars(struct uart_sunsab_port *up,
 				stat->sreg.isr0 &= ~(SAB82532_ISR0_PERR |
 						     SAB82532_ISR0_FERR);
 				up->port.icount.brk++;
-				if (up->port.line == up->port.cons->index)
-					saw_console_brk = 1;
 				/*
 				 * We do the SysRQ and SAK checking
 				 * here because otherwise the break
@@ -325,8 +328,9 @@ static irqreturn_t sunsab_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 	tty = NULL;
 	if (status.stat) {
-		if (status.sreg.isr0 & (SAB82532_ISR0_TCD | SAB82532_ISR0_TIME |
-					SAB82532_ISR0_RFO | SAB82532_ISR0_RPF))
+		if ((status.sreg.isr0 & (SAB82532_ISR0_TCD | SAB82532_ISR0_TIME |
+					 SAB82532_ISR0_RFO | SAB82532_ISR0_RPF)) ||
+		    (status.sreg.isr1 & SAB82532_ISR1_BRK))
 			tty = receive_chars(up, &status, regs);
 		if ((status.sreg.isr0 & SAB82532_ISR0_CDSC) ||
 		    (status.sreg.isr1 & SAB82532_ISR1_CSC))
@@ -352,8 +356,10 @@ static irqreturn_t sunsab_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 	tty = NULL;
 	if (status.stat) {
-		if (status.sreg.isr0 & (SAB82532_ISR0_TCD | SAB82532_ISR0_TIME |
-					SAB82532_ISR0_RFO | SAB82532_ISR0_RPF))
+		if ((status.sreg.isr0 & (SAB82532_ISR0_TCD | SAB82532_ISR0_TIME |
+					 SAB82532_ISR0_RFO | SAB82532_ISR0_RPF)) ||
+		    (status.sreg.isr1 & SAB82532_ISR1_BRK))
+
 			tty = receive_chars(up, &status, regs);
 		if ((status.sreg.isr0 & SAB82532_ISR0_CDSC) ||
 		    (status.sreg.isr1 & (SAB82532_ISR1_BRK | SAB82532_ISR1_CSC)))
@@ -768,25 +774,6 @@ static void sunsab_convert_to_sab(struct uart_sunsab_port *up, unsigned int cfla
 	writeb((readb(&up->regs->rw.ccr2) & ~0xc0) | ((ebrg >> 2) & 0xc0),
 	       &up->regs->rw.ccr2);
 
-	if (cflag & CRTSCTS) {
-		writeb(readb(&up->regs->rw.mode) & ~SAB82532_MODE_RTS,
-		       &up->regs->rw.mode);
-		writeb(readb(&up->regs->rw.mode) | SAB82532_MODE_FRTS,
-		       &up->regs->rw.mode);
-		writeb(readb(&up->regs->rw.mode) & ~SAB82532_MODE_FCTS,
-		       &up->regs->rw.mode);
-		up->interrupt_mask1 &= ~SAB82532_IMR1_CSC;
-		writeb(up->interrupt_mask1, &up->regs->w.imr1);
-	} else {
-		writeb(readb(&up->regs->rw.mode) | SAB82532_MODE_RTS,
-		       &up->regs->rw.mode);
-		writeb(readb(&up->regs->rw.mode) & ~SAB82532_MODE_FRTS,
-		       &up->regs->rw.mode);
-		writeb(readb(&up->regs->rw.mode) | SAB82532_MODE_FCTS,
-		       &up->regs->rw.mode);
-		up->interrupt_mask1 |= SAB82532_IMR1_CSC;
-		writeb(up->interrupt_mask1, &up->regs->w.imr1);
-	}
 	writeb(readb(&up->regs->rw.mode) | SAB82532_MODE_RAC, &up->regs->rw.mode);
 
 }
@@ -940,6 +927,7 @@ static int sunsab_console_setup(struct console *con, char *options)
 	writeb(up->interrupt_mask1, &up->regs->w.imr1);
 
 	sunsab_convert_to_sab(up, con->cflag, 0, baud);
+	sunsab_set_mctrl(&up->port, TIOCM_DTR | TIOCM_RTS);
 
 	spin_unlock_irqrestore(&up->port.lock, flags);
 	
@@ -1143,13 +1131,13 @@ static int __init sunsab_init(void)
 
 	sunserial_current_minor += num_channels;
 	
+	sunsab_console_init();
+
 	for (i = 0; i < num_channels; i++) {
 		struct uart_sunsab_port *up = &sunsab_ports[i];
 
 		uart_add_one_port(&sunsab_reg, &up->port);
 	}
-
-	sunsab_console_init();
 
 	return 0;
 }

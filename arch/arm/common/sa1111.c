@@ -35,6 +35,10 @@
 
 #include <asm/hardware/sa1111.h>
 
+#ifdef CONFIG_ARCH_PXA
+#include <asm/arch/pxa-regs.h>
+#endif
+
 extern void __init sa1110_mb_enable(void);
 
 /*
@@ -761,9 +765,6 @@ static void __sa1111_remove(struct sa1111 *sachip)
  */
 int dma_needs_bounce(struct device *dev, dma_addr_t addr, size_t size)
 {
-	unsigned int physaddr = SA1111_DMA_ADDR((unsigned int)addr);
-	u32 dma_mask = *dev->dma_mask;
-
 	/*
 	 * Section 4.6 of the "Intel StrongARM SA-1111 Development Module
 	 * User's Guide" mentions that jumpers R51 and R52 control the
@@ -771,14 +772,8 @@ int dma_needs_bounce(struct device *dev, dma_addr_t addr, size_t size)
 	 * SDRAM bank 1 on Neponset). The default configuration selects
 	 * Assabet, so any address in bank 1 is necessarily invalid.
 	 */
-	if ((machine_is_assabet() || machine_is_pfs168()) &&
-		(addr >= 0xc8000000 || (addr + size) >= 0xc8000000))
-	  	return 1;
-
-	/*
-	 * Check to see if either the start or end are illegal.
-	 */
-	return ((addr & ~dma_mask)) || ((addr + size - 1) & ~dma_mask);
+	return ((machine_is_assabet() || machine_is_pfs168()) &&
+		(addr >= 0xc8000000 || (addr + size) >= 0xc8000000));
 }
 
 struct sa1111_save_data {
@@ -802,6 +797,8 @@ struct sa1111_save_data {
 	unsigned int	wakeen1;
 };
 
+#ifdef	CONFIG_PM
+
 static int sa1111_suspend(struct device *dev, u32 state, u32 level)
 {
 	struct sa1111 *sachip = dev_get_drvdata(dev);
@@ -813,11 +810,10 @@ static int sa1111_suspend(struct device *dev, u32 state, u32 level)
 	if (level != SUSPEND_DISABLE)
 		return 0;
 
-	dev->saved_state = kmalloc(sizeof(struct sa1111_save_data), GFP_KERNEL);
-	if (!dev->saved_state)
+	save = kmalloc(sizeof(struct sa1111_save_data), GFP_KERNEL);
+	if (!save)
 		return -ENOMEM;
-
-	save = (struct sa1111_save_data *)dev->saved_state;
+	dev->power.saved_state = save;
 
 	spin_lock_irqsave(&sachip->lock, flags);
 
@@ -875,7 +871,7 @@ static int sa1111_resume(struct device *dev, u32 level)
 	if (level != RESUME_ENABLE)
 		return 0;
 
-	save = (struct sa1111_save_data *)dev->saved_state;
+	save = (struct sa1111_save_data *)dev->power.saved_state;
 	if (!save)
 		return 0;
 
@@ -920,11 +916,17 @@ static int sa1111_resume(struct device *dev, u32 level)
 
 	spin_unlock_irqrestore(&sachip->lock, flags);
 
-	dev->saved_state = NULL;
+	dev->power.saved_state = NULL;
 	kfree(save);
 
 	return 0;
 }
+
+#else	/* !CONFIG_PM */
+#define sa1111_resume	NULL
+#define sa1111_suspend	NULL
+#endif	/* !CONFIG_PM */
+
 
 static int sa1111_probe(struct device *dev)
 {
@@ -948,8 +950,10 @@ static int sa1111_remove(struct device *dev)
 		__sa1111_remove(sachip);
 		dev_set_drvdata(dev, NULL);
 
-		kfree(dev->saved_state);
-		dev->saved_state = NULL;
+#ifdef CONFIG_PM
+		kfree(dev->power.saved_state);
+		dev->power.saved_state = NULL;
+#endif
 	}
 
 	return 0;

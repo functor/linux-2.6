@@ -33,6 +33,17 @@ int dcache_stride;
 int icache_stride;
 EXPORT_SYMBOL(dcache_stride);
 
+
+#if defined(CONFIG_SMP)
+/* On some machines (e.g. ones with the Merced bus), there can be
+ * only a single PxTLB broadcast at a time; this must be guaranteed
+ * by software.  We put a spinlock around all TLB flushes  to
+ * ensure this.
+ */
+spinlock_t pa_tlb_lock = SPIN_LOCK_UNLOCKED;
+EXPORT_SYMBOL(pa_tlb_lock);
+#endif
+
 struct pdc_cache_info cache_info;
 #ifndef CONFIG_PA20
 static struct pdc_btlb_info btlb_info;
@@ -245,7 +256,7 @@ void disable_sr_hashing(void)
 void flush_dcache_page(struct page *page)
 {
 	struct address_space *mapping = page_mapping(page);
-	struct vm_area_struct *mpnt = NULL;
+	struct vm_area_struct *mpnt;
 	struct prio_tree_iter iter;
 	unsigned long offset;
 	unsigned long addr;
@@ -272,8 +283,7 @@ void flush_dcache_page(struct page *page)
 	 * to flush one address here for them all to become coherent */
 
 	flush_dcache_mmap_lock(mapping);
-	while ((mpnt = vma_prio_tree_next(mpnt, &mapping->i_mmap,
-					&iter, pgoff, pgoff)) != NULL) {
+	vma_prio_tree_foreach(mpnt, &iter, &mapping->i_mmap, pgoff, pgoff) {
 		offset = (pgoff - mpnt->vm_pgoff) << PAGE_SHIFT;
 		addr = mpnt->vm_start + offset;
 
@@ -307,3 +317,13 @@ EXPORT_SYMBOL(flush_kernel_dcache_range_asm);
 EXPORT_SYMBOL(flush_kernel_dcache_page);
 EXPORT_SYMBOL(flush_data_cache_local);
 EXPORT_SYMBOL(flush_kernel_icache_range_asm);
+
+void clear_user_page_asm(void *page, unsigned long vaddr)
+{
+	/* This function is implemented in assembly in pacache.S */
+	extern void __clear_user_page_asm(void *page, unsigned long vaddr);
+
+	purge_tlb_start();
+	__clear_user_page_asm(page, vaddr);
+	purge_tlb_end();
+}

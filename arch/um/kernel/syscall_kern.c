@@ -1,5 +1,5 @@
 /* 
- * Copyright (C) 2000 Jeff Dike (jdike@karaya.com)
+ * Copyright (C) 2000 - 2003 Jeff Dike (jdike@addtoit.com)
  * Licensed under the GPL
  */
 
@@ -36,32 +36,23 @@ long um_mount(char * dev_name, char * dir_name, char * type,
 
 long sys_fork(void)
 {
-	struct task_struct *p;
+	long ret;
 
 	current->thread.forking = 1;
-        p = do_fork(SIGCHLD, 0, NULL, 0, NULL, NULL);
+        ret = do_fork(SIGCHLD, 0, NULL, 0, NULL, NULL);
 	current->thread.forking = 0;
-	return(IS_ERR(p) ? PTR_ERR(p) : p->pid);
-}
-
-long sys_clone(unsigned long clone_flags, unsigned long newsp)
-{
-	struct task_struct *p;
-
-	current->thread.forking = 1;
-	p = do_fork(clone_flags, newsp, NULL, 0, NULL, NULL);
-	current->thread.forking = 0;
-	return(IS_ERR(p) ? PTR_ERR(p) : p->pid);
+	return(ret);
 }
 
 long sys_vfork(void)
 {
-	struct task_struct *p;
+	long ret;
 
 	current->thread.forking = 1;
-	p = do_fork(CLONE_VFORK | CLONE_VM | SIGCHLD, 0, NULL, 0, NULL, NULL);
+	ret = do_fork(CLONE_VFORK | CLONE_VM | SIGCHLD, 0, NULL, 0, NULL,
+		      NULL);
 	current->thread.forking = 0;
-	return(IS_ERR(p) ? PTR_ERR(p) : p->pid);
+	return(ret);
 }
 
 /* common code for old and new mmaps */
@@ -113,11 +104,11 @@ struct mmap_arg_struct {
 	unsigned long offset;
 };
 
-int old_mmap(unsigned long addr, unsigned long len,
+long old_mmap(unsigned long addr, unsigned long len,
 	     unsigned long prot, unsigned long flags,
 	     unsigned long fd, unsigned long offset)
 {
-	int err = -EINVAL;
+	long err = -EINVAL;
 	if (offset & ~PAGE_MASK)
 		goto out;
 
@@ -129,48 +120,17 @@ int old_mmap(unsigned long addr, unsigned long len,
  * sys_pipe() is the normal C calling standard for creating
  * a pipe. It's not the way unix traditionally does this, though.
  */
-int sys_pipe(unsigned long * fildes)
+long sys_pipe(unsigned long * fildes)
 {
         int fd[2];
-        int error;
+        long error;
 
         error = do_pipe(fd);
         if (!error) {
-                if (copy_to_user(fildes, fd, 2*sizeof(int)))
+		if (copy_to_user(fildes, fd, sizeof(fd)))
                         error = -EFAULT;
         }
         return error;
-}
-
-int sys_sigaction(int sig, const struct old_sigaction *act,
-			 struct old_sigaction *oact)
-{
-	struct k_sigaction new_ka, old_ka;
-	int ret;
-
-	if (act) {
-		old_sigset_t mask;
-		if (verify_area(VERIFY_READ, act, sizeof(*act)) ||
-		    __get_user(new_ka.sa.sa_handler, &act->sa_handler) ||
-		    __get_user(new_ka.sa.sa_restorer, &act->sa_restorer))
-			return -EFAULT;
-		__get_user(new_ka.sa.sa_flags, &act->sa_flags);
-		__get_user(mask, &act->sa_mask);
-		siginitset(&new_ka.sa.sa_mask, mask);
-	}
-
-	ret = do_sigaction(sig, act ? &new_ka : NULL, oact ? &old_ka : NULL);
-
-	if (!ret && oact) {
-		if (verify_area(VERIFY_WRITE, oact, sizeof(*oact)) ||
-		    __put_user(old_ka.sa.sa_handler, &oact->sa_handler) ||
-		    __put_user(old_ka.sa.sa_restorer, &oact->sa_restorer))
-			return -EFAULT;
-		__put_user(old_ka.sa.sa_flags, &oact->sa_flags);
-		__put_user(old_ka.sa.sa_mask.sig[0], &oact->sa_mask);
-	}
-
-	return ret;
 }
 
 /*
@@ -254,13 +214,13 @@ int sys_ipc (uint call, int first, int second,
 		return sys_shmctl (first, second,
 				   (struct shmid_ds *) ptr);
 	default:
-		return -EINVAL;
+		return -ENOSYS;
 	}
 }
 
-int sys_uname(struct old_utsname * name)
+long sys_uname(struct old_utsname * name)
 {
-	int err;
+	long err;
 	if (!name)
 		return -EFAULT;
 	down_read(&uts_sem);
@@ -269,9 +229,9 @@ int sys_uname(struct old_utsname * name)
 	return err?-EFAULT:0;
 }
 
-int sys_olduname(struct oldold_utsname * name)
+long sys_olduname(struct oldold_utsname * name)
 {
-	int error;
+	long error;
 
 	if (!name)
 		return -EFAULT;
@@ -301,11 +261,6 @@ int sys_olduname(struct oldold_utsname * name)
 	error = error ? -EFAULT : 0;
 
 	return error;
-}
-
-int sys_sigaltstack(const stack_t *uss, stack_t *uoss)
-{
-	return(do_sigaltstack(uss, uoss, PT_REGS_SP(&current->thread.regs)));
 }
 
 long execute_syscall(void *r)

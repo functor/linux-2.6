@@ -69,9 +69,9 @@ static void cs46xx_dsp_proc_scb_info_read (snd_info_entry_t *entry, snd_info_buf
 	proc_scb_info_t * scb_info  = (proc_scb_info_t *)entry->private_data;
 	dsp_scb_descriptor_t * scb = scb_info->scb_desc;
 	dsp_spos_instance_t * ins;
-	cs46xx_t *chip = snd_magic_cast(cs46xx_t, scb_info->chip, return);
+	cs46xx_t *chip = scb_info->chip;
 	int j,col;
-	unsigned long dst = chip->region.idx[1].remap_addr + DSP_PARAMETER_BYTE_OFFSET;
+	void __iomem *dst = chip->region.idx[1].remap_addr + DSP_PARAMETER_BYTE_OFFSET;
 
 	ins = chip->dsp_spos_instance;
 
@@ -162,7 +162,7 @@ static void _dsp_unlink_scb (cs46xx_t *chip,dsp_scb_descriptor_t * scb)
 
 static void _dsp_clear_sample_buffer (cs46xx_t *chip, u32 sample_buffer_addr, int dword_count) 
 {
-	unsigned long dst = chip->region.idx[2].remap_addr + sample_buffer_addr;
+	void __iomem *dst = chip->region.idx[2].remap_addr + sample_buffer_addr;
 	int i;
   
 	for (i = 0; i < dword_count ; ++i ) {

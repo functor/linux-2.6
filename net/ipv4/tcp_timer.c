@@ -36,7 +36,9 @@ static void tcp_write_timer(unsigned long);
 static void tcp_delack_timer(unsigned long);
 static void tcp_keepalive_timer (unsigned long data);
 
-const char timer_bug_msg[] = KERN_DEBUG "tcpbug: unknown timer value\n";
+#ifdef TCP_DEBUG
+const char tcp_timer_bug_msg[] = KERN_DEBUG "tcpbug: unknown timer value\n";
+#endif
 
 /*
  * Using different timers for retransmit, delayed acks and probes
@@ -121,7 +123,7 @@ static int tcp_out_of_resources(struct sock *sk, int do_reset)
 		 *      1. Last segment was sent recently. */
 		if ((s32)(tcp_time_stamp - tp->lsndtime) <= TCP_TIMEWAIT_LEN ||
 		    /*  2. Window is closed. */
-		    (!tp->snd_wnd && !tp->packets_out))
+		    (!tp->snd_wnd && !tcp_get_pcount(&tp->packets_out)))
 			do_reset = 1;
 		if (do_reset)
 			tcp_send_active_reset(sk, GFP_ATOMIC);
@@ -269,7 +271,7 @@ static void tcp_probe_timer(struct sock *sk)
 	struct tcp_opt *tp = tcp_sk(sk);
 	int max_probes;
 
-	if (tp->packets_out || !sk->sk_send_head) {
+	if (tcp_get_pcount(&tp->packets_out) || !sk->sk_send_head) {
 		tp->probes_out = 0;
 		return;
 	}
@@ -316,7 +318,7 @@ static void tcp_retransmit_timer(struct sock *sk)
 {
 	struct tcp_opt *tp = tcp_sk(sk);
 
-	if (tp->packets_out == 0)
+	if (!tcp_get_pcount(&tp->packets_out))
 		goto out;
 
 	BUG_TRAP(!skb_queue_empty(&sk->sk_write_queue));
@@ -489,16 +491,7 @@ static void tcp_synack_timer(struct sock *sk)
 	 * ones are about to clog our table.
 	 */
 	if (lopt->qlen>>(lopt->max_qlen_log-1)) {
-#ifdef CONFIG_ACCEPT_QUEUES
-		int young = 0;
-	       
-		for(i=0; i < NUM_ACCEPT_QUEUES; i++) 
-			young += lopt->qlen_young[i];
-		
-		young <<= 1;
-#else
 		int young = (lopt->qlen_young<<1);
-#endif
 
 		while (thresh > 2) {
 			if (lopt->qlen < young)
@@ -524,12 +517,9 @@ static void tcp_synack_timer(struct sock *sk)
 					unsigned long timeo;
 
 					if (req->retrans++ == 0)
-#ifdef CONFIG_ACCEPT_QUEUES
-			         		lopt->qlen_young[req->acceptq_class]--;
-#else
-			         		lopt->qlen_young--;
-#endif
-					timeo = min((TCP_TIMEOUT_INIT << req->retrans), TCP_RTO_MAX);
+						lopt->qlen_young--;
+					timeo = min((TCP_TIMEOUT_INIT << req->retrans),
+						    TCP_RTO_MAX);
 					req->expires = now + timeo;
 					reqp = &req->dl_next;
 					continue;
@@ -541,11 +531,7 @@ static void tcp_synack_timer(struct sock *sk)
 				write_unlock(&tp->syn_wait_lock);
 				lopt->qlen--;
 				if (req->retrans == 0)
-#ifdef CONFIG_ACCEPT_QUEUES
-			         		lopt->qlen_young[req->acceptq_class]--;
-#else
-			         		lopt->qlen_young--;
-#endif
+					lopt->qlen_young--;
 				tcp_openreq_free(req);
 				continue;
 			}
@@ -622,7 +608,7 @@ static void tcp_keepalive_timer (unsigned long data)
 	elapsed = keepalive_time_when(tp);
 
 	/* It is alive without keepalive 8) */
-	if (tp->packets_out || sk->sk_send_head)
+	if (tcp_get_pcount(&tp->packets_out) || sk->sk_send_head)
 		goto resched;
 
 	elapsed = tcp_time_stamp - tp->rcv_tstamp;
@@ -667,3 +653,6 @@ EXPORT_SYMBOL(tcp_clear_xmit_timers);
 EXPORT_SYMBOL(tcp_delete_keepalive_timer);
 EXPORT_SYMBOL(tcp_init_xmit_timers);
 EXPORT_SYMBOL(tcp_reset_keepalive_timer);
+#ifdef TCP_DEBUG
+EXPORT_SYMBOL(tcp_timer_bug_msg);
+#endif

@@ -44,8 +44,6 @@ struct rand_pool_info {
 
 extern void rand_initialize_irq(int irq);
 
-extern void batch_entropy_store(u32 a, u32 b, int num);
-
 extern void add_keyboard_randomness(unsigned char scancode);
 extern void add_mouse_randomness(__u32 mouse_data);
 extern void add_interrupt_randomness(int irq);
@@ -66,8 +64,6 @@ extern __u32 check_tcp_syn_cookie(__u32 cookie, __u32 saddr,
 				  __u32 count, __u32 maxdiff);
 extern __u32 secure_tcpv6_sequence_number(__u32 *saddr, __u32 *daddr,
 					  __u16 sport, __u16 dport);
-
-extern __u32 secure_ipv6_id(__u32 *daddr);
 
 #ifndef MODULE
 extern struct file_operations random_fops, urandom_fops;

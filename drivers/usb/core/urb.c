@@ -39,7 +39,7 @@ void usb_init_urb(struct urb *urb)
 {
 	if (urb) {
 		memset(urb, 0, sizeof(*urb));
-		kref_init(&urb->kref, urb_destroy);
+		kref_init(&urb->kref);
 		spin_lock_init(&urb->lock);
 	}
 }
@@ -88,7 +88,7 @@ struct urb *usb_alloc_urb(int iso_packets, int mem_flags)
 void usb_free_urb(struct urb *urb)
 {
 	if (urb)
-		kref_put(&urb->kref);
+		kref_put(&urb->kref, urb_destroy);
 }
 
 /**
@@ -256,13 +256,6 @@ int usb_submit_urb(struct urb *urb, int mem_flags)
 	if (!usb_pipecontrol (pipe) && dev->state < USB_STATE_CONFIGURED)
 		return -ENODEV;
 
-	/* (actually HCDs may need to duplicate this, endpoint might yet
-	 * stall due to queued bulk/intr transactions that complete after
-	 * we check)
-	 */
-	if (usb_endpoint_halted (dev, usb_pipeendpoint (pipe), is_out))
-		return -EPIPE;
-
 	/* FIXME there should be a sharable lock protecting us against
 	 * config/altsetting changes and disconnects, kicking in here.
 	 * (here == before maxpacket, and eventually endpoint type,
@@ -271,11 +264,10 @@ int usb_submit_urb(struct urb *urb, int mem_flags)
 
 	max = usb_maxpacket (dev, pipe, is_out);
 	if (max <= 0) {
-		dbg ("%s: bogus endpoint %d-%s on usb-%s-%s (bad maxpacket %d)",
-			__FUNCTION__,
-			usb_pipeendpoint (pipe), is_out ? "OUT" : "IN",
-			dev->bus->bus_name, dev->devpath,
-			max);
+		dev_dbg(&dev->dev,
+			"bogus endpoint ep%d%s in %s (bad maxpacket %d)",
+			usb_pipeendpoint (pipe), is_out ? "out" : "in",
+			__FUNCTION__, max);
 		return -EMSGSIZE;
 	}
 
@@ -458,6 +450,13 @@ int usb_unlink_urb(struct urb *urb)
 	if (!urb)
 		return -EINVAL;
 	if (!(urb->transfer_flags & URB_ASYNC_UNLINK)) {
+#ifdef CONFIG_DEBUG_KERNEL
+		if (printk_ratelimit()) {
+			printk(KERN_NOTICE "usb_unlink_urb() is deprecated for "
+				"synchronous unlinks.  Use usb_kill_urb() instead.\n");
+			WARN_ON(1);
+		}
+#endif
 		usb_kill_urb(urb);
 		return 0;
 	}

@@ -22,32 +22,19 @@
  *
  *-----------------------------------------------------------------------------
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
- * Where this Software is combined with software released under the terms of 
- * the GNU Public License ("GPL") and the terms of the GPL would require the 
- * combined work to also be released under the terms of the GPL, the terms
- * and conditions of this License will apply in addition to those of the
- * GPL with the exception of any terms or conditions of this License that
- * conflict with, or are expressly prohibited by, the GPL.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHORS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifdef __FreeBSD__
@@ -203,10 +190,12 @@ void sym_announce_transfer_rate(hcb_p np, int target)
 			mb10 = (f10 + period/2) / period;
 		}
 		printf_info (
-		    "%s:%d: %s %sSCSI %d.%d MB/s %s (%d.%d ns, offset %d)\n",
+		    "%s:%d: %s %sSCSI %d.%d MB/s %s%s%s (%d.%d ns, offset %d)\n",
 		    sym_name(np), target, scsi, __tcurr.width? "WIDE " : "",
 		    mb10/10, mb10%10,
 		    (__tcurr.options & PPR_OPT_DT) ? "DT" : "ST",
+		    (__tcurr.options & PPR_OPT_IU) ? " IU" : "",
+		    (__tcurr.options & PPR_OPT_QAS) ? " QAS" : "",
 		    period/10, period%10, __tcurr.offset);
 	}
 	else
@@ -216,121 +205,3 @@ void sym_announce_transfer_rate(hcb_p np, int target)
 #undef __tprev
 #undef __tcurr
 #endif	/* SYM_OPT_ANNOUNCE_TRANSFER_RATE */
-
-
-#ifdef	SYM_OPT_SNIFF_INQUIRY
-/*
- *  Update transfer settings according to user settings 
- *  and bits sniffed out from INQUIRY response.
- */
-void sym_update_trans_settings(hcb_p np, tcb_p tp)
-{
-	memcpy(&tp->tinfo.goal, &tp->tinfo.user, sizeof(tp->tinfo.goal));
-
-	if (tp->inq_version >= 4) {
-		switch(tp->inq_byte56 & INQ56_CLOCKING) {
-		case INQ56_ST_ONLY:
-			tp->tinfo.goal.options = 0;
-			break;
-		case INQ56_DT_ONLY:
-		case INQ56_ST_DT:
-		default:
-			break;
-		}
-	}
-
-	if (!((tp->inq_byte7 & tp->inq_byte7_valid) & INQ7_WIDE16)) {
-		tp->tinfo.goal.width   = 0;
-		tp->tinfo.goal.options = 0;
-	}
-
-	if (!((tp->inq_byte7 & tp->inq_byte7_valid) & INQ7_SYNC)) {
-		tp->tinfo.goal.offset  = 0;
-		tp->tinfo.goal.options = 0;
-	}
-
-	if (tp->tinfo.goal.options & PPR_OPT_DT) {
-		if (tp->tinfo.goal.offset > np->maxoffs_dt)
-			tp->tinfo.goal.offset = np->maxoffs_dt;
-	}
-	else {
-		if (tp->tinfo.goal.offset > np->maxoffs)
-			tp->tinfo.goal.offset = np->maxoffs;
-	}
-}
-
-/*
- *  Snoop target capabilities from INQUIRY response.
- *  We only believe device versions >= SCSI-2 that use 
- *  appropriate response data format (2). But it seems 
- *  that some CCS devices also support SYNC (?).
- */
-int 
-__sym_sniff_inquiry(hcb_p np, u_char tn, u_char ln,
-                    u_char *inq_data, int inq_len)
-{
-	tcb_p tp = &np->target[tn];
-	u_char inq_version;
-	u_char inq_byte7;
-	u_char inq_byte56;
-
-	if (!inq_data || inq_len < 2)
-		return -1;
-
-	/*
-	 *  Check device type and qualifier.
-	 */
-	if ((inq_data[0] & 0xe0) == 0x60)
-		return -1;
-
-	/*
-	 *  Get SPC version.
-	 */
-	if (inq_len <= 2)
-		return -1;
-	inq_version = inq_data[2] & 0x7;
-
-	/*
-	 *  Get SYNC/WIDE16 capabilities.
-	 */
-	inq_byte7 = tp->inq_byte7;
-	if (inq_version >= 2 && (inq_data[3] & 0xf) == 2) {
-		if (inq_len > 7)
-			inq_byte7 = inq_data[7];
-	}
-	else if (inq_version == 1 && (inq_data[3] & 0xf) == 1)
-		inq_byte7 = INQ7_SYNC;
-
-	/*
-	 *  Get Tagged Command Queuing capability.
-	 */
-	if (inq_byte7 & INQ7_CMDQ)
-		sym_set_bit(tp->cmdq_map, ln);
-	else
-		sym_clr_bit(tp->cmdq_map, ln);
-	inq_byte7 &= ~INQ7_CMDQ;
-
-	/*
-	 *  Get CLOCKING capability.
-	 */
-	inq_byte56 = tp->inq_byte56;
-	if (inq_version >= 4 && inq_len > 56)
-		inq_byte56 = inq_data[56];
-#if 0
-printf("XXXXXX [%d] inq_version=%x inq_byte7=%x inq_byte56=%x XXXXX\n",
-	inq_len, inq_version, inq_byte7, inq_byte56);
-#endif
-	/*
-	 *  Trigger a negotiation if needed.
-	 */
-	if (tp->inq_version != inq_version ||
-	    tp->inq_byte7   != inq_byte7   ||
-	    tp->inq_byte56  != inq_byte56) {
-		tp->inq_version = inq_version;
-		tp->inq_byte7   = inq_byte7;
-		tp->inq_byte56  = inq_byte56;
-		return 1;
-	}
-	return 0;
-}
-#endif	/* SYM_OPT_SNIFF_INQUIRY */

@@ -35,7 +35,6 @@
 #include <asm/cpu.h>
 #include <asm/processor.h>
 #include <asm/system.h>
-#include <asm/hardirq.h>
 #include <asm/mmu_context.h>
 #include <asm/smp.h>
 
@@ -45,6 +44,7 @@ cpumask_t cpu_online_map;		/* Bitmask of currently online CPUs */
 int __cpu_number_map[NR_CPUS];		/* Map physical to logical */
 int __cpu_logical_map[NR_CPUS];		/* Map logical to physical */
 
+EXPORT_SYMBOL(phys_cpu_present_map);
 EXPORT_SYMBOL(cpu_online_map);
 
 cycles_t cacheflush_time;
@@ -236,7 +236,6 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	init_new_context(current, &init_mm);
 	current_thread_info()->cpu = 0;
 	smp_tune_scheduling();
-	prom_build_cpu_map();
 	prom_prepare_cpus(max_cpus);
 }
 
@@ -254,16 +253,6 @@ void __devinit smp_prepare_boot_cpu(void)
 	cpu_set(0, cpu_callin_map);
 }
 
-static struct task_struct * __init fork_by_hand(void)
-{
-	struct pt_regs regs;
-	/*
-	 * don't care about the eip and regs settings since
-	 * we'll never reschedule the forked task.
-	 */
-	return copy_process(CLONE_VM|CLONE_IDLETASK, 0, &regs, 0, NULL, NULL);
-}
-
 /*
  * Startup the CPU with this logical number
  */
@@ -275,19 +264,9 @@ static int __init do_boot_cpu(int cpu)
 	 * The following code is purely to make sure
 	 * Linux can schedule processes on this slave.
 	 */
-	idle = fork_by_hand();
+	idle = fork_idle(cpu);
 	if (IS_ERR(idle))
 		panic("failed fork for CPU %d\n", cpu);
-
-	wake_up_forked_process(idle);
-
-	/*
-	 * We remove it from the pidhash and the runqueue once we've
-	 * got the process:
-	 */
-	init_idle(idle, cpu);
-
-	unhash_process(idle);
 
 	prom_boot_secondary(cpu, idle);
 

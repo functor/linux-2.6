@@ -32,9 +32,11 @@
 #include <linux/buffer_head.h>		/* for fsync_super() */
 #include <linux/mount.h>
 #include <linux/security.h>
+#include <linux/syscalls.h>
 #include <linux/vfs.h>
 #include <linux/writeback.h>		/* for the emergency remount stuff */
 #include <linux/idr.h>
+#include <linux/kobject.h>
 #include <asm/uaccess.h>
 
 
@@ -114,6 +116,27 @@ int __put_super(struct super_block *sb)
 		ret = 1;
 	}
 	return ret;
+}
+
+/*
+ * Drop a superblock's refcount.
+ * Returns non-zero if the superblock is about to be destroyed and
+ * at least is already removed from super_blocks list, so if we are
+ * making a loop through super blocks then we need to restart.
+ * The caller must hold sb_lock.
+ */
+int __put_super_and_need_restart(struct super_block *sb)
+{
+	/* check for race with generic_shutdown_super() */
+	if (list_empty(&sb->s_list)) {
+		/* super block is removed, need to restart... */
+		__put_super(sb);
+		return 1;
+	}
+	/* can't be the last, since s_list is still in use */
+	sb->s_count--;
+	BUG_ON(sb->s_count == 0);
+	return 0;
 }
 
 /**
@@ -229,7 +252,8 @@ void generic_shutdown_super(struct super_block *sb)
 		unlock_super(sb);
 	}
 	spin_lock(&sb_lock);
-	list_del(&sb->s_list);
+	/* should be initialized for __put_super_and_need_restart() */
+	list_del_init(&sb->s_list);
 	list_del(&sb->s_instances);
 	spin_unlock(&sb_lock);
 	up_write(&sb->s_umount);
@@ -282,7 +306,7 @@ retry:
 	}
 	s->s_type = type;
 	strlcpy(s->s_id, type->name, sizeof(s->s_id));
-	list_add(&s->s_list, super_blocks.prev);
+	list_add_tail(&s->s_list, &super_blocks);
 	list_add(&s->s_instances, &type->fs_supers);
 	spin_unlock(&sb_lock);
 	get_filesystem(type);
@@ -633,6 +657,16 @@ static int test_bdev_super(struct super_block *s, void *data)
 	return (void *)s->s_bdev == data;
 }
 
+static void bdev_uevent(struct block_device *bdev, enum kobject_action action)
+{
+	if (bdev->bd_disk) {
+		if (bdev->bd_part)
+			kobject_uevent(&bdev->bd_part->kobj, action, NULL);
+		else
+			kobject_uevent(&bdev->bd_disk->kobj, action, NULL);
+	}
+}
+
 struct super_block *get_sb_bdev(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data,
 	int (*fill_super)(struct super_block *, void *, int))
@@ -675,8 +709,10 @@ struct super_block *get_sb_bdev(struct file_system_type *fs_type,
 			up_write(&s->s_umount);
 			deactivate_super(s);
 			s = ERR_PTR(error);
-		} else
+		} else {
 			s->s_flags |= MS_ACTIVE;
+			bdev_uevent(bdev, KOBJ_MOUNT);
+		}
 	}
 
 	return s;
@@ -691,6 +727,8 @@ EXPORT_SYMBOL(get_sb_bdev);
 void kill_block_super(struct super_block *sb)
 {
 	struct block_device *bdev = sb->s_bdev;
+
+	bdev_uevent(bdev, KOBJ_UMOUNT);
 	generic_shutdown_super(sb);
 	set_blocksize(bdev, sb->s_old_blocksize);
 	close_bdev_excl(bdev);

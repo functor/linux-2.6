@@ -61,7 +61,7 @@
 
 static dabusb_t dabusb[NRDABUSB];
 static int buffers = 256;
-extern struct usb_driver dabusb_driver;
+static struct usb_driver dabusb_driver;
 
 /*-------------------------------------------------------------------*/
 
@@ -109,16 +109,13 @@ static void dump_urb (struct urb *urb)
 static int dabusb_cancel_queue (pdabusb_t s, struct list_head *q)
 {
 	unsigned long flags;
-	struct list_head *p;
 	pbuff_t b;
 
 	dbg("dabusb_cancel_queue");
 
 	spin_lock_irqsave (&s->lock, flags);
 
-	for (p = q->next; p != q; p = p->next) {
-		b = list_entry (p, buff_t, buff_list);
-
+	list_for_each_entry(b, q, buff_list) {
 #ifdef DEBUG
 		dump_urb(b->purb);
 #endif
@@ -598,7 +595,7 @@ static int dabusb_open (struct inode *inode, struct file *file)
 		if (file->f_flags & O_NONBLOCK) {
 			return -EBUSY;
 		}
-		schedule_timeout (HZ / 2);
+		msleep_interruptible(500);
 
 		if (signal_pending (current)) {
 			return -EAGAIN;
@@ -868,7 +865,7 @@ MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL");
 
-MODULE_PARM (buffers, "i");
+module_param(buffers, int, 0);
 MODULE_PARM_DESC (buffers, "Number of buffers (default=256)");
 
 module_init (dabusb_init);

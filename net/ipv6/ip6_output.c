@@ -54,8 +54,9 @@
 #include <net/rawv6.h>
 #include <net/icmp.h>
 #include <net/xfrm.h>
+#include <net/checksum.h>
 
-static int ip6_fragment(struct sk_buff **pskb, int (*output)(struct sk_buff**));
+static int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *));
 
 static __inline__ void ipv6_select_ident(struct sk_buff *skb, struct frag_hdr *fhdr)
 {
@@ -107,9 +108,8 @@ static int ip6_dev_loopback_xmit(struct sk_buff *newskb)
 }
 
 
-static int ip6_output2(struct sk_buff **pskb)
+static int ip6_output2(struct sk_buff *skb)
 {
-	struct sk_buff *skb = *pskb;
 	struct dst_entry *dst = skb->dst;
 	struct net_device *dev = dst->dev;
 
@@ -145,14 +145,12 @@ static int ip6_output2(struct sk_buff **pskb)
 	return NF_HOOK(PF_INET6, NF_IP6_POST_ROUTING, skb,NULL, skb->dev,ip6_output_finish);
 }
 
-int ip6_output(struct sk_buff **pskb)
+int ip6_output(struct sk_buff *skb)
 {
-	struct sk_buff *skb = *pskb;
-
-	if ((skb->len > dst_pmtu(skb->dst) || skb_shinfo(skb)->frag_list))
-		return ip6_fragment(pskb, ip6_output2);
+	if (skb->len > dst_pmtu(skb->dst))
+		return ip6_fragment(skb, ip6_output2);
 	else
-		return ip6_output2(pskb);
+		return ip6_output2(skb);
 }
 
 #ifdef CONFIG_NETFILTER
@@ -476,6 +474,7 @@ static void ip6_copy_metadata(struct sk_buff *to, struct sk_buff *from)
 	/* Connection association is same as pre-frag packet */
 	to->nfct = from->nfct;
 	nf_conntrack_get(to->nfct);
+	to->nfctinfo = from->nfctinfo;
 #ifdef CONFIG_BRIDGE_NETFILTER
 	nf_bridge_put(to->nf_bridge);
 	to->nf_bridge = from->nf_bridge;
@@ -516,10 +515,10 @@ int ip6_find_1stfragopt(struct sk_buff *skb, u8 **nexthdr)
 	return offset;
 }
 
-static int ip6_fragment(struct sk_buff **pskb, int (*output)(struct sk_buff**))
+static int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 {
 	struct net_device *dev;
-	struct sk_buff *frag, *skb = *pskb;
+	struct sk_buff *frag;
 	struct rt6_info *rt = (struct rt6_info*)skb->dst;
 	struct ipv6hdr *tmp_hdr;
 	struct frag_hdr *fh;
@@ -608,7 +607,7 @@ static int ip6_fragment(struct sk_buff **pskb, int (*output)(struct sk_buff**))
 				ip6_copy_metadata(frag, skb);
 			}
 			
-			err = output(&skb);
+			err = output(skb);
 			if (err || !frag)
 				break;
 
@@ -724,7 +723,7 @@ slow_path:
 
 		IP6_INC_STATS(IPSTATS_MIB_FRAGCREATES);
 
-		err = output(&frag);
+		err = output(frag);
 		if (err)
 			goto fail;
 	}
@@ -769,9 +768,9 @@ int ip6_dst_lookup(struct sock *sk, struct dst_entry **dst, struct flowi *fl)
 				 */
 	
 			if (((rt->rt6i_dst.plen != 128 ||
-			      ipv6_addr_cmp(&fl->fl6_dst, &rt->rt6i_dst.addr))
+			      !ipv6_addr_equal(&fl->fl6_dst, &rt->rt6i_dst.addr))
 			     && (np->daddr_cache == NULL ||
-				 ipv6_addr_cmp(&fl->fl6_dst, np->daddr_cache)))
+				 !ipv6_addr_equal(&fl->fl6_dst, np->daddr_cache)))
 			    || (fl->oif && fl->oif != (*dst)->dev->ifindex)) {
 				*dst = NULL;
 			} else
@@ -796,10 +795,6 @@ int ip6_dst_lookup(struct sock *sk, struct dst_entry **dst, struct flowi *fl)
 			goto out_err_release;
 		}
 	}
-	if ((err = xfrm_lookup(dst, fl, sk, 0)) < 0) {
-		err = -ENETUNREACH;
-		goto out_err_release;
-        }
 
 	return 0;
 
@@ -821,7 +816,7 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to, int offse
 	int exthdrlen;
 	int hh_len;
 	int mtu;
-	int copy = 0;
+	int copy;
 	int err;
 	int offset = 0;
 	int csummode = CHECKSUM_NONE;
@@ -879,29 +874,79 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to, int offse
 		}
 	}
 
+	/*
+	 * Let's try using as much space as possible.
+	 * Use MTU if total length of the message fits into the MTU.
+	 * Otherwise, we need to reserve fragment header and
+	 * fragment alignment (= 8-15 octects, in total).
+	 *
+	 * Note that we may need to "move" the data from the tail of
+	 * of the buffer to the new fragment when we split 
+	 * the message.
+	 *
+	 * FIXME: It may be fragmented into multiple chunks 
+	 *        at once if non-fragmentable extension headers
+	 *        are too large.
+	 * --yoshfuji 
+	 */
+
 	inet->cork.length += length;
 
 	if ((skb = skb_peek_tail(&sk->sk_write_queue)) == NULL)
 		goto alloc_new_skb;
 
 	while (length > 0) {
-		if ((copy = maxfraglen - skb->len) <= 0) {
+		/* Check if the remaining data fits into current packet. */
+		copy = mtu - skb->len;
+		if (copy < length)
+			copy = maxfraglen - skb->len;
+
+		if (copy <= 0) {
 			char *data;
 			unsigned int datalen;
 			unsigned int fraglen;
+			unsigned int fraggap;
 			unsigned int alloclen;
-			BUG_TRAP(copy == 0);
+			struct sk_buff *skb_prev;
 alloc_new_skb:
-			datalen = maxfraglen - fragheaderlen;
-			if (datalen > length)
-				datalen = length;
+			skb_prev = skb;
+
+			/* There's no room in the current skb */
+			if (skb_prev)
+				fraggap = skb_prev->len - maxfraglen;
+			else
+				fraggap = 0;
+
+			/*
+			 * If remaining data exceeds the mtu,
+			 * we know we need more fragment(s).
+			 */
+			datalen = length + fraggap;
+			if (datalen > mtu - fragheaderlen)
+				datalen = maxfraglen - fragheaderlen;
+
 			fraglen = datalen + fragheaderlen;
 			if ((flags & MSG_MORE) &&
 			    !(rt->u.dst.dev->features&NETIF_F_SG))
-				alloclen = maxfraglen;
+				alloclen = mtu;
 			else
-				alloclen = fraglen;
+				alloclen = datalen + fragheaderlen;
+
+			/*
+			 * The last fragment gets additional space at tail.
+			 * Note: we overallocate on fragments with MSG_MODE
+			 * because we have no idea if we're the last one.
+			 */
+			if (datalen == length + fraggap)
+				alloclen += rt->u.dst.trailer_len;
+
+			/*
+			 * We just reserve space for fragment header.
+			 * Note: this may be overallocation if the message 
+			 * (without MSG_MORE) fits into the MTU.
+			 */
 			alloclen += sizeof(struct frag_hdr);
+
 			if (transhdrlen) {
 				skb = sock_alloc_send_skb(sk,
 						alloclen + hh_len,
@@ -923,7 +968,7 @@ alloc_new_skb:
 			 */
 			skb->ip_summed = csummode;
 			skb->csum = 0;
-			/* reserve 8 byte for fragmentation */
+			/* reserve for fragmentation */
 			skb_reserve(skb, hh_len+sizeof(struct frag_hdr));
 
 			/*
@@ -933,15 +978,29 @@ alloc_new_skb:
 			skb->nh.raw = data + exthdrlen;
 			data += fragheaderlen;
 			skb->h.raw = data + exthdrlen;
-			copy = datalen - transhdrlen;
-			if (copy > 0 && getfrag(from, data + transhdrlen, offset, copy, 0, skb) < 0) {
+
+			if (fraggap) {
+				skb->csum = skb_copy_and_csum_bits(
+					skb_prev, maxfraglen,
+					data + transhdrlen, fraggap, 0);
+				skb_prev->csum = csum_sub(skb_prev->csum,
+							  skb->csum);
+				data += fraggap;
+				skb_trim(skb_prev, maxfraglen);
+			}
+			copy = datalen - transhdrlen - fraggap;
+			if (copy < 0) {
+				err = -EINVAL;
+				kfree_skb(skb);
+				goto error;
+			} else if (copy > 0 && getfrag(from, data + transhdrlen, offset, copy, fraggap, skb) < 0) {
 				err = -EFAULT;
 				kfree_skb(skb);
 				goto error;
 			}
 
 			offset += copy;
-			length -= datalen;
+			length -= datalen - fraggap;
 			transhdrlen = 0;
 			exthdrlen = 0;
 			csummode = CHECKSUM_NONE;

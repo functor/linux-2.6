@@ -38,6 +38,35 @@ config FB
 	  (e.g. an accelerated X server) and that are not frame buffer
 	  device-aware may cause unexpected results. If unsure, say N.
 
+config FB_MODE_HELPERS
+        bool "Enable Video Mode Handling Helpers"
+        depends on FB
+	default n
+	---help---
+	  This enables functions for handling video modes using the
+	  Generalized Timing Formula and the EDID parser. A few drivers rely
+          on this feature such as the radeonfb, rivafb, and the i810fb. If
+	  your driver does not take advantage of this feature, choosing Y will
+	  just increase the kernel size by about 5K.
+
+config FB_TILEBLITTING
+       bool "Enable Tile Blitting Support"
+       depends on FB
+       default n
+       ---help---
+         This enables tile blitting.  Tile blitting is a drawing technique
+	 where the screen is divided into rectangular sections (tiles), whereas
+	 the standard blitting divides the screen into pixels. Because the
+	 default drawing element is a tile, drawing functions will be passed
+	 parameters in terms of number of tiles instead of number of pixels.
+	 For example, to draw a single character, instead of using bitmaps,
+	 an index to an array of bitmaps will be used.  To clear or move a
+	 rectangular section of a screen, the rectangle will be described in
+	 terms of number of tiles in the x- and y-axis.
+
+	 This is particularly important to one driver, matroxfb.  If
+	 unsure, say N.
+
 config FB_CIRRUS
 	tristate "Cirrus Logic support"
 	depends on FB && (ZORRO || PCI)
@@ -67,6 +96,19 @@ config FB_PM2_FIFO_DISCONNECT
 	depends on FB_PM2 && PCI
 	help
 	  Support the Permedia2 FIFO disconnect feature (see CONFIG_FB_PM2).
+
+config FB_ARMCLCD
+	tristate "ARM PrimeCell PL110 support"
+	depends on FB && ARM && ARM_AMBA
+	help
+	  This framebuffer device driver is for the ARM PrimeCell PL110
+	  Colour LCD controller.  ARM PrimeCells provide the building
+	  blocks for System on a Chip devices.
+
+	  If you want to compile this as a module (=code which can be
+	  inserted into and removed from the running kernel), say M
+	  here and read <file:Documentation/modules.txt>.  The module
+	  will be called amba-clcd.
 
 config FB_ACORN
 	bool "Acorn VIDC support"
@@ -392,40 +434,21 @@ config FB_PVR2
 	  (<file:drivers/video/pvr2fb.c>). Please see the file
 	  <file:Documentation/fb/pvr2fb.txt>.
 
-config FB_E1355
+config FB_EPSON1355
 	bool "Epson 1355 framebuffer support"
-	depends on FB && SUPERH
+	depends on FB && (SUPERH || ARCH_CEIVA)
 	help
 	  Build in support for the SED1355 Epson Research Embedded RAMDAC
 	  LCD/CRT Controller (since redesignated as the S1D13505) as a
 	  framebuffer.  Product specs at
 	  <http://www.erd.epson.com/vdc/html/products.htm>.
 
-config E1355_REG_BASE
-	hex "Register Base Address"
-	depends on FB_E1355
-	default "a8000000"
-	help
-	  Epson SED1355/S1D13505 LCD/CRT controller register base address.
-	  See the manuals at
-	  <http://www.erd.epson.com/vdc/html/contents/S1D13505.htm> for
-	  discussion.
-
-config E1355_FB_BASE
-	hex "Framebuffer Base Address"
-	depends on FB_E1355
-	default "a8200000"
-	help
-	  Epson SED1355/S1D13505 LCD/CRT controller memory base address.  See
-	  the manuals at
-	  <http://www.erd.epson.com/vdc/html/contents/S1D13505.htm> for
-	  discussion.
-
 config FB_RIVA
 	tristate "nVidia Riva support"
 	depends on FB && PCI
 	select I2C_ALGOBIT if FB_RIVA_I2C
 	select I2C if FB_RIVA_I2C
+	select FB_MODE_HELPERS
 	help
 	  This driver supports graphics boards with the nVidia Riva/Geforce
 	  chips.
@@ -457,7 +480,10 @@ config FB_RIVA_DEBUG
 
 config FB_I810
 	tristate "Intel 810/815 support (EXPERIMENTAL)"
-	depends on FB && AGP && AGP_INTEL && EXPERIMENTAL && PCI	
+	depends on FB && EXPERIMENTAL && PCI && X86 && !X86_64
+	select AGP
+	select AGP_INTEL
+	select FB_MODE_HELPERS
 	help
 	  This driver supports the on-board graphics built in to the Intel 810 
           and 815 chipsets.  Say Y if you have and plan to use such a board.
@@ -490,6 +516,27 @@ config FB_I810_GTF
 	  using a set recommended by Intel in their documentation.
   
           If unsure, say N.
+
+config FB_INTEL
+	tristate "Intel 830M/845G/852GM/855GM/865G support (EXPERIMENTAL)"
+	depends on FB && EXPERIMENTAL && PCI && X86 && !X86_64
+	select AGP
+	select AGP_INTEL
+	help
+	  This driver supports the on-board graphics built in to the Intel
+          830M/845G/852GM/855GM/865G chipsets.
+          Say Y if you have and plan to use such a board.
+
+          To compile this driver as a module, choose M here: the
+	  module will be called intelfb.
+
+config FB_INTEL_DEBUG
+        bool "Intel driver Debug Messages"
+	depends on FB_INTEL
+	---help---
+	  Say Y here if you want the Intel driver to output all sorts
+	  of debugging informations to provide to the maintainer when
+	  something goes wrong.
 
 config FB_MATROX
 	tristate "Matrox acceleration"
@@ -661,6 +708,7 @@ config FB_RADEON
 	depends on FB && PCI
 	select I2C_ALGOBIT if FB_RADEON_I2C
 	select I2C if FB_RADEON_I2C
+	select FB_MODE_HELPERS
 	help
 	  Choose this option if you want to use an ATI Radeon graphics card as
 	  a framebuffer device.  There are both PCI and AGP versions.  You
@@ -723,6 +771,19 @@ config FB_ATY_CT
 	  framebuffer device.  The ATI product support page for these boards
 	  is at <http://support.ati.com/products/pc/mach64/>.
 
+config FB_ATY_GENERIC_LCD
+	bool "Mach64 generic LCD support (EXPERIMENTAL)"
+	depends on FB_ATY_CT
+	help
+	  Say Y if you have a laptop with an ATI Rage LT PRO, Rage Mobility,
+	  Rage XC, or Rage XL chipset.
+
+config FB_ATY_XL_INIT
+	bool "Rage XL No-BIOS Init support"
+	depends on FB_ATY_CT
+	help
+	  Say Y here to support booting a Rage XL without BIOS support.
+
 config FB_ATY_GX
 	bool "Mach64 GX support" if PCI
 	depends on FB_ATY
@@ -734,11 +795,41 @@ config FB_ATY_GX
 	  is at
 	  <http://support.ati.com/products/pc/mach64/graphics_xpression.html>.
 
-config FB_ATY_XL_INIT
-	bool "  Rage XL No-BIOS Init support" if FB_ATY_CT
-	depends on FB_ATY
+config FB_SAVAGE
+	tristate "S3 Savage support"
+	depends on FB && PCI && EXPERIMENTAL
+	select I2C_ALGOBIT if FB_SAVAGE_I2C
+	select I2C if FB_SAVAGE_I2C
+	select FB_MODE_HELPERS
 	help
-	  Say Y here to support booting a Rage XL without BIOS support.
+	  This driver supports notebooks and computers with S3 Savage PCI/AGP
+	  chips.
+
+	  Say Y if you have such a graphics card.
+
+	  To compile this driver as a module, choose M here; the module
+	  will be called savagefb.
+
+config FB_SAVAGE_I2C
+       tristate "Enable DDC2 Support"
+       depends on FB_SAVAGE
+       help
+	  This enables I2C support for S3 Savage Chipsets.  This is used
+	  only for getting EDID information from the attached display
+	  allowing for robust video mode handling and switching.
+
+	  Because fbdev-2.6 requires that drivers must be able to
+	  independently validate video mode parameters, you should say Y
+	  here.
+
+config FB_SAVAGE_ACCEL
+       tristate "Enable Console Acceleration"
+       depends on FB_SAVAGE
+       default n
+       help
+          This option will compile in console acceleration support. If
+          the resulting framebuffer console has bothersome glitches, then
+          choose N here.
 
 config FB_SIS
 	tristate "SiS acceleration"
@@ -766,6 +857,7 @@ config FB_SIS_315
 config FB_NEOMAGIC
 	tristate "NeoMagic display support"
 	depends on FB && PCI
+	select FB_MODE_HELPERS
 	help
 	  This driver supports notebooks with NeoMagic PCI chips.
 	  Say Y if you have such a graphics card. 

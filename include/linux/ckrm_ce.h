@@ -1,4 +1,5 @@
-/* ckrm_ce.h - Header file to be used by Classification Engine of CKRM
+/*
+ *  ckrm_ce.h - Header file to be used by Classification Engine of CKRM
  *
  * Copyright (C) Hubertus Franke, IBM Corp. 2003
  *           (C) Shailabh Nagar,  IBM Corp. 2003
@@ -32,9 +33,10 @@
 
 #ifdef CONFIG_CKRM
 
-#include <linux/ckrm.h>		// getting the event names
+#include <linux/ckrm_events.h>
 
-/* Action parameters identifying the cause of a task<->class notify callback 
+/*
+ * Action parameters identifying the cause of a task<->class notify callback 
  * these can perculate up to user daemon consuming records send by the 
  * classification engine
  */
@@ -50,39 +52,35 @@ typedef struct ckrm_eng_callback {
 	int always_callback;	/* set if CE should always be called back 
 				   regardless of numclasses */
 
-
-
-
 	/* callbacks which are called without holding locks */
 
 	unsigned long c_interest;	/* set of classification events of 
-					   interest to CE 
-					*/
+					 * interest to CE 
+					 */
 
 	/* generic classify */
-	ce_classify_fct_t classify;	
+	ce_classify_fct_t classify;
+
 	/* class added */
 	void (*class_add) (const char *name, void *core, int classtype);
+
 	/* class deleted */
 	void (*class_delete) (const char *name, void *core, int classtype);
 
-
 	/* callbacks which are called while holding task_lock(tsk) */
-
 	unsigned long n_interest;	/* set of notification events of 
-					   interest to CE 
-					*/
+					 *  interest to CE 
+					 */
 	/* notify on class switch */
 	ce_notify_fct_t notify;	
-
 } ckrm_eng_callback_t;
 
 struct inode;
 struct dentry;
 
 typedef struct rbce_eng_callback {
-	int (*mkdir) (struct inode *, struct dentry *, int);	// mkdir
-	int (*rmdir) (struct inode *, struct dentry *);	// rmdir
+	int (*mkdir) (struct inode *, struct dentry *, int);	/* mkdir */
+	int (*rmdir) (struct inode *, struct dentry *);		/* rmdir */
 	int (*mnt) (void);
 	int (*umnt) (void);
 } rbce_eng_callback_t;
@@ -100,13 +98,11 @@ extern int rcfs_unregister_engine(rbce_eng_callback_t *);
 extern int ckrm_reclassify(int pid);
 
 #ifndef _LINUX_CKRM_RC_H
-// ckrm kernel has inlined functions for this which are exported
+
 extern void ckrm_core_grab(void *);
 extern void ckrm_core_drop(void *);
 #endif
 
-#endif				// CONFIG_CKRM
-
-#endif				// __KERNEL__
-
-#endif				// _LINUX_CKRM_CE_H
+#endif /* CONFIG_CKRM */
+#endif /* __KERNEL__ */
+#endif /* _LINUX_CKRM_CE_H */

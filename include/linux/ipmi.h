@@ -124,7 +124,7 @@ struct ipmi_ipmb_addr
  * In this address, the remote_SWID is always the SWID the remote
  * message came from, or the SWID we are sending the message to.
  * local_SWID is always our SWID.  Note that having our SWID in the
- * message is a little wierd, but this is required.
+ * message is a little weird, but this is required.
  */
 #define IPMI_LAN_ADDR_TYPE		0x04
 struct ipmi_lan_addr
@@ -404,6 +404,12 @@ int ipmi_register_for_cmd(ipmi_user_t   user,
 int ipmi_unregister_for_cmd(ipmi_user_t   user,
 			    unsigned char netfn,
 			    unsigned char cmd);
+
+/*
+ * Allow run-to-completion mode to be set for the interface of
+ * a specific user.
+ */
+void ipmi_user_set_run_to_completion(ipmi_user_t user, int val);
 
 /*
  * When the user is created, it will not receive IPMI events by

@@ -89,7 +89,7 @@ rbce_write(struct file *file, const char __user * buf,
 	}
 	// printk("kernel read |%s|\n", line);
 	// printk("kernel read-2 |%s|\n", line+1000);
-	// printk prints only 1024 bytes once :)
+	// printk prints only 1024 bytes once  :) 
 	//
 	kfree(line);
 	return len;

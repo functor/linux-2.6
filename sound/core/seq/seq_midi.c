@@ -43,8 +43,6 @@ Possible options for midisynth module:
 MODULE_AUTHOR("Frank van de Pol <fvdpol@coil.demon.nl>, Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Advanced Linux Sound Architecture sequencer MIDI synth.");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_SUPPORTED_DEVICE("sound");
 int output_buffer_size = PAGE_SIZE;
 module_param(output_buffer_size, int, 0644);
 MODULE_PARM_DESC(output_buffer_size, "Output buffer size in bytes.");
@@ -281,7 +279,7 @@ static int set_client_name(seq_midisynth_client_t *client, snd_card_t *card,
 	cinfo.client = client->seq_client;
 	cinfo.type = KERNEL_CLIENT;
 	name = rmidi->name[0] ? (const char *)rmidi->name : "External MIDI";
-	snprintf(cinfo.name, sizeof(cinfo.name), "%s - Rawmidi %d", name, card->number);
+	strlcpy(cinfo.name, name, sizeof(cinfo.name));
 	return snd_seq_kernel_client_ctl(client->seq_client, SNDRV_SEQ_IOCTL_SET_CLIENT_INFO, &cinfo);
 }
 
@@ -323,7 +321,7 @@ snd_seq_midisynth_register_port(snd_seq_device_t *dev)
 	client = synths[card->number];
 	if (client == NULL) {
 		newclient = 1;
-		client = snd_kcalloc(sizeof(seq_midisynth_client_t), GFP_KERNEL);
+		client = kcalloc(1, sizeof(*client), GFP_KERNEL);
 		if (client == NULL) {
 			up(&register_mutex);
 			return -ENOMEM;
@@ -341,7 +339,7 @@ snd_seq_midisynth_register_port(snd_seq_device_t *dev)
 	} else if (device == 0)
 		set_client_name(client, card, &info); /* use the first device's name */
 
-	msynth = snd_kcalloc(sizeof(seq_midisynth_t) * ports, GFP_KERNEL);
+	msynth = kcalloc(ports, sizeof(seq_midisynth_t), GFP_KERNEL);
 	if (msynth == NULL)
 		goto __nomem;
 
@@ -466,7 +464,9 @@ static int __init alsa_seq_midi_init(void)
 		snd_seq_midisynth_unregister_port,
 	};
 	memset(&synths, 0, sizeof(synths));
+	snd_seq_autoload_lock();
 	snd_seq_device_register_driver(SNDRV_SEQ_DEV_ID_MIDISYNTH, &ops, 0);
+	snd_seq_autoload_unlock();
 	return 0;
 }
 

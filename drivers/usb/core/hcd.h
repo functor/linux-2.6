@@ -67,7 +67,6 @@ struct usb_hcd {	/* usb_bus.hcpriv points to this */
 
 	struct timer_list	rh_timer;	/* drives root hub */
 	struct list_head	dev_list;	/* devices on this bus */
-	struct work_struct	work;
 
 	/*
 	 * hardware info/state
@@ -77,11 +76,10 @@ struct usb_hcd {	/* usb_bus.hcpriv points to this */
 	unsigned		can_wakeup:1;	/* hw supports wakeup? */
 	unsigned		remote_wakeup:1;/* sw should use wakeup? */
 	int			irq;		/* irq allocated */
-	void			*regs;		/* device memory/io */
+	void __iomem		*regs;		/* device memory/io */
 
 #ifdef	CONFIG_PCI
 	int			region;		/* pci region for regs */
-	u32			pci_state [16];	/* for PM state save */
 #endif
 
 #define HCD_BUFFER_POOLS	4
@@ -193,8 +191,13 @@ struct hc_driver {
 	int	(*get_frame_number) (struct usb_hcd *hcd);
 
 	/* memory lifecycle */
+	/* Note: The absence of hcd_free reflects a temporary situation;
+	 * in the near future hcd_alloc will disappear as well and all
+	 * allocations/deallocations will be handled by usbcore.  For the
+	 * moment, drivers are required to return a pointer that the core
+	 * can pass to kfree, i.e., the struct usb_hcd must be the _first_
+	 * member of a larger driver-specific structure. */
 	struct usb_hcd	*(*hcd_alloc) (void);
-	void		(*hcd_free) (struct usb_hcd *hcd);
 
 	/* manage i/o requests, device state */
 	int	(*urb_enqueue) (struct usb_hcd *hcd, struct urb *urb,
@@ -212,11 +215,11 @@ struct hc_driver {
 				char *buf, u16 wLength);
 	int		(*hub_suspend)(struct usb_hcd *);
 	int		(*hub_resume)(struct usb_hcd *);
+	int		(*start_port_reset)(struct usb_hcd *, unsigned port_num);
 };
 
 extern void usb_hcd_giveback_urb (struct usb_hcd *hcd, struct urb *urb, struct pt_regs *regs);
 extern void usb_bus_init (struct usb_bus *bus);
-extern int usb_rh_status_dequeue (struct usb_hcd *hcd, struct urb *urb);
 
 #ifdef CONFIG_PCI
 struct pci_dev;
@@ -362,6 +365,11 @@ static inline int hcd_register_root (struct usb_device *usb_dev,
 	return usb_register_root_hub (usb_dev, hcd->self.controller);
 }
 
+extern void usb_hcd_release (struct usb_bus *);
+
+extern void usb_set_device_state(struct usb_device *udev,
+		enum usb_device_state new_state);
+
 /*-------------------------------------------------------------------------*/
 
 /* exported only within usbcore */
@@ -375,8 +383,6 @@ extern void usb_bus_put (struct usb_bus *bus);
 
 extern int usb_find_interface_driver (struct usb_device *dev,
 	struct usb_interface *interface);
-
-#define usb_endpoint_halt(dev, ep, out) ((dev)->halted[out] |= (1 << (ep)))
 
 #define usb_endpoint_out(ep_dir)	(!((ep_dir) & USB_DIR_IN))
 

@@ -43,8 +43,7 @@
 
 #define TC_FILE_MODE (S_IFREG | S_IRUGO | S_IWUSR)
 
-#define NR_TCROOTMF  7
-struct rcfs_magf tc_rootdesc[NR_TCROOTMF] = {
+struct rcfs_magf tc_rootdesc[] = {
 	/* First entry must be root */
 	{
 //              .name    = should not be set, copy from classtype name
@@ -53,12 +52,6 @@ struct rcfs_magf tc_rootdesc[NR_TCROOTMF] = {
 	 .i_fop = &simple_dir_operations,
 	 },
 	/* Rest are root's magic files */
-	{
-	 .name = "target",
-	 .mode = TC_FILE_MODE,
-	 .i_fop = &target_fileops,
-	 .i_op = &rcfs_file_inode_operations,
-	 },
 	{
 	 .name = "members",
 	 .mode = TC_FILE_MODE,
@@ -96,5 +89,5 @@ struct rcfs_magf tc_rootdesc[NR_TCROOTMF] = {
 
 struct rcfs_mfdesc tc_mfdesc = {
 	.rootmf = tc_rootdesc,
-	.rootmflen = NR_TCROOTMF,
+	.rootmflen = (sizeof(tc_rootdesc) / sizeof(struct rcfs_magf)),
 };

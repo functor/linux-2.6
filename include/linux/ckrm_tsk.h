@@ -22,6 +22,7 @@
 #ifndef _LINUX_CKRM_TSK_H
 #define _LINUX_CKRM_TSK_H
 
+#ifdef CONFIG_CKRM_TYPE_TASKCLASS
 #include <linux/ckrm_rc.h>
 
 typedef int (*get_ref_t) (void *, int);
@@ -31,4 +32,10 @@ extern int numtasks_get_ref(void *, int);
 extern void numtasks_put_ref(void *);
 extern void ckrm_numtasks_register(get_ref_t, put_ref_t);
 
-#endif				// _LINUX_CKRM_RES_H
+#else /* CONFIG_CKRM_TYPE_TASKCLASS */
+
+#define numtasks_get_ref(a, b)	(1)
+#define numtasks_put_ref(a)	do {} while(0)
+
+#endif /* CONFIG_CKRM_TYPE_TASKCLASS */
+#endif /* _LINUX_CKRM_RES_H */

@@ -188,6 +188,13 @@ Module parameters
 
     This module supports up to 8 cards and autoprobe.
 
+  Module snd-atiixp-modem
+  -----------------------
+
+    Module for ATI IXP 150/200/250 AC97 modem controllers.
+
+    Module supports up to 8 cards.
+
   Module snd-au8810, snd-au8820, snd-au8830
   -----------------------------------------
 
@@ -516,6 +523,13 @@ Module parameters
 
     Module for ForteMedia FM801 based PCI soundcards.
 
+    tea575x_tuner       - Enable TEA575x tuner
+                          - 1 = MediaForte 256-PCS
+                          - 2 = MediaForte 256-PCPR
+                          - 3 = MediaForte 64-PCR  
+                          - High 16-bits are video (radio) device number + 1
+                          - example: 0x10002 (MediaForte 256-PCPR, device 1)
+
     Module supports up to 8 cards and autoprobe.
     
   Module snd-gusclassic
@@ -613,7 +627,7 @@ Module parameters
     model       - Use the given board model, one of the following:
 		  delta1010, dio2496, delta66, delta44, audiophile, delta410,
 		  delta1010lt, vx442, ewx2496, ews88mt, ews88mt_new, ews88d,
-		  dmx6fire, dsp24, dsp24_71, ez8
+		  dmx6fire, dsp24, dsp24_value, dsp24_71, ez8
     omni	- Omni I/O support for MidiMan M-Audio Delta44/66
     cs8427_timeout - reset timeout for the CS8427 chip (S/PDIF transciever)
                      in msec resolution, default value is 500 (0.5 sec)
@@ -631,7 +645,8 @@ Module parameters
 			* TerraTec Aureon Sky-5.1, Space-7.1
 
     model       - Use the given board model, one of the following:
-		  revo71, amp2000, prodigy71, aureon51, aureon71
+		  revo71, amp2000, prodigy71, aureon51, aureon71,
+		  k8x800
 
     Module supports up to 8 cards and autoprobe.
 
@@ -646,8 +661,6 @@ Module parameters
 			* ALi m5455
 
     ac97_clock	  - AC'97 codec clock base (0 = auto-detect)
-    joystick      - Enable joystick (default off)
-    mpu_port      - MPU401 port # (0 = disabled, 0x330,0x300)
     ac97_quirk    - AC'97 workaround for strange hardware (-1 = default)
                     -1 = default, don't override
                      0 = disable
@@ -655,6 +668,9 @@ Module parameters
                      2 = swap headphone and master controls
                      3 = for AD1985, turn on OMS bit and use headphone
                      4 = for ALC65x, turn on the jack sense mode
+                     5 = inverted EAPD implementation
+    buggy_irq      - Enable workaround for buggy interrupts on some
+                     motherboards (default off)
 
     Module supports autoprobe and multiple bus-master chips (max 8).
 
@@ -662,8 +678,9 @@ Module parameters
     if you still encounter too fast playback, specify the clock
     explicitly via the module option "ac97_clock=41194".
 
-    The joystick and MPU-401 are supported only certain hardwares.
-    MPU401 is experimental,  It doesn't work perfectly.
+    Joystick/MIDI ports are not supported by this driver.  If your
+    motherboard has these devices, use the ns558 or snd-mpu401
+    modules, respectively.
 
     The ac97_quirk option is used to enable/override the workaround
     for specific devices.  Some hardware have swapped output pins
@@ -792,6 +809,7 @@ Module parameters
     buffer_top       - specify buffer top address
     use_cache        - 0 or 1 (disabled by default)
     vaio_hack        - alias buffer_top=0x25a800
+    reset_workaround - enable AC97 RESET workaround for some laptops
 
     Module supports autoprobe and multiple chips (max 8).
 
@@ -816,6 +834,11 @@ Module parameters
     other drivers, e.g. snd-cs4232 or snd-opl3sa2.  Some has ISA-PnP
     but some doesn't have ISA PnP.  You'll need to speicfy isapnp=0
     and proper hardware parameters in the case without ISA PnP.
+
+    Note: some laptops need a workaround for AC97 RESET.  For the
+    known hardware like Dell Latitude LS and Sony PCG-F305, this
+    workaround is enabled automatically.  For other laptops with a
+    hard freeze, you can try reset_workaround=1 option.
 
     Note: This driver is really crappy.  It's a porting from the
     OSS driver, which is a result of black-magic reverse engineering.
@@ -1102,6 +1125,16 @@ Module parameters
     pid             - Product ID for the device (optional)
 
     This module supports up to 8 cards, autoprobe and hotplugging.
+
+  Module snd-usb-usx2y
+  --------------------
+
+    Module for Tascam USB US-122, US-224 and US-428 devices.
+
+    This module supports up to 8 cards, autoprobe and hotplugging.
+
+    Note: you need to load the firmware via usx2yloader utility included
+          in alsa-tools and alsa-firmware packages.
 
   Module snd-via82xx
   ------------------

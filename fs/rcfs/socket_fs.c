@@ -49,7 +49,7 @@ int sock_mknod_noperm(struct inode *, struct dentry *, int, dev_t);
 void sock_set_directory(void);
 
 extern struct file_operations config_fileops,
-    members_fileops, shares_fileops, stats_fileops, target_fileops;
+    members_fileops, shares_fileops, stats_fileops;
 
 struct inode_operations my_iops = {
 	.create = rcfs_create,
@@ -108,12 +108,6 @@ struct rcfs_magf sock_rootdesc[] = {
 	 .i_fop = &members_fileops,
 	 },
 	{
-	 .name = "target",
-	 .mode = RCFS_DEFAULT_FILE_MODE,
-	 .i_op = &my_iops,
-	 .i_fop = &target_fileops,
-	 },
-	{
 	 .name = "reclassify",
 	 .mode = RCFS_DEFAULT_FILE_MODE,
 	 .i_op = &my_iops,
@@ -145,12 +139,6 @@ struct rcfs_magf sock_magf[] = {
 	 .mode = RCFS_DEFAULT_FILE_MODE,
 	 .i_op = &my_iops,
 	 .i_fop = &stats_fileops,
-	 },
-	{
-	 .name = "target",
-	 .mode = RCFS_DEFAULT_FILE_MODE,
-	 .i_op = &my_iops,
-	 .i_fop = &target_fileops,
 	 },
 };
 

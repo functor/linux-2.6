@@ -26,6 +26,7 @@
 #define FTDI_SIO_PID	0x8372	/* Product Id SIO application of 8U100AX  */
 #define FTDI_8U232AM_PID 0x6001 /* Similar device to SIO above */
 #define FTDI_8U232AM_ALT_PID 0x6006 /* FTDI's alternate PID for above */
+#define FTDI_8U2232C_PID 0x6010 /* Dual channel device */
 #define FTDI_RELAIS_PID	0xFA10  /* Relais device from Rudolf Gugler */
 #define FTDI_NF_RIC_VID	0x0DCD	/* Vendor Id */
 #define FTDI_NF_RIC_PID	0x0001	/* Product Id */
@@ -224,6 +225,21 @@
  */
 #define FTDI_SUUNTO_SPORTS_PID	0xF680	/* Suunto Sports instrument */
 
+/*
+ * Definitions for B&B Electronics products.
+ */
+#define BANDB_VID		0x0856	/* B&B Electronics Vendor ID */
+#define BANDB_USOTL4_PID	0xAC01	/* USOTL4 Isolated RS-485 Converter */
+#define BANDB_USTL4_PID		0xAC02	/* USTL4 RS-485 Converter */
+#define BANDB_USO9ML2_PID	0xAC03	/* USO9ML2 Isolated RS-232 Converter */
+
+/*
+ * RM Michaelides CANview USB (http://www.rmcan.com)
+ * CAN filedbus interface adapter, addad by port GmbH www.port.de)
+ */
+#define FTDI_RM_VID		0x0403	/* Vendor  Id */
+#define FTDI_RMCANVIEW_PID	0xfd60	/* Product Id */
+
 /* Commands */
 #define FTDI_SIO_RESET 		0 /* Reset the port */
 #define FTDI_SIO_MODEM_CTRL 	1 /* Set the modem control register */
@@ -233,6 +249,21 @@
 #define FTDI_SIO_GET_MODEM_STATUS	5 /* Retrieve current value of modern status register */
 #define FTDI_SIO_SET_EVENT_CHAR	6 /* Set the event character */
 #define FTDI_SIO_SET_ERROR_CHAR	7 /* Set the error character */
+
+/* Port interface code for FT2232C */
+#define INTERFACE_A		1
+#define INTERFACE_B		2
+
+
+/*
+ *   BmRequestType:  1100 0000b
+ *   bRequest:       FTDI_E2_READ
+ *   wValue:         0
+ *   wIndex:         Address of word to read
+ *   wLength:        2
+ *   Data:           Will return a word of data from E2Address
+ *
+ */
 
 /* Port Identifier Table */
 #define PIT_DEFAULT 		0 /* SIOA */
@@ -333,6 +364,7 @@ typedef enum {
 	SIO = 1,
 	FT8U232AM = 2,
 	FT232BM = 3,
+	FT2232C = 4,
 } ftdi_chip_type_t;
 
 typedef enum {

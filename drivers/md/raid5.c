@@ -21,7 +21,7 @@
 #include <linux/slab.h>
 #include <linux/raid/raid5.h>
 #include <linux/highmem.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <asm/atomic.h>
 
 /*
@@ -477,8 +477,8 @@ static void error(mddev_t *mddev, mdk_rdev_t *rdev)
 
 	if (!rdev->faulty) {
 		mddev->sb_dirty = 1;
-		conf->working_disks--;
 		if (rdev->in_sync) {
+			conf->working_disks--;
 			mddev->degraded++;
 			conf->failed_disks++;
 			rdev->in_sync = 0;
@@ -1071,7 +1071,8 @@ static void handle_stripe(struct stripe_head *sh)
 					PRINTK("Reading block %d (sync=%d)\n", 
 						i, syncing);
 					if (syncing)
-						md_sync_acct(conf->disks[i].rdev, STRIPE_SECTORS);
+						md_sync_acct(conf->disks[i].rdev->bdev,
+							     STRIPE_SECTORS);
 				}
 			}
 		}
@@ -1246,17 +1247,17 @@ static void handle_stripe(struct stripe_head *sh)
 		else
 			bi->bi_end_io = raid5_end_read_request;
  
-		spin_lock_irq(&conf->device_lock);
+		rcu_read_lock();
 		rdev = conf->disks[i].rdev;
 		if (rdev && rdev->faulty)
 			rdev = NULL;
 		if (rdev)
 			atomic_inc(&rdev->nr_pending);
-		spin_unlock_irq(&conf->device_lock);
+		rcu_read_unlock();
  
 		if (rdev) {
 			if (test_bit(R5_Syncio, &sh->dev[i].flags))
-				md_sync_acct(rdev, STRIPE_SECTORS);
+				md_sync_acct(rdev->bdev, STRIPE_SECTORS);
 
 			bi->bi_bdev = rdev->bdev;
 			PRINTK("for %llu schedule op %ld on disc %d\n",
@@ -1301,25 +1302,24 @@ static void unplug_slaves(mddev_t *mddev)
 {
 	raid5_conf_t *conf = mddev_to_conf(mddev);
 	int i;
-	unsigned long flags;
 
-	spin_lock_irqsave(&conf->device_lock, flags);
+	rcu_read_lock();
 	for (i=0; i<mddev->raid_disks; i++) {
 		mdk_rdev_t *rdev = conf->disks[i].rdev;
-		if (rdev && atomic_read(&rdev->nr_pending)) {
+		if (rdev && !rdev->faulty && atomic_read(&rdev->nr_pending)) {
 			request_queue_t *r_queue = bdev_get_queue(rdev->bdev);
 
 			atomic_inc(&rdev->nr_pending);
-			spin_unlock_irqrestore(&conf->device_lock, flags);
+			rcu_read_unlock();
 
-			if (r_queue && r_queue->unplug_fn)
+			if (r_queue->unplug_fn)
 				r_queue->unplug_fn(r_queue);
 
-			spin_lock_irqsave(&conf->device_lock, flags);
-			atomic_dec(&rdev->nr_pending);
+			rdev_dec_pending(rdev, mddev);
+			rcu_read_lock();
 		}
 	}
-	spin_unlock_irqrestore(&conf->device_lock, flags);
+	rcu_read_unlock();
 }
 
 static void raid5_unplug_device(request_queue_t *q)
@@ -1337,6 +1337,36 @@ static void raid5_unplug_device(request_queue_t *q)
 	spin_unlock_irqrestore(&conf->device_lock, flags);
 
 	unplug_slaves(mddev);
+}
+
+static int raid5_issue_flush(request_queue_t *q, struct gendisk *disk,
+			     sector_t *error_sector)
+{
+	mddev_t *mddev = q->queuedata;
+	raid5_conf_t *conf = mddev_to_conf(mddev);
+	int i, ret = 0;
+
+	rcu_read_lock();
+	for (i=0; i<mddev->raid_disks && ret == 0; i++) {
+		mdk_rdev_t *rdev = conf->disks[i].rdev;
+		if (rdev && !rdev->faulty) {
+			struct block_device *bdev = rdev->bdev;
+			request_queue_t *r_queue = bdev_get_queue(bdev);
+
+			if (!r_queue->issue_flush_fn)
+				ret = -EOPNOTSUPP;
+			else {
+				atomic_inc(&rdev->nr_pending);
+				rcu_read_unlock();
+				ret = r_queue->issue_flush_fn(r_queue, bdev->bd_disk,
+							      error_sector);
+				rdev_dec_pending(rdev, mddev);
+				rcu_read_lock();
+			}
+		}
+	}
+	rcu_read_unlock();
+	return ret;
 }
 
 static inline void raid5_plug_device(raid5_conf_t *conf)
@@ -1376,7 +1406,7 @@ static int make_request (request_queue_t *q, struct bio * bi)
 		new_sector = raid5_compute_sector(logical_sector,
 						  raid_disks, data_disks, &dd_idx, &pd_idx, conf);
 
-		PRINTK("raid5: make_request, sector %Lu logical %Lu\n",
+		PRINTK("raid5: make_request, sector %llu logical %llu\n",
 			(unsigned long long)new_sector, 
 			(unsigned long long)logical_sector);
 
@@ -1545,6 +1575,7 @@ static int run (mddev_t *mddev)
 	atomic_set(&conf->preread_active_stripes, 0);
 
 	mddev->queue->unplug_fn = raid5_unplug_device;
+	mddev->queue->issue_flush_fn = raid5_issue_flush;
 
 	PRINTK("raid5: run(%s) called.\n", mdname(mddev));
 
@@ -1676,6 +1707,7 @@ static int stop (mddev_t *mddev)
 	mddev->thread = NULL;
 	shrink_stripes(conf);
 	free_pages((unsigned long) conf->stripe_hashtbl, HASH_PAGES_ORDER);
+	blk_sync_queue(mddev->queue); /* the unplug fn references 'conf'*/
 	kfree(conf);
 	mddev->private = NULL;
 	return 0;
@@ -1764,7 +1796,6 @@ static int raid5_spare_active(mddev_t *mddev)
 	raid5_conf_t *conf = mddev->private;
 	struct disk_info *tmp;
 
-	spin_lock_irq(&conf->device_lock);
 	for (i = 0; i < conf->raid_disks; i++) {
 		tmp = conf->disks + i;
 		if (tmp->rdev
@@ -1776,7 +1807,6 @@ static int raid5_spare_active(mddev_t *mddev)
 			tmp->rdev->in_sync = 1;
 		}
 	}
-	spin_unlock_irq(&conf->device_lock);
 	print_raid5_conf(conf);
 	return 0;
 }
@@ -1784,25 +1814,28 @@ static int raid5_spare_active(mddev_t *mddev)
 static int raid5_remove_disk(mddev_t *mddev, int number)
 {
 	raid5_conf_t *conf = mddev->private;
-	int err = 1;
+	int err = 0;
+	mdk_rdev_t *rdev;
 	struct disk_info *p = conf->disks + number;
 
 	print_raid5_conf(conf);
-	spin_lock_irq(&conf->device_lock);
-
-	if (p->rdev) {
-		if (p->rdev->in_sync || 
-		    atomic_read(&p->rdev->nr_pending)) {
+	rdev = p->rdev;
+	if (rdev) {
+		if (rdev->in_sync ||
+		    atomic_read(&rdev->nr_pending)) {
 			err = -EBUSY;
 			goto abort;
 		}
 		p->rdev = NULL;
-		err = 0;
+		synchronize_kernel();
+		if (atomic_read(&rdev->nr_pending)) {
+			/* lost the race, try later */
+			err = -EBUSY;
+			p->rdev = rdev;
+		}
 	}
-	if (err)
-		MD_BUG();
 abort:
-	spin_unlock_irq(&conf->device_lock);
+
 	print_raid5_conf(conf);
 	return err;
 }
@@ -1814,19 +1847,17 @@ static int raid5_add_disk(mddev_t *mddev, mdk_rdev_t *rdev)
 	int disk;
 	struct disk_info *p;
 
-	spin_lock_irq(&conf->device_lock);
 	/*
 	 * find the disk ...
 	 */
 	for (disk=0; disk < mddev->raid_disks; disk++)
 		if ((p=conf->disks + disk)->rdev == NULL) {
-			p->rdev = rdev;
 			rdev->in_sync = 0;
 			rdev->raid_disk = disk;
 			found = 1;
+			p->rdev = rdev;
 			break;
 		}
-	spin_unlock_irq(&conf->device_lock);
 	print_raid5_conf(conf);
 	return found;
 }

@@ -130,6 +130,9 @@ static __inline__ int icmp_filter(struct sock *sk, struct sk_buff *skb)
 {
 	int type;
 
+	if (!pskb_may_pull(skb, sizeof(struct icmphdr)))
+		return 1;
+
 	type = skb->h.icmph->type;
 	if (type < 32) {
 		__u32 data = raw4_sk(sk)->filter.data;
@@ -323,6 +326,51 @@ error:
 	return err; 
 }
 
+static void raw_probe_proto_opt(struct flowi *fl, struct msghdr *msg)
+{
+	struct iovec *iov;
+	u8 __user *type = NULL;
+	u8 __user *code = NULL;
+	int probed = 0;
+	int i;
+
+	if (!msg->msg_iov)
+		return;
+
+	for (i = 0; i < msg->msg_iovlen; i++) {
+		iov = &msg->msg_iov[i];
+		if (!iov)
+			continue;
+
+		switch (fl->proto) {
+		case IPPROTO_ICMP:
+			/* check if one-byte field is readable or not. */
+			if (iov->iov_base && iov->iov_len < 1)
+				break;
+
+			if (!type) {
+				type = iov->iov_base;
+				/* check if code field is readable or not. */
+				if (iov->iov_len > 1)
+					code = type + 1;
+			} else if (!code)
+				code = iov->iov_base;
+
+			if (type && code) {
+				get_user(fl->fl_icmp_type, type);
+				__get_user(fl->fl_icmp_code, code);
+				probed = 1;
+			}
+			break;
+		default:
+			probed = 1;
+			break;
+		}
+		if (probed)
+			break;
+	}
+}
+
 static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		       size_t len)
 {
@@ -362,7 +410,7 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				printk(KERN_INFO "%s forgot to set AF_INET in "
 						 "raw sendmsg. Fix it!\n",
 						 current->comm);
-			err = -EINVAL;
+			err = -EAFNOSUPPORT;
 			if (usin->sin_family)
 				goto out;
 		}
@@ -429,6 +477,9 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				    .proto = inet->hdrincl ? IPPROTO_RAW :
 					    		     sk->sk_protocol,
 				  };
+		if (!inet->hdrincl)
+			raw_probe_proto_opt(&fl, msg);
+
 		err = ip_route_output_flow(&rt, &fl, sk, !(msg->msg_flags&MSG_DONTWAIT));
 	}
 	if (err)
@@ -658,6 +709,7 @@ static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 
 struct proto raw_prot = {
 	.name =		"RAW",
+	.owner =	THIS_MODULE,
 	.close =	raw_close,
 	.connect =	ip4_datagram_connect,
 	.disconnect =	udp_disconnect,
@@ -671,6 +723,7 @@ struct proto raw_prot = {
 	.backlog_rcv =	raw_rcv_skb,
 	.hash =		raw_v4_hash,
 	.unhash =	raw_v4_unhash,
+	.slab_obj_size = sizeof(struct raw_sock),
 };
 
 #ifdef CONFIG_PROC_FS

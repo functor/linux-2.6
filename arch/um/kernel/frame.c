@@ -21,6 +21,7 @@
 #include "sysdep/sigcontext.h"
 #include "frame_user.h"
 #include "kern_util.h"
+#include "user_util.h"
 #include "ptrace_user.h"
 #include "os.h"
 
@@ -40,7 +41,7 @@ static int capture_stack(int (*child)(void *arg), void *arg, void *sp,
 	/* Wait for it to stop itself and continue it with a SIGUSR1 to force 
 	 * it into the signal handler.
 	 */
-	n = waitpid(pid, &status, WUNTRACED);
+	CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
 	if(n < 0){
 		printf("capture_stack : waitpid failed - errno = %d\n", errno);
 		exit(1);
@@ -60,7 +61,7 @@ static int capture_stack(int (*child)(void *arg), void *arg, void *sp,
 	 * At this point, the handler has stuffed the addresses of
 	 * sig, sc, and SA_RESTORER in raw.
 	 */
-	n = waitpid(pid, &status, WUNTRACED);
+	CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
 	if(n < 0){
 		printf("capture_stack : waitpid failed - errno = %d\n", errno);
 		exit(1);
@@ -82,7 +83,8 @@ static int capture_stack(int (*child)(void *arg), void *arg, void *sp,
 		       errno);
 		exit(1);
 	}
-	if(waitpid(pid, &status, 0) < 0){
+	CATCH_EINTR(n = waitpid(pid, &status, 0));
+	if(n < 0){
 		printf("capture_stack : waitpid failed - errno = %d\n", errno);
 		exit(1);
 	}
@@ -138,7 +140,7 @@ static void child_common(struct common_raw *common, sighandler_t handler,
 	}
 	if(sigaltstack(&ss, NULL) < 0){
 		printf("sigaltstack failed - errno = %d\n", errno);
-		kill(getpid(), SIGKILL);
+		kill(os_getpid(), SIGKILL);
 	}
 
 	if(restorer){
@@ -160,7 +162,7 @@ static void child_common(struct common_raw *common, sighandler_t handler,
 	
 	if(err < 0){
 		printf("sigaction failed - errno = %d\n", errno);
-		kill(getpid(), SIGKILL);
+		kill(os_getpid(), SIGKILL);
 	}
 
 	os_stop_process(os_getpid());
@@ -189,7 +191,7 @@ static void sc_handler(int sig, struct sigcontext sc)
 	setup_arch_frame_raw(&raw_sc->common.arch, &sc + 1, raw_sc->common.sr);
 
 	os_stop_process(os_getpid());
-	kill(getpid(), SIGKILL);
+	kill(os_getpid(), SIGKILL);
 }
 
 static int sc_child(void *arg)
@@ -227,7 +229,7 @@ static void si_handler(int sig, siginfo_t *si, struct ucontext *ucontext)
 			     ucontext->uc_mcontext.fpregs, raw_si->common.sr);
 	
 	os_stop_process(os_getpid());
-	kill(getpid(), SIGKILL);
+	kill(os_getpid(), SIGKILL);
 }
 
 static int si_child(void *arg)
@@ -279,7 +281,7 @@ void capture_signal_stack(void)
 	struct sc_frame_raw raw_sc;
 	struct si_frame_raw raw_si;
 	void *stack, *sigstack;
-	unsigned long top, sig_top, base;
+	unsigned long top, base;
 
 	stack = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
 		     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -292,7 +294,6 @@ void capture_signal_stack(void)
 	}
 
 	top = (unsigned long) stack + PAGE_SIZE - sizeof(void *);
-	sig_top = (unsigned long) sigstack + PAGE_SIZE;
 
 	/* Get the sigcontext, no sigrestorer layout */
 	raw_sc.restorer = 0;

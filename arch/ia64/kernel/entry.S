@@ -128,7 +128,7 @@ GLOBAL_ENTRY(sys_clone2)
 (p6)	st8 [r2]=in5				// store TLS in r16 for copy_thread()
 	mov out5=in4	// child_tidptr:  valid only w/CLONE_CHILD_SETTID or CLONE_CHILD_CLEARTID
 	adds out2=IA64_SWITCH_STACK_SIZE+16,sp	// out2 = &regs
-	dep out0=0,in0,CLONE_IDLETASK_BIT,1	// out0 = clone_flags & ~CLONE_IDLETASK
+	mov out0=in0				// out0 = clone_flags
 	br.call.sptk.many rp=do_fork
 .ret1:	.restore sp
 	adds sp=IA64_SWITCH_STACK_SIZE,sp	// pop the switch stack
@@ -157,7 +157,7 @@ GLOBAL_ENTRY(sys_clone)
 (p6)	st8 [r2]=in4				// store TLS in r13 (tp)
 	mov out5=in3	// child_tidptr:  valid only w/CLONE_CHILD_SETTID or CLONE_CHILD_CLEARTID
 	adds out2=IA64_SWITCH_STACK_SIZE+16,sp	// out2 = &regs
-	dep out0=0,in0,CLONE_IDLETASK_BIT,1	// out0 = clone_flags & ~CLONE_IDLETASK
+	mov out0=in0				// out0 = clone_flags
 	br.call.sptk.many rp=do_fork
 .ret2:	.restore sp
 	adds sp=IA64_SWITCH_STACK_SIZE,sp	// pop the switch stack
@@ -1526,11 +1526,11 @@ sys_call_table:
 	data8 sys_mq_notify
 	data8 sys_mq_getsetattr
 	data8 sys_ni_syscall			// reserved for kexec_load
-	data8 sys_ni_syscall
-	data8 sys_ni_syscall			// 1270
-	data8 sys_ni_syscall
-	data8 sys_ni_syscall
-	data8 sys_ni_syscall
+	data8 sys_ni_syscall			// reserved for vserver
+	data8 sys_waitid			// 1270
+	data8 sys_add_key
+	data8 sys_request_key
+	data8 sys_keyctl
 	data8 sys_ni_syscall
 	data8 sys_ni_syscall			// 1275
 	data8 sys_ni_syscall

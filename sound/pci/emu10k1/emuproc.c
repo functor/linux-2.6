@@ -71,31 +71,32 @@ static void snd_emu10k1_proc_spdif_status(emu10k1_t * emu,
 static void snd_emu10k1_proc_read(snd_info_entry_t *entry, 
 				  snd_info_buffer_t * buffer)
 {
-	static char *outputs[32] = {
-		/* 00 */ "PCM Left",
-		/* 01 */ "PCM Right",
-		/* 02 */ "PCM Surround Left",
-		/* 03 */ "PCM Surround Right",
-		/* 04 */ "MIDI Left",
-		/* 05 */ "MIDI Right",
-		/* 06 */ "PCM Center",
-		/* 07 */ "PCM LFE",
-		/* 08 */ "???",
-		/* 09 */ "???",
-		/* 10 */ "???",
-		/* 11 */ "???",
-		/* 12 */ "MIDI Reverb",
-		/* 13 */ "MIDI Chorus",
-		/* 14 */ "???",
+	/* FIXME - output names are in emufx.c too */
+	static char *creative_outs[32] = {
+		/* 00 */ "AC97 Left",
+		/* 01 */ "AC97 Right",
+		/* 02 */ "Optical IEC958 Left",
+		/* 03 */ "Optical IEC958 Right",
+		/* 04 */ "Center",
+		/* 05 */ "LFE",
+		/* 06 */ "Headphone Left",
+		/* 07 */ "Headphone Right",
+		/* 08 */ "Surround Left",
+		/* 09 */ "Surround Right",
+		/* 10 */ "PCM Capture Left",
+		/* 11 */ "PCM Capture Right",
+		/* 12 */ "MIC Capture",
+		/* 13 */ "AC97 Surround Left",
+		/* 14 */ "AC97 Surround Right",
 		/* 15 */ "???",
 		/* 16 */ "???",
-		/* 17 */ "???",
-		/* 18 */ "ADC Left / CDROM S/PDIF Left",
-		/* 19 */ "ADC Right / CDROM S/PDIF Right",
-		/* 20 */ "MIC / Zoom Video Left",
-		/* 21 */ "Zoom Video Right",
-		/* 22 */ "S/PDIF Left",
-		/* 23 */ "S/PDIF Right",
+		/* 17 */ "Analog Center",
+		/* 18 */ "Analog LFE",
+		/* 19 */ "???",
+		/* 20 */ "???",
+		/* 21 */ "???",
+		/* 22 */ "???",
+		/* 23 */ "???",
 		/* 24 */ "???",
 		/* 25 */ "???",
 		/* 26 */ "???",
@@ -105,9 +106,78 @@ static void snd_emu10k1_proc_read(snd_info_entry_t *entry,
 		/* 30 */ "???",
 		/* 31 */ "???"
 	};
-	emu10k1_t *emu = snd_magic_cast(emu10k1_t, entry->private_data, return);
+
+	static char *audigy_outs[64] = {
+		/* 00 */ "Digital Front Left",
+		/* 01 */ "Digital Front Right",
+		/* 02 */ "Digital Center",
+		/* 03 */ "Digital LEF",
+		/* 04 */ "Headphone Left",
+		/* 05 */ "Headphone Right",
+		/* 06 */ "Digital Rear Left",
+		/* 07 */ "Digital Rear Right",
+		/* 08 */ "Front Left",
+		/* 09 */ "Front Right",
+		/* 10 */ "Center",
+		/* 11 */ "LFE",
+		/* 12 */ "???",
+		/* 13 */ "???",
+		/* 14 */ "Rear Left",
+		/* 15 */ "Rear Right",
+		/* 16 */ "AC97 Front Left",
+		/* 17 */ "AC97 Front Right",
+		/* 18 */ "ADC Caputre Left",
+		/* 19 */ "ADC Capture Right",
+		/* 20 */ "???",
+		/* 21 */ "???",
+		/* 22 */ "???",
+		/* 23 */ "???",
+		/* 24 */ "???",
+		/* 25 */ "???",
+		/* 26 */ "???",
+		/* 27 */ "???",
+		/* 28 */ "???",
+		/* 29 */ "???",
+		/* 30 */ "???",
+		/* 31 */ "???",
+		/* 32 */ "???",
+		/* 33 */ "???",
+		/* 34 */ "???",
+		/* 35 */ "???",
+		/* 36 */ "???",
+		/* 37 */ "???",
+		/* 38 */ "???",
+		/* 39 */ "???",
+		/* 40 */ "???",
+		/* 41 */ "???",
+		/* 42 */ "???",
+		/* 43 */ "???",
+		/* 44 */ "???",
+		/* 45 */ "???",
+		/* 46 */ "???",
+		/* 47 */ "???",
+		/* 48 */ "???",
+		/* 49 */ "???",
+		/* 50 */ "???",
+		/* 51 */ "???",
+		/* 52 */ "???",
+		/* 53 */ "???",
+		/* 54 */ "???",
+		/* 55 */ "???",
+		/* 56 */ "???",
+		/* 57 */ "???",
+		/* 58 */ "???",
+		/* 59 */ "???",
+		/* 60 */ "???",
+		/* 61 */ "???",
+		/* 62 */ "???",
+		/* 33 */ "???"
+	};
+
+	emu10k1_t *emu = entry->private_data;
 	unsigned int val;
 	int nefx = emu->audigy ? 64 : 32;
+	char **outputs = emu->audigy ? audigy_outs : creative_outs;
 	int idx;
 	
 	snd_iprintf(buffer, "EMU10K1\n\n");
@@ -117,7 +187,7 @@ static void snd_emu10k1_proc_read(snd_info_entry_t *entry,
 	snd_iprintf(buffer, "Card                  : %s\n",
 		    emu->audigy ? "Audigy" : (emu->APS ? "EMU APS" : "Creative"));
 	snd_iprintf(buffer, "Internal TRAM (words) : 0x%x\n", emu->fx8010.itram_size);
-	snd_iprintf(buffer, "External TRAM (words) : 0x%x\n", emu->fx8010.etram_pages.bytes);
+	snd_iprintf(buffer, "External TRAM (words) : 0x%x\n", (int)emu->fx8010.etram_pages.bytes);
 	snd_iprintf(buffer, "\n");
 	if (emu->audigy) {
 		snd_iprintf(buffer, "Effect Send Routing   : A=%i, B=%i, C=%i, D=%i\n",
@@ -135,7 +205,7 @@ static void snd_emu10k1_proc_read(snd_info_entry_t *entry,
 	snd_iprintf(buffer, "\nCaptured FX Outputs   :\n");
 	for (idx = 0; idx < nefx; idx++) {
 		if (emu->efx_voices_mask[idx/32] & (1 << (idx%32)))
-			snd_iprintf(buffer, "  Output %02i [%s]\n", idx, outputs[idx%32]);
+			snd_iprintf(buffer, "  Output %02i [%s]\n", idx, outputs[idx]);
 	}
 	snd_iprintf(buffer, "\nAll FX Outputs        :\n");
 	for (idx = 0; idx < 32; idx++)
@@ -155,11 +225,11 @@ static void snd_emu10k1_proc_acode_read(snd_info_entry_t *entry,
 				        snd_info_buffer_t * buffer)
 {
 	u32 pc;
-	emu10k1_t *emu = snd_magic_cast(emu10k1_t, entry->private_data, return);
+	emu10k1_t *emu = entry->private_data;
 
 	snd_iprintf(buffer, "FX8010 Instruction List '%s'\n", emu->fx8010.name);
 	snd_iprintf(buffer, "  Code dump      :\n");
-	for (pc = 0; pc < 512; pc++) {
+	for (pc = 0; pc < (emu->audigy ? 1024 : 512); pc++) {
 		u32 low, high;
 			
 		low = snd_emu10k1_efx_read(emu, pc * 2);
@@ -186,23 +256,27 @@ static void snd_emu10k1_proc_acode_read(snd_info_entry_t *entry,
 }
 
 #define TOTAL_SIZE_GPR		(0x100*4)
+#define A_TOTAL_SIZE_GPR	(0x200*4)
 #define TOTAL_SIZE_TANKMEM_DATA	(0xa0*4)
 #define TOTAL_SIZE_TANKMEM_ADDR (0xa0*4)
+#define A_TOTAL_SIZE_TANKMEM_DATA (0x100*4)
+#define A_TOTAL_SIZE_TANKMEM_ADDR (0x100*4)
 #define TOTAL_SIZE_CODE		(0x200*8)
+#define A_TOTAL_SIZE_CODE	(0x400*8)
 
 static long snd_emu10k1_fx8010_read(snd_info_entry_t *entry, void *file_private_data,
 				    struct file *file, char __user *buf,
 				    unsigned long count, unsigned long pos)
 {
 	long size;
-	emu10k1_t *emu = snd_magic_cast(emu10k1_t, entry->private_data, return -ENXIO);
+	emu10k1_t *emu = entry->private_data;
 	unsigned int offset;
+	int tram_addr = 0;
 	
 	if (!strcmp(entry->name, "fx8010_tram_addr")) {
-		if (emu->audigy) return -EINVAL;
 		offset = TANKMEMADDRREGBASE;
+		tram_addr = 1;
 	} else if (!strcmp(entry->name, "fx8010_tram_data")) {
-		if (emu->audigy) return -EINVAL;
 		offset = TANKMEMDATAREGBASE;
 	} else if (!strcmp(entry->name, "fx8010_code")) {
 		offset = emu->audigy ? A_MICROCODEBASE : MICROCODEBASE;
@@ -219,7 +293,11 @@ static long snd_emu10k1_fx8010_read(snd_info_entry_t *entry, void *file_private_
 		if ((tmp = kmalloc(size + 8, GFP_KERNEL)) == NULL)
 			return -ENOMEM;
 		for (idx = 0; idx < ((pos & 3) + size + 3) >> 2; idx++)
-			tmp[idx] = snd_emu10k1_ptr_read(emu, offset + idx + (pos >> 2), 0);
+			if (tram_addr && emu->audigy) {
+				tmp[idx] = snd_emu10k1_ptr_read(emu, offset + idx + (pos >> 2), 0) >> 11;
+				tmp[idx] |= snd_emu10k1_ptr_read(emu, 0x100 + idx + (pos >> 2), 0) << 20;
+			} else 
+				tmp[idx] = snd_emu10k1_ptr_read(emu, offset + idx + (pos >> 2), 0);
 		if (copy_to_user(buf, ((char *)tmp) + (pos & 3), size))
 			res = -EFAULT;
 		else {
@@ -246,35 +324,35 @@ int __devinit snd_emu10k1_proc_init(emu10k1_t * emu)
 		entry->content = SNDRV_INFO_CONTENT_DATA;
 		entry->private_data = emu;
 		entry->mode = S_IFREG | S_IRUGO /*| S_IWUSR*/;
-		entry->size = TOTAL_SIZE_GPR;
+		entry->size = emu->audigy ? A_TOTAL_SIZE_GPR : TOTAL_SIZE_GPR;
 		entry->c.ops = &snd_emu10k1_proc_ops_fx8010;
 	}
-	if (!emu->audigy && ! snd_card_proc_new(emu->card, "fx8010_tram_data", &entry)) {
+	if (! snd_card_proc_new(emu->card, "fx8010_tram_data", &entry)) {
 		entry->content = SNDRV_INFO_CONTENT_DATA;
 		entry->private_data = emu;
 		entry->mode = S_IFREG | S_IRUGO /*| S_IWUSR*/;
-		entry->size = TOTAL_SIZE_TANKMEM_DATA;
+		entry->size = emu->audigy ? A_TOTAL_SIZE_TANKMEM_DATA : TOTAL_SIZE_TANKMEM_DATA ;
 		entry->c.ops = &snd_emu10k1_proc_ops_fx8010;
 	}
-	if (!emu->audigy && ! snd_card_proc_new(emu->card, "fx8010_tram_addr", &entry)) {
+	if (! snd_card_proc_new(emu->card, "fx8010_tram_addr", &entry)) {
 		entry->content = SNDRV_INFO_CONTENT_DATA;
 		entry->private_data = emu;
 		entry->mode = S_IFREG | S_IRUGO /*| S_IWUSR*/;
-		entry->size = TOTAL_SIZE_TANKMEM_ADDR;
+		entry->size = emu->audigy ? A_TOTAL_SIZE_TANKMEM_ADDR : TOTAL_SIZE_TANKMEM_ADDR ;
 		entry->c.ops = &snd_emu10k1_proc_ops_fx8010;
 	}
 	if (! snd_card_proc_new(emu->card, "fx8010_code", &entry)) {
 		entry->content = SNDRV_INFO_CONTENT_DATA;
 		entry->private_data = emu;
 		entry->mode = S_IFREG | S_IRUGO /*| S_IWUSR*/;
-		entry->size = TOTAL_SIZE_CODE;
+		entry->size = emu->audigy ? A_TOTAL_SIZE_CODE : TOTAL_SIZE_CODE;
 		entry->c.ops = &snd_emu10k1_proc_ops_fx8010;
 	}
 	if (! snd_card_proc_new(emu->card, "fx8010_acode", &entry)) {
 		entry->content = SNDRV_INFO_CONTENT_TEXT;
 		entry->private_data = emu;
 		entry->mode = S_IFREG | S_IRUGO /*| S_IWUSR*/;
-		entry->c.text.read_size = 64*1024;
+		entry->c.text.read_size = 128*1024;
 		entry->c.text.read = snd_emu10k1_proc_acode_read;
 	}
 	return 0;

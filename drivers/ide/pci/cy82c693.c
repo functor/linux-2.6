@@ -183,7 +183,7 @@ static void cy82c693_dma_enable (ide_drive_t *drive, int mode, int single)
 /* 
  * used to set DMA mode for CY82C693 (single and multi modes)
  */
-int cy82c693_ide_dma_on (ide_drive_t *drive)
+static int cy82c693_ide_dma_on (ide_drive_t *drive)
 {
 	struct hd_driveid *id = drive->id;
 
@@ -444,7 +444,7 @@ static struct pci_device_id cy82c693_pci_tbl[] = {
 MODULE_DEVICE_TABLE(pci, cy82c693_pci_tbl);
 
 static struct pci_driver driver = {
-	.name		= "Cypress IDE",
+	.name		= "Cypress_IDE",
 	.id_table	= cy82c693_pci_tbl,
 	.probe		= cy82c693_init_one,
 };

@@ -20,6 +20,7 @@
 
 #include <linux/config.h>
 #include <linux/kernel.h>
+#include <linux/syscalls.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/percpu.h>
@@ -37,39 +38,12 @@
 #include <linux/bio.h>
 #include <linux/notifier.h>
 #include <linux/cpu.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 
+static int fsync_buffers_list(spinlock_t *lock, struct list_head *list);
 static void invalidate_bh_lrus(void);
 
 #define BH_ENTRY(list) list_entry((list), struct buffer_head, b_assoc_buffers)
-
-struct bh_wait_queue {
-	struct buffer_head *bh;
-	wait_queue_t wait;
-};
-
-#define __DEFINE_BH_WAIT(name, b, f)					\
-	struct bh_wait_queue name = {					\
-		.bh	= b,						\
-		.wait	= {						\
-				.task	= current,			\
-				.flags	= f,				\
-				.func	= bh_wake_function,		\
-				.task_list =				\
-					LIST_HEAD_INIT(name.wait.task_list),\
-			},						\
-	}
-#define DEFINE_BH_WAIT(name, bh)	__DEFINE_BH_WAIT(name, bh, 0)
-#define DEFINE_BH_WAIT_EXCLUSIVE(name, bh) \
-		__DEFINE_BH_WAIT(name, bh, WQ_FLAG_EXCLUSIVE)
-
-/*
- * Hashed waitqueue_head's for wait_on_buffer()
- */
-#define BH_WAIT_TABLE_ORDER	7
-static struct bh_wait_queue_head {
-	wait_queue_head_t wqh;
-} ____cacheline_aligned_in_smp bh_wait_queue_heads[1<<BH_WAIT_TABLE_ORDER];
 
 inline void
 init_buffer(struct buffer_head *bh, bh_end_io_t *handler, void *private)
@@ -78,63 +52,24 @@ init_buffer(struct buffer_head *bh, bh_end_io_t *handler, void *private)
 	bh->b_private = private;
 }
 
-/*
- * Return the address of the waitqueue_head to be used for this
- * buffer_head
- */
-wait_queue_head_t *bh_waitq_head(struct buffer_head *bh)
-{
-	return &bh_wait_queue_heads[hash_ptr(bh, BH_WAIT_TABLE_ORDER)].wqh;
-}
-EXPORT_SYMBOL(bh_waitq_head);
-
-void wake_up_buffer(struct buffer_head *bh)
-{
-	wait_queue_head_t *wq = bh_waitq_head(bh);
-
-	smp_mb();
-	if (waitqueue_active(wq))
-		__wake_up(wq, TASK_INTERRUPTIBLE|TASK_UNINTERRUPTIBLE, 1, bh);
-}
-EXPORT_SYMBOL(wake_up_buffer);
-
-static int bh_wake_function(wait_queue_t *wait, unsigned mode,
-				int sync, void *key)
-{
-	struct buffer_head *bh = key;
-	struct bh_wait_queue *wq;
-
-	wq = container_of(wait, struct bh_wait_queue, wait);
-	if (wq->bh != bh || buffer_locked(bh))
-		return 0;
-	else
-		return autoremove_wake_function(wait, mode, sync, key);
-}
-
-static void sync_buffer(struct buffer_head *bh)
+static int sync_buffer(void *word)
 {
 	struct block_device *bd;
+	struct buffer_head *bh
+		= container_of(word, struct buffer_head, b_state);
 
 	smp_mb();
 	bd = bh->b_bdev;
 	if (bd)
 		blk_run_address_space(bd->bd_inode->i_mapping);
+	io_schedule();
+	return 0;
 }
 
 void fastcall __lock_buffer(struct buffer_head *bh)
 {
-	wait_queue_head_t *wqh = bh_waitq_head(bh);
-	DEFINE_BH_WAIT_EXCLUSIVE(wait, bh);
-
-	do {
-		prepare_to_wait_exclusive(wqh, &wait.wait,
-					TASK_UNINTERRUPTIBLE);
-		if (buffer_locked(bh)) {
-			sync_buffer(bh);
-			io_schedule();
-		}
-	} while (test_set_buffer_locked(bh));
-	finish_wait(wqh, &wait.wait);
+	wait_on_bit_lock(&bh->b_state, BH_Lock, sync_buffer,
+							TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(__lock_buffer);
 
@@ -142,7 +77,7 @@ void fastcall unlock_buffer(struct buffer_head *bh)
 {
 	clear_buffer_locked(bh);
 	smp_mb__after_clear_bit();
-	wake_up_buffer(bh);
+	wake_up_bit(&bh->b_state, BH_Lock);
 }
 
 /*
@@ -152,25 +87,7 @@ void fastcall unlock_buffer(struct buffer_head *bh)
  */
 void __wait_on_buffer(struct buffer_head * bh)
 {
-	wait_queue_head_t *wqh = bh_waitq_head(bh);
-	DEFINE_BH_WAIT(wait, bh);
-
-	do {
-		prepare_to_wait(wqh, &wait.wait, TASK_UNINTERRUPTIBLE);
-		if (buffer_locked(bh)) {
-			sync_buffer(bh);
-			io_schedule();
-		}
-	} while (buffer_locked(bh));
-	finish_wait(wqh, &wait.wait);
-}
-
-static void
-__set_page_buffers(struct page *page, struct buffer_head *head)
-{
-	page_cache_get(page);
-	SetPagePrivate(page);
-	page->private = (unsigned long)head;
+	wait_on_bit(&bh->b_state, BH_Lock, sync_buffer, TASK_UNINTERRUPTIBLE);
 }
 
 static void
@@ -213,7 +130,7 @@ void end_buffer_write_sync(struct buffer_head *bh, int uptodate)
 	if (uptodate) {
 		set_buffer_uptodate(bh);
 	} else {
-		if (printk_ratelimit()) {
+		if (!buffer_eopnotsupp(bh) && printk_ratelimit()) {
 			buffer_io_error(bh);
 			printk(KERN_WARNING "lost page write due to "
 					"I/O error on %s\n",
@@ -725,12 +642,11 @@ still_busy:
  * PageLocked prevents anyone from starting writeback of a page which is
  * under read I/O (PageWriteback is only ever set against a locked page).
  */
-void mark_buffer_async_read(struct buffer_head *bh)
+static void mark_buffer_async_read(struct buffer_head *bh)
 {
 	bh->b_end_io = end_buffer_async_read;
 	set_buffer_async_read(bh);
 }
-EXPORT_SYMBOL(mark_buffer_async_read);
 
 void mark_buffer_async_write(struct buffer_head *bh)
 {
@@ -788,14 +704,6 @@ EXPORT_SYMBOL(mark_buffer_async_write);
  * filesystems (do it inside bforget()).  It could also be done by bringing
  * b_inode back.
  */
-
-void buffer_insert_list(spinlock_t *lock,
-		struct buffer_head *bh, struct list_head *list)
-{
-	spin_lock(lock);
-	list_move_tail(&bh->b_assoc_buffers, list);
-	spin_unlock(lock);
-}
 
 /*
  * The buffer's backing address_space's private_lock must be held
@@ -899,9 +807,12 @@ void mark_buffer_dirty_inode(struct buffer_head *bh, struct inode *inode)
 		if (mapping->assoc_mapping != buffer_mapping)
 			BUG();
 	}
-	if (list_empty(&bh->b_assoc_buffers))
-		buffer_insert_list(&buffer_mapping->private_lock,
-				bh, &mapping->private_list);
+	if (list_empty(&bh->b_assoc_buffers)) {
+		spin_lock(&buffer_mapping->private_lock);
+		list_move_tail(&bh->b_assoc_buffers,
+				&mapping->private_list);
+		spin_unlock(&buffer_mapping->private_lock);
+	}
 }
 EXPORT_SYMBOL(mark_buffer_dirty_inode);
 
@@ -982,7 +893,7 @@ EXPORT_SYMBOL(__set_page_dirty_buffers);
  * the osync code to catch these locked, dirty buffers without requeuing
  * any newly dirty buffers for write.
  */
-int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
+static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
 {
 	struct buffer_head *bh;
 	struct list_head tmp;
@@ -1094,8 +1005,8 @@ int remove_inode_buffers(struct inode *inode)
  * The retry flag is used to differentiate async IO (paging, swapping)
  * which may not fail from ordinary buffer allocations.
  */
-static struct buffer_head *
-create_buffers(struct page * page, unsigned long size, int retry)
+struct buffer_head *alloc_page_buffers(struct page *page, unsigned long size,
+		int retry)
 {
 	struct buffer_head *bh, *head;
 	long offset;
@@ -1153,6 +1064,7 @@ no_grow:
 	free_more_memory();
 	goto try_again;
 }
+EXPORT_SYMBOL_GPL(alloc_page_buffers);
 
 static inline void
 link_dev_buffers(struct page *page, struct buffer_head *head)
@@ -1165,7 +1077,7 @@ link_dev_buffers(struct page *page, struct buffer_head *head)
 		bh = bh->b_this_page;
 	} while (bh);
 	tail->b_this_page = head;
-	__set_page_buffers(page, head);
+	attach_page_buffers(page, head);
 }
 
 /*
@@ -1226,7 +1138,7 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	/*
 	 * Allocate some buffers for this page
 	 */
-	bh = create_buffers(page, size, 0);
+	bh = alloc_page_buffers(page, size, 0);
 	if (!bh)
 		goto failed;
 
@@ -1551,6 +1463,7 @@ __getblk(struct block_device *bdev, sector_t block, int size)
 {
 	struct buffer_head *bh = __find_get_block(bdev, block, size);
 
+	might_sleep();
 	if (bh == NULL)
 		bh = __getblk_slow(bdev, block, size);
 	return bh;
@@ -1731,7 +1644,7 @@ void create_empty_buffers(struct page *page,
 {
 	struct buffer_head *bh, *head, *tail;
 
-	head = create_buffers(page, blocksize, 1);
+	head = alloc_page_buffers(page, blocksize, 1);
 	bh = head;
 	do {
 		bh->b_state |= b_state;
@@ -1751,7 +1664,7 @@ void create_empty_buffers(struct page *page,
 			bh = bh->b_this_page;
 		} while (bh != head);
 	}
-	__set_page_buffers(page, head);
+	attach_page_buffers(page, head);
 	spin_unlock(&page->mapping->private_lock);
 }
 EXPORT_SYMBOL(create_empty_buffers);
@@ -1775,6 +1688,8 @@ EXPORT_SYMBOL(create_empty_buffers);
 void unmap_underlying_metadata(struct block_device *bdev, sector_t block)
 {
 	struct buffer_head *old_bh;
+
+	might_sleep();
 
 	old_bh = __find_get_block_slow(bdev, block, 0);
 	if (old_bh) {
@@ -2234,7 +2149,7 @@ int generic_cont_expand(struct inode *inode, loff_t size)
 	int err;
 
 	err = -EFBIG;
-        limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
+        limit = current->signal->rlim[RLIMIT_FSIZE].rlim_cur;
 	if (limit != RLIM_INFINITY && size > (loff_t)limit) {
 		send_sig(SIGXFSZ, current, 0);
 		goto out;
@@ -2309,8 +2224,7 @@ int cont_prepare_write(struct page *page, unsigned offset,
 		memset(kaddr+zerofrom, 0, PAGE_CACHE_SIZE-zerofrom);
 		flush_dcache_page(new_page);
 		kunmap_atomic(kaddr, KM_USER0);
-		__block_commit_write(inode, new_page,
-				zerofrom, PAGE_CACHE_SIZE);
+		generic_commit_write(NULL, new_page, zerofrom, PAGE_CACHE_SIZE);
 		unlock_page(new_page);
 		page_cache_release(new_page);
 	}
@@ -2756,21 +2670,33 @@ static int end_bio_bh_io_sync(struct bio *bio, unsigned int bytes_done, int err)
 	if (bio->bi_size)
 		return 1;
 
+	if (err == -EOPNOTSUPP) {
+		set_bit(BIO_EOPNOTSUPP, &bio->bi_flags);
+		set_bit(BH_Eopnotsupp, &bh->b_state);
+	}
+
 	bh->b_end_io(bh, test_bit(BIO_UPTODATE, &bio->bi_flags));
 	bio_put(bio);
 	return 0;
 }
 
-void submit_bh(int rw, struct buffer_head * bh)
+int submit_bh(int rw, struct buffer_head * bh)
 {
 	struct bio *bio;
+	int ret = 0;
 
 	BUG_ON(!buffer_locked(bh));
 	BUG_ON(!buffer_mapped(bh));
 	BUG_ON(!bh->b_end_io);
 
-	/* Only clear out a write error when rewriting */
-	if (test_set_buffer_req(bh) && rw == WRITE)
+	if (buffer_ordered(bh) && (rw == WRITE))
+		rw = WRITE_BARRIER;
+
+	/*
+	 * Only clear out a write error when rewriting, should this
+	 * include WRITE_SYNC as well?
+	 */
+	if (test_set_buffer_req(bh) && (rw == WRITE || rw == WRITE_BARRIER))
 		clear_buffer_write_io_error(bh);
 
 	/*
@@ -2792,7 +2718,14 @@ void submit_bh(int rw, struct buffer_head * bh)
 	bio->bi_end_io = end_bio_bh_io_sync;
 	bio->bi_private = bh;
 
+	bio_get(bio);
 	submit_bio(rw, bio);
+
+	if (bio_flagged(bio, BIO_EOPNOTSUPP))
+		ret = -EOPNOTSUPP;
+
+	bio_put(bio);
+	return ret;
 }
 
 /**
@@ -2851,20 +2784,30 @@ void ll_rw_block(int rw, int nr, struct buffer_head *bhs[])
 
 /*
  * For a data-integrity writeout, we need to wait upon any in-progress I/O
- * and then start new I/O and then wait upon it.
+ * and then start new I/O and then wait upon it.  The caller must have a ref on
+ * the buffer_head.
  */
-void sync_dirty_buffer(struct buffer_head *bh)
+int sync_dirty_buffer(struct buffer_head *bh)
 {
+	int ret = 0;
+
 	WARN_ON(atomic_read(&bh->b_count) < 1);
 	lock_buffer(bh);
 	if (test_clear_buffer_dirty(bh)) {
 		get_bh(bh);
 		bh->b_end_io = end_buffer_write_sync;
-		submit_bh(WRITE, bh);
+		ret = submit_bh(WRITE, bh);
 		wait_on_buffer(bh);
+		if (buffer_eopnotsupp(bh)) {
+			clear_buffer_eopnotsupp(bh);
+			ret = -EOPNOTSUPP;
+		}
+		if (!ret && !buffer_uptodate(bh))
+			ret = -EIO;
 	} else {
 		unlock_buffer(bh);
 	}
+	return ret;
 }
 
 /*
@@ -3095,14 +3038,11 @@ static int buffer_cpu_notify(struct notifier_block *self,
 
 void __init buffer_init(void)
 {
-	int i;
 	int nrpages;
 
 	bh_cachep = kmem_cache_create("buffer_head",
 			sizeof(struct buffer_head), 0,
 			SLAB_PANIC, init_buffer_head, NULL);
-	for (i = 0; i < ARRAY_SIZE(bh_wait_queue_heads); i++)
-		init_waitqueue_head(&bh_wait_queue_heads[i].wqh);
 
 	/*
 	 * Limit the bh occupancy to 10% of ZONE_NORMAL
@@ -3121,14 +3061,12 @@ EXPORT_SYMBOL(block_read_full_page);
 EXPORT_SYMBOL(block_sync_page);
 EXPORT_SYMBOL(block_truncate_page);
 EXPORT_SYMBOL(block_write_full_page);
-EXPORT_SYMBOL(buffer_insert_list);
 EXPORT_SYMBOL(cont_prepare_write);
 EXPORT_SYMBOL(end_buffer_async_write);
 EXPORT_SYMBOL(end_buffer_read_sync);
 EXPORT_SYMBOL(end_buffer_write_sync);
 EXPORT_SYMBOL(file_fsync);
 EXPORT_SYMBOL(fsync_bdev);
-EXPORT_SYMBOL(fsync_buffers_list);
 EXPORT_SYMBOL(generic_block_bmap);
 EXPORT_SYMBOL(generic_commit_write);
 EXPORT_SYMBOL(generic_cont_expand);

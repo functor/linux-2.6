@@ -57,10 +57,9 @@ extern unsigned int mem_fclk_21285;
 extern void paging_init(struct meminfo *, struct machine_desc *desc);
 extern void convert_to_tag_list(struct tag *tags);
 extern void squash_mem_tags(struct tag *tag);
-extern void bootmem_init(struct meminfo *);
 extern void reboot_setup(char *str);
 extern int root_mountflags;
-extern int _stext, _text, _etext, _edata, _end;
+extern void _stext, _text, _etext, __data_start, _edata, _end;
 
 unsigned int processor_id;
 unsigned int __machine_arch_type;
@@ -114,7 +113,7 @@ static union { char c[4]; unsigned long l; } endian_test __initdata = { { 'l', '
  */
 static struct resource mem_res[] = {
 	{ "Video RAM",   0,     0,     IORESOURCE_MEM			},
-	{ "Kernel code", 0,     0,     IORESOURCE_MEM			},
+	{ "Kernel text", 0,     0,     IORESOURCE_MEM			},
 	{ "Kernel data", 0,     0,     IORESOURCE_MEM			}
 };
 
@@ -133,21 +132,21 @@ static struct resource io_res[] = {
 #define lp2 io_res[2]
 
 static const char *cache_types[16] = {
-	"VIVT write-through",
-	"VIVT write-back",
-	"VIVT write-back",
+	"write-through",
+	"write-back",
+	"write-back",
 	"undefined 3",
 	"undefined 4",
 	"undefined 5",
-	"VIVT write-back",
-	"VIVT write-back",
+	"write-back",
+	"write-back",
 	"undefined 8",
 	"undefined 9",
 	"undefined 10",
 	"undefined 11",
 	"undefined 12",
 	"undefined 13",
-	"VIPT write-back",
+	"write-back",
 	"undefined 15",
 };
 
@@ -237,7 +236,8 @@ static void __init dump_cpu_info(void)
 	unsigned int info = read_cpuid(CPUID_CACHETYPE);
 
 	if (info != processor_id) {
-		printk("CPU: D %s cache\n", cache_types[CACHE_TYPE(info)]);
+		printk("CPU: D %s %s cache\n", cache_is_vivt() ? "VIVT" : "VIPT",
+		       cache_types[CACHE_TYPE(info)]);
 		if (CACHE_S(info)) {
 			dump_cache("CPU: I cache", CACHE_ISIZE(info));
 			dump_cache("CPU: D cache", CACHE_DSIZE(info));
@@ -256,7 +256,7 @@ int cpu_architecture(void)
 	} else if ((processor_id & 0x0000f000) == 0x00007000) {
 		cpu_arch = (processor_id & (1 << 23)) ? CPU_ARCH_ARMv4T : CPU_ARCH_ARMv3;
 	} else {
-		cpu_arch = (processor_id >> 16) & 15;
+		cpu_arch = (processor_id >> 16) & 7;
 		if (cpu_arch)
 			cpu_arch += CPU_ARCH_ARMv3;
 	}
@@ -448,10 +448,10 @@ request_standard_resources(struct meminfo *mi, struct machine_desc *mdesc)
 	struct resource *res;
 	int i;
 
-	kernel_code.start  = __virt_to_phys(init_mm.start_code);
-	kernel_code.end    = __virt_to_phys(init_mm.end_code - 1);
-	kernel_data.start  = __virt_to_phys(init_mm.end_code);
-	kernel_data.end    = __virt_to_phys(init_mm.brk - 1);
+	kernel_code.start   = virt_to_phys(&_text);
+	kernel_code.end     = virt_to_phys(&_etext - 1);
+	kernel_data.start   = virt_to_phys(&__data_start);
+	kernel_data.end     = virt_to_phys(&_end - 1);
 
 	for (i = 0; i < mi->nr_banks; i++) {
 		unsigned long virt_start, virt_end;
@@ -720,7 +720,6 @@ void __init setup_arch(char **cmdline_p)
 	memcpy(saved_command_line, from, COMMAND_LINE_SIZE);
 	saved_command_line[COMMAND_LINE_SIZE-1] = '\0';
 	parse_cmdline(cmdline_p, from);
-	bootmem_init(&meminfo);
 	paging_init(&meminfo, mdesc);
 	request_standard_resources(&meminfo, mdesc);
 
@@ -728,7 +727,7 @@ void __init setup_arch(char **cmdline_p)
 	 * Set up various architecture-specific pointers
 	 */
 	init_arch_irq = mdesc->init_irq;
-	init_arch_time = mdesc->init_time;
+	system_timer = mdesc->timer;
 	init_machine = mdesc->init_machine;
 
 #ifdef CONFIG_VT
@@ -758,6 +757,7 @@ static const char *hwcap_str[] = {
 	"fpa",
 	"vfp",
 	"edsp",
+	"java",
 	NULL
 };
 

@@ -40,8 +40,10 @@
 #include <linux/times.h>
 #include <linux/limits.h>
 #include <linux/dcache.h>
+#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
+#include <asm/processor.h>
 
 #ifdef CONFIG_ROOT_NFS
 #include <linux/nfs_fs.h>
@@ -64,6 +66,13 @@ extern int sysctl_lower_zone_protection;
 extern int min_free_kbytes;
 extern int printk_ratelimit_jiffies;
 extern int printk_ratelimit_burst;
+extern int pid_max_min, pid_max_max;
+
+#if defined(CONFIG_X86_LOCAL_APIC) && defined(CONFIG_X86)
+int unknown_nmi_panic;
+extern int proc_unknown_nmi_panic(ctl_table *, int, struct file *,
+				  void __user *, size_t *, loff_t *);
+#endif
 
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
@@ -110,12 +119,6 @@ extern int sysctl_userprocess_debug;
 
 extern int sysctl_hz_timer;
 
-#if defined(CONFIG_PPC32) && defined(CONFIG_6xx)
-extern unsigned long powersave_nap;
-int proc_dol2crvec(ctl_table *table, int write, struct file *filp,
-		  void __user *buffer, size_t *lenp, loff_t *ppos);
-#endif
-
 #ifdef CONFIG_BSD_PROCESS_ACCT
 extern int acct_parm[];
 #endif
@@ -141,6 +144,10 @@ static ctl_table dev_table[];
 extern ctl_table random_table[];
 #ifdef CONFIG_UNIX98_PTYS
 extern ctl_table pty_table[];
+#endif
+
+#ifdef HAVE_ARCH_PICK_MMAP_LAYOUT
+int sysctl_legacy_va_layout;
 #endif
 
 /* /proc declarations: */
@@ -289,7 +296,7 @@ static ctl_table kern_table[] = {
 		.procname	= "tainted",
 		.data		= &tainted,
 		.maxlen		= sizeof(int),
-		.mode		= 0644,
+		.mode		= 0444,
 		.proc_handler	= &proc_dointvec,
 	},
 	{
@@ -355,22 +362,6 @@ static ctl_table kern_table[] = {
 		.proc_handler	= &proc_dointvec,
 	},
 #endif
-#if defined(CONFIG_PPC32) && defined(CONFIG_6xx)
-	{
-		.ctl_name	= KERN_PPC_POWERSAVE_NAP,
-		.procname	= "powersave-nap",
-		.data		= &powersave_nap,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-	{
-		.ctl_name	= KERN_PPC_L2CR,
-		.procname	= "l2cr",
-		.mode		= 0644,
-		.proc_handler	= &proc_dol2crvec,
-	},
-#endif
 	{
 		.ctl_name	= KERN_CTLALTDEL,
 		.procname	= "ctrl-alt-del",
@@ -403,7 +394,7 @@ static ctl_table kern_table[] = {
 		.ctl_name	= KERN_HOTPLUG,
 		.procname	= "hotplug",
 		.data		= &hotplug_path,
-		.maxlen		= KMOD_PATH_LEN,
+		.maxlen		= HOTPLUG_PATH_LEN,
 		.mode		= 0644,
 		.proc_handler	= &proc_dostring,
 		.strategy	= &sysctl_string,
@@ -585,7 +576,10 @@ static ctl_table kern_table[] = {
 		.data		= &pid_max,
 		.maxlen		= sizeof (int),
 		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
+		.proc_handler	= &proc_dointvec_minmax,
+		.strategy	= sysctl_intvec,
+		.extra1		= &pid_max_min,
+		.extra2		= &pid_max_max,
 	},
 	{
 		.ctl_name	= KERN_PANIC_ON_OOPS,
@@ -620,6 +614,16 @@ static ctl_table kern_table[] = {
 		.mode		= 0444,
 		.proc_handler	= &proc_dointvec,
 	},
+#if defined(CONFIG_X86_LOCAL_APIC) && defined(CONFIG_X86)
+	{
+		.ctl_name       = KERN_UNKNOWN_NMI_PANIC,
+		.procname       = "unknown_nmi_panic",
+		.data           = &unknown_nmi_panic,
+		.maxlen         = sizeof (int),
+		.mode           = 0644,
+		.proc_handler   = &proc_unknown_nmi_panic,
+	},
+#endif
 	{ .ctl_name = 0 }
 };
 
@@ -789,6 +793,29 @@ static ctl_table vm_table[] = {
 		.strategy	= &sysctl_intvec,
 		.extra1		= &zero,
 	},
+#ifdef HAVE_ARCH_PICK_MMAP_LAYOUT
+	{
+		.ctl_name	= VM_LEGACY_VA_LAYOUT,
+		.procname	= "legacy_va_layout",
+		.data		= &sysctl_legacy_va_layout,
+		.maxlen		= sizeof(sysctl_legacy_va_layout),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+		.strategy	= &sysctl_intvec,
+		.extra1		= &zero,
+	},
+#endif
+#ifdef CONFIG_SWAP
+	{
+		.ctl_name	= VM_SWAP_TOKEN_TIMEOUT,
+		.procname	= "swap_token_timeout",
+		.data		= &swap_token_default_timeout,
+		.maxlen		= sizeof(swap_token_default_timeout),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec_jiffies,
+		.strategy	= &sysctl_jiffies,
+	},
+#endif
 	{ .ctl_name = 0 }
 };
 
@@ -867,6 +894,7 @@ static ctl_table fs_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 	},
+#ifdef CONFIG_DNOTIFY
 	{
 		.ctl_name	= FS_DIR_NOTIFY,
 		.procname	= "dir-notify-enable",
@@ -875,6 +903,7 @@ static ctl_table fs_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 	},
+#endif
 	{
 		.ctl_name	= FS_LEASE_TIME,
 		.procname	= "lease-break-time",

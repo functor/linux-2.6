@@ -1,4 +1,5 @@
-/* ckrmutils.c - Utility functions for CKRM
+/*
+ * ckrmutils.c - Utility functions for CKRM
  *
  * Copyright (C) Chandra Seetharaman,  IBM Corp. 2003
  *           (C) Hubertus Franke    ,  IBM Corp. 2004
@@ -15,7 +16,8 @@
  *
  */
 
-/* Changes
+/*
+ * Changes
  * 
  * 13 Nov 2003
  *        Created
@@ -40,7 +42,6 @@ int get_exe_path_name(struct task_struct *tsk, char *buf, int buflen)
 	if (!mm) {
 		return -EINVAL;
 	}
-
 	down_read(&mm->mmap_sem);
 	vma = mm->mmap;
 	while (vma) {
@@ -106,57 +107,64 @@ set_shares(struct ckrm_shares *new, struct ckrm_shares *cur,
 {
 	int rc = -EINVAL;
 	int cur_usage_guar = cur->total_guarantee - cur->unused_guarantee;
-	int increase_by = new->my_guarantee - cur->my_guarantee;
+	int increase_by;
 
-	// Check total_guarantee for correctness
+	if (cur->my_guarantee < 0) // DONTCARE or UNCHANGED
+		increase_by = new->my_guarantee;
+	else
+		increase_by = new->my_guarantee - cur->my_guarantee;
+
+	/* Check total_guarantee for correctness */
 	if (new->total_guarantee <= CKRM_SHARE_DONTCARE) {
 		goto set_share_err;
 	} else if (new->total_guarantee == CKRM_SHARE_UNCHANGED) {
-		;		// do nothing
+		/* do nothing */;
 	} else if (cur_usage_guar > new->total_guarantee) {
 		goto set_share_err;
 	}
-	// Check max_limit for correctness
+	/* Check max_limit for correctness */
 	if (new->max_limit <= CKRM_SHARE_DONTCARE) {
 		goto set_share_err;
 	} else if (new->max_limit == CKRM_SHARE_UNCHANGED) {
-		;		// do nothing
+		/* do nothing */;
 	} else if (cur->cur_max_limit > new->max_limit) {
 		goto set_share_err;
 	}
-	// Check my_guarantee for correctness
+	/* Check my_guarantee for correctness */
 	if (new->my_guarantee == CKRM_SHARE_UNCHANGED) {
-		;		// do nothing
+		/* do nothing */;
 	} else if (new->my_guarantee == CKRM_SHARE_DONTCARE) {
-		;		// do nothing
+		/* do nothing */;
 	} else if (par && increase_by > par->unused_guarantee) {
 		goto set_share_err;
 	}
-	// Check my_limit for correctness
+	/* Check my_limit for correctness */
 	if (new->my_limit == CKRM_SHARE_UNCHANGED) {
-		;		// do nothing
+		/* do nothing */;
 	} else if (new->my_limit == CKRM_SHARE_DONTCARE) {
-		;		// do nothing
+		/* do nothing */;
 	} else if (par && new->my_limit > par->max_limit) {
-		// I can't get more limit than my parent's limit
+		/* I can't get more limit than my parent's limit */
 		goto set_share_err;
 
 	}
-	// make sure guarantee is lesser than limit
+	/* make sure guarantee is lesser than limit */
 	if (new->my_limit == CKRM_SHARE_DONTCARE) {
-		;		// do nothing
+		/* do nothing */;
 	} else if (new->my_limit == CKRM_SHARE_UNCHANGED) {
 		if (new->my_guarantee == CKRM_SHARE_DONTCARE) {
-			;	// do nothing
+			/* do nothing */;
 		} else if (new->my_guarantee == CKRM_SHARE_UNCHANGED) {
-			;	// do nothing earlier setting would've 
-			        // taken care of it
+			/*
+			 * do nothing; earlier setting would have
+			 * taken care of it
+			 */;
 		} else if (new->my_guarantee > cur->my_limit) {
 			goto set_share_err;
 		}
-	} else {		// new->my_limit has a valid value
+	} else {		/* new->my_limit has a valid value */
 		if (new->my_guarantee == CKRM_SHARE_DONTCARE) {
-			;	// do nothing
+			/* do nothing */;
 		} else if (new->my_guarantee == CKRM_SHARE_UNCHANGED) {
 			if (cur->my_guarantee > new->my_limit) {
 				goto set_share_err;
@@ -165,33 +173,28 @@ set_shares(struct ckrm_shares *new, struct ckrm_shares *cur,
 			goto set_share_err;
 		}
 	}
-
 	if (new->my_guarantee != CKRM_SHARE_UNCHANGED) {
 		child_guarantee_changed(par, cur->my_guarantee,
 					new->my_guarantee);
 		cur->my_guarantee = new->my_guarantee;
 	}
-
 	if (new->my_limit != CKRM_SHARE_UNCHANGED) {
 		child_maxlimit_changed(par, new->my_limit);
 		cur->my_limit = new->my_limit;
 	}
-
 	if (new->total_guarantee != CKRM_SHARE_UNCHANGED) {
 		cur->unused_guarantee = new->total_guarantee - cur_usage_guar;
 		cur->total_guarantee = new->total_guarantee;
 	}
-
 	if (new->max_limit != CKRM_SHARE_UNCHANGED) {
 		cur->max_limit = new->max_limit;
 	}
-
 	rc = 0;
-      set_share_err:
+set_share_err:
 	return rc;
 }
 
-EXPORT_SYMBOL(get_exe_path_name);
-EXPORT_SYMBOL(child_guarantee_changed);
-EXPORT_SYMBOL(child_maxlimit_changed);
-EXPORT_SYMBOL(set_shares);
+EXPORT_SYMBOL_GPL(get_exe_path_name);
+EXPORT_SYMBOL_GPL(child_guarantee_changed);
+EXPORT_SYMBOL_GPL(child_maxlimit_changed);
+EXPORT_SYMBOL_GPL(set_shares);

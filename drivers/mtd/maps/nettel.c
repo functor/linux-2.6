@@ -6,7 +6,7 @@
  *      (C) Copyright 2000-2001, Greg Ungerer (gerg@snapgear.com)
  *      (C) Copyright 2001-2002, SnapGear (www.snapgear.com)
  *
- *	$Id: nettel.c,v 1.5 2004/07/12 21:59:44 dwmw2 Exp $
+ *	$Id: nettel.c,v 1.8 2004/11/04 13:24:15 gleixner Exp $
  */
 
 /****************************************************************************/
@@ -180,7 +180,7 @@ int nettel_eraseconfig(void)
 	if (mtd) {
 		nettel_erase.mtd = mtd;
 		nettel_erase.callback = nettel_erasecallback;
-		nettel_erase.callback = 0;
+		nettel_erase.callback = NULL;
 		nettel_erase.addr = 0;
 		nettel_erase.len = mtd->size;
 		nettel_erase.priv = (u_long) &wait_q;
@@ -273,8 +273,7 @@ int __init nettel_init(void)
 	__asm__ ("wbinvd");
 
 	nettel_amd_map.phys = amdaddr;
-	nettel_amd_map.virt = (unsigned long)
-		ioremap_nocache(amdaddr, maxsize);
+	nettel_amd_map.virt = ioremap_nocache(amdaddr, maxsize);
 	if (!nettel_amd_map.virt) {
 		printk("SNAPGEAR: failed to ioremap() BOOTCS\n");
 		return(-EIO);
@@ -472,8 +471,8 @@ void __exit nettel_cleanup(void)
 		map_destroy(amd_mtd);
 	}
 	if (nettel_amd_map.virt) {
-		iounmap((void *)nettel_amd_map.virt);
-		nettel_amd_map.virt = 0;
+		iounmap(nettel_amd_map.virt);
+		nettel_amd_map.virt = NULL;
 	}
 #ifdef CONFIG_MTD_CFI_INTELEXT
 	if (intel_mtd) {

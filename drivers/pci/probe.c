@@ -144,9 +144,11 @@ static void pci_read_bases(struct pci_dev *dev, unsigned int howmany, int rom)
 			pci_write_config_dword(dev, reg+4, ~0);
 			pci_read_config_dword(dev, reg+4, &sz);
 			pci_write_config_dword(dev, reg+4, l);
-			if (~sz)
-				res->end = res->start + 0xffffffff +
-						(((unsigned long) ~sz) << 32);
+			sz = pci_size(l, sz, 0xffffffff);
+			if (sz) {
+				/* This BAR needs > 4GB?  Wow. */
+				res->end |= (unsigned long)sz<<32;
+			}
 #else
 			if (l) {
 				printk(KERN_ERR "PCI: Unable to handle 64-bit address for device %s\n", pci_name(dev));
@@ -170,7 +172,7 @@ static void pci_read_bases(struct pci_dev *dev, unsigned int howmany, int rom)
 		if (sz && sz != 0xffffffff) {
 			sz = pci_size(l, sz, PCI_ROM_ADDRESS_MASK);
 			if (sz) {
-				res->flags = (l & PCI_ROM_ADDRESS_ENABLE) |
+				res->flags = (l & IORESOURCE_ROM_ENABLE) |
 				  IORESOURCE_MEM | IORESOURCE_PREFETCH |
 				  IORESOURCE_READONLY | IORESOURCE_CACHEABLE;
 				res->start = l & PCI_ROM_ADDRESS_MASK;
@@ -243,15 +245,23 @@ void __devinit pci_read_bridge_bases(struct pci_bus *child)
 		u32 mem_base_hi, mem_limit_hi;
 		pci_read_config_dword(dev, PCI_PREF_BASE_UPPER32, &mem_base_hi);
 		pci_read_config_dword(dev, PCI_PREF_LIMIT_UPPER32, &mem_limit_hi);
+
+		/*
+		 * Some bridges set the base > limit by default, and some
+		 * (broken) BIOSes do not initialize them.  If we find
+		 * this, just assume they are not being used.
+		 */
+		if (mem_base_hi <= mem_limit_hi) {
 #if BITS_PER_LONG == 64
-		base |= ((long) mem_base_hi) << 32;
-		limit |= ((long) mem_limit_hi) << 32;
+			base |= ((long) mem_base_hi) << 32;
+			limit |= ((long) mem_limit_hi) << 32;
 #else
-		if (mem_base_hi || mem_limit_hi) {
-			printk(KERN_ERR "PCI: Unable to handle 64-bit address space for %s\n", child->name);
-			return;
-		}
+			if (mem_base_hi || mem_limit_hi) {
+				printk(KERN_ERR "PCI: Unable to handle 64-bit address space for bridge %s\n", pci_name(dev));
+				return;
+			}
 #endif
+		}
 	}
 	if (base <= limit) {
 		res->flags = (mem_base_lo & PCI_MEMORY_RANGE_TYPE_MASK) | IORESOURCE_MEM | IORESOURCE_PREFETCH;
@@ -373,7 +383,10 @@ int __devinit pci_scan_bridge(struct pci_bus *bus, struct pci_dev * dev, int max
 		child->bridge_ctl = bctl;
 
 		cmax = pci_scan_child_bus(child);
-		if (cmax > max) max = cmax;
+		if (cmax > max)
+			max = cmax;
+		if (child->subordinate > max)
+			max = child->subordinate;
 	} else {
 		/*
 		 * We need to assign a number to this bus which we always
@@ -475,6 +488,9 @@ static int pci_setup_device(struct pci_dev * dev)
 	/* "Unknown power state" */
 	dev->current_state = 4;
 
+	/* Early fixups, before probing the BARs */
+	pci_fixup_device(pci_fixup_early, dev);
+
 	switch (dev->hdr_type) {		    /* header type */
 	case PCI_HEADER_TYPE_NORMAL:		    /* standard header */
 		if (class == PCI_CLASS_BRIDGE_PCI)
@@ -571,6 +587,11 @@ static int pci_cfg_space_size(struct pci_dev *dev)
 	return PCI_CFG_SPACE_SIZE;
 }
 
+static void pci_release_bus_bridge_dev(struct device *dev)
+{
+	kfree(dev);
+}
+
 /*
  * Read the config data for a PCI device, sanity-check it
  * and fill in the dev structure...
@@ -640,7 +661,7 @@ pci_scan_single_device(struct pci_bus *bus, int devfn)
 		return NULL;
 	
 	/* Fix up broken headers */
-	pci_fixup_device(PCI_FIXUP_HEADER, dev);
+	pci_fixup_device(pci_fixup_header, dev);
 
 	/*
 	 * Add the device to our list of discovered devices
@@ -745,6 +766,7 @@ unsigned int __devinit pci_do_scan_bus(struct pci_bus *bus)
 
 struct pci_bus * __devinit pci_scan_bus_parented(struct device *parent, int bus, struct pci_ops *ops, void *sysdata)
 {
+	int error;
 	struct pci_bus *b;
 	struct device *dev;
 
@@ -764,24 +786,31 @@ struct pci_bus * __devinit pci_scan_bus_parented(struct device *parent, int bus,
 	if (pci_find_bus(pci_domain_nr(b), bus)) {
 		/* If we already got to this bus through a different bridge, ignore it */
 		DBG("PCI: Bus %02x already known\n", bus);
-		kfree(dev);
-		kfree(b);
-		return NULL;
+		goto err_out;
 	}
 	list_add_tail(&b->node, &pci_root_buses);
 
 	memset(dev, 0, sizeof(*dev));
 	dev->parent = parent;
+	dev->release = pci_release_bus_bridge_dev;
 	sprintf(dev->bus_id, "pci%04x:%02x", pci_domain_nr(b), bus);
-	device_register(dev);
+	error = device_register(dev);
+	if (error)
+		goto dev_reg_err;
 	b->bridge = get_device(dev);
 
 	b->class_dev.class = &pcibus_class;
 	sprintf(b->class_dev.class_id, "%04x:%02x", pci_domain_nr(b), bus);
-	class_device_register(&b->class_dev);
-	class_device_create_file(&b->class_dev, &class_device_attr_cpuaffinity);
+	error = class_device_register(&b->class_dev);
+	if (error)
+		goto class_dev_reg_err;
+	error = class_device_create_file(&b->class_dev, &class_device_attr_cpuaffinity);
+	if (error)
+		goto class_dev_create_file_err;
 
-	sysfs_create_link(&b->class_dev.kobj, &b->bridge->kobj, "bridge");
+	error = sysfs_create_link(&b->class_dev.kobj, &b->bridge->kobj, "bridge");
+	if (error)
+		goto sys_create_link_err;
 
 	b->number = b->secondary = bus;
 	b->resource[0] = &ioport_resource;
@@ -792,6 +821,19 @@ struct pci_bus * __devinit pci_scan_bus_parented(struct device *parent, int bus,
 	pci_bus_add_devices(b);
 
 	return b;
+
+sys_create_link_err:
+	class_device_remove_file(&b->class_dev, &class_device_attr_cpuaffinity);
+class_dev_create_file_err:
+	class_device_unregister(&b->class_dev);
+class_dev_reg_err:
+	device_unregister(dev);
+dev_reg_err:
+	list_del(&b->node);
+err_out:
+	kfree(dev);
+	kfree(b);
+	return NULL;
 }
 EXPORT_SYMBOL(pci_scan_bus_parented);
 

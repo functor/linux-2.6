@@ -1,13 +1,14 @@
 # 
-# Copyright (C) 2002 Jeff Dike (jdike@karaya.com)
+# Copyright (C) 2002 - 2003 Jeff Dike (jdike@addtoit.com)
 # Licensed under the GPL
 #
 
 extra-y := unmap_fin.o
+clean-files := unmap_tmp.o
 
 obj-y = exec_kern.o exec_user.o gdb.o ksyms.o mem.o mem_user.o process_kern.o \
 	syscall_kern.o syscall_user.o time.o tlb.o tracer.o trap_user.o \
-	uaccess_user.o sys-$(SUBARCH)/
+	uaccess.o uaccess_user.o sys-$(SUBARCH)/
 
 obj-$(CONFIG_PT_PROXY) += gdb_kern.o ptproxy/
 
@@ -20,12 +21,9 @@ UNMAP_CFLAGS := $(patsubst -fprofile-arcs -ftest-coverage,,$(UNMAP_CFLAGS))
 $(USER_OBJS) : %.o: %.c
 	$(CC) $(CFLAGS_$(notdir $@)) $(USER_CFLAGS) -c -o $@ $<
 
-$(O_TARGET) : $(obj)/unmap_fin.o
-
 $(obj)/unmap.o: $(src)/unmap.c
 	$(CC) $(UNMAP_CFLAGS) -c -o $@ $<
 
-$(obj)/unmap_fin.o : $(src)/unmap.o
-	ld -r -o $@ $< -lc -L/usr/lib
-
-clean :
+$(obj)/unmap_fin.o : $(obj)/unmap.o
+	ld -r -o $(obj)/unmap_tmp.o  $< -lc -L/usr/lib
+	objcopy $(obj)/unmap_tmp.o $@ -G switcheroo

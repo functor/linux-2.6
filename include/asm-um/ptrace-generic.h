@@ -10,8 +10,6 @@
 
 #include "linux/config.h"
 
-#include "asm/current.h"
-
 #define pt_regs pt_regs_subarch
 #define show_regs show_regs_subarch
 
@@ -44,6 +42,8 @@ struct pt_regs {
 #define PT_REGS_SYSCALL_NR(r) UPT_SYSCALL_NR(&(r)->regs)
 
 #define PT_REGS_SC(r) UPT_SC(&(r)->regs)
+
+#define instruction_pointer(regs) PT_REGS_IP(regs)
 
 struct task_struct;
 

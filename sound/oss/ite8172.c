@@ -70,10 +70,10 @@
 #include <linux/spinlock.h>
 #include <linux/smp_lock.h>
 #include <linux/ac97_codec.h>
+#include <linux/interrupt.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/uaccess.h>
-#include <asm/hardirq.h>
 #include <asm/it8172/it8172.h>
 
 /* --------------------------------------------------------------------- */
@@ -693,7 +693,7 @@ static int prog_dmabuf(struct it8172_state *s, struct dmabuf *db,
 			return -ENOMEM;
 		db->buforder = order;
 		/* now mark the pages as reserved;
-		   otherwise remap_page_range doesn't do what we want */
+		   otherwise remap_pfn_range doesn't do what we want */
 		pend = virt_to_page(db->rawbuf +
 				    (PAGE_SIZE << db->buforder) - 1);
 		for (page = virt_to_page(db->rawbuf); page <= pend; page++)
@@ -1311,7 +1311,8 @@ static int it8172_mmap(struct file *file, struct vm_area_struct *vma)
 		unlock_kernel();
 		return -EINVAL;
 	}
-	if (remap_page_range(vma, vma->vm_start, virt_to_phys(db->rawbuf),
+	if (remap_pfn_range(vma, vma->vm_start,
+			     virt_to_phys(db->rawbuf) >> PAGE_SHIFT,
 			     size, vma->vm_page_prot)) {
 		unlock_kernel();
 		return -EAGAIN;

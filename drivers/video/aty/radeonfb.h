@@ -262,14 +262,14 @@ struct radeonfb_info {
 	unsigned long		mmio_base_phys;
 	unsigned long		fb_base_phys;
 
-	unsigned long		mmio_base;
-	unsigned long		fb_base;
+	void __iomem		*mmio_base;
+	void __iomem		*fb_base;
 
-	unsigned long 		fb_local_base;
+	unsigned long		fb_local_base;
 
 	struct pci_dev		*pdev;
 
-	u8			*bios_seg;
+	void __iomem		*bios_seg;
 	int			fp_bios_start;
 
 	u32			pseudo_palette[17];
@@ -424,8 +424,6 @@ static inline u32 _INPLL(struct radeonfb_info *rinfo, u32 addr)
 		OUTREG(addr, _tmp);					\
 		spin_unlock_irqrestore(&rinfo->reg_lock, flags); 	\
 	} while (0)
-
-#define MS_TO_HZ(ms)       ((ms * HZ + 999) / 1000)
 
 #define BIOS_IN8(v)  	(readb(rinfo->bios_seg + (v)))
 #define BIOS_IN16(v) 	(readb(rinfo->bios_seg + (v)) | \

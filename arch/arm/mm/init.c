@@ -14,6 +14,7 @@
 #include <linux/swap.h>
 #include <linux/init.h>
 #include <linux/bootmem.h>
+#include <linux/mman.h>
 #include <linux/initrd.h>
 
 #include <asm/mach-types.h>
@@ -29,7 +30,7 @@
 DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
 
 extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
-extern char _stext, _text, _etext, _end, __init_begin, __init_end;
+extern void _stext, _text, _etext, __data_start, _end, __init_begin, __init_end;
 extern unsigned long phys_initrd_start;
 extern unsigned long phys_initrd_size;
 
@@ -281,7 +282,11 @@ static __init void reserve_node_zero(unsigned int bootmap_pfn, unsigned int boot
 	 * Register the kernel text and data with bootmem.
 	 * Note that this can only be in node 0.
 	 */
+#ifdef CONFIG_XIP_KERNEL
+	reserve_bootmem_node(pgdat, __pa(&__data_start), &_end - &__data_start);
+#else
 	reserve_bootmem_node(pgdat, __pa(&_stext), &_end - &_stext);
+#endif
 
 	/*
 	 * Reserve the page tables.  These are already in use,
@@ -344,7 +349,7 @@ static inline void free_bootmem_node_bank(int node, struct meminfo *mi)
  * Initialise the bootmem allocator for all nodes.  This is called
  * early during the architecture specific initialisation.
  */
-void __init bootmem_init(struct meminfo *mi)
+static void __init bootmem_init(struct meminfo *mi)
 {
 	struct node_info node_info[MAX_NUMNODES], *np = node_info;
 	unsigned int bootmap_pages, bootmap_pfn, map_pg;
@@ -412,9 +417,7 @@ void __init bootmem_init(struct meminfo *mi)
 	}
 #endif
 
-	if (map_pg != bootmap_pfn + bootmap_pages)
-		BUG();
-
+	BUG_ON(map_pg != bootmap_pfn + bootmap_pages);
 }
 
 /*
@@ -425,6 +428,8 @@ void __init paging_init(struct meminfo *mi, struct machine_desc *mdesc)
 {
 	void *zero_page;
 	int node;
+
+	bootmem_init(mi);
 
 	memcpy(&meminfo, mi, sizeof(meminfo));
 
@@ -495,7 +500,7 @@ void __init paging_init(struct meminfo *mi, struct machine_desc *mdesc)
 		 */
 		arch_adjust_zones(node, zone_size, zhole_size);
 
-		free_area_init_node(node, pgdat, NULL, zone_size,
+		free_area_init_node(node, pgdat, zone_size,
 				bdata->node_boot_start >> PAGE_SHIFT, zhole_size);
 	}
 
@@ -539,7 +544,7 @@ void __init mem_init(void)
 	int i, node;
 
 	codepages = &_etext - &_text;
-	datapages = &_end - &_etext;
+	datapages = &_end - &__data_start;
 	initpages = &__init_end - &__init_begin;
 
 #ifndef CONFIG_DISCONTIGMEM
@@ -590,7 +595,7 @@ void __init mem_init(void)
 		 * anywhere without overcommit, so turn
 		 * it on by default.
 		 */
-		sysctl_overcommit_memory = 1;
+		sysctl_overcommit_memory = OVERCOMMIT_ALWAYS;
 	}
 }
 

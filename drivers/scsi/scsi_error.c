@@ -22,7 +22,7 @@
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
 #include <linux/blkdev.h>
-#include <linux/smp_lock.h>
+#include <linux/delay.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_dbg.h>
@@ -42,8 +42,8 @@
  * These should *probably* be handled by the host itself.
  * Since it is allowed to sleep, it probably should.
  */
-#define BUS_RESET_SETTLE_TIME   (10*HZ)
-#define HOST_RESET_SETTLE_TIME  (10*HZ)
+#define BUS_RESET_SETTLE_TIME   (10)
+#define HOST_RESET_SETTLE_TIME  (10)
 
 /* called with shost->host_lock held */
 void scsi_eh_wakeup(struct Scsi_Host *shost)
@@ -643,15 +643,13 @@ static void scsi_eh_finish_cmd(struct scsi_cmnd *scmd,
  * Notes:
  *    This has the unfortunate side effect that if a shost adapter does
  *    not automatically request sense information, that we end up shutting
- *    it down before we request it.  All shosts should be doing this
- *    anyways, so for now all I have to say is tough noogies if you end up
- *    in here.  On second thought, this is probably a good idea.  We
- *    *really* want to give authors an incentive to automatically request
- *    this.
+ *    it down before we request it.
  *
- *    In 2.5 this capability will be going away.
+ *    All drivers should request sense information internally these days,
+ *    so for now all I have to say is tough noogies if you end up in here.
  *
- *    Really?  --hch
+ *    XXX: Long term this code should go away, but that needs an audit of
+ *         all LLDDs first.
  **/
 static int scsi_eh_get_sense(struct list_head *work_q,
 			     struct list_head *done_q)
@@ -1044,7 +1042,7 @@ static int scsi_try_bus_reset(struct scsi_cmnd *scmd)
 
 	if (rtn == SUCCESS) {
 		if (!scmd->device->host->hostt->skip_settle_delay)
-			scsi_sleep(BUS_RESET_SETTLE_TIME);
+			ssleep(BUS_RESET_SETTLE_TIME);
 		spin_lock_irqsave(scmd->device->host->host_lock, flags);
 		scsi_report_bus_reset(scmd->device->host, scmd->device->channel);
 		spin_unlock_irqrestore(scmd->device->host->host_lock, flags);
@@ -1076,7 +1074,7 @@ static int scsi_try_host_reset(struct scsi_cmnd *scmd)
 
 	if (rtn == SUCCESS) {
 		if (!scmd->device->host->hostt->skip_settle_delay)
-			scsi_sleep(HOST_RESET_SETTLE_TIME);
+			ssleep(HOST_RESET_SETTLE_TIME);
 		spin_lock_irqsave(scmd->device->host->host_lock, flags);
 		scsi_report_bus_reset(scmd->device->host, scmd->device->channel);
 		spin_unlock_irqrestore(scmd->device->host->host_lock, flags);
@@ -1213,43 +1211,6 @@ static void scsi_eh_offline_sdevs(struct list_head *work_q,
 		scsi_eh_finish_cmd(scmd, done_q);
 	}
 	return;
-}
-
-/**
- * scsi_sleep_done - timer function for scsi_sleep
- * @sem:	semphore to signal
- *
- **/
-static void scsi_sleep_done(unsigned long data)
-{
-	struct semaphore *sem = (struct semaphore *)data;
-
-	if (sem)
-		up(sem);
-}
-
-/**
- * scsi_sleep - sleep for specified timeout
- * @timeout:	timeout value
- *
- **/
-void scsi_sleep(int timeout)
-{
-	DECLARE_MUTEX_LOCKED(sem);
-	struct timer_list timer;
-
-	init_timer(&timer);
-	timer.data = (unsigned long)&sem;
-	timer.expires = jiffies + timeout;
-	timer.function = (void (*)(unsigned long))scsi_sleep_done;
-
-	SCSI_LOG_ERROR_RECOVERY(5, printk("sleeping for timer tics %d\n",
-					  timeout));
-
-	add_timer(&timer);
-
-	down(&sem);
-	del_timer(&timer);
 }
 
 /**
@@ -1639,8 +1600,6 @@ int scsi_error_handler(void *data)
 	int rtn;
 	DECLARE_MUTEX_LOCKED(sem);
 
-	lock_kernel();
-
 	/*
 	 *    Flush resources
 	 */
@@ -1651,8 +1610,6 @@ int scsi_error_handler(void *data)
 
 	shost->eh_wait = &sem;
 	shost->ehandler = current;
-
-	unlock_kernel();
 
 	/*
 	 * Wake up the thread that created us.
@@ -1886,3 +1843,79 @@ scsi_reset_provider(struct scsi_device *dev, int flag)
 	scsi_next_command(scmd);
 	return rtn;
 }
+
+/**
+ * scsi_normalize_sense - normalize main elements from either fixed or
+ *			descriptor sense data format into a common format.
+ *
+ * @sense_buffer:	byte array containing sense data returned by device
+ * @sb_len:		number of valid bytes in sense_buffer
+ * @sshdr:		pointer to instance of structure that common
+ *			elements are written to.
+ *
+ * Notes:
+ *	The "main elements" from sense data are: response_code, sense_key,
+ *	asc, ascq and additional_length (only for descriptor format).
+ *
+ *	Typically this function can be called after a device has
+ *	responded to a SCSI command with the CHECK_CONDITION status.
+ *
+ * Return value:
+ *	1 if valid sense data information found, else 0;
+ **/
+int scsi_normalize_sense(const u8 *sense_buffer, int sb_len,
+                         struct scsi_sense_hdr *sshdr)
+{
+	if (!sense_buffer || !sb_len || (sense_buffer[0] & 0x70) != 0x70)
+		return 0;
+
+	memset(sshdr, 0, sizeof(struct scsi_sense_hdr));
+
+	sshdr->response_code = (sense_buffer[0] & 0x7f);
+	if (sshdr->response_code >= 0x72) {
+		/*
+		 * descriptor format
+		 */
+		if (sb_len > 1)
+			sshdr->sense_key = (sense_buffer[1] & 0xf);
+		if (sb_len > 2)
+			sshdr->asc = sense_buffer[2];
+		if (sb_len > 3)
+			sshdr->ascq = sense_buffer[3];
+		if (sb_len > 7)
+			sshdr->additional_length = sense_buffer[7];
+	} else {
+		/* 
+		 * fixed format
+		 */
+		if (sb_len > 2)
+			sshdr->sense_key = (sense_buffer[2] & 0xf);
+		if (sb_len > 7) {
+			sb_len = (sb_len < (sense_buffer[7] + 8)) ?
+					 sb_len : (sense_buffer[7] + 8);
+			if (sb_len > 12)
+				sshdr->asc = sense_buffer[12];
+			if (sb_len > 13)
+				sshdr->ascq = sense_buffer[13];
+		}
+	}
+
+	return 1;
+}
+EXPORT_SYMBOL(scsi_normalize_sense);
+
+int scsi_request_normalize_sense(struct scsi_request *sreq,
+				 struct scsi_sense_hdr *sshdr)
+{
+	return scsi_normalize_sense(sreq->sr_sense_buffer,
+			sizeof(sreq->sr_sense_buffer), sshdr);
+}
+EXPORT_SYMBOL(scsi_request_normalize_sense);
+
+int scsi_command_normalize_sense(struct scsi_cmnd *cmd,
+				 struct scsi_sense_hdr *sshdr)
+{
+	return scsi_normalize_sense(cmd->sense_buffer,
+			sizeof(cmd->sense_buffer), sshdr);
+}
+EXPORT_SYMBOL(scsi_command_normalize_sense);

@@ -57,9 +57,9 @@ MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
 
-module_param(shpchp_debug, bool, 644);
-module_param(shpchp_poll_mode, bool, 644);
-module_param(shpchp_poll_time, int, 644);
+module_param(shpchp_debug, bool, 0644);
+module_param(shpchp_poll_mode, bool, 0644);
+module_param(shpchp_poll_time, int, 0644);
 MODULE_PARM_DESC(shpchp_debug, "Debugging mode enabled or not");
 MODULE_PARM_DESC(shpchp_poll_mode, "Using polling mechanism for hot-plug events or not");
 MODULE_PARM_DESC(shpchp_poll_time, "Polling mechanism frequency, in seconds");
@@ -599,8 +599,8 @@ static int __init shpcd_init(void)
 
 	retval = shpchprm_init(PCI);
 	if (!retval) {
-		retval = pci_module_init(&shpc_driver);
-		dbg("%s: pci_module_init = %d\n", __FUNCTION__, retval);
+		retval = pci_register_driver(&shpc_driver);
+		dbg("%s: pci_register_driver = %d\n", __FUNCTION__, retval);
 		info(DRIVER_DESC " version: " DRIVER_VERSION "\n");
 	}
 

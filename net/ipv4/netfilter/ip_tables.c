@@ -61,6 +61,8 @@ do {								\
 #endif
 #define SMP_ALIGN(x) (((x) + SMP_CACHE_BYTES-1) & ~(SMP_CACHE_BYTES-1))
 
+static DECLARE_MUTEX(ipt_mutex);
+
 /* Must have mutex */
 #define ASSERT_READ_LOCK(x) IP_NF_ASSERT(down_trylock(&ipt_mutex) != 0)
 #define ASSERT_WRITE_LOCK(x) IP_NF_ASSERT(down_trylock(&ipt_mutex) != 0)
@@ -469,10 +471,22 @@ find_match_lock(const char *name, int *error, struct semaphore *mutex)
 	return find_inlist_lock(&ipt_match, name, "ipt_", error, mutex);
 }
 
-struct ipt_target *
+static struct ipt_target *
 ipt_find_target_lock(const char *name, int *error, struct semaphore *mutex)
 {
 	return find_inlist_lock(&ipt_target, name, "ipt_", error, mutex);
+}
+
+struct ipt_target *
+__ipt_find_target_lock(const char *name, int *error)
+{
+	return ipt_find_target_lock(name,error,&ipt_mutex);
+}
+
+void
+__ipt_mutex_up(void)
+{
+	up(&ipt_mutex);
 }
 
 /* All zeroes == unconditional rule. */
@@ -1278,7 +1292,7 @@ do_ipt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 			       sizeof(info.underflow));
 			info.num_entries = t->private->number;
 			info.size = t->private->size;
-			strcpy(info.name, name);
+			memcpy(info.name, name, sizeof(info.name));
 
 			if (copy_to_user(user, &info, *len) != 0)
 				ret = -EFAULT;
@@ -1416,7 +1430,7 @@ int ipt_register_table(struct ipt_table *table)
 	/* save number of initial entries */
 	table->private->initial_entries = table->private->number;
 
-	table->lock = RW_LOCK_UNLOCKED;
+	rwlock_init(&table->lock);
 	list_prepend(&ipt_tables, table);
 
  unlock:
@@ -1458,21 +1472,27 @@ tcp_find_option(u_int8_t option,
 		int *hotdrop)
 {
 	/* tcp.doff is only 4 bits, ie. max 15 * 4 bytes */
-	u_int8_t opt[60 - sizeof(struct tcphdr)];
+	u_int8_t _opt[60 - sizeof(struct tcphdr)], *op;
 	unsigned int i;
 
 	duprintf("tcp_match: finding option\n");
+
+	if (!optlen)
+		return invert;
+
 	/* If we don't have the whole header, drop packet. */
-	if (skb_copy_bits(skb, skb->nh.iph->ihl*4 + sizeof(struct tcphdr),
-			  opt, optlen) < 0) {
+	op = skb_header_pointer(skb,
+				skb->nh.iph->ihl*4 + sizeof(struct tcphdr),
+				optlen, _opt);
+	if (op == NULL) {
 		*hotdrop = 1;
 		return 0;
 	}
 
 	for (i = 0; i < optlen; ) {
-		if (opt[i] == option) return !invert;
-		if (opt[i] < 2) i++;
-		else i += opt[i+1]?:1;
+		if (op[i] == option) return !invert;
+		if (op[i] < 2) i++;
+		else i += op[i+1]?:1;
 	}
 
 	return invert;
@@ -1486,7 +1506,7 @@ tcp_match(const struct sk_buff *skb,
 	  int offset,
 	  int *hotdrop)
 {
-	struct tcphdr tcph;
+	struct tcphdr _tcph, *th;
 	const struct ipt_tcp *tcpinfo = matchinfo;
 
 	if (offset) {
@@ -1506,7 +1526,9 @@ tcp_match(const struct sk_buff *skb,
 
 #define FWINVTCP(bool,invflg) ((bool) ^ !!(tcpinfo->invflags & invflg))
 
-	if (skb_copy_bits(skb, skb->nh.iph->ihl*4, &tcph, sizeof(tcph)) < 0) {
+	th = skb_header_pointer(skb, skb->nh.iph->ihl*4,
+				sizeof(_tcph), &_tcph);
+	if (th == NULL) {
 		/* We've been asked to examine this packet, and we
 		   can't.  Hence, no choice but to drop. */
 		duprintf("Dropping evil TCP offset=0 tinygram.\n");
@@ -1515,23 +1537,24 @@ tcp_match(const struct sk_buff *skb,
 	}
 
 	if (!port_match(tcpinfo->spts[0], tcpinfo->spts[1],
-			ntohs(tcph.source),
+			ntohs(th->source),
 			!!(tcpinfo->invflags & IPT_TCP_INV_SRCPT)))
 		return 0;
 	if (!port_match(tcpinfo->dpts[0], tcpinfo->dpts[1],
-			ntohs(tcph.dest),
+			ntohs(th->dest),
 			!!(tcpinfo->invflags & IPT_TCP_INV_DSTPT)))
 		return 0;
-	if (!FWINVTCP((((unsigned char *)&tcph)[13] & tcpinfo->flg_mask)
+	if (!FWINVTCP((((unsigned char *)th)[13] & tcpinfo->flg_mask)
 		      == tcpinfo->flg_cmp,
 		      IPT_TCP_INV_FLAGS))
 		return 0;
 	if (tcpinfo->option) {
-		if (tcph.doff * 4 < sizeof(tcph)) {
+		if (th->doff * 4 < sizeof(_tcph)) {
 			*hotdrop = 1;
 			return 0;
 		}
-		if (!tcp_find_option(tcpinfo->option, skb, tcph.doff*4 - sizeof(tcph),
+		if (!tcp_find_option(tcpinfo->option, skb,
+				     th->doff*4 - sizeof(_tcph),
 				     tcpinfo->invflags & IPT_TCP_INV_OPTION,
 				     hotdrop))
 			return 0;
@@ -1564,14 +1587,16 @@ udp_match(const struct sk_buff *skb,
 	  int offset,
 	  int *hotdrop)
 {
-	struct udphdr udph;
+	struct udphdr _udph, *uh;
 	const struct ipt_udp *udpinfo = matchinfo;
 
 	/* Must not be a fragment. */
 	if (offset)
 		return 0;
 
-	if (skb_copy_bits(skb, skb->nh.iph->ihl*4, &udph, sizeof(udph)) < 0) {
+	uh = skb_header_pointer(skb, skb->nh.iph->ihl*4,
+				sizeof(_udph), &_udph);
+	if (uh == NULL) {
 		/* We've been asked to examine this packet, and we
 		   can't.  Hence, no choice but to drop. */
 		duprintf("Dropping evil UDP tinygram.\n");
@@ -1580,10 +1605,10 @@ udp_match(const struct sk_buff *skb,
 	}
 
 	return port_match(udpinfo->spts[0], udpinfo->spts[1],
-			  ntohs(udph.source),
+			  ntohs(uh->source),
 			  !!(udpinfo->invflags & IPT_UDP_INV_SRCPT))
 		&& port_match(udpinfo->dpts[0], udpinfo->dpts[1],
-			      ntohs(udph.dest),
+			      ntohs(uh->dest),
 			      !!(udpinfo->invflags & IPT_UDP_INV_DSTPT));
 }
 
@@ -1635,16 +1660,19 @@ icmp_match(const struct sk_buff *skb,
 	   int offset,
 	   int *hotdrop)
 {
-	struct icmphdr icmph;
+	struct icmphdr _icmph, *ic;
 	const struct ipt_icmp *icmpinfo = matchinfo;
 
 	/* Must not be a fragment. */
 	if (offset)
 		return 0;
 
-	if (skb_copy_bits(skb, skb->nh.iph->ihl*4, &icmph, sizeof(icmph)) < 0){
+	ic = skb_header_pointer(skb, skb->nh.iph->ihl*4,
+				sizeof(_icmph), &_icmph);
+	if (ic == NULL) {
 		/* We've been asked to examine this packet, and we
-		   can't.  Hence, no choice but to drop. */
+		 * can't.  Hence, no choice but to drop.
+		 */
 		duprintf("Dropping evil ICMP tinygram.\n");
 		*hotdrop = 1;
 		return 0;
@@ -1653,7 +1681,7 @@ icmp_match(const struct sk_buff *skb,
 	return icmp_type_code_match(icmpinfo->type,
 				    icmpinfo->code[0],
 				    icmpinfo->code[1],
-				    icmph.type, icmph.code,
+				    ic->type, ic->code,
 				    !!(icmpinfo->invflags&IPT_ICMP_INV));
 }
 
@@ -1861,7 +1889,8 @@ EXPORT_SYMBOL(ipt_unregister_match);
 EXPORT_SYMBOL(ipt_do_table);
 EXPORT_SYMBOL(ipt_register_target);
 EXPORT_SYMBOL(ipt_unregister_target);
-EXPORT_SYMBOL(ipt_find_target_lock);
+EXPORT_SYMBOL_GPL(__ipt_find_target_lock);
+EXPORT_SYMBOL_GPL(__ipt_mutex_up);
 
 module_init(init);
 module_exit(fini);

@@ -11,11 +11,11 @@
 #include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/bootmem.h>
+#include <linux/bitops.h>
 #include <asm/pda.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/desc.h>
-#include <asm/bitops.h>
 #include <asm/atomic.h>
 #include <asm/mmu_context.h>
 #include <asm/smp.h>
@@ -43,77 +43,26 @@ char boot_cpu_stack[IRQSTACKSIZE] __attribute__((section(".bss.page_aligned")));
 
 unsigned long __supported_pte_mask = ~0UL;
 static int do_not_nx __initdata = 0;
-unsigned long vm_stack_flags = __VM_STACK_FLAGS; 
-unsigned long vm_stack_flags32 = __VM_STACK_FLAGS; 
-unsigned long vm_data_default_flags = __VM_DATA_DEFAULT_FLAGS; 
-unsigned long vm_data_default_flags32 = __VM_DATA_DEFAULT_FLAGS; 
-unsigned long vm_force_exec32 = PROT_EXEC; 
 
 /* noexec=on|off
 Control non executable mappings for 64bit processes.
 
-on	Enable
+on	Enable(default)
 off	Disable
-noforce (default) Don't enable by default for heap/stack/data, 
-	but allow PROT_EXEC to be effective
-
 */ 
 static int __init nonx_setup(char *str)
 {
-	if (!strncmp(str, "on",3)) { 
+	if (!strcmp(str, "on")) {
                 __supported_pte_mask |= _PAGE_NX; 
  		do_not_nx = 0; 
- 		vm_data_default_flags &= ~VM_EXEC; 
- 		vm_stack_flags &= ~VM_EXEC;  
-	} else if (!strncmp(str, "noforce",7) || !strncmp(str,"off",3)) { 
-		do_not_nx = (str[0] == 'o');
-		if (do_not_nx)
-			__supported_pte_mask &= ~_PAGE_NX; 
-		vm_data_default_flags |= VM_EXEC; 
-		vm_stack_flags |= VM_EXEC;
+	} else if (!strcmp(str, "off")) {
+		do_not_nx = 1;
+		__supported_pte_mask &= ~_PAGE_NX;
         } 
         return 1;
 } 
 
 __setup("noexec=", nonx_setup); 
-
-/* noexec32=opt{,opt} 
-
-Control the no exec default for 32bit processes. Can be also overwritten
-per executable using ELF header flags (e.g. needed for the X server)
-Requires noexec=on or noexec=noforce to be effective.
-
-Valid options: 
-   all,on    Heap,stack,data is non executable. 	
-   off       (default) Heap,stack,data is executable
-   stack     Stack is non executable, heap/data is.
-   force     Don't imply PROT_EXEC for PROT_READ 
-   compat    (default) Imply PROT_EXEC for PROT_READ
-
-*/
- static int __init nonx32_setup(char *str)
- {
-	char *s;
-	while ((s = strsep(&str, ",")) != NULL) { 
-		if (!strcmp(s, "all") || !strcmp(s,"on")) {
-			vm_data_default_flags32 &= ~VM_EXEC; 
-			vm_stack_flags32 &= ~VM_EXEC;  
-		} else if (!strcmp(s, "off")) { 
-			vm_data_default_flags32 |= VM_EXEC; 
-			vm_stack_flags32 |= VM_EXEC;  
-		} else if (!strcmp(s, "stack")) { 
-			vm_data_default_flags32 |= VM_EXEC; 
-			vm_stack_flags32 &= ~VM_EXEC;  		
-		} else if (!strcmp(s, "force")) { 
-			vm_force_exec32 = 0; 
-		} else if (!strcmp(s, "compat")) { 
-			vm_force_exec32 = PROT_EXEC;
-		} 
-	} 
- 	return 1;
-} 
-
-__setup("noexec32=", nonx32_setup); 
 
 /*
  * Great future plan:
@@ -193,7 +142,8 @@ void pda_init(int cpu)
 char boot_exception_stacks[N_EXCEPTION_STACKS * EXCEPTION_STKSZ] 
 __attribute__((section(".bss.page_aligned")));
 
-void __init syscall_init(void)
+/* May not be marked __init: used by software suspend */
+void syscall_init(void)
 {
 	/* 
 	 * LSTAR and STAR live in a bit strange symbiosis.
@@ -235,10 +185,11 @@ void __init cpu_init (void)
 #else
 	int cpu = smp_processor_id();
 #endif
-	struct tss_struct * t = &init_tss[cpu];
+	struct tss_struct *t = &per_cpu(init_tss, cpu);
 	unsigned long v; 
 	char *estacks = NULL; 
 	struct task_struct *me;
+	int i;
 
 	/* CPU 0 is initialised in head64.c */
 	if (cpu != 0) {
@@ -265,8 +216,8 @@ void __init cpu_init (void)
 
 	cpu_gdt_descr[cpu].size = GDT_SIZE;
 	cpu_gdt_descr[cpu].address = (unsigned long)cpu_gdt_table[cpu];
-	__asm__ __volatile__("lgdt %0": "=m" (cpu_gdt_descr[cpu]));
-	__asm__ __volatile__("lidt %0": "=m" (idt_descr));
+	asm volatile("lgdt %0" :: "m" (cpu_gdt_descr[cpu]));
+	asm volatile("lidt %0" :: "m" (idt_descr));
 
 	memcpy(me->thread.tls_array, cpu_gdt_table[cpu], GDT_ENTRY_TLS_ENTRIES * 8);
 
@@ -302,12 +253,13 @@ void __init cpu_init (void)
 		t->ist[v] = (unsigned long)estacks;
 	}
 
-	t->io_bitmap_base = INVALID_IO_BITMAP_OFFSET;
+	t->io_bitmap_base = offsetof(struct tss_struct, io_bitmap);
 	/*
-	 * This is required because the CPU will access up to
+	 * <= is required because the CPU will access up to
 	 * 8 bits beyond the end of the IO permission bitmap.
 	 */
-	t->io_bitmap[IO_BITMAP_LONGS] = ~0UL;
+	for (i = 0; i <= IO_BITMAP_LONGS; i++)
+		t->io_bitmap[i] = ~0UL;
 
 	atomic_inc(&init_mm.mm_count);
 	me->active_mm = &init_mm;

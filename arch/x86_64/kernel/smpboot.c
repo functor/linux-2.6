@@ -43,6 +43,7 @@
 #include <linux/irq.h>
 #include <linux/bootmem.h>
 #include <linux/thread_info.h>
+#include <linux/module.h>
 
 #include <linux/delay.h>
 #include <linux/mc146818rtc.h>
@@ -55,13 +56,11 @@
 
 /* Number of siblings per CPU package */
 int smp_num_siblings = 1;
-char phys_proc_id[NR_CPUS]; /* Package ID of each logical CPU */
+/* Package ID of each logical CPU */
+u8 phys_proc_id[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
 
 /* Bitmask of currently online CPUs */
 cpumask_t cpu_online_map;
-
-/* which logical CPU number maps to which CPU (physical APIC ID) */
-volatile char x86_cpu_to_apicid[NR_CPUS];
 
 static cpumask_t cpu_callin_map;
 cpumask_t cpu_callout_map;
@@ -390,16 +389,6 @@ void __init start_secondary(void)
 extern volatile unsigned long init_rsp; 
 extern void (*initial_code)(void);
 
-static struct task_struct * __init fork_by_hand(void)
-{
-	struct pt_regs regs;
-	/*
-	 * don't care about the eip and regs settings since
-	 * we'll never reschedule the forked task.
-	 */
-	return copy_process(CLONE_VM|CLONE_IDLETASK, 0, &regs, 0, NULL, NULL);
-}
-
 #if APIC_DEBUG
 static inline void inquire_remote_apic(int apicid)
 {
@@ -573,26 +562,17 @@ static void __init do_boot_cpu (int apicid)
 	 * We can't use kernel_thread since we must avoid to
 	 * reschedule the child.
 	 */
-	idle = fork_by_hand();
+	idle = fork_idle(cpu);
 	if (IS_ERR(idle))
 		panic("failed fork for CPU %d", cpu);
-	wake_up_forked_process(idle);	
 	x86_cpu_to_apicid[cpu] = apicid;
-
-	/*
-	 * We remove it from the pidhash and the runqueue
-	 * once we got the process:
-	 */
-	init_idle(idle,cpu);
-
-	unhash_process(idle);
 
 	cpu_pda[cpu].pcurrent = idle;
 
 	start_rip = setup_trampoline();
 
 	init_rsp = idle->thread.rsp; 
-	init_tss[cpu].rsp0 = init_rsp;
+	per_cpu(init_tss,cpu).rsp0 = init_rsp;
 	initial_code = start_secondary;
 	clear_ti_thread_flag(idle->thread_info, TIF_FORK);
 
@@ -675,6 +655,8 @@ static void __init do_boot_cpu (int apicid)
 		cpu_clear(cpu, cpu_callout_map); /* was set here (do_boot_cpu()) */
 		clear_bit(cpu, &cpu_initialized); /* was set by cpu_init() */
 		cpucount--;
+		x86_cpu_to_apicid[cpu] = BAD_APICID;
+		x86_cpu_to_log_apicid[cpu] = BAD_APICID;
 	}
 }
 
@@ -967,6 +949,9 @@ int __devinit __cpu_up(unsigned int cpu)
 
 void __init smp_cpus_done(unsigned int max_cpus)
 {
+#ifdef CONFIG_X86_IO_APIC
+	setup_ioapic_dest();
+#endif
 	zap_low_mappings();
 }
 

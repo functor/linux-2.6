@@ -121,7 +121,7 @@ struct pt_regs * fastcall save_v86_state(struct kernel_vm86_regs * regs)
 		do_exit(SIGSEGV);
 	}
 
-	tss = init_tss + get_cpu();
+	tss = &per_cpu(init_tss, get_cpu());
 	current->thread.esp0 = current->thread.saved_esp0;
 	current->thread.sysenter_cs = __KERNEL_CS;
 	load_esp0(tss, &current->thread);
@@ -303,7 +303,7 @@ static void do_sys_vm86(struct kernel_vm86_struct *info, struct task_struct *tsk
 	asm volatile("movl %%fs,%0":"=m" (tsk->thread.saved_fs));
 	asm volatile("movl %%gs,%0":"=m" (tsk->thread.saved_gs));
 
-	tss = init_tss + get_cpu();
+	tss = &per_cpu(init_tss, get_cpu());
 	tsk->thread.esp0 = (unsigned long) &info->VM86_TSS_ESP0;
 	if (cpu_has_sep)
 		tsk->thread.sysenter_cs = 0;
@@ -723,7 +723,14 @@ static irqreturn_t irq_handler(int intno, void *dev_id, struct pt_regs * regs)
 	irqbits |= irq_bit;
 	if (vm86_irqs[intno].sig)
 		send_sig(vm86_irqs[intno].sig, vm86_irqs[intno].tsk, 1);
-	/* else user will poll for IRQs */
+	spin_unlock_irqrestore(&irqbits_lock, flags);
+	/*
+	 * IRQ will be re-enabled when user asks for the irq (whether
+	 * polling or as a result of the signal)
+	 */
+	disable_irq(intno);
+	return IRQ_HANDLED;
+
 out:
 	spin_unlock_irqrestore(&irqbits_lock, flags);	
 	return IRQ_NONE;
@@ -741,7 +748,7 @@ static inline void free_vm86_irq(int irqnumber)
 	spin_unlock_irqrestore(&irqbits_lock, flags);	
 }
 
-void release_x86_irqs(struct task_struct *task)
+void release_vm86_irqs(struct task_struct *task)
 {
 	int i;
 	for (i = FIRST_VM86_IRQ ; i <= LAST_VM86_IRQ; i++)

@@ -140,15 +140,13 @@ static inline struct scsi_cd *scsi_cd_get(struct gendisk *disk)
 	if (disk->private_data == NULL)
 		goto out;
 	cd = scsi_cd(disk);
-	if (!kref_get(&cd->kref))
-		goto out_null;
+	kref_get(&cd->kref);
 	if (scsi_device_get(cd->device))
 		goto out_put;
 	goto out;
 
  out_put:
-	kref_put(&cd->kref);
- out_null:
+	kref_put(&cd->kref, sr_kref_release);
 	cd = NULL;
  out:
 	up(&sr_ref_sem);
@@ -158,8 +156,8 @@ static inline struct scsi_cd *scsi_cd_get(struct gendisk *disk)
 static inline void scsi_cd_put(struct scsi_cd *cd)
 {
 	down(&sr_ref_sem);
+	kref_put(&cd->kref, sr_kref_release);
 	scsi_device_put(cd->device);
-	kref_put(&cd->kref);
 	up(&sr_ref_sem);
 }
 
@@ -183,7 +181,7 @@ int sr_media_change(struct cdrom_device_info *cdi, int slot)
 		return -EINVAL;
 	}
 
-	retval = scsi_ioctl(cd->device, SCSI_IOCTL_TEST_UNIT_READY, NULL);
+	retval = scsi_test_unit_ready(cd->device, SR_TIMEOUT, MAX_RETRIES);
 	if (retval) {
 		/* Unable to test, unit probably not ready.  This usually
 		 * means there is no disc in the drive.  Mark as changed,
@@ -379,6 +377,7 @@ static int sr_init_command(struct scsi_cmnd * SCpnt)
 			return 0;
 		SCpnt->cmnd[0] = WRITE_10;
 		SCpnt->sc_data_direction = DMA_TO_DEVICE;
+ 	 	cd->cdi.media_written = 1;
 	} else if (rq_data_dir(SCpnt->request) == READ) {
 		SCpnt->cmnd[0] = READ_10;
 		SCpnt->sc_data_direction = DMA_FROM_DEVICE;
@@ -576,7 +575,7 @@ static int sr_probe(struct device *dev)
 		goto fail;
 	memset(cd, 0, sizeof(*cd));
 
-	kref_init(&cd->kref, sr_kref_release);
+	kref_init(&cd->kref);
 
 	disk = alloc_disk(1);
 	if (!disk)
@@ -877,10 +876,10 @@ static void get_capabilities(struct scsi_cd *cd)
 		cd->cdi.mask |= CDC_CLOSE_TRAY; */
 
 	/*
-	 * if DVD-RAM of MRW-W, we are randomly writeable
+	 * if DVD-RAM, MRW-W or CD-RW, we are randomly writable
 	 */
-	if ((cd->cdi.mask & (CDC_DVD_RAM | CDC_MRW_W | CDC_RAM)) !=
-			(CDC_DVD_RAM | CDC_MRW_W | CDC_RAM)) {
+	if ((cd->cdi.mask & (CDC_DVD_RAM | CDC_MRW_W | CDC_RAM | CDC_CD_RW)) !=
+			(CDC_DVD_RAM | CDC_MRW_W | CDC_RAM | CDC_CD_RW)) {
 		cd->device->writeable = 1;
 	}
 
@@ -937,7 +936,7 @@ static int sr_remove(struct device *dev)
 	del_gendisk(cd->disk);
 
 	down(&sr_ref_sem);
-	kref_put(&cd->kref);
+	kref_put(&cd->kref, sr_kref_release);
 	up(&sr_ref_sem);
 
 	return 0;

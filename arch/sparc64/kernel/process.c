@@ -588,8 +588,6 @@ asmlinkage long sparc_do_fork(unsigned long clone_flags,
 {
 	int __user *parent_tid_ptr, *child_tid_ptr;
 
-	clone_flags &= ~CLONE_IDLETASK;
-
 #ifdef CONFIG_COMPAT
 	if (test_thread_flag(TIF_32BIT)) {
 		parent_tid_ptr = compat_ptr(regs->u_regs[UREG_I2]);
@@ -622,8 +620,6 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long sp,
 	p->thread.smp_lock_count = 0;
 	p->thread.smp_lock_pc = 0;
 #endif
-
-	p->set_child_tid = p->clear_child_tid = NULL;
 
 	/* Calculate offset to stack_frame & pt_regs */
 	child_trap_frame = ((char *)t) + (THREAD_SIZE - (TRACEREG_SZ+STACKFRAME_SZ));
@@ -831,7 +827,9 @@ asmlinkage int sparc_execve(struct pt_regs *regs)
 		current_thread_info()->xfsr[0] = 0;
 		current_thread_info()->fpsaved[0] = 0;
 		regs->tstate &= ~TSTATE_PEF;
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
 	}
 out:
 	return error;

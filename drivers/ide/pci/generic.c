@@ -41,12 +41,12 @@
 
 #include "generic.h"
 
-static unsigned int __init init_chipset_generic (struct pci_dev *dev, const char *name)
+static unsigned int __devinit init_chipset_generic (struct pci_dev *dev, const char *name)
 {
 	return 0;
 }
 
-static void __init init_hwif_generic (ide_hwif_t *hwif)
+static void __devinit init_hwif_generic (ide_hwif_t *hwif)
 {
 	switch(hwif->pci_dev->device) {
 		case PCI_DEVICE_ID_UMC_UM8673F:
@@ -138,7 +138,7 @@ static struct pci_device_id generic_pci_tbl[] = {
 MODULE_DEVICE_TABLE(pci, generic_pci_tbl);
 
 static struct pci_driver driver = {
-	.name		= "PCI IDE",
+	.name		= "PCI_IDE",
 	.id_table	= generic_pci_tbl,
 	.probe		= generic_init_one,
 };

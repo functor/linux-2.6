@@ -524,7 +524,7 @@ static void __init init_asiliant(struct fb_info *p, unsigned long addr)
 	p->fix.smem_start	= addr;
 	p->var			= asiliantfb_var;
 	p->fbops		= &asiliantfb_ops;
-	p->flags		= FBINFO_FLAG_DEFAULT;
+	p->flags		= FBINFO_DEFAULT;
 
 	fb_alloc_cmap(&p->cmap, 256, 0);
 
@@ -575,9 +575,6 @@ asiliantfb_pci_init(struct pci_dev *dp, const struct pci_device_id *ent)
 
 	init_asiliant(p, addr);
 
-	/* Clear the entire framebuffer */
-	memset(p->screen_base, 0, 0x200000);
-
 	pci_set_drvdata(dp, p);
 	return 0;
 }
@@ -609,8 +606,13 @@ static struct pci_driver asiliantfb_driver = {
 
 int __init asiliantfb_init(void)
 {
+	if (fb_get_options("asiliantfb", NULL))
+		return -ENODEV;
+
 	return pci_module_init(&asiliantfb_driver);
 }
+
+module_init(asiliantfb_init);
 
 static void __exit asiliantfb_exit(void)
 {

@@ -43,13 +43,13 @@
 #include <linux/seq_file.h>
 #include <linux/kallsyms.h>
 #include <linux/notifier.h>
+#include <linux/bitops.h>
 
 #include <asm/atomic.h>
 #include <asm/cpu.h>
 #include <asm/io.h>
 #include <asm/smp.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
 #include <asm/uaccess.h>
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
@@ -84,11 +84,13 @@ irq_desc_t _irq_desc[NR_IRQS] __cacheline_aligned = {
 	}
 };
 
+#ifdef CONFIG_SMP
 /*
  * This is updated when the user sets irq affinity via /proc
  */
 cpumask_t __cacheline_aligned pending_irq_cpumask[NR_IRQS];
 static unsigned long pending_irq_redir[BITS_TO_LONGS(NR_IRQS)];
+#endif
 
 #ifdef CONFIG_IA64_GENERIC
 irq_desc_t * __ia64_irq_desc (unsigned int irq)
@@ -213,11 +215,6 @@ int show_interrupts(struct seq_file *p, void *v)
 skip:
 		spin_unlock_irqrestore(&idesc->lock, flags);
 	} else if (i == NR_IRQS) {
-		seq_puts(p, "NMI: ");
-		for (j = 0; j < NR_CPUS; j++)
-			if (cpu_online(j))
-				seq_printf(p, "%10u ", nmi_count(j));
-		seq_putc(p, '\n');
 #ifdef CONFIG_X86_LOCAL_APIC
 		seq_puts(p, "LOC: ");
 		for (j = 0; j < NR_CPUS; j++)
@@ -255,14 +252,16 @@ int handle_IRQ_event(unsigned int irq,
 		struct pt_regs *regs, struct irqaction *action)
 {
 	int status = 1;	/* Force the "do bottom halves" bit */
-	int retval = 0;
+	int ret, retval = 0;
 
 	if (!(action->flags & SA_INTERRUPT))
 		local_irq_enable();
 
 	do {
-		status |= action->flags;
-		retval |= action->handler(irq, action->dev_id, regs);
+		ret = action->handler(irq, action->dev_id, regs);
+		if (ret == IRQ_HANDLED)
+			status |= action->flags;
+		retval |= ret;
 		action = action->next;
 	} while (action);
 	if (status & SA_SAMPLE_RANDOM)
@@ -962,7 +961,7 @@ static int irq_affinity_read_proc (char *page, char **start, off_t off,
 	return len;
 }
 
-static int irq_affinity_write_proc (struct file *file, const char *buffer,
+static int irq_affinity_write_proc (struct file *file, const char __user *buffer,
 				    unsigned long count, void *data)
 {
 	unsigned int irq = (unsigned long) data;
@@ -1137,31 +1136,6 @@ void fixup_irqs(void)
 }
 #endif
 
-static int prof_cpu_mask_read_proc (char *page, char **start, off_t off,
-			int count, int *eof, void *data)
-{
-	int len = cpumask_scnprintf(page, count, *(cpumask_t *)data);
-	if (count - len < 2)
-		return -EINVAL;
-	len += sprintf(page + len, "\n");
-	return len;
-}
-
-static int prof_cpu_mask_write_proc (struct file *file, const char *buffer,
-					unsigned long count, void *data)
-{
-	cpumask_t *mask = (cpumask_t *)data;
-	unsigned long full_count = count, err;
-	cpumask_t new_value;
-
-	err = cpumask_parse(buffer, count, new_value);
-	if (err)
-		return err;
-
-	*mask = new_value;
-	return full_count;
-}
-
 #define MAX_NAMELEN 10
 
 static void register_irq_proc (unsigned int irq)
@@ -1196,26 +1170,15 @@ static void register_irq_proc (unsigned int irq)
 #endif
 }
 
-cpumask_t prof_cpu_mask = CPU_MASK_ALL;
-
 void init_irq_proc (void)
 {
-	struct proc_dir_entry *entry;
 	int i;
 
 	/* create /proc/irq */
-	root_irq_dir = proc_mkdir("irq", 0);
+	root_irq_dir = proc_mkdir("irq", NULL);
 
 	/* create /proc/irq/prof_cpu_mask */
-	entry = create_proc_entry("prof_cpu_mask", 0600, root_irq_dir);
-
-	if (!entry)
-		return;
-
-	entry->nlink = 1;
-	entry->data = (void *)&prof_cpu_mask;
-	entry->read_proc = prof_cpu_mask_read_proc;
-	entry->write_proc = prof_cpu_mask_write_proc;
+	create_prof_cpu_mask(root_irq_dir);
 
 	/*
 	 * Create entries for all existing IRQs.

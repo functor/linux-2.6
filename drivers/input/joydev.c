@@ -143,9 +143,7 @@ static int joydev_fasync(int fd, struct file *file, int on)
 
 static void joydev_free(struct joydev *joydev)
 {
-	devfs_remove("input/js%d", joydev->minor);
 	joydev_table[joydev->minor] = NULL;
-	class_simple_device_remove(MKDEV(INPUT_MAJOR, JOYDEV_MINOR_BASE + joydev->minor));
 	kfree(joydev);
 }
 
@@ -232,8 +230,10 @@ static ssize_t joydev_read(struct file *file, char __user *buf, size_t count, lo
 		&& list->head == list->tail && (file->f_flags & O_NONBLOCK))
 			return -EAGAIN;
 
-	retval = wait_event_interruptible(list->joydev->wait, list->joydev->exist
-		&& (list->startup < joydev->nabs + joydev->nkey || list->head != list->tail));
+	retval = wait_event_interruptible(list->joydev->wait,
+		 			  !list->joydev->exist ||
+					  list->startup < joydev->nabs + joydev->nkey ||
+					  list->head != list->tail);
 
 	if (retval)
 		return retval;
@@ -464,6 +464,8 @@ static void joydev_disconnect(struct input_handle *handle)
 {
 	struct joydev *joydev = handle->private;
 
+	class_simple_device_remove(MKDEV(INPUT_MAJOR, JOYDEV_MINOR_BASE + joydev->minor));
+	devfs_remove("input/js%d", joydev->minor);
 	joydev->exist = 0;
 
 	if (joydev->open)

@@ -1,5 +1,5 @@
 /*
- *   Copyright (C) International Business Machines Corp., 2000-2003
+ *   Copyright (C) International Business Machines Corp., 2000-2004
  *
  *   This program is free software;  you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -44,6 +44,7 @@
 #include <linux/fs.h>
 #include <linux/buffer_head.h>
 #include <linux/pagemap.h>
+#include <linux/quotaops.h>
 
 #include "jfs_incore.h"
 #include "jfs_filsys.h"
@@ -130,7 +131,7 @@ int diMount(struct inode *ipimap)
 	struct inomap *imap;
 	struct metapage *mp;
 	int index;
-	struct dinomap *dinom_le;
+	struct dinomap_disk *dinom_le;
 
 	/*
 	 * allocate/initialize the in-memory inode map control structure
@@ -153,7 +154,7 @@ int diMount(struct inode *ipimap)
 	}
 
 	/* copy the on-disk version to the in-memory version. */
-	dinom_le = (struct dinomap *) mp->data;
+	dinom_le = (struct dinomap_disk *) mp->data;
 	imap->im_freeiag = le32_to_cpu(dinom_le->in_freeiag);
 	imap->im_nextiag = le32_to_cpu(dinom_le->in_nextiag);
 	atomic_set(&imap->im_numinos, le32_to_cpu(dinom_le->in_numinos));
@@ -241,7 +242,7 @@ int diUnmount(struct inode *ipimap, int mounterror)
  */
 int diSync(struct inode *ipimap)
 {
-	struct dinomap *dinom_le;
+	struct dinomap_disk *dinom_le;
 	struct inomap *imp = JFS_IP(ipimap)->i_imap;
 	struct metapage *mp;
 	int index;
@@ -259,7 +260,7 @@ int diSync(struct inode *ipimap)
 	}
 
 	/* copy the in-memory version to the on-disk version */
-	dinom_le = (struct dinomap *) mp->data;
+	dinom_le = (struct dinomap_disk *) mp->data;
 	dinom_le->in_freeiag = cpu_to_le32(imp->im_freeiag);
 	dinom_le->in_nextiag = cpu_to_le32(imp->im_nextiag);
 	dinom_le->in_numinos = cpu_to_le32(atomic_read(&imp->im_numinos));
@@ -503,6 +504,9 @@ struct inode *diReadSpecial(struct super_block *sb, ino_t inum, int secondary)
 
 	ip->i_mapping->a_ops = &jfs_aops;
 	mapping_set_gfp_mask(ip->i_mapping, GFP_NOFS);
+
+	/* Allocations to metadata inodes should not affect quotas */
+	ip->i_flags |= S_NOQUOTA;
 
 	if ((inum == FILESYSTEM_I) && (JFS_IP(ip)->ipimap == sbi->ipaimap)) {
 		sbi->gengen = le32_to_cpu(dp->di_gengen);
@@ -1023,7 +1027,7 @@ int diFree(struct inode *ip)
 			 */
 			iagp->inofreefwd =
 			    cpu_to_le32(imap->im_agctl[agno].inofree);
-			iagp->inofreeback = -1;
+			iagp->inofreeback = cpu_to_le32(-1);
 			imap->im_agctl[agno].inofree = iagno;
 		}
 		IREAD_UNLOCK(ipimap);
@@ -1033,7 +1037,7 @@ int diFree(struct inode *ip)
 		 * inodes (i.e., the inode being freed is the first free 
 		 * inode of extent),
 		 */
-		if (iagp->wmap[extno] == ONES) {
+		if (iagp->wmap[extno] == cpu_to_le32(ONES)) {
 			sword = extno >> L2EXTSPERSUM;
 			bitno = extno & (EXTSPERSUM - 1);
 			iagp->inosmap[sword] &=
@@ -1181,7 +1185,7 @@ int diFree(struct inode *ip)
 
 		iagp->extfreefwd =
 		    cpu_to_le32(imap->im_agctl[agno].extfree);
-		iagp->extfreeback = -1;
+		iagp->extfreeback = cpu_to_le32(-1);
 		imap->im_agctl[agno].extfree = iagno;
 	} else {
 		/* remove the iag from the ag extent list if all extents
@@ -1197,7 +1201,7 @@ int diFree(struct inode *ip)
 				imap->im_agctl[agno].extfree =
 				    le32_to_cpu(iagp->extfreefwd);
 
-			iagp->extfreefwd = iagp->extfreeback = -1;
+			iagp->extfreefwd = iagp->extfreeback = cpu_to_le32(-1);
 
 			IAGFREE_LOCK(imap);
 			iagp->iagfree = cpu_to_le32(imap->im_freeiag);
@@ -1219,7 +1223,7 @@ int diFree(struct inode *ip)
 			imap->im_agctl[agno].inofree =
 			    le32_to_cpu(iagp->inofreefwd);
 
-		iagp->inofreefwd = iagp->inofreeback = -1;
+		iagp->inofreefwd = iagp->inofreeback = cpu_to_le32(-1);
 	}
 
 	/* update the inode extent address and working map 
@@ -2127,7 +2131,7 @@ static int diAllocBit(struct inomap * imap, struct iag * iagp, int ino)
 	 * allocated.  if so, update the free inode summary
 	 * map to reflect this.
 	 */
-	if (iagp->wmap[extno] == ONES) {
+	if (iagp->wmap[extno] == cpu_to_le32(ONES)) {
 		sword = extno >> L2EXTSPERSUM;
 		bitno = extno & (EXTSPERSUM - 1);
 		iagp->inosmap[sword] |= cpu_to_le32(HIGHORDER >> bitno);
@@ -2149,7 +2153,7 @@ static int diAllocBit(struct inomap * imap, struct iag * iagp, int ino)
 			imap->im_agctl[agno].inofree =
 			    le32_to_cpu(iagp->inofreefwd);
 		}
-		iagp->inofreefwd = iagp->inofreeback = -1;
+		iagp->inofreefwd = iagp->inofreeback = cpu_to_le32(-1);
 	}
 
 	/* update the free inode count at the iag, ag, inode
@@ -2358,7 +2362,7 @@ static int diNewExt(struct inomap * imap, struct iag * iagp, int extno)
 			imap->im_agctl[agno].extfree =
 			    le32_to_cpu(iagp->extfreefwd);
 
-		iagp->extfreefwd = iagp->extfreeback = -1;
+		iagp->extfreefwd = iagp->extfreeback = cpu_to_le32(-1);
 	} else {
 		/* if the iag has all free extents (newly allocated iag),
 		 * add the iag to the ag free extent list.
@@ -2368,7 +2372,7 @@ static int diNewExt(struct inomap * imap, struct iag * iagp, int extno)
 				aiagp->extfreeback = cpu_to_le32(iagno);
 
 			iagp->extfreefwd = cpu_to_le32(fwd);
-			iagp->extfreeback = -1;
+			iagp->extfreeback = cpu_to_le32(-1);
 			imap->im_agctl[agno].extfree = iagno;
 		}
 	}
@@ -2382,7 +2386,7 @@ static int diNewExt(struct inomap * imap, struct iag * iagp, int extno)
 
 		iagp->inofreefwd =
 		    cpu_to_le32(imap->im_agctl[agno].inofree);
-		iagp->inofreeback = -1;
+		iagp->inofreeback = cpu_to_le32(-1);
 		imap->im_agctl[agno].inofree = iagno;
 	}
 
@@ -2588,9 +2592,9 @@ diNewIAG(struct inomap * imap, int *iagnop, int agno, struct metapage ** mpp)
 		/* init the iag */
 		memset(iagp, 0, sizeof(struct iag));
 		iagp->iagnum = cpu_to_le32(iagno);
-		iagp->inofreefwd = iagp->inofreeback = -1;
-		iagp->extfreefwd = iagp->extfreeback = -1;
-		iagp->iagfree = -1;
+		iagp->inofreefwd = iagp->inofreeback = cpu_to_le32(-1);
+		iagp->extfreefwd = iagp->extfreeback = cpu_to_le32(-1);
+		iagp->iagfree = cpu_to_le32(-1);
 		iagp->nfreeinos = 0;
 		iagp->nfreeexts = cpu_to_le32(EXTSPERIAG);
 
@@ -2598,31 +2602,14 @@ diNewIAG(struct inomap * imap, int *iagnop, int agno, struct metapage ** mpp)
 		 * summary map initialization handled by bzero).
 		 */
 		for (i = 0; i < SMAPSZ; i++)
-			iagp->inosmap[i] = ONES;
+			iagp->inosmap[i] = cpu_to_le32(ONES);
 
 		flush_metapage(mp);
-#ifdef _STILL_TO_PORT
-		/* synchronously write the iag page */
-		if (bmWrite(bp)) {
-			/* Free the blocks allocated for the iag since it was
-			 * not successfully added to the inode map
-			 */
-			dbFree(ipimap, xaddr, (s64) xlen);
-
-			/* release the inode map lock */
-			IWRITE_UNLOCK(ipimap);
-
-			rc = -EIO;
-			goto out;
-		}
-
-		/* Now the iag is on disk */
 
 		/*
 		 * start tyransaction of update of the inode map
 		 * addressing structure pointing to the new iag page;
 		 */
-#endif				/*  _STILL_TO_PORT */
 		tid = txBegin(sb, COMMIT_FORCE);
 		down(&JFS_IP(ipimap)->commit_sem);
 
@@ -2644,7 +2631,7 @@ diNewIAG(struct inomap * imap, int *iagnop, int agno, struct metapage ** mpp)
 
 		/* update the inode map's inode to reflect the extension */
 		ipimap->i_size += PSIZE;
-		ipimap->i_blocks += LBLK2PBLK(sb, xlen);
+		inode_add_bytes(ipimap, PSIZE);
 
 		/*
 		 * txCommit(COMMIT_FORCE) will synchronously write address 
@@ -2689,7 +2676,7 @@ diNewIAG(struct inomap * imap, int *iagnop, int agno, struct metapage ** mpp)
 
 	/* remove the iag from the iag free list */
 	imap->im_freeiag = le32_to_cpu(iagp->iagfree);
-	iagp->iagfree = -1;
+	iagp->iagfree = cpu_to_le32(-1);
 
 	/* set the return iag number and buffer pointer */
 	*iagnop = iagno;
@@ -2937,8 +2924,8 @@ int diExtendFS(struct inode *ipimap, struct inode *ipbmap)
 
 	/* init per AG control information im_agctl[] */
 	for (i = 0; i < MAXAG; i++) {
-		imap->im_agctl[i].inofree = -1;	/* free inode list */
-		imap->im_agctl[i].extfree = -1;	/* free extent list */
+		imap->im_agctl[i].inofree = -1;
+		imap->im_agctl[i].extfree = -1;
 		imap->im_agctl[i].numinos = 0;	/* number of backed inodes */
 		imap->im_agctl[i].numfree = 0;	/* number of free backed inodes */
 	}
@@ -2983,18 +2970,18 @@ int diExtendFS(struct inode *ipimap, struct inode *ipbmap)
 
 		/* if any backed free inodes, insert at AG free inode list */
 		if ((int) le32_to_cpu(iagp->nfreeinos) > 0) {
-			if ((head = imap->im_agctl[n].inofree) == -1)
-				iagp->inofreefwd = iagp->inofreeback = -1;
-			else {
+			if ((head = imap->im_agctl[n].inofree) == -1) {
+				iagp->inofreefwd = cpu_to_le32(-1);
+				iagp->inofreeback = cpu_to_le32(-1);
+			} else {
 				if ((rc = diIAGRead(imap, head, &hbp))) {
 					rcx = rc;
 					goto nextiag;
 				}
 				hiagp = (struct iag *) hbp->data;
-				hiagp->inofreeback =
-				    le32_to_cpu(iagp->iagnum);
+				hiagp->inofreeback = iagp->iagnum;
 				iagp->inofreefwd = cpu_to_le32(head);
-				iagp->inofreeback = -1;
+				iagp->inofreeback = cpu_to_le32(-1);
 				write_metapage(hbp);
 			}
 
@@ -3009,9 +2996,10 @@ int diExtendFS(struct inode *ipimap, struct inode *ipbmap)
 
 		/* if any free extents, insert at AG free extent list */
 		if (le32_to_cpu(iagp->nfreeexts) > 0) {
-			if ((head = imap->im_agctl[n].extfree) == -1)
-				iagp->extfreefwd = iagp->extfreeback = -1;
-			else {
+			if ((head = imap->im_agctl[n].extfree) == -1) {
+				iagp->extfreefwd = cpu_to_le32(-1);
+				iagp->extfreeback = cpu_to_le32(-1);
+			} else {
 				if ((rc = diIAGRead(imap, head, &hbp))) {
 					rcx = rc;
 					goto nextiag;
@@ -3019,7 +3007,7 @@ int diExtendFS(struct inode *ipimap, struct inode *ipbmap)
 				hiagp = (struct iag *) hbp->data;
 				hiagp->extfreeback = iagp->iagnum;
 				iagp->extfreefwd = cpu_to_le32(head);
-				iagp->extfreeback = -1;
+				iagp->extfreeback = cpu_to_le32(-1);
 				write_metapage(hbp);
 			}
 
@@ -3066,7 +3054,7 @@ static void duplicateIXtree(struct super_block *sb, s64 blkno,
 		if (readSuper(sb, &bh))
 			return;
 		j_sb = (struct jfs_superblock *)bh->b_data;
-		j_sb->s_flag |= JFS_BAD_SAIT;
+		j_sb->s_flag |= cpu_to_le32(JFS_BAD_SAIT);
 
 		mark_buffer_dirty(bh);
 		sync_dirty_buffer(bh);
@@ -3085,7 +3073,7 @@ static void duplicateIXtree(struct super_block *sb, s64 blkno,
 	}
 	/* update the inode map's inode to reflect the extension */
 	ip->i_size += PSIZE;
-	ip->i_blocks += LBLK2PBLK(sb, xlen);
+	inode_add_bytes(ip, PSIZE);
 	txCommit(tid, 1, &ip, COMMIT_FORCE);
       cleanup:
 	txEnd(tid);

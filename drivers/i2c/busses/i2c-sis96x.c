@@ -278,6 +278,8 @@ static struct pci_device_id sis96x_ids[] = {
 	{ 0, }
 };
 
+MODULE_DEVICE_TABLE (pci, sis96x_ids);
+
 static int __devinit sis96x_probe(struct pci_dev *dev,
 				const struct pci_device_id *id)
 {
@@ -339,7 +341,7 @@ static void __devexit sis96x_remove(struct pci_dev *dev)
 }
 
 static struct pci_driver sis96x_driver = {
-	.name		= "sis96x smbus",
+	.name		= "sis96x_smbus",
 	.id_table	= sis96x_ids,
 	.probe		= sis96x_probe,
 	.remove		= __devexit_p(sis96x_remove),
@@ -348,7 +350,7 @@ static struct pci_driver sis96x_driver = {
 static int __init i2c_sis96x_init(void)
 {
 	printk(KERN_INFO "i2c-sis96x version %s\n", SIS96x_VERSION);
-	return pci_module_init(&sis96x_driver);
+	return pci_register_driver(&sis96x_driver);
 }
 
 static void __exit i2c_sis96x_exit(void)

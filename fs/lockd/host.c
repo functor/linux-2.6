@@ -104,11 +104,7 @@ nlm_lookup_host(int server, struct sockaddr_in *sin,
 	memset(host, 0, sizeof(*host));
 
 	addr = sin->sin_addr.s_addr;
-	sprintf(host->h_name, "%d.%d.%d.%d",
-			(unsigned char) (ntohl(addr) >> 24),
-			(unsigned char) (ntohl(addr) >> 16),
-			(unsigned char) (ntohl(addr) >>  8),
-			(unsigned char) (ntohl(addr) >>  0));
+	sprintf(host->h_name, "%u.%u.%u.%u", NIPQUAD(addr));
 
 	host->h_addr       = *sin;
 	host->h_addr.sin_port = 0;	/* ouch! */
@@ -119,13 +115,15 @@ nlm_lookup_host(int server, struct sockaddr_in *sin,
 	init_MUTEX(&host->h_sema);
 	host->h_nextrebind = jiffies + NLM_HOST_REBIND;
 	host->h_expires    = jiffies + NLM_HOST_EXPIRE;
-	host->h_count      = 1;
+	atomic_set(&host->h_count, 1);
 	init_waitqueue_head(&host->h_gracewait);
 	host->h_state      = 0;			/* pseudo NSM state */
 	host->h_nsmstate   = 0;			/* real NSM state */
 	host->h_server	   = server;
 	host->h_next       = nlm_hosts[hash];
 	nlm_hosts[hash]    = host;
+	INIT_LIST_HEAD(&host->h_lockowners);
+	spin_lock_init(&host->h_lock);
 
 	if (++nrhosts > NLM_HOST_MAX)
 		next_gc = 0;
@@ -235,7 +233,7 @@ struct nlm_host * nlm_get_host(struct nlm_host *host)
 {
 	if (host) {
 		dprintk("lockd: get host %s\n", host->h_name);
-		host->h_count ++;
+		atomic_inc(&host->h_count);
 		host->h_expires = jiffies + NLM_HOST_EXPIRE;
 	}
 	return host;
@@ -246,9 +244,10 @@ struct nlm_host * nlm_get_host(struct nlm_host *host)
  */
 void nlm_release_host(struct nlm_host *host)
 {
-	if (host && host->h_count) {
+	if (host != NULL) {
 		dprintk("lockd: release host %s\n", host->h_name);
-		host->h_count --;
+		atomic_dec(&host->h_count);
+		BUG_ON(atomic_read(&host->h_count) < 0);
 	}
 }
 
@@ -283,7 +282,7 @@ nlm_shutdown_hosts(void)
 		for (i = 0; i < NLM_HOST_NRHASH; i++) {
 			for (host = nlm_hosts[i]; host; host = host->h_next) {
 				dprintk("       %s (cnt %d use %d exp %ld)\n",
-					host->h_name, host->h_count,
+					host->h_name, atomic_read(&host->h_count),
 					host->h_inuse, host->h_expires);
 			}
 		}
@@ -314,10 +313,10 @@ nlm_gc_hosts(void)
 	for (i = 0; i < NLM_HOST_NRHASH; i++) {
 		q = &nlm_hosts[i];
 		while ((host = *q) != NULL) {
-			if (host->h_count || host->h_inuse
+			if (atomic_read(&host->h_count) || host->h_inuse
 			 || time_before(jiffies, host->h_expires)) {
 				dprintk("nlm_gc_hosts skipping %s (cnt %d use %d exp %ld)\n",
-					host->h_name, host->h_count,
+					host->h_name, atomic_read(&host->h_count),
 					host->h_inuse, host->h_expires);
 				q = &host->h_next;
 				continue;
@@ -336,6 +335,7 @@ nlm_gc_hosts(void)
 					rpc_destroy_client(host->h_rpcclnt);
 				}
 			}
+			BUG_ON(!list_empty(&host->h_lockowners));
 			kfree(host);
 			nrhosts--;
 		}

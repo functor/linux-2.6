@@ -174,47 +174,7 @@ __calculate_ticks(__u64 elapsed)
 
 
 #ifdef CONFIG_PROFILING
-extern char _stext, _etext;
-
-/*
- * The profiling function is SMP safe. (nothing can mess
- * around with "current", and the profiling counters are
- * updated with atomic operations). This is especially
- * useful with a profiling multiplier != 1
- */
-static inline void s390_do_profile(struct pt_regs * regs)
-{
-	unsigned long eip;
-	extern cpumask_t prof_cpu_mask;
-
-	profile_hook(regs);
-
-	if (user_mode(regs))
-		return;
-
-	if (!prof_buffer)
-		return;
-
-	eip = instruction_pointer(regs);
-
-	/*
-	 * Only measure the CPUs specified by /proc/irq/prof_cpu_mask.
-	 * (default is all CPUs.)
-	 */
-	if (!cpu_isset(smp_processor_id(), prof_cpu_mask))
-		return;
-
-	eip -= (unsigned long) &_stext;
-	eip >>= prof_shift;
-	/*
-	 * Don't ignore out-of-bounds EIP values silently,
-	 * put them into the last histogram slot, so if
-	 * present, they will show up as a sharp peak.
-	 */
-	if (eip > prof_len-1)
-		eip = prof_len-1;
-	atomic_inc((atomic_t *)&prof_buffer[eip]);
-}
+#define s390_do_profile(regs)	profile_tick(CPU_PROFILING, regs)
 #else
 #define s390_do_profile(regs)  do { ; } while(0)
 #endif /* CONFIG_PROFILING */
@@ -273,8 +233,10 @@ void account_ticks(struct pt_regs *regs)
 	while (ticks--)
 		update_process_times(user_mode(regs));
 #else
-	while (ticks--)
+	while (ticks--) {
 		do_timer(regs);
+		update_process_times(user_mode(regs));
+	}
 #endif
 	s390_do_profile(regs);
 }
@@ -298,18 +260,21 @@ static inline void stop_hz_timer(void)
 	if (sysctl_hz_timer != 0)
 		return;
 
+	cpu_set(smp_processor_id(), nohz_cpu_mask);
+
 	/*
 	 * Leave the clock comparator set up for the next timer
 	 * tick if either rcu or a softirq is pending.
 	 */
-	if (rcu_pending(smp_processor_id()) || local_softirq_pending())
+	if (rcu_pending(smp_processor_id()) || local_softirq_pending()) {
+		cpu_clear(smp_processor_id(), nohz_cpu_mask);
 		return;
+	}
 
 	/*
 	 * This cpu is going really idle. Set up the clock comparator
 	 * for the next event.
 	 */
-	cpu_set(smp_processor_id(), nohz_cpu_mask);
 	timer = (__u64) (next_timer_interrupt() - jiffies) + jiffies_64;
 	timer = jiffies_timer_cc + timer * CLK_TICKS_PER_JIFFY;
 	asm volatile ("SCKC %0" : : "m" (timer));

@@ -38,8 +38,8 @@
 #include <linux/wait.h>
 #include <linux/seq_file.h>
 #include <linux/smp_lock.h>
+#include <linux/interrupt.h>
 
-#include <asm/hardirq.h>
 #include <asm/system.h>
 #include <asm/uaccess.h>
 #include <asm/iSeries/LparData.h>
@@ -473,7 +473,7 @@ static int allocateEvents(HvLpIndex remoteLp, int numEvents)
 		parms.used_wait_atomic = 0;
 		parms.sem = &Semaphore;
 	}
-	mf_allocateLpEvents(remoteLp, HvLpEvent_Type_VirtualIo, 250,	/* It would be nice to put a real number here! */
+	mf_allocate_lp_events(remoteLp, HvLpEvent_Type_VirtualIo, 250,	/* It would be nice to put a real number here! */
 			    numEvents, &viopath_donealloc, &parms);
 	if (in_atomic()) {
 		while (atomic_read(&wait_atomic))
@@ -582,7 +582,7 @@ int viopath_close(HvLpIndex remoteLp, int subtype, int numReq)
 
 	doneAllocParms.used_wait_atomic = 0;
 	doneAllocParms.sem = &Semaphore;
-	mf_deallocateLpEvents(remoteLp, HvLpEvent_Type_VirtualIo,
+	mf_deallocate_lp_events(remoteLp, HvLpEvent_Type_VirtualIo,
 			      numReq, &viopath_donealloc, &doneAllocParms);
 	down(&Semaphore);
 

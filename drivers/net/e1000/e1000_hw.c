@@ -65,6 +65,7 @@ static void e1000_release_eeprom(struct e1000_hw *hw);
 static void e1000_standby_eeprom(struct e1000_hw *hw);
 static int32_t e1000_id_led_init(struct e1000_hw * hw);
 static int32_t e1000_set_vco_speed(struct e1000_hw *hw);
+static int32_t e1000_polarity_reversal_workaround(struct e1000_hw *hw);
 static int32_t e1000_set_phy_mode(struct e1000_hw *hw);
 
 /* IGP cable length table */
@@ -251,6 +252,7 @@ e1000_set_mac_type(struct e1000_hw *hw)
         break;
     case E1000_DEV_ID_82541ER:
     case E1000_DEV_ID_82541GI:
+    case E1000_DEV_ID_82541GI_LF:
     case E1000_DEV_ID_82541GI_MOBILE:
         hw->mac_type = e1000_82541_rev_2;
         break;
@@ -920,7 +922,8 @@ e1000_setup_copper_link(struct e1000_hw *hw)
     if(ret_val)
         return ret_val;
 
-    if(hw->mac_type == e1000_82545_rev_3) {
+    if((hw->mac_type == e1000_82545_rev_3) ||
+       (hw->mac_type == e1000_82546_rev_3)) {
         ret_val = e1000_read_phy_reg(hw, M88E1000_PHY_SPEC_CTRL, &phy_data);
         phy_data |= 0x00000008;
         ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_SPEC_CTRL, phy_data);
@@ -1592,6 +1595,15 @@ e1000_phy_force_speed_duplex(struct e1000_hw *hw)
         ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_SPEC_CTRL, phy_data);
         if(ret_val)
             return ret_val;
+
+        if((hw->mac_type == e1000_82544 || hw->mac_type == e1000_82543) &&
+           (!hw->autoneg) &&
+           (hw->forced_speed_duplex == e1000_10_full ||
+            hw->forced_speed_duplex == e1000_10_half)) {
+            ret_val = e1000_polarity_reversal_workaround(hw);
+            if(ret_val)
+                return ret_val;
+        }
     }
     return E1000_SUCCESS;
 }
@@ -1981,6 +1993,7 @@ e1000_check_for_link(struct e1000_hw *hw)
     uint32_t ctrl;
     uint32_t status;
     uint32_t rctl;
+    uint32_t icr;
     uint32_t signal = 0;
     int32_t ret_val;
     uint16_t phy_data;
@@ -2029,6 +2042,25 @@ e1000_check_for_link(struct e1000_hw *hw)
             /* Check if there was DownShift, must be checked immediately after
              * link-up */
             e1000_check_downshift(hw);
+
+            /* If we are on 82544 or 82543 silicon and speed/duplex
+             * are forced to 10H or 10F, then we will implement the polarity
+             * reversal workaround.  We disable interrupts first, and upon
+             * returning, place the devices interrupt state to its previous
+             * value except for the link status change interrupt which will
+             * happen due to the execution of this workaround.
+             */
+
+            if((hw->mac_type == e1000_82544 || hw->mac_type == e1000_82543) &&
+               (!hw->autoneg) &&
+               (hw->forced_speed_duplex == e1000_10_full ||
+                hw->forced_speed_duplex == e1000_10_half)) {
+                E1000_WRITE_REG(hw, IMC, 0xffffffff);
+                ret_val = e1000_polarity_reversal_workaround(hw);
+                icr = E1000_READ_REG(hw, ICR);
+                E1000_WRITE_REG(hw, ICS, (icr & ~E1000_ICS_LSC));
+                E1000_WRITE_REG(hw, IMS, IMS_ENABLE_MASK);
+            }
 
         } else {
             /* No link detected */
@@ -3057,16 +3089,6 @@ e1000_init_eeprom_params(struct e1000_hw *hw)
         }
         break;
     default:
-        eeprom->type = e1000_eeprom_spi;
-        eeprom->opcode_bits = 8;
-        eeprom->delay_usec = 1;
-        if (eecd & E1000_EECD_ADDR_BITS) {
-            eeprom->page_size = 32;
-            eeprom->address_bits = 16;
-        } else {
-            eeprom->page_size = 8;
-            eeprom->address_bits = 8;
-        }
         break;
     }
 
@@ -3453,7 +3475,6 @@ e1000_read_eeprom(struct e1000_hw *hw,
     uint32_t i = 0;
 
     DEBUGFUNC("e1000_read_eeprom");
-
     /* A check for invalid values:  offset too large, too many words, and not
      * enough words.
      */
@@ -5200,27 +5221,88 @@ e1000_set_vco_speed(struct e1000_hw *hw)
     return E1000_SUCCESS;
 }
 
-/******************************************************************************
- * Verifies the hardware needs to allow ARPs to be processed by the host
- *
- * hw - Struct containing variables accessed by shared code
- *
- * returns: - TRUE/FALSE
- *
- *****************************************************************************/
-uint32_t
-e1000_enable_mng_pass_thru(struct e1000_hw *hw)
+static int32_t
+e1000_polarity_reversal_workaround(struct e1000_hw *hw)
 {
-    uint32_t manc;
+    int32_t ret_val;
+    uint16_t mii_status_reg;
+    uint16_t i;
 
-    if (hw->asf_firmware_present) {
-        manc = E1000_READ_REG(hw, MANC);
+    /* Polarity reversal workaround for forced 10F/10H links. */
 
-        if (!(manc & E1000_MANC_RCV_TCO_EN) ||
-            !(manc & E1000_MANC_EN_MAC_ADDR_FILTER))
-            return FALSE;
-        if ((manc & E1000_MANC_SMBUS_EN) && !(manc & E1000_MANC_ASF_EN))
-            return TRUE;
+    /* Disable the transmitter on the PHY */
+
+    ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_PAGE_SELECT, 0x0019);
+    if(ret_val)
+        return ret_val;
+    ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_GEN_CONTROL, 0xFFFF);
+    if(ret_val)
+        return ret_val;
+
+    ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_PAGE_SELECT, 0x0000);
+    if(ret_val)
+        return ret_val;
+
+    /* This loop will early-out if the NO link condition has been met. */
+    for(i = PHY_FORCE_TIME; i > 0; i--) {
+        /* Read the MII Status Register and wait for Link Status bit
+         * to be clear.
+         */
+
+        ret_val = e1000_read_phy_reg(hw, PHY_STATUS, &mii_status_reg);
+        if(ret_val)
+            return ret_val;
+
+        ret_val = e1000_read_phy_reg(hw, PHY_STATUS, &mii_status_reg);
+        if(ret_val)
+            return ret_val;
+
+        if((mii_status_reg & ~MII_SR_LINK_STATUS) == 0) break;
+        msec_delay_irq(100);
     }
-    return FALSE;
+
+    /* Recommended delay time after link has been lost */
+    msec_delay_irq(1000);
+
+    /* Now we will re-enable th transmitter on the PHY */
+
+    ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_PAGE_SELECT, 0x0019);
+    if(ret_val)
+        return ret_val;
+    msec_delay_irq(50);
+    ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_GEN_CONTROL, 0xFFF0);
+    if(ret_val)
+        return ret_val;
+    msec_delay_irq(50);
+    ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_GEN_CONTROL, 0xFF00);
+    if(ret_val)
+        return ret_val;
+    msec_delay_irq(50);
+    ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_GEN_CONTROL, 0x0000);
+    if(ret_val)
+        return ret_val;
+
+    ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_PAGE_SELECT, 0x0000);
+    if(ret_val)
+        return ret_val;
+
+    /* This loop will early-out if the link condition has been met. */
+    for(i = PHY_FORCE_TIME; i > 0; i--) {
+        /* Read the MII Status Register and wait for Link Status bit
+         * to be set.
+         */
+
+        ret_val = e1000_read_phy_reg(hw, PHY_STATUS, &mii_status_reg);
+        if(ret_val)
+            return ret_val;
+
+        ret_val = e1000_read_phy_reg(hw, PHY_STATUS, &mii_status_reg);
+        if(ret_val)
+            return ret_val;
+
+        if(mii_status_reg & MII_SR_LINK_STATUS) break;
+        msec_delay_irq(100);
+    }
+    return E1000_SUCCESS;
 }
+

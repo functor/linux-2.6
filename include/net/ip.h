@@ -89,8 +89,8 @@ extern int		ip_rcv(struct sk_buff *skb, struct net_device *dev,
 			       struct packet_type *pt);
 extern int		ip_local_deliver(struct sk_buff *skb);
 extern int		ip_mr_input(struct sk_buff *skb);
-extern int		ip_output(struct sk_buff **pskb);
-extern int		ip_mc_output(struct sk_buff **pskb);
+extern int		ip_output(struct sk_buff *skb);
+extern int		ip_mc_output(struct sk_buff *skb);
 extern int		ip_fragment(struct sk_buff *skb, int (*out)(struct sk_buff*));
 extern int		ip_do_nat(struct sk_buff *skb);
 extern void		ip_send_check(struct iphdr *ip);
@@ -255,6 +255,7 @@ extern int	ip_call_ra_chain(struct sk_buff *skb);
  */
  
 struct sk_buff *ip_defrag(struct sk_buff *skb);
+extern void ipfrag_flush(void);
 extern int ip_frag_nqueues;
 extern atomic_t ip_frag_mem;
 
