@@ -23,8 +23,8 @@
 #include <linux/kexec.h>
 #endif
 
-int panic_timeout;
-int panic_on_oops;
+int panic_timeout = 900;
+int panic_on_oops = 1;
 int tainted;
 void (*dump_function_ptr)(const char *, const struct pt_regs *) = 0;
 
