@@ -73,11 +73,18 @@ mem_class_get(ckrm_mem_res_t *cls)
 static inline void
 mem_class_put(ckrm_mem_res_t *cls)
 {
+	const char *name;
 	
 	if (cls && atomic_dec_and_test(&(cls->nr_users)) ) {
-		printk("freeing memclass %p of <core:%s>\n", cls, cls->core->name);
+		if (cls->core == NULL) {
+			name = "unknown";
+		} else {
+			name = cls->core->name;
+		}
+		printk("freeing memclass %p of <core:%s>\n", cls, name);
+
 		// BUG_ON(ckrm_memclass_valid(cls));
-		//kfree(cls);
+		// kfree(cls);
 	}	
 }
 

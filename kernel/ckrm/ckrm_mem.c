@@ -192,11 +192,13 @@ mem_res_free(void *my_res)
 		child_guarantee_changed(&parres->shares, res->shares.my_guarantee, 0);
 		child_maxlimit_changed_local(parres);
 	}
+	ckrm_mem_evaluate_all_pages();
+	res->core = NULL;
+
 	spin_lock(&ckrm_mem_lock);
 	list_del(&res->mcls_list);
 	spin_unlock(&ckrm_mem_lock);
 	mem_class_put(res);
-	ckrm_mem_evaluate_all_pages();
 	return;
 }
 
