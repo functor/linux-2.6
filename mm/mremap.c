@@ -16,9 +16,9 @@
 #include <linux/fs.h>
 #include <linux/highmem.h>
 #include <linux/security.h>
+#include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
-#include <asm/pgalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
@@ -327,12 +327,10 @@ unsigned long do_mremap(unsigned long addr,
 			goto out;
 	}
 	if (vma->vm_flags & VM_LOCKED) {
-		unsigned long locked, lock_limit;
-		locked = current->mm->locked_vm << PAGE_SHIFT;
-		lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+		unsigned long locked = current->mm->locked_vm << PAGE_SHIFT;
 		locked += new_len - old_len;
 		ret = -EAGAIN;
-		if (locked > lock_limit && !capable(CAP_IPC_LOCK))
+		if (locked > current->rlim[RLIMIT_MEMLOCK].rlim_cur)
 			goto out;
 	}
 	ret = -ENOMEM;

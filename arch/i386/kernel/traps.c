@@ -47,7 +47,6 @@
 #include <asm/nmi.h>
 
 #include <asm/smp.h>
-#include <asm/pgalloc.h>
 #include <asm/arch_hooks.h>
 
 #include <linux/irq.h>
@@ -159,7 +158,6 @@ void show_trace(struct task_struct *task, unsigned long * stack)
 			break;
 		printk(" =======================\n");
 	}
-	printk("\n");
 }
 
 void show_stack(struct task_struct *task, unsigned long *esp)
@@ -279,7 +277,7 @@ static void handle_BUG(struct pt_regs *regs)
 		file = "<bad filename>";
 
 	printk("------------[ cut here ]------------\n");
-	printk("kernel BUG at %s:%d!\n", file, line);
+	printk(KERN_ALERT "kernel BUG at %s:%d!\n", file, line);
 
 no_bug:
 	return;
@@ -300,7 +298,7 @@ void die(const char * str, struct pt_regs * regs, long err)
 	spin_lock_irq(&die_lock);
 	bust_spinlocks(1);
 	handle_BUG(regs);
-	printk("%s: %04lx [#%d]\n", str, err & 0xffff, ++die_counter);
+	printk(KERN_ALERT "%s: %04lx [#%d]\n", str, err & 0xffff, ++die_counter);
 #ifdef CONFIG_PREEMPT
 	printk("PREEMPT ");
 	nl = 1;

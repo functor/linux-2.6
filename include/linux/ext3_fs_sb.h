@@ -59,10 +59,6 @@ struct ext3_sb_info {
 	struct percpu_counter s_dirs_counter;
 	struct blockgroup_lock s_blockgroup_lock;
 
-	/* head of the per fs reservation window tree */
-	spinlock_t s_rsv_window_lock;
-	struct reserve_window s_rsv_window_head;
-
 	/* Journaling */
 	struct inode * s_journal_inode;
 	struct journal_s * s_journal;

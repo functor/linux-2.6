@@ -508,6 +508,8 @@ int cdrom_is_mrw(struct cdrom_device_info *cdi, int *write)
 	unsigned char buffer[16];
 	int ret;
 
+	*write = 0;
+
 	init_cdrom_command(&cgc, buffer, sizeof(buffer), CGC_DATA_READ);
 
 	cgc.cmd[0] = GPCMD_GET_CONFIGURATION;
@@ -521,8 +523,10 @@ int cdrom_is_mrw(struct cdrom_device_info *cdi, int *write)
 	mfd = (struct mrw_feature_desc *)&buffer[sizeof(struct feature_header)];
 	*write = mfd->write;
 
-	if ((ret = cdrom_mrw_probe_pc(cdi)))
+	if ((ret = cdrom_mrw_probe_pc(cdi))) {
+		*write = 0;
 		return ret;
+	}
 
 	return 0;
 }
@@ -651,7 +655,6 @@ int cdrom_get_random_writable(struct cdrom_device_info *cdi,
 {
 	struct packet_command cgc;
 	char buffer[24];
-	struct feature_header *fh;
 	int ret;
 
 	init_cdrom_command(&cgc, buffer, sizeof(buffer), CGC_DATA_READ);
@@ -664,14 +667,7 @@ int cdrom_get_random_writable(struct cdrom_device_info *cdi,
 	if ((ret = cdi->ops->generic_packet(cdi, &cgc)))
 		return ret;
 
-	fh = (struct feature_header *)&buffer[0];
-	if (be32_to_cpu(fh->data_len) >= (sizeof(struct feature_header)+
-					  sizeof(struct rwrt_feature_desc)))
-		memcpy(rfd, &buffer[sizeof(struct feature_header)],
-		       sizeof (*rfd));
-	else
-		memset(rfd, 0, sizeof(*rfd));
-
+	memcpy(rfd, &buffer[sizeof(struct feature_header)], sizeof (*rfd));
 	return 0;
 }
 
@@ -679,28 +675,24 @@ int cdrom_has_defect_mgt(struct cdrom_device_info *cdi)
 {
 	struct packet_command cgc;
 	char buffer[16];
-	struct feature_header *fh;
 	__u16 *feature_code;
 	int ret;
 
 	init_cdrom_command(&cgc, buffer, sizeof(buffer), CGC_DATA_READ);
 
-	cgc.cmd[0] = GPCMD_GET_CONFIGURATION;	/* often 0x46 */
-	cgc.cmd[3] = CDF_HWDM;			/* often 0x0024 */
-	cgc.cmd[8] = sizeof(buffer);		/* often 0x10 */
+	cgc.cmd[0] = GPCMD_GET_CONFIGURATION;
+	cgc.cmd[3] = CDF_HWDM;
+	cgc.cmd[8] = sizeof(buffer);
 	cgc.quiet = 1;
 
 	if ((ret = cdi->ops->generic_packet(cdi, &cgc)))
 		return ret;
 
-	fh = (struct feature_header *)&buffer[0];
-	ret = 1;
-	if (be32_to_cpu(fh->data_len) >= (sizeof(struct feature_header)+8)) {
-		feature_code = (__u16 *)&buffer[sizeof(struct feature_header)];
-		if (CDF_HWDM == be16_to_cpu(*feature_code))
-			ret = 0;
-	}
-	return ret;
+	feature_code = (__u16 *) &buffer[sizeof(struct feature_header)];
+	if (be16_to_cpu(*feature_code) == CDF_HWDM)
+		return 0;
+
+	return 1;
 }
 
 
@@ -834,7 +826,29 @@ static int cdrom_ram_open_write(struct cdrom_device_info *cdi)
  */
 static int cdrom_open_write(struct cdrom_device_info *cdi)
 {
+	int mrw, mrw_write, ram_write;
 	int ret = 1;
+
+	mrw = 0;
+	if (!cdrom_is_mrw(cdi, &mrw_write))
+		mrw = 1;
+
+	(void) cdrom_is_random_writable(cdi, &ram_write);
+
+	if (mrw)
+		cdi->mask &= ~CDC_MRW;
+	else
+		cdi->mask |= CDC_MRW;
+
+	if (mrw_write)
+		cdi->mask &= ~CDC_MRW_W;
+	else
+		cdi->mask |= CDC_MRW_W;
+
+	if (ram_write)
+		cdi->mask &= ~CDC_RAM;
+	else
+		cdi->mask |= CDC_RAM;
 
 	if (CDROM_CAN(CDC_MRW_W))
 		ret = cdrom_mrw_open_write(cdi);
@@ -878,6 +892,9 @@ int cdrom_open(struct cdrom_device_info *cdi, struct inode *ip, struct file *fp)
 	if ((fp->f_flags & O_NONBLOCK) && (cdi->options & CDO_USE_FFLAGS)) {
 		ret = cdi->ops->open(cdi, 1);
 	} else {
+		ret = open_for_data(cdi);
+		if (ret)
+			goto err;
 		if (fp->f_mode & FMODE_WRITE) {
 			ret = -EROFS;
 			if (!CDROM_CAN(CDC_RAM))
@@ -885,7 +902,6 @@ int cdrom_open(struct cdrom_device_info *cdi, struct inode *ip, struct file *fp)
 			if (cdrom_open_write(cdi))
 				goto err;
 		}
-		ret = open_for_data(cdi);
 	}
 
 	if (ret)

@@ -27,6 +27,8 @@
 #include <linux/security.h>
 #include <linux/mount.h>
 #include <linux/audit.h>
+#include <linux/vs_base.h>
+
 #include <asm/namei.h>
 #include <asm/uaccess.h>
 

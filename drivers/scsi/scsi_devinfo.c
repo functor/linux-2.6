@@ -27,7 +27,7 @@ struct scsi_dev_info_list {
 static const char spaces[] = "                "; /* 16 of them */
 static unsigned scsi_default_dev_flags;
 static LIST_HEAD(scsi_dev_info_list);
-static __init char scsi_dev_flags[256];
+static __initdata char scsi_dev_flags[256];
 
 /*
  * scsi_static_device_list: deprecated list of devices that require
@@ -118,7 +118,7 @@ static struct {
 	{"ADAPTEC", "AACRAID", NULL, BLIST_FORCELUN},
 	{"ADAPTEC", "Adaptec 5400S", NULL, BLIST_FORCELUN},
 	{"AFT PRO", "-IX CF", "0.0>", BLIST_FORCELUN},
-	{"BELKIN", "USB 2 HS-CF", "1.95",  BLIST_SPARSELUN},
+	{"BELKIN", "USB 2 HS-CF", "1.95",  BLIST_FORCELUN},
 	{"CANON", "IPUBJD", NULL, BLIST_SPARSELUN},
 	{"CBOX3", "USB Storage-SMC", "300A", BLIST_FORCELUN},
 	{"CMD", "CRA-7280", NULL, BLIST_SPARSELUN},	/* CMD RAID Controller */
@@ -142,7 +142,6 @@ static struct {
 	{"EMULEX", "MD21/S2     ESDI", NULL, BLIST_SINGLELUN},
 	{"FSC", "CentricStor", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"Generic", "USB SD Reader", "1.00", BLIST_FORCELUN},
-	{"Generic", "USB Storage-SMC", "0090", BLIST_FORCELUN},
 	{"Generic", "USB Storage-SMC", "0180", BLIST_FORCELUN},
 	{"Generic", "USB Storage-SMC", "0207", BLIST_FORCELUN},
 	{"HITACHI", "DF400", "*", BLIST_SPARSELUN},
@@ -155,7 +154,6 @@ static struct {
 	{"HP", "C1557A", NULL, BLIST_FORCELUN},
 	{"IBM", "AuSaV1S2", NULL, BLIST_FORCELUN},
 	{"IBM", "ProFibre 4000R", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
-	{"ICSI", "SD Card", "2.7C", BLIST_FORCELUN},
 	{"iomega", "jaz 1GB", "J.86", BLIST_NOTQ | BLIST_NOLUN},
 	{"IOMEGA", "Io20S         *F", NULL, BLIST_KEY},
 	{"INSITE", "Floptical   F*8I", NULL, BLIST_KEY},

@@ -42,7 +42,7 @@
 #include <linux/percpu.h>
 #include <linux/kthread.h>
 #include <linux/vserver/sched.h>
-#include <linux/vinline.h>
+#include <linux/vs_base.h>
 
 #include <asm/unistd.h>
 
@@ -554,7 +554,7 @@ static inline void resched_task(task_t *p)
  * task_curr - is this task currently executing on a CPU?
  * @p: the task in question.
  */
-inline int task_curr(task_t *p)
+inline int task_curr(const task_t *p)
 {
 	return cpu_curr(task_cpu(p)) == p;
 }
@@ -769,6 +769,13 @@ static int try_to_wake_up(task_t * p, unsigned int state, int sync)
 
 	load = source_load(cpu);
 	this_load = target_load(this_cpu);
+
+	/*
+	 * If sync wakeup then subtract the (maximum possible) effect of
+	 * the currently running task from the load of the current CPU:
+	 */
+	if (sync)
+		this_load -= SCHED_LOAD_SCALE;
 
 	/* Don't pull the task off an idle CPU to a busy one */
 	if (load < SCHED_LOAD_SCALE/2 && this_load > SCHED_LOAD_SCALE/2)
@@ -2719,7 +2726,7 @@ asmlinkage long sys_nice(int increment)
  * RT tasks are offset by -200. Normal tasks are centered
  * around 0, value goes from -16 to +15.
  */
-int task_prio(task_t *p)
+int task_prio(const task_t *p)
 {
 	return p->prio - MAX_RT_PRIO;
 }
@@ -2728,7 +2735,7 @@ int task_prio(task_t *p)
  * task_nice - return the nice value of a given task.
  * @p: the task in question.
  */
-int task_nice(task_t *p)
+int task_nice(const task_t *p)
 {
 	return TASK_NICE(p);
 }
@@ -3872,7 +3879,7 @@ void sched_domain_debug(void)
 
 		sd = rq->sd;
 
-		printk(KERN_DEBUG "CPU%d: %s\n",
+		printk(KERN_WARNING "CPU%d: %s\n",
 				i, (cpu_online(i) ? " online" : "offline"));
 
 		do {
@@ -3890,13 +3897,13 @@ void sched_domain_debug(void)
 			printk("domain %d: span %s\n", level, str);
 
 			if (!cpu_isset(i, sd->span))
-				printk(KERN_DEBUG "ERROR domain->span does not contain CPU%d\n", i);
+				printk(KERN_WARNING "ERROR domain->span does not contain CPU%d\n", i);
 			if (!cpu_isset(i, group->cpumask))
-				printk(KERN_DEBUG "ERROR domain->groups does not contain CPU%d\n", i);
+				printk(KERN_WARNING "ERROR domain->groups does not contain CPU%d\n", i);
 			if (!group->cpu_power)
-				printk(KERN_DEBUG "ERROR domain->cpu_power not set\n");
+				printk(KERN_WARNING "ERROR domain->cpu_power not set\n");
 
-			printk(KERN_DEBUG);
+			printk(KERN_WARNING);
 			for (j = 0; j < level + 2; j++)
 				printk(" ");
 			printk("groups:");
@@ -3931,7 +3938,7 @@ void sched_domain_debug(void)
 			if (sd) {
 				cpus_and(tmp, groupmask, sd->span);
 				if (!cpus_equal(tmp, groupmask))
-					printk(KERN_DEBUG "ERROR parent span is not a superset of domain->span\n");
+					printk(KERN_WARNING "ERROR parent span is not a superset of domain->span\n");
 			}
 
 		} while (sd);

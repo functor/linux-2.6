@@ -22,6 +22,9 @@
 #include <asm/uaccess.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
+#include <linux/vs_base.h>
+#include <linux/vs_limit.h>
+#include <linux/vs_dlimit.h>
 #include <linux/vserver/xid.h>
 
 #include <asm/unistd.h>

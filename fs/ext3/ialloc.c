@@ -582,11 +582,10 @@ got:
 	ei->i_file_acl = 0;
 	ei->i_dir_acl = 0;
 	ei->i_dtime = 0;
-	ei->i_rsv_window.rsv_start = 0;
-	ei->i_rsv_window.rsv_end = 0;
-	atomic_set(&ei->i_rsv_window.rsv_goal_size, EXT3_DEFAULT_RESERVE_BLOCKS);
-	ei->i_rsv_window.rsv_alloc_hit = 0;
-	INIT_LIST_HEAD(&ei->i_rsv_window.rsv_list);
+#ifdef EXT3_PREALLOCATE
+	ei->i_prealloc_block = 0;
+	ei->i_prealloc_count = 0;
+#endif
 	ei->i_block_group = group;
 
 	ext3_set_inode_flags(inode);

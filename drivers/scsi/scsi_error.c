@@ -31,20 +31,15 @@
 #include "scsi_priv.h"
 #include "scsi_logging.h"
 
-#ifdef DEBUG
-#define SENSE_TIMEOUT SCSI_TIMEOUT
-#else
-#define SENSE_TIMEOUT (10*HZ)
-#endif
-
-#define START_UNIT_TIMEOUT (30*HZ)
+#define SENSE_TIMEOUT		(10*HZ)
+#define START_UNIT_TIMEOUT	(30*HZ)
 
 /*
  * These should *probably* be handled by the host itself.
  * Since it is allowed to sleep, it probably should.
  */
-#define BUS_RESET_SETTLE_TIME   10*HZ
-#define HOST_RESET_SETTLE_TIME  10*HZ
+#define BUS_RESET_SETTLE_TIME   (10*HZ)
+#define HOST_RESET_SETTLE_TIME  (10*HZ)
 
 /* called with shost->host_lock held */
 void scsi_eh_wakeup(struct Scsi_Host *shost)
@@ -1026,7 +1021,8 @@ static int scsi_try_bus_reset(struct scsi_cmnd *scmd)
 	spin_unlock_irqrestore(scmd->device->host->host_lock, flags);
 
 	if (rtn == SUCCESS) {
-		scsi_sleep(BUS_RESET_SETTLE_TIME);
+		if (!scmd->device->host->hostt->skip_settle_delay)
+			scsi_sleep(BUS_RESET_SETTLE_TIME);
 		spin_lock_irqsave(scmd->device->host->host_lock, flags);
 		scsi_report_bus_reset(scmd->device->host, scmd->device->channel);
 		spin_unlock_irqrestore(scmd->device->host->host_lock, flags);
@@ -1057,7 +1053,8 @@ static int scsi_try_host_reset(struct scsi_cmnd *scmd)
 	spin_unlock_irqrestore(scmd->device->host->host_lock, flags);
 
 	if (rtn == SUCCESS) {
-		scsi_sleep(HOST_RESET_SETTLE_TIME);
+		if (!scmd->device->host->hostt->skip_settle_delay)
+			scsi_sleep(HOST_RESET_SETTLE_TIME);
 		spin_lock_irqsave(scmd->device->host->host_lock, flags);
 		scsi_report_bus_reset(scmd->device->host, scmd->device->channel);
 		spin_unlock_irqrestore(scmd->device->host->host_lock, flags);

@@ -18,7 +18,7 @@
 #include <linux/mount.h>
 #include <linux/tty.h>
 #include <linux/devpts_fs.h>
-#include <linux/vinline.h>
+#include <linux/vs_base.h>
 #include "xattr.h"
 
 #define DEVPTS_SUPER_MAGIC 0x1cd1

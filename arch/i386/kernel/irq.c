@@ -41,7 +41,6 @@
 #include <asm/system.h>
 #include <asm/bitops.h>
 #include <asm/uaccess.h>
-#include <asm/pgalloc.h>
 #include <asm/delay.h>
 #include <asm/desc.h>
 #include <asm/irq.h>
@@ -241,6 +240,7 @@ static void __report_bad_irq(int irq, irq_desc_t *desc, irqreturn_t action_ret)
 				irq, action_ret);
 	} else {
 		printk(KERN_ERR "irq %d: nobody cared! (screaming interrupt?)\n", irq);
+		printk(KERN_ERR "irq %d: Please try booting with acpi=off and report a bug\n", irq);
 	}
 	dump_stack();
 	printk(KERN_ERR "handlers:\n");

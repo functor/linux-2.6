@@ -15,8 +15,9 @@
 
 #include <linux/config.h>
 #include <linux/swap.h>
-#include <linux/vinline.h>
+#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
+#include <linux/vs_memory.h>
 
 /*
  * For UP we don't need to worry about TLB flush

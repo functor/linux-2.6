@@ -24,6 +24,8 @@
 #include <linux/security.h>
 #include <linux/dcookies.h>
 #include <linux/suspend.h>
+#include <linux/vs_base.h>
+#include <linux/vs_cvirt.h>
 #include <linux/ckrm.h>
 
 #include <asm/uaccess.h>
@@ -428,72 +430,7 @@ out_unlock:
 	return retval;
 }
 
-/*
- *      vshelper path is set via /proc/sys
- *      invoked by vserver sys_reboot(), with
- *      the following arguments
- *
- *      argv [0] = vshelper_path;
- *      argv [1] = action: "restart", "halt", "poweroff", ...
- *      argv [2] = context identifier
- *      argv [3] = additional argument (restart2)
- *
- *      envp [*] = type-specific parameters
- */
-char vshelper_path[255] = "/sbin/vshelper";
-
-long vs_reboot(unsigned int cmd, void * arg)
-{
-	char id_buf[8], cmd_buf[32];
-	char uid_buf[32], pid_buf[32];
-	char buffer[256];
-
-	char *argv[] = {vshelper_path, NULL, id_buf, NULL, 0};
-	char *envp[] = {"HOME=/", "TERM=linux",
-			"PATH=/sbin:/usr/sbin:/bin:/usr/bin",
-			uid_buf, pid_buf, cmd_buf, 0};
-
-	snprintf(id_buf, sizeof(id_buf)-1, "%d", vx_current_xid());
-
-	snprintf(cmd_buf, sizeof(cmd_buf)-1, "VS_CMD=%08x", cmd);
-	snprintf(uid_buf, sizeof(uid_buf)-1, "VS_UID=%d", current->uid);
-	snprintf(pid_buf, sizeof(pid_buf)-1, "VS_PID=%d", current->pid);
-
-	switch (cmd) {
-	case LINUX_REBOOT_CMD_RESTART:
-		argv[1] = "restart";
-		break;	
-
-	case LINUX_REBOOT_CMD_HALT:
-		argv[1] = "halt";
-		break;	
-
-	case LINUX_REBOOT_CMD_POWER_OFF:
-		argv[1] = "poweroff";
-		break;	
-
-	case LINUX_REBOOT_CMD_SW_SUSPEND:
-		argv[1] = "swsusp";
-		break;	
-
-	case LINUX_REBOOT_CMD_RESTART2:
-		if (strncpy_from_user(&buffer[0], (char *)arg, sizeof(buffer) - 1) < 0)
-			return -EFAULT;
-		argv[3] = buffer;
-	default:
-		argv[1] = "restart2";
-		break;	
-	}
-
-	/* maybe we should wait ? */
-	if (call_usermodehelper(*argv, argv, envp, 0)) {
-		printk( KERN_WARNING
-			"vs_reboot(): failed to exec (%s %s %s %s)\n",
-			vshelper_path, argv[1], argv[2], argv[3]);
-		return -EPERM;
-	}
-	return 0;
-}
+long vs_reboot(unsigned int, void *);
 
 /*
  * Reboot system call: for obvious reasons only root may call it,

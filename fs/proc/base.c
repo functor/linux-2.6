@@ -32,7 +32,10 @@
 #include <linux/mount.h>
 #include <linux/security.h>
 #include <linux/ptrace.h>
-#include <linux/ninline.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
+#include <linux/vs_cvirt.h>
+
 
 /*
  * For hysterical raisins we keep the same inumbers as in the old procfs.
@@ -1189,7 +1192,7 @@ static struct inode_operations proc_task_inode_operations = {
 };
 
 #ifdef CONFIG_SECURITY
-static ssize_t proc_pid_attr_read(struct file * file, char * buf,
+static ssize_t proc_pid_attr_read(struct file * file, char __user * buf,
 				  size_t count, loff_t *ppos)
 {
 	struct inode * inode = file->f_dentry->d_inode;
@@ -1226,7 +1229,7 @@ static ssize_t proc_pid_attr_read(struct file * file, char * buf,
 	return count;
 }
 
-static ssize_t proc_pid_attr_write(struct file * file, const char * buf,
+static ssize_t proc_pid_attr_write(struct file * file, const char __user * buf,
 				   size_t count, loff_t *ppos)
 { 
 	struct inode * inode = file->f_dentry->d_inode;

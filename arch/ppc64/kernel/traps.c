@@ -308,8 +308,7 @@ static void parse_fpe(struct pt_regs *regs)
 	siginfo_t info;
 	unsigned long fpscr;
 
-	if (regs->msr & MSR_FP)
-		giveup_fpu(current);
+	flush_fp_to_thread(current);
 
 	fpscr = current->thread.fpscr;
 
@@ -442,8 +441,22 @@ void KernelFPUnavailableException(struct pt_regs *regs)
 	die("Unrecoverable FP Unavailable Exception", regs, SIGABRT);
 }
 
-void KernelAltivecUnavailableException(struct pt_regs *regs)
+void AltivecUnavailableException(struct pt_regs *regs)
 {
+#ifndef CONFIG_ALTIVEC
+	if (user_mode(regs)) {
+		/* A user program has executed an altivec instruction,
+		   but this kernel doesn't support altivec. */
+		siginfo_t info;
+
+		memset(&info, 0, sizeof(info));
+		info.si_signo = SIGILL;
+		info.si_code = ILL_ILLOPC;
+		info.si_addr = (void *) regs->nip;
+		_exception(SIGILL, &info, regs);
+		return;
+	}
+#endif
 	printk(KERN_EMERG "Unrecoverable VMX/Altivec Unavailable Exception "
 			  "%lx at %lx\n", regs->trap, regs->nip);
 	die("Unrecoverable VMX/Altivec Unavailable Exception", regs, SIGABRT);
@@ -464,6 +477,18 @@ SingleStepException(struct pt_regs *regs)
 	info.si_code = TRAP_TRACE;
 	info.si_addr = (void *)regs->nip;
 	_exception(SIGTRAP, &info, regs);	
+}
+
+/*
+ * After we have successfully emulated an instruction, we have to
+ * check if the instruction was being single-stepped, and if so,
+ * pretend we got a single-step exception.  This was pointed out
+ * by Kumar Gala.  -- paulus
+ */
+static inline void emulate_single_step(struct pt_regs *regs)
+{
+	if (regs->msr & MSR_SE)
+		SingleStepException(regs);
 }
 
 static void dummy_perf(struct pt_regs *regs)
@@ -487,10 +512,8 @@ AlignmentException(struct pt_regs *regs)
 	fixed = fix_alignment(regs);
 
 	if (fixed == 1) {
-		if (!user_mode(regs))
-			PPCDBG(PPCDBG_ALIGNFIXUP, "fix alignment at %lx\n",
-			       regs->nip);
 		regs->nip += 4;	/* skip over emulated instruction */
+		emulate_single_step(regs);
 		return;
 	}
 
@@ -521,8 +544,7 @@ AlignmentException(struct pt_regs *regs)
 void
 AltivecAssistException(struct pt_regs *regs)
 {
-	if (regs->msr & MSR_VEC)
-		giveup_altivec(current);
+	flush_altivec_to_thread(current);
 	/* XXX quick hack for now: set the non-Java bit in the VSCR */
 	current->thread.vscr.u[3] |= 0x10000;
 }

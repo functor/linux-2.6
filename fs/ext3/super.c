@@ -493,9 +493,10 @@ static void destroy_inodecache(void)
 		printk(KERN_INFO "ext3_inode_cache: not all structures were freed\n");
 }
 
+#ifdef CONFIG_EXT3_FS_POSIX_ACL
+
 static void ext3_clear_inode(struct inode *inode)
 {
-#ifdef CONFIG_EXT3_FS_POSIX_ACL
        if (EXT3_I(inode)->i_acl &&
            EXT3_I(inode)->i_acl != EXT3_ACL_NOT_CACHED) {
                posix_acl_release(EXT3_I(inode)->i_acl);
@@ -506,10 +507,11 @@ static void ext3_clear_inode(struct inode *inode)
                posix_acl_release(EXT3_I(inode)->i_default_acl);
                EXT3_I(inode)->i_default_acl = EXT3_ACL_NOT_CACHED;
        }
-#endif
-	if (!is_bad_inode(inode))
-		ext3_discard_reservation(inode);
 }
+
+#else
+# define ext3_clear_inode NULL
+#endif
 
 #ifdef CONFIG_QUOTA
 
@@ -559,6 +561,7 @@ static struct super_operations ext3_sops = {
 	.read_inode	= ext3_read_inode,
 	.write_inode	= ext3_write_inode,
 	.dirty_inode	= ext3_dirty_inode,
+	.put_inode	= ext3_put_inode,
 	.delete_inode	= ext3_delete_inode,
 	.put_super	= ext3_put_super,
 	.write_super	= ext3_write_super,
@@ -579,8 +582,7 @@ enum {
 	Opt_bsd_df, Opt_minix_df, Opt_grpid, Opt_nogrpid,
 	Opt_resgid, Opt_resuid, Opt_sb, Opt_err_cont, Opt_err_panic, Opt_err_ro,
 	Opt_nouid32, Opt_check, Opt_nocheck, Opt_debug, Opt_oldalloc, Opt_orlov,
-	Opt_user_xattr, Opt_nouser_xattr, Opt_acl, Opt_noacl,
-	Opt_reservation, Opt_noreservation, Opt_noload,
+	Opt_user_xattr, Opt_nouser_xattr, Opt_acl, Opt_noacl, Opt_noload,
 	Opt_commit, Opt_journal_update, Opt_journal_inum,
 	Opt_abort, Opt_data_journal, Opt_data_ordered, Opt_data_writeback,
 	Opt_usrjquota, Opt_grpjquota, Opt_offusrjquota, Opt_offgrpjquota,
@@ -612,8 +614,6 @@ static match_table_t tokens = {
 	{Opt_nouser_xattr, "nouser_xattr"},
 	{Opt_acl, "acl"},
 	{Opt_noacl, "noacl"},
-	{Opt_reservation, "reservation"},
-	{Opt_noreservation, "noreservation"},
 	{Opt_noload, "noload"},
 	{Opt_commit, "commit=%u"},
 	{Opt_journal_update, "journal=update"},
@@ -633,9 +633,7 @@ static match_table_t tokens = {
 	{Opt_ignore, "noquota"},
 	{Opt_ignore, "quota"},
 	{Opt_ignore, "usrquota"},
-	{Opt_err, NULL},
-	{Opt_resize, "resize"}
-		
+	{Opt_err, NULL}
 };
 
 static unsigned long get_sb_block(void **data)
@@ -659,7 +657,7 @@ static unsigned long get_sb_block(void **data)
 }
 
 static int parse_options (char * options, struct super_block *sb,
-			  unsigned long * inum, unsigned long *n_blocks_count, int is_remount)
+			  unsigned long * inum, int is_remount)
 {
 	struct ext3_sb_info *sbi = EXT3_SB(sb);
 	char * p;
@@ -775,12 +773,6 @@ static int parse_options (char * options, struct super_block *sb,
 			printk("EXT3 (no)acl options not supported\n");
 			break;
 #endif
-		case Opt_reservation:
-			set_opt(sbi->s_mount_opt, RESERVATION);
-			break;
-		case Opt_noreservation:
-			clear_opt(sbi->s_mount_opt, RESERVATION);
-			break;
 		case Opt_journal_update:
 			/* @@@ FIXME */
 			/* Eventually we will want to be able to create
@@ -912,15 +904,6 @@ clear_qf_name:
 			set_opt(sbi->s_mount_opt, ABORT);
 			break;
 		case Opt_ignore:
-			break;
-		case Opt_resize:
-			if (!n_blocks_count) {
-				printk("EXT3-fs: resize option only available "
-					"for remount\n");
-				return 0;
-			}
-			match_int(&args[0], &option);
-			*n_blocks_count = option;
 			break;
 		default:
 			printk (KERN_ERR
@@ -1311,9 +1294,7 @@ static int ext3_fill_super (struct super_block *sb, void *data, int silent)
 	sbi->s_resuid = le16_to_cpu(es->s_def_resuid);
 	sbi->s_resgid = le16_to_cpu(es->s_def_resgid);
 
-	set_opt(sbi->s_mount_opt, RESERVATION);
-
-	if (!parse_options ((char *) data, sb, &journal_inum, NULL, 0))
+	if (!parse_options ((char *) data, sb, &journal_inum, 0))
 		goto failed_mount;
 
 	if (EXT3_SB(sb)->s_mount_opt & EXT3_MOUNT_TAG_XID)
@@ -1489,14 +1470,6 @@ static int ext3_fill_super (struct super_block *sb, void *data, int silent)
 	sbi->s_gdb_count = db_count;
 	get_random_bytes(&sbi->s_next_generation, sizeof(u32));
 	spin_lock_init(&sbi->s_next_gen_lock);
-	/* per fileystem reservation list head & lock */
-	spin_lock_init(&sbi->s_rsv_window_lock);
-	INIT_LIST_HEAD(&sbi->s_rsv_window_head.rsv_list);
-	sbi->s_rsv_window_head.rsv_start = 0;
-	sbi->s_rsv_window_head.rsv_end = 0;
-	sbi->s_rsv_window_head.rsv_alloc_hit = 0;
-	atomic_set(&sbi->s_rsv_window_head.rsv_goal_size, 0);
-
 	/*
 	 * set up enough so that it can read an inode
 	 */
@@ -1678,6 +1651,7 @@ static journal_t *ext3_get_journal(struct super_block *sb, int journal_inum)
 	if (!journal) {
 		printk(KERN_ERR "EXT3-fs: Could not load journal inode\n");
 		iput(journal_inode);
+		return NULL;
 	}
 	journal->j_private = sb;
 	ext3_init_journal_params(EXT3_SB(sb), journal);
@@ -1909,13 +1883,17 @@ static void ext3_commit_super (struct super_block * sb,
 static void ext3_mark_recovery_complete(struct super_block * sb,
 					struct ext3_super_block * es)
 {
-	journal_flush(EXT3_SB(sb)->s_journal);
+	journal_t *journal = EXT3_SB(sb)->s_journal;
+
+	journal_lock_updates(journal);
+	journal_flush(journal);
 	if (EXT3_HAS_INCOMPAT_FEATURE(sb, EXT3_FEATURE_INCOMPAT_RECOVER) &&
 	    sb->s_flags & MS_RDONLY) {
 		EXT3_CLEAR_INCOMPAT_FEATURE(sb, EXT3_FEATURE_INCOMPAT_RECOVER);
 		sb->s_dirt = 0;
 		ext3_commit_super(sb, es, 1);
 	}
+	journal_unlock_updates(journal);
 }
 
 /*
@@ -2043,12 +2021,11 @@ int ext3_remount (struct super_block * sb, int * flags, char * data)
 	struct ext3_super_block * es;
 	struct ext3_sb_info *sbi = EXT3_SB(sb);
 	unsigned long tmp;
-	unsigned long n_blocks_count = 0;
 
 	/*
 	 * Allow the "check" option to be passed as a remount option.
 	 */
-	if (!parse_options(data, sb, &tmp, &n_blocks_count, 1))
+	if (!parse_options(data, sb, &tmp, 1))
 		return -EINVAL;
 
 	if (sbi->s_mount_opt & EXT3_MOUNT_ABORT)
@@ -2061,8 +2038,7 @@ int ext3_remount (struct super_block * sb, int * flags, char * data)
 
 	ext3_init_journal_params(sbi, sbi->s_journal);
 
-	if ((*flags & MS_RDONLY) != (sb->s_flags & MS_RDONLY) ||
-		n_blocks_count > le32_to_cpu(es->s_blocks_count)) {
+	if ((*flags & MS_RDONLY) != (sb->s_flags & MS_RDONLY)) {
 		if (sbi->s_mount_opt & EXT3_MOUNT_ABORT)
 			return -EROFS;
 
@@ -2101,8 +2077,6 @@ int ext3_remount (struct super_block * sb, int * flags, char * data)
 			 */
 			ext3_clear_journal_err(sb, es);
 			sbi->s_mount_state = le16_to_cpu(es->s_state);
-			if ((ret = ext3_group_extend(sb, es, n_blocks_count)))
-				return ret;
 			if (!ext3_setup_super (sb, es, 0))
 				sb->s_flags &= ~MS_RDONLY;
 		}

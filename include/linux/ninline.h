@@ -1,3 +1,5 @@
+#error THIS FILE SHOULD NO LONGER BE USED
+
 #ifndef _NX_INLINE_H
 #define _NX_INLINE_H
 
@@ -5,6 +7,7 @@
 // #define NX_DEBUG
 
 #include <linux/kernel.h>
+#include <linux/rcupdate.h>
 #include <linux/sched.h>
 
 #include "vserver/network.h"
@@ -16,38 +19,38 @@
 #endif
 
 
-void free_nx_info(struct nx_info *);
-
 extern int proc_pid_nx_info(struct task_struct *, char *);
 
 
 #define get_nx_info(i)	__get_nx_info(i,__FILE__,__LINE__)
 
-static __inline__ struct nx_info *__get_nx_info(struct nx_info *nxi, const char *_file, int _line)
+static inline struct nx_info *__get_nx_info(struct nx_info *nxi,
+	const char *_file, int _line)
 {
 	if (!nxi)
 		return NULL;
-	nxdprintk("get_nx_info(%p[%d.%d])\t%s:%d\n",
-		nxi, nxi?nxi->nx_id:0, nxi?atomic_read(&nxi->nx_refcount):0,
+	nxdprintk("get_nx_info(%p[#%d.%d])\t%s:%d\n",
+		nxi, nxi?nxi->nx_id:0, nxi?atomic_read(&nxi->nx_usecnt):0,
 		_file, _line);
-	atomic_inc(&nxi->nx_refcount);
+	atomic_inc(&nxi->nx_usecnt);
 	return nxi;
 }
 
+
+#define	free_nx_info(nxi)	\
+	call_rcu(&nxi->nx_rcu, rcu_free_nx_info, nxi);
+
 #define put_nx_info(i)	__put_nx_info(i,__FILE__,__LINE__)
 
-static __inline__ void __put_nx_info(struct nx_info *nxi, const char *_file, int _line)
+static inline void __put_nx_info(struct nx_info *nxi, const char *_file, int _line)
 {
 	if (!nxi)
 		return;
-	nxdprintk("put_nx_info(%p[%d.%d])\t%s:%d\n",
-		nxi, nxi?nxi->nx_id:0, nxi?atomic_read(&nxi->nx_refcount):0,
+	nxdprintk("put_nx_info(%p[#%d.%d])\t%s:%d\n",
+		nxi, nxi?nxi->nx_id:0, nxi?atomic_read(&nxi->nx_usecnt):0,
 		_file, _line);
-	if (atomic_dec_and_lock(&nxi->nx_refcount, &nxlist_lock)) {
-		list_del(&nxi->nx_list);
-		spin_unlock(&nxlist_lock);
+	if (atomic_dec_and_test(&nxi->nx_usecnt))
 		free_nx_info(nxi);
-	}
 }
 
 
@@ -59,9 +62,12 @@ static inline void __set_nx_info(struct nx_info **nxp, struct nx_info *nxi,
 	BUG_ON(*nxp);
 	if (!nxi)
 		return;
-	nxdprintk("set_nx_info(%p[#%d.%d])\t%s:%d\n",
-		nxi, nxi?nxi->nx_id:0, nxi?atomic_read(&nxi->nx_refcount):0,
+	nxdprintk("set_nx_info(%p[#%d.%d.%d])\t%s:%d\n",
+		nxi, nxi?nxi->nx_id:0,
+		nxi?atomic_read(&nxi->nx_usecnt):0,
+		nxi?atomic_read(&nxi->nx_refcnt):0,
 		_file, _line);
+	atomic_inc(&nxi->nx_refcnt);
 	*nxp = __get_nx_info(nxi, _file, _line);
 }
 
@@ -74,11 +80,15 @@ static inline void __clr_nx_info(struct nx_info **nxp,
 
 	if (!nxo)
 		return;
-	nxdprintk("clr_nx_info(%p[#%d.%d])\t%s:%d\n",
-		nxo, nxo?nxo->nx_id:0, nxo?atomic_read(&nxo->nx_refcount):0,
+	nxdprintk("clr_nx_info(%p[#%d.%d.%d])\t%s:%d\n",
+		nxo, nxo?nxo->nx_id:0,
+		nxo?atomic_read(&nxo->nx_usecnt):0,
+		nxo?atomic_read(&nxo->nx_refcnt):0,
 		_file, _line);
 	*nxp = NULL;
 	wmb();
+	if (nxo && atomic_dec_and_test(&nxo->nx_refcnt))
+		unhash_nx_info(nxo);
 	__put_nx_info(nxo, _file, _line);
 }
 

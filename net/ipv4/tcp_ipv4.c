@@ -1545,7 +1545,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 #ifdef CONFIG_ACCEPT_QUEUES
 	if (tcp_acceptq_is_full(sk, class) && tcp_synq_young(sk, class) > 1)
 #else
-	if (tcp_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
+	if (sk_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
 #endif
 		goto drop;
 
@@ -1677,7 +1677,7 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 #ifdef CONFIG_ACCEPT_QUEUES
 	if (tcp_acceptq_is_full(sk, req->acceptq_class))
 #else
-	if (tcp_acceptq_is_full(sk))
+	if (sk_acceptq_is_full(sk))
 #endif
 		goto exit_overflow;
 
@@ -2192,7 +2192,7 @@ static int tcp_v4_init_sock(struct sock *sk)
 
 	sk->sk_state = TCP_CLOSE;
 
-	sk->sk_write_space = tcp_write_space;
+	sk->sk_write_space = sk_stream_write_space;
 	sk->sk_use_write_queue = 1;
 
 	tp->af_specific = &ipv4_specific;

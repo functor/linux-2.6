@@ -44,11 +44,12 @@
 #include <linux/jiffies.h>
 #include <linux/sysrq.h>
 #include <linux/vmalloc.h>
-#include <linux/vinline.h>
+#include <linux/vs_base.h>
+#include <linux/vs_cvirt.h>
+
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/io.h>
-#include <asm/pgalloc.h>
 #include <asm/tlb.h>
 #include <asm/div64.h>
 

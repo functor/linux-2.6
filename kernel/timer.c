@@ -31,8 +31,9 @@
 #include <linux/time.h>
 #include <linux/jiffies.h>
 #include <linux/cpu.h>
+#include <linux/vs_base.h>
+#include <linux/vs_cvirt.h>
 #include <linux/vserver/sched.h>
-#include <linux/vserver/cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -831,7 +832,7 @@ static inline void do_it_prof(struct task_struct *p)
 	}
 }
 
-void update_one_process(struct task_struct *p, unsigned long user,
+static void update_one_process(struct task_struct *p, unsigned long user,
 			unsigned long system, int cpu)
 {
 	do_process_times(p, user, system);

@@ -25,6 +25,7 @@
 #include <linux/module.h>
 #include <linux/sysctl.h>
 #include <linux/workqueue.h>
+#include <linux/vs_socket.h>
 #include <net/tcp.h>
 #include <net/inet_common.h>
 #include <net/xfrm.h>
@@ -727,7 +728,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newsk->sk_backlog.head = newsk->sk_backlog.tail = NULL;
 		newsk->sk_callback_lock = RW_LOCK_UNLOCKED;
 		skb_queue_head_init(&newsk->sk_error_queue);
-		newsk->sk_write_space = tcp_write_space;
+		newsk->sk_write_space = sk_stream_write_space;
 
 		if ((filter = newsk->sk_filter) != NULL)
 			sk_filter_charge(newsk, filter);

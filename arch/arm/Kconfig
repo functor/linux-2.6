@@ -246,10 +246,10 @@ menu "General setup"
 # Select various configuration options depending on the machine type
 config DISCONTIGMEM
 	bool
-	depends on ARCH_EDB7211 || ARCH_SA1100 || ARCH_LH7A40X
+	depends on ARCH_EDB7211 || ARCH_SA1100 || (ARCH_LH7A40X && !LH7A40X_SROMLL)
 	default y
 	help
-	  Say Y to upport efficient handling of discontiguous physical memory,
+	  Say Y to support efficient handling of discontiguous physical memory,
 	  for architectures which are either NUMA (Non-Uniform Memory Access)
 	  or have huge holes in the physical address space for other reasons.
 	  See <file:Documentation/vm/numa> for more.
@@ -421,6 +421,17 @@ config FPE_FASTFPE
 	  If you do not feel you need a faster FP emulation you should better
 	  choose NWFPE.
 
+config VFP
+	bool "VFP-format floating point maths"
+	help
+	  Say Y to include VFP support code in the kernel. This is needed
+	  if your hardware includes a VFP unit.
+
+	  Please see <file:Documentation/arm/VFP/release-notes.txt> for
+	  release notes and additional status information.
+
+	  Say N if your target does not have VFP hardware.
+
 source "fs/Kconfig.binfmt"
 
 source "drivers/base/Kconfig"
@@ -581,7 +592,7 @@ config LEDS_CPU
 config ALIGNMENT_TRAP
 	bool
 	depends on CPU_32
-	default y
+	default y if !ARCH_EBSA110
 	help
 	  ARM processors can not fetch/store information which is not
 	  naturally aligned on the bus, i.e., a 4 byte fetch must start at an

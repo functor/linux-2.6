@@ -26,6 +26,8 @@
 #include <linux/proc_fs.h>
 #include <linux/shmem_fs.h>
 #include <linux/security.h>
+#include <linux/vs_base.h>
+
 #include <asm/uaccess.h>
 
 #include "util.h"
@@ -505,11 +507,14 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 	case SHM_LOCK:
 	case SHM_UNLOCK:
 	{
-		/* Allow superuser to lock segment in memory */
-		if (!can_do_mlock()) {
+/* Allow superuser to lock segment in memory */
+/* Should the pages be faulted in here or leave it to user? */
+/* need to determine interaction with current->swappable */
+		if (!capable(CAP_IPC_LOCK)) {
 			err = -EPERM;
 			goto out;
 		}
+
 		shp = shm_lock(shmid);
 		if(shp==NULL) {
 			err = -EINVAL;
@@ -524,11 +529,9 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 			goto out_unlock;
 		
 		if(cmd==SHM_LOCK) {
-			if (!is_file_hugepages(shp->shm_file)) {
-				err = shmem_lock(shp->shm_file, 1);
-				if (!err)
-					shp->shm_flags |= SHM_LOCKED;
-			}
+			if (!is_file_hugepages(shp->shm_file))
+				shmem_lock(shp->shm_file, 1);
+			shp->shm_flags |= SHM_LOCKED;
 		} else {
 			if (!is_file_hugepages(shp->shm_file))
 				shmem_lock(shp->shm_file, 0);

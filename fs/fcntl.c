@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/security.h>
 #include <linux/ptrace.h>
+#include <linux/vs_limit.h>
 
 #include <asm/poll.h>
 #include <asm/siginfo.h>

@@ -73,7 +73,10 @@
 #include <linux/highmem.h>
 #include <linux/file.h>
 #include <linux/times.h>
-#include <linux/ninline.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>

@@ -858,11 +858,16 @@ static int netdev_open(struct net_device *dev)
 {
 	struct netdev_private *np = dev->priv;
 	long ioaddr = dev->base_addr;
+	int i;
 
 	writel(0x00000001, ioaddr + BCR);	/* Reset */
 
 	if (request_irq(dev->irq, &intr_handler, SA_SHIRQ, dev->name, dev))
 		return -EAGAIN;
+
+	for (i = 0; i < 3; i++)
+		writew(((unsigned short*)dev->dev_addr)[i],
+				ioaddr + PAR0 + i*2);
 
 	init_ring(dev);
 
@@ -1923,14 +1928,13 @@ static struct ethtool_ops netdev_ethtool_ops = {
 static int mii_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct netdev_private *np = dev->priv;
-	struct mii_ioctl_data *data = (struct mii_ioctl_data *) & rq->ifr_data;
 	int rc;
 
 	if (!netif_running(dev))
 		return -EINVAL;
 
 	spin_lock_irq(&np->lock);
-	rc = generic_mii_ioctl(&np->mii, data, cmd, NULL);
+	rc = generic_mii_ioctl(&np->mii, if_mii(rq), cmd, NULL);
 	spin_unlock_irq(&np->lock);
 
 	return rc;

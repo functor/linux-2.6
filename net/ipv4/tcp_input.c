@@ -90,7 +90,7 @@ int sysctl_tcp_nometrics_save;
 int sysctl_tcp_westwood;
 int sysctl_tcp_vegas_cong_avoid;
 
-int sysctl_tcp_moderate_rcvbuf;
+int sysctl_tcp_moderate_rcvbuf = 1;
 
 /* Default values of the Vegas variables, in fixed-point representation
  * with V_PARAM_SHIFT bits to the right of the binary point.
@@ -99,7 +99,7 @@ int sysctl_tcp_moderate_rcvbuf;
 int sysctl_tcp_vegas_alpha = 1<<V_PARAM_SHIFT;
 int sysctl_tcp_vegas_beta  = 3<<V_PARAM_SHIFT;
 int sysctl_tcp_vegas_gamma = 1<<V_PARAM_SHIFT;
-int sysctl_tcp_bic;
+int sysctl_tcp_bic = 1;
 int sysctl_tcp_bic_fast_convergence = 1;
 int sysctl_tcp_bic_low_window = 14;
 
@@ -463,6 +463,8 @@ void tcp_rcv_space_adjust(struct sock *sk)
 		tp->rcvq_space.space = space;
 
 		if (sysctl_tcp_moderate_rcvbuf) {
+			int new_clamp = space;
+
 			/* Receive space grows, normalize in order to
 			 * take into account packet headers and sk_buff
 			 * structure overhead.
@@ -472,10 +474,16 @@ void tcp_rcv_space_adjust(struct sock *sk)
 				space = 1;
 			rcvmem = (tp->advmss + MAX_TCP_HEADER +
 				  16 + sizeof(struct sk_buff));
+			while (tcp_win_from_space(rcvmem) < tp->advmss)
+				rcvmem += 128;
 			space *= rcvmem;
 			space = min(space, sysctl_tcp_rmem[2]);
-			if (space > sk->sk_rcvbuf)
+			if (space > sk->sk_rcvbuf) {
 				sk->sk_rcvbuf = space;
+
+				/* Make the window clamp follow along.  */
+				tp->window_clamp = new_clamp;
+			}
 		}
 	}
 	

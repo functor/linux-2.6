@@ -33,6 +33,7 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/rmap.h>
+#include <linux/vs_memory.h>
 
 #include <asm/tlbflush.h>
 
@@ -193,7 +194,7 @@ vma_address(struct page *page, struct vm_area_struct *vma)
  * repeatedly from either page_referenced_anon or page_referenced_file.
  */
 static int page_referenced_one(struct page *page,
-	struct vm_area_struct *vma, unsigned int *mapcount, int *failed)
+	struct vm_area_struct *vma, unsigned int *mapcount)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	unsigned long address;
@@ -208,14 +209,8 @@ static int page_referenced_one(struct page *page,
 	if (address == -EFAULT)
 		goto out;
 
-	if (!spin_trylock(&mm->page_table_lock)) {
-		/*
-		 * For debug we're currently warning if not all found,
-		 * but in this case that's expected: suppress warning.
-		 */
-		(*failed)++;
+	if (!spin_trylock(&mm->page_table_lock))
 		goto out;
-	}
 
 	pgd = pgd_offset(mm, address);
 	if (!pgd_present(*pgd))
@@ -232,7 +227,7 @@ static int page_referenced_one(struct page *page,
 	if (page_to_pfn(page) != pte_pfn(*pte))
 		goto out_unmap;
 
-	if (ptep_test_and_clear_young(pte))
+	if (ptep_clear_flush_young(vma, address, pte))
 		referenced++;
 
 	(*mapcount)--;
@@ -251,18 +246,14 @@ static inline int page_referenced_anon(struct page *page)
 	struct anon_vma *anon_vma = (struct anon_vma *) page->mapping;
 	struct vm_area_struct *vma;
 	int referenced = 0;
-	int failed = 0;
 
 	spin_lock(&anon_vma->lock);
 	BUG_ON(list_empty(&anon_vma->head));
 	list_for_each_entry(vma, &anon_vma->head, anon_vma_node) {
-		referenced += page_referenced_one(page, vma,
-						  &mapcount, &failed);
+		referenced += page_referenced_one(page, vma, &mapcount);
 		if (!mapcount)
-			goto out;
+			break;
 	}
-	WARN_ON(!failed);
-out:
 	spin_unlock(&anon_vma->lock);
 	return referenced;
 }
@@ -289,7 +280,6 @@ static inline int page_referenced_file(struct page *page)
 	struct vm_area_struct *vma = NULL;
 	struct prio_tree_iter iter;
 	int referenced = 0;
-	int failed = 0;
 
 	if (!spin_trylock(&mapping->i_mmap_lock))
 		return 0;
@@ -299,17 +289,13 @@ static inline int page_referenced_file(struct page *page)
 		if ((vma->vm_flags & (VM_LOCKED|VM_MAYSHARE))
 				  == (VM_LOCKED|VM_MAYSHARE)) {
 			referenced++;
-			goto out;
+			break;
 		}
-		referenced += page_referenced_one(page, vma,
-						  &mapcount, &failed);
+		referenced += page_referenced_one(page, vma, &mapcount);
 		if (!mapcount)
-			goto out;
+			break;
 	}
 
-	if (list_empty(&mapping->i_mmap_nonlinear))
-		WARN_ON(!failed);
-out:
 	spin_unlock(&mapping->i_mmap_lock);
 	return referenced;
 }
@@ -480,7 +466,24 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	 * skipped over this mm) then we should reactivate it.
 	 */
 	if ((vma->vm_flags & (VM_LOCKED|VM_RESERVED)) ||
-			ptep_test_and_clear_young(pte)) {
+			ptep_clear_flush_young(vma, address, pte)) {
+		ret = SWAP_FAIL;
+		goto out_unmap;
+	}
+
+	/*
+	 * Don't pull an anonymous page out from under get_user_pages.
+	 * GUP carefully breaks COW and raises page count (while holding
+	 * page_table_lock, as we have here) to make sure that the page
+	 * cannot be freed.  If we unmap that page here, a user write
+	 * access to the virtual address will bring back the page, but
+	 * its raised count will (ironically) be taken to mean it's not
+	 * an exclusive swap page, do_wp_page will replace it by a copy
+	 * page, and the user never get to see the data GUP was holding
+	 * the original page for.
+	 */
+	if (PageSwapCache(page) &&
+	    page_count(page) != page->mapcount + 2) {
 		ret = SWAP_FAIL;
 		goto out_unmap;
 	}
@@ -591,7 +594,7 @@ static int try_to_unmap_cluster(unsigned long cursor,
 		if (PageReserved(page))
 			continue;
 
-		if (ptep_test_and_clear_young(pte))
+		if (ptep_clear_flush_young(vma, address, pte))
 			continue;
 
 		/* Nuke the page table entry. */

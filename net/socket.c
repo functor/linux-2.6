@@ -94,6 +94,8 @@
 
 #include <net/sock.h>
 #include <linux/netfilter.h>
+#include <linux/vs_base.h>
+#include <linux/vs_socket.h>
 
 static int sock_no_open(struct inode *irrelevant, struct file *dontcare);
 static ssize_t sock_aio_read(struct kiocb *iocb, char __user *buf,
@@ -763,9 +765,9 @@ static ssize_t sock_writev(struct file *file, const struct iovec *vector,
  */
 
 static DECLARE_MUTEX(br_ioctl_mutex);
-static int (*br_ioctl_hook)(unsigned int cmd, unsigned long arg) = NULL;
+static int (*br_ioctl_hook)(unsigned int cmd, void __user *arg) = NULL;
 
-void brioctl_set(int (*hook)(unsigned int, unsigned long))
+void brioctl_set(int (*hook)(unsigned int, void __user *))
 {
 	down(&br_ioctl_mutex);
 	br_ioctl_hook = hook;
@@ -774,9 +776,9 @@ void brioctl_set(int (*hook)(unsigned int, unsigned long))
 EXPORT_SYMBOL(brioctl_set);
 
 static DECLARE_MUTEX(vlan_ioctl_mutex);
-static int (*vlan_ioctl_hook)(unsigned long arg);
+static int (*vlan_ioctl_hook)(void __user *arg);
 
-void vlan_ioctl_set(int (*hook)(unsigned long))
+void vlan_ioctl_set(int (*hook)(void __user *))
 {
 	down(&vlan_ioctl_mutex);
 	vlan_ioctl_hook = hook;
@@ -785,9 +787,9 @@ void vlan_ioctl_set(int (*hook)(unsigned long))
 EXPORT_SYMBOL(vlan_ioctl_set);
 
 static DECLARE_MUTEX(dlci_ioctl_mutex);
-static int (*dlci_ioctl_hook)(unsigned int, void *);
+static int (*dlci_ioctl_hook)(unsigned int, void __user *);
 
-void dlci_ioctl_set(int (*hook)(unsigned int, void *))
+void dlci_ioctl_set(int (*hook)(unsigned int, void __user *))
 {
 	down(&dlci_ioctl_mutex);
 	dlci_ioctl_hook = hook;
@@ -804,29 +806,30 @@ static int sock_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		      unsigned long arg)
 {
 	struct socket *sock;
+	void __user *argp = (void __user *)arg;
 	int pid, err;
 
 	unlock_kernel();
 	sock = SOCKET_I(inode);
 	if (cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15)) {
-		err = dev_ioctl(cmd, (void __user *)arg);
+		err = dev_ioctl(cmd, argp);
 	} else
 #ifdef WIRELESS_EXT
 	if (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST) {
-		err = dev_ioctl(cmd, (void __user *)arg);
+		err = dev_ioctl(cmd, argp);
 	} else
 #endif	/* WIRELESS_EXT */
 	switch (cmd) {
 		case FIOSETOWN:
 		case SIOCSPGRP:
 			err = -EFAULT;
-			if (get_user(pid, (int __user *)arg))
+			if (get_user(pid, (int __user *)argp))
 				break;
 			err = f_setown(sock->file, pid, 1);
 			break;
 		case FIOGETOWN:
 		case SIOCGPGRP:
-			err = put_user(sock->file->f_owner.pid, (int __user *)arg);
+			err = put_user(sock->file->f_owner.pid, (int __user *)argp);
 			break;
 		case SIOCGIFBR:
 		case SIOCSIFBR:
@@ -838,7 +841,7 @@ static int sock_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 			down(&br_ioctl_mutex);
 			if (br_ioctl_hook) 
-				err = br_ioctl_hook(cmd, arg);
+				err = br_ioctl_hook(cmd, argp);
 			up(&br_ioctl_mutex);
 			break;
 		case SIOCGIFVLAN:
@@ -849,13 +852,13 @@ static int sock_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 			down(&vlan_ioctl_mutex);
 			if (vlan_ioctl_hook)
-				err = vlan_ioctl_hook(arg);
+				err = vlan_ioctl_hook(argp);
 			up(&vlan_ioctl_mutex);
 			break;
 		case SIOCGIFDIVERT:
 		case SIOCSIFDIVERT:
 		/* Convert this to call through a hook */
-			err = divert_ioctl(cmd, (struct divert_cf *)arg);
+			err = divert_ioctl(cmd, argp);
 			break;
 		case SIOCADDDLCI:
 		case SIOCDELDLCI:
@@ -865,7 +868,7 @@ static int sock_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 			if (dlci_ioctl_hook) {
 				down(&dlci_ioctl_mutex);
-				err = dlci_ioctl_hook(cmd, (void *)arg);
+				err = dlci_ioctl_hook(cmd, argp);
 				up(&dlci_ioctl_mutex);
 			}
 			break;

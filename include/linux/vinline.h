@@ -1,3 +1,6 @@
+#error THIS FILE SHOULD NO LONGER BE USED
+
+
 #ifndef _VX_INLINE_H
 #define _VX_INLINE_H
 
@@ -5,6 +8,7 @@
 // #define VX_DEBUG
 
 #include <linux/kernel.h>
+#include <linux/rcupdate.h>
 #include <linux/sched.h>
 
 #include "vserver/context.h"
@@ -19,39 +23,38 @@
 
 
 
-void free_vx_info(struct vx_info *);
-
 extern int proc_pid_vx_info(struct task_struct *, char *);
 
 
 #define get_vx_info(i)	__get_vx_info(i,__FILE__,__LINE__)
 
-static __inline__ struct vx_info *__get_vx_info(struct vx_info *vxi,
+static inline struct vx_info *__get_vx_info(struct vx_info *vxi,
 	const char *_file, int _line)
 {
 	if (!vxi)
 		return NULL;
 	vxdprintk("get_vx_info(%p[#%d.%d])\t%s:%d\n",
-		vxi, vxi?vxi->vx_id:0, vxi?atomic_read(&vxi->vx_refcount):0,
+		vxi, vxi?vxi->vx_id:0, vxi?atomic_read(&vxi->vx_usecnt):0,
 		_file, _line);
-	atomic_inc(&vxi->vx_refcount);
+	atomic_inc(&vxi->vx_usecnt);
 	return vxi;
 }
 
+
+#define	free_vx_info(vxi)	\
+	call_rcu(&vxi->vx_rcu, rcu_free_vx_info, vxi);
+
 #define put_vx_info(i)	__put_vx_info(i,__FILE__,__LINE__)
 
-static __inline__ void __put_vx_info(struct vx_info *vxi, const char *_file, int _line)
+static inline void __put_vx_info(struct vx_info *vxi, const char *_file, int _line)
 {
 	if (!vxi)
 		return;
 	vxdprintk("put_vx_info(%p[#%d.%d])\t%s:%d\n",
-		vxi, vxi?vxi->vx_id:0, vxi?atomic_read(&vxi->vx_refcount):0,
+		vxi, vxi?vxi->vx_id:0, vxi?atomic_read(&vxi->vx_usecnt):0,
 		_file, _line);
-	if (atomic_dec_and_lock(&vxi->vx_refcount, &vxlist_lock)) {
-		list_del(&vxi->vx_list);
-		spin_unlock(&vxlist_lock);
+	if (atomic_dec_and_test(&vxi->vx_usecnt))
 		free_vx_info(vxi);
-	}
 }
 
 #define set_vx_info(p,i) __set_vx_info(p,i,__FILE__,__LINE__)
@@ -62,9 +65,12 @@ static inline void __set_vx_info(struct vx_info **vxp, struct vx_info *vxi,
 	BUG_ON(*vxp);
 	if (!vxi)
 		return;
-	vxdprintk("set_vx_info(%p[#%d.%d])\t%s:%d\n",
-		vxi, vxi?vxi->vx_id:0, vxi?atomic_read(&vxi->vx_refcount):0,
+	vxdprintk("set_vx_info(%p[#%d.%d.%d])\t%s:%d\n",
+		vxi, vxi?vxi->vx_id:0,
+		vxi?atomic_read(&vxi->vx_usecnt):0,
+		vxi?atomic_read(&vxi->vx_refcnt):0,
 		_file, _line);
+	atomic_inc(&vxi->vx_refcnt);
 	*vxp = __get_vx_info(vxi, _file, _line);
 }
 
@@ -75,11 +81,17 @@ static inline void __clr_vx_info(struct vx_info **vxp,
 {
 	struct vx_info *vxo = *vxp;
 
-	vxdprintk("clr_vx_info(%p[#%d.%d])\t%s:%d\n",
-		vxo, vxo?vxo->vx_id:0, vxo?atomic_read(&vxo->vx_refcount):0,
+	if (!vxo)
+		return;
+	vxdprintk("clr_vx_info(%p[#%d.%d.%d])\t%s:%d\n",
+		vxo, vxo?vxo->vx_id:0,
+		vxo?atomic_read(&vxo->vx_usecnt):0,
+		vxo?atomic_read(&vxo->vx_refcnt):0,
 		_file, _line);
 	*vxp = NULL;
 	wmb();
+	if (vxo && atomic_dec_and_test(&vxo->vx_refcnt))
+		unhash_vx_info(vxo);
 	__put_vx_info(vxo, _file, _line);
 }
 

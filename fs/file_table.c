@@ -16,6 +16,7 @@
 #include <linux/eventpoll.h>
 #include <linux/mount.h>
 #include <linux/cdev.h>
+#include <linux/vs_limit.h>
 
 /* sysctl tunables... */
 struct files_stat_struct files_stat = {

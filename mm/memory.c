@@ -649,15 +649,11 @@ follow_page(struct mm_struct *mm, unsigned long address, int write)
 	if (pte_present(pte)) {
 		if (write && !pte_write(pte))
 			goto out;
-		if (write && !pte_dirty(pte)) {
-			struct page *page = pte_page(pte);
-			if (!PageDirty(page))
-				set_page_dirty(page);
-		}
 		pfn = pte_pfn(pte);
 		if (pfn_valid(pfn)) {
-			struct page *page = pfn_to_page(pfn);
-			
+			page = pfn_to_page(pfn);
+			if (write && !pte_dirty(pte) && !PageDirty(page))
+				set_page_dirty(page);
 			mark_page_accessed(page);
 			return page;
 		}
@@ -739,6 +735,7 @@ static inline struct page *get_page_map(struct page *page)
 }
 
 
+#ifndef CONFIG_X86_4G
 static inline int
 untouched_anonymous_page(struct mm_struct* mm, struct vm_area_struct *vma,
 			 unsigned long address)
@@ -763,6 +760,7 @@ untouched_anonymous_page(struct mm_struct* mm, struct vm_area_struct *vma,
 	/* There is a pte slot for 'address' in 'mm'. */
 	return 0;
 }
+#endif
 
 
 int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
@@ -833,12 +831,21 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 				 * insanly big anonymously mapped areas that
 				 * nobody touched so far. This is important
 				 * for doing a core dump for these mappings.
+				 *
+				 * disable this for 4:4 - it prevents
+			 	 * follow_page() from ever seeing these pages.
+				 *
+				 * (The 'fix' is dubious anyway, there's
+				 * nothing that this code avoids which couldnt
+				 * be triggered from userspace anyway.)
 				 */
+#ifndef CONFIG_X86_4G
 				if (!lookup_write &&
 				    untouched_anonymous_page(mm,vma,start)) {
 					map = ZERO_PAGE(start);
 					break;
 				}
+#endif
 				spin_unlock(&mm->page_table_lock);
 				switch (handle_mm_fault(mm,vma,start,write)) {
 				case VM_FAULT_MINOR:

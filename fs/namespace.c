@@ -21,6 +21,8 @@
 #include <linux/namei.h>
 #include <linux/security.h>
 #include <linux/mount.h>
+#include <linux/vs_base.h>
+
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 
