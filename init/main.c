@@ -43,6 +43,7 @@
 #include <linux/efi.h>
 #include <linux/unistd.h>
 #include <linux/rmap.h>
+#include <linux/mempolicy.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -186,7 +187,7 @@ void __devinit calibrate_delay(void)
 	loops_per_jiffy = (1<<12);
 
 	printk("Calibrating delay loop... ");
-	while (loops_per_jiffy <<= 1) {
+	while ((loops_per_jiffy <<= 1) != 0) {
 		/* wait for "start of" clock tick */
 		ticks = jiffies;
 		while (ticks == jiffies)
@@ -268,6 +269,8 @@ static int __init unknown_bootoption(char *param, char *val)
 				panic_later = "Too many boot env vars at `%s'";
 				panic_param = param;
 			}
+			if (!strncmp(param, envp_init[i], val - param))
+				break;
 		}
 		envp_init[i] = param;
 	} else {
@@ -385,6 +388,7 @@ static void __init smp_init(void)
 static void noinline rest_init(void)
 {
 	kernel_thread(init, NULL, CLONE_FS | CLONE_SIGHAND);
+	numa_default_policy();
 	unlock_kernel();
  	cpu_idle();
 } 
@@ -456,6 +460,7 @@ asmlinkage void __init start_kernel(void)
 #endif
 	mem_init();
 	kmem_cache_init();
+	numa_policy_init();
 	if (late_time_init)
 		late_time_init();
 	calibrate_delay();
@@ -632,7 +637,7 @@ static int init(void * unused)
 	 * check if there is an early userspace init.  If yes, let it do all
 	 * the work
 	 */
-	if (sys_access("/init", 0) == 0)
+	if (sys_access((const char __user *) "/init", 0) == 0)
 		execute_command = "/init";
 	else
 		prepare_namespace();
@@ -645,8 +650,9 @@ static int init(void * unused)
 	free_initmem();
 	unlock_kernel();
 	system_state = SYSTEM_RUNNING;
+	numa_default_policy();
 
-	if (sys_open("/dev/console", O_RDWR, 0) < 0)
+	if (sys_open((const char __user *) "/dev/console", O_RDWR, 0) < 0)
 		printk("Warning: unable to open an initial console.\n");
 
 	(void) sys_dup(0);

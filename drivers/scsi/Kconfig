@@ -227,7 +227,7 @@ config SCSI_DECSII
 	depends on DECSTATION && SCSI
 
 config BLK_DEV_3W_XXXX_RAID
-	tristate "3ware Hardware ATA-RAID support"
+	tristate "3ware 5/6/7/8xxx ATA-RAID support"
 	depends on PCI && SCSI
 	help
 	  3ware is the only hardware ATA-Raid product in Linux to date.
@@ -238,6 +238,17 @@ config BLK_DEV_3W_XXXX_RAID
 
 	  Please read the comments at the top of
 	  <file:drivers/scsi/3w-xxxx.c>.
+
+config SCSI_3W_9XXX
+	tristate "3ware 9xxx SATA-RAID support"
+	depends on PCI && SCSI
+	help
+	  This driver supports the 9000 series 3ware SATA-RAID cards.
+
+	  <http://www.amcc.com>
+
+	  Please read the comments at the top of
+	  <file:drivers/scsi/3w-9xxx.c>.
 
 config SCSI_7000FASST
 	tristate "7000FASST SCSI support"
@@ -352,7 +363,7 @@ source "drivers/scsi/aic7xxx/Kconfig.aic79xx"
 # All the I2O code and drivers do not seem to be 64bit safe.
 config SCSI_DPT_I2O
 	tristate "Adaptec I2O RAID support "
-	depends on !64BIT && SCSI
+	depends on !64BIT && SCSI && PCI
 	help
 	  This driver supports all of Adaptec's I2O based RAID controllers as 
 	  well as the DPT SmartRaid V cards.  This is an Adaptec maintained
@@ -478,9 +489,7 @@ config SCSI_BUSLOGIC
 	  Adapters. Consult the SCSI-HOWTO, available from
 	  <http://www.tldp.org/docs.html#howto>, and the files
 	  <file:Documentation/scsi/BusLogic.txt> and
-	  <file:Documentation/scsi/FlashPoint.txt> for more information. If this
-	  driver does not work correctly without modification, please contact
-	  the author, Leonard N. Zubkoff, by email to lnz@dandelion.com.
+	  <file:Documentation/scsi/FlashPoint.txt> for more information.
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called BusLogic.
@@ -494,9 +503,15 @@ config SCSI_OMIT_FLASHPOINT
 	  substantial, so users of MultiMaster Host Adapters may wish to omit
 	  it.
 
+#
+# This is marked broken because it uses over 4kB of stack in
+# just two routines:
+#     2076  CpqTsProcessIMQEntry
+#     2052  PeekIMQEntry
+#
 config SCSI_CPQFCTS
 	tristate "Compaq Fibre Channel 64-bit/66Mhz HBA support"
-	depends on PCI && SCSI
+	depends on PCI && SCSI && BROKEN
 	help
 	  Say Y here to compile in support for the Compaq StorageWorks Fibre
 	  Channel 64-bit/66Mhz Host Bus Adapter.
@@ -1709,18 +1724,6 @@ config SCSI_SUNESP
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called esp.
-
-config SCSI_PC980155
-	tristate "NEC PC-9801-55 SCSI support"
-	depends on X86_PC9800 && SCSI
-	help
-	  If you have the NEC PC-9801-55 SCSI interface card or compatibles
-	  for NEC PC-9801/PC-9821, say Y.
-
-config WD33C93_PIO
-	bool
-	depends on SCSI_PC980155
-	default y
 
 #      bool 'Cyberstorm Mk III SCSI support (EXPERIMENTAL)' CONFIG_CYBERSTORMIII_SCSI
 

@@ -740,7 +740,7 @@ static void exit_notify(struct task_struct *tsk)
 	 * Clear these here so that update_process_times() won't try to deliver
 	 * itimer, profile or rlimit signals to this task while it is in late exit.
 	 */
-	tsk->it_virt_incr = 0;
+	tsk->it_virt_value = 0;
 	tsk->it_prof_value = 0;
 	tsk->rlim[RLIMIT_CPU].rlim_cur = RLIM_INFINITY;
 
@@ -841,10 +841,10 @@ asmlinkage long sys_exit(int error_code)
 	do_exit((error_code&0xff)<<8);
 }
 
-task_t fastcall *next_thread(task_t *p)
+task_t fastcall *next_thread(const task_t *p)
 {
-	struct pid_link *link = p->pids + PIDTYPE_TGID;
-	struct list_head *tmp, *head = &link->pidptr->task_list;
+	const struct pid_link *link = p->pids + PIDTYPE_TGID;
+	const struct list_head *tmp, *head = &link->pidptr->task_list;
 
 #ifdef CONFIG_SMP
 	if (!p->sighand)

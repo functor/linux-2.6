@@ -52,7 +52,7 @@
 
 extern spinlock_t tux_module_lock;
 extern struct module *tux_module;
-extern long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info);
+extern asmlinkage long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info);
 
 #undef Dprintk
 

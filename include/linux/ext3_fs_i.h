@@ -18,16 +18,8 @@
 
 #include <linux/rwsem.h>
 
-struct reserve_window {
-	struct list_head 	rsv_list;
-	__u32			rsv_start;
-	__u32			rsv_end;
-	atomic_t		rsv_goal_size;
-	__u32			rsv_alloc_hit;
-};
-
 /*
- * third extended file system inode data in memory
+ * second extended file system inode data in memory
  */
 struct ext3_inode_info {
 	__u32	i_data[15];
@@ -65,9 +57,10 @@ struct ext3_inode_info {
 	 * allocation when we detect linearly ascending requests.
 	 */
 	__u32	i_next_alloc_goal;
-	/* block reservation window */
-	struct reserve_window i_rsv_window;
-
+#ifdef EXT3_PREALLOCATE
+	__u32	i_prealloc_block;
+	__u32	i_prealloc_count;
+#endif
 	__u32	i_dir_start_lookup;
 #ifdef CONFIG_EXT3_FS_XATTR
 	/*

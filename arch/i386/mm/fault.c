@@ -24,7 +24,6 @@
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
-#include <asm/pgalloc.h>
 #include <asm/hardirq.h>
 #include <asm/desc.h>
 #include <asm/tlbflush.h>
@@ -451,7 +450,7 @@ no_context:
 	else
 		printk(KERN_ALERT "Unable to handle kernel paging request");
 	printk(" at virtual address %08lx\n",address);
-	printk(" printing eip:\n");
+	printk(KERN_ALERT " printing eip:\n");
 	printk("%08lx\n", regs->eip);
 	asm("movl %%cr3,%0":"=r" (page));
 	page = ((unsigned long *) __va(page))[address >> 22];

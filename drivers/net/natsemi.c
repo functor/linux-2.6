@@ -766,7 +766,7 @@ static int __devinit natsemi_probe1 (struct pci_dev *pdev,
 	SET_MODULE_OWNER(dev);
 	SET_NETDEV_DEV(dev, &pdev->dev);
 
-	i = pci_request_regions(pdev, dev->name);
+	i = pci_request_regions(pdev, DRV_NAME);
 	if (i)
 		goto err_pci_request_regions;
 
@@ -1798,14 +1798,9 @@ static void netdev_rx(struct net_device *dev)
 					np->rx_dma[entry],
 					buflen,
 					PCI_DMA_FROMDEVICE);
-#if HAS_IP_COPYSUM
 				eth_copy_and_sum(skb,
 					np->rx_skbuff[entry]->tail, pkt_len, 0);
 				skb_put(skb, pkt_len);
-#else
-				memcpy(skb_put(skb, pkt_len),
-					np->rx_skbuff[entry]->tail, pkt_len);
-#endif
 				pci_dma_sync_single_for_device(np->pci_dev,
 					np->rx_dma[entry],
 					buflen,
@@ -1961,12 +1956,12 @@ static void set_rx_mode(struct net_device *dev)
 	spin_unlock_irq(&np->lock);
 }
 
-static int netdev_ethtool_ioctl(struct net_device *dev, void *useraddr)
+static int netdev_ethtool_ioctl(struct net_device *dev, void __user *useraddr)
 {
 	struct netdev_private *np = dev->priv;
 	u32 cmd;
 
-	if (get_user(cmd, (u32 *)useraddr))
+	if (get_user(cmd, (u32 __user *)useraddr))
 		return -EFAULT;
 
 	switch (cmd) {
@@ -2417,11 +2412,11 @@ static int netdev_get_eeprom(struct net_device *dev, u8 *buf)
 
 static int netdev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
-	struct mii_ioctl_data *data = (struct mii_ioctl_data *)&rq->ifr_data;
+	struct mii_ioctl_data *data = if_mii(rq);
 
 	switch(cmd) {
 	case SIOCETHTOOL:
-		return netdev_ethtool_ioctl(dev, (void *) rq->ifr_data);
+		return netdev_ethtool_ioctl(dev, rq->ifr_data);
 	case SIOCGMIIPHY:		/* Get address of MII PHY in use. */
 	case SIOCDEVPRIVATE:		/* for binary compat, remove in 2.5 */
 		data->phy_id = 1;

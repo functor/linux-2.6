@@ -651,7 +651,8 @@ void do_generic_mapping_read(struct address_space *mapping,
 			     int nonblock)
 {
 	struct inode *inode = mapping->host;
-	unsigned long index, offset;
+	unsigned long index, end_index, offset;
+	loff_t isize;
 	struct page *cached_page;
 	int error;
 	struct file_ra_state ra = *_ra;
@@ -660,26 +661,18 @@ void do_generic_mapping_read(struct address_space *mapping,
 	index = *ppos >> PAGE_CACHE_SHIFT;
 	offset = *ppos & ~PAGE_CACHE_MASK;
 
+	isize = i_size_read(inode);
+	end_index = isize >> PAGE_CACHE_SHIFT;
+	if (index > end_index)
+		goto out;
+
 	for (;;) {
 		struct page *page;
-		unsigned long end_index, nr, ret;
-		loff_t isize = i_size_read(inode);
-
-		end_index = isize >> PAGE_CACHE_SHIFT;
-			
-		if (index > end_index)
-			break;
-		nr = PAGE_CACHE_SIZE;
-		if (index == end_index) {
-			nr = isize & ~PAGE_CACHE_MASK;
-			if (nr <= offset)
-				break;
-		}
+		unsigned long nr, ret;
 
 		cond_resched();
 		page_cache_readahead(mapping, &ra, filp, index);
 
-		nr = nr - offset;
 find_page:
 		page = find_get_page(mapping, index);
 		if (unlikely(page == NULL)) {
@@ -699,6 +692,17 @@ find_page:
 			goto page_not_up_to_date;
 		}
 page_ok:
+		/* nr is the maximum number of bytes to copy from this page */
+		nr = PAGE_CACHE_SIZE;
+		if (index == end_index) {
+			nr = isize & ~PAGE_CACHE_MASK;
+			if (nr <= offset) {
+				page_cache_release(page);
+				goto out;
+			}
+		}
+		nr = nr - offset;
+
 		/* If users can be writing to this page using arbitrary
 		 * virtual addresses, take care about potential aliasing
 		 * before reading the page on the kernel side.
@@ -730,7 +734,7 @@ page_ok:
 		page_cache_release(page);
 		if (ret == nr && desc->count)
 			continue;
-		break;
+		goto out;
 
 page_not_up_to_date:
 		/* Get exclusive access to the page ... */
@@ -750,22 +754,41 @@ page_not_up_to_date:
 		}
 
 readpage:
-		/* ... and start the actual read. The read will unlock the page. */
+		/* Start the actual read. The read will unlock the page. */
 		error = mapping->a_ops->readpage(filp, page);
 
-		if (!error) {
-			if (PageUptodate(page))
-				goto page_ok;
+		if (unlikely(error))
+			goto readpage_error;
+
+		if (!PageUptodate(page)) {
 			wait_on_page_locked(page);
-			if (PageUptodate(page))
-				goto page_ok;
-			error = -EIO;
+			if (!PageUptodate(page)) {
+				error = -EIO;
+				goto readpage_error;
+			}
 		}
 
+		/*
+		 * i_size must be checked after we have done ->readpage.
+		 *
+		 * Checking i_size after the readpage allows us to calculate
+		 * the correct value for "nr", which means the zero-filled
+		 * part of the page is not copied back to userspace (unless
+		 * another truncate extends the file - this is desired though).
+		 */
+		isize = i_size_read(inode);
+		end_index = isize >> PAGE_CACHE_SHIFT;
+		if (index > end_index) {
+			page_cache_release(page);
+			goto out;
+		}
+		goto page_ok;
+
+readpage_error:
 		/* UHHUH! A synchronous read error occurred. Report it */
 		desc->error = error;
 		page_cache_release(page);
-		break;
+		goto out;
 
 no_cached_page:
 		/*
@@ -776,7 +799,7 @@ no_cached_page:
 			cached_page = page_cache_alloc_cold(mapping);
 			if (!cached_page) {
 				desc->error = -ENOMEM;
-				break;
+				goto out;
 			}
 		}
 		error = add_to_page_cache_lru(cached_page, mapping,
@@ -785,13 +808,14 @@ no_cached_page:
 			if (error == -EEXIST)
 				goto find_page;
 			desc->error = error;
-			break;
+			goto out;
 		}
 		page = cached_page;
 		cached_page = NULL;
 		goto readpage;
 	}
 
+out:
 	*_ra = ra;
 
 	*ppos = ((loff_t) index << PAGE_CACHE_SHIFT) + offset;
@@ -1902,7 +1926,7 @@ generic_file_aio_write_nolock(struct kiocb *iocb, const struct iovec *iov,
 		count -= written;
 	}
 
-	buf = iov->iov_base;
+	buf = iov->iov_base + written;	/* handle partial DIO write */
 	do {
 		unsigned long index;
 		unsigned long offset;

@@ -60,7 +60,7 @@ static int do_mlock(unsigned long start, size_t len, int on)
 	struct vm_area_struct * vma, * next;
 	int error;
 
-	if (on && !can_do_mlock())
+	if (on && !capable(CAP_IPC_LOCK))
 		return -EPERM;
 	len = PAGE_ALIGN(len);
 	end = start + len;
@@ -118,7 +118,7 @@ asmlinkage long sys_mlock(unsigned long start, size_t len)
 	lock_limit >>= PAGE_SHIFT;
 
 	/* check against resource limits */
-	if ( (locked <= lock_limit) || capable(CAP_IPC_LOCK))
+	if (locked <= lock_limit)
 		error = do_mlock(start, len, 1);
 	up_write(&current->mm->mmap_sem);
 	return error;
@@ -142,7 +142,7 @@ static int do_mlockall(int flags)
 	unsigned int def_flags;
 	struct vm_area_struct * vma;
 
-	if (!can_do_mlock())
+	if (!capable(CAP_IPC_LOCK))
 		return -EPERM;
 
 	def_flags = 0;
@@ -177,7 +177,7 @@ asmlinkage long sys_mlockall(int flags)
 	lock_limit >>= PAGE_SHIFT;
 
 	ret = -ENOMEM;
-	if ((current->mm->total_vm <= lock_limit) || capable(CAP_IPC_LOCK))
+	if (current->mm->total_vm <= lock_limit)
 		ret = do_mlockall(flags);
 out:
 	up_write(&current->mm->mmap_sem);

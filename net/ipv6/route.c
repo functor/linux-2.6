@@ -84,9 +84,11 @@ static struct rt6_info * ip6_rt_copy(struct rt6_info *ort);
 static struct dst_entry	*ip6_dst_check(struct dst_entry *dst, u32 cookie);
 static struct dst_entry *ip6_negative_advice(struct dst_entry *);
 static void		ip6_dst_destroy(struct dst_entry *);
+static void		ip6_dst_ifdown(struct dst_entry *, int how);
 static int		 ip6_dst_gc(void);
 
 static int		ip6_pkt_discard(struct sk_buff *skb);
+static int		ip6_pkt_discard_out(struct sk_buff **pskb);
 static void		ip6_link_failure(struct sk_buff *skb);
 static void		ip6_rt_update_pmtu(struct dst_entry *dst, u32 mtu);
 
@@ -97,6 +99,7 @@ static struct dst_ops ip6_dst_ops = {
 	.gc_thresh		=	1024,
 	.check			=	ip6_dst_check,
 	.destroy		=	ip6_dst_destroy,
+	.ifdown			=	ip6_dst_ifdown,
 	.negative_advice	=	ip6_negative_advice,
 	.link_failure		=	ip6_link_failure,
 	.update_pmtu		=	ip6_rt_update_pmtu,
@@ -113,7 +116,7 @@ struct rt6_info ip6_null_entry = {
 			.error		= -ENETUNREACH,
 			.metrics	= { [RTAX_HOPLIMIT - 1] = 255, },
 			.input		= ip6_pkt_discard,
-			.output		= ip6_pkt_discard,
+			.output		= ip6_pkt_discard_out,
 			.ops		= &ip6_dst_ops,
 			.path		= (struct dst_entry*)&ip6_null_entry,
 		}
@@ -142,9 +145,17 @@ static __inline__ struct rt6_info *ip6_dst_alloc(void)
 static void ip6_dst_destroy(struct dst_entry *dst)
 {
 	struct rt6_info *rt = (struct rt6_info *)dst;
-	if (rt->rt6i_idev != NULL)
-		in6_dev_put(rt->rt6i_idev);
-	
+	struct inet6_dev *idev = rt->rt6i_idev;
+
+	if (idev != NULL) {
+		rt->rt6i_idev = NULL;
+		in6_dev_put(idev);
+	}	
+}
+
+static void ip6_dst_ifdown(struct dst_entry *dst, int how)
+{
+	ip6_dst_destroy(dst);
 }
 
 /*
@@ -572,11 +583,13 @@ static void ip6_rt_update_pmtu(struct dst_entry *dst, u32 mtu)
 
 /* Protected by rt6_lock.  */
 static struct dst_entry *ndisc_dst_gc_list;
+static int ipv6_get_mtu(struct net_device *dev);
+static inline unsigned int ipv6_advmss(unsigned int mtu);
 
 struct dst_entry *ndisc_dst_alloc(struct net_device *dev, 
 				  struct neighbour *neigh,
 				  struct in6_addr *addr,
-				  int (*output)(struct sk_buff *))
+				  int (*output)(struct sk_buff **))
 {
 	struct rt6_info *rt = ip6_dst_alloc();
 
@@ -597,6 +610,8 @@ struct dst_entry *ndisc_dst_alloc(struct net_device *dev,
 	rt->rt6i_metric   = 0;
 	atomic_set(&rt->u.dst.__refcnt, 1);
 	rt->u.dst.metrics[RTAX_HOPLIMIT-1] = 255;
+	rt->u.dst.metrics[RTAX_MTU-1] = ipv6_get_mtu(rt->rt6i_dev);
+	rt->u.dst.metrics[RTAX_ADVMSS-1] = ipv6_advmss(dst_pmtu(&rt->u.dst));
 	rt->u.dst.output  = output;
 
 	write_lock_bh(&rt6_lock);
@@ -778,7 +793,7 @@ int ip6_route_add(struct in6_rtmsg *rtmsg, struct nlmsghdr *nlh, void *_rtattr)
 			dev_put(dev);
 		dev = &loopback_dev;
 		dev_hold(dev);
-		rt->u.dst.output = ip6_pkt_discard;
+		rt->u.dst.output = ip6_pkt_discard_out;
 		rt->u.dst.input = ip6_pkt_discard;
 		rt->u.dst.error = -ENETUNREACH;
 		rt->rt6i_flags = RTF_REJECT|RTF_NONEXTHOP;
@@ -1276,6 +1291,11 @@ int ip6_pkt_discard(struct sk_buff *skb)
 	icmpv6_send(skb, ICMPV6_DEST_UNREACH, ICMPV6_NOROUTE, 0, skb->dev);
 	kfree_skb(skb);
 	return 0;
+}
+
+int ip6_pkt_discard_out(struct sk_buff **pskb)
+{
+	return ip6_pkt_discard(*pskb);
 }
 
 /*

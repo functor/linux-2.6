@@ -557,6 +557,8 @@ static int htree_dirblock_to_tree(struct file *dir_file,
 		    ((hinfo->hash == start_hash) &&
 		     (hinfo->minor_hash < start_minor_hash)))
 			continue;
+		if (de->inode == 0)
+			continue;
 		if ((err = ext3_htree_store_dirent(dir_file,
 				   hinfo->hash, hinfo->minor_hash, de)) != 0) {
 			brelse(bh);
@@ -1971,8 +1973,6 @@ int ext3_orphan_del(handle_t *handle, struct inode *inode)
 		goto out_brelse;
 	NEXT_ORPHAN(inode) = 0;
 	err = ext3_mark_iloc_dirty(handle, inode, &iloc);
-	if (err)
-		goto out_brelse;
 
 out_err:
 	ext3_std_error(inode->i_sb, err);

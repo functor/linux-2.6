@@ -81,6 +81,7 @@
  * superfluous timer interrupts from the nic.
  */
 #define FORCEDETH_VERSION		"0.25"
+#define DRV_NAME			"forcedeth"
 
 #include <linux/module.h>
 #include <linux/types.h>
@@ -556,7 +557,7 @@ static struct net_device_stats *nv_get_stats(struct net_device *dev)
 	return &np->stats;
 }
 
-static int nv_ethtool_ioctl(struct net_device *dev, void *useraddr)
+static int nv_ethtool_ioctl(struct net_device *dev, void __user *useraddr)
 {
 	struct fe_priv *np = get_nvpriv(dev);
 	u8 *base = get_hwbase(dev);
@@ -634,7 +635,7 @@ static int nv_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	switch(cmd) {
 	case SIOCETHTOOL:
-		return nv_ethtool_ioctl(dev, (void *) rq->ifr_data);
+		return nv_ethtool_ioctl(dev, rq->ifr_data);
 
 	default:
 		return -EOPNOTSUPP;
@@ -1424,7 +1425,7 @@ static int __devinit nv_probe(struct pci_dev *pci_dev, const struct pci_device_i
 
 	pci_set_master(pci_dev);
 
-	err = pci_request_regions(pci_dev, dev->name);
+	err = pci_request_regions(pci_dev, DRV_NAME);
 	if (err < 0)
 		goto out_disable;
 

@@ -99,45 +99,45 @@ static char s2io_gstrings[][ETH_GSTRING_LEN] = {
 };
 
 static char ethtool_stats_keys[][ETH_GSTRING_LEN] = {
-	{"tmac_frms"},
-	{"tmac_data_octets"},
-	{"tmac_drop_frms"},
-	{"tmac_mcst_frms"},
-	{"tmac_bcst_frms"},
-	{"tmac_pause_ctrl_frms"},
-	{"tmac_any_err_frms"},
-	{"tmac_vld_ip_octets"},
-	{"tmac_vld_ip"},
-	{"tmac_drop_ip"},
-	{"tmac_icmp"},
-	{"tmac_rst_tcp"},
-	{"tmac_tcp"},
-	{"tmac_udp"},
-	{"rmac_vld_frms"},
-	{"rmac_data_octets"},
-	{"rmac_fcs_err_frms"},
-	{"rmac_drop_frms"},
-	{"rmac_vld_mcst_frms"},
-	{"rmac_vld_bcst_frms"},
-	{"rmac_in_rng_len_err_frms"},
-	{"rmac_long_frms"},
-	{"rmac_pause_ctrl_frms"},
-	{"rmac_discarded_frms"},
-	{"rmac_usized_frms"},
-	{"rmac_osized_frms"},
-	{"rmac_frag_frms"},
-	{"rmac_jabber_frms"},
-	{"rmac_ip"},
-	{"rmac_ip_octets"},
-	{"rmac_hdr_err_ip"},
-	{"rmac_drop_ip"},
-	{"rmac_icmp"},
-	{"rmac_tcp"},
-	{"rmac_udp"},
-	{"rmac_err_drp_udp"},
-	{"rmac_pause_cnt"},
-	{"rmac_accepted_ip"},
-	{"rmac_err_tcp"},
+	"tmac_frms",
+	"tmac_data_octets",
+	"tmac_drop_frms",
+	"tmac_mcst_frms",
+	"tmac_bcst_frms",
+	"tmac_pause_ctrl_frms",
+	"tmac_any_err_frms",
+	"tmac_vld_ip_octets",
+	"tmac_vld_ip",
+	"tmac_drop_ip",
+	"tmac_icmp",
+	"tmac_rst_tcp",
+	"tmac_tcp",
+	"tmac_udp",
+	"rmac_vld_frms",
+	"rmac_data_octets",
+	"rmac_fcs_err_frms",
+	"rmac_drop_frms",
+	"rmac_vld_mcst_frms",
+	"rmac_vld_bcst_frms",
+	"rmac_in_rng_len_err_frms",
+	"rmac_long_frms",
+	"rmac_pause_ctrl_frms",
+	"rmac_discarded_frms",
+	"rmac_usized_frms",
+	"rmac_osized_frms",
+	"rmac_frag_frms",
+	"rmac_jabber_frms",
+	"rmac_ip",
+	"rmac_ip_octets",
+	"rmac_hdr_err_ip",
+	"rmac_drop_ip",
+	"rmac_icmp",
+	"rmac_tcp",
+	"rmac_udp",
+	"rmac_err_drp_udp",
+	"rmac_pause_cnt",
+	"rmac_accepted_ip",
+	"rmac_err_tcp",
 };
 
 #define S2IO_STAT_LEN sizeof(ethtool_stats_keys)/ ETH_GSTRING_LEN
@@ -1425,13 +1425,13 @@ int fill_rx_buffers(struct s2io_nic *nic, int ring_no)
 			goto end;
 		}
 
-		skb = dev_alloc_skb(size + HEADER_ALIGN_LAYER_3);
+		skb = dev_alloc_skb(size + NET_IP_ALIGN);
 		if (!skb) {
 			DBG_PRINT(ERR_DBG, "%s: Out of ", dev->name);
 			DBG_PRINT(ERR_DBG, "memory to allocate SKBs\n");
 			return -ENOMEM;
 		}
-		skb_reserve(skb, HEADER_ALIGN_LAYER_3);
+		skb_reserve(skb, NET_IP_ALIGN);
 		memset(rxdp, 0, sizeof(RxD_t));
 		rxdp->Buffer0_ptr = pci_map_single
 		    (nic->pdev, skb->data, size, PCI_DMA_FROMDEVICE);

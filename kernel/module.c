@@ -36,7 +36,6 @@
 #include <linux/stop_machine.h>
 #include <asm/uaccess.h>
 #include <asm/semaphore.h>
-#include <asm/pgalloc.h>
 #include <asm/cacheflush.h>
 
 #if 0
@@ -717,7 +716,7 @@ static inline void module_unload_init(struct module *mod)
 }
 
 asmlinkage long
-sys_delete_module(const char *name_user, unsigned int flags)
+sys_delete_module(const char __user *name_user, unsigned int flags)
 {
 	return -ENOSYS;
 }

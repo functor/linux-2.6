@@ -201,6 +201,7 @@ static int econet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len
 	return 0;
 }
 
+#ifdef CONFIG_ECONET_NATIVE
 /*
  *	Queue a transmit result for the user to be told about.
  */
@@ -228,7 +229,6 @@ static void tx_result(struct sock *sk, unsigned long cookie, int result)
 		kfree_skb(skb);
 }
 
-#ifdef CONFIG_ECONET_NATIVE
 /*
  *	Called by the Econet hardware driver when a packet transmit
  *	has completed.  Tell the user.
@@ -255,11 +255,6 @@ static int econet_sendmsg(struct kiocb *iocb, struct socket *sock,
 	struct ec_addr addr;
 	int err;
 	unsigned char port, cb;
-	struct sk_buff *skb;
-	struct ec_cb *eb;
-#ifdef CONFIG_ECONET_NATIVE
-	unsigned short proto = 0;
-#endif
 #ifdef CONFIG_ECONET_AUNUDP
 	struct msghdr udpmsg;
 	struct iovec iov[msg->msg_iovlen+1];
@@ -274,8 +269,8 @@ static int econet_sendmsg(struct kiocb *iocb, struct socket *sock,
 	 *	Check the flags. 
 	 */
 
-	if (msg->msg_flags&~MSG_DONTWAIT) 
-		return(-EINVAL);
+	if (msg->msg_flags & ~(MSG_DONTWAIT|MSG_CMSG_COMPAT)) 
+		return -EINVAL;
 
 	/*
 	 *	Get and verify the address. 
@@ -316,6 +311,10 @@ static int econet_sendmsg(struct kiocb *iocb, struct socket *sock,
 	{
 		/* Real hardware Econet.  We're not worthy etc. */
 #ifdef CONFIG_ECONET_NATIVE
+		struct ec_cb *eb;
+		struct sk_buff *skb;
+		unsigned short proto = 0;
+
 		dev_hold(dev);
 		
 		skb = sock_alloc_send_skb(sk, len+LL_RESERVED_SPACE(dev), 
@@ -418,10 +417,18 @@ static int econet_sendmsg(struct kiocb *iocb, struct socket *sock,
 
 	/* tack our header on the front of the iovec */
 	size = sizeof(struct aunhdr);
+	/*
+	 * XXX: that is b0rken.  We can't mix userland and kernel pointers
+	 * in iovec, since on a lot of platforms copy_from_user() will
+	 * *not* work with the kernel and userland ones at the same time,
+	 * regardless of what we do with set_fs().  And we are talking about
+	 * econet-over-ethernet here, so "it's only ARM anyway" doesn't
+	 * apply.  Any suggestions on fixing that code?		-- AV
+	 */
 	iov[0].iov_base = (void *)&ah;
 	iov[0].iov_len = size;
 	for (i = 0; i < msg->msg_iovlen; i++) {
-		void *base = msg->msg_iov[i].iov_base;
+		void __user *base = msg->msg_iov[i].iov_base;
 		size_t len = msg->msg_iov[i].iov_len;
 		/* Check it now since we switch to KERNEL_DS later. */
 		if ((err = verify_area(VERIFY_READ, base, len)) < 0)
@@ -589,7 +596,7 @@ out:
  *	Handle Econet specific ioctls
  */
 
-static int ec_dev_ioctl(struct socket *sock, unsigned int cmd, void *arg)
+static int ec_dev_ioctl(struct socket *sock, unsigned int cmd, void __user *arg)
 {
 	struct ifreq ifr;
 	struct ec_device *edev;
@@ -662,18 +669,19 @@ static int ec_dev_ioctl(struct socket *sock, unsigned int cmd, void *arg)
 static int econet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 {
 	struct sock *sk = sock->sk;
+	void __user *argp = (void __user *)arg;
 
 	switch(cmd) {
 		case SIOCGSTAMP:
-			return sock_get_timestamp(sk,(struct timeval __user *)arg);
+			return sock_get_timestamp(sk, argp);
 
 		case SIOCSIFADDR:
 		case SIOCGIFADDR:
-			return ec_dev_ioctl(sock, cmd, (void *)arg);
+			return ec_dev_ioctl(sock, cmd, argp);
 			break;
 
 		default:
-			return dev_ioctl(cmd,(void __user *) arg);
+			return dev_ioctl(cmd, argp);
 	}
 	/*NOTREACHED*/
 	return 0;
@@ -709,6 +717,7 @@ static struct proto_ops SOCKOPS_WRAPPED(econet_ops) = {
 #include <linux/smp_lock.h>
 SOCKOPS_WRAP(econet, PF_ECONET);
 
+#ifdef CONFIG_ECONET_AUNUDP
 /*
  *	Find the listening socket, if any, for the given data.
  */
@@ -752,8 +761,6 @@ static int ec_queue_packet(struct sock *sk, struct sk_buff *skb,
 
 	return sock_queue_rcv_skb(sk, skb);
 }
-
-#ifdef CONFIG_ECONET_AUNUDP
 
 /*
  *	Send an AUN protocol response. 

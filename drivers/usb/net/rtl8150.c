@@ -398,6 +398,21 @@ static void unlink_all_urbs(rtl8150_t * dev)
 	usb_unlink_urb(dev->ctrl_urb);
 }
 
+static inline struct sk_buff *pull_skb(rtl8150_t *dev)
+{
+	struct sk_buff *skb;
+	int i;
+
+	for (i = 0; i < RX_SKB_POOL_SIZE; i++) {
+		if (dev->rx_skb_pool[i]) {
+			skb = dev->rx_skb_pool[i];
+			dev->rx_skb_pool[i] = NULL;
+			return skb;
+		}
+	}
+	return NULL;
+}
+
 static void read_bulk_callback(struct urb *urb, struct pt_regs *regs)
 {
 	rtl8150_t *dev;
@@ -603,21 +618,6 @@ static void free_skb_pool(rtl8150_t *dev)
 			dev_kfree_skb(dev->rx_skb_pool[i]);
 }
 
-static inline struct sk_buff *pull_skb(rtl8150_t *dev)
-{
-	struct sk_buff *skb;
-	int i;
-
-	for (i = 0; i < RX_SKB_POOL_SIZE; i++) {
-		if (dev->rx_skb_pool[i]) {
-			skb = dev->rx_skb_pool[i];
-			dev->rx_skb_pool[i] = NULL;
-			return skb;
-		}
-	}
-	return NULL;
-}
-
 static int enable_net_traffic(rtl8150_t * dev)
 {
 	u8 cr, tcr, rcr, msr;
@@ -776,13 +776,13 @@ static int rtl8150_close(struct net_device *netdev)
 	return res;
 }
 
-static int rtl8150_ethtool_ioctl(struct net_device *netdev, void *uaddr)
+static int rtl8150_ethtool_ioctl(struct net_device *netdev, void __user *uaddr)
 {
 	rtl8150_t *dev;
 	int cmd;
 
 	dev = netdev->priv;
-	if (get_user(cmd, (int *) uaddr))
+	if (get_user(cmd, (int __user *) uaddr))
 		return -EFAULT;
 
 	switch (cmd) {
@@ -856,7 +856,7 @@ static int rtl8150_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	int res;
 
 	dev = netdev->priv;
-	data = (u16 *) & rq->ifr_data;
+	data = (u16 *) & rq->ifr_ifru;
 	res = 0;
 
 	switch (cmd) {

@@ -2510,7 +2510,7 @@ static struct ethtool_ops gem_ethtool_ops = {
 static int gem_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
 	struct gem *gp = dev->priv;
-	struct mii_ioctl_data *data = (struct mii_ioctl_data *)&ifr->ifr_data;
+	struct mii_ioctl_data *data = if_mii(ifr);
 	int rc = -EOPNOTSUPP;
 	
 	/* Hold the PM semaphore while doing ioctl's or we may collide
@@ -2717,7 +2717,7 @@ static int __devinit gem_init_one(struct pci_dev *pdev,
 
 	gp = dev->priv;
 
-	err = pci_request_regions(pdev, dev->name);
+	err = pci_request_regions(pdev, DRV_NAME);
 	if (err) {
 		printk(KERN_ERR PFX "Cannot obtain PCI resources, "
 		       "aborting.\n");

@@ -87,8 +87,6 @@
 		"rtl8139-diag -mmmaaavvveefN" output
 		enable RTL8139_DEBUG below, and look at 'dmesg' or kernel log
 
-		See 8139too.txt for more details.
-
 */
 
 #define DRV_NAME	"8139too"
@@ -2458,14 +2456,13 @@ static struct ethtool_ops rtl8139_ethtool_ops = {
 static int netdev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct rtl8139_private *np = dev->priv;
-	struct mii_ioctl_data *data = (struct mii_ioctl_data *) & rq->ifr_data;
 	int rc;
 
 	if (!netif_running(dev))
 		return -EINVAL;
 
 	spin_lock_irq(&np->lock);
-	rc = generic_mii_ioctl(&np->mii, data, cmd, NULL);
+	rc = generic_mii_ioctl(&np->mii, if_mii(rq), cmd, NULL);
 	spin_unlock_irq(&np->lock);
 
 	return rc;

@@ -377,11 +377,8 @@ int ipcperms (struct kern_ipc_perm *ipcp, short flag)
 		granted_mode >>= 3;
 	/* is there some bit set in requested_mode but not in granted_mode? */
 	if ((requested_mode & ~granted_mode & 0007) && 
-	    !capable(CAP_IPC_OWNER)) {
-		if (!can_do_mlock())  {
-			return -1;
-		}
-	}	
+	    !capable(CAP_IPC_OWNER))
+		return -1;
 
 	return security_ipc_permission(ipcp, flag);
 }
