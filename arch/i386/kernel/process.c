@@ -219,6 +219,24 @@ static int __init idle_setup (char *str)
 
 __setup("idle=", idle_setup);
 
+void stack_overflow(unsigned long esp, unsigned long eip)
+{
+	int panicing = ((esp&(THREAD_SIZE-1)) <= STACK_PANIC);
+
+	printk( "esp: 0x%lx masked: 0x%lx STACK_PANIC:0x%lx %d %d\n",
+		esp, (esp&(THREAD_SIZE-1)), STACK_PANIC, (((esp&(THREAD_SIZE-1)) <= STACK_PANIC)), panicing );
+
+	if (panicing)
+	  print_symbol("stack overflow from %s\n", eip);
+	else
+	  print_symbol("excessive stack use from %s\n", eip);
+	printk("esp: %p\n", (void*)esp);
+	show_trace(current,(void*)esp);
+
+	if (panicing)
+	  panic("stack overflow\n");
+}
+
 void show_regs(struct pt_regs * regs)
 {
 	unsigned long cr0 = 0L, cr2 = 0L, cr3 = 0L, cr4 = 0L;
