@@ -555,15 +555,11 @@ init_conntrack(const struct ip_conntrack_tuple *tuple,
 	conntrack->ct_general.destroy = destroy_conntrack;
 	conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple = *tuple;
 	conntrack->tuplehash[IP_CT_DIR_ORIGINAL].ctrack = conntrack;
-	conntrack->xid[IP_CT_DIR_ORIGINAL] = -1;
 	conntrack->tuplehash[IP_CT_DIR_REPLY].tuple = repl_tuple;
 	conntrack->tuplehash[IP_CT_DIR_REPLY].ctrack = conntrack;
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	conntrack->xid[IP_CT_DIR_ORIGINAL] = -1;
 	conntrack->xid[IP_CT_DIR_REPLY] = -1;
-
-#warning MEF removed initialization of conntrack->infos structure, as this structure no longer exists in 2.6.9-1.11_FC.
-#if 0
-	for (i=0; i < IP_CT_NUMBER; i++)
-		conntrack->infos[i].master = &conntrack->ct_general;
 #endif
 
 	if (!protocol->new(conntrack, skb)) {
