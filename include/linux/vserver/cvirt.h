@@ -1,5 +1,3 @@
-/* _VX_CVIRT_H defined below */
-
 #if	defined(__KERNEL__) && defined(_VX_INFO_DEF_)
 
 #include <linux/utsname.h>
@@ -13,7 +11,9 @@
 struct _vx_cvirt {
 	int max_threads;
 
+	unsigned int bias_cswtch;
 	struct timespec bias_idle;
+	struct timespec bias_tp;
 	uint64_t bias_jiffies;
 
 	struct new_utsname utsname;
@@ -52,8 +52,11 @@ static inline void vx_info_init_cvirt(struct _vx_cvirt *cvirt)
 {
 	uint64_t idle_jiffies = vx_idle_jiffies();
 
+	// new->virt.bias_cswtch = kstat.context_swtch;
 	cvirt->bias_jiffies = get_jiffies_64();
+
 	jiffies_to_timespec(idle_jiffies, &cvirt->bias_idle);
+	do_posix_clock_monotonic_gettime(&cvirt->bias_tp);
 
 	down_read(&uts_sem);
 	cvirt->utsname = system_utsname;
@@ -86,22 +89,6 @@ static inline void vx_info_exit_cacct(struct _vx_cacct *cacct)
 static inline int vx_info_proc_cvirt(struct _vx_cvirt *cvirt, char *buffer)
 {
 	int length = 0;
-	length += sprintf(buffer + length,
-		"BiasJiffies:\t%lld\n", (long long int)cvirt->bias_jiffies);
-	length += sprintf(buffer + length,
-		"SysName:\t%.*s\n"
-		"NodeName:\t%.*s\n"
-		"Release:\t%.*s\n"
-		"Version:\t%.*s\n"
-		"Machine:\t%.*s\n"
-		"DomainName:\t%.*s\n"
-		,__NEW_UTS_LEN, cvirt->utsname.sysname
-		,__NEW_UTS_LEN, cvirt->utsname.nodename
-		,__NEW_UTS_LEN, cvirt->utsname.release
-		,__NEW_UTS_LEN, cvirt->utsname.version
-		,__NEW_UTS_LEN, cvirt->utsname.machine
-		,__NEW_UTS_LEN, cvirt->utsname.domainname
-		);
 	return length;
 }
 

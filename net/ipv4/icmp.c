@@ -526,6 +526,7 @@ void icmp_send(struct sk_buff *skb_in, int type, int code, u32 info)
 							 .saddr = saddr,
 							 .tos = RT_TOS(tos) } },
 				    .proto = IPPROTO_ICMP };
+
 		if (ip_route_output_key(&rt, &fl))
 		    goto out_unlock;
 	}

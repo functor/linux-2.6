@@ -778,8 +778,7 @@ static int is_atomic_open(struct inode *dir, struct nameidata *nd)
 	if (nd->flags & LOOKUP_DIRECTORY)
 		return 0;
 	/* Are we trying to write to a read only partition? */
-	if ((IS_RDONLY(dir) || (nd && MNT_IS_RDONLY(nd->mnt))) &&
-		(nd->intent.open.flags & (O_CREAT|O_TRUNC|FMODE_WRITE)))
+	if (IS_RDONLY(dir) && (nd->intent.open.flags & (O_CREAT|O_TRUNC|FMODE_WRITE)))
 		return 0;
 	return 1;
 }
@@ -1016,7 +1015,7 @@ static int nfs_create(struct inode *dir, struct dentry *dentry, int mode,
 	int error;
 	int open_flags = 0;
 
-	dfprintk(VFS, "NFS: create(%s/%ld, %s\n", dir->i_sb->s_id, 
+	dfprintk(VFS, "NFS: create(%s/%ld, %s)\n", dir->i_sb->s_id,
 		dir->i_ino, dentry->d_name.name);
 
 	attr.ia_mode = mode;
@@ -1033,9 +1032,12 @@ static int nfs_create(struct inode *dir, struct dentry *dentry, int mode,
 	 */
 	lock_kernel();
 	nfs_begin_data_update(dir);
+	dfprintk(VFS, "NFS: attr %d.%d #%d\n", attr.ia_uid, attr.ia_gid, attr.ia_xid);
 	inode = NFS_PROTO(dir)->create(dir, &dentry->d_name, &attr, open_flags);
 	nfs_end_data_update(dir);
 	if (!IS_ERR(inode)) {
+		dfprintk(VFS, "NFS: inode=%p %d.%d #%d\n", inode,
+			inode->i_uid, inode->i_gid, inode->i_xid);
 		d_instantiate(dentry, inode);
 		nfs_renew_times(dentry);
 		nfs_set_verifier(dentry, nfs_save_change_attribute(dir));
@@ -1515,7 +1517,7 @@ nfs_permission(struct inode *inode, int mask, struct nameidata *nd)
 		 * Nobody gets write access to a read-only fs.
 		 *
 		 */
-		if ((IS_RDONLY(inode) || (nd && MNT_IS_RDONLY(nd->mnt))) &&
+		if (IS_RDONLY(inode) &&
 		    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 			return -EROFS;
 

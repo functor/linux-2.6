@@ -2,12 +2,21 @@
 #define _VX_VS_CONTEXT_H
 
 
+// #define VX_DEBUG
+
 #include <linux/kernel.h>
 #include <linux/rcupdate.h>
 #include <linux/sched.h>
 
 #include "vserver/context.h"
-#include "vserver/debug.h"
+
+#undef	vxdprintk
+#if defined(VX_DEBUG)
+#define vxdprintk(x...) printk("vxd: " x)
+#else
+#define vxdprintk(x...)
+#endif
+
 
 
 extern int proc_pid_vx_info(struct task_struct *, char *);
@@ -20,7 +29,7 @@ static inline struct vx_info *__get_vx_info(struct vx_info *vxi,
 {
 	if (!vxi)
 		return NULL;
-	vxlprintk(VXD_CBIT(xid, 2), "get_vx_info(%p[#%d.%d])",
+	vxdprintk("get_vx_info(%p[#%d.%d])\t%s:%d\n",
 		vxi, vxi?vxi->vx_id:0, vxi?atomic_read(&vxi->vx_usecnt):0,
 		_file, _line);
 	atomic_inc(&vxi->vx_usecnt);
@@ -37,7 +46,7 @@ static inline void __put_vx_info(struct vx_info *vxi, const char *_file, int _li
 {
 	if (!vxi)
 		return;
-	vxlprintk(VXD_CBIT(xid, 2), "put_vx_info(%p[#%d.%d])",
+	vxdprintk("put_vx_info(%p[#%d.%d])\t%s:%d\n",
 		vxi, vxi?vxi->vx_id:0, vxi?atomic_read(&vxi->vx_usecnt):0,
 		_file, _line);
 	if (atomic_dec_and_test(&vxi->vx_usecnt))
@@ -52,7 +61,7 @@ static inline void __set_vx_info(struct vx_info **vxp, struct vx_info *vxi,
 	BUG_ON(*vxp);
 	if (!vxi)
 		return;
-	vxlprintk(VXD_CBIT(xid, 3), "set_vx_info(%p[#%d.%d.%d])",
+	vxdprintk("set_vx_info(%p[#%d.%d.%d])\t%s:%d\n",
 		vxi, vxi?vxi->vx_id:0,
 		vxi?atomic_read(&vxi->vx_usecnt):0,
 		vxi?atomic_read(&vxi->vx_refcnt):0,
@@ -70,7 +79,7 @@ static inline void __clr_vx_info(struct vx_info **vxp,
 
 	if (!vxo)
 		return;
-	vxlprintk(VXD_CBIT(xid, 3), "clr_vx_info(%p[#%d.%d.%d])",
+	vxdprintk("clr_vx_info(%p[#%d.%d.%d])\t%s:%d\n",
 		vxo, vxo?vxo->vx_id:0,
 		vxo?atomic_read(&vxo->vx_usecnt):0,
 		vxo?atomic_read(&vxo->vx_refcnt):0,
@@ -91,8 +100,6 @@ static __inline__ struct vx_info *__task_get_vx_info(struct task_struct *p,
 	struct vx_info *vxi;
 	
 	task_lock(p);
-	vxlprintk(VXD_CBIT(xid, 5), "task_get_vx_info(%p)",
-		p, _file, _line);
 	vxi = __get_vx_info(p->vx_info, _file, _line);
 	task_unlock(p);
 	return vxi;
@@ -112,6 +119,9 @@ static __inline__ void __vx_verify_info(
 		vxa, vxb, _file, _line);
 }
 
+
+#undef	vxdprintk
+#define vxdprintk(x...)
 
 #else
 #warning duplicate inclusion
