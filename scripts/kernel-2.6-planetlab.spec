@@ -451,6 +451,7 @@ fi
 %files 
 %defattr(-,root,root)
 /%{image_install_path}/vmlinuz-%{KVERREL}
+/boot/Kerntypes-%{KVERREL}
 /boot/System.map-%{KVERREL}
 /boot/config-%{KVERREL}
 %dir /lib/modules/%{KVERREL}
@@ -463,6 +464,7 @@ fi
 %files smp
 %defattr(-,root,root)
 /%{image_install_path}/vmlinuz-%{KVERREL}smp
+/boot/Kerntypes-%{KVERREL}smp
 /boot/System.map-%{KVERREL}smp
 /boot/config-%{KVERREL}smp
 %dir /lib/modules/%{KVERREL}smp
