@@ -230,6 +230,11 @@ struct ip_conntrack
 	unsigned long mark;
 #endif
 
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	/* VServer context id */
+	xid_t xid[IP_CT_DIR_MAX];
+#endif
+
 	/* Traversed often, so hopefully in different cacheline to top */
 	/* These are my tuples; original and reply */
 	struct ip_conntrack_tuple_hash tuplehash[IP_CT_DIR_MAX];
