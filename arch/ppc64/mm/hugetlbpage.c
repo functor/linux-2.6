@@ -24,7 +24,6 @@
 #include <asm/machdep.h>
 #include <asm/cputable.h>
 #include <asm/tlb.h>
-#include <asm/rmap.h>
 
 #include <linux/sysctl.h>
 
@@ -126,7 +125,8 @@ static void setup_huge_pte(struct mm_struct *mm, struct page *page,
 	hugepte_t entry;
 	int i;
 
-	mm->rss += (HPAGE_SIZE / PAGE_SIZE);
+	// mm->rss += (HPAGE_SIZE / PAGE_SIZE);
+	vx_rsspages_sub(mm, HPAGE_SIZE / PAGE_SIZE);
 	entry = mk_hugepte(page, write_access);
 	for (i = 0; i < HUGEPTE_BATCH_SIZE; i++)
 		set_hugepte(ptep+i, entry);
@@ -214,7 +214,7 @@ static int prepare_low_seg_for_htlb(struct mm_struct *mm, unsigned long seg)
 		}
 		page = pmd_page(*pmd);
 		pmd_clear(pmd);
-		pgtable_remove_rmap(page);
+		dec_page_state(nr_page_table_pages);
 		pte_free_tlb(tlb, page);
 	}
 	tlb_finish_mmu(tlb, start, end);
@@ -288,7 +288,8 @@ int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
 			/* This is the first hugepte in a batch */
 			ptepage = hugepte_page(entry);
 			get_page(ptepage);
-			dst->rss += (HPAGE_SIZE / PAGE_SIZE);
+			// dst->rss += (HPAGE_SIZE / PAGE_SIZE);
+			vx_rsspages_add(dst, HPAGE_SIZE / PAGE_SIZE);
 		}
 		set_hugepte(dst_pte, entry);
 
@@ -408,7 +409,8 @@ void unmap_hugepage_range(struct vm_area_struct *vma,
 		put_page(page);
 	}
 
-	mm->rss -= (end - start) >> PAGE_SHIFT;
+	// mm->rss -= (end - start) >> PAGE_SHIFT;
+	vx_rsspages_sub(mm, (end - start) >> PAGE_SHIFT);
 }
 
 int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)
@@ -452,8 +454,9 @@ int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)
 				goto out;
 			}
 			ret = add_to_page_cache(page, mapping, idx, GFP_ATOMIC);
-			unlock_page(page);
-			if (ret) {
+			if (! ret) {
+				unlock_page(page);
+			} else {
 				hugetlb_put_quota(mapping);
 				free_huge_page(page);
 				goto out;

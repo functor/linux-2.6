@@ -70,6 +70,7 @@ nlmclnt_block(struct nlm_host *host, struct file_lock *fl, u32 *statp)
 	 * nlmclnt_lock for an explanation.
 	 */
 	sleep_on_timeout(&block.b_wait, 30*HZ);
+	#warning race
 
 	for (head = &nlm_blocked; *head; head = &(*head)->b_next) {
 		if (*head == &block) {

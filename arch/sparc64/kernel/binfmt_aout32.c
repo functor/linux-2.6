@@ -147,7 +147,6 @@ end_coredump:
  * memory and creates the pointer tables from them, and puts their
  * addresses on the "stack", returning the new stack pointer value.
  */
-#define A(__x) ((unsigned long)(__x))
 
 static u32 *create_aout32_tables(char * p, struct linux_binprm * bprm)
 {
@@ -171,7 +170,7 @@ static u32 *create_aout32_tables(char * p, struct linux_binprm * bprm)
 	current->mm->arg_start = (unsigned long) p;
 	while (argc-->0) {
 		char c;
-		put_user(((u32)A(p)),argv++);
+		put_user(((u32)(unsigned long)(p)),argv++);
 		do {
 			get_user(c,p++);
 		} while (c);
@@ -180,7 +179,7 @@ static u32 *create_aout32_tables(char * p, struct linux_binprm * bprm)
 	current->mm->arg_end = current->mm->env_start = (unsigned long) p;
 	while (envc-->0) {
 		char c;
-		put_user(((u32)A(p)),envp++);
+		put_user(((u32)(unsigned long)(p)),envp++);
 		do {
 			get_user(c,p++);
 		} while (c);
@@ -239,7 +238,8 @@ static int load_aout32_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	current->mm->brk = ex.a_bss +
 		(current->mm->start_brk = N_BSSADDR(ex));
 
-	current->mm->rss = 0;
+	// current->mm->rss = 0;
+	vx_rsspages_sub(current->mm, current->mm->rss);
 	current->mm->mmap = NULL;
 	compute_creds(bprm);
  	current->flags &= ~PF_FORKNOEXEC;

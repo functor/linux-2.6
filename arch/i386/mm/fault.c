@@ -27,6 +27,7 @@
 #include <asm/pgalloc.h>
 #include <asm/hardirq.h>
 #include <asm/desc.h>
+#include <asm/tlbflush.h>
 
 extern void die(const char *,struct pt_regs *,long);
 
@@ -104,8 +105,17 @@ static inline unsigned long get_segment_eip(struct pt_regs *regs,
 	if (seg & (1<<2)) {
 		/* Must lock the LDT while reading it. */
 		down(&current->mm->context.sem);
+#if 1
+		/* horrible hack for 4/4 disabled kernels.
+		   I'm not quite sure what the TLB flush is good for,
+		   it's mindlessly copied from the read_ldt code */
+		__flush_tlb_global();
+		desc = kmap(current->mm->context.ldt_pages[(seg&~7)/PAGE_SIZE]);
+		desc = (void *)desc + ((seg & ~7) % PAGE_SIZE);
+#else
 		desc = current->mm->context.ldt;
 		desc = (void *)desc + (seg & ~7);
+#endif
 	} else {
 		/* Must disable preemption while reading the GDT. */
 		desc = (u32 *)&cpu_gdt_table[get_cpu()];
@@ -118,6 +128,9 @@ static inline unsigned long get_segment_eip(struct pt_regs *regs,
 		 (desc[1] & 0xff000000);
 
 	if (seg & (1<<2)) { 
+#if 1
+		kunmap((void *)((unsigned long)desc & PAGE_MASK));
+#endif
 		up(&current->mm->context.sem);
 	} else
 		put_cpu();
@@ -243,6 +256,17 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 * (error_code & 4) == 0, and that the fault was not a
 	 * protection error (error_code & 1) == 0.
 	 */
+#ifdef CONFIG_X86_4G
+	/*
+	 * On 4/4 all kernels faults are either bugs, vmalloc or prefetch
+	 */
+	/* If it's vm86 fall through */
+	if (unlikely(!(regs->eflags & VM_MASK) && ((regs->xcs & 3) == 0))) {
+		if (error_code & 3)
+			goto bad_area_nosemaphore;
+		goto vmalloc_fault;
+	}
+#else
 	if (unlikely(address >= TASK_SIZE)) { 
 		if (!(error_code & 5))
 			goto vmalloc_fault;
@@ -252,6 +276,7 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		 */
 		goto bad_area_nosemaphore;
 	} 
+#endif
 
 	mm = tsk->mm;
 
@@ -406,6 +431,21 @@ no_context:
 
 	bust_spinlocks(1);
 
+#ifdef CONFIG_X86_PAE
+	{
+		pgd_t *pgd;
+		pmd_t *pmd;
+
+
+
+		pgd = init_mm.pgd + pgd_index(address);
+		if (pgd_present(*pgd)) {
+			pmd = pmd_offset(pgd, address);
+			if (pmd_val(*pmd) & _PAGE_NX)
+				printk(KERN_CRIT "kernel tried to access NX-protected page - exploit attempt? (uid: %d)\n", current->uid);
+		}
+	}
+#endif
 	if (address < PAGE_SIZE)
 		printk(KERN_ALERT "Unable to handle kernel NULL pointer dereference");
 	else

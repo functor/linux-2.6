@@ -16,13 +16,14 @@
 #include <linux/kmod.h>
 #include <linux/elf.h>
 #include <linux/stringify.h>
+#include <linux/kobject.h>
+#include <linux/moduleparam.h>
 #include <asm/local.h>
 
 #include <asm/module.h>
 
 /* Not Yet Implemented */
 #define MODULE_SUPPORTED_DEVICE(name)
-#define print_modules()
 
 /* v850 toolchain uses a `_' prefix for all user symbols */
 #ifndef MODULE_SYMBOL_PREFIX
@@ -207,6 +208,23 @@ enum module_state
 	MODULE_STATE_GOING,
 };
 
+/* sysfs stuff */
+struct module_attribute
+{
+	struct attribute attr;
+	struct kernel_param *param;
+};
+
+struct module_kobject
+{
+	/* Everyone should have one of these. */
+	struct kobject kobj;
+
+	/* We always have refcnt, we may have others from module_param(). */
+	unsigned int num_attributes;
+	struct module_attribute attr[0];
+};
+
 struct module
 {
 	enum module_state state;
@@ -216,6 +234,9 @@ struct module
 
 	/* Unique handle for this module */
 	char name[MODULE_NAME_LEN];
+
+	/* Sysfs stuff. */
+	struct module_kobject *mkobj;
 
 	/* Exported symbols */
 	const struct kernel_symbol *syms;
@@ -267,6 +288,9 @@ struct module
 
 	/* Destruction function. */
 	void (*exit)(void);
+
+	/* Fake kernel param for refcnt. */
+	struct kernel_param refcnt_param;
 #endif
 
 #ifdef CONFIG_KALLSYMS
@@ -400,6 +424,7 @@ const struct exception_table_entry *search_module_extables(unsigned long addr);
 int register_module_notifier(struct notifier_block * nb);
 int unregister_module_notifier(struct notifier_block * nb);
 
+extern void print_modules(void);
 #else /* !CONFIG_MODULES... */
 #define EXPORT_SYMBOL(sym)
 #define EXPORT_SYMBOL_GPL(sym)
@@ -480,6 +505,9 @@ static inline int unregister_module_notifier(struct notifier_block * nb)
 
 #define module_put_and_exit(code) do_exit(code)
 
+static inline void print_modules(void)
+{
+}
 #endif /* CONFIG_MODULES */
 
 #define symbol_request(x) try_then_request_module(symbol_get(x), "symbol:" #x)
@@ -497,29 +525,8 @@ struct obsolete_modparm {
 struct obsolete_modparm __parm_##var __attribute__((section("__obsparm"))) = \
 { __stringify(var), type };
 
-static inline void __deprecated MOD_INC_USE_COUNT(struct module *module)
-{
-	__unsafe(module);
-
-#if defined(CONFIG_MODULE_UNLOAD) && defined(MODULE)
-	local_inc(&module->ref[get_cpu()].count);
-	put_cpu();
-#else
-	(void)try_module_get(module);
-#endif
-}
-
-static inline void __deprecated MOD_DEC_USE_COUNT(struct module *module)
-{
-	module_put(module);
-}
-
-#define MOD_INC_USE_COUNT	MOD_INC_USE_COUNT(THIS_MODULE)
-#define MOD_DEC_USE_COUNT	MOD_DEC_USE_COUNT(THIS_MODULE)
 #else
 #define MODULE_PARM(var,type)
-#define MOD_INC_USE_COUNT	do { } while (0)
-#define MOD_DEC_USE_COUNT	do { } while (0)
 #endif
 
 #define __MODULE_STRING(x) __stringify(x)

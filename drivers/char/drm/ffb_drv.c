@@ -285,19 +285,19 @@ static unsigned long ffb_get_unmapped_area(struct file *filp,
 	unsigned long addr = -ENOMEM;
 
 	if (!map)
-		return get_unmapped_area(NULL, hint, len, pgoff, flags);
+		return get_unmapped_area(NULL, hint, len, pgoff, flags, 0);
 
 	if (map->type == _DRM_FRAME_BUFFER ||
 	    map->type == _DRM_REGISTERS) {
 #ifdef HAVE_ARCH_FB_UNMAPPED_AREA
 		addr = get_fb_unmapped_area(filp, hint, len, pgoff, flags);
 #else
-		addr = get_unmapped_area(NULL, hint, len, pgoff, flags);
+		addr = get_unmapped_area(NULL, hint, len, pgoff, flags, 0);
 #endif
 	} else if (map->type == _DRM_SHM && SHMLBA > PAGE_SIZE) {
 		unsigned long slack = SHMLBA - PAGE_SIZE;
 
-		addr = get_unmapped_area(NULL, hint, len + slack, pgoff, flags);
+		addr = get_unmapped_area(NULL, hint, len + slack, pgoff, flags, 0);
 		if (!(addr & ~PAGE_MASK)) {
 			unsigned long kvirt = (unsigned long) map->handle;
 
@@ -313,7 +313,7 @@ static unsigned long ffb_get_unmapped_area(struct file *filp,
 			}
 		}
 	} else {
-		addr = get_unmapped_area(NULL, hint, len, pgoff, flags);
+		addr = get_unmapped_area(NULL, hint, len, pgoff, flags, 0);
 	}
 
 	return addr;
