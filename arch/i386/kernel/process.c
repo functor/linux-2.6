@@ -219,22 +219,30 @@ static int __init idle_setup (char *str)
 
 __setup("idle=", idle_setup);
 
-void stack_overflow(unsigned long esp, unsigned long eip)
+void stack_overflow(void)
 {
+        extern unsigned long stack_overflowed;
+        unsigned long esp = current_stack_pointer();
 	int panicing = ((esp&(THREAD_SIZE-1)) <= STACK_PANIC);
 
+	oops_in_progress = 1;
 	printk( "esp: 0x%lx masked: 0x%lx STACK_PANIC:0x%lx %d %d\n",
-		esp, (esp&(THREAD_SIZE-1)), STACK_PANIC, (((esp&(THREAD_SIZE-1)) <= STACK_PANIC)), panicing );
-
-	if (panicing)
-	  print_symbol("stack overflow from %s\n", eip);
-	else
-	  print_symbol("excessive stack use from %s\n", eip);
-	printk("esp: %p\n", (void*)esp);
+		esp, (esp&(THREAD_SIZE-1)), STACK_PANIC, 
+		(((esp&(THREAD_SIZE-1)) <= STACK_PANIC)), panicing);
 	show_trace(current,(void*)esp);
 
 	if (panicing)
 	  panic("stack overflow\n");
+
+	oops_in_progress = 0;
+
+	/* Just let it happen once per task, as otherwise it goes nuts
+	 * in printing stack traces.  This means that I need to dump
+	 * the stack_overflowed boolean into the task or thread_info
+	 * structure.  For now just turn it off all together.
+	 */
+
+	/* stack_overflowed = 0; */
 }
 
 void show_regs(struct pt_regs * regs)

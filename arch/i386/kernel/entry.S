@@ -1043,48 +1043,41 @@ stack_overflowed:
 .text
 
 ENTRY(mcount)
+#warning stack check enabled
 	push %eax
 	movl $(THREAD_SIZE - 1),%eax
 	andl %esp,%eax
-	cmpl $STACK_WARN,%eax /* more than half the stack is used*/
+	cmpl $STACK_WARN,%eax
 	jle 1f
 2:
 	popl %eax
 	ret
 1:
+	/* prevent infinite recursion from call to mcount from the
+	 * stack_overflow function.  Need to revisit this code for
+	 * SMP based systems.
+	 */
 	lock; btsl $0,stack_overflowed
 	jc 2b
 
-	# switch to overflow stack
-	movl %esp,%eax
-	movl $(stack_overflow_stack + THREAD_SIZE - 4),%esp
+	/* prepare to jmp to stack_overflow directly, as if it were 
+	 * called directly by the caller of mcount.  
+	 */
+	pushl %ebp
+	pushl %ebx
+	pushl %esi
+	pushl %edi
 	
-	pushf
-	cli
-	pushl %eax
-
-	# push eip then esp of error for stack_overflow_panic
-	pushl 4(%eax)
-	pushl %eax
-
-	# update the task pointer and cpu in the overflow stack's thread_info.
-	GET_THREAD_INFO_WITH_ESP(%eax)
-	movl TI_task(%eax),%ebx
-	movl %ebx,stack_overflow_stack+TI_task
-	movl TI_cpu(%eax),%ebx
-	movl %ebx,stack_overflow_stack+TI_cpu
-
 	call stack_overflow
+	/* Note that stack_overflow() will clear the stack_overflowed
+	 * variable.
+	 */
 
-	# pop off call arguments
-	addl $8,%esp
-
-	popl %eax
-	popf
-	movl %eax,%esp
-	popl %eax
-	movl $0,stack_overflowed
+	popl %edi
+	popl %esi
+	popl %ebx
+	popl %ebp
+	
+	popl %eax	
 	ret
-
-#warning stack check enabled
 #endif
