@@ -175,9 +175,18 @@ config CKRM_RES_NUMTASKS
 config CKRM_CPU_SCHEDULE
 	bool "CKRM CPU scheduler"
 	depends on CKRM_TYPE_TASKCLASS
-	default y
+	default m
 	help
 	  Use CKRM CPU scheduler instead of Linux Scheduler
+	
+	  Say N if unsure, Y to use the feature.
+
+config CKRM_CPU_MONITOR
+	bool "CKRM CPU Resoure Monitor"
+	depends on CKRM_CPU_SCHEDULE
+	default m
+	help
+	  Monitor CPU Resource Usage of the classes
 	
 	  Say N if unsure, Y to use the feature.
 
@@ -353,22 +362,6 @@ config IKCONFIG_PROC
 	  This option enables access to the kernel configuration file
 	  through /proc/config.gz.
 
-config OOM_PANIC
-	bool "OOM Panic"
-	default y
-	---help---
-	  This option enables panic() to be called when a system is out of
-	  memory. This feature along with /proc/sys/kernel/panic allows a
-	  different behavior on out-of-memory conditions when the standard
-	  behavior (killing processes in an attempt to recover) does not
-	  make sense.
-
-	  If unsure, say N.
-
-config OOM_KILL
-	bool
-	depends on !OOM_PANIC
-	default y
 
 menuconfig EMBEDDED
 	bool "Configure standard kernel features (for small systems)"

@@ -504,7 +504,7 @@ shares_write(struct file *file, const char __user * buf,
 		}
 	}
 
-	printk(KERN_DEBUG "Set %s shares to %d %d %d %d\n",
+	printk(KERN_ERR "Set %s shares to %d %d %d %d\n",
 	       resname,
 	       newshares.my_guarantee,
 	       newshares.my_limit,
