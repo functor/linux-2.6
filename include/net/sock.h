@@ -1078,24 +1078,24 @@ extern void sk_reset_timer(struct sock *sk, struct timer_list* timer,
 
 extern void sk_stop_timer(struct sock *sk, struct timer_list* timer);
 
-extern struct proto_ops inet_stream_ops;
-
-extern int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len);
+extern int vnet_active;
 
 static inline int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
 	int err = 0;
 	int skb_len;
 
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	/* Silently drop if VNET is active (if INET bind() has been
 	 * overridden) and the context is not entitled to read the
 	 * packet.
 	 */
-	if (inet_stream_ops.bind != inet_bind &&
+	if (vnet_active &&
 	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid) {
 		err = -EPERM;
 		goto out;
 	}
+#endif
 
 	/* Cast skb->rcvbuf to unsigned... It's pointless, but reduces
 	   number of warnings when compiling with -W --ANK
