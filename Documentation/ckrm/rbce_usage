@@ -1,0 +1,98 @@
+Usage of CKRM with RBCE
+--------------------------
+
+0. Ensure that a CKRM-enabled kernel with following options configured
+   has been compiled. At a minimum, core, rcfs and atleast one
+   classtype. For testing, it is recommended all classtypes and
+   resource controllers be compiled as modules.
+
+1. Change ckrm/rbce/Makefile's KDIR to point to this compiled kernel's source
+   tree and call make
+
+2. Load rbce module.
+   # insmod ckrm/rbce/rbce.ko 
+   Note that /rcfs has to be mounted before this.
+   Note: this command should populate the directory /rcfs/ce with files
+   rbce_reclassify, rbce_tag, rbce_info, rbce_state and a directory
+   rules.
+
+   Note2: If these are not created automatically, just create them by
+   using the commands touch and mkdir.(bug that needs to be fixed)
+
+3. Defining a rule
+   Rules are defined by creating(by writing) to a file under the
+   /rcfs/ce/rules directory by concatinating multiple attribute value
+   pairs.
+
+   Note that the classes must be defined before defining rules that
+   uses the classes.  eg: the command # echo
+   "uid=1004,class=/rcfs/taskclass/c1" > /rcfs/ce/rules/r1 will define
+   a rule r1 that classifies all tasks belong to user id 1004 to class
+   /rcfs/taskclass/c1
+
+4. Viewing a rule
+   read the corresponding file.
+   to read rule r1, issue the command:
+      # cat /rcfs/ce/rules/r1
+
+5. Changing a rule
+
+   Changing a rule is done the same way as defining a rule, the new
+   rule will include the old set of attr-value pairs slapped with new
+   attr-value pairs.  eg: if the current r2 is
+   uid=1004,depend=r1,class=/rcfs/taskclass/c1
+   (r1 as defined in step 3)
+
+   the command:
+     # echo gid=502 > /rcfs/ce/rules/r1
+   will change the rule to
+     r1: uid=1004,gid=502,depend=r1,class=/rcfs/taskclass/c1
+
+   the command:
+     # echo uid=1005 > /rcfs/ce/rules/r1
+   will change the rule to
+     r1: uid=1005,class=/rcfs/taskclass/c1
+
+   the command:
+     # echo class=/rcfs/taskclass/c2 > /rcfs/ce/rules/r1
+   will change the rule to
+     r1: uid=1004,depend=r1,class=/rcfs/taskclass/c2
+   
+   the command:
+     # echo depend=r4 > /rcfs/ce/rules/r1
+   will change the rule to
+     r1: uid=1004,depend=r4,class=/rcfs/taskclass/c2
+   
+   the command:
+     # echo +depend=r4 > /rcfs/ce/rules/r1
+   will change the rule to
+     r1: uid=1004,depend=r1,depend=r4,class=/rcfs/taskclass/c2
+   
+   the command:
+     # echo -depend=r1 > /rcfs/ce/rules/r1
+   will change the rule to
+     r1: uid=1004,class=/rcfs/taskclass/c2
+
+6. Checking the state of RBCE
+   State(enabled/disabled) of RBCE can be checked by reading the file
+   /rcfs/ce/rbce_state, it will show 1(enabled) or 0(disabled).
+   By default, RBCE is enabled(1).
+   ex: # cat /rcfs/ce/rbce_state
+
+7. Changing the state of RBCE
+   State of RBCE can be changed by writing 1(enable) or 0(disable).
+   ex: # echo 1 > cat /rcfs/ce/rbce_state
+
+8. Checking the state of a rule
+   State of a rule is displayed in the rule. Rule can be viewed by
+   reading the rule file.  ex: # cat /rcfs/ce/rules/r1
+
+9. Changing the state of a rule
+
+   State of a rule can be changed by writing "state=1"(enable) or
+   "state=0"(disable) to the corresponding rule file. By defeault, the
+   rule is enabled when defined.  ex: to disable an existing rule r1,
+   issue the command 
+   # echo "state=0" > /rcfs/ce/rules/r1
+
+

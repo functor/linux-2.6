@@ -1,0 +1,70 @@
+Kernel installation
+------------------------------
+
+<kernver> = version of mainline Linux kernel
+<ckrmver> = version of CKRM
+
+Note: It is expected that CKRM versions will change fairly rapidly. Hence once
+a CKRM version has been released for some <kernver>, it will only be made
+available for future <kernver>'s until the next CKRM version is released. 
+
+1. Patch 
+
+    Apply ckrm/kernel/<kernver>/ckrm-<ckrmversion>.patch to a mainline kernel
+    tree with version <kernver>. 
+
+    If CRBCE will be used, additionally apply the following patches, in order: 
+       delayacctg-<ckrmversion>.patch 
+       relayfs-<ckrmversion>.patch
+    
+ 
+2. Configure
+
+Select appropriate configuration options:
+
+a. for taskclasses 
+
+   General Setup-->Class Based Kernel Resource Management
+
+   [*] Class Based Kernel Resource Management
+   <M> Resource Class File System (User API)
+   [*]   Class Manager for Task Groups  
+   <M>     Number of Tasks Resource Manager
+
+b. To test socket_classes and multiple accept queue controller 
+
+   General Setup-->Class Based Kernel Resource Management
+   [*] Class Based Kernel Resource Management
+   <M> Resource Class File System (User API)
+   [*]   Class Manager for socket groups
+   <M>     Multiple Accept Queues Resource Manager    
+   
+   Device Drivers-->Networking Support-->Networking options-->
+   [*] Network packet filtering (replaces ipchains)  
+   [*] IP: TCP Multiple accept queues support
+
+c. To test CRBCE later (requires 2a.)
+
+   File Systems-->Pseudo filesystems-->
+   <M> Relayfs filesystem support 
+   (enable all sub fields)
+   
+   General Setup-->
+   [*] Enable delay accounting
+   
+
+3. Build, boot into kernel
+
+4. Enable rcfs
+
+    # insmod <patchedtree>/fs/rcfs/rcfs.ko
+    # mount -t rcfs rcfs /rcfs
+ 
+    This will create the directories /rcfs/taskclass and
+    /rcfs/socketclass which are the "roots" of subtrees for creating
+    taskclasses and socketclasses respectively.
+  	
+5. Load numtasks and listenaq controllers
+
+    # insmod <patchedtree>/kernel/ckrm/ckrm_tasks.ko
+    # insmod <patchedtree>/kernel/ckrm/ckrm_listenaq.ko
