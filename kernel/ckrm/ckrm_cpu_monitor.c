@@ -929,8 +929,12 @@ void ckrm_cpu_monitor(int check_min)
 	if (update_max_demand(root_core) != 0)
 		goto outunlock;
 	
+#ifndef ALLOC_SURPLUS_SUPPORT
+#warning "MEF taking out alloc_surplus"
+#else
 	if (alloc_surplus(root_core) != 0)
 		goto outunlock;
+#endif
 	
 	adjust_local_weight();
 
