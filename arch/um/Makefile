@@ -202,6 +202,4 @@ $(ARCH_DIR)/util: scripts_basic $(SYS_DIR)/sc.h FORCE
 $(ARCH_DIR)/kernel/skas/util: scripts_basic FORCE
 	$(Q)$(MAKE) $(build)=$@
 
-define archhelp
-    echo  '* linux	- Binary kernel image (./linux)'
-endef
+export SUBARCH USER_CFLAGS OS

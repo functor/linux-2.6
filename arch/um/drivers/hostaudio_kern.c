@@ -214,7 +214,7 @@ static int hostaudio_release(struct inode *inode, struct file *file)
         printk("hostaudio: release called\n");
 #endif
 
-	os_close_file(state->fd);
+		os_close_file(state->fd);
         kfree(state);
 
 	return(0);
@@ -271,7 +271,7 @@ static int hostmixer_release(struct inode *inode, struct file *file)
         printk("hostmixer: release called\n");
 #endif
 
-	os_close_file(state->fd);
+		os_close_file(state->fd);
         kfree(state);
 
 	return(0);

@@ -1,5 +1,5 @@
 /* 
- * Copyright (C) 2000 - 2004 Jeff Dike (jdike@addtoit.com)
+ * Copyright (C) 2000, 2001, 2002 Jeff Dike (jdike@karaya.com)
  * Licensed under the GPL
  */
 
@@ -107,7 +107,6 @@ static inline void mm_copy_segments(struct mm_struct *from_mm,
  */
 extern unsigned long task_size;
 
-#undef TASK_SIZE
 #define TASK_SIZE	(task_size)
 
 /* This decides where the kernel will search for a free chunk of vm

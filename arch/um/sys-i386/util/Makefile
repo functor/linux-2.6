@@ -1,5 +1,3 @@
-host-progs	:= mk_sc mk_thread
-always		:= $(host-progs)
 
 hostprogs-y	:= mk_sc mk_thread
 always		:= $(hostprogs-y)

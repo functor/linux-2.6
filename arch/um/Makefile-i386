@@ -10,12 +10,6 @@ ifeq ($(CONFIG_MODE_SKAS),y)
   endif
 endif
 
-ifeq ($(CONFIG_MODE_SKAS),y)
-  ifneq ($(CONFIG_MODE_TT),y)
-     START = 0x8048000
-  endif
-endif
-
 CFLAGS += -U__$(SUBARCH)__ -U$(SUBARCH)
 ARCH_USER_CFLAGS :=
 
@@ -32,11 +26,7 @@ SYS_UTIL_DIR	:= $(ARCH_DIR)/sys-i386/util
 
 SYS_HEADERS := $(SYS_DIR)/sc.h $(SYS_DIR)/thread.h
 
-sys_prepare: $(SYS_DIR)/sc.h
-
 prepare: $(SYS_HEADERS)
-
-filechk_$(SYS_DIR)/sc.h := $(SYS_UTIL_DIR)/mk_sc
 
 $(SYS_DIR)/sc.h: $(SYS_UTIL_DIR)/mk_sc
 	$(call filechk,gen_header)

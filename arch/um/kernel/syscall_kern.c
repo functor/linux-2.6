@@ -15,8 +15,6 @@
 #include "linux/unistd.h"
 #include "linux/slab.h"
 #include "linux/utime.h"
-#include <linux/vs_cvirt.h>
-
 #include "asm/mman.h"
 #include "asm/uaccess.h"
 #include "asm/ipc.h"
@@ -58,9 +56,10 @@ long sys_vfork(void)
 }
 
 /* common code for old and new mmaps */
-long do_mmap2(struct mm_struct *mm, unsigned long addr, unsigned long len,
-	      unsigned long prot, unsigned long flags, unsigned long fd,
-	      unsigned long pgoff)
+static inline long do_mmap2(
+	unsigned long addr, unsigned long len,
+	unsigned long prot, unsigned long flags,
+	unsigned long fd, unsigned long pgoff)
 {
 	int error = -EBADF;
 	struct file * file = NULL;
@@ -72,9 +71,9 @@ long do_mmap2(struct mm_struct *mm, unsigned long addr, unsigned long len,
 			goto out;
 	}
 
-	down_write(&mm->mmap_sem);
-	error = do_mmap_pgoff(mm, file, addr, len, prot, flags, pgoff);
-	up_write(&mm->mmap_sem);
+	down_write(&current->mm->mmap_sem);
+	error = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
+	up_write(&current->mm->mmap_sem);
 
 	if (file)
 		fput(file);
@@ -86,7 +85,7 @@ long sys_mmap2(unsigned long addr, unsigned long len,
 	       unsigned long prot, unsigned long flags,
 	       unsigned long fd, unsigned long pgoff)
 {
-	return do_mmap2(current->mm, addr, len, prot, flags, fd, pgoff);
+	return do_mmap2(addr, len, prot, flags, fd, pgoff);
 }
 
 /*
@@ -113,8 +112,7 @@ long old_mmap(unsigned long addr, unsigned long len,
 	if (offset & ~PAGE_MASK)
 		goto out;
 
-	err = do_mmap2(current->mm, addr, len, prot, flags, fd, 
-		       offset >> PAGE_SHIFT);
+	err = do_mmap2(addr, len, prot, flags, fd, offset >> PAGE_SHIFT);
  out:
 	return err;
 }
@@ -226,7 +224,7 @@ long sys_uname(struct old_utsname * name)
 	if (!name)
 		return -EFAULT;
 	down_read(&uts_sem);
-	err=copy_to_user(name, vx_new_utsname(), sizeof (*name));
+	err=copy_to_user(name, &system_utsname, sizeof (*name));
 	up_read(&uts_sem);
 	return err?-EFAULT:0;
 }
@@ -234,7 +232,6 @@ long sys_uname(struct old_utsname * name)
 long sys_olduname(struct oldold_utsname * name)
 {
 	long error;
-	struct new_utsname *ptr;
 
 	if (!name)
 		return -EFAULT;
@@ -243,20 +240,19 @@ long sys_olduname(struct oldold_utsname * name)
   
   	down_read(&uts_sem);
 	
-	ptr = vx_new_utsname();
-	error = __copy_to_user(&name->sysname,ptr->sysname,
+	error = __copy_to_user(&name->sysname,&system_utsname.sysname,
 			       __OLD_UTS_LEN);
 	error |= __put_user(0,name->sysname+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->nodename,ptr->nodename,
+	error |= __copy_to_user(&name->nodename,&system_utsname.nodename,
 				__OLD_UTS_LEN);
 	error |= __put_user(0,name->nodename+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->release,ptr->release,
+	error |= __copy_to_user(&name->release,&system_utsname.release,
 				__OLD_UTS_LEN);
 	error |= __put_user(0,name->release+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->version,ptr->version,
+	error |= __copy_to_user(&name->version,&system_utsname.version,
 				__OLD_UTS_LEN);
 	error |= __put_user(0,name->version+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->machine,ptr->machine,
+	error |= __copy_to_user(&name->machine,&system_utsname.machine,
 				__OLD_UTS_LEN);
 	error |= __put_user(0,name->machine+__OLD_UTS_LEN);
 	
