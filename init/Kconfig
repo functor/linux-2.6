@@ -168,6 +168,24 @@ config CKRM_RES_NUMTASKS
 	
 	  Say N if unsure, Y to use the feature.
 
+config CKRM_CPU_SCHEDULE
+	bool "CKRM CPU scheduler"
+	depends on CKRM_TYPE_TASKCLASS
+	default m
+	help
+	  Use CKRM CPU scheduler instead of Linux Scheduler
+	
+	  Say N if unsure, Y to use the feature.
+
+config CKRM_CPU_MONITOR
+	tristate  "CKRM CPU Resoure Monitor"
+	depends on CKRM_CPU_SCHEDULE
+	default m
+	help
+	  Monitor CPU Resource Usage of the classes
+	
+	  Say N if unsure, Y to use the feature.
+
 config CKRM_TYPE_SOCKETCLASS
 	bool "Class Manager for socket groups"
 	depends on CKRM

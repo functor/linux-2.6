@@ -9,6 +9,7 @@ obj-y     = sched.o fork.o exec_domain.o panic.o printk.o profile.o \
 	    rcupdate.o intermodule.o extable.o params.o posix-timers.o \
 	    kthread.o ckrm/
 
+obj-$(CONFIG_ZTRACE) += swap_hook.o
 obj-$(CONFIG_FUTEX) += futex.o
 obj-$(CONFIG_GENERIC_ISA_DMA) += dma.o
 obj-$(CONFIG_SMP) += cpu.o
@@ -21,8 +22,12 @@ obj-$(CONFIG_COMPAT) += compat.o
 obj-$(CONFIG_IKCONFIG) += configs.o
 obj-$(CONFIG_IKCONFIG_PROC) += configs.o
 obj-$(CONFIG_STOP_MACHINE) += stop_machine.o
+obj-$(CONFIG_CKRM_CPU_SCHEDULE) += ckrm_classqueue.o
+obj-$(CONFIG_CKRM_CPU_SCHEDULE) += ckrm_sched.o
 obj-$(CONFIG_AUDIT) += audit.o
 obj-$(CONFIG_AUDITSYSCALL) += auditsc.o
+obj-$(CONFIG_KGDB) += kgdbstub.o
+
 
 ifneq ($(CONFIG_IA64),y)
 # According to Alan Modra <alan@linuxcare.com.au>, the -fno-omit-frame-pointer is

@@ -522,6 +522,9 @@ struct task_struct {
 	// .. Hubertus should change to CONFIG_CKRM_TYPE_TASKCLASS 
 	struct ckrm_task_class *taskclass;
 	struct list_head        taskclass_link;
+#ifdef CONFIG_CKRM_CPU_SCHEDULE
+        struct ckrm_cpu_class *cpu_class;
+#endif
 #endif // CONFIG_CKRM_TYPE_TASKCLASS
 #endif // CONFIG_CKRM
 
@@ -971,8 +974,7 @@ static inline struct mm_struct * get_task_mm(struct task_struct * task)
 
 	return mm;
 }
- 
- 
+
 /* set thread flags in other task's structures
  * - see asm/thread_info.h for TIF_xxxx flags available
  */
