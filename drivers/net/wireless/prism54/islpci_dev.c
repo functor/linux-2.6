@@ -39,7 +39,6 @@
 #include "oid_mgt.h"
 
 #define ISL3877_IMAGE_FILE	"isl3877"
-#define ISL3886_IMAGE_FILE	"isl3886"
 #define ISL3890_IMAGE_FILE	"isl3890"
 
 static int prism54_bring_down(islpci_private *);
@@ -83,7 +82,7 @@ isl_upload_firmware(islpci_private *priv)
 	mdelay(50);
 
 	{
-		const struct firmware *fw_entry = NULL;
+		const struct firmware *fw_entry = 0;
 		long fw_len;
 		const u32 *fw_ptr;
 
@@ -186,9 +185,6 @@ islpci_interrupt(int irq, void *config, struct pt_regs *regs)
 	void *device = priv->device_base;
 	int powerstate = ISL38XX_PSM_POWERSAVE_STATE;
 
-	/* lock the interrupt handler */
-	spin_lock(&priv->slock);
-
 	/* received an interrupt request on a shared IRQ line
 	 * first check whether the device is in sleep mode */
 	reg = readl(device + ISL38XX_CTRL_STAT_REG);
@@ -198,10 +194,14 @@ islpci_interrupt(int irq, void *config, struct pt_regs *regs)
 #if VERBOSE > SHOW_ERROR_MESSAGES
 		DEBUG(SHOW_TRACING, "Assuming someone else called the IRQ\n");
 #endif
-		spin_unlock(&priv->slock);
 		return IRQ_NONE;
 	}
 
+	if (islpci_get_state(priv) != PRV_STATE_SLEEP)
+		powerstate = ISL38XX_PSM_ACTIVE_STATE;
+
+	/* lock the interrupt handler */
+	spin_lock(&priv->slock);
 
 	/* check whether there is any source of interrupt on the device */
 	reg = readl(device + ISL38XX_INT_IDENT_REG);
@@ -212,9 +212,6 @@ islpci_interrupt(int irq, void *config, struct pt_regs *regs)
 	reg &= ISL38XX_INT_SOURCES;
 
 	if (reg != 0) {
-		if (islpci_get_state(priv) != PRV_STATE_SLEEP)
-			powerstate = ISL38XX_PSM_ACTIVE_STATE;
-
 		/* reset the request bits in the Identification register */
 		isl38xx_w32_flush(device, reg, ISL38XX_INT_ACK_REG);
 
@@ -342,12 +339,6 @@ islpci_interrupt(int irq, void *config, struct pt_regs *regs)
 			isl38xx_handle_wakeup(priv->control_block,
 					      &powerstate, priv->device_base);
 		}
-	} else {
-#if VERBOSE > SHOW_ERROR_MESSAGES
-		DEBUG(SHOW_TRACING, "Assuming someone else called the IRQ\n");
-#endif
-		spin_unlock(&priv->slock);
-		return IRQ_NONE;
 	}
 
 	/* sleep -> ready */
@@ -725,7 +716,7 @@ islpci_free_memory(islpci_private *priv)
 
 	if (priv->device_base)
 		iounmap(priv->device_base);
-	priv->device_base = NULL;
+	priv->device_base = 0;
 
 	/* free consistent DMA area... */
 	if (priv->driver_mem_address)
@@ -734,10 +725,10 @@ islpci_free_memory(islpci_private *priv)
 				    priv->device_host_address);
 
 	/* clear some dangling pointers */
-	priv->driver_mem_address = NULL;
+	priv->driver_mem_address = 0;
 	priv->device_host_address = 0;
 	priv->device_psm_buffer = 0;
-	priv->control_block = NULL;
+	priv->control_block = 0;
 
         /* clean up mgmt rx buffers */
         for (counter = 0; counter < ISL38XX_CB_MGMT_QSIZE; counter++) {
@@ -763,7 +754,7 @@ islpci_free_memory(islpci_private *priv)
 
 		if (priv->data_low_rx[counter])
 			dev_kfree_skb(priv->data_low_rx[counter]);
-		priv->data_low_rx[counter] = NULL;
+		priv->data_low_rx[counter] = 0;
 	}
 
 	/* Free the acces control list and the WPA list */
@@ -865,12 +856,12 @@ islpci_setup(struct pci_dev *pdev)
 
 	/* select the firmware file depending on the device id */
 	switch (pdev->device) {
-	case 0x3877:
-		strcpy(priv->firmware, ISL3877_IMAGE_FILE);
+	case PCIDEVICE_ISL3890:
+	case PCIDEVICE_3COM6001:
+		strcpy(priv->firmware, ISL3890_IMAGE_FILE);
 		break;
-
-	case 0x3886:
-		strcpy(priv->firmware, ISL3886_IMAGE_FILE);
+	case PCIDEVICE_ISL3877:
+		strcpy(priv->firmware, ISL3877_IMAGE_FILE);
 		break;
 
 	default:
@@ -889,9 +880,9 @@ islpci_setup(struct pci_dev *pdev)
       do_islpci_free_memory:
 	islpci_free_memory(priv);
       do_free_netdev:
-	pci_set_drvdata(pdev, NULL);
+	pci_set_drvdata(pdev, 0);
 	free_netdev(ndev);
-	priv = NULL;
+	priv = 0;
 	return NULL;
 }
 

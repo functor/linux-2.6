@@ -10,7 +10,6 @@
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/security.h>
-#include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <linux/vserver/inode.h>
 #include <linux/vserver/xid.h>
@@ -173,19 +172,6 @@ asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 				error = vx_proc_ioctl(filp->f_dentry->d_inode, filp, cmd, arg);
 			break;
 #endif
-		case FIOC_SETIATTR:
-		case FIOC_GETIATTR:
-			/*
-			 * Verify that this filp is a file object,
-			 * not (say) a socket.
-			 */
-			error = -ENOTTY;
-			if (S_ISREG(filp->f_dentry->d_inode->i_mode) ||
-			    S_ISDIR(filp->f_dentry->d_inode->i_mode))
-				error = vc_iattr_ioctl(filp->f_dentry,
-						       cmd, arg);
-			break;
-
 		default:
 			error = -ENOTTY;
 			if (S_ISREG(filp->f_dentry->d_inode->i_mode))

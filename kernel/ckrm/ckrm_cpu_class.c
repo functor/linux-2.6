@@ -47,7 +47,6 @@ void init_cpu_class(struct ckrm_cpu_class *cls,ckrm_shares_t* shares)
 	cls->shares = *shares;
 	cls->cnt_lock = SPIN_LOCK_UNLOCKED;
 	ckrm_cpu_stat_init(&cls->stat);
-	ckrm_usage_init(&cls->usage);
 	cls->magic = CKRM_CPU_CLASS_MAGIC;
 
 	for (i = 0 ; i < NR_CPUS ; i++) {
@@ -72,11 +71,10 @@ void init_cpu_class(struct ckrm_cpu_class *cls,ckrm_shares_t* shares)
 		queue->classqueue = get_cpu_classqueue(i);
 		queue->top_priority = MAX_PRIO;
 		cq_node_init(&queue->classqueue_linkobj);
-		queue->local_cvt = 0;
+		queue->local_cvt = CVT_INTERACTIVE_BONUS;
 		queue->lrq_load = 0;
 		queue->local_weight = cpu_class_weight(cls);
 		queue->uncounted_ns = 0;
-		queue->savings = 0;
 		queue->magic = 0x43FF43D7;
 	}
 
@@ -180,9 +178,6 @@ static void ckrm_free_cpu_class(void *my_res)
 	write_unlock(&class_list_lock);
 
 	kfree(cls);
-
-	//call ckrm_cpu_monitor after class removed
-	ckrm_cpu_monitor(0);
 }				
 
 /*
@@ -223,10 +218,6 @@ int ckrm_cpu_set_share(void *my_res, struct ckrm_shares *new_share)
 	if (cls->parent) {
 		spin_unlock(&parres->cnt_lock);
 	}
-
-	//call ckrm_cpu_monitor after changes are changed
-	ckrm_cpu_monitor(0);
-
 	return rc;
 }							
 			
@@ -267,16 +258,11 @@ int ckrm_cpu_get_stats(void *my_res, struct seq_file * sfile)
 	seq_printf(sfile, "\tmehl= %d\n",stat->mehl);
 	seq_printf(sfile, "\teshare= %d\n",stat->eshare);
 	seq_printf(sfile, "\tmeshare= %d\n",cpu_class_weight(cls));
-	seq_printf(sfile, "\tmax_demand= %lu\n",stat->max_demand);
 	seq_printf(sfile, "\ttotal_ns= %llu\n",stat->total_ns);
-	seq_printf(sfile, "\tusage(2,10,60)= %d %d %d\n",
-		   get_ckrm_usage(cls,2*HZ),
-		   get_ckrm_usage(cls,10*HZ),
-		   get_ckrm_usage(cls,60*HZ)
-		   );
+	seq_printf(sfile, "\tmax_demand= %lu\n",stat->max_demand);
 	for_each_online_cpu(i) {
 		lrq = get_ckrm_lrq(cls,i);		
-		seq_printf(sfile, "\tlrq %d demand= %lu weight= %d lrq_load= %lu cvt= %llu sav= %llu\n",i,stat->local_stats[i].cpu_demand,local_class_weight(lrq),lrq->lrq_load,lrq->local_cvt,lrq->savings);
+		seq_printf(sfile, "\tlrq %d demand= %lu weight= %d lrq_load= %lu cvt= %llu\n",i,stat->local_stats[i].cpu_demand,local_class_weight(lrq),lrq->lrq_load,lrq->local_cvt);
 	}
 
 	seq_printf(sfile, "-------- CPU Class Status END ---------\n");
@@ -318,7 +304,7 @@ static int ckrm_cpu_set_config(void *my_res, const char *cfgstr)
 
 	if (!cls) 
 		return -EINVAL;
-	printk(KERN_DEBUG "ckrm_cpu config='%s'\n",cfgstr);
+	printk("ckrm_cpu config='%s'\n",cfgstr);
 	return 0;
 }
 	
@@ -349,7 +335,7 @@ int __init init_ckrm_sched_res(void)
 
 	if (resid == -1) { /*not registered */
 		resid = ckrm_register_res_ctlr(clstype,&cpu_rcbs);
-		printk(KERN_DEBUG "........init_ckrm_sched_res , resid= %d\n",resid);
+		printk("........init_ckrm_sched_res , resid= %d\n",resid);
 	}
 	return 0;
 }

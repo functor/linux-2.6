@@ -27,96 +27,8 @@ struct ckrm_cpu_class * get_default_cpu_class(void) {
 /*******************************************************/
 /*                CVT Management                       */
 /*******************************************************/
-
-static inline void check_inactive_class(ckrm_lrq_t * lrq,CVT_t cur_cvt)
-{
-	CVT_t min_cvt;
-	CVT_t bonus;
-
-	//just a safty measure
-	if (unlikely(! cur_cvt))
-		return; 
-
-#ifndef INTERACTIVE_BONUS_SUPPORT
-#warning "ACB taking out interactive bonus calculation"	
-	bonus = 0;
-#else
-	/*
-	 * Always leaving a small bonus for inactive classes 
-	 * allows them to compete for cycles immediately when the become
-	 * active. This should improve interactive behavior
-	 */
-	bonus = INTERACTIVE_BONUS(lrq);
-#endif
-
-	//cvt can't be negative
-	if (cur_cvt > bonus)
-		min_cvt = cur_cvt - bonus;
-	else
-		min_cvt = 0;
-	
-	if (lrq->local_cvt < min_cvt) {
-		CVT_t lost_cvt;
-
-		lost_cvt = scale_cvt(min_cvt - lrq->local_cvt,lrq);
-		lrq->local_cvt = min_cvt;
-
-		/* add what the class lost to its savings*/
-		lrq->savings += lost_cvt;
-		if (lrq->savings > MAX_SAVINGS)
-			lrq->savings = MAX_SAVINGS; 
-	} else if (lrq->savings) {
-		/*
-		 *if a class saving and falling behind
-		 * then start to use it saving in a leaking bucket way
-		 */
-		CVT_t savings_used;
-
-		savings_used = scale_cvt((lrq->local_cvt - min_cvt),lrq);
-		if (savings_used > lrq->savings)
-			savings_used = lrq->savings;
-		
-		if (savings_used > SAVINGS_LEAK_SPEED)
-			savings_used = SAVINGS_LEAK_SPEED;
-
-		BUG_ON(lrq->savings < savings_used);
-		lrq->savings -= savings_used;
-		unscale_cvt(savings_used,lrq);
-		BUG_ON(lrq->local_cvt < savings_used);
-#ifndef CVT_SAVINGS_SUPPORT
-#warning "ACB taking out cvt saving"
-#else
-		lrq->local_cvt -= savings_used;
-#endif
-	}		
-}
-
-/*
- * return the max_cvt of all the classes
- */
-static inline CVT_t get_max_cvt(int this_cpu)
-{
-        struct ckrm_cpu_class *clsptr;
-        ckrm_lrq_t * lrq;
-        CVT_t max_cvt;
-
-        max_cvt = 0;
-
-        /*update class time, at the same time get max_cvt */
-        list_for_each_entry(clsptr, &active_cpu_classes, links) {
-                lrq = get_ckrm_lrq(clsptr, this_cpu);
-                if (lrq->local_cvt > max_cvt)
-                        max_cvt = lrq->local_cvt;
-        }
-
-	return max_cvt;
-}
-
 /**
- * update_class_cputime - updates cvt of inactive classes
- * -- an inactive class shouldn't starve others when it comes back
- * -- the cpu time it lost when it's inactive should be accumulated
- * -- its accumulated saving should be compensated (in a leaky bucket fashion)
+ * update_class_cputime - update the total cpu time received by a class
  * 
  * class_list_lock must have been acquired 
  */
@@ -124,54 +36,30 @@ void update_class_cputime(int this_cpu)
 {
 	struct ckrm_cpu_class *clsptr;
 	ckrm_lrq_t * lrq;
-	CVT_t cur_cvt;
+	CVT_t max_cvt, min_cvt;
 
-	/*
-	 *  a class's local_cvt must not be significantly smaller than min_cvt 
-	 *  of active classes otherwise, it will starve other classes when it 
-         *  is reactivated.
-	 * 
-  	 *  Hence we keep all local_cvt's within a range of the min_cvt off
-	 *  all active classes (approximated by the local_cvt of the currently
-	 *  running class) and account for how many cycles where thus taken
-	 *  from an inactive class building a savings (not to exceed a few seconds)
-	 *  for a class to gradually make up upon reactivation, without 
-	 *  starvation of other classes.
-         *  
-	 */
-	cur_cvt = get_local_cur_cvt(this_cpu);
+	max_cvt = 0;
 
-	/*
-	 * cur_cvt == 0 means the system is now idle
-	 * in this case, we use max_cvt as cur_cvt
-	 * max_cvt roughly represents the cvt of the class 
-	 * that has just finished running
-	 *
-	 * fairness wouldn't be a problem since we account for whatever lost in savings
-	 * if the system is not busy, the system responsiveness is not a problem.
-	 * still fine if the sytem is busy, but happened to be idle at this certain point
-	 * since bias toward interactive classes (class priority) is a more important way to improve system responsiveness
-	 */
-	if (unlikely(! cur_cvt))  {
-		cur_cvt = get_max_cvt(this_cpu);
-		//return;
-	}
-
-	/* 
-	 *  - check the local cvt of all the classes 
-	 *  - update total_ns received by the class
-	 *  - do a usage sampling for the whole class
-	 */
+	/*update class time, at the same time get max_cvt */
 	list_for_each_entry(clsptr, &active_cpu_classes, links) {
 		lrq = get_ckrm_lrq(clsptr, this_cpu);
 
 		spin_lock(&clsptr->stat.stat_lock);
 		clsptr->stat.total_ns += lrq->uncounted_ns;
-		ckrm_sample_usage(clsptr);
 		spin_unlock(&clsptr->stat.stat_lock);
-		lrq->uncounted_ns = 0;
 
-		check_inactive_class(lrq,cur_cvt);		
+		lrq->uncounted_ns = 0;
+		if (lrq->local_cvt > max_cvt)
+			max_cvt = lrq->local_cvt;
+	}
+	min_cvt = max_cvt - CVT_INTERACTIVE_BONUS;
+	BUG_ON(min_cvt < 0);
+
+	/*check again, make sure no one get too small cvt*/
+	list_for_each_entry(clsptr, &active_cpu_classes, links) {
+		lrq = get_ckrm_lrq(clsptr, this_cpu);
+		if (lrq->local_cvt < min_cvt)
+			lrq->local_cvt = min_cvt;
 	}
 }
 

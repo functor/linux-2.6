@@ -1,14 +1,8 @@
 /*
  * Intel & MS High Precision Event Timer Implementation.
- *
- * Copyright (C) 2003 Intel Corporation
+ * Contributors:
  *	Venki Pallipadi
- * (c) Copyright 2004 Hewlett-Packard Development Company, L.P.
- *	Bob Picco <robert.picco@hp.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * 	Bob Picco
  */
 
 #include <linux/config.h>
@@ -256,7 +250,9 @@ static unsigned int hpet_poll(struct file *file, poll_table * wait)
 
 static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
 {
-#ifdef	CONFIG_HPET_MMAP
+#ifdef	CONFIG_HPET_NOMMAP
+	return -ENOSYS;
+#else
 	struct hpet_dev *devp;
 	unsigned long addr;
 
@@ -280,8 +276,6 @@ static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 
 	return 0;
-#else
-	return -ENOSYS;
 #endif
 }
 
@@ -907,10 +901,14 @@ static acpi_status __init hpet_resources(struct acpi_resource *res, void *data)
 			hdp->hd_nirqs = irqp->number_of_interrupts;
 
 			for (i = 0; i < hdp->hd_nirqs; i++)
+#ifdef	CONFIG_IA64
 				hdp->hd_irq[i] =
 				    acpi_register_gsi(irqp->interrupts[i],
 						      irqp->edge_level,
 						      irqp->active_high_low);
+#else
+				hdp->hd_irq[i] = irqp->interrupts[i];
+#endif
 		}
 	}
 

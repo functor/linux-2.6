@@ -112,7 +112,9 @@
 #ifdef CONFIG_IP_MROUTE
 #include <linux/mroute.h>
 #endif
-#include <linux/vs_limit.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
 
 DEFINE_SNMP_STAT(struct linux_mib, net_statistics);
 
@@ -160,7 +162,6 @@ void inet_sock_destruct(struct sock *sk)
 	if (inet->opt)
 		kfree(inet->opt);
 	
-	vx_sock_dec(sk);
 	clr_vx_info(&sk->sk_vx_info);
 	sk->sk_xid = -1;
 	clr_nx_info(&sk->sk_nx_info);
@@ -344,7 +345,6 @@ override:
 	
 	set_vx_info(&sk->sk_vx_info, current->vx_info);
 	sk->sk_xid = vx_current_xid();
-	vx_sock_inc(sk);
 	set_nx_info(&sk->sk_nx_info, current->nx_info);
 	sk->sk_nid = nx_current_nid();
 
@@ -410,7 +410,6 @@ int inet_release(struct socket *sock)
 		    !(current->flags & PF_EXITING))
 			timeout = sk->sk_lingertime;
 		sock->sk = NULL;
-		vx_sock_dec(sk);
 		clr_vx_info(&sk->sk_vx_info);
 	sk->sk_xid = -1;
 		clr_nx_info(&sk->sk_nx_info);

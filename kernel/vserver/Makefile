@@ -6,8 +6,8 @@
 obj-y		+= vserver.o
 
 vserver-y	:= switch.o context.o namespace.o sched.o network.o inode.o \
-		   limit.o cvirt.o signal.o proc.o helper.o init.o dlimit.o
+		   limit.o cvirt.o signal.o proc.o sysctl.o helper.o init.o \
+		   dlimit.o
 
-vserver-$(CONFIG_VSERVER_DEBUG) += sysctl.o
 vserver-$(CONFIG_VSERVER_LEGACY) += legacy.o
 

@@ -1,5 +1,5 @@
 /* 
- * $Id: iucv.c,v 1.40 2004/08/04 12:29:33 cborntra Exp $
+ * $Id: iucv.c,v 1.38 2004/07/09 15:59:53 mschwide Exp $
  *
  * IUCV network driver
  *
@@ -29,7 +29,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * RELEASE-TAG: IUCV lowlevel driver $Revision: 1.40 $
+ * RELEASE-TAG: IUCV lowlevel driver $Revision: 1.38 $
  *
  */
 
@@ -53,7 +53,6 @@
 #include <asm/io.h>
 #include <asm/s390_ext.h>
 #include <asm/ebcdic.h>
-#include <asm/smp.h>
 #include <asm/ccwdev.h> //for root device stuff
 
 /* FLAGS:
@@ -355,7 +354,7 @@ do { \
 static void
 iucv_banner(void)
 {
-	char vbuf[] = "$Revision: 1.40 $";
+	char vbuf[] = "$Revision: 1.38 $";
 	char *version = vbuf;
 
 	if ((version = strchr(version, ':'))) {
@@ -875,6 +874,9 @@ iucv_register_program (__u8 pgmname[16],
 		iucv_remove_handler(new_handler);
 		kfree(new_handler);
 		switch(rc) {
+		case -ENODEV:
+			err = "No CPU can be reserved";
+			break;
 		case 0x03:
 			err = "Directory error";
 			break;

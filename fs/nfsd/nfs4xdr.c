@@ -1562,8 +1562,7 @@ nfsd4_encode_fattr(struct svc_fh *fhp, struct svc_export *exp,
 	}
 	if (bmval1 & FATTR4_WORD1_OWNER) {
 		status = nfsd4_encode_user(rqstp,
-			XIDINO_UID(XID_TAG(dentry->d_inode),
-			stat.uid, stat.xid), &p, &buflen);
+			XIDINO_UID(stat.uid, stat.xid), &p, &buflen);
 		if (status == nfserr_resource)
 			goto out_resource;
 		if (status)
@@ -1571,8 +1570,7 @@ nfsd4_encode_fattr(struct svc_fh *fhp, struct svc_export *exp,
 	}
 	if (bmval1 & FATTR4_WORD1_OWNER_GROUP) {
 		status = nfsd4_encode_group(rqstp,
-			XIDINO_GID(XID_TAG(dentry->d_inode),
-			stat.gid, stat.xid), &p, &buflen);
+			XIDINO_GID(stat.gid, stat.xid), &p, &buflen);
 		if (status == nfserr_resource)
 			goto out_resource;
 		if (status)
@@ -2524,7 +2522,7 @@ nfs4svc_encode_compoundres(struct svc_rqst *rqstp, u32 *p, struct nfsd4_compound
 	/*
 	 * All that remains is to write the tag and operation count...
 	 */
-	struct kvec *iov;
+	struct iovec *iov;
 	p = resp->tagp;
 	*p++ = htonl(resp->taglen);
 	memcpy(p, resp->tag, resp->taglen);
