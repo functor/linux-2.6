@@ -111,8 +111,8 @@ print_conntrack(char *buffer, struct ip_conntrack *conntrack)
 		len += sprintf(buffer + len, "[ASSURED] ");
 	len += sprintf(buffer + len, "use=%u ",
 		       atomic_read(&conntrack->ct_general.use));
-	len += sprintf(buffer + len, "xid=%d ",
-		       conntrack->xid);
+	len += sprintf(buffer + len, "sxid=%d dxid=%d ",
+		       conntrack->xid[IP_CT_DIR_ORIGINAL], conntrack->xid[IP_CT_DIR_REPLY]);
 	len += sprintf(buffer + len, "\n");
 
 	return len;
