@@ -205,11 +205,10 @@ static inline long get_ts32(struct timespec *o, struct compat_timeval *i)
 
 asmlinkage long sys32_time(compat_time_t *tloc)
 {
-	struct timeval tv;
-	compat_time_t now32;
+    struct timeval tv;
 
 	do_gettimeofday(&tv);
-	now32 = tv.tv_sec;
+	compat_time_t now32 = tv.tv_sec;
 
 	if (tloc)
 		if (put_user(now32, tloc))
@@ -345,7 +344,7 @@ filldir32 (void *__buf, const char *name, int namlen, loff_t offset, ino_t ino,
 	put_user(reclen, &dirent->d_reclen);
 	copy_to_user(dirent->d_name, name, namlen);
 	put_user(0, dirent->d_name + namlen);
-	dirent = (struct linux32_dirent *)((char *)dirent + reclen);
+	((char *) dirent) += reclen;
 	buf->current_dir = dirent;
 	buf->count -= reclen;
 	return 0;

@@ -102,6 +102,10 @@ advwdt_disable(void)
 static ssize_t
 advwdt_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
+	/*  Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	if (count) {
 		if (!nowayout) {
 			size_t i;
@@ -196,7 +200,7 @@ advwdt_open(struct inode *inode, struct file *file)
 	 */
 
 	advwdt_ping();
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int

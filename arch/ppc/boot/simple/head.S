@@ -57,7 +57,7 @@ start_:
 	isync
 #endif
 
-#if defined(CONFIG_MBX) || defined(CONFIG_RPX8260) || defined(CONFIG_PPC_PREP)
+#if defined(CONFIG_MBX) || defined(CONFIG_RPX6) || defined(CONFIG_PPC_PREP)
 	mr	r29,r3	/* On the MBX860, r3 is the board info pointer.
 			 * On the RPXSUPER, r3 points to the NVRAM
 			 * configuration keys.
@@ -129,15 +129,15 @@ haveOF:
 	mr	r3, r29
 #endif
 
-#if defined(CONFIG_MBX) || defined(CONFIG_RPX8260) || defined(CONFIG_PPC_PREP)
+#if defined(CONFIG_MBX) || defined(CONFIG_RPX6) || defined(CONFIG_PPC_PREP)
 	mr	r4,r29	/* put the board info pointer where the relocate
 			 * routine will find it
 			 */
 #endif
 
-#ifdef	CONFIG_EV64260
-	/* Move 64260's base regs & CS window for external UART */
-	bl	ev64260_init
+#ifdef	CONFIG_MV64X60
+	/* mv64x60 specific hook to do things like moving register base, etc. */
+	bl	mv64x60_init
 #endif
 
 	/* Get the load address.

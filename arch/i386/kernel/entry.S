@@ -960,15 +960,7 @@ ENTRY(sys_call_table)
 	.long sys_madvise
 	.long sys_getdents64	/* 220 */
 	.long sys_fcntl64
-#ifdef CONFIG_TUX
-	.long __sys_tux
-#else
-# ifdef CONFIG_TUX_MODULE
-	.long sys_tux
-# else
-	.long sys_ni_syscall
-# endif
-#endif
+	.long sys_ni_syscall	/* reserved for TUX */
 	.long sys_ni_syscall
 	.long sys_gettid
 	.long sys_readahead	/* 225 */
@@ -1030,7 +1022,5 @@ ENTRY(sys_call_table)
 	.long sys_mq_notify
 	.long sys_mq_getsetattr
 	.long sys_ni_syscall		/* reserved for kexec */
-	.long sys_ioprio_set
-	.long sys_ioprio_get		/* 285 */
 
 syscall_table_size=(.-sys_call_table)

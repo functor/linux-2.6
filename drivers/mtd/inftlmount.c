@@ -8,7 +8,7 @@
  * Author: Fabrice Bellard (fabrice.bellard@netgem.com) 
  * Copyright (C) 2000 Netgem S.A.
  *
- * $Id: inftlmount.c,v 1.14 2004/08/09 13:57:42 dwmw2 Exp $
+ * $Id: inftlmount.c,v 1.13 2004/06/28 16:06:36 dbrown Exp $
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -41,7 +41,7 @@
 #include <linux/mtd/inftl.h>
 #include <linux/mtd/compatmac.h>
 
-char inftlmountrev[]="$Revision: 1.14 $";
+char inftlmountrev[]="$Revision: 1.13 $";
 
 /*
  * find_boot_record: Find the INFTL Media Header and its Spare copy which
@@ -58,9 +58,10 @@ static int find_boot_record(struct INFTLrecord *inftl)
 	u8 buf[SECTORSIZE];
 	struct INFTLMediaHeader *mh = &inftl->MediaHdr;
 	struct INFTLPartition *ip;
-	size_t retlen;
+	int retlen;
 
-	DEBUG(MTD_DEBUG_LEVEL3, "INFTL: find_boot_record(inftl=%p)\n", inftl);
+	DEBUG(MTD_DEBUG_LEVEL3, "INFTL: find_boot_record(inftl=0x%x)\n",
+		(int)inftl);
 
         /*
 	 * Assume logical EraseSize == physical erasesize for starting the
@@ -287,7 +288,7 @@ static int find_boot_record(struct INFTLrecord *inftl)
 		inftl->PUtable = kmalloc(inftl->nb_blocks * sizeof(u16), GFP_KERNEL);
 		if (!inftl->PUtable) {
 			printk(KERN_WARNING "INFTL: allocation of PUtable "
-				"failed (%zd bytes)\n",
+				"failed (%d bytes)\n",
 				inftl->nb_blocks * sizeof(u16));
 			return -ENOMEM;
 		}
@@ -296,7 +297,7 @@ static int find_boot_record(struct INFTLrecord *inftl)
 		if (!inftl->VUtable) {
 			kfree(inftl->PUtable);
 			printk(KERN_WARNING "INFTL: allocation of VUtable "
-				"failed (%zd bytes)\n",
+				"failed (%d bytes)\n",
 				inftl->nb_blocks * sizeof(u16));
 			return -ENOMEM;
 		}
@@ -347,12 +348,11 @@ static int memcmpb(void *a, int c, int n)
 static int check_free_sectors(struct INFTLrecord *inftl, unsigned int address,
 	int len, int check_oob)
 {
+	int i, retlen;
 	u8 buf[SECTORSIZE + inftl->mbd.mtd->oobsize];
-	size_t retlen;
-	int i;
 
-	DEBUG(MTD_DEBUG_LEVEL3, "INFTL: check_free_sectors(inftl=%p,"
-		"address=0x%x,len=%d,check_oob=%d)\n", inftl,
+	DEBUG(MTD_DEBUG_LEVEL3, "INFTL: check_free_sectors(inftl=0x%x,"
+		"address=0x%x,len=%d,check_oob=%d)\n", (int)inftl,
 		address, len, check_oob);
 
 	for (i = 0; i < len; i += SECTORSIZE) {
@@ -382,13 +382,13 @@ static int check_free_sectors(struct INFTLrecord *inftl, unsigned int address,
  */
 int INFTL_formatblock(struct INFTLrecord *inftl, int block)
 {
-	size_t retlen;
+	int retlen;
 	struct inftl_unittail uci;
 	struct erase_info *instr = &inftl->instr;
 	int physblock;
 
-	DEBUG(MTD_DEBUG_LEVEL3, "INFTL: INFTL_formatblock(inftl=%p,"
-		"block=%d)\n", inftl, block);
+	DEBUG(MTD_DEBUG_LEVEL3, "INFTL: INFTL_formatblock(inftl=0x%x,"
+		"block=%d)\n", (int)inftl, block);
 
 	memset(instr, 0, sizeof(struct erase_info));
 
@@ -551,11 +551,10 @@ int INFTL_mount(struct INFTLrecord *s)
 	int chain_length, do_format_chain;
 	struct inftl_unithead1 h0;
 	struct inftl_unittail h1;
-	size_t retlen;
-	int i;
+	int i, retlen;
 	u8 *ANACtable, ANAC;
 
-	DEBUG(MTD_DEBUG_LEVEL3, "INFTL: INFTL_mount(inftl=%p)\n", s);
+	DEBUG(MTD_DEBUG_LEVEL3, "INFTL: INFTL_mount(inftl=0x%x)\n", (int)s);
 
 	/* Search for INFTL MediaHeader and Spare INFTL Media Header */
 	if (find_boot_record(s) < 0) {

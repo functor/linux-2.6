@@ -50,7 +50,7 @@
  * user to edit the cmdline or not.
  */
 #if (defined(CONFIG_SERIAL_8250_CONSOLE) || defined(CONFIG_VGA_CONSOLE)) \
-	&& !defined(CONFIG_GEMINI)
+	&& !defined(CONFIG_GEMINI) || defined(CONFIG_SERIAL_MPSC_CONSOLE)
 #define INTERACTIVE_CONSOLE	1
 #endif
 
@@ -98,7 +98,7 @@ decompress_kernel(unsigned long load_addr, int num_words, unsigned long cksum)
 	unsigned long initrd_loc, TotalMemory = 0;
 
 	serial_fixups();
-#ifdef CONFIG_SERIAL_8250_CONSOLE
+#if defined(CONFIG_SERIAL_8250_CONSOLE) || defined(CONFIG_SERIAL_MPSC_CONSOLE)
 	com_port = serial_init(0, NULL);
 #endif
 
@@ -221,7 +221,7 @@ decompress_kernel(unsigned long load_addr, int num_words, unsigned long cksum)
 	puts("\n");
 
 	puts("Uncompressing Linux...");
-	gunzip(NULL, 0x400000, zimage_start, &zimage_size);
+	gunzip(0, 0x400000, zimage_start, &zimage_size);
 	puts("done.\n");
 
 	/* get the bi_rec address */

@@ -27,7 +27,6 @@
 
 #define SID_SHIFT       28
 #define SID_MASK        0xfffffffffUL
-#define ESID_MASK	0xfffffffff0000000UL
 #define GET_ESID(x)     (((x) >> SID_SHIFT) & SID_MASK)
 
 #ifdef CONFIG_HUGETLB_PAGE
@@ -38,8 +37,8 @@
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
 
 /* For 64-bit processes the hugepage range is 1T-1.5T */
-#define TASK_HPAGE_BASE ASM_CONST(0x0000010000000000)
-#define TASK_HPAGE_END 	ASM_CONST(0x0000018000000000)
+#define TASK_HPAGE_BASE 	(0x0000010000000000UL)
+#define TASK_HPAGE_END 	(0x0000018000000000UL)
 
 #define LOW_ESID_MASK(addr, len)	(((1U << (GET_ESID(addr+len-1)+1)) \
 	   	                	- (1U << GET_ESID(addr))) & 0xffff)
@@ -245,8 +244,6 @@ extern int page_is_ram(unsigned long physaddr);
 
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
-
-#define devmem_is_allowed(x) 1
 
 #endif /* __KERNEL__ */
 #endif /* _PPC64_PAGE_H */

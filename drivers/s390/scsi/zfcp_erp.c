@@ -31,7 +31,7 @@
 #define ZFCP_LOG_AREA			ZFCP_LOG_AREA_ERP
 
 /* this drivers version (do not edit !!! generated and updated by cvs) */
-#define ZFCP_ERP_REVISION "$Revision: 1.61 $"
+#define ZFCP_ERP_REVISION "$Revision: 1.56 $"
 
 #include "zfcp_ext.h"
 
@@ -436,8 +436,8 @@ zfcp_els_handler(unsigned long data)
 	int retval = 0;
 
 	if (send_els->status != 0) {
-		ZFCP_LOG_NORMAL("ELS request timed out, force physical port "
-				"reopen of port 0x%016Lx on adapter %s\n",
+		ZFCP_LOG_NORMAL("ELS request timed out, physical port reopen "
+				"of port 0x%016Lx on adapter %s failed\n",
 				port->wwpn, zfcp_get_busid_by_port(port));
 		debug_text_event(port->adapter->erp_dbf, 3, "forcreop");
 		retval = zfcp_erp_port_forced_reopen(port, 0);
@@ -2170,6 +2170,7 @@ static int
 zfcp_erp_adapter_strategy(struct zfcp_erp_action *erp_action)
 {
 	int retval;
+	unsigned long timeout;
 	struct zfcp_adapter *adapter = erp_action->adapter;
 
 	retval = zfcp_erp_adapter_strategy_close(erp_action);
@@ -2186,7 +2187,14 @@ zfcp_erp_adapter_strategy(struct zfcp_erp_action *erp_action)
 		ZFCP_LOG_INFO("Waiting to allow the adapter %s "
 			      "to recover itself\n",
 			      zfcp_get_busid_by_adapter(adapter));
-		msleep(jiffies_to_msecs(ZFCP_TYPE2_RECOVERY_TIME));
+		/*
+		 * SUGGESTION: substitute by
+		 * timeout = ZFCP_TYPE2_RECOVERY_TIME;
+		 * __ZFCP_WAIT_EVENT_TIMEOUT(timeout, 0);
+		 */
+		timeout = ZFCP_TYPE2_RECOVERY_TIME;
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(timeout);
 	}
 
 	return retval;
@@ -2362,8 +2370,10 @@ zfcp_erp_adapter_strategy_open_qdio(struct zfcp_erp_action *erp_action)
  failed_qdio_activate:
 	debug_text_event(adapter->erp_dbf, 3, "qdio_down1a");
 	while (qdio_shutdown(adapter->ccw_device,
-			     QDIO_FLAG_CLEANUP_USING_CLEAR) == -EINPROGRESS)
-		msleep(1000);
+			     QDIO_FLAG_CLEANUP_USING_CLEAR) == -EINPROGRESS) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ);
+	}
 	debug_text_event(adapter->erp_dbf, 3, "qdio_down1b");
 
  failed_qdio_establish:
@@ -2409,8 +2419,10 @@ zfcp_erp_adapter_strategy_close_qdio(struct zfcp_erp_action *erp_action)
 
 	debug_text_event(adapter->erp_dbf, 3, "qdio_down2a");
 	while (qdio_shutdown(adapter->ccw_device,
-			     QDIO_FLAG_CLEANUP_USING_CLEAR) == -EINPROGRESS)
-		msleep(1000);
+			     QDIO_FLAG_CLEANUP_USING_CLEAR) == -EINPROGRESS) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ);
+	}
 	debug_text_event(adapter->erp_dbf, 3, "qdio_down2b");
 
 	/*
@@ -2521,7 +2533,8 @@ zfcp_erp_adapter_strategy_open_fsf_xconfig(struct zfcp_erp_action *erp_action)
 			ZFCP_LOG_DEBUG("host connection still initialising... "
 				       "waiting and retrying...\n");
 			/* sleep a little bit before retry */
-			msleep(jiffies_to_msecs(ZFCP_EXCHANGE_CONFIG_DATA_SLEEP));
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(ZFCP_EXCHANGE_CONFIG_DATA_SLEEP);
 		}
 	} while ((retries--) &&
 		 atomic_test_mask(ZFCP_STATUS_ADAPTER_HOST_CON_INIT,

@@ -27,8 +27,8 @@ struct cow_header_v1 {
 #define PATH_LEN_V2 MAXPATHLEN
 
 struct cow_header_v2 {
-	__u32 magic;
-	__u32 version;
+	unsigned long magic;
+	unsigned long version;
 	char backing_file[PATH_LEN_V2];
 	time_t mtime;
 	__u64 size;
