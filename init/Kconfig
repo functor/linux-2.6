@@ -178,6 +178,19 @@ config CKRM_CPU_MONITOR
 	
 	  Say N if unsure, Y to use the feature.
 
+config CKRM_RES_BLKIO
+	tristate " Disk I/O Resource Controller"
+	depends on CKRM_TYPE_TASKCLASS && IOSCHED_CFQ
+	default m
+	help
+	  Provides a resource controller for best-effort block I/O 
+	  bandwidth control. The controller attempts this by proportional 
+	  servicing of requests in the I/O scheduler. However, seek
+	  optimizations and reordering by device drivers/disk controllers may
+	  alter the actual bandwidth delivered to a class.
+	
+	  Say N if unsure, Y to use the feature.
+
 config CKRM_TYPE_SOCKETCLASS
 	bool "Class Manager for socket groups"
 	depends on CKRM
