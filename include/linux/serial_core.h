@@ -86,6 +86,9 @@
 /* PPC CPM type number */
 #define PORT_CPM        58
 
+/* Marvell MPSC for PPC & MIPS */
+#define PORT_MPSC	59
+
 #ifdef __KERNEL__
 
 #include <linux/config.h>
