@@ -304,7 +304,7 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 	vxi = task_get_vx_info(task);
 	if (vxi) {
 		buffer += sprintf (buffer,"ctxflags: %08llx\n"
-			,vxi->vx_flags);
+			,(unsigned long long)vxi->vx_flags);
 		buffer += sprintf (buffer,"initpid: %d\n"
 			,vxi->vx_initpid);
 	} else {
@@ -325,8 +325,6 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 		*buffer++ = '\n';
 		buffer += sprintf (buffer,"ipv4root_bcast: %08x\n"
 			,nxi->v4_bcast);
-		buffer += sprintf (buffer,"ipv4root_refcnt: %d\n"
-			,atomic_read(&nxi->nx_refcount));
 	} else {
 		buffer += sprintf (buffer,"ipv4root: 0\n");
 		buffer += sprintf (buffer,"ipv4root_bcast: 0\n");

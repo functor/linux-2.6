@@ -80,6 +80,7 @@ static kmem_cache_t *task_struct_cachep;
 static void free_task(struct task_struct *tsk)
 {
 	free_thread_info(tsk->thread_info);
+	vxdprintk("freeing up task %p\n", tsk);
 	clr_vx_info(&tsk->vx_info);
 	clr_nx_info(&tsk->nx_info);
 	free_task_struct(tsk);
@@ -883,7 +884,6 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	int retval;
 	struct task_struct *p = NULL;
 	struct vx_info *vxi;
-	struct nx_info *nxi;
 
 	if ((clone_flags & (CLONE_NEWNS|CLONE_FS)) == (CLONE_NEWNS|CLONE_FS))
 		return ERR_PTR(-EINVAL);
@@ -914,8 +914,10 @@ struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 	p->tux_info = NULL;
 
-	vxi = get_vx_info(current->vx_info);
-	nxi = get_nx_info(current->nx_info);
+	p->vx_info = NULL;
+	set_vx_info(&p->vx_info, current->vx_info);
+	p->nx_info = NULL;
+	set_nx_info(&p->nx_info, current->nx_info);
 
 	/* check vserver memory */
 	if (p->mm && !(clone_flags & CLONE_VM)) {
@@ -930,6 +932,7 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	}
 
 	retval = -EAGAIN;
+	vxi = current->vx_info;
 	if (vxi && (atomic_read(&vxi->limit.res[RLIMIT_NPROC])
 		>= vxi->limit.rlim[RLIMIT_NPROC]))
 		goto bad_fork_free;

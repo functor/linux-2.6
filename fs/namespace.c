@@ -755,7 +755,7 @@ static int do_add_mount(struct nameidata *nd, char *type, int flags,
 		return -EINVAL;
 
 	/* we need capabilities... */
-	if (!capable(CAP_SYS_ADMIN))
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SECURE_MOUNT))
 		return -EPERM;
 
 	mnt = do_kern_mount(type, flags, name, data);
