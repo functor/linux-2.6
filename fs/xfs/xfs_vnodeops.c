@@ -255,6 +255,10 @@ xfs_getattr(
 		vap->va_xflags |= XFS_XFLAG_PREALLOC;
 	if (ip->i_d.di_flags & XFS_DIFLAG_IMMUTABLE)
 		vap->va_xflags |= XFS_XFLAG_IMMUTABLE;
+	if (ip->i_d.di_flags & XFS_DIFLAG_IUNLINK)
+		vap->va_xflags |= XFS_XFLAG_IUNLINK;
+	if (ip->i_d.di_flags & XFS_DIFLAG_BARRIER)
+		vap->va_xflags |= XFS_XFLAG_BARRIER;
 	if (ip->i_d.di_flags & XFS_DIFLAG_APPEND)
 		vap->va_xflags |= XFS_XFLAG_APPEND;
 	if (ip->i_d.di_flags & XFS_DIFLAG_SYNC)
@@ -850,6 +854,10 @@ xfs_setattr(
 			}
 			if (vap->va_xflags & XFS_XFLAG_IMMUTABLE)
 				ip->i_d.di_flags |= XFS_DIFLAG_IMMUTABLE;
+			if (vap->va_xflags & XFS_XFLAG_IUNLINK)
+				ip->i_d.di_flags |= XFS_DIFLAG_IUNLINK;
+			if (vap->va_xflags & XFS_XFLAG_BARRIER)
+				ip->i_d.di_flags |= XFS_DIFLAG_BARRIER;
 			if (vap->va_xflags & XFS_XFLAG_APPEND)
 				ip->i_d.di_flags |= XFS_DIFLAG_APPEND;
 			if (vap->va_xflags & XFS_XFLAG_SYNC)

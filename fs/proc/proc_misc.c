@@ -44,6 +44,7 @@
 #include <linux/jiffies.h>
 #include <linux/sysrq.h>
 #include <linux/vmalloc.h>
+#include <linux/vinline.h>
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/io.h>
@@ -144,6 +145,9 @@ static int uptime_read_proc(char *page, char **start, off_t off,
 
 	do_posix_clock_monotonic_gettime(&uptime);
 	jiffies_to_timespec(idle_jiffies, &idle);
+	if (vx_flags(VXF_VIRT_UPTIME, 0))
+		vx_vsi_uptime(&uptime, &idle);
+
 	len = sprintf(page,"%lu.%02lu %lu.%02lu\n",
 			(unsigned long) uptime.tv_sec,
 			(uptime.tv_nsec / (NSEC_PER_SEC / 100)),

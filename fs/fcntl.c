@@ -107,6 +107,8 @@ repeat:
 	error = -EMFILE;
 	if (newfd >= current->rlim[RLIMIT_NOFILE].rlim_cur)
 		goto out;
+	if (!vx_files_avail(1))
+		goto out;
 
 	error = expand_files(files, newfd);
 	if (error < 0)
@@ -139,6 +141,7 @@ static int dupfd(struct file *file, unsigned int start)
 		FD_SET(fd, files->open_fds);
 		FD_CLR(fd, files->close_on_exec);
 		spin_unlock(&files->file_lock);
+		vx_openfd_inc(fd);
 		fd_install(fd, file);
 	} else {
 		spin_unlock(&files->file_lock);
@@ -186,6 +189,7 @@ asmlinkage long sys_dup2(unsigned int oldfd, unsigned int newfd)
 	FD_SET(newfd, files->open_fds);
 	FD_CLR(newfd, files->close_on_exec);
 	spin_unlock(&files->file_lock);
+	vx_openfd_inc(newfd);
 
 	if (tofree)
 		filp_close(tofree, files);

@@ -456,6 +456,9 @@ xfs_dinode_t *xfs_buf_to_dinode(struct xfs_buf *bp);
 #define XFS_DIFLAG_SYNC_BIT      5	/* inode is written synchronously */
 #define XFS_DIFLAG_NOATIME_BIT   6	/* do not update atime */
 #define XFS_DIFLAG_NODUMP_BIT    7	/* do not dump */
+#define XFS_DIFLAG_BARRIER_BIT   10	/* chroot() barrier */
+#define XFS_DIFLAG_IUNLINK_BIT   11	/* inode has iunlink */
+
 #define XFS_DIFLAG_REALTIME      (1 << XFS_DIFLAG_REALTIME_BIT)
 #define XFS_DIFLAG_PREALLOC      (1 << XFS_DIFLAG_PREALLOC_BIT)
 #define XFS_DIFLAG_NEWRTBM       (1 << XFS_DIFLAG_NEWRTBM_BIT)
@@ -464,5 +467,8 @@ xfs_dinode_t *xfs_buf_to_dinode(struct xfs_buf *bp);
 #define XFS_DIFLAG_SYNC          (1 << XFS_DIFLAG_SYNC_BIT)
 #define XFS_DIFLAG_NOATIME       (1 << XFS_DIFLAG_NOATIME_BIT)
 #define XFS_DIFLAG_NODUMP        (1 << XFS_DIFLAG_NODUMP_BIT)
+#define XFS_DIFLAG_BARRIER       (1 << XFS_DIFLAG_BARRIER_BIT)
+#define XFS_DIFLAG_IUNLINK       (1 << XFS_DIFLAG_IUNLINK_BIT)
+
 
 #endif	/* __XFS_DINODE_H__ */

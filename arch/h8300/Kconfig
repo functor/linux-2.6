@@ -368,6 +368,8 @@ config CONFIG_BLKDEV_RESERVE_ADDRESS
 	  BLKDEV start address.
 endmenu
 
+source "kernel/vserver/Kconfig"
+
 source "security/Kconfig"
 
 source "crypto/Kconfig"

@@ -31,6 +31,7 @@
 #include <linux/writeback.h>
 #include <linux/buffer_head.h>
 #include <linux/mpage.h>
+#include <linux/vserver/xid.h>
 #include "ext2.h"
 #include "acl.h"
 
@@ -65,6 +66,8 @@ void ext2_put_inode(struct inode *inode)
 		ext2_discard_prealloc(inode);
 }
 
+static void ext2_truncate_nocheck (struct inode * inode);
+
 /*
  * Called at the last iput() if i_nlink is zero.
  */
@@ -78,7 +81,7 @@ void ext2_delete_inode (struct inode * inode)
 
 	inode->i_size = 0;
 	if (inode->i_blocks)
-		ext2_truncate (inode);
+		ext2_truncate_nocheck(inode);
 	ext2_free_inode (inode);
 
 	return;
@@ -877,7 +880,7 @@ static void ext2_free_branches(struct inode *inode, u32 *p, u32 *q, int depth)
 		ext2_free_data(inode, p, q);
 }
 
-void ext2_truncate (struct inode * inode)
+static void ext2_truncate_nocheck(struct inode * inode)
 {
 	u32 *i_data = EXT2_I(inode)->i_data;
 	int addr_per_block = EXT2_ADDR_PER_BLOCK(inode->i_sb);
@@ -893,8 +896,6 @@ void ext2_truncate (struct inode * inode)
 	    S_ISLNK(inode->i_mode)))
 		return;
 	if (ext2_inode_is_fast_symlink(inode))
-		return;
-	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
 		return;
 
 	ext2_discard_prealloc(inode);
@@ -1017,6 +1018,13 @@ Egdp:
 	return ERR_PTR(-EIO);
 }
 
+void ext2_truncate (struct inode * inode)
+{
+	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
+		return;
+	ext2_truncate_nocheck(inode);
+}
+
 void ext2_set_inode_flags(struct inode *inode)
 {
 	unsigned int flags = EXT2_I(inode)->i_flags;
@@ -1028,6 +1036,10 @@ void ext2_set_inode_flags(struct inode *inode)
 		inode->i_flags |= S_APPEND;
 	if (flags & EXT2_IMMUTABLE_FL)
 		inode->i_flags |= S_IMMUTABLE;
+	if (flags & EXT2_IUNLINK_FL)
+		inode->i_flags |= S_IUNLINK;
+	if (flags & EXT2_BARRIER_FL)
+		inode->i_flags |= S_BARRIER;
 	if (flags & EXT2_NOATIME_FL)
 		inode->i_flags |= S_NOATIME;
 	if (flags & EXT2_DIRSYNC_FL)
@@ -1040,6 +1052,8 @@ void ext2_read_inode (struct inode * inode)
 	ino_t ino = inode->i_ino;
 	struct buffer_head * bh;
 	struct ext2_inode * raw_inode = ext2_get_inode(inode->i_sb, ino, &bh);
+	uid_t uid;
+	gid_t gid;
 	int n;
 
 #ifdef CONFIG_EXT2_FS_POSIX_ACL
@@ -1050,12 +1064,17 @@ void ext2_read_inode (struct inode * inode)
  		goto bad_inode;
 
 	inode->i_mode = le16_to_cpu(raw_inode->i_mode);
-	inode->i_uid = (uid_t)le16_to_cpu(raw_inode->i_uid_low);
-	inode->i_gid = (gid_t)le16_to_cpu(raw_inode->i_gid_low);
+	uid = (uid_t)le16_to_cpu(raw_inode->i_uid_low);
+	gid = (gid_t)le16_to_cpu(raw_inode->i_gid_low);
 	if (!(test_opt (inode->i_sb, NO_UID32))) {
-		inode->i_uid |= le16_to_cpu(raw_inode->i_uid_high) << 16;
-		inode->i_gid |= le16_to_cpu(raw_inode->i_gid_high) << 16;
+		uid |= le16_to_cpu(raw_inode->i_uid_high) << 16;
+		gid |= le16_to_cpu(raw_inode->i_gid_high) << 16;
 	}
+	inode->i_uid = INOXID_UID(uid, gid);
+	inode->i_gid = INOXID_GID(uid, gid);
+	if (inode->i_sb->s_flags & MS_TAGXID)
+		inode->i_xid = INOXID_XID(uid, gid, le16_to_cpu(raw_inode->i_raw_xid));
+
 	inode->i_nlink = le16_to_cpu(raw_inode->i_links_count);
 	inode->i_size = le32_to_cpu(raw_inode->i_size);
 	inode->i_atime.tv_sec = le32_to_cpu(raw_inode->i_atime);
@@ -1148,8 +1167,8 @@ static int ext2_update_inode(struct inode * inode, int do_sync)
 	struct ext2_inode_info *ei = EXT2_I(inode);
 	struct super_block *sb = inode->i_sb;
 	ino_t ino = inode->i_ino;
-	uid_t uid = inode->i_uid;
-	gid_t gid = inode->i_gid;
+	uid_t uid = XIDINO_UID(inode->i_uid, inode->i_xid);
+	gid_t gid = XIDINO_GID(inode->i_gid, inode->i_xid);
 	struct buffer_head * bh;
 	struct ext2_inode * raw_inode = ext2_get_inode(sb, ino, &bh);
 	int n;
@@ -1184,6 +1203,9 @@ static int ext2_update_inode(struct inode * inode, int do_sync)
 		raw_inode->i_uid_high = 0;
 		raw_inode->i_gid_high = 0;
 	}
+#ifdef CONFIG_INOXID_GID32
+	raw_inode->i_raw_xid = cpu_to_le16(inode->i_xid);
+#endif
 	raw_inode->i_links_count = cpu_to_le16(inode->i_nlink);
 	raw_inode->i_size = cpu_to_le32(inode->i_size);
 	raw_inode->i_atime = cpu_to_le32(inode->i_atime.tv_sec);
@@ -1261,6 +1283,27 @@ int ext2_sync_inode(struct inode *inode)
 	return sync_inode(inode, &wbc);
 }
 
+int ext2_setattr_flags(struct inode *inode, unsigned int flags)
+{
+	unsigned int oldflags, newflags;
+
+	oldflags = EXT2_I(inode)->i_flags;
+	newflags = oldflags &
+		~(EXT2_IMMUTABLE_FL | EXT2_IUNLINK_FL | EXT2_BARRIER_FL);	
+	if (flags & ATTR_FLAG_IMMUTABLE)
+		newflags |= EXT2_IMMUTABLE_FL;
+	if (flags & ATTR_FLAG_IUNLINK)
+		newflags |= EXT2_IUNLINK_FL;
+	if (flags & ATTR_FLAG_BARRIER)
+		newflags |= EXT2_BARRIER_FL;
+
+	if (oldflags ^ newflags) {
+		EXT2_I(inode)->i_flags = newflags;
+		inode->i_ctime = CURRENT_TIME;
+	}
+	return 0;
+}
+
 int ext2_setattr(struct dentry *dentry, struct iattr *iattr)
 {
 	struct inode *inode = dentry->d_inode;
@@ -1275,6 +1318,9 @@ int ext2_setattr(struct dentry *dentry, struct iattr *iattr)
 		if (error)
 			return error;
 	}
+	if (iattr->ia_valid & ATTR_ATTR_FLAG)
+		ext2_setattr_flags(inode, iattr->ia_attr_flags);
+
 	inode_setattr(inode, iattr);
 	if (iattr->ia_valid & ATTR_MODE)
 		error = ext2_acl_chmod(inode);

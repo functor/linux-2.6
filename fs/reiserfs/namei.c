@@ -1318,5 +1318,6 @@ struct inode_operations reiserfs_dir_inode_operations = {
     .rmdir	= reiserfs_rmdir,
     .mknod	= reiserfs_mknod,
     .rename	= reiserfs_rename,
+    .setattr	= reiserfs_setattr,
 };
 

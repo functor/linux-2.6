@@ -97,10 +97,35 @@ static int reiserfs_sync_file(
   return ( n_err < 0 ) ? -EIO : 0;
 }
 
-static int reiserfs_setattr(struct dentry *dentry, struct iattr *attr) {
+int reiserfs_setattr_flags(struct inode *inode, unsigned int flags)
+{
+	unsigned int oldflags, newflags;
+
+	oldflags = REISERFS_I(inode)->i_flags;
+	newflags = oldflags & ~(REISERFS_IMMUTABLE_FL |
+		REISERFS_IUNLINK_FL | REISERFS_BARRIER_FL);
+	if (flags & ATTR_FLAG_IMMUTABLE)
+		newflags |= REISERFS_IMMUTABLE_FL;
+	if (flags & ATTR_FLAG_IUNLINK)
+		newflags |= REISERFS_IUNLINK_FL;
+	if (flags & ATTR_FLAG_BARRIER)
+		newflags |= REISERFS_BARRIER_FL;
+
+	if (oldflags ^ newflags) {
+		REISERFS_I(inode)->i_flags = newflags;
+		inode->i_ctime = CURRENT_TIME;
+	}
+	return 0;
+}
+
+int reiserfs_setattr(struct dentry *dentry, struct iattr *attr) {
     struct inode *inode = dentry->d_inode ;
     int error ;
+
     reiserfs_write_lock(inode->i_sb);
+    if (S_ISDIR(inode->i_mode))
+	goto is_dir;
+
     if (attr->ia_valid & ATTR_SIZE) {
 	/* version 2 items will be caught by the s_maxbytes check
 	** done for us in vmtruncate
@@ -133,7 +158,12 @@ static int reiserfs_setattr(struct dentry *dentry, struct iattr *attr) {
 	    goto out;	
 	}
 
+is_dir:
     error = inode_change_ok(inode, attr) ;
+
+    if (!error && attr->ia_valid & ATTR_ATTR_FLAG)
+	reiserfs_setattr_flags(inode, attr->ia_attr_flags);
+
     if (!error)
         inode_setattr(inode, attr) ;
 

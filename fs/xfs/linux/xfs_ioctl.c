@@ -1017,6 +1017,8 @@ xfs_ioc_fsgeometry(
 #define LINUX_XFLAG_APPEND	0x00000020 /* writes to file may only append */
 #define LINUX_XFLAG_NODUMP	0x00000040 /* do not dump file */
 #define LINUX_XFLAG_NOATIME	0x00000080 /* do not update atime */
+#define LINUX_XFLAG_BARRIER	0x00004000 /* chroot() barrier */
+#define LINUX_XFLAG_IUNLINK	0x00008000 /* Immutable unlink */
 
 STATIC unsigned int
 xfs_merge_ioc_xflags(
@@ -1062,6 +1064,7 @@ xfs_ioc_xattr(
 	int			error;
 	int			attr_flags;
 	unsigned int		flags;
+	unsigned int		old_flags;
 
 	switch (cmd) {
 	case XFS_IOC_FSGETXATTR: {
@@ -1086,7 +1089,7 @@ xfs_ioc_xattr(
 		attr_flags = 0;
 		if (filp->f_flags & (O_NDELAY|O_NONBLOCK))
 			attr_flags |= ATTR_NONBLOCK;
-
+		
 		va.va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE;
 		va.va_xflags  = fa.fsx_xflags;
 		va.va_extsize = fa.fsx_extsize;
@@ -1114,15 +1117,17 @@ xfs_ioc_xattr(
 
 	case XFS_IOC_GETXFLAGS: {
 		flags = 0;
-		if (ip->i_d.di_flags & XFS_XFLAG_IMMUTABLE)
+		if (ip->i_d.di_flags & XFS_DIFLAG_IMMUTABLE)
 			flags |= LINUX_XFLAG_IMMUTABLE;
-		if (ip->i_d.di_flags & XFS_XFLAG_APPEND)
+		if (ip->i_d.di_flags & XFS_DIFLAG_IUNLINK)
+			flags |= LINUX_XFLAG_IUNLINK;
+		if (ip->i_d.di_flags & XFS_DIFLAG_APPEND)
 			flags |= LINUX_XFLAG_APPEND;
-		if (ip->i_d.di_flags & XFS_XFLAG_SYNC)
+		if (ip->i_d.di_flags & XFS_DIFLAG_SYNC)
 			flags |= LINUX_XFLAG_SYNC;
-		if (ip->i_d.di_flags & XFS_XFLAG_NOATIME)
+		if (ip->i_d.di_flags & XFS_DIFLAG_NOATIME)
 			flags |= LINUX_XFLAG_NOATIME;
-		if (ip->i_d.di_flags & XFS_XFLAG_NODUMP)
+		if (ip->i_d.di_flags & XFS_DIFLAG_NODUMP)
 			flags |= LINUX_XFLAG_NODUMP;
 		if (copy_to_user((unsigned int *)arg, &flags, sizeof(flags)))
 			return -XFS_ERROR(EFAULT);
@@ -1142,8 +1147,16 @@ xfs_ioc_xattr(
 		if (filp->f_flags & (O_NDELAY|O_NONBLOCK))
 			attr_flags |= ATTR_NONBLOCK;
 
+		old_flags = 0;
+		if (ip->i_d.di_flags & XFS_DIFLAG_IMMUTABLE)
+			old_flags |= LINUX_XFLAG_IMMUTABLE;
+		if (ip->i_d.di_flags & XFS_DIFLAG_IUNLINK)
+			old_flags |= LINUX_XFLAG_IUNLINK;
+		if (ip->i_d.di_flags & XFS_DIFLAG_BARRIER)
+			old_flags |= LINUX_XFLAG_BARRIER;
+
 		va.va_mask = XFS_AT_XFLAGS;
-		va.va_xflags = xfs_merge_ioc_xflags(flags, ip->i_d.di_flags);
+		va.va_xflags = xfs_merge_ioc_xflags(flags, old_flags);
 
 		VOP_SETATTR(vp, &va, attr_flags, NULL, error);
 		if (!error)

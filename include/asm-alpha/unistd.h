@@ -233,6 +233,7 @@
 #define __NR_osf_memcntl	260	/* not implemented */
 #define __NR_osf_fdatasync	261	/* not implemented */
 
+#define __NR_vserver		273
 
 /*
  * Linux-specific system calls begin at 300

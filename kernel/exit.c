@@ -35,6 +35,11 @@ int getrusage(struct task_struct *, int, struct rusage *);
 static void __unhash_process(struct task_struct *p)
 {
 	nr_threads--;
+	/* tasklist_lock is held, is this sufficient? */
+	if (p->vx_info) {
+		atomic_dec(&p->vx_info->cacct.nr_threads);
+		atomic_dec(&p->vx_info->limit.res[RLIMIT_NPROC]);
+	}
 	detach_pid(p, PIDTYPE_PID);
 	detach_pid(p, PIDTYPE_TGID);
 	if (thread_group_leader(p)) {
@@ -234,6 +239,7 @@ void reparent_to_init(void)
 	ptrace_unlink(current);
 	/* Reparent to init */
 	REMOVE_LINKS(current);
+	/* FIXME handle vchild_reaper/initpid */
 	current->parent = child_reaper;
 	current->real_parent = child_reaper;
 	SET_LINKS(current);
@@ -378,6 +384,7 @@ static inline void close_files(struct files_struct * files)
 				struct file * file = xchg(&files->fd[i], NULL);
 				if (file)
 					filp_close(file, files);
+				vx_openfd_dec(fd);
 			}
 			i++;
 			set >>= 1;
@@ -597,6 +604,7 @@ static inline void forget_original_parent(struct task_struct * father)
 	struct task_struct *p, *reaper = father;
 	struct list_head *_p, *_n;
 
+	/* FIXME handle vchild_reaper/initpid */
 	reaper = father->group_leader;
 	if (reaper == father)
 		reaper = child_reaper;

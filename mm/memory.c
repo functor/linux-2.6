@@ -285,6 +285,10 @@ skip_copy_pte_range:
 				struct page *page;
 				unsigned long pfn;
 
+				if (!vx_rsspages_avail(dst, 1)) {
+					spin_unlock(&src->page_table_lock);
+					goto nomem;
+				}
 				/* copy_one_pte */
 
 				if (pte_none(pte))
@@ -328,7 +332,8 @@ skip_copy_pte_range:
 					pte = pte_mkclean(pte);
 				pte = pte_mkold(pte);
 				get_page(page);
-				dst->rss++;
+				// dst->rss++;
+				vx_rsspages_inc(dst);
 
 				set_pte(dst_pte, pte);
 				pte_chain = page_add_rmap(page, dst_pte,
@@ -1124,7 +1129,8 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	page_table = pte_offset_map(pmd, address);
 	if (pte_same(*page_table, pte)) {
 		if (PageReserved(old_page))
-			++mm->rss;
+			// ++mm->rss;
+			vx_rsspages_inc(mm);
 		page_remove_rmap(old_page, page_table);
 		break_cow(vma, new_page, address, page_table);
 		pte_chain = page_add_rmap(new_page, page_table, pte_chain);
@@ -1343,6 +1349,10 @@ static int do_swap_page(struct mm_struct * mm,
 		inc_page_state(pgmajfault);
 	}
 
+	if (!vx_rsspages_avail(mm, 1)) {
+		ret = VM_FAULT_OOM;
+		goto out;
+	}
 	mark_page_accessed(page);
 	pte_chain = pte_chain_alloc(GFP_KERNEL);
 	if (!pte_chain) {
@@ -1372,7 +1382,8 @@ static int do_swap_page(struct mm_struct * mm,
 	if (vm_swap_full())
 		remove_exclusive_swap_page(page);
 
-	mm->rss++;
+	// mm->rss++;
+	vx_rsspages_inc(mm);
 	pte = mk_pte(page, vma->vm_page_prot);
 	if (write_access && can_share_swap_page(page))
 		pte = maybe_mkwrite(pte_mkdirty(pte), vma);
@@ -1405,6 +1416,11 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct page * page = ZERO_PAGE(addr);
 	struct pte_chain *pte_chain;
 	int ret;
+
+	if (!vx_rsspages_avail(mm, 1)) {
+		spin_unlock(&mm->page_table_lock);
+		return VM_FAULT_OOM;
+	}
 
 	pte_chain = pte_chain_alloc(GFP_ATOMIC | __GFP_NOWARN);
 	if (!pte_chain) {
@@ -1441,7 +1457,8 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 			ret = VM_FAULT_MINOR;
 			goto out;
 		}
-		mm->rss++;
+		// mm->rss++;
+		vx_rsspages_inc(mm);
 		entry = maybe_mkwrite(pte_mkdirty(mk_pte(page,
 							 vma->vm_page_prot)),
 				      vma);
@@ -1509,6 +1526,8 @@ retry:
 		return VM_FAULT_SIGBUS;
 	if (new_page == NOPAGE_OOM)
 		return VM_FAULT_OOM;
+	if (!vx_rsspages_avail(mm, 1))
+		return VM_FAULT_OOM;
 
 	pte_chain = pte_chain_alloc(GFP_KERNEL);
 	if (!pte_chain)
@@ -1556,7 +1575,8 @@ retry:
 	/* Only go through if we didn't race with anybody else... */
 	if (pte_none(*page_table)) {
 		if (!PageReserved(new_page))
-			++mm->rss;
+			// ++mm->rss;
+			vx_rsspages_inc(mm);
 		flush_icache_page(vma, new_page);
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		if (write_access)

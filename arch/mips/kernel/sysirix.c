@@ -577,7 +577,8 @@ asmlinkage int irix_brk(unsigned long brk)
 	/*
 	 * Check if we have enough memory..
 	 */
-	if (security_vm_enough_memory((newbrk-oldbrk) >> PAGE_SHIFT)) {
+	if (security_vm_enough_memory((newbrk-oldbrk) >> PAGE_SHIFT) ||
+		!vx_vmpages_avail(mm, (newbrk-oldbrk) >> PAGE_SHIFT)) {
 		ret = -ENOMEM;
 		goto out;
 	}

@@ -114,6 +114,11 @@ static struct inode *alloc_inode(struct super_block *sb)
 		struct address_space * const mapping = &inode->i_data;
 
 		inode->i_sb = sb;
+		if (sb->s_flags & MS_TAGXID)
+			inode->i_xid = current->xid;
+		else
+			inode->i_xid = 0;       /* maybe xid -1 would be better? */
+		// inode->i_dqh = dqhget(sb->s_dqh);
 		inode->i_blkbits = sb->s_blocksize_bits;
 		inode->i_flags = 0;
 		atomic_set(&inode->i_count, 1);
@@ -133,6 +138,7 @@ static struct inode *alloc_inode(struct super_block *sb)
 		inode->i_bdev = NULL;
 		inode->i_cdev = NULL;
 		inode->i_rdev = 0;
+		// inode->i_xid = 0;	/* maybe not too wise ... */
 		inode->i_security = NULL;
 		inode->dirtied_when = 0;
 		if (security_inode_alloc(inode)) {

@@ -425,6 +425,8 @@ config DEBUG_SPINLOCK_SLEEP
 
 endmenu
 
+source "kernel/vserver/Kconfig"
+
 source "security/Kconfig"
 
 source "crypto/Kconfig"

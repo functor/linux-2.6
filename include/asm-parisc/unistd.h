@@ -722,8 +722,9 @@
 #define __NR_remap_file_pages	(__NR_Linux + 227)
 #define __NR_semtimedop		(__NR_Linux + 228)
 
+#define __NR_vserver		(__NR_Linux + 273)
 
-#define __NR_Linux_syscalls     228
+#define __NR_Linux_syscalls     273
 
 #define HPUX_GATEWAY_ADDR       0xC0000004
 #define LINUX_GATEWAY_ADDR      0x100

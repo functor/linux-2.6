@@ -73,6 +73,7 @@
 #include <linux/highmem.h>
 #include <linux/file.h>
 #include <linux/times.h>
+#include <linux/ninline.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -128,7 +129,8 @@ static const char *task_state_array[] = {
 	"D (disk sleep)",	/*  2 */
 	"T (stopped)",		/*  4 */
 	"Z (zombie)",		/*  8 */
-	"X (dead)"		/* 16 */
+	"X (dead)",		/* 16 */
+	"H (on hold)"		/* 32 */
 };
 
 static inline const char * get_task_state(struct task_struct *tsk)
@@ -137,7 +139,8 @@ static inline const char * get_task_state(struct task_struct *tsk)
 					   TASK_INTERRUPTIBLE |
 					   TASK_UNINTERRUPTIBLE |
 					   TASK_ZOMBIE |
-					   TASK_STOPPED);
+					   TASK_STOPPED |
+					   TASK_ONHOLD);
 	const char **p = &task_state_array[0];
 
 	while (state) {
@@ -150,8 +153,10 @@ static inline const char * get_task_state(struct task_struct *tsk)
 static inline char * task_state(struct task_struct *p, char *buffer)
 {
 	int g;
+	pid_t ppid;
 
 	read_lock(&tasklist_lock);
+	ppid = vx_map_tgid(current->vx_info, p->real_parent->pid);
 	buffer += sprintf(buffer,
 		"State:\t%s\n"
 		"SleepAVG:\t%lu%%\n"
@@ -164,7 +169,7 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		get_task_state(p),
 		(p->sleep_avg/1024)*100/(1020000000/1024),
 	       	p->tgid,
-		p->pid, p->pid ? p->real_parent->pid : 0,
+		p->pid, p->pid ? ppid : 0,
 		p->pid && p->ptrace ? p->parent->pid : 0,
 		p->uid, p->euid, p->suid, p->fsuid,
 		p->gid, p->egid, p->sgid, p->fsgid);
@@ -275,6 +280,10 @@ extern char *task_mem(struct mm_struct *, char *);
 int proc_pid_status(struct task_struct *task, char * buffer)
 {
 	char * orig = buffer;
+#ifdef	CONFIG_VSERVER_LEGACY		
+	struct vx_info *vxi;
+	struct nx_info *nxi;
+#endif
 	struct mm_struct *mm = get_task_mm(task);
 
 	buffer = task_name(task, buffer);
@@ -286,6 +295,41 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 	}
 	buffer = task_sig(task, buffer);
 	buffer = task_cap(task, buffer);
+
+#ifdef	CONFIG_VSERVER_LEGACY		
+	buffer += sprintf (buffer,"s_context: %d\n", vx_task_xid(task));
+	vxi = task_get_vx_info(task);
+	if (vxi) {
+		buffer += sprintf (buffer,"ctxflags: %08llx\n"
+			,vxi->vx_flags);
+		buffer += sprintf (buffer,"initpid: %d\n"
+			,vxi->vx_initpid);
+	} else {
+		buffer += sprintf (buffer,"ctxflags: none\n");
+		buffer += sprintf (buffer,"initpid: none\n");
+	}
+	put_vx_info(vxi);
+	nxi = task_get_nx_info(task);
+	if (nxi) {
+		int i;
+
+		buffer += sprintf (buffer,"ipv4root:");
+		for (i=0; i<nxi->nbipv4; i++){
+			buffer += sprintf (buffer," %08x/%08x"
+				,nxi->ipv4[i]
+				,nxi->mask[i]);
+		}
+		*buffer++ = '\n';
+		buffer += sprintf (buffer,"ipv4root_bcast: %08x\n"
+			,nxi->v4_bcast);
+		buffer += sprintf (buffer,"ipv4root_refcnt: %d\n"
+			,atomic_read(&nxi->nx_refcount));
+	} else {
+		buffer += sprintf (buffer,"ipv4root: 0\n");
+		buffer += sprintf (buffer,"ipv4root_bcast: 0\n");
+	}
+	put_nx_info(nxi);
+#endif
 #if defined(CONFIG_ARCH_S390)
 	buffer = task_show_regs(task, buffer);
 #endif
@@ -297,6 +341,7 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 {
 	unsigned long vsize, eip, esp, wchan;
 	long priority, nice;
+	unsigned long long bias_jiffies;
 	int tty_pgrp = -1, tty_nr = 0;
 	sigset_t sigign, sigcatch;
 	char state;
@@ -308,7 +353,16 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 
 	state = *get_task_state(task);
 	vsize = eip = esp = 0;
+	bias_jiffies = INITIAL_JIFFIES;
+
 	task_lock(task);
+	if (__vx_task_flags(task, VXF_VIRT_UPTIME, 0)) {
+		bias_jiffies = task->vx_info->cvirt.bias_jiffies;
+		/* hmm, do we need that? */
+		if (bias_jiffies > task->start_time)
+			bias_jiffies = task->start_time;
+	}
+
 	mm = task->mm;
 	if(mm)
 		mm = mmgrab(mm);
@@ -352,7 +406,7 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 	read_unlock(&tasklist_lock);
 
 	/* Temporary variable needed for gcc-2.96 */
-	start_time = jiffies_64_to_clock_t(task->start_time - INITIAL_JIFFIES);
+	start_time = jiffies_64_to_clock_t(task->start_time - bias_jiffies);
 
 	res = sprintf(buffer,"%d (%s) %c %d %d %d %d %d %lu %lu \
 %lu %lu %lu %lu %lu %ld %ld %ld %ld %d %ld %llu %lu %ld %lu %lu %lu %lu %lu \

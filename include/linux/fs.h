@@ -116,6 +116,7 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 #define MS_VERBOSE	32768
 #define MS_POSIXACL	(1<<16)	/* VFS does not apply the umask */
 #define MS_ONE_SECOND	(1<<17)	/* fs has 1 sec a/m/ctime resolution */
+#define MS_TAGXID	(1<<24)	/* tag inodes with context information */
 #define MS_ACTIVE	(1<<30)
 #define MS_NOUSER	(1<<31)
 
@@ -142,6 +143,8 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 #define S_NOQUOTA	64	/* Inode is not counted to quota */
 #define S_DIRSYNC	128	/* Directory modifications are synchronous */
 #define S_NOCMTIME	256	/* Do not update file c/mtime */
+#define S_BARRIER	512	/* Barrier for chroot() */
+#define S_IUNLINK	1024	/* Immutable unlink */
 
 /*
  * Note that nosuid etc flags are inode-specific: setting some file-system
@@ -169,11 +172,14 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 #define IS_NOQUOTA(inode)	((inode)->i_flags & S_NOQUOTA)
 #define IS_APPEND(inode)	((inode)->i_flags & S_APPEND)
 #define IS_IMMUTABLE(inode)	((inode)->i_flags & S_IMMUTABLE)
+#define IS_IUNLINK(inode)	((inode)->i_flags & S_IUNLINK)
+#define IS_IXORUNLINK(inode)	((IS_IUNLINK(inode) ? S_IMMUTABLE : 0) ^ IS_IMMUTABLE(inode))
 #define IS_NOATIME(inode)	(__IS_FLG(inode, MS_NOATIME) || ((inode)->i_flags & S_NOATIME))
 #define IS_NODIRATIME(inode)	__IS_FLG(inode, MS_NODIRATIME)
 #define IS_POSIXACL(inode)	__IS_FLG(inode, MS_POSIXACL)
 #define IS_ONE_SECOND(inode)	__IS_FLG(inode, MS_ONE_SECOND)
 
+#define IS_BARRIER(inode)	(S_ISDIR((inode)->i_mode) && ((inode)->i_flags & S_BARRIER))
 #define IS_DEADDIR(inode)	((inode)->i_flags & S_DEAD)
 #define IS_NOCMTIME(inode)	((inode)->i_flags & S_NOCMTIME)
 
@@ -279,6 +285,9 @@ struct iattr {
 #define ATTR_FLAG_APPEND	4 	/* Append-only file */
 #define ATTR_FLAG_IMMUTABLE	8 	/* Immutable file */
 #define ATTR_FLAG_NODIRATIME	16 	/* Don't update atime for directory */
+
+#define ATTR_FLAG_BARRIER	512	/* Barrier for chroot() */
+#define ATTR_FLAG_IUNLINK	1024	/* Immutable unlink */
 
 /*
  * Includes for diskquotas.
@@ -415,6 +424,7 @@ struct inode {
 	unsigned int		i_nlink;
 	uid_t			i_uid;
 	gid_t			i_gid;
+	xid_t			i_xid;
 	dev_t			i_rdev;
 	loff_t			i_size;
 	struct timespec		i_atime;

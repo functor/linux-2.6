@@ -39,6 +39,8 @@
 #include <linux/cpu.h>
 #include <linux/percpu.h>
 #include <linux/kthread.h>
+#include <linux/vserver/sched.h>
+#include <linux/vinline.h>
 
 #ifdef CONFIG_NUMA
 #define cpu_to_node_mask(cpu) node_to_cpumask(cpu_to_node(cpu))
@@ -214,6 +216,8 @@ struct runqueue {
 #endif
 	task_t *migration_thread;
 	struct list_head migration_queue;
+	struct list_head hold_queue;
+	int idle_tokens;
 
 	atomic_t nr_iowait;
 };
@@ -373,6 +377,9 @@ static int effective_prio(task_t *p)
 	bonus = CURRENT_BONUS(p) - MAX_BONUS / 2;
 
 	prio = p->static_prio - bonus;
+	if (__vx_task_flags(p, VXF_SCHED_PRIO, 0))
+		prio += effective_vavavoom(p, MAX_USER_PRIO);
+
 	if (prio < MAX_RT_PRIO)
 		prio = MAX_RT_PRIO;
 	if (prio > MAX_PRIO-1)
@@ -1503,6 +1510,9 @@ void scheduler_tick(int user_ticks, int sys_ticks)
 	}
 
 	if (p == rq->idle) {
+		if (!--rq->idle_tokens && !list_empty(&rq->hold_queue))
+			set_need_resched();	
+
 		if (atomic_read(&rq->nr_iowait) > 0)
 			cpustat->iowait += sys_ticks;
 		else
@@ -1545,7 +1555,7 @@ void scheduler_tick(int user_ticks, int sys_ticks)
 		}
 		goto out_unlock;
 	}
-	if (!--p->time_slice) {
+	if (vx_need_resched(p)) {
 		dequeue_task(p, rq->active);
 		set_tsk_need_resched(p);
 		p->prio = effective_prio(p);
@@ -1606,6 +1616,10 @@ asmlinkage void __sched schedule(void)
 	struct list_head *queue;
 	unsigned long long now;
 	unsigned long run_time;
+#ifdef	CONFIG_VSERVER_HARDCPU		
+	struct vx_info *vxi;
+	int maxidle = -HZ;
+#endif
 	int idx;
 
 	/*
@@ -1656,6 +1670,37 @@ need_resched:
 			deactivate_task(prev, rq);
 	}
 
+#ifdef	CONFIG_VSERVER_HARDCPU		
+	if (!list_empty(&rq->hold_queue)) {
+		struct list_head *l, *n;
+		int ret;
+
+		vxi = NULL;
+		list_for_each_safe(l, n, &rq->hold_queue) {
+			next = list_entry(l, task_t, run_list);
+			if (vxi == next->vx_info)
+				continue;
+
+			vxi = next->vx_info;
+			ret = vx_tokens_recalc(vxi);
+			// tokens = vx_tokens_avail(next);
+
+			if (ret > 0) {
+				list_del(&next->run_list);
+				next->state &= ~TASK_ONHOLD;
+				recalc_task_prio(next, now);
+				__activate_task(next, rq);
+				// printk("··· unhold %p\n", next);
+				break;
+			}
+			if ((ret < 0) && (maxidle < ret))
+				maxidle = ret;
+		}	
+	}
+	rq->idle_tokens = -maxidle;
+
+pick_next:
+#endif
 	if (unlikely(!rq->nr_running)) {
 #ifdef CONFIG_SMP
 		load_balance(rq, 1, cpu_to_node_mask(smp_processor_id()));
@@ -1682,6 +1727,23 @@ need_resched:
 	idx = sched_find_first_bit(array->bitmap);
 	queue = array->queue + idx;
 	next = list_entry(queue->next, task_t, run_list);
+
+#ifdef	CONFIG_VSERVER_HARDCPU		
+	vxi = next->vx_info;
+	if (vxi && __vx_flags(vxi->vx_flags,
+		VXF_SCHED_PAUSE|VXF_SCHED_HARD, 0)) {
+		int ret = vx_tokens_recalc(vxi);
+
+		if (unlikely(ret <= 0)) {
+			if (ret && (rq->idle_tokens > -ret))
+				rq->idle_tokens = -ret;
+			deactivate_task(next, rq);
+			list_add_tail(&next->run_list, &rq->hold_queue);
+			next->state |= TASK_ONHOLD;			
+			goto pick_next;
+		}
+	}
+#endif
 
 	if (!rt_task(next) && next->activated > 0) {
 		unsigned long long delta = now - next->timestamp;
@@ -2954,6 +3016,7 @@ void __init sched_init(void)
 
 		spin_lock_init(&rq->lock);
 		INIT_LIST_HEAD(&rq->migration_queue);
+		INIT_LIST_HEAD(&rq->hold_queue);
 		atomic_set(&rq->nr_iowait, 0);
 		nr_running_init(rq);
 

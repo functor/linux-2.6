@@ -374,7 +374,8 @@ static int fastcall try_to_unmap_one(struct page * page, pte_addr_t paddr)
 	if (pte_dirty(pte))
 		set_page_dirty(page);
 
-	mm->rss--;
+	// mm->rss--;
+	vx_rsspages_dec(mm);
 	page_cache_release(page);
 	ret = SWAP_SUCCESS;
 

@@ -323,7 +323,10 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 			break;
 
 		case SO_PASSCRED:
-			sock->passcred = valbool;
+			if (valbool)
+				set_bit(SOCK_PASS_CRED, &sock->flags);
+			else
+				clear_bit(SOCK_PASS_CRED, &sock->flags);
 			break;
 
 		case SO_TIMESTAMP:
@@ -546,7 +549,7 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
 			break; 
 
 		case SO_PASSCRED:
-			v.val = sock->passcred;
+			v.val = test_bit(SOCK_PASS_CRED, &sock->flags)?1:0;
 			break;
 
 		case SO_PEERCRED:
@@ -621,6 +624,8 @@ struct sock *sk_alloc(int family, int priority, int zero_it, kmem_cache_t *slab)
 			sock_lock_init(sk);
 		}
 		sk->sk_slab = slab;
+		sock_vx_init(sk);
+		sock_nx_init(sk);
 		
 		if (security_sk_alloc(sk, family, priority)) {
 			kmem_cache_free(slab, sk);
@@ -651,6 +656,10 @@ void sk_free(struct sock *sk)
 		       __FUNCTION__, atomic_read(&sk->sk_omem_alloc));
 
 	security_sk_free(sk);
+	BUG_ON(sk->sk_vx_info);
+	BUG_ON(sk->sk_nx_info);
+/*	clr_vx_info(&sk->sk_vx_info);
+	clr_nx_info(&sk->sk_nx_info);	*/
 	kmem_cache_free(sk->sk_slab, sk);
 	module_put(owner);
 }
@@ -1141,6 +1150,11 @@ void sock_init_data(struct socket *sock, struct sock *sk)
 
 	sk->sk_stamp.tv_sec     = -1L;
 	sk->sk_stamp.tv_usec    = -1L;
+
+	sk->sk_vx_info		=	NULL;
+	sk->sk_xid		=	0;
+	sk->sk_nx_info		=	NULL;
+	sk->sk_nid		=	0;
 
 	atomic_set(&sk->sk_refcnt, 1);
 }

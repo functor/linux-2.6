@@ -195,6 +195,10 @@ struct tcp_tw_bucket {
 #define tw_node			__tw_common.skc_node
 #define tw_bind_node		__tw_common.skc_bind_node
 #define tw_refcnt		__tw_common.skc_refcnt
+#define tw_xid			__tw_common.skc_xid
+#define tw_vx_info		__tw_common.skc_vx_info
+#define tw_nid			__tw_common.skc_nid
+#define tw_nx_info		__tw_common.skc_nx_info
 	volatile unsigned char	tw_substate;
 	unsigned char		tw_rcv_wscale;
 	__u16			tw_sport;

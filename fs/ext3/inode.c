@@ -36,6 +36,7 @@
 #include <linux/writeback.h>
 #include <linux/mpage.h>
 #include <linux/uio.h>
+#include <linux/vserver/xid.h>
 #include "xattr.h"
 #include "acl.h"
 
@@ -189,6 +190,8 @@ void ext3_put_inode(struct inode *inode)
 		ext3_discard_prealloc(inode);
 }
 
+static void ext3_truncate_nocheck (struct inode *inode);
+
 /*
  * Called at the last iput() if i_nlink is zero.
  */
@@ -214,7 +217,7 @@ void ext3_delete_inode (struct inode * inode)
 		handle->h_sync = 1;
 	inode->i_size = 0;
 	if (inode->i_blocks)
-		ext3_truncate(inode);
+		ext3_truncate_nocheck(inode);
 	/*
 	 * Kill off the orphan record which ext3_truncate created.
 	 * AKPM: I think this can be inside the above `if'.
@@ -2112,7 +2115,7 @@ static void ext3_free_branches(handle_t *handle, struct inode *inode,
  * ext3_truncate() run will find them and release them.
  */
 
-void ext3_truncate(struct inode * inode)
+void ext3_truncate_nocheck(struct inode * inode)
 {
 	handle_t *handle;
 	struct ext3_inode_info *ei = EXT3_I(inode);
@@ -2132,8 +2135,6 @@ void ext3_truncate(struct inode * inode)
 	    S_ISLNK(inode->i_mode)))
 		return;
 	if (ext3_inode_is_fast_symlink(inode))
-		return;
-	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
 		return;
 
 	ext3_discard_prealloc(inode);
@@ -2441,6 +2442,13 @@ has_buffer:
 	return 0;
 }
 
+void ext3_truncate(struct inode * inode)
+{
+	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
+		return;
+	ext3_truncate_nocheck(inode);
+}
+
 void ext3_set_inode_flags(struct inode *inode)
 {
 	unsigned int flags = EXT3_I(inode)->i_flags;
@@ -2452,6 +2460,10 @@ void ext3_set_inode_flags(struct inode *inode)
 		inode->i_flags |= S_APPEND;
 	if (flags & EXT3_IMMUTABLE_FL)
 		inode->i_flags |= S_IMMUTABLE;
+	if (flags & EXT3_IUNLINK_FL)
+		inode->i_flags |= S_IUNLINK;
+	if (flags & EXT3_BARRIER_FL)
+		inode->i_flags |= S_BARRIER;
 	if (flags & EXT3_NOATIME_FL)
 		inode->i_flags |= S_NOATIME;
 	if (flags & EXT3_DIRSYNC_FL)
@@ -2465,6 +2477,8 @@ void ext3_read_inode(struct inode * inode)
 	struct ext3_inode_info *ei = EXT3_I(inode);
 	struct buffer_head *bh;
 	int block;
+	uid_t uid;
+	gid_t gid;
 
 #ifdef CONFIG_EXT3_FS_POSIX_ACL
 	ei->i_acl = EXT3_ACL_NOT_CACHED;
@@ -2475,12 +2489,17 @@ void ext3_read_inode(struct inode * inode)
 	bh = iloc.bh;
 	raw_inode = ext3_raw_inode(&iloc);
 	inode->i_mode = le16_to_cpu(raw_inode->i_mode);
-	inode->i_uid = (uid_t)le16_to_cpu(raw_inode->i_uid_low);
-	inode->i_gid = (gid_t)le16_to_cpu(raw_inode->i_gid_low);
+	uid = (uid_t)le16_to_cpu(raw_inode->i_uid_low);
+	gid = (gid_t)le16_to_cpu(raw_inode->i_gid_low);
 	if(!(test_opt (inode->i_sb, NO_UID32))) {
-		inode->i_uid |= le16_to_cpu(raw_inode->i_uid_high) << 16;
-		inode->i_gid |= le16_to_cpu(raw_inode->i_gid_high) << 16;
+		uid |= le16_to_cpu(raw_inode->i_uid_high) << 16;
+		gid |= le16_to_cpu(raw_inode->i_gid_high) << 16;
 	}
+	inode->i_uid = INOXID_UID(uid, gid);
+	inode->i_gid = INOXID_GID(uid, gid);
+	if (inode->i_sb->s_flags & MS_TAGXID)
+		inode->i_xid = INOXID_XID(uid, gid, le16_to_cpu(raw_inode->i_raw_xid));
+
 	inode->i_nlink = le16_to_cpu(raw_inode->i_links_count);
 	inode->i_size = le32_to_cpu(raw_inode->i_size);
 	inode->i_atime.tv_sec = le32_to_cpu(raw_inode->i_atime);
@@ -2588,6 +2607,8 @@ static int ext3_do_update_inode(handle_t *handle,
 	struct ext3_inode *raw_inode = ext3_raw_inode(iloc);
 	struct ext3_inode_info *ei = EXT3_I(inode);
 	struct buffer_head *bh = iloc->bh;
+	uid_t uid = XIDINO_UID(inode->i_uid, inode->i_xid);
+	gid_t gid = XIDINO_GID(inode->i_gid, inode->i_xid);
 	int err = 0, rc, block;
 
 	/* For fields not not tracking in the in-memory inode,
@@ -2597,29 +2618,32 @@ static int ext3_do_update_inode(handle_t *handle,
 
 	raw_inode->i_mode = cpu_to_le16(inode->i_mode);
 	if(!(test_opt(inode->i_sb, NO_UID32))) {
-		raw_inode->i_uid_low = cpu_to_le16(low_16_bits(inode->i_uid));
-		raw_inode->i_gid_low = cpu_to_le16(low_16_bits(inode->i_gid));
+		raw_inode->i_uid_low = cpu_to_le16(low_16_bits(uid));
+		raw_inode->i_gid_low = cpu_to_le16(low_16_bits(gid));
 /*
  * Fix up interoperability with old kernels. Otherwise, old inodes get
  * re-used with the upper 16 bits of the uid/gid intact
  */
 		if(!ei->i_dtime) {
 			raw_inode->i_uid_high =
-				cpu_to_le16(high_16_bits(inode->i_uid));
+				cpu_to_le16(high_16_bits(uid));
 			raw_inode->i_gid_high =
-				cpu_to_le16(high_16_bits(inode->i_gid));
+				cpu_to_le16(high_16_bits(gid));
 		} else {
 			raw_inode->i_uid_high = 0;
 			raw_inode->i_gid_high = 0;
 		}
 	} else {
 		raw_inode->i_uid_low =
-			cpu_to_le16(fs_high2lowuid(inode->i_uid));
+			cpu_to_le16(fs_high2lowuid(uid));
 		raw_inode->i_gid_low =
-			cpu_to_le16(fs_high2lowgid(inode->i_gid));
+			cpu_to_le16(fs_high2lowgid(gid));
 		raw_inode->i_uid_high = 0;
 		raw_inode->i_gid_high = 0;
 	}
+#ifdef CONFIG_INOXID_GID32
+	raw_inode->i_raw_xid = cpu_to_le16(inode->i_xid);
+#endif
 	raw_inode->i_links_count = cpu_to_le16(inode->i_nlink);
 	raw_inode->i_size = cpu_to_le32(ei->i_disksize);
 	raw_inode->i_atime = cpu_to_le32(inode->i_atime.tv_sec);
@@ -2741,6 +2765,44 @@ void ext3_write_inode(struct inode *inode, int wait)
 	ext3_force_commit(inode->i_sb);
 }
 
+int ext3_setattr_flags(struct inode *inode, unsigned int flags)
+{
+	unsigned int oldflags, newflags;
+	int err = 0;
+
+	oldflags = EXT3_I(inode)->i_flags;
+	newflags = oldflags &
+		~(EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL | EXT3_BARRIER_FL);	
+	if (flags & ATTR_FLAG_IMMUTABLE)
+		newflags |= EXT3_IMMUTABLE_FL;
+	if (flags & ATTR_FLAG_IUNLINK)
+		newflags |= EXT3_IUNLINK_FL;
+	if (flags & ATTR_FLAG_BARRIER)
+		newflags |= EXT3_BARRIER_FL;
+
+	if (oldflags ^ newflags) {
+		handle_t *handle;
+		struct ext3_iloc iloc;
+
+		handle = ext3_journal_start(inode, 1);
+		if (IS_ERR(handle))
+			return PTR_ERR(handle);
+		if (IS_SYNC(inode))
+			handle->h_sync = 1;
+		err = ext3_reserve_inode_write(handle, inode, &iloc);
+		if (err)
+			goto flags_err;
+		
+		EXT3_I(inode)->i_flags = newflags;
+		inode->i_ctime = CURRENT_TIME;
+
+		err = ext3_mark_iloc_dirty(handle, inode, &iloc);
+	flags_err:
+		ext3_journal_stop(handle);
+	}
+	return err;
+}
+
 /*
  * ext3_setattr()
  *
@@ -2810,6 +2872,12 @@ int ext3_setattr(struct dentry *dentry, struct iattr *attr)
 		if (!error)
 			error = rc;
 		ext3_journal_stop(handle);
+	}
+
+	if (ia_valid & ATTR_ATTR_FLAG) {
+		rc = ext3_setattr_flags(inode, attr->ia_attr_flags);
+		if (!error)
+			error = rc;
 	}
 
 	rc = inode_setattr(inode, attr);

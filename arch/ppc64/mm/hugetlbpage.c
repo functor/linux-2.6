@@ -126,7 +126,8 @@ static void setup_huge_pte(struct mm_struct *mm, struct page *page,
 	hugepte_t entry;
 	int i;
 
-	mm->rss += (HPAGE_SIZE / PAGE_SIZE);
+	// mm->rss += (HPAGE_SIZE / PAGE_SIZE);
+	vx_rsspages_sub(mm, HPAGE_SIZE / PAGE_SIZE);
 	entry = mk_hugepte(page, write_access);
 	for (i = 0; i < HUGEPTE_BATCH_SIZE; i++)
 		set_hugepte(ptep+i, entry);
@@ -288,7 +289,8 @@ int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
 			/* This is the first hugepte in a batch */
 			ptepage = hugepte_page(entry);
 			get_page(ptepage);
-			dst->rss += (HPAGE_SIZE / PAGE_SIZE);
+			// dst->rss += (HPAGE_SIZE / PAGE_SIZE);
+			vx_rsspages_add(dst, HPAGE_SIZE / PAGE_SIZE);
 		}
 		set_hugepte(dst_pte, entry);
 
@@ -408,7 +410,8 @@ void unmap_hugepage_range(struct vm_area_struct *vma,
 		put_page(page);
 	}
 
-	mm->rss -= (end - start) >> PAGE_SHIFT;
+	// mm->rss -= (end - start) >> PAGE_SHIFT;
+	vx_rsspages_sub(mm, (end - start) >> PAGE_SHIFT);
 }
 
 int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)

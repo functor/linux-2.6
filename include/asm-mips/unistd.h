@@ -289,10 +289,12 @@
 #define __NR_tgkill			(__NR_Linux + 266)
 #define __NR_utimes			(__NR_Linux + 267)
 
+#define __NR_vserver			(__NR_Linux + 273)
+
 /*
  * Offset of the last Linux o32 flavoured syscall
  */
-#define __NR_Linux_syscalls		267
+#define __NR_Linux_syscalls		273
 
 #endif /* _MIPS_SIM == _MIPS_SIM_ABI32 */
 

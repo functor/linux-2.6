@@ -801,6 +801,8 @@ config DEBUG_S3C2410_UART
 
 endmenu
 
+source "kernel/vserver/Kconfig"
+
 source "security/Kconfig"
 
 source "crypto/Kconfig"

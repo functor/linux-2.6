@@ -163,6 +163,9 @@ int vfs_permission(struct inode * inode, int mask)
 {
 	umode_t			mode = inode->i_mode;
 
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN|VX_WATCH))
+		return -EACCES;
+
 	if (mask & MAY_WRITE) {
 		/*
 		 * Nobody gets write access to a read-only fs.
@@ -208,6 +211,15 @@ int vfs_permission(struct inode * inode, int mask)
 	return -EACCES;
 }
 
+static inline int xid_permission(struct inode *inode)
+{
+	if (inode->i_xid == 0)
+		return 0;
+	if (vx_check(inode->i_xid, VX_ADMIN|VX_WATCH|VX_IDENT))
+		return 0;
+	return -EACCES;
+}
+
 int permission(struct inode * inode,int mask, struct nameidata *nd)
 {
 	int retval;
@@ -216,6 +228,8 @@ int permission(struct inode * inode,int mask, struct nameidata *nd)
 	/* Ordinary permission routines do not understand MAY_APPEND. */
 	submask = mask & ~MAY_APPEND;
 
+	if ((retval = xid_permission(inode)))
+		return retval;
 	if (inode->i_op && inode->i_op->permission)
 		retval = inode->i_op->permission(inode, submask, nd);
 	else
@@ -1039,7 +1053,7 @@ static inline int may_delete(struct inode *dir,struct dentry *victim,int isdir)
 	if (IS_APPEND(dir))
 		return -EPERM;
 	if (check_sticky(dir, victim->d_inode)||IS_APPEND(victim->d_inode)||
-	    IS_IMMUTABLE(victim->d_inode))
+		IS_IXORUNLINK(victim->d_inode))
 		return -EPERM;
 	if (isdir) {
 		if (!S_ISDIR(victim->d_inode->i_mode))
@@ -1833,7 +1847,7 @@ int vfs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *new_de
 	/*
 	 * A link to an append-only or immutable file cannot be created.
 	 */
-	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
+	if (IS_APPEND(inode) || IS_IXORUNLINK(inode))
 		return -EPERM;
 	if (!dir->i_op || !dir->i_op->link)
 		return -EPERM;
