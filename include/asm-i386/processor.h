@@ -400,10 +400,10 @@ struct tss_struct {
 
 #define ARCH_MIN_TASKALIGN	16
 
-
-#define STACK_PAGE_COUNT	(4096/PAGE_SIZE)
-
-
+#if ((1<<CONFIG_STACK_SIZE_SHIFT) < PAGE_SIZE)
+#error (1<<CONFIG_STACK_SIZE_SHIFT) must be at least PAGE_SIZE
+#endif
+#define STACK_PAGE_COUNT	((1<<CONFIG_STACK_SIZE_SHIFT)/PAGE_SIZE)
 
 
 struct thread_struct {

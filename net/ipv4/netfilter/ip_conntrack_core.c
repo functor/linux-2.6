@@ -143,6 +143,7 @@ get_tuple(const struct iphdr *iph,
 	tuple->src.ip = iph->saddr;
 	tuple->dst.ip = iph->daddr;
 	tuple->dst.protonum = iph->protocol;
+	tuple->src.u.all = tuple->dst.u.all = 0;
 
 	return protocol->pkt_to_tuple(skb, dataoff, tuple);
 }
@@ -155,6 +156,8 @@ invert_tuple(struct ip_conntrack_tuple *inverse,
 	inverse->src.ip = orig->dst.ip;
 	inverse->dst.ip = orig->src.ip;
 	inverse->dst.protonum = orig->dst.protonum;
+
+	inverse->src.u.all = inverse->dst.u.all = 0;
 
 	return protocol->invert_tuple(inverse, orig);
 }
@@ -976,8 +979,8 @@ int ip_conntrack_expect_related(struct ip_conntrack_expect *expect,
 	 * so there is no need to use the tuple lock too */
 
 	DEBUGP("ip_conntrack_expect_related %p\n", related_to);
-	DEBUGP("tuple: "); DUMP_TUPLE(&expect->tuple);
-	DEBUGP("mask:  "); DUMP_TUPLE(&expect->mask);
+	DEBUGP("tuple: "); DUMP_TUPLE_RAW(&expect->tuple);
+	DEBUGP("mask:  "); DUMP_TUPLE_RAW(&expect->mask);
 
 	old = LIST_FIND(&ip_conntrack_expect_list, resent_expect,
 		        struct ip_conntrack_expect *, &expect->tuple, 
@@ -1070,15 +1073,14 @@ int ip_conntrack_change_expect(struct ip_conntrack_expect *expect,
 
 	MUST_BE_READ_LOCKED(&ip_conntrack_lock);
 	WRITE_LOCK(&ip_conntrack_expect_tuple_lock);
-
 	DEBUGP("change_expect:\n");
-	DEBUGP("exp tuple: "); DUMP_TUPLE(&expect->tuple);
-	DEBUGP("exp mask:  "); DUMP_TUPLE(&expect->mask);
-	DEBUGP("newtuple:  "); DUMP_TUPLE(newtuple);
+	DEBUGP("exp tuple: "); DUMP_TUPLE_RAW(&expect->tuple);
+	DEBUGP("exp mask:  "); DUMP_TUPLE_RAW(&expect->mask);
+	DEBUGP("newtuple:  "); DUMP_TUPLE_RAW(newtuple);
 	if (expect->ct_tuple.dst.protonum == 0) {
 		/* Never seen before */
 		DEBUGP("change expect: never seen before\n");
-		if (!ip_ct_tuple_equal(&expect->tuple, newtuple) 
+		if (!ip_ct_tuple_mask_cmp(&expect->tuple, newtuple, &expect->mask)
 		    && LIST_FIND(&ip_conntrack_expect_list, expect_clash,
 			         struct ip_conntrack_expect *, newtuple, &expect->mask)) {
 			/* Force NAT to find an unused tuple */
@@ -1166,21 +1168,39 @@ void ip_conntrack_helper_unregister(struct ip_conntrack_helper *me)
 	synchronize_net();
 }
 
-/* Refresh conntrack for this many jiffies. */
-void ip_ct_refresh(struct ip_conntrack *ct, unsigned long extra_jiffies)
+static inline void ct_add_counters(struct ip_conntrack *ct,
+				   enum ip_conntrack_info ctinfo,
+				   const struct sk_buff *skb)
+{
+#ifdef CONFIG_IP_NF_CT_ACCT
+	if (skb) {
+		ct->counters[CTINFO2DIR(ctinfo)].packets++;
+		ct->counters[CTINFO2DIR(ctinfo)].bytes += 
+					ntohs(skb->nh.iph->tot_len);
+	}
+#endif
+}
+
+/* Refresh conntrack for this many jiffies and do accounting (if skb != NULL) */
+void ip_ct_refresh_acct(struct ip_conntrack *ct, 
+		        enum ip_conntrack_info ctinfo,
+			const struct sk_buff *skb,
+			unsigned long extra_jiffies)
 {
 	IP_NF_ASSERT(ct->timeout.data == (unsigned long)ct);
 
 	/* If not in hash table, timer will not be active yet */
-	if (!is_confirmed(ct))
+	if (!is_confirmed(ct)) {
 		ct->timeout.expires = extra_jiffies;
-	else {
+		ct_add_counters(ct, ctinfo, skb);
+	} else {
 		WRITE_LOCK(&ip_conntrack_lock);
 		/* Need del_timer for race avoidance (may already be dying). */
 		if (del_timer(&ct->timeout)) {
 			ct->timeout.expires = jiffies + extra_jiffies;
 			add_timer(&ct->timeout);
 		}
+		ct_add_counters(ct, ctinfo, skb);
 		WRITE_UNLOCK(&ip_conntrack_lock);
 	}
 }
