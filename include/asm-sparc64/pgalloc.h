@@ -236,4 +236,8 @@ static __inline__ void free_pte_slow(pte_t *pte)
 #define pgd_free(pgd)		free_pgd_fast(pgd)
 #define pgd_alloc(mm)		get_pgd_fast()
 
+#define arch_add_exec_range(mm, limit)		do { ; } while (0)
+#define arch_flush_exec_range(mm)		do { ; } while (0)
+#define arch_remove_exec_range(mm, limit)	do { ; } while (0)
+
 #endif /* _SPARC64_PGALLOC_H */

@@ -62,6 +62,7 @@
 #include <linux/nfs_mount.h>
 #include <net/ipv6.h>
 #include <linux/hugetlb.h>
+#include <linux/major.h>
 
 #include "avc.h"
 #include "objsec.h"
@@ -82,7 +83,7 @@ __setup("enforcing=", enforcing_setup);
 #endif
 
 #ifdef CONFIG_SECURITY_SELINUX_BOOTPARAM
-int selinux_enabled = 1;
+int selinux_enabled = 0;
 
 static int __init selinux_enabled_setup(char *str)
 {
@@ -1475,6 +1476,7 @@ static int selinux_syslog(int type)
 
 	switch (type) {
 		case 3:         /* Read last kernel messages */
+		case 10:        /* Return size of the log buffer */
 			rc = task_has_system(current, SYSTEM__SYSLOG_READ);
 			break;
 		case 6:         /* Disable logging to console */
@@ -1712,18 +1714,77 @@ static void selinux_bprm_free_security(struct linux_binprm *bprm)
 	kfree(bsec);
 }
 
+/* Create an open file that refers to the null device.
+   Derived from the OpenWall LSM. */
+struct file *open_devnull(void)
+{
+	struct inode *inode;
+	struct dentry *dentry;
+	struct file *file = NULL;
+	struct inode_security_struct *isec;
+	dev_t dev;
+
+	inode = new_inode(current->fs->rootmnt->mnt_sb);
+	if (!inode)
+		goto out;
+
+	dentry = dget(d_alloc_root(inode));
+	if (!dentry)
+		goto out_iput;
+
+	file = get_empty_filp();
+	if (!file)
+		goto out_dput;
+
+	dev = MKDEV(MEM_MAJOR, 3); /* null device */
+
+	inode->i_uid = current->fsuid;
+	inode->i_gid = current->fsgid;
+	inode->i_blksize = PAGE_SIZE;
+	inode->i_blocks = 0;
+	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
+	inode->i_state = I_DIRTY; /* so that mark_inode_dirty won't touch us */
+
+	isec = inode->i_security;
+	isec->sid = SECINITSID_DEVNULL;
+	isec->sclass = SECCLASS_CHR_FILE;
+	isec->initialized = 1;
+
+	file->f_flags = O_RDWR;
+	file->f_mode = FMODE_READ | FMODE_WRITE;
+	file->f_dentry = dentry;
+	file->f_vfsmnt = mntget(current->fs->rootmnt);
+	file->f_pos = 0;
+
+	init_special_inode(inode, S_IFCHR | S_IRUGO | S_IWUGO, dev);
+	if (inode->i_fop->open(inode, file))
+		goto out_fput;
+
+out:
+	return file;
+out_fput:
+	mntput(file->f_vfsmnt);
+	put_filp(file);
+out_dput:
+	dput(dentry);
+out_iput:
+	iput(inode);
+	file = NULL;
+	goto out;
+}
+
 /* Derived from fs/exec.c:flush_old_files. */
 static inline void flush_unauthorized_files(struct files_struct * files)
 {
 	struct avc_audit_data ad;
-	struct file *file;
+	struct file *file, *devnull = NULL;
 	long j = -1;
 
 	AVC_AUDIT_DATA_INIT(&ad,FS);
 
 	spin_lock(&files->file_lock);
 	for (;;) {
-		unsigned long set, i;
+		unsigned long set, i, fd;
 
 		j++;
 		i = j * __NFDBITS;
@@ -1740,8 +1801,27 @@ static inline void flush_unauthorized_files(struct files_struct * files)
 					continue;
 				if (file_has_perm(current,
 						  file,
-						  file_to_av(file)))
+						  file_to_av(file))) {
 					sys_close(i);
+					fd = get_unused_fd();
+					if (fd != i) {
+						if (fd >= 0)
+							put_unused_fd(fd);
+						fput(file);
+						continue;
+					}
+					if (devnull) {
+						atomic_inc(&devnull->f_count);
+					} else {
+						devnull = open_devnull();
+						if (!devnull) {
+							put_unused_fd(fd);
+							fput(file);
+							continue;
+						}
+					}
+					fd_install(fd, devnull);
+				}
 				fput(file);
 			}
 		}
@@ -3094,12 +3174,12 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	char *addrp;
 	int len, err = 0;
 	u32 netif_perm, node_perm, node_sid, recv_perm = 0;
+	u32 sock_sid = 0;
+	u16 sock_class = 0;
 	struct socket *sock;
-	struct inode *inode;
 	struct net_device *dev;
 	struct sel_netif *netif;
 	struct netif_security_struct *nsec;
-	struct inode_security_struct *isec;
 	struct avc_audit_data ad;
 
 	family = sk->sk_family;
@@ -3110,15 +3190,21 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	if (family == PF_INET6 && skb->protocol == ntohs(ETH_P_IP))
 		family = PF_INET;
 
-	sock = sk->sk_socket;
-	
-	/* TCP control messages don't always have a socket. */
-	if (!sock)
-		goto out;
-
-	inode = SOCK_INODE(sock);
-	if (!inode)
-		goto out;
+ 	read_lock_bh(&sk->sk_callback_lock);
+ 	sock = sk->sk_socket;
+ 	if (sock) {
+ 		struct inode *inode;
+ 		inode = SOCK_INODE(sock);
+ 		if (inode) {
+ 			struct inode_security_struct *isec;
+ 			isec = inode->i_security;
+ 			sock_sid = isec->sid;
+ 			sock_class = isec->sclass;
+ 		}
+ 	}
+ 	read_unlock_bh(&sk->sk_callback_lock);
+ 	if (!sock_sid)
+  		goto out;
 
 	dev = skb->dev;
 	if (!dev)
@@ -3131,9 +3217,8 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	}
 	
 	nsec = &netif->nsec;
-	isec = inode->i_security;
 
-	switch (isec->sclass) {
+	switch (sock_class) {
 	case SECCLASS_UDP_SOCKET:
 		netif_perm = NETIF__UDP_RECV;
 		node_perm = NODE__UDP_RECV;
@@ -3162,7 +3247,7 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 		goto out;
 	}
 
-	err = avc_has_perm(isec->sid, nsec->if_sid, SECCLASS_NETIF,
+	err = avc_has_perm(sock_sid, nsec->if_sid, SECCLASS_NETIF,
 	                   netif_perm, &nsec->avcr, &ad);
 	sel_netif_put(netif);
 	if (err)
@@ -3173,7 +3258,7 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	if (err)
 		goto out;
 	
-	err = avc_has_perm(isec->sid, node_sid, SECCLASS_NODE, node_perm, NULL, &ad);
+	err = avc_has_perm(sock_sid, node_sid, SECCLASS_NODE, node_perm, NULL, &ad);
 	if (err)
 		goto out;
 
@@ -3187,7 +3272,7 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 		if (err)
 			goto out;
 
-		err = avc_has_perm(isec->sid, port_sid, isec->sclass,
+		err = avc_has_perm(sock_sid, port_sid, sock_class,
 		                   recv_perm, NULL, &ad);
 	}
 out:	

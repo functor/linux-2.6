@@ -128,7 +128,7 @@ out:
 	return error;
 }
 
-static int dupfd(struct file *file, unsigned int start)
+int dupfd(struct file *file, unsigned int start)
 {
 	struct files_struct * files = current->files;
 	int fd;
@@ -147,6 +147,8 @@ static int dupfd(struct file *file, unsigned int start)
 
 	return fd;
 }
+
+EXPORT_SYMBOL_GPL(dupfd);
 
 asmlinkage long sys_dup2(unsigned int oldfd, unsigned int newfd)
 {
@@ -627,15 +629,12 @@ void kill_fasync(struct fasync_struct **fp, int sig, int band)
 		read_unlock(&fasync_lock);
 	}
 }
-
 EXPORT_SYMBOL(kill_fasync);
 
 static int __init fasync_init(void)
 {
 	fasync_cache = kmem_cache_create("fasync_cache",
-		sizeof(struct fasync_struct), 0, 0, NULL, NULL);
-	if (!fasync_cache)
-		panic("cannot create fasync slab cache");
+		sizeof(struct fasync_struct), 0, SLAB_PANIC, NULL, NULL);
 	return 0;
 }
 
