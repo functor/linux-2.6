@@ -270,11 +270,6 @@ struct runqueue {
 	int idle_tokens;
 #endif
 
-#ifdef CONFIG_VSERVER_HARDCPU
-	struct list_head hold_queue;
-	int idle_tokens;
-#endif
-
 #ifdef CONFIG_SCHEDSTATS
 	/* latency stats */
 	struct sched_info rq_sched_info;
@@ -3340,26 +3335,6 @@ go_idle:
 	 * versions of the code.
 	 */
 	next = rq_get_next_task(rq);
-
-#ifdef	CONFIG_VSERVER_HARDCPU
-	vxi = next->vx_info;
-	if (vx_info_flags(vxi, VXF_SCHED_PAUSE|VXF_SCHED_HARD, 0)) {
-		int ret = vx_tokens_recalc(vxi);
-
-		if (unlikely(ret <= 0)) {
-			if (ret && (rq->idle_tokens > -ret))
-				rq->idle_tokens = -ret;
-			__deactivate_task(next, rq);
-			recalc_task_prio(next, now);
-			// a new one on hold
-			vx_onhold_inc(vxi);
-			next->state |= TASK_ONHOLD;
-			list_add_tail(&next->run_list, &rq->hold_queue);
-			//printk("··· %8lu hold   %p [%d]\n", jiffies, next, next->prio);
-			goto pick_next;
-		}
-	}
-#endif
 
 #ifdef	CONFIG_VSERVER_HARDCPU
 	vxi = next->vx_info;
