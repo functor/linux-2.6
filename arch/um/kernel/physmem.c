@@ -122,13 +122,18 @@ int physmem_subst_mapping(void *virt, int fd, __u64 offset, int w)
 	unsigned long phys;
 	int err;
 
+	phys = __pa(virt);
+	desc = find_virtmem_hash(&virtmem_hash, (void *) virt);
+	if(desc != NULL){
+		if((virt != desc->virt) || (fd != desc->fd) || 
+		   (offset != desc->offset))
+			panic("Address 0x%p is already substituted\n", virt);
+		return(0);
+	}
+
 	fd_maps = descriptor_mapping(fd);
 	if(fd_maps == NULL)
 		return(-ENOMEM);
-
-	phys = __pa(virt);
-	if(find_virtmem_hash(&virtmem_hash, virt) != NULL)
-		panic("Address 0x%p is already substituted\n", virt);
 
 	err = -ENOMEM;
 	desc = kmalloc(sizeof(*desc), GFP_ATOMIC);
@@ -200,6 +205,9 @@ void physmem_forget_descriptor(int fd)
 	if(desc == NULL)
 		return;
 
+	if(!list_empty(&desc->pages))
+		printk("Still have mapped pages on fd %d\n", fd);
+
 	list_for_each_safe(ele, next, &desc->pages){
 		page = list_entry(ele, struct phys_desc, list);
 		offset = page->offset;
@@ -232,9 +240,16 @@ void arch_free_page(struct page *page, int order)
 	}
 }
 
-int is_remapped(void *virt)
+int is_remapped(const void *virt, int fd, __u64 offset)
 {
-	return(find_virtmem_hash(&virtmem_hash, virt) != NULL);
+	struct phys_desc *desc;
+
+	desc = find_virtmem_hash(&virtmem_hash, (void *) virt);
+	if(desc == NULL)
+		return(0);
+	if(offset != desc->offset)
+		printk("offset mismatch\n");
+	return(find_virtmem_hash(&virtmem_hash, (void *) virt) != NULL);
 }
 
 /* Changed during early boot */

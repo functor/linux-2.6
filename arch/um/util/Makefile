@@ -6,3 +6,6 @@ mk_constants-objs	:= mk_constants_user.o mk_constants_kern.o
 
 HOSTCFLAGS_mk_task_kern.o	:= $(CFLAGS) $(CPPFLAGS)
 HOSTCFLAGS_mk_constants_kern.o	:= $(CFLAGS) $(CPPFLAGS)
+
+clean:
+	$(RM) -f $(host-progs)

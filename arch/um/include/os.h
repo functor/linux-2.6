@@ -29,7 +29,8 @@
  * (if they are wrong here, they are wrong there...).
  */
 struct uml_stat {
-	int                ust_dev;        /* device */
+	int                ust_major;      /* device */
+	int                ust_minor;
 	unsigned long long ust_ino;        /* inode */
 	int                ust_mode;       /* protection */
 	int                ust_nlink;      /* number of hard links */
@@ -41,6 +42,8 @@ struct uml_stat {
 	unsigned long      ust_atime;      /* time of last access */
 	unsigned long      ust_mtime;      /* time of last modification */
 	unsigned long      ust_ctime;      /* time of last change */
+	int                ust_rmajor;
+	int                ust_rminor;
 };
 
 struct openflags {
@@ -52,10 +55,12 @@ struct openflags {
 	unsigned int a : 1;	/* O_APPEND */
 	unsigned int e : 1;	/* O_EXCL */
 	unsigned int cl : 1;    /* FD_CLOEXEC */
+	unsigned int d : 1;	/* O_DIRECT */
 };
 
 #define OPENFLAGS() ((struct openflags) { .r = 0, .w = 0, .s = 0, .c = 0, \
- 					  .t = 0, .a = 0, .e = 0, .cl = 0 })
+					  .t = 0, .a = 0, .e = 0, .cl = 0, \
+					  .d = 0 })
 
 static inline struct openflags of_read(struct openflags flags)
 {
@@ -117,9 +122,20 @@ static inline struct openflags of_cloexec(struct openflags flags)
 	return(flags); 
 }
   
+static inline struct openflags of_direct(struct openflags flags)
+{ 
+	flags.d = 1; 
+	return(flags); 
+}
+
 extern int os_stat_file(const char *file_name, struct uml_stat *buf);
+extern int os_lstat_file(const char *file_name, struct uml_stat *ubuf);
 extern int os_stat_fd(const int fd, struct uml_stat *buf);
 extern int os_access(const char *file, int mode);
+extern int os_set_file_time(const char *file, unsigned long access, 
+			    unsigned long mod);
+extern int os_set_file_perms(const char *file, int mode);
+extern int os_set_file_owner(const char *file, int owner, int group);
 extern void os_print_error(int error, const char* str);
 extern int os_get_exec_close(int fd, int *close_on_exec);
 extern int os_set_exec_close(int fd, int close_on_exec);
@@ -134,15 +150,33 @@ extern int os_mode_fd(int fd, int mode);
 
 extern int os_seek_file(int fd, __u64 offset);
 extern int os_open_file(char *file, struct openflags flags, int mode);
+extern void *os_open_dir(char *dir, int *err_out);
+extern int os_seek_dir(void *stream, unsigned long long pos);
+extern int os_read_dir(void *stream, unsigned long long *ino_out, 
+		       char **name_out);
+extern int os_tell_dir(void *stream);
+extern int os_close_dir(void *stream);
+extern int os_remove_file(const char *file);
+extern int os_move_file(const char *from, const char *to);
+extern int os_truncate_file(const char *file, unsigned long long len);
+extern int os_truncate_fd(int fd, unsigned long long len);
 extern int os_read_file(int fd, void *buf, int len);
 extern int os_write_file(int fd, const void *buf, int count);
 extern int os_file_size(char *file, long long *size_out);
+extern int os_fd_size(int fd, long long *size_out);
 extern int os_file_modtime(char *file, unsigned long *modtime);
 extern int os_pipe(int *fd, int stream, int close_on_exec);
 extern int os_set_fd_async(int fd, int owner);
+extern int os_clear_fd_async(int fd);
 extern int os_set_fd_block(int fd, int blocking);
 extern int os_accept_connection(int fd);
 extern int os_create_unix_socket(char *file, int len, int close_on_exec);
+extern int os_make_symlink(const char *to, const char *from);
+extern int os_read_symlink(const char *file, char *buf, int size);
+extern int os_link_file(const char *to, const char *from);
+extern int os_make_dir(const char *dir, int mode);
+extern int os_remove_dir(const char *dir);
+extern int os_make_dev(const char *name, int mode, int major, int minor);
 extern int os_shutdown_socket(int fd, int r, int w);
 extern void os_close_file(int fd);
 extern int os_rcv_fd(int fd, int *helper_pid_out);
@@ -165,6 +199,13 @@ extern int os_protect_memory(void *addr, unsigned long len,
 			     int r, int w, int x);
 extern int os_unmap_memory(void *addr, int len);
 extern void os_flush_stdout(void);
+extern int os_stat_filesystem(char *path, long *bsize_out, 
+			      long long *blocks_out, long long *bfree_out,
+			      long long *bavail_out, long long *files_out,
+			      long long *ffree_out, void *fsid_out, 
+			      int fsid_size, long *namelen_out, 
+			      long *spare_out);
+extern unsigned long long os_usecs(void);
 
 #endif
 

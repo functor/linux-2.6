@@ -78,6 +78,9 @@ config NET
 
 source "fs/Kconfig.binfmt"
 
+config EXTERNFS
+	tristate "Support for host-based filesystems"
+
 config HOSTFS
 	tristate "Host filesystem"
 	help
@@ -98,6 +101,10 @@ config HOSTFS
 
         If you'd like to be able to work with files stored on the host, 
         say Y or M here; otherwise say N.
+
+config HUMFS
+	tristate 'Usable host filesystem'
+	depends on EXTERNFS
 
 config HPPFS
 	tristate "HoneyPot ProcFS"
