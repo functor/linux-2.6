@@ -1,7 +1,7 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 8
-EXTRAVERSION = -1.521.2.5.planetlab
+EXTRAVERSION = -1.521.2.4.planetlab
 NAME=Zonked Quokka
 
 # *DOCUMENTATION*
