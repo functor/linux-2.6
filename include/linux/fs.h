@@ -18,7 +18,6 @@
 #include <linux/cache.h>
 #include <linux/prio_tree.h>
 #include <linux/kobject.h>
-#include <linux/mount.h>
 #include <asm/atomic.h>
 
 struct iovec;
@@ -42,7 +41,7 @@ struct vfsmount;
 /* Fixed constants first: */
 #undef NR_OPEN
 #define NR_OPEN (1024*1024)	/* Absolute upper limit on fd num */
-#define INR_OPEN 4096		/* Initial setting for nfile rlimits */
+#define INR_OPEN 1024		/* Initial setting for nfile rlimits */
 
 #define BLOCK_SIZE_BITS 10
 #define BLOCK_SIZE (1<<BLOCK_SIZE_BITS)
@@ -165,7 +164,7 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
  */
 #define __IS_FLG(inode,flg) ((inode)->i_sb->s_flags & (flg))
 
-#define IS_RDONLY(inode)	__IS_FLG(inode, MS_RDONLY)
+#define IS_RDONLY(inode) ((inode)->i_sb->s_flags & MS_RDONLY)
 #define IS_SYNC(inode)		(__IS_FLG(inode, MS_SYNCHRONOUS) || \
 					((inode)->i_flags & S_SYNC))
 #define IS_DIRSYNC(inode)	(__IS_FLG(inode, MS_SYNCHRONOUS|MS_DIRSYNC) || \
@@ -994,16 +993,8 @@ static inline void mark_inode_dirty_sync(struct inode *inode)
 
 static inline void touch_atime(struct vfsmount *mnt, struct dentry *dentry)
 {
-	struct inode *inode = dentry->d_inode;
-
-	if (MNT_IS_NOATIME(mnt))
-		return;
-	if (S_ISDIR(inode->i_mode) && MNT_IS_NODIRATIME(mnt))
-		return;
-	if (IS_RDONLY(inode) || MNT_IS_RDONLY(mnt))
-		return;
-
-	update_atime(inode);
+	/* per-mountpoint checks will go here */
+	update_atime(dentry->d_inode);
 }
 
 static inline void file_accessed(struct file *file)
@@ -1557,7 +1548,7 @@ extern ssize_t simple_read_from_buffer(void __user *, size_t, loff_t *, const vo
 extern int inode_change_ok(struct inode *, struct iattr *);
 extern int __must_check inode_setattr(struct inode *, struct iattr *);
 
-extern void inode_update_time(struct inode *inode, struct vfsmount *mnt, int ctime_too);
+extern void inode_update_time(struct inode *inode, int ctime_too);
 
 static inline ino_t parent_ino(struct dentry *dentry)
 {
@@ -1591,18 +1582,6 @@ static inline char *alloc_secdata(void)
 static inline void free_secdata(void *secdata)
 { }
 #endif	/* CONFIG_SECURITY */
-
-/* io priorities */
-
-#define IOPRIO_NR      21
-
-#define IOPRIO_IDLE	0
-#define IOPRIO_NORM	10
-#define IOPRIO_RT	20
-
-asmlinkage int sys_ioprio_set(int ioprio);
-asmlinkage int sys_ioprio_get(void);
-
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_FS_H */
