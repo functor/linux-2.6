@@ -838,12 +838,8 @@ static void adjust_lrq_weight(struct ckrm_cpu_class *clsptr, int cpu_online)
 		total_pressure += lrq->lrq_load;
 	}
 
-#if 1
-#warning "ACB taking out suspicious early return"
-#else
 	if (! total_pressure)
 		return;
-#endif
 	
 	class_weight = cpu_class_weight(clsptr) * cpu_online;
 
