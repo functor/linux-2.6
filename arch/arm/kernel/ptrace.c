@@ -622,7 +622,7 @@ static int do_ptrace(int request, struct task_struct *child, long addr, long dat
 			ret = access_process_vm(child, addr, &tmp,
 						sizeof(unsigned long), 0);
 			if (ret == sizeof(unsigned long))
-				ret = put_user(tmp, (unsigned long *) data);
+				ret = put_user(tmp, (unsigned long __user *) data);
 			else
 				ret = -EIO;
 			break;
@@ -754,6 +754,8 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 	read_unlock(&tasklist_lock);
 	if (!child)
 		goto out;
+	if (!vx_check(vx_task_xid(child), VX_WATCH|VX_IDENT))
+		goto out_tsk;
 
 	ret = -EPERM;
 	if (pid == 1)		/* you may not mess with init */

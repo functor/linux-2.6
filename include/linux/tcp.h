@@ -128,6 +128,10 @@ enum {
 #define TCP_INFO		11	/* Information about this connection. */
 #define TCP_QUICKACK		12	/* Block/reenable quick acks */
 
+#ifdef CONFIG_ACCEPT_QUEUES
+#define TCP_ACCEPTQ_SHARE	13	/* Set accept queue share */
+#endif
+
 #define TCPI_OPT_TIMESTAMPS	1
 #define TCPI_OPT_SACK		2
 #define TCPI_OPT_WSCALE		4
@@ -184,6 +188,18 @@ struct tcp_info
 	__u32	tcpi_advmss;
 	__u32	tcpi_reordering;
 };
+
+#ifdef CONFIG_ACCEPT_QUEUES
+
+#define NUM_ACCEPT_QUEUES	8 	/* Must be power of 2 */
+
+struct tcp_acceptq_info {
+	unsigned char acceptq_shares;
+	unsigned long acceptq_wait_time;
+	unsigned int acceptq_qcount;
+	unsigned int acceptq_count;
+};
+#endif
 
 #ifdef __KERNEL__
 
@@ -366,8 +382,9 @@ struct tcp_opt {
 
 	/* FIFO of established children */
 	struct open_request	*accept_queue;
-	struct open_request	*accept_queue_tail;
-
+#ifndef CONFIG_ACCEPT_QUEUES
+	struct open_request     *accept_queue_tail;
+#endif
 	int			write_pending;	/* A write to socket waits to start. */
 
 	unsigned int		keepalive_time;	  /* time before keep alive takes place */
@@ -375,6 +392,20 @@ struct tcp_opt {
 	int			linger2;
 
 	unsigned long last_synq_overflow; 
+
+/* Receiver side RTT estimation */
+	struct {
+		__u32	rtt;
+		__u32	seq;
+		__u32	time;
+	} rcv_rtt_est;
+
+/* Receiver queue space */
+	struct {
+		int	space;
+		__u32	seq;
+		__u32	time;
+	} rcvq_space;
 
 /* TCP Westwood structure */
         struct {
@@ -407,6 +438,22 @@ struct tcp_opt {
 		__u32 	last_max_cwnd;	/* last maximium snd_cwnd */
 		__u32	last_cwnd;	/* the last snd_cwnd */
 	} bictcp;
+
+#ifdef CONFIG_ACCEPT_QUEUES
+	/* move to listen opt... */
+	char		class_index;
+	struct {
+		struct open_request     *aq_head;
+		struct open_request     *aq_tail;
+		unsigned int		 aq_cnt;
+		unsigned int		 aq_ratio;
+		unsigned int             aq_count;
+		unsigned int             aq_qcount;
+		unsigned int             aq_backlog;
+		unsigned int             aq_wait_time;
+		int			 aq_valid;
+ 	} acceptq[NUM_ACCEPT_QUEUES];
+#endif
 };
 
 /* WARNING: don't change the layout of the members in tcp_sock! */

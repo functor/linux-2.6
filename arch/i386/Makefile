@@ -18,8 +18,9 @@
 LDFLAGS		:= -m elf_i386
 OBJCOPYFLAGS	:= -O binary -R .note -R .comment -S
 LDFLAGS_vmlinux :=
+CHECK		:= $(CHECK) -D__i386__=1
 
-CFLAGS += -pipe
+CFLAGS += -pipe -msoft-float -m32 -fno-builtin-sprintf -fno-builtin-log2 -fno-builtin-puts 
 
 # prevent gcc from keeping the stack 16 byte aligned
 CFLAGS += $(call check_gcc,-mpreferred-stack-boundary=2,)
@@ -92,7 +93,8 @@ core-$(CONFIG_X86_GENERICARCH) += arch/i386/mach-generic/
 
 # ES7000 subarch support
 mflags-$(CONFIG_X86_ES7000)	:= -Iinclude/asm-i386/mach-es7000
-mcore-$(CONFIG_X86_ES7000)	:= mach-es7000
+mcore-$(CONFIG_X86_ES7000)	:= mach-default
+core-$(CONFIG_X86_ES7000)	:= arch/i386/mach-es7000/
 
 # default subarch .h files
 mflags-y += -Iinclude/asm-i386/mach-default
@@ -110,7 +112,7 @@ drivers-$(CONFIG_OPROFILE)		+= arch/i386/oprofile/
 drivers-$(CONFIG_PM)			+= arch/i386/power/
 
 CFLAGS += $(mflags-y)
-AFLAGS += $(mflags-y)
+AFLAGS += $(mflags-y) -m32
 
 boot := arch/i386/boot
 

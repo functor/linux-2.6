@@ -20,8 +20,9 @@ ifeq ($(HAS_BIARCH),y)
 AS              := $(AS) -64
 LD              := $(LD) -m elf64ppc
 CC		:= $(CC) -m64
-CHECK		:= $(CHECK) -m64
 endif
+
+CHECK		:= $(CHECK) -m64 -D__powerpc__=1
 
 LDFLAGS		:= -m elf64ppc
 LDFLAGS_vmlinux	:= -Bstatic -e $(KERNELLOAD) -Ttext $(KERNELLOAD)
@@ -47,6 +48,8 @@ core-$(CONFIG_XMON)		+= arch/ppc64/xmon/
 drivers-$(CONFIG_OPROFILE)	+= arch/ppc64/oprofile/
 
 boot := arch/ppc64/boot
+bzImage: vmlinux
+	cp vmlinux arch/ppc64/boot/bzImage
 
 boottarget-$(CONFIG_PPC_PSERIES) := zImage zImage.initrd
 boottarget-$(CONFIG_PPC_ISERIES) := vmlinux.sminitrd vmlinux.initrd vmlinux.sm

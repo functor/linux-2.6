@@ -14,22 +14,13 @@ static void init_hwif_slc90e66(ide_hwif_t *);
 
 static ide_pci_device_t slc90e66_chipsets[] __devinitdata = {
 	{	/* 0 */
-		.vendor		= PCI_VENDOR_ID_EFAR,
-		.device		= PCI_DEVICE_ID_EFAR_SLC90E66_1,
 		.name		= "SLC90E66",
 		.init_chipset	= init_chipset_slc90e66,
-		.init_iops	= NULL,
 		.init_hwif	= init_hwif_slc90e66,
 		.channels	= 2,
 		.autodma	= AUTODMA,
 		.enablebits	= {{0x41,0x80,0x80}, {0x43,0x80,0x80}},
 		.bootable	= ON_BOARD,
-		.extra		= 0,
-	},{
-		.vendor		= 0,
-		.device		= 0,
-		.channels	= 0,
-		.bootable	= EOL,
 	}
 };
 

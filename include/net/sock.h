@@ -50,6 +50,7 @@
 #include <linux/security.h>
 
 #include <linux/filter.h>
+#include <linux/vinline.h>
 
 #include <asm/atomic.h>
 #include <net/dst.h>
@@ -61,7 +62,7 @@
  */
 
 /* Define this to get the sk->sk_debug debugging facility. */
-#define SOCK_DEBUGGING
+//#define SOCK_DEBUGGING
 #ifdef SOCK_DEBUGGING
 #define SOCK_DEBUG(sk, msg...) do { if ((sk) && ((sk)->sk_debug)) \
 					printk(KERN_DEBUG msg); } while (0)
@@ -109,6 +110,10 @@ struct sock_common {
 	struct hlist_node	skc_node;
 	struct hlist_node	skc_bind_node;
 	atomic_t		skc_refcnt;
+	xid_t			skc_xid;
+	struct vx_info		*skc_vx_info;
+	nid_t			skc_nid;
+	struct nx_info		*skc_nx_info;
 };
 
 /**
@@ -164,12 +169,13 @@ struct sock_common {
   *	@sk_timer - sock cleanup timer
   *	@sk_stamp - time stamp of last packet received
   *	@sk_socket - Identd and reporting IO signals
-  *	@sk_user_data - RPC layer private data
+  *	@sk_user_data - RPC and Tux layer private data
   *	@sk_owner - module that owns this socket
   *	@sk_state_change - callback to indicate change in the state of the sock
   *	@sk_data_ready - callback to indicate there is data to be processed
   *	@sk_write_space - callback to indicate there is bf sending space available
   *	@sk_error_report - callback to indicate errors (e.g. %MSG_ERRQUEUE)
+  *	@sk_create_child - callback to get new socket events
   *	@sk_backlog_rcv - callback to process the backlog
   *	@sk_destruct - called at sock freeing time, i.e. when all refcnt == 0
  */
@@ -186,6 +192,10 @@ struct sock {
 #define sk_node			__sk_common.skc_node
 #define sk_bind_node		__sk_common.skc_bind_node
 #define sk_refcnt		__sk_common.skc_refcnt
+#define sk_xid			__sk_common.skc_xid
+#define sk_vx_info		__sk_common.skc_vx_info
+#define sk_nid			__sk_common.skc_nid
+#define sk_nx_info		__sk_common.skc_nx_info
 	volatile unsigned char	sk_zapped;
 	unsigned char		sk_shutdown;
 	unsigned char		sk_use_write_queue;
@@ -245,6 +255,7 @@ struct sock {
 	struct timeval		sk_stamp;
 	struct socket		*sk_socket;
 	void			*sk_user_data;
+	void                    *sk_ns;        // For use by CKRM
 	struct module		*sk_owner;
 	void			*sk_security;
 	void			(*sk_state_change)(struct sock *sk);
@@ -253,6 +264,7 @@ struct sock {
 	void			(*sk_error_report)(struct sock *sk);
   	int			(*sk_backlog_rcv)(struct sock *sk,
 						  struct sk_buff *skb);  
+	void			(*sk_create_child)(struct sock *sk, struct sock *newsk);
 	void                    (*sk_destruct)(struct sock *sk);
 };
 
@@ -430,10 +442,11 @@ struct proto {
 	int			(*destroy)(struct sock *sk);
 	void			(*shutdown)(struct sock *sk, int how);
 	int			(*setsockopt)(struct sock *sk, int level, 
-					int optname, char *optval, int optlen);
+					int optname, char __user *optval,
+					int optlen);
 	int			(*getsockopt)(struct sock *sk, int level, 
-					int optname, char *optval, 
-					int *option);  	 
+					int optname, char __user *optval, 
+					int __user *option);  	 
 	int			(*sendmsg)(struct kiocb *iocb, struct sock *sk,
 					   struct msghdr *msg, size_t len);
 	int			(*recvmsg)(struct kiocb *iocb, struct sock *sk,
@@ -1048,7 +1061,7 @@ static inline void net_timestamp(struct timeval *stamp)
 	}		
 } 
 
-extern int sock_get_timestamp(struct sock *, struct timeval *);
+extern int sock_get_timestamp(struct sock *, struct timeval __user *);
 
 /* 
  *	Enable debug/info messages 

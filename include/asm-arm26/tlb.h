@@ -38,7 +38,8 @@ tlb_finish_mmu(struct mmu_gather *tlb, unsigned long start, unsigned long end)
 
         if (rss < freed)
                 freed = rss;
-        mm->rss = rss - freed;
+        // mm->rss = rss - freed;
+	vx_rsspages_sub(mm, freed);
 
         if (freed) {
                 flush_tlb_mm(mm);

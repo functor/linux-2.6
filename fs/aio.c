@@ -64,14 +64,9 @@ static void aio_kick_handler(void *);
 static int __init aio_setup(void)
 {
 	kiocb_cachep = kmem_cache_create("kiocb", sizeof(struct kiocb),
-				0, SLAB_HWCACHE_ALIGN, NULL, NULL);
-	if (!kiocb_cachep)
-		panic("unable to create kiocb cache\n");
-
+				0, SLAB_HWCACHE_ALIGN|SLAB_PANIC, NULL, NULL);
 	kioctx_cachep = kmem_cache_create("kioctx", sizeof(struct kioctx),
-				0, SLAB_HWCACHE_ALIGN, NULL, NULL);
-	if (!kioctx_cachep)
-		panic("unable to create kioctx cache");
+				0, SLAB_HWCACHE_ALIGN|SLAB_PANIC, NULL, NULL);
 
 	aio_wq = create_workqueue("aio");
 
@@ -543,19 +538,25 @@ struct kioctx *lookup_ioctx(unsigned long ctx_id)
 
 static void use_mm(struct mm_struct *mm)
 {
-	struct mm_struct *active_mm = current->active_mm;
+	struct mm_struct *active_mm;
+
 	atomic_inc(&mm->mm_count);
+	task_lock(current);
+	active_mm = current->active_mm;
 	current->mm = mm;
 	if (mm != active_mm) {
 		current->active_mm = mm;
 		activate_mm(active_mm, mm);
 	}
+	task_unlock(current);
 	mmdrop(active_mm);
 }
 
 static void unuse_mm(struct mm_struct *mm)
 {
+	task_lock(current);
 	current->mm = NULL;
+	task_unlock(current);
 	/* active_mm is still 'mm' */
 	enter_lazy_tlb(mm, current);
 }
@@ -613,7 +614,7 @@ void fastcall kick_iocb(struct kiocb *iocb)
 		spin_lock_irqsave(&ctx->ctx_lock, flags);
 		list_add_tail(&iocb->ki_run_list, &ctx->run_list);
 		spin_unlock_irqrestore(&ctx->ctx_lock, flags);
-		schedule_work(&ctx->wq);
+		queue_work(aio_wq, &ctx->wq);
 	}
 }
 
@@ -793,7 +794,7 @@ static inline void set_timeout(long start_jiffies, struct timeout *to,
 
 static inline void clear_timeout(struct timeout *to)
 {
-	del_timer_sync(&to->timer);
+	del_singleshot_timer_sync(&to->timer);
 }
 
 static int read_events(struct kioctx *ctx,
@@ -939,7 +940,7 @@ static void io_destroy(struct kioctx *ioctx)
  *	pointer is passed for ctxp.  Will fail with -ENOSYS if not
  *	implemented.
  */
-asmlinkage long sys_io_setup(unsigned nr_events, aio_context_t *ctxp)
+asmlinkage long sys_io_setup(unsigned nr_events, aio_context_t __user *ctxp)
 {
 	struct kioctx *ioctx = NULL;
 	unsigned long ctx;
@@ -1099,7 +1100,7 @@ out_put_req:
  *	fail with -ENOSYS if not implemented.
  */
 asmlinkage long sys_io_submit(aio_context_t ctx_id, long nr,
-			      struct iocb __user **iocbpp)
+			      struct iocb __user * __user *iocbpp)
 {
 	struct kioctx *ctx;
 	long ret = 0;

@@ -60,11 +60,11 @@ static int fbiogetputcmap(unsigned int fd, unsigned int cmd, unsigned long arg)
 	u32 r, g, b;
 	mm_segment_t old_fs = get_fs();
 	
-	ret = get_user(f.index, &(((struct fbcmap32 *)arg)->index));
-	ret |= __get_user(f.count, &(((struct fbcmap32 *)arg)->count));
-	ret |= __get_user(r, &(((struct fbcmap32 *)arg)->red));
-	ret |= __get_user(g, &(((struct fbcmap32 *)arg)->green));
-	ret |= __get_user(b, &(((struct fbcmap32 *)arg)->blue));
+	ret = get_user(f.index, &(((struct fbcmap32 __user *)arg)->index));
+	ret |= __get_user(f.count, &(((struct fbcmap32 __user *)arg)->count));
+	ret |= __get_user(r, &(((struct fbcmap32 __user *)arg)->red));
+	ret |= __get_user(g, &(((struct fbcmap32 __user *)arg)->green));
+	ret |= __get_user(b, &(((struct fbcmap32 __user *)arg)->blue));
 	if (ret)
 		return -EFAULT;
 	if ((f.index < 0) || (f.index > 255)) return -EINVAL;
@@ -113,16 +113,21 @@ static int fbiogscursor(unsigned int fd, unsigned int cmd, unsigned long arg)
 	u32 m, i;
 	mm_segment_t old_fs = get_fs();
 	
-	ret = copy_from_user (&f, (struct fbcursor32 *)arg, 2 * sizeof (short) + 2 * sizeof(struct fbcurpos));
-	ret |= __get_user(f.size.x, &(((struct fbcursor32 *)arg)->size.x));
-	ret |= __get_user(f.size.y, &(((struct fbcursor32 *)arg)->size.y));
-	ret |= __get_user(f.cmap.index, &(((struct fbcursor32 *)arg)->cmap.index));
-	ret |= __get_user(f.cmap.count, &(((struct fbcursor32 *)arg)->cmap.count));
-	ret |= __get_user(r, &(((struct fbcursor32 *)arg)->cmap.red));
-	ret |= __get_user(g, &(((struct fbcursor32 *)arg)->cmap.green));
-	ret |= __get_user(b, &(((struct fbcursor32 *)arg)->cmap.blue));
-	ret |= __get_user(m, &(((struct fbcursor32 *)arg)->mask));
-	ret |= __get_user(i, &(((struct fbcursor32 *)arg)->image));
+	ret = copy_from_user (&f, (struct fbcursor32 __user *) arg,
+			      2 * sizeof (short) + 2 * sizeof(struct fbcurpos));
+	ret |= __get_user(f.size.x,
+			  &(((struct fbcursor32 __user *)arg)->size.x));
+	ret |= __get_user(f.size.y,
+			  &(((struct fbcursor32 __user *)arg)->size.y));
+	ret |= __get_user(f.cmap.index,
+			  &(((struct fbcursor32 __user *)arg)->cmap.index));
+	ret |= __get_user(f.cmap.count,
+			  &(((struct fbcursor32 __user *)arg)->cmap.count));
+	ret |= __get_user(r, &(((struct fbcursor32 __user *)arg)->cmap.red));
+	ret |= __get_user(g, &(((struct fbcursor32 __user *)arg)->cmap.green));
+	ret |= __get_user(b, &(((struct fbcursor32 __user *)arg)->cmap.blue));
+	ret |= __get_user(m, &(((struct fbcursor32 __user *)arg)->mask));
+	ret |= __get_user(i, &(((struct fbcursor32 __user *)arg)->image));
 	if (ret)
 		return -EFAULT;
 	if (f.set & FB_CUR_SETCMAP) {
@@ -148,306 +153,6 @@ static int fbiogscursor(unsigned int fd, unsigned int cmd, unsigned long arg)
 	return ret;
 }
 
-struct ncp_ioctl_request_32 {
-	unsigned int function;
-	unsigned int size;
-	compat_caddr_t data;
-};
-
-struct ncp_fs_info_v2_32 {
-	int version;
-	unsigned int mounted_uid;
-	unsigned int connection;
-	unsigned int buffer_size;
-
-	unsigned int volume_number;
-	__u32 directory_id;
-
-	__u32 dummy1;
-	__u32 dummy2;
-	__u32 dummy3;
-};
-
-struct ncp_objectname_ioctl_32
-{
-	int		auth_type;
-	unsigned int	object_name_len;
-	compat_caddr_t	object_name;	/* an userspace data, in most cases user name */
-};
-
-struct ncp_privatedata_ioctl_32
-{
-	unsigned int	len;
-	compat_caddr_t	data;		/* ~1000 for NDS */
-};
-
-#define	NCP_IOC_NCPREQUEST_32		_IOR('n', 1, struct ncp_ioctl_request_32)
-
-#define NCP_IOC_GETMOUNTUID2_32		_IOW('n', 2, unsigned int)
-
-#define NCP_IOC_GET_FS_INFO_V2_32	_IOWR('n', 4, struct ncp_fs_info_v2_32)
-
-#define NCP_IOC_GETOBJECTNAME_32	_IOWR('n', 9, struct ncp_objectname_ioctl_32)
-#define NCP_IOC_SETOBJECTNAME_32	_IOR('n', 9, struct ncp_objectname_ioctl_32)
-#define NCP_IOC_GETPRIVATEDATA_32	_IOWR('n', 10, struct ncp_privatedata_ioctl_32)
-#define NCP_IOC_SETPRIVATEDATA_32	_IOR('n', 10, struct ncp_privatedata_ioctl_32)
-
-static int do_ncp_ncprequest(unsigned int fd, unsigned int cmd, unsigned long arg)
-{
-	struct ncp_ioctl_request_32 n32;
-	struct ncp_ioctl_request n;
-	mm_segment_t old_fs;
-	int err;
-
-	if (copy_from_user(&n32, (struct ncp_ioctl_request_32*)arg,
-	    sizeof(n32)))
-		return -EFAULT;
-
-	n.function = n32.function;
-	n.size = n32.size;
-	if (n.size > 65536)
-		return -EINVAL;
-	n.data = vmalloc(65536);	/* 65536 must be same as NCP_PACKET_SIZE_INTERNAL in ncpfs */
-	if (!n.data)
-		return -ENOMEM;
-	err = -EFAULT;
-	if (copy_from_user(n.data, A(n32.data), n.size))
-		goto out;
-
-	old_fs = get_fs(); set_fs (KERNEL_DS);
-	err = sys_ioctl (fd, NCP_IOC_NCPREQUEST, (unsigned long)&n);
-	set_fs (old_fs);
-        if(err <= 0)
-		goto out;
-	if (err > 65536) {
-		err = -EINVAL;
-		goto out;
-	}
-	if (copy_to_user(A(n32.data), n.data, err)) {
-		err = -EFAULT;
-		goto out;
-	}
- out:
-	vfree(n.data);
-	return err;
-}
-
-static int do_ncp_getmountuid2(unsigned int fd, unsigned int cmd, unsigned long arg)
-{
-	mm_segment_t old_fs = get_fs();
-	__kernel_uid_t kuid;
-	int err;
-
-	cmd = NCP_IOC_GETMOUNTUID2;
-
-	set_fs(KERNEL_DS);
-	err = sys_ioctl(fd, cmd, (unsigned long)&kuid);
-	set_fs(old_fs);
-
-	if (!err)
-		err = put_user(kuid, (unsigned int*)arg);
-
-	return err;
-}
-
-static int do_ncp_getfsinfo2(unsigned int fd, unsigned int cmd, unsigned long arg)
-{
-	mm_segment_t old_fs = get_fs();
-	struct ncp_fs_info_v2_32 n32;
-	struct ncp_fs_info_v2 n;
-	int err;
-
-	if (copy_from_user(&n32, (struct ncp_fs_info_v2_32*)arg, sizeof(n32)))
-		return -EFAULT;
-	if (n32.version != NCP_GET_FS_INFO_VERSION_V2)
-		return -EINVAL;
-	n.version = NCP_GET_FS_INFO_VERSION_V2;
-
-	set_fs(KERNEL_DS);
-	err = sys_ioctl(fd, NCP_IOC_GET_FS_INFO_V2, (unsigned long)&n);
-	set_fs(old_fs);
-
-	if (!err) {
-		n32.version = n.version;
-		n32.mounted_uid = n.mounted_uid;
-		n32.connection = n.connection;
-		n32.buffer_size = n.buffer_size;
-		n32.volume_number = n.volume_number;
-		n32.directory_id = n.directory_id;
-		n32.dummy1 = n.dummy1;
-		n32.dummy2 = n.dummy2;
-		n32.dummy3 = n.dummy3;
-		err = copy_to_user((struct ncp_fs_info_v2_32*)arg, &n32, sizeof(n32)) ? -EFAULT : 0;
-	}
-	return err;
-}
-
-static int do_ncp_getobjectname(unsigned int fd, unsigned int cmd, unsigned long arg)
-{
-	struct ncp_objectname_ioctl_32 n32;
-	struct ncp_objectname_ioctl n;
-	mm_segment_t old_fs;
-	int err;
-	size_t tl;
-
-	if (copy_from_user(&n32, (struct ncp_objectname_ioctl_32*)arg,
-	    sizeof(n32)))
-		return -EFAULT;
-
-	n.object_name_len = tl = n32.object_name_len;
-	if (tl) {
-		n.object_name = kmalloc(tl, GFP_KERNEL);
-		if (!n.object_name)
-			return -ENOMEM;
-	} else {
-		n.object_name = NULL;
-	}
-
-	old_fs = get_fs(); set_fs (KERNEL_DS);
-	err = sys_ioctl (fd, NCP_IOC_GETOBJECTNAME, (unsigned long)&n);
-	set_fs (old_fs);
-        if(err)
-		goto out;
-		
-	if (tl > n.object_name_len)
-		tl = n.object_name_len;
-
-	err = -EFAULT;
-	if (tl && copy_to_user(A(n32.object_name), n.object_name, tl))
-		goto out;
-
-	n32.auth_type = n.auth_type;
-	n32.object_name_len = n.object_name_len;
-	
-	if (copy_to_user((struct ncp_objectname_ioctl_32*)arg, &n32, sizeof(n32)))
-		goto out;
-	
-	err = 0;
- out:
- 	if (n.object_name)
-		kfree(n.object_name);
-
-	return err;
-}
-
-static int do_ncp_setobjectname(unsigned int fd, unsigned int cmd, unsigned long arg)
-{
-	struct ncp_objectname_ioctl_32 n32;
-	struct ncp_objectname_ioctl n;
-	mm_segment_t old_fs;
-	int err;
-	size_t tl;
-
-	if (copy_from_user(&n32, (struct ncp_objectname_ioctl_32*)arg,
-	    sizeof(n32)))
-		return -EFAULT;
-
-	n.auth_type = n32.auth_type;
-	n.object_name_len = tl = n32.object_name_len;
-	if (tl) {
-		n.object_name = kmalloc(tl, GFP_KERNEL);
-		if (!n.object_name)
-			return -ENOMEM;
-		err = -EFAULT;
-		if (copy_from_user(n.object_name, A(n32.object_name), tl))
-			goto out;
-	} else {
-		n.object_name = NULL;
-	}
-	
-	old_fs = get_fs(); set_fs (KERNEL_DS);
-	err = sys_ioctl (fd, NCP_IOC_SETOBJECTNAME, (unsigned long)&n);
-	set_fs (old_fs);
-		
- out:
-	if (n.object_name)
-		kfree(n.object_name);
-
-	return err;
-}
-
-static int do_ncp_getprivatedata(unsigned int fd, unsigned int cmd, unsigned long arg)
-{
-	struct ncp_privatedata_ioctl_32 n32;
-	struct ncp_privatedata_ioctl n;
-	mm_segment_t old_fs;
-	int err;
-	size_t tl;
-
-	if (copy_from_user(&n32, (struct ncp_privatedata_ioctl_32*)arg,
-	    sizeof(n32)))
-		return -EFAULT;
-
-	n.len = tl = n32.len;
-	if (tl) {
-		n.data = kmalloc(tl, GFP_KERNEL);
-		if (!n.data)
-			return -ENOMEM;
-	} else {
-		n.data = NULL;
-	}
-
-	old_fs = get_fs(); set_fs (KERNEL_DS);
-	err = sys_ioctl (fd, NCP_IOC_GETPRIVATEDATA, (unsigned long)&n);
-	set_fs (old_fs);
-        if(err)
-		goto out;
-		
-	if (tl > n.len)
-		tl = n.len;
-
-	err = -EFAULT;
-	if (tl && copy_to_user(A(n32.data), n.data, tl))
-		goto out;
-
-	n32.len = n.len;
-	
-	if (copy_to_user((struct ncp_privatedata_ioctl_32*)arg, &n32, sizeof(n32)))
-		goto out;
-	
-	err = 0;
- out:
- 	if (n.data)
-		kfree(n.data);
-
-	return err;
-}
-
-static int do_ncp_setprivatedata(unsigned int fd, unsigned int cmd, unsigned long arg)
-{
-	struct ncp_privatedata_ioctl_32 n32;
-	struct ncp_privatedata_ioctl n;
-	mm_segment_t old_fs;
-	int err;
-	size_t tl;
-
-	if (copy_from_user(&n32, (struct ncp_privatedata_ioctl_32*)arg,
-	    sizeof(n32)))
-		return -EFAULT;
-
-	n.len = tl = n32.len;
-	if (tl) {
-		n.data = kmalloc(tl, GFP_KERNEL);
-		if (!n.data)
-			return -ENOMEM;
-		err = -EFAULT;
-		if (copy_from_user(n.data, A(n32.data), tl))
-			goto out;
-	} else {
-		n.data = NULL;
-	}
-	
-	old_fs = get_fs(); set_fs (KERNEL_DS);
-	err = sys_ioctl (fd, NCP_IOC_SETPRIVATEDATA, (unsigned long)&n);
-	set_fs (old_fs);
-		
- out:
-	if (n.data)
-		kfree(n.data);
-
-	return err;
-}
-
 #if defined(CONFIG_DRM) || defined(CONFIG_DRM_MODULE)
 /* This really belongs in include/linux/drm.h -DaveM */
 #include "../../../drivers/char/drm/drm.h"
@@ -467,7 +172,7 @@ typedef struct drm32_version {
 
 static int drm32_version(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
-	drm32_version_t *uversion = (drm32_version_t *)arg;
+	drm32_version_t __user *uversion = (drm32_version_t __user *)arg;
 	char __user *name_ptr, *date_ptr, *desc_ptr;
 	u32 tmp1, tmp2, tmp3;
 	drm_version_t kversion;
@@ -545,7 +250,7 @@ typedef struct drm32_unique {
 
 static int drm32_getsetunique(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
-	drm32_unique_t *uarg = (drm32_unique_t *)arg;
+	drm32_unique_t __user *uarg = (drm32_unique_t __user *)arg;
 	drm_unique_t karg;
 	mm_segment_t old_fs;
 	char __user *uptr;
@@ -609,7 +314,7 @@ typedef struct drm32_map {
 
 static int drm32_addmap(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
-	drm32_map_t *uarg = (drm32_map_t *) arg;
+	drm32_map_t __user *uarg = (drm32_map_t __user *) arg;
 	drm_map_t karg;
 	mm_segment_t old_fs;
 	u32 tmp;
@@ -624,7 +329,7 @@ static int drm32_addmap(unsigned int fd, unsigned int cmd, unsigned long arg)
 	if (ret)
 		return -EFAULT;
 
-	karg.handle = A(tmp);
+	karg.handle = (void *) (unsigned long) tmp;
 
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
@@ -654,7 +359,7 @@ typedef struct drm32_buf_info {
 
 static int drm32_info_bufs(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
-	drm32_buf_info_t *uarg = (drm32_buf_info_t *)arg;
+	drm32_buf_info_t __user *uarg = (drm32_buf_info_t __user *)arg;
 	drm_buf_desc_t __user *ulist;
 	drm_buf_info_t karg;
 	mm_segment_t old_fs;
@@ -700,7 +405,7 @@ typedef struct drm32_buf_free {
 
 static int drm32_free_bufs(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
-	drm32_buf_free_t *uarg = (drm32_buf_free_t *)arg;
+	drm32_buf_free_t __user *uarg = (drm32_buf_free_t __user *)arg;
 	drm_buf_free_t karg;
 	mm_segment_t old_fs;
 	int __user *ulist;
@@ -748,7 +453,7 @@ typedef struct drm32_buf_map {
 
 static int drm32_map_bufs(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
-	drm32_buf_map_t *uarg = (drm32_buf_map_t *)arg;
+	drm32_buf_map_t __user *uarg = (drm32_buf_map_t __user *)arg;
 	drm32_buf_pub_t __user *ulist;
 	drm_buf_map_t karg;
 	mm_segment_t old_fs;
@@ -760,7 +465,7 @@ static int drm32_map_bufs(unsigned int fd, unsigned int cmd, unsigned long arg)
 	    get_user(tmp2, &uarg->list))
 		return -EFAULT;
 
-	karg.virtual = A(tmp1);
+	karg.virtual = (void *) (unsigned long) tmp1;
 	ulist = A(tmp2);
 
 	orig_count = karg.count;
@@ -777,7 +482,7 @@ static int drm32_map_bufs(unsigned int fd, unsigned int cmd, unsigned long arg)
 		    get_user(tmp1, &ulist[i].address))
 			goto out;
 
-		karg.list[i].address = A(tmp1);
+		karg.list[i].address = (void *) (unsigned long) tmp1;
 	}
 
 	old_fs = get_fs();
@@ -827,7 +532,7 @@ typedef struct drm32_dma {
  */
 static int drm32_dma(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
-	drm32_dma_t *uarg = (drm32_dma_t *) arg;
+	drm32_dma_t __user *uarg = (drm32_dma_t __user *) arg;
 	int __user *u_si, *u_ss, *u_ri, *u_rs;
 	drm_dma_t karg;
 	mm_segment_t old_fs;
@@ -937,7 +642,7 @@ typedef struct drm32_ctx_res {
 
 static int drm32_res_ctx(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
-	drm32_ctx_res_t *uarg = (drm32_ctx_res_t *) arg;
+	drm32_ctx_res_t __user *uarg = (drm32_ctx_res_t __user *) arg;
 	drm_ctx_t __user *ulist;
 	drm_ctx_res_t karg;
 	mm_segment_t old_fs;
@@ -1070,18 +775,6 @@ COMPATIBLE_IOCTL(AUDIO_GETDEV)
 COMPATIBLE_IOCTL(AUDIO_GETDEV_SUNOS)
 COMPATIBLE_IOCTL(AUDIO_FLUSH)
 COMPATIBLE_IOCTL(AUTOFS_IOC_EXPIRE_MULTI)
-/* NCP ioctls which do not need any translations */
-COMPATIBLE_IOCTL(NCP_IOC_CONN_LOGGED_IN)
-COMPATIBLE_IOCTL(NCP_IOC_SIGN_INIT)
-COMPATIBLE_IOCTL(NCP_IOC_SIGN_WANTED)
-COMPATIBLE_IOCTL(NCP_IOC_SET_SIGN_WANTED)
-COMPATIBLE_IOCTL(NCP_IOC_LOCKUNLOCK)
-COMPATIBLE_IOCTL(NCP_IOC_GETROOT)
-COMPATIBLE_IOCTL(NCP_IOC_SETROOT)
-COMPATIBLE_IOCTL(NCP_IOC_GETCHARSETS)
-COMPATIBLE_IOCTL(NCP_IOC_SETCHARSETS)
-COMPATIBLE_IOCTL(NCP_IOC_GETDENTRYTTL)
-COMPATIBLE_IOCTL(NCP_IOC_SETDENTRYTTL)
 #if defined(CONFIG_DRM) || defined(CONFIG_DRM_MODULE)
 COMPATIBLE_IOCTL(DRM_IOCTL_GET_MAGIC)
 COMPATIBLE_IOCTL(DRM_IOCTL_IRQ_BUSID)
@@ -1107,14 +800,6 @@ COMPATIBLE_IOCTL(WIOCSTART)
 COMPATIBLE_IOCTL(WIOCSTOP)
 COMPATIBLE_IOCTL(WIOCGSTAT)
 /* And these ioctls need translation */
-/* NCPFS */
-HANDLE_IOCTL(NCP_IOC_NCPREQUEST_32, do_ncp_ncprequest)
-HANDLE_IOCTL(NCP_IOC_GETMOUNTUID2_32, do_ncp_getmountuid2)
-HANDLE_IOCTL(NCP_IOC_GET_FS_INFO_V2_32, do_ncp_getfsinfo2)
-HANDLE_IOCTL(NCP_IOC_GETOBJECTNAME_32, do_ncp_getobjectname)
-HANDLE_IOCTL(NCP_IOC_SETOBJECTNAME_32, do_ncp_setobjectname)
-HANDLE_IOCTL(NCP_IOC_GETPRIVATEDATA_32, do_ncp_getprivatedata)
-HANDLE_IOCTL(NCP_IOC_SETPRIVATEDATA_32, do_ncp_setprivatedata)
 /* Note SIOCRTMSG is no longer, so this is safe and * the user would have seen just an -EINVAL anyways. */
 HANDLE_IOCTL(FBIOPUTCMAP32, fbiogetputcmap)
 HANDLE_IOCTL(FBIOGETCMAP32, fbiogetputcmap)

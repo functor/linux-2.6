@@ -36,11 +36,13 @@ struct systemcfg *systemcfg;
 {									    \
 	.xLpPacaPtr = &paca[number].xLpPaca,				    \
 	.xLpRegSavePtr = &paca[number].xRegSav,				    \
+	.lock_token = 0x8000,						    \
 	.xPacaIndex = (number),		/* Paca Index */		    \
 	.default_decr = 0x00ff0000,	/* Initial Decr */		    \
 	.xStab_data = {							    \
 		.real = (asrr),		/* Real pointer to segment table */ \
 		.virt = (asrv),		/* Virt pointer to segment table */ \
+		.next_round_robin = 1,					    \
 	},								    \
 	.lpQueuePtr = (lpq),		/* &xItLpQueue, */		    \
 	/* .xRtas = {							    \
@@ -53,7 +55,8 @@ struct systemcfg *systemcfg;
 		.xFPRegsInUse = 1,					    \
 		.xDynProcStatus = 2,					    \
 		.xDecrVal = 0x00ff0000,					    \
-		.xEndOfQuantum = 0xffffffffffffffff			    \
+		.xEndOfQuantum = 0xfffffffffffffffful,			    \
+		.xSLBCount = 64,					    \
 	},								    \
 	.xRegSav = {							    \
 		.xDesc = 0xd397d9e2,	/* "LpRS" */			    \

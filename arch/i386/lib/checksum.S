@@ -280,14 +280,14 @@ unsigned int csum_partial_copy_generic (const char *src, char *dst,
 	.previous
 
 .align 4
-.globl csum_partial_copy_generic
+.globl direct_csum_partial_copy_generic
 				
 #ifndef CONFIG_X86_USE_PPRO_CHECKSUM
 
 #define ARGBASE 16		
 #define FP		12
 		
-csum_partial_copy_generic:
+direct_csum_partial_copy_generic:
 	subl  $4,%esp	
 	pushl %edi
 	pushl %esi
@@ -422,7 +422,7 @@ DST(	movb %cl, (%edi)	)
 
 #define ARGBASE 12
 		
-csum_partial_copy_generic:
+direct_csum_partial_copy_generic:
 	pushl %ebx
 	pushl %edi
 	pushl %esi

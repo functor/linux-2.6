@@ -1,6 +1,8 @@
 #ifndef _I386_PAGE_H
 #define _I386_PAGE_H
 
+#include <linux/config.h>
+
 /* PAGE_SHIFT determines the page size */
 #define PAGE_SHIFT	12
 #define PAGE_SIZE	(1UL << PAGE_SHIFT)
@@ -9,11 +11,10 @@
 #define LARGE_PAGE_MASK (~(LARGE_PAGE_SIZE-1))
 #define LARGE_PAGE_SIZE (1UL << PMD_SHIFT)
 
-#ifdef __KERNEL__
-#ifndef __ASSEMBLY__
-
 #include <linux/config.h>
 
+#ifdef __KERNEL__
+#ifndef __ASSEMBLY__
 #ifdef CONFIG_X86_USE_3DNOW
 
 #include <asm/mmx.h>
@@ -40,15 +41,18 @@
  * These are used to make use of C type-checking..
  */
 #ifdef CONFIG_X86_PAE
+extern unsigned long long __supported_pte_mask;
 typedef struct { unsigned long pte_low, pte_high; } pte_t;
 typedef struct { unsigned long long pmd; } pmd_t;
 typedef struct { unsigned long long pgd; } pgd_t;
+typedef struct { unsigned long long pgprot; } pgprot_t;
 #define pte_val(x)	((x).pte_low | ((unsigned long long)(x).pte_high << 32))
 #define HPAGE_SHIFT	21
 #else
 typedef struct { unsigned long pte_low; } pte_t;
 typedef struct { unsigned long pmd; } pmd_t;
 typedef struct { unsigned long pgd; } pgd_t;
+typedef struct { unsigned long pgprot; } pgprot_t;
 #define boot_pte_t pte_t /* or would you rather have a typedef */
 #define pte_val(x)	((x).pte_low)
 #define HPAGE_SHIFT	22
@@ -61,7 +65,6 @@ typedef struct { unsigned long pgd; } pgd_t;
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
 #endif
 
-typedef struct { unsigned long pgprot; } pgprot_t;
 
 #define pmd_val(x)	((x).pmd)
 #define pgd_val(x)	((x).pgd)
@@ -88,7 +91,18 @@ typedef struct { unsigned long pgprot; } pgprot_t;
  *
  * If you want more physical memory than this then see the CONFIG_HIGHMEM4G
  * and CONFIG_HIGHMEM64G options in the kernel configuration.
+ *
+ * Note: on PAE the kernel must never go below 32 MB, we use the
+ * first 8 entries of the 2-level boot pgd for PAE magic.
  */
+
+#ifdef CONFIG_X86_4G_VM_LAYOUT
+#define __PAGE_OFFSET		(0x02000000)
+#define TASK_SIZE		(0xff000000)
+#else
+#define __PAGE_OFFSET		(0xc0000000)
+#define TASK_SIZE		(0xc0000000)
+#endif
 
 /*
  * This much address space is reserved for vmalloc() and iomap()
@@ -114,16 +128,10 @@ static __inline__ int get_order(unsigned long size)
 
 #endif /* __ASSEMBLY__ */
 
-#ifdef __ASSEMBLY__
-#define __PAGE_OFFSET		(0xC0000000)
-#else
-#define __PAGE_OFFSET		(0xC0000000UL)
-#endif
-
-
 #define PAGE_OFFSET		((unsigned long)__PAGE_OFFSET)
 #define VMALLOC_RESERVE		((unsigned long)__VMALLOC_RESERVE)
-#define MAXMEM			(-__PAGE_OFFSET-__VMALLOC_RESERVE)
+#define __MAXMEM		(-__PAGE_OFFSET-__VMALLOC_RESERVE)
+#define MAXMEM			((unsigned long)(-PAGE_OFFSET-VMALLOC_RESERVE))
 #define __pa(x)			((unsigned long)(x)-PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
 #define pfn_to_kaddr(pfn)      __va((pfn) << PAGE_SHIFT)
@@ -136,8 +144,10 @@ static __inline__ int get_order(unsigned long size)
 
 #define virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
 
-#define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
-				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+#define VM_DATA_DEFAULT_FLAGS \
+		(VM_READ | VM_WRITE | \
+			((current->flags & PF_RELOCEXEC) ? 0 : VM_EXEC) | \
+				VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
 #endif /* __KERNEL__ */
 

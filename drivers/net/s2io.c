@@ -238,7 +238,7 @@ static struct pci_driver s2io_driver = {
       name:"S2IO",
       id_table:s2io_tbl,
       probe:s2io_init_nic,
-      remove:s2io_rem_nic,
+      remove:__devexit_p(s2io_rem_nic),
 };
 
 /*  
@@ -2339,9 +2339,6 @@ static irqreturn_t s2io_isr(int irq, void *dev_id, struct pt_regs *regs)
 	struct net_device *dev = (struct net_device *) dev_id;
 	nic_t *sp = dev->priv;
 	XENA_dev_config_t *bar0 = (XENA_dev_config_t *) sp->bar0;
-#ifndef CONFIG_S2IO_NAPI
-	int i, ret;
-#endif
 	u64 reason = 0, general_mask = 0;
 	mac_info_t *mac_control;
 	struct config_param *config;
@@ -4358,7 +4355,7 @@ s2io_init_nic(struct pci_dev *pdev, const struct pci_device_id *pre)
 *  and free up all resource held up by the device. This could be in response 
 *  to a Hot plug event or when the driver is to be removed from memory.
 */
-static void __exit s2io_rem_nic(struct pci_dev *pdev)
+static void __devexit s2io_rem_nic(struct pci_dev *pdev)
 {
 	struct net_device *dev =
 	    (struct net_device *) pci_get_drvdata(pdev);

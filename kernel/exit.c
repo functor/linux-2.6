@@ -22,19 +22,28 @@
 #include <linux/profile.h>
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
+#include <linux/mempolicy.h>
+#include <linux/ckrm.h>
+#include <linux/ckrm_tsk.h>
 
 #include <asm/uaccess.h>
+#include <asm/unistd.h>
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
 
 extern void sem_exit (void);
 extern struct task_struct *child_reaper;
 
-int getrusage(struct task_struct *, int, struct rusage *);
+int getrusage(struct task_struct *, int, struct rusage __user *);
 
 static void __unhash_process(struct task_struct *p)
 {
 	nr_threads--;
+	/* tasklist_lock is held, is this sufficient? */
+	if (p->vx_info) {
+		atomic_dec(&p->vx_info->cacct.nr_threads);
+		atomic_dec(&p->vx_info->limit.res[RLIMIT_NPROC]);
+	}
 	detach_pid(p, PIDTYPE_PID);
 	detach_pid(p, PIDTYPE_TGID);
 	if (thread_group_leader(p)) {
@@ -234,6 +243,7 @@ void reparent_to_init(void)
 	ptrace_unlink(current);
 	/* Reparent to init */
 	REMOVE_LINKS(current);
+	/* FIXME handle vchild_reaper/initpid */
 	current->parent = child_reaper;
 	current->real_parent = child_reaper;
 	SET_LINKS(current);
@@ -378,6 +388,7 @@ static inline void close_files(struct files_struct * files)
 				struct file * file = xchg(&files->fd[i], NULL);
 				if (file)
 					filp_close(file, files);
+				vx_openfd_dec(fd);
 			}
 			i++;
 			set >>= 1;
@@ -597,6 +608,7 @@ static inline void forget_original_parent(struct task_struct * father)
 	struct task_struct *p, *reaper = father;
 	struct list_head *_p, *_n;
 
+	/* FIXME handle vchild_reaper/initpid */
 	reaper = father->group_leader;
 	if (reaper == father)
 		reaper = child_reaper;
@@ -636,6 +648,8 @@ static void exit_notify(struct task_struct *tsk)
 {
 	int state;
 	struct task_struct *t;
+
+	ckrm_cb_exit(tsk);
 
 	if (signal_pending(tsk) && !tsk->signal->group_exit
 	    && !thread_group_empty(tsk)) {
@@ -735,6 +749,14 @@ static void exit_notify(struct task_struct *tsk)
 	tsk->flags |= PF_DEAD;
 
 	/*
+	 * Clear these here so that update_process_times() won't try to deliver
+	 * itimer, profile or rlimit signals to this task while it is in late exit.
+	 */
+	tsk->it_virt_incr = 0;
+	tsk->it_prof_value = 0;
+	tsk->rlim[RLIMIT_CPU].rlim_cur = RLIM_INFINITY;
+
+	/*
 	 * In the preemption case it must be impossible for the task
 	 * to get runnable again, so use "_raw_" unlock to keep
 	 * preempt_count elevated until we schedule().
@@ -783,6 +805,13 @@ asmlinkage NORET_TYPE void do_exit(long code)
 	}
 
 	acct_process(code);
+	if (current->tux_info) {
+#ifdef CONFIG_TUX_DEBUG
+		printk("Possibly unexpected TUX-thread exit(%ld) at %p?\n",
+			code, __builtin_return_address(0));
+#endif
+		current->tux_exit();
+	}
 	__exit_mm(tsk);
 
 	exit_sem(tsk);
@@ -790,6 +819,9 @@ asmlinkage NORET_TYPE void do_exit(long code)
 	__exit_fs(tsk);
 	exit_namespace(tsk);
 	exit_thread();
+#ifdef CONFIG_NUMA
+	mpol_free(tsk->mempolicy);
+#endif
 
 	if (tsk->signal->leader)
 		disassociate_ctty(1);
@@ -799,6 +831,7 @@ asmlinkage NORET_TYPE void do_exit(long code)
 		module_put(tsk->binfmt->module);
 
 	tsk->exit_code = code;
+	numtasks_put_ref(tsk->taskclass);
 	exit_notify(tsk);
 	schedule();
 	BUG();
@@ -931,7 +964,7 @@ static int eligible_child(pid_t pid, int options, task_t *p)
  * the lock and this task is uninteresting.  If we return nonzero, we have
  * released the lock and the system call should return.
  */
-static int wait_task_zombie(task_t *p, unsigned int *stat_addr, struct rusage *ru)
+static int wait_task_zombie(task_t *p, unsigned int __user *stat_addr, struct rusage __user *ru)
 {
 	unsigned long state;
 	int retval;
@@ -1004,7 +1037,8 @@ static int wait_task_zombie(task_t *p, unsigned int *stat_addr, struct rusage *r
  * released the lock and the system call should return.
  */
 static int wait_task_stopped(task_t *p, int delayed_group_leader,
-			     unsigned int *stat_addr, struct rusage *ru)
+			     unsigned int __user *stat_addr,
+			     struct rusage __user *ru)
 {
 	int retval, exit_code;
 
@@ -1074,7 +1108,7 @@ static int wait_task_stopped(task_t *p, int delayed_group_leader,
 	return retval;
 }
 
-asmlinkage long sys_wait4(pid_t pid,unsigned int * stat_addr, int options, struct rusage * ru)
+asmlinkage long sys_wait4(pid_t pid,unsigned int __user *stat_addr, int options, struct rusage __user *ru)
 {
 	DECLARE_WAITQUEUE(wait, current);
 	struct task_struct *tsk;
@@ -1157,14 +1191,13 @@ end_wait4:
 	return retval;
 }
 
-#if !defined(__alpha__) && !defined(__ia64__) && \
-    !defined(__arm__) && !defined(__s390__)
+#ifdef __ARCH_WANT_SYS_WAITPID
 
 /*
  * sys_waitpid() remains for compatibility. waitpid() should be
  * implemented by calling sys_wait4() from libc.a.
  */
-asmlinkage long sys_waitpid(pid_t pid,unsigned int * stat_addr, int options)
+asmlinkage long sys_waitpid(pid_t pid, unsigned __user *stat_addr, int options)
 {
 	return sys_wait4(pid, stat_addr, options, NULL);
 }

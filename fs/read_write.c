@@ -15,6 +15,7 @@
 #include <linux/module.h>
 
 #include <asm/uaccess.h>
+#include <asm/unistd.h>
 
 struct file_operations generic_ro_fops = {
 	.llseek		= generic_file_llseek,
@@ -143,9 +144,8 @@ asmlinkage off_t sys_lseek(unsigned int fd, off_t offset, unsigned int origin)
 bad:
 	return retval;
 }
-EXPORT_SYMBOL_GPL(sys_lseek);
 
-#if !defined(__alpha__)
+#ifdef __ARCH_WANT_SYS_LLSEEK
 asmlinkage long sys_llseek(unsigned int fd, unsigned long offset_high,
 			   unsigned long offset_low, loff_t __user * result,
 			   unsigned int origin)
@@ -282,7 +282,6 @@ asmlinkage ssize_t sys_read(unsigned int fd, char __user * buf, size_t count)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(sys_read);
 
 asmlinkage ssize_t sys_write(unsigned int fd, const char __user * buf, size_t count)
 {

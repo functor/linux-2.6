@@ -34,12 +34,23 @@ char *task_mem(struct mm_struct *mm, char *buffer)
 		"VmData:\t%8lu kB\n"
 		"VmStk:\t%8lu kB\n"
 		"VmExe:\t%8lu kB\n"
-		"VmLib:\t%8lu kB\n",
+		"VmLib:\t%8lu kB\n"
+		"StaBrk:\t%08lx kB\n"
+		"Brk:\t%08lx kB\n"
+		"StaStk:\t%08lx kB\n"
+#if __i386__
+		"ExecLim:\t%08lx\n"
+#endif
+		,
 		mm->total_vm << (PAGE_SHIFT-10),
 		mm->locked_vm << (PAGE_SHIFT-10),
 		mm->rss << (PAGE_SHIFT-10),
 		data - stack, stack,
-		exec - lib, lib);
+		exec - lib, lib, mm->start_brk, mm->brk, mm->start_stack
+#if __i386__
+		, mm->context.exec_limit
+#endif
+		);
 	up_read(&mm->mmap_sem);
 	return buffer;
 }
@@ -65,7 +76,7 @@ int task_statm(struct mm_struct *mm, int *shared, int *text,
 				*shared += pages;
 			continue;
 		}
-		if (vma->vm_flags & VM_SHARED || !list_empty(&vma->shared))
+		if (vma->vm_file)
 			*shared += pages;
 		if (vma->vm_flags & VM_EXECUTABLE)
 			*text += pages;
