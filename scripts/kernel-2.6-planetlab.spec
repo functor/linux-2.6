@@ -27,14 +27,9 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 %define KVERREL %{PACKAGE_VERSION}-%{PACKAGE_RELEASE}
 
-# groups of related archs
-%define all_x86 i586 i686
-
 # Override generic defaults with per-arch defaults 
 
-%ifarch %{all_x86}
 %define image_install_path boot
-%endif
 
 #
 # Three sets of minimum package version requirements in the form of Conflicts:
