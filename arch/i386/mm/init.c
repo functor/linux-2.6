@@ -55,7 +55,7 @@ static inline int page_kills_ppro(unsigned long pagenr)
 
 extern int is_available_memory(efi_memory_desc_t *);
 
-static inline int page_is_ram(unsigned long pagenr)
+int page_is_ram(unsigned long pagenr)
 {
 	int i;
 	unsigned long addr, end;
@@ -92,33 +92,6 @@ static inline int page_is_ram(unsigned long pagenr)
 	}
 	return 0;
 }
-
-/* To enable modules to check if a page is in RAM */
-int pfn_is_ram(unsigned long pfn)
-{
-	return (page_is_ram(pfn));
-}
-
-
-/*
- * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
- * valid. The argument is a physical page number.
- *
- *
- * On x86, access has to be given to the first megabyte of ram because that area
- * contains bios code and data regions used by X and dosemu and similar apps.
- * Access has to be given to non-kernel-ram areas as well, these contain the PCI
- * mmio resources as well as potential bios/acpi data regions.
- */
-int devmem_is_allowed(unsigned long pagenr)
-{
-	if (pagenr <= 256)
-		return 1;
-	if (!page_is_ram(pagenr))
-		return 1;
-	return 0;
-}
-
 
 pte_t *kmap_pte;
 
@@ -409,8 +382,8 @@ static int __init noexec_setup(char *str)
 
 __setup("noexec=", noexec_setup);
 
+int use_nx = 0;
 #ifdef CONFIG_X86_PAE
-int nx_enabled = 0;
 
 static void __init set_nx(void)
 {
@@ -422,36 +395,10 @@ static void __init set_nx(void)
 			rdmsr(MSR_EFER, l, h);
 			l |= EFER_NX;
 			wrmsr(MSR_EFER, l, h);
-			nx_enabled = 1;
+			use_nx = 1;
 			__supported_pte_mask |= _PAGE_NX;
 		}
 	}
-}
-/*
- * Enables/disables executability of a given kernel page and
- * returns the previous setting.
- */
-int __init set_kernel_exec(unsigned long vaddr, int enable)
-{
-	pte_t *pte;
-	int ret = 1;
-
-	if (!nx_enabled)
-		goto out;
-
-	pte = lookup_address(vaddr);
-	BUG_ON(!pte);
-
-	if (!pte_exec_kernel(*pte))
-		ret = 0;
-
-	if (enable)
-		pte->pte_high &= ~(1 << (_PAGE_BIT_NX - 32));
-	else
-		pte->pte_high |= 1 << (_PAGE_BIT_NX - 32);
-	__flush_tlb_all();
-out:
-	return ret;
 }
 
 #endif
@@ -467,8 +414,13 @@ void __init paging_init(void)
 {
 #ifdef CONFIG_X86_PAE
 	set_nx();
-	if (nx_enabled)
+	if (use_nx)
 		printk("NX (Execute Disable) protection: active\n");
+	else {
+		printk("NX (Execute Disable) protection: not present!\n");
+		if (exec_shield)
+			printk("Using x86 segment limits to approximate NX protection\n");
+	}
 #endif
 
 	pagetable_init();
@@ -496,7 +448,6 @@ void __init paging_init(void)
 	kmap_init();
 	zone_sizes_init();
 }
-
 /*
  * Test if the WP bit works in supervisor mode. It isn't supported on 386's
  * and also on some strange 486's (NexGen etc.). All 586+'s are OK. This

@@ -202,6 +202,8 @@ static struct pci_driver orinoco_tmd_driver = {
 	.id_table	= orinoco_tmd_pci_id_table,
 	.probe		= orinoco_tmd_init_one,
 	.remove		= __devexit_p(orinoco_tmd_remove_one),
+	.suspend	= 0,
+	.resume		= 0,
 };
 
 static char version[] __initdata = "orinoco_tmd.c 0.01 (Joerg Dorchain <joerg@dorchain.net>)";
@@ -217,7 +219,7 @@ static int __init orinoco_tmd_init(void)
 	return pci_module_init(&orinoco_tmd_driver);
 }
 
-void __exit orinoco_tmd_exit(void)
+extern void __exit orinoco_tmd_exit(void)
 {
 	pci_unregister_driver(&orinoco_tmd_driver);
 	current->state = TASK_UNINTERRUPTIBLE;

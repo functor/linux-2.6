@@ -43,7 +43,7 @@ static int __init set_umid(char *name, int is_random,
 	}
 
 	if(strlen(name) > UMID_LEN - 1)
-		(*printer)("Unique machine name is being truncated to %d "
+		(*printer)("Unique machine name is being truncated to %s "
 			   "characters\n", UMID_LEN);
 	strlcpy(umid, name, sizeof(umid));
 
@@ -54,7 +54,6 @@ static int __init set_umid(char *name, int is_random,
 
 static int __init set_umid_arg(char *name, int *add)
 {
-	*add = 0;
 	return(set_umid(name, 0, printf));
 }
 
@@ -200,20 +199,17 @@ int not_dead_yet(char *dir)
 static int __init set_uml_dir(char *name, int *add)
 {
 	if((strlen(name) > 0) && (name[strlen(name) - 1] != '/')){
-		uml_dir = malloc(strlen(name) + 2);
+		uml_dir = malloc(strlen(name) + 1);
 		if(uml_dir == NULL){
 			printf("Failed to malloc uml_dir - error = %d\n",
 			       errno);
 			uml_dir = name;
-			/* Return 0 here because do_initcalls doesn't look at
-			 * the return value.
-			 */
 			return(0);
 		}
 		sprintf(uml_dir, "%s/", name);
 	}
 	else uml_dir = name;
-	return(0);
+	return 0;
 }
 
 static int __init make_uml_dir(void)

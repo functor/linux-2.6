@@ -5,18 +5,13 @@
 
 extra-y := vmlinux.lds.s
 
-# Descend into ../util for make clean.  This is here because it doesn't work
-# in arch/um/Makefile.
-
-subdir- = ../util
-
-obj-y = checksum.o config.o exec_kern.o exitcode.o filehandle.o frame_kern.o \
-	frame.o helper.o init_task.o irq.o irq_user.o ksyms.o mem.o \
-	mem_user.o physmem.o process.o process_kern.o ptrace.o reboot.o \
-	resource.o sigio_user.o sigio_kern.o signal_kern.o signal_user.o \
-	smp.o syscall_kern.o syscall_user.o sysrq.o sys_call_table.o \
-	tempfile.o time.o time_kern.o tlb.o trap_kern.o trap_user.o \
-	uaccess_user.o um_arch.o umid.o user_util.o
+obj-y = checksum.o config.o exec_kern.o exitcode.o frame_kern.o frame.o \
+	helper.o init_task.o irq.o irq_user.o ksyms.o mem.o mem_user.o \
+	physmem.o process.o process_kern.o ptrace.o reboot.o resource.o \
+	sigio_user.o sigio_kern.o signal_kern.o signal_user.o smp.o \
+	syscall_kern.o syscall_user.o sysrq.o sys_call_table.o tempfile.o \
+	time.o time_kern.o tlb.o trap_kern.o trap_user.o uaccess_user.o \
+	um_arch.o umid.o user_util.o
 
 obj-$(CONFIG_BLK_DEV_INITRD) += initrd_kern.o initrd_user.o
 obj-$(CONFIG_GPROF)	+= gprof_syms.o

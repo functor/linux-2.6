@@ -174,7 +174,6 @@
 
 #define SPRN_HID1	0x3F1		/* Hardware Implementation Register 1 */
 #define HID1_EMCP	(1<<31)		/* 7450 Machine Check Pin Enable */
-#define HID1_DFS	(1<<22)		/* 7447A Dynamic Frequency Scaling */
 #define HID1_PC0	(1<<16)		/* 7450 PLL_CFG[0] */
 #define HID1_PC1	(1<<15)		/* 7450 PLL_CFG[1] */
 #define HID1_PC2	(1<<14)		/* 7450 PLL_CFG[2] */
@@ -350,7 +349,7 @@
 #define DBAT6U	SPRN_DBAT6U	/* Data BAT 6 Upper Register */
 #define DBAT7L	SPRN_DBAT7L	/* Data BAT 7 Lower Register */
 #define DBAT7U	SPRN_DBAT7U	/* Data BAT 7 Upper Register */
-//#define DEC	SPRN_DEC	/* Decrement Register */
+#define DEC	SPRN_DEC	/* Decrement Register */
 #define DMISS	SPRN_DMISS	/* Data TLB Miss Register */
 #define DSISR	SPRN_DSISR	/* Data Storage Interrupt Status Register */
 #define EAR	SPRN_EAR	/* External Address Register */
@@ -380,9 +379,9 @@
 #define IMMR	SPRN_IMMR	/* PPC 860/821 Internal Memory Map Register */
 #define L2CR	SPRN_L2CR	/* Classic PPC L2 cache control register */
 #define L3CR	SPRN_L3CR	/* PPC 745x L3 cache control register */
-//#define LR	SPRN_LR
+#define LR	SPRN_LR
 #define PVR	SPRN_PVR	/* Processor Version */
-//#define RPA	SPRN_RPA	/* Required Physical Address Register */
+#define RPA	SPRN_RPA	/* Required Physical Address Register */
 #define SDR1	SPRN_SDR1	/* MMU hash base register */
 #define SPR0	SPRN_SPRG0	/* Supervisor Private Registers */
 #define SPR1	SPRN_SPRG1
@@ -489,7 +488,6 @@
 #define SVR_8555E	0x80790000
 #define SVR_8560	0x80700000
 
-#if 0
 /* Segment Registers */
 #define SR0	0
 #define SR1	1
@@ -507,7 +505,6 @@
 #define SR13	13
 #define SR14	14
 #define SR15	15
-#endif
 
 /* Macros for setting and retrieving special purpose registers */
 #ifndef __ASSEMBLY__

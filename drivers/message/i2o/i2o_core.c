@@ -831,14 +831,12 @@ static int i2o_issue_claim(u32 cmd, struct i2o_controller *c, int tid, u32 type)
  
 int i2o_claim_device(struct i2o_device *d, struct i2o_handler *h)
 {
-	int ret = 0;
-
 	down(&i2o_configuration_lock);
 	if (d->owner) {
 		printk(KERN_INFO "Device claim called, but dev already owned by %s!",
 		       h->name);
-		ret = -EBUSY;
-		goto out;
+		up(&i2o_configuration_lock);
+		return -EBUSY;
 	}
 	d->owner=h;
 
@@ -846,11 +844,10 @@ int i2o_claim_device(struct i2o_device *d, struct i2o_handler *h)
 			   I2O_CLAIM_PRIMARY))
 	{
 		d->owner = NULL;
-		ret = -EBUSY;
+		return -EBUSY;
 	}
-out:
 	up(&i2o_configuration_lock);
-	return ret;
+	return 0;
 }
 
 /**

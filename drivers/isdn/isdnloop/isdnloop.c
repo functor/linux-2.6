@@ -443,15 +443,18 @@ isdnloop_sendbuf(int channel, struct sk_buff *skb, isdnloop_card * card)
  *   number of bytes actually transferred.
  */
 static int
-isdnloop_readstatus(u_char __user *buf, int len, isdnloop_card * card)
+isdnloop_readstatus(u_char * buf, int len, int user, isdnloop_card * card)
 {
 	int count;
-	u_char __user *p;
+	u_char *p;
 
 	for (p = buf, count = 0; count < len; p++, count++) {
 		if (card->msg_buf_read == card->msg_buf_write)
 			return count;
-		put_user(*card->msg_buf_read++, p);
+		if (user)
+			put_user(*card->msg_buf_read++, p);
+		else
+			*p = *card->msg_buf_read++;
 		if (card->msg_buf_read > card->msg_buf_end)
 			card->msg_buf_read = card->msg_buf;
 	}
@@ -1385,14 +1388,14 @@ if_command(isdn_ctrl * c)
 }
 
 static int
-if_writecmd(const u_char __user *buf, int len, int id, int channel)
+if_writecmd(const u_char * buf, int len, int user, int id, int channel)
 {
 	isdnloop_card *card = isdnloop_findcard(id);
 
 	if (card) {
 		if (!card->flags & ISDNLOOP_FLAGS_RUNNING)
 			return -ENODEV;
-		return (isdnloop_writecmd(buf, len, 1, card));
+		return (isdnloop_writecmd(buf, len, user, card));
 	}
 	printk(KERN_ERR
 	       "isdnloop: if_writecmd called with invalid driverId!\n");
@@ -1400,14 +1403,14 @@ if_writecmd(const u_char __user *buf, int len, int id, int channel)
 }
 
 static int
-if_readstatus(u_char __user *buf, int len, int id, int channel)
+if_readstatus(u_char * buf, int len, int user, int id, int channel)
 {
 	isdnloop_card *card = isdnloop_findcard(id);
 
 	if (card) {
 		if (!card->flags & ISDNLOOP_FLAGS_RUNNING)
 			return -ENODEV;
-		return (isdnloop_readstatus(buf, len, card));
+		return (isdnloop_readstatus(buf, len, user, card));
 	}
 	printk(KERN_ERR
 	       "isdnloop: if_readstatus called with invalid driverId!\n");

@@ -1,10 +1,10 @@
 /*
- * arch/sh/drivers/dma/dma-sh.c
- *
- * SuperH On-chip DMAC Support
+ * arch/sh/kernel/cpu/dma.c
  *
  * Copyright (C) 2000 Takashi YOSHII
- * Copyright (C) 2003, 2004 Paul Mundt
+ * Copyright (C) 2003 Paul Mundt
+ *
+ * PC like DMA API for SuperH's DMAC.
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -29,29 +29,43 @@
  * Defaults to a 64-bit transfer size.
  */
 enum {
-	XMIT_SZ_64BIT,
-	XMIT_SZ_8BIT,
-	XMIT_SZ_16BIT,
-	XMIT_SZ_32BIT,
-	XMIT_SZ_256BIT,
+	XMIT_SZ_64BIT	= 0,
+	XMIT_SZ_8BIT	= 1,
+	XMIT_SZ_16BIT	= 2,
+	XMIT_SZ_32BIT	= 3,
+	XMIT_SZ_256BIT	= 4,
 };
 
 /*
  * The DMA count is defined as the number of bytes to transfer.
  */
 static unsigned int ts_shift[] = {
-	[XMIT_SZ_64BIT]		= 3,
-	[XMIT_SZ_8BIT]		= 0,
-	[XMIT_SZ_16BIT]		= 1,
-	[XMIT_SZ_32BIT]		= 2,
-	[XMIT_SZ_256BIT]	= 5,
+	[XMIT_SZ_64BIT]		3,
+	[XMIT_SZ_8BIT]		0,
+	[XMIT_SZ_16BIT]		1,
+	[XMIT_SZ_32BIT]		2,
+	[XMIT_SZ_256BIT]	5,
 };
+
+struct sh_dmac_channel {
+        unsigned long sar;
+        unsigned long dar;
+        unsigned long dmatcr;
+        unsigned long chcr;
+} __attribute__ ((aligned(16)));
+
+struct sh_dmac_info {
+        struct sh_dmac_channel channel[4];
+        unsigned long dmaor;
+};
+
+static volatile struct sh_dmac_info *sh_dmac = (volatile struct sh_dmac_info *)SH_DMAC_BASE;
 
 static inline unsigned int get_dmte_irq(unsigned int chan)
 {
 	unsigned int irq;
 
-	/*
+	/* 
 	 * Normally we could just do DMTE0_IRQ + chan outright, though in the
 	 * case of the 7751R, the DMTE IRQs for channels > 4 start right above
 	 * the SCIF
@@ -70,17 +84,13 @@ static inline unsigned int get_dmte_irq(unsigned int chan)
  * We determine the correct shift size based off of the CHCR transmit size
  * for the given channel. Since we know that it will take:
  *
- *	info->count >> ts_shift[transmit_size]
+ * 	info->count >> ts_shift[transmit_size]
  *
  * iterations to complete the transfer.
  */
-static inline unsigned int calc_xmit_shift(struct dma_channel *chan)
+static inline unsigned int calc_xmit_shift(struct dma_info *info)
 {
-	u32 chcr = ctrl_inl(CHCR[chan->chan]);
-
-	chcr >>= 4;
-
-	return ts_shift[chcr & 0x0007];
+	return ts_shift[(sh_dmac->channel[info->chan].chcr >> 4) & 0x0007];
 }
 
 /*
@@ -91,79 +101,68 @@ static inline unsigned int calc_xmit_shift(struct dma_channel *chan)
  */
 static irqreturn_t dma_tei(int irq, void *dev_id, struct pt_regs *regs)
 {
-	struct dma_channel *chan = (struct dma_channel *)dev_id;
-	u32 chcr;
-
-	chcr = ctrl_inl(CHCR[chan->chan]);
+	struct dma_info * info = (struct dma_info *)dev_id;
+	u32 chcr = sh_dmac->channel[info->chan].chcr;
 
 	if (!(chcr & CHCR_TE))
 		return IRQ_NONE;
 
-	chcr &= ~(CHCR_IE | CHCR_DE);
-	ctrl_outl(chcr, CHCR[chan->chan]);
+	sh_dmac->channel[info->chan].chcr = chcr & ~(CHCR_IE | CHCR_DE);
 
-	wake_up(&chan->wait_queue);
+	wake_up(&info->wait_queue);
 
 	return IRQ_HANDLED;
 }
 
-static int sh_dmac_request_dma(struct dma_channel *chan)
+static int sh_dmac_request_dma(struct dma_info *info)
 {
-	return request_irq(get_dmte_irq(chan->chan), dma_tei,
-			   SA_INTERRUPT, "DMAC Transfer End", chan);
+	return request_irq(get_dmte_irq(info->chan), dma_tei,
+			   SA_INTERRUPT, "DMAC Transfer End", info);
 }
 
-static void sh_dmac_free_dma(struct dma_channel *chan)
+static void sh_dmac_free_dma(struct dma_info *info)
 {
-	free_irq(get_dmte_irq(chan->chan), chan);
+	free_irq(get_dmte_irq(info->chan), info);
 }
 
-static void sh_dmac_configure_channel(struct dma_channel *chan, unsigned long chcr)
+static void sh_dmac_configure_channel(struct dma_info *info, unsigned long chcr)
 {
 	if (!chcr)
 		chcr = RS_DUAL;
 
-	ctrl_outl(chcr, CHCR[chan->chan]);
+	sh_dmac->channel[info->chan].chcr = chcr;
 
-	chan->flags |= DMA_CONFIGURED;
+	info->configured = 1;
 }
 
-static void sh_dmac_enable_dma(struct dma_channel *chan)
+static void sh_dmac_enable_dma(struct dma_info *info)
 {
-	int irq = get_dmte_irq(chan->chan);
-	u32 chcr;
+	int irq = get_dmte_irq(info->chan);
 
-	chcr = ctrl_inl(CHCR[chan->chan]);
-	chcr |= CHCR_DE | CHCR_IE;
-	ctrl_outl(chcr, CHCR[chan->chan]);
-
+	sh_dmac->channel[info->chan].chcr |= (CHCR_DE | CHCR_IE);
 	enable_irq(irq);
 }
 
-static void sh_dmac_disable_dma(struct dma_channel *chan)
+static void sh_dmac_disable_dma(struct dma_info *info)
 {
-	int irq = get_dmte_irq(chan->chan);
-	u32 chcr;
+	int irq = get_dmte_irq(info->chan);
 
 	disable_irq(irq);
-
-	chcr = ctrl_inl(CHCR[chan->chan]);
-	chcr &= ~(CHCR_DE | CHCR_TE | CHCR_IE);
-	ctrl_outl(chcr, CHCR[chan->chan]);
+	sh_dmac->channel[info->chan].chcr &= ~(CHCR_DE | CHCR_TE | CHCR_IE);
 }
 
-static int sh_dmac_xfer_dma(struct dma_channel *chan)
+static int sh_dmac_xfer_dma(struct dma_info *info)
 {
-	/*
+	/* 
 	 * If we haven't pre-configured the channel with special flags, use
 	 * the defaults.
 	 */
-	if (!(chan->flags & DMA_CONFIGURED))
-		sh_dmac_configure_channel(chan, 0);
+	if (!info->configured)
+		sh_dmac_configure_channel(info, 0);
 
-	sh_dmac_disable_dma(chan);
-
-	/*
+	sh_dmac_disable_dma(info);
+	
+	/* 
 	 * Single-address mode usage note!
 	 *
 	 * It's important that we don't accidentally write any value to SAR/DAR
@@ -178,36 +177,33 @@ static int sh_dmac_xfer_dma(struct dma_channel *chan)
 	 * cascading to the PVR2 DMAC. In this case, we still need to write
 	 * SAR and DAR, regardless of value, in order for cascading to work.
 	 */
-	if (chan->sar || (mach_is_dreamcast() && chan->chan == 2))
-		ctrl_outl(chan->sar, SAR[chan->chan]);
-	if (chan->dar || (mach_is_dreamcast() && chan->chan == 2))
-		ctrl_outl(chan->dar, DAR[chan->chan]);
+	if (info->sar || (mach_is_dreamcast() && info->chan == 2))
+		sh_dmac->channel[info->chan].sar = info->sar;
+	if (info->dar || (mach_is_dreamcast() && info->chan == 2))
+		sh_dmac->channel[info->chan].dar = info->dar;
+	
+	sh_dmac->channel[info->chan].dmatcr = info->count >> calc_xmit_shift(info);
 
-	ctrl_outl(chan->count >> calc_xmit_shift(chan), DMATCR[chan->chan]);
-
-	sh_dmac_enable_dma(chan);
+	sh_dmac_enable_dma(info);
 
 	return 0;
 }
 
-static int sh_dmac_get_dma_residue(struct dma_channel *chan)
+static int sh_dmac_get_dma_residue(struct dma_info *info)
 {
-	if (!(ctrl_inl(CHCR[chan->chan]) & CHCR_DE))
+	if (!(sh_dmac->channel[info->chan].chcr & CHCR_DE))
 		return 0;
 
-	return ctrl_inl(DMATCR[chan->chan]) << calc_xmit_shift(chan);
+	return sh_dmac->channel[info->chan].dmatcr << calc_xmit_shift(info);
 }
 
 #if defined(CONFIG_CPU_SH4)
 static irqreturn_t dma_err(int irq, void *dev_id, struct pt_regs *regs)
 {
-	unsigned long dmaor = ctrl_inl(DMAOR);
+	printk("DMAE: DMAOR=%lx\n", sh_dmac->dmaor);
 
-	printk("DMAE: DMAOR=%lx\n", dmaor);
-
-	ctrl_outl(ctrl_inl(DMAOR)&~DMAOR_NMIF, DMAOR);
-	ctrl_outl(ctrl_inl(DMAOR)&~DMAOR_AE, DMAOR);
-	ctrl_outl(ctrl_inl(DMAOR)|DMAOR_DME, DMAOR);
+	sh_dmac->dmaor &= ~(DMAOR_NMIF | DMAOR_AE);
+	sh_dmac->dmaor |= DMAOR_DME;
 
 	disable_irq(irq);
 
@@ -216,23 +212,16 @@ static irqreturn_t dma_err(int irq, void *dev_id, struct pt_regs *regs)
 #endif
 
 static struct dma_ops sh_dmac_ops = {
+	.name		= "SuperH DMAC",
 	.request	= sh_dmac_request_dma,
 	.free		= sh_dmac_free_dma,
 	.get_residue	= sh_dmac_get_dma_residue,
 	.xfer		= sh_dmac_xfer_dma,
 	.configure	= sh_dmac_configure_channel,
 };
-
-static struct dma_info sh_dmac_info = {
-	.name		= "SuperH DMAC",
-	.nr_channels	= 4,
-	.ops		= &sh_dmac_ops,
-	.flags		= DMAC_CHANNELS_TEI_CAPABLE,
-};
-
+	
 static int __init sh_dmac_init(void)
 {
-	struct dma_info *info = &sh_dmac_info;
 	int i;
 
 #ifdef CONFIG_CPU_SH4
@@ -242,15 +231,18 @@ static int __init sh_dmac_init(void)
 		return i;
 #endif
 
-	for (i = 0; i < info->nr_channels; i++) {
+	for (i = 0; i < MAX_DMAC_CHANNELS; i++) {
 		int irq = get_dmte_irq(i);
 
 		make_ipr_irq(irq, DMA_IPR_ADDR, DMA_IPR_POS, DMA_PRIORITY);
+
+		dma_info[i].ops = &sh_dmac_ops;
+		dma_info[i].tei_capable = 1;
 	}
 
-	ctrl_outl(0x8000 | DMAOR_DME, DMAOR);
+	sh_dmac->dmaor |= 0x8000 | DMAOR_DME;
 
-	return register_dmac(info);
+	return register_dmac(&sh_dmac_ops);
 }
 
 static void __exit sh_dmac_exit(void)

@@ -201,16 +201,11 @@ static int __is_prefetch(struct pt_regs *regs, unsigned long addr)
 	return prefetch;
 }
 
-static inline int is_prefetch(struct pt_regs *regs, unsigned long addr,
-			      unsigned long error_code)
+static inline int is_prefetch(struct pt_regs *regs, unsigned long addr)
 {
 	if (unlikely(boot_cpu_data.x86_vendor == X86_VENDOR_AMD &&
-		     boot_cpu_data.x86 >= 6)) {
-		/* Catch an obscure case of prefetch inside an NX page. */
-		if (nx_enabled && (error_code & 16))
-			return 0;
+		     boot_cpu_data.x86 >= 6))
 		return __is_prefetch(regs, addr);
-	}
 	return 0;
 } 
 
@@ -291,27 +286,7 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	if (in_atomic() || !mm)
 		goto bad_area_nosemaphore;
 
-	/* When running in the kernel we expect faults to occur only to
-	 * addresses in user space.  All other faults represent errors in the
-	 * kernel and should generate an OOPS.  Unfortunatly, in the case of an
-	 * erroneous fault occuring in a code path which already holds mmap_sem
-	 * we will deadlock attempting to validate the fault against the
-	 * address space.  Luckily the kernel only validly references user
-	 * space from well defined areas of code, which are listed in the
-	 * exceptions table.
-	 *
-	 * As the vast majority of faults will be valid we will only perform
-	 * the source reference check when there is a possibilty of a deadlock.
-	 * Attempt to lock the address space, if we cannot we then validate the
-	 * source.  If this is invalid we can skip the address space check,
-	 * thus avoiding the deadlock.
-	 */
-	if (!down_read_trylock(&mm->mmap_sem)) {
-		if ((error_code & 4) == 0 &&
-		    !search_exception_tables(regs->eip))
-			goto bad_area_nosemaphore;
-		down_read(&mm->mmap_sem);
-	}
+	down_read(&mm->mmap_sem);
 
 	vma = find_vma(mm, address);
 	if (!vma)
@@ -404,7 +379,7 @@ bad_area_nosemaphore:
 		 * Valid to do another page fault here because this one came 
 		 * from user space.
 		 */
-		if (is_prefetch(regs, address, error_code))
+		if (is_prefetch(regs, address))
 			return;
 
 		tsk->thread.cr2 = address;
@@ -414,7 +389,7 @@ bad_area_nosemaphore:
 		info.si_signo = SIGSEGV;
 		info.si_errno = 0;
 		/* info.si_code has been set above */
-		info.si_addr = (void __user *)address;
+		info.si_addr = (void *)address;
 		force_sig_info(SIGSEGV, &info, tsk);
 		return;
 	}
@@ -445,7 +420,7 @@ no_context:
 	 * had been triggered by is_prefetch fixup_exception would have 
 	 * handled it.
 	 */
- 	if (is_prefetch(regs, address, error_code))
+ 	if (is_prefetch(regs, address))
  		return;
 
 /*
@@ -456,11 +431,18 @@ no_context:
 	bust_spinlocks(1);
 
 #ifdef CONFIG_X86_PAE
-	if (error_code & 16) {
-		pte_t *pte = lookup_address(address);
+	{
+		pgd_t *pgd;
+		pmd_t *pmd;
 
-		if (pte && pte_present(*pte) && !pte_exec_kernel(*pte))
-			printk(KERN_CRIT "kernel tried to execute NX-protected page - exploit attempt? (uid: %d)\n", current->uid);
+
+
+		pgd = init_mm.pgd + pgd_index(address);
+		if (pgd_present(*pgd)) {
+			pmd = pmd_offset(pgd, address);
+			if (pmd_val(*pmd) & _PAGE_NX)
+				printk(KERN_CRIT "kernel tried to access NX-protected page - exploit attempt? (uid: %d)\n", current->uid);
+		}
 	}
 #endif
 	if (address < PAGE_SIZE)
@@ -515,7 +497,7 @@ do_sigbus:
 		goto no_context;
 
 	/* User space => ok to do another page fault */
-	if (is_prefetch(regs, address, error_code))
+	if (is_prefetch(regs, address))
 		return;
 
 	tsk->thread.cr2 = address;
@@ -524,7 +506,7 @@ do_sigbus:
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;
 	info.si_code = BUS_ADRERR;
-	info.si_addr = (void __user *)address;
+	info.si_addr = (void *)address;
 	force_sig_info(SIGBUS, &info, tsk);
 	return;
 

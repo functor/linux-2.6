@@ -201,7 +201,7 @@ Table 1-3: Kernel info in /proc
  devices     Available devices (block and character)           
  dma         Used DMS channels                                 
  filesystems Supported filesystems                             
- driver	     Various drivers grouped here, currently rtc (2.4)
+ driver	     Various drivers grouped here, currently rtc (2.4) and hpet (2.6)
  execdomains Execdomains, related to security			(2.4)
  fb	     Frame Buffer devices				(2.4)
  fs	     File system parameters, currently nfs/exports	(2.4)
@@ -1115,18 +1115,6 @@ program to load modules on demand.
 The files  in  this directory can be used to tune the operation of the virtual
 memory (VM)  subsystem  of  the  Linux  kernel.
 
-vfs_cache_pressure
-------------------
-
-Controls the tendency of the kernel to reclaim the memory which is used for
-caching of directory and inode objects.
-
-At the default value of vfs_cache_pressure=100 the kernel will attempt to
-reclaim dentries and inodes at a "fair" rate with respect to pagecache and
-swapcache reclaim.  Decreasing vfs_cache_pressure causes the kernel to prefer
-to retain dentry and inode caches.  Increasing vfs_cache_pressure beyond 100
-causes the kernel to prefer to reclaim dentries and inodes.
-
 dirty_background_ratio
 ----------------------
 
@@ -1223,26 +1211,6 @@ malloc(), when in fact the system has enough memory for the program to run.
 On the  other  hand,  enabling this feature can cause you to run out of memory
 and thrash the system to death, so large and/or important servers will want to
 set this value to 0.
-
-nr_hugepages and hugetlb_shm_group
-----------------------------------
-
-nr_hugepages configures number of hugetlb page reserved for the system.
-
-hugetlb_shm_group contains group id that is allowed to create SysV shared
-memory segment using hugetlb page.
-
-laptop_mode
------------
-
-laptop_mode is a knob that controls "laptop mode". All the things that are
-controlled by this knob are discussed in Documentation/laptop-mode.txt.
-
-block_dump
-----------
-
-block_dump enables block I/O debugging when set to a nonzero value. More
-information on block I/O debugging is in Documentation/laptop-mode.txt.
 
 2.5 /proc/sys/dev - Device specific parameters
 ----------------------------------------------
@@ -1885,3 +1853,10 @@ need to  recompile  the kernel, or even to reboot the system. The files in the
 command to write value into these files, thereby changing the default settings
 of the kernel.
 ------------------------------------------------------------------------------
+
+
+
+
+
+
+

@@ -16,7 +16,7 @@
  * Based on the Linux CPiA driver written by Peter Pregler,
  * Scott J. Bertin and Johannes Erdfelt.
  * 
- * Please see the file: Documentation/usb/ov511.txt
+ * Please see the file: linux/Documentation/usb/ov511.txt 
  * and the website at:  http://alpha.dyndns.org/ov511
  * for more info.
  *
@@ -1900,7 +1900,7 @@ sensor_get_exposure(struct usb_ov511 *ov, unsigned char *val)
 	case SEN_KS0127:
 	case SEN_KS0127B:
 	case SEN_SAA7111A:
-		val = NULL;
+		val = 0;
 		PDEBUG(3, "Unsupported with this sensor");
 		return -EPERM;
 	default:

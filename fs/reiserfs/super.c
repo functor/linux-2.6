@@ -695,30 +695,28 @@ static int reiserfs_parse_options (struct super_block * s, char * options, /* st
     char * arg = NULL;
     char * pos;
     opt_desc_t opts[] = {
-	/* Compatibility stuff, so that -o notail for old setups still work */
-	{"tails",	.arg_required = 't', .values = tails},
-	{"notail",	.clrmask = (1<<REISERFS_LARGETAIL)|(1<<REISERFS_SMALLTAIL)},
-	{"conv",	.setmask = 1<<REISERFS_CONVERT},
-	{"attrs",	.setmask = 1<<REISERFS_ATTRS},
-	{"noattrs",	.clrmask = 1<<REISERFS_ATTRS},
-	{"user_xattr",	.setmask = 1<<REISERFS_XATTRS_USER},
-	{"nouser_xattr",.clrmask = 1<<REISERFS_XATTRS_USER},
-	{"tagxid",	.setmask = 1<<REISERFS_TAGXID},
+	{"tails", 't', tails, 0, 0}, /* Compatibility stuff, so that -o notail for old setups still work */
+	{"notail", 0, 0, 0,  (1<<REISERFS_LARGETAIL)|(1<<REISERFS_SMALLTAIL)},
+	{"conv", 0, 0, 1<<REISERFS_CONVERT, 0},
+	{"attrs", 0, 0, 1<<REISERFS_ATTRS, 0},
+	{"noattrs", 0, 0, 0, 1<<REISERFS_ATTRS},
+	{"user_xattr", 0, 0, 1<<REISERFS_XATTRS_USER, 0},
+	{"nouser_xattr", 0, 0, 0, 1<<REISERFS_XATTRS_USER},
 #ifdef CONFIG_REISERFS_FS_POSIX_ACL
-	{"acl",		.setmask = 1<<REISERFS_POSIXACL},
-	{"noacl",	.clrmask = 1<<REISERFS_POSIXACL},
+	{"acl", 0, 0, 1<<REISERFS_POSIXACL, 0},
+	{"noacl", 0, 0, 0, 1<<REISERFS_POSIXACL},
 #endif
-	{"nolog",},	 /* This is unsupported */
-	{"replayonly",	.setmask = 1<<REPLAYONLY},
-	{"block-allocator", .arg_required = 'a', .values = balloc},
-	{"data",	.arg_required = 'd', .values = logging_mode},
-	{"resize",	.arg_required = 'r', .values = NULL},
-	{"jdev",	.arg_required = 'j', .values = NULL},
-	{"nolargeio",	.arg_required = 'w', .values = NULL},
-	{"commit",	.arg_required = 'c', .values = NULL},
-	{"usrquota",},
-	{"grpquota",},
-	{NULL,}
+	{"nolog", 0, 0, 0, 0}, /* This is unsupported */
+	{"replayonly", 0, 0, 1<<REPLAYONLY, 0},
+	{"block-allocator", 'a', balloc, 0, 0},
+	{"data", 'd', logging_mode, 0, 0},
+	{"resize", 'r', 0, 0, 0},
+	{"jdev", 'j', 0, 0, 0},
+	{"nolargeio", 'w', 0, 0, 0},
+	{"commit", 'c', 0, 0, 0},
+	{"usrquota", 0, 0, 0, 0},
+	{"grpquota", 0, 0, 0, 0},
+	{NULL, 0, 0, 0, 0}
     };
 	
     *blocks = 0;
@@ -736,7 +734,7 @@ static int reiserfs_parse_options (struct super_block * s, char * options, /* st
 	if (c == 'r') {
 	    char * p;
 	    
-	    p = NULL;
+	    p = 0;
 	    /* "resize=NNN" */
 	    *blocks = simple_strtoul (arg, &p, 0);
 	    if (*p != '\0') {
@@ -747,7 +745,7 @@ static int reiserfs_parse_options (struct super_block * s, char * options, /* st
 	}
 
 	if ( c == 'c' ) {
-		char *p = NULL;
+		char *p = 0;
 		unsigned long val = simple_strtoul (arg, &p, 0);
 		/* commit=NNN (time in seconds) */
 		if ( *p != '\0' || val >= (unsigned int)-1) {
@@ -757,7 +755,7 @@ static int reiserfs_parse_options (struct super_block * s, char * options, /* st
 	}
 
 	if ( c == 'w' ) {
-		char *p=NULL;
+		char *p=0;
 		int val = simple_strtoul (arg, &p, 0);
 
 		if ( *p != '\0') {

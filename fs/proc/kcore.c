@@ -18,7 +18,6 @@
 #include <linux/elfcore.h>
 #include <linux/vmalloc.h>
 #include <linux/highmem.h>
-#include <linux/init.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
@@ -82,8 +81,10 @@ kclist_del(void *addr)
 		}
 	}
 	write_unlock(&kclist_lock);
-	return NULL;
+	return 0;
 }
+
+extern char saved_command_line[];
 
 static size_t get_kcore_size(int *nphdr, size_t *elf_buflen)
 {

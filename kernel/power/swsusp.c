@@ -317,8 +317,7 @@ static int write_suspend_image(void)
 	for (i=0; i<nr_copy_pages; i++) {
 		if (!(i%100))
 			printk( "." );
-		entry = get_swap_page();
-		if (!entry.val)
+		if (!(entry = get_swap_page()).val)
 			panic("\nNot enough swapspace when writing data" );
 		
 		if (swapfile_used[swp_type(entry)] != SWAPFILE_SUSPEND)
@@ -335,8 +334,7 @@ static int write_suspend_image(void)
 		cur = (union diskpage *)((char *) pagedir_nosave)+i;
 		BUG_ON ((char *) cur != (((char *) pagedir_nosave) + i*PAGE_SIZE));
 		printk( "." );
-		entry = get_swap_page();
-		if (!entry.val) {
+		if (!(entry = get_swap_page()).val) {
 			printk(KERN_CRIT "Not enough swapspace when writing pgdir\n" );
 			panic("Don't know how to recover");
 			free_page((unsigned long) buffer);
@@ -358,8 +356,7 @@ static int write_suspend_image(void)
 	BUG_ON (sizeof(struct suspend_header) > PAGE_SIZE-sizeof(swp_entry_t));
 	BUG_ON (sizeof(union diskpage) != PAGE_SIZE);
 	BUG_ON (sizeof(struct link) != PAGE_SIZE);
-	entry = get_swap_page();
-	if (!entry.val)
+	if (!(entry = get_swap_page()).val)
 		panic( "\nNot enough swapspace when writing header" );
 	if (swapfile_used[swp_type(entry)] != SWAPFILE_SUSPEND)
 		panic("\nNot enough swapspace for header on suspend device" );
@@ -699,7 +696,6 @@ static void suspend_power_down(void)
 	else
 #endif
 	{
-		device_suspend(3);
 		device_shutdown();
 		machine_power_off();
 	}
@@ -720,7 +716,7 @@ asmlinkage void do_magic_resume_1(void)
 	mb();
 	spin_lock_irq(&suspend_pagedir_lock);	/* Done to disable interrupts */ 
 
-	device_power_down(3);
+	device_power_down(4);
 	PRINTK( "Waiting for DMAs to settle down...\n");
 	mdelay(1000);	/* We do not want some readahead with DMA to corrupt our memory, right?
 			   Do it with disabled interrupts for best effect. That way, if some
@@ -789,7 +785,7 @@ asmlinkage void do_magic_suspend_2(void)
 {
 	int is_problem;
 	read_swapfiles();
-	device_power_down(3);
+	device_power_down(4);
 	is_problem = suspend_prepare_image();
 	device_power_up();
 	spin_unlock_irq(&suspend_pagedir_lock);
@@ -806,6 +802,7 @@ asmlinkage void do_magic_suspend_2(void)
 	barrier();
 	mb();
 	spin_lock_irq(&suspend_pagedir_lock);	/* Done to disable interrupts */ 
+	mdelay(1000);
 
 	free_pages((unsigned long) pagedir_nosave, pagedir_order);
 	spin_unlock_irq(&suspend_pagedir_lock);
@@ -842,10 +839,9 @@ int software_suspend(void)
                    need half of memory free. */
 
 		free_some_memory();
-		disable_nonboot_cpus();
-		/* Save state of all device drivers, and stop them. */
-		printk("Suspending devices... ");
-		if ((res = device_suspend(3))==0) {
+		
+		/* Save state of all device drivers, and stop them. */		   
+		if ((res = device_suspend(4))==0)
 			/* If stopping device drivers worked, we proceed basically into
 			 * suspend_save_image.
 			 *
@@ -856,9 +852,7 @@ int software_suspend(void)
 			 * using normal kernel mechanism.
 			 */
 			do_magic(0);
-		}
 		thaw_processes();
-		enable_nonboot_cpus();
 	} else
 		res = -EBUSY;
 	software_suspend_enabled = 1;
@@ -928,7 +922,7 @@ static int relocate_pagedir(void)
 		return 0;
 	}
 
-	while ((m = (void *) __get_free_pages(GFP_ATOMIC, pagedir_order)) != NULL) {
+	while ((m = (void *) __get_free_pages(GFP_ATOMIC, pagedir_order))) {
 		if (!does_collide_order(old_pagedir, (unsigned long)m, pagedir_order))
 			break;
 		eaten_memory = m;
@@ -1198,9 +1192,7 @@ static int __init software_resume(void)
 	printk( "resuming from %s\n", resume_file);
 	if (read_suspend_image(resume_file, 0))
 		goto read_failure;
-	/* FIXME: Should we stop processes here, just to be safer? */
-	disable_nonboot_cpus();
-	device_suspend(3);
+	device_suspend(4);
 	do_magic(1);
 	panic("This never returns");
 

@@ -211,7 +211,7 @@ struct request *elv_next_request(request_queue_t *q)
 	struct request *rq;
 	int ret;
 
-	while ((rq = __elv_next_request(q)) != NULL) {
+	while ((rq = __elv_next_request(q))) {
 		/*
 		 * just mark as started even if we don't start it, a request
 		 * that has been delayed should not be passed by new incoming
@@ -339,14 +339,6 @@ void elv_put_request(request_queue_t *q, struct request *rq)
 		e->elevator_put_req_fn(q, rq);
 }
 
-void elv_set_congested(request_queue_t *q)
-{
-	elevator_t *e = &q->elevator;
-
-	if (e->elevator_set_congested_fn)
-		e->elevator_set_congested_fn(q);
-}
-
 int elv_may_queue(request_queue_t *q, int rw)
 {
 	elevator_t *e = &q->elevator;
@@ -354,7 +346,7 @@ int elv_may_queue(request_queue_t *q, int rw)
 	if (e->elevator_may_queue_fn)
 		return e->elevator_may_queue_fn(q, rw);
 
-	return 1;
+	return 0;
 }
 
 void elv_completed_request(request_queue_t *q, struct request *rq)

@@ -327,16 +327,10 @@ unsigned long do_mremap(unsigned long addr,
 			goto out;
 	}
 	if (vma->vm_flags & VM_LOCKED) {
-		unsigned long locked, lock_limit;
-		locked = current->mm->locked_vm << PAGE_SHIFT;
-		lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+		unsigned long locked = current->mm->locked_vm << PAGE_SHIFT;
 		locked += new_len - old_len;
 		ret = -EAGAIN;
-		if (locked > lock_limit && !capable(CAP_IPC_LOCK))
-			goto out;
-		ret = -ENOMEM;
-		if (!vx_vmlocked_avail(current->mm,
-			(new_len - old_len) >> PAGE_SHIFT))
+		if (locked > current->rlim[RLIMIT_MEMLOCK].rlim_cur)
 			goto out;
 	}
 	ret = -ENOMEM;
@@ -373,7 +367,7 @@ unsigned long do_mremap(unsigned long addr,
 			vx_vmpages_add(current->mm, pages);
 			if (vma->vm_flags & VM_LOCKED) {
 				// current->mm->locked_vm += pages;
-				vx_vmlocked_add(vma->vm_mm, pages);
+				vx_vmlocked_add(current->mm, pages);
 				make_pages_present(addr + old_len,
 						   addr + new_len);
 			}
@@ -393,8 +387,9 @@ unsigned long do_mremap(unsigned long addr,
 			if (vma->vm_flags & VM_MAYSHARE)
 				map_flags |= MAP_SHARED;
 
-			new_addr = get_unmapped_area_prot(vma->vm_file, 0, new_len, 
-				vma->vm_pgoff, map_flags, vma->vm_flags & VM_EXEC);
+			new_addr = get_unmapped_area(vma->vm_file, 0, new_len,
+					vma->vm_pgoff, map_flags,
+						vma->vm_flags & VM_EXEC);
 			ret = new_addr;
 			if (new_addr & ~PAGE_MASK)
 				goto out;

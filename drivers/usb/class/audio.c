@@ -212,6 +212,9 @@
 
 #define dprintk(x)
 
+#undef abs
+extern int abs(int __x) __attribute_const__; /* Shut up warning */
+
 /* --------------------------------------------------------------------- */
 
 /*
@@ -393,6 +396,17 @@ struct usb_audio_state {
 #define AFMT_BYTESSHIFT(x) ((AFMT_ISSTEREO(x) ? 1 : 0) + (AFMT_IS16BIT(x) ? 1 : 0))
 #define AFMT_BYTES(x)      (1<<AFMT_BYTESSHFIT(x))
 
+/* --------------------------------------------------------------------- */
+
+/* prevent picking up a bogus abs macro */
+#undef abs
+static inline int abs(int x)
+{
+        if (x < 0)
+		return -x;
+	return x;
+}
+                                
 /* --------------------------------------------------------------------- */
 
 static inline unsigned ld2(unsigned int x)
@@ -1974,7 +1988,7 @@ static int usb_audio_open_mixdev(struct inode *inode, struct file *file)
 	s->count++;
 
 	up(&open_sem);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int usb_audio_release_mixdev(struct inode *inode, struct file *file)
@@ -2147,6 +2161,8 @@ static ssize_t usb_audio_read(struct file *file, char __user *buffer, size_t cou
 	unsigned int ptr;
 	int cnt, err;
 
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (as->usbin.dma.mapped)
 		return -ENXIO;
 	if (!as->usbin.dma.ready && (ret = prog_dmabuf_in(as)))
@@ -2214,6 +2230,8 @@ static ssize_t usb_audio_write(struct file *file, const char __user *buffer, siz
 	unsigned int start_thr;
 	int cnt, err;
 
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (as->usbout.dma.mapped)
 		return -ENXIO;
 	if (!as->usbout.dma.ready && (ret = prog_dmabuf_out(as)))
@@ -2684,7 +2702,7 @@ static int usb_audio_open(struct inode *inode, struct file *file)
 	as->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
 	s->count++;
 	up(&open_sem);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int usb_audio_release(struct inode *inode, struct file *file)

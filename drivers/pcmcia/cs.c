@@ -264,10 +264,7 @@ int pcmcia_register_socket(struct pcmcia_socket *socket)
 		goto err;
 
 	wait_for_completion(&socket->thread_done);
-	if(!socket->thread) {
-		printk(KERN_WARNING "PCMCIA: warning: socket thread for socket %p did not start\n", socket);
-		return -EIO;
-	}
+	BUG_ON(!socket->thread);
 	pcmcia_parse_events(socket, SS_DETECT);
 
 	return 0;
@@ -681,8 +678,9 @@ static int pccardd(void *__skt)
 	int ret;
 
 	daemonize("pccardd");
-
 	skt->thread = current;
+	complete(&skt->thread_done);
+
 	skt->socket = dead_socket;
 	skt->ops->init(skt);
 	skt->ops->set_socket(skt, &skt->socket);
@@ -692,10 +690,7 @@ static int pccardd(void *__skt)
 	if (ret) {
 		printk(KERN_WARNING "PCMCIA: unable to register socket 0x%p\n",
 			skt);
-		skt->thread = NULL;
-		complete_and_exit(&skt->thread_done, 0);
 	}
-	complete(&skt->thread_done);
 
 	add_wait_queue(&skt->thread_wait, &wait);
 	for (;;) {
@@ -1105,8 +1100,8 @@ int pcmcia_get_window(window_handle_t *handle, int idx, win_req_t *req)
     if (w == MAX_WIN)
 	return CS_NO_MORE_ITEMS;
     win = &s->win[w];
-    req->Base = win->ctl.res->start;
-    req->Size = win->ctl.res->end - win->ctl.res->start + 1;
+    req->Base = win->ctl.sys_start;
+    req->Size = win->ctl.sys_stop - win->ctl.sys_start + 1;
     req->AccessSpeed = win->ctl.speed;
     req->Attributes = 0;
     if (win->ctl.flags & MAP_ATTRIB)
@@ -1553,11 +1548,8 @@ int pcmcia_release_window(window_handle_t win)
     s->state &= ~SOCKET_WIN_REQ(win->index);
 
     /* Release system memory */
-    if (win->ctl.res) {
-	release_resource(win->ctl.res);
-	kfree(win->ctl.res);
-	win->ctl.res = NULL;
-    }
+    if(!(s->features & SS_CAP_STATIC_MAP))
+	release_mem_region(win->base, win->size);
     win->handle->state &= ~CLIENT_WIN_REQ(win->index);
 
     win->magic = 0;
@@ -1879,19 +1871,14 @@ int pcmcia_request_window(client_handle_t *handle, win_req_t *req, window_handle
     win->index = w;
     win->handle = *handle;
     win->sock = s;
+    win->base = req->Base;
+    win->size = req->Size;
 
-    if (!(s->features & SS_CAP_STATIC_MAP)) {
-	win->ctl.res = find_mem_region(req->Base, req->Size, align,
-				       (req->Attributes & WIN_MAP_BELOW_1MB),
-				       (*handle)->dev_info, s);
-	if (!win->ctl.res)
-	    return CS_IN_USE;
-	win->ctl.sys_start = win->ctl.res->start;
-	win->ctl.sys_stop = win->ctl.res->end;
-    } else {
-	win->ctl.sys_start = req->Base;
-	win->ctl.sys_stop = req->Base + req->Size - 1;
-    }
+    if (!(s->features & SS_CAP_STATIC_MAP) &&
+	find_mem_region(&win->base, win->size, align,
+			(req->Attributes & WIN_MAP_BELOW_1MB),
+			(*handle)->dev_info, s))
+	return CS_IN_USE;
     (*handle)->state |= CLIENT_WIN_REQ(w);
 
     /* Configure the socket controller */
@@ -1906,6 +1893,8 @@ int pcmcia_request_window(client_handle_t *handle, win_req_t *req, window_handle
 	win->ctl.flags |= MAP_16BIT;
     if (req->Attributes & WIN_USE_WAIT)
 	win->ctl.flags |= MAP_USE_WAIT;
+    win->ctl.sys_start = win->base;
+    win->ctl.sys_stop = win->base + win->size-1;
     win->ctl.card_start = 0;
     if (s->ops->set_mem_map(s, &win->ctl) != 0)
 	return CS_BAD_ARGS;
@@ -2036,18 +2025,16 @@ int pcmcia_eject_card(struct pcmcia_socket *skt)
 	down(&skt->skt_sem);
 	do {
 		if (!(skt->state & SOCKET_PRESENT)) {
-			ret = -ENODEV;
+			ret = CS_NO_CARD;
 			break;
 		}
 
 		ret = send_event(skt, CS_EVENT_EJECTION_REQUEST, CS_EVENT_PRI_LOW);
-		if (ret != 0) {
-			ret = -EINVAL;
+		if (ret != 0)
 			break;
-		}
 
 		socket_remove(skt);
-		ret = 0;
+		ret = CS_SUCCESS;
 	} while (0);
 	up(&skt->skt_sem);
 
@@ -2063,14 +2050,14 @@ int pcmcia_insert_card(struct pcmcia_socket *skt)
 	down(&skt->skt_sem);
 	do {
 		if (skt->state & SOCKET_PRESENT) {
-			ret = -EBUSY;
+			ret = CS_IN_USE;
 			break;
 		}
 		if (socket_insert(skt) == CS_NO_CARD) {
-			ret = -ENODEV;
+			ret = CS_NO_CARD;
 			break;
 		}
-		ret = 0;
+		ret = CS_SUCCESS;
 	} while (0);
 	up(&skt->skt_sem);
 
@@ -2168,21 +2155,16 @@ EXPORT_SYMBOL(pcmcia_socket_class);
 
 static int __init init_pcmcia_cs(void)
 {
-	int ret;
-	printk(KERN_INFO "%s\n", release);
-	printk(KERN_INFO "  %s\n", options);
+    printk(KERN_INFO "%s\n", release);
+    printk(KERN_INFO "  %s\n", options);
 
-	ret = class_register(&pcmcia_socket_class);
-	if (ret)
-		return (ret);
-	return class_interface_register(&pccard_sysfs_interface);
+    return class_register(&pcmcia_socket_class);
 }
 
 static void __exit exit_pcmcia_cs(void)
 {
     printk(KERN_INFO "unloading Kernel Card Services\n");
     release_resource_db();
-    class_interface_unregister(&pccard_sysfs_interface);
     class_unregister(&pcmcia_socket_class);
 }
 

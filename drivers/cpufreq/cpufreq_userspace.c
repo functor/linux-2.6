@@ -151,13 +151,13 @@ EXPORT_SYMBOL_GPL(cpufreq_setmax);
 /*********************** cpufreq_sysctl interface ********************/
 static int
 cpufreq_procctl(ctl_table *ctl, int write, struct file *filp,
-		void __user *buffer, size_t *lenp, loff_t *ppos)
+		void __user *buffer, size_t *lenp)
 {
 	char buf[16], *p;
 	int cpu = (long) ctl->extra1;
 	unsigned int len, left = *lenp;
 
-	if (!left || (*ppos && !write) || !cpu_online(cpu)) {
+	if (!left || (filp->f_pos && !write) || !cpu_online(cpu)) {
 		*lenp = 0;
 		return 0;
 	}
@@ -183,7 +183,7 @@ cpufreq_procctl(ctl_table *ctl, int write, struct file *filp,
 	}
 
 	*lenp = len;
-	*ppos += len;
+	filp->f_pos += len;
 	return 0;
 }
 

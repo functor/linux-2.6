@@ -33,13 +33,6 @@ config BLK_DEV_SWIM_IOP
 	  Say Y here to support the SWIM (Super Woz Integrated Machine) IOP
 	  floppy controller on the Macintosh IIfx and Quadra 900/950.
 
-config MAC_FLOPPY
-	tristate "Support for PowerMac floppy"
-	depends on PPC_PMAC && !PPC_PMAC64
-	help
-	  If you have a SWIM-3 (Super Woz Integrated Machine 3; from Apple)
-	  floppy controller, say Y here. Most commonly found in PowerMacs.
-
 config BLK_DEV_PS2
 	tristate "PS/2 ESDI hard disk support"
 	depends on MCA && MCA_LEGACY
@@ -292,14 +285,14 @@ config BLK_DEV_NBD
 
 	  If unsure, say N.
 
-config BLK_DEV_SX8
-	tristate "Promise SATA SX8 support"
+config BLK_DEV_CARMEL
+	tristate "Promise SATA SX8 (carmel) support"
 	depends on PCI
 	---help---
 	  Saying Y or M here will enable support for the 
-	  Promise SATA SX8 controllers.
+	  Promise SATA SX8 ("carmel") controllers.
 
-	  Use devices /dev/sx8/$N and /dev/sx8/$Np$M.
+	  Use devices /dev/carmel/$N and /dev/carmel/$Np$M.
 
 config BLK_DEV_RAM
 	tristate "RAM disk support"

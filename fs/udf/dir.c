@@ -237,9 +237,7 @@ do_udf_readdir(struct inode * dir, struct file *filp, filldir_t filldir, void *d
 		}
 		else
 		{
-			lb_addr tloc = lelb_to_cpu(cfi.icb.extLocation);
-
-			iblock = udf_get_lb_pblock(dir->i_sb, tloc, 0);
+			iblock = udf_get_lb_pblock(dir->i_sb, lelb_to_cpu(cfi.icb.extLocation), 0);
 			flen = udf_get_filename(dir->i_sb, nameptr, fname, lfi);
 			dt_type = DT_UNKNOWN;
 		}

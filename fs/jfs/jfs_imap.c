@@ -1281,7 +1281,6 @@ int diFree(struct inode *ip)
 	 * to be freed by the transaction;  
 	 */
 	tid = txBegin(ipimap->i_sb, COMMIT_FORCE);
-	down(&JFS_IP(ipimap)->commit_sem);
 
 	/* acquire tlock of the iag page of the freed ixad 
 	 * to force the page NOHOMEOK (even though no data is
@@ -1314,7 +1313,6 @@ int diFree(struct inode *ip)
 	rc = txCommit(tid, 1, &iplist[0], COMMIT_FORCE);
 
 	txEnd(tid);
-	up(&JFS_IP(ipimap)->commit_sem);
 
 	/* unlock the AG inode map information */
 	AG_UNLOCK(imap, agno);
@@ -2064,7 +2062,7 @@ static int diAllocBit(struct inomap * imap, struct iag * iagp, int ino)
 {
 	int extno, bitno, agno, sword, rc;
 	struct metapage *amp = NULL, *bmp = NULL;
-	struct iag *aiagp = NULL, *biagp = NULL;
+	struct iag *aiagp = 0, *biagp = 0;
 	u32 mask;
 
 	/* check if this is the last free inode within the iag.
@@ -2210,7 +2208,7 @@ static int diAllocBit(struct inomap * imap, struct iag * iagp, int ino)
 static int diNewExt(struct inomap * imap, struct iag * iagp, int extno)
 {
 	int agno, iagno, fwd, back, freei = 0, sword, rc;
-	struct iag *aiagp = NULL, *biagp = NULL, *ciagp = NULL;
+	struct iag *aiagp = 0, *biagp = 0, *ciagp = 0;
 	struct metapage *amp, *bmp, *cmp, *dmp;
 	struct inode *ipimap;
 	s64 blkno, hint;
@@ -2625,13 +2623,10 @@ diNewIAG(struct inomap * imap, int *iagnop, int agno, struct metapage ** mpp)
 		 */
 #endif				/*  _STILL_TO_PORT */
 		tid = txBegin(sb, COMMIT_FORCE);
-		down(&JFS_IP(ipimap)->commit_sem);
 
 		/* update the inode map addressing structure to point to it */
 		if ((rc =
 		     xtInsert(tid, ipimap, 0, blkno, xlen, &xaddr, 0))) {
-			txEnd(tid);
-			up(&JFS_IP(ipimap)->commit_sem);
 			/* Free the blocks allocated for the iag since it was
 			 * not successfully added to the inode map
 			 */
@@ -2656,7 +2651,6 @@ diNewIAG(struct inomap * imap, int *iagnop, int agno, struct metapage ** mpp)
 		rc = txCommit(tid, 1, &iplist[0], COMMIT_FORCE);
 
 		txEnd(tid);
-		up(&JFS_IP(ipimap)->commit_sem);
 
 		duplicateIXtree(sb, blkno, xlen, &xaddr);
 
@@ -2917,7 +2911,7 @@ int diExtendFS(struct inode *ipimap, struct inode *ipbmap)
 {
 	int rc, rcx = 0;
 	struct inomap *imap = JFS_IP(ipimap)->i_imap;
-	struct iag *iagp = NULL, *hiagp = NULL;
+	struct iag *iagp = 0, *hiagp = 0;
 	struct bmap *mp = JFS_SBI(ipbmap->i_sb)->bmap;
 	struct metapage *bp, *hbp;
 	int i, n, head;
@@ -3116,9 +3110,9 @@ static int copy_from_dinode(struct dinode * dip, struct inode *ip)
 
 	uid = le32_to_cpu(dip->di_uid);
 	gid = le32_to_cpu(dip->di_gid);
-	ip->i_uid = INOXID_UID(XID_TAG(ip), uid, gid);
-	ip->i_gid = INOXID_GID(XID_TAG(ip), uid, gid);
-	ip->i_xid = INOXID_XID(XID_TAG(ip), uid, gid, 0);
+	ip->i_uid = INOXID_UID(uid, gid);
+	ip->i_gid = INOXID_GID(uid, gid);
+	ip->i_xid = INOXID_XID(uid, gid, 0);
 	
 	ip->i_size = le64_to_cpu(dip->di_size);
 	ip->i_atime.tv_sec = le32_to_cpu(dip->di_atime.tv_sec);
@@ -3181,8 +3175,8 @@ static void copy_to_dinode(struct dinode * dip, struct inode *ip)
 	dip->di_nblocks = cpu_to_le64(PBLK2LBLK(ip->i_sb, ip->i_blocks));
 	dip->di_nlink = cpu_to_le32(ip->i_nlink);
 
-	uid = XIDINO_UID(XID_TAG(ip), ip->i_uid, ip->i_xid);
-	gid = XIDINO_GID(XID_TAG(ip), ip->i_gid, ip->i_xid);
+	uid = XIDINO_UID(ip->i_uid, ip->i_xid);
+	gid = XIDINO_GID(ip->i_gid, ip->i_xid);
 	dip->di_uid = cpu_to_le32(uid);
 	dip->di_gid = cpu_to_le32(gid);
 	/*

@@ -27,11 +27,13 @@
 #include <linux/string.h>
 #include <linux/mm.h>
 #include <linux/init.h>
+#include <linux/list.h>
 #include <linux/completion.h>
+#include <linux/unistd.h>
 
-#include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_transport.h>
+#include "scsi.h"
 
 #include "scsi_priv.h"
 #include "scsi_logging.h"

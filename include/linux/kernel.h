@@ -45,32 +45,14 @@ extern int console_printk[];
 
 struct completion;
 
-#ifdef CONFIG_PREEMPT_VOLUNTARY
-extern void __cond_resched(void);
-# define might_resched() __cond_resched()
-#else
-# define might_resched() do { } while (0)
-#endif
-
 #ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
-  void __might_sleep(char *file, int line, int atomic_depth);
-# define might_sleep() \
-	do { __might_sleep(__FILE__, __LINE__, 0); might_resched(); } while (0)
-#else
-# define might_sleep() do { might_resched(); } while (0)
-#endif
-
+void __might_sleep(char *file, int line);
+#define might_sleep() __might_sleep(__FILE__, __LINE__)
 #define might_sleep_if(cond) do { if (unlikely(cond)) might_sleep(); } while (0)
-
-#define abs(x) ({				\
-		int __x = (x);			\
-		(__x < 0) ? -__x : __x;		\
-	})
-
-#define labs(x) ({				\
-		long __x = (x);			\
-		(__x < 0) ? -__x : __x;		\
-	})
+#else
+#define might_sleep() do {} while(0)
+#define might_sleep_if(cond) do {} while (0)
+#endif
 
 extern struct notifier_block *panic_notifier_list;
 NORET_TYPE void panic(const char * fmt, ...)
@@ -79,6 +61,7 @@ asmlinkage NORET_TYPE void do_exit(long error_code)
 	ATTRIB_NORET;
 NORET_TYPE void complete_and_exit(struct completion *, long)
 	ATTRIB_NORET;
+extern int abs(int);
 extern unsigned long simple_strtoul(const char *,char **,unsigned int);
 extern long simple_strtol(const char *,char **,unsigned int);
 extern unsigned long long simple_strtoull(const char *,char **,unsigned int);
@@ -101,7 +84,6 @@ extern int get_option(char **str, int *pint);
 extern char *get_options(const char *str, int nints, int *ints);
 extern unsigned long long memparse(char *ptr, char **retptr);
 
-extern int __kernel_text_address(unsigned long addr);
 extern int kernel_text_address(unsigned long addr);
 extern int session_of_pgrp(int pgrp);
 
@@ -109,15 +91,6 @@ asmlinkage int printk(const char * fmt, ...)
 	__attribute__ ((format (printf, 1, 2)));
 
 unsigned long int_sqrt(unsigned long);
-
-static inline int __attribute_pure__ long_log2(unsigned long x)
-{
-	int r = 0;
-	for (x >>= 1; x > 0; x >>= 1)
-		r++;
-	return r;
-}
-
 
 extern int printk_ratelimit(void);
 extern int __printk_ratelimit(int ratelimit_jiffies, int ratelimit_burst);
@@ -138,14 +111,10 @@ extern int oops_in_progress;		/* If set, an oops, panic(), BUG() or die() is in 
 extern int panic_on_oops;
 extern int tainted;
 extern const char *print_tainted(void);
-struct pt_regs;
-extern void (*netdump_func) (struct pt_regs *regs);
-extern int netdump_mode;
 
 /* Values used for system_state */
 extern enum system_states {
 	SYSTEM_BOOTING,
-	SYSTEM_BOOTING_SCHEDULER_OK,
 	SYSTEM_RUNNING,
 	SYSTEM_HALT,
 	SYSTEM_POWER_OFF,

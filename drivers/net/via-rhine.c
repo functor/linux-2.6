@@ -183,6 +183,12 @@ static const int multicast_filter_limit = 32;
 
 #define PKT_BUF_SZ	1536	/* Size of each temporary Rx buffer.*/
 
+#if !defined(__OPTIMIZE__)  ||  !defined(__KERNEL__)
+#warning  You must compile this file with the correct options!
+#warning  See the last lines of the source file.
+#error  You must compile this driver with "-O".
+#endif
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
@@ -748,8 +754,6 @@ static int __devinit rhine_init_one(struct pci_dev *pdev,
 	}
 #endif /* USE_MMIO */
 	dev->base_addr = ioaddr;
-	rp = netdev_priv(dev);
-	rp->quirks = quirks;
 
 	rhine_power_init(dev);
 
@@ -794,8 +798,10 @@ static int __devinit rhine_init_one(struct pci_dev *pdev,
 
 	dev->irq = pdev->irq;
 
+	rp = netdev_priv(dev);
 	spin_lock_init(&rp->lock);
 	rp->pdev = pdev;
+	rp->quirks = quirks;
 	rp->mii_if.dev = dev;
 	rp->mii_if.mdio_read = mdio_read;
 	rp->mii_if.mdio_write = mdio_write;
@@ -980,7 +986,7 @@ static void alloc_rbufs(struct net_device *dev)
 		rp->rx_ring[i].desc_length = cpu_to_le32(rp->rx_buf_sz);
 		next += sizeof(struct rx_desc);
 		rp->rx_ring[i].next_desc = cpu_to_le32(next);
-		rp->rx_skbuff[i] = NULL;
+		rp->rx_skbuff[i] = 0;
 	}
 	/* Mark the last entry as wrapping the ring. */
 	rp->rx_ring[i-1].next_desc = cpu_to_le32(rp->rx_ring_dma);
@@ -1018,7 +1024,7 @@ static void free_rbufs(struct net_device* dev)
 					 rp->rx_buf_sz, PCI_DMA_FROMDEVICE);
 			dev_kfree_skb(rp->rx_skbuff[i]);
 		}
-		rp->rx_skbuff[i] = NULL;
+		rp->rx_skbuff[i] = 0;
 	}
 }
 
@@ -1031,7 +1037,7 @@ static void alloc_tbufs(struct net_device* dev)
 	rp->dirty_tx = rp->cur_tx = 0;
 	next = rp->tx_ring_dma;
 	for (i = 0; i < TX_RING_SIZE; i++) {
-		rp->tx_skbuff[i] = NULL;
+		rp->tx_skbuff[i] = 0;
 		rp->tx_ring[i].tx_status = 0;
 		rp->tx_ring[i].desc_length = cpu_to_le32(TXDESC);
 		next += sizeof(struct tx_desc);
@@ -1060,8 +1066,8 @@ static void free_tbufs(struct net_device* dev)
 			}
 			dev_kfree_skb(rp->tx_skbuff[i]);
 		}
-		rp->tx_skbuff[i] = NULL;
-		rp->tx_buf[i] = NULL;
+		rp->tx_skbuff[i] = 0;
+		rp->tx_buf[i] = 0;
 	}
 }
 

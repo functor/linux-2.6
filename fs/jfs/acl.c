@@ -136,7 +136,7 @@ int jfs_permission(struct inode * inode, int mask, struct nameidata *nd)
 		/*
 		 * Nobody gets write access to a read-only fs.
 		 */
-		if ((IS_RDONLY(inode) || (nd && MNT_IS_RDONLY(nd->mnt))) &&
+		if (IS_RDONLY(inode) &&
 		    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 			return -EROFS;
 
@@ -281,9 +281,9 @@ int jfs_setattr(struct dentry *dentry, struct iattr *iattr)
 	if (rc)
 		return rc;
 
-	rc = inode_setattr(inode, iattr);
+	inode_setattr(inode, iattr);
 
-	if (!rc && (iattr->ia_valid & ATTR_MODE))
+	if (iattr->ia_valid & ATTR_MODE)
 		rc = jfs_acl_chmod(inode);
 
 	return rc;

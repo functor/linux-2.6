@@ -303,14 +303,15 @@ ccw_device_sense_id_irq(struct ccw_device *cdev, enum dev_event dev_event)
 
 	sch = to_subchannel(cdev->dev.parent);
 	irb = (struct irb *) __LC_IRB;
-	/* Retry sense id for cc=1. */
+	/*
+	 * Unsolicited interrupts may pertain to an earlier status pending or
+	 * busy condition on the subchannel. Retry sense id.
+	 */
 	if (irb->scsw.stctl ==
 	    (SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS)) {
-		if (irb->scsw.cc == 1) {
-			ret = __ccw_device_sense_id_start(cdev);
-			if (ret && ret != -EBUSY)
-				ccw_device_sense_id_done(cdev, ret);
-		}
+		ret = __ccw_device_sense_id_start(cdev);
+		if (ret && ret != -EBUSY)
+			ccw_device_sense_id_done(cdev, ret);
 		return;
 	}
 	if (ccw_device_accumulate_and_sense(cdev, irb) != 0)

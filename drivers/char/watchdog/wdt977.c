@@ -240,7 +240,7 @@ static int wdt977_open(struct inode *inode, struct file *file)
 		__module_get(THIS_MODULE);
 
 	wdt977_start();
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int wdt977_release(struct inode *inode, struct file *file)
@@ -273,9 +273,12 @@ static int wdt977_release(struct inode *inode, struct file *file)
  *      write of data will do, as we we don't define content meaning.
  */
 
-static ssize_t wdt977_write(struct file *file, const char __user *buf,
-			    size_t count, loff_t *ppos)
+static ssize_t wdt977_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
 {
+	/* Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	if (count) {
 		if (!nowayout) {
 			size_t i;
@@ -322,12 +325,6 @@ static int wdt977_ioctl(struct inode *inode, struct file *file,
 	int status;
 	int new_options, retval = -EINVAL;
 	int new_timeout;
-	union {
-		struct watchdog_info __user *ident;
-		int __user *i;
-	} uarg;
-
-	uarg.i = (int __user *)arg;
 
 	switch(cmd)
 	{
@@ -335,22 +332,22 @@ static int wdt977_ioctl(struct inode *inode, struct file *file,
 		return -ENOIOCTLCMD;
 
 	case WDIOC_GETSUPPORT:
-		return copy_to_user(uarg.ident, &ident,
+		return copy_to_user((struct watchdog_info *)arg, &ident,
 			sizeof(ident)) ? -EFAULT : 0;
 
 	case WDIOC_GETSTATUS:
 		wdt977_get_status(&status);
-		return put_user(status, uarg.i);
+		return put_user(status, (int *) arg);
 
 	case WDIOC_GETBOOTSTATUS:
-		return put_user(0, uarg.i);
+		return put_user(0, (int *) arg);
 
 	case WDIOC_KEEPALIVE:
 		wdt977_keepalive();
 		return 0;
 
 	case WDIOC_SETOPTIONS:
-		if (get_user (new_options, uarg.i))
+		if (get_user (new_options, (int *) arg))
 			return -EFAULT;
 
 		if (new_options & WDIOS_DISABLECARD) {
@@ -366,7 +363,7 @@ static int wdt977_ioctl(struct inode *inode, struct file *file,
 		return retval;
 
 	case WDIOC_SETTIMEOUT:
-		if (get_user(new_timeout, uarg.i))
+		if (get_user(new_timeout, (int *) arg))
 			return -EFAULT;
 
 		if (wdt977_set_timeout(new_timeout))
@@ -376,7 +373,7 @@ static int wdt977_ioctl(struct inode *inode, struct file *file,
 		/* Fall */
 
 	case WDIOC_GETTIMEOUT:
-		return put_user(timeout, uarg.i);
+		return put_user(timeout, (int *)arg);
 
 	}
 }

@@ -33,7 +33,6 @@
 #include <net/checksum.h>
 #include <net/sock.h>
 #include <net/snmp.h>
-#include <net/ip.h>
 #if defined(CONFIG_IPV6) || defined (CONFIG_IPV6_MODULE)
 #include <linux/ipv6.h>
 #endif
@@ -276,20 +275,20 @@ static __inline__ int tw_del_dead_node(struct tcp_tw_bucket *tw)
 
 #define tcptw_sk(__sk)	((struct tcp_tw_bucket *)(__sk))
 
-static inline u32 tcp_v4_rcv_saddr(const struct sock *sk)
+static inline const u32 tcp_v4_rcv_saddr(const struct sock *sk)
 {
 	return likely(sk->sk_state != TCP_TIME_WAIT) ?
 		inet_sk(sk)->rcv_saddr : tcptw_sk(sk)->tw_rcv_saddr;
 }
 
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
-static inline struct in6_addr *__tcp_v6_rcv_saddr(const struct sock *sk)
+static inline const struct in6_addr *__tcp_v6_rcv_saddr(const struct sock *sk)
 {
 	return likely(sk->sk_state != TCP_TIME_WAIT) ?
 		&inet6_sk(sk)->rcv_saddr : &tcptw_sk(sk)->tw_v6_rcv_saddr;
 }
 
-static inline struct in6_addr *tcp_v6_rcv_saddr(const struct sock *sk)
+static inline const struct in6_addr *tcp_v6_rcv_saddr(const struct sock *sk)
 {
 	return sk->sk_family == AF_INET6 ? __tcp_v6_rcv_saddr(sk) : NULL;
 }
@@ -1045,7 +1044,7 @@ static inline void tcp_reset_xmit_timer(struct sock *sk, int what, unsigned long
 		break;
 
 	default:
-		printk(timer_bug_msg);
+		printk(KERN_DEBUG "bug: unknown timer value\n");
 	};
 }
 
@@ -1194,6 +1193,13 @@ struct tcp_skb_cb {
 };
 
 #define TCP_SKB_CB(__skb)	((struct tcp_skb_cb *)&((__skb)->cb[0]))
+
+#define for_retrans_queue(skb, sk, tp) \
+		for (skb = (sk)->sk_write_queue.next;			\
+		     (skb != (tp)->send_head) &&			\
+		     (skb != (struct sk_buff *)&(sk)->sk_write_queue);	\
+		     skb=skb->next)
+
 
 #include <net/tcp_ecn.h>
 
@@ -1403,7 +1409,7 @@ tcp_nagle_check(struct tcp_opt *tp, struct sk_buff *skb, unsigned mss_now, int n
 		  tcp_minshall_check(tp))));
 }
 
-/* This checks if the data bearing packet SKB (usually sk->sk_send_head)
+/* This checks if the data bearing packet SKB (usually tp->send_head)
  * should be put on the wire right now.
  */
 static __inline__ int tcp_snd_test(struct tcp_opt *tp, struct sk_buff *skb,
@@ -1460,7 +1466,7 @@ static __inline__ void __tcp_push_pending_frames(struct sock *sk,
 						 unsigned cur_mss,
 						 int nonagle)
 {
-	struct sk_buff *skb = sk->sk_send_head;
+	struct sk_buff *skb = tp->send_head;
 
 	if (skb) {
 		if (!tcp_skb_is_last(sk, skb))
@@ -1480,7 +1486,7 @@ static __inline__ void tcp_push_pending_frames(struct sock *sk,
 
 static __inline__ int tcp_may_send_now(struct sock *sk, struct tcp_opt *tp)
 {
-	struct sk_buff *skb = sk->sk_send_head;
+	struct sk_buff *skb = tp->send_head;
 
 	return (skb &&
 		tcp_snd_test(tp, skb, tcp_current_mss(sk, 1),
@@ -1553,7 +1559,7 @@ static __inline__ int tcp_prequeue(struct sock *sk, struct sk_buff *skb)
 
 			while ((skb1 = __skb_dequeue(&tp->ucopy.prequeue)) != NULL) {
 				sk->sk_backlog_rcv(sk, skb1);
-				NET_INC_STATS_BH(LINUX_MIB_TCPPREQUEUEDROPPED);
+				NET_INC_STATS_BH(TCPPrequeueDropped);
 			}
 
 			tp->ucopy.memory = 0;
@@ -1585,12 +1591,12 @@ static __inline__ void tcp_set_state(struct sock *sk, int state)
 	switch (state) {
 	case TCP_ESTABLISHED:
 		if (oldstate != TCP_ESTABLISHED)
-			TCP_INC_STATS(TCP_MIB_CURRESTAB);
+			TCP_INC_STATS(TcpCurrEstab);
 		break;
 
 	case TCP_CLOSE:
 		if (oldstate == TCP_CLOSE_WAIT || oldstate == TCP_ESTABLISHED)
-			TCP_INC_STATS(TCP_MIB_ESTABRESETS);
+			TCP_INC_STATS(TcpEstabResets);
 
 		sk->sk_prot->unhash(sk);
 		if (tcp_sk(sk)->bind_hash &&
@@ -1599,7 +1605,7 @@ static __inline__ void tcp_set_state(struct sock *sk, int state)
 		/* fall through */
 	default:
 		if (oldstate==TCP_ESTABLISHED)
-			TCP_DEC_STATS(TCP_MIB_CURRESTAB);
+			TCP_DEC_STATS(TcpCurrEstab);
 	}
 
 	/* Change state AFTER socket is unhashed to avoid closed
@@ -1981,7 +1987,96 @@ static __inline__ void tcp_openreq_init(struct open_request *req,
 	req->rmt_port = skb->h.th->source;
 }
 
-extern void tcp_enter_memory_pressure(void);
+#define TCP_MEM_QUANTUM	((int)PAGE_SIZE)
+
+static inline void tcp_free_skb(struct sock *sk, struct sk_buff *skb)
+{
+	tcp_sk(sk)->queue_shrunk = 1;
+	sk->sk_wmem_queued -= skb->truesize;
+	sk->sk_forward_alloc += skb->truesize;
+	__kfree_skb(skb);
+}
+
+extern void __tcp_mem_reclaim(struct sock *sk);
+extern int tcp_mem_schedule(struct sock *sk, int size, int kind);
+
+static inline void tcp_mem_reclaim(struct sock *sk)
+{
+	if (sk->sk_forward_alloc >= TCP_MEM_QUANTUM)
+		__tcp_mem_reclaim(sk);
+}
+
+static inline void tcp_enter_memory_pressure(void)
+{
+	if (!tcp_memory_pressure) {
+		NET_INC_STATS(TCPMemoryPressures);
+		tcp_memory_pressure = 1;
+	}
+}
+
+static inline void tcp_moderate_sndbuf(struct sock *sk)
+{
+	if (!(sk->sk_userlocks & SOCK_SNDBUF_LOCK)) {
+		sk->sk_sndbuf = min(sk->sk_sndbuf, sk->sk_wmem_queued / 2);
+		sk->sk_sndbuf = max(sk->sk_sndbuf, SOCK_MIN_SNDBUF);
+	}
+}
+
+static inline struct sk_buff *tcp_alloc_pskb(struct sock *sk, int size, int mem, int gfp)
+{
+	struct sk_buff *skb = alloc_skb(size+MAX_TCP_HEADER, gfp);
+
+	if (skb) {
+		skb->truesize += mem;
+		if (sk->sk_forward_alloc >= (int)skb->truesize ||
+		    tcp_mem_schedule(sk, skb->truesize, 0)) {
+			skb_reserve(skb, MAX_TCP_HEADER);
+			return skb;
+		}
+		__kfree_skb(skb);
+	} else {
+		tcp_enter_memory_pressure();
+		tcp_moderate_sndbuf(sk);
+	}
+	return NULL;
+}
+
+static inline struct sk_buff *tcp_alloc_skb(struct sock *sk, int size, int gfp)
+{
+	return tcp_alloc_pskb(sk, size, 0, gfp);
+}
+
+static inline struct page * tcp_alloc_page(struct sock *sk)
+{
+	if (sk->sk_forward_alloc >= (int)PAGE_SIZE ||
+	    tcp_mem_schedule(sk, PAGE_SIZE, 0)) {
+		struct page *page = alloc_pages(sk->sk_allocation, 0);
+		if (page)
+			return page;
+	}
+	tcp_enter_memory_pressure();
+	tcp_moderate_sndbuf(sk);
+	return NULL;
+}
+
+static inline void tcp_writequeue_purge(struct sock *sk)
+{
+	struct sk_buff *skb;
+
+	while ((skb = __skb_dequeue(&sk->sk_write_queue)) != NULL)
+		tcp_free_skb(sk, skb);
+	tcp_mem_reclaim(sk);
+}
+
+extern void tcp_rfree(struct sk_buff *skb);
+
+static inline void tcp_set_owner_r(struct sk_buff *skb, struct sock *sk)
+{
+	skb->sk = sk;
+	skb->destructor = tcp_rfree;
+	atomic_add(skb->truesize, &sk->sk_rmem_alloc);
+	sk->sk_forward_alloc -= skb->truesize;
+}
 
 extern void tcp_listen_wlock(void);
 
@@ -2067,18 +2162,18 @@ static inline int tcp_use_frto(const struct sock *sk)
 	 * unsent new data, and the advertised window should allow
 	 * sending it.
 	 */
-	return (sysctl_tcp_frto && sk->sk_send_head &&
-		!after(TCP_SKB_CB(sk->sk_send_head)->end_seq,
+	return (sysctl_tcp_frto && tp->send_head &&
+		!after(TCP_SKB_CB(tp->send_head)->end_seq,
 		       tp->snd_una + tp->snd_wnd));
 }
 
 static inline void tcp_mib_init(void)
 {
 	/* See RFC 2012 */
-	TCP_ADD_STATS_USER(TCP_MIB_RTOALGORITHM, 1);
-	TCP_ADD_STATS_USER(TCP_MIB_RTOMIN, TCP_RTO_MIN*1000/HZ);
-	TCP_ADD_STATS_USER(TCP_MIB_RTOMAX, TCP_RTO_MAX*1000/HZ);
-	TCP_ADD_STATS_USER(TCP_MIB_MAXCONN, -1);
+	TCP_ADD_STATS_USER(TcpRtoAlgorithm, 1);
+	TCP_ADD_STATS_USER(TcpRtoMin, TCP_RTO_MIN*1000/HZ);
+	TCP_ADD_STATS_USER(TcpRtoMax, TCP_RTO_MAX*1000/HZ);
+	TCP_ADD_STATS_USER(TcpMaxConn, -1);
 }
 
 /* /proc */

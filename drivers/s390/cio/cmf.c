@@ -1,5 +1,5 @@
 /*
- * linux/drivers/s390/cio/cmf.c ($Revision: 1.15 $)
+ * linux/drivers/s390/cio/cmf.c ($Revision: 1.13 $)
  *
  * Linux on zSeries Channel Measurement Facility support
  *
@@ -39,7 +39,6 @@
 #include "css.h"
 #include "device.h"
 #include "ioasm.h"
-#include "chsc.h"
 
 /* parameter to enable cmf during boot, possible uses are:
  *  "s390cmf" -- enable cmf and allocate 2 MB of ram so measuring can be
@@ -997,8 +996,7 @@ init_cmf(void)
 	   see if we are running on z990 or up, otherwise fall back to basic mode. */
 
 	if (format == CMF_AUTODETECT) {
-		if (!css_characteristics_avail ||
-		    !css_general_characteristics.ext_mb) {
+		if (!MACHINE_NEW_STIDP) {
 			format = CMF_BASIC;
 		} else {
 			format = CMF_EXTENDED;

@@ -298,15 +298,12 @@ long sys32_sigaction(int sig, struct old_sigaction32 __user *act,
 
 	if (act) {
 		compat_old_sigset_t mask;
-		compat_uptr_t handler, restorer;
 
-		if (get_user(handler, &act->sa_handler) ||
-		    __get_user(restorer, &act->sa_restorer) ||
+		if (get_user((long)new_ka.sa.sa_handler, &act->sa_handler) ||
+		    __get_user((long)new_ka.sa.sa_restorer, &act->sa_restorer) ||
 		    __get_user(new_ka.sa.sa_flags, &act->sa_flags) ||
 		    __get_user(mask, &act->sa_mask))
 			return -EFAULT;
-		new_ka.sa.sa_handler = compat_ptr(handler);
-		new_ka.sa.sa_restorer = compat_ptr(restorer);
 		siginitset(&new_ka.sa.sa_mask, mask);
 	}
 
@@ -357,10 +354,7 @@ long sys32_rt_sigaction(int sig, const struct sigaction32 __user *act,
 		return -EINVAL;
 
 	if (act) {
-		compat_uptr_t handler;
-
-		ret = get_user(handler, &act->sa_handler);
-		new_ka.sa.sa_handler = compat_ptr(handler);
+		ret = get_user((long)new_ka.sa.sa_handler, &act->sa_handler);
 		ret |= __copy_from_user(&set32, &act->sa_mask,
 					sizeof(compat_sigset_t));
 		sigset_from_compat(&new_ka.sa.sa_mask, &set32);
@@ -602,7 +596,6 @@ int sys32_sigaltstack(u32 __new, u32 __old, int r5,
 	int ret;
 	mm_segment_t old_fs;
 	unsigned long sp;
-	compat_uptr_t ss_sp;
 
 	/*
 	 * set sp to the user stack on entry to the system call
@@ -611,13 +604,11 @@ int sys32_sigaltstack(u32 __new, u32 __old, int r5,
 	sp = regs->gpr[1];
 
 	/* Put new stack info in local 64 bit stack struct */
-	if (newstack) {
-		if (get_user(ss_sp, &newstack->ss_sp) ||
-		    __get_user(uss.ss_flags, &newstack->ss_flags) ||
-		    __get_user(uss.ss_size, &newstack->ss_size))
-			return -EFAULT;
-		uss.ss_sp = compat_ptr(ss_sp);
-	}
+	if (newstack &&
+		(get_user((long)uss.ss_sp, &newstack->ss_sp) ||
+		 __get_user(uss.ss_flags, &newstack->ss_flags) ||
+		 __get_user(uss.ss_size, &newstack->ss_size)))
+		return -EFAULT; 
 
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);

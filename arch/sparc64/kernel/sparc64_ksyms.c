@@ -24,7 +24,6 @@
 #include <linux/socket.h>
 #include <linux/syscalls.h>
 #include <linux/percpu.h>
-#include <linux/init.h>
 #include <net/compat.h>
 
 #include <asm/oplib.h>
@@ -77,6 +76,7 @@ extern int __memcmp(const void *, const void *, __kernel_size_t);
 extern int __strncmp(const char *, const char *, __kernel_size_t);
 extern __kernel_size_t __strlen(const char *);
 extern __kernel_size_t strlen(const char *);
+extern char saved_command_line[];
 extern void linux_sparc_syscall(void);
 extern void rtrap(void);
 extern void show_regs(struct pt_regs *);
@@ -135,7 +135,6 @@ EXPORT_SYMBOL(__write_lock);
 EXPORT_SYMBOL(__write_unlock);
 EXPORT_SYMBOL(__write_trylock);
 /* Out of line spin-locking implementation. */
-EXPORT_SYMBOL(_raw_spin_lock);
 EXPORT_SYMBOL(_raw_spin_lock_flags);
 #endif
 
@@ -143,8 +142,8 @@ EXPORT_SYMBOL(_raw_spin_lock_flags);
 EXPORT_SYMBOL(synchronize_irq);
 
 #if defined(CONFIG_MCOUNT)
-extern void _mcount(void);
-EXPORT_SYMBOL_NOVERS(_mcount);
+extern void mcount(void);
+EXPORT_SYMBOL_NOVERS(mcount);
 #endif
 
 /* CPU online map and active count.  */
@@ -259,7 +258,7 @@ EXPORT_SYMBOL(verify_compat_iovec);
 
 EXPORT_SYMBOL(dump_thread);
 EXPORT_SYMBOL(dump_fpu);
-EXPORT_SYMBOL(__pte_alloc_one_kernel);
+EXPORT_SYMBOL(pte_alloc_one_kernel);
 #ifndef CONFIG_SMP
 EXPORT_SYMBOL(pgt_quicklists);
 #endif
@@ -328,12 +327,14 @@ EXPORT_SYMBOL(sys_getegid);
 EXPORT_SYMBOL(sys_getgid);
 EXPORT_SYMBOL(svr4_getcontext);
 EXPORT_SYMBOL(svr4_setcontext);
+EXPORT_SYMBOL(sys_ioctl);
 EXPORT_SYMBOL(compat_sys_ioctl);
 EXPORT_SYMBOL(sparc32_open);
 EXPORT_SYMBOL(sys_close);
 #endif
 
 /* Special internal versions of library functions. */
+EXPORT_SYMBOL(__memcpy);
 EXPORT_SYMBOL(__memset);
 EXPORT_SYMBOL(_clear_page);
 EXPORT_SYMBOL(clear_user_page);
@@ -350,10 +351,9 @@ EXPORT_SYMBOL(csum_partial);
 EXPORT_SYMBOL(csum_partial_copy_sparc64);
 EXPORT_SYMBOL(ip_fast_csum);
 
-/* Moving data to/from/in userspace. */
+/* Moving data to/from userspace. */
 EXPORT_SYMBOL(__copy_to_user);
 EXPORT_SYMBOL(__copy_from_user);
-EXPORT_SYMBOL(__copy_in_user);
 EXPORT_SYMBOL(__strncpy_from_user);
 EXPORT_SYMBOL(__bzero_noasi);
 
@@ -361,8 +361,6 @@ EXPORT_SYMBOL(__bzero_noasi);
 EXPORT_SYMBOL(phys_base);
 EXPORT_SYMBOL(pfn_base);
 EXPORT_SYMBOL(sparc64_valid_addr_bitmap);
-EXPORT_SYMBOL(page_to_pfn);
-EXPORT_SYMBOL(pfn_to_page);
 
 /* No version information on this, heavily used in inline asm,
  * and will always be 'void __ret_efault(void)'.

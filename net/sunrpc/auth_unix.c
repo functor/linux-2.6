@@ -13,17 +13,14 @@
 #include <linux/in.h>
 #include <linux/sunrpc/clnt.h>
 #include <linux/sunrpc/auth.h>
-#include <linux/vserver/xid.h>
 
 #define NFS_NGROUPS	16
 
 struct unx_cred {
 	struct rpc_cred		uc_base;
 	gid_t			uc_gid;
-	xid_t			uc_xid;
 	uid_t			uc_puid;		/* process uid */
 	gid_t			uc_pgid;		/* process gid */
-	xid_t			uc_pxid;		/* process xid */
 	gid_t			uc_gids[NFS_NGROUPS];
 };
 #define uc_uid			uc_base.cr_uid
@@ -83,7 +80,6 @@ unx_create_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
 	if (flags & RPC_TASK_ROOTCREDS) {
 		cred->uc_uid = cred->uc_puid = 0;
 		cred->uc_gid = cred->uc_pgid = 0;
-		cred->uc_xid = cred->uc_pxid = current->xid;
 		cred->uc_gids[0] = NOGROUP;
 	} else {
 		int groups = acred->group_info->ngroups;
@@ -92,10 +88,8 @@ unx_create_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
 
 		cred->uc_uid = acred->uid;
 		cred->uc_gid = acred->gid;
-		cred->uc_xid = acred->xid;
 		cred->uc_puid = current->uid;
 		cred->uc_pgid = current->gid;
-		cred->uc_pxid = current->xid;
 		for (i = 0; i < groups; i++)
 			cred->uc_gids[i] = GROUP_AT(acred->group_info, i);
 		if (i < NFS_NGROUPS)
@@ -128,10 +122,8 @@ unx_match(struct auth_cred *acred, struct rpc_cred *rcred, int taskflags)
 
 		if (cred->uc_uid != acred->uid
 		 || cred->uc_gid != acred->gid
-		 || cred->uc_xid != acred->xid
 		 || cred->uc_puid != current->uid
-		 || cred->uc_pgid != current->gid
-		 || cred->uc_pxid != current->xid)
+		 || cred->uc_pgid != current->gid)
 			return 0;
 
 		groups = acred->group_info->ngroups;
@@ -157,7 +149,7 @@ unx_marshal(struct rpc_task *task, u32 *p, int ruid)
 	struct rpc_clnt	*clnt = task->tk_client;
 	struct unx_cred	*cred = (struct unx_cred *) task->tk_msg.rpc_cred;
 	u32		*base, *hold;
-	int		i, tagxid;
+	int		i;
 
 	*p++ = htonl(RPC_AUTH_UNIX);
 	base = p++;
@@ -167,19 +159,14 @@ unx_marshal(struct rpc_task *task, u32 *p, int ruid)
 	 * Copy the UTS nodename captured when the client was created.
 	 */
 	p = xdr_encode_array(p, clnt->cl_nodename, clnt->cl_nodelen);
-	tagxid = task->tk_client->cl_tagxid;
 
 	/* Note: we don't use real uid if it involves raising privilege */
 	if (ruid && cred->uc_puid != 0 && cred->uc_pgid != 0) {
-		*p++ = htonl((u32) XIDINO_UID(tagxid,
-			cred->uc_puid, cred->uc_pxid));
-		*p++ = htonl((u32) XIDINO_GID(tagxid,
-			cred->uc_pgid, cred->uc_pxid));
+		*p++ = htonl((u32) cred->uc_puid);
+		*p++ = htonl((u32) cred->uc_pgid);
 	} else {
-		*p++ = htonl((u32) XIDINO_UID(tagxid,
-			cred->uc_uid, cred->uc_xid));
-		*p++ = htonl((u32) XIDINO_GID(tagxid,
-			cred->uc_gid, cred->uc_xid));
+		*p++ = htonl((u32) cred->uc_uid);
+		*p++ = htonl((u32) cred->uc_gid);
 	}
 	hold = p++;
 	for (i = 0; i < 16 && cred->uc_gids[i] != (gid_t) NOGROUP; i++)

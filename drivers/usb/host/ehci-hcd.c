@@ -416,7 +416,7 @@ static int ehci_start (struct usb_hcd *hcd)
 	else					// N microframes cached
 		ehci->i_thresh = 2 + HCC_ISOC_THRES (hcc_params);
 
-	ehci->reclaim = NULL;
+	ehci->reclaim = 0;
 	ehci->next_uframe = -1;
 
 	/* controller state:  unknown --> reset */
@@ -426,6 +426,7 @@ static int ehci_start (struct usb_hcd *hcd)
 		ehci_mem_cleanup (ehci);
 		return retval;
 	}
+	writel (INTR_MASK, &ehci->regs->intr_enable);
 	writel (ehci->periodic_dma, &ehci->regs->frame_list);
 
 #ifdef	CONFIG_PCI
@@ -463,7 +464,7 @@ static int ehci_start (struct usb_hcd *hcd)
 	 * its dummy is used in hw_alt_next of many tds, to prevent the qh
 	 * from automatically advancing to the next td after short reads.
 	 */
-	ehci->async->qh_next.qh = NULL;
+	ehci->async->qh_next.qh = 0;
 	ehci->async->hw_next = QH_NEXT (ehci->async->qh_dma);
 	ehci->async->hw_info1 = cpu_to_le32 (QH_HEAD);
 	ehci->async->hw_token = cpu_to_le32 (QTD_STS_HALT);
@@ -531,8 +532,7 @@ done2:
 	/*
 	 * Start, enabling full USB 2.0 functionality ... usb 1.1 devices
 	 * are explicitly handed to companion controller(s), so no TT is
-	 * involved with the root hub.  (Except where one is integrated,
-	 * and there's no companion controller unless maybe for USB OTG.)
+	 * involved with the root hub.
 	 */
 	ehci->reboot_notifier.notifier_call = ehci_reboot;
 	register_reboot_notifier (&ehci->reboot_notifier);
@@ -564,8 +564,6 @@ done2:
 		goto done2;
 	}
 
-	writel (INTR_MASK, &ehci->regs->intr_enable); /* Turn On Interrupts */
-
 	create_debug_files (ehci);
 
 	return 0;
@@ -576,7 +574,6 @@ done2:
 static void ehci_stop (struct usb_hcd *hcd)
 {
 	struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
-	u8			rh_ports, port;
 
 	ehci_dbg (ehci, "stop\n");
 
@@ -588,16 +585,7 @@ static void ehci_stop (struct usb_hcd *hcd)
 		return;
 	}
 	del_timer_sync (&ehci->watchdog);
-
-	/* Turn off port power on all root hub ports. */
-	rh_ports = HCS_N_PORTS (ehci->hcs_params);
-	for (port = 1; port <= rh_ports; port++) {
-		ehci_hub_control(hcd, ClearPortFeature, USB_PORT_FEAT_POWER,
-			port, NULL, 0);
-	}
-
 	ehci_reset (ehci);
-	writel (0, &ehci->regs->intr_enable);
 
 	/* let companion controllers work when we aren't */
 	writel (0, &ehci->regs->configured_flag);
@@ -648,7 +636,7 @@ static int ehci_suspend (struct usb_hcd *hcd, u32 state)
 		msleep (100);
 
 #ifdef	CONFIG_USB_SUSPEND
-	(void) usb_suspend_device (hcd->self.root_hub, state);
+	(void) usb_suspend_device (hcd->self.root_hub);
 #else
 	/* FIXME lock root hub */
 	(void) ehci_hub_suspend (hcd);
@@ -717,6 +705,12 @@ static irqreturn_t ehci_irq (struct usb_hcd *hcd, struct pt_regs *regs)
 
 	status = readl (&ehci->regs->status);
 
+	/* shared irq */
+	if (status == 0) {
+		spin_unlock (&ehci->lock);
+		return IRQ_NONE;
+	}
+
 	/* e.g. cardbus physical eject */
 	if (status == ~(u32) 0) {
 		ehci_dbg (ehci, "device removed\n");
@@ -724,10 +718,8 @@ static irqreturn_t ehci_irq (struct usb_hcd *hcd, struct pt_regs *regs)
 	}
 
 	status &= INTR_MASK;
-	if (!status) {			/* irq sharing? */
-		spin_unlock(&ehci->lock);
-		return IRQ_NONE;
-	}
+	if (!status)			/* irq sharing? */
+		goto done;
 
 	/* clear (just) interrupts */
 	writel (status, &ehci->regs->status);
@@ -798,6 +790,7 @@ dead:
 
 	if (bh)
 		ehci_work (ehci, regs);
+done:
 	spin_unlock (&ehci->lock);
 	return IRQ_HANDLED;
 }
@@ -986,7 +979,7 @@ idle_timeout:
 			list_empty (&qh->qtd_list) ? "" : "(has tds)");
 		break;
 	}
-	dev->ep[epnum] = NULL;
+	dev->ep [epnum] = 0;
 done:
 	spin_unlock_irqrestore (&ehci->lock, flags);
 	return;
@@ -1037,8 +1030,6 @@ static const struct hc_driver ehci_driver = {
 	 */
 	.hub_status_data =	ehci_hub_status_data,
 	.hub_control =		ehci_hub_control,
-	.hub_suspend =		ehci_hub_suspend,
-	.hub_resume =		ehci_hub_resume,
 };
 
 /*-------------------------------------------------------------------------*/

@@ -106,7 +106,7 @@ void *irq_kmalloc(size_t size, int pri)
 			cache_bitmask |= (1<<i);
 			return (void *)(&malloc_cache[i]);
 		}
-	return NULL;
+	return 0;
 }
 
 void irq_kfree(void *ptr)
@@ -171,12 +171,7 @@ setup_irq(unsigned int irq, struct irqaction * new)
 	if (!shared) {
 		desc->depth = 0;
 		desc->status &= ~(IRQ_DISABLED | IRQ_AUTODETECT | IRQ_WAITING);
-		if (desc->handler) {
-			if (desc->handler->startup)
-				desc->handler->startup(irq);
-			else if (desc->handler->enable)
-				desc->handler->enable(irq);
-		}
+		unmask_irq(irq);
 	}
 	spin_unlock_irqrestore(&desc->lock,flags);
 
@@ -246,7 +241,7 @@ int request_irq(unsigned int irq,
 
 	action->handler = handler;
 	action->flags = irqflags;			
-	cpus_clear(action->mask);
+	action->mask = 0;
 	action->name = devname;
 	action->dev_id = dev_id;
 	action->next = NULL;
@@ -681,7 +676,7 @@ void init_irq_proc (void)
 	int i;
 
 	/* create /proc/irq */
-	root_irq_dir = proc_mkdir("irq", NULL);
+	root_irq_dir = proc_mkdir("irq", 0);
 
 	/* create /proc/irq/prof_cpu_mask */
 	entry = create_proc_entry("prof_cpu_mask", 0600, root_irq_dir);

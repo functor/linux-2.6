@@ -20,7 +20,6 @@
  */
 #include <linux/fs.h>
 #include <linux/stat.h>
-#include <linux/namei.h>
 #include "cifsfs.h"
 #include "cifspdu.h"
 #include "cifsglob.h"
@@ -95,7 +94,7 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 	int rc = -EACCES;
 	int xid;
 	char *full_path = NULL;
-	char * target_path = ERR_PTR(-ENOMEM);
+	char * target_path;
 	struct cifs_sb_info *cifs_sb;
 	struct cifsTconInfo *pTcon;
 
@@ -105,17 +104,22 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 	full_path = build_path_from_dentry(direntry);
 	up(&direntry->d_sb->s_vfs_rename_sem);
 
-	if (!full_path)
-		goto out;
-
+	if(full_path == NULL) {
+		FreeXid(xid);
+		return -ENOMEM;
+	}
 	cFYI(1, ("Full path: %s inode = 0x%p", full_path, inode));
 	cifs_sb = CIFS_SB(inode->i_sb);
 	pTcon = cifs_sb->tcon;
 	target_path = kmalloc(PATH_MAX, GFP_KERNEL);
-	if (!target_path) {
-		target_path = ERR_PTR(-ENOMEM);
-		goto out;
+	if(target_path == NULL) {
+		if (full_path)
+			kfree(full_path);
+		FreeXid(xid);
+		return -ENOMEM;
 	}
+	/* can not call the following line due to EFAULT in vfs_readlink which is presumably expecting a user space buffer */
+	/* length = cifs_readlink(direntry,target_path, sizeof(target_path) - 1);    */
 
 /* BB add read reparse point symlink code and Unix extensions symlink code here BB */
 	if (pTcon->ses->capabilities & CAP_UNIX)
@@ -135,16 +139,16 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 /* BB Add special case check for Samba DFS symlinks */
 
 		target_path[PATH_MAX-1] = 0;
-	} else {
-		kfree(target_path);
-		target_path = ERR_PTR(rc);
+		rc = vfs_follow_link(nd, target_path);
 	}
+	/* else EACCESS */
 
-out:
-	kfree(full_path);
+	if (target_path)
+		kfree(target_path);
+	if (full_path)
+		kfree(full_path);
 	FreeXid(xid);
-	nd_set_link(nd, target_path);
-	return 0;
+	return rc;
 }
 
 int
@@ -184,10 +188,10 @@ cifs_symlink(struct inode *inode, struct dentry *direntry, const char *symname)
 	if (rc == 0) {
 		if (pTcon->ses->capabilities & CAP_UNIX)
 			rc = cifs_get_inode_info_unix(&newinode, full_path,
-						      inode->i_sb,xid);
+						      inode->i_sb);
 		else
 			rc = cifs_get_inode_info(&newinode, full_path, NULL,
-						 inode->i_sb,xid);
+						 inode->i_sb);
 
 		if (rc != 0) {
 			cFYI(1,
@@ -321,11 +325,4 @@ cifs_readlink(struct dentry *direntry, char __user *pBuffer, int buflen)
 	}
 	FreeXid(xid);
 	return rc;
-}
-
-void cifs_put_link(struct dentry *direntry, struct nameidata *nd)
-{
-	char *p = nd_get_link(nd);
-	if (!IS_ERR(p))
-		kfree(p);
 }

@@ -30,7 +30,6 @@
 #include <linux/socket.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
-#include <linux/vs_cvirt.h>
 
 #include <asm/ptrace.h>
 #include <asm/page.h>
@@ -1641,7 +1640,7 @@ asmlinkage int irix_statvfs64(char *fname, struct irix_statvfs64 *buf)
 
 	printk("[%s:%d] Wheee.. irix_statvfs(%s,%p)\n",
 	       current->comm, current->pid, fname, buf);
-	error = verify_area(VERIFY_WRITE, buf, sizeof(struct irix_statvfs64));
+	error = verify_area(VERIFY_WRITE, buf, sizeof(struct irix_statvfs));
 	if(error)
 		goto out;
 	error = user_path_walk(fname, &nd);

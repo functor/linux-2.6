@@ -316,7 +316,7 @@ get_endpoints (struct usbnet *dev, struct usb_interface *intf)
 	for (tmp = 0; tmp < intf->num_altsetting; tmp++) {
 		unsigned	ep;
 
-		in = out = NULL;
+		in = out = 0;
 		alt = intf->altsetting + tmp;
 
 		/* take the first altsetting with in-bulk + out-bulk;
@@ -454,15 +454,6 @@ static const struct driver_info	an2720_info = {
 #define AX_MCAST_FILTER_SIZE		8
 #define AX_MAX_MCAST			64
 
-#define AX_INTERRUPT_BUFSIZE		8
-
-/* This structure cannot exceed sizeof(unsigned long [5]) AKA 20 bytes */
-struct ax8817x_data {
-	u8 multi_filter[AX_MCAST_FILTER_SIZE];
-	struct urb *int_urb;
-	u8 *int_buf;
-};
-
 static int ax8817x_read_cmd(struct usbnet *dev, u8 cmd, u16 value, u16 index,
 			    u16 size, void *data)
 {
@@ -505,30 +496,6 @@ static void ax8817x_async_cmd_callback(struct urb *urb, struct pt_regs *regs)
 	usb_free_urb(urb);
 }
 
-static void ax8817x_interrupt_complete(struct urb *urb, struct pt_regs *regs)
-{
-	struct usbnet *dev = (struct usbnet *)urb->context;
-	struct ax8817x_data *data = (struct ax8817x_data *)&dev->data;
-	int link;
-
-	if (urb->status < 0) {
-		printk(KERN_DEBUG "ax8817x_interrupt_complete() failed with %d",
-			urb->status);
-	} else {
-		if (data->int_buf[5] == 0x90) {
-			link = data->int_buf[2] & 0x01;
-			if (netif_carrier_ok(dev->net) != link) {
-				if (link)
-					netif_carrier_on(dev->net);
-				else
-					netif_carrier_off(dev->net);
-				devdbg(dev, "ax8817x - Link Status is: %d", link);
-			}
-		}
-		usb_submit_urb(data->int_urb, GFP_KERNEL);
-	}
-}
-
 static void ax8817x_write_cmd_async(struct usbnet *dev, u8 cmd, u16 value, u16 index,
 				    u16 size, void *data)
 {
@@ -568,7 +535,6 @@ static void ax8817x_write_cmd_async(struct usbnet *dev, u8 cmd, u16 value, u16 i
 static void ax8817x_set_multicast(struct net_device *net)
 {
 	struct usbnet *dev = (struct usbnet *) net->priv;
-	struct ax8817x_data *data = (struct ax8817x_data *)&dev->data;
 	u8 rx_ctl = 0x8c;
 
 	if (net->flags & IFF_PROMISC) {
@@ -583,24 +549,25 @@ static void ax8817x_set_multicast(struct net_device *net)
 		 * for our 8 byte filter buffer
 		 * to avoid allocating memory that
 		 * is tricky to free later */
+		u8 *multi_filter = (u8 *)&dev->data;
 		struct dev_mc_list *mc_list = net->mc_list;
 		u32 crc_bits;
 		int i;
 
-		memset(data->multi_filter, 0, AX_MCAST_FILTER_SIZE);
+		memset(multi_filter, 0, AX_MCAST_FILTER_SIZE);
 
 		/* Build the multicast hash filter. */
 		for (i = 0; i < net->mc_count; i++) {
 			crc_bits =
 			    ether_crc(ETH_ALEN,
 				      mc_list->dmi_addr) >> 26;
-			data->multi_filter[crc_bits >> 3] |=
+			multi_filter[crc_bits >> 3] |=
 			    1 << (crc_bits & 7);
 			mc_list = mc_list->next;
 		}
 
 		ax8817x_write_cmd_async(dev, AX_CMD_WRITE_MULTI_FILTER, 0, 0,
-				   AX_MCAST_FILTER_SIZE, data->multi_filter);
+				   AX_MCAST_FILTER_SIZE, multi_filter);
 
 		rx_ctl |= 0x10;
 	}
@@ -702,6 +669,13 @@ static void ax8817x_get_drvinfo (struct net_device *net,
 	info->eedump_len = 0x3e;
 }
 
+static u32 ax8817x_get_link (struct net_device *net)
+{
+	struct usbnet *dev = (struct usbnet *)net->priv;
+
+	return (u32)mii_link_ok(&dev->mii);
+}
+
 static int ax8817x_get_settings(struct net_device *net, struct ethtool_cmd *cmd)
 {
 	struct usbnet *dev = (struct usbnet *)net->priv;
@@ -721,7 +695,7 @@ static int ax8817x_set_settings(struct net_device *net, struct ethtool_cmd *cmd)
    devices that may be connected at the same time. */
 static struct ethtool_ops ax8817x_ethtool_ops = {
 	.get_drvinfo		= ax8817x_get_drvinfo,
-	.get_link		= ethtool_op_get_link,
+	.get_link		= ax8817x_get_link,
 	.get_msglevel		= usbnet_get_msglevel,
 	.set_msglevel		= usbnet_set_msglevel,
 	.get_wol		= ax8817x_get_wol,
@@ -735,33 +709,12 @@ static int ax8817x_bind(struct usbnet *dev, struct usb_interface *intf)
 {
 	int ret;
 	u8 buf[6];
+	u16 *buf16 = (u16 *) buf;
 	int i;
 	unsigned long gpio_bits = dev->driver_info->data;
-	struct ax8817x_data *data = (struct ax8817x_data *)dev->data;
 
 	dev->in = usb_rcvbulkpipe(dev->udev, 3);
 	dev->out = usb_sndbulkpipe(dev->udev, 2);
-
-	// allocate irq urb
-	if ((data->int_urb = usb_alloc_urb (0, GFP_KERNEL)) == 0) {
-		dbg ("%s: cannot allocate interrupt URB",
-			dev->net->name);
-		return -ENOMEM;
-	}
-	
-	if ((data->int_buf = kmalloc(AX_INTERRUPT_BUFSIZE, GFP_KERNEL)) == NULL) {
-		dbg ("%s: cannot allocate memory for interrupt buffer",
-			dev->net->name);
-		usb_free_urb(data->int_urb);
-		return -ENOMEM;
-	}
-	memset(data->int_buf, 0, AX_INTERRUPT_BUFSIZE);
-
-	usb_fill_int_urb (data->int_urb, dev->udev,
-		usb_rcvintpipe (dev->udev, 1),
-		data->int_buf, AX_INTERRUPT_BUFSIZE,
-		ax8817x_interrupt_complete, dev,
-		dev->udev->speed == USB_SPEED_HIGH ? 8 : 100);
 
 	/* Toggle the GPIOs in a manufacturer/model specific way */
 	for (i = 2; i >= 0; i--) {
@@ -803,37 +756,49 @@ static int ax8817x_bind(struct usbnet *dev, struct usb_interface *intf)
 	dev->mii.reg_num_mask = 0x1f;
 	dev->mii.phy_id = buf[1];
 
-	dev->net->set_multicast_list = ax8817x_set_multicast;
-	dev->net->ethtool_ops = &ax8817x_ethtool_ops;
-
-	ax8817x_mdio_write(dev->net, dev->mii.phy_id, MII_BMCR,
-			cpu_to_le16(BMCR_RESET));
-	ax8817x_mdio_write(dev->net, dev->mii.phy_id, MII_ADVERTISE,
-			cpu_to_le16(ADVERTISE_ALL | ADVERTISE_CSMA | 0x0400));
-	mii_nway_restart(&dev->mii);
-
-	if((ret = usb_submit_urb(data->int_urb, GFP_KERNEL)) < 0) {
-		dbg("Failed to submit interrupt URB: %02x", ret);
-		usb_free_urb(data->int_urb);
+	if ((ret = ax8817x_write_cmd(dev, AX_CMD_SET_SW_MII, 0, 0, 0, &buf)) < 0) {
+		dbg("Failed to go to software MII mode: %02x", ret);
 		return ret;
 	}
 
+	*buf16 = cpu_to_le16(BMCR_RESET);
+	if ((ret = ax8817x_write_cmd(dev, AX_CMD_WRITE_MII_REG,
+				     dev->mii.phy_id, MII_BMCR, 2, buf16)) < 0) {
+		dbg("Failed to write MII reg - MII_BMCR: %02x", ret);
+		return ret;
+	}
+
+	/* Advertise that we can do full-duplex pause */
+	*buf16 = cpu_to_le16(ADVERTISE_ALL | ADVERTISE_CSMA | 0x0400);
+	if ((ret = ax8817x_write_cmd(dev, AX_CMD_WRITE_MII_REG,
+			   	     dev->mii.phy_id, MII_ADVERTISE, 
+				     2, buf16)) < 0) {
+		dbg("Failed to write MII_REG advertisement: %02x", ret);
+		return ret;
+	}
+
+	*buf16 = cpu_to_le16(BMCR_ANENABLE | BMCR_ANRESTART);
+	if ((ret = ax8817x_write_cmd(dev, AX_CMD_WRITE_MII_REG,
+			  	     dev->mii.phy_id, MII_BMCR, 
+				     2, buf16)) < 0) {
+		dbg("Failed to write MII reg autonegotiate: %02x", ret);
+		return ret;
+	}
+
+	if ((ret = ax8817x_write_cmd(dev, AX_CMD_SET_HW_MII, 0, 0, 0, &buf)) < 0) {
+		dbg("Failed to set hardware MII: %02x", ret);
+		return ret;
+	}
+
+	dev->net->set_multicast_list = ax8817x_set_multicast;
+	dev->net->ethtool_ops = &ax8817x_ethtool_ops;
+
 	return 0;
-}
-
-static void ax8817x_unbind(struct usbnet *dev, struct usb_interface *intf)
-{
-	struct ax8817x_data *data = (struct ax8817x_data *)dev->data;
-
-	usb_unlink_urb(data->int_urb);
-	usb_free_urb(data->int_urb);
-	kfree(data->int_buf);
 }
 
 static const struct driver_info ax8817x_info = {
 	.description = "ASIX AX8817x USB 2.0 Ethernet",
 	.bind = ax8817x_bind,
-	.unbind = ax8817x_unbind,
 	.flags =  FLAG_ETHER,
 	.data = 0x00130103,
 };
@@ -841,7 +806,6 @@ static const struct driver_info ax8817x_info = {
 static const struct driver_info dlink_dub_e100_info = {
 	.description = "DLink DUB-E100 USB Ethernet",
 	.bind = ax8817x_bind,
-	.unbind = ax8817x_unbind,
 	.flags =  FLAG_ETHER,
 	.data = 0x009f9d9f,
 };
@@ -849,7 +813,6 @@ static const struct driver_info dlink_dub_e100_info = {
 static const struct driver_info netgear_fa120_info = {
 	.description = "Netgear FA-120 USB Ethernet",
 	.bind = ax8817x_bind,
-	.unbind = ax8817x_unbind,
 	.flags =  FLAG_ETHER,
 	.data = 0x00130103,
 };
@@ -857,7 +820,6 @@ static const struct driver_info netgear_fa120_info = {
 static const struct driver_info hawking_uf200_info = {
 	.description = "Hawking UF200 USB Ethernet",
 	.bind = ax8817x_bind,
-	.unbind = ax8817x_unbind,
 	.flags =  FLAG_ETHER,
 	.data = 0x001f1d1f,
 };
@@ -1124,7 +1086,7 @@ static void cdc_unbind (struct usbnet *dev, struct usb_interface *intf)
 		/* ensure immediate exit from usbnet_disconnect */
 		usb_set_intfdata(info->data, NULL);
 		usb_driver_release_interface (&usbnet_driver, info->data);
-		info->data = NULL;
+		info->data = 0;
 	}
 
 	/* and vice versa (just in case) */
@@ -1132,7 +1094,7 @@ static void cdc_unbind (struct usbnet *dev, struct usb_interface *intf)
 		/* ensure immediate exit from usbnet_disconnect */
 		usb_set_intfdata(info->control, NULL);
 		usb_driver_release_interface (&usbnet_driver, info->control);
-		info->control = NULL;
+		info->control = 0;
 	}
 }
 
@@ -1679,7 +1641,7 @@ nc_vendor_write (struct usbnet *dev, u8 req, u8 regnum, u16 value)
 		req,
 		USB_DIR_OUT | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 		value, regnum,
-		NULL, 0,			// data is in setup packet
+		0, 0,			// data is in setup packet
 		CONTROL_TIMEOUT_JIFFIES);
 }
 
@@ -2122,7 +2084,7 @@ pl_vendor_req (struct usbnet *dev, u8 req, u8 val, u8 index)
 		req,
 		USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 		val, index,
-		NULL, 0,
+		0, 0,
 		CONTROL_TIMEOUT_JIFFIES);
 }
 
@@ -2456,7 +2418,7 @@ static void rx_complete (struct urb *urb, struct pt_regs *regs)
 
 	skb_put (skb, urb->actual_length);
 	entry->state = rx_done;
-	entry->urb = NULL;
+	entry->urb = 0;
 
 	switch (urb_status) {
 	    // success
@@ -2500,7 +2462,7 @@ static void rx_complete (struct urb *urb, struct pt_regs *regs)
 block:
 		entry->state = rx_cleanup;
 		entry->urb = urb;
-		urb = NULL;
+		urb = 0;
 		break;
 
 	    // data overrun ... flush fifo?
@@ -2595,7 +2557,7 @@ static int usbnet_stop (struct net_device *net)
 		schedule_timeout (UNLINK_TIMEOUT_JIFFIES);
 		devdbg (dev, "waited for %d urb completions", temp);
 	}
-	dev->wait = NULL;
+	dev->wait = 0;
 	remove_wait_queue (&unlink_wakeup, &wait); 
 
 	/* deferred work (task, timer, softirq) must also stop.
@@ -2754,7 +2716,7 @@ kevent (void *data)
 
 	/* tasklet could resubmit itself forever if memory is tight */
 	if (test_bit (EVENT_RX_MEMORY, &dev->flags)) {
-		struct urb	*urb = NULL;
+		struct urb	*urb = 0;
 
 		if (netif_running (dev->net))
 			urb = usb_alloc_urb (0, GFP_KERNEL);
@@ -2809,7 +2771,7 @@ static void tx_complete (struct urb *urb, struct pt_regs *regs)
 		}
 	}
 
-	urb->dev = NULL;
+	urb->dev = 0;
 	entry->state = tx_done;
 	defer_bh (dev, skb);
 }
@@ -2833,13 +2795,13 @@ static int usbnet_start_xmit (struct sk_buff *skb, struct net_device *net)
 	struct usbnet		*dev = (struct usbnet *) net->priv;
 	int			length;
 	int			retval = NET_XMIT_SUCCESS;
-	struct urb		*urb = NULL;
+	struct urb		*urb = 0;
 	struct skb_data		*entry;
 	struct driver_info	*info = dev->driver_info;
 	unsigned long		flags;
 #ifdef	CONFIG_USB_NET1080
-	struct nc_header	*header = NULL;
-	struct nc_trailer	*trailer = NULL;
+	struct nc_header	*header = 0;
+	struct nc_trailer	*trailer = 0;
 #endif	/* CONFIG_USB_NET1080 */
 
 	// some devices want funky USB-level framing, for
@@ -3248,10 +3210,6 @@ static const struct usb_device_id	products [] = {
 }, {
 	// Buffalo LUA-U2-KTX
 	USB_DEVICE (0x0411, 0x003d),
-	.driver_info =  (unsigned long) &ax8817x_info,
-}, {
-	// Sitecom LN-029 "USB 2.0 10/100 Ethernet adapter"
-	USB_DEVICE (0x6189, 0x182d),
 	.driver_info =  (unsigned long) &ax8817x_info,
 },
 #endif

@@ -104,8 +104,7 @@ head-y := arch/i386/kernel/head.o arch/i386/kernel/init_task.o
 libs-y 					+= arch/i386/lib/
 core-y					+= arch/i386/kernel/ \
 					   arch/i386/mm/ \
-					   arch/i386/$(mcore-y)/ \
-					   arch/i386/crypto/
+					   arch/i386/$(mcore-y)/
 drivers-$(CONFIG_MATH_EMULATION)	+= arch/i386/math-emu/
 drivers-$(CONFIG_PCI)			+= arch/i386/pci/
 # must be linked after kernel/
@@ -122,23 +121,22 @@ boot := arch/i386/boot
 
 all: bzImage
 
-# KBUILD_IMAGE specify target image being built
-                    KBUILD_IMAGE := $(boot)/bzImage
-zImage zlilo zdisk: KBUILD_IMAGE := arch/i386/boot/zImage
+BOOTIMAGE=arch/i386/boot/bzImage
+zImage zlilo zdisk: BOOTIMAGE=arch/i386/boot/zImage
 
 zImage bzImage: vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) $(KBUILD_IMAGE)
+	$(Q)$(MAKE) $(build)=$(boot) $(BOOTIMAGE)
 
 compressed: zImage
 
 zlilo bzlilo: vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(KBUILD_IMAGE) zlilo
+	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(BOOTIMAGE) zlilo
 
 zdisk bzdisk: vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(KBUILD_IMAGE) zdisk
+	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(BOOTIMAGE) zdisk
 
 install fdimage fdimage144 fdimage288: vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(KBUILD_IMAGE) $@
+	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(BOOTIMAGE) $@
 
 prepare: include/asm-$(ARCH)/asm_offsets.h
 CLEAN_FILES += include/asm-$(ARCH)/asm_offsets.h

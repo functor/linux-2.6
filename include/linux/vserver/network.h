@@ -41,9 +41,7 @@ struct nx_info {
 };
 
 
-struct rcu_head;
-
-extern void rcu_free_nx_info(struct rcu_head *);
+extern void rcu_free_nx_info(void *);
 extern void unhash_nx_info(struct nx_info *);
 
 extern struct nx_info *locate_nx_info(int);

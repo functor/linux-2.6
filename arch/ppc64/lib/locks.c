@@ -16,7 +16,6 @@
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/module.h>
-#include <linux/stringify.h>
 #include <asm/hvcall.h>
 #include <asm/iSeries/HvCall.h>
 
@@ -38,10 +37,6 @@
 
 /* waiting for a spinlock... */
 #if defined(CONFIG_PPC_SPLPAR) || defined(CONFIG_PPC_ISERIES)
-
-/* We only yield to the hypervisor if we are in shared processor mode */
-#define SHARED_PROCESSOR (get_paca()->lppaca.xSharedProc)
-
 void __spin_yield(spinlock_t *lock)
 {
 	unsigned int lock_value, holder_cpu, yield_count;
@@ -53,7 +48,7 @@ void __spin_yield(spinlock_t *lock)
 	holder_cpu = lock_value & 0xffff;
 	BUG_ON(holder_cpu >= NR_CPUS);
 	holder_paca = &paca[holder_cpu];
-	yield_count = holder_paca->lppaca.xYieldCount;
+	yield_count = holder_paca->xLpPaca.xYieldCount;
 	if ((yield_count & 1) == 0)
 		return;		/* virtual cpu is currently running */
 	rmb();
@@ -69,7 +64,6 @@ void __spin_yield(spinlock_t *lock)
 
 #else /* SPLPAR || ISERIES */
 #define __spin_yield(x)	barrier()
-#define SHARED_PROCESSOR	0
 #endif
 
 /*
@@ -81,7 +75,7 @@ static __inline__ unsigned long __spin_trylock(spinlock_t *lock)
 	unsigned long tmp, tmp2;
 
 	__asm__ __volatile__(
-"	lwz		%1,%3(13)		# __spin_trylock\n\
+"	lwz		%1,24(13)		# __spin_trylock\n\
 1:	lwarx		%0,0,%2\n\
 	cmpwi		0,%0,0\n\
 	bne-		2f\n\
@@ -89,7 +83,7 @@ static __inline__ unsigned long __spin_trylock(spinlock_t *lock)
 	bne-		1b\n\
 	isync\n\
 2:"	: "=&r" (tmp), "=&r" (tmp2)
-	: "r" (&lock->lock), "i" (offsetof(struct paca_struct, lock_token))
+	: "r" (&lock->lock)
 	: "cr0", "memory");
 
 	return tmp;
@@ -109,8 +103,7 @@ void _raw_spin_lock(spinlock_t *lock)
 			break;
 		do {
 			HMT_low();
-			if (SHARED_PROCESSOR)
-				__spin_yield(lock);
+			__spin_yield(lock);
 		} while (likely(lock->lock != 0));
 		HMT_medium();
 	}
@@ -129,8 +122,7 @@ void _raw_spin_lock_flags(spinlock_t *lock, unsigned long flags)
 		local_irq_restore(flags);
 		do {
 			HMT_low();
-			if (SHARED_PROCESSOR)
-				__spin_yield(lock);
+			__spin_yield(lock);
 		} while (likely(lock->lock != 0));
 		HMT_medium();
 		local_irq_restore(flags_dis);
@@ -141,12 +133,8 @@ EXPORT_SYMBOL(_raw_spin_lock_flags);
 
 void spin_unlock_wait(spinlock_t *lock)
 {
-	while (lock->lock) {
-		HMT_low();
-		if (SHARED_PROCESSOR)
-			__spin_yield(lock);
-	}
-	HMT_medium();
+	while (lock->lock)
+		__spin_yield(lock);
 }
 
 EXPORT_SYMBOL(spin_unlock_wait);
@@ -169,7 +157,7 @@ void __rw_yield(rwlock_t *rw)
 	holder_cpu = lock_value & 0xffff;
 	BUG_ON(holder_cpu >= NR_CPUS);
 	holder_paca = &paca[holder_cpu];
-	yield_count = holder_paca->lppaca.xYieldCount;
+	yield_count = holder_paca->xLpPaca.xYieldCount;
 	if ((yield_count & 1) == 0)
 		return;		/* virtual cpu is currently running */
 	rmb();
@@ -224,8 +212,7 @@ void _raw_read_lock(rwlock_t *rw)
 			break;
 		do {
 			HMT_low();
-			if (SHARED_PROCESSOR)
-				__rw_yield(rw);
+			__rw_yield(rw);
 		} while (likely(rw->lock < 0));
 		HMT_medium();
 	}
@@ -259,7 +246,7 @@ static __inline__ long __write_trylock(rwlock_t *rw)
 	long tmp, tmp2;
 
 	__asm__ __volatile__(
-"	lwz		%1,%3(13)	# write_trylock\n\
+"	lwz		%1,24(13)		# write_trylock\n\
 1:	lwarx		%0,0,%2\n\
 	cmpwi		0,%0,0\n\
 	bne-		2f\n\
@@ -267,7 +254,7 @@ static __inline__ long __write_trylock(rwlock_t *rw)
 	bne-		1b\n\
 	isync\n\
 2:"	: "=&r" (tmp), "=&r" (tmp2)
-	: "r" (&rw->lock), "i" (offsetof(struct paca_struct, lock_token))
+	: "r" (&rw->lock)
 	: "cr0", "memory");
 
 	return tmp;
@@ -287,8 +274,7 @@ void _raw_write_lock(rwlock_t *rw)
 			break;
 		do {
 			HMT_low();
-			if (SHARED_PROCESSOR)
-				__rw_yield(rw);
+			__rw_yield(rw);
 		} while (likely(rw->lock != 0));
 		HMT_medium();
 	}

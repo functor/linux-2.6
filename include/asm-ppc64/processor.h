@@ -348,7 +348,7 @@
 #define	PVR	SPRN_PVR	/* Processor Version */
 #define	PIR	SPRN_PIR	/* Processor ID */
 #define	PURR	SPRN_PURR	/* Processor Utilization of Resource Register */
-//#define	RPA	SPRN_RPA	/* Required Physical Address Register */
+#define	RPA	SPRN_RPA	/* Required Physical Address Register */
 #define	SDR1	SPRN_SDR1      	/* MMU hash base register */
 #define	SPR0	SPRN_SPRG0	/* Supervisor Private Registers */
 #define	SPR1	SPRN_SPRG1
@@ -382,10 +382,10 @@
 #define	PV_ICESTAR	0x0036
 #define	PV_SSTAR	0x0037
 #define	PV_POWER4p	0x0038
-#define PV_970		0x0039
+#define PV_GPUL		0x0039
 #define	PV_POWER5	0x003A
 #define PV_POWER5p	0x003B
-#define PV_970FX	0x003C
+#define PV_GPULp	0x003C
 #define	PV_630        	0x0040
 #define	PV_630p	        0x0041
 
@@ -632,8 +632,6 @@ static inline void prefetchw(const void *x)
 #endif
 
 #endif /* ASSEMBLY */
-
-#define HAVE_ARCH_PICK_MMAP_LAYOUT
 
 /*
  * Number of entries in the SLB. If this ever changes we should handle

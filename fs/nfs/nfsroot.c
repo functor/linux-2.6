@@ -87,7 +87,6 @@
 #include <linux/root_dev.h>
 #include <net/ipconfig.h>
 #include <linux/parser.h>
-#include <linux/vs_cvirt.h>
 
 /* Define this to allow debugging output */
 #undef NFSROOT_DEBUG
@@ -125,7 +124,7 @@ enum {
 	Opt_soft, Opt_hard, Opt_intr,
 	Opt_nointr, Opt_posix, Opt_noposix, Opt_cto, Opt_nocto, Opt_ac, 
 	Opt_noac, Opt_lock, Opt_nolock, Opt_v2, Opt_v3, Opt_udp, Opt_tcp,
-	Opt_broken_suid, Opt_tagxid,
+	Opt_broken_suid,
 	/* Error token */
 	Opt_err
 };
@@ -161,7 +160,6 @@ static match_table_t __initdata tokens = {
 	{Opt_tcp, "proto=tcp"},
 	{Opt_tcp, "tcp"},
 	{Opt_broken_suid, "broken_suid"},
-	{Opt_tagxid, "tagxid"},
 	{Opt_err, NULL}
 	
 };
@@ -272,9 +270,6 @@ static int __init root_nfs_parse(char *name, char *buf)
 				break;
 			case Opt_broken_suid:
 				nfs_data.flags |= NFS_MOUNT_BROKEN_SUID;
-				break;
-			case Opt_tagxid:
-				nfs_data.flags |= NFS_MOUNT_TAGXID;
 				break;
 			default : 
 				return 0;

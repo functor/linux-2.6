@@ -28,8 +28,7 @@ struct cache_info {
 	unsigned int sets;
 	unsigned int linesz;
 
-	unsigned int way_incr;
-
+	unsigned int way_shift;
 	unsigned int entry_shift;
 	unsigned int entry_mask;
 

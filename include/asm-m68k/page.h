@@ -52,13 +52,15 @@ static inline void copy_page(void *to, void *from)
 
 static inline void clear_page(void *page)
 {
-	unsigned long tmp;
-	unsigned long *sp = page;
+	unsigned long data, tmp;
+	void *sp = page;
 
-	*sp++ = 0;
-	*sp++ = 0;
-	*sp++ = 0;
-	*sp++ = 0;
+	data = 0;
+
+	*((unsigned long *)(page))++ = 0;
+	*((unsigned long *)(page))++ = 0;
+	*((unsigned long *)(page))++ = 0;
+	*((unsigned long *)(page))++ = 0;
 
 	__asm__ __volatile__("1:\t"
 			     ".chip 68040\n\t"
@@ -67,8 +69,8 @@ static inline void clear_page(void *page)
 			     "subqw  #8,%2\n\t"
 			     "subqw  #8,%2\n\t"
 			     "dbra   %1,1b\n\t"
-			     : "=a" (sp), "=d" (tmp)
-			     : "a" (page), "0" (sp),
+			     : "=a" (page), "=d" (tmp)
+			     : "a" (sp), "0" (page),
 			       "1" ((PAGE_SIZE - 16) / 16 - 1));
 }
 
@@ -189,8 +191,6 @@ static inline void *__va(unsigned long x)
 
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
-
-#define devmem_is_allowed(x) 1
 
 #endif /* __KERNEL__ */
 

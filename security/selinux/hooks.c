@@ -63,7 +63,6 @@
 #include <net/ipv6.h>
 #include <linux/hugetlb.h>
 #include <linux/major.h>
-#include <linux/personality.h>
 
 #include "avc.h"
 #include "objsec.h"
@@ -1390,11 +1389,11 @@ static int selinux_capset_check(struct task_struct *target, kernel_cap_t *effect
 {
 	int error;
 
-	error = secondary_ops->capset_check(target, effective, inheritable, permitted);
+	error = task_has_perm(current, target, PROCESS__SETCAP);
 	if (error)
 		return error;
 
-	return task_has_perm(current, target, PROCESS__SETCAP);
+	return secondary_ops->capset_check(target, effective, inheritable, permitted);
 }
 
 static void selinux_capset_set(struct task_struct *target, kernel_cap_t *effective,
@@ -1427,10 +1426,6 @@ static int selinux_sysctl(ctl_table *table, int op)
 	struct task_security_struct *tsec;
 	u32 tsid;
 	int rc;
-
-	rc = secondary_ops->sysctl(table, op);
-	if (rc)
-		return rc;
 
 	tsec = current->security;
 
@@ -1685,9 +1680,6 @@ static int selinux_bprm_set_security(struct linux_binprm *bprm)
 		if (rc)
 			return rc;
 
-		/* Clear any possibly unsafe personality bits on exec: */
-		current->personality &= ~PER_CLEAR_ON_SETID;
-
 		/* Set the security field to the new SID. */
 		bsec->sid = newsid;
 	}
@@ -1698,7 +1690,7 @@ static int selinux_bprm_set_security(struct linux_binprm *bprm)
 
 static int selinux_bprm_check_security (struct linux_binprm *bprm)
 {
-	return secondary_ops->bprm_check_security(bprm);
+	return 0;
 }
 
 
@@ -1716,7 +1708,12 @@ static int selinux_bprm_secureexec (struct linux_binprm *bprm)
 					 PROCESS__NOATSECURE, NULL, NULL);
 	}
 
-	return (atsecure || secondary_ops->bprm_secureexec(bprm));
+	/* Note that we must include the legacy uid/gid test below
+	   to retain it, as the new userland will simply use the
+	   value passed by AT_SECURE to decide whether to enable
+	   secure mode. */
+	return ( atsecure || current->euid != current->uid ||
+		current->egid != current->gid);
 }
 
 static void selinux_bprm_free_security(struct linux_binprm *bprm)
@@ -1796,8 +1793,7 @@ static inline void flush_unauthorized_files(struct files_struct * files)
 
 	spin_lock(&files->file_lock);
 	for (;;) {
-		unsigned long set, i;
-		int fd;
+		unsigned long set, i, fd;
 
 		j++;
 		i = j * __NFDBITS;
@@ -2062,12 +2058,6 @@ static int selinux_mount(char * dev_name,
                          unsigned long flags,
                          void * data)
 {
-	int rc;
-
-	rc = secondary_ops->sb_mount(dev_name, nd, type, flags, data);
-	if (rc)
-		return rc;
-
 	if (flags & MS_REMOUNT)
 		return superblock_has_perm(current, nd->mnt->mnt_sb,
 		                           FILESYSTEM__REMOUNT, NULL);
@@ -2078,12 +2068,6 @@ static int selinux_mount(char * dev_name,
 
 static int selinux_umount(struct vfsmount *mnt, int flags)
 {
-	int rc;
-
-	rc = secondary_ops->sb_umount(mnt, flags);
-	if (rc)
-		return rc;
-
 	return superblock_has_perm(current,mnt->mnt_sb,
 	                           FILESYSTEM__UNMOUNT,NULL);
 }
@@ -2127,11 +2111,6 @@ static void selinux_inode_post_link(struct dentry *old_dentry, struct inode *ino
 
 static int selinux_inode_unlink(struct inode *dir, struct dentry *dentry)
 {
-	int rc;
-
-	rc = secondary_ops->inode_unlink(dir, dentry);
-	if (rc)
-		return rc;
 	return may_link(dir, dentry, MAY_UNLINK);
 }
 
@@ -2162,12 +2141,6 @@ static int selinux_inode_rmdir(struct inode *dir, struct dentry *dentry)
 
 static int selinux_inode_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
 {
-	int rc;
-
-	rc = secondary_ops->inode_mknod(dir, dentry, mode, dev);
-	if (rc)
-		return rc;
-
 	return may_create(dir, dentry, inode_mode_to_security_class(mode));
 }
 
@@ -2206,12 +2179,6 @@ static int selinux_inode_follow_link(struct dentry *dentry, struct nameidata *na
 static int selinux_inode_permission(struct inode *inode, int mask,
 				    struct nameidata *nd)
 {
-	int rc;
-
-	rc = secondary_ops->inode_permission(inode, mask, nd);
-	if (rc)
-		return rc;
-
 	if (!mask) {
 		/* No permission to check.  Existence test. */
 		return 0;
@@ -2223,12 +2190,6 @@ static int selinux_inode_permission(struct inode *inode, int mask,
 
 static int selinux_inode_setattr(struct dentry *dentry, struct iattr *iattr)
 {
-	int rc;
-
-	rc = secondary_ops->inode_setattr(dentry, iattr);
-	if (rc)
-		return rc;
-
 	if (iattr->ia_valid & (ATTR_MODE | ATTR_UID | ATTR_GID |
 			       ATTR_ATIME_SET | ATTR_MTIME_SET))
 		return dentry_has_perm(current, NULL, dentry, FILE__SETATTR);
@@ -2495,11 +2456,6 @@ static int selinux_file_ioctl(struct file *file, unsigned int cmd,
 static int selinux_file_mmap(struct file *file, unsigned long prot, unsigned long flags)
 {
 	u32 av;
-	int rc;
-
-	rc = secondary_ops->file_mmap(file, prot, flags);
-	if (rc)
-		return rc;
 
 	if (file) {
 		/* read access is always possible with a mapping */
@@ -2520,12 +2476,6 @@ static int selinux_file_mmap(struct file *file, unsigned long prot, unsigned lon
 static int selinux_file_mprotect(struct vm_area_struct *vma,
 				 unsigned long prot)
 {
-	int rc;
-
-	rc = secondary_ops->file_mprotect(vma, prot);
-	if (rc)
-		return rc;
-
 	return selinux_file_mmap(vma->vm_file, prot, vma->vm_flags);
 }
 
@@ -2623,12 +2573,6 @@ static int selinux_file_receive(struct file *file)
 
 static int selinux_task_create(unsigned long clone_flags)
 {
-	int rc;
-
-	rc = secondary_ops->task_create(clone_flags);
-	if (rc)
-		return rc;
-
 	return task_has_perm(current, current, PROCESS__FORK);
 }
 
@@ -2704,23 +2648,12 @@ static int selinux_task_setgroups(struct group_info *group_info)
 
 static int selinux_task_setnice(struct task_struct *p, int nice)
 {
-	int rc;
-
-	rc = secondary_ops->task_setnice(p, nice);
-	if (rc)
-		return rc;
-
 	return task_has_perm(current,p, PROCESS__SETSCHED);
 }
 
 static int selinux_task_setrlimit(unsigned int resource, struct rlimit *new_rlim)
 {
 	struct rlimit *old_rlim = current->rlim + resource;
-	int rc;
-
-	rc = secondary_ops->task_setrlimit(resource, new_rlim);
-	if (rc)
-		return rc;
 
 	/* Control the ability to change the hard limit (whether
 	   lowering or raising it), so that the hard limit can
@@ -2755,11 +2688,6 @@ static int selinux_task_getscheduler(struct task_struct *p)
 static int selinux_task_kill(struct task_struct *p, struct siginfo *info, int sig)
 {
 	u32 perm;
-	int rc;
-
-	rc = secondary_ops->task_kill(p, info, sig);
-	if (rc)
-		return rc;
 
 	if (info && ((unsigned long)info == 1 ||
 	             (unsigned long)info == 2 || SI_FROMKERNEL(info)))
@@ -3201,10 +3129,6 @@ static int selinux_socket_unix_stream_connect(struct socket *sock,
 	struct avc_audit_data ad;
 	int err;
 
-	err = secondary_ops->unix_stream_connect(sock, other, newsk);
-	if (err)
-		return err;
-
 	isec = SOCK_INODE(sock)->i_security;
 	other_isec = SOCK_INODE(other)->i_security;
 
@@ -3439,6 +3363,28 @@ out:
 	return err;
 }
 
+static int selinux_netlink_send(struct sock *sk, struct sk_buff *skb)
+{
+	int err = 0;
+	
+	if (capable(CAP_NET_ADMIN))
+		cap_raise (NETLINK_CB (skb).eff_cap, CAP_NET_ADMIN);
+	else
+		NETLINK_CB(skb).eff_cap = 0;
+	
+	if (policydb_loaded_version >= POLICYDB_VERSION_NLCLASS)
+		err = selinux_nlmsg_perm(sk, skb);
+	
+	return err;
+}
+
+static int selinux_netlink_recv(struct sk_buff *skb)
+{
+	if (!cap_raised(NETLINK_CB(skb).eff_cap, CAP_NET_ADMIN))
+		return -EPERM;
+	return 0;
+}
+
 #ifdef CONFIG_NETFILTER
 
 static unsigned int selinux_ip_postroute_last(unsigned int hooknum,
@@ -3574,36 +3520,7 @@ static unsigned int selinux_ipv6_postroute_last(unsigned int hooknum,
 
 #endif	/* CONFIG_NETFILTER */
 
-#else
-
-static inline int selinux_nlmsg_perm(struct sock *sk, struct sk_buff *skb)
-{
-	return 0;
-}
-
 #endif	/* CONFIG_SECURITY_NETWORK */
-
-static int selinux_netlink_send(struct sock *sk, struct sk_buff *skb)
-{
-	int err = 0;
-
-	if (capable(CAP_NET_ADMIN))
-		cap_raise (NETLINK_CB (skb).eff_cap, CAP_NET_ADMIN);
-	else
-		NETLINK_CB(skb).eff_cap = 0;
-
-	if (policydb_loaded_version >= POLICYDB_VERSION_NLCLASS)
-		err = selinux_nlmsg_perm(sk, skb);
-
-	return err;
-}
-
-static int selinux_netlink_recv(struct sk_buff *skb)
-{
-	if (!cap_raised(NETLINK_CB(skb).eff_cap, CAP_NET_ADMIN))
-		return -EPERM;
-	return 0;
-}
 
 static int ipc_alloc_security(struct task_struct *task,
 			      struct kern_ipc_perm *perm,
@@ -3930,11 +3847,6 @@ static int selinux_shm_shmat(struct shmid_kernel *shp,
 			     char __user *shmaddr, int shmflg)
 {
 	u32 perms;
-	int rc;
-
-	rc = secondary_ops->shm_shmat(shp, shmaddr, shmflg);
-	if (rc)
-		return rc;
 
 	if (shmflg & SHM_RDONLY)
 		perms = SHM__READ;

@@ -48,10 +48,10 @@ static spinlock_t log_lock = SPIN_LOCK_UNLOCKED;
 
 /* takes in current header and pointer to the header */
 /* if another header exists, sets hdrptr to the next header
-   and returns the new header value, else returns IPPROTO_NONE */
+   and returns the new header value, else returns 0 */
 static u_int8_t ip6_nexthdr(u_int8_t currenthdr, u_int8_t **hdrptr)
 {
-	u_int8_t hdrlen, nexthdr = IPPROTO_NONE;
+	u_int8_t hdrlen, nexthdr = 0;
 
 	switch(currenthdr){
 		case IPPROTO_AH:
@@ -77,6 +77,7 @@ static u_int8_t ip6_nexthdr(u_int8_t currenthdr, u_int8_t **hdrptr)
 			break;
 	}	
 	return nexthdr;
+
 }
 
 /* One level of recursion won't kill us */
@@ -100,7 +101,7 @@ static void dump_packet(const struct ip6t_log_info *info,
 
 	fragment = 0;
 	hdrptr = (u_int8_t *)(ipv6h + 1);
-	while (currenthdr != IPPROTO_NONE) {
+	while (currenthdr) {
 		if ((currenthdr == IPPROTO_TCP) ||
 		    (currenthdr == IPPROTO_UDP) ||
 		    (currenthdr == IPPROTO_ICMPV6))
@@ -263,7 +264,7 @@ static void dump_packet(const struct ip6t_log_info *info,
 		}
 		break;
 	}
-	/* Max length: 10 "PROTO=255 " */
+	/* Max length: 10 "PROTO 255 " */
 	default:
 		printk("PROTO=%u ", currenthdr);
 	}

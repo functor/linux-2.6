@@ -8,10 +8,8 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
-#include <linux/namei.h> 
 #include <linux/ext3_jbd.h>
 #include <linux/ext3_fs.h>
-#include <linux/vs_base.h>
 #include "xattr.h"
 #include "acl.h"
 
@@ -166,7 +164,7 @@ ext3_get_acl(struct inode *inode, int type)
 	int retval;
 
 	if (!test_opt(inode->i_sb, POSIX_ACL))
-		return NULL;
+		return 0;
 
 	switch(type) {
 		case ACL_TYPE_ACCESS:
@@ -297,12 +295,8 @@ ext3_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
 	int mode = inode->i_mode;
 
-	/* Prevent vservers from escaping chroot() barriers */
-	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
-		return -EACCES;
 	/* Nobody gets write access to a read-only fs */
-	if ((mask & MAY_WRITE) && (IS_RDONLY(inode) ||
-	    (nd && nd->mnt && MNT_IS_RDONLY(nd->mnt))) &&
+	if ((mask & MAY_WRITE) && IS_RDONLY(inode) &&
 	    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 		return -EROFS;
 	/* Nobody gets write access to an immutable file */

@@ -731,7 +731,7 @@ static void sixpack_close(struct tty_struct *tty)
 
 	write_lock(&disc_data_lock);
 	sp = tty->disc_data;
-	tty->disc_data = NULL;
+	tty->disc_data = 0;
 	write_unlock(&disc_data_lock);
 	if (sp == 0)
 		return;
@@ -750,7 +750,7 @@ static void sixpack_close(struct tty_struct *tty)
 	unregister_netdev(sp->dev);
 }
 
-static int sp_set_mac_address(struct net_device *dev, void __user *addr)
+static int sp_set_mac_address(struct net_device *dev, void *addr)
 {
 	return copy_from_user(dev->dev_addr, addr, AX25_ADDR_LEN) ? -EFAULT : 0;
 }
@@ -767,16 +767,16 @@ static int sixpack_ioctl(struct tty_struct *tty, struct file *file,
 
 	switch(cmd) {
 	case SIOCGIFNAME:
-		err = copy_to_user((void __user *) arg, sp->dev->name,
+		err = copy_to_user((void *) arg, sp->dev->name,
 		                   strlen(sp->dev->name) + 1) ? -EFAULT : 0;
 		break;
 
 	case SIOCGIFENCAP:
-		err = put_user(0, (int __user *)arg);
+		err = put_user(0, (int *)arg);
 		break;
 
 	case SIOCSIFENCAP:
-		if (get_user(tmp, (int __user *) arg)) {
+		if (get_user(tmp, (int *) arg)) {
 			err = -EFAULT;
 			break;
 		}
@@ -790,7 +790,7 @@ static int sixpack_ioctl(struct tty_struct *tty, struct file *file,
 		break;
 
 	 case SIOCSIFHWADDR:
-		err = sp_set_mac_address(sp->dev, (void __user *) arg);
+		err = sp_set_mac_address(sp->dev, (void *) arg);
 		break;
 
 	/* Allow stty to read, but not set, the serial port */

@@ -47,9 +47,15 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
+
+#ifdef CONFIG_USB_SERIAL_DEBUG
+	static int debug = 1;
+#else
+	static int debug;
+#endif
+
 #include "usb-serial.h"
 
-static int debug;
 
 /*
  * Version Information
@@ -274,7 +280,7 @@ static int omninet_write (struct usb_serial_port *port, int from_user, const uns
 		memcpy (wport->write_urb->transfer_buffer + OMNINET_DATAOFFSET, buf, count);
 	}
 
-	usb_serial_debug_data(debug, &port->dev, __FUNCTION__, count, wport->write_urb->transfer_buffer);
+	usb_serial_debug_data (__FILE__, __FUNCTION__, count, wport->write_urb->transfer_buffer);
 
 	header->oh_seq 	= od->od_outseq++;
 	header->oh_len 	= count;
@@ -367,5 +373,6 @@ MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL");
 
-module_param(debug, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM(debug, "i");
 MODULE_PARM_DESC(debug, "Debug enabled or not");
+

@@ -47,7 +47,7 @@ static struct usb_hcd *ehci_hcd_alloc (void)
 		ehci->hcd.product_desc = "EHCI Host Controller";
 		return &ehci->hcd;
 	}
-	return NULL;
+	return 0;
 }
 
 static void ehci_hcd_free (struct usb_hcd *hcd)
@@ -125,7 +125,7 @@ static struct ehci_qh *ehci_qh_alloc (struct ehci_hcd *ehci, int flags)
 	if (qh->dummy == 0) {
 		ehci_dbg (ehci, "no dummy td\n");
 		dma_pool_free (ehci->qh_pool, qh, qh->qh_dma);
-		qh = NULL;
+		qh = 0;
 	}
 	return qh;
 }
@@ -153,36 +153,36 @@ static void ehci_mem_cleanup (struct ehci_hcd *ehci)
 {
 	if (ehci->async)
 		qh_put (ehci->async);
-	ehci->async = NULL;
+	ehci->async = 0;
 
 	/* DMA consistent memory and pools */
 	if (ehci->qtd_pool)
 		dma_pool_destroy (ehci->qtd_pool);
-	ehci->qtd_pool = NULL;
+	ehci->qtd_pool = 0;
 
 	if (ehci->qh_pool) {
 		dma_pool_destroy (ehci->qh_pool);
-		ehci->qh_pool = NULL;
+		ehci->qh_pool = 0;
 	}
 
 	if (ehci->itd_pool)
 		dma_pool_destroy (ehci->itd_pool);
-	ehci->itd_pool = NULL;
+	ehci->itd_pool = 0;
 
 	if (ehci->sitd_pool)
 		dma_pool_destroy (ehci->sitd_pool);
-	ehci->sitd_pool = NULL;
+	ehci->sitd_pool = 0;
 
 	if (ehci->periodic)
 		dma_free_coherent (ehci->hcd.self.controller,
 			ehci->periodic_size * sizeof (u32),
 			ehci->periodic, ehci->periodic_dma);
-	ehci->periodic = NULL;
+	ehci->periodic = 0;
 
 	/* shadow periodic table */
 	if (ehci->pshadow)
 		kfree (ehci->pshadow);
-	ehci->pshadow = NULL;
+	ehci->pshadow = 0;
 }
 
 /* remember to add cleanup code (above) if you add anything here */

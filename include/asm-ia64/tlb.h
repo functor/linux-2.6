@@ -44,7 +44,6 @@
 #include <asm/pgalloc.h>
 #include <asm/processor.h>
 #include <asm/tlbflush.h>
-#include <asm/machvec.h>
 
 #ifdef CONFIG_SMP
 # define FREE_PTE_NR		2048
@@ -212,8 +211,6 @@ __tlb_remove_tlb_entry (struct mmu_gather *tlb, pte_t *ptep, unsigned long addre
 		tlb->start_addr = address;
 	tlb->end_addr = address + PAGE_SIZE;
 }
-
-#define tlb_migrate_finish(mm)	platform_tlb_migrate_finish(mm)
 
 #define tlb_start_vma(tlb, vma)			do { } while (0)
 #define tlb_end_vma(tlb, vma)			do { } while (0)
