@@ -318,7 +318,7 @@ static void cb_taskclass_fork(struct task_struct *tsk)
 		ckrm_task_unlock(tsk->parent);
 	}
 	if (!list_empty(&tsk->taskclass_link))
-		printk(KERN_WARNING "BUG in cb_fork.. tsk (%s:%d> already linked\n",
+		printk("BUG in cb_fork.. tsk (%s:%d> already linked\n",
 		       tsk->comm, tsk->pid);
 
 	ckrm_set_taskclass(tsk, cls, NULL, CKRM_EVENT_FORK);
@@ -669,7 +669,7 @@ static int ckrm_free_task_class(struct ckrm_core_class *core)
 
 void __init ckrm_meta_init_taskclass(void)
 {
-	printk(KERN_DEBUG "...... Initializing ClassType<%s> ........\n",
+	printk("...... Initializing ClassType<%s> ........\n",
 	       CT_taskclass.name);
 	// intialize the default class
 	ckrm_init_core_class(&CT_taskclass, class_core(&taskclass_dflt_class),
@@ -737,7 +737,7 @@ void check_tasklist_sanity(struct ckrm_task_class *cls)
 		class_lock(core);
 		if (list_empty(&core->objlist)) {
 			class_lock(core);
-			printk(KERN_DEBUG "check_tasklist_sanity: class %s empty list\n",
+			printk("check_tasklist_sanity: class %s empty list\n",
 			       core->name);
 			return;
 		}
@@ -746,14 +746,14 @@ void check_tasklist_sanity(struct ckrm_task_class *cls)
 			    container_of(lh1, struct task_struct,
 					 taskclass_link);
 			if (count++ > 20000) {
-				printk(KERN_WARNING "list is CORRUPTED\n");
+				printk("list is CORRUPTED\n");
 				break;
 			}
 			if (tsk->taskclass != cls) {
 				const char *tclsname;
 				tclsname = (tsk->taskclass) ? 
 					class_core(tsk->taskclass)->name:"NULL";
-				printk(KERN_WARNING "sanity: task %s:%d has ckrm_core "
+				printk("sanity: task %s:%d has ckrm_core "
 				       "|%s| but in list |%s|\n", tsk->comm, 
 				       tsk->pid, tclsname, core->name);
 			}
@@ -767,7 +767,7 @@ void ckrm_debug_free_task_class(struct ckrm_task_class *tskcls)
 	struct task_struct *proc, *thread;
 	int count = 0;
 
-	printk(KERN_DEBUG "Analyze Error <%s> %d\n",
+	printk("Analyze Error <%s> %d\n",
 	       class_core(tskcls)->name,
 	       atomic_read(&(class_core(tskcls)->refcnt)));
 
@@ -779,7 +779,7 @@ void ckrm_debug_free_task_class(struct ckrm_task_class *tskcls)
 			const char *tclsname;
 			tclsname = (thread->taskclass) ? 
 				class_core(thread->taskclass)->name :"NULL";
-			printk(KERN_DEBUG "%d thread=<%s:%d>  -> <%s> <%lx>\n", count,
+			printk("%d thread=<%s:%d>  -> <%s> <%lx>\n", count,
 			       thread->comm, thread->pid, tclsname,
 			       thread->flags & PF_EXITING);
 		}
@@ -787,7 +787,7 @@ void ckrm_debug_free_task_class(struct ckrm_task_class *tskcls)
 	class_unlock(class_core(tskcls));
 	read_unlock(&tasklist_lock);
 
-	printk(KERN_DEBUG "End Analyze Error <%s> %d\n",
+	printk("End Analyze Error <%s> %d\n",
 	       class_core(tskcls)->name,
 	       atomic_read(&(class_core(tskcls)->refcnt)));
 }
