@@ -178,6 +178,19 @@ Group: System Environment/Kernel
 %description uml
 This package includes a user mode version of the Linux kernel.
 
+%package vserver
+Summary: A placeholder RPM that provides kernel and kernel-drm
+
+Group: System Environment/Kernel
+Provides: kernel = %{version}
+Provides: kernel-drm = 4.3.0
+
+%description vserver
+VServers do not require and cannot use kernels, but some RPMs have
+implicit or explicit dependencies on the "kernel" package
+(e.g. tcpdump). This package installs no files but provides the
+necessary dependencies to make rpm and yum happy.
+
 %prep
 
 %setup -n linux-%{kversion}
@@ -497,6 +510,11 @@ fi
 %defattr(-,root,root)
 /usr/share/doc/kernel-doc-%{kversion}/Documentation/*
 %endif
+
+
+%files vserver
+%defattr(-,root,root)
+# no files
 
 %changelog
 * Thu Sep 16 2004 Mark Huang <mlhuang@cs.princeton.edu>
