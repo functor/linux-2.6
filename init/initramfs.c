@@ -169,7 +169,7 @@ static int __init do_collect(void)
 	memcpy(collect, victim, n);
 	eat(n);
 	collect += n;
-	if ((remains -= n) != 0)
+	if (remains -= n)
 		return 1;
 	state = next_state;
 	return 0;

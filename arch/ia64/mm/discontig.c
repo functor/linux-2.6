@@ -154,9 +154,6 @@ static void __init reassign_cpu_only_nodes(void)
 
 	memcpy(numa_slit, numa_slit_fix, sizeof (numa_slit));
 
-	for (i = nnode; i < numnodes; i++)
-		node_set_offline(i);
-
 	numnodes = nnode;
 
 	return;
@@ -498,7 +495,7 @@ void show_mem(void)
 
 	printk("Mem-info:\n");
 	show_free_areas();
-	printk("Free swap:       %6ldkB\n", nr_swap_pages<<(PAGE_SHIFT-10));
+	printk("Free swap:       %6dkB\n", nr_swap_pages<<(PAGE_SHIFT-10));
 	for_each_pgdat(pgdat) {
 		printk("Node ID: %d\n", pgdat->node_id);
 		for(i = 0; i < pgdat->node_spanned_pages; i++) {
@@ -549,7 +546,7 @@ void call_pernode_memory(unsigned long start, unsigned long len, void *arg)
 	if (!num_node_memblks) {
 		/* No SRAT table, so assume one node (node 0) */
 		if (start < end)
-			(*func)(start, end - start, 0);
+			(*func)(start, len, 0);
 		return;
 	}
 

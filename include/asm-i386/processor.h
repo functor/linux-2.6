@@ -291,10 +291,13 @@ extern unsigned int mca_pentium_flag;
  */
 #define TASK_UNMAPPED_BASE	PAGE_ALIGN(TASK_SIZE/3)
 
+#define SHLIB_BASE		0x00111000
+ 
 #define __HAVE_ARCH_ALIGN_STACK
 extern unsigned long arch_align_stack(unsigned long sp);
 
-#define HAVE_ARCH_PICK_MMAP_LAYOUT
+#define __HAVE_ARCH_MMAP_TOP
+extern unsigned long mmap_top(void);
 
 /*
  * Size of io_bitmap, covering ports 0 to 0x3ff.
@@ -463,6 +466,8 @@ load_esp0(struct tss_struct *tss, struct thread_struct *thread)
 		wrmsr(MSR_IA32_SYSENTER_CS, thread->sysenter_cs, 0);
 	}
 }
+
+extern int use_nx;
 
 #define start_thread(regs, new_eip, new_esp) do {		\
 	__asm__("movl %0,%%fs ; movl %0,%%gs": :"r" (0));	\

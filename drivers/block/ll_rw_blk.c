@@ -632,8 +632,6 @@ int blk_queue_resize_tags(request_queue_t *q, int new_depth)
 	return 0;
 }
 
-EXPORT_SYMBOL(blk_queue_resize_tags);
-
 /**
  * blk_queue_end_tag - end tag operations for a request
  * @q:  the request queue for the device
@@ -819,14 +817,14 @@ EXPORT_SYMBOL(blk_dump_rq_flags);
 void blk_recount_segments(request_queue_t *q, struct bio *bio)
 {
 	struct bio_vec *bv, *bvprv = NULL;
-	int i, nr_phys_segs, nr_hw_segs, seg_size, hw_seg_size, cluster;
+	int i, nr_phys_segs, nr_hw_segs, seg_size, cluster;
 	int high, highprv = 1;
 
 	if (unlikely(!bio->bi_io_vec))
 		return;
 
 	cluster = q->queue_flags & (1 << QUEUE_FLAG_CLUSTER);
-	hw_seg_size = seg_size = nr_phys_segs = nr_hw_segs = 0;
+	seg_size = nr_phys_segs = nr_hw_segs = 0;
 	bio_for_each_segment(bv, bio, i) {
 		/*
 		 * the trick here is making sure that a high page is never
@@ -843,35 +841,22 @@ void blk_recount_segments(request_queue_t *q, struct bio *bio)
 				goto new_segment;
 			if (!BIOVEC_SEG_BOUNDARY(q, bvprv, bv))
 				goto new_segment;
-			if (BIOVEC_VIRT_OVERSIZE(hw_seg_size + bv->bv_len))
-				goto new_hw_segment;
 
 			seg_size += bv->bv_len;
-			hw_seg_size += bv->bv_len;
 			bvprv = bv;
 			continue;
 		}
 new_segment:
-		if (BIOVEC_VIRT_MERGEABLE(bvprv, bv) &&
-		    !BIOVEC_VIRT_OVERSIZE(hw_seg_size + bv->bv_len)) {
-			hw_seg_size += bv->bv_len;
-		} else {
+		if (!BIOVEC_VIRT_MERGEABLE(bvprv, bv))
 new_hw_segment:
-			if (hw_seg_size > bio->bi_hw_front_size)
-				bio->bi_hw_front_size = hw_seg_size;
-			hw_seg_size = BIOVEC_VIRT_START_SIZE(bv) + bv->bv_len;
 			nr_hw_segs++;
-		}
 
 		nr_phys_segs++;
 		bvprv = bv;
 		seg_size = bv->bv_len;
 		highprv = high;
 	}
-	if (hw_seg_size > bio->bi_hw_back_size)
-		bio->bi_hw_back_size = hw_seg_size;
-	if (nr_hw_segs == 1 && hw_seg_size > bio->bi_hw_front_size)
-		bio->bi_hw_front_size = hw_seg_size;
+
 	bio->bi_phys_segments = nr_phys_segs;
 	bio->bi_hw_segments = nr_hw_segs;
 	bio->bi_flags |= (1 << BIO_SEG_VALID);
@@ -904,17 +889,22 @@ EXPORT_SYMBOL(blk_phys_contig_segment);
 int blk_hw_contig_segment(request_queue_t *q, struct bio *bio,
 				 struct bio *nxt)
 {
-	if (unlikely(!bio_flagged(bio, BIO_SEG_VALID)))
-		blk_recount_segments(q, bio);
-	if (unlikely(!bio_flagged(nxt, BIO_SEG_VALID)))
-		blk_recount_segments(q, nxt);
-	if (!BIOVEC_VIRT_MERGEABLE(__BVEC_END(bio), __BVEC_START(nxt)) ||
-	    BIOVEC_VIRT_OVERSIZE(bio->bi_hw_front_size + bio->bi_hw_back_size))
+	if (!(q->queue_flags & (1 << QUEUE_FLAG_CLUSTER)))
+		return 0;
+
+	if (!BIOVEC_VIRT_MERGEABLE(__BVEC_END(bio), __BVEC_START(nxt)))
 		return 0;
 	if (bio->bi_size + nxt->bi_size > q->max_segment_size)
 		return 0;
 
-	return 1;
+	/*
+	 * bio and nxt are contigous in memory, check if the queue allows
+	 * these two to be merged into one
+	 */
+	if (BIO_SEG_BOUNDARY(q, bio, nxt))
+		return 1;
+
+	return 0;
 }
 
 EXPORT_SYMBOL(blk_hw_contig_segment);
@@ -984,8 +974,7 @@ static inline int ll_new_mergeable(request_queue_t *q,
 
 	if (req->nr_phys_segments + nr_phys_segs > q->max_phys_segments) {
 		req->flags |= REQ_NOMERGE;
-		if (req == q->last_merge)
-			q->last_merge = NULL;
+		q->last_merge = NULL;
 		return 0;
 	}
 
@@ -1007,8 +996,7 @@ static inline int ll_new_hw_segment(request_queue_t *q,
 	if (req->nr_hw_segments + nr_hw_segs > q->max_hw_segments
 	    || req->nr_phys_segments + nr_phys_segs > q->max_phys_segments) {
 		req->flags |= REQ_NOMERGE;
-		if (req == q->last_merge)
-			q->last_merge = NULL;
+		q->last_merge = NULL;
 		return 0;
 	}
 
@@ -1024,31 +1012,14 @@ static inline int ll_new_hw_segment(request_queue_t *q,
 static int ll_back_merge_fn(request_queue_t *q, struct request *req, 
 			    struct bio *bio)
 {
-	int len;
-
 	if (req->nr_sectors + bio_sectors(bio) > q->max_sectors) {
 		req->flags |= REQ_NOMERGE;
-		if (req == q->last_merge)
-			q->last_merge = NULL;
+		q->last_merge = NULL;
 		return 0;
 	}
-	if (unlikely(!bio_flagged(req->biotail, BIO_SEG_VALID)))
-		blk_recount_segments(q, req->biotail);
-	if (unlikely(!bio_flagged(bio, BIO_SEG_VALID)))
-		blk_recount_segments(q, bio);
-	len = req->biotail->bi_hw_back_size + bio->bi_hw_front_size;
-	if (BIOVEC_VIRT_MERGEABLE(__BVEC_END(req->biotail), __BVEC_START(bio)) &&
-	    !BIOVEC_VIRT_OVERSIZE(len)) {
-		int mergeable =  ll_new_mergeable(q, req, bio);
 
-		if (mergeable) {
-			if (req->nr_hw_segments == 1)
-				req->bio->bi_hw_front_size = len;
-			if (bio->bi_hw_segments == 1)
-				bio->bi_hw_back_size = len;
-		}
-		return mergeable;
-	}
+	if (BIOVEC_VIRT_MERGEABLE(__BVEC_END(req->biotail), __BVEC_START(bio)))
+		return ll_new_mergeable(q, req, bio);
 
 	return ll_new_hw_segment(q, req, bio);
 }
@@ -1056,31 +1027,14 @@ static int ll_back_merge_fn(request_queue_t *q, struct request *req,
 static int ll_front_merge_fn(request_queue_t *q, struct request *req, 
 			     struct bio *bio)
 {
-	int len;
-
 	if (req->nr_sectors + bio_sectors(bio) > q->max_sectors) {
 		req->flags |= REQ_NOMERGE;
-		if (req == q->last_merge)
-			q->last_merge = NULL;
+		q->last_merge = NULL;
 		return 0;
 	}
-	len = bio->bi_hw_back_size + req->bio->bi_hw_front_size;
-	if (unlikely(!bio_flagged(bio, BIO_SEG_VALID)))
-		blk_recount_segments(q, bio);
-	if (unlikely(!bio_flagged(req->bio, BIO_SEG_VALID)))
-		blk_recount_segments(q, req->bio);
-	if (BIOVEC_VIRT_MERGEABLE(__BVEC_END(bio), __BVEC_START(req->bio)) &&
-	    !BIOVEC_VIRT_OVERSIZE(len)) {
-		int mergeable =  ll_new_mergeable(q, req, bio);
 
-		if (mergeable) {
-			if (bio->bi_hw_segments == 1)
-				bio->bi_hw_front_size = len;
-			if (req->nr_hw_segments == 1)
-				req->biotail->bi_hw_back_size = len;
-		}
-		return mergeable;
-	}
+	if (BIOVEC_VIRT_MERGEABLE(__BVEC_END(bio), __BVEC_START(req->bio)))
+		return ll_new_mergeable(q, req, bio);
 
 	return ll_new_hw_segment(q, req, bio);
 }
@@ -1112,17 +1066,8 @@ static int ll_merge_requests_fn(request_queue_t *q, struct request *req,
 		return 0;
 
 	total_hw_segments = req->nr_hw_segments + next->nr_hw_segments;
-	if (blk_hw_contig_segment(q, req->biotail, next->bio)) {
-		int len = req->biotail->bi_hw_back_size + next->bio->bi_hw_front_size;
-		/*
-		 * propagate the combined length to the end of the requests
-		 */
-		if (req->nr_hw_segments == 1)
-			req->bio->bi_hw_front_size = len;
-		if (next->nr_hw_segments == 1)
-			next->biotail->bi_hw_back_size = len;
+	if (blk_hw_contig_segment(q, req->biotail, next->bio))
 		total_hw_segments--;
-	}
 
 	if (total_hw_segments > q->max_hw_segments)
 		return 0;
@@ -1178,7 +1123,7 @@ EXPORT_SYMBOL(blk_remove_plug);
 /*
  * remove the plug and let it rip..
  */
-void __generic_unplug_device(request_queue_t *q)
+inline void __generic_unplug_device(request_queue_t *q)
 {
 	if (test_bit(QUEUE_FLAG_STOPPED, &q->queue_flags))
 		return;
@@ -1467,6 +1412,9 @@ request_queue_t *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock)
 		printk("Using %s io scheduler\n", chosen_elevator->elevator_name);
 	}
 
+	if (elevator_init(q, chosen_elevator))
+		goto out_elv;
+
 	q->request_fn		= rfn;
 	q->back_merge_fn       	= ll_back_merge_fn;
 	q->front_merge_fn      	= ll_front_merge_fn;
@@ -1484,12 +1432,8 @@ request_queue_t *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock)
 	blk_queue_max_hw_segments(q, MAX_HW_SEGMENTS);
 	blk_queue_max_phys_segments(q, MAX_PHYS_SEGMENTS);
 
-	/*
-	 * all done
-	 */
-	if (!elevator_init(q, chosen_elevator))
-		return q;
-
+	return q;
+out_elv:
 	blk_cleanup_queue(q);
 out_init:
 	kmem_cache_free(requestq_cachep, q);
@@ -1594,10 +1538,6 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 	struct io_context *ioc = get_io_context(gfp_mask);
 
 	spin_lock_irq(q->queue_lock);
-
-	if (!elv_may_queue(q, rw))
-		goto out_lock;
-
 	if (rl->count[rw]+1 >= q->nr_requests) {
 		/*
 		 * The queue will fill after this allocation, so set it as
@@ -1611,12 +1551,15 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 		}
 	}
 
-	/*
-	 * The queue is full and the allocating process is not a
-	 * "batcher", and not exempted by the IO scheduler
-	 */
-	if (blk_queue_full(q, rw) && !ioc_batching(ioc))
-		goto out_lock;
+	if (blk_queue_full(q, rw)
+			&& !ioc_batching(ioc) && !elv_may_queue(q, rw)) {
+		/*
+		 * The queue is full and the allocating process is not a
+		 * "batcher", and not exempted by the IO scheduler
+		 */
+		spin_unlock_irq(q->queue_lock);
+		goto out;
+	}
 
 	rl->count[rw]++;
 	if (rl->count[rw] >= queue_congestion_on_threshold(q))
@@ -1634,7 +1577,8 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 		 */
 		spin_lock_irq(q->queue_lock);
 		freed_request(q, rw);
-		goto out_lock;
+		spin_unlock_irq(q->queue_lock);
+		goto out;
 	}
 
 	if (ioc_batching(ioc))
@@ -1664,11 +1608,6 @@ static struct request *get_request(request_queue_t *q, int rw, int gfp_mask)
 out:
 	put_io_context(ioc);
 	return rq;
-out_lock:
-	if (!rq)
-		elv_set_congested(q);
-	spin_unlock_irq(q->queue_lock);
-	goto out;
 }
 
 /*
@@ -1821,53 +1760,54 @@ EXPORT_SYMBOL(blk_insert_request);
  *
  *    A matching blk_rq_unmap_user() must be issued at the end of io, while
  *    still in process context.
- *
- *    Note: The mapped bio may need to be bounced through blk_queue_bounce()
- *    before being submitted to the device, as pages mapped may be out of
- *    reach. It's the callers responsibility to make sure this happens. The
- *    original bio must be passed back in to blk_rq_unmap_user() for proper
- *    unmapping.
  */
 struct request *blk_rq_map_user(request_queue_t *q, int rw, void __user *ubuf,
 				unsigned int len)
 {
-	unsigned long uaddr;
-	struct request *rq;
+	struct request *rq = NULL;
+	char *buf = NULL;
 	struct bio *bio;
-
-	if (len > (q->max_sectors << 9))
-		return ERR_PTR(-EINVAL);
-	if ((!len && ubuf) || (len && !ubuf))
-		return ERR_PTR(-EINVAL);
+	int ret;
 
 	rq = blk_get_request(q, rw, __GFP_WAIT);
 	if (!rq)
 		return ERR_PTR(-ENOMEM);
 
-	/*
-	 * if alignment requirement is satisfied, map in user pages for
-	 * direct dma. else, set up kernel bounce buffers
-	 */
-	uaddr = (unsigned long) ubuf;
-	if (!(uaddr & queue_dma_alignment(q)) && !(len & queue_dma_alignment(q)))
-		bio = bio_map_user(q, NULL, uaddr, len, rw == READ);
-	else
-		bio = bio_copy_user(q, uaddr, len, rw == READ);
+	bio = bio_map_user(q, NULL, (unsigned long) ubuf, len, rw == READ);
+	if (!bio) {
+		int bytes = (len + 511) & ~511;
 
-	if (!IS_ERR(bio)) {
-		rq->bio = rq->biotail = bio;
-		blk_rq_bio_prep(q, rq, bio);
+		buf = kmalloc(bytes, q->bounce_gfp | GFP_USER);
+		if (!buf) {
+			ret = -ENOMEM;
+			goto fault;
+		}
 
-		rq->buffer = rq->data = NULL;
-		rq->data_len = len;
-		return rq;
+		if (rw == WRITE) {
+			if (copy_from_user(buf, ubuf, len)) {
+				ret = -EFAULT;
+				goto fault;
+			}
+		} else
+			memset(buf, 0, len);
 	}
 
-	/*
-	 * bio is the err-ptr
-	 */
-	blk_put_request(rq);
-	return (struct request *) bio;
+	rq->bio = rq->biotail = bio;
+	if (rq->bio)
+		blk_rq_bio_prep(q, rq, bio);
+
+	rq->buffer = rq->data = buf;
+	rq->data_len = len;
+	return rq;
+fault:
+	if (buf)
+		kfree(buf);
+	if (bio)
+		bio_unmap_user(bio, 1);
+	if (rq)
+		blk_put_request(rq);
+
+	return ERR_PTR(ret);
 }
 
 EXPORT_SYMBOL(blk_rq_map_user);
@@ -1881,15 +1821,18 @@ EXPORT_SYMBOL(blk_rq_map_user);
  * Description:
  *    Unmap a request previously mapped by blk_rq_map_user().
  */
-int blk_rq_unmap_user(struct request *rq, struct bio *bio, unsigned int ulen)
+int blk_rq_unmap_user(struct request *rq, void __user *ubuf, struct bio *bio,
+		      unsigned int ulen)
 {
+	const int read = rq_data_dir(rq) == READ;
 	int ret = 0;
 
-	if (bio) {
-		if (bio_flagged(bio, BIO_USER_MAPPED))
-			bio_unmap_user(bio);
-		else
-			ret = bio_uncopy_user(bio);
+	if (bio)
+		bio_unmap_user(bio, read);
+	if (rq->buffer) {
+		if (read && copy_to_user(ubuf, rq->buffer, ulen))
+			ret = -EFAULT;
+		kfree(rq->buffer);
 	}
 
 	blk_put_request(rq);
@@ -2404,7 +2347,6 @@ void generic_make_request(struct bio *bio)
 	sector_t maxsector;
 	int ret, nr_sectors = bio_sectors(bio);
 
-	might_sleep();
 	/* Test device or partition size, when known. */
 	maxsector = bio->bi_bdev->bd_inode->i_size >> 9;
 	if (maxsector) {
@@ -2590,7 +2532,7 @@ EXPORT_SYMBOL(process_that_request_first);
 
 void blk_recalc_rq_segments(struct request *rq)
 {
-	struct bio *bio, *prevbio = NULL;
+	struct bio *bio;
 	int nr_phys_segs, nr_hw_segs;
 
 	if (!rq->bio)
@@ -2603,13 +2545,6 @@ void blk_recalc_rq_segments(struct request *rq)
 
 		nr_phys_segs += bio_phys_segments(rq->q, bio);
 		nr_hw_segs += bio_hw_segments(rq->q, bio);
-		if (prevbio) {
-			if (blk_phys_contig_segment(rq->q, prevbio, bio))
-				nr_phys_segs--;
-			if (blk_hw_contig_segment(rq->q, prevbio, bio))
-				nr_hw_segs--;
-		}
-		prevbio = bio;
 	}
 
 	rq->nr_phys_segments = nr_phys_segs;
@@ -2672,7 +2607,7 @@ static int __end_that_request_first(struct request *req, int uptodate,
 	}
 
 	total_bytes = bio_nbytes = 0;
-	while ((bio = req->bio) != NULL) {
+	while ((bio = req->bio)) {
 		int nbytes;
 
 		if (nr_bytes >= bio->bi_size) {
@@ -2873,8 +2808,6 @@ int kblockd_schedule_work(struct work_struct *work)
 {
 	return queue_work(kblockd_workqueue, work);
 }
-
-EXPORT_SYMBOL(kblockd_schedule_work);
 
 void kblockd_flush(void)
 {
@@ -3173,21 +3106,3 @@ void blk_unregister_queue(struct gendisk *disk)
 		kobject_put(&disk->kobj);
 	}
 }
-
-asmlinkage int sys_ioprio_set(int ioprio)
-{
-	if (ioprio < IOPRIO_IDLE || ioprio > IOPRIO_RT)
-		return -EINVAL;
-	if (ioprio == IOPRIO_RT && !capable(CAP_SYS_ADMIN))
-		return -EACCES;
-
-	printk("%s: set ioprio %d\n", current->comm, ioprio);
-	current->ioprio = ioprio;
-	return 0;
-}
-
-asmlinkage int sys_ioprio_get(void)
-{
-	return current->ioprio;
-}
-

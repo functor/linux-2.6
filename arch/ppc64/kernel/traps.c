@@ -36,7 +36,6 @@
 #include <asm/io.h>
 #include <asm/processor.h>
 #include <asm/ppcdebug.h>
-#include <asm/rtas.h>
 
 #ifdef CONFIG_PPC_PSERIES
 /* This is true if we are using the firmware NMI handler (typically LPAR) */
@@ -116,8 +115,6 @@ int die(const char *str, struct pt_regs *regs, long err)
 	if (nl)
 		printk("\n");
 	show_regs(regs);
-	if (netdump_func)
-		netdump_func(regs);
 	bust_spinlocks(0);
 	spin_unlock_irq(&die_lock);
 
@@ -125,8 +122,6 @@ int die(const char *str, struct pt_regs *regs, long err)
 		panic("Fatal exception in interrupt");
 
 	if (panic_on_oops) {
-		if (netdump_func)
-			netdump_func = NULL;
 		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(5 * HZ);
@@ -177,9 +172,9 @@ static struct rtas_error_log *FWNMI_get_errinfo(struct pt_regs *regs)
  */
 static void FWNMI_release_errinfo(void)
 {
-	int ret = rtas_call(rtas_token("ibm,nmi-interlock"), 0, 1, NULL);
+	unsigned long ret = rtas_call(rtas_token("ibm,nmi-interlock"), 0, 1, NULL);
 	if (ret != 0)
-		printk("FWNMI: nmi-interlock failed: %d\n", ret);
+		printk("FWNMI: nmi-interlock failed: %ld\n", ret);
 }
 #endif
 
@@ -234,7 +229,7 @@ static int recover_mce(struct pt_regs *regs, struct rtas_error_log err)
 		info.si_errno = 0;
 		/* XXX something better for ECC error? */
 		info.si_code = BUS_ADRERR;
-		info.si_addr = (void __user *)regs->nip;
+		info.si_addr = (void *)regs->nip;
 		printk(KERN_ERR "MCE: uncorrectable ecc error for pid %d\n",
 		       current->pid);
 		_exception(SIGBUS, &info, regs);
@@ -290,7 +285,7 @@ UnknownException(struct pt_regs *regs)
 	info.si_signo = SIGTRAP;
 	info.si_errno = 0;
 	info.si_code = 0;
-	info.si_addr = NULL;
+	info.si_addr = 0;
 	_exception(SIGTRAP, &info, regs);	
 }
 
@@ -304,7 +299,7 @@ InstructionBreakpointException(struct pt_regs *regs)
 	info.si_signo = SIGTRAP;
 	info.si_errno = 0;
 	info.si_code = TRAP_BRKPT;
-	info.si_addr = (void __user *)regs->nip;
+	info.si_addr = (void *)regs->nip;
 	_exception(SIGTRAP, &info, regs);
 }
 
@@ -342,7 +337,7 @@ static void parse_fpe(struct pt_regs *regs)
 
 	info.si_signo = SIGFPE;
 	info.si_errno = 0;
-	info.si_addr = (void __user *)regs->nip;
+	info.si_addr = (void *)regs->nip;
 	_exception(SIGFPE, &info, regs);
 }
 
@@ -411,7 +406,7 @@ ProgramCheckException(struct pt_regs *regs)
 		info.si_signo = SIGILL;
 		info.si_errno = 0;
 		info.si_code = ILL_PRVOPC;
-		info.si_addr = (void __user *)regs->nip;
+		info.si_addr = (void *)regs->nip;
 		_exception(SIGILL, &info, regs);
 	} else if (regs->msr & 0x20000) {
 		/* trap exception */
@@ -426,7 +421,7 @@ ProgramCheckException(struct pt_regs *regs)
 		info.si_signo = SIGTRAP;
 		info.si_errno = 0;
 		info.si_code = TRAP_BRKPT;
-		info.si_addr = (void __user *)regs->nip;
+		info.si_addr = (void *)regs->nip;
 		_exception(SIGTRAP, &info, regs);
 	} else {
 		/* Illegal instruction */
@@ -434,7 +429,7 @@ ProgramCheckException(struct pt_regs *regs)
 		info.si_signo = SIGILL;
 		info.si_errno = 0;
 		info.si_code = ILL_ILLTRP;
-		info.si_addr = (void __user *)regs->nip;
+		info.si_addr = (void *)regs->nip;
 		_exception(SIGILL, &info, regs);
 	}
 }
@@ -480,7 +475,7 @@ SingleStepException(struct pt_regs *regs)
 	info.si_signo = SIGTRAP;
 	info.si_errno = 0;
 	info.si_code = TRAP_TRACE;
-	info.si_addr = (void __user *)regs->nip;
+	info.si_addr = (void *)regs->nip;
 	_exception(SIGTRAP, &info, regs);	
 }
 
@@ -528,7 +523,7 @@ AlignmentException(struct pt_regs *regs)
 			info.si_signo = SIGSEGV;
 			info.si_errno = 0;
 			info.si_code = SEGV_MAPERR;
-			info.si_addr = (void __user *)regs->dar;
+			info.si_addr = (void *)regs->dar;
 			force_sig_info(SIGSEGV, &info, current);
 		} else {
 			/* Search exception table */
@@ -541,7 +536,7 @@ AlignmentException(struct pt_regs *regs)
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;
 	info.si_code = BUS_ADRALN;
-	info.si_addr = (void __user *)regs->nip;
+	info.si_addr = (void *)regs->nip;
 	_exception(SIGBUS, &info, regs);	
 }
 
@@ -549,39 +544,9 @@ AlignmentException(struct pt_regs *regs)
 void
 AltivecAssistException(struct pt_regs *regs)
 {
-	int err;
-	siginfo_t info;
-
-	if (!user_mode(regs)) {
-		printk(KERN_EMERG "VMX/Altivec assist exception in kernel mode"
-		       " at %lx\n", regs->nip);
-		die("Kernel VMX/Altivec assist exception", regs, SIGILL);
-	}
-
 	flush_altivec_to_thread(current);
-
-	err = emulate_altivec(regs);
-	if (err == 0) {
-		regs->nip += 4;		/* skip emulated instruction */
-		emulate_single_step(regs);
-		return;
-	}
-
-	if (err == -EFAULT) {
-		/* got an error reading the instruction */
-		info.si_signo = SIGSEGV;
-		info.si_errno = 0;
-		info.si_code = SEGV_MAPERR;
-		info.si_addr = (void __user *) regs->nip;
-		force_sig_info(SIGSEGV, &info, current);
-	} else {
-		/* didn't recognize the instruction */
-		/* XXX quick hack for now: set the non-Java bit in the VSCR */
-		if (printk_ratelimit())
-			printk(KERN_ERR "Unrecognized altivec instruction "
-			       "in %s at %lx\n", current->comm, regs->nip);
-		current->thread.vscr.u[3] |= 0x10000;
-	}
+	/* XXX quick hack for now: set the non-Java bit in the VSCR */
+	current->thread.vscr.u[3] |= 0x10000;
 }
 #endif /* CONFIG_ALTIVEC */
 

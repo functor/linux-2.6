@@ -46,7 +46,7 @@ unsigned int csum_partial_copy_nocheck ( const char *src, char *dst,
 }
 
 static __inline__
-unsigned int csum_partial_copy_from_user ( const char __user *src, char *dst,
+unsigned int csum_partial_copy_from_user ( const char *src, char *dst,
 						int len, int sum, int *err_ptr)
 {
 	if (copy_from_user(dst, src, len))

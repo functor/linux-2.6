@@ -56,10 +56,12 @@ DECLARE_MUTEX(rtnl_sem);
 void rtnl_lock(void)
 {
 	rtnl_shlock();
+	rtnl_exlock();
 }
  
 void rtnl_unlock(void)
 {
+	rtnl_exunlock();
 	rtnl_shunlock();
 
 	netdev_run_todo();
@@ -91,8 +93,7 @@ static const int rtm_min[(RTM_MAX+1-RTM_BASE)/4] =
 	NLMSG_LENGTH(sizeof(struct rtmsg)),
 	NLMSG_LENGTH(sizeof(struct tcmsg)),
 	NLMSG_LENGTH(sizeof(struct tcmsg)),
-	NLMSG_LENGTH(sizeof(struct tcmsg)),
-	NLMSG_LENGTH(sizeof(struct tcamsg))
+	NLMSG_LENGTH(sizeof(struct tcmsg))
 };
 
 static const int rta_max[(RTM_MAX+1-RTM_BASE)/4] =
@@ -104,8 +105,7 @@ static const int rta_max[(RTM_MAX+1-RTM_BASE)/4] =
 	RTA_MAX,
 	TCA_MAX,
 	TCA_MAX,
-	TCA_MAX,
-	TCAA_MAX
+	TCA_MAX
 };
 
 void __rta_fill(struct sk_buff *skb, int attrtype, int attrlen, const void *data)
@@ -224,6 +224,8 @@ int rtnetlink_dump_ifinfo(struct sk_buff *skb, struct netlink_callback *cb)
 	for (dev=dev_base, idx=0; dev; dev = dev->next, idx++) {
 		if (idx < s_idx)
 			continue;
+		if (!dev_in_nx_info(dev, current->nx_info))
+			continue;
 		if (rtnetlink_fill_ifinfo(skb, dev, RTM_NEWLINK, NETLINK_CB(cb->skb).pid, cb->nlh->nlmsg_seq, 0) <= 0)
 			break;
 	}
@@ -309,6 +311,8 @@ void rtmsg_ifinfo(int type, struct net_device *dev, unsigned change)
 	struct sk_buff *skb;
 	int size = NLMSG_GOODSIZE;
 
+	if (!dev_in_nx_info(dev, current->nx_info))
+		return;
 	skb = alloc_skb(size, GFP_KERNEL);
 	if (!skb)
 		return;
@@ -335,6 +339,7 @@ rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh, int *errp)
 	struct rtnetlink_link *link_tab;
 	struct rtattr	*rta[RTATTR_MAX];
 
+	int exclusive = 0;
 	int sz_idx, kind;
 	int min_len;
 	int family;
@@ -401,6 +406,14 @@ rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh, int *errp)
 		return -1;
 	}
 
+	if (kind != 2) {
+		if (rtnl_exlock_nowait()) {
+			*errp = 0;
+			return -1;
+		}
+		exclusive = 1;
+	}
+
 	memset(&rta, 0, sizeof(rta));
 
 	min_len = rtm_min[sz_idx];
@@ -428,10 +441,14 @@ rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh, int *errp)
 		goto err_inval;
 	err = link->doit(skb, nlh, (void *)&rta);
 
+	if (exclusive)
+		rtnl_exunlock();
 	*errp = err;
 	return err;
 
 err_inval:
+	if (exclusive)
+		rtnl_exunlock();
 	*errp = -EINVAL;
 	return -1;
 }

@@ -129,12 +129,6 @@
 #define	WDIOC_GET_PRETIMEOUT     _IOW(WATCHDOG_IOCTL_BASE, 22, int)
 #endif
 
-#ifdef CONFIG_WATCHDOG_NOWAYOUT
-static int nowayout = 1;
-#else
-static int nowayout;
-#endif
-
 static ipmi_user_t watchdog_user = NULL;
 
 /* Default the timeout to 10 seconds. */
@@ -181,8 +175,6 @@ MODULE_PARM_DESC(preop, "Pretimeout driver operation.  One of: "
 module_param(start_now, int, 0);
 MODULE_PARM_DESC(start_now, "Set to 1 to start the watchdog as"
 		 "soon as the driver is loaded.");
-module_param(nowayout, int, 0);
-MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started (default=CONFIG_WATCHDOG_NOWAYOUT)");
 
 /* Default state of the timer. */
 static unsigned char ipmi_watchdog_state = WDOG_TIMEOUT_NONE;
@@ -237,7 +229,7 @@ static int i_ipmi_set_timeout(struct ipmi_smi_msg  *smi_msg,
 			      struct ipmi_recv_msg *recv_msg,
 			      int                  *send_heartbeat_now)
 {
-	struct kernel_ipmi_msg            msg;
+	struct ipmi_msg                   msg;
 	unsigned char                     data[6];
 	int                               rv;
 	struct ipmi_system_interface_addr addr;
@@ -414,7 +406,7 @@ static struct ipmi_recv_msg panic_halt_heartbeat_recv_msg =
  
 static int ipmi_heartbeat(void)
 {
-	struct kernel_ipmi_msg            msg;
+	struct ipmi_msg                   msg;
 	int                               rv;
 	struct ipmi_system_interface_addr addr;
 
@@ -486,7 +478,7 @@ static int ipmi_heartbeat(void)
 
 static void panic_halt_ipmi_heartbeat(void)
 {
-	struct kernel_ipmi_msg             msg;
+	struct ipmi_msg                   msg;
 	struct ipmi_system_interface_addr addr;
 
 
@@ -598,6 +590,10 @@ static ssize_t ipmi_write(struct file *file,
 {
 	int rv;
 
+	/*  Can't seek (pwrite) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+
 	if (len) {
 		rv = ipmi_heartbeat();
 		if (rv)
@@ -614,6 +610,10 @@ static ssize_t ipmi_read(struct file *file,
 {
 	int          rv = 0;
 	wait_queue_t wait;
+
+	/*  Can't seek (pread) on this device  */
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 
 	if (count <= 0)
 		return 0;
@@ -670,7 +670,7 @@ static int ipmi_open(struct inode *ino, struct file *filep)
 		    /* Don't start the timer now, let it start on the
 		       first heartbeat. */
 		    ipmi_start_timer_on_heartbeat = 1;
-                    return nonseekable_open(ino, filep);
+                    return(0);
 
                 default:
                     return (-ENODEV);
@@ -704,10 +704,10 @@ static int ipmi_close(struct inode *ino, struct file *filep)
 {
 	if (iminor(ino)==WATCHDOG_MINOR)
 	{
-		if (!nowayout) {
-			ipmi_watchdog_state = WDOG_TIMEOUT_NONE;
-			ipmi_set_timeout(IPMI_SET_TIMEOUT_NO_HB);
-		}
+#ifndef CONFIG_WATCHDOG_NOWAYOUT	
+		ipmi_watchdog_state = WDOG_TIMEOUT_NONE;
+		ipmi_set_timeout(IPMI_SET_TIMEOUT_NO_HB);
+#endif		
 	        ipmi_wdog_open = 0;
 	}
 

@@ -27,14 +27,11 @@
 #include <linux/errno.h>
 #include <linux/profile.h>
 #include <linux/sysdev.h>
-#include <linux/timer.h>
 
 #include <asm/hardware.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/leds.h>
-
-#include <asm/mach/time.h>
 
 u64 jiffies_64 = INITIAL_JIFFIES;
 
@@ -52,11 +49,15 @@ EXPORT_SYMBOL(rtc_lock);
 /* change this if you have some constant time drift */
 #define USECS_PER_JIFFY	(1000000/HZ)
 
+static int dummy_set_rtc(void)
+{
+	return 0;
+}
 
 /*
  * hook for setting the RTC's idea of the current time.
  */
-int (*set_rtc)(void);
+int (*set_rtc)(void) = dummy_set_rtc;
 
 static unsigned long dummy_gettimeoffset(void)
 {
@@ -237,7 +238,7 @@ EXPORT_SYMBOL(leds_event);
 #endif
 
 #ifdef CONFIG_LEDS_TIMER
-static inline void do_leds(void)
+static void do_leds(void)
 {
 	static unsigned int count = 50;
 
@@ -247,7 +248,7 @@ static inline void do_leds(void)
 	}
 }
 #else
-#define	do_leds()
+#define do_leds()
 #endif
 
 void do_gettimeofday(struct timeval *tv)
@@ -315,18 +316,12 @@ int do_settimeofday(struct timespec *tv)
 
 EXPORT_SYMBOL(do_settimeofday);
 
-void timer_tick(struct pt_regs *regs)
-{
-	do_profile(regs);
-	do_leds();
-	do_set_rtc();
-	do_timer(regs);
-}
+static struct irqaction timer_irq = {
+	.name	= "timer",
+	.flags	= SA_INTERRUPT,
+};
 
-void (*init_arch_time)(void);
-
-void __init time_init(void)
-{
-	init_arch_time();
-}
-
+/*
+ * Include architecture specific code
+ */
+#include <asm/arch/time.h>

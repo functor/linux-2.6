@@ -22,7 +22,6 @@
 #include <linux/udp.h>
 #include <linux/tcp.h>
 #include <net/checksum.h>
-#include <net/ip.h>
 #include <linux/timer.h>
 #include <linux/netdevice.h>
 #include <linux/if.h>

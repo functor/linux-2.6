@@ -2158,7 +2158,7 @@ static int ess_open_mixdev(struct inode *inode, struct file *file)
 	if (!card)
 		return -ENODEV;
 	file->private_data = card;
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int ess_release_mixdev(struct inode *inode, struct file *file)
@@ -2274,6 +2274,8 @@ ess_read(struct file *file, char __user *buffer, size_t count, loff_t *ppos)
 	unsigned char *combbuf = NULL;
 	
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (s->dma_adc.mapped)
 		return -ENXIO;
 	if (!s->dma_adc.ready && (ret = prog_dmabuf(s, 1)))
@@ -2370,6 +2372,8 @@ ess_write(struct file *file, const char __user *buffer, size_t count, loff_t *pp
 	int cnt;
 	
 	VALIDATE_STATE(s);
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
 	if (s->dma_dac.mapped)
 		return -ENXIO;
 	if (!s->dma_dac.ready && (ret = prog_dmabuf(s, 0)))
@@ -3078,7 +3082,7 @@ ess_open(struct inode *inode, struct file *file)
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
 
 	up(&s->open_sem);
-	return nonseekable_open(inode, file);
+	return 0;
 }
 
 static int 

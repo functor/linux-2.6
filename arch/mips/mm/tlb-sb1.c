@@ -125,7 +125,7 @@ void local_flush_tlb_all(void)
  * with the firmware, go back and give all the entries invalid addresses with
  * the normal flush routine.  Wired entries will be killed as well!
  */
-static void __init sb1_sanitize_tlb(void)
+void sb1_sanitize_tlb(void)
 {
 	int entry;
 	long addr = 0;

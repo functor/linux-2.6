@@ -26,7 +26,6 @@
 #include <linux/kallsyms.h>
 #include <linux/ptrace.h>
 #include <linux/version.h>
-#include <linux/dump.h>
 
 #ifdef CONFIG_EISA
 #include <linux/ioport.h>
@@ -100,7 +99,7 @@ static int valid_stack_ptr(struct task_struct *task, void *p)
 }
 
 #ifdef CONFIG_FRAME_POINTER
-static void print_context_stack(struct task_struct *task, unsigned long *stack,
+void print_context_stack(struct task_struct *task, unsigned long *stack,
 			 unsigned long ebp)
 {
 	unsigned long addr;
@@ -114,17 +113,16 @@ static void print_context_stack(struct task_struct *task, unsigned long *stack,
 	}
 }
 #else
-static void print_context_stack(struct task_struct *task, unsigned long *stack,
+void print_context_stack(struct task_struct *task, unsigned long *stack,
 			 unsigned long ebp)
 {
 	unsigned long addr;
 
 	while (!kstack_end(stack)) {
 		addr = *stack++;
-		if (__kernel_text_address(addr)) {
-			printk(" [<%08lx>]", addr);
-			print_symbol(" %s", addr);
-			printk("\n");
+		if (kernel_text_address(addr)) {
+			printk(" [<%08lx>] ", addr);
+			print_symbol("%s\n", addr);
 		}
 	}
 }
@@ -290,7 +288,6 @@ bug:
 }
 
 spinlock_t die_lock = SPIN_LOCK_UNLOCKED;
-static int die_owner = -1;
 
 void die(const char * str, struct pt_regs * regs, long err)
 {
@@ -298,13 +295,7 @@ void die(const char * str, struct pt_regs * regs, long err)
 	int nl = 0;
 
 	console_verbose();
-	local_irq_disable();
-	if (!spin_trylock(&die_lock)) {
-		if (smp_processor_id() != die_owner)
-			spin_lock(&die_lock);
-		/* allow recursive die to fall through */
-	}
-	die_owner = smp_processor_id();
+	spin_lock_irq(&die_lock);
 	bust_spinlocks(1);
 	handle_BUG(regs);
 	printk(KERN_ALERT "%s: %04lx [#%d]\n", str, err & 0xffff, ++die_counter);
@@ -323,18 +314,12 @@ void die(const char * str, struct pt_regs * regs, long err)
 	if (nl)
 		printk("\n");
 	show_registers(regs);
-	if (netdump_func)
-		netdump_func(regs);
-	dump((char *)str, regs);
 	bust_spinlocks(0);
-	die_owner = -1;
 	spin_unlock_irq(&die_lock);
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 
 	if (panic_on_oops) {
-		if (netdump_func)
-			netdump_func = NULL;
 		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(5 * HZ);
@@ -407,7 +392,7 @@ asmlinkage void do_##name(struct pt_regs * regs, long error_code) \
 	info.si_signo = signr; \
 	info.si_errno = 0; \
 	info.si_code = sicode; \
-	info.si_addr = (void __user *)siaddr; \
+	info.si_addr = (void *)siaddr; \
 	do_trap(trapnr, signr, str, 0, regs, error_code, &info); \
 }
 
@@ -424,7 +409,7 @@ asmlinkage void do_##name(struct pt_regs * regs, long error_code) \
 	info.si_signo = signr; \
 	info.si_errno = 0; \
 	info.si_code = sicode; \
-	info.si_addr = (void __user *)siaddr; \
+	info.si_addr = (void *)siaddr; \
 	do_trap(trapnr, signr, str, 1, regs, error_code, &info); \
 }
 
@@ -513,7 +498,7 @@ static void mem_parity_error(unsigned char reason, struct pt_regs * regs)
 {
 	printk("Uhhuh. NMI received. Dazed and confused, but trying to continue\n");
 	printk("You probably have a hardware problem with your RAM chips\n");
-	panic("Halting\n");
+
 	/* Clear and disable the memory parity error line. */
 	clear_mem_error(reason);
 }
@@ -692,8 +677,8 @@ asmlinkage void do_debug(struct pt_regs * regs, long error_code)
 	/* If this is a kernel mode trap, save the user PC on entry to 
 	 * the kernel, that's what the debugger can make sense of.
 	 */
-	info.si_addr = ((regs->xcs & 3) == 0) ? (void __user *)tsk->thread.eip
-	                                      : (void __user *)regs->eip;
+	info.si_addr = ((regs->xcs & 3) == 0) ? (void *)tsk->thread.eip : 
+	                                        (void *)regs->eip;
 	force_sig_info(SIGTRAP, &info, tsk);
 
 	/* Disable additional traps. They'll be re-enabled when
@@ -721,7 +706,7 @@ clear_TF:
  * the correct behaviour even in the presence of the asynchronous
  * IRQ13 behaviour
  */
-void math_error(void __user *eip)
+void math_error(void *eip)
 {
 	struct task_struct * task;
 	siginfo_t info;
@@ -780,10 +765,10 @@ void math_error(void __user *eip)
 asmlinkage void do_coprocessor_error(struct pt_regs * regs, long error_code)
 {
 	ignore_fpu_irq = 1;
-	math_error((void __user *)regs->eip);
+	math_error((void *)regs->eip);
 }
 
-void simd_math_error(void __user *eip)
+void simd_math_error(void *eip)
 {
 	struct task_struct * task;
 	siginfo_t info;
@@ -837,7 +822,7 @@ asmlinkage void do_simd_coprocessor_error(struct pt_regs * regs,
 	if (cpu_has_xmm) {
 		/* Handle SIMD FPU exceptions on PIII+ processors. */
 		ignore_fpu_irq = 1;
-		simd_math_error((void __user *)regs->eip);
+		simd_math_error((void *)regs->eip);
 	} else {
 		/*
 		 * Handle strange cache flush from user space exception

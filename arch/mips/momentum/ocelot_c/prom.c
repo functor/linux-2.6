@@ -29,7 +29,7 @@
 
 struct callvectors* debug_vectors;
 
-extern unsigned long marvell_base;
+extern unsigned long mv64340_base;
 extern unsigned long cpu_clock;
 
 #ifdef CONFIG_MV64340_ETH
@@ -147,14 +147,13 @@ char *arg64(unsigned long addrin, int arg_index)
 #endif  /* CONFIG_MIPS64 */
 
 
+/* [jsun@junsun.net] PMON passes arguments in C main() style */
 void __init prom_init(void)
 {
 	int argc = fw_arg0;
 	char **arg = (char **) fw_arg1;
 	char **env = (char **) fw_arg2;
-	struct callvectors *cv = (struct callvectors *) fw_arg3;
 	int i;
-
 #ifdef CONFIG_MIPS64
 	char *ptr;
 
@@ -180,13 +179,13 @@ void __init prom_init(void)
 			break;
 
 		if (strncmp("gtbase", ptr, strlen("gtbase")) == 0) {
-			marvell_base = simple_strtol(ptr + strlen("gtbase="),
+			mv64340_base = simple_strtol(ptr + strlen("gtbase="),
 							NULL, 16);
 
-			if ((marvell_base & 0xffffffff00000000) == 0)
-				marvell_base |= 0xffffffff00000000;
+			if ((mv64340_base & 0xffffffff00000000) == 0)
+				mv64340_base |= 0xffffffff00000000;
 
-			printk("marvell_base set to 0x%016lx\n", marvell_base);
+			printk("mv64340_base set to 0x%016lx\n", mv64340_base);
 		}
 		if (strncmp("cpuclock", ptr, strlen("cpuclock")) == 0) {
 			cpu_clock = simple_strtol(ptr + strlen("cpuclock="),
@@ -213,7 +212,7 @@ void __init prom_init(void)
 
 	while (*env) {
 		if (strncmp("gtbase", *env, strlen("gtbase")) == 0) {
-			marvell_base = simple_strtol(*env + strlen("gtbase="),
+			mv64340_base = simple_strtol(*env + strlen("gtbase="),
 							NULL, 16);
 		}
 		if (strncmp("cpuclock", *env, strlen("cpuclock")) == 0) {

@@ -14,7 +14,6 @@
 #include <linux/buffer_head.h>
 #include <linux/vfs.h>
 #include <linux/parser.h>
-#include <linux/namei.h>
 
 #include "befs.h"
 #include "btree.h"

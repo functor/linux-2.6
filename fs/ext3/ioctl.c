@@ -35,8 +35,7 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		unsigned int oldflags;
 		unsigned int jflag;
 
-		if (IS_RDONLY(inode) ||
-			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
+		if (IS_RDONLY(inode))
 			return -EROFS;
 
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
@@ -59,11 +58,11 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		 *
 		 * This test looks nicer. Thanks to Pauline Middelink
 		 */
-		if (((oldflags & EXT3_IMMUTABLE_FL) ||
+		if ((oldflags & EXT3_IMMUTABLE_FL) ||
 			((flags ^ oldflags) &
-			 (EXT3_APPEND_FL | EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL)))
-		    && !capable(CAP_LINUX_IMMUTABLE)) {
-			return -EPERM;		
+			(EXT3_APPEND_FL | EXT3_IMMUTABLE_FL))) {
+			if (!capable(CAP_LINUX_IMMUTABLE))
+				return -EPERM;
 		}
 
 		/*
@@ -114,8 +113,7 @@ flags_err:
 
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
 			return -EPERM;
-		if (IS_RDONLY(inode) ||
-			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
+		if (IS_RDONLY(inode))
 			return -EROFS;
 		if (get_user(generation, (int __user *) arg))
 			return -EFAULT;
@@ -156,6 +154,7 @@ flags_err:
 			return ret;
 		}
 #endif
+
 #if defined(CONFIG_VSERVER_LEGACY) && !defined(CONFIG_INOXID_NONE)
 	case EXT3_IOC_SETXID: {
 		handle_t *handle;

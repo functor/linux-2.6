@@ -21,19 +21,31 @@
 #include "choose-mode.h"
 #include "mode.h"
 
-static void winch_handler(int sig)
+void generic_close(int fd, void *unused)
 {
+	os_close_file(fd);
 }
 
-struct winch_data {
-	int pty_fd;
-	int pipe_fd;
-	int close_me;
-};
+int generic_read(int fd, char *c_out, void *unused)
+{
+	int n;
 
-/* XXX This breaks horribly (by hanging UML) when moved to chan_kern.c - 
- * needs investigation
- */
+	n = os_read_file(fd, c_out, sizeof(*c_out));
+
+	if(n == -EAGAIN) 
+		return(0);
+	else if(n == 0) 
+		return(-EIO);
+	return(n);
+}
+
+/* XXX Trivial wrapper around os_write_file */
+
+int generic_write(int fd, const char *buf, int n, void *unused)
+{
+	return(os_write_file(fd, buf, n));
+}
+
 int generic_console_write(int fd, const char *buf, int n, void *unused)
 {
 	struct termios save, new;
@@ -49,6 +61,39 @@ int generic_console_write(int fd, const char *buf, int n, void *unused)
 	if(isatty(fd)) tcsetattr(fd, TCSAFLUSH, &save);
 	return(err);
 }
+
+int generic_window_size(int fd, void *unused, unsigned short *rows_out,
+			unsigned short *cols_out)
+{
+	int rows, cols;
+	int ret;
+
+	ret = os_window_size(fd, &rows, &cols);
+	if(ret < 0)
+		return(ret);
+
+	ret = ((*rows_out != rows) || (*cols_out != cols));
+
+	*rows_out = rows;
+	*cols_out = cols;
+
+	return(ret);
+}
+
+void generic_free(void *data)
+{
+	kfree(data);
+}
+
+static void winch_handler(int sig)
+{
+}
+
+struct winch_data {
+	int pty_fd;
+	int pipe_fd;
+	int close_me;
+};
 
 static int winch_thread(void *arg)
 {

@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 
+#include "qla_os.h"
 #include "qla_def.h"
 
 static char qla_driver_name[] = "qla2200";

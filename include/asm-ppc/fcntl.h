@@ -20,7 +20,6 @@
 #define O_NOFOLLOW      0100000	/* don't follow links */
 #define O_LARGEFILE     0200000
 #define O_DIRECT	0400000	/* direct disk access hint */
-#define O_NOATIME	01000000
 #define O_ATOMICLOOKUP 01000000 /* tux hack */
 
 #define F_DUPFD		0	/* dup */

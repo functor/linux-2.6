@@ -153,7 +153,6 @@ static int i830_map_buffer(drm_buf_t *buf, struct file *filp)
 	drm_i830_buf_priv_t *buf_priv = buf->dev_private;
       	drm_i830_private_t *dev_priv = dev->dev_private;
    	struct file_operations *old_fops;
-	unsigned long virtual;
 	int retcode = 0;
 
 	if(buf_priv->currently_mapped == I830_BUF_MAPPED) return -EINVAL;
@@ -162,17 +161,17 @@ static int i830_map_buffer(drm_buf_t *buf, struct file *filp)
 	old_fops = filp->f_op;
 	filp->f_op = &i830_buffer_fops;
 	dev_priv->mmap_buffer = buf;
-	virtual = do_mmap(filp, 0, buf->total, PROT_READ|PROT_WRITE,
-			    MAP_SHARED, buf->bus_address);
+	buf_priv->virtual = (void __user *)do_mmap(filp, 0, buf->total,
+					    PROT_READ|PROT_WRITE,
+					    MAP_SHARED, 
+					    buf->bus_address);
 	dev_priv->mmap_buffer = NULL;
 	filp->f_op = old_fops;
-	if (IS_ERR((void *)virtual)) {		/* ugh */
+	if (IS_ERR(buf_priv->virtual)) {
 		/* Real error */
 		DRM_ERROR("mmap error\n");
-		retcode = virtual;
-		buf_priv->virtual = NULL;
-	} else {
-		buf_priv->virtual = (void __user *)virtual;
+		retcode = PTR_ERR(buf_priv->virtual);
+		buf_priv->virtual = 0;
 	}
 	up_write( &current->mm->mmap_sem );
 
@@ -194,7 +193,7 @@ static int i830_unmap_buffer(drm_buf_t *buf)
 	up_write(&current->mm->mmap_sem);
 
    	buf_priv->currently_mapped = I830_BUF_UNMAPPED;
-   	buf_priv->virtual = NULL;
+   	buf_priv->virtual = 0;
 
 	return retcode;
 }
@@ -464,7 +463,7 @@ static int i830_dma_initialize(drm_device_t *dev,
 }
 
 int i830_dma_init(struct inode *inode, struct file *filp,
-		  unsigned int cmd, unsigned long arg)
+		  unsigned int cmd, unsigned long __user arg)
 {
    	drm_file_t *priv = filp->private_data;
    	drm_device_t *dev = priv->dev;
@@ -1316,7 +1315,7 @@ void i830_reclaim_buffers( struct file *filp )
 }
 
 int i830_flush_ioctl(struct inode *inode, struct file *filp, 
-		     unsigned int cmd, unsigned long arg)
+		     unsigned int cmd, unsigned long __user arg)
 {
    	drm_file_t	  *priv	  = filp->private_data;
    	drm_device_t	  *dev	  = priv->dev;
@@ -1331,7 +1330,7 @@ int i830_flush_ioctl(struct inode *inode, struct file *filp,
 }
 
 int i830_dma_vertex(struct inode *inode, struct file *filp,
-	       unsigned int cmd, unsigned long arg)
+	       unsigned int cmd, unsigned long __user arg)
 {
 	drm_file_t *priv = filp->private_data;
 	drm_device_t *dev = priv->dev;
@@ -1366,7 +1365,7 @@ int i830_dma_vertex(struct inode *inode, struct file *filp,
 }
 
 int i830_clear_bufs(struct inode *inode, struct file *filp,
-		   unsigned int cmd, unsigned long arg)
+		   unsigned int cmd, unsigned long __user arg)
 {
 	drm_file_t *priv = filp->private_data;
 	drm_device_t *dev = priv->dev;
@@ -1393,7 +1392,7 @@ int i830_clear_bufs(struct inode *inode, struct file *filp,
 }
 
 int i830_swap_bufs(struct inode *inode, struct file *filp,
-		  unsigned int cmd, unsigned long arg)
+		  unsigned int cmd, unsigned long __user arg)
 {
 	drm_file_t *priv = filp->private_data;
 	drm_device_t *dev = priv->dev;
@@ -1436,7 +1435,7 @@ int i830_do_cleanup_pageflip( drm_device_t *dev )
 }
 
 int i830_flip_bufs(struct inode *inode, struct file *filp,
-		   unsigned int cmd, unsigned long arg)
+		   unsigned int cmd, unsigned long __user arg)
 {
 	drm_file_t *priv = filp->private_data;
 	drm_device_t *dev = priv->dev;
@@ -1457,7 +1456,7 @@ int i830_flip_bufs(struct inode *inode, struct file *filp,
 }
 
 int i830_getage(struct inode *inode, struct file *filp, unsigned int cmd,
-		unsigned long arg)
+		unsigned long __user arg)
 {
    	drm_file_t	  *priv	    = filp->private_data;
 	drm_device_t	  *dev	    = priv->dev;
@@ -1471,7 +1470,7 @@ int i830_getage(struct inode *inode, struct file *filp, unsigned int cmd,
 }
 
 int i830_getbuf(struct inode *inode, struct file *filp, unsigned int cmd,
-		unsigned long arg)
+		unsigned long __user arg)
 {
 	drm_file_t	  *priv	    = filp->private_data;
 	drm_device_t	  *dev	    = priv->dev;
@@ -1508,7 +1507,7 @@ int i830_getbuf(struct inode *inode, struct file *filp, unsigned int cmd,
 int i830_copybuf(struct inode *inode,
 		 struct file *filp, 
 		 unsigned int cmd,
-		 unsigned long arg)
+		 unsigned long __user arg)
 {
 	/* Never copy - 2.4.x doesn't need it */
 	return 0;
@@ -1523,7 +1522,7 @@ int i830_docopy(struct inode *inode, struct file *filp, unsigned int cmd,
 
 
 int i830_getparam( struct inode *inode, struct file *filp, unsigned int cmd,
-		      unsigned long arg )
+		      unsigned long __user arg )
 {
 	drm_file_t	  *priv	    = filp->private_data;
 	drm_device_t	  *dev	    = priv->dev;
@@ -1557,7 +1556,7 @@ int i830_getparam( struct inode *inode, struct file *filp, unsigned int cmd,
 
 
 int i830_setparam( struct inode *inode, struct file *filp, unsigned int cmd,
-		   unsigned long arg )
+		   unsigned long __user arg )
 {
 	drm_file_t	  *priv	    = filp->private_data;
 	drm_device_t	  *dev	    = priv->dev;

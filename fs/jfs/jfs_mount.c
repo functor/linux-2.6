@@ -166,7 +166,7 @@ int jfs_mount(struct super_block *sb)
 		}
 	} else
 		/* Secondary aggregate inode table is not valid */
-		sbi->ipaimap2 = NULL;
+		sbi->ipaimap2 = 0;
 
 	/*
 	 *      mount (the only/single) fileset

@@ -35,8 +35,6 @@
 #include <linux/vfs.h>
 #include <linux/writeback.h>		/* for the emergency remount stuff */
 #include <linux/idr.h>
-#include <linux/devpts_fs.h>
-#include <linux/proc_fs.h>
 #include <asm/uaccess.h>
 
 
@@ -788,13 +786,6 @@ do_kern_mount(const char *fstype, int flags, const char *name, void *data)
 	sb = type->get_sb(type, flags, name, data);
 	if (IS_ERR(sb))
 		goto out_free_secdata;
-
-	error = -EPERM;
-	if (!capable(CAP_SYS_ADMIN) && !sb->s_bdev &&
-		(sb->s_magic != PROC_SUPER_MAGIC) &&
-		(sb->s_magic != DEVPTS_SUPER_MAGIC))
-		goto out_sb;
-
  	error = security_sb_kern_mount(sb, secdata);
  	if (error)
  		goto out_sb;
@@ -802,7 +793,6 @@ do_kern_mount(const char *fstype, int flags, const char *name, void *data)
 	mnt->mnt_root = dget(sb->s_root);
 	mnt->mnt_mountpoint = sb->s_root;
 	mnt->mnt_parent = mnt;
-	mnt->mnt_namespace = current->namespace;
 	up_write(&sb->s_umount);
 	put_filesystem(type);
 	return mnt;
@@ -818,8 +808,6 @@ out:
 	put_filesystem(type);
 	return (struct vfsmount *)sb;
 }
-
-EXPORT_SYMBOL_GPL(do_kern_mount);
 
 struct vfsmount *kern_mount(struct file_system_type *type)
 {

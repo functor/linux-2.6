@@ -80,7 +80,12 @@
 #include <asm/uaccess.h>
 #include <linux/usb.h>
 
-static int debug;
+#ifdef CONFIG_USB_SERIAL_DEBUG
+	static int debug = 1;
+#else
+	static int debug;
+#endif
+
 
 struct ezusb_hex_record {
 	__u16 address;
@@ -776,7 +781,7 @@ static int keyspan_pda_startup (struct usb_serial *serial)
 	usb_set_serial_port_data(serial->port[0], priv);
 	init_waitqueue_head(&serial->port[0]->write_wait);
 	INIT_WORK(&priv->wakeup_work, (void *)keyspan_pda_wakeup_write,
-			(void *)(serial->port[0]));
+			(void *)(&serial->port[0]));
 	INIT_WORK(&priv->unthrottle_work,
 			(void *)keyspan_pda_request_unthrottle,
 			(void *)(serial));
@@ -904,6 +909,6 @@ MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL");
 
-module_param(debug, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM(debug, "i");
 MODULE_PARM_DESC(debug, "Debug enabled or not");
 

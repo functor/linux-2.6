@@ -142,7 +142,7 @@ int dupfd(struct file *file, unsigned int start)
 		FD_SET(fd, files->open_fds);
 		FD_CLR(fd, files->close_on_exec);
 		spin_unlock(&files->file_lock);
-		// vx_openfd_inc(fd);
+		vx_openfd_inc(fd);
 		fd_install(fd, file);
 	} else {
 		spin_unlock(&files->file_lock);
@@ -192,7 +192,7 @@ asmlinkage long sys_dup2(unsigned int oldfd, unsigned int newfd)
 	FD_SET(newfd, files->open_fds);
 	FD_CLR(newfd, files->close_on_exec);
 	spin_unlock(&files->file_lock);
-	// vx_openfd_inc(newfd);
+	vx_openfd_inc(newfd);
 
 	if (tofree)
 		filp_close(tofree, files);
@@ -219,7 +219,7 @@ asmlinkage long sys_dup(unsigned int fildes)
 	return ret;
 }
 
-#define SETFL_MASK (O_APPEND | O_NONBLOCK | O_NDELAY | FASYNC | O_DIRECT | O_NOATIME)
+#define SETFL_MASK (O_APPEND | O_NONBLOCK | O_NDELAY | FASYNC | O_DIRECT)
 
 static int setfl(int fd, struct file * filp, unsigned long arg)
 {
@@ -229,11 +229,6 @@ static int setfl(int fd, struct file * filp, unsigned long arg)
 	/* O_APPEND cannot be cleared if the file is marked as append-only */
 	if (!(arg & O_APPEND) && IS_APPEND(inode))
 		return -EPERM;
-
-	/* O_NOATIME can only be set by the owner or superuser */
-	if ((arg & O_NOATIME) && !(filp->f_flags & O_NOATIME))
-		if (current->fsuid != inode->i_uid && !capable(CAP_FOWNER))
-			return -EPERM;
 
 	/* required for strict SunOS emulation */
 	if (O_NONBLOCK != O_NDELAY)
@@ -245,11 +240,6 @@ static int setfl(int fd, struct file * filp, unsigned long arg)
 			!filp->f_mapping->a_ops->direct_IO)
 				return -EINVAL;
 	}
-
-	if (filp->f_op && filp->f_op->check_flags)
-		error = filp->f_op->check_flags(arg);
-	if (error)
-		return error;
 
 	lock_kernel();
 	if ((arg ^ filp->f_flags) & FASYNC) {
@@ -299,8 +289,8 @@ void f_delown(struct file *filp)
 
 EXPORT_SYMBOL(f_delown);
 
-static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
-		struct file *filp)
+long generic_file_fcntl(int fd, unsigned int cmd,
+			unsigned long arg, struct file *filp)
 {
 	long err = -EINVAL;
 
@@ -367,6 +357,15 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 		break;
 	}
 	return err;
+}
+EXPORT_SYMBOL(generic_file_fcntl);
+
+static long do_fcntl(int fd, unsigned int cmd,
+			unsigned long arg, struct file *filp)
+{
+	if (filp->f_op && filp->f_op->fcntl)
+		return filp->f_op->fcntl(fd, cmd, arg, filp);
+	return generic_file_fcntl(fd, cmd, arg, filp);
 }
 
 asmlinkage long sys_fcntl(int fd, unsigned int cmd, unsigned long arg)

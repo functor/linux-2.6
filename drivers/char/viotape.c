@@ -53,7 +53,6 @@
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 
-#include <asm/vio.h>
 #include <asm/iSeries/vio.h>
 #include <asm/iSeries/HvLpEvent.h>
 #include <asm/iSeries/HvCallEvent.h>
@@ -217,7 +216,7 @@ static const struct vio_error_entry viotape_err_table[] = {
 };
 
 /* Maximum number of tapes we support */
-#define VIOTAPE_MAX_TAPE	HVMAXARCHITECTEDVIRTUALTAPES
+#define VIOTAPE_MAX_TAPE	8
 #define MAX_PARTITIONS		4
 
 /* defines for current tape state */
@@ -238,8 +237,6 @@ static dma_addr_t viotape_unitinfo_token;
 static struct mtget viomtget[VIOTAPE_MAX_TAPE];
 
 static struct class_simple *tape_class;
-
-static struct device *tape_device[VIOTAPE_MAX_TAPE];
 
 /*
  * maintain the current state of each tape (and partition)
@@ -265,7 +262,6 @@ struct op_struct {
 	int			rc;
 	int			non_blocking;
 	struct completion	com;
-	struct device		*dev;
 	struct op_struct	*next;
 };
 
@@ -463,8 +459,7 @@ static ssize_t viotap_write(struct file *file, const char *buf,
 		down(&reqSem);
 
 	/* Allocate a DMA buffer */
-	op->dev = tape_device[devi.devno];
-	op->buffer = dma_alloc_coherent(op->dev, count, &op->dmaaddr,
+	op->buffer = dma_alloc_coherent(iSeries_vio_dev, count, &op->dmaaddr,
 			GFP_ATOMIC);
 
 	if (op->buffer == NULL) {
@@ -514,7 +509,7 @@ static ssize_t viotap_write(struct file *file, const char *buf,
 	}
 
 free_dma:
-	dma_free_coherent(op->dev, count, op->buffer, op->dmaaddr);
+	dma_free_coherent(iSeries_vio_dev, count, op->buffer, op->dmaaddr);
 up_sem:
 	up(&reqSem);
 free_op:
@@ -555,8 +550,7 @@ static ssize_t viotap_read(struct file *file, char *buf, size_t count,
 	chg_state(devi.devno, VIOT_READING, file);
 
 	/* Allocate a DMA buffer */
-	op->dev = tape_device[devi.devno];
-	op->buffer = dma_alloc_coherent(op->dev, count, &op->dmaaddr,
+	op->buffer = dma_alloc_coherent(iSeries_vio_dev, count, &op->dmaaddr,
 			GFP_ATOMIC);
 	if (op->buffer == NULL) {
 		ret = -EFAULT;
@@ -594,7 +588,7 @@ static ssize_t viotap_read(struct file *file, char *buf, size_t count,
 	}
 
 free_dma:
-	dma_free_coherent(op->dev, count, op->buffer, op->dmaaddr);
+	dma_free_coherent(iSeries_vio_dev, count, op->buffer, op->dmaaddr);
 up_sem:
 	up(&reqSem);
 free_op:
@@ -916,7 +910,7 @@ static void vioHandleTapeEvent(struct HvLpEvent *event)
 		break;
 	case viotapewrite:
 		if (op->non_blocking) {
-			dma_free_coherent(op->dev, op->count,
+			dma_free_coherent(iSeries_vio_dev, op->count,
 					op->buffer, op->dmaaddr);
 			free_op_struct(op);
 			up(&reqSem);
@@ -942,70 +936,12 @@ static void vioHandleTapeEvent(struct HvLpEvent *event)
 	}
 }
 
-static int viotape_probe(struct vio_dev *vdev, const struct vio_device_id *id)
-{
-	char tapename[32];
-	int i = vdev->unit_address;
-	int j;
-
-	if (i >= viotape_numdev)
-		return -ENODEV;
-
-	tape_device[i] = &vdev->dev;
-
-	state[i].cur_part = 0;
-	for (j = 0; j < MAX_PARTITIONS; ++j)
-		state[i].part_stat_rwi[j] = VIOT_IDLE;
-	class_simple_device_add(tape_class, MKDEV(VIOTAPE_MAJOR, i), NULL,
-			"iseries!vt%d", i);
-	class_simple_device_add(tape_class, MKDEV(VIOTAPE_MAJOR, i | 0x80),
-			NULL, "iseries!nvt%d", i);
-	devfs_mk_cdev(MKDEV(VIOTAPE_MAJOR, i), S_IFCHR | S_IRUSR | S_IWUSR,
-			"iseries/vt%d", i);
-	devfs_mk_cdev(MKDEV(VIOTAPE_MAJOR, i | 0x80),
-			S_IFCHR | S_IRUSR | S_IWUSR, "iseries/nvt%d", i);
-	sprintf(tapename, "iseries/vt%d", i);
-	state[i].dev_handle = devfs_register_tape(tapename);
-	printk(VIOTAPE_KERN_INFO "tape %s is iSeries "
-			"resource %10.10s type %4.4s, model %3.3s\n",
-			tapename, viotape_unitinfo[i].rsrcname,
-			viotape_unitinfo[i].type, viotape_unitinfo[i].model);
-	return 0;
-}
-
-static int viotape_remove(struct vio_dev *vdev)
-{
-	int i = vdev->unit_address;
-
-	devfs_remove("iseries/nvt%d", i);
-	devfs_remove("iseries/vt%d", i);
-	devfs_unregister_tape(state[i].dev_handle);
-	class_simple_device_remove(MKDEV(VIOTAPE_MAJOR, i | 0x80));
-	class_simple_device_remove(MKDEV(VIOTAPE_MAJOR, i));
-	return 0;
-}
-
-/**
- * viotape_device_table: Used by vio.c to match devices that we
- * support.
- */
-static struct vio_device_id viotape_device_table[] __devinitdata = {
-	{ "viotape", "" },
-	{ 0, }
-};
-
-MODULE_DEVICE_TABLE(vio, viotape_device_table);
-static struct vio_driver viotape_driver = {
-	.name = "viotape",
-	.id_table = viotape_device_table,
-	.probe = viotape_probe,
-	.remove = viotape_remove
-};
-
 
 int __init viotap_init(void)
 {
 	int ret;
+	char tapename[32];
+	int i;
 	struct proc_dir_entry *e;
 
 	op_struct_list = NULL;
@@ -1057,9 +993,31 @@ int __init viotap_init(void)
 		goto unreg_class;
 	}
 
-	ret = vio_register_driver(&viotape_driver);
-	if (ret)
-		goto unreg_class;
+	for (i = 0; i < viotape_numdev; i++) {
+		int j;
+
+		state[i].cur_part = 0;
+		for (j = 0; j < MAX_PARTITIONS; ++j)
+			state[i].part_stat_rwi[j] = VIOT_IDLE;
+		class_simple_device_add(tape_class, MKDEV(VIOTAPE_MAJOR, i),
+				NULL, "iseries!vt%d", i);
+		class_simple_device_add(tape_class,
+				MKDEV(VIOTAPE_MAJOR, i | 0x80),
+				NULL, "iseries!nvt%d", i);
+		devfs_mk_cdev(MKDEV(VIOTAPE_MAJOR, i),
+				S_IFCHR | S_IRUSR | S_IWUSR,
+				"iseries/vt%d", i);
+		devfs_mk_cdev(MKDEV(VIOTAPE_MAJOR, i | 0x80),
+				S_IFCHR | S_IRUSR | S_IWUSR,
+				"iseries/nvt%d", i);
+		sprintf(tapename, "iseries/vt%d", i);
+		state[i].dev_handle = devfs_register_tape(tapename);
+		printk(VIOTAPE_KERN_INFO "tape %s is iSeries "
+				"resource %10.10s type %4.4s, model %3.3s\n",
+				tapename, viotape_unitinfo[i].rsrcname,
+				viotape_unitinfo[i].type,
+				viotape_unitinfo[i].model);
+	}
 
 	e = create_proc_entry("iSeries/viotape", S_IFREG|S_IRUGO, NULL);
 	if (e) {
@@ -1106,10 +1064,17 @@ static int chg_state(int index, unsigned char new_state, struct file *file)
 /* Cleanup */
 static void __exit viotap_exit(void)
 {
-	int ret;
+	int i, ret;
 
 	remove_proc_entry("iSeries/viotape", NULL);
-	vio_unregister_driver(&viotape_driver);
+
+	for (i = 0; i < viotape_numdev; ++i) {
+		devfs_remove("iseries/nvt%d", i);
+		devfs_remove("iseries/vt%d", i);
+		devfs_unregister_tape(state[i].dev_handle);
+		class_simple_device_remove(MKDEV(VIOTAPE_MAJOR, i | 0x80));
+		class_simple_device_remove(MKDEV(VIOTAPE_MAJOR, i));
+	}
 	class_simple_destroy(tape_class);
 	ret = unregister_chrdev(VIOTAPE_MAJOR, "viotape");
 	if (ret < 0)

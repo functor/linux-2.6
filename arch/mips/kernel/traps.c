@@ -9,7 +9,7 @@
  * Copyright (C) 1999 Silicon Graphics, Inc.
  * Kevin D. Kissell, kevink@mips.com and Carsten Langgaard, carstenl@mips.com
  * Copyright (C) 2000, 01 MIPS Technologies, Inc.
- * Copyright (C) 2002, 2003, 2004  Maciej W. Rozycki
+ * Copyright (C) 2002, 2003  Maciej W. Rozycki
  */
 #include <linux/config.h>
 #include <linux/init.h>
@@ -23,7 +23,6 @@
 
 #include <asm/bootinfo.h>
 #include <asm/branch.h>
-#include <asm/break.h>
 #include <asm/cpu.h>
 #include <asm/fpu.h>
 #include <asm/module.h>
@@ -119,7 +118,7 @@ void show_trace(struct task_struct *task, unsigned long *stack)
 #endif
 	while (!kstack_end(stack)) {
 		addr = *stack++;
-		if (__kernel_text_address(addr)) {
+		if (kernel_text_address(addr)) {
 			printk(" [<%0*lx>] ", field, addr);
 			print_symbol("%s\n", addr);
 		}
@@ -235,7 +234,6 @@ void show_regs(struct pt_regs *regs)
 void show_registers(struct pt_regs *regs)
 {
 	show_regs(regs);
-	print_modules();
 	printk("Process %s (pid: %d, threadinfo=%p, task=%p)\n",
 	        current->comm, current->pid, current_thread_info(), current);
 	show_stack(current, (long *) regs->regs[29]);
@@ -280,8 +278,47 @@ void __declare_dbe_table(void)
 	);
 }
 
+#ifdef CONFIG_MDULES
+
+/* Given an address, look for it in the module exception tables. */
+const struct exception_table_entry *search_module_dbetables(unsigned long addr)
+{
+	unsigned long flags;
+	const struct exception_table_entry *e = NULL;
+	struct module *mod;
+
+	spin_lock_irqsave(&modlist_lock, flags);
+	list_for_each_entry(mod, &modules, list) {
+		if (mod->arch.num_dbeentries == 0)
+			continue;
+				
+		e = search_extable(mod->arch.dbe_table_start,
+				   mod->arch.dbe_table_end +
+		                   mod->arch.num_dbeentries - 1,
+				   addr);
+		if (e)
+			break;
+	}
+	spin_unlock_irqrestore(&modlist_lock, flags);
+
+	/* Now, if we found one, we are running inside it now, hence
+           we cannot unload the module, hence no refcnt needed. */
+	return e;
+}
+
+#else
+
 /* Given an address, look for it in the exception tables. */
-static const struct exception_table_entry *search_dbe_tables(unsigned long addr)
+static inline const struct exception_table_entry *
+search_module_dbetables(unsigned long addr)
+{
+	return NULL;
+}
+
+#endif
+
+/* Given an address, look for it in the exception tables. */
+const struct exception_table_entry *search_dbe_tables(unsigned long addr)
 {
 	const struct exception_table_entry *e;
 
@@ -542,12 +579,9 @@ asmlinkage void do_bp(struct pt_regs *regs)
 	/*
 	 * There is the ancient bug in the MIPS assemblers that the break
 	 * code starts left to bit 16 instead to bit 6 in the opcode.
-	 * Gas is bug-compatible, but not always, grrr...
-	 * We handle both cases with a simple heuristics.  --macro
+	 * Gas is bug-compatible ...
 	 */
-	bcode = ((opcode >> 6) & ((1 << 20) - 1));
-	if (bcode < (1 << 10))
-		bcode <<= 10;
+	bcode = ((opcode >> 16) & ((1 << 20) - 1));
 
 	/*
 	 * (A short test says that IRIX 5.3 sends SIGTRAP for all break
@@ -556,9 +590,9 @@ asmlinkage void do_bp(struct pt_regs *regs)
 	 * But should we continue the brokenness???  --macro
 	 */
 	switch (bcode) {
-	case BRK_OVERFLOW << 10:
-	case BRK_DIVZERO << 10:
-		if (bcode == (BRK_DIVZERO << 10))
+	case 6:
+	case 7:
+		if (bcode == 7)
 			info.si_code = FPE_INTDIV;
 		else
 			info.si_code = FPE_INTOVF;
@@ -584,7 +618,7 @@ asmlinkage void do_tr(struct pt_regs *regs)
 
 	/* Immediate versions don't provide a code.  */
 	if (!(opcode & OPCODE))
-		tcode = ((opcode >> 6) & ((1 << 10) - 1));
+		tcode = ((opcode >> 6) & ((1 << 20) - 1));
 
 	/*
 	 * (A short test says that IRIX 5.3 sends SIGTRAP for all trap
@@ -593,9 +627,9 @@ asmlinkage void do_tr(struct pt_regs *regs)
 	 * But should we continue the brokenness???  --macro
 	 */
 	switch (tcode) {
-	case BRK_OVERFLOW:
-	case BRK_DIVZERO:
-		if (tcode == BRK_DIVZERO)
+	case 6:
+	case 7:
+		if (tcode == 7)
 			info.si_code = FPE_INTDIV;
 		else
 			info.si_code = FPE_INTOVF;
@@ -711,24 +745,11 @@ asmlinkage void do_reserved(struct pt_regs *regs)
 static inline void parity_protection_init(void)
 {
 	switch (current_cpu_data.cputype) {
-	case CPU_24K:
-		/* 24K cache parity not currently implemented in FPGA */
-		printk(KERN_INFO "Disable cache parity protection for "
-		       "MIPS 24K CPU.\n");
-		write_c0_ecc(read_c0_ecc() & ~0x80000000);
-		break;
 	case CPU_5KC:
 		/* Set the PE bit (bit 31) in the c0_ecc register. */
-		printk(KERN_INFO "Enable cache parity protection for "
-		       "MIPS 5KC/24K CPUs.\n");
+		printk(KERN_INFO "Enable the cache parity protection for "
+		       "MIPS 5KC CPUs.\n");
 		write_c0_ecc(read_c0_ecc() | 0x80000000);
-		break;
-	case CPU_20KC:
-	case CPU_25KF:
-		/* Clear the DE bit (bit 16) in the c0_status register. */
-		printk(KERN_INFO "Enable cache parity protection for "
-		       "MIPS 20KC/25KF CPUs.\n");
-		clear_c0_status(ST0_DE);
 		break;
 	default:
 		break;

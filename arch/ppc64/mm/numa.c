@@ -356,7 +356,6 @@ void __init do_init_bootmem(void)
 
 	min_low_pfn = 0;
 	max_low_pfn = lmb_end_of_DRAM() >> PAGE_SHIFT;
-	max_pfn = max_low_pfn;
 
 	if (parse_numa_properties())
 		setup_nonnuma();
@@ -458,7 +457,7 @@ void __init paging_init(void)
 		zones_size[ZONE_DMA] = end_pfn - start_pfn;
 		zholes_size[ZONE_DMA] = 0;
 		if (nid == 0)
-			zholes_size[ZONE_DMA] = node0_io_hole_size >> PAGE_SHIFT;
+			zholes_size[ZONE_DMA] = node0_io_hole_size;
 
 		dbg("free_area_init node %d %lx %lx (hole: %lx)\n", nid,
 		    zones_size[ZONE_DMA], start_pfn, zholes_size[ZONE_DMA]);

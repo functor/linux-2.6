@@ -217,7 +217,7 @@ int bool_isvalid(struct cond_bool_datum *b)
 
 int cond_read_bool(struct policydb *p, struct hashtab *h, void *fp)
 {
-	char *key = NULL;
+	char *key = 0;
 	struct cond_bool_datum *booldatum;
 	__u32 *buf, len;
 
@@ -251,7 +251,7 @@ int cond_read_bool(struct policydb *p, struct hashtab *h, void *fp)
 
 	return 0;
 err:
-	cond_destroy_bool(key, booldatum, NULL);
+	cond_destroy_bool(key, booldatum, 0);
 	return -1;
 }
 

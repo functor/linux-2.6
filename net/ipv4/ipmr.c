@@ -109,9 +109,7 @@ static int ip_mr_forward(struct sk_buff *skb, struct mfc_cache *cache, int local
 static int ipmr_cache_report(struct sk_buff *pkt, vifi_t vifi, int assert);
 static int ipmr_fill_mroute(struct sk_buff *skb, struct mfc_cache *c, struct rtmsg *rtm);
 
-#ifdef CONFIG_IP_PIMSM_V2
-static struct net_protocol pim_protocol;
-#endif
+static struct inet_protocol pim_protocol;
 
 static struct timer_list ipmr_expire_timer;
 
@@ -1107,14 +1105,17 @@ static void ip_encap(struct sk_buff *skb, u32 saddr, u32 daddr)
 	skb->h.ipiph = skb->nh.iph;
 	skb->nh.iph = iph;
 	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
-	nf_reset(skb);
+#ifdef CONFIG_NETFILTER
+	nf_conntrack_put(skb->nfct);
+	skb->nfct = NULL;
+#endif
 }
 
 static inline int ipmr_forward_finish(struct sk_buff *skb)
 {
 	struct ip_options * opt	= &(IPCB(skb)->opt);
 
-	IP_INC_STATS_BH(IPSTATS_MIB_OUTFORWDATAGRAMS);
+	IP_INC_STATS_BH(OutForwDatagrams);
 
 	if (unlikely(opt->optlen))
 		ip_forward_options(skb);
@@ -1177,7 +1178,7 @@ static void ipmr_queue_xmit(struct sk_buff *skb, struct mfc_cache *c, int vifi)
 		   to blackhole.
 		 */
 
-		IP_INC_STATS_BH(IPSTATS_MIB_FRAGFAILS);
+		IP_INC_STATS_BH(FragFails);
 		ip_rt_put(rt);
 		goto out_free;
 	}
@@ -1460,7 +1461,10 @@ int pim_rcv_v1(struct sk_buff * skb)
 	skb->dst = NULL;
 	((struct net_device_stats*)reg_dev->priv)->rx_bytes += skb->len;
 	((struct net_device_stats*)reg_dev->priv)->rx_packets++;
-	nf_reset(skb);
+#ifdef CONFIG_NETFILTER
+	nf_conntrack_put(skb->nfct);
+	skb->nfct = NULL;
+#endif
 	netif_rx(skb);
 	dev_put(reg_dev);
 	return 0;
@@ -1516,7 +1520,10 @@ static int pim_rcv(struct sk_buff * skb)
 	((struct net_device_stats*)reg_dev->priv)->rx_bytes += skb->len;
 	((struct net_device_stats*)reg_dev->priv)->rx_packets++;
 	skb->dst = NULL;
-	nf_reset(skb);
+#ifdef CONFIG_NETFILTER
+	nf_conntrack_put(skb->nfct);
+	skb->nfct = NULL;
+#endif
 	netif_rx(skb);
 	dev_put(reg_dev);
 	return 0;
@@ -1704,7 +1711,7 @@ static struct file_operations ipmr_vif_fops = {
 	.open    = ipmr_vif_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
-	.release = seq_release_private,
+	.release = seq_release,
 };
 
 struct ipmr_mfc_iter {
@@ -1739,9 +1746,6 @@ static struct mfc_cache *ipmr_mfc_seq_idx(struct ipmr_mfc_iter *it, loff_t pos)
 
 static void *ipmr_mfc_seq_start(struct seq_file *seq, loff_t *pos)
 {
-	struct ipmr_mfc_iter *it = seq->private;
-	it->cache = NULL;
-	it->ct = 0;
 	return *pos ? ipmr_mfc_seq_idx(seq->private, *pos - 1) 
 		: SEQ_START_TOKEN;
 }
@@ -1851,6 +1855,7 @@ static int ipmr_mfc_open(struct inode *inode, struct file *file)
 	if (rc)
 		goto out_kfree;
 
+	memset(s, 0, sizeof(*s));
 	seq = file->private_data;
 	seq->private = s;
 out:
@@ -1866,12 +1871,12 @@ static struct file_operations ipmr_mfc_fops = {
 	.open    = ipmr_mfc_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
-	.release = seq_release_private,
+	.release = seq_release,
 };
 #endif	
 
 #ifdef CONFIG_IP_PIMSM_V2
-static struct net_protocol pim_protocol = {
+static struct inet_protocol pim_protocol = {
 	.handler	=	pim_rcv,
 };
 #endif

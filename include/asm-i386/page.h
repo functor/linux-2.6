@@ -42,7 +42,6 @@
  */
 #ifdef CONFIG_X86_PAE
 extern unsigned long long __supported_pte_mask;
-extern int nx_enabled;
 typedef struct { unsigned long pte_low, pte_high; } pte_t;
 typedef struct { unsigned long long pmd; } pmd_t;
 typedef struct { unsigned long long pgd; } pgd_t;
@@ -50,7 +49,6 @@ typedef struct { unsigned long long pgprot; } pgprot_t;
 #define pte_val(x)	((x).pte_low | ((unsigned long long)(x).pte_high << 32))
 #define HPAGE_SHIFT	21
 #else
-#define nx_enabled 0
 typedef struct { unsigned long pte_low; } pte_t;
 typedef struct { unsigned long pmd; } pmd_t;
 typedef struct { unsigned long pgd; } pgd_t;
@@ -128,8 +126,6 @@ static __inline__ int get_order(unsigned long size)
 	return order;
 }
 
-extern int devmem_is_allowed(unsigned long pagenr);
-
 #endif /* __ASSEMBLY__ */
 
 #define PAGE_OFFSET		((unsigned long)__PAGE_OFFSET)
@@ -149,11 +145,9 @@ extern int devmem_is_allowed(unsigned long pagenr);
 #define virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
 
 #define VM_DATA_DEFAULT_FLAGS \
-	(VM_READ | VM_WRITE | \
-	((current->personality & READ_IMPLIES_EXEC) ? VM_EXEC : 0 ) | \
-		 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
-
-
+		(VM_READ | VM_WRITE | \
+			((current->flags & PF_RELOCEXEC) ? 0 : VM_EXEC) | \
+				VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
 #endif /* __KERNEL__ */
 

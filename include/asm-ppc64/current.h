@@ -10,7 +10,9 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#define get_current()   (get_paca()->__current)
+#include <asm/thread_info.h>
+
+#define get_current()   (get_paca()->xCurrent)
 #define current         get_current()
 
 #endif /* !(_PPC64_CURRENT_H) */

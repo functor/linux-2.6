@@ -8,7 +8,6 @@
 #include <linux/fs.h>
 #include <linux/list.h>
 #include <linux/highmem.h>
-#include <linux/compiler.h>
 #include <asm/uaccess.h>
 #include <linux/gfp.h>
 
@@ -137,10 +136,7 @@ static inline void pagecache_acct(int count)
 
 static inline unsigned long get_page_cache_size(void)
 {
-	int ret = atomic_read(&nr_pagecache);
-	if (unlikely(ret < 0))
-		ret = 0;
-	return ret;
+        return atomic_read(&nr_pagecache);
 }
 
 static inline pgoff_t linear_page_index(struct vm_area_struct *vma,
@@ -156,7 +152,6 @@ extern void FASTCALL(unlock_page(struct page *page));
 
 static inline void lock_page(struct page *page)
 {
-	might_sleep();
 	if (TestSetPageLocked(page))
 		__lock_page(page);
 }

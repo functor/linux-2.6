@@ -19,7 +19,6 @@
 
 #include <asm/addrspace.h>
 #include <asm/ptrace.h>
-#include <asm/hazards.h>
 
 __asm__ (
 	".macro\tlocal_irq_enable\n\t"
@@ -30,7 +29,6 @@ __asm__ (
 	"ori\t$1,0x1f\n\t"
 	"xori\t$1,0x1e\n\t"
 	"mtc0\t$1,$12\n\t"
-	"irq_enable_hazard\n\t"
 	".set\tpop\n\t"
 	".endm");
 
@@ -59,7 +57,9 @@ __asm__ (
 	"xori\t$1,1\n\t"
 	".set\tnoreorder\n\t"
 	"mtc0\t$1,$12\n\t"
-	"irq_disable_hazard\n\t"
+	"sll\t$0, $0, 1\t\t\t# nop\n\t"
+	"sll\t$0, $0, 1\t\t\t# nop\n\t"
+	"sll\t$0, $0, 1\t\t\t# nop\n\t"
 	".set\tpop\n\t"
 	".endm");
 
@@ -80,7 +80,7 @@ __asm__ (
 	".set\tpop\n\t"
 	".endm");
 
-#define local_save_flags(x)						\
+#define local_save_flags(x)							\
 __asm__ __volatile__(							\
 	"local_save_flags %0"						\
 	: "=r" (x))
@@ -95,7 +95,9 @@ __asm__ (
 	"xori\t$1, 1\n\t"
 	".set\tnoreorder\n\t"
 	"mtc0\t$1, $12\n\t"
-	"irq_disable_hazard\n\t"
+	"sll\t$0, $0, 1\t\t\t# nop\n\t"
+	"sll\t$0, $0, 1\t\t\t# nop\n\t"
+	"sll\t$0, $0, 1\t\t\t# nop\n\t"
 	".set\tpop\n\t"
 	".endm");
 
@@ -106,8 +108,7 @@ __asm__ __volatile__(							\
 	: /* no inputs */						\
 	: "memory")
 
-__asm__ (
-	".macro\tlocal_irq_restore flags\n\t"
+__asm__(".macro\tlocal_irq_restore flags\n\t"
 	".set\tnoreorder\n\t"
 	".set\tnoat\n\t"
 	"mfc0\t$1, $12\n\t"
@@ -116,12 +117,14 @@ __asm__ (
 	"xori\t$1, 1\n\t"
 	"or\t\\flags, $1\n\t"
 	"mtc0\t\\flags, $12\n\t"
-	"irq_disable_hazard\n\t"
+	"sll\t$0, $0, 1\t\t\t# nop\n\t"
+	"sll\t$0, $0, 1\t\t\t# nop\n\t"
+	"sll\t$0, $0, 1\t\t\t# nop\n\t"
 	".set\tat\n\t"
 	".set\treorder\n\t"
 	".endm");
 
-#define local_irq_restore(flags)					\
+#define local_irq_restore(flags)						\
 do {									\
 	unsigned long __tmp1;						\
 									\

@@ -35,18 +35,16 @@
  */
 
 #include <linux/config.h>
-#include <linux/cdrom.h>
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/bcd.h>
-#include <linux/blkdev.h>
 
-#include <scsi/scsi.h>
-#include <scsi/scsi_cmnd.h>
-#include <scsi/scsi_device.h>
+#include <linux/blkdev.h>
+#include "scsi.h"
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_ioctl.h>
 
+#include <linux/cdrom.h>
 #include "sr.h"
 
 #if 0
@@ -137,7 +135,7 @@ int sr_set_blocklength(Scsi_CD *cd, int blocklength)
 	modesel->block_length_lo = blocklength & 0xff;
 	cgc.buffer = buffer;
 	cgc.buflen = sizeof(*modesel);
-	cgc.data_direction = DMA_TO_DEVICE;
+	cgc.data_direction = SCSI_DATA_WRITE;
 	cgc.timeout = VENDOR_TIMEOUT;
 	if (0 == (rc = sr_do_ioctl(cd, &cgc))) {
 		cd->device->sector_size = blocklength;
@@ -184,7 +182,7 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 		cgc.buffer = buffer;
 		cgc.buflen = 12;
 		cgc.quiet = 1;
-		cgc.data_direction = DMA_FROM_DEVICE;
+		cgc.data_direction = SCSI_DATA_READ;
 		cgc.timeout = VENDOR_TIMEOUT;
 		rc = sr_do_ioctl(cd, &cgc);
 		if (rc != 0)
@@ -212,7 +210,7 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 			cgc.buffer = buffer;
 			cgc.buflen = 0x16;
 			cgc.quiet = 1;
-			cgc.data_direction = DMA_FROM_DEVICE;
+			cgc.data_direction = SCSI_DATA_READ;
 			cgc.timeout = VENDOR_TIMEOUT;
 			rc = sr_do_ioctl(cd, &cgc);
 			if (rc != 0)
@@ -241,7 +239,7 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 			cgc.buffer = buffer;
 			cgc.buflen = 4;
 			cgc.quiet = 1;
-			cgc.data_direction = DMA_FROM_DEVICE;
+			cgc.data_direction = SCSI_DATA_READ;
 			cgc.timeout = VENDOR_TIMEOUT;
 			rc = sr_do_ioctl(cd, &cgc);
 			if (rc == -EINVAL) {
@@ -270,7 +268,7 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 		cgc.buffer = buffer;
 		cgc.buflen = 0x04;
 		cgc.quiet = 1;
-		cgc.data_direction = DMA_FROM_DEVICE;
+		cgc.data_direction = SCSI_DATA_READ;
 		cgc.timeout = VENDOR_TIMEOUT;
 		rc = sr_do_ioctl(cd, &cgc);
 		if (rc != 0) {
@@ -288,7 +286,7 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 		cgc.buffer = buffer;
 		cgc.buflen = 12;
 		cgc.quiet = 1;
-		cgc.data_direction = DMA_FROM_DEVICE;
+		cgc.data_direction = SCSI_DATA_READ;
 		cgc.timeout = VENDOR_TIMEOUT;
 		rc = sr_do_ioctl(cd, &cgc);
 		if (rc != 0) {

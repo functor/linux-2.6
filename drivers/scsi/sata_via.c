@@ -108,13 +108,10 @@ static struct ata_port_operations svia_sata_ops = {
 
 	.bmdma_setup            = ata_bmdma_setup_pio,
 	.bmdma_start            = ata_bmdma_start_pio,
-	.qc_prep		= ata_qc_prep,
-	.qc_issue		= ata_qc_issue_prot,
-
+	.fill_sg		= ata_fill_sg,
 	.eng_timeout		= ata_eng_timeout,
 
 	.irq_handler		= ata_interrupt,
-	.irq_clear		= ata_bmdma_irq_clear,
 
 	.scr_read		= svia_scr_read,
 	.scr_write		= svia_scr_write,
