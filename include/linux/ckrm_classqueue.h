@@ -28,7 +28,8 @@
 
 #include <linux/list.h>
 
-#define CLASSQUEUE_SIZE 128
+#define CLASSQUEUE_SIZE 1024   // acb: changed from 128
+//#define CLASSQUEUE_SIZE 128
 #define CQ_BITMAP_SIZE ((((CLASSQUEUE_SIZE+1+7)/8)+sizeof(long)-1)/sizeof(long))
 
 /**
