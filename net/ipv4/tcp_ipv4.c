@@ -1821,9 +1821,16 @@ process:
 	 * overridden) and the context is not entitled to read the
 	 * packet.
 	 */
-	if (inet_stream_ops.bind != inet_bind &&
-	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
-		goto discard_it;
+	if (inet_stream_ops.bind != inet_bind) {
+		/* Transfer ownership of reusable TIME_WAIT buckets to
+		 * whomever VNET decided should own the packet.
+		 */
+		if (sk->sk_state == TCP_TIME_WAIT)
+			sk->sk_xid = skb->xid;
+
+		if ((int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
+			goto discard_it;
+	}
 
 	if (sk->sk_state == TCP_TIME_WAIT)
 		goto do_time_wait;
