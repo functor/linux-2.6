@@ -181,6 +181,18 @@ config CKRM_CPU_SCHEDULE
 	
 	  Say N if unsure, Y to use the feature.
 
+config CKRM_CPU_SCHEDULE_AT_BOOT
+	bool "Turn on at boot time"
+	depends on CKRM_CPU_SCHEDULE
+	default n
+	help
+	  Enable CKRM CPU Scheduler at boot time. Otherwise
+	  it can be turned on dynamically at runtime. If not
+	  turned on the default Linux Scheduler behavior 
+	  will be obtained.
+
+	  Say N if unsure, Y to use this feature
+
 config CKRM_TYPE_SOCKETCLASS
 	bool "Class Manager for socket groups"
 	depends on CKRM

@@ -82,6 +82,7 @@ inline unsigned int is_res_regd(struct ckrm_classtype *clstype, int resid)
 	    );
 }
 
+static 
 struct ckrm_res_ctlr *ckrm_resctlr_lookup(struct ckrm_classtype *clstype,
 					  const char *resname)
 {
@@ -101,10 +102,8 @@ struct ckrm_res_ctlr *ckrm_resctlr_lookup(struct ckrm_classtype *clstype,
 	return NULL;
 }
 
-EXPORT_SYMBOL(ckrm_resctlr_lookup);
-
 /* given a classname return the class handle and its classtype*/
-void *ckrm_classobj(char *classname, int *classTypeID)
+void *ckrm_classobj(const char *classname, int *classTypeID)
 {
 	int i;
 
@@ -864,7 +863,10 @@ int ckrm_class_show_shares(struct ckrm_core_class *core, struct seq_file *seq)
 		atomic_inc(&clstype->nr_resusers[i]);
 		rcbs = clstype->res_ctlrs[i];
 		if (rcbs && rcbs->get_share_values) {
-			(*rcbs->get_share_values) (core->res_class[i], &shares);
+			int rc = (*rcbs->get_share_values)(core->res_class[i], 
+							   &shares);
+			if (rc == -ENOSYS) 
+				continue;
 			seq_printf(seq,"res=%s,guarantee=%d,limit=%d,"
 				   "total_guarantee=%d,max_limit=%d\n",
 				   rcbs->res_name, shares.my_guarantee,
