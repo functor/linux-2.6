@@ -143,6 +143,7 @@ get_tuple(const struct iphdr *iph,
 	tuple->src.ip = iph->saddr;
 	tuple->dst.ip = iph->daddr;
 	tuple->dst.protonum = iph->protocol;
+	tuple->src.u.all = tuple->dst.u.all = 0;
 
 	return protocol->pkt_to_tuple(skb, dataoff, tuple);
 }
@@ -155,6 +156,8 @@ invert_tuple(struct ip_conntrack_tuple *inverse,
 	inverse->src.ip = orig->dst.ip;
 	inverse->dst.ip = orig->src.ip;
 	inverse->dst.protonum = orig->dst.protonum;
+
+	inverse->src.u.all = inverse->dst.u.all = 0;
 
 	return protocol->invert_tuple(inverse, orig);
 }
@@ -976,8 +979,8 @@ int ip_conntrack_expect_related(struct ip_conntrack_expect *expect,
 	 * so there is no need to use the tuple lock too */
 
 	DEBUGP("ip_conntrack_expect_related %p\n", related_to);
-	DEBUGP("tuple: "); DUMP_TUPLE(&expect->tuple);
-	DEBUGP("mask:  "); DUMP_TUPLE(&expect->mask);
+	DEBUGP("tuple: "); DUMP_TUPLE_RAW(&expect->tuple);
+	DEBUGP("mask:  "); DUMP_TUPLE_RAW(&expect->mask);
 
 	old = LIST_FIND(&ip_conntrack_expect_list, resent_expect,
 		        struct ip_conntrack_expect *, &expect->tuple, 
@@ -1070,15 +1073,14 @@ int ip_conntrack_change_expect(struct ip_conntrack_expect *expect,
 
 	MUST_BE_READ_LOCKED(&ip_conntrack_lock);
 	WRITE_LOCK(&ip_conntrack_expect_tuple_lock);
-
 	DEBUGP("change_expect:\n");
-	DEBUGP("exp tuple: "); DUMP_TUPLE(&expect->tuple);
-	DEBUGP("exp mask:  "); DUMP_TUPLE(&expect->mask);
-	DEBUGP("newtuple:  "); DUMP_TUPLE(newtuple);
+	DEBUGP("exp tuple: "); DUMP_TUPLE_RAW(&expect->tuple);
+	DEBUGP("exp mask:  "); DUMP_TUPLE_RAW(&expect->mask);
+	DEBUGP("newtuple:  "); DUMP_TUPLE_RAW(newtuple);
 	if (expect->ct_tuple.dst.protonum == 0) {
 		/* Never seen before */
 		DEBUGP("change expect: never seen before\n");
-		if (!ip_ct_tuple_equal(&expect->tuple, newtuple) 
+		if (!ip_ct_tuple_mask_cmp(&expect->tuple, newtuple, &expect->mask)
 		    && LIST_FIND(&ip_conntrack_expect_list, expect_clash,
 			         struct ip_conntrack_expect *, newtuple, &expect->mask)) {
 			/* Force NAT to find an unused tuple */
