@@ -240,7 +240,15 @@ sys_call_table:
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 220 */
 	.quad alpha_ni_syscall
+#ifdef CONFIG_TUX
+	.quad __sys_tux
+#else
+# ifdef CONFIG_TUX_MODULE
+	.quad sys_tux
+# else
 	.quad alpha_ni_syscall
+# endif
+#endif
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 225 */
@@ -389,7 +397,7 @@ sys_call_table:
 	.quad sys_getcwd
 	.quad sys_capget
 	.quad sys_capset
-	.quad sys_sendfile			/* 370 */
+	.quad sys_sendfile64			/* 370 */
 	.quad sys_setresgid
 	.quad sys_getresgid
 	.quad sys_ni_syscall			/* sys_dipc */

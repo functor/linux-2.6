@@ -12,7 +12,7 @@
 #include <linux/blkdev.h>
 #include <linux/kernel.h>
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 
 #define CONST_COMMAND   0x01
 #define CONST_STATUS    0x02
@@ -31,6 +31,8 @@ static const char unknown[] = "UNKNOWN";
 #endif
 #define CONSTANTS (CONST_COMMAND | CONST_STATUS | CONST_SENSE | CONST_XSENSE \
 		   | CONST_CMND | CONST_MSG | CONST_HOST | CONST_DRIVER)
+#else
+#define CONSTANTS 0
 #endif
 
 #if (CONSTANTS & CONST_COMMAND)

@@ -44,7 +44,8 @@
 #ifndef __ACLINUX_H__
 #define __ACLINUX_H__
 
-#define ACPI_OS_NAME                "Linux"
+#define ACPI_OS_NAME                "Microsoft Windows NT"
+ /* Microsoft, Microsoft Windows, Microsoft Windows NT are trademarks of Microsoft Corp. */
 
 #define ACPI_USE_SYSTEM_CLIBRARY
 #define ACPI_USE_DO_WHILE_0
