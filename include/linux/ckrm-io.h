@@ -32,8 +32,8 @@ typedef int (*icls_ioprio_t) (struct task_struct *tsk);
 
 #ifdef CONFIG_CKRM_RES_BLKIO
 
-void *cki_tsk_icls(struct task_struct *tsk);
-int cki_tsk_ioprio(struct task_struct *tsk);
+extern void *cki_tsk_icls (struct task_struct *tsk);
+extern int cki_tsk_ioprio (struct task_struct *tsk);
 
 #endif /* CONFIG_CKRM_RES_BLKIO */
 
