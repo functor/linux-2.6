@@ -1,0 +1,72 @@
+Usage of CKRM without a classification engine
+-----------------------------------------------
+
+1. Create a class
+
+   # mkdir /rcfs/taskclass/c1
+   creates a taskclass named c1 , while
+   # mkdir /rcfs/socket_class/s1
+   creates a socketclass named s1 
+
+The newly created class directory is automatically populated by magic files
+shares, stats, members, target and config.
+
+2. View default shares 
+
+   # cat /rcfs/taskclass/c1/shares
+
+   "guarantee=-2,limit=-2,total_guarantee=100,max_limit=100" is the default
+   value set for resources that have controllers registered with CKRM.
+
+3. change shares of a <class>
+
+   One or more of the following fields can/must be specified
+       res=<res_name> #mandatory
+       guarantee=<number>
+       limit=<number>
+       total_guarantee=<number>
+       max_limit=<number>
+   e.g.
+	# echo "res=numtasks,limit=20" > /rcfs/taskclass/c1
+
+   If any of these parameters are not specified, the current value will be
+   retained. 
+
+4. Reclassify a task (listening socket)
+
+   write the pid of the process to the destination class' target file
+   # echo 1004 > /rcfs/taskclass/c1/target	
+
+   write the "<ipaddress>\<port>" string to the destination class' target file 
+   # echo "0.0.0.0\32770"  > /rcfs/taskclass/c1/target
+
+5. Get a list of tasks (sockets) assigned to a taskclass (socketclass)
+
+   # cat /rcfs/taskclass/c1/members
+   lists pids of tasks belonging to c1
+
+   # cat /rcfs/socket_class/s1/members
+   lists the ipaddress\port of all listening sockets in s1 
+
+6. Get the statictics of different resources of a class
+
+   # cat /rcfs/tasksclass/c1/stats
+   shows c1's statistics for each resource with a registered resource
+   controller.
+
+   # cat /rcfs/socket_class/s1/stats
+   show's s1's stats for the listenaq controller.	
+
+7. View the configuration values of the resources associated with a class
+
+   # cat /rcfs/taskclass/c1/config
+   shows per-controller config values for c1.
+
+8. Change the configuration values of resources associated with a class
+   Configuration values are different for different resources. the comman
+   field "res=<resname>" must always be specified.
+
+   # echo "res=numtasks,parameter=value" > /rcfs/taskclass/c1/config
+   to change (without any effect), the value associated with <parameter>.
+
+
