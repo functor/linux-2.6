@@ -38,7 +38,7 @@ int vc_ctx_kill(uint32_t id, void __user *data)
 	info.si_pid = current->pid;
 	info.si_uid = current->uid;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 

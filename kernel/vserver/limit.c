@@ -55,7 +55,7 @@ int vc_get_rlimit(uint32_t id, void __user *data)
 	if (!is_valid_rlimit(vc_data.id))
 		return -ENOTSUPP;
 		
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -81,7 +81,7 @@ int vc_set_rlimit(uint32_t id, void __user *data)
 	if (!is_valid_rlimit(vc_data.id))
 		return -ENOTSUPP;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 

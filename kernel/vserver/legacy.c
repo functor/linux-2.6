@@ -74,9 +74,9 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 		return -EINVAL;
 		
 	if ((ctx == VX_DYNAMIC_ID) || (ctx < MIN_D_CONTEXT))
-		new_vxi = find_or_create_vx_info(ctx);
+		new_vxi = locate_or_create_vx_info(ctx);
 	else
-		new_vxi = find_vx_info(ctx);
+		new_vxi = locate_vx_info(ctx);
 
 	if (!new_vxi)
 		return -EINVAL;
@@ -102,6 +102,7 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 }
 
 
+extern struct nx_info *create_nx_info(void);
 
 /*  set ipv4 root (syscall) */
 
@@ -152,9 +153,15 @@ int vc_set_ipv4root(uint32_t nbip, void __user *data)
 		new_nxi->mask[i] = vc_data.nx_mask_pair[i].mask;
 	}
 	new_nxi->v4_bcast = vc_data.broadcast;
-	current->nx_info = new_nxi;
-	current->nid = new_nxi->nx_id;
-	put_nx_info(nxi);
+	// current->nx_info = new_nxi;
+	if (nxi) {
+		printk("!!! switching nx_info %p->%p\n", nxi, new_nxi);
+		clr_nx_info(&current->nx_info);
+	}
+	nx_migrate_task(current, new_nxi);
+	// set_nx_info(&current->nx_info, new_nxi);
+	// current->nid = new_nxi->nx_id;
+	put_nx_info(new_nxi);
 	return 0;
 }
 

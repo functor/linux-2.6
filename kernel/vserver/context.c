@@ -12,6 +12,7 @@
  *  V0.05  rlimit basic implementation
  *  V0.06  task_xid and info commands
  *  V0.07  context flags and caps
+ *  V0.08  switch to RCU based hash
  *
  */
 
@@ -22,38 +23,35 @@
 #include <linux/vinline.h>
 #include <linux/kernel_stat.h>
 #include <linux/namespace.h>
+#include <linux/rcupdate.h>
 
 #include <asm/errno.h>
 
 
-/*  system functions */
+/*	__alloc_vx_info()
 
+	* allocate an initialized vx_info struct
+	* doesn't make it visible (hash)			*/
 
-LIST_HEAD(vx_infos);
-
-spinlock_t vxlist_lock
-	__cacheline_aligned_in_smp = SPIN_LOCK_UNLOCKED;
-
-
-/*
- *	struct vx_info allocation and deallocation
- */
-
-static struct vx_info *alloc_vx_info(int id)
+static struct vx_info *__alloc_vx_info(xid_t xid)
 {
 	struct vx_info *new = NULL;
 	
-	vxdprintk("alloc_vx_info(%d)\n", id);
+	vxdprintk("alloc_vx_info(%d)\n", xid);
+
 	/* would this benefit from a slab cache? */
 	new = kmalloc(sizeof(struct vx_info), GFP_KERNEL);
 	if (!new)
 		return 0;
 
 	memset (new, 0, sizeof(struct vx_info));
-	new->vx_id = id;
-	INIT_LIST_HEAD(&new->vx_list);
+	new->vx_id = xid;
+	INIT_RCU_HEAD(&new->vx_rcu);
+	INIT_HLIST_NODE(&new->vx_hlist);
+	atomic_set(&new->vx_refcnt, 0);
+	atomic_set(&new->vx_usecnt, 0);
+
 	/* rest of init goes here */
-	
 	vx_info_init_limit(&new->limit);
 	vx_info_init_sched(&new->sched);
 	vx_info_init_cvirt(&new->cvirt);
@@ -63,13 +61,21 @@ static struct vx_info *alloc_vx_info(int id)
 	new->vx_bcaps = CAP_INIT_EFF_SET;
 	new->vx_ccaps = 0;
 
-	vxdprintk("alloc_vx_info(%d) = %p\n", id, new);
+	vxdprintk("alloc_vx_info(%d) = %p\n", xid, new);
 	return new;
 }
 
-void free_vx_info(struct vx_info *vxi)
+/*	__dealloc_vx_info()
+
+	* final disposal of vx_info				*/
+
+static void __dealloc_vx_info(struct vx_info *vxi)
 {
-	vxdprintk("free_vx_info(%p)\n", vxi);
+	vxdprintk("dealloc_vx_info(%p)\n", vxi);
+
+	vxi->vx_hlist.next = LIST_POISON1;
+	vxi->vx_id = -1;
+
 	if (vxi->vx_namespace)
 		put_namespace(vxi->vx_namespace);
 	if (vxi->vx_fs)
@@ -80,69 +86,85 @@ void free_vx_info(struct vx_info *vxi)
 	vx_info_exit_cvirt(&vxi->cvirt);
 	vx_info_exit_cacct(&vxi->cacct);
 	
-	BUG_ON(atomic_read(&vxi->vx_refcount));
-	vxi->vx_id = -1;
+	BUG_ON(atomic_read(&vxi->vx_usecnt));
+	BUG_ON(atomic_read(&vxi->vx_refcnt));
 
 	kfree(vxi);
 }
 
 
-/*
- *	struct vx_info search by id
- *	assumes vxlist_lock is held
- */
+/*	hash table for vx_info hash */
 
-static __inline__ struct vx_info *__find_vx_info(int id)
+#define	VX_HASH_SIZE	13
+
+struct hlist_head vx_info_hash[VX_HASH_SIZE];
+
+static spinlock_t vx_info_hash_lock = SPIN_LOCK_UNLOCKED;
+
+
+static inline unsigned int __hashval(xid_t xid)
 {
-	struct vx_info *vxi;
-
-	list_for_each_entry(vxi, &vx_infos, vx_list)
-		if (vxi->vx_id == id)
-			return vxi;
-	return 0;
+	return (xid % VX_HASH_SIZE);
 }
 
 
-/*
- *	struct vx_info ref stuff
- */
 
-struct vx_info *find_vx_info(int id)
+/*	__hash_vx_info()
+
+	* add the vxi to the global hash table
+	* requires the hash_lock to be held			*/
+
+static inline void __hash_vx_info(struct vx_info *vxi)
 {
-	struct vx_info *vxi;
+	struct hlist_head *head;
 	
-	if (id < 0) {
-		vxi = current->vx_info;
-		get_vx_info(vxi);
-	} else {
-		spin_lock(&vxlist_lock);
-		if ((vxi = __find_vx_info(id)))
-			get_vx_info(vxi);
-		spin_unlock(&vxlist_lock);
-	}
-	return vxi;
+	vxdprintk("__hash_vx_info: %p[#%d]\n", vxi, vxi->vx_id);
+	get_vx_info(vxi);
+	head = &vx_info_hash[__hashval(vxi->vx_id)];
+	hlist_add_head_rcu(&vxi->vx_hlist, head);
 }
 
-/*
- *	verify that id is a valid xid
- */
+/*	__unhash_vx_info()
 
-int vx_info_id_valid(int id)
+	* remove the vxi from the global hash table
+	* requires the hash_lock to be held			*/
+
+static inline void __unhash_vx_info(struct vx_info *vxi)
 {
-	int valid;
-
-	spin_lock(&vxlist_lock);
-	valid = (__find_vx_info(id) != NULL);
-	spin_unlock(&vxlist_lock);
-	return valid;
+	vxdprintk("__unhash_vx_info: %p[#%d]\n", vxi, vxi->vx_id);
+	hlist_del_rcu(&vxi->vx_hlist);
+	put_vx_info(vxi);
 }
 
 
-/*
- *	dynamic context id ...
- */
+/*	__lookup_vx_info()
 
-static __inline__ xid_t __vx_dynamic_id(void)
+	* requires the rcu_read_lock()
+	* doesn't increment the vx_refcnt			*/
+
+static inline struct vx_info *__lookup_vx_info(xid_t xid)
+{
+	struct hlist_head *head = &vx_info_hash[__hashval(xid)];
+	struct hlist_node *pos;
+
+	hlist_for_each(pos, head) {
+		struct vx_info *vxi =
+			hlist_entry(pos, struct vx_info, vx_hlist);
+
+		if (vxi->vx_id == xid) {
+			return vxi;
+		}
+	}
+	return NULL;
+}
+
+
+/*	__vx_dynamic_id()
+
+	* find unused dynamic xid
+	* requires the hash_lock to be held			*/
+
+static inline xid_t __vx_dynamic_id(void)
 {
 	static xid_t seq = MAX_S_CONTEXT;
 	xid_t barrier = seq;
@@ -150,29 +172,29 @@ static __inline__ xid_t __vx_dynamic_id(void)
 	do {
 		if (++seq > MAX_S_CONTEXT)
 			seq = MIN_D_CONTEXT;
-		if (!__find_vx_info(seq))
+		if (!__lookup_vx_info(seq))
 			return seq;
 	} while (barrier != seq);
 	return 0;
 }
 
-static struct vx_info * __foc_vx_info(int id, int *err)
+/*	__loc_vx_info()
+
+	* locate or create the requested context
+	* get() it and if new hash it				*/
+
+static struct vx_info * __loc_vx_info(int id, int *err)
 {
 	struct vx_info *new, *vxi = NULL;
 	
-	vxdprintk("foc_vx_info(%d)\n", id);
-	if (!(new = alloc_vx_info(id))) {
+	vxdprintk("loc_vx_info(%d)\n", id);
+
+	if (!(new = __alloc_vx_info(id))) {
 		*err = -ENOMEM;
 		return NULL;
 	}
 
-	/* dirty hack until Spectator becomes a cap */
-	if (id == 0 || id == 1) {
-		*err = -EBUSY;
-		return NULL;
-	}
-
-	spin_lock(&vxlist_lock);
+	spin_lock(&vx_info_hash_lock);
 
 	/* dynamic context requested */
 	if (id == VX_DYNAMIC_ID) {
@@ -184,14 +206,14 @@ static struct vx_info * __foc_vx_info(int id, int *err)
 		new->vx_id = id;
 	}
 	/* existing context requested */
-	else if ((vxi = __find_vx_info(id))) {
+	else if ((vxi = __lookup_vx_info(id))) {
 		/* context in setup is not available */
 		if (vxi->vx_flags & VXF_STATE_SETUP) {
-			vxdprintk("foc_vx_info(%d) = %p (not available)\n", id, vxi);
+			vxdprintk("loc_vx_info(%d) = %p (not available)\n", id, vxi);
 			vxi = NULL;
 			*err = -EBUSY;
 		} else {
-			vxdprintk("foc_vx_info(%d) = %p (found)\n", id, vxi);
+			vxdprintk("loc_vx_info(%d) = %p (found)\n", id, vxi);
 			get_vx_info(vxi);
 			*err = 0;
 		}
@@ -199,27 +221,131 @@ static struct vx_info * __foc_vx_info(int id, int *err)
 	}
 
 	/* new context requested */
-	vxdprintk("foc_vx_info(%d) = %p (new)\n", id, new);
-	atomic_set(&new->vx_refcount, 1);
-	list_add(&new->vx_list, &vx_infos);
+	vxdprintk("loc_vx_info(%d) = %p (new)\n", id, new);
+	__hash_vx_info(get_vx_info(new));
 	vxi = new, new = NULL;
 	*err = 1;
 
 out_unlock:
-	spin_unlock(&vxlist_lock);
+	spin_unlock(&vx_info_hash_lock);
 	if (new)
-		free_vx_info(new);
+		__dealloc_vx_info(new);
 	return vxi;
 }
 
 
-struct vx_info *find_or_create_vx_info(int id)
+
+/*	exported stuff						*/
+
+
+
+void rcu_free_vx_info(void *obj)
+{
+	struct vx_info *vxi = obj;
+	int usecnt, refcnt;
+
+	usecnt = atomic_read(&vxi->vx_usecnt);
+	BUG_ON(usecnt < 0);
+
+	refcnt = atomic_read(&vxi->vx_refcnt);
+	BUG_ON(refcnt < 0);
+
+	if (!usecnt)
+		__dealloc_vx_info(vxi);
+	else
+		printk("!!! rcu didn't free\n");
+}
+
+void unhash_vx_info(struct vx_info *vxi)
+{
+	spin_lock(&vx_info_hash_lock);
+	__unhash_vx_info(vxi);
+	spin_unlock(&vx_info_hash_lock);
+}
+
+/*	locate_vx_info()
+
+	* search for a vx_info and get() it			
+	* negative id means current				*/
+
+struct vx_info *locate_vx_info(int id)
+{
+	struct vx_info *vxi;
+	
+	if (id < 0) {
+		vxi = get_vx_info(current->vx_info);
+	} else {
+		rcu_read_lock();
+		vxi = get_vx_info(__lookup_vx_info(id));
+		rcu_read_unlock();
+	}
+	return vxi;
+}
+
+/*	vx_info_is_hashed()
+
+	* verify that xid is still hashed			*/
+
+int vx_info_is_hashed(xid_t xid)
+{
+	int hashed;
+
+	rcu_read_lock();
+	hashed = (__lookup_vx_info(xid) != NULL);
+	rcu_read_unlock();
+	return hashed;
+}
+
+#ifdef	CONFIG_VSERVER_LEGACY
+
+#if 0
+struct vx_info *alloc_vx_info(xid_t xid)
+{
+	return __alloc_vx_info(xid);
+}
+#endif
+
+struct vx_info *locate_or_create_vx_info(int id)
 {
 	int err;
 
-	return __foc_vx_info(id, &err);
+	return __loc_vx_info(id, &err);
 }
 
+#endif
+
+#ifdef	CONFIG_PROC_FS
+
+#define hlist_for_each_rcu(pos, head) \
+        for (pos = (head)->first; pos && ({ prefetch(pos->next); 1;}); \
+		pos = pos->next, ({ smp_read_barrier_depends(); 0;}))
+
+int get_xid_list(int index, unsigned int *xids, int size)
+{
+	int hindex, nr_xids = 0;
+
+	rcu_read_lock();
+	for (hindex = 0; hindex < VX_HASH_SIZE; hindex++) {
+		struct hlist_head *head = &vx_info_hash[hindex];
+		struct hlist_node *pos;
+
+		hlist_for_each_rcu(pos, head) {
+			struct vx_info *vxi;
+
+			if (--index > 0)
+				continue;
+
+			vxi = hlist_entry(pos, struct vx_info, vx_hlist);
+			xids[nr_xids] = vxi->vx_id;			
+			if (++nr_xids >= size)
+				goto out;
+		}
+	}
+out:
+	rcu_read_unlock();
+	return nr_xids;
+}
+#endif
 
 int vx_migrate_user(struct task_struct *p, struct vx_info *vxi)
 {
@@ -300,16 +426,18 @@ static inline int vx_openfd_task(struct task_struct *tsk)
 
 int vx_migrate_task(struct task_struct *p, struct vx_info *vxi)
 {
-	struct vx_info *old_vxi = task_get_vx_info(p);
+	struct vx_info *old_vxi;
 	int ret = 0;
 	
 	if (!p || !vxi)
 		BUG();
 
-	vxdprintk("vx_migrate_task(%p,%p[#%d.%d)\n", p, vxi,
-		vxi->vx_id, atomic_read(&vxi->vx_refcount));
+	old_vxi = task_get_vx_info(p);
 	if (old_vxi == vxi)
 		goto out;
+
+	vxdprintk("vx_migrate_task(%p,%p[#%d.%d)\n", p, vxi,
+		vxi->vx_id, atomic_read(&vxi->vx_usecnt));
 
 	if (!(ret = vx_migrate_user(p, vxi))) {
 		task_lock(p);
@@ -321,6 +449,9 @@ int vx_migrate_task(struct task_struct *p, struct vx_info *vxi)
 		atomic_inc(&vxi->limit.res[RLIMIT_NPROC]);
 		atomic_add(vx_nofiles_task(p), &vxi->limit.res[RLIMIT_NOFILE]);
 		atomic_add(vx_openfd_task(p), &vxi->limit.res[RLIMIT_OPENFD]);
+		/* should be handled in set_vx_info !! */
+		if (old_vxi)
+			clr_vx_info(&p->vx_info);
 		set_vx_info(&p->vx_info, vxi);
 		p->xid = vxi->vx_id;
 		vx_mask_bcaps(p);
@@ -383,7 +514,7 @@ int vc_vx_info(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RESOURCE))
 		return -EPERM;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -401,7 +532,6 @@ int vc_vx_info(uint32_t id, void __user *data)
 
 int vc_ctx_create(uint32_t xid, void __user *data)
 {
-        // int ret = -ENOMEM;
 	struct vx_info *new_vxi;
 	int ret;
 
@@ -414,7 +544,7 @@ int vc_ctx_create(uint32_t xid, void __user *data)
 	if (xid < 1)
 		return -EINVAL;
 
-	new_vxi = __foc_vx_info(xid, &ret);
+	new_vxi = __loc_vx_info(xid, &ret);
 	if (!new_vxi)
 		return ret;
 	if (!(new_vxi->vx_flags & VXF_STATE_SETUP)) {
@@ -424,6 +554,7 @@ int vc_ctx_create(uint32_t xid, void __user *data)
 
 	ret = new_vxi->vx_id;
 	vx_migrate_task(current, new_vxi);
+	/* if this fails, we might end up with a hashed vx_info */
 out_put:
 	put_vx_info(new_vxi);
 	return ret;
@@ -443,7 +574,7 @@ int vc_ctx_migrate(uint32_t id, void __user *data)
 		return 0;
 	}
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 	vx_migrate_task(current, vxi);
@@ -460,13 +591,12 @@ int vc_get_cflags(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
 	vc_data.flagword = vxi->vx_flags;
 
-	// vc_data.mask = ~0UL;
 	/* special STATE flag handling */
 	vc_data.mask = vx_mask_flags(~0UL, vxi->vx_flags, VXF_ONE_TIME);
 
@@ -488,7 +618,7 @@ int vc_set_cflags(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -516,7 +646,7 @@ int vc_get_ccaps(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -540,7 +670,7 @@ int vc_set_ccaps(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -553,6 +683,6 @@ int vc_set_ccaps(uint32_t id, void __user *data)
 
 #include <linux/module.h>
 
-EXPORT_SYMBOL_GPL(free_vx_info);
-EXPORT_SYMBOL_GPL(vxlist_lock);
+EXPORT_SYMBOL_GPL(rcu_free_vx_info);
+EXPORT_SYMBOL_GPL(vx_info_hash_lock);
 

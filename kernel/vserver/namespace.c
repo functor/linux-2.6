@@ -57,7 +57,7 @@ int vc_set_vhi_name(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 	
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 	
@@ -77,7 +77,7 @@ int vc_get_vhi_name(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -126,7 +126,7 @@ int vc_enter_namespace(uint32_t id, void *data)
 	if (!vx_check(0, VX_ADMIN))
 		return -ENOSYS;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -158,11 +158,9 @@ out_put:
 int vc_cleanup_namespace(uint32_t id, void *data)
 {
 	down_write(&current->namespace->sem);
-	// spin_lock(&dcache_lock);
 	spin_lock(&vfsmount_lock);
 	umount_unused(current->namespace->root, current->fs);
 	spin_unlock(&vfsmount_lock);
-	// spin_unlock(&dcache_lock);
 	up_write(&current->namespace->sem);
 	return 0;
 }

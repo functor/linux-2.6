@@ -126,7 +126,7 @@ int vc_set_sched(uint32_t xid, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 	
-	vxi = find_vx_info(xid);
+	vxi = locate_vx_info(xid);
 	if (!vxi)
 		return -EINVAL;
 
