@@ -81,7 +81,7 @@ mem_class_put(ckrm_mem_res_t *cls)
 		} else {
 			name = cls->core->name;
 		}
-		printk(KERN_DEBUG "freeing memclass %p of <core:%s>\n", cls, name);
+		printk("freeing memclass %p of <core:%s>\n", cls, name);
 
 		// BUG_ON(ckrm_memclass_valid(cls));
 		// kfree(cls);
