@@ -506,7 +506,7 @@ rbce_class_deletecb(const char *classname, void *classobj, int classtype)
 		}
 		notify_class_action(cls, 0);
 		cls->classobj = NULL;
-		list_for_each_entry(pos, &rules_list[cls->classtype], link) {
+		list_for_each_entry(pos, &rules_list[classtype], link) {
 			rule = (struct rbce_rule *)pos;
 			if (rule->target_class) {
 				if (!strcmp
