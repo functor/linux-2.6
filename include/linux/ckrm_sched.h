@@ -117,7 +117,7 @@ struct ckrm_usage {
 	unsigned long samples[USAGE_WINDOW_SIZE]; //record usages 
 	unsigned long sample_pointer; //pointer for the sliding window
 	unsigned long long last_ns; //ns for last sample
-	unsigned long long last_sample_jiffies; //in number of jiffies
+	long long last_sample_jiffies; //in number of jiffies
 };
 
 /*
@@ -169,19 +169,27 @@ static inline void ckrm_sample_usage(struct ckrm_cpu_class* clsptr)
 	unsigned long long cur_sample;
 	int duration = jiffies - usage->last_sample_jiffies;
 
-//	printk("\tckrm_sample_usage %ld %p: %lld\n",jiffies, clsptr,cur_sample);
+	//jiffies wasn't start from 0
+	//so it need to be properly handled
+	if (unlikely(!usage->last_sample_jiffies)) 
+		usage->last_sample_jiffies = jiffies;
 
+	//called too frequenctly
 	if (duration < USAGE_SAMPLE_FREQ)
 		return;
 
-	cur_sample = clsptr->stat.total_ns - usage->last_ns; 
-	//scale it based on the sample duration
-	cur_sample *= ((duration << 10)/USAGE_SAMPLE_FREQ);
-	cur_sample >>= 10;
-
-	usage->samples[usage->sample_pointer++] = cur_sample;
 	usage->last_sample_jiffies = jiffies;
+
+	cur_sample = clsptr->stat.total_ns - usage->last_ns; 
 	usage->last_ns = clsptr->stat.total_ns;
+
+	//scale it based on the sample duration
+	cur_sample *= ((USAGE_SAMPLE_FREQ<< 15)/duration);
+	cur_sample >>= 15;
+	usage->samples[usage->sample_pointer] = cur_sample;
+	//	printk("sample = %llu jiffies=%lu \n",cur_sample, jiffies);
+
+	usage->sample_pointer ++;
 	if (usage->sample_pointer >= USAGE_WINDOW_SIZE)
 		usage->sample_pointer = 0;
 }
@@ -208,7 +216,7 @@ static inline int get_ckrm_usage(struct ckrm_cpu_class* clsptr, int duration)
         total *= 100;
         do_div(total,nr_samples);
         do_div(total,NS_PER_SAMPLE);
-        // printk("percent %lld\n",total);
+	do_div(total,cpus_weight(cpu_online_map));
         return total;
 }
 
@@ -258,8 +266,32 @@ void adjust_local_weight(void);
 #define get_cls_local_stat(cls,cpu) (&(cls)->stat.local_stats[cpu])
 #define get_rq_local_stat(lrq,cpu) (get_cls_local_stat((lrq)->cpu_class,cpu))
 
-#define CLASS_QUANTIZER 22	//shift from ns to increase class bonus
-#define PRIORITY_QUANTIZER 0	//controls how much a high prio task can borrow
+/********************************************************************
+ * Parameters that determine how quickly CVT's progress and how
+ * priority can impact a LRQ's runqueue position. See also
+ * get_effective_prio(). These parameters need to adjusted
+ * in accordance to the following example and understanding.
+ * 
+ * CLASS_QUANTIZER:
+ * 
+ * A class with 5% share, can execute 50M nsecs / per sec ~ 2^28.
+ * It's share will be set to 512 = 2^9. The globl CLASSQUEUE_SIZE is set to 2^7.
+ * With CLASS_QUANTIZER=16, the local_cvt of this class will increase
+ * by 2^28/2^9 = 2^19 = 512K.
+ * Setting CLASS_QUANTIZER to 16, 2^(19-16) = 8 slots / per second.
+ * A class with 5% shares, will cover 80 slots / per second.
+ *
+ * PRIORITY_QUANTIZER:
+ *
+ * How much can top priorities of class impact slot bonus.
+ * There are 40 nice priorities. "2" will allow upto 10 slots improvement
+ * in the RQ thus for 50% class it can perform ~1sec starvation.
+ *
+ *******************************************************************/
+
+#define CLASS_QUANTIZER 16 	//shift from ns to increase class bonus
+#define PRIORITY_QUANTIZER 2	//controls how much a high prio task can borrow
+
 #define CKRM_SHARE_ACCURACY 10
 #define NSEC_PER_MS 1000000
 #define NSEC_PER_JIFFIES (NSEC_PER_SEC/HZ)
@@ -504,15 +536,16 @@ void ckrm_load_sample(ckrm_load_t* ckrm_load,int cpu);
 long pid_get_pressure(ckrm_load_t* ckrm_load, int local_group);
 #define rq_ckrm_load(rq) (&((rq)->ckrm_load))
 
-static inline void ckrm_sched_tick(int j,int this_cpu,struct ckrm_load_struct* ckrm_load)
+static inline void ckrm_sched_tick(unsigned long j,int this_cpu,struct ckrm_load_struct* ckrm_load)
 {
 	read_lock(&class_list_lock);
-
+       
 #ifdef CONFIG_SMP
 	ckrm_load_sample(ckrm_load,this_cpu);
 #endif
 
-	if (!(j % CVT_UPDATE_TICK)) {
+	if (! (j % CVT_UPDATE_TICK)) {
+		//		printk("ckrm_sched j=%lu\n",j);
 		classqueue_update_base(get_cpu_classqueue(this_cpu));
 		update_class_cputime(this_cpu);
 	}

@@ -884,14 +884,11 @@ static int thread_exit = 0;
 
 static int ckrm_cpu_monitord(void *nothing)
 {
-	wait_queue_head_t wait;
-
-	init_waitqueue_head(&wait);
-
 	daemonize("ckrm_cpu_ctrld");
 	for (;;) {
 		/*sleep for sometime before next try*/
-		interruptible_sleep_on_timeout(&wait, CPU_MONITOR_INTERVAL);
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(CPU_MONITOR_INTERVAL);
 		ckrm_cpu_monitor();
 		if (thread_exit) {
 			break;
@@ -913,15 +910,14 @@ void ckrm_start_monitor(void)
 
 void ckrm_kill_monitor(void)
 {
-	wait_queue_head_t wait;
 	int interval = HZ;
-	init_waitqueue_head(&wait);
 
 	printk("killing process %d\n", cpu_monitor_pid);
 	if (cpu_monitor_pid > 0) {
 		thread_exit = 1;
 		while (thread_exit != 2) {
-			interruptible_sleep_on_timeout(&wait, interval);
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(CPU_MONITOR_INTERVAL);
 		}
 	}
 }

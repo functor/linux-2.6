@@ -162,10 +162,11 @@
  *  otherwise compare task priority 
  */
 #define TASK_PREEMPTS_CURR(p, rq) \
-	(((p)->cpu_class != (rq)->curr->cpu_class) && ((rq)->curr != (rq)->idle))? class_preempts_curr((p),(rq)->curr) : ((p)->prio < (rq)->curr->prio)
-
+	( ((p)->cpu_class != (rq)->curr->cpu_class) \
+	  && ((rq)->curr != (rq)->idle) && ((p) != (rq)->idle )) \
+	  ? class_preempts_curr((p),(rq)->curr)  \
+	  : ((p)->prio < (rq)->curr->prio)
 #else
-
 #define TASK_PREEMPTS_CURR(p, rq) \
 	((p)->prio < (rq)->curr->prio)
 #endif
@@ -2568,7 +2569,7 @@ void scheduler_tick(int user_ticks, int sys_ticks)
 			cpustat->idle += sys_ticks;
 		if (wake_priority_sleeper(rq))
 			goto out;
-//will break	ckrm_sched_tick(jiffies,cpu,rq_ckrm_load(rq));
+		ckrm_sched_tick(jiffies,cpu,rq_ckrm_load(rq));
 		rebalance_tick(cpu, rq, IDLE);
 		return;
 	}
