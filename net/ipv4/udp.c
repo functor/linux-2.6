@@ -1237,8 +1237,11 @@ int udp_rcv(struct sk_buff *skb)
 	if (udp_checksum_complete(skb))
 		goto csum_error;
 
-	UDP_INC_STATS_BH(UDP_MIB_NOPORTS);
-	icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
+	/* VNET: Suppress ICMP Unreachable if the port was bound to a (presumably raw) socket */
+	if (!skb->sk) {
+		UDP_INC_STATS_BH(UDP_MIB_NOPORTS);
+		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
+	}
 
 	/*
 	 * Hmm.  We got an UDP packet to a port to which we
