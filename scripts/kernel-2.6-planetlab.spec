@@ -89,7 +89,8 @@ AutoReqProv: no
 #
 # List the packages used during the kernel build
 #
-BuildPreReq: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
+BuildPreReq: patch >= 2.5.4, bash >= 2.03, sh-utils, tar
+#BuildPreReq: module-init-tools
 BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg
 #BuildPreReq: kernel-utils >= 2.4-12.1.139
 # temporary req since modutils changed output format 
