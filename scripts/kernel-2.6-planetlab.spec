@@ -88,6 +88,7 @@ BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg, kernel-utils
 #BuildPreReq: modutils >= 2.4.26-14
 BuildRequires: gcc >= 2.96-98, binutils >= 2.12, redhat-rpm-config
 BuildConflicts: rhbuildsys(DiskFree) < 500Mb
+BuildArchitectures: i686
 
 
 
@@ -196,13 +197,13 @@ BuildKernel() {
 
     # Pick the right config file for the kernel we're building
     if [ -n "$1" ] ; then
-	Config=kernel-%{kversion}-i686-$1-planetlab.config
+	Config=kernel-%{kversion}-%{_target_cpu}-$1-planetlab.config
     else
-	Config=kernel-%{kversion}-i686-planetlab.config
+	Config=kernel-%{kversion}-%{_target_cpu}-planetlab.config
     fi
 
     KernelVer=%{version}-%{release}$1
-    echo BUILDING A KERNEL FOR $1 i686...
+    echo BUILDING A KERNEL FOR $1 %{_target_cpu}...
 
     # make sure EXTRAVERSION says what we want it to say
     perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = -%{release}$1/" Makefile
