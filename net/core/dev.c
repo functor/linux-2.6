@@ -3174,6 +3174,9 @@ EXPORT_SYMBOL(dev_get_by_name);
 EXPORT_SYMBOL(dev_ioctl);
 EXPORT_SYMBOL(dev_open);
 EXPORT_SYMBOL(dev_queue_xmit);
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+EXPORT_SYMBOL(dev_queue_xmit_nit);
+#endif
 EXPORT_SYMBOL(dev_remove_pack);
 EXPORT_SYMBOL(dev_set_allmulti);
 EXPORT_SYMBOL(dev_set_promiscuity);
