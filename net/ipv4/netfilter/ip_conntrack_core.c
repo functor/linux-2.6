@@ -670,8 +670,10 @@ init_conntrack(const struct ip_conntrack_tuple *tuple,
 	conntrack->ct_general.destroy = destroy_conntrack;
 	conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple = *tuple;
 	conntrack->tuplehash[IP_CT_DIR_ORIGINAL].ctrack = conntrack;
+	conntrack->xid[IP_CT_DIR_ORIGINAL] = -1;
 	conntrack->tuplehash[IP_CT_DIR_REPLY].tuple = repl_tuple;
 	conntrack->tuplehash[IP_CT_DIR_REPLY].ctrack = conntrack;
+	conntrack->xid[IP_CT_DIR_REPLY] = -1;
 	for (i=0; i < IP_CT_NUMBER; i++)
 		conntrack->infos[i].master = &conntrack->ct_general;
 
