@@ -10,7 +10,6 @@
  */
 #include <linux/config.h>
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/errno.h>
 #include <linux/types.h>
 #include <linux/socket.h>
@@ -1452,7 +1451,8 @@ static int __init nr_proto_init(void)
 
 module_init(nr_proto_init);
 
-module_param(nr_ndevs, int, 0);
+
+MODULE_PARM(nr_ndevs, "i");
 MODULE_PARM_DESC(nr_ndevs, "number of NET/ROM devices");
 
 MODULE_AUTHOR("Jonathan Naylor G4KLX <g4klx@g4klx.demon.co.uk>");

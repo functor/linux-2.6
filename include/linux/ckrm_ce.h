@@ -9,13 +9,10 @@
  *
  * Latest version, more details at http://ckrm.sf.net
  * 
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2.1 of the GNU Lesser General Public License
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it would be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  */
 
@@ -32,7 +29,7 @@
 
 #ifdef CONFIG_CKRM
 
-#include <linux/ckrm.h>		// getting the event names
+#include "ckrm.h"		// getting the event names
 
 /* Action parameters identifying the cause of a task<->class notify callback 
  * these can perculate up to user daemon consuming records send by the 

@@ -79,7 +79,6 @@
 #include <linux/seq_file.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
-#include <linux/vs_base.h>
 
 struct hlist_head raw_v4_htable[RAWV4_HTABLE_SIZE];
 rwlock_t raw_v4_lock = RW_LOCK_UNLOCKED;
@@ -103,6 +102,38 @@ static void raw_v4_unhash(struct sock *sk)
 	write_unlock_bh(&raw_v4_lock);
 }
 
+
+/*
+	Check if an address is in the list
+*/
+static inline int raw_addr_in_list (
+	u32 rcv_saddr1,
+	u32 rcv_saddr2,
+	u32 loc_addr,
+	struct nx_info *nx_info)
+{
+	int ret = 0;
+	if (loc_addr != 0 &&
+		(rcv_saddr1 == loc_addr || rcv_saddr2 == loc_addr))
+		ret = 1;
+	else if (rcv_saddr1 == 0) {
+		/* Accept any address or only the one in the list */
+		if (nx_info == NULL)
+			ret = 1;
+		else {
+			int n = nx_info->nbipv4;
+			int i;
+			for (i=0; i<n; i++) {
+				if (nx_info->ipv4[i] == loc_addr) {
+					ret = 1;
+					break;
+				}
+			}
+		}
+	}
+	return ret;
+}
+
 struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
 			     unsigned long raddr, unsigned long laddr,
 			     int dif)
@@ -114,7 +145,8 @@ struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
 
 		if (inet->num == num 					&&
 		    !(inet->daddr && inet->daddr != raddr) 		&&
-		    !(inet->rcv_saddr && inet->rcv_saddr != laddr)	&&
+		    raw_addr_in_list(inet->rcv_saddr, inet->rcv_saddr2,
+			laddr, sk->sk_nx_info) &&
 		    !(sk->sk_bound_dev_if && sk->sk_bound_dev_if != dif))
 			goto found; /* gotcha */
 	}
@@ -320,7 +352,7 @@ error_fault:
 	err = -EFAULT;
 	kfree_skb(skb);
 error:
-	IP_INC_STATS(IPSTATS_MIB_OUTDISCARDS);
+	IP_INC_STATS(OutDiscards);
 	return err; 
 }
 
@@ -430,6 +462,13 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				    .proto = inet->hdrincl ? IPPROTO_RAW :
 					    		     sk->sk_protocol,
 				  };
+		
+		if (sk->sk_nx_info) {
+			err = ip_find_src(sk->sk_nx_info, &rt, &fl);
+
+			if (err)
+				goto done;
+		}
 		err = ip_route_output_flow(&rt, &fl, sk, !(msg->msg_flags&MSG_DONTWAIT));
 	}
 	if (err)
@@ -556,11 +595,9 @@ int raw_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	}
 	if (inet->cmsg_flags)
 		ip_cmsg_recv(msg, skb);
-	if (flags & MSG_TRUNC)
-		copied = skb->len;
 done:
 	skb_free_datagram(sk, skb);
-out:	return err ? err : copied;
+out:	return err ? : copied;
 }
 
 static int raw_init(struct sock *sk)
@@ -660,7 +697,7 @@ static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 struct proto raw_prot = {
 	.name =		"RAW",
 	.close =	raw_close,
-	.connect =	ip4_datagram_connect,
+	.connect =	udp_connect,
 	.disconnect =	udp_disconnect,
 	.ioctl =	raw_ioctl,
 	.init =		raw_init,

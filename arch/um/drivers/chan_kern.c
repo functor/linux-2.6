@@ -106,8 +106,6 @@ int generic_read(int fd, char *c_out, void *unused)
 	return(n);
 }
 
-/* XXX Trivial wrapper around os_write_file */
-
 int generic_write(int fd, const char *buf, int n, void *unused)
 {
 	return(os_write_file(fd, buf, n));

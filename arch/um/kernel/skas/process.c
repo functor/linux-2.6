@@ -57,7 +57,8 @@ static void handle_segv(int pid)
 	segv(fault.addr, 0, FAULT_WRITE(fault.is_write), 1, NULL);
 }
 
-static void handle_trap(int pid, union uml_pt_regs *regs)
+/*To use the same value of using_sysemu as the caller, ask it that value (in local_using_sysemu)*/
+static void handle_trap(int pid, union uml_pt_regs *regs, int local_using_sysemu)
 {
 	int err, syscall_nr, status;
 
@@ -68,20 +69,23 @@ static void handle_trap(int pid, union uml_pt_regs *regs)
 		return;
 	}
 
-	err = ptrace(PTRACE_POKEUSER, pid, PT_SYSCALL_NR_OFFSET, __NR_getpid);
-	if(err < 0)
-	        panic("handle_trap - nullifying syscall failed errno = %d\n", 
-		      errno);
+	if (!local_using_sysemu)
+	{
+		err = ptrace(PTRACE_POKEUSER, pid, PT_SYSCALL_NR_OFFSET, __NR_getpid);
+		if(err < 0)
+			panic("handle_trap - nullifying syscall failed errno = %d\n",
+			      errno);
 
-	err = ptrace(PTRACE_SYSCALL, pid, 0, 0);
-	if(err < 0)
-	        panic("handle_trap - continuing to end of syscall failed, "
-		      "errno = %d\n", errno);
+		err = ptrace(PTRACE_SYSCALL, pid, 0, 0);
+		if(err < 0)
+			panic("handle_trap - continuing to end of syscall failed, "
+			      "errno = %d\n", errno);
 
-	CATCH_EINTR(err = waitpid(pid, &status, WUNTRACED));
-	if((err < 0) || !WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP))
-		panic("handle_trap - failed to wait at end of syscall, "
-		      "errno = %d, status = %d\n", errno, status);
+		err = waitpid(pid, &status, WUNTRACED);
+		if((err < 0) || !WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP))
+			panic("handle_trap - failed to wait at end of syscall, "
+			      "errno = %d, status = %d\n", errno, status);
+	}
 
 	handle_syscall(regs);
 }
@@ -117,7 +121,7 @@ void start_userspace(int cpu)
 		panic("start_userspace : clone failed, errno = %d", errno);
 
 	do {
-		CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
+		n = waitpid(pid, &status, WUNTRACED);
 		if(n < 0)
 			panic("start_userspace : wait failed, errno = %d", 
 			      errno);
@@ -136,15 +140,21 @@ void start_userspace(int cpu)
 void userspace(union uml_pt_regs *regs)
 {
 	int err, status, op, pid = userspace_pid[0];
+	int local_using_sysemu; /*To prevent races if using_sysemu changes under us.*/
 
 	restore_registers(regs);
 		
-	err = ptrace(PTRACE_SYSCALL, pid, 0, 0);
+	local_using_sysemu = get_using_sysemu();
+
+	if (local_using_sysemu)
+		err = ptrace(PTRACE_SYSEMU, pid, 0, 0);
+	else
+		err = ptrace(PTRACE_SYSCALL, pid, 0, 0);
 	if(err)
 		panic("userspace - PTRACE_SYSCALL failed, errno = %d\n", 
 		       errno);
 	while(1){
-		CATCH_EINTR(err = waitpid(pid, &status, WUNTRACED));
+		err = waitpid(pid, &status, WUNTRACED);
 		if(err < 0)
 			panic("userspace - waitpid failed, errno = %d\n", 
 			      errno);
@@ -158,7 +168,7 @@ void userspace(union uml_pt_regs *regs)
 				handle_segv(pid);
 				break;
 			case SIGTRAP:
-			        handle_trap(pid, regs);
+			        handle_trap(pid, regs, local_using_sysemu);
 				break;
 			case SIGIO:
 			case SIGVTALRM:
@@ -177,8 +187,16 @@ void userspace(union uml_pt_regs *regs)
 
 		restore_registers(regs);
 
-		op = singlestepping_skas() ? PTRACE_SINGLESTEP : 
-			PTRACE_SYSCALL;
+		/*Now we ended the syscall, so re-read local_using_sysemu.*/
+		local_using_sysemu = get_using_sysemu();
+
+		if (local_using_sysemu)
+			op = singlestepping_skas() ? PTRACE_SINGLESTEP :
+				PTRACE_SYSEMU;
+		else
+			op = singlestepping_skas() ? PTRACE_SINGLESTEP :
+				PTRACE_SYSCALL;
+
 		err = ptrace(op, pid, 0, 0);
 		if(err)
 			panic("userspace - PTRACE_SYSCALL failed, "
@@ -190,7 +208,7 @@ void new_thread(void *stack, void **switch_buf_ptr, void **fork_buf_ptr,
 		void (*handler)(int))
 {
 	unsigned long flags;
-	sigjmp_buf switch_buf, fork_buf;
+	jmp_buf switch_buf, fork_buf;
 
 	*switch_buf_ptr = &switch_buf;
 	*fork_buf_ptr = &fork_buf;
@@ -214,7 +232,7 @@ void new_thread(void *stack, void **switch_buf_ptr, void **fork_buf_ptr,
 
 void thread_wait(void *sw, void *fb)
 {
-	sigjmp_buf buf, **switch_buf = sw, *fork_buf;
+	jmp_buf buf, **switch_buf = sw, *fork_buf;
 
 	*switch_buf = &buf;
 	fork_buf = fb;
@@ -276,23 +294,23 @@ void restore_registers(union uml_pt_regs *regs)
 
 void switch_threads(void *me, void *next)
 {
-	sigjmp_buf my_buf, **me_ptr = me, *next_buf = next;
+	jmp_buf my_buf, **me_ptr = me, *next_buf = next;
 	
 	*me_ptr = &my_buf;
 	if(sigsetjmp(my_buf, 1) == 0)
 		siglongjmp(*next_buf, 1);
 }
 
-static sigjmp_buf initial_jmpbuf;
+static jmp_buf initial_jmpbuf;
 
 /* XXX Make these percpu */
 static void (*cb_proc)(void *arg);
 static void *cb_arg;
-static sigjmp_buf *cb_back;
+static jmp_buf *cb_back;
 
 int start_idle_thread(void *stack, void *switch_buf_ptr, void **fork_buf_ptr)
 {
-	sigjmp_buf **switch_buf = switch_buf_ptr;
+	jmp_buf **switch_buf = switch_buf_ptr;
 	int n;
 
 	*fork_buf_ptr = &initial_jmpbuf;
@@ -328,7 +346,7 @@ void remove_sigstack(void)
 
 void initial_thread_cb_skas(void (*proc)(void *), void *arg)
 {
-	sigjmp_buf here;
+	jmp_buf here;
 
 	cb_proc = proc;
 	cb_arg = arg;
@@ -354,6 +372,28 @@ void reboot_skas(void)
 {
 	block_signals();
 	siglongjmp(initial_jmpbuf, 4);
+}
+
+int new_mm(int from)
+{
+	struct proc_mm_op copy;
+	int n, fd = os_open_file("/proc/mm", 
+				 of_cloexec(of_write(OPENFLAGS())), 0);
+
+	if(fd < 0)
+		return(fd);
+
+	if(from != -1){
+		copy = ((struct proc_mm_op) { .op 	= MM_COPY_SEGMENTS,
+					      .u 	= 
+					      { .copy_segments	= from } } );
+		n = os_write_file(fd, &copy, sizeof(copy));
+		if(n != sizeof(copy)) 
+			printk("new_mm : /proc/mm copy_segments failed, "
+			       "err = %d\n", -n);
+	}
+
+	return(fd);
 }
 
 void switch_mm_skas(int mm_fd)

@@ -13,7 +13,7 @@
  *
  * This code is GPL
  *
- * $Id: cfi_cmdset_0002.c,v 1.106 2004/08/09 14:02:32 dwmw2 Exp $
+ * $Id: cfi_cmdset_0002.c,v 1.103 2004/07/14 16:24:03 dwmw2 Exp $
  *
  */
 
@@ -1415,12 +1415,13 @@ int cfi_amdstd_erase_varsize(struct mtd_info *mtd, struct erase_info *instr)
 	ofs = instr->addr;
 	len = instr->len;
 
-	ret = cfi_amdstd_varsize_frob(mtd, do_erase_oneblock, ofs, len, NULL);
+	ret = cfi_amdstd_varsize_frob(mtd, do_erase_oneblock, ofs, len, 0);
 	if (ret)
 		return ret;
 
 	instr->state = MTD_ERASE_DONE;
-	mtd_erase_callback(instr);
+	if (instr->callback)
+		instr->callback(instr);
 	
 	return 0;
 }
@@ -1443,7 +1444,8 @@ static int cfi_amdstd_erase_chip(struct mtd_info *mtd, struct erase_info *instr)
 		return ret;
 
 	instr->state = MTD_ERASE_DONE;
-	mtd_erase_callback(instr);
+	if (instr->callback)
+		instr->callback(instr);
 	
 	return 0;
 }
@@ -1679,7 +1681,7 @@ static int cfi_amdstd_lock_varsize(struct mtd_info *mtd,
 	int ret;
 
 	DEBUG(MTD_DEBUG_LEVEL3,
-	      "%s: lock status before, ofs=0x%08llx, len=0x%08zX\n",
+	      "%s: lock status before, ofs=0x%08llx, len=0x%08X\n",
 	      __func__, ofs, len);
 	debug_dump_locks(mtd, do_printlockstatus_oneblock, ofs, len, 0);
 
@@ -1703,7 +1705,7 @@ static int cfi_amdstd_unlock_varsize(struct mtd_info *mtd,
 	int ret;
 
 	DEBUG(MTD_DEBUG_LEVEL3,
-	      "%s: lock status before, ofs=0x%08llx, len=0x%08zX\n",
+	      "%s: lock status before, ofs=0x%08llx, len=0x%08X\n",
 	      __func__, ofs, len);
 	debug_dump_locks(mtd, do_printlockstatus_oneblock, ofs, len, 0);
 

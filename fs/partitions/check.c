@@ -395,7 +395,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 	if (disk->fops->revalidate_disk)
 		disk->fops->revalidate_disk(disk);
 	if (!get_capacity(disk) || !(state = check_partition(disk, bdev)))
-		return -EIO;
+		return res;
 	for (p = 1; p < state->limit; p++) {
 		sector_t size = state->parts[p].size;
 		sector_t from = state->parts[p].from;
@@ -408,7 +408,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 #endif
 	}
 	kfree(state);
-	return 0;
+	return res;
 }
 
 unsigned char *read_dev_sector(struct block_device *bdev, sector_t n, Sector *p)

@@ -108,12 +108,12 @@
 #include <linux/kallsyms.h>
 #include <linux/netpoll.h>
 #include <linux/rcupdate.h>
+#include <linux/vserver/network.h>
 #ifdef CONFIG_NET_RADIO
 #include <linux/wireless.h>		/* Note : will define WIRELESS_EXT */
 #include <net/iw_handler.h>
 #endif	/* CONFIG_NET_RADIO */
 #include <asm/current.h>
-#include <linux/vs_network.h>
 
 /* This define, if set, will randomly drop a packet when congestion
  * is more than moderate.  It helps fairness in the multi-interface
@@ -217,6 +217,11 @@ static struct notifier_block *netdev_chain;
  */
 DEFINE_PER_CPU(struct softnet_data, softnet_data) = { 0, };
 
+#ifdef CONFIG_NET_FASTROUTE
+int netdev_fastroute;
+int netdev_fastroute_obstacles;
+#endif
+
 #ifdef CONFIG_SYSFS
 extern int netdev_sysfs_init(void);
 extern int netdev_register_sysfs(struct net_device *);
@@ -276,6 +281,12 @@ void dev_add_pack(struct packet_type *pt)
 	int hash;
 
 	spin_lock_bh(&ptype_lock);
+#ifdef CONFIG_NET_FASTROUTE
+	if (pt->af_packet_priv) {
+		netdev_fastroute_obstacles++;
+		dev_clear_fastroute(pt->dev);
+	}
+#endif
 	if (pt->type == htons(ETH_P_ALL)) {
 		netdev_nit++;
 		list_add_rcu(&pt->list, &ptype_all);
@@ -318,6 +329,10 @@ void __dev_remove_pack(struct packet_type *pt)
 
 	list_for_each_entry(pt1, head, list) {
 		if (pt == pt1) {
+#ifdef CONFIG_NET_FASTROUTE
+			if (pt->af_packet_priv)
+				netdev_fastroute_obstacles--;
+#endif
 			list_del_rcu(&pt->list);
 			goto out;
 		}
@@ -959,6 +974,39 @@ int dev_open(struct net_device *dev)
 	return ret;
 }
 
+#ifdef CONFIG_NET_FASTROUTE
+
+static void dev_do_clear_fastroute(struct net_device *dev)
+{
+	if (dev->accept_fastpath) {
+		int i;
+
+		for (i = 0; i <= NETDEV_FASTROUTE_HMASK; i++) {
+			struct dst_entry *dst;
+
+			write_lock_irq(&dev->fastpath_lock);
+			dst = dev->fastpath[i];
+			dev->fastpath[i] = NULL;
+			write_unlock_irq(&dev->fastpath_lock);
+
+			dst_release(dst);
+		}
+	}
+}
+
+void dev_clear_fastroute(struct net_device *dev)
+{
+	if (dev) {
+		dev_do_clear_fastroute(dev);
+	} else {
+		read_lock(&dev_base_lock);
+		for (dev = dev_base; dev; dev = dev->next)
+			dev_do_clear_fastroute(dev);
+		read_unlock(&dev_base_lock);
+	}
+}
+#endif
+
 /**
  *	dev_close - shutdown an interface.
  *	@dev: device to shutdown
@@ -1011,6 +1059,9 @@ int dev_close(struct net_device *dev)
 	 */
 
 	dev->flags &= ~IFF_UP;
+#ifdef CONFIG_NET_FASTROUTE
+	dev_clear_fastroute(dev);
+#endif
 
 	/*
 	 * Tell people we are down
@@ -1270,13 +1321,6 @@ int __skb_linearize(struct sk_buff *skb, int gfp_mask)
 		dev->xmit_lock_owner = -1;		\
 		spin_unlock_bh(&dev->xmit_lock);	\
 	}						\
-}
-
-static inline void qdisc_run(struct net_device *dev)
-{
-	while (!netif_queue_stopped(dev) &&
-	       qdisc_restart(dev)<0)
-		/* NOTHING */;
 }
 
 /**
@@ -1779,6 +1823,13 @@ int netif_receive_skb(struct sk_buff *skb)
 
 	__get_cpu_var(netdev_rx_stat).total++;
 
+#ifdef CONFIG_NET_FASTROUTE
+	if (skb->pkt_type == PACKET_FASTROUTE) {
+		__get_cpu_var(netdev_rx_stat).fastroute_deferred_out++;
+		return dev_queue_xmit(skb);
+	}
+#endif
+
 	skb->h.raw = skb->nh.raw = skb->data;
 	skb->mac_len = skb->nh.raw - skb->mac.raw;
 
@@ -2045,6 +2096,8 @@ static int dev_ifconf(char __user *arg)
 
 	total = 0;
 	for (dev = dev_base; dev; dev = dev->next) {
+		if (!dev_in_nx_info(dev, current->nx_info))
+			continue;
 		for (i = 0; i < NPROTO; i++) {
 			if (gifconf_list[i]) {
 				int done;
@@ -2105,6 +2158,10 @@ void dev_seq_stop(struct seq_file *seq, void *v)
 
 static void dev_seq_printf_stats(struct seq_file *seq, struct net_device *dev)
 {
+	struct nx_info *nxi = current->nx_info;
+
+	if (!dev_in_nx_info(dev, nxi))
+		return;
 	if (dev->get_stats) {
 		struct net_device_stats *stats = dev->get_stats(dev);
 
@@ -2318,6 +2375,13 @@ void dev_set_promiscuity(struct net_device *dev, int inc)
 	if ((dev->promiscuity += inc) == 0)
 		dev->flags &= ~IFF_PROMISC;
 	if (dev->flags ^ old_flags) {
+#ifdef CONFIG_NET_FASTROUTE
+		if (dev->flags & IFF_PROMISC) {
+			netdev_fastroute_obstacles++;
+			dev_clear_fastroute(dev);
+		} else
+			netdev_fastroute_obstacles--;
+#endif
 		dev_mc_upload(dev);
 		printk(KERN_INFO "device %s %s promiscuous mode\n",
 		       dev->name, (dev->flags & IFF_PROMISC) ? "entered" :
@@ -2870,6 +2934,10 @@ int register_netdevice(struct net_device *dev)
 	spin_lock_init(&dev->ingress_lock);
 #endif
 
+#ifdef CONFIG_NET_FASTROUTE
+	dev->fastpath_lock = RW_LOCK_UNLOCKED;
+#endif
+
 	ret = alloc_divert_blk(dev);
 	if (ret)
 		goto out;
@@ -2975,6 +3043,7 @@ static void netdev_wait_allrefs(struct net_device *dev)
 	while (atomic_read(&dev->refcnt) != 0) {
 		if (time_after(jiffies, rebroadcast_time + 1 * HZ)) {
 			rtnl_shlock();
+			rtnl_exlock();
 
 			/* Rebroadcast unregister notification */
 			notifier_call_chain(&netdev_chain,
@@ -2991,6 +3060,7 @@ static void netdev_wait_allrefs(struct net_device *dev)
 				linkwatch_run_queue();
 			}
 
+			rtnl_exunlock();
 			rtnl_shunlock();
 
 			rebroadcast_time = jiffies;
@@ -3188,6 +3258,10 @@ int unregister_netdevice(struct net_device *dev)
 
 	synchronize_net();
 
+#ifdef CONFIG_NET_FASTROUTE
+	dev_clear_fastroute(dev);
+#endif
+
 	/* Shutdown queueing discipline. */
 	dev_shutdown(dev);
 
@@ -3361,8 +3435,6 @@ EXPORT_SYMBOL(dev_queue_xmit_nit);
 EXPORT_SYMBOL(dev_remove_pack);
 EXPORT_SYMBOL(dev_set_allmulti);
 EXPORT_SYMBOL(dev_set_promiscuity);
-EXPORT_SYMBOL(dev_change_flags);
-EXPORT_SYMBOL(dev_set_mtu);
 EXPORT_SYMBOL(free_netdev);
 EXPORT_SYMBOL(netdev_boot_setup_check);
 EXPORT_SYMBOL(netdev_set_master);
@@ -3380,7 +3452,10 @@ EXPORT_SYMBOL(unregister_netdevice_notifier);
 #if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
 EXPORT_SYMBOL(br_handle_frame_hook);
 #endif
-
+/* for 801q VLAN support */
+#if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
+EXPORT_SYMBOL(dev_change_flags);
+#endif
 #ifdef CONFIG_KMOD
 EXPORT_SYMBOL(dev_load);
 #endif
@@ -3389,6 +3464,10 @@ EXPORT_SYMBOL(netdev_dropping);
 EXPORT_SYMBOL(netdev_fc_xoff);
 EXPORT_SYMBOL(netdev_register_fc);
 EXPORT_SYMBOL(netdev_unregister_fc);
+#endif
+#ifdef CONFIG_NET_FASTROUTE
+EXPORT_SYMBOL(netdev_fastroute);
+EXPORT_SYMBOL(netdev_fastroute_obstacles);
 #endif
 
 #ifdef CONFIG_NET_CLS_ACT

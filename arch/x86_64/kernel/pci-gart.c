@@ -70,8 +70,6 @@ int iommu_fullflush = 1;
 static spinlock_t iommu_bitmap_lock = SPIN_LOCK_UNLOCKED;
 static unsigned long *iommu_gart_bitmap; /* guarded by iommu_bitmap_lock */
 
-static u32 gart_unmapped_entry; 
-
 #define GPTE_VALID    1
 #define GPTE_COHERENT 2
 #define GPTE_ENCODE(x) \
@@ -149,6 +147,8 @@ static void free_iommu(unsigned long offset, int size)
 static void flush_gart(struct pci_dev *dev)
 { 
 	unsigned long flags;
+	int bus = dev ? dev->bus->number : -1;
+	cpumask_t bus_cpumask = pcibus_to_cpumask(bus);
 	int flushed = 0;
 	int i;
 
@@ -157,6 +157,8 @@ static void flush_gart(struct pci_dev *dev)
 		for (i = 0; i < MAX_NB; i++) {
 			u32 w;
 			if (!northbridges[i]) 
+				continue;
+			if (bus >= 0 && !(cpu_isset(i, bus_cpumask)))
 				continue;
 			pci_write_config_dword(northbridges[i], 0x9c, 
 					       northbridge_flush_word[i] | 1); 
@@ -167,7 +169,7 @@ static void flush_gart(struct pci_dev *dev)
 			flushed++;
 		} 
 		if (!flushed) 
-			printk("nothing to flush?\n");
+			printk("nothing to flush? %d\n", bus);
 		need_flush = 0;
 	} 
 	spin_unlock_irqrestore(&iommu_bitmap_lock, flags);
@@ -477,11 +479,6 @@ int pci_map_sg(struct pci_dev *dev, struct scatterlist *sg, int nents, int dir)
 	unsigned long pages = 0;
 	int need = 0, nextneed;
 
-#ifdef CONFIG_SWIOTLB
-	if (swiotlb)
-		return swiotlb_map_sg(&dev->dev,sg,nents,dir);
-#endif
-
 	BUG_ON(dir == PCI_DMA_NONE);
 	if (nents == 0) 
 		return 0;
@@ -565,7 +562,7 @@ void pci_unmap_single(struct pci_dev *hwdev, dma_addr_t dma_addr,
 	iommu_page = (dma_addr - iommu_bus_base)>>PAGE_SHIFT;	
 	npages = to_pages(dma_addr, size);
 	for (i = 0; i < npages; i++) { 
-		iommu_gatt_base[iommu_page + i] = gart_unmapped_entry; 
+		iommu_gatt_base[iommu_page + i] = 0; 
 		CLEAR_LEAK(iommu_page + i);
 	}
 	free_iommu(iommu_page, npages);
@@ -732,8 +729,7 @@ static int __init pci_iommu_init(void)
 	unsigned long aper_size;
 	unsigned long iommu_start;
 	struct pci_dev *dev;
-	unsigned long scratch;
-	long i;
+		
 
 #ifndef CONFIG_AGP_AMD64
 	no_agp = 1; 
@@ -770,7 +766,7 @@ static int __init pci_iommu_init(void)
 			return -1;
 		}
 	} 
-
+	
 	aper_size = info.aper_size * 1024 * 1024;	
 	iommu_size = check_iommu_size(info.aper_base, aper_size); 
 	iommu_pages = iommu_size >> PAGE_SHIFT; 
@@ -818,19 +814,6 @@ static int __init pci_iommu_init(void)
 	 * devices. 
 	 */
 	clear_kernel_mapping((unsigned long)__va(iommu_bus_base), iommu_size);
-
-	/* 
-	 * Try to workaround a bug (thanks to BenH) 
-	 * Set unmapped entries to a scratch page instead of 0. 
-	 * Any prefetches that hit unmapped entries won't get an bus abort
-	 * then.
-	 */
-	scratch = get_zeroed_page(GFP_KERNEL); 
-	if (!scratch) 
-		panic("Cannot allocate iommu scratch page");
-	gart_unmapped_entry = GPTE_ENCODE(__pa(scratch));
-	for (i = EMERGENCY_PAGES; i < iommu_pages; i++) 
-		iommu_gatt_base[i] = gart_unmapped_entry;
 
 	for_all_nb(dev) {
 		u32 flag; 

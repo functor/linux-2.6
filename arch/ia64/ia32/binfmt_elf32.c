@@ -14,7 +14,6 @@
 #include <linux/types.h>
 #include <linux/mm.h>
 #include <linux/security.h>
-#include <linux/vs_memory.h>
 
 #include <asm/param.h>
 #include <asm/signal.h>
@@ -41,8 +40,6 @@ static void elf32_set_personality (void);
 
 #undef SET_PERSONALITY
 #define SET_PERSONALITY(ex, ibcs2)	elf32_set_personality()
-
-#define elf_read_implies_exec(ex, have_pt_gnu_stack)	(!(have_pt_gnu_stack))
 
 /* Ugly but avoids duplication */
 #include "../../../fs/binfmt_elf.c"
@@ -218,6 +215,7 @@ elf32_set_personality (void)
 	set_personality(PER_LINUX32);
 	current->thread.map_base  = IA32_PAGE_OFFSET/3;
 	current->thread.task_size = IA32_PAGE_OFFSET;	/* use what Linux/x86 uses... */
+	current->thread.flags |= IA64_THREAD_XSTACK;	/* data must be executable */
 	set_fs(USER_DS);				/* set addr limit for new TASK_SIZE */
 }
 
