@@ -271,8 +271,9 @@ struct sk_buff {
 #endif
 
 #endif
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	xid_t			xid;			/* VServer context ID */
-
+#endif
 
 	/* These elements must be at the end, see alloc_skb() for details.  */
 	unsigned int		truesize;
