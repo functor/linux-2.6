@@ -76,8 +76,10 @@ static void register_irq_proc (unsigned int irq);
 /*
  * per-CPU IRQ handling stacks
  */
+#ifdef CONFIG_IRQSTACKS
 union irq_ctx *hardirq_ctx[NR_CPUS];
 union irq_ctx *softirq_ctx[NR_CPUS];
+#endif
 
 /*
  * Special irq handlers.
@@ -219,6 +221,9 @@ asmlinkage int handle_IRQ_event(unsigned int irq,
 {
 	int status = 1;	/* Force the "do bottom halves" bit */
 	int retval = 0;
+
+	if (!(action->flags & SA_INTERRUPT))
+		local_irq_enable();
 
 	do {
 		status |= action->flags;
@@ -489,10 +494,12 @@ asmlinkage unsigned int do_IRQ(struct pt_regs regs)
 		u32 *isp;
 		union irq_ctx * curctx;
 		union irq_ctx * irqctx;
-
+#ifdef CONFIG_IRQSTACKS
 		curctx = (union irq_ctx *) current_thread_info();
 		irqctx = hardirq_ctx[smp_processor_id()];
-
+#else
+		curctx = irqctx = (union irq_ctx *)0;
+#endif
 		spin_unlock(&desc->lock);
 
 		/*
@@ -536,7 +543,6 @@ asmlinkage unsigned int do_IRQ(struct pt_regs regs)
 			break;
 		desc->status &= ~IRQ_PENDING;
 	}
-
 	desc->status &= ~IRQ_INPROGRESS;
 
 out:
@@ -1095,6 +1101,7 @@ void init_irq_proc (void)
 }
 
 
+#ifdef CONFIG_IRQSTACKS
 /*
  * These should really be __section__(".bss.page_aligned") as well, but
  * gcc's 3.0 and earlier don't handle that correctly.
@@ -1174,3 +1181,4 @@ asmlinkage void do_softirq(void)
 }
 
 EXPORT_SYMBOL(do_softirq);
+#endif
