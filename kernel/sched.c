@@ -366,9 +366,6 @@ static inline struct task_struct * rq_get_next_task(struct runqueue* rq)
 		array = queue->active;
 		//check switch active/expired queue
 		if (unlikely(!queue->active->nr_active)) {
-			prio_array_t *array;
-		       
-			array = queue->active;
 			queue->active = queue->expired;
 			queue->expired = array;
 			queue->expired_timestamp = 0;
