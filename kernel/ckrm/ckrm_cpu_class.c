@@ -318,7 +318,7 @@ static int ckrm_cpu_set_config(void *my_res, const char *cfgstr)
 
 	if (!cls) 
 		return -EINVAL;
-	printk("ckrm_cpu config='%s'\n",cfgstr);
+	printk(KERN_DEBUG "ckrm_cpu config='%s'\n",cfgstr);
 	return 0;
 }
 	
@@ -349,7 +349,7 @@ int __init init_ckrm_sched_res(void)
 
 	if (resid == -1) { /*not registered */
 		resid = ckrm_register_res_ctlr(clstype,&cpu_rcbs);
-		printk("........init_ckrm_sched_res , resid= %d\n",resid);
+		printk(KERN_DEBUG "........init_ckrm_sched_res , resid= %d\n",resid);
 	}
 	return 0;
 }

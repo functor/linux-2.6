@@ -1,6 +1,26 @@
-/*
- * This file is released under the GPL.
+/* RCFS API for Rule-based Classification Engine (RBCE) and
+ * Consolidated RBCE module code (combined)
+ *
+ * Copyright (C) Hubertus Franke, IBM Corp. 2003
+ *           (C) Chandra Seetharaman, IBM Corp. 2003
+ *           (C) Vivek Kashyap, IBM Corp. 2004 
+ * 
+ * Module for loading of classification policies and providing
+ * a user API for Class-based Kernel Resource Management (CKRM)
+ *
+ * Latest version, more details at http://ckrm.sf.net
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it would be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
  */
+
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/errno.h>
@@ -54,12 +74,6 @@ rbce_write(struct file *file, const char __user * buf,
 	if (*ptr == '\n') {
 		*ptr = '\0';
 	}
-#if 0
-	if (!strcmp(file->f_dentry->d_name.name, "rbce_reclassify")) {
-		pid = simple_strtol(line, NULL, 0);
-		rc = reclassify_pid(pid);
-	} else
-#endif
 	if (!strcmp(file->f_dentry->d_name.name, "rbce_tag")) {
 		pid = simple_strtol(line, &ptr, 0);
 		rc = set_tasktag(pid, ptr + 1);	// expected syntax "pid tag"
@@ -87,8 +101,7 @@ static int rbce_show(struct seq_file *seq, void *offset)
 	char result[256];
 
 	memset(result, 0, 256);
-	if (!strcmp(file->f_dentry->d_name.name, "rbce_reclassify") ||
-	    !strcmp(file->f_dentry->d_name.name, "rbce_tag")) {
+	if (!strcmp(file->f_dentry->d_name.name, "rbce_tag")) {
 		return -EPERM;
 	}
 	if (!strcmp(file->f_dentry->d_name.name, "rbce_state")) {
@@ -117,8 +130,7 @@ static int rbce_close(struct inode *ino, struct file *file)
 {
 	const char *name = file->f_dentry->d_name.name;
 
-	if (strcmp(name, "rbce_reclassify") &&
-	    strcmp(name, "rbce_state") &&
+	if (strcmp(name, "rbce_state") &&
 	    strcmp(name, "rbce_tag") && strcmp(name, "rbce_info")) {
 
 		if (!rule_exists(name)) {
@@ -292,11 +304,9 @@ rbce_create(struct inode *dir, struct dentry *dentry,
 	struct dentry *pd =
 	    list_entry(dir->i_dentry.next, struct dentry, d_alias);
 
-	// Under /ce only "rbce_reclassify", "rbce_state", "rbce_tag" and
-	// "rbce_info" are allowed
+	// Under /ce only "rbce_state", "rbce_tag" and "rbce_info" are allowed
 	if (!strcmp(pd->d_name.name, "ce")) {
-		if (strcmp(dentry->d_name.name, "rbce_reclassify") &&
-		    strcmp(dentry->d_name.name, "rbce_state") &&
+		if (strcmp(dentry->d_name.name, "rbce_state") &&
 		    strcmp(dentry->d_name.name, "rbce_tag") &&
 		    strcmp(dentry->d_name.name, "rbce_info")) {
 			return -EINVAL;
@@ -319,7 +329,7 @@ rbce_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 
 /******************************* Magic files  ********************/
 
-#define RBCE_NR_MAGF 6
+#define RBCE_NR_MAGF 5
 struct rcfs_magf rbce_magf_files[RBCE_NR_MAGF] = {
 	{
 	 .name = "ce",
@@ -338,11 +348,6 @@ struct rcfs_magf rbce_magf_files[RBCE_NR_MAGF] = {
 	 },
 	{
 	 .name = "rbce_state",
-	 .mode = RCFS_DEFAULT_FILE_MODE,
-	 .i_fop = &rbce_file_operations,
-	 },
-	{
-	 .name = "rbce_reclassify",
 	 .mode = RCFS_DEFAULT_FILE_MODE,
 	 .i_fop = &rbce_file_operations,
 	 },
@@ -417,7 +422,7 @@ static struct inode_operations rbce_dir_inode_operations = {
 static void rbce_put_super(struct super_block *sb)
 {
 	module_put(THIS_MODULE);
-	printk("rbce_put_super called\n");
+	printk(KERN_DEBUG "rbce_put_super called\n");
 }
 
 static struct super_operations rbce_ops = {

@@ -453,7 +453,7 @@ static int numtasks_set_config(void *my_res, const char *cfgstr)
 
 	if (!res)
 		return -EINVAL;
-	printk("numtasks config='%s'\n", cfgstr);
+	printk(KERN_DEBUG "numtasks config='%s'\n", cfgstr);
 	return 0;
 }
 
@@ -505,7 +505,7 @@ int __init init_ckrm_numtasks_res(void)
 
 	if (resid == -1) {
 		resid = ckrm_register_res_ctlr(clstype, &numtasks_rcbs);
-		printk("........init_ckrm_numtasks_res -> %d\n", resid);
+		printk(KERN_DEBUG "........init_ckrm_numtasks_res -> %d\n", resid);
 		if (resid != -1) {
 			ckrm_numtasks_register(numtasks_get_ref_local,
 					       numtasks_put_ref_local);
