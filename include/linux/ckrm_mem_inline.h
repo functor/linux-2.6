@@ -203,56 +203,60 @@ static inline void
 ckrm_mem_inc_active(struct page *page)
 {
 	ckrm_mem_res_t *cls = page_class(page), *curcls;
-	if (likely(cls != NULL)) {
-		BUG_ON(test_bit(PG_ckrm_account, &page->flags));
-		if (unlikely(cls != (curcls = GET_MEM_CLASS(current)))) {
-			cls = curcls;
-			ckrm_change_page_class(page, cls);
-		}
-		cls->nr_active[page_zonenum(page)]++;
-		incr_use_count(cls, 0);
-		set_bit(PG_ckrm_account, &page->flags);
+	if (unlikely(!cls)) {
+		return;
 	}
+	BUG_ON(test_bit(PG_ckrm_account, &page->flags));
+	if (unlikely(cls != (curcls = GET_MEM_CLASS(current)))) {
+		cls = curcls;
+		ckrm_change_page_class(page, cls);
+	}
+	cls->nr_active[page_zonenum(page)]++;
+	incr_use_count(cls, 0);
+	set_bit(PG_ckrm_account, &page->flags);
 }
 
 static inline void
 ckrm_mem_dec_active(struct page *page)
 {
 	ckrm_mem_res_t *cls = page_class(page);
-	if (likely(cls != NULL)) {
-		BUG_ON(!test_bit(PG_ckrm_account, &page->flags));
-		cls->nr_active[page_zonenum(page)]--;
-		decr_use_count(cls, 0);
-		clear_bit(PG_ckrm_account, &page->flags);
+	if (unlikely(!cls)) {
+		return;
 	}
+	BUG_ON(!test_bit(PG_ckrm_account, &page->flags));
+	cls->nr_active[page_zonenum(page)]--;
+	decr_use_count(cls, 0);
+	clear_bit(PG_ckrm_account, &page->flags);
 }
 
 static inline void
 ckrm_mem_inc_inactive(struct page *page)
 {
 	ckrm_mem_res_t *cls = page_class(page), *curcls;
-	if (likely(cls != NULL)) {
-		BUG_ON(test_bit(PG_ckrm_account, &page->flags));
-		if (unlikely(cls != (curcls = GET_MEM_CLASS(current)))) {
-			cls = curcls;
-			ckrm_change_page_class(page, cls);
-		}
-		cls->nr_inactive[page_zonenum(page)]++;
-		incr_use_count(cls, 0);
-		set_bit(PG_ckrm_account, &page->flags);
+	if (unlikely(!cls)) {
+		return;
 	}
+	BUG_ON(test_bit(PG_ckrm_account, &page->flags));
+	if (unlikely(cls != (curcls = GET_MEM_CLASS(current)))) {
+		cls = curcls;
+		ckrm_change_page_class(page, cls);
+	}
+	cls->nr_inactive[page_zonenum(page)]++;
+	incr_use_count(cls, 0);
+	set_bit(PG_ckrm_account, &page->flags);
 }
 
 static inline void
 ckrm_mem_dec_inactive(struct page *page)
 {
 	ckrm_mem_res_t *cls = page_class(page);
-	if (likely(cls != NULL)) {
-		BUG_ON(!test_bit(PG_ckrm_account, &page->flags));
-		cls->nr_inactive[page_zonenum(page)]--;
-		decr_use_count(cls, 0);
-		clear_bit(PG_ckrm_account, &page->flags);
+	if (unlikely(!cls)) {
+		return;
 	}
+	BUG_ON(!test_bit(PG_ckrm_account, &page->flags));
+	cls->nr_inactive[page_zonenum(page)]--;
+	decr_use_count(cls, 0);
+	clear_bit(PG_ckrm_account, &page->flags);
 }
 
 static inline int
