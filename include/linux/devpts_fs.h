@@ -30,7 +30,6 @@ static inline void devpts_pty_kill(int number) { }
 
 #endif
 
-#define DEVPTS_SUPER_MAGIC 0x1cd1
-
+#define DEVPTS_SUPER_MAGIC	0x1cd1
 
 #endif /* _LINUX_DEVPTS_FS_H */

@@ -31,6 +31,7 @@
 #include <linux/pagemap.h>
 #include <linux/smp_lock.h>
 #include <linux/namei.h>
+#include <linux/vserver/xid.h>
 
 #include "delegation.h"
 
@@ -759,6 +760,7 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 	inode = nfs_fhget(dentry->d_sb, &fhandle, &fattr);
 	if (!inode)
 		goto out_unlock;
+	vx_propagate_xid(nd, inode);
 no_entry:
 	error = 0;
 	d_add(dentry, inode);

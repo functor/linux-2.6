@@ -80,7 +80,7 @@ struct fsxattr {
 #define XFS_XFLAG_PROJINHERIT	0x00000200	/* create with parents projid */
 #define XFS_XFLAG_NOSYMLINKS	0x00000400	/* disallow symlink creation */
 #define XFS_XFLAG_BARRIER	0x00004000	/* chroot() barrier */
-#define XFS_XFLAG_IUNLINK	0x00008000	/* Immutable unlink */
+#define XFS_XFLAG_IUNLINK	0x00008000	/* immutable unlink */
 #define XFS_XFLAG_HASATTR	0x80000000	/* no DIFLAG for this	*/
 
 /*

@@ -11,7 +11,7 @@ config	VSERVER_LEGACY
 	  This enables the legacy API used in vs1.xx, which allows
 	  to use older tools (for migration purposes).
 
-config	PROC_SECURE
+config	VSERVER_PROC_SECURE
 	bool	"Enable Proc Security"
 	depends on PROC_FS
 	default y
@@ -25,9 +25,19 @@ config	VSERVER_HARDCPU
 	help
 	  Activate the Hard CPU Limits
 
+config	VSERVER_HARDCPU_IDLE
+	bool	"Limit the IDLE task"
+	depends on VSERVER_HARDCPU
+	default n
+	help
+	  Limit the idle slices, so the the next context
+	  will be scheduled as soon as possible.
+	  might improve interactivity/latency but
+	  increases scheduling overhead.
+
 choice
 	prompt	"Persistent Inode Context Tagging"
-	default	INOXID_GID24
+	default	INOXID_UGID24
 	help
 	  This adds persistent context information to filesystems
 	  mounted with the tagxid option. Tagging is a requirement
@@ -39,26 +49,31 @@ config	INOXID_NONE
 	help
 	  no context information is store for inodes
 
+config	INOXID_UID16
+	bool	"UID16/GID32"
+	help
+	  reduces UID to 16 bit, but leaves GID at 32 bit.
+
 config	INOXID_GID16
 	bool	"UID32/GID16"
 	help
 	  reduces GID to 16 bit, but leaves UID at 32 bit.
 
-config	INOXID_GID24
+config	INOXID_UGID24
 	bool	"UID24/GID24"
 	help
 	  uses the upper 8bit from UID and GID for XID tagging
 	  which leaves 24bit for UID/GID each, which should be
 	  more than sufficient for normal use.
 
-config	INOXID_GID32
+config	INOXID_INTERN
 	bool	"UID32/GID32"
 	help
 	  this uses otherwise reserved inode fields in the on
 	  disk representation, which limits the use to a few
 	  filesystems (currently ext2 and ext3)
 
-config	INOXID_MAGIC
+config	INOXID_RUNTIME
 	bool	"Runtime"
 	depends on EXPERIMENTAL
 	help
@@ -67,6 +82,33 @@ config	INOXID_MAGIC
 	  funny results for mixed access.
 
 endchoice
+
+config	VSERVER_DEBUG
+	bool	"Compile Debugging Code"
+	default n
+	help
+	  Set this to yes if you want to be able to activate
+	  debugging output at runtime. It adds a probably small
+	  overhead (~ ??%) to all vserver related functions and
+	  increases the kernel size by about 20k.
+
+config	VSERVER_HISTORY
+	bool	"Compile History Tracing"
+	depends on VSERVER_DEBUG
+	default n
+	help
+	  Set this to yes if you want to record the history of
+	  linux-vserver activities, so they can be replayed on
+	  a kernel panic (oops)
+
+config	VSERVER_HISTORY_SIZE
+	int "Per CPU History Size (32-65536)"
+	depends on VSERVER_HISTORY
+	range 32 65536
+	default 64
+	help
+	  This allows you to specify the number of entries in
+	  the per CPU history buffer.
 
 endmenu
 

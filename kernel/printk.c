@@ -539,6 +539,8 @@ asmlinkage int printk(const char *fmt, ...)
 	return r;
 }
 
+static volatile int printk_cpu = -1;
+
 asmlinkage int vprintk(const char *fmt, va_list args)
 {
 	unsigned long flags;
@@ -547,11 +549,12 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	static char printk_buf[1024];
 	static int log_level_unknown = 1;
 
-	if (unlikely(oops_in_progress))
+	if (unlikely(oops_in_progress && printk_cpu == smp_processor_id()))
 		zap_locks();
 
 	/* This stops the holder of console_sem just where we want him */
 	spin_lock_irqsave(&logbuf_lock, flags);
+	printk_cpu = smp_processor_id();
 
 	/* Emit the output into the temporary buffer */
 	printed_len = vscnprintf(printk_buf, sizeof(printk_buf), fmt, args);

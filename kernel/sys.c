@@ -25,10 +25,8 @@
 #include <linux/dcookies.h>
 #include <linux/suspend.h>
 #include <linux/ckrm.h>
-#include <linux/vs_base.h>
-#include <linux/vs_cvirt.h>
 #include <linux/tty.h>
-
+#include <linux/vs_cvirt.h>
 #include <linux/compat.h>
 #include <linux/syscalls.h>
 

@@ -35,6 +35,7 @@
 #include <linux/vs_limit.h>
 #include <linux/ckrm_mem_inline.h>
 #include <linux/nodemask.h>
+#include <linux/vs_limit.h>
 
 #include <asm/tlbflush.h>
 

@@ -2,16 +2,8 @@
 #define _VX_VS_CVIRT_H
 
 
-// #define VX_DEBUG
-
 #include "vserver/cvirt.h"
-#include "vs_base.h"
-
-#if defined(VX_DEBUG)
-#define vxdprintk(x...) printk("vxd: " x)
-#else
-#define vxdprintk(x...)
-#endif
+#include "vserver/debug.h"
 
 
 /* utsname virtualization */
@@ -29,42 +21,88 @@ static inline struct new_utsname *vx_new_utsname(void)
 /* pid faking stuff */
 
 
-#define vx_map_tgid(v,p) \
-	__vx_map_tgid((v), (p), __FILE__, __LINE__)
+#define vx_info_map_pid(v,p) \
+	__vx_info_map_pid((v), (p), __FUNC__, __FILE__, __LINE__)
+#define vx_info_map_tgid(v,p)  vx_info_map_pid(v,p)
+#define vx_map_pid(p)	vx_info_map_pid(current->vx_info, p)
+#define vx_map_tgid(p) vx_map_pid(p)
 
-static inline int __vx_map_tgid(struct vx_info *vxi, int pid,
-	char *file, int line)
+static inline int __vx_info_map_pid(struct vx_info *vxi, int pid,
+	const char *func, const char *file, int line)
 {
-	if (vxi && __vx_flags(vxi->vx_flags, VXF_INFO_INIT, 0)) {
-		vxdprintk("vx_map_tgid: %p/%llx: %d -> %d in %s:%d\n",
-			vxi, vxi->vx_flags, pid,
-			(pid == vxi->vx_initpid)?1:pid,
-			file, line);
+	if (vx_info_flags(vxi, VXF_INFO_INIT, 0)) {
+		vxfprintk(VXD_CBIT(cvirt, 2),
+			"vx_map_tgid: %p/%llx: %d -> %d",
+			vxi, (long long)vxi->vx_flags, pid,
+			(pid && pid == vxi->vx_initpid)?1:pid,
+			func, file, line);
+		if (pid == 0)
+			return 0;
 		if (pid == vxi->vx_initpid)
 			return 1;
 	}
 	return pid;
 }
 
-#define vx_rmap_tgid(v,p) \
-	__vx_rmap_tgid((v), (p), __FILE__, __LINE__)
+#define vx_info_rmap_pid(v,p) \
+	__vx_info_rmap_pid((v), (p), __FUNC__, __FILE__, __LINE__)
+#define vx_rmap_pid(p)	vx_info_rmap_pid(current->vx_info, p)
+#define vx_rmap_tgid(p) vx_rmap_pid(p)
 
-static inline int __vx_rmap_tgid(struct vx_info *vxi, int pid,
-	char *file, int line)
+static inline int __vx_info_rmap_pid(struct vx_info *vxi, int pid,
+	const char *func, const char *file, int line)
 {
-	if (vxi && __vx_flags(vxi->vx_flags, VXF_INFO_INIT, 0)) {
-		vxdprintk("vx_rmap_tgid: %p/%llx: %d -> %d in %s:%d\n",
-			vxi, vxi->vx_flags, pid,
+	if (vx_info_flags(vxi, VXF_INFO_INIT, 0)) {
+		vxfprintk(VXD_CBIT(cvirt, 2),
+			"vx_rmap_tgid: %p/%llx: %d -> %d",
+			vxi, (long long)vxi->vx_flags, pid,
 			(pid == 1)?vxi->vx_initpid:pid,
-			file, line);
+			func, file, line);
 		if ((pid == 1) && vxi->vx_initpid)
 			return vxi->vx_initpid;
+		if (pid == vxi->vx_initpid)
+			return ~0U;
 	}
 	return pid;
 }
 
-#undef	vxdprintk
-#define vxdprintk(x...)
+
+static inline void vx_activate_task(struct task_struct *p)
+{
+	struct vx_info *vxi;
+
+	if ((vxi = p->vx_info)) {
+		vx_update_load(vxi);
+		atomic_inc(&vxi->cvirt.nr_running);
+	}
+}
+
+static inline void vx_deactivate_task(struct task_struct *p)
+{
+	struct vx_info *vxi;
+
+	if ((vxi = p->vx_info)) {
+		vx_update_load(vxi);
+		atomic_dec(&vxi->cvirt.nr_running);
+	}
+}
+
+static inline void vx_uninterruptible_inc(struct task_struct *p)
+{
+	struct vx_info *vxi;
+
+	if ((vxi = p->vx_info))
+		atomic_inc(&vxi->cvirt.nr_uninterruptible);
+}
+
+static inline void vx_uninterruptible_dec(struct task_struct *p)
+{
+	struct vx_info *vxi;
+
+	if ((vxi = p->vx_info))
+		atomic_dec(&vxi->cvirt.nr_uninterruptible);
+}
+
 
 #else
 #warning duplicate inclusion

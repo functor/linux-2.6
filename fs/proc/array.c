@@ -73,7 +73,6 @@
 #include <linux/highmem.h>
 #include <linux/file.h>
 #include <linux/times.h>
-#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vs_cvirt.h>
@@ -146,8 +145,8 @@ static inline const char * get_task_state(struct task_struct *tsk)
 					    TASK_INTERRUPTIBLE |
 					    TASK_UNINTERRUPTIBLE |
 					    TASK_STOPPED |
-					    TASK_TRACED |
-					    TASK_ONHOLD)) |
+					   TASK_TRACED |
+					   TASK_ONHOLD)) |
 			(tsk->exit_state & (EXIT_ZOMBIE |
 					    EXIT_DEAD));
 	const char **p = &task_state_array[0];
@@ -163,12 +162,12 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 {
 	struct group_info *group_info;
 	int g;
-	pid_t pid, ppid, tppid, tgid;
+	pid_t pid, ptgid, tppid, tgid;
 
 	read_lock(&tasklist_lock);
 	tgid = vx_map_tgid(p->tgid);
 	pid = vx_map_pid(p->pid);
-	ppid = vx_map_pid(p->real_parent->pid);
+	ptgid = vx_map_pid(p->group_leader->real_parent->tgid);
 	tppid = vx_map_pid(p->parent->pid);
 	buffer += sprintf(buffer,
 		"State:\t%s\n"
@@ -181,8 +180,8 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		"Gid:\t%d\t%d\t%d\t%d\n",
 		get_task_state(p),
 		(p->sleep_avg/1024)*100/(1020000000/1024),
-		tgid, pid, (pid > 1) ? ppid : 0,
-		p->pid && p->ptrace ? tppid : 0,
+		tgid, pid, (pid > 1) ? ptgid : 0,
+		pid_alive(p) && p->ptrace ? tppid : 0,
 		p->uid, p->euid, p->suid, p->fsuid,
 		p->gid, p->egid, p->sgid, p->fsgid);
 	read_unlock(&tasklist_lock);
@@ -418,10 +417,11 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 			stime += task->signal->stime;
 		}
 	}
-	if (task_vx_flags(task, VXF_VIRT_UPTIME, 0)) {
-		bias_uptime = task->vx_info->cvirt.bias_uptime.tv_sec * NSEC_PER_SEC
-			+ task->vx_info->cvirt.bias_uptime.tv_nsec;
-	}
+	pid = vx_info_map_pid(task->vx_info, pid_alive(task) ? task->pid : 0);
+	ppid = (!(pid > 1)) ? 0 : vx_info_map_tgid(task->vx_info,
+		task->group_leader->real_parent->tgid);
+	pgid = vx_info_map_pid(task->vx_info, pgid);
+
 	read_unlock(&tasklist_lock);
 
 	if (!whole || num_threads<2) {
@@ -453,8 +453,20 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	/* convert timespec -> nsec*/
 	start_time = (unsigned long long)task->start_time.tv_sec * NSEC_PER_SEC
 				+ task->start_time.tv_nsec;
+
 	/* convert nsec -> ticks */
 	start_time = nsec_to_clock_t(start_time - bias_uptime);
+
+	/* fixup start time for virt uptime */
+	if (vx_flags(VXF_VIRT_UPTIME, 0)) {
+		unsigned long long bias =
+			current->vx_info->cvirt.bias_clock;
+
+		if (start_time > bias)
+			start_time -= bias;
+		else
+			start_time = 0;
+	}
 
 	res = sprintf(buffer,"%d (%s) %c %d %d %d %d %d %lu %lu \
 %lu %lu %lu %lu %lu %ld %ld %ld %ld %d %ld %llu %lu %ld %lu %lu %lu %lu %lu \

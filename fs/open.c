@@ -27,6 +27,9 @@
 #include <linux/vs_dlimit.h>
 #include <linux/vserver/xid.h>
 #include <linux/syscalls.h>
+#include <linux/vs_limit.h>
+#include <linux/vs_dlimit.h>
+#include <linux/vserver/xid.h>
 
 #include <asm/unistd.h>
 

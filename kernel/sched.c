@@ -50,6 +50,9 @@
 #include <asm/tlb.h>
 
 #include <asm/unistd.h>
+#include <linux/vs_context.h>
+#include <linux/vs_cvirt.h>
+#include <linux/vs_sched.h>
 
 #ifdef CONFIG_NUMA
 #define cpu_to_node_mask(cpu) node_to_cpumask(cpu_to_node(cpu))
@@ -261,6 +264,10 @@ struct runqueue {
 
 	task_t *migration_thread;
 	struct list_head migration_queue;
+#endif
+#ifdef CONFIG_VSERVER_HARDCPU
+	struct list_head hold_queue;
+	int idle_tokens;
 #endif
 
 #ifdef CONFIG_VSERVER_HARDCPU
@@ -738,12 +745,10 @@ static int effective_prio(task_t *p)
 	bonus = CURRENT_BONUS(p) - MAX_BONUS / 2;
 
 	prio = p->static_prio - bonus;
-
 #ifdef CONFIG_VSERVER_HARDCPU
 	if (task_vx_flags(p, VXF_SCHED_PRIO, 0))
 		prio += effective_vavavoom(p, MAX_USER_PRIO);
 #endif
-
 	if (prio < MAX_RT_PRIO)
 		prio = MAX_RT_PRIO;
 	if (prio > MAX_PRIO-1)
@@ -904,10 +909,11 @@ static void __deactivate_task(struct task_struct *p, runqueue_t *rq)
 	p->array = NULL;
 }
 
-static void deactivate_task(struct task_struct *p, runqueue_t *rq)
+static inline
+void deactivate_task(struct task_struct *p, runqueue_t *rq)
 {
-	__deactivate_task(p, rq);
 	vx_deactivate_task(p);
+	__deactivate_task(p, rq);
 }
 
 /*
@@ -1244,6 +1250,9 @@ out_activate:
 	 * to be considered on this CPU.)
 	 */
 	activate_task(p, rq, cpu == this_cpu);
+	/* this is to get the accounting behind the load update */
+	if (old_state == TASK_UNINTERRUPTIBLE)
+		vx_uninterruptible_dec(p);
 	if (!sync || cpu != this_cpu) {
 		if (TASK_PREEMPTS_CURR(p, rq))
 			resched_task(rq->curr);
@@ -2886,7 +2895,6 @@ void scheduler_tick(int user_ticks, int sys_ticks)
 	if (rcu_pending(cpu))
 		rcu_check_callbacks(cpu, user_ticks);
 
-
 	if (vxi) {
 		vxi->sched.cpu[cpu].user_ticks += user_ticks;
 		vxi->sched.cpu[cpu].sys_ticks += sys_ticks;
@@ -2911,6 +2919,7 @@ void scheduler_tick(int user_ticks, int sys_ticks)
 
 		if (wake_priority_sleeper(rq))
 			goto out;
+
  		ckrm_sched_tick(jiffies,cpu,rq_ckrm_load(rq));
 
 #ifdef CONFIG_VSERVER_HARDCPU_IDLE
@@ -2955,6 +2964,7 @@ void scheduler_tick(int user_ticks, int sys_ticks)
 		}
 		goto out_unlock;
 	}
+#warning MEF: vx_need_resched incorpates standard kernel code, which it should not.
 	if (vx_need_resched(p)) {
 #ifdef CONFIG_CKRM_CPU_SCHEDULE
 		/* Hubertus ... we can abstract this out */
@@ -3158,11 +3168,11 @@ asmlinkage void __sched schedule(void)
 	prio_array_t *array;
 	unsigned long long now;
 	unsigned long run_time;
-	int cpu;
 #ifdef	CONFIG_VSERVER_HARDCPU
 	struct vx_info *vxi;
 	int maxidle = -HZ;
 #endif
+	int cpu;
 
 	/*
 	 * If crash dump is in progress, this other cpu's
@@ -3172,7 +3182,6 @@ asmlinkage void __sched schedule(void)
 	 */
 	 if (unlikely(dump_oncpu))
 		 goto dump_scheduling_disabled;
-
 
 	/*
 	 * Test if we are atomic.  Since do_exit() needs to call into
@@ -3249,8 +3258,10 @@ need_resched_nonpreemptible:
 				unlikely(signal_pending(prev))))
 			prev->state = TASK_RUNNING;
 		else {
-			if (prev->state == TASK_UNINTERRUPTIBLE)
+			if (prev->state == TASK_UNINTERRUPTIBLE) {
 				rq->nr_uninterruptible++;
+				vx_uninterruptible_inc(prev);
+			}
 			deactivate_task(prev, rq);
 		}
 	}
@@ -3329,6 +3340,26 @@ go_idle:
 	 * versions of the code.
 	 */
 	next = rq_get_next_task(rq);
+
+#ifdef	CONFIG_VSERVER_HARDCPU
+	vxi = next->vx_info;
+	if (vx_info_flags(vxi, VXF_SCHED_PAUSE|VXF_SCHED_HARD, 0)) {
+		int ret = vx_tokens_recalc(vxi);
+
+		if (unlikely(ret <= 0)) {
+			if (ret && (rq->idle_tokens > -ret))
+				rq->idle_tokens = -ret;
+			__deactivate_task(next, rq);
+			recalc_task_prio(next, now);
+			// a new one on hold
+			vx_onhold_inc(vxi);
+			next->state |= TASK_ONHOLD;
+			list_add_tail(&next->run_list, &rq->hold_queue);
+			//printk("··· %8lu hold   %p [%d]\n", jiffies, next, next->prio);
+			goto pick_next;
+		}
+	}
+#endif
 
 #ifdef	CONFIG_VSERVER_HARDCPU
 	vxi = next->vx_info;

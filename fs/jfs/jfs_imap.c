@@ -46,7 +46,6 @@
 #include <linux/pagemap.h>
 #include <linux/quotaops.h>
 #include <linux/vserver/xid.h>
-#include <linux/quotaops.h>
 
 #include "jfs_incore.h"
 #include "jfs_filsys.h"

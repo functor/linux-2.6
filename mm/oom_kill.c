@@ -55,7 +55,7 @@ static unsigned long badness(struct task_struct *p, unsigned long uptime)
 	 * The memory size of the process is the basis for the badness.
 	 */
 	points = p->mm->total_vm;
-	/* add vserver badness ;) */
+	/* FIXME add vserver badness ;) */
 
 	/*
 	 * CPU time is in tens of seconds and run time is in thousands

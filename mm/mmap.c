@@ -1469,10 +1469,9 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 	vma->vm_end = address;
 	// vma->vm_mm->total_vm += grow;
 	vx_vmpages_add(vma->vm_mm, grow);
-	if (vma->vm_flags & VM_LOCKED) {
+	if (vma->vm_flags & VM_LOCKED)
 		// vma->vm_mm->locked_vm += grow;
 		vx_vmlocked_add(vma->vm_mm, grow);
-	}
 	__vm_stat_account(vma->vm_mm, vma->vm_flags, vma->vm_file, grow);
 	anon_vma_unlock(vma);
 	return 0;
@@ -1548,10 +1547,9 @@ int expand_stack(struct vm_area_struct *vma, unsigned long address)
 	vma->vm_pgoff -= grow;
 	// vma->vm_mm->total_vm += grow;
 	vx_vmpages_add(vma->vm_mm, grow);
-	if (vma->vm_flags & VM_LOCKED) {
+	if (vma->vm_flags & VM_LOCKED)
 		// vma->vm_mm->locked_vm += grow;
 		vx_vmlocked_add(vma->vm_mm, grow);
-	}
 	__vm_stat_account(vma->vm_mm, vma->vm_flags, vma->vm_file, grow);
 	anon_vma_unlock(vma);
 	return 0;
@@ -1657,11 +1655,10 @@ static void unmap_vma(struct mm_struct *mm, struct vm_area_struct *area)
 
 	// area->vm_mm->total_vm -= len >> PAGE_SHIFT;
 	vx_vmpages_sub(area->vm_mm, len >> PAGE_SHIFT);
-	
-	if (area->vm_flags & VM_LOCKED) {
+
+	if (area->vm_flags & VM_LOCKED)
 		// area->vm_mm->locked_vm -= len >> PAGE_SHIFT;
 		vx_vmlocked_sub(area->vm_mm, len >> PAGE_SHIFT);
-	}
 	vm_stat_unaccount(area);
 	area->vm_mm->unmap_area(area);
 	remove_vm_struct(area);
@@ -2007,7 +2004,6 @@ void exit_mmap(struct mm_struct *mm)
 	vx_vmpages_sub(mm, mm->total_vm);
 	// mm->locked_vm = 0;
 	vx_vmlocked_sub(mm, mm->locked_vm);
-	arch_flush_exec_range(mm);
 
 	spin_unlock(&mm->page_table_lock);
 

@@ -16,7 +16,6 @@
 #include <linux/quotaops.h>
 #include <linux/sched.h>
 #include <linux/buffer_head.h>
-#include <linux/vs_base.h>
 #include <linux/vs_dlimit.h>
 
 /*

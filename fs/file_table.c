@@ -88,7 +88,7 @@ static int old_max;
 			/* f->f_version: 0 */
 			INIT_LIST_HEAD(&f->f_list);
 			// set_vx_info(&f->f_vx_info, current->vx_info);
-			f->f_xid = current->xid;
+			f->f_xid = vx_current_xid();
 			vx_files_inc(f);
 			return f;
 		}

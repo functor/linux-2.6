@@ -48,8 +48,8 @@
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
 #include <linux/ckrm.h>
-#include <linux/vs_memory.h>
 #include <linux/ckrm_mem.h>
+#include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>

@@ -41,7 +41,7 @@
 #include <linux/ckrm_mem.h>
 
 #ifndef AT_LIMIT_SUPPORT
-#warning "ckrm_at_limit disabled due to problems with memory hog tests -- seting ckrm_shrink_list_empty to true"
+#warning "ckrm_at_limit disabled due to problems with memory hog tests -- setting ckrm_shrink_list_empty to true"
 #undef ckrm_shrink_list_empty
 #define ckrm_shrink_list_empty()		(1)
 #endif

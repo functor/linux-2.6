@@ -178,7 +178,7 @@ static int newary (key_t key, int nsems, int semflg)
 
 	sma->sem_perm.mode = (semflg & S_IRWXUGO);
 	sma->sem_perm.key = key;
-	sma->sem_perm.xid = current->xid;
+	sma->sem_perm.xid = vx_current_xid();
 
 	sma->sem_perm.security = NULL;
 	retval = security_sem_alloc(sma);

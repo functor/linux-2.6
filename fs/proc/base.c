@@ -1268,6 +1268,9 @@ static struct file_operations proc_tgid_attr_operations;
 static struct inode_operations proc_tgid_attr_inode_operations;
 #endif
 
+extern int proc_pid_vx_info(struct task_struct *, char *);
+extern int proc_pid_nx_info(struct task_struct *, char *);
+
 /* SMP-safe */
 static struct dentry *proc_pident_lookup(struct inode *dir, 
 					 struct dentry *dentry,
@@ -1530,14 +1533,14 @@ static int proc_self_readlink(struct dentry *dentry, char __user *buffer,
 			      int buflen)
 {
 	char tmp[30];
-	sprintf(tmp, "%d", vx_map_pid(current->tgid));
+	sprintf(tmp, "%d", vx_map_tgid(current->tgid));
 	return vfs_readlink(dentry,buffer,buflen,tmp);
 }
 
 static int proc_self_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	char tmp[30];
-	sprintf(tmp, "%d", vx_map_pid(current->tgid));
+	sprintf(tmp, "%d", vx_map_tgid(current->tgid));
 	return vfs_follow_link(nd,tmp);
 }	
 

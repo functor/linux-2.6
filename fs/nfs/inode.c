@@ -723,7 +723,7 @@ nfs_fhget(struct super_block *sb, struct nfs_fh *fh, struct nfs_fattr *fattr)
 
 out:
 	return inode;
-/*
+/*	FIXME
 fail_dlim:
 	make_bad_inode(inode);
 	iput(inode);

@@ -18,6 +18,7 @@
 #include <linux/security.h>
 #include <linux/vs_memory.h>
 #include <linux/syscalls.h>
+#include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>

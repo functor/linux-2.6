@@ -440,7 +440,8 @@ unsigned long do_mmap_pgoff(
 
 	tblock->next = current->mm->context.tblock.next;
 	current->mm->context.tblock.next = tblock;
-	current->mm->total_vm += len >> PAGE_SHIFT;
+	// current->mm->total_vm += len >> PAGE_SHIFT;
+	vx_vmpages_add(current->mm, len >> PAGE_SHIFT);
 
 #ifdef DEBUG
 	printk("do_mmap:\n");
@@ -494,7 +495,8 @@ int do_munmap(struct mm_struct * mm, unsigned long addr, size_t len)
 	realalloc -= kobjsize(tblock);
 	askedalloc -= sizeof(struct mm_tblock_struct);
 	kfree(tblock);
-	mm->total_vm -= len >> PAGE_SHIFT;
+	// mm->total_vm -= len >> PAGE_SHIFT;
+	vx_vmpages_sub(mm, len >> PAGE_SHIFT);
 
 #ifdef DEBUG
 	show_process_blocks();
@@ -507,7 +509,8 @@ int do_munmap(struct mm_struct * mm, unsigned long addr, size_t len)
 void exit_mmap(struct mm_struct * mm)
 {
 	struct mm_tblock_struct *tmp;
-	mm->total_vm = 0;
+	// mm->total_vm = 0;
+	vx_vmpages_sub(mm, mm->total_vm);
 
 	if (!mm)
 		return;

@@ -26,6 +26,7 @@
 #include <linux/shm.h>
 #include <linux/vs_cvirt.h>
 #include <linux/compiler.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/branch.h>
 #include <asm/cachectl.h>

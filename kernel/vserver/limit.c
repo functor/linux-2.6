@@ -10,13 +10,30 @@
  */
 
 #include <linux/config.h>
+#include <linux/module.h>
+#include <linux/vs_context.h>
+#include <linux/vs_limit.h>
 #include <linux/vserver/limit.h>
-#include <linux/vserver/context.h>
 #include <linux/vserver/switch.h>
-#include <linux/vinline.h>
+#include <linux/vserver/limit_cmd.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>
+
+
+const char *vlimit_name[NUM_LIMITS] = {
+	[RLIMIT_CPU]		= "CPU",
+	[RLIMIT_RSS]		= "RSS",
+	[RLIMIT_NPROC]		= "NPROC",
+	[RLIMIT_NOFILE]	= "NOFILE",
+	[RLIMIT_MEMLOCK]	= "VML",
+	[RLIMIT_AS]		= "VM",
+	[RLIMIT_LOCKS]		= "LOCKS",
+	[RLIMIT_MSGQUEUE]	= "MSGQ",
+	[VLIMIT_NSOCK]		= "NSOCK",
+};
+
+EXPORT_SYMBOL_GPL(vlimit_name);
 
 
 static int is_valid_rlimit(int id)
@@ -42,7 +59,7 @@ static inline uint64_t vc_get_rlim(struct vx_info *vxi, int id)
 	limit = vxi->limit.rlim[id];
 	if (limit == RLIM_INFINITY)
 		return CRLIM_INFINITY;
-	return limit;	
+	return limit;
 }
 
 int vc_get_rlimit(uint32_t id, void __user *data)
@@ -54,8 +71,8 @@ int vc_get_rlimit(uint32_t id, void __user *data)
 		return -EFAULT;
 	if (!is_valid_rlimit(vc_data.id))
 		return -ENOTSUPP;
-		
-	vxi = find_vx_info(id);
+
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -81,13 +98,12 @@ int vc_set_rlimit(uint32_t id, void __user *data)
 	if (!is_valid_rlimit(vc_data.id))
 		return -ENOTSUPP;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
 	if (vc_data.maximum != CRLIM_KEEP)
 		vxi->limit.rlim[vc_data.id] = vc_data.maximum;
-	printk("setting [%d] = %d\n", vc_data.id, (int)vc_data.maximum);
 	put_vx_info(vxi);
 
 	return 0;
@@ -111,7 +127,7 @@ int vc_get_rlimit_mask(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RESOURCE))
 		return -EPERM;
 	if (copy_to_user(data, &mask, sizeof(mask)))
-                return -EFAULT;
+		return -EFAULT;
 	return 0;
 }
 
@@ -124,25 +140,25 @@ void vx_vsi_meminfo(struct sysinfo *val)
 	v = vxi->limit.rlim[RLIMIT_RSS];
 	if (v != RLIM_INFINITY)
 		val->totalram = min(val->totalram, v);
-	v = atomic_read(&vxi->limit.res[RLIMIT_RSS]);
+	v = atomic_read(&vxi->limit.rcur[RLIMIT_RSS]);
 	val->freeram = (v < val->totalram) ? val->totalram - v : 0;
 	val->bufferram = 0;
-        val->totalhigh = 0;
-        val->freehigh = 0;
+	val->totalhigh = 0;
+	val->freehigh = 0;
 	return;
 }
 
 void vx_vsi_swapinfo(struct sysinfo *val)
 {
 	struct vx_info *vxi = current->vx_info;
-	unsigned long w,v;
+	unsigned long v, w;
 
 	v = vxi->limit.rlim[RLIMIT_RSS];
 	w = vxi->limit.rlim[RLIMIT_AS];
 	if (w != RLIM_INFINITY)
 		val->totalswap = min(val->totalswap, w -
 		((v != RLIM_INFINITY) ? v : 0));
-	w = atomic_read(&vxi->limit.res[RLIMIT_AS]);
+	w = atomic_read(&vxi->limit.rcur[RLIMIT_AS]);
 	val->freeswap = (w < val->totalswap) ? val->totalswap - w : 0;
 	return;
 }

@@ -18,11 +18,19 @@
 #include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/proc_fs.h>
-#include <linux/vserver.h>
+#include <linux/sched.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
+#include <linux/vs_cvirt.h>
+
+#include <linux/vserver/switch.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 
+#include "cvirt_proc.h"
+#include "limit_proc.h"
+#include "sched_proc.h"
 
 static struct proc_dir_entry *proc_virtual;
 
@@ -43,7 +51,7 @@ enum vid_directory_inos {
 	PROC_NID_STATUS,
 };
 
-#define	PROC_VID_MASK	0x60
+#define PROC_VID_MASK	0x60
 
 
 /* first the actual feeds */
@@ -66,7 +74,7 @@ int proc_xid_info (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = find_vx_info(vid);
+	vxi = locate_vx_info(vid);
 	if (!vxi)
 		return 0;
 	length = sprintf(buffer,
@@ -86,19 +94,21 @@ int proc_xid_status (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = find_vx_info(vid);
+	vxi = locate_vx_info(vid);
 	if (!vxi)
 		return 0;
 	length = sprintf(buffer,
-		"RefC:\t%d\n"		
+		"UseCnt:\t%d\n"
+		"RefCnt:\t%d\n"
 		"Flags:\t%016llx\n"
 		"BCaps:\t%016llx\n"
 		"CCaps:\t%016llx\n"
-		"Ticks:\t%d\n"		
-		,atomic_read(&vxi->vx_refcount)
-		,vxi->vx_flags
-		,vxi->vx_bcaps
-		,vxi->vx_ccaps
+		"Ticks:\t%d\n"
+		,atomic_read(&vxi->vx_usecnt)
+		,atomic_read(&vxi->vx_refcnt)
+		,(unsigned long long)vxi->vx_flags
+		,(unsigned long long)vxi->vx_bcaps
+		,(unsigned long long)vxi->vx_ccaps
 		,atomic_read(&vxi->limit.ticks)
 		);
 	put_vx_info(vxi);
@@ -110,7 +120,7 @@ int proc_xid_limit (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = find_vx_info(vid);
+	vxi = locate_vx_info(vid);
 	if (!vxi)
 		return 0;
 	length = vx_info_proc_limit(&vxi->limit, buffer);
@@ -123,7 +133,7 @@ int proc_xid_sched (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = find_vx_info(vid);
+	vxi = locate_vx_info(vid);
 	if (!vxi)
 		return 0;
 	length = vx_info_proc_sched(&vxi->sched, buffer);
@@ -136,9 +146,10 @@ int proc_xid_cvirt (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = find_vx_info(vid);
+	vxi = locate_vx_info(vid);
 	if (!vxi)
 		return 0;
+	vx_update_load(vxi);
 	length = vx_info_proc_cvirt(&vxi->cvirt, buffer);
 	put_vx_info(vxi);
 	return length;
@@ -149,7 +160,7 @@ int proc_xid_cacct (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = find_vx_info(vid);
+	vxi = locate_vx_info(vid);
 	if (!vxi)
 		return 0;
 	length = vx_info_proc_cacct(&vxi->cacct, buffer);
@@ -169,7 +180,7 @@ static int proc_vnet_info(int vid, char *buffer)
 		);
 }
 
-#define	atoquad(a) \
+#define atoquad(a) \
 	(((a)>>0) & 0xff), (((a)>>8) & 0xff), \
 	(((a)>>16) & 0xff), (((a)>>24) & 0xff)
 
@@ -178,7 +189,7 @@ int proc_nid_info (int vid, char *buffer)
 	struct nx_info *nxi;
 	int length, i;
 
-	nxi = find_nx_info(vid);
+	nxi = locate_nx_info(vid);
 	if (!nxi)
 		return 0;
 	length = sprintf(buffer,
@@ -202,12 +213,14 @@ int proc_nid_status (int vid, char *buffer)
 	struct nx_info *nxi;
 	int length;
 
-	nxi = find_nx_info(vid);
+	nxi = locate_nx_info(vid);
 	if (!nxi)
 		return 0;
 	length = sprintf(buffer,
-		"RefC:\t%d\n"		
-		,atomic_read(&nxi->nx_refcount)
+		"UseCnt:\t%d\n"
+		"RefCnt:\t%d\n"
+		,atomic_read(&nxi->nx_usecnt)
+		,atomic_read(&nxi->nx_refcnt)
 		);
 	put_nx_info(nxi);
 	return length;
@@ -216,11 +229,11 @@ int proc_nid_status (int vid, char *buffer)
 /* here the inode helpers */
 
 
+#define fake_ino(id,nr) (((nr) & 0xFFFF) | \
+			(((id) & 0xFFFF) << 16))
 
-#define fake_ino(id,ino) (((id)<<16)|(ino))
-
-#define	inode_vid(i)	((i)->i_ino >> 16)
-#define	inode_type(i)	((i)->i_ino & 0xFFFF)
+#define inode_vid(i)	(((i)->i_ino >> 16) & 0xFFFF)
+#define inode_type(i)	((i)->i_ino & 0xFFFF)
 
 #define MAX_MULBY10	((~0U-9)/10)
 
@@ -247,18 +260,18 @@ out:
 static int proc_vid_revalidate(struct dentry * dentry, struct nameidata *nd)
 {
 	struct inode * inode = dentry->d_inode;
-	int vid, valid=0;
+	int vid, hashed=0;
 
 	vid = inode_vid(inode);
 	switch (inode_type(inode) & PROC_VID_MASK) {
 		case PROC_XID_INO:
-			valid = vx_info_id_valid(vid);
+			hashed = vx_info_is_hashed(vid);
 			break;
 		case PROC_NID_INO:
-			valid = nx_info_id_valid(vid);
+			hashed = nx_info_is_hashed(vid);
 			break;
-	}	
-	if (valid)
+	}
+	if (hashed)
 		return 1;
 	d_drop(dentry);
 	return 0;
@@ -267,7 +280,7 @@ static int proc_vid_revalidate(struct dentry * dentry, struct nameidata *nd)
 /*
 static int proc_vid_delete_dentry(struct dentry * dentry)
 {
-        return 1;
+	return 1;
 }
 */
 
@@ -320,7 +333,7 @@ static struct file_operations proc_vid_info_file_operations = {
 };
 
 static struct dentry_operations proc_vid_dentry_operations = {
-	d_revalidate:   proc_vid_revalidate,
+	d_revalidate:	proc_vid_revalidate,
 //	d_delete:       proc_vid_delete_dentry,
 };
 
@@ -364,10 +377,10 @@ static struct dentry *proc_vid_lookup(struct inode *dir,
 
 	switch (inode_type(dir)) {
 		case PROC_XID_INO:
-			p = vx_base_stuff;	
+			p = vx_base_stuff;
 			break;
 		case PROC_NID_INO:
-			p = vn_base_stuff;	
+			p = vn_base_stuff;
 			break;
 		default:
 			goto out;
@@ -413,7 +426,7 @@ static struct dentry *proc_vid_lookup(struct inode *dir,
 		case PROC_NID_STATUS:
 			PROC_I(inode)->op.proc_vid_read = proc_nid_status;
 			break;
-		
+
 		default:
 			printk("procfs: impossible type (%d)",p->type);
 			iput(inode);
@@ -424,7 +437,7 @@ static struct dentry *proc_vid_lookup(struct inode *dir,
 	inode->i_fop = &proc_vid_info_file_operations;
 	inode->i_nlink = 1;
 	inode->i_flags|=S_IMMUTABLE;
-	
+
 	dentry->d_op = &proc_vid_dentry_operations;
 	d_add(dentry, inode);
 	error = 0;
@@ -439,7 +452,7 @@ static int proc_vid_readdir(struct file * filp,
 	int i, size;
 	struct inode *inode = filp->f_dentry->d_inode;
 	struct vid_entry *p;
-	
+
 	i = filp->f_pos;
 	switch (i) {
 		case 0:
@@ -461,11 +474,11 @@ static int proc_vid_readdir(struct file * filp,
 			switch (inode_type(inode)) {
 				case PROC_XID_INO:
 					size = sizeof(vx_base_stuff);
-					p = vx_base_stuff + i;	
+					p = vx_base_stuff + i;
 					break;
 				case PROC_NID_INO:
 					size = sizeof(vn_base_stuff);
-					p = vn_base_stuff + i;	
+					p = vn_base_stuff + i;
 					break;
 				default:
 					return 1;
@@ -564,7 +577,7 @@ struct dentry *proc_virtual_lookup(struct inode *dir,
 	xid = atovid(name, len);
 	if (xid < 0)
 		goto out;
-	vxi = find_vx_info(xid);
+	vxi = locate_vx_info(xid);
 	if (!vxi)
 		goto out;
 
@@ -584,7 +597,7 @@ struct dentry *proc_virtual_lookup(struct inode *dir,
 	dentry->d_op = &proc_vid_dentry_operations;
 	d_add(dentry, inode);
 	ret = 0;
-	
+
 out_release:
 	put_vx_info(vxi);
 out:
@@ -634,7 +647,7 @@ struct dentry *proc_vnet_lookup(struct inode *dir,
 	nid = atovid(name, len);
 	if (nid < 0)
 		goto out;
-	nxi = find_nx_info(nid);
+	nxi = locate_nx_info(nid);
 	if (!nxi)
 		goto out;
 
@@ -654,7 +667,7 @@ struct dentry *proc_vnet_lookup(struct inode *dir,
 	dentry->d_op = &proc_vid_dentry_operations;
 	d_add(dentry, inode);
 	ret = 0;
-	
+
 out_release:
 	put_nx_info(nxi);
 out:
@@ -666,27 +679,6 @@ out:
 
 #define PROC_NUMBUF 10
 #define PROC_MAXVIDS 32
-
-
-static int get_xid_list(int index, unsigned int *xids)
-{
-	struct vx_info *p;
-	int nr_xids = 0;
-
-	index--;
-	spin_lock(&vxlist_lock);
-	list_for_each_entry(p, &vx_infos, vx_list) {
-		int xid = p->vx_id;
-
-		if (--index >= 0)
-			continue;
-		xids[nr_xids] = xid;
-		if (++nr_xids >= PROC_MAXVIDS)
-			break;
-	}
-	spin_unlock(&vxlist_lock);
-	return nr_xids;
-}
 
 int proc_virtual_readdir(struct file * filp,
 	void * dirent, filldir_t filldir)
@@ -720,7 +712,7 @@ int proc_virtual_readdir(struct file * filp,
 			filp->f_pos++;
 			/* fall through */
 		case 3:
-			if (current->xid > 1) {
+			if (vx_current_xid() > 1) {
 				ino = fake_ino(1, PROC_XID_INO);
 				if (filldir(dirent, "current", 7,
 					filp->f_pos, ino, DT_LNK) < 0)
@@ -729,12 +721,11 @@ int proc_virtual_readdir(struct file * filp,
 			filp->f_pos++;
 	}
 
-	nr_xids = get_xid_list(nr, xid_array);
-
+	nr_xids = get_xid_list(nr, xid_array, PROC_MAXVIDS);
 	for (i = 0; i < nr_xids; i++) {
 		int xid = xid_array[i];
 		ino_t ino = fake_ino(xid, PROC_XID_INO);
-		unsigned long j = PROC_NUMBUF;
+		unsigned int j = PROC_NUMBUF;
 
 		do buf[--j] = '0' + (xid % 10); while (xid/=10);
 
@@ -756,27 +747,6 @@ static struct inode_operations proc_virtual_dir_inode_operations = {
 	lookup:		proc_virtual_lookup,
 };
 
-
-
-static int get_nid_list(int index, unsigned int *nids)
-{
-	struct nx_info *p;
-	int nr_nids = 0;
-
-	index--;
-	spin_lock(&nxlist_lock);
-	list_for_each_entry(p, &nx_infos, nx_list) {
-		int nid = p->nx_id;
-
-		if (--index >= 0)
-			continue;
-		nids[nr_nids] = nid;
-		if (++nr_nids >= PROC_MAXVIDS)
-			break;
-	}
-	spin_unlock(&nxlist_lock);
-	return nr_nids;
-}
 
 int proc_vnet_readdir(struct file * filp,
 	void * dirent, filldir_t filldir)
@@ -810,7 +780,7 @@ int proc_vnet_readdir(struct file * filp,
 			filp->f_pos++;
 			/* fall through */
 		case 3:
-			if (current->xid > 1) {
+			if (vx_current_xid() > 1) {
 				ino = fake_ino(1, PROC_NID_INO);
 				if (filldir(dirent, "current", 7,
 					filp->f_pos, ino, DT_LNK) < 0)
@@ -819,8 +789,7 @@ int proc_vnet_readdir(struct file * filp,
 			filp->f_pos++;
 	}
 
-	nr_nids = get_nid_list(nr, nid_array);
-
+	nr_nids = get_nid_list(nr, nid_array, PROC_MAXVIDS);
 	for (i = 0; i < nr_nids; i++) {
 		int nid = nid_array[i];
 		ino_t ino = fake_ino(nid, PROC_NID_INO);
@@ -859,7 +828,7 @@ void proc_vx_init(void)
 	}
 	proc_virtual = ent;
 
-	ent = proc_mkdir("vnet", 0);
+	ent = proc_mkdir("virtnet", 0);
 	if (ent) {
 		ent->proc_fops = &proc_vnet_dir_operations;
 		ent->proc_iops = &proc_vnet_dir_inode_operations;
@@ -875,9 +844,22 @@ void proc_vx_init(void)
 
 char *task_vx_info(struct task_struct *p, char *buffer)
 {
-	return buffer + sprintf(buffer,
-		"XID:\t%d\n"
-		,p->xid);
+	struct vx_info *vxi;
+
+	buffer += sprintf (buffer,"XID:\t%d\n", vx_task_xid(p));
+	vxi = task_get_vx_info(p);
+	if (vxi && !vx_flags(VXF_INFO_HIDE, 0)) {
+		buffer += sprintf (buffer,"BCaps:\t%016llx\n"
+			,(unsigned long long)vxi->vx_bcaps);
+		buffer += sprintf (buffer,"CCaps:\t%016llx\n"
+			,(unsigned long long)vxi->vx_ccaps);
+		buffer += sprintf (buffer,"CFlags:\t%016llx\n"
+			,(unsigned long long)vxi->vx_flags);
+		buffer += sprintf (buffer,"CIPid:\t%d\n"
+			,vxi->vx_initpid);
+	}
+	put_vx_info(vxi);
+	return buffer;
 }
 
 int proc_pid_vx_info(struct task_struct *p, char *buffer)
@@ -890,9 +872,25 @@ int proc_pid_vx_info(struct task_struct *p, char *buffer)
 
 char *task_nx_info(struct task_struct *p, char *buffer)
 {
-	return buffer + sprintf(buffer,
-		"NID:\t%d\n"
-		,p->nid);
+	struct nx_info *nxi;
+
+	buffer += sprintf (buffer,"NID:\t%d\n", nx_task_nid(p));
+	nxi = task_get_nx_info(p);
+	if (nxi && !vx_flags(VXF_INFO_HIDE, 0)) {
+		int i;
+
+		for (i=0; i<nxi->nbipv4; i++){
+			buffer += sprintf (buffer,
+				"V4Root[%d]:\t%d.%d.%d.%d/%d.%d.%d.%d\n", i
+				,NIPQUAD(nxi->ipv4[i])
+				,NIPQUAD(nxi->mask[i]));
+		}
+		buffer += sprintf (buffer,
+			"V4Root[bcast]:\t%d.%d.%d.%d\n"
+			,NIPQUAD(nxi->v4_bcast));
+	}
+	put_nx_info(nxi);
+	return buffer;
 }
 
 int proc_pid_nx_info(struct task_struct *p, char *buffer)

@@ -1,15 +1,9 @@
 #ifndef _NX_VS_NETWORK_H
 #define _NX_VS_NETWORK_H
 
-#include <linux/kernel.h>
-#include <linux/rcupdate.h>
-#include <linux/sched.h>
 
 #include "vserver/network.h"
 #include "vserver/debug.h"
-
-
-extern int proc_pid_nx_info(struct task_struct *, char *);
 
 
 #define get_nx_info(i)	__get_nx_info(i,__FILE__,__LINE__)
@@ -25,10 +19,6 @@ static inline struct nx_info *__get_nx_info(struct nx_info *nxi,
 	atomic_inc(&nxi->nx_usecnt);
 	return nxi;
 }
-
-
-#define free_nx_info(i) \
-	call_rcu(&i->nx_rcu, rcu_free_nx_info);
 
 #define put_nx_info(i)	__put_nx_info(i,__FILE__,__LINE__)
 

@@ -32,6 +32,25 @@ static struct xattr_handler *devpts_xattr_handlers[] = {
 	NULL
 };
 
+static int devpts_permission(struct inode *inode, int mask, struct nameidata *nd)
+{
+	int ret = -EACCES;
+
+	if (vx_check(inode->i_xid, VX_IDENT))
+		ret = generic_permission(inode, mask, NULL);
+	return ret;
+}
+
+struct inode_operations devpts_file_inode_operations = {
+#ifdef CONFIG_DEVPTS_FS_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
+	.listxattr	= generic_listxattr,
+	.removexattr	= generic_removexattr,
+#endif
+	.permission	= devpts_permission,
+};
+
 static struct vfsmount *devpts_mnt;
 static struct dentry *devpts_root;
 
@@ -208,26 +227,6 @@ static struct dentry *get_node(int num)
 	return lookup_one_len(s, root, sprintf(s, "%d", num));
 }
 
-#ifdef CONFIG_DEVPTS_FS_XATTR
-static int devpts_permission(struct inode *inode, int mask, struct nameidata *nd)
-{
-	int ret = -EACCES;
-
-	if (vx_check(inode->i_xid, VX_IDENT))
-		ret = generic_permission(inode, mask, NULL);
-	return ret;
-}
-#endif
-
-struct inode_operations devpts_file_inode_operations = {
-#ifdef CONFIG_DEVPTS_FS_XATTR
-	.setxattr	= generic_setxattr,
-	.getxattr	= generic_getxattr,
-	.listxattr	= generic_listxattr,
-	.removexattr	= generic_removexattr,
-	.permission	= devpts_permission,
-#endif
-};
 
 int devpts_pty_new(struct tty_struct *tty)
 {

@@ -330,14 +330,6 @@ config MVIAC3_2
 
 endchoice
 
-config X86_HZ
-       int "Clock Tick Rate"
-       default 1000 if !(M386 || M486 || M586 || M586TSC || M586MMX)	
-       default 100 if (M386 || M486 || M586 || M586TSC || M586MMX)	
-       help
-	  Select the kernel clock tick rate in interrupts per second.
-	  Slower processors should choose 100; everything else 1000.
-
 config X86_GENERIC
        bool "Generic x86 support"
        help
@@ -560,6 +552,14 @@ config X86_IO_APIC
 	bool
 	depends on !SMP && X86_UP_IOAPIC
 	default y
+
+config KERNEL_HZ
+	int "Timer Frequency (100-20000)"
+	range 100 20000
+	default "1000"
+	help
+	  This allows you to specify the frequency at which the
+	  kernel timer interrupt will occur.
 
 config X86_TSC
 	bool

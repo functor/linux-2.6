@@ -60,11 +60,11 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		 *
 		 * This test looks nicer. Thanks to Pauline Middelink
 		 */
-		if (((oldflags & EXT3_IMMUTABLE_FL) ||
-			((flags ^ oldflags) &
-			 (EXT3_APPEND_FL | EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL)))
-		    && !capable(CAP_LINUX_IMMUTABLE)) {
-			return -EPERM;		
+		if ((oldflags & EXT3_IMMUTABLE_FL) ||
+			((flags ^ oldflags) & (EXT3_APPEND_FL |
+			EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL))) {
+			if (!capable(CAP_LINUX_IMMUTABLE))
+				return -EPERM;
 		}
 
 		/*
@@ -157,38 +157,6 @@ flags_err:
 			return ret;
 		}
 #endif
-#if defined(CONFIG_VSERVER_LEGACY) && !defined(CONFIG_INOXID_NONE)
-	case EXT3_IOC_SETXID: {
-		handle_t *handle;
-		struct ext3_iloc iloc;
-		int xid;
-		int err;
-
-		/* fixme: if stealth, return -ENOTTY */
-		if (!capable(CAP_CONTEXT))
-			return -EPERM;
-		if (IS_RDONLY(inode))
-			return -EROFS;
-		if (!(inode->i_sb->s_flags & MS_TAGXID))
-			return -ENOSYS;
-		if (get_user(xid, (int *) arg))
-			return -EFAULT;
-
-		handle = ext3_journal_start(inode, 1);
-		if (IS_ERR(handle))
-			return PTR_ERR(handle);
-		err = ext3_reserve_inode_write(handle, inode, &iloc);
-		if (err)
-			return err;
-
-		inode->i_xid = (xid & 0xFFFF);
-		inode->i_ctime = CURRENT_TIME;
-
-		err = ext3_mark_iloc_dirty(handle, inode, &iloc);
-		ext3_journal_stop(handle);
-		return err;
-	}
-#endif
 	case EXT3_IOC_GETRSVSZ:
 		if (test_opt(inode->i_sb, RESERVATION) && S_ISREG(inode->i_mode)) {
 			rsv_window_size = atomic_read(&ei->i_rsv_window.rsv_goal_size);
@@ -255,6 +223,39 @@ flags_err:
 
 		return err;
 	}
+
+#if defined(CONFIG_VSERVER_LEGACY) && !defined(CONFIG_INOXID_NONE)
+	case EXT3_IOC_SETXID: {
+		handle_t *handle;
+		struct ext3_iloc iloc;
+		int xid;
+		int err;
+
+		/* fixme: if stealth, return -ENOTTY */
+		if (!capable(CAP_CONTEXT))
+			return -EPERM;
+		if (IS_RDONLY(inode))
+			return -EROFS;
+		if (!(inode->i_sb->s_flags & MS_TAGXID))
+			return -ENOSYS;
+		if (get_user(xid, (int *) arg))
+			return -EFAULT;
+
+		handle = ext3_journal_start(inode, 1);
+		if (IS_ERR(handle))
+			return PTR_ERR(handle);
+		err = ext3_reserve_inode_write(handle, inode, &iloc);
+		if (err)
+			return err;
+
+		inode->i_xid = (xid & 0xFFFF);
+		inode->i_ctime = CURRENT_TIME;
+
+		err = ext3_mark_iloc_dirty(handle, inode, &iloc);
+		ext3_journal_stop(handle);
+		return err;
+	}
+#endif
 
 	default:
 		return -ENOTTY;

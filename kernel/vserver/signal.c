@@ -15,7 +15,7 @@
 #include <asm/errno.h>
 #include <asm/uaccess.h>
 
-#include <linux/vinline.h>
+#include <linux/vs_context.h>
 #include <linux/vserver/signal.h>
 
 
@@ -31,14 +31,14 @@ int vc_ctx_kill(uint32_t id, void __user *data)
 		return -ENOSYS;
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
-	
+
 	info.si_signo = vc_data.sig;
 	info.si_errno = 0;
 	info.si_code = SI_USER;
 	info.si_pid = current->pid;
 	info.si_uid = current->uid;
 
-	vxi = find_vx_info(id);
+	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -61,14 +61,14 @@ int vc_ctx_kill(uint32_t id, void __user *data)
 				retval = err;
 		}
 		break;
-		
+
 	default:
-	p = find_task_by_pid(vc_data.pid);
+	p = find_task_by_real_pid(vc_data.pid);
 		if (p) {
 			if (!thread_group_leader(p)) {
 				struct task_struct *tg;
-			
-				tg = find_task_by_pid(p->tgid);
+
+				tg = find_task_by_real_pid(p->tgid);
 				if (tg)
 					p = tg;
 			}
@@ -82,4 +82,45 @@ int vc_ctx_kill(uint32_t id, void __user *data)
 	return retval;
 }
 
+
+static int __wait_exit(struct vx_info *vxi)
+{
+	DECLARE_WAITQUEUE(wait, current);
+	int ret = 0;
+
+	add_wait_queue(&vxi->vx_exit, &wait);
+	set_current_state(TASK_INTERRUPTIBLE);
+
+wait:
+	if (vx_info_state(vxi, VXS_DEFUNCT))
+		goto out;
+	if (signal_pending(current)) {
+		ret = -ERESTARTSYS;
+		goto out;
+	}
+	schedule();
+	goto wait;
+
+out:
+	set_current_state(TASK_RUNNING);
+	remove_wait_queue(&vxi->vx_exit, &wait);
+	return ret;
+}
+
+
+
+int vc_wait_exit(uint32_t id, void __user *data)
+{
+//	struct vcmd_wait_exit_v0 vc_data;
+	struct vx_info *vxi;
+	int ret;
+
+	vxi = locate_vx_info(id);
+	if (!vxi)
+		return -ESRCH;
+
+	ret = __wait_exit(vxi);
+	put_vx_info(vxi);
+	return ret;
+}
 

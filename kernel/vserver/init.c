@@ -11,8 +11,6 @@
 
 #include <linux/config.h>
 #include <linux/errno.h>
-#include <linux/vserver.h>
-// #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
 
@@ -24,7 +22,9 @@ static int __init init_vserver(void)
 {
 	int ret = 0;
 
+#ifdef	CONFIG_VSERVER_DEBUG
 	vserver_register_sysctl();
+#endif
 	return ret;
 }
 
@@ -32,7 +32,9 @@ static int __init init_vserver(void)
 static void __exit exit_vserver(void)
 {
 
+#ifdef	CONFIG_VSERVER_DEBUG
 	vserver_unregister_sysctl();
+#endif
 	return;
 }
 

@@ -39,12 +39,12 @@
 #include <linux/audit.h>
 #include <linux/profile.h>
 #include <linux/rmap.h>
-#include <linux/vs_network.h>
-#include <linux/vs_limit.h>
-#include <linux/vs_memory.h>
 #include <linux/ckrm.h>
 #include <linux/ckrm_tsk.h>
 #include <linux/ckrm_mem_inline.h>
+#include <linux/vs_network.h>
+#include <linux/vs_limit.h>
+#include <linux/vs_memory.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -354,7 +354,6 @@ void fastcall __mmdrop(struct mm_struct *mm)
 	BUG_ON(mm == &init_mm);
 	mm_free_pgd(mm);
 	destroy_context(mm);
-	clr_vx_info(&mm->mm_vx_info);
 #ifdef CONFIG_CKRM_RES_MEM
 	/* class can be null and mm's tasklist can be empty here */
 	if (mm->memclass) {
@@ -362,6 +361,7 @@ void fastcall __mmdrop(struct mm_struct *mm)
 		mm->memclass = NULL;
 	}
 #endif
+	clr_vx_info(&mm->mm_vx_info);
 	free_mm(mm);
 }
 
@@ -851,6 +851,23 @@ static task_t *copy_process(unsigned long clone_flags,
 	if (!p)
 		goto fork_out;
 	p->tux_info = NULL;
+
+	p->vx_info = NULL;
+	set_vx_info(&p->vx_info, current->vx_info);
+	p->nx_info = NULL;
+	set_nx_info(&p->nx_info, current->nx_info);
+
+	/* check vserver memory */
+	if (p->mm && !(clone_flags & CLONE_VM)) {
+		if (vx_vmpages_avail(p->mm, p->mm->total_vm))
+			vx_pages_add(p->mm->mm_vx_info, RLIMIT_AS, p->mm->total_vm);
+		else
+			goto bad_fork_free;
+	}
+	if (p->mm && vx_flags(VXF_FORK_RSS, 0)) {
+		if (!vx_rsspages_avail(p->mm, p->mm->rss))
+			goto bad_fork_cleanup_vm;
+	}
 
 	p->vx_info = NULL;
 	set_vx_info(&p->vx_info, current->vx_info);

@@ -3,21 +3,24 @@
  *
  *  Virtual Server: Syscall Switch
  *
- *  Copyright (C) 2003-2004  Herbert Pötzl
+ *  Copyright (C) 2003-2005  Herbert Pötzl
  *
  *  V0.01  syscall switch
  *  V0.02  added signal to context
  *  V0.03  added rlimit functions
  *  V0.04  added iattr, task/xid functions
+ *  V0.05  added debug/history stuff
  *
  */
 
 #include <linux/config.h>
 #include <linux/linkage.h>
+#include <linux/sched.h>
 #include <asm/errno.h>
 
+#include <linux/vserver/network.h>
 #include <linux/vserver/switch.h>
-#include <linux/vinline.h>
+#include <linux/vserver/debug.h>
 
 
 static inline int
@@ -26,34 +29,50 @@ vc_get_version(uint32_t id)
 	return VCI_VERSION;
 }
 
+#include <linux/vserver/context_cmd.h>
+#include <linux/vserver/cvirt_cmd.h>
+#include <linux/vserver/limit_cmd.h>
+#include <linux/vserver/network_cmd.h>
+#include <linux/vserver/sched_cmd.h>
+#include <linux/vserver/debug_cmd.h>
 
 #include <linux/vserver/legacy.h>
-#include <linux/vserver/context.h>
-#include <linux/vserver/network.h>
 #include <linux/vserver/namespace.h>
-#include <linux/vserver/sched.h>
-#include <linux/vserver/limit.h>
 #include <linux/vserver/inode.h>
 #include <linux/vserver/signal.h>
-
-
-extern unsigned int vx_debug_switch;
+#include <linux/vserver/dlimit.h>
 
 
 extern asmlinkage long
 sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 {
+	vxdprintk(VXD_CBIT(switch, 0),
+		"vc: VCMD_%02d_%d[%d], %d",
+		VC_CATEGORY(cmd), VC_COMMAND(cmd),
+		VC_VERSION(cmd), id);
 
-	if (vx_debug_switch)
-		printk( "vc: VCMD_%02d_%d[%d], %d\n",
-			VC_CATEGORY(cmd), VC_COMMAND(cmd),
-			VC_VERSION(cmd), id);
+#ifdef	CONFIG_VSERVER_LEGACY
+	if (!capable(CAP_CONTEXT) &&
+		/* dirty hack for capremove */
+		!(cmd==VCMD_new_s_context && id==-2))
+		return -EPERM;
+#else
+	if (!capable(CAP_CONTEXT))
+		return -EPERM;
+#endif
 
 	switch (cmd) {
 	case VCMD_get_version:
 		return vc_get_version(id);
 
-#ifdef	CONFIG_VSERVER_LEGACY		
+	case VCMD_dump_history:
+#ifdef	CONFIG_VSERVER_HISTORY
+		return vc_dump_history(id);
+#else
+		return -ENOSYS;
+#endif
+
+#ifdef	CONFIG_VSERVER_LEGACY
 	case VCMD_new_s_context:
 		return vc_new_s_context(id, data);
 	case VCMD_set_ipv4root:
@@ -97,7 +116,7 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 		return vc_set_rlimit(id, data);
 	case VCMD_get_rlimit_mask:
 		return vc_get_rlimit_mask(id, data);
-		
+
 	case VCMD_vx_get_vhi_name:
 		return vc_get_vhi_name(id, data);
 	case VCMD_vx_set_vhi_name:
@@ -123,8 +142,20 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 	case VCMD_get_ncaps:
 		return vc_get_ncaps(id, data);
 
+	case VCMD_set_sched_v2:
+		return vc_set_sched_v2(id, data);
+	/* this is version 3 */
 	case VCMD_set_sched:
 		return vc_set_sched(id, data);
+
+	case VCMD_add_dlimit:
+		return vc_add_dlimit(id, data);
+	case VCMD_rem_dlimit:
+		return vc_rem_dlimit(id, data);
+	case VCMD_set_dlimit:
+		return vc_set_dlimit(id, data);
+	case VCMD_get_dlimit:
+		return vc_get_dlimit(id, data);
 	}
 
 	/* below here only with VX_ADMIN */
@@ -135,9 +166,14 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 	case VCMD_ctx_kill:
 		return vc_ctx_kill(id, data);
 
-#ifdef	CONFIG_VSERVER_LEGACY		
+	case VCMD_wait_exit:
+		return vc_wait_exit(id, data);
+
 	case VCMD_create_context:
+#ifdef	CONFIG_VSERVER_LEGACY
 		return vc_ctx_create(id, data);
+#else
+		return -ENOSYS;
 #endif
 
 	case VCMD_get_iattr:
@@ -149,7 +185,7 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 		return vc_enter_namespace(id, data);
 
 	case VCMD_ctx_create:
-#ifdef	CONFIG_VSERVER_LEGACY		
+#ifdef	CONFIG_VSERVER_LEGACY
 		if (id == 1) {
 			current->xid = 1;
 			return 1;

@@ -3,7 +3,7 @@
  *
  *  Virtual Server: Context Support
  *
- *  Copyright (C) 2003-2004  Herbert Pötzl
+ *  Copyright (C) 2003-2005  Herbert Pötzl
  *
  *  V0.01  context helper
  *  V0.02  vx_ctx_kill syscall command
@@ -13,25 +13,30 @@
  *  V0.06  task_xid and info commands
  *  V0.07  context flags and caps
  *  V0.08  switch to RCU based hash
+ *  V0.09  revert to non RCU for now
+ *  V0.10  and back to working RCU hash
  *
  */
 
 #include <linux/config.h>
 #include <linux/slab.h>
-#include <linux/vserver.h>
-#include <linux/vserver/legacy.h>
-#include <linux/vs_base.h>
-#include <linux/vs_context.h>
-#include <linux/kernel_stat.h>
+#include <linux/types.h>
 #include <linux/namespace.h>
-#include <linux/rcupdate.h>
 
-#define CKRM_VSERVER_INTEGRATION
-#ifdef CKRM_VSERVER_INTEGRATION
-#include <linux/ckrm.h>
-#endif //CKRM_VSERVER_INTEGRATION
+#include <linux/sched.h>
+#include <linux/vserver/network.h>
+#include <linux/vserver/legacy.h>
+#include <linux/vserver/limit.h>
+#include <linux/vserver/debug.h>
+#include <linux/vs_context.h>
+#include <linux/vserver/context_cmd.h>
+#include <linux/ckrm.h> /* needed for ckrm_cb_xid() */
 
 #include <asm/errno.h>
+
+#include "cvirt_init.h"
+#include "limit_init.h"
+#include "sched_init.h"
 
 
 /*	__alloc_vx_info()
@@ -74,6 +79,7 @@ static struct vx_info *__alloc_vx_info(xid_t xid)
 
 	vxdprintk(VXD_CBIT(xid, 0),
 		"alloc_vx_info(%d) = %p", xid, new);
+	vxh_alloc_vx_info(new);
 	return new;
 }
 
@@ -85,6 +91,7 @@ static void __dealloc_vx_info(struct vx_info *vxi)
 {
 	vxdprintk(VXD_CBIT(xid, 0),
 		"dealloc_vx_info(%p)", vxi);
+	vxh_dealloc_vx_info(vxi);
 
 	vxi->vx_hlist.next = LIST_POISON1;
 	vxi->vx_id = -1;
@@ -122,40 +129,47 @@ static inline int __free_vx_info(struct vx_info *vxi)
 	return usecnt;
 }
 
-#if 0
-
-static void __rcu_free_vx_info(struct rcu_head *head)
+static void __rcu_put_vx_info(struct rcu_head *head)
 {
 	struct vx_info *vxi = container_of(head, struct vx_info, vx_rcu);
 
-	BUG_ON(!head);
 	vxdprintk(VXD_CBIT(xid, 3),
-		"rcu_free_vx_info(%p): uc=%d", vxi,
-		atomic_read(&vxi->vx_usecnt));
-
-	__free_vx_info(vxi);
+		"__rcu_put_vx_info(%p[#%d]): %d,%d",
+		vxi, vxi->vx_id,
+		atomic_read(&vxi->vx_usecnt),
+		atomic_read(&vxi->vx_refcnt));
+	put_vx_info(vxi);
 }
 
-#endif
-
-void free_vx_info(struct vx_info *vxi)
+void __shutdown_vx_info(struct vx_info *vxi)
 {
 	struct namespace *namespace;
 	struct fs_struct *fs;
 
+	might_sleep();
+
+	namespace = xchg(&vxi->vx_namespace, NULL);
+	if (namespace)
+		put_namespace(namespace);
+
+	fs = xchg(&vxi->vx_fs, NULL);
+	if (fs)
+		put_fs_struct(fs);
+}
+
+/* exported stuff */
+
+void free_vx_info(struct vx_info *vxi)
+{
 	/* context shutdown is mandatory */
 	// BUG_ON(vxi->vx_state != VXS_SHUTDOWN);
 
-	namespace = xchg(&vxi->vx_namespace, NULL);
-	fs = xchg(&vxi->vx_fs, NULL);
+	BUG_ON(vxi->vx_state & VXS_HASHED);
 
-	if (namespace)
-		put_namespace(namespace);
-	if (fs)
-		put_fs_struct(fs);
+	BUG_ON(vxi->vx_namespace);
+	BUG_ON(vxi->vx_fs);
 
 	BUG_ON(__free_vx_info(vxi));
-	// call_rcu(&i->vx_rcu, __rcu_free_vx_info);
 }
 
 
@@ -186,6 +200,8 @@ static inline void __hash_vx_info(struct vx_info *vxi)
 
 	vxdprintk(VXD_CBIT(xid, 4),
 		"__hash_vx_info: %p[#%d]", vxi, vxi->vx_id);
+	vxh_hash_vx_info(vxi);
+
 	get_vx_info(vxi);
 	vxi->vx_state |= VXS_HASHED;
 	head = &vx_info_hash[__hashval(vxi->vx_id)];
@@ -201,9 +217,12 @@ static inline void __unhash_vx_info(struct vx_info *vxi)
 {
 	vxdprintk(VXD_CBIT(xid, 4),
 		"__unhash_vx_info: %p[#%d]", vxi, vxi->vx_id);
+	vxh_unhash_vx_info(vxi);
+
 	vxi->vx_state &= ~VXS_HASHED;
 	hlist_del_rcu(&vxi->vx_hlist);
-	put_vx_info(vxi);
+
+	call_rcu(&vxi->vx_rcu, __rcu_put_vx_info);
 }
 
 
@@ -216,22 +235,29 @@ static inline struct vx_info *__lookup_vx_info(xid_t xid)
 {
 	struct hlist_head *head = &vx_info_hash[__hashval(xid)];
 	struct hlist_node *pos;
+	struct vx_info *vxi;
 
 	hlist_for_each_rcu(pos, head) {
-		struct vx_info *vxi =
-			hlist_entry(pos, struct vx_info, vx_hlist);
+		vxi = hlist_entry(pos, struct vx_info, vx_hlist);
 
 		if ((vxi->vx_id == xid) &&
 			vx_info_state(vxi, VXS_HASHED))
-			return vxi;
+			goto found;
 	}
-	return NULL;
+	vxi = NULL;
+found:
+	vxdprintk(VXD_CBIT(xid, 0),
+		"__lookup_vx_info(#%u): %p[#%u]",
+		xid, vxi, vxi?vxi->vx_id:0);
+	vxh_lookup_vx_info(xid, vxi);
+	return vxi;
 }
 
 
 /*	__vx_dynamic_id()
 
 	* find unused dynamic xid
+	* requires the rcu_read_lock()
 	* requires the hash_lock to be held			*/
 
 static inline xid_t __vx_dynamic_id(void)
@@ -267,6 +293,9 @@ static struct vx_info * __loc_vx_info(int id, int *err)
 		return NULL;
 	}
 
+	/* FIXME is this required at all ? */
+	rcu_read_lock();
+	/* required to make dynamic xids unique */
 	spin_lock(&vx_info_hash_lock);
 
 	/* dynamic context requested */
@@ -304,6 +333,8 @@ static struct vx_info * __loc_vx_info(int id, int *err)
 
 out_unlock:
 	spin_unlock(&vx_info_hash_lock);
+	rcu_read_unlock();
+	vxh_loc_vx_info(id, vxi);
 	if (new)
 		__dealloc_vx_info(new);
 	return vxi;
@@ -316,6 +347,7 @@ out_unlock:
 
 void unhash_vx_info(struct vx_info *vxi)
 {
+	__shutdown_vx_info(vxi);
 	spin_lock(&vx_info_hash_lock);
 	__unhash_vx_info(vxi);
 	spin_unlock(&vx_info_hash_lock);
@@ -534,12 +566,7 @@ int vx_migrate_task(struct task_struct *p, struct vx_info *vxi)
 out:
 
 
-#ifdef CKRM_VSERVER_INTEGRATION
-	do {
-	  ckrm_cb_xid(p);
-	} while (0);
-#endif //CKRM_VSERVER_INTEGRATION
-
+	ckrm_cb_xid(p);
 
 	put_vx_info(old_vxi);
 	return ret;
@@ -584,7 +611,7 @@ int vc_task_xid(uint32_t id, void __user *data)
 		read_unlock(&tasklist_lock);
 	}
 	else
-		xid = current->xid;
+		xid = vx_current_xid();
 	return xid;
 }
 
@@ -768,8 +795,6 @@ int vc_set_ccaps(uint32_t id, void __user *data)
 
 #include <linux/module.h>
 
-// EXPORT_SYMBOL_GPL(rcu_free_vx_info);
 EXPORT_SYMBOL_GPL(free_vx_info);
-EXPORT_SYMBOL_GPL(vx_info_hash_lock);
 EXPORT_SYMBOL_GPL(unhash_vx_info);
 

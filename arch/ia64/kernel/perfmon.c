@@ -41,6 +41,8 @@
 #include <linux/vs_memory.h>
 #include <linux/vs_cvirt.h>
 #include <linux/bitops.h>
+#include <linux/vs_memory.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/errno.h>
 #include <asm/intrinsics.h>

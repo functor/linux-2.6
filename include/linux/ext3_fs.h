@@ -196,6 +196,9 @@ struct ext3_group_desc
 #define EXT3_FL_USER_VISIBLE		0x0003DFFF /* User visible flags */
 #define EXT3_FL_USER_MODIFIABLE		0x000380FF /* User modifiable flags */
 #endif
+#ifdef	CONFIG_VSERVER_LEGACY
+#define EXT3_IOC_SETXID			FIOC_SETXIDJ
+#endif
 
 /*
  * Inode dynamic state flags
@@ -366,7 +369,7 @@ struct ext3_inode {
 #define EXT3_MOUNT_POSIX_ACL		0x08000	/* POSIX Access Control Lists */
 #define EXT3_MOUNT_RESERVATION		0x10000	/* Preallocation */
 #define EXT3_MOUNT_BARRIER		0x20000 /* Use block barriers */
-#define EXT3_MOUNT_TAG_XID		0x40000 /* Enable Context Tags */
+#define EXT3_MOUNT_TAG_XID		(1<<24) /* Enable Context Tags */
 
 /* Compatibility, for having both ext2_fs.h and ext3_fs.h included at once */
 #ifndef _LINUX_EXT2_FS_H

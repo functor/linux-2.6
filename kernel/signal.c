@@ -626,7 +626,6 @@ static int check_kill_permission(int sig, struct siginfo *info,
 
 	if (sig < 0 || sig > _NSIG)
 		return error;
-
 	user = (!info ||
 		(info != SEND_SIG_PRIV &&
 		 info != SEND_SIG_FORCED &&

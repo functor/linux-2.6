@@ -30,6 +30,7 @@
 #include <linux/vs_limit.h>
 #include <linux/ckrm_mem.h>
 #include <linux/syscalls.h>
+#include <linux/vs_limit.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -382,6 +383,7 @@ static inline void close_files(struct files_struct * files)
 				struct file * file = xchg(&files->fd[i], NULL);
 				if (file) 
 					filp_close(file, files);
+				// vx_openfd_dec(i);
 			}
 			i++;
 			set >>= 1;
@@ -611,6 +613,7 @@ static inline void forget_original_parent(struct task_struct * father,
 	struct task_struct *p, *reaper = father;
 	struct list_head *_p, *_n;
 
+	/* FIXME handle vchild_reaper/initpid */
 	do {
 		reaper = next_thread(reaper);
 		if (reaper == father) {

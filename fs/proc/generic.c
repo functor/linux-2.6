@@ -21,6 +21,7 @@
 #include <linux/vs_base.h>
 #include <linux/vserver/inode.h>
 #include <linux/bitops.h>
+#include <linux/vserver/inode.h>
 #include <asm/uaccess.h>
 
 static ssize_t proc_file_read(struct file *file, char __user *buf,
@@ -388,7 +389,8 @@ struct dentry *proc_lookup(struct inode * dir, struct dentry *dentry, struct nam
 
 				error = -EINVAL;
 				inode = proc_get_inode(dir->i_sb, ino, de);
-				inode->i_xid = vx_current_xid();
+				/* generic proc entries belong to the host */
+				inode->i_xid = 0;
 				break;
 			}
 		}

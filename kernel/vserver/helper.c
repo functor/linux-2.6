@@ -13,8 +13,7 @@
 #include <linux/errno.h>
 #include <linux/reboot.h>
 #include <linux/kmod.h>
-#include <linux/vserver.h>
-#include <linux/vs_base.h>
+#include <linux/sched.h>
 #include <linux/vs_context.h>
 
 #include <asm/uaccess.h>
@@ -57,19 +56,19 @@ long vs_reboot(unsigned int cmd, void * arg)
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:
 		argv[1] = "restart";
-		break;	
+		break;
 
 	case LINUX_REBOOT_CMD_HALT:
 		argv[1] = "halt";
-		break;	
+		break;
 
 	case LINUX_REBOOT_CMD_POWER_OFF:
 		argv[1] = "poweroff";
-		break;	
+		break;
 
 	case LINUX_REBOOT_CMD_SW_SUSPEND:
 		argv[1] = "swsusp";
-		break;	
+		break;
 
 	case LINUX_REBOOT_CMD_RESTART2:
 		if (strncpy_from_user(&buffer[0], (char *)arg, sizeof(buffer) - 1) < 0)
@@ -77,7 +76,7 @@ long vs_reboot(unsigned int cmd, void * arg)
 		argv[3] = buffer;
 	default:
 		argv[1] = "restart2";
-		break;	
+		break;
 	}
 
 	/* maybe we should wait ? */
@@ -86,6 +85,37 @@ long vs_reboot(unsigned int cmd, void * arg)
 			"vs_reboot(): failed to exec (%s %s %s %s)\n",
 			vshelper_path, argv[1], argv[2], argv[3]);
 		return -EPERM;
+	}
+	return 0;
+}
+
+long vs_context_state(unsigned int cmd)
+{
+	char id_buf[8], cmd_buf[32];
+
+	char *argv[] = {vshelper_path, NULL, id_buf, NULL, 0};
+	char *envp[] = {"HOME=/", "TERM=linux",
+			"PATH=/sbin:/usr/sbin:/bin:/usr/bin", cmd_buf, 0};
+
+	snprintf(id_buf, sizeof(id_buf)-1, "%d", vx_current_xid());
+	snprintf(cmd_buf, sizeof(cmd_buf)-1, "VS_CMD=%08x", cmd);
+
+	switch (cmd) {
+	case VS_CONTEXT_CREATED:
+		argv[1] = "startup";
+		break;
+	case VS_CONTEXT_DESTROY:
+		argv[1] = "shutdown";
+		break;
+	default:
+		return 0;
+	}
+
+	if (call_usermodehelper(*argv, argv, envp, 1)) {
+		printk( KERN_WARNING
+			"vs_context_state(): failed to exec (%s %s %s %s)\n",
+			vshelper_path, argv[1], argv[2], argv[3]);
+		return 0;
 	}
 	return 0;
 }

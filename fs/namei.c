@@ -28,7 +28,9 @@
 #include <linux/syscalls.h>
 #include <linux/mount.h>
 #include <linux/audit.h>
-#include <linux/vs_base.h>
+#include <linux/proc_fs.h>
+#include <linux/vserver/inode.h>
+#include <linux/vserver/debug.h>
 
 #include <asm/namei.h>
 #include <asm/uaccess.h>
@@ -230,6 +232,24 @@ int generic_permission(struct inode *inode, int mask,
 	return -EACCES;
 }
 
+static inline int xid_permission(struct inode *inode, int mask, struct nameidata *nd)
+{
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN)) {
+		vxwprintk(1, "xid=%d did hit the barrier.",
+			vx_current_xid());
+		return -EACCES;
+	}
+	if (inode->i_xid == 0)
+		return 0;
+	if (vx_check(inode->i_xid, VX_ADMIN|VX_WATCH|VX_IDENT))
+		return 0;
+
+	vxwprintk(1, "xid=%d denied access to %p[#%d,%lu] »%s«.",
+		vx_current_xid(), inode, inode->i_xid, inode->i_ino,
+		vxd_path(nd->dentry, nd->mnt));
+	return -EACCES;
+}
+
 int permission(struct inode * inode,int mask, struct nameidata *nd)
 {
 	int retval;
@@ -242,6 +262,9 @@ int permission(struct inode * inode,int mask, struct nameidata *nd)
 	if (nd && (mask & MAY_WRITE) && MNT_IS_RDONLY(nd->mnt) &&
 		(S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 		return -EROFS;
+
+	if ((retval = xid_permission(inode, mask, nd)))
+		return retval;
 
 	if (inode->i_op && inode->i_op->permission)
 		retval = inode->i_op->permission(inode, submask, nd);
@@ -645,15 +668,33 @@ static int do_lookup(struct nameidata *nd, struct qstr *name,
 {
 	struct vfsmount *mnt = nd->mnt;
 	struct dentry *dentry = __d_lookup(nd->dentry, name);
+	struct inode *inode;
 
 	if (!dentry)
 		goto need_lookup;
 	if (dentry->d_op && dentry->d_op->d_revalidate)
 		goto need_revalidate;
+	inode = dentry->d_inode;
+	if (!inode)
+		goto done;
+	if (!vx_check(inode->i_xid, VX_WATCH|VX_HOSTID|VX_IDENT))
+		goto hidden;
+	if (inode->i_sb->s_magic == PROC_SUPER_MAGIC) {
+		struct proc_dir_entry *de = PDE(inode);
+
+		if (de && !vx_hide_check(0, de->vx_flags))
+			goto hidden;
+	}
 done:
 	path->mnt = mnt;
 	path->dentry = dentry;
 	return 0;
+hidden:
+	vxwprintk(1, "xid=%d did lookup hidden %p[#%d,%lu] »%s«.",
+		vx_current_xid(), inode, inode->i_xid, inode->i_ino,
+		vxd_path(dentry, mnt));
+	dput(dentry);
+	return -ENOENT;
 
 need_lookup:
 	if (atomic)

@@ -12,13 +12,11 @@
 
 #include <linux/config.h>
 #include <linux/sched.h>
-#include <linux/namespace.h>
-#include <linux/vserver/legacy.h>
-#include <linux/vserver/namespace.h>
-#include <linux/vserver.h>
-#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
+#include <linux/vserver/legacy.h>
+#include <linux/vserver/namespace.h>
+#include <linux/namespace.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>
@@ -61,8 +59,9 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 		return ret;
 	}
 
-	if (!vx_check(0, VX_ADMIN) ||
-		!capable(CAP_SYS_ADMIN) || vx_flags(VX_INFO_PRIVATE, 0))
+	if (!vx_check(0, VX_ADMIN) || !capable(CAP_SYS_ADMIN)
+		/* might make sense in the future, or not ... */
+		|| vx_flags(VX_INFO_LOCK, 0))
 		return -EPERM;
 
 	/* ugly hack for Spectator */
@@ -82,6 +81,12 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 
 	if (!new_vxi)
 		return -EINVAL;
+
+	ret = -EPERM;
+	if (!vx_info_flags(new_vxi, VXF_STATE_SETUP, 0) &&
+		vx_info_flags(new_vxi, VX_INFO_PRIVATE, 0))
+		goto out_put;
+
 	new_vxi->vx_flags &= ~(VXF_STATE_SETUP|VXF_STATE_INIT);
 
 	ret = vx_migrate_task(current, new_vxi);
@@ -99,6 +104,7 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 				current->signal->rlim[RLIMIT_NPROC].rlim_max;
 		ret = new_vxi->vx_id;
 	}
+out_put:
 	put_vx_info(new_vxi);
 	return ret;
 }

@@ -2,7 +2,6 @@
 #define _VX_LEGACY_H
 
 #include "switch.h"
-#include "network.h"
 
 /*  compatibiliy vserver commands */
 
@@ -13,12 +12,12 @@
 
 /*  compatibiliy vserver arguments */
 
-struct  vcmd_new_s_context_v1 {
+struct	vcmd_new_s_context_v1 {
 	uint32_t remove_cap;
 	uint32_t flags;
 };
 
-struct  vcmd_set_ipv4root_v3 {
+struct	vcmd_set_ipv4root_v3 {
 	/* number of pairs in id */
 	uint32_t broadcast;
 	struct {
@@ -40,7 +39,7 @@ struct  vcmd_set_ipv4root_v3 {
 					/* of the context */
 #define VX_INFO_NAMESPACE	128	/* save private namespace */
 
-	
+
 #define NB_S_CONTEXT	16
 
 #define NB_IPV4ROOT	16

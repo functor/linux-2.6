@@ -9,6 +9,7 @@
 #include <linux/mm.h>
 #include <linux/vs_memory.h>
 #include <linux/syscalls.h>
+#include <linux/vs_memory.h>
 
 
 static int mlock_fixup(struct vm_area_struct * vma, 
