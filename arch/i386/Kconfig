@@ -926,6 +926,32 @@ config REGPARM
 	generate incorrect output with certain kernel constructs when
 	-mregparm=3 is used.
 
+config IRQSTACKS
+	bool "Use separate IRQ stacks"
+	help
+	If you say Y here the kernel will use a separate IRQ stack on each
+	cpu to handle interrupts.
+
+config STACK_SIZE_SHIFT
+	int "Kernel stack size (12 => 4KB, 13 => 8KB, 14 => 16KB)"
+	range 12 14
+	default 12 if IRQSTACKS
+	default 13
+	help
+	Select kernel stack size.  4KB stacks are best as they let
+	the system scale further.  Use 8KB stacks if you have an 
+	experimental kernel where a stack overlow with a 4KB stack
+	might occur.  Use 16KB stacks if you want to safely support
+	Windows device drivers using either Linuxant or ndiswrapper.
+
+config STACK_WARN
+	int "Print stack trace when stack grows beyond specified bytes"
+	default 4096 if IRQSTACKS
+	default 4096
+	help
+	The kernel will print a stack trace when the current stack exceeds
+	the specified size.
+
 endmenu
 
 
