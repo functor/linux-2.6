@@ -194,8 +194,10 @@ int ckrm_cpu_set_share(void *my_res, struct ckrm_shares *new_share)
         struct ckrm_shares *cur = &cls->shares, *par;
         int rc = -EINVAL;
 
-        if (!cls)
+        if (!cls) {
+		printk("ckrm_cpu_set_share: cls == NULL\n");
 		return rc;
+	}
 
         if (cls->parent) {
                 parres = ckrm_get_cpu_class(cls->parent);

@@ -27,12 +27,11 @@
 #include <linux/module.h>
 #include <linux/ckrm_rc.h>
 
-int
-get_exe_path_name(struct task_struct *tsk, char *buf, int buflen)
+int get_exe_path_name(struct task_struct *tsk, char *buf, int buflen)
 {
-	struct vm_area_struct * vma;
+	struct vm_area_struct *vma;
 	struct vfsmount *mnt;
-	struct mm_struct * mm = get_task_mm(tsk);
+	struct mm_struct *mm = get_task_mm(tsk);
 	struct dentry *dentry;
 	char *lname;
 	int rc = 0;
@@ -45,15 +44,14 @@ get_exe_path_name(struct task_struct *tsk, char *buf, int buflen)
 	down_read(&mm->mmap_sem);
 	vma = mm->mmap;
 	while (vma) {
-		if ((vma->vm_flags & VM_EXECUTABLE) &&
-				vma->vm_file) {
+		if ((vma->vm_flags & VM_EXECUTABLE) && vma->vm_file) {
 			dentry = dget(vma->vm_file->f_dentry);
 			mnt = mntget(vma->vm_file->f_vfsmnt);
 			lname = d_path(dentry, mnt, buf, buflen);
-			if (! IS_ERR(lname)) {
+			if (!IS_ERR(lname)) {
 				strncpy(buf, lname, strlen(lname) + 1);
 			} else {
-				rc = (int) PTR_ERR(lname);
+				rc = (int)PTR_ERR(lname);
 			}
 			mntput(mnt);
 			dput(dentry);
@@ -66,14 +64,12 @@ get_exe_path_name(struct task_struct *tsk, char *buf, int buflen)
 	return rc;
 }
 
-
 /*
  * must be called with cnt_lock of parres held
  * Caller is responsible for making sure that the new guarantee doesn't
  * overflow parent's total guarantee.
  */
-void
-child_guarantee_changed(struct ckrm_shares *parent, int cur, int new)
+void child_guarantee_changed(struct ckrm_shares *parent, int cur, int new)
 {
 	if (new == cur || !parent) {
 		return;
@@ -92,8 +88,7 @@ child_guarantee_changed(struct ckrm_shares *parent, int cur, int new)
  * Caller is responsible for making sure that the new limit is not more 
  * than parent's max_limit
  */
-void
-child_maxlimit_changed(struct ckrm_shares *parent, int new_limit)
+void child_maxlimit_changed(struct ckrm_shares *parent, int new_limit)
 {
 	if (parent && parent->cur_max_limit < new_limit) {
 		parent->cur_max_limit = new_limit;
@@ -107,76 +102,95 @@ child_maxlimit_changed(struct ckrm_shares *parent, int new_limit)
  */
 int
 set_shares(struct ckrm_shares *new, struct ckrm_shares *cur,
-		struct ckrm_shares *par)
+	   struct ckrm_shares *par)
 {
 	int rc = -EINVAL;
 	int cur_usage_guar = cur->total_guarantee - cur->unused_guarantee;
-	int increase_by = new->my_guarantee - cur->my_guarantee;
+	int increase_by;
+
+	if (cur->my_guarantee < 0) // DONTCARE or UNCHANGED
+		increase_by = new->my_guarantee;
+	else
+		increase_by = new->my_guarantee - cur->my_guarantee;
 
 	// Check total_guarantee for correctness
 	if (new->total_guarantee <= CKRM_SHARE_DONTCARE) {
+		printk("set_shares: new->total_guarantee (%d) <= CKRM_SHARE_DONTCARE\n",
+		       new->total_guarantee);
 		goto set_share_err;
 	} else if (new->total_guarantee == CKRM_SHARE_UNCHANGED) {
-		;// do nothing
+		;		// do nothing
 	} else if (cur_usage_guar > new->total_guarantee) {
+		printk("set_shares: cur_usage_guar(%d) > new->total_guarantee (%d)\n",
+		       cur_usage_guar, new->total_guarantee);
 		goto set_share_err;
 	}
-
 	// Check max_limit for correctness
 	if (new->max_limit <= CKRM_SHARE_DONTCARE) {
+		printk("set_shares: new->max_limit (%d) <= CKRM_SHARE_DONTCARE\n",
+		       new->max_limit);
 		goto set_share_err;
 	} else if (new->max_limit == CKRM_SHARE_UNCHANGED) {
-		; // do nothing
+		;		// do nothing
 	} else if (cur->cur_max_limit > new->max_limit) {
+		printk("set_shares: cur->cur_max_limit (%d) > new->max_limit (%d)\n",
+		       cur->cur_max_limit,new->max_limit);
 		goto set_share_err;
 	}
-
 	// Check my_guarantee for correctness
 	if (new->my_guarantee == CKRM_SHARE_UNCHANGED) {
-		; // do nothing
+		;		// do nothing
 	} else if (new->my_guarantee == CKRM_SHARE_DONTCARE) {
-		; // do nothing
+		;		// do nothing
 	} else if (par && increase_by > par->unused_guarantee) {
+		printk("set_shares: increase_by (%d) > par->unused_guarantee (%d)\n",
+		       increase_by, par->unused_guarantee);
 		goto set_share_err;
 	}
-
 	// Check my_limit for correctness
 	if (new->my_limit == CKRM_SHARE_UNCHANGED) {
-		; // do nothing
+		;		// do nothing
 	} else if (new->my_limit == CKRM_SHARE_DONTCARE) {
-		; // do nothing
+		;		// do nothing
 	} else if (par && new->my_limit > par->max_limit) {
 		// I can't get more limit than my parent's limit
+		printk("set_shares: new->my_limit (%d) > par->max_limit (%d)\n",
+		       new->my_limit,par->max_limit);
 		goto set_share_err;
-		
 	}
-
 	// make sure guarantee is lesser than limit
 	if (new->my_limit == CKRM_SHARE_DONTCARE) {
-		; // do nothing
+		;		// do nothing
 	} else if (new->my_limit == CKRM_SHARE_UNCHANGED) {
 		if (new->my_guarantee == CKRM_SHARE_DONTCARE) {
-			; // do nothing
+			;	// do nothing
 		} else if (new->my_guarantee == CKRM_SHARE_UNCHANGED) {
-			; // do nothing earlier setting would 've taken care of it
+			;	// do nothing earlier setting would've 
+			        // taken care of it
 		} else if (new->my_guarantee > cur->my_limit) {
+			printk("set_shares: new->my_guarantee (%d) > cur->my_limit (%d)\n",
+			       new->my_guarantee,cur->my_limit);
 			goto set_share_err;
 		}
-	} else { // new->my_limit has a valid value
+	} else {		// new->my_limit has a valid value
 		if (new->my_guarantee == CKRM_SHARE_DONTCARE) {
-			; // do nothing
+			;	// do nothing
 		} else if (new->my_guarantee == CKRM_SHARE_UNCHANGED) {
 			if (cur->my_guarantee > new->my_limit) {
+				printk("set_shares: cur->my_guarantee (%d) > new->my_limit (%d)\n",
+				       cur->my_guarantee,new->my_limit);
 				goto set_share_err;
 			}
 		} else if (new->my_guarantee > new->my_limit) {
+			printk("set_shares: new->my_guarantee (%d) > new->my_limit (%d)\n",
+			       new->my_guarantee,new->my_limit);
 			goto set_share_err;
 		}
 	}
 
 	if (new->my_guarantee != CKRM_SHARE_UNCHANGED) {
 		child_guarantee_changed(par, cur->my_guarantee,
-				new->my_guarantee);
+					new->my_guarantee);
 		cur->my_guarantee = new->my_guarantee;
 	}
 
@@ -195,7 +209,7 @@ set_shares(struct ckrm_shares *new, struct ckrm_shares *cur,
 	}
 
 	rc = 0;
-set_share_err:
+      set_share_err:
 	return rc;
 }
 
@@ -203,5 +217,3 @@ EXPORT_SYMBOL(get_exe_path_name);
 EXPORT_SYMBOL(child_guarantee_changed);
 EXPORT_SYMBOL(child_maxlimit_changed);
 EXPORT_SYMBOL(set_shares);
-
-
