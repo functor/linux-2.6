@@ -1,0 +1,154 @@
+CKRM I/O controller
+
+Last updated: Sep 21, 2004
+
+
+Intro
+-----
+
+CKRM's I/O scheduler is developed as a delta over a modified version of
+the Complete Fair Queuing scheduler (CFQ) that implements I/O priorities.
+The latter's original posting can be found at:
+    http://www.ussg.iu.edu/hypermail/linux/kernel/0311.1/0019.html
+
+Please note that this is not the CFQ version currently in the linus kernel 
+(2.6.8.1 at time of writing) which provides equal, not prioritized, 
+bandwidth allocation amongst processes. Since the CFQ in the kernel is likely
+to eventually move towards I/O priority implementation, CKRM has not renamed
+the underlying I/O scheduler and simply replaces drivers/block/cfq-iosched.c
+with the modified version.
+
+Installation
+------------
+
+1. Configure "Disk I/O Resource Controller" under CKRM (see
+Documentation/ckrm/installation) 
+
+2. After booting into the new kernel, load ckrm-io
+   # modprobe ckrm-io
+
+3. Verify that reading /rcfs/taskclass/shares displays values for the
+I/O controller (res=cki).
+
+4. Mount sysfs for monitoring bandwidth received (temporary solution till
+a userlevel tool is developed)
+   # mount -t sysfs none /sys
+
+
+Usage
+-----
+
+For brevity, we assume we are in the /rcfs/taskclass directory for all the 
+code snippets below.
+
+Initially, the systemwide default class gets 100% of the I/O bandwidth. 
+
+	$ cat stats
+
+	<display from other controllers, snipped>
+	20 total ioprio
+	20 unused/default ioprio
+
+The first value is the share of a class, as a parent. The second is the share
+of its default subclass. Initially the two are equal. As named subclasses get
+created and assigned shares, the default subclass' share (which equals the
+"unused" portion of the parent's allocation) dwindles.
+
+
+CFQ assigns one of  20 I/O priorities to all I/O requests. Each priority level
+gets a fixed proportion of the total bandwidth in increments of 5%. e.g.
+     ioprio=1 gets 5%, 
+     ioprio=2 gets 10%.....
+     all the way through ioprio=19 getting 95%
+
+ioprio=0 gets bandwidth only if no other priority level submits I/O i.e. it can
+get starved.
+ioprio=20 is considered realtime I/O and always gets priority.
+
+CKRM's I/O scheduler distributes these 20 priority levels amongst the hierarchy
+of classes according to the relative share of each class. Thus, root starts out
+with the total allocation of 20 initially. As children get created and shares
+assigned to them, root's allocation reduces. At any time, the sum of absolute
+share values of all classes equals 20.
+
+ 
+
+Class creation 
+--------------
+
+       $ mkdir a
+
+Its initial share is zero. The parent's share values will be unchanged. Note
+that even classes with zero share get unused bandwidth under CFQ.
+
+Setting a new class share
+-------------------------
+	
+	$ echo "res=cki,guarantee=20" > /rcfs/taskclass/a/shares
+	Set cki shares to 20 -1 -1 -1
+
+	$ echo a/shares	
+	
+	res=cki,guarantee=20,limit=100,total_guarantee=100,max_limit=100
+
+The limit and max_limit fields can be ignored as they are not implemented.
+The absolute share of a is 20% of parent's absolute total (20) and can be seen
+through
+	$ echo a/stats
+
+	<snip>
+	4 total ioprio
+	4 unused/default ioprio
+
+Since a gets 4, parent's default's share diminishes accordingly. Thus
+
+	$ echo stats
+	
+	<snip>
+	20 total ioprio
+	16 unused/default ioprio
+
+
+Monitoring
+----------
+
+Each priority level's request service rate can be viewed through sysfs (mounted
+during installation). To view the servicing of priority 4's requests,
+
+       $  while : ; echo /sys/block/<device>/queue/iosched/p4 ; sleep 1 ; done
+       rq (10,15) sec (20,30) q (40,50)
+
+       <data above updated in a loop>
+
+where 
+      rq = cumulative I/O requests received (10) and serviced (15)
+      sec = cumulative sectors requested (20) and served (30)
+      q = cumulative number of times the queue was created(40)/destroyed (50)
+
+The rate at which requests or sectors are serviced should differ for different
+priority levels. The difference in received and serviced values indicates queue
+depth - with insufficient depth, differentiation between I/O priority levels
+will not be observed.
+
+The rate of q creation is not significant for CKRM. 
+
+
+Caveats
+-------
+
+CFQ's I/O differentiation is still being worked upon so its better to choose
+widely separated share values to observe differences in delivered I/O
+bandwidth.
+
+CFQ, and consequently CKRM, does not provide limits yet. So it is not possible
+to completely limit an I/O hog process by putting it in a class with a low I/O
+share. Only if the competing classes maintain sufficient queue depth (i.e a
+high I/O issue rate) will they get preferential treatment. However, they may
+still see latency degradation due to seeks caused by servicing of the low
+priority class.
+
+When limits are implemented, this behaviour will be rectified. 
+
+Please post questions on the CKRM I/O scheduler on ckrm-tech@lists.sf.net.
+
+
