@@ -12,6 +12,7 @@
 #include <linux/mman.h>
 #include <linux/smp_lock.h>
 #include <linux/notifier.h>
+#include <linux/kmod.h>
 #include <linux/reboot.h>
 #include <linux/prctl.h>
 #include <linux/init.h>
@@ -23,6 +24,7 @@
 #include <linux/security.h>
 #include <linux/dcookies.h>
 #include <linux/suspend.h>
+#include <linux/ckrm.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -271,6 +273,10 @@ cond_syscall(compat_sys_mq_timedsend)
 cond_syscall(compat_sys_mq_timedreceive)
 cond_syscall(compat_sys_mq_notify)
 cond_syscall(compat_sys_mq_getsetattr)
+cond_syscall(sys_mbind)
+cond_syscall(sys_get_mempolicy)
+cond_syscall(sys_set_mempolicy)
+cond_syscall(compat_get_mempolicy)
 
 /* arch-specific weak syscall entries */
 cond_syscall(sys_pciconfig_read)
@@ -339,7 +345,7 @@ asmlinkage long sys_setpriority(int which, int who, int niceval)
 			if (!who)
 				user = current->user;
 			else
-				user = find_user(who);
+				user = find_user(vx_current_xid(), who);
 
 			if (!user)
 				goto out_unlock;
@@ -348,6 +354,8 @@ asmlinkage long sys_setpriority(int which, int who, int niceval)
 				if (p->uid == who)
 					error = set_one_prio(p, niceval, error);
 			while_each_thread(g, p);
+			if (who)
+				free_uid(user);		/* For find_user() */
 			break;
 	}
 out_unlock:
@@ -398,7 +406,7 @@ asmlinkage long sys_getpriority(int which, int who)
 			if (!who)
 				user = current->user;
 			else
-				user = find_user(who);
+				user = find_user(vx_current_xid(), who);
 
 			if (!user)
 				goto out_unlock;
@@ -410,6 +418,8 @@ asmlinkage long sys_getpriority(int which, int who)
 						retval = niceval;
 				}
 			while_each_thread(g, p);
+			if (who)
+				free_uid(user);		/* for find_user() */
 			break;
 	}
 out_unlock:
@@ -418,6 +428,72 @@ out_unlock:
 	return retval;
 }
 
+/*
+ *      vshelper path is set via /proc/sys
+ *      invoked by vserver sys_reboot(), with
+ *      the following arguments
+ *
+ *      argv [0] = vshelper_path;
+ *      argv [1] = action: "restart", "halt", "poweroff", ...
+ *      argv [2] = context identifier
+ *      argv [3] = additional argument (restart2)
+ *
+ *      envp [*] = type-specific parameters
+ */
+char vshelper_path[255] = "/sbin/vshelper";
+
+long vs_reboot(unsigned int cmd, void * arg)
+{
+	char id_buf[8], cmd_buf[32];
+	char uid_buf[32], pid_buf[32];
+	char buffer[256];
+
+	char *argv[] = {vshelper_path, NULL, id_buf, NULL, 0};
+	char *envp[] = {"HOME=/", "TERM=linux",
+			"PATH=/sbin:/usr/sbin:/bin:/usr/bin",
+			uid_buf, pid_buf, cmd_buf, 0};
+
+	snprintf(id_buf, sizeof(id_buf)-1, "%d", vx_current_xid());
+
+	snprintf(cmd_buf, sizeof(cmd_buf)-1, "VS_CMD=%08x", cmd);
+	snprintf(uid_buf, sizeof(uid_buf)-1, "VS_UID=%d", current->uid);
+	snprintf(pid_buf, sizeof(pid_buf)-1, "VS_PID=%d", current->pid);
+
+	switch (cmd) {
+	case LINUX_REBOOT_CMD_RESTART:
+		argv[1] = "restart";
+		break;	
+
+	case LINUX_REBOOT_CMD_HALT:
+		argv[1] = "halt";
+		break;	
+
+	case LINUX_REBOOT_CMD_POWER_OFF:
+		argv[1] = "poweroff";
+		break;	
+
+	case LINUX_REBOOT_CMD_SW_SUSPEND:
+		argv[1] = "swsusp";
+		break;	
+
+	case LINUX_REBOOT_CMD_RESTART2:
+		if (strncpy_from_user(&buffer[0], (char *)arg, sizeof(buffer) - 1) < 0)
+			return -EFAULT;
+		argv[3] = buffer;
+	default:
+		argv[1] = "restart2";
+		break;	
+	}
+
+	/* maybe we should wait ? */
+	if (call_usermodehelper(*argv, argv, envp, 0)) {
+		printk( KERN_WARNING
+			"vs_reboot(): failed to exec (%s %s %s %s)\n",
+			vshelper_path, argv[1], argv[2], argv[3]);
+		return -EPERM;
+	}
+	return 0;
+}
 
 /*
  * Reboot system call: for obvious reasons only root may call it,
@@ -443,11 +519,14 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 	                magic2 != LINUX_REBOOT_MAGIC2C))
 		return -EINVAL;
 
+	if (!vx_check(0, VX_ADMIN|VX_WATCH))
+		return vs_reboot(cmd, arg);
+
 	lock_kernel();
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:
 		notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
-		system_state = SYSTEM_SHUTDOWN;
+		system_state = SYSTEM_RESTART;
 		device_shutdown();
 		printk(KERN_EMERG "Restarting system.\n");
 		machine_restart(NULL);
@@ -463,7 +542,7 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 
 	case LINUX_REBOOT_CMD_HALT:
 		notifier_call_chain(&reboot_notifier_list, SYS_HALT, NULL);
-		system_state = SYSTEM_SHUTDOWN;
+		system_state = SYSTEM_HALT;
 		device_shutdown();
 		printk(KERN_EMERG "System halted.\n");
 		machine_halt();
@@ -473,7 +552,7 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 
 	case LINUX_REBOOT_CMD_POWER_OFF:
 		notifier_call_chain(&reboot_notifier_list, SYS_POWER_OFF, NULL);
-		system_state = SYSTEM_SHUTDOWN;
+		system_state = SYSTEM_POWER_OFF;
 		device_shutdown();
 		printk(KERN_EMERG "Power down.\n");
 		machine_power_off();
@@ -489,7 +568,7 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 		buffer[sizeof(buffer) - 1] = '\0';
 
 		notifier_call_chain(&reboot_notifier_list, SYS_RESTART, buffer);
-		system_state = SYSTEM_SHUTDOWN;
+		system_state = SYSTEM_RESTART;
 		device_shutdown();
 		printk(KERN_EMERG "Restarting system with command '%s'.\n", buffer);
 		machine_restart(buffer);
@@ -593,6 +672,9 @@ asmlinkage long sys_setregid(gid_t rgid, gid_t egid)
 	current->fsgid = new_egid;
 	current->egid = new_egid;
 	current->gid = new_rgid;
+
+	ckrm_cb_gid();
+
 	return 0;
 }
 
@@ -630,6 +712,9 @@ asmlinkage long sys_setgid(gid_t gid)
 	}
 	else
 		return -EPERM;
+
+	ckrm_cb_gid();
+
 	return 0;
 }
   
@@ -637,7 +722,7 @@ static int set_user(uid_t new_ruid, int dumpclear)
 {
 	struct user_struct *new_user;
 
-	new_user = alloc_uid(new_ruid);
+	new_user = alloc_uid(vx_current_xid(), new_ruid);
 	if (!new_user)
 		return -EAGAIN;
 
@@ -718,6 +803,8 @@ asmlinkage long sys_setreuid(uid_t ruid, uid_t euid)
 		current->suid = current->euid;
 	current->fsuid = current->euid;
 
+	ckrm_cb_uid();
+
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_RE);
 }
 
@@ -762,6 +849,8 @@ asmlinkage long sys_setuid(uid_t uid)
 	}
 	current->fsuid = current->euid = uid;
 	current->suid = new_suid;
+
+	ckrm_cb_uid();
 
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_ID);
 }
@@ -809,10 +898,12 @@ asmlinkage long sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 	if (suid != (uid_t) -1)
 		current->suid = suid;
 
+	ckrm_cb_uid();
+
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_RES);
 }
 
-asmlinkage long sys_getresuid(uid_t *ruid, uid_t *euid, uid_t *suid)
+asmlinkage long sys_getresuid(uid_t __user *ruid, uid_t __user *euid, uid_t __user *suid)
 {
 	int retval;
 
@@ -858,10 +949,13 @@ asmlinkage long sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 		current->gid = rgid;
 	if (sgid != (gid_t) -1)
 		current->sgid = sgid;
+
+	ckrm_cb_gid();
+
 	return 0;
 }
 
-asmlinkage long sys_getresgid(gid_t *rgid, gid_t *egid, gid_t *sgid)
+asmlinkage long sys_getresgid(gid_t __user *rgid, gid_t __user *egid, gid_t __user *sgid)
 {
 	int retval;
 
@@ -1056,11 +1150,15 @@ asmlinkage long sys_getpgid(pid_t pid)
 	}
 }
 
+#ifdef __ARCH_WANT_SYS_GETPGRP
+
 asmlinkage long sys_getpgrp(void)
 {
 	/* SMP - assuming writes are word atomic this is fine */
 	return process_group(current);
 }
+
+#endif
 
 asmlinkage long sys_getsid(pid_t pid)
 {
@@ -1121,10 +1219,10 @@ struct group_info *groups_alloc(int gidsetsize)
 	int nblocks;
 	int i;
 
-	nblocks = (gidsetsize/NGROUPS_PER_BLOCK) +
-	    (gidsetsize%NGROUPS_PER_BLOCK?1:0);
-	group_info = kmalloc(sizeof(*group_info) + nblocks*sizeof(gid_t *),
-	    GFP_USER);
+	nblocks = (gidsetsize + NGROUPS_PER_BLOCK - 1) / NGROUPS_PER_BLOCK;
+	/* Make sure we always allocate at least one indirect block pointer */
+	nblocks = nblocks ? : 1;
+	group_info = kmalloc(sizeof(*group_info) + nblocks*sizeof(gid_t *), GFP_USER);
 	if (!group_info)
 		return NULL;
 	group_info->ngroups = gidsetsize;
@@ -1270,8 +1368,12 @@ int set_current_groups(struct group_info *group_info)
 
 	groups_sort(group_info);
 	get_group_info(group_info);
+
+	task_lock(current);
 	old_info = current->group_info;
 	current->group_info = group_info;
+	task_unlock(current);
+
 	put_group_info(old_info);
 
 	return 0;
@@ -1291,6 +1393,7 @@ asmlinkage long sys_getgroups(int gidsetsize, gid_t __user *grouplist)
 	if (gidsetsize < 0)
 		return -EINVAL;
 
+	/* no need to grab task_lock here; it cannot change */
 	get_group_info(current->group_info);
 	i = current->group_info->ngroups;
 	if (gidsetsize) {
@@ -1376,7 +1479,7 @@ asmlinkage long sys_newuname(struct new_utsname __user * name)
 	int errno = 0;
 
 	down_read(&uts_sem);
-	if (copy_to_user(name,&system_utsname,sizeof *name))
+	if (copy_to_user(name, vx_new_utsname(), sizeof *name))
 		errno = -EFAULT;
 	up_read(&uts_sem);
 	return errno;
@@ -1387,37 +1490,45 @@ asmlinkage long sys_sethostname(char __user *name, int len)
 	int errno;
 	char tmp[__NEW_UTS_LEN];
 
-	if (!capable(CAP_SYS_ADMIN))
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SET_UTSNAME))
 		return -EPERM;
 	if (len < 0 || len > __NEW_UTS_LEN)
 		return -EINVAL;
 	down_write(&uts_sem);
 	errno = -EFAULT;
 	if (!copy_from_user(tmp, name, len)) {
-		memcpy(system_utsname.nodename, tmp, len);
-		system_utsname.nodename[len] = 0;
+		char *ptr = vx_new_uts(nodename);
+
+		memcpy(ptr, tmp, len);
+		ptr[len] = 0;
 		errno = 0;
 	}
 	up_write(&uts_sem);
 	return errno;
 }
 
+#ifdef __ARCH_WANT_SYS_GETHOSTNAME
+
 asmlinkage long sys_gethostname(char __user *name, int len)
 {
 	int i, errno;
+	char *ptr;
 
 	if (len < 0)
 		return -EINVAL;
 	down_read(&uts_sem);
-	i = 1 + strlen(system_utsname.nodename);
+	ptr = vx_new_uts(nodename);
+	i = 1 + strlen(ptr);
 	if (i > len)
 		i = len;
 	errno = 0;
-	if (copy_to_user(name, system_utsname.nodename, i))
+	if (copy_to_user(name, ptr, i))
 		errno = -EFAULT;
 	up_read(&uts_sem);
 	return errno;
 }
+
+#endif
 
 /*
  * Only setdomainname; getdomainname can be implemented by calling
@@ -1428,7 +1539,7 @@ asmlinkage long sys_setdomainname(char __user *name, int len)
 	int errno;
 	char tmp[__NEW_UTS_LEN];
 
-	if (!capable(CAP_SYS_ADMIN))
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SET_UTSNAME))
 		return -EPERM;
 	if (len < 0 || len > __NEW_UTS_LEN)
 		return -EINVAL;
@@ -1436,8 +1547,10 @@ asmlinkage long sys_setdomainname(char __user *name, int len)
 	down_write(&uts_sem);
 	errno = -EFAULT;
 	if (!copy_from_user(tmp, name, len)) {
-		memcpy(system_utsname.domainname, tmp, len);
-		system_utsname.domainname[len] = 0;
+		char *ptr = vx_new_uts(domainname);
+
+		memcpy(ptr, tmp, len);
+		ptr[len] = 0;
 		errno = 0;
 	}
 	up_write(&uts_sem);
@@ -1453,7 +1566,7 @@ asmlinkage long sys_getrlimit(unsigned int resource, struct rlimit __user *rlim)
 			? -EFAULT : 0;
 }
 
-#if defined(COMPAT_RLIM_OLD_INFINITY) || !(defined(CONFIG_IA64) || defined(CONFIG_V850))
+#ifdef __ARCH_WANT_SYS_OLD_GETRLIMIT
 
 /*
  *	Back compatibility for getrlimit. Needed for some apps.
@@ -1489,7 +1602,7 @@ asmlinkage long sys_setrlimit(unsigned int resource, struct rlimit __user *rlim)
 	old_rlim = current->rlim + resource;
 	if (((new_rlim.rlim_cur > old_rlim->rlim_max) ||
 	     (new_rlim.rlim_max > old_rlim->rlim_max)) &&
-	    !capable(CAP_SYS_RESOURCE))
+	    !capable(CAP_SYS_RESOURCE) && vx_ccaps(VXC_SET_RLIMIT))
 		return -EPERM;
 	if (resource == RLIMIT_NOFILE) {
 		if (new_rlim.rlim_cur > NR_OPEN || new_rlim.rlim_max > NR_OPEN)

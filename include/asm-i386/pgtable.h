@@ -16,32 +16,30 @@
 #include <asm/processor.h>
 #include <asm/fixmap.h>
 #include <linux/threads.h>
+#include <linux/slab.h>
 
 #ifndef _I386_BITOPS_H
 #include <asm/bitops.h>
 #endif
 
-#include <linux/slab.h>
-#include <linux/list.h>
-#include <linux/spinlock.h>
+extern pgd_t swapper_pg_dir[1024];
+extern kmem_cache_t *pgd_cache, *pmd_cache, *kpmd_cache;
+extern spinlock_t pgd_lock;
+extern struct page *pgd_list;
+void pmd_ctor(void *, kmem_cache_t *, unsigned long);
+void kpmd_ctor(void *, kmem_cache_t *, unsigned long);
+void pgd_ctor(void *, kmem_cache_t *, unsigned long);
+void pgd_dtor(void *, kmem_cache_t *, unsigned long);
+void pgtable_cache_init(void);
+extern void paging_init(void);
+void setup_identity_mappings(pgd_t *pgd_base, unsigned long start, unsigned long end);
 
 /*
  * ZERO_PAGE is a global shared page that is always zero: used
  * for zero-mapped memory areas etc..
  */
-#define ZERO_PAGE(vaddr) (virt_to_page(empty_zero_page))
 extern unsigned long empty_zero_page[1024];
-extern pgd_t swapper_pg_dir[1024];
-extern kmem_cache_t *pgd_cache;
-extern kmem_cache_t *pmd_cache;
-extern spinlock_t pgd_lock;
-extern struct page *pgd_list;
-
-void pmd_ctor(void *, kmem_cache_t *, unsigned long);
-void pgd_ctor(void *, kmem_cache_t *, unsigned long);
-void pgd_dtor(void *, kmem_cache_t *, unsigned long);
-void pgtable_cache_init(void);
-void paging_init(void);
+#define ZERO_PAGE(vaddr) (virt_to_page(empty_zero_page))
 
 #endif /* !__ASSEMBLY__ */
 
@@ -51,6 +49,11 @@ void paging_init(void);
  * newer 3-level PAE-mode page tables.
  */
 #ifndef __ASSEMBLY__
+
+extern void set_system_gate(unsigned int n, void *addr);
+extern void init_entry_mappings(void);
+extern void entry_trampoline_setup(void);
+
 #ifdef CONFIG_X86_PAE
 # include <asm/pgtable-3level.h>
 #else
@@ -63,7 +66,12 @@ void paging_init(void);
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
-#define USER_PTRS_PER_PGD	(TASK_SIZE/PGDIR_SIZE)
+#if defined(CONFIG_X86_PAE) && defined(CONFIG_X86_4G_VM_LAYOUT)
+# define USER_PTRS_PER_PGD	4
+#else
+# define USER_PTRS_PER_PGD	((TASK_SIZE/PGDIR_SIZE) + ((TASK_SIZE % PGDIR_SIZE) + PGDIR_SIZE-1)/PGDIR_SIZE)
+#endif
+
 #define FIRST_USER_PGD_NR	0
 
 #define USER_PGD_PTRS (PAGE_OFFSET >> PGDIR_SHIFT)
@@ -110,6 +118,7 @@ void paging_init(void);
 #define _PAGE_BIT_UNUSED1	9	/* available for programmer */
 #define _PAGE_BIT_UNUSED2	10
 #define _PAGE_BIT_UNUSED3	11
+#define _PAGE_BIT_NX		63
 
 #define _PAGE_PRESENT	0x001
 #define _PAGE_RW	0x002
@@ -126,28 +135,51 @@ void paging_init(void);
 
 #define _PAGE_FILE	0x040	/* set:pagecache unset:swap */
 #define _PAGE_PROTNONE	0x080	/* If not present */
+#ifdef CONFIG_X86_PAE
+#define _PAGE_NX	(1ULL<<_PAGE_BIT_NX)
+#else
+#define _PAGE_NX	0
+#endif
 
 #define _PAGE_TABLE	(_PAGE_PRESENT | _PAGE_RW | _PAGE_USER | _PAGE_ACCESSED | _PAGE_DIRTY)
 #define _KERNPG_TABLE	(_PAGE_PRESENT | _PAGE_RW | _PAGE_ACCESSED | _PAGE_DIRTY)
 #define _PAGE_CHG_MASK	(PTE_MASK | _PAGE_ACCESSED | _PAGE_DIRTY)
 
-#define PAGE_NONE	__pgprot(_PAGE_PROTNONE | _PAGE_ACCESSED)
-#define PAGE_SHARED	__pgprot(_PAGE_PRESENT | _PAGE_RW | _PAGE_USER | _PAGE_ACCESSED)
-#define PAGE_COPY	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
-#define PAGE_READONLY	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
+#define PAGE_NONE \
+	__pgprot(_PAGE_PROTNONE | _PAGE_ACCESSED)
+#define PAGE_SHARED \
+	__pgprot(_PAGE_PRESENT | _PAGE_RW | _PAGE_USER | _PAGE_ACCESSED)
+
+#define PAGE_SHARED_EXEC \
+	__pgprot(_PAGE_PRESENT | _PAGE_RW | _PAGE_USER | _PAGE_ACCESSED)
+#define PAGE_COPY_NOEXEC \
+	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED | _PAGE_NX)
+#define PAGE_COPY_EXEC \
+	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
+#define PAGE_COPY \
+	PAGE_COPY_NOEXEC
+#define PAGE_READONLY \
+	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED | _PAGE_NX)
+#define PAGE_READONLY_EXEC \
+	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
 
 #define _PAGE_KERNEL \
+	(_PAGE_PRESENT | _PAGE_RW | _PAGE_DIRTY | _PAGE_ACCESSED | _PAGE_NX)
+#define _PAGE_KERNEL_EXEC \
 	(_PAGE_PRESENT | _PAGE_RW | _PAGE_DIRTY | _PAGE_ACCESSED)
 
-extern unsigned long __PAGE_KERNEL;
-#define __PAGE_KERNEL_RO	(__PAGE_KERNEL & ~_PAGE_RW)
-#define __PAGE_KERNEL_NOCACHE	(__PAGE_KERNEL | _PAGE_PCD)
-#define __PAGE_KERNEL_LARGE	(__PAGE_KERNEL | _PAGE_PSE)
+extern unsigned long long __PAGE_KERNEL, __PAGE_KERNEL_EXEC;
+#define __PAGE_KERNEL_RO		(__PAGE_KERNEL & ~_PAGE_RW)
+#define __PAGE_KERNEL_NOCACHE		(__PAGE_KERNEL | _PAGE_PCD)
+#define __PAGE_KERNEL_LARGE		(__PAGE_KERNEL | _PAGE_PSE)
+#define __PAGE_KERNEL_LARGE_EXEC	(__PAGE_KERNEL_EXEC | _PAGE_PSE)
 
 #define PAGE_KERNEL		__pgprot(__PAGE_KERNEL)
 #define PAGE_KERNEL_RO		__pgprot(__PAGE_KERNEL_RO)
+#define PAGE_KERNEL_EXEC	__pgprot(__PAGE_KERNEL_EXEC)
 #define PAGE_KERNEL_NOCACHE	__pgprot(__PAGE_KERNEL_NOCACHE)
 #define PAGE_KERNEL_LARGE	__pgprot(__PAGE_KERNEL_LARGE)
+#define PAGE_KERNEL_LARGE_EXEC	__pgprot(__PAGE_KERNEL_LARGE_EXEC)
 
 /*
  * The i386 can't do page protection for execute, and considers that
@@ -158,19 +190,19 @@ extern unsigned long __PAGE_KERNEL;
 #define __P001	PAGE_READONLY
 #define __P010	PAGE_COPY
 #define __P011	PAGE_COPY
-#define __P100	PAGE_READONLY
-#define __P101	PAGE_READONLY
-#define __P110	PAGE_COPY
-#define __P111	PAGE_COPY
+#define __P100	PAGE_READONLY_EXEC
+#define __P101	PAGE_READONLY_EXEC
+#define __P110	PAGE_COPY_EXEC
+#define __P111	PAGE_COPY_EXEC
 
 #define __S000	PAGE_NONE
 #define __S001	PAGE_READONLY
 #define __S010	PAGE_SHARED
 #define __S011	PAGE_SHARED
-#define __S100	PAGE_READONLY
-#define __S101	PAGE_READONLY
-#define __S110	PAGE_SHARED
-#define __S111	PAGE_SHARED
+#define __S100	PAGE_READONLY_EXEC
+#define __S101	PAGE_READONLY_EXEC
+#define __S110	PAGE_SHARED_EXEC
+#define __S111	PAGE_SHARED_EXEC
 
 /*
  * Define this if things work differently on an i386 and an i486:
@@ -239,11 +271,21 @@ static inline void ptep_mkdirty(pte_t *ptep)			{ set_bit(_PAGE_BIT_DIRTY, &ptep-
 
 #define mk_pte(page, pgprot)	pfn_pte(page_to_pfn(page), (pgprot))
 #define mk_pte_huge(entry) ((entry).pte_low |= _PAGE_PRESENT | _PAGE_PSE)
+#define mk_pte_phys(physpage, pgprot) pfn_pte((physpage) >> PAGE_SHIFT, pgprot)
 
 static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 {
 	pte.pte_low &= _PAGE_CHG_MASK;
 	pte.pte_low |= pgprot_val(newprot);
+#ifdef CONFIG_X86_PAE
+	/*
+	 * Chop off the NX bit (if present), and add the NX portion of
+	 * the newprot (if present):
+	 */
+	pte.pte_high &= -1 ^ (1 << (_PAGE_BIT_NX - 32));
+	pte.pte_high |= (pgprot_val(newprot) >> 32) & \
+					(__supported_pte_mask >> 32);
+#endif
 	return pte;
 }
 
@@ -314,23 +356,25 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 #define pte_unmap_nested(pte) do { } while (0)
 #endif
 
-#if defined(CONFIG_HIGHPTE) && defined(CONFIG_HIGHMEM4G)
-typedef u32 pte_addr_t;
-#endif
-
-#if defined(CONFIG_HIGHPTE) && defined(CONFIG_HIGHMEM64G)
-typedef u64 pte_addr_t;
-#endif
-
-#if !defined(CONFIG_HIGHPTE)
-typedef pte_t *pte_addr_t;
-#endif
-
 /*
  * The i386 doesn't have any external MMU info: the kernel page
  * tables contain all the necessary information.
+ *
+ * Also, we only update the dirty/accessed state if we set
+ * the dirty bit by hand in the kernel, since the hardware
+ * will do the accessed bit for us, and we don't want to
+ * race with other CPU's that might be updating the dirty
+ * bit at the same time.
  */
 #define update_mmu_cache(vma,address,pte) do { } while (0)
+#define  __HAVE_ARCH_PTEP_SET_ACCESS_FLAGS
+#define ptep_set_access_flags(__vma, __address, __ptep, __entry, __dirty) \
+	do {								  \
+		if (__dirty) {						  \
+			(__ptep)->pte_low = (__entry).pte_low;	  	  \
+			flush_tlb_page(__vma, __address);		  \
+		}							  \
+	} while (0)
 
 /* Encode and de-code a swap entry */
 #define __swp_type(x)			(((x).val >> 1) & 0x1f)
@@ -354,5 +398,12 @@ typedef pte_t *pte_addr_t;
 #define __HAVE_ARCH_PTEP_MKDIRTY
 #define __HAVE_ARCH_PTE_SAME
 #include <asm-generic/pgtable.h>
+
+/*
+ * The size of the low 1:1 mappings we use during bootup,
+ * SMP-boot and ACPI-sleep:
+ */
+#define LOW_MAPPINGS_SIZE (16*1024*1024)
+
 
 #endif /* _I386_PGTABLE_H */

@@ -76,6 +76,8 @@ int sys_ptrace(long request, long pid, long addr, long data)
 	read_unlock(&tasklist_lock);
 	if (!child)
 		goto out;
+	if (!vx_check(vx_task_xid(child), VX_WATCH|VX_IDENT))
+		goto out_tsk;
 
 	ret = -EPERM;
 	if (pid == 1)		/* you may not mess with init */
@@ -101,7 +103,7 @@ int sys_ptrace(long request, long pid, long addr, long data)
 		ret = -EIO;
 		if (copied != sizeof(tmp))
 			break;
-		ret = put_user(tmp,(unsigned long *) data);
+		ret = put_user(tmp,(unsigned long __user *) data);
 		break;
 	}
 
@@ -123,7 +125,7 @@ int sys_ptrace(long request, long pid, long addr, long data)
 				giveup_fpu(child);
 			tmp = ((unsigned long *)child->thread.fpr)[index - PT_FPR0];
 		}
-		ret = put_user(tmp,(unsigned long *) data);
+		ret = put_user(tmp,(unsigned long __user *) data);
 		break;
 	}
 
@@ -213,7 +215,7 @@ int sys_ptrace(long request, long pid, long addr, long data)
 	case PPC_PTRACE_GETREGS: { /* Get GPRs 0 - 31. */
 		int i;
 		unsigned long *reg = &((unsigned long *)child->thread.regs)[0];
-		unsigned long *tmp = (unsigned long *)addr;
+		unsigned long __user *tmp = (unsigned long __user *)addr;
 
 		for (i = 0; i < 32; i++) {
 			ret = put_user(*reg, tmp);
@@ -228,7 +230,7 @@ int sys_ptrace(long request, long pid, long addr, long data)
 	case PPC_PTRACE_SETREGS: { /* Set GPRs 0 - 31. */
 		int i;
 		unsigned long *reg = &((unsigned long *)child->thread.regs)[0];
-		unsigned long *tmp = (unsigned long *)addr;
+		unsigned long __user *tmp = (unsigned long __user *)addr;
 
 		for (i = 0; i < 32; i++) {
 			ret = get_user(*reg, tmp);
@@ -243,7 +245,7 @@ int sys_ptrace(long request, long pid, long addr, long data)
 	case PPC_PTRACE_GETFPREGS: { /* Get FPRs 0 - 31. */
 		int i;
 		unsigned long *reg = &((unsigned long *)child->thread.fpr)[0];
-		unsigned long *tmp = (unsigned long *)addr;
+		unsigned long __user *tmp = (unsigned long __user *)addr;
 
 		if (child->thread.regs->msr & MSR_FP)
 			giveup_fpu(child);
@@ -261,7 +263,7 @@ int sys_ptrace(long request, long pid, long addr, long data)
 	case PPC_PTRACE_SETFPREGS: { /* Get FPRs 0 - 31. */
 		int i;
 		unsigned long *reg = &((unsigned long *)child->thread.fpr)[0];
-		unsigned long *tmp = (unsigned long *)addr;
+		unsigned long __user *tmp = (unsigned long __user *)addr;
 
 		if (child->thread.regs->msr & MSR_FP)
 			giveup_fpu(child);

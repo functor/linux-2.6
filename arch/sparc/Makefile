@@ -13,6 +13,7 @@
 
 AS              := $(AS) -32
 LDFLAGS		:= -m elf32_sparc
+CHECK		:= $(CHECK) -D__sparc__=1
 
 #CFLAGS := $(CFLAGS) -g -pipe -fcall-used-g5 -fcall-used-g7
 CFLAGS := $(CFLAGS) -m32 -pipe -mno-fpu -fcall-used-g5 -fcall-used-g7
@@ -51,6 +52,9 @@ export INIT_Y CORE_Y DRIVERS_Y NET_Y LIBS_Y HEAD_Y kallsyms.o
 all: image
 
 boot := arch/sparc/boot
+
+bzImage: image
+	cp $(boot)/image $(boot)/bzImage
 
 image tftpboot.img: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@

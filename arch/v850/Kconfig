@@ -334,6 +334,8 @@ config NO_KERNEL_MSG
 
 endmenu
 
+source "kernel/vserver/Kconfig"
+
 source "security/Kconfig"
 
 source "crypto/Kconfig"

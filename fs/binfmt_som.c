@@ -259,7 +259,8 @@ load_som_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	create_som_tables(bprm);
 
 	current->mm->start_stack = bprm->p;
-	current->mm->rss = 0;
+	// current->mm->rss = 0;
+	vx_rsspages_sub(current->mm, current->mm->rss);
 
 #if 0
 	printk("(start_brk) %08lx\n" , (unsigned long) current->mm->start_brk);
@@ -305,5 +306,5 @@ static void __exit exit_som_binfmt(void)
 	unregister_binfmt(&som_format);
 }
 
-module_init(init_som_binfmt);
+core_initcall(init_som_binfmt);
 module_exit(exit_som_binfmt);
