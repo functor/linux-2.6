@@ -52,19 +52,23 @@ enum ip_conntrack_status {
 
 #include <linux/netfilter_ipv4/ip_conntrack_tcp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_icmp.h>
+#include <linux/netfilter_ipv4/ip_conntrack_proto_gre.h>
 
 /* per conntrack: protocol private data */
 union ip_conntrack_proto {
 	/* insert conntrack proto private data here */
+	struct ip_ct_gre gre;
 	struct ip_ct_tcp tcp;
 	struct ip_ct_icmp icmp;
 };
 
 union ip_conntrack_expect_proto {
 	/* insert expect proto private data here */
+	struct ip_ct_gre_expect gre;
 };
 
 /* Add protocol helper include file here */
+#include <linux/netfilter_ipv4/ip_conntrack_pptp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_amanda.h>
 #include <linux/netfilter_ipv4/ip_conntrack_ftp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_irc.h>
@@ -72,6 +76,7 @@ union ip_conntrack_expect_proto {
 /* per expectation: application helper private data */
 union ip_conntrack_expect_help {
 	/* insert conntrack helper private data (expect) here */
+	struct ip_ct_pptp_expect exp_pptp_info;
 	struct ip_ct_amanda_expect exp_amanda_info;
 	struct ip_ct_ftp_expect exp_ftp_info;
 	struct ip_ct_irc_expect exp_irc_info;
@@ -86,16 +91,19 @@ union ip_conntrack_expect_help {
 /* per conntrack: application helper private data */
 union ip_conntrack_help {
 	/* insert conntrack helper private data (master) here */
+	struct ip_ct_pptp_master ct_pptp_info;
 	struct ip_ct_ftp_master ct_ftp_info;
 	struct ip_ct_irc_master ct_irc_info;
 };
 
 #ifdef CONFIG_IP_NF_NAT_NEEDED
 #include <linux/netfilter_ipv4/ip_nat.h>
+#include <linux/netfilter_ipv4/ip_nat_pptp.h>
 
 /* per conntrack: nat application helper private data */
 union ip_conntrack_nat_help {
 	/* insert nat helper private data here */
+	struct ip_nat_pptp nat_pptp_info;
 };
 #endif
 
@@ -157,6 +165,12 @@ struct ip_conntrack_expect
 	union ip_conntrack_expect_help help;
 };
 
+struct ip_conntrack_counter
+{
+	u_int64_t packets;
+	u_int64_t bytes;
+};
+
 struct ip_conntrack_helper;
 
 struct ip_conntrack
@@ -173,6 +187,11 @@ struct ip_conntrack
 
 	/* Timer function; drops refcnt when it goes off. */
 	struct timer_list timeout;
+
+#ifdef CONFIG_IP_NF_CT_ACCT
+	/* Accounting Information (same cache line as other written members) */
+	struct ip_conntrack_counter counters[IP_CT_DIR_MAX];
+#endif
 
 	/* If we're expecting another related connection, this will be
            in expected linked list */
@@ -249,8 +268,10 @@ extern int invert_tuplepr(struct ip_conntrack_tuple *inverse,
 			  const struct ip_conntrack_tuple *orig);
 
 /* Refresh conntrack for this many jiffies */
-extern void ip_ct_refresh(struct ip_conntrack *ct,
-			  unsigned long extra_jiffies);
+extern void ip_ct_refresh_acct(struct ip_conntrack *ct,
+			       enum ip_conntrack_info ctinfo,
+			       const struct sk_buff *skb,
+			       unsigned long extra_jiffies);
 
 /* These are for NAT.  Icky. */
 /* Call me when a conntrack is destroyed. */
