@@ -191,8 +191,8 @@ int stdio_init(void)
 
 late_initcall(stdio_init);
 
-static void uml_console_write(struct console *console, const char *string, 
-			      unsigned len)
+static void console_write(struct console *console, const char *string, 
+			  unsigned len)
 {
 	struct line *line = &vts[console->index];
 
@@ -203,22 +203,22 @@ static void uml_console_write(struct console *console, const char *string,
 		up(&line->sem);
 }
 
-static struct tty_driver *uml_console_device(struct console *c, int *index)
+static struct tty_driver *console_device(struct console *c, int *index)
 {
 	*index = c->index;
 	return console_driver;
 }
 
-static int uml_console_setup(struct console *co, char *options)
+static int console_setup(struct console *co, char *options)
 {
 	return(0);
 }
 
 static struct console stdiocons = {
 	name:		"tty",
-	write:		uml_console_write,
-	device:		uml_console_device,
-	setup:		uml_console_setup,
+	write:		console_write,
+	device:		console_device,
+	setup:		console_setup,
 	flags:		CON_PRINTBUFFER,
 	index:		-1,
 };

@@ -118,9 +118,10 @@
 #include <linux/mount.h>
 #include <net/checksum.h>
 #include <linux/security.h>
+
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
-#include <linux/vs_limit.h>
+
 
 int sysctl_unix_max_dgram_qlen = 10;
 
@@ -408,7 +409,6 @@ static int unix_release_sock (struct sock *sk, int embrion)
 		mntput(mnt);
 	}
 
-	vx_sock_dec(sk);
 	clr_vx_info(&sk->sk_vx_info);
 	clr_nx_info(&sk->sk_nx_info);
 	sock_put(sk);
@@ -566,9 +566,8 @@ static struct sock * unix_create1(struct socket *sock)
 	sk_set_owner(sk, THIS_MODULE);
 
 	set_vx_info(&sk->sk_vx_info, current->vx_info);
-	sk->sk_xid = vx_current_xid();
-	vx_sock_inc(sk);
 	set_nx_info(&sk->sk_nx_info, current->nx_info);
+	sk->sk_xid = vx_current_xid();
 
 	sk->sk_write_space	= unix_write_space;
 	sk->sk_max_ack_backlog	= sysctl_unix_max_dgram_qlen;

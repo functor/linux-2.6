@@ -967,7 +967,6 @@ extern int  tcp_transmit_skb(struct sock *, struct sk_buff *);
 extern void tcp_push_one(struct sock *, unsigned mss_now);
 extern void tcp_send_ack(struct sock *sk);
 extern void tcp_send_delayed_ack(struct sock *sk);
-extern void cleanup_rbuf(struct sock *sk, int copied);
 
 /* tcp_timer.c */
 extern void tcp_init_xmit_timers(struct sock *);
@@ -1386,9 +1385,8 @@ static __inline__ void tcp_minshall_update(struct tcp_opt *tp, int mss, struct s
 /* Return 0, if packet can be sent now without violation Nagle's rules:
    1. It is full sized.
    2. Or it contains FIN.
-   3. Or higher layers meant to force a packet boundary, hence the PSH bit.
-   4. Or TCP_NODELAY was set.
-   5. Or TCP_CORK is not set, and all sent packets are ACKed.
+   3. Or TCP_NODELAY was set.
+   4. Or TCP_CORK is not set, and all sent packets are ACKed.
       With Minshall's modification: all sent small packets are ACKed.
  */
 
@@ -1553,7 +1551,7 @@ static __inline__ int tcp_prequeue(struct sock *sk, struct sk_buff *skb)
 
 			while ((skb1 = __skb_dequeue(&tp->ucopy.prequeue)) != NULL) {
 				sk->sk_backlog_rcv(sk, skb1);
-				NET_INC_STATS_BH(LINUX_MIB_TCPPREQUEUEDROPPED);
+				NET_INC_STATS_BH(TCPPrequeueDropped);
 			}
 
 			tp->ucopy.memory = 0;
@@ -1585,12 +1583,12 @@ static __inline__ void tcp_set_state(struct sock *sk, int state)
 	switch (state) {
 	case TCP_ESTABLISHED:
 		if (oldstate != TCP_ESTABLISHED)
-			TCP_INC_STATS(TCP_MIB_CURRESTAB);
+			TCP_INC_STATS(TcpCurrEstab);
 		break;
 
 	case TCP_CLOSE:
 		if (oldstate == TCP_CLOSE_WAIT || oldstate == TCP_ESTABLISHED)
-			TCP_INC_STATS(TCP_MIB_ESTABRESETS);
+			TCP_INC_STATS(TcpEstabResets);
 
 		sk->sk_prot->unhash(sk);
 		if (tcp_sk(sk)->bind_hash &&
@@ -1599,7 +1597,7 @@ static __inline__ void tcp_set_state(struct sock *sk, int state)
 		/* fall through */
 	default:
 		if (oldstate==TCP_ESTABLISHED)
-			TCP_DEC_STATS(TCP_MIB_CURRESTAB);
+			TCP_DEC_STATS(TcpCurrEstab);
 	}
 
 	/* Change state AFTER socket is unhashed to avoid closed
@@ -2075,10 +2073,10 @@ static inline int tcp_use_frto(const struct sock *sk)
 static inline void tcp_mib_init(void)
 {
 	/* See RFC 2012 */
-	TCP_ADD_STATS_USER(TCP_MIB_RTOALGORITHM, 1);
-	TCP_ADD_STATS_USER(TCP_MIB_RTOMIN, TCP_RTO_MIN*1000/HZ);
-	TCP_ADD_STATS_USER(TCP_MIB_RTOMAX, TCP_RTO_MAX*1000/HZ);
-	TCP_ADD_STATS_USER(TCP_MIB_MAXCONN, -1);
+	TCP_ADD_STATS_USER(TcpRtoAlgorithm, 1);
+	TCP_ADD_STATS_USER(TcpRtoMin, TCP_RTO_MIN*1000/HZ);
+	TCP_ADD_STATS_USER(TcpRtoMax, TCP_RTO_MAX*1000/HZ);
+	TCP_ADD_STATS_USER(TcpMaxConn, -1);
 }
 
 /* /proc */

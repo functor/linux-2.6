@@ -641,7 +641,7 @@ nfsd_read_actor(read_descriptor_t *desc, struct page *page, unsigned long offset
  */
 int
 nfsd_read(struct svc_rqst *rqstp, struct svc_fh *fhp, loff_t offset,
-          struct kvec *vec, int vlen, unsigned long *count)
+          struct iovec *vec, int vlen, unsigned long *count)
 {
 	struct raparms	*ra;
 	mm_segment_t	oldfs;
@@ -673,7 +673,7 @@ nfsd_read(struct svc_rqst *rqstp, struct svc_fh *fhp, loff_t offset,
 	} else {
 		oldfs = get_fs();
 		set_fs(KERNEL_DS);
-		err = vfs_readv(&file, (struct iovec __user *)vec, vlen, &offset);
+		err = vfs_readv(&file, vec, vlen, &offset);
 		set_fs(oldfs);
 	}
 
@@ -704,7 +704,7 @@ out:
  */
 int
 nfsd_write(struct svc_rqst *rqstp, struct svc_fh *fhp, loff_t offset,
-				struct kvec *vec, int vlen,
+				struct iovec *vec, int vlen,
 	   			unsigned long cnt, int *stablep)
 {
 	struct svc_export	*exp;
@@ -753,7 +753,7 @@ nfsd_write(struct svc_rqst *rqstp, struct svc_fh *fhp, loff_t offset,
 
 	/* Write the data. */
 	oldfs = get_fs(); set_fs(KERNEL_DS);
-	err = vfs_writev(&file, (struct iovec __user *)vec, vlen, &offset);
+	err = vfs_writev(&file, vec, vlen, &offset);
 	set_fs(oldfs);
 	if (err >= 0) {
 		nfsdstats.io_write += cnt;
@@ -1556,8 +1556,7 @@ nfsd_permission(struct svc_export *exp, struct dentry *dentry, int acc)
 	 */
 	if (!(acc & MAY_LOCAL_ACCESS))
 		if (acc & (MAY_WRITE | MAY_SATTR | MAY_TRUNC)) {
-			if (EX_RDONLY(exp) || IS_RDONLY(inode)
-				|| (exp && MNT_IS_RDONLY(exp->ex_mnt)))
+			if (EX_RDONLY(exp) || IS_RDONLY(inode))
 				return nfserr_rofs;
 			if (/* (acc & MAY_WRITE) && */ IS_IMMUTABLE(inode))
 				return nfserr_perm;

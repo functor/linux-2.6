@@ -131,7 +131,7 @@ out:
 	return error;
 }
 
-int dupfd(struct file *file, unsigned int start)
+static int dupfd(struct file *file, unsigned int start)
 {
 	struct files_struct * files = current->files;
 	int fd;
@@ -142,7 +142,7 @@ int dupfd(struct file *file, unsigned int start)
 		FD_SET(fd, files->open_fds);
 		FD_CLR(fd, files->close_on_exec);
 		spin_unlock(&files->file_lock);
-		// vx_openfd_inc(fd);
+		vx_openfd_inc(fd);
 		fd_install(fd, file);
 	} else {
 		spin_unlock(&files->file_lock);
@@ -151,8 +151,6 @@ int dupfd(struct file *file, unsigned int start)
 
 	return fd;
 }
-
-EXPORT_SYMBOL_GPL(dupfd);
 
 asmlinkage long sys_dup2(unsigned int oldfd, unsigned int newfd)
 {
@@ -192,7 +190,7 @@ asmlinkage long sys_dup2(unsigned int oldfd, unsigned int newfd)
 	FD_SET(newfd, files->open_fds);
 	FD_CLR(newfd, files->close_on_exec);
 	spin_unlock(&files->file_lock);
-	// vx_openfd_inc(newfd);
+	vx_openfd_inc(newfd);
 
 	if (tofree)
 		filp_close(tofree, files);
@@ -246,11 +244,6 @@ static int setfl(int fd, struct file * filp, unsigned long arg)
 				return -EINVAL;
 	}
 
-	if (filp->f_op && filp->f_op->check_flags)
-		error = filp->f_op->check_flags(arg);
-	if (error)
-		return error;
-
 	lock_kernel();
 	if ((arg ^ filp->f_flags) & FASYNC) {
 		if (filp->f_op && filp->f_op->fasync) {
@@ -299,8 +292,8 @@ void f_delown(struct file *filp)
 
 EXPORT_SYMBOL(f_delown);
 
-static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
-		struct file *filp)
+long generic_file_fcntl(int fd, unsigned int cmd,
+			unsigned long arg, struct file *filp)
 {
 	long err = -EINVAL;
 
@@ -367,6 +360,15 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 		break;
 	}
 	return err;
+}
+EXPORT_SYMBOL(generic_file_fcntl);
+
+static long do_fcntl(int fd, unsigned int cmd,
+			unsigned long arg, struct file *filp)
+{
+	if (filp->f_op && filp->f_op->fcntl)
+		return filp->f_op->fcntl(fd, cmd, arg, filp);
+	return generic_file_fcntl(fd, cmd, arg, filp);
 }
 
 asmlinkage long sys_fcntl(int fd, unsigned int cmd, unsigned long arg)

@@ -27,6 +27,7 @@
 #include "user_util.h"
 #include "kern_util.h"
 #include "kern.h"
+#include "mprot.h"
 #include "mem_user.h"
 #include "mem.h"
 #include "umid.h"
@@ -305,7 +306,7 @@ unsigned long end_iomem;
 
 int linux_main(int argc, char **argv)
 {
-	unsigned long avail, diff;
+	unsigned long avail;
 	unsigned long virtmem_size, max_physmem;
 	unsigned int i, add;
 
@@ -323,16 +324,6 @@ int linux_main(int argc, char **argv)
 
 	brk_start = (unsigned long) sbrk(0);
 	CHOOSE_MODE_PROC(before_mem_tt, before_mem_skas, brk_start);
-	/* Increase physical memory size for exec-shield users
-	so they actually get what they asked for. This should
-	add zero for non-exec shield users */
-	
-	diff = UML_ROUND_UP(brk_start) - UML_ROUND_UP(&_end);
-	if(diff > 1024 * 1024){
-		printf("Adding %ld bytes to physical memory to account for "
-		       "exec-shield gap\n", diff);
-		physmem_size += UML_ROUND_UP(brk_start) - UML_ROUND_UP(&_end);
-	}
 
 	uml_physmem = uml_start;
 
@@ -388,6 +379,9 @@ int linux_main(int argc, char **argv)
 		       virtmem_size);
 
   	uml_postsetup();
+
+	init_task.thread.kernel_stack = (unsigned long) &init_thread_info + 
+		2 * PAGE_SIZE;
 
 	task_protections((unsigned long) &init_thread_info);
 	os_flush_stdout();

@@ -331,18 +331,6 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 				clear_bit(SOCK_PASS_CRED, &sock->flags);
 			break;
 
-		case SO_SETXID:
-			if (current->xid) {
-				ret = -EPERM;
-				break;
-			}
-			if (val < 0 || val > MAX_S_CONTEXT) {
-				ret = -EINVAL;
-				break;
-			}
-			sk->sk_xid = val;
-			break;
-
 		case SO_TIMESTAMP:
 			sk->sk_rcvtstamp = valbool;
 			if (valbool) 
@@ -670,9 +658,19 @@ void sk_free(struct sock *sk)
 		printk(KERN_DEBUG "%s: optmem leakage (%d bytes) detected.\n",
 		       __FUNCTION__, atomic_read(&sk->sk_omem_alloc));
 
+	/*
+	 * If sendmsg cached page exists, toss it.
+	 */
+	if (sk->sk_sndmsg_page) {
+		__free_page(sk->sk_sndmsg_page);
+		sk->sk_sndmsg_page = NULL;
+	}
+
 	security_sk_free(sk);
 	BUG_ON(sk->sk_vx_info);
 	BUG_ON(sk->sk_nx_info);
+/*	clr_vx_info(&sk->sk_vx_info);
+	clr_nx_info(&sk->sk_nx_info);	*/
 	kmem_cache_free(sk->sk_slab, sk);
 	module_put(owner);
 }
@@ -1077,12 +1075,30 @@ int sock_no_mmap(struct file *file, struct socket *sock, struct vm_area_struct *
 ssize_t sock_no_sendpage(struct socket *sock, struct page *page, int offset, size_t size, int flags)
 {
 	ssize_t res;
-	struct msghdr msg = {.msg_flags = flags};
-	struct kvec iov;
-	char *kaddr = kmap(page);
-	iov.iov_base = kaddr + offset;
+	struct msghdr msg;
+	struct iovec iov;
+	mm_segment_t old_fs;
+	char *kaddr;
+
+	kaddr = kmap(page);
+
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	msg.msg_control = NULL;
+	msg.msg_controllen = 0;
+	msg.msg_flags = flags;
+
+	/* This cast is ok because of the "set_fs(KERNEL_DS)" */
+	iov.iov_base = (void __user *) (kaddr + offset);
 	iov.iov_len = size;
-	res = kernel_sendmsg(sock, &msg, &iov, 1, size);
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	res = sock_sendmsg(sock, &msg, size);
+	set_fs(old_fs);
+
 	kunmap(page);
 	return res;
 }

@@ -31,8 +31,7 @@ static struct dl_info *__alloc_dl_info(struct super_block *sb, xid_t xid)
 {
 	struct dl_info *new = NULL;
 	
-	vxdprintk(VXD_CBIT(dlim, 5),
-		"alloc_dl_info(%p,%d)*", sb, xid);
+	vxdprintk("alloc_dl_info(%p,%d)\n", sb, xid);
 
 	/* would this benefit from a slab cache? */
 	new = kmalloc(sizeof(struct dl_info), GFP_KERNEL);
@@ -50,8 +49,7 @@ static struct dl_info *__alloc_dl_info(struct super_block *sb, xid_t xid)
 
 	/* rest of init goes here */
 
-	vxdprintk(VXD_CBIT(dlim, 4),
-		"alloc_dl_info(%p,%d) = %p", sb, xid, new);
+	vxdprintk("alloc_dl_info(%p,%d) = %p\n", sb, xid, new);
 	return new;
 }
 
@@ -61,8 +59,7 @@ static struct dl_info *__alloc_dl_info(struct super_block *sb, xid_t xid)
 
 static void __dealloc_dl_info(struct dl_info *dli)
 {
-	vxdprintk(VXD_CBIT(dlim, 4),
-		"dealloc_dl_info(%p)", dli);
+	vxdprintk("dealloc_dl_info(%p)\n", dli);
 
 	dli->dl_hlist.next = LIST_POISON1;
 	dli->dl_xid = -1;
@@ -86,7 +83,7 @@ static spinlock_t dl_info_hash_lock = SPIN_LOCK_UNLOCKED;
 
 static inline unsigned int __hashval(struct super_block *sb, xid_t xid)
 {
-	return ((xid ^ (unsigned long)sb) % DL_HASH_SIZE);
+	return ((xid ^ (unsigned int)sb) % DL_HASH_SIZE);
 }
 
 
@@ -100,8 +97,7 @@ static inline void __hash_dl_info(struct dl_info *dli)
 {
 	struct hlist_head *head;
 	
-	vxdprintk(VXD_CBIT(dlim, 6),
-		"__hash_dl_info: %p[#%d]", dli, dli->dl_xid);
+	vxdprintk("__hash_dl_info: %p[#%d]\n", dli, dli->dl_xid);
 	get_dl_info(dli);
 	head = &dl_info_hash[__hashval(dli->dl_sb, dli->dl_xid)];
 	hlist_add_head_rcu(&dli->dl_hlist, head);
@@ -114,8 +110,7 @@ static inline void __hash_dl_info(struct dl_info *dli)
 
 static inline void __unhash_dl_info(struct dl_info *dli)
 {
-	vxdprintk(VXD_CBIT(dlim, 6),
-		"__unhash_dl_info: %p[#%d]", dli, dli->dl_xid);
+	vxdprintk("__unhash_dl_info: %p[#%d]\n", dli, dli->dl_xid);
 	hlist_del_rcu(&dli->dl_hlist);
 	put_dl_info(dli);
 }
@@ -154,15 +149,13 @@ struct dl_info *locate_dl_info(struct super_block *sb, xid_t xid)
 
 	rcu_read_lock();
 	dli = get_dl_info(__lookup_dl_info(sb, xid));
-	vxdprintk(VXD_CBIT(dlim, 7),
-		"locate_dl_info(%p,#%d) = %p", sb, xid, dli);
 	rcu_read_unlock();
         return dli;
 }
 
 void rcu_free_dl_info(struct rcu_head *head)
 {
-	struct dl_info *dli = container_of(head, struct dl_info, dl_rcu);
+        struct dl_info *dli = container_of(head, struct dl_info, dl_rcu);
 	int usecnt, refcnt;
 
 	BUG_ON(!dli || !head);
@@ -173,8 +166,6 @@ void rcu_free_dl_info(struct rcu_head *head)
 	refcnt = atomic_read(&dli->dl_refcnt);
 	BUG_ON(refcnt < 0);
 
-	vxdprintk(VXD_CBIT(dlim, 3),
-		"rcu_free_dl_info(%p)", dli);
 	if (!usecnt)
 		__dealloc_dl_info(dli);
 	else
@@ -445,11 +436,4 @@ no_blim:
 	
 	return;	
 }
-
-#include <linux/module.h>
-
-EXPORT_SYMBOL_GPL(locate_dl_info);
-EXPORT_SYMBOL_GPL(rcu_free_dl_info);
-// EXPORT_SYMBOL_GPL(dl_info_hash_lock);
-// EXPORT_SYMBOL_GPL(unhash_dl_info);
 

@@ -2295,7 +2295,7 @@ static struct snd_ice1712_card_info *card_tables[] __devinitdata = {
 	snd_ice1712_hoontech_cards,
 	snd_ice1712_delta_cards,
 	snd_ice1712_ews_cards,
-	NULL,
+	0,
 };
 
 static unsigned char __devinit snd_ice1712_read_i2c(ice1712_t *ice,

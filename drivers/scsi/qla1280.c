@@ -3667,7 +3667,7 @@ static request_t *
 qla1280_req_pkt(struct scsi_qla_host *ha)
 {
 	struct device_reg *reg = ha->iobase;
-	request_t *pkt = NULL;
+	request_t *pkt = 0;
 	int cnt;
 	uint32_t timer;
 
@@ -3774,7 +3774,7 @@ qla1280_isr(struct scsi_qla_host *ha, struct list_head *done_q)
 {
 	struct device_reg *reg = ha->iobase;
 	struct response *pkt;
-	struct srb *sp = NULL;
+	struct srb *sp = 0;
 	uint16_t mailbox[MAILBOX_REGISTER_COUNT];
 	uint16_t *wptr;
 	uint32_t index;
@@ -3832,11 +3832,11 @@ qla1280_isr(struct scsi_qla_host *ha, struct list_head *done_q)
 				if (index < MAX_OUTSTANDING_COMMANDS)
 					sp = ha->outstanding_cmds[index];
 				else
-					sp = NULL;
+					sp = 0;
 
 				if (sp) {
 					/* Free outstanding command slot. */
-					ha->outstanding_cmds[index] = NULL;
+					ha->outstanding_cmds[index] = 0;
 
 					/* Save ISP completion status */
 					CMD_RESULT(sp->cmd) = 0;
@@ -4095,7 +4095,7 @@ qla1280_status_entry(struct scsi_qla_host *ha, struct response *pkt,
 	}
 
 	/* Free outstanding command slot. */
-	ha->outstanding_cmds[handle] = NULL;
+	ha->outstanding_cmds[handle] = 0;
 
 	cmd = sp->cmd;
 
@@ -4188,11 +4188,11 @@ qla1280_error_entry(struct scsi_qla_host *ha, struct response *pkt,
 	if (handle < MAX_OUTSTANDING_COMMANDS)
 		sp = ha->outstanding_cmds[handle];
 	else
-		sp = NULL;
+		sp = 0;
 
 	if (sp) {
 		/* Free outstanding command slot. */
-		ha->outstanding_cmds[handle] = NULL;
+		ha->outstanding_cmds[handle] = 0;
 
 		/* Bad payload or header */
 		if (pkt->entry_status & (BIT_3 + BIT_2)) {

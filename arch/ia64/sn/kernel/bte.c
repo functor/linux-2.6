@@ -16,6 +16,7 @@
 #include <asm/sn/pda.h>
 #include <asm/sn/sn2/shubio.h>
 #include <asm/nodedata.h>
+#include <asm/delay.h>
 
 #include <linux/bootmem.h>
 #include <linux/string.h>
@@ -70,7 +71,6 @@ bte_result_t
 bte_copy(u64 src, u64 dest, u64 len, u64 mode, void *notification)
 {
 	u64 transfer_size;
-	u64 transfer_stat;
 	struct bteinfo_s *bte;
 	bte_result_t bte_status;
 	unsigned long irq_flags;
@@ -148,6 +148,9 @@ bte_copy(u64 src, u64 dest, u64 len, u64 mode, void *notification)
 		if (!(mode & BTE_WACQUIRE)) {
 			return BTEFAIL_NOTAVAIL;
 		}
+
+		/* Wait until a bte is available. */
+		udelay(1);
 	} while (1);
 
 
@@ -191,15 +194,15 @@ bte_copy(u64 src, u64 dest, u64 len, u64 mode, void *notification)
 		return BTE_SUCCESS;
 	}
 
-	while ((transfer_stat = *bte->most_rcnt_na) == -1UL) {
+	while (*bte->most_rcnt_na == -1UL) {
 	}
 
 
 	BTE_PRINTKV((" Delay Done.  IBLS = 0x%lx, most_rcnt_na = 0x%lx\n",
 				BTE_LNSTAT_LOAD(bte), *bte->most_rcnt_na));
 
-	if (transfer_stat & IBLS_ERROR) {
-		bte_status = transfer_stat & ~IBLS_ERROR;
+	if (*bte->most_rcnt_na & IBLS_ERROR) {
+		bte_status = *bte->most_rcnt_na & ~IBLS_ERROR;
 		*bte->most_rcnt_na = 0L;
 	} else {
 		bte_status = BTE_SUCCESS;
