@@ -4,7 +4,7 @@
  *	Authors:	Alan Cox <iiitac@pyr.swan.ac.uk>
  *			Florian La Roche <rzsfl@rz.uni-sb.de>
  *
- *	Version:	$Id: skbuff.c,v 1.90 2001/11/07 05:56:19 davem Exp $
+ *	Version:	$Id$
  *
  *	Fixes:
  *		Alan Cox	:	Fixed the worst of the load
@@ -333,7 +333,9 @@ struct sk_buff *skb_clone(struct sk_buff *skb, int gfp_mask)
 #endif
 
 #endif
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	C(xid);
+#endif
 	C(truesize);
 	atomic_set(&n->users, 1);
 	C(head);
@@ -392,7 +394,9 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 #endif
 	new->tc_index	= old->tc_index;
 #endif
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	new->xid	= old->xid;
+#endif
 	atomic_set(&new->users, 1);
 }
 
