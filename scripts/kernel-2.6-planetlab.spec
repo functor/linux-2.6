@@ -62,6 +62,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 #
 %define kernel_prereq  fileutils, module-init-tools, initscripts >= 5.83, mkinitrd >= 3.5.5
 
+Vendor: PlanetLab
+Packager: PlanetLab Central <support@planet-lab.org>
+Distribution: PlanetLab 3.0
+URL: http://cvs.planet-lab.org/cvs/linux-2.6
+
 Name: kernel
 Group: System Environment/Kernel
 License: GPLv2
