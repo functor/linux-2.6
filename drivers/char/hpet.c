@@ -1,8 +1,14 @@
 /*
  * Intel & MS High Precision Event Timer Implementation.
- * Contributors:
+ *
+ * Copyright (C) 2003 Intel Corporation
  *	Venki Pallipadi
- * 	Bob Picco
+ * (c) Copyright 2004 Hewlett-Packard Development Company, L.P.
+ *	Bob Picco <robert.picco@hp.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/config.h>
@@ -50,6 +56,8 @@ static spinlock_t hpet_lock = SPIN_LOCK_UNLOCKED;
 /* A lock for concurrent intermodule access to hpet and isr hpet activity. */
 static spinlock_t hpet_task_lock = SPIN_LOCK_UNLOCKED;
 
+#define	HPET_DEV_NAME	(7)
+
 struct hpet_dev {
 	struct hpets *hd_hpets;
 	struct hpet *hd_hpet;
@@ -62,6 +70,7 @@ struct hpet_dev {
 	unsigned int hd_flags;
 	unsigned int hd_irq;
 	unsigned int hd_hdwirq;
+	char hd_name[HPET_DEV_NAME];
 };
 
 struct hpets {
@@ -148,6 +157,9 @@ static int hpet_open(struct inode *inode, struct file *file)
 	struct hpets *hpetp;
 	int i;
 
+	if (file->f_mode & FMODE_WRITE)
+		return -EINVAL;
+
 	spin_lock_irq(&hpet_lock);
 
 	for (devp = NULL, hpetp = hpets; hpetp && !devp; hpetp = hpetp->hp_next)
@@ -174,7 +186,7 @@ static int hpet_open(struct inode *inode, struct file *file)
 }
 
 static ssize_t
-hpet_read(struct file *file, char *buf, size_t count, loff_t * ppos)
+hpet_read(struct file *file, char __user *buf, size_t count, loff_t * ppos)
 {
 	DECLARE_WAITQUEUE(wait, current);
 	unsigned long data;
@@ -190,8 +202,8 @@ hpet_read(struct file *file, char *buf, size_t count, loff_t * ppos)
 
 	add_wait_queue(&devp->hd_waitqueue, &wait);
 
-	do {
-		__set_current_state(TASK_INTERRUPTIBLE);
+	for ( ; ; ) {
+		set_current_state(TASK_INTERRUPTIBLE);
 
 		spin_lock_irq(&hpet_lock);
 		data = devp->hd_irqdata;
@@ -207,16 +219,14 @@ hpet_read(struct file *file, char *buf, size_t count, loff_t * ppos)
 			retval = -ERESTARTSYS;
 			goto out;
 		}
-
 		schedule();
+	}
 
-	} while (1);
-
-	retval = put_user(data, (unsigned long *)buf);
+	retval = put_user(data, (unsigned long __user *)buf);
 	if (!retval)
 		retval = sizeof(unsigned long);
-      out:
-	current->state = TASK_RUNNING;
+out:
+	__set_current_state(TASK_RUNNING);
 	remove_wait_queue(&devp->hd_waitqueue, &wait);
 
 	return retval;
@@ -246,17 +256,12 @@ static unsigned int hpet_poll(struct file *file, poll_table * wait)
 
 static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
 {
-#ifdef	CONFIG_HPET_NOMMAP
-	return -ENOSYS;
-#else
+#ifdef	CONFIG_HPET_MMAP
 	struct hpet_dev *devp;
 	unsigned long addr;
 
 	if (((vma->vm_end - vma->vm_start) != PAGE_SIZE) || vma->vm_pgoff)
 		return -EINVAL;
-
-	if (vma->vm_flags & VM_WRITE)
-		return -EPERM;
 
 	devp = file->private_data;
 	addr = (unsigned long)devp->hd_hpet;
@@ -275,6 +280,8 @@ static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 
 	return 0;
+#else
+	return -ENOSYS;
 #endif
 }
 
@@ -327,7 +334,7 @@ static int hpet_release(struct inode *inode, struct file *file)
 	if (file->f_flags & FASYNC)
 		hpet_fasync(-1, file, 0);
 
-	file->private_data = 0;
+	file->private_data = NULL;
 	return 0;
 }
 
@@ -371,12 +378,10 @@ static int hpet_ioctl_ieon(struct hpet_dev *devp)
 	irq = devp->hd_hdwirq;
 
 	if (irq) {
-		char name[7];
-
-		sprintf(name, "hpet%d", (int)(devp - hpetp->hp_dev));
+		sprintf(devp->hd_name, "hpet%d", (int)(devp - hpetp->hp_dev));
 
 		if (request_irq
-		    (irq, hpet_interrupt, SA_INTERRUPT, name, (void *)devp)) {
+		    (irq, hpet_interrupt, SA_INTERRUPT, devp->hd_name, (void *)devp)) {
 			printk(KERN_ERR "hpet: IRQ %d is not free\n", irq);
 			irq = 0;
 		}
@@ -477,7 +482,7 @@ hpet_ioctl_common(struct hpet_dev *devp, int cmd, unsigned long arg, int kernel)
 			    readq(&timer->hpet_config) & Tn_PER_INT_CAP_MASK;
 			info.hi_hpet = devp->hd_hpets->hp_which;
 			info.hi_timer = devp - devp->hd_hpets->hp_dev;
-			if (copy_to_user((void *)arg, &info, sizeof(info)))
+			if (copy_to_user((void __user *)arg, &info, sizeof(info)))
 				err = -EFAULT;
 			break;
 		}
@@ -560,7 +565,7 @@ int hpet_register(struct hpet_task *tp, int periodic)
 	spin_lock_irq(&hpet_task_lock);
 	spin_lock(&hpet_lock);
 
-	for (devp = 0, hpetp = hpets; hpetp && !devp; hpetp = hpetp->hp_next)
+	for (devp = NULL, hpetp = hpets; hpetp && !devp; hpetp = hpetp->hp_next)
 		for (timer = hpetp->hp_hpet->hpet_timers, i = 0;
 		     i < hpetp->hp_ntimer; i++, timer++) {
 			if ((readq(&timer->hpet_config) & Tn_PER_INT_CAP_MASK)
@@ -570,7 +575,7 @@ int hpet_register(struct hpet_task *tp, int periodic)
 			devp = &hpetp->hp_dev[i];
 
 			if (devp->hd_flags & HPET_OPEN || devp->hd_task) {
-				devp = 0;
+				devp = NULL;
 				continue;
 			}
 
@@ -630,7 +635,7 @@ int hpet_unregister(struct hpet_task *tp)
 	writeq((readq(&timer->hpet_config) & ~Tn_INT_ENB_CNF_MASK),
 	       &timer->hpet_config);
 	devp->hd_flags &= ~(HPET_IE | HPET_PERIODIC);
-	devp->hd_task = 0;
+	devp->hd_task = NULL;
 	spin_unlock(&hpet_lock);
 	spin_unlock_irq(&hpet_task_lock);
 
@@ -731,73 +736,6 @@ static ctl_table dev_root[] = {
 
 static struct ctl_table_header *sysctl_header;
 
-static void *hpet_start(struct seq_file *s, loff_t * pos)
-{
-	struct hpets *hpetp;
-	loff_t n;
-
-	for (n = *pos, hpetp = hpets; hpetp; hpetp = hpetp->hp_next)
-		if (!n--)
-			return hpetp;
-
-	return 0;
-}
-
-static void *hpet_next(struct seq_file *s, void *v, loff_t * pos)
-{
-	struct hpets *hpetp;
-
-	hpetp = v;
-	++*pos;
-	return hpetp->hp_next;
-}
-
-static void hpet_stop(struct seq_file *s, void *v)
-{
-	return;
-}
-
-static int hpet_show(struct seq_file *s, void *v)
-{
-	struct hpets *hpetp;
-	struct hpet *hpet;
-	u64 cap, vendor, period;
-
-	hpetp = v;
-	hpet = hpetp->hp_hpet;
-
-	cap = readq(&hpet->hpet_cap);
-	period = (cap & HPET_COUNTER_CLK_PERIOD_MASK) >>
-	    HPET_COUNTER_CLK_PERIOD_SHIFT;
-	vendor = (cap & HPET_VENDOR_ID_MASK) >> HPET_VENDOR_ID_SHIFT;
-
-	seq_printf(s,
-		   "HPET%d period = %d 10**-15  vendor = 0x%x number timer = %d\n",
-		   hpetp->hp_which, (u32) period, (u32) vendor,
-		   hpetp->hp_ntimer);
-
-	return 0;
-}
-
-static struct seq_operations hpet_seq_ops = {
-	.start = hpet_start,
-	.next = hpet_next,
-	.stop = hpet_stop,
-	.show = hpet_show
-};
-
-static int hpet_proc_open(struct inode *inode, struct file *file)
-{
-	return seq_open(file, &hpet_seq_ops);
-}
-
-static struct file_operations hpet_proc_fops = {
-	.open = hpet_proc_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release
-};
-
 /*
  * Adjustment for when arming the timer with
  * initial conditions.  That is, main counter
@@ -807,14 +745,13 @@ static struct file_operations hpet_proc_fops = {
 
 static unsigned long __init hpet_calibrate(struct hpets *hpetp)
 {
-	struct hpet_timer *timer;
+	struct hpet_timer *timer = NULL;
 	unsigned long t, m, count, i, flags, start;
 	struct hpet_dev *devp;
 	int j;
 	struct hpet *hpet;
 
-	for (timer = 0, j = 0, devp = hpetp->hp_dev; j < hpetp->hp_ntimer;
-	     j++, devp++)
+	for (j = 0, devp = hpetp->hp_dev; j < hpetp->hp_ntimer; j++, devp++)
 		if ((devp->hd_flags & HPET_OPEN) == 0) {
 			timer = devp->hd_timer;
 			break;
@@ -970,14 +907,10 @@ static acpi_status __init hpet_resources(struct acpi_resource *res, void *data)
 			hdp->hd_nirqs = irqp->number_of_interrupts;
 
 			for (i = 0; i < hdp->hd_nirqs; i++)
-#ifdef	CONFIG_IA64
 				hdp->hd_irq[i] =
 				    acpi_register_gsi(irqp->interrupts[i],
 						      irqp->edge_level,
 						      irqp->active_high_low);
-#else
-				hdp->hd_irq[i] = irqp->interrupts[i];
-#endif
 		}
 	}
 
@@ -1025,18 +958,11 @@ static struct miscdevice hpet_misc = { HPET_MINOR, "hpet", &hpet_fops };
 
 static int __init hpet_init(void)
 {
-	struct proc_dir_entry *entry;
-
 	(void)acpi_bus_register_driver(&hpet_acpi_driver);
 
 	if (hpets) {
 		if (misc_register(&hpet_misc))
 			return -ENODEV;
-
-		entry = create_proc_entry("driver/hpet", 0, 0);
-
-		if (entry)
-			entry->proc_fops = &hpet_proc_fops;
 
 		sysctl_header = register_sysctl_table(dev_root, 0);
 
@@ -1062,10 +988,8 @@ static void __exit hpet_exit(void)
 {
 	acpi_bus_unregister_driver(&hpet_acpi_driver);
 
-	if (hpets) {
+	if (hpets)
 		unregister_sysctl_table(sysctl_header);
-		remove_proc_entry("driver/hpet", NULL);
-	}
 
 	return;
 }

@@ -448,6 +448,7 @@ static void ipr_init_ipr_cmnd(struct ipr_cmnd *ipr_cmd)
 {
 	ipr_reinit_ipr_cmnd(ipr_cmd);
 	ipr_cmd->u.scratch = 0;
+	ipr_cmd->sibling = NULL;
 	init_timer(&ipr_cmd->timer);
 }
 
@@ -676,8 +677,8 @@ static void ipr_do_req(struct ipr_cmnd *ipr_cmd,
  **/
 static void ipr_internal_cmd_done(struct ipr_cmnd *ipr_cmd)
 {
-	if (ipr_cmd->u.sibling)
-		ipr_cmd->u.sibling = NULL;
+	if (ipr_cmd->sibling)
+		ipr_cmd->sibling = NULL;
 	else
 		complete(&ipr_cmd->completion);
 }
@@ -2884,6 +2885,7 @@ static int ipr_slave_alloc(struct scsi_device *sdev)
 		    (res->cfgte.res_addr.lun == sdev->lun)) {
 			res->sdev = sdev;
 			res->add_to_ml = 0;
+			res->in_erp = 0;
 			sdev->hostdata = res;
 			res->needs_sync_complete = 1;
 			break;
@@ -3014,10 +3016,10 @@ static void ipr_bus_reset_done(struct ipr_cmnd *ipr_cmd)
 	 * If abort has not completed, indicate the reset has, else call the
 	 * abort's done function to wake the sleeping eh thread
 	 */
-	if (ipr_cmd->u.sibling->u.sibling)
-		ipr_cmd->u.sibling->u.sibling = NULL;
+	if (ipr_cmd->sibling->sibling)
+		ipr_cmd->sibling->sibling = NULL;
 	else
-		ipr_cmd->u.sibling->done(ipr_cmd->u.sibling);
+		ipr_cmd->sibling->done(ipr_cmd->sibling);
 
 	list_add_tail(&ipr_cmd->queue, &ioa_cfg->free_q);
 	LEAVE;
@@ -3050,8 +3052,8 @@ static void ipr_abort_timeout(struct ipr_cmnd *ipr_cmd)
 
 	ipr_sdev_err(ipr_cmd->u.sdev, "Abort timed out. Resetting bus\n");
 	reset_cmd = ipr_get_free_ipr_cmnd(ioa_cfg);
-	ipr_cmd->u.sibling = reset_cmd;
-	reset_cmd->u.sibling = ipr_cmd;
+	ipr_cmd->sibling = reset_cmd;
+	reset_cmd->sibling = ipr_cmd;
 	reset_cmd->ioarcb.res_handle = ipr_cmd->ioarcb.res_handle;
 	cmd_pkt = &reset_cmd->ioarcb.cmd_pkt;
 	cmd_pkt->request_type = IPR_RQTYPE_IOACMD;
@@ -3435,8 +3437,10 @@ static void ipr_erp_done(struct ipr_cmnd *ipr_cmd)
 		       SCSI_SENSE_BUFFERSIZE);
 	}
 
-	if (res)
+	if (res) {
 		res->needs_sync_complete = 1;
+		res->in_erp = 0;
+	}
 	ipr_unmap_sglist(ioa_cfg, ipr_cmd);
 	list_add_tail(&ipr_cmd->queue, &ioa_cfg->free_q);
 	scsi_cmd->scsi_done(scsi_cmd);
@@ -3479,6 +3483,12 @@ static void ipr_reinit_ipr_cmnd_for_erp(struct ipr_cmnd *ipr_cmd)
 static void ipr_erp_request_sense(struct ipr_cmnd *ipr_cmd)
 {
 	struct ipr_cmd_pkt *cmd_pkt = &ipr_cmd->ioarcb.cmd_pkt;
+	u32 ioasc = be32_to_cpu(ipr_cmd->ioasa.ioasc);
+
+	if (IPR_IOASC_SENSE_KEY(ioasc) > 0) {
+		ipr_erp_done(ipr_cmd);
+		return;
+	}
 
 	ipr_reinit_ipr_cmnd_for_erp(ipr_cmd);
 
@@ -3524,6 +3534,11 @@ static void ipr_erp_cancel_all(struct ipr_cmnd *ipr_cmd)
 	res->in_erp = 1;
 
 	ipr_reinit_ipr_cmnd_for_erp(ipr_cmd);
+
+	if (!res->tcq_active) {
+		ipr_erp_request_sense(ipr_cmd);
+		return;
+	}
 
 	cmd_pkt = &ipr_cmd->ioarcb.cmd_pkt;
 	cmd_pkt->request_type = IPR_RQTYPE_IOACMD;
@@ -3756,6 +3771,7 @@ static void ipr_erp_start(struct ipr_ioa_cfg *ioa_cfg,
 			ipr_erp_cancel_all(ipr_cmd);
 			return;
 		}
+		res->needs_sync_complete = 1;
 		break;
 	case IPR_IOASC_NR_INIT_CMD_REQUIRED:
 		break;
@@ -4808,6 +4824,7 @@ static int ipr_reset_enable_ioa(struct ipr_cmnd *ipr_cmd)
 	ipr_cmd->timer.data = (unsigned long) ipr_cmd;
 	ipr_cmd->timer.expires = jiffies + IPR_OPERATIONAL_TIMEOUT;
 	ipr_cmd->timer.function = (void (*)(unsigned long))ipr_timeout;
+	ipr_cmd->done = ipr_reset_ioa_job;
 	add_timer(&ipr_cmd->timer);
 	list_add_tail(&ipr_cmd->queue, &ioa_cfg->pending_q);
 
