@@ -71,6 +71,8 @@ struct ckrm_runqueue {
 	 * 
 	 * initialized to be 0
 	 * a class can't accumulate more than SAVING_THRESHOLD of savings
+	 * savings are kept in normalized form (like cvt)
+	 * so when task share change the savings should be scaled accordingly
 	 */
 	unsigned long long savings;
 
@@ -254,7 +256,7 @@ void ckrm_cpu_change_class(void *task, void *old, void *new);
 #define CPU_DEMAND_INIT 3
 
 /*functions exported by ckrm_cpu_monitor.c*/
-void ckrm_cpu_monitor(int check_min);
+void ckrm_cpu_monitor(void);
 int ckrm_cpu_monitor_init(void);
 void ckrm_cpu_stat_init(struct ckrm_cpu_class_stat *stat);
 void cpu_demand_event(struct ckrm_cpu_demand_stat* local_stat, int event, unsigned long long len);
@@ -272,28 +274,25 @@ void adjust_local_weight(void);
  * 
  * CLASS_QUANTIZER:
  * 
- * A class with 50% share, can execute 500 ms / per sec ~ 2^29 ns.
+ * A class with 5% share, can execute 50M nsecs / per sec ~ 2^28.
  * It's share will be set to 512 = 2^9. The globl CLASSQUEUE_SIZE is set to 2^7.
  * With CLASS_QUANTIZER=16, the local_cvt of this class will increase
- * by 2^29/2^9 = 2^20 = 1024K.
- * Setting CLASS_QUANTIZER to 16, 2^(20-16) = 16 slots / per second.
-  * Do the same math, a class with any share value, will cover 16 slots / per second. 
- * So 2^8 total slots is good track for 8 seconds of system execution
+ * by 2^28/2^9 = 2^19 = 512K.
+ * Setting CLASS_QUANTIZER to 16, 2^(19-16) = 8 slots / per second.
+ * A class with 5% shares, will cover 80 slots / per second.
  *
  * PRIORITY_QUANTIZER:
  *
  * How much can top priorities of class impact slot bonus.
- * There are 40 nice priorities, range from -20 to 19, with default nice = 0
- * "2" will allow upto 5 slots improvement 
- * when certain task within the class  has a nice value of -20 
- * in the RQ thus for 50% class it can perform ~300 msec starvation.
+ * There are 40 nice priorities. "2" will allow upto 10 slots improvement
+ * in the RQ thus for 50% class it can perform ~1sec starvation.
  *
  *******************************************************************/
 
 #define CLASS_QUANTIZER 16 	//shift from ns to increase class bonus
 #define PRIORITY_QUANTIZER 2	//controls how much a high prio task can borrow
 
-#define CKRM_SHARE_ACCURACY 13
+#define CKRM_SHARE_ACCURACY 10
 #define NSEC_PER_MS 1000000
 #define NSEC_PER_JIFFIES (NSEC_PER_SEC/HZ)
 
@@ -323,7 +322,7 @@ void adjust_local_weight(void);
 /*
  * to improve system responsiveness
  * an inactive class is put a little bit ahead of the current class when it wakes up
- * the amount is set in normalized term to simplify the calculation
+ * the amount is set in normalized termis to simplify the calculation
  * for class with 100% share, it can be 2s ahead
  * while for class with 10% share, it can be 200ms ahead
  */
@@ -361,11 +360,7 @@ static inline int get_effective_prio(ckrm_lrq_t * lrq)
 	int prio;
 
 	prio = lrq->local_cvt >> CLASS_QUANTIZER;  // cumulative usage
-#ifndef URGENCY_SUPPORT
-#warning "ACB removing urgency calculation from get_effective_prio"
-#else
 	prio += lrq->top_priority >> PRIORITY_QUANTIZER; // queue urgency
-#endif
 
 	return prio;
 }
