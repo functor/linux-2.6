@@ -9,6 +9,7 @@
 #include <asm/user.h>
 #include <asm/processor.h>
 #include <asm/system.h>		/* for savesegment */
+#include <asm/desc.h>
 
 #include <linux/utsname.h>
 
@@ -117,7 +118,8 @@ typedef struct user_fxsr_struct elf_fpxregset_t;
 #define AT_SYSINFO_EHDR		33
 
 #ifdef __KERNEL__
-#define SET_PERSONALITY(ex, ibcs2) set_personality((ibcs2)?PER_SVR4:PER_LINUX)
+/* child inherits the personality of the parent */
+#define SET_PERSONALITY(ex, ibcs2) do { } while (0)
 
 extern int dump_task_regs (struct task_struct *, elf_gregset_t *);
 extern int dump_task_fpu (struct task_struct *, elf_fpregset_t *);
@@ -127,15 +129,22 @@ extern int dump_task_extended_fpu (struct task_struct *, struct user_fxsr_struct
 #define ELF_CORE_COPY_FPREGS(tsk, elf_fpregs) dump_task_fpu(tsk, elf_fpregs)
 #define ELF_CORE_COPY_XFPREGS(tsk, elf_xfpregs) dump_task_extended_fpu(tsk, elf_xfpregs)
 
-#define VSYSCALL_BASE	(__fix_to_virt(FIX_VSYSCALL))
-#define VSYSCALL_EHDR	((const struct elfhdr *) VSYSCALL_BASE)
-#define VSYSCALL_ENTRY	((unsigned long) &__kernel_vsyscall)
 extern void __kernel_vsyscall;
+#define VSYSCALL_BASE	((unsigned long)current->mm->context.vdso)
+#define VSYSCALL_EHDR	((const struct elfhdr *) VSYSCALL_BASE)
+#define VSYSCALL_OFFSET	((unsigned long) &__kernel_vsyscall)
+#define VSYSCALL_ENTRY	(VSYSCALL_BASE + VSYSCALL_OFFSET)
 
-#define ARCH_DLINFO						\
-do {								\
-		NEW_AUX_ENT(AT_SYSINFO,	VSYSCALL_ENTRY);	\
-		NEW_AUX_ENT(AT_SYSINFO_EHDR, VSYSCALL_BASE);	\
+/* kernel-internal fixmap address: */
+#define __VSYSCALL_BASE	(__fix_to_virt(FIX_VSYSCALL))
+#define __VSYSCALL_EHDR	((const struct elfhdr *) __VSYSCALL_BASE)
+
+#define ARCH_DLINFO							\
+do {									\
+	if (VSYSCALL_BASE) {						\
+		NEW_AUX_ENT(AT_SYSINFO,	VSYSCALL_ENTRY);		\
+		NEW_AUX_ENT(AT_SYSINFO_EHDR, VSYSCALL_BASE);		\
+	}								\
 } while (0)
 
 /*
@@ -146,15 +155,15 @@ do {								\
  * Dumping its extra ELF program headers includes all the other information
  * a debugger needs to easily find how the vsyscall DSO was being used.
  */
-#define ELF_CORE_EXTRA_PHDRS		(VSYSCALL_EHDR->e_phnum)
+#define ELF_CORE_EXTRA_PHDRS		(__VSYSCALL_EHDR->e_phnum)
 #define ELF_CORE_WRITE_EXTRA_PHDRS					      \
 do {									      \
 	const struct elf_phdr *const vsyscall_phdrs =			      \
-		(const struct elf_phdr *) (VSYSCALL_BASE		      \
-					   + VSYSCALL_EHDR->e_phoff);	      \
+		(const struct elf_phdr *) (__VSYSCALL_BASE		      \
+					   + __VSYSCALL_EHDR->e_phoff);	      \
 	int i;								      \
 	Elf32_Off ofs = 0;						      \
-	for (i = 0; i < VSYSCALL_EHDR->e_phnum; ++i) {			      \
+	for (i = 0; i < __VSYSCALL_EHDR->e_phnum; ++i) {		      \
 		struct elf_phdr phdr = vsyscall_phdrs[i];		      \
 		if (phdr.p_type == PT_LOAD) {				      \
 			BUG_ON(ofs != 0);				      \
@@ -172,10 +181,10 @@ do {									      \
 #define ELF_CORE_WRITE_EXTRA_DATA					      \
 do {									      \
 	const struct elf_phdr *const vsyscall_phdrs =			      \
-		(const struct elf_phdr *) (VSYSCALL_BASE		      \
-					   + VSYSCALL_EHDR->e_phoff);	      \
+		(const struct elf_phdr *) (__VSYSCALL_BASE		      \
+					   + __VSYSCALL_EHDR->e_phoff);	      \
 	int i;								      \
-	for (i = 0; i < VSYSCALL_EHDR->e_phnum; ++i) {			      \
+	for (i = 0; i < __VSYSCALL_EHDR->e_phnum; ++i) {		      \
 		if (vsyscall_phdrs[i].p_type == PT_LOAD)		      \
 			DUMP_WRITE((void *) vsyscall_phdrs[i].p_vaddr,	      \
 				   PAGE_ALIGN(vsyscall_phdrs[i].p_memsz));    \
@@ -183,5 +192,11 @@ do {									      \
 } while (0)
 
 #endif
+
+#define __HAVE_ARCH_RANDOMIZE_BRK
+extern void randomize_brk(unsigned long old_brk);
+
+#define __HAVE_ARCH_VSYSCALL
+extern void map_vsyscall(void);
 
 #endif

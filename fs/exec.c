@@ -293,53 +293,49 @@ EXPORT_SYMBOL(copy_strings_kernel);
  * This routine is used to map in a page into an address space: needed by
  * execve() for the initial stack and environment pages.
  *
- * tsk->mmap_sem is held for writing.
+ * vma->vm_mm->mmap_sem is held for writing.
  */
-void put_dirty_page(struct task_struct *tsk, struct page *page,
-			unsigned long address, pgprot_t prot)
+void install_arg_page(struct vm_area_struct *vma,
+			struct page *page, unsigned long address)
 {
+	struct mm_struct *mm = vma->vm_mm;
 	pgd_t * pgd;
 	pmd_t * pmd;
 	pte_t * pte;
-	struct pte_chain *pte_chain;
 
-	if (page_count(page) != 1)
-		printk(KERN_ERR "mem_map disagrees with %p at %08lx\n",
-				page, address);
-
-	pgd = pgd_offset(tsk->mm, address);
-	pte_chain = pte_chain_alloc(GFP_KERNEL);
-	if (!pte_chain)
+	if (unlikely(anon_vma_prepare(vma)))
 		goto out_sig;
-	spin_lock(&tsk->mm->page_table_lock);
-	pmd = pmd_alloc(tsk->mm, pgd, address);
+
+	flush_dcache_page(page);
+	pgd = pgd_offset(mm, address);
+
+	spin_lock(&mm->page_table_lock);
+	pmd = pmd_alloc(mm, pgd, address);
 	if (!pmd)
 		goto out;
-	pte = pte_alloc_map(tsk->mm, pmd, address);
+	pte = pte_alloc_map(mm, pmd, address);
 	if (!pte)
 		goto out;
 	if (!pte_none(*pte)) {
 		pte_unmap(pte);
 		goto out;
 	}
+	// mm->rss++;
+	vx_rsspages_inc(mm);
 	lru_cache_add_active(page);
-	flush_dcache_page(page);
-	set_pte(pte, pte_mkdirty(pte_mkwrite(mk_pte(page, prot))));
-	pte_chain = page_add_rmap(page, pte, pte_chain);
+	set_pte(pte, pte_mkdirty(pte_mkwrite(mk_pte(
+					page, vma->vm_page_prot))));
+	page_add_anon_rmap(page, vma, address);
 	pte_unmap(pte);
-	tsk->mm->rss++;
-	spin_unlock(&tsk->mm->page_table_lock);
+	spin_unlock(&mm->page_table_lock);
 
 	/* no need for flush_tlb */
-	pte_chain_free(pte_chain);
 	return;
 out:
-	spin_unlock(&tsk->mm->page_table_lock);
+	spin_unlock(&mm->page_table_lock);
 out_sig:
 	__free_page(page);
-	force_sig(SIGKILL, tsk);
-	pte_chain_free(pte_chain);
-	return;
+	force_sig(SIGKILL, current);
 }
 
 int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
@@ -395,7 +391,12 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	while (i < MAX_ARG_PAGES)
 		bprm->page[i++] = NULL;
 #else
+#ifdef __HAVE_ARCH_ALIGN_STACK
+	stack_base = arch_align_stack(STACK_TOP - MAX_ARG_PAGES*PAGE_SIZE);
+	stack_base = PAGE_ALIGN(stack_base);
+#else
 	stack_base = STACK_TOP - MAX_ARG_PAGES * PAGE_SIZE;
+#endif
 	mm->arg_start = bprm->p + stack_base;
 	arg_size = STACK_TOP - (PAGE_MASK & (unsigned long) mm->arg_start);
 #endif
@@ -409,10 +410,13 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt)
 		return -ENOMEM;
 
-	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT)) {
+	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT) ||
+		!vx_vmpages_avail(mm, arg_size >> PAGE_SHIFT)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
+
+	memset(mpnt, 0, sizeof(*mpnt));
 
 	down_write(&mm->mmap_sem);
 	{
@@ -435,21 +439,17 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 		else
 			mpnt->vm_flags = VM_STACK_FLAGS;
 		mpnt->vm_page_prot = protection_map[mpnt->vm_flags & 0x7];
-		mpnt->vm_ops = NULL;
-		mpnt->vm_pgoff = 0;
-		mpnt->vm_file = NULL;
-		INIT_LIST_HEAD(&mpnt->shared);
-		mpnt->vm_private_data = (void *) 0;
 		insert_vm_struct(mm, mpnt);
-		mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		// mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		vx_vmpages_sub(mm, mm->total_vm -
+			((mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT));
 	}
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
 		struct page *page = bprm->page[i];
 		if (page) {
 			bprm->page[i] = NULL;
-			put_dirty_page(current, page, stack_base,
-					mpnt->vm_page_prot);
+			install_arg_page(mpnt, page, stack_base);
 		}
 		stack_base += PAGE_SIZE;
 	}
@@ -845,6 +845,7 @@ int flush_old_exec(struct linux_binprm * bprm)
 	}
 	current->comm[i] = '\0';
 
+	current->flags &= ~PF_RELOCEXEC;
 	flush_thread();
 
 	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid || 
@@ -895,8 +896,13 @@ int prepare_binprm(struct linux_binprm *bprm)
 
 	if(!(bprm->file->f_vfsmnt->mnt_flags & MNT_NOSUID)) {
 		/* Set-uid? */
-		if (mode & S_ISUID)
+		if (mode & S_ISUID) {
 			bprm->e_uid = inode->i_uid;
+#ifdef __i386__
+			/* reset personality */
+			current->personality = PER_LINUX;
+#endif
+		}
 
 		/* Set-gid? */
 		/*
@@ -904,8 +910,13 @@ int prepare_binprm(struct linux_binprm *bprm)
 		 * is a candidate for mandatory locking, not a setgid
 		 * executable.
 		 */
-		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP))
+		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
 			bprm->e_gid = inode->i_gid;
+#ifdef __i386__
+			/* reset personality */
+			current->personality = PER_LINUX;
+#endif
+		}
 	}
 
 	/* fill in binprm security blob */
@@ -1003,7 +1014,7 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 			return retval;
 
 		/* Remember if the application is TASO.  */
-		bprm->sh_bang = eh->ah.entry < 0x100000000;
+		bprm->sh_bang = eh->ah.entry < 0x100000000UL;
 
 		bprm->file = file;
 		bprm->loader = loader;

@@ -49,7 +49,7 @@
 #include <scsi/scsicam.h>
 
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 
 #include "megaraid.h"
 
@@ -4068,7 +4068,6 @@ mega_support_ext_cdb(adapter_t *adapter)
 static int
 mega_del_logdrv(adapter_t *adapter, int logdrv)
 {
-	DECLARE_WAIT_QUEUE_HEAD(wq);
 	unsigned long flags;
 	scb_t *scb;
 	int rval;
@@ -4086,7 +4085,8 @@ mega_del_logdrv(adapter_t *adapter, int logdrv)
 	while( atomic_read(&adapter->pend_cmds) > 0 ||
 			!list_empty(&adapter->pending_list) ) {
 
-		sleep_on_timeout( &wq, 1*HZ );	/* sleep for 1s */
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(1*HZ );	/* sleep for 1s */
 	}
 
 	rval = mega_do_del_logdrv(adapter, logdrv);
@@ -4606,6 +4606,7 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	if (pci_enable_device(pdev))
 		goto out;
+	pci_set_master(pdev);
 
 	pci_bus = pdev->bus->number;
 	pci_dev_func = pdev->devfn;

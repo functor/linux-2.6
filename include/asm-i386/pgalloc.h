@@ -4,6 +4,7 @@
 #include <linux/config.h>
 #include <asm/processor.h>
 #include <asm/fixmap.h>
+#include <asm/desc.h>
 #include <linux/threads.h>
 #include <linux/mm.h>		/* for struct page */
 
@@ -51,5 +52,7 @@ static inline void pte_free(struct page *pte)
 #define pgd_populate(mm, pmd, pte)	BUG()
 
 #define check_pgt_cache()	do { } while (0)
+
+#define HAVE_ARCH_UNMAPPED_AREA 1
 
 #endif /* _I386_PGALLOC_H */

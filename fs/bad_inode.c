@@ -21,7 +21,8 @@
  */
 static int bad_follow_link(struct dentry *dent, struct nameidata *nd)
 {
-	return vfs_follow_link(nd, ERR_PTR(-EIO));
+	nd_set_link(nd, ERR_PTR(-EIO));
+	return 0;
 }
 
 static int return_EIO(void)

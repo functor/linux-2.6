@@ -327,7 +327,7 @@ static void elf32_init(struct pt_regs *regs)
 
 int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 {
-	unsigned long stack_base;
+	unsigned long stack_base, grow;
 	struct vm_area_struct *mpnt;
 	struct mm_struct *mm = current->mm;
 	int i;
@@ -344,10 +344,15 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt) 
 		return -ENOMEM; 
 	
-	if (security_vm_enough_memory((IA32_STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))>>PAGE_SHIFT)) {
+	grow = (IA32_STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))
+		>> PAGE_SHIFT;
+	if (security_vm_enough_memory(grow) ||
+		!vx_vmpages_avail(mm, grow)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
+
+	memset(mpnt, 0, sizeof(*mpnt));
 
 	down_write(&mm->mmap_sem);
 	{
@@ -362,20 +367,17 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 			mpnt->vm_flags = vm_stack_flags32;
  		mpnt->vm_page_prot = (mpnt->vm_flags & VM_EXEC) ? 
  			PAGE_COPY_EXEC : PAGE_COPY;
-		mpnt->vm_ops = NULL;
-		mpnt->vm_pgoff = 0;
-		mpnt->vm_file = NULL;
-		INIT_LIST_HEAD(&mpnt->shared);
-		mpnt->vm_private_data = (void *) 0;
 		insert_vm_struct(mm, mpnt);
-		mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		// mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		vx_vmpages_sub(mm, mm->total_vm -
+			((mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT));
 	} 
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
 		struct page *page = bprm->page[i];
 		if (page) {
 			bprm->page[i] = NULL;
-			put_dirty_page(current,page,stack_base,mpnt->vm_page_prot);
+			install_arg_page(mpnt, page, stack_base);
 		}
 		stack_base += PAGE_SIZE;
 	}
@@ -385,7 +387,7 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 }
 
 static unsigned long
-elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type)
+elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type, unsigned long unused)
 {
 	unsigned long map_addr;
 	struct task_struct *me = current; 

@@ -140,6 +140,8 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 	read_unlock(&tasklist_lock);
 	if (!child)
 		goto out;
+	if (!vx_check(vx_task_xid(child), VX_WATCH|VX_IDENT))
+		goto out_tsk;
 
 	ret = -EPERM;
 	if (pid == 1)		/* you may not mess with init */
@@ -156,7 +158,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 
 	switch (request) {
 	/* when I and D space are separate, these will need to be fixed. */
-		case PTRACE_PEEKTEXT: /* read word at location addr. */ 
+		case PTRACE_PEEKTEXT: /* read word at location addr. */
 		case PTRACE_PEEKDATA: {
 			unsigned long tmp;
 			int copied;
@@ -172,12 +174,12 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 	/* read the word at location addr in the USER area. */
 		case PTRACE_PEEKUSR: {
 			unsigned long tmp;
-			
+
 			ret = -EIO;
 			if ((addr & 3) || addr < 0 ||
 			    addr > sizeof(struct user) - 3)
 				break;
-			
+
 			tmp = 0;  /* Default return condition */
 			addr = addr >> 2; /* temporary hack. */
 			ret = -EIO;
@@ -217,7 +219,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 				break;
 
 			addr = addr >> 2; /* temporary hack. */
-			    
+
 			if (addr == PT_SR) {
 				data &= SR_MASK;
 				data <<= 16;
@@ -269,8 +271,8 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 		}
 
 /*
- * make the child exit.  Best I can do is send it a sigkill. 
- * perhaps it should be put in the status that it wants to 
+ * make the child exit.  Best I can do is send it a sigkill.
+ * perhaps it should be put in the status that it wants to
  * exit.
  */
 		case PTRACE_KILL: {
@@ -311,7 +313,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 			break;
 
 		case PTRACE_GETREGS: { /* Get all gp regs from the child. */
-		  	int i;
+			int i;
 			unsigned long tmp;
 			for (i = 0; i < 19; i++) {
 			    tmp = get_reg(child, i);
