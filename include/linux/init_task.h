@@ -112,6 +112,11 @@ extern struct group_info init_groups;
 	.proc_lock	= SPIN_LOCK_UNLOCKED,				\
 	.switch_lock	= SPIN_LOCK_UNLOCKED,				\
 	.journal_info	= NULL,						\
+	.xid		= 0,						\
+	.vx_info	= NULL,						\
+	.nid		= 0,						\
+	.nx_info	= NULL,						\
+	.ioprio		= IOPRIO_NORM,					\
 }
 
 

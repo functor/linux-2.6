@@ -717,10 +717,16 @@ static ide_driver_t idescsi_driver = {
 	.drives			= LIST_HEAD_INIT(idescsi_driver.drives),
 };
 
+static int ide_scsi_warned;
+
 static int idescsi_ide_open(struct inode *inode, struct file *filp)
 {
 	ide_drive_t *drive = inode->i_bdev->bd_disk->private_data;
 	drive->usage++;
+	if (!ide_scsi_warned++) {
+		printk(KERN_WARNING "ide-scsi: Warning this device driver is only intended for specialist devices.\n");
+		printk(KERN_WARNING "ide-scsi: Do not use for cd burning, use /dev/hdX directly instead.\n");
+	}
 	return 0;
 }
 

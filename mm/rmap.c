@@ -30,6 +30,7 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/rmap.h>
+#include <linux/vs_memory.h>
 
 #include <asm/tlbflush.h>
 
@@ -228,6 +229,9 @@ static int page_referenced_one(struct page *page,
 		goto out_unmap;
 
 	if (ptep_clear_flush_young(vma, address, pte))
+		referenced++;
+
+	if (mm != current->mm && has_swap_token(mm))
 		referenced++;
 
 	(*mapcount)--;
@@ -512,7 +516,8 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 		BUG_ON(pte_file(*pte));
 	}
 
-	mm->rss--;
+	// mm->rss--;
+	vx_rsspages_dec(mm);
 	BUG_ON(!page->mapcount);
 	page->mapcount--;
 	page_cache_release(page);
@@ -614,7 +619,8 @@ static int try_to_unmap_cluster(unsigned long cursor,
 
 		page_remove_rmap(page);
 		page_cache_release(page);
-		mm->rss--;
+		// mm->rss--;
+		vx_rsspages_dec(mm);
 		(*mapcount)--;
 	}
 

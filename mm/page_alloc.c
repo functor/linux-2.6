@@ -31,6 +31,9 @@
 #include <linux/topology.h>
 #include <linux/sysctl.h>
 #include <linux/cpu.h>
+#include <linux/vs_base.h>
+#include <linux/vs_limit.h>
+#include <linux/ckrm_mem_inline.h>
 
 #include <asm/tlbflush.h>
 
@@ -44,6 +47,11 @@ int sysctl_lower_zone_protection = 0;
 
 EXPORT_SYMBOL(totalram_pages);
 EXPORT_SYMBOL(nr_swap_pages);
+
+#ifdef CONFIG_CRASH_DUMP_MODULE
+/* This symbol has to be exported to use 'for_each_pgdat' macro by modules. */
+EXPORT_SYMBOL(pgdat_list);
+#endif
 
 /*
  * Used by page_zone() to look up the address of the struct zone whose
@@ -96,7 +104,8 @@ static void bad_page(const char *function, struct page *page)
 	page->mapcount = 0;
 }
 
-#ifndef CONFIG_HUGETLB_PAGE
+#if !defined(CONFIG_HUGETLB_PAGE) && !defined(CONFIG_CRASH_DUMP) \
+	&& !defined(CONFIG_CRASH_DUMP_MODULE)
 #define prep_compound_page(page, order) do { } while (0)
 #define destroy_compound_page(page, order) do { } while (0)
 #else
@@ -268,6 +277,7 @@ free_pages_bulk(struct zone *zone, int count,
 		/* have to delete it as __free_pages_bulk list manipulates */
 		list_del(&page->lru);
 		__free_pages_bulk(page, base, zone, area, order);
+		ckrm_clear_page_class(page);
 		ret++;
 	}
 	spin_unlock_irqrestore(&zone->lock, flags);
@@ -278,6 +288,8 @@ void __free_pages_ok(struct page *page, unsigned int order)
 {
 	LIST_HEAD(list);
 	int i;
+
+	arch_free_page(page, order);
 
 	mod_page_state(pgfree, 1 << order);
 	for (i = 0 ; i < (1 << order) ; ++i)
@@ -509,6 +521,8 @@ static void fastcall free_hot_cold_page(struct page *page, int cold)
 	struct per_cpu_pages *pcp;
 	unsigned long flags;
 
+	arch_free_page(page, 0);
+
 	kernel_map_pages(page, 1, 0);
 	inc_page_state(pgfree);
 	free_pages_check(__FUNCTION__, page);
@@ -609,6 +623,10 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 	int do_retry;
 
 	might_sleep_if(wait);
+
+	if (!ckrm_class_limit_ok((GET_MEM_CLASS(current)))) {
+		return NULL;
+	}
 
 	zones = zonelist->zones;  /* the list of zones suitable for gfp_mask */
 	if (zones[0] == NULL)     /* no zones in the zonelist */
@@ -739,6 +757,7 @@ nopage:
 	return NULL;
 got_pg:
 	kernel_map_pages(page, 1 << order, 1);
+	ckrm_set_pages_class(page, 1 << order, GET_MEM_CLASS(current));
 	return page;
 }
 
@@ -994,6 +1013,8 @@ void si_meminfo(struct sysinfo *val)
 	val->freehigh = 0;
 #endif
 	val->mem_unit = PAGE_SIZE;
+	if (vx_flags(VXF_VIRT_MEM, 0))
+		vx_vsi_meminfo(val);
 }
 
 EXPORT_SYMBOL(si_meminfo);

@@ -286,20 +286,20 @@ extern unsigned int machine_submodel_id;
 extern unsigned int BIOS_revision;
 extern unsigned int mca_pentium_flag;
 
-/*
- * User space process size: 3GB (default).
- */
-#define TASK_SIZE	(PAGE_OFFSET)
-
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
-#define TASK_UNMAPPED_BASE	(PAGE_ALIGN(TASK_SIZE / 3))
+#define TASK_UNMAPPED_BASE	PAGE_ALIGN(TASK_SIZE/3)
+
+#define __HAVE_ARCH_ALIGN_STACK
+extern unsigned long arch_align_stack(unsigned long sp);
+
+#define HAVE_ARCH_PICK_MMAP_LAYOUT
 
 /*
- * Size of io_bitmap.
+ * Size of io_bitmap, covering ports 0 to 0x3ff.
  */
-#define IO_BITMAP_BITS  65536
+#define IO_BITMAP_BITS  1024
 #define IO_BITMAP_BYTES (IO_BITMAP_BITS/8)
 #define IO_BITMAP_LONGS (IO_BITMAP_BYTES/sizeof(long))
 #define IO_BITMAP_OFFSET offsetof(struct tss_struct,io_bitmap)
@@ -391,7 +391,7 @@ struct tss_struct {
 	/*
 	 * pads the TSS to be cacheline-aligned (size is 0x100)
 	 */
-	unsigned long __cacheline_filler[37];
+	unsigned long __cacheline_filler[5];
 	/*
 	 * .. and then another 0x100 bytes for emergency kernel stack
 	 */
@@ -400,9 +400,16 @@ struct tss_struct {
 
 #define ARCH_MIN_TASKALIGN	16
 
+
+#define STACK_PAGE_COUNT	(4096/PAGE_SIZE)
+
+
+
+
 struct thread_struct {
 /* cached TLS descriptors. */
 	struct desc_struct tls_array[GDT_ENTRY_TLS_ENTRIES];
+	void *stack_page[STACK_PAGE_COUNT];
 	unsigned long	esp0;
 	unsigned long	sysenter_cs;
 	unsigned long	eip;
@@ -446,7 +453,8 @@ struct thread_struct {
 	.io_bitmap	= { [ 0 ... IO_BITMAP_LONGS] = ~0 },		\
 }
 
-static inline void load_esp0(struct tss_struct *tss, struct thread_struct *thread)
+static inline void
+load_esp0(struct tss_struct *tss, struct thread_struct *thread)
 {
 	tss->esp0 = thread->esp0;
 	/* This can only happen when SEP is enabled, no need to test "SEP"arately */
@@ -465,6 +473,7 @@ static inline void load_esp0(struct tss_struct *tss, struct thread_struct *threa
 	regs->xcs = __USER_CS;					\
 	regs->eip = new_eip;					\
 	regs->esp = new_esp;					\
+	load_user_cs_desc(smp_processor_id(), current->mm);	\
 } while (0)
 
 /* Forward declaration, a strange C thing */
@@ -481,6 +490,23 @@ extern void prepare_to_copy(struct task_struct *tsk);
  * create a kernel thread without removing it from tasklists
  */
 extern int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
+
+#ifdef CONFIG_X86_HIGH_ENTRY
+#define virtual_esp0(tsk) \
+	((unsigned long)(tsk)->thread_info->virtual_stack + ((tsk)->thread.esp0 - (unsigned long)(tsk)->thread_info->real_stack))
+#else
+# define virtual_esp0(tsk) ((tsk)->thread.esp0)
+#endif
+
+#define load_virtual_esp0(tss, task)					\
+	do {								\
+		tss->esp0 = virtual_esp0(task);				\
+		if (likely(cpu_has_sep) && unlikely(tss->ss1 != task->thread.sysenter_cs)) {	\
+			tss->ss1 = task->thread.sysenter_cs;		\
+			wrmsr(MSR_IA32_SYSENTER_CS,			\
+				task->thread.sysenter_cs, 0);		\
+		}							\
+	} while (0)
 
 extern unsigned long thread_saved_pc(struct task_struct *tsk);
 void show_trace(struct task_struct *task, unsigned long *stack);

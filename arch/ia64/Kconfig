@@ -44,10 +44,7 @@ choice
 
 config IA64_GENERIC
 	bool "generic"
-	select NUMA
-	select ACPI_NUMA
 	select VIRTUAL_MEM_MAP
-	select DISCONTIGMEM
 	help
 	  This selects the system type of your hardware.  A "generic" kernel
 	  will run on any supported IA-64 system.  However, if you configure
@@ -485,6 +482,8 @@ config SYSVIPC_COMPAT
 	depends on COMPAT && SYSVIPC
 	default y
 endmenu
+
+source "kernel/vserver/Kconfig"
 
 source "security/Kconfig"
 

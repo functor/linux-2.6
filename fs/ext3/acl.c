@@ -8,6 +8,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
+#include <linux/namei.h> 
 #include <linux/ext3_jbd.h>
 #include <linux/ext3_fs.h>
 #include "xattr.h"
@@ -296,7 +297,8 @@ ext3_permission(struct inode *inode, int mask, struct nameidata *nd)
 	int mode = inode->i_mode;
 
 	/* Nobody gets write access to a read-only fs */
-	if ((mask & MAY_WRITE) && IS_RDONLY(inode) &&
+	if ((mask & MAY_WRITE) && (IS_RDONLY(inode) ||
+	    (nd && nd->mnt && MNT_IS_RDONLY(nd->mnt))) &&
 	    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 		return -EROFS;
 	/* Nobody gets write access to an immutable file */

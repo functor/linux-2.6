@@ -25,7 +25,7 @@
 
 static int open_kcore(struct inode * inode, struct file * filp)
 {
-	return capable(CAP_SYS_RAWIO) ? 0 : -EPERM;
+	return -EPERM;
 }
 
 static ssize_t read_kcore(struct file *, char __user *, size_t, loff_t *);

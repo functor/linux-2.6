@@ -26,6 +26,7 @@
 #include <linux/kallsyms.h>
 #include <linux/ptrace.h>
 #include <linux/version.h>
+#include <linux/dump.h>
 
 #ifdef CONFIG_EISA
 #include <linux/ioport.h>
@@ -54,12 +55,8 @@
 
 #include "mach_traps.h"
 
-asmlinkage int system_call(void);
-asmlinkage void lcall7(void);
-asmlinkage void lcall27(void);
-
-struct desc_struct default_ldt[] = { { 0, 0 }, { 0, 0 }, { 0, 0 },
-		{ 0, 0 }, { 0, 0 } };
+struct desc_struct default_ldt[] __attribute__((__section__(".data.default_ldt"))) = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
+struct page *default_ldt_page;
 
 /* Do we ignore FPU interrupts ? */
 char ignore_fpu_irq = 0;
@@ -244,8 +241,10 @@ void show_registers(struct pt_regs *regs)
 
 		for(i=0;i<20;i++)
 		{
-			unsigned char c;
-			if(__get_user(c, &((unsigned char*)regs->eip)[i])) {
+			unsigned char c = 0;
+                        if ((user_mode(regs) && get_user(c, &((unsigned char*)regs->eip)[i])) ||
+                            (!user_mode(regs) && __direct_get_user(c, &((unsigned char*)regs->eip)[i]))) {
+			
 bad:
 				printk(" Bad EIP value.");
 				break;
@@ -269,16 +268,14 @@ static void handle_BUG(struct pt_regs *regs)
 
 	eip = regs->eip;
 
-	if (eip < PAGE_OFFSET)
-		goto no_bug;
-	if (__get_user(ud2, (unsigned short *)eip))
+	if (__direct_get_user(ud2, (unsigned short *)eip))
 		goto no_bug;
 	if (ud2 != 0x0b0f)
 		goto no_bug;
-	if (__get_user(line, (unsigned short *)(eip + 2)))
+	if (__direct_get_user(line, (unsigned short *)(eip + 2)))
 		goto bug;
-	if (__get_user(file, (char **)(eip + 4)) ||
-		(unsigned long)file < PAGE_OFFSET || __get_user(c, file))
+	if (__direct_get_user(file, (char **)(eip + 4)) ||
+			__direct_get_user(c, file))
 		file = "<bad filename>";
 
 	printk("------------[ cut here ]------------\n");
@@ -293,6 +290,7 @@ bug:
 }
 
 spinlock_t die_lock = SPIN_LOCK_UNLOCKED;
+static int die_owner = -1;
 
 void die(const char * str, struct pt_regs * regs, long err)
 {
@@ -300,7 +298,13 @@ void die(const char * str, struct pt_regs * regs, long err)
 	int nl = 0;
 
 	console_verbose();
-	spin_lock_irq(&die_lock);
+	local_irq_disable();
+	if (!spin_trylock(&die_lock)) {
+		if (smp_processor_id() != die_owner)
+			spin_lock(&die_lock);
+		/* allow recursive die to fall through */
+	}
+	die_owner = smp_processor_id();
 	bust_spinlocks(1);
 	handle_BUG(regs);
 	printk(KERN_ALERT "%s: %04lx [#%d]\n", str, err & 0xffff, ++die_counter);
@@ -319,12 +323,18 @@ void die(const char * str, struct pt_regs * regs, long err)
 	if (nl)
 		printk("\n");
 	show_registers(regs);
+	if (netdump_func)
+		netdump_func(regs);
+	dump((char *)str, regs);
 	bust_spinlocks(0);
+	die_owner = -1;
 	spin_unlock_irq(&die_lock);
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 
 	if (panic_on_oops) {
+		if (netdump_func)
+			netdump_func = NULL;
 		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(5 * HZ);
@@ -429,6 +439,10 @@ DO_ERROR(11, SIGBUS,  "segment not present", segment_not_present)
 DO_ERROR(12, SIGBUS,  "stack segment", stack_segment)
 DO_ERROR_INFO(17, SIGBUS, "alignment check", alignment_check, BUS_ADRALN, get_cr2())
 
+/*
+ * the original non-exec stack patch was written by
+ * Solar Designer <solar at openwall.com>. Thanks!
+ */
 asmlinkage void do_general_protection(struct pt_regs * regs, long error_code)
 {
 	if (regs->eflags & X86_EFLAGS_IF)
@@ -439,6 +453,46 @@ asmlinkage void do_general_protection(struct pt_regs * regs, long error_code)
 
 	if (!(regs->xcs & 3))
 		goto gp_in_kernel;
+
+	/*
+	 * lazy-check for CS validity on exec-shield binaries:
+	 */
+	if (current->mm) {
+		int cpu = smp_processor_id();
+		struct desc_struct *desc1, *desc2;
+		struct vm_area_struct *vma;
+		unsigned long limit = 0;
+		
+		spin_lock(&current->mm->page_table_lock);
+		for (vma = current->mm->mmap; vma; vma = vma->vm_next)
+			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
+				limit = vma->vm_end;
+		spin_unlock(&current->mm->page_table_lock);
+
+		current->mm->context.exec_limit = limit;
+		set_user_cs(&current->mm->context.user_cs, limit);
+
+		desc1 = &current->mm->context.user_cs;
+		desc2 = cpu_gdt_table[cpu] + GDT_ENTRY_DEFAULT_USER_CS;
+
+		/*
+		 * The CS was not in sync - reload it and retry the
+		 * instruction. If the instruction still faults then
+		 * we wont hit this branch next time around.
+		 */
+		if (desc1->a != desc2->a || desc1->b != desc2->b) {
+			if (print_fatal_signals >= 2) {
+				printk("#GPF fixup (%ld[seg:%lx]) at %08lx, CPU#%d.\n", error_code, error_code/8, regs->eip, smp_processor_id());
+				printk(" exec_limit: %08lx, user_cs: %08lx/%08lx, CPU_cs: %08lx/%08lx.\n", current->mm->context.exec_limit, desc1->a, desc1->b, desc2->a, desc2->b);
+			}
+			load_user_cs_desc(cpu, current->mm);
+			return;
+		}
+	}
+	if (print_fatal_signals) {
+		printk("#GPF(%ld[seg:%lx]) at %08lx, CPU#%d.\n", error_code, error_code/8, regs->eip, smp_processor_id());
+		printk(" exec_limit: %08lx, user_cs: %08lx/%08lx.\n", current->mm->context.exec_limit, current->mm->context.user_cs.a, current->mm->context.user_cs.b);
+	}
 
 	current->thread.error_code = error_code;
 	current->thread.trap_no = 13;
@@ -459,7 +513,7 @@ static void mem_parity_error(unsigned char reason, struct pt_regs * regs)
 {
 	printk("Uhhuh. NMI received. Dazed and confused, but trying to continue\n");
 	printk("You probably have a hardware problem with your RAM chips\n");
-
+	panic("Halting\n");
 	/* Clear and disable the memory parity error line. */
 	clear_mem_error(reason);
 }
@@ -591,10 +645,18 @@ asmlinkage void do_debug(struct pt_regs * regs, long error_code)
 	if (regs->eflags & X86_EFLAGS_IF)
 		local_irq_enable();
 
-	/* Mask out spurious debug traps due to lazy DR7 setting */
+	/*
+	 * Mask out spurious debug traps due to lazy DR7 setting or
+	 * due to 4G/4G kernel mode:
+	 */
 	if (condition & (DR_TRAP0|DR_TRAP1|DR_TRAP2|DR_TRAP3)) {
 		if (!tsk->thread.debugreg[7])
 			goto clear_dr7;
+		if (!user_mode(regs)) {
+			// restore upon return-to-userspace:
+			set_thread_flag(TIF_DB7);
+			goto clear_dr7;
+		}
 	}
 
 	if (regs->eflags & VM_MASK)
@@ -836,19 +898,53 @@ asmlinkage void math_emulate(long arg)
 
 #endif /* CONFIG_MATH_EMULATION */
 
-#ifdef CONFIG_X86_F00F_BUG
-void __init trap_init_f00f_bug(void)
+void __init trap_init_virtual_IDT(void)
 {
-	__set_fixmap(FIX_F00F_IDT, __pa(&idt_table), PAGE_KERNEL_RO);
-
 	/*
-	 * Update the IDT descriptor and reload the IDT so that
-	 * it uses the read-only mapped virtual address.
+	 * "idt" is magic - it overlaps the idt_descr
+	 * variable so that updating idt will automatically
+	 * update the idt descriptor..
 	 */
-	idt_descr.address = fix_to_virt(FIX_F00F_IDT);
+	__set_fixmap(FIX_IDT, __pa(&idt_table), PAGE_KERNEL_RO);
+	idt_descr.address = __fix_to_virt(FIX_IDT);
+
 	__asm__ __volatile__("lidt %0" : : "m" (idt_descr));
 }
+
+void __init trap_init_virtual_GDT(void)
+{
+	int cpu = smp_processor_id();
+	struct Xgt_desc_struct *gdt_desc = cpu_gdt_descr + cpu;
+	struct Xgt_desc_struct tmp_desc = {0, 0};
+	struct tss_struct * t;
+
+	__asm__ __volatile__("sgdt %0": "=m" (tmp_desc): :"memory");
+
+#ifdef CONFIG_X86_HIGH_ENTRY
+	if (!cpu) {
+		__set_fixmap(FIX_GDT_0, __pa(cpu_gdt_table), PAGE_KERNEL);
+		__set_fixmap(FIX_GDT_1, __pa(cpu_gdt_table) + PAGE_SIZE, PAGE_KERNEL);
+		__set_fixmap(FIX_TSS_0, __pa(init_tss), PAGE_KERNEL);
+		__set_fixmap(FIX_TSS_1, __pa(init_tss) + 1*PAGE_SIZE, PAGE_KERNEL);
+		__set_fixmap(FIX_TSS_2, __pa(init_tss) + 2*PAGE_SIZE, PAGE_KERNEL);
+		__set_fixmap(FIX_TSS_3, __pa(init_tss) + 3*PAGE_SIZE, PAGE_KERNEL);
+	}
+
+	gdt_desc->address = __fix_to_virt(FIX_GDT_0) + sizeof(cpu_gdt_table[0]) * cpu;
+#else
+	gdt_desc->address = (unsigned long)cpu_gdt_table[cpu];
 #endif
+	__asm__ __volatile__("lgdt %0": "=m" (*gdt_desc));
+
+#ifdef CONFIG_X86_HIGH_ENTRY
+	t = (struct tss_struct *) __fix_to_virt(FIX_TSS_0) + cpu;
+#else
+	t = init_tss + cpu;
+#endif
+	set_tss_desc(cpu, t);
+	cpu_gdt_table[cpu][GDT_ENTRY_TSS].b &= 0xfffffdff;
+	load_TR_desc();
+}
 
 #define _set_gate(gate_addr,type,dpl,addr,seg) \
 do { \
@@ -875,17 +971,17 @@ void set_intr_gate(unsigned int n, void *addr)
 	_set_gate(idt_table+n,14,0,addr,__KERNEL_CS);
 }
 
-static void __init set_trap_gate(unsigned int n, void *addr)
+void __init set_trap_gate(unsigned int n, void *addr)
 {
 	_set_gate(idt_table+n,15,0,addr,__KERNEL_CS);
 }
 
-static void __init set_system_gate(unsigned int n, void *addr)
+void __init set_system_gate(unsigned int n, void *addr)
 {
 	_set_gate(idt_table+n,15,3,addr,__KERNEL_CS);
 }
 
-static void __init set_call_gate(void *a, void *addr)
+void __init set_call_gate(void *a, void *addr)
 {
 	_set_gate(a,12,3,addr,__KERNEL_CS);
 }
@@ -907,6 +1003,7 @@ void __init trap_init(void)
 #ifdef CONFIG_X86_LOCAL_APIC
 	init_apic_mappings();
 #endif
+	init_entry_mappings();
 
 	set_trap_gate(0,&divide_error);
 	set_intr_gate(1,&debug);
@@ -937,9 +1034,10 @@ void __init trap_init(void)
 	 * default LDT is a single-entry callgate to lcall7 for iBCS
 	 * and a callgate to lcall27 for Solaris/x86 binaries
 	 */
+#if 0	 
 	set_call_gate(&default_ldt[0],lcall7);
 	set_call_gate(&default_ldt[4],lcall27);
-
+#endif
 	/*
 	 * Should be a barrier for any external CPU state.
 	 */

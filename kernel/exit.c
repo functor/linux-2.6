@@ -23,6 +23,10 @@
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
 #include <linux/mempolicy.h>
+#include <linux/ckrm.h>
+#include <linux/ckrm_tsk.h>
+#include <linux/vs_limit.h>
+#include <linux/ckrm_mem.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -37,6 +41,11 @@ int getrusage(struct task_struct *, int, struct rusage __user *);
 static void __unhash_process(struct task_struct *p)
 {
 	nr_threads--;
+	/* tasklist_lock is held, is this sufficient? */
+	if (p->vx_info) {
+		atomic_dec(&p->vx_info->cacct.nr_threads);
+		atomic_dec(&p->vx_info->limit.rcur[RLIMIT_NPROC]);
+	}
 	detach_pid(p, PIDTYPE_PID);
 	detach_pid(p, PIDTYPE_TGID);
 	if (thread_group_leader(p)) {
@@ -99,7 +108,7 @@ repeat:
 	sched_exit(p);
 	write_unlock_irq(&tasklist_lock);
 	spin_unlock(&p->proc_lock);
-	proc_pid_flush(proc_dentry);
+	dput(proc_dentry);
 	release_thread(p);
 	put_task_struct(p);
 
@@ -236,6 +245,7 @@ void reparent_to_init(void)
 	ptrace_unlink(current);
 	/* Reparent to init */
 	REMOVE_LINKS(current);
+	/* FIXME handle vchild_reaper/initpid */
 	current->parent = child_reaper;
 	current->real_parent = child_reaper;
 	SET_LINKS(current);
@@ -378,8 +388,11 @@ static inline void close_files(struct files_struct * files)
 		while (set) {
 			if (set & 1) {
 				struct file * file = xchg(&files->fd[i], NULL);
-				if (file)
+				if (file) {
 					filp_close(file, files);
+					cond_resched();
+				}
+				// vx_openfd_dec(fd);
 			}
 			i++;
 			set >>= 1;
@@ -511,6 +524,12 @@ static inline void __exit_mm(struct task_struct * tsk)
 	task_lock(tsk);
 	tsk->mm = NULL;
 	up_read(&mm->mmap_sem);
+#ifdef CONFIG_CKRM_RES_MEM
+	spin_lock(&mm->peertask_lock);
+	list_del_init(&tsk->mm_peers);
+	ckrm_mem_evaluate_mm(mm);
+	spin_unlock(&mm->peertask_lock);
+#endif
 	enter_lazy_tlb(mm, current);
 	task_unlock(tsk);
 	mmput(mm);
@@ -600,6 +619,7 @@ static inline void forget_original_parent(struct task_struct * father,
 	struct task_struct *p, *reaper = father;
 	struct list_head *_p, *_n;
 
+	/* FIXME handle vchild_reaper/initpid */
 	reaper = father->group_leader;
 	if (reaper == father)
 		reaper = child_reaper;
@@ -658,6 +678,8 @@ static void exit_notify(struct task_struct *tsk)
 	int state;
 	struct task_struct *t;
 	struct list_head ptrace_dead, *_p, *_n;
+
+	ckrm_cb_exit(tsk);
 
 	if (signal_pending(tsk) && !tsk->signal->group_exit
 	    && !thread_group_empty(tsk)) {
@@ -821,6 +843,13 @@ asmlinkage NORET_TYPE void do_exit(long code)
 	}
 
 	acct_process(code);
+	if (current->tux_info) {
+#ifdef CONFIG_TUX_DEBUG
+		printk("Possibly unexpected TUX-thread exit(%ld) at %p?\n",
+			code, __builtin_return_address(0));
+#endif
+		current->tux_exit();
+	}
 	__exit_mm(tsk);
 
 	exit_sem(tsk);

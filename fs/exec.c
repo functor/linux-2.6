@@ -46,6 +46,9 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
+#include <linux/ckrm.h>
+#include <linux/vs_memory.h>
+#include <linux/ckrm_mem.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -319,7 +322,8 @@ void install_arg_page(struct vm_area_struct *vma,
 		pte_unmap(pte);
 		goto out;
 	}
-	mm->rss++;
+	// mm->rss++;
+	vx_rsspages_inc(mm);
 	lru_cache_add_active(page);
 	set_pte(pte, pte_mkdirty(pte_mkwrite(mk_pte(
 					page, vma->vm_page_prot))));
@@ -389,7 +393,12 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	while (i < MAX_ARG_PAGES)
 		bprm->page[i++] = NULL;
 #else
+#ifdef __HAVE_ARCH_ALIGN_STACK
+	stack_base = arch_align_stack(STACK_TOP - MAX_ARG_PAGES*PAGE_SIZE);
+	stack_base = PAGE_ALIGN(stack_base);
+#else
 	stack_base = STACK_TOP - MAX_ARG_PAGES * PAGE_SIZE;
+#endif
 	mm->arg_start = bprm->p + stack_base;
 	arg_size = STACK_TOP - (PAGE_MASK & (unsigned long) mm->arg_start);
 #endif
@@ -403,7 +412,8 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt)
 		return -ENOMEM;
 
-	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT)) {
+	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT) ||
+		!vx_vmpages_avail(mm, arg_size >> PAGE_SHIFT)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
@@ -433,7 +443,9 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 		mpnt->vm_flags |= mm->def_flags;
 		mpnt->vm_page_prot = protection_map[mpnt->vm_flags & 0x7];
 		insert_vm_struct(mm, mpnt);
-		mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		// mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		vx_vmpages_sub(mm, mm->total_vm -
+			((mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT));
 	}
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
@@ -546,6 +558,19 @@ static int exec_mmap(struct mm_struct *mm)
 	tsk->active_mm = mm;
 	activate_mm(active_mm, mm);
 	task_unlock(tsk);
+	arch_pick_mmap_layout(mm);
+#ifdef CONFIG_CKRM_RES_MEM
+	if (old_mm) {
+		spin_lock(&old_mm->peertask_lock);
+		list_del(&tsk->mm_peers);
+		ckrm_mem_evaluate_mm(old_mm);
+		spin_unlock(&old_mm->peertask_lock);
+	}
+	spin_lock(&mm->peertask_lock);
+	list_add_tail(&tsk->mm_peers, &mm->tasklist);
+	ckrm_mem_evaluate_mm(mm);
+	spin_unlock(&mm->peertask_lock);
+#endif
 	if (old_mm) {
 		if (active_mm != old_mm) BUG();
 		mmput(old_mm);
@@ -836,6 +861,7 @@ int flush_old_exec(struct linux_binprm * bprm)
 	}
 	current->comm[i] = '\0';
 
+	current->flags &= ~PF_RELOCEXEC;
 	flush_thread();
 
 	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid || 
@@ -1035,6 +1061,7 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 					fput(bprm->file);
 				bprm->file = NULL;
 				current->did_exec = 1;
+				ckrm_cb_exec(bprm->filename);
 				return retval;
 			}
 			read_lock(&binfmt_lock);

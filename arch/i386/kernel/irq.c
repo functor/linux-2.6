@@ -76,10 +76,8 @@ static void register_irq_proc (unsigned int irq);
 /*
  * per-CPU IRQ handling stacks
  */
-#ifdef CONFIG_4KSTACKS
 union irq_ctx *hardirq_ctx[NR_CPUS];
 union irq_ctx *softirq_ctx[NR_CPUS];
-#endif
 
 /*
  * Special irq handlers.
@@ -222,9 +220,6 @@ asmlinkage int handle_IRQ_event(unsigned int irq,
 	int status = 1;	/* Force the "do bottom halves" bit */
 	int retval = 0;
 
-	if (!(action->flags & SA_INTERRUPT))
-		local_irq_enable();
-
 	do {
 		status |= action->flags;
 		retval |= action->handler(irq, action->dev_id, regs);
@@ -244,7 +239,8 @@ static void __report_bad_irq(int irq, irq_desc_t *desc, irqreturn_t action_ret)
 		printk(KERN_ERR "irq event %d: bogus return value %x\n",
 				irq, action_ret);
 	} else {
-		printk(KERN_ERR "irq %d: nobody cared!\n", irq);
+		printk(KERN_ERR "irq %d: nobody cared! (screaming interrupt?)\n", irq);
+		printk(KERN_ERR "irq %d: Please try booting with acpi=off and report a bug\n", irq);
 	}
 	dump_stack();
 	printk(KERN_ERR "handlers:\n");
@@ -487,7 +483,6 @@ asmlinkage unsigned int do_IRQ(struct pt_regs regs)
 	 * useful for irq hardware that does not mask cleanly in an
 	 * SMP environment.
 	 */
-#ifdef CONFIG_4KSTACKS
 
 	for (;;) {
 		irqreturn_t action_ret;
@@ -513,6 +508,8 @@ asmlinkage unsigned int do_IRQ(struct pt_regs regs)
 			/* build the stack frame on the IRQ stack */
 			isp = (u32*) ((char*)irqctx + sizeof(*irqctx));
 			irqctx->tinfo.task = curctx->tinfo.task;
+			irqctx->tinfo.real_stack = curctx->tinfo.real_stack;
+			irqctx->tinfo.virtual_stack = curctx->tinfo.virtual_stack;
 			irqctx->tinfo.previous_esp = current_stack_pointer();
 
 			*--isp = (u32) action;
@@ -540,23 +537,6 @@ asmlinkage unsigned int do_IRQ(struct pt_regs regs)
 		desc->status &= ~IRQ_PENDING;
 	}
 
-#else
-
-	for (;;) {
-		irqreturn_t action_ret;
-
-		spin_unlock(&desc->lock);
-
-		action_ret = handle_IRQ_event(irq, &regs, action);
-
-		spin_lock(&desc->lock);
-		if (!noirqdebug)
-			note_interrupt(irq, desc, action_ret);
-		if (likely(!(desc->status & IRQ_PENDING)))
-			break;
-		desc->status &= ~IRQ_PENDING;
-	}
-#endif
 	desc->status &= ~IRQ_INPROGRESS;
 
 out:
@@ -1115,7 +1095,6 @@ void init_irq_proc (void)
 }
 
 
-#ifdef CONFIG_4KSTACKS
 /*
  * These should really be __section__(".bss.page_aligned") as well, but
  * gcc's 3.0 and earlier don't handle that correctly.
@@ -1173,6 +1152,8 @@ asmlinkage void do_softirq(void)
 		curctx = current_thread_info();
 		irqctx = softirq_ctx[smp_processor_id()];
 		irqctx->tinfo.task = curctx->task;
+		irqctx->tinfo.real_stack = curctx->real_stack;
+		irqctx->tinfo.virtual_stack = curctx->virtual_stack;
 		irqctx->tinfo.previous_esp = current_stack_pointer();
 
 		/* build the stack frame on the softirq stack */
@@ -1193,4 +1174,3 @@ asmlinkage void do_softirq(void)
 }
 
 EXPORT_SYMBOL(do_softirq);
-#endif

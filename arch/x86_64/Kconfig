@@ -499,6 +499,8 @@ config IOMMU_LEAK
 
 endmenu
 
+source "kernel/vserver/Kconfig"
+
 source "security/Kconfig"
 
 source "crypto/Kconfig"

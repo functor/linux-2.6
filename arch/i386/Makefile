@@ -20,7 +20,7 @@ OBJCOPYFLAGS	:= -O binary -R .note -R .comment -S
 LDFLAGS_vmlinux :=
 CHECK		:= $(CHECK) -D__i386__=1
 
-CFLAGS += -pipe -msoft-float
+CFLAGS += -pipe -msoft-float -m32 -fno-builtin-sprintf -fno-builtin-log2 -fno-builtin-puts 
 
 # prevent gcc from keeping the stack 16 byte aligned
 CFLAGS += $(call check_gcc,-mpreferred-stack-boundary=2,)
@@ -113,7 +113,7 @@ drivers-$(CONFIG_OPROFILE)		+= arch/i386/oprofile/
 drivers-$(CONFIG_PM)			+= arch/i386/power/
 
 CFLAGS += $(mflags-y)
-AFLAGS += $(mflags-y)
+AFLAGS += $(mflags-y) -m32
 
 boot := arch/i386/boot
 

@@ -204,6 +204,27 @@ extern void free_pages_and_swap_cache(struct page **, int);
 extern struct page * lookup_swap_cache(swp_entry_t);
 extern struct page * read_swap_cache_async(swp_entry_t, struct vm_area_struct *vma,
 					   unsigned long addr);
+/* linux/mm/thrash.c */
+#ifdef CONFIG_SWAP
+extern struct mm_struct * swap_token_mm;
+extern void grab_swap_token(void);
+extern void __put_swap_token(struct mm_struct *);
+
+static inline int has_swap_token(struct mm_struct *mm)
+{
+	return (mm == swap_token_mm);
+}
+
+static inline void put_swap_token(struct mm_struct *mm)
+{
+	if (has_swap_token(mm))
+		__put_swap_token(mm);
+}
+#else /* CONFIG_SWAP */
+#define put_swap_token(x) do { } while(0)
+#define grab_swap_token  do { } while(0)
+#define has_swap_token 0
+#endif /* CONFIG_SWAP */
 
 /* linux/mm/swapfile.c */
 extern long total_swap_pages;

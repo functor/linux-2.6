@@ -1,6 +1,8 @@
 #ifndef _I386_PAGE_H
 #define _I386_PAGE_H
 
+#include <linux/config.h>
+
 /* PAGE_SHIFT determines the page size */
 #define PAGE_SHIFT	12
 #define PAGE_SIZE	(1UL << PAGE_SHIFT)
@@ -9,11 +11,10 @@
 #define LARGE_PAGE_MASK (~(LARGE_PAGE_SIZE-1))
 #define LARGE_PAGE_SIZE (1UL << PMD_SHIFT)
 
-#ifdef __KERNEL__
-#ifndef __ASSEMBLY__
-
 #include <linux/config.h>
 
+#ifdef __KERNEL__
+#ifndef __ASSEMBLY__
 #ifdef CONFIG_X86_USE_3DNOW
 
 #include <asm/mmx.h>
@@ -92,7 +93,18 @@ typedef struct { unsigned long pgprot; } pgprot_t;
  *
  * If you want more physical memory than this then see the CONFIG_HIGHMEM4G
  * and CONFIG_HIGHMEM64G options in the kernel configuration.
+ *
+ * Note: on PAE the kernel must never go below 32 MB, we use the
+ * first 8 entries of the 2-level boot pgd for PAE magic.
  */
+
+#ifdef CONFIG_X86_4G_VM_LAYOUT
+#define __PAGE_OFFSET		(0x02000000)
+#define TASK_SIZE		(0xff000000)
+#else
+#define __PAGE_OFFSET		(0xc0000000)
+#define TASK_SIZE		(0xc0000000)
+#endif
 
 /*
  * This much address space is reserved for vmalloc() and iomap()
@@ -116,18 +128,14 @@ static __inline__ int get_order(unsigned long size)
 	return order;
 }
 
+extern int devmem_is_allowed(unsigned long pagenr);
+
 #endif /* __ASSEMBLY__ */
-
-#ifdef __ASSEMBLY__
-#define __PAGE_OFFSET		(0xC0000000)
-#else
-#define __PAGE_OFFSET		(0xC0000000UL)
-#endif
-
 
 #define PAGE_OFFSET		((unsigned long)__PAGE_OFFSET)
 #define VMALLOC_RESERVE		((unsigned long)__VMALLOC_RESERVE)
-#define MAXMEM			(-__PAGE_OFFSET-__VMALLOC_RESERVE)
+#define __MAXMEM		(-__PAGE_OFFSET-__VMALLOC_RESERVE)
+#define MAXMEM			((unsigned long)(-PAGE_OFFSET-VMALLOC_RESERVE))
 #define __pa(x)			((unsigned long)(x)-PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
 #define pfn_to_kaddr(pfn)      __va((pfn) << PAGE_SHIFT)
@@ -144,6 +152,8 @@ static __inline__ int get_order(unsigned long size)
 	(VM_READ | VM_WRITE | \
 	((current->personality & READ_IMPLIES_EXEC) ? VM_EXEC : 0 ) | \
 		 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+
+
 
 #endif /* __KERNEL__ */
 

@@ -2,8 +2,8 @@
 #ifndef _PPC_SETUP_H
 #define _PPC_SETUP_H
 
-#define m68k_num_memory num_memory
-#define m68k_memory memory
+#define m68k_num_memory ppc_num_memory
+#define m68k_memory ppc_memory
 
 #include <asm-m68k/setup.h>
 /* We have a bigger command line buffer. */

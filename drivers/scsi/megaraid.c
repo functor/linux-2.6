@@ -4601,6 +4601,21 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	pci_bus = pdev->bus->number;
 	pci_dev_func = pdev->devfn;
+	
+	if(pdev->vendor == PCI_VENDOR_ID_INTEL)		/* The megaraid3 stuff reports the id of the intel
+							   part which is not remotely specific to the megaraid */
+	{
+		u16 magic;
+		/* Don't fall over the Compaq management cards using the same PCI identifier */
+		if(pdev->subsystem_vendor == PCI_VENDOR_ID_COMPAQ &&
+		   pdev->subsystem_device == 0xC000)
+		   	return -ENODEV;
+		/* Now check the magic signature byte */
+		pci_read_config_word(pdev, PCI_CONF_AMISIG, &magic);
+		if(magic != HBA_SIGNATURE_471 && magic != HBA_SIGNATURE)
+			return -ENODEV;
+		/* Ok it is probably a megaraid */
+	}
 
 	/*
 	 * The megaraid3 stuff reports the ID of the Intel part which is not

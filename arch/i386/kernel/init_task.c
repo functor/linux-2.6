@@ -27,7 +27,7 @@ EXPORT_SYMBOL(init_mm);
  */
 union thread_union init_thread_union 
 	__attribute__((__section__(".data.init_task"))) =
-		{ INIT_THREAD_INFO(init_task) };
+		{ INIT_THREAD_INFO(init_task, init_thread_union) };
 
 /*
  * Initial task structure.
@@ -45,5 +45,5 @@ EXPORT_SYMBOL(init_task);
  * section. Since TSS's are completely CPU-local, we want them
  * on exact cacheline boundaries, to eliminate cacheline ping-pong.
  */ 
-struct tss_struct init_tss[NR_CPUS] __cacheline_aligned = { [0 ... NR_CPUS-1] = INIT_TSS };
+struct tss_struct init_tss[NR_CPUS] __attribute__((__section__(".data.tss"))) = { [0 ... NR_CPUS-1] = INIT_TSS };
 

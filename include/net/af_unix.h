@@ -1,5 +1,8 @@
 #ifndef __LINUX_NET_AFUNIX_H
 #define __LINUX_NET_AFUNIX_H
+
+#include <linux/vs_base.h>
+
 extern void unix_inflight(struct file *fp);
 extern void unix_notinflight(struct file *fp);
 extern void unix_gc(void);
@@ -11,9 +14,9 @@ extern rwlock_t unix_table_lock;
 
 extern atomic_t unix_tot_inflight;
 
-static inline struct sock *first_unix_socket(int *i)
+static inline struct sock *next_unix_socket_table(int *i)
 {
-	for (*i = 0; *i <= UNIX_HASH_SIZE; (*i)++) {
+	for ((*i)++; *i <= UNIX_HASH_SIZE; (*i)++) {
 		if (!hlist_empty(&unix_socket_table[*i]))
 			return __sk_head(&unix_socket_table[*i]);
 	}
@@ -22,16 +25,19 @@ static inline struct sock *first_unix_socket(int *i)
 
 static inline struct sock *next_unix_socket(int *i, struct sock *s)
 {
-	struct sock *next = sk_next(s);
-	/* More in this chain? */
-	if (next)
-		return next;
-	/* Look for next non-empty chain. */
-	for ((*i)++; *i <= UNIX_HASH_SIZE; (*i)++) {
-		if (!hlist_empty(&unix_socket_table[*i]))
-			return __sk_head(&unix_socket_table[*i]);
-	}
-	return NULL;
+	do {
+		if (s)
+			s = sk_next(s);
+		if (!s)
+			s = next_unix_socket_table(i);
+	} while (s && !vx_check(s->sk_xid, VX_IDENT|VX_WATCH));
+	return s;
+}
+
+static inline struct sock *first_unix_socket(int *i)
+{
+	*i = 0;
+	return next_unix_socket(i, NULL);
 }
 
 #define forall_unix_sockets(i, s) \

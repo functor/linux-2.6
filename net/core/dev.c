@@ -113,6 +113,7 @@
 #include <net/iw_handler.h>
 #endif	/* CONFIG_NET_RADIO */
 #include <asm/current.h>
+#include <linux/vs_network.h>
 
 /* This define, if set, will randomly drop a packet when congestion
  * is more than moderate.  It helps fairness in the multi-interface
@@ -226,6 +227,8 @@ extern void netdev_unregister_sysfs(struct net_device *);
 #define	netdev_unregister_sysfs(dev)	do { } while(0)
 #endif
 
+/* netdump function */
+void (*netdump_func) (struct pt_regs *regs) = NULL;
 
 /*******************************************************************************
 
@@ -1558,7 +1561,7 @@ int netif_rx(struct sk_buff *skb)
 	struct softnet_data *queue;
 	unsigned long flags;
 
-#ifdef CONFIG_NETPOLL_RX
+#ifdef CONFIG_NETPOLL
 	if (skb->dev->netpoll_rx && netpoll_rx(skb)) {
 		kfree_skb(skb);
 		return NET_RX_DROP;
@@ -1762,7 +1765,7 @@ int netif_receive_skb(struct sk_buff *skb)
 	int ret = NET_RX_DROP;
 	unsigned short type;
 
-#ifdef CONFIG_NETPOLL_RX
+#ifdef CONFIG_NETPOLL
 	if (skb->dev->netpoll_rx && skb->dev->poll && netpoll_rx(skb)) {
 		kfree_skb(skb);
 		return NET_RX_DROP;

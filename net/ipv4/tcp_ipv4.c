@@ -74,6 +74,7 @@
 #include <linux/stddef.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/vserver/debug.h>
 
 extern int sysctl_ip_dynaddr;
 int sysctl_tcp_tw_reuse;
@@ -458,7 +459,6 @@ inline struct sock *tcp_v4_lookup_listener(u32 daddr, unsigned short hnum,
 	head = &tcp_listening_hash[tcp_lhashfn(hnum)];
 	if (!hlist_empty(head)) {
 		struct inet_opt *inet = inet_sk((sk = __sk_head(head)));
-
 		if (inet->num == hnum && !sk->sk_node.next &&
 		    (!inet->rcv_saddr || inet->rcv_saddr == daddr) &&
 		    (sk->sk_family == PF_INET || !ipv6_only_sock(sk)) &&
@@ -916,7 +916,11 @@ static void tcp_v4_synq_add(struct sock *sk, struct open_request *req)
 	lopt->syn_table[h] = req;
 	write_unlock(&tp->syn_wait_lock);
 
+#ifdef CONFIG_ACCEPT_QUEUES
+	tcp_synq_added(sk, req);
+#else
 	tcp_synq_added(sk);
+#endif
 }
 
 
@@ -1413,6 +1417,9 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	__u32 daddr = skb->nh.iph->daddr;
 	__u32 isn = TCP_SKB_CB(skb)->when;
 	struct dst_entry *dst = NULL;
+#ifdef CONFIG_ACCEPT_QUEUES
+	int class = 0;
+#endif
 #ifdef CONFIG_SYN_COOKIES
 	int want_cookie = 0;
 #else
@@ -1437,12 +1444,31 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 		goto drop;
 	}
 
+#ifdef CONFIG_ACCEPT_QUEUES
+	class = (skb->nfmark <= 0) ? 0 :
+		((skb->nfmark >= NUM_ACCEPT_QUEUES) ? 0: skb->nfmark);
+	/*
+	 * Accept only if the class has shares set or if the default class
+	 * i.e. class 0 has shares
+	 */
+	if (!(tcp_sk(sk)->acceptq[class].aq_ratio)) {
+		if (tcp_sk(sk)->acceptq[0].aq_ratio) 
+			class = 0;
+		else
+			goto drop;
+	}
+#endif
+
 	/* Accept backlog is full. If we have already queued enough
 	 * of warm entries in syn queue, drop request. It is better than
 	 * clogging syn queue with openreqs with exponentially increasing
 	 * timeout.
 	 */
+#ifdef CONFIG_ACCEPT_QUEUES
+	if (sk_acceptq_is_full(sk, class) && tcp_synq_young(sk, class) > 1)
+#else
 	if (sk_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
+#endif
 		goto drop;
 
 	req = tcp_openreq_alloc();
@@ -1472,7 +1498,10 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	tp.tstamp_ok = tp.saw_tstamp;
 
 	tcp_openreq_init(req, &tp, skb);
-
+#ifdef CONFIG_ACCEPT_QUEUES
+	req->acceptq_class = class;
+	req->acceptq_time_stamp = jiffies;
+#endif
 	req->af.v4_req.loc_addr = daddr;
 	req->af.v4_req.rmt_addr = saddr;
 	req->af.v4_req.opt = tcp_v4_save_options(sk, skb);
@@ -1567,7 +1596,11 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	struct tcp_opt *newtp;
 	struct sock *newsk;
 
+#ifdef CONFIG_ACCEPT_QUEUES
+	if (sk_acceptq_is_full(sk, req->acceptq_class))
+#else
 	if (sk_acceptq_is_full(sk))
+#endif
 		goto exit_overflow;
 
 	if (!dst && (dst = tcp_v4_route_req(sk, req)) == NULL)
@@ -1729,6 +1762,10 @@ csum_err:
 	goto discard;
 }
 
+extern struct proto_ops inet_stream_ops;
+
+extern int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len);
+
 /*
  *	From tcp_input.c
  */
@@ -1780,6 +1817,14 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		goto no_tcp_socket;
 
 process:
+	/* Silently drop if VNET is active (if INET bind() has been
+	 * overridden) and the context is not entitled to read the
+	 * packet.
+	 */
+	if (inet_stream_ops.bind != inet_bind &&
+	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
+		goto discard_it;
+
 	if (sk->sk_state == TCP_TIME_WAIT)
 		goto do_time_wait;
 
@@ -2165,6 +2210,11 @@ static void *listening_get_next(struct seq_file *seq, void *cur)
 		req = req->dl_next;
 		while (1) {
 			while (req) {
+				vxdprintk(VXD_CBIT(net, 6),
+					"sk,req: %p [#%d] (from %d)",
+					req->sk, req->sk->sk_xid, current->xid);
+				if (!vx_check(req->sk->sk_xid, VX_IDENT|VX_WATCH))
+					continue;
 				if (req->class->family == st->family) {
 					cur = req;
 					goto out;
@@ -2183,6 +2233,10 @@ get_req:
 		sk = sk_next(sk);
 get_sk:
 	sk_for_each_from(sk, node) {
+		vxdprintk(VXD_CBIT(net, 6), "sk: %p [#%d] (from %d)",
+			sk, sk->sk_xid, current->xid);
+		if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
+			continue;
 		if (sk->sk_family == st->family) {
 			cur = sk;
 			goto out;
@@ -2230,18 +2284,26 @@ static void *established_get_first(struct seq_file *seq)
 	       
 		read_lock(&tcp_ehash[st->bucket].lock);
 		sk_for_each(sk, node, &tcp_ehash[st->bucket].chain) {
-			if (sk->sk_family != st->family) {
+			vxdprintk(VXD_CBIT(net, 6),
+				"sk,egf: %p [#%d] (from %d)",
+				sk, sk->sk_xid, current->xid);
+			if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
 				continue;
-			}
+			if (sk->sk_family != st->family)
+				continue;
 			rc = sk;
 			goto out;
 		}
 		st->state = TCP_SEQ_STATE_TIME_WAIT;
 		tw_for_each(tw, node,
 			    &tcp_ehash[st->bucket + tcp_ehash_size].chain) {
-			if (tw->tw_family != st->family) {
+			vxdprintk(VXD_CBIT(net, 6),
+				"tw: %p [#%d] (from %d)",
+				tw, tw->tw_xid, current->xid);
+			if (!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH))
 				continue;
-			}
+			if (tw->tw_family != st->family)
+				continue;
 			rc = tw;
 			goto out;
 		}
@@ -2265,7 +2327,8 @@ static void *established_get_next(struct seq_file *seq, void *cur)
 		tw = cur;
 		tw = tw_next(tw);
 get_tw:
-		while (tw && tw->tw_family != st->family) {
+		while (tw && (tw->tw_family != st->family ||
+			!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH))) {
 			tw = tw_next(tw);
 		}
 		if (tw) {
@@ -2285,6 +2348,11 @@ get_tw:
 		sk = sk_next(sk);
 
 	sk_for_each_from(sk, node) {
+		vxdprintk(VXD_CBIT(net, 6),
+			"sk,egn: %p [#%d] (from %d)",
+			sk, sk->sk_xid, current->xid);
+		if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
+			continue;
 		if (sk->sk_family == st->family)
 			goto found;
 	}

@@ -175,7 +175,7 @@ ncp_file_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 
 	*ppos = pos;
 
-	if (!IS_RDONLY(inode)) {
+	if (!IS_RDONLY(inode) || (file && MNT_IS_RDONLY(file->f_vfsmnt))) {
 		inode->i_atime = CURRENT_TIME;
 	}
 	

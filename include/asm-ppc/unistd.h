@@ -261,7 +261,7 @@
 #define __NR_fadvise64_64	254
 #define __NR_rtas		255
 /* Number 256 is reserved for sys_debug_setcontext */
-/* Number 257 is reserved for vserver */
+#define __NR_vserver		257
 /* Number 258 is reserved for new sys_remap_file_pages */
 /* Number 259 is reserved for new sys_mbind */
 /* Number 260 is reserved for new sys_get_mempolicy */
@@ -273,8 +273,10 @@
 #define __NR_mq_notify		266
 #define __NR_mq_getsetattr	267
 #define __NR_kexec_load		268
+#define __NR_ioprio_set		269
+#define __NR_ioprio_get		270
 
-#define __NR_syscalls		269
+#define __NR_syscalls		271
 
 #define __NR(n)	#n
 

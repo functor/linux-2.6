@@ -132,28 +132,29 @@ sys_sigaltstack(unsigned long ebx)
  */
 
 static int
-restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc, int *peax)
+restore_sigcontext(struct pt_regs *regs,
+		struct sigcontext __user *__sc, int *peax)
 {
-	unsigned int err = 0;
+	struct sigcontext scratch; /* 88 bytes of scratch area */
 
 	/* Always make any pending restarted system calls return -EINTR */
 	current_thread_info()->restart_block.fn = do_no_restart_syscall;
 
-#define COPY(x)		err |= __get_user(regs->x, &sc->x)
+	if (copy_from_user(&scratch, __sc, sizeof(scratch)))
+		return -EFAULT;
+
+#define COPY(x)		regs->x = scratch.x
 
 #define COPY_SEG(seg)							\
-	{ unsigned short tmp;						\
-	  err |= __get_user(tmp, &sc->seg);				\
+	{ unsigned short tmp = scratch.seg;				\
 	  regs->x##seg = tmp; }
 
 #define COPY_SEG_STRICT(seg)						\
-	{ unsigned short tmp;						\
-	  err |= __get_user(tmp, &sc->seg);				\
+	{ unsigned short tmp = scratch.seg;				\
 	  regs->x##seg = tmp|3; }
 
 #define GET_SEG(seg)							\
-	{ unsigned short tmp;						\
-	  err |= __get_user(tmp, &sc->seg);				\
+	{ unsigned short tmp = scratch.seg;				\
 	  loadsegment(seg,tmp); }
 
 #define	FIX_EFLAGS	(X86_EFLAGS_AC | X86_EFLAGS_OF | X86_EFLAGS_DF | \
@@ -176,27 +177,23 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc, int *peax
 	COPY_SEG_STRICT(ss);
 	
 	{
-		unsigned int tmpflags;
-		err |= __get_user(tmpflags, &sc->eflags);
+		unsigned int tmpflags = scratch.eflags;
 		regs->eflags = (regs->eflags & ~FIX_EFLAGS) | (tmpflags & FIX_EFLAGS);
 		regs->orig_eax = -1;		/* disable syscall checks */
 	}
 
 	{
-		struct _fpstate __user * buf;
-		err |= __get_user(buf, &sc->fpstate);
+		struct _fpstate * buf = scratch.fpstate;
 		if (buf) {
 			if (verify_area(VERIFY_READ, buf, sizeof(*buf)))
-				goto badframe;
-			err |= restore_i387(buf);
+				return -EFAULT;
+			if (restore_i387(buf))
+				return -EFAULT;
 		}
 	}
 
-	err |= __get_user(*peax, &sc->eax);
-	return err;
-
-badframe:
-	return 1;
+	*peax = scratch.eax;
+	return 0;
 }
 
 asmlinkage int sys_sigreturn(unsigned long __unused)
@@ -265,46 +262,47 @@ badframe:
  */
 
 static int
-setup_sigcontext(struct sigcontext __user *sc, struct _fpstate __user *fpstate,
+setup_sigcontext(struct sigcontext __user *__sc, struct _fpstate __user *fpstate,
 		 struct pt_regs *regs, unsigned long mask)
 {
-	int tmp, err = 0;
+	struct sigcontext sc; /* 88 bytes of scratch area */
+	int tmp;
 
 	tmp = 0;
 	__asm__("movl %%gs,%0" : "=r"(tmp): "0"(tmp));
-	err |= __put_user(tmp, (unsigned int __user *)&sc->gs);
+	*(unsigned int *)&sc.gs = tmp;
 	__asm__("movl %%fs,%0" : "=r"(tmp): "0"(tmp));
-	err |= __put_user(tmp, (unsigned int __user *)&sc->fs);
-
-	err |= __put_user(regs->xes, (unsigned int __user *)&sc->es);
-	err |= __put_user(regs->xds, (unsigned int __user *)&sc->ds);
-	err |= __put_user(regs->edi, &sc->edi);
-	err |= __put_user(regs->esi, &sc->esi);
-	err |= __put_user(regs->ebp, &sc->ebp);
-	err |= __put_user(regs->esp, &sc->esp);
-	err |= __put_user(regs->ebx, &sc->ebx);
-	err |= __put_user(regs->edx, &sc->edx);
-	err |= __put_user(regs->ecx, &sc->ecx);
-	err |= __put_user(regs->eax, &sc->eax);
-	err |= __put_user(current->thread.trap_no, &sc->trapno);
-	err |= __put_user(current->thread.error_code, &sc->err);
-	err |= __put_user(regs->eip, &sc->eip);
-	err |= __put_user(regs->xcs, (unsigned int __user *)&sc->cs);
-	err |= __put_user(regs->eflags, &sc->eflags);
-	err |= __put_user(regs->esp, &sc->esp_at_signal);
-	err |= __put_user(regs->xss, (unsigned int __user *)&sc->ss);
+	*(unsigned int *)&sc.fs = tmp;
+	*(unsigned int *)&sc.es = regs->xes;
+	*(unsigned int *)&sc.ds = regs->xds;
+	sc.edi = regs->edi;
+	sc.esi = regs->esi;
+	sc.ebp = regs->ebp;
+	sc.esp = regs->esp;
+	sc.ebx = regs->ebx;
+	sc.edx = regs->edx;
+	sc.ecx = regs->ecx;
+	sc.eax = regs->eax;
+	sc.trapno = current->thread.trap_no;
+	sc.err = current->thread.error_code;
+	sc.eip = regs->eip;
+	*(unsigned int *)&sc.cs = regs->xcs;
+	sc.eflags = regs->eflags;
+	sc.esp_at_signal = regs->esp;
+	*(unsigned int *)&sc.ss = regs->xss;
 
 	tmp = save_i387(fpstate);
 	if (tmp < 0)
-	  err = 1;
-	else
-	  err |= __put_user(tmp ? fpstate : NULL, &sc->fpstate);
+		return 1;
+	sc.fpstate = tmp ? fpstate : NULL;
 
 	/* non-iBCS2 extensions.. */
-	err |= __put_user(mask, &sc->oldmask);
-	err |= __put_user(current->thread.cr2, &sc->cr2);
+	sc.oldmask = mask;
+	sc.cr2 = current->thread.cr2;
 
-	return err;
+	if (copy_to_user(__sc, &sc, sizeof(sc)))
+		return 1;
+	return 0;
 }
 
 /*
@@ -371,7 +369,7 @@ static void setup_frame(int sig, struct k_sigaction *ka,
 	if (err)
 		goto give_sigsegv;
 
-	restorer = &__kernel_sigreturn;
+	restorer = current->mm->context.vdso + (long)&__kernel_sigreturn;
 	if (ka->sa.sa_flags & SA_RESTORER)
 		restorer = ka->sa.sa_restorer;
 
@@ -443,7 +441,7 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	/* Create the ucontext.  */
 	err |= __put_user(0, &frame->uc.uc_flags);
 	err |= __put_user(0, &frame->uc.uc_link);
-	err |= __put_user(current->sas_ss_sp, &frame->uc.uc_stack.ss_sp);
+	err |= __put_user(current->sas_ss_sp, (unsigned long *)&frame->uc.uc_stack.ss_sp);
 	err |= __put_user(sas_ss_flags(regs->esp),
 			  &frame->uc.uc_stack.ss_flags);
 	err |= __put_user(current->sas_ss_size, &frame->uc.uc_stack.ss_size);
@@ -454,9 +452,10 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 		goto give_sigsegv;
 
 	/* Set up to return from userspace.  */
-	restorer = &__kernel_rt_sigreturn;
+	restorer = current->mm->context.vdso + (long)&__kernel_rt_sigreturn;
 	if (ka->sa.sa_flags & SA_RESTORER)
 		restorer = ka->sa.sa_restorer;
+
 	err |= __put_user(restorer, &frame->pretcode);
 	 
 	/*

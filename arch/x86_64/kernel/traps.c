@@ -335,8 +335,11 @@ void oops_end(void)
 	bust_spinlocks(0); 
 	spin_unlock(&die_lock); 
 	local_irq_enable();	/* make sure back scroll still works */
-	if (panic_on_oops)
+	if (panic_on_oops) {
+		if (netdump_func)
+			netdump_func = NULL;
 		panic("Oops"); 
+	}
 } 
 
 void __die(const char * str, struct pt_regs * regs, long err)
@@ -366,6 +369,8 @@ void die(const char * str, struct pt_regs * regs, long err)
 	oops_begin();
 	handle_BUG(regs);
 	__die(str, regs, err);
+	if (netdump_func)
+		netdump_func(regs);
 	oops_end();
 	do_exit(SIGSEGV); 
 }

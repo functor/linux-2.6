@@ -30,6 +30,7 @@
 #include <linux/smp.h>
 #include <linux/security.h>
 #include <linux/bootmem.h>
+#include <linux/vs_base.h>
 
 #include <asm/uaccess.h>
 
@@ -247,7 +248,10 @@ int do_syslog(int type, char __user * buf, int len)
 	unsigned long i, j, limit, count;
 	int do_clear = 0;
 	char c;
-	int error = 0;
+	int error = -EPERM;
+
+	if (!vx_check(0, VX_ADMIN|VX_WATCH))
+		return error;
 
 	error = security_syslog(type);
 	if (error)
@@ -280,6 +284,7 @@ int do_syslog(int type, char __user * buf, int len)
 			error = __put_user(c,buf);
 			buf++;
 			i++;
+			cond_resched();
 			spin_lock_irq(&logbuf_lock);
 		}
 		spin_unlock_irq(&logbuf_lock);
@@ -321,6 +326,7 @@ int do_syslog(int type, char __user * buf, int len)
 			c = LOG_BUF(j);
 			spin_unlock_irq(&logbuf_lock);
 			error = __put_user(c,&buf[count-1-i]);
+			cond_resched();
 			spin_lock_irq(&logbuf_lock);
 		}
 		spin_unlock_irq(&logbuf_lock);
@@ -336,6 +342,7 @@ int do_syslog(int type, char __user * buf, int len)
 					error = -EFAULT;
 					break;
 				}
+				cond_resched();
 			}
 		}
 		break;
@@ -374,6 +381,20 @@ out:
 asmlinkage long sys_syslog(int type, char __user * buf, int len)
 {
 	return do_syslog(type, buf, len);
+}
+
+/*
+ * Netdump special routine. Don't print to global log_buf, just to the
+ * actual console device(s).
+ */
+static void netdump_call_console_drivers(const char *buf, unsigned long len)
+{
+	struct console *con;
+
+	for (con = console_drivers; con; con = con->next) {
+		if ((con->flags & CON_ENABLED) && con->write)
+			con->write(con, buf, len);
+	}
 }
 
 /*
@@ -524,6 +545,12 @@ asmlinkage int printk(const char *fmt, ...)
 	va_start(args, fmt);
 	printed_len = vscnprintf(printk_buf, sizeof(printk_buf), fmt, args);
 	va_end(args);
+
+	if (unlikely(netdump_mode)) {
+		netdump_call_console_drivers(printk_buf, printed_len);
+		spin_unlock_irqrestore(&logbuf_lock, flags);
+		goto out;
+	}
 
 	/*
 	 * Copy the output into log_buf.  If the caller didn't provide

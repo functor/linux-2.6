@@ -291,6 +291,9 @@ struct module
 
 	/* Am I GPL-compatible */
 	int license_gplok;
+	
+	/* Am I gpg signed */
+	int gpgsig_ok;
 
 #ifdef CONFIG_MODULE_UNLOAD
 	/* Reference counts */
@@ -551,29 +554,8 @@ struct obsolete_modparm {
 struct obsolete_modparm __parm_##var __attribute__((section("__obsparm"))) = \
 { __stringify(var), type };
 
-static inline void __deprecated MOD_INC_USE_COUNT(struct module *module)
-{
-	__unsafe(module);
-
-#if defined(CONFIG_MODULE_UNLOAD) && defined(MODULE)
-	local_inc(&module->ref[get_cpu()].count);
-	put_cpu();
-#else
-	(void)try_module_get(module);
-#endif
-}
-
-static inline void __deprecated MOD_DEC_USE_COUNT(struct module *module)
-{
-	module_put(module);
-}
-
-#define MOD_INC_USE_COUNT	MOD_INC_USE_COUNT(THIS_MODULE)
-#define MOD_DEC_USE_COUNT	MOD_DEC_USE_COUNT(THIS_MODULE)
 #else
 #define MODULE_PARM(var,type)
-#define MOD_INC_USE_COUNT	do { } while (0)
-#define MOD_DEC_USE_COUNT	do { } while (0)
 #endif
 
 #define __MODULE_STRING(x) __stringify(x)

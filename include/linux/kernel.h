@@ -45,14 +45,22 @@ extern int console_printk[];
 
 struct completion;
 
-#ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
-void __might_sleep(char *file, int line);
-#define might_sleep() __might_sleep(__FILE__, __LINE__)
-#define might_sleep_if(cond) do { if (unlikely(cond)) might_sleep(); } while (0)
+#ifdef CONFIG_PREEMPT_VOLUNTARY
+extern void __cond_resched(void);
+# define might_resched() __cond_resched()
 #else
-#define might_sleep() do {} while(0)
-#define might_sleep_if(cond) do {} while (0)
+# define might_resched() do { } while (0)
 #endif
+
+#ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
+  void __might_sleep(char *file, int line, int atomic_depth);
+# define might_sleep() \
+	do { __might_sleep(__FILE__, __LINE__, 0); might_resched(); } while (0)
+#else
+# define might_sleep() do { might_resched(); } while (0)
+#endif
+
+#define might_sleep_if(cond) do { if (unlikely(cond)) might_sleep(); } while (0)
 
 #define abs(x) ({				\
 		int __x = (x);			\
@@ -130,10 +138,14 @@ extern int oops_in_progress;		/* If set, an oops, panic(), BUG() or die() is in 
 extern int panic_on_oops;
 extern int tainted;
 extern const char *print_tainted(void);
+struct pt_regs;
+extern void (*netdump_func) (struct pt_regs *regs);
+extern int netdump_mode;
 
 /* Values used for system_state */
 extern enum system_states {
 	SYSTEM_BOOTING,
+	SYSTEM_BOOTING_SCHEDULER_OK,
 	SYSTEM_RUNNING,
 	SYSTEM_HALT,
 	SYSTEM_POWER_OFF,

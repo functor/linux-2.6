@@ -531,9 +531,7 @@ __SYSCALL(__NR_tgkill, sys_tgkill)
 #define __NR_utimes		235
 __SYSCALL(__NR_utimes, sys_utimes)
 #define __NR_vserver		236
-__SYSCALL(__NR_vserver, sys_ni_syscall)
-#define __NR_vserver		236
-__SYSCALL(__NR_vserver, sys_ni_syscall)
+__SYSCALL(__NR_vserver, sys_vserver)
 #define __NR_mbind 		237
 __SYSCALL(__NR_mbind, sys_mbind)
 #define __NR_set_mempolicy 	238
@@ -554,8 +552,12 @@ __SYSCALL(__NR_mq_notify, sys_mq_notify)
 __SYSCALL(__NR_mq_getsetattr, sys_mq_getsetattr)
 #define __NR_kexec_load 	246
 __SYSCALL(__NR_kexec_load, sys_ni_syscall)
+#define __NR_ioprio_set		247
+__SYSCALL(__NR_ioprio_set, sys_ioprio_set);
+#define __NR_ioprio_get		248
+__SYSCALL(__NR_ioprio_get, sys_ioprio_get);
 
-#define __NR_syscall_max __NR_kexec_load
+#define __NR_syscall_max __NR_ioprio_get
 #ifndef __NO_STUBS
 
 /* user-visible error numbers are in the range -1 - -4095 */

@@ -44,6 +44,9 @@
 #include <linux/jiffies.h>
 #include <linux/sysrq.h>
 #include <linux/vmalloc.h>
+#include <linux/vs_base.h>
+#include <linux/vs_cvirt.h>
+
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/io.h>
@@ -140,6 +143,9 @@ static int uptime_read_proc(char *page, char **start, off_t off,
 
 	do_posix_clock_monotonic_gettime(&uptime);
 	jiffies_to_timespec(idle_jiffies, &idle);
+	if (vx_flags(VXF_VIRT_UPTIME, 0))
+		vx_vsi_uptime(&uptime, &idle);
+
 	len = sprintf(page,"%lu.%02lu %lu.%02lu\n",
 			(unsigned long) uptime.tv_sec,
 			(uptime.tv_nsec / (NSEC_PER_SEC / 100)),
@@ -418,12 +424,14 @@ int show_stat(struct seq_file *p, void *v)
 		"btime %lu\n"
 		"processes %lu\n"
 		"procs_running %lu\n"
-		"procs_blocked %lu\n",
+		"procs_blocked %lu\n"
+		"preempt %llu\n",
 		nr_context_switches(),
 		(unsigned long)jif,
 		total_forks,
 		nr_running(),
-		nr_iowait());
+		nr_iowait(),
+		nr_preempt());
 
 	return 0;
 }

@@ -26,11 +26,7 @@
  *   permitted by MAX_ORDER, so we allocate with the bootmem allocator, and are
  *   limited to this size
  */
-#if MAX_ORDER > 14
-#define MAX_SYS_HASH_TABLE_ORDER MAX_ORDER
-#else
-#define MAX_SYS_HASH_TABLE_ORDER 14
-#endif
+#define MAX_SYS_HASH_TABLE_ORDER 7
 
 struct free_area {
 	struct list_head	free_list;

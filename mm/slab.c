@@ -1337,10 +1337,13 @@ next:
 			 * the cache that's used by kmalloc(24), otherwise
 			 * the creation of further caches will BUG().
 			 */
-			cachep->array[smp_processor_id()] = &initarray_generic.cache;
+			cachep->array[smp_processor_id()] =
+					&initarray_generic.cache;
 			g_cpucache_up = PARTIAL;
 		} else {
-			cachep->array[smp_processor_id()] = kmalloc(sizeof(struct arraycache_init),GFP_KERNEL);
+			cachep->array[smp_processor_id()] =
+				kmalloc(sizeof(struct arraycache_init),
+					GFP_KERNEL);
 		}
 		BUG_ON(!ac_data(cachep));
 		ac_data(cachep)->avail = 0;
@@ -1354,7 +1357,7 @@ next:
 	} 
 
 	cachep->lists.next_reap = jiffies + REAPTIMEOUT_LIST3 +
-					((unsigned long)cachep)%REAPTIMEOUT_LIST3;
+				((unsigned long)cachep)%REAPTIMEOUT_LIST3;
 
 	/* Need the semaphore to access the chain. */
 	down(&cache_chain_sem);
@@ -1367,16 +1370,24 @@ next:
 		list_for_each(p, &cache_chain) {
 			kmem_cache_t *pc = list_entry(p, kmem_cache_t, next);
 			char tmp;
-			/* This happens when the module gets unloaded and doesn't
-			   destroy its slab cache and noone else reuses the vmalloc
-			   area of the module. Print a warning. */
-			if (__get_user(tmp,pc->name)) { 
-				printk("SLAB: cache with size %d has lost its name\n", 
-					pc->objsize); 
+
+			/*
+			 * This happens when the module gets unloaded and
+			 * doesn't destroy its slab cache and noone else reuses
+			 * the vmalloc area of the module. Print a warning.
+			 */
+#ifdef CONFIG_X86_UACCESS_INDIRECT
+			if (__direct_get_user(tmp,pc->name)) {
+#else
+			if (__get_user(tmp,pc->name)) {
+#endif
+				printk("SLAB: cache with size %d has lost its "
+						"name\n", pc->objsize);
 				continue; 
 			} 	
 			if (!strcmp(pc->name,name)) { 
-				printk("kmem_cache_create: duplicate cache %s\n",name); 
+				printk("kmem_cache_create: duplicate "
+						"cache %s\n",name);
 				up(&cache_chain_sem); 
 				unlock_cpu_hotplug();
 				BUG(); 

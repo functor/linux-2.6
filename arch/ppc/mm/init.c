@@ -648,3 +648,8 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
 	}
 #endif
 }
+
+int page_is_ram (unsigned long pagenr)
+{
+       return 1;
+}

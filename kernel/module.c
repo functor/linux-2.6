@@ -37,6 +37,7 @@
 #include <asm/uaccess.h>
 #include <asm/semaphore.h>
 #include <asm/cacheflush.h>
+#include "module-verify.h"
 
 #if 0
 #define DEBUGP printk
@@ -1624,6 +1625,14 @@ static struct module *load_module(void __user *umod,
 		goto free_hdr;
 	}
 
+	/* verify the signature on the module */
+#ifdef CONFIG_MODULE_SIG
+	if (module_verify_sig(hdr, sechdrs, secstrings, mod)) {
+		err = -EPERM;
+		goto free_hdr;
+	}
+#endif
+
 	/* Now copy in args */
 	arglen = strlen_user(uargs);
 	if (!arglen) {
@@ -2154,8 +2163,13 @@ void print_modules(void)
 	struct module *mod;
 
 	printk("Modules linked in:");
-	list_for_each_entry(mod, &modules, list)
+	list_for_each_entry(mod, &modules, list) {
 		printk(" %s", mod->name);
+#if CONFIG_MODULE_SIG		
+		if (!mod->gpgsig_ok)
+			printk("(U)");
+#endif		
+	}
 	printk("\n");
 }
 

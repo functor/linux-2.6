@@ -1,0 +1,134 @@
+0. Lifecycle of a LRU Page:
+----------------------------
+These are the events in a page's lifecycle:
+   - allocation of the page
+     there are multiple high level page alloc functions; __alloc_pages()
+	 is the lowest level function that does the real allocation.
+   - get into LRU list (active list or inactive list)
+   - get out of LRU list
+   - freeing the page
+     there are multiple high level page free functions; free_pages_bulk()
+	 is the lowest level function that does the real free.
+
+When the memory subsystem runs low on LRU pages, pages are reclaimed by
+    - moving pages from active list to inactive list (refill_inactive_zone())
+	- freeing pages from the inactive list (shrink_zone)
+depending on the recent usage of the page(approximately).
+
+1. Introduction
+---------------
+Memory resource controller controls the number of lru physical pages
+(active and inactive list) a class uses. It does not restrict any
+other physical pages (slabs etc.,)
+
+For simplicity, this document will always refer lru physical pages as
+physical pages or simply pages.
+
+There are two parameters(that are set by the user) that affect the number
+of pages a class is allowed to have in active/inactive list.
+They are
+  - guarantee - specifies the number of pages a class is
+	guaranteed to get. In other words, if a class is using less than
+	'guarantee' number of pages, its pages will not be freed when the
+	memory subsystem tries to free some pages.
+  - limit - specifies the maximum number of pages a class can get;
+    'limit' in essence can be considered as the 'hard limit'
+
+Rest of this document details how these two parameters are used in the
+memory allocation logic.
+
+Note that the numbers that are specified in the shares file, doesn't
+directly correspond to the number of pages. But, the user can make
+it so by making the total_guarantee and max_limit of the default class
+(/rcfs/taskclass) to be the total number of pages(given in config file)
+available in the system.
+
+  for example: 
+   # cd /rcfs/taskclass
+   # cat config
+   res=mem;tot_pages=239778,active=60473,inactive=135285,free=44555
+   # cat shares
+   res=mem,guarantee=-2,limit=-2,total_guarantee=100,max_limit=100
+
+  "tot_pages=239778" above mean there are 239778 lru pages in
+  the system.
+  
+  By making total_guarantee and max_limit to be same as this number at 
+  this level (/rcfs/taskclass), one can make guarantee and limit in all 
+  classes refer to the number of pages.
+
+  # echo 'res=mem,total_guarantee=239778,max_limit=239778' > shares
+  # cat shares
+  res=mem,guarantee=-2,limit=-2,total_guarantee=239778,max_limit=239778
+
+
+The number of pages a class can use be anywhere between its guarantee and
+limit. CKRM memory controller springs into action when the system needs
+to choose a victim page to swap out. While the number of pages a class can
+have allocated may be anywhere between its guarantee and limit, victim
+pages will be choosen from classes that are above their guarantee.
+
+Pages will be freed from classes that are close to their "limit" before
+freeing pages from the classes that are close to their guarantee. Pages
+belonging to classes that are below their guarantee will not be chosen as
+a victim.
+
+2. Core Design
+--------------------------
+
+CKRM memory resource controller taps at appropriate low level memory 
+management functions to associate a page with a class and to charge
+a class that brings the page to the LRU list.
+
+2.1 Changes in page allocation function(__alloc_pages())
+--------------------------------------------------------
+- If the class that the current task belong to is over 110% of its 'limit',
+  allocation of page(s) fail.
+- After succesful allocation of a page, the page is attached with the class
+  to which the current task belongs to.
+- Note that the class is _not_ charged for the page(s) here.
+
+2.2 Changes in page free(free_pages_bulk())
+-------------------------------------------
+- page is freed from the class it belongs to.
+
+2.3 Adding/Deleting page to active/inactive list
+-------------------------------------------------
+When a page is added to the active or inactive list, the class that the
+page belongs to is charged for the page usage.
+
+When a page is deleted from the active or inactive list, the class that the
+page belongs to is credited back.
+
+If a class uses upto its limit, attempt is made to shrink the class's usage
+to 90% of its limit, in order to help the class stay within its limit.
+But, if the class is aggressive, and keep getting over the class's limit
+often(more than 10 shrink events in 10 seconds), then the memory resource
+controller gives up on the class and doesn't try to shrink the class, which
+will eventually lead the class to reach its 110% of its limit and then the
+page allocations will start failing.
+
+2.4 Chages in the page reclaimation path (refill_inactive_zone and shrink_zone)
+-------------------------------------------------------------------------------
+Pages will be moved from active to inactive list(refill_inactive_zone) and
+pages from inactive list will be freed in the following order:
+(range is calculated by subtracting 'guarantee' from 'limit')
+  - Classes that are over 110% of their range
+  - Classes that are over 100% of their range
+  - Classes that are over 75%  of their range
+  - Classes that are over 50%  of their range
+  - Classes that are over 25%  of their range
+  - Classes whose parent is over 110% of its range
+  - Classes that are over their guarantee
+
+2.5 Handling of Shared pages
+----------------------------
+Even if a mm is shared by tasks, the pages that belong to the mm will be
+charged against the individual tasks that bring the page into LRU. 
+
+But, when any task that is using a mm moves to a different class or exits,
+then all pages that belong to the mm will be charged against the richest
+class among the tasks that are using the mm.
+
+Note: Shared page handling need to be improved with a better policy.
+

@@ -18,9 +18,8 @@
 #include <linux/mount.h>
 #include <linux/tty.h>
 #include <linux/devpts_fs.h>
+#include <linux/vs_base.h>
 #include "xattr.h"
-
-#define DEVPTS_SUPER_MAGIC 0x1cd1
 
 static struct vfsmount *devpts_mnt;
 static struct dentry *devpts_root;
@@ -97,6 +96,7 @@ devpts_fill_super(struct super_block *s, void *data, int silent)
 	inode->i_op = &simple_dir_inode_operations;
 	inode->i_fop = &simple_dir_operations;
 	inode->i_nlink = 2;
+	inode->i_xid = vx_current_xid();
 
 	devpts_root = s->s_root = d_alloc_root(inode);
 	if (s->s_root)
@@ -134,11 +134,21 @@ static struct dentry *get_node(int num)
 	return lookup_one_len(s, root, sprintf(s, "%d", num));
 }
 
+static int devpts_permission(struct inode *inode, int mask, struct nameidata *nd)
+{
+	int ret = -EACCES;
+	
+	if (vx_check(inode->i_xid, VX_IDENT))
+		ret = vfs_permission(inode, mask);
+	return ret;
+}
+
 static struct inode_operations devpts_file_inode_operations = {
 	.setxattr	= devpts_setxattr,
 	.getxattr	= devpts_getxattr,
 	.listxattr	= devpts_listxattr,
 	.removexattr	= devpts_removexattr,
+	.permission	= devpts_permission,
 };
 
 int devpts_pty_new(struct tty_struct *tty)
@@ -162,6 +172,7 @@ int devpts_pty_new(struct tty_struct *tty)
 	inode->i_gid = config.setgid ? config.gid : current->fsgid;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	init_special_inode(inode, S_IFCHR|config.mode, device);
+	inode->i_xid = vx_current_xid();
 	inode->i_op = &devpts_file_inode_operations;
 	inode->u.generic_ip = tty;
 

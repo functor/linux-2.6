@@ -1332,8 +1332,10 @@ static struct sock *udp_get_first(struct seq_file *seq)
 
 	for (state->bucket = 0; state->bucket < UDP_HTABLE_SIZE; ++state->bucket) {
 		struct hlist_node *node;
+
 		sk_for_each(sk, node, &udp_hash[state->bucket]) {
-			if (sk->sk_family == state->family)
+			if (sk->sk_family == state->family &&
+				vx_check(sk->sk_xid, VX_WATCH|VX_IDENT))
 				goto found;
 		}
 	}
@@ -1350,7 +1352,8 @@ static struct sock *udp_get_next(struct seq_file *seq, struct sock *sk)
 		sk = sk_next(sk);
 try_again:
 		;
-	} while (sk && sk->sk_family != state->family);
+	} while (sk && (sk->sk_family != state->family ||
+		!vx_check(sk->sk_xid, VX_WATCH|VX_IDENT)));
 
 	if (!sk && ++state->bucket < UDP_HTABLE_SIZE) {
 		sk = sk_head(&udp_hash[state->bucket]);

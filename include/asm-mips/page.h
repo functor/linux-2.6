@@ -137,4 +137,6 @@ static __inline__ int get_order(unsigned long size)
 #define WANT_PAGE_VIRTUAL
 #endif
 
+#define devmem_is_allowed(x) 1
+
 #endif /* _ASM_PAGE_H */

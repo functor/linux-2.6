@@ -182,11 +182,6 @@ EXPORT_SYMBOL_NOVERS(memcpy);
 EXPORT_SYMBOL_NOVERS(__memcpy);
 EXPORT_SYMBOL_NOVERS(memcmp);
 
-/* syscall export needed for misdesigned sound drivers. */
-EXPORT_SYMBOL(sys_read);
-EXPORT_SYMBOL(sys_lseek);
-EXPORT_SYMBOL(sys_open);
-
 EXPORT_SYMBOL(empty_zero_page);
 
 #ifdef CONFIG_HAVE_DEC_LOCK

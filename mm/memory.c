@@ -117,7 +117,8 @@ static inline void free_one_pmd(struct mmu_gather *tlb, pmd_t * dir)
 	pte_free_tlb(tlb, page);
 }
 
-static inline void free_one_pgd(struct mmu_gather *tlb, pgd_t * dir)
+static inline void free_one_pgd(struct mmu_gather *tlb, pgd_t * dir,
+							int pgd_idx)
 {
 	int j;
 	pmd_t * pmd;
@@ -131,8 +132,11 @@ static inline void free_one_pgd(struct mmu_gather *tlb, pgd_t * dir)
 	}
 	pmd = pmd_offset(dir, 0);
 	pgd_clear(dir);
-	for (j = 0; j < PTRS_PER_PMD ; j++)
+	for (j = 0; j < PTRS_PER_PMD ; j++) {
+		if (pgd_idx * PGDIR_SIZE + j * PMD_SIZE >= TASK_SIZE)
+			break;
 		free_one_pmd(tlb, pmd+j);
+	}
 	pmd_free_tlb(tlb, pmd);
 }
 
@@ -145,11 +149,13 @@ static inline void free_one_pgd(struct mmu_gather *tlb, pgd_t * dir)
 void clear_page_tables(struct mmu_gather *tlb, unsigned long first, int nr)
 {
 	pgd_t * page_dir = tlb->mm->pgd;
+	int pgd_idx = first;
 
 	page_dir += first;
 	do {
-		free_one_pgd(tlb, page_dir);
+		free_one_pgd(tlb, page_dir, pgd_idx);
 		page_dir++;
+		pgd_idx++;
 	} while (--nr);
 }
 
@@ -282,6 +288,10 @@ skip_copy_pte_range:
 				struct page *page;
 				unsigned long pfn;
 
+				if (!vx_rsspages_avail(dst, 1)) {
+					spin_unlock(&src->page_table_lock);
+					goto nomem;
+				}
 				/* copy_one_pte */
 
 				if (pte_none(pte))
@@ -325,7 +335,8 @@ skip_copy_pte_range:
 					pte = pte_mkclean(pte);
 				pte = pte_mkold(pte);
 				get_page(page);
-				dst->rss++;
+				// dst->rss++;
+				vx_rsspages_inc(dst);
 				set_pte(dst_pte, pte);
 				page_dup_rmap(page);
 cont_copy_pte_range_noset:
@@ -441,7 +452,7 @@ static void zap_pmd_range(struct mmu_gather *tlb,
 		unsigned long size, struct zap_details *details)
 {
 	pmd_t * pmd;
-	unsigned long end;
+	unsigned long end, pgd_boundary;
 
 	if (pgd_none(*dir))
 		return;
@@ -452,8 +463,9 @@ static void zap_pmd_range(struct mmu_gather *tlb,
 	}
 	pmd = pmd_offset(dir, address);
 	end = address + size;
-	if (end > ((address + PGDIR_SIZE) & PGDIR_MASK))
-		end = ((address + PGDIR_SIZE) & PGDIR_MASK);
+	pgd_boundary = ((address + PGDIR_SIZE) & PGDIR_MASK);
+	if (pgd_boundary && (end > pgd_boundary))
+		end = pgd_boundary;
 	do {
 		zap_pte_range(tlb, pmd, address, end - address, details);
 		address = (address + PMD_SIZE) & PMD_MASK; 
@@ -478,6 +490,10 @@ static void unmap_page_range(struct mmu_gather *tlb,
 	tlb_end_vma(tlb, vma);
 }
 
+#ifdef CONFIG_PREEMPT_VOLUNTARY
+# define ZAP_BLOCK_SIZE (128 * PAGE_SIZE)
+#else
+
 /* Dispose of an entire struct mmu_gather per rescheduling point */
 #if defined(CONFIG_SMP) && defined(CONFIG_PREEMPT)
 #define ZAP_BLOCK_SIZE	(FREE_PTE_NR * PAGE_SIZE)
@@ -491,6 +507,8 @@ static void unmap_page_range(struct mmu_gather *tlb,
 /* No preempt: go for improved straight-line efficiency */
 #if !defined(CONFIG_PREEMPT)
 #define ZAP_BLOCK_SIZE	(1024 * PAGE_SIZE)
+#endif
+
 #endif
 
 /**
@@ -565,8 +583,6 @@ int unmap_vmas(struct mmu_gather **tlbp, struct mm_struct *mm,
 
 			start += block;
 			zap_bytes -= block;
-			if ((long)zap_bytes > 0)
-				continue;
 			if (!atomic && need_resched()) {
 				int fullmm = tlb_is_full_mm(*tlbp);
 				tlb_finish_mmu(*tlbp, tlb_start, start);
@@ -574,6 +590,8 @@ int unmap_vmas(struct mmu_gather **tlbp, struct mm_struct *mm,
 				*tlbp = tlb_gather_mmu(mm, fullmm);
 				tlb_start_valid = 0;
 			}
+			if ((long)zap_bytes > 0)
+				continue;
 			zap_bytes = ZAP_BLOCK_SIZE;
 		}
 	}
@@ -660,6 +678,64 @@ out:
 	return NULL;
 }
 
+struct page *
+follow_page_pfn(struct mm_struct *mm, unsigned long address, int write,
+		unsigned long *pfn_ptr)
+{
+	pgd_t *pgd;
+	pmd_t *pmd;
+	pte_t *ptep, pte;
+	unsigned long pfn;
+	struct page *page;
+
+	*pfn_ptr = 0;
+	page = follow_huge_addr(mm, address, write);
+	if (!IS_ERR(page))
+		return page;
+
+	pgd = pgd_offset(mm, address);
+	if (pgd_none(*pgd) || pgd_bad(*pgd))
+		goto out;
+
+	pmd = pmd_offset(pgd, address);
+	if (pmd_none(*pmd))
+		goto out;
+	if (pmd_huge(*pmd))
+		return follow_huge_pmd(mm, address, pmd, write);
+	if (pmd_bad(*pmd))
+		goto out;
+
+	ptep = pte_offset_map(pmd, address);
+	if (!ptep)
+		goto out;
+
+	pte = *ptep;
+	pte_unmap(ptep);
+	if (pte_present(pte)) {
+		if (write && !pte_write(pte))
+			goto out;
+		if (write && !pte_dirty(pte)) {
+			struct page *page = pte_page(pte);
+			if (!PageDirty(page))
+				set_page_dirty(page);
+		}
+		pfn = pte_pfn(pte);
+		if (pfn_valid(pfn)) {
+			struct page *page = pfn_to_page(pfn);
+			
+			mark_page_accessed(page);
+			return page;
+		} else {
+			*pfn_ptr = pfn;
+			return NULL;
+		}
+	}
+
+out:
+	return NULL;
+}
+
+
 /* 
  * Given a physical address, is there a useful struct page pointing to
  * it?  This may become more complex in the future if we start dealing
@@ -674,6 +750,7 @@ static inline struct page *get_page_map(struct page *page)
 }
 
 
+#ifndef CONFIG_X86_4G
 static inline int
 untouched_anonymous_page(struct mm_struct* mm, struct vm_area_struct *vma,
 			 unsigned long address)
@@ -698,6 +775,7 @@ untouched_anonymous_page(struct mm_struct* mm, struct vm_area_struct *vma,
 	/* There is a pte slot for 'address' in 'mm'. */
 	return 0;
 }
+#endif
 
 
 int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
@@ -773,12 +851,21 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 				 * insanly big anonymously mapped areas that
 				 * nobody touched so far. This is important
 				 * for doing a core dump for these mappings.
+				 *
+				 * disable this for 4:4 - it prevents
+			 	 * follow_page() from ever seeing these pages.
+				 *
+				 * (The 'fix' is dubious anyway, there's
+				 * nothing that this code avoids which couldnt
+				 * be triggered from userspace anyway.)
 				 */
+#ifndef CONFIG_X86_4G
 				if (!lookup_write &&
 				    untouched_anonymous_page(mm,vma,start)) {
 					map = ZERO_PAGE(start);
 					break;
 				}
+#endif
 				spin_unlock(&mm->page_table_lock);
 				switch (handle_mm_fault(mm,vma,start,write)) {
 				case VM_FAULT_MINOR:
@@ -1096,7 +1183,8 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	page_table = pte_offset_map(pmd, address);
 	if (likely(pte_same(*page_table, pte))) {
 		if (PageReserved(old_page))
-			++mm->rss;
+			// ++mm->rss;
+			vx_rsspages_inc(mm);
 		else
 			page_remove_rmap(old_page);
 		break_cow(vma, new_page, address, page_table);
@@ -1351,8 +1439,13 @@ static int do_swap_page(struct mm_struct * mm,
 		/* Had to read the page from swap area: Major fault */
 		ret = VM_FAULT_MAJOR;
 		inc_page_state(pgmajfault);
+		grab_swap_token();
 	}
 
+	if (!vx_rsspages_avail(mm, 1)) {
+		ret = VM_FAULT_OOM;
+		goto out;
+	}
 	mark_page_accessed(page);
 	lock_page(page);
 
@@ -1377,7 +1470,8 @@ static int do_swap_page(struct mm_struct * mm,
 	if (vm_swap_full())
 		remove_exclusive_swap_page(page);
 
-	mm->rss++;
+	// mm->rss++;
+	vx_rsspages_inc(mm);
 	pte = mk_pte(page, vma->vm_page_prot);
 	if (write_access && can_share_swap_page(page)) {
 		pte = maybe_mkwrite(pte_mkdirty(pte), vma);
@@ -1428,6 +1522,9 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 		if (unlikely(anon_vma_prepare(vma)))
 			goto no_mem;
+		if (!vx_rsspages_avail(mm, 1))
+			goto no_mem;
+
 		page = alloc_page_vma(GFP_HIGHUSER, vma, addr);
 		if (!page)
 			goto no_mem;
@@ -1442,7 +1539,8 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 			spin_unlock(&mm->page_table_lock);
 			goto out;
 		}
-		mm->rss++;
+		// mm->rss++;
+		vx_rsspages_inc(mm);
 		entry = maybe_mkwrite(pte_mkdirty(mk_pte(page,
 							 vma->vm_page_prot)),
 				      vma);
@@ -1504,6 +1602,8 @@ retry:
 	if (new_page == NOPAGE_SIGBUS)
 		return VM_FAULT_SIGBUS;
 	if (new_page == NOPAGE_OOM)
+		return VM_FAULT_OOM;
+	if (!vx_rsspages_avail(mm, 1))
 		return VM_FAULT_OOM;
 
 	/*
@@ -1693,15 +1793,20 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct * vma,
 	 * We need the page table lock to synchronize with kswapd
 	 * and the SMP-safe atomic PTE updates.
 	 */
+	set_delay_flag(current,PF_MEMIO);
 	spin_lock(&mm->page_table_lock);
 	pmd = pmd_alloc(mm, pgd, address);
 
 	if (pmd) {
 		pte_t * pte = pte_alloc_map(mm, pmd, address);
-		if (pte)
-			return handle_pte_fault(mm, vma, address, write_access, pte, pmd);
+		if (pte) {
+			int rc = handle_pte_fault(mm, vma, address, write_access, pte, pmd);
+			clear_delay_flag(current,PF_MEMIO);
+			return rc;
+		}
 	}
 	spin_unlock(&mm->page_table_lock);
+	clear_delay_flag(current,PF_MEMIO);
 	return VM_FAULT_OOM;
 }
 

@@ -49,6 +49,14 @@
 #include <asm/bugs.h>
 #include <asm/setup.h>
 
+#include <linux/ckrm.h>
+#ifdef CONFIG_CKRM_CPU_SCHEDULE
+int __init init_ckrm_sched_res(void);
+#else
+#define init_ckrm_sched_res() ((void)0)
+#endif
+//#include <linux/ckrm_sched.h>
+
 /*
  * This is one of the first .c files built. Error out early
  * if we have compiler trouble..
@@ -100,6 +108,16 @@ extern void tc_init(void);
 
 enum system_states system_state;
 EXPORT_SYMBOL(system_state);
+
+/*
+ * The kernel_magic value represents the address of _end, which allows
+ * namelist tools to "match" each other respectively.  That way a tool
+ * that looks at /dev/mem can verify that it is using the right System.map
+ * file -- if kernel_magic doesn't equal the namelist value of _end,
+ * something's wrong.
+ */
+extern unsigned long _end;
+unsigned long *kernel_magic = &_end;
 
 /*
  * Boot command-line arguments
@@ -399,6 +417,7 @@ static void noinline rest_init(void)
 {
 	kernel_thread(init, NULL, CLONE_FS | CLONE_SIGHAND);
 	numa_default_policy();
+	system_state = SYSTEM_BOOTING_SCHEDULER_OK;
 	unlock_kernel();
  	cpu_idle();
 } 
@@ -478,6 +497,11 @@ asmlinkage void __init start_kernel(void)
 	rcu_init();
 	init_IRQ();
 	pidhash_init();
+	/* MEF: In 2.6.5. ckrm_init was right after pidhash_init() but 
+                before sched_init(). Will leave it after pidhash_init()
+                and cross finger.
+	*/
+	ckrm_init();
 	init_timers();
 	softirq_init();
 	time_init();
@@ -528,6 +552,7 @@ asmlinkage void __init start_kernel(void)
 #ifdef CONFIG_PROC_FS
 	proc_root_init();
 #endif
+
 	check_bugs();
 
 	/* 
@@ -666,7 +691,6 @@ static int init(void * unused)
 
 	fixup_cpu_present_map();
 	smp_init();
-	sched_init_smp();
 
 	/*
 	 * Do this before initcalls, because some drivers want to access
@@ -675,6 +699,10 @@ static int init(void * unused)
 	populate_rootfs();
 
 	do_basic_setup();
+
+	init_ckrm_sched_res();
+
+	sched_init_smp();
 
 	/*
 	 * check if there is an early userspace init.  If yes, let it do all

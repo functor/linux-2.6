@@ -154,7 +154,6 @@ static int verify_command(struct file *file, unsigned char *cmd)
 		safe_for_write(WRITE_12),
 		safe_for_write(WRITE_VERIFY_12),
 		safe_for_write(WRITE_16),
-		safe_for_write(WRITE_BUFFER),
 		safe_for_write(WRITE_LONG),
 	};
 	unsigned char type = cmd_type[cmd[0]];
@@ -316,12 +315,12 @@ static int sg_scsi_ioctl(struct file *file, request_queue_t *q,
 		return -EFAULT;
 	if (in_len > PAGE_SIZE || out_len > PAGE_SIZE)
 		return -EINVAL;
-	if (get_user(opcode, sic->data))
+	if (get_user(opcode, (int *)sic->data))
 		return -EFAULT;
 
 	bytes = max(in_len, out_len);
 	if (bytes) {
-		buffer = kmalloc(bytes, q->bounce_gfp | GFP_USER);
+		buffer = kmalloc(bytes, q->bounce_gfp | GFP_USER | __GFP_NOWARN);
 		if (!buffer)
 			return -ENOMEM;
 

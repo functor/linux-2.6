@@ -218,6 +218,13 @@ free_initrd_mem (unsigned long start, unsigned long end)
 	}
 }
 
+int page_is_ram(unsigned long pagenr)
+{
+      //FIXME: implement w/efi walk
+      printk("page is ram is called!!!!!\n");	
+      return 1;
+}
+
 /*
  * This installs a clean page in the kernel's page table.
  */

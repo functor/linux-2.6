@@ -21,6 +21,7 @@
 #include <linux/pagemap.h>
 #include <linux/cdev.h>
 #include <linux/bootmem.h>
+#include <linux/vs_base.h>
 
 /*
  * This is needed for the following functions:
@@ -99,13 +100,36 @@ struct inodes_stat_t inodes_stat;
 
 static kmem_cache_t * inode_cachep;
 
+static void prune_icache(int nr_to_scan);
+
+
+#define INODE_UNUSED_THRESHOLD 15000
+#define PRUNE_BATCH_COUNT 32
+
+void try_to_clip_inodes(void)
+{
+	unsigned long count = 0; 
+	/* if there are a LOT of unused inodes in cache, better shrink a few first */
+	
+	/* check lockless first to not take the lock always here; racing occasionally isn't a big deal */
+	if (inodes_stat.nr_unused > INODE_UNUSED_THRESHOLD) {
+		spin_lock(&inode_lock);
+		if (inodes_stat.nr_unused > INODE_UNUSED_THRESHOLD)
+			count = inodes_stat.nr_unused - INODE_UNUSED_THRESHOLD;
+		spin_unlock(&inode_lock);
+		if (count)
+			prune_icache(count);
+	}
+}
+
+
 static struct inode *alloc_inode(struct super_block *sb)
 {
 	static struct address_space_operations empty_aops;
 	static struct inode_operations empty_iops;
 	static struct file_operations empty_fops;
 	struct inode *inode;
-
+	
 	if (sb->s_op->alloc_inode)
 		inode = sb->s_op->alloc_inode(sb);
 	else
@@ -115,6 +139,10 @@ static struct inode *alloc_inode(struct super_block *sb)
 		struct address_space * const mapping = &inode->i_data;
 
 		inode->i_sb = sb;
+		// inode->i_dqh = dqhget(sb->s_dqh);
+
+		/* important because of inode slab reuse */
+		inode->i_xid = 0;
 		inode->i_blkbits = sb->s_blocksize_bits;
 		inode->i_flags = 0;
 		atomic_set(&inode->i_count, 1);
@@ -243,6 +271,7 @@ void __iget(struct inode * inode)
  */
 void clear_inode(struct inode *inode)
 {
+	might_sleep();
 	invalidate_inode_buffers(inode);
        
 	if (inode->i_data.nrpages)
@@ -1181,14 +1210,14 @@ EXPORT_SYMBOL(update_atime);
  *	When ctime_too is specified update the ctime too.
  */
 
-void inode_update_time(struct inode *inode, int ctime_too)
+void inode_update_time(struct inode *inode, struct vfsmount *mnt, int ctime_too)
 {
 	struct timespec now;
 	int sync_it = 0;
 
 	if (IS_NOCMTIME(inode))
 		return;
-	if (IS_RDONLY(inode))
+	if (IS_RDONLY(inode) || MNT_IS_RDONLY(mnt))
 		return;
 
 	now = current_kernel_time();

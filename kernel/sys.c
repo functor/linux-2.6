@@ -12,6 +12,7 @@
 #include <linux/mman.h>
 #include <linux/smp_lock.h>
 #include <linux/notifier.h>
+#include <linux/kmod.h>
 #include <linux/reboot.h>
 #include <linux/prctl.h>
 #include <linux/init.h>
@@ -23,6 +24,9 @@
 #include <linux/security.h>
 #include <linux/dcookies.h>
 #include <linux/suspend.h>
+#include <linux/ckrm.h>
+#include <linux/vs_base.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -343,7 +347,7 @@ asmlinkage long sys_setpriority(int which, int who, int niceval)
 			if (!who)
 				user = current->user;
 			else
-				user = find_user(who);
+				user = find_user(vx_current_xid(), who);
 
 			if (!user)
 				goto out_unlock;
@@ -404,7 +408,7 @@ asmlinkage long sys_getpriority(int which, int who)
 			if (!who)
 				user = current->user;
 			else
-				user = find_user(who);
+				user = find_user(vx_current_xid(), who);
 
 			if (!user)
 				goto out_unlock;
@@ -426,6 +430,7 @@ out_unlock:
 	return retval;
 }
 
+long vs_reboot(unsigned int, void *);
 
 /*
  * Reboot system call: for obvious reasons only root may call it,
@@ -450,6 +455,9 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 			magic2 != LINUX_REBOOT_MAGIC2B &&
 	                magic2 != LINUX_REBOOT_MAGIC2C))
 		return -EINVAL;
+
+	if (!vx_check(0, VX_ADMIN|VX_WATCH))
+		return vs_reboot(cmd, arg);
 
 	lock_kernel();
 	switch (cmd) {
@@ -601,6 +609,9 @@ asmlinkage long sys_setregid(gid_t rgid, gid_t egid)
 	current->fsgid = new_egid;
 	current->egid = new_egid;
 	current->gid = new_rgid;
+
+	ckrm_cb_gid();
+
 	return 0;
 }
 
@@ -638,6 +649,9 @@ asmlinkage long sys_setgid(gid_t gid)
 	}
 	else
 		return -EPERM;
+
+	ckrm_cb_gid();
+
 	return 0;
 }
   
@@ -645,7 +659,7 @@ static int set_user(uid_t new_ruid, int dumpclear)
 {
 	struct user_struct *new_user;
 
-	new_user = alloc_uid(new_ruid);
+	new_user = alloc_uid(vx_current_xid(), new_ruid);
 	if (!new_user)
 		return -EAGAIN;
 
@@ -726,6 +740,8 @@ asmlinkage long sys_setreuid(uid_t ruid, uid_t euid)
 		current->suid = current->euid;
 	current->fsuid = current->euid;
 
+	ckrm_cb_uid();
+
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_RE);
 }
 
@@ -770,6 +786,8 @@ asmlinkage long sys_setuid(uid_t uid)
 	}
 	current->fsuid = current->euid = uid;
 	current->suid = new_suid;
+
+	ckrm_cb_uid();
 
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_ID);
 }
@@ -816,6 +834,8 @@ asmlinkage long sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 	current->fsuid = current->euid;
 	if (suid != (uid_t) -1)
 		current->suid = suid;
+
+	ckrm_cb_uid();
 
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_RES);
 }
@@ -866,6 +886,9 @@ asmlinkage long sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 		current->gid = rgid;
 	if (sgid != (gid_t) -1)
 		current->sgid = sgid;
+
+	ckrm_cb_gid();
+
 	return 0;
 }
 
@@ -1393,7 +1416,7 @@ asmlinkage long sys_newuname(struct new_utsname __user * name)
 	int errno = 0;
 
 	down_read(&uts_sem);
-	if (copy_to_user(name,&system_utsname,sizeof *name))
+	if (copy_to_user(name, vx_new_utsname(), sizeof *name))
 		errno = -EFAULT;
 	up_read(&uts_sem);
 	return errno;
@@ -1404,15 +1427,17 @@ asmlinkage long sys_sethostname(char __user *name, int len)
 	int errno;
 	char tmp[__NEW_UTS_LEN];
 
-	if (!capable(CAP_SYS_ADMIN))
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SET_UTSNAME))
 		return -EPERM;
 	if (len < 0 || len > __NEW_UTS_LEN)
 		return -EINVAL;
 	down_write(&uts_sem);
 	errno = -EFAULT;
 	if (!copy_from_user(tmp, name, len)) {
-		memcpy(system_utsname.nodename, tmp, len);
-		system_utsname.nodename[len] = 0;
+		char *ptr = vx_new_uts(nodename);
+
+		memcpy(ptr, tmp, len);
+		ptr[len] = 0;
 		errno = 0;
 	}
 	up_write(&uts_sem);
@@ -1424,15 +1449,17 @@ asmlinkage long sys_sethostname(char __user *name, int len)
 asmlinkage long sys_gethostname(char __user *name, int len)
 {
 	int i, errno;
+	char *ptr;
 
 	if (len < 0)
 		return -EINVAL;
 	down_read(&uts_sem);
-	i = 1 + strlen(system_utsname.nodename);
+	ptr = vx_new_uts(nodename);
+	i = 1 + strlen(ptr);
 	if (i > len)
 		i = len;
 	errno = 0;
-	if (copy_to_user(name, system_utsname.nodename, i))
+	if (copy_to_user(name, ptr, i))
 		errno = -EFAULT;
 	up_read(&uts_sem);
 	return errno;
@@ -1449,7 +1476,7 @@ asmlinkage long sys_setdomainname(char __user *name, int len)
 	int errno;
 	char tmp[__NEW_UTS_LEN];
 
-	if (!capable(CAP_SYS_ADMIN))
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SET_UTSNAME))
 		return -EPERM;
 	if (len < 0 || len > __NEW_UTS_LEN)
 		return -EINVAL;
@@ -1457,8 +1484,10 @@ asmlinkage long sys_setdomainname(char __user *name, int len)
 	down_write(&uts_sem);
 	errno = -EFAULT;
 	if (!copy_from_user(tmp, name, len)) {
-		memcpy(system_utsname.domainname, tmp, len);
-		system_utsname.domainname[len] = 0;
+		char *ptr = vx_new_uts(domainname);
+
+		memcpy(ptr, tmp, len);
+		ptr[len] = 0;
 		errno = 0;
 	}
 	up_write(&uts_sem);
@@ -1510,7 +1539,7 @@ asmlinkage long sys_setrlimit(unsigned int resource, struct rlimit __user *rlim)
 	old_rlim = current->rlim + resource;
 	if (((new_rlim.rlim_cur > old_rlim->rlim_max) ||
 	     (new_rlim.rlim_max > old_rlim->rlim_max)) &&
-	    !capable(CAP_SYS_RESOURCE))
+	    !capable(CAP_SYS_RESOURCE) && !vx_ccaps(VXC_SET_RLIMIT))
 		return -EPERM;
 	if (resource == RLIMIT_NOFILE) {
 		if (new_rlim.rlim_cur > NR_OPEN || new_rlim.rlim_max > NR_OPEN)

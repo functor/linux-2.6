@@ -106,4 +106,4 @@ foreach $object (keys(%object)) {
 }
 # printf("Done\n");
 
-exit(0);
+exit($errorcount);

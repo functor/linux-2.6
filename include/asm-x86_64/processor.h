@@ -163,10 +163,6 @@ static inline void clear_in_cr4 (unsigned long mask)
 #define MCA_bus__is_a_macro
 
 
-/*
- * User space process size: 512GB - 1GB (default).
- */
-#define TASK_SIZE	(0x0000007fc0000000UL)
 
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
@@ -177,10 +173,18 @@ static inline void clear_in_cr4 (unsigned long mask)
 #define TASK_UNMAPPED_BASE	\
 	(test_thread_flag(TIF_IA32) ? TASK_UNMAPPED_32 : TASK_UNMAPPED_64)  
 
+
 /*
- * Size of io_bitmap.
+ * User space process size: 512GB - 1GB (default).
  */
-#define IO_BITMAP_BITS  65536
+#define TASK_SIZE_64	(0x0000007fc0000000UL)
+
+#define TASK_SIZE (test_thread_flag(TIF_IA32) ? IA32_PAGE_OFFSET : TASK_SIZE_64)
+
+/*
+ * Size of io_bitmap, covering ports 0 to 0x3ff.
+ */
+#define IO_BITMAP_BITS  1024
 #define IO_BITMAP_BYTES (IO_BITMAP_BITS/8)
 #define IO_BITMAP_LONGS (IO_BITMAP_BYTES/sizeof(long))
 #define IO_BITMAP_OFFSET offsetof(struct tss_struct,io_bitmap)
@@ -460,5 +464,7 @@ static inline void __mwait(unsigned long eax, unsigned long ecx)
 #define ARCH_HAS_SCHED_DOMAIN
 #define ARCH_HAS_SCHED_WAKE_IDLE
 #endif
+
+#define HAVE_ARCH_PICK_MMAP_LAYOUT
 
 #endif /* __ASM_X86_64_PROCESSOR_H */

@@ -107,6 +107,17 @@ static struct sysrq_key_op sysrq_reboot_op = {
 	.action_msg	= "Resetting",
 };
 
+/* crash sysrq handler */
+static void sysrq_handle_crash(int key, struct pt_regs *pt_regs,
+			       struct tty_struct *tty) {
+	*( (char *) 0) = 0;
+}
+static struct sysrq_key_op sysrq_crash_op = {
+	handler:        sysrq_handle_crash,
+	help_msg:       "Crash",
+	action_msg:     "Crashing the kernel by request",
+};
+
 static void sysrq_handle_sync(int key, struct pt_regs *pt_regs,
 			      struct tty_struct *tty) 
 {
@@ -235,7 +246,7 @@ static struct sysrq_key_op *sysrq_key_table[SYSRQ_KEY_TABLE_LENGTH] = {
 		 it is handled specially on the sparc
 		 and will never arrive */
 /* b */	&sysrq_reboot_op,
-/* c */ NULL,
+/* c */ &sysrq_crash_op,
 /* d */	NULL,
 /* e */	&sysrq_term_op,
 /* f */	NULL,

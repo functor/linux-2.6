@@ -60,6 +60,29 @@ __asm__ __volatile__(
 return dest;
 }
 
+/*
+ * This is a more generic variant of strncpy_count() suitable for
+ * implementing string-access routines with all sorts of return
+ * code semantics. It's used by mm/usercopy.c.
+ */
+static inline size_t strncpy_count(char * dest,const char *src,size_t count)
+{
+	__asm__ __volatile__(
+
+	"1:\tdecl %0\n\t"
+	"js 2f\n\t"
+	"lodsb\n\t"
+	"stosb\n\t"
+	"testb %%al,%%al\n\t"
+	"jne 1b\n\t"
+	"2:"
+	"incl %0"
+	: "=c" (count)
+	:"S" (src),"D" (dest),"0" (count) : "memory");
+
+	return count;
+}
+
 #define __HAVE_ARCH_STRCAT
 static inline char * strcat(char * dest,const char * src)
 {

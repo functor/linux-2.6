@@ -65,6 +65,29 @@ extern int min_free_kbytes;
 extern int printk_ratelimit_jiffies;
 extern int printk_ratelimit_burst;
 
+extern unsigned int vdso_enabled;
+
+int exec_shield = 1;
+int exec_shield_randomize = 1;
+
+static int __init setup_exec_shield(char *str)
+{
+        get_option (&str, &exec_shield);
+
+        return 1;
+}
+
+__setup("exec-shield=", setup_exec_shield);
+
+static int __init setup_exec_shield_randomize(char *str)
+{
+        get_option (&str, &exec_shield_randomize);
+
+        return 1;
+}
+
+__setup("exec-shield-randomize=", setup_exec_shield_randomize);
+
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
 static int minolduid;
@@ -77,6 +100,7 @@ extern char modprobe_path[];
 #ifdef CONFIG_HOTPLUG
 extern char hotplug_path[];
 #endif
+extern char vshelper_path[];
 #ifdef CONFIG_CHR_DEV_SG
 extern int sg_big_buff;
 #endif
@@ -142,6 +166,8 @@ extern ctl_table random_table[];
 #ifdef CONFIG_UNIX98_PTYS
 extern ctl_table pty_table[];
 #endif
+
+int sysctl_legacy_va_layout;
 
 /* /proc declarations: */
 
@@ -268,6 +294,40 @@ static ctl_table kern_table[] = {
 		.proc_handler	= &proc_dointvec,
 	},
 	{
+		.ctl_name	= KERN_PANIC,
+		.procname	= "exec-shield",
+		.data		= &exec_shield,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= KERN_PANIC,
+		.procname	= "exec-shield-randomize",
+		.data		= &exec_shield_randomize,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= KERN_PANIC,
+		.procname	= "print-fatal-signals",
+		.data		= &print_fatal_signals,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+#if __i386__
+	{
+		.ctl_name	= KERN_PANIC,
+		.procname	= "vdso",
+		.data		= &vdso_enabled,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+#endif
+	{
 		.ctl_name	= KERN_CORE_USES_PID,
 		.procname	= "core_uses_pid",
 		.data		= &core_uses_pid,
@@ -289,7 +349,7 @@ static ctl_table kern_table[] = {
 		.procname	= "tainted",
 		.data		= &tainted,
 		.maxlen		= sizeof(int),
-		.mode		= 0644,
+		.mode		= 0444,
 		.proc_handler	= &proc_dointvec,
 	},
 	{
@@ -409,6 +469,15 @@ static ctl_table kern_table[] = {
 		.strategy	= &sysctl_string,
 	},
 #endif
+	{
+		.ctl_name	= KERN_VSHELPER,
+		.procname	= "vshelper",
+		.data		= &vshelper_path,
+		.maxlen		= 256,
+		.mode		= 0644,
+		.proc_handler	= &proc_dostring,
+		.strategy	= &sysctl_string,
+	},
 #ifdef CONFIG_CHR_DEV_SG
 	{
 		.ctl_name	= KERN_SG_BIG_BUFF,
@@ -722,14 +791,6 @@ static ctl_table vm_table[] = {
 		.extra1		= (void *)&hugetlb_zero,
 		.extra2		= (void *)&hugetlb_infinity,
 	 },
-	 {
-		.ctl_name	= VM_HUGETLB_GROUP,
-		.procname	= "hugetlb_shm_group",
-		.data		= &sysctl_hugetlb_shm_group,
-		.maxlen		= sizeof(gid_t),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	 },
 #endif
 	{
 		.ctl_name	= VM_LOWER_ZONE_PROTECTION,
@@ -784,6 +845,16 @@ static ctl_table vm_table[] = {
 		.procname	= "vfs_cache_pressure",
 		.data		= &sysctl_vfs_cache_pressure,
 		.maxlen		= sizeof(sysctl_vfs_cache_pressure),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+		.strategy	= &sysctl_intvec,
+		.extra1		= &zero,
+	},
+	{
+		.ctl_name	= VM_LEGACY_VA_LAYOUT,
+		.procname	= "legacy_va_layout",
+		.data		= &sysctl_legacy_va_layout,
+		.maxlen		= sizeof(sysctl_legacy_va_layout),
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 		.strategy	= &sysctl_intvec,

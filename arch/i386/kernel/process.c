@@ -36,6 +36,8 @@
 #include <linux/module.h>
 #include <linux/kallsyms.h>
 #include <linux/ptrace.h>
+#include <linux/mman.h>
+#include <linux/random.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -46,6 +48,7 @@
 #include <asm/i387.h>
 #include <asm/irq.h>
 #include <asm/desc.h>
+#include <asm/atomic_kmap.h>
 #ifdef CONFIG_MATH_EMULATION
 #include <asm/math_emu.h>
 #endif
@@ -249,6 +252,8 @@ void show_regs(struct pt_regs * regs)
 	show_trace(NULL, &regs->esp);
 }
 
+EXPORT_SYMBOL_GPL(show_regs);
+
 /*
  * This gets run with %ebx containing the
  * function to call, and %edx containing
@@ -311,6 +316,9 @@ void flush_thread(void)
 	struct task_struct *tsk = current;
 
 	memset(tsk->thread.debugreg, 0, sizeof(unsigned long)*8);
+#ifdef CONFIG_X86_HIGH_ENTRY
+	clear_thread_flag(TIF_DB7);
+#endif
 	memset(tsk->thread.tls_array, 0, sizeof(tsk->thread.tls_array));	
 	/*
 	 * Forget coprocessor state..
@@ -324,9 +332,8 @@ void release_thread(struct task_struct *dead_task)
 	if (dead_task->mm) {
 		// temporary debugging check
 		if (dead_task->mm->context.size) {
-			printk("WARNING: dead process %8s still has LDT? <%p/%d>\n",
+			printk("WARNING: dead process %8s still has LDT? <%d>\n",
 					dead_task->comm,
-					dead_task->mm->context.ldt,
 					dead_task->mm->context.size);
 			BUG();
 		}
@@ -350,7 +357,7 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 {
 	struct pt_regs * childregs;
 	struct task_struct *tsk;
-	int err;
+	int err, i;
 
 	childregs = ((struct pt_regs *) (THREAD_SIZE + (unsigned long) p->thread_info)) - 1;
 	*childregs = *regs;
@@ -361,7 +368,18 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 	p->thread.esp = (unsigned long) childregs;
 	p->thread.esp0 = (unsigned long) (childregs+1);
 
+	/*
+	 * get the two stack pages, for the virtual stack.
+	 *
+	 * IMPORTANT: this code relies on the fact that the task
+	 * structure is an THREAD_SIZE aligned piece of physical memory.
+	 */
+	for (i = 0; i < ARRAY_SIZE(p->thread.stack_page); i++)
+		p->thread.stack_page[i] =
+				virt_to_page((unsigned long)p->thread_info + (i*PAGE_SIZE));
+
 	p->thread.eip = (unsigned long) ret_from_fork;
+	p->thread_info->real_stack = p->thread_info;
 
 	savesegment(fs,p->thread.fs);
 	savesegment(gs,p->thread.gs);
@@ -512,11 +530,45 @@ struct task_struct fastcall * __switch_to(struct task_struct *prev_p, struct tas
 	/* never put a printk in __switch_to... printk() calls wake_up*() indirectly */
 
 	__unlazy_fpu(prev_p);
+	if (next_p->mm)
+		load_user_cs_desc(cpu, next_p->mm);
 
+#ifdef CONFIG_X86_HIGH_ENTRY
+{
+	int i;
+	/*
+	 * Set the ptes of the virtual stack. (NOTE: a one-page TLB flush is
+	 * needed because otherwise NMIs could interrupt the
+	 * user-return code with a virtual stack and stale TLBs.)
+	 */
+	for (i = 0; i < ARRAY_SIZE(next->stack_page); i++) {
+		__kunmap_atomic_type(KM_VSTACK_TOP-i);
+		__kmap_atomic(next->stack_page[i], KM_VSTACK_TOP-i);
+	}
+	/*
+	 * NOTE: here we rely on the task being the stack as well
+	 */
+	next_p->thread_info->virtual_stack =
+			(void *)__kmap_atomic_vaddr(KM_VSTACK_TOP);
+}
+#if defined(CONFIG_PREEMPT) && defined(CONFIG_SMP)
+	/*
+	 * If next was preempted on entry from userspace to kernel,
+	 * and now it's on a different cpu, we need to adjust %esp.
+	 * This assumes that entry.S does not copy %esp while on the
+	 * virtual stack (with interrupts enabled): which is so,
+	 * except within __SWITCH_KERNELSPACE itself.
+	 */
+	if (unlikely(next->esp >= TASK_SIZE)) {
+		next->esp &= THREAD_SIZE - 1;
+		next->esp |= (unsigned long) next_p->thread_info->virtual_stack;
+	}
+#endif
+#endif
 	/*
 	 * Reload esp0, LDT and the page table pointer:
 	 */
-	load_esp0(tss, next);
+	load_virtual_esp0(tss, next_p);
 
 	/*
 	 * Load the per-thread Thread-Local Storage descriptor.
@@ -774,5 +826,64 @@ asmlinkage int sys_get_thread_area(struct user_desc __user *u_info)
 	if (copy_to_user(u_info, &info, sizeof(info)))
 		return -EFAULT;
 	return 0;
+}
+
+
+unsigned long arch_align_stack(unsigned long sp)
+{
+	if (current->flags & PF_RELOCEXEC)
+		sp -= ((get_random_int() % 65536) << 4);
+	return sp & ~0xf;
+}
+
+
+void arch_add_exec_range(struct mm_struct *mm, unsigned long limit)
+{
+	if (limit > mm->context.exec_limit) {
+		mm->context.exec_limit = limit;
+		set_user_cs(&mm->context.user_cs, limit);
+		if (mm == current->mm)
+			load_user_cs_desc(smp_processor_id(), mm);
+	}
+}
+
+void arch_remove_exec_range(struct mm_struct *mm, unsigned long old_end)
+{
+	struct vm_area_struct *vma;
+	unsigned long limit = 0;
+
+	if (old_end == mm->context.exec_limit) {
+		for (vma = mm->mmap; vma; vma = vma->vm_next)
+			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
+				limit = vma->vm_end;
+
+		mm->context.exec_limit = limit;
+		set_user_cs(&mm->context.user_cs, limit);
+		if (mm == current->mm)
+			load_user_cs_desc(smp_processor_id(), mm);
+	}
+}
+
+void arch_flush_exec_range(struct mm_struct *mm)
+{
+	mm->context.exec_limit = 0;
+	set_user_cs(&mm->context.user_cs, 0);
+}
+
+/*
+ * Generate random brk address between 128MB and 196MB. (if the layout
+ * allows it.)
+ */
+void randomize_brk(unsigned long old_brk)
+{
+	unsigned long new_brk, range_start, range_end;
+
+	range_start = 0x08000000;
+	if (current->mm->brk >= range_start)
+		range_start = current->mm->brk;
+	range_end = range_start + 0x02000000;
+	new_brk = randomize_range(range_start, range_end, 0);
+	if (new_brk)
+		current->mm->brk = new_brk;
 }
 

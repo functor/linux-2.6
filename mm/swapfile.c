@@ -29,6 +29,8 @@
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 #include <linux/swapops.h>
+#include <linux/vs_base.h>
+#include <linux/vs_memory.h>
 
 spinlock_t swaplock = SPIN_LOCK_UNLOCKED;
 unsigned int nr_swapfiles;
@@ -430,7 +432,8 @@ static void
 unuse_pte(struct vm_area_struct *vma, unsigned long address, pte_t *dir,
 	swp_entry_t entry, struct page *page)
 {
-	vma->vm_mm->rss++;
+	// vma->vm_mm->rss++;
+	vx_rsspages_inc(vma->vm_mm);
 	get_page(page);
 	set_pte(dir, pte_mkold(mk_pte(page, vma->vm_page_prot)));
 	page_add_anon_rmap(page, vma, address);
@@ -1599,6 +1602,8 @@ void si_swapinfo(struct sysinfo *val)
 	val->freeswap = nr_swap_pages + nr_to_be_unused;
 	val->totalswap = total_swap_pages + nr_to_be_unused;
 	swap_list_unlock();
+        if (vx_flags(VXF_VIRT_MEM, 0))
+                vx_vsi_swapinfo(val);
 }
 
 /*

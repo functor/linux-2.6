@@ -18,6 +18,7 @@
 #include <linux/cache.h>
 #include <linux/prio_tree.h>
 #include <linux/kobject.h>
+#include <linux/mount.h>
 #include <asm/atomic.h>
 
 struct iovec;
@@ -119,6 +120,7 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 #define MS_VERBOSE	32768
 #define MS_POSIXACL	(1<<16)	/* VFS does not apply the umask */
 #define MS_ONE_SECOND	(1<<17)	/* fs has 1 sec a/m/ctime resolution */
+#define MS_TAGXID	(1<<24)	/* tag inodes with context information */
 #define MS_ACTIVE	(1<<30)
 #define MS_NOUSER	(1<<31)
 
@@ -145,6 +147,8 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 #define S_DIRSYNC	64	/* Directory modifications are synchronous */
 #define S_NOCMTIME	128	/* Do not update file c/mtime */
 #define S_SWAPFILE	256	/* Do not truncate: swapon got its bmaps */
+#define S_BARRIER	512	/* Barrier for chroot() */
+#define S_IUNLINK	1024	/* Immutable unlink */
 
 /*
  * Note that nosuid etc flags are inode-specific: setting some file-system
@@ -161,7 +165,7 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
  */
 #define __IS_FLG(inode,flg) ((inode)->i_sb->s_flags & (flg))
 
-#define IS_RDONLY(inode) ((inode)->i_sb->s_flags & MS_RDONLY)
+#define IS_RDONLY(inode)	__IS_FLG(inode, MS_RDONLY)
 #define IS_SYNC(inode)		(__IS_FLG(inode, MS_SYNCHRONOUS) || \
 					((inode)->i_flags & S_SYNC))
 #define IS_DIRSYNC(inode)	(__IS_FLG(inode, MS_SYNCHRONOUS|MS_DIRSYNC) || \
@@ -171,11 +175,14 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 #define IS_NOQUOTA(inode)	((inode)->i_flags & S_NOQUOTA)
 #define IS_APPEND(inode)	((inode)->i_flags & S_APPEND)
 #define IS_IMMUTABLE(inode)	((inode)->i_flags & S_IMMUTABLE)
+#define IS_IUNLINK(inode)	((inode)->i_flags & S_IUNLINK)
+#define IS_IXORUNLINK(inode)	((IS_IUNLINK(inode) ? S_IMMUTABLE : 0) ^ IS_IMMUTABLE(inode))
 #define IS_NOATIME(inode)	(__IS_FLG(inode, MS_NOATIME) || ((inode)->i_flags & S_NOATIME))
 #define IS_NODIRATIME(inode)	__IS_FLG(inode, MS_NODIRATIME)
 #define IS_POSIXACL(inode)	__IS_FLG(inode, MS_POSIXACL)
 #define IS_ONE_SECOND(inode)	__IS_FLG(inode, MS_ONE_SECOND)
 
+#define IS_BARRIER(inode)	(S_ISDIR((inode)->i_mode) && ((inode)->i_flags & S_BARRIER))
 #define IS_DEADDIR(inode)	((inode)->i_flags & S_DEAD)
 #define IS_NOCMTIME(inode)	((inode)->i_flags & S_NOCMTIME)
 #define IS_SWAPFILE(inode)	((inode)->i_flags & S_SWAPFILE)
@@ -257,6 +264,7 @@ typedef void (dio_iodone_t)(struct inode *inode, loff_t offset,
 #define ATTR_ATTR_FLAG	1024
 #define ATTR_KILL_SUID	2048
 #define ATTR_KILL_SGID	4096
+#define ATTR_XID	8192
 
 /*
  * This is the Inode Attributes structure, used for notify_change().  It
@@ -272,6 +280,7 @@ struct iattr {
 	umode_t		ia_mode;
 	uid_t		ia_uid;
 	gid_t		ia_gid;
+	xid_t		ia_xid;
 	loff_t		ia_size;
 	struct timespec	ia_atime;
 	struct timespec	ia_mtime;
@@ -287,6 +296,9 @@ struct iattr {
 #define ATTR_FLAG_APPEND	4 	/* Append-only file */
 #define ATTR_FLAG_IMMUTABLE	8 	/* Immutable file */
 #define ATTR_FLAG_NODIRATIME	16 	/* Don't update atime for directory */
+
+#define ATTR_FLAG_BARRIER	512	/* Barrier for chroot() */
+#define ATTR_FLAG_IUNLINK	1024	/* Immutable unlink */
 
 /*
  * Includes for diskquotas.
@@ -426,6 +438,7 @@ struct inode {
 	unsigned int		i_nlink;
 	uid_t			i_uid;
 	gid_t			i_gid;
+	xid_t			i_xid;
 	dev_t			i_rdev;
 	loff_t			i_size;
 	struct timespec		i_atime;
@@ -981,8 +994,16 @@ static inline void mark_inode_dirty_sync(struct inode *inode)
 
 static inline void touch_atime(struct vfsmount *mnt, struct dentry *dentry)
 {
-	/* per-mountpoint checks will go here */
-	update_atime(dentry->d_inode);
+	struct inode *inode = dentry->d_inode;
+
+	if (MNT_IS_NOATIME(mnt))
+		return;
+	if (S_ISDIR(inode->i_mode) && MNT_IS_NODIRATIME(mnt))
+		return;
+	if (IS_RDONLY(inode) || MNT_IS_RDONLY(mnt))
+		return;
+
+	update_atime(inode);
 }
 
 static inline void file_accessed(struct file *file)
@@ -1419,7 +1440,7 @@ ssize_t generic_file_write_nolock(struct file *file, const struct iovec *iov,
 extern ssize_t generic_file_sendfile(struct file *, loff_t *, size_t, read_actor_t, void *);
 extern void do_generic_mapping_read(struct address_space *mapping,
 				    struct file_ra_state *, struct file *,
-				    loff_t *, read_descriptor_t *, read_actor_t);
+				    loff_t *, read_descriptor_t *, read_actor_t, int);
 extern void
 file_ra_state_init(struct file_ra_state *ra, struct address_space *mapping);
 extern ssize_t generic_file_direct_IO(int rw, struct kiocb *iocb,
@@ -1436,14 +1457,15 @@ extern int nonseekable_open(struct inode * inode, struct file * filp);
 
 static inline void do_generic_file_read(struct file * filp, loff_t *ppos,
 					read_descriptor_t * desc,
-					read_actor_t actor)
+					read_actor_t actor, int nonblock)
 {
 	do_generic_mapping_read(filp->f_mapping,
 				&filp->f_ra,
 				filp,
 				ppos,
 				desc,
-				actor);
+				actor,
+				nonblock);
 }
 
 ssize_t __blockdev_direct_IO(int rw, struct kiocb *iocb, struct inode *inode,
@@ -1535,7 +1557,7 @@ extern ssize_t simple_read_from_buffer(void __user *, size_t, loff_t *, const vo
 extern int inode_change_ok(struct inode *, struct iattr *);
 extern int __must_check inode_setattr(struct inode *, struct iattr *);
 
-extern void inode_update_time(struct inode *inode, int ctime_too);
+extern void inode_update_time(struct inode *inode, struct vfsmount *mnt, int ctime_too);
 
 static inline ino_t parent_ino(struct dentry *dentry)
 {
@@ -1569,6 +1591,18 @@ static inline char *alloc_secdata(void)
 static inline void free_secdata(void *secdata)
 { }
 #endif	/* CONFIG_SECURITY */
+
+/* io priorities */
+
+#define IOPRIO_NR      21
+
+#define IOPRIO_IDLE	0
+#define IOPRIO_NORM	10
+#define IOPRIO_RT	20
+
+asmlinkage int sys_ioprio_set(int ioprio);
+asmlinkage int sys_ioprio_get(void);
+
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_FS_H */

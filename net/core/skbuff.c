@@ -333,6 +333,7 @@ struct sk_buff *skb_clone(struct sk_buff *skb, int gfp_mask)
 #endif
 
 #endif
+	C(xid);
 	C(truesize);
 	atomic_set(&n->users, 1);
 	C(head);
@@ -391,6 +392,7 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 #endif
 	new->tc_index	= old->tc_index;
 #endif
+	new->xid	= old->xid;
 	atomic_set(&new->users, 1);
 }
 

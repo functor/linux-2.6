@@ -187,4 +187,6 @@ get_order (unsigned long size)
 					 (((current->personality & READ_IMPLIES_EXEC) != 0)	\
 					  ? VM_EXEC : 0))
 
+#define devmem_is_allowed(x) 1
+
 #endif /* _ASM_IA64_PAGE_H */

@@ -1438,7 +1438,7 @@ _GLOBAL(sys_call_table)
 	.long ppc_fadvise64_64
 	.long sys_ni_syscall		/* 255 - rtas (used on ppc64) */
 	.long sys_ni_syscall		/* 256 reserved for sys_debug_setcontext */
-	.long sys_ni_syscall		/* 257 reserved for vserver */
+	.long sys_vserver
 	.long sys_ni_syscall		/* 258 reserved for new sys_remap_file_pages */
 	.long sys_ni_syscall		/* 259 reserved for new sys_mbind */
 	.long sys_ni_syscall		/* 260 reserved for new sys_get_mempolicy */
@@ -1450,3 +1450,5 @@ _GLOBAL(sys_call_table)
 	.long sys_mq_notify
 	.long sys_mq_getsetattr
 	.long sys_ni_syscall		/* 268 reserved for sys_kexec_load */
+	.long sys_ioprio_set
+	.long sys_ioprio_get		

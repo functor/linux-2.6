@@ -43,8 +43,6 @@ static struct backing_dev_info hugetlbfs_backing_dev_info = {
 	.memory_backed	= 1,	/* Does not contribute to dirty memory */
 };
 
-int sysctl_hugetlb_shm_group;
-
 static int hugetlbfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct inode *inode = file->f_dentry->d_inode;
@@ -718,25 +716,22 @@ static unsigned long hugetlbfs_counter(void)
 	return ret;
 }
 
-static int can_do_hugetlb_shm(void)
-{
-	return likely(capable(CAP_IPC_LOCK) ||
-			in_group_p(sysctl_hugetlb_shm_group));
-}
-
 struct file *hugetlb_zero_setup(size_t size)
 {
-	int error;
+	int error = -ENOMEM;
 	struct file *file;
 	struct inode *inode;
 	struct dentry *dentry, *root;
 	struct qstr quick_string;
 	char buf[16];
 
-	if (!can_do_hugetlb_shm())
+	if (!capable(CAP_IPC_LOCK))
 		return ERR_PTR(-EPERM);
 
 	if (!is_hugepage_mem_enough(size))
+		return ERR_PTR(-ENOMEM);
+
+	if (!user_shm_lock(size, current->user))
 		return ERR_PTR(-ENOMEM);
 
 	root = hugetlbfs_vfsmount->mnt_root;
@@ -746,7 +741,7 @@ struct file *hugetlb_zero_setup(size_t size)
 	quick_string.hash = 0;
 	dentry = d_alloc(root, &quick_string);
 	if (!dentry)
-		return ERR_PTR(-ENOMEM);
+		goto out_shm_unlock;
 
 	error = -ENFILE;
 	file = get_empty_filp();
@@ -773,6 +768,8 @@ out_file:
 	put_filp(file);
 out_dentry:
 	dput(dentry);
+out_shm_unlock:
+	user_shm_unlock(size, current->user);
 	return ERR_PTR(error);
 }
 

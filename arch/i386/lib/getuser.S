@@ -9,6 +9,7 @@
  * return value.
  */
 #include <asm/thread_info.h>
+#include <asm/asm_offsets.h>
 
 
 /*

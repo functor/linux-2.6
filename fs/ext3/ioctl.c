@@ -12,6 +12,7 @@
 #include <linux/ext3_fs.h>
 #include <linux/ext3_jbd.h>
 #include <linux/time.h>
+#include <linux/vserver/xid.h>
 #include <asm/uaccess.h>
 
 
@@ -34,7 +35,8 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		unsigned int oldflags;
 		unsigned int jflag;
 
-		if (IS_RDONLY(inode))
+		if (IS_RDONLY(inode) ||
+			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
 			return -EROFS;
 
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
@@ -57,7 +59,9 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		 *
 		 * This test looks nicer. Thanks to Pauline Middelink
 		 */
-		if ((flags ^ oldflags) & (EXT3_APPEND_FL | EXT3_IMMUTABLE_FL)) {
+		if ((oldflags & EXT3_IMMUTABLE_FL) ||
+			((flags ^ oldflags) &
+			(EXT3_APPEND_FL | EXT3_IMMUTABLE_FL))) {
 			if (!capable(CAP_LINUX_IMMUTABLE))
 				return -EPERM;
 		}
@@ -110,7 +114,8 @@ flags_err:
 
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
 			return -EPERM;
-		if (IS_RDONLY(inode))
+		if (IS_RDONLY(inode) ||
+			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
 			return -EROFS;
 		if (get_user(generation, (int __user *) arg))
 			return -EFAULT;
@@ -150,6 +155,38 @@ flags_err:
 			remove_wait_queue(&EXT3_SB(sb)->ro_wait_queue, &wait);
 			return ret;
 		}
+#endif
+#if defined(CONFIG_VSERVER_LEGACY) && !defined(CONFIG_INOXID_NONE)
+	case EXT3_IOC_SETXID: {
+		handle_t *handle;
+		struct ext3_iloc iloc;
+		int xid;
+		int err;
+
+		/* fixme: if stealth, return -ENOTTY */
+		if (!capable(CAP_CONTEXT))
+			return -EPERM;
+		if (IS_RDONLY(inode))
+			return -EROFS;
+		if (!(inode->i_sb->s_flags & MS_TAGXID))
+			return -ENOSYS;
+		if (get_user(xid, (int *) arg))
+			return -EFAULT;	
+
+		handle = ext3_journal_start(inode, 1);
+		if (IS_ERR(handle))
+			return PTR_ERR(handle);
+		err = ext3_reserve_inode_write(handle, inode, &iloc);
+		if (err)
+			return err;
+
+		inode->i_xid = (xid & 0xFFFF);
+		inode->i_ctime = CURRENT_TIME;
+
+		err = ext3_mark_iloc_dirty(handle, inode, &iloc);
+		ext3_journal_stop(handle);
+		return err;
+	}
 #endif
 	default:
 		return -ENOTTY;

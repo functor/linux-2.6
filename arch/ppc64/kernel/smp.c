@@ -751,6 +751,8 @@ out:
 	return ret;
 }
 
+EXPORT_SYMBOL_GPL(smp_call_function);
+
 void smp_call_function_interrupt(void)
 {
 	void (*func) (void *info);

@@ -225,8 +225,8 @@ static void lp_error (int minor)
 
 	polling = lp_table[minor].dev->port->irq == PARPORT_IRQ_NONE;
 	if (polling) lp_release_parport (&lp_table[minor]);
-	interruptible_sleep_on_timeout (&lp_table[minor].waitq,
-					LP_TIMEOUT_POLLED);
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule_timeout(LP_TIMEOUT_POLLED);
 	if (polling) lp_claim_parport_or_block (&lp_table[minor]);
 	else parport_yield_blocking (lp_table[minor].dev);
 }

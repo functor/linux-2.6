@@ -545,6 +545,7 @@ wait_for_iobuf:
 			wait_on_buffer(bh);
 			goto wait_for_iobuf;
 		}
+		cond_resched();
 
 		if (unlikely(!buffer_uptodate(bh)))
 			err = -EIO;
@@ -599,6 +600,7 @@ wait_for_iobuf:
 			wait_on_buffer(bh);
 			goto wait_for_ctlbuf;
 		}
+		cond_resched();
 
 		if (unlikely(!buffer_uptodate(bh)))
 			err = -EIO;
@@ -764,6 +766,7 @@ skip_commit: /* The journal should be unlocked by now. */
 			release_buffer_page(bh);
 		}
 		spin_unlock(&journal->j_list_lock);
+		cond_resched();
 	}
 
 	/* Done with this transaction! */

@@ -123,7 +123,7 @@ int ncp_mmap(struct file *file, struct vm_area_struct *vma)
 	if (((vma->vm_end - vma->vm_start) >> PAGE_SHIFT) + vma->vm_pgoff 
 	   > (1U << (32 - PAGE_SHIFT)))
 		return -EFBIG;
-	if (!IS_RDONLY(inode)) {
+	if (!IS_RDONLY(inode) || (file && MNT_IS_RDONLY(file->f_vfsmnt))) {
 		inode->i_atime = CURRENT_TIME;
 	}
 

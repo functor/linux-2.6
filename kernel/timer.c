@@ -31,6 +31,9 @@
 #include <linux/time.h>
 #include <linux/jiffies.h>
 #include <linux/cpu.h>
+#include <linux/vs_base.h>
+#include <linux/vs_cvirt.h>
+#include <linux/vserver/sched.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -996,7 +999,7 @@ asmlinkage unsigned long sys_alarm(unsigned int seconds)
  */
 asmlinkage long sys_getpid(void)
 {
-	return current->tgid;
+	return vx_map_tgid(current->vx_info, current->tgid);
 }
 
 /*
@@ -1040,7 +1043,7 @@ asmlinkage long sys_getppid(void)
 #endif
 		break;
 	}
-	return pid;
+	return vx_map_tgid(current->vx_info, pid);
 }
 
 asmlinkage long sys_getuid(void)
@@ -1249,6 +1252,8 @@ asmlinkage long sys_sysinfo(struct sysinfo __user *info)
 			tp.tv_nsec = tp.tv_nsec - NSEC_PER_SEC;
 			tp.tv_sec++;
 		}
+		if (vx_flags(VXF_VIRT_UPTIME, 0))
+			vx_vsi_uptime(&tp, NULL);
 		val.uptime = tp.tv_sec + (tp.tv_nsec ? 1 : 0);
 
 		val.loads[0] = avenrun[0] << (SI_LOAD_SHIFT - FSHIFT);
@@ -1258,6 +1263,9 @@ asmlinkage long sys_sysinfo(struct sysinfo __user *info)
 		val.procs = nr_threads;
 	} while (read_seqretry(&xtime_lock, seq));
 
+/*	if (vx_flags(VXF_VIRT_CPU, 0))
+		vx_vsi_cpu(val);
+*/
 	si_meminfo(&val);
 	si_swapinfo(&val);
 

@@ -235,7 +235,7 @@ static struct vfsmount *afs_mntpt_do_automount(struct dentry *mntpt)
  */
 static int afs_mntpt_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
-	struct nameidata newnd;
+	struct dentry *old_dentry;
 	struct vfsmount *newmnt;
 	int err;
 
@@ -247,15 +247,18 @@ static int afs_mntpt_follow_link(struct dentry *dentry, struct nameidata *nd)
 	       nd->dentry->d_name.name);
 
 	newmnt = afs_mntpt_do_automount(dentry);
-	if (IS_ERR(newmnt))
-		return PTR_ERR(newmnt);
-
-	newnd = *nd;
-	newnd.dentry = dentry;
-	err = do_add_mount(newmnt, &newnd, 0, &afs_vfsmounts);
-
-	if (!err) {
+	if (IS_ERR(newmnt)) {
 		path_release(nd);
+		return PTR_ERR(newmnt);
+	}
+
+	old_dentry = nd->dentry;
+	nd->dentry = dentry;
+	err = do_add_mount(newmnt, nd, 0, &afs_vfsmounts);
+	nd->dentry = old_dentry;
+
+	path_release(nd);
+	if (!err) {
 		mntget(newmnt);
 		nd->mnt = newmnt;
 		dget(newmnt->mnt_root);

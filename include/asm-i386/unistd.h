@@ -289,9 +289,12 @@
 #define __NR_mq_notify		(__NR_mq_open+4)
 #define __NR_mq_getsetattr	(__NR_mq_open+5)
 #define __NR_sys_kexec_load	283
+#define __NR_ioprio_set		284
+#define __NR_ioprio_get		285
 
-#define NR_syscalls 284
+#define NR_syscalls 286
 
+#ifndef __KERNEL_SYSCALLS_NO_ERRNO__
 /* user-visible error numbers are in the range -1 - -124: see <asm-i386/errno.h> */
 
 #define __syscall_return(type, res) \
@@ -302,6 +305,10 @@ do { \
 	} \
 	return (type) (res); \
 } while (0)
+
+#else
+# define __syscall_return(type, res) return (type) (res)
+#endif
 
 /* XXX - _foo needs to be __foo, while __NR_bar could be _NR_bar. */
 #define _syscall0(type,name) \

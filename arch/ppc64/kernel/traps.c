@@ -116,6 +116,8 @@ int die(const char *str, struct pt_regs *regs, long err)
 	if (nl)
 		printk("\n");
 	show_regs(regs);
+	if (netdump_func)
+		netdump_func(regs);
 	bust_spinlocks(0);
 	spin_unlock_irq(&die_lock);
 
@@ -123,6 +125,8 @@ int die(const char *str, struct pt_regs *regs, long err)
 		panic("Fatal exception in interrupt");
 
 	if (panic_on_oops) {
+		if (netdump_func)
+			netdump_func = NULL;
 		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(5 * HZ);

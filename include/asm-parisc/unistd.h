@@ -728,7 +728,9 @@
 #define __NR_mq_notify          (__NR_Linux + 233)
 #define __NR_mq_getsetattr      (__NR_Linux + 234)
 
-#define __NR_Linux_syscalls     235
+#define __NR_vserver		(__NR_Linux + 273)
+
+#define __NR_Linux_syscalls     273
 
 #define HPUX_GATEWAY_ADDR       0xC0000004
 #define LINUX_GATEWAY_ADDR      0x100
