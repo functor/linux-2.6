@@ -20,20 +20,21 @@
 struct ckrm_sock_class;
 
 struct ckrm_net_struct {
-	int 		 ns_type;                    // type of net class
-	struct sock     *ns_sk;         // pointer to socket
-	pid_t            ns_tgid;       // real process id
-	pid_t            ns_pid;        // calling thread's pid
-	int              ns_family;     // IPPROTO_IPV4 || IPPROTO_IPV6
-					// Currently only IPV4 is supported
+	int ns_type;		// type of net class
+	struct sock *ns_sk;	// pointer to socket
+	pid_t ns_tgid;		// real process id
+	pid_t ns_pid;		// calling thread's pid
+	struct task_struct *ns_tsk;
+	int ns_family;		// IPPROTO_IPV4 || IPPROTO_IPV6
+	// Currently only IPV4 is supported
 	union {
-		__u32   ns_dipv4;       // V4 listener's address
+		__u32 ns_dipv4;	// V4 listener's address
 	} ns_daddr;
-	__u16 		ns_dport;       // listener's port
-	__u16 ns_sport;                 // sender's port
+	__u16 ns_dport;		// listener's port
+	__u16 ns_sport;		// sender's port
 	atomic_t ns_refcnt;
-	struct ckrm_sock_class 	*core;		
-	struct list_head       ckrm_link;
+	struct ckrm_sock_class *core;
+	struct list_head ckrm_link;
 };
 
 #define ns_daddrv4     ns_daddr.ns_dipv4

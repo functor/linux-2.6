@@ -22,11 +22,9 @@
  *        Created.
  */
 
-
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/namei.h>
-#include <asm/namei.h>
 #include <linux/namespace.h>
 #include <linux/dcache.h>
 #include <linux/seq_file.h>
@@ -42,57 +40,55 @@
 
 #include <linux/rcfs.h>
 #include <linux/ckrm.h>
-
+#include <linux/ckrm_rc.h>
+#include <linux/ckrm_ce.h>
 
 static kmem_cache_t *rcfs_inode_cachep;
-
 
 inline struct rcfs_inode_info *RCFS_I(struct inode *inode)
 {
 	return container_of(inode, struct rcfs_inode_info, vfs_inode);
 }
+
 EXPORT_SYMBOL(RCFS_I);
 
-
-
-static struct inode *
-rcfs_alloc_inode(struct super_block *sb)
+static struct inode *rcfs_alloc_inode(struct super_block *sb)
 {
 	struct rcfs_inode_info *ri;
-	ri = (struct rcfs_inode_info *) kmem_cache_alloc(rcfs_inode_cachep, 
-							 SLAB_KERNEL);
+	ri = (struct rcfs_inode_info *)kmem_cache_alloc(rcfs_inode_cachep,
+							SLAB_KERNEL);
 	if (!ri)
 		return NULL;
 	ri->name = NULL;
 	return &ri->vfs_inode;
 }
 
-static void 
-rcfs_destroy_inode(struct inode *inode)
+static void rcfs_destroy_inode(struct inode *inode)
 {
 	struct rcfs_inode_info *ri = RCFS_I(inode);
 
 	kfree(ri->name);
-	kmem_cache_free(rcfs_inode_cachep, RCFS_I(inode));
+	kmem_cache_free(rcfs_inode_cachep, ri);
 }
 
-static void 
-rcfs_init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
+static void
+rcfs_init_once(void *foo, kmem_cache_t * cachep, unsigned long flags)
 {
-	struct rcfs_inode_info *ri = (struct rcfs_inode_info *) foo;
+	struct rcfs_inode_info *ri = (struct rcfs_inode_info *)foo;
 
-	if ((flags & (SLAB_CTOR_VERIFY|SLAB_CTOR_CONSTRUCTOR)) ==
+	if ((flags & (SLAB_CTOR_VERIFY | SLAB_CTOR_CONSTRUCTOR)) ==
 	    SLAB_CTOR_CONSTRUCTOR)
 		inode_init_once(&ri->vfs_inode);
 }
 
-int 
-rcfs_init_inodecache(void)
+int rcfs_init_inodecache(void)
 {
 	rcfs_inode_cachep = kmem_cache_create("rcfs_inode_cache",
-				sizeof(struct rcfs_inode_info),
-				0, SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT,
-				rcfs_init_once, NULL);
+					      sizeof(struct rcfs_inode_info),
+					      0,
+					      SLAB_HWCACHE_ALIGN |
+					      SLAB_RECLAIM_ACCOUNT,
+					      rcfs_init_once, NULL);
 	if (rcfs_inode_cachep == NULL)
 		return -ENOMEM;
 	return 0;
@@ -102,31 +98,28 @@ void rcfs_destroy_inodecache(void)
 {
 	printk(KERN_WARNING "destroy inodecache was called\n");
 	if (kmem_cache_destroy(rcfs_inode_cachep))
-		printk(KERN_INFO "rcfs_inode_cache: not all structures were freed\n");
+		printk(KERN_INFO
+		       "rcfs_inode_cache: not all structures were freed\n");
 }
 
-struct super_operations rcfs_super_ops =
-{
-	.alloc_inode	= rcfs_alloc_inode,
-	.destroy_inode	= rcfs_destroy_inode,
-	.statfs		= simple_statfs,
-	.drop_inode     = generic_delete_inode,
+struct super_operations rcfs_super_ops = {
+	.alloc_inode = rcfs_alloc_inode,
+	.destroy_inode = rcfs_destroy_inode,
+	.statfs = simple_statfs,
+	.drop_inode = generic_delete_inode,
 };
 
-
-struct dentry *rcfs_rootde; /* redundant since one can also get it from sb */
+struct dentry *rcfs_rootde;	/* redundant; can also get it from sb */
 static struct inode *rcfs_root;
 static struct rcfs_inode_info *rcfs_rootri;
 
-static int rcfs_mounted;
-
-static int rcfs_fill_super(struct super_block * sb, void * data, int silent)
+static int rcfs_fill_super(struct super_block *sb, void *data, int silent)
 {
-	struct inode * inode;
-	struct dentry * root;
+	struct inode *inode;
+	struct dentry *root;
 	struct rcfs_inode_info *rootri;
 	struct ckrm_classtype *clstype;
-	int i,rc;
+	int i, rc;
 
 	sb->s_fs_info = NULL;
 	if (rcfs_mounted) {
@@ -135,7 +128,7 @@ static int rcfs_fill_super(struct super_block * sb, void * data, int silent)
 	rcfs_mounted++;
 
 	sb->s_blocksize = PAGE_CACHE_SIZE;
-	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;	
+	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
 	sb->s_magic = RCFS_MAGIC;
 	sb->s_op = &rcfs_super_ops;
 	inode = rcfs_get_inode(sb, S_IFDIR | 0755, 0);
@@ -150,7 +143,6 @@ static int rcfs_fill_super(struct super_block * sb, void * data, int silent)
 	}
 	sb->s_root = root;
 
-	
 	// Link inode and core class 
 	rootri = RCFS_I(inode);
 	rootri->name = kmalloc(strlen(RCFS_ROOT) + 1, GFP_KERNEL);
@@ -164,20 +156,31 @@ static int rcfs_fill_super(struct super_block * sb, void * data, int silent)
 
 	rcfs_root = inode;
 	sb->s_fs_info = rcfs_root = inode;
-	rcfs_rootde = root ;
-	rcfs_rootri = rootri ;
+	rcfs_rootde = root;
+	rcfs_rootri = rootri;
 
 	// register metatypes
-	for ( i=0; i<CKRM_MAX_CLASSTYPES; i++) {
+	for (i = 0; i < CKRM_MAX_CLASSTYPES; i++) {
 		clstype = ckrm_classtypes[i];
-		if (clstype == NULL) 
+		if (clstype == NULL)
 			continue;
 		printk("A non null classtype\n");
 
 		if ((rc = rcfs_register_classtype(clstype)))
-			continue ;  // could return with an error too 
+			continue;	// could return with an error too 
 	}
 
+	// do post-mount initializations needed by CE
+	// this is distinct from CE registration done on rcfs module load
+	if (rcfs_engine_regd) {
+		if (rcfs_eng_callbacks.mnt)
+			if ((rc = (*rcfs_eng_callbacks.mnt) ())) {
+				printk(KERN_ERR "Error in CE mnt %d\n", rc);
+			}
+	}
+	// Following comment handled by code above; keep nonetheless if it
+	// can be done better
+	//
 	// register CE's with rcfs 
 	// check if CE loaded
 	// call rcfs_register_engine for each classtype
@@ -186,18 +189,16 @@ static int rcfs_fill_super(struct super_block * sb, void * data, int silent)
 	return 0;
 }
 
-
 static struct super_block *rcfs_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+				       int flags, const char *dev_name,
+				       void *data)
 {
 	return get_sb_nodev(fs_type, flags, data, rcfs_fill_super);
 }
 
-
-void 
-rcfs_kill_sb(struct super_block *sb)
+void rcfs_kill_sb(struct super_block *sb)
 {
-	int i,rc;
+	int i, rc;
 	struct ckrm_classtype *clstype;
 
 	if (sb->s_fs_info != rcfs_root) {
@@ -206,10 +207,10 @@ rcfs_kill_sb(struct super_block *sb)
 	}
 	rcfs_mounted--;
 
-	for ( i=0; i < CKRM_MAX_CLASSTYPES; i++) {
+	for (i = 0; i < CKRM_MAX_CLASSTYPES; i++) {
 
 		clstype = ckrm_classtypes[i];
-		if (clstype == NULL || clstype->rootde == NULL) 
+		if (clstype == NULL || clstype->rootde == NULL)
 			continue;
 
 		if ((rc = rcfs_deregister_classtype(clstype))) {
@@ -218,8 +219,19 @@ rcfs_kill_sb(struct super_block *sb)
 			// return ;   // can also choose to stop here
 		}
 	}
-	
-	// do not remove comment block until ce directory issue resolved
+
+	// do pre-umount shutdown needed by CE
+	// this is distinct from CE deregistration done on rcfs module unload
+	if (rcfs_engine_regd) {
+		if (rcfs_eng_callbacks.umnt)
+			if ((rc = (*rcfs_eng_callbacks.umnt) ())) {
+				printk(KERN_ERR "Error in CE umnt %d\n", rc);
+				// return ; until error handling improves
+			}
+	}
+	// Following comment handled by code above; keep nonetheless if it 
+	// can be done better
+	//
 	// deregister CE with rcfs
 	// Check if loaded
 	// if ce is in  one directory /rcfs/ce, 
@@ -236,23 +248,22 @@ rcfs_kill_sb(struct super_block *sb)
 	generic_shutdown_super(sb);
 
 	// printk(KERN_ERR "Removed all entries\n");
-}	
-
+}
 
 static struct file_system_type rcfs_fs_type = {
-	.name		= "rcfs",
-	.get_sb		= rcfs_get_sb,
-	.kill_sb	= rcfs_kill_sb,
+	.name = "rcfs",
+	.get_sb = rcfs_get_sb,
+	.kill_sb = rcfs_kill_sb,
 };
 
 struct rcfs_functions my_rcfs_fn = {
-	.mkroot               = rcfs_mkroot,
-	.rmroot               = rcfs_rmroot,
-	.register_classtype   = rcfs_register_classtype,
+	.mkroot = rcfs_mkroot,
+	.rmroot = rcfs_rmroot,
+	.register_classtype = rcfs_register_classtype,
 	.deregister_classtype = rcfs_deregister_classtype,
 };
 
-extern struct rcfs_functions rcfs_fn ;
+extern struct rcfs_functions rcfs_fn;
 
 static int __init init_rcfs_fs(void)
 {
@@ -266,13 +277,16 @@ static int __init init_rcfs_fs(void)
 	if (ret)
 		goto init_cache_err;
 
-	rcfs_fn = my_rcfs_fn ;
-	
+	rcfs_fn = my_rcfs_fn;
+
+	// Due to tight coupling of this module with ckrm
+	// do not allow this module to be removed.
+	try_module_get(THIS_MODULE);
 	return ret;
 
-init_cache_err:
+      init_cache_err:
 	unregister_filesystem(&rcfs_fs_type);
-init_register_err:
+      init_register_err:
 	return ret;
 }
 
@@ -283,6 +297,6 @@ static void __exit exit_rcfs_fs(void)
 }
 
 module_init(init_rcfs_fs)
-module_exit(exit_rcfs_fs)
+    module_exit(exit_rcfs_fs)
 
-MODULE_LICENSE("GPL");
+    MODULE_LICENSE("GPL");

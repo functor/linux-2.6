@@ -427,3 +427,21 @@ int proc_pid_statm(struct task_struct *task, char *buffer)
 	return sprintf(buffer,"%d %d %d %d %d %d %d\n",
 		       size, resident, shared, text, lib, data, 0);
 }
+
+
+int proc_pid_delay(struct task_struct *task, char * buffer)
+{
+	int res;
+
+	res  = sprintf(buffer,"%u %llu %llu %u %llu %u %llu\n",
+		       get_delay(task,runs),
+		       get_delay(task,runcpu_total),
+		       get_delay(task,waitcpu_total),
+		       get_delay(task,num_iowaits),
+		       get_delay(task,iowait_total),
+		       get_delay(task,num_memwaits),
+		       get_delay(task,mem_iowait_total)
+		);
+	return res;
+}
+

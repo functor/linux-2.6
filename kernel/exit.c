@@ -23,6 +23,8 @@
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
 #include <linux/mempolicy.h>
+#include <linux/ckrm.h>
+#include <linux/ckrm_tsk.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -639,6 +641,8 @@ static void exit_notify(struct task_struct *tsk)
 	int state;
 	struct task_struct *t;
 
+	ckrm_cb_exit(tsk);
+
 	if (signal_pending(tsk) && !tsk->signal->group_exit
 	    && !thread_group_empty(tsk)) {
 		/*
@@ -812,6 +816,9 @@ asmlinkage NORET_TYPE void do_exit(long code)
 		module_put(tsk->binfmt->module);
 
 	tsk->exit_code = code;
+#ifdef CONFIG_CKRM_TYPE_TASKCLASS
+	numtasks_put_ref(tsk->taskclass);
+#endif
 	exit_notify(tsk);
 	schedule();
 	BUG();
