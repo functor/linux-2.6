@@ -470,7 +470,7 @@ sock_forced_reclassify(struct ckrm_core_class *target, const char *options)
 			return -EPERM;
 		if (id != 0) 
 			return -EINVAL;
-		printk(KERN_DEBUG "sock_class: reclassify all not net implemented\n");
+		printk("sock_class: reclassify all not net implemented\n");
 		return 0;
 	}
 
@@ -553,7 +553,7 @@ static void sock_reclassify_class(struct ckrm_sock_class *cls)
 
 void __init ckrm_meta_init_sockclass(void)
 {
-	printk(KERN_DEBUG "...... Initializing ClassType<%s> ........\n",
+	printk("...... Initializing ClassType<%s> ........\n",
 	       CT_sockclass.name);
 	// intialize the default class
 	ckrm_init_core_class(&CT_sockclass, class_core(&sockclass_dflt_class),

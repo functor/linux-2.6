@@ -293,7 +293,7 @@ rules_parse(char *rule_defn, struct rbce_rule_term **rterms, int *term_mask)
 		*term_mask = 0;
 	}			/* else {
 				   for (i = 0; i < nterms; i++) {
-				   printk(KERN_DEBUG "token: i %d; op %d, operator %d, str %ld\n",
+				   printk("token: i %d; op %d, operator %d, str %ld\n",
 				   i, terms[i].op, terms[i].operator, terms[i].u.id);
 				   }
 				   } */
