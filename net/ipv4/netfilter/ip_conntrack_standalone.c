@@ -113,7 +113,9 @@ print_conntrack(char *buffer, struct ip_conntrack *conntrack)
 	len += print_tuple(buffer + len,
 			   &conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple,
 			   proto);
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	len += sprintf(buffer + len, "xid=%d ", conntrack->xid[IP_CT_DIR_ORIGINAL]);
+#endif
 	len += print_counters(buffer + len, 
 			      &conntrack->counters[IP_CT_DIR_ORIGINAL]);
 	if (!(test_bit(IPS_SEEN_REPLY_BIT, &conntrack->status)))
@@ -121,7 +123,9 @@ print_conntrack(char *buffer, struct ip_conntrack *conntrack)
 	len += print_tuple(buffer + len,
 			   &conntrack->tuplehash[IP_CT_DIR_REPLY].tuple,
 			   proto);
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	len += sprintf(buffer + len, "xid=%d ", conntrack->xid[IP_CT_DIR_REPLY]);
+#endif
 	len += print_counters(buffer + len, 
 			      &conntrack->counters[IP_CT_DIR_REPLY]);
 	if (test_bit(IPS_ASSURED_BIT, &conntrack->status))
