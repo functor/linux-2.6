@@ -603,28 +603,17 @@ static int check_kill_permission(int sig, struct siginfo *info,
 				 struct task_struct *t)
 {
 	int error = -EINVAL;
-	int user;
-
 	if (sig < 0 || sig > _NSIG)
 		return error;
-
-	user = (!info ||
-		(info != SEND_SIG_PRIV &&
-		 info != SEND_SIG_FORCED &&
-		 SI_FROMUSER(info)));
-
 	error = -EPERM;
-	if (user && (sig != SIGCONT ||
-		     current->signal->session != t->signal->session)
+	if ((!info || ((unsigned long)info != 1 &&
+			(unsigned long)info != 2 && SI_FROMUSER(info)))
+	    && ((sig != SIGCONT) ||
+		(current->signal->session != t->signal->session))
 	    && (current->euid ^ t->suid) && (current->euid ^ t->uid)
 	    && (current->uid ^ t->suid) && (current->uid ^ t->uid)
 	    && !capable(CAP_KILL))
 		return error;
-
-	error = -ESRCH;
-	if (user && !vx_check(vx_task_xid(t), VX_ADMIN|VX_IDENT))
-		return error;
-
 	return security_task_kill(t, info, sig);
 }
 
@@ -1065,6 +1054,9 @@ int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 {
 	unsigned long flags;
 	int ret;
+
+	if (!vx_check(vx_task_xid(p), VX_ADMIN|VX_WATCH|VX_IDENT))
+		return -ESRCH;
 
 	ret = check_kill_permission(sig, info, p);
 	if (!ret && sig && p->sighand) {
