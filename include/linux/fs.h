@@ -1603,6 +1603,15 @@ static inline void free_secdata(void *secdata)
 asmlinkage int sys_ioprio_set(int ioprio);
 asmlinkage int sys_ioprio_get(void);
 
+/* common structure for cfq & ckrm I/O controller */
+typedef struct cfqlim {
+	int nskip;
+	unsigned long navsec;
+	int timedout;
+	atomic_t sectorate;
+	u64 sec[2];
+} cfqlim_t ;
+
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_FS_H */
