@@ -763,7 +763,7 @@ static int ckrm_cpu_idled(void *nothing)
 	set_user_nice(current,19);
 	daemonize("ckrm_idle_task");
 
-	//deactivate it, it will be waked up by ckrm_cpu_monitor
+	//deactivate it, it will be awakened by ckrm_cpu_monitor
 	current->state = TASK_INTERRUPTIBLE;
 	schedule();		
 
@@ -918,7 +918,7 @@ void ckrm_cpu_monitor(int check_min)
 	now = sched_clock();
 
 	//consecutive check should be at least 100ms apart
-	if (check_min && (now - last_check < MIN_CPU_MONITOR_INTERVAL))
+	if (check_min && ((now - last_check) < MIN_CPU_MONITOR_INTERVAL))
 		goto outunlock;
 
 	last_check = now;
