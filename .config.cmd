@@ -96,6 +96,7 @@ deps_config := \
 	drivers/net/arm/Kconfig \
 	drivers/net/arcnet/Kconfig \
 	drivers/net/Kconfig \
+	net/tux/Kconfig \
 	drivers/bluetooth/Kconfig \
 	net/bluetooth/hidp/Kconfig \
 	net/bluetooth/cmtp/Kconfig \

@@ -55,7 +55,7 @@ static inline int page_kills_ppro(unsigned long pagenr)
 
 extern int is_available_memory(efi_memory_desc_t *);
 
-int page_is_ram(unsigned long pagenr)
+static inline int page_is_ram(unsigned long pagenr)
 {
 	int i;
 	unsigned long addr, end;
@@ -92,6 +92,26 @@ int page_is_ram(unsigned long pagenr)
 	}
 	return 0;
 }
+
+/*
+ * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
+ * valid. The argument is a physical page number.
+ *
+ *
+ * On x86, access has to be given to the first megabyte of ram because that area
+ * contains bios code and data regions used by X and dosemu and similar apps.
+ * Access has to be given to non-kernel-ram areas as well, these contain the PCI
+ * mmio resources as well as potential bios/acpi data regions.
+ */
+int devmem_is_allowed(unsigned long pagenr)
+{
+	if (pagenr <= 256)
+		return 1;
+	if (!page_is_ram(pagenr))
+		return 1;
+	return 0;
+}
+
 
 pte_t *kmap_pte;
 

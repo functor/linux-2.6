@@ -551,6 +551,7 @@ static int exec_mmap(struct mm_struct *mm)
 	tsk->active_mm = mm;
 	activate_mm(active_mm, mm);
 	task_unlock(tsk);
+	arch_pick_mmap_layout(mm);
 	if (old_mm) {
 		if (active_mm != old_mm) BUG();
 		mmput(old_mm);
@@ -894,11 +895,8 @@ int prepare_binprm(struct linux_binprm *bprm)
 	if(!(bprm->file->f_vfsmnt->mnt_flags & MNT_NOSUID)) {
 		/* Set-uid? */
 		if (mode & S_ISUID) {
+			current->personality &= ~PER_CLEAR_ON_SETID;
 			bprm->e_uid = inode->i_uid;
-#ifdef __i386__
-			/* reset personality */
-			current->personality = PER_LINUX;
-#endif
 		}
 
 		/* Set-gid? */
@@ -908,11 +906,8 @@ int prepare_binprm(struct linux_binprm *bprm)
 		 * executable.
 		 */
 		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
+			current->personality &= ~PER_CLEAR_ON_SETID;
 			bprm->e_gid = inode->i_gid;
-#ifdef __i386__
-			/* reset personality */
-			current->personality = PER_LINUX;
-#endif
 		}
 	}
 

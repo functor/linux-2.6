@@ -463,7 +463,7 @@ static void tux_write_space (struct sock *sk)
 	Dprintk("sk->sk_wmem_queued: %d, sk->sk_sndbuf: %d.\n",
 		sk->sk_wmem_queued, sk->sk_sndbuf);
 
-	if (tcp_wspace(sk) >= tcp_min_write_space(sk)) {
+	if (sk_stream_wspace(sk) >= sk_stream_min_wspace(sk)) {
 		clear_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 		if (!idle_event(req))
 			output_space_event(req);
@@ -523,7 +523,7 @@ static void tux_ftp_write_space (struct sock *sk)
 	Dprintk("sk->sk_wmem_queued: %d, sk->sk_sndbuf: %d.\n",
 		sk->sk_wmem_queued, sk->sk_sndbuf);
 
-	if (tcp_wspace(sk) >= sk->sk_sndbuf/10*8) {
+	if (sk_stream_wspace(sk) >= sk->sk_sndbuf/10*8) {
 		clear_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 		if (!idle_event(req))
 			output_space_event(req);

@@ -192,13 +192,34 @@ extern int sysctl_max_map_count;
 
 #include <linux/aio.h>
 
+extern unsigned long
+arch_get_unmapped_area(struct file *, unsigned long, unsigned long,
+		       unsigned long, unsigned long);
+
+extern unsigned long
+arch_get_unmapped_exec_area(struct file *, unsigned long, unsigned long,
+		       unsigned long, unsigned long);
+extern unsigned long
+arch_get_unmapped_area_topdown(struct file *filp, unsigned long addr,
+			  unsigned long len, unsigned long pgoff,
+			  unsigned long flags);
+extern void arch_unmap_area(struct vm_area_struct *area);
+extern void arch_unmap_area_topdown(struct vm_area_struct *area);
+
+
 struct mm_struct {
 	struct vm_area_struct * mmap;		/* list of VMAs */
 	struct rb_root mm_rb;
 	struct vm_area_struct * mmap_cache;	/* last find_vma result */
+	unsigned long (*get_unmapped_area) (struct file *filp,
+				unsigned long addr, unsigned long len,
+				unsigned long pgoff, unsigned long flags);
+	unsigned long (*get_unmapped_exec_area) (struct file *filp,
+				unsigned long addr, unsigned long len,
+				unsigned long pgoff, unsigned long flags);
+	void (*unmap_area) (struct vm_area_struct *area);
+	unsigned long mmap_base;		/* base of mmap area */
 	unsigned long free_area_cache;		/* first hole */
-	unsigned long non_executable_cache;	/* last hole top */
-	unsigned long mmap_top;			/* top of mmap area */
 	pgd_t * pgd;
 	atomic_t mm_users;			/* How many users with user space? */
 	atomic_t mm_count;			/* How many references to "struct mm_struct" (users count as 1) */
@@ -224,6 +245,10 @@ struct mm_struct {
 
 	/* Architecture-specific MM context */
 	mm_context_t context;
+
+	/* Token based thrashing protection. */
+	unsigned long swap_token_time;
+	char recent_pagein;
 
 	/* coredumping support */
 	int core_waiters;
@@ -416,6 +441,10 @@ struct task_struct {
 	unsigned int time_slice, first_time_slice;
 
 	struct list_head tasks;
+	/*
+	 * ptrace_list/ptrace_children forms the list of my children
+	 * that were stolen by a ptracer.
+	 */
 	struct list_head ptrace_children;
 	struct list_head ptrace_list;
 
@@ -437,6 +466,10 @@ struct task_struct {
 	 */
 	struct task_struct *real_parent; /* real parent process (when being debugged) */
 	struct task_struct *parent;	/* parent process */
+	/*
+	 * children/sibling forms the list of my children plus the
+	 * tasks I'm ptracing.
+	 */
 	struct list_head children;	/* list of my children */
 	struct list_head sibling;	/* linkage in my parent's children list */
 	struct task_struct *group_leader;	/* threadgroup leader */
@@ -493,6 +526,11 @@ struct task_struct {
 	int (*notifier)(void *priv);
 	void *notifier_data;
 	sigset_t *notifier_mask;
+
+	/* TUX state */
+	void *tux_info;
+	void (*tux_exit)(void);
+
 	
 	void *security;
 	struct audit_context *audit_context;
@@ -1090,6 +1128,17 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 }
 
 #endif /* CONFIG_SMP */
+
+#ifdef HAVE_ARCH_PICK_MMAP_LAYOUT
+extern void arch_pick_mmap_layout(struct mm_struct *mm);
+#else
+static inline void arch_pick_mmap_layout(struct mm_struct *mm)
+{
+	mm->mmap_base = TASK_UNMAPPED_BASE;
+	mm->get_unmapped_area = arch_get_unmapped_area;
+	mm->unmap_area = arch_unmap_area;
+}
+#endif
 
 #endif /* __KERNEL__ */
 

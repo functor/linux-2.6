@@ -44,5 +44,6 @@ extern struct page *page_mem_map(struct page *page);
 
 extern struct page *arch_validate(struct page *page, int mask, int order);
 #define HAVE_ARCH_VALIDATE
+#define devmem_is_allowed(x) 1
 
 #endif

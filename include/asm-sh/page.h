@@ -133,6 +133,8 @@ static __inline__ int get_order(unsigned long size)
 
 #endif
 
+#define devmem_is_allowed(x) 1
+
 #endif /* __KERNEL__ */
 
 #endif /* __ASM_SH_PAGE_H */

@@ -10,8 +10,6 @@
 
 #if defined(CONFIG_EV64260)
 #include <platforms/ev64260.h>
-#elif defined(CONFIG_DMV182)
-#include <platforms/dmv182_serial.h>
 #elif defined(CONFIG_GEMINI)
 #include <platforms/gemini_serial.h>
 #elif defined(CONFIG_POWERPMC250)

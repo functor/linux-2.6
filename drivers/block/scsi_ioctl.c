@@ -90,7 +90,7 @@ static int sg_set_reserved_size(request_queue_t *q, int __user *p)
 	if (size < 0)
 		return -EINVAL;
 	if (size > (q->max_sectors << 9))
-		return -EINVAL;
+		size = q->max_sectors << 9;
 
 	q->sg_reserved_size = size;
 	return 0;
@@ -170,6 +170,13 @@ static int sg_io(request_queue_t *q, struct gendisk *bd_disk,
 	rq->flags |= REQ_BLOCK_PC;
 	bio = rq->bio;
 
+	/*
+	 * bounce this after holding a reference to the original bio, it's
+	 * needed for proper unmapping
+	 */
+	if (rq->bio)
+		blk_queue_bounce(q, &rq->bio);
+
 	rq->timeout = (hdr->timeout * HZ) / 1000;
 	if (!rq->timeout)
 		rq->timeout = q->sg_timeout;
@@ -204,7 +211,7 @@ static int sg_io(request_queue_t *q, struct gendisk *bd_disk,
 			hdr->sb_len_wr = len;
 	}
 
-	if (blk_rq_unmap_user(rq, hdr->dxferp, bio, hdr->dxfer_len))
+	if (blk_rq_unmap_user(rq, bio, hdr->dxfer_len))
 		return -EFAULT;
 
 	/* may not have succeeded, but output values written to control

@@ -86,8 +86,8 @@
 /* PPC CPM type number */
 #define PORT_CPM        58
 
-/* Marvell MPSC for PPC & MIPS */
-#define PORT_MPSC	59
+/* MPC52xx type numbers */
+#define PORT_MPC52xx	59
 
 #ifdef __KERNEL__
 

@@ -394,7 +394,7 @@ void print_req (tux_req_t *req)
 		sk = req->sock->sk;
 		printk("... sock %p, sk %p, sk->state: %d, sk->err: %d\n", req->sock, sk, sk->sk_state, sk->sk_err);
 		printk("... write_queue: %d, receive_queue: %d, error_queue: %d, keepalive: %d, status: %d\n", !skb_queue_empty(&sk->sk_write_queue), !skb_queue_empty(&sk->sk_receive_queue), !skb_queue_empty(&sk->sk_error_queue), req->keep_alive, req->status);
-		printk("...tp->send_head: %p\n", tcp_sk(sk)->send_head);
+		printk("...tp->send_head: %p\n", sk->sk_send_head);
 		printk("...tp->snd_una: %08x\n", tcp_sk(sk)->snd_una);
 		printk("...tp->snd_nxt: %08x\n", tcp_sk(sk)->snd_nxt);
 		printk("...tp->packets_out: %08x\n", tcp_sk(sk)->packets_out);

@@ -1121,15 +1121,9 @@ static int shmem_populate(struct vm_area_struct *vma,
 				return err;
 			}
 		} else if (nonblock) {
-	    		/*
-		 	 * If a nonlinear mapping then store the file page
-			 * offset in the pte.
-			 */
-			if (pgoff != linear_page_index(vma, addr)) {
-	    			err = install_file_pte(mm, vma, addr, pgoff, prot);
-				if (err)
-		    			return err;
-			}
+    			err = install_file_pte(mm, vma, addr, pgoff, prot);
+			if (err)
+	    			return err;
 		}
 
 		len -= PAGE_SIZE;
@@ -1157,41 +1151,24 @@ shmem_get_policy(struct vm_area_struct *vma, unsigned long addr)
 }
 #endif
 
-/* Protects current->user->locked_shm from concurrent access */
-static spinlock_t shmem_lock_user = SPIN_LOCK_UNLOCKED;
-
-int shmem_lock(struct file *file, int lock, struct user_struct * user)
+int shmem_lock(struct file *file, int lock, struct user_struct *user)
 {
 	struct inode *inode = file->f_dentry->d_inode;
 	struct shmem_inode_info *info = SHMEM_I(inode);
-	unsigned long lock_limit, locked;
 	int retval = -ENOMEM;
 
 	spin_lock(&info->lock);
-	spin_lock(&shmem_lock_user);
 	if (lock && !(info->flags & VM_LOCKED)) {
-		locked = inode->i_size >> PAGE_SHIFT;
-		locked += user->locked_shm;
-		lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
-		lock_limit >>= PAGE_SHIFT;
-		if ((locked > lock_limit) && !capable(CAP_IPC_LOCK))
+		if (!user_shm_lock(inode->i_size, user))
 			goto out_nomem;
-		/* for this branch user == current->user so it won't go away under us */
-		atomic_inc(&user->__count);
-		user->locked_shm = locked;
+		info->flags |= VM_LOCKED;
 	}
 	if (!lock && (info->flags & VM_LOCKED) && user) {
-		locked = inode->i_size >> PAGE_SHIFT;
-		user->locked_shm -= locked;
-		free_uid(user);
-	}
-	if (lock)
-		info->flags |= VM_LOCKED;
-	else
+		user_shm_unlock(inode->i_size, user);
 		info->flags &= ~VM_LOCKED;
+	}
 	retval = 0;
 out_nomem:
-	spin_unlock(&shmem_lock_user);
 	spin_unlock(&info->lock);
 	return retval;
 }

@@ -1224,6 +1224,26 @@ On the  other  hand,  enabling this feature can cause you to run out of memory
 and thrash the system to death, so large and/or important servers will want to
 set this value to 0.
 
+nr_hugepages and hugetlb_shm_group
+----------------------------------
+
+nr_hugepages configures number of hugetlb page reserved for the system.
+
+hugetlb_shm_group contains group id that is allowed to create SysV shared
+memory segment using hugetlb page.
+
+laptop_mode
+-----------
+
+laptop_mode is a knob that controls "laptop mode". All the things that are
+controlled by this knob are discussed in Documentation/laptop-mode.txt.
+
+block_dump
+----------
+
+block_dump enables block I/O debugging when set to a nonzero value. More
+information on block I/O debugging is in Documentation/laptop-mode.txt.
+
 2.5 /proc/sys/dev - Device specific parameters
 ----------------------------------------------
 
@@ -1865,10 +1885,3 @@ need to  recompile  the kernel, or even to reboot the system. The files in the
 command to write value into these files, thereby changing the default settings
 of the kernel.
 ------------------------------------------------------------------------------
-
-
-
-
-
-
-

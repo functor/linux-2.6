@@ -832,7 +832,15 @@ _GLOBAL(sys_call_table32)
 	.llong .compat_sys_sched_setaffinity
 	.llong .compat_sys_sched_getaffinity
 	.llong .sys_ni_syscall
-	.llong .sys_ni_syscall		/* 225 - reserved for tux */
+#ifdef CONFIG_TUX
+        .llong .__sys_tux
+#else
+# ifdef CONFIG_TUX_MODULE
+        .llong .sys_tux
+# else
+	.llong .sys_ni_syscall
+# endif
+#endif
 	.llong .sys32_sendfile64
 	.llong .compat_sys_io_setup
 	.llong .sys_io_destroy
@@ -1104,7 +1112,15 @@ _GLOBAL(sys_call_table)
 	.llong .sys_sched_setaffinity
 	.llong .sys_sched_getaffinity
 	.llong .sys_ni_syscall
-	.llong .sys_ni_syscall		/* 225 - reserved for tux */
+#ifdef CONFIG_TUX
+        .llong .__sys_tux
+#else
+# ifdef CONFIG_TUX_MODULE
+        .llong .sys_tux
+# else
+	.llong .sys_ni_syscall
+# endif
+#endif
 	.llong .sys_ni_syscall		/* 32bit only sendfile64 */
 	.llong .sys_io_setup
 	.llong .sys_io_destroy

@@ -292,6 +292,7 @@
 
 #define NR_syscalls 284
 
+#ifndef __KERNEL_SYSCALLS_NO_ERRNO__
 /* user-visible error numbers are in the range -1 - -124: see <asm-i386/errno.h> */
 
 #define __syscall_return(type, res) \
@@ -302,6 +303,10 @@ do { \
 	} \
 	return (type) (res); \
 } while (0)
+
+#else
+# define __syscall_return(type, res) return (type) (res)
+#endif
 
 /* XXX - _foo needs to be __foo, while __NR_bar could be _NR_bar. */
 #define _syscall0(type,name) \
@@ -425,15 +430,7 @@ __syscall_return(type,__res); \
  * won't be any messing with the stack from main(), but we define
  * some others too.
  */
-static inline _syscall0(pid_t,setsid)
-static inline _syscall3(int,write,int,fd,const char *,buf,off_t,count)
-static inline _syscall3(int,read,int,fd,char *,buf,off_t,count)
-static inline _syscall3(off_t,lseek,int,fd,off_t,offset,int,count)
-static inline _syscall1(int,dup,int,fd)
 static inline _syscall3(int,execve,const char *,file,char **,argv,char **,envp)
-static inline _syscall3(int,open,const char *,file,int,flag,int,mode)
-static inline _syscall1(int,close,int,fd)
-static inline _syscall3(pid_t,waitpid,pid_t,pid,int *,wait_stat,int,options)
 
 asmlinkage int sys_modify_ldt(int func, void __user *ptr, unsigned long bytecount);
 asmlinkage long sys_mmap2(unsigned long addr, unsigned long len,

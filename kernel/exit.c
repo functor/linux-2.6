@@ -823,6 +823,13 @@ asmlinkage NORET_TYPE void do_exit(long code)
 	}
 
 	acct_process(code);
+	if (current->tux_info) {
+#ifdef CONFIG_TUX_DEBUG
+		printk("Possibly unexpected TUX-thread exit(%ld) at %p?\n",
+			code, __builtin_return_address(0));
+#endif
+		current->tux_exit();
+	}
 	__exit_mm(tsk);
 
 	exit_sem(tsk);
@@ -1020,20 +1027,17 @@ static int wait_task_zombie(task_t *p, unsigned int __user *stat_addr, struct ru
 		if (p->real_parent != p->parent) {
 			__ptrace_unlink(p);
 			p->state = TASK_ZOMBIE;
-			/* If this is a detached thread, this is where it goes away.  */
-			if (p->exit_signal == -1) {
-				/* release_task takes the lock itself.  */
-				write_unlock_irq(&tasklist_lock);
-				release_task (p);
-			}
-			else {
+			/*
+			 * If this is not a detached task, notify the parent.  If it's
+			 * still not detached after that, don't release it now.
+			 */
+			if (p->exit_signal != -1) {
 				do_notify_parent(p, p->exit_signal);
-				write_unlock_irq(&tasklist_lock);
+				if (p->exit_signal != -1)
+					p = NULL;
 			}
-			p = NULL;
 		}
-		else
-			write_unlock_irq(&tasklist_lock);
+		write_unlock_irq(&tasklist_lock);
 	}
 	if (p != NULL)
 		release_task(p);

@@ -76,7 +76,7 @@ __initcall(sysenter_setup);
 
 extern void SYSENTER_RETURN_OFFSET;
 
-unsigned int vdso_enabled = 1;
+unsigned int vdso_enabled = 0;
 
 void map_vsyscall(void)
 {

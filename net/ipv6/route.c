@@ -584,7 +584,24 @@ static void ip6_rt_update_pmtu(struct dst_entry *dst, u32 mtu)
 /* Protected by rt6_lock.  */
 static struct dst_entry *ndisc_dst_gc_list;
 static int ipv6_get_mtu(struct net_device *dev);
-static inline unsigned int ipv6_advmss(unsigned int mtu);
+
+static inline unsigned int ipv6_advmss(unsigned int mtu)
+{
+	mtu -= sizeof(struct ipv6hdr) + sizeof(struct tcphdr);
+
+	if (mtu < ip6_rt_min_advmss)
+		mtu = ip6_rt_min_advmss;
+
+	/*
+	 * Maximal non-jumbo IPv6 payload is IPV6_MAXPLEN and 
+	 * corresponding MSS is IPV6_MAXPLEN - tcp_header_size. 
+	 * IPV6_MAXPLEN is also valid and means: "any MSS, 
+	 * rely only on pmtu discovery"
+	 */
+	if (mtu > IPV6_MAXPLEN - sizeof(struct tcphdr))
+		mtu = IPV6_MAXPLEN;
+	return mtu;
+}
 
 struct dst_entry *ndisc_dst_alloc(struct net_device *dev, 
 				  struct neighbour *neigh,
@@ -689,24 +706,6 @@ static int ipv6_get_mtu(struct net_device *dev)
 		mtu = idev->cnf.mtu6;
 		in6_dev_put(idev);
 	}
-	return mtu;
-}
-
-static inline unsigned int ipv6_advmss(unsigned int mtu)
-{
-	mtu -= sizeof(struct ipv6hdr) + sizeof(struct tcphdr);
-
-	if (mtu < ip6_rt_min_advmss)
-		mtu = ip6_rt_min_advmss;
-
-	/*
-	 * Maximal non-jumbo IPv6 payload is IPV6_MAXPLEN and 
-	 * corresponding MSS is IPV6_MAXPLEN - tcp_header_size. 
-	 * IPV6_MAXPLEN is also valid and means: "any MSS, 
-	 * rely only on pmtu discovery"
-	 */
-	if (mtu > IPV6_MAXPLEN - sizeof(struct tcphdr))
-		mtu = IPV6_MAXPLEN;
 	return mtu;
 }
 
@@ -1292,7 +1291,7 @@ int ipv6_route_ioctl(unsigned int cmd, void __user *arg)
 
 int ip6_pkt_discard(struct sk_buff *skb)
 {
-	IP6_INC_STATS(OutNoRoutes);
+	IP6_INC_STATS(IPSTATS_MIB_OUTNOROUTES);
 	icmpv6_send(skb, ICMPV6_DEST_UNREACH, ICMPV6_NOROUTE, 0, skb->dev);
 	kfree_skb(skb);
 	return 0;
@@ -1925,10 +1924,10 @@ static int flush_delay;
 
 static
 int ipv6_sysctl_rtcache_flush(ctl_table *ctl, int write, struct file * filp,
-			      void __user *buffer, size_t *lenp)
+			      void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	if (write) {
-		proc_dointvec(ctl, write, filp, buffer, lenp);
+		proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
 		if (flush_delay < 0)
 			flush_delay = 0;
 		fib6_run_gc((unsigned long)flush_delay);

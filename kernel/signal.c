@@ -417,6 +417,7 @@ flush_signal_handlers(struct task_struct *t, int force_default)
 	}
 }
 
+EXPORT_SYMBOL_GPL(flush_signal_handlers);
 
 /* Notify the system that a driver wants to block all signals for this
  * process, and wants to be notified if any signals at all were to be

@@ -53,6 +53,4 @@ static inline void pte_free(struct page *pte)
 
 #define check_pgt_cache()	do { } while (0)
 
-#define HAVE_ARCH_UNMAPPED_AREA 1
-
 #endif /* _I386_PGALLOC_H */

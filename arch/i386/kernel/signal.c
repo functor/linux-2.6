@@ -336,7 +336,6 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs * regs, size_t frame_size)
    See vsyscall-sigreturn.S.  */
 extern void __user __kernel_sigreturn;
 extern void __user __kernel_rt_sigreturn;
-extern SYSENTER_RETURN;
 
 static void setup_frame(int sig, struct k_sigaction *ka,
 			sigset_t *set, struct pt_regs * regs)

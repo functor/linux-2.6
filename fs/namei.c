@@ -658,9 +658,11 @@ int fastcall link_path_walk(const char * name, struct nameidata *nd)
 {
 	struct path next;
 	struct inode *inode;
-	int err;
+	int err, atomic;
 	unsigned int lookup_flags = nd->flags;
-	
+
+	atomic = (lookup_flags & LOOKUP_ATOMIC);
+
 	while (*name=='/')
 		name++;
 	if (!*name)
@@ -728,6 +730,9 @@ int fastcall link_path_walk(const char * name, struct nameidata *nd)
 			if (err < 0)
 				break;
 		}
+		err = -EWOULDBLOCKIO;
+		if (atomic)
+			break;
 		nd->flags |= LOOKUP_CONTINUE;
 		/* This does the actual lookups.. */
 		err = do_lookup(nd, &this, &next);
@@ -792,6 +797,9 @@ last_component:
 			if (err < 0)
 				break;
 		}
+		err = -EWOULDBLOCKIO;
+		if (atomic)
+			break;
 		err = do_lookup(nd, &this, &next);
 		if (err)
 			break;
@@ -1158,6 +1166,8 @@ static inline int lookup_flags(unsigned int f)
 	
 	if (f & O_DIRECTORY)
 		retval |= LOOKUP_DIRECTORY;
+	if (f & O_ATOMICLOOKUP)
+		retval |= LOOKUP_ATOMIC;
 
 	return retval;
 }

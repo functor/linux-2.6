@@ -600,7 +600,7 @@ pfm_do_munmap(struct mm_struct *mm, unsigned long addr, size_t len, int acct)
 static inline unsigned long 
 pfm_get_unmapped_area(struct file *file, unsigned long addr, unsigned long len, unsigned long pgoff, unsigned long flags, unsigned long exec)
 {
-	return get_unmapped_area(file, addr, len, pgoff, flags, 0);
+	return get_unmapped_area(file, addr, len, pgoff, flags);
 }
 
 
@@ -1512,13 +1512,6 @@ exit_pfm_fs(void)
 	mntput(pfmfs_mnt);
 }
 
-static loff_t
-pfm_lseek(struct file *file, loff_t offset, int whence)
-{
-	DPRINT(("pfm_lseek called\n"));
-	return -ESPIPE;
-}
-
 static ssize_t
 pfm_read(struct file *filp, char *buf, size_t size, loff_t *ppos)
 {
@@ -1545,10 +1538,6 @@ pfm_read(struct file *filp, char *buf, size_t size, loff_t *ppos)
 		DPRINT(("message is too small ctx=%p (>=%ld)\n", ctx, sizeof(pfm_msg_t)));
 		return -EINVAL;
 	}
-	/*
-	 * seeks are not allowed on message queues
-	 */
-	if (ppos != &filp->f_pos) return -ESPIPE;
 
 	PROTECT_CTX(ctx, flags);
 
@@ -2141,7 +2130,7 @@ pfm_no_open(struct inode *irrelevant, struct file *dontcare)
 
 
 static struct file_operations pfm_file_ops = {
-	.llseek   = pfm_lseek,
+	.llseek   = no_llseek,
 	.read     = pfm_read,
 	.write    = pfm_write,
 	.poll     = pfm_poll,
@@ -4729,6 +4718,11 @@ recheck:
 	if (task == current || ctx->ctx_fl_system) return 0;
 
 	/*
+	 * if context is UNLOADED we are safe to go
+	 */
+	if (state == PFM_CTX_UNLOADED) return 0;
+
+	/*
 	 * no command can operate on a zombie context
 	 */
 	if (state == PFM_CTX_ZOMBIE) {
@@ -4737,12 +4731,9 @@ recheck:
 	}
 
 	/*
-	 * if context is UNLOADED, MASKED we are safe to go
-	 */
-	if (state != PFM_CTX_LOADED) return 0;
-
-	/*
-	 * context is LOADED, we must make sure the task is stopped
+	 * context is LOADED or MASKED. Some commands may need to have 
+	 * the task stopped.
+	 *
 	 * We could lift this restriction for UP but it would mean that
 	 * the user has no guarantee the task would not run between
 	 * two successive calls to perfmonctl(). That's probably OK.

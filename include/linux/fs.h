@@ -75,6 +75,11 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 #define FMODE_READ 1
 #define FMODE_WRITE 2
 
+/* Internal kernel extensions */
+#define FMODE_LSEEK	4
+#define FMODE_PREAD	8
+#define FMODE_PWRITE	FMODE_PREAD	/* These go hand in hand */
+
 #define RW_MASK		1
 #define RWA_MASK	2
 #define READ 0
@@ -356,6 +361,7 @@ struct block_device {
 	struct block_device *	bd_contains;
 	unsigned		bd_block_size;
 	struct hd_struct *	bd_part;
+	/* number of times partitions within this device have been opened. */
 	unsigned		bd_part_count;
 	int			bd_invalidated;
 	struct gendisk *	bd_disk;
@@ -1416,7 +1422,7 @@ ssize_t generic_file_write_nolock(struct file *file, const struct iovec *iov,
 extern ssize_t generic_file_sendfile(struct file *, loff_t *, size_t, read_actor_t, void *);
 extern void do_generic_mapping_read(struct address_space *mapping,
 				    struct file_ra_state *, struct file *,
-				    loff_t *, read_descriptor_t *, read_actor_t);
+				    loff_t *, read_descriptor_t *, read_actor_t, int);
 extern void
 file_ra_state_init(struct file_ra_state *ra, struct address_space *mapping);
 extern ssize_t generic_file_direct_IO(int rw, struct kiocb *iocb,
@@ -1429,17 +1435,19 @@ extern loff_t no_llseek(struct file *file, loff_t offset, int origin);
 extern loff_t generic_file_llseek(struct file *file, loff_t offset, int origin);
 extern loff_t remote_llseek(struct file *file, loff_t offset, int origin);
 extern int generic_file_open(struct inode * inode, struct file * filp);
+extern int nonseekable_open(struct inode * inode, struct file * filp);
 
 static inline void do_generic_file_read(struct file * filp, loff_t *ppos,
 					read_descriptor_t * desc,
-					read_actor_t actor)
+					read_actor_t actor, int nonblock)
 {
 	do_generic_mapping_read(filp->f_mapping,
 				&filp->f_ra,
 				filp,
 				ppos,
 				desc,
-				actor);
+				actor,
+				nonblock);
 }
 
 ssize_t __blockdev_direct_IO(int rw, struct kiocb *iocb, struct inode *inode,
@@ -1525,6 +1533,8 @@ struct tree_descr { char *name; struct file_operations *ops; int mode; };
 extern int simple_fill_super(struct super_block *, int, struct tree_descr *);
 extern int simple_pin_fs(char *name, struct vfsmount **mount, int *count);
 extern void simple_release_fs(struct vfsmount **mount, int *count);
+
+extern ssize_t simple_read_from_buffer(void __user *, size_t, loff_t *, const void *, size_t);
 
 extern int inode_change_ok(struct inode *, struct iattr *);
 extern int __must_check inode_setattr(struct inode *, struct iattr *);
