@@ -83,7 +83,8 @@ AutoReqProv: no
 # List the packages used during the kernel build
 #
 BuildPreReq: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
-BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg, kernel-utils >= 1:2.4-12.1.142
+BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg
+#BuildPreReq: kernel-utils >= 1:2.4-12.1.142
 BuildRequires: gcc >= 2.96-98, binutils >= 2.12, redhat-rpm-config
 BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 BuildArchitectures: i686
