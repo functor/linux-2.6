@@ -398,6 +398,24 @@ int set_current_groups(struct group_info *group_info);
 struct audit_context;		/* See audit.c */
 struct mempolicy;
 
+#ifdef CONFIG_CKRM_CPU_SCHEDULE
+/**
+ * ckrm_cpu_demand_stat - used to track the cpu demand of a task/class
+ * @run: how much time it has been running since the counter started
+ * @total: total time since the counter started
+ * @last_sleep: the last time it sleeps, last_sleep = 0 when not sleeping
+ * @recalc_interval: how often do we recalculate the cpu_demand
+ * @cpu_demand: moving average of run/total
+ */
+struct ckrm_cpu_demand_stat {
+	unsigned long long run;
+	unsigned long long total;
+	unsigned long long last_sleep;
+	unsigned long long recalc_interval;
+	unsigned long cpu_demand; /*estimated cpu demand */
+};
+#endif
+
 struct task_struct {
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	struct thread_info *thread_info;
@@ -489,7 +507,6 @@ struct task_struct {
 /* signal handlers */
 	struct signal_struct *signal;
 	struct sighand_struct *sighand;
-
 	sigset_t blocked, real_blocked;
 	struct sigpending pending;
 
@@ -548,7 +565,9 @@ struct task_struct {
 	struct list_head        taskclass_link;
 #ifdef CONFIG_CKRM_CPU_SCHEDULE
         struct ckrm_cpu_class *cpu_class;
-#endif
+	//track cpu demand of this task
+	struct ckrm_cpu_demand_stat demand_stat;
+#endif //CONFIG_CKRM_CPU_SCHEDULE
 #endif // CONFIG_CKRM_TYPE_TASKCLASS
 #endif // CONFIG_CKRM
 
@@ -874,6 +893,7 @@ static inline int capable(int cap)
 }
 #endif
 
+
 /*
  * Routines for handling mm_structs
  */
@@ -1007,7 +1027,7 @@ static inline struct mm_struct * get_task_mm(struct task_struct * task)
 
 	return mm;
 }
-
+ 
 /* set thread flags in other task's structures
  * - see asm/thread_info.h for TIF_xxxx flags available
  */

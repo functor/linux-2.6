@@ -50,11 +50,7 @@
 #include <asm/setup.h>
 
 #include <linux/ckrm.h>
-#ifdef CONFIG_CKRM_CPU_SCHEDULE
-int __init init_ckrm_sched_res(void);
-#else
-#define init_ckrm_sched_res() ((void)0)
-#endif
+#include <linux/ckrm_sched.h>
 
 /*
  * This is one of the first .c files built. Error out early
@@ -466,6 +462,7 @@ asmlinkage void __init start_kernel(void)
 	 * printk() and can access its per-cpu storage.
 	 */
 	smp_prepare_boot_cpu();
+
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
 	 * timer interrupt). Full topology setup happens at smp_init()

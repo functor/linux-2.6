@@ -1374,28 +1374,32 @@ int reclassify_pid(int pid)
 int set_tasktag(int pid, char *tag)
 {
 	char *tp;
+	int rc = 0;
 	struct task_struct *tsk;
 	struct rbce_private_data *pdata;
+	int len;
 
 	if (!tag) {
 		return -EINVAL;
 	}
-
-	if ((tsk = find_task_by_pid(pid)) == NULL) {
-		return -EINVAL;
-	}
-
-	tp = kmalloc(strlen(tag) + 1, GFP_ATOMIC);
-
+	len = strlen(tag) + 1;
+	tp = kmalloc(len, GFP_ATOMIC);
 	if (!tp) {
 		return -ENOMEM;
+	}
+	strncpy(tp,tag,len);
+
+	read_lock(&tasklist_lock);
+	if ((tsk = find_task_by_pid(pid)) == NULL) {
+		rc = -EINVAL;
+		goto out;
 	}
 
 	if (unlikely(!RBCE_DATA(tsk))) {
 		RBCE_DATAP(tsk) = create_private_data(NULL, 0);
 		if (!RBCE_DATA(tsk)) {
-			kfree(tp);
-			return -ENOMEM;
+			rc = -ENOMEM;
+			goto out;
 		}
 	}
 	pdata = RBCE_DATA(tsk);
@@ -1403,10 +1407,14 @@ int set_tasktag(int pid, char *tag)
 		kfree(pdata->app_tag);
 	}
 	pdata->app_tag = tp;
-	strcpy(pdata->app_tag, tag);
-	rbce_ckrm_reclassify(pid);
 
-	return 0;
+ out:
+	read_unlock(&tasklist_lock);
+	if (rc != 0) 
+		kfree(tp);
+	else 
+		rbce_ckrm_reclassify(pid);
+	return rc;
 }
 
 /*====================== Classification Functions =======================*/
