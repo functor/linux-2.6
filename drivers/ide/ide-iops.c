@@ -107,62 +107,130 @@ void default_hwif_iops (ide_hwif_t *hwif)
 EXPORT_SYMBOL(default_hwif_iops);
 
 /*
+ *	Interface removed
+ */
+
+static u8 ide_no_inb(unsigned long port)
+{
+	return 0xFF;
+}
+
+static u16 ide_no_inw (unsigned long port)
+{
+	return 0xFFFF;
+}
+
+static void ide_no_insw (unsigned long port, void *addr, u32 count)
+{
+}
+
+static u32 ide_no_inl (unsigned long port)
+{
+	return 0xFFFFFFFF;
+}
+
+static void ide_no_insl (unsigned long port, void *addr, u32 count)
+{
+}
+
+static void ide_no_outb (u8 val, unsigned long port)
+{
+}
+
+static void ide_no_outbsync (ide_drive_t *drive, u8 addr, unsigned long port)
+{
+}
+
+static void ide_no_outw (u16 val, unsigned long port)
+{
+}
+
+static void ide_no_outsw (unsigned long port, void *addr, u32 count)
+{
+}
+
+static void ide_no_outl (u32 val, unsigned long port)
+{
+}
+
+static void ide_no_outsl (unsigned long port, void *addr, u32 count)
+{
+}
+
+void removed_hwif_iops (ide_hwif_t *hwif)
+{
+	hwif->OUTB	= ide_no_outb;
+	hwif->OUTBSYNC	= ide_no_outbsync;
+	hwif->OUTW	= ide_no_outw;
+	hwif->OUTL	= ide_no_outl;
+	hwif->OUTSW	= ide_no_outsw;
+	hwif->OUTSL	= ide_no_outsl;
+	hwif->INB	= ide_no_inb;
+	hwif->INW	= ide_no_inw;
+	hwif->INL	= ide_no_inl;
+	hwif->INSW	= ide_no_insw;
+	hwif->INSL	= ide_no_insl;
+}
+
+EXPORT_SYMBOL(removed_hwif_iops);
+
+/*
  *	MMIO operations, typically used for SATA controllers
  */
 
 static u8 ide_mm_inb (unsigned long port)
 {
-	return (u8) readb(port);
+	return (u8) readb((void __iomem *) port);
 }
 
 static u16 ide_mm_inw (unsigned long port)
 {
-	return (u16) readw(port);
+	return (u16) readw((void __iomem *) port);
 }
 
 static void ide_mm_insw (unsigned long port, void *addr, u32 count)
 {
-	__ide_mm_insw(port, addr, count);
+	__ide_mm_insw((void __iomem *) port, addr, count);
 }
 
 static u32 ide_mm_inl (unsigned long port)
 {
-	return (u32) readl(port);
+	return (u32) readl((void __iomem *) port);
 }
 
 static void ide_mm_insl (unsigned long port, void *addr, u32 count)
 {
-	__ide_mm_insl(port, addr, count);
+	__ide_mm_insl((void __iomem *) port, addr, count);
 }
 
 static void ide_mm_outb (u8 value, unsigned long port)
 {
-	writeb(value, port);
+	writeb(value, (void __iomem *) port);
 }
 
 static void ide_mm_outbsync (ide_drive_t *drive, u8 value, unsigned long port)
 {
-	writeb(value, port);	
+	writeb(value, (void __iomem *) port);
 }
 
 static void ide_mm_outw (u16 value, unsigned long port)
 {
-	writew(value, port);
+	writew(value, (void __iomem *) port);
 }
 
 static void ide_mm_outsw (unsigned long port, void *addr, u32 count)
 {
-	__ide_mm_outsw(port, addr, count);
+	__ide_mm_outsw((void __iomem *) port, addr, count);
 }
 
 static void ide_mm_outl (u32 value, unsigned long port)
 {
-	writel(value, port);
+	writel(value, (void __iomem *) port);
 }
 
 static void ide_mm_outsl (unsigned long port, void *addr, u32 count)
 {
-	__ide_mm_outsl(port, addr, count);
+	__ide_mm_outsl((void __iomem *) port, addr, count);
 }
 
 void default_hwif_mmiops (ide_hwif_t *hwif)
@@ -221,23 +289,17 @@ void SELECT_INTERRUPT (ide_drive_t *drive)
 		HWIF(drive)->OUTB(drive->ctl|2, IDE_CONTROL_REG);
 }
 
-EXPORT_SYMBOL(SELECT_INTERRUPT);
-
 void SELECT_MASK (ide_drive_t *drive, int mask)
 {
 	if (HWIF(drive)->maskproc)
 		HWIF(drive)->maskproc(drive, mask);
 }
 
-EXPORT_SYMBOL(SELECT_MASK);
-
 void QUIRK_LIST (ide_drive_t *drive)
 {
 	if (HWIF(drive)->quirkproc)
 		drive->quirk_list = HWIF(drive)->quirkproc(drive);
 }
-
-EXPORT_SYMBOL(QUIRK_LIST);
 
 /*
  * Some localbus EIDE interfaces require a special access sequence
@@ -252,8 +314,6 @@ void ata_vlb_sync (ide_drive_t *drive, unsigned long port)
 	(void) HWIF(drive)->INB(port);
 	(void) HWIF(drive)->INB(port);
 }
-
-EXPORT_SYMBOL(ata_vlb_sync);
 
 /*
  * This is used for most PIO data transfers *from* the IDE interface
@@ -277,8 +337,6 @@ void ata_input_data (ide_drive_t *drive, void *buffer, u32 wcount)
 	}
 }
 
-EXPORT_SYMBOL(ata_input_data);
-
 /*
  * This is used for most PIO data transfers *to* the IDE interface
  */
@@ -300,8 +358,6 @@ void ata_output_data (ide_drive_t *drive, void *buffer, u32 wcount)
 		hwif->OUTSW(IDE_DATA_REG, buffer, wcount<<1);
 	}
 }
-
-EXPORT_SYMBOL(ata_output_data);
 
 /*
  * The following routines are mainly used by the ATAPI drivers.
@@ -1096,7 +1152,6 @@ static ide_startstop_t reset_pollfunc (ide_drive_t *drive)
 			drive->failures = 0;
 		} else {
 			drive->failures++;
-#if FANCY_STATUS_DUMPS
 			printk("master: ");
 			switch (tmp & 0x7f) {
 				case 1: printk("passed");
@@ -1114,9 +1169,6 @@ static ide_startstop_t reset_pollfunc (ide_drive_t *drive)
 			if (tmp & 0x80)
 				printk("; slave: failed");
 			printk("\n");
-#else
-			printk("failed\n");
-#endif /* FANCY_STATUS_DUMPS */
 		}
 	}
 	hwgroup->poll_timeout = 0;	/* done polling */
@@ -1192,7 +1244,8 @@ static ide_startstop_t do_reset1 (ide_drive_t *drive, int do_not_try_atapi)
 		pre_reset(drive);
 		SELECT_DRIVE(drive);
 		udelay (20);
-		hwif->OUTB(WIN_SRST, IDE_COMMAND_REG);
+		hwif->OUTBSYNC(drive, WIN_SRST, IDE_COMMAND_REG);
+		ndelay(400);
 		hwgroup->poll_timeout = jiffies + WAIT_WORSTCASE;
 		__ide_set_handler(drive, &atapi_reset_pollfunc, HZ/20, NULL);
 		spin_unlock_irqrestore(&ide_lock, flags);

@@ -103,7 +103,7 @@ static int connect_to_switch(struct daemon_data *pri)
 
 	n = os_read_file(pri->control, sun, sizeof(*sun));
 	if(n != sizeof(*sun)){
-		printk("daemon_open : read of data socket failed, err = %d\n", 
+		printk("daemon_open : read of data socket failed, err = %d\n",
 		       -n);
 		err = -ENOTCONN;
 		goto out_close;		

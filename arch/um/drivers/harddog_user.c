@@ -123,7 +123,7 @@ int ping_watchdog(int fd)
 	n = os_write_file(fd, &c, sizeof(c));
 	if(n != sizeof(c)){
 		printk("ping_watchdog - write failed, err = %d\n", -n);
-		if(n < 0) 
+		if(n < 0)
 			return(n);
 		return(-EIO);
 	}

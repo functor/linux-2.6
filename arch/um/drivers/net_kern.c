@@ -129,6 +129,13 @@ static int uml_net_open(struct net_device *dev)
 	spin_lock(&opened_lock);
 	list_add(&lp->list, &opened);
 	spin_unlock(&opened_lock);
+
+	/* clear buffer - it can happen that the host side of the interface
+	 * is full when we get here.  In this case, new data is never queued,
+	 * SIGIOs never arrive, and the net never works.
+	 */
+	while((err = uml_net_rx(dev)) > 0) ;
+
  out:
 	spin_unlock(&lp->lock);
 	return(err);
@@ -361,7 +368,7 @@ static int eth_configure(int n, void *init, char *mac,
 	 * what it already has.
 	 */
 	save = lp->user[0];
-	*lp = ((struct uml_net_private) 
+	*lp = ((struct uml_net_private)
 		{ .list  		= LIST_HEAD_INIT(lp->list),
 		  .lock 		= SPIN_LOCK_UNLOCKED,
 		  .dev 			= dev,

@@ -133,7 +133,7 @@ static int tuntap_open(void *data)
 	int err, fds[2], len, used;
 
 	err = tap_open_common(pri->dev, pri->gate_addr);
-	if(err < 0) 
+	if(err < 0)
 		return(err);
 
 	if(pri->fixed_config){

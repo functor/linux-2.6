@@ -9,6 +9,7 @@
 #include <linux/mm.h>
 #include <linux/highmem.h>
 #include <linux/blkdev.h>
+#include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/mmx.h>
 
@@ -77,7 +78,7 @@ do {									   \
  * and returns @count.
  */
 long
-__direct_strncpy_from_user(char *dst, const char __user *src, long count)
+__strncpy_from_user(char *dst, const char __user *src, long count)
 {
 	long res;
 	__do_strncpy_from_user(dst, src, count, res);
@@ -103,7 +104,7 @@ __direct_strncpy_from_user(char *dst, const char __user *src, long count)
  * and returns @count.
  */
 long
-direct_strncpy_from_user(char *dst, const char __user *src, long count)
+strncpy_from_user(char *dst, const char __user *src, long count)
 {
 	long res = -EFAULT;
 	if (access_ok(VERIFY_READ, src, 1))
@@ -149,7 +150,7 @@ do {									\
  * On success, this will be zero.
  */
 unsigned long
-direct_clear_user(void __user *to, unsigned long n)
+clear_user(void __user *to, unsigned long n)
 {
 	might_sleep();
 	if (access_ok(VERIFY_WRITE, to, n))
@@ -169,7 +170,7 @@ direct_clear_user(void __user *to, unsigned long n)
  * On success, this will be zero.
  */
 unsigned long
-__direct_clear_user(void __user *to, unsigned long n)
+__clear_user(void __user *to, unsigned long n)
 {
 	__do_clear_user(to, n);
 	return n;
@@ -186,7 +187,7 @@ __direct_clear_user(void __user *to, unsigned long n)
  * On exception, returns 0.
  * If the string is too long, returns a value greater than @n.
  */
-long direct_strnlen_user(const char __user *s, long n)
+long strnlen_user(const char __user *s, long n)
 {
 	unsigned long mask = -__addr_ok(s);
 	unsigned long res, tmp;
@@ -569,7 +570,8 @@ survive:
 	return n;
 }
 
-unsigned long __copy_from_user_ll(void *to, const void __user *from, unsigned long n)
+unsigned long
+__copy_from_user_ll(void *to, const void __user *from, unsigned long n)
 {
 	if (movsl_is_ok(to, from, n))
 		__copy_user_zeroing(to, from, n);
@@ -578,3 +580,53 @@ unsigned long __copy_from_user_ll(void *to, const void __user *from, unsigned lo
 	return n;
 }
 
+/**
+ * copy_to_user: - Copy a block of data into user space.
+ * @to:   Destination address, in user space.
+ * @from: Source address, in kernel space.
+ * @n:    Number of bytes to copy.
+ *
+ * Context: User context only.  This function may sleep.
+ *
+ * Copy data from kernel space to user space.
+ *
+ * Returns number of bytes that could not be copied.
+ * On success, this will be zero.
+ */
+unsigned long
+copy_to_user(void __user *to, const void *from, unsigned long n)
+{
+	might_sleep();
+	if (access_ok(VERIFY_WRITE, to, n))
+		n = __copy_to_user(to, from, n);
+	return n;
+}
+EXPORT_SYMBOL(copy_to_user);
+
+/**
+ * copy_from_user: - Copy a block of data from user space.
+ * @to:   Destination address, in kernel space.
+ * @from: Source address, in user space.
+ * @n:    Number of bytes to copy.
+ *
+ * Context: User context only.  This function may sleep.
+ *
+ * Copy data from user space to kernel space.
+ *
+ * Returns number of bytes that could not be copied.
+ * On success, this will be zero.
+ *
+ * If some data could not be copied, this function will pad the copied
+ * data to the requested size using zero bytes.
+ */
+unsigned long
+copy_from_user(void *to, const void __user *from, unsigned long n)
+{
+	might_sleep();
+	if (access_ok(VERIFY_READ, from, n))
+		n = __copy_from_user(to, from, n);
+	else
+		memset(to, 0, n);
+	return n;
+}
+EXPORT_SYMBOL(copy_from_user);

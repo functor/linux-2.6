@@ -166,6 +166,13 @@ config BLK_DEV_IDECS
 	  Support for outboard IDE disks, tape drives, and CD-ROM drives
 	  connected through a  PCMCIA card.
 
+config BLK_DEV_DELKIN
+	tristate "Cardbus IDE support (Delkin/ASKA/Workbit)"
+	depends on PCMCIA && PCI
+	help
+	  Support for Delkin, ASKA, and Workbit Cardbus CompactFlash
+	  Adapters.  This may also work for similar SD and XD adapters.
+
 config BLK_DEV_IDECD
 	tristate "Include IDE/ATAPI CDROM support"
 	---help---
@@ -457,11 +464,6 @@ config IDEDMA_ONLYDISK
 
 	  Generally say N here.
 
-config BLK_DEV_ADMA
-	bool
-	depends on PCI && BLK_DEV_IDEPCI
-	default BLK_DEV_IDEDMA_PCI
-
 config BLK_DEV_AEC62XX
 	tristate "AEC62XX chipset support"
 	help
@@ -620,6 +622,12 @@ config BLK_DEV_IT8172
 	  Technology Express, Inc. ITE8172 SBC.  Vendor page at
 	  <http://www.ite.com.tw/ia/brief_it8172bsp.htm>; picture of the
 	  board at <http://www.mvista.com/partners/semiconductor/ite.html>.
+
+config BLK_DEV_IT8212
+	tristate "IT8212 IDE support"
+	help
+	  This driver adds support for the ITE 8212 IDE RAID controller in
+	  both RAID and pass-through mode. 
 
 config BLK_DEV_NS87415
 	tristate "NS87415 chipset support"
@@ -834,6 +842,13 @@ config BLK_DEV_IDE_RAPIDE
 	help
 	  Say Y here if you want to support the Yellowstone RapIDE controller
 	  manufactured for use with Acorn computers.
+
+config BLK_DEV_IDE_BAST
+	tristate "Simtec BAST / Thorcom VR1000 IDE support"
+	depends on ARM && (ARCH_BAST || MACH_VR100)
+	help
+	  Say Y here if you want to support the onboard IDE channels on the
+	  Simtec BAST or the Thorcom VR1000
 
 config BLK_DEV_GAYLE
 	bool "Amiga Gayle IDE interface support"

@@ -70,7 +70,7 @@ void fd_close(int fd, void *d)
 	if(data->raw && isatty(fd)){
 		CATCH_EINTR(err = tcsetattr(fd, TCSAFLUSH, &data->tt));
 		if(err)
-			printk("Failed to restore terminal state - " 
+			printk("Failed to restore terminal state - "
 			       "errno = %d\n", -err);
 		data->raw = 0;
 	}

@@ -193,6 +193,8 @@ static int __init log_buf_len_setup(char *str)
 	unsigned long size = memparse(str, &str);
 	unsigned long flags;
 
+	if (size)
+		size = roundup_pow_of_two(size);
 	if (size > log_buf_len) {
 		unsigned long start, dest_idx, offset;
 		char * new_log_buf;
@@ -384,20 +386,6 @@ asmlinkage long sys_syslog(int type, char __user * buf, int len)
 }
 
 /*
- * Netdump special routine. Don't print to global log_buf, just to the
- * actual console device(s).
- */
-static void netdump_call_console_drivers(const char *buf, unsigned long len)
-{
-	struct console *con;
-
-	for (con = console_drivers; con; con = con->next) {
-		if ((con->flags & CON_ENABLED) && con->write)
-			con->write(con, buf, len);
-	}
-}
-
-/*
  * Call the console drivers on a range of log_buf
  */
 static void __call_console_drivers(unsigned long start, unsigned long end)
@@ -529,6 +517,17 @@ static void zap_locks(void)
 asmlinkage int printk(const char *fmt, ...)
 {
 	va_list args;
+	int r;
+
+	va_start(args, fmt);
+	r = vprintk(fmt, args);
+	va_end(args);
+
+	return r;
+}
+
+asmlinkage int vprintk(const char *fmt, va_list args)
+{
 	unsigned long flags;
 	int printed_len;
 	char *p;
@@ -542,15 +541,7 @@ asmlinkage int printk(const char *fmt, ...)
 	spin_lock_irqsave(&logbuf_lock, flags);
 
 	/* Emit the output into the temporary buffer */
-	va_start(args, fmt);
 	printed_len = vscnprintf(printk_buf, sizeof(printk_buf), fmt, args);
-	va_end(args);
-
-	if (unlikely(netdump_mode)) {
-		netdump_call_console_drivers(printk_buf, printed_len);
-		spin_unlock_irqrestore(&logbuf_lock, flags);
-		goto out;
-	}
 
 	/*
 	 * Copy the output into log_buf.  If the caller didn't provide
@@ -602,6 +593,7 @@ out:
 	return printed_len;
 }
 EXPORT_SYMBOL(printk);
+EXPORT_SYMBOL(vprintk);
 
 /**
  * acquire_console_sem - lock the console system for exclusive use.

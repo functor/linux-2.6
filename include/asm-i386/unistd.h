@@ -289,10 +289,17 @@
 #define __NR_mq_notify		(__NR_mq_open+4)
 #define __NR_mq_getsetattr	(__NR_mq_open+5)
 #define __NR_sys_kexec_load	283
+#define __NR_waitid		284
+#define NR_syscalls 285
+
+#ifdef USE_IOPRIO_SYSCALLS
+#warning MEF need to fix up syscall numbers due to waitid addition
 #define __NR_ioprio_set		284
 #define __NR_ioprio_get		285
-
 #define NR_syscalls 286
+#else
+#warning MEF not includig sys_ioprio_{set,get} syscalls
+#endif	
 
 #ifndef __KERNEL_SYSCALLS_NO_ERRNO__
 /* user-visible error numbers are in the range -1 - -124: see <asm-i386/errno.h> */

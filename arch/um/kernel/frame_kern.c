@@ -35,7 +35,7 @@ static int copy_sc_to_user(void *to, void *fp, struct pt_regs *from,
 {
 	return(CHOOSE_MODE(copy_sc_to_user_tt(to, fp, UPT_SC(&from->regs), 
 					      arch),
-			   copy_sc_to_user_skas(userspace_pid[0], to, fp, 
+			   copy_sc_to_user_skas(userspace_pid[0], to, fp,
 						&from->regs,
 						current->thread.cr2,
 						current->thread.err)));

@@ -45,7 +45,6 @@ static int __init reboot_setup(char *str)
 			break;
 #ifdef CONFIG_SMP
 		case 's': /* "smp" reboot by executing reset on BSP or other CPU*/
-			reboot_smp = 1;
 			if (is_digit(*(str+1))) {
 				reboot_cpu = (int) (*(str+1) - '0');
 				if (is_digit(*(str+2))) 
@@ -208,11 +207,12 @@ void machine_real_restart(unsigned char *code, int length)
 	CMOS_WRITE(0x00, 0x8f);
 	spin_unlock_irqrestore(&rtc_lock, flags);
 
-	/*
-	 * Remap the first 16 MB of RAM (which includes the kernel image)
-	 * at virtual address zero:
-	 */
-	setup_identity_mappings(swapper_pg_dir, 0, LOW_MAPPINGS_SIZE);
+	/* Remap the kernel at virtual address zero, as well as offset zero
+	   from the kernel segment.  This assumes the kernel segment starts at
+	   virtual address PAGE_OFFSET. */
+
+	memcpy (swapper_pg_dir, swapper_pg_dir + USER_PGD_PTRS,
+		sizeof (swapper_pg_dir [0]) * KERNEL_PGD_PTRS);
 
 	/*
 	 * Use `swapper_pg_dir' as our page directory.
@@ -272,31 +272,31 @@ void machine_real_restart(unsigned char *code, int length)
 void machine_shutdown(void)
 {
 #ifdef CONFIG_SMP
-        int reboot_cpu_id;
+	int reboot_cpu_id;
 
-        /* The boot cpu is always logical cpu 0 */
-        reboot_cpu_id = 0;
+	/* The boot cpu is always logical cpu 0 */
+	reboot_cpu_id = 0;
 
-        /* See if there has been given a command line override */
+	/* See if there has been given a command line override */
 	if ((reboot_cpu_id != -1) && (reboot_cpu < NR_CPUS) &&
-	        cpu_isset(reboot_cpu, cpu_online_map)) {
-                reboot_cpu_id = reboot_cpu;
+		cpu_isset(reboot_cpu, cpu_online_map)) {
+		reboot_cpu_id = reboot_cpu;
 	}
 
 	/* Make certain the cpu I'm rebooting on is online */
-        if (!cpu_isset(reboot_cpu_id, cpu_online_map)) {
-                reboot_cpu_id = smp_processor_id();
+	if (!cpu_isset(reboot_cpu_id, cpu_online_map)) {
+		reboot_cpu_id = smp_processor_id();
 	}
 
-        /* Make certain I only run on the appropriate processor */
-        set_cpus_allowed(current, cpumask_of_cpu(reboot_cpu_id));
+	/* Make certain I only run on the appropriate processor */
+	set_cpus_allowed(current, cpumask_of_cpu(reboot_cpu_id));
 
-        /* O.K. Now that I'm on the appropriate processor, stop
-         * all of the others, and disable their local APICs.
+	/* O.K. Now that I'm on the appropriate processor, stop
+	 * all of the others, and disable their local APICs.
 	 */
-
 	if (!netdump_mode)
 		smp_send_stop();
+
 #elif defined(CONFIG_X86_LOCAL_APIC)
 	if (cpu_has_apic) {
 		local_irq_disable();
@@ -311,7 +311,7 @@ void machine_shutdown(void)
 
 void machine_restart(char * __unused)
 {
-        machine_shutdown();
+	machine_shutdown();
 
 	if (!reboot_thru_bios) {
 		if (efi_enabled) {

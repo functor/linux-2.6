@@ -88,6 +88,7 @@
 
 /* MPC52xx type numbers */
 #define PORT_MPC52xx	59
+#define PORT_ICOM	60
 
 #ifdef __KERNEL__
 
@@ -176,6 +177,7 @@ struct uart_port {
 #define UPIO_PORT		(0)
 #define UPIO_HUB6		(1)
 #define UPIO_MEM		(2)
+#define UPIO_MEM32		(3)
 
 	unsigned int		read_status_mask;	/* driver specific */
 	unsigned int		ignore_status_mask;	/* driver specific */

@@ -21,19 +21,22 @@
 void (*pm_power_off)(void);
 
 static long no_idt[3];
-static enum { 
-	BOOT_BIOS = 'b',
-	BOOT_TRIPLE = 't',
-	BOOT_KBD = 'k'
-} reboot_type = BOOT_KBD;
 static int reboot_mode = 0;
+enum reboot_types reboot_type = BOOT_KBD;
+EXPORT_SYMBOL(reboot_type);
+int reboot_override;
+EXPORT_SYMBOL(reboot_override);
 
-/* reboot=b[ios] | t[riple] | k[bd] [, [w]arm | [c]old]
+void (*machine_reset)(void);
+EXPORT_SYMBOL(machine_reset);
+
+/* reboot=b[ios] | t[riple] | k[bd] [, [w]arm | [c]old] | [a]cpi
    bios	  Use the CPU reboot vector for warm reset
    warm   Don't set the cold reboot flag
    cold   Set the cold reboot flag
    triple Force a triple fault (init)
    kbd    Use the keyboard controller. cold reset (default)
+   acpi   Use the ACPI reset mechanism defined in the FADT
  */ 
 static int __init reboot_setup(char *str)
 {
@@ -50,7 +53,9 @@ static int __init reboot_setup(char *str)
 		case 't':
 		case 'b':
 		case 'k':
+		case 'a':
 			reboot_type = *str;
+			reboot_override = 1;
 			break;
 		}
 		if((str = strchr(str,',')) != NULL)
@@ -91,31 +96,6 @@ static void reboot_warm(void)
 		      [target] "b" (WARMBOOT_TRAMP));
 }
 
-#ifdef CONFIG_SMP
-static void smp_halt(void)
-{
-	int cpuid = safe_smp_processor_id(); 
-		static int first_entry = 1;
-
-		if (first_entry) { 
-			first_entry = 0;
-			smp_call_function((void *)machine_restart, NULL, 1, 0);
-		} 
-			
-	smp_stop_cpu(); 
-
-	/* AP calling this. Just halt */
-	if (cpuid != boot_cpu_id) { 
-		for (;;) 
-			asm("hlt");
-	}
-
-	/* Wait for all other CPUs to have run smp_stop_cpu */
-	while (!cpus_empty(cpu_online_map))
-		rep_nop(); 
-}
-#endif
-
 static inline void kb_wait(void)
 {
 	int i;
@@ -125,23 +105,45 @@ static inline void kb_wait(void)
 			break;
 }
 
-void machine_restart(char * __unused)
+void machine_shutdown(void)
 {
-	int i;
-
+	/* Stop the cpus and apics */
 #ifdef CONFIG_SMP
-	smp_halt(); 
+	int reboot_cpu_id;
+
+	/* The boot cpu is always logical cpu 0 */
+	reboot_cpu_id = 0;
+
+	/* Make certain the cpu I'm about to reboot on is online */
+	if (!cpu_isset(reboot_cpu_id, cpu_online_map)) {
+		reboot_cpu_id = smp_processor_id();
+	}
+
+	/* Make certain I only run on the appropriate processor */
+	set_cpus_allowed(current, cpumask_of_cpu(reboot_cpu_id));
+
+	/* O.K Now that I'm on the appropriate processor,
+	 * stop all of the others.
+	 */
+	smp_send_stop();
 #endif
 
 	local_irq_disable();
-       
+
 #ifndef CONFIG_SMP
 	disable_local_APIC();
 #endif
 
 	disable_IO_APIC();
-	
+
 	local_irq_enable();
+}
+
+void machine_restart(char * __unused)
+{
+	int i;
+
+	machine_shutdown();
 	
 	/* Tell the BIOS if we want cold or warm reboot */
 	*((unsigned short *)__va(0x472)) = reboot_mode;
@@ -149,6 +151,13 @@ void machine_restart(char * __unused)
 	for (;;) {
 		/* Could also try the reset bit in the Hammer NB */
 		switch (reboot_type) { 
+		case BOOT_ACPI:
+			if (machine_reset)
+				(*machine_reset)();
+			else
+				reboot_type = BOOT_KBD;
+			break;
+		
 		case BOOT_BIOS:
 			reboot_warm();
 

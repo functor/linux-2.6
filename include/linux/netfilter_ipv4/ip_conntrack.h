@@ -53,11 +53,13 @@ enum ip_conntrack_status {
 #include <linux/netfilter_ipv4/ip_conntrack_tcp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_icmp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_proto_gre.h>
+#include <linux/netfilter_ipv4/ip_conntrack_sctp.h>
 
 /* per conntrack: protocol private data */
 union ip_conntrack_proto {
 	/* insert conntrack proto private data here */
 	struct ip_ct_gre gre;
+	struct ip_ct_sctp sctp;
 	struct ip_ct_tcp tcp;
 	struct ip_ct_icmp icmp;
 };
@@ -179,9 +181,6 @@ struct ip_conntrack
            plus 1 for any connection(s) we are `master' for */
 	struct nf_conntrack ct_general;
 
-	/* These are my tuples; original and reply */
-	struct ip_conntrack_tuple_hash tuplehash[IP_CT_DIR_MAX];
-
 	/* Have we seen traffic both ways yet? (bitset) */
 	unsigned long status;
 
@@ -206,12 +205,7 @@ struct ip_conntrack
 	/* Helper, if any. */
 	struct ip_conntrack_helper *helper;
 
-	/* Our various nf_ct_info structs specify *what* relation this
-           packet has to the conntrack */
-	struct nf_ct_info infos[IP_CT_NUMBER];
-
 	/* Storage reserved for other modules: */
-
 	union ip_conntrack_proto proto;
 
 	union ip_conntrack_help help;
@@ -230,6 +224,9 @@ struct ip_conntrack
 	/* VServer context id */
 	xid_t xid[IP_CT_DIR_MAX];
 
+	/* Traversed often, so hopefully in different cacheline to top */
+	/* These are my tuples; original and reply */
+	struct ip_conntrack_tuple_hash tuplehash[IP_CT_DIR_MAX];
 };
 
 /* get master conntrack via master expectation */
@@ -248,8 +245,12 @@ ip_conntrack_tuple_taken(const struct ip_conntrack_tuple *tuple,
 			 const struct ip_conntrack *ignored_conntrack);
 
 /* Return conntrack_info and tuple hash for given skb. */
-extern struct ip_conntrack *
-ip_conntrack_get(struct sk_buff *skb, enum ip_conntrack_info *ctinfo);
+static inline struct ip_conntrack *
+ip_conntrack_get(const struct sk_buff *skb, enum ip_conntrack_info *ctinfo)
+{
+	*ctinfo = skb->nfctinfo;
+	return (struct ip_conntrack *)skb->nfct;
+}
 
 /* decrement reference count on a conntrack */
 extern inline void ip_conntrack_put(struct ip_conntrack *ct);
@@ -274,12 +275,18 @@ extern void ip_ct_refresh_acct(struct ip_conntrack *ct,
 			       unsigned long extra_jiffies);
 
 /* These are for NAT.  Icky. */
+/* Update TCP window tracking data when NAT mangles the packet */
+extern int ip_conntrack_tcp_update(struct sk_buff *skb,
+				   struct ip_conntrack *conntrack,
+				   int dir);
+
 /* Call me when a conntrack is destroyed. */
 extern void (*ip_conntrack_destroyed)(struct ip_conntrack *conntrack);
 
 /* Fake conntrack entry for untracked connections */
 extern struct ip_conntrack ip_conntrack_untracked;
 
+extern int ip_ct_no_defrag;
 /* Returns new sk_buff, or NULL */
 struct sk_buff *
 ip_ct_gather_frags(struct sk_buff *skb);
@@ -296,6 +303,27 @@ static inline int is_confirmed(struct ip_conntrack *ct)
 }
 
 extern unsigned int ip_conntrack_htable_size;
+ 
+struct ip_conntrack_stat
+{
+	unsigned int searched;
+	unsigned int found;
+	unsigned int new;
+	unsigned int invalid;
+	unsigned int ignore;
+	unsigned int delete;
+	unsigned int delete_list;
+	unsigned int insert;
+	unsigned int insert_failed;
+	unsigned int drop;
+	unsigned int early_drop;
+	unsigned int error;
+	unsigned int expect_new;
+	unsigned int expect_create;
+	unsigned int expect_delete;
+};
+
+#define CONNTRACK_STAT_INC(count) (__get_cpu_var(ip_conntrack_stat).count++)
 
 /* eg. PROVIDES_CONNTRACK(ftp); */
 #define PROVIDES_CONNTRACK(name)                        \

@@ -12,11 +12,6 @@
 	.type __kernel_vsyscall,@function
 __kernel_vsyscall:
 .LSTART_vsyscall:
-	cmpl $192, %eax
-	jne 1f
-	int $0x80
-	ret
-1:
 	push %ecx
 .Lpush_ecx:
 	push %edx

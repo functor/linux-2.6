@@ -48,7 +48,6 @@
 #include <asm/i387.h>
 #include <asm/irq.h>
 #include <asm/desc.h>
-#include <asm/atomic_kmap.h>
 #ifdef CONFIG_MATH_EMULATION
 #include <asm/math_emu.h>
 #endif
@@ -145,13 +144,21 @@ void cpu_idle (void)
 	/* endless idle loop with no priority at all */
 	while (1) {
 		while (!need_resched()) {
-			void (*idle)(void) = pm_idle;
+			void (*idle)(void);
+			/*
+			 * Mark this as an RCU critical section so that
+			 * synchronize_kernel() in the unload path waits
+			 * for our completion.
+			 */
+			rcu_read_lock();
+			idle = pm_idle;
 
 			if (!idle)
 				idle = default_idle;
 
 			irq_stat[smp_processor_id()].idle_timestamp = jiffies;
 			idle();
+			rcu_read_unlock();
 		}
 		schedule();
 	}
@@ -186,18 +193,13 @@ void __init select_idle_routine(const struct cpuinfo_x86 *c)
 		printk("monitor/mwait feature present.\n");
 		/*
 		 * Skip, if setup has overridden idle.
-		 * Also, take care of system with asymmetric CPUs.
-		 * Use, mwait_idle only if all cpus support it.
-		 * If not, we fallback to default_idle()
+		 * One CPU supports mwait => All CPUs supports mwait
 		 */
 		if (!pm_idle) {
 			printk("using mwait in idle threads.\n");
 			pm_idle = mwait_idle;
 		}
-		return;
 	}
-	pm_idle = default_idle;
-	return;
 }
 
 static int __init idle_setup (char *str)
@@ -221,7 +223,6 @@ __setup("idle=", idle_setup);
 
 void stack_overflow(void)
 {
-        extern unsigned long stack_overflowed;
         unsigned long esp = current_stack_pointer();
 	int panicing = ((esp&(THREAD_SIZE-1)) <= STACK_PANIC);
 
@@ -278,8 +279,6 @@ void show_regs(struct pt_regs * regs)
 	show_trace(NULL, &regs->esp);
 }
 
-EXPORT_SYMBOL_GPL(show_regs);
-
 /*
  * This gets run with %ebx containing the
  * function to call, and %edx containing
@@ -325,13 +324,22 @@ int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
 void exit_thread(void)
 {
 	struct task_struct *tsk = current;
+	struct thread_struct *t = &tsk->thread;
 
 	/* The process may have allocated an io port bitmap... nuke it. */
-	if (unlikely(NULL != tsk->thread.io_bitmap_ptr)) {
+	if (unlikely(NULL != t->io_bitmap_ptr)) {
 		int cpu = get_cpu();
-		struct tss_struct *tss = init_tss + cpu;
-		kfree(tsk->thread.io_bitmap_ptr);
-		tsk->thread.io_bitmap_ptr = NULL;
+		struct tss_struct *tss = &per_cpu(init_tss, cpu);
+
+		kfree(t->io_bitmap_ptr);
+		t->io_bitmap_ptr = NULL;
+		/*
+		 * Careful, clear this in the TSS too:
+		 */
+		memset(tss->io_bitmap, 0xff, tss->io_bitmap_max);
+		t->io_bitmap_max = 0;
+		tss->io_bitmap_owner = NULL;
+		tss->io_bitmap_max = 0;
 		tss->io_bitmap_base = INVALID_IO_BITMAP_OFFSET;
 		put_cpu();
 	}
@@ -342,9 +350,6 @@ void flush_thread(void)
 	struct task_struct *tsk = current;
 
 	memset(tsk->thread.debugreg, 0, sizeof(unsigned long)*8);
-#ifdef CONFIG_X86_HIGH_ENTRY
-	clear_thread_flag(TIF_DB7);
-#endif
 	memset(tsk->thread.tls_array, 0, sizeof(tsk->thread.tls_array));	
 	/*
 	 * Forget coprocessor state..
@@ -358,8 +363,9 @@ void release_thread(struct task_struct *dead_task)
 	if (dead_task->mm) {
 		// temporary debugging check
 		if (dead_task->mm->context.size) {
-			printk("WARNING: dead process %8s still has LDT? <%d>\n",
+			printk("WARNING: dead process %8s still has LDT? <%p/%d>\n",
 					dead_task->comm,
+					dead_task->mm->context.ldt,
 					dead_task->mm->context.size);
 			BUG();
 		}
@@ -383,7 +389,7 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 {
 	struct pt_regs * childregs;
 	struct task_struct *tsk;
-	int err, i;
+	int err;
 
 	childregs = ((struct pt_regs *) (THREAD_SIZE + (unsigned long) p->thread_info)) - 1;
 	*childregs = *regs;
@@ -394,18 +400,7 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 	p->thread.esp = (unsigned long) childregs;
 	p->thread.esp0 = (unsigned long) (childregs+1);
 
-	/*
-	 * get the two stack pages, for the virtual stack.
-	 *
-	 * IMPORTANT: this code relies on the fact that the task
-	 * structure is an THREAD_SIZE aligned piece of physical memory.
-	 */
-	for (i = 0; i < ARRAY_SIZE(p->thread.stack_page); i++)
-		p->thread.stack_page[i] =
-				virt_to_page((unsigned long)p->thread_info + (i*PAGE_SIZE));
-
 	p->thread.eip = (unsigned long) ret_from_fork;
-	p->thread_info->real_stack = p->thread_info;
 
 	savesegment(fs,p->thread.fs);
 	savesegment(gs,p->thread.gs);
@@ -413,8 +408,10 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 	tsk = current;
 	if (unlikely(NULL != tsk->thread.io_bitmap_ptr)) {
 		p->thread.io_bitmap_ptr = kmalloc(IO_BITMAP_BYTES, GFP_KERNEL);
-		if (!p->thread.io_bitmap_ptr)
+		if (!p->thread.io_bitmap_ptr) {
+			p->thread.io_bitmap_max = 0;
 			return -ENOMEM;
+		}
 		memcpy(p->thread.io_bitmap_ptr, tsk->thread.io_bitmap_ptr,
 			IO_BITMAP_BYTES);
 	}
@@ -445,8 +442,10 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 
 	err = 0;
  out:
-	if (err && p->thread.io_bitmap_ptr)
+	if (err && p->thread.io_bitmap_ptr) {
 		kfree(p->thread.io_bitmap_ptr);
+		p->thread.io_bitmap_max = 0;
+	}
 	return err;
 }
 
@@ -511,6 +510,37 @@ int dump_task_regs(struct task_struct *tsk, elf_gregset_t *regs)
 	return 1;
 }
 
+static inline void
+handle_io_bitmap(struct thread_struct *next, struct tss_struct *tss)
+{
+	if (!next->io_bitmap_ptr) {
+		/*
+		 * Disable the bitmap via an invalid offset. We still cache
+		 * the previous bitmap owner and the IO bitmap contents:
+		 */
+		tss->io_bitmap_base = INVALID_IO_BITMAP_OFFSET;
+		return;
+	}
+	if (likely(next == tss->io_bitmap_owner)) {
+		/*
+		 * Previous owner of the bitmap (hence the bitmap content)
+		 * matches the next task, we dont have to do anything but
+		 * to set a valid offset in the TSS:
+		 */
+		tss->io_bitmap_base = IO_BITMAP_OFFSET;
+		return;
+	}
+	/*
+	 * Lazy TSS's I/O bitmap copy. We set an invalid offset here
+	 * and we let the task to get a GPF in case an I/O instruction
+	 * is performed.  The handler of the GPF will verify that the
+	 * faulting task has a valid I/O bitmap and, it true, does the
+	 * real copy and restart the instruction.  This will save us
+	 * redundant copies when the currently switched task does not
+	 * perform any I/O during its timeslice.
+	 */
+	tss->io_bitmap_base = INVALID_IO_BITMAP_OFFSET_LAZY;
+}
 /*
  * This special macro can be used to load a debugging register
  */
@@ -551,7 +581,7 @@ struct task_struct fastcall * __switch_to(struct task_struct *prev_p, struct tas
 	struct thread_struct *prev = &prev_p->thread,
 				 *next = &next_p->thread;
 	int cpu = smp_processor_id();
-	struct tss_struct *tss = init_tss + cpu;
+	struct tss_struct *tss = &per_cpu(init_tss, cpu);
 
 	/* never put a printk in __switch_to... printk() calls wake_up*() indirectly */
 
@@ -559,42 +589,10 @@ struct task_struct fastcall * __switch_to(struct task_struct *prev_p, struct tas
 	if (next_p->mm)
 		load_user_cs_desc(cpu, next_p->mm);
 
-#ifdef CONFIG_X86_HIGH_ENTRY
-{
-	int i;
-	/*
-	 * Set the ptes of the virtual stack. (NOTE: a one-page TLB flush is
-	 * needed because otherwise NMIs could interrupt the
-	 * user-return code with a virtual stack and stale TLBs.)
-	 */
-	for (i = 0; i < ARRAY_SIZE(next->stack_page); i++) {
-		__kunmap_atomic_type(KM_VSTACK_TOP-i);
-		__kmap_atomic(next->stack_page[i], KM_VSTACK_TOP-i);
-	}
-	/*
-	 * NOTE: here we rely on the task being the stack as well
-	 */
-	next_p->thread_info->virtual_stack =
-			(void *)__kmap_atomic_vaddr(KM_VSTACK_TOP);
-}
-#if defined(CONFIG_PREEMPT) && defined(CONFIG_SMP)
-	/*
-	 * If next was preempted on entry from userspace to kernel,
-	 * and now it's on a different cpu, we need to adjust %esp.
-	 * This assumes that entry.S does not copy %esp while on the
-	 * virtual stack (with interrupts enabled): which is so,
-	 * except within __SWITCH_KERNELSPACE itself.
-	 */
-	if (unlikely(next->esp >= TASK_SIZE)) {
-		next->esp &= THREAD_SIZE - 1;
-		next->esp |= (unsigned long) next_p->thread_info->virtual_stack;
-	}
-#endif
-#endif
 	/*
 	 * Reload esp0, LDT and the page table pointer:
 	 */
-	load_virtual_esp0(tss, next_p);
+	load_esp0(tss, next);
 
 	/*
 	 * Load the per-thread Thread-Local Storage descriptor.
@@ -629,28 +627,9 @@ struct task_struct fastcall * __switch_to(struct task_struct *prev_p, struct tas
 		loaddebug(next, 7);
 	}
 
-	if (unlikely(prev->io_bitmap_ptr || next->io_bitmap_ptr)) {
-		if (next->io_bitmap_ptr) {
-			/*
-			 * 4 cachelines copy ... not good, but not that
-			 * bad either. Anyone got something better?
-			 * This only affects processes which use ioperm().
-			 * [Putting the TSSs into 4k-tlb mapped regions
-			 * and playing VM tricks to switch the IO bitmap
-			 * is not really acceptable.]
-			 */
-			memcpy(tss->io_bitmap, next->io_bitmap_ptr,
-				IO_BITMAP_BYTES);
-			tss->io_bitmap_base = IO_BITMAP_OFFSET;
-		} else
-			/*
-			 * a bitmap offset pointing outside of the TSS limit
-			 * causes a nicely controllable SIGSEGV if a process
-			 * tries to use a port IO instruction. The first
-			 * sys_ioperm() call sets up the bitmap properly.
-			 */
-			tss->io_bitmap_base = INVALID_IO_BITMAP_OFFSET;
-	}
+	if (unlikely(prev->io_bitmap_ptr || next->io_bitmap_ptr))
+		handle_io_bitmap(next, tss);
+
 	return prev_p;
 }
 
@@ -671,7 +650,7 @@ asmlinkage int sys_clone(struct pt_regs regs)
 	child_tidptr = (int __user *)regs.edi;
 	if (!newsp)
 		newsp = regs.esp;
-	return do_fork(clone_flags & ~CLONE_IDLETASK, newsp, &regs, 0, parent_tidptr, child_tidptr);
+	return do_fork(clone_flags, newsp, &regs, 0, parent_tidptr, child_tidptr);
 }
 
 /*

@@ -61,7 +61,7 @@ int run_helper(void (*pre_exec)(void *), void *pre_data, char **argv,
 	if((stack_out != NULL) && (*stack_out != 0))
 		stack = *stack_out;
 	else stack = alloc_stack(0, um_in_interrupt());
-	if(stack == 0) 
+	if(stack == 0)
 		return(-ENOMEM);
 
 	err = os_pipe(fds, 1, 0);
@@ -94,7 +94,7 @@ int run_helper(void (*pre_exec)(void *), void *pre_data, char **argv,
 	if(n < 0){
 		printk("run_helper : read on pipe failed, err = %d\n", -n);
 		err = n;
-		os_kill_process(pid, 1);
+		goto out_kill;
 	}
 	else if(n != 0){
 		CATCH_EINTR(n = waitpid(pid, NULL, 0));
@@ -108,6 +108,15 @@ int run_helper(void (*pre_exec)(void *), void *pre_data, char **argv,
 	if(stack_out == NULL) 
 		free_stack(stack, 0);
         else *stack_out = stack;
+	return(pid);
+
+ out_kill:
+	os_kill_process(pid, 1);
+ out_close:
+	os_close_file(fds[0]);
+	os_close_file(fds[1]);
+ out_free:
+	free_stack(stack, 0);
 	return(err);
 }
 
@@ -128,7 +137,7 @@ int run_helper_thread(int (*proc)(void *), void *arg, unsigned int flags,
 		return(-errno);
 	}
 	if(stack_out == NULL){
-		pid = waitpid(pid, &status, 0);
+		CATCH_EINTR(pid = waitpid(pid, &status, 0));
 		if(pid < 0){
 			printk("run_helper_thread - wait failed, errno = %d\n",
 			       errno);
@@ -147,7 +156,7 @@ int helper_wait(int pid, int block)
 {
 	int ret;
 
-	ret = waitpid(pid, NULL, WNOHANG);
+	CATCH_EINTR(ret = waitpid(pid, NULL, WNOHANG));
 	if(ret < 0){
 		printk("helper_wait : waitpid failed, errno = %d\n", errno);
 		return(-errno);

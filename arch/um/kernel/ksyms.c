@@ -60,6 +60,7 @@ EXPORT_SYMBOL(strncpy_from_user_skas);
 EXPORT_SYMBOL(copy_to_user_skas);
 EXPORT_SYMBOL(copy_from_user_skas);
 #endif
+EXPORT_SYMBOL(uml_strdup);
 
 EXPORT_SYMBOL(os_stat_fd);
 EXPORT_SYMBOL(os_stat_file);
@@ -108,10 +109,10 @@ EXPORT_SYMBOL(sys_wait4);
 /* required for SMP */
 
 extern void FASTCALL( __write_lock_failed(rwlock_t *rw));
-EXPORT_SYMBOL_NOVERS(__write_lock_failed);
+EXPORT_SYMBOL(__write_lock_failed);
 
 extern void FASTCALL( __read_lock_failed(rwlock_t *rw));
-EXPORT_SYMBOL_NOVERS(__read_lock_failed);
+EXPORT_SYMBOL(__read_lock_failed);
 
 #endif
 

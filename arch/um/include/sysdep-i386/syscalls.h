@@ -38,7 +38,7 @@ typedef long syscall_handler_t(struct pt_regs);
 	[ __NR_pivot_root ] = (syscall_handler_t *) sys_pivot_root, \
 	[ __NR_mincore ] = (syscall_handler_t *) sys_mincore, \
 	[ __NR_madvise ] = (syscall_handler_t *) sys_madvise, \
-        [ 222 ] = (syscall_handler_t *) sys_ni_syscall, 
+        [ 222 ] = (syscall_handler_t *) sys_ni_syscall,
         
 /* 222 doesn't yet have a name in include/asm-i386/unistd.h */
 

@@ -25,19 +25,26 @@
 #include <linux/threads.h>
 #include <asm/kmap_types.h>
 #include <asm/tlbflush.h>
-#include <asm/atomic_kmap.h>
 
 /* declarations for highmem.c */
 extern unsigned long highstart_pfn, highend_pfn;
 
+extern pte_t *kmap_pte;
+extern pgprot_t kmap_prot;
 extern pte_t *pkmap_page_table;
-extern void kmap_init(void) __init;
+
+extern void kmap_init(void);
 
 /*
  * Right now we initialize only a single pte table. It can be extended
  * easily, subsequent pte tables have to be allocated in one physical
  * chunk of RAM.
  */
+#if NR_CPUS <= 32
+#define PKMAP_BASE (0xff800000UL)
+#else
+#define PKMAP_BASE (0xff600000UL)
+#endif
 #ifdef CONFIG_X86_PAE
 #define LAST_PKMAP 512
 #else
@@ -53,7 +60,6 @@ extern void FASTCALL(kunmap_high(struct page *page));
 void *kmap(struct page *page);
 void kunmap(struct page *page);
 void *kmap_atomic(struct page *page, enum km_type type);
-void *kmap_atomic_nocache_pfn(unsigned long pfn, enum km_type type);
 void kunmap_atomic(void *kvaddr, enum km_type type);
 struct page *kmap_atomic_to_page(void *ptr);
 

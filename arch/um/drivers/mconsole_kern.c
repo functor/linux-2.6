@@ -69,7 +69,7 @@ static void mc_work_proc(void *unused)
 
 DECLARE_WORK(mconsole_work, mc_work_proc, NULL);
 
-static irqreturn_t mconsole_interrupt(int irq, void *dev_id, 
+static irqreturn_t mconsole_interrupt(int irq, void *dev_id,
 				      struct pt_regs *regs)
 {
 	int fd;
@@ -78,7 +78,7 @@ static irqreturn_t mconsole_interrupt(int irq, void *dev_id,
 
 	fd = (int) dev_id;
 	while (mconsole_get_request(fd, &req)){
-		if(req.cmd->context == MCONSOLE_INTR) 
+		if(req.cmd->context == MCONSOLE_INTR)
 			(*req.cmd->handler)(&req);
 		else {
 			new = kmalloc(sizeof(*new), GFP_ATOMIC);
@@ -90,7 +90,7 @@ static irqreturn_t mconsole_interrupt(int irq, void *dev_id,
 			}
 		}
 	}
-	if(!list_empty(&mc_requests)) 
+	if(!list_empty(&mc_requests))
 		schedule_work(&mconsole_work);
 	reactivate_fd(fd, MCONSOLE_IRQ);
 	return(IRQ_HANDLED);
@@ -110,7 +110,7 @@ void mconsole_log(struct mc_request *req)
 {
 	int len;
 	char *ptr = req->request.data;
-	
+
 	ptr += strlen("log ");
 
 	len = req->len - (ptr - req->request.data);
@@ -126,7 +126,7 @@ void mconsole_proc(struct mc_request *req)
 	struct file *file;
 	int n, err;
 	char *ptr = req->request.data, *buf;
-	
+
 	ptr += strlen("proc");
 	while(isspace(*ptr)) ptr++;
 
@@ -169,14 +169,14 @@ void mconsole_proc(struct mc_request *req)
 
 	if((file->f_op != NULL) && (file->f_op->read != NULL)){
 		do {
-			n = (*file->f_op->read)(file, buf, PAGE_SIZE - 1, 
+			n = (*file->f_op->read)(file, buf, PAGE_SIZE - 1,
 						&file->f_pos);
 			if(n >= 0){
 				buf[n] = '\0';
 				mconsole_reply(req, buf, 0, (n > 0));
 			}
 			else {
-				mconsole_reply(req, "Read of file failed", 
+				mconsole_reply(req, "Read of file failed",
 					       1, 0);
 				goto out_free;
 			}

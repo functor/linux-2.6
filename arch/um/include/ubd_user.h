@@ -33,7 +33,7 @@ extern int open_ubd_file(char *file, struct openflags *openflags,
 			 int *create_cow_out);
 extern int create_cow_file(char *cow_file, char *backing_file, 
 			   struct openflags flags, int sectorsize, 
-			   int alignment, int *bitmap_offset_out, 
+			   int alignment, int *bitmap_offset_out,
 			   unsigned long *bitmap_len_out,
 			   int *data_offset_out);
 extern int read_cow_bitmap(int fd, void *buf, int offset, int len);

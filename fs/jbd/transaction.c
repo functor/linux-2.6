@@ -1200,12 +1200,13 @@ journal_release_buffer(handle_t *handle, struct buffer_head *bh, int credits)
  * Allow this call even if the handle has aborted --- it may be part of
  * the caller's cleanup after an abort.
  */
-void journal_forget(handle_t *handle, struct buffer_head *bh)
+int journal_forget (handle_t *handle, struct buffer_head *bh)
 {
 	transaction_t *transaction = handle->h_transaction;
 	journal_t *journal = transaction->t_journal;
 	struct journal_head *jh;
-
+	int err = 0;
+	
 	BUFFER_TRACE(bh, "entry");
 
 	jbd_lock_bh_state(bh);
@@ -1214,6 +1215,14 @@ void journal_forget(handle_t *handle, struct buffer_head *bh)
 	if (!buffer_jbd(bh))
 		goto not_jbd;
 	jh = bh2jh(bh);
+
+	/* Critical error: attempting to delete a bitmap buffer, maybe?
+	 * Don't do any jbd operations, and return an error. */
+	if (!J_EXPECT_JH(jh, !jh->b_committed_data,
+			 "inconsistent data on disk")) {
+		err = -EIO;
+		goto not_jbd;
+	}
 
 	if (jh->b_transaction == handle->h_transaction) {
 		J_ASSERT_JH(jh, !jh->b_frozen_data);
@@ -1225,7 +1234,6 @@ void journal_forget(handle_t *handle, struct buffer_head *bh)
 		clear_buffer_jbddirty(bh);
 
 		JBUFFER_TRACE(jh, "belongs to current transaction: unfile");
-		J_ASSERT_JH(jh, !jh->b_committed_data);
 
 		__journal_unfile_buffer(jh);
 
@@ -1250,7 +1258,7 @@ void journal_forget(handle_t *handle, struct buffer_head *bh)
 				spin_unlock(&journal->j_list_lock);
 				jbd_unlock_bh_state(bh);
 				__bforget(bh);
-				return;
+				return 0;
 			}
 		}
 	} else if (jh->b_transaction) {
@@ -1272,7 +1280,7 @@ not_jbd:
 	spin_unlock(&journal->j_list_lock);
 	jbd_unlock_bh_state(bh);
 	__brelse(bh);
-	return;
+	return err;
 }
 
 /**

@@ -50,6 +50,10 @@
 
 #include <linux/ckrm_tc.h>
 
+#warning MEF I cannot believe that vserver changes force the following include statement: FIX THIS!
+#include <linux/vs_cvirt.h>
+
+
 #define TC_DEBUG(fmt, args...) do { \
 /* printk("%s: " fmt, __FUNCTION__ , ## args); */ } while (0)
 

@@ -17,8 +17,8 @@
 #include "linux/init.h"
 #include "linux/interrupt.h"
 #include "linux/slab.h"
+#include "linux/hardirq.h"
 #include "asm/current.h"
-#include "asm/hardirq.h"
 #include "asm/irq.h"
 #include "stdio_console.h"
 #include "line.h"
@@ -191,8 +191,8 @@ int stdio_init(void)
 
 late_initcall(stdio_init);
 
-static void uml_console_write(struct console *console, const char *string, 
-			      unsigned len)
+static void uml_console_write(struct console *console, const char *string,
+			  unsigned len)
 {
 	struct line *line = &vts[console->index];
 

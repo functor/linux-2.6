@@ -29,8 +29,8 @@ void *tty_chan_init(char *str, int device, struct chan_opts *opts)
 	}
 	str++;
 
-	data = um_kmalloc(sizeof(*data)); 
-	if(data == NULL) 
+	data = um_kmalloc(sizeof(*data));
+	if(data == NULL)
 		return(NULL);
 	*data = ((struct tty_chan) { .dev 	= str,
 				     .raw 	= opts->raw });

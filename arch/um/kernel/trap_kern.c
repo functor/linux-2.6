@@ -54,8 +54,6 @@ int handle_page_fault(unsigned long address, unsigned long ip,
 	if(is_write && !(vma->vm_flags & VM_WRITE)) 
 		goto out;
 	page = address & PAGE_MASK;
-	if(page == (unsigned long) current_thread + PAGE_SIZE)
-		panic("Kernel stack overflow");
 	pgd = pgd_offset(mm, page);
 	pmd = pmd_offset(pgd, page);
 	do {
@@ -107,7 +105,7 @@ void register_remapper(struct remapper *info)
 	list_add(&info->list, &physmem_remappers);
 }
 
-static int check_remapped_addr(unsigned long address, int is_write, int is_user)
+static int check_remapped_addr(unsigned long address, int is_write)
 {
 	struct remapper *remapper;
 	struct list_head *ele;
@@ -120,7 +118,7 @@ static int check_remapped_addr(unsigned long address, int is_write, int is_user)
 
 	list_for_each(ele, &physmem_remappers){
 		remapper = list_entry(ele, struct remapper, list);
-		if((*remapper->proc)(fd, address, is_write, offset, is_user))
+		if((*remapper->proc)(fd, address, is_write, offset))
 			return(1);
 	}
 
@@ -138,7 +136,7 @@ unsigned long segv(unsigned long address, unsigned long ip, int is_write,
                 flush_tlb_kernel_vm();
                 return(0);
         }
-	else if(check_remapped_addr(address & PAGE_MASK, is_write, is_user))
+	else if(check_remapped_addr(address & PAGE_MASK, is_write))
 		return(0);
 	else if(current->mm == NULL)
 		panic("Segfault with no mm");

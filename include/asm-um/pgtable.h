@@ -196,7 +196,7 @@ static inline void pgd_clear(pgd_t * pgdp)	{ }
 extern struct page *phys_to_page(const unsigned long phys);
 extern struct page *__virt_to_page(const unsigned long virt);
 #define virt_to_page(addr) __virt_to_page((const unsigned long) addr)
-  
+
 /*
  * Bits 0 through 3 are taken
  */
@@ -241,8 +241,8 @@ static inline void set_pte(pte_t *pteptr, pte_t pteval)
  * Undefined behaviour if not..
  */
 static inline int pte_user(pte_t pte)
-{ 
-	return((pte_val(pte) & _PAGE_USER) && 
+{
+	return((pte_val(pte) & _PAGE_USER) &&
 	       !(pte_val(pte) & _PAGE_PROTNONE));
 }
 
@@ -267,8 +267,8 @@ static inline int pte_write(pte_t pte)
  * The following only works if pte_present() is not true.
  */
 static inline int pte_file(pte_t pte)
-{ 
-	return (pte).pte_low & _PAGE_FILE; 
+{
+	return (pte).pte_low & _PAGE_FILE;
 }
 
 static inline int pte_dirty(pte_t pte)	{ return pte_val(pte) & _PAGE_DIRTY; }

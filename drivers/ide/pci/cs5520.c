@@ -287,7 +287,7 @@ static int __devinit cs5520_init_one(struct pci_dev *dev, const struct pci_devic
 	if(pci_enable_device_bars(dev, 1<<2))
 	{
 		printk(KERN_WARNING "%s: Unable to enable 55x0.\n", d->name);
-		return 1;
+		return -EBUSY;
 	}
 	pci_set_master(dev);
 	if (pci_set_dma_mask(dev, 0xFFFFFFFF)) {
@@ -305,8 +305,6 @@ static int __devinit cs5520_init_one(struct pci_dev *dev, const struct pci_devic
 
 	ide_pci_setup_ports(dev, d, 1, 14, &index);
 
-	printk("Index.b %d %d\n", index.b.low, index.b.high);
-	mdelay(2000);
 	if((index.b.low & 0xf0) != 0xf0)
 		probe_hwif_init(&ide_hwifs[index.b.low]);
 	if((index.b.high & 0xf0) != 0xf0)
@@ -322,7 +320,7 @@ static struct pci_device_id cs5520_pci_tbl[] = {
 MODULE_DEVICE_TABLE(pci, cs5520_pci_tbl);
 
 static struct pci_driver driver = {
-	.name		= "CyrixIDE",
+	.name		= "Cyrix_IDE",
 	.id_table	= cs5520_pci_tbl,
 	.probe		= cs5520_init_one,
 };

@@ -61,8 +61,8 @@ EXPORT_SYMBOL(__strnlen_user);
 #define __KERNEL_SYSCALLS__
 #include <asm/unistd.h>
 EXPORT_SYMBOL(__ia64_syscall);
-EXPORT_SYMBOL(execve);
-EXPORT_SYMBOL(clone);
+EXPORT_SYMBOL_GPL(sys_execve);
+EXPORT_SYMBOL_GPL(clone);
 
 /* from arch/ia64/lib */
 extern void __divsi3(void);
@@ -107,7 +107,7 @@ EXPORT_SYMBOL(ia64_save_scratch_fpregs);
 EXPORT_SYMBOL(unw_init_running);
 
 #include <linux/efi.h>
-EXPORT_SYMBOL(efi_mem_type);
+EXPORT_SYMBOL_GPL(efi_mem_type);
 
 #ifdef ASM_SUPPORTED
 # ifdef CONFIG_SMP

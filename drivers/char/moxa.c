@@ -694,7 +694,6 @@ static void moxa_flush_buffer(struct tty_struct *tty)
 		return;
 	MoxaPortFlushData(ch->port, 1);
 	tty_wakeup(tty);
-	wake_up_interruptible(&tty->write_wait);
 }
 
 static int moxa_chars_in_buffer(struct tty_struct *tty)
@@ -953,7 +952,6 @@ static void moxa_poll(unsigned long ignored)
 					if (!tp->stopped) {
 						ch->statusflags &= ~LOWWAIT;
 						tty_wakeup(tp);
-						wake_up_interruptible(&tp->write_wait);
 					}
 				}
 			}
@@ -1120,7 +1118,6 @@ static void check_xmit_empty(unsigned long data)
 		if (MoxaPortTxQueue(ch->port) == 0) {
 			ch->statusflags &= ~EMPTYWAIT;
 			tty_wakeup(ch->tty);
-			wake_up_interruptible(&ch->tty->write_wait);
 			return;
 		}
 		moxaEmptyTimer[ch->port].expires = jiffies + HZ;

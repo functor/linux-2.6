@@ -43,12 +43,17 @@ static struct backing_dev_info hugetlbfs_backing_dev_info = {
 	.memory_backed	= 1,	/* Does not contribute to dirty memory */
 };
 
+int sysctl_hugetlb_shm_group;
+
 static int hugetlbfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct inode *inode = file->f_dentry->d_inode;
 	struct address_space *mapping = inode->i_mapping;
 	loff_t len, vma_len;
 	int ret;
+
+	if ((vma->vm_flags & (VM_MAYSHARE | VM_WRITE)) == VM_WRITE)
+		return -EINVAL;
 
 	if (vma->vm_pgoff & (HPAGE_SIZE / PAGE_SIZE - 1))
 		return -EINVAL;
@@ -68,10 +73,19 @@ static int hugetlbfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	file_accessed(file);
 	vma->vm_flags |= VM_HUGETLB | VM_RESERVED;
 	vma->vm_ops = &hugetlb_vm_ops;
+
+	ret = -ENOMEM;
+	len = vma_len + ((loff_t)vma->vm_pgoff << PAGE_SHIFT);
+	if (!(vma->vm_flags & VM_WRITE) && len > inode->i_size)
+		goto out;
+
 	ret = hugetlb_prefault(mapping, vma);
-	len = vma_len +	((loff_t)vma->vm_pgoff << PAGE_SHIFT);
-	if (ret == 0 && inode->i_size < len)
+	if (ret)
+		goto out;
+
+	if (inode->i_size < len)
 		inode->i_size = len;
+out:
 	up(&inode->i_sem);
 
 	return ret;
@@ -91,6 +105,7 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
+	unsigned long start_addr;
 
 	if (len & ~HPAGE_MASK)
 		return -EINVAL;
@@ -105,12 +120,25 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 			return addr;
 	}
 
-	addr = ALIGN(mm->free_area_cache, HPAGE_SIZE);
+	start_addr = mm->free_area_cache;
+
+full_search:
+	addr = ALIGN(start_addr, HPAGE_SIZE);
 
 	for (vma = find_vma(mm, addr); ; vma = vma->vm_next) {
 		/* At this point:  (!vma || addr < vma->vm_end). */
-		if (TASK_SIZE - len < addr)
+		if (TASK_SIZE - len < addr) {
+			/*
+			 * Start a new search - just in case we missed
+			 * some holes.
+			 */
+			if (start_addr != TASK_UNMAPPED_BASE) {
+				start_addr = TASK_UNMAPPED_BASE;
+				goto full_search;
+			}
 			return -ENOMEM;
+		}
+
 		if (!vma || addr + len <= vma->vm_start)
 			return addr;
 		addr = ALIGN(vma->vm_end, HPAGE_SIZE);
@@ -270,11 +298,10 @@ static void hugetlbfs_drop_inode(struct inode *inode)
 static inline void
 hugetlb_vmtruncate_list(struct prio_tree_root *root, unsigned long h_pgoff)
 {
-	struct vm_area_struct *vma = NULL;
+	struct vm_area_struct *vma;
 	struct prio_tree_iter iter;
 
-	while ((vma = vma_prio_tree_next(vma, root, &iter,
-					h_pgoff, ULONG_MAX)) != NULL) {
+	vma_prio_tree_foreach(vma, &iter, root, h_pgoff, ULONG_MAX) {
 		unsigned long h_vm_pgoff;
 		unsigned long v_length;
 		unsigned long v_offset;
@@ -638,6 +665,7 @@ hugetlbfs_fill_super(struct super_block *sb, void *data, int silent)
 	sbinfo->free_blocks = config.nr_blocks;
 	sbinfo->max_inodes = config.nr_inodes;
 	sbinfo->free_inodes = config.nr_inodes;
+	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_blocksize = HPAGE_SIZE;
 	sb->s_blocksize_bits = HPAGE_SHIFT;
 	sb->s_magic = HUGETLBFS_MAGIC;
@@ -716,6 +744,13 @@ static unsigned long hugetlbfs_counter(void)
 	return ret;
 }
 
+static int can_do_hugetlb_shm(void)
+{
+	return likely(capable(CAP_IPC_LOCK) ||
+			in_group_p(sysctl_hugetlb_shm_group) ||
+			can_do_mlock());
+}
+
 struct file *hugetlb_zero_setup(size_t size)
 {
 	int error = -ENOMEM;
@@ -725,7 +760,7 @@ struct file *hugetlb_zero_setup(size_t size)
 	struct qstr quick_string;
 	char buf[16];
 
-	if (!capable(CAP_IPC_LOCK))
+	if (!can_do_hugetlb_shm())
 		return ERR_PTR(-EPERM);
 
 	if (!is_hugepage_mem_enough(size))
@@ -780,8 +815,7 @@ static int __init init_hugetlbfs_fs(void)
 
 	hugetlbfs_inode_cachep = kmem_cache_create("hugetlbfs_inode_cache",
 					sizeof(struct hugetlbfs_inode_info),
-					0, SLAB_RECLAIM_ACCOUNT,
-					init_once, NULL);
+					0, 0, init_once, NULL);
 	if (hugetlbfs_inode_cachep == NULL)
 		return -ENOMEM;
 

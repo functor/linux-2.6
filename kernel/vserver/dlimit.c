@@ -30,7 +30,7 @@
 static struct dl_info *__alloc_dl_info(struct super_block *sb, xid_t xid)
 {
 	struct dl_info *new = NULL;
-	
+
 	vxdprintk(VXD_CBIT(dlim, 5),
 		"alloc_dl_info(%p,%d)*", sb, xid);
 
@@ -77,7 +77,7 @@ static void __dealloc_dl_info(struct dl_info *dli)
 
 /*	hash table for dl_info hash */
 
-#define	DL_HASH_SIZE	13
+#define DL_HASH_SIZE	13
 
 struct hlist_head dl_info_hash[DL_HASH_SIZE];
 
@@ -99,7 +99,7 @@ static inline unsigned int __hashval(struct super_block *sb, xid_t xid)
 static inline void __hash_dl_info(struct dl_info *dli)
 {
 	struct hlist_head *head;
-	
+
 	vxdprintk(VXD_CBIT(dlim, 6),
 		"__hash_dl_info: %p[#%d]", dli, dli->dl_xid);
 	get_dl_info(dli);
@@ -119,11 +119,6 @@ static inline void __unhash_dl_info(struct dl_info *dli)
 	hlist_del_rcu(&dli->dl_hlist);
 	put_dl_info(dli);
 }
-
-
-#define hlist_for_each_rcu(pos, head) \
-	for (pos = (head)->first; pos && ({ prefetch(pos->next); 1;}); \
-		pos = pos->next, ({ smp_read_barrier_depends(); 0;}))
 
 
 /*	__lookup_dl_info()
@@ -150,14 +145,14 @@ static inline struct dl_info *__lookup_dl_info(struct super_block *sb, xid_t xid
 
 struct dl_info *locate_dl_info(struct super_block *sb, xid_t xid)
 {
-        struct dl_info *dli;
+	struct dl_info *dli;
 
 	rcu_read_lock();
 	dli = get_dl_info(__lookup_dl_info(sb, xid));
 	vxdprintk(VXD_CBIT(dlim, 7),
 		"locate_dl_info(%p,#%d) = %p", sb, xid, dli);
 	rcu_read_unlock();
-        return dli;
+	return dli;
 }
 
 void rcu_free_dl_info(struct rcu_head *head)
@@ -204,20 +199,20 @@ int vc_add_dlimit(uint32_t id, void __user *data)
 		if (!nd.dentry->d_inode)
 			goto out_release;
 		if (!(sb = nd.dentry->d_inode->i_sb))
-			goto out_release;	
-		
+			goto out_release;
+
 		dli = __alloc_dl_info(sb, id);
-		spin_lock(&dl_info_hash_lock);		
+		spin_lock(&dl_info_hash_lock);
 
 		ret = -EEXIST;
 		if (__lookup_dl_info(sb, id))
-			goto out_unlock;	
+			goto out_unlock;
 		__hash_dl_info(dli);
 		dli = NULL;
 		ret = 0;
 
 	out_unlock:
-		spin_unlock(&dl_info_hash_lock);		
+		spin_unlock(&dl_info_hash_lock);
 		if (dli)
 			__dealloc_dl_info(dli);
 	out_release:
@@ -247,20 +242,20 @@ int vc_rem_dlimit(uint32_t id, void __user *data)
 		if (!nd.dentry->d_inode)
 			goto out_release;
 		if (!(sb = nd.dentry->d_inode->i_sb))
-			goto out_release;	
-		
-		spin_lock(&dl_info_hash_lock);		
+			goto out_release;
+
+		spin_lock(&dl_info_hash_lock);
 		dli = __lookup_dl_info(sb, id);
 
 		ret = -ESRCH;
 		if (!dli)
 			goto out_unlock;
-		
+
 		__unhash_dl_info(dli);
 		ret = 0;
 
 	out_unlock:
-		spin_unlock(&dl_info_hash_lock);		
+		spin_unlock(&dl_info_hash_lock);
 	out_release:
 		path_release(&nd);
 	}
@@ -288,10 +283,13 @@ int vc_set_dlimit(uint32_t id, void __user *data)
 		if (!nd.dentry->d_inode)
 			goto out_release;
 		if (!(sb = nd.dentry->d_inode->i_sb))
-			goto out_release;	
-		if (vc_data.reserved > 100 ||
-			vc_data.inodes_used > vc_data.inodes_total ||
-			vc_data.space_used > vc_data.space_total)
+			goto out_release;
+		if ((vc_data.reserved != (uint32_t)CDLIM_KEEP &&
+			vc_data.reserved > 100) ||
+			(vc_data.inodes_used != (uint32_t)CDLIM_KEEP &&
+			vc_data.inodes_used > vc_data.inodes_total) ||
+			(vc_data.space_used != (uint32_t)CDLIM_KEEP &&
+			vc_data.space_used > vc_data.space_total))
 			goto out_release;
 
 		ret = -ESRCH;
@@ -299,7 +297,7 @@ int vc_set_dlimit(uint32_t id, void __user *data)
 		if (!dli)
 			goto out_release;
 
-		spin_lock(&dli->dl_lock);		
+		spin_lock(&dli->dl_lock);
 
 		if (vc_data.inodes_used != (uint32_t)CDLIM_KEEP)
 			dli->dl_inodes_used = vc_data.inodes_used;
@@ -318,8 +316,8 @@ int vc_set_dlimit(uint32_t id, void __user *data)
 		if (vc_data.reserved != (uint32_t)CDLIM_KEEP)
 			dli->dl_nrlmult = (1 << 10) * (100 - vc_data.reserved) / 100;
 
-		spin_unlock(&dli->dl_lock);		
-		
+		spin_unlock(&dli->dl_lock);
+
 		put_dl_info(dli);
 		ret = 0;
 
@@ -349,7 +347,7 @@ int vc_get_dlimit(uint32_t id, void __user *data)
 		if (!nd.dentry->d_inode)
 			goto out_release;
 		if (!(sb = nd.dentry->d_inode->i_sb))
-			goto out_release;	
+			goto out_release;
 		if (vc_data.reserved > 100 ||
 			vc_data.inodes_used > vc_data.inodes_total ||
 			vc_data.space_used > vc_data.space_total)
@@ -360,7 +358,7 @@ int vc_get_dlimit(uint32_t id, void __user *data)
 		if (!dli)
 			goto out_release;
 
-		spin_lock(&dli->dl_lock);		
+		spin_lock(&dli->dl_lock);
 		vc_data.inodes_used = dli->dl_inodes_used;
 		vc_data.inodes_total = dli->dl_inodes_total;
 		vc_data.space_used = dli->dl_space_used >> 10;
@@ -370,8 +368,8 @@ int vc_get_dlimit(uint32_t id, void __user *data)
 			vc_data.space_total = dli->dl_space_total >> 10;
 
 		vc_data.reserved = 100 - ((dli->dl_nrlmult * 100 + 512) >> 10);
-		spin_unlock(&dli->dl_lock);		
-		
+		spin_unlock(&dli->dl_lock);
+
 		put_dl_info(dli);
 		ret = -EFAULT;
 		if (copy_to_user(data, &vc_data, sizeof(vc_data)))
@@ -388,9 +386,9 @@ int vc_get_dlimit(uint32_t id, void __user *data)
 void vx_vsi_statfs(struct super_block *sb, struct kstatfs *buf)
 {
 	struct dl_info *dli;
-        __u64 blimit, bfree, bavail;
-        __u32 ifree;
-		
+	__u64 blimit, bfree, bavail;
+	__u32 ifree;
+
 	dli = locate_dl_info(sb, current->xid);
 	if (!dli)
 		return;
@@ -442,14 +440,12 @@ no_ilim:
 no_blim:
 	spin_unlock(&dli->dl_lock);
 	put_dl_info(dli);
-	
-	return;	
+
+	return;
 }
 
 #include <linux/module.h>
 
 EXPORT_SYMBOL_GPL(locate_dl_info);
 EXPORT_SYMBOL_GPL(rcu_free_dl_info);
-// EXPORT_SYMBOL_GPL(dl_info_hash_lock);
-// EXPORT_SYMBOL_GPL(unhash_dl_info);
 

@@ -26,7 +26,11 @@ extern void * high_memory;
 extern unsigned long vmalloc_earlyreserve;
 extern int page_cluster;
 
+#ifdef CONFIG_SYSCTL
 extern int sysctl_legacy_va_layout;
+#else
+#define sysctl_legacy_va_layout 0
+#endif
 
 #include <asm/page.h>
 #include <asm/pgtable.h>
@@ -36,6 +40,8 @@ extern int sysctl_legacy_va_layout;
 #ifndef MM_VM_SIZE
 #define MM_VM_SIZE(mm)	TASK_SIZE
 #endif
+
+#define nth_page(page,n) pfn_to_page(page_to_pfn((page)) + (n))
 
 /*
  * Linux kernel virtual memory manager primitives.
@@ -197,21 +203,21 @@ struct page {
 	page_flags_t flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */
 	atomic_t _count;		/* Usage count, see below. */
-	unsigned int mapcount;		/* Count of ptes mapped in mms,
+	atomic_t _mapcount;		/* Count of ptes mapped in mms,
 					 * to show when page is mapped
-					 * & limit reverse map searches,
-					 * protected by PG_maplock.
+					 * & limit reverse map searches.
 					 */
 	unsigned long private;		/* Mapping-private opaque data:
 					 * usually used for buffer_heads
 					 * if PagePrivate set; used for
 					 * swp_entry_t if PageSwapCache
 					 */
-	struct address_space *mapping;	/* If PG_anon clear, points to
+	struct address_space *mapping;	/* If low bit clear, points to
 					 * inode address_space, or NULL.
 					 * If page mapped as anonymous
-					 * memory, PG_anon is set, and
-					 * it points to anon_vma object.
+					 * memory, low bit is set, and
+					 * it points to anon_vma object:
+					 * see PAGE_MAPPING_ANON below.
 					 */
 	pgoff_t index;			/* Our offset within mapping. */
 	struct list_head lru;		/* Pageout list, eg. active_list
@@ -438,22 +444,30 @@ void page_address_init(void);
 
 /*
  * On an anonymous page mapped into a user virtual memory area,
- * page->mapping points to its anon_vma, not to a struct address_space.
+ * page->mapping points to its anon_vma, not to a struct address_space;
+ * with the PAGE_MAPPING_ANON bit set to distinguish it.
  *
  * Please note that, confusingly, "page_mapping" refers to the inode
  * address_space which maps the page from disk; whereas "page_mapped"
  * refers to user virtual address space into which the page is mapped.
  */
+#define PAGE_MAPPING_ANON	1
+
 extern struct address_space swapper_space;
 static inline struct address_space *page_mapping(struct page *page)
 {
-	struct address_space *mapping = NULL;
+	struct address_space *mapping = page->mapping;
 
 	if (unlikely(PageSwapCache(page)))
 		mapping = &swapper_space;
-	else if (likely(!PageAnon(page)))
-		mapping = page->mapping;
+	else if (unlikely((unsigned long)mapping & PAGE_MAPPING_ANON))
+		mapping = NULL;
 	return mapping;
+}
+
+static inline int PageAnon(struct page *page)
+{
+	return ((unsigned long)page->mapping & PAGE_MAPPING_ANON) != 0;
 }
 
 /*
@@ -468,11 +482,26 @@ static inline pgoff_t page_index(struct page *page)
 }
 
 /*
+ * The atomic page->_mapcount, like _count, starts from -1:
+ * so that transitions both from it and to it can be tracked,
+ * using atomic_inc_and_test and atomic_add_negative(-1).
+ */
+static inline void reset_page_mapcount(struct page *page)
+{
+	atomic_set(&(page)->_mapcount, -1);
+}
+
+static inline int page_mapcount(struct page *page)
+{
+	return atomic_read(&(page)->_mapcount) + 1;
+}
+
+/*
  * Return true if this page is mapped into pagetables.
  */
 static inline int page_mapped(struct page *page)
 {
-	return page->mapcount != 0;
+	return atomic_read(&(page)->_mapcount) >= 0;
 }
 
 /*
@@ -495,13 +524,21 @@ static inline int page_mapped(struct page *page)
 
 extern void show_free_areas(void);
 
-struct page *shmem_nopage(struct vm_area_struct * vma,
+#ifdef CONFIG_SHMEM
+struct page *shmem_nopage(struct vm_area_struct *vma,
 			unsigned long address, int *type);
 int shmem_set_policy(struct vm_area_struct *vma, struct mempolicy *new);
 struct mempolicy *shmem_get_policy(struct vm_area_struct *vma,
 					unsigned long addr);
-struct file *shmem_file_setup(char * name, loff_t size, unsigned long flags);
 int shmem_lock(struct file *file, int lock, struct user_struct *user);
+#else
+#define shmem_nopage filemap_nopage
+#define shmem_lock(a, b, c) 	({0;})	/* always in memory, no need to lock */
+#define shmem_set_policy(a, b)	(0)
+#define shmem_get_policy(a, b)	(NULL)
+#endif
+struct file *shmem_file_setup(char *name, loff_t size, unsigned long flags);
+
 int shmem_zero_setup(struct vm_area_struct *);
 
 static inline int can_do_mlock(void)
@@ -607,31 +644,32 @@ static inline pmd_t *pmd_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long a
 }
 
 extern void free_area_init(unsigned long * zones_size);
-extern void free_area_init_node(int nid, pg_data_t *pgdat, struct page *pmap,
+extern void free_area_init_node(int nid, pg_data_t *pgdat,
 	unsigned long * zones_size, unsigned long zone_start_pfn, 
 	unsigned long *zholes_size);
-extern void memmap_init_zone(struct page *, unsigned long, int,
-	unsigned long, unsigned long);
+extern void memmap_init_zone(unsigned long, int, unsigned long, unsigned long);
 extern void mem_init(void);
 extern void show_mem(void);
 extern void si_meminfo(struct sysinfo * val);
 extern void si_meminfo_node(struct sysinfo *val, int nid);
 
-static inline void vma_prio_tree_init(struct vm_area_struct *vma)
-{
-	vma->shared.vm_set.list.next = NULL;
-	vma->shared.vm_set.list.prev = NULL;
-	vma->shared.vm_set.parent = NULL;
-	vma->shared.vm_set.head = NULL;
-}
-
 /* prio_tree.c */
 void vma_prio_tree_add(struct vm_area_struct *, struct vm_area_struct *old);
 void vma_prio_tree_insert(struct vm_area_struct *, struct prio_tree_root *);
 void vma_prio_tree_remove(struct vm_area_struct *, struct prio_tree_root *);
-struct vm_area_struct *vma_prio_tree_next(
-	struct vm_area_struct *, struct prio_tree_root *,
-	struct prio_tree_iter *, pgoff_t begin, pgoff_t end);
+struct vm_area_struct *vma_prio_tree_next(struct vm_area_struct *vma,
+	struct prio_tree_iter *iter);
+
+#define vma_prio_tree_foreach(vma, iter, root, begin, end)	\
+	for (prio_tree_iter_init(iter, root, begin, end), vma = NULL;	\
+		(vma = vma_prio_tree_next(vma, iter)); )
+
+static inline void vma_nonlinear_insert(struct vm_area_struct *vma,
+					struct list_head *list)
+{
+	vma->shared.vm_set.parent = NULL;
+	list_add_tail(&vma->shared.vm_set.list, list);
+}
 
 /* mmap.c */
 extern void vma_adjust(struct vm_area_struct *vma, unsigned long start,
@@ -643,7 +681,7 @@ extern struct vm_area_struct *vma_merge(struct mm_struct *,
 extern struct anon_vma *find_mergeable_anon_vma(struct vm_area_struct *);
 extern int split_vma(struct mm_struct *,
 	struct vm_area_struct *, unsigned long addr, int new_below);
-extern void insert_vm_struct(struct mm_struct *, struct vm_area_struct *);
+extern int insert_vm_struct(struct mm_struct *, struct vm_area_struct *);
 extern void __vma_link_rb(struct mm_struct *, struct vm_area_struct *,
 	struct rb_node **, struct rb_node *);
 extern struct vm_area_struct *copy_vma(struct vm_area_struct **,
@@ -737,10 +775,29 @@ extern struct vm_area_struct *find_extend_vma(struct mm_struct *mm, unsigned lon
 extern struct page * vmalloc_to_page(void *addr);
 extern struct page * follow_page(struct mm_struct *mm, unsigned long address,
 		int write);
-extern struct page * follow_page_pfn(struct mm_struct *mm,
-		unsigned long address, int write, unsigned long *pfn);
 extern int remap_page_range(struct vm_area_struct *vma, unsigned long from,
 		unsigned long to, unsigned long size, pgprot_t prot);
+
+#ifdef CONFIG_PROC_FS
+void __vm_stat_account(struct mm_struct *, unsigned long, struct file *, long);
+#else
+static inline void __vm_stat_account(struct mm_struct *mm,
+			unsigned long flags, struct file *file, long pages)
+{
+}
+#endif /* CONFIG_PROC_FS */
+
+static inline void vm_stat_account(struct vm_area_struct *vma)
+{
+	__vm_stat_account(vma->vm_mm, vma->vm_flags, vma->vm_file,
+							vma_pages(vma));
+}
+
+static inline void vm_stat_unaccount(struct vm_area_struct *vma)
+{
+	__vm_stat_account(vma->vm_mm, vma->vm_flags, vma->vm_file,
+							-vma_pages(vma));
+}
 
 #ifndef CONFIG_DEBUG_PAGEALLOC
 static inline void

@@ -280,8 +280,6 @@ kmem_cache_t *tcp_timewait_cachep;
 
 atomic_t tcp_orphan_count = ATOMIC_INIT(0);
 
-int sysctl_tcp_default_win_scale = 7;
-
 int sysctl_tcp_mem[3];
 int sysctl_tcp_wmem[3] = { 4 * 1024, 16 * 1024, 128 * 1024 };
 int sysctl_tcp_rmem[3] = { 4 * 1024, 87380, 87380 * 2 };
@@ -740,6 +738,7 @@ new_segment:
 		skb->ip_summed = CHECKSUM_HW;
 		tp->write_seq += copy;
 		TCP_SKB_CB(skb)->end_seq += copy;
+		skb_shinfo(skb)->tso_segs = 0;
 
 		if (!copied)
 			TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_PSH;
@@ -986,6 +985,7 @@ new_segment:
 
 			tp->write_seq += copy;
 			TCP_SKB_CB(skb)->end_seq += copy;
+			skb_shinfo(skb)->tso_segs = 0;
 
 			from += copy;
 			copied += copy;
@@ -1640,14 +1640,6 @@ void tcp_destroy_sock(struct sock *sk)
 	/* If it has not 0 inet_sk(sk)->num, it must be bound */
 	BUG_TRAP(!inet_sk(sk)->num || tcp_sk(sk)->bind_hash);
 
-#ifdef TCP_DEBUG
-	if (sk->sk_zapped) {
-		printk(KERN_DEBUG "TCP: double destroy sk=%p\n", sk);
-		sock_hold(sk);
-	}
-	sk->sk_zapped = 1;
-#endif
-
 	sk->sk_prot->destroy(sk);
 
 	sk_stream_kill_queues(sk);
@@ -1867,7 +1859,7 @@ int tcp_disconnect(struct sock *sk, int flags)
 	tp->backoff = 0;
 	tp->snd_cwnd = 2;
 	tp->probes_out = 0;
-	tp->packets_out = 0;
+	tcp_set_pcount(&tp->packets_out, 0);
 	tp->snd_ssthresh = 0x7fffffff;
 	tp->snd_cwnd_cnt = 0;
 	tcp_set_ca_state(tp, TCP_CA_Open);
@@ -2481,7 +2473,6 @@ void __init tcp_init(void)
 
 EXPORT_SYMBOL(tcp_accept);
 EXPORT_SYMBOL(tcp_close);
-EXPORT_SYMBOL(tcp_close_state);
 EXPORT_SYMBOL(tcp_destroy_sock);
 EXPORT_SYMBOL(tcp_disconnect);
 EXPORT_SYMBOL(tcp_getsockopt);

@@ -7,6 +7,7 @@
 #include <linux/blkdev.h>
 #include <linux/blkpg.h>
 #include <linux/cdrom.h>
+#include <linux/delay.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
 
@@ -131,7 +132,7 @@ int sr_do_ioctl(Scsi_CD *cd, struct packet_command *cgc)
 					printk(KERN_INFO "%s: CDROM not ready yet.\n", cd->cdi.name);
 				if (retries++ < 10) {
 					/* sleep 2 sec and try again */
-					scsi_sleep(2 * HZ);
+					ssleep(2);
 					goto retry;
 				} else {
 					/* 20 secs are enough? */
@@ -548,5 +549,17 @@ int sr_dev_ioctl(struct cdrom_device_info *cdi,
 		 unsigned int cmd, unsigned long arg)
 {
 	Scsi_CD *cd = cdi->handle;
+	int ret;
+	
+	ret = scsi_nonblockable_ioctl(cd->device, cmd,
+				      (void __user *)arg, NULL);
+	/*
+	 * ENODEV means that we didn't recognise the ioctl, or that we
+	 * cannot execute it in the current device state.  In either
+	 * case fall through to scsi_ioctl, which will return ENDOEV again
+	 * if it doesn't recognise the ioctl
+	 */
+	if (ret != -ENODEV)
+		return ret;
 	return scsi_ioctl(cd->device, cmd, (void __user *)arg);
 }

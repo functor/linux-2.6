@@ -18,6 +18,7 @@
 #include "linux/capability.h"
 #include "linux/vmalloc.h"
 #include "linux/spinlock.h"
+#include "linux/vs_cvirt.h"
 #include "asm/unistd.h"
 #include "asm/mman.h"
 #include "asm/segment.h"
@@ -104,7 +105,7 @@ int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
 
 	current->thread.request.u.thread.proc = fn;
 	current->thread.request.u.thread.arg = arg;
-	pid = do_fork(CLONE_VM | CLONE_UNTRACED | flags, 0, NULL, 0, NULL, 
+	pid = do_fork(CLONE_VM | CLONE_UNTRACED | flags, 0, NULL, 0, NULL,
 		      NULL);
 	if(pid < 0)
 		panic("do_fork failed in kernel_thread, errno = %d", pid);
@@ -114,10 +115,11 @@ int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
 void switch_mm(struct mm_struct *prev, struct mm_struct *next, 
 	       struct task_struct *tsk)
 {
-	unsigned cpu = smp_processor_id();
+	int cpu = smp_processor_id();
+
 	if (prev != next) 
-		clear_bit(cpu, &prev->cpu_vm_mask);
-	set_bit(cpu, &next->cpu_vm_mask);
+		cpu_clear(cpu, prev->cpu_vm_mask);
+	cpu_set(cpu, next->cpu_vm_mask);
 }
 
 void set_current(void *t)

@@ -1466,7 +1466,7 @@ cfq_prio_show(struct cfq_data *cfqd, char *page, unsigned int priolvl)
 	q2 = (int)atomic_read(&(cfqd->cid[priolvl].cum_queues_out));
 	*/
 
-	return sprintf(page,"skip %d timdout %d avsec %lu rate %ld "
+	return sprintf(page,"skip %d timdout %d avsec %lu rate %d "
 		       " sec0 %lu sec1 %lu\n",
 		       cfqd->cid[priolvl].cfqpriv.nskip,
 		       cfqd->cid[priolvl].cfqpriv.timedout,

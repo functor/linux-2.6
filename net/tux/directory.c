@@ -210,6 +210,7 @@ static int filldir64(void * __buf, const char * name, int namlen, loff_t offset,
 	struct linux_dirent64 * dirent, d;
 	struct getdents_callback64 * buf = (struct getdents_callback64 *) __buf;
 	int reclen = ROUND_UP64(NAME_OFFSET(dirent) + namlen + 1);
+	int err;
 
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
@@ -217,7 +218,8 @@ static int filldir64(void * __buf, const char * name, int namlen, loff_t offset,
 	dirent = buf->previous;
 	if (dirent) {
 		d.d_off = offset;
-		copy_to_user(&dirent->d_off, &d.d_off, sizeof(d.d_off));
+		err = copy_to_user(&dirent->d_off, &d.d_off, sizeof(d.d_off));
+		BUG_ON(err);
 	}
 	dirent = buf->current_dir;
 	buf->previous = dirent;
@@ -225,9 +227,12 @@ static int filldir64(void * __buf, const char * name, int namlen, loff_t offset,
 	d.d_ino = ino;
 	d.d_reclen = reclen;
 	d.d_type = d_type;
-	copy_to_user(dirent, &d, NAME_OFFSET(&d));
-	copy_to_user(dirent->d_name, name, namlen);
-	put_user(0, dirent->d_name + namlen);
+	err = copy_to_user(dirent, &d, NAME_OFFSET(&d));
+	BUG_ON(err);
+	err = copy_to_user(dirent->d_name, name, namlen);
+	BUG_ON(err);
+	err = put_user(0, dirent->d_name + namlen);
+	BUG_ON(err);
 	dirent = (void *)dirent + reclen;
 	buf->current_dir = dirent;
 	buf->count -= reclen;
@@ -261,7 +266,7 @@ void list_directory (tux_req_t *req, int cachemiss)
 
 	oldmm = get_fs(); set_fs(KERNEL_DS);
 	set_fs(KERNEL_DS);
-	total = vfs_readdir(&req->in_file, filldir64, &buf);
+	total = vfs_readdir(req->in_file, filldir64, &buf);
 	set_fs(oldmm);
 
 	if (buf.previous)
@@ -278,7 +283,7 @@ void list_directory (tux_req_t *req, int cachemiss)
 	}
 	if (!total) {
 		kfree(dirp0);
-		req->in_file.f_pos = 0;
+		req->in_file->f_pos = 0;
 		add_req_to_workqueue(req);
 		return;
 	}

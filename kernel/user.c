@@ -33,7 +33,7 @@ struct user_struct root_user = {
 	.files		= ATOMIC_INIT(0),
 	.sigpending	= ATOMIC_INIT(0),
 	.mq_bytes	= 0,
-	.locked_shm     = 0
+	.locked_shm     = 0,
 };
 
 /*

@@ -127,14 +127,19 @@ static int verify_command(struct file *file, unsigned char *cmd)
 		safe_for_read(MODE_SENSE),
 		safe_for_read(MODE_SENSE_10),
 		safe_for_read(START_STOP),
+		safe_for_read(GPCMD_VERIFY_10),
+		safe_for_read(VERIFY_16),
+		safe_for_read(READ_BUFFER),
 
 		/* Audio CD commands */
 		safe_for_read(GPCMD_PLAY_CD),
 		safe_for_read(GPCMD_PLAY_AUDIO_10),
 		safe_for_read(GPCMD_PLAY_AUDIO_MSF),
 		safe_for_read(GPCMD_PLAY_AUDIO_TI),
+		safe_for_read(GPCMD_PAUSE_RESUME),
 
 		/* CD/DVD data reading */
+		safe_for_read(GPCMD_READ_BUFFER_CAPACITY),
 		safe_for_read(GPCMD_READ_CD),
 		safe_for_read(GPCMD_READ_CD_MSF),
 		safe_for_read(GPCMD_READ_DISC_INFO),
@@ -146,6 +151,12 @@ static int verify_command(struct file *file, unsigned char *cmd)
 		safe_for_read(GPCMD_READ_TOC_PMA_ATIP),
 		safe_for_read(GPCMD_REPORT_KEY),
 		safe_for_read(GPCMD_SCAN),
+		safe_for_read(GPCMD_GET_CONFIGURATION),
+		safe_for_read(GPCMD_READ_FORMAT_CAPACITIES),
+		safe_for_read(GPCMD_GET_EVENT_STATUS_NOTIFICATION),
+		safe_for_read(GPCMD_GET_PERFORMANCE),
+		safe_for_read(GPCMD_SEEK),
+		safe_for_read(GPCMD_STOP_PLAY_SCAN),
 
 		/* Basic writing commands */
 		safe_for_write(WRITE_6),
@@ -155,6 +166,24 @@ static int verify_command(struct file *file, unsigned char *cmd)
 		safe_for_write(WRITE_VERIFY_12),
 		safe_for_write(WRITE_16),
 		safe_for_write(WRITE_LONG),
+		safe_for_write(ERASE),
+		safe_for_write(GPCMD_MODE_SELECT_10),
+		safe_for_write(MODE_SELECT),
+		safe_for_write(GPCMD_BLANK),
+		safe_for_write(GPCMD_CLOSE_TRACK),
+		safe_for_write(GPCMD_FLUSH_CACHE),
+		safe_for_write(GPCMD_FORMAT_UNIT),
+		safe_for_write(GPCMD_REPAIR_RZONE_TRACK),
+		safe_for_write(GPCMD_RESERVE_RZONE_TRACK),
+		safe_for_write(GPCMD_SEND_DVD_STRUCTURE),
+		safe_for_write(GPCMD_SEND_EVENT),
+		safe_for_write(GPCMD_SEND_KEY),
+		safe_for_write(GPCMD_SEND_OPC),
+		safe_for_write(GPCMD_SEND_CUE_SHEET),
+		safe_for_write(GPCMD_SET_SPEED),
+		safe_for_write(GPCMD_PREVENT_ALLOW_MEDIUM_REMOVAL),
+		safe_for_write(GPCMD_LOAD_UNLOAD),
+		safe_for_write(GPCMD_SET_STREAMING),
 	};
 	unsigned char type = cmd_type[cmd[0]];
 
@@ -265,11 +294,11 @@ static int sg_io(struct file *file, request_queue_t *q,
 	blk_execute_rq(q, bd_disk, rq);
 
 	/* write to all output members */
-	hdr->status = rq->errors;	
-	hdr->masked_status = (hdr->status >> 1) & 0x1f;
-	hdr->msg_status = 0;
-	hdr->host_status = 0;
-	hdr->driver_status = 0;
+	hdr->status = 0xff & rq->errors;
+	hdr->masked_status = status_byte(rq->errors);
+	hdr->msg_status = msg_byte(rq->errors);
+	hdr->host_status = host_byte(rq->errors);
+	hdr->driver_status = driver_byte(rq->errors);
 	hdr->info = 0;
 	if (hdr->masked_status || hdr->host_status || hdr->driver_status)
 		hdr->info |= SG_INFO_CHECK;
@@ -315,7 +344,7 @@ static int sg_scsi_ioctl(struct file *file, request_queue_t *q,
 		return -EFAULT;
 	if (in_len > PAGE_SIZE || out_len > PAGE_SIZE)
 		return -EINVAL;
-	if (get_user(opcode, (int *)sic->data))
+	if (get_user(opcode, sic->data))
 		return -EFAULT;
 
 	bytes = max(in_len, out_len);
@@ -510,6 +539,7 @@ int scsi_cmd_ioctl(struct file *file, struct gendisk *bd_disk, unsigned int cmd,
 		 * old junk scsi send command ioctl
 		 */
 		case SCSI_IOCTL_SEND_COMMAND:
+			printk(KERN_WARNING "program %s is using a deprecated SCSI ioctl, please convert it to SG_IO\n", current->comm);
 			err = -EINVAL;
 			if (!arg)
 				break;

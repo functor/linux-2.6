@@ -452,6 +452,7 @@ struct cdrom_generic_command
 #define GPCMD_PREVENT_ALLOW_MEDIUM_REMOVAL  0x1e
 #define GPCMD_READ_10			    0x28
 #define GPCMD_READ_12			    0xa8
+#define GPCMD_READ_BUFFER_CAPACITY	    0x5c
 #define GPCMD_READ_CDVD_CAPACITY	    0x25
 #define GPCMD_READ_CD			    0xbe
 #define GPCMD_READ_CD_MSF		    0xb9
@@ -466,9 +467,10 @@ struct cdrom_generic_command
 #define GPCMD_REPORT_KEY		    0xa4
 #define GPCMD_REQUEST_SENSE		    0x03
 #define GPCMD_RESERVE_RZONE_TRACK	    0x53
+#define GPCMD_SEND_CUE_SHEET		    0x5d
 #define GPCMD_SCAN			    0xba
 #define GPCMD_SEEK			    0x2b
-#define GPCMD_SEND_DVD_STRUCTURE	    0xad
+#define GPCMD_SEND_DVD_STRUCTURE	    0xbf
 #define GPCMD_SEND_EVENT		    0xa2
 #define GPCMD_SEND_KEY			    0xa3
 #define GPCMD_SEND_OPC			    0x54

@@ -424,7 +424,15 @@ __SYSCALL(__NR_putpmsg, sys_ni_syscall)
 __SYSCALL(__NR_afs_syscall, sys_ni_syscall)
 
 #define __NR_tuxcall      		184 /* reserved for tux */
-__SYSCALL(__NR_tuxcall, sys_ni_syscall)
+#ifdef CONFIG_TUX
+ __SYSCALL(__NR_tuxcall, __sys_tux)
+#else
+# ifdef CONFIG_TUX_MODULE
+  __SYSCALL(__NR_tuxcall, sys_tux)
+# else
+  __SYSCALL(__NR_tuxcall, sys_ni_syscall)
+# endif
+#endif
 
 #define __NR_security			185
 __SYSCALL(__NR_security, sys_ni_syscall)
@@ -551,13 +559,21 @@ __SYSCALL(__NR_mq_notify, sys_mq_notify)
 #define __NR_mq_getsetattr 	245
 __SYSCALL(__NR_mq_getsetattr, sys_mq_getsetattr)
 #define __NR_kexec_load 	246
-__SYSCALL(__NR_kexec_load, sys_ni_syscall)
+__SYSCALL(__NR_kexec_load, sys_kexec_load)
+#define __NR_waitid		247
+__SYSCALL(__NR_waitid, sys_waitid)
+#define __NR_syscall_max __NR_waitid
+
+#ifdef USE_IOPRIO_SYSCALLS
+#warning MEF if necessary may need to adjust ioprio syscalls 
 #define __NR_ioprio_set		247
 __SYSCALL(__NR_ioprio_set, sys_ioprio_set);
 #define __NR_ioprio_get		248
 __SYSCALL(__NR_ioprio_get, sys_ioprio_get);
+#else
+#warning MEF not including sys_ioprio_{set,get} syscalls
+#endif	
 
-#define __NR_syscall_max __NR_ioprio_get
 #ifndef __NO_STUBS
 
 /* user-visible error numbers are in the range -1 - -4095 */

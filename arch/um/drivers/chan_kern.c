@@ -19,6 +19,7 @@
 #include "line.h"
 #include "os.h"
 
+#ifdef CONFIG_NOCONFIG_CHAN
 static void *not_configged_init(char *str, int device, struct chan_opts *opts)
 {
 	printk(KERN_ERR "Using a channel type which is configured out of "
@@ -87,6 +88,55 @@ static struct chan_ops not_configged_ops = {
 	.free		= not_configged_free,
 	.winch		= 0,
 };
+#endif /* CONFIG_NOCONFIG_CHAN */
+
+void generic_close(int fd, void *unused)
+{
+	os_close_file(fd);
+}
+
+int generic_read(int fd, char *c_out, void *unused)
+{
+	int n;
+
+	n = os_read_file(fd, c_out, sizeof(*c_out));
+
+	if(n == -EAGAIN)
+		return(0);
+	else if(n == 0)
+		return(-EIO);
+	return(n);
+}
+
+/* XXX Trivial wrapper around os_write_file */
+
+int generic_write(int fd, const char *buf, int n, void *unused)
+{
+	return(os_write_file(fd, buf, n));
+}
+
+int generic_window_size(int fd, void *unused, unsigned short *rows_out,
+			unsigned short *cols_out)
+{
+	int rows, cols;
+	int ret;
+
+	ret = os_window_size(fd, &rows, &cols);
+	if(ret < 0)
+		return(ret);
+
+	ret = ((*rows_out != rows) || (*cols_out != cols));
+
+	*rows_out = rows;
+	*cols_out = cols;
+
+	return(ret);
+}
+
+void generic_free(void *data)
+{
+	kfree(data);
+}
 
 void generic_close(int fd, void *unused)
 {
@@ -531,14 +581,14 @@ void chan_interrupt(struct list_head *chans, struct work_struct *task,
 				goto out;
 			}
 			err = chan->ops->read(chan->fd, &c, chan->data);
-			if(err > 0) 
+			if(err > 0)
 				tty_receive_char(tty, c);
 		} while(err > 0);
 
 		if(err == 0) reactivate_fd(chan->fd, irq);
 		if(err == -EIO){
 			if(chan->primary){
-				if(tty != NULL) 
+				if(tty != NULL)
 					tty_hangup(tty);
 				line_disable(dev, irq);
 				close_chan(chans);

@@ -81,7 +81,7 @@ int inode_change_ok(struct inode *inode, struct iattr *attr)
 			printk(KERN_WARNING
 				"VSW: xid=%d messing with the devpts.\n",
 				vx_current_xid());
-			goto error;	
+			goto error;
 	}
 fine:
 	retval = 0;

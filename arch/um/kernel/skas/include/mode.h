@@ -14,9 +14,9 @@ extern unsigned long exec_fpx_regs[];
 extern int have_fpx_regs;
 
 extern void user_time_init_skas(void);
-extern int copy_sc_from_user_skas(int pid, union uml_pt_regs *regs, 
+extern int copy_sc_from_user_skas(int pid, union uml_pt_regs *regs,
 				  void *from_ptr);
-extern int copy_sc_to_user_skas(int pid, void *to_ptr, void *fp, 
+extern int copy_sc_to_user_skas(int pid, void *to_ptr, void *fp,
 				union uml_pt_regs *regs, 
 				unsigned long fault_addr, int fault_type);
 extern void sig_handler_common_skas(int sig, void *sc_ptr);

@@ -262,7 +262,7 @@ static void update_thread(void)
 		os_kill_process(write_sigio_pid, 1);
 	write_sigio_pid = -1;
 	os_close_file(sigio_private[0]);
-	os_close_file(sigio_private[1]);	
+	os_close_file(sigio_private[1]);
 	os_close_file(write_sigio_fds[0]);
 	os_close_file(write_sigio_fds[1]);
 	sigio_unlock();
@@ -390,7 +390,7 @@ void write_sigio_workaround(void)
 	write_sigio_pid = -1;
  out_close2:
 	os_close_file(sigio_private[0]);
-	os_close_file(sigio_private[1]);	
+	os_close_file(sigio_private[1]);
  out_close1:
 	os_close_file(write_sigio_fds[0]);
 	os_close_file(write_sigio_fds[1]);
@@ -407,8 +407,8 @@ int read_sigio_fd(int fd)
 		if(n < 0) {
 			printk("read_sigio_fd - read failed, err = %d\n", -n);
 			return(n);
-		} 
-		else { 
+		}
+		else {
 			printk("read_sigio_fd - short read, bytes = %d\n", n);
 			return(-EIO);
 		}

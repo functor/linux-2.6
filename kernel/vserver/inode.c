@@ -29,7 +29,7 @@ static int __vc_get_iattr(struct inode *in, uint32_t *xid, uint32_t *flags, uint
 	*flags = IATTR_XID
 		| (IS_BARRIER(in) ? IATTR_BARRIER : 0)
 		| (IS_IUNLINK(in) ? IATTR_IUNLINK : 0)
-		| (IS_IMMUTABLE(in) ? IATTR_IMMUTABLE : 0);	
+		| (IS_IMMUTABLE(in) ? IATTR_IMMUTABLE : 0);
 	*mask = IATTR_IUNLINK | IATTR_IMMUTABLE;
 
 	if (S_ISDIR(in->i_mode))
@@ -42,12 +42,12 @@ static int __vc_get_iattr(struct inode *in, uint32_t *xid, uint32_t *flags, uint
 
 	if (in->i_sb->s_magic == PROC_SUPER_MAGIC) {
 		struct proc_dir_entry *entry = PROC_I(in)->pde;
-		
+
 		// check for specific inodes ?
 		if (entry)
 			*mask |= IATTR_FLAGS;
 		if (entry)
-			*flags |= (entry->vx_flags & IATTR_FLAGS);	
+			*flags |= (entry->vx_flags & IATTR_FLAGS);
 		else
 			*flags |= (PROC_I(in)->vx_flags & IATTR_FLAGS);
 	}
@@ -105,7 +105,7 @@ static int __vc_set_iattr(struct dentry *de, uint32_t *xid, uint32_t *flags, uin
 		if (entry)
 			entry->vx_flags = iflags;
 	}
-	
+
 	if (*mask & (IATTR_BARRIER | IATTR_IUNLINK | IATTR_IMMUTABLE)) {
 		struct iattr attr;
 
@@ -141,7 +141,7 @@ static int __vc_set_iattr(struct dentry *de, uint32_t *xid, uint32_t *flags, uin
 				error = inode_setattr(in, &attr);
 		}
 	}
-		
+
 	mark_inode_dirty(in);
 	up(&in->i_sem);
 	return 0;
@@ -202,7 +202,7 @@ int vc_iattr_ioctl(struct dentry *de, unsigned int cmd, unsigned long arg)
 }
 
 
-#ifdef	CONFIG_VSERVER_LEGACY		
+#ifdef	CONFIG_VSERVER_LEGACY
 #include <linux/proc_fs.h>
 
 #define PROC_DYNAMIC_FIRST 0xF0000000UL
@@ -218,6 +218,8 @@ int vx_proc_ioctl(struct inode * inode, struct file * filp,
 		return -ENOTTY;
 
 	entry = PROC_I(inode)->pde;
+	if (!entry)
+		return -ENOTTY;
 
 	switch(cmd) {
 	case FIOC_GETXFLG: {

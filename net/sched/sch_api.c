@@ -371,6 +371,8 @@ int qdisc_graft(struct net_device *dev, struct Qdisc *parent, u32 classid,
 			unsigned long cl = cops->get(parent, classid);
 			if (cl) {
 				err = cops->graft(parent, cl, new, old);
+				if (new)
+					new->parent = classid;
 				cops->put(parent, cl);
 			}
 		}
@@ -407,6 +409,9 @@ qdisc_create(struct net_device *dev, u32 handle, struct rtattr **tca, int *errp)
 	err = -EINVAL;
 	if (ops == NULL)
 		goto err_out;
+	err = -EBUSY;
+	if (!try_module_get(ops->owner))
+		goto err_out;
 
 	/* ensure that the Qdisc and the private data are 32-byte aligned */
 	size = ((sizeof(*sch) + QDISC_ALIGN_CONST) & ~QDISC_ALIGN_CONST);
@@ -415,17 +420,11 @@ qdisc_create(struct net_device *dev, u32 handle, struct rtattr **tca, int *errp)
 	p = kmalloc(size, GFP_KERNEL);
 	err = -ENOBUFS;
 	if (!p)
-		goto err_out;
+		goto err_out2;
 	memset(p, 0, size);
 	sch = (struct Qdisc *)(((unsigned long)p + QDISC_ALIGN_CONST)
 	                       & ~QDISC_ALIGN_CONST);
 	sch->padded = (char *)sch - (char *)p;
-
-	/* Grrr... Resolve race condition with module unload */
-
-	err = -EINVAL;
-	if (ops != qdisc_lookup_ops(kind))
-		goto err_out;
 
 	INIT_LIST_HEAD(&sch->list);
 	skb_queue_head_init(&sch->q);
@@ -444,17 +443,13 @@ qdisc_create(struct net_device *dev, u32 handle, struct rtattr **tca, int *errp)
 		handle = qdisc_alloc_handle(dev);
 		err = -ENOMEM;
 		if (handle == 0)
-			goto err_out;
+			goto err_out3;
 	}
 
 	if (handle == TC_H_INGRESS)
                 sch->handle =TC_H_MAKE(TC_H_INGRESS, 0);
         else
                 sch->handle = handle;
-
-	err = -EBUSY;
-	if (!try_module_get(ops->owner))
-		goto err_out;
 
 	/* enqueue is accessed locklessly - make sure it's visible
 	 * before we set a netdevice's qdisc pointer to sch */
@@ -471,8 +466,10 @@ qdisc_create(struct net_device *dev, u32 handle, struct rtattr **tca, int *errp)
 #endif
 		return sch;
 	}
+err_out3:
+	dev_put(dev);
+err_out2:
 	module_put(ops->owner);
-
 err_out:
 	*errp = err;
 	if (p)
@@ -826,7 +823,7 @@ static int tc_dump_qdisc(struct sk_buff *skb, struct netlink_callback *cb)
 				q_idx++;
 				continue;
 			}
-			if (tc_fill_qdisc(skb, q, 0, NETLINK_CB(cb->skb).pid,
+			if (tc_fill_qdisc(skb, q, q->parent, NETLINK_CB(cb->skb).pid,
 					  cb->nlh->nlmsg_seq, NLM_F_MULTI, RTM_NEWQDISC) <= 0) {
 				read_unlock_bh(&qdisc_tree_lock);
 				goto done;
@@ -1099,21 +1096,6 @@ static struct file_operations psched_fops = {
 	.llseek = seq_lseek,
 	.release = single_release,
 };	
-#endif
-
-#ifdef CONFIG_NET_SCH_CLK_GETTIMEOFDAY
-int psched_tod_diff(int delta_sec, int bound)
-{
-	int delta;
-
-	if (bound <= 1000000 || delta_sec > (0x7FFFFFFF/1000000)-1)
-		return bound;
-	delta = delta_sec * 1000000;
-	if (delta > bound)
-		delta = bound;
-	return delta;
-}
-EXPORT_SYMBOL(psched_tod_diff);
 #endif
 
 #ifdef CONFIG_NET_SCH_CLK_CPU

@@ -73,9 +73,8 @@ static int buffer_data(struct line *line, const char *buf, int len)
 	else {
 		memcpy(line->tail, buf, end);
 		buf += end;
-		len -= end;
-		memcpy(line->buffer, buf, len);
-		line->tail = line->buffer + len;
+		memcpy(line->buffer, buf, len - end);
+		line->tail = line->buffer + len - end;
 	}
 
 	return(len);
@@ -165,7 +164,7 @@ int line_write(struct line *lines, struct tty_struct *tty, int from_user,
 	return(ret);
 }
 
-static irqreturn_t line_write_interrupt(int irq, void *data, 
+static irqreturn_t line_write_interrupt(int irq, void *data,
 					struct pt_regs *unused)
 {
 	struct line *dev = data;
@@ -173,14 +172,14 @@ static irqreturn_t line_write_interrupt(int irq, void *data,
 	int err;
 
 	err = flush_buffer(dev);
-	if(err == 0) 
+	if(err == 0)
 		return(IRQ_NONE);
 	else if(err < 0){
 		dev->head = dev->buffer;
 		dev->tail = dev->buffer;
 	}
 
-	if(tty == NULL) 
+	if(tty == NULL)
 		return(IRQ_NONE);
 
 	if(test_bit(TTY_DO_WRITE_WAKEUP, &tty->flags) &&
@@ -332,7 +331,7 @@ int line_setup(struct line *lines, int num, char *init, int all_allowed)
 	init++;
 	if((n >= 0) && (n >= num)){
 		printk("line_setup - %d out of range ((0 ... %d) allowed)\n",
-		       n, num);
+		       n, num - 1);
 		return(0);
 	}
 	else if(n >= 0){
@@ -506,7 +505,7 @@ irqreturn_t winch_interrupt(int irq, void *data, struct pt_regs *unused)
 			if(err != -EAGAIN){
 				printk("winch_interrupt : read failed, "
 				       "errno = %d\n", -err);
-				printk("fd %d is losing SIGWINCH support\n", 
+				printk("fd %d is losing SIGWINCH support\n",
 				       winch->tty_fd);
 				return(IRQ_HANDLED);
 			}

@@ -100,7 +100,7 @@ static int log_chunk(int fd, const char *buf, int len)
 		try -= missed;
 		n = os_write_file(fd, chunk, try);
 		if(n != try) {
-			if(n < 0) 
+			if(n < 0)
 				return(n);
 			return(-EIO);
 		}
@@ -142,7 +142,7 @@ void log_exec(char **argv, void *tty)
 	struct tty_log_buf data;
 	char **ptr,*arg;
 	int len;
-	
+
 	if(tty_log_fd == -1) return;
 
 	gettimeofday(&tv, NULL);
@@ -172,7 +172,7 @@ void log_exec(char **argv, void *tty)
 }
 
 extern void register_tty_logger(int (*opener)(void *, void *),
-				int (*writer)(int, const char *, int, 
+				int (*writer)(int, const char *, int,
 					      void *, int),
 				void (*closer)(int, void *));
 

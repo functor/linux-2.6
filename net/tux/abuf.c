@@ -130,7 +130,7 @@ repeat:
 			TDprintk("ret: %d, req->error = TUX_ERROR_CONN_CLOSE.\n", ret);
 			req->error = TUX_ERROR_CONN_CLOSE;
 			req->atom_idx = 0;
-			req->in_file.f_pos = 0;
+			req->in_file->f_pos = 0;
 			__free_page(req->abuf.page);
 			memset(&req->abuf, 0, sizeof(req->abuf));
 			zap_request(req, cachemiss);
@@ -157,7 +157,11 @@ repeat:
 			req->abuf.page, req->abuf.buf, req->abuf.size,
 			req->abuf.offset, req->abuf.flags);
 
-	__free_page(req->abuf.page);
+	if (req->abuf.page)
+		__free_page(req->abuf.page);
+	else
+		if (printk_ratelimit())
+			WARN_ON(1);
 
 	memset(&req->abuf, 0, sizeof(req->abuf));
 

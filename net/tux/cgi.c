@@ -41,16 +41,11 @@ static int exec_usermode(char *program_path, char *argv[], char *envp[])
 	/* Allow execve args to be in kernel space. */
 	set_fs(KERNEL_DS);
 
-	flush_signals(current);
-	spin_lock_irq(&current->sighand->siglock);
-	flush_signal_handlers(current, 1);
-	spin_unlock_irq(&current->sighand->siglock);
-
 	for (i = 3; i < current->files->max_fds; i++ )
 		if (current->files->fd[i])
 			tux_close(i);
 
-	err = execve(program_path, argv, envp);
+	err = __exec_usermodehelper(program_path, argv, envp);
 	if (err < 0)
 		return err;
 	return 0;
@@ -75,14 +70,12 @@ static int exec_helper (void * data)
 	sprintf(current->comm,"doexec - %d", current->pid);
 #if CONFIG_SMP
 	if (!tux_cgi_inherit_cpu) {
+		cpumask_t map;
 		
-		cpumask_t cgi_mask, map;
-		
-		mask_to_cpumask(tux_cgi_cpu_mask, &cgi_mask);
-		cpus_and(map, cpu_online_map, cgi_mask);
+		cpus_and(map, cpu_online_map, tux_cgi_cpu_mask);
 	
 		if (!(cpus_empty(map)))
-			set_cpus_allowed(current, cgi_mask);
+			set_cpus_allowed(current, map);
 		else
 			set_cpus_allowed(current, cpu_online_map);
 	}
@@ -121,17 +114,11 @@ static int exec_helper (void * data)
 		tux_close(3);
 		tux_close(5);
 		// do not close on exec.
-#if 0
-		sys_fcntl(0, F_SETFD, 0);
-		sys_fcntl(1, F_SETFD, 0);
-		sys_fcntl(2, F_SETFD, 0);
-#else
 		spin_lock(&current->files->file_lock);
 		FD_CLR(0, current->files->close_on_exec);
 		FD_CLR(1, current->files->close_on_exec);
 		FD_CLR(2, current->files->close_on_exec);
 		spin_unlock(&current->files->file_lock);
-#endif
 	}
 	ret = exec_usermode(param->command, param->argv, param->envp);
 	if (ret < 0)

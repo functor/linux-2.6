@@ -85,28 +85,22 @@ extern unsigned long pgkern_mask;
 
 static inline void flush_tlb_mm(struct mm_struct *mm)
 {
-#ifndef CONFIG_X86_SWITCH_PAGETABLES
 	if (mm == current->active_mm)
 		__flush_tlb();
-#endif
 }
 
 static inline void flush_tlb_page(struct vm_area_struct *vma,
 	unsigned long addr)
 {
-#ifndef CONFIG_X86_SWITCH_PAGETABLES
 	if (vma->vm_mm == current->active_mm)
 		__flush_tlb_one(addr);
-#endif
 }
 
 static inline void flush_tlb_range(struct vm_area_struct *vma,
 	unsigned long start, unsigned long end)
 {
-#ifndef CONFIG_X86_SWITCH_PAGETABLES
 	if (vma->vm_mm == current->active_mm)
 		__flush_tlb();
-#endif
 }
 
 #else
@@ -117,10 +111,11 @@ static inline void flush_tlb_range(struct vm_area_struct *vma,
 	__flush_tlb()
 
 extern void flush_tlb_all(void);
+extern void flush_tlb_current_task(void);
 extern void flush_tlb_mm(struct mm_struct *);
 extern void flush_tlb_page(struct vm_area_struct *, unsigned long);
 
-#define flush_tlb()	flush_tlb_all()
+#define flush_tlb()	flush_tlb_current_task()
 
 static inline void flush_tlb_range(struct vm_area_struct * vma, unsigned long start, unsigned long end)
 {
@@ -136,7 +131,7 @@ struct tlb_state
 	int state;
 	char __cacheline_padding[L1_CACHE_BYTES-8];
 };
-extern struct tlb_state cpu_tlbstate[NR_CPUS];
+DECLARE_PER_CPU(struct tlb_state, cpu_tlbstate);
 
 
 #endif

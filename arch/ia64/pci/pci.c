@@ -46,8 +46,6 @@
 #define DBG(x...)
 #endif
 
-struct pci_fixup pcibios_fixups[1];
-
 /*
  * Low-level SAL-based PCI configuration access functions. Note that SAL
  * calls are already serialized (via sal_lock), so we don't need another
@@ -126,7 +124,7 @@ pci_write (struct pci_bus *bus, unsigned int devfn, int where, int size, u32 val
 				  devfn, where, size, value);
 }
 
-static struct pci_ops pci_root_ops = {
+struct pci_ops pci_root_ops = {
 	.read = pci_read,
 	.write = pci_write,
 };
@@ -138,6 +136,11 @@ pci_acpi_init (void)
 
 	printk(KERN_INFO "PCI: Using ACPI for IRQ routing\n");
 
+#ifdef CONFIG_NUMA
+extern acpi_status acpi_map_iosapic (acpi_handle, u32, void*, void**);
+
+	acpi_get_devices(NULL, acpi_map_iosapic, NULL, NULL);
+#endif
 	/*
 	 * PCI IRQ routing is set up by pci_enable_device(), but we
 	 * also do it here in case there are still broken drivers that
@@ -332,7 +335,7 @@ pcibios_fixup_device_resources (struct pci_dev *dev, struct pci_bus *bus)
 	struct pci_window *window;
 	int i, j;
 	int limit = (dev->hdr_type == PCI_HEADER_TYPE_NORMAL) ? \
-		PCI_ROM_RESOURCE : PCI_NUM_RESOURCES;
+		PCI_BRIDGE_RESOURCES : PCI_NUM_RESOURCES;
 
 	for (i = 0; i < limit; i++) {
 		if (!dev->resource[i].start)

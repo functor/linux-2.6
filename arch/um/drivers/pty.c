@@ -98,9 +98,9 @@ int pty_open(int input, int output, int primary, void *d, char **dev_out)
 	char dev[sizeof("/dev/ptyxx\0")] = "/dev/ptyxx";
 
 	fd = getmaster(dev);
-	if(fd < 0) 
+	if(fd < 0)
 		return(-errno);
-	
+
 	if(data->raw){
 		err = raw(fd);
 		if(err)

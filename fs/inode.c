@@ -100,36 +100,13 @@ struct inodes_stat_t inodes_stat;
 
 static kmem_cache_t * inode_cachep;
 
-static void prune_icache(int nr_to_scan);
-
-
-#define INODE_UNUSED_THRESHOLD 15000
-#define PRUNE_BATCH_COUNT 32
-
-void try_to_clip_inodes(void)
-{
-	unsigned long count = 0; 
-	/* if there are a LOT of unused inodes in cache, better shrink a few first */
-	
-	/* check lockless first to not take the lock always here; racing occasionally isn't a big deal */
-	if (inodes_stat.nr_unused > INODE_UNUSED_THRESHOLD) {
-		spin_lock(&inode_lock);
-		if (inodes_stat.nr_unused > INODE_UNUSED_THRESHOLD)
-			count = inodes_stat.nr_unused - INODE_UNUSED_THRESHOLD;
-		spin_unlock(&inode_lock);
-		if (count)
-			prune_icache(count);
-	}
-}
-
-
 static struct inode *alloc_inode(struct super_block *sb)
 {
 	static struct address_space_operations empty_aops;
 	static struct inode_operations empty_iops;
 	static struct file_operations empty_fops;
 	struct inode *inode;
-	
+
 	if (sb->s_op->alloc_inode)
 		inode = sb->s_op->alloc_inode(sb);
 	else
@@ -514,8 +491,9 @@ static int shrink_icache_memory(int nr, unsigned int gfp_mask)
 		 * and we don't want to recurse into the FS that called us
 		 * in clear_inode() and friends..
 	 	 */
-		if (gfp_mask & __GFP_FS)
-			prune_icache(nr);
+		if (!(gfp_mask & __GFP_FS))
+			return -1;
+		prune_icache(nr);
 	}
 	return (inodes_stat.nr_unused / 100) * sysctl_vfs_cache_pressure;
 }
@@ -1401,8 +1379,7 @@ void __init inode_init(unsigned long mempages)
 
 	/* inode slab cache */
 	inode_cachep = kmem_cache_create("inode_cache", sizeof(struct inode),
-				0, SLAB_HWCACHE_ALIGN|SLAB_PANIC, init_once,
-				NULL);
+				0, SLAB_PANIC, init_once, NULL);
 	set_shrinker(DEFAULT_SEEKS, shrink_icache_memory);
 }
 

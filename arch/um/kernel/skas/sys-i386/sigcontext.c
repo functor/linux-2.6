@@ -55,8 +55,8 @@ int copy_sc_from_user_skas(int pid, union uml_pt_regs *regs, void *from_ptr)
 	return(0);
 }
 
-int copy_sc_to_user_skas(int pid, void *to_ptr, void *fp, 
-			 union uml_pt_regs *regs, unsigned long fault_addr, 
+int copy_sc_to_user_skas(int pid, void *to_ptr, void *fp,
+			 union uml_pt_regs *regs, unsigned long fault_addr,
 			 int fault_type)
 {
   	struct sigcontext sc, *to = to_ptr;

@@ -10,6 +10,13 @@ static void init_hwif_generic(ide_hwif_t *);
 
 static ide_pci_device_t generic_chipsets[] __devinitdata = {
 	{	/* 0 */
+		.name		= "Unknown",
+		.init_chipset	= init_chipset_generic,
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= AUTODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 1 */
 		.name		= "NS87410",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
@@ -17,84 +24,84 @@ static ide_pci_device_t generic_chipsets[] __devinitdata = {
 		.autodma	= AUTODMA,
 		.enablebits	= {{0x43,0x08,0x08}, {0x47,0x08,0x08}},
 		.bootable	= ON_BOARD,
-        },{	/* 1 */
+        },{	/* 2 */
 		.name		= "SAMURAI",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= AUTODMA,
 		.bootable	= ON_BOARD,
-	},{	/* 2 */
+	},{	/* 3 */
 		.name		= "HT6565",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= AUTODMA,
 		.bootable	= ON_BOARD,
-	},{	/* 3 */
+	},{	/* 4 */
 		.name		= "UM8673F",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= NODMA,
 		.bootable	= ON_BOARD,
-	},{	/* 4 */
+	},{	/* 5 */
 		.name		= "UM8886A",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= NODMA,
 		.bootable	= ON_BOARD,
-	},{	/* 5 */
+	},{	/* 6 */
 		.name		= "UM8886BF",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= NODMA,
 		.bootable	= ON_BOARD,
-	},{	/* 6 */
+	},{	/* 7 */
 		.name		= "HINT_IDE",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= AUTODMA,
 		.bootable	= ON_BOARD,
-	},{	/* 7 */
+	},{	/* 8 */
 		.name		= "VIA_IDE",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= NOAUTODMA,
 		.bootable	= ON_BOARD,
-	},{	/* 8 */
+	},{	/* 9 */
 		.name		= "OPTI621V",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= NOAUTODMA,
 		.bootable	= ON_BOARD,
-	},{	/* 9 */
+	},{	/* 10 */
 		.name		= "VIA8237SATA",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= AUTODMA,
 		.bootable	= OFF_BOARD,
-	},{ /* 10 */
+	},{	/* 11 */
 		.name 		= "Piccolo0102",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= NOAUTODMA,
 		.bootable	= ON_BOARD,
-	},{ /* 11 */
+	},{	/* 12 */
 		.name 		= "Piccolo0103",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,
 		.channels	= 2,
 		.autodma	= NOAUTODMA,
 		.bootable	= ON_BOARD,
-	},{ /* 12 */
+	},{	/* 13 */
 		.name 		= "Piccolo0105",
 		.init_chipset	= init_chipset_generic,
 		.init_hwif	= init_hwif_generic,

@@ -42,8 +42,14 @@ static int __init panic_setup(char *str)
 }
 __setup("panic=", panic_setup);
 
-int netdump_mode = 0;
-EXPORT_SYMBOL_GPL(netdump_mode);
+static long no_blink(long time)
+{
+	return 0;
+}
+
+/* Returns how long it waited in ms */
+long (*panic_blink)(long time) = no_blink;
+EXPORT_SYMBOL(panic_blink);
 
 /**
  *	panic - halt the system
@@ -57,6 +63,7 @@ EXPORT_SYMBOL_GPL(netdump_mode);
  
 NORET_TYPE void panic(const char * fmt, ...)
 {
+	long i;
 	static char buf[1024];
 	va_list args;
 #if defined(CONFIG_ARCH_S390)
@@ -69,8 +76,11 @@ NORET_TYPE void panic(const char * fmt, ...)
 	va_end(args);
 
 	printk(KERN_EMERG "Kernel panic: %s\n",buf);
+#warning MEF netdump_func not part of 2.6.9-1.11-FC2; taking out call for now
+#if 0
 	if (netdump_func)
 		BUG();
+#endif
 	if (in_interrupt())
 		printk(KERN_EMERG "In interrupt handler - not syncing\n");
 	else if (!current->pid)
@@ -85,15 +95,17 @@ NORET_TYPE void panic(const char * fmt, ...)
 	smp_send_stop();
 #endif
 
-	if (panic_timeout > 0) {
-		int i;
+	notifier_call_chain(&panic_notifier_list, 0, buf);
+
+	if (panic_timeout > 0)
+	{
 		/*
 	 	 * Delay timeout seconds before rebooting the machine. 
 		 * We can't use the "normal" timers since we just panicked..
 	 	 */
 		printk(KERN_EMERG "Rebooting in %d seconds..",panic_timeout);
 #ifdef CONFIG_KEXEC
-{		
+ {		
 		struct kimage *image;
 		image = xchg(&kexec_image, 0);
  		if (image) {
@@ -103,9 +115,11 @@ NORET_TYPE void panic(const char * fmt, ...)
  		}
  }
 #endif
-		for (i = 0; i < panic_timeout; i++) {
+		for (i = 0; i < panic_timeout*1000; ) {
 			touch_nmi_watchdog();
-			mdelay(1000);
+			i += panic_blink(i);
+			mdelay(1);
+			i++;
 		}
 		/*
 		 *	Should we run the reboot notifier. For the moment Im
@@ -126,8 +140,11 @@ NORET_TYPE void panic(const char * fmt, ...)
         disabled_wait(caller);
 #endif
 	local_irq_enable();
-	for (;;)
-		;
+	for (i = 0;;) { 
+		i += panic_blink(i);
+		mdelay(1); 
+		i++; 
+	}
 }
 
 EXPORT_SYMBOL(panic);
@@ -138,6 +155,9 @@ EXPORT_SYMBOL(panic);
  *  'P' - Proprietary module has been loaded.
  *  'F' - Module has been forcibly loaded.
  *  'S' - SMP with CPUs not designed for SMP.
+ *  'R' - User forced a module unload.
+ *  'M' - Machine had a machine check experience.
+ *  'B' - System has hit bad_page.
  *
  *	The string is overwritten by the next call to print_taint().
  */
@@ -146,12 +166,21 @@ const char *print_tainted(void)
 {
 	static char buf[20];
 	if (tainted) {
-		snprintf(buf, sizeof(buf), "Tainted: %c%c%c",
+		snprintf(buf, sizeof(buf), "Tainted: %c%c%c%c%c%c",
 			tainted & TAINT_PROPRIETARY_MODULE ? 'P' : 'G',
 			tainted & TAINT_FORCED_MODULE ? 'F' : ' ',
-			tainted & TAINT_UNSAFE_SMP ? 'S' : ' ');
+			tainted & TAINT_UNSAFE_SMP ? 'S' : ' ',
+			tainted & TAINT_FORCED_RMMOD ? 'R' : ' ',
+ 			tainted & TAINT_MACHINE_CHECK ? 'M' : ' ',
+			tainted & TAINT_BAD_PAGE ? 'B' : ' ');
 	}
 	else
 		snprintf(buf, sizeof(buf), "Not tainted");
 	return(buf);
 }
+
+void add_taint(unsigned flag)
+{
+	tainted |= flag;
+}
+EXPORT_SYMBOL(add_taint);

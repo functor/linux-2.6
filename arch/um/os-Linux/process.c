@@ -29,13 +29,13 @@ unsigned long os_process_pc(int pid)
 	sprintf(proc_stat, "/proc/%d/stat", pid);
 	fd = os_open_file(proc_stat, of_read(OPENFLAGS()), 0);
 	if(fd < 0){
-		printk("os_process_pc - couldn't open '%s', err = %d\n", 
+		printk("os_process_pc - couldn't open '%s', err = %d\n",
 		       proc_stat, -fd);
 		return(ARBITRARY_ADDR);
 	}
 	err = os_read_file(fd, buf, sizeof(buf));
 	if(err < 0){
-		printk("os_process_pc - couldn't read '%s', err = %d\n", 
+		printk("os_process_pc - couldn't read '%s', err = %d\n",
 		       proc_stat, -err);
 		os_close_file(fd);
 		return(ARBITRARY_ADDR);
@@ -75,7 +75,7 @@ int os_process_parent(int pid)
 
 	parent = FAILURE_PID;
 	n = sscanf(data, "%*d " COMM_SCANF " %*c %d", &parent);
-	if(n != 1) 
+	if(n != 1)
 		printk("Failed to scan '%s'\n", data);
 
 	return(parent);
@@ -113,7 +113,7 @@ int os_map_memory(void *virt, int fd, unsigned long long off, unsigned long len,
 	prot = (r ? PROT_READ : 0) | (w ? PROT_WRITE : 0) | 
 		(x ? PROT_EXEC : 0);
 
-	loc = mmap64((void *) virt, len, prot, MAP_SHARED | MAP_FIXED, 
+	loc = mmap64((void *) virt, len, prot, MAP_SHARED | MAP_FIXED,
 		     fd, off);
 	if(loc == MAP_FAILED)
 		return(-errno);

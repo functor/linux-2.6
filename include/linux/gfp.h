@@ -78,7 +78,7 @@ struct vm_area_struct;
 static inline void arch_free_page(struct page *page, int order) { }
 #endif
 
-extern struct page * 
+extern struct page *
 FASTCALL(__alloc_pages(unsigned int, unsigned int, struct zonelist *));
 static inline struct page * alloc_pages_node(int nid, unsigned int gfp_mask, 
 					     unsigned int order)

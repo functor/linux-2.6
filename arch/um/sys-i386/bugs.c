@@ -33,9 +33,9 @@ static char token(int fd, char *buf, int len, char stop)
 		if(n != sizeof(*ptr)){
 			if(n == 0) return(0);
 			printk("Reading /proc/cpuinfo failed, err = %d\n", -n);
-			if(n < 0) 
+			if(n < 0)
 				return(n);
-			else 
+			else
 				return(-EIO);
 		}
 	} while((c != '\n') && (c != stop) && (ptr < end));
@@ -63,7 +63,7 @@ static int find_cpuinfo_line(int fd, char *key, char *scratch, int len)
 			return(0);
 		}
 
-		if(!strncmp(scratch, key, strlen(key))) 
+		if(!strncmp(scratch, key, strlen(key)))
 			return(1);
 
 		do {
@@ -175,9 +175,9 @@ void arch_check_bugs(void)
 		       "checks\n");
 		return;
 	}
-	if(check_cpu_flag("cmov", &have_it)) 
+	if(check_cpu_flag("cmov", &have_it))
 		host_has_cmov = have_it;
-	if(check_cpu_flag("xmm", &have_it)) 
+	if(check_cpu_flag("xmm", &have_it))
 		host_has_xmm = have_it;
 }
 

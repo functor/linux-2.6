@@ -56,4 +56,10 @@ struct pt_regs;
 asmlinkage int handle_IRQ_event(unsigned int, struct pt_regs *,
 				struct irqaction *);
 
+#ifdef CONFIG_IRQBALANCE
+extern int irqbalance_disable(char *str);
+#endif
+extern int no_irq_affinity;
+extern int noirqdebug_setup(char *str);
+
 #endif /* _ASM_IRQ_H */

@@ -16,11 +16,7 @@ struct task_struct;
 
 struct mm_struct;
 
-#define current_text_addr() ((void *) 0)
-
 #define cpu_relax()   barrier()
-
-#define STACK_PAGE_COUNT	(4096/PAGE_SIZE)
 
 struct thread_struct {
 	int forking;
@@ -99,7 +95,7 @@ extern void prepare_to_copy(struct task_struct *tsk);
 
 extern unsigned long thread_saved_pc(struct task_struct *t);
 
-static inline void mm_copy_segments(struct mm_struct *from_mm, 
+static inline void mm_copy_segments(struct mm_struct *from_mm,
 				    struct mm_struct *new_mm)
 {
 }

@@ -48,7 +48,7 @@ static int slirp_tramp(char **argv, int fd)
 	return(pid);
 }
 
-/* XXX This is just a trivial wrapper around os_pipe */ 
+/* XXX This is just a trivial wrapper around os_pipe */
 static int slirp_datachan(int *mfd, int *sfd)
 {
 	int fds[2], err;

@@ -19,7 +19,7 @@
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 
-#ifdef	CONFIG_VSERVER_LEGACY		
+#ifdef	CONFIG_VSERVER_LEGACY
 extern int vx_proc_ioctl(struct inode *, struct file *,
 	unsigned int, unsigned long);
 #endif
@@ -131,7 +131,7 @@ asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 			else
 				error = -ENOTTY;
 			break;
-#ifdef	CONFIG_VSERVER_LEGACY		
+#ifdef	CONFIG_VSERVER_LEGACY
 #ifndef CONFIG_INOXID_NONE
 		case FIOC_GETXID: {
 			struct inode *inode = filp->f_dentry->d_inode;
@@ -163,7 +163,7 @@ asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 			inode->i_xid = (xid & 0xFFFF);
 			inode->i_ctime = CURRENT_TIME;
 			mark_inode_dirty(inode);
-			break;	
+			break;
 		}
 #endif
 		case FIOC_GETXFLG:

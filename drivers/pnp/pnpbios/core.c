@@ -252,8 +252,10 @@ static int pnpbios_set_resources(struct pnp_dev * dev, struct pnp_resource_table
 	node = pnpbios_kmalloc(node_info.max_node_size, GFP_KERNEL);
 	if (!node)
 		return -1;
-	if (pnp_bios_get_dev_node(&nodenum, (char )PNPMODE_DYNAMIC, node))
+	if (pnp_bios_get_dev_node(&nodenum, (char )PNPMODE_DYNAMIC, node)) {
+		kfree(node);
 		return -ENODEV;
+	}
 	if(pnpbios_write_resources_to_node(res, node)<0) {
 		kfree(node);
 		return -1;
@@ -533,6 +535,12 @@ int __init pnpbios_init(void)
 
 	if (pnpbios_disabled || dmi_check_system(pnpbios_dmi_table)) {
 		printk(KERN_INFO "PnPBIOS: Disabled\n");
+		return -ENODEV;
+	}
+
+	if (!acpi_disabled) {
+		pnpbios_disabled = 1;
+		printk(KERN_INFO "PnPBIOS: Disabled by ACPI\n");
 		return -ENODEV;
 	}
 

@@ -44,7 +44,7 @@ static inline int copy_to_user(void *to, const void *from, int n)
  *         least @count bytes long.
  * @src:   Source address, in user space.
  * @count: Maximum number of bytes to copy, including the trailing NUL.
- * 
+ *
  * Copies a NUL-terminated string from userspace to kernel space.
  *
  * On success, returns the length of the string (not including the trailing

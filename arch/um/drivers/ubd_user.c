@@ -44,9 +44,7 @@ static int same_backing_files(char *from_cmdline, char *from_cow, char *cow)
 		printk("Couldn't stat '%s', err = %d\n", from_cow, -err);
 		return(1);
 	}
-	if((buf1.ust_major == buf2.ust_major) && 
-	   (buf1.ust_minor == buf2.ust_minor) && 
-	   (buf1.ust_ino == buf2.ust_ino))
+	if((buf1.ust_dev == buf2.ust_dev) && (buf1.ust_ino == buf2.ust_ino))
 		return(1);
 
 	printk("Backing file mismatch - \"%s\" requested,\n"
@@ -93,11 +91,11 @@ int read_cow_bitmap(int fd, void *buf, int offset, int len)
 	int err;
 
 	err = os_seek_file(fd, offset);
-	if(err < 0) 
+	if(err < 0)
 		return(err);
 
 	err = os_read_file(fd, buf, len);
-	if(err < 0) 
+	if(err < 0)
 		return(err);
 
 	return(0);
@@ -121,8 +119,8 @@ int open_ubd_file(char *file, struct openflags *openflags,
                 if(!openflags->w ||
                    ((errno != EROFS) && (errno != EACCES))) return(-errno);
 		openflags->w = 0;
-		fd = os_open_file(file, *openflags, mode); 
-		if(fd < 0) 
+		fd = os_open_file(file, *openflags, mode);
+		if(fd < 0)
 			return(fd);
         }
 
@@ -131,7 +129,7 @@ int open_ubd_file(char *file, struct openflags *openflags,
 		printk("Failed to lock '%s', err = %d\n", file, -err);
 		goto out_close;
 	}
-	
+
 	if(backing_file_out == NULL) return(fd);
 
 	err = read_cow_header(file_reader, &fd, &version, &backing_file, &mtime,
@@ -162,7 +160,7 @@ int open_ubd_file(char *file, struct openflags *openflags,
 		if(err) goto out_close;
 	}
 
-	cow_sizes(version, size, sectorsize, align, *bitmap_offset_out, 
+	cow_sizes(version, size, sectorsize, align, *bitmap_offset_out,
 		  bitmap_len_out, data_offset_out);
 
         return(fd);
@@ -172,7 +170,7 @@ int open_ubd_file(char *file, struct openflags *openflags,
 }
 
 int create_cow_file(char *cow_file, char *backing_file, struct openflags flags,
-		    int sectorsize, int alignment, int *bitmap_offset_out, 
+		    int sectorsize, int alignment, int *bitmap_offset_out,
 		    unsigned long *bitmap_len_out, int *data_offset_out)
 {
 	int err, fd;
@@ -187,11 +185,10 @@ int create_cow_file(char *cow_file, char *backing_file, struct openflags flags,
 	}
 
 	err = init_cow_file(fd, cow_file, backing_file, sectorsize, alignment,
-			    bitmap_offset_out, bitmap_len_out, 
+			    bitmap_offset_out, bitmap_len_out,
 			    data_offset_out);
 	if(!err)
 		return(fd);
-
 	os_close_file(fd);
  out:
 	return(err);
@@ -241,8 +238,8 @@ void do_io(struct io_thread_req *req)
 	__u64 off;
 
 	if(req->op == UBD_MMAP){
-		/* Touch the page to force the host to do any necessary IO to 
-		 * get it into memory 
+		/* Touch the page to force the host to do any necessary IO to
+		 * get it into memory
 		 */
 		n = *((volatile int *) req->buffer);
 		req->error = update_bitmap(req);
@@ -353,6 +350,7 @@ int start_io_thread(unsigned long sp, int *fd_out)
 		    NULL);
 	if(pid < 0){
 		printk("start_io_thread - clone failed : errno = %d\n", errno);
+		err = -errno;
 		goto out_close;
 	}
 

@@ -84,9 +84,9 @@ int net_read(int fd, void *buf, int len)
 
 	n = os_read_file(fd,  buf,  len);
 
-	if(n == -EAGAIN) 
+	if(n == -EAGAIN)
 		return(0);
-	else if(n == 0) 
+	else if(n == 0)
 		return(-ENOTCONN);
 	return(n);
 }
@@ -112,9 +112,9 @@ int net_write(int fd, void *buf, int len)
 
 	n = os_write_file(fd, buf, len);
 
-	if(n == -EAGAIN) 
+	if(n == -EAGAIN)
 		return(0);
-	else if(n == 0) 
+	else if(n == 0)
 		return(-ENOTCONN);
 	return(n);
 }
@@ -173,10 +173,9 @@ static int change_tramp(char **argv, char *output, int output_len)
 	pe_data.stdout = fds[1];
 	pid = run_helper(change_pre_exec, &pe_data, argv, NULL);
 
-	read_output(fds[0], output, output_len);
-	os_close_file(fds[0]);
 	os_close_file(fds[1]);
-	CATCH_EINTR(waitpid(pid, NULL, 0));	
+	read_output(fds[0], output, output_len);
+	CATCH_EINTR(err = waitpid(pid, NULL, 0));
 	return(pid);
 }
 

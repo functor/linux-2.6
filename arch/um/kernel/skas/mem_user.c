@@ -51,9 +51,9 @@ int unmap(int fd, void *addr, int len)
 					   .len		= len } } } );
 	n = os_write_file(fd, &unmap, sizeof(unmap));
 	if(n != sizeof(unmap)) {
-		if(n < 0) 
+		if(n < 0)
 			return(n);
-		else if(n > 0) 
+		else if(n > 0)
 			return(-EIO);
 	}
 

@@ -36,10 +36,6 @@
   .init.setup : { *(.init.setup) }
   __setup_end = .;
 
-  __start___param = .;
-  __param : { *(__param) }
-  __stop___param = .;
-
   . = ALIGN(32);
   __per_cpu_start = . ; 
   .data.percpu : { *(.data.percpu) }
@@ -78,14 +74,14 @@
 
   . = ALIGN(4);
   __alt_instructions = .;
-  .altinstructions : { *(.altinstructions) } 
-  __alt_instructions_end = .; 
-  .altinstr_replacement : { *(.altinstr_replacement) } 
+  .altinstructions : { *(.altinstructions) }
+  __alt_instructions_end = .;
+  .altinstr_replacement : { *(.altinstr_replacement) }
   /* .exit.text is discard at runtime, not link time, to deal with references
      from .altinstructions and .eh_frame */
   .exit.text : { *(.exit.text) }
   .exit.data : { *(.exit.data) }
- 
+
   __preinit_array_start = .;
   .preinit_array : { *(.preinit_array) }
   __preinit_array_end = .;
@@ -105,4 +101,4 @@
   /DISCARD/ : {
  	*(.exitcall.exit)
   }
- 
+

@@ -25,7 +25,7 @@ int load_initrd(char *filename, void *buf, int size)
 	}
 	n = os_read_file(fd, buf, size);
 	if(n != size){
-		printk("Read of %d bytes from '%s' failed, err = %d\n", size, 
+		printk("Read of %d bytes from '%s' failed, err = %d\n", size,
 		       filename, -n);
 		return(-1);
 	}

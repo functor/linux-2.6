@@ -1037,11 +1037,7 @@ void tcp_v4_err(struct sk_buff *skb, u32 info)
 
 	switch (type) {
 	case ICMP_SOURCE_QUENCH:
-		/* This is deprecated, but if someone generated it,
-		 * we have no reasons to ignore it.
-		 */
-		if (!sock_owned_by_user(sk))
-			tcp_enter_cwr(tp);
+		/* Just silently ignore these. */
 		goto out;
 	case ICMP_PARAMETERPROB:
 		err = EPROTO;
@@ -2121,7 +2117,7 @@ static int tcp_v4_init_sock(struct sock *sk)
 	 */
 	tp->snd_ssthresh = 0x7fffffff;	/* Infinity */
 	tp->snd_cwnd_clamp = ~0;
-	tp->mss_cache = 536;
+	tp->mss_cache_std = tp->mss_cache = 536;
 
 	tp->reordering = sysctl_tcp_reordering;
 
@@ -2212,9 +2208,10 @@ static void *listening_get_next(struct seq_file *seq, void *cur)
 		while (1) {
 			while (req) {
 				vxdprintk(VXD_CBIT(net, 6),
-					"sk,req: %p [#%d] (from %d)",
-					req->sk, req->sk->sk_xid, current->xid);
-				if (!vx_check(req->sk->sk_xid, VX_IDENT|VX_WATCH))
+					"sk,req: %p [#%d] (from %d)", req->sk,
+					(req->sk)?req->sk->sk_xid:0, current->xid);
+				if (req->sk &&
+					!vx_check(req->sk->sk_xid, VX_IDENT|VX_WATCH))
 					continue;
 				if (req->class->family == st->family) {
 					cur = req;
@@ -2230,8 +2227,14 @@ get_req:
 		sk	  = sk_next(st->syn_wait_sk);
 		st->state = TCP_SEQ_STATE_LISTENING;
 		read_unlock_bh(&tp->syn_wait_lock);
-	} else
+	} else {
+	       	tp = tcp_sk(sk);
+		read_lock_bh(&tp->syn_wait_lock);
+		if (tp->listen_opt && tp->listen_opt->qlen)
+			goto start_req;
+		read_unlock_bh(&tp->syn_wait_lock);
 		sk = sk_next(sk);
+	}
 get_sk:
 	sk_for_each_from(sk, node) {
 		vxdprintk(VXD_CBIT(net, 6), "sk: %p [#%d] (from %d)",
@@ -2245,6 +2248,7 @@ get_sk:
 	       	tp = tcp_sk(sk);
 		read_lock_bh(&tp->syn_wait_lock);
 		if (tp->listen_opt && tp->listen_opt->qlen) {
+start_req:
 			st->uid		= sock_i_uid(sk);
 			st->syn_wait_sk = sk;
 			st->state	= TCP_SEQ_STATE_OPENREQ;
@@ -2686,6 +2690,7 @@ struct proto tcp_prot = {
 	.sysctl_wmem		= sysctl_tcp_wmem,
 	.sysctl_rmem		= sysctl_tcp_rmem,
 	.max_header		= MAX_TCP_HEADER,
+	.slab_obj_size		= sizeof(struct tcp_sock),
 };
 
 
@@ -2718,7 +2723,7 @@ EXPORT_SYMBOL(tcp_unhash);
 EXPORT_SYMBOL(tcp_v4_conn_request);
 EXPORT_SYMBOL(tcp_v4_connect);
 EXPORT_SYMBOL(tcp_v4_do_rcv);
-EXPORT_SYMBOL(tcp_v4_lookup_listener);
+EXPORT_SYMBOL_GPL(tcp_v4_lookup_listener);
 EXPORT_SYMBOL(tcp_v4_rebuild_header);
 EXPORT_SYMBOL(tcp_v4_remember_stamp);
 EXPORT_SYMBOL(tcp_v4_send_check);

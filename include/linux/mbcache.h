@@ -35,7 +35,8 @@ struct mb_cache_entry_index {
 struct mb_cache_entry {
 	struct list_head		e_lru_list;
 	struct mb_cache			*e_cache;
-	atomic_t			e_used;
+	unsigned short			e_used;
+	unsigned short			e_queued;
 	struct block_device		*e_bdev;
 	sector_t			e_block;
 	struct list_head		e_block_list;
@@ -56,9 +57,7 @@ int mb_cache_entry_insert(struct mb_cache_entry *, struct block_device *,
 			  sector_t, unsigned int[]);
 void mb_cache_entry_rehash(struct mb_cache_entry *, unsigned int[]);
 void mb_cache_entry_release(struct mb_cache_entry *);
-void mb_cache_entry_takeout(struct mb_cache_entry *);
 void mb_cache_entry_free(struct mb_cache_entry *);
-struct mb_cache_entry *mb_cache_entry_dup(struct mb_cache_entry *);
 struct mb_cache_entry *mb_cache_entry_get(struct mb_cache *,
 					  struct block_device *,
 					  sector_t);

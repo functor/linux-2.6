@@ -95,7 +95,8 @@ obj-$(CONFIG_SCSI_IBMMCA)	+= ibmmca.o
 obj-$(CONFIG_SCSI_EATA)		+= eata.o
 obj-$(CONFIG_SCSI_DC395x)	+= dc395x.o
 obj-$(CONFIG_SCSI_DC390T)	+= tmscsim.o
-obj-$(CONFIG_SCSI_MEGARAID)	+= megaraid.o
+obj-$(CONFIG_MEGARAID_LEGACY)	+= megaraid.o
+obj-$(CONFIG_MEGARAID_NEWGEN)	+= megaraid/
 obj-$(CONFIG_SCSI_ACARD)	+= atp870u.o
 obj-$(CONFIG_SCSI_SUNESP)	+= esp.o
 obj-$(CONFIG_SCSI_GDTH)		+= gdth.o
@@ -119,6 +120,8 @@ obj-$(CONFIG_SCSI_CPQFCTS)	+= cpqfc.o
 obj-$(CONFIG_SCSI_LASI700)	+= 53c700.o lasi700.o
 obj-$(CONFIG_SCSI_NSP32)	+= nsp32.o
 obj-$(CONFIG_SCSI_IPR)		+= ipr.o
+obj-$(CONFIG_SCSI_IBMVSCSI)	+= ibmvscsi/
+obj-$(CONFIG_SCSI_SATA_AHCI)	+= libata.o ahci.o
 obj-$(CONFIG_SCSI_SATA_SVW)	+= libata.o sata_svw.o
 obj-$(CONFIG_SCSI_ATA_PIIX)	+= libata.o ata_piix.o
 obj-$(CONFIG_SCSI_SATA_PROMISE)	+= libata.o sata_promise.o
@@ -128,6 +131,7 @@ obj-$(CONFIG_SCSI_SATA_VITESSE)	+= libata.o sata_vsc.o
 obj-$(CONFIG_SCSI_SATA_SIS)	+= libata.o sata_sis.o
 obj-$(CONFIG_SCSI_SATA_SX4)	+= libata.o sata_sx4.o
 obj-$(CONFIG_SCSI_SATA_NV)	+= libata.o sata_nv.o
+obj-$(CONFIG_SCSI_LPFC)		+= lpfc/
 
 obj-$(CONFIG_ARM)		+= arm/
 

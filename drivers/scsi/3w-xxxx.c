@@ -248,7 +248,7 @@ static struct file_operations tw_fops = {
 };
 
 /* Globals */
-char *tw_driver_version="1.26.00.039";
+#define TW_DRIVER_VERSION "1.26.00.039"
 TW_Device_Extension *tw_device_extension_list[TW_MAX_SLOT];
 int tw_device_extension_count = 0;
 static int twe_major = -1;
@@ -257,6 +257,7 @@ static int cmds_per_lun;
 /* Module parameters */
 module_param(cmds_per_lun, int, 0);
 MODULE_PARM_DESC(cmds_per_lun, "Maximum commands per LUN");
+MODULE_VERSION(TW_DRIVER_VERSION);
 
 /* Functions */
 
@@ -551,7 +552,7 @@ int tw_aen_read_queue(TW_Device_Extension *tw_dev, int request_id)
 	/* Now post the command packet */
 	if ((status_reg_value & TW_STATUS_COMMAND_QUEUE_FULL) == 0) {
 		dprintk(KERN_WARNING "3w-xxxx: tw_aen_read_queue(): Post succeeded.\n");
-		tw_dev->srb[request_id] = 0; /* Flag internal command */
+		tw_dev->srb[request_id] = NULL; /* Flag internal command */
 		tw_dev->state[request_id] = TW_S_POSTED;
 		outl(command_que_value, command_que_addr);
 	} else {
@@ -718,7 +719,7 @@ static int tw_chrdev_ioctl(struct inode *inode, struct file *file, unsigned int 
 			tw_state_request_start(tw_dev, &request_id);
 
 			/* Flag internal command */
-			tw_dev->srb[request_id] = 0;
+			tw_dev->srb[request_id] = NULL;
 
 			/* Flag chrdev ioctl */
 			tw_dev->chrdev_request_id = request_id;
@@ -2406,7 +2407,7 @@ int tw_scsi_detect(Scsi_Host_Template *tw_host)
 	
 	dprintk(KERN_NOTICE "3w-xxxx: tw_scsi_detect()\n");
 
-	printk(KERN_WARNING "3ware Storage Controller device driver for Linux v%s.\n", tw_driver_version);
+	printk(KERN_WARNING "3ware Storage Controller device driver for Linux v%s.\n", TW_DRIVER_VERSION);
 
 	ret = tw_findcards(tw_host);
 
@@ -2569,7 +2570,7 @@ int tw_scsi_proc_info(struct Scsi_Host *shost, char *buffer, char **start,
 			*start = buffer;
 		}
 		tw_copy_info(&info, "scsi%d: 3ware Storage Controller\n", shost->host_no);
-		tw_copy_info(&info, "Driver version: %s\n", tw_driver_version);
+		tw_copy_info(&info, "Driver version: %s\n", TW_DRIVER_VERSION);
 		tw_copy_info(&info, "Current commands posted:       %3d\n", tw_dev->posted_request_count);
 		tw_copy_info(&info, "Max commands posted:           %3d\n", tw_dev->max_posted_request_count);
 		tw_copy_info(&info, "Current pending commands:      %3d\n", tw_dev->pending_request_count);
@@ -2692,7 +2693,7 @@ int tw_scsi_release(struct Scsi_Host *tw_host)
 	/* Fake like we just shut down, so notify the card that
 	 * we "shut down cleanly".
 	 */
-	tw_halt(0, 0, 0);  // parameters aren't actually used
+	tw_halt(NULL, 0, NULL);  // parameters aren't actually used
 
 	/* Free up the IO region */
 	release_region((tw_dev->tw_pci_dev->resource[0].start), TW_IO_ADDRESS_RANGE);
@@ -2796,7 +2797,7 @@ int tw_scsiop_inquiry_complete(TW_Device_Extension *tw_dev, int request_id)
 	request_buffer[4] = 31;	       /* Additional length */
 	memcpy(&request_buffer[8], "3ware   ", 8);	 /* Vendor ID */
 	sprintf(&request_buffer[16], "Logical Disk %-2d ", tw_dev->srb[request_id]->device->id);
-	memcpy(&request_buffer[32], tw_driver_version, 3);
+	memcpy(&request_buffer[32], TW_DRIVER_VERSION, 3);
 
 	param = (TW_Param *)tw_dev->alignment_virtual_address[request_id];
 	if (param == NULL) {

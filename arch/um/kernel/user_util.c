@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <setjmp.h>
-#include <sys/mman.h> 
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/ptrace.h>
 #include <sys/utsname.h>
@@ -89,10 +89,10 @@ int wait_for_stop(int pid, int sig, int cont_type, void *relay)
 				       errno);
 			}
 			else if(WIFEXITED(status)) 
-				printk("process %d exited with status %d\n", 
+				printk("process %d exited with status %d\n",
 				       pid, WEXITSTATUS(status));
 			else if(WIFSIGNALED(status))
-				printk("process %d exited with signal %d\n", 
+				printk("process %d exited with signal %d\n",
 				       pid, WTERMSIG(status));
 			else if((WSTOPSIG(status) == SIGVTALRM) ||
 				(WSTOPSIG(status) == SIGALRM) ||
@@ -109,7 +109,7 @@ int wait_for_stop(int pid, int sig, int cont_type, void *relay)
 				ptrace(cont_type, pid, 0, WSTOPSIG(status));
 				continue;
 			}
-			else printk("process %d stopped with signal %d\n", 
+			else printk("process %d stopped with signal %d\n",
 				    pid, WSTOPSIG(status));
 			panic("wait_for_stop failed to wait for %d to stop "
 			      "with %d\n", pid, sig);
@@ -125,7 +125,7 @@ int raw(int fd)
 
 	CATCH_EINTR(err = tcgetattr(fd, &tt));
 	if (err < 0) {
-		printk("tcgetattr failed, errno = %d\n", errno);
+			printk("tcgetattr failed, errno = %d\n", errno);
 		return(-errno);
 	}
 
@@ -133,7 +133,7 @@ int raw(int fd)
 
  	CATCH_EINTR(err = tcsetattr(fd, TCSADRAIN, &tt));
 	if (err < 0) {
-		printk("tcsetattr failed, errno = %d\n", errno);
+			printk("tcsetattr failed, errno = %d\n", errno);
 		return(-errno);
 	}
 

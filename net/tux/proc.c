@@ -53,11 +53,11 @@ unsigned int tux_ftp_virtual_server = 0;
 unsigned int mass_hosting_hash = 0;
 unsigned int strip_host_tail = 0;
 unsigned int tux_max_object_size = 0;
-unsigned int log_cpu_mask = ~0;
+cpumask_t tux_log_cpu_mask = CPU_MASK_ALL;
 unsigned int tux_compression = 0;
 unsigned int tux_noid = 0;
 unsigned int tux_cgi_inherit_cpu = 0;
-unsigned int tux_cgi_cpu_mask = ~0;
+cpumask_t tux_cgi_cpu_mask = CPU_MASK_ALL;
 unsigned int tux_zerocopy_header = 1;
 unsigned int tux_max_free_requests = 1000;
 unsigned int tux_ignore_query = 0;
@@ -622,18 +622,6 @@ static ctl_table tux_table[] = {
 		NULL,
 		NULL
 	},
-	{	NET_TUX_CGI_CPU_MASK,
-		"cgi_cpu_mask",
-		&tux_cgi_cpu_mask,
-		sizeof(int),
-		0644,
-		NULL,
-		proc_dointvec,
-		&sysctl_intvec,
-		NULL,
-		NULL,
-		NULL
-	},
 	{	NET_TUX_ZEROCOPY_HEADER,
 		"zerocopy_header",
 		&tux_zerocopy_header,
@@ -770,6 +758,7 @@ static ctl_table tux_root_table[] = {
 
 static struct proc_dir_entry * root_tux_dir;
 static struct proc_dir_entry * log_cpu_mask_entry;
+static struct proc_dir_entry * cgi_cpu_mask_entry;
 static struct proc_dir_entry * stat_entry;
 static struct proc_dir_entry * tux_dir [CONFIG_TUX_NUMTHREADS];
 static struct proc_dir_entry * listen_dir [CONFIG_TUX_NUMTHREADS];
@@ -777,51 +766,29 @@ static struct proc_dir_entry * listen_dir [CONFIG_TUX_NUMTHREADS];
 tux_socket_t tux_listen [CONFIG_TUX_NUMTHREADS][CONFIG_TUX_NUMSOCKETS] =
  { [0 ... CONFIG_TUX_NUMTHREADS-1] = { {&tux_proto_http, 0, 80, NULL}, } };
 
-#define HEX_DIGITS 8
-
-static int hex_read_proc (char *page, char **start, off_t off,
-			int count, int *eof, void *data)
+static int cpu_mask_read_proc (char *page, char **start, off_t off,
+					int count, int *eof, void *data)
 {
-	if (count < HEX_DIGITS+1)
+	int len = cpumask_scnprintf(page, count, *(cpumask_t *)data);
+	if (count - len < 2)
 		return -EINVAL;
-	return sprintf (page, "%08x\n", *(unsigned int *)data);
+	len += sprintf(page + len, "\n");
+	return len;
 }
 
-static int hex_write_proc (struct file *file, const char *buffer,
+static int cpu_mask_write_proc (struct file *file,
+					const char __user *buffer,
 					unsigned long count, void *data)
 {
-	char hexnum [HEX_DIGITS];
-	unsigned int new_value;
-	unsigned int i, full_count = count;
+	cpumask_t *mask = (cpumask_t *)data;
+	unsigned long full_count = count, err;
+	cpumask_t new_value;
 
-	if (!count)
-		return -EINVAL;
-	if (count > HEX_DIGITS)
-		count = HEX_DIGITS;
-	if (copy_from_user(hexnum, buffer, count))
-		return -EFAULT;
+	err = cpumask_parse(buffer, count, new_value);
+	if (err)
+		return err;
 
-	/*
-	 * Parse the first 8 characters as a hex string, any non-hex char
-	 * is end-of-string. '00e1', 'e1', '00E1', 'E1' are the same.
-	 */
-	new_value = 0;
-
-	for (i = 0; i < count; i++) {
-		unsigned int c = hexnum[i];
-
-		switch (c) {
-			case '0' ... '9': c -= '0'; break;
-			case 'a' ... 'f': c -= 'a'-10; break;
-			case 'A' ... 'F': c -= 'A'-10; break;
-		default:
-			goto out;
-		}
-		new_value = (new_value << 4) | c;
-	}
-out:
-	*(int *)data = new_value;
-
+	*mask = new_value;
 	return full_count;
 }
 
@@ -892,7 +859,7 @@ static int print_request_stats (threadinfo_t *ti, char *page, unsigned int skip_
 		SP_HOST(req->client_addr, req->client_port);
 
 		SP("%Ld ", req->total_file_len);
-		SP("%Ld ", req->in_file.f_pos);
+		SP("%Ld ", req->in_file ? req->in_file->f_pos : -1);
 		if (req->proto == &tux_proto_http) {
 			SP("%d ", req->method);
 			SP("%d ", req->version);
@@ -1118,6 +1085,7 @@ static void cleanup_tux_proc (void)
 		unregister_tux_proc(i);
 	remove_proc_entry(stat_entry->name, root_tux_dir);
 	remove_proc_entry(log_cpu_mask_entry->name, root_tux_dir);
+	remove_proc_entry(cgi_cpu_mask_entry->name, root_tux_dir);
 	remove_proc_entry(root_tux_dir->name, proc_net);
 }
 
@@ -1135,11 +1103,20 @@ static void init_tux_proc (void)
 	entry = create_proc_entry("log_cpu_mask", 0700, root_tux_dir);
 
 	entry->nlink = 1;
-	entry->data = (void *)&log_cpu_mask;
-	entry->read_proc = hex_read_proc;
-	entry->write_proc = hex_write_proc;
+	entry->data = (void *)&tux_log_cpu_mask;
+	entry->read_proc = cpu_mask_read_proc;
+	entry->write_proc = cpu_mask_write_proc;
 
 	log_cpu_mask_entry = entry;
+
+	entry = create_proc_entry("cgi_cpu_mask", 0700, root_tux_dir);
+
+	entry->nlink = 1;
+	entry->data = (void *)&tux_cgi_cpu_mask;
+	entry->read_proc = cpu_mask_read_proc;
+	entry->write_proc = cpu_mask_write_proc;
+
+	cgi_cpu_mask_entry = entry;
 
 	entry = create_proc_entry("stat", 0700, root_tux_dir);
 
@@ -1169,22 +1146,4 @@ void end_sysctl(void)
 	unregister_sysctl_table(tux_table_header);
 }
 
-#if CONFIG_SMP
-void mask_to_cpumask(unsigned int mask, cpumask_t *cpu_mask)
-{
-
-	unsigned int bit_mask, i;
-
-	bit_mask = 1 << 31;
-
-	for (i=NR_CPUS-1; i--; i >= 0) {
-		if(mask & bit_mask)
-			cpu_set(i, *cpu_mask);
-		else
-			cpu_clear(i, *cpu_mask);
-		mask <<= 1;
-	}
-
-}
-#endif
 

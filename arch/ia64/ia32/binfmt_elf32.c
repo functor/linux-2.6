@@ -14,7 +14,6 @@
 #include <linux/types.h>
 #include <linux/mm.h>
 #include <linux/security.h>
-#include <linux/vs_memory.h>
 
 #include <asm/param.h>
 #include <asm/signal.h>
@@ -49,6 +48,7 @@ static void elf32_set_personality (void);
 
 extern struct page *ia32_shared_page[];
 extern unsigned long *ia32_gdt;
+extern struct page *ia32_gate_page;
 
 struct page *
 ia32_install_shared_page (struct vm_area_struct *vma, unsigned long address, int *type)
@@ -60,8 +60,23 @@ ia32_install_shared_page (struct vm_area_struct *vma, unsigned long address, int
 	return pg;
 }
 
+struct page *
+ia32_install_gate_page (struct vm_area_struct *vma, unsigned long address, int *type)
+{
+	struct page *pg = ia32_gate_page;
+	get_page(pg);
+	if (type)
+		*type = VM_FAULT_MINOR;
+	return pg;
+}
+
+
 static struct vm_operations_struct ia32_shared_page_vm_ops = {
 	.nopage = ia32_install_shared_page
+};
+
+static struct vm_operations_struct ia32_gate_page_vm_ops = {
+	.nopage = ia32_install_gate_page
 };
 
 void
@@ -85,6 +100,60 @@ ia64_elf32_init (struct pt_regs *regs)
 		vma->vm_ops = &ia32_shared_page_vm_ops;
 		down_write(&current->mm->mmap_sem);
 		{
+			if (insert_vm_struct(current->mm, vma)) {
+				kmem_cache_free(vm_area_cachep, vma);
+				up_write(&current->mm->mmap_sem);
+				return;
+			}
+		}
+		up_write(&current->mm->mmap_sem);
+	}
+
+	/*
+	 * When user stack is not executable, push sigreturn code to stack makes
+	 * segmentation fault raised when returning to kernel. So now sigreturn
+	 * code is locked in specific gate page, which is pointed by pretcode
+	 * when setup_frame_ia32
+	 */
+	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	if (vma) {
+		memset(vma, 0, sizeof(*vma));
+		vma->vm_mm = current->mm;
+		vma->vm_start = IA32_GATE_OFFSET;
+		vma->vm_end = vma->vm_start + PAGE_SIZE;
+		vma->vm_page_prot = PAGE_COPY_EXEC;
+		vma->vm_flags = VM_READ | VM_MAYREAD | VM_EXEC
+				| VM_MAYEXEC | VM_RESERVED;
+		vma->vm_ops = &ia32_gate_page_vm_ops;
+		down_write(&current->mm->mmap_sem);
+		{
+			if (insert_vm_struct(current->mm, vma)) {
+				kmem_cache_free(vm_area_cachep, vma);
+				up_write(&current->mm->mmap_sem);
+				return;
+			}
+		}
+		up_write(&current->mm->mmap_sem);
+	}
+
+	/*
+	 * When user stack is not executable, push sigreturn code to stack makes
+	 * segmentation fault raised when returning to kernel. So now sigreturn
+	 * code is locked in specific gate page, which is pointed by pretcode
+	 * when setup_frame_ia32
+	 */
+	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	if (vma) {
+		memset(vma, 0, sizeof(*vma));
+		vma->vm_mm = current->mm;
+		vma->vm_start = IA32_GATE_OFFSET;
+		vma->vm_end = vma->vm_start + PAGE_SIZE;
+		vma->vm_page_prot = PAGE_COPY_EXEC;
+		vma->vm_flags = VM_READ | VM_MAYREAD | VM_EXEC
+				| VM_MAYEXEC | VM_RESERVED;
+		vma->vm_ops = &ia32_gate_page_vm_ops;
+		down_write(&current->mm->mmap_sem);
+		{
 			insert_vm_struct(current->mm, vma);
 		}
 		up_write(&current->mm->mmap_sem);
@@ -104,7 +173,11 @@ ia64_elf32_init (struct pt_regs *regs)
 		vma->vm_flags = VM_READ|VM_WRITE|VM_MAYREAD|VM_MAYWRITE;
 		down_write(&current->mm->mmap_sem);
 		{
-			insert_vm_struct(current->mm, vma);
+			if (insert_vm_struct(current->mm, vma)) {
+				kmem_cache_free(vm_area_cachep, vma);
+				up_write(&current->mm->mmap_sem);
+				return;
+			}
 		}
 		up_write(&current->mm->mmap_sem);
 	}
@@ -152,7 +225,7 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 	unsigned long stack_base, grow;
 	struct vm_area_struct *mpnt;
 	struct mm_struct *mm = current->mm;
-	int i;
+	int i, ret;
 
 	stack_base = IA32_STACK_TOP - MAX_ARG_PAGES*PAGE_SIZE;
 	mm->arg_start = bprm->p + stack_base;
@@ -189,10 +262,14 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 			mpnt->vm_flags = VM_STACK_FLAGS;
 		mpnt->vm_page_prot = (mpnt->vm_flags & VM_EXEC)?
 					PAGE_COPY_EXEC: PAGE_COPY;
-		insert_vm_struct(current->mm, mpnt);
-		// current->mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
-		vx_vmpages_sub(current->mm, current->mm->total_vm -
-			((mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT));
+		if ((ret = insert_vm_struct(current->mm, mpnt))) {
+			up_write(&current->mm->mmap_sem);
+			kmem_cache_free(vm_area_cachep, mpnt);
+			return ret;
+		}
+		// current->mm->stack_vm = current->mm->total_vm = vma_pages(mpnt);
+		vx_vmpages_sub(current->mm, current->mm->total_vm - vma_pages(mpnt));
+		current->mm->stack_vm = current->mm->total_vm;
 	}
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {

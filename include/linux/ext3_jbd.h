@@ -138,10 +138,13 @@ ext3_journal_release_buffer(handle_t *handle, struct buffer_head *bh,
 	journal_release_buffer(handle, bh, credits);
 }
 
-static inline void
-ext3_journal_forget(handle_t *handle, struct buffer_head *bh)
+static inline int
+__ext3_journal_forget(const char *where, handle_t *handle, struct buffer_head *bh)
 {
-	journal_forget(handle, bh);
+	int err = journal_forget(handle, bh);
+	if (err)
+		ext3_journal_abort_handle(where, __FUNCTION__, bh, handle,err);
+	return err;
 }
 
 static inline int
@@ -187,9 +190,16 @@ __ext3_journal_dirty_metadata(const char *where,
 	__ext3_journal_get_create_access(__FUNCTION__, (handle), (bh))
 #define ext3_journal_dirty_metadata(handle, bh) \
 	__ext3_journal_dirty_metadata(__FUNCTION__, (handle), (bh))
+#define ext3_journal_forget(handle, bh) \
+	__ext3_journal_forget(__FUNCTION__, (handle), (bh))
 
-handle_t *ext3_journal_start(struct inode *inode, int nblocks);
+handle_t *ext3_journal_start_sb(struct super_block *sb, int nblocks);
 int __ext3_journal_stop(const char *where, handle_t *handle);
+
+static inline handle_t *ext3_journal_start(struct inode *inode, int nblocks)
+{
+	return ext3_journal_start_sb(inode->i_sb, nblocks);
+}
 
 #define ext3_journal_stop(handle) \
 	__ext3_journal_stop(__FUNCTION__, (handle))

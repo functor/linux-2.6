@@ -573,17 +573,48 @@ acpi_ex_opcode_2A_0T_1R (
 	 * Execute the Opcode
 	 */
 	if (walk_state->op_info->flags & AML_LOGICAL) /* logical_op (Operand0, Operand1) */ {
-		/* Both operands must be of the same type */
+		union acpi_operand_object *temp_desc = NULL;
 
-		if (ACPI_GET_OBJECT_TYPE (operand[0]) !=
-			ACPI_GET_OBJECT_TYPE (operand[1])) {
-			status = AE_AML_OPERAND_TYPE;
-			goto cleanup;
+		/*
+		 * Convert the second operand if necessary.  The first
+		 * operand determines the type of the second operand.
+		 */
+		switch (ACPI_GET_OBJECT_TYPE (operand[0])) {
+		case ACPI_TYPE_INTEGER:
+			status = acpi_ex_convert_to_integer (operand[1],
+			                                     &temp_desc,
+							     walk_state);
+			break;
+
+		case ACPI_TYPE_STRING:
+			status = acpi_ex_convert_to_string (operand[1],
+			                                    &temp_desc, 16,
+							    ACPI_UINT32_MAX,
+							    walk_state);
+			break;
+
+		case ACPI_TYPE_BUFFER:
+			status = acpi_ex_convert_to_buffer (operand[1],
+			                                    &temp_desc,
+							    walk_state);
+			break;
+
+		default:
+			ACPI_REPORT_ERROR (("logical_op - invalid obj type: %X\n",
+					ACPI_GET_OBJECT_TYPE (operand[0])));
+			status = AE_AML_INTERNAL;
 		}
+
+		if (ACPI_FAILURE (status))
+			goto cleanup;
 
 		logical_result = acpi_ex_do_logical_op (walk_state->opcode,
 				 operand[0],
-				 operand[1]);
+				 temp_desc);
+
+		if (temp_desc != operand[1])
+			acpi_ut_remove_reference(temp_desc);
+
 		goto store_logical_result;
 	}
 

@@ -2119,11 +2119,11 @@ void __init sock_init(void)
 int tux_Dprintk;
 int tux_TDprintk;
 
+struct module *tux_module = NULL;
+
 #ifdef CONFIG_TUX_MODULE
 
 asmlinkage long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info) = NULL;
-
-struct module *tux_module = NULL;
 spinlock_t tux_module_lock = SPIN_LOCK_UNLOCKED;
 
 asmlinkage long sys_tux (unsigned int action, user_req_t *u_info)
@@ -2181,8 +2181,7 @@ void socket_seq_show(struct seq_file *seq)
 /* ABI emulation layers need these two */
 EXPORT_SYMBOL(move_addr_to_kernel);
 EXPORT_SYMBOL(move_addr_to_user);
-EXPORT_SYMBOL(sock_alloc);
-EXPORT_SYMBOL(sock_alloc_inode);
+EXPORT_SYMBOL_GPL(sock_alloc);
 EXPORT_SYMBOL(sock_create);
 EXPORT_SYMBOL(sock_create_kern);
 EXPORT_SYMBOL(sock_create_lite);

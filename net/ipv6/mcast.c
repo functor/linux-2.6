@@ -128,6 +128,8 @@ static rwlock_t ipv6_sk_mc_lock = RW_LOCK_UNLOCKED;
 
 static struct socket *igmp6_socket;
 
+int __ipv6_dev_mc_dec(struct inet6_dev *idev, struct in6_addr *addr);
+
 static void igmp6_join_group(struct ifmcaddr6 *ma);
 static void igmp6_leave_group(struct ifmcaddr6 *ma);
 static void igmp6_timer_handler(unsigned long data);
@@ -256,9 +258,9 @@ int ipv6_sock_mc_drop(struct sock *sk, int ifindex, struct in6_addr *addr)
 
 				if (idev) {
 					(void) ip6_mc_leave_src(sk,mc_lst,idev);
+					__ipv6_dev_mc_dec(idev, &mc_lst->addr);
 					in6_dev_put(idev);
 				}
-				ipv6_dev_mc_dec(dev, &mc_lst->addr);
 				dev_put(dev);
 			}
 			sock_kfree_s(sk, mc_lst, sizeof(*mc_lst));
@@ -322,9 +324,9 @@ void ipv6_sock_mc_close(struct sock *sk)
 
 			if (idev) {
 				(void) ip6_mc_leave_src(sk, mc_lst, idev);
+				__ipv6_dev_mc_dec(idev, &mc_lst->addr);
 				in6_dev_put(idev);
 			}
-			ipv6_dev_mc_dec(dev, &mc_lst->addr);
 			dev_put(dev);
 		}
 
@@ -389,12 +391,12 @@ int ip6_mc_source(int add, int omode, struct sock *sk,
 			goto done;
 		rv = !0;
 		for (i=0; i<psl->sl_count; i++) {
-			rv = memcmp(&psl->sl_addr, group,
+			rv = memcmp(&psl->sl_addr[i], source,
 				sizeof(struct in6_addr));
-			if (rv >= 0)
+			if (rv == 0)
 				break;
 		}
-		if (!rv)	/* source not found */
+		if (rv)		/* source not found */
 			goto done;
 
 		/* update the interface filter */
@@ -435,8 +437,8 @@ int ip6_mc_source(int add, int omode, struct sock *sk,
 	}
 	rv = 1;	/* > 0 for insert logic below if sl_count is 0 */
 	for (i=0; i<psl->sl_count; i++) {
-		rv = memcmp(&psl->sl_addr, group, sizeof(struct in6_addr));
-		if (rv >= 0)
+		rv = memcmp(&psl->sl_addr[i], source, sizeof(struct in6_addr));
+		if (rv == 0)
 			break;
 	}
 	if (rv == 0)		/* address already there is an error */
@@ -870,7 +872,7 @@ int ipv6_dev_mc_inc(struct net_device *dev, struct in6_addr *addr)
 /*
  *	device multicast group del
  */
-static int __ipv6_dev_mc_dec(struct net_device *dev, struct inet6_dev *idev, struct in6_addr *addr)
+int __ipv6_dev_mc_dec(struct inet6_dev *idev, struct in6_addr *addr)
 {
 	struct ifmcaddr6 *ma, **map;
 
@@ -903,7 +905,7 @@ int ipv6_dev_mc_dec(struct net_device *dev, struct in6_addr *addr)
 	if (!idev)
 		return -ENODEV;
 
-	err = __ipv6_dev_mc_dec(dev, idev, addr);
+	err = __ipv6_dev_mc_dec(idev, addr);
 
 	in6_dev_put(idev);
 
@@ -2108,7 +2110,12 @@ void ipv6_mc_destroy_dev(struct inet6_dev *idev)
 	 * addrconf.c has NULL'd out dev->ip6_ptr so in6_dev_get() will
 	 * fail.
 	 */
-	__ipv6_dev_mc_dec(idev->dev, idev, &maddr);
+	__ipv6_dev_mc_dec(idev, &maddr);
+
+	if (idev->cnf.forwarding) {
+		ipv6_addr_all_routers(&maddr);
+		__ipv6_dev_mc_dec(idev, &maddr);
+	}
 
 	write_lock_bh(&idev->lock);
 	while ((i = idev->mc_list) != NULL) {

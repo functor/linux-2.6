@@ -177,12 +177,14 @@ success:
 	 * vm_flags and vm_page_prot are protected by the mmap_sem
 	 * held in write mode.
 	 */
+	vm_stat_unaccount(vma);
 	oldflags = vma->vm_flags;
 	vma->vm_flags = newflags;
 	vma->vm_page_prot = newprot;
 	if (oldflags & VM_EXEC)
 		arch_remove_exec_range(current->mm, old_end);
 	change_protection(vma, start, end, newprot);
+	vm_stat_account(vma);
 	return 0;
 
 fail:

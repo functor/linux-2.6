@@ -16,11 +16,11 @@
 #include "os.h"
 
 struct hostaudio_state {
-	int fd;
+  int fd;
 };
 
 struct hostmixer_state {
-	int fd;
+  int fd;
 };
 
 #define HOSTAUDIO_DEV_DSP "/dev/sound/dsp"
@@ -189,7 +189,7 @@ static int hostaudio_open(struct inode *inode, struct file *file)
 #endif
 
         state = kmalloc(sizeof(struct hostaudio_state), GFP_KERNEL);
-        if(state == NULL) 
+        if(state == NULL)
 		return(-ENOMEM);
 
         if(file->f_mode & FMODE_READ) r = 1;
@@ -217,7 +217,7 @@ static int hostaudio_release(struct inode *inode, struct file *file)
 	os_close_file(state->fd);
         kfree(state);
 
-        return(0);
+	return(0);
 }
 
 /* /dev/mixer file operations */
@@ -274,7 +274,7 @@ static int hostmixer_release(struct inode *inode, struct file *file)
 	os_close_file(state->fd);
         kfree(state);
 
-        return(0);
+	return(0);
 }
 
 

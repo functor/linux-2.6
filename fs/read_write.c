@@ -295,6 +295,7 @@ asmlinkage ssize_t sys_read(unsigned int fd, char __user * buf, size_t count)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(sys_read);
 
 asmlinkage ssize_t sys_write(unsigned int fd, const char __user * buf, size_t count)
 {
@@ -312,6 +313,8 @@ asmlinkage ssize_t sys_write(unsigned int fd, const char __user * buf, size_t co
 
 	return ret;
 }
+
+EXPORT_SYMBOL_GPL(sys_write);
 
 asmlinkage ssize_t sys_pread64(unsigned int fd, char __user *buf,
 			     size_t count, loff_t pos)

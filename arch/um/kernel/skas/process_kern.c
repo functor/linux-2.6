@@ -6,6 +6,12 @@
 #include "linux/sched.h"
 #include "linux/slab.h"
 #include "linux/ptrace.h"
+#include "linux/proc_fs.h"
+#include "linux/file.h"
+#include "linux/errno.h"
+#include "linux/init.h"
+#include "asm/uaccess.h"
+#include "asm/atomic.h"
 #include "kern_util.h"
 #include "time_user.h"
 #include "signal_user.h"
@@ -16,8 +22,62 @@
 #include "frame.h"
 #include "kern.h"
 #include "mode.h"
-#include "filehandle.h"
 #include "proc_mm.h"
+
+static atomic_t using_sysemu;
+int sysemu_supported;
+
+void set_using_sysemu(int value)
+{
+	atomic_set(&using_sysemu, sysemu_supported && value);
+}
+
+int get_using_sysemu(void)
+{
+	return atomic_read(&using_sysemu);
+}
+
+int proc_read_sysemu(char *buf, char **start, off_t offset, int size,int *eof, void *data)
+{
+	if (snprintf(buf, size, "%d\n", get_using_sysemu()) < size) /*No overflow*/
+		*eof = 1;
+
+	return strlen(buf);
+}
+
+int proc_write_sysemu(struct file *file,const char *buf, unsigned long count,void *data)
+{
+	char tmp[2];
+
+	if (copy_from_user(tmp, buf, 1))
+		return -EFAULT;
+
+	if (tmp[0] == '0' || tmp[0] == '1')
+		set_using_sysemu(tmp[0] - '0');
+	return count; /*We use the first char, but pretend to write everything*/
+}
+
+int __init make_proc_sysemu(void)
+{
+	struct proc_dir_entry *ent;
+	if (mode_tt || !sysemu_supported)
+		return 0;
+
+	ent = create_proc_entry("sysemu", 0600, &proc_root);
+
+	if (ent == NULL)
+	{
+		printk("Failed to register /proc/sysemu\n");
+		return(0);
+	}
+
+	ent->read_proc  = proc_read_sysemu;
+	ent->write_proc = proc_write_sysemu;
+
+	return 0;
+}
+
+late_initcall(make_proc_sysemu);
 
 int singlestepping_skas(void)
 {
@@ -99,7 +159,7 @@ void fork_handler(int sig)
 	force_flush_all();
 	if(current->thread.prev_sched == NULL)
 		panic("blech");
-	
+
 	schedule_tail(current->thread.prev_sched);
 	current->thread.prev_sched = NULL;
 
@@ -132,7 +192,7 @@ int copy_thread_skas(int nr, unsigned long clone_flags, unsigned long sp,
 		handler = new_thread_handler;
 	}
 
-	new_thread(p->thread_info, &p->thread.mode.skas.switch_buf, 
+	new_thread(p->thread_info, &p->thread.mode.skas.switch_buf,
 		   &p->thread.mode.skas.fork_buf, handler);
 	return(0);
 }
@@ -142,16 +202,16 @@ int new_mm(int from)
 	struct proc_mm_op copy;
 	int n, fd;
 
-	fd = open_file("/proc/mm", of_cloexec(of_write(OPENFLAGS())), 0);
+	fd = os_open_file("/proc/mm", of_cloexec(of_write(OPENFLAGS())), 0);
 	if(fd < 0)
 		return(fd);
 
 	if(from != -1){
 		copy = ((struct proc_mm_op) { .op 	= MM_COPY_SEGMENTS,
-					      .u 	= 
+					      .u 	=
 					      { .copy_segments	= from } } );
 		n = os_write_file(fd, &copy, sizeof(copy));
-		if(n != sizeof(copy)) 
+		if(n != sizeof(copy))
 			printk("new_mm : /proc/mm copy_segments failed, "
 			       "err = %d\n", -n);
 	}
@@ -200,13 +260,13 @@ int start_uml_skas(void)
 
 int external_pid_skas(struct task_struct *task)
 {
-#warning Need to look up userspace_pid by cpu	
+#warning Need to look up userspace_pid by cpu
 	return(userspace_pid[0]);
 }
 
 int thread_pid_skas(struct task_struct *task)
 {
-#warning Need to look up userspace_pid by cpu	
+#warning Need to look up userspace_pid by cpu
 	return(userspace_pid[0]);
 }
 

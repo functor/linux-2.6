@@ -21,19 +21,6 @@
 #include "choose-mode.h"
 #include "mode.h"
 
-static void winch_handler(int sig)
-{
-}
-
-struct winch_data {
-	int pty_fd;
-	int pipe_fd;
-	int close_me;
-};
-
-/* XXX This breaks horribly (by hanging UML) when moved to chan_kern.c - 
- * needs investigation
- */
 int generic_console_write(int fd, const char *buf, int n, void *unused)
 {
 	struct termios save, new;
@@ -49,6 +36,16 @@ int generic_console_write(int fd, const char *buf, int n, void *unused)
 	if(isatty(fd)) tcsetattr(fd, TCSAFLUSH, &save);
 	return(err);
 }
+
+static void winch_handler(int sig)
+{
+}
+
+struct winch_data {
+	int pty_fd;
+	int pipe_fd;
+	int close_me;
+};
 
 static int winch_thread(void *arg)
 {
@@ -141,11 +138,11 @@ void register_winch(int fd, void *device_data)
 	int count;
 	char c = 1;
 
-	if(!isatty(fd)) 
+	if(!isatty(fd))
 		return;
 
 	pid = tcgetpgrp(fd);
-	if(!CHOOSE_MODE_PROC(is_tracer_winch, is_skas_winch, pid, fd, 
+	if(!CHOOSE_MODE_PROC(is_tracer_winch, is_skas_winch, pid, fd,
 			     device_data) && (pid == -1)){
 		thread = winch_tramp(fd, device_data, &thread_fd);
 		if(fd != -1){

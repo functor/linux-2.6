@@ -2,6 +2,58 @@ menu "Kernel hacking"
 
 source "lib/Kconfig.debug"
 
+config CRASH_DUMP
+	tristate "Crash dump support (EXPERIMENTAL)"
+	depends on EXPERIMENTAL
+	default n
+	---help---
+	  Say Y here to enable saving an image of system memory when a panic
+	  or other error occurs. Dumps can also be forced with the SysRq+d
+	  key if MAGIC_SYSRQ is enabled.
+
+config CRASH_DUMP_BLOCKDEV
+	tristate "Crash dump block device driver"
+	depends on CRASH_DUMP
+	help
+	  Say Y to allow saving crash dumps directly to a disk device.
+
+config CRASH_DUMP_NETDEV
+	tristate "Crash dump network device driver"
+	depends on CRASH_DUMP
+	help
+	  Say Y to allow saving crash dumps over a network device.
+
+config CRASH_DUMP_MEMDEV
+	bool "Crash dump staged memory driver"
+	depends on CRASH_DUMP
+	help
+	  Say Y to allow intermediate saving crash dumps in spare 
+	  memory pages which would then be written out to disk
+	  later.
+
+config CRASH_DUMP_SOFTBOOT
+	bool "Save crash dump across a soft reboot"
+	depends on CRASH_DUMP_MEMDEV
+	help
+	  Say Y to allow a crash dump to be preserved in memory
+	  pages across a soft reboot and written out to disk
+	  thereafter. For this to work, CRASH_DUMP must be 
+	  configured as part of the kernel (not as a module).
+
+config CRASH_DUMP_COMPRESS_RLE
+	tristate "Crash dump RLE compression"
+	depends on CRASH_DUMP
+	help
+	  Say Y to allow saving dumps with Run Length Encoding compression.
+
+config CRASH_DUMP_COMPRESS_GZIP
+	tristate "Crash dump GZIP compression"
+	select ZLIB_INFLATE
+	select ZLIB_DEFLATE
+	depends on CRASH_DUMP
+	help
+	  Say Y to allow saving dumps with Gnu Zip compression.
+
 config EARLY_PRINTK
 	bool "Early printk" if EMBEDDED
 	default y
@@ -15,9 +67,28 @@ config EARLY_PRINTK
 	  with klogd/syslogd or the X server. You should normally N here,
 	  unless you want to debug such a crash.
 
-config DEBUG_STACKOVERFLOW
-	bool "Check for stack overflows"
-	depends on DEBUG_KERNEL
+config X86_FIND_SMP_CONFIG
+	bool
+	depends on X86_LOCAL_APIC || X86_VOYAGER
+	default y
+
+config X86_MPPARSE
+	bool
+	depends on X86_LOCAL_APIC && !X86_VISWS
+	default y
+
+config EARLY_PRINTK
+	bool "Early printk" if EMBEDDED
+	default y
+	help
+	  Write kernel log output directly into the VGA buffer or to a serial
+	  port.
+
+	  This is useful for kernel debugging when your machine crashes very
+	  early before the console code is initialized. For normal operation
+	  it is not recommended because it looks ugly and doesn't cooperate
+	  with klogd/syslogd or the X server. You should normally N here,
+	  unless you want to debug such a crash.
 
 config KPROBES
 	bool "Kprobes"
@@ -29,6 +100,18 @@ config KPROBES
 	  for kernel debugging, non-intrusive instrumentation and testing.
 	  If in doubt, say "N".
 
+config DEBUG_PAGEALLOC
+	bool "Page alloc debugging"
+	depends on DEBUG_KERNEL
+	help
+	  Unmap pages from the kernel linear mapping after free_pages().
+	  This results in a large slowdown, but helps to find certain types
+	  of memory corruptions.
+
+config DEBUG_STACKOVERFLOW
+	bool "Check for stack overflows"
+	depends on DEBUG_KERNEL
+
 config DEBUG_STACK_USAGE
 	bool "Stack utilization instrumentation"
 	depends on DEBUG_KERNEL
@@ -38,6 +121,57 @@ config DEBUG_STACK_USAGE
 
 	  This option will slow down process creation somewhat.
 
+config IRQSTACKS
+	bool "Use separate IRQ stacks"
+	help
+	This option subsumes the IRQ stack implementation of the orig. 4KSTACK
+	support.  You must use this if you select 4KB stacks! 
+
+config STACK_SIZE_SHIFT
+	int "Kernel stack size (12 => 4KB, 13 => 8KB, 14 => 16KB)"
+	range 12 14
+	default 12 if IRQSTACKS
+	default 13
+	help
+	Select kernel stack size.  4KB stacks are best as they let
+	the system scale further.  Use 8KB stacks if you have an 
+	experimental kernel where a stack overlow with a 4KB stack
+	might occur.  Use 16KB stacks if you want to safely support
+	Windows device drivers using either Linuxant or ndiswrapper.
+
+config STACK_WARN
+	int "Print stack trace when stack grows beyond specified bytes"
+	default 4096 if IRQSTACKS
+	default 4096
+	help
+	The kernel will print a stack trace when the current stack exceeds
+	the specified size.
+
+config X86_STACK_CHECK
+	bool "Check for stack overflows"
+	default n
+	help
+	Say Y here to have the kernel attempt to detect when the per-task
+	kernel stack overflows.
+
+	Some older versions of gcc don't handle the -p option correctly.
+	Kernprof is affected by the same problem, which is described here:
+	http://oss.sgi.com/projects/kernprof/faq.html#Q9
+
+	Basically, if you get oopses in __free_pages_ok during boot when
+	you have this turned on, you need to fix gcc. The Redhat 2.96
+	version and gcc-3.x seem to work.
+
+	If not debugging a stack overflow problem, say N
+
+config STACK_PANIC
+	int "Panic when stack approaches with specified bytes of the stack limit"
+	depends on X86_STACK_CHECK
+	default 512 if IRQSTACKS
+	default 512
+	help
+	Panic if the stack grows to within specified byte range.
+
 config DEBUG_PAGEALLOC
 	bool "Page alloc debugging"
 	depends on DEBUG_KERNEL
@@ -45,15 +179,6 @@ config DEBUG_PAGEALLOC
 	  Unmap pages from the kernel linear mapping after free_pages().
 	  This results in a large slowdown, but helps to find certain types
 	  of memory corruptions.
-
-config 4KSTACKS
-	bool "Use 4Kb for kernel stacks instead of 8Kb"
-	help
-	  If you say Y here the kernel will use a 4Kb stacksize for the
-	  kernel stack attached to each process/thread. This facilitates
-	  running more threads on a system and also reduces the pressure
-	  on the VM subsystem for higher order allocations. This option
-	  will also use IRQ stacks to compensate for the reduced stackspace.
 
 config SCHEDSTATS
 	bool "Collect scheduler statistics"

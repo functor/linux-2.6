@@ -18,10 +18,10 @@ DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
 #include "linux/threads.h"
 #include "linux/interrupt.h"
 #include "linux/err.h"
+#include "linux/hardirq.h"
 #include "asm/smp.h"
 #include "asm/processor.h"
 #include "asm/spinlock.h"
-#include "asm/hardirq.h"
 #include "user_util.h"
 #include "kern_util.h"
 #include "kern.h"
@@ -29,9 +29,11 @@ DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
 #include "os.h"
 
 /* CPU online map, set by smp_boot_cpus */
-unsigned long cpu_online_map = CPU_MASK_NONE;
+cpumask_t cpu_online_map = CPU_MASK_NONE;
+cpumask_t cpu_possible_map = CPU_MASK_NONE;
 
 EXPORT_SYMBOL(cpu_online_map);
+EXPORT_SYMBOL(cpu_possible_map);
 
 /* Per CPU bogomips and other parameters
  * The only piece used here is the ipi pipe, which is set before SMP is
@@ -105,9 +107,8 @@ static struct task_struct *idle_thread(int cpu)
 
         current->thread.request.u.thread.proc = idle_proc;
         current->thread.request.u.thread.arg = (void *) cpu;
-	new_task = copy_process(CLONE_VM | CLONE_IDLETASK, 0, NULL, 0, NULL, 
-				NULL);
-	if(IS_ERR(new_task)) 
+	new_task = fork_idle(cpu);
+	if(IS_ERR(new_task))
 		panic("copy_process failed in idle_thread, error = %ld",
 		      PTR_ERR(new_task));
 
@@ -115,9 +116,9 @@ static struct task_struct *idle_thread(int cpu)
 		          { .pid = 	new_task->thread.mode.tt.extern_pid,
 			    .task = 	new_task } );
 	idle_threads[cpu] = new_task;
-	CHOOSE_MODE(os_write_file(new_task->thread.mode.tt.switch_pipe[1], &c, 
-				  sizeof(c)),
-	wake_up_forked_process(new_task);
+	CHOOSE_MODE(os_write_file(new_task->thread.mode.tt.switch_pipe[1], &c,
+			  sizeof(c)),
+		    ({ panic("skas mode doesn't support SMP"); }));
 	return(new_task);
 }
 
@@ -126,6 +127,10 @@ void smp_prepare_cpus(unsigned int maxcpus)
 	struct task_struct *idle;
 	unsigned long waittime;
 	int err, cpu, me = smp_processor_id();
+	int i;
+
+	for (i = 0; i < ncpus; ++i)
+		cpu_set(i, cpu_possible_map);
 
 	cpu_clear(me, cpu_online_map);
 	cpu_set(me, cpu_online_map);
@@ -135,7 +140,7 @@ void smp_prepare_cpus(unsigned int maxcpus)
 	if(err < 0)
 		panic("CPU#0 failed to create IPI pipe, errno = %d", -err);
 
-	activate_ipi(cpu_data[me].ipi_pipe[0], 
+	activate_ipi(cpu_data[me].ipi_pipe[0],
 		     current->thread.mode.tt.extern_pid);
 
 	for(cpu = 1; cpu < ncpus; cpu++){
@@ -243,7 +248,7 @@ int smp_call_function(void (*_func)(void *info), void *_info, int nonatomic,
 	info = _info;
 
 	for (i=0;i<NR_CPUS;i++)
-		if((i != current_thread->cpu) && 
+		if((i != current_thread->cpu) &&
 		   cpu_isset(i, cpu_online_map))
 			os_write_file(cpu_data[i].ipi_pipe[1], "C", 1);
 

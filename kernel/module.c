@@ -90,13 +90,6 @@ static inline int strong_try_module_get(struct module *mod)
 	return try_module_get(mod);
 }
 
-/* Stub function for modules which don't have an initfn */
-int init_module(void)
-{
-	return 0;
-}
-EXPORT_SYMBOL(init_module);
-
 /* A thread that wants to hold a reference to a module only while it
  * is running can call ths to safely exit.
  * nfsd and lockd use this.
@@ -530,12 +523,6 @@ EXPORT_SYMBOL(module_refcount);
 /* This exists whether we can unload or not */
 static void free_module(struct module *mod);
 
-/* Stub function for modules which don't have an exitfn */
-void cleanup_module(void)
-{
-}
-EXPORT_SYMBOL(cleanup_module);
-
 static void wait_for_zero_refcount(struct module *mod)
 {
 	/* Since we might sleep for some time, drop the semaphore first */
@@ -590,7 +577,7 @@ sys_delete_module(const char __user *name_user, unsigned int flags)
 	}
 
 	/* If it has an init func, it must have an exit func to unload */
-	if ((mod->init != init_module && mod->exit == cleanup_module)
+	if ((mod->init != NULL && mod->exit == NULL)
 	    || mod->unsafe) {
 		forced = try_force(flags);
 		if (!forced) {
@@ -611,9 +598,11 @@ sys_delete_module(const char __user *name_user, unsigned int flags)
 		wait_for_zero_refcount(mod);
 
 	/* Final destruction now noone is using it. */
-	up(&module_mutex);
-	mod->exit();
-	down(&module_mutex);
+	if (mod->exit != NULL) {
+		up(&module_mutex);
+		mod->exit();
+		down(&module_mutex);
+	}
 	free_module(mod);
 
  out:
@@ -640,7 +629,7 @@ static void print_unload_info(struct seq_file *m, struct module *mod)
 		seq_printf(m, "[unsafe],");
 	}
 
-	if (mod->init != init_module && mod->exit == cleanup_module) {
+	if (mod->init != NULL && mod->exit == NULL) {
 		printed_something = 1;
 		seq_printf(m, "[permanent],");
 	}
@@ -726,19 +715,6 @@ static inline int sysfs_unload_setup(struct module *mod)
 #endif /* CONFIG_MODULE_UNLOAD */
 
 #ifdef CONFIG_OBSOLETE_MODPARM
-static int param_set_byte(const char *val, struct kernel_param *kp)  
-{
-	char *endp;
-	long l;
-
-	if (!val) return -EINVAL;
-	l = simple_strtol(val, &endp, 0);
-	if (endp == val || *endp || ((char)l != l))
-		return -EINVAL;
-	*((char *)kp->arg) = l;
-	return 0;
-}
-
 /* Bounds checking done below */
 static int obsparm_copy_string(const char *val, struct kernel_param *kp)
 {
@@ -1519,6 +1495,7 @@ static struct module *load_module(void __user *umod,
 	long err = 0;
 	void *percpu = NULL, *ptr = NULL; /* Stops spurious gcc warning */
 	struct exception_table_entry *extable;
+	int gpgsig_ok;
 
 	DEBUGP("load_module: umod=%p, len=%lu, uargs=%p\n",
 	       umod, len, uargs);
@@ -1544,16 +1521,18 @@ static struct module *load_module(void __user *umod,
 		goto free_hdr;
 	}
 
-	if (len < hdr->e_shoff + hdr->e_shnum * sizeof(Elf_Shdr))
-		goto truncated;
+	/* verify the module (validates ELF and checks signature) */
+	gpgsig_ok = 0;
+	err = module_verify(hdr, len);
+	if (err < 0)
+		goto free_hdr;
+	if (err == 1)
+		gpgsig_ok = 1;
 
 	/* Convenience variables */
 	sechdrs = (void *)hdr + hdr->e_shoff;
 	secstrings = (void *)hdr + sechdrs[hdr->e_shstrndx].sh_offset;
 	sechdrs[0].sh_addr = 0;
-
-	/* And these should exist, but gcc whinges if we don't init them */
-	symindex = strindex = 0;
 
 	for (i = 1; i < hdr->e_shnum; i++) {
 		if (sechdrs[i].sh_type != SHT_NOBITS
@@ -1585,6 +1564,14 @@ static struct module *load_module(void __user *umod,
 		goto free_hdr;
 	}
 	mod = (void *)sechdrs[modindex].sh_addr;
+	mod->gpgsig_ok = gpgsig_ok;
+
+	if (symindex == 0) {
+		printk(KERN_WARNING "%s: module has no symbols (stripped?)\n",
+		       mod->name);
+		err = -ENOEXEC;
+		goto free_hdr;
+	}
 
 	/* Optional sections */
 	exportindex = find_sec(hdr, sechdrs, secstrings, "__ksymtab");
@@ -1624,14 +1611,6 @@ static struct module *load_module(void __user *umod,
 		err = -ENOEXEC;
 		goto free_hdr;
 	}
-
-	/* verify the signature on the module */
-#ifdef CONFIG_MODULE_SIG
-	if (module_verify_sig(hdr, sechdrs, secstrings, mod)) {
-		err = -EPERM;
-		goto free_hdr;
-	}
-#endif
 
 	/* Now copy in args */
 	arglen = strlen_user(uargs);
@@ -1854,7 +1833,7 @@ sys_init_module(void __user *umod,
 		const char __user *uargs)
 {
 	struct module *mod;
-	int ret;
+	int ret = 0;
 
 	/* Must have permission */
 	if (!capable(CAP_SYS_MODULE))
@@ -1893,7 +1872,8 @@ sys_init_module(void __user *umod,
 	up(&notify_mutex);
 
 	/* Start the module */
-	ret = mod->init();
+	if (mod->init != NULL)
+		ret = mod->init();
 	if (ret < 0) {
 		/* Init routine failed: abort.  Try to protect us from
                    buggy refcounters. */

@@ -25,13 +25,13 @@
 #define CTL_VSERVER	4242    /* unused? */
 
 enum {
-        CTL_DEBUG_SWITCH = 1,
-        CTL_DEBUG_XID,
-        CTL_DEBUG_NID,
-        CTL_DEBUG_NET,
-        CTL_DEBUG_LIMIT,
-        CTL_DEBUG_DLIM,
-        CTL_DEBUG_CVIRT,
+	CTL_DEBUG_SWITCH = 1,
+	CTL_DEBUG_XID,
+	CTL_DEBUG_NID,
+	CTL_DEBUG_NET,
+	CTL_DEBUG_LIMIT,
+	CTL_DEBUG_DLIM,
+	CTL_DEBUG_CVIRT,
 };
 
 
@@ -57,7 +57,7 @@ void vserver_register_sysctl(void)
 //			vserver_table[0].de->owner = THIS_MODULE;
 #endif
 	}
-			
+
 }
 
 void vserver_unregister_sysctl(void)
@@ -125,81 +125,85 @@ done:
 	*ppos += *lenp;
 	return 0;
 }
-	
+
 
 
 static ctl_table debug_table[] = {
-        {
-                .ctl_name       = CTL_DEBUG_SWITCH,
-                .procname       = "debug_switch",
-                .data           = &vx_debug_switch,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        {
-                .ctl_name       = CTL_DEBUG_XID,
-                .procname       = "debug_xid",
-                .data           = &vx_debug_xid,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        {
-                .ctl_name       = CTL_DEBUG_NID,
-                .procname       = "debug_nid",
-                .data           = &vx_debug_nid,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        {
-                .ctl_name       = CTL_DEBUG_NET,
-                .procname       = "debug_net",
-                .data           = &vx_debug_net,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        {
-                .ctl_name       = CTL_DEBUG_LIMIT,
-                .procname       = "debug_limit",
-                .data           = &vx_debug_limit,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        {
-                .ctl_name       = CTL_DEBUG_DLIM,
-                .procname       = "debug_dlim",
-                .data           = &vx_debug_dlim,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        {
-                .ctl_name       = CTL_DEBUG_CVIRT,
-                .procname       = "debug_cvirt",
-                .data           = &vx_debug_cvirt,
-                .maxlen         = sizeof(int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dodebug
-        },
-        { .ctl_name = 0 }
+	{
+		.ctl_name	= CTL_DEBUG_SWITCH,
+		.procname	= "debug_switch",
+		.data		= &vx_debug_switch,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dodebug
+	},
+	{
+		.ctl_name	= CTL_DEBUG_XID,
+		.procname	= "debug_xid",
+		.data		= &vx_debug_xid,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dodebug
+	},
+	{
+		.ctl_name	= CTL_DEBUG_NID,
+		.procname	= "debug_nid",
+		.data		= &vx_debug_nid,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dodebug
+	},
+	{
+		.ctl_name	= CTL_DEBUG_NET,
+		.procname	= "debug_net",
+		.data		= &vx_debug_net,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dodebug
+	},
+	{
+		.ctl_name	= CTL_DEBUG_LIMIT,
+		.procname	= "debug_limit",
+		.data		= &vx_debug_limit,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dodebug
+	},
+	{
+		.ctl_name	= CTL_DEBUG_DLIM,
+		.procname	= "debug_dlim",
+		.data		= &vx_debug_dlim,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dodebug
+	},
+	{
+		.ctl_name	= CTL_DEBUG_CVIRT,
+		.procname	= "debug_cvirt",
+		.data		= &vx_debug_cvirt,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dodebug
+	},
+	{ .ctl_name = 0 }
 };
 
 static ctl_table vserver_table[] = {
-        {
-                .ctl_name       = CTL_VSERVER,
-                .procname       = "vserver",
-                .mode           = 0555,
-                .child          = debug_table
-        },
-        { .ctl_name = 0 }
+	{
+		.ctl_name	= CTL_VSERVER,
+		.procname	= "vserver",
+		.mode		= 0555,
+		.child		= debug_table
+	},
+	{ .ctl_name = 0 }
 };
 
 
-EXPORT_SYMBOL_GPL(vx_debug_dlim);
-EXPORT_SYMBOL_GPL(vx_debug_nid);
+EXPORT_SYMBOL_GPL(vx_debug_switch);
 EXPORT_SYMBOL_GPL(vx_debug_xid);
+EXPORT_SYMBOL_GPL(vx_debug_nid);
+EXPORT_SYMBOL_GPL(vx_debug_net);
+EXPORT_SYMBOL_GPL(vx_debug_limit);
+EXPORT_SYMBOL_GPL(vx_debug_dlim);
+EXPORT_SYMBOL_GPL(vx_debug_cvirt);
 

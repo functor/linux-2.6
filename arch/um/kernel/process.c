@@ -19,6 +19,7 @@
 #include <asm/sigcontext.h>
 #include <asm/unistd.h>
 #include <asm/page.h>
+#include <asm/user.h>
 #include "user_util.h"
 #include "kern_util.h"
 #include "user.h"
@@ -119,12 +120,12 @@ int start_fork_tramp(void *thread_arg, unsigned long temp_stack,
 
 	/* Start the process and wait for it to kill itself */
 	new_pid = clone(outer_tramp, (void *) sp, clone_flags, &arg);
-	if(new_pid < 0) 
+	if(new_pid < 0)
 		return(new_pid);
 
 	CATCH_EINTR(err = waitpid(new_pid, &status, 0));
-	if(err < 0) 
-		panic("Waiting for outer trampoline failed - errno = %d", 
+	if(err < 0)
+		panic("Waiting for outer trampoline failed - errno = %d",
 		      errno);
 
 	if(!WIFSIGNALED(status) || (WTERMSIG(status) != SIGKILL))
@@ -185,6 +186,66 @@ static void stop_ptraced_child(int pid, void *stack, int exitcode)
 		panic("check_ptrace : munmap failed, errno = %d", errno);
 }
 
+static int force_sysemu_disabled = 0;
+
+static int __init nosysemu_cmd_param(char *str, int* add)
+{
+	force_sysemu_disabled = 1;
+	return 0;
+}
+
+__uml_setup("nosysemu", nosysemu_cmd_param,
+		"nosysemu\n"
+		"    Turns off syscall emulation patch for ptrace (SYSEMU) on.\n"
+		"    SYSEMU is a performance-patch introduced by Laurent Vivier. It changes\n"
+		"    behaviour of ptrace() and helps reducing host context switch rate.\n"
+		"    To make it working, you need a kernel patch for your host, too.\n"
+		"    See http://perso.wanadoo.fr/laurent.vivier/UML/ for further information.\n");
+
+static void __init check_sysemu(void)
+{
+	void *stack;
+	int pid, n, status;
+
+	if (mode_tt)
+		return;
+
+	printk("Checking syscall emulation patch for ptrace...");
+	sysemu_supported = 0;
+	pid = start_ptraced_child(&stack);
+	if(ptrace(PTRACE_SYSEMU, pid, 0, 0) >= 0) {
+		struct user_regs_struct regs;
+
+		CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
+		if (n < 0)
+			panic("check_ptrace : wait failed, errno = %d", errno);
+		if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP))
+			panic("check_ptrace : expected SIGTRAP, "
+			      "got status = %d", status);
+
+		if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+			panic("check_ptrace : failed to read child "
+			      "registers, errno = %d", errno);
+		regs.orig_eax = pid;
+		if (ptrace(PTRACE_SETREGS, pid, 0, &regs) < 0)
+			panic("check_ptrace : failed to modify child "
+			      "registers, errno = %d", errno);
+
+		stop_ptraced_child(pid, stack, 0);
+
+		sysemu_supported = 1;
+		printk("found\n");
+	}
+	else
+	{
+		stop_ptraced_child(pid, stack, 1);
+		sysemu_supported = 0;
+		printk("missing\n");
+	}
+
+	set_using_sysemu(!force_sysemu_disabled);
+}
+
 void __init check_ptrace(void)
 {
 	void *stack;
@@ -217,6 +278,7 @@ void __init check_ptrace(void)
 	}
 	stop_ptraced_child(pid, stack, 0);
 	printk("OK\n");
+	check_sysemu();
 }
 
 int run_kernel_thread(int (*fn)(void *), void *arg, void **jmp_ptr)

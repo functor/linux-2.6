@@ -181,7 +181,7 @@ static_unused int _sys_clone(nabi_no_regargs struct pt_regs regs)
 		newsp = regs.regs[29];
 	parent_tidptr = (int *) regs.regs[6];
 	child_tidptr = (int *) regs.regs[7];
-	return do_fork(clone_flags & ~CLONE_IDLETASK, newsp, &regs, 0,
+	return do_fork(clone_flags, newsp, &regs, 0,
 	               parent_tidptr, child_tidptr);
 }
 
@@ -266,7 +266,7 @@ asmlinkage int _sys_sysmips(int cmd, long arg1, int arg2, int arg3)
 		strncpy(vx_new_uts(nodename), nodename, len);
 		nodename[__NEW_UTS_LEN] = '\0';
 		strlcpy(vx_new_uts(nodename), nodename,
-		        sizeof(vx_new_uts(nodename)));
+			sizeof(vx_new_uts(nodename)));
 		up_write(&uts_sem);
 		return 0;
 	}

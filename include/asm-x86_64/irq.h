@@ -57,4 +57,6 @@ struct irqaction;
 struct pt_regs;
 int handle_IRQ_event(unsigned int, struct pt_regs *, struct irqaction *);
 
+extern int no_irq_affinity;
+
 #endif /* _ASM_IRQ_H */

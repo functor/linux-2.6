@@ -8,9 +8,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <utime.h>
-#include <dirent.h>
-#include <linux/kdev_t.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -27,8 +24,7 @@
 static void copy_stat(struct uml_stat *dst, struct stat64 *src)
 {
 	*dst = ((struct uml_stat) {
-		.ust_major   = MAJOR(src->st_dev),     /* device */
-		.ust_minor   = MINOR(src->st_dev),
+		.ust_dev     = src->st_dev,     /* device */
 		.ust_ino     = src->st_ino,     /* inode */
 		.ust_mode    = src->st_mode,    /* protection */
 		.ust_nlink   = src->st_nlink,   /* number of hard links */
@@ -40,8 +36,6 @@ static void copy_stat(struct uml_stat *dst, struct stat64 *src)
 		.ust_atime   = src->st_atime,   /* time of last access */
 		.ust_mtime   = src->st_mtime,   /* time of last modification */
 		.ust_ctime   = src->st_ctime,   /* time of last change */
-		.ust_rmajor  = MAJOR(src->st_rdev),
-		.ust_rminor  = MINOR(src->st_rdev),
 	});
 }
 
@@ -54,7 +48,7 @@ int os_stat_fd(const int fd, struct uml_stat *ubuf)
 		err = fstat64(fd, &sbuf);
 	} while((err < 0) && (errno == EINTR)) ;
 
-	if(err < 0) 
+	if(err < 0)
 		return(-errno);
 
 	if(ubuf != NULL)
@@ -71,7 +65,7 @@ int os_stat_file(const char *file_name, struct uml_stat *ubuf)
 		err = stat64(file_name, &sbuf);
 	} while((err < 0) && (errno == EINTR)) ;
 
-	if(err < 0) 
+	if(err < 0)
 		return(-errno);
 
 	if(ubuf != NULL)
@@ -79,66 +73,14 @@ int os_stat_file(const char *file_name, struct uml_stat *ubuf)
 	return(err);
 }
 
-int os_lstat_file(const char *file_name, struct uml_stat *ubuf)
-{
-	struct stat64 sbuf;
-	int err;
-
-	do {
-		err = lstat64(file_name, &sbuf);
-	} while((err < 0) && (errno == EINTR)) ;
-
-	if(err < 0) 
-		return(-errno);
-
-	if(ubuf != NULL)
-		copy_stat(ubuf, &sbuf);
-	return(err);
-}
-
-int os_access(const char *file, int mode)
+int os_access(const char* file, int mode)
 {
 	int amode, err;
 
-	amode=(mode& OS_ACC_R_OK ? R_OK : 0) | (mode& OS_ACC_W_OK ? W_OK : 0) |
-	      (mode& OS_ACC_X_OK ? X_OK : 0) | (mode& OS_ACC_F_OK ? F_OK : 0) ;
+	amode=(mode&OS_ACC_R_OK ? R_OK : 0) | (mode&OS_ACC_W_OK ? W_OK : 0) |
+	      (mode&OS_ACC_X_OK ? X_OK : 0) | (mode&OS_ACC_F_OK ? F_OK : 0) ;
 
 	err = access(file, amode);
-	if(err < 0)
-		return(-errno);
-
-	return(0);
-}
-
-int os_set_file_time(const char *file, unsigned long access, unsigned long mod)
-{
-	struct utimbuf buf = ((struct utimbuf){ .actime = access, 
-						.modtime = mod });
-	int err;
-
-	err = utime(file, &buf);
-	if(err < 0)
-		return(-errno);
-
-	return(0);
-}
-
-int os_set_file_perms(const char *file, int mode)
-{
-	int err;
-
-	err = chmod(file, mode);
-	if(err < 0)
-		return(-errno);
-
-	return(0);
-}
-
-int os_set_file_owner(const char *file, int owner, int group)
-{
-	int err;
-
-	err = chown(file, owner, group);
 	if(err < 0)
 		return(-errno);
 
@@ -234,7 +176,7 @@ int os_set_owner(int fd, int pid)
 	return(0);
 }
 
-/* FIXME? moved wholesale from sigio_user.c to get fcntls out of that file */ 
+/* FIXME? moved wholesale from sigio_user.c to get fcntls out of that file */
 int os_sigio_async(int master, int slave)
 {
 	int flags;
@@ -247,7 +189,7 @@ int os_sigio_async(int master, int slave)
 
 	if((fcntl(master, F_SETFL, flags | O_NONBLOCK | O_ASYNC) < 0) ||
 	   (fcntl(master, F_SETOWN, os_getpid()) < 0)){
-		printk("fcntl F_SETFL or F_SETOWN failed, errno = %d\n", 
+		printk("fcntl F_SETFL or F_SETOWN failed, errno = %d\n",
 		       errno);
 		return(-errno);
 	}
@@ -279,7 +221,7 @@ int os_file_type(char *file)
 	struct uml_stat buf;
 	int err;
 
-	err = os_lstat_file(file, &buf);
+	err = os_stat_file(file, &buf);
 	if(err < 0)
 		return(err);
 
@@ -340,96 +282,6 @@ int os_open_file(char *file, struct openflags flags, int mode)
 	return(fd);
 }
 
-void *os_open_dir(char *path, int *err_out)
-{
-	void *dir;
-
-	dir = opendir(path);
-	*err_out = -errno;
-	return(dir);
-}
-
-int os_seek_dir(void *stream, unsigned long long pos)
-{
-	seekdir(stream, pos);
-	return(0);
-}
-
-int os_read_dir(void *stream, unsigned long long *ino_out, char **name_out)
-{
-	struct dirent *ent;
-
-	errno = 0;
-	ent = readdir(stream);
-	if(ent == NULL){
-		if(errno != 0)
-			return(-errno);
-		*name_out = NULL;
-		return(0);
-	}
-
-	*ino_out = ent->d_ino;
-	*name_out = ent->d_name;
-	return(0);
-}
-
-int os_tell_dir(void *stream)
-{
-	return(telldir(stream));
-}
-
-int os_close_dir(void *stream)
-{
-	int err;
-
-	err = closedir(stream);
-	if(err < 0)
-		return(-errno);
-	return(0);
-}
-
-int os_remove_file(const char *file)
-{
-	int err;
-
-	err = unlink(file);
-	if(err)
-		return(-errno);
-
-	return(0);
-}
-
-int os_move_file(const char *from, const char *to)
-{
-	int err;
-
-	err = rename(from, to);
-	if(err)
-		return(-errno);
-
-	return(0);
-}
-
-int os_truncate_fd(int fd, unsigned long long len)
-{
-	int err;
-
-	err = ftruncate(fd, len);
-	if(err)
-		return(-errno);
-	return(0);
-}
-
-int os_truncate_file(const char *file, unsigned long long len)
-{
-	int err;
-
-	err = truncate(file, len);
-	if(err)
-		return(-errno);
-	return(0);
-}
-
 int os_connect_socket(char *name)
 {
 	struct sockaddr_un sock;
@@ -464,7 +316,7 @@ int os_seek_file(int fd, __u64 offset)
 	return(0);
 }
 
-static int fault_buffer(void *start, int len, 
+static int fault_buffer(void *start, int len,
 			int (*copy_proc)(void *addr, void *buf, int len))
 {
 	int page = getpagesize(), i;
@@ -504,13 +356,13 @@ static int file_io(int fd, void *buf, int len,
 
 int os_read_file(int fd, void *buf, int len)
 {
-	return(file_io(fd, buf, len, (int (*)(int, void *, int)) read, 
+	return(file_io(fd, buf, len, (int (*)(int, void *, int)) read,
 		       copy_from_user_proc));
 }
 
 int os_write_file(int fd, const void *buf, int len)
 {
-	return(file_io(fd, (void *) buf, len, 
+	return(file_io(fd, (void *) buf, len,
 		       (int (*)(int, void *, int)) write, copy_to_user_proc));
 }
 
@@ -545,19 +397,6 @@ int os_file_size(char *file, long long *size_out)
 		return(0);
 	}
 	*size_out = buf.ust_size;
-	return(0);
-}
-
-int os_fd_size(int fd, long long *size_out)
-{
-	struct stat buf;
-	int err;
-
-	err = fstat(fd, &buf);
-	if(err)
-		return(-errno);
-
-	*size_out = buf.st_size;
 	return(0);
 }
 
@@ -612,7 +451,7 @@ int os_pipe(int *fds, int stream, int close_on_exec)
 	int err, type = stream ? SOCK_STREAM : SOCK_DGRAM;
 
 	err = socketpair(AF_UNIX, type, 0, fds);
-	if(err < 0) 
+	if(err < 0)
 		return(-errno);
 
 	if(!close_on_exec)
@@ -801,72 +640,6 @@ int os_create_unix_socket(char *file, int len, int close_on_exec)
 	return(sock);
 }
 
-int os_make_symlink(const char *to, const char *from)
-{
-	int err;
-
-	err = symlink(to, from);
-	if(err)
-		return(-errno);
-
-	return(0);
-}
-
-int os_read_symlink(const char *file, char *buf, int size)
-{
-	int err;
-
-	err = readlink(file, buf, size);
-	if(err < 0)
-		return(-errno);
-
-	return(err);
-}
-
-int os_link_file(const char *to, const char *from)
-{
-	int err;
-
-	err = link(to, from);
-	if(err)
-		return(-errno);
-
-	return(0);
-}
-
-int os_make_dir(const char *dir, int mode)
-{
-	int err;
-
-	err = mkdir(dir, mode);
-	if(err)
-		return(-errno);
-
-	return(0);
-}
-
-int os_make_dev(const char *name, int mode, int major, int minor)
-{
-	int err;
-
-	err = mknod(name, mode, MKDEV(major, minor));
-	if(err)
-		return(-errno);
-
-	return(0);
-}
-
-int os_remove_dir(const char *dir)
-{
-	int err;
-
-	err = rmdir(dir);
-	if(err)
-		return(-errno);
-
-	return(0);
-}
-
 void os_flush_stdout(void)
 {
 	fflush(stdout);
@@ -896,38 +669,6 @@ int os_lock_file(int fd, int excl)
 	err = save;
  out:
 	return(err);
-}
-
-int os_stat_filesystem(char *path, long *bsize_out, long long *blocks_out, 
-		       long long *bfree_out, long long *bavail_out, 
-		       long long *files_out, long long *ffree_out, 
-		       void *fsid_out, int fsid_size, long *namelen_out, 
-		       long *spare_out)
-{
-	struct statfs64 buf;
-	int err;
-
-	err = statfs64(path, &buf);
-	if(err < 0)
-		return(-errno);
-
-	*bsize_out = buf.f_bsize;
-	*blocks_out = buf.f_blocks;
-	*bfree_out = buf.f_bfree;
-	*bavail_out = buf.f_bavail;
-	*files_out = buf.f_files;
-	*ffree_out = buf.f_ffree;
-	memcpy(fsid_out, &buf.f_fsid, 
-	       sizeof(buf.f_fsid) > fsid_size ? fsid_size : 
-	       sizeof(buf.f_fsid));
-	*namelen_out = buf.f_namelen;
-	spare_out[0] = buf.f_spare[0];
-	spare_out[1] = buf.f_spare[1];
-	spare_out[2] = buf.f_spare[2];
-	spare_out[3] = buf.f_spare[3];
-	spare_out[4] = buf.f_spare[4];
-	spare_out[5] = buf.f_spare[5];
-	return(0);
 }
 
 /*

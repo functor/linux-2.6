@@ -47,7 +47,8 @@ static int mlock_fixup(struct vm_area_struct * vma,
 	pages = (end - start) >> PAGE_SHIFT;
 	if (newflags & VM_LOCKED) {
 		pages = -pages;
-		ret = make_pages_present(start, end);
+		if (!(newflags & VM_IO))
+			ret = make_pages_present(start, end);
 	}
 
 	// vma->vm_mm->locked_vm -= pages;
@@ -62,8 +63,6 @@ static int do_mlock(unsigned long start, size_t len, int on)
 	struct vm_area_struct * vma, * next;
 	int error;
 
-	if (on && !can_do_mlock())
-		return -EPERM;
 	len = PAGE_ALIGN(len);
 	end = start + len;
 	if (end < start)
@@ -109,6 +108,9 @@ asmlinkage long sys_mlock(unsigned long start, size_t len)
 	unsigned long lock_limit;
 	int error = -ENOMEM;
 
+	if (!can_do_mlock())
+		return -EPERM;
+
 	down_write(&current->mm->mmap_sem);
 	len = PAGE_ALIGN(len + (start & ~PAGE_MASK));
 	start &= PAGE_MASK;
@@ -122,7 +124,7 @@ asmlinkage long sys_mlock(unsigned long start, size_t len)
 	lock_limit >>= PAGE_SHIFT;
 
 	/* check against resource limits */
-	if ( (locked <= lock_limit) || capable(CAP_IPC_LOCK))
+	if ((locked <= lock_limit) || capable(CAP_IPC_LOCK))
 		error = do_mlock(start, len, 1);
 out:
 	up_write(&current->mm->mmap_sem);
@@ -143,19 +145,15 @@ asmlinkage long sys_munlock(unsigned long start, size_t len)
 
 static int do_mlockall(int flags)
 {
-	int error;
-	unsigned int def_flags;
 	struct vm_area_struct * vma;
+	unsigned int def_flags = 0;
 
-	if (!can_do_mlock())
-		return -EPERM;
-
-	def_flags = 0;
 	if (flags & MCL_FUTURE)
 		def_flags = VM_LOCKED;
 	current->mm->def_flags = def_flags;
+	if (flags == MCL_FUTURE)
+		goto out;
 
-	error = 0;
 	for (vma = current->mm->mmap; vma ; vma = vma->vm_next) {
 		unsigned int newflags;
 
@@ -166,7 +164,8 @@ static int do_mlockall(int flags)
 		/* Ignore errors */
 		mlock_fixup(vma, vma->vm_start, vma->vm_end, newflags);
 	}
-	return error;
+out:
+	return 0;
 }
 
 asmlinkage long sys_mlockall(int flags)
@@ -174,9 +173,14 @@ asmlinkage long sys_mlockall(int flags)
 	unsigned long lock_limit;
 	int ret = -EINVAL;
 
-	down_write(&current->mm->mmap_sem);
 	if (!flags || (flags & ~(MCL_CURRENT | MCL_FUTURE)))
 		goto out;
+
+	ret = -EPERM;
+	if (!can_do_mlock())
+		goto out;
+
+	down_write(&current->mm->mmap_sem);
 
 	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
 	lock_limit >>= PAGE_SHIFT;
@@ -184,10 +188,11 @@ asmlinkage long sys_mlockall(int flags)
 	ret = -ENOMEM;
 	if (!vx_vmlocked_avail(current->mm, current->mm->total_vm))
 		goto out;
-	if ((current->mm->total_vm <= lock_limit) || capable(CAP_IPC_LOCK))
+	if (!(flags & MCL_CURRENT) || (current->mm->total_vm <= lock_limit) ||
+	    capable(CAP_IPC_LOCK))
 		ret = do_mlockall(flags);
-out:
 	up_write(&current->mm->mmap_sem);
+out:
 	return ret;
 }
 

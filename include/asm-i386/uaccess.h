@@ -26,7 +26,7 @@
 
 
 #define KERNEL_DS	MAKE_MM_SEG(0xFFFFFFFFUL)
-#define USER_DS		MAKE_MM_SEG(TASK_SIZE)
+#define USER_DS		MAKE_MM_SEG(PAGE_OFFSET)
 
 #define get_ds()	(KERNEL_DS)
 #define get_fs()	(current_thread_info()->addr_limit)
@@ -150,45 +150,6 @@ extern void __get_user_4(void);
 		:"=a" (ret),"=d" (x) \
 		:"0" (ptr))
 
-extern int get_user_size(unsigned int size, void *val, const void *ptr);
-extern int put_user_size(unsigned int size, const void *val, void *ptr);
-extern int zero_user_size(unsigned int size, void *ptr);
-extern int copy_str_fromuser_size(unsigned int size, void *val, const void *ptr);
-extern int strlen_fromuser_size(unsigned int size, const void *ptr);
-
-
-# define indirect_get_user(x,ptr)					\
-({	int __ret_gu,__val_gu;						\
-	__typeof__(ptr) __ptr_gu = (ptr);				\
-	__ret_gu = get_user_size(sizeof(*__ptr_gu), &__val_gu,__ptr_gu) ? -EFAULT : 0;\
-	(x) = (__typeof__(*__ptr_gu))__val_gu;				\
-	__ret_gu;							\
-})
-#define indirect_put_user(x,ptr)					\
-({									\
-	__typeof__(*(ptr)) *__ptr_pu = (ptr), __x_pu = (x);		\
-	put_user_size(sizeof(*__ptr_pu), &__x_pu, __ptr_pu) ? -EFAULT : 0; \
-})
-#define __indirect_put_user indirect_put_user
-#define __indirect_get_user indirect_get_user
-
-#define indirect_copy_from_user(to,from,n) get_user_size(n,to,from)
-#define indirect_copy_to_user(to,from,n) put_user_size(n,from,to)
-
-#define __indirect_copy_from_user indirect_copy_from_user
-#define __indirect_copy_to_user indirect_copy_to_user
-
-#define indirect_strncpy_from_user(dst, src, count) \
-		copy_str_fromuser_size(count, dst, src)
-
-extern int strlen_fromuser_size(unsigned int size, const void *ptr);
-#define indirect_strnlen_user(str, n) strlen_fromuser_size(n, str)
-#define indirect_strlen_user(str) indirect_strnlen_user(str, ~0UL >> 1)
-
-extern int zero_user_size(unsigned int size, void *ptr);
-
-#define indirect_clear_user(mem, len) zero_user_size(len, mem)
-#define __indirect_clear_user clear_user
 
 /* Careful: we have to cast the result to the type of the pointer for sign reasons */
 /**
@@ -208,7 +169,7 @@ extern int zero_user_size(unsigned int size, void *ptr);
  * Returns zero on success, or -EFAULT on error.
  * On error, the variable @x is set to zero.
  */
-#define direct_get_user(x,ptr)						\
+#define get_user(x,ptr)							\
 ({	int __ret_gu,__val_gu;						\
 	__chk_user_ptr(ptr);						\
 	switch(sizeof (*(ptr))) {					\
@@ -239,7 +200,7 @@ extern void __put_user_bad(void);
  *
  * Returns zero on success, or -EFAULT on error.
  */
-#define direct_put_user(x,ptr)						\
+#define put_user(x,ptr)							\
   __put_user_check((__typeof__(*(ptr)))(x),(ptr),sizeof(*(ptr)))
 
 
@@ -263,7 +224,7 @@ extern void __put_user_bad(void);
  * Returns zero on success, or -EFAULT on error.
  * On error, the variable @x is set to zero.
  */
-#define __direct_get_user(x,ptr) \
+#define __get_user(x,ptr) \
   __get_user_nocheck((x),(ptr),sizeof(*(ptr)))
 
 
@@ -286,7 +247,7 @@ extern void __put_user_bad(void);
  *
  * Returns zero on success, or -EFAULT on error.
  */
-#define __direct_put_user(x,ptr) \
+#define __put_user(x,ptr) \
   __put_user_nocheck((__typeof__(*(ptr)))(x),(ptr),sizeof(*(ptr)))
 
 #define __put_user_nocheck(x,ptr,size)				\
@@ -414,8 +375,10 @@ do {									\
 		: "m"(__m(addr)), "i"(errret), "0"(err))
 
 
-unsigned long __copy_to_user_ll(void __user *to, const void *from, unsigned long n);
-unsigned long __copy_from_user_ll(void *to, const void __user *from, unsigned long n);
+unsigned long __must_check __copy_to_user_ll(void __user *to,
+				const void *from, unsigned long n);
+unsigned long __must_check __copy_from_user_ll(void *to,
+				const void __user *from, unsigned long n);
 
 /*
  * Here we special-case 1, 2 and 4-byte copy_*_user invocations.  On a fault
@@ -438,8 +401,8 @@ unsigned long __copy_from_user_ll(void *to, const void __user *from, unsigned lo
  * Returns number of bytes that could not be copied.
  * On success, this will be zero.
  */
-static inline unsigned long
-__direct_copy_to_user(void __user *to, const void *from, unsigned long n)
+static inline unsigned long __must_check
+__copy_to_user_inatomic(void __user *to, const void *from, unsigned long n)
 {
 	if (__builtin_constant_p(n)) {
 		unsigned long ret;
@@ -457,6 +420,13 @@ __direct_copy_to_user(void __user *to, const void *from, unsigned long n)
 		}
 	}
 	return __copy_to_user_ll(to, from, n);
+}
+
+static inline unsigned long __must_check
+__copy_to_user(void __user *to, const void *from, unsigned long n)
+{
+       might_sleep();
+       return __copy_to_user_inatomic(to, from, n);
 }
 
 /**
@@ -477,7 +447,7 @@ __direct_copy_to_user(void __user *to, const void *from, unsigned long n)
  * data to the requested size using zero bytes.
  */
 static inline unsigned long
-__direct_copy_from_user(void *to, const void __user *from, unsigned long n)
+__copy_from_user_inatomic(void *to, const void __user *from, unsigned long n)
 {
 	if (__builtin_constant_p(n)) {
 		unsigned long ret;
@@ -497,57 +467,20 @@ __direct_copy_from_user(void *to, const void __user *from, unsigned long n)
 	return __copy_from_user_ll(to, from, n);
 }
 
-/**
- * copy_to_user: - Copy a block of data into user space.
- * @to:   Destination address, in user space.
- * @from: Source address, in kernel space.
- * @n:    Number of bytes to copy.
- *
- * Context: User context only.  This function may sleep.
- *
- * Copy data from kernel space to user space.
- *
- * Returns number of bytes that could not be copied.
- * On success, this will be zero.
- */
 static inline unsigned long
-direct_copy_to_user(void __user *to, const void *from, unsigned long n)
+__copy_from_user(void *to, const void __user *from, unsigned long n)
 {
-	might_sleep();
-	if (access_ok(VERIFY_WRITE, to, n))
-		n = __direct_copy_to_user(to, from, n);
-	return n;
+       might_sleep();
+       return __copy_from_user_inatomic(to, from, n);
 }
-
-/**
- * copy_from_user: - Copy a block of data from user space.
- * @to:   Destination address, in kernel space.
- * @from: Source address, in user space.
- * @n:    Number of bytes to copy.
- *
- * Context: User context only.  This function may sleep.
- *
- * Copy data from user space to kernel space.
- *
- * Returns number of bytes that could not be copied.
- * On success, this will be zero.
- *
- * If some data could not be copied, this function will pad the copied
- * data to the requested size using zero bytes.
- */
-static inline unsigned long
-direct_copy_from_user(void *to, const void __user *from, unsigned long n)
-{
-	might_sleep();
-	if (access_ok(VERIFY_READ, from, n))
-		n = __direct_copy_from_user(to, from, n);
-	else
-		memset(to, 0, n);
-	return n;
-}
-
-long strncpy_from_user(char *dst, const char __user *src, long count);
-long __strncpy_from_user(char *dst, const char __user *src, long count);
+unsigned long __must_check copy_to_user(void __user *to,
+				const void *from, unsigned long n);
+unsigned long __must_check copy_from_user(void *to,
+				const void __user *from, unsigned long n);
+long __must_check strncpy_from_user(char *dst, const char __user *src,
+				long count);
+long __must_check __strncpy_from_user(char *dst,
+				const char __user *src, long count);
 
 /**
  * strlen_user: - Get the size of a string in user space.
@@ -563,71 +496,10 @@ long __strncpy_from_user(char *dst, const char __user *src, long count);
  * If there is a limit on the length of a valid string, you may wish to
  * consider using strnlen_user() instead.
  */
+#define strlen_user(str) strnlen_user(str, ~0UL >> 1)
 
-long direct_strncpy_from_user(char *dst, const char *src, long count);
-long __direct_strncpy_from_user(char *dst, const char *src, long count);
-#define direct_strlen_user(str) direct_strnlen_user(str, ~0UL >> 1)
-long direct_strnlen_user(const char *str, long n);
-unsigned long direct_clear_user(void *mem, unsigned long len);
-unsigned long __direct_clear_user(void *mem, unsigned long len);
-
-extern int indirect_uaccess;
-
-#ifdef CONFIG_X86_UACCESS_INDIRECT
-
-/*
- * Return code and zeroing semantics:
-
- __clear_user          0                      <-> bytes not done
- clear_user            0                      <-> bytes not done
- __copy_to_user        0                      <-> bytes not done
- copy_to_user          0                      <-> bytes not done
- __copy_from_user      0                      <-> bytes not done, zero rest
- copy_from_user        0                      <-> bytes not done, zero rest
- __get_user            0                      <-> -EFAULT
- get_user              0                      <-> -EFAULT
- __put_user            0                      <-> -EFAULT
- put_user              0                      <-> -EFAULT
- strlen_user           strlen + 1             <-> 0
- strnlen_user          strlen + 1 (or n+1)    <-> 0
- strncpy_from_user     strlen (or n)          <-> -EFAULT
-
- */
-
-#define __clear_user(mem,len) __indirect_clear_user(mem,len)
-#define clear_user(mem,len) indirect_clear_user(mem,len)
-#define __copy_to_user(to,from,n) __indirect_copy_to_user(to,from,n)
-#define copy_to_user(to,from,n) indirect_copy_to_user(to,from,n)
-#define __copy_from_user(to,from,n) __indirect_copy_from_user(to,from,n)
-#define copy_from_user(to,from,n) indirect_copy_from_user(to,from,n)
-#define __get_user(val,ptr) __indirect_get_user(val,ptr)
-#define get_user(val,ptr) indirect_get_user(val,ptr)
-#define __put_user(val,ptr) __indirect_put_user(val,ptr)
-#define put_user(val,ptr) indirect_put_user(val,ptr)
-#define strlen_user(str) indirect_strlen_user(str)
-#define strnlen_user(src,count) indirect_strnlen_user(src,count)
-#define strncpy_from_user(dst,src,count) \
-			indirect_strncpy_from_user(dst,src,count)
-
-#else
-
-#define __clear_user __direct_clear_user
-#define clear_user direct_clear_user
-#define __copy_to_user __direct_copy_to_user
-#define copy_to_user direct_copy_to_user
-#define __copy_from_user __direct_copy_from_user
-#define copy_from_user direct_copy_from_user
-#define __get_user __direct_get_user
-#define get_user direct_get_user
-#define __put_user __direct_put_user
-#define put_user direct_put_user
-#define strlen_user direct_strlen_user
-#define strnlen_user direct_strnlen_user
-#define strncpy_from_user direct_strncpy_from_user
-
-#endif /* CONFIG_X86_UACCESS_INDIRECT */
-#define __copy_to_user_inatomic __copy_to_user
-#define __copy_from_user_inatomic __copy_from_user
-
+long strnlen_user(const char __user *str, long n);
+unsigned long __must_check clear_user(void __user *mem, unsigned long len);
+unsigned long __must_check __clear_user(void __user *mem, unsigned long len);
 
 #endif /* __i386_UACCESS_H */

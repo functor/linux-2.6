@@ -44,7 +44,7 @@ struct cpuinfo_um boot_cpu_data = {
 	.ipi_pipe		= { -1, -1 }
 };
 
-/* Placeholder to make UML link until the vsyscall stuff is actually 
+/* Placeholder to make UML link until the vsyscall stuff is actually
  * implemented
  */
 void *__kernel_vsyscall;
@@ -326,7 +326,7 @@ int linux_main(int argc, char **argv)
 	/* Increase physical memory size for exec-shield users
 	so they actually get what they asked for. This should
 	add zero for non-exec shield users */
-	
+
 	diff = UML_ROUND_UP(brk_start) - UML_ROUND_UP(&_end);
 	if(diff > 1024 * 1024){
 		printf("Adding %ld bytes to physical memory to account for "

@@ -213,12 +213,19 @@ sys32_mmap(struct mmap_arg_struct __user *arg)
 	if (a.offset & ~PAGE_MASK)
 		return -EINVAL; 
 
+	if (a.flags & MAP_FIXED) {
+		if (a.len > IA32_PAGE_OFFSET)
+			return -EINVAL;
+		if (a.addr > IA32_PAGE_OFFSET - a.len)
+			return -ENOMEM;
+	}
+
 	if (!(a.flags & MAP_ANONYMOUS)) {
 		file = fget(a.fd);
 		if (!file)
 			return -EBADF;
 	}
-	
+
 	if (a.prot & PROT_READ) 
 		a.prot |= vm_force_exec32;
 
@@ -233,12 +240,80 @@ sys32_mmap(struct mmap_arg_struct __user *arg)
 	return retval;
 }
 
+asmlinkage long
+sys32_munmap(unsigned long start, unsigned long len)
+{
+	if ((start + len) > IA32_PAGE_OFFSET)
+		return -EINVAL;
+	return sys_munmap(start, len);
+}
+
 asmlinkage long 
 sys32_mprotect(unsigned long start, size_t len, unsigned long prot)
 {
+	if ((start + PAGE_ALIGN(len)) >> 32)
+		return -ENOMEM;
 	if (prot & PROT_READ) 
 		prot |= vm_force_exec32;
 	return sys_mprotect(start,len,prot); 
+}
+
+asmlinkage long
+sys32_brk(unsigned long brk)
+{
+	if (brk > IA32_PAGE_OFFSET)
+		return -EINVAL;
+	return sys_brk(brk);
+}
+
+extern unsigned long do_mremap(unsigned long addr,
+	unsigned long old_len, unsigned long new_len,
+	unsigned long flags, unsigned long new_addr);
+
+asmlinkage unsigned long sys32_mremap(unsigned long addr,
+	unsigned long old_len, unsigned long new_len,
+	unsigned long flags, unsigned long new_addr)
+{
+	struct vm_area_struct *vma;
+	unsigned long ret = -EINVAL;
+
+	if (old_len > IA32_PAGE_OFFSET || new_len > IA32_PAGE_OFFSET)
+		goto out;
+	if (addr > IA32_PAGE_OFFSET - old_len)
+		goto out;
+	down_write(&current->mm->mmap_sem);
+	if (flags & MREMAP_FIXED) {
+		if (new_addr > IA32_PAGE_OFFSET - new_len)
+			goto out_sem;
+	} else if (addr > IA32_PAGE_OFFSET - new_len) {
+		unsigned long map_flags = 0;
+		struct file *file = NULL;
+
+		ret = -ENOMEM;
+		if (!(flags & MREMAP_MAYMOVE))
+			goto out_sem;
+
+		vma = find_vma(current->mm, addr);
+		if (vma) {
+			if (vma->vm_flags & VM_SHARED)
+				map_flags |= MAP_SHARED;
+			file = vma->vm_file;
+		}
+
+		/* MREMAP_FIXED checked above. */
+		new_addr = get_unmapped_area(file, addr, new_len,
+				    vma ? vma->vm_pgoff : 0,
+				    map_flags);
+		ret = new_addr;
+		if (new_addr & ~PAGE_MASK)
+			goto out_sem;
+		flags |= MREMAP_FIXED;
+	}
+	ret = do_mremap(addr, old_len, new_len, flags, new_addr);
+out_sem:
+	up_write(&current->mm->mmap_sem);
+out:
+	return ret;       
 }
 
 asmlinkage long
@@ -659,11 +734,12 @@ sys32_waitpid(compat_pid_t pid, unsigned int *stat_addr, int options)
 int sys32_ni_syscall(int call)
 { 
 	struct task_struct *me = current;
-	static char lastcomm[8];
-	if (strcmp(lastcomm, me->comm)) {
-	printk(KERN_INFO "IA32 syscall %d from %s not implemented\n", call,
-	       current->comm);
-		strcpy(lastcomm, me->comm); 
+	static char lastcomm[sizeof(me->comm)];
+
+	if (strncmp(lastcomm, me->comm, sizeof(lastcomm))) {
+		printk(KERN_INFO "IA32 syscall %d from %s not implemented\n",
+		       call, me->comm);
+		strncpy(lastcomm, me->comm, sizeof(lastcomm));
 	} 
 	return -ENOSYS;	       
 } 
@@ -1039,6 +1115,14 @@ asmlinkage long sys32_mmap2(unsigned long addr, unsigned long len,
 	struct file * file = NULL;
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
+
+	if (flags & MAP_FIXED) {
+		if (len > IA32_PAGE_OFFSET)
+			return -EINVAL;
+		if (addr > IA32_PAGE_OFFSET - len)
+			return -ENOMEM;
+	}
+
 	if (!(flags & MAP_ANONYMOUS)) {
 		file = fget(fd);
 		if (!file)
@@ -1128,7 +1212,7 @@ long sys32_ustat(unsigned dev, struct ustat32 __user *u32p)
 } 
 
 asmlinkage long sys32_execve(char __user *name, compat_uptr_t __user *argv,
-			     compat_uptr_t __user *envp, struct pt_regs regs)
+			     compat_uptr_t __user *envp, struct pt_regs *regs)
 {
 	long error;
 	char * filename;
@@ -1137,21 +1221,47 @@ asmlinkage long sys32_execve(char __user *name, compat_uptr_t __user *argv,
 	error = PTR_ERR(filename);
 	if (IS_ERR(filename))
 		return error;
-	error = compat_do_execve(filename, argv, envp, &regs);
+	error = compat_do_execve(filename, argv, envp, regs);
 	if (error == 0)
 		current->ptrace &= ~PT_DTRACE;
 	putname(filename);
 	return error;
 }
 
-asmlinkage long sys32_clone(unsigned int clone_flags, unsigned int newsp, struct pt_regs regs)
+asmlinkage long sys32_clone(unsigned int clone_flags, unsigned int newsp,
+			    struct pt_regs *regs)
 {
-	void __user *parent_tid = (void __user *)regs.rdx;
-	void __user *child_tid = (void __user *)regs.rdi; 
+	void __user *parent_tid = (void __user *)regs->rdx;
+	void __user *child_tid = (void __user *)regs->rdi;
 	if (!newsp)
-		newsp = regs.rsp;
-        return do_fork(clone_flags & ~CLONE_IDLETASK, newsp, &regs, 0, 
-		    parent_tid, child_tid);
+		newsp = regs->rsp;
+        return do_fork(clone_flags, newsp, regs, 0, parent_tid, child_tid);
+}
+
+asmlinkage long sys32_waitid(int which, compat_pid_t pid,
+			     siginfo_t32 __user *uinfo, int options,
+			     struct compat_rusage __user *uru)
+{
+	siginfo_t info;
+	struct rusage ru;
+	long ret;
+	mm_segment_t old_fs = get_fs();
+
+	info.si_signo = 0;
+	set_fs (KERNEL_DS);
+	ret = sys_waitid(which, pid, (siginfo_t __user *) &info, options,
+			 uru ? &ru : NULL);
+	set_fs (old_fs);
+
+	if (ret < 0 || info.si_signo == 0)
+		return ret;
+
+	if (uru && (ret = put_compat_rusage(&ru, uru)))
+		return ret;
+
+	BUG_ON(info.si_code & __SI_MASK);
+	info.si_code |= __SI_CHLD;
+	return ia32_copy_siginfo_to_user(uinfo, &info);
 }
 
 /*
@@ -1265,7 +1375,7 @@ asmlinkage long sys32_open(const char __user * filename, int flags, int mode)
 		if (fd >= 0) {
 			struct file *f = filp_open(tmp, flags, mode);
 			error = PTR_ERR(f);
-			if (unlikely(IS_ERR(f))) {
+			if (IS_ERR(f)) {
 				put_unused_fd(fd); 
 				fd = error;
 			} else
@@ -1319,11 +1429,11 @@ long sys32_fadvise64_64(int fd, __u32 offset_low, __u32 offset_high,
 long sys32_vm86_warning(void)
 { 
 	struct task_struct *me = current;
-	static char lastcomm[8];
-	if (strcmp(lastcomm, me->comm)) {
+	static char lastcomm[sizeof(me->comm)];
+	if (strncmp(lastcomm, me->comm, sizeof(lastcomm))) {
 		printk(KERN_INFO "%s: vm86 mode not supported on 64 bit kernel\n",
 		       me->comm);
-		strcpy(lastcomm, me->comm); 
+		strncpy(lastcomm, me->comm, sizeof(lastcomm)); 
 	} 
 	return -ENOSYS;
 } 
@@ -1339,6 +1449,12 @@ long sys32_quotactl(void)
 	} 
 	return -ENOSYS;
 } 
+
+long sys32_lookup_dcookie(u32 addr_low, u32 addr_high,
+			  char __user * buf, size_t len)
+{
+	return sys_lookup_dcookie(((u64)addr_high << 32) | addr_low, buf, len);
+}
 
 cond_syscall(sys32_ipc)
 

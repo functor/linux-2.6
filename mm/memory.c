@@ -117,8 +117,7 @@ static inline void free_one_pmd(struct mmu_gather *tlb, pmd_t * dir)
 	pte_free_tlb(tlb, page);
 }
 
-static inline void free_one_pgd(struct mmu_gather *tlb, pgd_t * dir,
-							int pgd_idx)
+static inline void free_one_pgd(struct mmu_gather *tlb, pgd_t * dir)
 {
 	int j;
 	pmd_t * pmd;
@@ -132,11 +131,8 @@ static inline void free_one_pgd(struct mmu_gather *tlb, pgd_t * dir,
 	}
 	pmd = pmd_offset(dir, 0);
 	pgd_clear(dir);
-	for (j = 0; j < PTRS_PER_PMD ; j++) {
-		if (pgd_idx * PGDIR_SIZE + j * PMD_SIZE >= TASK_SIZE)
-			break;
+	for (j = 0; j < PTRS_PER_PMD ; j++)
 		free_one_pmd(tlb, pmd+j);
-	}
 	pmd_free_tlb(tlb, pmd);
 }
 
@@ -149,13 +145,11 @@ static inline void free_one_pgd(struct mmu_gather *tlb, pgd_t * dir,
 void clear_page_tables(struct mmu_gather *tlb, unsigned long first, int nr)
 {
 	pgd_t * page_dir = tlb->mm->pgd;
-	int pgd_idx = first;
 
 	page_dir += first;
 	do {
-		free_one_pgd(tlb, page_dir, pgd_idx);
+		free_one_pgd(tlb, page_dir);
 		page_dir++;
-		pgd_idx++;
 	} while (--nr);
 }
 
@@ -337,6 +331,8 @@ skip_copy_pte_range:
 				get_page(page);
 				// dst->rss++;
 				vx_rsspages_inc(dst);
+				if (PageAnon(page))
+					dst->anon_rss++;
 				set_pte(dst_pte, pte);
 				page_dup_rmap(page);
 cont_copy_pte_range_noset:
@@ -427,7 +423,9 @@ static void zap_pte_range(struct mmu_gather *tlb,
 				set_pte(ptep, pgoff_to_pte(page->index));
 			if (pte_dirty(pte))
 				set_page_dirty(page);
-			if (pte_young(pte) && !PageAnon(page))
+			if (PageAnon(page))
+				tlb->mm->anon_rss--;
+			else if (pte_young(pte))
 				mark_page_accessed(page);
 			tlb->freed++;
 			page_remove_rmap(page);
@@ -452,7 +450,7 @@ static void zap_pmd_range(struct mmu_gather *tlb,
 		unsigned long size, struct zap_details *details)
 {
 	pmd_t * pmd;
-	unsigned long end, pgd_boundary;
+	unsigned long end;
 
 	if (pgd_none(*dir))
 		return;
@@ -463,9 +461,8 @@ static void zap_pmd_range(struct mmu_gather *tlb,
 	}
 	pmd = pmd_offset(dir, address);
 	end = address + size;
-	pgd_boundary = ((address + PGDIR_SIZE) & PGDIR_MASK);
-	if (pgd_boundary && (end > pgd_boundary))
-		end = pgd_boundary;
+	if (end > ((address + PGDIR_SIZE) & PGDIR_MASK))
+		end = ((address + PGDIR_SIZE) & PGDIR_MASK);
 	do {
 		zap_pte_range(tlb, pmd, address, end - address, details);
 		address = (address + PMD_SIZE) & PMD_MASK; 
@@ -678,64 +675,6 @@ out:
 	return NULL;
 }
 
-struct page *
-follow_page_pfn(struct mm_struct *mm, unsigned long address, int write,
-		unsigned long *pfn_ptr)
-{
-	pgd_t *pgd;
-	pmd_t *pmd;
-	pte_t *ptep, pte;
-	unsigned long pfn;
-	struct page *page;
-
-	*pfn_ptr = 0;
-	page = follow_huge_addr(mm, address, write);
-	if (!IS_ERR(page))
-		return page;
-
-	pgd = pgd_offset(mm, address);
-	if (pgd_none(*pgd) || pgd_bad(*pgd))
-		goto out;
-
-	pmd = pmd_offset(pgd, address);
-	if (pmd_none(*pmd))
-		goto out;
-	if (pmd_huge(*pmd))
-		return follow_huge_pmd(mm, address, pmd, write);
-	if (pmd_bad(*pmd))
-		goto out;
-
-	ptep = pte_offset_map(pmd, address);
-	if (!ptep)
-		goto out;
-
-	pte = *ptep;
-	pte_unmap(ptep);
-	if (pte_present(pte)) {
-		if (write && !pte_write(pte))
-			goto out;
-		if (write && !pte_dirty(pte)) {
-			struct page *page = pte_page(pte);
-			if (!PageDirty(page))
-				set_page_dirty(page);
-		}
-		pfn = pte_pfn(pte);
-		if (pfn_valid(pfn)) {
-			struct page *page = pfn_to_page(pfn);
-			
-			mark_page_accessed(page);
-			return page;
-		} else {
-			*pfn_ptr = pfn;
-			return NULL;
-		}
-	}
-
-out:
-	return NULL;
-}
-
-
 /* 
  * Given a physical address, is there a useful struct page pointing to
  * it?  This may become more complex in the future if we start dealing
@@ -750,7 +689,6 @@ static inline struct page *get_page_map(struct page *page)
 }
 
 
-#ifndef CONFIG_X86_4G
 static inline int
 untouched_anonymous_page(struct mm_struct* mm, struct vm_area_struct *vma,
 			 unsigned long address)
@@ -775,7 +713,6 @@ untouched_anonymous_page(struct mm_struct* mm, struct vm_area_struct *vma,
 	/* There is a pte slot for 'address' in 'mm'. */
 	return 0;
 }
-#endif
 
 
 int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
@@ -805,19 +742,15 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			pte_t *pte;
 			if (write) /* user gate pages are read-only */
 				return i ? : -EFAULT;
-			pgd = pgd_offset_gate(mm, pg);
-			if (!pgd)
-				return i ? : -EFAULT;
+			if (pg > TASK_SIZE)
+				pgd = pgd_offset_k(pg);
+			else
+				pgd = pgd_offset_gate(mm, pg);
+			BUG_ON(pgd_none(*pgd));
 			pmd = pmd_offset(pgd, pg);
-			if (!pmd)
-				return i ? : -EFAULT;
+			BUG_ON(pmd_none(*pmd));
 			pte = pte_offset_map(pmd, pg);
-			if (!pte)
-				return i ? : -EFAULT;
-			if (!pte_present(*pte)) {
-				pte_unmap(pte);
-				return i ? : -EFAULT;
-			}
+			BUG_ON(pte_none(*pte));
 			if (pages) {
 				pages[i] = pte_page(*pte);
 				get_page(pages[i]);
@@ -831,7 +764,7 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			continue;
 		}
 
-		if (!vma || (pages && (vma->vm_flags & VM_IO))
+		if (!vma || (vma->vm_flags & VM_IO)
 				|| !(flags & vma->vm_flags))
 			return i ? : -EFAULT;
 
@@ -851,21 +784,12 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 				 * insanly big anonymously mapped areas that
 				 * nobody touched so far. This is important
 				 * for doing a core dump for these mappings.
-				 *
-				 * disable this for 4:4 - it prevents
-			 	 * follow_page() from ever seeing these pages.
-				 *
-				 * (The 'fix' is dubious anyway, there's
-				 * nothing that this code avoids which couldnt
-				 * be triggered from userspace anyway.)
 				 */
-#ifndef CONFIG_X86_4G
 				if (!lookup_write &&
 				    untouched_anonymous_page(mm,vma,start)) {
 					map = ZERO_PAGE(start);
 					break;
 				}
-#endif
 				spin_unlock(&mm->page_table_lock);
 				switch (handle_mm_fault(mm,vma,start,write)) {
 				case VM_FAULT_MINOR:
@@ -1055,6 +979,16 @@ int remap_page_range(struct vm_area_struct *vma, unsigned long from, unsigned lo
 	if (from >= end)
 		BUG();
 
+	/*
+	 * Physically remapped pages are special. Tell the
+	 * rest of the world about it:
+	 *   VM_IO tells people not to look at these pages
+	 *	(accesses can have side effects).
+	 *   VM_RESERVED tells swapout not to try to touch
+	 *	this region.
+	 */
+	vma->vm_flags |= VM_IO | VM_RESERVED;
+
 	spin_lock(&mm->page_table_lock);
 	do {
 		pmd_t *pmd = pmd_alloc(mm, dir, from);
@@ -1182,6 +1116,8 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	spin_lock(&mm->page_table_lock);
 	page_table = pte_offset_map(pmd, address);
 	if (likely(pte_same(*page_table, pte))) {
+		if (PageAnon(old_page))
+			mm->anon_rss--;
 		if (PageReserved(old_page))
 			// ++mm->rss;
 			vx_rsspages_inc(mm);
@@ -1211,12 +1147,12 @@ no_new_page:
 static inline void unmap_mapping_range_list(struct prio_tree_root *root,
 					    struct zap_details *details)
 {
-	struct vm_area_struct *vma = NULL;
+	struct vm_area_struct *vma;
 	struct prio_tree_iter iter;
 	pgoff_t vba, vea, zba, zea;
 
-	while ((vma = vma_prio_tree_next(vma, root, &iter,
-			details->first_index, details->last_index)) != NULL) {
+	vma_prio_tree_foreach(vma, &iter, root,
+			details->first_index, details->last_index) {
 		vba = vma->vm_pgoff;
 		vea = vba + ((vma->vm_end - vma->vm_start) >> PAGE_SHIFT) - 1;
 		/* Assume for now that PAGE_CACHE_SHIFT == PAGE_SHIFT */
@@ -1849,6 +1785,8 @@ int make_pages_present(unsigned long addr, unsigned long end)
 	struct vm_area_struct * vma;
 
 	vma = find_vma(current->mm, addr);
+	if (!vma)
+		return -1;
 	write = (vma->vm_flags & VM_WRITE) != 0;
 	if (addr >= end)
 		BUG();

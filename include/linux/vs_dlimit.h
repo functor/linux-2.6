@@ -25,7 +25,7 @@ static inline struct dl_info *__get_dl_info(struct dl_info *dli,
 }
 
 
-#define	free_dl_info(i)	\
+#define free_dl_info(i) \
 	call_rcu(&i->dl_rcu, rcu_free_dl_info);
 
 #define put_dl_info(i)	__put_dl_info(i,__FILE__,__LINE__)
@@ -43,7 +43,7 @@ static inline void __put_dl_info(struct dl_info *dli,
 }
 
 
-#define	__dlimit_char(d)	((d)?'*':' ')
+#define __dlimit_char(d)	((d)?'*':' ')
 
 static inline int __dl_alloc_space(struct super_block *sb,
 	xid_t xid, dlsize_t nr, const char *file, int line)
@@ -66,7 +66,8 @@ static inline int __dl_alloc_space(struct super_block *sb,
 out:
 	vxlprintk(VXD_CBIT(dlim, 1),
 		"ALLOC (%p,#%d)%c %lld bytes (%d)",
-		sb, xid, __dlimit_char(dli), nr, ret, file, line);
+		sb, xid, __dlimit_char(dli), (long long)nr,
+		ret, file, line);
 	return ret;
 }
 
@@ -91,7 +92,8 @@ static inline void __dl_free_space(struct super_block *sb,
 out:
 	vxlprintk(VXD_CBIT(dlim, 1),
 		"FREE  (%p,#%d)%c %lld bytes",
-		sb, xid, __dlimit_char(dli), nr, _file, _line);
+		sb, xid, __dlimit_char(dli), (long long)nr,
+		_file, _line);
 }
 
 static inline int __dl_alloc_inode(struct super_block *sb,
@@ -167,8 +169,9 @@ static inline void __dl_adjust_block(struct super_block *sb, xid_t xid,
 
 	vxlprintk(VXD_CBIT(dlim, 2),
 		"ADJUST: %lld,%lld on %d,%d [mult=%d]",
-		bfree, broot, *free_blocks, *root_blocks,
-		dli->dl_nrlmult, _file, _line);
+		(long long)bfree, (long long)broot,
+		*free_blocks, *root_blocks, dli->dl_nrlmult,
+		_file, _line);
 	if (free_blocks) {
 		if (*free_blocks > bfree)
 			*free_blocks = bfree;
@@ -198,7 +201,7 @@ static inline void __dl_adjust_block(struct super_block *sb, xid_t xid,
 	__dl_free_inode(sb, xid, __FILE__, __LINE__ )
 
 
-#define	DLIMIT_ADJUST_BLOCK(sb, xid, fb, rb) \
+#define DLIMIT_ADJUST_BLOCK(sb, xid, fb, rb) \
 	__dl_adjust_block(sb, xid, fb, rb, __FILE__, __LINE__ )
 
 

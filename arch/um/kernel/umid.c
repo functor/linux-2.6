@@ -34,7 +34,7 @@ static int umid_inited = 0;
 
 static int make_umid(int (*printer)(const char *fmt, ...));
 
-static int __init set_umid(char *name, int is_random, 
+static int __init set_umid(char *name, int is_random,
 			   int (*printer)(const char *fmt, ...))
 {
 	if(umid_inited){
@@ -54,7 +54,6 @@ static int __init set_umid(char *name, int is_random,
 
 static int __init set_umid_arg(char *name, int *add)
 {
-	*add = 0;
 	return(set_umid(name, 0, printf));
 }
 

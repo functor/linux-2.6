@@ -57,7 +57,7 @@ static void idepnp_remove(struct pnp_dev * dev)
 {
 	ide_hwif_t *hwif = pnp_get_drvdata(dev);
 	if (hwif) {
-		ide_unregister(hwif->index);
+		ide_unregister_hwif(hwif);
 	} else
 		printk(KERN_ERR "idepnp: Unable to remove device, please report.\n");
 }

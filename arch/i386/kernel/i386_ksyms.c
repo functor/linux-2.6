@@ -24,7 +24,6 @@
 #include <asm/uaccess.h>
 #include <asm/checksum.h>
 #include <asm/io.h>
-#include <asm/hardirq.h>
 #include <asm/delay.h>
 #include <asm/irq.h>
 #include <asm/mmx.h>
@@ -33,7 +32,7 @@
 #include <asm/tlbflush.h>
 #include <asm/nmi.h>
 #include <asm/ist.h>
-#include <asm/e820.h>
+#include <asm/kdebug.h>
 
 extern void dump_thread(struct pt_regs *, struct user *);
 extern spinlock_t rtc_lock;
@@ -73,7 +72,6 @@ EXPORT_SYMBOL(xquad_portio);
 #endif
 EXPORT_SYMBOL(dump_thread);
 EXPORT_SYMBOL(dump_fpu);
-EXPORT_SYMBOL(dump_extended_fpu);
 EXPORT_SYMBOL_GPL(kernel_fpu_begin);
 EXPORT_SYMBOL(__ioremap);
 EXPORT_SYMBOL(ioremap_nocache);
@@ -89,35 +87,32 @@ EXPORT_SYMBOL(get_cmos_time);
 EXPORT_SYMBOL(cpu_khz);
 EXPORT_SYMBOL(apm_info);
 
-EXPORT_SYMBOL_NOVERS(__down_failed);
-EXPORT_SYMBOL_NOVERS(__down_failed_interruptible);
-EXPORT_SYMBOL_NOVERS(__down_failed_trylock);
-EXPORT_SYMBOL_NOVERS(__up_wakeup);
+EXPORT_SYMBOL(__down_failed);
+EXPORT_SYMBOL(__down_failed_interruptible);
+EXPORT_SYMBOL(__down_failed_trylock);
+EXPORT_SYMBOL(__up_wakeup);
 /* Networking helper routines. */
+EXPORT_SYMBOL(csum_partial_copy_generic);
 /* Delay loops */
 EXPORT_SYMBOL(__ndelay);
 EXPORT_SYMBOL(__udelay);
 EXPORT_SYMBOL(__delay);
 EXPORT_SYMBOL(__const_udelay);
 
-EXPORT_SYMBOL_NOVERS(__get_user_1);
-EXPORT_SYMBOL_NOVERS(__get_user_2);
-EXPORT_SYMBOL_NOVERS(__get_user_4);
+EXPORT_SYMBOL(__get_user_1);
+EXPORT_SYMBOL(__get_user_2);
+EXPORT_SYMBOL(__get_user_4);
 
 EXPORT_SYMBOL(strpbrk);
 EXPORT_SYMBOL(strstr);
 
-#if !defined(CONFIG_X86_UACCESS_INDIRECT)
 EXPORT_SYMBOL(strncpy_from_user);
-EXPORT_SYMBOL(__direct_strncpy_from_user);
+EXPORT_SYMBOL(__strncpy_from_user);
 EXPORT_SYMBOL(clear_user);
 EXPORT_SYMBOL(__clear_user);
 EXPORT_SYMBOL(__copy_from_user_ll);
 EXPORT_SYMBOL(__copy_to_user_ll);
 EXPORT_SYMBOL(strnlen_user);
-#else /* CONFIG_X86_UACCESS_INDIRECT */
-EXPORT_SYMBOL(direct_csum_partial_copy_generic);
-#endif
 
 EXPORT_SYMBOL(dma_alloc_coherent);
 EXPORT_SYMBOL(dma_free_coherent);
@@ -147,8 +142,8 @@ EXPORT_SYMBOL(cpu_sibling_map);
 EXPORT_SYMBOL(cpu_data);
 EXPORT_SYMBOL(cpu_online_map);
 EXPORT_SYMBOL(cpu_callout_map);
-EXPORT_SYMBOL_NOVERS(__write_lock_failed);
-EXPORT_SYMBOL_NOVERS(__read_lock_failed);
+EXPORT_SYMBOL(__write_lock_failed);
+EXPORT_SYMBOL(__read_lock_failed);
 
 /* Global SMP stuff */
 EXPORT_SYMBOL(synchronize_irq);
@@ -180,8 +175,9 @@ EXPORT_SYMBOL_GPL(unset_nmi_callback);
 
 #undef memcmp
 extern int memcmp(const void *,const void *,__kernel_size_t);
-EXPORT_SYMBOL_NOVERS(memcmp);
+EXPORT_SYMBOL(memcmp);
 
+EXPORT_SYMBOL(register_die_notifier);
 #ifdef CONFIG_HAVE_DEC_LOCK
 EXPORT_SYMBOL(atomic_dec_and_lock);
 #endif
@@ -208,8 +204,6 @@ EXPORT_SYMBOL(ist_info);
 
 EXPORT_SYMBOL(csum_partial);
 
-EXPORT_SYMBOL_GPL(empty_zero_page);
- 
 #ifdef CONFIG_CRASH_DUMP_MODULE
 #ifdef CONFIG_SMP
 extern irq_desc_t irq_desc[NR_IRQS];

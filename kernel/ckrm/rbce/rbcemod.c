@@ -56,6 +56,10 @@
 #include "bitvector.h"
 #include <linux/rbce.h>
 
+#warning MEF I cannot believe that vserver changes force the following include statement: FIX THIS!
+#include <linux/vs_cvirt.h>
+
+
 #define DEBUG
 
 MODULE_DESCRIPTION(RBCE_MOD_DESCR);

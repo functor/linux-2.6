@@ -59,6 +59,12 @@ struct rlimit {
 #define EXEC_STACK_BIAS	(2*1024*1024)
 
 /*
+ * GPG wants 32kB of mlocked memory, to make sure pass phrases
+ * and other sensitive information are never written to disk.
+ */
+#define MLOCK_LIMIT	(8 * PAGE_SIZE)
+
+/*
  * Due to binary compatibility, the actual resource numbers
  * may be different for different linux versions..
  */

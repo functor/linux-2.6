@@ -7,6 +7,7 @@
  */
 
 #include <linux/config.h>
+#include <linux/module.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -39,6 +40,10 @@
 
 #ifndef Dprintk
 #define Dprintk(x...)
+#endif
+
+#ifdef CONFIG_GART_IOMMU
+extern int swiotlb;
 #endif
 
 extern char _stext[];
@@ -396,6 +401,8 @@ static inline int page_is_ram (unsigned long pagenr)
 	return 0;
 }
 
+extern int swiotlb_force;
+
 /*
  * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
  * valid. The argument is a physical page number.
@@ -416,6 +423,8 @@ int devmem_is_allowed(unsigned long pagenr)
 }
 
 
+EXPORT_SYMBOL_GPL(page_is_ram);
+
 static struct kcore_list kcore_mem, kcore_vmalloc, kcore_kernel, kcore_modules,
 			 kcore_vsyscall;
 
@@ -425,7 +434,8 @@ void __init mem_init(void)
 	int tmp;
 
 #ifdef CONFIG_SWIOTLB
-	if (!iommu_aperture && end_pfn >= 0xffffffff>>PAGE_SHIFT)
+	if (!iommu_aperture &&
+	    (end_pfn >= 0xffffffff>>PAGE_SHIFT || force_iommu))
 	       swiotlb = 1;
 	if (swiotlb)
 		swiotlb_init();	
@@ -616,7 +626,16 @@ static struct vm_area_struct gate32_vma = {
 
 struct vm_area_struct *get_gate_vma(struct task_struct *tsk)
 {
-	return test_tsk_thread_flag(tsk, TIF_IA32) ? &gate32_vma : &gate_vma;
+#ifdef CONFIG_IA32_EMULATION
+	if (test_tsk_thread_flag(tsk, TIF_IA32)) {
+		/* lookup code assumes the pages are present. set them up
+		   now */
+		if (__map_syscall32(tsk->mm, 0xfffe000) < 0)
+			return NULL;
+		return &gate32_vma;
+	}
+#endif
+	return &gate_vma;
 }
 
 int in_gate_area(struct task_struct *task, unsigned long addr)

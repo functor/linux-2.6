@@ -23,14 +23,23 @@
 CROSS32_COMPILE ?=
 #CROSS32_COMPILE = /usr/local/ppc/bin/powerpc-linux-
 
-BOOTCC		:= $(CROSS32_COMPILE)gcc
+HAS_BIARCH      := $(shell if gcc -m32 -S -o /dev/null -xc /dev/null > /dev/null 2>&1; then echo y; else echo n; fi;)
+ifeq ($(HAS_BIARCH),y)
+BOOTCC := gcc -m32
+BOOTLD := ld -m elf32ppclinux
+BOOTAS := as -32
+BOOTOBJCOPY := objcopy --target elf32-powerpc
+else
+BOOTCC = $(CROSS32_COMPILE)gcc
+BOOTLD = $(CROSS32_COMPILE)ld
+BOOTAS = $(CROSS32_COMPILE)as
+BOOTOBJCOPY = $(CROSS32_COMPILE)objcopy
+endif
+
 HOSTCC		:= gcc
 BOOTCFLAGS	:= $(HOSTCFLAGS) $(LINUXINCLUDE) -fno-builtin 
-BOOTAS		:= $(CROSS32_COMPILE)as
 BOOTAFLAGS	:= -D__ASSEMBLY__ $(BOOTCFLAGS) -traditional
-BOOTLD		:= $(CROSS32_COMPILE)ld
 BOOTLFLAGS	:= -Ttext 0x00400000 -e _start -T $(srctree)/$(src)/zImage.lds
-BOOTOBJCOPY	:= $(CROSS32_COMPILE)objcopy
 OBJCOPYFLAGS    := contents,alloc,load,readonly,data
 
 src-boot := crt0.S string.S prom.c main.c zlib.c imagesize.c div64.S
@@ -103,6 +112,9 @@ $(call obj-sec, $(required) $(initrd)): $(obj)/kernel-%.o: $(obj)/kernel-%.c FOR
 $(obj)/zImage: obj-boot += $(call obj-sec, $(required))
 $(obj)/zImage: $(call obj-sec, $(required)) $(obj-boot) $(obj)/addnote FORCE
 	$(call if_changed,addnote)
+
+$(obj)/zImage.stub: $(obj-boot) FORCE
+	$(BOOTLD) -r $(BOOTLFLAGS) -o $@ $(obj-boot)
 
 $(obj)/zImage.initrd: obj-boot += $(call obj-sec, $(required) $(initrd))
 $(obj)/zImage.initrd: $(call obj-sec, $(required) $(initrd)) $(obj-boot) $(obj)/addnote FORCE

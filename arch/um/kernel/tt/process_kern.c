@@ -28,7 +28,7 @@
 
 void *switch_to_tt(void *prev, void *next, void *last)
 {
-	struct task_struct *from, *to;
+	struct task_struct *from, *to, *prev_sched;
 	unsigned long flags;
 	int err, vtalrm, alrm, prof, cpu;
 	char c;
@@ -65,12 +65,24 @@ void *switch_to_tt(void *prev, void *next, void *last)
 		panic("write of switch_pipe failed, err = %d", -err);
 
 	reading = 1;
-	if((from->state == TASK_ZOMBIE) || (from->state == TASK_DEAD))
+	if((from->exit_state == EXIT_ZOMBIE) || (from->exit_state == EXIT_DEAD))
 		os_kill_process(os_getpid(), 0);
 
 	err = os_read_file(from->thread.mode.tt.switch_pipe[0], &c, sizeof(c));
 	if(err != sizeof(c))
 		panic("read of switch_pipe failed, errno = %d", -err);
+
+	/* If the process that we have just scheduled away from has exited,
+	 * then it needs to be killed here.  The reason is that, even though
+	 * it will kill itself when it next runs, that may be too late.  Its
+	 * stack will be freed, possibly before then, and if that happens,
+	 * we have a use-after-free situation.  So, it gets killed here
+	 * in case it has not already killed itself.
+	 */
+	prev_sched = current->thread.prev_sched;
+	if((prev_sched->exit_state == EXIT_ZOMBIE) ||
+	   (prev_sched->exit_state == EXIT_DEAD))
+		os_kill_process(prev_sched->thread.mode.tt.extern_pid, 1);
 
 	/* This works around a nasty race with 'jail'.  If we are switching
 	 * between two threads of a threaded app and the incoming process 
@@ -161,7 +173,7 @@ static void new_thread_handler(int sig)
 	local_irq_enable();
 	if(!run_kernel_thread(fn, arg, &current->thread.exec_buf))
 		do_exit(0);
-	
+
 	/* XXX No set_user_mode here because a newly execed process will
 	 * immediately segfault on its non-existent IP, coming straight back
 	 * to the signal handler, which will call set_user_mode on its way
@@ -172,17 +184,17 @@ static void new_thread_handler(int sig)
 static int new_thread_proc(void *stack)
 {
 	/* local_irq_disable is needed to block out signals until this thread is
-	 * properly scheduled.  Otherwise, the tracing thread will get mighty 
-	 * upset about any signals that arrive before that.  
+	 * properly scheduled.  Otherwise, the tracing thread will get mighty
+	 * upset about any signals that arrive before that.
 	 * This has the complication that it sets the saved signal mask in
 	 * the sigcontext to block signals.  This gets restored when this
 	 * thread (or a descendant, since they get a copy of this sigcontext)
 	 * returns to userspace.
 	 * So, this is compensated for elsewhere.
-	 * XXX There is still a small window until local_irq_disable() actually 
-	 * finishes where signals are possible - shouldn't be a problem in 
-	 * practice since SIGIO hasn't been forwarded here yet, and the 
-	 * local_irq_disable should finish before a SIGVTALRM has time to be 
+	 * XXX There is still a small window until local_irq_disable() actually
+	 * finishes where signals are possible - shouldn't be a problem in
+	 * practice since SIGIO hasn't been forwarded here yet, and the
+	 * local_irq_disable should finish before a SIGVTALRM has time to be
 	 * delivered.
 	 */
 
@@ -255,7 +267,7 @@ int copy_thread_tt(int nr, unsigned long clone_flags, unsigned long sp,
 	err = os_pipe(p->thread.mode.tt.switch_pipe, 1, 1);
 	if(err < 0){
 		printk("copy_thread : pipe failed, err = %d\n", -err);
-		goto out;
+		return(err);
 	}
 
 	stack = alloc_stack(0, 0);
@@ -508,7 +520,7 @@ void set_init_pid(int pid)
 	init_task.thread.mode.tt.extern_pid = pid;
 	err = os_pipe(init_task.thread.mode.tt.switch_pipe, 1, 1);
 	if(err)
-		panic("Can't create switch pipe for init_task, errno = %d", 
+		panic("Can't create switch pipe for init_task, errno = %d",
 		      -err);
 }
 
@@ -534,7 +546,7 @@ int start_uml_tt(void)
 	int pages;
 
 	pages = (1 << CONFIG_KERNEL_STACK_ORDER);
-	sp = (void *) ((unsigned long) init_task.thread_info) + 
+	sp = (void *) ((unsigned long) init_task.thread_info) +
 		pages * PAGE_SIZE - sizeof(unsigned long);
 	return(tracer(start_kernel_proc, sp));
 }

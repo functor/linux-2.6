@@ -48,11 +48,11 @@ void *port_init(char *str, int device, struct chan_opts *opts)
 	}
 
 	kern_data = port_data(port);
-	if(kern_data == NULL) 
+	if(kern_data == NULL)
 		return(NULL);
 
 	data = um_kmalloc(sizeof(*data));
-	if(data == NULL) 
+	if(data == NULL)
 		goto err;
 
 	*data = ((struct port_chan) { .raw  		= opts->raw,
@@ -188,7 +188,7 @@ int port_connection(int fd, int *socket, int *pid_out)
 		return(new);
 
 	err = os_pipe(socket, 0, 0);
-	if(err < 0) 
+	if(err < 0)
 		goto out_close;
 
 	data = ((struct port_pre_exec_data)

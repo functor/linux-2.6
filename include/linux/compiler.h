@@ -1,23 +1,28 @@
 #ifndef __LINUX_COMPILER_H
 #define __LINUX_COMPILER_H
 
+#ifndef __ASSEMBLY__
+
 #ifdef __CHECKER__
 # define __user		__attribute__((noderef, address_space(1)))
 # define __kernel	/* default address space */
 # define __safe		__attribute__((safe))
 # define __force	__attribute__((force))
+# define __iomem	__attribute__((noderef, address_space(2)))
 extern void __chk_user_ptr(void __user *);
+extern void __chk_io_ptr(void __iomem *);
 #else
 # define __user
 # define __kernel
 # define __safe
 # define __force
+# define __iomem
 # define __chk_user_ptr(x) (void)0
+# define __chk_io_ptr(x) (void)0
 #endif
 
 #ifdef __KERNEL__
 
-#ifndef __ASSEMBLY__
 #if __GNUC__ > 3
 # include <linux/compiler-gcc+.h>	/* catch-all for GCC 4, 5, etc. */
 #elif __GNUC__ == 3
@@ -26,7 +31,6 @@ extern void __chk_user_ptr(void __user *);
 # include <linux/compiler-gcc2.h>
 #else
 # error Sorry, your compiler is too old/not recognized.
-#endif
 #endif
 
 /* Intel compiler defines __GNUC__. So we will overwrite implementations
@@ -56,6 +60,8 @@ extern void __chk_user_ptr(void __user *);
      __ptr = (unsigned long) (ptr);				\
     (typeof(ptr)) (__ptr + (off)); })
 #endif
+
+#endif /* __ASSEMBLY__ */
 
 #endif /* __KERNEL__ */
 
@@ -122,6 +128,10 @@ extern void __chk_user_ptr(void __user *);
 
 #ifndef noinline
 #define noinline
+#endif
+
+#ifndef __always_inline
+#define __always_inline inline
 #endif
 
 #endif /* __LINUX_COMPILER_H */

@@ -217,7 +217,7 @@ static struct tty_operations ssl_ops = {
  */
 static int ssl_init_done = 0;
 
-static void ssl_console_write(struct console *c, const char *string, 
+static void ssl_console_write(struct console *c, const char *string,
 			      unsigned len)
 {
 	struct line *line = &serial_lines[c->index];
@@ -272,8 +272,8 @@ late_initcall(ssl_init);
 
 static int ssl_chan_setup(char *str)
 {
-	return(line_setup(serial_lines, 
-			  sizeof(serial_lines)/sizeof(serial_lines[0]), 
+	return(line_setup(serial_lines,
+			  sizeof(serial_lines)/sizeof(serial_lines[0]),
 			  str, 1));
 }
 

@@ -50,7 +50,7 @@ int nfsd_setuser(struct svc_rqst *rqstp, struct svc_export *exp)
 		current->fsgid = INOXID_GID(1, cred->cr_uid, cred->cr_gid);
 	else
 		current->fsgid = exp->ex_anon_gid;
-	
+
 	current->xid = INOXID_XID(1, cred->cr_uid, cred->cr_gid, 0);
 
 	if (!cred->cr_group_info)

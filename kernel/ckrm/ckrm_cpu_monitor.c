@@ -28,6 +28,9 @@
 #include <asm/div64.h>
 #include <linux/ckrm_sched.h>
 
+#warning MEF I cannot believe that vserver changes force the following include statement: FIX THIS!
+#include <linux/vs_cvirt.h>
+
 #define CPU_MONITOR_INTERVAL (HZ) /*how often do we adjust the shares*/
 #define CKRM_SHARE_MAX (1<<CKRM_SHARE_ACCURACY)
 

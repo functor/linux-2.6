@@ -389,15 +389,6 @@ static int try_to_identify (ide_drive_t *drive, u8 cmd)
 				 */
 				printk("%s: IRQ probe failed (0x%lx)\n",
 					drive->name, cookie);
-#ifdef CONFIG_BLK_DEV_CMD640
-#ifdef CMD640_DUMP_REGS
-				if (hwif->chipset == ide_cmd640) {
-					printk("%s: Hmmm.. probably a driver "
-						"problem.\n", drive->name);
-					CMD640_DUMP_REGS;
-				}
-#endif /* CMD640_DUMP_REGS */
-#endif /* CONFIG_BLK_DEV_CMD640 */
 			}
 		}
 	}
@@ -633,14 +624,14 @@ static void hwif_register (ide_hwif_t *hwif)
 	}
 	hwif->gendev.release = hwif_release_dev;
 	device_register(&hwif->gendev);
+	hwif->configured = 1;
 }
 
-#ifdef CONFIG_PPC
 static int wait_hwif_ready(ide_hwif_t *hwif)
 {
 	int rc;
 
-	printk(KERN_INFO "Probing IDE interface %s...\n", hwif->name);
+	printk(KERN_DEBUG "Probing IDE interface %s...\n", hwif->name);
 
 	/* Let HW settle down a bit from whatever init state we
 	 * come from */
@@ -671,7 +662,42 @@ static int wait_hwif_ready(ide_hwif_t *hwif)
 	
 	return rc;
 }
-#endif
+
+/**
+ *	ide_undecoded_slave	-	look for bad CF adapters
+ *	@hwif: interface
+ *
+ *	Analyse the drives on the interface and attempt to decide if we
+ *	have the same drive viewed twice. This occurs with crap CF adapters
+ *	and PCMCIA sometimes.
+ */
+
+void ide_undecoded_slave(ide_hwif_t *hwif) 
+{
+	ide_drive_t *drive0 = &hwif->drives[0];
+	ide_drive_t *drive1 = &hwif->drives[1];
+	
+	if (drive0->present == 0 || drive1->present == 0)
+			return;
+		
+	/* If the models don't match they are not the same product */	
+	if (strcmp(drive0->id->model, drive1->id->model))
+		return;
+	/* Serial numbers do not match */
+	if(strncmp(drive0->id->serial_no, drive1->id->serial_no, 20))
+		return;
+	/* No serial number, thankfully very rare for CF */
+	if (drive0->id->serial_no[0] == 0)
+		return;
+	/* Has a serial number but is warped */
+	if (!strstr(drive0->id->model, "Integrated Technology Express"))
+		return;
+	/* Appears to be an IDE flash adapter with decode bugs */
+	printk(KERN_WARNING "ide-probe: ignoring undecoded slave\n");
+	drive1->present = 0;
+}
+
+EXPORT_SYMBOL(ide_undecoded_slave);
 
 /*
  * This routine only knows how to look for drive units 0 and 1
@@ -717,7 +743,6 @@ static void probe_hwif(ide_hwif_t *hwif)
 
 	local_irq_set(flags);
 
-#ifdef CONFIG_PPC
 	/* This is needed on some PPCs and a bunch of BIOS-less embedded
 	 * platforms. Typical cases are:
 	 * 
@@ -738,8 +763,7 @@ static void probe_hwif(ide_hwif_t *hwif)
 	 *  BenH.
 	 */
 	if (wait_hwif_ready(hwif))
-		printk(KERN_WARNING "%s: Wait for ready failed before probe !\n", hwif->name);
-#endif /* CONFIG_PPC */
+		printk(KERN_DEBUG "%s: Wait for ready failed before probe !\n", hwif->name);
 
 	/*
 	 * Second drive should only exist if first drive was found,
@@ -822,13 +846,18 @@ static void probe_hwif(ide_hwif_t *hwif)
 }
 
 static int hwif_init(ide_hwif_t *hwif);
-int probe_hwif_init (ide_hwif_t *hwif)
+
+int probe_hwif_init_with_fixup(ide_hwif_t *hwif, void (*fixup)(ide_hwif_t *hwif))
 {
 	probe_hwif(hwif);
+	if(fixup != NULL)
+		fixup(hwif);
 	hwif_init(hwif);
 
 	if (hwif->present) {
 		u16 unit = 0;
+
+			
 		for (unit = 0; unit < MAX_DRIVES; ++unit) {
 			ide_drive_t *drive = &hwif->drives[unit];
 			/* For now don't attach absent drives, we may
@@ -840,6 +869,13 @@ int probe_hwif_init (ide_hwif_t *hwif)
 		}
 	}
 	return 0;
+}
+
+EXPORT_SYMBOL(probe_hwif_init_with_fixup);
+
+int probe_hwif_init(ide_hwif_t *hwif)
+{
+	return probe_hwif_init_with_fixup(hwif, NULL);
 }
 
 EXPORT_SYMBOL(probe_hwif_init);
@@ -893,11 +929,15 @@ static int ide_init_queue(ide_drive_t *drive)
 	if (!q)
 		return 1;
 
-	q->queuedata = HWGROUP(drive);
+	q->queuedata = drive;
 	blk_queue_segment_boundary(q, 0xffff);
 
-	if (!hwif->rqsize)
-		hwif->rqsize = hwif->no_lba48 ? 256 : 65536;
+	if (!hwif->rqsize) {
+		if (hwif->no_lba48 || hwif->no_lba48_dma)
+			hwif->rqsize = 256;
+		else
+			hwif->rqsize = 65536;
+	}
 	if (hwif->rqsize < max_sectors)
 		max_sectors = hwif->rqsize;
 	blk_queue_max_sectors(q, max_sectors);
@@ -906,11 +946,11 @@ static int ide_init_queue(ide_drive_t *drive)
 	/* When we have an IOMMU, we may have a problem where pci_map_sg()
 	 * creates segments that don't completely match our boundary
 	 * requirements and thus need to be broken up again. Because it
-	 * doesn't align properly neither, we may actually have to break up
+	 * doesn't align properly either, we may actually have to break up
 	 * to more segments than what was we got in the first place, a max
 	 * worst case is twice as many.
 	 * This will be fixed once we teach pci_map_sg() about our boundary
-	 * requirements, hopefully soon
+	 * requirements, hopefully soon. *FIXME*
 	 */
 	if (!PCI_DMA_BUS_IS_PHYS)
 		max_sg_entries >>= 1;

@@ -1,6 +1,9 @@
 #
 # Makefile for the Linux Wireless network device drivers.
 #
+obj-$(CONFIG_IPW2100) += ipw2100/
+obj-$(CONFIG_IPW2200) += ipw2200/
+obj-$(CONFIG_IEEE80211) += ieee80211/
 
 obj-$(CONFIG_STRIP) += strip.o
 obj-$(CONFIG_ARLAN) += arlan.o 

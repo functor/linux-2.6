@@ -31,17 +31,6 @@
 EXPORT_SYMBOL(block_signals);
 EXPORT_SYMBOL(unblock_signals);
 
-static void force_segv(int sig)
-{
-	if(sig == SIGSEGV){
-		struct k_sigaction *ka;
-
-		ka = &current->sighand->action[SIGSEGV - 1];
-		ka->sa.sa_handler = SIG_DFL;
-	}
-	force_sig(SIGSEGV, current);
-}
-
 #define _S(nr) (1<<((nr)-1))
 
 #define _BLOCKABLE (~(_S(SIGKILL) | _S(SIGSTOP)))
@@ -124,27 +113,27 @@ static int handle_signal(struct pt_regs *regs, unsigned long signr,
 
 	return(0);
  segv:
-	force_segv(signr);
+	force_sigsegv(signr, current);
 	return(1);
 }
 
 static int kern_do_signal(struct pt_regs *regs, sigset_t *oldset, int error)
 {
+	struct k_sigaction ka_copy;
 	siginfo_t info;
-	struct k_sigaction *ka;
 	int err, sig;
 
 	if (!oldset)
 		oldset = &current->blocked;
 
-	sig = get_signal_to_deliver(&info, regs, NULL);
+	sig = get_signal_to_deliver(&info, &ka_copy, regs, NULL);
 	if(sig == 0)
 		return(0);
 
 	/* Whee!  Actually deliver the signal.  */
-	ka = &current->sighand->action[sig -1 ];
-	err = handle_signal(regs, sig, ka, &info, oldset, error);
-	if(!err) return(1);
+	err = handle_signal(regs, sig, &ka_copy, &info, oldset, error);
+	if(!err)
+		return(1);
 
 	/* Did we come from a system call? */
 	if(PT_REGS_SYSCALL_NR(regs) >= 0){
@@ -271,7 +260,7 @@ static int copy_sc_from_user(struct pt_regs *to, void *from,
 	int ret;
 
 	ret = CHOOSE_MODE(copy_sc_from_user_tt(UPT_SC(&to->regs), from, arch),
-			  copy_sc_from_user_skas(userspace_pid[0], 
+			  copy_sc_from_user_skas(userspace_pid[0],
 						 &to->regs, from));
 	return(ret);
 }

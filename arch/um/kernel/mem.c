@@ -42,7 +42,7 @@ static void map_cb(void *unused)
 }
 
 #ifdef CONFIG_HIGHMEM
-static void setup_highmem(unsigned long highmem_start, 
+static void setup_highmem(unsigned long highmem_start,
 			  unsigned long highmem_len)
 {
 	struct page *page;
@@ -212,7 +212,7 @@ struct page *arch_validate(struct page *page, int mask, int order)
 	addr = (unsigned long) page_address(page);
 	for(i = 0; i < (1 << order); i++){
 		current->thread.fault_addr = (void *) addr;
-		if(__do_copy_to_user((void *) addr, &zero, 
+		if(__do_copy_to_user((void *) addr, &zero,
 				     sizeof(zero),
 				     &current->thread.fault_addr,
 				     &current->thread.fault_catcher)){

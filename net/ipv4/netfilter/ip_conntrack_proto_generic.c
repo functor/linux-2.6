@@ -34,15 +34,15 @@ static int generic_invert_tuple(struct ip_conntrack_tuple *tuple,
 }
 
 /* Print out the per-protocol part of the tuple. */
-static unsigned int generic_print_tuple(char *buffer,
-					const struct ip_conntrack_tuple *tuple)
+static int generic_print_tuple(struct seq_file *s,
+			       const struct ip_conntrack_tuple *tuple)
 {
 	return 0;
 }
 
 /* Print out the private part of the conntrack. */
-static unsigned int generic_print_conntrack(char *buffer,
-					    const struct ip_conntrack *state)
+static int generic_print_conntrack(struct seq_file *s,
+				   const struct ip_conntrack *state)
 {
 	return 0;
 }
@@ -62,8 +62,14 @@ static int new(struct ip_conntrack *conntrack, const struct sk_buff *skb)
 	return 1;
 }
 
-struct ip_conntrack_protocol ip_conntrack_generic_protocol
-= { { NULL, NULL }, 0, "unknown",
-    generic_pkt_to_tuple, generic_invert_tuple, generic_print_tuple,
-    generic_print_conntrack, packet, new, NULL, NULL, NULL };
-
+struct ip_conntrack_protocol ip_conntrack_generic_protocol =
+{
+	.proto			= 0,
+	.name			= "unknown",
+	.pkt_to_tuple		= generic_pkt_to_tuple,
+	.invert_tuple		= generic_invert_tuple,
+	.print_tuple		= generic_print_tuple,
+	.print_conntrack	= generic_print_conntrack,
+	.packet			= packet,
+	.new			= new,
+};

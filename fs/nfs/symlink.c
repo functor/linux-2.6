@@ -27,17 +27,26 @@
 
 /* Symlink caching in the page cache is even more simplistic
  * and straight-forward than readdir caching.
+ *
+ * At the beginning of the page we store pointer to struct page in question,
+ * simplifying nfs_put_link() (if inode got invalidated we can't find the page
+ * to be freed via pagecache lookup).
+ * The NUL-terminated string follows immediately thereafter.
  */
+
+struct nfs_symlink {
+	struct page *page;
+	char body[0];
+};
+
 static int nfs_symlink_filler(struct inode *inode, struct page *page)
 {
+	const unsigned int pgbase = offsetof(struct nfs_symlink, body);
+	const unsigned int pglen = PAGE_SIZE - pgbase;
 	int error;
 
-	/* We place the length at the beginning of the page,
-	 * in host byte order, followed by the string.  The
-	 * XDR response verification will NULL terminate it.
-	 */
 	lock_kernel();
-	error = NFS_PROTO(inode)->readlink(inode, page);
+	error = NFS_PROTO(inode)->readlink(inode, page, pgbase, pglen);
 	unlock_kernel();
 	if (error < 0)
 		goto error;
@@ -51,51 +60,46 @@ error:
 	return -EIO;
 }
 
-enum {
-	Page_Offset = (PAGE_SIZE - sizeof(void *)) / 4
-};
-
 static int nfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	struct inode *inode = dentry->d_inode;
 	struct page *page;
-	u32 *p;
-
-	page = ERR_PTR(nfs_revalidate_inode(NFS_SERVER(inode), inode));
-	if (page)
+	struct nfs_symlink *p;
+	void *err = ERR_PTR(nfs_revalidate_inode(NFS_SERVER(inode), inode));
+	if (err)
 		goto read_failed;
 	page = read_cache_page(&inode->i_data, 0,
 				(filler_t *)nfs_symlink_filler, inode);
-	if (IS_ERR(page))
+	if (IS_ERR(page)) {
+		err = page;
 		goto read_failed;
-	if (!PageUptodate(page))
+	}
+	if (!PageUptodate(page)) {
+		err = ERR_PTR(-EIO);
 		goto getlink_read_error;
+	}
 	p = kmap(page);
-	if (*p > Page_Offset * 4 - 1 - 4)
-		goto too_long;
-	*(struct page **)(p + Page_Offset) = page;
-
-	nd_set_link(nd, (char *)(p+1));
+	p->page = page;
+	nd_set_link(nd, p->body);
 	return 0;
 
-too_long:
-	kunmap(page);
-	page_cache_release(page);
-	page = ERR_PTR(-ENAMETOOLONG);
-	goto read_failed;
 getlink_read_error:
 	page_cache_release(page);
-	page = ERR_PTR(-EIO);
 read_failed:
-	nd_set_link(nd, (char*)page);
+	nd_set_link(nd, err);
 	return 0;
 }
 
 static void nfs_put_link(struct dentry *dentry, struct nameidata *nd)
 {
-	u32 *s = (u32 *)nd_get_link(nd);
+	char *s = nd_get_link(nd);
 	if (!IS_ERR(s)) {
-		struct page *page = *(struct page **)(s + Page_Offset - 1);
+		struct nfs_symlink *p;
+		struct page *page;
+
+		p = container_of(s, struct nfs_symlink, body[0]);
+		page = p->page;
+
 		kunmap(page);
 		page_cache_release(page);
 	}

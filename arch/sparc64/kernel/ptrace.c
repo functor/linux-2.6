@@ -563,7 +563,7 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
  * exit.
  */
 	case PTRACE_KILL: {
-		if (child->state == TASK_ZOMBIE) {	/* already dead */
+		if (child->exit_state == EXIT_ZOMBIE) {	/* already dead */
 			pt_succ_return(regs, 0);
 			goto out_tsk;
 		}
@@ -631,11 +631,8 @@ asmlinkage void syscall_trace(void)
 		return;
 	if (!(current->ptrace & PT_PTRACED))
 		return;
-	current->exit_code = SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
-					? 0x80 : 0);
-	current->state = TASK_STOPPED;
-	notify_parent(current, SIGCHLD);
-	schedule();
+	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
+				 ? 0x80 : 0));
 
 	/*
 	 * this isn't the same as continuing with a signal, but it will do

@@ -16,41 +16,38 @@
 #include <asm/processor.h>
 #include <asm/fixmap.h>
 #include <linux/threads.h>
-#include <linux/slab.h>
 
 #ifndef _I386_BITOPS_H
 #include <asm/bitops.h>
 #endif
 
-extern pgd_t swapper_pg_dir[1024];
-extern kmem_cache_t *pgd_cache, *pmd_cache, *kpmd_cache;
-extern spinlock_t pgd_lock;
-extern struct page *pgd_list;
-void pmd_ctor(void *, kmem_cache_t *, unsigned long);
-void kpmd_ctor(void *, kmem_cache_t *, unsigned long);
-void pgd_ctor(void *, kmem_cache_t *, unsigned long);
-void pgd_dtor(void *, kmem_cache_t *, unsigned long);
-void pgtable_cache_init(void);
-extern void paging_init(void);
-void setup_identity_mappings(pgd_t *pgd_base, unsigned long start, unsigned long end);
+#include <linux/slab.h>
+#include <linux/list.h>
+#include <linux/spinlock.h>
 
 /*
  * ZERO_PAGE is a global shared page that is always zero: used
  * for zero-mapped memory areas etc..
  */
-extern unsigned long empty_zero_page[1024];
 #define ZERO_PAGE(vaddr) (virt_to_page(empty_zero_page))
+extern unsigned long empty_zero_page[1024];
+extern pgd_t swapper_pg_dir[1024];
+extern kmem_cache_t *pgd_cache;
+extern kmem_cache_t *pmd_cache;
+extern spinlock_t pgd_lock;
+extern struct page *pgd_list;
+
+void pmd_ctor(void *, kmem_cache_t *, unsigned long);
+void pgd_ctor(void *, kmem_cache_t *, unsigned long);
+void pgd_dtor(void *, kmem_cache_t *, unsigned long);
+void pgtable_cache_init(void);
+void paging_init(void);
 
 /*
  * The Linux x86 paging architecture is 'compile-time dual-mode', it
  * implements both the traditional 2-level x86 page tables and the
  * newer 3-level PAE-mode page tables.
  */
-
-extern void set_system_gate(unsigned int n, void *addr);
-extern void init_entry_mappings(void);
-extern void entry_trampoline_setup(void);
-
 #ifdef CONFIG_X86_PAE
 # include <asm/pgtable-3level-defs.h>
 #else
@@ -62,12 +59,7 @@ extern void entry_trampoline_setup(void);
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
-#if defined(CONFIG_X86_PAE) && defined(CONFIG_X86_4G_VM_LAYOUT)
-# define USER_PTRS_PER_PGD	4
-#else
-# define USER_PTRS_PER_PGD	((TASK_SIZE/PGDIR_SIZE) + ((TASK_SIZE % PGDIR_SIZE) + PGDIR_SIZE-1)/PGDIR_SIZE)
-#endif
-
+#define USER_PTRS_PER_PGD	(TASK_SIZE/PGDIR_SIZE)
 #define FIRST_USER_PGD_NR	0
 
 #define USER_PGD_PTRS (PAGE_OFFSET >> PGDIR_SHIFT)
@@ -282,7 +274,6 @@ static inline void ptep_mkdirty(pte_t *ptep)			{ set_bit(_PAGE_BIT_DIRTY, &ptep-
 
 #define mk_pte(page, pgprot)	pfn_pte(page_to_pfn(page), (pgprot))
 #define mk_pte_huge(entry) ((entry).pte_low |= _PAGE_PRESENT | _PAGE_PSE)
-#define mk_pte_phys(physpage, pgprot) pfn_pte((physpage) >> PAGE_SHIFT, pgprot)
 
 static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 {
@@ -407,13 +398,6 @@ extern pte_t *lookup_address(unsigned long address);
 		}							  \
 	} while (0)
 
-/* Encode and de-code a swap entry */
-#define __swp_type(x)			(((x).val >> 1) & 0x1f)
-#define __swp_offset(x)			((x).val >> 8)
-#define __swp_entry(type, offset)	((swp_entry_t) { ((type) << 1) | ((offset) << 8) })
-#define __pte_to_swp_entry(pte)		((swp_entry_t) { (pte).pte_low })
-#define __swp_entry_to_pte(x)		((pte_t) { (x).val })
-
 #endif /* !__ASSEMBLY__ */
 
 #ifndef CONFIG_DISCONTIGMEM
@@ -429,12 +413,5 @@ extern pte_t *lookup_address(unsigned long address);
 #define __HAVE_ARCH_PTEP_MKDIRTY
 #define __HAVE_ARCH_PTE_SAME
 #include <asm-generic/pgtable.h>
-
-/*
- * The size of the low 1:1 mappings we use during bootup,
- * SMP-boot and ACPI-sleep:
- */
-#define LOW_MAPPINGS_SIZE (16*1024*1024)
-
 
 #endif /* _I386_PGTABLE_H */

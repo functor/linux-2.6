@@ -18,7 +18,7 @@
 #include "time_user.h"
 #include "kern_constants.h"
 
-/* XXX This really needs to be declared and initialized in a kernel file since 
+/* XXX This really needs to be declared and initialized in a kernel file since
  * it's in <linux/time.h>
  */
 extern struct timespec wall_to_monotonic;
@@ -99,7 +99,7 @@ extern int do_posix_clock_monotonic_gettime(struct timespec *tp);
 void time_init(void)
 {
 	struct timespec now;
- 
+
 	if(signal(SIGVTALRM, boot_timer_handler) == SIG_ERR)
 		panic("Couldn't set SIGVTALRM handler");
 	set_interval(ITIMER_VIRTUAL);

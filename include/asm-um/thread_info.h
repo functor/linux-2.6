@@ -44,7 +44,7 @@ struct thread_info {
 static inline struct thread_info *current_thread_info(void)
 {
 	struct thread_info *ti;
-	unsigned long mask = PAGE_SIZE * 
+	unsigned long mask = PAGE_SIZE *
 		(1 << CONFIG_KERNEL_STACK_ORDER) - 1;
 	__asm__("andl %%esp,%0; ":"=r" (ti) : "0" (~mask));
 	return ti;
@@ -55,7 +55,7 @@ static inline struct thread_info *current_thread_info(void)
 #define alloc_thread_info(tsk) \
 	((struct thread_info *) kmalloc(THREAD_SIZE, GFP_KERNEL))
 #define free_thread_info(ti) kfree(ti)
-	
+
 #define get_thread_info(ti) get_task_struct((ti)->task)
 #define put_thread_info(ti) put_task_struct((ti)->task)
 

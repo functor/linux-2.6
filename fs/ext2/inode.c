@@ -145,12 +145,12 @@ static int ext2_alloc_block (struct inode * inode, unsigned long goal, int *err)
 }
 
 typedef struct {
-	u32	*p;
-	u32	key;
+	__le32	*p;
+	__le32	key;
 	struct buffer_head *bh;
 } Indirect;
 
-static inline void add_chain(Indirect *p, struct buffer_head *bh, u32 *v)
+static inline void add_chain(Indirect *p, struct buffer_head *bh, __le32 *v)
 {
 	p->key = *(p->p = v);
 	p->bh = bh;
@@ -283,7 +283,7 @@ static Indirect *ext2_get_branch(struct inode *inode,
 		read_lock(&EXT2_I(inode)->i_meta_lock);
 		if (!verify_chain(chain, p))
 			goto changed;
-		add_chain(++p, bh, (u32*)bh->b_data + *++offsets);
+		add_chain(++p, bh, (__le32*)bh->b_data + *++offsets);
 		read_unlock(&EXT2_I(inode)->i_meta_lock);
 		if (!p->key)
 			goto no_block;
@@ -324,8 +324,8 @@ no_block:
 static unsigned long ext2_find_near(struct inode *inode, Indirect *ind)
 {
 	struct ext2_inode_info *ei = EXT2_I(inode);
-	u32 *start = ind->bh ? (u32*) ind->bh->b_data : ei->i_data;
-	u32 *p;
+	__le32 *start = ind->bh ? (__le32 *) ind->bh->b_data : ei->i_data;
+	__le32 *p;
 	unsigned long bg_start;
 	unsigned long colour;
 
@@ -443,7 +443,7 @@ static int ext2_alloc_branch(struct inode *inode,
 		lock_buffer(bh);
 		memset(bh->b_data, 0, blocksize);
 		branch[n].bh = bh;
-		branch[n].p = (u32*) bh->b_data + offsets[n];
+		branch[n].p = (__le32 *) bh->b_data + offsets[n];
 		*branch[n].p = branch[n].key;
 		set_buffer_uptodate(bh);
 		unlock_buffer(bh);
@@ -705,7 +705,7 @@ struct address_space_operations ext2_nobh_aops = {
  * or memcmp with zero_page, whatever is better for particular architecture.
  * Linus?
  */
-static inline int all_zeroes(u32 *p, u32 *q)
+static inline int all_zeroes(__le32 *p, __le32 *q)
 {
 	while (p < q)
 		if (*p++)
@@ -751,7 +751,7 @@ static Indirect *ext2_find_shared(struct inode *inode,
 				int depth,
 				int offsets[4],
 				Indirect chain[4],
-				u32 *top)
+				__le32 *top)
 {
 	Indirect *partial, *p;
 	int k, err;
@@ -771,7 +771,7 @@ static Indirect *ext2_find_shared(struct inode *inode,
 		write_unlock(&EXT2_I(inode)->i_meta_lock);
 		goto no_top;
 	}
-	for (p=partial; p>chain && all_zeroes((u32*)p->bh->b_data,p->p); p--)
+	for (p=partial; p>chain && all_zeroes((__le32*)p->bh->b_data,p->p); p--)
 		;
 	/*
 	 * OK, we've found the last block that must survive. The rest of our
@@ -806,7 +806,7 @@ no_top:
  *	stored as little-endian 32-bit) and updating @inode->i_blocks
  *	appropriately.
  */
-static inline void ext2_free_data(struct inode *inode, u32 *p, u32 *q)
+static inline void ext2_free_data(struct inode *inode, __le32 *p, __le32 *q)
 {
 	unsigned long block_to_free = 0, count = 0;
 	unsigned long nr;
@@ -846,7 +846,7 @@ static inline void ext2_free_data(struct inode *inode, u32 *p, u32 *q)
  *	stored as little-endian 32-bit) and updating @inode->i_blocks
  *	appropriately.
  */
-static void ext2_free_branches(struct inode *inode, u32 *p, u32 *q, int depth)
+static void ext2_free_branches(struct inode *inode, __le32 *p, __le32 *q, int depth)
 {
 	struct buffer_head * bh;
 	unsigned long nr;
@@ -870,8 +870,8 @@ static void ext2_free_branches(struct inode *inode, u32 *p, u32 *q, int depth)
 				continue;
 			}
 			ext2_free_branches(inode,
-					   (u32*)bh->b_data,
-					   (u32*)bh->b_data + addr_per_block,
+					   (__le32*)bh->b_data,
+					   (__le32*)bh->b_data + addr_per_block,
 					   depth);
 			bforget(bh);
 			ext2_free_blocks(inode, nr, 1);
@@ -883,12 +883,12 @@ static void ext2_free_branches(struct inode *inode, u32 *p, u32 *q, int depth)
 
 static void ext2_truncate_nocheck(struct inode * inode)
 {
-	u32 *i_data = EXT2_I(inode)->i_data;
+	__le32 *i_data = EXT2_I(inode)->i_data;
 	int addr_per_block = EXT2_ADDR_PER_BLOCK(inode->i_sb);
 	int offsets[4];
 	Indirect chain[4];
 	Indirect *partial;
-	int nr = 0;
+	__le32 nr = 0;
 	int n;
 	long iblock;
 	unsigned blocksize;
@@ -934,7 +934,7 @@ static void ext2_truncate_nocheck(struct inode * inode)
 	while (partial > chain) {
 		ext2_free_branches(inode,
 				   partial->p + 1,
-				   (u32*)partial->bh->b_data + addr_per_block,
+				   (__le32*)partial->bh->b_data+addr_per_block,
 				   (chain+n-1) - partial);
 		mark_buffer_dirty_inode(partial->bh, inode);
 		brelse (partial->bh);
@@ -1270,9 +1270,9 @@ static int ext2_update_inode(struct inode * inode, int do_sync)
 	return err;
 }
 
-void ext2_write_inode(struct inode *inode, int wait)
+int ext2_write_inode(struct inode *inode, int wait)
 {
-	ext2_update_inode(inode, wait);
+	return ext2_update_inode(inode, wait);
 }
 
 int ext2_sync_inode(struct inode *inode)
@@ -1290,7 +1290,7 @@ int ext2_setattr_flags(struct inode *inode, unsigned int flags)
 
 	oldflags = EXT2_I(inode)->i_flags;
 	newflags = oldflags &
-		~(EXT2_IMMUTABLE_FL | EXT2_IUNLINK_FL | EXT2_BARRIER_FL);	
+		~(EXT2_IMMUTABLE_FL | EXT2_IUNLINK_FL | EXT2_BARRIER_FL);
 	if (flags & ATTR_FLAG_IMMUTABLE)
 		newflags |= EXT2_IMMUTABLE_FL;
 	if (flags & ATTR_FLAG_IUNLINK)

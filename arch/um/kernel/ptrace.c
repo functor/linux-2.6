@@ -24,11 +24,6 @@ void ptrace_disable(struct task_struct *child)
 { 
 }
 
-extern long do_mmap2(struct task_struct *task, unsigned long addr, 
-		     unsigned long len, unsigned long prot, 
-		     unsigned long flags, unsigned long fd,
-		     unsigned long pgoff);
-
 int sys_ptrace(long request, long pid, long addr, long data)
 {
 	struct task_struct *child;
@@ -165,7 +160,7 @@ int sys_ptrace(long request, long pid, long addr, long data)
  */
 	case PTRACE_KILL: {
 		ret = 0;
-		if (child->state == TASK_ZOMBIE)	/* already dead */
+		if (child->exit_state == EXIT_ZOMBIE)	/* already dead */
 			break;
 		child->exit_code = SIGKILL;
 		wake_up_process(child);
@@ -294,7 +289,7 @@ int sys_ptrace(long request, long pid, long addr, long data)
 	}
 #endif
 	default:
-		ret = -EIO;
+		ret = ptrace_request(child, request, addr, data);
 		break;
 	}
  out_tsk:

@@ -142,19 +142,21 @@ fh_verify(struct svc_rqst *rqstp, struct svc_fh *fhp, int type, int access)
 		}
 
 		error = nfserr_dropit;
-		if (IS_ERR(exp) && PTR_ERR(exp) == -EAGAIN)
+		if (IS_ERR(exp) && PTR_ERR(exp) == -EAGAIN) {
+			dprintk("nfsd: fh_verify failed: nfserr_dropit\n");
 			goto out;
-
+		}
 		error = nfserr_stale; 
-		if (!exp || IS_ERR(exp))
+		if (!exp || IS_ERR(exp)) {
+			dprintk("nfsd: fh_verify failed: nfserr_stale\n");
 			goto out;
-
+		}
 		/* Check if the request originated from a secure port. */
 		error = nfserr_perm;
 		if (!rqstp->rq_secure && EX_SECURE(exp)) {
 			printk(KERN_WARNING
-			       "nfsd: request from insecure port (%08x:%d)!\n",
-			       ntohl(rqstp->rq_addr.sin_addr.s_addr),
+			       "nfsd: request from insecure port (%u.%u.%u.%u:%d)!\n",
+			       NIPQUAD(rqstp->rq_addr.sin_addr.s_addr),
 			       ntohs(rqstp->rq_addr.sin_port));
 			goto out;
 		}
@@ -162,6 +164,7 @@ fh_verify(struct svc_rqst *rqstp, struct svc_fh *fhp, int type, int access)
 		/* Set user creds for this exportpoint */
 		error = nfsd_setuser(rqstp, exp);
 		if (error) {
+			dprintk("nfsd: nfsd_setuser failed: %d\n", error);
 			error = nfserrno(error);
 			goto out;
 		}
@@ -190,14 +193,15 @@ fh_verify(struct svc_rqst *rqstp, struct svc_fh *fhp, int type, int access)
 			dentry = dget(exp->ex_dentry);
 		else {
 			struct export_operations *nop = exp->ex_mnt->mnt_sb->s_export_op;
-				dentry = CALL(nop,decode_fh)(exp->ex_mnt->mnt_sb,
-							     datap, data_left,
-							     fileid_type,
-							     nfsd_acceptable, exp);
+			dentry = CALL(nop,decode_fh)(exp->ex_mnt->mnt_sb,
+						     datap, data_left,
+						     fileid_type,
+						     nfsd_acceptable, exp);
 		}
 		if (dentry == NULL)
 			goto out;
 		if (IS_ERR(dentry)) {
+			dprintk("nfsd: CALL(nop,decode_fh) failed: %ld\n", PTR_ERR(dentry));
 			if (PTR_ERR(dentry) != -EINVAL)
 				error = nfserrno(PTR_ERR(dentry));
 			goto out;
@@ -243,6 +247,7 @@ fh_verify(struct svc_rqst *rqstp, struct svc_fh *fhp, int type, int access)
 			error = nfserr_isdir;
 		else
 			error = nfserr_inval;
+		dprintk("nfsd: bad type: %d\n", ntohl(error));
 		goto out;
 	}
 	if (type < 0 && (inode->i_mode & S_IFMT) == -type) {
@@ -252,6 +257,7 @@ fh_verify(struct svc_rqst *rqstp, struct svc_fh *fhp, int type, int access)
 			error = nfserr_isdir;
 		else
 			error = nfserr_notdir;
+		dprintk("nfsd: bad type2: %d\n", ntohl(error));
 		goto out;
 	}
 
@@ -339,13 +345,16 @@ fh_compose(struct svc_fh *fhp, struct svc_export *exp, struct dentry *dentry, st
 			ref_fh_fsid_type = ref_fh->fh_handle.fh_fsid_type;
 		if (ref_fh_fsid_type > 3)
 			ref_fh_fsid_type = 0;
-	}
-	/* make sure ref_fh type works for given export */
-	if (ref_fh_fsid_type == 1 &&
-	    !(exp->ex_flags & NFSEXP_FSID)) {
-		/* if we don't have an fsid, we cannot provide one... */
-		ref_fh_fsid_type = 0;
-	}
+
+		/* make sure ref_fh type works for given export */
+		if (ref_fh_fsid_type == 1 &&
+		    !(exp->ex_flags & NFSEXP_FSID)) {
+			/* if we don't have an fsid, we cannot provide one... */
+			ref_fh_fsid_type = 0;
+		}
+	} else if (exp->ex_flags & NFSEXP_FSID)
+		ref_fh_fsid_type = 1;
+
 	if (!old_valid_dev(ex_dev) && ref_fh_fsid_type == 0) {
 		/* for newer device numbers, we must use a newer fsid format */
 		ref_fh_version = 1;
