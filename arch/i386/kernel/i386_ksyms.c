@@ -93,7 +93,6 @@ EXPORT_SYMBOL_NOVERS(__down_failed_interruptible);
 EXPORT_SYMBOL_NOVERS(__down_failed_trylock);
 EXPORT_SYMBOL_NOVERS(__up_wakeup);
 /* Networking helper routines. */
-EXPORT_SYMBOL(csum_partial_copy_generic);
 /* Delay loops */
 EXPORT_SYMBOL(__ndelay);
 EXPORT_SYMBOL(__udelay);
@@ -107,13 +106,17 @@ EXPORT_SYMBOL_NOVERS(__get_user_4);
 EXPORT_SYMBOL(strpbrk);
 EXPORT_SYMBOL(strstr);
 
+#if !defined(CONFIG_X86_UACCESS_INDIRECT)
 EXPORT_SYMBOL(strncpy_from_user);
-EXPORT_SYMBOL(__strncpy_from_user);
+EXPORT_SYMBOL(__direct_strncpy_from_user);
 EXPORT_SYMBOL(clear_user);
 EXPORT_SYMBOL(__clear_user);
 EXPORT_SYMBOL(__copy_from_user_ll);
 EXPORT_SYMBOL(__copy_to_user_ll);
 EXPORT_SYMBOL(strnlen_user);
+#else /* CONFIG_X86_UACCESS_INDIRECT */
+EXPORT_SYMBOL(direct_csum_partial_copy_generic);
+#endif
 
 EXPORT_SYMBOL(dma_alloc_coherent);
 EXPORT_SYMBOL(dma_free_coherent);

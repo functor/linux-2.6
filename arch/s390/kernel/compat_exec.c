@@ -34,12 +34,9 @@
 #endif
 
 
-#undef STACK_TOP
-#define STACK_TOP TASK31_SIZE
-
 int setup_arg_pages32(struct linux_binprm *bprm, int executable_stack)
 {
-	unsigned long stack_base;
+	unsigned long stack_base, grow;
 	struct vm_area_struct *mpnt;
 	struct mm_struct *mm = current->mm;
 	int i;
@@ -56,10 +53,15 @@ int setup_arg_pages32(struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt) 
 		return -ENOMEM; 
 	
-	if (security_vm_enough_memory((STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))>>PAGE_SHIFT)) {
+	grow = (STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))
+		>> PAGE_SHIFT;
+	if (security_vm_enough_memory(grow) ||
+		!vx_vmpages_avail(mm, grow)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
+
+	memset(mpnt, 0, sizeof(*mpnt));
 
 	down_write(&mm->mmap_sem);
 	{
@@ -69,20 +71,17 @@ int setup_arg_pages32(struct linux_binprm *bprm, int executable_stack)
 		/* executable stack setting would be applied here */
 		mpnt->vm_page_prot = PAGE_COPY;
 		mpnt->vm_flags = VM_STACK_FLAGS;
-		mpnt->vm_ops = NULL;
-		mpnt->vm_pgoff = 0;
-		mpnt->vm_file = NULL;
-		INIT_LIST_HEAD(&mpnt->shared);
-		mpnt->vm_private_data = (void *) 0;
 		insert_vm_struct(mm, mpnt);
-		mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		// mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
+		vx_vmpages_sub(mm, mm->total_vm -
+			((mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT));
 	} 
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
 		struct page *page = bprm->page[i];
 		if (page) {
 			bprm->page[i] = NULL;
-			put_dirty_page(current,page,stack_base,PAGE_COPY);
+			install_arg_page(mpnt, page, stack_base);
 		}
 		stack_base += PAGE_SIZE;
 	}

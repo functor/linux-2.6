@@ -651,7 +651,8 @@ static int load_flat_file(struct linux_binprm * bprm,
 		current->mm->start_brk = datapos + data_len + bss_len;
 		current->mm->brk = (current->mm->start_brk + 3) & ~3;
 		current->mm->context.end_brk = memp + ksize((void *) memp) - stack_len;
-		current->mm->rss = 0;
+		// current->mm->rss = 0;
+		vx_rsspages_sub(current->mm, current->mm->rss);
 	}
 
 	if (flags & FLAT_FLAG_KTRACE)
@@ -723,7 +724,7 @@ static int load_flat_file(struct linux_binprm * bprm,
 				return -ENOEXEC;
 
 			/* Get the pointer's value.  */
-			addr = flat_get_addr_from_rp(rp, relval);
+			addr = flat_get_addr_from_rp(rp, relval, flags);
 			if (addr != 0) {
 				/*
 				 * Do the relocation.  PIC relocs in the data section are
@@ -896,7 +897,7 @@ static void __exit exit_flat_binfmt(void)
 
 /****************************************************************************/
 
-module_init(init_flat_binfmt);
+core_initcall(init_flat_binfmt);
 module_exit(exit_flat_binfmt);
 
 /****************************************************************************/

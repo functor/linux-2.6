@@ -23,6 +23,10 @@ oldconfig: $(obj)/conf
 silentoldconfig: $(obj)/conf
 	$< -s arch/$(ARCH)/Kconfig
 
+nonint_oldconfig: scripts/kconfig/conf
+	./scripts/kconfig/conf -b arch/$(ARCH)/Kconfig
+
+
 .PHONY: randconfig allyesconfig allnoconfig allmodconfig defconfig
 
 randconfig: $(obj)/conf
@@ -68,7 +72,7 @@ help:
 libkconfig-objs := zconf.tab.o
 
 host-progs	:= conf mconf qconf gconf
-conf-objs	:= conf.o  libkconfig.so
+conf-objs	:= conf.o
 mconf-objs	:= mconf.o libkconfig.so
 
 ifeq ($(MAKECMDGOALS),xconfig)
@@ -95,13 +99,15 @@ clean-files	:= libkconfig.so lkc_defs.h qconf.moc .tmp_qtcheck \
 HOSTCFLAGS_lex.zconf.o	:= -I$(src)
 HOSTCFLAGS_zconf.tab.o	:= -I$(src)
 
+HOSTLOADLIBES_conf     = -Wl,-rpath,\$$ORIGIN -Lscripts/kconfig -lkconfig
+
 HOSTLOADLIBES_qconf	= -L$(QTLIBPATH) -Wl,-rpath,$(QTLIBPATH) -l$(QTLIB) -ldl
 HOSTCXXFLAGS_qconf.o	= -I$(QTDIR)/include 
 
 HOSTLOADLIBES_gconf	= `pkg-config gtk+-2.0 gmodule-2.0 libglade-2.0 --libs`
 HOSTCFLAGS_gconf.o	= `pkg-config gtk+-2.0 gmodule-2.0 libglade-2.0 --cflags`
 
-$(obj)/conf.o $(obj)/mconf.o $(obj)/qconf.o $(obj)/gconf.o: $(obj)/zconf.tab.h
+$(obj)/conf.o $(obj)/mconf.o $(obj)/qconf.o $(obj)/gconf.o: $(obj)/zconf.tab.h $(obj)/libkconfig.so
 
 $(obj)/qconf.o: $(obj)/.tmp_qtcheck
 
@@ -112,7 +118,7 @@ QTLIBPATH = $(QTDIR)/lib
 
 # QT needs some extra effort...
 $(obj)/.tmp_qtcheck:
-	@set -e; for d in $$QTDIR /usr/share/qt* /usr/lib/qt*; do \
+	@set -e; for d in $$QTDIR /usr/share/qt* /usr/lib/qt* /usr/lib64/qt* ; do \
 	  if [ -f $$d/include/qconfig.h ]; then DIR=$$d; break; fi; \
 	done; \
 	if [ -z "$$DIR" ]; then \

@@ -285,7 +285,7 @@
 #define __NR_timer_getoverrun	264
 #define __NR_timer_delete	265
 #define __NR_timer_create	266
-/* #define __NR_vserver		267 Reserved for VSERVER */
+#define __NR_vserver		267
 #define __NR_io_setup		268
 #define __NR_io_destroy		269
 #define __NR_io_submit		270
@@ -474,6 +474,27 @@ asmlinkage long sys_rt_sigaction(int sig,
 #define   _SC_JOB_CONTROL         6
 #define   _SC_SAVED_IDS           7
 #define   _SC_VERSION             8
+
+#define __ARCH_WANT_IPC_PARSE_VERSION
+#define __ARCH_WANT_OLD_READDIR
+#define __ARCH_WANT_STAT64
+#define __ARCH_WANT_SYS_ALARM
+#define __ARCH_WANT_SYS_GETHOSTNAME
+#define __ARCH_WANT_SYS_PAUSE
+#define __ARCH_WANT_SYS_SGETMASK
+#define __ARCH_WANT_SYS_SIGNAL
+#define __ARCH_WANT_SYS_TIME
+#define __ARCH_WANT_SYS_UTIME
+#define __ARCH_WANT_SYS_WAITPID
+#define __ARCH_WANT_SYS_SOCKETCALL
+#define __ARCH_WANT_SYS_FADVISE64
+#define __ARCH_WANT_SYS_GETPGRP
+#define __ARCH_WANT_SYS_LLSEEK
+#define __ARCH_WANT_SYS_NICE
+#define __ARCH_WANT_SYS_OLD_GETRLIMIT
+#define __ARCH_WANT_SYS_OLDUMOUNT
+#define __ARCH_WANT_SYS_SIGPENDING
+#define __ARCH_WANT_SYS_SIGPROCMASK
 #endif
 
 /*
