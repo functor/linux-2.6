@@ -1,0 +1,23 @@
+/COPYING/1.1.1.1/Wed Jun  2 19:22:46 2004/-ko/
+/CREDITS/1.5/Fri Jul 30 14:12:43 2004/-ko/
+/MAINTAINERS/1.4/Tue Jul 20 15:32:59 2004/-ko/
+/Makefile/1.10/Mon Aug  9 21:22:34 2004/-ko/
+/README/1.1.1.1/Wed Jun  2 19:22:46 2004/-ko/
+/REPORTING-BUGS/1.1.1.1/Wed Jun  2 19:22:46 2004/-ko/
+D/Documentation////
+D/arch////
+D/configs////
+D/crypto////
+D/drivers////
+D/fs////
+D/include////
+D/init////
+D/ipc////
+D/kernel////
+D/lib////
+D/mm////
+D/net////
+D/scripts////
+D/security////
+D/sound////
+D/usr////
