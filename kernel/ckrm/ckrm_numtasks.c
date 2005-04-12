@@ -21,6 +21,7 @@
  * Code Description: TBD
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -149,6 +150,7 @@ static int numtasks_get_ref_local(void *arg, int force)
 	if (res == NULL)
 		return 1;
 
+#ifdef CONFIG_CKRM_RES_NUMTASKS_FORKRATE
 	// force is not associated with fork. So, if force is specified
 	// we don't have to bother about forkrate.
 	if (!force) {
@@ -167,6 +169,7 @@ static int numtasks_get_ref_local(void *arg, int force)
 			return 0;
 		}
 	}
+#endif
 
 	atomic_inc(&res->cnt_cur_alloc);
 
@@ -215,9 +218,11 @@ static int numtasks_get_ref_local(void *arg, int force)
 		atomic_dec(&res->cnt_cur_alloc);
 	} else if (!borrowed) { 
 		total_cnt_alloc++;
+#ifdef CONFIG_CKRM_RES_NUMTASKS_FORKRATE
 		if (!force) { // force is not associated with a real fork.
 			res->forks_in_period++;
 		}
+#endif
 	}
 	return rc;
 }

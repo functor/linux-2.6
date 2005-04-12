@@ -202,10 +202,21 @@ config CKRM_RES_NUMTASKS
 	depends on CKRM_TYPE_TASKCLASS
 	default m
 	help
-	  Provides a Resource Controller for CKRM that allows limiting no of
+	  Provides a Resource Controller for CKRM that allows limiting number of
 	  tasks a task class can have.
 	
 	  Say N if unsure, Y to use the feature.
+
+config CKRM_RES_NUMTASKS_FORKRATE
+	tristate "Number of Tasks Resource Manager for Fork Rate"
+	depends on CKRM_RES_NUMTASKS
+	default y
+	help
+	  Provides a Resource Controller for CKRM that allows limiting the rate
+	  of tasks a task class can fork per hour.
+	
+	  Say N if unsure, Y to use the feature.
+
 
 config CKRM_CPU_SCHEDULE
 	bool "CKRM CPU scheduler"
