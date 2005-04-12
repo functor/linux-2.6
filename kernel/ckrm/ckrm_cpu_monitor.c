@@ -960,9 +960,11 @@ static int thread_exit = 0;
 static int ckrm_cpu_monitord(void *nothing)
 {
 	daemonize("ckrm_cpu_ctrld");
+	current->flags |= PF_NOFREEZE;
+
 	for (;;) {
 		/*sleep for sometime before next try*/
-		set_current_state(TASK_UNINTERRUPTIBLE);
+		set_current_state(TASK_INTERRUPTIBLE);
 		schedule_timeout(CPU_MONITOR_INTERVAL);
 		ckrm_cpu_monitor(1);
 		if (thread_exit) {
