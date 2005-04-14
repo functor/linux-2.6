@@ -339,6 +339,18 @@ static void numtasks_res_free(void *my_res)
 	return;
 }
 
+static inline int
+do_share_calc(int a, int b, int c)
+{
+	u64 temp;
+	if (a < 0) {
+		temp = b;
+	} else {
+		temp = (u64) a * b;
+	}
+	do_div(temp, c);
+	return (int) temp;
+}
 
 /*
  * Recalculate the guarantee and limit in real units... and propagate the
@@ -358,33 +370,40 @@ recalc_and_propagate(ckrm_numtasks_t * res, ckrm_numtasks_t * parres)
 
 		// calculate cnt_guarantee and cnt_limit
 		//
-		if (parres->cnt_guarantee == CKRM_SHARE_DONTCARE) {
+		if ((parres->cnt_guarantee == CKRM_SHARE_DONTCARE) ||
+		    (self->my_guarantee == CKRM_SHARE_DONTCARE))
+		{
 			res->cnt_guarantee = CKRM_SHARE_DONTCARE;
 		} else if (par->total_guarantee) {
-			u64 temp = (u64) self->my_guarantee * parres->cnt_guarantee;
-			do_div(temp, par->total_guarantee);
-			res->cnt_guarantee = (int) temp;
+			res->cnt_guarantee = 
+				do_share_calc(self->my_guarantee, 
+					      parres->cnt_guarantee,
+					      par->total_guarantee);
 		} else {
 			res->cnt_guarantee = 0;
 		}
 
-		if (parres->cnt_limit == CKRM_SHARE_DONTCARE) {
+		if ((parres->cnt_limit == CKRM_SHARE_DONTCARE) ||
+		    (self->my_limit == CKRM_SHARE_DONTCARE)) {
 			res->cnt_limit = CKRM_SHARE_DONTCARE;
 		} else if (par->max_limit) {
-			u64 temp = (u64) self->my_limit * parres->cnt_limit;
-			do_div(temp, par->max_limit);
-			res->cnt_limit = (int) temp;
+			res->cnt_limit = 
+				do_share_calc(self->my_limit, 
+					      parres->cnt_limit,
+					      par->max_limit);
 		} else {
 			res->cnt_limit = 0;
 		}
 
 		// Calculate unused units
-		if (res->cnt_guarantee == CKRM_SHARE_DONTCARE) {
+		if ((res->cnt_guarantee == CKRM_SHARE_DONTCARE) ||
+		    (self->my_guarantee == CKRM_SHARE_DONTCARE)) {
 			res->cnt_unused = CKRM_SHARE_DONTCARE;
 		} else if (self->total_guarantee) {
-			u64 temp = (u64) self->unused_guarantee * res->cnt_guarantee;
-			do_div(temp, self->total_guarantee);
-			res->cnt_unused = (int) temp;
+			res->cnt_unused = 
+				do_share_calc(self->unused_guarantee, 
+					      res->cnt_guarantee,
+					      par->total_guarantee);
 		} else {
 			res->cnt_unused = 0;
 		}
@@ -433,9 +452,10 @@ static int numtasks_set_share_values(void *my_res, struct ckrm_shares *new)
 		if (parres->cnt_guarantee == CKRM_SHARE_DONTCARE) {
 			parres->cnt_unused = CKRM_SHARE_DONTCARE;
 		} else if (par->total_guarantee) {
-			u64 temp = (u64) par->unused_guarantee * parres->cnt_guarantee;
-			do_div(temp, par->total_guarantee);
-			parres->cnt_unused = (int) temp;
+			parres->cnt_unused =
+				do_share_calc(par->unused_guarantee, 
+					      parres->cnt_guarantee,
+					      par->total_guarantee);
 		} else {
 			parres->cnt_unused = 0;
 		}
