@@ -57,12 +57,19 @@ extern int vc_set_iattr_v0(uint32_t, void __user *);
 extern int vc_get_iattr(uint32_t, void __user *);
 extern int vc_set_iattr(uint32_t, void __user *);
 
+extern int vc_iattr_ioctl(struct dentry *de,
+			  unsigned int cmd,
+			  unsigned long arg);
+
 #endif	/* __KERNEL__ */
 
 /* inode ioctls */
 
 #define FIOC_GETXFLG	_IOR('x', 5, long)
 #define FIOC_SETXFLG	_IOW('x', 6, long)
+
+#define FIOC_GETIATTR   _IOR('x', 7, long)
+#define FIOC_SETIATTR   _IOR('x', 8, long)
 
 #else	/* _VX_INODE_H */
 #warning duplicate inclusion

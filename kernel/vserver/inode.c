@@ -12,6 +12,7 @@
 #include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/vs_context.h>
+#include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/devpts_fs.h>
 #include <linux/namei.h>
@@ -184,6 +185,37 @@ int vc_set_iattr(uint32_t id, void __user *data)
 	}
 
 	if (copy_to_user (data, &vc_data, sizeof(vc_data)))
+		ret = -EFAULT;
+	return ret;
+}
+
+int vc_iattr_ioctl(struct dentry *de, unsigned int cmd, unsigned long arg)
+{
+	void __user *data = (void __user *)arg;
+	struct vcmd_ctx_iattr_v1 vc_data;
+	int ret;
+
+	/*
+	 * I don't think we need any dget/dput pairs in here as long as
+	 * this function is always called from sys_ioctl i.e., de is
+         * a field of a struct file that is guaranteed not to be freed.
+	 */
+	if (cmd == FIOC_SETIATTR) {
+		if (!capable(CAP_SYS_ADMIN) || !capable(CAP_LINUX_IMMUTABLE))
+			return -EPERM;
+		if (copy_from_user (&vc_data, data, sizeof(vc_data)))
+			return -EFAULT;
+		ret = __vc_set_iattr(de,
+			&vc_data.xid, &vc_data.flags, &vc_data.mask);
+	}
+	else {
+		if (!vx_check(0, VX_ADMIN))
+			return -ENOSYS;
+		ret = __vc_get_iattr(de->d_inode,
+			&vc_data.xid, &vc_data.flags, &vc_data.mask);
+	}
+
+	if (!ret && copy_to_user (data, &vc_data, sizeof(vc_data)))
 		ret = -EFAULT;
 	return ret;
 }
