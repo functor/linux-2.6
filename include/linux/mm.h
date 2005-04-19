@@ -240,7 +240,7 @@ struct page {
 #endif /* WANT_PAGE_VIRTUAL */
 #ifdef CONFIG_CKRM_RES_MEM
 	struct ckrm_zone *ckrm_zone;
-#endif
+#endif // CONFIG_CKRM_RES_MEM
 };
 
 /*

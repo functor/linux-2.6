@@ -92,7 +92,11 @@ int rotate_reclaimable_page(struct page *page)
 	spin_lock_irqsave(&zone->lru_lock, flags);
 	if (PageLRU(page) && !PageActive(page)) {
 		list_del(&page->lru);
-		ckrm_add_tail_inactive(page);
+#ifdef CONFIG_CKRM_RES_MEM
+		list_add_tail(&page->lru, &ckrm_zone->inactive_list);
+#else
+		list_add_tail(&page->lru, &zone->inactive_list);
+#endif
 		inc_page_state(pgrotated);
 	}
 	if (!test_clear_page_writeback(page))

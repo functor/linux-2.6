@@ -41,7 +41,6 @@
 #include <linux/rmap.h>
 #include <linux/ckrm_events.h>
 #include <linux/ckrm_tsk.h>
-#include <linux/ckrm_tc.h>
 #include <linux/ckrm_mem_inline.h>
 #include <linux/vs_network.h>
 #include <linux/vs_limit.h>
@@ -310,7 +309,7 @@ static struct mm_struct * mm_init(struct mm_struct * mm)
 	mm->ioctx_list = NULL;
 	mm->default_kioctx = (struct kioctx)INIT_KIOCTX(mm->default_kioctx, *mm);
 	mm->free_area_cache = TASK_UNMAPPED_BASE;
-	ckrm_mm_init(mm);
+ 	ckrm_mm_init(mm);
 
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
@@ -490,8 +489,7 @@ good_mm:
 	ckrm_mm_setclass(mm, oldmm->memclass);
 	tsk->mm = mm;
 	tsk->active_mm = mm;
-	ckrm_mm_setclass(mm, oldmm->memclass);
-	ckrm_task_mm_set(mm, tsk);
+	ckrm_init_mm_to_task(mm, tsk);
 	return 0;
 
 free_pt:
