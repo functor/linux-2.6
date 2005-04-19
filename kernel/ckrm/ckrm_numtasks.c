@@ -165,7 +165,12 @@ static void numtasks_put_ref_local(struct ckrm_core_class *core)
 	res = ckrm_get_res_class(core, resid, struct ckrm_numtasks);
 	if (res == NULL)
 		return;
+
+	if (atomic_read(&res->cnt_cur_alloc)==0)
+		return;
+
 	atomic_dec(&res->cnt_cur_alloc);
+
 	if (atomic_read(&res->cnt_borrowed) > 0) {
 		atomic_dec(&res->cnt_borrowed);
 		numtasks_put_ref_local(res->parent);
