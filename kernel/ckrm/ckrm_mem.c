@@ -165,8 +165,10 @@ check_memclass(struct ckrm_mem_res *res, char *str)
 	struct list_head *pos;
 	struct page *page;
 
+#if 0
 	printk("Check<%s> %s: total=%d\n",
 		str, res->core->name, atomic_read(&res->pg_total));
+#endif
 	for (i = 0; i < MAX_NR_ZONES; i++) {
 		act = 0; inact = 0;
 		ckrm_zone = &res->ckrm_zone[i];
@@ -185,9 +187,11 @@ check_memclass(struct ckrm_mem_res *res, char *str)
 			act++;
 		}
 		spin_unlock_irq(&zone->lru_lock);
+#if 0
 		printk("Check<%s>(zone=%d): act %ld, inae %ld lact %d lina %d\n",
 			str, i, ckrm_zone->nr_active, ckrm_zone->nr_inactive,
 			act, inact);
+#endif
 	}
 }
 EXPORT_SYMBOL_GPL(check_memclass);
