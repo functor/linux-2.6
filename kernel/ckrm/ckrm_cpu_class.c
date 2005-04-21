@@ -145,6 +145,8 @@ static void ckrm_free_cpu_class(void *my_res)
 	struct ckrm_cpu_class *cls = my_res, *parres, *childres;
 	ckrm_core_class_t *child = NULL;
 	int maxlimit;
+	ckrm_lrq_t* queue;
+	int i;
 
 	if (!cls) 
 		return;
@@ -152,6 +154,15 @@ static void ckrm_free_cpu_class(void *my_res)
 	/*the default class can't be freed*/
 	if (cls == get_default_cpu_class()) 
 		return;
+#if 1
+#warning "ACB: Remove freed class from any classqueues [PL #4233]"
+	for (i = 0 ; i < NR_CPUS ; i++) {
+	  queue = &cls->local_queues[i];
+	  if (cls_in_classqueue(&queue->classqueue_linkobj))
+	    classqueue_dequeue(queue->classqueue,
+			       &queue->classqueue_linkobj);
+	}
+#endif
 
 	// Assuming there will be no children when this function is called
 	parres = ckrm_get_cpu_class(cls->parent);
