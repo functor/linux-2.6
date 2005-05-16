@@ -287,33 +287,47 @@ static struct call_data_struct * call_data;
 static void __smp_call_function (void (*func) (void *info), void *info,
 				int nonatomic, int wait)
 {
-	struct call_data_struct data;
+	static struct call_data_struct dumpdata;
+	struct call_data_struct normaldata;
+	struct call_data_struct *data;
 	int cpus = num_online_cpus()-1;
 
 	if (!cpus)
 		return;
 
-	data.func = func;
-	data.info = info;
-	atomic_set(&data.started, 0);
-	data.wait = wait;
-	if (wait)
-		atomic_set(&data.finished, 0);
+	if (wait == -1) {
+		/* if another cpu beat us, they win! */
+		if (dumpdata.func) {
+			spin_unlock(&call_lock);
+			return;
+		}
+		data = &dumpdata;
+	} else
+		data = &normaldata;
 
-	call_data = &data;
+	data->func = func;
+	data->info = info;
+	atomic_set(&data->started, 0);
+	data->wait = wait > 0 ? wait : 0;
+	if (wait > 0)
+		atomic_set(&data->finished, 0);
+
+	call_data = data;
 	wmb();
 	/* Send a message to all other CPUs and wait for them to respond */
 	send_IPI_allbutself(CALL_FUNCTION_VECTOR);
 
 	/* Wait for response */
-	while (atomic_read(&data.started) != cpus)
-		cpu_relax();
+	if (wait >= 0)
+		while (atomic_read(&data->started) != cpus)
+			cpu_relax();
 
-	if (!wait)
-		return;
+	if (wait > 0)
+		while (atomic_read(&data->finished) != cpus)
+			cpu_relax();
 
-	while (atomic_read(&data.finished) != cpus)
-		cpu_relax();
+	if (wait >= 0)
+		call_data = NULL;
 }
 
 /*
@@ -321,8 +335,10 @@ static void __smp_call_function (void (*func) (void *info), void *info,
  * @func: The function to run. This must be fast and non-blocking.
  * @info: An arbitrary pointer to pass to the function.
  * @nonatomic: currently unused.
- * @wait: If true, wait (atomically) until function has completed on other
- *        CPUs.
+ * @wait: If 1, wait (atomically) until function has complete on other CPUs.
+ *        If 0, wait for the IPI to be received by other CPUs, but do not wait
+ *        for the completion of the IPI on each CPU.  If -1, do not wait for
+ *        other CPUs to receive IPI.
  *
  * Returns 0 on success, else a negative status code. Does not return until
  * remote CPUs are nearly ready to execute func or are or have executed.

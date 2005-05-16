@@ -192,6 +192,10 @@ struct tcp_tw_bucket {
 #define tw_node			__tw_common.skc_node
 #define tw_bind_node		__tw_common.skc_bind_node
 #define tw_refcnt		__tw_common.skc_refcnt
+#define tw_xid			__tw_common.skc_xid
+#define tw_vx_info		__tw_common.skc_vx_info
+#define tw_nid			__tw_common.skc_nid
+#define tw_nx_info		__tw_common.skc_nx_info
 	volatile unsigned char	tw_substate;
 	unsigned char		tw_rcv_wscale;
 	__u16			tw_sport;
@@ -668,6 +672,10 @@ struct open_request {
 		struct tcp_v6_open_req v6_req;
 #endif
 	} af;
+#ifdef CONFIG_ACCEPT_QUEUES
+	unsigned long acceptq_time_stamp;
+	int	      acceptq_class;
+#endif
 };
 
 /* SLAB cache for open requests. */
@@ -776,6 +784,8 @@ extern void			tcp_v4_err(struct sk_buff *skb, u32);
 extern void			tcp_shutdown (struct sock *sk, int how);
 
 extern int			tcp_v4_rcv(struct sk_buff *skb);
+
+extern struct sock *		tcp_v4_lookup_listener(u32 daddr, unsigned short hnum, int dif);
 
 extern int			tcp_v4_remember_stamp(struct sock *sk);
 
@@ -955,6 +965,7 @@ extern int  tcp_send_synack(struct sock *);
 extern void tcp_push_one(struct sock *, unsigned mss_now);
 extern void tcp_send_ack(struct sock *sk);
 extern void tcp_send_delayed_ack(struct sock *sk);
+extern void cleanup_rbuf(struct sock *sk, int copied);
 
 /* tcp_timer.c */
 extern void tcp_init_xmit_timers(struct sock *);
@@ -1438,8 +1449,9 @@ static __inline__ void tcp_minshall_update(struct tcp_opt *tp, int mss,
 /* Return 0, if packet can be sent now without violation Nagle's rules:
    1. It is full sized.
    2. Or it contains FIN.
-   3. Or TCP_NODELAY was set.
-   4. Or TCP_CORK is not set, and all sent packets are ACKed.
+   3. Or higher layers meant to force a packet boundary, hence the PSH bit.
+   4. Or TCP_NODELAY was set.
+   5. Or TCP_CORK is not set, and all sent packets are ACKed.
       With Minshall's modification: all sent small packets are ACKed.
  */
 
@@ -1787,6 +1799,83 @@ static inline int tcp_full_space(const struct sock *sk)
 	return tcp_win_from_space(sk->sk_rcvbuf); 
 }
 
+struct tcp_listen_opt
+{
+	u8			max_qlen_log;	/* log_2 of maximal queued SYNs */
+	int			qlen;
+#ifdef CONFIG_ACCEPT_QUEUES
+	int			qlen_young[NUM_ACCEPT_QUEUES];
+#else
+	int			qlen_young;
+#endif
+	int			clock_hand;
+	u32			hash_rnd;
+	struct open_request	*syn_table[TCP_SYNQ_HSIZE];
+};
+
+#ifdef CONFIG_ACCEPT_QUEUES
+static inline void sk_acceptq_removed(struct sock *sk, int class)
+{
+	tcp_sk(sk)->acceptq[class].aq_backlog--;
+}
+
+static inline void sk_acceptq_added(struct sock *sk, int class)
+{
+	tcp_sk(sk)->acceptq[class].aq_backlog++;
+}
+
+static inline int sk_acceptq_is_full(struct sock *sk, int class)
+{
+	return tcp_sk(sk)->acceptq[class].aq_backlog >
+		sk->sk_max_ack_backlog;
+}
+
+static inline void tcp_set_acceptq(struct tcp_opt *tp, struct open_request *req)
+{
+	int class = req->acceptq_class;
+	int prev_class;
+
+	if (!tp->acceptq[class].aq_ratio) {
+		req->acceptq_class = 0;
+		class = 0;
+	}
+
+	tp->acceptq[class].aq_qcount++;
+	req->acceptq_time_stamp = jiffies;
+
+	if (tp->acceptq[class].aq_tail) {
+		req->dl_next = tp->acceptq[class].aq_tail->dl_next;
+		tp->acceptq[class].aq_tail->dl_next = req;
+		tp->acceptq[class].aq_tail = req;
+	} else { /* if first request in the class */
+		tp->acceptq[class].aq_head = req;
+		tp->acceptq[class].aq_tail = req;
+
+		prev_class = class - 1;
+		while (prev_class >= 0) {
+			if (tp->acceptq[prev_class].aq_tail)
+				break;
+			prev_class--;
+		}
+		if (prev_class < 0) {
+			req->dl_next = tp->accept_queue;
+			tp->accept_queue = req;
+		}
+		else {
+			req->dl_next = tp->acceptq[prev_class].aq_tail->dl_next;
+			tp->acceptq[prev_class].aq_tail->dl_next = req;
+		}
+	}
+}
+static inline void tcp_acceptq_queue(struct sock *sk, struct open_request *req,
+					 struct sock *child)
+{
+	tcp_set_acceptq(tcp_sk(sk),req);
+	req->sk = child;
+	sk_acceptq_added(sk,req->acceptq_class);
+}
+
+#else
 static inline void tcp_acceptq_queue(struct sock *sk, struct open_request *req,
 					 struct sock *child)
 {
@@ -1804,15 +1893,41 @@ static inline void tcp_acceptq_queue(struct sock *sk, struct open_request *req,
 	req->dl_next = NULL;
 }
 
-struct tcp_listen_opt
+#endif
+
+
+#ifdef CONFIG_ACCEPT_QUEUES
+static inline void
+tcp_synq_removed(struct sock *sk, struct open_request *req)
 {
-	u8			max_qlen_log;	/* log_2 of maximal queued SYNs */
-	int			qlen;
-	int			qlen_young;
-	int			clock_hand;
-	u32			hash_rnd;
-	struct open_request	*syn_table[TCP_SYNQ_HSIZE];
-};
+	struct tcp_listen_opt *lopt = tcp_sk(sk)->listen_opt;
+
+	if (--lopt->qlen == 0)
+		tcp_delete_keepalive_timer(sk);
+	if (req->retrans == 0)
+		lopt->qlen_young[req->acceptq_class]--;
+}
+
+static inline void tcp_synq_added(struct sock *sk, struct open_request *req)
+{
+	struct tcp_listen_opt *lopt = tcp_sk(sk)->listen_opt;
+
+	if (lopt->qlen++ == 0)
+		tcp_reset_keepalive_timer(sk, TCP_TIMEOUT_INIT);
+	lopt->qlen_young[req->acceptq_class]++;
+}
+
+static inline int tcp_synq_len(struct sock *sk)
+{
+	return tcp_sk(sk)->listen_opt->qlen;
+}
+
+static inline int tcp_synq_young(struct sock *sk, int class)
+{
+	return tcp_sk(sk)->listen_opt->qlen_young[class];
+}
+
+#else
 
 static inline void
 tcp_synq_removed(struct sock *sk, struct open_request *req)
@@ -1843,6 +1958,7 @@ static inline int tcp_synq_young(struct sock *sk)
 {
 	return tcp_sk(sk)->listen_opt->qlen_young;
 }
+#endif
 
 static inline int tcp_synq_is_full(struct sock *sk)
 {

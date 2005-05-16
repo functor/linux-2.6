@@ -128,7 +128,8 @@ static void sha1_update(void *ctx, const u8 *data, unsigned int len)
 		memcpy(&sctx->buffer[j], data, (i = 64-j));
 		sha1_transform(sctx->state, sctx->buffer);
 		for ( ; i + 63 < len; i += 64) {
-			sha1_transform(sctx->state, &data[i]);
+			memcpy(sctx->buffer, &data[i], 64);
+			sha1_transform(sctx->state, sctx->buffer);
 		}
 		j = 0;
 	}

@@ -419,6 +419,7 @@ static void init_setup_hpt37x(struct pci_dev *, ide_pci_device_t *);
 static void init_setup_hpt374(struct pci_dev *, ide_pci_device_t *);
 static unsigned int init_chipset_hpt366(struct pci_dev *, const char *);
 static void init_hwif_hpt366(ide_hwif_t *);
+static void init_iops_hpt366(ide_hwif_t *);
 static void init_dma_hpt366(ide_hwif_t *, unsigned long);
 
 static ide_pci_device_t hpt366_chipsets[] __devinitdata = {
@@ -426,6 +427,7 @@ static ide_pci_device_t hpt366_chipsets[] __devinitdata = {
 		.name		= "HPT366",
 		.init_setup	= init_setup_hpt366,
 		.init_chipset	= init_chipset_hpt366,
+		.init_iops	= init_iops_hpt366,
 		.init_hwif	= init_hwif_hpt366,
 		.init_dma	= init_dma_hpt366,
 		.channels	= 2,
@@ -436,6 +438,7 @@ static ide_pci_device_t hpt366_chipsets[] __devinitdata = {
 		.name		= "HPT372A",
 		.init_setup	= init_setup_hpt37x,
 		.init_chipset	= init_chipset_hpt366,
+		.init_iops	= init_iops_hpt366,
 		.init_hwif	= init_hwif_hpt366,
 		.init_dma	= init_dma_hpt366,
 		.channels	= 2,
@@ -445,6 +448,7 @@ static ide_pci_device_t hpt366_chipsets[] __devinitdata = {
 		.name		= "HPT302",
 		.init_setup	= init_setup_hpt37x,
 		.init_chipset	= init_chipset_hpt366,
+		.init_iops	= init_iops_hpt366,
 		.init_hwif	= init_hwif_hpt366,
 		.init_dma	= init_dma_hpt366,
 		.channels	= 2,
@@ -454,6 +458,7 @@ static ide_pci_device_t hpt366_chipsets[] __devinitdata = {
 		.name		= "HPT371",
 		.init_setup	= init_setup_hpt37x,
 		.init_chipset	= init_chipset_hpt366,
+		.init_iops	= init_iops_hpt366,
 		.init_hwif	= init_hwif_hpt366,
 		.init_dma	= init_dma_hpt366,
 		.channels	= 2,
@@ -463,6 +468,7 @@ static ide_pci_device_t hpt366_chipsets[] __devinitdata = {
 		.name		= "HPT374",
 		.init_setup	= init_setup_hpt374,
 		.init_chipset	= init_chipset_hpt366,
+		.init_iops	= init_iops_hpt366,
 		.init_hwif	= init_hwif_hpt366,
 		.init_dma	= init_dma_hpt366,
 		.channels	= 2,	/* 4 */
@@ -472,6 +478,7 @@ static ide_pci_device_t hpt366_chipsets[] __devinitdata = {
 		.name		= "HPT372N",
 		.init_setup	= init_setup_hpt37x,
 		.init_chipset	= init_chipset_hpt366,
+		.init_iops	= init_iops_hpt366,
 		.init_hwif	= init_hwif_hpt366,
 		.init_dma	= init_dma_hpt366,
 		.channels	= 2,	/* 4 */

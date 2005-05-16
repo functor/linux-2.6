@@ -24,11 +24,11 @@ __kernel_vsyscall:
 	/* 7: align return point with nop's to make disassembly easier */
 	.space 7,0x90
 
-	/* 14: System call restart point is here! (SYSENTER_RETURN - 2) */
+	/* 14: System call restart point is here! (SYSENTER_RETURN_OFFSET-2) */
 	jmp .Lenter_kernel
 	/* 16: System call normal return point is here! */
-	.globl SYSENTER_RETURN	/* Symbol used by entry.S.  */
-SYSENTER_RETURN:
+	.globl SYSENTER_RETURN_OFFSET	/* Symbol used by sysenter.c  */
+SYSENTER_RETURN_OFFSET:
 	pop %ebp
 .Lpop_ebp:
 	pop %edx

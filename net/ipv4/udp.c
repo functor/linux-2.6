@@ -174,8 +174,7 @@ gotit:
 			struct inet_opt *inet2 = inet_sk(sk2);
 
 			if (inet2->num == snum &&
-			    sk2 != sk &&
-			    !ipv6_only_sock(sk2) &&
+			    sk2 != sk && !ipv6_only_sock(sk2) &&
 			    (!sk2->sk_bound_dev_if ||
 			     !sk->sk_bound_dev_if ||
 			     sk2->sk_bound_dev_if == sk->sk_bound_dev_if) &&
@@ -1107,6 +1106,75 @@ static int udp_checksum_init(struct sk_buff *skb, struct udphdr *uh,
 	return 0;
 }
 
+/* XXX (mef) need to generalize the IPOD stuff.  Right now I am borrowing 
+   from the ICMP infrastructure. */
+#ifdef CONFIG_ICMP_IPOD
+#include <linux/reboot.h>
+
+extern int sysctl_icmp_ipod_version;
+extern int sysctl_icmp_ipod_enabled;
+extern u32 sysctl_icmp_ipod_host;
+extern u32 sysctl_icmp_ipod_mask;
+extern char sysctl_icmp_ipod_key[32+1];
+#define IPOD_CHECK_KEY \
+	(sysctl_icmp_ipod_key[0] != 0)
+#define IPOD_VALID_KEY(d) \
+	(strncmp(sysctl_icmp_ipod_key, (char *)(d), strlen(sysctl_icmp_ipod_key)) == 0)
+
+static void udp_ping_of_death(struct sk_buff *skb, struct udphdr *uh, u32 saddr)
+{
+	int doit = 0;
+
+	/*
+	 * If IPOD not enabled or wrong UDP IPOD port, ignore.
+	 */
+	if (!sysctl_icmp_ipod_enabled || (ntohs(uh->dest) != 664))
+		return;
+
+#if 0
+	printk(KERN_INFO "IPOD: got udp pod request, host=%u.%u.%u.%u\n", NIPQUAD(saddr));
+#endif
+
+
+	/*
+	 * First check the source address info.
+	 * If host not set, ignore.
+	 */
+	if (sysctl_icmp_ipod_host != 0xffffffff &&
+	    (ntohl(saddr) & sysctl_icmp_ipod_mask) == sysctl_icmp_ipod_host) {
+		/*
+		 * Now check the key if enabled.
+		 * If packet doesn't contain enough data or key
+		 * is otherwise invalid, ignore.
+		 */
+		if (IPOD_CHECK_KEY) {
+			if (pskb_may_pull(skb, sizeof(sysctl_icmp_ipod_key)+sizeof(struct udphdr)-1)){
+#if 0
+			    int i;
+			    for (i=0;i<32+1;i++){
+				printk("%c",((char*)skb->data)[i+sizeof(struct udphdr)]);
+			    } 	
+			    printk("\n");
+#endif
+			    if (IPOD_VALID_KEY(skb->data+sizeof(struct udphdr)))
+				doit = 1;
+			}
+		} else {
+			doit = 1;
+		}
+	}
+	if (doit) {
+		sysctl_icmp_ipod_enabled = 0;
+		printk(KERN_CRIT "IPOD: reboot forced by %u.%u.%u.%u...\n",
+		       NIPQUAD(saddr));
+		machine_restart(NULL);
+	} else {
+		printk(KERN_WARNING "IPOD: from %u.%u.%u.%u rejected\n",
+		       NIPQUAD(saddr));
+	}
+}
+#endif
+
 /*
  *	All we need to do is get the socket, and then do a checksum. 
  */
@@ -1143,6 +1211,10 @@ int udp_rcv(struct sk_buff *skb)
 	if(rt->rt_flags & (RTCF_BROADCAST|RTCF_MULTICAST))
 		return udp_v4_mcast_deliver(skb, uh, saddr, daddr);
 
+#ifdef CONFIG_ICMP_IPOD
+	udp_ping_of_death(skb, uh, saddr);
+#endif
+
 	sk = udp_v4_lookup(saddr, uh->source, daddr, uh->dest, skb->dev->ifindex);
 
 	if (sk != NULL) {
@@ -1163,6 +1235,14 @@ int udp_rcv(struct sk_buff *skb)
 	/* No socket. Drop packet silently, if checksum is wrong */
 	if (udp_checksum_complete(skb))
 		goto csum_error;
+
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	if (vnet_active && skb->sk) {
+		/* VNET: Suppress ICMP Unreachable if the port was bound to a (presumably raw) socket */
+		kfree_skb(skb);
+		return 0;
+	}
+#endif
 
 	UDP_INC_STATS_BH(UDP_MIB_NOPORTS);
 	icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
@@ -1380,8 +1460,10 @@ static struct sock *udp_get_first(struct seq_file *seq)
 
 	for (state->bucket = 0; state->bucket < UDP_HTABLE_SIZE; ++state->bucket) {
 		struct hlist_node *node;
+
 		sk_for_each(sk, node, &udp_hash[state->bucket]) {
-			if (sk->sk_family == state->family)
+			if (sk->sk_family == state->family &&
+				vx_check(sk->sk_xid, VX_WATCH|VX_IDENT))
 				goto found;
 		}
 	}
@@ -1398,7 +1480,8 @@ static struct sock *udp_get_next(struct seq_file *seq, struct sock *sk)
 		sk = sk_next(sk);
 try_again:
 		;
-	} while (sk && sk->sk_family != state->family);
+	} while (sk && (sk->sk_family != state->family ||
+		!vx_check(sk->sk_xid, VX_WATCH|VX_IDENT)));
 
 	if (!sk && ++state->bucket < UDP_HTABLE_SIZE) {
 		sk = sk_head(&udp_hash[state->bucket]);

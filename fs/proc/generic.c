@@ -18,7 +18,10 @@
 #include <linux/init.h>
 #include <linux/idr.h>
 #include <linux/namei.h>
+#include <linux/vs_base.h>
+#include <linux/vserver/inode.h>
 #include <linux/bitops.h>
+#include <linux/vserver/inode.h>
 #include <asm/uaccess.h>
 
 static ssize_t proc_file_read(struct file *file, char __user *buf,
@@ -60,7 +63,7 @@ proc_file_read(struct file *file, char __user *buf, size_t nbytes,
 		return -ENOMEM;
 
 	while ((nbytes > 0) && !eof) {
-		count = min_t(ssize_t, PROC_BLOCK_SIZE, nbytes);
+		count = min_t(size_t, PROC_BLOCK_SIZE, nbytes);
 
 		start = NULL;
 		if (dp->get_info) {
@@ -351,8 +354,15 @@ static int proc_delete_dentry(struct dentry * dentry)
 	return 1;
 }
 
+static int proc_revalidate_dentry(struct dentry *de, struct nameidata *nd)
+{
+	/* maybe add a check if it's really necessary? */
+	return 0;
+}
+
 static struct dentry_operations proc_dentry_operations =
 {
+	.d_revalidate	= proc_revalidate_dentry,
 	.d_delete	= proc_delete_dentry,
 };
 
@@ -372,11 +382,15 @@ struct dentry *proc_lookup(struct inode * dir, struct dentry *dentry, struct nam
 		for (de = de->subdir; de ; de = de->next) {
 			if (de->namelen != dentry->d_name.len)
 				continue;
+			if (!vx_hide_check(0, de->vx_flags))
+				continue;
 			if (!memcmp(dentry->d_name.name, de->name, de->namelen)) {
 				unsigned int ino = de->low_ino;
 
 				error = -EINVAL;
 				inode = proc_get_inode(dir->i_sb, ino, de);
+				/* generic proc entries belong to the host */
+				inode->i_xid = 0;
 				break;
 			}
 		}
@@ -448,9 +462,12 @@ int proc_readdir(struct file * filp,
 			}
 
 			do {
+				if (!vx_hide_check(0, de->vx_flags))
+					goto skip;
 				if (filldir(dirent, de->name, de->namelen, filp->f_pos,
 					    de->low_ino, de->mode >> 12) < 0)
 					goto out;
+			skip:
 				filp->f_pos++;
 				de = de->next;
 			} while (de);
@@ -562,6 +579,7 @@ static struct proc_dir_entry *proc_create(struct proc_dir_entry **parent,
 	ent->namelen = len;
 	ent->mode = mode;
 	ent->nlink = nlink;
+	ent->vx_flags = IATTR_PROC_DEFAULT;
  out:
 	return ent;
 }
@@ -582,7 +600,8 @@ struct proc_dir_entry *proc_symlink(const char *name,
 				kfree(ent->data);
 				kfree(ent);
 				ent = NULL;
-			}
+			} else
+				ent->vx_flags = IATTR_PROC_SYMLINK;
 		} else {
 			kfree(ent);
 			ent = NULL;
@@ -685,7 +704,7 @@ void remove_proc_entry(const char *name, struct proc_dir_entry *parent)
 			parent->nlink--;
 		proc_kill_inodes(de);
 		de->nlink = 0;
-		WARN_ON(de->subdir);
+		BUG_ON(de->subdir);
 		if (!atomic_read(&de->count))
 			free_proc_entry(de);
 		else {

@@ -1168,6 +1168,11 @@ do_replace(void __user *user, unsigned int len)
 		ret = -EFAULT;
 		goto free_newinfo;
 	}
+	
+	if(tmp.num_counters >= (4 << 20)/sizeof(struct ip6t_counters)) {
+		ret = -ENOMEM;
+		goto free_newinfo;
+	}
 
 	counters = vmalloc(tmp.num_counters * sizeof(struct ip6t_counters));
 	if (!counters) {
@@ -1372,7 +1377,7 @@ do_ip6t_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 			       sizeof(info.underflow));
 			info.num_entries = t->private->number;
 			info.size = t->private->size;
-			strcpy(info.name, name);
+			memcpy(info.name, name, sizeof(info.name));
 
 			if (copy_to_user(user, &info, *len) != 0)
 				ret = -EFAULT;

@@ -26,7 +26,9 @@
 #include <linux/proc_fs.h>
 #include <linux/shmem_fs.h>
 #include <linux/security.h>
+#include <linux/vs_base.h>
 #include <linux/syscalls.h>
+
 #include <asm/uaccess.h>
 
 #include "util.h"
@@ -193,6 +195,7 @@ static int newseg (key_t key, int shmflg, size_t size)
 		return -ENOMEM;
 
 	shp->shm_perm.key = key;
+	shp->shm_perm.xid = vx_current_xid();
 	shp->shm_flags = (shmflg & S_IRWXUGO);
 	shp->mlock_user = NULL;
 
@@ -865,11 +868,15 @@ static int sysvipc_shm_read_proc(char *buffer, char **start, off_t offset, int l
 		struct shmid_kernel* shp;
 
 		shp = shm_lock(i);
-		if(shp!=NULL) {
+		if (shp) {
 #define SMALL_STRING "%10d %10d  %4o %10u %5u %5u  %5d %5u %5u %5u %5u %10lu %10lu %10lu\n"
 #define BIG_STRING   "%10d %10d  %4o %21u %5u %5u  %5d %5u %5u %5u %5u %10lu %10lu %10lu\n"
 			char *format;
 
+			if (!vx_check(shp->shm_perm.xid, VX_IDENT)) {
+				shm_unlock(shp);
+				continue;
+			}
 			if (sizeof(size_t) <= sizeof(int))
 				format = SMALL_STRING;
 			else

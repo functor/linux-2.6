@@ -2579,3 +2579,10 @@ config NETCONSOLE
 	If you want to log kernel messages over the network, enable this.
 	See Documentation/networking/netconsole.txt for details.
 
+config NETDUMP
+	tristate "Network kernel crash dump support"
+	depends on NETPOLL && NETPOLL_TRAP && (X86 || PPC_PSERIES || IA64)
+	---help---
+	Enable this option if you have a netdump server and you would like
+	to collect kernel crash dumps.
+

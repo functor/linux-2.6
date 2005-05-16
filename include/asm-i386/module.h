@@ -6,9 +6,14 @@ struct mod_arch_specific
 {
 };
 
+#define MODULES_ARE_ELF32
 #define Elf_Shdr Elf32_Shdr
 #define Elf_Sym Elf32_Sym
 #define Elf_Ehdr Elf32_Ehdr
+#define Elf_Rel Elf32_Rel
+#define Elf_Rela Elf32_Rela
+#define ELF_R_TYPE(X)	ELF32_R_TYPE(X)
+#define ELF_R_SYM(X)	ELF32_R_SYM(X)
 
 #ifdef CONFIG_M386
 #define MODULE_PROC_FAMILY "386 "
@@ -62,8 +67,16 @@ struct mod_arch_specific
 #define MODULE_REGPARM ""
 #endif
 
-#ifdef CONFIG_4KSTACKS
+#if (CONFIG_STACK_SIZE_SHIFT < 12)
+#define MODULE_STACKSIZE "TINYSTACKS "
+#elif (CONFIG_STACK_SIZE_SHIFT == 12)
 #define MODULE_STACKSIZE "4KSTACKS "
+#elif (CONFIG_STACK_SIZE_SHIFT == 13)
+#define MODULE_STACKSIZE "8KSTACKS "
+#elif (CONFIG_STACK_SIZE_SHIFT == 14)
+#define MODULE_STACKSIZE "16KSTACKS "
+#elif (CONFIG_STACK_SIZE_SHIFT > 14)
+#define MODULE_STACKSIZE "HUGESTACKS "
 #else
 #define MODULE_STACKSIZE ""
 #endif

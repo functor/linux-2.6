@@ -283,6 +283,10 @@ skip_copy_pte_range:
 				struct page *page;
 				unsigned long pfn;
 
+				if (!vx_rsspages_avail(dst, 1)) {
+					spin_unlock(&src->page_table_lock);
+					goto nomem;
+				}
 				/* copy_one_pte */
 
 				if (pte_none(pte))
@@ -333,7 +337,8 @@ skip_copy_pte_range:
 					pte = pte_mkclean(pte);
 				pte = pte_mkold(pte);
 				get_page(page);
-				dst->rss++;
+				// dst->rss++;
+				vx_rsspages_inc(dst);
 				if (PageAnon(page))
 					dst->anon_rss++;
 				set_pte(dst_pte, pte);
@@ -1112,7 +1117,8 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 		if (PageAnon(old_page))
 			mm->anon_rss--;
 		if (PageReserved(old_page))
-			++mm->rss;
+			// ++mm->rss;
+			vx_rsspages_inc(mm);
 		else
 			page_remove_rmap(old_page);
 		break_cow(vma, new_page, address, page_table);
@@ -1370,6 +1376,10 @@ static int do_swap_page(struct mm_struct * mm,
 		grab_swap_token();
 	}
 
+	if (!vx_rsspages_avail(mm, 1)) {
+		ret = VM_FAULT_OOM;
+		goto out;
+	}
 	mark_page_accessed(page);
 	lock_page(page);
 
@@ -1394,7 +1404,8 @@ static int do_swap_page(struct mm_struct * mm,
 	if (vm_swap_full())
 		remove_exclusive_swap_page(page);
 
-	mm->rss++;
+	// mm->rss++;
+	vx_rsspages_inc(mm);
 	pte = mk_pte(page, vma->vm_page_prot);
 	if (write_access && can_share_swap_page(page)) {
 		pte = maybe_mkwrite(pte_mkdirty(pte), vma);
@@ -1445,6 +1456,9 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 		if (unlikely(anon_vma_prepare(vma)))
 			goto no_mem;
+		if (!vx_rsspages_avail(mm, 1))
+			goto no_mem;
+
 		page = alloc_page_vma(GFP_HIGHUSER, vma, addr);
 		if (!page)
 			goto no_mem;
@@ -1459,7 +1473,8 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 			spin_unlock(&mm->page_table_lock);
 			goto out;
 		}
-		mm->rss++;
+		// mm->rss++;
+		vx_rsspages_inc(mm);
 		entry = maybe_mkwrite(pte_mkdirty(mk_pte(page,
 							 vma->vm_page_prot)),
 				      vma);
@@ -1522,6 +1537,8 @@ retry:
 		return VM_FAULT_SIGBUS;
 	if (new_page == NOPAGE_OOM)
 		return VM_FAULT_OOM;
+	if (!vx_rsspages_avail(mm, 1))
+		return VM_FAULT_OOM;
 
 	/*
 	 * Should we do an early C-O-W break?
@@ -1568,7 +1585,8 @@ retry:
 	/* Only go through if we didn't race with anybody else... */
 	if (pte_none(*page_table)) {
 		if (!PageReserved(new_page))
-			++mm->rss;
+			// ++mm->rss;
+			vx_rsspages_inc(mm);
 		flush_icache_page(vma, new_page);
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		if (write_access)
@@ -1710,15 +1728,20 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct * vma,
 	 * We need the page table lock to synchronize with kswapd
 	 * and the SMP-safe atomic PTE updates.
 	 */
+	set_delay_flag(current,PF_MEMIO);
 	spin_lock(&mm->page_table_lock);
 	pmd = pmd_alloc(mm, pgd, address);
 
 	if (pmd) {
 		pte_t * pte = pte_alloc_map(mm, pmd, address);
-		if (pte)
-			return handle_pte_fault(mm, vma, address, write_access, pte, pmd);
+		if (pte) {
+			int rc = handle_pte_fault(mm, vma, address, write_access, pte, pmd);
+			clear_delay_flag(current,PF_MEMIO);
+			return rc;
+		}
 	}
 	spin_unlock(&mm->page_table_lock);
+	clear_delay_flag(current,PF_MEMIO);
 	return VM_FAULT_OOM;
 }
 

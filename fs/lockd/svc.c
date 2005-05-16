@@ -282,6 +282,8 @@ void
 lockd_down(void)
 {
 	static int warned;
+	wait_queue_t __wait;
+	int retries=0;
 
 	down(&nlmsvc_sema);
 	if (nlmsvc_users) {
@@ -298,20 +300,33 @@ lockd_down(void)
 	warned = 0;
 
 	kill_proc(nlmsvc_pid, SIGKILL, 1);
+
+	init_waitqueue_entry(&__wait, current);
+	add_wait_queue(&lockd_exit,  &__wait);
+
 	/*
 	 * Wait for the lockd process to exit, but since we're holding
 	 * the lockd semaphore, we can't wait around forever ...
 	 */
 	clear_thread_flag(TIF_SIGPENDING);
-	interruptible_sleep_on_timeout(&lockd_exit, HZ);
-	if (nlmsvc_pid) {
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	while (nlmsvc_pid) {
+
+		schedule_timeout(HZ);
+		if (retries++ < 3)
+			continue;
+
 		printk(KERN_WARNING 
 			"lockd_down: lockd failed to exit, clearing pid\n");
 		nlmsvc_pid = 0;
 	}
+	set_current_state(TASK_RUNNING);
+	remove_wait_queue(&lockd_exit,  &__wait);
+
 	spin_lock_irq(&current->sighand->siglock);
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
+
 out:
 	up(&nlmsvc_sema);
 }

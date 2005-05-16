@@ -30,6 +30,7 @@
 #include <linux/socket.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/ptrace.h>
 #include <asm/page.h>
@@ -582,7 +583,8 @@ asmlinkage int irix_brk(unsigned long brk)
 	/*
 	 * Check if we have enough memory..
 	 */
-	if (security_vm_enough_memory((newbrk-oldbrk) >> PAGE_SHIFT)) {
+	if (security_vm_enough_memory((newbrk-oldbrk) >> PAGE_SHIFT) ||
+		!vx_vmpages_avail(mm, (newbrk-oldbrk) >> PAGE_SHIFT)) {
 		ret = -ENOMEM;
 		goto out;
 	}
@@ -591,7 +593,7 @@ asmlinkage int irix_brk(unsigned long brk)
 	 * Ok, looks good - let it rip.
 	 */
 	mm->brk = brk;
-	do_brk(oldbrk, newbrk-oldbrk);
+	__do_brk(oldbrk, newbrk-oldbrk);
 	ret = 0;
 
 out:

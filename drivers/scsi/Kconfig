@@ -265,8 +265,8 @@ config SCSI_ACARD
 	tristate "ACARD SCSI support"
 	depends on PCI && SCSI
 	help
-	  This driver supports the ACARD 870U/W SCSI host adapter.
-
+	  This driver supports the ACARD SCSI host adapter.
+	  Support Chip <ATP870 ATP876 ATP880 ATP885>
 	  To compile this driver as a module, choose M here: the
 	  module will be called atp870u.
 
@@ -374,7 +374,7 @@ config SCSI_DPT_I2O
 
 config SCSI_ADVANSYS
 	tristate "AdvanSys SCSI support"
-	depends on (ISA || EISA || PCI) && SCSI && BROKEN
+	depends on (ISA || EISA || PCI) && SCSI
 	help
 	  This is a driver for all SCSI host adapters manufactured by
 	  AdvanSys. It is documented in the kernel source in

@@ -291,7 +291,7 @@ static int usb_stor_control_thread(void * __us)
 	 */
 	daemonize("usb-storage");
 
-	current->flags |= PF_NOFREEZE;
+	current->flags |= PF_NOFREEZE|PF_MEMALLOC;
 
 	unlock_kernel();
 

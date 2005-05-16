@@ -50,13 +50,18 @@ nlmclnt_block(struct nlm_host *host, struct file_lock *fl, u32 *statp)
 	struct nlm_wait	block, **head;
 	int		err;
 	u32		pstate;
+	wait_queue_t __wait;
 
 	block.b_host   = host;
 	block.b_lock   = fl;
-	init_waitqueue_head(&block.b_wait);
 	block.b_status = NLM_LCK_BLOCKED;
+	init_waitqueue_entry(&__wait, current);
+	init_waitqueue_head(&block.b_wait);
+	add_wait_queue(&block.b_wait, &__wait);
+
 	block.b_next   = nlm_blocked;
 	nlm_blocked    = &block;
+
 
 	/* Remember pseudo nsm state */
 	pstate = host->h_state;
@@ -69,7 +74,8 @@ nlmclnt_block(struct nlm_host *host, struct file_lock *fl, u32 *statp)
 	 * a 1 minute timeout would do. See the comment before
 	 * nlmclnt_lock for an explanation.
 	 */
-	sleep_on_timeout(&block.b_wait, 30*HZ);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(30*HZ);
 
 	for (head = &nlm_blocked; *head; head = &(*head)->b_next) {
 		if (*head == &block) {
@@ -77,6 +83,7 @@ nlmclnt_block(struct nlm_host *host, struct file_lock *fl, u32 *statp)
 			break;
 		}
 	}
+	remove_wait_queue(&block.b_wait, &__wait);
 
 	if (!signalled()) {
 		*statp = block.b_status;
@@ -167,7 +174,7 @@ void nlmclnt_prepare_reclaim(struct nlm_host *host, u32 newstate)
 	host->h_nextrebind = 0;
 	nlm_rebind_host(host);
 	nlmclnt_mark_reclaim(host);
-	dprintk("NLM: reclaiming locks for host %s", host->h_name);
+	dprintk("NLM: reclaiming locks for host %s\n", host->h_name);
 }
 
 /*

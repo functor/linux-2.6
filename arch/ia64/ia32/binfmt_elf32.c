@@ -137,6 +137,29 @@ ia64_elf32_init (struct pt_regs *regs)
 	}
 
 	/*
+	 * When user stack is not executable, push sigreturn code to stack makes
+	 * segmentation fault raised when returning to kernel. So now sigreturn
+	 * code is locked in specific gate page, which is pointed by pretcode
+	 * when setup_frame_ia32
+	 */
+	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	if (vma) {
+		memset(vma, 0, sizeof(*vma));
+		vma->vm_mm = current->mm;
+		vma->vm_start = IA32_GATE_OFFSET;
+		vma->vm_end = vma->vm_start + PAGE_SIZE;
+		vma->vm_page_prot = PAGE_COPY_EXEC;
+		vma->vm_flags = VM_READ | VM_MAYREAD | VM_EXEC
+				| VM_MAYEXEC | VM_RESERVED;
+		vma->vm_ops = &ia32_gate_page_vm_ops;
+		down_write(&current->mm->mmap_sem);
+		{
+			insert_vm_struct(current->mm, vma);
+		}
+		up_write(&current->mm->mmap_sem);
+	}
+
+	/*
 	 * Install LDT as anonymous memory.  This gives us all-zero segment descriptors
 	 * until a task modifies them via modify_ldt().
 	 */
@@ -199,7 +222,7 @@ ia64_elf32_init (struct pt_regs *regs)
 int
 ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 {
-	unsigned long stack_base;
+	unsigned long stack_base, grow;
 	struct vm_area_struct *mpnt;
 	struct mm_struct *mm = current->mm;
 	int i, ret;
@@ -216,8 +239,10 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt)
 		return -ENOMEM;
 
-	if (security_vm_enough_memory((IA32_STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))
-				      >> PAGE_SHIFT)) {
+	grow = (IA32_STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))
+		>> PAGE_SHIFT;
+	if (security_vm_enough_memory(grow) ||
+		!vx_vmpages_avail(mm, grow)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
@@ -242,7 +267,9 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 			kmem_cache_free(vm_area_cachep, mpnt);
 			return ret;
 		}
-		current->mm->stack_vm = current->mm->total_vm = vma_pages(mpnt);
+		// current->mm->stack_vm = current->mm->total_vm = vma_pages(mpnt);
+		vx_vmpages_sub(current->mm, current->mm->total_vm - vma_pages(mpnt));
+		current->mm->stack_vm = current->mm->total_vm;
 	}
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
@@ -272,7 +299,7 @@ elf32_set_personality (void)
 }
 
 static unsigned long
-elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type)
+elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type, unsigned long unused)
 {
 	unsigned long pgoff = (eppnt->p_vaddr) & ~IA32_PAGE_MASK;
 

@@ -164,7 +164,7 @@ asmlinkage int sunos_brk(u32 baddr)
 		goto out;
 	/* Ok, we have probably got enough memory - let it rip. */
 	current->mm->brk = brk;
-	do_brk(oldbrk, newbrk-oldbrk);
+	__do_brk(oldbrk, newbrk-oldbrk);
 	retval = 0;
 out:
 	up_write(&current->mm->mmap_sem);

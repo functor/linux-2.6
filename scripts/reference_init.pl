@@ -90,6 +90,7 @@ foreach $object (sort(keys(%object))) {
 		if (($line =~ /\.init$/ || $line =~ /\.init\./) &&
 		    ($from !~ /\.init$/ &&
 		     $from !~ /\.init\./ &&
+		     $from !~ /\.eh_frame$/ &&
 		     $from !~ /\.stab$/ &&
 		     $from !~ /\.rodata$/ &&
 		     $from !~ /\.text\.lock$/ &&

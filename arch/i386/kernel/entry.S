@@ -204,8 +204,12 @@ sysenter_past_esp:
 	pushl %ebp
 	pushfl
 	pushl $(__USER_CS)
-	pushl $SYSENTER_RETURN
-
+	/*
+	 * Push current_thread_info()->sysenter_return to the stack.
+	 * A tiny bit of offset fixup is necessary - 4*4 means the 4 words
+	 * pushed above, and the word being pushed now:
+	 */
+	pushl (TI_sysenter_return-THREAD_SIZE+4*4)(%esp)
 /*
  * Load the potential sixth argument from user stack.
  * Careful about security.
@@ -798,7 +802,15 @@ ENTRY(sys_call_table)
 	.long sys_madvise
 	.long sys_getdents64	/* 220 */
 	.long sys_fcntl64
-	.long sys_ni_syscall	/* reserved for TUX */
+#ifdef CONFIG_TUX
+	.long __sys_tux
+#else
+# ifdef CONFIG_TUX_MODULE
+	.long sys_tux
+# else
+	.long sys_ni_syscall
+# endif
+#endif
 	.long sys_ni_syscall
 	.long sys_gettid
 	.long sys_readahead	/* 225 */
@@ -849,7 +861,7 @@ ENTRY(sys_call_table)
 	.long sys_tgkill	/* 270 */
 	.long sys_utimes
  	.long sys_fadvise64_64
-	.long sys_ni_syscall	/* sys_vserver */
+	.long sys_vserver
 	.long sys_mbind
 	.long sys_get_mempolicy
 	.long sys_set_mempolicy
@@ -859,7 +871,7 @@ ENTRY(sys_call_table)
 	.long sys_mq_timedreceive	/* 280 */
 	.long sys_mq_notify
 	.long sys_mq_getsetattr
-	.long sys_ni_syscall		/* reserved for kexec */
+	.long sys_kexec_load
 	.long sys_waitid
 	.long sys_ni_syscall		/* 285 */ /* available */
 	.long sys_add_key
@@ -867,3 +879,4 @@ ENTRY(sys_call_table)
 	.long sys_keyctl
 
 syscall_table_size=(.-sys_call_table)
+

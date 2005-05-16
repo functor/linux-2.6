@@ -297,6 +297,7 @@
 
 #define NR_syscalls 289
 
+#ifndef __KERNEL_SYSCALLS_NO_ERRNO__
 /*
  * user-visible error numbers are in the range -1 - -128: see
  * <asm-i386/errno.h>
@@ -309,6 +310,10 @@ do { \
 	} \
 	return (type) (res); \
 } while (0)
+
+#else
+# define __syscall_return(type, res) return (type) (res)
+#endif
 
 /* XXX - _foo needs to be __foo, while __NR_bar could be _NR_bar. */
 #define _syscall0(type,name) \

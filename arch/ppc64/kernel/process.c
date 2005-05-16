@@ -258,6 +258,7 @@ void show_regs(struct pt_regs * regs)
 	print_symbol("%s\n", regs->link);
 	show_stack(current, (unsigned long *)regs->gpr[1]);
 }
+EXPORT_SYMBOL_GPL(show_regs);
 
 void exit_thread(void)
 {

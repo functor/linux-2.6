@@ -614,6 +614,7 @@ static void hwif_register (ide_hwif_t *hwif)
 	}
 	hwif->gendev.release = hwif_release_dev;
 	device_register(&hwif->gendev);
+	hwif->configured = 1;
 }
 
 static int wait_hwif_ready(ide_hwif_t *hwif)

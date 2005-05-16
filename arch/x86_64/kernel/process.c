@@ -257,6 +257,8 @@ void show_regs(struct pt_regs *regs)
 	show_trace(&regs->rsp);
 }
 
+EXPORT_SYMBOL_GPL(show_regs);
+
 /*
  * Free current thread data structures etc..
  */

@@ -508,6 +508,10 @@ xfs_attrmulti_by_handle(
 	if (error)
 		return -error;
 
+	if(am_hreq.opcount > 1024) {
+		VN_RELE(vp);
+		return -XFS_ERROR(ENOMEM);
+	}
 	size = am_hreq.opcount * sizeof(attr_multiop_t);
 	ops = (xfs_attr_multiop_t *)kmalloc(size, GFP_KERNEL);
 	if (!ops) {
@@ -1008,6 +1012,8 @@ xfs_ioc_fsgeometry(
 #define LINUX_XFLAG_APPEND	0x00000020 /* writes to file may only append */
 #define LINUX_XFLAG_NODUMP	0x00000040 /* do not dump file */
 #define LINUX_XFLAG_NOATIME	0x00000080 /* do not update atime */
+#define LINUX_XFLAG_BARRIER	0x00004000 /* chroot() barrier */
+#define LINUX_XFLAG_IUNLINK	0x00008000 /* immutable unlink */
 
 STATIC unsigned int
 xfs_merge_ioc_xflags(
@@ -1048,6 +1054,10 @@ xfs_di2lxflags(
 
 	if (di_flags & XFS_DIFLAG_IMMUTABLE)
 		flags |= LINUX_XFLAG_IMMUTABLE;
+	if (di_flags & XFS_DIFLAG_IUNLINK)
+		flags |= LINUX_XFLAG_IUNLINK;
+	if (di_flags & XFS_DIFLAG_BARRIER)
+		flags |= LINUX_XFLAG_BARRIER;
 	if (di_flags & XFS_DIFLAG_APPEND)
 		flags |= LINUX_XFLAG_APPEND;
 	if (di_flags & XFS_DIFLAG_SYNC)
@@ -1096,7 +1106,7 @@ xfs_ioc_xattr(
 		attr_flags = 0;
 		if (filp->f_flags & (O_NDELAY|O_NONBLOCK))
 			attr_flags |= ATTR_NONBLOCK;
-
+		
 		va.va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE;
 		va.va_xflags  = fa.fsx_xflags;
 		va.va_extsize = fa.fsx_extsize;

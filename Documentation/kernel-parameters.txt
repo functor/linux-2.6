@@ -29,6 +29,7 @@ restrictions referred to are that the relevant option is valid if:
 	CD	Appropriate CD support is enabled.
 	DEVFS	devfs support is enabled. 
 	DRM	Direct Rendering Management support is enabled. 
+	EDD	BIOS Enhanced Disk Drive Services (EDD) is enabled
 	EFI	EFI Partitioning (GPT) is enabled
 	EIDE	EIDE/ATAPI support is enabled.
 	FB	The frame buffer device is enabled.
@@ -408,6 +409,10 @@ running once the system is up.
 
 	edb=		[HW,PS2]
 
+	edd		[EDD]
+			Format: {"of[f]" | "sk[ipmbr]"}
+			See comment in arch/i386/boot/edd.S
+
 	eicon=		[HW,ISDN] 
 			Format: <id>,<membase>,<irq>
 
@@ -568,6 +573,17 @@ running once the system is up.
 
 	ips=		[HW,SCSI] Adaptec / IBM ServeRAID controller
 			See header of drivers/scsi/ips.c.
+
+	irqfixup	[HW]
+			When an interrupt is not handled search all handlers
+			for it. Intended to get systems with badly broken
+			firmware running.
+
+	irqpoll		[HW]
+			When an interrupt is not handled search all handlers
+			for it. Also check all handlers each timer
+			interrupt. Intended to get systems with badly broken
+			firmware running.
 
 	isapnp=		[ISAPNP]
 			Format: <RDP>, <reset>, <pci_scan>, <verbosity>

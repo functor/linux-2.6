@@ -139,6 +139,17 @@ extern int tainted;
 extern const char *print_tainted(void);
 extern void add_taint(unsigned);
 
+#define crashdump_mode()       unlikely(netdump_mode || diskdump_mode)
+
+struct pt_regs;
+extern void try_crashdump(struct pt_regs *);
+extern void (*netdump_func) (struct pt_regs *regs);
+extern int netdump_mode;
+extern void (*diskdump_func) (struct pt_regs *regs);
+extern int diskdump_mode;
+
+#define crashdump_func()	unlikely(netdump_func || diskdump_func)
+
 /* Values used for system_state */
 extern enum system_states {
 	SYSTEM_BOOTING,
@@ -146,6 +157,7 @@ extern enum system_states {
 	SYSTEM_HALT,
 	SYSTEM_POWER_OFF,
 	SYSTEM_RESTART,
+	SYSTEM_DUMPING,
 } system_state;
 
 #define TAINT_PROPRIETARY_MODULE	(1<<0)
@@ -167,6 +179,12 @@ extern void dump_stack(void);
 
 #define pr_info(fmt,arg...) \
 	printk(KERN_INFO fmt,##arg)
+
+#define pr_err(fmt,arg...) \
+	printk(KERN_ERR fmt,##arg)
+
+#define pr_warn(fmt,arg...) \
+	printk(KERN_WARNING fmt,##arg)
 
 /*
  *      Display an IP address in readable format.

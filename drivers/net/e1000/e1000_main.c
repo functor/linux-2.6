@@ -48,7 +48,8 @@ char e1000_driver_string[] = "Intel(R) PRO/1000 Network Driver";
 #else
 #define DRIVERNAPI "-NAPI"
 #endif
-char e1000_driver_version[] = "5.5.4-k2"DRIVERNAPI;
+#define DRV_VERSION "5.5.4-k2"DRIVERNAPI;
+char e1000_driver_version[] = DRV_VERSION;
 char e1000_copyright[] = "Copyright (c) 1999-2004 Intel Corporation.";
 
 /* e1000_pci_tbl - PCI Device ID Table
@@ -196,6 +197,7 @@ static struct pci_driver e1000_driver = {
 MODULE_AUTHOR("Intel Corporation, <linux.nics@intel.com>");
 MODULE_DESCRIPTION("Intel(R) PRO/1000 Network Driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DRV_VERSION);
 
 static int debug = NETIF_MSG_DRV | NETIF_MSG_PROBE;
 module_param(debug, int, 0);
@@ -777,6 +779,31 @@ e1000_close(struct net_device *netdev)
 }
 
 /**
+ * e1000_check_64k_bound - check that memory doesn't cross 64kB boundary
+ * @adapter: address of board private structure
+ * @begin: address of beginning of memory
+ * @end: address of end of memory
+ **/
+static inline boolean_t
+e1000_check_64k_bound(struct e1000_adapter *adapter,
+		      void *start, unsigned long len)
+{
+	unsigned long begin = (unsigned long) start;
+	unsigned long end = begin + len;
+
+	/* first rev 82545 and 82546 need to not allow any memory
+	 * write location to cross a 64k boundary due to errata 23 */
+	if (adapter->hw.mac_type == e1000_82545 ||
+	    adapter->hw.mac_type == e1000_82546
+	    ) {
+		/* check buffer doesn't cross 64kB */
+		return ((begin ^ (end - 1)) >> 16) != 0 ? FALSE : TRUE;
+	}
+
+	return TRUE;
+}
+
+/**
  * e1000_setup_tx_resources - allocate Tx resources (Descriptors)
  * @adapter: board private structure
  *
@@ -794,7 +821,7 @@ e1000_setup_tx_resources(struct e1000_adapter *adapter)
 	txdr->buffer_info = vmalloc(size);
 	if(!txdr->buffer_info) {
 		DPRINTK(PROBE, ERR, 
-		"Unble to Allocate Memory for the Transmit descriptor ring\n");
+		"Unable to Allocate Memory for the Transmit descriptor ring\n");
 		return -ENOMEM;
 	}
 	memset(txdr->buffer_info, 0, size);
@@ -806,10 +833,41 @@ e1000_setup_tx_resources(struct e1000_adapter *adapter)
 
 	txdr->desc = pci_alloc_consistent(pdev, txdr->size, &txdr->dma);
 	if(!txdr->desc) {
+setup_tx_desc_die:
 		DPRINTK(PROBE, ERR, 
-		"Unble to Allocate Memory for the Transmit descriptor ring\n");
+		"Unable to Allocate Memory for the Transmit descriptor ring\n");
 		vfree(txdr->buffer_info);
 		return -ENOMEM;
+	}
+
+	/* fix for errata 23, cant cross 64kB boundary */
+	if (!e1000_check_64k_bound(adapter, txdr->desc, txdr->size)) {
+		void *olddesc = txdr->desc;
+		dma_addr_t olddma = txdr->dma;
+		DPRINTK(TX_ERR,ERR,"txdr align check failed: %u bytes at %p\n",
+		        txdr->size, txdr->desc);
+		/* try again, without freeing the previous */
+		txdr->desc = pci_alloc_consistent(pdev, txdr->size, &txdr->dma);
+		/* failed allocation, critial failure */
+ 		if(!txdr->desc) {
+			pci_free_consistent(pdev, txdr->size, olddesc, olddma);
+			goto setup_tx_desc_die;
+		}
+
+		if (!e1000_check_64k_bound(adapter, txdr->desc, txdr->size)) {
+			/* give up */
+			pci_free_consistent(pdev, txdr->size,
+			     txdr->desc, txdr->dma);
+			pci_free_consistent(pdev, txdr->size, olddesc, olddma);
+			DPRINTK(PROBE, ERR,
+			 "Unable to Allocate aligned Memory for the Transmit"
+		         " descriptor ring\n");
+			vfree(txdr->buffer_info);
+			return -ENOMEM;
+		} else {
+			/* free old, move on with the new one since its okay */
+			pci_free_consistent(pdev, txdr->size, olddesc, olddma);
+		}
 	}
 	memset(txdr->desc, 0, txdr->size);
 
@@ -915,7 +973,7 @@ e1000_setup_rx_resources(struct e1000_adapter *adapter)
 	rxdr->buffer_info = vmalloc(size);
 	if(!rxdr->buffer_info) {
 		DPRINTK(PROBE, ERR, 
-		"Unble to Allocate Memory for the Recieve descriptor ring\n");
+		"Unable to Allocate Memory for the Recieve descriptor ring\n");
 		return -ENOMEM;
 	}
 	memset(rxdr->buffer_info, 0, size);
@@ -928,10 +986,41 @@ e1000_setup_rx_resources(struct e1000_adapter *adapter)
 	rxdr->desc = pci_alloc_consistent(pdev, rxdr->size, &rxdr->dma);
 
 	if(!rxdr->desc) {
+setup_rx_desc_die:
 		DPRINTK(PROBE, ERR, 
-		"Unble to Allocate Memory for the Recieve descriptor ring\n");
+		"Unable to Allocate Memory for the Recieve descriptor ring\n");
 		vfree(rxdr->buffer_info);
 		return -ENOMEM;
+	}
+	/* fix for errata 23, cant cross 64kB boundary */
+	if (!e1000_check_64k_bound(adapter, rxdr->desc, rxdr->size)) {
+		void *olddesc = rxdr->desc;
+		dma_addr_t olddma = rxdr->dma;
+		DPRINTK(RX_ERR,ERR,
+			"rxdr align check failed: %u bytes at %p\n",
+			rxdr->size, rxdr->desc);
+		/* try again, without freeing the previous */
+		rxdr->desc = pci_alloc_consistent(pdev, rxdr->size, &rxdr->dma);
+		/* failed allocation, critial failure */
+		if(!rxdr->desc) {
+			pci_free_consistent(pdev, rxdr->size, olddesc, olddma);
+			goto setup_rx_desc_die;
+		}
+
+		if (!e1000_check_64k_bound(adapter, rxdr->desc, rxdr->size)) {
+			/* give up */
+			pci_free_consistent(pdev, rxdr->size,
+			     rxdr->desc, rxdr->dma);
+			pci_free_consistent(pdev, rxdr->size, olddesc, olddma);
+			DPRINTK(PROBE, ERR, 
+				"Unable to Allocate aligned Memory for the"
+				" Receive descriptor ring\n");
+			vfree(rxdr->buffer_info);
+			return -ENOMEM;
+		} else {
+			/* free old, move on with the new one since its okay */
+			pci_free_consistent(pdev, rxdr->size, olddesc, olddma);
+		}
 	}
 	memset(rxdr->desc, 0, rxdr->size);
 
@@ -1061,6 +1150,25 @@ e1000_free_tx_resources(struct e1000_adapter *adapter)
 	adapter->tx_ring.desc = NULL;
 }
 
+static inline void
+e1000_unmap_and_free_tx_resource(struct e1000_adapter *adapter,
+			struct e1000_buffer *buffer_info)
+{
+	struct pci_dev *pdev = adapter->pdev;
+	
+	if(buffer_info->dma) {
+		pci_unmap_page(pdev,
+			       buffer_info->dma,
+			       buffer_info->length,
+			       PCI_DMA_TODEVICE);
+		buffer_info->dma = 0;
+	}
+	if(buffer_info->skb) {
+		dev_kfree_skb_any(buffer_info->skb);
+		buffer_info->skb = NULL;
+	}
+}
+
 /**
  * e1000_clean_tx_ring - Free Tx Buffers
  * @adapter: board private structure
@@ -1071,25 +1179,19 @@ e1000_clean_tx_ring(struct e1000_adapter *adapter)
 {
 	struct e1000_desc_ring *tx_ring = &adapter->tx_ring;
 	struct e1000_buffer *buffer_info;
-	struct pci_dev *pdev = adapter->pdev;
 	unsigned long size;
 	unsigned int i;
 
 	/* Free all the Tx ring sk_buffs */
 
+	if (likely(adapter->previous_buffer_info.skb != NULL)) {
+		e1000_unmap_and_free_tx_resource(adapter, 
+				&adapter->previous_buffer_info);
+	}
+
 	for(i = 0; i < tx_ring->count; i++) {
 		buffer_info = &tx_ring->buffer_info[i];
-		if(buffer_info->skb) {
-
-			pci_unmap_page(pdev,
-				       buffer_info->dma,
-				       buffer_info->length,
-				       PCI_DMA_TODEVICE);
-
-			dev_kfree_skb(buffer_info->skb);
-
-			buffer_info->skb = NULL;
-		}
+		e1000_unmap_and_free_tx_resource(adapter, buffer_info);
 	}
 
 	size = sizeof(struct e1000_buffer) * tx_ring->count;
@@ -2190,7 +2292,6 @@ e1000_clean_tx_irq(struct e1000_adapter *adapter)
 {
 	struct e1000_desc_ring *tx_ring = &adapter->tx_ring;
 	struct net_device *netdev = adapter->netdev;
-	struct pci_dev *pdev = adapter->pdev;
 	struct e1000_tx_desc *tx_desc, *eop_desc;
 	struct e1000_buffer *buffer_info;
 	unsigned int i, eop;
@@ -2201,23 +2302,34 @@ e1000_clean_tx_irq(struct e1000_adapter *adapter)
 	eop_desc = E1000_TX_DESC(*tx_ring, eop);
 
 	while(eop_desc->upper.data & cpu_to_le32(E1000_TXD_STAT_DD)) {
+		/* pre-mature writeback of Tx descriptors     */
+		/* clear (free buffers and unmap pci_mapping) */
+		/* previous_buffer_info                       */
+		if (likely(adapter->previous_buffer_info.skb != NULL)) {
+			e1000_unmap_and_free_tx_resource(adapter, 
+					&adapter->previous_buffer_info);
+		}
+
 		for(cleaned = FALSE; !cleaned; ) {
 			tx_desc = E1000_TX_DESC(*tx_ring, i);
 			buffer_info = &tx_ring->buffer_info[i];
 
-			if(likely(buffer_info->dma)) {
-				pci_unmap_page(pdev,
-					       buffer_info->dma,
-					       buffer_info->length,
-					       PCI_DMA_TODEVICE);
-				buffer_info->dma = 0;
-			}
+			cleaned = (i == eop);
 
-			if(buffer_info->skb) {
-				dev_kfree_skb_any(buffer_info->skb);
-				buffer_info->skb = NULL;
+			/* pre-mature writeback of Tx descriptors */
+			/* save the cleaning of the this for the  */
+			/* next iteration                         */
+			if (cleaned) {
+				memcpy(&adapter->previous_buffer_info,
+					buffer_info,
+					sizeof(struct e1000_buffer));
+				memset(buffer_info,
+					0,
+					sizeof(struct e1000_buffer));
+			} else {
+				e1000_unmap_and_free_tx_resource(adapter, 
+							buffer_info);
 			}
-
 			tx_desc->buffer_addr = 0;
 			tx_desc->lower.data = 0;
 			tx_desc->upper.data = 0;
@@ -2370,17 +2482,41 @@ e1000_alloc_rx_buffers(struct e1000_adapter *adapter)
 	struct e1000_rx_desc *rx_desc;
 	struct e1000_buffer *buffer_info;
 	struct sk_buff *skb;
-	unsigned int i;
+	unsigned int i, bufsz;
 
 	i = rx_ring->next_to_use;
 	buffer_info = &rx_ring->buffer_info[i];
 
 	while(!buffer_info->skb) {
+		bufsz = adapter->rx_buffer_len + NET_IP_ALIGN;
 
-		skb = dev_alloc_skb(adapter->rx_buffer_len + NET_IP_ALIGN);
+		skb = dev_alloc_skb(bufsz);
 		if(unlikely(!skb)) {
 			/* Better luck next round */
 			break;
+		}
+
+		/* fix for errata 23, cant cross 64kB boundary */
+		if (!e1000_check_64k_bound(adapter, skb->data, bufsz)) {
+			struct sk_buff *oldskb = skb;
+			DPRINTK(RX_ERR,ERR,
+				"skb align check failed: %u bytes at %p\n",
+				bufsz, skb->data);
+			/* try again, without freeing the previous */
+			skb = dev_alloc_skb(bufsz);
+			if (!skb) {
+				dev_kfree_skb(oldskb);
+				break;
+			}
+			if (!e1000_check_64k_bound(adapter, skb->data, bufsz)) {
+				/* give up */
+				dev_kfree_skb(skb);
+				dev_kfree_skb(oldskb);
+				break; /* while !buffer_info->skb */
+			} else {
+				/* move on with the new one */
+				dev_kfree_skb(oldskb);
+			}
 		}
 
 		/* Make buffer alignment 2 beyond a 16 byte boundary
@@ -2397,6 +2533,23 @@ e1000_alloc_rx_buffers(struct e1000_adapter *adapter)
 						  skb->data,
 						  adapter->rx_buffer_len,
 						  PCI_DMA_FROMDEVICE);
+
+		/* fix for errata 23, cant cross 64kB boundary */
+		if (!e1000_check_64k_bound(adapter, (void *)buffer_info->dma, adapter->rx_buffer_len)) {
+			DPRINTK(RX_ERR,ERR,
+				"dma align check failed: %u bytes at %ld\n",
+				adapter->rx_buffer_len, buffer_info->dma);
+
+			dev_kfree_skb(skb);
+			buffer_info->skb = NULL;
+
+			pci_unmap_single(pdev,
+					 buffer_info->dma,
+					 adapter->rx_buffer_len,
+					 PCI_DMA_FROMDEVICE);
+
+			break; /* while !buffer_info->skb */
+		}
 
 		rx_desc = E1000_RX_DESC(*rx_ring, i);
 		rx_desc->buffer_addr = cpu_to_le64(buffer_info->dma);

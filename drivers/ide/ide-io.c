@@ -190,6 +190,62 @@ int ide_end_request (ide_drive_t *drive, int uptodate, int nr_sectors)
 EXPORT_SYMBOL(ide_end_request);
 
 /**
+ *	ide_end_dequeued_request	-	complete an IDE I/O
+ *	@drive: IDE device for the I/O
+ *	@uptodate:
+ *	@nr_sectors: number of sectors completed
+ *
+ *	Complete an I/O that is no longer on the request queue. This 
+ *	typically occurs when we pull the request and issue a REQUEST_SENSE.
+ *	We must still finish the old request but we must not tamper with the
+ *	queue in the meantime.
+ *
+ *	NOTE: This path does not handle barrier, but barrier is not supported
+ *	on ide-cd anyway.
+ */
+
+int ide_end_dequeued_request(ide_drive_t *drive, struct request *rq,
+			     int uptodate, int nr_sectors)
+{
+	unsigned long flags;
+	int ret = 1;
+
+	spin_lock_irqsave(&ide_lock, flags);
+
+	BUG_ON(!(rq->flags & REQ_STARTED));
+
+	/*
+	 * if failfast is set on a request, override number of sectors and
+	 * complete the whole request right now
+	 */
+	if (blk_noretry_request(rq) && end_io_error(uptodate))
+		nr_sectors = rq->hard_nr_sectors;
+
+	if (!blk_fs_request(rq) && end_io_error(uptodate) && !rq->errors)
+		rq->errors = -EIO;
+
+	/*
+	 * decide whether to reenable DMA -- 3 is a random magic for now,
+	 * if we DMA timeout more than 3 times, just stay in PIO
+	 */
+	if (drive->state == DMA_PIO_RETRY && drive->retry_pio <= 3) {
+		drive->state = 0;
+		HWGROUP(drive)->hwif->ide_dma_on(drive);
+	}
+
+	if (!end_that_request_first(rq, uptodate, nr_sectors)) {
+		add_disk_randomness(rq->rq_disk);
+		if (blk_rq_tagged(rq))
+			blk_queue_end_tag(drive->queue, rq);
+		end_that_request_last(rq);
+		ret = 0;
+	}
+	spin_unlock_irqrestore(&ide_lock, flags);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ide_end_dequeued_request);
+
+/**
  *	ide_complete_pm_request - end the current Power Management request
  *	@drive: target drive
  *	@rq: request
@@ -555,30 +611,38 @@ media_out:
  *	This differs fundamentally from ide_error because in 
  *	this case the command is doing just fine when we
  *	blow it away.
+ *
+ *	FIXME: need to fix locking corner cases
  */
  
 ide_startstop_t ide_abort(ide_drive_t *drive, const char *msg)
 {
 	ide_hwif_t *hwif;
 	struct request *rq;
+	unsigned long flags;
 
-	if (drive == NULL || (rq = HWGROUP(drive)->rq) == NULL)
+	spin_lock_irqsave(&ide_lock, flags);
+	if (drive == NULL || (rq = HWGROUP(drive)->rq) == NULL) {
+		spin_unlock_irqrestore(&ide_lock, flags);
 		return ide_stopped;
-
+	}
 	hwif = HWIF(drive);
 	/* retry only "normal" I/O: */
 	if (rq->flags & (REQ_DRIVE_CMD | REQ_DRIVE_TASK)) {
 		rq->errors = 1;
+		spin_unlock_irqrestore(&ide_lock, flags);
 		ide_end_drive_cmd(drive, BUSY_STAT, 0);
 		return ide_stopped;
 	}
 	if (rq->flags & REQ_DRIVE_TASKFILE) {
 		rq->errors = 1;
+		spin_unlock_irqrestore(&ide_lock, flags);
 		ide_end_drive_cmd(drive, BUSY_STAT, 0);
 		return ide_stopped;
 	}
 
 	rq->errors |= ERROR_RESET;
+	spin_unlock_irqrestore(&ide_lock, flags);
 	DRIVER(drive)->end_request(drive, 0, 0);
 	return ide_stopped;
 }
@@ -1212,7 +1276,7 @@ static ide_startstop_t ide_dma_timeout_retry(ide_drive_t *drive, int error)
 	rq->sector = rq->bio->bi_sector;
 	rq->current_nr_sectors = bio_iovec(rq->bio)->bv_len >> 9;
 	rq->hard_cur_sectors = rq->current_nr_sectors;
-	rq->buffer = NULL;
+	rq->buffer = bio_data(rq->bio);
 out:
 	return ret;
 }
@@ -1419,6 +1483,13 @@ irqreturn_t ide_intr (int irq, void *dev_id, struct pt_regs *regs)
 		return IRQ_NONE;
 	}
 
+	if (hwif->polling) {
+		/* We took an interrupt during a polled drive retune. 
+		   This should go away eventually when that code uses
+		   the polling logic like do_reset1 */
+		spin_unlock_irqrestore(&ide_lock, flags);
+		return IRQ_HANDLED;
+	}
 	if ((handler = hwgroup->handler) == NULL ||
 	    hwgroup->poll_timeout != 0) {
 		/*

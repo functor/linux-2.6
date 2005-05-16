@@ -446,6 +446,8 @@ void tcp_set_skb_tso_segs(struct sk_buff *skb, unsigned int mss_std)
 	}
 }
 
+EXPORT_SYMBOL_GPL(tcp_set_skb_tso_segs);
+
 /* Function to create two new TCP segments.  Shrinks the given segment
  * to the specified size and appends a new segment with the rest of the
  * packet to the list.  This won't be called frequently, I hope. 
@@ -717,6 +719,7 @@ unsigned int tcp_current_mss(struct sock *sk, int large)
 			    (tp->eff_sacks * TCPOLEN_SACK_PERBLOCK));
 	return mss_now;
 }
+EXPORT_SYMBOL_GPL(tcp_current_mss);
 
 /* This routine writes packets to the network.  It advances the
  * send_head.  This happens as incoming acks open up the remote
@@ -776,6 +779,8 @@ int tcp_write_xmit(struct sock *sk, int nonagle)
 	}
 	return 0;
 }
+
+EXPORT_SYMBOL_GPL(tcp_write_xmit);
 
 /* This function returns the amount that we can raise the
  * usable window based on the following constraints
@@ -1070,6 +1075,7 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	   (skb->next != sk->sk_send_head) &&
 	   (skb->next != (struct sk_buff *)&sk->sk_write_queue) &&
 	   (skb_shinfo(skb)->nr_frags == 0 && skb_shinfo(skb->next)->nr_frags == 0) &&
+	   (tcp_skb_pcount(skb) == 1 && tcp_skb_pcount(skb->next) == 1) &&
 	   (sysctl_tcp_retrans_collapse != 0))
 		tcp_retrans_try_collapse(sk, skb, cur_mss);
 

@@ -53,6 +53,7 @@ MODULE_SUPPORTED_DEVICE("{{Intel,82801AA-ICH},"
 		"{Intel,82801DB-ICH4},"
 		"{Intel,ICH5},"
 		"{Intel,ICH6},"
+		"{Intel,ICH7},"
 		"{Intel,6300ESB},"
 		"{Intel,MX440},"
 		"{SiS,SI7012},"
@@ -119,6 +120,9 @@ MODULE_PARM_DESC(xbox, "Set to 1 for Xbox, if you have problems with the AC'97 c
 #endif
 #ifndef PCI_DEVICE_ID_INTEL_ICH6_3
 #define PCI_DEVICE_ID_INTEL_ICH6_3	0x266e
+#endif
+#ifndef PCI_DEVICE_ID_INTEL_ICH7_20
+#define PCI_DEVICE_ID_INTEL_ICH7_20	0x27de
 #endif
 #ifndef PCI_DEVICE_ID_SI_7012
 #define PCI_DEVICE_ID_SI_7012		0x7012
@@ -380,6 +384,7 @@ typedef struct {
 	unsigned int ali_slot;			/* ALI DMA slot */
 	struct ac97_pcm *pcm;
 	int pcm_open_flag;
+	unsigned int page_attr_changed: 1;
 } ichdev_t;
 
 typedef struct _snd_intel8x0 intel8x0_t;
@@ -438,6 +443,7 @@ static struct pci_device_id snd_intel8x0_ids[] = {
 	{ 0x8086, 0x24d5, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL_ICH4 }, /* ICH5 */
 	{ 0x8086, 0x25a6, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL_ICH4 }, /* ESB */
 	{ 0x8086, 0x266e, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL_ICH4 }, /* ICH6 */
+	{ 0x8086, 0x27de, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL_ICH4 }, /* ICH7 */
 	{ 0x8086, 0x7195, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL },	/* 440MX */
 	{ 0x1039, 0x7012, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_SIS },	/* SI7012 */
 	{ 0x10de, 0x01b1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_NFORCE },	/* NFORCE */
@@ -946,13 +952,19 @@ static int snd_intel8x0_hw_params(snd_pcm_substream_t * substream,
 	int dbl = params_rate(hw_params) > 48000;
 	int err;
 
-	if (chip->fix_nocache && runtime->dma_area && runtime->dma_bytes < size)
+	if (chip->fix_nocache && ichdev->page_attr_changed) {
 		fill_nocache(runtime->dma_area, runtime->dma_bytes, 0); /* clear */
+		ichdev->page_attr_changed = 0;
+	}
 	err = snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(hw_params));
 	if (err < 0)
 		return err;
-	if (chip->fix_nocache && err > 0)
-		fill_nocache(runtime->dma_area, runtime->dma_bytes, 1);
+	if (chip->fix_nocache) {
+		if (runtime->dma_area && ! ichdev->page_attr_changed) {
+			fill_nocache(runtime->dma_area, runtime->dma_bytes, 1);
+			ichdev->page_attr_changed = 1;
+		}
+	}
 	if (ichdev->pcm_open_flag) {
 		snd_ac97_pcm_close(ichdev->pcm);
 		ichdev->pcm_open_flag = 0;
@@ -978,8 +990,10 @@ static int snd_intel8x0_hw_free(snd_pcm_substream_t * substream)
 		snd_ac97_pcm_close(ichdev->pcm);
 		ichdev->pcm_open_flag = 0;
 	}
-	if (chip->fix_nocache && substream->runtime->dma_area)
+	if (chip->fix_nocache && ichdev->page_attr_changed) {
 		fill_nocache(substream->runtime->dma_area, substream->runtime->dma_bytes, 0);
+		ichdev->page_attr_changed = 0;
+	}
 	return snd_pcm_lib_free_pages(substream);
 }
 
@@ -1743,6 +1757,12 @@ static struct ac97_quirk ac97_quirks[] __devinitdata = {
 	},
 	{
 		.vendor = 0x1028,
+		.device = 0x010d,
+		.name = "Dell",	/* which model?  AD1885 */
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x1028,
 		.device = 0x0126,
 		.name = "Dell Optiplex GX260",	/* AD1981A */
 		.type = AC97_TUNE_HP_ONLY
@@ -1751,6 +1771,12 @@ static struct ac97_quirk ac97_quirks[] __devinitdata = {
 		.vendor = 0x1028,
 		.device = 0x012d,
 		.name = "Dell Precision 450",	/* AD1981B*/
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x1028,
+		.device = 0x0147,
+		.name = "Dell",	/* which model?  AD1981B*/
 		.type = AC97_TUNE_HP_ONLY
 	},
 	{	/* FIXME: which codec? */
@@ -1880,6 +1906,24 @@ static struct ac97_quirk ac97_quirks[] __devinitdata = {
 		.type = AC97_TUNE_HP_ONLY
 	},
 #endif
+	{
+		.vendor = 0x1028,
+		.device = 0x012d,
+		.name = "Dell Precision 450",	/* AD1981B*/
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x103c,
+		.device = 0x3008,
+		.name = "HP xw4200",	/* AD1981B*/
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x103c,
+		.device = 0x12f1,
+		.name = "HP xw8200",	/* AD1981B*/
+		.type = AC97_TUNE_HP_ONLY
+	},
 	{ } /* terminator */
 };
 
@@ -2279,6 +2323,17 @@ static int intel8x0_suspend(snd_card_t *card, unsigned int state)
 
 	for (i = 0; i < chip->pcm_devs; i++)
 		snd_pcm_suspend_all(chip->pcm[i]);
+	/* clear nocache */
+	if (chip->fix_nocache) {
+		for (i = 0; i < chip->bdbars_count; i++) {
+			ichdev_t *ichdev = &chip->ichd[i];
+			if (ichdev->substream && ichdev->page_attr_changed) {
+				snd_pcm_runtime_t *runtime = ichdev->substream->runtime;
+				if (runtime->dma_area)
+					fill_nocache(runtime->dma_area, runtime->dma_bytes, 0);
+			}
+		}
+	}
 	for (i = 0; i < 3; i++)
 		if (chip->ac97[i])
 			snd_ac97_suspend(chip->ac97[i]);
@@ -2308,7 +2363,7 @@ static int intel8x0_resume(snd_card_t *card, unsigned int state)
 	if (chip->fix_nocache) {
 		for (i = 0; i < chip->bdbars_count; i++) {
 			ichdev_t *ichdev = &chip->ichd[i];
-			if (ichdev->substream) {
+			if (ichdev->substream && ichdev->page_attr_changed) {
 				snd_pcm_runtime_t *runtime = ichdev->substream->runtime;
 				if (runtime->dma_area)
 					fill_nocache(runtime->dma_area, runtime->dma_bytes, 1);
@@ -2658,6 +2713,7 @@ static struct shortname_table {
 	{ PCI_DEVICE_ID_INTEL_ICH5, "Intel ICH5" },
 	{ PCI_DEVICE_ID_INTEL_ESB_5, "Intel 6300ESB" },
 	{ PCI_DEVICE_ID_INTEL_ICH6_3, "Intel ICH6" },
+	{ PCI_DEVICE_ID_INTEL_ICH7_20, "Intel ICH7" },
 	{ PCI_DEVICE_ID_SI_7012, "SiS SI7012" },
 	{ PCI_DEVICE_ID_NVIDIA_MCP_AUDIO, "NVidia nForce" },
 	{ PCI_DEVICE_ID_NVIDIA_MCP2_AUDIO, "NVidia nForce2" },

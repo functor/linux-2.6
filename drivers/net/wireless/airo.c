@@ -2378,14 +2378,22 @@ void stop_airo_card( struct net_device *dev, int freeres )
 			dev_kfree_skb(skb);
 	}
 
-	if (ai->flash)
+	if (ai->flash) {
 		kfree(ai->flash);
-	if (ai->rssi)
+		ai->flash = NULL;
+	}
+	if (ai->rssi) {
 		kfree(ai->rssi);
-	if (ai->APList)
+		ai->rssi = NULL;
+	}
+	if (ai->APList) {
 		kfree(ai->APList);
-	if (ai->SSID)
+		ai->APList = NULL;
+	}
+	if (ai->SSID) {
 		kfree(ai->SSID);
+		ai->SSID = NULL;
+	}
 	if (freeres) {
 		/* PCMCIA frees this stuff, so only for PCI and ISA */
 	        release_region( dev->base_addr, 64 );
@@ -4552,6 +4560,7 @@ static int proc_status_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 2048, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 
@@ -4632,6 +4641,7 @@ static int proc_stats_rid_open( struct inode *inode,
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 4096, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 
@@ -4898,11 +4908,14 @@ static int proc_config_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 2048, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	if ((data->wbuffer = kmalloc( 2048, GFP_KERNEL )) == NULL) {
 		kfree (data->rbuffer);
+		data->rbuffer = NULL;
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	memset( data->wbuffer, 0, 2048 );
@@ -5173,6 +5186,7 @@ static int proc_wepkey_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 180, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	memset(data->rbuffer, 0, 180);
@@ -5180,7 +5194,9 @@ static int proc_wepkey_open( struct inode *inode, struct file *file ) {
 	data->maxwritelen = 80;
 	if ((data->wbuffer = kmalloc( 80, GFP_KERNEL )) == NULL) {
 		kfree (data->rbuffer);
+		data->rbuffer = NULL;
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	memset( data->wbuffer, 0, 80 );
@@ -5220,13 +5236,16 @@ static int proc_SSID_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 104, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	data->writelen = 0;
 	data->maxwritelen = 33*3;
 	if ((data->wbuffer = kmalloc( 33*3, GFP_KERNEL )) == NULL) {
 		kfree (data->rbuffer);
+		data->rbuffer = NULL;
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	memset( data->wbuffer, 0, 33*3 );
@@ -5264,13 +5283,16 @@ static int proc_APList_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 104, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	data->writelen = 0;
 	data->maxwritelen = 4*6*3;
 	if ((data->wbuffer = kmalloc( data->maxwritelen, GFP_KERNEL )) == NULL) {
 		kfree (data->rbuffer);
+		data->rbuffer=NULL;
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	memset( data->wbuffer, 0, data->maxwritelen );
@@ -5314,6 +5336,7 @@ static int proc_BSSList_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 1024, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
+		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	data->writelen = 0;
@@ -5371,9 +5394,16 @@ static int proc_close( struct inode *inode, struct file *file )
 {
 	struct proc_data *data = (struct proc_data *)file->private_data;
 	if ( data->on_close != NULL ) data->on_close( inode, file );
-	if ( data->rbuffer ) kfree( data->rbuffer );
-	if ( data->wbuffer ) kfree( data->wbuffer );
+	if ( data->rbuffer ) {
+		kfree( data->rbuffer );
+		data->rbuffer = NULL;
+	}
+	if ( data->wbuffer ) {
+		kfree( data->wbuffer );
+		data->wbuffer = NULL;
+	}
 	kfree( data );
+	file->private_data = NULL;
 	return 0;
 }
 

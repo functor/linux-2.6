@@ -19,9 +19,11 @@
 #include <linux/mc146818rtc.h>
 #include <linux/cache.h>
 #include <linux/interrupt.h>
+#include <linux/dump.h>
 
 #include <asm/mtrr.h>
 #include <asm/tlbflush.h>
+#include <asm/desc.h>
 #include <mach_apic.h>
 
 /*
@@ -137,10 +139,20 @@ void __send_IPI_shortcut(unsigned int shortcut, int vector)
 	 */
 	apic_wait_icr_idle();
 
+	if (vector == CRASH_DUMP_VECTOR)
+		cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
+
 	/*
 	 * No need to touch the target chip field
 	 */
 	cfg = __prepare_ICR(shortcut, vector);
+
+	if (vector == CRASH_DUMP_VECTOR) {
+		/*
+		 * Setup DUMP IPI to be delivered as an NMI
+		 */
+		cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
+	}
 
 	/*
 	 * Send the IPI. The write to APIC_ICR fires this off.
@@ -219,7 +231,13 @@ inline void send_IPI_mask_sequence(cpumask_t mask, int vector)
 			 * program the ICR 
 			 */
 			cfg = __prepare_ICR(0, vector);
-			
+		
+			if (vector == CRASH_DUMP_VECTOR) {
+				/*
+				 * Setup DUMP IPI to be delivered as an NMI
+				 */
+				cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
+			}	
 			/*
 			 * Send the IPI. The write to APIC_ICR fires this off.
 			 */
@@ -313,6 +331,8 @@ fastcall void smp_invalidate_interrupt(struct pt_regs *regs)
 	unsigned long cpu;
 
 	cpu = get_cpu();
+	if (current->active_mm)
+		load_user_cs_desc(cpu, current->active_mm);
 
 	if (!cpu_isset(cpu, flush_cpumask))
 		goto out;
@@ -467,6 +487,11 @@ void flush_tlb_all(void)
 	on_each_cpu(do_flush_tlb_all, NULL, 1, 1);
 }
 
+void dump_send_ipi(void)
+{
+	send_IPI_allbutself(CRASH_DUMP_VECTOR);
+}
+
 /*
  * this function sends a 'reschedule' IPI to another CPU.
  * it goes straight through and wastes no time serializing
@@ -475,6 +500,11 @@ void flush_tlb_all(void)
 void smp_send_reschedule(int cpu)
 {
 	send_IPI_mask(cpumask_of_cpu(cpu), RESCHEDULE_VECTOR);
+}
+
+void crash_dump_send_ipi(void)
+{
+	send_IPI_allbutself(CRASH_DUMP_VECTOR);
 }
 
 /*
@@ -505,7 +535,10 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
  * <func> The function to run. This must be fast and non-blocking.
  * <info> An arbitrary pointer to pass to the function.
  * <nonatomic> currently unused.
- * <wait> If true, wait (atomically) until function has completed on other CPUs.
+ * <wait> If 1, wait (atomically) until function has completed on other CPUs.
+ *        If 0, wait for the IPI to be received by other CPUs, but do not wait 
+ *        for the completion of the function on each CPU.  
+ *        If -1, do not wait for other CPUs to receive IPI.
  * [RETURNS] 0 on success, else a negative status code. Does not return until
  * remote CPUs are nearly ready to execute <<func>> or are or have executed.
  *
@@ -513,42 +546,56 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
  * hardware interrupt handler or from a bottom half handler.
  */
 {
-	struct call_data_struct data;
+	static struct call_data_struct dumpdata;
+	struct call_data_struct normaldata;
+	struct call_data_struct *data;
 	int cpus = num_online_cpus()-1;
 
 	if (!cpus)
 		return 0;
 
 	/* Can deadlock when called with interrupts disabled */
-	WARN_ON(irqs_disabled());
-
-	data.func = func;
-	data.info = info;
-	atomic_set(&data.started, 0);
-	data.wait = wait;
-	if (wait)
-		atomic_set(&data.finished, 0);
+	/* Only if we are waiting for other CPU to ack */
+	WARN_ON(irqs_disabled() && wait >= 0);
 
 	spin_lock(&call_lock);
-	call_data = &data;
+	if (wait == -1) {
+		/* if another cpu beat us, they win! */
+		if (dumpdata.func) {
+			spin_unlock(&call_lock);
+			return 0;
+		}
+		data = &dumpdata;
+	} else
+		data = &normaldata;
+
+	data->func = func;
+	data->info = info;
+	atomic_set(&data->started, 0);
+	data->wait = wait > 0 ? wait : 0;
+	if (wait > 0)
+		atomic_set(&data->finished, 0);
+
+	call_data = data;
 	mb();
 	
 	/* Send a message to all other CPUs and wait for them to respond */
 	send_IPI_allbutself(CALL_FUNCTION_VECTOR);
 
 	/* Wait for response */
-	while (atomic_read(&data.started) != cpus)
-		cpu_relax();
+	if (wait >= 0)
+		while (atomic_read(&data->started) != cpus)
+			cpu_relax();
 
-	if (wait)
-		while (atomic_read(&data.finished) != cpus)
+	if (wait > 0)
+		while (atomic_read(&data->finished) != cpus)
 			cpu_relax();
 	spin_unlock(&call_lock);
 
 	return 0;
 }
 
-static void stop_this_cpu (void * dummy)
+void stop_this_cpu (void * dummy)
 {
 	/*
 	 * Remove this CPU:
@@ -573,6 +620,8 @@ void smp_send_stop(void)
 	disable_local_APIC();
 	local_irq_enable();
 }
+
+EXPORT_SYMBOL(smp_send_stop);
 
 /*
  * Reschedule call back. Nothing to do,
@@ -609,4 +658,3 @@ fastcall void smp_call_function_interrupt(struct pt_regs *regs)
 		atomic_inc(&call_data->finished);
 	}
 }
-

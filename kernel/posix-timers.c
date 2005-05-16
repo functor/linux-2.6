@@ -46,6 +46,7 @@
 #include <linux/syscalls.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
+#include <linux/vs_cvirt.h>
 
 #ifndef div_long_long_rem
 #include <asm/div64.h>
@@ -469,7 +470,7 @@ static inline struct task_struct * good_sigevent(sigevent_t * event)
 	struct task_struct *rtn = current->group_leader;
 
 	if ((event->sigev_notify & SIGEV_THREAD_ID ) &&
-		(!(rtn = find_task_by_pid(event->sigev_notify_thread_id)) ||
+		(!(rtn = find_task_by_real_pid(event->sigev_notify_thread_id)) ||
 		 rtn->tgid != current->tgid ||
 		 (event->sigev_notify & ~SIGEV_THREAD_ID) != SIGEV_SIGNAL))
 		return NULL;

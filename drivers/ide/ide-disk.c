@@ -84,6 +84,10 @@ static int lba_capacity_is_ok (struct hd_driveid *id)
 {
 	unsigned long lba_sects, chs_sects, head, tail;
 
+	/* No non-LBA info .. so valid! */
+	if (id->cyls == 0)
+		return 1;
+		
 	/*
 	 * The ATA spec tells large drives to return
 	 * C/H/S = 16383/16/63 independent of their size.
@@ -211,7 +215,7 @@ ide_startstop_t __ide_do_rw_disk (ide_drive_t *drive, struct request *rq, sector
 	}
 
 	if (dma) {
-		if (!hwif->dma_setup(drive)) {
+		if (!hwif->ide_dma_setup(drive)) {
 			if (rq_data_dir(rq)) {
 				command = lba48 ? WIN_WRITEDMA_EXT : WIN_WRITEDMA;
 				if (drive->vdma)
@@ -221,8 +225,8 @@ ide_startstop_t __ide_do_rw_disk (ide_drive_t *drive, struct request *rq, sector
 				if (drive->vdma)
 					command = lba48 ? WIN_READ_EXT: WIN_READ;
 			}
-			hwif->dma_exec_cmd(drive, command);
-			hwif->dma_start(drive);
+			hwif->ide_dma_exec_cmd(drive, command);
+			hwif->ide_dma_start(drive);
 			return ide_started;
 		}
 		/* fallback to PIO */
@@ -624,13 +628,14 @@ static inline int idedisk_supports_lba48(const struct hd_driveid *id)
 
 static inline void idedisk_check_hpa(ide_drive_t *drive)
 {
-	unsigned long long capacity, set_max;
+	unsigned long long capacity, set_max = 0;
 	int lba48 = idedisk_supports_lba48(drive->id);
 
+	
 	capacity = drive->capacity64;
 	if (lba48)
 		set_max = idedisk_read_native_max_address_ext(drive);
-	else
+	if (set_max == 0)	/* LBA28 or LBA48 failed */
 		set_max = idedisk_read_native_max_address(drive);
 
 	if (set_max <= capacity)
@@ -643,7 +648,8 @@ static inline void idedisk_check_hpa(ide_drive_t *drive)
 			 capacity, sectors_to_MB(capacity),
 			 set_max, sectors_to_MB(set_max));
 
-	if (lba48)
+	/* Some maxtor support LBA48 but do not accept LBA48  set max... */
+	if (lba48 || set_max < (1ULL << 28))
 		set_max = idedisk_set_max_address_ext(drive, set_max);
 	else
 		set_max = idedisk_set_max_address(drive, set_max);
@@ -821,24 +827,30 @@ static int get_smart_thresholds(ide_drive_t *drive, u8 *buf)
 static int proc_idedisk_read_cache
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) data;
+	ide_drive_t	*drive;
 	char		*out = page;
 	int		len;
 
-	if (drive->id_read)
+	down(&ide_cfg_sem);
+	drive = ide_drive_from_key(data);
+	if (drive && drive->id_read)
 		len = sprintf(out,"%i\n", drive->id->buf_size / 2);
 	else
 		len = sprintf(out,"(none)\n");
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
 static int proc_idedisk_read_smart_thresholds
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *)data;
+	ide_drive_t	*drive;
 	int		len = 0, i = 0;
 
-	if (!get_smart_thresholds(drive, page)) {
+	down(&ide_cfg_sem);
+
+	drive = ide_drive_from_key(data);
+	if (drive && !get_smart_thresholds(drive, page)) {
 		unsigned short *val = (unsigned short *) page;
 		char *out = ((char *)val) + (SECTOR_WORDS * 4);
 		page = out;
@@ -848,16 +860,20 @@ static int proc_idedisk_read_smart_thresholds
 		} while (i < (SECTOR_WORDS * 2));
 		len = out - page;
 	}
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
 static int proc_idedisk_read_smart_values
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *)data;
+	ide_drive_t	*drive;
 	int		len = 0, i = 0;
 
-	if (!get_smart_values(drive, page)) {
+	down(&ide_cfg_sem);
+
+	drive = ide_drive_from_key(data);
+	if (drive && !get_smart_values(drive, page)) {
 		unsigned short *val = (unsigned short *) page;
 		char *out = ((char *)val) + (SECTOR_WORDS * 4);
 		page = out;
@@ -867,6 +883,7 @@ static int proc_idedisk_read_smart_values
 		} while (i < (SECTOR_WORDS * 2));
 		len = out - page;
 	}
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
@@ -1239,8 +1256,9 @@ static void idedisk_setup (ide_drive_t *drive)
 	if (id->buf_size)
 		printk (" w/%dKiB Cache", id->buf_size/2);
 
-	printk(", CHS=%d/%d/%d", 
-	       drive->bios_cyl, drive->bios_head, drive->bios_sect);
+	if(drive->bios_cyl)
+		printk(", CHS=%d/%d/%d", 
+			drive->bios_cyl, drive->bios_head, drive->bios_sect);
 	if (drive->using_dma)
 		ide_dma_verbose(drive);
 	printk("\n");

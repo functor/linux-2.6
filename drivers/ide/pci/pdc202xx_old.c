@@ -592,7 +592,7 @@ static void __devinit init_hwif_pdc202xx(ide_hwif_t *hwif)
 	if (hwif->pci_dev->device != PCI_DEVICE_ID_PROMISE_20246) {
 		if (!(hwif->udma_four))
 			hwif->udma_four = (pdc202xx_old_cable_detect(hwif)) ? 0 : 1;
-		hwif->dma_start = &pdc202xx_old_ide_dma_start;
+		hwif->ide_dma_start = &pdc202xx_old_ide_dma_start;
 		hwif->ide_dma_end = &pdc202xx_old_ide_dma_end;
 	} 
 	hwif->ide_dma_test_irq = &pdc202xx_old_ide_dma_test_irq;

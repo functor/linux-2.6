@@ -95,6 +95,7 @@ static atomic_t eeh_fail_count;
 static int ibm_set_eeh_option;
 static int ibm_set_slot_reset;
 static int ibm_read_slot_reset_state;
+static int ibm_read_slot_reset_state2;
 static int ibm_slot_error_detail;
 
 static int eeh_subsystem_enabled;
@@ -508,7 +509,7 @@ static inline unsigned long eeh_token_to_phys(unsigned long token)
 int eeh_dn_check_failure(struct device_node *dn, struct pci_dev *dev)
 {
 	int ret;
-	int rets[2];
+	int rets[3];
 	unsigned long flags;
 	int rc, reset_state;
 	struct eeh_event  *event;
@@ -556,9 +557,7 @@ int eeh_dn_check_failure(struct device_node *dn, struct pci_dev *dev)
 	 * function zero of a multi-function device.
 	 * In any case they must share a common PHB.
 	 */
-	ret = rtas_call(ibm_read_slot_reset_state, 3, 3, rets,
-			dn->eeh_config_addr, BUID_HI(dn->phb->buid),
-			BUID_LO(dn->phb->buid));
+	ret = read_slot_reset_state(dn, rets);
 
 	if (!(ret == 0 && rets[1] == 1 && (rets[0] == 2 || rets[0] == 4))) {
 		__get_cpu_var(false_positives)++;
@@ -612,6 +611,29 @@ int eeh_dn_check_failure(struct device_node *dn, struct pci_dev *dev)
 }
 
 EXPORT_SYMBOL(eeh_dn_check_failure);
+
+/**
+ * read_slot_reset_state - get the current state of a slot for a
+ * given device node. 
+ *
+ * @dn device node for the slot to check
+ * @rets array to return results in
+ */
+static int read_slot_reset_state(struct device_node *dn, unsigned long rets[])
+{
+	int token, outputs;
+	
+	if (ibm_read_slot_reset_state2 != RTAS_UNKNOWN_SERVICE) {
+		token = ibm_read_slot_reset_state2;
+		outputs = 4;
+	} else {
+		token = ibm_read_slot_reset_state;
+		outputs = 3;
+	}
+
+	return rtas_call(token, 3, outputs, rets, dn->eeh_config_addr,
+			 BUID_HI(dn->phb->buid), BUID_LO(dn->phb->buid));
+}
 
 /**
  * eeh_check_failure - check if all 1's data is due to EEH slot freeze
@@ -756,6 +778,7 @@ void __init eeh_init(void)
 	ibm_set_eeh_option = rtas_token("ibm,set-eeh-option");
 	ibm_set_slot_reset = rtas_token("ibm,set-slot-reset");
 	ibm_read_slot_reset_state = rtas_token("ibm,read-slot-reset-state");
+	ibm_read_slot_reset_state2 = rtas_token("ibm,read-slot-reset-state2");
 	ibm_slot_error_detail = rtas_token("ibm,slot-error-detail");
 
 	if (ibm_set_eeh_option == RTAS_UNKNOWN_SERVICE)

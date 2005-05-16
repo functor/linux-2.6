@@ -82,6 +82,7 @@ struct media_bay_info {
 #ifdef CONFIG_BLK_DEV_IDE
 	void __iomem			*cd_base;
 	int 				cd_index;
+	ide_hwif_t			*cd_hwif;
 	int				cd_irq;
 	int				cd_retry;
 #endif
@@ -569,7 +570,7 @@ static void __pmac media_bay_step(int i)
 				ide_init_hwif_ports(&hw, (unsigned long) bay->cd_base, (unsigned long) 0, NULL);
 				hw.irq = bay->cd_irq;
 				hw.chipset = ide_pmac;
-				bay->cd_index = ide_register_hw(&hw, NULL);
+				bay->cd_index = ide_register_hw(&hw, &bay->cd_hwif);
 				pmu_resume();
 			}
 			if (bay->cd_index == -1) {
@@ -600,7 +601,7 @@ static void __pmac media_bay_step(int i)
     	        if (bay->cd_index >= 0) {
 			printk(KERN_DEBUG "Unregistering mb %d ide, index:%d\n", i,
 			       bay->cd_index);
-			ide_unregister(bay->cd_index);
+			ide_unregister_hwif(bay->cd_hwif);
 			bay->cd_index = -1;
 		}
 	    	if (bay->cd_retry) {

@@ -53,6 +53,8 @@
 #include <linux/init.h>
 #include <linux/rmap.h>
 #include <linux/rcupdate.h>
+#include <linux/vs_memory.h>
+#include <linux/rcupdate.h>
 
 #include <asm/tlbflush.h>
 
@@ -595,7 +597,8 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 		mm->anon_rss--;
 	}
 
-	mm->rss--;
+	// mm->rss--;
+	vx_rsspages_dec(mm);
 	page_remove_rmap(page);
 	page_cache_release(page);
 
@@ -695,7 +698,8 @@ static void try_to_unmap_cluster(unsigned long cursor,
 
 		page_remove_rmap(page);
 		page_cache_release(page);
-		mm->rss--;
+		// mm->rss--;
+		vx_rsspages_dec(mm);
 		(*mapcount)--;
 	}
 

@@ -113,6 +113,7 @@ void show_mem(void)
 	printk("%ld pages shared\n", shared);
 	printk("%ld pages swap cached\n", cached);
 }
+EXPORT_SYMBOL_GPL(show_mem);
 
 #ifdef CONFIG_PPC_ISERIES
 
@@ -589,6 +590,34 @@ int page_is_ram(unsigned long pfn)
 }
 EXPORT_SYMBOL(page_is_ram);
 
+unsigned long next_ram_page(unsigned long pfn)
+{
+	int i;
+	unsigned long paddr, base;
+	unsigned long best_base = (ULONG_MAX << PAGE_SHIFT);
+
+	pfn++;
+	paddr = (pfn << PAGE_SHIFT);
+                                                                                
+	for (i=0; i < lmb.memory.cnt; i++) {
+#ifdef CONFIG_MSCHUNKS
+		base = lmb.memory.region[i].physbase;
+#else
+		base = lmb.memory.region[i].base;
+#endif
+		if ((paddr >= base)
+		    && (paddr < (base + lmb.memory.region[i].size)))
+			return (paddr >> PAGE_SHIFT);
+		if ((paddr < base) && (base < best_base))
+			best_base = base;
+	}
+	if (best_base < (ULONG_MAX << PAGE_SHIFT))
+		return (best_base >> PAGE_SHIFT);
+	else
+		return ULONG_MAX;
+}
+EXPORT_SYMBOL_GPL(next_ram_page);
+
 /*
  * Initialize the bootmem system and give it all the memory we
  * have available.
@@ -713,6 +742,18 @@ void __init mem_init(void)
 #else
 	max_mapnr = num_physpages;
 	totalram_pages += free_all_bootmem();
+#endif
+
+#ifdef CONFIG_PPC_PSERIES
+	/* Mark the RTAS pages as PG_reserved so userspace can mmap them */
+	if (rtas_rmo_buf) {
+		unsigned long pfn, start_pfn, end_pfn;
+
+		start_pfn = rtas_rmo_buf >> PAGE_SHIFT;
+		end_pfn = (rtas_rmo_buf + RTAS_RMOBUF_MAX) >>  PAGE_SHIFT;
+		for (pfn = start_pfn; pfn < end_pfn; pfn++)
+			SetPageReserved(pfn_to_page(pfn));
+	}
 #endif
 
 	for_each_pgdat(pgdat) {

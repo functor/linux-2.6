@@ -112,6 +112,7 @@
 #ifdef CONFIG_IP_MROUTE
 #include <linux/mroute.h>
 #endif
+#include <linux/vs_limit.h>
 
 DEFINE_SNMP_STAT(struct linux_mib, net_statistics);
 
@@ -153,6 +154,13 @@ void inet_sock_destruct(struct sock *sk)
 
 	if (inet->opt)
 		kfree(inet->opt);
+
+	vx_sock_dec(sk);
+	clr_vx_info(&sk->sk_vx_info);
+	sk->sk_xid = -1;
+	clr_nx_info(&sk->sk_nx_info);
+	sk->sk_nid = -1;
+
 	dst_release(sk->sk_dst_cache);
 #ifdef INET_REFCNT_DEBUG
 	atomic_dec(&inet_sock_nr);
@@ -266,8 +274,11 @@ static int inet_create(struct socket *sock, int protocol)
 	if (!answer)
 		goto out_rcu_unlock;
 	err = -EPERM;
+	if ((protocol == IPPROTO_ICMP) && vx_ccaps(VXC_RAW_ICMP))
+		goto override;
 	if (answer->capability > 0 && !capable(answer->capability))
 		goto out_rcu_unlock;
+override:
 	err = -EPROTONOSUPPORT;
 	if (!protocol)
 		goto out_rcu_unlock;
@@ -315,6 +326,12 @@ static int inet_create(struct socket *sock, int protocol)
 	sk->sk_family	   = PF_INET;
 	sk->sk_protocol	   = protocol;
 	sk->sk_backlog_rcv = sk->sk_prot->backlog_rcv;
+
+	set_vx_info(&sk->sk_vx_info, current->vx_info);
+	sk->sk_xid = vx_current_xid();
+	vx_sock_inc(sk);
+	set_nx_info(&sk->sk_nx_info, current->nx_info);
+	sk->sk_nid = nx_current_nid();
 
 	inet->uc_ttl	= -1;
 	inet->mc_loop	= 1;
@@ -377,6 +394,11 @@ int inet_release(struct socket *sock)
 		    !(current->flags & PF_EXITING))
 			timeout = sk->sk_lingertime;
 		sock->sk = NULL;
+		vx_sock_dec(sk);
+		clr_vx_info(&sk->sk_vx_info);
+		//sk->sk_xid = -1;
+		clr_nx_info(&sk->sk_nx_info);
+		//sk->sk_nid = -1;
 		sk->sk_prot->close(sk, timeout);
 	}
 	return 0;
@@ -825,7 +847,13 @@ struct proto_ops inet_dgram_ops = {
  * For SOCK_RAW sockets; should be the same as inet_dgram_ops but without
  * udp_poll
  */
-static struct proto_ops inet_sockraw_ops = {
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+struct proto_ops inet_sockraw_ops;
+EXPORT_SYMBOL(inet_sockraw_ops);
+#else
+static
+#endif
+struct proto_ops inet_sockraw_ops = {
 	.family =	PF_INET,
 	.owner =	THIS_MODULE,
 	.release =	inet_release,
@@ -846,7 +874,15 @@ static struct proto_ops inet_sockraw_ops = {
 	.sendpage =	inet_sendpage,
 };
 
-static struct net_proto_family inet_family_ops = {
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+int vnet_active = 0;
+EXPORT_SYMBOL(vnet_active);
+struct net_proto_family inet_family_ops;
+EXPORT_SYMBOL(inet_family_ops);
+#else
+static
+#endif
+struct net_proto_family inet_family_ops = {
 	.family = PF_INET,
 	.create = inet_create,
 	.owner	= THIS_MODULE,

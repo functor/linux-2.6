@@ -30,6 +30,7 @@
 #include <linux/smp.h>
 #include <linux/security.h>
 #include <linux/bootmem.h>
+#include <linux/vs_base.h>
 #include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
@@ -251,7 +252,10 @@ int do_syslog(int type, char __user * buf, int len)
 	unsigned long i, j, limit, count;
 	int do_clear = 0;
 	char c;
-	int error = 0;
+	int error = -EPERM;
+
+	if (!vx_check(0, VX_ADMIN|VX_WATCH))
+		return error;
 
 	error = security_syslog(type);
 	if (error)
@@ -378,6 +382,20 @@ out:
 asmlinkage long sys_syslog(int type, char __user * buf, int len)
 {
 	return do_syslog(type, buf, len);
+}
+
+/*
+ * Crashdump special routine. Don't print to global log_buf, just to the
+ * actual console device(s).
+ */
+static void crashdump_call_console_drivers(const char *buf, unsigned long len)
+{
+	struct console *con;
+
+	for (con = console_drivers; con; con = con->next) {
+		if ((con->flags & CON_ENABLED) && con->write)
+			con->write(con, buf, len);
+	}
 }
 
 /*
@@ -521,6 +539,8 @@ asmlinkage int printk(const char *fmt, ...)
 	return r;
 }
 
+static volatile int printk_cpu = -1;
+
 asmlinkage int vprintk(const char *fmt, va_list args)
 {
 	unsigned long flags;
@@ -529,14 +549,21 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	static char printk_buf[1024];
 	static int log_level_unknown = 1;
 
-	if (unlikely(oops_in_progress))
+	if (unlikely(oops_in_progress && printk_cpu == smp_processor_id()))
 		zap_locks();
 
 	/* This stops the holder of console_sem just where we want him */
 	spin_lock_irqsave(&logbuf_lock, flags);
+	printk_cpu = smp_processor_id();
 
 	/* Emit the output into the temporary buffer */
 	printed_len = vscnprintf(printk_buf, sizeof(printk_buf), fmt, args);
+
+	if (unlikely(crashdump_mode())) {
+		crashdump_call_console_drivers(printk_buf, printed_len);
+		spin_unlock_irqrestore(&logbuf_lock, flags);
+		goto out;
+	}
 
 	/*
 	 * Copy the output into log_buf.  If the caller didn't provide

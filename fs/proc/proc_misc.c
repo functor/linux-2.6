@@ -44,11 +44,17 @@
 #include <linux/jiffies.h>
 #include <linux/sysrq.h>
 #include <linux/vmalloc.h>
+#include <linux/crash_dump.h>
+#include <linux/vs_base.h>
+#include <linux/vs_cvirt.h>
+
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/io.h>
 #include <asm/tlb.h>
 #include <asm/div64.h>
+
+#include <linux/vs_cvirt.h>
 
 #define LOAD_INT(x) ((x) >> FSHIFT)
 #define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
@@ -81,17 +87,32 @@ static int proc_calc_metrics(char *page, char **start, off_t off,
 static int loadavg_read_proc(char *page, char **start, off_t off,
 				 int count, int *eof, void *data)
 {
+	unsigned int running, threads;
 	int a, b, c;
 	int len;
 
-	a = avenrun[0] + (FIXED_1/200);
-	b = avenrun[1] + (FIXED_1/200);
-	c = avenrun[2] + (FIXED_1/200);
-	len = sprintf(page,"%d.%02d %d.%02d %d.%02d %ld/%d %d\n",
+	if (vx_flags(VXF_VIRT_LOAD, 0)) {
+		struct vx_info *vxi = current->vx_info;
+
+		a = vxi->cvirt.load[0] + (FIXED_1/200);
+		b = vxi->cvirt.load[1] + (FIXED_1/200);
+		c = vxi->cvirt.load[2] + (FIXED_1/200);
+
+		running = atomic_read(&vxi->cvirt.nr_running);
+		threads = atomic_read(&vxi->cvirt.nr_threads);
+	} else {
+		a = avenrun[0] + (FIXED_1/200);
+		b = avenrun[1] + (FIXED_1/200);
+		c = avenrun[2] + (FIXED_1/200);
+
+		running = nr_running();
+		threads = nr_threads;
+	}
+	len = sprintf(page,"%d.%02d %d.%02d %d.%02d %d/%d %d\n",
 		LOAD_INT(a), LOAD_FRAC(a),
 		LOAD_INT(b), LOAD_FRAC(b),
 		LOAD_INT(c), LOAD_FRAC(c),
-		nr_running(), nr_threads, last_pid);
+		running, threads, last_pid);
 	return proc_calc_metrics(page, start, off, count, eof, len);
 }
 
@@ -140,6 +161,9 @@ static int uptime_read_proc(char *page, char **start, off_t off,
 
 	do_posix_clock_monotonic_gettime(&uptime);
 	jiffies_to_timespec(idle_jiffies, &idle);
+	if (vx_flags(VXF_VIRT_UPTIME, 0))
+		vx_vsi_uptime(&uptime, &idle);
+
 	len = sprintf(page,"%lu.%02lu %lu.%02lu\n",
 			(unsigned long) uptime.tv_sec,
 			(uptime.tv_nsec / (NSEC_PER_SEC / 100)),
@@ -634,11 +658,13 @@ void __init proc_misc_init(void)
 				(size_t)high_memory - PAGE_OFFSET + PAGE_SIZE;
 	}
 #endif
+	crash_create_proc_entry();
 #ifdef CONFIG_MAGIC_SYSRQ
 	entry = create_proc_entry("sysrq-trigger", S_IWUSR, NULL);
 	if (entry)
 		entry->proc_fops = &proc_sysrq_trigger_operations;
 #endif
+	crash_enable_by_proc();
 #ifdef CONFIG_PPC32
 	{
 		extern struct file_operations ppc_htab_operations;

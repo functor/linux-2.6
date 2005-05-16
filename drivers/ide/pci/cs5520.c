@@ -158,10 +158,11 @@ static void __devinit cs5520_init_setup_dma(struct pci_dev *dev, ide_pci_device_
  *	DMA channel
  */
  
-static int cs5520_dma_on(ide_drive_t *drive)
+static int cs5520_dma_setup(ide_drive_t *drive)
 {
-	drive->vdma = 1;
-	return 0;
+	/* If DMA setup works then VDMA on */
+	drive->vdma = ide_dma_setup(drive) ? 1: 0;
+	return drive->vdma;
 }
 
 static void __devinit init_hwif_cs5520(ide_hwif_t *hwif)
@@ -169,7 +170,7 @@ static void __devinit init_hwif_cs5520(ide_hwif_t *hwif)
 	hwif->tuneproc = &cs5520_tune_drive;
 	hwif->speedproc = &cs5520_tune_chipset;
 	hwif->ide_dma_check = &cs5520_config_drive_xfer_rate;
-	hwif->ide_dma_on = &cs5520_dma_on;
+	hwif->ide_dma_setup = &cs5520_dma_setup;
 
 	if(!noautodma)
 		hwif->autodma = 1;
@@ -224,7 +225,7 @@ static int __devinit cs5520_init_one(struct pci_dev *dev, const struct pci_devic
 	if(pci_enable_device_bars(dev, 1<<2))
 	{
 		printk(KERN_WARNING "%s: Unable to enable 55x0.\n", d->name);
-		return 1;
+		return -EBUSY;
 	}
 	pci_set_master(dev);
 	if (pci_set_dma_mask(dev, 0xFFFFFFFF)) {

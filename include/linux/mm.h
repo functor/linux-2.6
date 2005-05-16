@@ -13,6 +13,7 @@
 #include <linux/rbtree.h>
 #include <linux/prio_tree.h>
 #include <linux/fs.h>
+#include <linux/ckrm_mem.h>
 
 struct mempolicy;
 struct anon_vma;
@@ -237,6 +238,9 @@ struct page {
 	void *virtual;			/* Kernel virtual address (NULL if
 					   not kmapped, ie. highmem) */
 #endif /* WANT_PAGE_VIRTUAL */
+#ifdef CONFIG_CKRM_RES_MEM
+	struct ckrm_zone *ckrm_zone;
+#endif // CONFIG_CKRM_RES_MEM
 };
 
 /*
@@ -682,7 +686,14 @@ extern struct vm_area_struct *copy_vma(struct vm_area_struct **,
 	unsigned long addr, unsigned long len, pgoff_t pgoff);
 extern void exit_mmap(struct mm_struct *);
 
-extern unsigned long get_unmapped_area(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
+extern unsigned long get_unmapped_area_prot(struct file *, unsigned long, unsigned long, unsigned long, unsigned long, int);
+
+
+static inline unsigned long get_unmapped_area(struct file * file, unsigned long addr, 
+		unsigned long len, unsigned long pgoff, unsigned long flags)
+{
+	return get_unmapped_area_prot(file, addr, len, pgoff, flags, 0);	
+}
 
 extern unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
@@ -703,6 +714,7 @@ out:
 
 extern int do_munmap(struct mm_struct *, unsigned long, size_t);
 
+extern unsigned long __do_brk(unsigned long, unsigned long);
 extern unsigned long do_brk(unsigned long, unsigned long);
 
 /* filemap.c */

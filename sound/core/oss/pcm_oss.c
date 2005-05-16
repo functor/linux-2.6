@@ -1817,6 +1817,13 @@ static int snd_pcm_oss_open(struct inode *inode, struct file *file)
 	snd_pcm_oss_setup_t *psetup = NULL, *csetup = NULL;
 	int nonblock;
 	wait_queue_t wait;
+	static char printed_comm[16];
+
+	if (strncmp(printed_comm, current->comm, 16)) {
+		printk(KERN_DEBUG "application %s uses obsolete OSS audio interface\n",
+		       current->comm);
+		memcpy(printed_comm, current->comm, 16);
+	}
 
 	snd_assert(cardnum >= 0 && cardnum < SNDRV_CARDS, return -ENXIO);
 	device = SNDRV_MINOR_OSS_DEVICE(minor) == SNDRV_MINOR_OSS_PCM1 ?

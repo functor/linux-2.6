@@ -187,14 +187,13 @@ typedef unsigned char	byte;	/* used everywhere */
  * Timeouts for various operations:
  */
 #define WAIT_DRQ	(HZ/10)		/* 100msec - spec allows up to 20ms */
-#if defined(CONFIG_APM) || defined(CONFIG_APM_MODULE)
 #define WAIT_READY	(5*HZ)		/* 5sec - some laptops are very slow */
-#else
-#define WAIT_READY	(HZ/10)		/* 100msec - should be instantaneous */
-#endif /* CONFIG_APM || CONFIG_APM_MODULE */
-#define WAIT_PIDENTIFY	(10*HZ)	/* 10sec  - should be less than 3ms (?), if all ATAPI CD is closed at boot */
-#define WAIT_WORSTCASE	(30*HZ)	/* 30sec  - worst case when spinning up */
-#define WAIT_CMD	(10*HZ)	/* 10sec  - maximum wait for an IRQ to happen */
+#define WAIT_PIDENTIFY	(10*HZ)		/* 10sec  - should be less than 3ms (?), if all ATAPI CD is closed at boot */
+#define WAIT_WORSTCASE	(30*HZ)		/* 30sec  - worst case when spinning up */
+/* We should make this more tunable and smart: Windows apparently uses 7 secs
+   but we've seen drives take long. Equally some drives can now do fast fails
+   for RAID. Can probably be 10 but lets see if 15 helps */
+#define WAIT_CMD	(15*HZ)		/* 15sec  - maximum wait for an IRQ to happen */
 #define WAIT_MIN_SLEEP	(2*HZ/100)	/* 20msec - minimum sleep time */
 
 #define HOST(hwif,chipset)					\
@@ -754,6 +753,7 @@ typedef struct ide_drive_s {
 	unsigned int	max_failures;	/* maximum allowed failure count */
 
 	u64		capacity64;	/* total number of sectors */
+	u64		probed_capacity;/* initial reported media capacity (ide-cd only currently) */
 
 	int		lun;		/* logical unit */
 	int		crc_count;	/* crc counter to reduce drive speed */
@@ -768,6 +768,7 @@ typedef struct ide_drive_s {
 #define IDE_CHIPSET_IS_PCI(c)	((IDE_CHIPSET_PCI_MASK >> (c)) & 1)
 
 struct ide_pci_device_s;
+struct ide_task_s;
 
 typedef struct hwif_s {
 	struct hwif_s *next;		/* for linked-list in ide_hwgroup_t */
@@ -775,6 +776,7 @@ typedef struct hwif_s {
 	struct hwgroup_s *hwgroup;	/* actually (ide_hwgroup_t *) */
 	struct proc_dir_entry *proc;	/* /proc/ide/ directory entry */
 
+	u16		key;		/* /proc persistent keying */
 	char name[6];			/* name of interface, eg. "ide0" */
 
 		/* task file registers for pata and sata */
@@ -830,6 +832,9 @@ typedef struct hwif_s {
 //	u8	(*ratemask)(ide_drive_t *);
 //	/* device rate limiter */
 //	u8	(*ratefilter)(ide_drive_t *, u8);
+	/* hwif remove hook, called on unload/pci remove paths*/
+	void	(*remove)(struct hwif_s *);
+	/* allow command filter/control */
 #endif
 
 	void (*ata_input_data)(ide_drive_t *, void *, u32);
@@ -838,9 +843,9 @@ typedef struct hwif_s {
 	void (*atapi_input_bytes)(ide_drive_t *, void *, u32);
 	void (*atapi_output_bytes)(ide_drive_t *, void *, u32);
 
-	int (*dma_setup)(ide_drive_t *);
-	void (*dma_exec_cmd)(ide_drive_t *, u8);
-	void (*dma_start)(ide_drive_t *);
+	int (*ide_dma_setup)(ide_drive_t *);
+	void (*ide_dma_exec_cmd)(ide_drive_t *, u8);
+	void (*ide_dma_start)(ide_drive_t *);
 	int (*ide_dma_end)(ide_drive_t *drive);
 	int (*ide_dma_check)(ide_drive_t *drive);
 	int (*ide_dma_on)(ide_drive_t *drive);
@@ -901,7 +906,9 @@ typedef struct hwif_s {
 
 	unsigned	noprobe    : 1;	/* don't probe for this interface */
 	unsigned	present    : 1;	/* this interface exists */
+	unsigned	configured : 1;	/* this hwif exists and is set up (may not be "present") */
 	unsigned	hold       : 1; /* this interface is always present */
+	unsigned	user_dev   : 1; /* user ioctl created device */
 	unsigned	serialized : 1;	/* serialized all channel operation */
 	unsigned	sharing_irq: 1;	/* 1 = sharing irq with another hwif */
 	unsigned	reset      : 1;	/* reset after probe */
@@ -912,6 +919,7 @@ typedef struct hwif_s {
 	unsigned	no_dsc     : 1;	/* 0 default, 1 dsc_overlap disabled */
 	unsigned	auto_poll  : 1; /* supports nop auto-poll */
 	unsigned	sg_mapped  : 1;	/* sg_table and sg_nents are ready */
+	unsigned 	polling    : 1; /* doing a polled command ignore irqs */
 
 	struct device	gendev;
 	struct semaphore gendev_rel_sem; /* To deal with device release() */
@@ -1004,6 +1012,11 @@ extern int ide_read_setting(ide_drive_t *t, ide_settings_t *setting);
 extern int ide_write_setting(ide_drive_t *drive, ide_settings_t *setting, int val);
 extern void ide_add_generic_settings(ide_drive_t *drive);
 
+extern void *ide_drive_to_key(ide_drive_t *drive);
+extern ide_drive_t *ide_drive_from_key(void *);
+extern void *ide_hwif_to_key(ide_hwif_t *hwif);
+extern ide_hwif_t *ide_hwif_from_key(void *);
+
 /*
  * /proc/ide interface
  */
@@ -1020,7 +1033,7 @@ extern struct proc_dir_entry *proc_ide_root;
 extern void proc_ide_create(void);
 extern void proc_ide_destroy(void);
 extern void create_proc_ide_interfaces(void);
-void destroy_proc_ide_interface(ide_hwif_t *);
+extern void destroy_proc_ide_interface(ide_hwif_t *);
 extern void ide_add_proc_entries(struct proc_dir_entry *, ide_proc_entry_t *, void *);
 extern void ide_remove_proc_entries(struct proc_dir_entry *, ide_proc_entry_t *);
 read_proc_t proc_ide_read_capacity;
@@ -1133,6 +1146,7 @@ extern	ide_hwif_t	ide_hwifs[];		/* master data repository */
 extern int noautodma;
 
 extern int ide_end_request (ide_drive_t *drive, int uptodate, int nrsecs);
+extern int ide_end_dequeued_request (ide_drive_t *drive, struct request *rq, int uptodate, int nrsecs);
 
 /*
  * This is used on exit from the driver to designate the next irq handler
@@ -1384,9 +1398,11 @@ extern int ide_pci_register_driver(struct pci_driver *driver);
 extern void ide_pci_unregister_driver(struct pci_driver *driver);
 void ide_pci_setup_ports(struct pci_dev *, struct ide_pci_device_s *, int, ata_index_t *);
 extern void ide_setup_pci_noise (struct pci_dev *dev, struct ide_pci_device_s *d);
+extern void ide_pci_remove_hwifs(struct pci_dev *dev);
 
 extern void default_hwif_iops(ide_hwif_t *);
 extern void default_hwif_mmiops(ide_hwif_t *);
+extern void removed_hwif_iops(ide_hwif_t *);
 extern void default_hwif_transport(ide_hwif_t *);
 
 int ide_register_driver(ide_driver_t *driver);
@@ -1487,11 +1503,12 @@ static inline void ide_release_dma(ide_hwif_t *drive) {;}
 
 extern int ide_hwif_request_regions(ide_hwif_t *hwif);
 extern void ide_hwif_release_regions(ide_hwif_t* hwif);
-extern void ide_unregister (unsigned int index);
+extern int ide_unregister_hwif(ide_hwif_t *hwif);
+extern int __ide_unregister_hwif(ide_hwif_t *hwif);
 
-void ide_undecoded_slave(ide_hwif_t *);
+extern void ide_undecoded_slave(ide_hwif_t *);
 
-int probe_hwif_init_with_fixup(ide_hwif_t *, void (*)(ide_hwif_t *));
+extern int probe_hwif_init_with_fixup(ide_hwif_t *, void (*)(ide_hwif_t *));
 extern int probe_hwif_init(ide_hwif_t *);
 
 static inline void *ide_get_hwifdata (ide_hwif_t * hwif)

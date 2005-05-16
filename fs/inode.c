@@ -21,6 +21,7 @@
 #include <linux/pagemap.h>
 #include <linux/cdev.h>
 #include <linux/bootmem.h>
+#include <linux/vs_base.h>
 
 /*
  * This is needed for the following functions:
@@ -115,6 +116,10 @@ static struct inode *alloc_inode(struct super_block *sb)
 		struct address_space * const mapping = &inode->i_data;
 
 		inode->i_sb = sb;
+		// inode->i_dqh = dqhget(sb->s_dqh);
+
+		/* essential because of inode slab reuse */
+		inode->i_xid = 0;
 		inode->i_blkbits = sb->s_blocksize_bits;
 		inode->i_flags = 0;
 		atomic_set(&inode->i_count, 1);
@@ -1183,14 +1188,14 @@ EXPORT_SYMBOL(update_atime);
  *	When ctime_too is specified update the ctime too.
  */
 
-void inode_update_time(struct inode *inode, int ctime_too)
+void inode_update_time(struct inode *inode, struct vfsmount *mnt, int ctime_too)
 {
 	struct timespec now;
 	int sync_it = 0;
 
 	if (IS_NOCMTIME(inode))
 		return;
-	if (IS_RDONLY(inode))
+	if (IS_RDONLY(inode) || MNT_IS_RDONLY(mnt))
 		return;
 
 	now = current_kernel_time();

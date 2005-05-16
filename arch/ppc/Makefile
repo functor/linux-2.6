@@ -74,6 +74,7 @@ CPPFLAGS_vmlinux.lds	:= -Upowerpc
 
 # All the instructions talk about "make bzImage".
 bzImage: zImage
+	cp vmlinux arch/ppc/boot/bzImage
 
 boot := arch/$(ARCH)/boot
 

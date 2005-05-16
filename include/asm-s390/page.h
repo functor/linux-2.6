@@ -200,6 +200,8 @@ page_get_storage_key(unsigned long addr)
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
+#define devmem_is_allowed(x) 1
+
 #endif /* __KERNEL__ */
 
 #endif /* _S390_PAGE_H */

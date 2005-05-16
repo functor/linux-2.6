@@ -25,6 +25,8 @@
 #include <linux/module.h>
 #include <linux/sysctl.h>
 #include <linux/workqueue.h>
+#include <linux/vs_limit.h>
+#include <linux/vs_socket.h>
 #include <net/tcp.h>
 #include <net/inet_common.h>
 #include <net/xfrm.h>
@@ -362,6 +364,11 @@ void tcp_time_wait(struct sock *sk, int state, int timeo)
 		tw->tw_ts_recent_stamp	= tp->ts_recent_stamp;
 		tw_dead_node_init(tw);
 
+		tw->tw_xid		= sk->sk_xid;
+		tw->tw_vx_info		= NULL;
+		tw->tw_nid		= sk->sk_nid;
+		tw->tw_nx_info		= NULL;
+
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 		if (tw->tw_family == PF_INET6) {
 			struct ipv6_pinfo *np = inet6_sk(sk);
@@ -697,6 +704,8 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newsk->sk_state = TCP_SYN_RECV;
 
 		/* SANITY */
+		sock_vx_init(newsk);
+		sock_nx_init(newsk);
 		sk_node_init(&newsk->sk_node);
 		tcp_sk(newsk)->bind_hash = NULL;
 
@@ -725,6 +734,9 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 
 		if ((filter = newsk->sk_filter) != NULL)
 			sk_filter_charge(newsk, filter);
+
+		if (sk->sk_create_child)
+			sk->sk_create_child(sk, newsk);
 
 		if (unlikely(xfrm_sk_clone_policy(newsk))) {
 			/* It is still raw copy of parent, so invalidate
@@ -787,7 +799,14 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newtp->num_sacks = 0;
 		newtp->urg_data = 0;
 		newtp->listen_opt = NULL;
+#ifdef CONFIG_ACCEPT_QUEUES
+		newtp->accept_queue = NULL;
+		memset(newtp->acceptq, 0,sizeof(newtp->acceptq));
+		newtp->class_index = 0;
+
+#else
 		newtp->accept_queue = newtp->accept_queue_tail = NULL;
+#endif
 		/* Deinitialize syn_wait_lock to trap illegal accesses. */
 		memset(&newtp->syn_wait_lock, 0, sizeof(newtp->syn_wait_lock));
 
@@ -795,6 +814,12 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newsk->sk_err = 0;
 		newsk->sk_priority = 0;
 		atomic_set(&newsk->sk_refcnt, 2);
+
+		set_vx_info(&newsk->sk_vx_info, sk->sk_vx_info);
+		newsk->sk_xid = sk->sk_xid;
+		vx_sock_inc(newsk);
+		set_nx_info(&newsk->sk_nx_info, sk->sk_nx_info);
+		newsk->sk_nid = sk->sk_nid;
 #ifdef INET_REFCNT_DEBUG
 		atomic_inc(&inet_sock_nr);
 #endif

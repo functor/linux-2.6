@@ -531,9 +531,9 @@ static void icside_dma_init(ide_hwif_t *hwif)
 	hwif->ide_dma_off_quietly = icside_dma_off_quietly;
 	hwif->ide_dma_host_on	= icside_dma_host_on;
 	hwif->ide_dma_on	= icside_dma_on;
-	hwif->dma_setup		= icside_dma_setup;
-	hwif->dma_exec_cmd	= icside_dma_exec_cmd;
-	hwif->dma_start		= icside_dma_start;
+	hwif->ide_dma_setup	= icside_dma_setup;
+	hwif->ide_dma_exec_cmd	= icside_dma_exec_cmd;
+	hwif->ide_dma_start	= icside_dma_start;
 	hwif->ide_dma_end	= icside_dma_end;
 	hwif->ide_dma_test_irq	= icside_dma_test_irq;
 	hwif->ide_dma_timeout	= icside_dma_timeout;

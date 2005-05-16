@@ -18,12 +18,18 @@
 #include <linux/sysrq.h>
 #include <linux/interrupt.h>
 #include <linux/nmi.h>
+#include <linux/kexec.h>
+#include <linux/crash_dump.h>
 
-int panic_timeout;
-int panic_on_oops;
+int panic_timeout = 900;
+int panic_on_oops = 1;
 int tainted;
+unsigned int crashed;
+int crash_dump_on;
+void (*dump_function_ptr)(const char *, const struct pt_regs *) = 0;
 
 EXPORT_SYMBOL(panic_timeout);
+EXPORT_SYMBOL(dump_function_ptr);
 
 struct notifier_block *panic_notifier_list;
 
@@ -69,8 +75,15 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
+	if (crashdump_func())
+		BUG();
 	bust_spinlocks(0);
 
+	/* If we have crashed, perform a kexec reboot, for dump write-out */
+	crash_machine_kexec();
+
+        notifier_call_chain(&panic_notifier_list, 0, buf);
+	
 #ifdef CONFIG_SMP
 	smp_send_stop();
 #endif
@@ -87,6 +100,17 @@ NORET_TYPE void panic(const char * fmt, ...)
 		 * We can't use the "normal" timers since we just panicked..
 	 	 */
 		printk(KERN_EMERG "Rebooting in %d seconds..",panic_timeout);
+#ifdef CONFIG_KEXEC
+ {		
+		struct kimage *image;
+		image = xchg(&kexec_image, 0);
+ 		if (image) {
+ 			printk(KERN_EMERG "by starting a new kernel ..\n");
+ 			mdelay(panic_timeout*1000);
+			machine_kexec(image);
+ 		}
+ }
+#endif
 		for (i = 0; i < panic_timeout*1000; ) {
 			touch_nmi_watchdog();
 			i += panic_blink(i);

@@ -102,6 +102,7 @@
 #include <linux/vt_kern.h>
 #include <linux/selection.h>
 #include <linux/devfs_fs_kernel.h>
+#include <linux/vs_cvirt.h>
 
 #include <linux/kmod.h>
 
@@ -918,9 +919,11 @@ void disassociate_ctty(int on_exit)
 
 	lock_kernel();
 
+	down(&tty_sem);
 	tty = current->signal->tty;
 	if (tty) {
 		tty_pgrp = tty->pgrp;
+		up(&tty_sem);
 		if (on_exit && tty->driver->type != TTY_DRIVER_TYPE_PTY)
 			tty_vhangup(tty);
 	} else {
@@ -928,6 +931,7 @@ void disassociate_ctty(int on_exit)
 			kill_pg(current->signal->tty_old_pgrp, SIGHUP, on_exit);
 			kill_pg(current->signal->tty_old_pgrp, SIGCONT, on_exit);
 		}
+		up(&tty_sem);
 		unlock_kernel();	
 		return;
 	}
@@ -937,15 +941,19 @@ void disassociate_ctty(int on_exit)
 			kill_pg(tty_pgrp, SIGCONT, on_exit);
 	}
 
+	/* Must lock changes to tty_old_pgrp */
+	down(&tty_sem);
 	current->signal->tty_old_pgrp = 0;
 	tty->session = 0;
 	tty->pgrp = -1;
 
+	/* Now clear signal->tty under the lock */
 	read_lock(&tasklist_lock);
 	do_each_task_pid(current->signal->session, PIDTYPE_SID, p) {
 		p->signal->tty = NULL;
 	} while_each_task_pid(current->signal->session, PIDTYPE_SID, p);
 	read_unlock(&tasklist_lock);
+	up(&tty_sem);
 	unlock_kernel();
 }
 
@@ -1148,8 +1156,8 @@ static inline void pty_line_name(struct tty_driver *driver, int index, char *p)
 	int i = index + driver->name_base;
 	/* ->name is initialized to "ttyp", but "tty" is expected */
 	sprintf(p, "%s%c%x",
-			driver->subtype == PTY_TYPE_SLAVE ? "tty" : driver->name,
-			ptychar[i >> 4 & 0xf], i & 0xf);
+		driver->subtype == PTY_TYPE_SLAVE ? "pty" : driver->name,
+		ptychar[i >> 4 & 0xf], i & 0xf);
 }
 
 static inline void tty_line_name(struct tty_driver *driver, int index, char *p)
@@ -1170,12 +1178,6 @@ static int init_dev(struct tty_driver *driver, int idx,
 	struct termios *tp, **tp_loc, *o_tp, **o_tp_loc;
 	struct termios *ltp, **ltp_loc, *o_ltp, **o_ltp_loc;
 	int retval=0;
-
-	/* 
-	 * Check whether we need to acquire the tty semaphore to avoid
-	 * race conditions.  For now, play it safe.
-	 */
-	down(&tty_sem);
 
 	/* check whether we're reopening an existing tty */
 	if (driver->flags & TTY_DRIVER_DEVPTS_MEM) {
@@ -1365,7 +1367,6 @@ success:
 	
 	/* All paths come through here to release the semaphore */
 end_init:
-	up(&tty_sem);
 	return retval;
 
 	/* Release locally allocated memory ... nothing placed in slots */
@@ -1561,9 +1562,14 @@ static void release_dev(struct file * filp)
 	 * each iteration we avoid any problems.
 	 */
 	while (1) {
+		/* Guard against races with tty->count changes elsewhere and
+		   opens on /dev/tty */
+		   
+		down(&tty_sem);
 		tty_closing = tty->count <= 1;
 		o_tty_closing = o_tty &&
 			(o_tty->count <= (pty_master ? 1 : 0));
+		up(&tty_sem);
 		do_sleep = 0;
 
 		if (tty_closing) {
@@ -1599,6 +1605,8 @@ static void release_dev(struct file * filp)
 	 * both sides, and we've completed the last operation that could 
 	 * block, so it's safe to proceed with closing.
 	 */
+	 
+	down(&tty_sem);
 	if (pty_master) {
 		if (--o_tty->count < 0) {
 			printk(KERN_WARNING "release_dev: bad pty slave count "
@@ -1612,7 +1620,8 @@ static void release_dev(struct file * filp)
 		       tty->count, tty_name(tty, buf));
 		tty->count = 0;
 	}
-
+	up(&tty_sem);
+	
 	/*
 	 * We've decremented tty->count, so we need to remove this file
 	 * descriptor off the tty->tty_files list; this serves two
@@ -1759,10 +1768,14 @@ retry_open:
 	noctty = filp->f_flags & O_NOCTTY;
 	index  = -1;
 	retval = 0;
+	
+	down(&tty_sem);
 
 	if (device == MKDEV(TTYAUX_MAJOR,0)) {
-		if (!current->signal->tty)
+		if (!current->signal->tty) {
+			up(&tty_sem);
 			return -ENXIO;
+		}
 		driver = current->signal->tty->driver;
 		index = current->signal->tty->index;
 		filp->f_flags |= O_NONBLOCK; /* Don't let /dev/tty block */
@@ -1787,14 +1800,18 @@ retry_open:
 			noctty = 1;
 			goto got_driver;
 		}
+		up(&tty_sem);
 		return -ENODEV;
 	}
 
 	driver = get_tty_driver(device, &index);
-	if (!driver)
+	if (!driver) {
+		up(&tty_sem);
 		return -ENODEV;
+	}
 got_driver:
 	retval = init_dev(driver, index, &tty);
+	up(&tty_sem);
 	if (retval)
 		return retval;
 
@@ -1880,7 +1897,10 @@ static int ptmx_open(struct inode * inode, struct file * filp)
 	}
 	up(&allocated_ptys_lock);
 
+	down(&tty_sem);
 	retval = init_dev(ptm_driver, index, &tty);
+	up(&tty_sem);
+	
 	if (retval)
 		goto out;
 
@@ -2092,13 +2112,16 @@ static int tiocsctty(struct tty_struct *tty, int arg)
 
 static int tiocgpgrp(struct tty_struct *tty, struct tty_struct *real_tty, pid_t __user *p)
 {
+	pid_t pgrp;
 	/*
 	 * (tty == real_tty) is a cheap way of
 	 * testing if the tty is NOT a master pty.
 	 */
 	if (tty == real_tty && current->signal->tty != real_tty)
 		return -ENOTTY;
-	return put_user(real_tty->pgrp, p);
+
+	pgrp = vx_map_pid(real_tty->pgrp);
+	return put_user(pgrp, p);
 }
 
 static int tiocspgrp(struct tty_struct *tty, struct tty_struct *real_tty, pid_t __user *p)
@@ -2116,6 +2139,8 @@ static int tiocspgrp(struct tty_struct *tty, struct tty_struct *real_tty, pid_t 
 		return -ENOTTY;
 	if (get_user(pgrp, p))
 		return -EFAULT;
+
+	pgrp = vx_rmap_pid(pgrp);
 	if (pgrp < 0)
 		return -EINVAL;
 	if (session_of_pgrp(pgrp) != current->signal->session)

@@ -4022,6 +4022,12 @@ qeth_send_packet(struct qeth_card *card, struct sk_buff *skb)
 	if (!card->options.layer2)
 		ipv = qeth_get_ip_version(skb);
 	cast_type = qeth_get_cast_type(card, skb);
+	if ((cast_type == RTN_BROADCAST) && (card->info.broadcast_capable == 0)){
+		card->stats.tx_dropped++;
+		card->stats.tx_errors++;
+		dev_kfree_skb_any(skb);
+		return 0;
+	}
 	queue = card->qdio.out_qs
 		[qeth_get_priority_queue(card, skb, ipv, cast_type)];
 
@@ -4897,6 +4903,7 @@ out:
 	rcu_read_unlock();
 }
 
+#ifdef CONFIG_QETH_IPV6
 static void
 qeth_free_vlan_addresses6(struct qeth_card *card, unsigned short vid)
 {
@@ -4923,6 +4930,9 @@ qeth_free_vlan_addresses6(struct qeth_card *card, unsigned short vid)
 	}
 	in6_dev_put(in6_dev);
 }
+#else
+#define qeth_free_vlan_addresses6(card, vid)	do{ ; }while(0)
+#endif
 
 static void
 qeth_layer2_send_setdelvlan(struct qeth_card *card, __u16 i,

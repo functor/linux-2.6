@@ -235,6 +235,7 @@ typedef __u32 kernel_cap_t;
 /* Allow enabling/disabling tagged queuing on SCSI controllers and sending
    arbitrary SCSI commands */
 /* Allow setting encryption key on loopback filesystem */
+/* Allow the selection of a security context */
 
 #define CAP_SYS_ADMIN        21
 
@@ -283,6 +284,11 @@ typedef __u32 kernel_cap_t;
 /* Allow taking of leases on files */
 
 #define CAP_LEASE            28
+
+/* Allow context manipulations */
+/* Allow changing context info on files */
+
+#define CAP_CONTEXT	     29
 
 #ifdef __KERNEL__
 /* 

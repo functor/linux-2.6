@@ -235,5 +235,7 @@ extern int page_is_ram(unsigned long pfn);
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
+#define devmem_is_allowed(x) 1
+
 #endif /* __KERNEL__ */
 #endif /* _PPC64_PAGE_H */

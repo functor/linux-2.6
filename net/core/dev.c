@@ -112,7 +112,9 @@
 #include <linux/wireless.h>		/* Note : will define WIRELESS_EXT */
 #include <net/iw_handler.h>
 #endif	/* CONFIG_NET_RADIO */
+#include <linux/vs_network.h>
 #include <asm/current.h>
+#include <linux/vs_network.h>
 
 /* This define, if set, will randomly drop a packet when congestion
  * is more than moderate.  It helps fairness in the multi-interface
@@ -1893,6 +1895,9 @@ static int dev_ifconf(char __user *arg)
 
 	total = 0;
 	for (dev = dev_base; dev; dev = dev->next) {
+		if (vx_flags(VXF_HIDE_NETIF, 0) &&
+			!dev_in_nx_info(dev, current->nx_info))
+			continue;
 		for (i = 0; i < NPROTO; i++) {
 			if (gifconf_list[i]) {
 				int done;
@@ -1953,6 +1958,10 @@ void dev_seq_stop(struct seq_file *seq, void *v)
 
 static void dev_seq_printf_stats(struct seq_file *seq, struct net_device *dev)
 {
+	struct nx_info *nxi = current->nx_info;
+
+	if (vx_flags(VXF_HIDE_NETIF, 0) && !dev_in_nx_info(dev, nxi))
+		return;
 	if (dev->get_stats) {
 		struct net_device_stats *stats = dev->get_stats(dev);
 
@@ -3213,10 +3222,14 @@ EXPORT_SYMBOL(dev_get_by_name);
 EXPORT_SYMBOL(dev_ioctl);
 EXPORT_SYMBOL(dev_open);
 EXPORT_SYMBOL(dev_queue_xmit);
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+EXPORT_SYMBOL(dev_queue_xmit_nit);
+#endif
 EXPORT_SYMBOL(dev_remove_pack);
 EXPORT_SYMBOL(dev_set_allmulti);
 EXPORT_SYMBOL(dev_set_promiscuity);
 EXPORT_SYMBOL(dev_change_flags);
+EXPORT_SYMBOL(dev_change_name);
 EXPORT_SYMBOL(dev_set_mtu);
 EXPORT_SYMBOL(free_netdev);
 EXPORT_SYMBOL(netdev_boot_setup_check);

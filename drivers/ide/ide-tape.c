@@ -2067,7 +2067,7 @@ static ide_startstop_t idetape_transfer_pc(ide_drive_t *drive)
 #ifdef CONFIG_BLK_DEV_IDEDMA
 	/* Begin DMA, if necessary */
 	if (test_bit(PC_DMA_IN_PROGRESS, &pc->flags))
-		hwif->dma_start(drive);
+		hwif->ide_dma_start(drive);
 #endif
 	/* Send the actual packet */
 	HWIF(drive)->atapi_output_bytes(drive, pc->c, 12);
@@ -2136,7 +2136,7 @@ static ide_startstop_t idetape_issue_packet_command (ide_drive_t *drive, idetape
 		(void)__ide_dma_off(drive);
 	}
 	if (test_bit(PC_DMA_RECOMMENDED, &pc->flags) && drive->using_dma)
-		dma_ok = !hwif->dma_setup(drive);
+		dma_ok = !hwif->ide_dma_setup(drive);
 
 	if (IDE_CONTROL_REG)
 		hwif->OUTB(drive->ctl, IDE_CONTROL_REG);

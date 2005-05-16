@@ -265,7 +265,7 @@ static void __init init_hwif_ns87415 (ide_hwif_t *hwif)
 		return;
 
 	hwif->OUTB(0x60, hwif->dma_status);
-	hwif->dma_setup = &ns87415_ide_dma_setup;
+	hwif->ide_dma_setup = &ns87415_ide_dma_setup;
 	hwif->ide_dma_check = &ns87415_ide_dma_check;
 	hwif->ide_dma_end = &ns87415_ide_dma_end;
 

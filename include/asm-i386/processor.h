@@ -289,14 +289,18 @@ extern unsigned int BIOS_revision;
 extern unsigned int mca_pentium_flag;
 
 /*
- * User space process size: 3GB (default).
+ * User space process size: (3GB default).
  */
-#define TASK_SIZE	(PAGE_OFFSET)
+#define __TASK_SIZE		(__PAGE_OFFSET)
+#define TASK_SIZE		((unsigned long)__TASK_SIZE)
 
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
-#define TASK_UNMAPPED_BASE	(PAGE_ALIGN(TASK_SIZE / 3))
+#define TASK_UNMAPPED_BASE	PAGE_ALIGN(TASK_SIZE/3)
+
+#define __HAVE_ARCH_ALIGN_STACK
+extern unsigned long arch_align_stack(unsigned long sp);
 
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
 
@@ -412,6 +416,11 @@ struct tss_struct {
 
 #define ARCH_MIN_TASKALIGN	16
 
+#if ((1<<CONFIG_STACK_SIZE_SHIFT) < PAGE_SIZE)
+#error (1<<CONFIG_STACK_SIZE_SHIFT) must be at least PAGE_SIZE
+#endif
+#define STACK_PAGE_COUNT	((1<<CONFIG_STACK_SIZE_SHIFT)/PAGE_SIZE)
+
 struct thread_struct {
 /* cached TLS descriptors. */
 	struct desc_struct tls_array[GDT_ENTRY_TLS_ENTRIES];
@@ -478,6 +487,7 @@ static inline void load_esp0(struct tss_struct *tss, struct thread_struct *threa
 	regs->xcs = __USER_CS;					\
 	regs->eip = new_eip;					\
 	regs->esp = new_esp;					\
+	load_user_cs_desc(smp_processor_id(), current->mm);	\
 } while (0)
 
 /* Forward declaration, a strange C thing */

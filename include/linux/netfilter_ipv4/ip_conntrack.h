@@ -8,6 +8,7 @@
 #include <linux/netfilter_ipv4/ip_conntrack_tuple.h>
 #include <linux/bitops.h>
 #include <linux/compiler.h>
+#include <linux/vserver/context.h>
 #include <asm/atomic.h>
 
 enum ip_conntrack_info
@@ -51,11 +52,13 @@ enum ip_conntrack_status {
 
 #include <linux/netfilter_ipv4/ip_conntrack_tcp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_icmp.h>
+#include <linux/netfilter_ipv4/ip_conntrack_proto_gre.h>
 #include <linux/netfilter_ipv4/ip_conntrack_sctp.h>
 
 /* per conntrack: protocol private data */
 union ip_conntrack_proto {
 	/* insert conntrack proto private data here */
+	struct ip_ct_gre gre;
 	struct ip_ct_sctp sctp;
 	struct ip_ct_tcp tcp;
 	struct ip_ct_icmp icmp;
@@ -63,9 +66,11 @@ union ip_conntrack_proto {
 
 union ip_conntrack_expect_proto {
 	/* insert expect proto private data here */
+	struct ip_ct_gre_expect gre;
 };
 
 /* Add protocol helper include file here */
+#include <linux/netfilter_ipv4/ip_conntrack_pptp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_amanda.h>
 #include <linux/netfilter_ipv4/ip_conntrack_ftp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_irc.h>
@@ -73,6 +78,7 @@ union ip_conntrack_expect_proto {
 /* per expectation: application helper private data */
 union ip_conntrack_expect_help {
 	/* insert conntrack helper private data (expect) here */
+	struct ip_ct_pptp_expect exp_pptp_info;
 	struct ip_ct_amanda_expect exp_amanda_info;
 	struct ip_ct_ftp_expect exp_ftp_info;
 	struct ip_ct_irc_expect exp_irc_info;
@@ -87,16 +93,19 @@ union ip_conntrack_expect_help {
 /* per conntrack: application helper private data */
 union ip_conntrack_help {
 	/* insert conntrack helper private data (master) here */
+	struct ip_ct_pptp_master ct_pptp_info;
 	struct ip_ct_ftp_master ct_ftp_info;
 	struct ip_ct_irc_master ct_irc_info;
 };
 
 #ifdef CONFIG_IP_NF_NAT_NEEDED
 #include <linux/netfilter_ipv4/ip_nat.h>
+#include <linux/netfilter_ipv4/ip_nat_pptp.h>
 
 /* per conntrack: nat application helper private data */
 union ip_conntrack_nat_help {
 	/* insert nat helper private data here */
+	struct ip_nat_pptp nat_pptp_info;
 };
 #endif
 
@@ -214,6 +223,11 @@ struct ip_conntrack
 
 #if defined(CONFIG_IP_NF_CONNTRACK_MARK)
 	unsigned long mark;
+#endif
+
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	/* VServer context id */
+	xid_t xid[IP_CT_DIR_MAX];
 #endif
 
 	/* Traversed often, so hopefully in different cacheline to top */

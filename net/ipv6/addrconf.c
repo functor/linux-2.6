@@ -2659,6 +2659,10 @@ static int inet6_dump_addr(struct sk_buff *skb, struct netlink_callback *cb,
 	struct ifmcaddr6 *ifmca;
 	struct ifacaddr6 *ifaca;
 
+	/* no ipv6 inside a vserver for now */
+	if (skb->sk && skb->sk->sk_vx_info)
+		return skb->len;
+
 	s_idx = cb->args[0];
 	s_ip_idx = ip_idx = cb->args[1];
 	read_lock(&dev_base_lock);
@@ -2877,6 +2881,10 @@ static int inet6_dump_ifinfo(struct sk_buff *skb, struct netlink_callback *cb)
 	int s_idx = cb->args[0];
 	struct net_device *dev;
 	struct inet6_dev *idev;
+
+	/* no ipv6 inside a vserver for now */
+	if (skb->sk && skb->sk->sk_vx_info)
+		return skb->len;
 
 	read_lock(&dev_base_lock);
 	for (dev=dev_base, idx=0; dev; dev = dev->next, idx++) {

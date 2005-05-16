@@ -1635,8 +1635,10 @@ static int snd_ensoniq_1371_mixer(ensoniq_t * ensoniq)
 		if (err < 0)
 			return err;
 	}
-	if ((ensoniq->subsystem_vendor_id == 0x1274) &&
-	    (ensoniq->subsystem_device_id == 0x2000)) { /* GA-7DXR */
+	if (((ensoniq->subsystem_vendor_id == 0x1274) &&
+	    (ensoniq->subsystem_device_id == 0x2000)) || /* GA-7DXR */
+	    ((ensoniq->subsystem_vendor_id == 0x1458) &&
+	    (ensoniq->subsystem_device_id == 0xa000))) { /* GA-8IEXP */
 		 err = snd_ctl_add(card, snd_ctl_new1(&snd_ens1373_line, ensoniq));
 		 if (err < 0)
 			 return err;
@@ -1930,7 +1932,6 @@ static int __devinit snd_ensoniq_create(snd_card_t * card,
 	ensoniq->subsystem_vendor_id = cmdw;
 	pci_read_config_word(pci, PCI_SUBSYSTEM_ID, &cmdw);
 	ensoniq->subsystem_device_id = cmdw;
-	snd_ensoniq_proc_init(ensoniq);
 #ifdef CHIP1370
 #if 0
 	ensoniq->ctrl = ES_1370_CDC_EN | ES_1370_SERR_DISABLE | ES_1370_PCLKDIVO(ES_1370_SRTODIV(8000));
@@ -2022,6 +2023,8 @@ static int __devinit snd_ensoniq_create(snd_card_t * card,
 		snd_ensoniq_free(ensoniq);
 		return err;
 	}
+
+	snd_ensoniq_proc_init(ensoniq);
 
 	snd_card_set_dev(card, &pci->dev);
 

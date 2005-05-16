@@ -285,12 +285,16 @@ void die(const char * str, struct pt_regs * regs, long err)
 	bust_spinlocks(1);
 	printk("%s: %04lx [#%d]\n", str, err & 0xffff, ++die_counter);
         show_regs(regs);
+	try_crashdump(regs);  
 	bust_spinlocks(0);
         spin_unlock_irq(&die_lock);
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
-	if (panic_on_oops)
+	if (panic_on_oops) {
+		if (netdump_func)
+			netdump_func = NULL;
 		panic("Fatal exception: panic_on_oops");
+	}
         do_exit(SIGSEGV);
 }
 

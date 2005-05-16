@@ -17,6 +17,7 @@
 #include <linux/acpi.h>
 #include <linux/efi.h>
 #include <linux/nodemask.h>
+#include <linux/module.h>
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
 #include <asm/meminit.h>
@@ -544,6 +545,8 @@ void show_mem(void)
 	printk("Total of %ld pages in page table cache\n", pgtable_cache_size);
 	printk("%d free buffer pages\n", nr_free_buffer_pages());
 }
+
+EXPORT_SYMBOL_GPL(show_mem);
 
 /**
  * call_pernode_memory - use SRAT to call callback functions with node info

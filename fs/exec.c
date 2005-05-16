@@ -47,6 +47,9 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
+#include <linux/ckrm_events.h>
+#include <linux/ckrm_mem_inline.h>
+#include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -57,6 +60,9 @@
 
 int core_uses_pid;
 char core_pattern[65] = "core";
+int suid_dumpable = 0;
+
+EXPORT_SYMBOL(suid_dumpable);
 /* The maximal length of core_pattern is also specified in sysctl.c */
 
 static struct linux_binfmt *formats;
@@ -320,7 +326,8 @@ void install_arg_page(struct vm_area_struct *vma,
 		pte_unmap(pte);
 		goto out;
 	}
-	mm->rss++;
+	// mm->rss++;
+	vx_rsspages_inc(mm);
 	lru_cache_add_active(page);
 	set_pte(pte, pte_mkdirty(pte_mkwrite(mk_pte(
 					page, vma->vm_page_prot))));
@@ -336,6 +343,8 @@ out_sig:
 	__free_page(page);
 	force_sig(SIGKILL, current);
 }
+
+#define EXTRA_STACK_VM_PAGES	20	/* random */
 
 int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 {
@@ -374,14 +383,14 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	memmove(to, to + offset, PAGE_SIZE - offset);
 	kunmap(bprm->page[j - 1]);
 
-	/* Adjust bprm->p to point to the end of the strings. */
-	bprm->p = PAGE_SIZE * i - offset;
-
 	/* Limit stack size to 1GB */
 	stack_base = current->signal->rlim[RLIMIT_STACK].rlim_max;
 	if (stack_base > (1 << 30))
 		stack_base = 1 << 30;
 	stack_base = PAGE_ALIGN(STACK_TOP - stack_base);
+
+	/* Adjust bprm->p to point to the end of the strings. */
+	bprm->p = stack_base + PAGE_SIZE * i - offset;
 
 	mm->arg_start = stack_base;
 	arg_size = i << PAGE_SHIFT;
@@ -390,12 +399,19 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	while (i < MAX_ARG_PAGES)
 		bprm->page[i++] = NULL;
 #else
+#ifdef __HAVE_ARCH_ALIGN_STACK
+	stack_base = arch_align_stack(STACK_TOP - MAX_ARG_PAGES*PAGE_SIZE);
+	stack_base = PAGE_ALIGN(stack_base);
+#else
 	stack_base = STACK_TOP - MAX_ARG_PAGES * PAGE_SIZE;
-	mm->arg_start = bprm->p + stack_base;
+#endif
+	bprm->p += stack_base;
+	mm->arg_start = bprm->p;
 	arg_size = STACK_TOP - (PAGE_MASK & (unsigned long) mm->arg_start);
 #endif
 
-	bprm->p += stack_base;
+	arg_size += EXTRA_STACK_VM_PAGES * PAGE_SIZE;
+
 	if (bprm->loader)
 		bprm->loader += stack_base;
 	bprm->exec += stack_base;
@@ -404,7 +420,8 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt)
 		return -ENOMEM;
 
-	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT)) {
+	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT) ||
+		!vx_vmpages_avail(mm, arg_size >> PAGE_SHIFT)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
@@ -416,11 +433,10 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 		mpnt->vm_mm = mm;
 #ifdef CONFIG_STACK_GROWSUP
 		mpnt->vm_start = stack_base;
-		mpnt->vm_end = PAGE_MASK &
-			(PAGE_SIZE - 1 + (unsigned long) bprm->p);
+		mpnt->vm_end = stack_base + arg_size;
 #else
-		mpnt->vm_start = PAGE_MASK & (unsigned long) bprm->p;
 		mpnt->vm_end = STACK_TOP;
+		mpnt->vm_start = mpnt->vm_end - arg_size;
 #endif
 		/* Adjust stack execute permissions; explicitly enable
 		 * for EXSTACK_ENABLE_X, disable for EXSTACK_DISABLE_X
@@ -438,7 +454,9 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 			kmem_cache_free(vm_area_cachep, mpnt);
 			return ret;
 		}
-		mm->stack_vm = mm->total_vm = vma_pages(mpnt);
+		// mm->stack_vm = mm->total_vm = vma_pages(mpnt);
+		vx_vmpages_sub(mm, mm->total_vm - vma_pages(mpnt));
+		mm->stack_vm = mm->total_vm;
 	}
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
@@ -546,6 +564,7 @@ static int exec_mmap(struct mm_struct *mm)
 	activate_mm(active_mm, mm);
 	task_unlock(tsk);
 	arch_pick_mmap_layout(mm);
+	ckrm_task_change_mm(tsk, old_mm, mm);
 	if (old_mm) {
 		if (active_mm != old_mm) BUG();
 		mmput(old_mm);
@@ -720,14 +739,11 @@ no_thread_group:
 		atomic_set(&newsighand->count, 1);
 		memcpy(newsighand->action, oldsighand->action,
 		       sizeof(newsighand->action));
-
 		write_lock_irq(&tasklist_lock);
 		spin_lock(&oldsighand->siglock);
 		spin_lock(&newsighand->siglock);
-
 		current->sighand = newsighand;
 		recalc_sigpending();
-
 		spin_unlock(&newsighand->siglock);
 		spin_unlock(&oldsighand->siglock);
 		write_unlock_irq(&tasklist_lock);
@@ -832,6 +848,9 @@ int flush_old_exec(struct linux_binprm * bprm)
 
 	if (current->euid == current->uid && current->egid == current->gid)
 		current->mm->dumpable = 1;
+	else
+		current->mm->dumpable = suid_dumpable;
+		
 	name = bprm->filename;
 	for (i=0; (ch = *(name++)) != '\0';) {
 		if (ch == '/')
@@ -843,13 +862,14 @@ int flush_old_exec(struct linux_binprm * bprm)
 	tcomm[i] = '\0';
 	set_task_comm(current, tcomm);
 
+	current->flags &= ~PF_RELOCEXEC;
 	flush_thread();
 
 	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid || 
 	    permission(bprm->file->f_dentry->d_inode,MAY_READ, NULL) ||
 	    (bprm->interp_flags & BINPRM_FLAGS_ENFORCE_NONDUMP)) {
 		suid_keys(current);
-		current->mm->dumpable = 0;
+		current->mm->dumpable = suid_dumpable;
 	}
 
 	/* An exec changes our domain. We are no longer part of the thread
@@ -1050,6 +1070,7 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 					fput(bprm->file);
 				bprm->file = NULL;
 				current->did_exec = 1;
+				ckrm_cb_exec(bprm->filename);
 				return retval;
 			}
 			read_lock(&binfmt_lock);
@@ -1325,6 +1346,7 @@ static void zap_threads (struct mm_struct *mm)
 	struct task_struct *g, *p;
 	struct task_struct *tsk = current;
 	struct completion *vfork_done = tsk->vfork_done;
+	int traced = 0;
 
 	/*
 	 * Make sure nobody is waiting for us to release the VM,
@@ -1340,10 +1362,65 @@ static void zap_threads (struct mm_struct *mm)
 		if (mm == p->mm && p != tsk) {
 			force_sig_specific(SIGKILL, p);
 			mm->core_waiters++;
+			if (unlikely(p->ptrace) &&
+			    unlikely(p->parent->mm == mm))
+				traced = 1;
 		}
 	while_each_thread(g,p);
 
 	read_unlock(&tasklist_lock);
+
+	while (unlikely(traced)) {
+		/*
+		 * We are zapping a thread and the thread it ptraces.
+		 * The tracee won't come out of TASK_TRACED state until
+		 * its ptracer detaches.  That happens when the ptracer
+		 * dies, but it synchronizes with us and so won't get
+		 * that far until we finish the core dump.  If we're
+		 * waiting for the tracee to synchronize but it stays
+		 * blocked in TASK_TRACED, then we deadlock.  So, for
+		 * this weirdo case we have to do another round with
+		 * tasklist_lock write-locked to __ptrace_unlink the
+		 * children that might cause this deadlock.  That will
+		 * wake them up to process their pending SIGKILL.
+		 *
+		 * First, give everyone we just killed a chance to run
+		 * so they can all get into the coredump synchronization.
+		 * That should leave only the TASK_TRACED stragglers for
+		 * us to wake up.  If a ptracer is still running, we'll
+		 * have to come around again after letting it finish.
+		 */
+		yield();
+		traced = 0;
+		write_lock_irq(&tasklist_lock);
+		do_each_thread(g,p) {
+			if (mm != p->mm || p == tsk ||
+			    !p->ptrace || p->parent->mm != mm)
+				continue;
+			if ((p->parent->flags & (PF_SIGNALED|PF_EXITING)) ||
+			    (p->parent->state & (TASK_TRACED|TASK_STOPPED))) {
+				/*
+				 * The parent is in the process of exiting
+				 * itself, or else it's stopped right now.
+				 * It cannot be in a ptrace call, and would
+				 * have to read_lock tasklist_lock before
+				 * it could start one, so we are safe here.
+				 */
+				__ptrace_unlink(p);
+			} else {
+				/*
+				 * Blargh!  The ptracer is not dying
+				 * yet, so we cannot be sure that it
+				 * isn't in the middle of a ptrace call.
+				 * We'll have to let it run to get into
+				 * coredump_wait and come around another
+				 * time to detach its tracee.
+				 */
+				traced = 1;
+			}
+		} while_each_thread(g,p);
+		write_unlock_irq(&tasklist_lock);
+	}
 }
 
 static void coredump_wait(struct mm_struct *mm)
@@ -1373,14 +1450,28 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 	struct inode * inode;
 	struct file * file;
 	int retval = 0;
+	int fsuid = current->fsuid;
+	int flag = 0;
 
 	binfmt = current->binfmt;
 	if (!binfmt || !binfmt->core_dump)
 		goto fail;
+	if (current->tux_exit)
+		current->tux_exit();
 	down_write(&mm->mmap_sem);
 	if (!mm->dumpable) {
 		up_write(&mm->mmap_sem);
 		goto fail;
+	}
+
+	/*
+	 *	We cannot trust fsuid as being the "true" uid of the
+	 *	process nor do we know its entire history. We only know it
+	 *	was tainted so we dump it as root in mode 2.
+	 */
+	if (mm->dumpable == 2) {	/* Setuid core dump mode */
+		flag = O_EXCL;		/* Stop rewrite attacks */
+		current->fsuid = 0;	/* Dump root private */
 	}
 	mm->dumpable = 0;
 	init_completion(&mm->core_done);
@@ -1398,7 +1489,7 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
  	lock_kernel();
 	format_corename(corename, core_pattern, signr);
 	unlock_kernel();
-	file = filp_open(corename, O_CREAT | 2 | O_NOFOLLOW | O_LARGEFILE, 0600);
+	file = filp_open(corename, O_CREAT | 2 | O_NOFOLLOW | O_LARGEFILE | flag, 0600);
 	if (IS_ERR(file))
 		goto fail_unlock;
 	inode = file->f_dentry->d_inode;
@@ -1423,6 +1514,7 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 close_fail:
 	filp_close(file, NULL);
 fail_unlock:
+	current->fsuid = fsuid;
 	complete_all(&mm->core_done);
 fail:
 	return retval;

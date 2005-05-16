@@ -37,10 +37,12 @@ extern int smp_num_siblings;
 extern cpumask_t cpu_sibling_map[];
 
 extern void smp_flush_tlb(void);
+extern void dump_send_ipi(void);
 extern void smp_message_irq(int cpl, void *dev_id, struct pt_regs *regs);
 extern void smp_invalidate_rcv(void);		/* Process an NMI */
 extern void (*mtrr_hook) (void);
 extern void zap_low_mappings (void);
+extern void stop_this_cpu(void *);
 
 #define MAX_APICID 256
 extern u8 x86_cpu_to_apicid[];

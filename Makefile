@@ -1,8 +1,8 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 10
-EXTRAVERSION =
-NAME=Woozy Numbat
+EXTRAVERSION = -1.14_FC2.1.planetlab
+NAME=AC 1
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
@@ -520,6 +520,10 @@ ifdef CONFIG_FRAME_POINTER
 CFLAGS		+= -fno-omit-frame-pointer
 else
 CFLAGS		+= -fomit-frame-pointer
+endif
+
+ifdef CONFIG_X86_STACK_CHECK
+CFLAGS		+= -p
 endif
 
 ifdef CONFIG_DEBUG_INFO

@@ -110,7 +110,6 @@ nlm_lookup_host(int server, struct sockaddr_in *sin,
 	host->h_addr.sin_port = 0;	/* ouch! */
 	host->h_version    = version;
 	host->h_proto      = proto;
-	host->h_authflavor = RPC_AUTH_UNIX;
 	host->h_rpcclnt    = NULL;
 	init_MUTEX(&host->h_sema);
 	host->h_nextrebind = jiffies + NLM_HOST_REBIND;
@@ -186,15 +185,18 @@ nlm_bind_host(struct nlm_host *host)
 		}
 	} else {
 		xprt = xprt_create_proto(host->h_proto, &host->h_addr, NULL);
-		if (IS_ERR(xprt))
+		if (IS_ERR(xprt)) {
+			dprintk("lockd: xprt_create_proto failed: %ld\n", PTR_ERR(xprt));
 			goto forgetit;
-
+		}
 		xprt_set_timeout(&xprt->timeout, 5, nlmsvc_timeout);
 
+		/* Existing NLM servers accept AUTH_UNIX only */
 		clnt = rpc_create_client(xprt, host->h_name, &nlm_program,
-					host->h_version, host->h_authflavor);
+					host->h_version, RPC_AUTH_UNIX);
 		if (IS_ERR(clnt)) {
 			xprt_destroy(xprt);
+			dprintk("lockd: rpc_create_client failed: %ld\n", PTR_ERR(clnt));
 			goto forgetit;
 		}
 		clnt->cl_autobind = 1;	/* turn on pmap queries */

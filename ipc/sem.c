@@ -71,7 +71,9 @@
 #include <linux/time.h>
 #include <linux/smp_lock.h>
 #include <linux/security.h>
+#include <linux/vs_base.h>
 #include <linux/syscalls.h>
+
 #include <asm/uaccess.h>
 #include "util.h"
 
@@ -176,6 +178,7 @@ static int newary (key_t key, int nsems, int semflg)
 
 	sma->sem_perm.mode = (semflg & S_IRWXUGO);
 	sma->sem_perm.key = key;
+	sma->sem_perm.xid = vx_current_xid();
 
 	sma->sem_perm.security = NULL;
 	retval = security_sem_alloc(sma);
@@ -358,8 +361,22 @@ static void update_queue (struct sem_array * sma)
 		if (error <= 0) {
 			struct sem_queue *n;
 			remove_from_queue(sma,q);
-			n = q->next;
 			q->status = IN_WAKEUP;
+			/*
+			 * Continue scanning. The next operation
+			 * that must be checked depends on the type of the
+			 * completed operation:
+			 * - if the operation modified the array, then
+			 *   restart from the head of the queue and
+			 *   check for threads that might be waiting
+			 *   for semaphore values to become 0.
+			 * - if the operation didn't modify the array,
+			 *   then just continue.
+			 */
+			if (q->alter)
+				n = sma->sem_pending;
+			else
+				n = q->next;
 			wake_up_process(q->sleeper);
 			/* hands-off: q will disappear immediately after
 			 * writing q->status.
@@ -1119,8 +1136,11 @@ retry_undos:
 		goto out_unlock_free;
 
 	error = try_atomic_semop (sma, sops, nsops, un, current->tgid);
-	if (error <= 0)
-		goto update;
+	if (error <= 0) {
+		if (alter && error == 0)
+			update_queue (sma);
+		goto out_unlock_free;
+	}
 
 	/* We need to sleep on this operation, so we put the current
 	 * task into the pending queue and go to sleep.
@@ -1132,6 +1152,7 @@ retry_undos:
 	queue.undo = un;
 	queue.pid = current->tgid;
 	queue.id = semid;
+	queue.alter = alter;
 	if (alter)
 		append_to_queue(sma ,&queue);
 	else
@@ -1183,9 +1204,6 @@ retry_undos:
 	remove_from_queue(sma,&queue);
 	goto out_unlock_free;
 
-update:
-	if (alter)
-		update_queue (sma);
 out_unlock_free:
 	sem_unlock(sma);
 out_free:
@@ -1329,7 +1347,11 @@ static int sysvipc_sem_read_proc(char *buffer, char **start, off_t offset, int l
 	for(i = 0; i <= sem_ids.max_id; i++) {
 		struct sem_array *sma;
 		sma = sem_lock(i);
-		if(sma) {
+		if (sma) {
+			if (!vx_check(sma->sem_perm.xid, VX_IDENT)) {
+				sem_unlock(sma);
+				continue;
+			}
 			len += sprintf(buffer + len, "%10d %10d  %4o %10lu %5u %5u %5u %5u %10lu %10lu\n",
 				sma->sem_perm.key,
 				sem_buildid(i,sma->sem_perm.seq),

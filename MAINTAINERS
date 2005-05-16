@@ -663,7 +663,7 @@ S:	Maintained
 DEVICE NUMBER REGISTRY
 P:	Torben Mathiasen
 M:	device@lanana.org
-W:	http://lanana.org/docs/device-list/index.html
+W:	http://www.lanana.org/docs/device-list/index.html
 L:	linux-kernel@vger.kernel.org
 S:	Maintained
 
@@ -1257,6 +1257,17 @@ KERNEL EVENT LAYER (KOBJECT_UEVENT)
 P:	Robert Love
 M:	rml@novell.com
 L:	linux-kernel@vger.kernel.org
+S:	Maintained
+
+KEXEC
+P:	Eric Biederman
+P:	Randy Dunlap
+M:	ebiederm@xmission.com
+M:	rddunlap@osdl.org
+W:	http://www.xmission.com/~ebiederm/files/kexec/
+W:	http://developer.osdl.org/rddunlap/kexec/
+L:	linux-kernel@vger.kernel.org
+L:	fastboot@osdl.org
 S:	Maintained
 
 LANMEDIA WAN CARD DRIVER

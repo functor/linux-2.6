@@ -290,7 +290,6 @@ sn_pci_fixup_slot(struct pci_dev *dev)
 			addr |= __IA64_UNCACHED_OFFSET;
 			dev->resource[idx].start = addr;
 			dev->resource[idx].end = addr + size;
-			dev->resource[idx].parent = &ioport_resource;
 		}
 
 		if (dev->resource[idx].flags & IORESOURCE_IO)
@@ -323,7 +322,6 @@ sn_pci_fixup_slot(struct pci_dev *dev)
 			addr |= __IA64_UNCACHED_OFFSET;
 			dev->resource[idx].start = addr;
 			dev->resource[idx].end = addr + size;
-			dev->resource[idx].parent = &iomem_resource;
 		}
 
 		if (dev->resource[idx].flags & IORESOURCE_MEM)
@@ -353,24 +351,10 @@ sn_pci_fixup_slot(struct pci_dev *dev)
                         addr |= __IA64_UNCACHED_OFFSET;
                         dev->resource[PCI_ROM_RESOURCE].start = addr;
                         dev->resource[PCI_ROM_RESOURCE].end = addr + size;
-			dev->resource[idx].parent = &iomem_resource;
                         if (dev->resource[PCI_ROM_RESOURCE].flags & IORESOURCE_MEM)
                                 cmd |= PCI_COMMAND_MEMORY;
                 }
-        } else {
-		/*
-		 * Remove other ROM resources since they don't have valid
-		 * CPU addresses.
-		 */
-                size = dev->resource[PCI_ROM_RESOURCE].end -
-                        dev->resource[PCI_ROM_RESOURCE].start;
-
-		if (size) {
-			dev->resource[PCI_ROM_RESOURCE].start = 0;
-			dev->resource[PCI_ROM_RESOURCE].end = 0;
-			dev->resource[PCI_ROM_RESOURCE].flags = 0;
-		}
-	}
+        }
 
 	/*
 	 * Update the Command Word on the Card.

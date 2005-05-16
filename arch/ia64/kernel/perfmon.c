@@ -38,7 +38,11 @@
 #include <linux/pagemap.h>
 #include <linux/mount.h>
 #include <linux/version.h>
+#include <linux/vs_memory.h>
+#include <linux/vs_cvirt.h>
 #include <linux/bitops.h>
+#include <linux/vs_memory.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/errno.h>
 #include <asm/intrinsics.h>
@@ -2341,7 +2345,8 @@ pfm_smpl_buffer_alloc(struct task_struct *task, pfm_context_t *ctx, unsigned lon
 	 */
 	insert_vm_struct(mm, vma);
 
-	mm->total_vm  += size >> PAGE_SHIFT;
+	// mm->total_vm  += size >> PAGE_SHIFT;
+	vx_vmpages_add(mm, size >> PAGE_SHIFT);
 	vm_stat_account(vma);
 	up_write(&task->mm->mmap_sem);
 

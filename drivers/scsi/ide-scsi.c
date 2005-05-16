@@ -569,7 +569,7 @@ static ide_startstop_t idescsi_transfer_pc(ide_drive_t *drive)
 	atapi_output_bytes(drive, scsi->pc->c, 12);
 	if (test_bit (PC_DMA_OK, &pc->flags)) {
 		set_bit (PC_DMA_IN_PROGRESS, &pc->flags);
-		hwif->dma_start(drive);
+		hwif->ide_dma_start(drive);
 	}
 	return ide_started;
 }
@@ -636,7 +636,7 @@ static ide_startstop_t idescsi_issue_pc (ide_drive_t *drive, idescsi_pc_t *pc)
 	feature.all = 0;
 	if (drive->using_dma && !idescsi_map_sg(drive, pc)) {
 		hwif->sg_mapped = 1;
-		feature.b.dma = !hwif->dma_setup(drive);
+		feature.b.dma = !hwif->ide_dma_setup(drive);
 		hwif->sg_mapped = 0;
 	}
 
@@ -753,10 +753,16 @@ static ide_driver_t idescsi_driver = {
 	.drives			= LIST_HEAD_INIT(idescsi_driver.drives),
 };
 
+static int ide_scsi_warned;
+
 static int idescsi_ide_open(struct inode *inode, struct file *filp)
 {
 	ide_drive_t *drive = inode->i_bdev->bd_disk->private_data;
 	drive->usage++;
+	if (!ide_scsi_warned++) {
+		printk(KERN_WARNING "ide-scsi: Warning this device driver is only intended for specialist devices.\n");
+		printk(KERN_WARNING "ide-scsi: Do not use for cd burning, use /dev/hdX directly instead.\n");
+	}
 	return 0;
 }
 

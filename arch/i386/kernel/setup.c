@@ -48,6 +48,7 @@
 #include <asm/io_apic.h>
 #include <asm/ist.h>
 #include <asm/io.h>
+#include <asm/crash_dump.h>
 #include "setup_arch_pre.h"
 #include <bios_ebda.h>
 
@@ -57,6 +58,7 @@
 unsigned long init_pg_tables_end __initdata = ~0UL;
 
 int disable_pse __initdata = 0;
+unsigned int dump_enabled;
 
 /*
  * Machine setup..
@@ -662,6 +664,8 @@ static inline void copy_edd(void)
  */
 #define LOWMEMSIZE()	(0x9f000)
 
+unsigned long crashdump_addr = 0xdeadbeef;
+
 static void __init parse_cmdline_early (char ** cmdline_p)
 {
 	char c = ' ', *to = command_line, *from = saved_command_line;
@@ -708,6 +712,11 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 			if (to != command_line)
 				to--;
 			if (!memcmp(from+7, "exactmap", 8)) {
+				/* If we are doing a crash dump, we
+				 * still need to know the real mem
+				 * size.
+				 */
+				set_saved_max_pfn();
 				from += 8+7;
 				e820.nr_map = 0;
 				userdef = 1;
@@ -814,7 +823,13 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 		 */
 		if (c == ' ' && !memcmp(from, "highmem=", 8))
 			highmem_pages = memparse(from+8, &from) >> PAGE_SHIFT;
+
+		if (!memcmp(from, "dump", 4))
+			dump_enabled = 1;
 	
+		if (c == ' ' && !memcmp(from, "crashdump=", 10))
+			crashdump_addr = memparse(from+10, &from); 
+			
 		/*
 		 * vmalloc=size forces the vmalloc area to be exactly 'size'
 		 * bytes. This can be used to increase (or decrease) the
@@ -1110,6 +1125,9 @@ static unsigned long __init setup_memory(void)
 		}
 	}
 #endif
+
+	crash_reserve_bootmem();
+
 	return max_low_pfn;
 }
 #else
@@ -1288,6 +1306,10 @@ __setup("noreplacement", noreplacement_setup);
 
 static char * __init machine_specific_memory_setup(void);
 
+#ifdef CONFIG_CRASH_DUMP_SOFTBOOT
+extern void crashdump_reserve(void);
+#endif
+
 /*
  * Determine if we were loaded by an EFI loader.  If so, then we have also been
  * passed the efi memmap, systab, etc., so we should use these data structures
@@ -1392,6 +1414,10 @@ void __init setup_arch(char **cmdline_p)
 	}
 #endif
 
+
+#ifdef CONFIG_CRASH_DUMP_SOFTBOOT
+	crashdump_reserve(); /* Preserve crash dump state from prev boot */
+#endif
 
 	dmi_scan_machine();
 

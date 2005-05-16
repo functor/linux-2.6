@@ -23,6 +23,10 @@
 #include <asm/mmu_context.h>
 #include <asm/processor.h>
 
+#define arch_add_exec_range(mm, limit)		do { ; } while (0)
+#define arch_flush_exec_range(mm)		do { ; } while (0)
+#define arch_remove_exec_range(mm, limit)	do { ; } while (0)
+
 /*
  * Very stupidly, we used to get new pgd's and pmd's, init their contents
  * to point to the NULL versions of the next level page table, later on

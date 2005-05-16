@@ -12,6 +12,8 @@ raid6-objs	:= raid6main.o raid6algos.o raid6recov.o raid6tables.o \
 		   raid6mmx.o raid6sse1.o raid6sse2.o
 hostprogs-y	:= mktables
 
+CFLAGS_raid6int8.o += -O2
+
 # Note: link order is important.  All raid personalities
 # and xor.o must come before md.o, as they each initialise 
 # themselves, and md.o may use the personalities when it 

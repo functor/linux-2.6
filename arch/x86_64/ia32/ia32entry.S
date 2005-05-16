@@ -347,7 +347,7 @@ ia32_sys_call_table:
 	.quad sys32_pipe
 	.quad compat_sys_times
 	.quad quiet_ni_syscall			/* old prof syscall holder */
-	.quad sys_brk		/* 45 */
+	.quad sys32_brk		/* 45 */
 	.quad sys_setgid16
 	.quad sys_getgid16
 	.quad sys_signal
@@ -393,7 +393,7 @@ ia32_sys_call_table:
 	.quad sys_reboot
 	.quad compat_sys_old_readdir
 	.quad sys32_mmap		/* 90 */
-	.quad sys_munmap
+	.quad sys32_munmap
 	.quad sys_truncate
 	.quad sys_ftruncate
 	.quad sys_fchmod
@@ -465,7 +465,7 @@ ia32_sys_call_table:
 	.quad sys_sched_get_priority_min  /* 160 */
 	.quad sys_sched_rr_get_interval
 	.quad compat_sys_nanosleep
-	.quad sys_mremap
+	.quad sys32_mremap
 	.quad sys_setresuid16
 	.quad sys_getresuid16	/* 165 */
 	.quad sys32_vm86_warning	/* vm86 */ 
@@ -524,7 +524,15 @@ ia32_sys_call_table:
 	.quad sys_madvise
 	.quad compat_sys_getdents64	/* 220 getdents64 */
 	.quad compat_sys_fcntl64	
-	.quad quiet_ni_syscall		/* tux */
+#ifdef CONFIG_TUX
+	.quad __sys_tux
+#else
+# ifdef CONFIG_TUX_MODULE
+	.quad sys_tux
+# else
+	.quad quiet_ni_syscall
+# endif
+#endif
 	.quad quiet_ni_syscall    	/* security */
 	.quad sys_gettid	
 	.quad sys_readahead	/* 225 */
@@ -575,7 +583,7 @@ ia32_sys_call_table:
 	.quad sys_tgkill		/* 270 */
 	.quad compat_sys_utimes
 	.quad sys32_fadvise64_64
-	.quad quiet_ni_syscall	/* sys_vserver */
+	.quad sys_vserver
 	.quad sys_mbind
 	.quad compat_sys_get_mempolicy	/* 275 */
 	.quad sys_set_mempolicy

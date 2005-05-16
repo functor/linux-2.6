@@ -28,6 +28,10 @@
 #include <linux/syscalls.h>
 #include <linux/mount.h>
 #include <linux/audit.h>
+#include <linux/proc_fs.h>
+#include <linux/vserver/inode.h>
+#include <linux/vserver/debug.h>
+
 #include <asm/namei.h>
 #include <asm/uaccess.h>
 
@@ -224,13 +228,47 @@ int generic_permission(struct inode *inode, int mask,
 	return -EACCES;
 }
 
+static inline int xid_permission(struct inode *inode, int mask, struct nameidata *nd)
+{
+	if (inode->i_xid == 0)
+		return 0;
+
+#ifdef CONFIG_VSERVER_FILESHARING
+	/* MEF: PlanetLab FS module assumes that any file that can be
+	 * named (e.g., via a cross mount) is not hidden from another
+	 * context or the admin context.
+	 */
+	if (vx_check(inode->i_xid,VX_STATIC|VX_DYNAMIC))
+		return 0;
+#endif
+	if (vx_check(inode->i_xid,VX_ADMIN|VX_WATCH|VX_IDENT))
+		return 0;
+
+	vxwprintk(1, "xid=%d denied access to %p[#%d,%lu] »%s«.",
+		vx_current_xid(), inode, inode->i_xid, inode->i_ino,
+		vxd_path(nd->dentry, nd->mnt));
+	return -EACCES;
+}
+
 int permission(struct inode * inode,int mask, struct nameidata *nd)
 {
 	int retval;
 	int submask;
+ 	umode_t	mode = inode->i_mode;
+
+	/* Prevent vservers from escaping chroot() barriers */
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
+		return -EACCES;
 
 	/* Ordinary permission routines do not understand MAY_APPEND. */
 	submask = mask & ~MAY_APPEND;
+
+	if (nd && (mask & MAY_WRITE) && MNT_IS_RDONLY(nd->mnt) &&
+		(S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
+		return -EROFS;
+
+	if ((retval = xid_permission(inode, mask, nd)))
+		return retval;
 
 	if (inode->i_op && inode->i_op->permission)
 		retval = inode->i_op->permission(inode, submask, nd);
@@ -630,27 +668,62 @@ struct path {
  *  It _is_ time-critical.
  */
 static int do_lookup(struct nameidata *nd, struct qstr *name,
-		     struct path *path)
+		     struct path *path, int atomic)
 {
 	struct vfsmount *mnt = nd->mnt;
 	struct dentry *dentry = __d_lookup(nd->dentry, name);
+	struct inode *inode;
 
 	if (!dentry)
 		goto need_lookup;
 	if (dentry->d_op && dentry->d_op->d_revalidate)
 		goto need_revalidate;
+	inode = dentry->d_inode;
+	if (!inode)
+		goto done;
+	if (inode->i_sb->s_magic == PROC_SUPER_MAGIC) {
+		struct proc_dir_entry *de = PDE(inode);
+
+		if (de && !vx_hide_check(0, de->vx_flags))
+			goto hidden;
+	}
+#ifdef CONFIG_VSERVER_FILESHARING
+	/* MEF: PlanetLab FS module assumes that any file that can be
+	 * named (e.g., via a cross mount) is not hidden from another
+	 * context or the admin context.
+	 */
+	if (vx_check(inode->i_xid,VX_STATIC|VX_DYNAMIC|VX_ADMIN)) {
+		/* do nothing */
+	}
+	else /* do the following check */
+#endif
+	if (!vx_check(inode->i_xid, 
+		      VX_WATCH|
+		      VX_HOSTID|
+		      VX_IDENT))
+		goto hidden;
 done:
 	path->mnt = mnt;
 	path->dentry = dentry;
 	return 0;
+hidden:
+	vxwprintk(1, "xid=%d did lookup hidden %p[#%d,%lu] »%s«.",
+		vx_current_xid(), inode, inode->i_xid, inode->i_ino,
+		vxd_path(dentry, mnt));
+	dput(dentry);
+	return -ENOENT;
 
 need_lookup:
+	if (atomic)
+		return -EWOULDBLOCKIO;
 	dentry = real_lookup(nd->dentry, name, nd);
 	if (IS_ERR(dentry))
 		goto fail;
 	goto done;
 
 need_revalidate:
+	if (atomic)
+		return -EWOULDBLOCKIO;
 	if (dentry->d_op->d_revalidate(dentry, nd))
 		goto done;
 	if (d_invalidate(dentry))
@@ -674,9 +747,11 @@ int fastcall link_path_walk(const char * name, struct nameidata *nd)
 {
 	struct path next;
 	struct inode *inode;
-	int err;
+	int err, atomic;
 	unsigned int lookup_flags = nd->flags;
-	
+
+	atomic = (lookup_flags & LOOKUP_ATOMIC);
+
 	while (*name=='/')
 		name++;
 	if (!*name)
@@ -746,7 +821,7 @@ int fastcall link_path_walk(const char * name, struct nameidata *nd)
 		}
 		nd->flags |= LOOKUP_CONTINUE;
 		/* This does the actual lookups.. */
-		err = do_lookup(nd, &this, &next);
+		err = do_lookup(nd, &this, &next, atomic);
 		if (err)
 			break;
 		/* Check mountpoints.. */
@@ -808,7 +883,7 @@ last_component:
 			if (err < 0)
 				break;
 		}
-		err = do_lookup(nd, &this, &next);
+		err = do_lookup(nd, &this, &next, atomic);
 		if (err)
 			break;
 		follow_mount(&next.mnt, &next.dentry);
@@ -1123,7 +1198,7 @@ static inline int may_delete(struct inode *dir,struct dentry *victim,int isdir)
 	if (IS_APPEND(dir))
 		return -EPERM;
 	if (check_sticky(dir, victim->d_inode)||IS_APPEND(victim->d_inode)||
-	    IS_IMMUTABLE(victim->d_inode))
+		IS_IXORUNLINK(victim->d_inode))
 		return -EPERM;
 	if (isdir) {
 		if (!S_ISDIR(victim->d_inode->i_mode))
@@ -1157,6 +1232,24 @@ static inline int may_create(struct inode *dir, struct dentry *child,
 	return permission(dir,MAY_WRITE | MAY_EXEC, nd);
 }
 
+static inline int mnt_may_create(struct vfsmount *mnt, struct inode *dir, struct dentry *child) {
+       if (child->d_inode)
+               return -EEXIST;
+       if (IS_DEADDIR(dir))
+               return -ENOENT;
+       if (mnt->mnt_flags & MNT_RDONLY)
+               return -EROFS;
+       return 0;
+}
+
+static inline int mnt_may_unlink(struct vfsmount *mnt, struct inode *dir, struct dentry *child) {
+       if (!child->d_inode)
+               return -ENOENT;
+       if (mnt->mnt_flags & MNT_RDONLY)
+               return -EROFS;
+       return 0;
+}
+
 /* 
  * Special case: O_CREAT|O_EXCL implies O_NOFOLLOW for security
  * reasons.
@@ -1175,6 +1268,8 @@ static inline int lookup_flags(unsigned int f)
 	
 	if (f & O_DIRECTORY)
 		retval |= LOOKUP_DIRECTORY;
+	if (f & O_ATOMICLOOKUP)
+		retval |= LOOKUP_ATOMIC;
 
 	return retval;
 }
@@ -1278,7 +1373,8 @@ int may_open(struct nameidata *nd, int acc_mode, int flag)
 			return -EACCES;
 
 		flag &= ~O_TRUNC;
-	} else if (IS_RDONLY(inode) && (flag & FMODE_WRITE))
+	} else if ((IS_RDONLY(inode) || (nd && MNT_IS_RDONLY(nd->mnt)))
+		&& (flag & FMODE_WRITE))
 		return -EROFS;
 	/*
 	 * An append-only file must be opened in append mode for writing.
@@ -1516,23 +1612,28 @@ do_link:
 struct dentry *lookup_create(struct nameidata *nd, int is_dir)
 {
 	struct dentry *dentry;
+	int error;
 
 	down(&nd->dentry->d_inode->i_sem);
-	dentry = ERR_PTR(-EEXIST);
+	error = -EEXIST;
 	if (nd->last_type != LAST_NORM)
-		goto fail;
+		goto out;
 	nd->flags &= ~LOOKUP_PARENT;
 	dentry = lookup_hash(&nd->last, nd->dentry);
 	if (IS_ERR(dentry))
+		goto ret;
+	error = mnt_may_create(nd->mnt, nd->dentry->d_inode, dentry);
+	if (error)
 		goto fail;
+	error = -ENOENT;
 	if (!is_dir && nd->last.name[nd->last.len] && !dentry->d_inode)
-		goto enoent;
+		goto fail;
+ret:
 	return dentry;
-enoent:
-	dput(dentry);
-	dentry = ERR_PTR(-ENOENT);
 fail:
-	return dentry;
+	dput(dentry);
+out:
+	return ERR_PTR(error);
 }
 
 int vfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
@@ -1761,7 +1862,11 @@ asmlinkage long sys_rmdir(const char __user * pathname)
 	dentry = lookup_hash(&nd.last, nd.dentry);
 	error = PTR_ERR(dentry);
 	if (!IS_ERR(dentry)) {
+		error = mnt_may_unlink(nd.mnt, nd.dentry->d_inode, dentry);
+		if (error)
+			goto exit2;
 		error = vfs_rmdir(nd.dentry->d_inode, dentry);
+	exit2:
 		dput(dentry);
 	}
 	up(&nd.dentry->d_inode->i_sem);
@@ -1833,6 +1938,9 @@ asmlinkage long sys_unlink(const char __user * pathname)
 		/* Why not before? Because we want correct error value */
 		if (nd.last.name[nd.last.len])
 			goto slashes;
+		error = mnt_may_unlink(nd.mnt, nd.dentry->d_inode, dentry);
+		if (error)
+			goto exit2;
 		inode = dentry->d_inode;
 		if (inode)
 			atomic_inc(&inode->i_count);
@@ -1929,7 +2037,7 @@ int vfs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *new_de
 	/*
 	 * A link to an append-only or immutable file cannot be created.
 	 */
-	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
+	if (IS_APPEND(inode) || IS_IXORUNLINK(inode))
 		return -EPERM;
 	if (!dir->i_op || !dir->i_op->link)
 		return -EPERM;
@@ -1977,8 +2085,13 @@ asmlinkage long sys_link(const char __user * oldname, const char __user * newnam
 	error = path_lookup(to, LOOKUP_PARENT, &nd);
 	if (error)
 		goto out;
-	error = -EXDEV;
-	if (old_nd.mnt != nd.mnt)
+	/*
+	 * We allow hard-links to be created to a bind-mount as long
+	 * as the bind-mount is not read-only.  Checking for cross-dev
+	 * links is subsumed by the superblock check in vfs_link().
+	 */
+	error = -EROFS;
+	if (MNT_IS_RDONLY(old_nd.mnt))
 		goto out_release;
 	new_dentry = lookup_create(&nd, 0);
 	error = PTR_ERR(new_dentry);
@@ -2195,6 +2308,9 @@ static inline int do_rename(const char * oldname, const char * newname)
 	/* source should not be ancestor of target */
 	error = -EINVAL;
 	if (old_dentry == trap)
+		goto exit4;
+	error = -EROFS;
+	if (MNT_IS_RDONLY(newnd.mnt))
 		goto exit4;
 	new_dentry = lookup_hash(&newnd.last, new_dir);
 	error = PTR_ERR(new_dentry);

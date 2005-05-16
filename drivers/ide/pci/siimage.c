@@ -48,6 +48,8 @@ static int pdev_is_sata(struct pci_dev *pdev)
 	{
 		case PCI_DEVICE_ID_SII_3112:
 		case PCI_DEVICE_ID_SII_1210SA:
+		case PCI_DEVICE_ID_ATI_IXP300_SATA:
+		case PCI_DEVICE_ID_ATI_IXP400_SATA:
 			return 1;
 		case PCI_DEVICE_ID_SII_680:
 			return 0;
@@ -1111,6 +1113,8 @@ static struct pci_device_id siimage_pci_tbl[] = {
 #ifdef CONFIG_BLK_DEV_IDE_SATA
 	{ PCI_VENDOR_ID_CMD, PCI_DEVICE_ID_SII_3112, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 1},
 	{ PCI_VENDOR_ID_CMD, PCI_DEVICE_ID_SII_1210SA, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 2},
+	{ PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_IXP300_SATA, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 3},
+	{ PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_IXP400_SATA, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 4},
 #endif
 	{ 0, },
 };

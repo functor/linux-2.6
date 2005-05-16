@@ -51,6 +51,7 @@ extern syscall_handler_t old_mmap_i386;
 extern syscall_handler_t old_select;
 extern syscall_handler_t sys_modify_ldt;
 extern syscall_handler_t sys_rt_sigsuspend;
+extern syscall_handler_t sys_vserver;
 
 syscall_handler_t *sys_call_table[] = {
 	[ __NR_restart_syscall ] = (syscall_handler_t *) sys_restart_syscall,
@@ -305,7 +306,7 @@ syscall_handler_t *sys_call_table[] = {
 	[ __NR_tgkill ] (syscall_handler_t *) sys_tgkill,
 	[ __NR_utimes ] (syscall_handler_t *) sys_utimes,
 	[ __NR_fadvise64_64 ] (syscall_handler_t *) sys_fadvise64_64,
-	[ __NR_vserver ] (syscall_handler_t *) sys_ni_syscall,
+	[ __NR_vserver ] (syscall_handler_t *) sys_vserver,
 
 	ARCH_SYSCALLS
 	[ LAST_SYSCALL + 1 ... NR_syscalls ] = 

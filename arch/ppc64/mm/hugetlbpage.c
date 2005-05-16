@@ -153,7 +153,8 @@ static void set_huge_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 {
 	pte_t entry;
 
-	mm->rss += (HPAGE_SIZE / PAGE_SIZE);
+	// mm->rss += (HPAGE_SIZE / PAGE_SIZE);
+	vx_rsspages_add(mm, HPAGE_SIZE / PAGE_SIZE);
 	if (write_access) {
 		entry =
 		    pte_mkwrite(pte_mkdirty(mk_pte(page, vma->vm_page_prot)));
@@ -311,9 +312,9 @@ int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
 		
 		ptepage = pte_page(entry);
 		get_page(ptepage);
-		dst->rss += (HPAGE_SIZE / PAGE_SIZE);
+		// dst->rss += (HPAGE_SIZE / PAGE_SIZE);
+		vx_rsspages_add(dst, HPAGE_SIZE / PAGE_SIZE);
 		set_pte(dst_pte, entry);
-
 		addr += HPAGE_SIZE;
 	}
 
@@ -421,7 +422,8 @@ void unmap_hugepage_range(struct vm_area_struct *vma,
 
 		put_page(page);
 	}
-	mm->rss -= (end - start) >> PAGE_SHIFT;
+	// mm->rss -= (end - start) >> PAGE_SHIFT;
+	vx_rsspages_sub(mm, (end - start) >> PAGE_SHIFT);
 	flush_tlb_pending();
 }
 

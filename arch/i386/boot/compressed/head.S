@@ -74,7 +74,7 @@ startup_32:
 	popl %esi	# discard address
 	popl %esi	# real mode pointer
 	xorl %ebx,%ebx
-	ljmp $(__BOOT_CS), $0x100000
+	ljmp $(__BOOT_CS), $KERN_PHYS_OFFSET
 
 /*
  * We come here, if we were loaded high.
@@ -99,7 +99,7 @@ startup_32:
 	popl %ecx	# lcount
 	popl %edx	# high_buffer_start
 	popl %eax	# hcount
-	movl $0x100000,%edi
+	movl $KERN_PHYS_OFFSET,%edi
 	cli		# make sure we don't get interrupted
 	ljmp $(__BOOT_CS), $0x1000 # and jump to the move routine
 
@@ -124,5 +124,5 @@ move_routine_start:
 	movsl
 	movl %ebx,%esi	# Restore setup pointer
 	xorl %ebx,%ebx
-	ljmp $(__BOOT_CS), $0x100000
+	ljmp $(__BOOT_CS), $KERN_PHYS_OFFSET
 move_routine_end:

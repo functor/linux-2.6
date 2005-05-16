@@ -30,8 +30,12 @@
 #include <linux/pid.h>
 #include <linux/percpu.h>
 #include <linux/topology.h>
+#include <linux/vs_base.h>
 
 struct exec_domain;
+extern int exec_shield;
+extern int exec_shield_randomize;
+extern int print_fatal_signals;
 
 /*
  * cloning flags:
@@ -91,6 +95,7 @@ extern unsigned long avenrun[];		/* Load averages */
 extern int nr_threads;
 extern int last_pid;
 DECLARE_PER_CPU(unsigned long, process_counts);
+// DECLARE_PER_CPU(struct runqueue, runqueues); -- removed after ckrm cpu v7 merge
 extern int nr_processes(void);
 extern unsigned long nr_running(void);
 extern unsigned long nr_uninterruptible(void);
@@ -110,6 +115,7 @@ extern unsigned long nr_iowait(void);
 #define TASK_TRACED		8
 #define EXIT_ZOMBIE		16
 #define EXIT_DEAD		32
+#define TASK_ONHOLD		64
 
 #define __set_task_state(tsk, state_value)		\
 	do { (tsk)->state = (state_value); } while (0)
@@ -134,6 +140,7 @@ struct sched_param {
 
 #ifdef __KERNEL__
 
+#include <linux/taskdelays.h>
 #include <linux/spinlock.h>
 
 /*
@@ -193,6 +200,10 @@ extern int sysctl_max_map_count;
 extern unsigned long
 arch_get_unmapped_area(struct file *, unsigned long, unsigned long,
 		       unsigned long, unsigned long);
+
+extern unsigned long
+arch_get_unmapped_exec_area(struct file *, unsigned long, unsigned long,
+		       unsigned long, unsigned long);
 extern unsigned long
 arch_get_unmapped_area_topdown(struct file *filp, unsigned long addr,
 			  unsigned long len, unsigned long pgoff,
@@ -206,6 +217,9 @@ struct mm_struct {
 	struct rb_root mm_rb;
 	struct vm_area_struct * mmap_cache;	/* last find_vma result */
 	unsigned long (*get_unmapped_area) (struct file *filp,
+				unsigned long addr, unsigned long len,
+				unsigned long pgoff, unsigned long flags);
+	unsigned long (*get_unmapped_exec_area) (struct file *filp,
 				unsigned long addr, unsigned long len,
 				unsigned long pgoff, unsigned long flags);
 	void (*unmap_area) (struct vm_area_struct *area);
@@ -231,11 +245,12 @@ struct mm_struct {
 
 	unsigned long saved_auxv[42]; /* for /proc/PID/auxv */
 
-	unsigned dumpable:1;
+	unsigned dumpable:2;
 	cpumask_t cpu_vm_mask;
 
 	/* Architecture-specific MM context */
 	mm_context_t context;
+	struct vx_info *mm_vx_info;
 
 	/* Token based thrashing protection. */
 	unsigned long swap_token_time;
@@ -250,6 +265,11 @@ struct mm_struct {
 	struct kioctx		*ioctx_list;
 
 	struct kioctx		default_kioctx;
+#ifdef CONFIG_CKRM_RES_MEM
+	struct ckrm_mem_res *memclass;
+	struct list_head	tasklist; /* list of all tasks sharing this address space */
+	spinlock_t		peertask_lock; /* protect above tasklist */
+#endif
 };
 
 struct sighand_struct {
@@ -365,9 +385,10 @@ struct user_struct {
 	/* Hash table maintenance information */
 	struct list_head uidhash_list;
 	uid_t uid;
+	xid_t xid;
 };
 
-extern struct user_struct *find_user(uid_t);
+extern struct user_struct *find_user(xid_t, uid_t);
 
 extern struct user_struct root_user;
 #define INIT_USER (&root_user)
@@ -510,6 +531,25 @@ int set_current_groups(struct group_info *group_info);
 struct audit_context;		/* See audit.c */
 struct mempolicy;
 
+#ifdef CONFIG_CKRM_CPU_SCHEDULE
+/**
+ * ckrm_cpu_demand_stat - used to track the cpu demand of a task/class
+ * @run: how much time it has been running since the counter started
+ * @total: total time since the counter started
+ * @last_sleep: the last time it sleeps, last_sleep = 0 when not sleeping
+ * @recalc_interval: how often do we recalculate the cpu_demand
+ * @cpu_demand: moving average of run/total
+ */
+struct ckrm_cpu_demand_stat {
+	unsigned long long run;
+	unsigned long long total;
+	unsigned long long last_sleep;
+	unsigned long long recalc_interval;
+	unsigned long cpu_demand; /*estimated cpu demand */
+};
+#endif
+
+
 struct task_struct {
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	struct thread_info *thread_info;
@@ -617,7 +657,6 @@ struct task_struct {
 /* signal handlers */
 	struct signal_struct *signal;
 	struct sighand_struct *sighand;
-
 	sigset_t blocked, real_blocked;
 	struct sigpending pending;
 
@@ -626,9 +665,22 @@ struct task_struct {
 	int (*notifier)(void *priv);
 	void *notifier_data;
 	sigset_t *notifier_mask;
+
+	/* TUX state */
+	void *tux_info;
+	void (*tux_exit)(void);
+
 	
 	void *security;
 	struct audit_context *audit_context;
+
+/* vserver context data */
+	xid_t xid;
+	struct vx_info *vx_info;
+
+/* vserver network data */
+	nid_t nid;
+	struct nx_info *nx_info;
 
 /* Thread group tracking */
    	u32 parent_exec_id;
@@ -651,6 +703,8 @@ struct task_struct {
 
 	struct io_context *io_context;
 
+	int ioprio;
+
 	unsigned long ptrace_message;
 	siginfo_t *last_siginfo; /* For ptrace use.  */
 /*
@@ -664,6 +718,25 @@ struct task_struct {
   	struct mempolicy *mempolicy;
   	short il_next;		/* could be shared with used_math */
 #endif
+
+#ifdef CONFIG_CKRM
+	spinlock_t  ckrm_tsklock; 
+	void       *ce_data;
+#ifdef CONFIG_CKRM_TYPE_TASKCLASS
+	// .. Hubertus should change to CONFIG_CKRM_TYPE_TASKCLASS 
+	struct ckrm_task_class *taskclass;
+	struct list_head        taskclass_link;
+#ifdef CONFIG_CKRM_CPU_SCHEDULE
+        struct ckrm_cpu_class *cpu_class;
+	//track cpu demand of this task
+	struct ckrm_cpu_demand_stat demand_stat;
+#endif //CONFIG_CKRM_CPU_SCHEDULE
+#endif // CONFIG_CKRM_TYPE_TASKCLASS
+#ifdef CONFIG_CKRM_RES_MEM
+	struct list_head	mm_peers; // list of tasks using same mm_struct
+#endif // CONFIG_CKRM_RES_MEM
+#endif // CONFIG_CKRM
+	struct task_delay_info  delays;
 };
 
 static inline pid_t process_group(struct task_struct *tsk)
@@ -715,6 +788,9 @@ do { if (atomic_dec_and_test(&(tsk)->usage)) __put_task_struct(tsk); } while(0)
 #define PF_LESS_THROTTLE 0x00100000	/* Throttle me less: I clean memory */
 #define PF_SYNCWRITE	0x00200000	/* I am doing a sync write */
 #define PF_BORROWED_MM	0x00400000	/* I am a kthread doing use_mm */
+#define PF_RELOCEXEC	0x00800000	/* relocate shared libraries */
+#define PF_MEMIO   	0x01000000      /* I am  potentially doing I/O for mem */
+#define PF_IOWAIT       0x02000000      /* I am waiting on disk I/O */
 
 #ifdef CONFIG_SMP
 extern int set_cpus_allowed(task_t *p, cpumask_t new_mask);
@@ -768,18 +844,25 @@ extern struct task_struct init_task;
 
 extern struct   mm_struct init_mm;
 
-#define find_task_by_pid(nr)	find_task_by_pid_type(PIDTYPE_PID, nr)
+
+#define find_task_by_real_pid(nr) \
+	find_task_by_pid_type(PIDTYPE_PID, nr)
+#define find_task_by_pid(nr) \
+	find_task_by_pid_type(PIDTYPE_PID, \
+		vx_rmap_pid(nr))
+
 extern struct task_struct *find_task_by_pid_type(int type, int pid);
 extern void set_special_pids(pid_t session, pid_t pgrp);
 extern void __set_special_pids(pid_t session, pid_t pgrp);
 
 /* per-UID process charging. */
-extern struct user_struct * alloc_uid(uid_t);
+extern struct user_struct * alloc_uid(xid_t, uid_t);
 static inline struct user_struct *get_uid(struct user_struct *u)
 {
 	atomic_inc(&u->__count);
 	return u;
 }
+
 extern void free_uid(struct user_struct *);
 extern void switch_uid(struct user_struct *);
 
@@ -867,16 +950,30 @@ static inline int sas_ss_flags(unsigned long sp)
 #ifdef CONFIG_SECURITY
 /* code is in security.c */
 extern int capable(int cap);
+extern int vx_capable(int cap, int ccap);
 #else
 static inline int capable(int cap)
 {
+	if (vx_check_bit(VXC_CAP_MASK, cap) && !vx_mcaps(1L << cap))
+		return 0;
 	if (cap_raised(current->cap_effective, cap)) {
 		current->flags |= PF_SUPERPRIV;
 		return 1;
 	}
 	return 0;
 }
+
+static inline int vx_capable(int cap, int ccap)
+{
+	if (cap_raised(current->cap_effective, cap) &&
+		vx_ccaps(ccap)) {
+		current->flags |= PF_SUPERPRIV;
+		return 1;
+	}
+	return 0;
+}
 #endif
+
 
 /*
  * Routines for handling mm_structs
@@ -1103,6 +1200,88 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 }
 
 #endif /* CONFIG_SMP */
+
+/* API for registering delay info */
+#ifdef CONFIG_DELAY_ACCT
+
+#define test_delay_flag(tsk,flg)                ((tsk)->flags & (flg))
+#define set_delay_flag(tsk,flg)                 ((tsk)->flags |= (flg))
+#define clear_delay_flag(tsk,flg)               ((tsk)->flags &= ~(flg))
+
+#define def_delay_var(var)		        unsigned long long var
+#define get_delay(tsk,field)                    ((tsk)->delays.field)
+
+#define start_delay(var)                        ((var) = sched_clock())
+#define start_delay_set(var,flg)                (set_delay_flag(current,flg),(var) = sched_clock())
+
+#define inc_delay(tsk,field) (((tsk)->delays.field)++)
+
+/* because of hardware timer drifts in SMPs and task continue on different cpu
+ * then where the start_ts was taken there is a possibility that
+ * end_ts < start_ts by some usecs. In this case we ignore the diff
+ * and add nothing to the total.
+ */
+#ifdef CONFIG_SMP
+#define test_ts_integrity(start_ts,end_ts)  (likely((end_ts) > (start_ts)))
+#else
+#define test_ts_integrity(start_ts,end_ts)  (1)
+#endif
+
+#define add_delay_ts(tsk,field,start_ts,end_ts) \
+	do { if (test_ts_integrity(start_ts,end_ts)) (tsk)->delays.field += ((end_ts)-(start_ts)); } while (0)
+
+#define add_delay_clear(tsk,field,start_ts,flg)        \
+	do {                                           \
+		unsigned long long now = sched_clock();\
+           	add_delay_ts(tsk,field,start_ts,now);  \
+           	clear_delay_flag(tsk,flg);             \
+        } while (0)
+
+static inline void add_io_delay(unsigned long long dstart) 
+{
+	struct task_struct * tsk = current;
+	unsigned long long now = sched_clock();
+	unsigned long long val;
+
+	if (test_ts_integrity(dstart,now))
+		val = now - dstart;
+	else
+		val = 0;
+	if (test_delay_flag(tsk,PF_MEMIO)) {
+		tsk->delays.mem_iowait_total += val;
+		tsk->delays.num_memwaits++;
+	} else {
+		tsk->delays.iowait_total += val;
+		tsk->delays.num_iowaits++;
+	}
+	clear_delay_flag(tsk,PF_IOWAIT);
+}
+
+inline static void init_delays(struct task_struct *tsk)
+{
+	memset((void*)&tsk->delays,0,sizeof(tsk->delays));
+}
+
+#else
+
+#define test_delay_flag(tsk,flg)                (0)
+#define set_delay_flag(tsk,flg)                 do { } while (0)
+#define clear_delay_flag(tsk,flg)               do { } while (0)
+
+#define def_delay_var(var)			      
+#define get_delay(tsk,field)                    (0)
+
+#define start_delay(var)                        do { } while (0)
+#define start_delay_set(var,flg)                do { } while (0)
+
+#define inc_delay(tsk,field)                    do { } while (0)
+#define add_delay_ts(tsk,field,start_ts,now)    do { } while (0)
+#define add_delay_clear(tsk,field,start_ts,flg) do { } while (0)
+#define add_io_delay(dstart)			do { } while (0) 
+#define init_delays(tsk)                        do { } while (0)
+#endif
+
+
 
 #ifdef HAVE_ARCH_PICK_MMAP_LAYOUT
 extern void arch_pick_mmap_layout(struct mm_struct *mm);

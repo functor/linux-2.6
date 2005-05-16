@@ -147,9 +147,9 @@ ide_startstop_t do_rw_taskfile (ide_drive_t *drive, ide_task_t *task)
 		case WIN_READDMA:
 		case WIN_READDMA_EXT:
 		case WIN_IDENTIFY_DMA:
-			if (!hwif->dma_setup(drive)) {
-				hwif->dma_exec_cmd(drive, taskfile->command);
-				hwif->dma_start(drive);
+			if (!hwif->ide_dma_setup(drive)) {
+				hwif->ide_dma_exec_cmd(drive, taskfile->command);
+				hwif->ide_dma_start(drive);
 				return ide_started;
 			}
 			break;
@@ -863,9 +863,9 @@ ide_startstop_t flagged_taskfile (ide_drive_t *drive, ide_task_t *task)
 		case TASKFILE_OUT_DMA:
 		case TASKFILE_IN_DMAQ:
 		case TASKFILE_IN_DMA:
-			hwif->dma_setup(drive);
-			hwif->dma_exec_cmd(drive, taskfile->command);
-			hwif->dma_start(drive);
+			hwif->ide_dma_setup(drive);
+			hwif->ide_dma_exec_cmd(drive, taskfile->command);
+			hwif->ide_dma_start(drive);
 			break;
 
 	        default:

@@ -43,6 +43,7 @@
 #include <linux/ide.h>
 #include <linux/hdreg.h>
 #include <linux/major.h>
+#include <linux/delay.h>
 #include <asm/io.h>
 #include <asm/system.h>
 
@@ -90,6 +91,7 @@ typedef struct ide_info_t {
     int		ndev;
     dev_node_t	node;
     int		hd;
+    ide_hwif_t *hwif;
 } ide_info_t;
 
 static void ide_release(dev_link_t *);
@@ -199,14 +201,14 @@ static void ide_detach(dev_link_t *link)
     
 } /* ide_detach */
 
-static int idecs_register(unsigned long io, unsigned long ctl, unsigned long irq)
+static int idecs_register(unsigned long io, unsigned long ctl, unsigned long irq, ide_hwif_t **hwif)
 {
     hw_regs_t hw;
     memset(&hw, 0, sizeof(hw));
     ide_init_hwif_ports(&hw, io, ctl, NULL);
     hw.irq = irq;
     hw.chipset = ide_pci;
-    return ide_register_hw_with_fixup(&hw, NULL, ide_undecoded_slave);
+    return ide_register_hw_with_fixup(&hw, hwif, ide_undecoded_slave);
 }
 
 /*======================================================================
@@ -224,6 +226,7 @@ void ide_config(dev_link_t *link)
 {
     client_handle_t handle = link->handle;
     ide_info_t *info = link->priv;
+    ide_hwif_t *hwif;
     tuple_t tuple;
     struct {
 	u_short		buf[128];
@@ -343,22 +346,24 @@ void ide_config(dev_link_t *link)
     if (is_kme)
 	outb(0x81, ctl_base+1);
 
-    /* retry registration in case device is still spinning up */
+    /* retry registration in case device is still spinning up 
+    
+       FIXME: now handled by IDE layer... ?? */
+       
     for (hd = -1, i = 0; i < 10; i++) {
-	hd = idecs_register(io_base, ctl_base, link->irq.AssignedIRQ);
+	hd = idecs_register(io_base, ctl_base, link->irq.AssignedIRQ, &hwif);
 	if (hd >= 0) break;
 	if (link->io.NumPorts1 == 0x20) {
 	    outb(0x02, ctl_base + 0x10);
 	    hd = idecs_register(io_base + 0x10, ctl_base + 0x10,
-				link->irq.AssignedIRQ);
+				link->irq.AssignedIRQ, &hwif);
 	    if (hd >= 0) {
 		io_base += 0x10;
 		ctl_base += 0x10;
 		break;
 	    }
 	}
-	__set_current_state(TASK_UNINTERRUPTIBLE);
-	schedule_timeout(HZ/10);
+	msleep(100);
     }
 
     if (hd < 0) {
@@ -373,6 +378,7 @@ void ide_config(dev_link_t *link)
     info->node.major = ide_major[hd];
     info->node.minor = 0;
     info->hd = hd;
+    info->hwif = hwif;
     link->dev = &info->node;
     printk(KERN_INFO "ide-cs: %s: Vcc = %d.%d, Vpp = %d.%d\n",
 	   info->node.dev_name, link->conf.Vcc / 10, link->conf.Vcc % 10,
@@ -409,9 +415,11 @@ void ide_release(dev_link_t *link)
     DEBUG(0, "ide_release(0x%p)\n", link);
 
     if (info->ndev) {
-	/* FIXME: if this fails we need to queue the cleanup somehow
-	   -- need to investigate the required PCMCIA magic */
-	ide_unregister(info->hd);
+    	/* Wait for the interface to cease to be busy */
+	while(ide_unregister_hwif(info->hwif) < 0) {
+		removed_hwif_iops(info->hwif);
+		msleep(1000);
+	}
     }
     info->ndev = 0;
     link->dev = NULL;

@@ -61,6 +61,7 @@
 #include <linux/ptrace.h>
 #include <linux/highuid.h>
 #include <linux/vmalloc.h>
+#include <linux/vs_cvirt.h>
 #include <asm/mman.h>
 #include <asm/types.h>
 #include <asm/uaccess.h>
@@ -212,6 +213,13 @@ sys32_mmap(struct mmap_arg_struct __user *arg)
 	if (a.offset & ~PAGE_MASK)
 		return -EINVAL; 
 
+	if (a.flags & MAP_FIXED) {
+		if (a.len > IA32_PAGE_OFFSET)
+			return -EINVAL;
+		if (a.addr > IA32_PAGE_OFFSET - a.len)
+			return -ENOMEM;
+	}
+
 	if (!(a.flags & MAP_ANONYMOUS)) {
 		file = fget(a.fd);
 		if (!file)
@@ -229,11 +237,78 @@ sys32_mmap(struct mmap_arg_struct __user *arg)
 	return retval;
 }
 
+asmlinkage long
+sys32_munmap(unsigned long start, unsigned long len)
+{
+	if ((start + len) > IA32_PAGE_OFFSET)
+		return -EINVAL;
+	return sys_munmap(start, len);
+}
+
 asmlinkage long 
 sys32_mprotect(unsigned long start, size_t len, unsigned long prot)
 {
+	if ((start + PAGE_ALIGN(len)) >> 32)
+		return -ENOMEM;
 	return sys_mprotect(start,len,prot); 
 }
+
+sys32_brk(unsigned long brk)
+{
+	if (brk > IA32_PAGE_OFFSET)
+		return -EINVAL;
+	return sys_brk(brk);
+}
+
+extern unsigned long do_mremap(unsigned long addr,
+   unsigned long old_len, unsigned long new_len,
+   unsigned long flags, unsigned long new_addr);
+
+asmlinkage unsigned long sys32_mremap(unsigned long addr,
+   unsigned long old_len, unsigned long new_len,
+   unsigned long flags, unsigned long new_addr)
+{
+	struct vm_area_struct *vma;
+	unsigned long ret = -EINVAL;
+
+	if (old_len > IA32_PAGE_OFFSET || new_len > IA32_PAGE_OFFSET)
+		goto out;
+	if (addr > IA32_PAGE_OFFSET - old_len)
+		goto out;
+	down_write(&current->mm->mmap_sem);
+	if (flags & MREMAP_FIXED) {
+		if (new_addr > IA32_PAGE_OFFSET - new_len)
+			goto out_sem;
+	} else if (addr > IA32_PAGE_OFFSET - new_len) {
+		unsigned long map_flags = 0;
+		struct file *file = NULL;
+
+		ret = -ENOMEM;
+		if (!(flags & MREMAP_MAYMOVE))
+			goto out_sem;
+
+		vma = find_vma(current->mm, addr);
+		if (vma) {
+			if (vma->vm_flags & VM_SHARED)
+				map_flags |= MAP_SHARED;
+			file = vma->vm_file;
+		}
+
+		/* MREMAP_FIXED checked above. */
+		new_addr = get_unmapped_area(file, addr, new_len,
+			vma ? vma->vm_pgoff : 0, map_flags);
+		ret = new_addr;
+		if (new_addr & ~PAGE_MASK)
+			goto out_sem;
+		flags |= MREMAP_FIXED;
+	}
+	ret = do_mremap(addr, old_len, new_len, flags, new_addr);
+out_sem:
+	up_write(&current->mm->mmap_sem);
+out:
+return ret;
+}
+
 
 asmlinkage long
 sys32_pipe(int __user *fd)
@@ -906,6 +981,14 @@ asmlinkage long sys32_mmap2(unsigned long addr, unsigned long len,
 	struct file * file = NULL;
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
+
+	if (flags & MAP_FIXED) {
+		if (len > IA32_PAGE_OFFSET)
+			return -EINVAL;
+		if (addr > IA32_PAGE_OFFSET - len)
+			return -ENOMEM;
+	}
+
 	if (!(flags & MAP_ANONYMOUS)) {
 		file = fget(fd);
 		if (!file)
@@ -924,6 +1007,7 @@ asmlinkage long sys32_mmap2(unsigned long addr, unsigned long len,
 asmlinkage long sys32_olduname(struct oldold_utsname __user * name)
 {
 	int error;
+	struct new_utsname *ptr;
 
 	if (!name)
 		return -EFAULT;
@@ -932,13 +1016,14 @@ asmlinkage long sys32_olduname(struct oldold_utsname __user * name)
   
   	down_read(&uts_sem);
 	
-	error = __copy_to_user(&name->sysname,&system_utsname.sysname,__OLD_UTS_LEN);
+	ptr = vx_new_utsname();
+	error = __copy_to_user(&name->sysname,ptr->sysname,__OLD_UTS_LEN);
 	 __put_user(0,name->sysname+__OLD_UTS_LEN);
-	 __copy_to_user(&name->nodename,&system_utsname.nodename,__OLD_UTS_LEN);
+	 __copy_to_user(&name->nodename,ptr->nodename,__OLD_UTS_LEN);
 	 __put_user(0,name->nodename+__OLD_UTS_LEN);
-	 __copy_to_user(&name->release,&system_utsname.release,__OLD_UTS_LEN);
+	 __copy_to_user(&name->release,ptr->release,__OLD_UTS_LEN);
 	 __put_user(0,name->release+__OLD_UTS_LEN);
-	 __copy_to_user(&name->version,&system_utsname.version,__OLD_UTS_LEN);
+	 __copy_to_user(&name->version,ptr->version,__OLD_UTS_LEN);
 	 __put_user(0,name->version+__OLD_UTS_LEN);
 	 { 
 		 char *arch = "x86_64";
@@ -961,7 +1046,7 @@ long sys32_uname(struct old_utsname __user * name)
 	if (!name)
 		return -EFAULT;
 	down_read(&uts_sem);
-	err=copy_to_user(name, &system_utsname, sizeof (*name));
+	err=copy_to_user(name, vx_new_utsname(), sizeof (*name));
 	up_read(&uts_sem);
 	if (personality(current->personality) == PER_LINUX32) 
 		err |= copy_to_user(&name->machine, "i686", 5);
@@ -1152,4 +1237,3 @@ static int __init ia32_init (void)
 __initcall(ia32_init);
 
 extern unsigned long ia32_sys_call_table[];
-EXPORT_SYMBOL(ia32_sys_call_table);

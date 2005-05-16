@@ -42,68 +42,86 @@
 static int proc_ide_read_imodel
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_hwif_t	*hwif = (ide_hwif_t *) data;
+	ide_hwif_t	*hwif;
 	int		len;
-	const char	*name;
+	const char	*name = "";
 
-	/*
-	 * Neither ide_unknown nor ide_forced should be set at this point.
-	 */
-	switch (hwif->chipset) {
-		case ide_generic:	name = "generic";	break;
-		case ide_pci:		name = "pci";		break;
-		case ide_cmd640:	name = "cmd640";	break;
-		case ide_dtc2278:	name = "dtc2278";	break;
-		case ide_ali14xx:	name = "ali14xx";	break;
-		case ide_qd65xx:	name = "qd65xx";	break;
-		case ide_umc8672:	name = "umc8672";	break;
-		case ide_ht6560b:	name = "ht6560b";	break;
-		case ide_rz1000:	name = "rz1000";	break;
-		case ide_trm290:	name = "trm290";	break;
-		case ide_cmd646:	name = "cmd646";	break;
-		case ide_cy82c693:	name = "cy82c693";	break;
-		case ide_4drives:	name = "4drives";	break;
-		case ide_pmac:		name = "mac-io";	break;
-		default:		name = "(unknown)";	break;
+	down(&ide_cfg_sem);
+	hwif = ide_hwif_from_key(data);	
+	if(hwif) {
+		/*
+		 * Neither ide_unknown nor ide_forced should be set at this point.
+		 */
+		switch (hwif->chipset) {	
+			case ide_generic:	name = "generic";	break;
+			case ide_pci:		name = "pci";		break;
+			case ide_cmd640:	name = "cmd640";	break;
+			case ide_dtc2278:	name = "dtc2278";	break;
+			case ide_ali14xx:	name = "ali14xx";	break;
+			case ide_qd65xx:	name = "qd65xx";	break;
+			case ide_umc8672:	name = "umc8672";	break;
+			case ide_ht6560b:	name = "ht6560b";	break;
+			case ide_rz1000:	name = "rz1000";	break;
+			case ide_trm290:	name = "trm290";	break;
+			case ide_cmd646:	name = "cmd646";	break;
+			case ide_cy82c693:	name = "cy82c693";	break;
+			case ide_4drives:	name = "4drives";	break;
+			case ide_pmac:		name = "mac-io";	break;
+			default:		name = "(unknown)";	break;
+		}
 	}
 	len = sprintf(page, "%s\n", name);
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
 static int proc_ide_read_mate
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_hwif_t	*hwif = (ide_hwif_t *) data;
+	ide_hwif_t	*hwif;
 	int		len;
 
+	down(&ide_cfg_sem);
+	hwif = ide_hwif_from_key(data);	
 	if (hwif && hwif->mate && hwif->mate->present)
 		len = sprintf(page, "%s\n", hwif->mate->name);
 	else
 		len = sprintf(page, "(none)\n");
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
 static int proc_ide_read_channel
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_hwif_t	*hwif = (ide_hwif_t *) data;
-	int		len;
+	ide_hwif_t	*hwif;
+	int		len = 0;
 
-	page[0] = hwif->channel ? '1' : '0';
-	page[1] = '\n';
-	len = 2;
+	down(&ide_cfg_sem);
+	hwif = ide_hwif_from_key(data);	
+ 	if(hwif) {
+		page[0] = hwif->channel ? '1' : '0';
+		page[1] = '\n';
+		len = 2;
+	}
+	else
+		page[0] = '\n';
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
 static int proc_ide_read_identify
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *)data;
+	ide_drive_t	*drive;
 	int		len = 0, i = 0;
 	int		err = 0;
 
 	len = sprintf(page, "\n");
 
+	down(&ide_cfg_sem);
+	drive = ide_drive_from_key(data);
+	
 	if (drive) {
 		unsigned short *val = (unsigned short *) page;
 
@@ -121,6 +139,7 @@ static int proc_ide_read_identify
 			len = out - page;
 		}
 	}
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
@@ -139,13 +158,22 @@ static void proc_ide_settings_warn(void)
 static int proc_ide_read_settings
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) data;
-	ide_settings_t	*setting = (ide_settings_t *) drive->settings;
+	ide_drive_t	*drive;
+	ide_settings_t	*setting;
 	char		*out = page;
 	int		len, rc, mul_factor, div_factor;
 
 	proc_ide_settings_warn();
 
+	down(&ide_cfg_sem);
+	drive = ide_drive_from_key(data);
+	
+	if(drive == NULL) {
+		up(&ide_cfg_sem);
+		return -EIO;
+	}
+
+	setting = (ide_settings_t *) drive->settings;
 	down(&ide_setting_sem);
 	out += sprintf(out, "name\t\t\tvalue\t\tmin\t\tmax\t\tmode\n");
 	out += sprintf(out, "----\t\t\t-----\t\t---\t\t---\t\t----\n");
@@ -167,15 +195,16 @@ static int proc_ide_read_settings
 	}
 	len = out - page;
 	up(&ide_setting_sem);
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
 #define MAX_LEN	30
 
-static int proc_ide_write_settings(struct file *file, const char __user *buffer,
+static int do_proc_ide_write_settings(struct file *file, const char __user *buffer,
 				   unsigned long count, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) data;
+	ide_drive_t	*drive = ide_drive_from_key(data);
 	char		name[MAX_LEN + 1];
 	int		for_real = 0;
 	unsigned long	n;
@@ -184,6 +213,9 @@ static int proc_ide_write_settings(struct file *file, const char __user *buffer,
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
+		
+	if (drive == NULL)
+		return -EIO;
 
 	proc_ide_settings_warn();
 
@@ -266,30 +298,55 @@ parse_error:
 	return -EINVAL;
 }
 
+static int proc_ide_write_settings(struct file *file, const char __user *buffer,
+				   unsigned long count, void *data)
+{
+	int ret;
+	
+	down(&ide_cfg_sem);
+	ret = do_proc_ide_write_settings(file, buffer, count, data);
+	up(&ide_cfg_sem);
+	return ret;
+}
+
 int proc_ide_read_capacity
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) data;
+	ide_drive_t	*drive;
 	int		len;
 
+	drive = ide_drive_from_key(data);
+	if(drive == NULL) {
+		up(&ide_cfg_sem);
+		return -EIO;
+	}
+		
 	len = sprintf(page,"%llu\n",
 		      (long long) (DRIVER(drive)->capacity(drive)));
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
 int proc_ide_read_geometry
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) data;
+	ide_drive_t	*drive;
 	char		*out = page;
 	int		len;
 
+	down(&ide_cfg_sem);
+	drive = ide_drive_from_key(data);
+	if(drive == NULL) {
+		up(&ide_cfg_sem);
+		return -EIO;
+	}
 	out += sprintf(out,"physical     %d/%d/%d\n",
 			drive->cyl, drive->head, drive->sect);
 	out += sprintf(out,"logical      %d/%d/%d\n",
 			drive->bios_cyl, drive->bios_head, drive->bios_sect);
 
 	len = out - page;
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
@@ -298,51 +355,59 @@ EXPORT_SYMBOL(proc_ide_read_geometry);
 static int proc_ide_read_dmodel
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) data;
-	struct hd_driveid *id = drive->id;
+	ide_drive_t	*drive;
+	struct hd_driveid *id;
 	int		len;
 
+	down(&ide_cfg_sem);
+	drive = ide_drive_from_key(data);
+	if(drive == NULL) {
+		up(&ide_cfg_sem);
+		return -EIO;
+	}
+
+	id = drive->id;
 	len = sprintf(page, "%.40s\n",
 		(id && id->model[0]) ? (char *)id->model : "(none)");
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
 static int proc_ide_read_driver
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) data;
-	ide_driver_t	*driver = drive->driver;
+	ide_drive_t	*drive;
+	ide_driver_t	*driver;
 	int		len;
+
+	down(&ide_cfg_sem);
+	drive = ide_drive_from_key(data);
+	if(drive == NULL) {
+		up(&ide_cfg_sem);
+		return -EIO;
+	}
+			
+	driver = drive->driver;
 
 	len = sprintf(page, "%s version %s\n",
 			driver->name, driver->version);
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
-}
-
-static int proc_ide_write_driver
-	(struct file *file, const char __user *buffer, unsigned long count, void *data)
-{
-	ide_drive_t	*drive = (ide_drive_t *) data;
-	char name[32];
-
-	if (!capable(CAP_SYS_ADMIN))
-		return -EACCES;
-	if (count > 31)
-		count = 31;
-	if (copy_from_user(name, buffer, count))
-		return -EFAULT;
-	name[count] = '\0';
-	if (ide_replace_subdriver(drive, name))
-		return -EINVAL;
-	return count;
 }
 
 static int proc_ide_read_media
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) data;
+	ide_drive_t	*drive;
 	const char	*media;
 	int		len;
+
+	down(&ide_cfg_sem);
+	drive = ide_drive_from_key(data);
+	if(drive == NULL) {
+		up(&ide_cfg_sem);
+		return -EIO;
+	}
 
 	switch (drive->media) {
 		case ide_disk:	media = "disk\n";
@@ -358,11 +423,12 @@ static int proc_ide_read_media
 	}
 	strcpy(page,media);
 	len = strlen(media);
+	up(&ide_cfg_sem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
 static ide_proc_entry_t generic_drive_entries[] = {
-	{ "driver",	S_IFREG|S_IRUGO,	proc_ide_read_driver,	proc_ide_write_driver },
+	{ "driver",	S_IFREG|S_IRUGO,	proc_ide_read_driver,	NULL },
 	{ "identify",	S_IFREG|S_IRUSR,	proc_ide_read_identify,	NULL },
 	{ "media",	S_IFREG|S_IRUGO,	proc_ide_read_media,	NULL },
 	{ "model",	S_IFREG|S_IRUGO,	proc_ide_read_dmodel,	NULL },
@@ -414,7 +480,7 @@ static void create_proc_ide_drives(ide_hwif_t *hwif)
 
 		drive->proc = proc_mkdir(drive->name, parent);
 		if (drive->proc)
-			ide_add_proc_entries(drive->proc, generic_drive_entries, drive);
+			ide_add_proc_entries(drive->proc, generic_drive_entries, ide_drive_to_key(drive));
 		sprintf(name,"ide%d/%s", (drive->name[2]-'a')/2, drive->name);
 		ent = proc_symlink(drive->name, proc_ide_root, name);
 		if (!ent) return;
@@ -465,7 +531,7 @@ void create_proc_ide_interfaces(void)
 			hwif->proc = proc_mkdir(hwif->name, proc_ide_root);
 			if (!hwif->proc)
 				return;
-			ide_add_proc_entries(hwif->proc, hwif_entries, hwif);
+			ide_add_proc_entries(hwif->proc, hwif_entries, ide_hwif_to_key(hwif));
 		}
 		create_proc_ide_drives(hwif);
 	}
@@ -491,6 +557,8 @@ void destroy_proc_ide_interface(ide_hwif_t *hwif)
 		hwif->proc = NULL;
 	}
 }
+
+EXPORT_SYMBOL(destroy_proc_ide_interface);
 
 static void destroy_proc_ide_interfaces(void)
 {

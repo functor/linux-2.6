@@ -2,6 +2,8 @@
 # Kernel configuration targets
 # These targets are used from top-level makefile
 
+export LD_LIBRARY_PATH = scripts/kconfig
+
 .PHONY: oldconfig xconfig gconfig menuconfig config silentoldconfig
 
 xconfig: $(obj)/qconf
@@ -22,6 +24,10 @@ oldconfig: $(obj)/conf
 
 silentoldconfig: $(obj)/conf
 	$< -s arch/$(ARCH)/Kconfig
+
+nonint_oldconfig: scripts/kconfig/conf
+	./scripts/kconfig/conf -b arch/$(ARCH)/Kconfig
+
 
 .PHONY: randconfig allyesconfig allnoconfig allmodconfig defconfig
 
@@ -116,7 +122,7 @@ QTLIBPATH = $(QTDIR)/lib
 
 # QT needs some extra effort...
 $(obj)/.tmp_qtcheck:
-	@set -e; for d in $$QTDIR /usr/share/qt* /usr/lib/qt*; do \
+	@set -e; for d in $$QTDIR /usr/share/qt* /usr/lib/qt* /usr/lib64/qt* ; do \
 	  if [ -f $$d/include/qconfig.h ]; then DIR=$$d; break; fi; \
 	done; \
 	if [ -z "$$DIR" ]; then \

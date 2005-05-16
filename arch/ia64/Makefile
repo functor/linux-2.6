@@ -71,6 +71,10 @@ boot := arch/ia64/hp/sim/boot
 
 all: compressed unwcheck
 
+bzImage: compressed
+	mkdir -p arch/ia64/boot
+	cp vmlinux.gz arch/ia64/boot/bzImage
+
 compressed: vmlinux.gz
 
 vmlinux.gz: vmlinux

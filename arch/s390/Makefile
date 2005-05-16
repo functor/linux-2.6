@@ -91,6 +91,11 @@ boot		:= arch/$(ARCH)/boot
 
 all: image
 
+# This is a white lie which helps to keep our spec simpler.
+# No $(Q) or other trickery because nobody should use it outside of RPM builds.
+bzImage: image
+	ln -s image arch/$(ARCH)/boot/bzImage
+
 install: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $@
 

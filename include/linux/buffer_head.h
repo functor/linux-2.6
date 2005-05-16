@@ -196,6 +196,7 @@ int cont_prepare_write(struct page*, unsigned, unsigned, get_block_t*,
 int generic_cont_expand(struct inode *inode, loff_t size) ;
 int block_commit_write(struct page *page, unsigned from, unsigned to);
 int block_sync_page(struct page *);
+void flush_inode_pages (struct inode * inode);
 sector_t generic_block_bmap(struct address_space *, sector_t, get_block_t *);
 int generic_commit_write(struct file *, struct page *, unsigned, unsigned);
 int block_truncate_page(struct address_space *, loff_t, get_block_t *);

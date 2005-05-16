@@ -219,6 +219,8 @@ void packet_sock_destruct(struct sock *sk)
 {
 	BUG_TRAP(!atomic_read(&sk->sk_rmem_alloc));
 	BUG_TRAP(!atomic_read(&sk->sk_wmem_alloc));
+	BUG_ON(sk->sk_nx_info);
+	BUG_ON(sk->sk_vx_info);
 
 	if (!sock_flag(sk, SOCK_DEAD)) {
 		printk("Attempt to release alive packet socket: %p\n", sk);
@@ -450,6 +452,12 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,  struct packe
 
 	sk = pt->af_packet_priv;
 	po = pkt_sk(sk);
+
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	if (vnet_active &&
+	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
+		goto drop;
+#endif
 
 	skb->dev = dev;
 
@@ -823,6 +831,9 @@ static int packet_release(struct socket *sock)
 	}
 #endif
 
+	clr_vx_info(&sk->sk_vx_info);
+	clr_nx_info(&sk->sk_nx_info);
+
 	/*
 	 *	Now the socket is dead. No more input will appear.
 	 */
@@ -997,6 +1008,11 @@ static int packet_create(struct socket *sock, int protocol)
 
 	sk->sk_destruct = packet_sock_destruct;
 	atomic_inc(&packet_socks_nr);
+
+	set_vx_info(&sk->sk_vx_info, current->vx_info);
+	sk->sk_xid = vx_current_xid();
+	set_nx_info(&sk->sk_nx_info, current->nx_info);
+	sk->sk_nid = nx_current_nid();
 
 	/*
 	 *	Attach a protocol block
@@ -1790,7 +1806,14 @@ struct proto_ops packet_ops = {
 	.sendpage =	sock_no_sendpage,
 };
 
-static struct net_proto_family packet_family_ops = {
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+EXPORT_SYMBOL(packet_ops);
+struct net_proto_family packet_family_ops;
+EXPORT_SYMBOL(packet_family_ops);
+#else
+static
+#endif
+struct net_proto_family packet_family_ops = {
 	.family =	PF_PACKET,
 	.create =	packet_create,
 	.owner	=	THIS_MODULE,

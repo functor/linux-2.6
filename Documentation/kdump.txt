@@ -1,0 +1,105 @@
+Documentation for kdump - the kexec based crash dumping solution
+================================================================
+
+DESIGN
+======
+
+We use kexec to reboot to a second kernel whenever a dump needs to be taken.
+This second kernel is booted with with very little memory (configurable
+at compile time). The first kernel reserves the section of memory that the
+second kernel uses. This ensures that on-going DMA from the first kernel
+does not corrupt the second kernel. The first 640k of physical memory is
+needed irrespective of where the kernel loads at. Hence, this region is
+backed up before reboot.
+
+In the second kernel, "old memory" can be accessed in two ways. The
+first one is through a device interface. We can create a /dev/oldmem or
+whatever and write out the memory in raw format. The second interface is
+through /proc/vmcore. This exports the dump as an ELF format file which
+can be written out using any file copy command (cp, scp, etc). Further, gdb
+can be used to perform some minimal debugging on the dump file. Both these
+methods ensure that there is correct ordering of the dump pages (corresponding
+to the first 640k that has been relocated).
+
+SETUP
+=====
+
+1) Obtain the appropriate -mm tree patch and apply it on to the vanilla
+   kernel tree.
+
+2) Two kernels need to be built in order to get this feature working.
+
+   For the first kernel, choose the default values for the following options.
+
+   a) Physical address where the kernel is loaded
+   b) kexec system call
+   c) kernel crash dumps
+
+   All the options are under "Processor type and features"
+
+   For the second kernel, change (a) to 16MB. If you want to choose another
+   value here, ensure "location from where the crash dumping kernel will boot
+   (MB)" under (c) reflects the same value.
+
+   Also ensure you have CONFIG_HIGHMEM on.
+
+3) Boot into the first kernel. You are now ready to try out kexec based crash
+   dumps.
+
+4) Load the second kernel to be booted using
+
+   kexec -p <second-kernel> --args-linux --append="root=<root-dev> dump
+   init 1 memmap=exactmap memmap=640k@0 memmap=32M@16M"
+
+   Note that <second-kernel> has to be a vmlinux image. bzImage will not
+   work, as of now.
+
+5) Enable kexec based dumping by
+
+   echo 1 > /proc/kexec-dump
+
+   If this is not set, the system will not do a kexec reboot in the event
+   of a panic.
+
+6) System reboots into the second kernel when a panic occurs.
+   You could write a module to call panic, for testing purposes.
+
+7) Write out the dump file using
+
+   cp /proc/vmcore <dump-file>
+
+You can also access the dump as a device for a linear/raw view. To do this,
+you will need the kd-oldmem-<version>.patch built into the kernel. To create
+the device, type
+
+  mknod /dev/oldmem c 1 12
+
+Use "dd" with suitable options for count, bs and skip to access specific
+portions of the dump.
+
+ANALYSIS
+========
+
+You can run gdb on the dump file copied out of /proc/vmcore. Use vmlinux built
+with -g and run
+
+  gdb vmlinux <dump-file>
+
+Stack trace for the task on processor 0, register display, memory display
+work fine.
+
+TODO
+====
+
+1) Provide a kernel-pages only view for the dump. This could possibly turn up
+   as /proc/vmcore-kern.
+2) Provide register contents of all processors (similar to what multi-threaded
+   core dumps does).
+3) Modify "crash" to make it recognize this dump.
+4) Make the i386 kernel boot from any location so we can run the second kernel
+   from the reserved location instead of the current approach.
+
+CONTACT
+=======
+
+Hariprasad Nellitheertha - hari at in dot ibm dot com

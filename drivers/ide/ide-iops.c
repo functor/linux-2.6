@@ -107,6 +107,74 @@ void default_hwif_iops (ide_hwif_t *hwif)
 EXPORT_SYMBOL(default_hwif_iops);
 
 /*
+ *	Interface removed
+ */
+
+static u8 ide_no_inb(unsigned long port)
+{
+	return 0xFF;
+}
+
+static u16 ide_no_inw (unsigned long port)
+{
+	return 0xFFFF;
+}
+
+static void ide_no_insw (unsigned long port, void *addr, u32 count)
+{
+}
+
+static u32 ide_no_inl (unsigned long port)
+{
+	return 0xFFFFFFFF;
+}
+
+static void ide_no_insl (unsigned long port, void *addr, u32 count)
+{
+}
+
+static void ide_no_outb (u8 val, unsigned long port)
+{
+}
+
+static void ide_no_outbsync (ide_drive_t *drive, u8 addr, unsigned long port)
+{
+}
+
+static void ide_no_outw (u16 val, unsigned long port)
+{
+}
+
+static void ide_no_outsw (unsigned long port, void *addr, u32 count)
+{
+}
+
+static void ide_no_outl (u32 val, unsigned long port)
+{
+}
+
+static void ide_no_outsl (unsigned long port, void *addr, u32 count)
+{
+}
+
+void removed_hwif_iops (ide_hwif_t *hwif)
+{
+	hwif->OUTB	= ide_no_outb;
+	hwif->OUTBSYNC	= ide_no_outbsync;
+	hwif->OUTW	= ide_no_outw;
+	hwif->OUTL	= ide_no_outl;
+	hwif->OUTSW	= ide_no_outsw;
+	hwif->OUTSL	= ide_no_outsl;
+	hwif->INB	= ide_no_inb;
+	hwif->INW	= ide_no_inw;
+	hwif->INL	= ide_no_inl;
+	hwif->INSW	= ide_no_insw;
+	hwif->INSL	= ide_no_insl;
+}
+
+EXPORT_SYMBOL(removed_hwif_iops);
+
+/*
  *	MMIO operations, typically used for SATA controllers
  */
 
@@ -606,44 +674,15 @@ EXPORT_SYMBOL(ide_wait_stat);
  */
 u8 eighty_ninty_three (ide_drive_t *drive)
 {
-#if 0
-	if (!HWIF(drive)->udma_four)
+	if(HWIF(drive)->udma_four == 0)
 		return 0;
-
-	if (drive->id->major_rev_num) {
-		int hssbd = 0;
-		int i;
-		/*
-		 * Determine highest Supported SPEC
-		 */
-		for (i=1; i<=15; i++)
-			if (drive->id->major_rev_num & (1<<i))
-				hssbd++;
-
-		switch (hssbd) {
-			case 7:
-			case 6:
-			case 5:
-		/* ATA-4 and older do not support above Ultra 33 */
-			default:
-				return 0;
-		}
-	}
-
-	return ((u8) (
+	if (!(drive->id->hw_config & 0x6000))
+		return 0;
 #ifndef CONFIG_IDEDMA_IVB
-		(drive->id->hw_config & 0x4000) &&
+	if(!(drive->id->hw_config & 0x4000))
+		return 0;
 #endif /* CONFIG_IDEDMA_IVB */
-		 (drive->id->hw_config & 0x6000)) ? 1 : 0);
-
-#else
-
-	return ((u8) ((HWIF(drive)->udma_four) &&
-#ifndef CONFIG_IDEDMA_IVB
-			(drive->id->hw_config & 0x4000) &&
-#endif /* CONFIG_IDEDMA_IVB */
-			(drive->id->hw_config & 0x6000)) ? 1 : 0);
-#endif
+	return 1;
 }
 
 EXPORT_SYMBOL(eighty_ninty_three);
@@ -801,6 +840,11 @@ int ide_driveid_update (ide_drive_t *drive)
  * It is gone..........
  *
  * const char *msg == consider adding for verbose errors.
+ *
+ * Beware. If we timed out from a series of CRC errors and the timer
+ * expiry caused a switch to PIO mode and we take an IRQ as the drive times
+ * out about the same moment we may be entering this function with a
+ * pending interrupt. 
  */
 int ide_config_drive_speed (ide_drive_t *drive, u8 speed)
 {
@@ -818,20 +862,20 @@ int ide_config_drive_speed (ide_drive_t *drive, u8 speed)
 
 	/*
 	 * Don't use ide_wait_cmd here - it will
-	 * attempt to set_geometry and recalibrate,
-	 * but for some reason these don't work at
-	 * this point (lost interrupt).
-	 */
-        /*
-         * Select the drive, and issue the SETFEATURES command
+	 * attempt to set_geometry and recalibrate, We can't
+	 * do that here as we may be in the IRQ handler already
+	 *
+         * Select the drive, and issue the SETFEATURES command in
+         * polled mode.
          */
 	disable_irq_nosync(hwif->irq);
 	
 	/*
-	 *	FIXME: we race against the running IRQ here if
+	 *	We race against the running IRQ here if
 	 *	this is called from non IRQ context. If we use
-	 *	disable_irq() we hang on the error path. Work
-	 *	is needed.
+	 *	disable_irq() we hang on the error path. Instead we
+	 *	must let the core code know the hwif is doing a polling
+	 *	recovery.
 	 */
 	 
 	udelay(1);
@@ -842,23 +886,43 @@ int ide_config_drive_speed (ide_drive_t *drive, u8 speed)
 		hwif->OUTB(drive->ctl | 2, IDE_CONTROL_REG);
 	hwif->OUTB(speed, IDE_NSECTOR_REG);
 	hwif->OUTB(SETFEATURES_XFER, IDE_FEATURE_REG);
-	hwif->OUTB(WIN_SETFEATURES, IDE_COMMAND_REG);
-	if ((IDE_CONTROL_REG) && (drive->quirk_list == 2))
+	hwif->OUTBSYNC(drive, WIN_SETFEATURES, IDE_COMMAND_REG);
+	/* The status bits are not valid for 400nS */
+	udelay(1);
+	
+	/* Drive status is now valid which means we can allow interrupts
+	   to occur as they will see the drive as busy and will not
+	   interfere erroneously. IRQ's for this drive will also be off
+	   providing control and quirks allow for it */
+	   
+	if ((IDE_CONTROL_REG) && drive->quirk_list == 2)
 		hwif->OUTB(drive->ctl, IDE_CONTROL_REG);
 	udelay(1);
+	
+	/*
+	 * Tell the interrupt layer that we are doing polled recovery.
+	 * Eventually this should use the same mechanism do_reset does
+	 * internally.
+	 */
+	 
+	hwif->polling = 1;
+	
 	/*
 	 * Wait for drive to become non-BUSY
 	 */
 	if ((stat = hwif->INB(IDE_STATUS_REG)) & BUSY_STAT) {
-		unsigned long flags, timeout;
-		local_irq_set(flags);
+		unsigned long timeout;
+		/* FIXME */
+/*		spin_unlock_irq(&ide_lock); */
 		timeout = jiffies + WAIT_CMD;
 		while ((stat = hwif->INB(IDE_STATUS_REG)) & BUSY_STAT) {
 			if (time_after(jiffies, timeout))
 				break;
 		}
-		local_irq_restore(flags);
+/*		spin_lock_irq(&ide_lock); */
 	}
+	
+	hwif->polling = 0;
 
 	/*
 	 * Allow status to settle, then read it again.
@@ -1168,7 +1232,8 @@ static ide_startstop_t do_reset1 (ide_drive_t *drive, int do_not_try_atapi)
 		pre_reset(drive);
 		SELECT_DRIVE(drive);
 		udelay (20);
-		hwif->OUTB(WIN_SRST, IDE_COMMAND_REG);
+		hwif->OUTBSYNC(drive, WIN_SRST, IDE_COMMAND_REG);
+		ndelay(400);
 		hwgroup->poll_timeout = jiffies + WAIT_WORSTCASE;
 		__ide_set_handler(drive, &atapi_reset_pollfunc, HZ/20, NULL);
 		spin_unlock_irqrestore(&ide_lock, flags);

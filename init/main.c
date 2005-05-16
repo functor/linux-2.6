@@ -46,6 +46,8 @@
 #include <linux/rmap.h>
 #include <linux/mempolicy.h>
 #include <linux/key.h>
+#include <linux/ckrm_events.h>
+#include <linux/ckrm_sched.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -107,6 +109,16 @@ extern void tc_init(void);
 
 enum system_states system_state;
 EXPORT_SYMBOL(system_state);
+
+/*
+ * The kernel_magic value represents the address of _end, which allows
+ * namelist tools to "match" each other respectively.  That way a tool
+ * that looks at /dev/mem can verify that it is using the right System.map
+ * file -- if kernel_magic doesn't equal the namelist value of _end,
+ * something's wrong.
+ */
+extern unsigned long _end;
+unsigned long *kernel_magic = &_end;
 
 /*
  * Boot command-line arguments
@@ -523,6 +535,7 @@ asmlinkage void __init start_kernel(void)
 	rcu_init();
 	init_IRQ();
 	pidhash_init();
+	ckrm_init();
 	init_timers();
 	softirq_init();
 	time_init();
@@ -709,15 +722,17 @@ static int init(void * unused)
 
 	fixup_cpu_present_map();
 	smp_init();
-	sched_init_smp();
 
 	/*
 	 * Do this before initcalls, because some drivers want to access
 	 * firmware files.
 	 */
 	populate_rootfs();
-
 	do_basic_setup();
+
+	init_ckrm_sched_res();
+
+	sched_init_smp();
 
 	/*
 	 * check if there is an early userspace init.  If yes, let it do all

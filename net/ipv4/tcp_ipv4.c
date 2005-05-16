@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_ipv4.c,v 1.240 2002/02/01 22:01:04 davem Exp $
+ * Version:	$Id$
  *
  *		IPv4 specific functions
  *
@@ -74,6 +74,7 @@
 #include <linux/stddef.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/vserver/debug.h>
 
 extern int sysctl_ip_dynaddr;
 int sysctl_tcp_tw_reuse;
@@ -448,8 +449,7 @@ static struct sock *__tcp_v4_lookup_listener(struct hlist_head *head, u32 daddr,
 }
 
 /* Optimize the common listener case. */
-static inline struct sock *tcp_v4_lookup_listener(u32 daddr,
-		unsigned short hnum, int dif)
+struct sock *tcp_v4_lookup_listener(u32 daddr, unsigned short hnum, int dif)
 {
 	struct sock *sk = NULL;
 	struct hlist_head *head;
@@ -458,7 +458,6 @@ static inline struct sock *tcp_v4_lookup_listener(u32 daddr,
 	head = &tcp_listening_hash[tcp_lhashfn(hnum)];
 	if (!hlist_empty(head)) {
 		struct inet_opt *inet = inet_sk((sk = __sk_head(head)));
-
 		if (inet->num == hnum && !sk->sk_node.next &&
 		    (!inet->rcv_saddr || inet->rcv_saddr == daddr) &&
 		    (sk->sk_family == PF_INET || !ipv6_only_sock(sk)) &&
@@ -473,6 +472,8 @@ sherry_cache:
 	read_unlock(&tcp_lhash_lock);
 	return sk;
 }
+
+EXPORT_SYMBOL_GPL(tcp_v4_lookup_listener);
 
 /* Sockets in TCP_CLOSE state are _always_ taken out of the hash, so
  * we need not check it for TCP lookups anymore, thanks Alexey. -DaveM
@@ -918,7 +919,11 @@ static void tcp_v4_synq_add(struct sock *sk, struct open_request *req)
 	lopt->syn_table[h] = req;
 	write_unlock(&tp->syn_wait_lock);
 
+#ifdef CONFIG_ACCEPT_QUEUES
+	tcp_synq_added(sk, req);
+#else
 	tcp_synq_added(sk);
+#endif
 }
 
 
@@ -1411,6 +1416,9 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	__u32 daddr = skb->nh.iph->daddr;
 	__u32 isn = TCP_SKB_CB(skb)->when;
 	struct dst_entry *dst = NULL;
+#ifdef CONFIG_ACCEPT_QUEUES
+	int class = 0;
+#endif
 #ifdef CONFIG_SYN_COOKIES
 	int want_cookie = 0;
 #else
@@ -1435,12 +1443,31 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 		goto drop;
 	}
 
+#ifdef CONFIG_ACCEPT_QUEUES
+	class = (skb->nfmark <= 0) ? 0 :
+		((skb->nfmark >= NUM_ACCEPT_QUEUES) ? 0: skb->nfmark);
+	/*
+	 * Accept only if the class has shares set or if the default class
+	 * i.e. class 0 has shares
+	 */
+	if (!(tcp_sk(sk)->acceptq[class].aq_ratio)) {
+		if (tcp_sk(sk)->acceptq[0].aq_ratio) 
+			class = 0;
+		else
+			goto drop;
+	}
+#endif
+
 	/* Accept backlog is full. If we have already queued enough
 	 * of warm entries in syn queue, drop request. It is better than
 	 * clogging syn queue with openreqs with exponentially increasing
 	 * timeout.
 	 */
+#ifdef CONFIG_ACCEPT_QUEUES
+	if (sk_acceptq_is_full(sk, class) && tcp_synq_young(sk, class) > 1)
+#else
 	if (sk_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
+#endif
 		goto drop;
 
 	req = tcp_openreq_alloc();
@@ -1470,7 +1497,10 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	tp.tstamp_ok = tp.saw_tstamp;
 
 	tcp_openreq_init(req, &tp, skb);
-
+#ifdef CONFIG_ACCEPT_QUEUES
+	req->acceptq_class = class;
+	req->acceptq_time_stamp = jiffies;
+#endif
 	req->af.v4_req.loc_addr = daddr;
 	req->af.v4_req.rmt_addr = saddr;
 	req->af.v4_req.opt = tcp_v4_save_options(sk, skb);
@@ -1565,7 +1595,11 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	struct tcp_opt *newtp;
 	struct sock *newsk;
 
+#ifdef CONFIG_ACCEPT_QUEUES
+	if (sk_acceptq_is_full(sk, req->acceptq_class))
+#else
 	if (sk_acceptq_is_full(sk))
+#endif
 		goto exit_overflow;
 
 	if (!dst && (dst = tcp_v4_route_req(sk, req)) == NULL)
@@ -1778,6 +1812,22 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		goto no_tcp_socket;
 
 process:
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	/* Silently drop if VNET is active and the context is not
+	 * entitled to read the packet.
+	 */
+	if (vnet_active) {
+		/* Transfer ownership of reusable TIME_WAIT buckets to
+		 * whomever VNET decided should own the packet.
+		 */
+		if (sk->sk_state == TCP_TIME_WAIT)
+			sk->sk_xid = skb->xid;
+
+		if ((int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
+			goto discard_it;
+	}
+#endif
+
 	if (sk->sk_state == TCP_TIME_WAIT)
 		goto do_time_wait;
 
@@ -1809,6 +1859,10 @@ no_tcp_socket:
 	if (skb->len < (th->doff << 2) || tcp_checksum_complete(skb)) {
 bad_packet:
 		TCP_INC_STATS_BH(TCP_MIB_INERRS);
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	} else if (vnet_active && skb->sk) {
+		/* VNET: Suppress RST if the port was bound to a (presumably raw) socket */
+#endif
 	} else {
 		tcp_v4_send_reset(skb);
 	}
@@ -2163,6 +2217,12 @@ static void *listening_get_next(struct seq_file *seq, void *cur)
 		req = req->dl_next;
 		while (1) {
 			while (req) {
+				vxdprintk(VXD_CBIT(net, 6),
+					"sk,req: %p [#%d] (from %d)", req->sk,
+					(req->sk)?req->sk->sk_xid:0, current->xid);
+				if (req->sk &&
+					!vx_check(req->sk->sk_xid, VX_IDENT|VX_WATCH))
+					continue;
 				if (req->class->family == st->family) {
 					cur = req;
 					goto out;
@@ -2187,6 +2247,10 @@ get_req:
 	}
 get_sk:
 	sk_for_each_from(sk, node) {
+		vxdprintk(VXD_CBIT(net, 6), "sk: %p [#%d] (from %d)",
+			sk, sk->sk_xid, current->xid);
+		if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
+			continue;
 		if (sk->sk_family == st->family) {
 			cur = sk;
 			goto out;
@@ -2235,18 +2299,26 @@ static void *established_get_first(struct seq_file *seq)
 	       
 		read_lock(&tcp_ehash[st->bucket].lock);
 		sk_for_each(sk, node, &tcp_ehash[st->bucket].chain) {
-			if (sk->sk_family != st->family) {
+			vxdprintk(VXD_CBIT(net, 6),
+				"sk,egf: %p [#%d] (from %d)",
+				sk, sk->sk_xid, current->xid);
+			if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
 				continue;
-			}
+			if (sk->sk_family != st->family)
+				continue;
 			rc = sk;
 			goto out;
 		}
 		st->state = TCP_SEQ_STATE_TIME_WAIT;
 		tw_for_each(tw, node,
 			    &tcp_ehash[st->bucket + tcp_ehash_size].chain) {
-			if (tw->tw_family != st->family) {
+			vxdprintk(VXD_CBIT(net, 6),
+				"tw: %p [#%d] (from %d)",
+				tw, tw->tw_xid, current->xid);
+			if (!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH))
 				continue;
-			}
+			if (tw->tw_family != st->family)
+				continue;
 			rc = tw;
 			goto out;
 		}
@@ -2270,7 +2342,8 @@ static void *established_get_next(struct seq_file *seq, void *cur)
 		tw = cur;
 		tw = tw_next(tw);
 get_tw:
-		while (tw && tw->tw_family != st->family) {
+		while (tw && (tw->tw_family != st->family ||
+			!vx_check(tw->tw_xid, VX_IDENT|VX_WATCH))) {
 			tw = tw_next(tw);
 		}
 		if (tw) {
@@ -2290,6 +2363,11 @@ get_tw:
 		sk = sk_next(sk);
 
 	sk_for_each_from(sk, node) {
+		vxdprintk(VXD_CBIT(net, 6),
+			"sk,egn: %p [#%d] (from %d)",
+			sk, sk->sk_xid, current->xid);
+		if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
+			continue;
 		if (sk->sk_family == st->family)
 			goto found;
 	}

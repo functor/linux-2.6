@@ -25,7 +25,7 @@
 
 static int open_kcore(struct inode * inode, struct file * filp)
 {
-	return capable(CAP_SYS_RAWIO) ? 0 : -EPERM;
+	return -EPERM;
 }
 
 static ssize_t read_kcore(struct file *, char __user *, size_t, loff_t *);
@@ -114,7 +114,7 @@ static size_t get_kcore_size(int *nphdr, size_t *elf_buflen)
 /*
  * determine size of ELF note
  */
-static int notesize(struct memelfnote *en)
+int notesize(struct memelfnote *en)
 {
 	int sz;
 
@@ -129,7 +129,7 @@ static int notesize(struct memelfnote *en)
 /*
  * store a note in the header buffer
  */
-static char *storenote(struct memelfnote *men, char *bufp)
+char *storenote(struct memelfnote *men, char *bufp)
 {
 	struct elf_note en;
 
@@ -156,7 +156,7 @@ static char *storenote(struct memelfnote *men, char *bufp)
  * store an ELF coredump header in the supplied buffer
  * nphdr is the number of elf_phdr to insert
  */
-static void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff)
+void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff, struct kcore_list *clist)
 {
 	struct elf_prstatus prstatus;	/* NT_PRSTATUS */
 	struct elf_prpsinfo prpsinfo;	/* NT_PRPSINFO */
@@ -208,7 +208,7 @@ static void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff)
 	nhdr->p_align	= 0;
 
 	/* setup ELF PT_LOAD program header for every area */
-	for (m=kclist; m; m=m->next) {
+	for (m=clist; m; m=m->next) {
 		phdr = (struct elf_phdr *) bufp;
 		bufp += sizeof(struct elf_phdr);
 		offset += sizeof(struct elf_phdr);
@@ -305,7 +305,7 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 			return -ENOMEM;
 		}
 		memset(elf_buf, 0, elf_buflen);
-		elf_kcore_store_hdr(elf_buf, nphdr, elf_buflen);
+		elf_kcore_store_hdr(elf_buf, nphdr, elf_buflen, kclist);
 		read_unlock(&kclist_lock);
 		if (copy_to_user(buffer, elf_buf + *fpos, tsz)) {
 			kfree(elf_buf);

@@ -271,7 +271,9 @@ struct sk_buff {
 #endif
 
 #endif
-
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	xid_t			xid;			/* VServer context ID */
+#endif
 
 	/* These elements must be at the end, see alloc_skb() for details.  */
 	unsigned int		truesize;
@@ -1136,6 +1138,8 @@ extern void skb_iter_first(const struct sk_buff *skb, struct skb_iter *i);
 extern int skb_iter_next(const struct sk_buff *skb, struct skb_iter *i);
 /* Call this if aborting loop before !skb_iter_next */
 extern void skb_iter_abort(const struct sk_buff *skb, struct skb_iter *i);
+
+struct tux_req_struct;
 
 #ifdef CONFIG_NETFILTER
 static inline void nf_conntrack_put(struct nf_conntrack *nfct)

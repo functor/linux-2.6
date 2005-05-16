@@ -110,7 +110,8 @@ typedef struct {
 #define CHECK_LOCK(x) \
 	do { \
 	 	if ((x)->magic != SPINLOCK_MAGIC) { \
-			printk(KERN_ERR "%s:%d: spin_is_locked on uninitialized spinlock %p.\n", \
+			dump_stack(); \
+			panic("%s:%d: spin_is_locked on uninitialized spinlock %p.\n", \
 					__FILE__, __LINE__, (x)); \
 		} \
 	} while(0)
@@ -120,7 +121,8 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if ((x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			printk("%s:%d: spin_lock(%s:%p) already locked by %s/%d\n", \
+			dump_stack(); \
+			panic("%s:%d: spin_lock(%s:%p) already locked by %s/%d\n", \
 					__FILE__,__LINE__, (x)->module, \
 					(x), (x)->owner, (x)->oline); \
 		} \
@@ -176,7 +178,8 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if (!(x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			printk("%s:%d: spin_unlock(%s:%p) not locked\n", \
+			dump_stack(); \
+			panic("%s:%d: spin_unlock(%s:%p) not locked\n", \
 					__FILE__,__LINE__, (x)->module, (x));\
 		} \
 		(x)->lock = 0; \
@@ -467,6 +470,20 @@ do { \
 #define write_unlock_bh(lock)			_write_unlock_bh(lock)
 
 #define spin_trylock_bh(lock)			__cond_lock(_spin_trylock_bh(lock))
+
+#define spin_trylock_irq(lock) \
+({ \
+	local_irq_disable(); \
+	_spin_trylock(lock) ? \
+	1 : ({local_irq_enable(); 0; }); \
+})
+
+#define spin_trylock_irqsave(lock, flags) \
+({ \
+	local_irq_save(flags); \
+	_spin_trylock(lock) ? \
+	1 : ({local_irq_restore(flags); 0;}); \
+})
 
 #ifdef CONFIG_LOCKMETER
 extern void _metered_spin_lock   (spinlock_t *lock);

@@ -240,7 +240,15 @@ sys_call_table:
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 220 */
 	.quad alpha_ni_syscall
+#ifdef CONFIG_TUX
+	.quad __sys_tux
+#else
+# ifdef CONFIG_TUX_MODULE
+	.quad sys_tux
+# else
 	.quad alpha_ni_syscall
+# endif
+#endif
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 225 */
@@ -291,7 +299,7 @@ sys_call_table:
 	.quad alpha_ni_syscall			/* 270 */
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall
-	.quad alpha_ni_syscall
+	.quad sys_vserver			/* 273 sys_vserver */
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 275 */
 	.quad alpha_ni_syscall

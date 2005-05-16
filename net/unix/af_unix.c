@@ -118,6 +118,9 @@
 #include <linux/mount.h>
 #include <net/checksum.h>
 #include <linux/security.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
+#include <linux/vs_limit.h>
 
 int sysctl_unix_max_dgram_qlen = 10;
 
@@ -394,6 +397,9 @@ static int unix_release_sock (struct sock *sk, int embrion)
 		mntput(mnt);
 	}
 
+	vx_sock_dec(sk);
+	clr_vx_info(&sk->sk_vx_info);
+	clr_nx_info(&sk->sk_nx_info);
 	sock_put(sk);
 
 	/* ---- Socket is dead now and most probably destroyed ---- */
@@ -549,6 +555,11 @@ static struct sock * unix_create1(struct socket *sock)
 
 	sock_init_data(sock,sk);
 	sk_set_owner(sk, THIS_MODULE);
+
+	set_vx_info(&sk->sk_vx_info, current->vx_info);
+	sk->sk_xid = vx_current_xid();
+	vx_sock_inc(sk);
+	set_nx_info(&sk->sk_nx_info, current->nx_info);
 
 	sk->sk_write_space	= unix_write_space;
 	sk->sk_max_ack_backlog	= sysctl_unix_max_dgram_qlen;
@@ -861,7 +872,7 @@ static int unix_dgram_connect(struct socket *sock, struct sockaddr *addr,
 			goto out;
 		alen = err;
 
-		if (sock->passcred && !unix_sk(sk)->addr &&
+		if (test_bit(SOCK_PASS_CRED, &sock->flags) && !unix_sk(sk)->addr &&
 		    (err = unix_autobind(sock)) != 0)
 			goto out;
 
@@ -952,7 +963,8 @@ static int unix_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 		goto out;
 	addr_len = err;
 
-	if (sock->passcred && !u->addr && (err = unix_autobind(sock)) != 0)
+	if (test_bit(SOCK_PASS_CRED, &sock->flags)
+		&& !u->addr && (err = unix_autobind(sock)) != 0)
 		goto out;
 
 	timeo = sock_sndtimeo(sk, flags & O_NONBLOCK);
@@ -1286,7 +1298,8 @@ static int unix_dgram_sendmsg(struct kiocb *kiocb, struct socket *sock,
 			goto out;
 	}
 
-	if (sock->passcred && !u->addr && (err = unix_autobind(sock)) != 0)
+	if (test_bit(SOCK_PASS_CRED, &sock->flags)
+		&& !u->addr && (err = unix_autobind(sock)) != 0)
 		goto out;
 
 	err = -EMSGSIZE;

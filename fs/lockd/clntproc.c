@@ -329,7 +329,6 @@ nlmclnt_call(struct nlm_rqst *req, u32 proc)
 	struct rpc_clnt	*clnt;
 	struct nlm_args	*argp = &req->a_args;
 	struct nlm_res	*resp = &req->a_res;
-	struct file	*filp = argp->lock.fl.fl_file;
 	struct rpc_message msg = {
 		.rpc_argp	= argp,
 		.rpc_resp	= resp,
@@ -338,9 +337,6 @@ nlmclnt_call(struct nlm_rqst *req, u32 proc)
 
 	dprintk("lockd: call procedure %d on %s\n",
 			(int)proc, host->h_name);
-
-	if (filp)
-		msg.rpc_cred = nfs_file_cred(filp);
 
 	do {
 		if (host->h_reclaiming && !argp->reclaim)
@@ -435,7 +431,6 @@ nlmclnt_async_call(struct nlm_rqst *req, u32 proc, rpc_action callback)
 	struct rpc_clnt	*clnt;
 	struct nlm_args	*argp = &req->a_args;
 	struct nlm_res	*resp = &req->a_res;
-	struct file	*file = argp->lock.fl.fl_file;
 	struct rpc_message msg = {
 		.rpc_argp	= argp,
 		.rpc_resp	= resp,
@@ -450,11 +445,9 @@ nlmclnt_async_call(struct nlm_rqst *req, u32 proc, rpc_action callback)
 		return -ENOLCK;
 	msg.rpc_proc = &clnt->cl_procinfo[proc];
 
-        /* bootstrap and kick off the async RPC call */
-	if (file)
-		msg.rpc_cred = nfs_file_cred(file);
 	/* Increment host refcount */
 	nlm_get_host(host);
+        /* bootstrap and kick off the async RPC call */
         status = rpc_call_async(clnt, &msg, RPC_TASK_ASYNC, callback, req);
 	if (status < 0)
 		nlm_release_host(host);
@@ -594,9 +587,25 @@ nlmclnt_reclaim(struct nlm_host *host, struct file_lock *fl)
 	nlmclnt_setlockargs(req, fl);
 	req->a_args.reclaim = 1;
 
-	if ((status = nlmclnt_call(req, NLMPROC_LOCK)) >= 0
-	 && req->a_res.status == NLM_LCK_GRANTED)
-		return 0;
+again:
+	switch ((status = nlmclnt_call(req, NLMPROC_LOCK))) {
+	case 0:
+		if (req->a_res.status == NLM_LCK_GRANTED)
+			return 0;
+		break;
+	case -EAGAIN:
+	case -EACCES: /* portmapper might be up, but lockd isn't */
+		current->state = TASK_INTERRUPTIBLE;
+		schedule_timeout(10*HZ);
+		if (signalled()) {
+			status = -EINTR;
+			dprintk("lockd: reclaim got interrupted!\n");
+			break;
+		}
+		goto again;
+	default:
+		break;
+	}
 
 	printk(KERN_WARNING "lockd: failed to reclaim lock for pid %d "
 				"(errno %d, status %d)\n", fl->fl_pid,

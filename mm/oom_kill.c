@@ -55,6 +55,7 @@ static unsigned long badness(struct task_struct *p, unsigned long uptime)
 	 * The memory size of the process is the basis for the badness.
 	 */
 	points = p->mm->total_vm;
+	/* FIXME add vserver badness ;) */
 
 	/*
 	 * CPU time is in tens of seconds and run time is in thousands
@@ -188,7 +189,10 @@ static void oom_kill(void)
 {
 	struct mm_struct *mm;
 	struct task_struct *g, *p, *q;
-	
+
+	/* print the memory stats whenever we OOM kill */
+	show_mem();
+
 	read_lock(&tasklist_lock);
 retry:
 	p = select_bad_process();
@@ -279,7 +283,6 @@ void out_of_memory(int gfp_mask)
 	lastkill = now;
 
 	printk("oom-killer: gfp_mask=0x%x\n", gfp_mask);
-	show_free_areas();
 
 	/* oom_kill() sleeps */
 	spin_unlock(&oom_lock);

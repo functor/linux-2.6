@@ -644,5 +644,7 @@ struct qdio_irq {
 	struct qdio_q *input_qs[QDIO_MAX_QUEUES_PER_IRQ];
 	struct qdio_q *output_qs[QDIO_MAX_QUEUES_PER_IRQ];
 	struct semaphore setting_up_sema;
+
+	char *actual_alloc;
 };
 #endif
