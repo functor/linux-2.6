@@ -1,8 +1,8 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 10
-EXTRAVERSION = -1.14_FC2.1.planetlab
-NAME=AC 1
+EXTRAVERSION = -1.771_FC2.1.planetlab
+NAME=AC
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"

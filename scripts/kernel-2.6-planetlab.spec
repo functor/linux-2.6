@@ -22,8 +22,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
 %define rhbsys  %([ -r /etc/beehive-root ] && echo  || echo .`whoami`)
-%define release 1.14_FC2.2.planetlab%{?date:.%{date}}
+
+%define release 1.771_FC2.1.planetlab%{?date:.%{date}}
+
 %define signmodules 0
+%define make_target bzImage
 
 %define KVERREL %{PACKAGE_VERSION}-%{PACKAGE_RELEASE}
 
@@ -238,7 +241,7 @@ BuildKernel() {
     make -s nonint_oldconfig > /dev/null
     make -s include/linux/version.h 
 
-    make -s %{?_smp_mflags} bzImage 
+    make -s %{?_smp_mflags} %{make_target}
     make -s %{?_smp_mflags} modules || exit 1
     make buildcheck
     
