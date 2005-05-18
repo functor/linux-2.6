@@ -21,7 +21,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define sublevel 10
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
-%define rhbsys  %([ -r /etc/beehive-root ] && echo  || echo .`whoami`)
+%define rhbsys  %([ -r /etc/beehive-root -o -n "%{?__beehive_build}" ] && echo || echo .`whoami`)
 
 %define release 1.771_FC2.1.planetlab%{?date:.%{date}}
 
@@ -277,7 +277,9 @@ BuildKernel() {
     # * all script/ files 
 
     rm -f $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
+    rm -f $RPM_BUILD_ROOT/lib/modules/$KernelVer/source
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
+    (cd $RPM_BUILD_ROOT/lib/modules/$KernelVer ; ln -s build source)
     # first copy everything
     cp --parents `find  -type f -name Makefile -o -name "Kconfig*"` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build 
     cp Module.symvers $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
@@ -375,7 +377,7 @@ tar cf - . | tar xf - -C $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}
 perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = -%{release}custom/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/Makefile
 
 # some config options may be appropriate for an rpm kernel build but are less so for custom user builds,
-# change those to values that are more appropriate as defeault for people who build their own kernel.
+# change those to values that are more appropriate as default for people who build their own kernel.
 perl -p -i -e "s/^CONFIG_DEBUG_INFO.*/# CONFIG_DEBUG_INFO is not set/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/configs/*
 perl -p -i -e "s/^.*CONFIG_DEBUG_PAGEALLOC.*/# CONFIG_DEBUG_PAGEALLOC is not set/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/configs/*
 perl -p -i -e "s/^.*CONFIG_DEBUG_SLAB.*/# CONFIG_DEBUG_SLAB is not set/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/configs/*
@@ -426,7 +428,7 @@ pushd /lib/modules/%{KVERREL}/build > /dev/null ; {
 	cd /lib/modules/%{KVERREL}/build
 	find . -type f | while read f; do hardlink -c /lib/modules/*/build/$f $f ; done
 }
-popd
+popd > /dev/null
 fi
 
 # make some useful links
@@ -437,7 +439,7 @@ pushd /boot > /dev/null ; {
 	ln -sf initrd-%{KVERREL}.img initrd-boot
 	ln -sf vmlinuz-%{KVERREL} kernel-boot
 }
-popd
+popd > /dev/null
 
 # ask for a reboot
 mkdir -p /etc/planetlab
@@ -450,9 +452,8 @@ pushd /lib/modules/%{KVERREL}smp/build > /dev/null ; {
 	cd /lib/modules/%{KVERREL}smp/build
 	find . -type f | while read f; do hardlink -c /lib/modules/*/build/$f $f ; done
 }
-popd
+popd > /dev/null
 fi
-
 
 %preun 
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
@@ -462,7 +463,6 @@ fi
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
 [ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --rminitrd --rmmoddep --remove %{KVERREL}smp
 
-
 ###
 ### file lists
 ###
@@ -470,27 +470,27 @@ fi
 %if %{buildup}
 %files 
 %defattr(-,root,root)
-/%{image_install_path}/vmlinuz-%{KVERREL}
+/%{image_install_path}/*-%{KVERREL}
 #/boot/Kerntypes-%{KVERREL}
 /boot/System.map-%{KVERREL}
 /boot/config-%{KVERREL}
 %dir /lib/modules/%{KVERREL}
 /lib/modules/%{KVERREL}/kernel
 %verify(not mtime) /lib/modules/%{KVERREL}/build
-
+/lib/modules/%{KVERREL}/source
 %endif
 
 %if %{buildsmp}
 %files smp
 %defattr(-,root,root)
-/%{image_install_path}/vmlinuz-%{KVERREL}smp
+/%{image_install_path}/*-%{KVERREL}smp
 #/boot/Kerntypes-%{KVERREL}smp
 /boot/System.map-%{KVERREL}smp
 /boot/config-%{KVERREL}smp
 %dir /lib/modules/%{KVERREL}smp
 /lib/modules/%{KVERREL}smp/kernel
 %verify(not mtime) /lib/modules/%{KVERREL}smp/build
-
+/lib/modules/%{KVERREL}smp/source
 %endif
 
 %if %{builduml}
@@ -520,17 +520,549 @@ fi
 # no files
 
 %changelog
-* Thu Feb 17 2005 Marc E. Fiuczynski <mef@cs.princeton.edu>
-- merge to Fedora Core 2 2.6.10-1.14_FC2
+* Sun Mar 27 2005 Dave Jones <davej@redhat.com>
+- Catch up with all recent security issues.
+  - CAN-2005-0210 : dst leak
+  - CAN-2005-0384 : ppp dos
+  - CAN-2005-0531 : Sign handling issues.
+  - CAN-2005-0400 : EXT2 information leak.
+  - CAN-2005-0449 : Remote oops.
+  - CAN-2005-0736 : Epoll overflow
+  - CAN-2005-0749 : ELF loader may kfree wrong memory.
+  - CAN-2005-0750 : Missing range checking in bluetooth 
+  - CAN-2005-0767 : drm race in radeon
+  - CAN-2005-0815 : Corrupt isofs images could cause oops.
 
-* Tue Feb 8 2005 Marc E. Fiuczynski <mef@cs.princeton.edu>
-- merge to Fedora Core 2 2.6.10-1.12_FC2
+* Tue Mar 22 2005 Dave Jones <davej@redhat.com>
+- Fix swapped parameters to memset in ieee802.11 code.
 
-* Tue Jan 18 2005 Marc E. Fiuczynski <mef@cs.princeton.edu>
-- merge to Fedora Core 2 2.6.9-1.11_FC2
+* Thu Feb 24 2005 Dave Jones <davej@redhat.com>
+- Use old scheme first when probing USB. (#145273)
 
-* Thu Sep 16 2004 Mark Huang <mlhuang@cs.princeton.edu>
-- merge to Fedora Core 2 2.6.8-1.521
+* Wed Feb 23 2005 Dave Jones <davej@redhat.com>
+- Try as you may, there's no escape from crap SCSI hardware. (#149402)
+
+* Mon Feb 21 2005 Dave Jones <davej@redhat.com>
+- Disable some experimental USB EHCI features.
+
+* Tue Feb 15 2005 Dave Jones <davej@redhat.com>
+- Fix bio leak in md layer.
+
+* Wed Feb  9 2005 Dave Jones <davej@redhat.com> [2.6.10-1.766_FC3, 2.6.10-1.14_FC2]
+- Backport some exec-shield fixes from devel/ branch.
+- Scan all SCSI LUNs by default.
+  Theoretically, some devices may hang when being probed, though
+  there should be few enough of these that we can blacklist them
+  instead of having to whitelist every other device on the planet.
+
+* Tue Feb  8 2005 Dave Jones <davej@redhat.com>
+- Use both old-style and new-style for USB initialisation.
+
+* Mon Feb  7 2005 Dave Jones <davej@redhat.com>	[2.6.10-1.762_FC3, 2.6.10-1.13_FC2]
+- Update to 2.6.10-ac12
+
+* Tue Feb  1 2005 Dave Jones <davej@redhat.com> [2.6.10-1.760_FC3, 2.6.10-1.12_FC2]
+- Disable longhaul driver, it causes random hangs. (#140873)
+- Fixup NFSv3 oops when mounting with sec=krb5 (#146703)
+
+* Mon Jan 31 2005 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.10-ac11
+
+* Sat Jan 29 2005 Dave Jones <davej@redhat.com>
+- Reintegrate Tux. (#144812)
+
+* Thu Jan 20 2005 Dave Jones <davej@redhat.com>	[2.6.10-1.753_FC3, 2.6.10-1.11_FC2]
+- Fix x87 fnsave Tag Word emulation when using FXSR (SSE)
+- Add multi-card reader of the day to the whitelist. (#145587)
+
+* Tue Jan 18 2005 Dave Jones <davej@redhat.com>
+- Reintegrate netdump/netconsole. (#144068)
+
+* Mon Jan 17 2005 Dave Jones <davej@redhat.com>
+- Update to 2.6.10-ac10
+- Revert module loader patch that caused lots of invalid parameter problems.
+- Print more debug info when spinlock code triggers a panic.
+- Print tainted information on various mm debug info.
+
+* Fri Jan 14 2005 Dave Jones <davej@redhat.com>
+- Enable advansys scsi module on x86. (#141004)
+
+* Thu Jan 13 2005 Dave Jones <davej@redhat.com>
+- Reenable CONFIG_PARIDE (#127333)
+
+* Thu Jan 13 2005 Dave Jones <davej@redhat.com>  [2.6.10-1.741_FC3, 2.6.10-1.9_FC2]
+- Update to 2.6.10-ac9
+- Fix slab corruption in ACPI video code.
+
+* Mon Jan 10 2005 Dave Jones <davej@redhat.com>
+- Add another Lexar card reader to the whitelist. (#143600)
+- Package asm-m68k for asm-ppc includes. (don't ask). (#144604)
+
+* Mon Jan 10 2005 Dave Jones <davej@redhat.com>  [2.6.10-1.737_FC3, 2.6.10-1.8_FC2]
+- Disable slab debugging.
+
+* Sat Jan  8 2005 Dave Jones <davej@redhat.com>
+- Periodic slab debug is incompatable with pagealloc debug.
+  Disable the latter.
+- Update to 2.6.10-ac8
+
+* Fri Jan  7 2005 Dave Jones <davej@redhat.com>
+- Bump up to -ac7
+- Another new card reader.
+
+* Thu Jan  6 2005 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.10-ac5
+
+* Tue Jan  4 2005 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.10-ac4
+- Add periodic slab debug checker.
+
+* Mon Jan  3 2005 Dave Jones <davej@redhat.com>
+- Drop patch which meant we needed a newer gcc. (#144035)
+- Rebase to 2.6.10-ac2
+- Enable SL82C104 IDE driver as built-in on PPC64 (#131033)
+
+* Sat Jan  1 2005 Dave Jones <davej@redhat.com>
+- Fix probing of vesafb. (#125890)
+- Enable PCILynx driver. (#142173)
+
+* Fri Dec 31 2004 Dave Jones <davej@redhat.com>
+- Drop 4g/4g patch completely.
+
+* Tue Dec 28 2004 Dave Jones <davej@redhat.com>
+- Drop bogus ethernet slab cache.
+
+* Thu Dec 23 2004 Dave Jones <davej@redhat.com>
+- Fix bio error propagation.
+- Clear ebp on sysenter return.
+- Extra debugging info on OOM kill.
+- exit() race fix.
+- Fix refcounting order in sd/sr, fixing cable pulls on USB storage.
+- IGMP source filter fixes.
+- Fix ext2/3 leak on umount.
+- fix missing wakeup in ipc/sem
+- Fix another tux corner case bug.
+
+* Wed Dec 22 2004 Dave Jones <davej@redhat.com>
+- Add another ipod to the unusual usb devices list. (#142779)
+
+* Tue Dec 21 2004 Dave Jones <davej@redhat.com>
+- Fix two silly bugs in the AGP posting fixes.
+
+* Thu Dec 16 2004 Dave Jones <davej@redhat.com>
+- Better version of the PCI Posting fixes for agpgart.
+- Add missing cache flush to the AGP code.
+
+* Sun Dec 12 2004 Dave Jones <davej@redhat.com>
+- fix false ECHILD result from wait* with zombie group leader.
+
+* Sat Dec 11 2004 Dave Jones <davej@redhat.com>
+- Workaround broken pci posting in AGPGART.
+- Make sure VC resizing fits in s16.
+
+* Fri Dec 10 2004 Dave Jones <davej@redhat.com>
+- Prevent block device queues from being shared in viocd. (#139018)
+- Libata updates. (#132848, #138405)
+- aacraid: remove aac_handle_aif (#135527)
+- fix uninitialized variable in waitid(2). (#142505)
+- Fix CMSG validation checks wrt. signedness.
+- Fix memory leak in ip_conntrack_ftp
+- [IPV4]: Do not leak IP options.
+- ppc64: Align PACA buffer for hypervisor's use. (#141817)
+- ppc64: Indicate that the veth link is always up. (#135402)
+- ppc64: Quiesce OpenFirmware stdin device at boot. (#142009)
+- SELinux: Fix avc_node_update oops. (#142353)
+- Fix CCISS ioctl return code.
+- Make ppc64's pci_alloc_consistent() conform to documentation. (#140047)
+- Disable tiglusb module. (#142102)
+- E1000 64k-alignment fix. (#140047)
+- Disable tiglusb module. (#142102)
+- ID updates for cciss driver.
+- Fix overflows in USB Edgeport-IO driver. (#142258)
+- Fix wrong TASK_SIZE for 32bit processes on x86-64. (#141737)
+- Fix ext2/ext3 xattr/mbcache race. (#138951)
+- Fix bug where __getblk_slow can loop forever when pages are partially mapped. (#140424)
+- Add missing cache flushes in agpgart code.
+
+* Wed Dec  8 2004 Dave Jones <davej@redhat.com>
+- Enable EDD
+- Enable ETH1394. (#138497)
+- Workaround E1000 post-maturely writing back to TX descriptors. (#133261)
+- Fix the previous E1000 errata workaround.
+- Several IDE fixes from 2.6.9-ac
+- vm pageout throttling. (#133858)
+- Fix Tux from oopsing. (#140918)
+- Fix Tux/SELinux incompatability (#140916)
+- Fix Tux/IPV6 problem. (#140916)
+- ide: Fix possible oops on boot.
+- Make spinlock debugging panic instead of printk.
+- Update Emulex lpfc driver to 8.0.16
+- Selected patches from 2.6.9-ac12
+- ppc64: Fix inability to find space for TCE table (#138844)
+- Fix compat fcntl F_GETLK{,64} (#141680)
+- blkdev_get_blocks(): handle eof
+- Another card reader for the whitelist. (#134094)
+
+* Sat Dec  4 2004 Dave Jones <davej@redhat.com>
+- Enable both old and new megaraid drivers.
+- Add yet another card reader to usb scsi whitelist. (#141367)
+- Fix oops in conntrack on rmmod.
+
+* Fri Dec  3 2004 Dave Jones <davej@redhat.com>
+- Pull in bits of -ac12
+  Should fix the smbfs & visor issues among others.
+
+* Thu Dec  2 2004 Dave Jones <davej@redhat.com>
+- Drop the futex debug patch, it served its purpose.
+- XFRM layer bug fixes
+- ppc64: Convert to using ibm,read-slot-reset-state2 RTAS call
+- ide: Make CSB6 driver support configurations.
+- ide: Handle early EOF on CDs.
+- Fix sx8 device naming in sysfs
+- e100/e1000: return -EINVAL when setting rx-mini or rx-jumbo. (#140793)
+
+* Wed Dec  1 2004 Dave Jones <davej@redhat.com>
+- Disable 4G/4G for i686.
+- Workaround for the E1000 erratum 23 (#140047)
+- Remove bogus futex warning. (#138179)
+- x86_64: Fix lost edge triggered irqs on UP kernel.
+- x86_64: Reenable DRI for MGA.
+- Workaround E1000 post-maturely writing back to TX descriptors (#133261)
+- 3c59x: add EEPROM_RESET for 3c900 Boomerang
+- Fix buffer overrun in arch/x86_64/sys_ia32.c:sys32_ni_syscall()
+- ext3: improves ext3's error logging when we encounter an on-disk corruption.
+- ext3: improves ext3's ability to deal with corruption on-disk
+- ext3: Handle double-delete of indirect blocks.
+- Disable SCB2 flash driver for RHEL4. (#141142)
+
+* Tue Nov 30 2004 Dave Jones <davej@redhat.com>
+- x86_64: add an option to configure oops stack dump
+- x86[64]: display phys_proc_id only when it is initialized
+- x86_64: no TIOCSBRK/TIOCCBRK in ia32 emulation
+- via-rhine: references __init code during resume
+- Add barriers to generic timer code to prevent race. (#128242)
+- ppc64: Add PURR and version data to /proc/ppc64/lparcfg
+- Prevent xtime value becoming incorrect.
+- scsi: return full SCSI status byte in SG_IO
+- Fix show_trace() in irq context with CONFIG_4KSTACKS
+- Adjust alignment of pagevec structure.
+- md: make sure md always uses rdev_dec_pending properly.
+- Make proc_pid_status not dereference dead task structs.
+- sg: Fix oops of sg_cmd_done and sg_release race (#140648)
+- fix bad segment coalescing in blk_recalc_rq_segments()
+- fix missing security_*() check in net/compat.c
+- ia64/x86_64/s390 overlapping vma fix
+- Update Emulex lpfc to 8.0.15
+
+* Mon Nov 29 2004 Dave Jones <davej@redhat.com>
+- Add another card reader to whitelist. (#141022)
+- Fix possible hang in do_wait() (#140042)
+- Fix ps showing wrong ppid. (#132030)
+- Print advice to use -hugemem if >=16GB of memory is detected.
+- Enable ICOM serial driver. (#136150)
+- Enable acpi hotplug driver for IA64.
+- SCSI: fix USB forced remove oops.
+- ia64: add missing sn2 timer mask in time_interpolator code. (#140580)
+- ia64: Fix hang reading /proc/pal/cpu0/tr_info (#139571)
+- ia64: bump number of UARTS. (#139100)
+- Fix ACPI debug level (#141292)
+- Make EDD runtime configurable, and reenable.
+- ppc64: IBM VSCSI driver race fix. (#138725)
+- ppc64: Ensure PPC64 interrupts don't end up hard-disabled. (#139020, #131590)
+- ppc64: Yet more sigsuspend/singlestep fixing. (#140102, #137931)
+- x86-64: Implement ACPI based reset mechanism. (#139104)
+- Backport 2.6.10rc sysfs changes needed for IBM hotplug driver. (#140372)
+- Update Emulex lpfc driver to v8.0.14
+- Optimize away the unconditional write to debug registers on signal delivery path.
+- Fix up scsi_test_unit_ready() to work correctly with CD-ROMs.
+- md: fix two little bugs in raid10
+- Remove incorrect ELF check from module loading. (#140954)
+- Plug leaks in error paths of aic driver.
+- Add refcounting to scsi command allocation.
+- Taint oopses on machine checks, bad_page()'s calls and forced rmmod's.
+- Share Intel cache descriptors between x86 & x86-64.
+- rx checksum support for gige nForce ethernet
+- vm: vm_dirty_ratio initialisation fix
+
+* Mon Nov 29 2004 Soeren Sandmann <sandmann@redhat.com>
+- Build FC-3 kernel in RHEL build root
+
+* Sun Nov 28 2004 Dave Jones <davej@redhat.com>
+- Move 4g/4g kernel into -hugemem.
+
+* Sat Nov 27 2004 Dave Jones <davej@redhat.com>
+- Recognise Shuttle SN85G4 card reader. (#139163)
+
+* Tue Nov 23 2004 Dave Jones <davej@redhat.com>
+- Add futex debug patch.
+
+* Mon Nov 22 2004 Dave Jones <davej@redhat.com>
+- Update -ac patch to 2.6.9-ac11
+- make tulip_stop_rxtx() wait for DMA to fully stop. (#138240)
+- ACPI: Make LEqual less strict about operand types matching.
+- scsi: avoid extra 'put' on devices in __scsi_iterate_device() (#138135)
+- Fix bugs with SOCK_SEQPACKET AF_UNIX sockets
+- Reenable token ring drivers. (#119345)
+- SELinux: Map Unix seqpacket sockets to appropriate security class
+- SELinux: destroy avtab node cache in policy load error path.
+- AF_UNIX: Serialize dgram read using semaphore just like stream.
+- lockd: NLM blocks locks don't sleep
+- NFS lock recovery fixes
+- Add more MODULE_VERSION tags (#136403)
+- Update qlogic driver to 2.6.10rc2 level.
+- cciss: fixes for clustering
+- ieee802.11 update.
+- ipw2100: update to ver 1.0.0
+- ipw2200: update to ver 1.0.0
+- Enable promisc mode on ipw2100
+- 3c59x: reload EEPROM values at rmmod for needy cards
+- ppc64: Prevent sigsuspend stomping on r4 and r5
+- ppc64: Alternative single-step fix.
+- fix for recursive netdump oops on x86_64
+- ia64: Fix IRQ routing fix when booted with maxcpus=  (#138236)
+- ia64: search the iommu for the correct size
+- Deal with fraglists correctly on ipv4/ipv6 output
+- Various statm accounting fixes (#139447)
+- Reenable CMM /proc interface for s390 (#137397)
+
+* Fri Nov 19 2004 Dave Jones <davej@redhat.com>
+- e100: fix improper enabling of interrupts. (#139706)
+- autofs4: allow map update recognition
+- Various TCP fixes from 2.6.10rc
+- Various netlink fixes from 2.6.10rc
+- [IPV4]: Do not try to unhash null-netdev nexthops.
+- ppc64: Make NUMA map CPU->node before bringing up the CPU (#128063)
+- ppc64: sched domains / cpu hotplug cleanup. (#128063)
+- ppc64: Add a CPU_DOWN_PREPARE hotplug CPU notifier (#128063)
+- ppc64: Register a cpu hotplug notifier to reinitialize the
+  scheduler domains hierarchy (#128063)
+- ppc64: Introduce CPU_DOWN_FAILED notifier (#128063)
+- ppc64: Make arch_destroy_sched_domains() conditional (#128063)
+- ppc64: Use CPU_DOWN_FAILED notifier in the sched-domains hotplug code (#128063)
+- Various updates to the SCSI midlayer from 2.6.10rc.
+- vlan_dev: return 0 on vlan_dev_change_mtu success. (#139760)
+- Update Emulex lpfc driver to v8013
+- Fix problem with b44 driver and 4g/4g patch. (#118165)
+- Prevent oops when loading aic79xx on machine without hardware. (#125982)
+- Use correct spinlock functions in token ring net code. (#135462)
+- scsi: Add reset ioctl capability to ULDs
+- scsi: update ips driver to 7.10.18
+- Reenable ACPI hotplug driver. (#139976, #140130, #132691)
+
+* Thu Nov 18 2004 Dave Jones <davej@redhat.com>
+- Drop 2.6.9 changes that broke megaraid. (#139723)
+- Update to 2.6.9-ac10, fixing the SATA problems (#139674)
+- Update the OOM-killer tamer to upstream.
+- Implement an RCU scheme for the SELinux AVC
+- Improve on the OOM-killer taming patch.
+- device-mapper: Remove duplicate kfree in dm_register_target error path.
+- Make SHA1 guard against misaligned accesses
+- ASPM workaround for PCIe. (#123360)
+- Hot-plug driver updates due to MSI change (#134290)
+- Workaround for 80332 IOP hot-plug problem (#139041)
+- ExpressCard hot-plug support for ICH6M (#131800)
+- Fix boot crash on VIA systems (noted on x86-64)
+- PPC64: Store correct backtracking info in ppc64 signal frames
+- PPC64: Prevent HVSI from oopsing on hangup (#137912)
+- Fix poor performance b/c of noncacheable mapping in 4g/4g (#130842)
+- Fix PCI-X hotplug issues (#132852, #134290)
+- Re-export force_sig() (#139503)
+- Various fixes for more security issues from latest -ac patch.
+- Fix d_find_alias brokenness (#137791)
+- tg3: Fix fiber hw autoneg bounces (#138738)
+- diskdump: Fix issue with NMI watchdog. (#138041)
+- diskdump: Export disk_dump_state. (#138132)
+- diskdump: Tickle NMI watchdog in diskdump_mdelay() (#138036)
+- diskdump: Fix mem= for x86-64 (#138139)
+- diskdump: Fix missing system_state setting. (#138130)
+- diskdump: Fix diskdump completion message (#138028)
+- Re-add aic host raid support.
+- Take a few more export removal patches from 2.6.10rc
+- SATA: Make AHCI work
+- SATA: Core updates.
+- S390: Fix Incorrect registers in core dumps. (#138206)
+- S390: Fix up lcs device state. (#131167)
+- S390: Fix possible qeth IP registration failure.
+- S390: Support broadcast on z800/z900 HiperSockets
+- S390: Allow FCP port to recover after aborted nameserver request.
+- Flush error in pci_mmcfg_write (#129338)
+- hugetlb_get_unmapped_area fix (#135364, #129525)
+- Fix ia64 cyclone timer on ia64 (#137842, #136684)
+- Fix ipv6 MTU calculation. (#130397)
+- ACPI: Don't display messages about ACPI breakpoints. (#135856)
+- Fix x86_64 copy_user_generic (#135655)
+- lockd: remove hardcoded maximum NLM cookie length
+- Fix SCSI bounce limit
+- Disable polling mode on hotplug controllers in favour of interrupt driven. (#138737)
+
+* Sat Nov 13 2004 Dave Jones <davej@redhat.com>
+- Drop some bogus patches.
+
+* Thu Nov 11 2004 Dave Jones <davej@redhat.com>
+- NFS: Fix dentry refcount accounting error
+- Fix single-stepping on PPC64
+- Integrate kernel-devel changes
+- SELinux: netif fixes.
+- SELinux: add DAC check to setxattr() hook.
+- SELinux: sidtab locking fix.
+- SELinux: mediate send_sigurg().
+- SELinux: fix setscheduler hook deadlock.
+- ide-floppy: Supresses error messages resulting from Medium not present
+- Various IA64 updates from 2.6.10rc1
+- nfsd: make sure getxattr inode op is non-NULL before calling it.
+- Handle NULL dev->dev_addr in SIOCGIFHWADDR correctly. (#137648)
+- Fix NFSD domainname size limit.
+- nfsd4: nfsd oopsed when encountering a conflict with a local lock
+- nfsd4: fix putrootfh return
+- nfsd: Insecure port warning shows decimal IPv4 address
+- Disable sw irqbalance/irqaffinity for e7520/e7320/e7525 (#136419)
+- Fix exec-shield non-PIE/non-prelinked bug
+- ext3 reservations: fix goal hit accounting.
+- Fix problems with non-power-of-two sector size discs. (#135094)
+- Fix possible oops in netpoll (#132153)
+- Add missing MODULE_VERSION tags to various modules. (#136399)
+- Add USB card reader de jour. (#124048)
+- Remove SG_IO deprecation warning (#136179)
+- Make sure that modules get signed with the right key.
+- Remove SG_IO deprecation warning (#136179)
+- s390: Fix fake_ll for qeth device. (#136175)
+- s390: zfcp: Kernel stack frame for zfcp_cfdc_dev_ioctl() is too big
+- s390: Use slab allocator for DASD I/O pages.
+- PPC64: HVSI udbg support
+- PPC64: Make HVSI console survive FSP reset
+- PPC64: Make PCI hostbridge hotplugging work
+- PPC64: Fix IBM VSCSI problems (#138124)
+- Rebase -ac patch to 2.6.9-ac8.
+
+* Wed Nov  3 2004 Dave Jones <davej@redhat.com>
+- Reenable token-ring drivers (#122602)
+
+* Tue Nov  2 2004 Dave Jones <davej@redhat.com>
+- Reenable SLIP. (#124223)
+- Add USB card reader de jour. (#124048)
+
+* Mon Nov  1 2004 Dave Jones <davej@redhat.com>
+- Fix memory leak on x86-64 in mixed 32/64 mode. (#132947)
+- Yet another USB card reader for the whitelist. (#137722)
+
+* Fri Oct 29 2004 Dave Jones <davej@redhat.com>
+- Fix raid5 oops (#127862)
+- Stop E820 BIOS entries being corrupted by EDID info. (#137510)
+
+* Thu Oct 28 2004 Dave Jones <davej@redhat.com>
+- Remove the possibility of some false OOM kills. (#131251)
+- Add more USB card readers to SCSI whitelist (#131546)
+- Disable CONFIG_SCHED_SMT for iseries.
+
+* Wed Oct 27 2004 Dave Jones <davej@redhat.com>
+- Reenable ISA NIC support (#136569)
+
+* Tue Oct 26 2004 Dave Jones <davej@redhat.com>
+- Reenable Initio 9100U(W) SCSI driver. (#137153)
+
+* Mon Oct 25 2004 Dave Jones <davej@redhat.com>
+- Add another USB card reader to SCSI whitelist (#132923)
+
+* Fri Oct 22 2004 Dave Jones <davej@redhat.com>
+- Fix PPC NUMA (#130716).
+- Fix autoraid for S390 (#123842/#130339)
+- Selected bits from 2.6.9-ac3
+  - Fix syncppp/async ppp problems with new hangup
+  - Fix broken parport_pc unload
+  - Stop i8xx_tco making some boxes reboot on load
+  - Fix cpia/module tools deadlock
+  - Security fix for smbfs leak/overrun
+
+* Thu Oct 21 2004 Dave Jones <davej@redhat.com>
+- Misc security fixes from 2.6.9-ac2
+
+* Wed Oct 20 2004 Dave Jones <davej@redhat.com>
+- Fix ia64 module loading. (#136365)
+- Enable discontigmem for PPC64
+- Disable a bunch of useless PPC config options
+- Enable PACK_STACK on s390.
+
+* Tue Oct 19 2004 Dave Jones <davej@redhat.com>
+- Fix NFS badness (#132726)
+- Drop bogus USB workaround. (#131127)
+
+* Mon Oct 18 2004 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.9
+- Speedtouch USB DSL modem driver update.
+- Cleanup some iseries config options.
+
+* Fri Oct 15 2004 Dave Jones <davej@redhat.com>
+- 2.6.9-rc4-bk3
+- Fix up a bunch of unresolved symbols that crept in recently.
+- Remove bogus O_NONBLOCK patch which broke lots of userspace.
+- Fix booting on PPC64 by reserving initrd pages.
+
+* Thu Oct 14 2004 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.9-rc4-bk2
+- librtas needs to work around the /dev/mem restrictions.
+- EXT3 reservations use-before-initialised bugfix.
+- support O_NONBLOCK for read,pread,readv of regular files.
+- EDD blows up some x86-64's. Disable again.
+
+* Wed Oct 13 2004 Dave Jones <davej@redhat.com>
+- Make EDD driver modular on x86-64 too.
+- Various mkinitrd spec changes (Jeremy Katz)
+- Enable a bunch more PPC64 config options. (Dave Howells)
+- Enable ACPI cpufreq driver for x86-64 too.
+
+* Tue Oct 12 2004 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.9-rc4-bk1
+- Tux update.
+- Update netdump/diskdump patches
+- PowerPC 64 netboot changes.
+- Various CONFIG_ option diddling.
+- Fix up the find_isa_irq_pin() oops on reboot for x86-64 too. 
+
+* Mon Oct 11 2004 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.9-rc4
+- Enable CONFIG_MICROCODE for x86-64
+
+* Fri Oct  8 2004 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.9-rc3-bk8
+
+* Thu Oct  7 2004 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.9-rc3-bk7
+- Fix up PPC/PPC64 compilation failures due to new binutils. (David Woodhouse)
+
+* Wed Oct  6 2004 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.9-rc3-bk6
+- Add xattr support for tmpfs.
+
+* Mon Oct  4 2004 Stephen C. Tweedie <sct@redhat.com>
+- Update ext3 online resize to 2.6.9-rc3-mm2 upstream
+- Reenable ext3 online resize in .spec
+
+* Tue Sep 28 2004 Jeremy Katz <katzj@redhat.com>
+- add patch from Roland McGrath/James Morris to fix mprotect hook bug (#133505)
+
+* Mon Sep 20 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.9-rc2-bk5
+
+* Thu Sep 16 2004 Arjan van de Ven <arjanv@redhat.com>
+- fix tux for x86-64 and ppc64
+
+* Tue Sep 14 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.9-rc2
+- add diskdump
+
+* Fri Sep 10 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.9-rc1-bk17 ; make ppc32 build
+
+* Tue Sep 07 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.9-rc1-bk13
+
+* Mon Sep 06 2004 Arjan van de Ven <arjanv@redhat.com>
+- disable online resize again
+- hopefully fix Quake3 interaction with execshield
+- add Alan's borken-bios-IRQ workaround patch
+
+* Sat Sep 04 2004 Arjan van de Ven <arjanv@redhat.com>
+- 2.6.9-rc1-bk11
 
 * Tue Aug 31 2004 Arjan van de Ven <arjanv@redhat.com>
 - fix execshield buglet with legacy binaries
@@ -560,10 +1092,6 @@ fi
 
 * Mon Aug 9 2004 Arjan van de Ven <arjanv@redhat.com>
 - 2.6.8-rc3-bk3
-
-* Thu Aug  5 2004 Mark Huang <mlhuang@cs.princeton.edu>
-- adapt for Fedora Core 2 based PlanetLab 3.0 (remove Source and Patch
-  sections, most non-x86 sections, and GPG sections)
 
 * Wed Aug 4 2004 Arjan van de Ven <arjanv@redhat.com>
 - Add the flex-mmap bits for s390/s390x (Pete Zaitcev)
@@ -837,5 +1365,4 @@ fi
 - switch several cpufreq modules to built in since detecting in userspace
   which to use is unpleasant
 * Thu Jul 03 2003 Arjan van de Ven <arjanv@redhat.com>
-- 2.6 start 
- 
+- 2.6 start
