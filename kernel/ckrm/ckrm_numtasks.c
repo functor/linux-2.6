@@ -304,10 +304,13 @@ recalc_and_propagate(struct ckrm_numtasks * res, struct ckrm_numtasks * parres)
 	ckrm_lock_hier(res->core);
 	while ((child = ckrm_get_next_child(res->core, child)) != NULL) {
 		childres = ckrm_get_res_class(child, resid, struct ckrm_numtasks);
-
-		spin_lock(&childres->cnt_lock);
-		recalc_and_propagate(childres, res);
-		spin_unlock(&childres->cnt_lock);
+		if (childres) {
+			spin_lock(&childres->cnt_lock);
+			recalc_and_propagate(childres, res);
+			spin_unlock(&childres->cnt_lock);
+		} else {
+			printk(KERN_ERR "%s: numtasks resclass missing\n",__FUNCTION__);
+		}
 	}
 	ckrm_unlock_hier(res->core);
 	return;
@@ -324,7 +327,7 @@ static int numtasks_set_share_values(void *my_res, struct ckrm_shares *new)
 
 	if (res->parent) {
 		parres =
-		    ckrm_get_res_class(res->parent, resid, struct ckrm_numtasks);
+		   ckrm_get_res_class(res->parent, resid, struct ckrm_numtasks);
 		spin_lock(&parres->cnt_lock);
 		spin_lock(&res->cnt_lock);
 		par = &parres->shares;
