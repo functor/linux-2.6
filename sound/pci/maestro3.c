@@ -62,16 +62,17 @@ static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP; /* all enabled */
 static int external_amp[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 1};
 static int amp_gpio[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = -1};
+static int boot_devs;
 
-module_param_array(index, int, NULL, 0444);
+module_param_array(index, int, boot_devs, 0444);
 MODULE_PARM_DESC(index, "Index value for " CARD_NAME " soundcard.");
-module_param_array(id, charp, NULL, 0444);
+module_param_array(id, charp, boot_devs, 0444);
 MODULE_PARM_DESC(id, "ID string for " CARD_NAME " soundcard.");
-module_param_array(enable, bool, NULL, 0444);
+module_param_array(enable, bool, boot_devs, 0444);
 MODULE_PARM_DESC(enable, "Enable this soundcard.");
-module_param_array(external_amp, bool, NULL, 0444);
+module_param_array(external_amp, bool, boot_devs, 0444);
 MODULE_PARM_DESC(external_amp, "Enable external amp for " CARD_NAME " soundcard.");
-module_param_array(amp_gpio, int, NULL, 0444);
+module_param_array(amp_gpio, int, boot_devs, 0444);
 MODULE_PARM_DESC(amp_gpio, "GPIO pin number for external amp. (default = -1)");
 
 #define MAX_PLAYBACKS	2
@@ -2386,7 +2387,6 @@ static int snd_m3_free(m3_t *chip)
 	if (chip->iobase)
 		pci_release_regions(chip->pci);
 
-	pci_disable_device(chip->pci);
 	kfree(chip);
 	return 0;
 }
@@ -2423,8 +2423,6 @@ static int m3_suspend(snd_card_t *card, unsigned int state)
 	/* power down apci registers */
 	snd_m3_outw(chip, 0xffff, 0x54);
 	snd_m3_outw(chip, 0xffff, 0x56);
-
-	pci_disable_device(chip->pci);
 	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	return 0;
 }
@@ -2437,7 +2435,6 @@ static int m3_resume(snd_card_t *card, unsigned int state)
 	if (chip->suspend_mem == NULL)
 		return 0;
 
-	pci_enable_device(chip->pci);
 	pci_set_master(chip->pci);
 
 	/* first lets just bring everything back. .*/
@@ -2506,15 +2503,12 @@ snd_m3_create(snd_card_t *card, struct pci_dev *pci,
 	if (pci_set_dma_mask(pci, 0x0fffffff) < 0 ||
 	    pci_set_consistent_dma_mask(pci, 0x0fffffff) < 0) {
 		snd_printk("architecture does not support 28bit PCI busmaster DMA\n");
-		pci_disable_device(pci);
 		return -ENXIO;
 	}
 
 	chip = kcalloc(1, sizeof(*chip), GFP_KERNEL);
-	if (chip == NULL) {
-		pci_disable_device(pci);
+	if (chip == NULL)
 		return -ENOMEM;
-	}
 
 	spin_lock_init(&chip->reg_lock);
 	switch (pci->device) {
@@ -2556,7 +2550,6 @@ snd_m3_create(snd_card_t *card, struct pci_dev *pci,
 	chip->substreams = kmalloc(sizeof(m3_dma_t) * chip->num_substreams, GFP_KERNEL);
 	if (chip->substreams == NULL) {
 		kfree(chip);
-		pci_disable_device(pci);
 		return -ENOMEM;
 	}
 	memset(chip->substreams, 0, sizeof(m3_dma_t) * chip->num_substreams);
@@ -2577,7 +2570,26 @@ snd_m3_create(snd_card_t *card, struct pci_dev *pci,
 
 	snd_m3_assp_init(chip);
 	snd_m3_amp_enable(chip, 1);
+    
+	if ((err = snd_m3_mixer(chip)) < 0) {
+		snd_m3_free(chip);
+		return err;
+	}
 
+	for (i = 0; i < chip->num_substreams; i++) {
+		m3_dma_t *s = &chip->substreams[i];
+		s->chip = chip;
+		if ((err = snd_m3_assp_client_init(chip, s, i)) < 0) {
+			snd_m3_free(chip);
+			return err;
+		}
+	}
+    
+	if ((err = snd_m3_pcm(chip, 0)) < 0) {
+		snd_m3_free(chip);
+		return err;
+	}
+    
 	if (request_irq(pci->irq, snd_m3_interrupt, SA_INTERRUPT|SA_SHIRQ,
 			card->driver, (void *)chip)) {
 		snd_printk("unable to grab IRQ %d\n", pci->irq);
@@ -2599,19 +2611,6 @@ snd_m3_create(snd_card_t *card, struct pci_dev *pci,
 		return err;
 	}
 
-	if ((err = snd_m3_mixer(chip)) < 0)
-		return err;
-
-	for (i = 0; i < chip->num_substreams; i++) {
-		m3_dma_t *s = &chip->substreams[i];
-		s->chip = chip;
-		if ((err = snd_m3_assp_client_init(chip, s, i)) < 0)
-			return err;
-	}
-
-	if ((err = snd_m3_pcm(chip, 0)) < 0)
-		return err;
-    
 	snd_m3_enable_ints(chip);
 	snd_m3_assp_continue(chip);
 

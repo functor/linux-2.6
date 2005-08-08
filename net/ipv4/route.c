@@ -65,7 +65,7 @@
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -801,13 +801,14 @@ restart:
 			 * must be visible to another weakly ordered CPU before
 			 * the insertion at the start of the hash chain.
 			 */
-			rcu_assign_pointer(rth->u.rt_next,
-					   rt_hash_table[hash].chain);
+			smp_wmb();
+			rth->u.rt_next = rt_hash_table[hash].chain;
 			/*
 			 * Since lookup is lockfree, the update writes
 			 * must be ordered for consistency on SMP.
 			 */
-			rcu_assign_pointer(rt_hash_table[hash].chain, rth);
+			smp_wmb();
+			rt_hash_table[hash].chain = rth;
 
 			rth->u.dst.__use++;
 			dst_hold(&rth->u.dst);
@@ -1366,8 +1367,10 @@ static void ipv4_link_failure(struct sk_buff *skb)
 		dst_set_expires(&rt->u.dst, 0);
 }
 
-static int ip_rt_bug(struct sk_buff *skb)
+static int ip_rt_bug(struct sk_buff **pskb)
 {
+	struct sk_buff *skb = *pskb;
+
 	printk(KERN_DEBUG "ip_rt_bug: %u.%u.%u.%u -> %u.%u.%u.%u, %s\n",
 		NIPQUAD(skb->nh.iph->saddr), NIPQUAD(skb->nh.iph->daddr),
 		skb->dev ? skb->dev->name : "?");
@@ -2755,7 +2758,7 @@ int __init ip_rt_init(void)
 
 	rt_hash_mask--;
 	for (i = 0; i <= rt_hash_mask; i++) {
-		spin_lock_init(&rt_hash_table[i].lock);
+		rt_hash_table[i].lock = SPIN_LOCK_UNLOCKED;
 		rt_hash_table[i].chain = NULL;
 	}
 

@@ -1,5 +1,5 @@
 /* 
- * Copyright (C) 2000, 2001, 2002 Jeff Dike (jdike@karaya.com)
+ * Copyright (C) 2000 - 2004 Jeff Dike (jdike@addtoit.com)
  * Licensed under the GPL
  */
 
@@ -25,7 +25,6 @@ struct thread_struct {
 	unsigned long cr2;
 	int err;
 	unsigned long trap_no;
-	int singlestep_syscall;
 	void *fault_addr;
 	void *fault_catcher;
 	struct task_struct *prev_sched;
@@ -38,6 +37,7 @@ struct thread_struct {
 			int extern_pid;
 			int tracing;
 			int switch_pipe[2];
+			int singlestep_syscall;
 			int vm_seq;
 		} tt;
 #endif
@@ -107,6 +107,7 @@ static inline void mm_copy_segments(struct mm_struct *from_mm,
  */
 extern unsigned long task_size;
 
+#undef TASK_SIZE
 #define TASK_SIZE	(task_size)
 
 /* This decides where the kernel will search for a free chunk of vm

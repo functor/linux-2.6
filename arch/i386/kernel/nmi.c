@@ -565,4 +565,3 @@ EXPORT_SYMBOL(reserve_lapic_nmi);
 EXPORT_SYMBOL(release_lapic_nmi);
 EXPORT_SYMBOL(disable_timer_nmi_watchdog);
 EXPORT_SYMBOL(enable_timer_nmi_watchdog);
-EXPORT_SYMBOL_GPL(touch_nmi_watchdog);

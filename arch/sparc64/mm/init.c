@@ -1745,7 +1745,6 @@ void free_initmem (void)
 		page = (addr +
 			((unsigned long) __va(kern_base)) -
 			((unsigned long) KERNBASE));
-		memset((void *)addr, 0xcc, PAGE_SIZE);
 		p = virt_to_page(page);
 
 		ClearPageReserved(p);

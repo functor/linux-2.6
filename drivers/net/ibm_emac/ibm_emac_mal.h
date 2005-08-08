@@ -83,7 +83,6 @@ struct ibm_ocp_mal {
 		GET_MAL0_STANZA(dcrn) \
 		GET_MAL1_STANZA(dcrn) \
 	default: \
-		x = 0; \
 		BUG(); \
 	} \
 x; })

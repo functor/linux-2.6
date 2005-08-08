@@ -92,7 +92,7 @@ puts(unsigned char *cp)
 }
 
 void
-fputs(const char *cp)
+fputs(unsigned char *cp)
 {
     unsigned char ch;
     int i = 0;

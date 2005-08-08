@@ -16,16 +16,15 @@ LC0:		.word	loops_per_jiffy
 /*
  * 0 <= r0 <= 2000
  */
-ENTRY(__udelay)
+ENTRY(udelay)
 		mov	r2,     #0x6800
 		orr	r2, r2, #0x00db
-		mul	r0, r2, r0
-ENTRY(__const_udelay)				@ 0 <= r0 <= 0x01ffffff
+		mul	r1, r0, r2
 		ldr	r2, LC0
-		ldr	r2, [r2]		@ max = 0x0fffffff
-		mov	r0, r0, lsr #11		@ max = 0x00003fff
-		mov	r2, r2, lsr #11		@ max = 0x0003ffff
-		mul	r0, r2, r0		@ max = 2^32-1
+		ldr	r2, [r2]
+		mov	r1, r1, lsr #11
+		mov	r2, r2, lsr #11
+		mul	r0, r1, r2
 		movs	r0, r0, lsr #6
 		RETINSTR(moveq,pc,lr)
 

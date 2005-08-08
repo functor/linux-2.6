@@ -21,7 +21,8 @@
 
 struct irqaction;
 
-extern void disable_irq_nosync(unsigned int);
+#define disable_irq_nosync(i) disable_irq(i)
+
 extern void disable_irq(unsigned int);
 extern void enable_irq(unsigned int);
 

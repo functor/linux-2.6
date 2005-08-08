@@ -7,7 +7,6 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/sched.h>
-#include <linux/serial_8250.h>
 
 #include <asm/setup.h>
 #include <asm/mach-types.h>
@@ -18,46 +17,6 @@
 #include <asm/mach/map.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/time.h>
-
-static struct plat_serial8250_port serial_platform_data[] = {
-	{
-		.iobase		= 0x3f8,
-		.irq		= 4,
-		.uartclk	= 1843200,
-		.regshift	= 2,
-		.iotype		= UPIO_PORT,
-		.flags		= UPF_BOOT_AUTOCONF | UPF_SKIP_TEST,
-	},
-	{
-		.iobase		= 0x2f8,
-		.irq		= 3,
-		.uartclk	= 1843200,
-		.regshift	= 2,
-		.iotype		= UPIO_PORT,
-		.flags		= UPF_BOOT_AUTOCONF | UPF_SKIP_TEST,
-	},
-	{ },
-};
-
-static struct platform_device serial_device = {
-	.name			= "serial8250",
-	.id			= 0,
-	.dev			= {
-		.platform_data	= serial_platform_data,
-	},
-};
-
-static int __init shark_init(void)
-{
-	int ret;
-
-	if (machine_is_shark())
-		ret = platform_device_register(&serial_device);
-
-	return ret;
-}
-
-arch_initcall(shark_init);
 
 extern void shark_init_irq(void);
 
@@ -76,9 +35,8 @@ static void __init shark_map_io(void)
 static irqreturn_t
 shark_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
-	write_seqlock(&xtime_lock);
 	timer_tick(regs);
-	write_sequnlock(&xtime_lock);
+
 	return IRQ_HANDLED;
 }
 
@@ -91,7 +49,7 @@ static struct irqaction shark_timer_irq = {
 /*
  * Set up timer interrupt, and return the current time in seconds.
  */
-static void __init shark_timer_init(void)
+void __init shark_init_time(void)
 {
         unsigned long flags;
 
@@ -102,9 +60,6 @@ static void __init shark_timer_init(void)
 	setup_irq(IRQ_TIMER, &shark_timer_irq);
 }
 
-static struct sys_timer shark_timer = {
-	.init		= shark_timer_init,
-};
 
 MACHINE_START(SHARK, "Shark")
 	MAINTAINER("Alexander Schulz")
@@ -112,5 +67,5 @@ MACHINE_START(SHARK, "Shark")
 	BOOT_PARAMS(0x08003000)
 	MAPIO(shark_map_io)
 	INITIRQ(shark_init_irq)
-	.timer		= &shark_timer,
+	INITTIME(shark_init_time)
 MACHINE_END

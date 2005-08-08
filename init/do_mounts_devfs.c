@@ -2,6 +2,7 @@
 #include <linux/kernel.h>
 #include <linux/dirent.h>
 #include <linux/string.h>
+#include <linux/syscalls.h>
 
 #include "do_mounts.h"
 

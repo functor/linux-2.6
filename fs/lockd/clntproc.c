@@ -7,7 +7,6 @@
  */
 
 #include <linux/config.h>
-#include <linux/module.h>
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
@@ -279,7 +278,6 @@ done:
 	nlm_release_host(host);
 	return status;
 }
-EXPORT_SYMBOL(nlmclnt_proc);
 
 /*
  * Allocate an NLM RPC call struct
@@ -329,6 +327,7 @@ nlmclnt_call(struct nlm_rqst *req, u32 proc)
 	struct rpc_clnt	*clnt;
 	struct nlm_args	*argp = &req->a_args;
 	struct nlm_res	*resp = &req->a_res;
+	struct file	*filp = argp->lock.fl.fl_file;
 	struct rpc_message msg = {
 		.rpc_argp	= argp,
 		.rpc_resp	= resp,
@@ -337,6 +336,9 @@ nlmclnt_call(struct nlm_rqst *req, u32 proc)
 
 	dprintk("lockd: call procedure %d on %s\n",
 			(int)proc, host->h_name);
+
+	if (filp)
+		msg.rpc_cred = nfs_file_cred(filp);
 
 	do {
 		if (host->h_reclaiming && !argp->reclaim)
@@ -431,6 +433,7 @@ nlmclnt_async_call(struct nlm_rqst *req, u32 proc, rpc_action callback)
 	struct rpc_clnt	*clnt;
 	struct nlm_args	*argp = &req->a_args;
 	struct nlm_res	*resp = &req->a_res;
+	struct file	*file = argp->lock.fl.fl_file;
 	struct rpc_message msg = {
 		.rpc_argp	= argp,
 		.rpc_resp	= resp,
@@ -445,9 +448,11 @@ nlmclnt_async_call(struct nlm_rqst *req, u32 proc, rpc_action callback)
 		return -ENOLCK;
 	msg.rpc_proc = &clnt->cl_procinfo[proc];
 
+        /* bootstrap and kick off the async RPC call */
+	if (file)
+		msg.rpc_cred = nfs_file_cred(file);
 	/* Increment host refcount */
 	nlm_get_host(host);
-        /* bootstrap and kick off the async RPC call */
         status = rpc_call_async(clnt, &msg, RPC_TASK_ASYNC, callback, req);
 	if (status < 0)
 		nlm_release_host(host);

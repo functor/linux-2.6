@@ -64,7 +64,7 @@ struct kprobe {
 	kprobe_opcode_t opcode;
 
 	/* copy of the original instruction */
-	struct arch_specific_insn ainsn;
+	kprobe_opcode_t insn[MAX_INSN_SIZE];
 };
 
 /*
@@ -94,8 +94,7 @@ static inline int kprobe_running(void)
 	return kprobe_cpu == smp_processor_id();
 }
 
-extern int arch_prepare_kprobe(struct kprobe *p);
-extern void arch_remove_kprobe(struct kprobe *p);
+extern void arch_prepare_kprobe(struct kprobe *p);
 extern void show_registers(struct pt_regs *regs);
 
 /* Get the kprobe at this addr (if any).  Must have called lock_kprobes */

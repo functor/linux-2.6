@@ -2247,7 +2247,6 @@ xfs_alloc_vextent(
 	xfs_alloctype_t	type;	/* input allocation type */
 	int		bump_rotor = 0;
 	int		no_min = 0;
-	xfs_agnumber_t	rotorstep = xfs_rotorstep; /* inode32 agf stepper */
 
 	mp = args->mp;
 	type = args->otype = args->type;
@@ -2311,9 +2310,7 @@ xfs_alloc_vextent(
 		 */
 		if ((args->userdata  == XFS_ALLOC_INITIAL_USER_DATA) &&
 		    (mp->m_flags & XFS_MOUNT_32BITINODES)) {
-			args->fsbno = XFS_AGB_TO_FSB(mp,
-					((mp->m_agfrotor / rotorstep) %
-					mp->m_sb.sb_agcount), 0);
+			args->fsbno = XFS_AGB_TO_FSB(mp, mp->m_agfrotor, 0);
 			bump_rotor = 1;
 		}
 		args->agbno = XFS_FSB_TO_AGBNO(mp, args->fsbno);
@@ -2329,8 +2326,7 @@ xfs_alloc_vextent(
 			/*
 			 * Start with the last place we left off.
 			 */
-			args->agno = sagno = (mp->m_agfrotor / rotorstep) %
-					mp->m_sb.sb_agcount;
+			args->agno = sagno = mp->m_agfrotor;
 			args->type = XFS_ALLOCTYPE_THIS_AG;
 			flags = XFS_ALLOC_FLAG_TRYLOCK;
 		} else if (type == XFS_ALLOCTYPE_FIRST_AG) {
@@ -2404,14 +2400,8 @@ xfs_alloc_vextent(
 			}
 		}
 		up_read(&mp->m_peraglock);
-		if (bump_rotor || (type == XFS_ALLOCTYPE_ANY_AG)) {
-			if (args->agno == sagno)
-				mp->m_agfrotor = (mp->m_agfrotor + 1) %
-					(mp->m_sb.sb_agcount * rotorstep);
-			else
-				mp->m_agfrotor = (args->agno * rotorstep + 1) %
-					(mp->m_sb.sb_agcount * rotorstep);
-		}
+		if (bump_rotor || (type == XFS_ALLOCTYPE_ANY_AG))
+			mp->m_agfrotor = (args->agno + 1) % mp->m_sb.sb_agcount;
 		break;
 	default:
 		ASSERT(0);

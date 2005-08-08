@@ -112,7 +112,6 @@ struct hpet_task {
 };
 
 struct hpet_data {
-	unsigned long hd_phys_address;
 	void __iomem *hd_address;
 	unsigned short hd_nirqs;
 	unsigned short hd_flags;

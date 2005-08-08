@@ -142,7 +142,7 @@ dev_t __init name_to_dev_t(char *name)
 	int part;
 
 #ifdef CONFIG_SYSFS
-	int mkdir_err = sys_mkdir("/sys", 0700);
+	sys_mkdir("/sys", 0700);
 	if (sys_mount("sysfs", "/sys", "sysfs", 0, NULL) < 0)
 		goto out;
 #endif
@@ -197,8 +197,7 @@ done:
 #ifdef CONFIG_SYSFS
 	sys_umount("/sys", 0);
 out:
-	if (!mkdir_err)
-		sys_rmdir("/sys");
+	sys_rmdir("/sys");
 #endif
 	return res;
 fail:

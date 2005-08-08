@@ -149,7 +149,7 @@ static const struct class_info clas_info[] =
 
 /*****************************************************************/
 
-void usbfs_conn_disc_event(void)
+void usbdevfs_conn_disc_event(void)
 {
 	conndiscevcnt++;
 	wake_up(&deviceconndiscwq);
@@ -451,7 +451,7 @@ static char *usb_dump_string(char *start, char *end, const struct usb_device *de
  * nbytes - the maximum number of bytes to write
  * skip_bytes - the number of bytes to skip before writing anything
  * file_offset - the offset into the devices file on completion
- * The caller must own the device lock.
+ * The caller must own the usbdev->serialize semaphore.
  */
 static ssize_t usb_device_dump(char __user **buffer, size_t *nbytes, loff_t *skip_bytes, loff_t *file_offset,
 				struct usb_device *usbdev, struct usb_bus *bus, int level, int index, int count)
@@ -569,6 +569,7 @@ static ssize_t usb_device_dump(char __user **buffer, size_t *nbytes, loff_t *ski
 
 static ssize_t usb_device_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 {
+	struct list_head *buslist;
 	struct usb_bus *bus;
 	ssize_t ret, total_written = 0;
 	loff_t skip_bytes = *ppos;
@@ -580,15 +581,18 @@ static ssize_t usb_device_read(struct file *file, char __user *buf, size_t nbyte
 	if (!access_ok(VERIFY_WRITE, buf, nbytes))
 		return -EFAULT;
 
+	/* enumerate busses */
 	down (&usb_bus_list_lock);
-	/* print devices for all busses */
-	list_for_each_entry(bus, &usb_bus_list, bus_list) {
+	list_for_each(buslist, &usb_bus_list) {
+		/* print devices for this bus */
+		bus = list_entry(buslist, struct usb_bus, bus_list);
+
 		/* recurse through all children of the root hub */
 		if (!bus->root_hub)
 			continue;
-		usb_lock_device(bus->root_hub);
+		down(&bus->root_hub->serialize);
 		ret = usb_device_dump(&buf, &nbytes, &skip_bytes, ppos, bus->root_hub, bus, 0, 0, 0);
-		usb_unlock_device(bus->root_hub);
+		up(&bus->root_hub->serialize);
 		if (ret < 0) {
 			up(&usb_bus_list_lock);
 			return ret;
@@ -678,7 +682,7 @@ static loff_t usb_device_lseek(struct file * file, loff_t offset, int orig)
 	return ret;
 }
 
-struct file_operations usbfs_devices_fops = {
+struct file_operations usbdevfs_devices_fops = {
 	.llseek =	usb_device_lseek,
 	.read =		usb_device_read,
 	.poll =		usb_device_poll,

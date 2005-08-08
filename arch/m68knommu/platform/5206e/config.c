@@ -22,6 +22,7 @@
 #include <asm/mcfsim.h>
 #include <asm/mcfdma.h>
 #include <asm/irq.h>
+#include <asm/delay.h>
 
 /***************************************************************************/
 

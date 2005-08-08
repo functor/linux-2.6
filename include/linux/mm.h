@@ -13,7 +13,6 @@
 #include <linux/rbtree.h>
 #include <linux/prio_tree.h>
 #include <linux/fs.h>
-#include <linux/ckrm_mem.h>
 
 struct mempolicy;
 struct anon_vma;
@@ -239,7 +238,7 @@ struct page {
 					   not kmapped, ie. highmem) */
 #endif /* WANT_PAGE_VIRTUAL */
 #ifdef CONFIG_CKRM_RES_MEM
-	struct ckrm_zone *ckrm_zone;
+	void *memclass;
 #endif // CONFIG_CKRM_RES_MEM
 };
 
@@ -546,7 +545,7 @@ static inline int can_do_mlock(void)
 {
 	if (capable(CAP_IPC_LOCK))
 		return 1;
-	if (current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur != 0)
+	if (current->rlim[RLIMIT_MEMLOCK].rlim_cur != 0)
 		return 1;
 	return 0;
 }
@@ -618,6 +617,9 @@ int clear_page_dirty_for_io(struct page *page);
  * cache size, so a fastpath for that case is appropriate.
  */
 typedef int (*shrinker_t)(int nr_to_scan, unsigned int gfp_mask);
+
+asmlinkage long do_mprotect(struct mm_struct *mm, unsigned long start, 
+			size_t len, unsigned long prot);
 
 /*
  * Add an aging callback.  The int is the number of 'seeks' it takes
@@ -695,9 +697,10 @@ static inline unsigned long get_unmapped_area(struct file * file, unsigned long 
 	return get_unmapped_area_prot(file, addr, len, pgoff, flags, 0);	
 }
 
-extern unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
-	unsigned long len, unsigned long prot,
-	unsigned long flag, unsigned long pgoff);
+extern unsigned long do_mmap_pgoff(struct mm_struct *mm, struct file *file, 
+				   unsigned long addr, unsigned long len,
+				   unsigned long prot, unsigned long flag,
+				   unsigned long pgoff);
 
 static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
@@ -707,14 +710,14 @@ static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	if ((offset + PAGE_ALIGN(len)) < offset)
 		goto out;
 	if (!(offset & ~PAGE_MASK))
-		ret = do_mmap_pgoff(file, addr, len, prot, flag, offset >> PAGE_SHIFT);
+		ret = do_mmap_pgoff(current->mm, file, addr, len, prot, flag, 
+				    offset >> PAGE_SHIFT);
 out:
 	return ret;
 }
 
 extern int do_munmap(struct mm_struct *, unsigned long, size_t);
 
-extern unsigned long __do_brk(unsigned long, unsigned long);
 extern unsigned long do_brk(unsigned long, unsigned long);
 
 /* filemap.c */
@@ -770,18 +773,10 @@ static inline unsigned long vma_pages(struct vm_area_struct *vma)
 extern struct vm_area_struct *find_extend_vma(struct mm_struct *mm, unsigned long addr);
 
 extern struct page * vmalloc_to_page(void *addr);
-extern unsigned long vmalloc_to_pfn(void *addr);
 extern struct page * follow_page(struct mm_struct *mm, unsigned long address,
 		int write);
-int remap_pfn_range(struct vm_area_struct *, unsigned long,
-		unsigned long, unsigned long, pgprot_t);
-
-static inline __deprecated /* since 25 Sept 2004 -- wli */
-int remap_page_range(struct vm_area_struct *vma, unsigned long uvaddr,
-			unsigned long paddr, unsigned long size, pgprot_t prot)
-{
-	return remap_pfn_range(vma, uvaddr, paddr >> PAGE_SHIFT, size, prot);
-}
+extern int remap_page_range(struct vm_area_struct *vma, unsigned long from,
+		unsigned long to, unsigned long size, pgprot_t prot);
 
 #ifdef CONFIG_PROC_FS
 void __vm_stat_account(struct mm_struct *, unsigned long, struct file *, long);

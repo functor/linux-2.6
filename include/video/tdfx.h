@@ -173,7 +173,7 @@ struct banshee_reg {
 struct tdfx_par {
   u32 max_pixclock;
 
-  void __iomem *regbase_virt;
+  void *regbase_virt;
   unsigned long iobase;
   u32 baseline;
 

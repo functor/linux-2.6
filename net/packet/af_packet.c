@@ -1745,8 +1745,7 @@ static int packet_mmap(struct file *file, struct socket *sock, struct vm_area_st
 	start = vma->vm_start;
 	err = -EAGAIN;
 	for (i=0; i<po->pg_vec_len; i++) {
-		if (remap_pfn_range(vma, start,
-				     __pa(po->pg_vec[i]) >> PAGE_SHIFT,
+		if (remap_page_range(vma, start, __pa(po->pg_vec[i]),
 				     po->pg_vec_pages*PAGE_SIZE,
 				     vma->vm_page_prot))
 			goto out;

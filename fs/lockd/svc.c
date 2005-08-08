@@ -39,10 +39,7 @@
 #define ALLOWED_SIGS		(sigmask(SIGKILL))
 
 extern struct svc_program	nlmsvc_program;
-
 struct nlmsvc_binding *		nlmsvc_ops;
-EXPORT_SYMBOL(nlmsvc_ops);
-
 static DECLARE_MUTEX(nlmsvc_sema);
 static unsigned int		nlmsvc_users;
 static pid_t			nlmsvc_pid;
@@ -88,6 +85,46 @@ static unsigned long set_grace_period(void)
 static inline void clear_grace_period(void)
 {
 	nlmsvc_grace_period = 0;
+}
+int
+nlmsvc_dispatch(struct svc_rqst *rqstp, u32 *statp)
+{
+	struct svc_procedure	*procp;
+	kxdrproc_t		xdr;
+	struct kvec *argv;
+	struct kvec *resv;
+
+	dprintk("nlmsvc_dispatch: vers %d proc %d\n",
+				rqstp->rq_vers, rqstp->rq_proc);
+
+	procp = rqstp->rq_procinfo;
+	argv = &rqstp->rq_arg.head[0];
+	resv = &rqstp->rq_res.head[0];
+
+	/* Decode arguments */
+	xdr = procp->pc_decode;
+	if (xdr && !xdr(rqstp, argv->iov_base, rqstp->rq_argp)) {
+		dprintk("nlmsvc_dispatch: failed to decode arguments!\n");
+		*statp = rpc_garbage_args;
+		return 1;
+	}
+	*statp = procp->pc_func(rqstp, rqstp->rq_argp, rqstp->rq_resp);
+	if (*statp == nlm_lck_dropit) {
+		dprintk("nlmsvc_dispatch: dropping request\n");
+		return 0;
+	}
+
+	/* Encode reply */
+	if (*statp == rpc_success && (xdr = procp->pc_encode)
+	 && !xdr(rqstp, resv->iov_base+resv->iov_len, rqstp->rq_resp)) {
+		dprintk("nlmsvc_dispatch: failed to encode reply\n");
+		*statp = rpc_system_err;
+		return 1;
+	}
+
+	dprintk("nlmsvc_dispatch: statp %d\n", ntohl(*statp));
+
+	return 1;
 }
 
 /*
@@ -273,7 +310,6 @@ out:
 	up(&nlmsvc_sema);
 	return error;
 }
-EXPORT_SYMBOL(lockd_up);
 
 /*
  * Decrement the user count and bring down lockd if we're the last.
@@ -330,7 +366,6 @@ lockd_down(void)
 out:
 	up(&nlmsvc_sema);
 }
-EXPORT_SYMBOL(lockd_down);
 
 /*
  * Sysctl parameters (same as module parameters, different interface).
@@ -464,12 +499,14 @@ static struct svc_version	nlmsvc_version1 = {
 		.vs_vers	= 1,
 		.vs_nproc	= 17,
 		.vs_proc	= nlmsvc_procedures,
+		.vs_dispatch = nlmsvc_dispatch,
 		.vs_xdrsize	= NLMSVC_XDRSIZE,
 };
 static struct svc_version	nlmsvc_version3 = {
 		.vs_vers	= 3,
 		.vs_nproc	= 24,
 		.vs_proc	= nlmsvc_procedures,
+		.vs_dispatch = nlmsvc_dispatch,
 		.vs_xdrsize	= NLMSVC_XDRSIZE,
 };
 #ifdef CONFIG_LOCKD_V4
@@ -477,6 +514,7 @@ static struct svc_version	nlmsvc_version4 = {
 		.vs_vers	= 4,
 		.vs_nproc	= 24,
 		.vs_proc	= nlmsvc_procedures4,
+		.vs_dispatch = nlmsvc_dispatch,
 		.vs_xdrsize	= NLMSVC_XDRSIZE,
 };
 #endif

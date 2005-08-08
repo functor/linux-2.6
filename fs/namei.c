@@ -25,12 +25,9 @@
 #include <linux/smp_lock.h>
 #include <linux/personality.h>
 #include <linux/security.h>
-#include <linux/syscalls.h>
 #include <linux/mount.h>
 #include <linux/audit.h>
-#include <linux/proc_fs.h>
-#include <linux/vserver/inode.h>
-#include <linux/vserver/debug.h>
+#include <linux/vs_base.h>
 
 #include <asm/namei.h>
 #include <asm/uaccess.h>
@@ -156,21 +153,21 @@ char * getname(const char __user * filename)
 	return result;
 }
 
-/**
- * generic_permission  -  check for access rights on a Posix-like filesystem
- * @inode:	inode to check access rights for
- * @mask:	right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC)
- * @check_acl:	optional callback to check for Posix ACLs
+/*
+ *	vfs_permission()
  *
- * Used to check for read/write/execute permissions on a file.
+ * is used to check for read/write/execute permissions on a file.
  * We use "fsuid" for this, letting us set arbitrary permissions
  * for filesystem access without changing the "normal" uids which
  * are used for other things..
  */
-int generic_permission(struct inode *inode, int mask,
-		int (*check_acl)(struct inode *inode, int mask))
+int vfs_permission(struct inode * inode, int mask)
 {
 	umode_t			mode = inode->i_mode;
+
+	/* Prevent vservers from escaping chroot() barriers */
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
+		return -EACCES;
 
 	if (mask & MAY_WRITE) {
 		/*
@@ -189,18 +186,8 @@ int generic_permission(struct inode *inode, int mask,
 
 	if (current->fsuid == inode->i_uid)
 		mode >>= 6;
-	else {
-		if (IS_POSIXACL(inode) && (mode & S_IRWXG) && check_acl) {
-			int error = check_acl(inode, mask);
-			if (error == -EACCES)
-				goto check_capabilities;
-			else if (error != -EAGAIN)
-				return error;
-		}
-
-		if (in_group_p(inode->i_gid))
-			mode >>= 3;
-	}
+	else if (in_group_p(inode->i_gid))
+		mode >>= 3;
 
 	/*
 	 * If the DACs are ok we don't need any capability check.
@@ -208,7 +195,6 @@ int generic_permission(struct inode *inode, int mask,
 	if (((mode & mask & (MAY_READ|MAY_WRITE|MAY_EXEC)) == mask))
 		return 0;
 
- check_capabilities:
 	/*
 	 * Read/write DACs are always overridable.
 	 * Executable DACs are overridable if at least one exec bit is set.
@@ -228,37 +214,11 @@ int generic_permission(struct inode *inode, int mask,
 	return -EACCES;
 }
 
-static inline int xid_permission(struct inode *inode, int mask, struct nameidata *nd)
-{
-	if (inode->i_xid == 0)
-		return 0;
-
-#ifdef CONFIG_VSERVER_FILESHARING
-	/* MEF: PlanetLab FS module assumes that any file that can be
-	 * named (e.g., via a cross mount) is not hidden from another
-	 * context or the admin context.
-	 */
-	if (vx_check(inode->i_xid,VX_STATIC|VX_DYNAMIC))
-		return 0;
-#endif
-	if (vx_check(inode->i_xid,VX_ADMIN|VX_WATCH|VX_IDENT))
-		return 0;
-
-	vxwprintk(1, "xid=%d denied access to %p[#%d,%lu] »%s«.",
-		vx_current_xid(), inode, inode->i_xid, inode->i_ino,
-		vxd_path(nd->dentry, nd->mnt));
-	return -EACCES;
-}
-
 int permission(struct inode * inode,int mask, struct nameidata *nd)
 {
 	int retval;
 	int submask;
  	umode_t	mode = inode->i_mode;
-
-	/* Prevent vservers from escaping chroot() barriers */
-	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
-		return -EACCES;
 
 	/* Ordinary permission routines do not understand MAY_APPEND. */
 	submask = mask & ~MAY_APPEND;
@@ -267,13 +227,10 @@ int permission(struct inode * inode,int mask, struct nameidata *nd)
 		(S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 		return -EROFS;
 
-	if ((retval = xid_permission(inode, mask, nd)))
-		return retval;
-
 	if (inode->i_op && inode->i_op->permission)
 		retval = inode->i_op->permission(inode, submask, nd);
 	else
-		retval = generic_permission(inode, submask, NULL);
+		retval = vfs_permission(inode, submask);
 	if (retval)
 		return retval;
 
@@ -368,7 +325,7 @@ static struct dentry * cached_lookup(struct dentry * parent, struct qstr * name,
 /*
  * Short-cut version of permission(), for calling by
  * path_walk(), when dcache lock is held.  Combines parts
- * of permission() and generic_permission(), and tests ONLY for
+ * of permission() and vfs_permission(), and tests ONLY for
  * MAY_EXEC permission.
  *
  * If appropriate, check DAC only.  If not appropriate, or
@@ -672,46 +629,15 @@ static int do_lookup(struct nameidata *nd, struct qstr *name,
 {
 	struct vfsmount *mnt = nd->mnt;
 	struct dentry *dentry = __d_lookup(nd->dentry, name);
-	struct inode *inode;
 
 	if (!dentry)
 		goto need_lookup;
 	if (dentry->d_op && dentry->d_op->d_revalidate)
 		goto need_revalidate;
-	inode = dentry->d_inode;
-	if (!inode)
-		goto done;
-	if (inode->i_sb->s_magic == PROC_SUPER_MAGIC) {
-		struct proc_dir_entry *de = PDE(inode);
-
-		if (de && !vx_hide_check(0, de->vx_flags))
-			goto hidden;
-	}
-#ifdef CONFIG_VSERVER_FILESHARING
-	/* MEF: PlanetLab FS module assumes that any file that can be
-	 * named (e.g., via a cross mount) is not hidden from another
-	 * context or the admin context.
-	 */
-	if (vx_check(inode->i_xid,VX_STATIC|VX_DYNAMIC|VX_ADMIN)) {
-		/* do nothing */
-	}
-	else /* do the following check */
-#endif
-	if (!vx_check(inode->i_xid, 
-		      VX_WATCH|
-		      VX_HOSTID|
-		      VX_IDENT))
-		goto hidden;
 done:
 	path->mnt = mnt;
 	path->dentry = dentry;
 	return 0;
-hidden:
-	vxwprintk(1, "xid=%d did lookup hidden %p[#%d,%lu] »%s«.",
-		vx_current_xid(), inode, inode->i_xid, inode->i_ino,
-		vxd_path(dentry, mnt));
-	dput(dentry);
-	return -ENOENT;
 
 need_lookup:
 	if (atomic)
@@ -2522,7 +2448,7 @@ EXPORT_SYMBOL(vfs_follow_link);
 EXPORT_SYMBOL(vfs_link);
 EXPORT_SYMBOL(vfs_mkdir);
 EXPORT_SYMBOL(vfs_mknod);
-EXPORT_SYMBOL(generic_permission);
+EXPORT_SYMBOL(vfs_permission);
 EXPORT_SYMBOL(vfs_readlink);
 EXPORT_SYMBOL(vfs_rename);
 EXPORT_SYMBOL(vfs_rmdir);

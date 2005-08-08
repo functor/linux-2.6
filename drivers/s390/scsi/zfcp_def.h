@@ -12,8 +12,6 @@
  *            Wolfgang Taphorn
  *            Stefan Bader <stefan.bader@de.ibm.com> 
  *            Heiko Carstens <heiko.carstens@de.ibm.com> 
- *            Andreas Herrmann <aherrman@de.ibm.com>
- *            Volker Sameske <sameske@de.ibm.com>
  * 
  * This program is free software; you can redistribute it and/or modify 
  * it under the terms of the GNU General Public License as published by 
@@ -34,7 +32,8 @@
 #ifndef ZFCP_DEF_H
 #define ZFCP_DEF_H
 
-#define ZFCP_DEF_REVISION "$Revision: 1.111 $"
+/* this drivers version (do not edit !!! generated and updated by cvs) */
+#define ZFCP_DEF_REVISION "$Revision: 1.91 $"
 
 /*************************** INCLUDES *****************************************/
 
@@ -61,7 +60,9 @@
 #include <linux/mempool.h>
 #include <linux/syscalls.h>
 #include <linux/ioctl.h>
+#ifdef CONFIG_S390_SUPPORT
 #include <linux/ioctl32.h>
+#endif
 
 /************************ DEBUG FLAGS *****************************************/
 
@@ -70,7 +71,7 @@
 /********************* GENERAL DEFINES *********************************/
 
 /* zfcp version number, it consists of major, minor, and patch-level number */
-#define ZFCP_VERSION		"4.2.0"
+#define ZFCP_VERSION		"4.1.3"
 
 /**
  * zfcp_sg_to_address - determine kernel address from struct scatterlist
@@ -186,11 +187,11 @@ typedef unsigned int       fcp_dl_t;
 #define UNTAGGED	5
 
 /* task management flags in FCP-2 FCP_CMND IU */
-#define FCP_CLEAR_ACA		0x40
-#define FCP_TARGET_RESET	0x20
-#define FCP_LOGICAL_UNIT_RESET	0x10
-#define FCP_CLEAR_TASK_SET	0x04
-#define FCP_ABORT_TASK_SET	0x02
+#define CLEAR_ACA		0x40
+#define TARGET_RESET		0x20
+#define LOGICAL_UNIT_RESET	0x10
+#define CLEAR_TASK_SET		0x04
+#define ABORT_TASK_SET		0x02
 
 #define FCP_CDB_LENGTH		16
 
@@ -288,11 +289,11 @@ struct fcp_logo {
 #define R_A_TOV				10 /* seconds */
 #define ZFCP_ELS_TIMEOUT		(2 * R_A_TOV)
 
-#define ZFCP_LS_RLS			0x0f
+#define ZFCP_LS_RTV			0x0E
+#define ZFCP_LS_RLS			0x0F
+#define ZFCP_LS_PDISC			0x50
 #define ZFCP_LS_ADISC			0x52
-#define ZFCP_LS_RPS			0x56
-#define ZFCP_LS_RSCN			0x61
-#define ZFCP_LS_RNID			0x78
+#define ZFCP_LS_RTV_E_D_TOV_FLAG	0x04000000
 
 struct zfcp_ls_rjt_par {
 	u8 action;
@@ -301,22 +302,82 @@ struct zfcp_ls_rjt_par {
  	u8 vendor_unique;
 } __attribute__ ((packed));
 
+struct zfcp_ls_rtv {
+	u8		code;
+	u8		field[3];
+} __attribute__ ((packed));
+
+struct zfcp_ls_rtv_acc {
+	u8		code;
+	u8		field[3];
+	u32		r_a_tov;
+	u32		e_d_tov;
+	u32		qualifier;
+} __attribute__ ((packed));
+
+struct zfcp_ls_rls {
+	u8		code;
+	u8		field[3];
+	fc_id_t		port_id;
+} __attribute__ ((packed));
+
+struct zfcp_ls_rls_acc {
+	u8		code;
+	u8		field[3];
+	u32		link_failure_count;
+	u32		loss_of_sync_count;
+	u32		loss_of_signal_count;
+	u32		prim_seq_prot_error;
+	u32		invalid_transmition_word;
+	u32		invalid_crc_count;
+} __attribute__ ((packed));
+
+struct zfcp_ls_pdisc {
+	u8		code;
+	u8		field[3];
+	u8		common_svc_parm[16];
+		wwn_t	wwpn;
+	wwn_t		wwnn;
+	struct {
+		u8	class1[16];
+		u8	class2[16];
+		u8	class3[16];
+	} svc_parm;
+	u8		reserved[16];
+	u8		vendor_version[16];
+} __attribute__ ((packed));
+
+struct zfcp_ls_pdisc_acc {
+	u8		code;
+	u8		field[3];
+	u8		common_svc_parm[16];
+	wwn_t		wwpn;
+	wwn_t		wwnn;
+	struct {
+		u8	class1[16];
+		u8	class2[16];
+		u8	class3[16];
+	} svc_parm;
+	u8		reserved[16];
+	u8		vendor_version[16];
+} __attribute__ ((packed));
+
 struct zfcp_ls_adisc {
 	u8		code;
 	u8		field[3];
-	u32		hard_nport_id;
-	u64		wwpn;
-	u64		wwnn;
-	u32		nport_id;
+	fc_id_t		hard_nport_id;
+	wwn_t		wwpn;
+	wwn_t		wwnn;
+	fc_id_t		nport_id;
 } __attribute__ ((packed));
 
 struct zfcp_ls_adisc_acc {
 	u8		code;
 	u8		field[3];
-	u32		hard_nport_id;
-	u64		wwpn;
-	u64		wwnn;
-	u32		nport_id;
+	fc_id_t		hard_nport_id;
+	wwn_t		wwpn;
+	wwn_t		wwnn;
+	fc_id_t		nport_id;
 } __attribute__ ((packed));
 
 struct zfcp_rc_entry {
@@ -379,9 +440,6 @@ struct zfcp_rc_entry {
 
 #define ZFCP_NAME               "zfcp"
 
-/* read-only LUN sharing switch initial value */
-#define ZFCP_RO_LUN_SHARING_DEFAULTS 0
-
 /* independent log areas */
 #define ZFCP_LOG_AREA_OTHER	0
 #define ZFCP_LOG_AREA_SCSI	1
@@ -431,7 +489,7 @@ struct zfcp_rc_entry {
 /* logging routine for zfcp */
 #define _ZFCP_LOG(fmt, args...) \
 	printk(KERN_ERR ZFCP_NAME": %s(%d): " fmt, __FUNCTION__, \
-	       __LINE__ , ##args)
+	       __LINE__ , ##args);
 
 #define ZFCP_LOG(level, fmt, args...) \
 do { \
@@ -490,8 +548,8 @@ do { \
  * Note, the leftmost status byte is common among adapter, port 
  * and unit
  */
-#define ZFCP_COMMON_FLAGS			0xfff00000
-#define ZFCP_SPECIFIC_FLAGS			0x000fffff
+#define ZFCP_COMMON_FLAGS                       0xff000000
+#define ZFCP_SPECIFIC_FLAGS                     0x00ffffff
 
 /* common status bits */
 #define ZFCP_STATUS_COMMON_REMOVE		0x80000000
@@ -502,7 +560,6 @@ do { \
 #define ZFCP_STATUS_COMMON_OPEN                 0x04000000
 #define ZFCP_STATUS_COMMON_CLOSING              0x02000000
 #define ZFCP_STATUS_COMMON_ERP_INUSE		0x01000000
-#define ZFCP_STATUS_COMMON_ACCESS_DENIED	0x00800000
 
 /* adapter status */
 #define ZFCP_STATUS_ADAPTER_QDIOUP		0x00000002
@@ -533,7 +590,6 @@ do { \
 #define ZFCP_STATUS_PORT_NO_WWPN		0x00000008
 #define ZFCP_STATUS_PORT_NO_SCSI_ID		0x00000010
 #define ZFCP_STATUS_PORT_INVALID_WWPN		0x00000020
-#define ZFCP_STATUS_PORT_ACCESS_DENIED		0x00000040
 
 /* for ports with well known addresses */
 #define ZFCP_STATUS_PORT_WKA \
@@ -542,9 +598,7 @@ do { \
 
 /* logical unit status */
 #define ZFCP_STATUS_UNIT_NOTSUPPUNITRESET	0x00000001
-#define ZFCP_STATUS_UNIT_TEMPORARY		0x00000002
-#define ZFCP_STATUS_UNIT_SHARED			0x00000004
-#define ZFCP_STATUS_UNIT_READONLY		0x00000008
+
 
 /* FSF request status (this does not have a common part) */
 #define ZFCP_STATUS_FSFREQ_NOT_INIT		0x00000000
@@ -763,8 +817,7 @@ typedef void (*zfcp_send_els_handler_t)(unsigned long);
 
 /**
  * struct zfcp_send_els - used to pass parameters to function zfcp_fsf_send_els
- * @adapter: adapter where request is sent from
- * @d_id: destiniation id of port where request is sent to
+ * @port: port where the request is sent to
  * @req: scatter-gather list for request
  * @resp: scatter-gather list for response
  * @req_count: number of elements in request scatter-gather list
@@ -777,8 +830,7 @@ typedef void (*zfcp_send_els_handler_t)(unsigned long);
  * @status: used to pass error status to calling function
  */
 struct zfcp_send_els {
-	struct zfcp_adapter *adapter;
-	fc_id_t d_id;
+	struct zfcp_port *port;
 	struct scatterlist *req;
 	struct scatterlist *resp;
 	unsigned int req_count;
@@ -900,7 +952,7 @@ struct zfcp_adapter {
 	debug_info_t            *abort_dbf;
 	debug_info_t            *in_els_dbf;
 	debug_info_t            *cmd_dbf;
-	spinlock_t              dbf_lock;
+	rwlock_t                cmd_dbf_lock;
 	struct zfcp_adapter_mempool	pool;      /* Adapter memory pools */
 	struct qdio_initialize  qdio_init_data;    /* for qdio_establish */
 	struct device           generic_services;  /* directory for WKA ports */
@@ -950,6 +1002,8 @@ struct zfcp_unit {
         struct scsi_device     *device;        /* scsi device struct pointer */
 	struct zfcp_erp_action erp_action;     /* pending error recovery */
         atomic_t               erp_counter;
+	atomic_t               scsi_add_work;  /* used to synchronize */
+	wait_queue_head_t      scsi_add_wq;    /* wait for scsi_add_device */
 };
 
 /* FSF request */
@@ -1001,7 +1055,6 @@ struct zfcp_data {
 	char                    init_busid[BUS_ID_SIZE];
 	wwn_t                   init_wwpn;
 	fcp_lun_t               init_fcp_lun;
-	char 			*driver_version;
 };
 
 /**

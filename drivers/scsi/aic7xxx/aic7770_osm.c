@@ -185,8 +185,10 @@ aic7770_linux_config(struct aic7770_identity *entry, aic7770_dev_t dev,
 		return (ENOMEM);
 	strcpy(name, buf);
 	ahc = ahc_alloc(&aic7xxx_driver_template, name);
-	if (ahc == NULL)
+	if (ahc == NULL) {
+		free(name, M_DEVBUF);
 		return (ENOMEM);
+	}
 	error = aic7770_config(ahc, entry, eisaBase);
 	if (error != 0) {
 		ahc->bsh.ioport = 0;

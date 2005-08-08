@@ -46,6 +46,7 @@ static void keyspan_rx_unthrottle	(struct usb_serial_port *port);
 static int  keyspan_write_room		(struct usb_serial_port *port);
 
 static int  keyspan_write		(struct usb_serial_port *port,
+					 int from_user,
 					 const unsigned char *buf,
 					 int count);
 

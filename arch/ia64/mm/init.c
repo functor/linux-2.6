@@ -19,9 +19,9 @@
 #include <linux/slab.h>
 #include <linux/swap.h>
 #include <linux/proc_fs.h>
-#include <linux/bitops.h>
 
 #include <asm/a.out.h>
+#include <asm/bitops.h>
 #include <asm/dma.h>
 #include <asm/ia32.h>
 #include <asm/io.h>
@@ -98,7 +98,7 @@ update_mmu_cache (struct vm_area_struct *vma, unsigned long vaddr, pte_t pte)
 inline void
 ia64_set_rbs_bot (void)
 {
-	unsigned long stack_size = current->signal->rlim[RLIMIT_STACK].rlim_max & -16;
+	unsigned long stack_size = current->rlim[RLIMIT_STACK].rlim_max & -16;
 
 	if (stack_size > MAX_USER_STACK_SIZE)
 		stack_size = MAX_USER_STACK_SIZE;
@@ -230,94 +230,12 @@ free_initrd_mem (unsigned long start, unsigned long end)
 	}
 }
 
-struct curr_mem_request {
-	unsigned long requested;
-	unsigned long min_physaddr;
-	int found;
-};
-
-/*
- *  Check whether a physical address fits within the memory descriptor
- *  block sent from efi_mmap_walk(). If it fits, set found.
- */
-static int
-verify_physaddr (unsigned long start, unsigned long end, void *arg)
+int page_is_ram(unsigned long pagenr)
 {
-	struct curr_mem_request *cr = arg;
-
-	start = __pa(start);
-	end = __pa(end);
-
-	if ((cr->requested >= start) && (cr->requested + PAGE_SIZE) <= end) {
-		cr->found = 1;
-		return -1;
-	}
-
-	return 0;
+      //FIXME: implement w/efi walk
+      printk("page is ram is called!!!!!\n");	
+      return 1;
 }
-
-/*
- * If physical page 'nr' is valid RAM then return 1.  Otherwise return 0.
- */
-
-int
-page_is_ram (unsigned long pagenr)
-{
-	struct curr_mem_request cr;
-
-	if (!pfn_valid(pagenr))
-		return 0;
-
-	cr.requested = pagenr << PAGE_SHIFT;
-	cr.found = 0;
-
-	efi_memmap_walk(verify_physaddr, &cr);
-
-	return cr.found;
-}
-EXPORT_SYMBOL_GPL(page_is_ram);
-
-static int
-find_next (unsigned long start, unsigned long end, void *arg)
-{
-	struct curr_mem_request *cr = (struct curr_mem_request *)arg;
-
-	start = __pa(start);
-	end = __pa(end);
-
-	if ((cr->requested >= start) && (cr->requested + PAGE_SIZE) <= end) {
-		cr->min_physaddr = cr->requested;
-		cr->found = 1;
-		return -1;
-	}
-	if ((cr->requested < start) && (start + PAGE_SIZE) <= end)
-		if (start < cr->min_physaddr) {
-			cr->min_physaddr = start;
-			cr->found = 1;
-		}
-
-	return 0;
-}
-
-unsigned long
-next_ram_page (unsigned long pagenr)
-{
-	struct curr_mem_request cr;
-
-	pagenr++;
-
-	cr.requested = pagenr << PAGE_SHIFT;
-	cr.found = 0;
-	cr.min_physaddr = ULONG_MAX;
-
-	efi_memmap_walk(find_next, &cr);
-
-	if (cr.found)
-		return cr.min_physaddr >> PAGE_SHIFT;
-	else
-		return ULONG_MAX;
-}
-EXPORT_SYMBOL_GPL(next_ram_page);
 
 /*
  * This installs a clean page in the kernel's page table.

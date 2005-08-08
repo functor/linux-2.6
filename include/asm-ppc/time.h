@@ -10,8 +10,7 @@
 #define __ASM_TIME_H__
 
 #include <linux/config.h>
-#include <linux/types.h>
-#include <linux/rtc.h>
+#include <linux/mc146818rtc.h>
 #include <linux/threads.h>
 
 #include <asm/reg.h>

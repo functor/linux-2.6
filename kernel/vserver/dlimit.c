@@ -15,6 +15,7 @@
 #include <linux/namei.h>
 #include <linux/statfs.h>
 #include <linux/vserver/switch.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_dlimit.h>
 
@@ -388,7 +389,7 @@ void vx_vsi_statfs(struct super_block *sb, struct kstatfs *buf)
 	__u64 blimit, bfree, bavail;
 	__u32 ifree;
 
-	dli = locate_dl_info(sb, vx_current_xid());
+	dli = locate_dl_info(sb, current->xid);
 	if (!dli)
 		return;
 

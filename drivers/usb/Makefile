@@ -10,7 +10,6 @@ obj-$(CONFIG_USB_EHCI_HCD)	+= host/
 obj-$(CONFIG_USB_OHCI_HCD)	+= host/
 obj-$(CONFIG_USB_UHCI_HCD)	+= host/
 obj-$(CONFIG_USB_SL811HS)	+= host/
-obj-$(CONFIG_ETRAX_USB_HOST)	+= host/
 
 obj-$(CONFIG_USB_ACM)		+= class/
 obj-$(CONFIG_USB_AUDIO)		+= class/
@@ -38,7 +37,6 @@ obj-$(CONFIG_USB_KONICAWC)	+= media/
 obj-$(CONFIG_USB_OV511)		+= media/
 obj-$(CONFIG_USB_PWC)		+= media/
 obj-$(CONFIG_USB_SE401)		+= media/
-obj-$(CONFIG_USB_SN9C102)	+= media/
 obj-$(CONFIG_USB_STV680)	+= media/
 obj-$(CONFIG_USB_VICAM)		+= media/
 obj-$(CONFIG_USB_W9968CF)	+= media/

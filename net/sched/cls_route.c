@@ -13,7 +13,7 @@
 #include <linux/config.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -33,8 +33,7 @@
 #include <net/route.h>
 #include <linux/skbuff.h>
 #include <net/sock.h>
-#include <net/act_api.h>
-#include <net/pkt_cls.h>
+#include <net/pkt_sched.h>
 
 /*
    1. For now we assume that route tags < 256.
@@ -292,8 +291,11 @@ static void route4_destroy(struct tcf_proto *tp)
 				struct route4_filter *f;
 
 				while ((f = b->ht[h2]) != NULL) {
+					unsigned long cl;
+
 					b->ht[h2] = f->next;
-					tcf_unbind_filter(tp, &f->res);
+					if ((cl = __cls_set_class(&f->res.class, 0)) != 0)
+						tp->q->ops->cl_ops->unbind_tcf(tp->q, cl);
 #ifdef CONFIG_NET_CLS_POLICE
 					tcf_police_release(f->police,TCA_ACT_UNBIND);
 #endif
@@ -322,12 +324,17 @@ static int route4_delete(struct tcf_proto *tp, unsigned long arg)
 
 	for (fp = &b->ht[from_hash(h>>16)]; *fp; fp = &(*fp)->next) {
 		if (*fp == f) {
+			unsigned long cl;
+
 			tcf_tree_lock(tp);
 			*fp = f->next;
 			tcf_tree_unlock(tp);
 
 			route4_reset_fastmap(tp->q->dev, head, f->id);
-			tcf_unbind_filter(tp, &f->res);
+
+			if ((cl = cls_set_class(tp, &f->res.class, 0)) != 0)
+				tp->q->ops->cl_ops->unbind_tcf(tp->q, cl);
+
 #ifdef CONFIG_NET_CLS_POLICE
 			tcf_police_release(f->police,TCA_ACT_UNBIND);
 #endif
@@ -371,18 +378,27 @@ static int route4_change(struct tcf_proto *tp, unsigned long base,
 		return -EINVAL;
 
 	if ((f = (struct route4_filter*)*arg) != NULL) {
+		/* Node exists: adjust only classid */
+
 		if (f->handle != handle && handle)
 			return -EINVAL;
 		if (tb[TCA_ROUTE4_CLASSID-1]) {
+			unsigned long cl;
+
 			f->res.classid = *(u32*)RTA_DATA(tb[TCA_ROUTE4_CLASSID-1]);
-			tcf_bind_filter(tp, &f->res, base);
+			cl = cls_set_class(tp, &f->res.class, tp->q->ops->cl_ops->bind_tcf(tp->q, base, f->res.classid));
+			if (cl)
+				tp->q->ops->cl_ops->unbind_tcf(tp->q, cl);
 		}
 #ifdef CONFIG_NET_CLS_POLICE
 		if (tb[TCA_ROUTE4_POLICE-1]) {
-			err = tcf_change_police(tp, &f->police,
-				tb[TCA_ROUTE4_POLICE-1], tca[TCA_RATE-1]);
-			if (err < 0)
-				return err;
+			struct tcf_police *police = tcf_police_locate(tb[TCA_ROUTE4_POLICE-1], tca[TCA_RATE-1]);
+
+			tcf_tree_lock(tp);
+			police = xchg(&f->police, police);
+			tcf_tree_unlock(tp);
+
+			tcf_police_release(police,TCA_ACT_UNBIND);
 		}
 #endif
 		return 0;
@@ -475,10 +491,10 @@ static int route4_change(struct tcf_proto *tp, unsigned long base,
 			goto errout;
 	}
 
-	tcf_bind_filter(tp, &f->res, base);
+	cls_set_class(tp, &f->res.class, tp->q->ops->cl_ops->bind_tcf(tp->q, base, f->res.classid));
 #ifdef CONFIG_NET_CLS_POLICE
 	if (tb[TCA_ROUTE4_POLICE-1])
-		tcf_change_police(tp, &f->police, tb[TCA_ROUTE4_POLICE-1], tca[TCA_RATE-1]);
+		f->police = tcf_police_locate(tb[TCA_ROUTE4_POLICE-1], tca[TCA_RATE-1]);
 #endif
 
 	f->next = f1;
@@ -521,7 +537,7 @@ static void route4_walk(struct tcf_proto *tp, struct tcf_walker *arg)
 					}
 					if (arg->fn(tp, (unsigned long)f, arg) < 0) {
 						arg->stop = 1;
-						return;
+						break;
 					}
 					arg->count++;
 				}
@@ -560,15 +576,25 @@ static int route4_dump(struct tcf_proto *tp, unsigned long fh,
 	if (f->res.classid)
 		RTA_PUT(skb, TCA_ROUTE4_CLASSID, 4, &f->res.classid);
 #ifdef CONFIG_NET_CLS_POLICE
-	if (tcf_dump_police(skb, f->police, TCA_ROUTE4_POLICE) < 0)
-		goto rtattr_failure;
+	if (f->police) {
+		struct rtattr * p_rta = (struct rtattr*)skb->tail;
+
+		RTA_PUT(skb, TCA_ROUTE4_POLICE, 0, NULL);
+
+		if (tcf_police_dump(skb, f->police) < 0)
+			goto rtattr_failure;
+
+		p_rta->rta_len = skb->tail - (u8*)p_rta;
+	}
 #endif
 
 	rta->rta_len = skb->tail - b;
 #ifdef CONFIG_NET_CLS_POLICE
-	if (f->police)
-		if (tcf_police_dump_stats(skb, f->police) < 0)
+	if (f->police) {
+		if (qdisc_copy_stats(skb, &f->police->stats,
+				     f->police->stats_lock))
 			goto rtattr_failure;
+	}
 #endif
 	return skb->len;
 

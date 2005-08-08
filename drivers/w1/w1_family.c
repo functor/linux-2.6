@@ -21,7 +21,6 @@
 
 #include <linux/spinlock.h>
 #include <linux/list.h>
-#include <linux/delay.h>
 
 #include "w1_family.h"
 
@@ -85,13 +84,8 @@ void w1_unregister_family(struct w1_family *fent)
 
 	spin_unlock(&w1_flock);
 
-	while (atomic_read(&fent->refcnt)) {
-		printk(KERN_INFO "Waiting for family %u to become free: refcnt=%d.\n",
-				fent->fid, atomic_read(&fent->refcnt));
-
-		if (msleep_interruptible(1000))
-			flush_signals(current);
-	}
+	while (atomic_read(&fent->refcnt))
+		schedule_timeout(10);
 }
 
 /*

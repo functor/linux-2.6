@@ -22,7 +22,6 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
-#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/list.h>
@@ -30,6 +29,7 @@
 #include <linux/pm.h>
 #include <linux/device.h>
 #include <linux/proc_fs.h>
+#include <linux/reboot.h>
 #ifdef CONFIG_X86
 #include <asm/mpspec.h>
 #endif
@@ -45,11 +45,8 @@ extern void __init acpi_pic_sci_set_trigger(unsigned int irq, u16 trigger);
 #endif
 
 FADT_DESCRIPTOR			acpi_fadt;
-EXPORT_SYMBOL(acpi_fadt);
-
 struct acpi_device		*acpi_root;
 struct proc_dir_entry		*acpi_root_dir;
-EXPORT_SYMBOL(acpi_root_dir);
 
 #define STRUCT_TO_INT(s)	(*((int*)&s))
 
@@ -84,7 +81,6 @@ acpi_bus_get_device (
 
 	return_VALUE(0);
 }
-EXPORT_SYMBOL(acpi_bus_get_device);
 
 int
 acpi_bus_get_status (
@@ -130,7 +126,6 @@ acpi_bus_get_status (
 
 	return_VALUE(0);
 }
-EXPORT_SYMBOL(acpi_bus_get_status);
 
 
 /* --------------------------------------------------------------------------
@@ -188,7 +183,6 @@ acpi_bus_get_power (
 
 	return_VALUE(0);
 }
-EXPORT_SYMBOL(acpi_bus_get_power);
 
 
 int
@@ -277,7 +271,6 @@ end:
 
 	return_VALUE(result);
 }
-EXPORT_SYMBOL(acpi_bus_set_power);
 
 
 
@@ -327,7 +320,6 @@ acpi_bus_generate_event (
 
 	return_VALUE(0);
 }
-EXPORT_SYMBOL(acpi_bus_generate_event);
 
 int
 acpi_bus_receive_event (
@@ -341,7 +333,7 @@ acpi_bus_receive_event (
 	ACPI_FUNCTION_TRACE("acpi_bus_receive_event");
 
 	if (!event)
-		return_VALUE(-EINVAL);
+		return -EINVAL;
 
 	if (list_empty(&acpi_bus_event_list)) {
 
@@ -373,7 +365,6 @@ acpi_bus_receive_event (
 
 	return_VALUE(0);
 }
-EXPORT_SYMBOL(acpi_bus_receive_event);
 
 
 /* --------------------------------------------------------------------------
@@ -599,6 +590,34 @@ acpi_bus_init_irq (void)
 	return_VALUE(0);
 }
 
+void
+acpi_machine_reset(void)
+{
+	acpi_status status;
+	FADT_DESCRIPTOR *f = &acpi_fadt;
+
+	if (f->reset_register.register_bit_width != 8) {
+		printk(KERN_WARNING PREFIX "invalid reset register bit width: 0x%x\n", f->reset_register.register_bit_width);
+		return_VOID;
+	}
+
+	if (f->reset_register.register_bit_offset != 0) {
+		printk(KERN_WARNING PREFIX "invalid reset register bit offset: 0x%x\n", f->reset_register.register_bit_offset);
+		return_VOID;
+	}
+
+	if ((f->reset_register.address_space_id != ACPI_ADR_SPACE_SYSTEM_IO) &&
+		(f->reset_register.address_space_id != ACPI_ADR_SPACE_SYSTEM_MEMORY) &&
+		(f->reset_register.address_space_id != ACPI_ADR_SPACE_PCI_CONFIG)) {
+		printk(KERN_WARNING PREFIX "invalid reset register address space id: 0x%x\n", f->reset_register.address_space_id);
+		return_VOID;
+	}
+
+	status = acpi_hw_low_level_write(f->reset_register.register_bit_width, f->reset_value, &f->reset_register);
+
+	if (status != AE_OK)
+		printk(KERN_WARNING "ACPI system reset failed 0x%x\n", status);
+}
 
 void __init
 acpi_early_init (void)
@@ -609,7 +628,7 @@ acpi_early_init (void)
 	ACPI_FUNCTION_TRACE("acpi_early_init");
 
 	if (acpi_disabled)
-		return_VOID;
+		return;
 
 	/* enable workarounds, unless strict ACPI spec. compliance */
 	if (!acpi_strict)
@@ -635,6 +654,23 @@ acpi_early_init (void)
 		printk(KERN_ERR PREFIX "Unable to get the FADT\n");
 		goto error0;
 	}
+
+#if defined(CONFIG_X86_64)
+	/*
+	 * Set up system reset via ACPI if defined in FADT.
+	 */
+	if (acpi_fadt.revision >= 2) {
+		if (acpi_fadt.reset_reg_sup) {
+			printk(KERN_INFO PREFIX "System reset via FADT Reset Register is supported\n");
+			/* if no 8042 KBD controller exists, use ACPI reset */
+			if (!(acpi_fadt.iapc_boot_arch & BAF_8042_KEYBOARD_CONTROLLER)) {
+				machine_reset = acpi_machine_reset;
+				if (!reboot_override)
+					reboot_type = BOOT_ACPI;
+			}
+		}
+	}
+#endif
 
 #ifdef CONFIG_X86
 	if (!acpi_ioapic) {
@@ -662,11 +698,11 @@ acpi_early_init (void)
 		goto error0;
 	}
 
-	return_VOID;
+	return;
 
 error0:
 	disable_acpi();
-	return_VOID;
+	return;
 }
 
 static int __init
@@ -753,7 +789,7 @@ static int __init acpi_init (void)
 
 	if (acpi_disabled) {
 		printk(KERN_INFO PREFIX "Interpreter disabled.\n");
-		return_VALUE(-ENODEV);
+		return -ENODEV;
 	}
 
 	firmware_register(&acpi_subsys);

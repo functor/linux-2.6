@@ -11,7 +11,6 @@
 #include <linux/spinlock.h>
 #include <linux/mm.h>
 #include <linux/highmem.h>	/* pte_offset_map => kmap_atomic */
-#include <linux/bitops.h>
 
 #include <asm/scatterlist.h>
 #include <asm/pgalloc.h>
@@ -20,6 +19,7 @@
 #include <asm/io.h>
 #include <asm/io-unit.h>
 #include <asm/mxcc.h>
+#include <asm/bitops.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 #include <asm/dma.h>

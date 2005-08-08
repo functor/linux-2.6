@@ -1,4 +1,4 @@
-/*
+/* 
  * Copyright (C) 2002 - 2003 Jeff Dike (jdike@addtoit.com)
  * Licensed under the GPL
  */
@@ -14,7 +14,7 @@
 #include "kern_util.h"
 #include "user_util.h"
 
-extern void *um_virt_to_phys(struct task_struct *task, unsigned long addr,
+extern void *um_virt_to_phys(struct task_struct *task, unsigned long addr, 
 			     pte_t *pte_out);
 
 static unsigned long maybe_map(unsigned long virt, int is_write)
@@ -34,7 +34,7 @@ static unsigned long maybe_map(unsigned long virt, int is_write)
 	return((unsigned long) phys);
 }
 
-static int do_op(unsigned long addr, int len, int is_write,
+static int do_op(unsigned long addr, int len, int is_write, 
 		 int (*op)(unsigned long addr, int len, void *arg), void *arg)
 {
 	struct page *page;
@@ -106,8 +106,8 @@ static int buffer_op(unsigned long addr, int len, int is_write,
 		     void *arg)
 {
 	int faulted, res;
-
-	faulted = setjmp_wrapper(do_buffer_op, addr, len, is_write, op, arg,
+	
+	faulted = setjmp_wrapper(do_buffer_op, addr, len, is_write, op, arg, 
 				 &res);
 	if(!faulted)
 		return(res);
@@ -166,7 +166,7 @@ static int strncpy_chunk_from_user(unsigned long from, int len, void *arg)
 	n = strnlen(to, len);
 	*to_ptr += n;
 
-	if(n < len)
+	if(n < len) 
 	        return(1);
 	return(0);
 }
@@ -184,7 +184,7 @@ int strncpy_from_user_skas(char *dst, const char *src, int count)
 	if(!access_ok_skas(VERIFY_READ, src, 1))
 		return(-EFAULT);
 
-	n = buffer_op((unsigned long) src, count, 0, strncpy_chunk_from_user,
+	n = buffer_op((unsigned long) src, count, 0, strncpy_chunk_from_user, 
 		      &ptr);
 	if(n != 0)
 		return(-EFAULT);
@@ -209,7 +209,7 @@ int clear_user_skas(void *mem, int len)
 		return(0);
 	}
 
-	return(access_ok_skas(VERIFY_WRITE, mem, len) ?
+	return(access_ok_skas(VERIFY_WRITE, mem, len) ? 
 	       buffer_op((unsigned long) mem, len, 1, clear_chunk, NULL) : len);
 }
 

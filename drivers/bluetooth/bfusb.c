@@ -123,7 +123,7 @@ static void bfusb_unlink_urbs(struct bfusb *bfusb)
 
 	while ((skb = skb_dequeue(&bfusb->pending_q))) {
 		urb = ((struct bfusb_scb *) skb->cb)->urb;
-		usb_kill_urb(urb);
+		usb_unlink_urb(urb);
 		skb_queue_tail(&bfusb->completed_q, skb);
 	}
 
@@ -680,7 +680,7 @@ static int bfusb_probe(struct usb_interface *intf, const struct usb_device_id *i
 	bfusb->bulk_out_ep   = bulk_out_ep->desc.bEndpointAddress;
 	bfusb->bulk_pkt_size = bulk_out_ep->desc.wMaxPacketSize;
 
-	rwlock_init(&bfusb->lock);
+	bfusb->lock = RW_LOCK_UNLOCKED;
 
 	bfusb->reassembly = NULL;
 

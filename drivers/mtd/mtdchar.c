@@ -1,5 +1,5 @@
 /*
- * $Id: mtdchar.c,v 1.65 2004/09/23 23:45:47 gleixner Exp $
+ * $Id: mtdchar.c,v 1.64 2004/08/09 13:59:46 dwmw2 Exp $
  *
  * Character-device access to raw MTD devices.
  *
@@ -179,13 +179,7 @@ static ssize_t mtd_read(struct file *file, char __user *buf, size_t count,loff_t
 			return -ENOMEM;
 		
 		ret = MTD_READ(mtd, *ppos, len, &retlen, kbuf);
-		/* Nand returns -EBADMSG on ecc errors, but it returns
-		 * the data. For our userspace tools it is important
-		 * to dump areas with ecc errors ! 
-		 * Userspace software which accesses NAND this way
-		 * must be aware of the fact that it deals with NAND
-		 */
-		if (!ret || (ret == -EBADMSG)) {
+		if (!ret) {
 			*ppos += retlen;
 			if (copy_to_user(buf, kbuf, retlen)) {
 			        kfree(kbuf);
@@ -204,7 +198,7 @@ static ssize_t mtd_read(struct file *file, char __user *buf, size_t count,loff_t
 		
 		kfree(kbuf);
 	}
-
+	
 	return total_retlen;
 } /* mtd_read */
 

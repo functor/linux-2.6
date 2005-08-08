@@ -421,7 +421,7 @@ tristate sym_toggle_tristate_value(struct symbol *sym)
 
 bool sym_string_valid(struct symbol *sym, const char *str)
 {
-	signed char ch;
+	char ch;
 
 	switch (sym->type) {
 	case S_STRING:

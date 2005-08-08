@@ -42,8 +42,6 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#include <linux/module.h>
-
 #include <acpi/acpi.h>
 
 #define _COMPONENT          ACPI_HARDWARE
@@ -114,7 +112,6 @@ acpi_get_timer (
 
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_get_timer);
 
 
 /******************************************************************************
@@ -152,9 +149,10 @@ acpi_get_timer_duration (
 	u32                             end_ticks,
 	u32                             *time_elapsed)
 {
+	u32                             delta_ticks = 0;
+	union uint64_overlay            normalized_ticks;
 	acpi_status                     status;
-	u32                             delta_ticks;
-	acpi_integer                    quotient;
+	acpi_integer                    out_quotient;
 
 
 	ACPI_FUNCTION_TRACE ("acpi_get_timer_duration");
@@ -166,7 +164,7 @@ acpi_get_timer_duration (
 
 	/*
 	 * Compute Tick Delta:
-	 * Handle (max one) timer rollovers on 24-bit versus 32-bit timers.
+	 * Handle (max one) timer rollovers on 24- versus 32-bit timers.
 	 */
 	if (start_ticks < end_ticks) {
 		delta_ticks = end_ticks - start_ticks;
@@ -183,21 +181,23 @@ acpi_get_timer_duration (
 			delta_ticks = (0xFFFFFFFF - start_ticks) + end_ticks;
 		}
 	}
-	else /* start_ticks == end_ticks */ {
+	else {
 		*time_elapsed = 0;
 		return_ACPI_STATUS (AE_OK);
 	}
 
 	/*
-	 * Compute Duration (Requires a 64-bit multiply and divide):
+	 * Compute Duration (Requires a 64-bit divide):
 	 *
 	 * time_elapsed = (delta_ticks * 1000000) / PM_TIMER_FREQUENCY;
 	 */
-	status = acpi_ut_short_divide (((u64) delta_ticks) * 1000000,
-			 PM_TIMER_FREQUENCY, &quotient, NULL);
+	normalized_ticks.full = ((u64) delta_ticks) * 1000000;
 
-	*time_elapsed = (u32) quotient;
+	status = acpi_ut_short_divide (&normalized_ticks.full, PM_TIMER_FREQUENCY,
+			   &out_quotient, NULL);
+
+	*time_elapsed = (u32) out_quotient;
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_get_timer_duration);
+
 

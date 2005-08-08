@@ -1,5 +1,5 @@
 #
-# S/390 crypto devices
+# S/390 miscellaneous devices
 #
 
 z90crypt-objs := z90main.o z90hardware.o

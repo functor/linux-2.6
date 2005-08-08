@@ -172,7 +172,8 @@ mpc85xx_cds_show_cpuinfo(struct seq_file *m)
 
         seq_printf(m, "Vendor\t\t: Freescale Semiconductor\n");
 	seq_printf(m, "Machine\t\t: CDS (%x)\n", cadmus[CM_VER]);
-	seq_printf(m, "clock\t\t: %dMHz\n", freq / 1000000);
+        seq_printf(m, "bus freq\t: %u.%.6u MHz\n", freq / 1000000,
+                   freq % 1000000);
         seq_printf(m, "PVR\t\t: 0x%x\n", pvid);
         seq_printf(m, "SVR\t\t: 0x%x\n", svid);
 
@@ -190,15 +191,10 @@ mpc85xx_cds_show_cpuinfo(struct seq_file *m)
 static void cpm2_cascade(int irq, void *dev_id, struct pt_regs *regs)
 {
 	while((irq = cpm2_get_irq(regs)) >= 0)
-		__do_IRQ(irq, regs);
+	{
+		ppc_irq_dispatch_handler(regs,irq);
+	}
 }
-
-static struct irqaction cpm2_irqaction = {
-	.handler = cpm2_cascade,
-	.flags = SA_INTERRUPT,
-	.mask = CPU_MASK_NONE,
-	.name = "cpm2_cascade",
-};
 #endif /* CONFIG_CPM2 */
 
 void __init
@@ -241,7 +237,7 @@ mpc85xx_cds_init_IRQ(void)
 	immap->im_intctl.ic_scprrh = 0x05309770;
 	immap->im_intctl.ic_scprrl = 0x05309770;
 
-	setup_irq(MPC85xx_IRQ_CPM, &cpm2_irqaction);
+	request_irq(MPC85xx_IRQ_CPM, cpm2_cascade, SA_INTERRUPT, "cpm2_cascade", NULL);
 #endif
 
         return;

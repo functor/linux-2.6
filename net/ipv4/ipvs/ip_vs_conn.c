@@ -453,9 +453,7 @@ int ip_vs_check_template(struct ip_vs_conn *ct)
 	 * Checking the dest server status.
 	 */
 	if ((dest == NULL) ||
-	    !(dest->flags & IP_VS_DEST_F_AVAILABLE) || 
-	    (sysctl_ip_vs_expire_quiescent_template && 
-	     (atomic_read(&dest->weight) == 0))) {
+	    !(dest->flags & IP_VS_DEST_F_AVAILABLE)) {
 		IP_VS_DBG(9, "check_template: dest not available for "
 			  "protocol %s s:%u.%u.%u.%u:%d v:%u.%u.%u.%u:%d "
 			  "-> d:%u.%u.%u.%u:%d\n",
@@ -582,7 +580,7 @@ ip_vs_conn_new(int proto, __u32 caddr, __u16 cport, __u32 vaddr, __u16 vport,
 	cp->daddr          = daddr;
 	cp->dport          = dport;
 	cp->flags	   = flags;
-	spin_lock_init(&cp->lock);
+	cp->lock           = SPIN_LOCK_UNLOCKED;
 
 	/*
 	 * Set the entry is referenced by the current thread before hashing
@@ -896,7 +894,7 @@ int ip_vs_conn_init(void)
 	}
 
 	for (idx = 0; idx < CT_LOCKARRAY_SIZE; idx++)  {
-		rwlock_init(&__ip_vs_conntbl_lock_array[idx].l);
+		__ip_vs_conntbl_lock_array[idx].l = RW_LOCK_UNLOCKED;
 	}
 
 	proc_net_fops_create("ip_vs_conn", 0, &ip_vs_conn_fops);

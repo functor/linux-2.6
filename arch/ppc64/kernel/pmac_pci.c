@@ -39,10 +39,14 @@
 #define DBG(x...)
 #endif
 
+extern int pci_probe_only;
+extern int pci_read_irq_line(struct pci_dev *pci_dev);
+
 /* XXX Could be per-controller, but I don't think we risk anything by
  * assuming we won't have both UniNorth and Bandit */
 static int has_uninorth;
 static struct pci_controller *u3_agp;
+u8 pci_cache_line_size;
 struct pci_dev *k2_skiplist[2];
 
 static int __init fixup_one_level_bus_range(struct device_node *node, int higher)
@@ -146,9 +150,16 @@ static int __pmac macrisc_read_config(struct pci_bus *bus, unsigned int devfn,
 				      int offset, int len, u32 *val)
 {
 	struct pci_controller *hose;
+	struct device_node *busdn;
 	unsigned long addr;
 
-	hose = pci_bus_to_host(bus);
+	if (bus->self)
+		busdn = pci_device_to_OF_node(bus->self);
+	else
+		busdn = bus->sysdata;	/* must be a phb */
+	if (busdn == NULL)
+		return PCIBIOS_DEVICE_NOT_FOUND;
+	hose = busdn->phb;
 	if (hose == NULL)
 		return PCIBIOS_DEVICE_NOT_FOUND;
 
@@ -177,9 +188,16 @@ static int __pmac macrisc_write_config(struct pci_bus *bus, unsigned int devfn,
 				       int offset, int len, u32 val)
 {
 	struct pci_controller *hose;
+	struct device_node *busdn;
 	unsigned long addr;
 
-	hose = pci_bus_to_host(bus);
+	if (bus->self)
+		busdn = pci_device_to_OF_node(bus->self);
+	else
+		busdn = bus->sysdata;	/* must be a phb */
+	if (busdn == NULL)
+		return PCIBIOS_DEVICE_NOT_FOUND;
+	hose = busdn->phb;
 	if (hose == NULL)
 		return PCIBIOS_DEVICE_NOT_FOUND;
 
@@ -218,44 +236,14 @@ static struct pci_ops macrisc_pci_ops =
  * implement self-view of the HT host yet
  */
 
-/*
- * This function deals with some "special cases" devices.
- *
- *  0 -> No special case
- *  1 -> Skip the device but act as if the access was successfull
- *       (return 0xff's on reads, eventually, cache config space
- *       accesses in a later version)
- * -1 -> Hide the device (unsuccessful acess)
- */
-static int u3_ht_skip_device(struct pci_controller *hose,
-			     struct pci_bus *bus, unsigned int devfn)
+static int skip_k2_device(struct pci_bus *bus, unsigned int devfn)
 {
-	struct device_node *busdn, *dn;
 	int i;
 
-	/*
-	 * When a device in K2 is powered down, we die on config
-	 * cycle accesses. Fix that here.
-	 */
 	for (i=0; i<2; i++)
 		if (k2_skiplist[i] && k2_skiplist[i]->bus == bus &&
 		    k2_skiplist[i]->devfn == devfn)
 			return 1;
-
-	/* We only allow config cycles to devices that are in OF device-tree
-	 * as we are apparently having some weird things going on with some
-	 * revs of K2 on recent G5s
-	 */
-	if (bus->self)
-		busdn = pci_device_to_OF_node(bus->self);
-	else
-		busdn = hose->arch_data;
-	for (dn = busdn->child; dn; dn = dn->sibling)
-		if (dn->devfn == devfn)
-			break;
-	if (dn == NULL)
-		return -1;
-
 	return 0;
 }
 
@@ -271,7 +259,8 @@ static unsigned long __pmac u3_ht_cfg_access(struct pci_controller* hose,
 {
 	if (bus == hose->first_busno) {
 		/* For now, we don't self probe U3 HT bridge */
-		if (PCI_SLOT(devfn) == 0)
+		if (PCI_FUNC(devfn) != 0 || PCI_SLOT(devfn) > 7 ||
+		    PCI_SLOT(devfn) < 1)
 			return 0;
 		return ((unsigned long)hose->cfg_data) + U3_HT_CFA0(devfn, offset);
 	} else
@@ -282,21 +271,39 @@ static int __pmac u3_ht_read_config(struct pci_bus *bus, unsigned int devfn,
 				    int offset, int len, u32 *val)
 {
 	struct pci_controller *hose;
+	struct device_node *busdn, *dn;
 	unsigned long addr;
 
-
-	hose = pci_bus_to_host(bus);      
+	if (bus->self)
+		busdn = pci_device_to_OF_node(bus->self);
+	else
+		busdn = bus->sysdata;	/* must be a phb */
+	if (busdn == NULL)
+		return PCIBIOS_DEVICE_NOT_FOUND;
+	hose = busdn->phb;
 	if (hose == NULL)
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+	/* We only allow config cycles to devices that are in OF device-tree
+	 * as we are apparently having some weird things going on with some
+	 * revs of K2 on recent G5s
+	 */
+	for (dn = busdn->child; dn; dn = dn->sibling)
+		if (dn->devfn == devfn)
+			break;
+	if (dn == NULL)
 		return PCIBIOS_DEVICE_NOT_FOUND;
 
 	addr = u3_ht_cfg_access(hose, bus->number, devfn, offset);
 	if (!addr)
 		return PCIBIOS_DEVICE_NOT_FOUND;
-
-	switch (u3_ht_skip_device(hose, bus, devfn)) {
-	case 0:
-		break;
-	case 1:
+	/*
+	 * When a device in K2 is powered down, we die on config
+	 * cycle accesses. Fix that here. We may ultimately want
+	 * to cache the config space for those instead of returning
+	 * 0xffffffff's to make life easier to HW detection tools
+	 */
+	if (skip_k2_device(bus, devfn)) {
 		switch (len) {
 		case 1:
 			*val = 0xff; break;
@@ -306,8 +313,6 @@ static int __pmac u3_ht_read_config(struct pci_bus *bus, unsigned int devfn,
 			*val = 0xfffffffful; break;
 		}
 		return PCIBIOS_SUCCESSFUL;
-	default:
-		return PCIBIOS_DEVICE_NOT_FOUND;
 	}
 
 	/*
@@ -332,24 +337,28 @@ static int __pmac u3_ht_write_config(struct pci_bus *bus, unsigned int devfn,
 				     int offset, int len, u32 val)
 {
 	struct pci_controller *hose;
+	struct device_node *busdn;
 	unsigned long addr;
 
-	hose = pci_bus_to_host(bus);
+	if (bus->self)
+		busdn = pci_device_to_OF_node(bus->self);
+	else
+		busdn = bus->sysdata;	/* must be a phb */
+	if (busdn == NULL)
+		return PCIBIOS_DEVICE_NOT_FOUND;
+	hose = busdn->phb;
 	if (hose == NULL)
 		return PCIBIOS_DEVICE_NOT_FOUND;
 
 	addr = u3_ht_cfg_access(hose, bus->number, devfn, offset);
 	if (!addr)
 		return PCIBIOS_DEVICE_NOT_FOUND;
-
-	switch (u3_ht_skip_device(hose, bus, devfn)) {
-	case 0:
-		break;
-	case 1:
+	/*
+	 * When a device in K2 is powered down, we die on config
+	 * cycle accesses. Fix that here.
+	 */
+	if (skip_k2_device(bus, devfn))
 		return PCIBIOS_SUCCESSFUL;
-	default:
-		return PCIBIOS_DEVICE_NOT_FOUND;
-	}
 
 	/*
 	 * Note: the caller has already checked that offset is
@@ -504,7 +513,7 @@ static void __init pmac_process_bridge_OF_ranges(struct pci_controller *hose,
 	dt_ranges = (unsigned int *) get_property(dev, "ranges", &rlen);
 	if (!dt_ranges)
 		return;
-	/*	lc_ranges = alloc_bootmem(rlen);*/
+	/*	lc_ranges = (unsigned int *) alloc_bootmem(rlen);*/
 	lc_ranges = static_lc_ranges;
 	if (!lc_ranges)
 		return; /* what can we do here ? */
@@ -614,17 +623,15 @@ static int __init add_bridge(struct device_node *dev)
        			       dev->full_name);
        	}
 
-	hose = alloc_bootmem(sizeof(struct pci_controller));
-	if (hose == NULL)
-		return -ENOMEM;
-       	pci_setup_pci_controller(hose);
-
+       	hose = pci_alloc_pci_controller(phb_type_apple);
+       	if (!hose)
+       		return -ENOMEM;
        	hose->arch_data = dev;
        	hose->first_busno = bus_range ? bus_range[0] : 0;
        	hose->last_busno = bus_range ? bus_range[1] : 0xff;
 
-	of_prop = alloc_bootmem(sizeof(struct property) +
-				sizeof(hose->global_number));
+	of_prop = (struct property *)alloc_bootmem(sizeof(struct property) +
+			sizeof(hose->global_number));        
 	if (of_prop) {
 		memset(of_prop, 0, sizeof(struct property));
 		of_prop->name = "linux,pci-domain";
@@ -662,12 +669,13 @@ void __init pmac_pcibios_fixup(void)
 {
 	struct pci_dev *dev = NULL;
 
-	for_each_pci_dev(dev)
+	while ((dev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL)
 		pci_read_irq_line(dev);
 
 	pci_fix_bus_sysdata();
 
 	iommu_setup_u3();
+
 }
 
 static void __init pmac_fixup_phb_resources(void)
@@ -739,9 +747,14 @@ void __init pmac_pci_init(void)
 
 	pmac_check_ht_link();
 
-	/* Tell pci.c to not use the common resource allocation mecanism */
-	pci_probe_only = 1;
+	/* Tell pci.c to use the common resource allocation mecanism */
+	pci_probe_only = 0;
 	
+	/* HT don't do more than 64 bytes transfers. FIXME: Deal with
+	 * the exception of U3/AGP (hook into pci_set_mwi)
+	 */
+	pci_cache_line_size = 16; /* 64 bytes */
+
 	/* Allow all IO */
 	io_page_mask = -1;
 }
@@ -750,7 +763,7 @@ void __init pmac_pci_init(void)
  * Disable second function on K2-SATA, it's broken
  * and disable IO BARs on first one
  */
-static void fixup_k2_sata(struct pci_dev* dev)
+void fixup_k2_sata(struct pci_dev* dev)
 {
 	int i;
 	u16 cmd;

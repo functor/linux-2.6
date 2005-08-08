@@ -23,6 +23,9 @@
 #include <linux/device.h>
 #include <linux/bitops.h>
 #include <linux/pci.h>
+#include <linux/interrupt.h>
+#include <linux/mm.h>
+#include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
@@ -52,15 +55,10 @@ void ixdp2400_init_irq(void)
  * IXDP2800 timer tick
  *************************************************************************/
 
-static void __init ixdp2800_timer_init(void)
+static void __init ixdp2800_init_time(void)
 {
 	ixp2000_init_time(50000000);
 }
-
-static struct sys_timer ixdp2800_timer = {
-	.init		= ixdp2800_timer_init,
-	.offset		= ixp2000_gettimeoffset,
-};
 
 /*************************************************************************
  * IXDP2800 PCI
@@ -174,7 +172,7 @@ MACHINE_START(IXDP2800, "Intel IXDP2800 Development Platform")
 	BOOT_PARAMS(0x00000100)
 	MAPIO(ixdp2x00_map_io)
 	INITIRQ(ixdp2800_init_irq)
-	.timer		= &ixdp2800_timer,
+	INITTIME(ixdp2800_init_time)
 	INIT_MACHINE(ixdp2x00_init_machine)
 MACHINE_END
 

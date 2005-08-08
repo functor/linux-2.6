@@ -14,4 +14,5 @@
 
 /*
 #define CLOCK_TICK_RATE		3686400
+#define CLOCK_TICK_FACTOR	80
 */

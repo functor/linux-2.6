@@ -25,11 +25,11 @@ struct list_head saa7146_devices;
 struct semaphore saa7146_devices_lock;
 
 static int initialized = 0;
-static int saa7146_num = 0;
+int saa7146_num = 0;
 
 unsigned int saa7146_debug = 0;
 
-module_param(saa7146_debug, int, 0644);
+MODULE_PARM(saa7146_debug,"i");
 MODULE_PARM_DESC(saa7146_debug, "debug level (default: 0)");
 
 #if 0
@@ -48,7 +48,7 @@ static void dump_registers(struct saa7146_dev* dev)
  * gpio and debi helper functions
  ****************************************************************************/
 
-/* write "data" to the gpio-pin "pin" -- unused */
+/* write "data" to the gpio-pin "pin" */
 void saa7146_set_gpio(struct saa7146_dev *dev, u8 pin, u8 data)
 {
 	u32 value = 0;
@@ -67,7 +67,7 @@ void saa7146_set_gpio(struct saa7146_dev *dev, u8 pin, u8 data)
 }
 
 /* This DEBI code is based on the saa7146 Stradis driver by Nathan Laredo */
-int saa7146_wait_for_debi_done(struct saa7146_dev *dev, int nobusyloop)
+int saa7146_wait_for_debi_done(struct saa7146_dev *dev)
 {
 	unsigned long start;
 
@@ -80,8 +80,6 @@ int saa7146_wait_for_debi_done(struct saa7146_dev *dev, int nobusyloop)
 			DEB_S(("timed out while waiting for registers getting programmed\n"));
 			return -ETIMEDOUT;
 		}
-		if (nobusyloop)
-			msleep(1);
 	}
 
 	/* wait for transfer to complete */
@@ -94,8 +92,6 @@ int saa7146_wait_for_debi_done(struct saa7146_dev *dev, int nobusyloop)
 			DEB_S(("timed out while waiting for transfer completion\n"));
 			return -ETIMEDOUT;
 		}
-		if (nobusyloop)
-			msleep(1);
 	}
 
 	return 0;
@@ -136,6 +132,8 @@ static struct scatterlist* vmalloc_to_sg(unsigned char *virt, int nr_pages)
 
 /********************************************************************************/
 /* common page table functions */
+
+#define SAA7146_PGTABLE_SIZE 4096
 
 char *saa7146_vmalloc_build_pgtable(struct pci_dev *pci, long length, struct saa7146_pgtable *pt)
 {
@@ -184,11 +182,11 @@ int saa7146_pgtable_alloc(struct pci_dev *pci, struct saa7146_pgtable *pt)
         u32          *cpu;
         dma_addr_t   dma_addr;
 
-	cpu = pci_alloc_consistent(pci, PAGE_SIZE, &dma_addr);
+	cpu = pci_alloc_consistent(pci, SAA7146_PGTABLE_SIZE, &dma_addr);
 	if (NULL == cpu) {
 		return -ENOMEM;
 	}
-	pt->size = PAGE_SIZE;
+	pt->size = SAA7146_PGTABLE_SIZE;
 	pt->cpu  = cpu;
 	pt->dma  = dma_addr;
 
@@ -203,7 +201,11 @@ int saa7146_pgtable_build_single(struct pci_dev *pci, struct saa7146_pgtable *pt
 	int   i,p;
 
 	BUG_ON( 0 == sglen);
-	BUG_ON(list->offset > PAGE_SIZE);
+
+	if (list->offset > PAGE_SIZE) {
+		DEB_D(("offset > PAGE_SIZE. this should not happen."));
+		return -EINVAL;
+	}
 	
 	/* if we have a user buffer, the first page may not be
 	   aligned to a page boundary. */
@@ -215,7 +217,7 @@ int saa7146_pgtable_build_single(struct pci_dev *pci, struct saa7146_pgtable *pt
 		printk("i:%d, adr:0x%08x, len:%d, offset:%d\n", i,sg_dma_address(list), sg_dma_len(list), list->offset);
 */
 		for (p = 0; p * 4096 < list->length; p++, ptr++) {
-			*ptr = cpu_to_le32(sg_dma_address(list) + p * 4096);
+			*ptr = sg_dma_address(list) + p * 4096;
 			nr_pages++;
 		}
 	}
@@ -252,9 +254,10 @@ void saa7146_setgpio(struct saa7146_dev *dev, int port, u32 data)
 
 /********************************************************************************/
 /* interrupt handler */
+
 static irqreturn_t interrupt_hw(int irq, void *dev_id, struct pt_regs *regs)
 {
-	struct saa7146_dev *dev = dev_id;
+	struct saa7146_dev *dev = (struct saa7146_dev*)dev_id;
 	u32 isr = 0;
 
 	/* read out the interrupt status register */
@@ -292,7 +295,7 @@ static irqreturn_t interrupt_hw(int irq, void *dev_id, struct pt_regs *regs)
 	if (0 != (isr & (MASK_16|MASK_17))) {
 		u32 status = saa7146_read(dev, I2C_STATUS);
 		if( (0x3 == (status & 0x3)) || (0 == (status & 0x1)) ) {
-			SAA7146_IER_DISABLE(dev, MASK_16|MASK_17);
+			IER_DISABLE(dev, MASK_16|MASK_17);
 			/* only wake up if we expect something */
 			if( 0 != dev->i2c_op ) {
 				u32 psr = (saa7146_read(dev, PSR) >> 16) & 0x2;
@@ -311,7 +314,7 @@ static irqreturn_t interrupt_hw(int irq, void *dev_id, struct pt_regs *regs)
 	if( 0 != isr ) {
 		ERR(("warning: interrupt enabled, but not handled properly.(0x%08x)\n",isr));
 		ERR(("disabling interrupt source(s)!\n"));
-		SAA7146_IER_DISABLE(dev,isr);
+		IER_DISABLE(dev,isr);
 	}
 	return IRQ_HANDLED;
 }
@@ -321,15 +324,16 @@ static irqreturn_t interrupt_hw(int irq, void *dev_id, struct pt_regs *regs)
 
 static int saa7146_init_one(struct pci_dev *pci, const struct pci_device_id *ent)
 {
+	unsigned long adr = 0, len = 0;
+	struct saa7146_dev* dev = kmalloc (sizeof(struct saa7146_dev),GFP_KERNEL);
+	
 	struct saa7146_pci_extension_data *pci_ext = (struct saa7146_pci_extension_data *)ent->driver_data;
 	struct saa7146_extension* ext = pci_ext->ext;
-	struct saa7146_dev *dev;
-	int err = -ENOMEM;
+	int err = 0;
 	
-	dev = kmalloc(sizeof(struct saa7146_dev), GFP_KERNEL);
-	if (!dev) {
+	if (!(dev = kmalloc (sizeof(struct saa7146_dev),GFP_KERNEL))) {
 		ERR(("out of memory.\n"));
-		goto out;
+		return -ENOMEM;
 	}
 
 	/* clear out mem for sure */
@@ -337,37 +341,38 @@ static int saa7146_init_one(struct pci_dev *pci, const struct pci_device_id *ent
 
 	DEB_EE(("pci:%p\n",pci));
 
-	err = pci_enable_device(pci);
-	if (err < 0) {
+	if (pci_enable_device(pci)) {
 		ERR(("pci_enable_device() failed.\n"));
-		goto err_free;
+		err = -EIO;
+		goto pci_error;
 	}
 
 	/* enable bus-mastering */
 	pci_set_master(pci);
 
 	dev->pci = pci;
-
 	/* get chip-revision; this is needed to enable bug-fixes */
-	err = pci_read_config_dword(pci, PCI_CLASS_REVISION, &dev->revision);
-	if (err < 0) {
+	if( 0 > pci_read_config_dword(dev->pci, PCI_CLASS_REVISION, &dev->revision)) {
 		ERR(("pci_read_config_dword() failed.\n"));
-		goto err_disable;
+		err = -ENODEV;
+		goto pci_error;
 	}
 	dev->revision &= 0xf;
 
 	/* remap the memory from virtual to physical adress */
+	adr = pci_resource_start(pci,0);
+	len = pci_resource_len(pci,0);
 
-	err = pci_request_region(pci, 0, "saa7146");
-	if (err < 0)
-		goto err_disable;
+	if (!request_mem_region(pci_resource_start(pci,0), pci_resource_len(pci,0), "saa7146")) {
+		ERR(("request_mem_region() failed.\n"));
+		err = -ENODEV;
+		goto pci_error;
+	}
 
-	dev->mem = ioremap(pci_resource_start(pci, 0),
-			   pci_resource_len(pci, 0));
-	if (!dev->mem) {
+	if (!(dev->mem = ioremap(adr,len))) {
 		ERR(("ioremap() failed.\n"));
 		err = -ENODEV;
-		goto err_release;
+		goto ioremap_error;
 	}
 
 	/* we don't do a master reset here anymore, it screws up
@@ -387,40 +392,42 @@ static int saa7146_init_one(struct pci_dev *pci, const struct pci_device_id *ent
 	saa7146_write(dev, MC2, 0xf8000000);
 
 	/* request an interrupt for the saa7146 */
-	err = request_irq(pci->irq, interrupt_hw, SA_SHIRQ | SA_INTERRUPT,
-			  dev->name, dev);
-	if (err < 0) {
+	if (request_irq(dev->pci->irq, interrupt_hw, SA_SHIRQ | SA_INTERRUPT,
+			dev->name, dev))
+	{
 		ERR(("request_irq() failed.\n"));
-		goto err_unmap;
+		err = -ENODEV;
+		goto irq_error;
 	}
 
-		err = -ENOMEM;
-
 	/* get memory for various stuff */
-	dev->d_rps0.cpu_addr = pci_alloc_consistent(pci, SAA7146_RPS_MEM,
-						    &dev->d_rps0.dma_handle);
-	if (!dev->d_rps0.cpu_addr)
-		goto err_free_irq;
+	dev->d_rps0.cpu_addr = pci_alloc_consistent(dev->pci, SAA7146_RPS_MEM, &dev->d_rps0.dma_handle);	
+	if( NULL == dev->d_rps0.cpu_addr ) {
+		err = -ENOMEM;
+		goto kmalloc_error_1;
+	}
 	memset(dev->d_rps0.cpu_addr, 0x0, SAA7146_RPS_MEM);
 
-	dev->d_rps1.cpu_addr = pci_alloc_consistent(pci, SAA7146_RPS_MEM,
-						    &dev->d_rps1.dma_handle);
-	if (!dev->d_rps1.cpu_addr)
-		goto err_free_rps0;
+	dev->d_rps1.cpu_addr = pci_alloc_consistent(dev->pci, SAA7146_RPS_MEM, &dev->d_rps1.dma_handle);	
+	if( NULL == dev->d_rps1.cpu_addr ) {
+		err = -ENOMEM;
+		goto kmalloc_error_2;
+	}
 	memset(dev->d_rps1.cpu_addr, 0x0, SAA7146_RPS_MEM);
 
-	dev->d_i2c.cpu_addr = pci_alloc_consistent(pci, SAA7146_RPS_MEM,
-						   &dev->d_i2c.dma_handle);
-	if (!dev->d_i2c.cpu_addr)
-		goto err_free_rps1;
+	dev->d_i2c.cpu_addr = pci_alloc_consistent(dev->pci, SAA7146_RPS_MEM, &dev->d_i2c.dma_handle);	
+	if( NULL == dev->d_i2c.cpu_addr ) {
+		err = -ENOMEM;
+		goto kmalloc_error_3;
+	}
 	memset(dev->d_i2c.cpu_addr, 0x0, SAA7146_RPS_MEM);
 
 	/* the rest + print status message */
 
 	/* create a nice device name */
-	sprintf(dev->name, "saa7146 (%d)", saa7146_num);
+	sprintf(&dev->name[0], "saa7146 (%d)",saa7146_num);
 
-	INFO(("found saa7146 @ mem %p (revision %d, irq %d) (0x%04x,0x%04x).\n", dev->mem, dev->revision, pci->irq, pci->subsystem_vendor, pci->subsystem_device));
+	INFO(("found saa7146 @ mem %p (revision %d, irq %d) (0x%04x,0x%04x).\n", dev->mem, dev->revision,dev->pci->irq,dev->pci->subsystem_vendor,dev->pci->subsystem_device));
 	dev->ext = ext;
 
 	pci_set_drvdata(pci,dev);
@@ -437,18 +444,18 @@ static int saa7146_init_one(struct pci_dev *pci, const struct pci_device_id *ent
 	/* set some sane pci arbitrition values */
 	saa7146_write(dev, PCI_BT_V1, 0x1c00101f); 
 
-	/* TODO: use the status code of the callback */
-
+	if( 0 != ext->probe) {
+		if( 0 != ext->probe(dev) ) {
+			DEB_D(("ext->probe() failed for %p. skipping device.\n",dev));
 			err = -ENODEV;
-
-	if (ext->probe && ext->probe(dev)) {
-		DEB_D(("ext->probe() failed for %p. skipping device.\n",dev));
-		goto err_free_i2c;
+			goto probe_error;
+		}
 	}
 
-	if (ext->attach(dev, pci_ext)) {
+	if( 0 != ext->attach(dev,pci_ext) ) {
 		DEB_D(("ext->attach() failed for %p. skipping device.\n",dev));
-		goto err_unprobe;
+			err = -ENODEV;
+			goto attach_error;
 	}
 
 	INIT_LIST_HEAD(&dev->item);
@@ -456,46 +463,30 @@ static int saa7146_init_one(struct pci_dev *pci, const struct pci_device_id *ent
 	saa7146_num++;
 
 	err = 0;
+	goto out;
+attach_error:
+probe_error:
+	pci_set_drvdata(pci,NULL);
+	pci_free_consistent(dev->pci, SAA7146_RPS_MEM, dev->d_i2c.cpu_addr, dev->d_i2c.dma_handle);
+kmalloc_error_3:
+	pci_free_consistent(dev->pci, SAA7146_RPS_MEM, dev->d_rps1.cpu_addr, dev->d_rps1.dma_handle);
+kmalloc_error_2:
+	pci_free_consistent(dev->pci, SAA7146_RPS_MEM, dev->d_rps0.cpu_addr, dev->d_rps0.dma_handle);
+kmalloc_error_1:
+	free_irq(dev->pci->irq, (void *)dev);
+irq_error:
+	iounmap(dev->mem);
+ioremap_error:
+        release_mem_region(adr,len);
+pci_error:
+	kfree(dev);
 out:
 	return err;
-
-err_unprobe:
-	pci_set_drvdata(pci,NULL);
-err_free_i2c:
-	pci_free_consistent(pci, SAA7146_RPS_MEM, dev->d_i2c.cpu_addr,
-			    dev->d_i2c.dma_handle);
-err_free_rps1:
-	pci_free_consistent(pci, SAA7146_RPS_MEM, dev->d_rps1.cpu_addr,
-			    dev->d_rps1.dma_handle);
-err_free_rps0:
-	pci_free_consistent(pci, SAA7146_RPS_MEM, dev->d_rps0.cpu_addr,
-			    dev->d_rps0.dma_handle);
-err_free_irq:
-	free_irq(pci->irq, (void *)dev);
-err_unmap:
-	iounmap(dev->mem);
-err_release:
-	pci_release_region(pci, 0);
-err_disable:
-	pci_disable_device(pci);
-err_free:
-	kfree(dev);
-	goto out;
 }
 
 static void saa7146_remove_one(struct pci_dev *pdev)
 {
-	struct saa7146_dev* dev = pci_get_drvdata(pdev);
-	struct {
-		void *addr;
-		dma_addr_t dma;
-	} dev_map[] = {
-		{ dev->d_i2c.cpu_addr, dev->d_i2c.dma_handle },
-		{ dev->d_rps1.cpu_addr, dev->d_rps1.dma_handle },
-		{ dev->d_rps0.cpu_addr, dev->d_rps0.dma_handle },
-		{ NULL, 0 }
-	}, *p;
-
+	struct saa7146_dev* dev = (struct saa7146_dev*) pci_get_drvdata(pdev);
 	DEB_EE(("dev:%p\n",dev));
 
 	dev->ext->detach(dev);
@@ -506,15 +497,17 @@ static void saa7146_remove_one(struct pci_dev *pdev)
 	/* disable all irqs, release irq-routine */
 	saa7146_write(dev, IER, 0);
 
-	free_irq(pdev->irq, dev);
+	free_irq(dev->pci->irq, (void *)dev);
 
-	for (p = dev_map; p->addr; p++)
-		pci_free_consistent(pdev, SAA7146_RPS_MEM, p->addr, p->dma);
+	/* free kernel memory */
+	pci_free_consistent(dev->pci, SAA7146_RPS_MEM, dev->d_i2c.cpu_addr, dev->d_i2c.dma_handle);
+	pci_free_consistent(dev->pci, SAA7146_RPS_MEM, dev->d_rps1.cpu_addr, dev->d_rps1.dma_handle);
+	pci_free_consistent(dev->pci, SAA7146_RPS_MEM, dev->d_rps0.cpu_addr, dev->d_rps0.dma_handle);
 
 	iounmap(dev->mem);
-	pci_release_region(pdev, 0);
+	release_mem_region(pci_resource_start(dev->pci,0), pci_resource_len(dev->pci,0));
+
 	list_del(&dev->item);
-	pci_disable_device(pdev);
 	kfree(dev);
 
 	saa7146_num--;

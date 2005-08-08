@@ -7,7 +7,6 @@
 #include "asm/elf.h"
 #include "asm/ptrace.h"
 #include "asm/uaccess.h"
-#include "asm/unistd.h"
 #include "ptrace_user.h"
 #include "sysdep/sigcontext.h"
 #include "sysdep/sc.h"
@@ -24,12 +23,11 @@ int is_syscall(unsigned long addr)
 
 	n = copy_from_user(&instr, (void *) addr, sizeof(instr));
 	if(n){
-		printk("is_syscall : failed to read instruction from 0x%lx\n",
+		printk("is_syscall : failed to read instruction from 0x%lu\n", 
 		       addr);
 		return(0);
 	}
-	/* int 0x80 or sysenter */
-	return((instr == 0x80cd) || (instr == 0x340f));
+	return(instr == 0x80cd);
 }
 
 /* determines which flags the user has access to. */

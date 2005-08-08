@@ -20,7 +20,6 @@
 
 #include <linux/config.h>
 #include <linux/kernel.h>
-#include <linux/syscalls.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/percpu.h>
@@ -38,12 +37,40 @@
 #include <linux/bio.h>
 #include <linux/notifier.h>
 #include <linux/cpu.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 
 static int fsync_buffers_list(spinlock_t *lock, struct list_head *list);
 static void invalidate_bh_lrus(void);
 
 #define BH_ENTRY(list) list_entry((list), struct buffer_head, b_assoc_buffers)
+
+struct bh_wait_queue {
+	struct buffer_head *bh;
+	wait_queue_t wait;
+};
+
+#define __DEFINE_BH_WAIT(name, b, f)					\
+	struct bh_wait_queue name = {					\
+		.bh	= b,						\
+		.wait	= {						\
+				.task	= current,			\
+				.flags	= f,				\
+				.func	= bh_wake_function,		\
+				.task_list =				\
+					LIST_HEAD_INIT(name.wait.task_list),\
+			},						\
+	}
+#define DEFINE_BH_WAIT(name, bh)	__DEFINE_BH_WAIT(name, bh, 0)
+#define DEFINE_BH_WAIT_EXCLUSIVE(name, bh) \
+		__DEFINE_BH_WAIT(name, bh, WQ_FLAG_EXCLUSIVE)
+
+/*
+ * Hashed waitqueue_head's for wait_on_buffer()
+ */
+#define BH_WAIT_TABLE_ORDER	7
+static struct bh_wait_queue_head {
+	wait_queue_head_t wqh;
+} ____cacheline_aligned_in_smp bh_wait_queue_heads[1<<BH_WAIT_TABLE_ORDER];
 
 inline void
 init_buffer(struct buffer_head *bh, bh_end_io_t *handler, void *private)
@@ -52,24 +79,63 @@ init_buffer(struct buffer_head *bh, bh_end_io_t *handler, void *private)
 	bh->b_private = private;
 }
 
-static int sync_buffer(void *word)
+/*
+ * Return the address of the waitqueue_head to be used for this
+ * buffer_head
+ */
+wait_queue_head_t *bh_waitq_head(struct buffer_head *bh)
+{
+	return &bh_wait_queue_heads[hash_ptr(bh, BH_WAIT_TABLE_ORDER)].wqh;
+}
+EXPORT_SYMBOL(bh_waitq_head);
+
+void wake_up_buffer(struct buffer_head *bh)
+{
+	wait_queue_head_t *wq = bh_waitq_head(bh);
+
+	smp_mb();
+	if (waitqueue_active(wq))
+		__wake_up(wq, TASK_INTERRUPTIBLE|TASK_UNINTERRUPTIBLE, 1, bh);
+}
+EXPORT_SYMBOL(wake_up_buffer);
+
+static int bh_wake_function(wait_queue_t *wait, unsigned mode,
+				int sync, void *key)
+{
+	struct buffer_head *bh = key;
+	struct bh_wait_queue *wq;
+
+	wq = container_of(wait, struct bh_wait_queue, wait);
+	if (wq->bh != bh || buffer_locked(bh))
+		return 0;
+	else
+		return autoremove_wake_function(wait, mode, sync, key);
+}
+
+static void sync_buffer(struct buffer_head *bh)
 {
 	struct block_device *bd;
-	struct buffer_head *bh
-		= container_of(word, struct buffer_head, b_state);
 
 	smp_mb();
 	bd = bh->b_bdev;
 	if (bd)
 		blk_run_address_space(bd->bd_inode->i_mapping);
-	io_schedule();
-	return 0;
 }
 
 void fastcall __lock_buffer(struct buffer_head *bh)
 {
-	wait_on_bit_lock(&bh->b_state, BH_Lock, sync_buffer,
-							TASK_UNINTERRUPTIBLE);
+	wait_queue_head_t *wqh = bh_waitq_head(bh);
+	DEFINE_BH_WAIT_EXCLUSIVE(wait, bh);
+
+	do {
+		prepare_to_wait_exclusive(wqh, &wait.wait,
+					TASK_UNINTERRUPTIBLE);
+		if (buffer_locked(bh)) {
+			sync_buffer(bh);
+			io_schedule();
+		}
+	} while (test_set_buffer_locked(bh));
+	finish_wait(wqh, &wait.wait);
 }
 EXPORT_SYMBOL(__lock_buffer);
 
@@ -77,7 +143,7 @@ void fastcall unlock_buffer(struct buffer_head *bh)
 {
 	clear_buffer_locked(bh);
 	smp_mb__after_clear_bit();
-	wake_up_bit(&bh->b_state, BH_Lock);
+	wake_up_buffer(bh);
 }
 
 /*
@@ -87,7 +153,25 @@ void fastcall unlock_buffer(struct buffer_head *bh)
  */
 void __wait_on_buffer(struct buffer_head * bh)
 {
-	wait_on_bit(&bh->b_state, BH_Lock, sync_buffer, TASK_UNINTERRUPTIBLE);
+	wait_queue_head_t *wqh = bh_waitq_head(bh);
+	DEFINE_BH_WAIT(wait, bh);
+
+	do {
+		prepare_to_wait(wqh, &wait.wait, TASK_UNINTERRUPTIBLE);
+		if (buffer_locked(bh)) {
+			sync_buffer(bh);
+			io_schedule();
+		}
+	} while (buffer_locked(bh));
+	finish_wait(wqh, &wait.wait);
+}
+
+static void
+__set_page_buffers(struct page *page, struct buffer_head *head)
+{
+	page_cache_get(page);
+	SetPagePrivate(page);
+	page->private = (unsigned long)head;
 }
 
 static void
@@ -1015,8 +1099,8 @@ int remove_inode_buffers(struct inode *inode)
  * The retry flag is used to differentiate async IO (paging, swapping)
  * which may not fail from ordinary buffer allocations.
  */
-struct buffer_head *alloc_page_buffers(struct page *page, unsigned long size,
-		int retry)
+static struct buffer_head *
+create_buffers(struct page * page, unsigned long size, int retry)
 {
 	struct buffer_head *bh, *head;
 	long offset;
@@ -1074,7 +1158,6 @@ no_grow:
 	free_more_memory();
 	goto try_again;
 }
-EXPORT_SYMBOL_GPL(alloc_page_buffers);
 
 static inline void
 link_dev_buffers(struct page *page, struct buffer_head *head)
@@ -1087,7 +1170,7 @@ link_dev_buffers(struct page *page, struct buffer_head *head)
 		bh = bh->b_this_page;
 	} while (bh);
 	tail->b_this_page = head;
-	attach_page_buffers(page, head);
+	__set_page_buffers(page, head);
 }
 
 /*
@@ -1148,7 +1231,7 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	/*
 	 * Allocate some buffers for this page
 	 */
-	bh = alloc_page_buffers(page, size, 0);
+	bh = create_buffers(page, size, 0);
 	if (!bh)
 		goto failed;
 
@@ -1654,7 +1737,7 @@ void create_empty_buffers(struct page *page,
 {
 	struct buffer_head *bh, *head, *tail;
 
-	head = alloc_page_buffers(page, blocksize, 1);
+	head = create_buffers(page, blocksize, 1);
 	bh = head;
 	do {
 		bh->b_state |= b_state;
@@ -1674,7 +1757,7 @@ void create_empty_buffers(struct page *page,
 			bh = bh->b_this_page;
 		} while (bh != head);
 	}
-	attach_page_buffers(page, head);
+	__set_page_buffers(page, head);
 	spin_unlock(&page->mapping->private_lock);
 }
 EXPORT_SYMBOL(create_empty_buffers);
@@ -2159,7 +2242,7 @@ int generic_cont_expand(struct inode *inode, loff_t size)
 	int err;
 
 	err = -EFBIG;
-        limit = current->signal->rlim[RLIMIT_FSIZE].rlim_cur;
+        limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
 	if (limit != RLIM_INFINITY && size > (loff_t)limit) {
 		send_sig(SIGXFSZ, current, 0);
 		goto out;
@@ -2234,7 +2317,8 @@ int cont_prepare_write(struct page *page, unsigned offset,
 		memset(kaddr+zerofrom, 0, PAGE_CACHE_SIZE-zerofrom);
 		flush_dcache_page(new_page);
 		kunmap_atomic(kaddr, KM_USER0);
-		generic_commit_write(NULL, new_page, zerofrom, PAGE_CACHE_SIZE);
+		__block_commit_write(inode, new_page,
+				zerofrom, PAGE_CACHE_SIZE);
 		unlock_page(new_page);
 		page_cache_release(new_page);
 	}
@@ -3048,11 +3132,14 @@ static int buffer_cpu_notify(struct notifier_block *self,
 
 void __init buffer_init(void)
 {
+	int i;
 	int nrpages;
 
 	bh_cachep = kmem_cache_create("buffer_head",
 			sizeof(struct buffer_head), 0,
 			SLAB_PANIC, init_buffer_head, NULL);
+	for (i = 0; i < ARRAY_SIZE(bh_wait_queue_heads); i++)
+		init_waitqueue_head(&bh_wait_queue_heads[i].wqh);
 
 	/*
 	 * Limit the bh occupancy to 10% of ZONE_NORMAL

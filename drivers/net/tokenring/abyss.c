@@ -457,7 +457,14 @@ static struct pci_driver abyss_driver = {
 
 static int __init abyss_init (void)
 {
-	return pci_register_driver(&abyss_driver);
+	int rc = pci_register_driver (&abyss_driver);
+	if (rc < 0)
+		return rc;
+	if (rc == 0) {
+		pci_unregister_driver (&abyss_driver);
+		return -ENODEV;
+	}
+	return 0;
 }
 
 static void __exit abyss_rmmod (void)

@@ -18,7 +18,6 @@
 #include <linux/time.h>
 #include <linux/timex.h>
 #include <linux/bcd.h>
-#include <linux/mc146818rtc.h>
 
 #include <asm/machdep.h>
 #include <asm/io.h>
@@ -48,6 +47,8 @@
  * 	 we set the 'R' bit before reading them, they basically stop counting.
  * 	 					--MAG
  */
+
+extern spinlock_t	rtc_lock;
 
 /*
  * 'todc_info' should be initialized in your *_setup.c file to
@@ -81,13 +82,13 @@
 u_char
 todc_direct_read_val(int addr)
 {
-	return readb((void __iomem *)(todc_info->nvram_data + addr));
+	return readb(todc_info->nvram_data + addr);
 }
 
 void
 todc_direct_write_val(int addr, unsigned char val)
 {
-	writeb(val, (void __iomem *)(todc_info->nvram_data + addr));
+	writeb(val, todc_info->nvram_data + addr);
 	return;
 }
 

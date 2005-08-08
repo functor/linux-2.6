@@ -762,7 +762,8 @@ icn_check_loader(int cardnumber)
 #ifdef BOOT_DEBUG
 			printk(KERN_DEBUG "Loader %d TO?\n", cardnumber);
 #endif
-			msleep_interruptible(ICN_BOOT_TIMEOUT1);
+			current->state = TASK_INTERRUPTIBLE;
+			schedule_timeout(ICN_BOOT_TIMEOUT1);
 		} else {
 #ifdef BOOT_DEBUG
 			printk(KERN_DEBUG "Loader %d OK\n", cardnumber);
@@ -787,7 +788,8 @@ icn_check_loader(int cardnumber)
 int slsec = sec; \
   printk(KERN_DEBUG "SLEEP(%d)\n",slsec); \
   while (slsec) { \
-    msleep_interruptible(1000); \
+    current->state = TASK_INTERRUPTIBLE; \
+    schedule_timeout(HZ); \
     slsec--; \
   } \
 }
@@ -948,7 +950,7 @@ icn_loadproto(u_char __user * buffer, icn_card * card)
 				icn_maprelease_channel(card, 0);
 				return -EIO;
 			}
-			set_current_state(TASK_INTERRUPTIBLE);
+			current->state = TASK_INTERRUPTIBLE;
 			schedule_timeout(10);
 		}
 	}
@@ -972,7 +974,8 @@ icn_loadproto(u_char __user * buffer, icn_card * card)
 #ifdef BOOT_DEBUG
 			printk(KERN_DEBUG "Proto TO?\n");
 #endif
-			msleep_interruptible(ICN_BOOT_TIMEOUT1);
+			current->state = TASK_INTERRUPTIBLE;
+			schedule_timeout(ICN_BOOT_TIMEOUT1);
 		} else {
 			if ((card->secondhalf) || (!card->doubleS0)) {
 #ifdef BOOT_DEBUG
@@ -1268,9 +1271,9 @@ icn_command(isdn_ctrl * c, icn_card * card)
 						if (!card->leased) {
 							card->leased = 1;
 							while (card->ptype == ISDN_PTYPE_UNKNOWN) {
-								msleep_interruptible(ICN_BOOT_TIMEOUT1);
+								schedule_timeout(ICN_BOOT_TIMEOUT1);
 							}
-							msleep_interruptible(ICN_BOOT_TIMEOUT1);
+							schedule_timeout(ICN_BOOT_TIMEOUT1);
 							sprintf(cbuf, "00;FV2ON\n01;EAZ%c\n02;EAZ%c\n",
 								(a & 1)?'1':'C', (a & 2)?'2':'C');
 							i = icn_writecmd(cbuf, strlen(cbuf), 0, card);

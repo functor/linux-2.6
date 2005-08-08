@@ -98,9 +98,6 @@ static struct usb_serial_device_type edgeport_2port_device = {
 	.write_room		= edge_write_room,
 	.chars_in_buffer	= edge_chars_in_buffer,
 	.break_ctl		= edge_break,
-	.read_int_callback	= edge_interrupt_callback,
-	.read_bulk_callback	= edge_bulk_in_callback,
-	.write_bulk_callback	= edge_bulk_out_data_callback,
 };
 
 static struct usb_serial_device_type edgeport_4port_device = {
@@ -126,9 +123,6 @@ static struct usb_serial_device_type edgeport_4port_device = {
 	.write_room		= edge_write_room,
 	.chars_in_buffer	= edge_chars_in_buffer,
 	.break_ctl		= edge_break,
-	.read_int_callback	= edge_interrupt_callback,
-	.read_bulk_callback	= edge_bulk_in_callback,
-	.write_bulk_callback	= edge_bulk_out_data_callback,
 };
 
 static struct usb_serial_device_type edgeport_8port_device = {
@@ -154,9 +148,6 @@ static struct usb_serial_device_type edgeport_8port_device = {
 	.write_room		= edge_write_room,
 	.chars_in_buffer	= edge_chars_in_buffer,
 	.break_ctl		= edge_break,
-	.read_int_callback	= edge_interrupt_callback,
-	.read_bulk_callback	= edge_bulk_in_callback,
-	.write_bulk_callback	= edge_bulk_out_data_callback,
 };
 
 #endif

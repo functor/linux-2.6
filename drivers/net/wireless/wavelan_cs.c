@@ -502,7 +502,7 @@ unsigned char WAVELAN_BEACON_ADDRESS[]= {0x09,0x00,0x0e,0x20,0x03,0x00};
   
 void wv_roam_init(struct net_device *dev)
 {
-  net_local  *lp= netdev_priv(dev);
+  net_local  *lp= (net_local *)dev->priv;
 
   /* Do not remove this unless you have a good reason */
   printk(KERN_NOTICE "%s: Warning, you have enabled roaming on"
@@ -532,7 +532,7 @@ void wv_roam_init(struct net_device *dev)
 void wv_roam_cleanup(struct net_device *dev)
 {
   wavepoint_history *ptr,*old_ptr;
-  net_local *lp= netdev_priv(dev);
+  net_local *lp= (net_local *)dev->priv;
   
   printk(KERN_DEBUG "WaveLAN: Roaming Disabled on device %s\n",dev->name);
   
@@ -762,7 +762,7 @@ static inline void wl_roam_gather(struct net_device *  dev,
   unsigned short nwid=ntohs(beacon->nwid);  
   unsigned short sigqual=stats[2] & MMR_SGNL_QUAL;   /* SNR of beacon */
   wavepoint_history *wavepoint=NULL;                /* WavePoint table entry */
-  net_local *lp = netdev_priv(dev);              /* Device info */
+  net_local *lp=(net_local *)dev->priv;              /* Device info */
 
 #ifdef I_NEED_THIS_FEATURE
   /* Some people don't need this, some other may need it */
@@ -1006,7 +1006,7 @@ read_ringbuf(struct net_device *	dev,
 static inline void
 wv_82593_reconfig(struct net_device *	dev)
 {
-  net_local *		lp = netdev_priv(dev);
+  net_local *		lp = (net_local *)dev->priv;
   dev_link_t *		link = lp->link;
   unsigned long		flags;
 
@@ -1135,7 +1135,7 @@ static void
 wv_mmc_show(struct net_device *	dev)
 {
   ioaddr_t	base = dev->base_addr;
-  net_local *	lp = netdev_priv(dev);
+  net_local *	lp = (net_local *)dev->priv;
   mmr_t		m;
 
   /* Basic check */
@@ -1224,7 +1224,7 @@ wv_mmc_show(struct net_device *	dev)
 static void
 wv_ru_show(struct net_device *	dev)
 {
-  net_local *lp = netdev_priv(dev);
+  net_local *lp = (net_local *) dev->priv;
 
   printk(KERN_DEBUG "##### wavelan i82593 receiver status: #####\n");
   printk(KERN_DEBUG "ru: rfp %d stop %d", lp->rfp, lp->stop);
@@ -1258,7 +1258,9 @@ wv_dev_show(struct net_device *	dev)
 static void
 wv_local_show(struct net_device *	dev)
 {
-  net_local *lp = netdev_priv(dev);
+  net_local *lp;
+
+  lp = (net_local *)dev->priv;
 
   printk(KERN_DEBUG "local:");
   /*
@@ -1416,7 +1418,7 @@ wavelan_get_stats(struct net_device *	dev)
   printk(KERN_DEBUG "%s: <>wavelan_get_stats()\n", dev->name);
 #endif
 
-  return(&((net_local *)netdev_priv(dev))->stats);
+  return(&((net_local *) dev->priv)->stats);
 }
 
 /*------------------------------------------------------------------*/
@@ -1431,7 +1433,7 @@ wavelan_get_stats(struct net_device *	dev)
 static void
 wavelan_set_multicast_list(struct net_device *	dev)
 {
-  net_local *	lp = netdev_priv(dev);
+  net_local *	lp = (net_local *) dev->priv;
 
 #ifdef DEBUG_IOCTL_TRACE
   printk(KERN_DEBUG "%s: ->wavelan_set_multicast_list()\n", dev->name);
@@ -1548,6 +1550,7 @@ wavelan_set_mac_address(struct net_device *	dev,
 /*
  * Frequency setting (for hardware able of it)
  * It's a bit complicated and you don't really want to look into it...
+ * (called in wavelan_ioctl)
  */
 static inline int
 wv_set_frequency(u_long		base,	/* i/o port of the card */
@@ -1823,7 +1826,7 @@ static inline void
 wl_his_gather(struct net_device *	dev,
 	      u_char *	stats)		/* Statistics to gather */
 {
-  net_local *	lp = netdev_priv(dev);
+  net_local *	lp = (net_local *) dev->priv;
   u_char	level = stats[0] & MMR_SIGNAL_LVL;
   int		i;
 
@@ -1837,14 +1840,27 @@ wl_his_gather(struct net_device *	dev,
 }
 #endif	/* HISTOGRAM */
 
-static void wl_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
+static inline int
+wl_netdev_ethtool_ioctl(struct net_device *dev, void __user *useraddr)
 {
-	strncpy(info->driver, "wavelan_cs", sizeof(info->driver)-1);
-}
+	u32 ethcmd;
 
-static struct ethtool_ops ops = {
-	.get_drvinfo = wl_get_drvinfo
-};
+	if (copy_from_user(&ethcmd, useraddr, sizeof(ethcmd)))
+		return -EFAULT;
+
+	switch (ethcmd) {
+	case ETHTOOL_GDRVINFO: {
+		struct ethtool_drvinfo info = {ETHTOOL_GDRVINFO};
+
+		strncpy(info.driver, "wavelan_cs", sizeof(info.driver)-1);
+		if (copy_to_user(useraddr, &info, sizeof(info)))
+			return -EFAULT;
+		return 0;
+	}
+	}
+
+	return -EOPNOTSUPP;
+}
 
 /*------------------------------------------------------------------*/
 /*
@@ -1869,7 +1885,7 @@ static int wavelan_set_nwid(struct net_device *dev,
 			    char *extra)
 {
 	ioaddr_t base = dev->base_addr;
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	psa_t psa;
 	mm_t m;
 	unsigned long flags;
@@ -1927,7 +1943,7 @@ static int wavelan_get_nwid(struct net_device *dev,
 			    union iwreq_data *wrqu,
 			    char *extra)
 {
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	psa_t psa;
 	unsigned long flags;
 	int ret = 0;
@@ -1959,7 +1975,7 @@ static int wavelan_set_freq(struct net_device *dev,
 			    char *extra)
 {
 	ioaddr_t base = dev->base_addr;
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	unsigned long flags;
 	int ret;
 
@@ -1989,7 +2005,7 @@ static int wavelan_get_freq(struct net_device *dev,
 			    char *extra)
 {
 	ioaddr_t base = dev->base_addr;
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	psa_t psa;
 	unsigned long flags;
 	int ret = 0;
@@ -2035,7 +2051,7 @@ static int wavelan_set_sens(struct net_device *dev,
 			    char *extra)
 {
 	ioaddr_t base = dev->base_addr;
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	psa_t psa;
 	unsigned long flags;
 	int ret = 0;
@@ -2070,7 +2086,7 @@ static int wavelan_get_sens(struct net_device *dev,
 			    union iwreq_data *wrqu,
 			    char *extra)
 {
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	psa_t psa;
 	unsigned long flags;
 	int ret = 0;
@@ -2101,7 +2117,7 @@ static int wavelan_set_encode(struct net_device *dev,
 			      char *extra)
 {
 	ioaddr_t base = dev->base_addr;
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	unsigned long flags;
 	psa_t psa;
 	int ret = 0;
@@ -2171,7 +2187,7 @@ static int wavelan_get_encode(struct net_device *dev,
 			      char *extra)
 {
 	ioaddr_t base = dev->base_addr;
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	psa_t psa;
 	unsigned long flags;
 	int ret = 0;
@@ -2218,7 +2234,7 @@ static int wavelan_set_essid(struct net_device *dev,
 			     union iwreq_data *wrqu,
 			     char *extra)
 {
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	unsigned long flags;
 	int ret = 0;
 
@@ -2266,7 +2282,7 @@ static int wavelan_get_essid(struct net_device *dev,
 			     union iwreq_data *wrqu,
 			     char *extra)
 {
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 
 	/* Is the domain ID active ? */
 	wrqu->data.flags = lp->filter_domains;
@@ -2331,7 +2347,7 @@ static int wavelan_set_mode(struct net_device *dev,
 			    union iwreq_data *wrqu,
 			    char *extra)
 {
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	unsigned long flags;
 	int ret = 0;
 
@@ -2390,7 +2406,7 @@ static int wavelan_get_range(struct net_device *dev,
 			     char *extra)
 {
 	ioaddr_t base = dev->base_addr;
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	struct iw_range *range = (struct iw_range *) extra;
 	unsigned long flags;
 	int ret = 0;
@@ -2421,12 +2437,6 @@ static int wavelan_get_range(struct net_device *dev,
 
 	range->num_bitrates = 1;
 	range->bitrate[0] = 2000000;	/* 2 Mb/s */
-
-	/* Event capability (kernel + driver) */
-	range->event_capa[0] = (IW_EVENT_CAPA_MASK(0x8B02) |
-				IW_EVENT_CAPA_MASK(0x8B04) |
-				IW_EVENT_CAPA_MASK(0x8B06));
-	range->event_capa[1] = IW_EVENT_CAPA_K_1;
 
 	/* Disable interrupts and save flags. */
 	spin_lock_irqsave(&lp->spinlock, flags);
@@ -2466,7 +2476,7 @@ static int wavelan_set_qthr(struct net_device *dev,
 			    char *extra)
 {
 	ioaddr_t base = dev->base_addr;
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	psa_t psa;
 	unsigned long flags;
 
@@ -2497,7 +2507,7 @@ static int wavelan_get_qthr(struct net_device *dev,
 			    union iwreq_data *wrqu,
 			    char *extra)
 {
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	psa_t psa;
 	unsigned long flags;
 
@@ -2525,7 +2535,7 @@ static int wavelan_set_roam(struct net_device *dev,
 			    union iwreq_data *wrqu,
 			    char *extra)
 {
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 	unsigned long flags;
 
 	/* Disable interrupts and save flags. */
@@ -2570,7 +2580,7 @@ static int wavelan_set_histo(struct net_device *dev,
 			     union iwreq_data *wrqu,
 			     char *extra)
 {
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 
 	/* Check the number of intervals. */
 	if (wrqu->data.length > 16) {
@@ -2613,7 +2623,7 @@ static int wavelan_get_histo(struct net_device *dev,
 			     union iwreq_data *wrqu,
 			     char *extra)
 {
-	net_local *lp = netdev_priv(dev);
+	net_local *lp = (net_local *) dev->priv;	/* lp is not unused */
 
 	/* Set the number of intervals. */
 	wrqu->data.length = lp->his_number;
@@ -2727,11 +2737,47 @@ static const struct iw_handler_def	wavelan_handler_def =
 	.num_standard	= sizeof(wavelan_handler)/sizeof(iw_handler),
 	.num_private	= sizeof(wavelan_private_handler)/sizeof(iw_handler),
 	.num_private_args = sizeof(wavelan_private_args)/sizeof(struct iw_priv_args),
-	.standard	= wavelan_handler,
-	.private	= wavelan_private_handler,
-	.private_args	= wavelan_private_args,
-	.get_wireless_stats = wavelan_get_wireless_stats,
+	.standard	= (iw_handler *) wavelan_handler,
+	.private	= (iw_handler *) wavelan_private_handler,
+	.private_args	= (struct iw_priv_args *) wavelan_private_args,
+	.spy_offset	= ((void *) (&((net_local *) NULL)->spy_data) -
+			   (void *) NULL),
 };
+
+/*------------------------------------------------------------------*/
+/*
+ * Perform ioctl : config & info stuff
+ * This is here that are treated the wireless extensions (iwconfig)
+ */
+static int
+wavelan_ioctl(struct net_device *	dev,	/* Device on wich the ioctl apply */
+	      struct ifreq *	rq,	/* Data passed */
+	      int		cmd)	/* Ioctl number */
+{
+  int			ret = 0;
+
+#ifdef DEBUG_IOCTL_TRACE
+  printk(KERN_DEBUG "%s: ->wavelan_ioctl(cmd=0x%X)\n", dev->name, cmd);
+#endif
+
+  /* Look what is the request */
+  switch(cmd)
+    {
+    case SIOCETHTOOL:
+      ret = wl_netdev_ethtool_ioctl(dev, rq->ifr_data);
+      break;
+
+      /* ------------------- OTHER IOCTL ------------------- */
+
+    default:
+      ret = -EOPNOTSUPP;
+    }
+
+#ifdef DEBUG_IOCTL_TRACE
+  printk(KERN_DEBUG "%s: <-wavelan_ioctl()\n", dev->name);
+#endif
+  return ret;
+}
 
 /*------------------------------------------------------------------*/
 /*
@@ -2742,7 +2788,7 @@ static iw_stats *
 wavelan_get_wireless_stats(struct net_device *	dev)
 {
   ioaddr_t		base = dev->base_addr;
-  net_local *		lp = netdev_priv(dev);
+  net_local *		lp = (net_local *) dev->priv;
   mmr_t			m;
   iw_stats *		wstats;
   unsigned long		flags;
@@ -2867,7 +2913,7 @@ wv_packet_read(struct net_device *		dev,
 	       int		fd_p,
 	       int		sksize)
 {
-  net_local *		lp = netdev_priv(dev);
+  net_local *		lp = (net_local *) dev->priv;
   struct sk_buff *	skb;
 
 #ifdef DEBUG_RX_TRACE
@@ -2969,7 +3015,7 @@ static inline void
 wv_packet_rcv(struct net_device *	dev)
 {
   ioaddr_t	base = dev->base_addr;
-  net_local *	lp = netdev_priv(dev);
+  net_local *	lp = (net_local *) dev->priv;
   int		newrfp;
   int		rp;
   int		len;
@@ -3104,7 +3150,7 @@ wv_packet_write(struct net_device *	dev,
 		void *		buf,
 		short		length)
 {
-  net_local *		lp = netdev_priv(dev);
+  net_local *		lp = (net_local *) dev->priv;
   ioaddr_t		base = dev->base_addr;
   unsigned long		flags;
   int			clen = length;
@@ -3165,7 +3211,7 @@ static int
 wavelan_packet_xmit(struct sk_buff *	skb,
 		    struct net_device *		dev)
 {
-  net_local *		lp = netdev_priv(dev);
+  net_local *		lp = (net_local *)dev->priv;
   unsigned long		flags;
 
 #ifdef DEBUG_TX_TRACE
@@ -3424,7 +3470,7 @@ static int
 wv_ru_stop(struct net_device *	dev)
 {
   ioaddr_t	base = dev->base_addr;
-  net_local *	lp = netdev_priv(dev);
+  net_local *	lp = (net_local *) dev->priv;
   unsigned long	flags;
   int		status;
   int		spin;
@@ -3487,7 +3533,7 @@ static int
 wv_ru_start(struct net_device *	dev)
 {
   ioaddr_t	base = dev->base_addr;
-  net_local *	lp = netdev_priv(dev);
+  net_local *	lp = (net_local *) dev->priv;
   unsigned long	flags;
 
 #ifdef DEBUG_CONFIG_TRACE
@@ -3575,7 +3621,7 @@ static int
 wv_82593_config(struct net_device *	dev)
 {
   ioaddr_t			base = dev->base_addr;
-  net_local *			lp = netdev_priv(dev);
+  net_local *			lp = (net_local *) dev->priv;
   struct i82593_conf_block	cfblk;
   int				ret = TRUE;
 
@@ -3750,7 +3796,7 @@ wv_pcmcia_reset(struct net_device *	dev)
 {
   int		i;
   conf_reg_t	reg = { 0, CS_READ, CISREG_COR, 0 };
-  dev_link_t *	link = ((net_local *)netdev_priv(dev))->link;
+  dev_link_t *	link = ((net_local *) dev->priv)->link;
 
 #ifdef DEBUG_CONFIG_TRACE
   printk(KERN_DEBUG "%s: ->wv_pcmcia_reset()\n", dev->name);
@@ -3810,7 +3856,7 @@ wv_pcmcia_reset(struct net_device *	dev)
 static int
 wv_hw_config(struct net_device *	dev)
 {
-  net_local *		lp = netdev_priv(dev);
+  net_local *		lp = (net_local *) dev->priv;
   ioaddr_t		base = dev->base_addr;
   unsigned long		flags;
   int			ret = FALSE;
@@ -3917,7 +3963,7 @@ wv_hw_config(struct net_device *	dev)
 static inline void
 wv_hw_reset(struct net_device *	dev)
 {
-  net_local *	lp = netdev_priv(dev);
+  net_local *	lp = (net_local *) dev->priv;
 
 #ifdef DEBUG_CONFIG_TRACE
   printk(KERN_DEBUG "%s: ->wv_hw_reset()\n", dev->name);
@@ -4085,8 +4131,8 @@ wv_pcmcia_config(dev_link_t *	link)
       return FALSE;
     }
 
-  strcpy(((net_local *) netdev_priv(dev))->node.dev_name, dev->name);
-  link->dev = &((net_local *) netdev_priv(dev))->node;
+  strcpy(((net_local *) dev->priv)->node.dev_name, dev->name);
+  link->dev = &((net_local *) dev->priv)->node;
 
 #ifdef DEBUG_CONFIG_TRACE
   printk(KERN_DEBUG "<-wv_pcmcia_config()\n");
@@ -4157,7 +4203,7 @@ wavelan_interrupt(int		irq,
   printk(KERN_DEBUG "%s: ->wavelan_interrupt()\n", dev->name);
 #endif
 
-  lp = netdev_priv(dev);
+  lp = (net_local *) dev->priv;
   base = dev->base_addr;
 
 #ifdef DEBUG_INTERRUPT_INFO
@@ -4407,7 +4453,7 @@ wavelan_interrupt(int		irq,
 static void
 wavelan_watchdog(struct net_device *	dev)
 {
-  net_local *		lp = netdev_priv(dev);
+  net_local *		lp = (net_local *) dev->priv;
   ioaddr_t		base = dev->base_addr;
   unsigned long		flags;
   int			aborted = FALSE;
@@ -4482,8 +4528,8 @@ wavelan_watchdog(struct net_device *	dev)
 static int
 wavelan_open(struct net_device *	dev)
 {
-  net_local *	lp = netdev_priv(dev);
-  dev_link_t *	link = lp->link;
+  dev_link_t *	link = ((net_local *) dev->priv)->link;
+  net_local *	lp = (net_local *)dev->priv;
   ioaddr_t	base = dev->base_addr;
 
 #ifdef DEBUG_CALLBACK_TRACE
@@ -4537,7 +4583,7 @@ wavelan_open(struct net_device *	dev)
 static int
 wavelan_close(struct net_device *	dev)
 {
-  dev_link_t *	link = ((net_local *)netdev_priv(dev))->link;
+  dev_link_t *	link = ((net_local *) dev->priv)->link;
   ioaddr_t	base = dev->base_addr;
 
 #ifdef DEBUG_CALLBACK_TRACE
@@ -4640,7 +4686,7 @@ wavelan_attach(void)
   }
   link->priv = link->irq.Instance = dev;
 
-  lp = netdev_priv(dev);
+  lp = dev->priv;
 
   /* Init specific data */
   lp->configured = 0;
@@ -4672,12 +4718,11 @@ wavelan_attach(void)
   /* Set the watchdog timer */
   dev->tx_timeout	= &wavelan_watchdog;
   dev->watchdog_timeo	= WATCHDOG_JIFFIES;
-  SET_ETHTOOL_OPS(dev, &ops);
 
 #ifdef WIRELESS_EXT	/* If wireless extension exist in the kernel */
-  dev->wireless_handlers = &wavelan_handler_def;
-  lp->wireless_data.spy_data = &lp->spy_data;
-  dev->wireless_data = &lp->wireless_data;
+  dev->wireless_handlers = (struct iw_handler_def *)&wavelan_handler_def;
+  dev->do_ioctl = wavelan_ioctl;	/* old wireless extensions */
+  dev->get_wireless_stats = wavelan_get_wireless_stats;
 #endif
 
   /* Other specific data */
@@ -4775,8 +4820,8 @@ wavelan_detach(dev_link_t *	link)
       if (link->dev)
 	unregister_netdev(dev);
       link->dev = NULL;
-      ((net_local *)netdev_priv(dev))->link = NULL;
-      ((net_local *)netdev_priv(dev))->dev = NULL;
+      ((net_local *) dev->priv)->link = NULL;
+      ((net_local *) dev->priv)->dev = NULL;
       free_netdev(dev);
     }
   kfree(link);

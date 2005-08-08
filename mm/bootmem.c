@@ -28,11 +28,6 @@ unsigned long max_low_pfn;
 unsigned long min_low_pfn;
 EXPORT_SYMBOL(min_low_pfn);
 unsigned long max_pfn;
-/*
- * If we have booted due to a crash, max_pfn will be a very low value. We need
- * to know the amount of memory that the previous kernel used.
- */
-unsigned long saved_max_pfn;
 
 EXPORT_SYMBOL(max_pfn);		/* This is exported so
 				 * dma_get_required_mask(), which uses
@@ -349,29 +344,31 @@ unsigned long __init free_all_bootmem_node (pg_data_t *pgdat)
 	return(free_all_bootmem_core(pgdat));
 }
 
+#ifndef CONFIG_DISCONTIGMEM
 unsigned long __init init_bootmem (unsigned long start, unsigned long pages)
 {
 	max_low_pfn = pages;
 	min_low_pfn = start;
-	return(init_bootmem_core(NODE_DATA(0), start, 0, pages));
+	return(init_bootmem_core(&contig_page_data, start, 0, pages));
 }
 
 #ifndef CONFIG_HAVE_ARCH_BOOTMEM_NODE
 void __init reserve_bootmem (unsigned long addr, unsigned long size)
 {
-	reserve_bootmem_core(NODE_DATA(0)->bdata, addr, size);
+	reserve_bootmem_core(contig_page_data.bdata, addr, size);
 }
 #endif /* !CONFIG_HAVE_ARCH_BOOTMEM_NODE */
 
 void __init free_bootmem (unsigned long addr, unsigned long size)
 {
-	free_bootmem_core(NODE_DATA(0)->bdata, addr, size);
+	free_bootmem_core(contig_page_data.bdata, addr, size);
 }
 
 unsigned long __init free_all_bootmem (void)
 {
-	return(free_all_bootmem_core(NODE_DATA(0)));
+	return(free_all_bootmem_core(&contig_page_data));
 }
+#endif /* !CONFIG_DISCONTIGMEM */
 
 void * __init __alloc_bootmem (unsigned long size, unsigned long align, unsigned long goal)
 {

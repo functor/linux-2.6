@@ -1,7 +1,7 @@
-/* linux/arch/arm/mach-s3c2410/time.c
+/* linux/include/asm-arm/arch-s3c2410/time.h
  *
- * Copyright (C) 2003,2004 Simtec Electronics
- *	Ben Dooks, <ben@simtec.co.uk>
+ *  Copyright (C) 2003 Simtec Electronics <linux@simtec.co.uk>
+ *    Ben Dooks, <ben@simtec.co.uk>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -34,52 +34,13 @@
 #include <asm/arch/regs-irq.h>
 #include <asm/mach/time.h>
 
-#include "clock.h"
-
 static unsigned long timer_startval;
-static unsigned long timer_usec_ticks;
-
-#define TIMER_USEC_SHIFT 16
-
-/* we use the shifted arithmetic to work out the ratio of timer ticks
- * to usecs, as often the peripheral clock is not a nice even multiple
- * of 1MHz.
- *
- * shift of 14 and 15 are too low for the 12MHz, 16 seems to be ok
- * for the current HZ value of 200 without producing overflows.
- *
- * Original patch by Dimitry Andric, updated by Ben Dooks
-*/
+static unsigned long timer_ticks_usec;
 
 
-/* timer_mask_usec_ticks
- *
- * given a clock and divisor, make the value to pass into timer_ticks_to_usec
- * to scale the ticks into usecs
-*/
+/* with an 12MHz clock, we get 12 ticks per-usec
+ */
 
-static inline unsigned long
-timer_mask_usec_ticks(unsigned long scaler, unsigned long pclk)
-{
-	unsigned long den = pclk / 1000;
-
-	return ((1000 << TIMER_USEC_SHIFT) * scaler + (den >> 1)) / den;
-}
-
-/* timer_ticks_to_usec
- *
- * convert timer ticks to usec.
-*/
-
-static inline unsigned long timer_ticks_to_usec(unsigned long ticks)
-{
-	unsigned long res;
-
-	res = ticks * timer_usec_ticks;
-	res += 1 << (TIMER_USEC_SHIFT - 4);	/* round up slightly */
-
-	return res >> TIMER_USEC_SHIFT;
-}
 
 /***
  * Returns microsecond  since last clock interrupt.  Note that interrupts
@@ -92,31 +53,31 @@ static inline unsigned long timer_ticks_to_usec(unsigned long ticks)
 static unsigned long s3c2410_gettimeoffset (void)
 {
 	unsigned long tdone;
+	unsigned long usec;
 	unsigned long irqpend;
-	unsigned long tval;
 
 	/* work out how many ticks have gone since last timer interrupt */
 
-        tval =  __raw_readl(S3C2410_TCNTO(4));
-	tdone = timer_startval - tval;
+	tdone = timer_startval - __raw_readl(S3C2410_TCNTO(4));
 
 	/* check to see if there is an interrupt pending */
 
 	irqpend = __raw_readl(S3C2410_SRCPND);
 	if (irqpend & SRCPND_TIMER4) {
 		/* re-read the timer, and try and fix up for the missed
-		 * interrupt. Note, the interrupt may go off before the
-		 * timer has re-loaded from wrapping.
-		 */
+		 * interrupt */
 
-		tval =  __raw_readl(S3C2410_TCNTO(4));
-		tdone = timer_startval - tval;
-
-		if (tval != 0)
-			tdone += timer_startval;
+		tdone = timer_startval - __raw_readl(S3C2410_TCNTO(4));
+		tdone += 1<<16;
 	}
 
-	return timer_ticks_to_usec(tdone);
+	/* currently, tcnt is in 12MHz units, but this may change
+	 * for non-bast machines...
+	 */
+
+	usec = tdone / timer_ticks_usec;
+
+	return usec;
 }
 
 
@@ -126,14 +87,13 @@ static unsigned long s3c2410_gettimeoffset (void)
 static irqreturn_t
 s3c2410_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
-	write_seqlock(&xtime_lock);
 	timer_tick(regs);
-	write_sequnlock(&xtime_lock);
+
 	return IRQ_HANDLED;
 }
 
 static struct irqaction s3c2410_timer_irq = {
-	.name		= "S3C2410 Timer Tick",
+	.name		= "S32410 Timer Tick",
 	.flags		= SA_INTERRUPT,
 	.handler	= s3c2410_timer_interrupt
 };
@@ -144,12 +104,14 @@ static struct irqaction s3c2410_timer_irq = {
  * Currently we only use timer4, as it is the only timer which has no
  * other function that can be exploited externally
  */
-static void s3c2410_timer_setup (void)
+void __init s3c2410_init_time (void)
 {
 	unsigned long tcon;
 	unsigned long tcnt;
 	unsigned long tcfg1;
 	unsigned long tcfg0;
+
+	gettimeoffset = s3c2410_gettimeoffset;
 
 	tcnt = 0xffff;  /* default value for tcnt */
 
@@ -162,25 +124,23 @@ static void s3c2410_timer_setup (void)
 	/* configure the system for whichever machine is in use */
 
 	if (machine_is_bast() || machine_is_vr1000()) {
-		/* timer is at 12MHz, scaler is 1 */
-		timer_usec_ticks = timer_mask_usec_ticks(1, 12000000);
-		tcnt = 12000000 / HZ;
+		timer_ticks_usec = 12;	      /* timer is at 12MHz */
+		tcnt = (timer_ticks_usec * (1000*1000)) / HZ;
+	}
 
-		tcfg1 &= ~S3C2410_TCFG1_MUX4_MASK;
-		tcfg1 |= S3C2410_TCFG1_MUX4_TCLK1;
-	} else {
-		/* for the h1940 (and others), we use the pclk from the core
-		 * to generate the timer values. since values around 50 to
-		 * 70MHz are not values we can directly generate the timer
-		 * value from, we need to pre-scale and divide before using it.
-		 *
-		 * for instance, using 50.7MHz and dividing by 6 gives 8.45MHz
-		 * (8.45 ticks per usec)
-		 */
+	/* for the h1940, we use the pclk from the core to generate
+	 * the timer values. since 67.5MHz is not a value we can directly
+	 * generate the timer value from, we need to pre-scale and
+	 * divied before using it.
+	 *
+	 * overall divsior to get 200Hz is 337500
+	 *   we can fit tcnt if we pre-scale by 6, producing a tick rate
+	 *   of 11.25MHz, and a tcnt of 56250.
+	 */
 
-		/* this is used as default if no other timer can be found */
-
-		timer_usec_ticks = timer_mask_usec_ticks(6, s3c24xx_pclk);
+	if (machine_is_h1940() || machine_is_smdk2410() ) {
+		timer_ticks_usec = s3c2410_pclk / (1000*1000);
+		timer_ticks_usec /= 6;
 
 		tcfg1 &= ~S3C2410_TCFG1_MUX4_MASK;
 		tcfg1 |= S3C2410_TCFG1_MUX4_DIV2;
@@ -188,15 +148,12 @@ static void s3c2410_timer_setup (void)
 		tcfg0 &= ~S3C2410_TCFG_PRESCALER1_MASK;
 		tcfg0 |= ((6 - 1) / 2) << S3C2410_TCFG_PRESCALER1_SHIFT;
 
-		tcnt = (s3c24xx_pclk / 6) / HZ;
+		tcnt = (s3c2410_pclk / 6) / HZ;
 	}
 
-	/* timers reload after counting zero, so reduce the count by 1 */
 
-	tcnt--;
-
-	printk("timer tcon=%08lx, tcnt %04lx, tcfg %08lx,%08lx, usec %08lx\n",
-	       tcon, tcnt, tcfg0, tcfg1, timer_usec_ticks);
+	printk("setup_timer tcon=%08lx, tcnt %04lx, tcfg %08lx,%08lx\n",
+	       tcon, tcnt, tcfg0, tcfg1);
 
 	/* check to see if timer is within 16bit range... */
 	if (tcnt > 0xffff) {
@@ -220,20 +177,13 @@ static void s3c2410_timer_setup (void)
 	__raw_writel(tcnt, S3C2410_TCNTB(4));
 	__raw_writel(tcnt, S3C2410_TCMPB(4));
 
+	setup_irq(IRQ_TIMER4, &s3c2410_timer_irq);
+
 	/* start the timer running */
 	tcon |= S3C2410_TCON_T4START;
 	tcon &= ~S3C2410_TCON_T4MANUALUPD;
 	__raw_writel(tcon, S3C2410_TCON);
 }
 
-static void __init s3c2410_timer_init (void)
-{
-	s3c2410_timer_setup();
-	setup_irq(IRQ_TIMER4, &s3c2410_timer_irq);
-}
 
-struct sys_timer s3c2410_timer = {
-	.init		= s3c2410_timer_init,
-	.offset		= s3c2410_gettimeoffset,
-	.resume		= s3c2410_timer_setup
-};
+

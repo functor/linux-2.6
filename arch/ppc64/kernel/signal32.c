@@ -228,21 +228,13 @@ static long restore_user_regs(struct pt_regs *regs,
 				     sizeof(sr->mc_vregs)))
 			return 1;
 	} else if (current->thread.used_vr)
-		memset(current->thread.vr, 0, ELF_NVRREG32 * sizeof(vector128));
+		memset(&current->thread.vr, 0, ELF_NVRREG32 * sizeof(vector128));
 
 	/* Always get VRSAVE back */
 	if (__get_user(current->thread.vrsave, (u32 __user *)&sr->mc_vregs[32]))
 		return 1;
 #endif /* CONFIG_ALTIVEC */
 
-#ifndef CONFIG_SMP
-	preempt_disable();
-	if (last_task_used_math == current)
-		last_task_used_math = NULL;
-	if (last_task_used_altivec == current)
-		last_task_used_altivec = NULL;
-	preempt_enable();
-#endif
 	return 0;
 }
 
@@ -285,10 +277,12 @@ long sys32_sigsuspend(old_sigset_t mask, int p2, int p3, int p4, int p6, int p7,
 		schedule();
 		if (do_signal32(&saveset, regs))
 			/*
-			 * Returning 0 means we return to userspace via
-			 * ret_from_except and thus restore all user
-			 * registers from *regs.  This is what we need
-			 * to do when a signal has been delivered.
+			 * If a signal handler needs to be called,
+			 * do_signal32() has set R3 to the signal number (the
+			 * first argument of the signal handler), so don't
+			 * overwrite that with EINTR !
+			 * In the other cases, do_signal32() doesn't touch 
+			 * R3, so it's still set to -EINTR (see above).
 			 */
 			return 0;
 	}
@@ -586,10 +580,12 @@ int sys32_rt_sigsuspend(compat_sigset_t __user * unewset, size_t sigsetsize, int
 		schedule();
 		if (do_signal32(&saveset, regs))
 			/*
-			 * Returning 0 means we return to userspace via
-			 * ret_from_except and thus restore all user
-			 * registers from *regs.  This is what we need
-			 * to do when a signal has been delivered.
+			 * If a signal handler needs to be called,
+			 * do_signal32() has set R3 to the signal number (the
+			 * first argument of the signal handler), so don't
+			 * overwrite that with EINTR !
+			 * In the other cases, do_signal32() doesn't touch 
+			 * R3, so it's still set to -EINTR (see above).
 			 */
 			return 0;
 	}
@@ -650,9 +646,9 @@ int sys32_sigaltstack(u32 __new, u32 __old, int r5,
  * Set up a signal frame for a "real-time" signal handler
  * (one which gets siginfo).
  */
-static int handle_rt_signal32(unsigned long sig, struct k_sigaction *ka,
-			      siginfo_t *info, sigset_t *oldset,
-			      struct pt_regs * regs, unsigned long newsp)
+static void handle_rt_signal32(unsigned long sig, struct k_sigaction *ka,
+			       siginfo_t *info, sigset_t *oldset,
+			       struct pt_regs * regs, unsigned long newsp)
 {
 	struct rt_sigframe32 __user *rt_sf;
 	struct mcontext32 __user *frame;
@@ -704,7 +700,7 @@ static int handle_rt_signal32(unsigned long sig, struct k_sigaction *ka,
 	if (test_thread_flag(TIF_SINGLESTEP))
 		ptrace_notify(SIGTRAP);
 
-	return 1;
+	return;
 
 badframe:
 #if DEBUG_SIG
@@ -712,7 +708,6 @@ badframe:
 	       regs, frame, newsp);
 #endif
 	force_sigsegv(sig, current);
-	return 0;
 }
 
 static long do_setcontext32(struct ucontext32 __user *ucp, struct pt_regs *regs, int sig)
@@ -823,7 +818,7 @@ long sys32_rt_sigreturn(int r3, int r4, int r5, int r6, int r7, int r8,
 /*
  * OK, we're invoking a handler
  */
-static int handle_signal32(unsigned long sig, struct k_sigaction *ka,
+static void handle_signal32(unsigned long sig, struct k_sigaction *ka,
 			    siginfo_t *info, sigset_t *oldset,
 			    struct pt_regs * regs, unsigned long newsp)
 {
@@ -871,7 +866,7 @@ static int handle_signal32(unsigned long sig, struct k_sigaction *ka,
 	if (test_thread_flag(TIF_SINGLESTEP))
 		ptrace_notify(SIGTRAP);
 
-	return 1;
+	return;
 
 badframe:
 #if DEBUG_SIG
@@ -879,7 +874,6 @@ badframe:
 	       regs, frame, *newspp);
 #endif
 	force_sigsegv(sig, current);
-	return 0;
 }
 
 /*
@@ -989,11 +983,11 @@ int do_signal32(sigset_t *oldset, struct pt_regs *regs)
 
 	/* Whee!  Actually deliver the signal.  */
 	if (ka.sa.sa_flags & SA_SIGINFO)
-		ret = handle_rt_signal32(signr, &ka, &info, oldset, regs, newsp);
+		handle_rt_signal32(signr, &ka, &info, oldset, regs, newsp);
 	else
-		ret = handle_signal32(signr, &ka, &info, oldset, regs, newsp);
+		handle_signal32(signr, &ka, &info, oldset, regs, newsp);
 
-	if (ret && !(ka.sa.sa_flags & SA_NODEFER)) {
+	if (!(ka.sa.sa_flags & SA_NODEFER)) {
 		spin_lock_irq(&current->sighand->siglock);
 		sigorsets(&current->blocked, &current->blocked,
 			  &ka.sa.sa_mask);
@@ -1002,5 +996,5 @@ int do_signal32(sigset_t *oldset, struct pt_regs *regs)
 		spin_unlock_irq(&current->sighand->siglock);
 	}
 
-	return ret;
+	return 1;
 }

@@ -53,6 +53,19 @@ static inline int ext2_inode_is_fast_symlink(struct inode *inode)
 		inode->i_blocks - ea_blocks == 0);
 }
 
+/*
+ * Called at each iput().
+ *
+ * The inode may be "bad" if ext2_read_inode() saw an error from
+ * ext2_get_inode(), so we need to check that to avoid freeing random disk
+ * blocks.
+ */
+void ext2_put_inode(struct inode *inode)
+{
+	if (!is_bad_inode(inode))
+		ext2_discard_prealloc(inode);
+}
+
 static void ext2_truncate_nocheck (struct inode * inode);
 
 /*
@@ -1191,7 +1204,7 @@ static int ext2_update_inode(struct inode * inode, int do_sync)
 		raw_inode->i_uid_high = 0;
 		raw_inode->i_gid_high = 0;
 	}
-#ifdef CONFIG_INOXID_INTERN
+#ifdef CONFIG_INOXID_GID32
 	raw_inode->i_raw_xid = cpu_to_le16(inode->i_xid);
 #endif
 	raw_inode->i_links_count = cpu_to_le16(inode->i_nlink);

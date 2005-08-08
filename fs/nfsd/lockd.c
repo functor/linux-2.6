@@ -42,15 +42,18 @@ nlm_fopen(struct svc_rqst *rqstp, struct nfs_fh *f, struct file **filp)
  	/* nlm and nfsd don't share error codes.
 	 * we invent: 0 = no error
 	 *            1 = stale file handle
-	 *	      2 = other error
+	 *            2 = nfserr_dropit (or -EAGAIN)
+	 *	          3 = other error
 	 */
 	switch (nfserr) {
 	case nfs_ok:
 		return 0;
 	case nfserr_stale:
 		return 1;
-	default:
+	case nfserr_dropit:
 		return 2;
+	default:
+		return 3;
 	}
 }
 

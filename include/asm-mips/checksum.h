@@ -46,7 +46,6 @@ static inline unsigned int csum_and_copy_to_user (const char *src,
 						  int len, int sum,
 						  int *err_ptr)
 {
-	might_sleep();
 	sum = csum_partial(src, len, sum);
 
 	if (copy_to_user(dst, src, len)) {

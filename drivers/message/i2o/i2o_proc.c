@@ -290,7 +290,7 @@ static char *bus_strings[] = {
 	"CARDBUS"
 };
 
-static int i2o_seq_show_hrt(struct seq_file *seq, void *v)
+int i2o_seq_show_hrt(struct seq_file *seq, void *v)
 {
 	struct i2o_controller *c = (struct i2o_controller *)seq->private;
 	i2o_hrt *hrt = (i2o_hrt *) c->hrt.virt;
@@ -391,7 +391,7 @@ static int i2o_seq_show_hrt(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static int i2o_seq_show_lct(struct seq_file *seq, void *v)
+int i2o_seq_show_lct(struct seq_file *seq, void *v)
 {
 	struct i2o_controller *c = (struct i2o_controller *)seq->private;
 	i2o_lct *lct = (i2o_lct *) c->lct;
@@ -521,7 +521,7 @@ static int i2o_seq_show_lct(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static int i2o_seq_show_status(struct seq_file *seq, void *v)
+int i2o_seq_show_status(struct seq_file *seq, void *v)
 {
 	struct i2o_controller *c = (struct i2o_controller *)seq->private;
 	char prodstr[25];
@@ -718,7 +718,7 @@ static int i2o_seq_show_status(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static int i2o_seq_show_hw(struct seq_file *seq, void *v)
+int i2o_seq_show_hw(struct seq_file *seq, void *v)
 {
 	struct i2o_controller *c = (struct i2o_controller *)seq->private;
 	static u32 work32[5];
@@ -775,7 +775,7 @@ static int i2o_seq_show_hw(struct seq_file *seq, void *v)
 }
 
 /* Executive group 0003h - Executing DDM List (table) */
-static int i2o_seq_show_ddm_table(struct seq_file *seq, void *v)
+int i2o_seq_show_ddm_table(struct seq_file *seq, void *v)
 {
 	struct i2o_controller *c = (struct i2o_controller *)seq->private;
 	int token;
@@ -851,7 +851,7 @@ static int i2o_seq_show_ddm_table(struct seq_file *seq, void *v)
 }
 
 /* Executive group 0004h - Driver Store (scalar) */
-static int i2o_seq_show_driver_store(struct seq_file *seq, void *v)
+int i2o_seq_show_driver_store(struct seq_file *seq, void *v)
 {
 	struct i2o_controller *c = (struct i2o_controller *)seq->private;
 	u32 work32[8];
@@ -874,7 +874,7 @@ static int i2o_seq_show_driver_store(struct seq_file *seq, void *v)
 }
 
 /* Executive group 0005h - Driver Store Table (table) */
-static int i2o_seq_show_drivers_stored(struct seq_file *seq, void *v)
+int i2o_seq_show_drivers_stored(struct seq_file *seq, void *v)
 {
 	typedef struct _i2o_driver_store {
 		u16 stored_ddm_index;
@@ -938,6 +938,11 @@ static int i2o_seq_show_drivers_stored(struct seq_file *seq, void *v)
 			seq_printf(seq, "                ");
 		}
 
+#if 0
+		if (c->i2oversion == 0x02)
+			seq_printf(seq, "%-d", dst->module_state);
+#endif
+
 		seq_printf(seq, "%-#7x", dst->i2o_vendor_id);
 		seq_printf(seq, "%-#8x", dst->module_id);
 		seq_printf(seq, "%-29s", chtostr(dst->module_name_version, 28));
@@ -945,6 +950,10 @@ static int i2o_seq_show_drivers_stored(struct seq_file *seq, void *v)
 		seq_printf(seq, "%8d ", dst->module_size);
 		seq_printf(seq, "%8d ", dst->mpb_size);
 		seq_printf(seq, "0x%04x", dst->module_flags);
+#if 0
+		if (c->i2oversion == 0x02)
+			seq_printf(seq, "%d", dst->notification_level);
+#endif
 		seq_printf(seq, "\n");
 	}
 
@@ -953,7 +962,7 @@ static int i2o_seq_show_drivers_stored(struct seq_file *seq, void *v)
 }
 
 /* Generic group F000h - Params Descriptor (table) */
-static int i2o_seq_show_groups(struct seq_file *seq, void *v)
+int i2o_seq_show_groups(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	int token;
@@ -1029,7 +1038,7 @@ static int i2o_seq_show_groups(struct seq_file *seq, void *v)
 }
 
 /* Generic group F001h - Physical Device Table (table) */
-static int i2o_seq_show_phys_device(struct seq_file *seq, void *v)
+int i2o_seq_show_phys_device(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	int token;
@@ -1070,7 +1079,7 @@ static int i2o_seq_show_phys_device(struct seq_file *seq, void *v)
 }
 
 /* Generic group F002h - Claimed Table (table) */
-static int i2o_seq_show_claimed(struct seq_file *seq, void *v)
+int i2o_seq_show_claimed(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	int token;
@@ -1110,7 +1119,7 @@ static int i2o_seq_show_claimed(struct seq_file *seq, void *v)
 }
 
 /* Generic group F003h - User Table (table) */
-static int i2o_seq_show_users(struct seq_file *seq, void *v)
+int i2o_seq_show_users(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	int token;
@@ -1164,7 +1173,7 @@ static int i2o_seq_show_users(struct seq_file *seq, void *v)
 }
 
 /* Generic group F005h - Private message extensions (table) (optional) */
-static int i2o_seq_show_priv_msgs(struct seq_file *seq, void *v)
+int i2o_seq_show_priv_msgs(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	int token;
@@ -1213,7 +1222,7 @@ static int i2o_seq_show_priv_msgs(struct seq_file *seq, void *v)
 }
 
 /* Generic group F006h - Authorized User Table (table) */
-static int i2o_seq_show_authorized_users(struct seq_file *seq, void *v)
+int i2o_seq_show_authorized_users(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	int token;
@@ -1254,7 +1263,7 @@ static int i2o_seq_show_authorized_users(struct seq_file *seq, void *v)
 }
 
 /* Generic group F100h - Device Identity (scalar) */
-static int i2o_seq_show_dev_identity(struct seq_file *seq, void *v)
+int i2o_seq_show_dev_identity(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	static u32 work32[128];	// allow for "stuff" + up to 256 byte (max) serial number
@@ -1292,7 +1301,7 @@ static int i2o_seq_show_dev_identity(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static int i2o_seq_show_dev_name(struct seq_file *seq, void *v)
+int i2o_seq_show_dev_name(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 
@@ -1302,7 +1311,7 @@ static int i2o_seq_show_dev_name(struct seq_file *seq, void *v)
 }
 
 /* Generic group F101h - DDM Identity (scalar) */
-static int i2o_seq_show_ddm_identity(struct seq_file *seq, void *v)
+int i2o_seq_show_ddm_identity(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	int token;
@@ -1339,7 +1348,7 @@ static int i2o_seq_show_ddm_identity(struct seq_file *seq, void *v)
 }
 
 /* Generic group F102h - User Information (scalar) */
-static int i2o_seq_show_uinfo(struct seq_file *seq, void *v)
+int i2o_seq_show_uinfo(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	int token;
@@ -1371,7 +1380,7 @@ static int i2o_seq_show_uinfo(struct seq_file *seq, void *v)
 }
 
 /* Generic group F103h - SGL Operating Limits (scalar) */
-static int i2o_seq_show_sgl_limits(struct seq_file *seq, void *v)
+int i2o_seq_show_sgl_limits(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	static u32 work32[12];
@@ -1418,7 +1427,7 @@ static int i2o_seq_show_sgl_limits(struct seq_file *seq, void *v)
 }
 
 /* Generic group F200h - Sensors (scalar) */
-static int i2o_seq_show_sensors(struct seq_file *seq, void *v)
+int i2o_seq_show_sensors(struct seq_file *seq, void *v)
 {
 	struct i2o_device *d = (struct i2o_device *)seq->private;
 	int token;

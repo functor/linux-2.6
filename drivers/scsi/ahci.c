@@ -239,13 +239,9 @@ static struct ata_port_info ahci_port_info[] = {
 
 static struct pci_device_id ahci_pci_tbl[] = {
 	{ PCI_VENDOR_ID_INTEL, 0x2652, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	  board_ahci }, /* ICH6 */
+	  board_ahci },
 	{ PCI_VENDOR_ID_INTEL, 0x2653, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	  board_ahci }, /* ICH6M */
-	{ PCI_VENDOR_ID_INTEL, 0x27c1, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	  board_ahci }, /* ICH7 */
-	{ PCI_VENDOR_ID_INTEL, 0x27c5, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	  board_ahci }, /* ICH7M */
+	  board_ahci },
 	{ }	/* terminate list */
 };
 
@@ -276,7 +272,7 @@ static void ahci_host_stop(struct ata_host_set *host_set)
 
 static int ahci_port_start(struct ata_port *ap)
 {
-	struct device *dev = ap->host_set->dev;
+	struct pci_dev *pdev = ap->host_set->pdev;
 	struct ahci_host_priv *hpriv = ap->host_set->private_data;
 	struct ahci_port_priv *pp;
 	int rc;
@@ -295,7 +291,7 @@ static int ahci_port_start(struct ata_port *ap)
 	}
 	memset(pp, 0, sizeof(*pp));
 
-	mem = dma_alloc_coherent(dev, AHCI_PORT_PRIV_DMA_SZ, &mem_dma, GFP_KERNEL);
+	mem = pci_alloc_consistent(pdev, AHCI_PORT_PRIV_DMA_SZ, &mem_dma);
 	if (!mem) {
 		rc = -ENOMEM;
 		goto err_out_kfree;
@@ -359,7 +355,7 @@ err_out:
 
 static void ahci_port_stop(struct ata_port *ap)
 {
-	struct device *dev = ap->host_set->dev;
+	struct pci_dev *pdev = ap->host_set->pdev;
 	struct ahci_port_priv *pp = ap->private_data;
 	void *mmio = ap->host_set->mmio_base;
 	void *port_mmio = ahci_port_base(mmio, ap->port_no);
@@ -376,8 +372,8 @@ static void ahci_port_stop(struct ata_port *ap)
 	msleep(500);
 
 	ap->private_data = NULL;
-	dma_free_coherent(dev, AHCI_PORT_PRIV_DMA_SZ,
-			  pp->cmd_slot, pp->cmd_slot_dma);
+	pci_free_consistent(pdev, AHCI_PORT_PRIV_DMA_SZ,
+			    pp->cmd_slot, pp->cmd_slot_dma);
 	kfree(pp);
 	ata_port_stop(ap);
 }
@@ -709,7 +705,7 @@ static void ahci_setup_port(struct ata_ioports *port, unsigned long base,
 static int ahci_host_init(struct ata_probe_ent *probe_ent)
 {
 	struct ahci_host_priv *hpriv = probe_ent->private_data;
-	struct pci_dev *pdev = to_pci_dev(probe_ent->dev);
+	struct pci_dev *pdev = probe_ent->pdev;
 	void __iomem *mmio = probe_ent->mmio_base;
 	u32 tmp, cap_save;
 	u16 tmp16;
@@ -867,7 +863,7 @@ static void pci_enable_intx(struct pci_dev *pdev)
 static void ahci_print_info(struct ata_probe_ent *probe_ent)
 {
 	struct ahci_host_priv *hpriv = probe_ent->private_data;
-	struct pci_dev *pdev = to_pci_dev(probe_ent->dev);
+	struct pci_dev *pdev = probe_ent->pdev;
 	void *mmio = probe_ent->mmio_base;
 	u32 vers, cap, impl, speed;
 	const char *speed_s;
@@ -950,6 +946,10 @@ static int ahci_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (!printed_version++)
 		printk(KERN_DEBUG DRV_NAME " version " DRV_VERSION "\n");
 
+	/*
+	 * If this driver happens to only be useful on Apple's K2, then
+	 * we should check that here as it has a normal Serverworks ID
+	 */
 	rc = pci_enable_device(pdev);
 	if (rc)
 		return rc;
@@ -967,7 +967,7 @@ static int ahci_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	memset(probe_ent, 0, sizeof(*probe_ent));
-	probe_ent->dev = pci_dev_to_dev(pdev);
+	probe_ent->pdev = pdev;
 	INIT_LIST_HEAD(&probe_ent->node);
 
 	mmio_base = ioremap(pci_resource_start(pdev, AHCI_PCI_BAR),

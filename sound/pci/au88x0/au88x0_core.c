@@ -2081,6 +2081,7 @@ vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type)
 	    || ((dir == SNDRV_PCM_STREAM_CAPTURE) && (nr_ch > 2)))
 		return -EBUSY;
 
+	spin_lock(&vortex->lock);
 	if (dma >= 0) {
 		en = 0;
 		vortex_adb_checkinout(vortex,
@@ -2276,6 +2277,7 @@ vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type)
 		}
 	}
 	vortex->dma_adb[dma].nr_ch = nr_ch;
+	spin_unlock(&vortex->lock);
 
 #if 0
 	/* AC97 Codec channel setup. FIXME: this has no effect on some cards !! */
@@ -2404,28 +2406,22 @@ static irqreturn_t vortex_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	}
 	if (source & IRQ_PCMOUT) {
 		/* ALSA period acknowledge. */
-		spin_lock(&vortex->lock);
 		for (i = 0; i < NR_ADB; i++) {
 			if (vortex->dma_adb[i].fifo_status == FIFO_START) {
 				if (vortex_adbdma_bufshift(vortex, i)) ;
-				spin_unlock(&vortex->lock);
 				snd_pcm_period_elapsed(vortex->dma_adb[i].
 						       substream);
-				spin_lock(&vortex->lock);
 			}
 		}
 #ifndef CHIP_AU8810
 		for (i = 0; i < NR_WT; i++) {
 			if (vortex->dma_wt[i].fifo_status == FIFO_START) {
 				if (vortex_wtdma_bufshift(vortex, i)) ;
-				spin_unlock(&vortex->lock);
 				snd_pcm_period_elapsed(vortex->dma_wt[i].
 						       substream);
-				spin_lock(&vortex->lock);
 			}
 		}
 #endif
-		spin_unlock(&vortex->lock);
 		handled = 1;
 	}
 	//Acknowledge the Timer interrupt
@@ -2490,13 +2486,16 @@ vortex_codec_write(ac97_t * codec, unsigned short addr, unsigned short data)
 {
 
 	vortex_t *card = (vortex_t *) codec->private_data;
+	unsigned long flags;
 	unsigned int lifeboat = 0;
+	spin_lock_irqsave(&card->lock, flags);
 
 	/* wait for transactions to clear */
 	while (!(hwread(card->mmio, VORTEX_CODEC_CTRL) & 0x100)) {
 		udelay(100);
 		if (lifeboat++ > POLL_COUNT) {
 			printk(KERN_ERR "vortex: ac97 codec stuck busy\n");
+			spin_unlock_irqrestore(&card->lock, flags);
 			return;
 		}
 	}
@@ -2508,6 +2507,8 @@ vortex_codec_write(ac97_t * codec, unsigned short addr, unsigned short data)
 
 	/* Flush Caches. */
 	hwread(card->mmio, VORTEX_CODEC_IO);
+
+	spin_unlock_irqrestore(&card->lock, flags);
 }
 
 static unsigned short vortex_codec_read(ac97_t * codec, unsigned short addr)
@@ -2515,13 +2516,17 @@ static unsigned short vortex_codec_read(ac97_t * codec, unsigned short addr)
 
 	vortex_t *card = (vortex_t *) codec->private_data;
 	u32 read_addr, data;
+	unsigned long flags;
 	unsigned lifeboat = 0;
+
+	spin_lock_irqsave(&card->lock, flags);
 
 	/* wait for transactions to clear */
 	while (!(hwread(card->mmio, VORTEX_CODEC_CTRL) & 0x100)) {
 		udelay(100);
 		if (lifeboat++ > POLL_COUNT) {
 			printk(KERN_ERR "vortex: ac97 codec stuck busy\n");
+			spin_unlock_irqrestore(&card->lock, flags);
 			return 0xffff;
 		}
 	}
@@ -2530,15 +2535,20 @@ static unsigned short vortex_codec_read(ac97_t * codec, unsigned short addr)
 	hwwrite(card->mmio, VORTEX_CODEC_IO, read_addr);
 
 	/* wait for address */
-	do {
+	{
 		udelay(100);
 		data = hwread(card->mmio, VORTEX_CODEC_IO);
 		if (lifeboat++ > POLL_COUNT) {
 			printk(KERN_ERR "vortex: ac97 address never arrived\n");
+			spin_unlock_irqrestore(&card->lock, flags);
 			return 0xffff;
 		}
-	} while ((data & VORTEX_CODEC_ADDMASK) !=
-		 (addr << VORTEX_CODEC_ADDSHIFT));
+	}
+	while ((data & VORTEX_CODEC_ADDMASK) !=
+	       (addr << VORTEX_CODEC_ADDSHIFT)) ;
+
+	/* Unlock. */
+	spin_unlock_irqrestore(&card->lock, flags);
 
 	/* return data. */
 	return (u16) (data & VORTEX_CODEC_DATMASK);

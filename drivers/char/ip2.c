@@ -38,11 +38,11 @@ static int poll_only = 0;
 
 MODULE_AUTHOR("Doug McNash");
 MODULE_DESCRIPTION("Computone IntelliPort Plus Driver");
-module_param_array(irq, int, NULL, 0);
+MODULE_PARM(irq,"1-"__MODULE_STRING(IP2_MAX_BOARDS) "i");
 MODULE_PARM_DESC(irq,"Interrupts for IntelliPort Cards");
-module_param_array(io, int, NULL, 0);
+MODULE_PARM(io,"1-"__MODULE_STRING(IP2_MAX_BOARDS) "i");
 MODULE_PARM_DESC(io,"I/O ports for IntelliPort Cards");
-module_param(poll_only, bool, 0);
+MODULE_PARM(poll_only,"1i");
 MODULE_PARM_DESC(poll_only,"Do not use card interrupts");
 
 

@@ -153,7 +153,7 @@ __unregister_chrdev_region(unsigned major, unsigned baseminor, int minorct)
 	return cd;
 }
 
-int register_chrdev_region(dev_t from, unsigned count, const char *name)
+int register_chrdev_region(dev_t from, unsigned count, char *name)
 {
 	struct char_device_struct *cd;
 	dev_t to = from + count;
@@ -178,8 +178,7 @@ fail:
 	return PTR_ERR(cd);
 }
 
-int alloc_chrdev_region(dev_t *dev, unsigned baseminor, unsigned count,
-			const char *name)
+int alloc_chrdev_region(dev_t *dev, unsigned baseminor, unsigned count, char *name)
 {
 	struct char_device_struct *cd;
 	cd = __register_chrdev_region(0, baseminor, count, name);
@@ -207,8 +206,8 @@ int register_chrdev(unsigned int major, const char *name,
 
 	cdev->owner = fops->owner;
 	cdev->ops = fops;
-	kobject_set_name(&cdev->kobj, "%s", name);
-	for (s = strchr(kobject_name(&cdev->kobj),'/'); s; s = strchr(s, '/'))
+	strcpy(cdev->kobj.name, name);
+	for (s = strchr(cdev->kobj.name, '/'); s; s = strchr(s, '/'))
 		*s = '!';
 		
 	err = cdev_add(cdev, MKDEV(cd->major, 0), 256);
@@ -417,7 +416,6 @@ struct cdev *cdev_alloc(void)
 
 void cdev_init(struct cdev *cdev, struct file_operations *fops)
 {
-	memset(cdev, 0, sizeof *cdev);
 	INIT_LIST_HEAD(&cdev->list);
 	cdev->kobj.ktype = &ktype_cdev_default;
 	kobject_init(&cdev->kobj);

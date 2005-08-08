@@ -33,8 +33,7 @@
 #include <asm/prom.h>
 
 static loff_t  page_map_seek( struct file *file, loff_t off, int whence);
-static ssize_t page_map_read( struct file *file, char __user *buf, size_t nbytes,
-			      loff_t *ppos);
+static ssize_t page_map_read( struct file *file, char *buf, size_t nbytes, loff_t *ppos);
 static int     page_map_mmap( struct file *file, struct vm_area_struct *vma );
 
 static struct file_operations page_map_fops = {
@@ -162,8 +161,7 @@ static loff_t page_map_seek( struct file *file, loff_t off, int whence)
 	return (file->f_pos = new);
 }
 
-static ssize_t page_map_read( struct file *file, char __user *buf, size_t nbytes,
-			      loff_t *ppos)
+static ssize_t page_map_read( struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 {
 	struct proc_dir_entry *dp = PDE(file->f_dentry->d_inode);
 	return simple_read_from_buffer(buf, nbytes, ppos, dp->data, dp->size);
@@ -178,8 +176,7 @@ static int page_map_mmap( struct file *file, struct vm_area_struct *vma )
 	if ((vma->vm_end - vma->vm_start) > dp->size)
 		return -EINVAL;
 
-	remap_pfn_range(vma, vma->vm_start, __pa(dp->data) >> PAGE_SHIFT,
-						dp->size, vma->vm_page_prot);
+	remap_page_range( vma, vma->vm_start, __pa(dp->data), dp->size, vma->vm_page_prot );
 	return 0;
 }
 
@@ -210,8 +207,7 @@ static void proc_ppc64_create_ofdt(void)
  * whole nodes along with their properties.  Operations on individual
  * properties are not implemented (yet).
  */
-static ssize_t ofdt_write(struct file *file, const char __user *buf, size_t count,
-			  loff_t *off)
+static ssize_t ofdt_write(struct file *file, const char __user *buf, size_t count, loff_t *off)
 {
 	int rv = 0;
 	char *kbuf;
@@ -305,8 +301,7 @@ out:
 	return rv;
 }
 
-static struct property *new_property(const char *name, const int length,
-				     const unsigned char *value, struct property *last)
+static struct property *new_property(const char *name, const int length, const unsigned char *value, struct property *last)
 {
 	struct property *new = kmalloc(sizeof(*new), GFP_KERNEL);
 
@@ -347,8 +342,7 @@ cleanup:
  * this function does no allocation or copying of the data.  Return value
  * is set to the next name in buf, or NULL on error.
  */
-static char * parse_next_property(char *buf, char *end, char **name, int *length,
-				  unsigned char **value)
+static char * parse_next_property(char *buf, char *end, char **name, int *length, unsigned char **value)
 {
 	char *tmp;
 
@@ -356,15 +350,13 @@ static char * parse_next_property(char *buf, char *end, char **name, int *length
 
 	tmp = strchr(buf, ' ');
 	if (!tmp) {
-		printk(KERN_ERR "property parse failed in %s at line %d\n",
-		       __FUNCTION__, __LINE__);
+		printk(KERN_ERR "property parse failed in %s at line %d\n", __FUNCTION__, __LINE__);
 		return NULL;
 	}
 	*tmp = '\0';
 
 	if (++tmp >= end) {
-		printk(KERN_ERR "property parse failed in %s at line %d\n",
-		       __FUNCTION__, __LINE__);
+		printk(KERN_ERR "property parse failed in %s at line %d\n", __FUNCTION__, __LINE__);
 		return NULL;
 	}
 
@@ -372,13 +364,11 @@ static char * parse_next_property(char *buf, char *end, char **name, int *length
 	*length = -1;
 	*length = simple_strtoul(tmp, &tmp, 10);
 	if (*length == -1) {
-		printk(KERN_ERR "property parse failed in %s at line %d\n", 
-		       __FUNCTION__, __LINE__);
+		printk(KERN_ERR "property parse failed in %s at line %d\n", __FUNCTION__, __LINE__);
 		return NULL;
 	}
 	if (*tmp != ' ' || ++tmp >= end) {
-		printk(KERN_ERR "property parse failed in %s at line %d\n",
-		       __FUNCTION__, __LINE__);
+		printk(KERN_ERR "property parse failed in %s at line %d\n", __FUNCTION__, __LINE__);
 		return NULL;
 	}
 
@@ -386,13 +376,11 @@ static char * parse_next_property(char *buf, char *end, char **name, int *length
 	*value = tmp;
 	tmp += *length;
 	if (tmp > end) {
-		printk(KERN_ERR "property parse failed in %s at line %d\n",
-		       __FUNCTION__, __LINE__);
+		printk(KERN_ERR "property parse failed in %s at line %d\n", __FUNCTION__, __LINE__);
 		return NULL;
 	}
 	else if (tmp < end && *tmp != ' ' && *tmp != '\0') {
-		printk(KERN_ERR "property parse failed in %s at line %d\n",
-		       __FUNCTION__, __LINE__);
+		printk(KERN_ERR "property parse failed in %s at line %d\n", __FUNCTION__, __LINE__);
 		return NULL;
 	}
 	tmp++;

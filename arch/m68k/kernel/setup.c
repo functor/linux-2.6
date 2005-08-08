@@ -109,7 +109,6 @@ extern int q40_parse_bootinfo(const struct bi_record *);
 extern int bvme6000_parse_bootinfo(const struct bi_record *);
 extern int mvme16x_parse_bootinfo(const struct bi_record *);
 extern int mvme147_parse_bootinfo(const struct bi_record *);
-extern int hp300_parse_bootinfo(const struct bi_record *);
 
 extern void config_amiga(void);
 extern void config_atari(void);
@@ -176,8 +175,6 @@ static void __init m68k_parse_bootinfo(const struct bi_record *record)
 		    unknown = mvme16x_parse_bootinfo(record);
 		else if (MACH_IS_MVME147)
 		    unknown = mvme147_parse_bootinfo(record);
-		else if (MACH_IS_HP300)
-		    unknown = hp300_parse_bootinfo(record);
 		else
 		    unknown = 1;
 	}
@@ -207,8 +204,20 @@ void __init setup_arch(char **cmdline_p)
 	int i;
 	char *p, *q;
 
-	/* The bootinfo is located right after the kernel bss */
-	m68k_parse_bootinfo((const struct bi_record *)&_end);
+	if (!MACH_IS_HP300) {
+		/* The bootinfo is located right after the kernel bss */
+		m68k_parse_bootinfo((const struct bi_record *)&_end);
+	} else {
+		/* FIXME HP300 doesn't use bootinfo yet */
+		extern unsigned long hp300_phys_ram_base;
+		unsigned long hp300_mem_size = 0xffffffff-hp300_phys_ram_base;
+		m68k_cputype = CPU_68030;
+		m68k_fputype = FPU_68882;
+		m68k_memory[0].addr = hp300_phys_ram_base;
+		/* 0.5M fudge factor */
+		m68k_memory[0].size = hp300_mem_size-512*1024;
+		m68k_num_memory++;
+	}
 
 	if (CPU_IS_040)
 		m68k_is040or060 = 4;
@@ -343,7 +352,7 @@ void __init setup_arch(char **cmdline_p)
 #ifndef CONFIG_SUN3
 	startmem= m68k_memory[0].addr;
 	endmem = startmem + m68k_memory[0].size;
-	high_memory = (void *)PAGE_OFFSET;
+	high_memory = PAGE_OFFSET;
 	for (i = 0; i < m68k_num_memory; i++) {
 		m68k_memory[i].size &= MASK_256K;
 		if (m68k_memory[i].addr < startmem)
@@ -541,5 +550,7 @@ void check_bugs(void)
 				"emulation project\n" );
 		panic( "no FPU" );
 	}
-#endif /* !CONFIG_M68KFPU_EMU */
+
+#endif /* CONFIG_SUN3 */
+
 }

@@ -1,7 +1,7 @@
 /*
  * Copyright 2001 MontaVista Software Inc.
  * Author: Jun Sun, jsun@mvista.com or jsun@junsun.net
- * Copyright (c) 2003, 2004  Maciej W. Rozycki
+ * Copyright (c) 2003  Maciej W. Rozycki
  *
  * Common time service routines for MIPS machines. See
  * Documentation/mips/time.README.
@@ -26,7 +26,6 @@
 #include <linux/module.h>
 
 #include <asm/bootinfo.h>
-#include <asm/compiler.h>
 #include <asm/cpu.h>
 #include <asm/cpu-features.h>
 #include <asm/div64.h>
@@ -54,6 +53,12 @@ EXPORT_SYMBOL(jiffies_64);
 extern volatile unsigned long wall_jiffies;
 
 spinlock_t rtc_lock = SPIN_LOCK_UNLOCKED;
+
+/*
+ * whether we emulate local_timer_interrupts for SMP machines.
+ */
+int emulate_local_timer_interrupt;
+
 
 /*
  * By default we provide the null RTC ops
@@ -272,7 +277,7 @@ static unsigned long fixed_rate_gettimeoffset(void)
 	__asm__("multu	%1,%2"
 		: "=h" (res)
 		: "r" (count), "r" (sll32_usecs_per_cycle)
-		: "lo", GCC_REG_ACCUM);
+		: "lo", "accum");
 
 	/*
 	 * Due to possible jiffies inconsistencies, we need to check
@@ -327,7 +332,7 @@ static unsigned long calibrate_div32_gettimeoffset(void)
 	__asm__("multu  %1,%2"
 		: "=h" (res)
 		: "r" (count), "r" (quotient)
-		: "lo", GCC_REG_ACCUM);
+		: "lo", "accum");
 
 	/*
 	 * Due to possible jiffies inconsistencies, we need to check
@@ -369,7 +374,7 @@ static unsigned long calibrate_div64_gettimeoffset(void)
 				: "r" (timerhi), "m" (timerlo),
 				  "r" (tmp), "r" (USECS_PER_JIFFY),
 				  "r" (USECS_PER_JIFFY_FRAC)
-				: "hi", "lo", GCC_REG_ACCUM);
+				: "hi", "lo", "accum");
 			cached_quotient = quotient;
 		}
 	}
@@ -383,7 +388,7 @@ static unsigned long calibrate_div64_gettimeoffset(void)
 	__asm__("multu	%1,%2"
 		: "=h" (res)
 		: "r" (count), "r" (quotient)
-		: "lo", GCC_REG_ACCUM);
+		: "lo", "accum");
 
 	/*
 	 * Due to possible jiffies inconsistencies, we need to check
@@ -413,7 +418,10 @@ void local_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
 	if (current->pid)
 		profile_tick(CPU_PROFILING, regs);
+#ifdef CONFIG_SMP
+	/* in UP mode, update_process_times() is invoked by do_timer() */
 	update_process_times(user_mode(regs));
+#endif
 }
 
 /*
@@ -497,6 +505,7 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 		}
 	}
 
+#if !defined(CONFIG_SMP)
 	/*
 	 * In UP mode, we call local_timer_interrupt() to do profiling
 	 * and process accouting.
@@ -505,6 +514,21 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	 * low-level local timer interrupt handler.
 	 */
 	local_timer_interrupt(irq, dev_id, regs);
+
+#else	/* CONFIG_SMP */
+
+	if (emulate_local_timer_interrupt) {
+		/*
+		 * this is the place where we send out inter-process
+		 * interrupts and let each CPU do its own profiling
+		 * and process accouting.
+		 *
+		 * Obviously we need to call local_timer_interrupt() for
+		 * the current CPU too.
+		 */
+		panic("Not implemented yet!!!");
+	}
+#endif	/* CONFIG_SMP */
 
 	return IRQ_HANDLED;
 }

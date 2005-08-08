@@ -14,20 +14,18 @@
 
 extern size_t strlen(const char *);
 extern void *memcpy(void *, const void *, size_t);
-extern void *memmove(void *, const void *, size_t);
 extern void *memset(void *, int, size_t);
 extern int printf(const char *, ...);
 
 EXPORT_SYMBOL(strlen);
 EXPORT_SYMBOL(memcpy);
-EXPORT_SYMBOL(memmove);
 EXPORT_SYMBOL(memset);
 EXPORT_SYMBOL(printf);
 
 EXPORT_SYMBOL(strstr);
 
 /* Here, instead, I can provide a fake prototype. Yes, someone cares: genksyms.
- * However, the modules will use the CRC defined *here*, no matter if it is
+ * However, the modules will use the CRC defined *here*, no matter if it is 
  * good; so the versions of these symbols will always match
  */
 #define EXPORT_SYMBOL_PROTO(sym)       \

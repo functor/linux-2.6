@@ -221,10 +221,6 @@ struct ip_conntrack
 	} nat;
 #endif /* CONFIG_IP_NF_NAT_NEEDED */
 
-#if defined(CONFIG_IP_NF_CONNTRACK_MARK)
-	unsigned long mark;
-#endif
-
 #if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	/* VServer context id */
 	xid_t xid[IP_CT_DIR_MAX];

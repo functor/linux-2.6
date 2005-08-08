@@ -128,9 +128,12 @@ nlm4svc_proc_lock(struct svc_rqst *rqstp, struct nlm_args *argp,
 	}
 
 	/* Obtain client and file */
-	if ((resp->status = nlm4svc_retrieve_args(rqstp, argp, &host, &file)))
+	if ((resp->status = nlm4svc_retrieve_args(rqstp, argp, &host, &file))) {
+		dprintk("lockd: LOCK(args)    status %d\n", ntohl(resp->status));
+		if (resp->status == nlm_lck_dropit)
+			return nlm_lck_dropit;
 		return rpc_success;
-
+	}
 #if 0
 	/* If supplied state doesn't match current state, we assume it's
 	 * an old request that time-warped somehow. Any error return would

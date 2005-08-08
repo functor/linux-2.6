@@ -20,6 +20,7 @@
 #include <linux/random.h>
 #include <linux/sched.h>
 
+#include <asm/bitops.h>
 #include <asm/mipsregs.h>
 #include <asm/signal.h>
 #include <asm/system.h>
@@ -29,14 +30,10 @@
 #include <asm/ip32/ip32_ints.h>
 
 /* issue a PIO read to make sure no PIO writes are pending */
-static void inline flush_crime_bus(void)
-{
-	volatile unsigned long junk = crime->control;
-}
-
+#define flush_crime_bus() crime_read(CRIME_CONTROL);
 static void inline flush_mace_bus(void)
 {
-	volatile unsigned long junk = mace->perif.ctrl.misc;
+	volatile unsigned long junk = mace_perif_ctrl_read(misc);
 }
 
 #undef DEBUG_IRQ
@@ -186,7 +183,7 @@ static void enable_crime_irq(unsigned int irq)
 
 	spin_lock_irqsave(&ip32_irq_lock, flags);
 	crime_mask |= 1 << (irq - 1);
-	crime->imask = crime_mask;
+	crime_write(crime_mask, CRIME_INT_MASK);
 	spin_unlock_irqrestore(&ip32_irq_lock, flags);
 }
 
@@ -202,7 +199,7 @@ static void disable_crime_irq(unsigned int irq)
 
 	spin_lock_irqsave(&ip32_irq_lock, flags);
 	crime_mask &= ~(1 << (irq - 1));
-	crime->imask = crime_mask;
+	crime_write(crime_mask, CRIME_INT_MASK);
 	flush_crime_bus();
 	spin_unlock_irqrestore(&ip32_irq_lock, flags);
 }
@@ -217,9 +214,9 @@ static void mask_and_ack_crime_irq(unsigned int irq)
 	    || (irq >= CRIME_SOFT0_IRQ && irq <= CRIME_SOFT2_IRQ)) {
 	        uint64_t crime_int;
 		spin_lock_irqsave(&ip32_irq_lock, flags);
-		crime_int = crime->hard_int;
+		crime_int = crime_read(CRIME_HARD_INT);
 		crime_int &= ~(1 << (irq - 1));
-		crime->hard_int = crime_int;
+		crime_write(crime_int, CRIME_HARD_INT);
 		spin_unlock_irqrestore(&ip32_irq_lock, flags);
 	}
 	disable_crime_irq(irq);
@@ -260,7 +257,7 @@ static void enable_macepci_irq(unsigned int irq)
 	macepci_mask |= MACEPCI_CONTROL_INT(irq - 9);
 	mace->pci.control = macepci_mask;
 	crime_mask |= 1 << (irq - 1);
-	crime->imask = crime_mask;
+	crime_write(crime_mask, CRIME_INT_MASK);
 	spin_unlock_irqrestore(&ip32_irq_lock, flags);
 }
 
@@ -276,7 +273,7 @@ static void disable_macepci_irq(unsigned int irq)
 
 	spin_lock_irqsave(&ip32_irq_lock, flags);
 	crime_mask &= ~(1 << (irq - 1));
-	crime->imask = crime_mask;
+	crime_write(crime_mask, CRIME_INT_MASK);
 	flush_crime_bus();
 	macepci_mask &= ~MACEPCI_CONTROL_INT(irq - 9);
 	mace->pci.control = macepci_mask;
@@ -364,9 +361,9 @@ static void enable_maceisa_irq (unsigned int irq)
 	DBG ("crime_int %08x enabled\n", crime_int);
 	spin_lock_irqsave(&ip32_irq_lock, flags);
 	crime_mask |= crime_int;
-	crime->imask = crime_mask;
+	crime_write(crime_mask, CRIME_INT_MASK);
 	maceisa_mask |= 1 << (irq - 33);
-	mace->perif.ctrl.imask = maceisa_mask;
+	mace_perif_ctrl_write(maceisa_mask, imask);
 	spin_unlock_irqrestore(&ip32_irq_lock, flags);
 }
 
@@ -390,9 +387,9 @@ static void disable_maceisa_irq(unsigned int irq)
         if(!(maceisa_mask & MACEISA_SUPERIO_INT))
 		crime_int |= MACE_SUPERIO_INT;
 	crime_mask &= ~crime_int;
-	crime->imask = crime_mask;
+	crime_write(crime_mask, CRIME_INT_MASK);
 	flush_crime_bus();
-	mace->perif.ctrl.imask = maceisa_mask;
+	mace_perif_ctrl_write(maceisa_mask, imask);
 	flush_mace_bus();
 	spin_unlock_irqrestore(&ip32_irq_lock, flags);
 }
@@ -407,9 +404,9 @@ static void mask_and_ack_maceisa_irq(unsigned int irq)
 	case MACEISA_SERIAL2_TDMAPR_IRQ:
 		/* edge triggered */
 		spin_lock_irqsave(&ip32_irq_lock, flags);
-		mace_int = mace->perif.ctrl.istat;
+		mace_int = mace_perif_ctrl_read(istat);
 		mace_int &= ~(1 << (irq - 33));
-		mace->perif.ctrl.istat = mace_int;
+		mace_perif_ctrl_write(mace_int, istat);
 		spin_unlock_irqrestore(&ip32_irq_lock, flags);
 		break;
 	}
@@ -445,7 +442,7 @@ static void enable_mace_irq(unsigned int irq)
 
 	spin_lock_irqsave(&ip32_irq_lock, flags);
 	crime_mask |= 1 << (irq - 1);
-	crime->imask = crime_mask;
+	crime_write(crime_mask, CRIME_INT_MASK);
 	spin_unlock_irqrestore(&ip32_irq_lock, flags);
 }
 
@@ -461,7 +458,7 @@ static void disable_mace_irq(unsigned int irq)
 
 	spin_lock_irqsave(&ip32_irq_lock, flags);
 	crime_mask &= ~(1 << (irq - 1));
-	crime->imask = crime_mask;
+	crime_write(crime_mask, CRIME_INT_MASK);
 	flush_crime_bus();
 	spin_unlock_irqrestore(&ip32_irq_lock, flags);
 }
@@ -488,14 +485,19 @@ static struct hw_interrupt_type ip32_mace_interrupt = {
 
 static void ip32_unknown_interrupt(struct pt_regs *regs)
 {
+	uint64_t crime;
+
 	printk ("Unknown interrupt occurred!\n");
 	printk ("cp0_status: %08x\n", read_c0_status());
 	printk ("cp0_cause: %08x\n", read_c0_cause());
-	printk ("CRIME intr mask: %016lx\n", crime->imask);
-	printk ("CRIME intr status: %016lx\n", crime->istat);
-	printk ("CRIME hardware intr register: %016lx\n", crime->hard_int);
-	printk ("MACE ISA intr mask: %08lx\n", mace->perif.ctrl.imask);
-	printk ("MACE ISA intr status: %08lx\n", mace->perif.ctrl.istat);
+	crime = crime_read(CRIME_INT_MASK);
+	printk ("CRIME intr mask: %016lx\n", crime);
+	crime = crime_read(CRIME_INT_STAT);
+	printk ("CRIME intr status: %016lx\n", crime);
+	crime = crime_read(CRIME_HARD_INT);
+	printk ("CRIME hardware intr register: %016lx\n", crime);
+	printk ("MACE ISA intr mask: %08lx\n", mace_perif_ctrl_read(imask));
+	printk ("MACE ISA intr status: %08lx\n", mace_perif_ctrl_read(istat));
 	printk ("MACE PCI control register: %08x\n", mace->pci.control);
 
 	printk("Register dump:\n");
@@ -513,12 +515,12 @@ void ip32_irq0(struct pt_regs *regs)
 	uint64_t crime_int;
 	int irq = 0;
 
-	crime_int = crime->istat & crime_mask;
+	crime_int = crime_read(CRIME_INT_STAT) & crime_mask;
 	irq = ffs(crime_int);
 	crime_int = 1 << (irq - 1);
 
 	if (crime_int & CRIME_MACEISA_INT_MASK) {
-		unsigned long mace_int = mace->perif.ctrl.istat;
+		unsigned long mace_int = mace_perif_ctrl_read(istat);
 		irq = ffs(mace_int & maceisa_mask) + 32;
 	}
 	DBG("*irq %u*\n", irq);
@@ -550,17 +552,18 @@ void ip32_irq5(struct pt_regs *regs)
 	ll_timer_interrupt(IP32_R4K_TIMER_IRQ, regs);
 }
 
-void __init arch_init_irq(void)
+void __init init_IRQ(void)
 {
 	unsigned int irq;
 
+	init_generic_irq();
 	/* Install our interrupt handler, then clear and disable all
 	 * CRIME and MACE interrupts. */
-	crime->imask = 0;
-	crime->hard_int = 0;
-	crime->soft_int = 0;
-	mace->perif.ctrl.istat = 0;
-	mace->perif.ctrl.imask = 0;
+	crime_write(0, CRIME_INT_MASK);
+	crime_write(0, CRIME_HARD_INT);
+	crime_write(0, CRIME_SOFT_INT);
+	mace_perif_ctrl_write(0, istat);
+	mace_perif_ctrl_write(0, imask);
 	set_except_vector(0, ip32_handle_int);
 
 	for (irq = 0; irq <= IP32_IRQ_MAX; irq++) {

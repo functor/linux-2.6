@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2004 Silicon Graphics, Inc.  All Rights Reserved.
+ * Copyright (c) 2000-2003 Silicon Graphics, Inc.  All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -207,9 +207,10 @@ xfs_qm_syncall(
 }
 
 /*
- * Clear the quotaflags in memory and in the superblock.
+ * When xfsquotas isn't installed and the superblock had quotas, we need to
+ * clear the quotaflags from superblock.
  */
-void
+STATIC void
 xfs_mount_reset_sbqflags(
 	xfs_mount_t		*mp)
 {
@@ -240,8 +241,6 @@ xfs_mount_reset_sbqflags(
 	if (xfs_trans_reserve(tp, 0, mp->m_sb.sb_sectsize + 128, 0, 0,
 				      XFS_DEFAULT_LOG_COUNT)) {
 		xfs_trans_cancel(tp, 0);
-		xfs_fs_cmn_err(CE_ALERT, mp,
-			"xfs_mount_reset_sbqflags: Superblock update failed!");
 		return;
 	}
 	xfs_mod_sb(tp, XFS_SB_QFLAGS);
@@ -295,12 +294,15 @@ xfs_qm_newmount(
 		 */
 		if (quotaondisk && !XFS_QM_NEED_QUOTACHECK(mp)) {
 			/*
+			 * If the xfs quota code isn't installed,
+			 * we have to reset the quotachk'd bit.
 			 * If an error occured, qm_mount_quotas code
 			 * has already disabled quotas. So, just finish
 			 * mounting, and get on with the boring life
 			 * without disk quotas.
 			 */
-			xfs_qm_mount_quotas(mp, 0);
+			if (xfs_qm_mount_quotas(mp))
+				xfs_mount_reset_sbqflags(mp);
 		} else {
 			/*
 			 * Clear the quota flags, but remember them. This
@@ -322,13 +324,13 @@ STATIC int
 xfs_qm_endmount(
 	xfs_mount_t	*mp,
 	uint		needquotamount,
-	uint		quotaflags,
-	int		mfsi_flags)
+	uint		quotaflags)
 {
 	if (needquotamount) {
 		ASSERT(mp->m_qflags == 0);
 		mp->m_qflags = quotaflags;
-		xfs_qm_mount_quotas(mp, mfsi_flags);
+		if (xfs_qm_mount_quotas(mp))
+			xfs_mount_reset_sbqflags(mp);
 	}
 
 #if defined(DEBUG) && defined(XFS_LOUD_RECOVERY)

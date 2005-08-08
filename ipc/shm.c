@@ -27,7 +27,6 @@
 #include <linux/shmem_fs.h>
 #include <linux/security.h>
 #include <linux/vs_base.h>
-#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
 
@@ -195,7 +194,7 @@ static int newseg (key_t key, int shmflg, size_t size)
 		return -ENOMEM;
 
 	shp->shm_perm.key = key;
-	shp->shm_perm.xid = vx_current_xid();
+	shp->shm_perm.xid = current->xid;
 	shp->shm_flags = (shmflg & S_IRWXUGO);
 	shp->mlock_user = NULL;
 
@@ -514,6 +513,11 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 	case SHM_LOCK:
 	case SHM_UNLOCK:
 	{
+		/* Allow superuser to lock segment in memory */
+		if (!can_do_mlock() && cmd == SHM_LOCK) {
+			err = -EPERM;
+			goto out;
+		}
 		shp = shm_lock(shmid);
 		if(shp==NULL) {
 			err = -EINVAL;
@@ -522,16 +526,6 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 		err = shm_checkid(shp,shmid);
 		if(err)
 			goto out_unlock;
-
-		if (!capable(CAP_IPC_LOCK)) {
-			err = -EPERM;
-			if (current->euid != shp->shm_perm.uid &&
-			    current->euid != shp->shm_perm.cuid)
-				goto out_unlock;
-			if (cmd == SHM_LOCK &&
-			    !current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur)
-				goto out_unlock;
-		}
 
 		err = security_shm_shmctl(shp, cmd);
 		if (err)

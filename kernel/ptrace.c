@@ -38,29 +38,6 @@ void __ptrace_link(task_t *child, task_t *new_parent)
 	SET_LINKS(child);
 }
  
-static inline int pending_resume_signal(struct sigpending *pending)
-{
-#define M(sig) (1UL << ((sig)-1))
-	return sigtestsetmask(&pending->signal, M(SIGCONT) | M(SIGKILL));
-}
-
-/*
- * Turn a tracing stop into a normal stop now, since with no tracer there
- * would be no way to wake it up with SIGCONT or SIGKILL.  If there was a
- * signal sent that would resume the child, but didn't because it was in
- * TASK_TRACED, resume it now.
- */
-void ptrace_untrace(task_t *child)
-{
-	spin_lock(&child->sighand->siglock);
-	child->state = TASK_STOPPED;
-	if (pending_resume_signal(&child->pending) ||
-	    pending_resume_signal(&child->signal->shared_pending)) {
-		signal_wake_up(child, 1);
-	}
-	spin_unlock(&child->sighand->siglock);
-}
-
 /*
  * unptrace a task: move it back to its original parent and
  * remove it from the ptrace list.
@@ -72,15 +49,21 @@ void __ptrace_unlink(task_t *child)
 	if (!child->ptrace)
 		BUG();
 	child->ptrace = 0;
-	if (!list_empty(&child->ptrace_list)) {
-		list_del_init(&child->ptrace_list);
-		REMOVE_LINKS(child);
-		child->parent = child->real_parent;
-		SET_LINKS(child);
-	}
+	if (list_empty(&child->ptrace_list))
+		return;
+	list_del_init(&child->ptrace_list);
+	REMOVE_LINKS(child);
+	child->parent = child->real_parent;
+	SET_LINKS(child);
 
-	if (child->state == TASK_TRACED)
-		ptrace_untrace(child);
+	if (child->state == TASK_TRACED) {
+		/*
+		 * Turn a tracing stop into a normal stop now,
+		 * since with no tracer there would be no way
+		 * to wake it up with SIGCONT or SIGKILL.
+		 */
+		child->state = TASK_STOPPED;
+	}
 }
 
 /*
@@ -99,8 +82,7 @@ int ptrace_check_attach(struct task_struct *child, int kill)
 	 */
 	read_lock(&tasklist_lock);
 	if ((child->ptrace & PT_PTRACED) && child->parent == current &&
-	    (!(child->ptrace & PT_ATTACHED) || child->real_parent != current)
-	    && child->signal != NULL) {
+	    child->signal != NULL) {
 		ret = 0;
 		spin_lock_irq(&child->sighand->siglock);
 		if (child->state == TASK_STOPPED) {
@@ -149,8 +131,7 @@ int ptrace_attach(struct task_struct *task)
 		goto bad;
 
 	/* Go */
-	task->ptrace |= PT_PTRACED | ((task->real_parent != current)
-				      ? PT_ATTACHED : 0);
+	task->ptrace |= PT_PTRACED;
 	if (capable(CAP_SYS_PTRACE))
 		task->ptrace |= PT_PTRACE_CAP;
 	task_unlock(task);

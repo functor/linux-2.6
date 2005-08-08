@@ -19,7 +19,6 @@
 #include <linux/vmalloc.h>
 #include <linux/blkdev.h>
 #include <linux/backing-dev.h>
-#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
 #include <asm/tlb.h>
@@ -33,10 +32,9 @@ unsigned long askedalloc, realalloc;
 atomic_t vm_committed_space = ATOMIC_INIT(0);
 int sysctl_overcommit_memory = OVERCOMMIT_GUESS; /* heuristic overcommit */
 int sysctl_overcommit_ratio = 50; /* default is 50% */
-int sysctl_max_map_count = DEFAULT_MAX_MAP_COUNT;
 
+int sysctl_max_map_count = DEFAULT_MAX_MAP_COUNT;
 EXPORT_SYMBOL(sysctl_max_map_count);
-EXPORT_SYMBOL(mem_map);
 
 /*
  * Handle all mappings that got truncated by a "truncate()"
@@ -59,7 +57,7 @@ int vmtruncate(struct inode *inode, loff_t offset)
 	goto out_truncate;
 
 do_expand:
-	limit = current->signal->rlim[RLIMIT_FSIZE].rlim_cur;
+	limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
 	if (limit != RLIM_INFINITY && offset > limit)
 		goto out_sig;
 	if (offset > inode->i_sb->s_maxbytes)
@@ -75,8 +73,6 @@ out_sig:
 out:
 	return -EFBIG;
 }
-
-EXPORT_SYMBOL(vmtruncate);
 
 /*
  * Return the total memory allocated for this pointer, not
@@ -143,12 +139,6 @@ struct page * vmalloc_to_page(void *addr)
 {
 	return virt_to_page(addr);
 }
-
-unsigned long vmalloc_to_pfn(void *addr)
-{
-	return page_to_pfn(virt_to_page(addr));
-}
-
 
 long vread(char *buf, char *addr, unsigned long count)
 {
@@ -440,8 +430,6 @@ unsigned long do_mmap_pgoff(
 
 	tblock->next = current->mm->context.tblock.next;
 	current->mm->context.tblock.next = tblock;
-	// current->mm->total_vm += len >> PAGE_SHIFT;
-	vx_vmpages_add(current->mm, len >> PAGE_SHIFT);
 
 #ifdef DEBUG
 	printk("do_mmap:\n");
@@ -495,8 +483,6 @@ int do_munmap(struct mm_struct * mm, unsigned long addr, size_t len)
 	realalloc -= kobjsize(tblock);
 	askedalloc -= sizeof(struct mm_tblock_struct);
 	kfree(tblock);
-	// mm->total_vm -= len >> PAGE_SHIFT;
-	vx_vmpages_sub(mm, len >> PAGE_SHIFT);
 
 #ifdef DEBUG
 	show_process_blocks();
@@ -509,8 +495,6 @@ int do_munmap(struct mm_struct * mm, unsigned long addr, size_t len)
 void exit_mmap(struct mm_struct * mm)
 {
 	struct mm_tblock_struct *tmp;
-	// mm->total_vm = 0;
-	vx_vmpages_sub(mm, mm->total_vm);
 
 	if (!mm)
 		return;
@@ -575,7 +559,7 @@ struct vm_area_struct *find_extend_vma(struct mm_struct *mm, unsigned long addr)
 	return NULL;
 }
 
-int remap_pfn_range(struct vm_area_struct *vma, unsigned long from,
+int remap_page_range(struct vm_area_struct *vma, unsigned long from,
 		unsigned long to, unsigned long size, pgprot_t prot)
 {
 	return -EPERM;
@@ -590,14 +574,3 @@ unsigned long get_unmapped_area(struct file *file, unsigned long addr,
 void swap_unplug_io_fn(struct backing_dev_info *bdi, struct page *page)
 {
 }
-
-unsigned long arch_get_unmapped_area(struct file *file, unsigned long addr,
-	unsigned long len, unsigned long pgoff, unsigned long flags)
-{
-	return -ENOMEM;
-}
-
-void arch_unmap_area(struct vm_area_struct *area)
-{
-}
-

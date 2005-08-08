@@ -34,14 +34,13 @@
 #include <linux/ptrace.h>
 #include <linux/ioport.h>
 #include <linux/spinlock.h>
-#include <linux/moduleparam.h>
 
 #include <linux/skbuff.h>
 #include <linux/string.h>
 #include <linux/serial.h>
 #include <linux/serial_reg.h>
-#include <linux/bitops.h>
 #include <asm/system.h>
+#include <asm/bitops.h>
 #include <asm/io.h>
 
 #include <linux/device.h>
@@ -64,11 +63,11 @@
 
 
 /* Bit map of interrupts to choose from */
-static unsigned int irq_mask = 0xffff;
+static u_int irq_mask = 0xffff;
 static int irq_list[4] = { -1 };
 
-module_param(irq_mask, uint, 0);
-module_param_array(irq_list, int, NULL, 0);
+MODULE_PARM(irq_mask, "i");
+MODULE_PARM(irq_list, "1-4i");
 
 MODULE_AUTHOR("Marcel Holtmann <marcel@holtmann.org>, Jose Orlando Pereira <jop@di.uminho.pt>");
 MODULE_DESCRIPTION("Bluetooth driver for the 3Com Bluetooth PCMCIA card");
@@ -96,14 +95,14 @@ typedef struct bt3c_info_t {
 } bt3c_info_t;
 
 
-static void bt3c_config(dev_link_t *link);
-static void bt3c_release(dev_link_t *link);
-static int bt3c_event(event_t event, int priority, event_callback_args_t *args);
+void bt3c_config(dev_link_t *link);
+void bt3c_release(dev_link_t *link);
+int bt3c_event(event_t event, int priority, event_callback_args_t *args);
 
 static dev_info_t dev_info = "bt3c_cs";
 
-static dev_link_t *bt3c_attach(void);
-static void bt3c_detach(dev_link_t *);
+dev_link_t *bt3c_attach(void);
+void bt3c_detach(dev_link_t *);
 
 static dev_link_t *dev_list = NULL;
 
@@ -132,28 +131,28 @@ static dev_link_t *dev_list = NULL;
 #define CONTROL  4
 
 
-static inline void bt3c_address(unsigned int iobase, unsigned short addr)
+inline void bt3c_address(unsigned int iobase, unsigned short addr)
 {
 	outb(addr & 0xff, iobase + ADDR_L);
 	outb((addr >> 8) & 0xff, iobase + ADDR_H);
 }
 
 
-static inline void bt3c_put(unsigned int iobase, unsigned short value)
+inline void bt3c_put(unsigned int iobase, unsigned short value)
 {
 	outb(value & 0xff, iobase + DATA_L);
 	outb((value >> 8) & 0xff, iobase + DATA_H);
 }
 
 
-static inline void bt3c_io_write(unsigned int iobase, unsigned short addr, unsigned short value)
+inline void bt3c_io_write(unsigned int iobase, unsigned short addr, unsigned short value)
 {
 	bt3c_address(iobase, addr);
 	bt3c_put(iobase, value);
 }
 
 
-static inline unsigned short bt3c_get(unsigned int iobase)
+inline unsigned short bt3c_get(unsigned int iobase)
 {
 	unsigned short value = inb(iobase + DATA_L);
 
@@ -163,7 +162,7 @@ static inline unsigned short bt3c_get(unsigned int iobase)
 }
 
 
-static inline unsigned short bt3c_read(unsigned int iobase, unsigned short addr)
+inline unsigned short bt3c_read(unsigned int iobase, unsigned short addr)
 {
 	bt3c_address(iobase, addr);
 
@@ -490,10 +489,13 @@ static int bt3c_hci_ioctl(struct hci_dev *hdev, unsigned int cmd, unsigned long 
 
 static struct device *bt3c_device(void)
 {
+	static char *kobj_name = "bt3c";
+
 	static struct device dev = {
 		.bus_id = "pcmcia",
 	};
-	kobject_set_name(&dev.kobj, "bt3c");
+	dev.kobj.k_name = kmalloc(strlen(kobj_name) + 1, GFP_KERNEL);
+	strcpy(dev.kobj.k_name, kobj_name);
 	kobject_init(&dev.kobj);
 
 	return &dev;
@@ -584,7 +586,7 @@ error:
 }
 
 
-static int bt3c_open(bt3c_info_t *info)
+int bt3c_open(bt3c_info_t *info)
 {
 	const struct firmware *firmware;
 	struct hci_dev *hdev;
@@ -654,7 +656,7 @@ error:
 }
 
 
-static int bt3c_close(bt3c_info_t *info)
+int bt3c_close(bt3c_info_t *info)
 {
 	struct hci_dev *hdev = info->hdev;
 
@@ -671,7 +673,7 @@ static int bt3c_close(bt3c_info_t *info)
 	return 0;
 }
 
-static dev_link_t *bt3c_attach(void)
+dev_link_t *bt3c_attach(void)
 {
 	bt3c_info_t *info;
 	client_reg_t client_reg;
@@ -729,7 +731,7 @@ static dev_link_t *bt3c_attach(void)
 }
 
 
-static void bt3c_detach(dev_link_t *link)
+void bt3c_detach(dev_link_t *link)
 {
 	bt3c_info_t *info = link->priv;
 	dev_link_t **linkp;
@@ -783,7 +785,7 @@ static int next_tuple(client_handle_t handle, tuple_t *tuple, cisparse_t *parse)
 	return get_tuple(handle, tuple, parse);
 }
 
-static void bt3c_config(dev_link_t *link)
+void bt3c_config(dev_link_t *link)
 {
 	static ioaddr_t base[5] = { 0x3f8, 0x2f8, 0x3e8, 0x2e8, 0x0 };
 	client_handle_t handle = link->handle;
@@ -896,7 +898,7 @@ failed:
 }
 
 
-static void bt3c_release(dev_link_t *link)
+void bt3c_release(dev_link_t *link)
 {
 	bt3c_info_t *info = link->priv;
 
@@ -913,7 +915,7 @@ static void bt3c_release(dev_link_t *link)
 }
 
 
-static int bt3c_event(event_t event, int priority, event_callback_args_t *args)
+int bt3c_event(event_t event, int priority, event_callback_args_t *args)
 {
 	dev_link_t *link = args->client_data;
 	bt3c_info_t *info = link->priv;

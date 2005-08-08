@@ -185,7 +185,7 @@ mcpn765_setup_via_82c586b(void)
 	struct pci_dev	*dev;
 	u_char		c;
 
-	if ((dev = pci_get_device(PCI_VENDOR_ID_VIA,
+	if ((dev = pci_find_device(PCI_VENDOR_ID_VIA,
 				   PCI_DEVICE_ID_VIA_82C586_0,
 				   NULL)) == NULL) {
 		printk("No VIA ISA bridge found\n");
@@ -209,8 +209,8 @@ mcpn765_setup_via_82c586b(void)
 	pci_write_config_dword(dev, 0x54, 0);
 	pci_write_config_byte(dev, 0x58, 0);
 
-	pci_dev_put(dev);
-	if ((dev = pci_get_device(PCI_VENDOR_ID_VIA,
+
+	if ((dev = pci_find_device(PCI_VENDOR_ID_VIA,
 				   PCI_DEVICE_ID_VIA_82C586_1,
 				   NULL)) == NULL) {
 		printk("No VIA ISA bridge found\n");
@@ -225,7 +225,6 @@ mcpn765_setup_via_82c586b(void)
 	pci_read_config_byte(dev, 0x40, &c);
 	c |= 0x03;
 	pci_write_config_byte(dev, 0x40, c);
-	pci_dev_put(dev);
 
 	return;
 }

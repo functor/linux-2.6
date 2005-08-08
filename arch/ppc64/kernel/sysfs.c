@@ -6,8 +6,6 @@
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/module.h>
-#include <linux/nodemask.h>
-
 #include <asm/current.h>
 #include <asm/processor.h>
 #include <asm/cputable.h>
@@ -17,7 +15,8 @@
 
 /* SMT stuff */
 
-#ifdef CONFIG_PPC_MULTIPLATFORM
+#ifndef CONFIG_PPC_ISERIES
+
 /* default to snooze disabled */
 DEFINE_PER_CPU(unsigned long, smt_snooze_delay);
 
@@ -93,6 +92,19 @@ static int __init setup_smt_snooze_delay(char *str)
 }
 __setup("smt-snooze-delay=", setup_smt_snooze_delay);
 
+#endif
+
+
+/* PMC stuff */
+
+#ifdef CONFIG_PPC_ISERIES
+void ppc64_enable_pmcs(void)
+{
+	/* XXX Implement for iseries */
+}
+#endif
+
+#ifdef CONFIG_PPC_MULTIPLATFORM
 /*
  * Enabling PMCs will slow partition context switch times so we only do
  * it the first time we write to the PMCs.
@@ -168,14 +180,6 @@ void ppc64_enable_pmcs(void)
 		mtspr(CTRLT, ctrl);
 	}
 #endif /* CONFIG_PPC_PSERIES */
-}
-
-#else
-
-/* PMC stuff */
-void ppc64_enable_pmcs(void)
-{
-	/* XXX Implement for iseries */
 }
 #endif /* CONFIG_PPC_MULTIPLATFORM */
 

@@ -546,12 +546,14 @@ nfsd4_decode_access(struct nfsd4_compoundargs *argp, struct nfsd4_access *access
 	DECODE_TAIL;
 }
 
+#define NFS4_STATE_NOT_LOCKED	((void *)-1)
+
 static int
 nfsd4_decode_close(struct nfsd4_compoundargs *argp, struct nfsd4_close *close)
 {
 	DECODE_HEAD;
 
-	close->cl_stateowner = NULL;
+	close->cl_stateowner = NFS4_STATE_NOT_LOCKED;
 	READ_BUF(4 + sizeof(stateid_t));
 	READ32(close->cl_seqid);
 	READ32(close->cl_stateid.si_generation);
@@ -641,7 +643,7 @@ nfsd4_decode_lock(struct nfsd4_compoundargs *argp, struct nfsd4_lock *lock)
 {
 	DECODE_HEAD;
 
-	lock->lk_stateowner = NULL;
+	lock->lk_stateowner = NFS4_STATE_NOT_LOCKED;
 	/*
 	* type, reclaim(boolean), offset, length, new_lock_owner(boolean)
 	*/
@@ -699,7 +701,7 @@ nfsd4_decode_locku(struct nfsd4_compoundargs *argp, struct nfsd4_locku *locku)
 {
 	DECODE_HEAD;
 
-	locku->lu_stateowner = NULL;
+	locku->lu_stateowner = NFS4_STATE_NOT_LOCKED;
 	READ_BUF(24 + sizeof(stateid_t));
 	READ32(locku->lu_type);
 	if ((locku->lu_type < NFS4_READ_LT) || (locku->lu_type > NFS4_WRITEW_LT))
@@ -735,7 +737,7 @@ nfsd4_decode_open(struct nfsd4_compoundargs *argp, struct nfsd4_open *open)
 
 	memset(open->op_bmval, 0, sizeof(open->op_bmval));
 	open->op_iattr.ia_valid = 0;
-	open->op_stateowner = NULL;
+	open->op_stateowner = NFS4_STATE_NOT_LOCKED;
 
 	/* seqid, share_access, share_deny, clientid, ownerlen */
 	READ_BUF(16 + sizeof(clientid_t));
@@ -811,7 +813,7 @@ nfsd4_decode_open_confirm(struct nfsd4_compoundargs *argp, struct nfsd4_open_con
 {
 	DECODE_HEAD;
 		    
-	open_conf->oc_stateowner = NULL;
+	open_conf->oc_stateowner = NFS4_STATE_NOT_LOCKED;
 	READ_BUF(4 + sizeof(stateid_t));
 	READ32(open_conf->oc_req_stateid.si_generation);
 	COPYMEM(&open_conf->oc_req_stateid.si_opaque, sizeof(stateid_opaque_t));
@@ -825,7 +827,7 @@ nfsd4_decode_open_downgrade(struct nfsd4_compoundargs *argp, struct nfsd4_open_d
 {
 	DECODE_HEAD;
 		    
-	open_down->od_stateowner = NULL;
+	open_down->od_stateowner = NFS4_STATE_NOT_LOCKED;
 	READ_BUF(4 + sizeof(stateid_t));
 	READ32(open_down->od_stateid.si_generation);
 	COPYMEM(&open_down->od_stateid.si_opaque, sizeof(stateid_opaque_t));
@@ -1326,7 +1328,8 @@ nfsd4_decode_compound(struct nfsd4_compoundargs *argp)
  */
 
 #define ENCODE_SEQID_OP_TAIL(stateowner) do {			\
-	if (seqid_mutating_err(nfserr) && stateowner) { 	\
+	if (seqid_mutating_err(nfserr) && stateowner		\
+	    && (stateowner != NFS4_STATE_NOT_LOCKED)) { 	\
 		if (stateowner->so_confirmed)			\
 			stateowner->so_seqid++;			\
 		stateowner->so_replay.rp_status = nfserr;   	\
@@ -1334,7 +1337,10 @@ nfsd4_decode_compound(struct nfsd4_compoundargs *argp)
 			  (((char *)(resp)->p - (char *)save)); \
 		memcpy(stateowner->so_replay.rp_buf, save,      \
  			stateowner->so_replay.rp_buflen); 	\
-	} } while (0);
+	}							\
+	if (stateowner != NFS4_STATE_NOT_LOCKED)		\
+		nfs4_unlock_state();				\
+	} while (0);
 
 
 static u32 nfs4_ftypes[16] = {
@@ -1999,10 +2005,9 @@ nfsd4_encode_lock_denied(struct nfsd4_compoundres *resp, struct nfsd4_lock_denie
 	WRITE64(ld->ld_length);
 	WRITE32(ld->ld_type);
 	if (ld->ld_sop) {
-		WRITEMEM(&ld->ld_clientid, 8);
+		WRITEMEM(&ld->ld_sop->so_client->cl_clientid, 8);
 		WRITE32(ld->ld_sop->so_owner.len);
 		WRITEMEM(ld->ld_sop->so_owner.data, ld->ld_sop->so_owner.len);
-		kref_put(&ld->ld_sop->so_ref, nfs4_free_stateowner);
 	}  else {  /* non - nfsv4 lock in conflict, no clientid nor owner */
 		WRITE64((u64)0); /* clientid */
 		WRITE32(0); /* length of owner name */
@@ -2573,6 +2578,7 @@ nfsd4_encode_replay(struct nfsd4_compoundres *resp, struct nfsd4_op *op)
 	RESERVE_SPACE(rp->rp_buflen);
 	WRITEMEM(rp->rp_buf, rp->rp_buflen);
 	ADJUST_ARGS();
+	nfs4_unlock_state();
 }
 
 /*

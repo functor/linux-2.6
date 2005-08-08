@@ -32,8 +32,9 @@ CHECKFLAGS	+= -m64 -D__powerpc__
 
 LDFLAGS		:= -m elf64ppc
 LDFLAGS_vmlinux	:= -Bstatic -e $(KERNELLOAD) -Ttext $(KERNELLOAD)
-CFLAGS		+= -msoft-float -pipe -mminimal-toc -mtraceback=none \
-		   -mcall-aixdesc
+CFLAGS		+= -msoft-float -pipe -mminimal-toc -mtraceback=none
+		   
+CFLAGS += $(call cc-option,-mcall-aixdesc)		   
 
 ifeq ($(CONFIG_POWER4_ONLY),y)
 	CFLAGS += $(call cc-option,-mcpu=power4)
@@ -58,13 +59,11 @@ bzImage: vmlinux
 	cp vmlinux arch/ppc64/boot/bzImage
 
 boottarget-$(CONFIG_PPC_PSERIES) := zImage zImage.initrd zImage.stub
-boottarget-$(CONFIG_PPC_MAPLE) := zImage zImage.initrd
 boottarget-$(CONFIG_PPC_ISERIES) := vmlinux.sminitrd vmlinux.initrd vmlinux.sm
 $(boottarget-y): vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
 bootimage-$(CONFIG_PPC_PSERIES) := zImage
-bootimage-$(CONFIG_PPC_MAPLE) := zImage
 bootimage-$(CONFIG_PPC_ISERIES) := vmlinux
 BOOTIMAGE := $(bootimage-y)
 install: vmlinux

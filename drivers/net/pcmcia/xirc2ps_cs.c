@@ -79,7 +79,6 @@
 #include <linux/skbuff.h>
 #include <linux/if_arp.h>
 #include <linux/ioport.h>
-#include <linux/bitops.h>
 
 #include <pcmcia/version.h>
 #include <pcmcia/cs_types.h>
@@ -90,6 +89,7 @@
 
 #include <asm/io.h>
 #include <asm/system.h>
+#include <asm/bitops.h>
 #include <asm/uaccess.h>
 
 #ifndef MANFID_COMPAQ

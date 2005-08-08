@@ -13,7 +13,7 @@
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/jiffies.h>
@@ -227,7 +227,7 @@ static unsigned int sfq_drop(struct Qdisc *sch)
 		kfree_skb(skb);
 		sfq_dec(q, x);
 		sch->q.qlen--;
-		sch->qstats.drops++;
+		sch->stats.drops++;
 		return len;
 	}
 
@@ -243,7 +243,7 @@ static unsigned int sfq_drop(struct Qdisc *sch)
 		sfq_dec(q, d);
 		sch->q.qlen--;
 		q->ht[q->hash[d]] = SFQ_DEPTH;
-		sch->qstats.drops++;
+		sch->stats.drops++;
 		return len;
 	}
 
@@ -276,8 +276,8 @@ sfq_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 		}
 	}
 	if (++sch->q.qlen < q->limit-1) {
-		sch->bstats.bytes += skb->len;
-		sch->bstats.packets++;
+		sch->stats.bytes += skb->len;
+		sch->stats.packets++;
 		return 0;
 	}
 
@@ -310,12 +310,10 @@ sfq_requeue(struct sk_buff *skb, struct Qdisc* sch)
 			q->tail = x;
 		}
 	}
-	if (++sch->q.qlen < q->limit - 1) {
-		sch->qstats.requeues++;
+	if (++sch->q.qlen < q->limit - 1)
 		return 0;
-	}
 
-	sch->qstats.drops++;
+	sch->stats.drops++;
 	sfq_drop(sch);
 	return NET_XMIT_CN;
 }

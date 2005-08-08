@@ -457,7 +457,7 @@ struct hrz_dev {
   unsigned long    unassigned_cell_count;
 
   struct pci_dev * pci_dev;
-  struct timer_list housekeeping;
+  struct hrz_dev * prev;
 };
 
 typedef struct hrz_dev hrz_dev;

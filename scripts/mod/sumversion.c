@@ -9,6 +9,39 @@
 #include <string.h>
 #include "modpost.h"
 
+/* Parse tag=value strings from .modinfo section */
+static char *next_string(char *string, unsigned long *secsize)
+{
+	/* Skip non-zero chars */
+	while (string[0]) {
+		string++;
+		if ((*secsize)-- <= 1)
+			return NULL;
+	}
+
+	/* Skip any zero padding. */
+	while (!string[0]) {
+		string++;
+		if ((*secsize)-- <= 1)
+			return NULL;
+	}
+	return string;
+}
+
+static char *get_modinfo(void *modinfo, unsigned long modinfo_len,
+			 const char *tag)
+{
+	char *p;
+	unsigned int taglen = strlen(tag);
+	unsigned long size = modinfo_len;
+
+	for (p = modinfo; p; p = next_string(p, &size)) {
+		if (strncmp(p, tag, taglen) == 0 && p[taglen] == '=')
+			return p + taglen + 1;
+	}
+	return NULL;
+}
+
 /*
  * Stolen form Cryptographic API.
  *
@@ -252,9 +285,9 @@ static int parse_comment(const char *file, unsigned long len)
 }
 
 /* FIXME: Handle .s files differently (eg. # starts comments) --RR */
-static int parse_file(const signed char *fname, struct md4_ctx *md)
+static int parse_file(const char *fname, struct md4_ctx *md)
 {
-	signed char *file;
+	char *file;
 	unsigned long i, len;
 
 	file = grab_file(fname, &len);
@@ -332,7 +365,7 @@ static int parse_source_files(const char *objfile, struct md4_ctx *md)
 	   Sum all files in the same dir or subdirs.
 	*/
 	while ((line = get_next_line(&pos, file, flen)) != NULL) {
-		signed char* p = line;
+		char* p = line;
 		if (strncmp(line, "deps_", sizeof("deps_")-1) == 0) {
 			check_files = 1;
 			continue;
@@ -375,16 +408,15 @@ out:
 	return ret;
 }
 
-/* Calc and record src checksum. */
-void get_src_version(const char *modname, char sum[], unsigned sumlen)
+static int get_version(const char *modname, char sum[])
 {
 	void *file;
 	unsigned long len;
+	int ret = 0;
 	struct md4_ctx md;
 	char *sources, *end, *fname;
 	const char *basename;
-	char filelist[strlen(getenv("MODVERDIR")) + strlen("/") +
-		      strlen(modname) - strlen(".o") + strlen(".mod") + 1 ];
+	char filelist[sizeof(".tmp_versions/%s.mod") + strlen(modname)];
 
 	/* Source files for module are in .tmp_versions/modname.mod,
 	   after the first line. */
@@ -392,14 +424,15 @@ void get_src_version(const char *modname, char sum[], unsigned sumlen)
 		basename = strrchr(modname, '/') + 1;
 	else
 		basename = modname;
-	sprintf(filelist, "%s/%.*s.mod", getenv("MODVERDIR"),
-		(int) strlen(basename) - 2, basename);
+	sprintf(filelist, ".tmp_versions/%s", basename);
+	/* Truncate .o, add .mod */
+	strcpy(filelist + strlen(filelist)-2, ".mod");
 
 	file = grab_file(filelist, &len);
 	if (!file) {
 		fprintf(stderr, "Warning: could not find versions for %s\n",
 			filelist);
-		return;
+		return 0;
 	}
 
 	sources = strchr(file, '\n');
@@ -424,9 +457,12 @@ void get_src_version(const char *modname, char sum[], unsigned sumlen)
 			goto release;
 	}
 
-	md4_final_ascii(&md, sum, sumlen);
+	/* sum is of form \0<padding>. */
+	md4_final_ascii(&md, sum, 1 + strlen(sum+1));
+	ret = 1;
 release:
 	release_file(file, len);
+	return ret;
 }
 
 static void write_version(const char *filename, const char *sum,
@@ -456,12 +492,12 @@ out:
 	close(fd);
 }
 
-static int strip_rcs_crap(signed char *version)
+void strip_rcs_crap(char *version)
 {
 	unsigned int len, full_len;
 
 	if (strncmp(version, "$Revision", strlen("$Revision")) != 0)
-		return 0;
+		return;
 
 	/* Space for version string follows. */
 	full_len = strlen(version) + strlen(version + strlen(version) + 1) + 2;
@@ -482,15 +518,31 @@ static int strip_rcs_crap(signed char *version)
 		len++;
 	memmove(version + len, version + strlen(version),
 		full_len - strlen(version));
-	return 1;
 }
 
-/* Clean up RCS-style version numbers. */
-void maybe_frob_rcs_version(const char *modfilename,
-			    char *version,
-			    void *modinfo,
-			    unsigned long version_offset)
+/* If the modinfo contains a "version" value, then set this. */
+void maybe_frob_version(const char *modfilename,
+			void *modinfo,
+			unsigned long modinfo_len,
+			unsigned long modinfo_offset)
 {
-	if (strip_rcs_crap(version))
-		write_version(modfilename, version, version_offset);
+	char *version, *csum;
+
+	version = get_modinfo(modinfo, modinfo_len, "version");
+	if (!version)
+		return;
+
+	/* RCS $Revision gets stripped out. */
+	strip_rcs_crap(version);
+
+	/* Check against double sumversion */
+	if (strchr(version, ' '))
+		return;
+
+	/* Version contains embedded NUL: second half has space for checksum */
+	csum = version + strlen(version);
+	*(csum++) = ' ';
+	if (get_version(modfilename, csum))
+		write_version(modfilename, version,
+			      modinfo_offset + (version - (char *)modinfo));
 }

@@ -105,8 +105,6 @@ extern void iounmap(void *addr);
 #define outb(x,addr) ((void) writeb(x,addr))
 #define outb_p(x,addr) outb(x,addr)
 
-#define mmiowb()
-
 #endif /* __KERNEL__ */
 
 #endif

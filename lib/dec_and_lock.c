@@ -27,7 +27,7 @@
  */
 
 #ifndef ATOMIC_DEC_AND_LOCK
-int _atomic_dec_and_lock(atomic_t *atomic, spinlock_t *lock)
+int atomic_dec_and_lock(atomic_t *atomic, spinlock_t *lock)
 {
 	spin_lock(lock);
 	if (atomic_dec_and_test(atomic))
@@ -36,5 +36,5 @@ int _atomic_dec_and_lock(atomic_t *atomic, spinlock_t *lock)
 	return 0;
 }
 
-EXPORT_SYMBOL(_atomic_dec_and_lock);
+EXPORT_SYMBOL(atomic_dec_and_lock);
 #endif

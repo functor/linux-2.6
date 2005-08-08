@@ -3,7 +3,7 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 
 /*
  * If the bitops are not inlined in bitops.h, they are defined here.

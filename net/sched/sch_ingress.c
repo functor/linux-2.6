@@ -151,12 +151,12 @@ static int ingress_enqueue(struct sk_buff *skb,struct Qdisc *sch)
 	 * firewall FW_* code.
 	 */
 #ifdef CONFIG_NET_CLS_ACT
-	sch->bstats.packets++;
-	sch->bstats.bytes += skb->len;
+	sch->stats.packets++;
+	sch->stats.bytes += skb->len;
 	switch (result) {
 		case TC_ACT_SHOT:
 			result = TC_ACT_SHOT;
-			sch->qstats.drops++;
+			sch->stats.drops++;
 			break;
 		case TC_ACT_STOLEN:
 		case TC_ACT_QUEUED:
@@ -176,14 +176,14 @@ static int ingress_enqueue(struct sk_buff *skb,struct Qdisc *sch)
 	switch (result) {
 		case TC_POLICE_SHOT:
 		result = NF_DROP;
-		sch->qstats.drops++;
+		sch->stats.drops++;
 		break;
 		case TC_POLICE_RECLASSIFY: /* DSCP remarking here ? */
 		case TC_POLICE_OK:
 		case TC_POLICE_UNSPEC:
 		default:
-		sch->bstats.packets++;
-		sch->bstats.bytes += skb->len;
+		sch->stats.packets++;
+		sch->stats.bytes += skb->len;
 		result = NF_ACCEPT;
 		break;
 	};
@@ -191,8 +191,8 @@ static int ingress_enqueue(struct sk_buff *skb,struct Qdisc *sch)
 #else
 	D2PRINTK("Overriding result to ACCEPT\n");
 	result = NF_ACCEPT;
-	sch->bstats.packets++;
-	sch->bstats.bytes += skb->len;
+	sch->stats.packets++;
+	sch->stats.bytes += skb->len;
 #endif
 #endif
 
