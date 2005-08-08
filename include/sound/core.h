@@ -49,6 +49,7 @@ struct sbus_dev;
 
 typedef enum {
 	SNDRV_DEV_TOPLEVEL =		(0*SNDRV_DEV_TYPE_RANGE_SIZE),
+	SNDRV_DEV_CONTROL,
 	SNDRV_DEV_LOWLEVEL_PRE,
 	SNDRV_DEV_LOWLEVEL_NORMAL =	(1*SNDRV_DEV_TYPE_RANGE_SIZE),
 	SNDRV_DEV_PCM,
@@ -57,6 +58,8 @@ typedef enum {
 	SNDRV_DEV_SEQUENCER,
 	SNDRV_DEV_HWDEP,
 	SNDRV_DEV_INFO,
+	SNDRV_DEV_BUS,
+	SNDRV_DEV_CODEC,
 	SNDRV_DEV_LOWLEVEL =		(2*SNDRV_DEV_TYPE_RANGE_SIZE)
 } snd_device_type_t;
 
@@ -147,6 +150,7 @@ struct _snd_card {
 	struct rw_semaphore controls_rwsem;	/* controls list lock */
 	rwlock_t ctl_files_rwlock;	/* ctl_files list lock */
 	int controls_count;		/* count of all controls */
+	int user_ctl_count;		/* count of all user controls */
 	struct list_head controls;	/* all controls for this card */
 	struct list_head ctl_files;	/* active control files */
 
@@ -312,7 +316,6 @@ int copy_from_user_toio(volatile void __iomem *dst, const void __user *src, size
 
 /* init.c */
 
-extern int snd_cards_count;
 extern unsigned int snd_cards_lock;
 extern snd_card_t *snd_cards[SNDRV_CARDS];
 extern rwlock_t snd_card_rwlock;

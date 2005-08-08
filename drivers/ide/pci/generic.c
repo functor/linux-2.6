@@ -39,8 +39,6 @@
 
 #include <asm/io.h>
 
-#include "generic.h"
-
 static int ide_generic_all;		/* Set to claim all devices */
 
 static int __init ide_generic_all_on(char *unused)
@@ -51,11 +49,6 @@ static int __init ide_generic_all_on(char *unused)
 }
 
 __setup("all-generic-ide", ide_generic_all_on);
-
-static unsigned int __devinit init_chipset_generic (struct pci_dev *dev, const char *name)
-{
-	return 0;
-}
 
 static void __devinit init_hwif_generic (ide_hwif_t *hwif)
 {
@@ -94,6 +87,95 @@ static void __devinit init_hwif_generic (ide_hwif_t *hwif)
 	return 0;
 #endif	
 
+static ide_pci_device_t generic_chipsets[] __devinitdata = {
+	{	/* 0 */
+		.name		= "Unknown",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= AUTODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 1 */
+		.name		= "NS87410",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= AUTODMA,
+		.enablebits	= {{0x43,0x08,0x08}, {0x47,0x08,0x08}},
+		.bootable	= ON_BOARD,
+        },{	/* 2 */
+		.name		= "SAMURAI",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= AUTODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 3 */
+		.name		= "HT6565",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= AUTODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 4 */
+		.name		= "UM8673F",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= NODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 5 */
+		.name		= "UM8886A",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= NODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 6 */
+		.name		= "UM8886BF",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= NODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 7 */
+		.name		= "HINT_IDE",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= AUTODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 8 */
+		.name		= "VIA_IDE",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= NOAUTODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 9 */
+		.name		= "OPTI621V",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= NOAUTODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 10 */
+		.name		= "VIA8237SATA",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= AUTODMA,
+		.bootable	= OFF_BOARD,
+	},{	/* 11 */
+		.name 		= "Piccolo0102",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= NOAUTODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 12 */
+		.name 		= "Piccolo0103",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= NOAUTODMA,
+		.bootable	= ON_BOARD,
+	},{	/* 13 */
+		.name 		= "Piccolo0105",
+		.init_hwif	= init_hwif_generic,
+		.channels	= 2,
+		.autodma	= NOAUTODMA,
+		.bootable	= ON_BOARD,
+	}
+};
+
 /**
  *	generic_init_one	-	called when a PIIX is found
  *	@dev: the generic device
@@ -107,29 +189,30 @@ static int __devinit generic_init_one(struct pci_dev *dev, const struct pci_devi
 {
 	ide_pci_device_t *d = &generic_chipsets[id->driver_data];
 	u16 command;
-	
+	int ret = -ENODEV;
+
 	/* Don't use the generic entry unless instructed to do so */
-	if (id->driver_data == 0)
-		if(ide_generic_all == 0)
-			return -ENODEV;
+	if (id->driver_data == 0 && ide_generic_all == 0)
+			goto out;
 
 	if (dev->vendor == PCI_VENDOR_ID_UMC &&
 	    dev->device == PCI_DEVICE_ID_UMC_UM8886A &&
 	    (!(PCI_FUNC(dev->devfn) & 1)))
-		return -EAGAIN; /* UM8886A/BF pair */
+		goto out; /* UM8886A/BF pair */
 
 	if (dev->vendor == PCI_VENDOR_ID_OPTI &&
 	    dev->device == PCI_DEVICE_ID_OPTI_82C558 &&
 	    (!(PCI_FUNC(dev->devfn) & 1)))
-		return -EAGAIN;
+		goto out;
 
 	pci_read_config_word(dev, PCI_COMMAND, &command);
-	if(!(command & PCI_COMMAND_IO)) {
+	if (!(command & PCI_COMMAND_IO)) {
 		printk(KERN_INFO "Skipping disabled %s IDE controller.\n", d->name);
-		return -ENODEV; 
+		goto out;
 	}
-	ide_setup_pci_device(dev, d);
-	return 0;
+	ret = ide_setup_pci_device(dev, d);
+out:
+	return ret;
 }
 
 static void __devexit generic_remove_one(struct pci_dev *dev)
@@ -179,7 +262,6 @@ static void generic_ide_exit(void)
 }
 
 module_exit(generic_ide_exit);
-
 
 MODULE_AUTHOR("Andre Hedrick");
 MODULE_DESCRIPTION("PCI driver module for generic PCI IDE");

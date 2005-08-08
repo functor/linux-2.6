@@ -311,10 +311,10 @@ int file_fsync(struct file *filp, struct dentry *dentry, int datasync)
 {
 	struct inode * inode = dentry->d_inode;
 	struct super_block * sb;
-	int ret;
+	int ret, err;
 
 	/* sync the inode to buffers */
-	write_inode_now(inode, 0);
+	ret = write_inode_now(inode, 0);
 
 	/* sync the superblock to buffers */
 	sb = inode->i_sb;
@@ -324,7 +324,9 @@ int file_fsync(struct file *filp, struct dentry *dentry, int datasync)
 	unlock_super(sb);
 
 	/* .. finally sync the buffers to disk */
-	ret = sync_blockdev(sb->s_bdev);
+	err = sync_blockdev(sb->s_bdev);
+	if (!ret)
+		ret = err;
 	return ret;
 }
 
@@ -347,18 +349,22 @@ asmlinkage long sys_fsync(unsigned int fd)
 		goto out_putf;
 	}
 
-	/* We need to protect against concurrent writers.. */
-	down(&mapping->host->i_sem);
 	current->flags |= PF_SYNCWRITE;
 	ret = filemap_fdatawrite(mapping);
+
+	/*
+	 * We need to protect against concurrent writers,
+	 * which could cause livelocks in fsync_buffers_list
+	 */
+	down(&mapping->host->i_sem);
 	err = file->f_op->fsync(file, file->f_dentry, 0);
 	if (!ret)
 		ret = err;
+	up(&mapping->host->i_sem);
 	err = filemap_fdatawait(mapping);
 	if (!ret)
 		ret = err;
 	current->flags &= ~PF_SYNCWRITE;
-	up(&mapping->host->i_sem);
 
 out_putf:
 	fput(file);
@@ -383,17 +389,17 @@ asmlinkage long sys_fdatasync(unsigned int fd)
 
 	mapping = file->f_mapping;
 
-	down(&mapping->host->i_sem);
 	current->flags |= PF_SYNCWRITE;
 	ret = filemap_fdatawrite(mapping);
+	down(&mapping->host->i_sem);
 	err = file->f_op->fsync(file, file->f_dentry, 1);
 	if (!ret)
 		ret = err;
+	up(&mapping->host->i_sem);
 	err = filemap_fdatawait(mapping);
 	if (!ret)
 		ret = err;
 	current->flags &= ~PF_SYNCWRITE;
-	up(&mapping->host->i_sem);
 
 out_putf:
 	fput(file);
@@ -445,7 +451,7 @@ __find_get_block_slow(struct block_device *bdev, sector_t block, int unused)
 		bh = bh->b_this_page;
 	} while (bh != head);
 
-	/* we might be here because some of the buffers on this page are 
+	/* we might be here because some of the buffers on this page are
 	 * not mapped.  This is due to various races between
 	 * file io on the block device and getblk.  It gets dealt with
 	 * elsewhere, don't buffer_error if we had some unmapped buffers
@@ -531,7 +537,7 @@ static void free_more_memory(void)
  */
 static void end_buffer_async_read(struct buffer_head *bh, int uptodate)
 {
-	static spinlock_t page_uptodate_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(page_uptodate_lock);
 	unsigned long flags;
 	struct buffer_head *tmp;
 	struct page *page;
@@ -544,7 +550,8 @@ static void end_buffer_async_read(struct buffer_head *bh, int uptodate)
 		set_buffer_uptodate(bh);
 	} else {
 		clear_buffer_uptodate(bh);
-		buffer_io_error(bh);
+		if (printk_ratelimit())
+			buffer_io_error(bh);
 		SetPageError(page);
 	}
 
@@ -589,7 +596,7 @@ still_busy:
 void end_buffer_async_write(struct buffer_head *bh, int uptodate)
 {
 	char b[BDEVNAME_SIZE];
-	static spinlock_t page_uptodate_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(page_uptodate_lock);
 	unsigned long flags;
 	struct buffer_head *tmp;
 	struct page *page;

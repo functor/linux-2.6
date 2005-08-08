@@ -73,7 +73,7 @@
 #define XATTR_SELINUX_SUFFIX "selinux"
 #define XATTR_NAME_SELINUX XATTR_SECURITY_PREFIX XATTR_SELINUX_SUFFIX
 
-extern int policydb_loaded_version;
+extern unsigned int policydb_loaded_version;
 extern int selinux_nlmsg_lookup(u16 sclass, u16 nlmsg_type, u32 *perm);
 
 #ifdef CONFIG_SECURITY_SELINUX_DEVELOP
@@ -110,7 +110,7 @@ static struct security_operations *secondary_ops = NULL;
 /* Lists of inode and superblock security structures initialized
    before the policy was loaded. */
 static LIST_HEAD(superblock_security_head);
-static spinlock_t sb_security_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(sb_security_lock);
 
 /* Allocate and free functions for each kind of security blob. */
 
@@ -1390,12 +1390,6 @@ static int selinux_capset_check(struct task_struct *target, kernel_cap_t *effect
 static void selinux_capset_set(struct task_struct *target, kernel_cap_t *effective,
                                kernel_cap_t *inheritable, kernel_cap_t *permitted)
 {
-	int error;
-
-	error = task_has_perm(current, target, PROCESS__SETCAP);
-	if (error)
-		return;
-
 	secondary_ops->capset_set(target, effective, inheritable, permitted);
 }
 
@@ -1481,9 +1475,9 @@ static int selinux_quotactl(int cmds, int type, int id, struct super_block *sb)
 	return rc;
 }
 
-static int selinux_quota_on(struct file *f)
+static int selinux_quota_on(struct dentry *dentry)
 {
-	return file_has_perm(current, f, FILE__QUOTAON);
+	return dentry_has_perm(current, NULL, dentry, FILE__QUOTAON);
 }
 
 static int selinux_syslog(int type)
@@ -1521,69 +1515,29 @@ static int selinux_syslog(int type)
  * mapping. 0 means there is enough memory for the allocation to
  * succeed and -ENOMEM implies there is not.
  *
- * We currently support three overcommit policies, which are set via the
- * vm.overcommit_memory sysctl.  See Documentation/vm/overcommit-accounting
+ * Note that secondary_ops->capable and task_has_perm_noaudit return 0
+ * if the capability is granted, but __vm_enough_memory requires 1 if
+ * the capability is granted.
  *
- * Strict overcommit modes added 2002 Feb 26 by Alan Cox.
- * Additional code 2002 Jul 20 by Robert Love.
+ * Do not audit the selinux permission check, as this is applied to all
+ * processes that allocate mappings.
  */
 static int selinux_vm_enough_memory(long pages)
 {
-	unsigned long free, allowed;
-	int rc;
+	int rc, cap_sys_admin = 0;
 	struct task_security_struct *tsec = current->security;
 
-	vm_acct_memory(pages);
+	rc = secondary_ops->capable(current, CAP_SYS_ADMIN);
+	if (rc == 0)
+		rc = avc_has_perm_noaudit(tsec->sid, tsec->sid,
+					SECCLASS_CAPABILITY,
+					CAP_TO_MASK(CAP_SYS_ADMIN),
+					NULL);
 
-        /*
-	 * Sometimes we want to use more memory than we have
-	 */
-	if (sysctl_overcommit_memory == OVERCOMMIT_ALWAYS)
-		return 0;
+	if (rc == 0)
+		cap_sys_admin = 1;
 
-	if (sysctl_overcommit_memory == OVERCOMMIT_GUESS) {
-		free = get_page_cache_size();
-		free += nr_free_pages();
-		free += nr_swap_pages;
-
-		/*
-		 * Any slabs which are created with the
-		 * SLAB_RECLAIM_ACCOUNT flag claim to have contents
-		 * which are reclaimable, under pressure.  The dentry
-		 * cache and most inode caches should fall into this
-		 */
-		free += atomic_read(&slab_reclaim_pages);
-
-		/*
-		 * Leave the last 3% for privileged processes.
-		 * Don't audit the check, as it is applied to all processes
-		 * that allocate mappings.
-		 */
-		rc = secondary_ops->capable(current, CAP_SYS_ADMIN);
-		if (!rc) {
-			rc = avc_has_perm_noaudit(tsec->sid, tsec->sid,
-						  SECCLASS_CAPABILITY,
-						  CAP_TO_MASK(CAP_SYS_ADMIN), NULL);
-		}
-		if (rc)
-			free -= free / 32;
-
-		if (free > pages)
-			return 0;
-		vm_unacct_memory(pages);
-		return -ENOMEM;
-	}
-
-	allowed = (totalram_pages - hugetlb_total_pages())
-		* sysctl_overcommit_ratio / 100;
-	allowed += total_swap_pages;
-
-	if (atomic_read(&vm_committed_space) < allowed)
-		return 0;
-
-	vm_unacct_memory(pages);
-
-	return -ENOMEM;
+	return __vm_enough_memory(pages, cap_sys_admin);
 }
 
 /* binprm security operations */
@@ -1801,10 +1755,7 @@ static void selinux_bprm_apply_creds(struct linux_binprm *bprm, int unsafe)
 	struct task_security_struct *tsec;
 	struct bprm_security_struct *bsec;
 	u32 sid;
-	struct av_decision avd;
-	struct itimerval itimer;
-	struct rlimit *rlim, *initrlim;
-	int rc, i;
+	int rc;
 
 	secondary_ops->bprm_apply_creds(bprm, unsafe);
 
@@ -1814,91 +1765,101 @@ static void selinux_bprm_apply_creds(struct linux_binprm *bprm, int unsafe)
 	sid = bsec->sid;
 
 	tsec->osid = tsec->sid;
+	bsec->unsafe = 0;
 	if (tsec->sid != sid) {
 		/* Check for shared state.  If not ok, leave SID
 		   unchanged and kill. */
 		if (unsafe & LSM_UNSAFE_SHARE) {
-			rc = avc_has_perm_noaudit(tsec->sid, sid,
-					  SECCLASS_PROCESS, PROCESS__SHARE, &avd);
+			rc = avc_has_perm(tsec->sid, sid, SECCLASS_PROCESS,
+					PROCESS__SHARE, NULL);
 			if (rc) {
-				task_unlock(current);
-				avc_audit(tsec->sid, sid, SECCLASS_PROCESS,
-				    PROCESS__SHARE, &avd, rc, NULL);
-				force_sig_specific(SIGKILL, current);
-				goto lock_out;
+				bsec->unsafe = 1;
+				return;
 			}
 		}
 
 		/* Check for ptracing, and update the task SID if ok.
 		   Otherwise, leave SID unchanged and kill. */
 		if (unsafe & (LSM_UNSAFE_PTRACE | LSM_UNSAFE_PTRACE_CAP)) {
-			rc = avc_has_perm_noaudit(tsec->ptrace_sid, sid,
-					  SECCLASS_PROCESS, PROCESS__PTRACE, &avd);
-			if (!rc)
-				tsec->sid = sid;
-			task_unlock(current);
-			avc_audit(tsec->ptrace_sid, sid, SECCLASS_PROCESS,
-				  PROCESS__PTRACE, &avd, rc, NULL);
+			rc = avc_has_perm(tsec->ptrace_sid, sid,
+					  SECCLASS_PROCESS, PROCESS__PTRACE,
+					  NULL);
 			if (rc) {
-				force_sig_specific(SIGKILL, current);
-				goto lock_out;
-			}
-		} else {
-			tsec->sid = sid;
-			task_unlock(current);
-		}
-
-		/* Close files for which the new task SID is not authorized. */
-		flush_unauthorized_files(current->files);
-
-		/* Check whether the new SID can inherit signal state
-		   from the old SID.  If not, clear itimers to avoid
-		   subsequent signal generation and flush and unblock
-		   signals. This must occur _after_ the task SID has
-                  been updated so that any kill done after the flush
-                  will be checked against the new SID. */
-		rc = avc_has_perm(tsec->osid, tsec->sid, SECCLASS_PROCESS,
-				  PROCESS__SIGINH, NULL);
-		if (rc) {
-			memset(&itimer, 0, sizeof itimer);
-			for (i = 0; i < 3; i++)
-				do_setitimer(i, &itimer, NULL);
-			flush_signals(current);
-			spin_lock_irq(&current->sighand->siglock);
-			flush_signal_handlers(current, 1);
-			sigemptyset(&current->blocked);
-			recalc_sigpending();
-			spin_unlock_irq(&current->sighand->siglock);
-		}
-
-		/* Check whether the new SID can inherit resource limits
-		   from the old SID.  If not, reset all soft limits to
-		   the lower of the current task's hard limit and the init
-		   task's soft limit.  Note that the setting of hard limits 
-		   (even to lower them) can be controlled by the setrlimit 
-		   check. The inclusion of the init task's soft limit into
-	           the computation is to avoid resetting soft limits higher
-		   than the default soft limit for cases where the default
-		   is lower than the hard limit, e.g. RLIMIT_CORE or 
-		   RLIMIT_STACK.*/
-		rc = avc_has_perm(tsec->osid, tsec->sid, SECCLASS_PROCESS,
-				  PROCESS__RLIMITINH, NULL);
-		if (rc) {
-			for (i = 0; i < RLIM_NLIMITS; i++) {
-				rlim = current->signal->rlim + i;
-				initrlim = init_task.signal->rlim+i;
-				rlim->rlim_cur = min(rlim->rlim_max,initrlim->rlim_cur);
+				bsec->unsafe = 1;
+				return;
 			}
 		}
+		tsec->sid = sid;
+	}
+}
 
-		/* Wake up the parent if it is waiting so that it can
-		   recheck wait permission to the new task SID. */
-		wake_up_interruptible(&current->parent->wait_chldexit);
+/*
+ * called after apply_creds without the task lock held
+ */
+static void selinux_bprm_post_apply_creds(struct linux_binprm *bprm)
+{
+	struct task_security_struct *tsec;
+	struct rlimit *rlim, *initrlim;
+	struct itimerval itimer;
+	struct bprm_security_struct *bsec;
+	int rc, i;
 
-lock_out:
-		task_lock(current);
+	tsec = current->security;
+	bsec = bprm->security;
+
+	if (bsec->unsafe) {
+		force_sig_specific(SIGKILL, current);
 		return;
 	}
+	if (tsec->osid == tsec->sid)
+		return;
+
+	/* Close files for which the new task SID is not authorized. */
+	flush_unauthorized_files(current->files);
+
+	/* Check whether the new SID can inherit signal state
+	   from the old SID.  If not, clear itimers to avoid
+	   subsequent signal generation and flush and unblock
+	   signals. This must occur _after_ the task SID has
+	  been updated so that any kill done after the flush
+	  will be checked against the new SID. */
+	rc = avc_has_perm(tsec->osid, tsec->sid, SECCLASS_PROCESS,
+			  PROCESS__SIGINH, NULL);
+	if (rc) {
+		memset(&itimer, 0, sizeof itimer);
+		for (i = 0; i < 3; i++)
+			do_setitimer(i, &itimer, NULL);
+		flush_signals(current);
+		spin_lock_irq(&current->sighand->siglock);
+		flush_signal_handlers(current, 1);
+		sigemptyset(&current->blocked);
+		recalc_sigpending();
+		spin_unlock_irq(&current->sighand->siglock);
+	}
+
+	/* Check whether the new SID can inherit resource limits
+	   from the old SID.  If not, reset all soft limits to
+	   the lower of the current task's hard limit and the init
+	   task's soft limit.  Note that the setting of hard limits
+	   (even to lower them) can be controlled by the setrlimit
+	   check. The inclusion of the init task's soft limit into
+	   the computation is to avoid resetting soft limits higher
+	   than the default soft limit for cases where the default
+	   is lower than the hard limit, e.g. RLIMIT_CORE or
+	   RLIMIT_STACK.*/
+	rc = avc_has_perm(tsec->osid, tsec->sid, SECCLASS_PROCESS,
+			  PROCESS__RLIMITINH, NULL);
+	if (rc) {
+		for (i = 0; i < RLIM_NLIMITS; i++) {
+			rlim = current->signal->rlim + i;
+			initrlim = init_task.signal->rlim+i;
+			rlim->rlim_cur = min(rlim->rlim_max,initrlim->rlim_cur);
+		}
+	}
+
+	/* Wake up the parent if it is waiting so that it can
+	   recheck wait permission to the new task SID. */
+	wake_up_interruptible(&current->parent->signal->wait_chldexit);
 }
 
 /* superblock security operations */
@@ -2179,6 +2140,9 @@ static int selinux_inode_setattr(struct dentry *dentry, struct iattr *iattr)
 	if (rc)
 		return rc;
 
+	if (iattr->ia_valid & ATTR_FORCE)
+		return 0;
+
 	if (iattr->ia_valid & (ATTR_MODE | ATTR_UID | ATTR_GID |
 			       ATTR_ATIME_SET | ATTR_MTIME_SET))
 		return dentry_has_perm(current, NULL, dentry, FILE__SETATTR);
@@ -2443,6 +2407,17 @@ static int selinux_file_ioctl(struct file *file, unsigned int cmd,
 
 static int file_map_prot_check(struct file *file, unsigned long prot, int shared)
 {
+	if ((prot & PROT_EXEC) && (!file || (!shared && (prot & PROT_WRITE)))) {
+		/*
+		 * We are making executable an anonymous mapping or a
+		 * private file mapping that will also be writable.
+		 * This has an additional check.
+		 */
+		int rc = task_has_perm(current, current, PROCESS__EXECMEM);
+		if (rc)
+			return rc;
+	}
+
 	if (file) {
 		/* read access is always possible with a mapping */
 		u32 av = FILE__READ;
@@ -2479,6 +2454,18 @@ static int selinux_file_mprotect(struct vm_area_struct *vma,
 	rc = secondary_ops->file_mprotect(vma, prot);
 	if (rc)
 		return rc;
+
+	if (vma->vm_file != NULL && vma->anon_vma != NULL && (prot & PROT_EXEC)) {
+		/*
+		 * We are making executable a file mapping that has
+		 * had some COW done. Since pages might have been written,
+		 * check ability to execute the possibly modified content.
+		 * This typically should only occur for text relocations.
+		 */
+		int rc = file_has_perm(current, vma->vm_file, FILE__EXECMOD);
+		if (rc)
+			return rc;
+	}
 
 	return file_map_prot_check(vma->vm_file, prot, vma->vm_flags&VM_SHARED);
 }
@@ -2692,16 +2679,7 @@ static int selinux_task_setrlimit(unsigned int resource, struct rlimit *new_rlim
 
 static int selinux_task_setscheduler(struct task_struct *p, int policy, struct sched_param *lp)
 {
-	struct task_security_struct *tsec1, *tsec2;
-
-	tsec1 = current->security;
-	tsec2 = p->security;
-
-	/* No auditing from the setscheduler hook, since the runqueue lock
-	   is held and the system will deadlock if we try to log an audit
-	   message. */
-	return avc_has_perm_noaudit(tsec1->sid, tsec2->sid,
-				    SECCLASS_PROCESS, PROCESS__SETSCHED, NULL);
+	return task_has_perm(current, p, PROCESS__SETSCHED);
 }
 
 static int selinux_task_getscheduler(struct task_struct *p)
@@ -3527,12 +3505,20 @@ static inline int selinux_nlmsg_perm(struct sock *sk, struct sk_buff *skb)
 
 static int selinux_netlink_send(struct sock *sk, struct sk_buff *skb)
 {
-	int err = 0;
+	struct task_security_struct *tsec;
+	struct av_decision avd;
+	int err;
 
-	if (capable(CAP_NET_ADMIN))
-		cap_raise (NETLINK_CB (skb).eff_cap, CAP_NET_ADMIN);
-	else
-		NETLINK_CB(skb).eff_cap = 0;
+	err = secondary_ops->netlink_send(sk, skb);
+	if (err)
+		return err;
+
+	tsec = current->security;
+
+	avd.allowed = 0;
+	avc_has_perm_noaudit(tsec->sid, tsec->sid,
+				SECCLASS_CAPABILITY, ~0, &avd);
+	cap_mask(NETLINK_CB(skb).eff_cap, avd.allowed);
 
 	if (policydb_loaded_version >= POLICYDB_VERSION_NLCLASS)
 		err = selinux_nlmsg_perm(sk, skb);
@@ -4094,10 +4080,9 @@ static int selinux_setprocattr(struct task_struct *p,
 	u32 sid = 0;
 	int error;
 
-	if (current != p || !strcmp(name, "current")) {
+	if (current != p) {
 		/* SELinux only allows a process to change its own
-		   security attributes, and it only allows the process
-		   current SID to change via exec. */
+		   security attributes. */
 		return -EACCES;
 	}
 
@@ -4110,6 +4095,8 @@ static int selinux_setprocattr(struct task_struct *p,
 		error = task_has_perm(current, p, PROCESS__SETEXEC);
 	else if (!strcmp(name, "fscreate"))
 		error = task_has_perm(current, p, PROCESS__SETFSCREATE);
+	else if (!strcmp(name, "current"))
+		error = task_has_perm(current, p, PROCESS__SETCURRENT);
 	else
 		error = -EINVAL;
 	if (error)
@@ -4134,6 +4121,51 @@ static int selinux_setprocattr(struct task_struct *p,
 		tsec->exec_sid = sid;
 	else if (!strcmp(name, "fscreate"))
 		tsec->create_sid = sid;
+	else if (!strcmp(name, "current")) {
+		struct av_decision avd;
+
+		if (sid == 0)
+			return -EINVAL;
+
+		/* Only allow single threaded processes to change context */
+		if (atomic_read(&p->mm->mm_users) != 1) {
+			struct task_struct *g, *t;
+			struct mm_struct *mm = p->mm;
+			read_lock(&tasklist_lock);
+			do_each_thread(g, t)
+				if (t->mm == mm && t != p) {
+					read_unlock(&tasklist_lock);
+					return -EPERM;
+				}
+			while_each_thread(g, t);
+			read_unlock(&tasklist_lock);
+                }
+
+		/* Check permissions for the transition. */
+		error = avc_has_perm(tsec->sid, sid, SECCLASS_PROCESS,
+		                     PROCESS__DYNTRANSITION, NULL);
+		if (error)
+			return error;
+
+		/* Check for ptracing, and update the task SID if ok.
+		   Otherwise, leave SID unchanged and fail. */
+		task_lock(p);
+		if (p->ptrace & PT_PTRACED) {
+			error = avc_has_perm_noaudit(tsec->ptrace_sid, sid,
+						     SECCLASS_PROCESS,
+						     PROCESS__PTRACE, &avd);
+			if (!error)
+				tsec->sid = sid;
+			task_unlock(p);
+			avc_audit(tsec->ptrace_sid, sid, SECCLASS_PROCESS,
+				  PROCESS__PTRACE, &avd, error, NULL);
+			if (error)
+				return error;
+		} else {
+			tsec->sid = sid;
+			task_unlock(p);
+		}
+	}
 	else
 		return -EINVAL;
 
@@ -4158,6 +4190,7 @@ struct security_operations selinux_ops = {
 	.bprm_alloc_security =		selinux_bprm_alloc_security,
 	.bprm_free_security =		selinux_bprm_free_security,
 	.bprm_apply_creds =		selinux_bprm_apply_creds,
+	.bprm_post_apply_creds =	selinux_bprm_post_apply_creds,
 	.bprm_set_security =		selinux_bprm_set_security,
 	.bprm_check_security =		selinux_bprm_check_security,
 	.bprm_secureexec =		selinux_bprm_secureexec,

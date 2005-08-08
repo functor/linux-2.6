@@ -48,6 +48,7 @@
 */
 
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/timer.h>
@@ -120,6 +121,7 @@ static struct mii_chip_info {
 } mii_chip_table[] = {
 	{ "SiS 900 Internal MII PHY", 		0x001d, 0x8000, LAN },
 	{ "SiS 7014 Physical Layer Solution", 	0x0016, 0xf830, LAN },
+	{ "Altimata AC101LF PHY",               0x0022, 0x5520, LAN },
 	{ "AMD 79C901 10BASE-T PHY",  		0x0000, 0x6B70, LAN },
 	{ "AMD 79C901 HomePNA PHY",		0x0000, 0x6B90, HOME},
 	{ "ICS LAN PHY",			0x0015, 0xF440, LAN },
@@ -178,9 +180,9 @@ MODULE_AUTHOR("Jim Huang <cmhuang@sis.com.tw>, Ollie Lho <ollie@sis.com.tw>");
 MODULE_DESCRIPTION("SiS 900 PCI Fast Ethernet driver");
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(multicast_filter_limit, "i");
-MODULE_PARM(max_interrupt_work, "i");
-MODULE_PARM(debug, "i");
+module_param(multicast_filter_limit, int, 0444);
+module_param(max_interrupt_work, int, 0444);
+module_param(debug, int, 0444);
 MODULE_PARM_DESC(multicast_filter_limit, "SiS 900/7016 maximum number of filtered multicast addresses");
 MODULE_PARM_DESC(max_interrupt_work, "SiS 900/7016 maximum events handled per interrupt");
 MODULE_PARM_DESC(debug, "SiS 900/7016 debug level (2-4)");
@@ -234,7 +236,7 @@ static int __devinit sis900_get_mac_addr(struct pci_dev * pci_dev, struct net_de
 	signature = (u16) read_eeprom(ioaddr, EEPROMSignature);    
 	if (signature == 0xffff || signature == 0x0000) {
 		printk (KERN_INFO "%s: Error EERPOM read %x\n", 
-			net_dev->name, signature);
+			pci_name(pci_dev), signature);
 		return 0;
 	}
 
@@ -266,7 +268,7 @@ static int __devinit sis630e_get_mac_addr(struct pci_dev * pci_dev,
 	if (!isa_bridge)
 		isa_bridge = pci_get_device(PCI_VENDOR_ID_SI, 0x0018, isa_bridge);
 	if (!isa_bridge) {
-		printk("%s: Can not find ISA bridge\n", net_dev->name);
+		printk("%s: Can not find ISA bridge\n", pci_name(pci_dev));
 		return 0;
 	}
 	pci_read_config_byte(isa_bridge, 0x48, &reg);
@@ -454,10 +456,6 @@ static int __devinit sis900_probe(struct pci_dev *pci_dev,
 	net_dev->tx_timeout = sis900_tx_timeout;
 	net_dev->watchdog_timeo = TX_TIMEOUT;
 	net_dev->ethtool_ops = &sis900_ethtool_ops;
-	
-	ret = register_netdev(net_dev);
-	if (ret)
-		goto err_unmap_rx;
 		
 	/* Get Mac address according to the chip revision */
 	pci_read_config_byte(pci_dev, PCI_CLASS_REVISION, &revision);
@@ -474,7 +472,7 @@ static int __devinit sis900_probe(struct pci_dev *pci_dev,
 
 	if (ret == 0) {
 		ret = -ENODEV;
-		goto err_out_unregister;
+		goto err_unmap_rx;
 	}
 	
 	/* 630ET : set the mii access mode as software-mode */
@@ -484,7 +482,7 @@ static int __devinit sis900_probe(struct pci_dev *pci_dev,
 	/* probe for mii transceiver */
 	if (sis900_mii_probe(net_dev) == 0) {
 		ret = -ENODEV;
-		goto err_out_unregister;
+		goto err_unmap_rx;
 	}
 
 	/* save our host bridge revision */
@@ -493,6 +491,10 @@ static int __devinit sis900_probe(struct pci_dev *pci_dev,
 		pci_read_config_byte(dev, PCI_CLASS_REVISION, &sis_priv->host_bridge_rev);
 		pci_dev_put(dev);
 	}
+
+	ret = register_netdev(net_dev);
+	if (ret)
+		goto err_unmap_rx;
 
 	/* print some information about our NIC */
 	printk(KERN_INFO "%s: %s at %#lx, IRQ %d, ", net_dev->name,
@@ -503,8 +505,6 @@ static int __devinit sis900_probe(struct pci_dev *pci_dev,
 
 	return 0;
 
- err_out_unregister:
- 	unregister_netdev(net_dev);
  err_unmap_rx:
 	pci_free_consistent(pci_dev, RX_TOTAL_SIZE, sis_priv->rx_ring,
 		sis_priv->rx_ring_dma);
@@ -531,6 +531,7 @@ static int __devinit sis900_probe(struct pci_dev *pci_dev,
 static int __init sis900_mii_probe(struct net_device * net_dev)
 {
 	struct sis900_private * sis_priv = net_dev->priv;
+	const char *dev_name = pci_name(sis_priv->pci_dev);
 	u16 poll_bit = MII_STAT_LINK, status = 0;
 	unsigned long timeout = jiffies + 5 * HZ;
 	int phy_addr;
@@ -580,21 +581,20 @@ static int __init sis900_mii_probe(struct net_device * net_dev)
 					mii_phy->phy_types =
 					    (mii_status & (MII_STAT_CAN_TX_FDX | MII_STAT_CAN_TX)) ? LAN : HOME;
 				printk(KERN_INFO "%s: %s transceiver found at address %d.\n",
-				       net_dev->name, mii_chip_table[i].name,
+				       dev_name, mii_chip_table[i].name,
 				       phy_addr);
 				break;
 			}
 			
 		if( !mii_chip_table[i].phy_id1 ) {
 			printk(KERN_INFO "%s: Unknown PHY transceiver found at address %d.\n",
-			       net_dev->name, phy_addr);
+			       dev_name, phy_addr);
 			mii_phy->phy_types = UNKNOWN;
 		}
 	}
 	
 	if (sis_priv->mii == NULL) {
-		printk(KERN_INFO "%s: No MII transceivers found!\n",
-			net_dev->name);
+		printk(KERN_INFO "%s: No MII transceivers found!\n", dev_name);
 		return 0;
 	}
 
@@ -619,7 +619,7 @@ static int __init sis900_mii_probe(struct net_device * net_dev)
 			poll_bit ^= (mdio_read(net_dev, sis_priv->cur_phy, MII_STATUS) & poll_bit);
 			if (time_after_eq(jiffies, timeout)) {
 				printk(KERN_WARNING "%s: reset phy and link down now\n",
-					net_dev->name);
+				       dev_name);
 				return -ETIME;
 			}
 		}
@@ -689,7 +689,7 @@ static u16 sis900_default_phy(struct net_device * net_dev)
 		sis_priv->mii = default_phy;
 		sis_priv->cur_phy = default_phy->phy_addr;
 		printk(KERN_INFO "%s: Using transceiver found at address %d as default\n",
-					net_dev->name,sis_priv->cur_phy);
+		       pci_name(sis_priv->pci_dev), sis_priv->cur_phy);
 	}
 	
 	status = mdio_read(net_dev, sis_priv->cur_phy, MII_CONTROL);
@@ -2238,7 +2238,7 @@ static int sis900_suspend(struct pci_dev *pci_dev, u32 state)
 	/* Stop the chip's Tx and Rx Status Machine */
 	outl(RxDIS | TxDIS | inl(ioaddr + cr), ioaddr + cr);
 
-	pci_set_power_state(pci_dev, 3);
+	pci_set_power_state(pci_dev, PCI_D3hot);
 	pci_save_state(pci_dev);
 
 	return 0;
@@ -2253,7 +2253,7 @@ static int sis900_resume(struct pci_dev *pci_dev)
 	if(!netif_running(net_dev))
 		return 0;
 	pci_restore_state(pci_dev);
-	pci_set_power_state(pci_dev, 0);
+	pci_set_power_state(pci_dev, PCI_D0);
 
 	sis900_init_rxfilter(net_dev);
 

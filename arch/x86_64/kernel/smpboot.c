@@ -58,11 +58,12 @@
 int smp_num_siblings = 1;
 /* Package ID of each logical CPU */
 u8 phys_proc_id[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
+EXPORT_SYMBOL(phys_proc_id);
 
 /* Bitmask of currently online CPUs */
 cpumask_t cpu_online_map;
 
-static cpumask_t cpu_callin_map;
+cpumask_t cpu_callin_map;
 cpumask_t cpu_callout_map;
 static cpumask_t smp_commenced_mask;
 
@@ -308,8 +309,6 @@ void __init smp_callin(void)
 	Dprintk("CALLIN, before setup_local_APIC().\n");
 	setup_local_APIC();
 
-	local_irq_enable();
-
 	/*
 	 * Get our bogomips.
 	 */
@@ -322,8 +321,6 @@ void __init smp_callin(void)
 	 * Save our processor parameters
 	 */
  	smp_store_cpu_info(cpuid);
-
-	local_irq_disable();
 
 	/*
 	 * Allow the master to continue.

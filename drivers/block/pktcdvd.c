@@ -135,12 +135,10 @@ static struct packet_data *pkt_alloc_packet_data(void)
 		goto no_bio;
 
 	for (i = 0; i < PAGES_PER_PACKET; i++) {
-		pkt->pages[i] = alloc_page(GFP_KERNEL);
+		pkt->pages[i] = alloc_page(GFP_KERNEL|__GFP_ZERO);
 		if (!pkt->pages[i])
 			goto no_page;
 	}
-	for (i = 0; i < PAGES_PER_PACKET; i++)
-		clear_page(page_address(pkt->pages[i]));
 
 	spin_lock_init(&pkt->lock);
 
@@ -607,8 +605,7 @@ static int pkt_set_segment_merging(struct pktcdvd_device *pd, request_queue_t *q
 /*
  * Copy CD_FRAMESIZE bytes from src_bio into a destination page
  */
-static void pkt_copy_bio_data(struct bio *src_bio, int seg, int offs,
-			      struct page *dst_page, int dst_offs)
+static void pkt_copy_bio_data(struct bio *src_bio, int seg, int offs, struct page *dst_page, int dst_offs)
 {
 	unsigned int copy_size = CD_FRAMESIZE;
 
@@ -1301,8 +1298,7 @@ static void pkt_print_settings(struct pktcdvd_device *pd)
 	printk("Mode-%c disc\n", pd->settings.block_mode == 8 ? '1' : '2');
 }
 
-static int pkt_mode_sense(struct pktcdvd_device *pd, struct packet_command *cgc,
-			  int page_code, int page_control)
+static int pkt_mode_sense(struct pktcdvd_device *pd, struct packet_command *cgc, int page_code, int page_control)
 {
 	memset(cgc->cmd, 0, sizeof(cgc->cmd));
 
@@ -2404,7 +2400,7 @@ static int pkt_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 	case CDROM_LAST_WRITTEN:
 	case CDROM_SEND_PACKET:
 	case SCSI_IOCTL_SEND_COMMAND:
-		return ioctl_by_bdev(pd->bdev, cmd, arg);
+		return blkdev_ioctl(pd->bdev->bd_inode, file, cmd, arg);
 
 	case CDROMEJECT:
 		/*
@@ -2412,7 +2408,7 @@ static int pkt_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		 * have to unlock it or else the eject command fails.
 		 */
 		pkt_lock_door(pd, 0);
-		return ioctl_by_bdev(pd->bdev, cmd, arg);
+		return blkdev_ioctl(pd->bdev->bd_inode, file, cmd, arg);
 
 	default:
 		printk("pktcdvd: Unknown ioctl for %s (%x)\n", pd->name, cmd);
@@ -2627,7 +2623,7 @@ static struct miscdevice pkt_misc = {
 	.fops  		= &pkt_ctl_fops
 };
 
-int pkt_init(void)
+static int pkt_init(void)
 {
 	int ret;
 
@@ -2663,7 +2659,7 @@ out2:
 	return ret;
 }
 
-void pkt_exit(void)
+static void pkt_exit(void)
 {
 	remove_proc_entry("pktcdvd", proc_root_driver);
 	misc_deregister(&pkt_misc);

@@ -63,10 +63,36 @@ change_pte_range(pmd_t *pmd, unsigned long address,
 }
 
 static inline void
-change_pmd_range(pgd_t *pgd, unsigned long address,
+change_pmd_range(pud_t *pud, unsigned long address,
 		unsigned long size, pgprot_t newprot)
 {
 	pmd_t * pmd;
+	unsigned long end;
+
+	if (pud_none(*pud))
+		return;
+	if (pud_bad(*pud)) {
+		pud_ERROR(*pud);
+		pud_clear(pud);
+		return;
+	}
+	pmd = pmd_offset(pud, address);
+	address &= ~PUD_MASK;
+	end = address + size;
+	if (end > PUD_SIZE)
+		end = PUD_SIZE;
+	do {
+		change_pte_range(pmd, address, end - address, newprot);
+		address = (address + PMD_SIZE) & PMD_MASK;
+		pmd++;
+	} while (address && (address < end));
+}
+
+static inline void
+change_pud_range(pgd_t *pgd, unsigned long address,
+		unsigned long size, pgprot_t newprot)
+{
+	pud_t * pud;
 	unsigned long end;
 
 	if (pgd_none(*pgd))
@@ -76,15 +102,15 @@ change_pmd_range(pgd_t *pgd, unsigned long address,
 		pgd_clear(pgd);
 		return;
 	}
-	pmd = pmd_offset(pgd, address);
+	pud = pud_offset(pgd, address);
 	address &= ~PGDIR_MASK;
 	end = address + size;
 	if (end > PGDIR_SIZE)
 		end = PGDIR_SIZE;
 	do {
-		change_pte_range(pmd, address, end - address, newprot);
-		address = (address + PMD_SIZE) & PMD_MASK;
-		pmd++;
+		change_pmd_range(pud, address, end - address, newprot);
+		address = (address + PUD_SIZE) & PUD_MASK;
+		pud++;
 	} while (address && (address < end));
 }
 
@@ -92,22 +118,25 @@ static void
 change_protection(struct vm_area_struct *vma, unsigned long start,
 		unsigned long end, pgprot_t newprot)
 {
-	pgd_t *dir;
-	unsigned long beg = start;
+	struct mm_struct *mm = current->mm;
+	pgd_t *pgd;
+	unsigned long beg = start, next;
+	int i;
 
-	dir = pgd_offset(current->mm, start);
+	pgd = pgd_offset(mm, start);
 	flush_cache_range(vma, beg, end);
-	if (start >= end)
-		BUG();
-	spin_lock(&current->mm->page_table_lock);
-	do {
-		change_pmd_range(dir, start, end - start, newprot);
-		start = (start + PGDIR_SIZE) & PGDIR_MASK;
-		dir++;
-	} while (start && (start < end));
+	BUG_ON(start >= end);
+	spin_lock(&mm->page_table_lock);
+	for (i = pgd_index(start); i <= pgd_index(end-1); i++) {
+		next = (start + PGDIR_SIZE) & PGDIR_MASK;
+		if (next <= start || next > end)
+			next = end;
+		change_pud_range(pgd, start, next - start, newprot);
+		start = next;
+		pgd++;
+	}
 	flush_tlb_range(vma, beg, end);
-	spin_unlock(&current->mm->page_table_lock);
-	return;
+	spin_unlock(&mm->page_table_lock);
 }
 
 static int
@@ -179,7 +208,6 @@ success:
 	 * vm_flags and vm_page_prot are protected by the mmap_sem
 	 * held in write mode.
 	 */
-	oldflags = vma->vm_flags;
 	vma->vm_flags = newflags;
 	vma->vm_page_prot = newprot;
 	if (oldflags & VM_EXEC)

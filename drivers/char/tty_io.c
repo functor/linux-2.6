@@ -249,7 +249,7 @@ static void tty_set_termios_ldisc(struct tty_struct *tty, int num)
  *	callers who will do ldisc lookups and cannot sleep.
  */
  
-static spinlock_t tty_ldisc_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(tty_ldisc_lock);
 static DECLARE_WAIT_QUEUE_HEAD(tty_ldisc_wait);
 static struct tty_ldisc tty_ldiscs[NR_LDISCS];	/* line disc dispatch table	*/
 
@@ -327,7 +327,7 @@ void tty_ldisc_put(int disc)
 	
 EXPORT_SYMBOL_GPL(tty_ldisc_put);
 
-void tty_ldisc_assign(struct tty_struct *tty, struct tty_ldisc *ld)
+static void tty_ldisc_assign(struct tty_struct *tty, struct tty_ldisc *ld)
 {
 	tty->ldisc = *ld;
 	tty->ldisc.refcount = 0;
@@ -583,7 +583,7 @@ restart:
 /*
  * This routine returns a tty driver structure, given a device number
  */
-struct tty_driver *get_tty_driver(dev_t device, int *index)
+static struct tty_driver *get_tty_driver(dev_t device, int *index)
 {
 	struct tty_driver *p;
 
@@ -690,7 +690,7 @@ static struct file_operations hung_up_tty_fops = {
 	.release	= tty_release,
 };
 
-static spinlock_t redirect_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(redirect_lock);
 static struct file *redirect;
 
 /**
@@ -744,7 +744,7 @@ EXPORT_SYMBOL_GPL(tty_ldisc_flush);
  * but doesn't hold any locks, so we need to make sure we have the appropriate
  * locks for what we're doing..
  */
-void do_tty_hangup(void *data)
+static void do_tty_hangup(void *data)
 {
 	struct tty_struct *tty = (struct tty_struct *) data;
 	struct file * cons_filp = NULL;
@@ -1018,7 +1018,7 @@ static ssize_t tty_read(struct file * file, char __user * buf, size_t count,
 	tty_ldisc_deref(ld);
 	unlock_kernel();
 	if (i > 0)
-		inode->i_atime = CURRENT_TIME;
+		inode->i_atime = current_fs_time(inode->i_sb);
 	return i;
 }
 
@@ -1047,8 +1047,13 @@ static inline ssize_t do_tty_write(
 	 *
 	 * But if TTY_NO_WRITE_SPLIT is set, we should use a
 	 * big chunk-size..
+	 *
+	 * The default chunk-size is 2kB, because the NTTY
+	 * layer has problems with bigger chunks. It will
+	 * claim to be able to handle more characters than
+	 * it actually does.
 	 */
-	chunk = 4096;
+	chunk = 2048;
 	if (test_bit(TTY_NO_WRITE_SPLIT, &tty->flags))
 		chunk = 65536;
 	if (count < chunk)
@@ -1095,7 +1100,8 @@ static inline ssize_t do_tty_write(
 		cond_resched();
 	}
 	if (written) {
-		file->f_dentry->d_inode->i_mtime = CURRENT_TIME;
+		struct inode *inode = file->f_dentry->d_inode;
+		inode->i_mtime = current_fs_time(inode->i_sb);
 		ret = written;
 	}
 	up(&tty->atomic_write);
@@ -1155,8 +1161,8 @@ static inline void pty_line_name(struct tty_driver *driver, int index, char *p)
 	int i = index + driver->name_base;
 	/* ->name is initialized to "ttyp", but "tty" is expected */
 	sprintf(p, "%s%c%x",
-		driver->subtype == PTY_TYPE_SLAVE ? "pty" : driver->name,
-		ptychar[i >> 4 & 0xf], i & 0xf);
+			driver->subtype == PTY_TYPE_SLAVE ? "tty" : driver->name,
+			ptychar[i >> 4 & 0xf], i & 0xf);
 }
 
 static inline void tty_line_name(struct tty_driver *driver, int index, char *p)
@@ -2523,28 +2529,6 @@ out:
 }
 
 /*
- *	Call the ldisc flush directly from a driver. This function may
- *	return an error and need retrying by the user.
- */
-
-int tty_push_data(struct tty_struct *tty, unsigned char *cp, unsigned char *fp, int count)
-{
-	int ret = 0;
-	struct tty_ldisc *disc;
-	
-	disc = tty_ldisc_ref(tty);
-	if(test_bit(TTY_DONT_FLIP, &tty->flags))
-		ret = -EAGAIN;
-	else if(disc == NULL)
-		ret = -EIO;
-	else
-		disc->receive_buf(tty, cp, fp, count);
-	tty_ldisc_deref(disc);
-	return ret;
-	
-}
-
-/*
  * Routine which returns the baud rate of the tty
  *
  * Note that the baud_table needs to be kept in sync with the
@@ -2922,8 +2906,8 @@ void __init console_init(void)
 	   So I haven't moved it. dwmw2 */
         rs_360_init();
 #endif
-	call = &__con_initcall_start;
-	while (call < &__con_initcall_end) {
+	call = __con_initcall_start;
+	while (call < __con_initcall_end) {
 		(*call)();
 		call++;
 	}

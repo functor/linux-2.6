@@ -548,6 +548,8 @@ void ide_pci_create_host_proc(const char *name, get_info_t *get_info)
 EXPORT_SYMBOL_GPL(ide_pci_create_host_proc);
 #endif
 
+EXPORT_SYMBOL_GPL(destroy_proc_ide_interface);
+
 void destroy_proc_ide_interface(ide_hwif_t *hwif)
 {
 	if (hwif->proc) {
@@ -555,22 +557,6 @@ void destroy_proc_ide_interface(ide_hwif_t *hwif)
 		ide_remove_proc_entries(hwif->proc, hwif_entries);
 		remove_proc_entry(hwif->name, proc_ide_root);
 		hwif->proc = NULL;
-	}
-}
-
-EXPORT_SYMBOL(destroy_proc_ide_interface);
-
-static void destroy_proc_ide_interfaces(void)
-{
-	int	h;
-
-	for (h = 0; h < MAX_HWIFS; h++) {
-		ide_hwif_t *hwif = &ide_hwifs[h];
-#if 0
-		if (!hwif->present)
-			continue;
-#endif
-		destroy_proc_ide_interface(hwif);
 	}
 }
 
@@ -603,6 +589,5 @@ void proc_ide_create(void)
 void proc_ide_destroy(void)
 {
 	remove_proc_entry("ide/drivers", proc_ide_root);
-	destroy_proc_ide_interfaces();
 	remove_proc_entry("ide", NULL);
 }

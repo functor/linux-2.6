@@ -887,7 +887,7 @@ out_err:
 void ftp_accept_pasv (tux_req_t *req, int cachemiss)
 {
 	struct socket *sock, *new_sock = NULL;
-	struct tcp_opt *tp1, *tp2;
+	struct tcp_sock *tp1, *tp2;
 	int err;
 
 	tp1 = tcp_sk(req->data_sock->sk);
@@ -1287,7 +1287,7 @@ static void ftp_execute_command (tux_req_t *req, int cachemiss)
 		struct socket *data_sock;
 		struct sockaddr_in addr;
 		unsigned int str_len;
-		struct tcp_opt *tp;
+		struct tcp_sock *tp;
 		u32 local_addr;
 		int err;
 

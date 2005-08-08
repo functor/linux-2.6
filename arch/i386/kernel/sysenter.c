@@ -79,7 +79,7 @@ void map_vsyscall(void)
 	struct vm_area_struct *vma;
 	unsigned long addr;
 
-	if (unlikely(!vdso_enabled)) {
+	if (1 || unlikely(!vdso_enabled)) {
 		current->mm->context.vdso = NULL;
 		return;
 	}

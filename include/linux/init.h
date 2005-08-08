@@ -46,11 +46,7 @@
 #define __exitdata	__attribute__ ((__section__(".exit.data")))
 #define __exit_call	__attribute_used__ __attribute__ ((__section__ (".exitcall.exit")))
 
-#ifdef MODULE
-#define __exit		__attribute__ ((__section__(".exit.text")))
-#else
 #define __exit		__attribute_used__ __attribute__ ((__section__(".exit.text")))
-#endif
 
 /* For assembly routines */
 #define __INIT		.section	".init.text","ax"
@@ -64,8 +60,8 @@
 typedef int (*initcall_t)(void);
 typedef void (*exitcall_t)(void);
 
-extern initcall_t __con_initcall_start, __con_initcall_end;
-extern initcall_t __security_initcall_start, __security_initcall_end;
+extern initcall_t __con_initcall_start[], __con_initcall_end[];
+extern initcall_t __security_initcall_start[], __security_initcall_end[];
 
 /* Defined in init/main.c */
 extern char saved_command_line[];

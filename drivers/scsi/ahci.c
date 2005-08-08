@@ -179,6 +179,7 @@ static void ahci_port_stop(struct ata_port *ap);
 static void ahci_host_stop(struct ata_host_set *host_set);
 static void ahci_qc_prep(struct ata_queued_cmd *qc);
 static u8 ahci_check_status(struct ata_port *ap);
+static u8 ahci_check_err(struct ata_port *ap);
 static inline int ahci_host_intr(struct ata_port *ap, struct ata_queued_cmd *qc);
 
 static Scsi_Host_Template ahci_sht = {
@@ -204,6 +205,8 @@ static struct ata_port_operations ahci_ops = {
 	.port_disable		= ata_port_disable,
 
 	.check_status		= ahci_check_status,
+	.check_altstatus	= ahci_check_status,
+	.check_err		= ahci_check_err,
 	.dev_select		= ata_noop_dev_select,
 
 	.phy_reset		= ahci_phy_reset,
@@ -246,6 +249,12 @@ static struct pci_device_id ahci_pci_tbl[] = {
 	  board_ahci }, /* ICH7 */
 	{ PCI_VENDOR_ID_INTEL, 0x27c5, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 	  board_ahci }, /* ICH7M */
+	{ PCI_VENDOR_ID_INTEL, 0x27c2, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
+	  board_ahci }, /* ICH7R */
+	{ PCI_VENDOR_ID_INTEL, 0x27c3, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
+	  board_ahci }, /* ICH7R */
+	{ PCI_VENDOR_ID_AL, 0x5288, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
+	  board_ahci }, /* ULi M5288 */
 	{ }	/* terminate list */
 };
 
@@ -446,6 +455,13 @@ static u8 ahci_check_status(struct ata_port *ap)
 	return readl(mmio + PORT_TFDATA) & 0xFF;
 }
 
+static u8 ahci_check_err(struct ata_port *ap)
+{
+	void *mmio = (void *) ap->ioaddr.cmd_addr;
+
+	return (readl(mmio + PORT_TFDATA) >> 8) & 0xFF;
+}
+
 static void ahci_fill_sg(struct ata_queued_cmd *qc)
 {
 	struct ahci_port_priv *pp = qc->ap->private_data;
@@ -511,15 +527,6 @@ static void ahci_qc_prep(struct ata_queued_cmd *qc)
 		return;
 
 	ahci_fill_sg(qc);
-}
-
-static inline void ahci_dma_complete (struct ata_port *ap,
-                                     struct ata_queued_cmd *qc,
-				     int have_err)
-{
-	/* get drive status; clear intr; complete txn */
-	ata_qc_complete(ata_qc_from_tag(ap, ap->active_tag),
-			have_err ? ATA_ERR : 0);
 }
 
 static void ahci_intr_error(struct ata_port *ap, u32 irq_stat)
@@ -943,6 +950,7 @@ static int ahci_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 	unsigned long base;
 	void *mmio_base;
 	unsigned int board_idx = (unsigned int) ent->driver_data;
+	int pci_dev_busy = 0;
 	int rc;
 
 	VPRINTK("ENTER\n");
@@ -955,8 +963,10 @@ static int ahci_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 		return rc;
 
 	rc = pci_request_regions(pdev, DRV_NAME);
-	if (rc)
+	if (rc) {
+		pci_dev_busy = 1;
 		goto err_out;
+	}
 
 	pci_enable_intx(pdev);
 
@@ -1018,7 +1028,8 @@ err_out_free_ent:
 err_out_regions:
 	pci_release_regions(pdev);
 err_out:
-	pci_disable_device(pdev);
+	if (!pci_dev_busy)
+		pci_disable_device(pdev);
 	return rc;
 }
 

@@ -37,7 +37,7 @@ struct socket * start_listening(tux_socket_t *listen, int nr)
 	struct sockaddr_in sin;
 	struct socket *sock = NULL;
 	struct sock *sk;
-	struct tcp_opt *tp;
+	struct tcp_sock *tp;
 	int err;
 	u16 port = listen->port;
 	u32 addr = listen->ip;
@@ -377,7 +377,7 @@ int output_space_event (tux_req_t *req)
 
 static int __idle_event (tux_req_t *req)
 {
-	struct tcp_opt *tp;
+	struct tcp_sock *tp;
 	threadinfo_t *ti;
 
 	if (!req || (req->magic != TUX_MAGIC))
@@ -786,7 +786,7 @@ int accept_requests (threadinfo_t *ti)
 {
 	int count = 0, last_count = 0, error, socknr = 0;
 	struct socket *sock, *new_sock;
-	struct tcp_opt *tp1, *tp2;
+	struct tcp_sock *tp1, *tp2;
 	tux_req_t *req;
 
 	if (ti->nr_requests > tux_max_connect)

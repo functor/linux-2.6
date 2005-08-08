@@ -67,7 +67,7 @@ static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
 static int ac97_clock[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 0};
-static int ac97_quirk[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = AC97_TUNE_DEFAULT};
+static char *ac97_quirk[SNDRV_CARDS];
 static int buggy_irq[SNDRV_CARDS];
 static int xbox[SNDRV_CARDS];
 
@@ -83,7 +83,7 @@ module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable Intel i8x0 soundcard.");
 module_param_array(ac97_clock, int, NULL, 0444);
 MODULE_PARM_DESC(ac97_clock, "AC'97 codec clock (0 = auto-detect).");
-module_param_array(ac97_quirk, int, NULL, 0444);
+module_param_array(ac97_quirk, charp, NULL, 0444);
 MODULE_PARM_DESC(ac97_quirk, "AC'97 workaround for strange hardware.");
 module_param_array(buggy_irq, bool, NULL, 0444);
 MODULE_PARM_DESC(buggy_irq, "Enable workaround for buggy interrupts on some motherboards.");
@@ -426,7 +426,6 @@ struct _snd_intel8x0 {
 	unsigned int ac97_sdin[3];
 
 	spinlock_t reg_lock;
-	spinlock_t ac97_lock;
 	
 	u32 bdbars_count;
 	struct snd_dma_buffer bdbars;
@@ -595,13 +594,11 @@ static void snd_intel8x0_codec_write(ac97_t *ac97,
 {
 	intel8x0_t *chip = ac97->private_data;
 	
-	spin_lock(&chip->ac97_lock);
 	if (snd_intel8x0_codec_semaphore(chip, ac97->num) < 0) {
 		if (! chip->in_ac97_init)
 			snd_printk("codec_write %d: semaphore is not ready for register 0x%x\n", ac97->num, reg);
 	}
 	iaputword(chip, reg + ac97->num * 0x80, val);
-	spin_unlock(&chip->ac97_lock);
 }
 
 static unsigned short snd_intel8x0_codec_read(ac97_t *ac97,
@@ -611,7 +608,6 @@ static unsigned short snd_intel8x0_codec_read(ac97_t *ac97,
 	unsigned short res;
 	unsigned int tmp;
 
-	spin_lock(&chip->ac97_lock);
 	if (snd_intel8x0_codec_semaphore(chip, ac97->num) < 0) {
 		if (! chip->in_ac97_init)
 			snd_printk("codec_read %d: semaphore is not ready for register 0x%x\n", ac97->num, reg);
@@ -626,7 +622,6 @@ static unsigned short snd_intel8x0_codec_read(ac97_t *ac97,
 			res = 0xffff;
 		}
 	}
-	spin_unlock(&chip->ac97_lock);
 	return res;
 }
 
@@ -634,7 +629,6 @@ static void snd_intel8x0_codec_read_test(intel8x0_t *chip, unsigned int codec)
 {
 	unsigned int tmp;
 
-	spin_lock(&chip->ac97_lock);
 	if (snd_intel8x0_codec_semaphore(chip, codec) >= 0) {
 		iagetword(chip, codec * 0x80);
 		if ((tmp = igetdword(chip, ICHREG(GLOB_STA))) & ICH_RCS) {
@@ -642,7 +636,6 @@ static void snd_intel8x0_codec_read_test(intel8x0_t *chip, unsigned int codec)
 			iputdword(chip, ICHREG(GLOB_STA), tmp & ~(ICH_SRI|ICH_PRI|ICH_TRI|ICH_GSCI));
 		}
 	}
-	spin_unlock(&chip->ac97_lock);
 }
 
 /*
@@ -675,7 +668,6 @@ static unsigned short snd_intel8x0_ali_codec_read(ac97_t *ac97, unsigned short r
 	intel8x0_t *chip = ac97->private_data;
 	unsigned short data = 0xffff;
 
-	spin_lock(&chip->ac97_lock);
 	if (snd_intel8x0_ali_codec_semaphore(chip))
 		goto __err;
 	reg |= ALI_CPR_ADDR_READ;
@@ -686,7 +678,6 @@ static unsigned short snd_intel8x0_ali_codec_read(ac97_t *ac97, unsigned short r
 		goto __err;
 	data = igetword(chip, ICHREG(ALI_SPR));
  __err:
-	spin_unlock(&chip->ac97_lock);
 	return data;
 }
 
@@ -694,17 +685,13 @@ static void snd_intel8x0_ali_codec_write(ac97_t *ac97, unsigned short reg, unsig
 {
 	intel8x0_t *chip = ac97->private_data;
 
-	spin_lock(&chip->ac97_lock);
-	if (snd_intel8x0_ali_codec_semaphore(chip)) {
-		spin_unlock(&chip->ac97_lock);
+	if (snd_intel8x0_ali_codec_semaphore(chip))
 		return;
-	}
 	iputword(chip, ICHREG(ALI_CPR), val);
 	if (ac97->num)
 		reg |= ALI_CPR_ADDR_SECONDARY;
 	iputword(chip, ICHREG(ALI_CPR_ADDR), reg);
 	snd_intel8x0_ali_codec_ready(chip, ALI_CSPSR_WRITE_OK);
-	spin_unlock(&chip->ac97_lock);
 }
 
 
@@ -948,7 +935,6 @@ static int snd_intel8x0_hw_params(snd_pcm_substream_t * substream,
 	intel8x0_t *chip = snd_pcm_substream_chip(substream);
 	ichdev_t *ichdev = get_ichdev(substream);
 	snd_pcm_runtime_t *runtime = substream->runtime;
-	size_t size = params_buffer_bytes(hw_params);
 	int dbl = params_rate(hw_params) > 48000;
 	int err;
 
@@ -1743,6 +1729,12 @@ static struct ac97_quirk ac97_quirks[] __devinitdata = {
 		.name = "Compaq Evo D510C",
 		.type = AC97_TUNE_HP_ONLY
 	},
+        {
+		.vendor = 0x0e11,
+		.device = 0x0860,
+		.name = "HP/Compaq nx7010",
+		.type = AC97_TUNE_MUTE_LED
+        },
 	{
 		.vendor = 0x1014,
 		.device = 0x1f00,
@@ -1779,16 +1771,46 @@ static struct ac97_quirk ac97_quirks[] __devinitdata = {
 		.name = "Dell",	/* which model?  AD1981B*/
 		.type = AC97_TUNE_HP_ONLY
 	},
+	{
+		.vendor = 0x103c,
+		.device = 0x006d,
+		.name = "HP zv5000",
+		.type = AC97_TUNE_MUTE_LED	/*AD1981B*/
+	},
 	{	/* FIXME: which codec? */
 		.vendor = 0x103c,
 		.device = 0x00c3,
-		.name = "Hewlett-Packard onboard",
+		.name = "HP xw6000",
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x103c,
+		.device = 0x088c,
+		.name = "HP nc8000",
+		.type = AC97_TUNE_MUTE_LED
+	},
+	{
+		.vendor = 0x103c,
+		.device = 0x0890,
+		.name = "HP nc6000",
+		.type = AC97_TUNE_MUTE_LED
+	},
+	{
+		.vendor = 0x103c,
+		.device = 0x129d,
+		.name = "HP xw8000",
 		.type = AC97_TUNE_HP_ONLY
 	},
 	{
 		.vendor = 0x103c,
 		.device = 0x12f1,
 		.name = "HP xw8200",	/* AD1981B*/
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x103c,
+		.device = 0x12f2,
+		.name = "HP xw6200",
 		.type = AC97_TUNE_HP_ONLY
 	},
 	{
@@ -1927,7 +1949,7 @@ static struct ac97_quirk ac97_quirks[] __devinitdata = {
 	{ } /* terminator */
 };
 
-static int __devinit snd_intel8x0_mixer(intel8x0_t *chip, int ac97_clock, int ac97_quirk)
+static int __devinit snd_intel8x0_mixer(intel8x0_t *chip, int ac97_clock, const char *quirk_override)
 {
 	ac97_bus_t *pbus;
 	ac97_template_t ac97;
@@ -2023,7 +2045,7 @@ static int __devinit snd_intel8x0_mixer(intel8x0_t *chip, int ac97_clock, int ac
 		}
 	}
 	/* tune up the primary codec */
-	snd_ac97_tune_hardware(chip->ac97[0], ac97_quirks, ac97_quirk);
+	snd_ac97_tune_hardware(chip->ac97[0], ac97_quirks, quirk_override);
 	/* enable separate SDINs for ICH4 */
 	if (chip->device_type == DEVICE_INTEL_ICH4)
 		pbus->isdin = 1;
@@ -2338,7 +2360,6 @@ static int intel8x0_suspend(snd_card_t *card, unsigned int state)
 		if (chip->ac97[i])
 			snd_ac97_suspend(chip->ac97[i]);
 	pci_disable_device(chip->pci);
-	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	return 0;
 }
 
@@ -2371,7 +2392,6 @@ static int intel8x0_resume(snd_card_t *card, unsigned int state)
 		}
 	}
 
-	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	return 0;
 }
 #endif /* CONFIG_PM */
@@ -2560,7 +2580,6 @@ static int __devinit snd_intel8x0_create(snd_card_t * card,
 		return -ENOMEM;
 	}
 	spin_lock_init(&chip->reg_lock);
-	spin_lock_init(&chip->ac97_lock);
 	chip->device_type = device_type;
 	chip->card = card;
 	chip->pci = pci;
@@ -2821,11 +2840,7 @@ static struct pci_driver driver = {
 
 static int __init alsa_card_intel8x0_init(void)
 {
-	int err;
-
-        if ((err = pci_module_init(&driver)) < 0)
-                return err;
-        return 0;
+	return pci_module_init(&driver);
 }
 
 static void __exit alsa_card_intel8x0_exit(void)

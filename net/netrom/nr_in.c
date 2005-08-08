@@ -261,7 +261,7 @@ static int nr_state3_machine(struct sock *sk, struct sk_buff *skb, int frametype
 	return queued;
 }
 
-/* Higher level upcall for a LAPB frame - called with sk locked */
+/* Higher level upcall for a LAPB frame */
 int nr_process_rx_frame(struct sock *sk, struct sk_buff *skb)
 {
 	nr_cb *nr = nr_sk(sk);

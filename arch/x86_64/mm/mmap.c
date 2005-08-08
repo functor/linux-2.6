@@ -26,6 +26,7 @@
 
 #include <linux/personality.h>
 #include <linux/mm.h>
+#include <linux/random.h>
 
 /*
  * Top of mmap area (just below the process stack).
@@ -33,7 +34,7 @@
  * Leave an at least ~128 MB hole.
  */
 #define MIN_GAP (128*1024*1024)
-#define MAX_GAP (TASK_SIZE_3264/6*5)
+#define MAX_GAP (TASK_SIZE/6*5)
 
 static inline unsigned long mmap_base(void)
 {
@@ -44,7 +45,7 @@ static inline unsigned long mmap_base(void)
 	else if (gap > MAX_GAP)
 		gap = MAX_GAP;
 
-	return TASK_SIZE_3264 - (gap & PAGE_MASK);
+	return TASK_SIZE - (gap & PAGE_MASK);
 }
 
 static inline int mmap_is_legacy(void)
@@ -84,3 +85,11 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 		mm->unmap_area = arch_unmap_area_topdown;
 	}
 }
+
+unsigned long arch_align_stack(unsigned long sp)
+{
+	if (current->flags & PF_RELOCEXEC)
+		sp -= ((get_random_int() % 65536) << 4);
+	return sp & ~0xf;
+}
+

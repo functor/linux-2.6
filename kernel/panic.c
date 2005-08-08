@@ -69,6 +69,7 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
+	dump_stack();
 	if (crashdump_func())
 		BUG();
 	bust_spinlocks(0);
@@ -152,6 +153,7 @@ const char *print_tainted(void)
 		snprintf(buf, sizeof(buf), "Not tainted");
 	return(buf);
 }
+EXPORT_SYMBOL(print_tainted);
 
 void add_taint(unsigned flag)
 {

@@ -28,7 +28,7 @@ struct scsi_dev_info_list {
 static const char spaces[] = "                "; /* 16 of them */
 static unsigned scsi_default_dev_flags;
 static LIST_HEAD(scsi_dev_info_list);
-static __initdata char scsi_dev_flags[256];
+static char scsi_dev_flags[256];
 
 /*
  * scsi_static_device_list: deprecated list of devices that require
@@ -114,6 +114,7 @@ static struct {
 	{"YAMAHA", "CDR102", "1.00", BLIST_NOLUN},	/* locks up */
 	{"YAMAHA", "CRW8424S", "1.0", BLIST_NOLUN},	/* locks up */
 	{"YAMAHA", "CRW6416S", "1.0c", BLIST_NOLUN},	/* locks up */
+	{"", "Scanner", "1.80", BLIST_NOLUN},	/* responds to all lun */
 
 	/*
 	 * Other types of devices that have special flags.

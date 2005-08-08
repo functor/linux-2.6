@@ -167,7 +167,7 @@ DEB( static int debugging = DEBUG; )
    24 bits) */
 #define SET_DENS_AND_BLK 0x10001
 
-static rwlock_t st_dev_arr_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(st_dev_arr_lock);
 
 static int st_fixed_buffer_size = ST_FIXED_BUFFER_SIZE;
 static int st_max_sg_segs = ST_MAX_SG;
@@ -3414,11 +3414,17 @@ static int st_ioctl(struct inode *inode, struct file *file,
 		case SCSI_IOCTL_GET_BUS_NUMBER:
 			break;
 		default:
+		if (!capable(CAP_SYS_ADMIN))
+			i = -EPERM;
+		else
 			i = scsi_cmd_ioctl(file, STp->disk, cmd_in, p);
 			if (i != -ENOTTY)
 				return i;
 			break;
 	}
+	if (!capable(CAP_SYS_ADMIN) &&
+	    (cmd_in == SCSI_IOCTL_START_UNIT || cmd_in == SCSI_IOCTL_STOP_UNIT))
+		return -EPERM;
 	return scsi_ioctl(STp->device, cmd_in, p);
 
  out:

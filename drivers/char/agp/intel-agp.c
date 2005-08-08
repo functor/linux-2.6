@@ -6,7 +6,7 @@
  * Intel(R) 855GM/852GM and 865G support added by David Dawes
  * <dawes@tungstengraphics.com>.
  *
- * Intel(R) 915G support added by Alan Hourihane
+ * Intel(R) 915G/915GM support added by Alan Hourihane
  * <alanh@tungstengraphics.com>.
  */
 
@@ -248,6 +248,7 @@ static int intel_i810_remove_entries(struct agp_memory *mem, off_t pg_start,
 		writel(agp_bridge->scratch_page, intel_i810_private.registers+I810_PTE_BASE+(i*4));
 		readl(intel_i810_private.registers+I810_PTE_BASE+(i*4));	/* PCI Posting. */
 	}
+
 	global_cache_flush();
 	agp_bridge->driver->tlb_flush(mem);
 	return 0;
@@ -414,14 +415,16 @@ static void intel_i830_init_gtt_entries(void)
 			break;
 		case I915_GMCH_GMS_STOLEN_48M:
 			/* Check it's really I915G */
-			if (agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_82915G_HB)
+			if (agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_82915G_HB ||
+			    agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_82915GM_HB)
 				gtt_entries = MB(48) - KB(size);
 			else
 				gtt_entries = 0;
 			break;
 		case I915_GMCH_GMS_STOLEN_64M:
 			/* Check it's really I915G */
-			if (agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_82915G_HB)
+			if (agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_82915G_HB ||
+			    agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_82915GM_HB)
 				gtt_entries = MB(64) - KB(size);
 			else
 				gtt_entries = 0;
@@ -637,9 +640,9 @@ static int intel_i915_configure(void)
 	gmch_ctrl |= I830_GMCH_ENABLED;
 	pci_write_config_word(agp_bridge->dev,I830_GMCH_CTRL,gmch_ctrl);
 
-	writel(agp_bridge->gatt_bus_addr | I810_PGETBL_ENABLED, intel_i830_private.registers);
+	writel(agp_bridge->gatt_bus_addr|I810_PGETBL_ENABLED, intel_i830_private.registers+I810_PGETBL_CTL);
 	readl(intel_i830_private.registers+I810_PGETBL_CTL);	/* PCI Posting. */
-	
+
 	if (agp_bridge->driver->needs_scratch_page) {
 		for (i = intel_i830_private.gtt_entries; i < current_size->num_entries; i++) {
 			writel(agp_bridge->scratch_page, intel_i830_private.gtt+i);
@@ -1647,6 +1650,14 @@ static int __devinit agp_intel_probe(struct pci_dev *pdev,
 		}
 		name = "915G";
 		break;
+	case PCI_DEVICE_ID_INTEL_82915GM_HB:
+		if (find_i830(PCI_DEVICE_ID_INTEL_82915GM_IG)) {
+			bridge->driver = &intel_915_driver;
+		} else {
+			bridge->driver = &intel_845_driver;
+		}
+		name = "915GM";
+		break;
 	case PCI_DEVICE_ID_INTEL_7505_0:
 		bridge->driver = &intel_7505_driver;
 		name = "E7505";
@@ -1719,8 +1730,13 @@ static void __devexit agp_intel_remove(struct pci_dev *pdev)
 {
 	struct agp_bridge_data *bridge = pci_get_drvdata(pdev);
 
-	pci_dev_put(pdev);
 	agp_remove_bridge(bridge);
+
+	if (intel_i810_private.i810_dev)
+		pci_dev_put(intel_i810_private.i810_dev);
+	if (intel_i830_private.i830_dev)
+		pci_dev_put(intel_i830_private.i830_dev);
+
 	agp_put_bridge(bridge);
 }
 
@@ -1732,12 +1748,16 @@ static int agp_intel_resume(struct pci_dev *pdev)
 
 	if (bridge->driver == &intel_generic_driver)
 		intel_configure();
+	else if (bridge->driver == &intel_850_driver)
+		intel_850_configure();
 	else if (bridge->driver == &intel_845_driver)
 		intel_845_configure();
 	else if (bridge->driver == &intel_830mp_driver)
 		intel_830mp_configure();
 	else if (bridge->driver == &intel_915_driver)
 		intel_i915_configure();
+	else if (bridge->driver == &intel_830_driver)
+		intel_i830_configure();
 
 	return 0;
 }
@@ -1774,6 +1794,7 @@ static struct pci_device_id agp_intel_pci_table[] = {
 	ID(PCI_DEVICE_ID_INTEL_7505_0),
 	ID(PCI_DEVICE_ID_INTEL_7205_0),
 	ID(PCI_DEVICE_ID_INTEL_82915G_HB),
+	ID(PCI_DEVICE_ID_INTEL_82915GM_HB),
 	{ }
 };
 

@@ -216,6 +216,16 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 	PCI_DEVICE_ID_INTEL_82443BX_1, 	qu
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 	PCI_DEVICE_ID_INTEL_82443BX_2, 	quirk_natoma );
 
 /*
+ *  This chip can cause PCI parity errors if config register 0xA0 is read
+ *  while DMAs are occurring.
+ */
+static void __devinit quirk_citrine(struct pci_dev *dev)
+{
+	dev->cfg_size = 0xA0;
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_IBM,	PCI_DEVICE_ID_IBM_CITRINE,	quirk_citrine );
+
+/*
  *  S3 868 and 968 chips report region size equal to 32M, but they decode 64M.
  *  If it's needed, re-allocate the region.
  */
@@ -698,6 +708,26 @@ static void __init quirk_svwks_csb5ide(struct pci_dev *pdev)
 	}
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_SERVERWORKS, PCI_DEVICE_ID_SERVERWORKS_CSB5IDE, quirk_svwks_csb5ide );
+
+/*
+ *	Intel 82801CAM ICH3-M datasheet says IDE modes must be the same
+ */
+static void __init quirk_ide_samemode(struct pci_dev *pdev)
+{
+	u8 prog;
+
+	pci_read_config_byte(pdev, PCI_CLASS_PROG, &prog);
+
+	if (((prog & 1) && !(prog & 4)) || ((prog & 4) && !(prog & 1))) {
+		printk(KERN_INFO "PCI: IDE mode mismatch; forcing legacy mode\n");
+		prog &= ~5;
+		pdev->class &= ~5;
+		pci_write_config_byte(pdev, PCI_CLASS_PROG, prog);
+		/* need to re-assign BARs for compat mode */
+		quirk_ide_bases(pdev);
+	}
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82801CA_10, quirk_ide_samemode);
 
 /* This was originally an Alpha specific thing, but it really fits here.
  * The i82375 PCI/EISA bridge appears as non-classified. Fix that.
@@ -1223,6 +1253,8 @@ static void pci_do_fixups(struct pci_dev *dev, struct pci_fixup *f, struct pci_f
 	}
 }
 
+extern struct pci_fixup __start_pci_fixups_early[];
+extern struct pci_fixup __end_pci_fixups_early[];
 extern struct pci_fixup __start_pci_fixups_header[];
 extern struct pci_fixup __end_pci_fixups_header[];
 extern struct pci_fixup __start_pci_fixups_final[];
@@ -1236,6 +1268,11 @@ void pci_fixup_device(enum pci_fixup_pass pass, struct pci_dev *dev)
 	struct pci_fixup *start, *end;
 
 	switch(pass) {
+	case pci_fixup_early:
+		start = __start_pci_fixups_early;
+		end = __end_pci_fixups_early;
+		break;
+
 	case pci_fixup_header:
 		start = __start_pci_fixups_header;
 		end = __end_pci_fixups_header;

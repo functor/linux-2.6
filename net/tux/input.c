@@ -396,7 +396,7 @@ void print_req (tux_req_t *req)
 		printk("...tp->send_head: %p\n", sk->sk_send_head);
 		printk("...tp->snd_una: %08x\n", tcp_sk(sk)->snd_una);
 		printk("...tp->snd_nxt: %08x\n", tcp_sk(sk)->snd_nxt);
-		printk("...tp->packets_out: %08x\n", tcp_get_pcount(&tcp_sk(sk)->packets_out));
+		printk("...tp->packets_out: %08x\n", tcp_sk(sk)->packets_out);
 	}
 	printk("... meth:{%s}, uri:{%s}, query:{%s}, ver:{%s}\n", req->method_str ? req->method_str : "<null>", req->uri_str ? req->uri_str : "<null>", req->query_str ? req->query_str : "<null>", req->version_str ? req->version_str : "<null>");
 	printk("... post_data:{%s}(%d).\n", req->post_data_str, req->post_data_len);
@@ -413,7 +413,7 @@ void parse_request (tux_req_t *req, int cachemiss)
 {
 	int len, parsed_len;
 	struct sock *sk = req->sock->sk;
-	struct tcp_opt *tp = tcp_sk(sk);
+	struct tcp_sock *tp = tcp_sk(sk);
 	int was_keepalive = req->keep_alive;
 
 	if (req->magic != TUX_MAGIC)

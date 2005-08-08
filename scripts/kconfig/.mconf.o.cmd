@@ -2,8 +2,8 @@ cmd_scripts/kconfig/mconf.o := gcc -Wp,-MD,scripts/kconfig/.mconf.o.d -Wall -Wst
 
 deps_scripts/kconfig/mconf.o := \
   scripts/kconfig/mconf.c \
-    $(wildcard include/config/.h) \
     $(wildcard include/config/mode.h) \
+    $(wildcard include/config/.h) \
   /usr/include/sys/ioctl.h \
   /usr/include/features.h \
   /usr/include/sys/cdefs.h \
@@ -18,7 +18,7 @@ deps_scripts/kconfig/mconf.o := \
   /usr/include/bits/sigset.h \
   /usr/include/bits/types.h \
   /usr/include/bits/wordsize.h \
-  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/stddef.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.2/include/stddef.h \
   /usr/include/bits/typesizes.h \
   /usr/include/bits/signum.h \
   /usr/include/time.h \
@@ -48,14 +48,14 @@ deps_scripts/kconfig/mconf.o := \
   /usr/include/sys/select.h \
   /usr/include/bits/select.h \
   /usr/include/sys/sysmacros.h \
-  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/limits.h \
-  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/syslimits.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.2/include/limits.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.2/include/syslimits.h \
   /usr/include/limits.h \
   /usr/include/bits/posix1_lim.h \
   /usr/include/bits/local_lim.h \
   /usr/include/linux/limits.h \
   /usr/include/bits/posix2_lim.h \
-  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/stdarg.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.2/include/stdarg.h \
   /usr/include/stdlib.h \
   /usr/include/alloca.h \
   /usr/include/string.h \
@@ -67,7 +67,6 @@ deps_scripts/kconfig/mconf.o := \
   /usr/include/bits/posix_opt.h \
   /usr/include/bits/confname.h \
   /usr/include/getopt.h \
-  /usr/include/regex.h \
   scripts/kconfig/lkc.h \
   scripts/kconfig/expr.h \
   /usr/include/stdio.h \
@@ -79,7 +78,7 @@ deps_scripts/kconfig/mconf.o := \
   /usr/include/bits/stdio_lim.h \
   /usr/include/bits/sys_errlist.h \
   /usr/include/bits/stdio.h \
-  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/stdbool.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.2/include/stdbool.h \
   scripts/kconfig/lkc_proto.h \
 
 scripts/kconfig/mconf.o: $(deps_scripts/kconfig/mconf.o)

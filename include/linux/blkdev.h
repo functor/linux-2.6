@@ -95,6 +95,7 @@ void swap_io_context(struct io_context **ioc1, struct io_context **ioc2);
 
 struct request_list {
 	int count[2];
+	int starved[2];
 	mempool_t *rq_pool;
 	wait_queue_head_t wait[2];
 	wait_queue_head_t drain;
@@ -339,8 +340,11 @@ struct request_queue
 	unsigned long		queue_flags;
 
 	/*
-	 * protects queue structures from reentrancy
+	 * protects queue structures from reentrancy. ->__queue_lock should
+	 * _never_ be used directly, it is queue private. always use
+	 * ->queue_lock.
 	 */
+	spinlock_t		__queue_lock;
 	spinlock_t		*queue_lock;
 
 	/*

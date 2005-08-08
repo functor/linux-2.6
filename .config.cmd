@@ -1,5 +1,6 @@
 deps_config := \
 	lib/Kconfig \
+	drivers/crypto/Kconfig \
 	crypto/Kconfig \
 	security/selinux/Kconfig \
 	security/Kconfig \
@@ -9,7 +10,11 @@ deps_config := \
 	fs/nls/Kconfig \
 	fs/partitions/Kconfig \
 	fs/ncpfs/Kconfig \
+	fs/xfs/Kconfig \
 	fs/Kconfig \
+	drivers/infiniband/ulp/ipoib/Kconfig \
+	drivers/infiniband/hw/mthca/Kconfig \
+	drivers/infiniband/Kconfig \
 	drivers/mmc/Kconfig \
 	drivers/usb/gadget/Kconfig \
 	drivers/usb/atm/Kconfig \
@@ -29,6 +34,7 @@ deps_config := \
 	sound/sparc/Kconfig \
 	sound/pcmcia/Kconfig \
 	sound/usb/Kconfig \
+	sound/mips/Kconfig \
 	sound/arm/Kconfig \
 	sound/ppc/Kconfig \
 	sound/pci/Kconfig \
@@ -37,6 +43,7 @@ deps_config := \
 	sound/core/Kconfig \
 	sound/oss/dmasound/Kconfig \
 	sound/Kconfig \
+	drivers/video/backlight/Kconfig \
 	drivers/video/logo/Kconfig \
 	drivers/video/console/Kconfig \
 	drivers/video/Kconfig \
@@ -167,6 +174,7 @@ deps_config := \
 	drivers/mca/Kconfig \
 	drivers/eisa/Kconfig \
 	drivers/pci/Kconfig \
+	drivers/pci/pcie/Kconfig \
 	drivers/cpufreq/Kconfig \
 	arch/i386/kernel/cpu/cpufreq/Kconfig \
 	drivers/acpi/Kconfig \

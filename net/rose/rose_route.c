@@ -40,11 +40,11 @@
 static unsigned int rose_neigh_no = 1;
 
 static struct rose_node  *rose_node_list;
-static spinlock_t rose_node_list_lock = SPIN_LOCK_UNLOCKED;
-struct rose_neigh *rose_neigh_list;
-static spinlock_t rose_neigh_list_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(rose_node_list_lock);
+static struct rose_neigh *rose_neigh_list;
+static DEFINE_SPINLOCK(rose_neigh_list_lock);
 static struct rose_route *rose_route_list;
-static spinlock_t rose_route_list_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(rose_route_list_lock);
 
 struct rose_neigh *rose_loopback_neigh;
 
@@ -587,7 +587,7 @@ static int rose_clear_routes(void)
 /*
  *	Check that the device given is a valid AX.25 interface that is "up".
  */
-struct net_device *rose_ax25_dev_get(char *devname)
+static struct net_device *rose_ax25_dev_get(char *devname)
 {
 	struct net_device *dev;
 
@@ -727,7 +727,7 @@ int rose_rt_ioctl(unsigned int cmd, void __user *arg)
 		}
 		if (rose_route.mask > 10) /* Mask can't be more than 10 digits */
 			return -EINVAL;
-		if(rose_route.ndigis > 8) /* No more than 8 digipeats */
+		if (rose_route.ndigis > 8) /* No more than 8 digipeats */
 			return -EINVAL;
 		err = rose_add_node(&rose_route, dev);
 		dev_put(dev);

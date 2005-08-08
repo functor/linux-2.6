@@ -30,7 +30,7 @@ int send_sync_buf (tux_req_t *req, struct socket *sock, const char *buf, const s
 	struct msghdr msg;
 	struct iovec iov;
 	int len, written = 0, left = length;
-	struct tcp_opt *tp = tcp_sk(sock->sk);
+	struct tcp_sock *tp = tcp_sk(sock->sk);
 
 	tp->nonagle = 2;
 
@@ -227,7 +227,7 @@ int generic_send_file (tux_req_t *req, struct socket *sock, int cachemiss)
 {
 	sock_send_desc_t sock_desc;
 	int len, want, nonblock = !cachemiss;
-	struct tcp_opt *tp = tcp_sk(sock->sk);
+	struct tcp_sock *tp = tcp_sk(sock->sk);
 
 	tp->nonagle = 2;
 

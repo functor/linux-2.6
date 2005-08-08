@@ -127,7 +127,7 @@
 
 /* G-series and Mystique have (almost) same DAC */
 #undef NEED_DAC1064
-#if defined(CONFIG_FB_MATROX_MYSTIQUE) || defined(CONFIG_FB_MATROX_G100)
+#if defined(CONFIG_FB_MATROX_MYSTIQUE) || defined(CONFIG_FB_MATROX_G)
 #define NEED_DAC1064 1
 #endif
 
@@ -170,14 +170,14 @@ static inline void mga_memcpy_toio(vaddr_t va, const void* src, int len) {
 
 	if ((unsigned long)src & 3) {
 		while (len >= 4) {
-			writel(get_unaligned((u32 *)src), addr);
+			fb_writel(get_unaligned((u32 *)src), addr);
 			addr++;
 			len -= 4;
 			src += 4;
 		}
 	} else {
 		while (len >= 4) {
-			writel(*(u32 *)src, addr);
+			fb_writel(*(u32 *)src, addr);
 			addr++;
 			len -= 4;
 			src += 4;

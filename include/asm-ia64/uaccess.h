@@ -35,6 +35,8 @@
 #include <linux/compiler.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
+#include <linux/page-flags.h>
+#include <linux/mm.h>
 
 #include <asm/intrinsics.h>
 #include <asm/pgtable.h>
@@ -132,7 +134,7 @@ extern long __get_user_unaligned_unknown (void);
 
 #ifdef ASM_SUPPORTED
   struct __large_struct { unsigned long buf[100]; };
-# define __m(x) (*(struct __large_struct *)(x))
+# define __m(x) (*(struct __large_struct __user *)(x))
 
 /* We need to declare the __ex_table section before we can use it in .xdata.  */
 asm (".section \"__ex_table\", \"a\"\n\t.previous");
@@ -365,6 +367,40 @@ ia64_done_with_exception (struct pt_regs *regs)
 		return 1;
 	}
 	return 0;
+}
+
+#define ARCH_HAS_TRANSLATE_MEM_PTR	1
+static __inline__ char *
+xlate_dev_mem_ptr (unsigned long p)
+{
+	struct page *page;
+	char * ptr;
+
+	page = pfn_to_page(p >> PAGE_SHIFT);
+	if (PageUncached(page))
+		ptr = (char *)p + __IA64_UNCACHED_OFFSET;
+	else
+		ptr = __va(p);
+
+	return ptr;
+}
+
+/*
+ * Convert a virtual cached kernel memory pointer to an uncached pointer
+ */
+static __inline__ char *
+xlate_dev_kmem_ptr (char * p)
+{
+	struct page *page;
+	char * ptr;
+
+	page = virt_to_page((unsigned long)p >> PAGE_SHIFT);
+	if (PageUncached(page))
+		ptr = (char *)__pa(p) + __IA64_UNCACHED_OFFSET;
+	else
+		ptr = p;
+
+	return ptr;
 }
 
 #endif /* _ASM_IA64_UACCESS_H */

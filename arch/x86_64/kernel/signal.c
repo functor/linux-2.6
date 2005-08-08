@@ -24,7 +24,6 @@
 #include <linux/stddef.h>
 #include <linux/personality.h>
 #include <linux/compiler.h>
-#include <linux/suspend.h>
 #include <asm/ucontext.h>
 #include <asm/uaccess.h>
 #include <asm/i387.h>
@@ -127,9 +126,9 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc, unsigned 
 			err |= restore_i387(buf);
 		} else {
 			struct task_struct *me = current;
-			if (me->used_math) {
+			if (used_math()) {
 				clear_fpu(me);
-				me->used_math = 0;
+				clear_used_math();
 			}
 		}
 	}
@@ -145,7 +144,7 @@ asmlinkage long sys_rt_sigreturn(struct pt_regs *regs)
 {
 	struct rt_sigframe __user *frame;
 	sigset_t set;
-	long eax;
+	unsigned long eax;
 
 	frame = (struct rt_sigframe __user *)(regs->rsp - 8);
 	if (verify_area(VERIFY_READ, frame, sizeof(*frame))) { 
@@ -252,7 +251,7 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	int err = 0;
 	struct task_struct *me = current;
 
-	if (me->used_math) {
+	if (used_math()) {
 		fp = get_stack(ka, regs, sizeof(struct _fpstate)); 
 		frame = (void __user *)round_down((unsigned long)fp - sizeof(struct rt_sigframe), 16) - 8;
 
@@ -423,10 +422,8 @@ int do_signal(struct pt_regs *regs, sigset_t *oldset)
 		return 1;
 	} 	
 
-	if (current->flags & PF_FREEZE) {
-		refrigerator(0);
+	if (try_to_freeze(0))
 		goto no_signal;
-	}
 
 	if (!oldset)
 		oldset = &current->blocked;

@@ -76,6 +76,20 @@ EXPORT_SYMBOL(mb_cache_entry_find_first);
 EXPORT_SYMBOL(mb_cache_entry_find_next);
 #endif
 
+struct mb_cache {
+	struct list_head		c_cache_list;
+	const char			*c_name;
+	struct mb_cache_op		c_op;
+	atomic_t			c_entry_count;
+	int				c_bucket_bits;
+#ifndef MB_CACHE_INDEXES_COUNT
+	int				c_indexes_count;
+#endif
+	kmem_cache_t			*c_entry_cache;
+	struct list_head		*c_block_hash;
+	struct list_head		*c_indexes_hash[0];
+};
+
 
 /*
  * Global data: list of all mbcache's, lru list, and a spinlock for
@@ -85,7 +99,7 @@ EXPORT_SYMBOL(mb_cache_entry_find_next);
 
 static LIST_HEAD(mb_cache_list);
 static LIST_HEAD(mb_cache_lru_list);
-static spinlock_t mb_cache_spinlock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(mb_cache_spinlock);
 static struct shrinker *mb_shrinker;
 
 static inline int
@@ -130,8 +144,7 @@ __mb_cache_entry_forget(struct mb_cache_entry *ce, int gfp_mask)
 {
 	struct mb_cache *cache = ce->e_cache;
 
-	mb_assert(!ce->e_used);
-	mb_assert(!ce->e_queued);
+	mb_assert(!(ce->e_used || ce->e_queued));
 	if (cache->c_op.free && cache->c_op.free(ce, gfp_mask)) {
 		/* free failed -- put back on the lru list
 		   for freeing later. */
@@ -157,6 +170,7 @@ __mb_cache_entry_release_unlock(struct mb_cache_entry *ce)
 	if (!(ce->e_used || ce->e_queued)) {
 		if (!__mb_cache_entry_is_hashed(ce))
 			goto forget;
+		mb_assert(list_empty(&ce->e_lru_list));
 		list_add_tail(&ce->e_lru_list, &mb_cache_lru_list);
 	}
 	spin_unlock(&mb_cache_spinlock);
@@ -240,7 +254,7 @@ mb_cache_create(const char *name, struct mb_cache_op *cache_op,
 	struct mb_cache *cache = NULL;
 
 	if(entry_size < sizeof(struct mb_cache_entry) +
-	   indexes_count * sizeof(struct mb_cache_entry_index))
+	   indexes_count * sizeof(((struct mb_cache_entry *) 0)->e_indexes[0]))
 		return NULL;
 
 	cache = kmalloc(sizeof(struct mb_cache) +
@@ -505,6 +519,9 @@ mb_cache_entry_get(struct mb_cache *cache, struct block_device *bdev,
 		if (ce->e_bdev == bdev && ce->e_block == block) {
 			DEFINE_WAIT(wait);
 
+			if (!list_empty(&ce->e_lru_list))
+				list_del_init(&ce->e_lru_list);
+
 			while (ce->e_used > 0) {
 				ce->e_queued++;
 				prepare_to_wait(&mb_cache_queue, &wait,
@@ -516,13 +533,11 @@ mb_cache_entry_get(struct mb_cache *cache, struct block_device *bdev,
 			}
 			finish_wait(&mb_cache_queue, &wait);
 			ce->e_used += 1 + MB_CACHE_WRITER;
-			
+
 			if (!__mb_cache_entry_is_hashed(ce)) {
 				__mb_cache_entry_release_unlock(ce);
 				return NULL;
 			}
-			if (!list_empty(&ce->e_lru_list))
-				list_del_init(&ce->e_lru_list);
 			goto cleanup;
 		}
 	}
@@ -539,8 +554,6 @@ static struct mb_cache_entry *
 __mb_cache_entry_find(struct list_head *l, struct list_head *head,
 		      int index, struct block_device *bdev, unsigned int key)
 {
-	DEFINE_WAIT(wait);
-
 	while (l != head) {
 		struct mb_cache_entry *ce =
 			list_entry(l, struct mb_cache_entry,
@@ -548,10 +561,12 @@ __mb_cache_entry_find(struct list_head *l, struct list_head *head,
 		if (ce->e_bdev == bdev && ce->e_indexes[index].o_key == key) {
 			DEFINE_WAIT(wait);
 
+			if (!list_empty(&ce->e_lru_list))
+				list_del_init(&ce->e_lru_list);
+
 			/* Incrementing before holding the lock gives readers
 			   priority over writers. */
 			ce->e_used++;
-			
 			while (ce->e_used >= MB_CACHE_WRITER) {
 				ce->e_queued++;
 				prepare_to_wait(&mb_cache_queue, &wait,
@@ -562,14 +577,12 @@ __mb_cache_entry_find(struct list_head *l, struct list_head *head,
 				ce->e_queued--;
 			}
 			finish_wait(&mb_cache_queue, &wait);
-			
+
 			if (!__mb_cache_entry_is_hashed(ce)) {
 				__mb_cache_entry_release_unlock(ce);
 				spin_lock(&mb_cache_spinlock);
 				return ERR_PTR(-EAGAIN);
 			}
-			if (!list_empty(&ce->e_lru_list))
-				list_del_init(&ce->e_lru_list);
 			return ce;
 		}
 		l = l->next;

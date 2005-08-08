@@ -31,13 +31,44 @@
 #include <net/ipv6.h>
 #include "avc.h"
 #include "avc_ss.h"
-#ifdef CONFIG_AUDIT
-#include "class_to_string.h"
-#endif
-#include "common_perm_to_string.h"
-#include "av_inherit.h"
+
+static const struct av_perm_to_string
+{
+  u16 tclass;
+  u32 value;
+  const char *name;
+} av_perm_to_string[] = {
+#define S_(c, v, s) { c, v, s },
 #include "av_perm_to_string.h"
-#include "objsec.h"
+#undef S_
+};
+
+#ifdef CONFIG_AUDIT
+static const char *class_to_string[] = {
+#define S_(s) s,
+#include "class_to_string.h"
+#undef S_
+};
+#endif
+
+#define TB_(s) static const char * s [] = {
+#define TE_(s) };
+#define S_(s) s,
+#include "common_perm_to_string.h"
+#undef TB_
+#undef TE_
+#undef S_
+
+static const struct av_inherit
+{
+    u16 tclass;
+    const char **common_pts;
+    u32 common_base;
+} av_inherit[] = {
+#define S_(c, i, b) { c, common_##i##_perm_to_string, b },
+#include "av_inherit.h"
+#undef S_
+};
 
 #define AVC_CACHE_SLOTS			512
 #define AVC_DEF_CACHE_THRESHOLD		512
@@ -110,7 +141,7 @@ static inline int avc_hash(u32 ssid, u32 tsid, u16 tclass)
  */
 void avc_dump_av(struct audit_buffer *ab, u16 tclass, u32 av)
 {
-	char **common_pts = NULL;
+	const char **common_pts = NULL;
 	u32 common_base = 0;
 	int i, i2, perm;
 
@@ -131,8 +162,10 @@ void avc_dump_av(struct audit_buffer *ab, u16 tclass, u32 av)
 	i = 0;
 	perm = 1;
 	while (perm < common_base) {
-		if (perm & av)
+		if (perm & av) {
 			audit_log_format(ab, " %s", common_pts[i]);
+			av &= ~perm;
+		}
 		i++;
 		perm <<= 1;
 	}
@@ -144,13 +177,18 @@ void avc_dump_av(struct audit_buffer *ab, u16 tclass, u32 av)
 				    (av_perm_to_string[i2].value == perm))
 					break;
 			}
-			if (i2 < ARRAY_SIZE(av_perm_to_string))
+			if (i2 < ARRAY_SIZE(av_perm_to_string)) {
 				audit_log_format(ab, " %s",
 						 av_perm_to_string[i2].name);
+				av &= ~perm;
+			}
 		}
 		i++;
 		perm <<= 1;
 	}
+
+	if (av)
+		audit_log_format(ab, " 0x%x", av);
 
 	audit_log_format(ab, " }");
 }
@@ -196,11 +234,11 @@ void __init avc_init(void)
 
 	for (i = 0; i < AVC_CACHE_SLOTS; i++) {
 		INIT_LIST_HEAD(&avc_cache.slots[i]);
-		avc_cache.slots_lock[i] = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&avc_cache.slots_lock[i]);
 	}
 	atomic_set(&avc_cache.active_nodes, 0);
 	atomic_set(&avc_cache.lru_hint, 0);
-	
+
 	avc_node_cachep = kmem_cache_create("avc_node", sizeof(struct avc_node),
 					     0, SLAB_PANIC, NULL, NULL);
 
@@ -296,17 +334,17 @@ out:
 static struct avc_node *avc_alloc_node(void)
 {
 	struct avc_node *node;
-	
+
 	node = kmem_cache_alloc(avc_node_cachep, SLAB_ATOMIC);
 	if (!node)
 		goto out;
-		
+
 	memset(node, 0, sizeof(*node));
 	INIT_RCU_HEAD(&node->rhead);
 	INIT_LIST_HEAD(&node->list);
 	atomic_set(&node->ae.used, 1);
 	avc_cache_stats_incr(allocations);
-	
+
 	if (atomic_inc_return(&avc_cache.active_nodes) > avc_cache_threshold)
 		avc_reclaim_node();
 
@@ -384,7 +422,7 @@ out:
 static int avc_latest_notif_update(int seqno, int is_insert)
 {
 	int ret = 0;
-	static spinlock_t notif_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(notif_lock);
 	unsigned long flag;
 
 	spin_lock_irqsave(&notif_lock, flag);
@@ -542,6 +580,8 @@ void avc_audit(u32 ssid, u32 tsid,
 					vma = vma->vm_next;
 				}
 				up_read(&mm->mmap_sem);
+			} else {
+				audit_log_format(ab, " comm=%s", tsk->comm);
 			}
 			if (tsk != current)
 				mmput(mm);
@@ -592,7 +632,7 @@ void avc_audit(u32 ssid, u32 tsid,
 
 				switch (sk->sk_family) {
 				case AF_INET: {
-					struct inet_opt *inet = inet_sk(sk);
+					struct inet_sock *inet = inet_sk(sk);
 
 					avc_print_ipv4_addr(ab, inet->rcv_saddr,
 							    inet->sport,
@@ -603,7 +643,7 @@ void avc_audit(u32 ssid, u32 tsid,
 					break;
 				}
 				case AF_INET6: {
-					struct inet_opt *inet = inet_sk(sk);
+					struct inet_sock *inet = inet_sk(sk);
 					struct ipv6_pinfo *inet6 = inet6_sk(sk);
 
 					avc_print_ipv6_addr(ab, &inet6->rcv_saddr,
@@ -717,7 +757,7 @@ static inline int avc_sidcmp(u32 x, u32 y)
  * @event : Updating event
  * @perms : Permission mask bits
  * @ssid,@tsid,@tclass : identifier of an AVC entry
- * 
+ *
  * if a valid AVC entry doesn't exist,this function returns -ENOENT.
  * if kmalloc() called internal returns NULL, this function returns -ENOMEM.
  * otherwise, this function update the AVC entry. The original AVC-entry object
@@ -759,7 +799,7 @@ static int avc_update_node(u32 event, u32 perms, u32 ssid, u32 tsid, u16 tclass)
 	 */
 
 	avc_node_populate(node, ssid, tsid, tclass, &orig->ae);
-	
+
 	switch (event) {
 	case AVC_CALLBACK_GRANT:
 		node->ae.avd.allowed |= perms;
@@ -1045,7 +1085,7 @@ int avc_has_perm_noaudit(u32 ssid, u32 tsid,
 				avc_update_node(AVC_CALLBACK_GRANT,requested,
 						ssid,tsid,tclass);
 	}
-	
+
 	rcu_read_unlock();
 out:
 	return rc;

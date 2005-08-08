@@ -15,8 +15,8 @@
 #include <asm/setup.h>
 
 #if defined(CONFIG_EDD) || defined(CONFIG_EDD_MODULE)
-	movb	$0, (EDD_MBR_SIG_NR_BUF)	# zero value at EDD_MBR_SIG_NR_BUF
-	movb	$0, (EDDNR)			# zero value at EDDNR
+	movb	$0, (EDD_MBR_SIG_NR_BUF)
+	movb	$0, (EDDNR)
 
 # Check the command line for two options:
 # edd=of  disables EDD completely  (edd=off)
@@ -26,7 +26,7 @@
 	jz	done_cl
 	movl	%cs:(cmd_line_ptr), %esi
 # ds:esi has the pointer to the command line now
-	movl	$(COMMAND_LINE_SIZE-6), %ecx
+	movl	$(COMMAND_LINE_SIZE-7), %ecx
 # loop through kernel command line one byte at a time
 cl_loop:
 	cmpl	$EDD_CL_EQUALS, (%si)
@@ -51,7 +51,7 @@ do_edd_off:
 done_cl:
 	popl	%esi
 
-    
+
 # Read the first sector of each BIOS disk device and store the 4-byte signature
 edd_mbr_sig_start:
 	movb	$0x80, %dl			# from device 80

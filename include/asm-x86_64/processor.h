@@ -64,6 +64,7 @@ struct cpuinfo_x86 {
 	__u8	x86_num_cores;
 	__u8	x86_apicid;
         __u32   x86_power; 	
+	__u32   x86_cpuid_level;	/* Max CPUID function supported */
 	unsigned long loops_per_jiffy;
 } ____cacheline_aligned;
 
@@ -157,14 +158,19 @@ static inline void clear_in_cr4 (unsigned long mask)
 		:"ax");
 }
 
+
 /*
- * Bus types
+ * User space process size. 47bits minus one guard page.
  */
-#define MCA_bus 0
-#define MCA_bus__is_a_macro
+#define TASK_SIZE_64	(0x800000000000UL - 4096)
 
+#define TASK_SIZE (test_thread_flag(TIF_IA32) ? IA32_PAGE_OFFSET : TASK_SIZE_64)
 
+#define __HAVE_ARCH_ALIGN_STACK
+extern unsigned long arch_align_stack(unsigned long sp);
 
+#define HAVE_ARCH_PICK_MMAP_LAYOUT
+  
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
@@ -173,14 +179,6 @@ static inline void clear_in_cr4 (unsigned long mask)
 #define TASK_UNMAPPED_64 PAGE_ALIGN(TASK_SIZE/3) 
 #define TASK_UNMAPPED_BASE	\
 	(test_thread_flag(TIF_IA32) ? TASK_UNMAPPED_32 : TASK_UNMAPPED_64)  
-
-
-/*
- * User space process size: 512GB - 1GB (default).
- */
-#define TASK_SIZE	(0x0000007fc0000000UL)
-
-#define TASK_SIZE_3264 (test_thread_flag(TIF_IA32) ? IA32_PAGE_OFFSET : TASK_SIZE)
 
 /*
  * Size of io_bitmap.
@@ -466,7 +464,7 @@ static inline void __mwait(unsigned long eax, unsigned long ecx)
 #define cache_line_size() (boot_cpu_data.x86_cache_alignment)
 
 extern unsigned long boot_option_idle_override;
-
-#define HAVE_ARCH_PICK_MMAP_LAYOUT
+/* Boot loader type from the setup header */
+extern int bootloader_type;
 
 #endif /* __ASM_X86_64_PROCESSOR_H */

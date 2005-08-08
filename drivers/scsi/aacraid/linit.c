@@ -471,7 +471,7 @@ static int aac_cfg_open(struct inode *inode, struct file *file)
 		}
 	}
 
-	return 0;
+	return err;
 }
 
 /**

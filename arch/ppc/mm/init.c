@@ -31,6 +31,7 @@
 #include <linux/bootmem.h>
 #include <linux/highmem.h>
 #include <linux/initrd.h>
+#include <linux/pagemap.h>
 
 #include <asm/pgalloc.h>
 #include <asm/prom.h>
@@ -411,7 +412,6 @@ void __init mem_init(void)
 	unsigned long highmem_mapnr;
 
 	highmem_mapnr = total_lowmem >> PAGE_SHIFT;
-	highmem_start_page = mem_map + highmem_mapnr;
 #endif /* CONFIG_HIGHMEM */
 	max_mapnr = total_memory >> PAGE_SHIFT;
 
@@ -652,9 +652,4 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
 			add_hash_page(mm->context, address, pmd_val(*pmd));
 	}
 #endif
-}
-
-int page_is_ram (unsigned long pagenr)
-{
-       return 1;
 }

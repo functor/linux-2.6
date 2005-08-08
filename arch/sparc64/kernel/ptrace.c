@@ -50,7 +50,7 @@ static inline void pt_succ_return(struct pt_regs *regs, unsigned long value)
 }
 
 static inline void
-pt_succ_return_linux(struct pt_regs *regs, unsigned long value, long *addr)
+pt_succ_return_linux(struct pt_regs *regs, unsigned long value, void __user *addr)
 {
 	if (test_thread_flag(TIF_32BIT)) {
 		if (put_user(value, (unsigned int __user *) addr)) {
@@ -70,7 +70,7 @@ pt_succ_return_linux(struct pt_regs *regs, unsigned long value, long *addr)
 }
 
 static void
-pt_os_succ_return (struct pt_regs *regs, unsigned long val, long *addr)
+pt_os_succ_return (struct pt_regs *regs, unsigned long val, void __user *addr)
 {
 	if (current->personality == PER_SUNOS)
 		pt_succ_return (regs, val);
@@ -226,7 +226,7 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 		if (res < 0)
 			pt_error_return(regs, -res);
 		else
-			pt_os_succ_return(regs, tmp64, (long *) data);
+			pt_os_succ_return(regs, tmp64, (void __user *) data);
 		goto flush_and_out;
 	}
 
@@ -513,25 +513,6 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 		if (data > _NSIG) {
 			pt_error_return(regs, EIO);
 			goto out_tsk;
-		}
-		if (addr != 1) {
-			unsigned long pc_mask = ~0UL;
-
-			if ((child->thread_info->flags & _TIF_32BIT) != 0)
-				pc_mask = 0xffffffff;
-
-			if (addr & 3) {
-				pt_error_return(regs, EINVAL);
-				goto out_tsk;
-			}
-#ifdef DEBUG_PTRACE
-			printk ("Original: %016lx %016lx\n",
-				child->thread_info->kregs->tpc,
-				child->thread_info->kregs->tnpc);
-			printk ("Continuing with %016lx %016lx\n", addr, addr+4);
-#endif
-			child->thread_info->kregs->tpc = (addr & pc_mask);
-			child->thread_info->kregs->tnpc = ((addr + 4) & pc_mask);
 		}
 
 		if (request == PTRACE_SYSCALL) {

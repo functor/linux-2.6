@@ -129,13 +129,13 @@ static int putreg(struct task_struct *child,
 			value &= 0xffff;
 			return 0;
 		case offsetof(struct user_regs_struct,fs_base):
-			if (!((value >> 48) == 0 || (value >> 48) == 0xffff))
-				return -EIO; 
+			if (value >= TASK_SIZE)
+				return -EIO;
 			child->thread.fs = value;
 			return 0;
 		case offsetof(struct user_regs_struct,gs_base):
-			if (!((value >> 48) == 0 || (value >> 48) == 0xffff))
-				return -EIO; 
+			if (value >= TASK_SIZE)
+				return -EIO;
 			child->thread.gs = value;
 			return 0;
 		case offsetof(struct user_regs_struct, eflags):
@@ -148,6 +148,11 @@ static int putreg(struct task_struct *child,
 			if ((value & 3) != 3)
 				return -EIO;
 			value &= 0xffff;
+			break;
+		case offsetof(struct user_regs_struct, rip):
+			/* Check if the new RIP address is canonical */
+			if (value >= TASK_SIZE)
+				return -EIO;
 			break;
 	}
 	put_stack_long(child, regno - sizeof(struct pt_regs), value);
@@ -247,7 +252,7 @@ asmlinkage long sys_ptrace(long request, long pid, unsigned long addr, long data
 			break;
 
 		switch (addr) { 
-		case 0 ... sizeof(struct user_regs_struct):
+		case 0 ... sizeof(struct user_regs_struct) - sizeof(long):
 			tmp = getreg(child, addr);
 			break;
 		case offsetof(struct user, u_debugreg[0]):
@@ -292,7 +297,7 @@ asmlinkage long sys_ptrace(long request, long pid, unsigned long addr, long data
 			break;
 
 		switch (addr) { 
-		case 0 ... sizeof(struct user_regs_struct): 
+		case 0 ... sizeof(struct user_regs_struct) - sizeof(long):
 			ret = putreg(child, addr, data);
 			break;
 		/* Disallows to set a breakpoint into the vsyscall */
@@ -480,7 +485,7 @@ asmlinkage long sys_ptrace(long request, long pid, unsigned long addr, long data
 			ret = -EIO;
 			break;
 		}
-		child->used_math = 1;
+		set_stopped_child_used_math(child);
 		ret = set_fpregs(child, (struct user_i387_struct __user *)data);
 		break;
 	}

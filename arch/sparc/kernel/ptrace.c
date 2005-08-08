@@ -48,9 +48,9 @@ static inline void pt_succ_return(struct pt_regs *regs, unsigned long value)
 }
 
 static void
-pt_succ_return_linux(struct pt_regs *regs, unsigned long value, long *addr)
+pt_succ_return_linux(struct pt_regs *regs, unsigned long value, long __user *addr)
 {
-	if (put_user(value, (long __user *) addr)) {
+	if (put_user(value, addr)) {
 		pt_error_return(regs, EFAULT);
 		return;
 	}
@@ -61,7 +61,7 @@ pt_succ_return_linux(struct pt_regs *regs, unsigned long value, long *addr)
 }
 
 static void
-pt_os_succ_return (struct pt_regs *regs, unsigned long val, long *addr)
+pt_os_succ_return (struct pt_regs *regs, unsigned long val, long __user *addr)
 {
 	if (current->personality == PER_SUNOS)
 		pt_succ_return (regs, val);
@@ -71,7 +71,7 @@ pt_os_succ_return (struct pt_regs *regs, unsigned long val, long *addr)
 
 /* Fuck me gently with a chainsaw... */
 static inline void read_sunos_user(struct pt_regs *regs, unsigned long offset,
-				   struct task_struct *tsk, long *addr)
+				   struct task_struct *tsk, long __user *addr)
 {
 	struct pt_regs *cregs = tsk->thread.kregs;
 	struct thread_info *t = tsk->thread_info;
@@ -345,14 +345,14 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 
 		if (access_process_vm(child, addr,
 				      &tmp, sizeof(tmp), 0) == sizeof(tmp))
-			pt_os_succ_return(regs, tmp, (long *)data);
+			pt_os_succ_return(regs, tmp, (long __user *)data);
 		else
 			pt_error_return(regs, EIO);
 		goto out_tsk;
 	}
 
 	case PTRACE_PEEKUSR:
-		read_sunos_user(regs, addr, child, (long *) data);
+		read_sunos_user(regs, addr, child, (long __user *) data);
 		goto out_tsk;
 
 	case PTRACE_POKEUSR:
@@ -530,18 +530,6 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 		if (data > _NSIG) {
 			pt_error_return(regs, EIO);
 			goto out_tsk;
-		}
-		if (addr != 1) {
-			if (addr & 3) {
-				pt_error_return(regs, EINVAL);
-				goto out_tsk;
-			}
-#ifdef DEBUG_PTRACE
-			printk ("Original: %08lx %08lx\n", child->thread.kregs->pc, child->thread.kregs->npc);
-			printk ("Continuing with %08lx %08lx\n", addr, addr+4);
-#endif
-			child->thread.kregs->pc = addr;
-			child->thread.kregs->npc = addr + 4;
 		}
 
 		if (request == PTRACE_SYSCALL)

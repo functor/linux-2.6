@@ -2,7 +2,7 @@
  * This file contains various system calls that have different calling
  * conventions on different platforms.
  *
- * Copyright (C) 1999-2000, 2002-2003 Hewlett-Packard Co
+ * Copyright (C) 1999-2000, 2002-2003, 2005 Hewlett-Packard Co
  *	David Mosberger-Tang <davidm@hpl.hp.com>
  */
 #include <linux/config.h>
@@ -147,7 +147,7 @@ ia64_brk (unsigned long brk)
 		goto out;
 
 	/* Ok, looks good - let it rip. */
-	if (__do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
+	if (do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
 		goto out;
 set_brk:
 	mm->brk = brk;
@@ -163,10 +163,9 @@ out:
  * and r9) as this is faster than doing a copy_to_user().
  */
 asmlinkage long
-sys_pipe (long arg0, long arg1, long arg2, long arg3,
-	  long arg4, long arg5, long arg6, long arg7, long stack)
+sys_pipe (void)
 {
-	struct pt_regs *regs = (struct pt_regs *) &stack;
+	struct pt_regs *regs = ia64_task_regs(current);
 	int fd[2];
 	int retval;
 

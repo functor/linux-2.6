@@ -225,6 +225,11 @@ int __init verify_local_APIC(void)
 
 void __init sync_Arb_IDs(void)
 {
+	/* Unsupported on P4 - see Intel Dev. Manual Vol. 3, Ch. 8.6.1 */
+	unsigned int ver = GET_APIC_VERSION(apic_read(APIC_LVR));
+	if (ver >= 0x14)	/* P4 or higher */
+		return;
+
 	/*
 	 * Wait for idle.
 	 */
@@ -770,9 +775,7 @@ void __init setup_boot_APIC_clock (void)
 
 void __init setup_secondary_APIC_clock(void)
 {
-	local_irq_disable(); /* FIXME: Do we need this? --RR */
 	setup_APIC_timer(calibration_result);
-	local_irq_enable();
 }
 
 void __init disable_APIC_timer(void)

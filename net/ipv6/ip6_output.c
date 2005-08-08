@@ -61,7 +61,7 @@ static int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *));
 static __inline__ void ipv6_select_ident(struct sk_buff *skb, struct frag_hdr *fhdr)
 {
 	static u32 ipv6_fragmentation_id = 1;
-	static spinlock_t ip6_id_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(ip6_id_lock);
 
 	spin_lock_bh(&ip6_id_lock);
 	fhdr->identification = htonl(ipv6_fragmentation_id);
@@ -311,7 +311,7 @@ int ip6_nd_hdr(struct sock *sk, struct sk_buff *skb, struct net_device *dev,
 	return 0;
 }
 
-int ip6_call_ra_chain(struct sk_buff *skb, int sel)
+static int ip6_call_ra_chain(struct sk_buff *skb, int sel)
 {
 	struct ip6_ra_chain *ra;
 	struct sock *last = NULL;
@@ -593,6 +593,7 @@ static int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 			/* Prepare header of the next frame,
 			 * before previous one went down. */
 			if (frag) {
+				frag->ip_summed = CHECKSUM_NONE;
 				frag->h.raw = frag->data;
 				fh = (struct frag_hdr*)__skb_push(frag, sizeof(struct frag_hdr));
 				frag->nh.raw = __skb_push(frag, hlen);
@@ -810,7 +811,7 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to, int offse
 		    int hlimit, struct ipv6_txoptions *opt, struct flowi *fl, struct rt6_info *rt,
 		    unsigned int flags)
 {
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct sk_buff *skb;
 	unsigned int maxfraglen, fragheaderlen;
@@ -1088,7 +1089,7 @@ int ip6_push_pending_frames(struct sock *sk)
 	struct sk_buff *skb, *tmp_skb;
 	struct sk_buff **tail_skb;
 	struct in6_addr final_dst_buf, *final_dst = &final_dst_buf;
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct ipv6hdr *hdr;
 	struct ipv6_txoptions *opt = np->cork.opt;
@@ -1166,7 +1167,7 @@ error:
 
 void ip6_flush_pending_frames(struct sock *sk)
 {
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct sk_buff *skb;
 

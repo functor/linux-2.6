@@ -71,7 +71,7 @@ static int snd_pmac_dbdma_alloc(pmac_dbdma_t *rec, int size)
 
 static void snd_pmac_dbdma_free(pmac_dbdma_t *rec)
 {
-	if (rec && rec->space)
+	if (rec)
 		kfree(rec->space);
 }
 
@@ -1251,7 +1251,6 @@ static int snd_pmac_suspend(snd_card_t *card, unsigned int state)
 	if (chip->rx_irq >= 0)
 		disable_irq(chip->rx_irq);
 	snd_pmac_sound_feature(chip, 0);
-	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	return 0;
 }
 
@@ -1278,7 +1277,6 @@ static int snd_pmac_resume(snd_card_t *card, unsigned int state)
 	if (chip->rx_irq >= 0)
 		enable_irq(chip->rx_irq);
 
-	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	return 0;
 }
 

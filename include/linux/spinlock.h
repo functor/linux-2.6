@@ -38,9 +38,12 @@
  * If CONFIG_SMP is set, pull in the _raw_* definitions
  */
 #ifdef CONFIG_SMP
+
+#define assert_spin_locked(x)	BUG_ON(!spin_is_locked(x))
 #include <asm/spinlock.h>
 
 int __lockfunc _spin_trylock(spinlock_t *lock);
+int __lockfunc _read_trylock(rwlock_t *lock);
 int __lockfunc _write_trylock(rwlock_t *lock);
 
 void __lockfunc _spin_lock(spinlock_t *lock)	__acquires(spinlock_t);
@@ -73,6 +76,7 @@ void __lockfunc _write_unlock_irq(rwlock_t *lock)				__releases(rwlock_t);
 void __lockfunc _write_unlock_bh(rwlock_t *lock)				__releases(rwlock_t);
 
 int __lockfunc _spin_trylock_bh(spinlock_t *lock);
+int __lockfunc generic_raw_read_trylock(rwlock_t *lock);
 int in_lock_functions(unsigned long addr);
 
 #else
@@ -110,9 +114,8 @@ typedef struct {
 #define CHECK_LOCK(x) \
 	do { \
 	 	if ((x)->magic != SPINLOCK_MAGIC) { \
-			dump_stack(); \
-			panic("%s:%d: spin_is_locked on uninitialized spinlock %p.\n", \
-					__FILE__, __LINE__, (x)); \
+			panic("%s:%d: spin_is_locked on uninitialized spinlock %p. (%s)\n", \
+					__FILE__, __LINE__, (x), print_tainted()); \
 		} \
 	} while(0)
 
@@ -121,10 +124,9 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if ((x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			dump_stack(); \
-			panic("%s:%d: spin_lock(%s:%p) already locked by %s/%d\n", \
+			panic("%s:%d: spin_lock(%s:%p) already locked by %s/%d. (%s)\n", \
 					__FILE__,__LINE__, (x)->module, \
-					(x), (x)->owner, (x)->oline); \
+					(x), (x)->owner, (x)->oline, print_tainted()); \
 		} \
 		(x)->lock = 1; \
 		(x)->owner = __FILE__; \
@@ -138,11 +140,19 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if ((x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			printk("%s:%d: spin_is_locked(%s:%p) already locked by %s/%d\n", \
+			printk("%s:%d: spin_is_locked(%s:%p) already locked by %s/%d.(%s)\n", \
 					__FILE__,__LINE__, (x)->module, \
-					(x), (x)->owner, (x)->oline); \
+					(x), (x)->owner, (x)->oline, print_tainted()); \
 		} \
 		0; \
+	})
+
+/* with debugging, assert_spin_locked() on UP does check
+ * the lock value properly */
+#define assert_spin_locked(x) \
+	({ \
+		CHECK_LOCK(x); \
+		BUG_ON(!(x)->lock); \
 	})
 
 /* without debugging, spin_trylock on UP always says
@@ -152,9 +162,9 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if ((x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			printk("%s:%d: spin_trylock(%s:%p) already locked by %s/%d\n", \
+			printk("%s:%d: spin_trylock(%s:%p) already locked by %s/%d.(%s)\n", \
 					__FILE__,__LINE__, (x)->module, \
-					(x), (x)->owner, (x)->oline); \
+					(x), (x)->owner, (x)->oline, print_tainted()); \
 		} \
 		(x)->lock = 1; \
 		(x)->owner = __FILE__; \
@@ -167,9 +177,9 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if ((x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			printk("%s:%d: spin_unlock_wait(%s:%p) owned by %s/%d\n", \
+			panic("%s:%d: spin_unlock_wait(%s:%p) owned by %s/%d. (%s)\n", \
 					__FILE__,__LINE__, (x)->module, (x), \
-					(x)->owner, (x)->oline); \
+					(x)->owner, (x)->oline, print_tainted()); \
 		}\
 	} while (0)
 
@@ -178,9 +188,8 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if (!(x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			dump_stack(); \
-			panic("%s:%d: spin_unlock(%s:%p) not locked\n", \
-					__FILE__,__LINE__, (x)->module, (x));\
+			panic("%s:%d: spin_unlock(%s:%p) not locked. (%s)\n", \
+					__FILE__,__LINE__, (x)->module, (x), print_tainted());\
 		} \
 		(x)->lock = 0; \
 	} while (0)
@@ -202,8 +211,9 @@ typedef struct {
 #define spin_lock_init(lock)	do { (void)(lock); } while(0)
 #define _raw_spin_lock(lock)	do { (void)(lock); } while(0)
 #define spin_is_locked(lock)	((void)(lock), 0)
+#define assert_spin_locked(lock)	do { (void)(lock); } while(0)
 #define _raw_spin_trylock(lock)	(((void)(lock), 1))
-#define spin_unlock_wait(lock)	(void)(lock);
+#define spin_unlock_wait(lock)	(void)(lock)
 #define _raw_spin_unlock(lock) do { (void)(lock); } while(0)
 #endif /* CONFIG_DEBUG_SPINLOCK */
 
@@ -222,9 +232,15 @@ typedef struct {
 #define _raw_read_unlock(lock)	do { (void)(lock); } while(0)
 #define _raw_write_lock(lock)	do { (void)(lock); } while(0)
 #define _raw_write_unlock(lock)	do { (void)(lock); } while(0)
+#define read_can_lock(lock)	(((void)(lock), 1))
+#define write_can_lock(lock)	(((void)(lock), 1))
+#define _raw_read_trylock(lock) ({ (void)(lock); (1); })
 #define _raw_write_trylock(lock) ({ (void)(lock); (1); })
 
 #define _spin_trylock(lock)	({preempt_disable(); _raw_spin_trylock(lock) ? \
+				1 : ({preempt_enable(); 0;});})
+
+#define _read_trylock(lock)	({preempt_disable();_raw_read_trylock(lock) ? \
 				1 : ({preempt_enable(); 0;});})
 
 #define _write_trylock(lock)	({preempt_disable(); _raw_write_trylock(lock) ? \
@@ -428,16 +444,12 @@ do { \
  * methods are defined as nops in the case they are not required.
  */
 #define spin_trylock(lock)	__cond_lock(_spin_trylock(lock))
+#define read_trylock(lock)	__cond_lock(_read_trylock(lock))
 #define write_trylock(lock)	__cond_lock(_write_trylock(lock))
-
-/* Where's read_trylock? */
 
 #define spin_lock(lock)		_spin_lock(lock)
 #define write_lock(lock)	_write_lock(lock)
 #define read_lock(lock)		_read_lock(lock)
-#define spin_unlock(lock)	_spin_unlock(lock)
-#define write_unlock(lock)	_write_unlock(lock)
-#define read_unlock(lock)	_read_unlock(lock)
 
 #ifdef CONFIG_SMP
 #define spin_lock_irqsave(lock, flags)	flags = _spin_lock_irqsave(lock)
@@ -457,6 +469,11 @@ do { \
 
 #define write_lock_irq(lock)		_write_lock_irq(lock)
 #define write_lock_bh(lock)		_write_lock_bh(lock)
+
+#define spin_unlock(lock)	_spin_unlock(lock)
+#define write_unlock(lock)	_write_unlock(lock)
+#define read_unlock(lock)	_read_unlock(lock)
+
 #define spin_unlock_irqrestore(lock, flags)	_spin_unlock_irqrestore(lock, flags)
 #define spin_unlock_irq(lock)		_spin_unlock_irq(lock)
 #define spin_unlock_bh(lock)		_spin_unlock_bh(lock)
@@ -493,6 +510,7 @@ extern void _metered_read_lock    (rwlock_t *lock);
 extern void _metered_read_unlock  (rwlock_t *lock);
 extern void _metered_write_lock   (rwlock_t *lock);
 extern void _metered_write_unlock (rwlock_t *lock);
+extern int  _metered_read_trylock (rwlock_t *lock);
 extern int  _metered_write_trylock(rwlock_t *lock);
 #endif
 
@@ -522,8 +540,11 @@ static inline void bit_spin_lock(int bitnum, unsigned long *addr)
 	preempt_disable();
 #if defined(CONFIG_SMP) || defined(CONFIG_DEBUG_SPINLOCK)
 	while (test_and_set_bit(bitnum, addr)) {
-		while (test_bit(bitnum, addr))
+		while (test_bit(bitnum, addr)) {
+			preempt_enable();
 			cpu_relax();
+			preempt_disable();
+		}
 	}
 #endif
 	__acquire(bitlock);
@@ -572,5 +593,14 @@ static inline int bit_spin_is_locked(int bitnum, unsigned long *addr)
 	return 1;
 #endif
 }
+
+#define DEFINE_SPINLOCK(x) spinlock_t x = SPIN_LOCK_UNLOCKED
+#define DEFINE_RWLOCK(x) rwlock_t x = RW_LOCK_UNLOCKED
+
+/**
+ * spin_can_lock - would spin_trylock() succeed?
+ * @lock: the spinlock in question.
+ */
+#define spin_can_lock(lock)		(!spin_is_locked(lock))
 
 #endif /* __LINUX_SPINLOCK_H */

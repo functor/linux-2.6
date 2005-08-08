@@ -945,7 +945,7 @@ void *agp_generic_alloc_page(void)
 		return NULL;
 
 	map_page_into_agp(page);
-	
+
 	get_page(page);
 	SetPageLocked(page);
 	atomic_inc(&agp_bridge->current_memory_agp);
@@ -963,7 +963,6 @@ void agp_generic_destroy_page(void *addr)
 
 	page = virt_to_page(addr);
 	unmap_page_from_agp(page);
-
 	put_page(page);
 	unlock_page(page);
 	free_page((unsigned long)addr);
