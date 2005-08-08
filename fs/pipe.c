@@ -720,5 +720,5 @@ static void __exit exit_pipe_fs(void)
 	mntput(pipe_mnt);
 }
 
-fs_initcall(init_pipe_fs);
-module_exit(exit_pipe_fs);
+module_init(init_pipe_fs)
+module_exit(exit_pipe_fs)

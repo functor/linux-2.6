@@ -822,6 +822,7 @@ static int sel_make_bools(void)
 	struct dentry *dir = bool_dir;
 	struct inode *inode = NULL;
 	struct inode_security_struct *isec;
+	struct qstr qname;
 	char **names = NULL, *page;
 	int num;
 	int *values = NULL;
@@ -841,7 +842,10 @@ static int sel_make_bools(void)
 		goto out;
 
 	for (i = 0; i < num; i++) {
-		dentry = d_alloc_name(dir, names[i]);
+		qname.name = names[i];
+		qname.len = strlen(qname.name);
+		qname.hash = full_name_hash(qname.name, qname.len);
+		dentry = d_alloc(dir, &qname);
 		if (!dentry) {
 			ret = -ENOMEM;
 			goto err;
@@ -1114,6 +1118,7 @@ static int sel_fill_super(struct super_block * sb, void * data, int silent)
 	int ret;
 	struct dentry *dentry;
 	struct inode *inode;
+	struct qstr qname;
 	struct inode_security_struct *isec;
 
 	static struct tree_descr selinux_files[] = {
@@ -1134,7 +1139,10 @@ static int sel_fill_super(struct super_block * sb, void * data, int silent)
 	if (ret)
 		return ret;
 
-	dentry = d_alloc_name(sb->s_root, BOOL_DIR_NAME);
+	qname.name = BOOL_DIR_NAME;
+	qname.len = strlen(qname.name);
+	qname.hash = full_name_hash(qname.name, qname.len);
+	dentry = d_alloc(sb->s_root, &qname);
 	if (!dentry)
 		return -ENOMEM;
 
@@ -1149,7 +1157,10 @@ static int sel_fill_super(struct super_block * sb, void * data, int silent)
 	if (ret)
 		goto out;
 
-	dentry = d_alloc_name(sb->s_root, NULL_FILE_NAME);
+	qname.name = NULL_FILE_NAME;
+	qname.len = strlen(qname.name);
+	qname.hash = full_name_hash(qname.name, qname.len);
+	dentry = d_alloc(sb->s_root, &qname);
 	if (!dentry)
 		return -ENOMEM;
 

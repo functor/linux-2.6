@@ -46,7 +46,6 @@ comment "DVB-T (terrestrial) frontends"
 config DVB_SP8870
  	tristate "Spase sp8870 based"
 	depends on DVB_CORE
-	select FW_LOADER
 	help
  	  A DVB-T tuner module. Say Y when you want to support this frontend.
 
@@ -57,7 +56,6 @@ config DVB_SP8870
 config DVB_SP887X
  	tristate "Spase sp887x based"
 	depends on DVB_CORE
-	select FW_LOADER
 	help
 	  A DVB-T tuner module. Say Y when you want to support this frontend.
 
@@ -86,7 +84,6 @@ config DVB_L64781
 config DVB_TDA1004X
 	tristate "Philips TDA10045H/TDA10046H based"
 	depends on DVB_CORE
-	select FW_LOADER
 	help
 	  A DVB-T tuner module. Say Y when you want to support this frontend.
 

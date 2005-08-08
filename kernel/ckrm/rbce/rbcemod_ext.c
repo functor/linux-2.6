@@ -27,7 +27,6 @@
  ******************************************************************************/
 
 #include <linux/relayfs_fs.h>
-#include <linux/jiffies.h>
 
 #define PSAMPLE(pdata)    (&((pdata)->ext_data.sample))
 #define UKCC_N_SUB_BUFFERS     (4)
@@ -129,8 +128,7 @@ static inline void close_ukcc_channel(void)
 
 #define rec_set_hdr(r,t,p)      ((r)->hdr.type = (t), (r)->hdr.pid = (p))
 #define rec_set_timehdr(r,t,p,c)  (rec_set_hdr(r,t,p), \
-(r)->hdr.timestamp = jiffies_to_msecs(jiffies), (r)->hdr.cls=(unsigned long)(c) )
-
+(r)->hdr.jiffies = jiffies, (r)->hdr.cls=(unsigned long)(c) )
 
 #if CHANNEL_AUTO_CONT
 

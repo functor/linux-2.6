@@ -106,9 +106,9 @@ static int dst_discard_in(struct sk_buff *skb)
 	return 0;
 }
 
-static int dst_discard_out(struct sk_buff *skb)
+static int dst_discard_out(struct sk_buff **pskb)
 {
-	kfree_skb(skb);
+	kfree_skb(*pskb);
 	return 0;
 }
 

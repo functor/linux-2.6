@@ -16,31 +16,31 @@ config PARTITION_ADVANCED
 
 config ACORN_PARTITION
 	bool "Acorn partition support" if PARTITION_ADVANCED
-	default y if ARCH_ACORN
+	default y if !PARTITION_ADVANCED && ARCH_ACORN
 	help
 	  Support hard disks partitioned under Acorn operating systems.
 
 config ACORN_PARTITION_CUMANA
 	bool "Cumana partition support" if PARTITION_ADVANCED && ACORN_PARTITION
-	default y if ARCH_ACORN
+	default y if !PARTITION_ADVANCED && ARCH_ACORN
 	help
 	  Say Y here if you would like to use hard disks under Linux which
 	  were partitioned using the Cumana interface on Acorn machines.
 
 config ACORN_PARTITION_EESOX
 	bool "EESOX partition support" if PARTITION_ADVANCED && ACORN_PARTITION
-	default y if ARCH_ACORN
+	default y if !PARTITION_ADVANCED && ARCH_ACORN
 
 config ACORN_PARTITION_ICS
 	bool "ICS partition support" if PARTITION_ADVANCED && ACORN_PARTITION
-	default y if ARCH_ACORN
+	default y if !PARTITION_ADVANCED && ARCH_ACORN
 	help
 	  Say Y here if you would like to use hard disks under Linux which
 	  were partitioned using the ICS interface on Acorn machines.
 
 config ACORN_PARTITION_ADFS
 	bool "Native filecore partition support" if PARTITION_ADVANCED && ACORN_PARTITION
-	default y if ARCH_ACORN
+	default y if !PARTITION_ADVANCED && ARCH_ACORN
 	help
 	  The Acorn Disc Filing System is the standard file system of the
 	  RiscOS operating system which runs on Acorn's ARM-based Risc PC
@@ -49,14 +49,14 @@ config ACORN_PARTITION_ADFS
 
 config ACORN_PARTITION_POWERTEC
 	bool "PowerTec partition support" if PARTITION_ADVANCED && ACORN_PARTITION
-	default y if ARCH_ACORN
+	default y if !PARTITION_ADVANCED && ARCH_ACORN
 	help
 	  Support reading partition tables created on Acorn machines using
 	  the PowerTec SCSI drive.
 
 config ACORN_PARTITION_RISCIX
 	bool "RISCiX partition support" if PARTITION_ADVANCED && ACORN_PARTITION
-	default y if ARCH_ACORN
+	default y if !PARTITION_ADVANCED && ARCH_ACORN
 	help
 	  Once upon a time, there was a native Unix port for the Acorn series
 	  of machines called RISCiX.  If you say 'Y' here, Linux will be able
@@ -64,21 +64,21 @@ config ACORN_PARTITION_RISCIX
 
 config OSF_PARTITION
 	bool "Alpha OSF partition support" if PARTITION_ADVANCED
-	default y if ALPHA
+	default y if !PARTITION_ADVANCED && ALPHA
 	help
 	  Say Y here if you would like to use hard disks under Linux which
 	  were partitioned on an Alpha machine.
 
 config AMIGA_PARTITION
 	bool "Amiga partition table support" if PARTITION_ADVANCED
-	default y if (AMIGA || AFFS_FS=y)
+	default y if !PARTITION_ADVANCED && (AMIGA || AFFS_FS=y)
 	help
 	  Say Y here if you would like to use hard disks under Linux which
 	  were partitioned under AmigaOS.
 
 config ATARI_PARTITION
 	bool "Atari partition table support" if PARTITION_ADVANCED
-	default y if ATARI
+	default y if !PARTITION_ADVANCED && ATARI
 	help
 	  Say Y here if you would like to use hard disks under Linux which
 	  were partitioned under the Atari OS.
@@ -93,16 +93,17 @@ config IBM_PARTITION
 
 config MAC_PARTITION
 	bool "Macintosh partition map support" if PARTITION_ADVANCED
-	default y if MAC
+	default y if !PARTITION_ADVANCED && MAC
 	help
 	  Say Y here if you would like to use hard disks under Linux which
 	  were partitioned on a Macintosh.
 
 config MSDOS_PARTITION
 	bool "PC BIOS (MSDOS partition tables) support" if PARTITION_ADVANCED
-	default y
+	default y if !PARTITION_ADVANCED && !AMIGA && !ATARI && !MAC && !SGI_IP22 && !ARM && !SGI_IP27
 	help
-	  Say Y here.
+	  Say Y here if you would like to use hard disks under Linux which
+	  were partitioned on an x86 PC (not necessarily by DOS).
 
 config BSD_DISKLABEL
 	bool "BSD disklabel (FreeBSD partition tables) support"
@@ -188,14 +189,14 @@ config LDM_DEBUG
 
 config SGI_PARTITION
 	bool "SGI partition support" if PARTITION_ADVANCED
-	default y if (SGI_IP22 || SGI_IP27)
+	default y if !PARTITION_ADVANCED && (SGI_IP22 || SGI_IP27)
 	help
 	  Say Y here if you would like to be able to read the hard disk
 	  partition table format used by SGI machines.
 
 config ULTRIX_PARTITION
 	bool "Ultrix partition table support" if PARTITION_ADVANCED
-	default y if DECSTATION
+	default y if !PARTITION_ADVANCED && DECSTATION
 	help
 	  Say Y here if you would like to be able to read the hard disk
 	  partition table format used by DEC (now Compaq) Ultrix machines.
@@ -203,7 +204,7 @@ config ULTRIX_PARTITION
 
 config SUN_PARTITION
 	bool "Sun partition tables support" if PARTITION_ADVANCED
-	default y if (SPARC32 || SPARC64)
+	default y if !PARTITION_ADVANCED && (SPARC32 || SPARC64)
 	---help---
 	  Like most systems, SunOS uses its own hard disk partition table
 	  format, incompatible with all others. Saying Y here allows you to

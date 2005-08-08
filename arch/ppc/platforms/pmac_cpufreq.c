@@ -33,8 +33,6 @@
 #include <asm/sections.h>
 #include <asm/cputable.h>
 #include <asm/time.h>
-#include <asm/system.h>
-#include <asm/open_pic.h>
 
 /* WARNING !!! This will cause calibrate_delay() to be called,
  * but this is an __init function ! So you MUST go edit
@@ -53,6 +51,10 @@
 extern void low_choose_7447a_dfs(int dfs);
 extern void low_choose_750fx_pll(int pll);
 extern void low_sleep_handler(void);
+extern void openpic_suspend(struct sys_device *sysdev, u32 state);
+extern void openpic_resume(struct sys_device *sysdev);
+extern void enable_kernel_altivec(void);
+extern void enable_kernel_fp(void);
 
 /*
  * Currently, PowerMac cpufreq supports only high & low frequencies
@@ -138,8 +140,11 @@ static int __pmac dfs_set_cpu_speed(int low_speed)
 	if (low_speed == 0) {
 		/* ramping up, set voltage first */
 		pmac_call_feature(PMAC_FTR_WRITE_GPIO, NULL, voltage_gpio, 0x05);
-		/* Make sure we sleep for at least 1ms */
-		msleep(1);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ/1000);
+	} else {
+		/* ramping down, enable aack delay first */
+		pmac_call_feature(PMAC_FTR_AACK_DELAY_ENABLE, NULL, 1, 0);
 	}
 
 	/* set frequency */
@@ -148,7 +153,11 @@ static int __pmac dfs_set_cpu_speed(int low_speed)
 	if (low_speed == 1) {
 		/* ramping down, set voltage last */
 		pmac_call_feature(PMAC_FTR_WRITE_GPIO, NULL, voltage_gpio, 0x04);
-		msleep(1);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ/1000);
+	} else {
+		/* ramping up, disable aack delay last */
+		pmac_call_feature(PMAC_FTR_AACK_DELAY_ENABLE, NULL, 0, 0);
 	}
 
 	return 0;
@@ -165,7 +174,8 @@ static int __pmac gpios_set_cpu_speed(int low_speed)
 	if (low_speed == 0) {
 		pmac_call_feature(PMAC_FTR_WRITE_GPIO, NULL, voltage_gpio, 0x05);
 		/* Delay is way too big but it's ok, we schedule */
-		msleep(10);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ/100);
 	}
 
 	/* Set frequency */
@@ -182,7 +192,8 @@ static int __pmac gpios_set_cpu_speed(int low_speed)
 	if (low_speed == 1) {
 		pmac_call_feature(PMAC_FTR_WRITE_GPIO, NULL, voltage_gpio, 0x04);
 		/* Delay is way too big but it's ok, we schedule */
-		msleep(10);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ/100);
 	}
 
 #ifdef DEBUG_FREQ
@@ -206,7 +217,7 @@ static int __pmac pmu_set_cpu_speed(int low_speed)
 	printk(KERN_DEBUG "HID1, before: %x\n", mfspr(SPRN_HID1));
 #endif
 	/* Disable all interrupt sources on openpic */
- 	openpic_set_priority(0xf);
+	openpic_suspend(NULL, 1);
 
 	/* Make sure the decrementer won't interrupt us */
 	asm volatile("mtdec %0" : : "r" (0x7fffffff));
@@ -273,7 +284,7 @@ static int __pmac pmu_set_cpu_speed(int low_speed)
 	wakeup_decrementer();
 
 	/* Restore interrupts */
- 	openpic_set_priority(0);
+	openpic_resume(NULL);
 
 	/* Let interrupts flow again ... */
 	local_irq_enable();

@@ -14,7 +14,6 @@
 #include <linux/xattr.h>
 #include <linux/namei.h>
 #include <linux/security.h>
-#include <linux/syscalls.h>
 #include <linux/module.h>
 #include <asm/uaccess.h>
 

@@ -1047,7 +1047,7 @@ static void rs_360_put_char(struct tty_struct *tty, unsigned char ch)
 
 }
 
-static int rs_360_write(struct tty_struct * tty,
+static int rs_360_write(struct tty_struct * tty, int from_user,
 		    const unsigned char *buf, int count)
 {
 	int	c, ret = 0;
@@ -1079,8 +1079,16 @@ static int rs_360_write(struct tty_struct * tty,
 			break;
 		}
 
-		/* memcpy(__va(bdp->buf), buf, c); */
-		memcpy((void *)bdp->buf, buf, c);
+		if (from_user) {
+			if (copy_from_user((void *)bdp->buf, buf, c)) {
+				if (!ret)
+					ret = -EFAULT;
+				break;
+			}
+		} else {
+			/* memcpy(__va(bdp->buf), buf, c); */
+			memcpy((void *)bdp->buf, buf, c);
+		}
 
 		bdp->length = c;
 		bdp->status |= BD_SC_READY;
@@ -1396,7 +1404,7 @@ static void end_break(ser_info_t *info)
  */
 static void send_break(ser_info_t *info, int duration)
 {
-	set_current_state(TASK_INTERRUPTIBLE);
+	current->state = TASK_INTERRUPTIBLE;
 #ifdef SERIAL_DEBUG_SEND_BREAK
 	printk("rs_send_break(%d) jiff=%lu...", duration, jiffies);
 #endif
@@ -1707,7 +1715,8 @@ static void rs_360_close(struct tty_struct *tty, struct file * filp)
 	info->tty = 0;
 	if (info->blocked_open) {
 		if (info->close_delay) {
-			msleep_interruptible(jiffies_to_msecs(info->close_delay));
+			current->state = TASK_INTERRUPTIBLE;
+			schedule_timeout(info->close_delay);
 		}
 		wake_up_interruptible(&info->open_wait);
 	}
@@ -1760,8 +1769,9 @@ static void rs_360_wait_until_sent(struct tty_struct *tty, int timeout)
 #ifdef SERIAL_DEBUG_RS_WAIT_UNTIL_SENT
 		printk("lsr = %d (jiff=%lu)...", lsr, jiffies);
 #endif
+		current->state = TASK_INTERRUPTIBLE;
 /*		current->counter = 0;	 make us low-priority */
-		msleep_interruptible(jiffies_to_msecs(char_time));
+		schedule_timeout(char_time);
 		if (signal_pending(current))
 			break;
 		if (timeout && ((orig_jiffies + timeout) < jiffies))

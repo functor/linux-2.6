@@ -130,7 +130,7 @@ fastcall unsigned int __do_IRQ(unsigned int irq, struct pt_regs *regs)
 		desc->handler->ack(irq);
 		action_ret = handle_IRQ_event(irq, regs, desc->action);
 		if (!noirqdebug)
-			note_interrupt(irq, desc, action_ret, regs);
+			note_interrupt(irq, desc, action_ret);
 		desc->handler->end(irq);
 		return 1;
 	}
@@ -184,7 +184,7 @@ fastcall unsigned int __do_IRQ(unsigned int irq, struct pt_regs *regs)
 
 		spin_lock(&desc->lock);
 		if (!noirqdebug)
-			note_interrupt(irq, desc, action_ret, regs);
+			note_interrupt(irq, desc, action_ret);
 		if (likely(!(desc->status & IRQ_PENDING)))
 			break;
 		desc->status &= ~IRQ_PENDING;

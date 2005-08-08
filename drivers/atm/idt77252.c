@@ -1266,9 +1266,8 @@ idt77252_rx_raw(struct idt77252_dev *card)
 	head = IDT77252_PRV_PADDR(queue) + (queue->data - queue->head - 16);
 	tail = readl(SAR_REG_RAWCT);
 
-	pci_dma_sync_single_for_cpu(card->pcidev, IDT77252_PRV_PADDR(queue),
-				    queue->end - queue->head - 16,
-				    PCI_DMA_FROMDEVICE);
+	pci_dma_sync_single(card->pcidev, IDT77252_PRV_PADDR(queue),
+			    queue->end - queue->head - 16, PCI_DMA_FROMDEVICE);
 
 	while (head != tail) {
 		unsigned int vpi, vci, pti;
@@ -1361,10 +1360,10 @@ drop:
 			if (next) {
 				card->raw_cell_head = next;
 				queue = card->raw_cell_head;
-				pci_dma_sync_single_for_cpu(card->pcidev,
-							    IDT77252_PRV_PADDR(queue),
-							    queue->end - queue->data,
-							    PCI_DMA_FROMDEVICE);
+				pci_dma_sync_single(card->pcidev,
+						    IDT77252_PRV_PADDR(queue),
+						    queue->end - queue->data,
+						    PCI_DMA_FROMDEVICE);
 			} else {
 				card->raw_cell_head = NULL;
 				printk("%s: raw cell queue overrun\n",
@@ -3169,7 +3168,7 @@ deinit_card(struct idt77252_dev *card)
 	}
 
 	if (card->membase)
-		iounmap(card->membase);
+		iounmap((void *) card->membase);
 
 	clear_bit(IDT77252_BIT_INIT, &card->flags);
 	DIPRINTK("%s: Card deinitialized.\n", card->name);
@@ -3685,9 +3684,9 @@ idt77252_init_one(struct pci_dev *pcidev, const struct pci_device_id *id)
 	int i, err;
 
 
-	if ((err = pci_enable_device(pcidev))) {
+	if (pci_enable_device(pcidev)) {
 		printk("idt77252: can't enable PCI device at %s\n", pci_name(pcidev));
-		return err;
+		return -ENODEV;
 	}
 
 	if (pci_read_config_word(pcidev, PCI_REVISION_ID, &revision)) {
@@ -3803,7 +3802,7 @@ err_out_deinit_card:
 	deinit_card(card);
 
 err_out_iounmap:
-	iounmap(card->membase);
+	iounmap((void *) card->membase);
 
 err_out_free_card:
 	kfree(card);
@@ -3819,8 +3818,6 @@ static struct pci_device_id idt77252_pci_tbl[] =
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
 	{ 0, }
 };
-
-MODULE_DEVICE_TABLE(pci, idt77252_pci_tbl);
 
 static struct pci_driver idt77252_driver = {
 	.name		= "idt77252",
@@ -3843,7 +3840,11 @@ static int __init idt77252_init(void)
 		return -EIO;
 	}
 
-	return pci_register_driver(&idt77252_driver);
+	if (pci_register_driver(&idt77252_driver) > 0)
+		return 0;
+
+	pci_unregister_driver(&idt77252_driver);
+	return -ENODEV;
 }
 
 static void __exit idt77252_exit(void)
@@ -3873,10 +3874,10 @@ module_exit(idt77252_exit);
 
 MODULE_LICENSE("GPL");
 
-module_param(vpibits, uint, 0);
+MODULE_PARM(vpibits, "i");
 MODULE_PARM_DESC(vpibits, "number of VPI bits supported (0, 1, or 2)");
 #ifdef CONFIG_ATM_IDT77252_DEBUG
-module_param(debug, ulong, 0644);
+MODULE_PARM(debug, "i");
 MODULE_PARM_DESC(debug,   "debug bitmap, see drivers/atm/idt77252.h");
 #endif
 

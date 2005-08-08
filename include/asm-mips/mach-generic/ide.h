@@ -3,17 +3,12 @@
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * Copyright (C) 1994-1996  Linus Torvalds & authors
+ * IDE routines for typical pc-like legacy IDE configurations.
  *
- * Copied from i386; many of the especially older MIPS or ISA-based platforms
- * are basically identical.  Using this file probably implies i8259 PIC
- * support in a system but the very least interrupt numbers 0 - 15 need to
- * be put aside for legacy devices.
+ * Copyright (C) 1998, 1999, 2001, 2003 by Ralf Baechle
  */
 #ifndef __ASM_MACH_GENERIC_IDE_H
 #define __ASM_MACH_GENERIC_IDE_H
-
-#ifdef __KERNEL__
 
 #include <linux/config.h>
 
@@ -27,7 +22,7 @@
 
 #define IDE_ARCH_OBSOLETE_DEFAULTS
 
-static __inline__ int ide_default_irq(unsigned long base)
+static inline int ide_default_irq(unsigned long base)
 {
 	switch (base) {
 		case 0x1f0: return 14;
@@ -41,11 +36,11 @@ static __inline__ int ide_default_irq(unsigned long base)
 	}
 }
 
-static __inline__ unsigned long ide_default_io_base(int index)
+static inline unsigned long ide_default_io_base(int index)
 {
 	switch (index) {
-		case 0:	return 0x1f0;
-		case 1:	return 0x170;
+		case 0: return 0x1f0;
+		case 1: return 0x170;
 		case 2: return 0x1e8;
 		case 3: return 0x168;
 		case 4: return 0x1e0;
@@ -63,9 +58,5 @@ static __inline__ unsigned long ide_default_io_base(int index)
 #else
 #define ide_init_default_irq(base)	ide_default_irq(base)
 #endif
-
-#include <asm-generic/ide_iops.h>
-
-#endif /* __KERNEL__ */
 
 #endif /* __ASM_MACH_GENERIC_IDE_H */

@@ -244,8 +244,6 @@ static int
 __writeback_single_inode(struct inode *inode,
 			struct writeback_control *wbc)
 {
-	wait_queue_head_t *wqh;
-
 	if ((wbc->sync_mode != WB_SYNC_ALL) && (inode->i_state & I_LOCK)) {
 		list_move(&inode->i_list, &inode->i_sb->s_dirty);
 		return 0;
@@ -254,18 +252,12 @@ __writeback_single_inode(struct inode *inode,
 	/*
 	 * It's a data-integrity sync.  We must wait.
 	 */
-	if (inode->i_state & I_LOCK) {
-		DEFINE_WAIT_BIT(wq, &inode->i_state, __I_LOCK);
-
-		wqh = bit_waitqueue(&inode->i_state, __I_LOCK);
-		do {
-			__iget(inode);
-			spin_unlock(&inode_lock);
-			__wait_on_bit(wqh, &wq, inode_wait,
-							TASK_UNINTERRUPTIBLE);
-			iput(inode);
-			spin_lock(&inode_lock);
-		} while (inode->i_state & I_LOCK);
+	while (inode->i_state & I_LOCK) {
+		__iget(inode);
+		spin_unlock(&inode_lock);
+		__wait_on_inode(inode);
+		iput(inode);
+		spin_lock(&inode_lock);
 	}
 	return __sync_single_inode(inode, wbc);
 }
@@ -378,6 +370,7 @@ sync_sb_inodes(struct super_block *sb, struct writeback_control *wbc)
 			list_move(&inode->i_list, &sb->s_dirty);
 		}
 		spin_unlock(&inode_lock);
+		cond_resched();
 		iput(inode);
 		spin_lock(&inode_lock);
 		if (wbc->nr_to_write <= 0)
@@ -591,6 +584,7 @@ int sync_inode(struct inode *inode, struct writeback_control *wbc)
 {
 	int ret;
 
+	might_sleep();
 	spin_lock(&inode_lock);
 	ret = __writeback_single_inode(inode, wbc);
 	spin_unlock(&inode_lock);

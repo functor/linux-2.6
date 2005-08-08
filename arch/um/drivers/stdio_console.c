@@ -143,10 +143,10 @@ static void con_close(struct tty_struct *tty, struct file *filp)
 	line_close(vts, tty);
 }
 
-static int con_write(struct tty_struct *tty, 
+static int con_write(struct tty_struct *tty, int from_user, 
 		     const unsigned char *buf, int count)
 {
-	 return(line_write(vts, tty, buf, count));
+	 return(line_write(vts, tty, from_user, buf, count));
 }
 
 static void set_termios(struct tty_struct *tty, struct termios * old)

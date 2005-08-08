@@ -99,14 +99,17 @@ static int linear_issue_flush(request_queue_t *q, struct gendisk *disk,
 	linear_conf_t *conf = mddev_to_conf(mddev);
 	int i, ret = 0;
 
-	for (i=0; i < mddev->raid_disks && ret == 0; i++) {
+	for (i=0; i < mddev->raid_disks; i++) {
 		struct block_device *bdev = conf->disks[i].rdev->bdev;
 		request_queue_t *r_queue = bdev_get_queue(bdev);
 
-		if (!r_queue->issue_flush_fn)
+		if (!r_queue->issue_flush_fn) {
 			ret = -EOPNOTSUPP;
-		else
-			ret = r_queue->issue_flush_fn(r_queue, bdev->bd_disk, error_sector);
+			break;
+		}
+		ret = r_queue->issue_flush_fn(r_queue, bdev->bd_disk, error_sector);
+		if (ret)
+			break;
 	}
 	return ret;
 }
@@ -117,8 +120,8 @@ static int linear_run (mddev_t *mddev)
 	struct linear_hash *table;
 	mdk_rdev_t *rdev;
 	int i, nb_zone, cnt;
-	sector_t start;
-	sector_t curr_offset;
+	sector_t size;
+	unsigned int curr_offset;
 	struct list_head *tmp;
 
 	conf = kmalloc (sizeof (*conf) + mddev->raid_disks*sizeof(dev_info_t),
@@ -193,24 +196,23 @@ static int linear_run (mddev_t *mddev)
 	 * Here we generate the linear hash table
 	 */
 	table = conf->hash_table;
-	start = 0;
+	size = 0;
 	curr_offset = 0;
 	for (i = 0; i < cnt; i++) {
 		dev_info_t *disk = conf->disks + i;
 
-		if (start > curr_offset)
-			table[-1].dev1 = disk;
-
 		disk->offset = curr_offset;
 		curr_offset += disk->size;
 
-		/* 'curr_offset' is the end of this disk
-		 * 'start' is the start of table
-		 */
-		while (start < curr_offset) {
+		if (size < 0) {
+			table[-1].dev1 = disk;
+		}
+		size += disk->size;
+
+		while (size>0) {
 			table->dev0 = disk;
 			table->dev1 = NULL;
-			start += conf->smallest->size;
+			size -= conf->smallest->size;
 			table++;
 		}
 	}
@@ -232,7 +234,6 @@ static int linear_stop (mddev_t *mddev)
 {
 	linear_conf_t *conf = mddev_to_conf(mddev);
   
-	blk_sync_queue(mddev->queue); /* the unplug fn references 'conf'*/
 	kfree(conf->hash_table);
 	kfree(conf);
 

@@ -111,7 +111,7 @@ static struct dmi_system_id __initdata reboot_dmi_table[] = {
 	{ }
 };
 
-static int __init reboot_init(void)
+static int reboot_init(void)
 {
 	dmi_check_system(reboot_dmi_table);
 	return 0;
@@ -294,12 +294,16 @@ void machine_shutdown(void)
 	/* O.K. Now that I'm on the appropriate processor, stop
 	 * all of the others, and disable their local APICs.
 	 */
+	if (!netdump_mode)
+		smp_send_stop();
 
-	smp_send_stop();
-#endif /* CONFIG_SMP */
-
-	lapic_shutdown();
-
+#elif defined(CONFIG_X86_LOCAL_APIC)
+	if (cpu_has_apic) {
+		local_irq_disable();
+		disable_local_APIC();
+		local_irq_enable();
+	}
+#endif
 #ifdef CONFIG_X86_IO_APIC
 	disable_IO_APIC();
 #endif
@@ -340,8 +344,6 @@ EXPORT_SYMBOL(machine_halt);
 
 void machine_power_off(void)
 {
-	lapic_shutdown();
-
 	if (efi_enabled)
 		efi.reset_system(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, NULL);
 	if (pm_power_off)

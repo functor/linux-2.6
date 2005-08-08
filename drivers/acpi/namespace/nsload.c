@@ -92,14 +92,12 @@ acpi_ns_load_table (
 		return_ACPI_STATUS (AE_BAD_PARAMETER);
 	}
 
-	ACPI_DEBUG_PRINT ((ACPI_DB_INFO, "AML block at %p\n",
-		table_desc->aml_start));
+	ACPI_DEBUG_PRINT ((ACPI_DB_INFO, "AML block at %p\n", table_desc->aml_start));
 
 	/* Ignore table if there is no AML contained within */
 
 	if (!table_desc->aml_length) {
-		ACPI_REPORT_WARNING (("Zero-length AML block in table [%4.4s]\n",
-			table_desc->pointer->signature));
+		ACPI_REPORT_WARNING (("Zero-length AML block in table [%4.4s]\n", table_desc->pointer->signature));
 		return_ACPI_STATUS (AE_OK);
 	}
 
@@ -112,8 +110,7 @@ acpi_ns_load_table (
 	 * to another control method, we can't continue parsing
 	 * because we don't know how many arguments to parse next!
 	 */
-	ACPI_DEBUG_PRINT ((ACPI_DB_INFO,
-		"**** Loading table into namespace ****\n"));
+	ACPI_DEBUG_PRINT ((ACPI_DB_INFO, "**** Loading table into namespace ****\n"));
 
 	status = acpi_ut_acquire_mutex (ACPI_MTX_NAMESPACE);
 	if (ACPI_FAILURE (status)) {
@@ -199,6 +196,7 @@ acpi_ns_load_table_by_type (
 		if (ACPI_SUCCESS (status)) {
 			table_desc->loaded_into_namespace = TRUE;
 		}
+
 		break;
 
 
@@ -254,6 +252,7 @@ acpi_ns_load_table_by_type (
 
 			table_desc = table_desc->next;
 		}
+
 		break;
 
 
@@ -320,8 +319,6 @@ acpi_ns_load_namespace (
 	return_ACPI_STATUS (status);
 }
 
-
-#ifdef ACPI_FUTURE_USAGE
 
 /*******************************************************************************
  *
@@ -453,8 +450,6 @@ acpi_ns_unload_namespace (
 
 	return_ACPI_STATUS (status);
 }
-
-#endif  /*  ACPI_FUTURE_USAGE  */
 
 #endif
 

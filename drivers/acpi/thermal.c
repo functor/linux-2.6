@@ -60,7 +60,7 @@
 #define ACPI_THERMAL_NOTIFY_HOT		0xF1
 #define ACPI_THERMAL_MODE_ACTIVE	0x00
 #define ACPI_THERMAL_MODE_PASSIVE	0x01
-#define ACPI_THERMAL_MODE_CRITICAL   	0xff
+#define ACPI_THERMAL_MODE_CRT   	0xff
 #define ACPI_THERMAL_PATH_POWEROFF	"/sbin/poweroff"
 
 #define ACPI_THERMAL_MAX_ACTIVE	10
@@ -76,7 +76,7 @@ MODULE_DESCRIPTION(ACPI_THERMAL_DRIVER_NAME);
 MODULE_LICENSE("GPL");
 
 static int tzp;
-module_param(tzp, int, 0);
+MODULE_PARM(tzp, "i");
 MODULE_PARM_DESC(tzp, "Thermal zone polling frequency, in 1/10 seconds.\n");
 
 
@@ -226,7 +226,7 @@ acpi_thermal_get_temperature (
 
 	status = acpi_evaluate_integer(tz->handle, "_TMP", NULL, &tz->temperature);
 	if (ACPI_FAILURE(status))
-		return_VALUE(-ENODEV);
+		return -ENODEV;
 
 	ACPI_DEBUG_PRINT((ACPI_DB_INFO, "Temperature is %lu dK\n", tz->temperature));
 
@@ -328,7 +328,7 @@ acpi_thermal_get_trip_points (
 	if (ACPI_FAILURE(status)) {
 		tz->trips.critical.flags.valid = 0;
 		ACPI_DEBUG_PRINT((ACPI_DB_ERROR, "No critical threshold\n"));
-		return_VALUE(-ENODEV);
+		return -ENODEV;
 	}
 	else {
 		tz->trips.critical.flags.valid = 1;
@@ -801,7 +801,7 @@ static int acpi_thermal_state_seq_show(struct seq_file *seq, void *offset)
 	}
 
 end:
-	return_VALUE(0);
+	return 0;
 }
 
 static int acpi_thermal_state_open_fs(struct inode *inode, struct file *file)
@@ -828,7 +828,7 @@ static int acpi_thermal_temp_seq_show(struct seq_file *seq, void *offset)
 		KELVIN_TO_CELSIUS(tz->temperature));
 
 end:
-	return_VALUE(0);
+	return 0;
 }
 
 static int acpi_thermal_temp_open_fs(struct inode *inode, struct file *file)
@@ -881,7 +881,7 @@ static int acpi_thermal_trip_seq_show(struct seq_file *seq, void *offset)
 	}
 
 end:
-	return_VALUE(0);
+	return 0;
 }
 
 static int acpi_thermal_trip_open_fs(struct inode *inode, struct file *file)
@@ -953,14 +953,14 @@ static int acpi_thermal_cooling_seq_show(struct seq_file *seq, void *offset)
 		seq_puts(seq, "<setting not supported>\n");
 	}
 
-	if ( tz->cooling_mode == ACPI_THERMAL_MODE_CRITICAL )
+	if ( tz->cooling_mode == ACPI_THERMAL_MODE_CRT )
 		seq_printf(seq, "cooling mode:	critical\n");
 	else
 		seq_printf(seq, "cooling mode:	%s\n",
 			tz->cooling_mode?"passive":"active");
 
 end:
-	return_VALUE(0);
+	return 0;
 }
 
 static int acpi_thermal_cooling_open_fs(struct inode *inode, struct file *file)
@@ -1023,7 +1023,7 @@ static int acpi_thermal_polling_seq_show(struct seq_file *seq, void *offset)
 		(tz->polling_frequency / 10));
 
 end:
-	return_VALUE(0);
+	return 0;
 }
 
 static int acpi_thermal_polling_open_fs(struct inode *inode, struct file *file)
@@ -1262,7 +1262,7 @@ acpi_thermal_get_info (
 			tz->cooling_mode = ACPI_THERMAL_MODE_ACTIVE;
 		} else {
 			/* _ACx and _PSV are optional, but _CRT is required */
-			tz->cooling_mode = ACPI_THERMAL_MODE_CRITICAL;
+			tz->cooling_mode = ACPI_THERMAL_MODE_CRT;
 		}
 	}
 

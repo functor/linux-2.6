@@ -14,7 +14,6 @@
 #include <linux/fs.h>
 #include <linux/dirent.h>
 #include <linux/security.h>
-#include <linux/syscalls.h>
 #include <linux/unistd.h>
 
 #include <asm/uaccess.h>

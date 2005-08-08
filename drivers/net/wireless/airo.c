@@ -35,9 +35,9 @@
 #include <linux/interrupt.h>
 #include <linux/suspend.h>
 #include <linux/in.h>
-#include <linux/bitops.h>
 #include <asm/io.h>
 #include <asm/system.h>
+#include <asm/bitops.h>
 
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -1189,7 +1189,6 @@ struct airo_info {
 	struct iw_statistics	wstats;		// wireless stats
 	unsigned long		scan_timestamp;	/* Time started to scan */
 	struct iw_spy_data	spy_data;
-	struct iw_public_data	wireless_data;
 #endif /* WIRELESS_EXT */
 #ifdef MICSUPPORT
 	/* MIC stuff */
@@ -1211,6 +1210,7 @@ struct airo_info {
 	SsidRid			*SSID;
 	APListRid		*APList;
 #define	PCI_SHARED_LEN		2*MPI_MAX_FIDS*PKTSIZE+RIDSIZE
+	u32			pci_state[16];
 	char			proc_name[IFNAMSIZ];
 };
 
@@ -2378,22 +2378,14 @@ void stop_airo_card( struct net_device *dev, int freeres )
 			dev_kfree_skb(skb);
 	}
 
-	if (ai->flash) {
+	if (ai->flash)
 		kfree(ai->flash);
-		ai->flash = NULL;
-	}
-	if (ai->rssi) {
+	if (ai->rssi)
 		kfree(ai->rssi);
-		ai->rssi = NULL;
-	}
-	if (ai->APList) {
+	if (ai->APList)
 		kfree(ai->APList);
-		ai->APList = NULL;
-	}
-	if (ai->SSID) {
+	if (ai->SSID)
 		kfree(ai->SSID);
-		ai->SSID = NULL;
-	}
 	if (freeres) {
 		/* PCMCIA frees this stuff, so only for PCI and ISA */
 	        release_region( dev->base_addr, 64 );
@@ -2648,7 +2640,8 @@ static void wifi_setup(struct net_device *dev)
 	dev->set_mac_address = &airo_set_mac_address;
 	dev->do_ioctl = &airo_ioctl;
 #ifdef WIRELESS_EXT
-	dev->wireless_handlers = &airo_handler_def;
+	dev->get_wireless_stats = airo_get_wireless_stats;
+	dev->wireless_handlers = (struct iw_handler_def *)&airo_handler_def;
 #endif /* WIRELESS_EXT */
 	dev->change_mtu = &airo_change_mtu;
 	dev->open = &airo_open;
@@ -2675,9 +2668,6 @@ static struct net_device *init_wifidev(struct airo_info *ai,
 	dev->priv = ethdev->priv;
 	dev->irq = ethdev->irq;
 	dev->base_addr = ethdev->base_addr;
-#ifdef WIRELESS_EXT
-	dev->wireless_data = ethdev->wireless_data;
-#endif /* WIRELESS_EXT */
 	memcpy(dev->dev_addr, ethdev->dev_addr, dev->addr_len);
 	err = register_netdev(dev);
 	if (err<0) {
@@ -2730,7 +2720,7 @@ struct net_device *_init_airo_card( unsigned short irq, int port,
 		set_bit(FLAG_MPI, &ai->flags);
 	}
         ai->dev = dev;
-	spin_lock_init(&ai->aux_lock);
+	ai->aux_lock = SPIN_LOCK_UNLOCKED;
 	sema_init(&ai->sem, 1);
 	ai->config.len = 0;
 	ai->pci = pci;
@@ -2757,9 +2747,8 @@ struct net_device *_init_airo_card( unsigned short irq, int port,
 	dev->set_mac_address = &airo_set_mac_address;
 	dev->do_ioctl = &airo_ioctl;
 #ifdef WIRELESS_EXT
-	dev->wireless_handlers = &airo_handler_def;
-	ai->wireless_data.spy_data = &ai->spy_data;
-	dev->wireless_data = &ai->wireless_data;
+	dev->get_wireless_stats = airo_get_wireless_stats;
+	dev->wireless_handlers = (struct iw_handler_def *)&airo_handler_def;
 #endif /* WIRELESS_EXT */
 	dev->change_mtu = &airo_change_mtu;
 	dev->open = &airo_open;
@@ -3242,7 +3231,7 @@ badrx:
 					goto exitrx;
 				}
 			}
-#ifdef WIRELESS_SPY
+#ifdef IW_WIRELESS_SPY		/* defined in iw_handler.h */
 			if (apriv->spy_data.spy_number > 0) {
 				char *sa;
 				struct iw_quality wstats;
@@ -3262,7 +3251,7 @@ badrx:
 				/* Update spy records */
 				wireless_spy_update(dev, sa, &wstats);
 			}
-#endif /* WIRELESS_SPY */
+#endif /* IW_WIRELESS_SPY */
 			OUT4500( apriv, EVACK, EV_RX);
 
 			if (test_bit(FLAG_802_11, &apriv->flags)) {
@@ -3487,7 +3476,7 @@ badmic:
 #else
 		memcpy(buffer, ai->rxfids[0].virtual_host_addr, len);
 #endif
-#ifdef WIRELESS_SPY
+#ifdef IW_WIRELESS_SPY		/* defined in iw_handler.h */
 		if (ai->spy_data.spy_number > 0) {
 			char *sa;
 			struct iw_quality wstats;
@@ -3499,7 +3488,7 @@ badmic:
 			/* Update spy records */
 			wireless_spy_update(ai->dev, sa, &wstats);
 		}
-#endif /* WIRELESS_SPY */
+#endif /* IW_WIRELESS_SPY */
 
 		skb->dev = ai->dev;
 		skb->ip_summed = CHECKSUM_NONE;
@@ -4560,7 +4549,6 @@ static int proc_status_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 2048, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 
@@ -4641,7 +4629,6 @@ static int proc_stats_rid_open( struct inode *inode,
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 4096, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 
@@ -4908,14 +4895,11 @@ static int proc_config_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 2048, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	if ((data->wbuffer = kmalloc( 2048, GFP_KERNEL )) == NULL) {
 		kfree (data->rbuffer);
-		data->rbuffer = NULL;
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	memset( data->wbuffer, 0, 2048 );
@@ -5186,7 +5170,6 @@ static int proc_wepkey_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 180, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	memset(data->rbuffer, 0, 180);
@@ -5194,9 +5177,7 @@ static int proc_wepkey_open( struct inode *inode, struct file *file ) {
 	data->maxwritelen = 80;
 	if ((data->wbuffer = kmalloc( 80, GFP_KERNEL )) == NULL) {
 		kfree (data->rbuffer);
-		data->rbuffer = NULL;
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	memset( data->wbuffer, 0, 80 );
@@ -5236,16 +5217,13 @@ static int proc_SSID_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 104, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	data->writelen = 0;
 	data->maxwritelen = 33*3;
 	if ((data->wbuffer = kmalloc( 33*3, GFP_KERNEL )) == NULL) {
 		kfree (data->rbuffer);
-		data->rbuffer = NULL;
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	memset( data->wbuffer, 0, 33*3 );
@@ -5283,16 +5261,13 @@ static int proc_APList_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 104, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	data->writelen = 0;
 	data->maxwritelen = 4*6*3;
 	if ((data->wbuffer = kmalloc( data->maxwritelen, GFP_KERNEL )) == NULL) {
 		kfree (data->rbuffer);
-		data->rbuffer=NULL;
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	memset( data->wbuffer, 0, data->maxwritelen );
@@ -5336,7 +5311,6 @@ static int proc_BSSList_open( struct inode *inode, struct file *file ) {
 	data = (struct proc_data *)file->private_data;
 	if ((data->rbuffer = kmalloc( 1024, GFP_KERNEL )) == NULL) {
 		kfree (file->private_data);
-		file->private_data = NULL;
 		return -ENOMEM;
 	}
 	data->writelen = 0;
@@ -5394,16 +5368,9 @@ static int proc_close( struct inode *inode, struct file *file )
 {
 	struct proc_data *data = (struct proc_data *)file->private_data;
 	if ( data->on_close != NULL ) data->on_close( inode, file );
-	if ( data->rbuffer ) {
-		kfree( data->rbuffer );
-		data->rbuffer = NULL;
-	}
-	if ( data->wbuffer ) {
-		kfree( data->wbuffer );
-		data->wbuffer = NULL;
-	}
+	if ( data->rbuffer ) kfree( data->rbuffer );
+	if ( data->wbuffer ) kfree( data->wbuffer );
 	kfree( data );
-	file->private_data = NULL;
 	return 0;
 }
 
@@ -5525,7 +5492,7 @@ static int airo_pci_suspend(struct pci_dev *pdev, u32 state)
 	issuecommand(ai, &cmd, &rsp);
 
 	pci_enable_wake(pdev, state, 1);
-	pci_save_state(pdev);
+	pci_save_state(pdev, ai->pci_state);
 	return pci_set_power_state(pdev, state);
 }
 
@@ -5536,7 +5503,7 @@ static int airo_pci_resume(struct pci_dev *pdev)
 	Resp rsp;
 
 	pci_set_power_state(pdev, 0);
-	pci_restore_state(pdev);
+	pci_restore_state(pdev, ai->pci_state);
 	pci_enable_wake(pdev, ai->power, 0);
 
 	if (ai->power > 1) {
@@ -6553,13 +6520,6 @@ static int airo_get_range(struct net_device *dev,
 		range->avg_qual.level = 176;	/* -80 dBm */
 	range->avg_qual.noise = 0;
 
-	/* Event capability (kernel + driver) */
-	range->event_capa[0] = (IW_EVENT_CAPA_K_0 |
-				IW_EVENT_CAPA_MASK(SIOCGIWTHRSPY) |
-				IW_EVENT_CAPA_MASK(SIOCGIWAP) |
-				IW_EVENT_CAPA_MASK(SIOCGIWSCAN));
-	range->event_capa[1] = IW_EVENT_CAPA_K_1;
-	range->event_capa[4] = IW_EVENT_CAPA_MASK(IWEVTXDROP);
 	return 0;
 }
 
@@ -6927,14 +6887,8 @@ static int airo_get_scan(struct net_device *dev,
 	while((!rc) && (BSSList.index != 0xffff)) {
 		/* Translate to WE format this entry */
 		current_ev = airo_translate_scan(dev, current_ev,
-						 extra + dwrq->length,
+						 extra + IW_SCAN_MAX_DATA,
 						 &BSSList);
-
-		/* Check if there is space for one more entry */
-		if((extra + dwrq->length - current_ev) <= IW_EV_ADDR_LEN) {
-			/* Ask user space to try again with a bigger buffer */
-			return -E2BIG;
-		}
 
 		/* Read next entry */
 		rc = PC4500_readrid(ai, RID_BSSLISTNEXT,
@@ -7071,10 +7025,12 @@ static const struct iw_handler_def	airo_handler_def =
 	.num_standard	= sizeof(airo_handler)/sizeof(iw_handler),
 	.num_private	= sizeof(airo_private_handler)/sizeof(iw_handler),
 	.num_private_args = sizeof(airo_private_args)/sizeof(struct iw_priv_args),
-	.standard	= airo_handler,
-	.private	= airo_private_handler,
-	.private_args	= airo_private_args,
-	.get_wireless_stats = airo_get_wireless_stats,
+	.standard	= (iw_handler *) airo_handler,
+	.private	= (iw_handler *) airo_private_handler,
+	.private_args	= (struct iw_priv_args *) airo_private_args,
+	.spy_offset	= ((void *) (&((struct airo_info *) NULL)->spy_data) -
+			   (void *) NULL),
+
 };
 
 #endif /* WIRELESS_EXT */

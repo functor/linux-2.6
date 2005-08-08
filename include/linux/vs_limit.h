@@ -1,7 +1,11 @@
 #ifndef _VX_VS_LIMIT_H
 #define _VX_VS_LIMIT_H
 
+#include <linux/kernel.h>
+#include <linux/rcupdate.h>
+#include <linux/sched.h>
 
+#include "vserver/context.h"
 #include "vserver/limit.h"
 #include "vserver/debug.h"
 
@@ -31,7 +35,7 @@ static inline void __vx_acc_cres(struct vx_info *vxi,
 	__vx_acc_cres((v), (r), (d), (p), __FILE__, __LINE__)
 
 #define vx_acc_cres_cond(x,d,p,r) \
-	__vx_acc_cres(((x) == vx_current_xid()) ? current->vx_info : 0,\
+	__vx_acc_cres(((x) == current->xid) ? current->vx_info : 0,\
 	(r), (d), (p), __FILE__, __LINE__)
 
 #define vx_nproc_inc(p) \

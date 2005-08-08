@@ -6,7 +6,6 @@
 #include <linux/pci.h>
 #include <linux/init.h>
 #include <linux/agp_backend.h>
-#include <linux/delay.h>
 #include "agp.h"
 
 #define SIS_ATTBASE	0x90
@@ -86,7 +85,7 @@ static void sis_delayed_enable(u32 mode)
 	command |= AGPSTAT_AGP_ENABLE;
 	rate = (command & 0x7) << 2;
 
-	for_each_pci_dev(device) {
+	while ((device = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, device)) != NULL) {
 		u8 agp = pci_find_capability(device, PCI_CAP_ID_AGP);
 		if (!agp)
 			continue;
@@ -103,7 +102,8 @@ static void sis_delayed_enable(u32 mode)
 		 */
 		if (device->device == agp_bridge->dev->device) {
 			printk(KERN_INFO PFX "SiS delay workaround: giving bridge time to recover.\n");
-			msleep(10);
+			set_current_state(TASK_UNINTERRUPTIBLE);
+			schedule_timeout (1+(HZ*10)/1000);
 		}
 	}
 }
@@ -340,8 +340,6 @@ static struct pci_driver agp_sis_pci_driver = {
 
 static int __init agp_sis_init(void)
 {
-	if (agp_off)
-		return -EINVAL;
 	return pci_module_init(&agp_sis_pci_driver);
 }
 

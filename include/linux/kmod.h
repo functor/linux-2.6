@@ -38,4 +38,8 @@ extern int call_usermodehelper(char *path, char *argv[], char *envp[], int wait)
 extern void usermodehelper_init(void);
 extern int __exec_usermodehelper(char *path, char **argv, char **envp);
 
+#ifdef CONFIG_HOTPLUG
+extern char hotplug_path [];
+#endif
+
 #endif /* __LINUX_KMOD_H__ */

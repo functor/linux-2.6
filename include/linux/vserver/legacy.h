@@ -2,6 +2,7 @@
 #define _VX_LEGACY_H
 
 #include "switch.h"
+#include "network.h"
 
 /*  compatibiliy vserver commands */
 

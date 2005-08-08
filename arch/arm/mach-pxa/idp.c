@@ -119,6 +119,6 @@ MACHINE_START(PXA_IDP, "Accelent Xscale IDP")
 	BOOT_MEM(0xa0000000, 0x40000000, io_p2v(0x40000000))
 	MAPIO(idp_map_io)
 	INITIRQ(idp_init_irq)
-	.timer		= &pxa_timer,
+	INITTIME(pxa_init_time)
 	INIT_MACHINE(idp_init)
 MACHINE_END

@@ -38,13 +38,18 @@
 #include <linux/byteorder/swabb.h>
 #include <linux/smp_lock.h>
 
+#define DEBUG_VARIABLE av7110_debug
+extern int av7110_debug;
+
+#include "dvb_i2c.h"
 #include "av7110.h"
 #include "av7110_hw.h"
+#include "dvb_functions.h"
 
 
 void CI_handle(struct av7110 *av7110, u8 *data, u16 len)
 {
-	dprintk(8, "av7110:%p\n",av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (len < 3)
 		return;
@@ -89,20 +94,20 @@ void ci_get_data(struct dvb_ringbuffer *cibuf, u8 *data, int len)
  * CI link layer file ops
  ******************************************************************************/
 
-static int ci_ll_init(struct dvb_ringbuffer *cirbuf, struct dvb_ringbuffer *ciwbuf, int size)
+int ci_ll_init(struct dvb_ringbuffer *cirbuf, struct dvb_ringbuffer *ciwbuf, int size)
 {
 	dvb_ringbuffer_init(cirbuf, vmalloc(size), size);
 	dvb_ringbuffer_init(ciwbuf, vmalloc(size), size);
 	return 0;
 }
 
-static void ci_ll_flush(struct dvb_ringbuffer *cirbuf, struct dvb_ringbuffer *ciwbuf)
+void ci_ll_flush(struct dvb_ringbuffer *cirbuf, struct dvb_ringbuffer *ciwbuf)
 {
 	dvb_ringbuffer_flush_spinlock_wakeup(cirbuf);
 	dvb_ringbuffer_flush_spinlock_wakeup(ciwbuf);
 }
 
-static void ci_ll_release(struct dvb_ringbuffer *cirbuf, struct dvb_ringbuffer *ciwbuf)
+void ci_ll_release(struct dvb_ringbuffer *cirbuf, struct dvb_ringbuffer *ciwbuf)
 {
 	vfree(cirbuf->data);
 	cirbuf->data = NULL;
@@ -110,7 +115,7 @@ static void ci_ll_release(struct dvb_ringbuffer *cirbuf, struct dvb_ringbuffer *
 	ciwbuf->data = NULL;
 }
 
-static int ci_ll_reset(struct dvb_ringbuffer *cibuf, struct file *file,
+int ci_ll_reset(struct dvb_ringbuffer *cibuf, struct file *file,
 		int slots, ca_slot_info_t *slot)
 {
 	int i;
@@ -207,7 +212,7 @@ static int dvb_ca_open(struct inode *inode, struct file *file)
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 	int err = dvb_generic_open(inode, file);
 
-	dprintk(8, "av7110:%p\n",av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (err < 0)
 		return err;
@@ -223,16 +228,13 @@ static unsigned int dvb_ca_poll (struct file *file, poll_table *wait)
 	struct dvb_ringbuffer *wbuf = &av7110->ci_wbuffer;
 	unsigned int mask = 0;
 
-	dprintk(8, "av7110:%p\n",av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	poll_wait(file, &rbuf->queue, wait);
-	poll_wait(file, &wbuf->queue, wait);
-
 	if (!dvb_ringbuffer_empty(rbuf))
-		mask |= (POLLIN | POLLRDNORM);
-
-	if (dvb_ringbuffer_free(wbuf) > 1024)
-		mask |= (POLLOUT | POLLWRNORM);
+		mask |= POLLIN;
+	if (dvb_ringbuffer_avail(wbuf) > 1024)
+		mask |= POLLOUT;
 
 	return mask;
 }
@@ -244,7 +246,7 @@ static int dvb_ca_ioctl(struct inode *inode, struct file *file,
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 	unsigned long arg = (unsigned long) parg;
 
-	dprintk(8, "av7110:%p\n",av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	switch (cmd) {
 	case CA_RESET:
@@ -321,7 +323,7 @@ static ssize_t dvb_ca_write(struct file *file, const char __user *buf,
 	struct dvb_device *dvbdev = (struct dvb_device *) file->private_data;
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 
-	dprintk(8, "av7110:%p\n",av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 	return ci_ll_write(&av7110->ci_wbuffer, file, buf, count, ppos);
 }
 
@@ -331,7 +333,7 @@ static ssize_t dvb_ca_read(struct file *file, char __user *buf,
 	struct dvb_device *dvbdev = (struct dvb_device *) file->private_data;
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 
-	dprintk(8, "av7110:%p\n",av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 	return ci_ll_read(&av7110->ci_rbuffer, file, buf, count, ppos);
 }
 

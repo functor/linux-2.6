@@ -38,7 +38,7 @@
 #include <asm/io.h>
 
 #define DRV_NAME	"sata_via"
-#define DRV_VERSION	"1.0"
+#define DRV_VERSION	"0.20"
 
 enum {
 	via_sata		= 0,

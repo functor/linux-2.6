@@ -19,6 +19,7 @@
 #include <linux/ext3_jbd.h>
 #include <linux/quotaops.h>
 #include <linux/buffer_head.h>
+#include <linux/vs_base.h>
 #include <linux/vs_dlimit.h>
 
 /*
@@ -113,27 +114,27 @@ error_out:
  * code.
  */
 #if 0
-static void __rsv_window_dump(struct rb_root *root, int verbose,
+static void __rsv_window_dump(struct rb_root *root, int verbose, 
 			      const char *fn)
 {
 	struct rb_node *n;
-	struct ext3_reserve_window_node *rsv, *prev;
+	struct reserve_window_node *rsv, *prev;
 	int bad;
-
+	
 restart:
 	n = rb_first(root);
 	bad = 0;
 	prev = NULL;
-
+	
 	printk("Block Allocation Reservation Windows Map (%s):\n", fn);
 	while (n) {
-		rsv = list_entry(n, struct ext3_reserve_window_node, rsv_node);
+		rsv = list_entry(n, struct reserve_window_node, rsv_node);
 		if (verbose)
 			printk("reservation window 0x%p "
 			       "start:  %d, end:  %d\n",
 			       rsv, rsv->rsv_start, rsv->rsv_end);
 		if (rsv->rsv_start && rsv->rsv_start >= rsv->rsv_end) {
-			printk("Bad reservation %p (start >= end)\n",
+			printk("Bad reservation %p (start >= end)\n", 
 			       rsv);
 			bad = 1;
 		}
@@ -163,7 +164,7 @@ restart:
 #endif
 
 static int
-goal_in_my_reservation(struct ext3_reserve_window *rsv, int goal,
+goal_in_my_reservation(struct reserve_window *rsv, int goal,
 			unsigned int group, struct super_block * sb)
 {
 	unsigned long group_first_block, group_last_block;
@@ -181,22 +182,23 @@ goal_in_my_reservation(struct ext3_reserve_window *rsv, int goal,
 	return 1;
 }
 
-/*
+/* 
  * Find the reserved window which includes the goal, or the previous one
  * if the goal is not in any window.
  * Returns NULL if there are no windows or if all windows start after the goal.
  */
-static struct ext3_reserve_window_node *
-search_reserve_window(struct rb_root *root, unsigned long goal)
+static struct reserve_window_node *search_reserve_window(struct rb_root *root,
+							 unsigned long goal)
 {
 	struct rb_node *n = root->rb_node;
-	struct ext3_reserve_window_node *rsv;
+	struct reserve_window_node *rsv;
 
 	if (!n)
 		return NULL;
-
-	do {
-		rsv = rb_entry(n, struct ext3_reserve_window_node, rsv_node);
+	
+	while (n)
+	{
+		rsv = rb_entry(n, struct reserve_window_node, rsv_node);
 
 		if (goal < rsv->rsv_start)
 			n = n->rb_left;
@@ -204,22 +206,22 @@ search_reserve_window(struct rb_root *root, unsigned long goal)
 			n = n->rb_right;
 		else
 			return rsv;
-	} while (n);
-	/*
+	}
+	/* 
 	 * We've fallen off the end of the tree: the goal wasn't inside
 	 * any particular node.  OK, the previous node must be to one
 	 * side of the interval containing the goal.  If it's the RHS,
-	 * we need to back up one.
+	 * we need to back up one. 
 	 */
 	if (rsv->rsv_start > goal) {
 		n = rb_prev(&rsv->rsv_node);
-		rsv = rb_entry(n, struct ext3_reserve_window_node, rsv_node);
+		rsv = rb_entry(n, struct reserve_window_node, rsv_node);
 	}
-	return rsv;
+	return rsv; 
 }
 
-void ext3_rsv_window_add(struct super_block *sb,
-		    struct ext3_reserve_window_node *rsv)
+void rsv_window_add(struct super_block *sb,
+		    struct reserve_window_node *rsv)
 {
 	struct rb_root *root = &EXT3_SB(sb)->s_rsv_window_root;
 	struct rb_node *node = &rsv->rsv_node;
@@ -227,12 +229,12 @@ void ext3_rsv_window_add(struct super_block *sb,
 
 	struct rb_node ** p = &root->rb_node;
 	struct rb_node * parent = NULL;
-	struct ext3_reserve_window_node *this;
-
+	struct reserve_window_node *this;
+	
 	while (*p)
 	{
 		parent = *p;
-		this = rb_entry(parent, struct ext3_reserve_window_node, rsv_node);
+		this = rb_entry(parent, struct reserve_window_node, rsv_node);
 
 		if (start < this->rsv_start)
 			p = &(*p)->rb_left;
@@ -247,7 +249,7 @@ void ext3_rsv_window_add(struct super_block *sb,
 }
 
 static void rsv_window_remove(struct super_block *sb,
-			      struct ext3_reserve_window_node *rsv)
+			      struct reserve_window_node *rsv)
 {
 	rsv->rsv_start = EXT3_RESERVE_WINDOW_NOT_ALLOCATED;
 	rsv->rsv_end = EXT3_RESERVE_WINDOW_NOT_ALLOCATED;
@@ -255,7 +257,7 @@ static void rsv_window_remove(struct super_block *sb,
 	rb_erase(&rsv->rsv_node, &EXT3_SB(sb)->s_rsv_window_root);
 }
 
-static inline int rsv_is_empty(struct ext3_reserve_window *rsv)
+static inline int rsv_is_empty(struct reserve_window *rsv)
 {
 	/* a valid reservation end block could not be 0 */
 	return (rsv->_rsv_end == EXT3_RESERVE_WINDOW_NOT_ALLOCATED);
@@ -264,7 +266,7 @@ static inline int rsv_is_empty(struct ext3_reserve_window *rsv)
 void ext3_discard_reservation(struct inode *inode)
 {
 	struct ext3_inode_info *ei = EXT3_I(inode);
-	struct ext3_reserve_window_node *rsv = &ei->i_rsv_window;
+	struct reserve_window_node *rsv = &ei->i_rsv_window;
 	spinlock_t *rsv_lock = &EXT3_SB(inode->i_sb)->s_rsv_window_lock;
 
 	if (!rsv_is_empty(&rsv->rsv_window)) {
@@ -614,7 +616,7 @@ claim_block(spinlock_t *lock, int block, struct buffer_head *bh)
  */
 static int
 ext3_try_to_allocate(struct super_block *sb, handle_t *handle, int group,
-	struct buffer_head *bitmap_bh, int goal, struct ext3_reserve_window *my_rsv)
+	struct buffer_head *bitmap_bh, int goal, struct reserve_window *my_rsv)
 {
 	int group_first_block, start, end;
 
@@ -704,7 +706,7 @@ fail_access:
  *		group. The search will end when we found the start of next
  *		possible reservable space is out of this boundary.
  *		This could handle the cross boundary reservation window
- *		request.
+ *		request. 
  *
  * 	basically we search from the given range, rather than the whole
  * 	reservation double linked list, (start_block, last_block)
@@ -714,22 +716,22 @@ fail_access:
  *	on succeed, it returns the reservation window to be appended to.
  *	failed, return NULL.
  */
-static struct ext3_reserve_window_node *find_next_reservable_window(
-				struct ext3_reserve_window_node *search_head,
+static struct reserve_window_node *find_next_reservable_window(
+				struct reserve_window_node *search_head,
 				unsigned long size, int *start_block,
 				int last_block)
 {
 	struct rb_node *next;
-	struct ext3_reserve_window_node *rsv, *prev;
+	struct reserve_window_node *rsv, *prev;
 	int cur;
 
 	/* TODO: make the start of the reservation window byte-aligned */
 	/* cur = *start_block & ~7;*/
 	cur = *start_block;
 	rsv = search_head;
-	if (!rsv)
+	if (!rsv) 
 		return NULL;
-
+	
 	while (1) {
 		if (cur <= rsv->rsv_end)
 			cur = rsv->rsv_end + 1;
@@ -748,11 +750,11 @@ static struct ext3_reserve_window_node *find_next_reservable_window(
 
 		prev = rsv;
 		next = rb_next(&rsv->rsv_node);
-		rsv = list_entry(next, struct ext3_reserve_window_node, rsv_node);
+		rsv = list_entry(next, struct reserve_window_node, rsv_node);
 
-		/*
-		 * Reached the last reservation, we can just append to the
-		 * previous one.
+		/* 
+		 * Reached the last reservation, we can just append to the 
+		 * previous one. 
 		 */
 		if (!next)
 			break;
@@ -781,11 +783,19 @@ static struct ext3_reserve_window_node *find_next_reservable_window(
 
 /**
  * 	alloc_new_reservation()--allocate a new reservation window
+ *		if there is an existing reservation, discard it first
+ *		then allocate the new one from there
+ *		otherwise allocate the new reservation from the given
+ *		start block, or the beginning of the group, if a goal
+ *		is not given.
  *
  *		To make a new reservation, we search part of the filesystem
- *		reservation list (the list that inside the group). We try to
- *		allocate a new reservation window near the allocation goal,
- *		or the beginning of the group, if there is no goal.
+ *		reservation list (the list that inside the group).
+ *
+ *		If we have a old reservation, the search goal is the end of
+ *		last reservation. If we do not have a old reservation, then we
+ *		start from a given goal, or the first block of the group, if
+ *		the goal is not given.
  *
  *		We first find a reservable space after the goal, then from
  *		there, we check the bitmap for the first free block after
@@ -807,6 +817,8 @@ static struct ext3_reserve_window_node *find_next_reservable_window(
  *
  *	@goal: The goal (group-relative).  It is where the search for a
  *		free reservable space should start from.
+ *		if we have a old reservation, start_block is the end of
+ *		old reservation. Otherwise,
  *		if we have a goal(goal >0 ), then start from there,
  *		no goal(goal = -1), we start from the first block
  *		of the group.
@@ -815,15 +827,15 @@ static struct ext3_reserve_window_node *find_next_reservable_window(
  *	@group: the group we are trying to allocate in
  *	@bitmap_bh: the block group block bitmap
  */
-static int alloc_new_reservation(struct ext3_reserve_window_node *my_rsv,
+static int alloc_new_reservation(struct reserve_window_node *my_rsv,
 		int goal, struct super_block *sb,
 		unsigned int group, struct buffer_head *bitmap_bh)
 {
-	struct ext3_reserve_window_node *search_head;
+	struct reserve_window_node *search_head;
 	int group_first_block, group_end_block, start_block;
 	int first_free_block;
 	int reservable_space_start;
-	struct ext3_reserve_window_node *prev_rsv;
+	struct reserve_window_node *prev_rsv;
 	struct rb_root *fs_rsv_root = &EXT3_SB(sb)->s_rsv_window_root;
 	unsigned long size;
 
@@ -837,10 +849,10 @@ static int alloc_new_reservation(struct ext3_reserve_window_node *my_rsv,
 		start_block = goal + group_first_block;
 
 	size = atomic_read(&my_rsv->rsv_goal_size);
+	/* if we have a old reservation, start the search from the old rsv */
 	if (!rsv_is_empty(&my_rsv->rsv_window)) {
 		/*
 		 * if the old reservation is cross group boundary
-		 * and if the goal is inside the old reservation window,
 		 * we will come here when we just failed to allocate from
 		 * the first part of the window. We still have another part
 		 * that belongs to the next group. In this case, there is no
@@ -853,11 +865,14 @@ static int alloc_new_reservation(struct ext3_reserve_window_node *my_rsv,
 		 */
 
 		if ((my_rsv->rsv_start <= group_end_block) &&
-				(my_rsv->rsv_end > group_end_block) &&
-				(start_block >= my_rsv->rsv_start))
+				(my_rsv->rsv_end > group_end_block))
 			return -1;
 
-		if ((atomic_read(&my_rsv->rsv_alloc_hit) >
+		/* remember where we are before we discard the old one */
+		if (my_rsv->rsv_end + 1 > start_block)
+			start_block = my_rsv->rsv_end + 1;
+		search_head = my_rsv;
+		if ((atomic_read(&my_rsv->rsv_alloc_hit) > 
 		     (my_rsv->rsv_end - my_rsv->rsv_start + 1) / 2)) {
 			/*
 			 * if we previously allocation hit ration is greater than half
@@ -870,10 +885,14 @@ static int alloc_new_reservation(struct ext3_reserve_window_node *my_rsv,
 			atomic_set(&my_rsv->rsv_goal_size, size);
 		}
 	}
-	/*
-	 * shift the search start to the window near the goal block
-	 */
-	search_head = search_reserve_window(fs_rsv_root, start_block);
+	else {
+		/*
+		 * we don't have a reservation,
+		 * we set our goal(start_block) and
+		 * the list head for the search
+		 */
+		search_head = search_reserve_window(fs_rsv_root, start_block);
+	}
 
 	/*
 	 * find_next_reservable_window() simply finds a reservable window
@@ -944,17 +963,10 @@ found_rsv_window:
 	my_rsv->rsv_end = my_rsv->rsv_start + size - 1;
 	atomic_set(&my_rsv->rsv_alloc_hit, 0);
 	if (my_rsv != prev_rsv)  {
-		ext3_rsv_window_add(sb, my_rsv);
+		rsv_window_add(sb, my_rsv);
 	}
 	return 0;		/* succeed */
 failed:
-	/*
-	 * failed to find a new reservation window in the current
-	 * group, remove the current(stale) reservation window
-	 * if there is any
-	 */
-	if (!rsv_is_empty(&my_rsv->rsv_window))
-		rsv_window_remove(sb, my_rsv);
 	return -1;		/* failed */
 }
 
@@ -982,7 +994,7 @@ failed:
 static int
 ext3_try_to_allocate_with_rsv(struct super_block *sb, handle_t *handle,
 			unsigned int group, struct buffer_head *bitmap_bh,
-			int goal, struct ext3_reserve_window_node * my_rsv,
+			int goal, struct reserve_window_node * my_rsv,
 			int *errp)
 {
 	spinlock_t *rsv_lock;
@@ -1041,9 +1053,9 @@ ext3_try_to_allocate_with_rsv(struct super_block *sb, handle_t *handle,
 	 * then we could go to allocate from the reservation window directly.
 	 */
 	while (1) {
-		struct ext3_reserve_window rsv_copy;
+		struct reserve_window rsv_copy;
 		unsigned int seq;
-
+		
 		do {
 			seq = read_seqbegin(&my_rsv->rsv_seqlock);
 			rsv_copy._rsv_start = my_rsv->rsv_start;
@@ -1163,9 +1175,7 @@ int ext3_new_block(handle_t *handle, struct inode *inode,
 	struct ext3_group_desc *gdp;
 	struct ext3_super_block *es;
 	struct ext3_sb_info *sbi;
-	struct ext3_reserve_window_node *my_rsv = NULL;
-	struct ext3_reserve_window_node *rsv = &EXT3_I(inode)->i_rsv_window;
-	unsigned short windowsz = 0;
+	struct reserve_window_node *my_rsv = NULL;
 #ifdef EXT3FS_DEBUG
 	static int goal_hits, goal_attempts;
 #endif
@@ -1191,18 +1201,9 @@ int ext3_new_block(handle_t *handle, struct inode *inode,
 	sbi = EXT3_SB(sb);
 	es = EXT3_SB(sb)->s_es;
 	ext3_debug("goal=%lu.\n", goal);
-	/*
-	 * Allocate a block from reservation only when
-	 * filesystem is mounted with reservation(default,-o reservation), and
-	 * it's a regular file, and
-	 * the desired window size is greater than 0 (One could use ioctl
-	 * command EXT3_IOC_SETRSVSZ to set the window size to 0 to turn off
-	 * reservation on that particular file)
-	 */
-	windowsz = atomic_read(&rsv->rsv_goal_size);
-	if (test_opt(sb, RESERVATION) &&
-		S_ISREG(inode->i_mode) && (windowsz > 0))
-		my_rsv = rsv;
+	if (test_opt(sb, RESERVATION) && S_ISREG(inode->i_mode))
+		my_rsv = &EXT3_I(inode)->i_rsv_window;
+#warning MEF was if (!ext3_has_free_blocks(sbi)) in 1.11-FC2
 	if (!ext3_has_free_blocks(sb)) {
 		*errp = -ENOSPC;
 		goto out;
@@ -1254,12 +1255,7 @@ retry:
 			goto out;
 		}
 		free_blocks = le16_to_cpu(gdp->bg_free_blocks_count);
-		/*
-		 * skip this group if the number of
-		 * free blocks is less than half of the reservation
-		 * window size.
-		 */
-		if (free_blocks <= (windowsz/2))
+		if (free_blocks <= 0)
 			continue;
 
 		brelse(bitmap_bh);

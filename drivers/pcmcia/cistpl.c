@@ -331,14 +331,6 @@ void destroy_cis_cache(struct pcmcia_socket *s)
 		list_del(&cis->node);
 		kfree(cis);
 	}
-
-	/*
-	 * If there was a fake CIS, destroy that as well.
-	 */
-	if (s->fake_cis) {
-		kfree(s->fake_cis);
-		s->fake_cis = NULL;
-	}
 }
 
 /*======================================================================
@@ -384,8 +376,12 @@ int verify_cis_cache(struct pcmcia_socket *s)
     
 ======================================================================*/
 
-int pcmcia_replace_cis(struct pcmcia_socket *s, cisdump_t *cis)
+int pcmcia_replace_cis(client_handle_t handle, cisdump_t *cis)
 {
+    struct pcmcia_socket *s;
+    if (CHECK_HANDLE(handle))
+	return CS_BAD_HANDLE;
+    s = SOCKET(handle);
     if (s->fake_cis != NULL) {
 	kfree(s->fake_cis);
 	s->fake_cis = NULL;
@@ -418,12 +414,14 @@ typedef struct tuple_flags {
 #define MFC_FN(f)	(((tuple_flags *)(&(f)))->mfc_fn)
 #define SPACE(f)	(((tuple_flags *)(&(f)))->space)
 
-int pccard_get_next_tuple(struct pcmcia_socket *s, unsigned int func, tuple_t *tuple);
+int pcmcia_get_next_tuple(client_handle_t handle, tuple_t *tuple);
 
-int pccard_get_first_tuple(struct pcmcia_socket *s, unsigned int function, tuple_t *tuple)
+int pcmcia_get_first_tuple(client_handle_t handle, tuple_t *tuple)
 {
-    if (!s)
+    struct pcmcia_socket *s;
+    if (CHECK_HANDLE(handle))
 	return CS_BAD_HANDLE;
+    s = SOCKET(handle);
     if (!(s->state & SOCKET_PRESENT))
 	return CS_NO_CARD;
     tuple->TupleLink = tuple->Flags = 0;
@@ -445,17 +443,16 @@ int pccard_get_first_tuple(struct pcmcia_socket *s, unsigned int function, tuple
 	!(tuple->Attributes & TUPLE_RETURN_COMMON)) {
 	cisdata_t req = tuple->DesiredTuple;
 	tuple->DesiredTuple = CISTPL_LONGLINK_MFC;
-	if (pccard_get_next_tuple(s, function, tuple) == CS_SUCCESS) {
+	if (pcmcia_get_next_tuple(handle, tuple) == CS_SUCCESS) {
 	    tuple->DesiredTuple = CISTPL_LINKTARGET;
-	    if (pccard_get_next_tuple(s, function, tuple) != CS_SUCCESS)
+	    if (pcmcia_get_next_tuple(handle, tuple) != CS_SUCCESS)
 		return CS_NO_MORE_ITEMS;
 	} else
 	    tuple->CISOffset = tuple->TupleLink = 0;
 	tuple->DesiredTuple = req;
     }
-    return pccard_get_next_tuple(s, function, tuple);
+    return pcmcia_get_next_tuple(handle, tuple);
 }
-EXPORT_SYMBOL(pccard_get_first_tuple);
 
 static int follow_link(struct pcmcia_socket *s, tuple_t *tuple)
 {
@@ -497,13 +494,15 @@ static int follow_link(struct pcmcia_socket *s, tuple_t *tuple)
     return -1;
 }
 
-int pccard_get_next_tuple(struct pcmcia_socket *s, unsigned int function, tuple_t *tuple)
+int pcmcia_get_next_tuple(client_handle_t handle, tuple_t *tuple)
 {
+    struct pcmcia_socket *s;
     u_char link[2], tmp;
     int ofs, i, attr;
-
-    if (!s)
+    
+    if (CHECK_HANDLE(handle))
 	return CS_BAD_HANDLE;
+    s = SOCKET(handle);
     if (!(s->state & SOCKET_PRESENT))
 	return CS_NO_CARD;
 
@@ -555,14 +554,14 @@ int pccard_get_next_tuple(struct pcmcia_socket *s, unsigned int function, tuple_
 	    case CISTPL_LONGLINK_MFC:
 		tuple->LinkOffset = ofs + 3;
 		LINK_SPACE(tuple->Flags) = attr;
-		if (function == BIND_FN_ALL) {
+		if (handle->Function == BIND_FN_ALL) {
 		    /* Follow all the MFC links */
 		    read_cis_cache(s, attr, ofs+2, 1, &tmp);
 		    MFC_FN(tuple->Flags) = tmp;
 		} else {
 		    /* Follow exactly one of the links */
 		    MFC_FN(tuple->Flags) = 1;
-		    tuple->LinkOffset += function * 5;
+		    tuple->LinkOffset += handle->Function * 5;
 		}
 		break;
 	    case CISTPL_NO_LINK:
@@ -590,18 +589,20 @@ int pccard_get_next_tuple(struct pcmcia_socket *s, unsigned int function, tuple_
     tuple->CISOffset = ofs + 2;
     return CS_SUCCESS;
 }
-EXPORT_SYMBOL(pccard_get_next_tuple);
 
 /*====================================================================*/
 
 #define _MIN(a, b)		(((a) < (b)) ? (a) : (b))
 
-int pccard_get_tuple_data(struct pcmcia_socket *s, tuple_t *tuple)
+int pcmcia_get_tuple_data(client_handle_t handle, tuple_t *tuple)
 {
+    struct pcmcia_socket *s;
     u_int len;
-
-    if (!s)
+    
+    if (CHECK_HANDLE(handle))
 	return CS_BAD_HANDLE;
+
+    s = SOCKET(handle);
 
     if (tuple->TupleLink < tuple->TupleOffset)
 	return CS_NO_MORE_ITEMS;
@@ -614,8 +615,6 @@ int pccard_get_tuple_data(struct pcmcia_socket *s, tuple_t *tuple)
 		   _MIN(len, tuple->TupleDataMax), tuple->TupleData);
     return CS_SUCCESS;
 }
-EXPORT_SYMBOL(pccard_get_tuple_data);
-
 
 /*======================================================================
 
@@ -1321,7 +1320,7 @@ static int parse_format(tuple_t *tuple, cistpl_format_t *fmt)
 
 /*====================================================================*/
 
-int pccard_parse_tuple(tuple_t *tuple, cisparse_t *parse)
+int pcmcia_parse_tuple(client_handle_t handle, tuple_t *tuple, cisparse_t *parse)
 {
     int ret = CS_SUCCESS;
     
@@ -1402,7 +1401,6 @@ int pccard_parse_tuple(tuple_t *tuple, cisparse_t *parse)
     }
     return ret;
 }
-EXPORT_SYMBOL(pccard_parse_tuple);
 
 /*======================================================================
 
@@ -1410,7 +1408,7 @@ EXPORT_SYMBOL(pccard_parse_tuple);
     
 ======================================================================*/
 
-int pccard_read_tuple(struct pcmcia_socket *s, unsigned int function, cisdata_t code, void *parse)
+int read_tuple(client_handle_t handle, cisdata_t code, void *parse)
 {
     tuple_t tuple;
     cisdata_t *buf;
@@ -1421,19 +1419,18 @@ int pccard_read_tuple(struct pcmcia_socket *s, unsigned int function, cisdata_t 
 	return CS_OUT_OF_RESOURCE;
     tuple.DesiredTuple = code;
     tuple.Attributes = TUPLE_RETURN_COMMON;
-    ret = pccard_get_first_tuple(s, function, &tuple);
+    ret = pcmcia_get_first_tuple(handle, &tuple);
     if (ret != CS_SUCCESS) goto done;
     tuple.TupleData = buf;
     tuple.TupleOffset = 0;
     tuple.TupleDataMax = 255;
-    ret = pccard_get_tuple_data(s, &tuple);
+    ret = pcmcia_get_tuple_data(handle, &tuple);
     if (ret != CS_SUCCESS) goto done;
-    ret = pccard_parse_tuple(&tuple, parse);
+    ret = pcmcia_parse_tuple(handle, &tuple, parse);
 done:
     kfree(buf);
     return ret;
 }
-EXPORT_SYMBOL(pccard_read_tuple);
 
 /*======================================================================
 
@@ -1445,15 +1442,14 @@ EXPORT_SYMBOL(pccard_read_tuple);
     
 ======================================================================*/
 
-int pccard_validate_cis(struct pcmcia_socket *s, unsigned int function, cisinfo_t *info)
+int pcmcia_validate_cis(client_handle_t handle, cisinfo_t *info)
 {
     tuple_t *tuple;
     cisparse_t *p;
     int ret, reserved, dev_ok = 0, ident_ok = 0;
 
-    if (!s)
+    if (CHECK_HANDLE(handle))
 	return CS_BAD_HANDLE;
-
     tuple = kmalloc(sizeof(*tuple), GFP_KERNEL);
     if (tuple == NULL)
 	return CS_OUT_OF_RESOURCE;
@@ -1466,30 +1462,30 @@ int pccard_validate_cis(struct pcmcia_socket *s, unsigned int function, cisinfo_
     info->Chains = reserved = 0;
     tuple->DesiredTuple = RETURN_FIRST_TUPLE;
     tuple->Attributes = TUPLE_RETURN_COMMON;
-    ret = pccard_get_first_tuple(s, function, tuple);
+    ret = pcmcia_get_first_tuple(handle, tuple);
     if (ret != CS_SUCCESS)
 	goto done;
 
     /* First tuple should be DEVICE; we should really have either that
        or a CFTABLE_ENTRY of some sort */
     if ((tuple->TupleCode == CISTPL_DEVICE) ||
-	(pccard_read_tuple(s, function, CISTPL_CFTABLE_ENTRY, p) == CS_SUCCESS) ||
-	(pccard_read_tuple(s, function, CISTPL_CFTABLE_ENTRY_CB, p) == CS_SUCCESS))
+	(read_tuple(handle, CISTPL_CFTABLE_ENTRY, p) == CS_SUCCESS) ||
+	(read_tuple(handle, CISTPL_CFTABLE_ENTRY_CB, p) == CS_SUCCESS))
 	dev_ok++;
 
     /* All cards should have a MANFID tuple, and/or a VERS_1 or VERS_2
        tuple, for card identification.  Certain old D-Link and Linksys
        cards have only a broken VERS_2 tuple; hence the bogus test. */
-    if ((pccard_read_tuple(s, function, CISTPL_MANFID, p) == CS_SUCCESS) ||
-	(pccard_read_tuple(s, function, CISTPL_VERS_1, p) == CS_SUCCESS) ||
-	(pccard_read_tuple(s, function, CISTPL_VERS_2, p) != CS_NO_MORE_ITEMS))
+    if ((read_tuple(handle, CISTPL_MANFID, p) == CS_SUCCESS) ||
+	(read_tuple(handle, CISTPL_VERS_1, p) == CS_SUCCESS) ||
+	(read_tuple(handle, CISTPL_VERS_2, p) != CS_NO_MORE_ITEMS))
 	ident_ok++;
 
     if (!dev_ok && !ident_ok)
 	goto done;
 
     for (info->Chains = 1; info->Chains < MAX_TUPLES; info->Chains++) {
-	ret = pccard_get_next_tuple(s, function, tuple);
+	ret = pcmcia_get_next_tuple(handle, tuple);
 	if (ret != CS_SUCCESS) break;
 	if (((tuple->TupleCode > 0x23) && (tuple->TupleCode < 0x40)) ||
 	    ((tuple->TupleCode > 0x47) && (tuple->TupleCode < 0x80)) ||
@@ -1505,4 +1501,4 @@ done:
     kfree(p);
     return CS_SUCCESS;
 }
-EXPORT_SYMBOL(pccard_validate_cis);
+

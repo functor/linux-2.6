@@ -32,7 +32,6 @@
 #include <linux/smp_lock.h>
 #include <linux/device.h>
 #include <linux/serial.h> /* for serial_state and serial_icounter_struct */
-#include <linux/delay.h>
 
 #include <asm/irq.h>
 #include <asm/uaccess.h>
@@ -163,6 +162,8 @@ static int uart_startup(struct uart_state *state, int init_hw)
 			return -ENOMEM;
 
 		info->xmit.buf = (unsigned char *) page;
+		info->tmpbuf = info->xmit.buf + UART_XMIT_SIZE;
+		init_MUTEX(&info->tmpbuf_sem);
 		uart_circ_clear(&info->xmit);
 	}
 
@@ -237,6 +238,7 @@ static void uart_shutdown(struct uart_state *state)
 	if (info->xmit.buf) {
 		free_page((unsigned long)info->xmit.buf);
 		info->xmit.buf = NULL;
+		info->tmpbuf = NULL;
 	}
 
 	/*
@@ -448,29 +450,52 @@ __uart_put_char(struct uart_port *port, struct circ_buf *circ, unsigned char c)
 	spin_unlock_irqrestore(&port->lock, flags);
 }
 
-static void uart_put_char(struct tty_struct *tty, unsigned char ch)
+static inline int
+__uart_user_write(struct uart_port *port, struct circ_buf *circ,
+		  const unsigned char __user *buf, int count)
 {
-	struct uart_state *state = tty->driver_data;
-
-	__uart_put_char(state->port, &state->info->xmit, ch);
-}
-
-static void uart_flush_chars(struct tty_struct *tty)
-{
-	uart_start(tty);
-}
-
-static int
-uart_write(struct tty_struct *tty, const unsigned char * buf, int count)
-{
-	struct uart_state *state = tty->driver_data;
-	struct uart_port *port = state->port;
-	struct circ_buf *circ = &state->info->xmit;
 	unsigned long flags;
 	int c, ret = 0;
 
-	if (!circ->buf)
-		return 0;
+	if (down_interruptible(&port->info->tmpbuf_sem))
+		return -EINTR;
+
+	while (1) {
+		int c1;
+		c = CIRC_SPACE_TO_END(circ->head, circ->tail, UART_XMIT_SIZE);
+		if (count < c)
+			c = count;
+		if (c <= 0)
+			break;
+
+		c -= copy_from_user(port->info->tmpbuf, buf, c);
+		if (!c) {
+			if (!ret)
+				ret = -EFAULT;
+			break;
+		}
+		spin_lock_irqsave(&port->lock, flags);
+		c1 = CIRC_SPACE_TO_END(circ->head, circ->tail, UART_XMIT_SIZE);
+		if (c1 < c)
+			c = c1;
+		memcpy(circ->buf + circ->head, port->info->tmpbuf, c);
+		circ->head = (circ->head + c) & (UART_XMIT_SIZE - 1);
+		spin_unlock_irqrestore(&port->lock, flags);
+		buf += c;
+		count -= c;
+		ret += c;
+	}
+	up(&port->info->tmpbuf_sem);
+
+	return ret;
+}
+
+static inline int
+__uart_kern_write(struct uart_port *port, struct circ_buf *circ,
+		  const unsigned char *buf, int count)
+{
+	unsigned long flags;
+	int c, ret = 0;
 
 	spin_lock_irqsave(&port->lock, flags);
 	while (1) {
@@ -486,6 +511,38 @@ uart_write(struct tty_struct *tty, const unsigned char * buf, int count)
 		ret += c;
 	}
 	spin_unlock_irqrestore(&port->lock, flags);
+
+	return ret;
+}
+
+static void uart_put_char(struct tty_struct *tty, unsigned char ch)
+{
+	struct uart_state *state = tty->driver_data;
+
+	__uart_put_char(state->port, &state->info->xmit, ch);
+}
+
+static void uart_flush_chars(struct tty_struct *tty)
+{
+	uart_start(tty);
+}
+
+static int
+uart_write(struct tty_struct *tty, int from_user, const unsigned char * buf,
+	   int count)
+{
+	struct uart_state *state = tty->driver_data;
+	int ret;
+
+	if (!state->info->xmit.buf)
+		return 0;
+
+	if (from_user)
+		ret = __uart_user_write(state->port, &state->info->xmit,
+				(const unsigned char __user *)buf, count);
+	else
+		ret = __uart_kern_write(state->port, &state->info->xmit,
+					buf, count);
 
 	uart_start(tty);
 	return ret;
@@ -584,10 +641,8 @@ static int uart_get_info(struct uart_state *state,
 	tmp.flags	    = port->flags;
 	tmp.xmit_fifo_size  = port->fifosize;
 	tmp.baud_base	    = port->uartclk / 16;
-	tmp.close_delay	    = state->close_delay / 10;
-	tmp.closing_wait    = state->closing_wait == USF_CLOSING_WAIT_NONE ?
-				ASYNC_CLOSING_WAIT_NONE :
-			        state->closing_wait / 10;
+	tmp.close_delay	    = state->close_delay;
+	tmp.closing_wait    = state->closing_wait;
 	tmp.custom_divisor  = port->custom_divisor;
 	tmp.hub6	    = port->hub6;
 	tmp.io_type         = port->iotype;
@@ -605,8 +660,8 @@ static int uart_set_info(struct uart_state *state,
 	struct serial_struct new_serial;
 	struct uart_port *port = state->port;
 	unsigned long new_port;
-	unsigned int change_irq, change_port, old_flags, closing_wait;
-	unsigned int old_custom_divisor, close_delay;
+	unsigned int change_irq, change_port, old_flags;
+	unsigned int old_custom_divisor;
 	int retval = 0;
 
 	if (copy_from_user(&new_serial, newinfo, sizeof(new_serial)))
@@ -617,9 +672,6 @@ static int uart_set_info(struct uart_state *state,
 		new_port += (unsigned long) new_serial.port_high << HIGH_BITS_OFFSET;
 
 	new_serial.irq = irq_canonicalize(new_serial.irq);
-	close_delay = new_serial.close_delay * 10;
-	closing_wait = new_serial.closing_wait == ASYNC_CLOSING_WAIT_NONE ?
-			USF_CLOSING_WAIT_NONE : new_serial.closing_wait * 10;
 
 	/*
 	 * This semaphore protects state->count.  It is also
@@ -651,8 +703,8 @@ static int uart_set_info(struct uart_state *state,
 		retval = -EPERM;
 		if (change_irq || change_port ||
 		    (new_serial.baud_base != port->uartclk / 16) ||
-		    (close_delay != state->close_delay) ||
-		    (closing_wait != state->closing_wait) ||
+		    (new_serial.close_delay != state->close_delay) ||
+		    (new_serial.closing_wait != state->closing_wait) ||
 		    (new_serial.xmit_fifo_size != port->fifosize) ||
 		    (((new_serial.flags ^ old_flags) & ~UPF_USR_MASK) != 0))
 			goto exit;
@@ -756,8 +808,8 @@ static int uart_set_info(struct uart_state *state,
 	port->flags            = (port->flags & ~UPF_CHANGE_MASK) |
 				 (new_serial.flags & UPF_CHANGE_MASK);
 	port->custom_divisor   = new_serial.custom_divisor;
-	state->close_delay     = close_delay;
-	state->closing_wait    = closing_wait;
+	state->close_delay     = new_serial.close_delay * HZ / 100;
+	state->closing_wait    = new_serial.closing_wait * HZ / 100;
 	port->fifosize         = new_serial.xmit_fifo_size;
 	if (state->info->tty)
 		state->info->tty->low_latency =
@@ -1196,7 +1248,7 @@ static void uart_close(struct tty_struct *tty, struct file *filp)
 	tty->closing = 1;
 
 	if (state->closing_wait != USF_CLOSING_WAIT_NONE)
-		tty_wait_until_sent(tty, msecs_to_jiffies(state->closing_wait));
+		tty_wait_until_sent(tty, state->closing_wait);
 
 	/*
 	 * At this point, we stop accepting input.  To do this, we
@@ -1224,8 +1276,10 @@ static void uart_close(struct tty_struct *tty, struct file *filp)
 	state->info->tty = NULL;
 
 	if (state->info->blocked_open) {
-		if (state->close_delay)
-			msleep_interruptible(state->close_delay);
+		if (state->close_delay) {
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(state->close_delay);
+		}
 	} else if (!uart_console(port)) {
 		uart_change_pm(state, 3);
 	}
@@ -1289,7 +1343,8 @@ static void uart_wait_until_sent(struct tty_struct *tty, int timeout)
 	 * we wait.
 	 */
 	while (!port->ops->tx_empty(port)) {
-		msleep_interruptible(jiffies_to_msecs(char_time));
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(char_time);
 		if (signal_pending(current))
 			break;
 		if (time_after(jiffies, expire))
@@ -1846,8 +1901,10 @@ int uart_suspend_port(struct uart_driver *drv, struct uart_port *port)
 		 * Wait for the transmitter to empty.
 		 */
 		while (!ops->tx_empty(port)) {
-			msleep(10);
+			set_current_state(TASK_UNINTERRUPTIBLE);
+			schedule_timeout(10*HZ/1000);
 		}
+		set_current_state(TASK_RUNNING);
 
 		ops->shutdown(port);
 	}
@@ -2086,8 +2143,8 @@ int uart_register_driver(struct uart_driver *drv)
 	for (i = 0; i < drv->nr; i++) {
 		struct uart_state *state = drv->state + i;
 
-		state->close_delay     = 500;	/* .5 seconds */
-		state->closing_wait    = 30000;	/* 30 seconds */
+		state->close_delay     = 5 * HZ / 10;
+		state->closing_wait    = 30 * HZ;
 
 		init_MUTEX(&state->sem);
 	}
@@ -2167,15 +2224,6 @@ int uart_add_one_port(struct uart_driver *drv, struct uart_port *port)
 	 * setserial to be used to alter this ports parameters.
 	 */
 	tty_register_device(drv->tty_driver, port->line, port->dev);
-
-	/*
-	 * If this driver supports console, and it hasn't been
-	 * successfully registered yet, try to re-register it.
-	 * It may be that the port was not available.
-	 */
-	if (port->type != PORT_UNKNOWN &&
-	    port->cons && !(port->cons->flags & CON_ENABLED))
-		register_console(port->cons);
 
  out:
 	up(&port_sem);

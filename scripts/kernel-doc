@@ -105,7 +105,10 @@ use strict;
 # enums and typedefs. Instead of the function name you must write the name 
 # of the declaration;  the struct/union/enum/typedef must always precede 
 # the name. Nesting of declarations is not supported. 
-# Use the argument mechanism to document members or constants.
+# Use the argument mechanism to document members or constants. In 
+# structs and unions you must declare one member per declaration 
+# (comma-separated members are not allowed -  the parser does not support 
+# this).
 # e.g.
 # /**
 #  * struct my_struct - short description
@@ -452,14 +455,7 @@ sub output_struct_html(%) {
     print "<h2>".$args{'type'}." ".$args{'struct'}."</h2>\n";
     print "<b>".$args{'type'}." ".$args{'struct'}."</b> {<br>\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-	if ($parameter =~ /^#/) {
-		print "$parameter<br>\n";
-		next;
-	}
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
-        ($args{'parameterdescs'}{$parameter_name} ne $undescribed) || next;
+        ($args{'parameterdescs'}{$parameter} ne $undescribed) || next;
 	$type = $args{'parametertypes'}{$parameter};
 	if ($type =~ m/([^\(]*\(\*)\s*\)\s*\(([^\)]*)\)/) {
 	    # pointer-to-function
@@ -475,15 +471,10 @@ sub output_struct_html(%) {
     print "<h3>Members</h3>\n";
     print "<dl>\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-	($parameter =~ /^#/) && next;
-
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
-        ($args{'parameterdescs'}{$parameter_name} ne $undescribed) || next;
+        ($args{'parameterdescs'}{$parameter} ne $undescribed) || next;
 	print "<dt><b>".$parameter."</b>\n";
 	print "<dd>";
-	output_highlight($args{'parameterdescs'}{$parameter_name});
+	output_highlight($args{'parameterdescs'}{$parameter});
     }
     print "</dl>\n";
     output_section_html(@_);
@@ -519,13 +510,10 @@ sub output_function_html(%) {
     print "<h3>Arguments</h3>\n";
     print "<dl>\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
-        ($args{'parameterdescs'}{$parameter_name} ne $undescribed) || next;
+        ($args{'parameterdescs'}{$parameter} ne $undescribed) || next;
 	print "<dt><b>".$parameter."</b>\n";
 	print "<dd>";
-	output_highlight($args{'parameterdescs'}{$parameter_name});
+	output_highlight($args{'parameterdescs'}{$parameter});
     }
     print "</dl>\n";
     output_section_html(@_);
@@ -617,13 +605,10 @@ sub output_function_sgml(%) {
     if ($#{$args{'parameterlist'}} >= 0) {
 	print " <variablelist>\n";
 	foreach $parameter (@{$args{'parameterlist'}}) {
-	    my $parameter_name = $parameter;
-	    $parameter_name =~ s/\[.*//;
-
 	    print "  <varlistentry>\n   <term><parameter>$parameter</parameter></term>\n";
 	    print "   <listitem>\n    <para>\n";
 	    $lineprefix="     ";
-	    output_highlight($args{'parameterdescs'}{$parameter_name});
+	    output_highlight($args{'parameterdescs'}{$parameter});
 	    print "    </para>\n   </listitem>\n  </varlistentry>\n";
 	}
 	print " </variablelist>\n";
@@ -662,16 +647,8 @@ sub output_struct_sgml(%) {
     print "  <programlisting>\n";
     print $args{'type'}." ".$args{'struct'}." {\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-	if ($parameter =~ /^#/) {
-	    print "$parameter\n";
-	    next;
-	}
-
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
-	defined($args{'parameterdescs'}{$parameter_name}) || next;
-        ($args{'parameterdescs'}{$parameter_name} ne $undescribed) || next;
+	defined($args{'parameterdescs'}{$parameter}) || next;
+        ($args{'parameterdescs'}{$parameter} ne $undescribed) || next;
 	$type = $args{'parametertypes'}{$parameter};
 	if ($type =~ m/([^\(]*\(\*)\s*\)\s*\(([^\)]*)\)/) {
 	    # pointer-to-function
@@ -691,17 +668,12 @@ sub output_struct_sgml(%) {
 
     print "  <variablelist>\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-      ($parameter =~ /^#/) && next;
-
-      my $parameter_name = $parameter;
-      $parameter_name =~ s/\[.*//;
-
-      defined($args{'parameterdescs'}{$parameter_name}) || next;
-      ($args{'parameterdescs'}{$parameter_name} ne $undescribed) || next;
+      defined($args{'parameterdescs'}{$parameter}) || next;
+      ($args{'parameterdescs'}{$parameter} ne $undescribed) || next;
       print "    <varlistentry>";
       print "      <term>$parameter</term>\n";
       print "      <listitem><para>\n";
-      output_highlight($args{'parameterdescs'}{$parameter_name});
+      output_highlight($args{'parameterdescs'}{$parameter});
       print "      </para></listitem>\n";
       print "    </varlistentry>\n";
     }
@@ -756,13 +728,10 @@ sub output_enum_sgml(%) {
     print " <title>Constants</title>\n";    
     print "  <variablelist>\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-      my $parameter_name = $parameter;
-      $parameter_name =~ s/\[.*//;
-
       print "    <varlistentry>";
       print "      <term>$parameter</term>\n";
       print "      <listitem><para>\n";
-      output_highlight($args{'parameterdescs'}{$parameter_name});
+      output_highlight($args{'parameterdescs'}{$parameter});
       print "      </para></listitem>\n";
       print "    </varlistentry>\n";
     }
@@ -873,13 +842,10 @@ sub output_function_gnome {
 	print "<colspec colwidth=\"8*\">\n";
 	print "<tbody>\n";
 	foreach $parameter (@{$args{'parameterlist'}}) {
-	    my $parameter_name = $parameter;
-	    $parameter_name =~ s/\[.*//;
-
 	    print "  <row><entry align=\"right\"><parameter>$parameter</parameter></entry>\n";
 	    print "   <entry>\n";
 	    $lineprefix="     ";
-	    output_highlight($args{'parameterdescs'}{$parameter_name});
+	    output_highlight($args{'parameterdescs'}{$parameter});
 	    print "    </entry></row>\n";
 	}
 	print " </tbody></tgroup></informaltable>\n";
@@ -943,11 +909,8 @@ sub output_function_man(%) {
 
     print ".SH ARGUMENTS\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
 	print ".IP \"".$parameter."\" 12\n";
-	output_highlight($args{'parameterdescs'}{$parameter_name});
+	output_highlight($args{'parameterdescs'}{$parameter});
     }
     foreach $section (@{$args{'sectionlist'}}) {
 	print ".SH \"", uc $section, "\"\n";
@@ -984,11 +947,8 @@ sub output_enum_man(%) {
 
     print ".SH Constants\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
 	print ".IP \"".$parameter."\" 12\n";
-	output_highlight($args{'parameterdescs'}{$parameter_name});
+	output_highlight($args{'parameterdescs'}{$parameter});
     }
     foreach $section (@{$args{'sectionlist'}}) {
 	print ".SH \"$section\"\n";
@@ -1008,17 +968,11 @@ sub output_struct_man(%) {
     print $args{'type'}." ".$args{'struct'}." \\- ".$args{'purpose'}."\n";
 
     print ".SH SYNOPSIS\n";
-    print $args{'type'}." ".$args{'struct'}." {\n.br\n";
+    print $args{'type'}." ".$args{'struct'}." {\n";
 
     foreach my $parameter (@{$args{'parameterlist'}}) {
-	if ($parameter =~ /^#/) {
-	    print ".BI \"$parameter\"\n.br\n";
-	    next;
-	}
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
-        ($args{'parameterdescs'}{$parameter_name} ne $undescribed) || next;
+        ($args{'parameterdescs'}{$parameter} ne $undescribed) || next;
+	print "\n.br\n";
 	$type = $args{'parametertypes'}{$parameter};
 	if ($type =~ m/([^\(]*\(\*)\s*\)\s*\(([^\)]*)\)/) {
 	    # pointer-to-function
@@ -1035,14 +989,9 @@ sub output_struct_man(%) {
 
     print ".SH Arguments\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-	($parameter =~ /^#/) && next;
-
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
-        ($args{'parameterdescs'}{$parameter_name} ne $undescribed) || next;
+        ($args{'parameterdescs'}{$parameter} ne $undescribed) || next;
 	print ".IP \"".$parameter."\" 12\n";
-	output_highlight($args{'parameterdescs'}{$parameter_name});
+	output_highlight($args{'parameterdescs'}{$parameter});
     }
     foreach $section (@{$args{'sectionlist'}}) {
 	print ".SH \"$section\"\n";
@@ -1109,10 +1058,7 @@ sub output_function_text(%) {
 
     print "Arguments:\n\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
-	print $parameter."\n\t".$args{'parameterdescs'}{$parameter_name}."\n";
+	print $parameter."\n\t".$args{'parameterdescs'}{$parameter}."\n";
     }
     output_section_text(@_);
 }
@@ -1177,15 +1123,7 @@ sub output_struct_text(%) {
     print $args{'type'}." ".$args{'struct'}.":\n\n";
     print $args{'type'}." ".$args{'struct'}." {\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-	if ($parameter =~ /^#/) {
-	    print "$parameter\n";
-	    next;
-	}
-
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
-        ($args{'parameterdescs'}{$parameter_name} ne $undescribed) || next;
+        ($args{'parameterdescs'}{$parameter} ne $undescribed) || next;
 	$type = $args{'parametertypes'}{$parameter};
 	if ($type =~ m/([^\(]*\(\*)\s*\)\s*\(([^\)]*)\)/) {
 	    # pointer-to-function
@@ -1200,14 +1138,9 @@ sub output_struct_text(%) {
 
     print "Members:\n\n";
     foreach $parameter (@{$args{'parameterlist'}}) {
-	($parameter =~ /^#/) && next;
-
-	my $parameter_name = $parameter;
-	$parameter_name =~ s/\[.*//;
-
-        ($args{'parameterdescs'}{$parameter_name} ne $undescribed) || next;
+        ($args{'parameterdescs'}{$parameter} ne $undescribed) || next;
 	print "$parameter\n\t";
-	print $args{'parameterdescs'}{$parameter_name}."\n";
+	print $args{'parameterdescs'}{$parameter}."\n";
     }
     print "\n";
     output_section_text(@_);
@@ -1378,57 +1311,33 @@ sub create_parameterlist($$$) {
 	$arg =~ s/\s*$//;
 	$arg =~ s/\s+/ /;
 
-	if ($arg =~ /^#/) {
-	    # Treat preprocessor directive as a typeless variable just to fill
-	    # corresponding data structures "correctly". Catch it later in
-	    # output_* subs.
-	    push_parameter($arg, "", $file);
-	} elsif ($arg =~ m/\(/) {
+	if ($arg =~ m/\(/) {
 	    # pointer-to-function
 	    $arg =~ tr/#/,/;
 	    $arg =~ m/[^\(]+\(\*([^\)]+)\)/;
 	    $param = $1;
 	    $type = $arg;
 	    $type =~ s/([^\(]+\(\*)$param/$1/;
-	    push_parameter($param, $type, $file);
 	} else {
-	    $arg =~ s/\s*:\s*/:/g;
-	    $arg =~ s/\s*\[/\[/g;
-
-	    my @args = split('\s*,\s*', $arg);
-	    if ($args[0] =~ m/\*/) {
-		$args[0] =~ s/(\*+)\s*/ $1/;
+	    # evil magic to get fixed array parameters to work
+	    $arg =~ s/(.+\s+)(.+)\[.*/$1* $2/;
+	    my @args = split('\s', $arg);
+	
+	    $param = pop @args;
+	    if ($param =~ m/^(\*+)(.*)/) {
+	        $param = $2;
+		push @args, $1;
+	    } 
+	    elsif ($param =~ m/(.*?)\s*:\s*(\d+)/) {
+	        $param = $1;
+	        push @args, ":$2";
 	    }
-	    my @first_arg = split('\s+', shift @args);
-	    unshift(@args, pop @first_arg);
-	    $type = join " ", @first_arg;
-
-	    foreach $param (@args) {
-		if ($param =~ m/^(\*+)\s*(.*)/) {
-		    push_parameter($2, "$type $1", $file);
-		}
-		elsif ($param =~ m/(.*?):(\d+)/) {
-		    push_parameter($1, "$type:$2", $file)
-		}
-		else {
-		    push_parameter($param, $type, $file);
-		}
-	    }
+	    $type = join " ", @args;
 	}
-    }
-}
-
-sub push_parameter($$$) {
-	my $param = shift;
-	my $type = shift;
-	my $file = shift;
-
-	my $param_name = $param;
-	$param_name =~ s/\[.*//;
 
 	if ($type eq "" && $param eq "...")
 	{
-	    $type="";
+	    $type="...";
 	    $param="...";
 	    $parameterdescs{"..."} = "variable arguments";
 	}
@@ -1438,8 +1347,8 @@ sub push_parameter($$$) {
 	    $param="void";
 	    $parameterdescs{void} = "no arguments";
 	}
-	if (defined $type && $type && !defined $parameterdescs{$param_name}) {
-	    $parameterdescs{$param_name} = $undescribed;
+	if (defined $type && $type && !defined $parameterdescs{$param}) {
+	    $parameterdescs{$param} = $undescribed;
 
 	    if (($type eq 'function') || ($type eq 'enum')) {
 	        print STDERR "Warning(${file}:$.): Function parameter ".
@@ -1453,6 +1362,7 @@ sub push_parameter($$$) {
 
 	push @parameterlist, $param;
 	$parametertypes{$param} = $type;
+    }
 }
 
 ##
@@ -1601,10 +1511,6 @@ sub process_state3_type($$) {
     $x =~ s@[\r\n]+@ @gos; # strip newlines/cr's.
     $x =~ s@^\s+@@gos; # strip leading spaces
     $x =~ s@\s+$@@gos; # strip trailing spaces
-    if ($x =~ /^#/) {
-	# To distinguish preprocessor directive from regular declaration later.
-	$x .= ";";
-    }
 
     while (1) {
         if ( $x =~ /([^{};]*)([{};])(.*)/ ) {
@@ -1625,7 +1531,7 @@ sub process_state3_type($$) {
 }
 
 sub process_file($) {
-    my ($file) = "$ENV{'SRCTREE'}@_";
+    my ($file) = @_;
     my $identifier;
     my $func;
     my $initial_section_counter = $section_counter;

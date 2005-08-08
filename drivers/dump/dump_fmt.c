@@ -305,7 +305,7 @@ int dump_lcrash_add_data(unsigned long loc, unsigned long len)
 	buf += sizeof(struct __dump_page);
 
 	while (len) {
-		addr = kmap_atomic(page, KM_CRASHDUMP);
+		addr = kmap_atomic(page, KM_DUMP);
 		size = bytes = (len > PAGE_SIZE) ? PAGE_SIZE : len;	
 		/* check for compression */
 		if (dump_allow_compress(page, bytes)) {
@@ -321,7 +321,7 @@ int dump_lcrash_add_data(unsigned long loc, unsigned long len)
 			size = bytes;
 		}
 		/* memset(buf, 'A', size); temporary: testing only !! */
-		kunmap_atomic(addr, KM_CRASHDUMP);
+		kunmap_atomic(addr, KM_DUMP);
 		dp->dp_size += size;
 		buf += size;
 		len -= bytes;

@@ -14,7 +14,6 @@
 #include <linux/mm.h>
 #include <asm/mach/arch.h>
 #include <asm/thread_info.h>
-#include <asm/memory.h>
 
 /*
  * Make sure that the compiler and target are compatible.
@@ -73,7 +72,6 @@ int main(void)
   DEFINE(VM_EXEC,	       	VM_EXEC);
   BLANK();
   DEFINE(PAGE_SZ,	       	PAGE_SIZE);
-  DEFINE(VIRT_OFFSET,	       	PAGE_OFFSET);
   BLANK();
   DEFINE(SYS_ERROR0,		0x9f0000);
   BLANK();

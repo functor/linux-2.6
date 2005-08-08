@@ -14,9 +14,9 @@
 #include <linux/fcntl.h>
 #include <linux/quotaops.h>
 #include <linux/security.h>
+#include <linux/vs_base.h>
 #include <linux/proc_fs.h>
 #include <linux/devpts_fs.h>
-#include <linux/vserver/debug.h>
 
 /* Taken over from the old code... */
 
@@ -64,19 +64,22 @@ int inode_change_ok(struct inode *inode, struct iattr *attr)
 		goto fine;
 
 	if (IS_BARRIER(inode)) {
-		vxwprintk(1, "xid=%d messing with the barrier.",
+		printk(KERN_WARNING
+			"VSW: xid=%d messing with the barrier.\n",
 			vx_current_xid());
 		goto error;
 	}
 	switch (inode->i_sb->s_magic) {
 		case PROC_SUPER_MAGIC:
-			vxwprintk(1, "xid=%d messing with the procfs.",
+			printk(KERN_WARNING
+				"VSW: xid=%d messing with the procfs.\n",
 				vx_current_xid());
 			goto error;
 		case DEVPTS_SUPER_MAGIC:
 			if (vx_check(inode->i_xid, VX_IDENT))
 				goto fine;
-			vxwprintk(1, "xid=%d messing with the devpts.",
+			printk(KERN_WARNING
+				"VSW: xid=%d messing with the devpts.\n",
 				vx_current_xid());
 			goto error;
 	}

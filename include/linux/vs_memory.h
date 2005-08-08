@@ -1,7 +1,11 @@
 #ifndef _VX_VS_MEMORY_H
 #define _VX_VS_MEMORY_H
 
+#include <linux/kernel.h>
+#include <linux/rcupdate.h>
+#include <linux/sched.h>
 
+#include "vserver/context.h"
 #include "vserver/limit.h"
 #include "vserver/debug.h"
 

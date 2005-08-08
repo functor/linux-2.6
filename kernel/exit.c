@@ -14,7 +14,6 @@
 #include <linux/personality.h>
 #include <linux/tty.h>
 #include <linux/namespace.h>
-#include <linux/key.h>
 #include <linux/security.h>
 #include <linux/cpu.h>
 #include <linux/acct.h>
@@ -25,11 +24,10 @@
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
 #include <linux/mempolicy.h>
-#include <linux/ckrm_events.h>
+#include <linux/ckrm.h>
 #include <linux/ckrm_tsk.h>
-#include <linux/ckrm_mem_inline.h>
-#include <linux/syscalls.h>
 #include <linux/vs_limit.h>
+#include <linux/ckrm_mem.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -103,7 +101,7 @@ repeat:
 	sched_exit(p);
 	write_unlock_irq(&tasklist_lock);
 	spin_unlock(&p->proc_lock);
-	proc_pid_flush(proc_dentry);
+	dput(proc_dentry);
 	release_thread(p);
 	put_task_struct(p);
 
@@ -249,11 +247,11 @@ void reparent_to_init(void)
 	/* rt_priority? */
 	/* signals? */
 	security_task_reparent_to_init(current);
-	memcpy(current->signal->rlim, init_task.signal->rlim,
-	       sizeof(current->signal->rlim));
+	memcpy(current->rlim, init_task.rlim, sizeof(*(current->rlim)));
 	atomic_inc(&(INIT_USER->__count));
-	write_unlock_irq(&tasklist_lock);
 	switch_uid(INIT_USER);
+
+	write_unlock_irq(&tasklist_lock);
 }
 
 void __set_special_pids(pid_t session, pid_t pgrp)
@@ -342,9 +340,7 @@ void daemonize(const char *name, ...)
 	exit_mm(current);
 
 	set_special_pids(1, 1);
-	down(&tty_sem);
 	current->signal->tty = NULL;
-	up(&tty_sem);
 
 	/* Block and flush all signals */
 	sigfillset(&blocked);
@@ -380,9 +376,11 @@ static inline void close_files(struct files_struct * files)
 		while (set) {
 			if (set & 1) {
 				struct file * file = xchg(&files->fd[i], NULL);
-				if (file) 
+				if (file) {
 					filp_close(file, files);
-				// vx_openfd_dec(i);
+					cond_resched();
+				}
+				// vx_openfd_dec(fd);
 			}
 			i++;
 			set >>= 1;
@@ -514,7 +512,12 @@ static inline void __exit_mm(struct task_struct * tsk)
 	task_lock(tsk);
 	tsk->mm = NULL;
 	up_read(&mm->mmap_sem);
-	ckrm_task_clear_mm(tsk, mm);
+#ifdef CONFIG_CKRM_RES_MEM
+	spin_lock(&mm->peertask_lock);
+	list_del_init(&tsk->mm_peers);
+	ckrm_mem_evaluate_mm(mm);
+	spin_unlock(&mm->peertask_lock);
+#endif
 	enter_lazy_tlb(mm, current);
 	task_unlock(tsk);
 	mmput(mm);
@@ -574,7 +577,7 @@ static inline void reparent_thread(task_t *p, task_t *father, int traced)
 			 * a normal stop since it's no longer being
 			 * traced.
 			 */
-			ptrace_untrace(p);
+			p->state = TASK_STOPPED;
 		}
 	}
 
@@ -607,7 +610,6 @@ static inline void forget_original_parent(struct task_struct * father,
 	struct task_struct *p, *reaper = father;
 	struct list_head *_p, *_n;
 
-	/* FIXME handle vchild_reaper/initpid */
 	do {
 		reaper = next_thread(reaper);
 		if (reaper == father) {
@@ -777,6 +779,7 @@ static void exit_notify(struct task_struct *tsk)
 	 */
 	tsk->it_virt_value = 0;
 	tsk->it_prof_value = 0;
+	tsk->rlim[RLIMIT_CPU].rlim_cur = RLIM_INFINITY;
 
 	write_unlock_irq(&tasklist_lock);
 
@@ -795,10 +798,9 @@ static void exit_notify(struct task_struct *tsk)
 	tsk->flags |= PF_DEAD;
 }
 
-fastcall NORET_TYPE void do_exit(long code)
+asmlinkage NORET_TYPE void do_exit(long code)
 {
 	struct task_struct *tsk = current;
-	int group_dead;
 
 	profile_task_exit(tsk);
 
@@ -823,9 +825,7 @@ fastcall NORET_TYPE void do_exit(long code)
 		ptrace_notify((PTRACE_EVENT_EXIT << 8) | SIGTRAP);
 	}
 
-	group_dead = atomic_dec_and_test(&tsk->signal->live);
-	if (group_dead)
-		acct_process(code);
+	acct_process(code);
 	if (current->tux_info) {
 #ifdef CONFIG_TUX_DEBUG
 		printk("Possibly unexpected TUX-thread exit(%ld) at %p?\n",
@@ -840,9 +840,8 @@ fastcall NORET_TYPE void do_exit(long code)
 	__exit_fs(tsk);
 	exit_namespace(tsk);
 	exit_thread();
-	exit_keys(tsk);
 
-	if (group_dead && tsk->signal->leader)
+	if (tsk->signal->leader)
 		disassociate_ctty(1);
 
 	module_put(tsk->thread_info->exec_domain->module);
@@ -1321,8 +1320,6 @@ static inline int my_ptrace_child(struct task_struct *p)
 {
 	if (!(p->ptrace & PT_PTRACED))
 		return 0;
-	if (!(p->ptrace & PT_ATTACHED))
-		return 1;
 	/*
 	 * This child was PTRACE_ATTACH'd.  We should be seeing it only if
 	 * we are the attacher.  If we are the real parent, this is a race

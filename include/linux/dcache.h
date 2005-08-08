@@ -28,7 +28,7 @@ struct vfsmount;
  * "quick string" -- eases parameter passing, but more importantly
  * saves "metadata" about the string (ie length and the hash).
  *
- * hash comes first so it snuggles against d_parent in the
+ * hash comes first so it snuggles against d_parent and d_bucket in the
  * dentry.
  */
 struct qstr {
@@ -91,6 +91,7 @@ struct dentry {
 	 * so they all fit in a 16-byte range, with 16-byte alignment.
 	 */
 	struct dentry *d_parent;	/* parent directory */
+	struct hlist_head *d_bucket;	/* lookup hash bucket */
 	struct qstr d_name;
 
 	struct list_head d_lru;		/* LRU list */

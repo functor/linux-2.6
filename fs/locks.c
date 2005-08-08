@@ -122,7 +122,6 @@
 #include <linux/security.h>
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
-#include <linux/syscalls.h>
 #include <linux/time.h>
 
 #include <asm/semaphore.h>
@@ -173,12 +172,7 @@ static inline void locks_free_lock(struct file_lock *fl)
 			fl->fl_ops->fl_release_private(fl);
 		fl->fl_ops = NULL;
 	}
-
-	if (fl->fl_lmops) {
-		if (fl->fl_lmops->fl_release_private)
-			fl->fl_lmops->fl_release_private(fl);
-		fl->fl_lmops = NULL;
-	}
+	fl->fl_lmops = NULL;
 
 	kmem_cache_free(filelock_cache, fl);
 }
@@ -233,8 +227,6 @@ void locks_copy_lock(struct file_lock *new, struct file_lock *fl)
 	new->fl_lmops = fl->fl_lmops;
 	if (fl->fl_ops && fl->fl_ops->fl_copy_lock)
 		fl->fl_ops->fl_copy_lock(new, fl);
-	if (fl->fl_lmops && fl->fl_lmops->fl_copy_lock)
-		fl->fl_lmops->fl_copy_lock(new, fl);
 }
 
 EXPORT_SYMBOL(locks_copy_lock);
@@ -391,31 +383,13 @@ static int flock64_to_posix_lock(struct file *filp, struct file_lock *fl,
 }
 #endif
 
-/* default lease lock manager operations */
-static void lease_break_callback(struct file_lock *fl)
+/* Allocate a file_lock initialised to this type of lease */
+static int lease_alloc(struct file *filp, int type, struct file_lock **flp)
 {
-	kill_fasync(&fl->fl_fasync, SIGIO, POLL_MSG);
-}
+	struct file_lock *fl = locks_alloc_lock();
+	if (fl == NULL)
+		return -ENOMEM;
 
-static void lease_release_private_callback(struct file_lock *fl)
-{
-	if (!fl->fl_file)
-		return;
-
-	f_delown(fl->fl_file);
-	fl->fl_file->f_owner.signum = 0;
-}
-
-struct lock_manager_operations lease_manager_ops = {
-	.fl_break = lease_break_callback,
-	.fl_release_private = lease_release_private_callback,
-};
-
-/*
- * Initialize a lease, use the default lock manager operations
- */
-static int lease_init(struct file *filp, int type, struct file_lock *fl)
- {
 	fl->fl_owner = current->files;
 	fl->fl_pid = current->tgid;
 
@@ -428,22 +402,8 @@ static int lease_init(struct file *filp, int type, struct file_lock *fl)
 	fl->fl_start = 0;
 	fl->fl_end = OFFSET_MAX;
 	fl->fl_ops = NULL;
-	fl->fl_lmops = &lease_manager_ops;
-	return 0;
-}
+	fl->fl_lmops = NULL;
 
-/* Allocate a file_lock initialised to this type of lease */
-static int lease_alloc(struct file *filp, int type, struct file_lock **flp)
-{
-	struct file_lock *fl = locks_alloc_lock();
-	int error;
-
-	if (fl == NULL)
-		return -ENOMEM;
-
-	error = lease_init(filp, type, fl);
-	if (error)
-		return error;
 	*flp = fl;
 	return 0;
 }
@@ -1066,8 +1026,13 @@ static int lease_modify(struct file_lock **before, int arg)
 	if (error)
 		return error;
 	locks_wake_up_blocks(fl);
-	if (arg == F_UNLCK)
+	if (arg == F_UNLCK) {
+		struct file *filp = fl->fl_file;
+
+		f_delown(filp);
+		filp->f_owner.signum = 0;
 		locks_delete_lock(before);
+	}
 	return 0;
 }
 
@@ -1089,26 +1054,6 @@ static void time_out_leases(struct inode *inode)
 			before = &fl->fl_next;
 	}
 }
-
- /**
-*	remove_lease - let time_out_leases remove the lease.
-*	@@file_lock: the lease to remove
-*/
-void remove_lease(struct file_lock *fl)
-{
-	if (!IS_LEASE(fl))
-		return;
-
-	lock_kernel();
-
-	fl->fl_type = F_UNLCK | F_INPROGRESS;
-	fl->fl_break_time = jiffies - 10;
-	time_out_leases(fl->fl_file->f_dentry->d_inode);
-
-	unlock_kernel();
-}
-
-EXPORT_SYMBOL(remove_lease);
 
 /**
  *	__break_lease	-	revoke all outstanding leases on file
@@ -1174,10 +1119,7 @@ int __break_lease(struct inode *inode, unsigned int mode)
 		if (fl->fl_type != future) {
 			fl->fl_type = future;
 			fl->fl_break_time = break_time;
-			if (fl->fl_lmops && fl->fl_lmops->fl_break)
-				fl->fl_lmops->fl_break(fl);
-			else    /* lease must have lmops break callback */
-				BUG();
+			kill_fasync(&fl->fl_fasync, SIGIO, POLL_MSG);
 		}
 	}
 
@@ -1277,36 +1219,45 @@ int fcntl_getlease(struct file *filp)
 }
 
 /**
- *	__setlease	-	sets a lease on an open file
+ *	fcntl_setlease	-	sets a lease on an open file
+ *	@fd: open file descriptor
  *	@filp: file pointer
  *	@arg: type of lease to obtain
- *	@flp: input - file_lock to use, output - file_lock inserted
  *
- *	The (input) flp->fl_lmops->fl_break function is required
- *	by break_lease().
- *
- *	Called with kernel lock held.
+ *	Call this fcntl to establish a lease on the file.
+ *	Note that you also need to call %F_SETSIG to
+ *	receive a signal when the lease is broken.
  */
-int __setlease(struct file *filp, long arg, struct file_lock **flp)
+int fcntl_setlease(unsigned int fd, struct file *filp, long arg)
 {
-	struct file_lock *fl, **before, **my_before = NULL, *lease = *flp;
-	struct dentry *dentry = filp->f_dentry;
-	struct inode *inode = dentry->d_inode;
+	struct file_lock *fl, **before, **my_before = NULL;
+	struct dentry *dentry;
+	struct inode *inode;
 	int error, rdlease_count = 0, wrlease_count = 0;
+
+	dentry = filp->f_dentry;
+	inode = dentry->d_inode;
+
+	if ((current->fsuid != inode->i_uid) && !capable(CAP_LEASE))
+		return -EACCES;
+	if (!S_ISREG(inode->i_mode))
+		return -EINVAL;
+	error = security_file_lock(filp, arg);
+	if (error)
+		return error;
+
+	lock_kernel();
 
 	time_out_leases(inode);
 
-	error = -EINVAL;
-	if (!flp || !(*flp) || !(*flp)->fl_lmops || !(*flp)->fl_lmops->fl_break)
-		goto out;
-
+	/*
+	 * FIXME: What about F_RDLCK and files open for writing?
+	 */
 	error = -EAGAIN;
-	if ((arg == F_RDLCK) && (atomic_read(&inode->i_writecount) > 0))
-		goto out;
 	if ((arg == F_WRLCK)
 	    && ((atomic_read(&dentry->d_count) > 1)
 		|| (atomic_read(&inode->i_count) > 1)))
-		goto out;
+		goto out_unlock;
 
 	/*
 	 * At this point, we know that if there is an exclusive
@@ -1334,111 +1285,32 @@ int __setlease(struct file *filp, long arg, struct file_lock **flp)
 
 	if ((arg == F_RDLCK && (wrlease_count > 0)) ||
 	    (arg == F_WRLCK && ((rdlease_count + wrlease_count) > 0)))
-		goto out;
+		goto out_unlock;
 
 	if (my_before != NULL) {
 		error = lease_modify(my_before, arg);
-		goto out;
+		goto out_unlock;
 	}
 
 	error = 0;
 	if (arg == F_UNLCK)
-		goto out;
+		goto out_unlock;
 
 	error = -EINVAL;
 	if (!leases_enable)
-		goto out;
+		goto out_unlock;
 
 	error = lease_alloc(filp, arg, &fl);
 	if (error)
-		goto out;
-
-	locks_copy_lock(fl, lease);
-
-	locks_insert_lock(before, fl);
-
-	*flp = fl;
-out:
-	return error;
-}
-
- /**
- *	setlease        -       sets a lease on an open file
- *	@filp: file pointer
- *	@arg: type of lease to obtain
- *	@lease: file_lock to use
- *
- *	Call this to establish a lease on the file.
- *	The fl_lmops fl_break function is required by break_lease
- */
-
-int setlease(struct file *filp, long arg, struct file_lock **lease)
-{
-	struct dentry *dentry = filp->f_dentry;
-	struct inode *inode = dentry->d_inode;
-	int error;
-
-	if ((current->fsuid != inode->i_uid) && !capable(CAP_LEASE))
-		return -EACCES;
-	if (!S_ISREG(inode->i_mode))
-		return -EINVAL;
-	error = security_file_lock(filp, arg);
-	if (error)
-		return error;
-
-	lock_kernel();
-	error = __setlease(filp, arg, lease);
-	unlock_kernel();
-
-	return error;
-}
-
-EXPORT_SYMBOL(setlease);
-
-/**
- *	fcntl_setlease	-	sets a lease on an open file
- *	@fd: open file descriptor
- *	@filp: file pointer
- *	@arg: type of lease to obtain
- *
- *	Call this fcntl to establish a lease on the file.
- *	Note that you also need to call %F_SETSIG to
- *	receive a signal when the lease is broken.
- */
-int fcntl_setlease(unsigned int fd, struct file *filp, long arg)
-{
-	struct file_lock fl, *flp = &fl;
-	struct dentry *dentry = filp->f_dentry;
-	struct inode *inode = dentry->d_inode;
-	int error;
-
-	if ((current->fsuid != inode->i_uid) && !capable(CAP_LEASE))
-		return -EACCES;
-	if (!S_ISREG(inode->i_mode))
-		return -EINVAL;
-	error = security_file_lock(filp, arg);
-	if (error)
-		return error;
-
-	locks_init_lock(&fl);
-	error = lease_init(filp, arg, &fl);
-	if (error)
-		return error;
-
-	lock_kernel();
-
-	error = __setlease(filp, arg, &flp);
-	if (error)
 		goto out_unlock;
 
-	error = fasync_helper(fd, filp, 1, &flp->fl_fasync);
+	error = fasync_helper(fd, filp, 1, &fl->fl_fasync);
 	if (error < 0) {
-		/* remove lease just inserted by __setlease */
-		flp->fl_type = F_UNLCK | F_INPROGRESS;
-		flp->fl_break_time = jiffies- 10;
-		time_out_leases(inode);
+		locks_free_lock(fl);
 		goto out_unlock;
 	}
+
+	locks_insert_lock(before, fl);
 
 	error = f_setown(filp, current->pid, 0);
 out_unlock:

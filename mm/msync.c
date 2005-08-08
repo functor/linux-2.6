@@ -12,7 +12,6 @@
 #include <linux/mm.h>
 #include <linux/mman.h>
 #include <linux/hugetlb.h>
-#include <linux/syscalls.h>
 
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>

@@ -2016,9 +2016,9 @@ pmac_ide_setup_dma(pmac_ide_hwif_t *pmif, ide_hwif_t *hwif)
 	hwif->ide_dma_off_quietly = &__ide_dma_off_quietly;
 	hwif->ide_dma_on = &__ide_dma_on;
 	hwif->ide_dma_check = &pmac_ide_dma_check;
-	hwif->ide_dma_setup = &pmac_ide_dma_setup;
-	hwif->ide_dma_exec_cmd = &pmac_ide_dma_exec_cmd;
-	hwif->ide_dma_start = &pmac_ide_dma_start;
+	hwif->dma_setup = &pmac_ide_dma_setup;
+	hwif->dma_exec_cmd = &pmac_ide_dma_exec_cmd;
+	hwif->dma_start = &pmac_ide_dma_start;
 	hwif->ide_dma_end = &pmac_ide_dma_end;
 	hwif->ide_dma_test_irq = &pmac_ide_dma_test_irq;
 	hwif->ide_dma_host_off = &pmac_ide_dma_host_off;

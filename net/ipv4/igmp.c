@@ -1252,8 +1252,8 @@ void ip_mc_init_dev(struct in_device *in_dev)
 	in_dev->mr_qrv = IGMP_Unsolicited_Report_Count;
 #endif
 
-	rwlock_init(&in_dev->mc_list_lock);
-	spin_lock_init(&in_dev->mc_tomb_lock);
+	in_dev->mc_list_lock = RW_LOCK_UNLOCKED;
+	in_dev->mc_tomb_lock = SPIN_LOCK_UNLOCKED;
 }
 
 /* Device going up */

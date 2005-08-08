@@ -40,11 +40,6 @@ u64 jiffies_64 = INITIAL_JIFFIES;
 
 EXPORT_SYMBOL(jiffies_64);
 
-/*
- * Our system timer.
- */
-struct sys_timer *system_timer;
-
 extern unsigned long wall_jiffies;
 
 /* this needs a better home */
@@ -81,6 +76,12 @@ static unsigned long dummy_gettimeoffset(void)
 {
 	return 0;
 }
+
+/*
+ * hook for getting the time offset.  Note that it is
+ * always called with interrupts disabled.
+ */
+unsigned long (*gettimeoffset)(void) = dummy_gettimeoffset;
 
 /*
  * Scheduler clock - returns current time in nanosec units.
@@ -246,7 +247,7 @@ void do_gettimeofday(struct timeval *tv)
 
 	do {
 		seq = read_seqbegin_irqsave(&xtime_lock, flags);
-		usec = system_timer->offset();
+		usec = gettimeoffset();
 
 		lost = jiffies - wall_jiffies;
 		if (lost)
@@ -283,7 +284,7 @@ int do_settimeofday(struct timespec *tv)
 	 * wall time.  Discover what correction gettimeofday() would have
 	 * done, and then undo it!
 	 */
-	nsec -= system_timer->offset() * NSEC_PER_USEC;
+	nsec -= gettimeoffset() * NSEC_PER_USEC;
 	nsec -= (jiffies - wall_jiffies) * TICK_NSEC;
 
 	wtm_sec  = wall_to_monotonic.tv_sec + (xtime.tv_sec - sec);
@@ -336,67 +337,18 @@ void restore_time_delta(struct timespec *delta, struct timespec *rtc)
 }
 EXPORT_SYMBOL(restore_time_delta);
 
-/*
- * Kernel system timer support.
- */
 void timer_tick(struct pt_regs *regs)
 {
 	profile_tick(CPU_PROFILING, regs);
 	do_leds();
 	do_set_rtc();
 	do_timer(regs);
-#ifndef CONFIG_SMP
-	update_process_times(user_mode(regs));
-#endif
 }
 
-#ifdef CONFIG_PM
-static int timer_suspend(struct sys_device *dev, u32 state)
-{
-	struct sys_timer *timer = container_of(dev, struct sys_timer, dev);
-
-	if (timer->suspend != NULL)
-		timer->suspend();
-
-	return 0;
-}
-
-static int timer_resume(struct sys_device *dev)
-{
-	struct sys_timer *timer = container_of(dev, struct sys_timer, dev);
-
-	if (timer->resume != NULL)
-		timer->resume();
-
-	return 0;
-}
-#else
-#define timer_suspend NULL
-#define timer_resume NULL
-#endif
-
-static struct sysdev_class timer_sysclass = {
-	set_kset_name("timer"),
-	.suspend	= timer_suspend,
-	.resume		= timer_resume,
-};
-
-static int __init timer_init_sysfs(void)
-{
-	int ret = sysdev_class_register(&timer_sysclass);
-	if (ret == 0) {
-		system_timer->dev.cls = &timer_sysclass;
-		ret = sysdev_register(&system_timer->dev);
-	}
-	return ret;
-}
-
-device_initcall(timer_init_sysfs);
+void (*init_arch_time)(void);
 
 void __init time_init(void)
 {
-	if (system_timer->offset == NULL)
-		system_timer->offset = dummy_gettimeoffset;
-	system_timer->init();
+	init_arch_time();
 }
 

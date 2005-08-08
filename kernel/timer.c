@@ -33,9 +33,6 @@
 #include <linux/cpu.h>
 #include <linux/vs_cvirt.h>
 #include <linux/vserver/sched.h>
-#include <linux/syscalls.h>
-#include <linux/delay.h>
-#include <linux/diskdump.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -245,6 +242,7 @@ void add_timer_on(struct timer_list *timer, int cpu)
 	spin_unlock_irqrestore(&base->lock, flags);
 }
 
+EXPORT_SYMBOL_GPL(add_timer_on);
 
 /***
  * mod_timer - modify a timer's timeout
@@ -312,8 +310,10 @@ repeat:
 		goto repeat;
 	}
 	list_del(&timer->entry);
-	/* Need to make sure that anybody who sees a NULL base also sees the list ops */
-	smp_wmb();
+	smp_wmb(); /* the list del must have taken effect before timer->base
+		    * change is visible to other CPUs, or a concurrent mod_timer
+		    * would cause a race with list_add
+		    */
 	timer->base = NULL;
 	spin_unlock_irqrestore(&base->lock, flags);
 
@@ -438,9 +438,8 @@ static int cascade(tvec_base_t *base, tvec_t *tv, int index)
 static inline void __run_timers(tvec_base_t *base)
 {
 	struct timer_list *timer;
-	unsigned long flags;
 
-	spin_lock_irqsave(&base->lock, flags);
+	spin_lock_irq(&base->lock);
 	while (time_after_eq(jiffies, base->timer_jiffies)) {
 		struct list_head work_list = LIST_HEAD_INIT(work_list);
 		struct list_head *head = &work_list;
@@ -467,16 +466,19 @@ repeat:
 
 			list_del(&timer->entry);
 			set_running_timer(base, timer);
-			smp_wmb();
+			smp_wmb(); /* the list del must have taken effect before timer->base
+				    * change is visible to other CPUs, or a concurrent mod_timer
+				    * would cause a race with list_add
+				    */
 			timer->base = NULL;
-			spin_unlock_irqrestore(&base->lock, flags);
+			spin_unlock_irq(&base->lock);
 			fn(data);
 			spin_lock_irq(&base->lock);
 			goto repeat;
 		}
 	}
 	set_running_timer(base, NULL);
-	spin_unlock_irqrestore(&base->lock, flags);
+	spin_unlock_irq(&base->lock);
 }
 
 #ifdef CONFIG_NO_IDLE_HZ
@@ -812,12 +814,12 @@ static inline void do_process_times(struct task_struct *p,
 	psecs = (p->utime += user);
 	psecs += (p->stime += system);
 	if (p->signal && !unlikely(p->state & (EXIT_DEAD|EXIT_ZOMBIE)) &&
-	    psecs / HZ >= p->signal->rlim[RLIMIT_CPU].rlim_cur) {
+			(psecs / HZ >= p->rlim[RLIMIT_CPU].rlim_cur)) {
 		/* Send SIGXCPU every second.. */
 		if (!(psecs % HZ))
 			send_sig(SIGXCPU, p, 1);
 		/* and SIGKILL when we go over max.. */
-		if (psecs / HZ >= p->signal->rlim[RLIMIT_CPU].rlim_max)
+		if (psecs / HZ >= p->rlim[RLIMIT_CPU].rlim_max)
 			send_sig(SIGKILL, p, 1);
 	}
 }
@@ -965,6 +967,11 @@ static inline void update_times(void)
 void do_timer(struct pt_regs *regs)
 {
 	jiffies_64++;
+#ifndef CONFIG_SMP
+	/* SMP process accounting uses the local APIC timer */
+
+	update_process_times(user_mode(regs));
+#endif
 	update_times();
 }
 
@@ -1119,12 +1126,6 @@ fastcall signed long __sched schedule_timeout(signed long timeout)
 {
 	struct timer_list timer;
 	unsigned long expire;
-
-	if (crashdump_mode()) {
-		diskdump_mdelay(timeout);
-		set_current_state(TASK_RUNNING);
-		return timeout;
-	}
 
 	switch (timeout)
 	{
@@ -1333,7 +1334,7 @@ asmlinkage long sys_sysinfo(struct sysinfo __user *info)
 	return 0;
 }
 
-static void /* __devinit */ init_timers_cpu(int cpu)
+static void __devinit init_timers_cpu(int cpu)
 {
 	int j;
 	tvec_base_t *base;
@@ -1351,27 +1352,6 @@ static void /* __devinit */ init_timers_cpu(int cpu)
 
 	base->timer_jiffies = jiffies;
 }
-
-static tvec_base_t saved_tvec_base;
-
-void dump_clear_timers(void)
-{
-	tvec_base_t *base = &per_cpu(tvec_bases, smp_processor_id());
-
-	memcpy(&saved_tvec_base, base, sizeof(saved_tvec_base));
-	init_timers_cpu(smp_processor_id());
-}
-
-EXPORT_SYMBOL_GPL(dump_clear_timers);
-
-void dump_run_timers(void)
-{
-	tvec_base_t *base = &__get_cpu_var(tvec_bases);
-
-	__run_timers(base);
-}
-
-EXPORT_SYMBOL_GPL(dump_run_timers);
 
 #ifdef CONFIG_HOTPLUG_CPU
 static int migrate_timer_list(tvec_base_t *new_base, struct list_head *head)
@@ -1655,12 +1635,7 @@ unregister_time_interpolator(struct time_interpolator *ti)
  */
 void msleep(unsigned int msecs)
 {
-	unsigned long timeout = msecs_to_jiffies(msecs) + 1;
-
-	if (unlikely(crashdump_mode())) {
-		while (msecs--) udelay(1000);
-		return;
-	}
+	unsigned long timeout = msecs_to_jiffies(msecs);
 
 	while (timeout) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
@@ -1676,7 +1651,7 @@ EXPORT_SYMBOL(msleep);
  */
 unsigned long msleep_interruptible(unsigned int msecs)
 {
-	unsigned long timeout = msecs_to_jiffies(msecs) + 1;
+	unsigned long timeout = msecs_to_jiffies(msecs);
 
 	while (timeout && !signal_pending(current)) {
 		set_current_state(TASK_INTERRUPTIBLE);

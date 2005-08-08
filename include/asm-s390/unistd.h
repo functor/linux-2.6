@@ -269,9 +269,8 @@
 #define __NR_mq_timedreceive	274
 #define __NR_mq_notify		275
 #define __NR_mq_getsetattr	276
-/* Number 277 is reserved for new sys_kexec_load */
 
-#define NR_syscalls 278
+#define NR_syscalls 277
 
 /* 
  * There are some system calls that are not present on 64 bit, some

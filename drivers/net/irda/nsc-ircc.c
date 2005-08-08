@@ -351,9 +351,8 @@ static int __init nsc_ircc_open(int i, chipio_t *info)
 	}
 	MESSAGE("IrDA: Registered device %s\n", dev->name);
 
-	/* Check if user has supplied a valid dongle id or not */
-	if ((dongle_id <= 0) ||
-	    (dongle_id >= (sizeof(dongle_types) / sizeof(dongle_types[0]))) ) {
+	/* Check if user has supplied the dongle id or not */
+	if (!dongle_id) {
 		dongle_id = nsc_ircc_read_dongle_id(self->io.fir_base);
 		
 		MESSAGE("%s, Found dongle: %s\n", driver_name,

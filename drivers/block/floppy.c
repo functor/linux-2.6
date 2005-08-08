@@ -1787,11 +1787,10 @@ irqreturn_t floppy_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 		} while ((ST0 & 0x83) != UNIT(current_drive) && inr == 2
 			 && max_sensei);
 	}
-	if (!handler) {
+	if (handler)
+		schedule_bh(handler);
+	else
 		FDCS->reset = 1;
-		return IRQ_NONE;
-	}
-	schedule_bh(handler);
 	is_alive("normal interrupt end");
 
 	/* FIXME! Was it really for us? */
@@ -4125,7 +4124,7 @@ static struct param_table {
 	int *var;
 	int def_param;
 	int param2;
-} config_params[] __initdata = {
+} config_params[] = {
 	{"allowed_drive_mask", NULL, &allowed_drive_mask, 0xff, 0}, /* obsolete */
 	{"all_drives", NULL, &allowed_drive_mask, 0xff, 0},	/* obsolete */
 	{"asus_pci", NULL, &allowed_drive_mask, 0x33, 0},
@@ -4287,13 +4286,6 @@ int __init floppy_init(void)
 	}
 
 	use_virtual_dma = can_use_virtual_dma & 1;
-#if defined(CONFIG_PPC64)
-	if (check_legacy_ioport(FDC1)) {
-		del_timer(&fd_timeout);
-		err = -ENODEV;
-		goto out_unreg_region;
-	}
-#endif
 	fdc_state[0].address = FDC1;
 	if (fdc_state[0].address == -1) {
 		del_timer(&fd_timeout);
@@ -4323,12 +4315,6 @@ int __init floppy_init(void)
 		floppy_track_buffer = NULL;
 		max_buffer_sectors = 0;
 	}
-	/*
-	 * Small 10 msec delay to let through any interrupt that
-	 * initialization might have triggered, to not
-	 * confuse detection:
-	 */
-	msleep(10);
 
 	for (i = 0; i < N_FDC; i++) {
 		fdc = i;
@@ -4596,6 +4582,8 @@ static void __init parse_floppy_cfg_string(char *cfg)
 
 int init_module(void)
 {
+	printk(KERN_INFO "inserting floppy driver for " UTS_RELEASE "\n");
+
 	if (floppy)
 		parse_floppy_cfg_string(floppy);
 	return floppy_init();
@@ -4635,9 +4623,9 @@ void cleanup_module(void)
 	wait_for_completion(&device_release);
 }
 
-module_param(floppy, charp, 0);
-module_param(FLOPPY_IRQ, int, 0);
-module_param(FLOPPY_DMA, int, 0);
+MODULE_PARM(floppy, "s");
+MODULE_PARM(FLOPPY_IRQ, "i");
+MODULE_PARM(FLOPPY_DMA, "i");
 MODULE_AUTHOR("Alain L. Knaff");
 MODULE_SUPPORTED_DEVICE("fd");
 MODULE_LICENSE("GPL");

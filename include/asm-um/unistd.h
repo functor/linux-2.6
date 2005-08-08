@@ -13,9 +13,10 @@
 extern int um_execve(const char *file, char *const argv[], char *const env[]);
 
 #ifdef __KERNEL__
-/* We get __ARCH_WANT_OLD_STAT and __ARCH_WANT_STAT64 from the base arch */
 #define __ARCH_WANT_IPC_PARSE_VERSION
 #define __ARCH_WANT_OLD_READDIR
+#define __ARCH_WANT_OLD_STAT
+#define __ARCH_WANT_STAT64
 #define __ARCH_WANT_SYS_ALARM
 #define __ARCH_WANT_SYS_GETHOSTNAME
 #define __ARCH_WANT_SYS_PAUSE
@@ -83,7 +84,7 @@ static inline pid_t setsid(void)
 	KERNEL_CALL(pid_t, sys_setsid)
 }
 
-static inline off_t lseek(unsigned int fd, off_t offset, unsigned int whence)
+static inline long lseek(unsigned int fd, off_t offset, unsigned int whence)
 {
 	KERNEL_CALL(long, sys_lseek, fd, offset, whence)
 }
@@ -101,12 +102,13 @@ static inline int write(unsigned int fd, char * buf, int len)
 long sys_mmap2(unsigned long addr, unsigned long len,
 		unsigned long prot, unsigned long flags,
 		unsigned long fd, unsigned long pgoff);
-long sys_execve(char *file, char **argv, char **env);
+int sys_execve(char *file, char **argv, char **env);
 long sys_clone(unsigned long clone_flags, unsigned long newsp,
 		int *parent_tid, int *child_tid);
 long sys_fork(void);
 long sys_vfork(void);
-long sys_pipe(unsigned long *fildes);
+int sys_pipe(unsigned long *fildes);
+int sys_ptrace(long request, long pid, long addr, long data);
 struct sigaction;
 asmlinkage long sys_rt_sigaction(int sig,
 				const struct sigaction __user *act,

@@ -37,10 +37,14 @@
 #include <linux/smp_lock.h>
 #include <linux/fs.h>
 
+#define DEBUG_VARIABLE av7110_debug
+extern int av7110_debug;
+
 #include "av7110.h"
 #include "av7110_hw.h"
 #include "av7110_av.h"
 #include "av7110_ipack.h"
+#include "dvb_functions.h"
 
 /* MPEG-2 (ISO 13818 / H.222.0) stream types */
 #define PROG_STREAM_MAP  0xBC
@@ -98,6 +102,8 @@ int av7110_record_cb(struct dvb_filter_pes2ts *p2t, u8 *buf, size_t len)
 {
 	struct dvb_demux_feed *dvbdmxfeed = (struct dvb_demux_feed *) p2t->priv;
 
+//	DEB_EE(("struct dvb_filter_pes2ts:%p\n", p2t));
+
 	if (!(dvbdmxfeed->ts_type & TS_PACKET))
 		return 0;
 	if (buf[3] == 0xe0)	 // video PES do not have a length in TS
@@ -113,6 +119,8 @@ static int dvb_filter_pes2ts_cb(void *priv, unsigned char *data)
 {
 	struct dvb_demux_feed *dvbdmxfeed = (struct dvb_demux_feed *) priv;
 
+//	DEB_EE(("dvb_demux_feed:%p\n", dvbdmxfeed));
+
 	dvbdmxfeed->cb.ts(data, 188, NULL, 0,
 			  &dvbdmxfeed->feed.ts, DMX_OK);
 	return 0;
@@ -123,7 +131,7 @@ int av7110_av_start_record(struct av7110 *av7110, int av,
 {
 	struct dvb_demux *dvbdmx = dvbdmxfeed->demux;
 
-	dprintk(2, "av7110:%p, , dvb_demux_feed:%p\n", av7110, dvbdmxfeed);
+	DEB_EE(("av7110: %p, dvb_demux_feed:%p\n", av7110, dvbdmxfeed));
 
 	if (av7110->playing || (av7110->rec_mode & av))
 		return -EBUSY;
@@ -165,7 +173,7 @@ int av7110_av_start_record(struct av7110 *av7110, int av,
 
 int av7110_av_start_play(struct av7110 *av7110, int av)
 {
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (av7110->rec_mode)
 		return -EBUSY;
@@ -198,7 +206,7 @@ int av7110_av_start_play(struct av7110 *av7110, int av)
 
 void av7110_av_stop(struct av7110 *av7110, int av)
 {
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (!(av7110->playing & av) && !(av7110->rec_mode & av))
 		return;
@@ -239,6 +247,8 @@ int av7110_pes_play(void *dest, struct dvb_ringbuffer *buf, int dlen)
 	u32 sync;
 	u16 blen;
 
+	DEB_EE(("dvb_ring_buffer_t: %p\n", buf));
+
 	if (!dlen) {
 		wake_up(&buf->queue);
 		return -1;
@@ -269,8 +279,8 @@ int av7110_pes_play(void *dest, struct dvb_ringbuffer *buf, int dlen)
 
 	dvb_ringbuffer_read(buf, dest, (size_t) blen, 0);
 
-	dprintk(2, "pread=0x%08lx, pwrite=0x%08lx\n",
-	       (unsigned long) buf->pread, (unsigned long) buf->pwrite);
+	DEB_S(("pread=0x%08lx, pwrite=0x%08lx\n",
+	       (unsigned long) buf->pread, (unsigned long) buf->pwrite));
 	wake_up(&buf->queue);
 	return blen;
 }
@@ -280,10 +290,7 @@ int av7110_set_volume(struct av7110 *av7110, int volleft, int volright)
 {
 	int err, vol, val, balance = 0;
 
-	dprintk(2, "av7110:%p, \n", av7110);
-
-	av7110->mixer.volume_left = volleft;
-	av7110->mixer.volume_right = volright;
+	DEB_EE(("av7110: %p\n", av7110));
 
 	switch (av7110->adac_type) {
 	case DVB_ADAC_TI:
@@ -319,7 +326,7 @@ int av7110_set_volume(struct av7110 *av7110, int volleft, int volright)
 
 void av7110_set_vidmode(struct av7110 *av7110, int mode)
 {
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	av7110_fw_cmd(av7110, COMTYPE_ENCODER, LoadVidCode, 1, mode);
 
@@ -347,7 +354,7 @@ static void get_video_format(struct av7110 *av7110, u8 *buf, int count)
 	int sw;
 	u8 *p;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (av7110->sinfo)
 		return;
@@ -360,7 +367,7 @@ static void get_video_format(struct av7110 *av7110, u8 *buf, int count)
 		vsize = ((p[1] &0x0F) << 8) | (p[2]);
 		sw = (p[3] & 0x0F);
 		av7110_set_vidmode(av7110, sw2mode[sw]);
-		dprintk(2, "playback %dx%d fr=%d\n", hsize, vsize, sw);
+		DEB_S(("dvb: playback %dx%d fr=%d\n", hsize, vsize, sw));
 		av7110->sinfo = 1;
 		break;
 	}
@@ -397,7 +404,7 @@ static inline long aux_ring_buffer_write(struct dvb_ringbuffer *rbuf,
 static void play_video_cb(u8 *buf, int count, void *priv)
 {
 	struct av7110 *av7110 = (struct av7110 *) priv;
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if ((buf[3] & 0xe0) == 0xe0) {
 		get_video_format(av7110, buf, count);
@@ -409,7 +416,7 @@ static void play_video_cb(u8 *buf, int count, void *priv)
 static void play_audio_cb(u8 *buf, int count, void *priv)
 {
 	struct av7110 *av7110 = (struct av7110 *) priv;
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	aux_ring_buffer_write(&av7110->aout, buf, count);
 }
@@ -421,7 +428,7 @@ static ssize_t dvb_play(struct av7110 *av7110, const u8 __user *buf,
 			unsigned long count, int nonblock, int type)
 {
 	unsigned long todo = count, n;
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (!av7110->kbuf[type])
 		return -ENOBUFS;
@@ -454,7 +461,7 @@ static ssize_t dvb_play_kernel(struct av7110 *av7110, const u8 *buf,
 			unsigned long count, int nonblock, int type)
 {
 	unsigned long todo = count, n;
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (!av7110->kbuf[type])
 		return -ENOBUFS;
@@ -484,7 +491,7 @@ static ssize_t dvb_aplay(struct av7110 *av7110, const u8 __user *buf,
 			 unsigned long count, int nonblock, int type)
 {
 	unsigned long todo = count, n;
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (!av7110->kbuf[type])
 		return -ENOBUFS;
@@ -674,7 +681,7 @@ void av7110_p2t_write(u8 const *buf, long int length, u16 pid, struct av7110_p2t
 }
 
 
-static int write_ts_header2(u16 pid, u8 *counter, int pes_start, u8 *buf, u8 length)
+int write_ts_header2(u16 pid, u8 *counter, int pes_start, u8 *buf, u8 length)
 {
 	int i;
 	int c = 0;
@@ -763,7 +770,7 @@ int av7110_write_to_decoder(struct dvb_demux_feed *feed, const u8 *buf, size_t l
 	struct av7110 *av7110 = (struct av7110 *) demux->priv;
 	struct ipack *ipack = &av7110->ipack[feed->pes_type];
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	switch (feed->pes_type) {
 	case 0:
@@ -804,6 +811,8 @@ void dvb_video_add_event(struct av7110 *av7110, struct video_event *event)
 	struct dvb_video_events *events = &av7110->video_events;
 	int wp;
 
+	DEB_D(("\n"));
+
 	spin_lock_bh(&events->lock);
 
 	wp = (events->eventw + 1) % MAX_VIDEO_EVENT;
@@ -825,6 +834,8 @@ void dvb_video_add_event(struct av7110 *av7110, struct video_event *event)
 static int dvb_video_get_event (struct av7110 *av7110, struct video_event *event, int flags)
 {
 	struct dvb_video_events *events = &av7110->video_events;
+
+	DEB_D(("\n"));
 
 	if (events->overflow) {
 		events->overflow = 0;
@@ -864,7 +875,7 @@ static unsigned int dvb_video_poll(struct file *file, poll_table *wait)
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 	unsigned int mask = 0;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if ((file->f_flags & O_ACCMODE) != O_RDONLY)
 		poll_wait(file, &av7110->avout.queue, wait);
@@ -891,7 +902,7 @@ static ssize_t dvb_video_write(struct file *file, const char __user *buf,
 	struct dvb_device *dvbdev = (struct dvb_device *) file->private_data;
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
 		return -EPERM;
@@ -908,7 +919,7 @@ static unsigned int dvb_audio_poll(struct file *file, poll_table *wait)
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 	unsigned int mask = 0;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	poll_wait(file, &av7110->aout.queue, wait);
 
@@ -927,7 +938,7 @@ static ssize_t dvb_audio_write(struct file *file, const char __user *buf,
 	struct dvb_device *dvbdev = (struct dvb_device *) file->private_data;
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (av7110->audiostate.stream_source != AUDIO_SOURCE_MEMORY) {
 		printk(KERN_ERR "not audio source memory\n");
@@ -936,7 +947,7 @@ static ssize_t dvb_audio_write(struct file *file, const char __user *buf,
 	return dvb_aplay(av7110, buf, count, file->f_flags & O_NONBLOCK, 0);
 }
 
-static u8 iframe_header[] = { 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x80, 0x00, 0x00 };
+u8 iframe_header[] = { 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x80, 0x00, 0x00 };
 
 #define MIN_IFRAME 400000
 
@@ -944,7 +955,7 @@ static int play_iframe(struct av7110 *av7110, u8 __user *buf, unsigned int len, 
 {
 	int i, n;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (!(av7110->playing & RP_VIDEO)) {
 		if (av7110_av_start_play(av7110, RP_VIDEO) < 0)
@@ -974,7 +985,7 @@ static int dvb_video_ioctl(struct inode *inode, struct file *file,
 	unsigned long arg = (unsigned long) parg;
 	int ret = 0;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY) {
 		if ( cmd != VIDEO_GET_STATUS && cmd != VIDEO_GET_EVENT &&
@@ -1170,7 +1181,7 @@ static int dvb_audio_ioctl(struct inode *inode, struct file *file,
 	unsigned long arg = (unsigned long) parg;
 	int ret = 0;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (((file->f_flags & O_ACCMODE) == O_RDONLY) &&
 	    (cmd != AUDIO_GET_STATUS))
@@ -1286,7 +1297,7 @@ static int dvb_video_open(struct inode *inode, struct file *file)
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 	int err;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if ((err = dvb_generic_open(inode, file)) < 0)
 		return err;
@@ -1310,7 +1321,7 @@ static int dvb_video_release(struct inode *inode, struct file *file)
 	struct dvb_device *dvbdev = (struct dvb_device *) file->private_data;
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if ((file->f_flags & O_ACCMODE) != O_RDONLY) {
 		av7110_av_stop(av7110, RP_VIDEO);
@@ -1325,7 +1336,7 @@ static int dvb_audio_open(struct inode *inode, struct file *file)
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 	int err=dvb_generic_open(inode, file);
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	if (err < 0)
 		return err;
@@ -1339,7 +1350,7 @@ static int dvb_audio_release(struct inode *inode, struct file *file)
 	struct dvb_device *dvbdev = (struct dvb_device *) file->private_data;
 	struct av7110 *av7110 = (struct av7110 *) dvbdev->priv;
 
-	dprintk(2, "av7110:%p, \n", av7110);
+	DEB_EE(("av7110: %p\n", av7110));
 
 	av7110_av_stop(av7110, RP_AUDIO);
 	return dvb_generic_release(inode, file);

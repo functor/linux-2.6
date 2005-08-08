@@ -46,7 +46,6 @@
 #include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/init.h>
-#include <linux/delay.h>
 #include <linux/pci.h>
 #include <linux/vmalloc.h>
 #include <linux/smp.h>
@@ -54,13 +53,13 @@
 #include <linux/spinlock.h>
 #include <linux/kobject.h>
 #include <linux/firmware.h>
-#include <linux/bitops.h>
 
 #include <asm/system.h>
 #include <asm/segment.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/uaccess.h>
+#include <asm/bitops.h>
 
 #include "icom.h"
 
@@ -139,6 +138,12 @@ static inline void trace(struct icom_port *, char *, unsigned long) {};
 #else
 static inline void trace(struct icom_port *icom_port, char *trace_pt, unsigned long trace_data) {};
 #endif
+
+static void msleep(unsigned long msecs)
+{
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(MSECS_TO_JIFFIES(msecs));
+}
 
 static void free_port_memory(struct icom_port *icom_port)
 {
@@ -1693,4 +1698,3 @@ MODULE_DESCRIPTION("IBM iSeries Serial IOA driver");
 MODULE_SUPPORTED_DEVICE
     ("IBM iSeries 2745, 2771, 2772, 2742, 2793 and 2805 Communications adapters");
 MODULE_LICENSE("GPL");
-

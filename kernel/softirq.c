@@ -137,17 +137,11 @@ EXPORT_SYMBOL(do_softirq);
 
 void local_bh_enable(void)
 {
+	__local_bh_enable();
 	WARN_ON(irqs_disabled());
-	/*
-	 * Keep preemption disabled until we are done with
-	 * softirq processing:
- 	 */
-	preempt_count() -= SOFTIRQ_OFFSET - 1;
-
-	if (unlikely(!in_interrupt() && local_softirq_pending()))
-		do_softirq();
-
-	dec_preempt_count();
+	if (unlikely(!in_interrupt() &&
+		     local_softirq_pending()))
+		invoke_softirq();
 	preempt_check_resched();
 }
 EXPORT_SYMBOL(local_bh_enable);
@@ -322,38 +316,6 @@ void tasklet_kill(struct tasklet_struct *t)
 }
 
 EXPORT_SYMBOL(tasklet_kill);
-
-struct tasklet_head saved_tasklet;
-
-void dump_clear_tasklet(void)
-{
-	saved_tasklet.list = __get_cpu_var(tasklet_vec).list;
-	__get_cpu_var(tasklet_vec).list = NULL;
-}
-
-EXPORT_SYMBOL_GPL(dump_clear_tasklet);
-
-void dump_run_tasklet(void)
-{
-	struct tasklet_struct *list;
-
-	list = __get_cpu_var(tasklet_vec).list;
-	__get_cpu_var(tasklet_vec).list = NULL;
-
-	while (list) {
-		struct tasklet_struct *t = list;
-		list = list->next;
-
-		if (!atomic_read(&t->count) &&
-		    (test_and_clear_bit(TASKLET_STATE_SCHED, &t->state)))
-				t->func(t->data);
-
-		t->next = __get_cpu_var(tasklet_vec).list;
-		__get_cpu_var(tasklet_vec).list = t;
-	}
-}
-
-EXPORT_SYMBOL_GPL(dump_run_tasklet);
 
 void __init softirq_init(void)
 {

@@ -185,10 +185,11 @@ static struct file_operations rtc_fops = {
 	.release =	rtc_release,
 };
 
-static struct miscdevice rtc_dev = {
-	.minor =	RTC_MINOR,
-	.name =		"rtc",
-	.fops =		&rtc_fops
+static struct miscdevice rtc_dev=
+{
+	RTC_MINOR,
+	"rtc",
+	&rtc_fops
 };
 
 static int __init rtc_init(void)
@@ -200,11 +201,9 @@ static int __init rtc_init(void)
 		return retval;
 
 #ifdef CONFIG_PROC_FS
-	if (create_proc_read_entry("driver/rtc", 0, NULL, rtc_read_proc, NULL)
-			== NULL) {
+	if (create_proc_read_entry ("driver/rtc", 0, NULL, rtc_read_proc, NULL) == NULL)
 		misc_deregister(&rtc_dev);
 		return -ENOMEM;
-	}
 #endif
 
 	printk(KERN_INFO "i/pSeries Real Time Clock Driver v" RTC_VERSION "\n");
@@ -276,7 +275,7 @@ void iSeries_get_rtc_time(struct rtc_time *rtc_tm)
 	if (piranha_simulator)
 		return;
 
-	mf_get_rtc(rtc_tm);
+	mf_getRtc(rtc_tm);
 	rtc_tm->tm_mon--;
 }
 
@@ -286,7 +285,7 @@ void iSeries_get_rtc_time(struct rtc_time *rtc_tm)
  */
 int iSeries_set_rtc_time(struct rtc_time *tm)
 {
-	mf_set_rtc(tm);
+	mf_setRtc(tm);
 	return 0;
 }
 
@@ -357,7 +356,7 @@ void pSeries_get_boot_time(struct rtc_time *rtc_tm)
 		}
 	} while (error == RTAS_CLOCK_BUSY && (__get_tb() < max_wait_tb));
 
-	if (error != 0 && printk_ratelimit()) {
+	if (error != 0) {
 		printk(KERN_WARNING "error: reading the clock failed (%d)\n",
 			error);
 		return;
@@ -385,7 +384,7 @@ void pSeries_get_rtc_time(struct rtc_time *rtc_tm)
 	do {
 		error = rtas_call(rtas_token("get-time-of-day"), 0, 8, ret);
 		if (error == RTAS_CLOCK_BUSY || rtas_is_extended_busy(error)) {
-			if (in_interrupt() && printk_ratelimit()) {
+			if (in_interrupt()) {
 				printk(KERN_WARNING "error: reading clock would delay interrupt\n");
 				return;	/* delay not allowed */
 			}
@@ -396,7 +395,7 @@ void pSeries_get_rtc_time(struct rtc_time *rtc_tm)
 		}
 	} while (error == RTAS_CLOCK_BUSY && (__get_tb() < max_wait_tb));
 
-        if (error != 0 && printk_ratelimit()) {
+        if (error != 0) {
                 printk(KERN_WARNING "error: reading the clock failed (%d)\n",
 		       error);
 		return;
@@ -431,7 +430,7 @@ int pSeries_set_rtc_time(struct rtc_time *tm)
 		}
 	} while (error == RTAS_CLOCK_BUSY && (__get_tb() < max_wait_tb));
 
-        if (error != 0 && printk_ratelimit())
+        if (error != 0)
                 printk(KERN_WARNING "error: setting the clock failed (%d)\n",
 		       error); 
 

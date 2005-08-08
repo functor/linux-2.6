@@ -449,7 +449,8 @@ static struct sock *__tcp_v4_lookup_listener(struct hlist_head *head, u32 daddr,
 }
 
 /* Optimize the common listener case. */
-struct sock *tcp_v4_lookup_listener(u32 daddr, unsigned short hnum, int dif)
+inline struct sock *tcp_v4_lookup_listener(u32 daddr, unsigned short hnum,
+					   int dif)
 {
 	struct sock *sk = NULL;
 	struct hlist_head *head;
@@ -472,8 +473,6 @@ sherry_cache:
 	read_unlock(&tcp_lhash_lock);
 	return sk;
 }
-
-EXPORT_SYMBOL_GPL(tcp_v4_lookup_listener);
 
 /* Sockets in TCP_CLOSE state are _always_ taken out of the hash, so
  * we need not check it for TCP lookups anymore, thanks Alexey. -DaveM
@@ -535,8 +534,6 @@ inline struct sock *tcp_v4_lookup(u32 saddr, u16 sport, u32 daddr,
 
 	return sk;
 }
-
-EXPORT_SYMBOL_GPL(tcp_v4_lookup);
 
 static inline __u32 tcp_v4_init_sequence(struct sock *sk, struct sk_buff *skb)
 {
@@ -2676,7 +2673,6 @@ void tcp4_proc_exit(void)
 
 struct proto tcp_prot = {
 	.name			= "TCP",
-	.owner			= THIS_MODULE,
 	.close			= tcp_close,
 	.connect		= tcp_v4_connect,
 	.disconnect		= tcp_disconnect,
@@ -2734,6 +2730,7 @@ EXPORT_SYMBOL(tcp_unhash);
 EXPORT_SYMBOL(tcp_v4_conn_request);
 EXPORT_SYMBOL(tcp_v4_connect);
 EXPORT_SYMBOL(tcp_v4_do_rcv);
+EXPORT_SYMBOL_GPL(tcp_v4_lookup_listener);
 EXPORT_SYMBOL(tcp_v4_rebuild_header);
 EXPORT_SYMBOL(tcp_v4_remember_stamp);
 EXPORT_SYMBOL(tcp_v4_send_check);
@@ -2743,7 +2740,8 @@ EXPORT_SYMBOL(tcp_v4_syn_recv_sock);
 EXPORT_SYMBOL(tcp_proc_register);
 EXPORT_SYMBOL(tcp_proc_unregister);
 #endif
+#ifdef CONFIG_SYSCTL
 EXPORT_SYMBOL(sysctl_local_port_range);
 EXPORT_SYMBOL(sysctl_max_syn_backlog);
 EXPORT_SYMBOL(sysctl_tcp_low_latency);
-
+#endif

@@ -17,12 +17,9 @@
 * General Public License for more details.
 *
 ******************************************************************************/
-#define QLA1280_VERSION      "3.25"
+#define QLA1280_VERSION      "3.24.4"
 /*****************************************************************************
     Revision History:
-    Rev  3.25, September 28, 2004, Christoph Hellwig
-	- add support for ISP1020/1040
-	- don't include "scsi.h" anymore for 2.6.x
     Rev  3.24.4 June 7, 2004 Christoph Hellwig
 	- restructure firmware loading, cleanup initialization code
 	- prepare support for ISP1020/1040 chips
@@ -359,6 +356,7 @@
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_tcq.h>
+#include "scsi.h"
 #else
 #include <linux/blk.h>
 #include "scsi.h"
@@ -396,7 +394,6 @@
 #include "qla1280.h"
 #include "ql12160_fw.h"		/* ISP RISC codes */
 #include "ql1280_fw.h"
-#include "ql1040_fw.h"
 
 
 /*
@@ -540,7 +537,7 @@ static void qla1280_error_entry(struct scsi_qla_host *, struct response *,
 				struct list_head *);
 static uint16_t qla1280_get_nvram_word(struct scsi_qla_host *, uint32_t);
 static uint16_t qla1280_nvram_request(struct scsi_qla_host *, uint32_t);
-static uint16_t qla1280_debounce_register(volatile uint16_t __iomem *);
+static uint16_t qla1280_debounce_register(volatile uint16_t *);
 static request_t *qla1280_req_pkt(struct scsi_qla_host *);
 static int qla1280_check_for_dead_scsi_bus(struct scsi_qla_host *,
 					   unsigned int);
@@ -549,7 +546,7 @@ static void qla1280_get_target_parameters(struct scsi_qla_host *,
 static int qla1280_set_target_parameters(struct scsi_qla_host *, int, int);
 
 
-static struct qla_driver_setup driver_setup;
+static struct qla_driver_setup driver_setup __initdata;
 
 /*
  * convert scsi data direction to request_t control flags
@@ -588,7 +585,7 @@ static void __qla1280_dump_buffer(char *, int);
 static char *qla1280;
 
 /* insmod qla1280 options=verbose" */
-module_param(qla1280, charp, 0);
+MODULE_PARM(qla1280, "s");
 #else
 __setup("qla1280=", qla1280_setup);
 #endif
@@ -632,22 +629,18 @@ struct qla_boards {
 	unsigned char *fwver;	/* Ptr to F/W version array    */
 };
 
-/* NOTE: the last argument in each entry is used to index ql1280_board_tbl */
+/* NOTE: qla1280_pci_tbl and ql1280_board_tbl must be in the same order */
 static struct pci_device_id qla1280_pci_tbl[] = {
 	{PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP12160,
 		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-#ifdef CONFIG_SCSI_QLOGIC_1280_1040
-	{PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP1020,
-		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 1},
-#endif
 	{PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP1080,
-		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 2},
+		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 1},
 	{PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP1240,
-		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 3},
+		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 2},
 	{PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP1280,
-		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 4},
+		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 3},
 	{PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP10160,
-		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 5},
+		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 4},
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, qla1280_pci_tbl);
@@ -656,8 +649,6 @@ static struct qla_boards ql1280_board_tbl[] = {
 	/* Name ,  Number of ports, FW details */
 	{"QLA12160", 2, &fw12160i_code01[0], &fw12160i_length01,
 	 &fw12160i_addr01, &fw12160i_version_str[0]},
-	{"QLA1040", 1, &risc_code01[0], &risc_code_length01,
-	 &risc_code_addr01, &firmware_version[0]},
 	{"QLA1080", 1, &fw1280ei_code01[0], &fw1280ei_length01,
 	 &fw1280ei_addr01, &fw1280ei_version_str[0]},
 	{"QLA1240", 2, &fw1280ei_code01[0], &fw1280ei_length01,
@@ -949,7 +940,7 @@ static void qla1280_error_wait_timeout(unsigned long __data)
 static void qla1280_mailbox_timeout(unsigned long __data)
 {
 	struct scsi_qla_host *ha = (struct scsi_qla_host *)__data;
-	struct device_reg __iomem *reg;
+	struct device_reg *reg;
 	reg = ha->iobase;
 
 	ha->mailbox_out[0] = RD_REG_WORD(&reg->mailbox0);
@@ -1360,7 +1351,7 @@ static irqreturn_t
 qla1280_intr_handler(int irq, void *dev_id, struct pt_regs *regs)
 {
 	struct scsi_qla_host *ha;
-	struct device_reg __iomem *reg;
+	struct device_reg *reg;
 	u16 data;
 	int handled = 0;
 
@@ -1716,7 +1707,7 @@ qla1280_return_status(struct response * sts, struct scsi_cmnd *cp)
 static inline void
 qla1280_enable_intrs(struct scsi_qla_host *ha)
 {
-	struct device_reg __iomem *reg;
+	struct device_reg *reg;
 
 	reg = ha->iobase;
 	/* enable risc and host interrupts */
@@ -1728,7 +1719,7 @@ qla1280_enable_intrs(struct scsi_qla_host *ha)
 static inline void
 qla1280_disable_intrs(struct scsi_qla_host *ha)
 {
-	struct device_reg __iomem *reg;
+	struct device_reg *reg;
 
 	reg = ha->iobase;
 	/* disable risc and host interrupts */
@@ -1750,7 +1741,7 @@ qla1280_disable_intrs(struct scsi_qla_host *ha)
 static int __devinit
 qla1280_initialize_adapter(struct scsi_qla_host *ha)
 {
-	struct device_reg __iomem *reg;
+	struct device_reg *reg;
 	int status;
 	int bus;
 #if LINUX_VERSION_CODE > 0x020500
@@ -1768,16 +1759,10 @@ qla1280_initialize_adapter(struct scsi_qla_host *ha)
 	ha->flags.ints_enabled = 0;
 #if defined(CONFIG_IA64_GENERIC) || defined(CONFIG_IA64_SGI_SN2)
 	if (ia64_platform_is("sn2")) {
-		printk(KERN_INFO "scsi(%li): Enabling SN2 PCI DMA "
-		       "dual channel lockup workaround\n", ha->host_no);
 		ha->flags.use_pci_vchannel = 1;
 		driver_setup.no_nvram = 1;
 	}
 #endif
-
-	/* TODO: implement support for the 1040 nvram format */
-	if (IS_ISP1040(ha))
-		driver_setup.no_nvram = 1;
 
 	dprintk(1, "Configure PCI space for adapter...\n");
 
@@ -1921,7 +1906,7 @@ static int
 qla1280_chip_diag(struct scsi_qla_host *ha)
 {
 	uint16_t mb[MAILBOX_REGISTER_COUNT];
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 	int status = 0;
 	int cnt;
 	uint16_t data;
@@ -2339,7 +2324,9 @@ qla1280_set_target_defaults(struct scsi_qla_host *ha, int bus, int target)
 #if 1	/* Some SCSI Processors do not seem to like this */
 	nv->bus[bus].target[target].parameter.f.enable_wide = 1;
 #endif
-	nv->bus[bus].target[target].parameter.f.parity_checking = 1;
+	if (!IS_ISP1040(ha))
+		nv->bus[bus].target[target].parameter.f.parity_checking = 1;
+
 	nv->bus[bus].target[target].parameter.f.disconnect_allowed = 1;
 	nv->bus[bus].target[target].execution_throttle =
 		nv->bus[bus].max_queue_depth - 1;
@@ -2513,7 +2500,7 @@ qla1280_config_bus(struct scsi_qla_host *ha, int bus)
 static int
 qla1280_nvram_config(struct scsi_qla_host *ha)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 	struct nvram *nv = &ha->nvram;
 	int bus, target, status = 0;
 	uint16_t mb[MAILBOX_REGISTER_COUNT];
@@ -2699,7 +2686,7 @@ qla1280_get_nvram_word(struct scsi_qla_host *ha, uint32_t address)
 static uint16_t
 qla1280_nvram_request(struct scsi_qla_host *ha, uint32_t nv_cmd)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 	int cnt;
 	uint16_t data = 0;
 	uint16_t reg_data;
@@ -2742,7 +2729,7 @@ qla1280_nvram_request(struct scsi_qla_host *ha, uint32_t nv_cmd)
 static void
 qla1280_nv_write(struct scsi_qla_host *ha, uint16_t data)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 
 	WRT_REG_WORD(&reg->nvram, data | NV_SELECT);
 	RD_REG_WORD(&reg->id_l);	/* Flush PCI write */
@@ -2773,14 +2760,13 @@ qla1280_nv_write(struct scsi_qla_host *ha, uint16_t data)
 static int
 qla1280_mailbox_command(struct scsi_qla_host *ha, uint8_t mr, uint16_t *mb)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 #if 0
 	LIST_HEAD(done_q);
 #endif
 	int status = 0;
 	int cnt;
 	uint16_t *optr, *iptr;
-	uint16_t __iomem *mptr;
 	uint16_t data;
 	DECLARE_COMPLETION(wait);
 	struct timer_list timer;
@@ -2797,15 +2783,15 @@ qla1280_mailbox_command(struct scsi_qla_host *ha, uint8_t mr, uint16_t *mb)
 	 * available before starting sending the command data
 	 */
 	/* Load mailbox registers. */
-	mptr = (uint16_t __iomem *) &reg->mailbox0;
+	optr = (uint16_t *) &reg->mailbox0;
 	iptr = mb;
 	for (cnt = 0; cnt < MAILBOX_REGISTER_COUNT; cnt++) {
 		if (mr & BIT_0) {
-			WRT_REG_WORD(mptr, (*iptr));
+			WRT_REG_WORD(optr, (*iptr));
 		}
 
 		mr >>= 1;
-		mptr++;
+		optr++;
 		iptr++;
 	}
 
@@ -2881,7 +2867,7 @@ qla1280_mailbox_command(struct scsi_qla_host *ha, uint8_t mr, uint16_t *mb)
 static void
 qla1280_poll(struct scsi_qla_host *ha)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 	uint16_t data;
 	LIST_HEAD(done_q);
 
@@ -3084,7 +3070,7 @@ qla1280_abort_command(struct scsi_qla_host *ha, struct srb * sp, int handle)
 static void
 qla1280_reset_adapter(struct scsi_qla_host *ha)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 
 	ENTER("qla1280_reset_adapter");
 
@@ -3148,7 +3134,7 @@ qla1280_marker(struct scsi_qla_host *ha, int bus, int id, int lun, u8 type)
 static int
 qla1280_64bit_start_scsi(struct scsi_qla_host *ha, struct srb * sp)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 	struct scsi_cmnd *cmd = sp->cmd;
 	cmd_a64_entry_t *pkt;
 	struct scatterlist *sg = NULL;
@@ -3271,8 +3257,7 @@ qla1280_64bit_start_scsi(struct scsi_qla_host *ha, struct srb * sp)
 				dma_handle = sg_dma_address(sg);
 #if defined(CONFIG_IA64_GENERIC) || defined(CONFIG_IA64_SGI_SN2)
 				if (ha->flags.use_pci_vchannel)
-					sn_pci_set_vchan(ha->pdev,
-							(unsigned long *)&dma_handle,
+					sn_pci_set_vchan(ha->pdev, &dma_handle,
 							 SCSI_BUS_32(cmd));
 #endif
 				*dword_ptr++ =
@@ -3330,8 +3315,7 @@ qla1280_64bit_start_scsi(struct scsi_qla_host *ha, struct srb * sp)
 					dma_handle = sg_dma_address(sg);
 #if defined(CONFIG_IA64_GENERIC) || defined(CONFIG_IA64_SGI_SN2)
 				if (ha->flags.use_pci_vchannel)
-					sn_pci_set_vchan(ha->pdev, 
-							(unsigned long *)&dma_handle,
+					sn_pci_set_vchan(ha->pdev, &dma_handle,
 							 SCSI_BUS_32(cmd));
 #endif
 					*dword_ptr++ =
@@ -3365,8 +3349,7 @@ qla1280_64bit_start_scsi(struct scsi_qla_host *ha, struct srb * sp)
 			sp->saved_dma_handle = dma_handle;
 #if defined(CONFIG_IA64_GENERIC) || defined(CONFIG_IA64_SGI_SN2)
 			if (ha->flags.use_pci_vchannel)
-				sn_pci_set_vchan(ha->pdev, 
-						(unsigned long *)&dma_handle,
+				sn_pci_set_vchan(ha->pdev, &dma_handle,
 						 SCSI_BUS_32(cmd));
 #endif
 			*dword_ptr++ = cpu_to_le32(pci_dma_lo32(dma_handle));
@@ -3434,7 +3417,7 @@ qla1280_64bit_start_scsi(struct scsi_qla_host *ha, struct srb * sp)
 static int
 qla1280_32bit_start_scsi(struct scsi_qla_host *ha, struct srb * sp)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 	struct scsi_cmnd *cmd = sp->cmd;
 	struct cmd_entry *pkt;
 	struct scatterlist *sg = NULL;
@@ -3694,7 +3677,7 @@ out:
 static request_t *
 qla1280_req_pkt(struct scsi_qla_host *ha)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 	request_t *pkt = NULL;
 	int cnt;
 	uint32_t timer;
@@ -3762,7 +3745,7 @@ qla1280_req_pkt(struct scsi_qla_host *ha)
 static void
 qla1280_isp_cmd(struct scsi_qla_host *ha)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 
 	ENTER("qla1280_isp_cmd");
 
@@ -3800,7 +3783,7 @@ qla1280_isp_cmd(struct scsi_qla_host *ha)
 static void
 qla1280_isr(struct scsi_qla_host *ha, struct list_head *done_q)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 	struct response *pkt;
 	struct srb *sp = NULL;
 	uint16_t mailbox[MAILBOX_REGISTER_COUNT];
@@ -4259,7 +4242,7 @@ qla1280_error_entry(struct scsi_qla_host *ha, struct response *pkt,
 static int
 qla1280_abort_isp(struct scsi_qla_host *ha)
 {
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 	struct srb *sp;
 	int status = 0;
 	int cnt;
@@ -4337,7 +4320,7 @@ qla1280_abort_isp(struct scsi_qla_host *ha)
  *      register value.
  */
 static u16
-qla1280_debounce_register(volatile u16 __iomem * addr)
+qla1280_debounce_register(volatile u16 * addr)
 {
 	volatile u16 ret;
 	volatile u16 ret2;
@@ -4369,7 +4352,7 @@ static int
 qla1280_check_for_dead_scsi_bus(struct scsi_qla_host *ha, unsigned int bus)
 {
 	uint16_t config_reg, scsi_control;
-	struct device_reg __iomem *reg = ha->iobase;
+	struct device_reg *reg = ha->iobase;
 
 	if (ha->bus_settings[bus].scsi_bus_dead) {
 		WRT_REG_WORD(&reg->host_cmd, HC_PAUSE_RISC);
@@ -4643,7 +4626,6 @@ qla1280_get_token(char *str)
 
 #if LINUX_VERSION_CODE >= 0x020600
 static struct scsi_host_template qla1280_driver_template = {
-	.module			= THIS_MODULE,
 	.proc_name		= "qla1280",
 	.name			= "Qlogic ISP 1280/12160",
 	.info			= qla1280_info,
@@ -4788,7 +4770,7 @@ qla1280_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	host->base = (unsigned long)ha->mmpbase;
-	ha->iobase = (struct device_reg __iomem *)ha->mmpbase;
+	ha->iobase = (struct device_reg *)ha->mmpbase;
 #else
 	host->io_port = pci_resource_start(ha->pdev, 0);
 	if (!request_region(host->io_port, 0xff, "qla1280")) {

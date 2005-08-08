@@ -224,8 +224,9 @@ int ip_finish_output(struct sk_buff *skb)
 		       ip_finish_output2);
 }
 
-int ip_mc_output(struct sk_buff *skb)
+int ip_mc_output(struct sk_buff **pskb)
 {
+	struct sk_buff *skb = *pskb;
 	struct sock *sk = skb->sk;
 	struct rtable *rt = (struct rtable*)skb->dst;
 	struct net_device *dev = rt->u.dst.dev;
@@ -284,8 +285,10 @@ int ip_mc_output(struct sk_buff *skb)
 		return ip_finish_output(skb);
 }
 
-int ip_output(struct sk_buff *skb)
+int ip_output(struct sk_buff **pskb)
 {
+	struct sk_buff *skb = *pskb;
+
 	IP_INC_STATS(IPSTATS_MIB_OUTREQUESTS);
 
 	if (skb->len > dst_pmtu(skb->dst) && !skb_shinfo(skb)->tso_size)

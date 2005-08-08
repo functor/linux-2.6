@@ -23,7 +23,6 @@
 #include <linux/pagemap.h>
 #include <linux/bootmem.h>
 #include <linux/proc_fs.h>
-#include <linux/module.h>
 
 #include <asm/processor.h>
 #include <asm/system.h>
@@ -85,8 +84,6 @@ void show_mem(void)
 	printk("%d pages shared\n",shared);
 	printk("%d pages swap cached\n",cached);
 }
-
-EXPORT_SYMBOL_GPL(show_mem);
 
 /* References to section boundaries */
 
@@ -406,35 +403,6 @@ static inline int page_is_ram (unsigned long pagenr)
 
 extern int swiotlb_force;
 
-unsigned long next_ram_page (unsigned long pagenr)
-{
-	int i;
-	unsigned long min_pageno = ULONG_MAX;
-
-	pagenr++;
-
-	for (i = 0; i < e820.nr_map; i++) {
-		unsigned long addr, end;
-
-		if (e820.map[i].type != E820_RAM)	/* not usable memory */
-			continue;
-		/*
-		 *	!!!FIXME!!! Some BIOSen report areas as RAM that
-		 *	are not. Notably the 640->1Mb area. We need a sanity
-		 *	check here.
-		 */
-		addr = (e820.map[i].addr+PAGE_SIZE-1) >> PAGE_SHIFT;
-		end = (e820.map[i].addr+e820.map[i].size) >> PAGE_SHIFT;
-		if  ((pagenr >= addr) && (pagenr < end))
-			return pagenr;
-		if ((pagenr < addr) && (addr < min_pageno))
-			min_pageno = addr;
-	}
-	return min_pageno;
-}
-
-EXPORT_SYMBOL_GPL(next_ram_page);
-
 /*
  * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
  * valid. The argument is a physical page number.
@@ -537,8 +505,6 @@ void __init mem_init(void)
 #endif
 }
 
-extern char __initdata_begin[], __initdata_end[];
-
 void free_initmem(void)
 {
 	unsigned long addr;
@@ -547,11 +513,12 @@ void free_initmem(void)
 	for (; addr < (unsigned long)(&__init_end); addr += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(addr));
 		set_page_count(virt_to_page(addr), 1);
+#ifdef CONFIG_INIT_DEBUG
 		memset((void *)(addr & ~(PAGE_SIZE-1)), 0xcc, PAGE_SIZE); 
+#endif
 		free_page(addr);
 		totalram_pages++;
 	}
-	memset(__initdata_begin, 0xba, __initdata_end - __initdata_begin);
 	printk ("Freeing unused kernel memory: %luk freed\n", (&__init_end - &__init_begin) >> 10);
 }
 
@@ -611,7 +578,6 @@ int kern_addr_valid(unsigned long addr)
 		return 0;
 	return pfn_valid(pte_pfn(*pte));
 }
-EXPORT_SYMBOL_GPL(kern_addr_valid);
 
 #ifdef CONFIG_SYSCTL
 #include <linux/sysctl.h>
@@ -664,7 +630,7 @@ struct vm_area_struct *get_gate_vma(struct task_struct *tsk)
 	if (test_tsk_thread_flag(tsk, TIF_IA32)) {
 		/* lookup code assumes the pages are present. set them up
 		   now */
-		if (__map_syscall32(tsk->mm, VSYSCALL32_BASE) < 0)
+		if (__map_syscall32(tsk->mm, 0xfffe000) < 0)
 			return NULL;
 		return &gate32_vma;
 	}

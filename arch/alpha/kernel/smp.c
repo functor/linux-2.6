@@ -26,7 +26,6 @@
 #include <linux/irq.h>
 #include <linux/cache.h>
 #include <linux/profile.h>
-#include <linux/bitops.h>
 
 #include <asm/hwrpb.h>
 #include <asm/ptrace.h>
@@ -34,6 +33,7 @@
 
 #include <asm/io.h>
 #include <asm/irq.h>
+#include <asm/bitops.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/mmu_context.h>
