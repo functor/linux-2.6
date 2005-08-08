@@ -147,7 +147,7 @@ ia64_brk (unsigned long brk)
 		goto out;
 
 	/* Ok, looks good - let it rip. */
-	if (__do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
+	if (do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
 		goto out;
 set_brk:
 	mm->brk = brk;

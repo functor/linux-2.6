@@ -585,7 +585,6 @@ static int kimage_load_segment(struct kimage *image,
  * that to happen you need to do that yourself.
  */
 struct kimage *kexec_image = NULL;
-struct kimage *kexec_crash_image = NULL;
 
 asmlinkage long sys_kexec_load(unsigned long entry, unsigned long nr_segments,
 	struct kexec_segment *segments, unsigned long flags)
@@ -596,6 +595,13 @@ asmlinkage long sys_kexec_load(unsigned long entry, unsigned long nr_segments,
 	/* We only trust the superuser with rebooting the system. */
 	if (!capable(CAP_SYS_BOOT))
 		return -EPERM;
+
+	/*
+	 * In case we need just a little bit of special behavior for
+	 * reboot on panic.
+	 */
+	if (flags != 0)
+		return -EINVAL;
 
 	if (nr_segments > KEXEC_SEGMENT_MAX)
 		return -EINVAL;
@@ -626,10 +632,7 @@ asmlinkage long sys_kexec_load(unsigned long entry, unsigned long nr_segments,
 		}
 	}
 
-	if (!flags)
-		image = xchg(&kexec_image, image);
-	else
-		image = xchg(&kexec_crash_image, image);
+	image = xchg(&kexec_image, image);
 
  out:
 	kimage_free(image);

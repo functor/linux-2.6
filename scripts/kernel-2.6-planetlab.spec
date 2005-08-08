@@ -18,11 +18,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # that the kernel isn't the stock distribution kernel, for example by
 # adding some text to the end of the version number.
 #
-%define sublevel 10
+%define sublevel 9
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
 %define rhbsys  %([ -r /etc/beehive-root ] && echo  || echo .`whoami`)
-%define release 1.14_FC2.2.planetlab%{?date:.%{date}}
+%define release 1.11_FC2.1.planetlab%{?date:.%{date}}
 %define signmodules 0
 
 %define KVERREL %{PACKAGE_VERSION}-%{PACKAGE_RELEASE}
@@ -517,12 +517,6 @@ fi
 # no files
 
 %changelog
-* Thu Feb 17 2005 Marc E. Fiuczynski <mef@cs.princeton.edu>
-- merge to Fedora Core 2 2.6.10-1.14_FC2
-
-* Tue Feb 8 2005 Marc E. Fiuczynski <mef@cs.princeton.edu>
-- merge to Fedora Core 2 2.6.10-1.12_FC2
-
 * Tue Jan 18 2005 Marc E. Fiuczynski <mef@cs.princeton.edu>
 - merge to Fedora Core 2 2.6.9-1.11_FC2
 

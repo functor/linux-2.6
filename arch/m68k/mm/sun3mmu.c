@@ -7,6 +7,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/mm.h>

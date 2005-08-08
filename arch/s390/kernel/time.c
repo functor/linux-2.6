@@ -233,10 +233,8 @@ void account_ticks(struct pt_regs *regs)
 	while (ticks--)
 		update_process_times(user_mode(regs));
 #else
-	while (ticks--) {
+	while (ticks--)
 		do_timer(regs);
-		update_process_times(user_mode(regs));
-	}
 #endif
 	s390_do_profile(regs);
 }
@@ -260,21 +258,18 @@ static inline void stop_hz_timer(void)
 	if (sysctl_hz_timer != 0)
 		return;
 
-	cpu_set(smp_processor_id(), nohz_cpu_mask);
-
 	/*
 	 * Leave the clock comparator set up for the next timer
 	 * tick if either rcu or a softirq is pending.
 	 */
-	if (rcu_pending(smp_processor_id()) || local_softirq_pending()) {
-		cpu_clear(smp_processor_id(), nohz_cpu_mask);
+	if (rcu_pending(smp_processor_id()) || local_softirq_pending())
 		return;
-	}
 
 	/*
 	 * This cpu is going really idle. Set up the clock comparator
 	 * for the next event.
 	 */
+	cpu_set(smp_processor_id(), nohz_cpu_mask);
 	timer = (__u64) (next_timer_interrupt() - jiffies) + jiffies_64;
 	timer = jiffies_timer_cc + timer * CLK_TICKS_PER_JIFFY;
 	asm volatile ("SCKC %0" : : "m" (timer));

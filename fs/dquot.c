@@ -758,7 +758,7 @@ static inline void dquot_decr_inodes(struct dquot *dquot, unsigned long number)
 		dquot->dq_dqb.dqb_curinodes -= number;
 	else
 		dquot->dq_dqb.dqb_curinodes = 0;
-	if (dquot->dq_dqb.dqb_curinodes <= dquot->dq_dqb.dqb_isoftlimit)
+	if (dquot->dq_dqb.dqb_curinodes < dquot->dq_dqb.dqb_isoftlimit)
 		dquot->dq_dqb.dqb_itime = (time_t) 0;
 	clear_bit(DQ_INODES_B, &dquot->dq_flags);
 }
@@ -769,7 +769,7 @@ static inline void dquot_decr_space(struct dquot *dquot, qsize_t number)
 		dquot->dq_dqb.dqb_curspace -= number;
 	else
 		dquot->dq_dqb.dqb_curspace = 0;
-	if (toqb(dquot->dq_dqb.dqb_curspace) <= dquot->dq_dqb.dqb_bsoftlimit)
+	if (toqb(dquot->dq_dqb.dqb_curspace) < dquot->dq_dqb.dqb_bsoftlimit)
 		dquot->dq_dqb.dqb_btime = (time_t) 0;
 	clear_bit(DQ_BLKS_B, &dquot->dq_flags);
 }
@@ -811,22 +811,22 @@ static void print_warning(struct dquot *dquot, const char warntype)
 	tty_write_message(current->signal->tty, quotatypes[dquot->dq_type]);
 	switch (warntype) {
 		case IHARDWARN:
-			msg = " file limit reached.\r\n";
+			msg = " file limit reached.\n";
 			break;
 		case ISOFTLONGWARN:
-			msg = " file quota exceeded too long.\r\n";
+			msg = " file quota exceeded too long.\n";
 			break;
 		case ISOFTWARN:
-			msg = " file quota exceeded.\r\n";
+			msg = " file quota exceeded.\n";
 			break;
 		case BHARDWARN:
-			msg = " block limit reached.\r\n";
+			msg = " block limit reached.\n";
 			break;
 		case BSOFTLONGWARN:
-			msg = " block quota exceeded too long.\r\n";
+			msg = " block quota exceeded too long.\n";
 			break;
 		case BSOFTWARN:
-			msg = " block quota exceeded.\r\n";
+			msg = " block quota exceeded.\n";
 			break;
 	}
 	tty_write_message(current->signal->tty, msg);

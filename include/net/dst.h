@@ -67,7 +67,7 @@ struct dst_entry
 	struct xfrm_state	*xfrm;
 
 	int			(*input)(struct sk_buff*);
-	int			(*output)(struct sk_buff*);
+	int			(*output)(struct sk_buff**);
 
 #ifdef CONFIG_NET_CLS_ROUTE
 	__u32			tclassid;
@@ -103,19 +103,19 @@ struct dst_ops
 #ifdef __KERNEL__
 
 static inline u32
-dst_metric(const struct dst_entry *dst, int metric)
+dst_metric(struct dst_entry *dst, int metric)
 {
 	return dst->metrics[metric-1];
 }
 
 static inline u32
-dst_path_metric(const struct dst_entry *dst, int metric)
+dst_path_metric(struct dst_entry *dst, int metric)
 {
 	return dst->path->metrics[metric-1];
 }
 
 static inline u32
-dst_pmtu(const struct dst_entry *dst)
+dst_pmtu(struct dst_entry *dst)
 {
 	u32 mtu = dst_path_metric(dst, RTAX_MTU);
 	/* Yes, _exactly_. This is paranoia. */
@@ -222,7 +222,7 @@ static inline int dst_output(struct sk_buff *skb)
 	int err;
 
 	for (;;) {
-		err = skb->dst->output(skb);
+		err = skb->dst->output(&skb);
 
 		if (likely(err == 0))
 			return err;

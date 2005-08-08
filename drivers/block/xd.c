@@ -266,7 +266,7 @@ Enomem:
 /* xd_detect: scan the possible BIOS ROM locations for the signature strings */
 static u_char __init xd_detect (u_char *controller, unsigned int *address)
 {
-	int i, j;
+	u_char i,j,found = 0;
 
 	if (xd_override)
 	{
@@ -275,23 +275,15 @@ static u_char __init xd_detect (u_char *controller, unsigned int *address)
 		return(1);
 	}
 
-	for (i = 0; i < (sizeof(xd_bases) / sizeof(xd_bases[0])); i++) {
-		void __iomem *p = ioremap(xd_bases[i], 0x2000);
-		if (!p)
-			continue;
-		for (j = 1; j < (sizeof(xd_sigs) / sizeof(xd_sigs[0])); j++) {
-			const char *s = xd_sigs[j].string;
-			if (check_signature(p + xd_sigs[j].offset, s, strlen(s))) {
+	for (i = 0; i < (sizeof(xd_bases) / sizeof(xd_bases[0])) && !found; i++)
+		for (j = 1; j < (sizeof(xd_sigs) / sizeof(xd_sigs[0])) && !found; j++)
+			if (isa_check_signature(xd_bases[i] + xd_sigs[j].offset,xd_sigs[j].string,strlen(xd_sigs[j].string))) {
 				*controller = j;
 				xd_type = j;
 				*address = xd_bases[i];
-				iounmap(p);
-				return 1;
+				found++;
 			}
-		}
-		iounmap(p);
-	}
-	return 0;
+	return (found);
 }
 
 /* do_xd_request: handle an incoming request */

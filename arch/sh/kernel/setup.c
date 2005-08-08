@@ -443,7 +443,6 @@ static const char *cpu_name[] = {
 	[CPU_SH7751]	= "SH7751",
 	[CPU_SH7751R]	= "SH7751R",
 	[CPU_SH7760]	= "SH7760",
-	[CPU_SH73180]	= "SH73180",
 	[CPU_ST40RA]	= "ST40RA",
 	[CPU_ST40GX1]	= "ST40GX1",
 	[CPU_SH4_202]	= "SH4-202",
@@ -458,7 +457,7 @@ const char *get_cpu_subtype(void)
 
 #ifdef CONFIG_PROC_FS
 static const char *cpu_flags[] = {
-	"none", "fpu", "p2flush", "mmuassoc", "dsp", "perfctr",
+	"none", "fpu", "p2flush", "mmuassoc", "dsp",
 };
 
 static void show_cpuflags(struct seq_file *m)

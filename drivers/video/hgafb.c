@@ -59,16 +59,16 @@
 
 /* Description of the hardware layout */
 
-static void __iomem *hga_vram;			/* Base of video memory */
+static unsigned long hga_vram_base;		/* Base of video memory */
 static unsigned long hga_vram_len;		/* Size of video memory */
 
 #define HGA_ROWADDR(row) ((row%4)*8192 + (row>>2)*90)
 #define HGA_TXT			0
 #define HGA_GFX			1
 
-static inline u8 __iomem * rowaddr(struct fb_info *info, u_int row)
+static inline u8* rowaddr(struct fb_info *info, u_int row)
 {
-	return info->screen_base + HGA_ROWADDR(row);
+        return info->screen_base + HGA_ROWADDR(row);
 }
 
 static int hga_mode = -1;			/* 0 = txt, 1 = gfx mode */
@@ -176,7 +176,7 @@ static void hga_clear_screen(void)
 		fillchar = 0x00;
 	spin_unlock_irqrestore(&hga_reg_lock, flags);
 	if (fillchar != 0xbf)
-		memset_io(hga_vram, fillchar, hga_vram_len);
+		isa_memset_io(hga_vram_base, fillchar, hga_vram_len);
 }
 
 static void hga_txt_mode(void)
@@ -244,13 +244,13 @@ static void hga_gfx_mode(void)
 static void hga_show_logo(struct fb_info *info)
 {
 /*
-	void __iomem *dest = hga_vram;
+	unsigned long dest = hga_vram_base;
 	char *logo = linux_logo_bw;
 	int x, y;
 	
 	for (y = 134; y < 134 + 80 ; y++) * this needs some cleanup *
 		for (x = 0; x < 10 ; x++)
-			writeb(~*(logo++),(dest + HGA_ROWADDR(y) + x + 40));
+			isa_writeb(~*(logo++),(dest + HGA_ROWADDR(y) + x + 40));
 */
 }
 
@@ -282,12 +282,11 @@ static void hga_blank(int blank_mode)
 static int __init hga_card_detect(void)
 {
 	int count=0;
-	void __iomem *p, *q;
+	unsigned long p, q;
 	unsigned short p_save, q_save;
 
+	hga_vram_base = 0xb0000;
 	hga_vram_len  = 0x08000;
-
-	hga_vram = ioremap(0xb0000, hga_vram_len);
 
 	if (request_region(0x3b0, 12, "hgafb"))
 		release_io_ports = 1;
@@ -296,14 +295,14 @@ static int __init hga_card_detect(void)
 
 	/* do a memory check */
 
-	p = hga_vram;
-	q = hga_vram + 0x01000;
+	p = hga_vram_base;
+	q = hga_vram_base + 0x01000;
 
-	p_save = readw(p); q_save = readw(q);
+	p_save = isa_readw(p); q_save = isa_readw(q);
 
-	writew(0xaa55, p); if (readw(p) == 0xaa55) count++;
-	writew(0x55aa, p); if (readw(p) == 0x55aa) count++;
-	writew(p_save, p);
+	isa_writew(0xaa55, p); if (isa_readw(p) == 0xaa55) count++;
+	isa_writew(0x55aa, p); if (isa_readw(p) == 0x55aa) count++;
+	isa_writew(p_save, p);
 
 	if (count != 2) {
 		return 0;
@@ -456,7 +455,7 @@ static int hgafb_blank(int blank_mode, struct fb_info *info)
 static void hgafb_fillrect(struct fb_info *info, const struct fb_fillrect *rect)
 {
 	u_int rows, y;
-	u8 __iomem *dest;
+	u8 *dest;
 
 	y = rect->dy;
 
@@ -467,7 +466,7 @@ static void hgafb_fillrect(struct fb_info *info, const struct fb_fillrect *rect)
 			//fb_memset(dest, rect->color, (rect->width >> 3));
 			break;
 		case ROP_XOR:
-			fb_writeb(~(fb_readb(dest)), dest);
+			*dest = ~*dest;
 			break;
 		}
 	}
@@ -476,8 +475,7 @@ static void hgafb_fillrect(struct fb_info *info, const struct fb_fillrect *rect)
 static void hgafb_copyarea(struct fb_info *info, const struct fb_copyarea *area)
 {
 	u_int rows, y1, y2;
-	u8 __iomem *src;
-	u8 __iomem *dest;
+	u8 *src, *dest;
 
 	if (area->dy <= area->sy) {
 		y1 = area->sy;
@@ -506,15 +504,14 @@ static void hgafb_copyarea(struct fb_info *info, const struct fb_copyarea *area)
 
 static void hgafb_imageblit(struct fb_info *info, const struct fb_image *image)
 {
-	u8 __iomem *dest;
-	u8 *cdat = (u8 *) image->data;
+	u8 *dest, *cdat = (u8 *) image->data;
 	u_int rows, y = image->dy;
 	u8 d;
 
 	for (rows = image->height; rows--; y++) {
 		d = *cdat++;
 		dest = rowaddr(info, y) + (image->dx >> 3);
-		fb_writeb(d, dest);
+		*dest = d;
 	}
 }
 #else /* !CONFIG_FB_HGA_ACCEL */
@@ -555,15 +552,13 @@ int __init hgafb_init(void)
 
 	if (! hga_card_detect()) {
 		printk(KERN_INFO "hgafb: HGA card not detected.\n");
-		if (hga_vram)
-			iounmap(hga_vram);
 		return -EINVAL;
 	}
 
 	printk(KERN_INFO "hgafb: %s with %ldK of memory detected.\n",
 		hga_type_name, hga_vram_len/1024);
 
-	hga_fix.smem_start = (unsigned long)hga_vram;
+	hga_fix.smem_start = VGA_MAP_MEM(hga_vram_base);
 	hga_fix.smem_len = hga_vram_len;
 
 	fb_info.flags = FBINFO_DEFAULT | FBINFO_HWACCEL_YPAN;
@@ -575,12 +570,10 @@ int __init hgafb_init(void)
 	fb_info.monspecs.vfmax = 10000;
 	fb_info.monspecs.dpms = 0;
 	fb_info.fbops = &hgafb_ops;
-	fb_info.screen_base = hga_vram;
+	fb_info.screen_base = (char *)hga_fix.smem_start;
 
-        if (register_framebuffer(&fb_info) < 0) {
-		iounmap(hga_vram);
-		return -EINVAL;
-	}
+        if (register_framebuffer(&fb_info) < 0)
+                return -EINVAL;
 
         printk(KERN_INFO "fb%d: %s frame buffer device\n",
                fb_info.node, fb_info.fix.id);
@@ -602,7 +595,6 @@ static void __exit hgafb_exit(void)
 	hga_txt_mode();
 	hga_clear_screen();
 	unregister_framebuffer(&fb_info);
-	iounmap(hga_vram);
 	if (release_io_ports) release_region(0x3b0, 12);
 	if (release_io_port) release_region(0x3bf, 1);
 }

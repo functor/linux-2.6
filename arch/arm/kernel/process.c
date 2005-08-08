@@ -97,8 +97,6 @@ void default_idle(void)
  */
 void cpu_idle(void)
 {
-	local_fiq_enable();
-
 	/* endless idle loop with no priority at all */
 	while (1) {
 		void (*idle)(void) = pm_idle;

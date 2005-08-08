@@ -5,7 +5,7 @@
  *                     Steven J. Hill <sjhill@realitydiluted.com>
  *		       Thomas Gleixner <tglx@linutronix.de>
  *
- * $Id: nand.h,v 1.66 2004/10/02 10:07:08 gleixner Exp $
+ * $Id: nand.h,v 1.63 2004/07/07 16:29:43 gleixner Exp $
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -212,18 +212,6 @@ typedef enum {
 	FL_CACHEDPRG,
 } nand_state_t;
 
-/* Keep gcc happy */
-struct nand_chip;
-
-/**
- * struct nand_hw_control - Control structure for hardware controller (e.g ECC generator) shared among independend devices
- * @lock:               protection lock  
- * @active:		the mtd device which holds the controller currently
- */
-struct nand_hw_control {
-	spinlock_t	 lock;
-	struct nand_chip *active;
-};
 
 /**
  * struct nand_chip - NAND Private Flash Chip Data
@@ -277,13 +265,12 @@ struct nand_hw_control {
  * @bbt:		[INTERN] bad block table pointer
  * @bbt_td:		[REPLACEABLE] bad block table descriptor for flash lookup
  * @bbt_md:		[REPLACEABLE] bad block table mirror descriptor
- * @controller:		[OPTIONAL] a pointer to a hardware controller structure which is shared among multiple independend devices
  * @priv:		[OPTIONAL] pointer to private chip date
  */
  
 struct nand_chip {
-	void  __iomem	*IO_ADDR_R;
-	void  __iomem 	*IO_ADDR_W;
+	unsigned long 	IO_ADDR_R;
+	unsigned long 	IO_ADDR_W;
 	
 	u_char		(*read_byte)(struct mtd_info *mtd);
 	void		(*write_byte)(struct mtd_info *mtd, u_char byte);
@@ -330,7 +317,6 @@ struct nand_chip {
 	uint8_t		*bbt;
 	struct nand_bbt_descr	*bbt_td;
 	struct nand_bbt_descr	*bbt_md;
-	struct nand_hw_control  *controller;
 	void		*priv;
 };
 

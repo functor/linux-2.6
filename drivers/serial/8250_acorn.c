@@ -11,6 +11,7 @@
 #include <linux/types.h>
 #include <linux/tty.h>
 #include <linux/serial_core.h>
+#include <linux/serial.h>
 #include <linux/errno.h>
 #include <linux/ioport.h>
 #include <linux/slab.h>
@@ -21,13 +22,11 @@
 #include <asm/ecard.h>
 #include <asm/string.h>
 
-#include "8250.h"
-
 #define MAX_PORTS	3
 
 struct serial_card_type {
 	unsigned int	num_ports;
-	unsigned int	uartclk;
+	unsigned int	baud_base;
 	unsigned int	type;
 	unsigned int	offset[MAX_PORTS];
 };
@@ -37,15 +36,31 @@ struct serial_card_info {
 	int		ports[MAX_PORTS];
 };
 
+static inline int
+serial_register_onedev(unsigned long baddr, void *vaddr, int irq, unsigned int baud_base)
+{
+	struct serial_struct req;
+
+	memset(&req, 0, sizeof(req));
+	req.irq			= irq;
+	req.flags		= UPF_AUTOPROBE | UPF_SHARE_IRQ;
+	req.baud_base		= baud_base;
+	req.io_type		= UPIO_MEM;
+	req.iomem_base		= vaddr;
+	req.iomem_reg_shift	= 2;
+	req.iomap_base		= baddr;
+
+	return register_serial(&req);
+}
+
 static int __devinit
 serial_card_probe(struct expansion_card *ec, const struct ecard_id *id)
 {
 	struct serial_card_info *info;
 	struct serial_card_type *type = id->data;
-	struct uart_port port;
 	unsigned long bus_addr;
-	unsigned char __iomem *virt_addr;
-	unsigned int i;
+	unsigned char *virt_addr;
+	unsigned int port;
 
 	info = kmalloc(sizeof(struct serial_card_info), GFP_KERNEL);
 	if (!info)
@@ -54,28 +69,21 @@ serial_card_probe(struct expansion_card *ec, const struct ecard_id *id)
 	memset(info, 0, sizeof(struct serial_card_info));
 	info->num_ports = type->num_ports;
 
-	bus_addr = ecard_resource_start(ec, type->type);
-	virt_addr = ioremap(bus_addr, ecard_resource_len(ec, type->type));
+	ecard_set_drvdata(ec, info);
+
+	bus_addr = ec->resource[type->type].start;
+	virt_addr = ioremap(bus_addr, ec->resource[type->type].end - bus_addr + 1);
 	if (!virt_addr) {
 		kfree(info);
 		return -ENOMEM;
 	}
 
-	ecard_set_drvdata(ec, info);
+	for (port = 0; port < info->num_ports; port ++) {
+		unsigned long baddr = bus_addr + type->offset[port];
+		unsigned char *vaddr = virt_addr + type->offset[port];
 
-	memset(&port, 0, sizeof(struct uart_port));
-	port.irq	= ec->irq;
-	port.flags	= UPF_BOOT_AUTOCONF | UPF_SHARE_IRQ;
-	port.uartclk	= type->uartclk;
-	port.iotype	= UPIO_MEM;
-	port.regshift	= 2;
-	port.dev	= &ec->dev;
-
-	for (i = 0; i < info->num_ports; i ++) {
-		port.membase = virt_addr + type->offset[i];
-		port.mapbase = bus_addr + type->offset[i];
-
-		info->ports[i] = serial8250_register_port(&port);
+		info->ports[port] = serial_register_onedev(baddr, vaddr,
+						ec->irq, type->baud_base);
 	}
 
 	return 0;
@@ -90,21 +98,21 @@ static void __devexit serial_card_remove(struct expansion_card *ec)
 
 	for (i = 0; i < info->num_ports; i++)
 		if (info->ports[i] > 0)
-			serial8250_unregister_port(info->ports[i]);
+			unregister_serial(info->ports[i]);
 
 	kfree(info);
 }
 
 static struct serial_card_type atomwide_type = {
 	.num_ports	= 3,
-	.uartclk	= 7372800,
+	.baud_base	= 7372800 / 16,
 	.type		= ECARD_RES_IOCSLOW,
 	.offset		= { 0x2800, 0x2400, 0x2000 },
 };
 
 static struct serial_card_type serport_type = {
 	.num_ports	= 2,
-	.uartclk	= 3686400,
+	.baud_base	= 3686400 / 16,
 	.type		= ECARD_RES_IOCSLOW,
 	.offset		= { 0x2000, 0x2020 },
 };
@@ -120,7 +128,7 @@ static struct ecard_driver serial_card_driver = {
 	.remove 	= __devexit_p(serial_card_remove),
 	.id_table	= serial_cids,
 	.drv = {
-		.name	= "8250_acorn",
+		.name		= "8250_acorn",
 	},
 };
 

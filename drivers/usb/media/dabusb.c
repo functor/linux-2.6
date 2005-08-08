@@ -109,13 +109,16 @@ static void dump_urb (struct urb *urb)
 static int dabusb_cancel_queue (pdabusb_t s, struct list_head *q)
 {
 	unsigned long flags;
+	struct list_head *p;
 	pbuff_t b;
 
 	dbg("dabusb_cancel_queue");
 
 	spin_lock_irqsave (&s->lock, flags);
 
-	list_for_each_entry(b, q, buff_list) {
+	for (p = q->next; p != q; p = p->next) {
+		b = list_entry (p, buff_t, buff_list);
+
 #ifdef DEBUG
 		dump_urb(b->purb);
 #endif
@@ -595,7 +598,7 @@ static int dabusb_open (struct inode *inode, struct file *file)
 		if (file->f_flags & O_NONBLOCK) {
 			return -EBUSY;
 		}
-		msleep_interruptible(500);
+		schedule_timeout (HZ / 2);
 
 		if (signal_pending (current)) {
 			return -EAGAIN;

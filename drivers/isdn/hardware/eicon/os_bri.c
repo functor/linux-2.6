@@ -78,7 +78,7 @@ int diva_bri_init_card(diva_os_xdi_adapter_t * a)
 	word cmd = 0, cmd_org;
 	byte Bus, Slot;
 	void *hdev;
-	byte __iomem *p;
+	byte *p;
 
 	/*
 	   Set properties
@@ -331,11 +331,10 @@ void diva_os_prepare_maestra_functions(PISDN_ADAPTER IoAdapter)
 static dword diva_bri_get_serial_number(diva_os_xdi_adapter_t * a)
 {
 	dword serNo = 0;
-	byte __iomem *confIO;
-	word serHi, serLo;
-	word __iomem *confMem;
+	byte *confIO;
+	word serHi, serLo, *confMem;
 
-	confIO = DIVA_OS_MEM_ATTACH_CFG(&a->xdi_adapter);
+	confIO = (byte *) DIVA_OS_MEM_ATTACH_CFG(&a->xdi_adapter);
 	serHi = (word) (inppw(&confIO[0x22]) & 0x0FFF);
 	serLo = (word) (inppw(&confIO[0x26]) & 0x0FFF);
 	serNo = ((dword) serHi << 16) | (dword) serLo;
@@ -344,7 +343,7 @@ static dword diva_bri_get_serial_number(diva_os_xdi_adapter_t * a)
 	if ((serNo == 0) || (serNo == 0xFFFFFFFF)) {
 		DBG_FTL(("W: BRI use BAR[0] to get card serial number"))
 
-		confMem = (word __iomem *)DIVA_OS_MEM_ATTACH_RAM(&a->xdi_adapter);
+		confMem = (word *) DIVA_OS_MEM_ATTACH_RAM(&a->xdi_adapter);
 		serHi = (word) (READ_WORD(&confMem[0x11]) & 0x0FFF);
 		serLo = (word) (READ_WORD(&confMem[0x13]) & 0x0FFF);
 		serNo = (((dword) serHi) << 16) | ((dword) serLo);
@@ -514,9 +513,9 @@ diva_bri_cmd_card_proc(struct _diva_os_xdi_adapter *a,
 
 static int diva_bri_reset_adapter(PISDN_ADAPTER IoAdapter)
 {
-	byte __iomem *addrHi, *addrLo, *ioaddr;
+	byte *addrHi, *addrLo, *ioaddr;
 	dword i;
-	byte __iomem *Port;
+	byte *Port;
 
 	if (!IoAdapter->port) {
 		return (-1);
@@ -603,8 +602,8 @@ static int
 diva_bri_write_sdram_block(PISDN_ADAPTER IoAdapter,
 			   dword address, const byte * data, dword length)
 {
-	byte __iomem *addrHi, *addrLo, *ioaddr;
-	byte __iomem *Port;
+	byte *addrHi, *addrLo, *ioaddr;
+	byte *Port;
 
 	if (!IoAdapter->port) {
 		return (-1);
@@ -631,9 +630,9 @@ static int
 diva_bri_start_adapter(PISDN_ADAPTER IoAdapter,
 		       dword start_address, dword features)
 {
-	byte __iomem *Port;
+	byte *Port;
 	dword i, test;
-	byte __iomem *addrHi, *addrLo, *ioaddr;
+	byte *addrHi, *addrLo, *ioaddr;
 	int started = 0;
 	ADAPTER *a = &IoAdapter->a;
 

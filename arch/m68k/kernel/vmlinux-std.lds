@@ -15,7 +15,7 @@ SECTIONS
 	SCHED_TEXT
 	*(.fixup)
 	*(.gnu.warning)
-	} :text = 0x4e75
+	} = 0x4e75
 
   . = ALIGN(16);		/* Exception table */
   __start___ex_table = .;
@@ -34,7 +34,7 @@ SECTIONS
   .bss : { *(.bss) }		/* BSS */
 
   . = ALIGN(16);
-  .data.cacheline_aligned : { *(.data.cacheline_aligned) } :data
+  .data.cacheline_aligned : { *(.data.cacheline_aligned) }
 
   _edata = .;			/* End of data section */
 

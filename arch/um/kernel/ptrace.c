@@ -22,11 +22,9 @@
  */
 void ptrace_disable(struct task_struct *child)
 { 
-	child->ptrace &= ~PT_DTRACE;
-	child->thread.singlestep_syscall = 0;
 }
 
-long sys_ptrace(long request, long pid, long addr, long data)
+int sys_ptrace(long request, long pid, long addr, long data)
 {
 	struct task_struct *child;
 	int i, ret;
@@ -55,6 +53,8 @@ long sys_ptrace(long request, long pid, long addr, long data)
 	read_unlock(&tasklist_lock);
 	if (!child)
 		goto out;
+	if (!vx_check(vx_task_xid(child), VX_WATCH|VX_IDENT))
+		goto out_tsk;
 
 	ret = -EPERM;
 	if (pid == 1)		/* you may not mess with init */
@@ -141,9 +141,6 @@ long sys_ptrace(long request, long pid, long addr, long data)
 		ret = -EIO;
 		if ((unsigned long) data > _NSIG)
 			break;
-
-		child->ptrace &= ~PT_DTRACE;
-		child->thread.singlestep_syscall = 0;
 		if (request == PTRACE_SYSCALL) {
 			set_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
 		}
@@ -165,9 +162,6 @@ long sys_ptrace(long request, long pid, long addr, long data)
 		ret = 0;
 		if (child->exit_state == EXIT_ZOMBIE)	/* already dead */
 			break;
-
-		child->ptrace &= ~PT_DTRACE;
-		child->thread.singlestep_syscall = 0;
 		child->exit_code = SIGKILL;
 		wake_up_process(child);
 		break;
@@ -179,7 +173,6 @@ long sys_ptrace(long request, long pid, long addr, long data)
 			break;
 		clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
 		child->ptrace |= PT_DTRACE;
-		child->thread.singlestep_syscall = 0;
 		child->exit_code = data;
 		/* give it a chance to run. */
 		wake_up_process(child);
@@ -308,9 +301,6 @@ long sys_ptrace(long request, long pid, long addr, long data)
 
 void syscall_trace(union uml_pt_regs *regs, int entryexit)
 {
-	int is_singlestep = (current->ptrace & PT_DTRACE) && entryexit;
-	int tracesysgood;
-
 	if (unlikely(current->audit_context)) {
 		if (!entryexit)
 			audit_syscall_entry(current, regs->orig_eax,
@@ -320,20 +310,18 @@ void syscall_trace(union uml_pt_regs *regs, int entryexit)
 			audit_syscall_exit(current, regs->eax);
 	}
 
-	if (!test_thread_flag(TIF_SYSCALL_TRACE) && !is_singlestep)
+	if (!test_thread_flag(TIF_SYSCALL_TRACE))
 		return;
 	if (!(current->ptrace & PT_PTRACED))
 		return;
 
 	/* the 0x80 provides a way for the tracing parent to distinguish
 	   between a syscall stop and SIGTRAP delivery */
-	tracesysgood = (current->ptrace & PT_TRACESYSGOOD) && !is_singlestep;
-	ptrace_notify(SIGTRAP | (tracesysgood ? 0x80 : 0));
+	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
+				 ? 0x80 : 0));
 
-	/* force do_signal() --> is_syscall() */
-	set_thread_flag(TIF_SIGPENDING);
-
-	/* this isn't the same as continuing with a signal, but it will do
+	/*
+	 * this isn't the same as continuing with a signal, but it will do
 	 * for normal use.  strace only continues with a signal if the
 	 * stopping signal is not SIGTRAP.  -brl
 	 */

@@ -56,7 +56,6 @@
 #include <asm/smp.h>
 #include <asm/proto.h>
 #include <asm/setup.h>
-#include <asm/mach_apic.h>
 
 /*
  * Machine setup..
@@ -711,6 +710,7 @@ static void __init detect_ht(struct cpuinfo_x86 *c)
 #ifdef CONFIG_SMP
 	u32 	eax, ebx, ecx, edx;
 	int 	index_lsb, index_msb, tmp;
+	int	initial_apic_id;
 	int 	cpu = smp_processor_id();
 	
 	if (!cpu_has(c, X86_FEATURE_HT))
@@ -745,7 +745,8 @@ static void __init detect_ht(struct cpuinfo_x86 *c)
 		}
 		if (index_lsb != index_msb )
 			index_msb++;
-		phys_proc_id[cpu] = phys_pkg_id(index_msb);
+		initial_apic_id = hard_smp_processor_id();
+		phys_proc_id[cpu] = initial_apic_id >> index_msb;
 		
 		printk(KERN_INFO  "CPU: Physical Processor ID: %d\n",
 		       phys_proc_id[cpu]);
@@ -908,9 +909,7 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 			boot_cpu_data.x86_capability[i] &= c->x86_capability[i];
 	}
 
-#ifdef CONFIG_X86_MCE
 	mcheck_init(c);
-#endif
 }
  
 
@@ -949,10 +948,10 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	        "fxsr", "sse", "sse2", "ss", "ht", "tm", "ia64", NULL,
 
 		/* AMD-defined */
-		"pni", NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 		NULL, NULL, NULL, "syscall", NULL, NULL, NULL, NULL,
 		NULL, NULL, NULL, NULL, "nx", NULL, "mmxext", NULL,
-		NULL, "fxsr_opt", NULL, NULL, NULL, "lm", "3dnowext", "3dnow",
+		NULL, NULL, NULL, NULL, NULL, "lm", "3dnowext", "3dnow",
 
 		/* Transmeta-defined */
 		"recovery", "longrun", NULL, "lrti", NULL, NULL, NULL, NULL,
@@ -971,12 +970,6 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 		"tm2", NULL, "cid", NULL, NULL, "cx16", "xtpr", NULL,
 		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-
-		/* AMD-defined (#2) */
-		"lahf_lm", "htvalid", NULL, NULL, NULL, NULL, NULL, NULL,
-		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 	};
 	static char *x86_power_flags[] = { 
 		"ts",	/* temperature sensor */

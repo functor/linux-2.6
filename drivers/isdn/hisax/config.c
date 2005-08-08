@@ -843,8 +843,9 @@ static int init_card(struct IsdnCardState *cs)
 	}
 	while (cnt) {
 		cs->cardmsg(cs, CARD_INIT, NULL);
+		set_current_state(TASK_UNINTERRUPTIBLE);
 		/* Timeout 10ms */
-		msleep(10);
+		schedule_timeout((10 * HZ) / 1000);
 		printk(KERN_INFO "%s: IRQ %d count %d\n",
 		       CardType[cs->typ], cs->irq, kstat_irqs(cs->irq));
 		if (kstat_irqs(cs->irq) == irq_cnt) {

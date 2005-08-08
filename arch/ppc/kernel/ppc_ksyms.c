@@ -15,7 +15,6 @@
 #include <linux/delay.h>
 #include <linux/ide.h>
 #include <linux/pm.h>
-#include <linux/bitops.h>
 
 #include <asm/page.h>
 #include <asm/semaphore.h>
@@ -24,6 +23,7 @@
 #include <asm/io.h>
 #include <asm/ide.h>
 #include <asm/atomic.h>
+#include <asm/bitops.h>
 #include <asm/checksum.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
@@ -84,6 +84,10 @@ EXPORT_SYMBOL(SingleStepException);
 EXPORT_SYMBOL(sys_sigreturn);
 EXPORT_SYMBOL(ppc_n_lost_interrupts);
 EXPORT_SYMBOL(ppc_lost_interrupts);
+EXPORT_SYMBOL(enable_irq);
+EXPORT_SYMBOL(disable_irq);
+EXPORT_SYMBOL(disable_irq_nosync);
+EXPORT_SYMBOL(probe_irq_mask);
 
 EXPORT_SYMBOL(ISA_DMA_THRESHOLD);
 EXPORT_SYMBOL(DMA_MODE_READ);
@@ -201,6 +205,7 @@ EXPORT_SYMBOL(giveup_spe);
 #ifdef CONFIG_SMP
 EXPORT_SYMBOL(smp_call_function);
 EXPORT_SYMBOL(smp_hw_index);
+EXPORT_SYMBOL(synchronize_irq);
 #endif
 
 EXPORT_SYMBOL(ppc_md);
@@ -287,6 +292,8 @@ EXPORT_SYMBOL(local_irq_restore_end);
 #endif
 EXPORT_SYMBOL(timer_interrupt);
 EXPORT_SYMBOL(irq_desc);
+void ppc_irq_dispatch_handler(struct pt_regs *, int);
+EXPORT_SYMBOL(ppc_irq_dispatch_handler);
 EXPORT_SYMBOL(tb_ticks_per_jiffy);
 EXPORT_SYMBOL(get_wchan);
 EXPORT_SYMBOL(console_drivers);
@@ -320,6 +327,9 @@ EXPORT_SYMBOL(cpm_free_handler);
 #endif /* CONFIG_8xx */
 #if defined(CONFIG_8xx) || defined(CONFIG_40x) || defined(CONFIG_85xx)
 EXPORT_SYMBOL(__res);
+#endif
+#if defined(CONFIG_8xx)
+EXPORT_SYMBOL(request_8xxirq);
 #endif
 
 EXPORT_SYMBOL(next_mmu_context);

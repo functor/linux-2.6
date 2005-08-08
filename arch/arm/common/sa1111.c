@@ -797,8 +797,6 @@ struct sa1111_save_data {
 	unsigned int	wakeen1;
 };
 
-#ifdef	CONFIG_PM
-
 static int sa1111_suspend(struct device *dev, u32 state, u32 level)
 {
 	struct sa1111 *sachip = dev_get_drvdata(dev);
@@ -810,10 +808,11 @@ static int sa1111_suspend(struct device *dev, u32 state, u32 level)
 	if (level != SUSPEND_DISABLE)
 		return 0;
 
-	save = kmalloc(sizeof(struct sa1111_save_data), GFP_KERNEL);
-	if (!save)
+	dev->saved_state = kmalloc(sizeof(struct sa1111_save_data), GFP_KERNEL);
+	if (!dev->saved_state)
 		return -ENOMEM;
-	dev->power.saved_state = save;
+
+	save = (struct sa1111_save_data *)dev->saved_state;
 
 	spin_lock_irqsave(&sachip->lock, flags);
 
@@ -871,7 +870,7 @@ static int sa1111_resume(struct device *dev, u32 level)
 	if (level != RESUME_ENABLE)
 		return 0;
 
-	save = (struct sa1111_save_data *)dev->power.saved_state;
+	save = (struct sa1111_save_data *)dev->saved_state;
 	if (!save)
 		return 0;
 
@@ -916,17 +915,11 @@ static int sa1111_resume(struct device *dev, u32 level)
 
 	spin_unlock_irqrestore(&sachip->lock, flags);
 
-	dev->power.saved_state = NULL;
+	dev->saved_state = NULL;
 	kfree(save);
 
 	return 0;
 }
-
-#else	/* !CONFIG_PM */
-#define sa1111_resume	NULL
-#define sa1111_suspend	NULL
-#endif	/* !CONFIG_PM */
-
 
 static int sa1111_probe(struct device *dev)
 {
@@ -950,10 +943,8 @@ static int sa1111_remove(struct device *dev)
 		__sa1111_remove(sachip);
 		dev_set_drvdata(dev, NULL);
 
-#ifdef CONFIG_PM
-		kfree(dev->power.saved_state);
-		dev->power.saved_state = NULL;
-#endif
+		kfree(dev->saved_state);
+		dev->saved_state = NULL;
 	}
 
 	return 0;

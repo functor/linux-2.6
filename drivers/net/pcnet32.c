@@ -47,8 +47,8 @@ DRV_NAME ".c:v" DRV_VERSION " " DRV_RELDATE " tsbogend@alpha.franken.de\n";
 #include <linux/skbuff.h>
 #include <linux/spinlock.h>
 #include <linux/moduleparam.h>
-#include <linux/bitops.h>
 
+#include <asm/bitops.h>
 #include <asm/dma.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
@@ -359,9 +359,9 @@ struct pcnet32_private {
     struct net_device_stats stats;
     char		tx_full;
     int			options;
-    unsigned int	shared_irq:1,	/* shared irq possible */
-			dxsuflo:1,	/* disable transmit stop on uflo */
-			mii:1;		/* mii port available */
+    int	shared_irq:1,			/* shared irq possible */
+	dxsuflo:1,			/* disable transmit stop on uflo */
+	mii:1;				/* mii port available */
     struct net_device	*next;
     struct mii_if_info	mii_if;
     struct timer_list	watchdog_timer;
@@ -1010,11 +1010,7 @@ pcnet32_probe_pci(struct pci_dev *pdev, const struct pci_device_id *ent)
 	return -EBUSY;
     }
 
-    err =  pcnet32_probe1(ioaddr, 1, pdev);
-    if (err < 0) {
-	pci_disable_device(pdev);
-    }
-    return err;
+    return pcnet32_probe1(ioaddr, 1, pdev);
 }
 
 
@@ -1429,32 +1425,26 @@ pcnet32_open(struct net_device *dev)
 	val |= 0x10;
     lp->a.write_csr (ioaddr, 124, val);
 
-    /* Skip PHY selection on AT2701FX, looses link otherwise */
-    if(lp->pci_dev->subsystem_vendor == PCI_VENDOR_ID_AT && 
-       lp->pci_dev->subsystem_device == PCI_SUBDEVICE_ID_AT_2701FX ) {
-    	printk(KERN_DEBUG "pcnet32: Skipping PHY selection.\n");
+    /* 24 Jun 2004 according AMD, in order to change the PHY,
+     * DANAS (or DISPM for 79C976) must be set; then select the speed,
+     * duplex, and/or enable auto negotiation, and clear DANAS */
+    if (lp->mii && !(lp->options & PCNET32_PORT_ASEL)) {
+	lp->a.write_bcr(ioaddr, 32, lp->a.read_bcr(ioaddr, 32) | 0x0080);
+	/* disable Auto Negotiation, set 10Mpbs, HD */
+	val = lp->a.read_bcr(ioaddr, 32) & ~0xb8;
+	if (lp->options & PCNET32_PORT_FD)
+	    val |= 0x10;
+	if (lp->options & PCNET32_PORT_100)
+	    val |= 0x08;
+	lp->a.write_bcr (ioaddr, 32, val);
     } else {
-        /* 24 Jun 2004 according AMD, in order to change the PHY,
-         * DANAS (or DISPM for 79C976) must be set; then select the speed,
-         * duplex, and/or enable auto negotiation, and clear DANAS */
-        if (lp->mii && !(lp->options & PCNET32_PORT_ASEL)) {
-    	lp->a.write_bcr(ioaddr, 32, lp->a.read_bcr(ioaddr, 32) | 0x0080);
-    	/* disable Auto Negotiation, set 10Mpbs, HD */
-    	val = lp->a.read_bcr(ioaddr, 32) & ~0xb8;
-    	if (lp->options & PCNET32_PORT_FD)
-    	    val |= 0x10;
-    	if (lp->options & PCNET32_PORT_100)
-    	    val |= 0x08;
-    	lp->a.write_bcr (ioaddr, 32, val);
-        } else {
-    	    if (lp->options & PCNET32_PORT_ASEL) {
-    	        lp->a.write_bcr(ioaddr, 32, lp->a.read_bcr(ioaddr, 32) | 0x0080);
-    	        /* enable auto negotiate, setup, disable fd */
-    	        val = lp->a.read_bcr(ioaddr, 32) & ~0x98;
-    	        val |= 0x20;
-    	        lp->a.write_bcr(ioaddr, 32, val);
-    	    }
-        }
+	if (lp->options & PCNET32_PORT_ASEL) {
+	    lp->a.write_bcr(ioaddr, 32, lp->a.read_bcr(ioaddr, 32) | 0x0080);
+	    /* enable auto negotiate, setup, disable fd */
+	    val = lp->a.read_bcr(ioaddr, 32) & ~0x98;
+	    val |= 0x20;
+	    lp->a.write_bcr(ioaddr, 32, val);
+	}
     }
 
 #ifdef DO_DXSUFLO
@@ -2259,7 +2249,6 @@ static void __devexit pcnet32_remove_one(struct pci_dev *pdev)
 	release_region(dev->base_addr, PCNET32_TOTAL_SIZE);
 	pci_free_consistent(lp->pci_dev, sizeof(*lp), lp, lp->dma_addr);
 	free_netdev(dev);
-	pci_disable_device(pdev);
 	pci_set_drvdata(pdev, NULL);
     }
 }
@@ -2275,6 +2264,7 @@ static struct pci_driver pcnet32_driver = {
 static int debug = -1;
 static int tx_start_pt = -1;
 static int pcnet32_have_pci;
+static int num_params;
 
 module_param(debug, int, 0);
 MODULE_PARM_DESC(debug, DRV_NAME " debug level");
@@ -2286,12 +2276,12 @@ module_param(tx_start_pt, int, 0);
 MODULE_PARM_DESC(tx_start_pt, DRV_NAME " transmit start point (0-3)");
 module_param(pcnet32vlb, int, 0);
 MODULE_PARM_DESC(pcnet32vlb, DRV_NAME " Vesa local bus (VLB) support (0/1)");
-module_param_array(options, int, NULL, 0);
+module_param_array(options, int, num_params, 0);
 MODULE_PARM_DESC(options, DRV_NAME " initial option setting(s) (0-15)");
-module_param_array(full_duplex, int, NULL, 0);
+module_param_array(full_duplex, int, num_params, 0);
 MODULE_PARM_DESC(full_duplex, DRV_NAME " full duplex setting(s) (1)");
 /* Module Parameter for HomePNA cards added by Patrick Simmons, 2004 */
-module_param_array(homepna, int, NULL, 0);
+module_param_array(homepna, int, num_params, 0);
 MODULE_PARM_DESC(homepna, DRV_NAME " mode for 79C978 cards (1 for HomePNA, 0 for Ethernet, default Ethernet");
 
 MODULE_AUTHOR("Thomas Bogendoerfer");

@@ -24,7 +24,7 @@
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -130,7 +130,7 @@ gred_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 
 	D2PRINTK("gred_enqueue virtualQ 0x%x classid %x backlog %d "
 	    "general backlog %d\n",skb->tc_index&0xf,sch->handle,q->backlog,
-	    sch->qstats.backlog);
+	    sch->stats.backlog);
 	/* sum up all the qaves of prios <= to ours to get the new qave*/
 	if (!t->eqp && t->grio) {
 		for (i=0;i<t->DPs;i++) {
@@ -161,7 +161,7 @@ gred_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 		q->qave >>= q->Stab[(us_idle>>q->Scell_log)&0xFF];
 	} else {
 		if (t->eqp) {
-			q->qave += sch->qstats.backlog - (q->qave >> q->Wlog);
+			q->qave += sch->stats.backlog - (q->qave >> q->Wlog);
 		} else {
 			q->qave += q->backlog - (q->qave >> q->Wlog);
 		}
@@ -179,9 +179,9 @@ enqueue:
 			q->backlog += skb->len;
 do_enqueue:
 			__skb_queue_tail(&sch->q, skb);
-			sch->qstats.backlog += skb->len;
-			sch->bstats.bytes += skb->len;
-			sch->bstats.packets++;
+			sch->stats.backlog += skb->len;
+			sch->stats.bytes += skb->len;
+			sch->stats.packets++;
 			return 0;
 		} else {
 			q->pdrop++;
@@ -189,12 +189,12 @@ do_enqueue:
 
 drop:
 		kfree_skb(skb);
-		sch->qstats.drops++;
+		sch->stats.drops++;
 		return NET_XMIT_DROP;
 	}
 	if ((q->qave+qave) >= q->qth_max) {
 		q->qcount = -1;
-		sch->qstats.overlimits++;
+		sch->stats.overlimits++;
 		q->forced++;
 		goto drop;
 	}
@@ -203,7 +203,7 @@ drop:
 			goto enqueue;
 		q->qcount = 0;
 		q->qR = net_random()&q->Rmask;
-		sch->qstats.overlimits++;
+		sch->stats.overlimits++;
 		q->early++;
 		goto drop;
 	}
@@ -221,8 +221,7 @@ gred_requeue(struct sk_buff *skb, struct Qdisc* sch)
 	PSCHED_SET_PASTPERFECT(q->qidlestart);
 
 	__skb_queue_head(&sch->q, skb);
-	sch->qstats.backlog += skb->len;
-	sch->qstats.requeues++;
+	sch->stats.backlog += skb->len;
 	q->backlog += skb->len;
 	return 0;
 }
@@ -236,7 +235,7 @@ gred_dequeue(struct Qdisc* sch)
 
 	skb = __skb_dequeue(&sch->q);
 	if (skb) {
-		sch->qstats.backlog -= skb->len;
+		sch->stats.backlog -= skb->len;
 		q= t->tab[(skb->tc_index&0xf)];
 		if (q) {
 			q->backlog -= skb->len;
@@ -270,8 +269,8 @@ static unsigned int gred_drop(struct Qdisc* sch)
 	skb = __skb_dequeue_tail(&sch->q);
 	if (skb) {
 		unsigned int len = skb->len;
-		sch->qstats.backlog -= len;
-		sch->qstats.drops++;
+		sch->stats.backlog -= len;
+		sch->stats.drops++;
 		q= t->tab[(skb->tc_index&0xf)];
 		if (q) {
 			q->backlog -= len;
@@ -305,7 +304,7 @@ static void gred_reset(struct Qdisc* sch)
 
 	__skb_queue_purge(&sch->q);
 
-	sch->qstats.backlog = 0;
+	sch->stats.backlog = 0;
 
         for (i=0;i<t->DPs;i++) {
 	        q= t->tab[i];

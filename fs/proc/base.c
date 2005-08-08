@@ -101,6 +101,10 @@ enum pid_directory_inos {
 #endif
 	PROC_TID_VX_INFO,
 	PROC_TID_IP_INFO,
+#ifdef CONFIG_DELAY_ACCT
+        PROC_TID_DELAY_ACCT,
+        PROC_TGID_DELAY_ACCT,
+#endif
 	PROC_TID_FD_DIR = 0x8000,	/* 0x8000-0xffff */
 };
 
@@ -131,6 +135,9 @@ static struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_SECURITY
 	E(PROC_TGID_ATTR,      "attr",    S_IFDIR|S_IRUGO|S_IXUGO),
 #endif
+#ifdef CONFIG_DELAY_ACCT
+	E(PROC_TGID_DELAY_ACCT,"delay",   S_IFREG|S_IRUGO),
+#endif
 #ifdef CONFIG_KALLSYMS
 	E(PROC_TGID_WCHAN,     "wchan",   S_IFREG|S_IRUGO),
 #endif
@@ -139,6 +146,9 @@ static struct pid_entry tgid_base_stuff[] = {
 #endif
 	E(PROC_TGID_VX_INFO,   "vinfo",   S_IFREG|S_IRUGO),
 	E(PROC_TGID_IP_INFO,   "ninfo",   S_IFREG|S_IRUGO),
+#ifdef CONFIG_SCHEDSTATS
+	E(PROC_TGID_SCHEDSTAT, "schedstat", S_IFREG|S_IRUGO),
+#endif
 	{0,0,NULL,0}
 };
 static struct pid_entry tid_base_stuff[] = {
@@ -158,6 +168,9 @@ static struct pid_entry tid_base_stuff[] = {
 #ifdef CONFIG_SECURITY
 	E(PROC_TID_ATTR,       "attr",    S_IFDIR|S_IRUGO|S_IXUGO),
 #endif
+#ifdef CONFIG_DELAY_ACCT
+	E(PROC_TGID_DELAY_ACCT,"delay",   S_IFREG|S_IRUGO),
+#endif
 #ifdef CONFIG_KALLSYMS
 	E(PROC_TID_WCHAN,      "wchan",   S_IFREG|S_IRUGO),
 #endif
@@ -166,6 +179,9 @@ static struct pid_entry tid_base_stuff[] = {
 #endif
 	E(PROC_TID_VX_INFO,    "vinfo",   S_IFREG|S_IRUGO),
 	E(PROC_TID_IP_INFO,    "ninfo",   S_IFREG|S_IRUGO),
+#ifdef CONFIG_SCHEDSTATS
+	E(PROC_TID_SCHEDSTAT, "schedstat",S_IFREG|S_IRUGO),
+#endif
 	{0,0,NULL,0}
 };
 
@@ -198,10 +214,12 @@ static inline int proc_type(struct inode *inode)
 	return PROC_I(inode)->type;
 }
 
-int proc_tid_stat(struct task_struct*,char*);
-int proc_tgid_stat(struct task_struct*,char*);
+int proc_pid_stat(struct task_struct*,char*);
 int proc_pid_status(struct task_struct*,char*);
 int proc_pid_statm(struct task_struct*,char*);
+#ifdef CONFIG_DELAY_ACCT
+int proc_pid_delay(struct task_struct*,char*);
+#endif
 
 static int proc_fd_link(struct inode *inode, struct dentry **dentry, struct vfsmount **mnt)
 {
@@ -482,7 +500,7 @@ out:
 
 static int proc_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
-	if (generic_permission(inode, mask, NULL) != 0)
+	if (vfs_permission(inode, mask) != 0)
 		return -EACCES;
 	return proc_check_root(inode);
 }
@@ -1249,9 +1267,6 @@ static struct file_operations proc_tgid_attr_operations;
 static struct inode_operations proc_tgid_attr_inode_operations;
 #endif
 
-extern int proc_pid_vx_info(struct task_struct *, char *);
-extern int proc_pid_nx_info(struct task_struct *, char *);
-
 /* SMP-safe */
 static struct dentry *proc_pident_lookup(struct inode *dir, 
 					 struct dentry *dentry,
@@ -1332,12 +1347,9 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 			ei->op.proc_read = proc_pid_status;
 			break;
 		case PROC_TID_STAT:
-			inode->i_fop = &proc_info_file_operations;
-			ei->op.proc_read = proc_tid_stat;
-			break;
 		case PROC_TGID_STAT:
 			inode->i_fop = &proc_info_file_operations;
-			ei->op.proc_read = proc_tgid_stat;
+			ei->op.proc_read = proc_pid_stat;
 			break;
 		case PROC_TID_CMDLINE:
 		case PROC_TGID_CMDLINE:
@@ -1412,7 +1424,7 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 		case PROC_TID_DELAY_ACCT:
 		case PROC_TGID_DELAY_ACCT:
 			inode->i_fop = &proc_info_file_operations;
-			ei->op.proc_read = proc_pid_schedstat;
+			ei->op.proc_read = proc_pid_delay;
 			break;
 #endif
 #ifdef CONFIG_SCHEDSTATS
@@ -1514,14 +1526,14 @@ static int proc_self_readlink(struct dentry *dentry, char __user *buffer,
 			      int buflen)
 {
 	char tmp[30];
-	sprintf(tmp, "%d", vx_map_tgid(current->tgid));
+	sprintf(tmp, "%d", vx_map_pid(current->tgid));
 	return vfs_readlink(dentry,buffer,buflen,tmp);
 }
 
 static int proc_self_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	char tmp[30];
-	sprintf(tmp, "%d", vx_map_tgid(current->tgid));
+	sprintf(tmp, "%d", vx_map_pid(current->tgid));
 	return vfs_follow_link(nd,tmp);
 }	
 

@@ -1487,16 +1487,14 @@ int shpc_init(struct controller * ctrl,
 
 	info("HPC vendor_id %x device_id %x ss_vid %x ss_did %x\n", pdev->vendor, pdev->device, pdev->subsystem_vendor, 
 		pdev->subsystem_device);
-	
-	if (pci_enable_device(pdev))
-		goto abort_free_ctlr;
 
 	if (!request_mem_region(pci_resource_start(pdev, 0) + shpc_base_offset, pci_resource_len(pdev, 0), MY_NAME)) {
 		err("%s: cannot reserve MMIO region\n", __FUNCTION__);
 		goto abort_free_ctlr;
 	}
 
-	php_ctlr->creg = ioremap(pci_resource_start(pdev, 0) + shpc_base_offset, pci_resource_len(pdev, 0));
+	php_ctlr->creg = (struct ctrl_reg *)
+		ioremap(pci_resource_start(pdev, 0) + shpc_base_offset, pci_resource_len(pdev, 0));
 	if (!php_ctlr->creg) {
 		err("%s: cannot remap MMIO region %lx @ %lx\n", __FUNCTION__, pci_resource_len(pdev, 0), 
 			pci_resource_start(pdev, 0) + shpc_base_offset);

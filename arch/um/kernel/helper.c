@@ -100,8 +100,13 @@ int run_helper(void (*pre_exec)(void *), void *pre_data, char **argv,
 		CATCH_EINTR(n = waitpid(pid, NULL, 0));
 		pid = -errno;
 	}
+	err = pid;
 
-	if(stack_out == NULL) free_stack(stack, 0);
+ out_close:
+	os_close_file(fds[0]);
+ out_free:
+	if(stack_out == NULL) 
+		free_stack(stack, 0);
         else *stack_out = stack;
 	return(pid);
 

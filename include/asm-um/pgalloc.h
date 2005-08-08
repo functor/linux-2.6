@@ -49,10 +49,6 @@ static inline void pte_free(struct page *pte)
 
 #define check_pgt_cache()	do { } while (0)
 
-#define arch_add_exec_range(mm, limit)         do { ; } while (0)
-#define arch_flush_exec_range(mm)              do { ; } while (0)
-#define arch_remove_exec_range(mm, limit)      do { ; } while (0)
-
 #endif
 
 /*

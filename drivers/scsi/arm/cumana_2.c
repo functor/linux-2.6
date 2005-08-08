@@ -408,12 +408,14 @@ cumanascsi2_probe(struct expansion_card *ec, const struct ecard_id *id)
 	unsigned char *base;
 	int ret;
 
-	ret = ecard_request_resources(ec);
-	if (ret)
-		goto out;
-
 	resbase = ecard_resource_start(ec, ECARD_RES_MEMC);
 	reslen = ecard_resource_len(ec, ECARD_RES_MEMC);
+
+	if (!request_mem_region(resbase, reslen, "cumanascsi2")) {
+		ret = -EBUSY;
+		goto out;
+	}
+
 	base = ioremap(resbase, reslen);
 	if (!base) {
 		ret = -ENOMEM;
@@ -502,7 +504,7 @@ cumanascsi2_probe(struct expansion_card *ec, const struct ecard_id *id)
 	iounmap(base);
 
  out_region:
-	ecard_release_resources(ec);
+	release_mem_region(resbase, reslen);
 
  out:
 	return ret;
@@ -512,6 +514,7 @@ static void __devexit cumanascsi2_remove(struct expansion_card *ec)
 {
 	struct Scsi_Host *host = ecard_get_drvdata(ec);
 	struct cumanascsi2_info *info = (struct cumanascsi2_info *)host->hostdata;
+	unsigned long resbase, reslen;
 
 	ecard_set_drvdata(ec, NULL);
 	fas216_remove(host);
@@ -522,9 +525,13 @@ static void __devexit cumanascsi2_remove(struct expansion_card *ec)
 
 	iounmap((void *)host->base);
 
+	resbase = ecard_resource_start(ec, ECARD_RES_MEMC);
+	reslen = ecard_resource_len(ec, ECARD_RES_MEMC);
+
+	release_mem_region(resbase, reslen);
+
 	fas216_release(host);
 	scsi_host_put(host);
-	ecard_release_resources(ec);
 }
 
 static const struct ecard_id cumanascsi2_cids[] = {

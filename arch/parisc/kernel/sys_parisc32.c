@@ -80,11 +80,8 @@ asmlinkage int sys32_execve(struct pt_regs *regs)
 		goto out;
 	error = compat_do_execve(filename, compat_ptr(regs->gr[25]),
 				 compat_ptr(regs->gr[24]), regs);
-	if (error == 0) {
-		task_lock(current);
+	if (error == 0)
 		current->ptrace &= ~PT_DTRACE;
-		task_unlock(current);
-	}
 	putname(filename);
 out:
 

@@ -63,9 +63,9 @@ do {						\
 
 /* Default MSR for kernel mode. */
 #if defined (CONFIG_40x)
-#define MSR_KERNEL	(MSR_ME|MSR_RI|MSR_IR|MSR_DR|MSR_CE)
+#define MSR_KERNEL	(MSR_ME|MSR_RI|MSR_IR|MSR_DR|MSR_CE|MSR_DE)
 #elif defined(CONFIG_BOOKE)
-#define MSR_KERNEL	(MSR_ME|MSR_RI|MSR_CE)
+#define MSR_KERNEL	(MSR_ME|MSR_RI|MSR_CE|MSR_DE)
 #endif
 
 /* Special Purpose Registers (SPRNs)*/

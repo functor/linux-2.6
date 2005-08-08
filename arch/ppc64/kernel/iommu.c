@@ -33,12 +33,12 @@
 #include <linux/string.h>
 #include <linux/dma-mapping.h>
 #include <linux/init.h>
-#include <linux/bitops.h>
 #include <asm/io.h>
 #include <asm/prom.h>
 #include <asm/iommu.h>
 #include <asm/pci-bridge.h>
 #include <asm/machdep.h>
+#include <asm/bitops.h>
 
 #define DBG(...)
 
@@ -433,39 +433,6 @@ struct iommu_table *iommu_init_table(struct iommu_table *tbl)
 	}
 
 	return tbl;
-}
-
-void iommu_free_table(struct device_node *dn)
-{
-	struct iommu_table *tbl = dn->iommu_table;
-	unsigned long bitmap_sz, i;
-	unsigned int order;
-
-	if (!tbl || !tbl->it_map) {
-		printk(KERN_ERR "%s: expected TCE map for %s\n", __FUNCTION__,
-				dn->full_name);
-		return;
-	}
-
-	/* verify that table contains no entries */
-	/* it_mapsize is in entries, and we're examining 64 at a time */
-	for (i = 0; i < (tbl->it_mapsize/64); i++) {
-		if (tbl->it_map[i] != 0) {
-			printk(KERN_WARNING "%s: Unexpected TCEs for %s\n",
-				__FUNCTION__, dn->full_name);
-			break;
-		}
-	}
-
-	/* calculate bitmap size in bytes */
-	bitmap_sz = (tbl->it_mapsize + 7) / 8;
-
-	/* free bitmap */
-	order = get_order(bitmap_sz);
-	free_pages((unsigned long) tbl->it_map, order);
-
-	/* free table */
-	kfree(tbl);
 }
 
 /* Creates TCEs for a user provided buffer.  The user buffer must be

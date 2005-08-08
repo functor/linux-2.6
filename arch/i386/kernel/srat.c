@@ -28,7 +28,6 @@
 #include <linux/bootmem.h>
 #include <linux/mmzone.h>
 #include <linux/acpi.h>
-#include <linux/nodemask.h>
 #include <asm/srat.h>
 
 /*

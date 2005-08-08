@@ -186,7 +186,7 @@ struct xfrm_state *xfrm_state_alloc(void)
 		x->lft.soft_packet_limit = XFRM_INF;
 		x->lft.hard_byte_limit = XFRM_INF;
 		x->lft.hard_packet_limit = XFRM_INF;
-		spin_lock_init(&x->lock);
+		x->lock = SPIN_LOCK_UNLOCKED;
 	}
 	return x;
 }

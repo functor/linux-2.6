@@ -56,11 +56,6 @@ config WALNUT
 	help
 	  This option enables support for the IBM PPC405GP evaluation board.
 
-config XILINX_ML300
-	bool "Xilinx-ML300"
-	help
-	  This option enables support for the Xilinx ML300 evaluation board.
-
 endchoice
 
 choice
@@ -135,11 +130,6 @@ config IBM_OCP
 	depends on ASH || BUBINGA || CPCI405 || EBONY || EP405 || OCOTEA || REDWOOD_5 || REDWOOD_6 || SYCAMORE || WALNUT
 	default y
 
-config XILINX_OCP
-	bool
-	depends on XILINX_ML300
-	default y
-
 config IBM_EMAC4
 	bool
 	depends on 440GX
@@ -170,11 +160,6 @@ config 405GPR
 	depends on SYCAMORE
 	default y
 
-config VIRTEX_II_PRO
-	bool
-	depends on XILINX_ML300
-	default y
-
 config STB03xxx
 	bool
 	depends on REDWOOD_5 || REDWOOD_6
@@ -182,7 +167,7 @@ config STB03xxx
 
 config EMBEDDEDBOOT
 	bool
-	depends on EP405 || XILINX_ML300
+	depends on EP405
 	default y
 
 config IBM_OPENBIOS
@@ -197,11 +182,6 @@ config PPC4xx_DMA
 config PPC4xx_EDMA
 	bool
 	depends on !STB03xxx && PPC4xx_DMA
-	default y
-
-config PPC_GEN550
-	bool
-	depends on 4xx
 	default y
 
 config PM

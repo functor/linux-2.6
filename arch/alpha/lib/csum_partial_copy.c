@@ -251,8 +251,7 @@ out:
  * look at this too closely, you'll go blind.
  */
 static inline unsigned long
-csum_partial_cfu_unaligned(const unsigned long __user * src,
-			   unsigned long * dst,
+csum_partial_cfu_unaligned(const unsigned long * src, unsigned long * dst,
 			   unsigned long soff, unsigned long doff,
 			   long len, unsigned long checksum,
 			   unsigned long partial_dest,
@@ -384,8 +383,7 @@ csum_partial_copy_from_user(const char __user *src, char *dst, int len,
 }
 
 unsigned int
-csum_partial_copy_nocheck(const char __user *src, char *dst, int len,
-			  unsigned int sum)
+csum_partial_copy_nocheck(const char *src, char *dst, int len, unsigned int sum)
 {
 	return do_csum_partial_copy_from_user(src, dst, len, sum, NULL);
 }

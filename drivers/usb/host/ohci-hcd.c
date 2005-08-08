@@ -2,7 +2,7 @@
  * OHCI HCD (Host Controller Driver) for USB.
  *
  * (C) Copyright 1999 Roman Weissgaerber <weissg@vienna.at>
- * (C) Copyright 2000-2004 David Brownell <dbrownell@users.sourceforge.net>
+ * (C) Copyright 2000-2002 David Brownell <dbrownell@users.sourceforge.net>
  * 
  * [ Initialisation is based on Linus'  ]
  * [ uhci code and gregs ohci fragments ]
@@ -109,7 +109,7 @@
 #include <asm/byteorder.h>
 
 
-#define DRIVER_VERSION "2004 Nov 08"
+#define DRIVER_VERSION "2004 Feb 02"
 #define DRIVER_AUTHOR "Roman Weissgaerber, David Brownell"
 #define DRIVER_DESC "USB 1.1 'Open' Host Controller (OHCI) Driver"
 
@@ -122,25 +122,11 @@
 #define	OHCI_INTR_INIT \
 	(OHCI_INTR_MIE | OHCI_INTR_UE | OHCI_INTR_RD | OHCI_INTR_WDH)
 
-#ifdef __hppa__
-/* On PA-RISC, PDC can leave IR set incorrectly; ignore it there. */
-#define	IR_DISABLE
-#endif
-
-#ifdef CONFIG_ARCH_OMAP
-/* OMAP doesn't support IR (no SMM; not needed) */
-#define	IR_DISABLE
-#endif
-
 /*-------------------------------------------------------------------------*/
 
 static const char	hcd_name [] = "ohci_hcd";
 
 #include "ohci.h"
-
-static void ohci_dump (struct ohci_hcd *ohci, int verbose);
-static int ohci_init (struct ohci_hcd *ohci);
-static void ohci_stop (struct usb_hcd *hcd);
 
 #include "ohci-hub.c"
 #include "ohci-dbg.c"
@@ -152,11 +138,6 @@ static void ohci_stop (struct usb_hcd *hcd);
 static int power_switching = 0;
 module_param (power_switching, bool, 0);
 MODULE_PARM_DESC (power_switching, "true (not default) to switch port power");
-
-/* Some boards leave IR set wrongly, since they fail BIOS/SMM handshakes */
-static int no_handshake = 0;
-module_param (no_handshake, bool, 0);
-MODULE_PARM_DESC (no_handshake, "true (not default) disables BIOS handshake");
 
 /*-------------------------------------------------------------------------*/
 
@@ -260,7 +241,7 @@ static int ohci_urb_enqueue (
 		if (retval < 0)
 			goto fail0;
 		if (ed->type == PIPE_ISOCHRONOUS) {
-			u16	frame = ohci_frame_no(ohci);
+			u16	frame = OHCI_FRAME_NO(ohci->hcca);
 
 			/* delay a few frames before the first TD */
 			frame += max_t (u16, 8, ed->interval);
@@ -403,35 +384,34 @@ static int ohci_get_frame (struct usb_hcd *hcd)
 {
 	struct ohci_hcd		*ohci = hcd_to_ohci (hcd);
 
-	return ohci_frame_no(ohci);
-}
-
-static void ohci_usb_reset (struct ohci_hcd *ohci)
-{
-	ohci->hc_control = ohci_readl (ohci, &ohci->regs->control);
-	ohci->hc_control &= OHCI_CTRL_RWC;
-	ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
+	return OHCI_FRAME_NO(ohci->hcca);
 }
 
 /*-------------------------------------------------------------------------*
  * HC functions
  *-------------------------------------------------------------------------*/
 
-/* init memory, and kick BIOS/SMM off */
+/* reset the HC and BUS */
 
-static int ohci_init (struct ohci_hcd *ohci)
+static int hc_reset (struct ohci_hcd *ohci)
 {
 	u32 temp;
-	int ret;
 
-	disable (ohci);
-	ohci->regs = ohci->hcd.regs;
-	ohci->next_statechange = jiffies;
+	/* boot firmware should have set this up (5.1.1.3.1) */
+	if (!ohci->fminterval) {
+		temp = ohci_readl (&ohci->regs->fminterval);
+		if (temp & 0x3fff0000)
+			ohci->fminterval = temp;
+		else
+			ohci->fminterval = DEFAULT_FMINTERVAL;
+		/* also: power/overcurrent flags in roothub.a */
+	}
 
-#ifndef IR_DISABLE
-	/* SMM owns the HC?  not for long! */
-	if (!no_handshake && ohci_readl (ohci,
-					&ohci->regs->control) & OHCI_CTRL_IR) {
+	/* SMM owns the HC?  not for long!
+	 * On PA-RISC, PDC can leave IR set incorrectly; ignore it there.
+	 */
+#ifndef __hppa__
+	if (ohci_readl (&ohci->regs->control) & OHCI_CTRL_IR) {
 		ohci_dbg (ohci, "USB HC TakeOver from BIOS/SMM\n");
 
 		/* this timeout is arbitrary.  we make it long, so systems
@@ -440,123 +420,50 @@ static int ohci_init (struct ohci_hcd *ohci)
 		 */
 		temp = 500;	/* arbitrary: five seconds */
 
-		ohci_writel (ohci, OHCI_INTR_OC, &ohci->regs->intrenable);
-		ohci_writel (ohci, OHCI_OCR, &ohci->regs->cmdstatus);
-		while (ohci_readl (ohci, &ohci->regs->control) & OHCI_CTRL_IR) {
+		writel (OHCI_INTR_OC, &ohci->regs->intrenable);
+		writel (OHCI_OCR, &ohci->regs->cmdstatus);
+		while (ohci_readl (&ohci->regs->control) & OHCI_CTRL_IR) {
 			msleep (10);
 			if (--temp == 0) {
 				ohci_err (ohci, "USB HC TakeOver failed!\n");
-				return -EBUSY;
+				return -1;
 			}
 		}
-		ohci_usb_reset (ohci);
 	}
 #endif
 
 	/* Disable HC interrupts */
-	ohci_writel (ohci, OHCI_INTR_MIE, &ohci->regs->intrdisable);
-	// flush the writes
-	(void) ohci_readl (ohci, &ohci->regs->control);
+	writel (OHCI_INTR_MIE, &ohci->regs->intrdisable);
 
-	if (ohci->hcca)
-		return 0;
+	ohci_dbg (ohci, "reset, control = 0x%x\n",
+		  ohci_readl (&ohci->regs->control));
 
-	ohci->hcca = dma_alloc_coherent (ohci->hcd.self.controller,
-			sizeof *ohci->hcca, &ohci->hcca_dma, 0);
-	if (!ohci->hcca)
-		return -ENOMEM;
-
-	if ((ret = ohci_mem_init (ohci)) < 0)
-		ohci_stop (&ohci->hcd);
-
-	return ret;
-
-}
-
-/*-------------------------------------------------------------------------*/
-
-/* Start an OHCI controller, set the BUS operational
- * resets USB and controller
- * enable interrupts 
- * connect the virtual root hub
- */
-static int ohci_run (struct ohci_hcd *ohci)
-{
-  	u32			mask, temp;
-  	struct usb_device	*udev;
-  	struct usb_bus		*bus;
-	int			first = ohci->fminterval == 0;
-
-	disable (ohci);
-
-	/* boot firmware should have set this up (5.1.1.3.1) */
-	if (first) {
-
-		temp = ohci_readl (ohci, &ohci->regs->fminterval);
-		ohci->fminterval = temp & 0x3fff;
-		if (ohci->fminterval != FI)
-			ohci_dbg (ohci, "fminterval delta %d\n",
-				ohci->fminterval - FI);
-		ohci->fminterval |= FSMP (ohci->fminterval) << 16;
-		/* also: power/overcurrent flags in roothub.a */
-	}
-
-  	/* Reset USB nearly "by the book".  RemoteWakeupConnected
+  	/* Reset USB (needed by some controllers); RemoteWakeupConnected
 	 * saved if boot firmware (BIOS/SMM/...) told us it's connected
 	 * (for OHCI integrated on mainboard, it normally is)
 	 */
-	ohci->hc_control = ohci_readl (ohci, &ohci->regs->control);
-	ohci_dbg (ohci, "resetting from state '%s', control = 0x%x\n",
-			hcfs2string (ohci->hc_control & OHCI_CTRL_HCFS),
-			ohci->hc_control);
-
-	if (ohci->hc_control & OHCI_CTRL_RWC
-			&& !(ohci->flags & OHCI_QUIRK_AMD756))
+	ohci->hc_control = ohci_readl (&ohci->regs->control);
+	ohci->hc_control &= OHCI_CTRL_RWC;	/* hcfs 0 = RESET */
+	if (ohci->hc_control)
 		ohci->hcd.can_wakeup = 1;
-
-	switch (ohci->hc_control & OHCI_CTRL_HCFS) {
-	case OHCI_USB_OPER:
-		temp = 0;
-		break;
-	case OHCI_USB_SUSPEND:
-	case OHCI_USB_RESUME:
-		ohci->hc_control &= OHCI_CTRL_RWC;
-		ohci->hc_control |= OHCI_USB_RESUME;
-		temp = 10 /* msec wait */;
-		break;
-	// case OHCI_USB_RESET:
-	default:
-		ohci->hc_control &= OHCI_CTRL_RWC;
-		ohci->hc_control |= OHCI_USB_RESET;
-		temp = 50 /* msec wait */;
-		break;
-	}
-	ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
-	// flush the writes
-	(void) ohci_readl (ohci, &ohci->regs->control);
-	msleep(temp);
+	writel (ohci->hc_control, &ohci->regs->control);
 	if (power_switching) {
 		unsigned ports = roothub_a (ohci) & RH_A_NDP; 
 
 		/* power down each port */
 		for (temp = 0; temp < ports; temp++)
-			ohci_writel (ohci, RH_PS_LSDA,
+			writel (RH_PS_LSDA,
 				&ohci->regs->roothub.portstatus [temp]);
 	}
-	// flush those writes
-	(void) ohci_readl (ohci, &ohci->regs->control);
-	memset (ohci->hcca, 0, sizeof (struct ohci_hcca));
+	// flush those pci writes
+	(void) ohci_readl (&ohci->regs->control);
+	msleep (50);
 
-	/* 2msec timelimit here means no irqs/preempt */
-	spin_lock_irq (&ohci->lock);
-
-retry:
 	/* HC Reset requires max 10 us delay */
-	ohci_writel (ohci, OHCI_HCR,  &ohci->regs->cmdstatus);
+	writel (OHCI_HCR,  &ohci->regs->cmdstatus);
 	temp = 30;	/* ... allow extra time */
-	while ((ohci_readl (ohci, &ohci->regs->cmdstatus) & OHCI_HCR) != 0) {
+	while ((ohci_readl (&ohci->regs->cmdstatus) & OHCI_HCR) != 0) {
 		if (--temp == 0) {
-			spin_unlock_irq (&ohci->lock);
 			ohci_err (ohci, "USB HC reset timed out!\n");
 			return -1;
 		}
@@ -569,103 +476,102 @@ retry:
 	 * ... but some hardware won't init fmInterval "by the book"
 	 * (SiS, OPTi ...), so reset again instead.  SiS doesn't need
 	 * this if we write fmInterval after we're OPERATIONAL.
-	 * Unclear about ALi, ServerWorks, and others ... this could
-	 * easily be a longstanding bug in chip init on Linux.
 	 */
-	if (ohci->flags & OHCI_QUIRK_INITRESET) {
-		ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
-		// flush those writes
-		(void) ohci_readl (ohci, &ohci->regs->control);
-	}
-	ohci_writel (ohci, ohci->fminterval, &ohci->regs->fminterval);
+	writel (ohci->hc_control, &ohci->regs->control);
+	// flush those pci writes
+	(void) ohci_readl (&ohci->regs->control);
+
+	return 0;
+}
+
+/*-------------------------------------------------------------------------*/
+
+/* Start an OHCI controller, set the BUS operational
+ * enable interrupts 
+ * connect the virtual root hub
+ */
+static int hc_start (struct ohci_hcd *ohci)
+{
+  	u32			mask, tmp;
+  	struct usb_device	*udev;
+  	struct usb_bus		*bus;
+
+	disable (ohci);
 
 	/* Tell the controller where the control and bulk lists are
 	 * The lists are empty now. */
-	ohci_writel (ohci, 0, &ohci->regs->ed_controlhead);
-	ohci_writel (ohci, 0, &ohci->regs->ed_bulkhead);
+	writel (0, &ohci->regs->ed_controlhead);
+	writel (0, &ohci->regs->ed_bulkhead);
 
 	/* a reset clears this */
-	ohci_writel (ohci, (u32) ohci->hcca_dma, &ohci->regs->hcca);
+	writel ((u32) ohci->hcca_dma, &ohci->regs->hcca);
 
 	periodic_reinit (ohci);
 
 	/* some OHCI implementations are finicky about how they init.
 	 * bogus values here mean not even enumeration could work.
 	 */
-	if ((ohci_readl (ohci, &ohci->regs->fminterval) & 0x3fff0000) == 0
-			|| !ohci_readl (ohci, &ohci->regs->periodicstart)) {
-		if (!(ohci->flags & OHCI_QUIRK_INITRESET)) {
-			ohci->flags |= OHCI_QUIRK_INITRESET;
-			ohci_dbg (ohci, "enabling initreset quirk\n");
-			goto retry;
-		}
-		spin_unlock_irq (&ohci->lock);
-		ohci_err (ohci, "init err (%08x %04x)\n",
-			ohci_readl (ohci, &ohci->regs->fminterval),
-			ohci_readl (ohci, &ohci->regs->periodicstart));
+	if ((ohci_readl (&ohci->regs->fminterval) & 0x3fff0000) == 0
+			|| !ohci_readl (&ohci->regs->periodicstart)) {
+		ohci_err (ohci, "init err\n");
 		return -EOVERFLOW;
 	}
 
  	/* start controller operations */
 	ohci->hc_control &= OHCI_CTRL_RWC;
  	ohci->hc_control |= OHCI_CONTROL_INIT | OHCI_USB_OPER;
- 	ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
+ 	writel (ohci->hc_control, &ohci->regs->control);
 	ohci->hcd.state = USB_STATE_RUNNING;
 
 	/* wake on ConnectStatusChange, matching external hubs */
-	ohci_writel (ohci, RH_HS_DRWE, &ohci->regs->roothub.status);
+	writel (RH_HS_DRWE, &ohci->regs->roothub.status);
 
 	/* Choose the interrupts we care about now, others later on demand */
 	mask = OHCI_INTR_INIT;
-	ohci_writel (ohci, mask, &ohci->regs->intrstatus);
-	ohci_writel (ohci, mask, &ohci->regs->intrenable);
+	writel (mask, &ohci->regs->intrstatus);
+	writel (mask, &ohci->regs->intrenable);
 
 	/* handle root hub init quirks ... */
-	temp = roothub_a (ohci);
-	temp &= ~(RH_A_PSM | RH_A_OCPM);
+	tmp = roothub_a (ohci);
+	tmp &= ~(RH_A_PSM | RH_A_OCPM);
 	if (ohci->flags & OHCI_QUIRK_SUPERIO) {
 		/* NSC 87560 and maybe others */
-		temp |= RH_A_NOCP;
-		temp &= ~(RH_A_POTPGT | RH_A_NPS);
+		tmp |= RH_A_NOCP;
+		tmp &= ~(RH_A_POTPGT | RH_A_NPS);
 	} else if (power_switching) {
 		/* act like most external hubs:  use per-port power
 		 * switching and overcurrent reporting.
 		 */
-		temp &= ~(RH_A_NPS | RH_A_NOCP);
-		temp |= RH_A_PSM | RH_A_OCPM;
+		tmp &= ~(RH_A_NPS | RH_A_NOCP);
+		tmp |= RH_A_PSM | RH_A_OCPM;
 	} else {
 		/* hub power always on; required for AMD-756 and some
 		 * Mac platforms.  ganged overcurrent reporting, if any.
 		 */
-		temp |= RH_A_NPS;
+		tmp |= RH_A_NPS;
 	}
-	ohci_writel (ohci, temp, &ohci->regs->roothub.a);
-	ohci_writel (ohci, RH_HS_LPSC, &ohci->regs->roothub.status);
-	ohci_writel (ohci, power_switching ? RH_B_PPCM : 0,
-						&ohci->regs->roothub.b);
-	// flush those writes
-	(void) ohci_readl (ohci, &ohci->regs->control);
-
-	spin_unlock_irq (&ohci->lock);
+	writel (tmp, &ohci->regs->roothub.a);
+	writel (RH_HS_LPSC, &ohci->regs->roothub.status);
+	writel (power_switching ? RH_B_PPCM : 0, &ohci->regs->roothub.b);
+	// flush those pci writes
+	(void) ohci_readl (&ohci->regs->control);
 
 	// POTPGT delay is bits 24-31, in 2 ms units.
 	mdelay ((roothub_a (ohci) >> 23) & 0x1fe);
 	bus = hcd_to_bus (&ohci->hcd);
-	ohci->hcd.state = USB_STATE_RUNNING;
 
-	ohci_dump (ohci, 1);
-
-	udev = hcd_to_bus (&ohci->hcd)->root_hub;
-	if (udev) {
+	if (bus->root_hub) {
+		ohci->hcd.state = USB_STATE_RUNNING;
 		return 0;
 	}
  
 	/* connect the virtual root hub */
 	udev = usb_alloc_dev (NULL, bus, 0);
+	ohci->hcd.state = USB_STATE_RUNNING;
 	if (!udev) {
 		disable (ohci);
 		ohci->hc_control &= ~OHCI_CTRL_HCFS;
-		ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
+		writel (ohci->hc_control, &ohci->regs->control);
 		return -ENOMEM;
 	}
 
@@ -674,13 +580,10 @@ retry:
 		usb_put_dev (udev);
 		disable (ohci);
 		ohci->hc_control &= ~OHCI_CTRL_HCFS;
-		ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
+		writel (ohci->hc_control, &ohci->regs->control);
 		return -ENODEV;
 	}
-	if (ohci->power_budget)
-		hub_set_power_budget(udev, ohci->power_budget);
 
-	create_debug_files (ohci);
 	return 0;
 }
 
@@ -697,18 +600,17 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd, struct pt_regs *ptregs)
 	/* we can eliminate a (slow) ohci_readl()
 	   if _only_ WDH caused this irq */
 	if ((ohci->hcca->done_head != 0)
-			&& ! (hc32_to_cpup (ohci, &ohci->hcca->done_head)
-				& 0x01)) {
+			&& ! (le32_to_cpup (&ohci->hcca->done_head) & 0x01)) {
 		ints =  OHCI_INTR_WDH;
 
 	/* cardbus/... hardware gone before remove() */
-	} else if ((ints = ohci_readl (ohci, &regs->intrstatus)) == ~(u32)0) {
+	} else if ((ints = ohci_readl (&regs->intrstatus)) == ~(u32)0) {
 		disable (ohci);
 		ohci_dbg (ohci, "device removed!\n");
 		return IRQ_HANDLED;
 
 	/* interrupt for some other device? */
-	} else if ((ints &= ohci_readl (ohci, &regs->intrenable)) == 0) {
+	} else if ((ints &= ohci_readl (&regs->intrenable)) == 0) {
 		return IRQ_NONE;
 	} 
 
@@ -718,7 +620,7 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd, struct pt_regs *ptregs)
 		// e.g. due to PCI Master/Target Abort
 
 		ohci_dump (ohci, 1);
-		ohci_usb_reset (ohci);
+		hc_reset (ohci);
 	}
 
 	if (ints & OHCI_INTR_RD) {
@@ -728,12 +630,12 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd, struct pt_regs *ptregs)
 
 	if (ints & OHCI_INTR_WDH) {
 		if (HCD_IS_RUNNING(hcd->state))
-			ohci_writel (ohci, OHCI_INTR_WDH, &regs->intrdisable);	
+			writel (OHCI_INTR_WDH, &regs->intrdisable);	
 		spin_lock (&ohci->lock);
 		dl_done_list (ohci, ptregs);
 		spin_unlock (&ohci->lock);
 		if (HCD_IS_RUNNING(hcd->state))
-			ohci_writel (ohci, OHCI_INTR_WDH, &regs->intrenable); 
+			writel (OHCI_INTR_WDH, &regs->intrenable); 
 	}
   
 	/* could track INTR_SO to reduce available PCI/... bandwidth */
@@ -743,17 +645,18 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd, struct pt_regs *ptregs)
 	 */
 	spin_lock (&ohci->lock);
 	if (ohci->ed_rm_list)
-		finish_unlinks (ohci, ohci_frame_no(ohci), ptregs);
+		finish_unlinks (ohci, OHCI_FRAME_NO(ohci->hcca),
+				ptregs);
 	if ((ints & OHCI_INTR_SF) != 0 && !ohci->ed_rm_list
 			&& HCD_IS_RUNNING(ohci->hcd.state))
-		ohci_writel (ohci, OHCI_INTR_SF, &regs->intrdisable);	
+		writel (OHCI_INTR_SF, &regs->intrdisable);	
 	spin_unlock (&ohci->lock);
 
 	if (HCD_IS_RUNNING(ohci->hcd.state)) {
-		ohci_writel (ohci, ints, &regs->intrstatus);
-		ohci_writel (ohci, OHCI_INTR_MIE, &regs->intrenable);	
-		// flush those writes
-		(void) ohci_readl (ohci, &ohci->regs->control);
+		writel (ints, &regs->intrstatus);
+		writel (OHCI_INTR_MIE, &regs->intrenable);	
+		// flush those pci writes
+		(void) ohci_readl (&ohci->regs->control);
 	}
 
 	return IRQ_HANDLED;
@@ -771,9 +674,10 @@ static void ohci_stop (struct usb_hcd *hcd)
 	ohci_dump (ohci, 1);
 
 	flush_scheduled_work();
-
-	ohci_usb_reset (ohci);
-	ohci_writel (ohci, OHCI_INTR_MIE, &ohci->regs->intrdisable);
+	if (HCD_IS_RUNNING(ohci->hcd.state))
+		hc_reset (ohci);
+	else
+		writel (OHCI_INTR_MIE, &ohci->regs->intrdisable);
 	
 	remove_debug_files (ohci);
 	ohci_mem_cleanup (ohci);
@@ -792,12 +696,23 @@ static void ohci_stop (struct usb_hcd *hcd)
 
 #if	defined(CONFIG_USB_SUSPEND) || defined(CONFIG_PM)
 
-static int ohci_restart (struct ohci_hcd *ohci)
+static void mark_children_gone (struct usb_device *dev)
+{
+	unsigned i;
+
+	for (i = 0; i < dev->maxchild; i++) {
+		if (dev->children [i] == 0)
+			continue;
+		dev->children [i]->state = USB_STATE_NOTATTACHED;
+		mark_children_gone (dev->children [i]);
+	}
+}
+
+static int hc_restart (struct ohci_hcd *ohci)
 {
 	int temp;
 	int i;
 	struct urb_priv *priv;
-	struct usb_device *root = ohci->hcd.self.root_hub;
 
 	/* mark any devices gone, so they do nothing till khubd disconnects.
 	 * recycle any "live" eds/tds (and urbs) right away.
@@ -806,11 +721,7 @@ static int ohci_restart (struct ohci_hcd *ohci)
 	 */ 
 	spin_lock_irq(&ohci->lock);
 	disable (ohci);
-	for (i = 0; i < root->maxchild; i++) {
-		if (root->children [i])
-			usb_set_device_state (root->children[i],
-				USB_STATE_NOTATTACHED);
-	}
+	mark_children_gone (ohci->hcd.self.root_hub);
 	if (!list_empty (&ohci->pending))
 		ohci_dbg(ohci, "abort schedule...\n");
 	list_for_each_entry (priv, &ohci->pending, pending) {
@@ -820,7 +731,7 @@ static int ohci_restart (struct ohci_hcd *ohci)
 		switch (ed->state) {
 		case ED_OPER:
 			ed->state = ED_UNLINK;
-			ed->hwINFO |= cpu_to_hc32(ohci, ED_DEQUEUE);
+			ed->hwINFO |= ED_DEQUEUE;
 			ed_deschedule (ohci, ed);
 
 			ed->ed_next = ohci->ed_rm_list;
@@ -854,7 +765,7 @@ static int ohci_restart (struct ohci_hcd *ohci)
 	ohci->ed_controltail = NULL;
 	ohci->ed_bulktail    = NULL;
 
-	if ((temp = ohci_run (ohci)) < 0) {
+	if ((temp = hc_reset (ohci)) < 0 || (temp = hc_start (ohci)) < 0) {
 		ohci_err (ohci, "can't restart, %d\n", temp);
 		return temp;
 	} else {
@@ -864,9 +775,12 @@ static int ohci_restart (struct ohci_hcd *ohci)
 		 */
 		i = roothub_a (ohci) & RH_A_NDP;
 		while (i--)
-			ohci_writel (ohci, RH_PS_PSS,
+			writel (RH_PS_PSS,
 				&ohci->regs->roothub.portstatus [temp]);
+		ohci->hcd.self.root_hub->dev.power.power_state = 0;
+		ohci->hcd.state = USB_STATE_RUNNING;
 		ohci_dbg (ohci, "restart complete\n");
+		ohci_dump (ohci, 1);
 	}
 	return 0;
 }
@@ -896,25 +810,10 @@ MODULE_LICENSE ("GPL");
 #include "ohci-lh7a404.c"
 #endif
 
-#ifdef CONFIG_PXA27x
-#include "ohci-pxa27x.c"
-#endif
-
 #if !(defined(CONFIG_PCI) \
       || defined(CONFIG_SA1111) \
       || defined(CONFIG_ARCH_OMAP) \
       || defined (CONFIG_ARCH_LH7A404) \
-      || defined (CONFIG_PXA27x) \
 	)
 #error "missing bus glue for ohci-hcd"
-#endif
-
-#if	!defined(HAVE_HNP) && defined(CONFIG_USB_OTG)
-
-#warning non-OTG configuration, too many HCDs
-
-static void start_hnp(struct ohci_hcd *ohci)
-{
-	/* "can't happen" */
-}
 #endif

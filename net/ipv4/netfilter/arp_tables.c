@@ -1199,7 +1199,7 @@ int arpt_register_table(struct arpt_table *table)
 	/* save number of initial entries */
 	table->private->initial_entries = table->private->number;
 
-	rwlock_init(&table->lock);
+	table->lock = RW_LOCK_UNLOCKED;
 	list_prepend(&arpt_tables, table);
 
  unlock:

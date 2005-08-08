@@ -462,7 +462,8 @@ byte ide_dump_atapi_status (ide_drive_t *drive, const char *msg, byte stat)
 
 	status.all = stat;
 	local_irq_set(flags);
-	printk("%s: %s: status=0x%02x { ", drive->name, msg, stat);
+	printk("%s: %s: status=0x%02x", drive->name, msg, stat);
+	printk(" { ");
 	if (status.b.bsy)
 		printk("Busy ");
 	else {
@@ -474,17 +475,18 @@ byte ide_dump_atapi_status (ide_drive_t *drive, const char *msg, byte stat)
 		if (status.b.idx)	printk("Index ");
 		if (status.b.check)	printk("Error ");
 	}
-	printk("}\n");
+	printk("}");
+	printk("\n");
 	if ((status.all & (status.b.bsy|status.b.check)) == status.b.check) {
 		error.all = HWIF(drive)->INB(IDE_ERROR_REG);
-		printk("%s: %s: error=0x%02x { ", drive->name, msg, error.all);
+		printk("%s: %s: error=0x%02x", drive->name, msg, error.all);
 		if (error.b.ili)	printk("IllegalLengthIndication ");
 		if (error.b.eom)	printk("EndOfMedia ");
-		if (error.b.abrt)	printk("AbortedCommand ");
+		if (error.b.abrt)	printk("Aborted Command ");
 		if (error.b.mcr)	printk("MediaChangeRequested ");
-		if (error.b.sense_key)	printk("LastFailedSense=0x%02x ",
+		if (error.b.sense_key)	printk("LastFailedSense 0x%02x ",
 						error.b.sense_key);
-		printk("}\n");
+		printk("\n");
 	}
 	local_irq_restore(flags);
 	return error.all;

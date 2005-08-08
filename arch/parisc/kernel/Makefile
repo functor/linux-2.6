@@ -2,7 +2,9 @@
 # Makefile for arch/parisc/kernel
 #
 
-extra-y			:= init_task.o head.o vmlinux.lds
+head-y			:= head.o
+head-$(CONFIG_PARISC64)	:= head64.o
+extra-y			:= init_task.o $(head-y) vmlinux.lds
 
 AFLAGS_entry.o	:= -traditional
 AFLAGS_pacache.o := -traditional
@@ -12,8 +14,7 @@ obj-y	     	:= cache.o pacache.o setup.o traps.o time.o irq.o \
 		   pa7300lc.o syscall.o entry.o sys_parisc.o firmware.o \
 		   ptrace.o hardware.o inventory.o drivers.o semaphore.o \
 		   signal.o hpmc.o real2.o parisc_ksyms.o unaligned.o \
-		   process.o processor.o pdc_cons.o pdc_chassis.o unwind.o \
-		   topology.o
+		   process.o processor.o pdc_cons.o pdc_chassis.o unwind.o
 
 obj-$(CONFIG_SMP)	+= smp.o
 obj-$(CONFIG_PA11)	+= pci-dma.o

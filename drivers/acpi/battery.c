@@ -28,7 +28,6 @@
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <asm/uaccess.h>
 
 #include <acpi/acpi_bus.h>
@@ -342,22 +341,32 @@ acpi_battery_check (
    -------------------------------------------------------------------------- */
 
 struct proc_dir_entry		*acpi_battery_dir;
-static int acpi_battery_read_info(struct seq_file *seq, void *offset)
+
+static int
+acpi_battery_read_info (
+	char			*page,
+	char			**start,
+	off_t			off,
+	int 			count,
+	int 			*eof,
+	void			*data)
 {
 	int			result = 0;
-	struct acpi_battery	*battery = (struct acpi_battery *) seq->private;
+	struct acpi_battery	*battery = (struct acpi_battery *) data;
 	struct acpi_battery_info *bif = NULL;
 	char			*units = "?";
+	char			*p = page;
+	int			len = 0;
 
 	ACPI_FUNCTION_TRACE("acpi_battery_read_info");
 
-	if (!battery)
+	if (!battery || (off != 0))
 		goto end;
 
 	if (battery->flags.present)
-		seq_printf(seq, "present:                 yes\n");
+		p += sprintf(p, "present:                 yes\n");
 	else {
-		seq_printf(seq, "present:                 no\n");
+		p += sprintf(p, "present:                 no\n");
 		goto end;
 	}
 
@@ -365,88 +374,98 @@ static int acpi_battery_read_info(struct seq_file *seq, void *offset)
 
 	result = acpi_battery_get_info(battery, &bif);
 	if (result || !bif) {
-		seq_printf(seq, "ERROR: Unable to read battery information\n");
+		p += sprintf(p, "ERROR: Unable to read battery information\n");
 		goto end;
 	}
 
 	units = bif->power_unit ? ACPI_BATTERY_UNITS_AMPS : ACPI_BATTERY_UNITS_WATTS;
 					
 	if (bif->design_capacity == ACPI_BATTERY_VALUE_UNKNOWN)
-		seq_printf(seq, "design capacity:         unknown\n");
+		p += sprintf(p, "design capacity:         unknown\n");
 	else
-		seq_printf(seq, "design capacity:         %d %sh\n",
+		p += sprintf(p, "design capacity:         %d %sh\n",
 			(u32) bif->design_capacity, units);
 
 	if (bif->last_full_capacity == ACPI_BATTERY_VALUE_UNKNOWN)
-		seq_printf(seq, "last full capacity:      unknown\n");
+		p += sprintf(p, "last full capacity:      unknown\n");
 	else
-		seq_printf(seq, "last full capacity:      %d %sh\n",
+		p += sprintf(p, "last full capacity:      %d %sh\n",
 			(u32) bif->last_full_capacity, units);
 
 	switch ((u32) bif->battery_technology) {
 	case 0:
-		seq_printf(seq, "battery technology:      non-rechargeable\n");
+		p += sprintf(p, "battery technology:      non-rechargeable\n");
 		break;
 	case 1:
-		seq_printf(seq, "battery technology:      rechargeable\n");
+		p += sprintf(p, "battery technology:      rechargeable\n");
 		break;
 	default:
-		seq_printf(seq, "battery technology:      unknown\n");
+		p += sprintf(p, "battery technology:      unknown\n");
 		break;
 	}
 
 	if (bif->design_voltage == ACPI_BATTERY_VALUE_UNKNOWN)
-		seq_printf(seq, "design voltage:          unknown\n");
+		p += sprintf(p, "design voltage:          unknown\n");
 	else
-		seq_printf(seq, "design voltage:          %d mV\n",
+		p += sprintf(p, "design voltage:          %d mV\n",
 			(u32) bif->design_voltage);
 	
-	seq_printf(seq, "design capacity warning: %d %sh\n",
+	p += sprintf(p, "design capacity warning: %d %sh\n",
 		(u32) bif->design_capacity_warning, units);
-	seq_printf(seq, "design capacity low:     %d %sh\n",
+	p += sprintf(p, "design capacity low:     %d %sh\n",
 		(u32) bif->design_capacity_low, units);
-	seq_printf(seq, "capacity granularity 1:  %d %sh\n",
+	p += sprintf(p, "capacity granularity 1:  %d %sh\n",
 		(u32) bif->battery_capacity_granularity_1, units);
-	seq_printf(seq, "capacity granularity 2:  %d %sh\n",
+	p += sprintf(p, "capacity granularity 2:  %d %sh\n",
 		(u32) bif->battery_capacity_granularity_2, units);
-	seq_printf(seq, "model number:            %s\n",
+	p += sprintf(p, "model number:            %s\n",
 		bif->model_number);
-	seq_printf(seq, "serial number:           %s\n",
+	p += sprintf(p, "serial number:           %s\n",
 		bif->serial_number);
-	seq_printf(seq, "battery type:            %s\n",
+	p += sprintf(p, "battery type:            %s\n",
 		bif->battery_type);
-	seq_printf(seq, "OEM info:                %s\n",
+	p += sprintf(p, "OEM info:                %s\n",
 		bif->oem_info);
 
 end:
 	kfree(bif);
 
-	return_VALUE(0);
-}
+	len = (p - page);
+	if (len <= off+count) *eof = 1;
+	*start = page + off;
+	len -= off;
+	if (len>count) len = count;
+	if (len<0) len = 0;
 
-static int acpi_battery_info_open_fs(struct inode *inode, struct file *file)
-{
-	return single_open(file, acpi_battery_read_info, PDE(inode)->data);
+	return_VALUE(len);
 }
 
 
 static int
-acpi_battery_read_state (struct seq_file *seq, void *offset)
+acpi_battery_read_state (
+	char			*page,
+	char			**start,
+	off_t			off,
+	int 			count,
+	int 			*eof,
+	void			*data)
 {
 	int			result = 0;
-	struct acpi_battery	*battery = (struct acpi_battery *) seq->private;
+	struct acpi_battery	*battery = (struct acpi_battery *) data;
 	struct acpi_battery_status *bst = NULL;
 	char			*units = "?";
+	char			*p = page;
+	int			len = 0;
 
 	ACPI_FUNCTION_TRACE("acpi_battery_read_state");
 
-	if (!battery)
+	if (!battery || (off != 0))
 		goto end;
 
 	if (battery->flags.present)
-		seq_printf(seq, "present:                 yes\n");
+		p += sprintf(p, "present:                 yes\n");
 	else {
-		seq_printf(seq, "present:                 no\n");
+		p += sprintf(p, "present:                 no\n");
 		goto end;
 	}
 
@@ -458,71 +477,81 @@ acpi_battery_read_state (struct seq_file *seq, void *offset)
 
 	result = acpi_battery_get_status(battery, &bst);
 	if (result || !bst) {
-		seq_printf(seq, "ERROR: Unable to read battery status\n");
+		p += sprintf(p, "ERROR: Unable to read battery status\n");
 		goto end;
 	}
 
 	if (!(bst->state & 0x04))
-		seq_printf(seq, "capacity state:          ok\n");
+		p += sprintf(p, "capacity state:          ok\n");
 	else
-		seq_printf(seq, "capacity state:          critical\n");
+		p += sprintf(p, "capacity state:          critical\n");
 
 	if ((bst->state & 0x01) && (bst->state & 0x02)){
-		seq_printf(seq, "charging state:          charging/discharging\n");
+		p += sprintf(p, "charging state:          charging/discharging\n");
 		ACPI_DEBUG_PRINT ((ACPI_DB_ERROR,
 					"Battery Charging and Discharging?\n"));
 	}
 	else if (bst->state & 0x01)
-		seq_printf(seq, "charging state:          discharging\n");
+		p += sprintf(p, "charging state:          discharging\n");
 	else if (bst->state & 0x02)
-		seq_printf(seq, "charging state:          charging\n");
+		p += sprintf(p, "charging state:          charging\n");
 	else {
-		seq_printf(seq, "charging state:          charged\n");
+		p += sprintf(p, "charging state:          charged\n");
 	}
 
 	if (bst->present_rate == ACPI_BATTERY_VALUE_UNKNOWN)
-		seq_printf(seq, "present rate:            unknown\n");
+		p += sprintf(p, "present rate:            unknown\n");
 	else
-		seq_printf(seq, "present rate:            %d %s\n",
+		p += sprintf(p, "present rate:            %d %s\n",
 			(u32) bst->present_rate, units);
 
 	if (bst->remaining_capacity == ACPI_BATTERY_VALUE_UNKNOWN)
-		seq_printf(seq, "remaining capacity:      unknown\n");
+		p += sprintf(p, "remaining capacity:      unknown\n");
 	else
-		seq_printf(seq, "remaining capacity:      %d %sh\n",
+		p += sprintf(p, "remaining capacity:      %d %sh\n",
 			(u32) bst->remaining_capacity, units);
 
 	if (bst->present_voltage == ACPI_BATTERY_VALUE_UNKNOWN)
-		seq_printf(seq, "present voltage:         unknown\n");
+		p += sprintf(p, "present voltage:         unknown\n");
 	else
-		seq_printf(seq, "present voltage:         %d mV\n",
+		p += sprintf(p, "present voltage:         %d mV\n",
 			(u32) bst->present_voltage);
 
 end:
 	kfree(bst);
 
-	return_VALUE(0);
-}
+	len = (p - page);
+	if (len <= off+count) *eof = 1;
+	*start = page + off;
+	len -= off;
+	if (len>count) len = count;
+	if (len<0) len = 0;
 
-static int acpi_battery_state_open_fs(struct inode *inode, struct file *file)
-{
-	return single_open(file, acpi_battery_read_state, PDE(inode)->data);
+	return_VALUE(len);
 }
 
 
 static int
-acpi_battery_read_alarm (struct seq_file *seq, void *offset)
+acpi_battery_read_alarm (
+	char			*page,
+	char			**start,
+	off_t			off,
+	int 			count,
+	int 			*eof,
+	void			*data)
 {
-	struct acpi_battery	*battery = (struct acpi_battery *) seq->private;
+	struct acpi_battery	*battery = (struct acpi_battery *) data;
 	char			*units = "?";
+	char			*p = page;
+	int			len = 0;
 
 	ACPI_FUNCTION_TRACE("acpi_battery_read_alarm");
 
-	if (!battery)
+	if (!battery || (off != 0))
 		goto end;
 
 	if (!battery->flags.present) {
-		seq_printf(seq, "present:                 no\n");
+		p += sprintf(p, "present:                 no\n");
 		goto end;
 	}
 
@@ -532,28 +561,34 @@ acpi_battery_read_alarm (struct seq_file *seq, void *offset)
 
 	/* Battery Alarm */
 
-	seq_printf(seq, "alarm:                   ");
+	p += sprintf(p, "alarm:                   ");
 	if (!battery->alarm)
-		seq_printf(seq, "unsupported\n");
+		p += sprintf(p, "unsupported\n");
 	else
-		seq_printf(seq, "%d %sh\n", (u32) battery->alarm, units);
+		p += sprintf(p, "%d %sh\n", (u32) battery->alarm, units);
 
 end:
-	return_VALUE(0);
+	len = (p - page);
+	if (len <= off+count) *eof = 1;
+	*start = page + off;
+	len -= off;
+	if (len>count) len = count;
+	if (len<0) len = 0;
+
+	return_VALUE(len);
 }
 
 
-static ssize_t
+static int
 acpi_battery_write_alarm (
-	struct file	*file,
-	const char	__user *buffer,
-	size_t		count,
-	loff_t		*ppos)
+	struct file		*file,
+	const char		__user *buffer,
+	unsigned long		count,
+	void			*data)
 {
 	int			result = 0;
+	struct acpi_battery	*battery = (struct acpi_battery *) data;
 	char			alarm_string[12] = {'\0'};
-	struct seq_file		*m = (struct seq_file *)file->private_data;
-	struct acpi_battery	*battery = (struct acpi_battery *)m->private;
 
 	ACPI_FUNCTION_TRACE("acpi_battery_write_alarm");
 
@@ -576,35 +611,6 @@ acpi_battery_write_alarm (
 	return_VALUE(count);
 }
 
-static int acpi_battery_alarm_open_fs(struct inode *inode, struct file *file)
-{
-	return single_open(file, acpi_battery_read_alarm, PDE(inode)->data);
-}
-
-static struct file_operations acpi_battery_info_ops = {
-	.open		= acpi_battery_info_open_fs,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.owner = THIS_MODULE,
-};
-
-static struct file_operations acpi_battery_state_ops = {
-	.open		= acpi_battery_state_open_fs,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.owner = THIS_MODULE,
-};
-
-static struct file_operations acpi_battery_alarm_ops = {
-	.open		= acpi_battery_alarm_open_fs,
-	.read		= seq_read,
-	.write		= acpi_battery_write_alarm,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.owner = THIS_MODULE,
-};
 
 static int
 acpi_battery_add_fs (
@@ -630,7 +636,7 @@ acpi_battery_add_fs (
 			"Unable to create '%s' fs entry\n",
 			ACPI_BATTERY_FILE_INFO));
 	else {
-		entry->proc_fops = &acpi_battery_info_ops; 
+		entry->read_proc = acpi_battery_read_info;
 		entry->data = acpi_driver_data(device);
 		entry->owner = THIS_MODULE;
 	}
@@ -643,7 +649,7 @@ acpi_battery_add_fs (
 			"Unable to create '%s' fs entry\n",
 			ACPI_BATTERY_FILE_STATUS));
 	else {
-		entry->proc_fops = &acpi_battery_state_ops;
+		entry->read_proc = acpi_battery_read_state;
 		entry->data = acpi_driver_data(device);
 		entry->owner = THIS_MODULE;
 	}
@@ -656,7 +662,8 @@ acpi_battery_add_fs (
 			"Unable to create '%s' fs entry\n",
 			ACPI_BATTERY_FILE_ALARM));
 	else {
-		entry->proc_fops = &acpi_battery_alarm_ops;
+		entry->read_proc = acpi_battery_read_alarm;
+		entry->write_proc = acpi_battery_write_alarm;
 		entry->data = acpi_driver_data(device);
 		entry->owner = THIS_MODULE;
 	}

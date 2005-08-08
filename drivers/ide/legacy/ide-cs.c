@@ -43,7 +43,6 @@
 #include <linux/ide.h>
 #include <linux/hdreg.h>
 #include <linux/major.h>
-#include <linux/delay.h>
 #include <asm/io.h>
 #include <asm/system.h>
 
@@ -363,7 +362,8 @@ void ide_config(dev_link_t *link)
 		break;
 	    }
 	}
-	msleep(100);
+	__set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(HZ/10);
     }
 
     if (hd < 0) {
@@ -415,11 +415,9 @@ void ide_release(dev_link_t *link)
     DEBUG(0, "ide_release(0x%p)\n", link);
 
     if (info->ndev) {
-    	/* Wait for the interface to cease to be busy */
-	while(ide_unregister_hwif(info->hwif) < 0) {
-		removed_hwif_iops(info->hwif);
-		msleep(1000);
-	}
+	/* FIXME: if this fails we need to queue the cleanup somehow
+	   -- need to investigate the required PCMCIA magic */
+	ide_unregister_hwif(info->hwif);
     }
     info->ndev = 0;
     link->dev = NULL;

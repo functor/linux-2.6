@@ -10,11 +10,11 @@
 #include "choose-mode.h"
 
 #ifdef CONFIG_MODE_TT
-#include "uaccess-tt.h"
+#include "../kernel/tt/include/uaccess.h"
 #endif
 
 #ifdef CONFIG_MODE_SKAS
-#include "uaccess-skas.h"
+#include "../kernel/skas/include/uaccess.h"
 #endif
 
 #define access_ok(type, addr, size) \
