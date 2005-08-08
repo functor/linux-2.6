@@ -10,11 +10,15 @@
  * "as is" without any warranty of any kind, whether express or implied.
  */
 
-long	mv64x60_console_baud = 9600;		/* Default baud: 9600 */
-long	mv64x60_mpsc_clk_src = 8;		/* Default clk src: TCLK */
-long	mv64x60_mpsc_clk_freq = 100000000;	/* Default clk freq: 100 MHz */
+#include <linux/config.h>
 
-void
+#if defined(CONFIG_SERIAL_MPSC_CONSOLE)
+long __attribute__ ((weak))	mv64x60_console_baud = 9600;
+long __attribute__ ((weak))	mv64x60_mpsc_clk_src = 8; /* TCLK */
+long __attribute__ ((weak))	mv64x60_mpsc_clk_freq = 100000000;
+#endif
+
+void __attribute__ ((weak))
 mv64x60_board_init(void)
 {
 }

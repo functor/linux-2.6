@@ -1,6 +1,6 @@
 /*
  * arch/ppc/boot/simple/misc-mv64x60.S
- * 
+ *
  * Code to change the base address of the host bridges and call board specific
  * init routine.
  *
@@ -35,19 +35,19 @@ move_base:
 	li	r23,20
 
 	/* Relocate bridge's regs */
-        addis	r25,0,CONFIG_MV64X60_BASE@h
-        ori	r25,r25,MV64x60_INTERNAL_SPACE_DECODE             
-        lwbrx	r26,0,(r25)
+	addis	r25,0,CONFIG_MV64X60_BASE@h
+	ori	r25,r25,MV64x60_INTERNAL_SPACE_DECODE
+	lwbrx	r26,0,(r25)
 	lis	r24,0xffff
 	and	r26,r26,r24
 	addis	r24,0,CONFIG_MV64X60_NEW_BASE@h
 	srw	r24,r24,r23
 	or	r26,r26,r24
-        stwbrx  r26,0,(r25)
+	stwbrx	r26,0,(r25)
 	sync
 
 	/* Wait for write to take effect */
-        addis	r25,0,CONFIG_MV64X60_NEW_BASE@h
+	addis	r25,0,CONFIG_MV64X60_NEW_BASE@h
 	ori	r25,r25,MV64x60_INTERNAL_SPACE_DECODE
 1:	lwbrx	r24,0,(r25)
 	cmpw	r24,r26
