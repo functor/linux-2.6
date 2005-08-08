@@ -749,6 +749,7 @@ static int snd_emu10k1x_ac97(emu10k1x_t *chip)
 
 	memset(&ac97, 0, sizeof(ac97));
 	ac97.private_data = chip;
+	ac97.scaps = AC97_SCAP_NO_SPDIF;
 	return snd_ac97_mixer(pbus, &ac97, &chip->ac97);
 }
 
@@ -1278,10 +1279,8 @@ static void do_emu10k1x_midi_interrupt(emu10k1x_t *emu, emu10k1x_midi_t *midi, u
 			mpu401_clear_rx(emu, midi);
 		} else {
 			byte = mpu401_read_data(emu, midi);
-			spin_unlock(&midi->input_lock);
 			if (midi->substream_input)
 				snd_rawmidi_receive(midi->substream_input, &byte, 1);
-			spin_lock(&midi->input_lock);
 		}
 	}
 	spin_unlock(&midi->input_lock);

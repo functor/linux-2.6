@@ -270,25 +270,35 @@ static const char *snd_pcm_oss_format_name(int format)
 #ifdef CONFIG_PROC_FS
 static void snd_pcm_proc_info_read(snd_pcm_substream_t *substream, snd_info_buffer_t *buffer)
 {
-	snd_pcm_info_t info;
+	snd_pcm_info_t *info;
 	int err;
+
 	snd_runtime_check(substream, return);
-	err = snd_pcm_info(substream, &info);
-	if (err < 0) {
-		snd_iprintf(buffer, "error %d\n", err);
+
+	info = kmalloc(sizeof(*info), GFP_KERNEL);
+	if (! info) {
+		printk(KERN_DEBUG "snd_pcm_proc_info_read: cannot malloc\n");
 		return;
 	}
-	snd_iprintf(buffer, "card: %d\n", info.card);
-	snd_iprintf(buffer, "device: %d\n", info.device);
-	snd_iprintf(buffer, "subdevice: %d\n", info.subdevice);
-	snd_iprintf(buffer, "stream: %s\n", snd_pcm_stream_name(info.stream));
-	snd_iprintf(buffer, "id: %s\n", info.id);
-	snd_iprintf(buffer, "name: %s\n", info.name);
-	snd_iprintf(buffer, "subname: %s\n", info.subname);
-	snd_iprintf(buffer, "class: %d\n", info.dev_class);
-	snd_iprintf(buffer, "subclass: %d\n", info.dev_subclass);
-	snd_iprintf(buffer, "subdevices_count: %d\n", info.subdevices_count);
-	snd_iprintf(buffer, "subdevices_avail: %d\n", info.subdevices_avail);
+
+	err = snd_pcm_info(substream, info);
+	if (err < 0) {
+		snd_iprintf(buffer, "error %d\n", err);
+		kfree(info);
+		return;
+	}
+	snd_iprintf(buffer, "card: %d\n", info->card);
+	snd_iprintf(buffer, "device: %d\n", info->device);
+	snd_iprintf(buffer, "subdevice: %d\n", info->subdevice);
+	snd_iprintf(buffer, "stream: %s\n", snd_pcm_stream_name(info->stream));
+	snd_iprintf(buffer, "id: %s\n", info->id);
+	snd_iprintf(buffer, "name: %s\n", info->name);
+	snd_iprintf(buffer, "subname: %s\n", info->subname);
+	snd_iprintf(buffer, "class: %d\n", info->dev_class);
+	snd_iprintf(buffer, "subclass: %d\n", info->dev_subclass);
+	snd_iprintf(buffer, "subdevices_count: %d\n", info->subdevices_count);
+	snd_iprintf(buffer, "subdevices_avail: %d\n", info->subdevices_avail);
+	kfree(info);
 }
 
 static void snd_pcm_stream_proc_info_read(snd_info_entry_t *entry, snd_info_buffer_t *buffer)
@@ -1004,6 +1014,7 @@ static int __init alsa_pcm_init(void)
 	snd_info_entry_t *entry;
 
 	snd_ctl_register_ioctl(snd_pcm_control_ioctl);
+	snd_ctl_register_ioctl_compat(snd_pcm_control_ioctl);
 	if ((entry = snd_info_create_module_entry(THIS_MODULE, "pcm", NULL)) != NULL) {
 		snd_info_set_text_ops(entry, NULL, SNDRV_CARDS * SNDRV_PCM_DEVICES * 128, snd_pcm_proc_read);
 		if (snd_info_register(entry) < 0) {
@@ -1018,6 +1029,7 @@ static int __init alsa_pcm_init(void)
 static void __exit alsa_pcm_exit(void)
 {
 	snd_ctl_unregister_ioctl(snd_pcm_control_ioctl);
+	snd_ctl_unregister_ioctl_compat(snd_pcm_control_ioctl);
 	if (snd_pcm_proc_entry) {
 		snd_info_unregister(snd_pcm_proc_entry);
 		snd_pcm_proc_entry = NULL;
