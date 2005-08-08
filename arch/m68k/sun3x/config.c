@@ -6,7 +6,6 @@
  * based on code from Oliver Jowett <oliver@jowett.manawatu.gen.nz>
  */
 
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/mm.h>
 #include <linux/console.h>
@@ -71,7 +70,7 @@ void __init config_sun3x(void)
 	mach_get_model       = sun3_get_model;
 	mach_get_hardware_list = sun3x_get_hardware_list;
 
-#ifdef CONFIG_DUMMY_CONSOLE
+#if defined(CONFIG_DUMMY_CONSOLE)
 	conswitchp	     = &dummy_con;
 #endif
 

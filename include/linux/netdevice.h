@@ -309,9 +309,7 @@ struct net_device
 
 	/* List of functions to handle Wireless Extensions (instead of ioctl).
 	 * See <net/iw_handler.h> for details. Jean II */
-	const struct iw_handler_def *	wireless_handlers;
-	/* Instance data managed by the core of Wireless Extensions. */
-	struct iw_public_data *	wireless_data;
+	struct iw_handler_def *	wireless_handlers;
 
 	struct ethtool_ops *ethtool_ops;
 
@@ -610,12 +608,20 @@ static inline void netif_start_queue(struct net_device *dev)
 
 static inline void netif_wake_queue(struct net_device *dev)
 {
+#ifdef CONFIG_NETPOLL_TRAP
+	if (netpoll_trap())
+		return;
+#endif
 	if (test_and_clear_bit(__LINK_STATE_XOFF, &dev->state))
 		__netif_schedule(dev);
 }
 
 static inline void netif_stop_queue(struct net_device *dev)
 {
+#ifdef CONFIG_NETPOLL_TRAP
+	if (netpoll_trap())
+		return;
+#endif
 	set_bit(__LINK_STATE_XOFF, &dev->state);
 }
 
@@ -661,7 +667,6 @@ static inline void dev_kfree_skb_any(struct sk_buff *skb)
 
 #define HAVE_NETIF_RX 1
 extern int		netif_rx(struct sk_buff *skb);
-extern int		netif_rx_ni(struct sk_buff *skb);
 #define HAVE_NETIF_RECEIVE_SKB 1
 extern int		netif_receive_skb(struct sk_buff *skb);
 extern int		dev_ioctl(unsigned int cmd, void __user *);
@@ -675,6 +680,17 @@ extern void		dev_queue_xmit_nit(struct sk_buff *skb, struct net_device *dev);
 extern void		dev_init(void);
 
 extern int		netdev_nit;
+
+/* Post buffer to the network code from _non interrupt_ context.
+ * see net/core/dev.c for netif_rx description.
+ */
+static inline int netif_rx_ni(struct sk_buff *skb)
+{
+       int err = netif_rx(skb);
+       if (softirq_pending(smp_processor_id()))
+               do_softirq();
+       return err;
+}
 
 /* Called by rtnetlink.c:rtnl_unlock() */
 extern void netdev_run_todo(void);
@@ -894,7 +910,10 @@ static inline void netif_tx_disable(struct net_device *dev)
 /* These functions live elsewhere (drivers/net/net_init.c, but related) */
 
 extern void		ether_setup(struct net_device *dev);
-
+extern void		fddi_setup(struct net_device *dev);
+extern void		tr_setup(struct net_device *dev);
+extern void		fc_setup(struct net_device *dev);
+extern void		fc_freedev(struct net_device *dev);
 /* Support for loadable net-drivers */
 extern struct net_device *alloc_netdev(int sizeof_priv, const char *name,
 				       void (*setup)(struct net_device *));
@@ -916,10 +935,7 @@ extern int		weight_p;
 extern unsigned long	netdev_fc_xoff;
 extern atomic_t netdev_dropping;
 extern int		netdev_set_master(struct net_device *dev, struct net_device *master);
-extern int skb_checksum_help(struct sk_buff *skb, int inward);
-/* rx skb timestamps */
-extern void		net_enable_timestamp(void);
-extern void		net_disable_timestamp(void);
+extern int skb_checksum_help(struct sk_buff **pskb, int inward);
 
 #ifdef CONFIG_SYSCTL
 extern char *net_sysctl_strdup(const char *s);

@@ -8,8 +8,6 @@
 #ifndef __ASM_CPU_FEATURES_H
 #define __ASM_CPU_FEATURES_H
 
-#include <asm/cpu.h>
-#include <asm/cpu-info.h>
 #include <cpu-feature-overrides.h>
 
 /*
@@ -71,18 +69,7 @@
 #define cpu_has_dc_aliases	(cpu_data[0].dcache.flags & MIPS_CACHE_ALIASES)
 #endif
 #ifndef cpu_has_ic_fills_f_dc
-#define cpu_has_ic_fills_f_dc	(cpu_data[0].icache.flags & MIPS_CACHE_IC_F_DC)
-#endif
-
-/*
- * Certain CPUs may throw bizarre exceptions if not the whole cacheline
- * contains valid instructions.  For these we ensure proper alignment of
- * signal trampolines and pad them to the size of a full cache lines with
- * nops.  This is also used in structure definitions so can't be a test macro
- * like the others.
- */
-#ifndef PLAT_TRAMPOLINE_STUFF_LINE
-#define PLAT_TRAMPOLINE_STUFF_LINE	0UL
+#define cpu_has_ic_fills_f_dc	(cpu_data[0].dcache.flags & MIPS_CACHE_IC_F_DC)
 #endif
 
 #ifdef CONFIG_MIPS32

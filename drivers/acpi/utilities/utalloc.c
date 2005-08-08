@@ -265,7 +265,7 @@ acpi_ut_validate_buffer (
  * RETURN:      Status
  *
  * DESCRIPTION: Validate that the buffer is of the required length or
- *              allocate a new buffer.  Returned buffer is always zeroed.
+ *              allocate a new buffer.
  *
  ******************************************************************************/
 
@@ -305,25 +305,24 @@ acpi_ut_initialize_buffer (
 
 		/* Allocate a new buffer with local interface to allow tracking */
 
-		buffer->pointer = ACPI_MEM_CALLOCATE (required_length);
+		buffer->pointer = ACPI_MEM_ALLOCATE (required_length);
 		if (!buffer->pointer) {
 			return (AE_NO_MEMORY);
-		}
-		break;
-
-
-	default:
-
-		/* Existing buffer: Validate the size of the buffer */
-
-		if (buffer->length < required_length) {
-			status = AE_BUFFER_OVERFLOW;
-			break;
 		}
 
 		/* Clear the buffer */
 
 		ACPI_MEMSET (buffer->pointer, 0, required_length);
+		break;
+
+
+	default:
+
+		/* Validate the size of the buffer */
+
+		if (buffer->length < required_length) {
+			status = AE_BUFFER_OVERFLOW;
+		}
 		break;
 	}
 
@@ -473,7 +472,7 @@ acpi_ut_allocate_and_track (
 	acpi_status                     status;
 
 
-	allocation = acpi_ut_allocate (size + sizeof (struct acpi_debug_mem_header), component,
+	allocation = acpi_ut_allocate (size + sizeof (struct acpi_debug_mem_block), component,
 			  module, line);
 	if (!allocation) {
 		return (NULL);
@@ -519,7 +518,7 @@ acpi_ut_callocate_and_track (
 	acpi_status                     status;
 
 
-	allocation = acpi_ut_callocate (size + sizeof (struct acpi_debug_mem_header), component,
+	allocation = acpi_ut_callocate (size + sizeof (struct acpi_debug_mem_block), component,
 			  module, line);
 	if (!allocation) {
 		/* Report allocation error */
@@ -713,7 +712,6 @@ acpi_ut_track_allocation (
 	allocation->line      = line;
 
 	ACPI_STRNCPY (allocation->module, module, ACPI_MAX_MODULE_NAME);
-	allocation->module[ACPI_MAX_MODULE_NAME-1] = 0;
 
 	/* Insert at list head */
 
@@ -818,7 +816,7 @@ acpi_ut_remove_allocation (
  * DESCRIPTION: Print some info about the outstanding allocations.
  *
  ******************************************************************************/
-#ifdef ACPI_FUTURE_USAGE
+
 void
 acpi_ut_dump_allocation_info (
 	void)
@@ -864,7 +862,6 @@ acpi_ut_dump_allocation_info (
 */
 	return_VOID;
 }
-#endif  /*  ACPI_FUTURE_USAGE  */
 
 
 /*******************************************************************************

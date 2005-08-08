@@ -3,11 +3,38 @@
 
 #include <linux/config.h>
 
-#if defined(CONFIG_CLEOPATRA)
-#define	HZ 1000
-#endif
 #ifndef HZ
-#define	HZ 100
+#ifdef CONFIG_COLDFIRE
+#if defined(CONFIG_CLEOPATRA)
+#define HZ 1000
+#else
+#define HZ 100
+#endif
+#endif
+#ifdef CONFIG_M68EN302
+#define HZ 100
+#endif
+#ifdef CONFIG_M68328
+#define HZ 100
+#endif
+#ifdef CONFIG_M68EZ328
+#define HZ 100
+#endif
+#ifdef CONFIG_UCSIMM
+#define HZ 100
+#endif
+
+#ifdef CONFIG_M68VZ328
+#define HZ 100
+#endif
+
+#ifdef CONFIG_SHGLCORE
+#define HZ 50
+#endif
+#ifdef CONFIG_M68360
+#define HZ 100
+#endif
+
 #endif
 
 #ifdef __KERNEL__

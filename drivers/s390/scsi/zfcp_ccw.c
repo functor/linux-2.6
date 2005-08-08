@@ -10,7 +10,6 @@
  * Authors:
  *      Martin Peschke <mpeschke@de.ibm.com>
  *	Heiko Carstens <heiko.carstens@de.ibm.com>
- *      Andreas Herrmann <aherrman@de.ibm.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,7 +26,7 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#define ZFCP_CCW_C_REVISION "$Revision: 1.58 $"
+#define ZFCP_CCW_C_REVISION "$Revision: 1.56 $"
 
 #include "zfcp_ext.h"
 
@@ -302,11 +301,9 @@ zfcp_ccw_shutdown(struct device *dev)
 {
 	struct zfcp_adapter *adapter;
 
-	down(&zfcp_data.config_sema);
 	adapter = dev_get_drvdata(dev);
 	zfcp_erp_adapter_shutdown(adapter, 0);
 	zfcp_erp_wait(adapter);
-	up(&zfcp_data.config_sema);
 }
 
 #undef ZFCP_LOG_AREA

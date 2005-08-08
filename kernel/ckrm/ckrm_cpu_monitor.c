@@ -22,7 +22,7 @@
 #include <asm/errno.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
-#include <linux/ckrm_events.h>
+#include <linux/ckrm.h>
 #include <linux/ckrm_rc.h>
 #include <linux/ckrm_tc.h>
 #include <asm/div64.h>
@@ -841,13 +841,8 @@ static void adjust_lrq_weight(struct ckrm_cpu_class *clsptr, int cpu_online)
 		total_pressure += lrq->lrq_load;
 	}
 
-#define FIX_SHARES 
-#ifdef FIX_SHARES
-#warning "ACB: fix share initialization problem [PL #4227]"
-#else
 	if (! total_pressure)
 		return;
-#endif
 	
 	class_weight = cpu_class_weight(clsptr) * cpu_online;
 
@@ -860,10 +855,6 @@ static void adjust_lrq_weight(struct ckrm_cpu_class *clsptr, int cpu_online)
 			/*give idle class a high share to boost interactiveness */
 			lw = cpu_class_weight(clsptr); 
 		else {
-#ifdef FIX_SHARES
-		        if (! total_pressure)
-			        return;
-#endif			
 			lw = lrq->lrq_load * class_weight;
 			do_div(lw,total_pressure);
 			if (!lw)
@@ -965,8 +956,6 @@ static int thread_exit = 0;
 static int ckrm_cpu_monitord(void *nothing)
 {
 	daemonize("ckrm_cpu_ctrld");
-	current->flags |= PF_NOFREEZE;
-
 	for (;;) {
 		/*sleep for sometime before next try*/
 		set_current_state(TASK_INTERRUPTIBLE);

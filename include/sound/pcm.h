@@ -364,7 +364,6 @@ struct _snd_pcm_runtime {
 typedef struct _snd_pcm_group {		/* keep linked substreams */
 	spinlock_t lock;
 	struct list_head substreams;
-	int count;
 } snd_pcm_group_t;
 
 struct _snd_pcm_substream {
@@ -406,8 +405,6 @@ struct _snd_pcm_substream {
 	snd_info_entry_t *proc_sw_params_entry;
 	snd_info_entry_t *proc_status_entry;
 	snd_info_entry_t *proc_prealloc_entry;
-	/* misc flags */
-	unsigned int no_mmap_ctrl: 1;
 };
 
 #if defined(CONFIG_SND_PCM_OSS) || defined(CONFIG_SND_PCM_OSS_MODULE)
@@ -489,7 +486,6 @@ int snd_pcm_status(snd_pcm_substream_t * substream, snd_pcm_status_t *status);
 int snd_pcm_prepare(snd_pcm_substream_t *substream);
 int snd_pcm_start(snd_pcm_substream_t *substream);
 int snd_pcm_stop(snd_pcm_substream_t *substream, int status);
-int snd_pcm_drain_done(snd_pcm_substream_t *substream);
 #ifdef CONFIG_PM
 int snd_pcm_suspend(snd_pcm_substream_t *substream);
 int snd_pcm_suspend_all(snd_pcm_t *pcm);
@@ -810,7 +806,6 @@ int snd_pcm_hw_param_set(snd_pcm_substream_t *pcm,
 int snd_pcm_hw_params_choose(snd_pcm_substream_t *substream, snd_pcm_hw_params_t *params);
 
 int snd_pcm_hw_refine(snd_pcm_substream_t *substream, snd_pcm_hw_params_t *params);
-int snd_pcm_hw_params(snd_pcm_substream_t *substream, snd_pcm_hw_params_t *params);
 
 int snd_pcm_hw_constraints_init(snd_pcm_substream_t *substream);
 int snd_pcm_hw_constraints_complete(snd_pcm_substream_t *substream);

@@ -22,7 +22,6 @@
 #include <linux/cpu.h>
 #include <linux/module.h>
 #include <linux/sysctl.h>
-#include <linux/smp.h>
 
 #include <asm/system.h>
 #include <asm/processor.h>
@@ -364,13 +363,12 @@ int idle_setup(void)
 		}
 	}
 #endif /* CONFIG_PPC_PSERIES */
-#ifndef CONFIG_PPC_ISERIES
-	if (systemcfg->platform == PLATFORM_POWERMAC ||
-	    systemcfg->platform == PLATFORM_MAPLE) {
+#ifdef CONFIG_PPC_PMAC
+	if (systemcfg->platform == PLATFORM_POWERMAC) {
 		printk(KERN_INFO "Using native/NAP idle loop\n");
 		idle_loop = native_idle;
 	}
-#endif /* CONFIG_PPC_ISERIES */
+#endif /* CONFIG_PPC_PMAC */
 
 	return 1;
 }

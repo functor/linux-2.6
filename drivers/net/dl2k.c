@@ -107,6 +107,7 @@ static int change_mtu (struct net_device *dev, int new_mtu);
 static void set_multicast (struct net_device *dev);
 static struct net_device_stats *get_stats (struct net_device *dev);
 static int clear_stats (struct net_device *dev);
+static int rio_ethtool_ioctl (struct net_device *dev, void __user *useraddr);
 static int rio_ioctl (struct net_device *dev, struct ifreq *rq, int cmd);
 static int rio_close (struct net_device *dev);
 static int find_miiphy (struct net_device *dev);
@@ -120,8 +121,6 @@ static int mii_get_media_pcs (struct net_device *dev);
 static int mii_read (struct net_device *dev, int phy_addr, int reg_num);
 static int mii_write (struct net_device *dev, int phy_addr, int reg_num,
 		      u16 data);
-
-static struct ethtool_ops ethtool_ops;
 
 static int __devinit
 rio_probe1 (struct pci_dev *pdev, const struct pci_device_id *ent)
@@ -169,7 +168,7 @@ rio_probe1 (struct pci_dev *pdev, const struct pci_device_id *ent)
 #endif
 	dev->base_addr = ioaddr;
 	dev->irq = irq;
-	np = netdev_priv(dev);
+	np = dev->priv;
 	np->chip_id = chip_idx;
 	np->pdev = pdev;
 	spin_lock_init (&np->tx_lock);
@@ -245,7 +244,6 @@ rio_probe1 (struct pci_dev *pdev, const struct pci_device_id *ent)
 	dev->tx_timeout = &rio_tx_timeout;
 	dev->watchdog_timeo = TX_TIMEOUT;
 	dev->change_mtu = &change_mtu;
-	SET_ETHTOOL_OPS(dev, &ethtool_ops);
 #if 0
 	dev->features = NETIF_F_IP_CSUM;
 #endif
@@ -337,7 +335,7 @@ find_miiphy (struct net_device *dev)
 	int i, phy_found = 0;
 	struct netdev_private *np;
 	long ioaddr;
-	np = netdev_priv(dev);
+	np = dev->priv;
 	ioaddr = dev->base_addr;
 	np->phy_addr = 1;
 
@@ -364,7 +362,7 @@ parse_eeprom (struct net_device *dev)
 	u8 *psib;
 	u32 crc;
 	PSROM_t psrom = (PSROM_t) sromdata;
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 
 	int cid, next;
 
@@ -434,7 +432,7 @@ parse_eeprom (struct net_device *dev)
 static int
 rio_open (struct net_device *dev)
 {
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	long ioaddr = dev->base_addr;
 	int i;
 	u16 macctrl;
@@ -518,7 +516,7 @@ static void
 rio_timer (unsigned long data)
 {
 	struct net_device *dev = (struct net_device *)data;
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	unsigned int entry;
 	int next_tick = 1*HZ;
 	unsigned long flags;
@@ -576,7 +574,7 @@ rio_tx_timeout (struct net_device *dev)
 static void
 alloc_list (struct net_device *dev)
 {
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	int i;
 
 	np->cur_rx = np->cur_tx = 0;
@@ -633,7 +631,7 @@ alloc_list (struct net_device *dev)
 static int
 start_xmit (struct sk_buff *skb, struct net_device *dev)
 {
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	struct netdev_desc *txdesc;
 	unsigned entry;
 	u32 ioaddr;
@@ -713,7 +711,7 @@ rio_interrupt (int irq, void *dev_instance, struct pt_regs *rgs)
 	int handled = 0;
 
 	ioaddr = dev->base_addr;
-	np = netdev_priv(dev);
+	np = dev->priv;
 	while (1) {
 		int_status = readw (ioaddr + IntStatus); 
 		writew (int_status, ioaddr + IntStatus);
@@ -747,7 +745,7 @@ rio_interrupt (int irq, void *dev_instance, struct pt_regs *rgs)
 static void 
 rio_free_tx (struct net_device *dev, int irq) 
 {
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	int entry = np->old_tx % TX_RING_SIZE;
 	int tx_use = 0;
 	unsigned long flag = 0;
@@ -800,7 +798,7 @@ tx_error (struct net_device *dev, int tx_status)
 	int frame_id;
 	int i;
 
-	np = netdev_priv(dev);
+	np = dev->priv;
 
 	frame_id = (tx_status & 0xffff0000);
 	printk (KERN_ERR "%s: Transmit error, TxStatus %4.4x, FrameId %d.\n",
@@ -857,7 +855,7 @@ tx_error (struct net_device *dev, int tx_status)
 static int
 receive_packet (struct net_device *dev)
 {
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	int entry = np->cur_rx % RX_RING_SIZE;
 	int cnt = 30;
 
@@ -967,7 +965,7 @@ static void
 rio_error (struct net_device *dev, int int_status)
 {
 	long ioaddr = dev->base_addr;
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	u16 macctrl;
 
 	/* Link change event */
@@ -1018,7 +1016,7 @@ static struct net_device_stats *
 get_stats (struct net_device *dev)
 {
 	long ioaddr = dev->base_addr;
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 #ifdef MEM_MAPPING
 	int i;
 #endif
@@ -1134,7 +1132,7 @@ clear_stats (struct net_device *dev)
 int
 change_mtu (struct net_device *dev, int new_mtu)
 {
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	int max = (np->jumbo) ? MAX_JUMBO : 1536;
 
 	if ((new_mtu < 68) || (new_mtu > max)) {
@@ -1152,7 +1150,7 @@ set_multicast (struct net_device *dev)
 	long ioaddr = dev->base_addr;
 	u32 hash_table[2];
 	u16 rx_mode = 0;
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	
 	hash_table[0] = hash_table[1] = 0;
 	/* RxFlowcontrol DA: 01-80-C2-00-00-01. Hash index=0x39 */
@@ -1196,118 +1194,137 @@ set_multicast (struct net_device *dev)
 	writew (rx_mode, ioaddr + ReceiveMode);
 }
 
-static void rio_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
+static int
+rio_ethtool_ioctl (struct net_device *dev, void __user *useraddr)
 {
-	struct netdev_private *np = netdev_priv(dev);
-	strcpy(info->driver, "DL2K");
-	strcpy(info->version, DRV_VERSION);
-	strcpy(info->bus_info, pci_name(np->pdev));
-}	
-
-static int rio_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
-{
-	struct netdev_private *np = netdev_priv(dev);
-	if (np->phy_media) {
-		/* fiber device */
-		cmd->supported = SUPPORTED_Autoneg | SUPPORTED_FIBRE;
-		cmd->advertising= ADVERTISED_Autoneg | ADVERTISED_FIBRE;
-		cmd->port = PORT_FIBRE;
-		cmd->transceiver = XCVR_INTERNAL;	
-	} else {
-		/* copper device */
-		cmd->supported = SUPPORTED_10baseT_Half | 
-			SUPPORTED_10baseT_Full | SUPPORTED_100baseT_Half
-			| SUPPORTED_100baseT_Full | SUPPORTED_1000baseT_Full |
-			SUPPORTED_Autoneg | SUPPORTED_MII;
-		cmd->advertising = ADVERTISED_10baseT_Half |
-			ADVERTISED_10baseT_Full | ADVERTISED_100baseT_Half |
-			ADVERTISED_100baseT_Full | ADVERTISED_1000baseT_Full|
-			ADVERTISED_Autoneg | ADVERTISED_MII;
-		cmd->port = PORT_MII;
-		cmd->transceiver = XCVR_INTERNAL;
-	}
-	if ( np->link_status ) { 
-		cmd->speed = np->speed;
-		cmd->duplex = np->full_duplex ? DUPLEX_FULL : DUPLEX_HALF;
-	} else {
-		cmd->speed = -1;
-		cmd->duplex = -1;
-	}
-	if ( np->an_enable)
-		cmd->autoneg = AUTONEG_ENABLE;
-	else
-		cmd->autoneg = AUTONEG_DISABLE;
+	struct netdev_private *np = dev->priv;
+       	u32 ethcmd;
 	
-	cmd->phy_address = np->phy_addr;
-	return 0;				   
-}
-
-static int rio_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
-{
-	struct netdev_private *np = netdev_priv(dev);
-	netif_carrier_off(dev);
-	if (cmd->autoneg == AUTONEG_ENABLE) {
-		if (np->an_enable)
+	if (copy_from_user (&ethcmd, useraddr, sizeof (ethcmd)))
+		return -EFAULT;
+	switch (ethcmd) {
+		case ETHTOOL_GDRVINFO: {
+			struct ethtool_drvinfo info = { ETHTOOL_GDRVINFO };
+			strcpy(info.driver, "DL2K");
+			strcpy(info.version, DRV_VERSION);
+			strcpy(info.bus_info, pci_name(np->pdev));
+			memset(&info.fw_version, 0, sizeof(info.fw_version));
+			if (copy_to_user(useraddr, &info, sizeof(info)))
+				return -EFAULT;
 			return 0;
-		else {
-			np->an_enable = 1;
-			mii_set_media(dev);
-			return 0;	
 		}	
-	} else {
-		np->an_enable = 0;
-		if (np->speed == 1000) {
-			cmd->speed = SPEED_100;			
-			cmd->duplex = DUPLEX_FULL;
-			printk("Warning!! Can't disable Auto negotiation in 1000Mbps, change to Manual 100Mbps, Full duplex.\n");
+ 	
+		case ETHTOOL_GSET: {
+			struct ethtool_cmd cmd = { ETHTOOL_GSET };
+			if (np->phy_media) {
+				/* fiber device */
+				cmd.supported = SUPPORTED_Autoneg | 
+							SUPPORTED_FIBRE;
+				cmd.advertising= ADVERTISED_Autoneg |
+							ADVERTISED_FIBRE;
+				cmd.port = PORT_FIBRE;
+				cmd.transceiver = XCVR_INTERNAL;	
+			} else {
+				/* copper device */
+				cmd.supported = SUPPORTED_10baseT_Half | 
+					SUPPORTED_10baseT_Full | SUPPORTED_100baseT_Half
+					| SUPPORTED_100baseT_Full | SUPPORTED_1000baseT_Full |
+					SUPPORTED_Autoneg | SUPPORTED_MII;
+				cmd.advertising = ADVERTISED_10baseT_Half |
+					ADVERTISED_10baseT_Full | ADVERTISED_100baseT_Half |
+					ADVERTISED_100baseT_Full | ADVERTISED_1000baseT_Full|
+					ADVERTISED_Autoneg | ADVERTISED_MII;
+				cmd.port = PORT_MII;
+				cmd.transceiver = XCVR_INTERNAL;
+			}
+			if ( np->link_status ) { 
+				cmd.speed = np->speed;
+				cmd.duplex = np->full_duplex ? 
+						    DUPLEX_FULL : DUPLEX_HALF;
+			} else {
+				cmd.speed = -1;
+				cmd.duplex = -1;
+			}
+			if ( np->an_enable)
+				cmd.autoneg = AUTONEG_ENABLE;
+			else
+				cmd.autoneg = AUTONEG_DISABLE;
+			
+			cmd.phy_address = np->phy_addr;
+
+			if (copy_to_user(useraddr, &cmd,
+					sizeof(cmd)))
+				return -EFAULT;
+			return 0;				   
 		}
-		switch(cmd->speed + cmd->duplex) {
-		
-		case SPEED_10 + DUPLEX_HALF:
-			np->speed = 10;
-			np->full_duplex = 0;
-			break;
-		
-		case SPEED_10 + DUPLEX_FULL:
-			np->speed = 10;
-			np->full_duplex = 1;
-			break;
-		case SPEED_100 + DUPLEX_HALF:
-			np->speed = 100;
-			np->full_duplex = 0;
-			break;
-		case SPEED_100 + DUPLEX_FULL:
-			np->speed = 100;
-			np->full_duplex = 1;
-			break;
-		case SPEED_1000 + DUPLEX_HALF:/* not supported */
-		case SPEED_1000 + DUPLEX_FULL:/* not supported */
+		case ETHTOOL_SSET: {
+			struct ethtool_cmd cmd;
+			if (copy_from_user(&cmd, useraddr, sizeof(cmd)))
+				return -EFAULT;
+			netif_carrier_off(dev);
+			if (cmd.autoneg == AUTONEG_ENABLE) {
+				if (np->an_enable)
+					return 0;
+				else {
+					np->an_enable = 1;
+					mii_set_media(dev);
+					return 0;	
+				}	
+			} else {
+				np->an_enable = 0;
+				if (np->speed == 1000){
+					cmd.speed = SPEED_100;			
+					cmd.duplex = DUPLEX_FULL;
+					printk("Warning!! Can't disable Auto negotiation in 1000Mbps, change to Manul 100Mbps, Full duplex.\n");
+					}
+				switch(cmd.speed + cmd.duplex){
+				
+				case SPEED_10 + DUPLEX_HALF:
+					np->speed = 10;
+					np->full_duplex = 0;
+					break;
+				
+				case SPEED_10 + DUPLEX_FULL:
+					np->speed = 10;
+					np->full_duplex = 1;
+					break;
+				case SPEED_100 + DUPLEX_HALF:
+					np->speed = 100;
+					np->full_duplex = 0;
+					break;
+				case SPEED_100 + DUPLEX_FULL:
+					np->speed = 100;
+					np->full_duplex = 1;
+					break;
+				case SPEED_1000 + DUPLEX_HALF:/* not supported */
+				case SPEED_1000 + DUPLEX_FULL:/* not supported */
+				default:
+					return -EINVAL;	
+				}
+				mii_set_media(dev);
+			}
+		return 0;		   
+		}
+#ifdef ETHTOOL_GLINK		
+		case ETHTOOL_GLINK:{
+		struct ethtool_value link = { ETHTOOL_GLINK };
+		link.data = np->link_status;
+		if (copy_to_user(useraddr, &link, sizeof(link)))
+			return -EFAULT;
+		return 0;
+		}			   
+#endif
 		default:
-			return -EINVAL;	
-		}
-		mii_set_media(dev);
-	}
-	return 0;
+		return -EOPNOTSUPP;
+	}	
 }
 
-static u32 rio_get_link(struct net_device *dev)
-{
-	struct netdev_private *np = netdev_priv(dev);
-	return np->link_status;
-}
-
-static struct ethtool_ops ethtool_ops = {
-	.get_drvinfo = rio_get_drvinfo,
-	.get_settings = rio_get_settings,
-	.set_settings = rio_set_settings,
-	.get_link = rio_get_link,
-};
 
 static int
 rio_ioctl (struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	int phy_addr;
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	struct mii_data *miidata = (struct mii_data *) &rq->ifr_ifru;
 	
 	struct netdev_desc *desc;
@@ -1315,6 +1332,8 @@ rio_ioctl (struct net_device *dev, struct ifreq *rq, int cmd)
 
 	phy_addr = np->phy_addr;
 	switch (cmd) {
+	case SIOCETHTOOL:
+		return rio_ethtool_ioctl(dev, rq->ifr_data);		
 	case SIOCDEVPRIVATE:
 		break;
 	
@@ -1471,7 +1490,7 @@ mii_wait_link (struct net_device *dev, int wait)
 	int phy_addr;
 	struct netdev_private *np;
 
-	np = netdev_priv(dev);
+	np = dev->priv;
 	phy_addr = np->phy_addr;
 
 	do {
@@ -1493,7 +1512,7 @@ mii_get_media (struct net_device *dev)
 	int phy_addr;
 	struct netdev_private *np;
 
-	np = netdev_priv(dev);
+	np = dev->priv;
 	phy_addr = np->phy_addr;
 
 	bmsr.image = mii_read (dev, phy_addr, MII_BMSR);
@@ -1575,7 +1594,7 @@ mii_set_media (struct net_device *dev)
 	ANAR_t anar;
 	int phy_addr;
 	struct netdev_private *np;
-	np = netdev_priv(dev);
+	np = dev->priv;
 	phy_addr = np->phy_addr;
 
 	/* Does user set speed? */
@@ -1665,7 +1684,7 @@ mii_get_media_pcs (struct net_device *dev)
 	int phy_addr;
 	struct netdev_private *np;
 
-	np = netdev_priv(dev);
+	np = dev->priv;
 	phy_addr = np->phy_addr;
 
 	bmsr.image = mii_read (dev, phy_addr, PCS_BMSR);
@@ -1721,7 +1740,7 @@ mii_set_media_pcs (struct net_device *dev)
 	ANAR_PCS_t anar;
 	int phy_addr;
 	struct netdev_private *np;
-	np = netdev_priv(dev);
+	np = dev->priv;
 	phy_addr = np->phy_addr;
 
 	/* Auto-Negotiation? */
@@ -1775,7 +1794,7 @@ static int
 rio_close (struct net_device *dev)
 {
 	long ioaddr = dev->base_addr;
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = dev->priv;
 	struct sk_buff *skb;
 	int i;
 
@@ -1821,7 +1840,7 @@ rio_remove1 (struct pci_dev *pdev)
 	struct net_device *dev = pci_get_drvdata (pdev);
 
 	if (dev) {
-		struct netdev_private *np = netdev_priv(dev);
+		struct netdev_private *np = dev->priv;
 
 		unregister_netdev (dev);
 		pci_free_consistent (pdev, RX_TOTAL_SIZE, np->rx_ring,

@@ -19,7 +19,8 @@
 #include <asm/pgtable.h>
 #include <asm/system.h>
 
-extern void build_tlb_refill_handler(void);
+extern void except_vec0_generic(void);
+extern void except_vec1_r8k(void);
 
 #define TFP_TLB_SIZE		384
 #define TFP_TLB_SET_SHIFT	7
@@ -246,5 +247,7 @@ void __init tlb_init(void)
 
 	local_flush_tlb_all();
 
-	build_tlb_refill_handler();
+	memcpy((void *)(CKSEG0 + 0x00), &except_vec0_generic, 0x80);
+	memcpy((void *)(CKSEG0 + 0x80), except_vec1_r8k, 0x80);
+	flush_icache_range(CKSEG0 + 0x80, CKSEG0 + 0x100);
 }

@@ -9,7 +9,6 @@
  */
 #ifndef __ASM_SH_DMA_H
 #define __ASM_SH_DMA_H
-#ifdef __KERNEL__
 
 #include <linux/config.h>
 #include <linux/spinlock.h>
@@ -139,5 +138,4 @@ extern int isa_dma_bridge_buggy;
 #define isa_dma_bridge_buggy	(0)
 #endif
 
-#endif /* __KERNEL__ */
 #endif /* __ASM_SH_DMA_H */

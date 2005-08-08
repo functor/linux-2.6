@@ -35,7 +35,7 @@ struct pglist_data;
  */
 #if defined(CONFIG_SMP)
 struct zone_padding {
-	char x[0];
+	int x;
 } ____cacheline_maxaligned_in_smp;
 #define ZONE_PADDING(name)	struct zone_padding name;
 #else
@@ -108,7 +108,10 @@ struct per_cpu_pageset {
  */
 
 struct zone {
-	/* Fields commonly accessed by the page allocator */
+	/*
+	 * Commonly accessed fields:
+	 */
+	spinlock_t		lock;
 	unsigned long		free_pages;
 	unsigned long		pages_min, pages_low, pages_high;
 	/*
@@ -125,29 +128,19 @@ struct zone {
 	 */
 	unsigned long		protection[MAX_NR_ZONES];
 
-	struct per_cpu_pageset	pageset[NR_CPUS];
-
-	/*
-	 * free areas of different sizes
-	 */
-	spinlock_t		lock;
-	struct free_area	free_area[MAX_ORDER];
-
-
 	ZONE_PADDING(_pad1_)
 
-	/* Fields commonly accessed by the page reclaim scanner */
 	spinlock_t		lru_lock;	
-#ifndef CONFIG_CKRM_RES_MEM
 	struct list_head	active_list;
 	struct list_head	inactive_list;
-#endif
 	unsigned long		nr_scan_active;
 	unsigned long		nr_scan_inactive;
 	unsigned long		nr_active;
 	unsigned long		nr_inactive;
-	unsigned long		pages_scanned;	   /* since last reclaim */
 	int			all_unreclaimable; /* All pages pinned */
+	unsigned long		pages_scanned;	   /* since last reclaim */
+
+	ZONE_PADDING(_pad2_)
 
 	/*
 	 * prev_priority holds the scanning priority for this zone.  It is
@@ -168,9 +161,10 @@ struct zone {
 	int temp_priority;
 	int prev_priority;
 
-
-	ZONE_PADDING(_pad2_)
-	/* Rarely used or read-mostly fields */
+	/*
+	 * free areas of different sizes
+	 */
+	struct free_area	free_area[MAX_ORDER];
 
 	/*
 	 * wait_table		-- the array holding the hash table
@@ -200,6 +194,10 @@ struct zone {
 	unsigned long		wait_table_size;
 	unsigned long		wait_table_bits;
 
+	ZONE_PADDING(_pad3_)
+
+	struct per_cpu_pageset	pageset[NR_CPUS];
+
 	/*
 	 * Discontig memory support fields.
 	 */
@@ -208,13 +206,12 @@ struct zone {
 	/* zone_start_pfn == zone_start_paddr >> PAGE_SHIFT */
 	unsigned long		zone_start_pfn;
 
-	unsigned long		spanned_pages;	/* total size, including holes */
-	unsigned long		present_pages;	/* amount of memory (excluding holes) */
-
 	/*
 	 * rarely used fields:
 	 */
 	char			*name;
+	unsigned long		spanned_pages;	/* total size, including holes */
+	unsigned long		present_pages;	/* amount of memory (excluding holes) */
 } ____cacheline_maxaligned_in_smp;
 
 
@@ -413,6 +410,35 @@ extern struct pglist_data contig_page_data;
 #error ZONES_SHIFT > MAX_ZONES_SHIFT
 #endif
 
+extern DECLARE_BITMAP(node_online_map, MAX_NUMNODES);
+
+#if defined(CONFIG_DISCONTIGMEM) || defined(CONFIG_NUMA)
+
+#define node_online(node)	test_bit(node, node_online_map)
+#define node_set_online(node)	set_bit(node, node_online_map)
+#define node_set_offline(node)	clear_bit(node, node_online_map)
+static inline unsigned int num_online_nodes(void)
+{
+	int i, num = 0;
+
+	for(i = 0; i < MAX_NUMNODES; i++){
+		if (node_online(i))
+			num++;
+	}
+	return num;
+}
+
+#else /* !CONFIG_DISCONTIGMEM && !CONFIG_NUMA */
+
+#define node_online(node) \
+	({ BUG_ON((node) != 0); test_bit(node, node_online_map); })
+#define node_set_online(node) \
+	({ BUG_ON((node) != 0); set_bit(node, node_online_map); })
+#define node_set_offline(node) \
+	({ BUG_ON((node) != 0); clear_bit(node, node_online_map); })
+#define num_online_nodes()	1
+
+#endif /* CONFIG_DISCONTIGMEM || CONFIG_NUMA */
 #endif /* !__ASSEMBLY__ */
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MMZONE_H */

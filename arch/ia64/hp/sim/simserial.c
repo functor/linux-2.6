@@ -301,7 +301,7 @@ static void rs_flush_chars(struct tty_struct *tty)
 }
 
 
-static int rs_write(struct tty_struct * tty,
+static int rs_write(struct tty_struct * tty, int from_user,
 		    const unsigned char *buf, int count)
 {
 	int	c, ret = 0;
@@ -310,22 +310,58 @@ static int rs_write(struct tty_struct * tty,
 
 	if (!tty || !info->xmit.buf || !tmp_buf) return 0;
 
-	local_irq_save(flags);
-	while (1) {
-		c = CIRC_SPACE_TO_END(info->xmit.head, info->xmit.tail, SERIAL_XMIT_SIZE);
-		if (count < c)
-			c = count;
-		if (c <= 0) {
-			break;
+	if (from_user) {
+		down(&tmp_buf_sem);
+		while (1) {
+			int c1;
+			c = CIRC_SPACE_TO_END(info->xmit.head, info->xmit.tail, SERIAL_XMIT_SIZE);
+			if (count < c)
+				c = count;
+			if (c <= 0)
+				break;
+
+			c -= copy_from_user(tmp_buf, buf, c);
+			if (!c) {
+				if (!ret)
+					ret = -EFAULT;
+				break;
+			}
+
+			local_irq_save(flags);
+			{
+				c1 = CIRC_SPACE_TO_END(info->xmit.head, info->xmit.tail,
+						       SERIAL_XMIT_SIZE);
+				if (c1 < c)
+					c = c1;
+				memcpy(info->xmit.buf + info->xmit.head, tmp_buf, c);
+				info->xmit.head = ((info->xmit.head + c) &
+						   (SERIAL_XMIT_SIZE-1));
+			}
+			local_irq_restore(flags);
+
+			buf += c;
+			count -= c;
+			ret += c;
 		}
-		memcpy(info->xmit.buf + info->xmit.head, buf, c);
-		info->xmit.head = ((info->xmit.head + c) &
-				   (SERIAL_XMIT_SIZE-1));
-		buf += c;
-		count -= c;
-		ret += c;
+		up(&tmp_buf_sem);
+	} else {
+		local_irq_save(flags);
+		while (1) {
+			c = CIRC_SPACE_TO_END(info->xmit.head, info->xmit.tail, SERIAL_XMIT_SIZE);
+			if (count < c)
+				c = count;
+			if (c <= 0) {
+				break;
+			}
+			memcpy(info->xmit.buf + info->xmit.head, buf, c);
+			info->xmit.head = ((info->xmit.head + c) &
+					   (SERIAL_XMIT_SIZE-1));
+			buf += c;
+			count -= c;
+			ret += c;
+		}
+		local_irq_restore(flags);
 	}
-	local_irq_restore(flags);
 	/*
 	 * Hey, we transmit directly from here in our case
 	 */

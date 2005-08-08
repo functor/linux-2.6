@@ -715,7 +715,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		sock_lock_init(newsk);
 		bh_lock_sock(newsk);
 
-		rwlock_init(&newsk->sk_dst_lock);
+		newsk->sk_dst_lock = RW_LOCK_UNLOCKED;
 		atomic_set(&newsk->sk_rmem_alloc, 0);
 		skb_queue_head_init(&newsk->sk_receive_queue);
 		atomic_set(&newsk->sk_wmem_alloc, 0);
@@ -728,7 +728,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newsk->sk_userlocks = sk->sk_userlocks & ~SOCK_BINDPORT_LOCK;
 		newsk->sk_backlog.head = newsk->sk_backlog.tail = NULL;
 		newsk->sk_send_head = NULL;
-		rwlock_init(&newsk->sk_callback_lock);
+		newsk->sk_callback_lock = RW_LOCK_UNLOCKED;
 		skb_queue_head_init(&newsk->sk_error_queue);
 		newsk->sk_write_space = sk_stream_write_space;
 
@@ -1100,3 +1100,7 @@ EXPORT_SYMBOL(tcp_child_process);
 EXPORT_SYMBOL(tcp_create_openreq_child);
 EXPORT_SYMBOL(tcp_timewait_state_process);
 EXPORT_SYMBOL(tcp_tw_deschedule);
+
+#ifdef CONFIG_SYSCTL
+EXPORT_SYMBOL(sysctl_tcp_tw_recycle);
+#endif

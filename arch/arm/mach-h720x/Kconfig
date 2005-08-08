@@ -1,5 +1,3 @@
-if ARCH_H720X
-
 menu "h720x Implementations"
 
 config ARCH_H7201
@@ -27,5 +25,3 @@ config CPU_H7202
 	bool
 	help
 	  Select code specific to h7202 variants
-
-endif

@@ -112,7 +112,6 @@ struct stifb_info {
 	ngle_rom_t ngle_rom;
 	struct sti_struct *sti;
 	int deviceSpecificConfig;
-	u32 pseudo_palette[16];
 };
 
 static int __initdata bpp = 8;	/* parameter from modprobe */
@@ -1031,14 +1030,6 @@ stifb_setcolreg(u_int regno, u_int red, u_int green,
 				/* 0x100 is same as used in WRITE_IMAGE_COLOR() */
 		START_COLORMAPLOAD(fb, lutBltCtl.all);
 		SETUP_FB(fb);
-
-		/* info->var.bits_per_pixel == 32 */
-		if (regno < 16) 
-		  ((u32 *)(info->pseudo_palette))[regno] =
-			(red   << info->var.red.offset)   |
-			(green << info->var.green.offset) |
-			(blue  << info->var.blue.offset);
-
 	} else {
 		/* cleanup colormap hardware */
 		FINISH_IMAGE_COLORMAP_ACCESS(fb);
@@ -1335,7 +1326,7 @@ stifb_init_fb(struct sti_struct *sti, int force_bpp)
 	info->fbops = &stifb_ops;
 	info->screen_base = (void*) REGION_BASE(fb,1);
 	info->flags = FBINFO_DEFAULT;
-	info->pseudo_palette = &fb->pseudo_palette;
+	info->currcon = -1;
 
 	/* This has to been done !!! */
 	fb_alloc_cmap(&info->cmap, 256, 0);
@@ -1392,7 +1383,6 @@ int __init
 stifb_init(void)
 {
 	struct sti_struct *sti;
-	struct sti_struct *def_sti;
 	int i;
 	
 #ifndef MODULE
@@ -1407,19 +1397,9 @@ stifb_init(void)
 		return -ENXIO;
 	}
 	
-	def_sti = sti_get_rom(0);
-	if (def_sti) {
-		for (i = 1; i < MAX_STI_ROMS; i++) {
-			sti = sti_get_rom(i);
-			if (sti == def_sti && bpp > 0)
-				stifb_force_bpp[i] = bpp;
-		}
-		stifb_init_fb(def_sti, stifb_force_bpp[i]);
-	}
-
 	for (i = 1; i < MAX_STI_ROMS; i++) {
 		sti = sti_get_rom(i);
-		if (!sti || sti==def_sti)
+		if (!sti)
 			break;
 		if (bpp > 0)
 			stifb_force_bpp[i] = bpp;

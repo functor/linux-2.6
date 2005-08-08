@@ -39,7 +39,19 @@
 #include <asm/irq.h>
 #include <asm/dma.h>
 #include <asm/hardware.h>
-#include <asm/mach/irda.h>
+#include <asm/mach-types.h>
+
+#include <asm/arch/assabet.h>
+#include <asm/arch/h3600.h>
+#include <asm/arch/yopy.h>
+
+#ifndef GPIO_IRDA_FIR
+#define GPIO_IRDA_FIR		(0)
+#endif
+
+#ifndef GPIO_IRDA_POWER
+#define GPIO_IRDA_POWER		(0)
+#endif
 
 static int power_level = 3;
 static int tx_lpm;
@@ -63,7 +75,6 @@ struct sa1100_irda {
 
 	struct net_device_stats	stats;
 	struct device		*dev;
-	struct irda_platform_data *pdata;
 	struct irlap_cb		*irlap;
 	struct qos_info		qos;
 
@@ -159,8 +170,12 @@ static int sa1100_irda_set_speed(struct sa1100_irda *si, int speed)
 		Ser2UTSR0 = UTSR0_REB | UTSR0_RBB | UTSR0_RID;
 		Ser2UTCR3 = UTCR3_RIE | UTCR3_RXE | UTCR3_TXE;
 
-		if (si->pdata->set_speed)
-			si->pdata->set_speed(si->dev, speed);
+		if (machine_is_assabet())
+			ASSABET_BCR_clear(ASSABET_BCR_IRDA_FSEL);
+		if (machine_is_h3xxx())
+			clr_h3600_egpio(IPAQ_EGPIO_IR_FSEL);
+		if (machine_is_yopy())
+			PPSR &= ~GPIO_IRDA_FIR;
 
 		si->speed = speed;
 
@@ -179,8 +194,12 @@ static int sa1100_irda_set_speed(struct sa1100_irda *si, int speed)
 
 		si->speed = speed;
 
-		if (si->pdata->set_speed)
-			si->pdata->set_speed(si->dev, speed);
+		if (machine_is_assabet())
+			ASSABET_BCR_set(ASSABET_BCR_IRDA_FSEL);
+		if (machine_is_h3xxx())
+			set_h3600_egpio(IPAQ_EGPIO_IR_FSEL);
+		if (machine_is_yopy())
+			PPSR |= GPIO_IRDA_FIR;
 
 		sa1100_irda_rx_alloc(si);
 		sa1100_irda_rx_dma_start(si);
@@ -197,6 +216,51 @@ static int sa1100_irda_set_speed(struct sa1100_irda *si, int speed)
 }
 
 /*
+ * This sets the IRDA power level on the Assabet.
+ */
+static inline int
+sa1100_irda_set_power_assabet(struct sa1100_irda *si, unsigned int state)
+{
+	static unsigned int bcr_state[4] = {
+		ASSABET_BCR_IRDA_MD0,
+		ASSABET_BCR_IRDA_MD1|ASSABET_BCR_IRDA_MD0,
+		ASSABET_BCR_IRDA_MD1,
+		0
+	};
+
+	if (state < 4) {
+		state = bcr_state[state];
+		ASSABET_BCR_clear(state ^ (ASSABET_BCR_IRDA_MD1|
+					   ASSABET_BCR_IRDA_MD0));
+		ASSABET_BCR_set(state);
+	}
+	return 0;
+}
+
+/*
+ * This turns the IRDA power on or off on the Compaq H3600
+ */
+static inline int
+sa1100_irda_set_power_h3600(struct sa1100_irda *si, unsigned int state)
+{
+	assign_h3600_egpio( IPAQ_EGPIO_IR_ON, state );
+	return 0;
+}
+
+/*
+ * This turns the IRDA power on or off on the Yopy
+ */
+static inline int
+sa1100_irda_set_power_yopy(struct sa1100_irda *si, unsigned int state)
+{
+	if (state)
+		PPSR &= ~GPIO_IRDA_POWER;
+	else
+		PPSR |= GPIO_IRDA_POWER;
+	return 0;
+}
+
+/*
  * Control the power state of the IrDA transmitter.
  * State:
  *  0 - off
@@ -210,8 +274,14 @@ static int
 __sa1100_irda_set_power(struct sa1100_irda *si, unsigned int state)
 {
 	int ret = 0;
-	if (si->pdata->set_power)
-		ret = si->pdata->set_power(si->dev, state);
+
+	if (machine_is_assabet())
+		ret = sa1100_irda_set_power_assabet(si, state);
+	if (machine_is_h3xxx())
+		ret = sa1100_irda_set_power_h3600(si, state);
+	if (machine_is_yopy())
+		ret = sa1100_irda_set_power_yopy(si, state);
+
 	return ret;
 }
 
@@ -234,8 +304,11 @@ static int sa1100_irda_startup(struct sa1100_irda *si)
 	/*
 	 * Ensure that the ports for this device are setup correctly.
 	 */
-	if (si->pdata->startup)
-		si->pdata->startup(si->dev);
+	if (machine_is_yopy()) {
+		PPDR |= GPIO_IRDA_POWER | GPIO_IRDA_FIR;
+		PPSR |= GPIO_IRDA_POWER | GPIO_IRDA_FIR;
+		PSDR |= GPIO_IRDA_POWER | GPIO_IRDA_FIR;
+	}
 
 	/*
 	 * Configure PPC for IRDA - we want to drive TXD2 low.
@@ -260,15 +333,10 @@ static int sa1100_irda_startup(struct sa1100_irda *si)
 	Ser2UTSR0 = UTSR0_REB | UTSR0_RBB | UTSR0_RID;
 
 	ret = sa1100_irda_set_speed(si, si->speed = 9600);
-	if (ret) {
-		Ser2UTCR3 = 0;
-		Ser2HSCR0 = 0;
+	if (ret)
+		return ret;
 
-		if (si->pdata->shutdown)
-			si->pdata->shutdown(si->dev);
-	}
-
-	return ret;
+	return 0;
 }
 
 static void sa1100_irda_shutdown(struct sa1100_irda *si)
@@ -282,9 +350,6 @@ static void sa1100_irda_shutdown(struct sa1100_irda *si)
 	/* Disable the port. */
 	Ser2UTCR3 = 0;
 	Ser2HSCR0 = 0;
-
-	if (si->pdata->shutdown)
-		si->pdata->shutdown(si->dev);
 }
 
 #ifdef CONFIG_PM
@@ -894,9 +959,6 @@ static int sa1100_irda_probe(struct device *_dev)
 	unsigned int baudrate_mask;
 	int err;
 
-	if (!pdev->dev.platform_data)
-		return -EINVAL;
-
 	err = request_mem_region(__PREG(Ser2UTCR0), 0x24, "IrDA") ? 0 : -EBUSY;
 	if (err)
 		goto err_mem_1;
@@ -913,7 +975,6 @@ static int sa1100_irda_probe(struct device *_dev)
 
 	si = dev->priv;
 	si->dev = &pdev->dev;
-	si->pdata = pdev->dev.platform_data;
 
 	/*
 	 * Initialise the HP-SIR buffers
@@ -967,7 +1028,7 @@ static int sa1100_irda_probe(struct device *_dev)
 
 	err = register_netdev(dev);
 	if (err == 0)
-		dev_set_drvdata(&pdev->dev, dev);
+		dev_set_drvdata(&pdev->dev, si);
 
 	if (err) {
  err_mem_5:
@@ -1013,8 +1074,15 @@ static struct device_driver sa1100ir_driver = {
 	.resume		= sa1100_irda_resume,
 };
 
+static struct platform_device sa1100ir_device = {
+	.name		= "sa11x0-ir",
+	.id		= 0,
+};
+
 static int __init sa1100_irda_init(void)
 {
+	int ret;
+
 	/*
 	 * Limit power level a sensible range.
 	 */
@@ -1023,12 +1091,19 @@ static int __init sa1100_irda_init(void)
 	if (power_level > 3)
 		power_level = 3;
 
-	return driver_register(&sa1100ir_driver);
+	ret = driver_register(&sa1100ir_driver);
+	if (ret == 0) {
+		ret = platform_device_register(&sa1100ir_device);
+		if (ret)
+			driver_unregister(&sa1100ir_driver);
+	}
+	return ret;
 }
 
 static void __exit sa1100_irda_exit(void)
 {
 	driver_unregister(&sa1100ir_driver);
+	platform_device_unregister(&sa1100ir_device);
 }
 
 module_init(sa1100_irda_init);

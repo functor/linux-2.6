@@ -325,7 +325,7 @@ static void intr_deschedule (
 		status = disable_periodic (ehci);
 	else {
 		status = 0;
-		ehci_vdbg (ehci, "periodic schedule still enabled\n");
+		vdbg ("periodic schedule still enabled");
 	}
 
 	/*
@@ -342,7 +342,7 @@ static void intr_deschedule (
 			 * the race is very short.  then if qh also isn't
 			 * rescheduled soon, it won't matter.  otherwise...
 			 */
-			ehci_vdbg (ehci, "intr_deschedule...\n");
+			vdbg ("intr_deschedule...");
 		}
 	} else
 		qh->hw_next = EHCI_LIST_END;
@@ -353,8 +353,8 @@ static void intr_deschedule (
 	hcd_to_bus (&ehci->hcd)->bandwidth_allocated -= 
 		(qh->usecs + qh->c_usecs) / qh->period;
 
-	ehci_dbg (ehci, "descheduled qh%d/%p frame=%d count=%d, urbs=%d\n",
-		qh->period, qh, frame,
+	dbg ("descheduled qh %p, period = %d frame = %d count = %d, urbs = %d",
+		qh, qh->period, frame,
 		atomic_read (&qh->kref.refcount), ehci->periodic_sched);
 }
 
@@ -450,7 +450,6 @@ static int qh_schedule (struct ehci_hcd *ehci, struct ehci_qh *qh)
 	__le32		c_mask;
 	unsigned	frame;		/* 0..(qh->period - 1), or NO_FRAME */
 
-	qh_refresh(ehci, qh);
 	qh->hw_next = EHCI_LIST_END;
 	frame = qh->start;
 
@@ -487,14 +486,13 @@ static int qh_schedule (struct ehci_hcd *ehci, struct ehci_qh *qh)
 		qh->hw_info2 &= ~__constant_cpu_to_le32(0xffff);
 		qh->hw_info2 |= cpu_to_le32 (1 << uframe) | c_mask;
 	} else
-		ehci_dbg (ehci, "reused qh %p schedule\n", qh);
+		dbg ("reused previous qh %p schedule", qh);
 
 	/* stuff into the periodic schedule */
 	qh->qh_state = QH_STATE_LINKED;
-	ehci_dbg(ehci,
-		"scheduled qh%d/%p usecs %d/%d starting %d.%d (gap %d)\n",
-		qh->period, qh, qh->usecs, qh->c_usecs,
-		frame, uframe, qh->gap_uf);
+	dbg ("scheduled qh %p usecs %d/%d period %d.0 starting %d.%d (gap %d)",
+		qh, qh->usecs, qh->c_usecs,
+		qh->period, frame, uframe, qh->gap_uf);
 	do {
 		if (unlikely (ehci->pshadow [frame].ptr != 0)) {
 
@@ -1838,9 +1836,7 @@ restart:
 		while (q.ptr != 0) {
 			unsigned		uf;
 			union ehci_shadow	temp;
-			int			live;
 
-			live = HCD_IS_RUNNING (ehci->hcd.state);
 			switch (type) {
 			case Q_TYPE_QH:
 				/* handle any completions */
@@ -1865,7 +1861,7 @@ restart:
 			case Q_TYPE_ITD:
 				/* skip itds for later in the frame */
 				rmb ();
-				for (uf = live ? uframes : 8; uf < 8; uf++) {
+				for (uf = uframes; uf < 8; uf++) {
 					if (0 == (q.itd->hw_transaction [uf]
 							& ITD_ACTIVE))
 						continue;
@@ -1889,8 +1885,7 @@ restart:
 				q = *q_p;
 				break;
 			case Q_TYPE_SITD:
-				if ((q.sitd->hw_results & SITD_ACTIVE)
-						&& live) {
+				if (q.sitd->hw_results & SITD_ACTIVE) {
 					q_p = &q.sitd->sitd_next;
 					hw_p = &q.sitd->hw_next;
 					type = Q_NEXT_TYPE (q.sitd->hw_next);

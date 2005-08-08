@@ -24,13 +24,6 @@
 #include <asm/string.h>
 #include <asm/uaccess.h>
 
-#define addc(_t,_r)                     \
-	__asm__ __volatile__ (          \
-"       add             %0, %1, %0\n"   \
-"       addc            %0, %%r0, %0\n" \
-	: "=r"(_t)                      \
-	: "r"(_r), "0"(_t));
-
 static inline unsigned short from32to16(unsigned int x)
 {
 	/* 32 bits --> 16 bits + carry */
@@ -63,25 +56,16 @@ static inline unsigned int do_csum(const unsigned char * buff, int len)
 		}
 		count >>= 1;		/* nr of 32-bit words.. */
 		if (count) {
-			while (count >= 4) {
-				unsigned int r1, r2, r3, r4;
-				r1 = *(unsigned int *)(buff + 0);
-				r2 = *(unsigned int *)(buff + 4);
-				r3 = *(unsigned int *)(buff + 8);
-				r4 = *(unsigned int *)(buff + 12);
-				addc(result, r1);
-				addc(result, r2);
-				addc(result, r3);
-				addc(result, r4);
-				count -= 4;
-				buff += 16;
-			}
-			while (count) {
+			unsigned int carry = 0;
+			do {
 				unsigned int w = *(unsigned int *) buff;
 				count--;
 				buff += 4;
-				addc(result, w);
-			}
+				result += carry;
+				result += w;
+				carry = (w > result);
+			} while (count);
+			result += carry;
 			result = (result & 0xffff) + (result >> 16);
 		}
 		if (len & 2) {
@@ -93,7 +77,7 @@ static inline unsigned int do_csum(const unsigned char * buff, int len)
 		result += le16_to_cpu(*buff);
 	result = from32to16(result);
 	if (odd)
-		result = swab16(result);
+		result = ((result >> 8) & 0xff) | ((result & 0xff) << 8);
 out:
 	return result;
 }
@@ -104,8 +88,12 @@ out:
 unsigned int csum_partial(const unsigned char *buff, int len, unsigned int sum)
 {
 	unsigned int result = do_csum(buff, len);
-	addc(result, sum);
-	return from32to16(result);
+
+	/* add in old sum, and carry.. */
+	result += sum;
+	if(sum > result)
+		result += 1;
+	return result;
 }
 
 EXPORT_SYMBOL(csum_partial);

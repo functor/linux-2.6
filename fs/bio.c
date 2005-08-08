@@ -98,7 +98,12 @@ void bio_destructor(struct bio *bio)
 
 	BIO_BUG_ON(pool_idx >= BIOVEC_NR_POOLS);
 
-	mempool_free(bio->bi_io_vec, bp->pool);
+	/*
+	 * cloned bio doesn't own the veclist
+	 */
+	if (!bio_flagged(bio, BIO_CLONED))
+		mempool_free(bio->bi_io_vec, bp->pool);
+
 	mempool_free(bio, bio_pool);
 }
 
@@ -205,9 +210,7 @@ inline int bio_hw_segments(request_queue_t *q, struct bio *bio)
  */
 inline void __bio_clone(struct bio *bio, struct bio *bio_src)
 {
-	request_queue_t *q = bdev_get_queue(bio_src->bi_bdev);
-
-	memcpy(bio->bi_io_vec, bio_src->bi_io_vec, bio_src->bi_max_vecs * sizeof(struct bio_vec));
+	bio->bi_io_vec = bio_src->bi_io_vec;
 
 	bio->bi_sector = bio_src->bi_sector;
 	bio->bi_bdev = bio_src->bi_bdev;
@@ -219,9 +222,21 @@ inline void __bio_clone(struct bio *bio, struct bio *bio_src)
 	 * for the clone
 	 */
 	bio->bi_vcnt = bio_src->bi_vcnt;
+	bio->bi_idx = bio_src->bi_idx;
+	if (bio_flagged(bio, BIO_SEG_VALID)) {
+		bio->bi_phys_segments = bio_src->bi_phys_segments;
+		bio->bi_hw_segments = bio_src->bi_hw_segments;
+		bio->bi_flags |= (1 << BIO_SEG_VALID);
+	}
 	bio->bi_size = bio_src->bi_size;
-	bio_phys_segments(q, bio);
-	bio_hw_segments(q, bio);
+
+	/*
+	 * cloned bio does not own the bio_vec, so users cannot fiddle with
+	 * it. clear bi_max_vecs and clear the BIO_POOL_BITS to make this
+	 * apparent
+	 */
+	bio->bi_max_vecs = 0;
+	bio->bi_flags &= (BIO_POOL_MASK - 1);
 }
 
 /**
@@ -233,7 +248,7 @@ inline void __bio_clone(struct bio *bio, struct bio *bio_src)
  */
 struct bio *bio_clone(struct bio *bio, int gfp_mask)
 {
-	struct bio *b = bio_alloc(gfp_mask, bio->bi_max_vecs);
+	struct bio *b = bio_alloc(gfp_mask, 0);
 
 	if (b)
 		__bio_clone(b, bio);
@@ -446,10 +461,11 @@ struct bio *bio_copy_user(request_queue_t *q, unsigned long uaddr,
 
 	bmd->userptr = (void __user *) uaddr;
 
-	ret = -ENOMEM;
 	bio = bio_alloc(GFP_KERNEL, end - start);
-	if (!bio)
-		goto out_bmd;
+	if (!bio) {
+		bio_free_map_data(bmd);
+		return ERR_PTR(-ENOMEM);
+	}
 
 	bio->bi_rw |= (!write_to_vm << BIO_RW);
 
@@ -503,8 +519,6 @@ cleanup:
 		__free_page(bvec->bv_page);
 
 	bio_put(bio);
-out_bmd:
-	bio_free_map_data(bmd);
 	return ERR_PTR(ret);
 }
 

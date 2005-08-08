@@ -11,14 +11,15 @@
  *
  * Modifications:
  *     29-Aug-2004 BJD  Start of drive-strength control
- *     09-Nov-2004 BJD  Added symbol export
 */
 
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>
+#include <linux/list.h>
+#include <linux/timer.h>
 #include <linux/init.h>
-#include <linux/module.h>
+#include <linux/device.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
@@ -54,5 +55,3 @@ int s3c2440_set_dsc(unsigned int pin, unsigned int value)
 	local_irq_restore(flags);
 	return 0;
 }
-
-EXPORT_SYMBOL(s3c2440_set_dsc);

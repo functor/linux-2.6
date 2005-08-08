@@ -552,9 +552,9 @@ create_iface(struct device_node *np, struct device *dev)
 	iface->irq = np->intrs[0].line;
 	iface->channels = (struct keywest_chan *)
 		(((unsigned long)(iface + 1) + 3UL) & ~3UL);
-	iface->base = ioremap(np->addrs[0].address + addroffset,
+	iface->base = (unsigned long)ioremap(np->addrs[0].address + addroffset,
 						np->addrs[0].size);
-	if (!iface->base) {
+	if (iface->base == 0) {
 		printk(KERN_ERR "i2c-keywest: can't map inteface !\n");
 		kfree(iface);
 		pmac_low_i2c_unlock(np);
@@ -600,7 +600,7 @@ create_iface(struct device_node *np, struct device *dev)
 	rc = request_irq(iface->irq, keywest_irq, SA_INTERRUPT, "keywest i2c", iface);
 	if (rc) {
 		printk(KERN_ERR "i2c-keywest: can't get IRQ %d !\n", iface->irq);
-		iounmap(iface->base);
+		iounmap((void *)iface->base);
 		kfree(iface);
 		pmac_low_i2c_unlock(np);
 		return -ENODEV;
@@ -685,7 +685,7 @@ dispose_iface(struct device *dev)
 		if (rc)
 			printk("i2c-keywest.c: i2c_del_adapter failed, that's bad !\n");
 	}
-	iounmap(iface->base);
+	iounmap((void *)iface->base);
 	dev_set_drvdata(dev, NULL);
 	of_node_put(iface->node);
 	kfree(iface);

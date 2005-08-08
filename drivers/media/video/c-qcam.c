@@ -103,7 +103,8 @@ static unsigned int qcam_await_ready1(struct qcam_device *qcam,
 	{
 		if (qcam_ready1(qcam) == value)
 			return 0;
-		msleep_interruptible(100);
+		current->state=TASK_INTERRUPTIBLE;
+		schedule_timeout(HZ/10);
 	}
 
 	/* Probably somebody pulled the plug out.  Not much we can do. */
@@ -128,7 +129,8 @@ static unsigned int qcam_await_ready2(struct qcam_device *qcam, int value)
 	{
 		if (qcam_ready2(qcam) == value)
 			return 0;
-		msleep_interruptible(100);
+		current->state=TASK_INTERRUPTIBLE;
+		schedule_timeout(HZ/10);
 	}
 
 	/* Probably somebody pulled the plug out.  Not much we can do. */

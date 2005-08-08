@@ -519,7 +519,7 @@ struct cdrom_info {
 
  /* The generic packet command opcodes for CD/DVD Logical Units,
  * From Table 57 of the SFF8090 Ver. 3 (Mt. Fuji) draft standard. */ 
-static const struct {
+const struct {
 	unsigned short packet_command;
 	const char * const text;
 } packet_command_texts[] = {
@@ -577,7 +577,7 @@ static const struct {
 
 
 /* From Table 303 of the SFF8090 Ver. 3 (Mt. Fuji) draft standard. */
-static const char * const sense_key_texts[16] = {
+const char * const sense_key_texts[16] = {
 	"No sense data",
 	"Recovered error",
 	"Not ready",
@@ -597,7 +597,7 @@ static const char * const sense_key_texts[16] = {
 };
 
 /* From Table 304 of the SFF8090 Ver. 3 (Mt. Fuji) draft standard. */
-static const struct {
+const struct {
 	unsigned long asc_ascq;
 	const char * const text;
 } sense_data_texts[] = {

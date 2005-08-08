@@ -85,9 +85,8 @@ static int max_id = 64;
 static int max_channel = 3;
 static int init_timeout = 5;
 static int max_requests = 50;
-static int max_sectors = 32 * 8; /* default max I/O 32 pages */
 
-#define IBMVSCSI_VERSION "1.5.3"
+#define IBMVSCSI_VERSION "1.5.1"
 
 MODULE_DESCRIPTION("IBM Virtual SCSI");
 MODULE_AUTHOR("Dave Boutcher");
@@ -102,8 +101,6 @@ module_param_named(init_timeout, init_timeout, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(init_timeout, "Initialization timeout in seconds");
 module_param_named(max_requests, max_requests, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(max_requests, "Maximum requests for this adapter");
-module_param_named(max_sectors, max_sectors, int, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(max_sectors, "Maximum sectors per request for this adapter");
 
 /* ------------------------------------------------------------
  * Routines for the event pool and event structs
@@ -643,16 +640,11 @@ static void adapter_info_rsp(struct srp_event_struct *evt_struct)
 		       evt_struct->xfer_iu->mad.adapter_info.common.status);
 	} else {
 		printk("ibmvscsi: host srp version: %s, "
-		       "host partition %s (%d), OS %d, max io %u\n",
+		       "host partition %s (%d), OS %d\n",
 		       hostdata->madapter_info.srp_version,
 		       hostdata->madapter_info.partition_name,
 		       hostdata->madapter_info.partition_number,
-		       hostdata->madapter_info.os_type,
-		       hostdata->madapter_info.port_max_txu[0]);
-
-		if (hostdata->madapter_info.port_max_txu[0]) 
-		    hostdata->host->max_sectors = 
-			hostdata->madapter_info.port_max_txu[0] >> 9;
+		       hostdata->madapter_info.os_type);
 	}
 }
 
@@ -1302,7 +1294,6 @@ static int ibmvscsi_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 	hostdata->host = host;
 	hostdata->dev = dev;
 	atomic_set(&hostdata->request_limit, -1);
-	hostdata->host->max_sectors = max_sectors; 
 
 	if (ibmvscsi_init_crq_queue(&hostdata->queue, hostdata,
 				    max_requests) != 0) {
@@ -1334,7 +1325,7 @@ static int ibmvscsi_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 		 */
 		for (wait_switch = jiffies + (init_timeout * HZ);
 		     time_before(jiffies, wait_switch) &&
-		     atomic_read(&hostdata->request_limit) < 2;) {
+		     atomic_read(&hostdata->request_limit) < 0;) {
 
 			set_current_state(TASK_UNINTERRUPTIBLE);
 			schedule_timeout(HZ / 100);

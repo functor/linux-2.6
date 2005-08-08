@@ -112,11 +112,7 @@ struct neigh_statistics
 };
 
 #define NEIGH_CACHE_STAT_INC(tbl, field)				\
-	do {								\
-		preempt_disable();					\
-		(per_cpu_ptr((tbl)->stats, smp_processor_id())->field)++; \
-		preempt_enable();					\
-	} while (0)
+		(per_cpu_ptr((tbl)->stats, smp_processor_id())->field++)
 
 struct neighbour
 {

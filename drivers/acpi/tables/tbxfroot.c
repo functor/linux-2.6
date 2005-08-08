@@ -41,7 +41,6 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#include <linux/module.h>
 
 #include <acpi/acpi.h>
 #include <acpi/actables.h>
@@ -88,28 +87,12 @@ acpi_tb_find_table (
 		return_ACPI_STATUS (AE_AML_STRING_LIMIT);
 	}
 
-	if (!ACPI_STRNCMP (signature, DSDT_SIG, ACPI_NAME_SIZE)) {
-		/*
-		 * The DSDT pointer is contained in the FADT, not the RSDT.
-		 * This code should suffice, because the only code that would perform
-		 * a "find" on the DSDT is the data_table_region() AML opcode -- in
-		 * which case, the DSDT is guaranteed to be already loaded.
-		 * If this becomes insufficient, the FADT will have to be found first.
-		 */
-		if (!acpi_gbl_DSDT) {
-			return_ACPI_STATUS (AE_NO_ACPI_TABLES);
-		}
+	/* Find the table */
 
-		table = acpi_gbl_DSDT;
-	}
-	else {
-		/* Find the table */
-
-		status = acpi_get_firmware_table (signature, 1,
-				   ACPI_LOGICAL_ADDRESSING, &table);
-		if (ACPI_FAILURE (status)) {
-			return_ACPI_STATUS (status);
-		}
+	status = acpi_get_firmware_table (signature, 1,
+			   ACPI_LOGICAL_ADDRESSING, &table);
+	if (ACPI_FAILURE (status)) {
+		return_ACPI_STATUS (status);
 	}
 
 	/* Check oem_id and oem_table_id */
@@ -119,7 +102,6 @@ acpi_tb_find_table (
 		return_ACPI_STATUS (AE_AML_NAME_NOT_FOUND);
 	}
 
-	ACPI_DEBUG_PRINT ((ACPI_DB_TABLES, "Found table [%4.4s]\n", table->signature));
 	*table_ptr = table;
 	return_ACPI_STATUS (AE_OK);
 }
@@ -322,7 +304,6 @@ cleanup:
 	}
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_get_firmware_table);
 
 
 /* TBD: Move to a new file */

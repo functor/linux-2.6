@@ -52,12 +52,7 @@ static int stopmachine(void *cpu)
 			mb(); /* Must read state first. */
 			atomic_inc(&stopmachine_thread_ack);
 		}
-		/* Yield in first stage: migration threads need to
-		 * help our sisters onto their CPUs. */
-		if (!prepared && !irqs_disabled)
-			yield();
-		else
-			cpu_relax();
+		cpu_relax();
 	}
 
 	/* Ack: we are exiting. */

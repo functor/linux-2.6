@@ -932,7 +932,7 @@ static void pwc_isoc_cleanup(struct pwc_device *pdev)
 		if (urb != 0) {
 			if (pdev->iso_init) {
 				Trace(TRACE_MEMORY, "Unlinking URB %p\n", urb);
-				usb_kill_urb(urb);
+				usb_unlink_urb(urb);
 			}
 			Trace(TRACE_MEMORY, "Freeing URB\n");
 			usb_free_urb(urb);
@@ -1619,8 +1619,8 @@ static int pwc_video_mmap(struct file *file, struct vm_area_struct *vma)
 
 	pos = (unsigned long)pdev->image_data;
 	while (size > 0) {
-		page = vmalloc_to_pfn((void *)pos);
-		if (remap_pfn_range(vma, start, page, PAGE_SIZE, PAGE_SHARED))
+		page = kvirt_to_pa(pos);
+		if (remap_page_range(vma, start, page, PAGE_SIZE, PAGE_SHARED))
 			return -EAGAIN;
 
 		start += PAGE_SIZE;

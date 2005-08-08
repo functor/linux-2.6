@@ -99,7 +99,4 @@ extern void init_timers(void);
 extern void run_local_timers(void);
 extern void it_real_fn(unsigned long);
 
-extern void dump_clear_timers(void);
-extern void dump_run_timers(void);
-
 #endif

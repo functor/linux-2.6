@@ -15,7 +15,6 @@
  */
 
 #include <linux/config.h>
-#include <linux/syscalls.h>
 #include <linux/string.h>
 #include <linux/mm.h>
 #include <linux/fs.h>
@@ -396,6 +395,8 @@ static void prune_dcache(int count)
 		struct dentry *dentry;
 		struct list_head *tmp;
 
+		cond_resched_lock(&dcache_lock);
+
 		tmp = dentry_unused.prev;
 		if (tmp == &dentry_unused)
 			break;
@@ -731,6 +732,7 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	dentry->d_extra_attributes = NULL;
 	dentry->d_mounted = 0;
 	dentry->d_cookie = NULL;
+	dentry->d_bucket = NULL;
 	INIT_HLIST_NODE(&dentry->d_hash);
 	INIT_LIST_HEAD(&dentry->d_lru);
 	INIT_LIST_HEAD(&dentry->d_subdirs);
@@ -750,16 +752,6 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	spin_unlock(&dcache_lock);
 
 	return dentry;
-}
-
-struct dentry *d_alloc_name(struct dentry *parent, const char *name)
-{
-	struct qstr q;
-
-	q.name = name;
-	q.len = strlen(name);
-	q.hash = full_name_hash(q.name, q.len);
-	return d_alloc(parent, &q);
 }
 
 /**
@@ -869,6 +861,12 @@ struct dentry * d_alloc_anon(struct inode *inode)
 		res->d_sb = inode->i_sb;
 		res->d_parent = res;
 		res->d_inode = inode;
+
+		/*
+		 * Set d_bucket to an "impossible" bucket address so
+		 * that d_move() doesn't get a false positive
+		 */
+		res->d_bucket = NULL;
 		res->d_flags |= DCACHE_DISCONNECTED;
 		res->d_flags &= ~DCACHE_UNHASHED;
 		list_add(&res->d_alias, &inode->i_dentry);
@@ -991,12 +989,21 @@ struct dentry * __d_lookup(struct dentry * parent, struct qstr * name)
 
 		dentry = hlist_entry(node, struct dentry, d_hash);
 
+		smp_rmb();
+
 		if (dentry->d_name.hash != hash)
 			continue;
 		if (dentry->d_parent != parent)
 			continue;
 
 		spin_lock(&dentry->d_lock);
+
+		/*
+		 * If lookup ends up in a different bucket due to concurrent
+		 * rename, fail it
+		 */
+		if (unlikely(dentry->d_bucket != head))
+			goto terminate;
 
 		/*
 		 * Recheck the dentry after taking the lock - d_move may have
@@ -1006,11 +1013,7 @@ struct dentry * __d_lookup(struct dentry * parent, struct qstr * name)
 		if (dentry->d_parent != parent)
 			goto next;
 
-		/*
-		 * It is safe to compare names since d_move() cannot
-		 * change the qstr (protected by d_lock).
-		 */
-		qstr = &dentry->d_name;
+		qstr = rcu_dereference(&dentry->d_name);
 		if (parent->d_op && parent->d_op->d_compare) {
 			if (parent->d_op->d_compare(parent, qstr, name))
 				goto next;
@@ -1025,6 +1028,7 @@ struct dentry * __d_lookup(struct dentry * parent, struct qstr * name)
 			atomic_inc(&dentry->d_count);
 			found = dentry;
 		}
+terminate:
 		spin_unlock(&dentry->d_lock);
 		break;
 next:
@@ -1116,13 +1120,6 @@ void d_delete(struct dentry * dentry)
 	spin_unlock(&dcache_lock);
 }
 
-static void __d_rehash(struct dentry * entry, struct hlist_head *list)
-{
-
- 	entry->d_flags &= ~DCACHE_UNHASHED;
- 	hlist_add_head_rcu(&entry->d_hash, list);
-}
-
 /**
  * d_rehash	- add an entry back to the hash
  * @entry: dentry to add to the hash
@@ -1136,8 +1133,10 @@ void d_rehash(struct dentry * entry)
 
 	spin_lock(&dcache_lock);
 	spin_lock(&entry->d_lock);
-	__d_rehash(entry, list);
+ 	entry->d_flags &= ~DCACHE_UNHASHED;
 	spin_unlock(&entry->d_lock);
+	entry->d_bucket = list;
+ 	hlist_add_head_rcu(&entry->d_hash, list);
 	spin_unlock(&dcache_lock);
 }
 
@@ -1215,8 +1214,6 @@ static void switch_names(struct dentry *dentry, struct dentry *target)
 
 void d_move(struct dentry * dentry, struct dentry * target)
 {
-	struct hlist_head *list;
-
 	if (!dentry->d_inode)
 		printk(KERN_WARNING "VFS: moving negative dcache entry\n");
 
@@ -1236,12 +1233,13 @@ void d_move(struct dentry * dentry, struct dentry * target)
 	/* Move the dentry to the target hash queue, if on different bucket */
 	if (dentry->d_flags & DCACHE_UNHASHED)
 		goto already_unhashed;
-
-	hlist_del_rcu(&dentry->d_hash);
-
+	if (dentry->d_bucket != target->d_bucket) {
+		hlist_del_rcu(&dentry->d_hash);
 already_unhashed:
-	list = d_hash(target->d_parent, target->d_name.hash);
-	__d_rehash(dentry, list);
+		dentry->d_bucket = target->d_bucket;
+		hlist_add_head_rcu(&dentry->d_hash, target->d_bucket);
+		dentry->d_flags &= ~DCACHE_UNHASHED;
+	}
 
 	/* Unhash the target: dput() will then get rid of it */
 	__d_drop(target);
@@ -1261,6 +1259,7 @@ already_unhashed:
 
 	/* Switch the names.. */
 	switch_names(dentry, target);
+	smp_wmb();
 	do_switch(dentry->d_name.len, target->d_name.len);
 	do_switch(dentry->d_name.hash, target->d_name.hash);
 

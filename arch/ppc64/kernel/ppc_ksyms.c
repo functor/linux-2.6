@@ -21,7 +21,6 @@
 #include <linux/delay.h>
 #include <linux/smp_lock.h>
 #include <linux/syscalls.h>
-#include <linux/bitops.h>
 
 #include <asm/page.h>
 #include <asm/semaphore.h>
@@ -29,6 +28,7 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/atomic.h>
+#include <asm/bitops.h>
 #include <asm/checksum.h>
 #include <asm/pgtable.h>
 #include <asm/prom.h>

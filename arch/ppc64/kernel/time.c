@@ -49,7 +49,6 @@
 #include <linux/init.h>
 #include <linux/profile.h>
 #include <linux/cpu.h>
-#include <linux/security.h>
 
 #include <asm/segment.h>
 #include <asm/io.h>
@@ -278,9 +277,6 @@ int timer_interrupt(struct pt_regs * regs)
 			write_seqlock(&xtime_lock);
 			tb_last_stamp = lpaca->next_jiffy_update_tb;
 			do_timer(regs);
-#ifndef CONFIG_SMP
-			update_process_times(user_mode(regs));
-#endif
 			timer_sync_xtime( cur_tb );
 			timer_check_rtc();
 			write_sequnlock(&xtime_lock);
@@ -435,17 +431,15 @@ long ppc64_sys32_stime(int __user * tptr)
 {
 	int value;
 	struct timespec myTimeval;
-	int err;
+
+	if (!capable(CAP_SYS_TIME))
+		return -EPERM;
 
 	if (get_user(value, tptr))
 		return -EFAULT;
 
 	myTimeval.tv_sec = value;
 	myTimeval.tv_nsec = 0;
-
-	err = security_settime(&myTimeval, NULL);
-	if (err)
-		return err;
 
 	do_settimeofday(&myTimeval);
 
@@ -462,17 +456,15 @@ long ppc64_sys_stime(long __user * tptr)
 {
 	long value;
 	struct timespec myTimeval;
-	int err;
+
+	if (!capable(CAP_SYS_TIME))
+		return -EPERM;
 
 	if (get_user(value, tptr))
 		return -EFAULT;
 
 	myTimeval.tv_sec = value;
 	myTimeval.tv_nsec = 0;
-
-	err = security_settime(&myTimeval, NULL);
-	if (err)
-		return err;
 
 	do_settimeofday(&myTimeval);
 

@@ -9,7 +9,6 @@
 struct matroxfb_dh_fb_info {
 	struct fb_info		fbcon;
 	int			fbcon_registered;
-	int                     initialized;
 
 	struct matrox_fb_info*	primary_dev;
 

@@ -341,7 +341,9 @@ void flush_hash_page(unsigned long context, unsigned long ea, pte_t pte,
 		     int local)
 {
 	unsigned long vsid, vpn, va, hash, secondary, slot;
-	unsigned long huge = pte_huge(pte);
+
+	/* XXX fix for large ptes */
+	unsigned long large = 0;
 
 	if ((ea >= USER_START) && (ea <= USER_END))
 		vsid = get_vsid(context, ea);
@@ -349,18 +351,18 @@ void flush_hash_page(unsigned long context, unsigned long ea, pte_t pte,
 		vsid = get_kernel_vsid(ea);
 
 	va = (vsid << 28) | (ea & 0x0fffffff);
-	if (huge)
+	if (large)
 		vpn = va >> HPAGE_SHIFT;
 	else
 		vpn = va >> PAGE_SHIFT;
-	hash = hpt_hash(vpn, huge);
+	hash = hpt_hash(vpn, large);
 	secondary = (pte_val(pte) & _PAGE_SECONDARY) >> 15;
 	if (secondary)
 		hash = ~hash;
 	slot = (hash & htab_data.htab_hash_mask) * HPTES_PER_GROUP;
 	slot += (pte_val(pte) & _PAGE_GROUP_IX) >> 12;
 
-	ppc_md.hpte_invalidate(slot, va, huge, local);
+	ppc_md.hpte_invalidate(slot, va, large, local);
 }
 
 void flush_hash_range(unsigned long context, unsigned long number, int local)
@@ -399,7 +401,7 @@ void low_hash_fault(struct pt_regs *regs, unsigned long address)
 		info.si_signo = SIGBUS;
 		info.si_errno = 0;
 		info.si_code = BUS_ADRERR;
-		info.si_addr = (void __user *)address;
+		info.si_addr = (void *)address;
 		force_sig_info(SIGBUS, &info, current);
 		return;
 	}

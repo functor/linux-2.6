@@ -92,7 +92,8 @@ match(const struct sk_buff *skb,
       const struct net_device *out,
       const void *matchinfo,
       int offset,
-      unsigned int protoff,
+      const void *hdr,
+      u_int16_t datalen,
       int *hotdrop)
 {
 	const struct ip6t_owner_info *info = matchinfo;

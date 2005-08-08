@@ -41,6 +41,12 @@
 
 extern asmlinkage void mipsIRQ(void);
 
+#ifdef CONFIG_KGDB
+extern void breakpoint(void);
+extern void set_debug_traps(void);
+extern int remote_debug;
+#endif
+
 static spinlock_t mips_irq_lock = SPIN_LOCK_UNLOCKED;
 
 static inline int mips_pcibios_iack(void)
@@ -181,8 +187,18 @@ void corehi_irqdispatch(struct pt_regs *regs)
         die("CoreHi interrupt", regs);
 }
 
-void __init arch_init_irq(void)
+void __init init_IRQ(void)
 {
 	set_except_vector(0, mipsIRQ);
+	init_generic_irq();
 	init_i8259_irqs();
+
+#ifdef CONFIG_KGDB
+	if (remote_debug) {
+		set_debug_traps();
+		breakpoint();
+	}
+#endif
 }
+
+

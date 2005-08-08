@@ -173,8 +173,13 @@ static struct dentry *ibmasmfs_create_file (struct super_block *sb,
 {
 	struct dentry *dentry;
 	struct inode *inode;
+	struct qstr qname;
 
-	dentry = d_alloc_name(parent, name);
+	qname.name = name;
+	qname.len = strlen (name);
+	qname.hash = full_name_hash(name, qname.len);
+
+	dentry = d_alloc(parent, &qname);
 	if (!dentry)
 		return NULL;
 
@@ -197,8 +202,12 @@ static struct dentry *ibmasmfs_create_dir (struct super_block *sb,
 {
 	struct dentry *dentry;
 	struct inode *inode;
+	struct qstr qname;
 
-	dentry = d_alloc_name(parent, name);
+	qname.name = name;
+	qname.len = strlen (name);
+	qname.hash = full_name_hash(name, qname.len);
+	dentry = d_alloc(parent, &qname);
 	if (!dentry)
 		return NULL;
 
@@ -511,7 +520,7 @@ static int remote_settings_file_close(struct inode *inode, struct file *file)
 
 static ssize_t remote_settings_file_read(struct file *file, char __user *buf, size_t count, loff_t *offset)
 {
-	void __iomem *address = (void __iomem *)file->private_data;
+	unsigned long address = (unsigned long)file->private_data;
 	unsigned char *page;
 	int retval;
 	int len = 0;
@@ -545,7 +554,7 @@ exit:
 
 static ssize_t remote_settings_file_write(struct file *file, const char __user *ubuff, size_t count, loff_t *offset)
 {
-	void __iomem *address = (void __iomem *)file->private_data;
+	unsigned long address = (unsigned long)file->private_data;
 	char *buff;
 	unsigned int value;
 

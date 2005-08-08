@@ -57,7 +57,6 @@ static void *r_next(struct seq_file *m, void *v, loff_t *pos)
 }
 
 static void *r_start(struct seq_file *m, loff_t *pos)
-	__acquires(resource_lock)
 {
 	struct resource *p = m->private;
 	loff_t l = 0;
@@ -68,7 +67,6 @@ static void *r_start(struct seq_file *m, loff_t *pos)
 }
 
 static void r_stop(struct seq_file *m, void *v)
-	__releases(resource_lock)
 {
 	read_unlock(&resource_lock);
 }

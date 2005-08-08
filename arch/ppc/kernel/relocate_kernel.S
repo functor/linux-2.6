@@ -2,7 +2,7 @@
  * relocate_kernel.S - put the kernel image in place to boot
  * Copyright (C) 2002-2003 Eric Biederman  <ebiederm@xmission.com>
  *
- * GameCube/ppc32 port Copyright (C) 2004 Albert Herranz
+ * GAMECUBE/PPC32 port Copyright (C) 2004 Albert Herranz
  *
  * This source code is licensed under the GNU General Public License,
  * Version 2.  See the file COPYING for more details.
@@ -41,20 +41,12 @@ relocate_new_kernel:
 
 	li	r0, 0
 
-	/*
-	 * Set Machine Status Register to a known status,
-	 * switch the MMU off and jump to 1: in a single step.
-	 */
-
+	/* Set Machine Status Register to a known status */
 	mr	r8, r0
 	ori     r8, r8, MSR_RI|MSR_ME
-	mtspr	SRR1, r8
-	addi	r8, r4, 1f - relocate_new_kernel
-	mtspr	SRR0, r8
-	sync
-	rfi
+	mtmsr	r8
+	isync
 
-1:
 	/* from this point address translation is turned off */
 	/* and interrupts are disabled */
 

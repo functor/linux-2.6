@@ -217,26 +217,7 @@ source "net/ipv6/netfilter/Kconfig"
 source "net/decnet/netfilter/Kconfig"
 source "net/bridge/netfilter/Kconfig"
 
-config VNET
-	tristate "PlanetLab Virtualized NETwork access"
-	depends on IP_NF_CONNTRACK
-	---help---
-	  VNET associates IP connections with VServer virtual contexts
-	  and ensures that unprivileged contexts can receive only packets
-	  related to connections initiated by, or bound to, sockets
-	  created in their contexts.
-
-	  For now, enabling or disabling this option does not compile
-	  the driver or activate any non-default code paths. Compile
-	  and load the VNET module separately.
-
-	  If unsure, say N.
-
 endif
-
-config XFRM
-       bool
-       depends on NET
 
 source "net/xfrm/Kconfig"
 

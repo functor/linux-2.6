@@ -114,7 +114,6 @@ static inline void free_one_pmd(struct mmu_gather *tlb, pmd_t * dir)
 	page = pmd_page(*dir);
 	pmd_clear(dir);
 	dec_page_state(nr_page_table_pages);
-	tlb->mm->nr_ptes--;
 	pte_free_tlb(tlb, page);
 }
 
@@ -164,6 +163,7 @@ pte_t fastcall * pte_alloc_map(struct mm_struct *mm, pmd_t *pmd, unsigned long a
 		spin_lock(&mm->page_table_lock);
 		if (!new)
 			return NULL;
+
 		/*
 		 * Because we dropped the lock, we should re-check the
 		 * entry, as somebody else could have populated it..
@@ -172,7 +172,6 @@ pte_t fastcall * pte_alloc_map(struct mm_struct *mm, pmd_t *pmd, unsigned long a
 			pte_free(new);
 			goto out;
 		}
-		mm->nr_ptes++;
 		inc_page_state(nr_page_table_pages);
 		pmd_populate(mm, pmd, new);
 	}
@@ -293,15 +292,8 @@ skip_copy_pte_range:
 					goto cont_copy_pte_range_noset;
 				/* pte contains position in swap, so copy. */
 				if (!pte_present(pte)) {
-					if (!pte_file(pte)) {
+					if (!pte_file(pte))
 						swap_duplicate(pte_to_swp_entry(pte));
-						if (list_empty(&dst->mmlist)) {
-							spin_lock(&mmlist_lock);
-							list_add(&dst->mmlist,
-								 &src->mmlist);
-							spin_unlock(&mmlist_lock);
-						}
-					}
 					set_pte(dst_pte, pte);
 					goto cont_copy_pte_range_noset;
 				}
@@ -495,6 +487,10 @@ static void unmap_page_range(struct mmu_gather *tlb,
 	tlb_end_vma(tlb, vma);
 }
 
+#ifdef CONFIG_PREEMPT_VOLUNTARY
+# define ZAP_BLOCK_SIZE (128 * PAGE_SIZE)
+#else
+
 /* Dispose of an entire struct mmu_gather per rescheduling point */
 #if defined(CONFIG_SMP) && defined(CONFIG_PREEMPT)
 #define ZAP_BLOCK_SIZE	(FREE_PTE_NR * PAGE_SIZE)
@@ -508,6 +504,8 @@ static void unmap_page_range(struct mmu_gather *tlb,
 /* No preempt: go for improved straight-line efficiency */
 #if !defined(CONFIG_PREEMPT)
 #define ZAP_BLOCK_SIZE	(1024 * PAGE_SIZE)
+#endif
+
 #endif
 
 /**
@@ -582,8 +580,6 @@ int unmap_vmas(struct mmu_gather **tlbp, struct mm_struct *mm,
 
 			start += block;
 			zap_bytes -= block;
-			if ((long)zap_bytes > 0)
-				continue;
 			if (!atomic && need_resched()) {
 				int fullmm = tlb_is_full_mm(*tlbp);
 				tlb_finish_mmu(*tlbp, tlb_start, start);
@@ -591,6 +587,8 @@ int unmap_vmas(struct mmu_gather **tlbp, struct mm_struct *mm,
 				*tlbp = tlb_gather_mmu(mm, fullmm);
 				tlb_start_valid = 0;
 			}
+			if ((long)zap_bytes > 0)
+				continue;
 			zap_bytes = ZAP_BLOCK_SIZE;
 		}
 	}
@@ -923,14 +921,16 @@ int zeromap_page_range(struct vm_area_struct *vma, unsigned long address, unsign
  * in null mappings (currently treated as "copy-on-access")
  */
 static inline void remap_pte_range(pte_t * pte, unsigned long address, unsigned long size,
-	unsigned long pfn, pgprot_t prot)
+	unsigned long phys_addr, pgprot_t prot)
 {
 	unsigned long end;
+	unsigned long pfn;
 
 	address &= ~PMD_MASK;
 	end = address + size;
 	if (end > PMD_SIZE)
 		end = PMD_SIZE;
+	pfn = phys_addr >> PAGE_SHIFT;
 	do {
 		BUG_ON(!pte_none(*pte));
 		if (!pfn_valid(pfn) || PageReserved(pfn_to_page(pfn)))
@@ -942,7 +942,7 @@ static inline void remap_pte_range(pte_t * pte, unsigned long address, unsigned 
 }
 
 static inline int remap_pmd_range(struct mm_struct *mm, pmd_t * pmd, unsigned long address, unsigned long size,
-	unsigned long pfn, pgprot_t prot)
+	unsigned long phys_addr, pgprot_t prot)
 {
 	unsigned long base, end;
 
@@ -951,12 +951,12 @@ static inline int remap_pmd_range(struct mm_struct *mm, pmd_t * pmd, unsigned lo
 	end = address + size;
 	if (end > PGDIR_SIZE)
 		end = PGDIR_SIZE;
-	pfn -= address >> PAGE_SHIFT;
+	phys_addr -= address;
 	do {
 		pte_t * pte = pte_alloc_map(mm, pmd, base + address);
 		if (!pte)
 			return -ENOMEM;
-		remap_pte_range(pte, base + address, end - address, pfn + (address >> PAGE_SHIFT), prot);
+		remap_pte_range(pte, base + address, end - address, address + phys_addr, prot);
 		pte_unmap(pte);
 		address = (address + PMD_SIZE) & PMD_MASK;
 		pmd++;
@@ -965,7 +965,7 @@ static inline int remap_pmd_range(struct mm_struct *mm, pmd_t * pmd, unsigned lo
 }
 
 /*  Note: this is only safe if the mm semaphore is held when called. */
-int remap_pfn_range(struct vm_area_struct *vma, unsigned long from, unsigned long pfn, unsigned long size, pgprot_t prot)
+int remap_page_range(struct vm_area_struct *vma, unsigned long from, unsigned long phys_addr, unsigned long size, pgprot_t prot)
 {
 	int error = 0;
 	pgd_t * dir;
@@ -973,7 +973,7 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long from, unsigned lon
 	unsigned long end = from + size;
 	struct mm_struct *mm = vma->vm_mm;
 
-	pfn -= from >> PAGE_SHIFT;
+	phys_addr -= from;
 	dir = pgd_offset(mm, from);
 	flush_cache_range(vma, beg, end);
 	if (from >= end)
@@ -988,13 +988,14 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long from, unsigned lon
 	 *	this region.
 	 */
 	vma->vm_flags |= VM_IO | VM_RESERVED;
+
 	spin_lock(&mm->page_table_lock);
 	do {
 		pmd_t *pmd = pmd_alloc(mm, dir, from);
 		error = -ENOMEM;
 		if (!pmd)
 			break;
-		error = remap_pmd_range(mm, pmd, from, end - from, pfn + (from >> PAGE_SHIFT), prot);
+		error = remap_pmd_range(mm, pmd, from, end - from, phys_addr + from, prot);
 		if (error)
 			break;
 		from = (from + PGDIR_SIZE) & PGDIR_MASK;
@@ -1007,7 +1008,8 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long from, unsigned lon
 	spin_unlock(&mm->page_table_lock);
 	return error;
 }
-EXPORT_SYMBOL(remap_pfn_range);
+
+EXPORT_SYMBOL(remap_page_range);
 
 /*
  * Do pte_mkwrite, but only if the vma says VM_WRITE.  We do this when
@@ -1258,7 +1260,7 @@ int vmtruncate(struct inode * inode, loff_t offset)
 	goto out_truncate;
 
 do_expand:
-	limit = current->signal->rlim[RLIMIT_FSIZE].rlim_cur;
+	limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
 	if (limit != RLIM_INFINITY && offset > limit)
 		goto out_sig;
 	if (offset > inode->i_sb->s_maxbytes)
@@ -1584,9 +1586,9 @@ retry:
 	 */
 	/* Only go through if we didn't race with anybody else... */
 	if (pte_none(*page_table)) {
-		if (!PageReserved(new_page))
-			// ++mm->rss;
-			vx_rsspages_inc(mm);
+	        if (!PageReserved(new_page)) 
+		        //++mm->rss;
+		        vx_rsspages_inc(mm);
 		flush_icache_page(vma, new_page);
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		if (write_access)
@@ -1812,27 +1814,19 @@ struct page * vmalloc_to_page(void * vmalloc_addr)
 	if (!pgd_none(*pgd)) {
 		pmd = pmd_offset(pgd, addr);
 		if (!pmd_none(*pmd)) {
+			preempt_disable();
 			ptep = pte_offset_map(pmd, addr);
 			pte = *ptep;
 			if (pte_present(pte))
 				page = pte_page(pte);
 			pte_unmap(ptep);
+			preempt_enable();
 		}
 	}
 	return page;
 }
 
 EXPORT_SYMBOL(vmalloc_to_page);
-
-/*
- * Map a vmalloc()-space virtual address to the physical page frame number.
- */
-unsigned long vmalloc_to_pfn(void * vmalloc_addr)
-{
-	return page_to_pfn(vmalloc_to_page(vmalloc_addr));
-}
-
-EXPORT_SYMBOL(vmalloc_to_pfn);
 
 #if !defined(CONFIG_ARCH_GATE_AREA)
 

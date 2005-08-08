@@ -10,7 +10,6 @@
  */
 #ifndef __ASM_SH_UBC_H
 #define __ASM_SH_UBC_H
-#ifdef __KERNEL__
 
 #include <asm/cpu/ubc.h>
 
@@ -56,5 +55,5 @@ extern void ubc_wakeup(void);
 extern void ubc_sleep(void);
 #endif
 
-#endif /* __KERNEL__ */
 #endif /* __ASM_SH_UBC_H */
+

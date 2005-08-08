@@ -30,16 +30,14 @@
 #include <asm/arch/irqs.h>
 #include <asm/arch/gpio.h>
 #include <asm/mach-types.h>
-#include <asm/arch/serial.h>
-
 #include "common.h"
+
+extern void __init omap_init_time(void);
 
 void h3_init_irq(void)
 {
 	omap_init_irq();
 }
-
-static int __initdata h3_serial_ports[OMAP_MAX_NR_PORTS] = {1, 1, 1};
 
 static struct resource smc91x_resources[] = {
 	[0] = {
@@ -70,10 +68,15 @@ static void __init h3_init(void)
 	(void) platform_add_devices(devices, ARRAY_SIZE(devices));
 }
 
+static struct map_desc h3_io_desc[] __initdata = {
+{ OMAP1710_ETHR_BASE,  OMAP1710_ETHR_START,  OMAP1710_ETHR_SIZE,  MT_DEVICE },
+{ OMAP_NOR_FLASH_BASE, OMAP_NOR_FLASH_START, OMAP_NOR_FLASH_SIZE, MT_DEVICE },
+};
+
 static void __init h3_map_io(void)
 {
 	omap_map_io();
-	omap_serial_init(h3_serial_ports);
+	iotable_init(h3_io_desc, ARRAY_SIZE(h3_io_desc));
 }
 
 MACHINE_START(OMAP_H3, "TI OMAP1710 H3 board")
@@ -83,5 +86,5 @@ MACHINE_START(OMAP_H3, "TI OMAP1710 H3 board")
 	MAPIO(h3_map_io)
 	INITIRQ(h3_init_irq)
 	INIT_MACHINE(h3_init)
-	.timer		= &omap_timer,
+	INITTIME(omap_init_time)
 MACHINE_END

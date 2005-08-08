@@ -120,7 +120,4 @@ static inline gid_t vx_map_gid(gid_t gid)
 #define FIOC_SETXIDJ	_IOW('x', 3, long)
 #endif
 
-int vx_parse_xid(char *string, xid_t *xid, int remove);
-void vx_propagate_xid(struct nameidata *nd, struct inode *inode);
-
 #endif /* _VX_XID_H */

@@ -31,7 +31,8 @@ ipv6header_match(const struct sk_buff *skb,
 		 const struct net_device *out,
 		 const void *matchinfo,
 		 int offset,
-		 unsigned int protoff,
+		 const void *protohdr,
+		 u_int16_t datalen,
 		 int *hotdrop)
 {
 	const struct ip6t_ipv6header_info *info = matchinfo;
@@ -51,7 +52,7 @@ ipv6header_match(const struct sk_buff *skb,
 	temp = 0;
 
         while (ip6t_ext_hdr(nexthdr)) {
-		struct ipv6_opt_hdr _hdr, *hp;
+        	struct ipv6_opt_hdr *hdr;
         	int hdrlen;
 
 		/* Is there enough space for the next ext header? */
@@ -68,16 +69,15 @@ ipv6header_match(const struct sk_buff *skb,
 			break;
 		}
 
-		hp = skb_header_pointer(skb, ptr, sizeof(_hdr), &_hdr);
-		BUG_ON(hp == NULL);
+		hdr=(struct ipv6_opt_hdr *)skb->data+ptr;
 
 		/* Calculate the header length */
                 if (nexthdr == NEXTHDR_FRAGMENT) {
                         hdrlen = 8;
                 } else if (nexthdr == NEXTHDR_AUTH)
-                        hdrlen = (hp->hdrlen+2)<<2;
+                        hdrlen = (hdr->hdrlen+2)<<2;
                 else
-                        hdrlen = ipv6_optlen(hp);
+                        hdrlen = ipv6_optlen(hdr);
 
 		/* set the flag */
 		switch (nexthdr){
@@ -101,7 +101,7 @@ ipv6header_match(const struct sk_buff *skb,
 				break;
 		}
 
-                nexthdr = hp->nexthdr;
+                nexthdr = hdr->nexthdr;
                 len -= hdrlen;
                 ptr += hdrlen;
 		if (ptr > skb->len)
@@ -112,14 +112,10 @@ ipv6header_match(const struct sk_buff *skb,
 		temp |= MASK_PROTO;
 
 	if (info->modeflag)
-		return !((temp ^ info->matchflags ^ info->invflags)
-			 & info->matchflags);
-	else {
-		if (info->invflags)
-			return temp != info->matchflags;
-		else
-			return temp == info->matchflags;
-	}
+		return (!( (temp & info->matchflags)
+			^ info->matchflags) ^ info->invflags);
+	else
+		return (!( temp ^ info->matchflags) ^ info->invflags);
 }
 
 static int
@@ -129,16 +125,9 @@ ipv6header_checkentry(const char *tablename,
 		      unsigned int matchsize,
 		      unsigned int hook_mask)
 {
-	const struct ip6t_ipv6header_info *info = matchinfo;
-
 	/* Check for obvious errors */
 	/* This match is valid in all hooks! */
 	if (matchsize != IP6T_ALIGN(sizeof(struct ip6t_ipv6header_info)))
-		return 0;
-
-	/* invflags is 0 or 0xff in hard mode */
-	if ((!info->modeflag) && info->invflags != 0x00
-			      && info->invflags != 0xFF)
 		return 0;
 
 	return 1;

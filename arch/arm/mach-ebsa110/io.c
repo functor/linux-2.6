@@ -27,9 +27,9 @@
 #include <asm/io.h>
 #include <asm/page.h>
 
-static void __iomem *__isamem_convert_addr(void __iomem *addr)
+static u32 __isamem_convert_addr(void *addr)
 {
-	u32 ret, a = (u32 __force) addr;
+	u32 ret, a = (u32) addr;
 
 	/*
 	 * The PCMCIA controller is wired up as follows:
@@ -53,43 +53,41 @@ static void __iomem *__isamem_convert_addr(void __iomem *addr)
 	ret += 0xe8000000;
 
 	if ((a & 0x20000) == (a & 0x40000) >> 1)
-		return (void __iomem *)ret;
+		return ret;
 
 	BUG();
-	return NULL;
+	return 0;
 }
 
 /*
  * read[bwl] and write[bwl]
  */
-u8 __readb(void __iomem *addr)
+u8 __readb(void *addr)
 {
-	void __iomem *a = __isamem_convert_addr(addr);
-	u32 ret;
+	u32 ret, a = __isamem_convert_addr(addr);
 
-	if ((unsigned long)addr & 1)
+	if ((int)addr & 1)
 		ret = __raw_readl(a);
 	else
 		ret = __raw_readb(a);
 	return ret;
 }
 
-u16 __readw(void __iomem *addr)
+u16 __readw(void *addr)
 {
-	void __iomem *a = __isamem_convert_addr(addr);
+	u32 a = __isamem_convert_addr(addr);
 
-	if ((unsigned long)addr & 1)
+	if ((int)addr & 1)
 		BUG();
 
 	return __raw_readw(a);
 }
 
-u32 __readl(void __iomem *addr)
+u32 __readl(void *addr)
 {
-	void __iomem *a = __isamem_convert_addr(addr);
-	u32 ret;
+	u32 ret, a = __isamem_convert_addr(addr);
 
-	if ((unsigned long)addr & 3)
+	if ((int)addr & 3)
 		BUG();
 
 	ret = __raw_readw(a);
@@ -101,31 +99,31 @@ EXPORT_SYMBOL(__readb);
 EXPORT_SYMBOL(__readw);
 EXPORT_SYMBOL(__readl);
 
-void __writeb(u8 val, void __iomem *addr)
+void __writeb(u8 val, void *addr)
 {
-	void __iomem *a = __isamem_convert_addr(addr);
+	u32 a = __isamem_convert_addr(addr);
 
-	if ((unsigned long)addr & 1)
+	if ((int)addr & 1)
 		__raw_writel(val, a);
 	else
 		__raw_writeb(val, a);
 }
 
-void __writew(u16 val, void __iomem *addr)
+void __writew(u16 val, void *addr)
 {
-	void __iomem *a = __isamem_convert_addr(addr);
+	u32 a = __isamem_convert_addr(addr);
 
-	if ((unsigned long)addr & 1)
+	if ((int)addr & 1)
 		BUG();
 
 	__raw_writew(val, a);
 }
 
-void __writel(u32 val, void __iomem *addr)
+void __writel(u32 val, void *addr)
 {
-	void __iomem *a = __isamem_convert_addr(addr);
+	u32 a = __isamem_convert_addr(addr);
 
-	if ((unsigned long)addr & 3)
+	if ((int)addr & 3)
 		BUG();
 
 	__raw_writew(val, a);
@@ -155,7 +153,7 @@ u8 __inb8(unsigned int port)
 	if (SUPERIO_PORT(port))
 		ret = __raw_readb(ISAIO_BASE + (port << 2));
 	else {
-		void __iomem *a = ISAIO_BASE + ((port & ~1) << 1);
+		u32 a = ISAIO_BASE + ((port & ~1) << 1);
 
 		/*
 		 * Shame nothing else does
@@ -182,7 +180,7 @@ u8 __inb16(unsigned int port)
 	if (SUPERIO_PORT(port))
 		ret = __raw_readb(ISAIO_BASE + (port << 2));
 	else {
-		void __iomem *a = ISAIO_BASE + ((port & ~1) << 1);
+		u32 a = ISAIO_BASE + ((port & ~1) << 1);
 
 		/*
 		 * Shame nothing else does
@@ -202,7 +200,7 @@ u16 __inw(unsigned int port)
 	if (SUPERIO_PORT(port))
 		ret = __raw_readw(ISAIO_BASE + (port << 2));
 	else {
-		void __iomem *a = ISAIO_BASE + ((port & ~1) << 1);
+		u32 a = ISAIO_BASE + ((port & ~1) << 1);
 
 		/*
 		 * Shame nothing else does
@@ -220,7 +218,7 @@ u16 __inw(unsigned int port)
  */
 u32 __inl(unsigned int port)
 {
-	void __iomem *a;
+	u32 a;
 
 	if (SUPERIO_PORT(port) || port & 3)
 		BUG();
@@ -243,7 +241,7 @@ void __outb8(u8 val, unsigned int port)
 	if (SUPERIO_PORT(port))
 		__raw_writeb(val, ISAIO_BASE + (port << 2));
 	else {
-		void __iomem *a = ISAIO_BASE + ((port & ~1) << 1);
+		u32 a = ISAIO_BASE + ((port & ~1) << 1);
 
 		/*
 		 * Shame nothing else does
@@ -263,7 +261,7 @@ void __outb16(u8 val, unsigned int port)
 	if (SUPERIO_PORT(port))
 		__raw_writeb(val, ISAIO_BASE + (port << 2));
 	else {
-		void __iomem *a = ISAIO_BASE + ((port & ~1) << 1);
+		u32 a = ISAIO_BASE + ((port & ~1) << 1);
 
 		/*
 		 * Shame nothing else does

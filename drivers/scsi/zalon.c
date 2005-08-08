@@ -190,12 +190,7 @@ static struct parisc_driver zalon_driver = {
 
 static int __init zalon7xx_init(void)
 {
-	int ret = ncr53c8xx_init();
-	if (!ret)
-		ret = register_parisc_driver(&zalon_driver);
-	if (ret)
-		ncr53c8xx_exit();
-	return ret;
+	return register_parisc_driver(&zalon_driver);
 }
 
 static void __exit zalon7xx_exit(void)

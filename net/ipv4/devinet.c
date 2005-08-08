@@ -31,7 +31,7 @@
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -158,7 +158,8 @@ struct in_device *inetdev_init(struct net_device *dev)
 
 	/* Account for reference dev->ip_ptr */
 	in_dev_hold(in_dev);
-	rcu_assign_pointer(dev->ip_ptr, in_dev);
+	smp_wmb();
+	dev->ip_ptr = in_dev;
 
 #ifdef CONFIG_SYSCTL
 	devinet_sysctl_register(in_dev, &in_dev->cnf);
@@ -1045,6 +1046,7 @@ static int inet_dump_ifaddr(struct sk_buff *skb, struct netlink_callback *cb)
 	struct net_device *dev;
 	struct in_device *in_dev;
 	struct in_ifaddr *ifa;
+	struct sock *sk = skb->sk;
 	int s_ip_idx, s_idx = cb->args[0];
 
 	s_ip_idx = ip_idx = cb->args[1];

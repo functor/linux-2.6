@@ -19,27 +19,25 @@
 /*
  * Translation of various region addresses to virtual addresses
  */
-#define __io(a)			((void __iomem *)(PCIO_BASE + (a)))
+#define __io(a)			(PCIO_BASE + (a))
 #if 1
-#define __mem_pci(a)		(a)
-#define __mem_isa(a)		((a) + PCIMEM_BASE)
+#define __mem_pci(a)		((unsigned long)(a))
+#define __mem_isa(a)		(PCIMEM_BASE + (unsigned long)(a))
 #else
 
-static inline void __iomem *___mem_pci(void __iomem *p)
+static inline unsigned long ___mem_pci(unsigned long a)
 {
-	unsigned long a = (unsigned long)p;
 	BUG_ON(a <= 0xc0000000 || a >= 0xe0000000);
-	return p;
+	return a;
 }
 
-static inline void __iomem *___mem_isa(void __iomem *p)
+static inline unsigned long ___mem_isa(unsigned long a)
 {
-	unsigned long a = (unsigned long)p;
 	BUG_ON(a >= 16*1048576);
-	return p + PCIMEM_BASE;
+	return PCIMEM_BASE + a;
 }
-#define __mem_pci(a)		___mem_pci(a)
-#define __mem_isa(a)		___mem_isa(a)
+#define __mem_pci(a)		___mem_pci((unsigned long)(a))
+#define __mem_isa(a)		___mem_isa((unsigned long)(a))
 #endif
 
 #endif

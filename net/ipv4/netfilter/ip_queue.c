@@ -162,7 +162,6 @@ static inline void
 __ipq_reset(void)
 {
 	peer_pid = 0;
-	net_disable_timestamp();
 	__ipq_set_mode(IPQ_COPY_NONE, 0);
 	__ipq_flush(NF_DROP);
 }
@@ -258,8 +257,7 @@ ipq_build_packet_message(struct ipq_queue_entry *entry, int *errp)
 	}
 	
 	if (data_len)
-		if (skb_copy_bits(entry->skb, 0, pmsg->payload, data_len))
-			BUG();
+		memcpy(pmsg->payload, entry->skb->data, data_len);
 		
 	nlh->nlmsg_len = skb->tail - old_tail;
 	return skb;
@@ -364,8 +362,6 @@ ipq_mangle_ipv4(ipq_verdict_msg_t *v, struct ipq_queue_entry *e)
 		}
 		skb_put(e->skb, diff);
 	}
-	if (!skb_ip_make_writable(&e->skb, v->data_len))
-		return -ENOMEM;
 	memcpy(e->skb->data, v->payload, v->data_len);
 	e->skb->nfcache |= NFC_ALTERED;
 
@@ -518,10 +514,9 @@ ipq_rcv_skb(struct sk_buff *skb)
 			write_unlock_bh(&queue_lock);
 			RCV_SKB_FAIL(-EBUSY);
 		}
-	} else {
-		net_enable_timestamp();
-		peer_pid = pid;
 	}
+	else
+		peer_pid = pid;
 		
 	write_unlock_bh(&queue_lock);
 	

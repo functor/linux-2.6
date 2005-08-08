@@ -26,10 +26,6 @@
 #include <linux/vs_limit.h>
 #include <linux/vs_dlimit.h>
 #include <linux/vserver/xid.h>
-#include <linux/syscalls.h>
-#include <linux/vs_limit.h>
-#include <linux/vs_dlimit.h>
-#include <linux/vserver/xid.h>
 
 #include <asm/unistd.h>
 
@@ -869,7 +865,7 @@ repeat:
 	 * N.B. For clone tasks sharing a files structure, this test
 	 * will limit the total number of files that can be opened.
 	 */
-	if (fd >= current->signal->rlim[RLIMIT_NOFILE].rlim_cur)
+	if (fd >= current->rlim[RLIMIT_NOFILE].rlim_cur)
 		goto out;
 
 	/* Do we need to expand the fdset array? */

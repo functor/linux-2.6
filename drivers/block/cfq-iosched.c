@@ -6,6 +6,18 @@
  *  Based on ideas from a previously unfinished io
  *  scheduler (round robin per-process disk scheduling) and Andrea Arcangeli.
  *
+ *  IO priorities are supported, from 0% to 100% in 5% increments. Both of
+ *  those values have special meaning - 0% class is allowed to do io if
+ *  noone else wants to use the disk. 100% is considered real-time io, and
+ *  always get priority. Default process io rate is 95%. In absence of other
+ *  io, a class may consume 100% disk bandwidth regardless. Withing a class,
+ *  bandwidth is distributed equally among the citizens.
+ *
+ * TODO:
+ *	- cfq_select_requests() needs some work for 5-95% io
+ *	- barriers not supported
+ *	- export grace periods in ms, not jiffies
+ *
  *  Copyright (C) 2003 Jens Axboe <axboe@suse.de>
  */
 #include <linux/kernel.h>
@@ -21,205 +33,208 @@
 #include <linux/hash.h>
 #include <linux/rbtree.h>
 #include <linux/mempool.h>
+#include <asm/div64.h>
 
-static unsigned long max_elapsed_crq;
-static unsigned long max_elapsed_dispatch;
+#if IOPRIO_NR > BITS_PER_LONG
+#error Cannot support this many io priority levels
+#endif
 
 /*
  * tunables
  */
-static int cfq_quantum = 4;		/* max queue in one round of service */
-static int cfq_queued = 8;		/* minimum rq allocate limit per-queue*/
-static int cfq_service = HZ;		/* period over which service is avg */
-static int cfq_fifo_expire_r = HZ / 2;	/* fifo timeout for sync requests */
-static int cfq_fifo_expire_w = 5 * HZ;	/* fifo timeout for async requests */
-static int cfq_fifo_rate = HZ / 8;	/* fifo expiry rate */
-static int cfq_back_max = 16 * 1024;	/* maximum backwards seek, in KiB */
-static int cfq_back_penalty = 2;	/* penalty of a backwards seek */
+static int cfq_quantum = 6;
+static int cfq_quantum_io = 256;
+static int cfq_idle_quantum = 1;
+static int cfq_idle_quantum_io = 64;
+static int cfq_queued = 4;
+static int cfq_grace_rt = HZ / 100 ?: 1;
+static int cfq_grace_idle = HZ / 10;
 
-/*
- * for the hash of cfqq inside the cfqd
- */
+#define CFQ_EPOCH		1000000000
+#define CFQ_SECTORATE		1000   
+#define CFQ_HMAX_PCT		80
+
 #define CFQ_QHASH_SHIFT		6
 #define CFQ_QHASH_ENTRIES	(1 << CFQ_QHASH_SHIFT)
 #define list_entry_qhash(entry)	hlist_entry((entry), struct cfq_queue, cfq_hash)
 
-/*
- * for the hash of crq inside the cfqq
- */
-#define CFQ_MHASH_SHIFT		6
+#define CFQ_MHASH_SHIFT		8
 #define CFQ_MHASH_BLOCK(sec)	((sec) >> 3)
 #define CFQ_MHASH_ENTRIES	(1 << CFQ_MHASH_SHIFT)
-#define CFQ_MHASH_FN(sec)	hash_long(CFQ_MHASH_BLOCK(sec), CFQ_MHASH_SHIFT)
+#define CFQ_MHASH_FN(sec)	(hash_long(CFQ_MHASH_BLOCK((sec)),CFQ_MHASH_SHIFT))
 #define rq_hash_key(rq)		((rq)->sector + (rq)->nr_sectors)
 #define list_entry_hash(ptr)	hlist_entry((ptr), struct cfq_rq, hash)
 
 #define list_entry_cfqq(ptr)	list_entry((ptr), struct cfq_queue, cfq_list)
+#define list_entry_prio(ptr)	list_entry((ptr), struct cfq_rq, prio_list)
 
-#define RQ_DATA(rq)		(rq)->elevator_private
-
-/*
- * rb-tree defines
- */
-#define RB_NONE			(2)
-#define RB_EMPTY(node)		((node)->rb_node == NULL)
-#define RB_CLEAR_COLOR(node)	(node)->rb_color = RB_NONE
-#define RB_CLEAR(node)		do {	\
-	(node)->rb_parent = NULL;	\
-	RB_CLEAR_COLOR((node));		\
-	(node)->rb_right = NULL;	\
-	(node)->rb_left = NULL;		\
-} while (0)
-#define RB_CLEAR_ROOT(root)	((root)->rb_node = NULL)
-#define ON_RB(node)		((node)->rb_color != RB_NONE)
-#define rb_entry_crq(node)	rb_entry((node), struct cfq_rq, rb_node)
-#define rq_rb_key(rq)		(rq)->sector
+#define cfq_account_io(crq)	\
+	((crq)->ioprio != IOPRIO_IDLE && (crq)->ioprio != IOPRIO_RT)
 
 /*
- * threshold for switching off non-tag accounting
+ * defines how we distribute bandwidth (can be tgid, uid, etc)
  */
-#define CFQ_MAX_TAG		(4)
+
+/* FIXME: change hash_key to be sizeof(void *) rather than sizeof(int) 
+ * otherwise the cast of cki_tsk_icls will not work reliably on 64-bit arches.
+ * OR, change cki_tsk_icls to return ints (will need another id space to be 
+ * managed)
+ */
+
+#if defined(CONFIG_CKRM_RES_BLKIO) || defined(CONFIG_CKRM_RES_BLKIO_MODULE)
+extern void *cki_hash_key(struct task_struct *tsk);
+extern int cki_ioprio(struct task_struct *tsk);
+extern void *cki_cfqpriv(struct task_struct *tsk); 
+
+#define cfq_hash_key(tsk)   ((int)cki_hash_key((tsk)))
+#define cfq_ioprio(tsk)	(cki_ioprio((tsk)))
+#define cfq_cfqpriv(cfqd,tsk)	(cki_cfqpriv((tsk)))
+
+#else
+#define cfq_hash_key(tsk)	((tsk)->tgid)
+#define cfq_cfqpriv(cfqd,tsk)	(&(((cfqd)->cid[(tsk)->ioprio]).cfqpriv))
 
 /*
- * sort key types and names
+ * move to io_context
  */
-enum {
-	CFQ_KEY_PGID,
-	CFQ_KEY_TGID,
-	CFQ_KEY_UID,
-	CFQ_KEY_GID,
-	CFQ_KEY_LAST,
-};
+#define cfq_ioprio(tsk)	((tsk)->ioprio)
+#endif
 
-static char *cfq_key_types[] = { "pgid", "tgid", "uid", "gid", NULL };
+#define CFQ_WAIT_RT	0
+#define CFQ_WAIT_NORM	1
 
 static kmem_cache_t *crq_pool;
 static kmem_cache_t *cfq_pool;
-static kmem_cache_t *cfq_ioc_pool;
-
-struct cfq_data {
-	struct list_head rr_list;
-	struct list_head empty_list;
-
-	struct hlist_head *cfq_hash;
-	struct hlist_head *crq_hash;
-
-	/* queues on rr_list (ie they have pending requests */
-	unsigned int busy_queues;
-
-	unsigned int max_queued;
-
-	atomic_t ref;
-
-	int key_type;
-
-	mempool_t *crq_pool;
-
-	request_queue_t *queue;
-
-	sector_t last_sector;
-
-	int rq_in_driver;
-
-	/*
-	 * tunables, see top of file
-	 */
-	unsigned int cfq_quantum;
-	unsigned int cfq_queued;
-	unsigned int cfq_fifo_expire_r;
-	unsigned int cfq_fifo_expire_w;
-	unsigned int cfq_fifo_batch_expire;
-	unsigned int cfq_back_penalty;
-	unsigned int cfq_back_max;
-	unsigned int find_best_crq;
-
-	unsigned int cfq_tagged;
-};
-
-struct cfq_queue {
-	/* reference count */
-	atomic_t ref;
-	/* parent cfq_data */
-	struct cfq_data *cfqd;
-	/* hash of mergeable requests */
-	struct hlist_node cfq_hash;
-	/* hash key */
-	unsigned long key;
-	/* whether queue is on rr (or empty) list */
-	int on_rr;
-	/* on either rr or empty list of cfqd */
-	struct list_head cfq_list;
-	/* sorted list of pending requests */
-	struct rb_root sort_list;
-	/* if fifo isn't expired, next request to serve */
-	struct cfq_rq *next_crq;
-	/* requests queued in sort_list */
-	int queued[2];
-	/* currently allocated requests */
-	int allocated[2];
-	/* fifo list of requests in sort_list */
-	struct list_head fifo[2];
-	/* last time fifo expired */
-	unsigned long last_fifo_expire;
-
-	int key_type;
-
-	unsigned long service_start;
-	unsigned long service_used;
-
-	unsigned int max_rate;
-
-	/* number of requests that have been handed to the driver */
-	int in_flight;
-	/* number of currently allocated requests */
-	int alloc_limit[2];
-};
-
-struct cfq_rq {
-	struct rb_node rb_node;
-	sector_t rb_key;
-	struct request *request;
-	struct hlist_node hash;
-
-	struct cfq_queue *cfq_queue;
-	struct cfq_io_context *io_context;
-
-	unsigned long service_start;
-	unsigned long queue_start;
-
-	unsigned int in_flight : 1;
-	unsigned int accounted : 1;
-	unsigned int is_sync   : 1;
-	unsigned int is_write  : 1;
-};
-
-static struct cfq_queue *cfq_find_cfq_hash(struct cfq_data *, unsigned long);
-static void cfq_dispatch_sort(request_queue_t *, struct cfq_rq *);
-static void cfq_update_next_crq(struct cfq_rq *);
-static void cfq_put_cfqd(struct cfq_data *cfqd);
+static mempool_t *cfq_mpool;
 
 /*
- * what the fairness is based on (ie how processes are grouped and
- * differentiated)
+ * defines an io priority level
  */
-static inline unsigned long
-cfq_hash_key(struct cfq_data *cfqd, struct task_struct *tsk)
-{
-	/*
-	 * optimize this so that ->key_type is the offset into the struct
+struct io_prio_data {
+	struct list_head rr_list;
+	int busy_queues;
+	int busy_rq;
+	unsigned long busy_sectors;
+	
+	/* requests, sectors and queues 
+         * added(in),dispatched/deleted(out) 
+	 * at this priority level. 
 	 */
-	switch (cfqd->key_type) {
-		case CFQ_KEY_PGID:
-			return process_group(tsk);
-		default:
-		case CFQ_KEY_TGID:
-			return tsk->tgid;
-		case CFQ_KEY_UID:
-			return tsk->uid;
-		case CFQ_KEY_GID:
-			return tsk->gid;
-	}
-}
+	atomic_t cum_rq_in,cum_rq_out;              
+	atomic_t cum_sectors_in,cum_sectors_out;    
+	atomic_t cum_queues_in,cum_queues_out;
+
+	cfqlim_t cfqpriv; 	/* data for enforcing limits */
+
+	struct list_head prio_list;
+	int last_rq;
+	int last_sectors;
+
+};
+
+/*
+ * per-request queue structure
+ */
+struct cfq_data {
+	struct list_head rr_list;
+	struct list_head *dispatch;
+	struct hlist_head *cfq_hash;
+	struct hlist_head *crq_hash;
+	mempool_t *crq_pool;
+
+	struct io_prio_data cid[IOPRIO_NR];
+
+	/*
+	 * total number of busy queues and requests
+	 */
+	int busy_rq;
+	int busy_queues;
+	unsigned long busy_sectors;
+
+
+	request_queue_t *queue;
+	unsigned long rq_starved_mask;
+
+	/*
+	 * grace period handling
+	 */
+	struct timer_list timer;
+	unsigned long wait_end;
+	unsigned long flags;
+	struct work_struct work;
+
+	/*
+	 * tunables
+	 */
+	unsigned int cfq_quantum;
+	unsigned int cfq_quantum_io;
+	unsigned int cfq_idle_quantum;
+	unsigned int cfq_idle_quantum_io;
+	unsigned int cfq_queued;
+	unsigned int cfq_grace_rt;
+	unsigned int cfq_grace_idle;
+
+	unsigned int cfq_epoch;
+	unsigned int cfq_hmax_pct;
+	unsigned int cfq_qsectorate;
+};
+
+/*
+ * per-class structure
+ */
+struct cfq_queue {
+	struct list_head cfq_list;
+	struct hlist_node cfq_hash;
+	int hash_key;
+	struct rb_root sort_list;
+	int queued[2];
+	int ioprio;
+
+	/* limit related settings/stats obtained 
+	   either from io_prio_data or ckrm I/O class
+	*/
+	struct cfqlim *cfqpriv;	
+
+	u64 epstart;		/* current epoch's starting timestamp (ns) */
+	u64 epsector[2];	/* Total sectors dispatched in [0] previous
+				 * and [1] current epoch
+				 */
+	
+	unsigned long avsec;		/* avg sectors dispatched/epoch */
+//	unsigned long long lastime;	/* timestamp of last request served */
+//	unsigned long sectorate;	/* limit for sectors served/epoch */
+	int skipped;			/* queue skipped at last dispatch ? */
+
+	/* Per queue timer to suspend/resume queue from processing */
+	struct timer_list timer;
+	unsigned long wait_end;
+	unsigned long flags;
+	struct work_struct work;
+
+	struct cfq_data *cfqd;
+};
+
+
+
+/*
+ * Per-request structure
+ */
+struct cfq_rq {
+	struct cfq_queue *cfq_queue;
+	struct rb_node rb_node;
+	struct hlist_node hash;
+	sector_t rb_key;
+
+	struct request *request;
+	struct list_head prio_list;
+	unsigned long nr_sectors;
+	int ioprio;
+};
+
+static void cfq_put_queue(struct cfq_data *cfqd, struct cfq_queue *cfqq);
+static struct cfq_queue *cfq_find_cfq_hash(struct cfq_data *cfqd, int pid);
+static void cfq_dispatch_sort(struct cfq_data *cfqd, struct cfq_queue *cfqq,
+			      struct cfq_rq *crq);
 
 /*
  * lots of deadline iosched dupes, can be abstracted later...
@@ -229,22 +244,22 @@ static inline void cfq_del_crq_hash(struct cfq_rq *crq)
 	hlist_del_init(&crq->hash);
 }
 
-static void cfq_remove_merge_hints(request_queue_t *q, struct cfq_rq *crq)
+static inline void
+cfq_remove_merge_hints(request_queue_t *q, struct cfq_rq *crq)
 {
 	cfq_del_crq_hash(crq);
 
 	if (q->last_merge == crq->request)
 		q->last_merge = NULL;
-
-	cfq_update_next_crq(crq);
 }
 
 static inline void cfq_add_crq_hash(struct cfq_data *cfqd, struct cfq_rq *crq)
 {
-	const int hash_idx = CFQ_MHASH_FN(rq_hash_key(crq->request));
+	struct request *rq = crq->request;
+	const int hash_idx = CFQ_MHASH_FN(rq_hash_key(rq));
 
 	BUG_ON(!hlist_unhashed(&crq->hash));
-
+ 
 	hlist_add_head(&crq->hash, &cfqd->crq_hash[hash_idx]);
 }
 
@@ -272,257 +287,36 @@ static struct request *cfq_find_rq_hash(struct cfq_data *cfqd, sector_t offset)
 }
 
 /*
- * Lifted from AS - choose which of crq1 and crq2 that is best served now.
- * We choose the request that is closest to the head right now. Distance
- * behind the head are penalized and only allowed to a certain extent.
- */
-static struct cfq_rq *
-cfq_choose_req(struct cfq_data *cfqd, struct cfq_rq *crq1, struct cfq_rq *crq2)
-{
-	sector_t last, s1, s2, d1 = 0, d2 = 0;
-	int r1_wrap = 0, r2_wrap = 0;	/* requests are behind the disk head */
-	unsigned long back_max;
-
-	if (crq1 == NULL || crq1 == crq2)
-		return crq2;
-	if (crq2 == NULL)
-		return crq1;
-
-	s1 = crq1->request->sector;
-	s2 = crq2->request->sector;
-
-	last = cfqd->last_sector;
-
-#if 0
-	if (!list_empty(&cfqd->queue->queue_head)) {
-		struct list_head *entry = &cfqd->queue->queue_head;
-		unsigned long distance = ~0UL;
-		struct request *rq;
-
-		while ((entry = entry->prev) != &cfqd->queue->queue_head) {
-			rq = list_entry_rq(entry);
-
-			if (blk_barrier_rq(rq))
-				break;
-
-			if (distance < abs(s1 - rq->sector + rq->nr_sectors)) {
-				distance = abs(s1 - rq->sector +rq->nr_sectors);
-				last = rq->sector + rq->nr_sectors;
-			}
-			if (distance < abs(s2 - rq->sector + rq->nr_sectors)) {
-				distance = abs(s2 - rq->sector +rq->nr_sectors);
-				last = rq->sector + rq->nr_sectors;
-			}
-		}
-	}
-#endif
-
-	/*
-	 * by definition, 1KiB is 2 sectors
-	 */
-	back_max = cfqd->cfq_back_max * 2;
-
-	/*
-	 * Strict one way elevator _except_ in the case where we allow
-	 * short backward seeks which are biased as twice the cost of a
-	 * similar forward seek.
-	 */
-	if (s1 >= last)
-		d1 = s1 - last;
-	else if (s1 + back_max >= last)
-		d1 = (last - s1) * cfqd->cfq_back_penalty;
-	else
-		r1_wrap = 1;
-
-	if (s2 >= last)
-		d2 = s2 - last;
-	else if (s2 + back_max >= last)
-		d2 = (last - s2) * cfqd->cfq_back_penalty;
-	else
-		r2_wrap = 1;
-
-	/* Found required data */
-	if (!r1_wrap && r2_wrap)
-		return crq1;
-	else if (!r2_wrap && r1_wrap)
-		return crq2;
-	else if (r1_wrap && r2_wrap) {
-		/* both behind the head */
-		if (s1 <= s2)
-			return crq1;
-		else
-			return crq2;
-	}
-
-	/* Both requests in front of the head */
-	if (d1 < d2)
-		return crq1;
-	else if (d2 < d1)
-		return crq2;
-	else {
-		if (s1 >= s2)
-			return crq1;
-		else
-			return crq2;
-	}
-}
-
-/*
- * would be nice to take fifo expire time into account as well
- */
-static struct cfq_rq *
-cfq_find_next_crq(struct cfq_data *cfqd, struct cfq_queue *cfqq,
-		  struct cfq_rq *last)
-{
-	struct cfq_rq *crq_next = NULL, *crq_prev = NULL;
-	struct rb_node *rbnext, *rbprev;
-
-	if (!ON_RB(&last->rb_node))
-		return NULL;
-
-	if ((rbnext = rb_next(&last->rb_node)) == NULL)
-		rbnext = rb_first(&cfqq->sort_list);
-
-	rbprev = rb_prev(&last->rb_node);
-
-	if (rbprev)
-		crq_prev = rb_entry_crq(rbprev);
-	if (rbnext)
-		crq_next = rb_entry_crq(rbnext);
-
-	return cfq_choose_req(cfqd, crq_next, crq_prev);
-}
-
-static void cfq_update_next_crq(struct cfq_rq *crq)
-{
-	struct cfq_queue *cfqq = crq->cfq_queue;
-
-	if (cfqq->next_crq == crq)
-		cfqq->next_crq = cfq_find_next_crq(cfqq->cfqd, cfqq, crq);
-}
-
-static int cfq_check_sort_rr_list(struct cfq_queue *cfqq)
-{
-	struct list_head *head = &cfqq->cfqd->rr_list;
-	struct list_head *next, *prev;
-
-	/*
-	 * list might still be ordered
-	 */
-	next = cfqq->cfq_list.next;
-	if (next != head) {
-		struct cfq_queue *cnext = list_entry_cfqq(next);
-
-		if (cfqq->service_used > cnext->service_used)
-			return 1;
-	}
-
-	prev = cfqq->cfq_list.prev;
-	if (prev != head) {
-		struct cfq_queue *cprev = list_entry_cfqq(prev);
-
-		if (cfqq->service_used < cprev->service_used)
-			return 1;
-	}
-
-	return 0;
-}
-
-static void cfq_sort_rr_list(struct cfq_queue *cfqq, int new_queue)
-{
-	struct list_head *entry = &cfqq->cfqd->rr_list;
-
-	if (!cfqq->on_rr)
-		return;
-	if (!new_queue && !cfq_check_sort_rr_list(cfqq))
-		return;
-
-	list_del(&cfqq->cfq_list);
-
-	/*
-	 * sort by our mean service_used, sub-sort by in-flight requests
-	 */
-	while ((entry = entry->prev) != &cfqq->cfqd->rr_list) {
-		struct cfq_queue *__cfqq = list_entry_cfqq(entry);
-
-		if (cfqq->service_used > __cfqq->service_used)
-			break;
-		else if (cfqq->service_used == __cfqq->service_used) {
-			struct list_head *prv;
-
-			while ((prv = entry->prev) != &cfqq->cfqd->rr_list) {
-				__cfqq = list_entry_cfqq(prv);
-
-				WARN_ON(__cfqq->service_used > cfqq->service_used);
-				if (cfqq->service_used != __cfqq->service_used)
-					break;
-				if (cfqq->in_flight > __cfqq->in_flight)
-					break;
-
-				entry = prv;
-			}
-		}
-	}
-
-	list_add(&cfqq->cfq_list, entry);
-}
-
-/*
- * add to busy list of queues for service, trying to be fair in ordering
- * the pending list according to requests serviced
- */
-static inline void
-cfq_add_cfqq_rr(struct cfq_data *cfqd, struct cfq_queue *cfqq)
-{
-	/*
-	 * it's currently on the empty list
-	 */
-	cfqq->on_rr = 1;
-	cfqd->busy_queues++;
-
-	if (time_after(jiffies, cfqq->service_start + cfq_service))
-		cfqq->service_used >>= 3;
-
-	cfq_sort_rr_list(cfqq, 1);
-}
-
-static inline void
-cfq_del_cfqq_rr(struct cfq_data *cfqd, struct cfq_queue *cfqq)
-{
-	list_move(&cfqq->cfq_list, &cfqd->empty_list);
-	cfqq->on_rr = 0;
-
-	BUG_ON(!cfqd->busy_queues);
-	cfqd->busy_queues--;
-}
-
-/*
  * rb tree support functions
  */
-static inline void cfq_del_crq_rb(struct cfq_rq *crq)
+#define RB_EMPTY(node)		((node)->rb_node == NULL)
+#define rb_entry_crq(node)	rb_entry((node), struct cfq_rq, rb_node)
+#define rq_rb_key(rq)		(rq)->sector
+
+static void
+cfq_del_crq_rb(struct cfq_data *cfqd, struct cfq_queue *cfqq,struct cfq_rq *crq)
 {
-	struct cfq_queue *cfqq = crq->cfq_queue;
+	if (crq->cfq_queue) {
+		crq->cfq_queue = NULL;
 
-	if (ON_RB(&crq->rb_node)) {
-		struct cfq_data *cfqd = cfqq->cfqd;
-
-		BUG_ON(!cfqq->queued[crq->is_sync]);
-
-		cfq_update_next_crq(crq);
-
-		cfqq->queued[crq->is_sync]--;
+		if (cfq_account_io(crq)) {
+			cfqd->busy_rq--;
+			cfqd->busy_sectors -= crq->nr_sectors;
+			cfqd->cid[crq->ioprio].busy_rq--;
+			cfqd->cid[crq->ioprio].busy_sectors -= crq->nr_sectors;
+		}
+		atomic_inc(&(cfqd->cid[crq->ioprio].cum_rq_out));
+		atomic_add(crq->nr_sectors,
+			   &(cfqd->cid[crq->ioprio].cum_sectors_out));
+		cfqq->queued[rq_data_dir(crq->request)]--;
 		rb_erase(&crq->rb_node, &cfqq->sort_list);
-		RB_CLEAR_COLOR(&crq->rb_node);
-
-		if (RB_EMPTY(&cfqq->sort_list) && cfqq->on_rr)
-			cfq_del_cfqq_rr(cfqd, cfqq);
 	}
 }
 
 static struct cfq_rq *
-__cfq_add_crq_rb(struct cfq_rq *crq)
+__cfq_add_crq_rb(struct cfq_queue *cfqq, struct cfq_rq *crq)
 {
-	struct rb_node **p = &crq->cfq_queue->sort_list.rb_node;
+	struct rb_node **p = &cfqq->sort_list.rb_node;
 	struct rb_node *parent = NULL;
 	struct cfq_rq *__crq;
 
@@ -542,50 +336,40 @@ __cfq_add_crq_rb(struct cfq_rq *crq)
 	return NULL;
 }
 
-static void cfq_add_crq_rb(struct cfq_rq *crq)
+static void
+cfq_add_crq_rb(struct cfq_data *cfqd, struct cfq_queue *cfqq,struct cfq_rq *crq)
 {
-	struct cfq_queue *cfqq = crq->cfq_queue;
-	struct cfq_data *cfqd = cfqq->cfqd;
 	struct request *rq = crq->request;
 	struct cfq_rq *__alias;
 
-	crq->rb_key = rq_rb_key(rq);
-	cfqq->queued[crq->is_sync]++;
 
-	/*
-	 * looks a little odd, but the first insert might return an alias.
-	 * if that happens, put the alias on the dispatch list
-	 */
-	while ((__alias = __cfq_add_crq_rb(crq)) != NULL)
-		cfq_dispatch_sort(cfqd->queue, __alias);
-
-	rb_insert_color(&crq->rb_node, &cfqq->sort_list);
-
-	if (!cfqq->on_rr)
-		cfq_add_cfqq_rr(cfqd, cfqq);
-
-	/*
-	 * check if this request is a better next-serve candidate
-	 */
-	cfqq->next_crq = cfq_choose_req(cfqd, cfqq->next_crq, crq);
-}
-
-static inline void
-cfq_reposition_crq_rb(struct cfq_queue *cfqq, struct cfq_rq *crq)
-{
-	if (ON_RB(&crq->rb_node)) {
-		rb_erase(&crq->rb_node, &cfqq->sort_list);
-		cfqq->queued[crq->is_sync]--;
+	cfqq->queued[rq_data_dir(rq)]++;
+	if (cfq_account_io(crq)) {
+		cfqd->busy_rq++;
+		cfqd->busy_sectors += crq->nr_sectors;
+		cfqd->cid[crq->ioprio].busy_rq++;
+		cfqd->cid[crq->ioprio].busy_sectors += crq->nr_sectors;
+	}
+	atomic_inc(&(cfqd->cid[crq->ioprio].cum_rq_in));
+	atomic_add(crq->nr_sectors,
+		   &(cfqd->cid[crq->ioprio].cum_sectors_in));
+retry:
+	__alias = __cfq_add_crq_rb(cfqq, crq);
+	if (!__alias) {
+		rb_insert_color(&crq->rb_node, &cfqq->sort_list);
+		crq->rb_key = rq_rb_key(rq);
+		crq->cfq_queue = cfqq;
+		return;
 	}
 
-	cfq_add_crq_rb(crq);
+	cfq_dispatch_sort(cfqd, cfqq, __alias);
+	goto retry;
 }
 
 static struct request *
 cfq_find_rq_rb(struct cfq_data *cfqd, sector_t sector)
 {
-	const unsigned long key = cfq_hash_key(cfqd, current);
-	struct cfq_queue *cfqq = cfq_find_cfq_hash(cfqd, key);
+	struct cfq_queue *cfqq = cfq_find_cfq_hash(cfqd, cfq_hash_key(current));
 	struct rb_node *n;
 
 	if (!cfqq)
@@ -607,44 +391,45 @@ out:
 	return NULL;
 }
 
-/*
- * make sure the service time gets corrected on reissue of this request
- */
-static void cfq_requeue_request(request_queue_t *q, struct request *rq)
-{
-	struct cfq_rq *crq = RQ_DATA(rq);
-
-	if (crq) {
-		struct cfq_queue *cfqq = crq->cfq_queue;
-
-		if (cfqq->cfqd->cfq_tagged) {
-			cfqq->service_used--;
-			cfq_sort_rr_list(cfqq, 0);
-		}
-
-		crq->accounted = 0;
-		cfqq->cfqd->rq_in_driver--;
-	}
-	list_add(&rq->queuelist, &q->queue_head);
-}
-
 static void cfq_remove_request(request_queue_t *q, struct request *rq)
 {
-	struct cfq_rq *crq = RQ_DATA(rq);
+	struct cfq_data *cfqd = q->elevator.elevator_data;
+	struct cfq_rq *crq = RQ_ELV_DATA(rq);
 
 	if (crq) {
+
 		cfq_remove_merge_hints(q, crq);
+		list_del_init(&crq->prio_list);
 		list_del_init(&rq->queuelist);
 
-		if (crq->cfq_queue)
-			cfq_del_crq_rb(crq);
+		/*
+		 * set a grace period timer to allow realtime io to make real
+		 * progress, if we release an rt request. for normal request,
+		 * set timer so idle io doesn't interfere with other io
+		 */
+		if (crq->ioprio == IOPRIO_RT) {
+			set_bit(CFQ_WAIT_RT, &cfqd->flags);
+			cfqd->wait_end = jiffies + cfqd->cfq_grace_rt;
+		} else if (crq->ioprio != IOPRIO_IDLE) {
+			set_bit(CFQ_WAIT_NORM, &cfqd->flags);
+			cfqd->wait_end = jiffies + cfqd->cfq_grace_idle;
+		}
+
+		if (crq->cfq_queue) {
+			struct cfq_queue *cfqq = crq->cfq_queue;
+
+			cfq_del_crq_rb(cfqd, cfqq, crq);
+
+			if (RB_EMPTY(&cfqq->sort_list))
+				cfq_put_queue(cfqd, cfqq);
+		}
 	}
 }
 
 static int
 cfq_merge(request_queue_t *q, struct request **req, struct bio *bio)
 {
-	struct cfq_data *cfqd = q->elevator->elevator_data;
+	struct cfq_data *cfqd = q->elevator.elevator_data;
 	struct request *__rq;
 	int ret;
 
@@ -682,626 +467,655 @@ out_insert:
 
 static void cfq_merged_request(request_queue_t *q, struct request *req)
 {
-	struct cfq_data *cfqd = q->elevator->elevator_data;
-	struct cfq_rq *crq = RQ_DATA(req);
+	struct cfq_data *cfqd = q->elevator.elevator_data;
+	struct cfq_rq *crq = RQ_ELV_DATA(req);
+	int tmp;
 
 	cfq_del_crq_hash(crq);
 	cfq_add_crq_hash(cfqd, crq);
 
-	if (ON_RB(&crq->rb_node) && (rq_rb_key(req) != crq->rb_key)) {
+	if (crq->cfq_queue && (rq_rb_key(req) != crq->rb_key)) {
 		struct cfq_queue *cfqq = crq->cfq_queue;
 
-		cfq_update_next_crq(crq);
-		cfq_reposition_crq_rb(cfqq, crq);
+		cfq_del_crq_rb(cfqd, cfqq, crq);
+		cfq_add_crq_rb(cfqd, cfqq, crq);
 	}
+
+	tmp = req->hard_nr_sectors - crq->nr_sectors;
+	cfqd->busy_sectors += tmp;
+	cfqd->cid[crq->ioprio].busy_sectors += tmp;
+	atomic_add(tmp,&(cfqd->cid[crq->ioprio].cum_sectors_in));
+
+	crq->nr_sectors = req->hard_nr_sectors;
 
 	q->last_merge = req;
 }
 
 static void
-cfq_merged_requests(request_queue_t *q, struct request *rq,
+cfq_merged_requests(request_queue_t *q, struct request *req,
 		    struct request *next)
 {
-	struct cfq_rq *crq = RQ_DATA(rq);
-	struct cfq_rq *cnext = RQ_DATA(next);
-
-	cfq_merged_request(q, rq);
-
-	if (!list_empty(&rq->queuelist) && !list_empty(&next->queuelist)) {
-		if (time_before(cnext->queue_start, crq->queue_start)) {
-			list_move(&rq->queuelist, &next->queuelist);
-			crq->queue_start = cnext->queue_start;
-		}
-	}
-
-	cfq_update_next_crq(cnext);
+	cfq_merged_request(q, req);
 	cfq_remove_request(q, next);
 }
 
 /*
- * we dispatch cfqd->cfq_quantum requests in total from the rr_list queues,
- * this function sector sorts the selected request to minimize seeks. we start
- * at cfqd->last_sector, not 0.
+ * sort into dispatch list, in optimal ascending order
  */
-static void cfq_dispatch_sort(request_queue_t *q, struct cfq_rq *crq)
+static void
+cfq_dispatch_sort(struct cfq_data *cfqd, struct cfq_queue *cfqq,
+		  struct cfq_rq *crq)
 {
-	struct cfq_data *cfqd = q->elevator->elevator_data;
-	struct cfq_queue *cfqq = crq->cfq_queue;
-	struct list_head *head = &q->queue_head, *entry = head;
+	struct list_head *head = cfqd->dispatch, *entry = head;
 	struct request *__rq;
-	sector_t last;
 
-	cfq_del_crq_rb(crq);
-	cfq_remove_merge_hints(q, crq);
-	list_del(&crq->request->queuelist);
+	cfq_del_crq_rb(cfqd, cfqq, crq);
+	cfq_remove_merge_hints(cfqd->queue, crq);
 
-	last = cfqd->last_sector;
+	if (!list_empty(head)) {
+		__rq = list_entry_rq(head->next);
+
+		if (crq->request->sector < __rq->sector) {
+			entry = head->prev;
+			goto link;
+		}
+	}
+
 	while ((entry = entry->prev) != head) {
 		__rq = list_entry_rq(entry);
 
-		if (blk_barrier_rq(crq->request))
+		if (crq->request->sector <= __rq->sector)
 			break;
-		if (!blk_fs_request(crq->request))
-			break;
-
-		if (crq->request->sector > __rq->sector)
-			break;
-		if (__rq->sector > last && crq->request->sector < last) {
-			last = crq->request->sector;
-			break;
-		}
 	}
 
-	cfqd->last_sector = last;
-	crq->in_flight = 1;
-	cfqq->in_flight++;
-	list_add(&crq->request->queuelist, entry);
+link:
+	list_add_tail(&crq->request->queuelist, entry);
 }
 
-/*
- * return expired entry, or NULL to just start from scratch in rbtree
- */
-static inline struct cfq_rq *cfq_check_fifo(struct cfq_queue *cfqq)
-{
-	struct cfq_data *cfqd = cfqq->cfqd;
-	const int reads = !list_empty(&cfqq->fifo[0]);
-	const int writes = !list_empty(&cfqq->fifo[1]);
-	unsigned long now = jiffies;
-	struct cfq_rq *crq;
+struct cfq_queue *dcfqq;
+u64 dtmp;
 
-	if (time_before(now, cfqq->last_fifo_expire + cfqd->cfq_fifo_batch_expire))
-		return NULL;
 
-	crq = RQ_DATA(list_entry(cfqq->fifo[0].next, struct request, queuelist));
-	if (reads && time_after(now, crq->queue_start + cfqd->cfq_fifo_expire_r)) {
-		cfqq->last_fifo_expire = now;
-		return crq;
-	}
 
-	crq = RQ_DATA(list_entry(cfqq->fifo[1].next, struct request, queuelist));
-	if (writes && time_after(now, crq->queue_start + cfqd->cfq_fifo_expire_w)) {
-		cfqq->last_fifo_expire = now;
-		return crq;
-	}
+/* Over how many ns is sectorate defined */
+#define NS4SCALE  (100000000)
 
-	return NULL;
-}
-
-/*
- * dispatch a single request from given queue
- */
-static inline void
-cfq_dispatch_request(request_queue_t *q, struct cfq_data *cfqd,
-		     struct cfq_queue *cfqq)
+static inline int
+__cfq_check_limit(struct cfq_data *cfqd,struct cfq_queue *cfqq, int dontskip)
 {
 	struct cfq_rq *crq;
+	unsigned long long ts, gap, epoch, tmp;
+	unsigned long newavsec, sectorate;
 
-	/*
-	 * follow expired path, else get first next available
-	 */
-	if ((crq = cfq_check_fifo(cfqq)) == NULL) {
-		if (cfqd->find_best_crq)
-			crq = cfqq->next_crq;
-		else
-			crq = rb_entry_crq(rb_first(&cfqq->sort_list));
-	}
+	crq = rb_entry_crq(rb_first(&cfqq->sort_list));
 
-	cfqd->last_sector = crq->request->sector + crq->request->nr_sectors;
+	ts = sched_clock();
+	gap = ts - cfqq->epstart;
+	epoch = cfqd->cfq_epoch;
 
-	/*
-	 * finally, insert request into driver list
-	 */
-	cfq_dispatch_sort(q, crq);
-}
+	sectorate = atomic_read(&cfqq->cfqpriv->sectorate);
+//	sectorate = atomic_read(&(cfqd->cid[crq->ioprio].sectorate));
 
-static int cfq_dispatch_requests(request_queue_t *q, int max_dispatch)
-{
-	struct cfq_data *cfqd = q->elevator->elevator_data;
-	struct cfq_queue *cfqq;
-	struct list_head *entry, *tmp;
-	int queued, busy_queues, first_round;
+	dcfqq = cfqq;
 
-	if (list_empty(&cfqd->rr_list))
+	if ((gap >= epoch) || (gap < 0)) {
+
+		if (gap >= (epoch << 1)) {
+			cfqq->epsector[0] = 0;
+			cfqq->epstart = ts ; 
+		} else {
+			cfqq->epsector[0] = cfqq->epsector[1];
+			cfqq->epstart += epoch;
+		} 
+		cfqq->epsector[1] = 0;
+		gap = ts - cfqq->epstart;
+
+		tmp  = (cfqq->epsector[0] + crq->nr_sectors) * NS4SCALE;
+		do_div(tmp,epoch+gap);
+
+		cfqq->avsec = (unsigned long)tmp;
+		cfqq->skipped = 0;
+		cfqq->epsector[1] += crq->nr_sectors;
+		
+		cfqq->cfqpriv->navsec = cfqq->avsec;
+		cfqq->cfqpriv->sec[0] = cfqq->epsector[0];
+		cfqq->cfqpriv->sec[1] = cfqq->epsector[1];
+		cfqq->cfqpriv->timedout++;
+		/*
+		cfqd->cid[crq->ioprio].navsec = cfqq->avsec;
+		cfqd->cid[crq->ioprio].sec[0] = cfqq->epsector[0];
+		cfqd->cid[crq->ioprio].sec[1] = cfqq->epsector[1];
+		cfqd->cid[crq->ioprio].timedout++;
+		*/
 		return 0;
+	} else {
+		
+		tmp = (cfqq->epsector[0] + cfqq->epsector[1] + crq->nr_sectors)
+			* NS4SCALE;
+		do_div(tmp,epoch+gap);
 
-	queued = 0;
-	first_round = 1;
-restart:
+		newavsec = (unsigned long)tmp;
+		if ((newavsec < sectorate) || dontskip) {
+			cfqq->avsec = newavsec ;
+			cfqq->skipped = 0;
+			cfqq->epsector[1] += crq->nr_sectors;
+			cfqq->cfqpriv->navsec = cfqq->avsec;
+			cfqq->cfqpriv->sec[1] = cfqq->epsector[1];
+			/*
+			cfqd->cid[crq->ioprio].navsec = cfqq->avsec;
+			cfqd->cid[crq->ioprio].sec[1] = cfqq->epsector[1];
+			*/
+		} else {
+			cfqq->skipped = 1;
+			/* pause q's processing till avsec drops to 
+			   cfq_hmax_pct % of its value */
+			tmp = (epoch+gap) * (100-cfqd->cfq_hmax_pct);
+			do_div(tmp,1000000*cfqd->cfq_hmax_pct);
+			cfqq->wait_end = jiffies+msecs_to_jiffies(tmp);
+		}
+	}			
+}
+
+/*
+ * remove from io scheduler core and put on dispatch list for service
+ */
+static inline int
+__cfq_dispatch_requests(request_queue_t *q, struct cfq_data *cfqd,
+			struct cfq_queue *cfqq)
+{
+	struct cfq_rq *crq;
+
+	crq = rb_entry_crq(rb_first(&cfqq->sort_list));
+
+	cfq_dispatch_sort(cfqd, cfqq, crq);
+
+	/*
+	 * technically, for IOPRIO_RT we don't need to add it to the list.
+	 */
+	list_add_tail(&crq->prio_list, &cfqd->cid[cfqq->ioprio].prio_list);
+	return crq->nr_sectors;
+}
+
+static int
+cfq_dispatch_requests(request_queue_t *q, int prio, int max_rq, int max_sectors)
+{
+	struct cfq_data *cfqd = q->elevator.elevator_data;
+	struct list_head *plist = &cfqd->cid[prio].rr_list;
+	struct cfq_queue *cfqq;
+	struct list_head *entry, *nxt;
+	int q_rq, q_io;
+	int first_round,busy_queues,busy_unlimited;
+
+
+	/*
+	 * for each queue at this prio level, dispatch a request
+	 */
+	q_rq = q_io = 0;
+	first_round=1;
+ restart:
+	busy_unlimited = 0;
 	busy_queues = 0;
-	list_for_each_safe(entry, tmp, &cfqd->rr_list) {
+	list_for_each_safe(entry, nxt, plist) {
 		cfqq = list_entry_cfqq(entry);
 
 		BUG_ON(RB_EMPTY(&cfqq->sort_list));
+		busy_queues++;
 
-		/*
-		 * first round of queueing, only select from queues that
-		 * don't already have io in-flight
-		 */
-		if (first_round && cfqq->in_flight)
+		
+		if (first_round || busy_unlimited)
+			__cfq_check_limit(cfqd,cfqq,0);
+		else
+			__cfq_check_limit(cfqd,cfqq,1);
+
+		if (cfqq->skipped) {
+			cfqq->cfqpriv->nskip++;
+			/* cfqd->cid[prio].nskip++; */
+			busy_queues--;
+			if (time_before(jiffies, cfqq->wait_end)) {
+				list_del(&cfqq->cfq_list);
+				mod_timer(&cfqq->timer,cfqq->wait_end);
+			}
 			continue;
+		}
+		busy_unlimited++;
 
-		cfq_dispatch_request(q, cfqd, cfqq);
+		q_io += __cfq_dispatch_requests(q, cfqd, cfqq);
+		q_rq++;
 
-		if (!RB_EMPTY(&cfqq->sort_list))
-			busy_queues++;
+		if (RB_EMPTY(&cfqq->sort_list)) {
+			busy_unlimited--;
+			busy_queues--;
+			cfq_put_queue(cfqd, cfqq);
+		} 
 
-		queued++;
+		if (q_io >= max_sectors || q_rq >= max_rq) {
+#if 0
+			struct list_head *prv = nxt->prev;
+
+			if (prv != plist) {
+				list_del(plist);
+				list_add(plist, prv);
+			}
+#endif
+			break;
+		}
 	}
 
-	if ((queued < max_dispatch) && (busy_queues || first_round)) {
+	if ((q_io < max_sectors) && (q_rq < max_rq) && 
+	    (busy_queues || first_round))
+	{
 		first_round = 0;
 		goto restart;
+	} else {
+		/*
+		 * if we hit the queue limit, put the string of serviced
+		 * queues at the back of the pending list
+		 */
+		struct list_head *prv = nxt->prev;
+		if (prv != plist) {
+			list_del(plist);
+			list_add(plist, prv);
+		}
 	}
 
-	return queued;
+	cfqd->cid[prio].last_rq = q_rq;
+	cfqd->cid[prio].last_sectors = q_io;
+	return q_rq;
 }
 
-static inline void cfq_account_dispatch(struct cfq_rq *crq)
+/*
+ * try to move some requests to the dispatch list. return 0 on success
+ */
+static int cfq_select_requests(request_queue_t *q, struct cfq_data *cfqd)
 {
-	struct cfq_queue *cfqq = crq->cfq_queue;
-	struct cfq_data *cfqd = cfqq->cfqd;
-	unsigned long now, elapsed;
-
-	if (!blk_fs_request(crq->request))
-		return;
+	int queued, busy_rq, busy_sectors, i;
 
 	/*
-	 * accounted bit is necessary since some drivers will call
-	 * elv_next_request() many times for the same request (eg ide)
+	 * if there's any realtime io, only schedule that
 	 */
-	if (crq->accounted)
-		return;
-
-	now = jiffies;
-	if (cfqq->service_start == ~0UL)
-		cfqq->service_start = now;
+	if (cfq_dispatch_requests(q, IOPRIO_RT, cfqd->cfq_quantum, cfqd->cfq_quantum_io))
+		return 1;
 
 	/*
-	 * on drives with tagged command queueing, command turn-around time
-	 * doesn't necessarily reflect the time spent processing this very
-	 * command inside the drive. so do the accounting differently there,
-	 * by just sorting on the number of requests
+	 * if RT io was last serviced and grace time hasn't expired,
+	 * arm the timer to restart queueing if no other RT io has been
+	 * submitted in the mean time
 	 */
-	if (cfqd->cfq_tagged) {
-		if (time_after(now, cfqq->service_start + cfq_service)) {
-			cfqq->service_start = now;
-			cfqq->service_used /= 10;
+	if (test_bit(CFQ_WAIT_RT, &cfqd->flags)) {
+		if (time_before(jiffies, cfqd->wait_end)) {
+			mod_timer(&cfqd->timer, cfqd->wait_end);
+			return 0;
 		}
-
-		cfqq->service_used++;
-		cfq_sort_rr_list(cfqq, 0);
+		clear_bit(CFQ_WAIT_RT, &cfqd->flags);
 	}
 
-	elapsed = now - crq->queue_start;
-	if (elapsed > max_elapsed_dispatch)
-		max_elapsed_dispatch = elapsed;
+	/*
+	 * for each priority level, calculate number of requests we
+	 * are allowed to put into service.
+	 */
+	queued = 0;
+	busy_rq = cfqd->busy_rq;
+	busy_sectors = cfqd->busy_sectors;
+	for (i = IOPRIO_RT - 1; i > IOPRIO_IDLE; i--) {
+		const int o_rq = busy_rq - cfqd->cid[i].busy_rq;
+		const int o_sectors = busy_sectors - cfqd->cid[i].busy_sectors;
+		int q_rq = cfqd->cfq_quantum * (i + 1) / IOPRIO_NR;
+		int q_io = cfqd->cfq_quantum_io * (i + 1) / IOPRIO_NR;
 
-	crq->accounted = 1;
-	crq->service_start = now;
+		/*
+		 * no need to keep iterating the list, if there are no
+		 * requests pending anymore
+		 */
+		if (!cfqd->busy_rq)
+			break;
 
-	if (++cfqd->rq_in_driver >= CFQ_MAX_TAG && !cfqd->cfq_tagged) {
-		cfqq->cfqd->cfq_tagged = 1;
-		printk("cfq: depth %d reached, tagging now on\n", CFQ_MAX_TAG);
+		/*
+		 * find out how many requests and sectors we are allowed to
+		 * service
+		 */
+		if (o_rq)
+			q_rq = o_sectors * (i + 1) / IOPRIO_NR;
+		if (q_rq > cfqd->cfq_quantum)
+			q_rq = cfqd->cfq_quantum;
+
+		if (o_sectors)
+			q_io = o_sectors * (i + 1) / IOPRIO_NR;
+		if (q_io > cfqd->cfq_quantum_io)
+			q_io = cfqd->cfq_quantum_io;
+
+		/*
+		 * average with last dispatched for fairness
+		 */
+		if (cfqd->cid[i].last_rq != -1)
+			q_rq = (cfqd->cid[i].last_rq + q_rq) / 2;
+		if (cfqd->cid[i].last_sectors != -1)
+			q_io = (cfqd->cid[i].last_sectors + q_io) / 2;
+
+		queued += cfq_dispatch_requests(q, i, q_rq, q_io);
 	}
-}
 
-static inline void
-cfq_account_completion(struct cfq_queue *cfqq, struct cfq_rq *crq)
-{
-	struct cfq_data *cfqd = cfqq->cfqd;
+	if (queued)
+		return 1;
 
-	if (!crq->accounted)
-		return;
-
-	WARN_ON(!cfqd->rq_in_driver);
-	cfqd->rq_in_driver--;
-
-	if (!cfqd->cfq_tagged) {
-		unsigned long now = jiffies;
-		unsigned long duration = now - crq->service_start;
-
-		if (time_after(now, cfqq->service_start + cfq_service)) {
-			cfqq->service_start = now;
-			cfqq->service_used >>= 3;
+	/*
+	 * only allow dispatch of idle io, if the queue has been idle from
+	 * servicing RT or normal io for the grace period
+	 */
+	if (test_bit(CFQ_WAIT_NORM, &cfqd->flags)) {
+		if (time_before(jiffies, cfqd->wait_end)) {
+			mod_timer(&cfqd->timer, cfqd->wait_end);
+			return 0;
 		}
-
-		cfqq->service_used += duration;
-		cfq_sort_rr_list(cfqq, 0);
-
-		if (duration > max_elapsed_crq)
-			max_elapsed_crq = duration;
+		clear_bit(CFQ_WAIT_NORM, &cfqd->flags);
 	}
+
+	/*
+	 * if we found nothing to do, allow idle io to be serviced
+	 */
+	if (cfq_dispatch_requests(q, IOPRIO_IDLE, cfqd->cfq_idle_quantum, cfqd->cfq_idle_quantum_io))
+		return 1;
+
+	return 0;
 }
 
 static struct request *cfq_next_request(request_queue_t *q)
 {
-	struct cfq_data *cfqd = q->elevator->elevator_data;
+	struct cfq_data *cfqd = q->elevator.elevator_data;
 	struct request *rq;
 
-	if (!list_empty(&q->queue_head)) {
+	if (!list_empty(cfqd->dispatch)) {
 		struct cfq_rq *crq;
 dispatch:
-		rq = list_entry_rq(q->queue_head.next);
+		/*
+		 * end grace period, we are servicing a request
+		 */
+		del_timer(&cfqd->timer);
+		clear_bit(CFQ_WAIT_RT, &cfqd->flags);
+		clear_bit(CFQ_WAIT_NORM, &cfqd->flags);
 
-		if ((crq = RQ_DATA(rq)) != NULL) {
-			cfq_remove_merge_hints(q, crq);
-			cfq_account_dispatch(crq);
+		BUG_ON(list_empty(cfqd->dispatch));
+		rq = list_entry_rq(cfqd->dispatch->next);
+
+		BUG_ON(q->last_merge == rq);
+		crq = RQ_ELV_DATA(rq);
+		if (crq) {
+			BUG_ON(!hlist_unhashed(&crq->hash));
+			list_del_init(&crq->prio_list);
 		}
 
 		return rq;
 	}
 
-	if (cfq_dispatch_requests(q, cfqd->cfq_quantum))
+	/*
+	 * we moved requests to dispatch list, go back end serve one
+	 */
+	if (cfq_select_requests(q, cfqd))
 		goto dispatch;
 
 	return NULL;
 }
 
-/*
- * task holds one reference to the queue, dropped when task exits. each crq
- * in-flight on this queue also holds a reference, dropped when crq is freed.
- *
- * queue lock must be held here.
- */
-static void cfq_put_queue(struct cfq_queue *cfqq)
-{
-	BUG_ON(!atomic_read(&cfqq->ref));
-
-	if (!atomic_dec_and_test(&cfqq->ref))
-		return;
-
-	BUG_ON(rb_first(&cfqq->sort_list));
-	BUG_ON(cfqq->on_rr);
-
-	cfq_put_cfqd(cfqq->cfqd);
-
-	/*
-	 * it's on the empty list and still hashed
-	 */
-	list_del(&cfqq->cfq_list);
-	hlist_del(&cfqq->cfq_hash);
-	kmem_cache_free(cfq_pool, cfqq);
-}
-
 static inline struct cfq_queue *
-__cfq_find_cfq_hash(struct cfq_data *cfqd, unsigned long key, const int hashval)
+__cfq_find_cfq_hash(struct cfq_data *cfqd, int hashkey, const int hashval)
 {
 	struct hlist_head *hash_list = &cfqd->cfq_hash[hashval];
-	struct hlist_node *entry, *next;
+	struct hlist_node *entry;
 
-	hlist_for_each_safe(entry, next, hash_list) {
+	hlist_for_each(entry, hash_list) {
 		struct cfq_queue *__cfqq = list_entry_qhash(entry);
 
-		if (__cfqq->key == key)
+		if (__cfqq->hash_key == hashkey)
 			return __cfqq;
 	}
 
 	return NULL;
 }
 
-static struct cfq_queue *
-cfq_find_cfq_hash(struct cfq_data *cfqd, unsigned long key)
+
+static struct cfq_queue *cfq_find_cfq_hash(struct cfq_data *cfqd, int hashkey)
 {
-	return __cfq_find_cfq_hash(cfqd, key, hash_long(key, CFQ_QHASH_SHIFT));
+	const int hashval = hash_long(hashkey, CFQ_QHASH_SHIFT);
+
+	return __cfq_find_cfq_hash(cfqd, hashkey, hashval);
 }
 
-static inline void
-cfq_rehash_cfqq(struct cfq_data *cfqd, struct cfq_queue **cfqq,
-		struct cfq_io_context *cic)
+static void cfq_put_queue(struct cfq_data *cfqd, struct cfq_queue *cfqq)
 {
-	unsigned long hashkey = cfq_hash_key(cfqd, current);
-	unsigned long hashval = hash_long(hashkey, CFQ_QHASH_SHIFT);
-	struct cfq_queue *__cfqq;
+	cfqd->busy_queues--;
+	WARN_ON(cfqd->busy_queues < 0);
+
+	cfqd->cid[cfqq->ioprio].busy_queues--;
+	WARN_ON(cfqd->cid[cfqq->ioprio].busy_queues < 0);
+	atomic_inc(&(cfqd->cid[cfqq->ioprio].cum_queues_out));
+
+	list_del(&cfqq->cfq_list);
+	hlist_del(&cfqq->cfq_hash);
+	mempool_free(cfqq, cfq_mpool);
+}
+
+static void cfq_pauseq_timer(unsigned long data)
+{
+	struct cfq_queue *cfqq = (struct cfq_queue *) data;
+	kblockd_schedule_work(&cfqq->work);
+}
+
+static void cfq_pauseq_work(void *data)
+{
+	struct cfq_queue *cfqq = (struct cfq_queue *) data;
+	struct cfq_data *cfqd = cfqq->cfqd;
+	request_queue_t *q = cfqd->queue;
 	unsigned long flags;
+	
+	spin_lock_irqsave(q->queue_lock, flags);
+	list_add_tail(&cfqq->cfq_list,&cfqd->cid[cfqq->ioprio].rr_list);
+	cfqq->skipped = 0;
+	if (cfq_next_request(q))
+		q->request_fn(q);
+	spin_unlock_irqrestore(q->queue_lock, flags);
 
-	spin_lock_irqsave(cfqd->queue->queue_lock, flags);
+	//del_timer(&cfqq->timer);
+}	
 
-	hlist_del(&(*cfqq)->cfq_hash);
-
-	__cfqq = __cfq_find_cfq_hash(cfqd, hashkey, hashval);
-	if (!__cfqq || __cfqq == *cfqq) {
-		__cfqq = *cfqq;
-		hlist_add_head(&__cfqq->cfq_hash, &cfqd->cfq_hash[hashval]);
-		__cfqq->key_type = cfqd->key_type;
-	} else {
-		atomic_inc(&__cfqq->ref);
-		cic->cfqq = __cfqq;
-		cfq_put_queue(*cfqq);
-		*cfqq = __cfqq;
-	}
-
-	cic->cfqq = __cfqq;
-	spin_unlock_irqrestore(cfqd->queue->queue_lock, flags);
-}
-
-static void cfq_free_io_context(struct cfq_io_context *cic)
+static struct cfq_queue *__cfq_get_queue(struct cfq_data *cfqd, int hashkey,
+					 int gfp_mask)
 {
-	kmem_cache_free(cfq_ioc_pool, cic);
-}
-
-/*
- * locking hierarchy is: io_context lock -> queue locks
- */
-static void cfq_exit_io_context(struct cfq_io_context *cic)
-{
-	struct cfq_queue *cfqq = cic->cfqq;
-	struct list_head *entry = &cic->list;
-	request_queue_t *q;
-	unsigned long flags;
-
-	/*
-	 * put the reference this task is holding to the various queues
-	 */
-	spin_lock_irqsave(&cic->ioc->lock, flags);
-	while ((entry = cic->list.next) != &cic->list) {
-		struct cfq_io_context *__cic;
-
-		__cic = list_entry(entry, struct cfq_io_context, list);
-		list_del(entry);
-
-		q = __cic->cfqq->cfqd->queue;
-		spin_lock(q->queue_lock);
-		cfq_put_queue(__cic->cfqq);
-		spin_unlock(q->queue_lock);
-	}
-
-	q = cfqq->cfqd->queue;
-	spin_lock(q->queue_lock);
-	cfq_put_queue(cfqq);
-	spin_unlock(q->queue_lock);
-
-	cic->cfqq = NULL;
-	spin_unlock_irqrestore(&cic->ioc->lock, flags);
-}
-
-static struct cfq_io_context *cfq_alloc_io_context(int gfp_flags)
-{
-	struct cfq_io_context *cic = kmem_cache_alloc(cfq_ioc_pool, gfp_flags);
-
-	if (cic) {
-		cic->dtor = cfq_free_io_context;
-		cic->exit = cfq_exit_io_context;
-		INIT_LIST_HEAD(&cic->list);
-		cic->cfqq = NULL;
-	}
-
-	return cic;
-}
-
-/*
- * Setup general io context and cfq io context. There can be several cfq
- * io contexts per general io context, if this process is doing io to more
- * than one device managed by cfq. Note that caller is holding a reference to
- * cfqq, so we don't need to worry about it disappearing
- */
-static struct cfq_io_context *
-cfq_get_io_context(struct cfq_queue **cfqq, int gfp_flags)
-{
-	struct cfq_data *cfqd = (*cfqq)->cfqd;
-	struct cfq_queue *__cfqq = *cfqq;
-	struct cfq_io_context *cic;
-	struct io_context *ioc;
-
-	might_sleep_if(gfp_flags & __GFP_WAIT);
-
-	ioc = get_io_context(gfp_flags);
-	if (!ioc)
-		return NULL;
-
-	if ((cic = ioc->cic) == NULL) {
-		cic = cfq_alloc_io_context(gfp_flags);
-
-		if (cic == NULL)
-			goto err;
-
-		ioc->cic = cic;
-		cic->ioc = ioc;
-		cic->cfqq = __cfqq;
-		atomic_inc(&__cfqq->ref);
-	} else {
-		struct cfq_io_context *__cic;
-		unsigned long flags;
-
-		/*
-		 * since the first cic on the list is actually the head
-		 * itself, need to check this here or we'll duplicate an
-		 * cic per ioc for no reason
-		 */
-		if (cic->cfqq == __cfqq)
-			goto out;
-
-		/*
-		 * cic exists, check if we already are there. linear search
-		 * should be ok here, the list will usually not be more than
-		 * 1 or a few entries long
-		 */
-		spin_lock_irqsave(&ioc->lock, flags);
-		list_for_each_entry(__cic, &cic->list, list) {
-			/*
-			 * this process is already holding a reference to
-			 * this queue, so no need to get one more
-			 */
-			if (__cic->cfqq == __cfqq) {
-				cic = __cic;
-				spin_unlock_irqrestore(&ioc->lock, flags);
-				goto out;
-			}
-		}
-		spin_unlock_irqrestore(&ioc->lock, flags);
-
-		/*
-		 * nope, process doesn't have a cic assoicated with this
-		 * cfqq yet. get a new one and add to list
-		 */
-		__cic = cfq_alloc_io_context(gfp_flags);
-		if (__cic == NULL)
-			goto err;
-
-		__cic->ioc = ioc;
-		__cic->cfqq = __cfqq;
-		atomic_inc(&__cfqq->ref);
-		spin_lock_irqsave(&ioc->lock, flags);
-		list_add(&__cic->list, &cic->list);
-		spin_unlock_irqrestore(&ioc->lock, flags);
-
-		cic = __cic;
-		*cfqq = __cfqq;
-	}
-
-out:
-	/*
-	 * if key_type has been changed on the fly, we lazily rehash
-	 * each queue at lookup time
-	 */
-	if ((*cfqq)->key_type != cfqd->key_type)
-		cfq_rehash_cfqq(cfqd, cfqq, cic);
-
-	return cic;
-err:
-	put_io_context(ioc);
-	return NULL;
-}
-
-static struct cfq_queue *
-__cfq_get_queue(struct cfq_data *cfqd, unsigned long key, int gfp_mask)
-{
-	const int hashval = hash_long(key, CFQ_QHASH_SHIFT);
+	const int hashval = hash_long(hashkey, CFQ_QHASH_SHIFT);
 	struct cfq_queue *cfqq, *new_cfqq = NULL;
+	request_queue_t *q = cfqd->queue;
 
 retry:
-	cfqq = __cfq_find_cfq_hash(cfqd, key, hashval);
+	cfqq = __cfq_find_cfq_hash(cfqd, hashkey, hashval);
 
 	if (!cfqq) {
 		if (new_cfqq) {
 			cfqq = new_cfqq;
 			new_cfqq = NULL;
 		} else if (gfp_mask & __GFP_WAIT) {
-			spin_unlock_irq(cfqd->queue->queue_lock);
-			new_cfqq = kmem_cache_alloc(cfq_pool, gfp_mask);
-			spin_lock_irq(cfqd->queue->queue_lock);
+			spin_unlock_irq(q->queue_lock);
+			new_cfqq = mempool_alloc(cfq_mpool, gfp_mask);
+			spin_lock_irq(q->queue_lock);
 			goto retry;
 		} else
-			goto out;
+			return NULL;
 
 		memset(cfqq, 0, sizeof(*cfqq));
-
 		INIT_HLIST_NODE(&cfqq->cfq_hash);
 		INIT_LIST_HEAD(&cfqq->cfq_list);
-		RB_CLEAR_ROOT(&cfqq->sort_list);
-		INIT_LIST_HEAD(&cfqq->fifo[0]);
-		INIT_LIST_HEAD(&cfqq->fifo[1]);
+		cfqq->hash_key = cfq_hash_key(current);
+		cfqq->ioprio = cfq_ioprio(current);
+		
+		cfqq->cfqpriv = cfq_cfqpriv(cfqd,current);
+		if (!cfqq->cfqpriv)
+			cfqq->cfqpriv = &((cfqd->cid[cfqq->ioprio]).cfqpriv);
 
-		cfqq->key = key;
+		cfqq->epstart = sched_clock();
+		/* epsector, avsec, skipped initialized to zero by memset */
+		
+		init_timer(&cfqq->timer);
+		cfqq->timer.function = cfq_pauseq_timer;
+		cfqq->timer.data = (unsigned long) cfqq;
+
+		INIT_WORK(&cfqq->work, cfq_pauseq_work, cfqq); 
+
+		cfqq->cfqd = cfqd ;
+
 		hlist_add_head(&cfqq->cfq_hash, &cfqd->cfq_hash[hashval]);
-		atomic_set(&cfqq->ref, 0);
-		cfqq->cfqd = cfqd;
-		atomic_inc(&cfqd->ref);
-		cfqq->key_type = cfqd->key_type;
-		cfqq->service_start = ~0UL;
 	}
 
 	if (new_cfqq)
-		kmem_cache_free(cfq_pool, new_cfqq);
+		mempool_free(new_cfqq, cfq_mpool);
 
-	atomic_inc(&cfqq->ref);
-out:
-	WARN_ON((gfp_mask & __GFP_WAIT) && !cfqq);
 	return cfqq;
 }
 
-static void cfq_enqueue(struct cfq_data *cfqd, struct cfq_rq *crq)
+static struct cfq_queue *cfq_get_queue(struct cfq_data *cfqd, int hashkey,
+				       int gfp_mask)
 {
-	crq->is_sync = 0;
-	if (rq_data_dir(crq->request) == READ || current->flags & PF_SYNCWRITE)
-		crq->is_sync = 1;
+	request_queue_t *q = cfqd->queue;
+	struct cfq_queue *cfqq;
 
-	cfq_add_crq_rb(crq);
-	crq->queue_start = jiffies;
+	spin_lock_irq(q->queue_lock);
+	cfqq = __cfq_get_queue(cfqd, hashkey, gfp_mask);
+	spin_unlock_irq(q->queue_lock);
 
-	list_add_tail(&crq->request->queuelist, &crq->cfq_queue->fifo[crq->is_sync]);
+	return cfqq;
+}
+
+static void
+__cfq_enqueue(request_queue_t *q, struct cfq_data *cfqd, struct cfq_rq *crq)
+{
+	const int prio = crq->ioprio;
+	struct cfq_queue *cfqq;
+
+	cfqq = __cfq_get_queue(cfqd, cfq_hash_key(current), GFP_ATOMIC);
+	if (cfqq) {
+
+		/*
+		 * not too good...
+		 */
+		if (prio > cfqq->ioprio) {
+			printk("prio hash collision %d %d\n", 
+			       prio, cfqq->ioprio);
+			if (!list_empty(&cfqq->cfq_list)) {
+				cfqd->cid[cfqq->ioprio].busy_queues--;
+				WARN_ON(cfqd->cid[cfqq->ioprio].busy_queues<0);
+				atomic_inc(&(cfqd->cid[cfqq->ioprio].cum_queues_out));
+				cfqd->cid[prio].busy_queues++;
+				atomic_inc(&(cfqd->cid[prio].cum_queues_in));
+				list_move_tail(&cfqq->cfq_list, 
+					       &cfqd->cid[prio].rr_list);
+			}
+			cfqq->ioprio = prio;
+		}
+
+		cfq_add_crq_rb(cfqd, cfqq, crq);
+
+		if (list_empty(&cfqq->cfq_list)) {
+			list_add_tail(&cfqq->cfq_list, 
+				      &cfqd->cid[prio].rr_list);
+			cfqd->cid[prio].busy_queues++;
+			atomic_inc(&(cfqd->cid[prio].cum_queues_in));
+			cfqd->busy_queues++;
+		}
+
+		if (rq_mergeable(crq->request)) {
+			cfq_add_crq_hash(cfqd, crq);
+			
+			if (!q->last_merge)
+				q->last_merge = crq->request;
+		}
+
+	} else {
+		/*
+		 * should can only happen if the request wasn't allocated
+		 * through blk_alloc_request(), eg stack requests from ide-cd
+		 * (those should be removed) _and_ we are in OOM.
+		 */
+		list_add_tail(&crq->request->queuelist, cfqd->dispatch);
+	}
+}
+
+static void cfq_reenqueue(request_queue_t *q, struct cfq_data *cfqd, int prio)
+{
+	struct list_head *prio_list = &cfqd->cid[prio].prio_list;
+	struct list_head *entry, *tmp;
+
+	list_for_each_safe(entry, tmp, prio_list) {
+		struct cfq_rq *crq = list_entry_prio(entry);
+
+		list_del_init(entry);
+		list_del_init(&crq->request->queuelist);
+		__cfq_enqueue(q, cfqd, crq);
+	}
+}
+
+static void
+cfq_enqueue(request_queue_t *q, struct cfq_data *cfqd, struct cfq_rq *crq)
+{
+	const int prio = cfq_ioprio(current);
+
+	crq->ioprio = prio;
+	crq->nr_sectors = crq->request->hard_nr_sectors;
+	__cfq_enqueue(q, cfqd, crq);
+
+	if (prio == IOPRIO_RT) {
+		int i;
+
+		/*
+		 * realtime io gets priority, move all other io back
+		 */
+		for (i = IOPRIO_IDLE; i < IOPRIO_RT; i++)
+			cfq_reenqueue(q, cfqd, i);
+	} else if (prio != IOPRIO_IDLE) {
+		/*
+		 * check if we need to move idle io back into queue
+		 */
+		cfq_reenqueue(q, cfqd, IOPRIO_IDLE);
+	}
 }
 
 static void
 cfq_insert_request(request_queue_t *q, struct request *rq, int where)
 {
-	struct cfq_data *cfqd = q->elevator->elevator_data;
-	struct cfq_rq *crq = RQ_DATA(rq);
+	struct cfq_data *cfqd = q->elevator.elevator_data;
+	struct cfq_rq *crq = RQ_ELV_DATA(rq);
 
 	switch (where) {
 		case ELEVATOR_INSERT_BACK:
-			while (cfq_dispatch_requests(q, cfqd->cfq_quantum))
+#if 0
+			while (cfq_dispatch_requests(q, cfqd))
 				;
-			list_add_tail(&rq->queuelist, &q->queue_head);
+#endif
+			list_add_tail(&rq->queuelist, cfqd->dispatch);
 			break;
 		case ELEVATOR_INSERT_FRONT:
-			list_add(&rq->queuelist, &q->queue_head);
+			list_add(&rq->queuelist, cfqd->dispatch);
 			break;
 		case ELEVATOR_INSERT_SORT:
 			BUG_ON(!blk_fs_request(rq));
-			cfq_enqueue(cfqd, crq);
+			cfq_enqueue(q, cfqd, crq);
 			break;
 		default:
-			printk("%s: bad insert point %d\n", __FUNCTION__,where);
+			printk("%s: bad insert point %d\n", 
+			       __FUNCTION__,where);
 			return;
-	}
-
-	if (rq_mergeable(rq)) {
-		cfq_add_crq_hash(cfqd, crq);
-
-		if (!q->last_merge)
-			q->last_merge = rq;
 	}
 }
 
 static int cfq_queue_empty(request_queue_t *q)
 {
-	struct cfq_data *cfqd = q->elevator->elevator_data;
+	struct cfq_data *cfqd = q->elevator.elevator_data;
 
-	return list_empty(&q->queue_head) && list_empty(&cfqd->rr_list);
-}
+	if (list_empty(cfqd->dispatch) && !cfqd->busy_queues)
+		return 1;
 
-static void cfq_completed_request(request_queue_t *q, struct request *rq)
-{
-	struct cfq_rq *crq = RQ_DATA(rq);
-
-	if (unlikely(!blk_fs_request(rq)))
-		return;
-
-	if (crq->in_flight) {
-		struct cfq_queue *cfqq = crq->cfq_queue;
-
-		WARN_ON(!cfqq->in_flight);
-		cfqq->in_flight--;
-
-		cfq_account_completion(cfqq, crq);
-	}
-
+	return 0;
 }
 
 static struct request *
 cfq_former_request(request_queue_t *q, struct request *rq)
 {
-	struct cfq_rq *crq = RQ_DATA(rq);
+	struct cfq_rq *crq = RQ_ELV_DATA(rq);
 	struct rb_node *rbprev = rb_prev(&crq->rb_node);
 
 	if (rbprev)
@@ -1313,7 +1127,7 @@ cfq_former_request(request_queue_t *q, struct request *rq)
 static struct request *
 cfq_latter_request(request_queue_t *q, struct request *rq)
 {
-	struct cfq_rq *crq = RQ_DATA(rq);
+	struct cfq_rq *crq = RQ_ELV_DATA(rq);
 	struct rb_node *rbnext = rb_next(&crq->rb_node);
 
 	if (rbnext)
@@ -1322,173 +1136,148 @@ cfq_latter_request(request_queue_t *q, struct request *rq)
 	return NULL;
 }
 
+static void cfq_queue_congested(request_queue_t *q)
+{
+	struct cfq_data *cfqd = q->elevator.elevator_data;
+
+	set_bit(cfq_ioprio(current), &cfqd->rq_starved_mask);
+}
+
 static int cfq_may_queue(request_queue_t *q, int rw)
 {
-	struct cfq_data *cfqd = q->elevator->elevator_data;
+	struct cfq_data *cfqd = q->elevator.elevator_data;
 	struct cfq_queue *cfqq;
-	int ret = ELV_MQUEUE_MAY;
+	const int prio = cfq_ioprio(current);
+	int limit, ret = 1;
 
-	if (current->flags & PF_MEMALLOC)
-		return ELV_MQUEUE_MAY;
+	if (!cfqd->busy_queues)
+		goto out;
 
-	cfqq = cfq_find_cfq_hash(cfqd, cfq_hash_key(cfqd, current));
-	if (cfqq) {
-		int limit = cfqd->max_queued;
+	cfqq = cfq_find_cfq_hash(cfqd, cfq_hash_key(current));
+	if (!cfqq)
+		goto out;
 
-		if (cfqq->allocated[rw] < cfqd->cfq_queued)
-			return ELV_MQUEUE_MUST;
+	cfqq = cfq_find_cfq_hash(cfqd, cfq_hash_key(current));
+	if (!cfqq)
+		goto out;
 
-		if (cfqd->busy_queues)
-			limit = q->nr_requests / cfqd->busy_queues;
+	/*
+	 * if higher or equal prio io is sleeping waiting for a request, don't
+	 * allow this one to allocate one. as long as ll_rw_blk does fifo
+	 * waitqueue wakeups this should work...
+	 */
+	if (cfqd->rq_starved_mask & ~((1 << prio) - 1))
+		goto out;
 
-		if (limit < cfqd->cfq_queued)
-			limit = cfqd->cfq_queued;
-		else if (limit > cfqd->max_queued)
-			limit = cfqd->max_queued;
+	if (cfqq->queued[rw] < cfqd->cfq_queued || !cfqd->cid[prio].busy_queues)
+		goto out;
 
-		if (cfqq->allocated[rw] >= limit) {
-			if (limit > cfqq->alloc_limit[rw])
-				cfqq->alloc_limit[rw] = limit;
-
-			ret = ELV_MQUEUE_NO;
-		}
-	}
-
+	limit = q->nr_requests * (prio + 1) / IOPRIO_NR;
+	limit /= cfqd->cid[prio].busy_queues;
+	if (cfqq->queued[rw] > limit)
+		ret = 0;
+out:
 	return ret;
 }
 
-static void cfq_check_waiters(request_queue_t *q, struct cfq_queue *cfqq)
-{
-	struct request_list *rl = &q->rq;
-	const int write = waitqueue_active(&rl->wait[WRITE]);
-	const int read = waitqueue_active(&rl->wait[READ]);
-
-	if (read && cfqq->allocated[READ] < cfqq->alloc_limit[READ])
-		wake_up(&rl->wait[READ]);
-	if (write && cfqq->allocated[WRITE] < cfqq->alloc_limit[WRITE])
-		wake_up(&rl->wait[WRITE]);
-}
-
-/*
- * queue lock held here
- */
 static void cfq_put_request(request_queue_t *q, struct request *rq)
 {
-	struct cfq_data *cfqd = q->elevator->elevator_data;
-	struct cfq_rq *crq = RQ_DATA(rq);
+	struct cfq_data *cfqd = q->elevator.elevator_data;
+	struct cfq_rq *crq = RQ_ELV_DATA(rq);
+	struct request_list *rl;
+	int other_rw;
 
 	if (crq) {
-		struct cfq_queue *cfqq = crq->cfq_queue;
-
 		BUG_ON(q->last_merge == rq);
 		BUG_ON(!hlist_unhashed(&crq->hash));
 
-		if (crq->io_context)
-			put_io_context(crq->io_context->ioc);
-
-		BUG_ON(!cfqq->allocated[crq->is_write]);
-		cfqq->allocated[crq->is_write]--;
-
 		mempool_free(crq, cfqd->crq_pool);
 		rq->elevator_private = NULL;
+	}
 
+	/*
+	 * work-around for may_queue "bug": if a read gets issued and refused
+	 * to queue because writes ate all the allowed slots and no other
+	 * reads are pending for this queue, it could get stuck infinitely
+	 * since freed_request() only checks the waitqueue for writes when
+	 * freeing them. or vice versa for a single write vs many reads.
+	 * so check here whether "the other" data direction might be able
+	 * to queue and wake them
+	 */
+	rl = &q->rq;
+	other_rw = rq_data_dir(rq) ^ 1;
+	if (rl->count[other_rw] <= q->nr_requests) {
 		smp_mb();
-		cfq_check_waiters(q, cfqq);
-		cfq_put_queue(cfqq);
+		if (waitqueue_active(&rl->wait[other_rw]))
+			wake_up(&rl->wait[other_rw]);
 	}
 }
 
-/*
- * Allocate cfq data structures associated with this request. A queue and
- */
 static int cfq_set_request(request_queue_t *q, struct request *rq, int gfp_mask)
 {
-	struct cfq_data *cfqd = q->elevator->elevator_data;
-	struct cfq_io_context *cic;
-	const int rw = rq_data_dir(rq);
-	struct cfq_queue *cfqq, *saved_cfqq;
+	struct cfq_data *cfqd = q->elevator.elevator_data;
+	struct cfq_queue *cfqq;
 	struct cfq_rq *crq;
-	unsigned long flags;
 
-	might_sleep_if(gfp_mask & __GFP_WAIT);
-
-	spin_lock_irqsave(q->queue_lock, flags);
-
-	cfqq = __cfq_get_queue(cfqd, cfq_hash_key(cfqd, current), gfp_mask);
+	/*
+	 * prepare a queue up front, so cfq_enqueue() doesn't have to
+	 */
+	cfqq = cfq_get_queue(cfqd, cfq_hash_key(current), gfp_mask);
 	if (!cfqq)
-		goto out_lock;
-
-repeat:
-	if (cfqq->allocated[rw] >= cfqd->max_queued)
-		goto out_lock;
-
-	cfqq->allocated[rw]++;
-	spin_unlock_irqrestore(q->queue_lock, flags);
-
-	/*
-	 * if hashing type has changed, the cfq_queue might change here.
-	 */
-	saved_cfqq = cfqq;
-	cic = cfq_get_io_context(&cfqq, gfp_mask);
-	if (!cic)
-		goto err;
-
-	/*
-	 * repeat allocation checks on queue change
-	 */
-	if (unlikely(saved_cfqq != cfqq)) {
-		spin_lock_irqsave(q->queue_lock, flags);
-		saved_cfqq->allocated[rw]--;
-		goto repeat;
-	}
+		return 1;
 
 	crq = mempool_alloc(cfqd->crq_pool, gfp_mask);
 	if (crq) {
-		RB_CLEAR(&crq->rb_node);
-		crq->rb_key = 0;
+		/*
+		 * process now has one request
+		 */
+		clear_bit(cfq_ioprio(current), &cfqd->rq_starved_mask);
+
+		memset(crq, 0, sizeof(*crq));
 		crq->request = rq;
 		INIT_HLIST_NODE(&crq->hash);
-		crq->cfq_queue = cfqq;
-		crq->io_context = cic;
-		crq->service_start = crq->queue_start = 0;
-		crq->in_flight = crq->accounted = crq->is_sync = 0;
-		crq->is_write = rw;
+		INIT_LIST_HEAD(&crq->prio_list);
 		rq->elevator_private = crq;
-		cfqq->alloc_limit[rw] = 0;
 		return 0;
 	}
 
-	put_io_context(cic->ioc);
-err:
-	spin_lock_irqsave(q->queue_lock, flags);
-	cfqq->allocated[rw]--;
-	cfq_put_queue(cfqq);
-out_lock:
-	spin_unlock_irqrestore(q->queue_lock, flags);
 	return 1;
 }
 
-static void cfq_put_cfqd(struct cfq_data *cfqd)
+static void cfq_exit(request_queue_t *q, elevator_t *e)
 {
-	request_queue_t *q = cfqd->queue;
+	struct cfq_data *cfqd = e->elevator_data;
 
-	if (!atomic_dec_and_test(&cfqd->ref))
-		return;
-
-	blk_put_queue(q);
-
+	e->elevator_data = NULL;
 	mempool_destroy(cfqd->crq_pool);
 	kfree(cfqd->crq_hash);
 	kfree(cfqd->cfq_hash);
 	kfree(cfqd);
 }
 
-static void cfq_exit_queue(elevator_t *e)
+	
+
+static void cfq_timer(unsigned long data)
 {
-	cfq_put_cfqd(e->elevator_data);
+	struct cfq_data *cfqd = (struct cfq_data *) data;
+
+	clear_bit(CFQ_WAIT_RT, &cfqd->flags);
+	clear_bit(CFQ_WAIT_NORM, &cfqd->flags);
+	kblockd_schedule_work(&cfqd->work);
 }
 
-static int cfq_init_queue(request_queue_t *q, elevator_t *e)
+static void cfq_work(void *data)
+{
+	request_queue_t *q = data;
+	unsigned long flags;
+
+	spin_lock_irqsave(q->queue_lock, flags);
+	if (cfq_next_request(q))
+		q->request_fn(q);
+	spin_unlock_irqrestore(q->queue_lock, flags);
+}
+
+static int cfq_init(request_queue_t *q, elevator_t *e)
 {
 	struct cfq_data *cfqd;
 	int i;
@@ -1498,18 +1287,46 @@ static int cfq_init_queue(request_queue_t *q, elevator_t *e)
 		return -ENOMEM;
 
 	memset(cfqd, 0, sizeof(*cfqd));
-	INIT_LIST_HEAD(&cfqd->rr_list);
-	INIT_LIST_HEAD(&cfqd->empty_list);
+	init_timer(&cfqd->timer);
+	cfqd->timer.function = cfq_timer;
+	cfqd->timer.data = (unsigned long) cfqd;
 
-	cfqd->crq_hash = kmalloc(sizeof(struct hlist_head) * CFQ_MHASH_ENTRIES, GFP_KERNEL);
+	INIT_WORK(&cfqd->work, cfq_work, q);
+
+	for (i = 0; i < IOPRIO_NR; i++) {
+		struct io_prio_data *cid = &cfqd->cid[i];
+
+		INIT_LIST_HEAD(&cid->rr_list);
+		INIT_LIST_HEAD(&cid->prio_list);
+		cid->last_rq = -1;
+		cid->last_sectors = -1;
+
+		atomic_set(&cid->cum_rq_in,0);		
+		atomic_set(&cid->cum_rq_out,0);
+		atomic_set(&cid->cum_sectors_in,0);
+		atomic_set(&cid->cum_sectors_out,0);		
+		atomic_set(&cid->cum_queues_in,0);
+		atomic_set(&cid->cum_queues_out,0);
+
+		
+		atomic_set(&((cid->cfqpriv).sectorate),CFQ_SECTORATE);
+		(cid->cfqpriv).nskip = 0;
+		(cid->cfqpriv).navsec = 0;
+		(cid->cfqpriv).timedout = 0;
+	}
+
+	cfqd->crq_hash = kmalloc(sizeof(struct hlist_head) * CFQ_MHASH_ENTRIES,
+				 GFP_KERNEL);
 	if (!cfqd->crq_hash)
 		goto out_crqhash;
 
-	cfqd->cfq_hash = kmalloc(sizeof(struct hlist_head) * CFQ_QHASH_ENTRIES, GFP_KERNEL);
+	cfqd->cfq_hash = kmalloc(sizeof(struct hlist_head) * CFQ_QHASH_ENTRIES,
+				 GFP_KERNEL);
 	if (!cfqd->cfq_hash)
 		goto out_cfqhash;
 
-	cfqd->crq_pool = mempool_create(BLKDEV_MIN_RQ, mempool_alloc_slab, mempool_free_slab, crq_pool);
+	cfqd->crq_pool = mempool_create(BLKDEV_MIN_RQ, mempool_alloc_slab, 
+					mempool_free_slab, crq_pool);
 	if (!cfqd->crq_pool)
 		goto out_crqpool;
 
@@ -1518,29 +1335,22 @@ static int cfq_init_queue(request_queue_t *q, elevator_t *e)
 	for (i = 0; i < CFQ_QHASH_ENTRIES; i++)
 		INIT_HLIST_HEAD(&cfqd->cfq_hash[i]);
 
-	e->elevator_data = cfqd;
-
-	cfqd->queue = q;
-	atomic_inc(&q->refcnt);
-
-	/*
-	 * just set it to some high value, we want anyone to be able to queue
-	 * some requests. fairness is handled differently
-	 */
-	q->nr_requests = 1024;
-	cfqd->max_queued = q->nr_requests / 16;
-	q->nr_batching = cfq_queued;
-	cfqd->key_type = CFQ_KEY_TGID;
-	cfqd->find_best_crq = 1;
-	atomic_set(&cfqd->ref, 1);
-
 	cfqd->cfq_queued = cfq_queued;
 	cfqd->cfq_quantum = cfq_quantum;
-	cfqd->cfq_fifo_expire_r = cfq_fifo_expire_r;
-	cfqd->cfq_fifo_expire_w = cfq_fifo_expire_w;
-	cfqd->cfq_fifo_batch_expire = cfq_fifo_rate;
-	cfqd->cfq_back_max = cfq_back_max;
-	cfqd->cfq_back_penalty = cfq_back_penalty;
+	cfqd->cfq_quantum_io = cfq_quantum_io;
+	cfqd->cfq_idle_quantum = cfq_idle_quantum;
+	cfqd->cfq_idle_quantum_io = cfq_idle_quantum_io;
+	cfqd->cfq_grace_rt = cfq_grace_rt;
+	cfqd->cfq_grace_idle = cfq_grace_idle;
+	
+	cfqd->cfq_epoch = CFQ_EPOCH;
+	cfqd->cfq_hmax_pct = CFQ_HMAX_PCT;
+
+	q->nr_requests <<= 2;
+
+	cfqd->dispatch = &q->queue_head;
+	e->elevator_data = cfqd;
+	cfqd->queue = q;
 
 	return 0;
 out_crqpool:
@@ -1552,39 +1362,29 @@ out_crqhash:
 	return -ENOMEM;
 }
 
-static void cfq_slab_kill(void)
-{
-	if (crq_pool)
-		kmem_cache_destroy(crq_pool);
-	if (cfq_pool)
-		kmem_cache_destroy(cfq_pool);
-	if (cfq_ioc_pool)
-		kmem_cache_destroy(cfq_ioc_pool);
-}
-
 static int __init cfq_slab_setup(void)
 {
 	crq_pool = kmem_cache_create("crq_pool", sizeof(struct cfq_rq), 0, 0,
 					NULL, NULL);
+
 	if (!crq_pool)
-		goto fail;
+		panic("cfq_iosched: can't init crq pool\n");
 
 	cfq_pool = kmem_cache_create("cfq_pool", sizeof(struct cfq_queue), 0, 0,
 					NULL, NULL);
-	if (!cfq_pool)
-		goto fail;
 
-	cfq_ioc_pool = kmem_cache_create("cfq_ioc_pool",
-			sizeof(struct cfq_io_context), 0, 0, NULL, NULL);
-	if (!cfq_ioc_pool)
-		goto fail;
+	if (!cfq_pool)
+		panic("cfq_iosched: can't init cfq pool\n");
+
+	cfq_mpool = mempool_create(64, mempool_alloc_slab, mempool_free_slab, cfq_pool);
+
+	if (!cfq_mpool)
+		panic("cfq_iosched: can't init cfq mpool\n");
 
 	return 0;
-fail:
-	cfq_slab_kill();
-	return -ENOMEM;
 }
 
+subsys_initcall(cfq_slab_setup);
 
 /*
  * sysfs parts below -->
@@ -1610,149 +1410,286 @@ cfq_var_store(unsigned int *var, const char *page, size_t count)
 	return count;
 }
 
-static ssize_t
-cfq_clear_elapsed(struct cfq_data *cfqd, const char *page, size_t count)
-{
-	max_elapsed_dispatch = max_elapsed_crq = 0;
-	return count;
-}
-
-static ssize_t
-cfq_set_key_type(struct cfq_data *cfqd, const char *page, size_t count)
-{
-	spin_lock_irq(cfqd->queue->queue_lock);
-	if (!strncmp(page, "pgid", 4))
-		cfqd->key_type = CFQ_KEY_PGID;
-	else if (!strncmp(page, "tgid", 4))
-		cfqd->key_type = CFQ_KEY_TGID;
-	else if (!strncmp(page, "uid", 3))
-		cfqd->key_type = CFQ_KEY_UID;
-	else if (!strncmp(page, "gid", 3))
-		cfqd->key_type = CFQ_KEY_GID;
-	spin_unlock_irq(cfqd->queue->queue_lock);
-	return count;
-}
-
-static ssize_t
-cfq_read_key_type(struct cfq_data *cfqd, char *page)
-{
-	ssize_t len = 0;
-	int i;
-
-	for (i = CFQ_KEY_PGID; i < CFQ_KEY_LAST; i++) {
-		if (cfqd->key_type == i)
-			len += sprintf(page+len, "[%s] ", cfq_key_types[i]);
-		else
-			len += sprintf(page+len, "%s ", cfq_key_types[i]);
-	}
-	len += sprintf(page+len, "\n");
-	return len;
-}
-
-#define SHOW_FUNCTION(__FUNC, __VAR, __CONV)				\
+#define SHOW_FUNCTION(__FUNC, __VAR)					\
 static ssize_t __FUNC(struct cfq_data *cfqd, char *page)		\
 {									\
-	unsigned int __data = __VAR;					\
-	if (__CONV)							\
-		__data = jiffies_to_msecs(__data);			\
-	return cfq_var_show(__data, (page));				\
+	return cfq_var_show(__VAR, (page));				\
 }
-SHOW_FUNCTION(cfq_quantum_show, cfqd->cfq_quantum, 0);
-SHOW_FUNCTION(cfq_queued_show, cfqd->cfq_queued, 0);
-SHOW_FUNCTION(cfq_fifo_expire_r_show, cfqd->cfq_fifo_expire_r, 1);
-SHOW_FUNCTION(cfq_fifo_expire_w_show, cfqd->cfq_fifo_expire_w, 1);
-SHOW_FUNCTION(cfq_fifo_batch_expire_show, cfqd->cfq_fifo_batch_expire, 1);
-SHOW_FUNCTION(cfq_find_best_show, cfqd->find_best_crq, 0);
-SHOW_FUNCTION(cfq_back_max_show, cfqd->cfq_back_max, 0);
-SHOW_FUNCTION(cfq_back_penalty_show, cfqd->cfq_back_penalty, 0);
+SHOW_FUNCTION(cfq_quantum_show, cfqd->cfq_quantum);
+SHOW_FUNCTION(cfq_quantum_io_show, cfqd->cfq_quantum_io);
+SHOW_FUNCTION(cfq_idle_quantum_show, cfqd->cfq_idle_quantum);
+SHOW_FUNCTION(cfq_idle_quantum_io_show, cfqd->cfq_idle_quantum_io);
+SHOW_FUNCTION(cfq_queued_show, cfqd->cfq_queued);
+SHOW_FUNCTION(cfq_grace_rt_show, cfqd->cfq_grace_rt);
+SHOW_FUNCTION(cfq_grace_idle_show, cfqd->cfq_grace_idle);
+SHOW_FUNCTION(cfq_epoch_show, cfqd->cfq_epoch);
+SHOW_FUNCTION(cfq_hmax_pct_show, cfqd->cfq_hmax_pct);
 #undef SHOW_FUNCTION
 
-#define STORE_FUNCTION(__FUNC, __PTR, MIN, MAX, __CONV)			\
+#define STORE_FUNCTION(__FUNC, __PTR, MIN, MAX)				\
 static ssize_t __FUNC(struct cfq_data *cfqd, const char *page, size_t count)	\
 {									\
-	unsigned int __data;						\
-	int ret = cfq_var_store(&__data, (page), count);		\
-	if (__data < (MIN))						\
-		__data = (MIN);						\
-	else if (__data > (MAX))					\
-		__data = (MAX);						\
-	if (__CONV)							\
-		*(__PTR) = msecs_to_jiffies(__data);			\
-	else								\
-		*(__PTR) = __data;					\
+	int ret = cfq_var_store(__PTR, (page), count);			\
+	if (*(__PTR) < (MIN))						\
+		*(__PTR) = (MIN);					\
+	else if (*(__PTR) > (MAX))					\
+		*(__PTR) = (MAX);					\
 	return ret;							\
 }
-STORE_FUNCTION(cfq_quantum_store, &cfqd->cfq_quantum, 1, UINT_MAX, 0);
-STORE_FUNCTION(cfq_queued_store, &cfqd->cfq_queued, 1, UINT_MAX, 0);
-STORE_FUNCTION(cfq_fifo_expire_r_store, &cfqd->cfq_fifo_expire_r, 1, UINT_MAX, 1);
-STORE_FUNCTION(cfq_fifo_expire_w_store, &cfqd->cfq_fifo_expire_w, 1, UINT_MAX, 1);
-STORE_FUNCTION(cfq_fifo_batch_expire_store, &cfqd->cfq_fifo_batch_expire, 0, UINT_MAX, 1);
-STORE_FUNCTION(cfq_find_best_store, &cfqd->find_best_crq, 0, 1, 0);
-STORE_FUNCTION(cfq_back_max_store, &cfqd->cfq_back_max, 0, UINT_MAX, 0);
-STORE_FUNCTION(cfq_back_penalty_store, &cfqd->cfq_back_penalty, 1, UINT_MAX, 0);
+STORE_FUNCTION(cfq_quantum_store, &cfqd->cfq_quantum, 1, INT_MAX);
+STORE_FUNCTION(cfq_quantum_io_store, &cfqd->cfq_quantum_io, 4, INT_MAX);
+STORE_FUNCTION(cfq_idle_quantum_store, &cfqd->cfq_idle_quantum, 1, INT_MAX);
+STORE_FUNCTION(cfq_idle_quantum_io_store, &cfqd->cfq_idle_quantum_io, 4, INT_MAX);
+STORE_FUNCTION(cfq_queued_store, &cfqd->cfq_queued, 1, INT_MAX);
+STORE_FUNCTION(cfq_grace_rt_store, &cfqd->cfq_grace_rt, 0, INT_MAX);
+STORE_FUNCTION(cfq_grace_idle_store, &cfqd->cfq_grace_idle, 0, INT_MAX);
+STORE_FUNCTION(cfq_epoch_store, &cfqd->cfq_epoch, 0, INT_MAX);
+STORE_FUNCTION(cfq_hmax_pct_store, &cfqd->cfq_hmax_pct, 1, 100);
 #undef STORE_FUNCTION
+
+
+/* Additional entries to get priority level data */
+static ssize_t
+cfq_prio_show(struct cfq_data *cfqd, char *page, unsigned int priolvl)
+{
+    //int r1,r2,s1,s2,q1,q2;
+
+	if (!(priolvl >= IOPRIO_IDLE && priolvl <= IOPRIO_RT)) 
+		return 0;
+	
+	/*
+	r1 = (int)atomic_read(&(cfqd->cid[priolvl].cum_rq_in));
+	r2 = (int)atomic_read(&(cfqd->cid[priolvl].cum_rq_out));
+	s1 = (int)atomic_read(&(cfqd->cid[priolvl].cum_sectors_in));
+	s2 = (int)atomic_read(&(cfqd->cid[priolvl].cum_sectors_out));
+	q1 = (int)atomic_read(&(cfqd->cid[priolvl].cum_queues_in)); 
+	q2 = (int)atomic_read(&(cfqd->cid[priolvl].cum_queues_out));
+	*/
+
+	return sprintf(page,"skip %d timdout %d avsec %lu rate %d "
+		       " sec0 %lu sec1 %lu\n",
+		       cfqd->cid[priolvl].cfqpriv.nskip,
+		       cfqd->cid[priolvl].cfqpriv.timedout,
+		       cfqd->cid[priolvl].cfqpriv.navsec,
+		       atomic_read(&(cfqd->cid[priolvl].cfqpriv.sectorate)),
+		       (unsigned long)cfqd->cid[priolvl].cfqpriv.sec[0],
+		       (unsigned long)cfqd->cid[priolvl].cfqpriv.sec[1]);
+
+}
+
+#define SHOW_PRIO_DATA(__PRIOLVL)                                               \
+static ssize_t cfq_prio_##__PRIOLVL##_show(struct cfq_data *cfqd, char *page)	\
+{									        \
+	return cfq_prio_show(cfqd,page,__PRIOLVL);				\
+}
+SHOW_PRIO_DATA(0);
+SHOW_PRIO_DATA(1);
+SHOW_PRIO_DATA(2);
+SHOW_PRIO_DATA(3);
+SHOW_PRIO_DATA(4);
+SHOW_PRIO_DATA(5);
+SHOW_PRIO_DATA(6);
+SHOW_PRIO_DATA(7);
+SHOW_PRIO_DATA(8);
+SHOW_PRIO_DATA(9);
+SHOW_PRIO_DATA(10);
+SHOW_PRIO_DATA(11);
+SHOW_PRIO_DATA(12);
+SHOW_PRIO_DATA(13);
+SHOW_PRIO_DATA(14);
+SHOW_PRIO_DATA(15);
+SHOW_PRIO_DATA(16);
+SHOW_PRIO_DATA(17);
+SHOW_PRIO_DATA(18);
+SHOW_PRIO_DATA(19);
+SHOW_PRIO_DATA(20);
+#undef SHOW_PRIO_DATA
+
+
+static ssize_t cfq_prio_store(struct cfq_data *cfqd, const char *page, size_t count, int priolvl)
+{	
+
+	char *p = (char *) page;
+	int val;
+
+	val = (int) simple_strtoul(p, &p, 10);
+
+	atomic_set(&(cfqd->cid[priolvl].cfqpriv.sectorate),val);
+	cfqd->cid[priolvl].cfqpriv.nskip = 0;
+	cfqd->cid[priolvl].cfqpriv.navsec = 0;
+	cfqd->cid[priolvl].cfqpriv.timedout = 0;
+
+#if 0
+	atomic_set(&(cfqd->cid[priolvl].cum_rq_in),0);
+	atomic_set(&(cfqd->cid[priolvl].cum_rq_out),0);
+	atomic_set(&(cfqd->cid[priolvl].cum_sectors_in),0);
+	atomic_set(&(cfqd->cid[priolvl].cum_sectors_out),0);
+	atomic_set(&(cfqd->cid[priolvl].cum_queues_in),0);
+	atomic_set(&(cfqd->cid[priolvl].cum_queues_out),0);
+#endif
+
+	return count;
+}
+
+
+#define STORE_PRIO_DATA(__PRIOLVL)				                                   \
+static ssize_t cfq_prio_##__PRIOLVL##_store(struct cfq_data *cfqd, const char *page, size_t count) \
+{									                           \
+        return cfq_prio_store(cfqd,page,count,__PRIOLVL);                                          \
+}                  
+STORE_PRIO_DATA(0);     
+STORE_PRIO_DATA(1);
+STORE_PRIO_DATA(2);
+STORE_PRIO_DATA(3);
+STORE_PRIO_DATA(4);
+STORE_PRIO_DATA(5);
+STORE_PRIO_DATA(6);
+STORE_PRIO_DATA(7);
+STORE_PRIO_DATA(8);
+STORE_PRIO_DATA(9);
+STORE_PRIO_DATA(10);
+STORE_PRIO_DATA(11);
+STORE_PRIO_DATA(12);
+STORE_PRIO_DATA(13);
+STORE_PRIO_DATA(14);
+STORE_PRIO_DATA(15);
+STORE_PRIO_DATA(16);
+STORE_PRIO_DATA(17);
+STORE_PRIO_DATA(18);
+STORE_PRIO_DATA(19);
+STORE_PRIO_DATA(20);
+#undef STORE_PRIO_DATA
+
 
 static struct cfq_fs_entry cfq_quantum_entry = {
 	.attr = {.name = "quantum", .mode = S_IRUGO | S_IWUSR },
 	.show = cfq_quantum_show,
 	.store = cfq_quantum_store,
 };
+static struct cfq_fs_entry cfq_quantum_io_entry = {
+	.attr = {.name = "quantum_io", .mode = S_IRUGO | S_IWUSR },
+	.show = cfq_quantum_io_show,
+	.store = cfq_quantum_io_store,
+};
+static struct cfq_fs_entry cfq_idle_quantum_entry = {
+	.attr = {.name = "idle_quantum", .mode = S_IRUGO | S_IWUSR },
+	.show = cfq_idle_quantum_show,
+	.store = cfq_idle_quantum_store,
+};
+static struct cfq_fs_entry cfq_idle_quantum_io_entry = {
+	.attr = {.name = "idle_quantum_io", .mode = S_IRUGO | S_IWUSR },
+	.show = cfq_idle_quantum_io_show,
+	.store = cfq_idle_quantum_io_store,
+};
 static struct cfq_fs_entry cfq_queued_entry = {
 	.attr = {.name = "queued", .mode = S_IRUGO | S_IWUSR },
 	.show = cfq_queued_show,
 	.store = cfq_queued_store,
 };
-static struct cfq_fs_entry cfq_fifo_expire_r_entry = {
-	.attr = {.name = "fifo_expire_sync", .mode = S_IRUGO | S_IWUSR },
-	.show = cfq_fifo_expire_r_show,
-	.store = cfq_fifo_expire_r_store,
+static struct cfq_fs_entry cfq_grace_rt_entry = {
+	.attr = {.name = "grace_rt", .mode = S_IRUGO | S_IWUSR },
+	.show = cfq_grace_rt_show,
+	.store = cfq_grace_rt_store,
 };
-static struct cfq_fs_entry cfq_fifo_expire_w_entry = {
-	.attr = {.name = "fifo_expire_async", .mode = S_IRUGO | S_IWUSR },
-	.show = cfq_fifo_expire_w_show,
-	.store = cfq_fifo_expire_w_store,
+static struct cfq_fs_entry cfq_grace_idle_entry = {
+	.attr = {.name = "grace_idle", .mode = S_IRUGO | S_IWUSR },
+	.show = cfq_grace_idle_show,
+	.store = cfq_grace_idle_store,
 };
-static struct cfq_fs_entry cfq_fifo_batch_expire_entry = {
-	.attr = {.name = "fifo_batch_expire", .mode = S_IRUGO | S_IWUSR },
-	.show = cfq_fifo_batch_expire_show,
-	.store = cfq_fifo_batch_expire_store,
+static struct cfq_fs_entry cfq_epoch_entry = {
+	.attr = {.name = "epoch", .mode = S_IRUGO | S_IWUSR },
+	.show = cfq_epoch_show,
+	.store = cfq_epoch_store,
 };
-static struct cfq_fs_entry cfq_find_best_entry = {
-	.attr = {.name = "find_best_crq", .mode = S_IRUGO | S_IWUSR },
-	.show = cfq_find_best_show,
-	.store = cfq_find_best_store,
+static struct cfq_fs_entry cfq_hmax_pct_entry = {
+	.attr = {.name = "hmaxpct", .mode = S_IRUGO | S_IWUSR },
+	.show = cfq_hmax_pct_show,
+	.store = cfq_hmax_pct_store,
 };
-static struct cfq_fs_entry cfq_back_max_entry = {
-	.attr = {.name = "back_seek_max", .mode = S_IRUGO | S_IWUSR },
-	.show = cfq_back_max_show,
-	.store = cfq_back_max_store,
+
+#define P_0_STR   "p0"
+#define P_1_STR   "p1"
+#define P_2_STR   "p2"
+#define P_3_STR   "p3"
+#define P_4_STR   "p4"
+#define P_5_STR   "p5"
+#define P_6_STR   "p6"
+#define P_7_STR   "p7"
+#define P_8_STR   "p8"
+#define P_9_STR   "p9"
+#define P_10_STR  "p10"
+#define P_11_STR  "p11"
+#define P_12_STR  "p12"
+#define P_13_STR  "p13"
+#define P_14_STR  "p14"
+#define P_15_STR  "p15"
+#define P_16_STR  "p16"
+#define P_17_STR  "p17"
+#define P_18_STR  "p18"
+#define P_19_STR  "p19"
+#define P_20_STR  "p20"
+
+
+#define CFQ_PRIO_SYSFS_ENTRY(__PRIOLVL)				           \
+static struct cfq_fs_entry cfq_prio_##__PRIOLVL##_entry = {                \
+	.attr = {.name = P_##__PRIOLVL##_STR, .mode = S_IRUGO | S_IWUSR }, \
+	.show = cfq_prio_##__PRIOLVL##_show,                               \
+	.store = cfq_prio_##__PRIOLVL##_store,                             \
 };
-static struct cfq_fs_entry cfq_back_penalty_entry = {
-	.attr = {.name = "back_seek_penalty", .mode = S_IRUGO | S_IWUSR },
-	.show = cfq_back_penalty_show,
-	.store = cfq_back_penalty_store,
-};
-static struct cfq_fs_entry cfq_clear_elapsed_entry = {
-	.attr = {.name = "clear_elapsed", .mode = S_IWUSR },
-	.store = cfq_clear_elapsed,
-};
-static struct cfq_fs_entry cfq_key_type_entry = {
-	.attr = {.name = "key_type", .mode = S_IRUGO | S_IWUSR },
-	.show = cfq_read_key_type,
-	.store = cfq_set_key_type,
-};
+CFQ_PRIO_SYSFS_ENTRY(0);
+CFQ_PRIO_SYSFS_ENTRY(1);
+CFQ_PRIO_SYSFS_ENTRY(2);
+CFQ_PRIO_SYSFS_ENTRY(3);
+CFQ_PRIO_SYSFS_ENTRY(4);
+CFQ_PRIO_SYSFS_ENTRY(5);
+CFQ_PRIO_SYSFS_ENTRY(6);
+CFQ_PRIO_SYSFS_ENTRY(7);
+CFQ_PRIO_SYSFS_ENTRY(8);
+CFQ_PRIO_SYSFS_ENTRY(9);
+CFQ_PRIO_SYSFS_ENTRY(10);
+CFQ_PRIO_SYSFS_ENTRY(11);
+CFQ_PRIO_SYSFS_ENTRY(12);
+CFQ_PRIO_SYSFS_ENTRY(13);
+CFQ_PRIO_SYSFS_ENTRY(14);
+CFQ_PRIO_SYSFS_ENTRY(15);
+CFQ_PRIO_SYSFS_ENTRY(16);
+CFQ_PRIO_SYSFS_ENTRY(17);
+CFQ_PRIO_SYSFS_ENTRY(18);
+CFQ_PRIO_SYSFS_ENTRY(19);
+CFQ_PRIO_SYSFS_ENTRY(20);
+#undef CFQ_PRIO_SYSFS_ENTRY
 
 static struct attribute *default_attrs[] = {
 	&cfq_quantum_entry.attr,
+	&cfq_quantum_io_entry.attr,
+	&cfq_idle_quantum_entry.attr,
+	&cfq_idle_quantum_io_entry.attr,
 	&cfq_queued_entry.attr,
-	&cfq_fifo_expire_r_entry.attr,
-	&cfq_fifo_expire_w_entry.attr,
-	&cfq_fifo_batch_expire_entry.attr,
-	&cfq_key_type_entry.attr,
-	&cfq_find_best_entry.attr,
-	&cfq_back_max_entry.attr,
-	&cfq_back_penalty_entry.attr,
-	&cfq_clear_elapsed_entry.attr,
+	&cfq_grace_rt_entry.attr,
+	&cfq_grace_idle_entry.attr,
+	&cfq_epoch_entry.attr,
+	&cfq_hmax_pct_entry.attr,
+	&cfq_prio_0_entry.attr,
+	&cfq_prio_1_entry.attr,
+	&cfq_prio_2_entry.attr,
+	&cfq_prio_3_entry.attr,
+	&cfq_prio_4_entry.attr,
+	&cfq_prio_5_entry.attr,
+	&cfq_prio_6_entry.attr,
+	&cfq_prio_7_entry.attr,
+	&cfq_prio_8_entry.attr,
+	&cfq_prio_9_entry.attr,
+	&cfq_prio_10_entry.attr,
+	&cfq_prio_11_entry.attr,
+	&cfq_prio_12_entry.attr,
+	&cfq_prio_13_entry.attr,
+	&cfq_prio_14_entry.attr,
+	&cfq_prio_15_entry.attr,
+	&cfq_prio_16_entry.attr,
+	&cfq_prio_17_entry.attr,
+	&cfq_prio_18_entry.attr,
+	&cfq_prio_19_entry.attr,
+	&cfq_prio_20_entry.attr,
 	NULL,
 };
 
@@ -1793,56 +1730,24 @@ struct kobj_type cfq_ktype = {
 	.default_attrs	= default_attrs,
 };
 
-static struct elevator_type iosched_cfq = {
-	.ops = {
-		.elevator_merge_fn = 		cfq_merge,
-		.elevator_merged_fn =		cfq_merged_request,
-		.elevator_merge_req_fn =	cfq_merged_requests,
-		.elevator_next_req_fn =		cfq_next_request,
-		.elevator_add_req_fn =		cfq_insert_request,
-		.elevator_remove_req_fn =	cfq_remove_request,
-		.elevator_requeue_req_fn =	cfq_requeue_request,
-		.elevator_queue_empty_fn =	cfq_queue_empty,
-		.elevator_completed_req_fn =	cfq_completed_request,
-		.elevator_former_req_fn =	cfq_former_request,
-		.elevator_latter_req_fn =	cfq_latter_request,
-		.elevator_set_req_fn =		cfq_set_request,
-		.elevator_put_req_fn =		cfq_put_request,
-		.elevator_may_queue_fn =	cfq_may_queue,
-		.elevator_init_fn =		cfq_init_queue,
-		.elevator_exit_fn =		cfq_exit_queue,
-	},
-	.elevator_ktype =	&cfq_ktype,
-	.elevator_name =	"cfq",
-	.elevator_owner =	THIS_MODULE,
+elevator_t iosched_cfq = {
+	.elevator_name =		"cfq",
+	.elevator_ktype =		&cfq_ktype,
+	.elevator_merge_fn = 		cfq_merge,
+	.elevator_merged_fn =		cfq_merged_request,
+	.elevator_merge_req_fn =	cfq_merged_requests,
+	.elevator_next_req_fn =		cfq_next_request,
+	.elevator_add_req_fn =		cfq_insert_request,
+	.elevator_remove_req_fn =	cfq_remove_request,
+	.elevator_queue_empty_fn =	cfq_queue_empty,
+	.elevator_former_req_fn =	cfq_former_request,
+	.elevator_latter_req_fn =	cfq_latter_request,
+	.elevator_set_req_fn =		cfq_set_request,
+	.elevator_put_req_fn =		cfq_put_request,
+	.elevator_may_queue_fn =	cfq_may_queue,
+	.elevator_set_congested_fn =	cfq_queue_congested,
+	.elevator_init_fn =		cfq_init,
+	.elevator_exit_fn =		cfq_exit,
 };
 
-int cfq_init(void)
-{
-	int ret;
-
-	if (cfq_slab_setup())
-		return -ENOMEM;
-
-	ret = elv_register(&iosched_cfq);
-	if (!ret) {
-		__module_get(THIS_MODULE);
-		return 0;
-	}
-
-	cfq_slab_kill();
-	return ret;
-}
-
-static void __exit cfq_exit(void)
-{
-	cfq_slab_kill();
-	elv_unregister(&iosched_cfq);
-}
-
-module_init(cfq_init);
-module_exit(cfq_exit);
-
-MODULE_AUTHOR("Jens Axboe");
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Completely Fair Queueing IO scheduler");
+EXPORT_SYMBOL(iosched_cfq);

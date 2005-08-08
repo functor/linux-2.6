@@ -51,9 +51,9 @@
 #include <linux/if_arp.h>
 #include <linux/if_frad.h>
 #include <linux/sdla.h>
-#include <linux/bitops.h>
 
 #include <asm/system.h>
+#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/uaccess.h>
@@ -1306,8 +1306,6 @@ NOTE:  This is rather a useless action right now, as the
 
 		case SDLA_WRITEMEM:
 		case SDLA_READMEM:
-			if(!capable(CAP_SYS_RAWIO))
-				return -EPERM;
 			return(sdla_xfer(dev, ifr->ifr_data, cmd == SDLA_READMEM));
 
 		case SDLA_START:

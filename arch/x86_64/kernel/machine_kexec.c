@@ -218,7 +218,7 @@ void machine_kexec(struct kimage *image)
 	 * as that will happen when I fully switch to my identity mapped
 	 * page table anyway.
 	 */
-//	memcpy(current->active_mm->pml4, __va(start_pgtable), PAGE_SIZE/2);
+	memcpy((void *)read_pda(level4_pgt), __va(start_pgtable), PAGE_SIZE/2);
 	__flush_tlb();
 
 

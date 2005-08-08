@@ -11,9 +11,6 @@
  * partition split defined below.
  *
  * $Log: axisflashmap.c,v $
- * Revision 1.10  2004/08/16 12:37:22  starvik
- * Merge of Linux 2.6.8
- *
  * Revision 1.8  2004/05/14 07:58:03  starvik
  * Merge of changes from 2.4
  *
@@ -156,14 +153,6 @@
 #define FLASH_CACHED_ADDR    KSEG_F
 #endif
 
-#if CONFIG_ETRAX_FLASH_BUSWIDTH==1
-#define flash_data __u8
-#elif CONFIG_ETRAX_FLASH_BUSWIDTH==2
-#define flash_data __u16
-#elif CONFIG_ETRAX_FLASH_BUSWIDTH==4
-#define flash_data __u16
-#endif
-
 /* From head.S */
 extern unsigned long romfs_start, romfs_length, romfs_in_flash;
 
@@ -172,11 +161,19 @@ struct mtd_info* axisflash_mtd = NULL;
 
 /* Map driver functions. */
 
-static map_word flash_read(struct map_info *map, unsigned long ofs)
+static __u8 flash_read8(struct map_info *map, unsigned long ofs)
 {
-	map_word tmp;
-	tmp.x[0] = *(flash_data *)(map->map_priv_1 + ofs);
-	return tmp;
+	return *(__u8 *)(map->map_priv_1 + ofs);
+}
+
+static __u16 flash_read16(struct map_info *map, unsigned long ofs)
+{
+	return *(__u16 *)(map->map_priv_1 + ofs);
+}
+
+static __u32 flash_read32(struct map_info *map, unsigned long ofs)
+{
+	return *(volatile unsigned int *)(map->map_priv_1 + ofs);
 }
 
 static void flash_copy_from(struct map_info *map, void *to,
@@ -185,9 +182,19 @@ static void flash_copy_from(struct map_info *map, void *to,
 	memcpy(to, (void *)(map->map_priv_1 + from), len);
 }
 
-static void flash_write(struct map_info *map, map_word d, unsigned long adr)
+static void flash_write8(struct map_info *map, __u8 d, unsigned long adr)
 {
-	*(flash_data *)(map->map_priv_1 + adr) = (flash_data)d.x[0];
+	*(__u8 *)(map->map_priv_1 + adr) = d;
+}
+
+static void flash_write16(struct map_info *map, __u16 d, unsigned long adr)
+{
+	*(__u16 *)(map->map_priv_1 + adr) = d;
+}
+
+static void flash_write32(struct map_info *map, __u32 d, unsigned long adr)
+{
+	*(__u32 *)(map->map_priv_1 + adr) = d;
 }
 
 /*
@@ -208,10 +215,14 @@ static void flash_write(struct map_info *map, map_word d, unsigned long adr)
 static struct map_info map_cse0 = {
 	.name = "cse0",
 	.size = MEM_CSE0_SIZE,
-	.bankwidth = CONFIG_ETRAX_FLASH_BUSWIDTH,
-	.read = flash_read,
+	.buswidth = CONFIG_ETRAX_FLASH_BUSWIDTH,
+	.read8 = flash_read8,
+	.read16 = flash_read16,
+	.read32 = flash_read32,
 	.copy_from = flash_copy_from,
-	.write = flash_write,
+	.write8 = flash_write8,
+	.write16 = flash_write16,
+	.write32 = flash_write32,
 	.map_priv_1 = FLASH_UNCACHED_ADDR
 };
 
@@ -224,10 +235,14 @@ static struct map_info map_cse0 = {
 static struct map_info map_cse1 = {
 	.name = "cse1",
 	.size = MEM_CSE1_SIZE,
-	.bankwidth = CONFIG_ETRAX_FLASH_BUSWIDTH,
-	.read = flash_read,
+	.buswidth = CONFIG_ETRAX_FLASH_BUSWIDTH,
+	.read8 = flash_read8,
+	.read16 = flash_read16,
+	.read32 = flash_read32,
 	.copy_from = flash_copy_from,
-	.write = flash_write,
+	.write8 = flash_write8,
+	.write16 = flash_write16,
+	.write32 = flash_write32,
 	.map_priv_1 = FLASH_UNCACHED_ADDR + MEM_CSE0_SIZE
 };
 

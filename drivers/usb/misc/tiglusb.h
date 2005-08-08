@@ -18,6 +18,12 @@
 #define MAXTIGL		16
 
 /*
+ * Max. packetsize for IN and OUT pipes
+ */
+#define BULK_RCV_MAX	32
+#define BULK_SND_MAX	32
+
+/*
  * The driver context...
  */
 
@@ -36,8 +42,6 @@ typedef struct
 	driver_state_t	state;			/* started/stopped */
 	int		opened;			/* tru if open */
 	int	remove_pending;
-
-	int             max_ps;                 /* max packet size */
 } tiglusb_t, *ptiglusb_t;
 
 #endif

@@ -8,24 +8,16 @@ SECTIONS
 
   _text = .;
   .text : { *(.text) } = 0
-  .rodata : { *(.rodata) *(.rodata.*) }
+  .rodata : { *(.rodata) }
   _etext = .;
 
-  . = ALIGN(32 / 8);
+  . = ALIGN(32) + (. & (32 - 1));
   .data : { *(.data) }
-  . = ALIGN(32 / 8);
-  _got = .;
-  .got  : { *(.got) _egot = .; *(.got.*) }
   _edata  =  .;
 
   . = ALIGN(32 / 8);
   __bss_start = .;
-  .bss : { *(.bss) *(.sbss) }
+  .bss : { *(.bss) }
   . = ALIGN(32 / 8);
-  _ebss = .;
-  . = ALIGN(4096);
-  . += 4096;
-  end = . ;
-
-  got_len = (_egot - _got);
+  _end = . ;
 }

@@ -61,8 +61,8 @@ EXPORT_SYMBOL(__strnlen_user);
 #define __KERNEL_SYSCALLS__
 #include <asm/unistd.h>
 EXPORT_SYMBOL(__ia64_syscall);
-EXPORT_SYMBOL(sys_execve);
-EXPORT_SYMBOL(clone);
+EXPORT_SYMBOL_GPL(sys_execve);
+EXPORT_SYMBOL_GPL(clone);
 
 /* from arch/ia64/lib */
 extern void __divsi3(void);

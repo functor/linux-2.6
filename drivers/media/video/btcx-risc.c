@@ -1,6 +1,4 @@
 /*
-    $Id: btcx-risc.c,v 1.4 2004/11/07 13:17:14 kraxel Exp $
-
     btcx-risc.c
 
     bt848/bt878/cx2388x risc code generator.
@@ -38,7 +36,7 @@ MODULE_AUTHOR("Gerd Knorr");
 MODULE_LICENSE("GPL");
 
 static unsigned int debug = 0;
-module_param(debug, int, 0644);
+MODULE_PARM(debug,"i");
 MODULE_PARM_DESC(debug,"debug messages, default is 0 (no)");
 
 /* ---------------------------------------------------------- */
@@ -189,7 +187,7 @@ btcx_calc_skips(int line, int width, unsigned int *maxy,
 {
 	unsigned int clip,skip;
 	int end,maxline;
-
+	
 	skip=0;
 	maxline = 9999;
 	for (clip = 0; clip < nclips; clip++) {
@@ -199,7 +197,7 @@ btcx_calc_skips(int line, int width, unsigned int *maxy,
 			continue;
 		if (clips[clip].c.left > (signed)width)
 			break;
-
+		
 		/* vertical range */
 		if (line > clips[clip].c.top+clips[clip].c.height-1)
 			continue;

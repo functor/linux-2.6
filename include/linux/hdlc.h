@@ -243,15 +243,11 @@ static __inline__ struct net_device_stats *hdlc_stats(struct net_device *dev)
 static __inline__ unsigned short hdlc_type_trans(struct sk_buff *skb,
 						 struct net_device *dev)
 {
-	hdlc_device *hdlc = dev_to_hdlc(dev);
-
-	skb->mac.raw  = skb->data;
-	skb->dev      = dev;
-
+	hdlc_device *hdlc = dev_to_hdlc(skb->dev);
 	if (hdlc->proto.type_trans)
 		return hdlc->proto.type_trans(skb, dev);
 	else
-		return htons(ETH_P_HDLC);
+		return __constant_htons(ETH_P_HDLC);
 }
 
 #endif /* __KERNEL */

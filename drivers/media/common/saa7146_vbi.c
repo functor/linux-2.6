@@ -91,7 +91,7 @@ static int vbi_workaround(struct saa7146_dev *dev)
 		saa7146_write(dev, MC2, MASK_04|MASK_20);
 	
 		/* enable rps1 irqs */
-		SAA7146_IER_ENABLE(dev,MASK_28);
+		IER_ENABLE(dev,MASK_28);
 
 		/* prepare to wait to be woken up by the irq-handler */
 		add_wait_queue(&vv->vbi_wq, &wait);
@@ -109,7 +109,7 @@ static int vbi_workaround(struct saa7146_dev *dev)
 		current->state = TASK_RUNNING;
 
 		/* disable rps1 irqs */
-		SAA7146_IER_DISABLE(dev,MASK_28);
+		IER_DISABLE(dev,MASK_28);
 
 		/* stop video-dma3 */
 		saa7146_write(dev, MC1, MASK_20);
@@ -130,7 +130,7 @@ static int vbi_workaround(struct saa7146_dev *dev)
 	return 0;
 }
 
-static void saa7146_set_vbi_capture(struct saa7146_dev *dev, struct saa7146_buf *buf, struct saa7146_buf *next)
+void saa7146_set_vbi_capture(struct saa7146_dev *dev, struct saa7146_buf *buf, struct saa7146_buf *next)
 {
 	struct saa7146_vv *vv = dev->vv_data;
 
@@ -190,7 +190,7 @@ static void saa7146_set_vbi_capture(struct saa7146_dev *dev, struct saa7146_buf 
 	WRITE_RPS1(CMD_STOP);					
 
 	/* enable rps1 irqs */
-	SAA7146_IER_ENABLE(dev, MASK_28);
+	IER_ENABLE(dev, MASK_28);
 
 	/* write the address of the rps-program */
 	saa7146_write(dev, RPS_ADDR1, dev->d_rps1.dma_handle);
@@ -213,9 +213,8 @@ static int buffer_activate(struct saa7146_dev *dev,
 	return 0;
 }
 
-static int buffer_prepare(struct videobuf_queue *q, struct videobuf_buffer *vb,enum v4l2_field field)
+static int buffer_prepare(struct file *file, struct videobuf_buffer *vb,enum v4l2_field field)
 {
-	struct file *file = q->priv_data;
 	struct saa7146_fh *fh = file->private_data;
 	struct saa7146_dev *dev = fh->dev;
 	struct saa7146_buf *buf = (struct saa7146_buf *)vb;
@@ -265,7 +264,7 @@ static int buffer_prepare(struct videobuf_queue *q, struct videobuf_buffer *vb,e
 	return err;
 }
 
-static int buffer_setup(struct videobuf_queue *q, unsigned int *count, unsigned int *size)
+static int buffer_setup(struct file *file, unsigned int *count, unsigned int *size)
 {
 	int llength,lines;
 	
@@ -280,9 +279,8 @@ static int buffer_setup(struct videobuf_queue *q, unsigned int *count, unsigned 
 	return 0;
 }
 
-static void buffer_queue(struct videobuf_queue *q, struct videobuf_buffer *vb)
+static void buffer_queue(struct file *file, struct videobuf_buffer *vb)
 {
-	struct file *file = q->priv_data;
 	struct saa7146_fh *fh = file->private_data;
 	struct saa7146_dev *dev = fh->dev;
 	struct saa7146_vv *vv = dev->vv_data;
@@ -292,9 +290,8 @@ static void buffer_queue(struct videobuf_queue *q, struct videobuf_buffer *vb)
 	saa7146_buffer_queue(dev,&vv->vbi_q,buf);
 }
 
-static void buffer_release(struct videobuf_queue *q, struct videobuf_buffer *vb)
+static void buffer_release(struct file *file, struct videobuf_buffer *vb)
 {
-	struct file *file = q->priv_data;
 	struct saa7146_fh *fh   = file->private_data;
 	struct saa7146_dev *dev = fh->dev;
 	struct saa7146_buf *buf = (struct saa7146_buf *)vb;
@@ -325,7 +322,7 @@ static void vbi_stop(struct saa7146_fh *fh, struct file *file)
 	saa7146_write(dev, MC1, MASK_29);
 
 	/* disable rps1 irqs */
-	SAA7146_IER_DISABLE(dev, MASK_28);
+	IER_DISABLE(dev, MASK_28);
 
 	/* shut down dma 3 transfers */
 	saa7146_write(dev, MC1, MASK_20);
@@ -334,7 +331,7 @@ static void vbi_stop(struct saa7146_fh *fh, struct file *file)
 		saa7146_buffer_finish(dev,&vv->vbi_q,STATE_DONE);
 	}
 
-	videobuf_queue_cancel(&fh->vbi_q);
+	videobuf_queue_cancel(file,&fh->vbi_q);
 
 	vv->vbi_streaming = NULL;
 
@@ -407,8 +404,7 @@ static int vbi_open(struct saa7146_dev *dev, struct file *file)
 			    dev->pci, &dev->slock,
 			    V4L2_BUF_TYPE_VBI_CAPTURE,
 			    V4L2_FIELD_SEQ_TB, // FIXME: does this really work?
-			    sizeof(struct saa7146_buf),
-			    file);
+			    sizeof(struct saa7146_buf));
 	init_MUTEX(&fh->vbi_q.lock);
 
 	init_timer(&fh->vbi_read_timeout);
@@ -484,8 +480,7 @@ static ssize_t vbi_read(struct file *file, char __user *data, size_t count, loff
 	}
 
 	mod_timer(&fh->vbi_read_timeout, jiffies+BUFFER_TIMEOUT);
-	ret = videobuf_read_stream(&fh->vbi_q, data, count, ppos, 1,
-				   file->f_flags & O_NONBLOCK);
+	ret = videobuf_read_stream(file, &fh->vbi_q, data, count, ppos, 1);
 /*
 	printk("BASE_ODD3:      0x%08x\n", saa7146_read(dev, BASE_ODD3));
 	printk("BASE_EVEN3:     0x%08x\n", saa7146_read(dev, BASE_EVEN3));

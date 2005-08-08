@@ -50,7 +50,7 @@
 #include <linux/if.h>
 #include <linux/slab.h>
 #include <linux/errno.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/system.h>
 #include <linux/interrupt.h>

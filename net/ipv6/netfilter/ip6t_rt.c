@@ -47,10 +47,11 @@ match(const struct sk_buff *skb,
       const struct net_device *out,
       const void *matchinfo,
       int offset,
-      unsigned int protoff,
+      const void *protohdr,
+      u_int16_t datalen,
       int *hotdrop)
 {
-       struct ipv6_rt_hdr _route, *rh = NULL;
+       struct ipv6_rt_hdr *route = NULL;
        const struct ip6t_rt *rtinfo = matchinfo;
        unsigned int temp;
        unsigned int len;
@@ -58,7 +59,6 @@ match(const struct sk_buff *skb,
        unsigned int ptr;
        unsigned int hdrlen = 0;
        unsigned int ret = 0;
-       struct in6_addr *ap, _addr;
 
        /* type of the 1st exthdr */
        nexthdr = skb->nh.ipv6h->nexthdr;
@@ -69,7 +69,7 @@ match(const struct sk_buff *skb,
        temp = 0;
 
         while (ip6t_ext_hdr(nexthdr)) {
-               struct ipv6_opt_hdr _hdr, *hp;
+               struct ipv6_opt_hdr *hdr;
 
               DEBUGP("ipv6_rt header iteration \n");
 
@@ -85,16 +85,15 @@ match(const struct sk_buff *skb,
                      break;
               }
 
-	      hp = skb_header_pointer(skb, ptr, sizeof(_hdr), &_hdr);
-	      BUG_ON(hp == NULL);
+              hdr=(struct ipv6_opt_hdr *)skb->data+ptr;
 
               /* Calculate the header length */
                 if (nexthdr == NEXTHDR_FRAGMENT) {
                         hdrlen = 8;
                 } else if (nexthdr == NEXTHDR_AUTH)
-                        hdrlen = (hp->hdrlen+2)<<2;
+                        hdrlen = (hdr->hdrlen+2)<<2;
                 else
-                        hdrlen = ipv6_optlen(hp);
+                        hdrlen = ipv6_optlen(hdr);
 
               /* ROUTING -> evaluate */
                 if (nexthdr == NEXTHDR_ROUTING) {
@@ -117,7 +116,7 @@ match(const struct sk_buff *skb,
                             break;
               }
 
-                nexthdr = hp->nexthdr;
+                nexthdr = hdr->nexthdr;
                 len -= hdrlen;
                 ptr += hdrlen;
 		if ( ptr > skb->len ) {
@@ -139,21 +138,20 @@ match(const struct sk_buff *skb,
        		return 0;
        }
 
-       rh = skb_header_pointer(skb, ptr, sizeof(_route), &_route);
-       BUG_ON(rh == NULL);
+       route = (struct ipv6_rt_hdr *) (skb->data + ptr);
 
-       DEBUGP("IPv6 RT LEN %u %u ", hdrlen, rh->hdrlen);
-       DEBUGP("TYPE %04X ", rh->type);
-       DEBUGP("SGS_LEFT %u %02X\n", rh->segments_left, rh->segments_left);
+       DEBUGP("IPv6 RT LEN %u %u ", hdrlen, route->hdrlen);
+       DEBUGP("TYPE %04X ", route->type);
+       DEBUGP("SGS_LEFT %u %08X\n", ntohl(route->segments_left), ntohl(route->segments_left));
 
        DEBUGP("IPv6 RT segsleft %02X ",
        		(segsleft_match(rtinfo->segsleft[0], rtinfo->segsleft[1],
-                           rh->segments_left,
+                           ntohl(route->segments_left),
                            !!(rtinfo->invflags & IP6T_RT_INV_SGS))));
        DEBUGP("type %02X %02X %02X ",
-       		rtinfo->rt_type, rh->type, 
+       		rtinfo->rt_type, route->type, 
        		(!(rtinfo->flags & IP6T_RT_TYP) ||
-                           ((rtinfo->rt_type == rh->type) ^
+                           ((rtinfo->rt_type == route->type) ^
                            !!(rtinfo->invflags & IP6T_RT_INV_TYP))));
        DEBUGP("len %02X %04X %02X ",
        		rtinfo->hdrlen, hdrlen,
@@ -161,13 +159,13 @@ match(const struct sk_buff *skb,
                            ((rtinfo->hdrlen == hdrlen) ^
                            !!(rtinfo->invflags & IP6T_RT_INV_LEN))));
        DEBUGP("res %02X %02X %02X ", 
-       		(rtinfo->flags & IP6T_RT_RES), ((struct rt0_hdr *)rh)->bitmap,
-       		!((rtinfo->flags & IP6T_RT_RES) && (((struct rt0_hdr *)rh)->bitmap)));
+       		(rtinfo->flags & IP6T_RT_RES), ((struct rt0_hdr *)route)->bitmap,
+       		!((rtinfo->flags & IP6T_RT_RES) && (((struct rt0_hdr *)route)->bitmap)));
 
-       ret = (rh != NULL)
+       ret = (route != NULL)
        		&&
        		(segsleft_match(rtinfo->segsleft[0], rtinfo->segsleft[1],
-                           rh->segments_left,
+                           ntohl(route->segments_left),
                            !!(rtinfo->invflags & IP6T_RT_INV_SGS)))
 		&&
 	      	(!(rtinfo->flags & IP6T_RT_LEN) ||
@@ -175,19 +173,13 @@ match(const struct sk_buff *skb,
                            !!(rtinfo->invflags & IP6T_RT_INV_LEN)))
 		&&
        		(!(rtinfo->flags & IP6T_RT_TYP) ||
-                           ((rtinfo->rt_type == rh->type) ^
-                           !!(rtinfo->invflags & IP6T_RT_INV_TYP)));
-
-	if (ret && (rtinfo->flags & IP6T_RT_RES)) {
-		u_int32_t *bp, _bitmap;
-		bp = skb_header_pointer(skb,
-					ptr + offsetof(struct rt0_hdr, bitmap),
-					sizeof(_bitmap), &_bitmap);
-
-		ret = (*bp == 0);
-	}
+                           ((rtinfo->rt_type == route->type) ^
+                           !!(rtinfo->invflags & IP6T_RT_INV_TYP)))
+		&&
+       		!((rtinfo->flags & IP6T_RT_RES) && (((struct rt0_hdr *)route)->bitmap));
 
 	DEBUGP("#%d ",rtinfo->addrnr);
+       temp = len = ptr = 0;
        if ( !(rtinfo->flags & IP6T_RT_FST) ){
 	       return ret;
 	} else if (rtinfo->flags & IP6T_RT_FST_NSTRICT) {
@@ -196,27 +188,32 @@ match(const struct sk_buff *skb,
 			DEBUGP("There isn't enough space\n");
 			return 0;
 		} else {
-			unsigned int i = 0;
-
 			DEBUGP("#%d ",rtinfo->addrnr);
+			ptr = 0;
 			for(temp=0; temp<(unsigned int)((hdrlen-8)/16); temp++){
-				ap = skb_header_pointer(skb,
-							ptr
-							+ sizeof(struct rt0_hdr)
-							+ temp * sizeof(_addr),
-							sizeof(_addr),
-							&_addr);
-
-				BUG_ON(ap == NULL);
-
-				if (ipv6_addr_equal(ap, &rtinfo->addrs[i])) {
-					DEBUGP("i=%d temp=%d;\n",i,temp);
-					i++;
+				len = 0;
+				while ((u8)(((struct rt0_hdr *)route)->
+						addr[temp].s6_addr[len]) ==
+					(u8)(rtinfo->addrs[ptr].s6_addr[len])){
+					DEBUGP("%02X?%02X ",
+		(u8)(((struct rt0_hdr *)route)->addr[temp].s6_addr[len]),
+					(u8)(rtinfo->addrs[ptr].s6_addr[len]));
+					len++;
+					if ( len == 16 ) break;
 				}
-				if (i==rtinfo->addrnr) break;
+				if (len==16) {
+					DEBUGP("ptr=%d temp=%d;\n",ptr,temp);
+					ptr++;
+				} else {
+					DEBUGP("%02X?%02X ",
+		(u8)(((struct rt0_hdr *)route)->addr[temp].s6_addr[len]),
+					(u8)(rtinfo->addrs[ptr].s6_addr[len]));
+					DEBUGP("!ptr=%d temp=%d;\n",ptr,temp);
+				}
+				if (ptr==rtinfo->addrnr) break;
 			}
-			DEBUGP("i=%d #%d\n", i, rtinfo->addrnr);
-			if (i == rtinfo->addrnr)
+			DEBUGP("ptr=%d len=%d #%d\n",ptr,len, rtinfo->addrnr);
+			if ( (len == 16) && (ptr == rtinfo->addrnr))
 				return ret;
 			else return 0;
 		}
@@ -228,19 +225,26 @@ match(const struct sk_buff *skb,
 		} else {
 			DEBUGP("#%d ",rtinfo->addrnr);
 			for(temp=0; temp<rtinfo->addrnr; temp++){
-				ap = skb_header_pointer(skb,
-							ptr
-							+ sizeof(struct rt0_hdr)
-							+ temp * sizeof(_addr),
-							sizeof(_addr),
-							&_addr);
-				BUG_ON(ap == NULL);
-
-				if (!ipv6_addr_equal(ap, &rtinfo->addrs[temp]))
+				len = 0;
+				while ((u8)(((struct rt0_hdr *)route)->
+						addr[temp].s6_addr[len]) ==
+					(u8)(rtinfo->addrs[temp].s6_addr[len])){
+					DEBUGP("%02X?%02X ",
+		(u8)(((struct rt0_hdr *)route)->addr[temp].s6_addr[len]),
+					(u8)(rtinfo->addrs[temp].s6_addr[len]));
+					len++;
+					if ( len == 16 ) break;
+				}
+				if (len!=16) {
+					DEBUGP("%02X?%02X ",
+		(u8)(((struct rt0_hdr *)route)->addr[temp].s6_addr[len]),
+					(u8)(rtinfo->addrs[temp].s6_addr[len]));
+					DEBUGP("!len=%d temp=%d;\n",len,temp);
 					break;
+				}
 			}
-			DEBUGP("temp=%d #%d\n", temp, rtinfo->addrnr);
-			if ((temp == rtinfo->addrnr) && (temp == (unsigned int)((hdrlen-8)/16)))
+			DEBUGP("temp=%d len=%d #%d\n",temp,len,rtinfo->addrnr);
+			if ( (len == 16) && (temp == rtinfo->addrnr) && (temp == (unsigned int)((hdrlen-8)/16)))
 				return ret;
 			else return 0;
 		}

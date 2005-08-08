@@ -12,6 +12,7 @@
 #include <linux/mm.h>
 #include <linux/init.h>
 #include <linux/config.h>
+#include <linux/init.h>
 #include <linux/major.h>
 #include <linux/fs.h>
 #include <linux/device.h>
@@ -80,7 +81,7 @@ void __init iop331_map_io(void)
 
 #ifdef CONFIG_ARCH_IQ80331
 extern void iop331_init_irq(void);
-extern struct sys_timer iop331_timer;
+extern void iop331_init_time(void);
 extern void iq80331_map_io(void);
 #endif
 
@@ -91,7 +92,7 @@ MACHINE_START(IQ80331, "Intel IQ80331")
     //BOOT_MEM(PHYS_OFFSET, IQ80331_UART0_VIRT, IQ80331_UART0_PHYS)
     MAPIO(iq80331_map_io)
     INITIRQ(iop331_init_irq)
-    .timer		= &iop331_timer,
+    INITTIME(iop331_init_time)
     BOOT_PARAMS(0x0100)
 MACHINE_END
 #else

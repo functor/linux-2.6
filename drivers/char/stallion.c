@@ -42,7 +42,6 @@
 #include <linux/smp_lock.h>
 #include <linux/devfs_fs_kernel.h>
 #include <linux/device.h>
-#include <linux/delay.h>
 
 #include <asm/io.h>
 #include <asm/uaccess.h>
@@ -173,6 +172,14 @@ static stlport_t	stl_dummyport;
  *	Define global place to put buffer overflow characters.
  */
 static char		stl_unwanted[SC26198_RXFIFOSIZE];
+
+/*
+ *	Keep track of what interrupts we have requested for us.
+ *	We don't need to request an interrupt twice if it is being
+ *	shared with another Stallion board.
+ */
+static int	stl_gotintrs[STL_MAXBRDS];
+static int	stl_numintrs;
 
 /*****************************************************************************/
 
@@ -474,7 +481,7 @@ static unsigned long stl_atol(char *str);
 int		stl_init(void);
 static int	stl_open(struct tty_struct *tty, struct file *filp);
 static void	stl_close(struct tty_struct *tty, struct file *filp);
-static int	stl_write(struct tty_struct *tty, const unsigned char *buf, int count);
+static int	stl_write(struct tty_struct *tty, int from_user, const unsigned char *buf, int count);
 static void	stl_putchar(struct tty_struct *tty, unsigned char ch);
 static void	stl_flushchars(struct tty_struct *tty);
 static int	stl_writeroom(struct tty_struct *tty);
@@ -496,6 +503,7 @@ static int	stl_readproc(char *page, char **start, off_t off, int count, int *eof
 
 static int	stl_brdinit(stlbrd_t *brdp);
 static int	stl_initports(stlbrd_t *brdp, stlpanel_t *panelp);
+static int	stl_mapirq(int irq, char *name);
 static int	stl_getserial(stlport_t *portp, struct serial_struct __user *sp);
 static int	stl_setserial(stlport_t *portp, struct serial_struct __user *sp);
 static int	stl_getbrdstats(combrd_t __user *bp);
@@ -504,11 +512,12 @@ static int	stl_clrportstats(stlport_t *portp, comstats_t __user *cp);
 static int	stl_getportstruct(stlport_t __user *arg);
 static int	stl_getbrdstruct(stlbrd_t __user *arg);
 static int	stl_waitcarrier(stlport_t *portp, struct file *filp);
-static int	stl_eiointr(stlbrd_t *brdp);
-static int	stl_echatintr(stlbrd_t *brdp);
-static int	stl_echmcaintr(stlbrd_t *brdp);
-static int	stl_echpciintr(stlbrd_t *brdp);
-static int	stl_echpci64intr(stlbrd_t *brdp);
+static void	stl_delay(int len);
+static void	stl_eiointr(stlbrd_t *brdp);
+static void	stl_echatintr(stlbrd_t *brdp);
+static void	stl_echmcaintr(stlbrd_t *brdp);
+static void	stl_echpciintr(stlbrd_t *brdp);
+static void	stl_echpci64intr(stlbrd_t *brdp);
 static void	stl_offintr(void *private);
 static void	*stl_memalloc(int len);
 static stlbrd_t *stl_allocbrd(void);
@@ -798,9 +807,6 @@ static void __exit stallion_module_exit(void)
 	for (i = 0; (i < stl_nrbrds); i++) {
 		if ((brdp = stl_brds[i]) == (stlbrd_t *) NULL)
 			continue;
-
-		free_irq(brdp->irq, brdp);
-
 		for (j = 0; (j < STL_MAXPANELS); j++) {
 			panelp = brdp->panels[j];
 			if (panelp == (stlpanel_t *) NULL)
@@ -825,6 +831,9 @@ static void __exit stallion_module_exit(void)
 		kfree(brdp);
 		stl_brds[i] = (stlbrd_t *) NULL;
 	}
+
+	for (i = 0; (i < stl_numintrs); i++)
+		free_irq(stl_gotintrs[i], NULL);
 
 	restore_flags(flags);
 }
@@ -1195,7 +1204,7 @@ static void stl_close(struct tty_struct *tty, struct file *filp)
 
 	if (portp->openwaitcnt) {
 		if (portp->close_delay)
-			msleep_interruptible(jiffies_to_msecs(portp->close_delay));
+			stl_delay(portp->close_delay);
 		wake_up_interruptible(&portp->open_wait);
 	}
 
@@ -1207,11 +1216,30 @@ static void stl_close(struct tty_struct *tty, struct file *filp)
 /*****************************************************************************/
 
 /*
+ *	Wait for a specified delay period, this is not a busy-loop. It will
+ *	give up the processor while waiting. Unfortunately this has some
+ *	rather intimate knowledge of the process management stuff.
+ */
+
+static void stl_delay(int len)
+{
+#ifdef DEBUG
+	printk("stl_delay(len=%d)\n", len);
+#endif
+	if (len > 0) {
+		current->state = TASK_INTERRUPTIBLE;
+		schedule_timeout(len);
+	}
+}
+
+/*****************************************************************************/
+
+/*
  *	Write routine. Take data and stuff it in to the TX ring queue.
  *	If transmit interrupts are not running then start them.
  */
 
-static int stl_write(struct tty_struct *tty, const unsigned char *buf, int count)
+static int stl_write(struct tty_struct *tty, int from_user, const unsigned char *buf, int count)
 {
 	stlport_t	*portp;
 	unsigned int	len, stlen;
@@ -1219,8 +1247,8 @@ static int stl_write(struct tty_struct *tty, const unsigned char *buf, int count
 	char		*head, *tail;
 
 #ifdef DEBUG
-	printk("stl_write(tty=%x,buf=%x,count=%d)\n",
-		(int) tty, (int) buf, count);
+	printk("stl_write(tty=%x,from_user=%d,buf=%x,count=%d)\n",
+		(int) tty, from_user, (int) buf, count);
 #endif
 
 	if ((tty == (struct tty_struct *) NULL) ||
@@ -1239,6 +1267,18 @@ static int stl_write(struct tty_struct *tty, const unsigned char *buf, int count
  *	copy it into the TX buffer.
  */
 	chbuf = (unsigned char *) buf;
+	if (from_user) {
+		head = portp->tx.head;
+		tail = portp->tx.tail;
+		len = (head >= tail) ? (STL_TXBUFSIZE - (head - tail) - 1) :
+			(tail - head - 1);
+		count = MIN(len, count);
+		
+		down(&stl_tmpwritesem);
+		if (copy_from_user(stl_tmpwritebuf, chbuf, count)) 
+			return -EFAULT;
+		chbuf = &stl_tmpwritebuf[0];
+	}
 
 	head = portp->tx.head;
 	tail = portp->tx.tail;
@@ -1268,6 +1308,9 @@ static int stl_write(struct tty_struct *tty, const unsigned char *buf, int count
 
 	clear_bit(ASYI_TXLOW, &portp->istate);
 	stl_startrxtx(portp, -1, 1);
+
+	if (from_user)
+		up(&stl_tmpwritesem);
 
 	return(count);
 }
@@ -1811,7 +1854,7 @@ static void stl_waituntilsent(struct tty_struct *tty, int timeout)
 	while (stl_datastate(portp)) {
 		if (signal_pending(current))
 			break;
-		msleep_interruptible(20);
+		stl_delay(2);
 		if (time_after_eq(jiffies, tend))
 			break;
 	}
@@ -1983,14 +2026,23 @@ stl_readdone:
 
 static irqreturn_t stl_intr(int irq, void *dev_id, struct pt_regs *regs)
 {
-	stlbrd_t	*brdp = (stlbrd_t *) dev_id;
+	stlbrd_t	*brdp;
+	int		i;
+	int handled = 0;
 
 #ifdef DEBUG
-	printk("stl_intr(brdp=%x,irq=%d,regs=%x)\n", (int) brdp, irq,
-	    (int) regs);
+	printk("stl_intr(irq=%d,regs=%x)\n", irq, (int) regs);
 #endif
 
-	return IRQ_RETVAL((* brdp->isr)(brdp));
+	for (i = 0; (i < stl_nrbrds); i++) {
+		if ((brdp = stl_brds[i]) == (stlbrd_t *) NULL)
+			continue;
+		if (brdp->state == 0)
+			continue;
+		handled = 1;
+		(* brdp->isr)(brdp);
+	}
+	return IRQ_RETVAL(handled);
 }
 
 /*****************************************************************************/
@@ -1999,19 +2051,15 @@ static irqreturn_t stl_intr(int irq, void *dev_id, struct pt_regs *regs)
  *	Interrupt service routine for EasyIO board types.
  */
 
-static int stl_eiointr(stlbrd_t *brdp)
+static void stl_eiointr(stlbrd_t *brdp)
 {
 	stlpanel_t	*panelp;
 	unsigned int	iobase;
-	int		handled = 0;
 
 	panelp = brdp->panels[0];
 	iobase = panelp->iobase;
-	while (inb(brdp->iostatus) & EIO_INTRPEND) {
-		handled = 1;
+	while (inb(brdp->iostatus) & EIO_INTRPEND)
 		(* panelp->isr)(panelp, iobase);
-	}
-	return handled;
 }
 
 /*****************************************************************************/
@@ -2020,17 +2068,15 @@ static int stl_eiointr(stlbrd_t *brdp)
  *	Interrupt service routine for ECH-AT board types.
  */
 
-static int stl_echatintr(stlbrd_t *brdp)
+static void stl_echatintr(stlbrd_t *brdp)
 {
 	stlpanel_t	*panelp;
 	unsigned int	ioaddr;
 	int		bnknr;
-	int		handled = 0;
 
 	outb((brdp->ioctrlval | ECH_BRDENABLE), brdp->ioctrl);
 
 	while (inb(brdp->iostatus) & ECH_INTRPEND) {
-		handled = 1;
 		for (bnknr = 0; (bnknr < brdp->nrbnks); bnknr++) {
 			ioaddr = brdp->bnkstataddr[bnknr];
 			if (inb(ioaddr) & ECH_PNLINTRPEND) {
@@ -2041,8 +2087,6 @@ static int stl_echatintr(stlbrd_t *brdp)
 	}
 
 	outb((brdp->ioctrlval | ECH_BRDDISABLE), brdp->ioctrl);
-
-	return handled;
 }
 
 /*****************************************************************************/
@@ -2051,15 +2095,13 @@ static int stl_echatintr(stlbrd_t *brdp)
  *	Interrupt service routine for ECH-MCA board types.
  */
 
-static int stl_echmcaintr(stlbrd_t *brdp)
+static void stl_echmcaintr(stlbrd_t *brdp)
 {
 	stlpanel_t	*panelp;
 	unsigned int	ioaddr;
 	int		bnknr;
-	int		handled = 0;
 
 	while (inb(brdp->iostatus) & ECH_INTRPEND) {
-		handled = 1;
 		for (bnknr = 0; (bnknr < brdp->nrbnks); bnknr++) {
 			ioaddr = brdp->bnkstataddr[bnknr];
 			if (inb(ioaddr) & ECH_PNLINTRPEND) {
@@ -2068,7 +2110,6 @@ static int stl_echmcaintr(stlbrd_t *brdp)
 			}
 		}
 	}
-	return handled;
 }
 
 /*****************************************************************************/
@@ -2077,12 +2118,11 @@ static int stl_echmcaintr(stlbrd_t *brdp)
  *	Interrupt service routine for ECH-PCI board types.
  */
 
-static int stl_echpciintr(stlbrd_t *brdp)
+static void stl_echpciintr(stlbrd_t *brdp)
 {
 	stlpanel_t	*panelp;
 	unsigned int	ioaddr;
 	int		bnknr, recheck;
-	int		handled = 0;
 
 	while (1) {
 		recheck = 0;
@@ -2093,13 +2133,11 @@ static int stl_echpciintr(stlbrd_t *brdp)
 				panelp = brdp->bnk2panel[bnknr];
 				(* panelp->isr)(panelp, (ioaddr & 0xfffc));
 				recheck++;
-				handled = 1;
 			}
 		}
 		if (! recheck)
 			break;
 	}
-	return handled;
 }
 
 /*****************************************************************************/
@@ -2108,15 +2146,13 @@ static int stl_echpciintr(stlbrd_t *brdp)
  *	Interrupt service routine for ECH-8/64-PCI board types.
  */
 
-static int stl_echpci64intr(stlbrd_t *brdp)
+static void stl_echpci64intr(stlbrd_t *brdp)
 {
 	stlpanel_t	*panelp;
 	unsigned int	ioaddr;
 	int		bnknr;
-	int		handled = 0;
 
 	while (inb(brdp->ioctrl) & 0x1) {
-		handled = 1;
 		for (bnknr = 0; (bnknr < brdp->nrbnks); bnknr++) {
 			ioaddr = brdp->bnkstataddr[bnknr];
 			if (inb(ioaddr) & ECH_PNLINTRPEND) {
@@ -2125,8 +2161,6 @@ static int stl_echpci64intr(stlbrd_t *brdp)
 			}
 		}
 	}
-
-	return handled;
 }
 
 /*****************************************************************************/
@@ -2169,6 +2203,39 @@ static void stl_offintr(void *private)
 		}
 	}
 	unlock_kernel();
+}
+
+/*****************************************************************************/
+
+/*
+ *	Map in interrupt vector to this driver. Check that we don't
+ *	already have this vector mapped, we might be sharing this
+ *	interrupt across multiple boards.
+ */
+
+static int __init stl_mapirq(int irq, char *name)
+{
+	int	rc, i;
+
+#ifdef DEBUG
+	printk("stl_mapirq(irq=%d,name=%s)\n", irq, name);
+#endif
+
+	rc = 0;
+	for (i = 0; (i < stl_numintrs); i++) {
+		if (stl_gotintrs[i] == irq)
+			break;
+	}
+	if (i >= stl_numintrs) {
+		if (request_irq(irq, stl_intr, SA_SHIRQ, name, NULL) != 0) {
+			printk("STALLION: failed to register interrupt "
+				"routine for %s irq=%d\n", name, irq);
+			rc = -ENODEV;
+		} else {
+			stl_gotintrs[stl_numintrs++] = irq;
+		}
+	}
+	return(rc);
 }
 
 /*****************************************************************************/
@@ -2356,13 +2423,7 @@ static inline int stl_initeio(stlbrd_t *brdp)
 	brdp->nrpanels = 1;
 	brdp->state |= BRD_FOUND;
 	brdp->hwid = status;
-	if (request_irq(brdp->irq, stl_intr, SA_SHIRQ, name, brdp) != 0) {
-		printk("STALLION: failed to register interrupt "
-		    "routine for %s irq=%d\n", name, brdp->irq);
-		rc = -ENODEV;
-	} else {
-		rc = 0;
-	}
+	rc = stl_mapirq(brdp->irq, name);
 	return(rc);
 }
 
@@ -2567,14 +2628,7 @@ static inline int stl_initech(stlbrd_t *brdp)
 		outb((brdp->ioctrlval | ECH_BRDDISABLE), brdp->ioctrl);
 
 	brdp->state |= BRD_FOUND;
-	if (request_irq(brdp->irq, stl_intr, SA_SHIRQ, name, brdp) != 0) {
-		printk("STALLION: failed to register interrupt "
-		    "routine for %s irq=%d\n", name, brdp->irq);
-		i = -ENODEV;
-	} else {
-		i = 0;
-	}
-
+	i = stl_mapirq(brdp->irq, name);
 	return(i);
 }
 

@@ -40,7 +40,6 @@
 #include <linux/reiserfs_xattr.h>
 #include <linux/reiserfs_acl.h>
 #include <linux/mbcache.h>
-#include <linux/vs_base.h>
 #include <asm/uaccess.h>
 #include <asm/checksum.h>
 #include <linux/smp_lock.h>

@@ -7,6 +7,7 @@
  */
 
 #include <linux/config.h>
+#include <linux/kernel.h>
 
 /*
  *	switch_to() should switch tasks to task nr n, first

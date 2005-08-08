@@ -5,6 +5,7 @@
 LDFLAGS		:=
 OBJCOPYFLAGS	:= -O binary -R .note -R .comment -S
 LDFLAGS_vmlinux	:= -e startup_32
+LDFLAGS_BLOB	:= --format binary --oformat elf32-m32r
 
 CFLAGS += -pipe -fno-schedule-insns
 CFLAGS_KERNEL += -mmodel=medium
@@ -41,8 +42,6 @@ boot := arch/m32r/boot
 
 .PHONY: zImage
 
-all: zImage
-
 zImage: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
@@ -52,5 +51,5 @@ archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)
 
 define archhelp
-	echo  '* zImage          - Compressed kernel image (arch/$(ARCH)/boot/zImage)'
+	@echo '  zImage			- Compressed kernel image (arch/m32r/boot/zImage)'
 endef

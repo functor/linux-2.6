@@ -287,9 +287,10 @@ static int dn_insert_route(struct dn_route *rt, unsigned hash, struct dn_route *
 		if (compare_keys(&rth->fl, &rt->fl)) {
 			/* Put it first */
 			*rthp = rth->u.rt_next;
-			rcu_assign_pointer(rth->u.rt_next,
-					   dn_rt_hash_table[hash].chain);
-			rcu_assign_pointer(dn_rt_hash_table[hash].chain, rth);
+			smp_wmb();
+			rth->u.rt_next = dn_rt_hash_table[hash].chain;
+			smp_wmb();
+			dn_rt_hash_table[hash].chain = rth;
 
 			rth->u.dst.__use++;
 			dst_hold(&rth->u.dst);
@@ -303,8 +304,10 @@ static int dn_insert_route(struct dn_route *rt, unsigned hash, struct dn_route *
 		rthp = &rth->u.rt_next;
 	}
 
-	rcu_assign_pointer(rt->u.rt_next, dn_rt_hash_table[hash].chain);
-	rcu_assign_pointer(dn_rt_hash_table[hash].chain, rt);
+	smp_wmb();
+	rt->u.rt_next = dn_rt_hash_table[hash].chain;
+	smp_wmb();
+	dn_rt_hash_table[hash].chain = rt;
 	
 	dst_hold(&rt->u.dst);
 	rt->u.dst.__use++;
@@ -680,8 +683,9 @@ out:
 	return NET_RX_DROP;
 }
 
-static int dn_output(struct sk_buff *skb)
+static int dn_output(struct sk_buff **pskb)
 {
+	struct sk_buff *skb = *pskb;
 	struct dst_entry *dst = skb->dst;
 	struct dn_route *rt = (struct dn_route *)dst;
 	struct net_device *dev = dst->dev;
@@ -790,6 +794,11 @@ static int dn_rt_bug(struct sk_buff *skb)
 	kfree_skb(skb);
 
 	return NET_RX_BAD;
+}
+
+static int dn_rt_bug_out(struct sk_buff **pskb)
+{
+	return dn_rt_bug(*pskb);
 }
 
 static int dn_rt_set_next_hop(struct dn_route *rt, struct dn_fib_res *res)
@@ -1383,7 +1392,7 @@ make_route:
 	rt->u.dst.neighbour = neigh;
 	rt->u.dst.dev = out_dev;
 	rt->u.dst.lastuse = jiffies;
-	rt->u.dst.output = dn_rt_bug;
+	rt->u.dst.output = dn_rt_bug_out;
 	switch(res.type) {
 		case RTN_UNICAST:
 			rt->u.dst.input = dn_forward;
@@ -1676,7 +1685,7 @@ static struct dn_route *dn_rt_cache_get_first(struct seq_file *seq)
 		rt = dn_rt_hash_table[s->bucket].chain;
 		if (rt)
 			break;
-		rcu_read_unlock_bh();
+		rcu_read_unlock();
 	}
 	return rt;
 }
@@ -1822,7 +1831,7 @@ void __init dn_route_init(void)
 
 	dn_rt_hash_mask--;
         for(i = 0; i <= dn_rt_hash_mask; i++) {
-                spin_lock_init(&dn_rt_hash_table[i].lock);
+                dn_rt_hash_table[i].lock = SPIN_LOCK_UNLOCKED;
                 dn_rt_hash_table[i].chain = NULL;
         }
 

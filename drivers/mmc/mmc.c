@@ -301,15 +301,14 @@ static u32 mmc_select_voltage(struct mmc_host *host, u32 ocr)
 
 #define UNSTUFF_BITS(resp,start,size)					\
 	({								\
-		const int __size = size;				\
-		const u32 __mask = (__size < 32 ? 1 << __size : 0) - 1;	\
+		const u32 __mask = (1 << (size)) - 1;			\
 		const int __off = 3 - ((start) / 32);			\
 		const int __shft = (start) & 31;			\
 		u32 __res;						\
 									\
 		__res = resp[__off] >> __shft;				\
-		if (__size + __shft > 32)				\
-			__res |= resp[__off-1] << ((32 - __shft) % 32);	\
+		if ((size) + __shft >= 32)				\
+			__res |= resp[__off-1] << (32 - __shft);	\
 		__res & __mask;						\
 	})
 

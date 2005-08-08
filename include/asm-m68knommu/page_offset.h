@@ -1,5 +1,6 @@
 
 #include <linux/config.h>
+#include <asm/shglcore.h>
 
 /* This handles the memory map.. */
 
@@ -43,5 +44,8 @@
 #endif
 #ifdef CONFIG_M68EN302
 #define PAGE_OFFSET_RAW		0x00000000
+#endif
+#ifdef CONFIG_SHGLCORE
+#define PAGE_OFFSET_RAW		SHGLCORE_RAM_BANK_0_ADDR 
 #endif
 

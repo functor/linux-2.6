@@ -96,7 +96,6 @@ extern unsigned long hpet_address;	/* hpet memory map physical address */
 
 extern int hpet_rtc_timer_init(void);
 extern int hpet_enable(void);
-extern int hpet_reenable(void);
 extern int is_hpet_enabled(void);
 extern int is_hpet_capable(void);
 extern int hpet_readl(unsigned long a);

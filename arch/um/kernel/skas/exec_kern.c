@@ -12,7 +12,7 @@
 #include "asm/mmu_context.h"
 #include "tlb.h"
 #include "skas.h"
-#include "um_mmu.h"
+#include "mmu.h"
 #include "os.h"
 
 void flush_thread_skas(void)

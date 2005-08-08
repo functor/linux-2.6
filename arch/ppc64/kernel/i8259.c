@@ -23,8 +23,7 @@ unsigned char cached_8259[2] = { 0xff, 0xff };
 
 static spinlock_t i8259_lock __cacheline_aligned_in_smp = SPIN_LOCK_UNLOCKED;
 
-static int i8259_pic_irq_offset;
-static int i8259_present;
+int i8259_pic_irq_offset;
 
 int i8259_irq(int cpu)
 {
@@ -141,13 +140,11 @@ struct hw_interrupt_type i8259_pic = {
         NULL
 };
 
-void __init i8259_init(int offset)
+void __init i8259_init(void)
 {
 	unsigned long flags;
 	
 	spin_lock_irqsave(&i8259_lock, flags);
-	i8259_pic_irq_offset = offset;
-	i8259_present = 1;
         /* init master interrupt controller */
         outb(0x11, 0x20); /* Start init sequence */
         outb(0x00, 0x21); /* Vector base */
@@ -163,18 +160,7 @@ void __init i8259_init(int offset)
         outb(cached_A1, 0xA1);
         outb(cached_21, 0x21);
 	spin_unlock_irqrestore(&i8259_lock, flags);
-        
-}
-
-static int i8259_request_cascade(void)
-{
-	if (!i8259_present)
-		return -ENODEV;
-
         request_irq( i8259_pic_irq_offset + 2, no_action, SA_INTERRUPT,
                      "82c59 secondary cascade", NULL );
-
-	return 0;
+        
 }
-
-arch_initcall(i8259_request_cascade);

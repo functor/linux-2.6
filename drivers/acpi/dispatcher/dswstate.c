@@ -51,8 +51,6 @@
 	 ACPI_MODULE_NAME    ("dswstate")
 
 
-#ifdef ACPI_FUTURE_USAGE
-
 /*******************************************************************************
  *
  * FUNCTION:    acpi_ds_result_insert
@@ -175,8 +173,6 @@ acpi_ds_result_remove (
 
 	return (AE_OK);
 }
-
-#endif  /*  ACPI_FUTURE_USAGE  */
 
 
 /*******************************************************************************
@@ -449,7 +445,7 @@ acpi_ds_result_stack_pop (
  *              Should be used with great care, if at all!
  *
  ******************************************************************************/
-#ifdef ACPI_FUTURE_USAGE
+
 acpi_status
 acpi_ds_obj_stack_delete_all (
 	struct acpi_walk_state          *walk_state)
@@ -471,7 +467,6 @@ acpi_ds_obj_stack_delete_all (
 
 	return_ACPI_STATUS (AE_OK);
 }
-#endif  /*  ACPI_FUTURE_USAGE  */
 
 
 /*******************************************************************************
@@ -692,7 +687,7 @@ acpi_ds_obj_stack_pop_and_delete (
  *              be within the range of the current stack pointer.
  *
  ******************************************************************************/
-#ifdef ACPI_FUTURE_USAGE
+
 void *
 acpi_ds_obj_stack_get_value (
 	u32                             index,
@@ -717,7 +712,6 @@ acpi_ds_obj_stack_get_value (
 	return_PTR (walk_state->operands[(acpi_native_uint)(walk_state->num_operands - 1) -
 			  index]);
 }
-#endif  /*  ACPI_FUTURE_USAGE  */
 
 
 /*******************************************************************************
@@ -873,7 +867,6 @@ acpi_ds_create_walk_state (
 
 	status = acpi_ds_result_stack_push (walk_state);
 	if (ACPI_FAILURE (status)) {
-		acpi_ut_release_to_cache (ACPI_MEM_LIST_WALK, walk_state);
 		return_PTR (NULL);
 	}
 

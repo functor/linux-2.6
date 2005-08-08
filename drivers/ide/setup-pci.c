@@ -30,7 +30,6 @@
 #include <linux/mm.h>
 #include <linux/interrupt.h>
 #include <linux/ide.h>
-#include <linux/delay.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -190,16 +189,19 @@ static unsigned long ide_get_or_set_dma_base (ide_hwif_t *hwif)
 second_chance_to_dma:
 #endif /* CONFIG_BLK_DEV_IDEDMA_FORCED */
 
-	if (hwif->mmio)
+	if ((hwif->mmio) && (hwif->dma_base))
 		return hwif->dma_base;
 
 	if (hwif->mate && hwif->mate->dma_base) {
 		dma_base = hwif->mate->dma_base - (hwif->channel ? 0 : 8);
 	} else {
-		dma_base = pci_resource_start(dev, 4);
+		dma_base = (hwif->mmio) ?
+			((unsigned long) hwif->hwif_data) :
+			(pci_resource_start(dev, 4));
 		if (!dma_base) {
-			printk(KERN_ERR "%s: dma_base is invalid\n",
-					hwif->cds->name);
+			printk(KERN_ERR "%s: dma_base is invalid (0x%04lx)\n",
+				hwif->cds->name, dma_base);
+			dma_base = 0;
 		}
 	}
 
@@ -253,6 +255,7 @@ second_chance_to_dma:
 				simplex_stat = hwif->INB(dma_base + 2);
 				if (simplex_stat & 0x80) {
 					/* simplex device? */
+#if 0					
 /*
  *	At this point we haven't probed the drives so we can't make the
  *	appropriate decision. Really we should defer this problem
@@ -260,7 +263,18 @@ second_chance_to_dma:
  *	to be the DMA end. This has to be become dynamic to handle hot
  *	plug.
  */
-					if (hwif->mate && hwif->mate->dma_base) {
+					/* Don't enable DMA on a simplex channel with no drives */
+					if (!hwif->drives[0].present && !hwif->drives[1].present)
+					{
+						printk(KERN_INFO "%s: simplex device with no drives: DMA disabled\n",
+								hwif->cds->name);
+						dma_base = 0;
+					}
+					/* If our other channel has DMA then we cannot */
+					else 
+#endif					
+					if(hwif->mate && hwif->mate->dma_base) 
+					{
 						printk(KERN_INFO "%s: simplex device: "
 							"DMA disabled\n",
 							hwif->cds->name);
@@ -491,8 +505,13 @@ static void ide_hwif_setup_dma(struct pci_dev *dev, ide_pci_device_t *d, ide_hwi
  			 * Set up BM-DMA capability
 			 * (PnP BIOS should have done this)
  			 */
-			/* default DMA off if we had to configure it here */
-			hwif->autodma = 0;
+			if ((d->flags & IDEPCI_FLAG_FORCE_MASTER) == 0) {
+				/*
+				 * default DMA off if we had to
+				 * configure it here
+				 */
+				hwif->autodma = 0;
+			}
 			pci_set_master(dev);
 			if (pci_read_config_word(dev, PCI_COMMAND, &pcicmd) || !(pcicmd & PCI_COMMAND_MASTER)) {
 				printk(KERN_ERR "%s: %s error updating PCICMD\n",
@@ -512,11 +531,6 @@ static void ide_hwif_setup_dma(struct pci_dev *dev, ide_pci_device_t *d, ide_hwi
 		}
 	}
 }
-
-#ifndef CONFIG_IDEDMA_PCI_AUTO
-#warning CONFIG_IDEDMA_PCI_AUTO=n support is obsolete, and will be removed soon.
-#endif
-
 #endif /* CONFIG_BLK_DEV_IDEDMA_PCI*/
 
 /**
@@ -533,8 +547,12 @@ static void ide_hwif_setup_dma(struct pci_dev *dev, ide_pci_device_t *d, ide_hwi
  
 static int ide_setup_pci_controller(struct pci_dev *dev, ide_pci_device_t *d, int noisy, int *config)
 {
+	int ret = 0;
 	u32 class_rev;
 	u16 pcicmd;
+
+	if (!noautodma)
+		ret = 1;
 
 	if (noisy)
 		ide_setup_pci_noise(dev, d);
@@ -549,6 +567,8 @@ static int ide_setup_pci_controller(struct pci_dev *dev, ide_pci_device_t *d, in
 	if (!(pcicmd & PCI_COMMAND_IO)) {	/* is device disabled? */
 		if (ide_pci_configure(dev, d))
 			return -ENODEV;
+		/* default DMA off if we had to configure it here */
+		ret = 0;
 		*config = 1;
 		printk(KERN_INFO "%s: device enabled (Linux)\n", d->name);
 	}
@@ -557,13 +577,14 @@ static int ide_setup_pci_controller(struct pci_dev *dev, ide_pci_device_t *d, in
 	class_rev &= 0xff;
 	if (noisy)
 		printk(KERN_INFO "%s: chipset revision %d\n", d->name, class_rev);
-	return 0;
+	return ret;
 }
 
 /**
  *	ide_pci_setup_ports	-	configure ports/devices on PCI IDE
  *	@dev: PCI device
  *	@d: IDE pci device info
+ *	@autodma: Should we enable DMA
  *	@pciirq: IRQ line
  *	@index: ata index to update
  *
@@ -576,7 +597,7 @@ static int ide_setup_pci_controller(struct pci_dev *dev, ide_pci_device_t *d, in
  *	where the chipset setup is not the default PCI IDE one.
  */
  
-void ide_pci_setup_ports(struct pci_dev *dev, ide_pci_device_t *d, int pciirq, ata_index_t *index)
+void ide_pci_setup_ports(struct pci_dev *dev, ide_pci_device_t *d, int autodma, int pciirq, ata_index_t *index)
 {
 	int port;
 	int at_least_one_hwif_enabled = 0;
@@ -630,7 +651,11 @@ controller_ok:
 
 		if (d->autodma == NODMA)
 			goto bypass_legacy_dma;
-
+		if (d->autodma == NOAUTODMA)
+			autodma = 0;
+		if (autodma)
+			hwif->autodma = 1;
+			
 		if(d->init_setup_dma)
 			d->init_setup_dma(dev, d, hwif);
 		else
@@ -663,11 +688,12 @@ EXPORT_SYMBOL_GPL(ide_pci_setup_ports);
  */
 static ata_index_t do_ide_setup_pci_device (struct pci_dev *dev, ide_pci_device_t *d, u8 noisy)
 {
+	int autodma = 0;
 	int pciirq = 0;
 	int tried_config = 0;
 	ata_index_t index = { .b = { .low = 0xff, .high = 0xff } };
 
-	if (ide_setup_pci_controller(dev, d, noisy, &tried_config) < 0)
+	if((autodma = ide_setup_pci_controller(dev, d, noisy, &tried_config)) < 0)
 		return index;
 
 	/*
@@ -715,9 +741,21 @@ static ata_index_t do_ide_setup_pci_device (struct pci_dev *dev, ide_pci_device_
 	if(pciirq < 0)		/* Error not an IRQ */
 		return index;
 
-	ide_pci_setup_ports(dev, d, pciirq, &index);
+	ide_pci_setup_ports(dev, d, autodma, pciirq, &index);
 
 	return index;
+}
+
+/**
+ *	probe_pci_hwif_init	-	probe the hwif then allow fixups
+ *	@hwif: interface to probe
+ *	@d: PCI device
+ *
+ *	Perform the generic probe and if it is successful invoke any
+ *	remaining post probe fixup logic in the driver itself.
+ */
+static void probe_pci_hwif_init(ide_hwif_t *hwif, ide_pci_device_t *d) {
+	probe_hwif_init_with_fixup(hwif, d->fixup);
 }
 
 void ide_setup_pci_device (struct pci_dev *dev, ide_pci_device_t *d)
@@ -725,9 +763,9 @@ void ide_setup_pci_device (struct pci_dev *dev, ide_pci_device_t *d)
 	ata_index_t index_list = do_ide_setup_pci_device(dev, d, 1);
 
 	if ((index_list.b.low & 0xf0) != 0xf0)
-		probe_hwif_init_with_fixup(&ide_hwifs[index_list.b.low], d->fixup);
+		probe_pci_hwif_init(&ide_hwifs[index_list.b.low], d);
 	if ((index_list.b.high & 0xf0) != 0xf0)
-		probe_hwif_init_with_fixup(&ide_hwifs[index_list.b.high], d->fixup);
+		probe_pci_hwif_init(&ide_hwifs[index_list.b.high], d);
 
 	create_proc_ide_interfaces();
 }
@@ -740,34 +778,18 @@ void ide_setup_pci_devices (struct pci_dev *dev, struct pci_dev *dev2, ide_pci_d
 	ata_index_t index_list2 = do_ide_setup_pci_device(dev2, d, 0);
 
 	if ((index_list.b.low & 0xf0) != 0xf0)
-		probe_hwif_init_with_fixup(&ide_hwifs[index_list.b.low], d->fixup);
+		probe_pci_hwif_init(&ide_hwifs[index_list.b.low], d);
 	if ((index_list.b.high & 0xf0) != 0xf0)
-		probe_hwif_init_with_fixup(&ide_hwifs[index_list.b.high], d->fixup);
+		probe_pci_hwif_init(&ide_hwifs[index_list.b.high], d);
 	if ((index_list2.b.low & 0xf0) != 0xf0)
-		probe_hwif_init_with_fixup(&ide_hwifs[index_list2.b.low], d->fixup);
+		probe_pci_hwif_init(&ide_hwifs[index_list2.b.low], d);
 	if ((index_list2.b.high & 0xf0) != 0xf0)
-		probe_hwif_init_with_fixup(&ide_hwifs[index_list2.b.high], d->fixup);
+		probe_pci_hwif_init(&ide_hwifs[index_list2.b.high], d);
 
 	create_proc_ide_interfaces();
 }
 
 EXPORT_SYMBOL_GPL(ide_setup_pci_devices);
-
-
-static int ide_pci_try_unregister(struct pci_dev *dev) 
-{
-	int i;
-	int err = 0;
-	ide_hwif_t *hwif = ide_hwifs;
-	
-	for(i = 0; i < MAX_HWIFS; i++) {
-		if(hwif->configured && hwif->pci_dev == dev)
-			err |= __ide_unregister_hwif(hwif);
-		i++;
-		hwif++;
-	}
-	return err;
-}
 
 /**
  *	ide_pci_remove_hwifs	-	remove PCI interfaces
@@ -788,24 +810,28 @@ void ide_pci_remove_hwifs(struct pci_dev *dev)
 {
 	int i;
 	ide_hwif_t *hwif = ide_hwifs;
-	int err;
 
 	down(&ide_cfg_sem);
-	
-	err = ide_pci_try_unregister(dev);
-
-	if(err < 0) {
-		printk(KERN_ERR "ide: PCI interfaces busy during hotplug. Waiting....\n");
-		for(i = 0; i < MAX_HWIFS; i++) {
-			if(hwif->configured && hwif->pci_dev == dev)
-				removed_hwif_iops(hwif);
-			i++;
-			hwif++;
+#if 0
+	for(i = 0; i < MAX_HWIFS; i++)
+	{
+		if(hwif->configured && hwif->pci_dev == dev)
+		{
+			removed_hwif_iops(hwif);
 		}
+		i++;
+		hwif++;
 	}
-	/* Should drop this out to a work queue I think ? */
-	while(ide_pci_try_unregister(dev) < 0)
-		msleep(1000);
+#endif
+	hwif = ide_hwifs;
+	
+	for(i = 0; i < MAX_HWIFS; i++)
+	{
+		if(hwif->configured && hwif->pci_dev == dev)
+			__ide_unregister_hwif(hwif);
+		i++;
+		hwif++;
+	}
 	up(&ide_cfg_sem);
 }
 

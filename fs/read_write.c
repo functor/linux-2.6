@@ -13,7 +13,6 @@
 #include <linux/dnotify.h>
 #include <linux/security.h>
 #include <linux/module.h>
-#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>

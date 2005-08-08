@@ -1160,7 +1160,7 @@ static struct compressor ppp_bsd_compress = {
  * Module support routines
  *************************************************************/
 
-static int __init bsdcomp_init(void)
+int __init bsdcomp_init(void)
 {
 	int answer = ppp_register_compressor(&ppp_bsd_compress);
 	if (answer == 0)
@@ -1168,7 +1168,7 @@ static int __init bsdcomp_init(void)
 	return answer;
 }
 
-static void __exit bsdcomp_cleanup(void)
+void __exit bsdcomp_cleanup(void)
 {
 	ppp_unregister_compressor(&ppp_bsd_compress);
 }

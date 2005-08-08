@@ -43,7 +43,6 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#include <linux/module.h>
 
 #include <acpi/acpi.h>
 #include <acpi/acnamesp.h>
@@ -212,7 +211,6 @@ acpi_get_sleep_type_data (
 	acpi_ut_remove_reference (info.return_object);
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_get_sleep_type_data);
 
 
 /*******************************************************************************
@@ -309,7 +307,6 @@ acpi_get_register (
 
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_get_register);
 
 
 /*******************************************************************************
@@ -460,7 +457,6 @@ unlock_and_exit:
 			value, register_value, bit_reg_info->parent_register));
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_set_register);
 
 
 /******************************************************************************
@@ -713,7 +709,6 @@ acpi_hw_low_level_read (
 	u32                             *value,
 	struct acpi_generic_address     *reg)
 {
-	u64                             address;
 	acpi_status                     status;
 
 
@@ -725,14 +720,8 @@ acpi_hw_low_level_read (
 	 * a non-zero address within. However, don't return an error
 	 * because the PM1A/B code must not fail if B isn't present.
 	 */
-	if (!reg) {
-		return (AE_OK);
-	}
-
-	/* Get a local copy of the address.  Handles possible alignment issues */
-
-	ACPI_MOVE_64_TO_64 (&address, &reg->address);
-	if (!address) {
+	if ((!reg) ||
+		(!reg->address)) {
 		return (AE_OK);
 	}
 	*value = 0;
@@ -745,14 +734,14 @@ acpi_hw_low_level_read (
 	case ACPI_ADR_SPACE_SYSTEM_MEMORY:
 
 		status = acpi_os_read_memory (
-				 (acpi_physical_address) address,
+				 (acpi_physical_address) reg->address,
 				 value, width);
 		break;
 
 
 	case ACPI_ADR_SPACE_SYSTEM_IO:
 
-		status = acpi_os_read_port ((acpi_io_address) address,
+		status = acpi_os_read_port ((acpi_io_address) reg->address,
 				 value, width);
 		break;
 
@@ -765,7 +754,7 @@ acpi_hw_low_level_read (
 
 	ACPI_DEBUG_PRINT ((ACPI_DB_IO, "Read:  %8.8X width %2d from %8.8X%8.8X (%s)\n",
 			*value, width,
-			ACPI_FORMAT_UINT64 (address),
+			ACPI_FORMAT_UINT64 (reg->address),
 			acpi_ut_get_region_name (reg->address_space_id)));
 
 	return (status);
@@ -792,7 +781,6 @@ acpi_hw_low_level_write (
 	u32                             value,
 	struct acpi_generic_address     *reg)
 {
-	u64                             address;
 	acpi_status                     status;
 
 
@@ -804,14 +792,8 @@ acpi_hw_low_level_write (
 	 * a non-zero address within. However, don't return an error
 	 * because the PM1A/B code must not fail if B isn't present.
 	 */
-	if (!reg) {
-		return (AE_OK);
-	}
-
-	/* Get a local copy of the address.  Handles possible alignment issues */
-
-	ACPI_MOVE_64_TO_64 (&address, &reg->address);
-	if (!address) {
+	if ((!reg) ||
+		(!reg->address)) {
 		return (AE_OK);
 	}
 
@@ -823,14 +805,14 @@ acpi_hw_low_level_write (
 	case ACPI_ADR_SPACE_SYSTEM_MEMORY:
 
 		status = acpi_os_write_memory (
-				 (acpi_physical_address) address,
+				 (acpi_physical_address) reg->address,
 				 value, width);
 		break;
 
 
 	case ACPI_ADR_SPACE_SYSTEM_IO:
 
-		status = acpi_os_write_port ((acpi_io_address) address,
+		status = acpi_os_write_port ((acpi_io_address) reg->address,
 				 value, width);
 		break;
 
@@ -843,7 +825,7 @@ acpi_hw_low_level_write (
 
 	ACPI_DEBUG_PRINT ((ACPI_DB_IO, "Wrote: %8.8X width %2d   to %8.8X%8.8X (%s)\n",
 			value, width,
-			ACPI_FORMAT_UINT64 (address),
+			ACPI_FORMAT_UINT64 (reg->address),
 			acpi_ut_get_region_name (reg->address_space_id)));
 
 	return (status);

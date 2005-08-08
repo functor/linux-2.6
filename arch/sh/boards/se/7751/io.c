@@ -18,7 +18,7 @@
 #include <asm/addrspace.h>
 
 #include <linux/pci.h>
-#include "../../../drivers/pci/pci-sh7751.h"
+#include <asm/pci-sh7751.h>
 
 #if 0
 /******************************************************************

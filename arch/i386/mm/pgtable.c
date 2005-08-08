@@ -13,7 +13,6 @@
 #include <linux/slab.h>
 #include <linux/pagemap.h>
 #include <linux/spinlock.h>
-#include <linux/module.h>
 
 #include <asm/system.h>
 #include <asm/pgtable.h>
@@ -55,8 +54,6 @@ void show_mem(void)
 	printk("%d pages shared\n",shared);
 	printk("%d pages swap cached\n",cached);
 }
-
-EXPORT_SYMBOL_GPL(show_mem);
 
 /*
  * Associate a virtual page frame with a given physical page frame 
@@ -168,8 +165,10 @@ void pmd_ctor(void *pmd, kmem_cache_t *cache, unsigned long flags)
  * against pageattr.c; it is the unique case in which a valid change
  * of kernel pagetables can't be lazily synchronized by vmalloc faults.
  * vmalloc faults work because attached pagetables are never freed.
- * The locking scheme was chosen on the basis of manfred's
- * recommendations and having no core impact whatsoever.
+ * If the locking proves to be non-performant, a ticketing scheme with
+ * checks at dup_mmap(), exec(), and other mmlist addition points
+ * could be used. The locking scheme was chosen on the basis of
+ * manfred's recommendations and having no core impact whatsoever.
  * -- wli
  */
 spinlock_t pgd_lock = SPIN_LOCK_UNLOCKED;
@@ -236,7 +235,7 @@ pgd_t *pgd_alloc(struct mm_struct *mm)
 		pmd_t *pmd = kmem_cache_alloc(pmd_cache, GFP_KERNEL);
 		if (!pmd)
 			goto out_oom;
-		set_pgd(&pgd[i], __pgd(1 + __pa(pmd)));
+		set_pgd(&pgd[i], __pgd(1 + __pa((u64)((u32)pmd))));
 	}
 	return pgd;
 

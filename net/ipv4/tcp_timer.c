@@ -36,9 +36,7 @@ static void tcp_write_timer(unsigned long);
 static void tcp_delack_timer(unsigned long);
 static void tcp_keepalive_timer (unsigned long data);
 
-#ifdef TCP_DEBUG
-const char tcp_timer_bug_msg[] = KERN_DEBUG "tcpbug: unknown timer value\n";
-#endif
+const char timer_bug_msg[] = KERN_DEBUG "tcpbug: unknown timer value\n";
 
 /*
  * Using different timers for retransmit, delayed acks and probes
@@ -669,6 +667,3 @@ EXPORT_SYMBOL(tcp_clear_xmit_timers);
 EXPORT_SYMBOL(tcp_delete_keepalive_timer);
 EXPORT_SYMBOL(tcp_init_xmit_timers);
 EXPORT_SYMBOL(tcp_reset_keepalive_timer);
-#ifdef TCP_DEBUG
-EXPORT_SYMBOL(tcp_timer_bug_msg);
-#endif

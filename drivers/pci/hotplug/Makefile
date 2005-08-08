@@ -51,6 +51,7 @@ rpadlpar_io-objs	:=	rpadlpar_core.o \
 pciehp-objs		:=	pciehp_core.o	\
 				pciehp_ctrl.o	\
 				pciehp_pci.o	\
+				pciehp_sysfs.o	\
 				pciehp_hpc.o
 ifdef CONFIG_ACPI_BUS
 	pciehp-objs += pciehprm_acpi.o

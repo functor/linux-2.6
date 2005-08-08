@@ -109,17 +109,11 @@ static inline int ebt_do_match (struct ebt_entry_match *m,
 
 static inline int ebt_dev_check(char *entry, const struct net_device *device)
 {
-	int i = 0;
-	char *devname = device->name;
-
 	if (*entry == '\0')
 		return 0;
 	if (!device)
 		return 1;
-	/* 1 is the wildcard token */
-	while (entry[i] != '\0' && entry[i] != 1 && entry[i] == devname[i])
-		i++;
-	return (devname[i] != entry[i] && entry[i] != 1);
+	return !!strcmp(entry, device->name);
 }
 
 #define FWINV2(bool,invflg) ((bool) ^ !!(e->invflags & invflg))
@@ -1168,7 +1162,7 @@ int ebt_register_table(struct ebt_table *table)
 	}
 
 	table->private = newinfo;
-	rwlock_init(&table->lock);
+	table->lock = RW_LOCK_UNLOCKED;
 	ret = down_interruptible(&ebt_mutex);
 	if (ret != 0)
 		goto free_chainstack;

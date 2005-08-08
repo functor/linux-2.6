@@ -97,13 +97,13 @@
 #include <linux/slab.h>
 #include <linux/cdrom.h>
 #include <linux/ide.h>
-#include <linux/bitops.h>
 
 #include <asm/byteorder.h>
 #include <asm/irq.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/unaligned.h>
+#include <asm/bitops.h>
 
 /*
  *	The following are used to debug the driver.
@@ -1009,7 +1009,6 @@ static inline int idefloppy_should_report_error(idefloppy_floppy_t *floppy)
 static ide_startstop_t idefloppy_issue_pc (ide_drive_t *drive, idefloppy_pc_t *pc)
 {
 	idefloppy_floppy_t *floppy = drive->driver_data;
-	ide_hwif_t *hwif = drive->hwif;
 	atapi_feature_t feature;
 	atapi_bcount_t bcount;
 	ide_handler_t *pkt_xfer_routine;
@@ -1065,8 +1064,13 @@ static ide_startstop_t idefloppy_issue_pc (ide_drive_t *drive, idefloppy_pc_t *p
 	}
 	feature.all = 0;
 
-	if (test_bit(PC_DMA_RECOMMENDED, &pc->flags) && drive->using_dma)
-		feature.b.dma = !hwif->ide_dma_setup(drive);
+	if (test_bit(PC_DMA_RECOMMENDED, &pc->flags) && drive->using_dma) {
+		if (test_bit(PC_WRITING, &pc->flags)) {
+			feature.b.dma = !HWIF(drive)->ide_dma_write(drive);
+		} else {
+			feature.b.dma = !HWIF(drive)->ide_dma_read(drive);
+		}
+	}
 
 	if (IDE_CONTROL_REG)
 		HWIF(drive)->OUTB(drive->ctl, IDE_CONTROL_REG);
@@ -1078,7 +1082,7 @@ static ide_startstop_t idefloppy_issue_pc (ide_drive_t *drive, idefloppy_pc_t *p
 
 	if (feature.b.dma) {	/* Begin DMA, if necessary */
 		set_bit(PC_DMA_IN_PROGRESS, &pc->flags);
-		hwif->ide_dma_start(drive);
+		(void) (HWIF(drive)->ide_dma_begin(drive));
 	}
 
 	/* Can we transfer the packet when we get the interrupt or wait? */
