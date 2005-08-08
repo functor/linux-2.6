@@ -841,9 +841,8 @@ static void adjust_lrq_weight(struct ckrm_cpu_class *clsptr, int cpu_online)
 		total_pressure += lrq->lrq_load;
 	}
 
-#define FIX_SHARES 
-#ifdef FIX_SHARES
-#warning "ACB: fix share initialization problem [PL #4227]"
+#if 1
+#warning "ACB taking out suspicious early return"
 #else
 	if (! total_pressure)
 		return;
@@ -860,10 +859,6 @@ static void adjust_lrq_weight(struct ckrm_cpu_class *clsptr, int cpu_online)
 			/*give idle class a high share to boost interactiveness */
 			lw = cpu_class_weight(clsptr); 
 		else {
-#ifdef FIX_SHARES
-		        if (! total_pressure)
-			        return;
-#endif			
 			lw = lrq->lrq_load * class_weight;
 			do_div(lw,total_pressure);
 			if (!lw)
@@ -965,11 +960,9 @@ static int thread_exit = 0;
 static int ckrm_cpu_monitord(void *nothing)
 {
 	daemonize("ckrm_cpu_ctrld");
-	current->flags |= PF_NOFREEZE;
-
 	for (;;) {
 		/*sleep for sometime before next try*/
-		set_current_state(TASK_INTERRUPTIBLE);
+		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(CPU_MONITOR_INTERVAL);
 		ckrm_cpu_monitor(1);
 		if (thread_exit) {

@@ -15,10 +15,6 @@ When the memory subsystem runs low on LRU pages, pages are reclaimed by
     - freeing pages from the inactive list (shrink_zone)
 depending on the recent usage of the page(approximately).
 
-In the process of the life cycle a page can move from the lru list to swap
-and back. For this document's purpose, we treat it same as freeing and
-allocating the page, respectfully.
-
 1. Introduction
 ---------------
 Memory resource controller controls the number of lru physical pages

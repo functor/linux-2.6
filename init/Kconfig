@@ -177,19 +177,6 @@ config CKRM_RES_NULL
 	tristate "Null Tasks Resource Manager"
 	depends on CKRM_TYPE_TASKCLASS
 	default m
-
-config CKRM_RES_MEM
-	bool "Class based physical memory controller"
-	default y
-	depends on CKRM
-	help
-	  Provide the basic support for collecting physical memory usage
-	  information among classes. Say Y if you want to know the memory
-	  usage of each class.
-
-config CKRM_TYPE_SOCKETCLASS
-	bool "Class Manager for socket groups"
-	depends on CKRM && RCFS_FS
 	help
 	  Provides a Null Resource Controller for CKRM that is purely for
 	  demonstration purposes.
@@ -202,21 +189,10 @@ config CKRM_RES_NUMTASKS
 	depends on CKRM_TYPE_TASKCLASS
 	default m
 	help
-	  Provides a Resource Controller for CKRM that allows limiting number of
+	  Provides a Resource Controller for CKRM that allows limiting no of
 	  tasks a task class can have.
 	
 	  Say N if unsure, Y to use the feature.
-
-config CKRM_RES_NUMTASKS_FORKRATE
-	tristate "Number of Tasks Resource Manager for Fork Rate"
-	depends on CKRM_RES_NUMTASKS
-	default y
-	help
-	  Provides a Resource Controller for CKRM that allows limiting the rate
-	  of tasks a task class can fork per hour.
-	
-	  Say N if unsure, Y to use the feature.
-
 
 config CKRM_CPU_SCHEDULE
 	bool "CKRM CPU scheduler"
@@ -239,6 +215,26 @@ config CKRM_RES_BLKIO
 	  alter the actual bandwidth delivered to a class.
 	
 	  Say N if unsure, Y to use the feature.
+
+config CKRM_RES_MEM
+	bool "Class based physical memory controller"
+	default y
+	depends on CKRM
+	help
+	  Provide the basic support for collecting physical memory usage information
+	  among classes. Say Y if you want to know the memory usage of each class.
+
+config CKRM_MEM_LRUORDER_CHANGE
+	bool "Change the LRU ordering of scanned pages"
+	default n
+	depends on CKRM_RES_MEM
+	help
+	  While trying to free pages, by default(n), scanned pages are left were they
+	  are found if they belong to relatively under-used class. In this case the
+	  LRU ordering of the memory subsystemis left intact. If this option is chosen,
+	  then the scanned pages are moved to the tail of the list(active or inactive).
+	  Changing this to yes reduces the checking overhead but violates the approximate
+	  LRU order that is maintained by the paging subsystem.
 
 config CKRM_CPU_SCHEDULE_AT_BOOT
 	bool "Turn on at boot time"
