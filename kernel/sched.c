@@ -802,12 +802,9 @@ void vx_hold_task(struct vx_info *vxi,
 {
 	__deactivate_task(p, rq);
 	p->state |= TASK_ONHOLD;
-	// recalc_task_prio(p, now);
-	// a new one on hold
+	/* a new one on hold */
 	vx_onhold_inc(vxi);
 	list_add_tail(&p->run_list, &rq->hold_queue);
-
-	//printk("··· %8lu hold   %p [%d]\n", jiffies, p, p->prio);
 }
 
 /*
@@ -818,19 +815,14 @@ void vx_unhold_task(struct vx_info *vxi,
 	struct task_struct *p, runqueue_t *rq)
 {
 	list_del(&p->run_list);
-	// one less waiting
+	/* one less waiting */
 	vx_onhold_dec(vxi);
-	// p->prio = MAX_PRIO-1;
-	// p->activated = 1;
-	// recalc_task_prio(p, now);
 	p->state &= ~TASK_ONHOLD;
 	enqueue_task(p, rq->expired);
 	rq->nr_running++;
 
 	if (p->static_prio < rq->best_expired_prio)
 		rq->best_expired_prio = p->static_prio;
-
-	// printk("··· %8lu unhold %p [%d]\n", jiffies, p, p->prio);
 }
 #else
 static inline
@@ -2423,9 +2415,12 @@ static void check_rlimit(struct task_struct *p, cputime_t cputime)
 void account_user_time(struct task_struct *p, cputime_t cputime)
 {
 	struct cpu_usage_stat *cpustat = &kstat_this_cpu.cpustat;
+	struct vx_info *vxi = p->vx_info;  /* p is _always_ current */
 	cputime64_t tmp;
+	int nice = (TASK_NICE(p) > 0);
 
 	p->utime = cputime_add(p->utime, cputime);
+	vx_account_user(vxi, cputime, nice);
 
 	/* Check for signals (SIGVTALRM, SIGPROF, SIGXCPU & SIGKILL). */
 	check_rlimit(p, cputime);
@@ -2434,7 +2429,7 @@ void account_user_time(struct task_struct *p, cputime_t cputime)
 
 	/* Add user time to cpustat. */
 	tmp = cputime_to_cputime64(cputime);
-	if (TASK_NICE(p) > 0)
+	if (nice)
 		cpustat->nice = cputime64_add(cpustat->nice, tmp);
 	else
 		cpustat->user = cputime64_add(cpustat->user, tmp);
@@ -2450,10 +2445,12 @@ void account_system_time(struct task_struct *p, int hardirq_offset,
 			 cputime_t cputime)
 {
 	struct cpu_usage_stat *cpustat = &kstat_this_cpu.cpustat;
+	struct vx_info *vxi = p->vx_info;  /* p is _always_ current */
 	runqueue_t *rq = this_rq();
 	cputime64_t tmp;
 
 	p->stime = cputime_add(p->stime, cputime);
+	vx_account_system(vxi, cputime, (p == rq->idle));
 
 	/* Check for signals (SIGPROF, SIGXCPU & SIGKILL). */
 	if (likely(p->signal && p->exit_state < EXIT_ZOMBIE)) {
@@ -2849,7 +2846,6 @@ need_resched_nonpreemptible:
 
 			vxi = next->vx_info;
 			ret = vx_tokens_recalc(vxi);
-			// tokens = vx_tokens_avail(next);
 
 			if (ret > 0) {
 				vx_unhold_task(vxi, next, rq);

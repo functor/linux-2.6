@@ -258,7 +258,7 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr * exec,
 	}
 
 	/* Populate argv and envp */
-	p = current->mm->arg_start;
+	p = current->mm->arg_end = current->mm->arg_start;
 	while (argc-- > 0) {
 		size_t len;
 		__put_user((elf_addr_t)p, argv++);
@@ -765,7 +765,6 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 	/* Do this so that we can load the interpreter, if need be.  We will
 	   change some of these later */
-	// current->mm->rss = 0;
 	vx_rsspages_sub(current->mm, current->mm->rss);
 	current->mm->free_area_cache = current->mm->mmap_base;
 	retval = setup_arg_pages(bprm, STACK_TOP, executable_stack);
@@ -1281,7 +1280,7 @@ static void fill_prstatus(struct elf_prstatus *prstatus,
 static int fill_psinfo(struct elf_prpsinfo *psinfo, struct task_struct *p,
 		       struct mm_struct *mm)
 {
-	int i, len;
+	unsigned int i, len;
 	
 	/* first copy the parameters from user space */
 	memset(psinfo, 0, sizeof(struct elf_prpsinfo));

@@ -418,6 +418,7 @@ typedef struct xfs_mount {
 #define XFS_MOUNT_IDELETE	0x00040000	/* delete empty inode clusters*/
 #define XFS_MOUNT_SWALLOC	0x00080000	/* turn on stripe width
 						 * allocation */
+#define XFS_MOUNT_TAGXID	0x40000000	/* context xid tagging */
 
 /*
  * Default minimum read and write sizes.

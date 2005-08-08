@@ -313,10 +313,8 @@ copy_one_pte(struct mm_struct *dst_mm,  struct mm_struct *src_mm,
 		pte = pte_mkclean(pte);
 	pte = pte_mkold(pte);
 	get_page(page);
-	// dst_mm->rss++;
 	vx_rsspages_inc(dst_mm);
 	if (PageAnon(page))
-		// dst_mm->anon_rss++;
 		vx_anonpages_inc(dst_mm);
 	set_pte(dst_pte, pte);
 	page_dup_rmap(page);
@@ -515,7 +513,6 @@ static void zap_pte_range(struct mmu_gather *tlb,
 			if (pte_dirty(pte))
 				set_page_dirty(page);
 			if (PageAnon(page))
-				// tlb->mm->anon_rss--;
 				vx_anonpages_dec(tlb->mm);
 			else if (pte_young(pte))
 				mark_page_accessed(page);
@@ -1340,10 +1337,8 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	page_table = pte_offset_map(pmd, address);
 	if (likely(pte_same(*page_table, pte))) {
 		if (PageAnon(old_page))
-			// mm->anon_rss--;
 			vx_anonpages_dec(mm);
 		if (PageReserved(old_page)) {
-			// ++mm->rss;
 			vx_rsspages_inc(mm);
 			acct_update_integrals();
 			update_mem_hiwater();
@@ -1755,7 +1750,6 @@ static int do_swap_page(struct mm_struct * mm,
 	if (vm_swap_full())
 		remove_exclusive_swap_page(page);
 
-	// mm->rss++;
 	vx_rsspages_inc(mm);
 	acct_update_integrals();
 	update_mem_hiwater();
@@ -1825,7 +1819,6 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 			spin_unlock(&mm->page_table_lock);
 			goto out;
 		}
-		// mm->rss++;
 		vx_rsspages_inc(mm);
 		acct_update_integrals();
 		update_mem_hiwater();
@@ -1947,7 +1940,6 @@ retry:
 	/* Only go through if we didn't race with anybody else... */
 	if (pte_none(*page_table)) {
 		if (!PageReserved(new_page))
-			// ++mm->rss;
 			vx_rsspages_inc(mm);
 		acct_update_integrals();
 		update_mem_hiwater();

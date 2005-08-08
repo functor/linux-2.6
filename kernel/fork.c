@@ -805,6 +805,7 @@ static task_t *copy_process(unsigned long clone_flags,
 	int retval;
 	struct task_struct *p = NULL;
 	struct vx_info *vxi;
+	struct nx_info *nxi;
 
 	if ((clone_flags & (CLONE_NEWNS|CLONE_FS)) == (CLONE_NEWNS|CLONE_FS))
 		return ERR_PTR(-EINVAL);
@@ -834,8 +835,7 @@ static task_t *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	init_vx_info(&p->vx_info, current->vx_info);
-	p->nx_info = NULL;
-	set_nx_info(&p->nx_info, current->nx_info);
+	init_nx_info(&p->nx_info, current->nx_info);
 
 	/* check vserver memory */
 	if (p->mm && !(clone_flags & CLONE_VM)) {
@@ -1073,6 +1073,9 @@ static task_t *copy_process(unsigned long clone_flags,
 		atomic_inc(&vxi->cvirt.total_forks);
 		vx_nproc_inc(p);
 	}
+	nxi = p->nx_info;
+	if (nxi)
+		claim_nx_info(nxi, p);
 	write_unlock_irq(&tasklist_lock);
 	retval = 0;
 

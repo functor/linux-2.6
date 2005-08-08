@@ -651,7 +651,6 @@ static int load_flat_file(struct linux_binprm * bprm,
 		current->mm->start_brk = datapos + data_len + bss_len;
 		current->mm->brk = (current->mm->start_brk + 3) & ~3;
 		current->mm->context.end_brk = memp + ksize((void *) memp) - stack_len;
-		// current->mm->rss = 0;
 		vx_rsspages_sub(current->mm, current->mm->rss);
 	}
 

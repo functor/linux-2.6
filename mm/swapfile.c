@@ -433,7 +433,6 @@ static void
 unuse_pte(struct vm_area_struct *vma, unsigned long address, pte_t *dir,
 	swp_entry_t entry, struct page *page)
 {
-	// vma->vm_mm->rss++;
 	vx_rsspages_inc(vma->vm_mm);
 	get_page(page);
 	set_pte(dir, pte_mkold(mk_pte(page, vma->vm_page_prot)));

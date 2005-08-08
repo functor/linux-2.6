@@ -269,7 +269,10 @@ static int show_vfsmnt(struct seq_file *m, void *v)
 		{ MNT_NOEXEC, ",noexec" },
 		{ 0, NULL }
 	};
+
 	struct proc_fs_info *fs_infop;
+	unsigned long s_flags = mnt->mnt_sb->s_flags;
+	int mnt_flags = mnt->mnt_flags;
 
 	if (vx_flags(VXF_HIDE_MOUNT, 0))
 		return 0;

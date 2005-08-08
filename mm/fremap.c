@@ -40,7 +40,6 @@ static inline void zap_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 					set_page_dirty(page);
 				page_remove_rmap(page);
 				page_cache_release(page);
-				// mm->rss--;
 				vx_rsspages_dec(mm);
 			}
 		}
@@ -97,7 +96,6 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	zap_pte(mm, vma, addr, pte);
 
-	// mm->rss++;
 	vx_rsspages_inc(mm);
 	flush_icache_page(vma, page);
 	set_pte(pte, mk_pte(page, prot));

@@ -327,7 +327,6 @@ void install_arg_page(struct vm_area_struct *vma,
 		pte_unmap(pte);
 		goto out;
 	}
-	// mm->rss++;
 	vx_rsspages_inc(mm);
 	lru_cache_add_active(page);
 	set_pte(pte, pte_mkdirty(pte_mkwrite(mk_pte(
@@ -452,7 +451,6 @@ int setup_arg_pages(struct linux_binprm *bprm,
 			kmem_cache_free(vm_area_cachep, mpnt);
 			return ret;
 		}
-		// mm->stack_vm = mm->total_vm = vma_pages(mpnt);
 		vx_vmpages_sub(mm, mm->total_vm - vma_pages(mpnt));
 		mm->stack_vm = mm->total_vm;
 	}

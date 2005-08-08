@@ -103,5 +103,6 @@ struct xfs_mount_args {
 #define XFSMNT_IDELETE		0x08000000	/* inode cluster delete */
 #define XFSMNT_SWALLOC		0x10000000	/* turn on stripe width
 						 * allocation */
+#define XFSMNT_TAGXID		0x40000000	/* context xid tagging */
 
 #endif	/* __XFS_CLNT_H__ */

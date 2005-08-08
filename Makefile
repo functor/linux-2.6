@@ -1,8 +1,8 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 11
-EXTRAVERSION = .7-vs2.0-pre4
-NAME=Woozy Numbat
+EXTRAVERSION = .11-vs2.0-rc4
+NAME=Woozy Beaver
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"

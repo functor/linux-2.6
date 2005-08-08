@@ -319,6 +319,8 @@ xfs_start_flags(
 
 	if (ap->flags & XFSMNT_NOUUID)
 		mp->m_flags |= XFS_MOUNT_NOUUID;
+	if (ap->flags & XFSMNT_TAGXID)
+		mp->m_flags |= XFS_MOUNT_TAGXID;
 	if (ap->flags & XFSMNT_NOLOGFLUSH)
 		mp->m_flags |= XFS_MOUNT_NOLOGFLUSH;
 
@@ -401,6 +403,8 @@ xfs_finish_flags(
 			return XFS_ERROR(EINVAL);
 	}
 
+	if (ap->flags & XFSMNT_TAGXID)
+		vfs->vfs_super->s_flags |= MS_TAGXID;
 	return 0;
 }
 
@@ -1654,6 +1658,7 @@ xfs_vget(
 #define MNTOPT_64BITINODE   "inode64"	/* inodes can be allocated anywhere */
 #define MNTOPT_IKEEP	"ikeep"		/* do not free empty inode clusters */
 #define MNTOPT_NOIKEEP	"noikeep"	/* free empty inode clusters */
+#define MNTOPT_TAGXID	"tagxid"	/* context xid tagging for inodes */
 
 
 int
@@ -1789,6 +1794,8 @@ xfs_parseargs(
 			args->flags &= ~XFSMNT_IDELETE;
 		} else if (!strcmp(this_char, MNTOPT_NOIKEEP)) {
 			args->flags |= XFSMNT_IDELETE;
+		} else if (!strcmp(this_char, MNTOPT_TAGXID)) {
+			args->flags |= XFSMNT_TAGXID;
 		} else if (!strcmp(this_char, "osyncisdsync")) {
 			/* no-op, this is now the default */
 printk("XFS: osyncisdsync is now the default, option is deprecated.\n");

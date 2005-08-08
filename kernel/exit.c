@@ -27,6 +27,7 @@
 #include <linux/mempolicy.h>
 #include <linux/syscalls.h>
 #include <linux/vs_limit.h>
+#include <linux/vs_network.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -104,6 +105,8 @@ repeat:
 	release_thread(p);
 	if (p->vx_info)
 		release_vx_info(p->vx_info, p);
+	if (p->nx_info)
+		release_nx_info(p->nx_info, p);
 	put_task_struct(p);
 
 	p = leader;
@@ -526,8 +529,6 @@ static inline void choose_new_parent(task_t *p, task_t *reaper, task_t *child_re
 	 */
 	BUG_ON(p == reaper || reaper->exit_state >= EXIT_ZOMBIE);
 	p->real_parent = reaper;
-	if (p->parent == p->real_parent)
-		BUG();
 }
 
 static inline void reparent_thread(task_t *p, task_t *father, int traced)
