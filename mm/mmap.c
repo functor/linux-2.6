@@ -1439,11 +1439,12 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 	address += 4 + PAGE_SIZE - 1;
 	address &= PAGE_MASK;
 	grow = (address - vma->vm_end) >> PAGE_SHIFT;
-
-	if (address < vma->vm_end) {
+	
+	if(address < vma->vm_end) {
 		anon_vma_unlock(vma);
 		return 0;
 	}
+
 	/* Overcommit.. vx check first to avoid vm_unacct_memory() */
 	if (!vx_vmpages_avail(vma->vm_mm, grow) ||
 		security_vm_enough_memory(grow)) {
@@ -1520,6 +1521,7 @@ int expand_stack(struct vm_area_struct *vma, unsigned long address)
 		anon_vma_unlock(vma);
 		return 0;
 	}
+
         /* Overcommit.. vx check first to avoid vm_unacct_memory() */
 	if (!vx_vmpages_avail(vma->vm_mm, grow) ||
 		security_vm_enough_memory(grow)) {
