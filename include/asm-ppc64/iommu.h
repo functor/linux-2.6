@@ -110,17 +110,10 @@ struct scatterlist;
 extern void iommu_setup_pSeries(void);
 extern void iommu_setup_u3(void);
 
-/* Frees table for an individual device node */
-extern void iommu_free_table(struct device_node *dn);
+/* Creates table for an individual device node */
+extern void iommu_devnode_init(struct device_node *dn);
 
 #endif /* CONFIG_PPC_MULTIPLATFORM */
-
-#ifdef CONFIG_PPC_PSERIES
-
-/* Creates table for an individual device node */
-extern void iommu_devnode_init_pSeries(struct device_node *dn);
-
-#endif /* CONFIG_PPC_PSERIES */
 
 #ifdef CONFIG_PPC_ISERIES
 
@@ -132,7 +125,7 @@ extern void __init iommu_vio_init(void);
 
 struct iSeries_Device_Node;
 /* Creates table for an individual device node */
-extern void iommu_devnode_init_iSeries(struct iSeries_Device_Node *dn);
+extern void iommu_devnode_init(struct iSeries_Device_Node *dn);
 
 #endif /* CONFIG_PPC_ISERIES */
 

@@ -11,6 +11,7 @@
 
 #include <linux/config.h>
 #include <linux/errno.h>
+#include <linux/vserver.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/ctype.h>
@@ -51,6 +52,10 @@ void vserver_register_sysctl(void)
 {
 	if (!vserver_table_header) {
 		vserver_table_header = register_sysctl_table(vserver_table, 1);
+#ifdef CONFIG_PROC_FS
+//		if (vserver_table[0].de)
+//			vserver_table[0].de->owner = THIS_MODULE;
+#endif
 	}
 
 }

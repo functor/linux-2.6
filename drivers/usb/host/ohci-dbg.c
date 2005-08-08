@@ -134,13 +134,13 @@ ohci_dump_status (struct ohci_hcd *controller, char **next, unsigned *size)
 	struct ohci_regs __iomem *regs = controller->regs;
 	u32			temp;
 
-	temp = ohci_readl (controller, &regs->revision) & 0xff;
+	temp = ohci_readl (&regs->revision) & 0xff;
 	ohci_dbg_sw (controller, next, size,
 		"OHCI %d.%d, %s legacy support registers\n",
 		0x03 & (temp >> 4), (temp & 0x0f),
 		(temp & 0x10) ? "with" : "NO");
 
-	temp = ohci_readl (controller, &regs->control);
+	temp = ohci_readl (&regs->control);
 	ohci_dbg_sw (controller, next, size,
 		"control 0x%03x%s%s%s HCFS=%s%s%s%s%s CBSR=%d\n",
 		temp,
@@ -155,7 +155,7 @@ ohci_dump_status (struct ohci_hcd *controller, char **next, unsigned *size)
 		temp & OHCI_CTRL_CBSR
 		);
 
-	temp = ohci_readl (controller, &regs->cmdstatus);
+	temp = ohci_readl (&regs->cmdstatus);
 	ohci_dbg_sw (controller, next, size,
 		"cmdstatus 0x%05x SOC=%d%s%s%s%s\n", temp,
 		(temp & OHCI_SOC) >> 16,
@@ -166,33 +166,26 @@ ohci_dump_status (struct ohci_hcd *controller, char **next, unsigned *size)
 		);
 
 	ohci_dump_intr_mask (controller, "intrstatus",
-			ohci_readl (controller, &regs->intrstatus),
-			next, size);
+			ohci_readl (&regs->intrstatus), next, size);
 	ohci_dump_intr_mask (controller, "intrenable",
-			ohci_readl (controller, &regs->intrenable),
-			next, size);
+			ohci_readl (&regs->intrenable), next, size);
 	// intrdisable always same as intrenable
 
 	maybe_print_eds (controller, "ed_periodcurrent",
-			ohci_readl (controller, &regs->ed_periodcurrent),
-			next, size);
+			ohci_readl (&regs->ed_periodcurrent), next, size);
 
 	maybe_print_eds (controller, "ed_controlhead",
-			ohci_readl (controller, &regs->ed_controlhead),
-			next, size);
+			ohci_readl (&regs->ed_controlhead), next, size);
 	maybe_print_eds (controller, "ed_controlcurrent",
-			ohci_readl (controller, &regs->ed_controlcurrent),
-			next, size);
+			ohci_readl (&regs->ed_controlcurrent), next, size);
 
 	maybe_print_eds (controller, "ed_bulkhead",
-			ohci_readl (controller, &regs->ed_bulkhead),
-			next, size);
+			ohci_readl (&regs->ed_bulkhead), next, size);
 	maybe_print_eds (controller, "ed_bulkcurrent",
-			ohci_readl (controller, &regs->ed_bulkcurrent),
-			next, size);
+			ohci_readl (&regs->ed_bulkcurrent), next, size);
 
 	maybe_print_eds (controller, "donehead",
-			ohci_readl (controller, &regs->donehead), next, size);
+			ohci_readl (&regs->donehead), next, size);
 }
 
 #define dbg_port_sw(hc,num,value,next,size) \
@@ -276,7 +269,7 @@ static void ohci_dump (struct ohci_hcd *controller, int verbose)
 	ohci_dump_status (controller, NULL, NULL);
 	if (controller->hcca)
 		ohci_dbg (controller,
-			"hcca frame #%04x\n", ohci_frame_no(controller));
+			"hcca frame #%04x\n", OHCI_FRAME_NO(controller->hcca));
 	ohci_dump_roothub (controller, 1, NULL, NULL);
 }
 
@@ -286,13 +279,13 @@ static const char data1 [] = "DATA1";
 static void ohci_dump_td (const struct ohci_hcd *ohci, const char *label,
 		const struct td *td)
 {
-	u32	tmp = hc32_to_cpup (ohci, &td->hwINFO);
+	u32	tmp = le32_to_cpup (&td->hwINFO);
 
 	ohci_dbg (ohci, "%s td %p%s; urb %p index %d; hw next td %08x\n",
 		label, td,
 		(tmp & TD_DONE) ? " (DONE)" : "",
 		td->urb, td->index,
-		hc32_to_cpup (ohci, &td->hwNextTD));
+		le32_to_cpup (&td->hwNextTD));
 	if ((tmp & TD_ISO) == 0) {
 		const char	*toggle, *pid;
 		u32	cbp, be;
@@ -313,8 +306,8 @@ static void ohci_dump_td (const struct ohci_hcd *ohci, const char *label,
 			TD_CC_GET(tmp), /* EC, */ toggle,
 			(tmp & TD_DI) >> 21, pid,
 			(tmp & TD_R) ? "R" : "");
-		cbp = hc32_to_cpup (ohci, &td->hwCBP);
-		be = hc32_to_cpup (ohci, &td->hwBE);
+		cbp = le32_to_cpup (&td->hwCBP);
+		be = le32_to_cpup (&td->hwBE);
 		ohci_dbg (ohci, "     cbp %08x be %08x (len %d)\n", cbp, be,
 			cbp ? (be + 1 - cbp) : 0);
 	} else {
@@ -325,10 +318,10 @@ static void ohci_dump_td (const struct ohci_hcd *ohci, const char *label,
 			(tmp & TD_DI) >> 21,
 			tmp & 0x0000ffff);
 		ohci_dbg (ohci, "  bp0 %08x be %08x\n",
-			hc32_to_cpup (ohci, &td->hwCBP) & ~0x0fff,
-			hc32_to_cpup (ohci, &td->hwBE));
+			le32_to_cpup (&td->hwCBP) & ~0x0fff,
+			le32_to_cpup (&td->hwBE));
 		for (i = 0; i < MAXPSW; i++) {
-			u16	psw = hc16_to_cpup (ohci, &td->hwPSW [i]);
+			u16	psw = le16_to_cpup (&td->hwPSW [i]);
 			int	cc = (psw >> 12) & 0x0f;
 			ohci_dbg (ohci, "    psw [%d] = %2x, CC=%x %s=%d\n", i,
 				psw, cc,
@@ -343,34 +336,33 @@ static void __attribute__((unused))
 ohci_dump_ed (const struct ohci_hcd *ohci, const char *label,
 		const struct ed *ed, int verbose)
 {
-	u32	tmp = hc32_to_cpu (ohci, ed->hwINFO);
+	__le32	tmp = ed->hwINFO;
 	char	*type = "";
 
 	ohci_dbg (ohci, "%s, ed %p state 0x%x type %s; next ed %08x\n",
 		label,
 		ed, ed->state, edstring (ed->type),
-		hc32_to_cpup (ohci, &ed->hwNextED));
+		le32_to_cpup (&ed->hwNextED));
 	switch (tmp & (ED_IN|ED_OUT)) {
 	case ED_OUT: type = "-OUT"; break;
 	case ED_IN: type = "-IN"; break;
 	/* else from TDs ... control */
 	}
 	ohci_dbg (ohci,
-		"  info %08x MAX=%d%s%s%s%s EP=%d%s DEV=%d\n", tmp,
-		0x03ff & (tmp >> 16),
+		"  info %08x MAX=%d%s%s%s%s EP=%d%s DEV=%d\n", le32_to_cpu (tmp),
+		0x03ff & (le32_to_cpu (tmp) >> 16),
 		(tmp & ED_DEQUEUE) ? " DQ" : "",
 		(tmp & ED_ISO) ? " ISO" : "",
 		(tmp & ED_SKIP) ? " SKIP" : "",
 		(tmp & ED_LOWSPEED) ? " LOW" : "",
-		0x000f & (tmp >> 7),
+		0x000f & (le32_to_cpu (tmp) >> 7),
 		type,
-		0x007f & tmp);
-	tmp = hc32_to_cpup (ohci, &ed->hwHeadP);
+		0x007f & le32_to_cpu (tmp));
 	ohci_dbg (ohci, "  tds: head %08x %s%s tail %08x%s\n",
-		tmp,
-		(tmp & ED_C) ? data1 : data0,
-		(tmp & ED_H) ? " HALT" : "",
-		hc32_to_cpup (ohci, &ed->hwTailP),
+		le32_to_cpup (&ed->hwHeadP),
+		(ed->hwHeadP & ED_C) ? data1 : data0,
+		(ed->hwHeadP & ED_H) ? " HALT" : "",
+		le32_to_cpup (&ed->hwTailP),
 		verbose ? "" : " (not listing)");
 	if (verbose) {
 		struct list_head	*tmp;
@@ -402,6 +394,13 @@ static inline void remove_debug_files (struct ohci_hcd *bus) { }
 
 #else
 
+static inline struct ohci_hcd *dev_to_ohci (struct device *dev)
+{
+	struct usb_hcd	*hcd = dev_get_drvdata (dev);
+
+	return hcd_to_ohci (hcd);
+}
+
 static ssize_t
 show_list (struct ohci_hcd *ohci, char *buf, size_t count, struct ed *ed)
 {
@@ -416,23 +415,23 @@ show_list (struct ohci_hcd *ohci, char *buf, size_t count, struct ed *ed)
 
 	/* dump a snapshot of the bulk or control schedule */
 	while (ed) {
-		u32		info = hc32_to_cpu (ohci, ed->hwINFO);
-		u32		headp = hc32_to_cpu (ohci, ed->hwHeadP);
-		struct list_head *entry;
-		struct td	*td;
+		__le32			info = ed->hwINFO;
+		u32			scratch = le32_to_cpup (&ed->hwINFO);
+		struct list_head	*entry;
+		struct td		*td;
 
 		temp = scnprintf (buf, size,
 			"ed/%p %cs dev%d ep%d%s max %d %08x%s%s %s",
 			ed,
 			(info & ED_LOWSPEED) ? 'l' : 'f',
-			info & 0x7f,
-			(info >> 7) & 0xf,
+			scratch & 0x7f,
+			(scratch >> 7) & 0xf,
 			(info & ED_IN) ? "in" : "out",
-			0x03ff & (info >> 16),
-			info,
+			0x03ff & (scratch >> 16),
+			scratch,
 			(info & ED_SKIP) ? " s" : "",
-			(headp & ED_H) ? " H" : "",
-			(headp & ED_C) ? data1 : data0);
+			(ed->hwHeadP & ED_H) ? " H" : "",
+			(ed->hwHeadP & ED_C) ? data1 : data0);
 		size -= temp;
 		buf += temp;
 
@@ -440,21 +439,21 @@ show_list (struct ohci_hcd *ohci, char *buf, size_t count, struct ed *ed)
 			u32		cbp, be;
 
 			td = list_entry (entry, struct td, td_list);
-			info = hc32_to_cpup (ohci, &td->hwINFO);
-			cbp = hc32_to_cpup (ohci, &td->hwCBP);
-			be = hc32_to_cpup (ohci, &td->hwBE);
+			scratch = le32_to_cpup (&td->hwINFO);
+			cbp = le32_to_cpup (&td->hwCBP);
+			be = le32_to_cpup (&td->hwBE);
 			temp = scnprintf (buf, size,
 					"\n\ttd %p %s %d cc=%x urb %p (%08x)",
 					td,
 					({ char *pid;
-					switch (info & TD_DP) {
+					switch (scratch & TD_DP) {
 					case TD_DP_SETUP: pid = "setup"; break;
 					case TD_DP_IN: pid = "in"; break;
 					case TD_DP_OUT: pid = "out"; break;
 					default: pid = "(?)"; break;
 					 } pid;}),
 					cbp ? (be + 1 - cbp) : 0,
-					TD_CC_GET (info), td->urb, info);
+					TD_CC_GET (scratch), td->urb, scratch);
 			size -= temp;
 			buf += temp;
 		}
@@ -542,7 +541,8 @@ show_periodic (struct class_device *class_dev, char *buf)
 
 			/* show more info the first time around */
 			if (temp == seen_count) {
-				u32	info = hc32_to_cpu (ohci, ed->hwINFO);
+				__le32	info = ed->hwINFO;
+				u32	scratch = le32_to_cpup (&ed->hwINFO);
 				struct list_head	*entry;
 				unsigned		qlen = 0;
 
@@ -554,17 +554,15 @@ show_periodic (struct class_device *class_dev, char *buf)
 					" (%cs dev%d ep%d%s-%s qlen %u"
 					" max %d %08x%s%s)",
 					(info & ED_LOWSPEED) ? 'l' : 'f',
-					info & 0x7f,
-					(info >> 7) & 0xf,
+					scratch & 0x7f,
+					(scratch >> 7) & 0xf,
 					(info & ED_IN) ? "in" : "out",
 					(info & ED_ISO) ? "iso" : "int",
 					qlen,
-					0x03ff & (info >> 16),
-					info,
+					0x03ff & (scratch >> 16),
+					scratch,
 					(info & ED_SKIP) ? " K" : "",
-					(ed->hwHeadP &
-						cpu_to_hc32(ohci, ED_H)) ?
- 							" H" : "");
+					(ed->hwHeadP & ED_H) ? " H" : "");
 				size -= temp;
 				next += temp;
 
@@ -636,31 +634,31 @@ show_registers (struct class_device *class_dev, char *buf)
 	/* hcca */
 	if (ohci->hcca)
 		ohci_dbg_sw (ohci, &next, &size,
-			"hcca frame 0x%04x\n", ohci_frame_no(ohci));
+			"hcca frame 0x%04x\n", OHCI_FRAME_NO(ohci->hcca));
 
 	/* other registers mostly affect frame timings */
-	rdata = ohci_readl (ohci, &regs->fminterval);
+	rdata = ohci_readl (&regs->fminterval);
 	temp = scnprintf (next, size,
 			"fmintvl 0x%08x %sFSMPS=0x%04x FI=0x%04x\n",
-			rdata, (rdata >> 31) ? "FIT " : "",
+			rdata, (rdata >> 31) ? " FIT" : "",
 			(rdata >> 16) & 0xefff, rdata & 0xffff);
 	size -= temp;
 	next += temp;
 
-	rdata = ohci_readl (ohci, &regs->fmremaining);
+	rdata = ohci_readl (&regs->fmremaining);
 	temp = scnprintf (next, size, "fmremaining 0x%08x %sFR=0x%04x\n",
-			rdata, (rdata >> 31) ? "FRT " : "",
+			rdata, (rdata >> 31) ? " FRT" : "",
 			rdata & 0x3fff);
 	size -= temp;
 	next += temp;
 
-	rdata = ohci_readl (ohci, &regs->periodicstart);
+	rdata = ohci_readl (&regs->periodicstart);
 	temp = scnprintf (next, size, "periodicstart 0x%04x\n",
 			rdata & 0x3fff);
 	size -= temp;
 	next += temp;
 
-	rdata = ohci_readl (ohci, &regs->lsthresh);
+	rdata = ohci_readl (&regs->lsthresh);
 	temp = scnprintf (next, size, "lsthresh 0x%04x\n",
 			rdata & 0x3fff);
 	size -= temp;

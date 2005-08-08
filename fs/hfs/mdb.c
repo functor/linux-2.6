@@ -200,7 +200,8 @@ int hfs_mdb_get(struct super_block *sb)
 	}
 
 	attrib = mdb->drAtrb;
-	if (!(attrib & cpu_to_be16(HFS_SB_ATTRIB_UNMNT))) {
+	if (!(attrib & cpu_to_be16(HFS_SB_ATTRIB_UNMNT))
+	    || (attrib & cpu_to_be16(HFS_SB_ATTRIB_INCNSTNT))) {
 		hfs_warn("HFS-fs warning: Filesystem was not cleanly unmounted, "
 			 "running fsck.hfs is recommended.  mounting read-only.\n");
 		sb->s_flags |= MS_RDONLY;
@@ -211,9 +212,8 @@ int hfs_mdb_get(struct super_block *sb)
 	}
 	if (!(sb->s_flags & MS_RDONLY)) {
 		/* Mark the volume uncleanly unmounted in case we crash */
-		attrib &= cpu_to_be16(~HFS_SB_ATTRIB_UNMNT);
-		attrib |= cpu_to_be16(HFS_SB_ATTRIB_INCNSTNT);
-		mdb->drAtrb = attrib;
+		mdb->drAtrb = attrib & cpu_to_be16(~HFS_SB_ATTRIB_UNMNT);
+		mdb->drAtrb = attrib | cpu_to_be16(HFS_SB_ATTRIB_INCNSTNT);
 		mdb->drWrCnt = cpu_to_be32(be32_to_cpu(mdb->drWrCnt) + 1);
 		mdb->drLsMod = hfs_mtime();
 

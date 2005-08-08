@@ -564,7 +564,7 @@ struct isp_queue_entry {
 };
 
 struct isp1020_hostdata {
-	void __iomem *memaddr;
+	u_long	memaddr;
 	u_char	revision;
 	struct	host_param host_param;
 	struct	dev_param dev_param[MAX_TARGETS];
@@ -714,7 +714,7 @@ int isp1020_detect(Scsi_Host_Template *tmpt)
 		continue;
 
 	fail_uninit:
-		iounmap(hostdata->memaddr);
+		iounmap((void *)hostdata->memaddr);
 		release_region(host->io_port, 0xff);
 	fail_and_unregister:
 		if (hostdata->res_cpu)
@@ -747,7 +747,7 @@ int isp1020_release(struct Scsi_Host *host)
 	isp_outw(0x0, host, PCI_INTF_CTL);
 	free_irq(host->irq, host);
 
-	iounmap(hostdata->memaddr);
+	iounmap((void *)hostdata->memaddr);
 
 	release_region(host->io_port, 0xff);
 
@@ -769,7 +769,7 @@ const char *isp1020_info(struct Scsi_Host *host)
 		"QLogic ISP1020 SCSI on PCI bus %02x device %02x irq %d %s base 0x%lx",
 		hostdata->pci_dev->bus->number, hostdata->pci_dev->devfn, host->irq,
 		(hostdata->memaddr ? "MEM" : "I/O"),
-		(hostdata->memaddr ? (unsigned long)hostdata->memaddr : host->io_port));
+		(hostdata->memaddr ? hostdata->memaddr : host->io_port));
 
 	LEAVE("isp1020_info");
 
@@ -1410,17 +1410,18 @@ static int isp1020_init(struct Scsi_Host *sh)
 
  	if ((command & PCI_COMMAND_MEMORY) &&
  	    ((mem_flags & 1) == 0)) {
- 		hostdata->memaddr = ioremap(mem_base, PAGE_SIZE);
-		if (!hostdata->memaddr) {
+ 		mem_base = (u_long) ioremap(mem_base, PAGE_SIZE);
+		if (!mem_base) {
  			printk("qlogicisp : i/o remapping failed.\n");
 			goto out_release;
 		}
+ 		hostdata->memaddr = mem_base;
  	} else {
 		if (command & PCI_COMMAND_IO && (io_flags & 3) != 1) {
 			printk("qlogicisp : i/o mapping is disabled\n");
 			goto out_release;
  		}
- 		hostdata->memaddr = NULL; /* zero to signify no i/o mapping */
+ 		hostdata->memaddr = 0; /* zero to signify no i/o mapping */
  		mem_base = 0;
 	}
 
@@ -1469,7 +1470,7 @@ static int isp1020_init(struct Scsi_Host *sh)
 	return 0;
 
 out_unmap:
-	iounmap(hostdata->memaddr);
+	iounmap((void *)hostdata->memaddr);
 out_release:
 	release_region(sh->io_port, 0xff);
 	return 1;

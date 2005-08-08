@@ -1,5 +1,4 @@
 #include <media/saa7146_vv.h>
-#include <linux/version.h>
 
 #define BOARD_CAN_DO_VBI(dev)   (dev->revision != 0 && dev->vv_data->vbi_minor != -1) 
 
@@ -31,6 +30,17 @@ int saa7146_res_get(struct saa7146_fh *fh, unsigned int bit)
 	DEB_D(("res: get 0x%02x, cur:0x%02x\n",bit,vv->resources));
 	up(&dev->lock);
 	return 1;
+}
+
+int saa7146_res_check(struct saa7146_fh *fh, unsigned int bit)
+{
+	return (fh->resources & bit);
+}
+
+int saa7146_res_locked(struct saa7146_dev *dev, unsigned int bit)
+{
+	struct saa7146_vv *vv = dev->vv_data;
+	return (vv->resources & bit);
 }
 
 void saa7146_res_free(struct saa7146_fh *fh, unsigned int bits)
@@ -78,7 +88,10 @@ int saa7146_buffer_queue(struct saa7146_dev *dev,
 #endif
 	DEB_EE(("dev:%p, dmaq:%p, buf:%p\n", dev, q, buf));
 
-	BUG_ON(!q);
+	if( NULL == q ) {
+		ERR(("internal error: fatal NULL pointer for q.\n"));
+		return 0;
+	}
 
 	if (NULL == q->curr) {
 		q->curr = buf;
@@ -99,10 +112,13 @@ void saa7146_buffer_finish(struct saa7146_dev *dev,
 #ifdef DEBUG_SPINLOCKS
 	BUG_ON(!spin_is_locked(&dev->slock));
 #endif
+	if( NULL == q->curr ) {
+		ERR(("internal error: fatal NULL pointer for q->curr.\n"));
+		return;
+	}
+
 	DEB_EE(("dev:%p, dmaq:%p, state:%d\n", dev, q, state));
 	DEB_EE(("q->curr:%p\n",q->curr));
-
-	BUG_ON(!q->curr);
 
 	/* finish current buffer */
 	if (NULL == q->curr) {
@@ -122,7 +138,10 @@ void saa7146_buffer_next(struct saa7146_dev *dev,
 {
 	struct saa7146_buf *buf,*next = NULL;
 
-	BUG_ON(!q);
+	if( NULL == q ) {
+		ERR(("internal error: fatal NULL pointer for q.\n"));
+		return;
+	}
 
 	DEB_INT(("dev:%p, dmaq:%p, vbi:%d\n", dev, q, vbi));
 
@@ -339,7 +358,7 @@ static int fops_mmap(struct file *file, struct vm_area_struct * vma)
 		BUG();
 		return 0;
 	}
-	return videobuf_mmap_mapper(q,vma);
+	return videobuf_mmap_mapper(vma,q);
 }
 
 static unsigned int fops_poll(struct file *file, struct poll_table_struct *wait)
@@ -496,58 +515,45 @@ int saa7146_vv_release(struct saa7146_dev* dev)
 	return 0;
 }
 
-int saa7146_register_device(struct video_device **vid, struct saa7146_dev* dev,
-			    char *name, int type)
+int saa7146_register_device(struct video_device *vid, struct saa7146_dev* dev, char *name, int type)
 {
 	struct saa7146_vv *vv = dev->vv_data;
-	struct video_device *vfd;
 
 	DEB_EE(("dev:%p, name:'%s', type:%d\n",dev,name,type));
  
-	// released by vfd->release
- 	vfd = video_device_alloc();
-	if (vfd == NULL)
-		return -ENOMEM;
-
-	memcpy(vfd, &device_template, sizeof(struct video_device));
-	strlcpy(vfd->name, name, sizeof(vfd->name));
-	vfd->release = video_device_release;
-	vfd->priv = dev;
+ 	*vid = device_template;
+	strlcpy(vid->name, name, sizeof(vid->name));
+	vid->priv = dev;
 
 	// fixme: -1 should be an insmod parameter *for the extension* (like "video_nr");
-	if (video_register_device(vfd, type, -1) < 0) {
+	if (video_register_device(vid,type,-1) < 0) {
 		ERR(("cannot register v4l2 device. skipping.\n"));
 		return -1;
 	}
 
 	if( VFL_TYPE_GRABBER == type ) {
-		vv->video_minor = vfd->minor;
-		INFO(("%s: registered device video%d [v4l2]\n",
-			dev->name, vfd->minor & 0x1f));
+		vv->video_minor = vid->minor;
+		INFO(("%s: registered device video%d [v4l2]\n", dev->name,vid->minor & 0x1f));
 	} else {
-		vv->vbi_minor = vfd->minor;
-		INFO(("%s: registered device vbi%d [v4l2]\n",
-			dev->name, vfd->minor & 0x1f));
+		vv->vbi_minor = vid->minor;
+		INFO(("%s: registered device vbi%d [v4l2]\n", dev->name,vid->minor & 0x1f));
 	}
 
-	*vid = vfd;
 	return 0;
 }
 
-int saa7146_unregister_device(struct video_device **vid, struct saa7146_dev* dev)
+int saa7146_unregister_device(struct video_device *vid, struct saa7146_dev* dev)
 {
 	struct saa7146_vv *vv = dev->vv_data;
 	
 	DEB_EE(("dev:%p\n",dev));
 
-	if( VFL_TYPE_GRABBER == (*vid)->type ) {
+	if( VFL_TYPE_GRABBER == vid->type ) {
 		vv->video_minor = -1;
 	} else {
 		vv->vbi_minor = -1;
 	}
-
-	video_unregister_device(*vid);
-	*vid = NULL;
+	video_unregister_device(vid);
 
 	return 0;
 }

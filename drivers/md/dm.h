@@ -2,7 +2,6 @@
  * Internal header file for device mapper
  *
  * Copyright (C) 2001, 2002 Sistina Software
- * Copyright (C) 2004 Red Hat, Inc. All rights reserved.
  *
  * This file is released under the LGPL.
  */
@@ -55,8 +54,6 @@ struct mapped_device;
  *---------------------------------------------------------------*/
 int dm_create(struct mapped_device **md);
 int dm_create_with_minor(unsigned int minor, struct mapped_device **md);
-void dm_set_mdptr(struct mapped_device *md, void *ptr);
-void *dm_get_mdptr(dev_t dev);
 
 /*
  * Reference counting for md.
@@ -167,8 +164,6 @@ static inline unsigned long to_bytes(sector_t n)
 {
 	return (n << 9);
 }
-
-int dm_split_args(int *argc, char ***argvp, char *input);
 
 /*
  * The device-mapper can be driven through one of two interfaces;

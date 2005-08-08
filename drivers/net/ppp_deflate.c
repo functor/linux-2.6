@@ -636,7 +636,7 @@ struct compressor ppp_deflate_draft = {
 	.owner =		THIS_MODULE
 };
 
-static int __init deflate_init(void)
+int __init deflate_init(void)
 {  
         int answer = ppp_register_compressor(&ppp_deflate);
         if (answer == 0)
@@ -646,7 +646,7 @@ static int __init deflate_init(void)
         return answer;
 }
      
-static void __exit deflate_cleanup(void)
+void __exit deflate_cleanup(void)
 {
 	ppp_unregister_compressor(&ppp_deflate);
 	ppp_unregister_compressor(&ppp_deflate_draft);

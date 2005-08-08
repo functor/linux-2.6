@@ -43,11 +43,10 @@ int __init pcibios_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
 	return pci_irq[virq];
 }
 
-/* Do platform specific device initialization at pci_enable_device() time */
-int pcibios_plat_dev_init(struct pci_dev *dev)
+void __init pcibios_fixup_irqs(void)
 {
-	return 0;
 }
+
 
 static void __init malta_piix_func0_fixup(struct pci_dev *pdev)
 {
@@ -100,4 +99,4 @@ static void __init malta_piix_func1_fixup(struct pci_dev *pdev)
 }
 
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371AB,
-	 malta_piix_func1_fixup);
+	malta_piix_func1_fixup);

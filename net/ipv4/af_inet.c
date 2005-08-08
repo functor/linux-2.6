@@ -320,7 +320,7 @@ override:
 	inet->id = 0;
 
 	sock_init_data(sock, sk);
-	sk_set_owner(sk, sk->sk_prot->owner);
+	sk_set_owner(sk, THIS_MODULE);
 
 	sk->sk_destruct	   = inet_sock_destruct;
 	sk->sk_family	   = PF_INET;
@@ -396,9 +396,9 @@ int inet_release(struct socket *sock)
 		sock->sk = NULL;
 		vx_sock_dec(sk);
 		clr_vx_info(&sk->sk_vx_info);
-		//sk->sk_xid = -1;
+	sk->sk_xid = -1;
 		clr_nx_info(&sk->sk_nx_info);
-		//sk->sk_nid = -1;
+	sk->sk_nid = -1;
 		sk->sk_prot->close(sk, timeout);
 	}
 	return 0;
@@ -831,37 +831,6 @@ struct proto_ops inet_dgram_ops = {
 	.socketpair =	sock_no_socketpair,
 	.accept =	sock_no_accept,
 	.getname =	inet_getname,
-	.poll =		udp_poll,
-	.ioctl =	inet_ioctl,
-	.listen =	sock_no_listen,
-	.shutdown =	inet_shutdown,
-	.setsockopt =	sock_common_setsockopt,
-	.getsockopt =	sock_common_getsockopt,
-	.sendmsg =	inet_sendmsg,
-	.recvmsg =	sock_common_recvmsg,
-	.mmap =		sock_no_mmap,
-	.sendpage =	inet_sendpage,
-};
-
-/*
- * For SOCK_RAW sockets; should be the same as inet_dgram_ops but without
- * udp_poll
- */
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-struct proto_ops inet_sockraw_ops;
-EXPORT_SYMBOL(inet_sockraw_ops);
-#else
-static
-#endif
-struct proto_ops inet_sockraw_ops = {
-	.family =	PF_INET,
-	.owner =	THIS_MODULE,
-	.release =	inet_release,
-	.bind =		inet_bind,
-	.connect =	inet_dgram_connect,
-	.socketpair =	sock_no_socketpair,
-	.accept =	sock_no_accept,
-	.getname =	inet_getname,
 	.poll =		datagram_poll,
 	.ioctl =	inet_ioctl,
 	.listen =	sock_no_listen,
@@ -874,15 +843,7 @@ struct proto_ops inet_sockraw_ops = {
 	.sendpage =	inet_sendpage,
 };
 
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-int vnet_active = 0;
-EXPORT_SYMBOL(vnet_active);
-struct net_proto_family inet_family_ops;
-EXPORT_SYMBOL(inet_family_ops);
-#else
-static
-#endif
-struct net_proto_family inet_family_ops = {
+static struct net_proto_family inet_family_ops = {
 	.family = PF_INET,
 	.create = inet_create,
 	.owner	= THIS_MODULE,
@@ -922,7 +883,7 @@ static struct inet_protosw inetsw_array[] =
                .type =       SOCK_RAW,
                .protocol =   IPPROTO_IP,	/* wild card */
                .prot =       &raw_prot,
-               .ops =        &inet_sockraw_ops,
+               .ops =        &inet_dgram_ops,
                .capability = CAP_NET_RAW,
                .no_check =   UDP_CSUM_DEFAULT,
                .flags =      INET_PROTOSW_REUSE,

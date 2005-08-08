@@ -4,7 +4,6 @@
  */
 
 #include <asm-generic/vmlinux.lds.h>
-#include <linux/config.h>
 	
 OUTPUT_ARCH(arm)
 ENTRY(stext)
@@ -18,6 +17,7 @@ SECTIONS
 	. = TEXTADDR;
 	.init : {			/* Init code and data		*/
 		_stext = .;
+		__init_begin = .;
 			_sinittext = .;
 			*(.init.text)
 			_einittext = .;
@@ -30,6 +30,7 @@ SECTIONS
 		__tagtable_begin = .;
 			*(.taglist)
 		__tagtable_end = .;
+			*(.init.data)
 		. = ALIGN(16);
 		__setup_start = .;
 			*(.init.setup)
@@ -56,16 +57,8 @@ SECTIONS
 		__initramfs_start = .;
 			usr/built-in.o(.init.ramfs)
 		__initramfs_end = .;
-		. = ALIGN(64);
-		__per_cpu_start = .;
-			*(.data.percpu)
-		__per_cpu_end = .;
-#ifndef CONFIG_XIP_KERNEL
-		__init_begin = _stext;
-		*(.init.data)
 		. = ALIGN(4096);
 		__init_end = .;
-#endif
 	}
 
 	/DISCARD/ : {			/* Exit code and data		*/
@@ -86,6 +79,8 @@ SECTIONS
 			*(.glue_7)
 			*(.glue_7t)
 		*(.got)			/* Global offset table		*/
+
+		_etext = .;		/* End of text section		*/
 	}
 
 	. = ALIGN(16);
@@ -97,32 +92,14 @@ SECTIONS
 
 	RODATA
 
-	_etext = .;			/* End of text and rodata section */
-
-#ifdef CONFIG_XIP_KERNEL
-	__data_loc = ALIGN(4);		/* location in binary */
-	. = DATAADDR;
-#else
 	. = ALIGN(8192);
-	__data_loc = .;
-#endif
 
-	.data : AT(__data_loc) {
-		__data_start = .;	/* address in memory */
-
+	.data : {
 		/*
 		 * first, the init task union, aligned
 		 * to an 8192 byte boundary.
 		 */
 		*(.init.task)
-
-#ifdef CONFIG_XIP_KERNEL
-		. = ALIGN(4096);
-		__init_begin = .;
-		*(.init.data)
-		. = ALIGN(4096);
-		__init_end = .;
-#endif
 
 		. = ALIGN(4096);
 		__nosave_begin = .;
@@ -149,7 +126,7 @@ SECTIONS
 		__bss_start = .;	/* BSS				*/
 		*(.bss)
 		*(COMMON)
-		_end = .;
+		_end = . ;
 	}
 					/* Stabs debugging sections.	*/
 	.stab 0 : { *(.stab) }

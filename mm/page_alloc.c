@@ -31,15 +31,13 @@
 #include <linux/topology.h>
 #include <linux/sysctl.h>
 #include <linux/cpu.h>
-#include <linux/ckrm_mem_inline.h>
 #include <linux/vs_base.h>
 #include <linux/vs_limit.h>
-#include <linux/nodemask.h>
+#include <linux/ckrm_mem_inline.h>
 
 #include <asm/tlbflush.h>
 
-nodemask_t node_online_map = NODE_MASK_NONE;
-nodemask_t node_possible_map = NODE_MASK_ALL;
+DECLARE_BITMAP(node_online_map, MAX_NUMNODES);
 struct pglist_data *pgdat_list;
 unsigned long totalram_pages;
 unsigned long totalhigh_pages;
@@ -50,7 +48,7 @@ int sysctl_lower_zone_protection = 0;
 EXPORT_SYMBOL(totalram_pages);
 EXPORT_SYMBOL(nr_swap_pages);
 
-#ifdef CONFIG_CRASH_DUMP
+#ifdef CONFIG_CRASH_DUMP_MODULE
 /* This symbol has to be exported to use 'for_each_pgdat' macro by modules. */
 EXPORT_SYMBOL(pgdat_list);
 #endif
@@ -86,9 +84,9 @@ static void bad_page(const char *function, struct page *page)
 {
 	printk(KERN_EMERG "Bad page state at %s (in process '%s', page %p)\n",
 		function, current->comm, page);
-	printk(KERN_EMERG "flags:0x%0*lx mapping:%p mapcount:%d count:%d (%s)\n",
+	printk(KERN_EMERG "flags:0x%0*lx mapping:%p mapcount:%d count:%d\n",
 		(int)(2*sizeof(page_flags_t)), (unsigned long)page->flags,
-		page->mapping, page_mapcount(page), page_count(page), print_tainted());
+		page->mapping, page_mapcount(page), page_count(page));
 	printk(KERN_EMERG "Backtrace:\n");
 	dump_stack();
 	printk(KERN_EMERG "Trying to fix it up, but a reboot is needed\n");
@@ -105,7 +103,8 @@ static void bad_page(const char *function, struct page *page)
 	tainted |= TAINT_BAD_PAGE;
 }
 
-#if !defined(CONFIG_HUGETLB_PAGE) && !defined(CONFIG_CRASH_DUMP)
+#if !defined(CONFIG_HUGETLB_PAGE) && !defined(CONFIG_CRASH_DUMP) \
+	&& !defined(CONFIG_CRASH_DUMP_MODULE)
 #define prep_compound_page(page, order) do { } while (0)
 #define destroy_compound_page(page, order) do { } while (0)
 #else
@@ -366,14 +365,8 @@ static void prep_new_page(struct page *page, int order)
 
 	page->flags &= ~(1 << PG_uptodate | 1 << PG_error |
 			1 << PG_referenced | 1 << PG_arch_1 |
-#ifdef CONFIG_CKRM_RES_MEM
-			1 << PG_ckrm_account |
-#endif
 			1 << PG_checked | 1 << PG_mappedtodisk);
 	page->private = 0;
-#ifdef CONFIG_CKRM_RES_MEM
-	page->ckrm_zone = NULL;
-#endif
 	set_page_refs(page, order);
 }
 
@@ -629,16 +622,16 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 
 	might_sleep_if(wait);
 
+	if (!ckrm_class_limit_ok((GET_MEM_CLASS(current)))) {
+		return NULL;
+	}
+
 	/*
 	 * The caller may dip into page reserves a bit more if the caller
 	 * cannot run direct reclaim, or is the caller has realtime scheduling
 	 * policy
 	 */
 	can_try_harder = (unlikely(rt_task(p)) && !in_interrupt()) || !wait;
-
-	if (!ckrm_class_limit_ok((ckrm_get_mem_class(current)))) {
-		return NULL;
-	}
 
 	zones = zonelist->zones;  /* the list of zones suitable for gfp_mask */
 
@@ -757,6 +750,7 @@ nopage:
 got_pg:
 	zone_statistics(zonelist, z);
 	kernel_map_pages(page, 1 << order, 1);
+	ckrm_set_pages_class(page, 1 << order, GET_MEM_CLASS(current));
 	return page;
 }
 
@@ -1124,8 +1118,6 @@ void show_free_areas(void)
 			" active:%lukB"
 			" inactive:%lukB"
 			" present:%lukB"
-			" pages_scanned:%lu"
-			" all_unreclaimable? %s"
 			"\n",
 			zone->name,
 			K(zone->free_pages),
@@ -1134,9 +1126,7 @@ void show_free_areas(void)
 			K(zone->pages_high),
 			K(zone->nr_active),
 			K(zone->nr_inactive),
-			K(zone->present_pages),
-			zone->pages_scanned,
-			(zone->all_unreclaimable ? "yes" : "no")
+			K(zone->present_pages)
 			);
 		printk("protections[]:");
 		for (i = 0; i < MAX_NR_ZONES; i++)
@@ -1233,12 +1223,6 @@ static int __init find_next_best_node(int node, void *used_node_mask)
 		/* Don't want a node to appear more than once */
 		if (test_bit(n, used_node_mask))
 			continue;
-
-		/* Use the local node if we haven't already */
-		if (!test_bit(node, used_node_mask)) {
-			best_node = node;
-			break;
-		}
 
 		/* Use the distance array to find the distance */
 		val = node_distance(node, n);
@@ -1573,10 +1557,8 @@ static void __init free_area_init_core(struct pglist_data *pgdat,
 		}
 		printk(KERN_DEBUG "  %s zone: %lu pages, LIFO batch:%lu\n",
 				zone_names[j], realsize, batch);
-#ifndef CONFIG_CKRM_RES_MEM
 		INIT_LIST_HEAD(&zone->active_list);
 		INIT_LIST_HEAD(&zone->inactive_list);
-#endif
 		zone->nr_scan_active = 0;
 		zone->nr_scan_inactive = 0;
 		zone->nr_active = 0;
@@ -1968,12 +1950,8 @@ static void setup_per_zone_pages_min(void)
 			                   lowmem_pages;
 		}
 
-		/*
-		 * When interpreting these watermarks, just keep in mind that:
-		 * zone->pages_min == (zone->pages_min * 4) / 4;
-		 */
-		zone->pages_low   = (zone->pages_min * 5) / 4;
-		zone->pages_high  = (zone->pages_min * 6) / 4;
+		zone->pages_low = zone->pages_min * 2;
+		zone->pages_high = zone->pages_min * 3;
 		spin_unlock_irqrestore(&zone->lru_lock, flags);
 	}
 }
@@ -1982,25 +1960,24 @@ static void setup_per_zone_pages_min(void)
  * Initialise min_free_kbytes.
  *
  * For small machines we want it small (128k min).  For large machines
- * we want it large (64MB max).  But it is not linear, because network
+ * we want it large (16MB max).  But it is not linear, because network
  * bandwidth does not increase linearly with machine size.  We use
  *
- * 	min_free_kbytes = 4 * sqrt(lowmem_kbytes), for better accuracy:
- *	min_free_kbytes = sqrt(lowmem_kbytes * 16)
+ *	min_free_kbytes = sqrt(lowmem_kbytes)
  *
  * which yields
  *
- * 16MB:	512k
- * 32MB:	724k
- * 64MB:	1024k
- * 128MB:	1448k
- * 256MB:	2048k
- * 512MB:	2896k
- * 1024MB:	4096k
- * 2048MB:	5792k
- * 4096MB:	8192k
- * 8192MB:	11584k
- * 16384MB:	16384k
+ * 16MB:	128k
+ * 32MB:	181k
+ * 64MB:	256k
+ * 128MB:	362k
+ * 256MB:	512k
+ * 512MB:	724k
+ * 1024MB:	1024k
+ * 2048MB:	1448k
+ * 4096MB:	2048k
+ * 8192MB:	2896k
+ * 16384MB:	4096k
  */
 static int __init init_per_zone_pages_min(void)
 {
@@ -2008,11 +1985,11 @@ static int __init init_per_zone_pages_min(void)
 
 	lowmem_kbytes = nr_free_buffer_pages() * (PAGE_SIZE >> 10);
 
-	min_free_kbytes = int_sqrt(lowmem_kbytes * 16);
+	min_free_kbytes = int_sqrt(lowmem_kbytes);
 	if (min_free_kbytes < 128)
 		min_free_kbytes = 128;
-	if (min_free_kbytes > 65536)
-		min_free_kbytes = 65536;
+	if (min_free_kbytes > 16384)
+		min_free_kbytes = 16384;
 	setup_per_zone_pages_min();
 	setup_per_zone_protection();
 	return 0;

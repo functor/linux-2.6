@@ -53,7 +53,7 @@ struct mixart_uid
 
 struct mem_area {
 	unsigned long phys;
-	void __iomem *virt;
+	unsigned long virt;
 	struct resource *res;
 };
 

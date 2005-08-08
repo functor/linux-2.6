@@ -95,6 +95,7 @@ struct uart_sunsu_port {
 	enum su_type		su_type;
 	unsigned int		type_probed;	/* XXX Stupid */
 	int			port_node;
+	unsigned int		irq;
 
 #ifdef CONFIG_SERIO
 	struct serio		*serio;
@@ -683,14 +684,14 @@ static int sunsu_startup(struct uart_port *port)
 	}
 
 	if (up->su_type != SU_PORT_PORT) {
-		retval = request_irq(up->port.irq, sunsu_kbd_ms_interrupt,
+		retval = request_irq(up->irq, sunsu_kbd_ms_interrupt,
 				     SA_SHIRQ, su_typev[up->su_type], up);
 	} else {
-		retval = request_irq(up->port.irq, sunsu_serial_interrupt,
+		retval = request_irq(up->irq, sunsu_serial_interrupt,
 				     SA_SHIRQ, su_typev[up->su_type], up);
 	}
 	if (retval) {
-		printk("su: Cannot register IRQ %d\n", up->port.irq);
+		printk("su: Cannot register IRQ %d\n", up->irq);
 		return retval;
 	}
 
@@ -778,7 +779,7 @@ static void sunsu_shutdown(struct uart_port *port)
 	 */
 	(void) serial_in(up, UART_RX);
 
-	free_irq(up->port.irq, up);
+	free_irq(up->irq, up);
 }
 
 static void
@@ -1077,7 +1078,7 @@ static void sunsu_autoconfig(struct uart_sunsu_port *up)
 				 * This is correct on both architectures.
 				 */
 				up->port.mapbase = dev->resource[0].start;
-				up->port.irq = dev->irqs[0];
+				up->irq = dev->irqs[0];
 				goto ebus_done;
 			}
 		}
@@ -1090,7 +1091,7 @@ static void sunsu_autoconfig(struct uart_sunsu_port *up)
 				/* Same on sparc64. Cool architecure... */
 				up->port.membase = (char *) isa_dev->resource.start;
 				up->port.mapbase = isa_dev->resource.start;
-				up->port.irq = isa_dev->irq;
+				up->irq = isa_dev->irq;
 				goto ebus_done;
 			}
 		}
@@ -1132,7 +1133,7 @@ static void sunsu_autoconfig(struct uart_sunsu_port *up)
 	/*
 	 * There is no intr property on MrCoffee, so hardwire it.
 	 */
-	up->port.irq = IRQ_4M(13);
+	up->irq = IRQ_4M(13);
 #endif
 
 ebus_done:
@@ -1302,7 +1303,7 @@ static int __init sunsu_kbd_ms_init(struct uart_sunsu_port *up, int channel)
 
 	printk(KERN_INFO "su%d at 0x%p (irq = %s) is a %s\n",
 	       channel,
-	       up->port.membase, __irq_itoa(up->port.irq),
+	       up->port.membase, __irq_itoa(up->irq),
 	       sunsu_type(&up->port));
 
 #ifdef CONFIG_SERIO
@@ -1532,7 +1533,6 @@ static int __init sunsu_serial_init(void)
 	if (ret < 0)
 		return ret;
 
-	sunsu_serial_console_init();
 	for (i = 0; i < UART_NR; i++) {
 		struct uart_sunsu_port *up = &sunsu_ports[i];
 
@@ -1705,6 +1705,7 @@ static int __init sunsu_probe(void)
 	 * Console must be initiated after the generic initialization.
 	 */
        	sunsu_serial_init();
+	sunsu_serial_console_init();
 
 	return 0;
 }

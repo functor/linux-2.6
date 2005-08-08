@@ -206,7 +206,6 @@ snd_vortex_pcm_hw_params(snd_pcm_substream_t * substream,
 	   printk(KERN_INFO "Vortex: periods %d, period_bytes %d, channels = %d\n", params_periods(hw_params),
 	   params_period_bytes(hw_params), params_channels(hw_params));
 	 */
-	spin_lock_irq(&chip->lock);
 	// Make audio routes and config buffer DMA.
 	if (VORTEX_PCM_TYPE(substream->pcm) != VORTEX_PCM_WT) {
 		int dma, type = VORTEX_PCM_TYPE(substream->pcm);
@@ -244,7 +243,6 @@ snd_vortex_pcm_hw_params(snd_pcm_substream_t * substream,
 					params_periods(hw_params));
 	}
 #endif
-	spin_unlock_irq(&chip->lock);
 	return 0;
 }
 
@@ -254,7 +252,6 @@ static int snd_vortex_pcm_hw_free(snd_pcm_substream_t * substream)
 	vortex_t *chip = snd_pcm_substream_chip(substream);
 	stream_t *stream = (stream_t *) (substream->runtime->private_data);
 
-	spin_lock_irq(&chip->lock);
 	// Delete audio routes.
 	if (VORTEX_PCM_TYPE(substream->pcm) != VORTEX_PCM_WT) {
 		if (stream != NULL)
@@ -269,7 +266,6 @@ static int snd_vortex_pcm_hw_free(snd_pcm_substream_t * substream)
 	}
 #endif
 	substream->runtime->private_data = NULL;
-	spin_unlock_irq(&chip->lock);
 
 	return snd_pcm_lib_free_pages(substream);
 }
@@ -288,7 +284,6 @@ static int snd_vortex_pcm_prepare(snd_pcm_substream_t * substream)
 	else
 		dir = 0;
 	fmt = vortex_alsafmt_aspfmt(runtime->format);
-	spin_lock_irq(&chip->lock);
 	if (VORTEX_PCM_TYPE(substream->pcm) != VORTEX_PCM_WT) {
 		vortex_adbdma_setmode(chip, dma, 1, dir, fmt, 0 /*? */ ,
 				      0);
@@ -303,7 +298,6 @@ static int snd_vortex_pcm_prepare(snd_pcm_substream_t * substream)
 		vortex_wtdma_setstartbuffer(chip, dma, 0);
 	}
 #endif
-	spin_unlock_irq(&chip->lock);
 	return 0;
 }
 
@@ -314,7 +308,6 @@ static int snd_vortex_pcm_trigger(snd_pcm_substream_t * substream, int cmd)
 	stream_t *stream = (stream_t *) substream->runtime->private_data;
 	int dma = stream->dma;
 
-	spin_lock(&chip->lock);
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 		// do something to start the PCM engine
@@ -362,10 +355,8 @@ static int snd_vortex_pcm_trigger(snd_pcm_substream_t * substream, int cmd)
 #endif
 		break;
 	default:
-		spin_unlock(&chip->lock);
 		return -EINVAL;
 	}
-	spin_unlock(&chip->lock);
 	return 0;
 }
 

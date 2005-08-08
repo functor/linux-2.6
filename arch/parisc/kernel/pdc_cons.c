@@ -71,19 +71,6 @@ void pdc_outc(unsigned char c)
 	pdc_iodc_outc(c);
 }
 
-void pdc_printf(const char *fmt, ...)
-{
-	va_list args;
-	char buf[1024];
-	int i, len;
-
-	va_start(args, fmt);
-	len = vscnprintf(buf, sizeof(buf), fmt, args);
-	va_end(args);
-
-	for (i = 0; i < len; i++)
-		pdc_iodc_outc(buf[i]);
-}
 
 int pdc_console_poll_key(struct console *co)
 {

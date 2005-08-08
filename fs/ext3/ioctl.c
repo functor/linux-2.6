@@ -60,11 +60,11 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		 *
 		 * This test looks nicer. Thanks to Pauline Middelink
 		 */
-		if ((oldflags & EXT3_IMMUTABLE_FL) ||
-			((flags ^ oldflags) & (EXT3_APPEND_FL |
-			EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL))) {
-			if (!capable(CAP_LINUX_IMMUTABLE))
-				return -EPERM;
+		if (((oldflags & EXT3_IMMUTABLE_FL) ||
+			((flags ^ oldflags) &
+			 (EXT3_APPEND_FL | EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL)))
+		    && !capable(CAP_LINUX_IMMUTABLE)) {
+			return -EPERM;		
 		}
 
 		/*
@@ -157,73 +157,6 @@ flags_err:
 			return ret;
 		}
 #endif
-	case EXT3_IOC_GETRSVSZ:
-		if (test_opt(inode->i_sb, RESERVATION) && S_ISREG(inode->i_mode)) {
-			rsv_window_size = atomic_read(&ei->i_rsv_window.rsv_goal_size);
-			return put_user(rsv_window_size, (int __user *)arg);
-		}
-		return -ENOTTY;
-	case EXT3_IOC_SETRSVSZ:
-		if (!test_opt(inode->i_sb, RESERVATION) ||!S_ISREG(inode->i_mode))
-			return -ENOTTY;
-
-		if (IS_RDONLY(inode))
-			return -EROFS;
-
-		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
-			return -EACCES;
-
-		if (get_user(rsv_window_size, (int __user *)arg))
-			return -EFAULT;
-
-		if (rsv_window_size > EXT3_MAX_RESERVE_BLOCKS)
-			rsv_window_size = EXT3_MAX_RESERVE_BLOCKS;
-		atomic_set(&ei->i_rsv_window.rsv_goal_size, rsv_window_size);
-		return 0;
-	case EXT3_IOC_GROUP_EXTEND: {
-		unsigned long n_blocks_count;
-		struct super_block *sb = inode->i_sb;
-		int err;
-
-		if (!capable(CAP_SYS_RESOURCE))
-			return -EPERM;
-
-		if (IS_RDONLY(inode))
-			return -EROFS;
-
-		if (get_user(n_blocks_count, (__u32 __user *)arg))
-			return -EFAULT;
-
-		err = ext3_group_extend(sb, EXT3_SB(sb)->s_es, n_blocks_count);
-		journal_lock_updates(EXT3_SB(sb)->s_journal);
-		journal_flush(EXT3_SB(sb)->s_journal);
-		journal_unlock_updates(EXT3_SB(sb)->s_journal);
-
-		return err;
-	}
-	case EXT3_IOC_GROUP_ADD: {
-		struct ext3_new_group_data input;
-		struct super_block *sb = inode->i_sb;
-		int err;
-
-		if (!capable(CAP_SYS_RESOURCE))
-			return -EPERM;
-
-		if (IS_RDONLY(inode))
-			return -EROFS;
-
-		if (copy_from_user(&input, (struct ext3_new_group_input __user *)arg,
-				sizeof(input)))
-			return -EFAULT;
-
-		err = ext3_group_add(sb, &input);
-		journal_lock_updates(EXT3_SB(sb)->s_journal);
-		journal_flush(EXT3_SB(sb)->s_journal);
-		journal_unlock_updates(EXT3_SB(sb)->s_journal);
-
-		return err;
-	}
-
 #if defined(CONFIG_VSERVER_LEGACY) && !defined(CONFIG_INOXID_NONE)
 	case EXT3_IOC_SETXID: {
 		handle_t *handle;
@@ -256,6 +189,72 @@ flags_err:
 		return err;
 	}
 #endif
+	case EXT3_IOC_GETRSVSZ:
+		if (test_opt(inode->i_sb, RESERVATION) && S_ISREG(inode->i_mode)) {
+			rsv_window_size = atomic_read(&ei->i_rsv_window.rsv_goal_size);
+			return put_user(rsv_window_size, (int *)arg);
+		}
+		return -ENOTTY;
+	case EXT3_IOC_SETRSVSZ:
+		if (!test_opt(inode->i_sb, RESERVATION) ||!S_ISREG(inode->i_mode))
+			return -ENOTTY;
+
+		if (IS_RDONLY(inode))
+			return -EROFS;
+
+		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
+			return -EACCES;
+
+		if (get_user(rsv_window_size, (int *)arg))
+			return -EFAULT;
+
+		if (rsv_window_size > EXT3_MAX_RESERVE_BLOCKS)
+			rsv_window_size = EXT3_MAX_RESERVE_BLOCKS;
+		atomic_set(&ei->i_rsv_window.rsv_goal_size, rsv_window_size);
+		return 0;
+	case EXT3_IOC_GROUP_EXTEND: {
+		unsigned long n_blocks_count;
+		struct super_block *sb = inode->i_sb;
+		int err;
+
+		if (!capable(CAP_SYS_RESOURCE))
+			return -EPERM;
+
+		if (IS_RDONLY(inode))
+			return -EROFS;
+
+		if (get_user(n_blocks_count, (__u32 *)arg))
+			return -EFAULT;
+
+		err = ext3_group_extend(sb, EXT3_SB(sb)->s_es, n_blocks_count);
+		journal_lock_updates(EXT3_SB(sb)->s_journal);
+		journal_flush(EXT3_SB(sb)->s_journal);
+		journal_unlock_updates(EXT3_SB(sb)->s_journal);
+
+		return err;
+	}
+	case EXT3_IOC_GROUP_ADD: {
+		struct ext3_new_group_data input;
+		struct super_block *sb = inode->i_sb;
+		int err;
+
+		if (!capable(CAP_SYS_RESOURCE))
+			return -EPERM;
+
+		if (IS_RDONLY(inode))
+			return -EROFS;
+
+		if (copy_from_user(&input, (struct ext3_new_group_input *)arg,
+				sizeof(input)))
+			return -EFAULT;
+
+		err = ext3_group_add(sb, &input);
+		journal_lock_updates(EXT3_SB(sb)->s_journal);
+		journal_flush(EXT3_SB(sb)->s_journal);
+		journal_unlock_updates(EXT3_SB(sb)->s_journal);
+
+		return err;
+	}
 
 	default:
 		return -ENOTTY;

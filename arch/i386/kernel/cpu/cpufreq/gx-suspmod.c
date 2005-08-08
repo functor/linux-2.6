@@ -141,7 +141,17 @@ module_param (max_duration, int, 0444);
 #define POLICY_MIN_DIV 20
 
 
-#define dprintk(msg...) cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, "gx-suspmod", msg)
+/* DEBUG
+ *   Define it if you want verbose debug output
+ */
+
+#define SUSPMOD_DEBUG 1
+
+#ifdef SUSPMOD_DEBUG
+#define dprintk(msg...) printk(KERN_DEBUG "cpufreq:" msg)
+#else
+#define dprintk(msg...) do { } while(0)
+#endif
 
 /**
  *      we can detect a core multipiler from dir0_lsb 
@@ -184,18 +194,18 @@ static __init struct pci_dev *gx_detect_chipset(void)
 	/* check if CPU is a MediaGX or a Geode. */
         if ((current_cpu_data.x86_vendor != X86_VENDOR_NSC) && 
 	    (current_cpu_data.x86_vendor != X86_VENDOR_CYRIX)) {
-		dprintk("error: no MediaGX/Geode processor found!\n");
+		printk(KERN_INFO "gx-suspmod: error: no MediaGX/Geode processor found!\n");
 		return NULL;		
 	}
 
 	/* detect which companion chip is used */
-	while ((gx_pci = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, gx_pci)) != NULL) {
+	while ((gx_pci = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, gx_pci)) != NULL) {
 		if ((pci_match_device (gx_chipset_tbl, gx_pci)) != NULL) {
 			return gx_pci;
 		}
 	}
 
-	dprintk("error: no supported chipset found!\n");
+	dprintk(KERN_INFO "gx-suspmod: error: no supported chipset found!\n");
 	return NULL;
 }
 
@@ -489,7 +499,6 @@ static int __init cpufreq_gx_init(void)
 static void __exit cpufreq_gx_exit(void)
 {
 	cpufreq_unregister_driver(&gx_suspmod_driver);
-	pci_dev_put(gx_params->cs55x0);
 	kfree(gx_params);
 }
 

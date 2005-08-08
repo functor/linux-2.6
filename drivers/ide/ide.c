@@ -153,12 +153,12 @@
 #include <linux/cdrom.h>
 #include <linux/seq_file.h>
 #include <linux/device.h>
-#include <linux/bitops.h>
 
 #include <asm/byteorder.h>
 #include <asm/irq.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
+#include <asm/bitops.h>
 
 
 /* default maximum number of failures */
@@ -424,16 +424,11 @@ void *ide_hwif_to_key(ide_hwif_t *hwif)
 
 int ide_system_bus_speed (void)
 {
-	static struct pci_device_id pci_default[] = {
-		{ PCI_DEVICE(PCI_ANY_ID, PCI_ANY_ID) },
-		{ }
-	};
-
 	if (!system_bus_speed) {
 		if (idebus_parameter) {
 			/* user supplied value */
 			system_bus_speed = idebus_parameter;
-		} else if (pci_dev_present(pci_default)) {
+		} else if (pci_find_device(PCI_ANY_ID, PCI_ANY_ID, NULL) != NULL) {
 			/* safe default value for PCI */
 			system_bus_speed = 33;
 		} else {
@@ -767,6 +762,7 @@ static void ide_hwif_restore(ide_hwif_t *hwif, ide_hwif_t *tmp_hwif)
 	hwif->cds			= tmp_hwif->cds;
 #endif
 
+	hwif->identify			= tmp_hwif->identify;
 	hwif->tuneproc			= tmp_hwif->tuneproc;
 	hwif->speedproc			= tmp_hwif->speedproc;
 	hwif->selectproc		= tmp_hwif->selectproc;
@@ -777,15 +773,16 @@ static void ide_hwif_restore(ide_hwif_t *hwif, ide_hwif_t *tmp_hwif)
 	hwif->maskproc			= tmp_hwif->maskproc;
 	hwif->quirkproc			= tmp_hwif->quirkproc;
 	hwif->busproc			= tmp_hwif->busproc;
+	hwif->raw_taskfile		= tmp_hwif->raw_taskfile;
 
 	hwif->ata_input_data		= tmp_hwif->ata_input_data;
 	hwif->ata_output_data		= tmp_hwif->ata_output_data;
 	hwif->atapi_input_bytes		= tmp_hwif->atapi_input_bytes;
 	hwif->atapi_output_bytes	= tmp_hwif->atapi_output_bytes;
 
-	hwif->ide_dma_setup		= tmp_hwif->ide_dma_setup;
-	hwif->ide_dma_exec_cmd		= tmp_hwif->ide_dma_exec_cmd;
-	hwif->ide_dma_start		= tmp_hwif->ide_dma_start;
+	hwif->ide_dma_read		= tmp_hwif->ide_dma_read;
+	hwif->ide_dma_write		= tmp_hwif->ide_dma_write;
+	hwif->ide_dma_begin		= tmp_hwif->ide_dma_begin;
 	hwif->ide_dma_end		= tmp_hwif->ide_dma_end;
 	hwif->ide_dma_check		= tmp_hwif->ide_dma_check;
 	hwif->ide_dma_on		= tmp_hwif->ide_dma_on;
@@ -793,6 +790,7 @@ static void ide_hwif_restore(ide_hwif_t *hwif, ide_hwif_t *tmp_hwif)
 	hwif->ide_dma_test_irq		= tmp_hwif->ide_dma_test_irq;
 	hwif->ide_dma_host_on		= tmp_hwif->ide_dma_host_on;
 	hwif->ide_dma_host_off		= tmp_hwif->ide_dma_host_off;
+	hwif->ide_dma_verbose		= tmp_hwif->ide_dma_verbose;
 	hwif->ide_dma_lostirq		= tmp_hwif->ide_dma_lostirq;
 	hwif->ide_dma_timeout		= tmp_hwif->ide_dma_timeout;
 
@@ -808,8 +806,6 @@ static void ide_hwif_restore(ide_hwif_t *hwif, ide_hwif_t *tmp_hwif)
 	hwif->INL			= tmp_hwif->INL;
 	hwif->INSW			= tmp_hwif->INSW;
 	hwif->INSL			= tmp_hwif->INSL;
-
-	hwif->sg_max_nents		= tmp_hwif->sg_max_nents;
 
 	hwif->mmio			= tmp_hwif->mmio;
 	hwif->rqsize			= tmp_hwif->rqsize;
@@ -918,7 +914,10 @@ int __ide_unregister_hwif(ide_hwif_t *hwif)
 		DRIVER(drive)->cleanup(drive);
 	}
 
+#ifdef CONFIG_PROC_FS
+	destroy_proc_ide_drives(hwif);
 	destroy_proc_ide_interface(hwif);
+#endif
 
 	spin_lock_irq(&ide_lock);
 	hwgroup = hwif->hwgroup;
@@ -949,6 +948,7 @@ int __ide_unregister_hwif(ide_hwif_t *hwif)
 
 	if(was_present)
 		ide_hwif_release_regions(hwif);
+
 	/*
 	 * Remove us from the hwgroup, and free
 	 * the hwgroup if we were the only member
@@ -1056,7 +1056,6 @@ int __ide_unregister_hwif(ide_hwif_t *hwif)
 		hwif->drives[i].disk = NULL;
 		put_disk(disk);
 	}
-	kfree(hwif->sg_table);
 	unregister_blkdev(hwif->major, hwif->name);
 	spin_lock_irq(&ide_lock);
 
@@ -1197,7 +1196,7 @@ void ide_setup_ports (	hw_regs_t *hw,
  *	ide_register_hw_with_fixup	-	register IDE interface
  *	@hw: hardware registers
  *	@hwifp: pointer to returned hwif
- *	@fixup: fixup function
+ *	@fixup function to call
  *
  *	Register an IDE interface, specifying exactly the registers etc.
  *	Set init=1 iff calling before probes have taken place. The
@@ -1210,7 +1209,7 @@ void ide_setup_ports (	hw_regs_t *hw,
  *	Returns -1 on error.
  */
 
-int ide_register_hw_with_fixup(hw_regs_t *hw, ide_hwif_t **hwifp, void(*fixup)(ide_hwif_t *hwif))
+int ide_register_hw_with_fixup(hw_regs_t *hw, ide_hwif_t **hwifp, void (*fixup)(ide_hwif_t *hwif))
 {
 	int index, retry = 1;
 	ide_hwif_t *hwif;
@@ -1232,7 +1231,8 @@ int ide_register_hw_with_fixup(hw_regs_t *hw, ide_hwif_t **hwifp, void(*fixup)(i
 				goto found;
 		}
 		/* FIXME- this check should die as should the retry loop */
-		for (index = 0; index < MAX_HWIFS; index++) {
+		for (index = 0; index < MAX_HWIFS; index++)
+		{
 			hwif = &ide_hwifs[index];
 			__ide_unregister_hwif(hwif);
 		}
@@ -1271,9 +1271,21 @@ found:
 
 EXPORT_SYMBOL(ide_register_hw_with_fixup);
 
-int ide_register_hw(hw_regs_t *hw, ide_hwif_t **hwifp)
+/**
+ *	ide_register_hw		-	register new IDE hardware
+ *	@hw: hardware registers
+ *	@hwifp: pointer to returned hwif
+ *
+ *	Register an IDE interface, specifying exactly the registers etc.
+ *	Set init=1 iff calling before probes have taken place. The
+ *	ide_cfg_sem protects this against races.
+ *
+ *	Returns -1 on error.
+ */
+ 
+int ide_register_hw(hw_regs_t *hw, ide_hwif_t **hwif)
 {
-	return ide_register_hw_with_fixup(hw, hwifp, NULL);
+	return ide_register_hw_with_fixup(hw, hwif, NULL);
 }
 
 EXPORT_SYMBOL(ide_register_hw);
@@ -1899,13 +1911,9 @@ int generic_ide_ioctl(struct file *file, struct block_device *bdev,
 			 *	spot if we miss one somehow
 			 */
 
-
-			/* FIXME: need to block new commands here, must
-			   find a better approach! */
-			HWGROUP(drive)->busy = 1;
-			DRIVER(drive)->abort(drive, "drive reset");
-			
 			spin_lock_irqsave(&ide_lock, flags);
+			
+			DRIVER(drive)->abort(drive, "drive reset");
 			if(HWGROUP(drive)->handler)
 				BUG();
 				
@@ -2018,6 +2026,9 @@ static int __init match_parm (char *s, const char *keywords[], int vals[], int m
 	return 0;	/* zero = nothing matched */
 }
 
+#ifdef CONFIG_BLK_DEV_PDC4030
+static int __initdata probe_pdc4030;
+#endif
 #ifdef CONFIG_BLK_DEV_ALI14XX
 static int __initdata probe_ali14xx;
 extern int ali14xx_init(void);
@@ -2077,7 +2088,7 @@ int __init ide_setup (char *s)
 #endif /* CONFIG_BLK_DEV_IDEDOUBLER */
 
 	if (!strcmp(s, "ide=nodma")) {
-		printk(" : Prevented DMA\n");
+		printk("IDE: Prevented DMA\n");
 		noautodma = 1;
 		return 1;
 	}
@@ -2096,7 +2107,7 @@ int __init ide_setup (char *s)
 	if (s[0] == 'h' && s[1] == 'd' && s[2] >= 'a' && s[2] <= max_drive) {
 		const char *hd_words[] = {
 			"none", "noprobe", "nowerr", "cdrom", "serialize",
-			"autotune", "noautotune", "minus8", "swapdata", "bswap",
+			"autotune", "noautotune", "stroke", "swapdata", "bswap",
 			"minus11", "remap", "remap63", "scsi", NULL };
 		unit = s[2] - 'a';
 		hw   = unit / MAX_DRIVES;
@@ -2129,6 +2140,9 @@ int __init ide_setup (char *s)
 				goto done;
 			case -7: /* "noautotune" */
 				drive->autotune = IDE_TUNE_NOAUTO;
+				goto done;
+			case -8: /* stroke */
+				drive->stroke = 1;
 				goto done;
 			case -9: /* "swapdata" */
 			case -10: /* "bswap" */
@@ -2183,7 +2197,7 @@ int __init ide_setup (char *s)
 			"noprobe", "serialize", "autotune", "noautotune", 
 			"reset", "dma", "ata66", "minus8", "minus9",
 			"minus10", "four", "qd65xx", "ht6560b", "cmd640_vlb",
-			"dtc2278", "umc8672", "ali14xx", NULL };
+			"dtc2278", "umc8672", "ali14xx", "dc4030", NULL };
 		hw = s[3] - '0';
 		hwif = &ide_hwifs[hw];
 		i = match_parm(&s[4], ide_words, vals, 3);
@@ -2209,6 +2223,11 @@ int __init ide_setup (char *s)
 		}
 
 		switch (i) {
+#ifdef CONFIG_BLK_DEV_PDC4030
+			case -18: /* "dc4030" */
+				probe_pdc4030 = 1;
+				goto done;
+#endif
 #ifdef CONFIG_BLK_DEV_ALI14XX
 			case -17: /* "ali14xx" */
 				probe_ali14xx = 1;
@@ -2343,6 +2362,13 @@ static void __init probe_for_hwifs (void)
 		ide_probe_for_cmd640x();
 	}
 #endif /* CONFIG_BLK_DEV_CMD640 */
+#ifdef CONFIG_BLK_DEV_PDC4030
+	{
+		extern int pdc4030_init(void);
+		if (probe_pdc4030)
+			(void)pdc4030_init();
+	}
+#endif /* CONFIG_BLK_DEV_PDC4030 */
 #ifdef CONFIG_BLK_DEV_IDE_PMAC
 	{
 		extern void pmac_ide_probe(void);
@@ -2709,7 +2735,7 @@ int __init ide_init (void)
 
 #ifdef MODULE
 char *options = NULL;
-module_param(options, charp, 0);
+MODULE_PARM(options,"s");
 MODULE_LICENSE("GPL");
 
 static void __init parse_options (char *line)

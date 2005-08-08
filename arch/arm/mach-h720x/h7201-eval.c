@@ -27,7 +27,10 @@
 #include <asm/pgtable.h>
 #include <asm/mach/arch.h>
 #include <asm/hardware.h>
-#include "common.h"
+
+extern void h720x_init_irq (void);
+extern void h7201_init_time(void);
+extern void __init h720x_map_io(void);
 
 MACHINE_START(H7201, "Hynix GMS30C7201")
 	MAINTAINER("Robert Schwebel, Pengutronix")
@@ -35,5 +38,5 @@ MACHINE_START(H7201, "Hynix GMS30C7201")
 	BOOT_PARAMS(0xc0001000)
 	MAPIO(h720x_map_io)
 	INITIRQ(h720x_init_irq)
-	.timer = &h7201_timer,
+	INITTIME(h7201_init_time)
 MACHINE_END

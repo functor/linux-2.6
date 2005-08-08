@@ -20,9 +20,8 @@
 #include <linux/namei.h>
 #include <linux/vs_base.h>
 #include <linux/vserver/inode.h>
-#include <linux/bitops.h>
-#include <linux/vserver/inode.h>
 #include <asm/uaccess.h>
+#include <asm/bitops.h>
 
 static ssize_t proc_file_read(struct file *file, char __user *buf,
 			      size_t nbytes, loff_t *ppos);
@@ -63,7 +62,7 @@ proc_file_read(struct file *file, char __user *buf, size_t nbytes,
 		return -ENOMEM;
 
 	while ((nbytes > 0) && !eof) {
-		count = min_t(size_t, PROC_BLOCK_SIZE, nbytes);
+		count = min_t(ssize_t, PROC_BLOCK_SIZE, nbytes);
 
 		start = NULL;
 		if (dp->get_info) {
@@ -389,8 +388,7 @@ struct dentry *proc_lookup(struct inode * dir, struct dentry *dentry, struct nam
 
 				error = -EINVAL;
 				inode = proc_get_inode(dir->i_sb, ino, de);
-				/* generic proc entries belong to the host */
-				inode->i_xid = 0;
+				inode->i_xid = vx_current_xid();
 				break;
 			}
 		}

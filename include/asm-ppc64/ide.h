@@ -19,7 +19,7 @@
 #ifdef __KERNEL__
 
 #ifndef MAX_HWIFS
-# define MAX_HWIFS	10
+# define MAX_HWIFS	4
 #endif
 
 #define IDE_ARCH_OBSOLETE_INIT

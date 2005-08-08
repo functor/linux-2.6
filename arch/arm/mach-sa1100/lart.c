@@ -17,8 +17,6 @@
 #include "generic.h"
 
 
-#warning "include/asm/arch-sa1100/ide.h needs fixing for lart"
-
 static struct map_desc lart_io_desc[] __initdata = {
  /* virtual     physical    length      type */
   { 0xe8000000, 0x00000000, 0x00400000, MT_DEVICE }, /* main flash memory */
@@ -45,5 +43,5 @@ MACHINE_START(LART, "LART")
 	BOOT_PARAMS(0xc0000100)
 	MAPIO(lart_map_io)
 	INITIRQ(sa1100_init_irq)
-	.timer		= &sa1100_timer,
+	INITTIME(sa1100_init_time)
 MACHINE_END

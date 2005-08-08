@@ -28,7 +28,6 @@
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <asm/uaccess.h>
 
 #include <acpi/acpi_bus.h>
@@ -76,41 +75,51 @@ struct proc_dir_entry		*acpi_fan_dir;
 
 
 static int
-acpi_fan_read_state (struct seq_file *seq, void *offset)
+acpi_fan_read_state (
+	char			*page,
+	char			**start,
+	off_t			off,
+	int 			count,
+	int 			*eof,
+	void			*data)
 {
-	struct acpi_fan		*fan = (struct acpi_fan *) seq->private;
+	struct acpi_fan		*fan = (struct acpi_fan *) data;
+	char			*p = page;
+	int			len = 0;
 	int			state = 0;
 
 	ACPI_FUNCTION_TRACE("acpi_fan_read_state");
 
-	if (!fan)
+	if (!fan || (off != 0))
 		goto end;
 
 	if (acpi_bus_get_power(fan->handle, &state))
 		goto end;
 
-	seq_printf(seq, "status:                  %s\n",
+	p += sprintf(p, "status:                  %s\n",
 		!state?"on":"off");
 
 end:
-	return_VALUE(0);
+	len = (p - page);
+	if (len <= off+count) *eof = 1;
+	*start = page + off;
+	len -= off;
+	if (len>count) len = count;
+	if (len<0) len = 0;
+
+	return_VALUE(len);
 }
 
-static int acpi_fan_state_open_fs(struct inode *inode, struct file *file)
-{
-	return single_open(file, acpi_fan_read_state, PDE(inode)->data);
-}
 
-static ssize_t
+static int
 acpi_fan_write_state (
 	struct file		*file,
 	const char		__user *buffer,
-	size_t			count,
-	loff_t			*ppos)
+	unsigned long		count,
+	void			*data)
 {
 	int			result = 0;
-	struct seq_file		*m = (struct seq_file *)file->private_data;
-	struct acpi_fan		*fan = (struct acpi_fan *) m->private;
+	struct acpi_fan		*fan = (struct acpi_fan *) data;
 	char			state_string[12] = {'\0'};
 
 	ACPI_FUNCTION_TRACE("acpi_fan_write_state");
@@ -131,14 +140,6 @@ acpi_fan_write_state (
 	return_VALUE(count);
 }
 
-static struct file_operations acpi_fan_state_ops = {
-	.open		= acpi_fan_state_open_fs,
-	.read		= seq_read,
-	.write		= acpi_fan_write_state,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.owner = THIS_MODULE,
-};
 
 static int
 acpi_fan_add_fs (
@@ -167,7 +168,8 @@ acpi_fan_add_fs (
 			"Unable to create '%s' fs entry\n",
 			ACPI_FAN_FILE_STATE));
 	else {
-		entry->proc_fops = &acpi_fan_state_ops;
+		entry->read_proc = acpi_fan_read_state;
+		entry->write_proc = acpi_fan_write_state;
 		entry->data = acpi_driver_data(device);
 		entry->owner = THIS_MODULE;
 	}

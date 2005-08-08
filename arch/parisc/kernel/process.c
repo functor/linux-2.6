@@ -363,11 +363,8 @@ asmlinkage int sys_execve(struct pt_regs *regs)
 		goto out;
 	error = do_execve(filename, (char **) regs->gr[25],
 		(char **) regs->gr[24], regs);
-	if (error == 0) {
-		task_lock(current);
+	if (error == 0)
 		current->ptrace &= ~PT_DTRACE;
-		task_unlock(current);
-	}
 	putname(filename);
 out:
 

@@ -33,14 +33,13 @@
 #include <linux/ptrace.h>
 #include <linux/ioport.h>
 #include <linux/spinlock.h>
-#include <linux/moduleparam.h>
 
 #include <linux/skbuff.h>
 #include <linux/string.h>
 #include <linux/serial.h>
 #include <linux/serial_reg.h>
-#include <linux/bitops.h>
 #include <asm/system.h>
+#include <asm/bitops.h>
 #include <asm/io.h>
 
 #include <pcmcia/version.h>
@@ -60,11 +59,11 @@
 
 
 /* Bit map of interrupts to choose from */
-static unsigned int irq_mask = 0xffff;
+static u_int irq_mask = 0xffff;
 static int irq_list[4] = { -1 };
 
-module_param(irq_mask, uint, 0);
-module_param_array(irq_list, int, NULL, 0);
+MODULE_PARM(irq_mask, "i");
+MODULE_PARM(irq_list, "1-4i");
 
 MODULE_AUTHOR("Marcel Holtmann <marcel@holtmann.org>");
 MODULE_DESCRIPTION("Bluetooth driver for Bluetooth PCMCIA cards with HCI UART interface");
@@ -92,14 +91,14 @@ typedef struct btuart_info_t {
 } btuart_info_t;
 
 
-static void btuart_config(dev_link_t *link);
-static void btuart_release(dev_link_t *link);
-static int btuart_event(event_t event, int priority, event_callback_args_t *args);
+void btuart_config(dev_link_t *link);
+void btuart_release(dev_link_t *link);
+int btuart_event(event_t event, int priority, event_callback_args_t *args);
 
 static dev_info_t dev_info = "btuart_cs";
 
-static dev_link_t *btuart_attach(void);
-static void btuart_detach(dev_link_t *);
+dev_link_t *btuart_attach(void);
+void btuart_detach(dev_link_t *);
 
 static dev_link_t *dev_list = NULL;
 
@@ -492,7 +491,7 @@ static int btuart_hci_ioctl(struct hci_dev *hdev, unsigned int cmd, unsigned lon
 /* ======================== Card services HCI interaction ======================== */
 
 
-static int btuart_open(btuart_info_t *info)
+int btuart_open(btuart_info_t *info)
 {
 	unsigned long flags;
 	unsigned int iobase = info->link.io.BasePort1;
@@ -561,7 +560,7 @@ static int btuart_open(btuart_info_t *info)
 }
 
 
-static int btuart_close(btuart_info_t *info)
+int btuart_close(btuart_info_t *info)
 {
 	unsigned long flags;
 	unsigned int iobase = info->link.io.BasePort1;
@@ -590,7 +589,7 @@ static int btuart_close(btuart_info_t *info)
 	return 0;
 }
 
-static dev_link_t *btuart_attach(void)
+dev_link_t *btuart_attach(void)
 {
 	btuart_info_t *info;
 	client_reg_t client_reg;
@@ -648,7 +647,7 @@ static dev_link_t *btuart_attach(void)
 }
 
 
-static void btuart_detach(dev_link_t *link)
+void btuart_detach(dev_link_t *link)
 {
 	btuart_info_t *info = link->priv;
 	dev_link_t **linkp;
@@ -702,7 +701,7 @@ static int next_tuple(client_handle_t handle, tuple_t *tuple, cisparse_t *parse)
 	return get_tuple(handle, tuple, parse);
 }
 
-static void btuart_config(dev_link_t *link)
+void btuart_config(dev_link_t *link)
 {
 	static ioaddr_t base[5] = { 0x3f8, 0x2f8, 0x3e8, 0x2e8, 0x0 };
 	client_handle_t handle = link->handle;
@@ -816,7 +815,7 @@ failed:
 }
 
 
-static void btuart_release(dev_link_t *link)
+void btuart_release(dev_link_t *link)
 {
 	btuart_info_t *info = link->priv;
 
@@ -833,7 +832,7 @@ static void btuart_release(dev_link_t *link)
 }
 
 
-static int btuart_event(event_t event, int priority, event_callback_args_t *args)
+int btuart_event(event_t event, int priority, event_callback_args_t *args)
 {
 	dev_link_t *link = args->client_data;
 	btuart_info_t *info = link->priv;

@@ -11,17 +11,17 @@
 #include <linux/tty.h>
 #include <linux/init.h>
 #include <linux/device.h>
-#include <linux/interrupt.h>
 
 #include <asm/hardware.h>
 #include <asm/setup.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
+#include <asm/hardware.h>	/* io_p2v() */
 #include <asm/irq.h>
 #include <asm/mach/irq.h>
 #include <asm/mach/map.h>
 
-#include "common.h"
+#include <linux/interrupt.h>
 
 static struct resource smc91x_resources[] = {
 	[0] = {
@@ -261,13 +261,16 @@ lpd7a400_map_io(void)
 
 #ifdef CONFIG_MACH_LPD7A400
 
+extern void lh7a400_init_irq (void);
+extern void lh7a40x_init_time (void);
+
 MACHINE_START (LPD7A400, "Logic Product Development LPD7A400-10")
 	MAINTAINER ("Marc Singer")
 	BOOT_MEM (0xc0000000, 0x80000000, io_p2v (0x80000000))
 	BOOT_PARAMS (0xc0000100)
 	MAPIO (lpd7a400_map_io)
 	INITIRQ (lh7a400_init_irq)
-	.timer		= &lh7a40x_timer,
+	INITTIME (lh7a40x_init_time)
 	INIT_MACHINE (lpd7a40x_init)
 MACHINE_END
 
@@ -275,13 +278,16 @@ MACHINE_END
 
 #ifdef CONFIG_MACH_LPD7A404
 
+extern void lh7a404_init_irq (void);
+extern void lh7a40x_init_time (void);
+
 MACHINE_START (LPD7A404, "Logic Product Development LPD7A404-10")
 	MAINTAINER ("Marc Singer")
 	BOOT_MEM (0xc0000000, 0x80000000, io_p2v (0x80000000))
 	BOOT_PARAMS (0xc0000100)
 	MAPIO (lpd7a400_map_io)
 	INITIRQ (lh7a404_init_irq)
-	.timer		= &lh7a40x_timer,
+	INITTIME (lh7a40x_init_time)
 	INIT_MACHINE (lpd7a40x_init)
 MACHINE_END
 

@@ -27,7 +27,6 @@
 
 	.text
 
-#ifdef CONFIG_6xx
 	.globl	disable_6xx_mmu
 disable_6xx_mmu:
 	/* Establish default MSR value, exception prefix 0xFFF.
@@ -95,7 +94,6 @@ disable_6xx_l1cache:
 	sync
 	isync
 	blr
-#endif
 
 	.globl	_setup_L2CR
 _setup_L2CR:

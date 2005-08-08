@@ -5,11 +5,12 @@
 # Rewritten to use lists instead of if-statements.
 # 
 
-obj-y :=	open.o read_write.o file_table.o buffer.o  bio.o super.o \
-		block_dev.o char_dev.o stat.o exec.o pipe.o namei.o fcntl.o \
-		ioctl.o readdir.o select.o fifo.o locks.o dcache.o inode.o \
-		attr.o bad_inode.o file.o filesystems.o namespace.o aio.o \
-		seq_file.o xattr.o libfs.o fs-writeback.o mpage.o direct-io.o \
+obj-y :=	open.o read_write.o file_table.o buffer.o \
+		bio.o super.o block_dev.o char_dev.o stat.o exec.o pipe.o \
+		namei.o fcntl.o ioctl.o readdir.o select.o fifo.o locks.o \
+		dcache.o inode.o attr.o bad_inode.o file.o dnotify.o \
+		filesystems.o namespace.o seq_file.o xattr.o libfs.o \
+		fs-writeback.o mpage.o direct-io.o aio.o
 
 obj-$(CONFIG_EPOLL)		+= eventpoll.o
 obj-$(CONFIG_COMPAT)		+= compat.o
@@ -35,8 +36,6 @@ obj-$(CONFIG_QUOTA)		+= dquot.o
 obj-$(CONFIG_QFMT_V1)		+= quota_v1.o
 obj-$(CONFIG_QFMT_V2)		+= quota_v2.o
 obj-$(CONFIG_QUOTACTL)		+= quota.o
-
-obj-$(CONFIG_DNOTIFY)		+= dnotify.o
 
 obj-$(CONFIG_PROC_FS)		+= proc/
 obj-y				+= partitions/
@@ -93,6 +92,7 @@ obj-$(CONFIG_JFS_FS)		+= jfs/
 obj-$(CONFIG_XFS_FS)		+= xfs/
 obj-$(CONFIG_AFS_FS)		+= afs/
 obj-$(CONFIG_BEFS_FS)		+= befs/
+obj-$(CONFIG_EXTERNFS)		+= hostfs/
 obj-$(CONFIG_RCFS_FS)		+= rcfs/
 obj-$(CONFIG_HOSTFS)		+= hostfs/
 obj-$(CONFIG_HPPFS)		+= hppfs/

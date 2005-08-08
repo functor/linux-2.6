@@ -433,7 +433,7 @@ int __init start_secondary(void *unused)
 	cpu_init();
 	smp_callin();
 	while (!cpu_isset(smp_processor_id(), smp_commenced_mask))
-		cpu_relax();
+		rep_nop();
 
 	smp_online();
 
@@ -482,7 +482,7 @@ static void __init smp_callin(void)
 		/* Has the boot CPU finished it's STARTUP sequence ? */
 		if (cpu_isset(cpu_id, cpu_callout_map))
 			break;
-		cpu_relax();
+		rep_nop();
 	}
 
 	if (!time_before(jiffies, timeout)) {

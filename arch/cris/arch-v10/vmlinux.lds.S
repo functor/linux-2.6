@@ -26,7 +26,6 @@ SECTIONS
 	.text : {
 		*(.text)
 		SCHED_TEXT
-		LOCK_TEXT
 		*(.fixup)
 		*(.text.__*)
 	}

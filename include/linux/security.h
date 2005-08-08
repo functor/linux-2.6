@@ -27,18 +27,18 @@
 #include <linux/signal.h>
 #include <linux/resource.h>
 #include <linux/sem.h>
+#include <linux/sysctl.h>
 #include <linux/shm.h>
 #include <linux/msg.h>
 #include <linux/sched.h>
-
-struct ctl_table;
+#include <linux/skbuff.h>
+#include <linux/netlink.h>
 
 /*
  * These functions are in security/capability.c and are used
  * as the default capabilities functions
  */
 extern int cap_capable (struct task_struct *tsk, int cap);
-extern int cap_settime (struct timespec *ts, struct timezone *tz);
 extern int cap_ptrace (struct task_struct *parent, struct task_struct *child);
 extern int cap_capget (struct task_struct *target, kernel_cap_t *effective, kernel_cap_t *inheritable, kernel_cap_t *permitted);
 extern int cap_capset_check (struct task_struct *target, kernel_cap_t *effective, kernel_cap_t *inheritable, kernel_cap_t *permitted);
@@ -53,14 +53,18 @@ extern void cap_task_reparent_to_init (struct task_struct *p);
 extern int cap_syslog (int type);
 extern int cap_vm_enough_memory (long pages);
 
-struct msghdr;
-struct sk_buff;
-struct sock;
-struct sockaddr;
-struct socket;
+static inline int cap_netlink_send (struct sock *sk, struct sk_buff *skb)
+{
+	NETLINK_CB (skb).eff_cap = current->cap_effective;
+	return 0;
+}
 
-extern int cap_netlink_send(struct sock *sk, struct sk_buff *skb);
-extern int cap_netlink_recv(struct sk_buff *skb);
+static inline int cap_netlink_recv (struct sk_buff *skb)
+{
+	if (!cap_raised (NETLINK_CB (skb).eff_cap, CAP_NET_ADMIN))
+		return -EPERM;
+	return 0;
+}
 
 /*
  * Values used in the task_security_ops calls
@@ -482,11 +486,11 @@ struct swap_info_struct;
  *	@file contains the file structure to update.
  *	Return 0 on success.
  * @file_send_sigiotask:
- *	Check permission for the file owner @fown to send SIGIO or SIGURG to the
- *	process @tsk.  Note that this hook is sometimes called from interrupt.
- *	Note that the fown_struct, @fown, is never outside the context of a
- *	struct file, so the file structure (and associated security information)
- *	can always be obtained:
+ *     Check permission for the file owner @fown to send SIGIO or SIGURG to the
+ *     process @tsk.  Note that this hook is sometimes called from interrupt.
+ *     Note that the fown_struct, @fown, is never outside the context of a
+ *     struct file, so the file structure (and associated security information)
+ *     can always be obtained:
  *		(struct file *)((long)fown - offsetof(struct file,f_owner));
  * 	@tsk contains the structure of task receiving signal.
  *	@fown contains the file owner information.
@@ -578,7 +582,7 @@ struct swap_info_struct;
  * @task_setrlimit:
  *	Check permission before setting the resource limits of the current
  *	process for @resource to @new_rlim.  The old resource limit values can
- *	be examined by dereferencing (current->signal->rlim + resource).
+ *	be examined by dereferencing (current->rlim + resource).
  *	@resource contains the resource whose limit is being set.
  *	@new_rlim contains the new limits for @resource.
  *	Return 0 if permission is granted.
@@ -995,12 +999,6 @@ struct swap_info_struct;
  *	See the syslog(2) manual page for an explanation of the @type values.  
  *	@type contains the type of action.
  *	Return 0 if permission is granted.
- * @settime:
- *	Check permission to change the system time.
- *	struct timespec and timezone are defined in include/linux/time.h
- *	@ts contains new time
- *	@tz contains new timezone
- *	Return 0 if permission is granted.
  * @vm_enough_memory:
  *	Check permissions for allocating a new virtual mapping.
  *      @pages contains the number of pages.
@@ -1031,12 +1029,11 @@ struct security_operations {
 			    kernel_cap_t * inheritable,
 			    kernel_cap_t * permitted);
 	int (*acct) (struct file * file);
-	int (*sysctl) (struct ctl_table * table, int op);
+	int (*sysctl) (ctl_table * table, int op);
 	int (*capable) (struct task_struct * tsk, int cap);
 	int (*quotactl) (int cmds, int type, int id, struct super_block * sb);
 	int (*quota_on) (struct file * f);
 	int (*syslog) (int type);
-	int (*settime) (struct timespec *ts, struct timezone *tz);
 	int (*vm_enough_memory) (long pages);
 
 	int (*bprm_alloc_security) (struct linux_binprm * bprm);
@@ -1127,6 +1124,7 @@ struct security_operations {
 	int (*file_fcntl) (struct file * file, unsigned int cmd,
 			   unsigned long arg);
 	int (*file_set_fowner) (struct file * file);
+
 	int (*file_send_sigiotask) (struct task_struct * tsk,
 				    struct fown_struct * fown, int sig);
 	int (*file_receive) (struct file * file);
@@ -1270,7 +1268,7 @@ static inline int security_acct (struct file *file)
 	return security_ops->acct (file);
 }
 
-static inline int security_sysctl(struct ctl_table *table, int op)
+static inline int security_sysctl(ctl_table * table, int op)
 {
 	return security_ops->sysctl(table, op);
 }
@@ -1290,12 +1288,6 @@ static inline int security_syslog(int type)
 {
 	return security_ops->syslog(type);
 }
-
-static inline int security_settime(struct timespec *ts, struct timezone *tz)
-{
-	return security_ops->settime(ts, tz);
-}
-
 
 static inline int security_vm_enough_memory(long pages)
 {
@@ -1895,7 +1887,7 @@ static inline int security_netlink_recv(struct sk_buff * skb)
 }
 
 /* prototypes */
-extern int security_init	(void);
+extern int security_scaffolding_startup	(void);
 extern int register_security	(struct security_operations *ops);
 extern int unregister_security	(struct security_operations *ops);
 extern int mod_reg_security	(const char *name, struct security_operations *ops);
@@ -1909,7 +1901,7 @@ extern int mod_unreg_security	(const char *name, struct security_operations *ops
  * are just stubbed out, but a few must call the proper capable code.
  */
 
-static inline int security_init(void)
+static inline int security_scaffolding_startup (void)
 {
 	return 0;
 }
@@ -1948,7 +1940,7 @@ static inline int security_acct (struct file *file)
 	return 0;
 }
 
-static inline int security_sysctl(struct ctl_table *table, int op)
+static inline int security_sysctl(ctl_table * table, int op)
 {
 	return 0;
 }
@@ -1967,11 +1959,6 @@ static inline int security_quota_on (struct file * file)
 static inline int security_syslog(int type)
 {
 	return cap_syslog(type);
-}
-
-static inline int security_settime(struct timespec *ts, struct timezone *tz)
-{
-	return cap_settime(ts, tz);
 }
 
 static inline int security_vm_enough_memory(long pages)
@@ -2512,6 +2499,11 @@ static inline int security_setprocattr(struct task_struct *p, char *name, void *
 	return -EINVAL;
 }
 
+/*
+ * The netlink capability defaults need to be used inline by default
+ * (rather than hooking into the capability module) to reduce overhead
+ * in the networking code.
+ */
 static inline int security_netlink_send (struct sock *sk, struct sk_buff *skb)
 {
 	return cap_netlink_send (sk, skb);

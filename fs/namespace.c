@@ -9,7 +9,6 @@
  */
 
 #include <linux/config.h>
-#include <linux/syscalls.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/smp_lock.h>
@@ -22,8 +21,8 @@
 #include <linux/namei.h>
 #include <linux/security.h>
 #include <linux/mount.h>
+#include <linux/vs_base.h>
 #include <linux/vserver/namespace.h>
-#include <linux/vserver/xid.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -109,6 +108,8 @@ struct vfsmount *lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
 	return found;
 }
 
+EXPORT_SYMBOL(lookup_mnt);
+
 static inline int check_mnt(struct vfsmount *mnt)
 {
 	return mnt->mnt_namespace == current->namespace;
@@ -164,7 +165,6 @@ clone_mnt(struct vfsmount *old, struct dentry *root)
 		mnt->mnt_mountpoint = mnt->mnt_root;
 		mnt->mnt_parent = mnt;
 		mnt->mnt_namespace = old->mnt_namespace;
-		mnt->mnt_xid = old->mnt_xid;
 
 		/* stick the duplicate mount on the same expiry list
 		 * as the original if that was on one */
@@ -250,11 +250,6 @@ static int show_vfsmnt(struct seq_file *m, void *v)
 	if (!vx_check_vfsmount(current->vx_info, mnt))
 		return 0;
 
-	if (vx_flags(VXF_HIDE_MOUNT, 0))
-		return 0;
-	if (!vx_check_vfsmount(current->vx_info, mnt))
-		return 0;
-
 	mangle(m, mnt->mnt_devname ? mnt->mnt_devname : "none");
 	seq_putc(m, ' ');
 	seq_path(m, mnt, mnt->mnt_root, " \t\n\\");
@@ -270,8 +265,6 @@ static int show_vfsmnt(struct seq_file *m, void *v)
 				seq_puts(m, p->unset_str);
 		}
 	}
-	if (mnt->mnt_flags & MNT_XID)
-		seq_printf(m, ",xid=%d", mnt->mnt_xid);
 	if (mnt->mnt_sb->s_op->show_options)
 		err = mnt->mnt_sb->s_op->show_options(m, mnt);
 	seq_puts(m, " 0 0\n");
@@ -357,10 +350,8 @@ int may_umount(struct vfsmount *mnt)
 
 EXPORT_SYMBOL(may_umount);
 
-static inline void __umount_list(struct list_head *kill)
+static inline void __umount_tree(struct vfsmount *mnt, struct list_head *kill)
 {
-	struct vfsmount *mnt;
-
 	while (!list_empty(kill)) {
 		mnt = list_entry(kill->next, struct vfsmount, mnt_list);
 		list_del_init(&mnt->mnt_list);
@@ -387,7 +378,7 @@ void umount_tree(struct vfsmount *mnt)
 		list_del(&p->mnt_list);
 		list_add(&p->mnt_list, &kill);
 	}
-	__umount_list(&kill);
+	__umount_tree(mnt, &kill);
 }
 
 void umount_unused(struct vfsmount *mnt, struct fs_struct *fs)
@@ -401,7 +392,7 @@ void umount_unused(struct vfsmount *mnt, struct fs_struct *fs)
 		list_del(&p->mnt_list);
 		list_add(&p->mnt_list, &kill);
 	}
-	__umount_list(&kill);
+	__umount_tree(mnt, &kill);
 }
 
 static int do_umount(struct vfsmount *mnt, int flags)
@@ -463,7 +454,6 @@ static int do_umount(struct vfsmount *mnt, int flags)
 		down_write(&sb->s_umount);
 		if (!(sb->s_flags & MS_RDONLY)) {
 			lock_kernel();
-			DQUOT_OFF(sb);
 			retval = do_remount_sb(sb, MS_RDONLY, NULL, 0);
 			unlock_kernel();
 		}
@@ -660,7 +650,7 @@ out_unlock:
 /*
  * do loopback mount.
  */
-static int do_loopback(struct nameidata *nd, char *old_name, xid_t xid, unsigned long flags, int mnt_flags)
+static int do_loopback(struct nameidata *nd, char *old_name, unsigned long flags, int mnt_flags)
 {
 	struct nameidata old_nd;
 	struct vfsmount *mnt = NULL;
@@ -691,10 +681,6 @@ static int do_loopback(struct nameidata *nd, char *old_name, xid_t xid, unsigned
 		list_del_init(&mnt->mnt_fslink);
 		spin_unlock(&vfsmount_lock);
 
-		if (flags & MS_XID) {
-			mnt->mnt_xid = xid;
-			mnt->mnt_flags |= MNT_XID;
-		}
 		err = graft_tree(mnt, nd);
 		if (err) {
 			spin_lock(&vfsmount_lock);
@@ -717,7 +703,7 @@ static int do_loopback(struct nameidata *nd, char *old_name, xid_t xid, unsigned
  */
 
 static int do_remount(struct nameidata *nd, int flags, int mnt_flags,
-		      void *data, xid_t xid)
+		      void *data)
 {
 	int err;
 	struct super_block * sb = nd->mnt->mnt_sb;
@@ -735,11 +721,8 @@ static int do_remount(struct nameidata *nd, int flags, int mnt_flags,
 		mnt_flags |= MNT_NODEV;
 	down_write(&sb->s_umount);
 	err = do_remount_sb(sb, flags, data, 0);
-	if (!err) {
+	if (!err)
 		nd->mnt->mnt_flags=mnt_flags;
-		if (flags & MS_XID)
-			nd->mnt->mnt_xid = xid;
-	}
 	up_write(&sb->s_umount);
 	if (!err)
 		security_sb_post_remount(nd->mnt, flags, data);
@@ -1065,7 +1048,6 @@ long do_mount(char * dev_name, char * dir_name, char *type_page,
 	struct nameidata nd;
 	int retval = 0;
 	int mnt_flags = 0;
-	xid_t xid = 0;
 
 	/* Discard magic */
 	if ((flags & MS_MGC_MSK) == MS_MGC_VAL)
@@ -1080,14 +1062,6 @@ long do_mount(char * dev_name, char * dir_name, char *type_page,
 
 	if (data_page)
 		((char *)data_page)[PAGE_SIZE - 1] = 0;
-
-	retval = vx_parse_xid(data_page, &xid, 1);
-	if (retval) {
-		mnt_flags |= MNT_XID;
-		/* bind and re-mounts get xid flag */
-		if (flags & (MS_BIND|MS_REMOUNT))
-			flags |= MS_XID;
-	}
 
 	/* Separate the per-mountpoint flags */
 	if (flags & MS_RDONLY)
@@ -1118,10 +1092,9 @@ long do_mount(char * dev_name, char * dir_name, char *type_page,
 
 	if (flags & MS_REMOUNT)
 		retval = do_remount(&nd, flags & ~MS_REMOUNT, mnt_flags,
-				    data_page, xid);
+				    data_page);
 	else if (flags & MS_BIND)
-		retval = do_loopback(&nd, dev_name, xid, flags, mnt_flags);
-
+		retval = do_loopback(&nd, dev_name, flags, mnt_flags);
 	else if (flags & MS_MOVE)
 		retval = do_move_mount(&nd, dev_name);
 	else
@@ -1282,7 +1255,6 @@ void set_fs_root(struct fs_struct *fs, struct vfsmount *mnt,
 }
 
 EXPORT_SYMBOL_GPL(set_fs_root);
-
 /*
  * Replace the fs->{pwdmnt,pwd} with {mnt,dentry}. Put the old values.
  * It can block. Requires the big lock held.

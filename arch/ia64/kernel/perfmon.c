@@ -40,10 +40,8 @@
 #include <linux/version.h>
 #include <linux/vs_memory.h>
 #include <linux/vs_cvirt.h>
-#include <linux/bitops.h>
-#include <linux/vs_memory.h>
-#include <linux/vs_cvirt.h>
 
+#include <asm/bitops.h>
 #include <asm/errno.h>
 #include <asm/intrinsics.h>
 #include <asm/page.h>
@@ -576,6 +574,12 @@ pfm_unreserve_page(unsigned long a)
 	ClearPageReserved(vmalloc_to_page((void*)a));
 }
 
+static inline int
+pfm_remap_page_range(struct vm_area_struct *vma, unsigned long from, unsigned long phys_addr, unsigned long size, pgprot_t prot)
+{
+	return remap_page_range(vma, from, phys_addr, size, prot);
+}
+
 static inline unsigned long
 pfm_protect_ctx_ctxsw(pfm_context_t *x)
 {
@@ -801,6 +805,18 @@ pfm_reset_msgq(pfm_context_t *ctx)
 {
 	ctx->ctx_msgq_head = ctx->ctx_msgq_tail = 0;
 	DPRINT(("ctx=%p msgq reset\n", ctx));
+}
+
+
+/* Here we want the physical address of the memory.
+ * This is used when initializing the contents of the
+ * area and marking the pages as reserved.
+ */
+static inline unsigned long
+pfm_kvirt_to_pa(unsigned long adr)
+{
+	__u64 pa = ia64_tpa(adr);
+	return pa;
 }
 
 static void *
@@ -1642,7 +1658,7 @@ pfm_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned lon
 }
 
 /*
- * interrupt cannot be masked when coming here
+ * context is locked when coming here and interrupts are disabled
  */
 static inline int
 pfm_do_fasync(int fd, struct file *filp, pfm_context_t *ctx, int on)
@@ -2002,7 +2018,7 @@ pfm_close(struct inode *inode, struct file *filp)
 
 		/*
 		 * XXX: check for signals :
-		 * 	- ok for explicit close
+		 * 	- ok of explicit close
 		 * 	- not ok when coming from exit_files()
 		 */
       		schedule();
@@ -2230,14 +2246,14 @@ pfm_free_fd(int fd, struct file *file)
 static int
 pfm_remap_buffer(struct vm_area_struct *vma, unsigned long buf, unsigned long addr, unsigned long size)
 {
+	unsigned long page;
+
 	DPRINT(("CPU%d buf=0x%lx addr=0x%lx size=%ld\n", smp_processor_id(), buf, addr, size));
 
 	while (size > 0) {
-		unsigned long pfn = ia64_tpa(buf) >> PAGE_SHIFT;
+		page = pfm_kvirt_to_pa(buf);
 
-
-		if (remap_pfn_range(vma, addr, pfn, PAGE_SIZE, PAGE_READONLY))
-			return -ENOMEM;
+		if (pfm_remap_page_range(vma, addr, page, PAGE_SIZE, PAGE_READONLY)) return -ENOMEM;
 
 		addr  += PAGE_SIZE;
 		buf   += PAGE_SIZE;
@@ -2273,8 +2289,7 @@ pfm_smpl_buffer_alloc(struct task_struct *task, pfm_context_t *ctx, unsigned lon
 	 * if ((mm->total_vm << PAGE_SHIFT) + len> task->rlim[RLIMIT_AS].rlim_cur)
 	 * 	return -ENOMEM;
 	 */
-	if (size > task->signal->rlim[RLIMIT_MEMLOCK].rlim_cur)
-		return -ENOMEM;
+	if (size > task->rlim[RLIMIT_MEMLOCK].rlim_cur) return -ENOMEM;
 
 	/*
 	 * We do the easy to undo allocations first.
@@ -2299,6 +2314,10 @@ pfm_smpl_buffer_alloc(struct task_struct *task, pfm_context_t *ctx, unsigned lon
 
 	/*
 	 * partially initialize the vma for the sampling buffer
+	 *
+	 * The VM_DONTCOPY flag is very important as it ensures that the mapping
+	 * will never be inherited for any child process (via fork()) which is always
+	 * what we want.
 	 */
 	vma->vm_mm	     = mm;
 	vma->vm_flags	     = VM_READ| VM_MAYREAD |VM_RESERVED;
@@ -2328,7 +2347,6 @@ pfm_smpl_buffer_alloc(struct task_struct *task, pfm_context_t *ctx, unsigned lon
 		goto error;
 	}
 	vma->vm_end = vma->vm_start + size;
-	vma->vm_pgoff = vma->vm_start >> PAGE_SHIFT;
 
 	DPRINT(("aligned size=%ld, hdr=%p mapped @0x%lx\n", size, ctx->ctx_smpl_hdr, vma->vm_start));
 
@@ -3062,12 +3080,11 @@ pfm_write_pmcs(pfm_context_t *ctx, void *arg, int count, struct pt_regs *regs)
 #endif
 		}
 
-		DPRINT(("pmc[%u]=0x%lx ld=%d apmu=%d flags=0x%x all_pmcs=0x%lx used_pmds=0x%lx eventid=%ld smpl_pmds=0x%lx reset_pmds=0x%lx reloads_pmcs=0x%lx used_monitors=0x%lx ovfl_regs=0x%lx\n",
+		DPRINT(("pmc[%u]=0x%lx loaded=%d access_pmu=%d all_pmcs=0x%lx used_pmds=0x%lx eventid=%ld smpl_pmds=0x%lx reset_pmds=0x%lx reloads_pmcs=0x%lx used_monitors=0x%lx ovfl_regs=0x%lx\n",
 			  cnum,
 			  value,
 			  is_loaded,
 			  can_access_pmu,
-			  flags,
 			  ctx->ctx_all_pmcs[0],
 			  ctx->ctx_used_pmds[0],
 			  ctx->ctx_pmds[cnum].eventid,
@@ -3243,8 +3260,8 @@ pfm_write_pmds(pfm_context_t *ctx, void *arg, int count, struct pt_regs *regs)
 			}
 		}
 
-		DPRINT(("pmd[%u]=0x%lx ld=%d apmu=%d, hw_value=0x%lx ctx_pmd=0x%lx  short_reset=0x%lx "
-			  "long_reset=0x%lx notify=%c seed=0x%lx mask=0x%lx used_pmds=0x%lx reset_pmds=0x%lx reload_pmds=0x%lx all_pmds=0x%lx ovfl_regs=0x%lx\n",
+		DPRINT(("pmd[%u]=0x%lx loaded=%d access_pmu=%d, hw_value=0x%lx ctx_pmd=0x%lx  short_reset=0x%lx "
+			  "long_reset=0x%lx notify=%c used_pmds=0x%lx reset_pmds=0x%lx reload_pmds=0x%lx all_pmds=0x%lx ovfl_regs=0x%lx\n",
 			cnum,
 			value,
 			is_loaded,
@@ -3254,8 +3271,6 @@ pfm_write_pmds(pfm_context_t *ctx, void *arg, int count, struct pt_regs *regs)
 			ctx->ctx_pmds[cnum].short_reset,
 			ctx->ctx_pmds[cnum].long_reset,
 			PMC_OVFL_NOTIFY(ctx, cnum) ? 'Y':'N',
-			ctx->ctx_pmds[cnum].seed,
-			ctx->ctx_pmds[cnum].mask,
 			ctx->ctx_used_pmds[0],
 			ctx->ctx_pmds[cnum].reset_pmds[0],
 			ctx->ctx_reload_pmds[0],
@@ -3333,7 +3348,7 @@ pfm_read_pmds(pfm_context_t *ctx, void *arg, int count, struct pt_regs *regs)
 	}
 	expert_mode = pfm_sysctl.expert_mode; 
 
-	DPRINT(("ld=%d apmu=%d ctx_state=%d\n",
+	DPRINT(("loaded=%d access_pmu=%d ctx_state=%d\n",
 		is_loaded,
 		can_access_pmu,
 		state));
@@ -3873,7 +3888,7 @@ pfm_write_ibr_dbr(int mode, pfm_context_t *ctx, void *arg, int count, struct pt_
 
 			ctx->ctx_ibrs[rnum] = dbreg.val;
 
-			DPRINT(("write ibr%u=0x%lx used_ibrs=0x%x ld=%d apmu=%d\n",
+			DPRINT(("write ibr%u=0x%lx used_ibrs=0x%x is_loaded=%d access_pmu=%d\n",
 				rnum, dbreg.val, ctx->ctx_used_ibrs[0], is_loaded, can_access_pmu));
 		} else {
 			CTX_USED_DBR(ctx, rnum);
@@ -3884,7 +3899,7 @@ pfm_write_ibr_dbr(int mode, pfm_context_t *ctx, void *arg, int count, struct pt_
 			}
 			ctx->ctx_dbrs[rnum] = dbreg.val;
 
-			DPRINT(("write dbr%u=0x%lx used_dbrs=0x%x ld=%d apmu=%d\n",
+			DPRINT(("write dbr%u=0x%lx used_dbrs=0x%x is_loaded=%d access_pmu=%d\n",
 				rnum, dbreg.val, ctx->ctx_used_dbrs[0], is_loaded, can_access_pmu));
 		}
 	}
@@ -4983,14 +4998,26 @@ pfm_resume_after_ovfl(pfm_context_t *ctx, unsigned long ovfl_regs, struct pt_reg
 static void
 pfm_context_force_terminate(pfm_context_t *ctx, struct pt_regs *regs)
 {
-	int ret;
-
-	DPRINT(("entering for [%d]\n", current->pid));
-
-	ret = pfm_context_unload(ctx, NULL, 0, regs);
-	if (ret) {
-		printk(KERN_ERR "pfm_context_force_terminate: [%d] unloaded failed with %d\n", current->pid, ret);
+	if (ctx->ctx_fl_system) {
+		printk(KERN_ERR "perfmon: pfm_context_force_terminate [%d] is system-wide\n", current->pid);
+		return;
 	}
+	/*
+	 * we stop the whole thing, we do no need to flush
+	 * we know we WERE masked
+	 */
+	pfm_clear_psr_up();
+	ia64_psr(regs)->up = 0;
+	ia64_psr(regs)->sp = 1;
+
+	/*
+	 * disconnect the task from the context and vice-versa
+	 */
+	current->thread.pfm_context  = NULL;
+	current->thread.flags       &= ~IA64_THREAD_PM_VALID;
+	ctx->ctx_task = NULL;
+
+	DPRINT(("context terminated\n"));
 
 	/*
 	 * and wakeup controlling task, indicating we are now disconnected
@@ -5050,18 +5077,6 @@ pfm_handle_work(void)
 
 	UNPROTECT_CTX(ctx, flags);
 
-	 /*
-	  * pfm_handle_work() is currently called with interrupts disabled.
-	  * The down_interruptible call may sleep, therefore we
-	  * must re-enable interrupts to avoid deadlocks. It is
-	  * safe to do so because this function is called ONLY
-	  * when returning to user level (PUStk=1), in which case
-	  * there is no risk of kernel stack overflow due to deep
-	  * interrupt nesting.
-	  */
-	BUG_ON(flags & IA64_PSR_I);
-	local_irq_enable();
-
 	DPRINT(("before block sleeping\n"));
 
 	/*
@@ -5071,12 +5086,6 @@ pfm_handle_work(void)
 	ret = down_interruptible(&ctx->ctx_restart_sem);
 
 	DPRINT(("after block sleeping ret=%d\n", ret));
-
-	/*
-	 * disable interrupts to restore state we had upon entering
-	 * this function
-	 */
-	local_irq_disable();
 
 	PROTECT_CTX(ctx, flags);
 
@@ -5363,8 +5372,9 @@ pfm_overflow_handler(struct task_struct *task, pfm_context_t *ctx, u64 pmc0, str
 		if (ovfl_notify == 0) reset_pmds = ovfl_pmds;
 	}
 
-	DPRINT_ovfl(("ovfl_pmds=0x%lx reset_pmds=0x%lx\n", ovfl_pmds, reset_pmds));
-
+	DPRINT(("ovfl_pmds=0x%lx reset_pmds=0x%lx\n",
+		ovfl_pmds,
+		reset_pmds));
 	/*
 	 * reset the requested PMD registers using the short reset values
 	 */
@@ -5865,6 +5875,14 @@ pfm_save_regs(struct task_struct *task)
 	}
 
 	/*
+	 * sanity check
+	 */
+	if (ctx->ctx_last_activation != GET_ACTIVATION()) {
+		pfm_unprotect_ctx_ctxsw(ctx, flags);
+		return;
+	}
+
+	/*
 	 * save current PSR: needed because we modify it
 	 */
 	ia64_srlz_d();
@@ -6359,9 +6377,6 @@ pfm_flush_pmds(struct task_struct *task, pfm_context_t *ctx)
 	 * XXX: sampling situation is not taken into account here
 	 */
 	mask2 = ctx->ctx_used_pmds[0];
-
-	DPRINT(("is_self=%d ovfl_val=0x%lx mask2=0x%lx\n", is_self, ovfl_val, mask2));
-
 	for (i = 0; mask2; i++, mask2>>=1) {
 
 		/* skip non used pmds */
@@ -6400,7 +6415,7 @@ pfm_flush_pmds(struct task_struct *task, pfm_context_t *ctx)
 			}
 		}
 
-		DPRINT(("[%d] ctx_pmd[%d]=0x%lx  pmd_val=0x%lx\n", task->pid, i, val, pmd_val));
+		DPRINT(("[%d] is_self=%d ctx_pmd[%d]=0x%lx  pmd_val=0x%lx\n", task->pid, is_self, i, val, pmd_val));
 
 		if (is_self) task->thread.pmds[i] = pmd_val;
 

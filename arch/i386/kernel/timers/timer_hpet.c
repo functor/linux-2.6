@@ -177,15 +177,11 @@ static int __init init_hpet(char* override)
 /************************************************************/
 
 /* tsc timer_opts struct */
-static struct timer_opts timer_hpet = {
+struct timer_opts timer_hpet = {
 	.name = 		"hpet",
+	.init =			init_hpet,
 	.mark_offset =		mark_offset_hpet,
 	.get_offset =		get_offset_hpet,
 	.monotonic_clock =	monotonic_clock_hpet,
 	.delay = 		delay_hpet,
-};
-
-struct init_timer_opts __initdata timer_hpet_init = {
-	.init =	init_hpet,
-	.opts = &timer_hpet,
 };

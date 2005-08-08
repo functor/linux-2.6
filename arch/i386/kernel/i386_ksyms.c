@@ -76,6 +76,9 @@ EXPORT_SYMBOL_GPL(kernel_fpu_begin);
 EXPORT_SYMBOL(__ioremap);
 EXPORT_SYMBOL(ioremap_nocache);
 EXPORT_SYMBOL(iounmap);
+EXPORT_SYMBOL(enable_irq);
+EXPORT_SYMBOL(disable_irq);
+EXPORT_SYMBOL(disable_irq_nosync);
 EXPORT_SYMBOL(probe_irq_mask);
 EXPORT_SYMBOL(kernel_thread);
 EXPORT_SYMBOL(pm_idle);
@@ -143,6 +146,7 @@ EXPORT_SYMBOL(__write_lock_failed);
 EXPORT_SYMBOL(__read_lock_failed);
 
 /* Global SMP stuff */
+EXPORT_SYMBOL(synchronize_irq);
 EXPORT_SYMBOL(smp_call_function);
 
 /* TLB flushing */
@@ -175,7 +179,7 @@ EXPORT_SYMBOL(memcmp);
 
 EXPORT_SYMBOL(register_die_notifier);
 #ifdef CONFIG_HAVE_DEC_LOCK
-EXPORT_SYMBOL(_atomic_dec_and_lock);
+EXPORT_SYMBOL(atomic_dec_and_lock);
 #endif
 
 EXPORT_SYMBOL(__PAGE_KERNEL);
@@ -200,7 +204,7 @@ EXPORT_SYMBOL(ist_info);
 
 EXPORT_SYMBOL(csum_partial);
 
-#ifdef CONFIG_CRASH_DUMP
+#ifdef CONFIG_CRASH_DUMP_MODULE
 #ifdef CONFIG_SMP
 extern irq_desc_t irq_desc[NR_IRQS];
 extern unsigned long irq_affinity[NR_IRQS];
@@ -210,8 +214,8 @@ EXPORT_SYMBOL(irq_affinity);
 EXPORT_SYMBOL(stop_this_cpu);
 EXPORT_SYMBOL(dump_send_ipi);
 #endif
-extern int page_is_ram(unsigned long);
-EXPORT_SYMBOL(page_is_ram);
+extern int pfn_is_ram(unsigned long);
+EXPORT_SYMBOL(pfn_is_ram);
 #ifdef ARCH_HAS_NMI_WATCHDOG
 EXPORT_SYMBOL(touch_nmi_watchdog);
 #endif

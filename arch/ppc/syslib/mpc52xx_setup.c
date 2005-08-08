@@ -19,7 +19,6 @@
 
 #include <linux/config.h>
 
-#include <asm/io.h>
 #include <asm/time.h>
 #include <asm/mpc52xx.h>
 #include <asm/mpc52xx_psc.h>

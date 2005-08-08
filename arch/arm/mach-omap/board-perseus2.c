@@ -24,9 +24,10 @@
 #include <asm/arch/gpio.h>
 #include <asm/arch/mux.h>
 #include <asm/arch/fpga.h>
-#include <asm/arch/serial.h>
 
 #include "common.h"
+
+extern void __init omap_init_time(void);
 
 void omap_perseus2_init_irq(void)
 {
@@ -45,8 +46,6 @@ static struct resource smc91x_resources[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 };
-
-static int __initdata p2_serial_ports[OMAP_MAX_NR_PORTS] = {1, 1, 0};
 
 static struct platform_device smc91x_device = {
 	.name		= "smc91x",
@@ -107,7 +106,6 @@ static void __init omap_perseus2_map_io(void)
 	 * It is used as the Ethernet controller interrupt
 	 */
 	omap_writel(omap_readl(OMAP730_IO_CONF_9) & 0x1FFFFFFF, OMAP730_IO_CONF_9);
-	omap_serial_init(p2_serial_ports);
 }
 
 MACHINE_START(OMAP_PERSEUS2, "OMAP730 Perseus2")
@@ -117,5 +115,5 @@ MACHINE_START(OMAP_PERSEUS2, "OMAP730 Perseus2")
 	MAPIO(omap_perseus2_map_io)
 	INITIRQ(omap_perseus2_init_irq)
 	INIT_MACHINE(omap_perseus2_init)
-	.timer		= &omap_timer,
+	INITTIME(omap_init_time)
 MACHINE_END

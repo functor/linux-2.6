@@ -272,10 +272,8 @@ struct ucred {
 #define SOL_NETBEUI	267
 #define SOL_LLC		268
 
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 /* PlanetLab PL2525: reset the context ID of an existing socket */
 #define SO_SETXID	SO_PEERCRED
-#endif
 
 /* IPX options */
 #define IPX_TYPE	1

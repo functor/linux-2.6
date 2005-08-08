@@ -130,6 +130,6 @@ $(obj)/imagesize.c: vmlinux.strip
 		>> $(obj)/imagesize.c
 
 install: $(CONFIGURE) $(obj)/$(BOOTIMAGE)
-	sh -x $(srctree)/$(src)/install.sh "$(KERNELRELEASE)" "$(obj)/$(BOOTIMAGE)" "$(INSTALL_PATH)"
+	sh -x $(src)/install.sh "$(KERNELRELEASE)" "$(obj)/$(BOOTIMAGE)" "$(INSTALL_PATH)"
 
 clean-files := $(addprefix $(objtree)/, $(obj-boot) vmlinux.strip)

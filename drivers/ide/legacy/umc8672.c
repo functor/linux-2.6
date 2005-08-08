@@ -161,8 +161,6 @@ static int __init umc8672_probe(void)
 	probe_hwif_init(hwif);
 	probe_hwif_init(mate);
 
-	create_proc_ide_interfaces();
-
 	return 0;
 }
 

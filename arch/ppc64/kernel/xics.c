@@ -85,7 +85,7 @@ struct xics_ipl {
 	} qirr;
 };
 
-static struct xics_ipl __iomem *xics_per_cpu[NR_CPUS];
+static struct xics_ipl *xics_per_cpu[NR_CPUS];
 
 static int xics_irq_8259_cascade = 0;
 static int xics_irq_8259_cascade_real = 0;
@@ -116,22 +116,22 @@ typedef struct {
 
 static int pSeries_xirr_info_get(int n_cpu)
 {
-	return in_be32(&xics_per_cpu[n_cpu]->xirr.word);
+	return xics_per_cpu[n_cpu]->xirr.word;
 }
 
 static void pSeries_xirr_info_set(int n_cpu, int value)
 {
-	out_be32(&xics_per_cpu[n_cpu]->xirr.word, value);
+	xics_per_cpu[n_cpu]->xirr.word = value;
 }
 
 static void pSeries_cppr_info(int n_cpu, u8 value)
 {
-	out_8(&xics_per_cpu[n_cpu]->xirr.bytes[0], value);
+	xics_per_cpu[n_cpu]->xirr.bytes[0] = value;
 }
 
 static void pSeries_qirr_info(int n_cpu, u8 value)
 {
-	out_8(&xics_per_cpu[n_cpu]->qirr.bytes[0], value);
+	xics_per_cpu[n_cpu]->qirr.bytes[0] = value;
 }
 
 static xics_ops pSeries_ops = {
@@ -216,15 +216,12 @@ xics_ops pSeriesLP_ops = {
 
 static unsigned int xics_startup(unsigned int virq)
 {
-	unsigned int irq;
-
-	irq = irq_offset_down(virq);
-	if (radix_tree_insert(&irq_map, virt_irq_to_real(irq),
-			      &virt_irq_to_real_map[irq]) == -ENOMEM)
+	virq = irq_offset_down(virq);
+	if (radix_tree_insert(&irq_map, virt_irq_to_real(virq),
+			      &virt_irq_to_real_map[virq]) == -ENOMEM)
 		printk(KERN_CRIT "Out of memory creating real -> virtual"
 		       " IRQ mapping for irq %u (real 0x%x)\n",
-		       virq, virt_irq_to_real(irq));
-	xics_enable_irq(virq);
+		       virq, virt_irq_to_real(virq));
 	return 0;	/* return value is ignored */
 }
 
@@ -457,7 +454,7 @@ void xics_init_IRQ(void)
 	struct xics_interrupt_node {
 		unsigned long addr;
 		unsigned long size;
-	} intnodes[NR_CPUS]; 
+	} inodes[NR_CPUS]; 
 
 	ppc64_boot_msg(0x20, "XICS Init");
 
@@ -484,13 +481,13 @@ nextnode:
 		panic("xics_init_IRQ: can't find interrupt reg property");
 	
 	while (ilen) {
-		intnodes[indx].addr = (unsigned long)*ireg++ << 32;
+		inodes[indx].addr = (unsigned long long)*ireg++ << 32;
 		ilen -= sizeof(uint);
-		intnodes[indx].addr |= *ireg++;
+		inodes[indx].addr |= *ireg++;
 		ilen -= sizeof(uint);
-		intnodes[indx].size = (unsigned long)*ireg++ << 32;
+		inodes[indx].size = (unsigned long long)*ireg++ << 32;
 		ilen -= sizeof(uint);
-		intnodes[indx].size |= *ireg++;
+		inodes[indx].size |= *ireg++;
 		ilen -= sizeof(uint);
 		indx++;
 		if (indx >= NR_CPUS) break;
@@ -504,9 +501,8 @@ nextnode:
 	     np;
 	     np = of_find_node_by_type(np, "cpu")) {
 		ireg = (uint *)get_property(np, "reg", &ilen);
-		if (ireg && ireg[0] == boot_cpuid_phys) {
-			ireg = (uint *)get_property(np, "ibm,ppc-interrupt-gserver#s",
-						    &ilen);
+		if (ireg && ireg[0] == hard_smp_processor_id()) {
+			ireg = (uint *)get_property(np, "ibm,ppc-interrupt-gserver#s", &ilen);
 			i = ilen / sizeof(int);
 			if (ireg && i > 0) {
 				default_server = ireg[0];
@@ -517,8 +513,8 @@ nextnode:
 	}
 	of_node_put(np);
 
-	intr_base = intnodes[0].addr;
-	intr_size = intnodes[0].size;
+	intr_base = inodes[0].addr;
+	intr_size = (ulong)inodes[0].size;
 
 	np = of_find_node_by_type(NULL, "interrupt-controller");
 	if (!np) {
@@ -539,18 +535,16 @@ nextnode:
 	if (systemcfg->platform == PLATFORM_PSERIES) {
 #ifdef CONFIG_SMP
 		for_each_cpu(i) {
-			int hard_id;
-
 			/* FIXME: Do this dynamically! --RR */
 			if (!cpu_present(i))
 				continue;
-
-			hard_id = get_hard_smp_processor_id(i);
-			xics_per_cpu[i] = ioremap(intnodes[hard_id].addr, 
-						  intnodes[hard_id].size);
+			xics_per_cpu[i] = __ioremap((ulong)inodes[get_hard_smp_processor_id(i)].addr, 
+						    (ulong)inodes[get_hard_smp_processor_id(i)].size,
+						    _PAGE_NO_CACHE);
 		}
 #else
-		xics_per_cpu[0] = ioremap(intr_base, intr_size);
+		xics_per_cpu[0] = __ioremap((ulong)intr_base, intr_size,
+					    _PAGE_NO_CACHE);
 #endif /* CONFIG_SMP */
 	} else if (systemcfg->platform == PLATFORM_PSERIES_LPAR) {
 		ops = &pSeriesLP_ops;
@@ -581,7 +575,7 @@ static int __init xics_setup_i8259(void)
 				no_action, 0, "8259 cascade", NULL))
 			printk(KERN_ERR "xics_setup_i8259: couldn't get 8259 "
 					"cascade\n");
-		i8259_init(0);
+		i8259_init();
 	}
 	return 0;
 }

@@ -51,14 +51,6 @@
 #define	METHOD_NAME__HPP	"_HPP"
 #define	METHOD_NAME_OSHP	"OSHP"
 
-/* Status code for running acpi method to gain native control */
-#define NC_NOT_RUN	0
-#define OSC_NOT_EXIST	1
-#define OSC_RUN_FAILED	2
-#define OSHP_NOT_EXIST	3
-#define OSHP_RUN_FAILED	4
-#define NC_RUN_SUCCESS	5
-
 #define	PHP_RES_BUS		0xA0
 #define	PHP_RES_IO		0xA1
 #define	PHP_RES_MEM		0xA2
@@ -134,9 +126,11 @@ static u8 * acpi_path_name( acpi_handle	handle)
 }
 
 static void acpi_get__hpp ( struct acpi_bridge	*ab);
-static int acpi_run_oshp ( struct acpi_bridge	*ab);
-static int osc_run_status = NC_NOT_RUN;
-static int oshp_run_status = NC_NOT_RUN;
+static void acpi_run_oshp ( struct acpi_bridge	*ab);
+static int osc_exist = 0;
+static int oshp_exist = 0;
+static int run__osc_success = 0;
+static int run_oshp_success = 0;
 
 static int acpi_add_slot_to_php_slots(
 	struct acpi_bridge	*ab,
@@ -170,8 +164,8 @@ static int acpi_add_slot_to_php_slots(
 	if (!ab->_hpp)
 		acpi_get__hpp(ab);
 	
-	if (osc_run_status == OSC_NOT_EXIST)
-		oshp_run_status = acpi_run_oshp(ab);
+	if (!osc_exist)
+		acpi_run_oshp(ab);
 
 	if (sun != samesun) {
 		info("acpi_pciehprm:   Slot sun(%x) at s:b:d:f=0x%02x:%02x:%02x:%02x\n", 
@@ -250,7 +244,7 @@ free_and_return:
 	kfree(ret_buf.pointer);
 }
 
-static int acpi_run_oshp ( struct acpi_bridge	*ab)
+static void acpi_run_oshp ( struct acpi_bridge	*ab)
 {
 	acpi_status		status;
 	u8			*path_name = acpi_path_name(ab->handle);
@@ -260,13 +254,13 @@ static int acpi_run_oshp ( struct acpi_bridge	*ab)
 	status = acpi_evaluate_object(ab->handle, METHOD_NAME_OSHP, NULL, &ret_buf);
 	if (ACPI_FAILURE(status)) {
 		err("acpi_pciehprm:%s OSHP fails=0x%x\n", path_name, status);
-		oshp_run_status = (status == AE_NOT_FOUND) ? OSHP_NOT_EXIST : OSHP_RUN_FAILED;
+		oshp_exist = (status == 0x5) ? 0 : 1;
 	} else {
-		oshp_run_status = NC_RUN_SUCCESS;
+		oshp_exist = 1;
+		run_oshp_success = 1;
 		dbg("acpi_pciehprm:%s OSHP passes =0x%x\n", path_name, status);
-		dbg("acpi_pciehprm:%s oshp_run_status =0x%x\n", path_name, oshp_run_status);
 	}
-	return oshp_run_status;
+	return;
 }
 
 static acpi_status acpi_evaluate_crs(
@@ -1072,15 +1066,15 @@ static struct acpi_bridge * add_host_bridge(
 		kfree(ab);
 		return NULL;
 	}
-
 	status = pci_osc_control_set (OSC_PCI_EXPRESS_NATIVE_HP_CONTROL); 
 	if (ACPI_FAILURE(status)) {
-		err("%s: status %x\n", __FUNCTION__, status);
-		osc_run_status = (status == AE_NOT_FOUND) ? OSC_NOT_EXIST : OSC_RUN_FAILED;
-	} else {
-		osc_run_status = NC_RUN_SUCCESS;
+		dbg("%s: status %x\n", __FUNCTION__, status);
+	 } else {
+		run__osc_success = 1;
+		osc_exist = 1;
 	}	
-	dbg("%s: osc_run_status %x\n", __FUNCTION__, osc_run_status);
+	dbg("%s: status %x run__osc_success %x osc_exist %x \n", 
+		__FUNCTION__, status, run__osc_success, osc_exist);
 	
 	build_a_bridge(ab, ab);
 
@@ -1167,10 +1161,22 @@ int pciehprm_init(enum php_ctlr_type ctlr_type)
 	if (rc)
 		return rc;
 
-	if ((oshp_run_status != NC_RUN_SUCCESS) && (osc_run_status != NC_RUN_SUCCESS)) {
-		err("Fails to gain control of native hot-plug\n");
-		rc = -ENODEV;
+	if (!osc_exist) {
+		if (!oshp_exist) {
+			err("Both _OSC and OSHP methods do not exist\n");
+			rc = -ENODEV;
+		} else if (!run_oshp_success) {
+			err("Fails to run OSHP to gain control of native hot-plug\n");
+			rc = -ENODEV;
+		}
+	} else if (!run__osc_success) {
+			err("Fails to run _OSC to gain control of native hot-plug\n");
+			rc = -ENODEV;
 	}
+	dbg("%s: run__osc_success %x osc_exist %x\n", __FUNCTION__,
+		run__osc_success, osc_exist);
+	dbg("%s: run_oshp_success %x oshp_exist %x", __FUNCTION__, 
+		run_oshp_success, oshp_exist);
 
 	dbg("pciehprm ACPI init %s\n", (rc)?"fail":"success");
 	return rc;

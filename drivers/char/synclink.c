@@ -82,7 +82,6 @@
 #include <linux/ioport.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
-#include <linux/delay.h>
 
 #include <linux/netdevice.h>
 
@@ -97,7 +96,7 @@
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/dma.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 #include <asm/types.h>
 #include <linux/termios.h>
 #include <linux/workqueue.h>
@@ -2140,15 +2139,16 @@ static void mgsl_flush_chars(struct tty_struct *tty)
  * Arguments:
  * 
  * 	tty		pointer to tty information structure
+ * 	from_user	flag: 1 = from user process
  * 	buf		pointer to buffer containing send data
  * 	count		size of send data in bytes
  * 	
  * Return Value:	number of characters written
  */
-static int mgsl_write(struct tty_struct * tty,
+static int mgsl_write(struct tty_struct * tty, int from_user,
 		    const unsigned char *buf, int count)
 {
-	int	c, ret = 0;
+	int	c, ret = 0, err;
 	struct mgsl_struct *info = (struct mgsl_struct *)tty->driver_data;
 	unsigned long flags;
 	
@@ -2185,7 +2185,20 @@ static int mgsl_write(struct tty_struct * tty,
 
 			/* queue transmit frame request */
 			ret = count;
-			save_tx_buffer_request(info,buf,count);
+			if (from_user) {
+				down(&tmp_buf_sem);
+				COPY_FROM_USER(err,tmp_buf, buf, count);
+				if (err) {
+					if ( debug_level >= DEBUG_LEVEL_INFO )
+						printk( "%s(%d):mgsl_write(%s) sync user buf copy failed\n",
+							__FILE__,__LINE__,info->device_name);
+					ret = -EFAULT;
+				} else
+					save_tx_buffer_request(info,tmp_buf,count);
+				up(&tmp_buf_sem);
+			}
+			else
+				save_tx_buffer_request(info,buf,count);
 
 			/* if we have sufficient tx dma buffers,
 			 * load the next buffered tx request
@@ -2225,26 +2238,70 @@ static int mgsl_write(struct tty_struct * tty,
 					__FILE__,__LINE__,info->device_name);
 			ret = count;
 			info->xmit_cnt = count;
-			mgsl_load_tx_dma_buffer(info,buf,count);
+			if (from_user) {
+				down(&tmp_buf_sem);
+				COPY_FROM_USER(err,tmp_buf, buf, count);
+				if (err) {
+					if ( debug_level >= DEBUG_LEVEL_INFO )
+						printk( "%s(%d):mgsl_write(%s) sync user buf copy failed\n",
+							__FILE__,__LINE__,info->device_name);
+					ret = -EFAULT;
+				} else
+					mgsl_load_tx_dma_buffer(info,tmp_buf,count);
+				up(&tmp_buf_sem);
+			}
+			else
+				mgsl_load_tx_dma_buffer(info,buf,count);
 		}
 	} else {
-		while (1) {
-			spin_lock_irqsave(&info->irq_spinlock,flags);
-			c = min_t(int, count,
-				min(SERIAL_XMIT_SIZE - info->xmit_cnt - 1,
-				    SERIAL_XMIT_SIZE - info->xmit_head));
-			if (c <= 0) {
+		if (from_user) {
+			down(&tmp_buf_sem);
+			while (1) {
+				c = min_t(int, count,
+					min(SERIAL_XMIT_SIZE - info->xmit_cnt - 1,
+					    SERIAL_XMIT_SIZE - info->xmit_head));
+				if (c <= 0)
+					break;
+
+				COPY_FROM_USER(err,tmp_buf, buf, c);
+				c -= err;
+				if (!c) {
+					if (!ret)
+						ret = -EFAULT;
+					break;
+				}
+				spin_lock_irqsave(&info->irq_spinlock,flags);
+				c = min_t(int, c, min(SERIAL_XMIT_SIZE - info->xmit_cnt - 1,
+					       SERIAL_XMIT_SIZE - info->xmit_head));
+				memcpy(info->xmit_buf + info->xmit_head, tmp_buf, c);
+				info->xmit_head = ((info->xmit_head + c) &
+						   (SERIAL_XMIT_SIZE-1));
+				info->xmit_cnt += c;
 				spin_unlock_irqrestore(&info->irq_spinlock,flags);
-				break;
+				buf += c;
+				count -= c;
+				ret += c;
 			}
-			memcpy(info->xmit_buf + info->xmit_head, buf, c);
-			info->xmit_head = ((info->xmit_head + c) &
-					   (SERIAL_XMIT_SIZE-1));
-			info->xmit_cnt += c;
-			spin_unlock_irqrestore(&info->irq_spinlock,flags);
-			buf += c;
-			count -= c;
-			ret += c;
+			up(&tmp_buf_sem);
+		} else {
+			while (1) {
+				spin_lock_irqsave(&info->irq_spinlock,flags);
+				c = min_t(int, count,
+					min(SERIAL_XMIT_SIZE - info->xmit_cnt - 1,
+					    SERIAL_XMIT_SIZE - info->xmit_head));
+				if (c <= 0) {
+					spin_unlock_irqrestore(&info->irq_spinlock,flags);
+					break;
+				}
+				memcpy(info->xmit_buf + info->xmit_head, buf, c);
+				info->xmit_head = ((info->xmit_head + c) &
+						   (SERIAL_XMIT_SIZE-1));
+				info->xmit_cnt += c;
+				spin_unlock_irqrestore(&info->irq_spinlock,flags);
+				buf += c;
+				count -= c;
+				ret += c;
+			}
 		}
 	}	
 	
@@ -3202,7 +3259,8 @@ static void mgsl_close(struct tty_struct *tty, struct file * filp)
 	
 	if (info->blocked_open) {
 		if (info->close_delay) {
-			msleep_interruptible(jiffies_to_msecs(info->close_delay));
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(info->close_delay);
 		}
 		wake_up_interruptible(&info->open_wait);
 	}
@@ -3268,7 +3326,8 @@ static void mgsl_wait_until_sent(struct tty_struct *tty, int timeout)
 	if ( info->params.mode == MGSL_MODE_HDLC ||
 		info->params.mode == MGSL_MODE_RAW ) {
 		while (info->tx_active) {
-			msleep_interruptible(jiffies_to_msecs(char_time));
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(char_time);
 			if (signal_pending(current))
 				break;
 			if (timeout && time_after(jiffies, orig_jiffies + timeout))
@@ -3277,7 +3336,8 @@ static void mgsl_wait_until_sent(struct tty_struct *tty, int timeout)
 	} else {
 		while (!(usc_InReg(info,TCSR) & TXSTATUS_ALL_SENT) &&
 			info->tx_enabled) {
-			msleep_interruptible(jiffies_to_msecs(char_time));
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(char_time);
 			if (signal_pending(current))
 				break;
 			if (timeout && time_after(jiffies, orig_jiffies + timeout))
@@ -7140,7 +7200,8 @@ BOOLEAN mgsl_irq_test( struct mgsl_struct *info )
 
 	EndTime=100;
 	while( EndTime-- && !info->irq_occurred ) {
-		msleep_interruptible(10);
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(msecs_to_jiffies(10));
 	}
 	
 	spin_lock_irqsave(&info->irq_spinlock,flags);
@@ -8089,7 +8150,9 @@ static void hdlcdev_rx(struct mgsl_struct *info, char *buf, int size)
 
 	memcpy(skb_put(skb, size),buf,size);
 
-	skb->protocol = hdlc_type_trans(skb, info->netdev);
+	skb->dev      = info->netdev;
+	skb->mac.raw  = skb->data;
+	skb->protocol = hdlc_type_trans(skb, skb->dev);
 
 	stats->rx_packets++;
 	stats->rx_bytes += size;

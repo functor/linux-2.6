@@ -54,9 +54,7 @@ typedef struct {
 
 #if defined(__KERNEL__) || !defined(__GLIBC__) || (__GLIBC__ < 2)
 
-/* We used to include <asm/bitops.h> here, which seems the right thing, but
-   it caused nasty include-file definition order problems.  Removing the
-   include seems to work, so fingers crossed...  */
+#include <asm/bitops.h>
 
 #undef	__FD_SET
 #define __FD_SET(fd, fd_set) \

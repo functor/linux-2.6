@@ -78,8 +78,4 @@ void consistent_sync(void *vaddr, size_t size, int direction)
 		BUG();
 	}
 }
-
-EXPORT_SYMBOL(consistent_alloc);
-EXPORT_SYMBOL(consistent_free);
 EXPORT_SYMBOL(consistent_sync);
-

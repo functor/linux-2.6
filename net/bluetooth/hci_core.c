@@ -65,10 +65,6 @@ rwlock_t hci_task_lock = RW_LOCK_UNLOCKED;
 LIST_HEAD(hci_dev_list);
 rwlock_t hci_dev_list_lock = RW_LOCK_UNLOCKED;
 
-/* HCI callback list */
-LIST_HEAD(hci_cb_list);
-rwlock_t hci_cb_list_lock = RW_LOCK_UNLOCKED;
-
 /* HCI protocols */
 #define HCI_MAX_PROTO	2
 struct hci_proto *hci_proto[HCI_MAX_PROTO];
@@ -313,19 +309,19 @@ struct inquiry_entry *hci_inquiry_cache_lookup(struct hci_dev *hdev, bdaddr_t *b
 	BT_DBG("cache %p, %s", cache, batostr(bdaddr));
 
 	for (e = cache->list; e; e = e->next)
-		if (!bacmp(&e->data.bdaddr, bdaddr))
+		if (!bacmp(&e->info.bdaddr, bdaddr))
 			break;
 	return e;
 }
 
-void hci_inquiry_cache_update(struct hci_dev *hdev, struct inquiry_data *data)
+void hci_inquiry_cache_update(struct hci_dev *hdev, struct inquiry_info *info)
 {
 	struct inquiry_cache *cache = &hdev->inq_cache;
 	struct inquiry_entry *e;
 
-	BT_DBG("cache %p, %s", cache, batostr(&data->bdaddr));
+	BT_DBG("cache %p, %s", cache, batostr(&info->bdaddr));
 
-	if (!(e = hci_inquiry_cache_lookup(hdev, &data->bdaddr))) {
+	if (!(e = hci_inquiry_cache_lookup(hdev, &info->bdaddr))) {
 		/* Entry not in the cache. Add new one. */
 		if (!(e = kmalloc(sizeof(struct inquiry_entry), GFP_ATOMIC)))
 			return;
@@ -334,7 +330,7 @@ void hci_inquiry_cache_update(struct hci_dev *hdev, struct inquiry_data *data)
 		cache->list = e;
 	}
 
-	memcpy(&e->data, data, sizeof(*data));
+	memcpy(&e->info, info, sizeof(*info));
 	e->timestamp = jiffies;
 	cache->timestamp = jiffies;
 }
@@ -346,16 +342,8 @@ static int inquiry_cache_dump(struct hci_dev *hdev, int num, __u8 *buf)
 	struct inquiry_entry *e;
 	int copied = 0;
 
-	for (e = cache->list; e && copied < num; e = e->next, copied++) {
-		struct inquiry_data *data = &e->data;
-		bacpy(&info->bdaddr, &data->bdaddr);
-		info->pscan_rep_mode	= data->pscan_rep_mode;
-		info->pscan_period_mode	= data->pscan_period_mode;
-		info->pscan_mode	= data->pscan_mode;
-		memcpy(info->dev_class, data->dev_class, 3);
-		info->clock_offset	= data->clock_offset;
-		info++;
-	}
+	for (e = cache->list; e && copied < num; e = e->next, copied++)
+		memcpy(info++, &e->info, sizeof(*info));
 
 	BT_DBG("cache %p, copied %d", cache, copied);
 	return copied;
@@ -941,30 +929,6 @@ int hci_unregister_proto(struct hci_proto *hp)
 	return err;
 }
 EXPORT_SYMBOL(hci_unregister_proto);
-
-int hci_register_cb(struct hci_cb *cb)
-{
-	BT_DBG("%p name %s", cb, cb->name);
-
-	write_lock_bh(&hci_cb_list_lock);
-	list_add(&cb->list, &hci_cb_list);
-	write_unlock_bh(&hci_cb_list_lock);
-
-	return 0;
-}
-EXPORT_SYMBOL(hci_register_cb);
-
-int hci_unregister_cb(struct hci_cb *cb)
-{
-	BT_DBG("%p name %s", cb, cb->name);
-
-	write_lock_bh(&hci_cb_list_lock);
-	list_del(&cb->list);
-	write_unlock_bh(&hci_cb_list_lock);
-
-	return 0;
-}
-EXPORT_SYMBOL(hci_unregister_cb);
 
 static int hci_send_frame(struct sk_buff *skb)
 {

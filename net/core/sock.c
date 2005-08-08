@@ -180,7 +180,7 @@ static void sock_disable_timestamp(struct sock *sk)
 {	
 	if (sock_flag(sk, SOCK_TIMESTAMP)) { 
 		sock_reset_flag(sk, SOCK_TIMESTAMP);
-		net_disable_timestamp();
+		atomic_dec(&netstamp_needed);
 	}
 }
 
@@ -340,7 +340,6 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 				clear_bit(SOCK_PASS_CRED, &sock->flags);
 			break;
 
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 		case SO_SETXID:
 			if (current->xid) {
 				ret = -EPERM;
@@ -352,7 +351,6 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 			}
 			sk->sk_xid = val;
 			break;
-#endif
 
 		case SO_TIMESTAMP:
 			sk->sk_rcvtstamp = valbool;
@@ -1197,8 +1195,8 @@ void sock_init_data(struct socket *sock, struct sock *sk)
 	} else
 		sk->sk_sleep	=	NULL;
 
-	rwlock_init(&sk->sk_dst_lock);
-	rwlock_init(&sk->sk_callback_lock);
+	sk->sk_dst_lock		=	RW_LOCK_UNLOCKED;
+	sk->sk_callback_lock	=	RW_LOCK_UNLOCKED;
 
 	sk->sk_state_change	=	sock_def_wakeup;
 	sk->sk_data_ready	=	sock_def_readable;
@@ -1253,6 +1251,9 @@ void fastcall release_sock(struct sock *sk)
 }
 EXPORT_SYMBOL(release_sock);
 
+/* When > 0 there are consumers of rx skb time stamps */
+atomic_t netstamp_needed = ATOMIC_INIT(0); 
+
 int sock_get_timestamp(struct sock *sk, struct timeval __user *userstamp)
 { 
 	if (!sock_flag(sk, SOCK_TIMESTAMP))
@@ -1270,7 +1271,7 @@ void sock_enable_timestamp(struct sock *sk)
 {	
 	if (!sock_flag(sk, SOCK_TIMESTAMP)) { 
 		sock_set_flag(sk, SOCK_TIMESTAMP);
-		net_enable_timestamp();
+		atomic_inc(&netstamp_needed);
 	}
 }
 EXPORT_SYMBOL(sock_enable_timestamp); 

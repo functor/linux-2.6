@@ -38,7 +38,6 @@
 #include <asm/cpcmd.h>
 #include <asm/s390_ext.h>
 #include <asm/lowcore.h>
-#include <asm/debug.h>
 
 /* Called from entry.S only */
 extern void handle_per_exception(struct pt_regs *regs);
@@ -278,38 +277,18 @@ spinlock_t die_lock = SPIN_LOCK_UNLOCKED;
 void die(const char * str, struct pt_regs * regs, long err)
 {
 	static int die_counter;
-
-	debug_stop_all();
-	console_verbose();
-	spin_lock_irq(&die_lock);
+        console_verbose();
+        spin_lock_irq(&die_lock);
 	bust_spinlocks(1);
 	printk("%s: %04lx [#%d]\n", str, err & 0xffff, ++die_counter);
         show_regs(regs);
-	try_crashdump(regs);  
 	bust_spinlocks(0);
         spin_unlock_irq(&die_lock);
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
-	if (panic_on_oops) {
-		if (netdump_func)
-			netdump_func = NULL;
+	if (panic_on_oops)
 		panic("Fatal exception: panic_on_oops");
-	}
         do_exit(SIGSEGV);
-}
-
-static void inline
-report_user_fault(long interruption_code, struct pt_regs *regs)
-{
-#if defined(CONFIG_SYSCTL)
-	if (!sysctl_userprocess_debug)
-		return;
-#endif
-#if defined(CONFIG_SYSCTL) || defined(CONFIG_PROCESS_DEBUG)
-	printk("User process fault: interruption code 0x%lX\n",
-	       interruption_code);
-	show_regs(regs);
-#endif
 }
 
 static void inline do_trap(long interruption_code, int signr, char *str,
@@ -326,8 +305,23 @@ static void inline do_trap(long interruption_code, int signr, char *str,
                 struct task_struct *tsk = current;
 
                 tsk->thread.trap_no = interruption_code & 0xffff;
-		force_sig_info(signr, info, tsk);
-		report_user_fault(interruption_code, regs);
+		if (info)
+			force_sig_info(signr, info, tsk);
+		else
+                	force_sig(signr, tsk);
+#ifndef CONFIG_SYSCTL
+#ifdef CONFIG_PROCESS_DEBUG
+                printk("User process fault: interruption code 0x%lX\n",
+                       interruption_code);
+                show_regs(regs);
+#endif
+#else
+		if (sysctl_userprocess_debug) {
+			printk("User process fault: interruption code 0x%lX\n",
+			       interruption_code);
+			show_regs(regs);
+		}
+#endif
         } else {
                 const struct exception_table_entry *fixup;
                 fixup = search_exception_tables(regs->psw.addr & PSW_ADDR_INSN);
@@ -349,15 +343,10 @@ void do_single_step(struct pt_regs *regs)
 		force_sig(SIGTRAP, current);
 }
 
-asmlinkage void
-default_trap_handler(struct pt_regs * regs, long interruption_code)
-{
-        if (regs->psw.mask & PSW_MASK_PSTATE) {
-		local_irq_enable();
-		do_exit(SIGSEGV);
-		report_user_fault(interruption_code, regs);
-	} else
-		die("Unknown program exception", regs, interruption_code);
+#define DO_ERROR(signr, str, name) \
+asmlinkage void name(struct pt_regs * regs, long interruption_code) \
+{ \
+	do_trap(interruption_code, signr, str, regs, NULL); \
 }
 
 #define DO_ERROR_INFO(signr, str, name, sicode, siaddr) \
@@ -370,6 +359,8 @@ asmlinkage void name(struct pt_regs * regs, long interruption_code) \
         info.si_addr = (void *)siaddr; \
         do_trap(interruption_code, signr, str, regs, &info); \
 }
+
+DO_ERROR(SIGSEGV, "Unknown program exception", default_trap_handler)
 
 DO_ERROR_INFO(SIGILL, "addressing exception", addressing_exception,
 	      ILL_ILLADR, get_check_address(regs))
@@ -429,7 +420,6 @@ do_fp_trap(struct pt_regs *regs, void *location,
 
 asmlinkage void illegal_op(struct pt_regs * regs, long interruption_code)
 {
-	siginfo_t info;
         __u8 opcode[6];
 	__u16 *location;
 	int signal = 0;
@@ -473,27 +463,12 @@ asmlinkage void illegal_op(struct pt_regs * regs, long interruption_code)
 	} else
 		signal = SIGILL;
 
-#ifdef CONFIG_MATHEMU
         if (signal == SIGFPE)
 		do_fp_trap(regs, location,
                            current->thread.fp_regs.fpc, interruption_code);
-        else if (signal == SIGSEGV) {
-		info.si_signo = signal;
-		info.si_errno = 0;
-		info.si_code = SEGV_MAPERR;
-		info.si_addr = (void *) location;
+        else if (signal)
 		do_trap(interruption_code, signal,
-			"user address fault", regs, &info);
-	} else
-#endif
-        if (signal) {
-		info.si_signo = signal;
-		info.si_errno = 0;
-		info.si_code = ILL_ILLOPC;
-		info.si_addr = (void *) location;
-		do_trap(interruption_code, signal,
-			"illegal operation", regs, &info);
-	}
+			"illegal operation", regs, NULL);
 }
 
 

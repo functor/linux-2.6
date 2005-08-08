@@ -41,7 +41,6 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#include <linux/module.h>
 
 #include <acpi/acpi.h>
 #include <acpi/actables.h>
@@ -50,9 +49,6 @@
 #define _COMPONENT          ACPI_TABLES
 	 ACPI_MODULE_NAME    ("tbconvrt")
 
-
-u8 acpi_fadt_is_v1;
-EXPORT_SYMBOL(acpi_fadt_is_v1);
 
 /*******************************************************************************
  *
@@ -216,7 +212,6 @@ acpi_tb_convert_fadt1 (
 
 	/* ACPI 1.0 FACS */
 	/* The BIOS stored FADT should agree with Revision 1.0 */
-	acpi_fadt_is_v1 = 1;
 
 	/*
 	 * Copy the table header and the common part of the tables.
@@ -245,12 +240,9 @@ acpi_tb_convert_fadt1 (
 	/*
 	 * Processor Performance State Control. This is the value OSPM writes to
 	 * the SMI_CMD register to assume processor performance state control
-	 * responsibility. There isn't any equivalence in 1.0, but as many 1.x
-	 * ACPI tables contain _PCT and _PSS we also keep this value, unless
-	 * acpi_strict is set.
+	 * responsibility. There isn't any equivalence in 1.0, leave it zeroed.
 	 */
-	if (acpi_strict)
-		local_fadt->pstate_cnt = 0;
+	local_fadt->pstate_cnt = 0;
 
 	/*
 	 * Support for the _CST object and C States change notification.
@@ -259,24 +251,20 @@ acpi_tb_convert_fadt1 (
 	local_fadt->cst_cnt = 0;
 
 	/*
-	 * FADT Rev 2 was an interim FADT released between ACPI 1.0 and ACPI 2.0.
-	 * It primarily adds the FADT reset mechanism.
+	 * Support for ACPI system reset mechanism was introduced between
+	 * Spec revisions 1.0b and 2.0, for legacy free systems..
 	 */
-	if ((original_fadt->revision == 2) &&
-		(original_fadt->length == sizeof (struct fadt_descriptor_rev2_minus))) {
+	if (original_fadt->revision == FADT2_INTERIM_REVISION_ID && original_fadt->length == FADT2_INTERIM_LENGTH) {
 		/*
-		 * Grab the entire generic address struct, plus the 1-byte reset value
-		 * that immediately follows.
+		 * Copy the entire GAS, plus the 1-byte reset value that
+		 * immediately follows.
 		 */
-		ACPI_MEMCPY (&local_fadt->reset_register,
-			&((struct fadt_descriptor_rev2_minus *) original_fadt)->reset_register,
-			sizeof (struct acpi_generic_address) + 1);
-	}
-	else {
+		ACPI_MEMCPY (&local_fadt->reset_register, &((FADT_DESCRIPTOR *)original_fadt)->reset_register, sizeof(struct acpi_generic_address) + 1);
+	} else {
 		/*
-		 * Since there isn't any equivalence in 1.0 and since it is highly
-		 * likely that a 1.0 system has legacy support.
-		 */
+		 * Otherwise, there isn't any equivalence in 1.0 and it's
+		 * highly likely that a 1.0 system has legacy support.
+	 	 */
 		local_fadt->iapc_boot_arch = BAF_LEGACY_DEVICES;
 	}
 
@@ -442,19 +430,21 @@ acpi_tb_convert_table_fadt (void)
 
 
 	/*
-	 * acpi_gbl_FADT is valid. Validate the FADT length. The table must be
-	 * at least as long as the version 1.0 FADT
+	 * acpi_gbl_FADT is valid
+	 * Allocate and zero the 2.0 FADT buffer
 	 */
-	if (acpi_gbl_FADT->length < sizeof (struct fadt_descriptor_rev1)) {
-		ACPI_REPORT_ERROR (("FADT is invalid, too short: 0x%X\n", acpi_gbl_FADT->length));
-		return_ACPI_STATUS (AE_INVALID_TABLE_LENGTH);
+	local_fadt = ACPI_MEM_CALLOCATE (sizeof (struct fadt_descriptor_rev2));
+	if (local_fadt == NULL) {
+		return_ACPI_STATUS (AE_NO_MEMORY);
 	}
 
-	/* Allocate buffer for the ACPI 2.0(+) FADT */
-
-	local_fadt = ACPI_MEM_CALLOCATE (sizeof (struct fadt_descriptor_rev2));
-	if (!local_fadt) {
-		return_ACPI_STATUS (AE_NO_MEMORY);
+	/*
+	 * FADT length and version validation.  The table must be at least as
+	 * long as the version 1.0 FADT
+	 */
+	if (acpi_gbl_FADT->length < sizeof (struct fadt_descriptor_rev1)) {
+		ACPI_REPORT_ERROR (("Invalid FADT table length: 0x%X\n", acpi_gbl_FADT->length));
+		return_ACPI_STATUS (AE_INVALID_TABLE_LENGTH);
 	}
 
 	if (acpi_gbl_FADT->revision >= FADT2_REVISION_ID) {

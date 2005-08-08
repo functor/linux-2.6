@@ -2,8 +2,6 @@
  * Carsten Langgaard, carstenl@mips.com
  * Copyright (C) 1999, 2000 MIPS Technologies, Inc.  All rights reserved.
  *
- * Copyright (C) 2004 by Ralf Baechle (ralf@linux-mips.org)
- *
  *  This program is free software; you can distribute it and/or modify it
  *  under the terms of the GNU General Public License (Version 2) as
  *  published by the Free Software Foundation.
@@ -26,6 +24,7 @@
 #include <linux/init.h>
 
 #include <asm/mips-boards/generic.h>
+#include <asm/pci_channel.h>
 #include <asm/gt64120.h>
 #include <asm/mips-boards/bonito64.h>
 #include <asm/mips-boards/msc01_pci.h>

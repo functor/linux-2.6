@@ -26,7 +26,7 @@
 
 #undef DEBUG_TLB
 
-extern void build_tlb_refill_handler(void);
+extern char except_vec0_r2300;
 
 /* CP0 hazard avoidance. */
 #define BARRIER				\
@@ -284,6 +284,6 @@ void __init add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 void __init tlb_init(void)
 {
 	local_flush_tlb_all();
-
-	build_tlb_refill_handler();
+	memcpy((void *)KSEG0, &except_vec0_r2300, 0x80);
+	flush_icache_range(KSEG0, KSEG0 + 0x80);
 }

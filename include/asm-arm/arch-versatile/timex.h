@@ -1,7 +1,7 @@
 /*
  *  linux/include/asm-arm/arch-versatile/timex.h
  *
- *  Versatile architecture timex specifications
+ *  Versatile PB architecture timex specifications
  *
  *  Copyright (C) 2003 ARM Limited
  *

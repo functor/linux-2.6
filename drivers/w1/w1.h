@@ -63,7 +63,6 @@ struct w1_slave
 	atomic_t		refcnt;
 	u8			rom[9];
 	u32			flags;
-	int			ttl;
 
 	struct w1_master	*master;
 	struct w1_family 	*family;
@@ -100,7 +99,6 @@ struct w1_master
 	struct list_head	slist;
 	int			max_slave_count, slave_count;
 	unsigned long		attempts;
-	int			slave_ttl;
 	int			initialized;
 	u32			id;
 

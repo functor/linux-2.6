@@ -126,6 +126,25 @@ sys_sigaction(int sig, const struct old_sigaction __user *act,
 	return ret;
 }
 
+/*
+ * Do a signal return; undo the signal stack.
+ */
+struct sigframe
+{
+	struct sigcontext sc;
+	unsigned long extramask[_NSIG_WORDS-1];
+	unsigned long retcode;
+};
+
+struct rt_sigframe
+{
+	struct siginfo __user *pinfo;
+	void __user *puc;
+	struct siginfo info;
+	struct ucontext uc;
+	unsigned long retcode;
+};
+
 #ifdef CONFIG_IWMMXT
 
 /* iwmmxt_area is 0x98 bytes long, preceeded by 8 bytes of signature */
@@ -133,15 +152,8 @@ sys_sigaction(int sig, const struct old_sigaction __user *act,
 #define IWMMXT_MAGIC0		0x12ef842a
 #define IWMMXT_MAGIC1		0x1c07ca71
 
-struct iwmmxt_sigframe {
-	unsigned long	magic0;
-	unsigned long	magic1;
-	unsigned long	storage[0x98/4];
-};
-
-static int page_present(struct mm_struct *mm, void __user *uptr, int wr)
+static int page_present(struct mm_struct *mm, unsigned long addr, int wr)
 {
-	unsigned long addr = (unsigned long)uptr;
 	pgd_t *pgd = pgd_offset(mm, addr);
 	if (pgd_present(*pgd)) {
 		pmd_t *pmd = pmd_offset(pgd, addr);
@@ -153,66 +165,49 @@ static int page_present(struct mm_struct *mm, void __user *uptr, int wr)
 	return 0;
 }
 
-static int copy_locked(void __user *uptr, void *kptr, size_t size, int write,
-		       void (*copyfn)(void *, void __user *))
-{
-	unsigned char v, __user *userptr = uptr;
-	int err = 0;
-
-	do {
-		struct mm_struct *mm;
-
-		if (write) {
-			__put_user_error(0, userptr, err);
-			__put_user_error(0, userptr + size - 1, err);
-		} else {
-			__get_user_error(v, userptr, err);
-			__get_user_error(v, userptr + size - 1, err);
-		}
-
-		if (err)
-			break;
-
-		mm = current->mm;
-		spin_lock(&mm->page_table_lock);
-		if (page_present(mm, userptr, write) &&
-		    page_present(mm, userptr + size - 1, write)) {
-		    	copyfn(kptr, uptr);
-		} else
-			err = 1;
-		spin_unlock(&mm->page_table_lock);
-	} while (err);
-
-	return err;
-}
-
-static int preserve_iwmmxt_context(struct iwmmxt_sigframe *frame)
+static int
+preserve_iwmmxt_context(void *iwmmxt_save_area)
 {
 	int err = 0;
 
 	/* the iWMMXt context must be 64 bit aligned */
-	WARN_ON((unsigned long)frame & 7);
+	long *iwmmxt_storage = (long *)(((long)iwmmxt_save_area + 4) & ~7);
 
-	__put_user_error(IWMMXT_MAGIC0, &frame->magic0, err);
-	__put_user_error(IWMMXT_MAGIC1, &frame->magic1, err);
-
+again:
+	__put_user_error(IWMMXT_MAGIC0, iwmmxt_storage+0, err);
+	__put_user_error(IWMMXT_MAGIC1, iwmmxt_storage+1, err);
 	/*
 	 * iwmmxt_task_copy() doesn't check user permissions.
 	 * Let's do a dummy write on the upper boundary to ensure
 	 * access to user mem is OK all way up.
 	 */
-	err |= copy_locked(&frame->storage, current_thread_info(),
-			   sizeof(frame->storage), 1, iwmmxt_task_copy);
+	__put_user_error(0, iwmmxt_storage+IWMMXT_STORAGE_SIZE/4-1, err);
+	if (!err) {
+		/* Let's make sure the user mapping won't disappear under us */
+		struct mm_struct *mm = current->mm;
+		unsigned long addr = (unsigned long)iwmmxt_storage;
+		spin_lock(&mm->page_table_lock);
+		if ( !page_present(mm, addr, 1) ||
+		     !page_present(mm, addr+IWMMXT_STORAGE_SIZE-1, 1) ) {
+			/* our user area has gone before grabbing the lock */
+			spin_unlock(&mm->page_table_lock);
+			goto again;
+		}
+		iwmmxt_task_copy(current_thread_info(), iwmmxt_storage+2);
+		spin_unlock(&mm->page_table_lock);
+		return 0;
+	}
 	return err;
 }
 
-static int restore_iwmmxt_context(struct iwmmxt_sigframe *frame)
+static int
+restore_iwmmxt_context(void *iwmmxt_save_area)
 {
-	unsigned long magic0, magic1;
 	int err = 0;
+	long *iwmmxt_storage, magic0, magic1, dummy;
 
 	/* the iWMMXt context is 64 bit aligned */
-	WARN_ON((unsigned long)frame & 7);
+	iwmmxt_storage = (long *)(((long)iwmmxt_save_area + 4) & ~7);
 
 	/*
 	 * Validate iWMMXt context signature.
@@ -220,51 +215,32 @@ static int restore_iwmmxt_context(struct iwmmxt_sigframe *frame)
 	 * Let's do a dummy write on the upper boundary to ensure
 	 * access to user mem is OK all way up.
 	 */
-	__get_user_error(magic0, &frame->magic0, err);
-	__get_user_error(magic1, &frame->magic1, err);
-	if (!err && magic0 == IWMMXT_MAGIC0 && magic1 == IWMMXT_MAGIC1)
-		err = copy_locked(&frame->storage, current_thread_info(),
-				  sizeof(frame->storage), 0, iwmmxt_task_restore);
-	return err;
+again:
+	__get_user_error(magic0, iwmmxt_storage+0, err);
+	__get_user_error(magic1, iwmmxt_storage+1, err);
+	if (!err && magic0 == IWMMXT_MAGIC0 && magic1 == IWMMXT_MAGIC1 &&
+	    !__get_user(dummy, iwmmxt_storage+IWMMXT_STORAGE_SIZE/4-1)) {
+		/* Let's make sure the user mapping won't disappear under us */
+		struct mm_struct *mm = current->mm;
+		unsigned long addr = (unsigned long)iwmmxt_storage;
+		spin_lock(&mm->page_table_lock);
+		if ( !page_present(mm, addr, 0) ||
+		     !page_present(mm, addr+IWMMXT_STORAGE_SIZE-1, 0) ) {
+			/* our user area has gone before grabbing the lock */
+			spin_unlock(&mm->page_table_lock);
+			goto again;
+		}
+		iwmmxt_task_restore(current_thread_info(), iwmmxt_storage+2);
+		spin_unlock(&mm->page_table_lock);
+		return 0;
+	}
+	return -1;
 }
 
 #endif
 
-/*
- * Auxiliary signal frame.  This saves stuff like FP state.
- * The layout of this structure is not part of the user ABI.
- */
-struct aux_sigframe {
-#ifdef CONFIG_IWMMXT
-	struct iwmmxt_sigframe	iwmmxt;
-#endif
-#ifdef CONFIG_VFP
-	union vfp_state		vfp;
-#endif
-};
-
-/*
- * Do a signal return; undo the signal stack.  These are aligned to 64-bit.
- */
-struct sigframe {
-	struct sigcontext sc;
-	unsigned long extramask[_NSIG_WORDS-1];
-	unsigned long retcode;
-	struct aux_sigframe aux __attribute__((aligned(8)));
-};
-
-struct rt_sigframe {
-	struct siginfo __user *pinfo;
-	void __user *puc;
-	struct siginfo info;
-	struct ucontext uc;
-	unsigned long retcode;
-	struct aux_sigframe aux __attribute__((aligned(8)));
-};
-
 static int
-restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc,
-		   struct aux_sigframe __user *aux)
+restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 {
 	int err = 0;
 
@@ -287,15 +263,6 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc,
 	__get_user_error(regs->ARM_cpsr, &sc->arm_cpsr, err);
 
 	err |= !valid_user_regs(regs);
-
-#ifdef CONFIG_IWMMXT
-	if (err == 0 && test_thread_flag(TIF_USING_IWMMXT))
-		err |= restore_iwmmxt_context(&aux->iwmmxt);
-#endif
-#ifdef CONFIG_VFP
-//	if (err == 0)
-//		err |= vfp_restore_state(&aux->vfp);
-#endif
 
 	return err;
 }
@@ -332,8 +299,13 @@ asmlinkage int sys_sigreturn(struct pt_regs *regs)
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
 
-	if (restore_sigcontext(regs, &frame->sc, &frame->aux))
+	if (restore_sigcontext(regs, &frame->sc))
 		goto badframe;
+
+#ifdef CONFIG_IWMMXT
+	if (test_thread_flag(TIF_USING_IWMMXT) && restore_iwmmxt_context(frame+1))
+		goto badframe;
+#endif
 
 	/* Send SIGTRAP if we're single-stepping */
 	if (current->ptrace & PT_SINGLESTEP) {
@@ -377,11 +349,16 @@ asmlinkage int sys_rt_sigreturn(struct pt_regs *regs)
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
 
-	if (restore_sigcontext(regs, &frame->uc.uc_mcontext, &frame->aux))
+	if (restore_sigcontext(regs, &frame->uc.uc_mcontext))
 		goto badframe;
 
 	if (do_sigaltstack(&frame->uc.uc_stack, NULL, regs->ARM_sp) == -EFAULT)
 		goto badframe;
+
+#ifdef CONFIG_IWMMXT
+	if (test_thread_flag(TIF_USING_IWMMXT) && restore_iwmmxt_context(frame+1))
+		goto badframe;
+#endif
 
 	/* Send SIGTRAP if we're single-stepping */
 	if (current->ptrace & PT_SINGLESTEP) {
@@ -397,7 +374,7 @@ badframe:
 }
 
 static int
-setup_sigcontext(struct sigcontext __user *sc, struct aux_sigframe __user *aux,
+setup_sigcontext(struct sigcontext __user *sc, /*struct _fpstate *fpstate,*/
 		 struct pt_regs *regs, unsigned long mask)
 {
 	int err = 0;
@@ -425,15 +402,6 @@ setup_sigcontext(struct sigcontext __user *sc, struct aux_sigframe __user *aux,
 	__put_user_error(current->thread.address, &sc->fault_address, err);
 	__put_user_error(mask, &sc->oldmask, err);
 
-#ifdef CONFIG_IWMMXT
-	if (err == 0 && test_thread_flag(TIF_USING_IWMMXT))
-		err |= preserve_iwmmxt_context(&aux->iwmmxt);
-#endif
-#ifdef CONFIG_VFP
-//	if (err == 0)
-//		err |= vfp_save_state(&aux->vfp);
-#endif
-
 	return err;
 }
 
@@ -442,6 +410,11 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, int framesize)
 {
 	unsigned long sp = regs->ARM_sp;
 	void __user *frame;
+
+#ifdef CONFIG_IWMMXT
+	if (test_thread_flag(TIF_USING_IWMMXT))
+		framesize = (framesize + 4 + IWMMXT_STORAGE_SIZE) & ~7;
+#endif
 
 	/*
 	 * This is the X/Open sanctioned signal stack switching.
@@ -532,12 +505,17 @@ setup_frame(int usig, struct k_sigaction *ka, sigset_t *set, struct pt_regs *reg
 	if (!frame)
 		return 1;
 
-	err |= setup_sigcontext(&frame->sc, &frame->aux, regs, set->sig[0]);
+	err |= setup_sigcontext(&frame->sc, /*&frame->fpstate,*/ regs, set->sig[0]);
 
 	if (_NSIG_WORDS > 1) {
 		err |= __copy_to_user(frame->extramask, &set->sig[1],
 				      sizeof(frame->extramask));
 	}
+
+#ifdef CONFIG_IWMMXT
+	if (test_thread_flag(TIF_USING_IWMMXT))
+		err |= preserve_iwmmxt_context(frame+1);
+#endif
 
 	if (err == 0)
 		err = setup_return(regs, ka, &frame->retcode, frame, usig);
@@ -569,9 +547,14 @@ setup_rt_frame(int usig, struct k_sigaction *ka, siginfo_t *info,
 	stack.ss_size = current->sas_ss_size;
 	err |= __copy_to_user(&frame->uc.uc_stack, &stack, sizeof(stack));
 
-	err |= setup_sigcontext(&frame->uc.uc_mcontext, &frame->aux,
+	err |= setup_sigcontext(&frame->uc.uc_mcontext, /*&frame->fpstate,*/
 				regs, set->sig[0]);
 	err |= __copy_to_user(&frame->uc.uc_sigmask, set, sizeof(*set));
+
+#ifdef CONFIG_IWMMXT
+	if (test_thread_flag(TIF_USING_IWMMXT))
+		err |= preserve_iwmmxt_context(frame+1);
+#endif
 
 	if (err == 0)
 		err = setup_return(regs, ka, &frame->retcode, frame, usig);

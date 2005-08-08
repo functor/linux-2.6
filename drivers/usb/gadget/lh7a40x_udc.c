@@ -54,6 +54,7 @@ static const char ep0name[] = "ep0-control";
 /*
   Local definintions.
 */
+#define UDC_PROC_FILE
 
 #ifndef NO_STATES
 static char *state_names[] = {
@@ -191,7 +192,7 @@ static __inline__ void usb_clear(u32 val, u32 port)
  */
 #define is_usb_connected() 		get_portc_pdr(2)
 
-#ifdef CONFIG_USB_GADGET_DEBUG_FILES
+#ifdef UDC_PROC_FILE
 
 static const char proc_node_name[] = "driver/udc";
 
@@ -247,12 +248,12 @@ udc_proc_read(char *page, char **start, off_t off, int count,
 #define create_proc_files() 	create_proc_read_entry(proc_node_name, 0, NULL, udc_proc_read, dev)
 #define remove_proc_files() 	remove_proc_entry(proc_node_name, NULL)
 
-#else	/* !CONFIG_USB_GADGET_DEBUG_FILES */
+#else				/* !UDC_PROC_FILE */
 
 #define create_proc_files() do {} while (0)
 #define remove_proc_files() do {} while (0)
 
-#endif	/* CONFIG_USB_GADGET_DEBUG_FILES */
+#endif				/* UDC_PROC_FILE */
 
 /*
  * 	udc_disable - disable USB device controller

@@ -304,6 +304,8 @@ extern unsigned long arch_align_stack(unsigned long sp);
 
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
 
+#define HAVE_ARCH_PICK_MMAP_LAYOUT
+
 /*
  * Size of io_bitmap.
  */
@@ -667,7 +669,5 @@ extern inline void prefetchw(const void *x)
 extern void select_idle_routine(const struct cpuinfo_x86 *c);
 
 #define cache_line_size() (boot_cpu_data.x86_cache_alignment)
-
-extern unsigned long boot_option_idle_override;
 
 #endif /* __ASM_I386_PROCESSOR_H */

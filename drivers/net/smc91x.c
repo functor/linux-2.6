@@ -55,10 +55,12 @@
  *                                  smc_phy_configure
  *                                - clean up (and fix stack overrun) in PHY
  *                                  MII read/write functions
- *   22/09/04  Nicolas Pitre      big update (see commit log for details)
+ *   09/15/04  Hayato Fujiwara    - Add m32r support.
+ *                                - Modify for SMP kernel; Change spin-locked
+ *                                  regions.
  */
 static const char version[] =
-	"smc91x.c: v1.1, sep 22 2004 by Nicolas Pitre <nico@cam.org>\n";
+	"smc91x.c: v1.0, mar 07 2003 by Nicolas Pitre <nico@cam.org>\n";
 
 /* Debugging level */
 #ifndef SMC_DEBUG
@@ -73,7 +75,7 @@ static const char version[] =
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
-#include <linux/interrupt.h>
+#include <linux/timer.h>
 #include <linux/errno.h>
 #include <linux/ioport.h>
 #include <linux/crc32.h>
@@ -81,7 +83,6 @@ static const char version[] =
 #include <linux/spinlock.h>
 #include <linux/ethtool.h>
 #include <linux/mii.h>
-#include <linux/workqueue.h>
 
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -176,8 +177,7 @@ struct smc_local {
 	 * packet, I will store the skbuff here, until I get the
 	 * desired memory.  Then, I'll send it out and free it.
 	 */
-	struct sk_buff *pending_tx_skb;
-	struct tasklet_struct tx_task;
+	struct sk_buff *saved_skb;
 
  	/*
 	 * these are things that the kernel wants me to keep, so users
@@ -203,11 +203,6 @@ struct smc_local {
 	u32	msg_enable;
 	u32	phy_type;
 	struct mii_if_info mii;
-
-	/* work queue */
-	struct work_struct phy_configure;
-	int	work_pending;
-
 	spinlock_t lock;
 
 #ifdef SMC_USE_PXA_DMA
@@ -220,7 +215,7 @@ struct smc_local {
 #define DBG(n, args...)					\
 	do {						\
 		if (SMC_DEBUG >= (n))			\
-			printk(args);	\
+			printk(KERN_DEBUG args);	\
 	} while (0)
 
 #define PRINTK(args...)   printk(args)
@@ -265,21 +260,17 @@ static void PRINT_PKT(u_char *buf, int length)
 /* this enables an interrupt in the interrupt mask register */
 #define SMC_ENABLE_INT(x) do {						\
 	unsigned char mask;						\
-	spin_lock_irq(&lp->lock);					\
 	mask = SMC_GET_INT_MASK();					\
 	mask |= (x);							\
 	SMC_SET_INT_MASK(mask);						\
-	spin_unlock_irq(&lp->lock);					\
 } while (0)
 
 /* this disables an interrupt from the interrupt mask register */
 #define SMC_DISABLE_INT(x) do {						\
 	unsigned char mask;						\
-	spin_lock_irq(&lp->lock);					\
 	mask = SMC_GET_INT_MASK();					\
 	mask &= ~(x);							\
 	SMC_SET_INT_MASK(mask);						\
-	spin_unlock_irq(&lp->lock);					\
 } while (0)
 
 /*
@@ -308,16 +299,9 @@ static void PRINT_PKT(u_char *buf, int length)
 static void smc_reset(struct net_device *dev)
 {
 	unsigned long ioaddr = dev->base_addr;
-	struct smc_local *lp = netdev_priv(dev);
 	unsigned int ctl, cfg;
 
 	DBG(2, "%s: %s\n", dev->name, __FUNCTION__);
-
-	/* Disable all interrupts */
-	spin_lock(&lp->lock);
-	SMC_SELECT_BANK(2);
-	SMC_SET_INT_MASK(0);
-	spin_unlock(&lp->lock);
 
 	/*
 	 * This resets the registers mostly to defaults, but doesn't
@@ -374,24 +358,20 @@ static void smc_reset(struct net_device *dev)
 	 * transmitted packets, to make the best use out of our limited
 	 * memory
 	 */
-	if(!THROTTLE_TX_PKTS)
-		ctl |= CTL_AUTO_RELEASE;
-	else
-		ctl &= ~CTL_AUTO_RELEASE;
+#if ! THROTTLE_TX_PKTS
+	ctl |= CTL_AUTO_RELEASE;
+#else
+	ctl &= ~CTL_AUTO_RELEASE;
+#endif
 	SMC_SET_CTL(ctl);
 
-	/* Reset the MMU */
+	/* Disable all interrupts */
 	SMC_SELECT_BANK(2);
+	SMC_SET_INT_MASK(0);
+
+	/* Reset the MMU */
 	SMC_SET_MMU_CMD(MC_RESET);
 	SMC_WAIT_MMU_BUSY();
-
-	/* clear anything saved */
-	if (lp->pending_tx_skb != NULL) {
-		dev_kfree_skb (lp->pending_tx_skb);
-		lp->pending_tx_skb = NULL;
-		lp->stats.tx_errors++;
-		lp->stats.tx_aborted_errors++;
-	}
 }
 
 /*
@@ -410,39 +390,24 @@ static void smc_enable(struct net_device *dev)
 	SMC_SET_TCR(lp->tcr_cur_mode);
 	SMC_SET_RCR(lp->rcr_cur_mode);
 
-	SMC_SELECT_BANK(1);
-	SMC_SET_MAC_ADDR(dev->dev_addr);
-
 	/* now, enable interrupts */
 	mask = IM_EPH_INT|IM_RX_OVRN_INT|IM_RCV_INT;
 	if (lp->version >= (CHIP_91100 << 4))
 		mask |= IM_MDINT;
 	SMC_SELECT_BANK(2);
 	SMC_SET_INT_MASK(mask);
-
-	/*
-	 * From this point the register bank must _NOT_ be switched away
-	 * to something else than bank 2 without proper locking against
-	 * races with any tasklet or interrupt handlers until smc_shutdown()
-	 * or smc_reset() is called.
-	 */
 }
 
 /*
  * this puts the device in an inactive state
  */
-static void smc_shutdown(struct net_device *dev)
+static void smc_shutdown(unsigned long ioaddr)
 {
-	unsigned long ioaddr = dev->base_addr;
-	struct smc_local *lp = netdev_priv(dev);
-
 	DBG(2, "%s: %s\n", CARDNAME, __FUNCTION__);
 
 	/* no more interrupts for me */
-	spin_lock(&lp->lock);
 	SMC_SELECT_BANK(2);
 	SMC_SET_INT_MASK(0);
-	spin_unlock(&lp->lock);
 
 	/* and tell the card to stay away from that nasty outside world */
 	SMC_SELECT_BANK(0);
@@ -484,8 +449,6 @@ static inline void  smc_rcv(struct net_device *dev)
 		packet_len, packet_len);
 
 	if (unlikely(status & RS_ERRORS)) {
-		SMC_WAIT_MMU_BUSY();
-		SMC_SET_MMU_CMD(MC_RELEASE);
 		lp->stats.rx_errors++;
 		if (status & RS_ALGNERR)
 			lp->stats.rx_frame_errors++;
@@ -503,21 +466,17 @@ static inline void  smc_rcv(struct net_device *dev)
 			lp->stats.multicast++;
 
 		/*
-		 * Actual payload is packet_len - 6 (or 5 if odd byte).
+		 * Actual payload is packet_len - 4 (or 3 if odd byte).
 		 * We want skb_reserve(2) and the final ctrl word
 		 * (2 bytes, possibly containing the payload odd byte).
-		 * Furthermore, we add 2 bytes to allow rounding up to
-		 * multiple of 4 bytes on 32 bit buses.
-		 * Ence packet_len - 6 + 2 + 2 + 2.
+		 * Ence packet_len - 4 + 2 + 2.
 		 */
 		skb = dev_alloc_skb(packet_len);
 		if (unlikely(skb == NULL)) {
 			printk(KERN_NOTICE "%s: Low memory, packet dropped.\n",
 				dev->name);
-			SMC_WAIT_MMU_BUSY();
-			SMC_SET_MMU_CMD(MC_RELEASE);
 			lp->stats.rx_dropped++;
-			return;
+			goto done;
 		}
 
 		/* Align IP header to 32 bits */
@@ -528,18 +487,14 @@ static inline void  smc_rcv(struct net_device *dev)
 			status |= RS_ODDFRAME;
 
 		/*
-		 * If odd length: packet_len - 5,
-		 * otherwise packet_len - 6.
-		 * With the trailing ctrl byte it's packet_len - 4.
+		 * If odd length: packet_len - 3,
+		 * otherwise packet_len - 4.
 		 */
-		data_len = packet_len - ((status & RS_ODDFRAME) ? 5 : 6);
+		data_len = packet_len - ((status & RS_ODDFRAME) ? 3 : 4);
 		data = skb_put(skb, data_len);
-		SMC_PULL_DATA(data, packet_len - 4);
+		SMC_PULL_DATA(data, packet_len - 2);
 
-		SMC_WAIT_MMU_BUSY();
-		SMC_SET_MMU_CMD(MC_RELEASE);
-
-		PRINT_PKT(data, packet_len - 4);
+		PRINT_PKT(data, packet_len - 2);
 
 		dev->last_rx = jiffies;
 		skb->dev = dev;
@@ -548,76 +503,34 @@ static inline void  smc_rcv(struct net_device *dev)
 		lp->stats.rx_packets++;
 		lp->stats.rx_bytes += data_len;
 	}
-}
 
-#ifdef CONFIG_SMP
-/*
- * On SMP we have the following problem:
- *
- * 	A = smc_hardware_send_pkt()
- * 	B = smc_hard_start_xmit()
- * 	C = smc_interrupt()
- *
- * A and B can never be executed simultaneously.  However, at least on UP,
- * it is possible (and even desirable) for C to interrupt execution of
- * A or B in order to have better RX reliability and avoid overruns.
- * C, just like A and B, must have exclusive access to the chip and
- * each of them must lock against any other concurrent access.
- * Unfortunately this is not possible to have C suspend execution of A or
- * B taking place on another CPU. On UP this is no an issue since A and B
- * are run from softirq context and C from hard IRQ context, and there is
- * no other CPU where concurrent access can happen.
- * If ever there is a way to force at least B and C to always be executed
- * on the same CPU then we could use read/write locks to protect against
- * any other concurrent access and C would always interrupt B. But life
- * isn't that easy in a SMP world...
- */
-#define smc_special_trylock(lock)					\
-({									\
-	int __ret;							\
-	local_irq_disable();						\
-	__ret = spin_trylock(lock);					\
-	if (!__ret)							\
-		local_irq_enable();					\
-	__ret;								\
-})
-#define smc_special_lock(lock)		spin_lock_irq(lock)
-#define smc_special_unlock(lock)	spin_unlock_irq(lock)
-#else
-#define smc_special_trylock(lock)	(1)
-#define smc_special_lock(lock)		do { } while (0)
-#define smc_special_unlock(lock)	do { } while (0)
-#endif
+done:
+	SMC_WAIT_MMU_BUSY();
+	SMC_SET_MMU_CMD(MC_RELEASE);
+}
 
 /*
  * This is called to actually send a packet to the chip.
+ * Returns non-zero when successful.
  */
-static void smc_hardware_send_pkt(unsigned long data)
+static void smc_hardware_send_packet(struct net_device *dev)
 {
-	struct net_device *dev = (struct net_device *)data;
 	struct smc_local *lp = netdev_priv(dev);
 	unsigned long ioaddr = dev->base_addr;
-	struct sk_buff *skb;
+	struct sk_buff *skb = lp->saved_skb;
 	unsigned int packet_no, len;
 	unsigned char *buf;
 
 	DBG(3, "%s: %s\n", dev->name, __FUNCTION__);
 
-	if (!smc_special_trylock(&lp->lock)) {
-		netif_stop_queue(dev);
-		tasklet_schedule(&lp->tx_task);
-		return;
-	}
-
-	skb = lp->pending_tx_skb;
-	lp->pending_tx_skb = NULL;
 	packet_no = SMC_GET_AR();
 	if (unlikely(packet_no & AR_FAILED)) {
 		printk("%s: Memory allocation failed.\n", dev->name);
+		lp->saved_skb = NULL;
 		lp->stats.tx_errors++;
 		lp->stats.tx_fifo_errors++;
-		smc_special_unlock(&lp->lock);
-		goto done;
+		dev_kfree_skb_any(skb);
+		return;
 	}
 
 	/* point to the beginning of the packet */
@@ -642,33 +555,15 @@ static void smc_hardware_send_pkt(unsigned long data)
 	/* Send final ctl word with the last byte if there is one */
 	SMC_outw(((len & 1) ? (0x2000 | buf[len-1]) : 0), ioaddr, DATA_REG);
 
-	/*
-	 * If THROTTLE_TX_PKTS is set, we look at the TX_EMPTY flag
-	 * before queueing this packet for TX, and if it's clear then
-	 * we stop the queue here.  This will have the effect of
-	 * having at most 2 packets queued for TX in the chip's memory
-	 * at all time. If THROTTLE_TX_PKTS is not set then the queue
-	 * is stopped only when memory allocation (MC_ALLOC) does not
-	 * succeed right away.
-	 */
-	if (THROTTLE_TX_PKTS && !(SMC_GET_INT() & IM_TX_EMPTY_INT))
-		netif_stop_queue(dev);
-
-	/* queue the packet for TX */
+	/* and let the chipset deal with it */
 	SMC_SET_MMU_CMD(MC_ENQUEUE);
 	SMC_ACK_INT(IM_TX_EMPTY_INT);
-	smc_special_unlock(&lp->lock);
 
 	dev->trans_start = jiffies;
+	dev_kfree_skb_any(skb);
+	lp->saved_skb = NULL;
 	lp->stats.tx_packets++;
 	lp->stats.tx_bytes += len;
-
-	SMC_ENABLE_INT(IM_TX_INT | IM_TX_EMPTY_INT);
-
-done:	if (!THROTTLE_TX_PKTS)
-		netif_wake_queue(dev);
-
-	dev_kfree_skb(skb);
 }
 
 /*
@@ -681,12 +576,15 @@ static int smc_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct smc_local *lp = netdev_priv(dev);
 	unsigned long ioaddr = dev->base_addr;
-	unsigned int numPages, poll_count, status;
+	unsigned int numPages, poll_count, status, saved_bank;
+	unsigned long flags;
 
 	DBG(3, "%s: %s\n", dev->name, __FUNCTION__);
 
-	BUG_ON(lp->pending_tx_skb != NULL);
-	lp->pending_tx_skb = skb;
+	spin_lock_irqsave(&lp->lock, flags);
+
+	BUG_ON(lp->saved_skb != NULL);
+	lp->saved_skb = skb;
 
 	/*
 	 * The MMU wants the number of pages to be the number of 256 bytes
@@ -702,16 +600,17 @@ static int smc_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	numPages = ((skb->len & ~1) + (6 - 1)) >> 8;
 	if (unlikely(numPages > 7)) {
 		printk("%s: Far too big packet error.\n", dev->name);
-		lp->pending_tx_skb = NULL;
+		lp->saved_skb = NULL;
 		lp->stats.tx_errors++;
 		lp->stats.tx_dropped++;
 		dev_kfree_skb(skb);
+		spin_unlock_irqrestore(&lp->lock, flags);
 		return 0;
 	}
 
-	smc_special_lock(&lp->lock);
-
 	/* now, try to allocate the memory */
+	saved_bank = SMC_CURRENT_BANK();
+	SMC_SELECT_BANK(2);
 	SMC_SET_MMU_CMD(MC_ALLOC | numPages);
 
 	/*
@@ -727,8 +626,6 @@ static int smc_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		}
    	} while (--poll_count);
 
-	smc_special_unlock(&lp->lock);
-
    	if (!poll_count) {
 		/* oh well, wait until the chip finds memory later */
 		netif_stop_queue(dev);
@@ -738,10 +635,25 @@ static int smc_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		/*
 		 * Allocation succeeded: push packet to the chip's own memory
 		 * immediately.
+		 *
+		 * If THROTTLE_TX_PKTS is selected that means we don't want
+		 * more than a single TX packet taking up space in the chip's
+		 * internal memory at all time, in which case we stop the
+		 * queue right here until we're notified of TX completion.
+		 *
+		 * Otherwise we're quite happy to feed more TX packets right
+		 * away for better TX throughput, in which case the queue is
+		 * left active.
 		 */  
-		smc_hardware_send_pkt((unsigned long)dev);
+#if THROTTLE_TX_PKTS
+		netif_stop_queue(dev);
+#endif
+		smc_hardware_send_packet(dev);
+		SMC_ENABLE_INT(IM_TX_INT | IM_TX_EMPTY_INT);
 	}
 
+	SMC_SELECT_BANK(saved_bank);
+	spin_unlock_irqrestore(&lp->lock, flags);
 	return 0;
 }
 
@@ -855,8 +767,10 @@ static unsigned int smc_mii_in(struct net_device *dev, int bits)
 static int smc_phy_read(struct net_device *dev, int phyaddr, int phyreg)
 {
 	unsigned long ioaddr = dev->base_addr;
-	unsigned int phydata;
+	unsigned int phydata, old_bank;
 
+	/* Save the current bank, and select bank 3 */
+	old_bank = SMC_CURRENT_BANK();
 	SMC_SELECT_BANK(3);
 
 	/* Idle - 32 ones */
@@ -871,10 +785,12 @@ static int smc_phy_read(struct net_device *dev, int phyaddr, int phyreg)
 	/* Return to idle state */
 	SMC_SET_MII(SMC_GET_MII() & ~(MII_MCLK|MII_MDOE|MII_MDO));
 
+	/* And select original bank */
+	SMC_SELECT_BANK(old_bank);
+
 	DBG(3, "%s: phyaddr=0x%x, phyreg=0x%x, phydata=0x%x\n",
 		__FUNCTION__, phyaddr, phyreg, phydata);
 
-	SMC_SELECT_BANK(2);
 	return phydata;
 }
 
@@ -885,7 +801,10 @@ static void smc_phy_write(struct net_device *dev, int phyaddr, int phyreg,
 			  int phydata)
 {
 	unsigned long ioaddr = dev->base_addr;
+	unsigned int old_bank;
 
+	/* Save the current bank, and select bank 3 */
+	old_bank = SMC_CURRENT_BANK();
 	SMC_SELECT_BANK(3);
 
 	/* Idle - 32 ones */
@@ -897,16 +816,17 @@ static void smc_phy_write(struct net_device *dev, int phyaddr, int phyreg,
 	/* Return to idle state */
 	SMC_SET_MII(SMC_GET_MII() & ~(MII_MCLK|MII_MDOE|MII_MDO));
 
+	/* And select original bank */
+	SMC_SELECT_BANK(old_bank);
+
 	DBG(3, "%s: phyaddr=0x%x, phyreg=0x%x, phydata=0x%x\n",
 		__FUNCTION__, phyaddr, phyreg, phydata);
-
-	SMC_SELECT_BANK(2);
 }
 
 /*
  * Finds and reports the PHY address
  */
-static void smc_phy_detect(struct net_device *dev)
+static void smc_detect_phy(struct net_device *dev)
 {
 	struct smc_local *lp = netdev_priv(dev);
 	int phyaddr;
@@ -973,9 +893,7 @@ static int smc_phy_fixed(struct net_device *dev)
 	smc_phy_write(dev, phyaddr, MII_BMCR, bmcr);
 
 	/* Re-Configure the Receive/Phy Control register */
-	SMC_SELECT_BANK(0);
 	SMC_SET_RPC(lp->rpc_cur_mode);
-	SMC_SELECT_BANK(2);
 
 	return 1;
 }
@@ -1023,10 +941,13 @@ static int smc_phy_reset(struct net_device *dev, int phy)
  */
 static void smc_phy_powerdown(struct net_device *dev, int phy)
 {
+	struct smc_local *lp = netdev_priv(dev);
 	unsigned int bmcr;
 
+	spin_lock_irq(&lp->lock);
 	bmcr = smc_phy_read(dev, phy, MII_BMCR);
 	smc_phy_write(dev, phy, MII_BMCR, bmcr | BMCR_PDOWN);
+	spin_unlock_irq(&lp->lock);
 }
 
 /*
@@ -1043,6 +964,8 @@ static void smc_phy_check_media(struct net_device *dev, int init)
 	unsigned long ioaddr = dev->base_addr;
 
 	if (mii_check_media(&lp->mii, netif_msg_link(lp), init)) {
+		unsigned int old_bank;
+
 		/* duplex state has changed */
 		if (lp->mii.full_duplex) {
 			lp->tcr_cur_mode |= TCR_SWFDUP;
@@ -1050,8 +973,10 @@ static void smc_phy_check_media(struct net_device *dev, int init)
 			lp->tcr_cur_mode &= ~TCR_SWFDUP;
 		}
 
+		old_bank = SMC_CURRENT_BANK();
 		SMC_SELECT_BANK(0);
 		SMC_SET_TCR(lp->tcr_cur_mode);
+		SMC_SELECT_BANK(old_bank);
 	}
 }
 
@@ -1064,9 +989,8 @@ static void smc_phy_check_media(struct net_device *dev, int init)
  * of autonegotiation.)  If the RPC ANEG bit is cleared, the selection
  * is controlled by the RPC SPEED and RPC DPLX bits.
  */
-static void smc_phy_configure(void *data)
+static void smc_phy_configure(struct net_device *dev)
 {
-	struct net_device *dev = data;
 	struct smc_local *lp = netdev_priv(dev);
 	unsigned long ioaddr = dev->base_addr;
 	int phyaddr = lp->mii.phy_id;
@@ -1158,7 +1082,6 @@ static void smc_phy_configure(void *data)
 
 smc_phy_configure_exit:
 	spin_unlock_irq(&lp->lock);
-	lp->work_pending = 0;
 }
 
 /*
@@ -1194,13 +1117,12 @@ static void smc_10bt_check_media(struct net_device *dev, int init)
 {
 	struct smc_local *lp = netdev_priv(dev);
 	unsigned long ioaddr = dev->base_addr;
-	unsigned int old_carrier, new_carrier;
+	unsigned int old_carrier, new_carrier, old_bank;
 
-	old_carrier = netif_carrier_ok(dev) ? 1 : 0;
-
+	old_bank = SMC_CURRENT_BANK();
 	SMC_SELECT_BANK(0);
+	old_carrier = netif_carrier_ok(dev) ? 1 : 0;
 	new_carrier = SMC_inw(ioaddr, EPH_STATUS_REG) & ES_LINK_OK ? 1 : 0;
-	SMC_SELECT_BANK(2);
 
 	if (init || (old_carrier != new_carrier)) {
 		if (!new_carrier) {
@@ -1212,20 +1134,24 @@ static void smc_10bt_check_media(struct net_device *dev, int init)
 			printk(KERN_INFO "%s: link %s\n", dev->name,
 			       new_carrier ? "up" : "down");
 	}
+	SMC_SELECT_BANK(old_bank);
 }
 
 static void smc_eph_interrupt(struct net_device *dev)
 {
 	unsigned long ioaddr = dev->base_addr;
-	unsigned int ctl;
+	unsigned int old_bank, ctl;
 
 	smc_10bt_check_media(dev, 0);
 
+	old_bank = SMC_CURRENT_BANK();
 	SMC_SELECT_BANK(1);
+
 	ctl = SMC_GET_CTL();
 	SMC_SET_CTL(ctl & ~CTL_LE_ENABLE);
 	SMC_SET_CTL(ctl);
-	SMC_SELECT_BANK(2);
+
+	SMC_SELECT_BANK(old_bank);
 }
 
 /*
@@ -1238,17 +1164,14 @@ static irqreturn_t smc_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	unsigned long ioaddr = dev->base_addr;
 	struct smc_local *lp = netdev_priv(dev);
 	int status, mask, timeout, card_stats;
-	int saved_pointer;
+	int saved_bank, saved_pointer;
 
 	DBG(3, "%s: %s\n", dev->name, __FUNCTION__);
 
 	spin_lock(&lp->lock);
 
-	/* A preamble may be used when there is a potential race
-	 * between the interruptible transmit functions and this
-	 * ISR. */
-	SMC_INTERRUPT_PREAMBLE;
-
+	saved_bank = SMC_CURRENT_BANK();
+	SMC_SELECT_BANK(2);
 	saved_pointer = SMC_GET_PTR();
 	mask = SMC_GET_INT_MASK();
 	SMC_SET_INT_MASK(0);
@@ -1259,7 +1182,7 @@ static irqreturn_t smc_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	do {
 		status = SMC_GET_INT();
 
-		DBG(2, "%s: INT 0x%02x MASK 0x%02x MEM 0x%04x FIFO 0x%04x\n",
+		DBG(2, "%s: IRQ 0x%02x MASK 0x%02x MEM 0x%04x FIFO 0x%04x\n",
 			dev->name, status, mask,
 			({ int meminfo; SMC_SELECT_BANK(0);
 			   meminfo = SMC_GET_MIR();
@@ -1277,12 +1200,17 @@ static irqreturn_t smc_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 			DBG(3, "%s: TX int\n", dev->name);
 			smc_tx(dev);
 			SMC_ACK_INT(IM_TX_INT);
-			if (THROTTLE_TX_PKTS)
-				netif_wake_queue(dev);
+#if THROTTLE_TX_PKTS
+			netif_wake_queue(dev);
+#endif
 		} else if (status & IM_ALLOC_INT) {
 			DBG(3, "%s: Allocation irq\n", dev->name);
-			tasklet_hi_schedule(&lp->tx_task);
+			smc_hardware_send_packet(dev);
+			mask |= (IM_TX_INT | IM_TX_EMPTY_INT);
 			mask &= ~IM_ALLOC_INT;
+#if ! THROTTLE_TX_PKTS
+			netif_wake_queue(dev);
+#endif
 		} else if (status & IM_TX_EMPTY_INT) {
 			DBG(3, "%s: TX empty\n", dev->name);
 			mask &= ~IM_TX_EMPTY_INT;
@@ -1312,16 +1240,17 @@ static irqreturn_t smc_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 			SMC_ACK_INT(IM_ERCV_INT);
 			PRINTK("%s: UNSUPPORTED: ERCV INTERRUPT \n", dev->name);
 		}
+
 	} while (--timeout);
 
 	/* restore register states */
-	SMC_SET_PTR(saved_pointer);
 	SMC_SET_INT_MASK(mask);
-
-	spin_unlock(&lp->lock);
+	SMC_SET_PTR(saved_pointer);
+	SMC_SELECT_BANK(saved_bank);
 
 	DBG(3, "%s: Interrupt done (%d loops)\n", dev->name, 8-timeout);
 
+	spin_unlock(&lp->lock);
 	/*
 	 * We return IRQ_HANDLED unconditionally here even if there was
 	 * nothing to do.  There is a possibility that a packet might
@@ -1337,39 +1266,98 @@ static irqreturn_t smc_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 static void smc_timeout(struct net_device *dev)
 {
 	struct smc_local *lp = netdev_priv(dev);
-	unsigned long ioaddr = dev->base_addr;
-	int status, mask, meminfo, fifo;
+	unsigned long flags;
 
+	spin_lock_irqsave(&lp->lock, flags);
 	DBG(2, "%s: %s\n", dev->name, __FUNCTION__);
-
-	spin_lock_irq(&lp->lock);
-	status = SMC_GET_INT();
-	mask = SMC_GET_INT_MASK();
-	fifo = SMC_GET_FIFO();
-	SMC_SELECT_BANK(0);
-	meminfo = SMC_GET_MIR();
-	SMC_SELECT_BANK(2);
-	spin_unlock_irq(&lp->lock);
-	PRINTK( "%s: INT 0x%02x MASK 0x%02x MEM 0x%04x FIFO 0x%04x\n",
-		dev->name, status, mask, meminfo, fifo );
 
 	smc_reset(dev);
 	smc_enable(dev);
 
+#if 0
 	/*
 	 * Reconfiguring the PHY doesn't seem like a bad idea here, but
-	 * smc_phy_configure() calls msleep() which calls schedule_timeout()
-	 * which calls schedule().  Hence we use a work queue.
+	 * it introduced a problem.  Now that this is a timeout routine,
+	 * we are getting called from within an interrupt context.
+	 * smc_phy_configure() calls msleep() which calls
+	 * schedule_timeout() which calls schedule().  When schedule()
+	 * is called from an interrupt context, it prints out
+	 * "Scheduling in interrupt" and then calls BUG().  This is
+	 * obviously not desirable.  This was worked around by removing
+	 * the call to smc_phy_configure() here because it didn't seem
+	 * absolutely necessary.  Ultimately, if msleep() is
+	 * supposed to be usable from an interrupt context (which it
+	 * looks like it thinks it should handle), it should be fixed.
 	 */
-	if (lp->phy_type != 0) {
-		if (schedule_work(&lp->phy_configure)) {
-			lp->work_pending = 1;
-		}
-	}
+	if (lp->phy_type != 0)
+		smc_phy_configure(dev);
+#endif
 
+	/* clear anything saved */
+	if (lp->saved_skb != NULL) {
+		dev_kfree_skb (lp->saved_skb);
+		lp->saved_skb = NULL;
+		lp->stats.tx_errors++;
+		lp->stats.tx_aborted_errors++;
+	}
 	/* We can accept TX packets again */
 	dev->trans_start = jiffies;
+
+	spin_unlock_irqrestore(&lp->lock, flags);
+
 	netif_wake_queue(dev);
+}
+
+/*
+ *    This sets the internal hardware table to filter out unwanted multicast
+ *    packets before they take up memory.
+ *
+ *    The SMC chip uses a hash table where the high 6 bits of the CRC of
+ *    address are the offset into the table.  If that bit is 1, then the
+ *    multicast packet is accepted.  Otherwise, it's dropped silently.
+ *
+ *    To use the 6 bits as an offset into the table, the high 3 bits are the
+ *    number of the 8 bit register, while the low 3 bits are the bit within
+ *    that register.
+ *
+ *    This routine is based very heavily on the one provided by Peter Cammaert.
+ */
+static void
+smc_setmulticast(unsigned long ioaddr, int count, struct dev_mc_list *addrs)
+{
+	int i;
+	unsigned char multicast_table[8];
+	struct dev_mc_list *cur_addr;
+
+	/* table for flipping the order of 3 bits */
+	static unsigned char invert3[] = { 0, 4, 2, 6, 1, 5, 3, 7 };
+
+	/* start with a table of all zeros: reject all */
+	memset(multicast_table, 0, sizeof(multicast_table));
+
+	cur_addr = addrs;
+	for (i = 0; i < count; i++, cur_addr = cur_addr->next) {
+		int position;
+
+		/* do we have a pointer here? */
+		if (!cur_addr)
+			break;
+		/* make sure this is a multicast address - shouldn't this
+		   be a given if we have it here ? */
+		if (!(*cur_addr->dmi_addr & 1))
+			continue;
+
+		/* only use the low order bits */
+		position = crc32_le(~0, cur_addr->dmi_addr, 6) & 0x3f;
+
+		/* do some messy swapping to put the bit in the right spot */
+		multicast_table[invert3[position&7]] |=
+					(1<<invert3[(position>>3)&7]);
+
+	}
+	/* now, the table can be loaded into the chipset */
+	SMC_SELECT_BANK(3);
+	SMC_SET_MCAST(multicast_table);
 }
 
 /*
@@ -1382,14 +1370,14 @@ static void smc_set_multicast_list(struct net_device *dev)
 {
 	struct smc_local *lp = netdev_priv(dev);
 	unsigned long ioaddr = dev->base_addr;
-	unsigned char multicast_table[8];
-	int update_multicast = 0;
 
 	DBG(2, "%s: %s\n", dev->name, __FUNCTION__);
 
+	SMC_SELECT_BANK(0);
 	if (dev->flags & IFF_PROMISC) {
 		DBG(2, "%s: RCR_PRMS\n", dev->name);
 		lp->rcr_cur_mode |= RCR_PRMS;
+		SMC_SET_RCR(lp->rcr_cur_mode);
 	}
 
 /* BUG?  I never disable promiscuous mode if multicasting was turned on.
@@ -1403,78 +1391,38 @@ static void smc_set_multicast_list(struct net_device *dev)
 	 * checked before the table is
 	 */
 	else if (dev->flags & IFF_ALLMULTI || dev->mc_count > 16) {
-		DBG(2, "%s: RCR_ALMUL\n", dev->name);
 		lp->rcr_cur_mode |= RCR_ALMUL;
+		SMC_SET_RCR(lp->rcr_cur_mode);
+		DBG(2, "%s: RCR_ALMUL\n", dev->name);
 	}
 
 	/*
-	 * This sets the internal hardware table to filter out unwanted
-	 * multicast packets before they take up memory.
-	 *
-	 * The SMC chip uses a hash table where the high 6 bits of the CRC of
-	 * address are the offset into the table.  If that bit is 1, then the
-	 * multicast packet is accepted.  Otherwise, it's dropped silently.
-	 *
-	 * To use the 6 bits as an offset into the table, the high 3 bits are
-	 * the number of the 8 bit register, while the low 3 bits are the bit
-	 * within that register.
+	 * We just get all multicast packets even if we only want them
+	 * from one source.  This will be changed at some future point.
 	 */
 	else if (dev->mc_count)  {
-		int i;
-		struct dev_mc_list *cur_addr;
-
-		/* table for flipping the order of 3 bits */
-		static const unsigned char invert3[] = {0, 4, 2, 6, 1, 5, 3, 7};
-
-		/* start with a table of all zeros: reject all */
-		memset(multicast_table, 0, sizeof(multicast_table));
-
-		cur_addr = dev->mc_list;
-		for (i = 0; i < dev->mc_count; i++, cur_addr = cur_addr->next) {
-			int position;
-
-			/* do we have a pointer here? */
-			if (!cur_addr)
-				break;
-			/* make sure this is a multicast address -
-		   	   shouldn't this be a given if we have it here ? */
-			if (!(*cur_addr->dmi_addr & 1))
-				continue;
-
-			/* only use the low order bits */
-			position = crc32_le(~0, cur_addr->dmi_addr, 6) & 0x3f;
-
-			/* do some messy swapping to put the bit in the right spot */
-			multicast_table[invert3[position&7]] |=
-				(1<<invert3[(position>>3)&7]);
-		}
+		/* support hardware multicasting */
 
 		/* be sure I get rid of flags I might have set */
 		lp->rcr_cur_mode &= ~(RCR_PRMS | RCR_ALMUL);
-
-		/* now, the table can be loaded into the chipset */
-		update_multicast = 1;
+		SMC_SET_RCR(lp->rcr_cur_mode);
+		/*
+		 * NOTE: this has to set the bank, so make sure it is the
+		 * last thing called.  The bank is set to zero at the top
+		 */
+		smc_setmulticast(ioaddr, dev->mc_count, dev->mc_list);
 	} else  {
 		DBG(2, "%s: ~(RCR_PRMS|RCR_ALMUL)\n", dev->name);
 		lp->rcr_cur_mode &= ~(RCR_PRMS | RCR_ALMUL);
+		SMC_SET_RCR(lp->rcr_cur_mode);
 
 		/*
 		 * since I'm disabling all multicast entirely, I need to
 		 * clear the multicast list
 		 */
-		memset(multicast_table, 0, sizeof(multicast_table));
-		update_multicast = 1;
-	}
-
-	spin_lock_irq(&lp->lock);
-	SMC_SELECT_BANK(0);
-	SMC_SET_RCR(lp->rcr_cur_mode);
-	if (update_multicast) {
 		SMC_SELECT_BANK(3);
-		SMC_SET_MCAST(multicast_table);
+		SMC_CLEAR_MCAST();
 	}
-	SMC_SELECT_BANK(2);
-	spin_unlock_irq(&lp->lock);
 }
 
 
@@ -1487,6 +1435,7 @@ static int
 smc_open(struct net_device *dev)
 {
 	struct smc_local *lp = netdev_priv(dev);
+	unsigned long ioaddr = dev->base_addr;
 
 	DBG(2, "%s: %s\n", dev->name, __FUNCTION__);
 
@@ -1496,9 +1445,12 @@ smc_open(struct net_device *dev)
 	 * address using ifconfig eth0 hw ether xx:xx:xx:xx:xx:xx
 	 */
 	if (!is_valid_ether_addr(dev->dev_addr)) {
-		PRINTK("%s: no valid ethernet hw addr\n", __FUNCTION__);
+		DBG(2, "smc_open: no valid ethernet hw addr\n");
 		return -EINVAL;
 	}
+
+	/* clear out all the junk that was put here before... */
+	lp->saved_skb = NULL;
 
 	/* Setup the default Register Modes */
 	lp->tcr_cur_mode = TCR_DEFAULT;
@@ -1516,7 +1468,10 @@ smc_open(struct net_device *dev)
 	smc_reset(dev);
 	smc_enable(dev);
 
-	/* Configure the PHY, initialize the link state */
+	SMC_SELECT_BANK(1);
+	SMC_SET_MAC_ADDR(dev->dev_addr);
+
+	/* Configure the PHY */
 	if (lp->phy_type != 0)
 		smc_phy_configure(dev);
 	else {
@@ -1525,6 +1480,12 @@ smc_open(struct net_device *dev)
 		spin_unlock_irq(&lp->lock);
 	}
 
+	/*
+	 * make sure to initialize the link state with netif_carrier_off()
+	 * somewhere, too --jgarzik
+	 *
+	 * smc_phy_configure() and smc_10bt_check_media() does that. --rmk
+	 */
 	netif_start_queue(dev);
 	return 0;
 }
@@ -1546,28 +1507,10 @@ static int smc_close(struct net_device *dev)
 	netif_carrier_off(dev);
 
 	/* clear everything */
-	smc_shutdown(dev);
+	smc_shutdown(dev->base_addr);
 
-	if (lp->phy_type != 0) {
-		/* We need to ensure that no calls to
-		   smc_phy_configure are pending.
-
-		   flush_scheduled_work() cannot be called because we
-		   are running with the netlink semaphore held (from
-		   devinet_ioctl()) and the pending work queue
-		   contains linkwatch_event() (scheduled by
-		   netif_carrier_off() above). linkwatch_event() also
-		   wants the netlink semaphore.
-		*/
-		while(lp->work_pending)
-			schedule();
+	if (lp->phy_type != 0)
 		smc_phy_powerdown(dev, lp->mii.phy_id);
-	}
-
-	if (lp->pending_tx_skb) {
-		dev_kfree_skb(lp->pending_tx_skb);
-		lp->pending_tx_skb = NULL;
-	}
 
 	return 0;
 }
@@ -1857,7 +1800,6 @@ static int __init smc_probe(struct net_device *dev, unsigned long ioaddr)
 	/* fill in some of the fields */
 	dev->base_addr = ioaddr;
 	lp->version = revision_register & 0xff;
-	spin_lock_init(&lp->lock);
 
 	/* Get the MAC address */
 	SMC_SELECT_BANK(1);
@@ -1913,8 +1855,7 @@ static int __init smc_probe(struct net_device *dev, unsigned long ioaddr)
 	dev->set_multicast_list = smc_set_multicast_list;
 	dev->ethtool_ops = &smc_ethtool_ops;
 
-	tasklet_init(&lp->tx_task, smc_hardware_send_pkt, (unsigned long)dev);
-	INIT_WORK(&lp->phy_configure, smc_phy_configure, dev);
+	spin_lock_init(&lp->lock);
 	lp->mii.phy_id_mask = 0x1f;
 	lp->mii.reg_num_mask = 0x1f;
 	lp->mii.force_media = 0;
@@ -1927,7 +1868,7 @@ static int __init smc_probe(struct net_device *dev, unsigned long ioaddr)
 	 * Locate the phy, if any.
 	 */
 	if (lp->version >= (CHIP_91100 << 4))
-		smc_phy_detect(dev);
+		smc_detect_phy(dev);
 
 	/* Set default parameters */
 	lp->msg_enable = NETIF_MSG_LINK;
@@ -1944,8 +1885,9 @@ static int __init smc_probe(struct net_device *dev, unsigned long ioaddr)
       	if (retval)
       		goto err_out;
 
+#if !defined(__m32r__)
 	set_irq_type(dev->irq, IRQT_RISING);
-
+#endif
 #ifdef SMC_USE_PXA_DMA
 	{
 		int dma = pxa_request_dma(dev->name, DMA_PRIO_LOW,
@@ -2179,7 +2121,7 @@ static int smc_drv_suspend(struct device *dev, u32 state, u32 level)
 	if (ndev && level == SUSPEND_DISABLE) {
 		if (netif_running(ndev)) {
 			netif_device_detach(ndev);
-			smc_shutdown(ndev);
+			smc_shutdown(ndev->base_addr);
 		}
 	}
 	return 0;
@@ -2192,12 +2134,15 @@ static int smc_drv_resume(struct device *dev, u32 level)
 
 	if (ndev && level == RESUME_ENABLE) {
 		struct smc_local *lp = netdev_priv(ndev);
+		unsigned long ioaddr = ndev->base_addr;
 
 		if (pdev->num_resources == 3)
 			smc_enable_device(pdev->resource[2].start);
 		if (netif_running(ndev)) {
 			smc_reset(ndev);
 			smc_enable(ndev);
+			SMC_SELECT_BANK(1);
+			SMC_SET_MAC_ADDR(ndev->dev_addr);
 			if (lp->phy_type != 0)
 				smc_phy_configure(ndev);
 			netif_device_attach(ndev);

@@ -17,7 +17,6 @@
 #include <linux/kernel.h>
 #include <linux/ioport.h>
 #include <linux/interrupt.h>
-#include <linux/delay.h>
 #include <asm/io.h>
 
 #include "hysdn_defs.h"
@@ -161,7 +160,8 @@ hysdn_tx_cfgline(hysdn_card * card, uchar * line, word chan)
 		if (card->debug_flags & LOG_SCHED_ASYN)
 			hysdn_addlog(card, "async tx-cfg delayed");
 
-		msleep_interruptible(20);		/* Timeout 20ms */
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout((20 * HZ) / 1000);	/* Timeout 20ms */
 		if (!--cnt) {
 			restore_flags(flags);
 			return (-ERR_ASYNC_TIME);	/* timed out */
@@ -190,7 +190,8 @@ hysdn_tx_cfgline(hysdn_card * card, uchar * line, word chan)
 		if (card->debug_flags & LOG_SCHED_ASYN)
 			hysdn_addlog(card, "async tx-cfg waiting for tx-ready");
 
-		msleep_interruptible(20);		/* Timeout 20ms */
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout((20 * HZ) / 1000);	/* Timeout 20ms */
 		if (!--cnt) {
 			restore_flags(flags);
 			return (-ERR_ASYNC_TIME);	/* timed out */

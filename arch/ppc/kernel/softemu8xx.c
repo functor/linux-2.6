@@ -133,7 +133,7 @@ Soft_emulate_8xx(struct pt_regs *regs)
 			print_8xx_pte(current->mm,regs->nip);
 			pa = get_8xx_pte(current->mm,regs->nip) & PAGE_MASK;
 			pa |= (regs->nip & ~PAGE_MASK);
-			pa = (unsigned long)__va(pa);
+			pa = __va(pa);
 			printk("Kernel VA for NIP %x ", pa);
 			print_8xx_pte(current->mm,pa);
 		}

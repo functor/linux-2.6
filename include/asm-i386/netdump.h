@@ -1,5 +1,5 @@
-#ifndef _ASM_I386_NETDUMP_H_
-#define _ASM_I386_NETDUMP_H_
+#ifndef _ASM_I386_NETDUMP_H
+#define _ASM_I386_NETDUMP_H
 
 /*
  * linux/include/asm-i386/netdump.h
@@ -25,55 +25,76 @@
 #ifdef __KERNEL__
 
 #include <asm/irq.h>
-#include <asm/crashdump.h>
 
+extern int page_is_ram (unsigned long);
 const static int platform_supports_netdump = 1;
+extern union irq_ctx *netdump_irq_ctx;
 
-#define platform_page_is_ram(x) (page_is_ram(x))
-#define platform_machine_type() (EM_386)
+#define platform_timestamp(x) rdtscll(x)
 
-static inline unsigned char platform_effective_version(req_t *req)
+#define platform_fix_regs()						\
+{									\
+       unsigned long esp;						\
+       unsigned short ss;						\
+       esp = (unsigned long) ((char *)regs + sizeof (struct pt_regs));	\
+       ss = __KERNEL_DS;						\
+       if (regs->xcs & 3) {						\
+               esp = regs->esp;						\
+               ss = regs->xss & 0xffff;					\
+       }								\
+       myregs = *regs;							\
+       myregs.esp = esp;						\
+       myregs.xss = (myregs.xss & 0xffff0000) | ss;			\
+};
+
+static inline void platform_init_stack(void **stackptr)
 {
-        if (req->from == 0)
-                return NETDUMP_VERSION;
-        else
-                return min_t(unsigned char, req->from, NETDUMP_VERSION_MAX);
+	*stackptr = (void *)kmalloc(sizeof(union irq_ctx), GFP_KERNEL);
+	if (*stackptr)
+		memset(*stackptr, 0, sizeof(union irq_ctx));
+	else
+		printk(KERN_WARNING
+		       "netdump: unable to allocate separate stack\n");
 }
+
+static inline void platform_start_netdump(void *stackptr, struct pt_regs *regs)
+{
+	u32 *dsp;
+	union irq_ctx * curctx;
+	union irq_ctx * dumpctx;
+
+	if (!stackptr)
+		netpoll_netdump(regs);
+	else {
+		curctx = (union irq_ctx *) current_thread_info();
+		dumpctx = (union irq_ctx *) stackptr;
+
+		/* build the stack frame on the IRQ stack */
+		dsp = (u32*) ((char*)dumpctx + sizeof(*dumpctx));
+		dumpctx->tinfo.task = curctx->tinfo.task;
+		dumpctx->tinfo.real_stack = curctx->tinfo.real_stack;
+		dumpctx->tinfo.virtual_stack = curctx->tinfo.virtual_stack;
+		dumpctx->tinfo.previous_esp = current_stack_pointer();
+
+		*--dsp = (u32) regs;
+
+		asm volatile(
+			"       xchgl   %%ebx,%%esp     \n"
+			"	call    netpoll_netdump \n"
+			"	xchgl   %%ebx,%%esp     \n"
+			: : "b"(dsp) :	"memory", "cc", "edx", "ecx"
+		);
+	}
+}
+
+#define platform_cleanup_stack(stackptr)	\
+do {						\
+	if (stackptr)				\
+		kfree(stackptr);		\
+} while (0)
 
 #define platform_max_pfn() (num_physpages)
 
-static inline u32 platform_next_available(unsigned long pfn)
-{
-	unsigned long pgnum = next_ram_page(pfn);
-
-	if (pgnum < platform_max_pfn()) {
-		return (u32)pgnum;
-	}
-	return 0;
-}
-
-static inline void platform_jiffy_cycles(unsigned long long *jcp)
-{
-        unsigned long long t0, t1;
-
-        platform_timestamp(t0);
-        netdump_mdelay(1);
-        platform_timestamp(t1);
-        if (t1 > t0)
-                *jcp = t1 - t0;
-}
-
-static inline unsigned int platform_get_regs(char *tmp, struct pt_regs *myregs)
-{
-	elf_gregset_t elf_regs;
-	char *tmp2;
-
-	tmp2 = tmp + sprintf(tmp, "Sending register info.\n");
-	ELF_CORE_COPY_REGS(elf_regs, myregs);
-	memcpy(tmp2, &elf_regs, sizeof(elf_regs));
-
-	return(strlen(tmp) + sizeof(elf_regs));
-}
 #endif /* __KERNEL__ */
 
-#endif /* _ASM_I386_NETDUMP_H_ */
+#endif /* _ASM_I386_NETDUMP_H */

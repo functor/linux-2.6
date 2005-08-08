@@ -2,6 +2,7 @@
 #define _H8300_SYSTEM_H
 
 #include <linux/config.h> /* get configuration macros */
+#include <linux/kernel.h>
 #include <linux/linkage.h>
 
 #define prepare_to_switch()	do { } while(0)
@@ -118,7 +119,7 @@ static inline unsigned long __xchg(unsigned long x, volatile void * ptr, int siz
     __asm__ __volatile__
     ("mov.b %2,%0\n\t"
      "mov.b %1,%2"
-    : "=&r" (tmp) : "r" (x), "m" (*__xg(ptr)) : "memory");
+    : "=&r" (tmp) : "r" (x), "m" (*__xg(ptr)) : "er0","memory");
     break;
   case 2:
     __asm__ __volatile__

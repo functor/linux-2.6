@@ -1,5 +1,5 @@
 /***************************************************************************
- * Plug-in for PAS106B image sensor connected to the SN9C10x PC Camera     *
+ * Driver for PAS106B image sensor connected to the SN9C10[12] PC Camera   *
  * Controllers                                                             *
  *                                                                         *
  * Copyright (C) 2004 by Luca Risolia <luca.risolia@studio.unibo.it>       *
@@ -38,9 +38,14 @@ static int pas106b_init(struct sn9c102_device* cam)
 	err += sn9c102_write_reg(cam, 0x09, 0x18);
 
 	err += sn9c102_i2c_write(cam, 0x02, 0x0c);
+	err += sn9c102_i2c_write(cam, 0x03, 0x12);
+	err += sn9c102_i2c_write(cam, 0x04, 0x05);
 	err += sn9c102_i2c_write(cam, 0x05, 0x5a);
 	err += sn9c102_i2c_write(cam, 0x06, 0x88);
 	err += sn9c102_i2c_write(cam, 0x07, 0x80);
+	err += sn9c102_i2c_write(cam, 0x08, 0x01);
+	err += sn9c102_i2c_write(cam, 0x0a, 0x01);
+	err += sn9c102_i2c_write(cam, 0x0b, 0x00);
 	err += sn9c102_i2c_write(cam, 0x10, 0x06);
 	err += sn9c102_i2c_write(cam, 0x11, 0x06);
 	err += sn9c102_i2c_write(cam, 0x12, 0x00);
@@ -57,15 +62,6 @@ static int pas106b_get_ctrl(struct sn9c102_device* cam,
                             struct v4l2_control* ctrl)
 {
 	switch (ctrl->id) {
-	case V4L2_CID_EXPOSURE:
-		{
-			int r1 = sn9c102_i2c_read(cam, 0x03),
-			    r2 = sn9c102_i2c_read(cam, 0x04);
-			if (r1 < 0 || r2 < 0)
-				return -EIO;
-			ctrl->value = (r1 << 4) | (r2 & 0x0f);
-		}
-		return 0;
 	case V4L2_CID_RED_BALANCE:
 		if ((ctrl->value = sn9c102_i2c_read(cam, 0x0c)) < 0)
 			return -EIO;
@@ -81,25 +77,15 @@ static int pas106b_get_ctrl(struct sn9c102_device* cam,
 			return -EIO;
 		ctrl->value &= 0x1f;
 		return 0;
+	case V4L2_CID_BRIGHTNESS:
+		if ((ctrl->value = sn9c102_i2c_read(cam, 0x0d)) < 0)
+			return -EIO;
+		ctrl->value &= 0x1f;
+		return 0;
 	case V4L2_CID_CONTRAST:
 		if ((ctrl->value = sn9c102_i2c_read(cam, 0x0f)) < 0)
 			return -EIO;
 		ctrl->value &= 0x07;
-		return 0;
-	case SN9C102_V4L2_CID_GREEN_BALANCE:
-		if ((ctrl->value = sn9c102_i2c_read(cam, 0x0a)) < 0)
-			return -EIO;
-		ctrl->value = (ctrl->value & 0x1f) << 1;
-		return 0;
-	case SN9C102_V4L2_CID_DAC_MAGNITUDE:
-		if ((ctrl->value = sn9c102_i2c_read(cam, 0x08)) < 0)
-			return -EIO;
-		ctrl->value &= 0xf8;
-		return 0;
-	case SN9C102_V4L2_CID_DAC_SIGN:
-		if ((ctrl->value = sn9c102_i2c_read(cam, 0x07)) < 0)
-			return -EIO;
-		ctrl->value &= 0x01;
 		return 0;
 	default:
 		return -EINVAL;
@@ -113,42 +99,27 @@ static int pas106b_set_ctrl(struct sn9c102_device* cam,
 	int err = 0;
 
 	switch (ctrl->id) {
-	case V4L2_CID_EXPOSURE:
-		err += sn9c102_i2c_write(cam, 0x03, ctrl->value >> 4);
-		err += sn9c102_i2c_write(cam, 0x04, ctrl->value & 0x0f);
-		break;
 	case V4L2_CID_RED_BALANCE:
-		err += sn9c102_i2c_write(cam, 0x0c, ctrl->value);
+		err += sn9c102_i2c_write(cam, 0x0c, ctrl->value & 0x1f);
 		break;
 	case V4L2_CID_BLUE_BALANCE:
-		err += sn9c102_i2c_write(cam, 0x09, ctrl->value);
+		err += sn9c102_i2c_write(cam, 0x09, ctrl->value & 0x1f);
 		break;
 	case V4L2_CID_GAIN:
-		err += sn9c102_i2c_write(cam, 0x0e, ctrl->value);
+		err += sn9c102_i2c_write(cam, 0x0e, ctrl->value & 0x1f);
+		break;
+	case V4L2_CID_BRIGHTNESS:
+		err += sn9c102_i2c_write(cam, 0x0d, 0x1f-(ctrl->value & 0x1f));
 		break;
 	case V4L2_CID_CONTRAST:
-		err += sn9c102_i2c_write(cam, 0x0f, ctrl->value);
-		break;
-	case SN9C102_V4L2_CID_GREEN_BALANCE:
-		err += sn9c102_i2c_write(cam, 0x0a, ctrl->value >> 1);
-		err += sn9c102_i2c_write(cam, 0x0b, ctrl->value >> 1);
-		break;
-	case SN9C102_V4L2_CID_DAC_MAGNITUDE:
-		err += sn9c102_i2c_write(cam, 0x08, ctrl->value << 3);
-		break;
-	case SN9C102_V4L2_CID_DAC_SIGN:
-		{
-			int r;
-			err += (r = sn9c102_i2c_read(cam, 0x07)) < 0 ? r : 0;
-			err += sn9c102_i2c_write(cam, 0x07, r | ctrl->value);
-		}
+		err += sn9c102_i2c_write(cam, 0x0f, ctrl->value & 0x03);
 		break;
 	default:
 		return -EINVAL;
 	}
 	err += sn9c102_i2c_write(cam, 0x13, 0x01);
 
-	return err ? -EIO : 0;
+	return err;
 }
 
 
@@ -177,36 +148,6 @@ static struct sn9c102_sensor pas106b = {
 	.init = &pas106b_init,
 	.qctrl = {
 		{
-			.id = V4L2_CID_EXPOSURE,
-			.type = V4L2_CTRL_TYPE_INTEGER,
-			.name = "exposure",
-			.minimum = 0x125,
-			.maximum = 0xfff,
-			.step = 0x01,
-			.default_value = 0x140,
-			.flags = 0,
-		},
-		{
-			.id = V4L2_CID_GAIN,
-			.type = V4L2_CTRL_TYPE_INTEGER,
-			.name = "global gain",
-			.minimum = 0x00,
-			.maximum = 0x1f,
-			.step = 0x01,
-			.default_value = 0x0d,
-			.flags = 0,
-		},
-		{
-			.id = V4L2_CID_CONTRAST,
-			.type = V4L2_CTRL_TYPE_INTEGER,
-			.name = "contrast",
-			.minimum = 0x00,
-			.maximum = 0x07,
-			.step = 0x01,
-			.default_value = 0x00, /* 0x00~0x03 have same effect */
-			.flags = 0,
-		},
-		{
 			.id = V4L2_CID_RED_BALANCE,
 			.type = V4L2_CTRL_TYPE_INTEGER,
 			.name = "red balance",
@@ -227,33 +168,33 @@ static struct sn9c102_sensor pas106b = {
 			.flags = 0,
 		},
 		{
-			.id = SN9C102_V4L2_CID_GREEN_BALANCE,
+			.id = V4L2_CID_GAIN,
 			.type = V4L2_CTRL_TYPE_INTEGER,
-			.name = "green balance",
-			.minimum = 0x00,
-			.maximum = 0x3e,
-			.step = 0x02,
-			.default_value = 0x02,
-			.flags = 0,
-		},
-		{
-			.id = SN9C102_V4L2_CID_DAC_MAGNITUDE,
-			.type = V4L2_CTRL_TYPE_INTEGER,
-			.name = "DAC magnitude",
+			.name = "global gain",
 			.minimum = 0x00,
 			.maximum = 0x1f,
 			.step = 0x01,
-			.default_value = 0x01,
+			.default_value = 0x0d,
 			.flags = 0,
 		},
 		{
-			.id = SN9C102_V4L2_CID_DAC_SIGN,
-			.type = V4L2_CTRL_TYPE_BOOLEAN,
-			.name = "DAC sign",
+			.id = V4L2_CID_BRIGHTNESS,
+			.type = V4L2_CTRL_TYPE_INTEGER,
+			.name = "brightness",
 			.minimum = 0x00,
-			.maximum = 0x01,
+			.maximum = 0x1f,
 			.step = 0x01,
-			.default_value = 0x00,
+			.default_value = 0x1f,
+			.flags = 0,
+		},
+		{
+			.id = V4L2_CID_CONTRAST,
+			.type = V4L2_CTRL_TYPE_INTEGER,
+			.name = "contrast",
+			.minimum = 0x00,
+			.maximum = 0x07,
+			.step = 0x01,
+			.default_value = 0x00, /* 0x00~0x03 have same effect */
 			.flags = 0,
 		},
 	},

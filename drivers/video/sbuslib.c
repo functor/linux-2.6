@@ -52,7 +52,7 @@ int sbusfb_mmap_helper(struct sbus_mmap_map *map,
 	off = vma->vm_pgoff << PAGE_SHIFT;
 
 	/* To stop the swapper from even considering these pages */
-	vma->vm_flags |= (VM_IO | VM_RESERVED);
+	vma->vm_flags |= (VM_SHM | VM_IO | VM_LOCKED);
 	
 	/* Each page, see which map applies */
 	for (page = 0; page < size; ){

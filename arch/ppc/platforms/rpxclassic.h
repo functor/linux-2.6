@@ -82,6 +82,7 @@ extern bd_t m8xx_board_info;
 /* for pcmcia sandisk */
 #ifdef CONFIG_IDE
 # define MAX_HWIFS 1
+# define request_irq(irq,hand,flg,dev,id)    request_8xxirq((irq),(hand),(flg),(dev),(id))
 #endif
 #endif
 

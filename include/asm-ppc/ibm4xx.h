@@ -59,10 +59,6 @@
 #include <platforms/4xx/walnut.h>
 #endif
 
-#if defined(CONFIG_XILINX_ML300)
-#include <platforms/4xx/xilinx_ml300.h>
-#endif
-
 #ifndef __ASSEMBLY__
 
 #ifdef CONFIG_40x

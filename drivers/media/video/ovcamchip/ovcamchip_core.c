@@ -15,7 +15,6 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/slab.h>
-#include <linux/delay.h>
 #include "ovcamchip_priv.h"
 
 #define DRIVER_VERSION "v2.27 for Linux 2.6"
@@ -129,7 +128,8 @@ static int init_camchip(struct i2c_client *c)
 	ov_write(c, 0x12, 0x80);
 
 	/* Wait for it to initialize */
-	msleep(150);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(1 + 150 * HZ / 1000);
 
 	for (i = 0, success = 0; i < I2C_DETECT_RETRIES && !success; i++) {
 		if (ov_read(c, GENERIC_REG_ID_HIGH, &high) >= 0) {
@@ -145,7 +145,8 @@ static int init_camchip(struct i2c_client *c)
 		ov_write(c, 0x12, 0x80);
 
 		/* Wait for it to initialize */
-		msleep(150);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(1 + 150 * HZ / 1000);
 
 		/* Dummy read to sync I2C */
 		ov_read(c, 0x00, &low);

@@ -16,7 +16,6 @@
 #include <asm/io.h>
 #include <asm/apic.h>
 #include <asm/cpufeature.h>
-#include <asm/crash_dump.h>
 
 static inline unsigned long read_cr3(void)
 {
@@ -159,30 +158,6 @@ int machine_kexec_prepare(struct kimage *image)
 
 void machine_kexec_cleanup(struct kimage *image)
 {
-}
-
-/*
- * We are going to do a memory preserving reboot. So, we copy over the
- * first 640k of memory into a backup location. Though the second kernel
- * boots from a different location, it still requires the first 640k.
- * Hence this backup.
- */
-void __crash_relocate_mem(unsigned long backup_addr, unsigned long backup_size)
-{
-	unsigned long pfn, pfn_max;
-	void *src_addr, *dest_addr;
-	struct page *page;
-
-	pfn_max = backup_size >> PAGE_SHIFT;
-	for (pfn = 0; pfn < pfn_max; pfn++) {
-		src_addr = phys_to_virt(pfn << PAGE_SHIFT);
-		dest_addr = backup_addr + src_addr;
-		if (!pfn_valid(pfn))
-			continue;
-		page = pfn_to_page(pfn);
-		if (PageReserved(page))
-			copy_page(dest_addr, src_addr);
-	}
 }
 
 /*

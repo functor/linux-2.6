@@ -225,52 +225,12 @@ static inline int page_is_ram(unsigned long pagenr)
 	return 0;
 }
 
-unsigned long next_ram_page(unsigned long pagenr)
+/* To enable modules to check if a page is in RAM */
+int pfn_is_ram(unsigned long pfn)
 {
-	int i;
-	unsigned long addr, end;
-	unsigned long min_pageno = ULONG_MAX;
-
-	pagenr++;
-
-	if (efi_enabled) {
-		efi_memory_desc_t *md;
-
-		for (i = 0; i < memmap.nr_map; i++) {
-			md = &memmap.map[i];
-			if (!is_available_memory(md))
-				continue;
-			addr = (md->phys_addr+PAGE_SIZE-1) >> PAGE_SHIFT;
-			end = (md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT)) >> PAGE_SHIFT;
-
-			if ((pagenr >= addr) && (pagenr < end))
-				return pagenr;
-			if ((pagenr < addr) && (addr < min_pageno))
-				min_pageno = addr;
-		}
-		return min_pageno;
-	}
-
-	for (i = 0; i < e820.nr_map; i++) {
-
-		if (e820.map[i].type != E820_RAM)	/* not usable memory */
-			continue;
-		/*
-		 *	!!!FIXME!!! Some BIOSen report areas as RAM that
-		 *	are not. Notably the 640->1Mb area. We need a sanity
-		 *	check here.
-		 */
-		addr = (e820.map[i].addr+PAGE_SIZE-1) >> PAGE_SHIFT;
-		end = (e820.map[i].addr+e820.map[i].size) >> PAGE_SHIFT;
-		if  ((pagenr >= addr) && (pagenr < end))
-			return pagenr;
-		if ((pagenr < addr) && (addr < min_pageno))
-			min_pageno = addr;
-	}
-	return min_pageno;
+	return (page_is_ram(pfn));
 }
 
-EXPORT_SYMBOL_GPL(next_ram_page);
 
 /*
  * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
@@ -507,8 +467,8 @@ static int __init noexec_setup(char *str)
 
 __setup("noexec=", noexec_setup);
 
-int nx_enabled = 0;
 #ifdef CONFIG_X86_PAE
+int nx_enabled = 0;
 
 static void __init set_nx(void)
 {
@@ -568,10 +528,7 @@ void __init paging_init(void)
 	set_nx();
 	if (nx_enabled)
 		printk("NX (Execute Disable) protection: active\n");
-	else
 #endif
-	if (exec_shield)
-		printk("Using x86 segment limits to approximate NX protection\n");
 
 	pagetable_init();
 
@@ -776,7 +733,6 @@ void free_initmem(void)
 	for (; addr < (unsigned long)(&__init_end); addr += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(addr));
 		set_page_count(virt_to_page(addr), 1);
-		memset((void *)addr, 0xcc, PAGE_SIZE);
 		free_page(addr);
 		totalram_pages++;
 	}

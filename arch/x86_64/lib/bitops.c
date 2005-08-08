@@ -1,5 +1,5 @@
 #include <linux/module.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 
 #undef find_first_zero_bit
 #undef find_next_zero_bit

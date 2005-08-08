@@ -27,7 +27,11 @@
 #include <asm/pgtable.h>
 #include <asm/mach/arch.h>
 #include <asm/hardware.h>
-#include "common.h"
+
+extern void __init init_hw_h7202(void);
+extern void __init h7202_init_irq (void);
+extern void __init h7202_init_time(void);
+extern void __init h720x_map_io(void);
 
 static struct resource cirrus_resources[] = {
 	[0] = {
@@ -76,6 +80,6 @@ MACHINE_START(H7202, "Hynix HMS30C7202")
 	BOOT_PARAMS(0x40000100)
 	MAPIO(h720x_map_io)
 	INITIRQ(h7202_init_irq)
-	.timer = &h7202_timer,
+	INITTIME(h7202_init_time)
 	INIT_MACHINE(init_eval_h7202)
 MACHINE_END

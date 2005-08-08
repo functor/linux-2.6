@@ -71,6 +71,4 @@ extern int vc_iattr_ioctl(struct dentry *de,
 #define FIOC_GETIATTR   _IOR('x', 7, long)
 #define FIOC_SETIATTR   _IOR('x', 8, long)
 
-#else	/* _VX_INODE_H */
-#warning duplicate inclusion
 #endif	/* _VX_INODE_H */

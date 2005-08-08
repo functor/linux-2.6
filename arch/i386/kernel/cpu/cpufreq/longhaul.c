@@ -58,9 +58,21 @@ static int vrmrev;
 
 /* Module parameters */
 static int dont_scale_voltage;
+static int debug;
 
+static void dprintk(const char *fmt, ...)
+{
+	char s[256];
+	va_list args;
 
-#define dprintk(msg...) cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, "longhaul", msg)
+	if (debug == 0)
+		return;
+
+	va_start(args, fmt);
+	vsprintf(s, fmt, args);
+	printk(s);
+	va_end(args);
+}
 
 
 #define __hlt()     __asm__ __volatile__("hlt": : :"memory")
@@ -72,8 +84,6 @@ static int voltage_table[32];
 static unsigned int highest_speed, lowest_speed; /* kHz */
 static int longhaul_version;
 static struct cpufreq_frequency_table *longhaul_table;
-
-#ifdef CONFIG_CPU_FREQ_DEBUG
 static char speedbuffer[8];
 
 static char *print_speed(int speed)
@@ -88,7 +98,6 @@ static char *print_speed(int speed)
 
 	return speedbuffer;
 }
-#endif
 
 
 static unsigned int calc_speed(int mult)
@@ -183,7 +192,7 @@ static void longhaul_setstate(unsigned int clock_ratio_index)
 
 	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
 
-	dprintk ("Setting to FSB:%dMHz Mult:%d.%dx (%s)\n",
+	dprintk (KERN_INFO PFX "Setting to FSB:%dMHz Mult:%d.%dx (%s)\n",
 			fsb, mult/10, mult%10, print_speed(speed/1000));
 
 	switch (longhaul_version) {
@@ -347,7 +356,7 @@ static int __init longhaul_get_ranges(void)
 		}
 	}
 
-	dprintk ("MinMult:%d.%dx MaxMult:%d.%dx\n",
+	dprintk (KERN_INFO PFX "MinMult:%d.%dx MaxMult:%d.%dx\n",
 		 minmult/10, minmult%10, maxmult/10, maxmult%10);
 
 	if (fsb == -1) {
@@ -357,9 +366,9 @@ static int __init longhaul_get_ranges(void)
 
 	highest_speed = calc_speed(maxmult);
 	lowest_speed = calc_speed(minmult);
-	dprintk ("FSB:%dMHz  Lowest speed: %s   Highest speed:%s\n", fsb,
-		 print_speed(lowest_speed/1000), 
-		 print_speed(highest_speed/1000));
+	dprintk (KERN_INFO PFX "FSB:%dMHz  ", fsb);
+	dprintk ("Lowest speed:%s  ", print_speed(lowest_speed/1000));
+	dprintk ("Highest speed:%s\n", print_speed(highest_speed/1000));
 
 	if (lowest_speed == highest_speed) {
 		printk (KERN_INFO PFX "highestspeed == lowest, aborting.\n");
@@ -425,11 +434,11 @@ static void __init longhaul_setup_voltagescaling(void)
 	}
 
 	if (vrmrev==0) {
-		dprintk ("VRM 8.5 \n");
+		dprintk (KERN_INFO PFX "VRM 8.5 : ");
 		memcpy (voltage_table, vrm85scales, sizeof(voltage_table));
 		numvscales = (voltage_table[maxvid]-voltage_table[minvid])/25;
 	} else {
-		dprintk ("Mobile VRM \n");
+		dprintk (KERN_INFO PFX "Mobile VRM : ");
 		memcpy (voltage_table, mobilevrmscales, sizeof(voltage_table));
 		numvscales = (voltage_table[maxvid]-voltage_table[minvid])/5;
 	}
@@ -648,6 +657,9 @@ static void __exit longhaul_exit(void)
 
 module_param (dont_scale_voltage, int, 0644);
 MODULE_PARM_DESC(dont_scale_voltage, "Don't scale voltage of processor");
+
+module_param (debug, int, 0644);
+MODULE_PARM_DESC(debug, "Dump debugging information.");
 
 MODULE_AUTHOR ("Dave Jones <davej@codemonkey.org.uk>");
 MODULE_DESCRIPTION ("Longhaul driver for VIA Cyrix processors.");

@@ -62,7 +62,7 @@ void __init pcibios_fixup_irqs(void)
 {
 	struct pci_dev *dev = 0;
 
-	for_each_pci_dev(dev) {
+	while ((dev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
 		/*
 		 * The interrupt routing semantics here are quite trivial.
 		 *

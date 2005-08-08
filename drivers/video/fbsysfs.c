@@ -51,8 +51,6 @@ struct fb_info *framebuffer_alloc(size_t size, struct device *dev)
 	if (size)
 		info->par = p + fb_info_size;
 
-	info->device = dev;
-
 	return info;
 #undef PADDING
 #undef BYTES_PER_LONG

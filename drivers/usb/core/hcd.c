@@ -435,6 +435,8 @@ static int rh_call_control (struct usb_hcd *hcd, struct urb *urb)
 		/* non-generic request */
 		if (HCD_IS_SUSPENDED (hcd->state))
 			urb->status = -EAGAIN;
+		else if (!HCD_IS_RUNNING (hcd->state))
+			urb->status = -ENODEV;
 		else
 			urb->status = hcd->driver->hub_control (hcd,
 				typeReq, wValue, wIndex,
@@ -443,16 +445,13 @@ static int rh_call_control (struct usb_hcd *hcd, struct urb *urb)
 error:
 		/* "protocol stall" on error */
 		urb->status = -EPIPE;
+		dev_dbg (hcd->self.controller, "unsupported hub control message (maxchild %d)\n",
+				urb->dev->maxchild);
 	}
 	if (urb->status) {
 		urb->actual_length = 0;
-		if (urb->status != -EPIPE) {
-			dev_dbg (hcd->self.controller,
-				"CTRL: TypeReq=0x%x val=0x%x "
-				"idx=0x%x len=%d ==> %d\n",
-				typeReq, wValue, wIndex,
-				wLength, urb->status);
-		}
+		dev_dbg (hcd->self.controller, "CTRL: TypeReq=0x%x val=0x%x idx=0x%x len=%d ==> %d\n",
+			typeReq, wValue, wIndex, wLength, urb->status);
 	}
 	if (bufp) {
 		if (urb->transfer_buffer_length < len)
@@ -479,11 +478,6 @@ error:
 /*
  * Root Hub interrupt transfers are synthesized with a timer.
  * Completions are called in_interrupt() but not in_irq().
- *
- * Note: some root hubs (including common UHCI based designs) can't
- * correctly issue port change IRQs.  They're the ones that _need_ a
- * timer; most other root hubs don't.  Some systems could save a
- * lot of battery power by eliminating these root hub timer IRQs.
  */
 
 static void rh_report_status (unsigned long ptr);
@@ -493,7 +487,10 @@ static int rh_status_urb (struct usb_hcd *hcd, struct urb *urb)
 	int	len = 1 + (urb->dev->maxchild / 8);
 
 	/* rh_timer protected by hcd_data_lock */
-	if (hcd->rh_timer.data || urb->transfer_buffer_length < len) {
+	if (hcd->rh_timer.data
+			|| urb->status != -EINPROGRESS
+			|| urb->transfer_buffer_length < len
+			|| !HCD_IS_RUNNING (hcd->state)) {
 		dev_dbg (hcd->self.controller,
 				"not queuing rh status urb, stat %d\n",
 				urb->status);
@@ -532,19 +529,19 @@ static void rh_report_status (unsigned long ptr)
 		return;
 	}
 
-	/* complete the status urb, or retrigger the timer */
-	spin_lock (&hcd_data_lock);
-	if (urb->dev->state == USB_STATE_CONFIGURED) {
+	if (!HCD_IS_SUSPENDED (hcd->state))
 		length = hcd->driver->hub_status_data (
 					hcd, urb->transfer_buffer);
-		if (length > 0) {
-			hcd->rh_timer.data = 0;
-			urb->actual_length = length;
-			urb->status = 0;
-			urb->hcpriv = NULL;
-		} else
-			mod_timer (&hcd->rh_timer, jiffies + HZ/4);
-	}
+
+	/* complete the status urb, or retrigger the timer */
+	spin_lock (&hcd_data_lock);
+	if (length > 0) {
+		hcd->rh_timer.data = 0;
+		urb->actual_length = length;
+		urb->status = 0;
+		urb->hcpriv = NULL;
+	} else
+		mod_timer (&hcd->rh_timer, jiffies + HZ/4);
 	spin_unlock (&hcd_data_lock);
 	spin_unlock (&urb->lock);
 
@@ -575,34 +572,18 @@ static int rh_urb_enqueue (struct usb_hcd *hcd, struct urb *urb)
 
 /*-------------------------------------------------------------------------*/
 
-static int usb_rh_urb_dequeue (struct usb_hcd *hcd, struct urb *urb)
+int usb_rh_status_dequeue (struct usb_hcd *hcd, struct urb *urb)
 {
 	unsigned long	flags;
 
 	/* note:  always a synchronous unlink */
-	if ((unsigned long) urb == hcd->rh_timer.data) {
-		del_timer_sync (&hcd->rh_timer);
-		hcd->rh_timer.data = 0;
+	del_timer_sync (&hcd->rh_timer);
+	hcd->rh_timer.data = 0;
 
-		local_irq_save (flags);
-		urb->hcpriv = NULL;
-		usb_hcd_giveback_urb (hcd, urb, NULL);
-		local_irq_restore (flags);
-
-	} else if (usb_pipeendpoint(urb->pipe) == 0) {
-		spin_lock_irq(&urb->lock);	/* from usb_kill_urb */
-		++urb->reject;
-		spin_unlock_irq(&urb->lock);
-
-		wait_event(usb_kill_urb_queue,
-				atomic_read(&urb->use_count) == 0);
-
-		spin_lock_irq(&urb->lock);
-		--urb->reject;
-		spin_unlock_irq(&urb->lock);
-	} else
-		return -EINVAL;
-
+	local_irq_save (flags);
+	urb->hcpriv = NULL;
+	usb_hcd_giveback_urb (hcd, urb, NULL);
+	local_irq_restore (flags);
 	return 0;
 }
 
@@ -817,9 +798,9 @@ int usb_register_root_hub (struct usb_device *usb_dev, struct device *parent_dev
 		return (retval < 0) ? retval : -EMSGSIZE;
 	}
 
-	usb_lock_device (usb_dev);
+	down (&usb_dev->serialize);
 	retval = usb_new_device (usb_dev);
-	usb_unlock_device (usb_dev);
+	up (&usb_dev->serialize);
 	if (retval) {
 		usb_dev->bus->root_hub = NULL;
 		dev_err (parent_dev, "can't register root hub for %s, %d\n",
@@ -1105,17 +1086,13 @@ static int hcd_submit_urb (struct urb *urb, int mem_flags)
 	spin_lock_irqsave (&hcd_data_lock, flags);
 	if (unlikely (urb->reject))
 		status = -EPERM;
-	else switch (hcd->state) {
-	case USB_STATE_RUNNING:
-	case USB_STATE_RESUMING:
+	else if (HCD_IS_RUNNING (hcd->state) &&
+			hcd->state != USB_STATE_QUIESCING) {
 		usb_get_dev (urb->dev);
 		list_add_tail (&urb->urb_list, &dev->urb_list);
 		status = 0;
-		break;
-	default:
+	} else
 		status = -ESHUTDOWN;
-		break;
-	}
 	spin_unlock_irqrestore (&hcd_data_lock, flags);
 	if (status) {
 		INIT_LIST_HEAD (&urb->urb_list);
@@ -1198,8 +1175,8 @@ unlink1 (struct usb_hcd *hcd, struct urb *urb)
 {
 	int		value;
 
-	if (urb->dev == hcd->self.root_hub)
-		value = usb_rh_urb_dequeue (hcd, urb);
+	if (urb == (struct urb *) hcd->rh_timer.data)
+		value = usb_rh_status_dequeue (hcd, urb);
 	else {
 
 		/* The only reason an HCD might fail this call is if
@@ -1287,7 +1264,7 @@ static int hcd_unlink_urb (struct urb *urb, int status)
 	 * never get completion IRQs ... maybe even the ones we need to
 	 * finish unlinking the initial failed usb_set_address().
 	 */
-	if (!hcd->saw_irq && hcd->self.root_hub != urb->dev) {
+	if (!hcd->saw_irq) {
 		dev_warn (hcd->self.controller, "Unlink after no-IRQ?  "
 			"Different ACPI or APIC settings may help."
 			"\n");
@@ -1596,12 +1573,13 @@ irqreturn_t usb_hcd_irq (int irq, void *__hcd, struct pt_regs * r)
 	struct usb_hcd		*hcd = __hcd;
 	int			start = hcd->state;
 
-	if (start == USB_STATE_HALT)
-		return IRQ_NONE;
-	if (hcd->driver->irq (hcd, r) == IRQ_NONE)
+	if (unlikely (hcd->state == USB_STATE_HALT))	/* irq sharing? */
 		return IRQ_NONE;
 
 	hcd->saw_irq = 1;
+	if (hcd->driver->irq (hcd, r) == IRQ_NONE)
+		return IRQ_NONE;
+
 	if (hcd->state != start && hcd->state == USB_STATE_HALT)
 		usb_hc_died (hcd);
 	return IRQ_HANDLED;
@@ -1609,6 +1587,22 @@ irqreturn_t usb_hcd_irq (int irq, void *__hcd, struct pt_regs * r)
 EXPORT_SYMBOL (usb_hcd_irq);
 
 /*-------------------------------------------------------------------------*/
+
+static void hcd_panic (void *_hcd)
+{
+	struct usb_hcd		*hcd = _hcd;
+	struct usb_device	*hub = hcd->self.root_hub;
+	unsigned		i;
+
+	/* hc's root hub is removed later removed in hcd->stop() */
+	down (&hub->serialize);
+	usb_set_device_state(hub, USB_STATE_NOTATTACHED);
+	for (i = 0; i < hub->maxchild; i++) {
+		if (hub->children [i])
+			usb_disconnect (&hub->children [i]);
+	}
+	up (&hub->serialize);
+}
 
 /**
  * usb_hc_died - report abnormal shutdown of a host controller (bus glue)
@@ -1622,19 +1616,9 @@ void usb_hc_died (struct usb_hcd *hcd)
 {
 	dev_err (hcd->self.controller, "HC died; cleaning up\n");
 
-	/* make khubd clean up old urbs and devices */
-	usb_set_device_state(hcd->self.root_hub, USB_STATE_NOTATTACHED);
-	mod_timer(&hcd->rh_timer, jiffies);
+	/* clean up old urbs and devices; needs a task context */
+	INIT_WORK (&hcd->work, hcd_panic, hcd);
+	(void) schedule_work (&hcd->work);
 }
 EXPORT_SYMBOL (usb_hc_died);
 
-/*-------------------------------------------------------------------------*/
-
-void usb_hcd_release(struct usb_bus *bus)
-{
-	struct usb_hcd *hcd;
-
-	hcd = container_of (bus, struct usb_hcd, self);
-	kfree(hcd);
-}
-EXPORT_SYMBOL (usb_hcd_release);

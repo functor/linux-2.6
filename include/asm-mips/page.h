@@ -15,8 +15,6 @@
 
 #include <spaces.h>
 
-#endif
-
 /*
  * PAGE_SHIFT determines the page size
  */
@@ -33,10 +31,8 @@
 #define PAGE_SHIFT	16
 #endif
 #define PAGE_SIZE	(1UL << PAGE_SHIFT)
-#define PAGE_MASK       (~((1 << PAGE_SHIFT) - 1))
+#define PAGE_MASK	(~(PAGE_SIZE-1))
 
-
-#ifdef __KERNEL__
 #ifndef __ASSEMBLY__
 
 extern void clear_page(void * page);
@@ -76,22 +72,15 @@ static inline void copy_user_page(void *vto, void *vfrom, unsigned long vaddr,
  * These are used to make use of C type-checking..
  */
 #ifdef CONFIG_64BIT_PHYS_ADDR
-  #ifdef CONFIG_CPU_MIPS32
-    typedef struct { unsigned long pte_low, pte_high; } pte_t;
-    #define pte_val(x)    ((x).pte_low | ((unsigned long long)(x).pte_high << 32))
-  #else
-     typedef struct { unsigned long long pte; } pte_t;
-     #define pte_val(x)	((x).pte)
-  #endif
+typedef struct { unsigned long long pte; } pte_t;
 #else
 typedef struct { unsigned long pte; } pte_t;
-#define pte_val(x)	((x).pte)
 #endif
-
 typedef struct { unsigned long pmd; } pmd_t;
 typedef struct { unsigned long pgd; } pgd_t;
 typedef struct { unsigned long pgprot; } pgprot_t;
 
+#define pte_val(x)	((x).pte)
 #define pmd_val(x)	((x).pmd)
 #define pgd_val(x)	((x).pgd)
 #define pgprot_val(x)	((x).pgprot)

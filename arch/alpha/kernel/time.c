@@ -138,9 +138,6 @@ irqreturn_t timer_interrupt(int irq, void *dev, struct pt_regs * regs)
 
 	while (nticks > 0) {
 		do_timer(regs);
-#ifndef CONFIG_SMP
-		update_process_times(user_mode(regs));
-#endif
 		nticks--;
 	}
 

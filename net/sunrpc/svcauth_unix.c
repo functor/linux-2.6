@@ -172,6 +172,8 @@ static int ip_map_parse(struct cache_detail *cd,
 	/* class */
 	len = qword_get(&mesg, ipm.m_class, sizeof(ipm.m_class));
 	if (len <= 0) return -EINVAL;
+	if (len >= sizeof(ipm.m_class))
+		return -EINVAL;
 
 	/* ip address */
 	len = qword_get(&mesg, buf, mlen);

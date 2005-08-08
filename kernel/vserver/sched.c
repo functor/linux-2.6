@@ -12,10 +12,10 @@
 
 #include <linux/config.h>
 #include <linux/sched.h>
-// #include <linux/vs_base.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
-#include <linux/vs_sched.h>
-#include <linux/vserver/sched_cmd.h>
+#include <linux/vserver/context.h>
+#include <linux/vserver/sched.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>

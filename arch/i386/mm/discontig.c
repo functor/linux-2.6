@@ -28,11 +28,9 @@
 #include <linux/mmzone.h>
 #include <linux/highmem.h>
 #include <linux/initrd.h>
-#include <linux/nodemask.h>
 #include <asm/e820.h>
 #include <asm/setup.h>
 #include <asm/mmzone.h>
-#include <asm/crash_dump.h>
 #include <bios_ebda.h>
 
 struct pglist_data *node_data[MAX_NUMNODES];
@@ -364,9 +362,6 @@ unsigned long __init setup_memory(void)
 		}
 	}
 #endif
-
-	crash_reserve_bootmem();
-
 	return system_max_low_pfn;
 }
 
@@ -472,7 +467,7 @@ void __init set_max_mapnr_init(void)
 	if (high0->spanned_pages > 0)
 	      	highmem_start_page = high0->zone_mem_map;
 	else
-		highmem_start_page = pfn_to_page(max_low_pfn - 1) + 1;
+		highmem_start_page = pfn_to_page(max_low_pfn+1); 
 	num_physpages = highend_pfn;
 #else
 	num_physpages = max_low_pfn;

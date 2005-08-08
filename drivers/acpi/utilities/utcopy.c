@@ -424,21 +424,23 @@ acpi_ut_copy_esimple_to_isimple (
 		break;
 
 	default:
-		/* All other types are not supported */
-
+		/*
+		 * Whatever other type -- it is not supported
+		 */
 		return_ACPI_STATUS (AE_SUPPORT);
 	}
 
 
+	switch (external_object->type) {
+
 	/* Must COPY string and buffer contents */
 
-	switch (external_object->type) {
 	case ACPI_TYPE_STRING:
 
 		internal_object->string.pointer =
 			ACPI_MEM_CALLOCATE ((acpi_size) external_object->string.length + 1);
 		if (!internal_object->string.pointer) {
-			goto error_exit;
+			return_ACPI_STATUS (AE_NO_MEMORY);
 		}
 
 		ACPI_MEMCPY (internal_object->string.pointer,
@@ -454,7 +456,7 @@ acpi_ut_copy_esimple_to_isimple (
 		internal_object->buffer.pointer =
 			ACPI_MEM_CALLOCATE (external_object->buffer.length);
 		if (!internal_object->buffer.pointer) {
-			goto error_exit;
+			return_ACPI_STATUS (AE_NO_MEMORY);
 		}
 
 		ACPI_MEMCPY (internal_object->buffer.pointer,
@@ -477,11 +479,6 @@ acpi_ut_copy_esimple_to_isimple (
 
 	*ret_internal_object = internal_object;
 	return_ACPI_STATUS (AE_OK);
-
-
-error_exit:
-	acpi_ut_remove_reference (internal_object);
-	return_ACPI_STATUS (AE_NO_MEMORY);
 }
 
 
@@ -750,7 +747,7 @@ acpi_ut_copy_ielement_to_ielement (
 
 			status = acpi_ut_copy_simple_object (source_object, target_object);
 			if (ACPI_FAILURE (status)) {
-				goto error_exit;
+				return (status);
 			}
 
 			*this_target_ptr = target_object;
@@ -784,8 +781,8 @@ acpi_ut_copy_ielement_to_ielement (
 			ACPI_MEM_CALLOCATE (((acpi_size) source_object->package.count + 1) *
 					 sizeof (void *));
 		if (!target_object->package.elements) {
-			status = AE_NO_MEMORY;
-			goto error_exit;
+			ACPI_MEM_FREE (target_object);
+			return (AE_NO_MEMORY);
 		}
 
 		/*
@@ -804,10 +801,6 @@ acpi_ut_copy_ielement_to_ielement (
 		return (AE_BAD_PARAMETER);
 	}
 
-	return (status);
-
-error_exit:
-	acpi_ut_remove_reference (target_object);
 	return (status);
 }
 

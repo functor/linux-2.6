@@ -43,6 +43,11 @@
 #include <asm/uaccess.h>
 #endif
 
+#include <linux/version.h>
+#ifndef KERNEL_VERSION
+#define KERNEL_VERSION(a,b,c) ((a)*65536+(b)*256+(c))
+#endif
+
 #include "videocodec.h"
 
 static int debug = 0;

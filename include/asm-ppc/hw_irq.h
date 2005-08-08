@@ -9,6 +9,7 @@
 #include <asm/reg.h>
 
 extern void timer_interrupt(struct pt_regs *);
+extern void ppc_irq_dispatch_handler(struct pt_regs *regs, int irq);
 
 #define INLINE_IRQS
 

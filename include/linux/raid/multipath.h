@@ -13,7 +13,6 @@ struct multipath_private_data {
 	int			raid_disks;
 	int			working_disks;
 	spinlock_t		device_lock;
-	struct list_head	retry_list;
 
 	mempool_t		*pool;
 };
@@ -37,6 +36,6 @@ struct multipath_bh {
 	struct bio		*master_bio;
 	struct bio		bio;
 	int			path;
-	struct list_head	retry_list;
+	struct multipath_bh	*next_mp; /* next for retry */
 };
 #endif

@@ -208,6 +208,7 @@ void kernel_map_pages(struct page *page, int numpages, int enable)
 	 */
 	__flush_tlb_all();
 }
+EXPORT_SYMBOL(kernel_map_pages);
 #endif
 
 EXPORT_SYMBOL(change_page_attr);

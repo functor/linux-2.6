@@ -9,7 +9,6 @@
 #define _ELFCORE32_H_
 
 #include <asm/intrinsics.h>
-#include <asm/uaccess.h>
 
 #define USE_ELF_CORE_DUMP 1
 

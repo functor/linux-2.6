@@ -128,10 +128,9 @@ static int ct_seq_real_show(const struct ip_conntrack_tuple_hash *hash,
 			proto))
 		return 1;
 
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+#warning MEF should make this seq_printf conditional on xid support
 	if (seq_printf(s, "xid=%d\n", conntrack->xid[IP_CT_DIR_ORIGINAL]))
 		return 1;
-#endif
 
  	if (seq_print_counters(s, &conntrack->counters[IP_CT_DIR_ORIGINAL]))
 		return 1;
@@ -144,10 +143,9 @@ static int ct_seq_real_show(const struct ip_conntrack_tuple_hash *hash,
 			proto))
 		return 1;
 
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+#warning MEF should make this seq_printf conditional on xid support
 	if (seq_printf(s, "xid=%d\n", conntrack->xid[IP_CT_DIR_REPLY]))
 		return 1;
-#endif
 
  	if (seq_print_counters(s, &conntrack->counters[IP_CT_DIR_REPLY]))
 		return 1;
@@ -155,11 +153,6 @@ static int ct_seq_real_show(const struct ip_conntrack_tuple_hash *hash,
 	if (test_bit(IPS_ASSURED_BIT, &conntrack->status))
 		if (seq_printf(s, "[ASSURED] "))
 			return 1;
-
-#if defined(CONFIG_IP_NF_CONNTRACK_MARK)
-	if (seq_printf(s, "mark=%ld ", conntrack->mark))
-		return 1;
-#endif
 
 	if (seq_printf(s, "use=%u\n", atomic_read(&conntrack->ct_general.use)))
 		return 1;
@@ -751,7 +744,6 @@ static int init_or_cleanup(int init)
 		goto cleanup_nothing;
 
 #ifdef CONFIG_PROC_FS
-	ret = -ENOMEM;
 	proc = proc_net_fops_create("ip_conntrack", 0440, &ct_file_ops);
 	if (!proc) goto cleanup_init;
 
@@ -919,6 +911,3 @@ EXPORT_SYMBOL(ip_conntrack_hash);
 EXPORT_SYMBOL(ip_conntrack_untracked);
 EXPORT_SYMBOL_GPL(ip_conntrack_find_get);
 EXPORT_SYMBOL_GPL(ip_conntrack_put);
-#ifdef CONFIG_IP_NF_NAT_NEEDED
-EXPORT_SYMBOL(ip_conntrack_tcp_update);
-#endif

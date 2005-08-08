@@ -645,7 +645,6 @@ int rh_set_owner(rh_info_t * info, void *start, const char *owner)
 		return -EINVAL;
 
 	blk->owner = owner;
-	size = blk->size;
 
 	return size;
 }

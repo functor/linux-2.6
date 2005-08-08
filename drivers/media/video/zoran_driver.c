@@ -265,7 +265,7 @@ get_high_mem (unsigned long size)
  * if more than one driver at a time has the idea to use this memory!!!!
  */
 
-	volatile unsigned char __iomem *mem;
+	volatile unsigned char *mem;
 	unsigned char c;
 	unsigned long hi_mem_ph;
 	unsigned long i;
@@ -285,21 +285,21 @@ get_high_mem (unsigned long size)
 	for (i = 0; i < size; i++) {
 		/* Check if it is memory */
 		c = i & 0xff;
-		writeb(c, mem + i);
-		if (readb(mem + i) != c)
+		mem[i] = c;
+		if (mem[i] != c)
 			break;
 		c = 255 - c;
-		writeb(c, mem + i);
-		if (readb(mem + i) != c)
+		mem[i] = c;
+		if (mem[i] != c)
 			break;
-		writeb(0, mem + i);	/* zero out memory */
+		mem[i] = 0;	/* zero out memory */
 
 		/* give the kernel air to breath */
 		if ((i & 0x3ffff) == 0x3ffff)
 			schedule();
 	}
 
-	iounmap(mem);
+	iounmap((void *) mem);
 
 	if (i != size) {
 		dprintk(1,
@@ -1917,7 +1917,8 @@ zoran_set_norm (struct zoran *zr,
 		decoder_command(zr, DECODER_SET_NORM, &norm);
 
 		/* let changes come into effect */
-		ssleep(2);
+		current->state = TASK_UNINTERRUPTIBLE;
+		schedule_timeout(2 * HZ);
 
 		decoder_command(zr, DECODER_GET_STATUS, &status);
 		if (!(status & DECODER_STATUS_GOOD)) {
@@ -2638,7 +2639,8 @@ zoran_do_ioctl (struct inode *inode,
 		decoder_command(zr, DECODER_SET_NORM, &norm);
 
 		/* sleep 1 second */
-		ssleep(1);
+		current->state = TASK_UNINTERRUPTIBLE;
+		schedule_timeout(1 * HZ);
 
 		/* Get status of video decoder */
 		decoder_command(zr, DECODER_GET_STATUS, &status);
@@ -4448,6 +4450,12 @@ static struct vm_operations_struct zoran_vm_ops = {
 	.close = zoran_vm_close,
 };
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
+#define zr_remap_page_range(a,b,c,d,e) remap_page_range(b,c,d,e)
+#else
+#define zr_remap_page_range(a,b,c,d,e) remap_page_range(a,b,c,d,e)
+#endif
+
 static int
 zoran_mmap (struct file           *file,
 	    struct vm_area_struct *vma)
@@ -4547,14 +4555,12 @@ zoran_mmap (struct file           *file,
 				pos =
 				    (unsigned long) fh->jpg_buffers.
 				    buffer[i].frag_tab[2 * j];
-				/* should just be pos on i386 */
-				page = virt_to_phys(bus_to_virt(pos))
-								>> PAGE_SHIFT;
-				if (remap_pfn_range(vma, start, page,
-							todo, PAGE_SHARED)) {
+				page = virt_to_phys(bus_to_virt(pos));	/* should just be pos on i386 */
+				if (zr_remap_page_range
+				    (vma, start, page, todo, PAGE_SHARED)) {
 					dprintk(1,
 						KERN_ERR
-						"%s: zoran_mmap(V4L) - remap_pfn_range failed\n",
+						"%s: zoran_mmap(V4L) - remap_page_range failed\n",
 						ZR_DEVNAME(zr));
 					res = -EAGAIN;
 					goto jpg_mmap_unlock_and_return;
@@ -4635,11 +4641,11 @@ zoran_mmap (struct file           *file,
 			if (todo > fh->v4l_buffers.buffer_size)
 				todo = fh->v4l_buffers.buffer_size;
 			page = fh->v4l_buffers.buffer[i].fbuffer_phys;
-			if (remap_pfn_range(vma, start, page >> PAGE_SHIFT,
-							todo, PAGE_SHARED)) {
+			if (zr_remap_page_range
+			    (vma, start, page, todo, PAGE_SHARED)) {
 				dprintk(1,
 					KERN_ERR
-					"%s: zoran_mmap(V4L)i - remap_pfn_range failed\n",
+					"%s: zoran_mmap(V4L)i - remap_page_range failed\n",
 					ZR_DEVNAME(zr));
 				res = -EAGAIN;
 				goto v4l_mmap_unlock_and_return;

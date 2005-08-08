@@ -523,12 +523,16 @@ rpc_populate(struct dentry *parent,
 {
 	struct inode *inode, *dir = parent->d_inode;
 	void *private = RPC_I(dir)->private;
+	struct qstr name;
 	struct dentry *dentry;
 	int mode, i;
 
 	down(&dir->i_sem);
 	for (i = start; i < eof; i++) {
-		dentry = d_alloc_name(parent, files[i].name);
+		name.name = files[i].name;
+		name.len = strlen(name.name);
+		name.hash = full_name_hash(name.name, name.len);
+		dentry = d_alloc(parent, &name);
 		if (!dentry)
 			goto out_bad;
 		mode = files[i].mode;

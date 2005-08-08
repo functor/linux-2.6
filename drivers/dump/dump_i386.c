@@ -314,7 +314,7 @@ __dump_cleanup(void)
 	free_dha_stack();
 }
 
-extern int page_is_ram(unsigned long);
+extern int pfn_is_ram(unsigned long);
 
 /*
  * Name: __dump_page_valid()
@@ -326,7 +326,7 @@ __dump_page_valid(unsigned long index)
 	if (!pfn_valid(index))
 		return 0;
 
-	return page_is_ram(index);
+	return pfn_is_ram(index);
 }
 
 /* 

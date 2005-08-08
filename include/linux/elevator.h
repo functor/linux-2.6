@@ -17,14 +17,15 @@ typedef void (elevator_requeue_req_fn) (request_queue_t *, struct request *);
 typedef struct request *(elevator_request_list_fn) (request_queue_t *, struct request *);
 typedef void (elevator_completed_req_fn) (request_queue_t *, struct request *);
 typedef int (elevator_may_queue_fn) (request_queue_t *, int);
+typedef void (elevator_set_congested_fn) (request_queue_t *);
 
 typedef int (elevator_set_req_fn) (request_queue_t *, struct request *, int);
 typedef void (elevator_put_req_fn) (request_queue_t *, struct request *);
 
 typedef int (elevator_init_fn) (request_queue_t *, elevator_t *);
-typedef void (elevator_exit_fn) (elevator_t *);
+typedef void (elevator_exit_fn) (request_queue_t *, elevator_t *);
 
-struct elevator_ops
+struct elevator_s
 {
 	elevator_merge_fn *elevator_merge_fn;
 	elevator_merged_fn *elevator_merged_fn;
@@ -45,35 +46,16 @@ struct elevator_ops
 	elevator_put_req_fn *elevator_put_req_fn;
 
 	elevator_may_queue_fn *elevator_may_queue_fn;
+	elevator_set_congested_fn *elevator_set_congested_fn;
 
 	elevator_init_fn *elevator_init_fn;
 	elevator_exit_fn *elevator_exit_fn;
-};
 
-#define ELV_NAME_MAX	(16)
-
-/*
- * identifies an elevator type, such as AS or deadline
- */
-struct elevator_type
-{
-	struct list_head list;
-	struct elevator_ops ops;
-	struct elevator_type *elevator_type;
-	struct kobj_type *elevator_ktype;
-	char elevator_name[ELV_NAME_MAX];
-	struct module *elevator_owner;
-};
-
-/*
- * each queue has an elevator_queue assoicated with it
- */
-struct elevator_queue
-{
-	struct elevator_ops *ops;
 	void *elevator_data;
+
 	struct kobject kobj;
-	struct elevator_type *elevator_type;
+	struct kobj_type *elevator_ktype;
+	const char *elevator_name;
 };
 
 /*
@@ -94,24 +76,34 @@ extern struct request *elv_latter_request(request_queue_t *, struct request *);
 extern int elv_register_queue(request_queue_t *q);
 extern void elv_unregister_queue(request_queue_t *q);
 extern int elv_may_queue(request_queue_t *, int);
+extern void elv_set_congested(request_queue_t *);
 extern void elv_completed_request(request_queue_t *, struct request *);
 extern int elv_set_request(request_queue_t *, struct request *, int);
 extern void elv_put_request(request_queue_t *, struct request *);
 
 /*
- * io scheduler registration
+ * noop I/O scheduler. always merges, always inserts new request at tail
  */
-extern int elv_register(struct elevator_type *);
-extern void elv_unregister(struct elevator_type *);
+extern elevator_t elevator_noop;
 
 /*
- * io scheduler sysfs switching
+ * deadline i/o scheduler. uses request time outs to prevent indefinite
+ * starvation
  */
-extern ssize_t elv_iosched_show(request_queue_t *, char *);
-extern ssize_t elv_iosched_store(request_queue_t *, const char *, size_t);
+extern elevator_t iosched_deadline;
 
-extern int elevator_init(request_queue_t *, char *);
-extern void elevator_exit(elevator_t *);
+/*
+ * anticipatory I/O scheduler
+ */
+extern elevator_t iosched_as;
+
+/*
+ * completely fair queueing I/O scheduler
+ */
+extern elevator_t iosched_cfq;
+
+extern int elevator_init(request_queue_t *, elevator_t *);
+extern void elevator_exit(request_queue_t *);
 extern int elv_rq_merge_ok(struct request *, struct bio *);
 extern int elv_try_merge(struct request *, struct bio *);
 extern int elv_try_last_merge(request_queue_t *, struct bio *);
@@ -130,13 +122,6 @@ extern int elv_try_last_merge(request_queue_t *, struct bio *);
 #define ELEVATOR_INSERT_BACK	2
 #define ELEVATOR_INSERT_SORT	3
 
-/*
- * return values from elevator_may_queue_fn
- */
-enum {
-	ELV_MQUEUE_MAY,
-	ELV_MQUEUE_NO,
-	ELV_MQUEUE_MUST,
-};
+#define RQ_ELV_DATA(rq)		(rq)->elevator_private
 
 #endif

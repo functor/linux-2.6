@@ -676,7 +676,7 @@ static int i8042_spank_usb(void)
 	unsigned long len;
 	int i;
 	
-	while((usb = pci_get_class((PCI_CLASS_SERIAL_USB << 8), usb)) != NULL)
+	while((usb = pci_find_class((PCI_CLASS_SERIAL_USB << 8), usb)) != NULL)
 	{
 		/* UHCI controller not in legacy ? */
 		
@@ -724,8 +724,6 @@ static int i8042_spank_usb(void)
 		/* Now take if off the BIOS */
 		pci_write_config_word(usb, 0xC0, 0x2000);
 		release_region(addr, len);
-		
-		pci_dev_put(usb);
 
 		found = 1;
 	}
@@ -886,41 +884,6 @@ void i8042_controller_cleanup(void)
 }
 
 
-static int blink_frequency = 500;
-module_param_named(panicblink, blink_frequency, int, 0600);
-
-/* Catch the case when the kbd interrupt is off */
-#define DELAY do { mdelay(1); if (++delay > 10) return delay; } while(0)
-
-/* Tell the user who may be running in X and not see the console that we have
-   panic'ed. This is to distingush panics from "real" lockups.  */
-static long i8042_panic_blink(long count)
-{
-	long delay = 0;
-	static long last_blink;
-	static char led;
-	/* Roughly 1/2s frequency. KDB uses about 1s. Make sure it is
-	   different. */
-	if (!blink_frequency)
-		return 0;
-	if (count - last_blink < blink_frequency)
-		return 0;
-	led ^= 0x01 | 0x04;
-	while (i8042_read_status() & I8042_STR_IBF)
-		DELAY;
-	i8042_write_data(0xed); /* set leds */
-	DELAY;
-	while (i8042_read_status() & I8042_STR_IBF)
-		DELAY;
-	DELAY;
-	i8042_write_data(led);
-	DELAY;
-	last_blink = count;
-	return delay;
-}
-
-#undef DELAY
-
 /*
  * Here we try to restore the original BIOS settings
  */
@@ -971,8 +934,6 @@ static int i8042_controller_resume(void)
  */
 	mod_timer(&i8042_timer, jiffies + I8042_POLL_PERIOD);
 
-	panic_blink = i8042_panic_blink;
-
 	return 0;
 }
 
@@ -996,6 +957,40 @@ static struct notifier_block i8042_notifier =
         NULL,
         0
 };
+
+static int blink_frequency = 500;
+module_param_named(panicblink, blink_frequency, int, 0600);
+
+#define DELAY mdelay(1), delay++
+
+/* Tell the user who may be running in X and not see the console that we have 
+   panic'ed. This is to distingush panics from "real" lockups.  */
+static long i8042_panic_blink(long count)
+{ 
+	long delay = 0;
+	static long last_blink;
+	static char led;
+	/* Roughly 1/2s frequency. KDB uses about 1s. Make sure it is 
+	   different. */
+	if (!blink_frequency) 
+		return 0;
+	if (count - last_blink < blink_frequency)
+		return 0;
+	led ^= 0x01 | 0x04;
+	while (i8042_read_status() & I8042_STR_IBF)
+		DELAY;
+	i8042_write_data(0xed); /* set leds */
+	DELAY;
+	while (i8042_read_status() & I8042_STR_IBF)
+		DELAY;
+	DELAY;
+	i8042_write_data(led);
+	DELAY;
+	last_blink = count;
+	return delay;
+}  
+
+#undef DELAY
 
 /*
  * Suspend/resume handlers for the new PM scheme (driver model)
@@ -1156,6 +1151,8 @@ int __init i8042_init(void)
 	i8042_pm_dev = pm_register(PM_SYS_DEV, PM_SYS_UNKNOWN, i8042_pm_callback);
 
 	register_reboot_notifier(&i8042_notifier);
+
+	panic_blink = i8042_panic_blink;
 
 	return 0;
 }

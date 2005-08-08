@@ -26,7 +26,7 @@ obj-$(CONFIG_TAU)		+= temp.o
 obj-$(CONFIG_ALTIVEC)		+= vecemu.o vector.o
 obj-$(CONFIG_KEXEC)		+= machine_kexec.o relocate_kernel.o
 
-ifndef CONFIG_MATH_EMULATION
+ifdef CONFIG_MATH_EMULATION
 obj-$(CONFIG_8xx)		+= softemu8xx.o
 endif
 

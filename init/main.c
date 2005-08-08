@@ -45,13 +45,18 @@
 #include <linux/unistd.h>
 #include <linux/rmap.h>
 #include <linux/mempolicy.h>
-#include <linux/key.h>
-#include <linux/ckrm_events.h>
-#include <linux/ckrm_sched.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
 #include <asm/setup.h>
+
+#include <linux/ckrm.h>
+#ifdef CONFIG_CKRM_CPU_SCHEDULE
+int __init init_ckrm_sched_res(void);
+#else
+#define init_ckrm_sched_res() ((void)0)
+#endif
+//#include <linux/ckrm_sched.h>
 
 /*
  * This is one of the first .c files built. Error out early
@@ -300,15 +305,8 @@ static int __init unknown_bootoption(char *param, char *val)
 {
 	/* Change NUL term back to "=", to make "param" the whole string. */
 	if (val) {
-		/* param=val or param="val"? */
-		if (val == param+strlen(param)+1)
-			val[-1] = '=';
-		else if (val == param+strlen(param)+2) {
-			val[-2] = '=';
-			memmove(val-1, val, strlen(val)+1);
-			val--;
-		} else
-			BUG();
+		if (val[-1] == '"') val[-2] = '=';
+		else val[-1] = '=';
 	}
 
 	/* Handle obsolete-style parameters */
@@ -453,10 +451,10 @@ static void __init smp_init(void)
  */
 
 static void noinline rest_init(void)
-	__releases(kernel_lock)
 {
 	kernel_thread(init, NULL, CLONE_FS | CLONE_SIGHAND);
 	numa_default_policy();
+	system_state = SYSTEM_BOOTING_SCHEDULER_OK;
 	unlock_kernel();
  	cpu_idle();
 } 
@@ -535,6 +533,10 @@ asmlinkage void __init start_kernel(void)
 	rcu_init();
 	init_IRQ();
 	pidhash_init();
+	/* MEF: In 2.6.5. ckrm_init was right after pidhash_init() but 
+                before sched_init(). Will leave it after pidhash_init()
+                and cross finger.
+	*/
 	ckrm_init();
 	init_timers();
 	softirq_init();
@@ -577,7 +579,7 @@ asmlinkage void __init start_kernel(void)
 	proc_caches_init();
 	buffer_init();
 	unnamed_dev_init();
-	security_init();
+	security_scaffolding_startup();
 	vfs_caches_init(num_physpages);
 	radix_tree_init();
 	signals_init();
@@ -586,6 +588,7 @@ asmlinkage void __init start_kernel(void)
 #ifdef CONFIG_PROC_FS
 	proc_root_init();
 #endif
+
 	check_bugs();
 
 	acpi_early_init(); /* before LAPIC and SMP init */
@@ -617,7 +620,7 @@ static void __init do_initcalls(void)
 
 		if (initcall_debug) {
 			printk(KERN_DEBUG "Calling initcall 0x%p", *call);
-			print_fn_descriptor_symbol(": %s()", (unsigned long) *call);
+			print_symbol(": %s()", (unsigned long) *call);
 			printk("\n");
 		}
 
@@ -654,7 +657,7 @@ static void __init do_basic_setup(void)
 	/* drivers will send hotplug events */
 	init_workqueues();
 	usermodehelper_init();
-	key_init();
+
 	driver_init();
 
 #ifdef CONFIG_SYSCTL
@@ -728,6 +731,7 @@ static int init(void * unused)
 	 * firmware files.
 	 */
 	populate_rootfs();
+
 	do_basic_setup();
 
 	init_ckrm_sched_res();

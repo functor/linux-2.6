@@ -1629,16 +1629,15 @@ static int radeonfb_blank (int blank, struct fb_info *info)
 	val2 &= ~(LVDS_DISPLAY_DIS);
 
         switch (blank) {
-	        case FB_BLANK_UNBLANK:
-	        case FB_BLANK_NORMAL:
+                case VESA_NO_BLANKING:
                         break;
-                case FB_BLANK_VSYNC_SUSPEND:
+                case VESA_VSYNC_SUSPEND:
                         val |= (CRTC_DISPLAY_DIS | CRTC_VSYNC_DIS);
                         break;
-                case FB_BLANK_HSYNC_SUSPEND:
+                case VESA_HSYNC_SUSPEND:
                         val |= (CRTC_DISPLAY_DIS | CRTC_HSYNC_DIS);
                         break;
-                case FB_BLANK_POWERDOWN:
+                case VESA_POWERDOWN:
                         val |= (CRTC_DISPLAY_DIS | CRTC_VSYNC_DIS | 
                                 CRTC_HSYNC_DIS);
 			val2 |= (LVDS_DISPLAY_DIS);
@@ -1655,8 +1654,7 @@ static int radeonfb_blank (int blank, struct fb_info *info)
 			break;
 	}
 
-	/* let fbcon do a soft blank for us */
-	return (blank == FB_BLANK_NORMAL) ? 1 : 0;
+	return 0;
 }
 
 
@@ -2249,6 +2247,7 @@ static int __devinit radeon_set_fbinfo (struct radeonfb_info *rinfo)
 
 	info = &rinfo->info;
 
+	info->currcon = -1;
 	info->par = rinfo;
 	info->pseudo_palette = rinfo->pseudo_palette;
         info->flags = FBINFO_DEFAULT | FBINFO_HWACCEL_YPAN;
@@ -3041,7 +3040,7 @@ static int radeonfb_pci_register (struct pci_dev *pdev,
 	pci_set_drvdata(pdev, rinfo);
 	rinfo->next = board_list;
 	board_list = rinfo;
-	((struct fb_info *) rinfo)->device = &pdev->dev;
+
 	if (register_framebuffer ((struct fb_info *) rinfo) < 0) {
 		printk ("radeonfb: could not register framebuffer\n");
 		iounmap(rinfo->fb_base);

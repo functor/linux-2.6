@@ -131,13 +131,47 @@ VM_MASK		= 0x00020000
 	movl $(__USER_DS), %edx; \
 	movl %edx, %ds; \
 	movl %edx, %es; \
-	movl $11,%eax;	\
+	pushl $11;	\
 	call do_exit;	\
 .previous;		\
 .section __ex_table,"a";\
 	.align 4;	\
 	.long 1b,2b;	\
 .previous
+
+
+
+ENTRY(lcall7)
+	pushfl			# We get a different stack layout with call
+				# gates, which has to be cleaned up later..
+	pushl %eax
+	SAVE_ALL
+	movl %esp, %ebp
+	pushl %ebp
+	pushl $0x7
+do_lcall:
+	movl EIP(%ebp), %eax	# due to call gates, this is eflags, not eip..
+	movl CS(%ebp), %edx	# this is eip..
+	movl EFLAGS(%ebp), %ecx	# and this is cs..
+	movl %eax,EFLAGS(%ebp)	#
+	movl %edx,EIP(%ebp)	# Now we move them to their "normal" places
+	movl %ecx,CS(%ebp)	#
+	GET_THREAD_INFO_WITH_ESP(%ebp)	# GET_THREAD_INFO
+	movl TI_exec_domain(%ebp), %edx	# Get the execution domain
+	call *EXEC_DOMAIN_handler(%edx)	# Call the handler for the domain
+	addl $4, %esp
+	popl %eax
+	jmp resume_userspace
+
+ENTRY(lcall27)
+	pushfl			# We get a different stack layout with call
+				# gates, which has to be cleaned up later..
+	pushl %eax
+	SAVE_ALL
+	movl %esp, %ebp
+	pushl %ebp
+	pushl $0x27
+	jmp do_lcall
 
 
 ENTRY(ret_from_fork)
@@ -187,8 +221,8 @@ need_resched:
 	movl $PREEMPT_ACTIVE,TI_preempt_count(%ebp)
 	sti
 	call schedule
-	cli
 	movl $0,TI_preempt_count(%ebp)
+	cli
 	jmp need_resched
 #endif
 
@@ -296,8 +330,8 @@ work_notifysig:				# deal with pending signals and
 
 	ALIGN
 work_notifysig_v86:
-	pushl %ecx			# save ti_flags for do_notify_resume
-	call save_v86_state		# %eax contains pt_regs pointer
+	pushl %ecx
+	call save_v86_state
 	popl %ecx
 	movl %eax, %esp
 	xorl %edx, %edx
@@ -364,7 +398,6 @@ vector=vector+1
 	ALIGN
 common_interrupt:
 	SAVE_ALL
-	movl %esp,%eax
 	call do_IRQ
 	jmp ret_from_intr
 
@@ -372,8 +405,7 @@ common_interrupt:
 ENTRY(name)				\
 	pushl $nr-256;			\
 	SAVE_ALL			\
-	movl %esp,%eax;			\
-	call smp_/**/name;		\
+	call smp_/**/name;	\
 	jmp ret_from_intr;
 
 /* The include is where all of the SMP etc. interrupts come from */
@@ -396,15 +428,18 @@ error_code:
 	pushl %ebx
 	cld
 	movl %es, %ecx
+	movl ORIG_EAX(%esp), %esi	# get the error code
 	movl ES(%esp), %edi		# get the function address
-	movl ORIG_EAX(%esp), %edx	# get the error code
 	movl %eax, ORIG_EAX(%esp)
 	movl %ecx, ES(%esp)
-	movl $(__USER_DS), %ecx
-	movl %ecx, %ds
-	movl %ecx, %es
-	movl %esp,%eax			# pt_regs pointer
+	movl %esp, %edx
+	pushl %esi			# push the error code
+	pushl %edx			# push the pt_regs pointer
+	movl $(__USER_DS), %edx
+	movl %edx, %ds
+	movl %edx, %es
 	call *%edi
+	addl $8, %esp
 	jmp ret_from_exception
 
 ENTRY(coprocessor_error)
@@ -461,9 +496,11 @@ ENTRY(debug)
 debug_stack_correct:
 	pushl $-1			# mark this as an int
 	SAVE_ALL
-	xorl %edx,%edx			# error code 0
-	movl %esp,%eax			# pt_regs pointer
+	movl %esp,%edx
+  	pushl $0
+	pushl %edx
 	call do_debug
+	addl $8,%esp
 	testl %eax,%eax
 	jnz restore_all
 	jmp ret_from_exception
@@ -493,9 +530,11 @@ ENTRY(nmi)
 nmi_stack_correct:
 	pushl %eax
 	SAVE_ALL
-	xorl %edx,%edx		# zero error code
-	movl %esp,%eax		# pt_regs pointer
+	movl %esp, %edx
+	pushl $0
+	pushl %edx
 	call do_nmi
+	addl $8, %esp
 	RESTORE_ALL
 
 nmi_stack_fixup:
@@ -515,9 +554,11 @@ nmi_debug_stack_fixup:
 ENTRY(int3)
 	pushl $-1			# mark this as an int
 	SAVE_ALL
-	xorl %edx,%edx		# zero error code
-	movl %esp,%eax		# pt_regs pointer
+	movl %esp,%edx
+	pushl $0
+	pushl %edx
 	call do_int3
+	addl $8,%esp
 	testl %eax,%eax
 	jnz restore_all
 	jmp ret_from_exception
@@ -873,10 +914,58 @@ ENTRY(sys_call_table)
 	.long sys_mq_getsetattr
 	.long sys_kexec_load
 	.long sys_waitid
-	.long sys_ni_syscall		/* 285 */ /* available */
-	.long sys_add_key
-	.long sys_request_key
-	.long sys_keyctl
+#ifdef USE_IOPRIO_SYSCALLS
+	.long sys_ioprio_set		/* 285 */
+	.long sys_ioprio_get
+#else
+#warning MEF not includig sys_ioprio_{set,get} syscalls
+#endif	
 
 syscall_table_size=(.-sys_call_table)
 
+#ifdef CONFIG_X86_STACK_CHECK
+.data
+.globl stack_overflowed
+stack_overflowed:
+	.long 0
+.text
+
+ENTRY(mcount)
+#warning stack check enabled
+	push %eax
+	movl $(THREAD_SIZE - 1),%eax
+	andl %esp,%eax
+	cmpl $STACK_WARN,%eax
+	jle 1f
+2:
+	popl %eax
+	ret
+1:
+	/* prevent infinite recursion from call to mcount from the
+	 * stack_overflow function.  Need to revisit this code for
+	 * SMP based systems.
+	 */
+	lock; btsl $0,stack_overflowed
+	jc 2b
+
+	/* prepare to jmp to stack_overflow directly, as if it were 
+	 * called directly by the caller of mcount.  
+	 */
+	pushl %ebp
+	pushl %ebx
+	pushl %esi
+	pushl %edi
+	
+	call stack_overflow
+	/* Note that stack_overflow() will clear the stack_overflowed
+	 * variable.
+	 */
+
+	popl %edi
+	popl %esi
+	popl %ebx
+	popl %ebp
+	
+	popl %eax	
+	ret
+#endif

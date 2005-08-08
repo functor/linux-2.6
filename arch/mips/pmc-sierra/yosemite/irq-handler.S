@@ -1,7 +1,6 @@
 /*
- * Copyright 2003, 04 PMC-Sierra Inc.
+ * Copyright 2003 PMC-Sierra Inc.
  * Author: Manish Lachwani (lachwani@pmc-sierra.com
- * Copyright 2004 Ralf Baechle (ralf@linux-mips.org)
  *
  * First-level interrupt router for the PMC-Sierra Titan board
  *
@@ -28,7 +27,6 @@
 		CLI
 		.set	at
 		.set	noreorder
-		la	ra, ret_from_irq
 		mfc0	t0, CP0_CAUSE
 		mfc0	t2, CP0_STATUS
 
@@ -71,36 +69,42 @@ ll_pcia_irq:
 		li	a0, 2
 		move	a1, sp
 #ifdef CONFIG_HYPERTRANSPORT
-		j	ll_ht_smp_irq_handler
+		jal	ll_ht_smp_irq_handler
 #else
-		j	do_IRQ
+		jal	do_IRQ
 #endif
+		j	ret_from_irq
 
 ll_pcib_irq:
 		li	a0, 3
 		move	a1, sp
-		j	do_IRQ
+		jal	do_IRQ
+		j	ret_from_irq
 
 ll_duart_irq:
 		li	a0, 4
 		move	a1, sp
-		j	do_IRQ
+		jal	do_IRQ
+		j	ret_from_irq
 
 ll_smp_irq:
 		li	a0, 5
 		move	a1, sp
 #ifdef CONFIG_SMP
-		j	titan_mailbox_irq
+		jal	jaguar_mailbox_irq
 #else
-		j	do_IRQ
+		jal	do_IRQ
 #endif
+		j	ret_from_irq
 
 ll_ht_irq:
 		li	a0, 6
 		move	a1, sp
-		j	ll_ht_smp_irq_handler
+		jal	ll_ht_smp_irq_handler
+		j	ret_from_irq
 
 ll_timer_irq:
 		li	a0, 7
 		move	a1, sp
-		j	do_IRQ
+		jal	do_IRQ
+		j	ret_from_irq

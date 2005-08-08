@@ -267,7 +267,6 @@ static int dart_init(struct device_node *dart_node)
 
 void iommu_setup_u3(void)
 {
-	struct pci_controller *phb, *tmp;
 	struct pci_dev *dev = NULL;
 	struct device_node *dn;
 
@@ -291,7 +290,7 @@ void iommu_setup_u3(void)
 	/* We only have one iommu table on the mac for now, which makes
 	 * things simple. Setup all PCI devices to point to this table
 	 */
-	for_each_pci_dev(dev) {
+	while ((dev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
 		/* We must use pci_device_to_OF_node() to make sure that
 		 * we get the real "final" pointer to the device in the
 		 * pci_dev sysdata and not the temporary PHB one
@@ -299,11 +298,6 @@ void iommu_setup_u3(void)
 		struct device_node *dn = pci_device_to_OF_node(dev);
 		if (dn)
 			dn->iommu_table = &iommu_table_u3;
-	}
-	/* We also make sure we set all PHBs ... */
-	list_for_each_entry_safe(phb, tmp, &hose_list, list_node) {
-		dn = (struct device_node *)phb->arch_data;
-		dn->iommu_table = &iommu_table_u3;
 	}
 }
 

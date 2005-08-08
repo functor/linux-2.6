@@ -120,3 +120,5 @@ int shmem_unuse(swp_entry_t entry, struct page *page)
 {
 	return 0;
 }
+
+EXPORT_SYMBOL(shmem_file_setup);

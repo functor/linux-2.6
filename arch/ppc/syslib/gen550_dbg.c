@@ -40,12 +40,12 @@ static int shift;
 
 unsigned long direct_inb(unsigned long addr)
 {
-	return readb((void __iomem *)addr);
+	return readb(addr);
 }
 
 void direct_outb(unsigned long addr, unsigned char val)
 {
-	writeb(val, (void __iomem *)addr);
+	writeb(val, addr);
 }
 
 unsigned long io_inb(unsigned long port)

@@ -83,31 +83,12 @@ struct request *elevator_noop_next_request(request_queue_t *q)
 	return NULL;
 }
 
-static struct elevator_type elevator_noop = {
-	.ops = {
-		.elevator_merge_fn		= elevator_noop_merge,
-		.elevator_merge_req_fn		= elevator_noop_merge_requests,
-		.elevator_next_req_fn		= elevator_noop_next_request,
-		.elevator_add_req_fn		= elevator_noop_add_request,
-	},
-	.elevator_name = "noop",
-	.elevator_owner = THIS_MODULE,
+elevator_t elevator_noop = {
+	.elevator_merge_fn		= elevator_noop_merge,
+	.elevator_merge_req_fn		= elevator_noop_merge_requests,
+	.elevator_next_req_fn		= elevator_noop_next_request,
+	.elevator_add_req_fn		= elevator_noop_add_request,
+	.elevator_name			= "noop",
 };
 
-int noop_init(void)
-{
-	return elv_register(&elevator_noop);
-}
-
-void noop_exit(void)
-{
-	elv_unregister(&elevator_noop);
-}
-
-module_init(noop_init);
-module_exit(noop_exit);
-
-
-MODULE_AUTHOR("Jens Axboe");
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("No-op IO scheduler");
+EXPORT_SYMBOL(elevator_noop);

@@ -479,8 +479,7 @@ extern void update_mmu_cache(struct vm_area_struct * vma,
 #define PageSkip(page)		(0)
 #define kern_addr_valid(addr)	(1)
 
-#define io_remap_page_range(vma, vaddr, paddr, size, prot)		\
-		remap_pfn_range(vma, vaddr, (paddr) >> PAGE_SHIFT, size, prot)
+#define io_remap_page_range remap_page_range
 #endif /* !__ASSEMBLY__ */
 
 /*

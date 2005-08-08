@@ -9,11 +9,11 @@
 #include "linux/config.h"
 
 #ifdef CONFIG_MODE_TT
-#include "mode_kern-tt.h"
+#include "../kernel/tt/include/mode_kern.h"
 #endif
 
 #ifdef CONFIG_MODE_SKAS
-#include "mode_kern-skas.h"
+#include "../kernel/skas/include/mode_kern.h"
 #endif
 
 #endif

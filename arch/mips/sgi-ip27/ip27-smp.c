@@ -122,6 +122,10 @@ void cpu_node_probe(void)
 	printk("Discovered %d cpus on %d nodes\n", highest + 1, numnodes);
 }
 
+void __init prom_build_cpu_map(void)
+{
+}
+
 static void intr_clear_bits(nasid_t nasid, volatile hubreg_t *pend,
 	int base_level)
 {
@@ -153,6 +157,9 @@ void __init prom_prepare_cpus(unsigned int max_cpus)
 
 	for (cnode = 0; cnode < numnodes; cnode++)
 		intr_clear_all(COMPACT_TO_NASID_NODEID(cnode));
+
+	/* Master has already done per_cpu_init() */
+	install_ipi();
 
 	replicate_kernel_text(numnodes);
 

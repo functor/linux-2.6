@@ -41,7 +41,6 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#include <linux/module.h>
 
 #include <acpi/acpi.h>
 #include <acpi/acevents.h>
@@ -343,8 +342,6 @@ acpi_terminate (void)
 }
 
 
-#ifdef ACPI_FUTURE_USAGE
-
 /*****************************************************************************
  *
  * FUNCTION:    acpi_subsystem_status
@@ -458,7 +455,6 @@ acpi_get_system_info (
 
 	return_ACPI_STATUS (AE_OK);
 }
-EXPORT_SYMBOL(acpi_get_system_info);
 
 
 /*****************************************************************************
@@ -492,8 +488,6 @@ acpi_install_initialization_handler (
 	acpi_gbl_init_handler = handler;
 	return AE_OK;
 }
-
-#endif  /*  ACPI_FUTURE_USAGE  */
 
 
 /*****************************************************************************

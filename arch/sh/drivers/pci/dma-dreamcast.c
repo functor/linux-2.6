@@ -23,8 +23,6 @@
 #include <linux/init.h>
 #include <linux/irq.h>
 #include <linux/pci.h>
-#include <linux/dma-mapping.h>
-#include <linux/device.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -32,21 +30,18 @@
 
 static int gapspci_dma_used = 0;
 
-void *dreamcast_consistent_alloc(struct device *dev, size_t size,
-				 dma_addr_t *dma_handle, int flag)
+void *__pci_alloc_consistent(struct pci_dev *hwdev, size_t size,
+			   dma_addr_t * dma_handle)
 {
 	unsigned long buf;
 
-	if (dev && dev->bus != &pci_bus_type)
+	if (gapspci_dma_used+size > GAPSPCI_DMA_SIZE)
 		return NULL;
 
-	if (gapspci_dma_used + size > GAPSPCI_DMA_SIZE)
-		return ERR_PTR(-EINVAL);
-
-	buf = GAPSPCI_DMA_BASE + gapspci_dma_used;
+	buf = GAPSPCI_DMA_BASE+gapspci_dma_used;
 
 	gapspci_dma_used = PAGE_ALIGN(gapspci_dma_used+size);
-
+	
 	*dma_handle = (dma_addr_t)buf;
 
 	buf = P2SEGADDR(buf);
@@ -57,15 +52,10 @@ void *dreamcast_consistent_alloc(struct device *dev, size_t size,
 	return (void *)buf;
 }
 
-int dreamcast_consistent_free(struct device *dev, size_t size,
+void __pci_free_consistent(struct pci_dev *hwdev, size_t size,
 			 void *vaddr, dma_addr_t dma_handle)
 {
-	if (dev && dev->bus != &pci_bus_type)
-		return -EINVAL;
-
 	/* XXX */
 	gapspci_dma_used = 0;
-
-	return 0;
 }
 
