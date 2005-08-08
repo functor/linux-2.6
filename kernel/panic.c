@@ -18,14 +18,13 @@
 #include <linux/sysrq.h>
 #include <linux/interrupt.h>
 #include <linux/nmi.h>
+#ifdef CONFIG_KEXEC
 #include <linux/kexec.h>
-#include <linux/crash_dump.h>
+#endif
 
 int panic_timeout = 900;
 int panic_on_oops = 1;
 int tainted;
-unsigned int crashed;
-int crash_dump_on;
 void (*dump_function_ptr)(const char *, const struct pt_regs *) = 0;
 
 EXPORT_SYMBOL(panic_timeout);
@@ -78,9 +77,6 @@ NORET_TYPE void panic(const char * fmt, ...)
 	if (crashdump_func())
 		BUG();
 	bust_spinlocks(0);
-
-	/* If we have crashed, perform a kexec reboot, for dump write-out */
-	crash_machine_kexec();
 
         notifier_call_chain(&panic_notifier_list, 0, buf);
 	

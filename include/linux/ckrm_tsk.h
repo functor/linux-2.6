@@ -13,23 +13,22 @@
  *
  */
 
+/* Changes
+ *
+ * 31 Mar 2004
+ *    Created.
+ */
+
 #ifndef _LINUX_CKRM_TSK_H
 #define _LINUX_CKRM_TSK_H
 
-#ifdef CONFIG_CKRM_TYPE_TASKCLASS
 #include <linux/ckrm_rc.h>
 
-typedef int (*get_ref_t) (struct ckrm_core_class *, int);
-typedef void (*put_ref_t) (struct ckrm_core_class *);
+typedef int (*get_ref_t) (void *, int);
+typedef void (*put_ref_t) (void *);
 
-extern int numtasks_get_ref(struct ckrm_core_class *, int);
-extern void numtasks_put_ref(struct ckrm_core_class *);
+extern int numtasks_get_ref(void *, int);
+extern void numtasks_put_ref(void *);
 extern void ckrm_numtasks_register(get_ref_t, put_ref_t);
 
-#else /* CONFIG_CKRM_TYPE_TASKCLASS */
-
-#define numtasks_get_ref(core_class, ref) (1)
-#define numtasks_put_ref(core_class)  do {} while (0)
-
-#endif /* CONFIG_CKRM_TYPE_TASKCLASS */
-#endif /* _LINUX_CKRM_RES_H */
+#endif				// _LINUX_CKRM_RES_H

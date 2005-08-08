@@ -14,7 +14,6 @@
 #include <linux/tty.h>
 #include <video/edid.h>
 #include <asm/io.h>
-#include <asm/segment.h>
 
 /*
  * gzip declarations
@@ -310,7 +309,7 @@ static void setup_normal_output_buffer(void)
 #else
 	if ((RM_ALT_MEM_K > RM_EXT_MEM_K ? RM_ALT_MEM_K : RM_EXT_MEM_K) < 1024) error("Less than 2MB of memory");
 #endif
-	output_data = (char *)KERN_PHYS_OFFSET; /* Points to 1M */
+	output_data = (char *)0x100000; /* Points to 1M */
 	free_mem_end_ptr = (long)real_mode;
 }
 
@@ -335,8 +334,8 @@ static void setup_output_buffer_if_we_run_high(struct moveparams *mv)
 	low_buffer_size = low_buffer_end - LOW_BUFFER_START;
 	high_loaded = 1;
 	free_mem_end_ptr = (long)high_buffer_start;
-	if ( (KERN_PHYS_OFFSET + low_buffer_size) > ((ulg)high_buffer_start)) {
-		high_buffer_start = (uch *)(KERN_PHYS_OFFSET + low_buffer_size);
+	if ( (0x100000 + low_buffer_size) > ((ulg)high_buffer_start)) {
+		high_buffer_start = (uch *)(0x100000 + low_buffer_size);
 		mv->hcount = 0; /* say: we need not to move high_buffer */
 	}
 	else mv->hcount = -1;

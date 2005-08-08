@@ -282,24 +282,19 @@ ext2_set_acl(struct inode *inode, int type, struct posix_acl *acl)
 	return error;
 }
 
-static int
-ext2_check_acl(struct inode *inode, int mask)
-{
-	struct posix_acl *acl = ext2_get_acl(inode, ACL_TYPE_ACCESS);
-
-	if (acl) {
-		int error = posix_acl_permission(inode, acl, mask);
-		posix_acl_release(acl);
-		return error;
-	}
-
-	return -EAGAIN;
-}
-
 int
 ext2_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
-	return generic_permission(inode, mask, ext2_check_acl);
+	int mode = inode->i_mode;
+
+#warning MEF Get new BME patch, which I believe pushes these checks higher
+	/* Nobody gets write access to a read-only fs */
+	if ((mask & MAY_WRITE) && (IS_RDONLY(inode) ||
+	    (nd && MNT_IS_RDONLY(nd->mnt))) &&
+	    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
+		return -EROFS;
+
+	return generic_permission(inode, mask, 0);
 }
 
 /*

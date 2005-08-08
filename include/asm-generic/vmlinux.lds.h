@@ -73,7 +73,7 @@
 	}
 
 #define SECURITY_INIT							\
-	.security_initcall.init : AT(ADDR(.security_initcall.init) - LOAD_OFFSET) {\
+	.security_initcall.init : {					\
 		VMLINUX_SYMBOL(__security_initcall_start) = .;		\
 		*(.security_initcall.init) 				\
 		VMLINUX_SYMBOL(__security_initcall_end) = .;		\
