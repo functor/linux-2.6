@@ -138,10 +138,8 @@ struct zone {
 
 	/* Fields commonly accessed by the page reclaim scanner */
 	spinlock_t		lru_lock;	
-#ifndef CONFIG_CKRM_RES_MEM
 	struct list_head	active_list;
 	struct list_head	inactive_list;
-#endif
 	unsigned long		nr_scan_active;
 	unsigned long		nr_scan_inactive;
 	unsigned long		nr_active;

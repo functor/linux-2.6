@@ -460,7 +460,7 @@ xfs_dinode_t *xfs_buf_to_dinode(struct xfs_buf *bp);
 #define XFS_DIFLAG_PROJINHERIT_BIT  9	/* create with parents projid */
 #define XFS_DIFLAG_NOSYMLINKS_BIT  10	/* disallow symlink creation */
 #define XFS_DIFLAG_BARRIER_BIT	 12	/* chroot() barrier */
-#define XFS_DIFLAG_IUNLINK_BIT	 13	/* immutable unlink */
+#define XFS_DIFLAG_IUNLINK_BIT	 13	/* inode has iunlink */
 
 #define XFS_DIFLAG_REALTIME      (1 << XFS_DIFLAG_REALTIME_BIT)
 #define XFS_DIFLAG_PREALLOC      (1 << XFS_DIFLAG_PREALLOC_BIT)
@@ -475,7 +475,6 @@ xfs_dinode_t *xfs_buf_to_dinode(struct xfs_buf *bp);
 #define XFS_DIFLAG_NOSYMLINKS    (1 << XFS_DIFLAG_NOSYMLINKS_BIT)
 #define XFS_DIFLAG_BARRIER	 (1 << XFS_DIFLAG_BARRIER_BIT)
 #define XFS_DIFLAG_IUNLINK	 (1 << XFS_DIFLAG_IUNLINK_BIT)
-
 
 #define XFS_DIFLAG_ANY \
 	(XFS_DIFLAG_REALTIME | XFS_DIFLAG_PREALLOC | XFS_DIFLAG_NEWRTBM | \

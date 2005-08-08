@@ -11,6 +11,12 @@
  *
  */
 
+/* Changes
+ * 
+ * 16 May 2004: Created
+ * 
+ */
+
 #include <linux/spinlock.h>
 #include <linux/module.h>
 #include <linux/ckrm_tsk.h>
@@ -28,7 +34,7 @@ void ckrm_numtasks_register(get_ref_t gr, put_ref_t pr)
 	spin_unlock(&stub_lock);
 }
 
-int numtasks_get_ref(struct ckrm_core_class *arg, int force)
+int numtasks_get_ref(void *arg, int force)
 {
 	int ret = 1;
 	spin_lock(&stub_lock);
@@ -39,7 +45,7 @@ int numtasks_get_ref(struct ckrm_core_class *arg, int force)
 	return ret;
 }
 
-void numtasks_put_ref(struct ckrm_core_class *arg)
+void numtasks_put_ref(void *arg)
 {
 	spin_lock(&stub_lock);
 	if (real_put_ref) {

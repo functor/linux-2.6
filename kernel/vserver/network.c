@@ -14,7 +14,8 @@
 
 #include <linux/config.h>
 #include <linux/slab.h>
-#include <linux/vserver/network_cmd.h>
+#include <linux/vserver.h>
+#include <linux/vs_base.h>
 #include <linux/rcupdate.h>
 #include <net/tcp.h>
 
@@ -69,35 +70,6 @@ static void __dealloc_nx_info(struct nx_info *nxi)
 	kfree(nxi);
 }
 
-static inline int __free_nx_info(struct nx_info *nxi)
-{
-	int usecnt, refcnt;
-
-	BUG_ON(!nxi);
-
-	usecnt = atomic_read(&nxi->nx_usecnt);
-	BUG_ON(usecnt < 0);
-
-	refcnt = atomic_read(&nxi->nx_refcnt);
-	BUG_ON(refcnt < 0);
-
-	if (!usecnt)
-		__dealloc_nx_info(nxi);
-	return usecnt;
-}
-
-static void __rcu_put_nx_info(struct rcu_head *head)
-{
-	struct nx_info *nxi = container_of(head, struct nx_info, nx_rcu);
-
-	vxdprintk(VXD_CBIT(nid, 3),
-		"__rcu_put_nx_info(%p[#%d]): %d,%d",
-		nxi, nxi->nx_id,
-		atomic_read(&nxi->nx_usecnt),
-		atomic_read(&nxi->nx_refcnt));
-	put_nx_info(nxi);
-}
-
 
 /*	hash table for nx_info hash */
 
@@ -141,7 +113,7 @@ static inline void __unhash_nx_info(struct nx_info *nxi)
 	vxdprintk(VXD_CBIT(nid, 4),
 		"__unhash_nx_info: %p[#%d]", nxi, nxi->nx_id);
 	hlist_del_rcu(&nxi->nx_hlist);
-	call_rcu(&nxi->nx_rcu, __rcu_put_nx_info);
+	put_nx_info(nxi);
 }
 
 
@@ -170,7 +142,6 @@ static inline struct nx_info *__lookup_nx_info(nid_t nid)
 /*	__nx_dynamic_id()
 
 	* find unused dynamic nid
-	* requires the rcu_read_lock()
 	* requires the hash_lock to be held			*/
 
 static inline nid_t __nx_dynamic_id(void)
@@ -206,9 +177,6 @@ static struct nx_info * __loc_nx_info(int id, int *err)
 		return NULL;
 	}
 
-	/* FIXME is this required at all ? */
-	rcu_read_lock();
-	/* required to make dynamic xids unique */
 	spin_lock(&nx_info_hash_lock);
 
 	/* dynamic context requested */
@@ -246,7 +214,6 @@ static struct nx_info * __loc_nx_info(int id, int *err)
 
 out_unlock:
 	spin_unlock(&nx_info_hash_lock);
-	rcu_read_unlock();
 	if (new)
 		__dealloc_nx_info(new);
 	return nxi;
@@ -256,9 +223,28 @@ out_unlock:
 
 /*	exported stuff						*/
 
-void free_nx_info(struct nx_info *nxi)
+
+
+
+void rcu_free_nx_info(struct rcu_head *head)
 {
-	BUG_ON(__free_nx_info(nxi));
+	struct nx_info *nxi = container_of(head, struct nx_info, nx_rcu);
+	int usecnt, refcnt;
+
+	BUG_ON(!nxi || !head);
+
+	usecnt = atomic_read(&nxi->nx_usecnt);
+	BUG_ON(usecnt < 0);
+
+	refcnt = atomic_read(&nxi->nx_refcnt);
+	BUG_ON(refcnt < 0);
+
+	vxdprintk(VXD_CBIT(nid, 3),
+		"rcu_free_nx_info(%p): uc=%d", nxi, usecnt);
+	if (!usecnt)
+		__dealloc_nx_info(nxi);
+	else
+		printk("!!! rcu didn't free\n");
 }
 
 void unhash_nx_info(struct nx_info *nxi)
@@ -710,6 +696,7 @@ int vc_set_ncaps(uint32_t id, void __user *data)
 
 #include <linux/module.h>
 
-EXPORT_SYMBOL_GPL(free_nx_info);
+EXPORT_SYMBOL_GPL(rcu_free_nx_info);
+EXPORT_SYMBOL_GPL(nx_info_hash_lock);
 EXPORT_SYMBOL_GPL(unhash_nx_info);
 

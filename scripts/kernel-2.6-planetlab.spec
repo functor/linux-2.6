@@ -22,7 +22,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
 %define rhbsys  %([ -r /etc/beehive-root ] && echo  || echo .`whoami`)
-%define release 1.14_FC2.2.planetlab%{?date:.%{date}}
+%define release 1.12_FC2.1.planetlab%{?date:.%{date}}
 %define signmodules 0
 
 %define KVERREL %{PACKAGE_VERSION}-%{PACKAGE_RELEASE}
@@ -517,9 +517,6 @@ fi
 # no files
 
 %changelog
-* Thu Feb 17 2005 Marc E. Fiuczynski <mef@cs.princeton.edu>
-- merge to Fedora Core 2 2.6.10-1.14_FC2
-
 * Tue Feb 8 2005 Marc E. Fiuczynski <mef@cs.princeton.edu>
 - merge to Fedora Core 2 2.6.10-1.12_FC2
 

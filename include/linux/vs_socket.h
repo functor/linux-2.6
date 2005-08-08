@@ -2,6 +2,14 @@
 #define _VX_VS_SOCKET_H
 
 
+// #define VX_DEBUG
+
+#include <linux/kernel.h>
+#include <linux/rcupdate.h>
+#include <linux/sched.h>
+
+#include "vserver/context.h"
+#include "vserver/network.h"
 #include "vserver/debug.h"
 
 

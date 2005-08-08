@@ -25,11 +25,11 @@
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
 #include <linux/mempolicy.h>
-#include <linux/ckrm_events.h>
+#include <linux/ckrm.h>
 #include <linux/ckrm_tsk.h>
-#include <linux/ckrm_mem_inline.h>
-#include <linux/syscalls.h>
 #include <linux/vs_limit.h>
+#include <linux/ckrm_mem.h>
+#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -382,7 +382,6 @@ static inline void close_files(struct files_struct * files)
 				struct file * file = xchg(&files->fd[i], NULL);
 				if (file) 
 					filp_close(file, files);
-				// vx_openfd_dec(i);
 			}
 			i++;
 			set >>= 1;
@@ -514,7 +513,12 @@ static inline void __exit_mm(struct task_struct * tsk)
 	task_lock(tsk);
 	tsk->mm = NULL;
 	up_read(&mm->mmap_sem);
-	ckrm_task_clear_mm(tsk, mm);
+#ifdef CONFIG_CKRM_RES_MEM
+	spin_lock(&mm->peertask_lock);
+	list_del_init(&tsk->mm_peers);
+	ckrm_mem_evaluate_mm(mm);
+	spin_unlock(&mm->peertask_lock);
+#endif
 	enter_lazy_tlb(mm, current);
 	task_unlock(tsk);
 	mmput(mm);
@@ -607,7 +611,6 @@ static inline void forget_original_parent(struct task_struct * father,
 	struct task_struct *p, *reaper = father;
 	struct list_head *_p, *_n;
 
-	/* FIXME handle vchild_reaper/initpid */
 	do {
 		reaper = next_thread(reaper);
 		if (reaper == father) {

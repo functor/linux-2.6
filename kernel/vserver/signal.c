@@ -15,6 +15,7 @@
 #include <asm/errno.h>
 #include <asm/uaccess.h>
 
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vserver/signal.h>
 

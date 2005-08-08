@@ -10,11 +10,12 @@
  */
 
 #include <linux/config.h>
-#include <linux/sched.h>
-#include <linux/types.h>
+#include <linux/vserver/cvirt.h>
+#include <linux/vserver/context.h>
+#include <linux/vserver/switch.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_cvirt.h>
-#include <linux/vserver/switch.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>
@@ -35,7 +36,7 @@ void vx_vsi_uptime(struct timespec *uptime, struct timespec *idle)
 	return;
 }
 
-uint64_t vx_idle_jiffies(void)
+uint64_t vx_idle_jiffies()
 {
 	return init_task.utime + init_task.stime;
 }
@@ -45,17 +46,14 @@ uint64_t vx_idle_jiffies(void)
 static inline uint32_t __update_loadavg(uint32_t load,
 	int wsize, int delta, int n)
 {
-	unsigned long long calc, prev;
+	unsigned long long calc;
 
 	/* just set it to n */
 	if (unlikely(delta >= wsize))
 		return (n << FSHIFT);
 
-	calc = delta * n;
-	calc <<= FSHIFT;
-	prev = (wsize - delta);
-	prev *= load;
-	calc += prev;
+	calc = (delta * n) << FSHIFT;
+	calc += (wsize - delta) * load;
 	do_div(calc, wsize);
 	return calc;
 }
@@ -64,8 +62,6 @@ static inline uint32_t __update_loadavg(uint32_t load,
 void vx_update_load(struct vx_info *vxi)
 {
 	uint32_t now, last, delta;
-	unsigned int nr_running, nr_uninterruptible;
-	unsigned int total;
 
 	spin_lock(&vxi->cvirt.load_lock);
 
@@ -73,23 +69,14 @@ void vx_update_load(struct vx_info *vxi)
 	last = vxi->cvirt.load_last;
 	delta = now - last;
 
-	if (delta < 5*HZ)
-		goto out;
-
-	nr_running = atomic_read(&vxi->cvirt.nr_running);
-	nr_uninterruptible = atomic_read(&vxi->cvirt.nr_uninterruptible);
-	total = nr_running + nr_uninterruptible;
-
 	vxi->cvirt.load[0] = __update_loadavg(vxi->cvirt.load[0],
-		60*HZ, delta, total);
+		60*HZ, delta, atomic_read(&vxi->cvirt.nr_running));
 	vxi->cvirt.load[1] = __update_loadavg(vxi->cvirt.load[1],
-		5*60*HZ, delta, total);
+		5*60*HZ, delta, atomic_read(&vxi->cvirt.nr_running));
 	vxi->cvirt.load[2] = __update_loadavg(vxi->cvirt.load[2],
-		15*60*HZ, delta, total);
+		15*60*HZ, delta, atomic_read(&vxi->cvirt.nr_running));
 
 	vxi->cvirt.load_last = now;
-out:
-	atomic_inc(&vxi->cvirt.load_updates);
 	spin_unlock(&vxi->cvirt.load_lock);
 }
 

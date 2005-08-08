@@ -19,6 +19,7 @@
 #include "linux/capability.h"
 #include "linux/vmalloc.h"
 #include "linux/spinlock.h"
+#include "linux/vs_cvirt.h"
 #include "linux/proc_fs.h"
 #include "linux/ptrace.h"
 #include "asm/unistd.h"

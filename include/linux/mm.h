@@ -13,7 +13,6 @@
 #include <linux/rbtree.h>
 #include <linux/prio_tree.h>
 #include <linux/fs.h>
-#include <linux/ckrm_mem.h>
 
 struct mempolicy;
 struct anon_vma;
@@ -239,7 +238,7 @@ struct page {
 					   not kmapped, ie. highmem) */
 #endif /* WANT_PAGE_VIRTUAL */
 #ifdef CONFIG_CKRM_RES_MEM
-	struct ckrm_zone *ckrm_zone;
+	void *memclass;
 #endif // CONFIG_CKRM_RES_MEM
 };
 
@@ -619,6 +618,9 @@ int clear_page_dirty_for_io(struct page *page);
  */
 typedef int (*shrinker_t)(int nr_to_scan, unsigned int gfp_mask);
 
+asmlinkage long do_mprotect(struct mm_struct *mm, unsigned long start, 
+			size_t len, unsigned long prot);
+
 /*
  * Add an aging callback.  The int is the number of 'seeks' it takes
  * to recreate one of the objects that these functions age.
@@ -695,9 +697,10 @@ static inline unsigned long get_unmapped_area(struct file * file, unsigned long 
 	return get_unmapped_area_prot(file, addr, len, pgoff, flags, 0);	
 }
 
-extern unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
-	unsigned long len, unsigned long prot,
-	unsigned long flag, unsigned long pgoff);
+extern unsigned long do_mmap_pgoff(struct mm_struct *mm, struct file *file, 
+				   unsigned long addr, unsigned long len,
+				   unsigned long prot, unsigned long flag,
+				   unsigned long pgoff);
 
 static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
@@ -707,7 +710,8 @@ static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	if ((offset + PAGE_ALIGN(len)) < offset)
 		goto out;
 	if (!(offset & ~PAGE_MASK))
-		ret = do_mmap_pgoff(file, addr, len, prot, flag, offset >> PAGE_SHIFT);
+		ret = do_mmap_pgoff(current->mm, file, addr, len, prot, flag, 
+				    offset >> PAGE_SHIFT);
 out:
 	return ret;
 }

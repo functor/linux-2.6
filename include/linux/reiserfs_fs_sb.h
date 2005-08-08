@@ -458,7 +458,6 @@ enum reiserfs_mount_options {
     REISERFS_BARRIER_NONE,
     REISERFS_BARRIER_FLUSH,
     REISERFS_TAGXID,
-
     /* Actions on error */
     REISERFS_ERROR_PANIC,
     REISERFS_ERROR_RO,

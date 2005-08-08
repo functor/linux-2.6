@@ -330,6 +330,14 @@ config MVIAC3_2
 
 endchoice
 
+config X86_HZ
+       int "Clock Tick Rate"
+       default 1000 if !(M386 || M486 || M586 || M586TSC || M586MMX)	
+       default 100 if (M386 || M486 || M586 || M586TSC || M586MMX)	
+       help
+	  Select the kernel clock tick rate in interrupts per second.
+	  Slower processors should choose 100; everything else 1000.
+
 config X86_GENERIC
        bool "Generic x86 support"
        help
@@ -552,14 +560,6 @@ config X86_IO_APIC
 	bool
 	depends on !SMP && X86_UP_IOAPIC
 	default y
-
-config KERNEL_HZ
-	int "Timer Frequency (100-20000)"
-	range 100 20000
-	default "1000"
-	help
-	  This allows you to specify the frequency at which the
-	  kernel timer interrupt will occur.
 
 config X86_TSC
 	bool
@@ -922,53 +922,6 @@ config REGPARM
 	generate incorrect output with certain kernel constructs when
 	-mregparm=3 is used.
 
-config KERN_PHYS_OFFSET
-	int "Physical address where the kernel is loaded (1-112)MB"
-	range 1 112
-	default "1"
-	help
-	  This gives the physical address where the kernel is loaded.
-	  Primarily used in the case of kexec on panic where the
-	  recovery kernel needs to run at a different address than
-	  the panic-ed kernel.
-
-config KEXEC
-	bool "kexec system call (EXPERIMENTAL)"
-	depends on EXPERIMENTAL
-	help
-	  kexec is a system call that implements the ability to shutdown your
-	  current kernel, and to start another kernel.  It is like a reboot
-	  but it is indepedent of the system firmware.   And like a reboot
-	  you can start any kernel with it, not just Linux.
-
-	  The name comes from the similiarity to the exec system call.
-
-	  It is an ongoing process to be certain the hardware in a machine
-	  is properly shutdown, so do not be surprised if this code does not
-	  initially work for you.  It may help to enable device hotplugging
-	  support.  As of this writing the exact hardware interface is
-	  strongly in flux, so no good recommendation can be made.
-
-config CRASH_DUMP
-	bool "kernel crash dumps (EXPERIMENTAL)"
-	depends on KEXEC
-	help
-	  Generate crash dump using kexec.
-
-config BACKUP_BASE
-	int "location from where the crash dumping kernel will boot (MB)"
-	depends on CRASH_DUMP
-	default 16
-	help
-	This is the location where the second kernel will boot from.
-
-config BACKUP_SIZE
-	int "Size of memory used by the crash dumping kernel (MB)"
-	depends on CRASH_DUMP
-	range 16 64
-	default 32
-	help
-	The size of the second kernel's memory.
 endmenu
 
 

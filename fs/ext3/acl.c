@@ -287,24 +287,19 @@ ext3_set_acl(handle_t *handle, struct inode *inode, int type,
 	return error;
 }
 
-static int
-ext3_check_acl(struct inode *inode, int mask)
-{
-	struct posix_acl *acl = ext3_get_acl(inode, ACL_TYPE_ACCESS);
-
-	if (acl) {
-		int error = posix_acl_permission(inode, acl, mask);
-		posix_acl_release(acl);
-		return error;
-	}
-
-	return -EAGAIN;
-}
-
 int
 ext3_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
-	return generic_permission(inode, mask, ext3_check_acl);
+	int mode = inode->i_mode;
+
+#warning MEF Need new BME patch for 2.6.10
+	/* Nobody gets write access to a read-only fs */
+	if ((mask & MAY_WRITE) && (IS_RDONLY(inode) ||
+	    (nd && MNT_IS_RDONLY(nd->mnt))) &&
+	    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
+		return -EROFS;
+
+	return generic_permission(inode, mask, 0);
 }
 
 /*
