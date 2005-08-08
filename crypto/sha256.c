@@ -63,7 +63,15 @@ static inline u32 RORu32(u32 x, u32 y)
 
 static inline void LOAD_OP(int I, u32 *W, const u8 *input)
 {
-	W[I] = __be32_to_cpu( ((u32*)(input))[I] );
+	u32 t1 = input[(4 * I)] & 0xff;
+
+	t1 <<= 8;
+	t1 |= input[(4 * I) + 1] & 0xff;
+	t1 <<= 8;
+	t1 |= input[(4 * I) + 2] & 0xff;
+	t1 <<= 8;
+	t1 |= input[(4 * I) + 3] & 0xff;
+	W[I] = t1;
 }
 
 static inline void BLEND_OP(int I, u32 *W)

@@ -67,7 +67,8 @@ extern int			ipv6_get_saddr(struct dst_entry *dst,
 					       struct in6_addr *saddr);
 extern int			ipv6_dev_get_saddr(struct net_device *dev, 
 					       struct in6_addr *daddr,
-					       struct in6_addr *saddr);
+					       struct in6_addr *saddr,
+					       int onlink);
 extern int			ipv6_get_lladdr(struct net_device *dev, struct in6_addr *);
 extern int			ipv6_rcv_saddr_equal(const struct sock *sk, 
 						      const struct sock *sk2);

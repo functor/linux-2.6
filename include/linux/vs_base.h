@@ -1,7 +1,6 @@
 #ifndef _VX_VS_BASE_H
 #define _VX_VS_BASE_H
 
-
 #include "vserver/context.h"
 
 
@@ -18,7 +17,7 @@
  * check current context for ADMIN/WATCH and
  * optionally agains supplied argument
  */
-static inline int __vx_check(xid_t cid, xid_t id, unsigned int mode)
+static __inline__ int __vx_check(xid_t cid, xid_t id, unsigned int mode)
 {
 	if (mode & VX_ARG_MASK) {
 		if ((mode & VX_IDENT) &&
@@ -35,8 +34,7 @@ static inline int __vx_check(xid_t cid, xid_t id, unsigned int mode)
 			return 1;
 	}
 	return (((mode & VX_ADMIN) && (cid == 0)) ||
-		((mode & VX_WATCH) && (cid == 1)) ||
-		((mode & VX_HOSTID) && (id == 0)));
+		((mode & VX_WATCH) && (cid == 1)));
 }
 
 
@@ -52,8 +50,6 @@ static inline int __vx_check(xid_t cid, xid_t id, unsigned int mode)
 #define vx_mask_flags(v,f,m)	(((v) & ~(m)) | ((f) & (m)))
 
 #define vx_mask_mask(v,f,m)	(((v) & ~(m)) | ((v) & (f) & (m)))
-
-#define vx_check_bit(v,n)	((v) & (1LL << (n)))
 
 
 /* context flags */
@@ -82,13 +78,6 @@ static inline int __vx_check(xid_t cid, xid_t id, unsigned int mode)
 #define vx_ccaps(c)	vx_info_ccaps(current->vx_info,(c))
 
 
-#define __vx_mcaps(v)	((v) ? (v)->vx_ccaps >> 32UL : ~0 )
-
-#define vx_info_mcaps(v,c)	(__vx_mcaps(v) & (c))
-
-#define vx_mcaps(c)	vx_info_mcaps(current->vx_info,(c))
-
-
 #define vx_current_bcaps() \
 	(((current->vx_info) && !vx_flags(VXF_STATE_SETUP, 0)) ? \
 	current->vx_info->vx_bcaps : cap_bset)
@@ -99,6 +88,4 @@ static inline int __vx_check(xid_t cid, xid_t id, unsigned int mode)
 	(current->vx_info->vx_initpid == (n)))
 
 
-#else
-#warning duplicate inclusion
 #endif

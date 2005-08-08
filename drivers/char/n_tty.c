@@ -44,10 +44,10 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/poll.h>
-#include <linux/bitops.h>
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
+#include <asm/bitops.h>
 
 /* number of characters left in xmit buffer before select has we have room */
 #define WAKEUP_CHARS 256
@@ -270,7 +270,7 @@ static int opost(unsigned char c, struct tty_struct *tty)
 				if (space < spaces)
 					return -1;
 				tty->column += spaces;
-				tty->driver->write(tty, "        ", spaces);
+				tty->driver->write(tty, 0, "        ", spaces);
 				return 0;
 			}
 			tty->column += spaces;
@@ -306,11 +306,12 @@ static int opost(unsigned char c, struct tty_struct *tty)
  */
  
 static ssize_t opost_block(struct tty_struct * tty,
-		       const unsigned char * buf, unsigned int nr)
+		       const unsigned char __user * inbuf, unsigned int nr)
 {
+	char	buf[80];
 	int	space;
 	int 	i;
-	const unsigned char *cp;
+	char	*cp;
 
 	space = tty->driver->write_room(tty);
 	if (!space)
@@ -319,6 +320,9 @@ static ssize_t opost_block(struct tty_struct * tty,
 		nr = space;
 	if (nr > sizeof(buf))
 	    nr = sizeof(buf);
+
+	if (copy_from_user(buf, inbuf, nr))
+		return -EFAULT;
 
 	for (i = 0, cp = buf; i < nr; i++, cp++) {
 		switch (*cp) {
@@ -332,8 +336,12 @@ static ssize_t opost_block(struct tty_struct * tty,
 		case '\r':
 			if (O_ONOCR(tty) && tty->column == 0)
 				goto break_out;
-			if (O_OCRNL(tty))
-				goto break_out;
+			if (O_OCRNL(tty)) {
+				*cp = '\n';
+				if (O_ONLRET(tty))
+					tty->canon_column = tty->column = 0;
+				break;
+			}
 			tty->canon_column = tty->column = 0;
 			break;
 		case '\t':
@@ -344,7 +352,7 @@ static ssize_t opost_block(struct tty_struct * tty,
 			break;
 		default:
 			if (O_OLCUC(tty))
-				goto break_out;
+				*cp = toupper(*cp);
 			if (!iscntrl(*cp))
 				tty->column++;
 			break;
@@ -353,7 +361,7 @@ static ssize_t opost_block(struct tty_struct * tty,
 break_out:
 	if (tty->driver->flush_chars)
 		tty->driver->flush_chars(tty);
-	i = tty->driver->write(tty, buf, i);	
+	i = tty->driver->write(tty, 0, buf, i);	
 	return i;
 }
 
@@ -1143,13 +1151,13 @@ static inline int copy_from_read_buf(struct tty_struct *tty,
 
 {
 	int retval;
-	size_t n;
+	ssize_t n;
 	unsigned long flags;
 
 	retval = 0;
 	spin_lock_irqsave(&tty->read_lock, flags);
 	n = min(tty->read_cnt, N_TTY_BUF_SIZE - tty->read_tail);
-	n = min(*nr, n);
+	n = min((ssize_t)*nr, n);
 	spin_unlock_irqrestore(&tty->read_lock, flags);
 	if (n) {
 		mb();
@@ -1427,9 +1435,9 @@ do_it_again:
  */
  
 static ssize_t write_chan(struct tty_struct * tty, struct file * file,
-			  const unsigned char * buf, size_t nr)
+			  const unsigned char __user * buf, size_t nr)
 {
-	const unsigned char *b = buf;
+	const unsigned char __user *b = buf;
 	DECLARE_WAITQUEUE(wait, current);
 	int c;
 	ssize_t retval = 0;
@@ -1465,7 +1473,7 @@ static ssize_t write_chan(struct tty_struct * tty, struct file * file,
 				nr -= num;
 				if (nr == 0)
 					break;
-				c = *b;
+				get_user(c, b);
 				if (opost(c, tty) < 0)
 					break;
 				b++; nr--;
@@ -1473,7 +1481,7 @@ static ssize_t write_chan(struct tty_struct * tty, struct file * file,
 			if (tty->driver->flush_chars)
 				tty->driver->flush_chars(tty);
 		} else {
-			c = tty->driver->write(tty, b, nr);
+			c = tty->driver->write(tty, 1, b, nr);
 			if (c < 0) {
 				retval = c;
 				goto break_out;

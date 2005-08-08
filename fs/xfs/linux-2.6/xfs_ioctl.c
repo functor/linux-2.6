@@ -270,7 +270,7 @@ xfs_vget_fsop_handlereq(
 	/*
 	 * Get the XFS inode, building a vnode to go with it.
 	 */
-	error = xfs_iget(mp, NULL, ino, 0, XFS_ILOCK_SHARED, &ip, 0);
+	error = xfs_iget(mp, NULL, ino, XFS_ILOCK_SHARED, &ip, 0);
 	if (error)
 		return error;
 	if (ip == NULL)
@@ -508,10 +508,6 @@ xfs_attrmulti_by_handle(
 	if (error)
 		return -error;
 
-	if(am_hreq.opcount > 1024) {
-		VN_RELE(vp);
-		return -XFS_ERROR(ENOMEM);
-	}
 	size = am_hreq.opcount * sizeof(attr_multiop_t);
 	ops = (xfs_attr_multiop_t *)kmalloc(size, GFP_KERNEL);
 	if (!ops) {
@@ -1013,7 +1009,7 @@ xfs_ioc_fsgeometry(
 #define LINUX_XFLAG_NODUMP	0x00000040 /* do not dump file */
 #define LINUX_XFLAG_NOATIME	0x00000080 /* do not update atime */
 #define LINUX_XFLAG_BARRIER	0x00004000 /* chroot() barrier */
-#define LINUX_XFLAG_IUNLINK	0x00008000 /* immutable unlink */
+#define LINUX_XFLAG_IUNLINK	0x00008000 /* Immutable unlink */
 
 STATIC unsigned int
 xfs_merge_ioc_xflags(
@@ -1056,8 +1052,6 @@ xfs_di2lxflags(
 		flags |= LINUX_XFLAG_IMMUTABLE;
 	if (di_flags & XFS_DIFLAG_IUNLINK)
 		flags |= LINUX_XFLAG_IUNLINK;
-	if (di_flags & XFS_DIFLAG_BARRIER)
-		flags |= LINUX_XFLAG_BARRIER;
 	if (di_flags & XFS_DIFLAG_APPEND)
 		flags |= LINUX_XFLAG_APPEND;
 	if (di_flags & XFS_DIFLAG_SYNC)
@@ -1082,6 +1076,7 @@ xfs_ioc_xattr(
 	int			error;
 	int			attr_flags;
 	unsigned int		flags;
+	unsigned int		old_flags;
 
 	switch (cmd) {
 	case XFS_IOC_FSGETXATTR: {

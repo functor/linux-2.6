@@ -314,7 +314,8 @@ release_io_hfcsx(struct IsdnCardState *cs)
 	cs->hw.hfcsx.int_m2 = 0;	/* interrupt output off ! */
 	Write_hfc(cs, HFCSX_INT_M2, cs->hw.hfcsx.int_m2);
 	Write_hfc(cs, HFCSX_CIRM, HFCSX_RESET);	/* Reset On */
-	msleep(30);				/* Timeout 30ms */
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout((30 * HZ) / 1000);	/* Timeout 30ms */
 	Write_hfc(cs, HFCSX_CIRM, 0);	/* Reset Off */
 	del_timer(&cs->hw.hfcsx.timer);
 	release_region(cs->hw.hfcsx.base, 2); /* release IO-Block */
@@ -1366,7 +1367,8 @@ hfcsx_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 			spin_lock_irqsave(&cs->lock, flags);
 			inithfcsx(cs);
 			spin_unlock_irqrestore(&cs->lock, flags);
-			msleep(80);				/* Timeout 80ms */
+			set_current_state(TASK_UNINTERRUPTIBLE);
+			schedule_timeout((80 * HZ) / 1000);	/* Timeout 80ms */
 			/* now switch timer interrupt off */
 			spin_lock_irqsave(&cs->lock, flags);
 			cs->hw.hfcsx.int_m1 &= ~HFCSX_INTS_TIMER;

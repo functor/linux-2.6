@@ -25,26 +25,25 @@
  *
  */
 #include <linux/config.h>
-
-#if defined(CONFIG_SERIAL_SA1100_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
-
 #include <linux/module.h>
+#include <linux/tty.h>
 #include <linux/ioport.h>
 #include <linux/init.h>
+#include <linux/serial.h>
 #include <linux/console.h>
 #include <linux/sysrq.h>
 #include <linux/device.h>
-#include <linux/tty.h>
-#include <linux/tty_flip.h>
-#include <linux/serial_core.h>
-#include <linux/serial.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/hardware.h>
 #include <asm/mach/serial_sa1100.h>
+
+#if defined(CONFIG_SERIAL_SA1100_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
+#define SUPPORT_SYSRQ
+#endif
+
+#include <linux/serial_core.h>
 
 /* We've been assigned a range on the "Low-density serial ports" major */
 #define SERIAL_SA1100_MAJOR	204
@@ -221,7 +220,9 @@ sa1100_rx_chars(struct sa1100_port *sport, struct pt_regs *regs)
 			goto ignore_char;
 
 	error_return:
-		tty_insert_flip_char(tty, ch, flg);
+		*tty->flip.flag_buf_ptr++ = flg;
+		*tty->flip.char_buf_ptr++ = ch;
+		tty->flip.count++;
 	ignore_char:
 		status = UTSR1_TO_SM(UART_GET_UTSR1(sport)) |
 			 UTSR0_TO_SM(UART_GET_UTSR0(sport));
@@ -256,7 +257,11 @@ sa1100_rx_chars(struct sa1100_port *sport, struct pt_regs *regs)
 		 * overrun does *not* affect the character
 		 * we read from the FIFO
 		 */
-		tty_insert_flip_char(tty, ch, flg);
+		*tty->flip.flag_buf_ptr++ = flg;
+		*tty->flip.char_buf_ptr++ = ch;
+		tty->flip.count++;
+		if (tty->flip.count >= TTY_FLIPBUF_SIZE)
+			goto ignore_char;
 		ch = 0;
 		flg = TTY_OVERRUN;
 	}

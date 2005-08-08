@@ -1409,8 +1409,7 @@ forte_dsp_mmap (struct file *file, struct vm_area_struct *vma)
                 goto out;
 	}
 
-        if (remap_pfn_range(vma, vma->vm_start,
-			      virt_to_phys(channel->buf) >> PAGE_SHIFT,
+        if (remap_page_range (vma, vma->vm_start, virt_to_phys (channel->buf),
 			      size, vma->vm_page_prot)) {
 		DPRINTK ("%s: remap el a no worko\n", __FUNCTION__);
 		ret = -EAGAIN;
@@ -2112,7 +2111,12 @@ forte_init_module (void)
 {
 	printk (KERN_INFO PFX DRIVER_VERSION "\n");
 
-	return pci_register_driver (&forte_pci_driver);
+	if (!pci_register_driver (&forte_pci_driver)) {
+		pci_unregister_driver (&forte_pci_driver);
+		return -ENODEV;
+	}
+
+	return 0;
 }
 
 

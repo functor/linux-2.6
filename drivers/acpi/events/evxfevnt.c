@@ -41,7 +41,6 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#include <linux/module.h>
 
 #include <acpi/acpi.h>
 #include <acpi/acevents.h>
@@ -201,7 +200,6 @@ acpi_enable_event (
 
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_enable_event);
 
 
 /*******************************************************************************
@@ -250,7 +248,6 @@ acpi_set_gpe_type (
 unlock_and_exit:
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_set_gpe_type);
 
 
 /*******************************************************************************
@@ -308,7 +305,6 @@ unlock_and_exit:
 	}
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_enable_gpe);
 
 
 /*******************************************************************************
@@ -421,7 +417,6 @@ acpi_disable_event (
 
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_disable_event);
 
 
 /*******************************************************************************
@@ -435,7 +430,7 @@ EXPORT_SYMBOL(acpi_disable_event);
  * DESCRIPTION: Clear an ACPI event (fixed)
  *
  ******************************************************************************/
-#ifdef ACPI_FUTURE_USAGE
+
 acpi_status
 acpi_clear_event (
 	u32                             event)
@@ -461,8 +456,6 @@ acpi_clear_event (
 
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_clear_event);
-#endif  /*  ACPI_FUTURE_USAGE  */
 
 
 /*******************************************************************************
@@ -518,8 +511,6 @@ unlock_and_exit:
 	return_ACPI_STATUS (status);
 }
 
-
-#ifdef ACPI_FUTURE_USAGE
 
 /*******************************************************************************
  *
@@ -622,7 +613,6 @@ unlock_and_exit:
 	}
 	return_ACPI_STATUS (status);
 }
-#endif  /*  ACPI_FUTURE_USAGE  */
 
 
 /*******************************************************************************
@@ -715,7 +705,6 @@ unlock_and_exit:
 	(void) acpi_ut_release_mutex (ACPI_MTX_NAMESPACE);
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_install_gpe_block);
 
 
 /*******************************************************************************
@@ -776,4 +765,4 @@ unlock_and_exit:
 	(void) acpi_ut_release_mutex (ACPI_MTX_NAMESPACE);
 	return_ACPI_STATUS (status);
 }
-EXPORT_SYMBOL(acpi_remove_gpe_block);
+

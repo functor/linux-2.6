@@ -22,7 +22,6 @@
 #include <linux/msg.h>
 #include <linux/skbuff.h>
 #include <linux/netlink.h>
-#include <linux/syscalls.h>
 #include <net/sock.h>
 #include "util.h"
 
@@ -146,7 +145,7 @@ static struct inode *mqueue_get_inode(struct super_block *sb, int mode,
 			spin_lock(&mq_lock);
 			if (u->mq_bytes + mq_bytes < u->mq_bytes ||
 		 	    u->mq_bytes + mq_bytes >
-			    p->signal->rlim[RLIMIT_MSGQUEUE].rlim_cur) {
+			    p->rlim[RLIMIT_MSGQUEUE].rlim_cur) {
 				spin_unlock(&mq_lock);
 				goto out_inode;
 			}
@@ -1219,8 +1218,11 @@ static int __init init_mqueue_fs(void)
 	if (mqueue_inode_cachep == NULL)
 		return -ENOMEM;
 
-	/* ignore failues - they are not fatal */
 	mq_sysctl_table = register_sysctl_table(mq_sysctl_root, 0);
+	if (!mq_sysctl_table) {
+		error = -ENOMEM;
+		goto out_cache;
+	}
 
 	error = register_filesystem(&mqueue_fs_type);
 	if (error)
@@ -1240,8 +1242,8 @@ static int __init init_mqueue_fs(void)
 out_filesystem:
 	unregister_filesystem(&mqueue_fs_type);
 out_sysctl:
-	if (mq_sysctl_table)
-		unregister_sysctl_table(mq_sysctl_table);
+	unregister_sysctl_table(mq_sysctl_table);
+out_cache:
 	if (kmem_cache_destroy(mqueue_inode_cachep)) {
 		printk(KERN_INFO
 			"mqueue_inode_cache: not all structures were freed\n");

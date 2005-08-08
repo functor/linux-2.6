@@ -2,7 +2,7 @@
 #include <linux/types.h>
 #include <asm/intrinsics.h>
 #include <linux/module.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 
 /*
  * Find next zero bit in a bitmap reasonably efficiently..

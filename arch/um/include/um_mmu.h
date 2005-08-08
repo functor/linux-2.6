@@ -10,11 +10,11 @@
 #include "choose-mode.h"
 
 #ifdef CONFIG_MODE_TT
-#include "mmu-tt.h"
+#include "../kernel/tt/include/mmu.h"
 #endif
 
 #ifdef CONFIG_MODE_SKAS
-#include "mmu-skas.h"
+#include "../kernel/skas/include/mmu.h"
 #endif
 
 typedef union {

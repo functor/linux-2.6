@@ -589,7 +589,7 @@ typedef union icb {
 
 #ifdef MODULE
 static char *wd7000;
-module_param(wd7000, charp, 0);
+MODULE_PARM(wd7000, "s");
 #endif
 
 /*
@@ -1429,16 +1429,16 @@ static int wd7000_detect(struct scsi_host_template *tpnt)
 						break;
 
 				if (i == pass) {
-					void __iomem *biosaddr = ioremap(wd7000_biosaddr[biosaddr_ptr] + signatures[sig_ptr].ofs,
+					void *biosaddr = ioremap(wd7000_biosaddr[biosaddr_ptr] + signatures[sig_ptr].ofs,
 								 signatures[sig_ptr].len);
-					short bios_match = 1;
+					short bios_match = 0;
 
 					if (biosaddr)
-						bios_match = check_signature(biosaddr, signatures[sig_ptr].sig, signatures[sig_ptr].len);
+						bios_match = memcmp((char *) biosaddr, signatures[sig_ptr].sig, signatures[sig_ptr].len);
 
 					iounmap(biosaddr);
 
-					if (bios_match)
+					if (!bios_match)
 						goto bios_matched;
 				}
 			}
@@ -1473,7 +1473,8 @@ static int wd7000_detect(struct scsi_host_template *tpnt)
 			 * ASC reset...
 			 */
 			outb(ASC_RES, iobase + ASC_CONTROL);
-			msleep(10);
+			set_current_state(TASK_UNINTERRUPTIBLE);
+			schedule_timeout(HZ / 100);
 			outb(0, iobase + ASC_CONTROL);
 
 			if (WAIT(iobase + ASC_STAT, ASC_STATMASK, CMD_RDY, 0)) {

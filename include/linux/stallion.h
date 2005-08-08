@@ -126,7 +126,7 @@ typedef struct stlbrd {
 	int		nrbnks;
 	int		irq;
 	int		irqtype;
-	int		(*isr)(struct stlbrd *brdp);
+	void		(*isr)(struct stlbrd *brdp);
 	unsigned int	ioaddr1;
 	unsigned int	ioaddr2;
 	unsigned int	iosize1;

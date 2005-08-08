@@ -18,7 +18,6 @@
 #include <linux/security.h>
 #include <linux/mempolicy.h>
 #include <linux/personality.h>
-#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -112,17 +111,16 @@ change_protection(struct vm_area_struct *vma, unsigned long start,
 
 static int
 mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
-	unsigned long start, unsigned long end, unsigned long newflags)
+	unsigned long start, unsigned long end, unsigned int newflags)
 {
 	struct mm_struct * mm = vma->vm_mm;
-	unsigned long oldflags = vma->vm_flags;
-	long nrpages = (end - start) >> PAGE_SHIFT;
 	unsigned long charged = 0, old_end = vma->vm_end;
 	pgprot_t newprot;
+	unsigned int oldflags;
 	pgoff_t pgoff;
 	int error;
 
-	if (newflags == oldflags) {
+	if (newflags == vma->vm_flags) {
 		*pprev = vma;
 		return 0;
 	}
@@ -136,8 +134,8 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	 * a MAP_NORESERVE private mapping to writable will now reserve.
 	 */
 	if (newflags & VM_WRITE) {
-		if (!(oldflags & (VM_ACCOUNT|VM_WRITE|VM_SHARED|VM_HUGETLB))) {
-			charged = nrpages;
+		if (!(vma->vm_flags & (VM_ACCOUNT|VM_WRITE|VM_SHARED|VM_HUGETLB))) {
+			charged = (end - start) >> PAGE_SHIFT;
 			if (security_vm_enough_memory(charged))
 				return -ENOMEM;
 			newflags |= VM_ACCOUNT;
@@ -179,14 +177,14 @@ success:
 	 * vm_flags and vm_page_prot are protected by the mmap_sem
 	 * held in write mode.
 	 */
+	vm_stat_unaccount(vma);
 	oldflags = vma->vm_flags;
 	vma->vm_flags = newflags;
 	vma->vm_page_prot = newprot;
 	if (oldflags & VM_EXEC)
 		arch_remove_exec_range(current->mm, old_end);
 	change_protection(vma, start, end, newprot);
-	__vm_stat_account(mm, oldflags, vma->vm_file, -nrpages);
-	__vm_stat_account(mm, newflags, vma->vm_file, nrpages);
+	vm_stat_account(vma);
 	return 0;
 
 fail:
@@ -253,7 +251,7 @@ do_mprotect(struct mm_struct *mm, unsigned long start, size_t len,
 		prev = vma;
 
 	for (nstart = start ; ; ) {
-		unsigned long newflags;
+		unsigned int newflags;
 
 		/* Here we know that  vma->vm_start <= nstart < vma->vm_end. */
 

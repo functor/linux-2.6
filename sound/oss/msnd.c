@@ -33,8 +33,6 @@
 #include <linux/delay.h>
 #include <linux/mm.h>
 #include <linux/init.h>
-#include <linux/interrupt.h>
-
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <linux/spinlock.h>
@@ -81,12 +79,12 @@ void msnd_unregister(multisound_dev_t *dev)
 	--num_devs;
 }
 
-void msnd_init_queue(void __iomem *base, int start, int size)
+void msnd_init_queue(unsigned long base, int start, int size)
 {
-	writew(PCTODSP_BASED(start), base + JQS_wStart);
-	writew(PCTODSP_OFFSET(size) - 1, base + JQS_wSize);
-	writew(0, base + JQS_wHead);
-	writew(0, base + JQS_wTail);
+	isa_writew(PCTODSP_BASED(start), base + JQS_wStart);
+	isa_writew(PCTODSP_OFFSET(size) - 1, base + JQS_wSize);
+	isa_writew(0, base + JQS_wHead);
+	isa_writew(0, base + JQS_wTail);
 }
 
 void msnd_fifo_init(msnd_fifo *f)
@@ -122,37 +120,6 @@ void msnd_fifo_make_empty(msnd_fifo *f)
 	f->len = f->tail = f->head = 0;
 }
 
-int msnd_fifo_write_io(msnd_fifo *f, char __iomem *buf, size_t len)
-{
-	int count = 0;
-
-	while ((count < len) && (f->len != f->n)) {
-
-		int nwritten;
-
-		if (f->head <= f->tail) {
-			nwritten = len - count;
-			if (nwritten > f->n - f->tail)
-				nwritten = f->n - f->tail;
-		}
-		else {
-			nwritten = f->head - f->tail;
-			if (nwritten > len - count)
-				nwritten = len - count;
-		}
-
-		memcpy_fromio(f->data + f->tail, buf, nwritten);
-
-		count += nwritten;
-		buf += nwritten;
-		f->len += nwritten;
-		f->tail += nwritten;
-		f->tail %= f->n;
-	}
-
-	return count;
-}
-
 int msnd_fifo_write(msnd_fifo *f, const char *buf, size_t len)
 {
 	int count = 0;
@@ -172,44 +139,13 @@ int msnd_fifo_write(msnd_fifo *f, const char *buf, size_t len)
 				nwritten = len - count;
 		}
 
-		memcpy(f->data + f->tail, buf, nwritten);
+		isa_memcpy_fromio(f->data + f->tail, (unsigned long) buf, nwritten);
 
 		count += nwritten;
 		buf += nwritten;
 		f->len += nwritten;
 		f->tail += nwritten;
 		f->tail %= f->n;
-	}
-
-	return count;
-}
-
-int msnd_fifo_read_io(msnd_fifo *f, char __iomem *buf, size_t len)
-{
-	int count = 0;
-
-	while ((count < len) && (f->len > 0)) {
-
-		int nread;
-
-		if (f->tail <= f->head) {
-			nread = len - count;
-			if (nread > f->n - f->head)
-				nread = f->n - f->head;
-		}
-		else {
-			nread = f->tail - f->head;
-			if (nread > len - count)
-				nread = len - count;
-		}
-
-		memcpy_toio(buf, f->data + f->head, nread);
-
-		count += nread;
-		buf += nread;
-		f->len -= nread;
-		f->head += nread;
-		f->head %= f->n;
 	}
 
 	return count;
@@ -234,7 +170,7 @@ int msnd_fifo_read(msnd_fifo *f, char *buf, size_t len)
 				nread = len - count;
 		}
 
-		memcpy(buf, f->data + f->head, nread);
+		isa_memcpy_toio((unsigned long) buf, f->data + f->head, nread);
 
 		count += nread;
 		buf += nread;
@@ -389,8 +325,6 @@ EXPORT_SYMBOL(msnd_fifo_init);
 EXPORT_SYMBOL(msnd_fifo_free);
 EXPORT_SYMBOL(msnd_fifo_alloc);
 EXPORT_SYMBOL(msnd_fifo_make_empty);
-EXPORT_SYMBOL(msnd_fifo_write_io);
-EXPORT_SYMBOL(msnd_fifo_read_io);
 EXPORT_SYMBOL(msnd_fifo_write);
 EXPORT_SYMBOL(msnd_fifo_read);
 

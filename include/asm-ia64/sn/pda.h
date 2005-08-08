@@ -9,10 +9,10 @@
 #define _ASM_IA64_SN_PDA_H
 
 #include <linux/cache.h>
-#include <linux/numa.h>
 #include <asm/percpu.h>
 #include <asm/system.h>
 #include <asm/sn/bte.h>
+
 
 /*
  * CPU-specific data structure.

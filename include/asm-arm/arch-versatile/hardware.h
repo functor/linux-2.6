@@ -1,7 +1,7 @@
 /*
  *  linux/include/asm-arm/arch-versatile/hardware.h
  *
- *  This file contains the hardware definitions of the Versatile boards.
+ *  This file contains the hardware definitions of the Versatile PB board.
  *
  *  Copyright (C) 2003 ARM Limited.
  *

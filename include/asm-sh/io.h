@@ -134,8 +134,6 @@
 #define readw_relaxed(a) readw(a)
 #define readl_relaxed(a) readl(a)
 
-#define mmiowb()
-
 /*
  * If the platform has PC-like I/O, this function converts the offset into
  * an address.

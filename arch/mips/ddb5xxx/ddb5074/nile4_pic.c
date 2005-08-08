@@ -222,6 +222,7 @@ static hw_irq_controller nile4_irq_controller = {
 void nile4_irq_setup(u32 base) {
 
 	int i;
+	extern irq_desc_t irq_desc[];
 
 	irq_base=base;
 
@@ -257,6 +258,7 @@ void nile4_irq_setup(u32 base) {
 		irq_desc[i].depth = 1;
 		irq_desc[i].handler = &nile4_irq_controller;
 	}
+
 }
 
 #if defined(CONFIG_RUNTIME_DEBUG)

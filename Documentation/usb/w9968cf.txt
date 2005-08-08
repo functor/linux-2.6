@@ -8,30 +8,26 @@
 
 Index
 =====
-1.  Copyright
-2.  Disclaimer
-3.  License
-4.  Overview
-5.  Supported devices
-6.  Module dependencies
-7.  Module loading
-8.  Module paramaters
-9.  Contact information
-10. Credits
+1. Copyright
+2. License
+3. Overview
+4. Supported devices
+5. Module dependencies
+6. Module loading
+7. Module paramaters
+8. Contact information
+9. Credits
 
 
 1. Copyright
 ============
 Copyright (C) 2002-2004 by Luca Risolia <luca.risolia@studio.unibo.it>
 
-
-2. Disclaimer
-=============
 Winbond is a trademark of Winbond Electronics Corporation.
-This software is not sponsored or developed by Winbond.
+This driver is not sponsored or developed by Winbond.
 
 
-3. License
+2. License
 ==========
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -48,7 +44,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 
-4. Overview
+3. Overview
 ===========
 This driver supports the video streaming capabilities of the devices mounting
 Winbond W9967CF and Winbond W9968CF JPEG USB Dual Mode Camera Chips. OV681
@@ -61,7 +57,7 @@ decoding, up-scaling and colour conversions. Once the driver is installed,
 every time an application tries to open a recognized device, "w9968cf" checks
 the presence of the "w9968cf-vpp" module and loads it automatically by default.
 
-Please keep in mind that official kernels do not include the second module for
+Please keep in mind that official kernels do NOT include the second module for
 performance purposes. However it is always recommended to download and install
 the latest and complete release of the driver, replacing the existing one, if
 present: it will be still even possible not to load the "w9968cf-vpp" module at
@@ -69,7 +65,7 @@ all, if you ever want to. Another important missing feature of the version in
 the official Linux 2.4 kernels is the writeable /proc filesystem interface.
 
 The latest and full-featured version of the W996[87]CF driver can be found at:
-http://www.linux-projects.org. Please refer to the documentation included in
+http://go.lamarinapunto.com/ . Please refer to the documentation included in
 that package, if you are going to use it.
 
 Up to 32 cameras can be handled at the same time. They can be connected and
@@ -87,7 +83,7 @@ will be automatically loaded by default (provided that the kernel has been
 compiled with the automatic module loading option).
 
 
-5. Supported devices
+4. Supported devices
 ====================
 At the moment, known W996[87]CF and OV681 based devices are:
 - Aroma Digi Pen VGA Dual Mode ADG-5000 (unknown image sensor)
@@ -103,9 +99,11 @@ At the moment, known W996[87]CF and OV681 based devices are:
 
 If you know any other W996[87]CF or OV681 based cameras, please contact me.
 
-The list above does not imply that all those devices work with this driver: up
+The list above does NOT imply that all those devices work with this driver: up
 until now only webcams that have an image sensor supported by the "ovcamchip"
-module work. Kernel messages will always tell you whether this is case.
+module work. 
+For a list of supported image sensors, please visit the author's homepage on
+this module: http://alpha.dyndns.org/ov511/
 
 Possible external microcontrollers of those webcams are not supported: this
 means that still images cannot be downloaded from the device memory.
@@ -115,7 +113,7 @@ Furthermore, it's worth to note that I was only able to run tests on my
 additional testing and full support, would be much appreciated.
 
 
-6. Module dependencies
+5. Module dependencies
 ======================
 For it to work properly, the driver needs kernel support for Video4Linux, USB
 and I2C, and the "ovcamchip" module for the image sensor. Make sure you are not
@@ -159,7 +157,7 @@ And finally:
 	CONFIG_USB_W9968CF=m
 
 
-7. Module loading
+6. Module loading
 =================
 To use the driver, it is necessary to load the "w9968cf" module into memory
 after every other module required.
@@ -168,7 +166,6 @@ Loading can be done this way, from root:
 
 	[root@localhost home]# modprobe usbcore
 	[root@localhost home]# modprobe i2c-core
-	[root@localhost home]# modprobe videodev
 	[root@localhost home]# modprobe w9968cf
 
 At this point the pertinent devices should be recognized: "dmesg" can be used
@@ -184,7 +181,7 @@ explanation about them and which syntax to use, it is recommended to run the
 	[root@locahost home]# modinfo w9968cf
 
 
-8. Module parameters
+7. Module parameters
 ====================
 Module parameters are listed below:
 -------------------------------------------------------------------------------
@@ -455,7 +452,7 @@ Default:        0
 -------------------------------------------------------------------------------
 
 
-9. Contact information
+8. Contact information
 ======================
 I may be contacted by e-mail at <luca.risolia@studio.unibo.it>.
 
@@ -464,7 +461,7 @@ My public 1024-bit key should be available at your keyserver; the fingerprint
 is: '88E8 F32F 7244 68BA 3958  5D40 99DA 5D2A FCE6 35A4'.
 
 
-10. Credits
+9. Credits
 ==========
 The development would not have proceed much further without having looked at
 the source code of other drivers and without the help of several persons; in

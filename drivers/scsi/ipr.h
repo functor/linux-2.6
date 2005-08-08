@@ -749,7 +749,7 @@ struct ipr_misc_cbs {
 	struct ipr_supported_device supp_dev;
 };
 
-struct ipr_interrupt_offsets {
+struct ipr_interrupts {
 	unsigned long set_interrupt_mask_reg;
 	unsigned long clr_interrupt_mask_reg;
 	unsigned long sense_interrupt_mask_reg;
@@ -762,23 +762,10 @@ struct ipr_interrupt_offsets {
 	unsigned long clr_uproc_interrupt_reg;
 };
 
-struct ipr_interrupts {
-	void __iomem *set_interrupt_mask_reg;
-	void __iomem *clr_interrupt_mask_reg;
-	void __iomem *sense_interrupt_mask_reg;
-	void __iomem *clr_interrupt_reg;
-
-	void __iomem *sense_interrupt_reg;
-	void __iomem *ioarrin_reg;
-	void __iomem *sense_uproc_interrupt_reg;
-	void __iomem *set_uproc_interrupt_reg;
-	void __iomem *clr_uproc_interrupt_reg;
-};
-
 struct ipr_chip_cfg_t {
 	u32 mailbox;
 	u8 cache_line_size;
-	struct ipr_interrupt_offsets regs;
+	struct ipr_interrupts regs;
 };
 
 enum ipr_shutdown_type {
@@ -897,11 +884,12 @@ struct ipr_ioa_cfg {
 
 	const struct ipr_chip_cfg_t *chip_cfg;
 
-	void __iomem *hdw_dma_regs;	/* iomapped PCI memory space */
+	unsigned long hdw_dma_regs;	/* iomapped PCI memory space */
 	unsigned long hdw_dma_regs_pci;	/* raw PCI memory space */
-	void __iomem *ioa_mailbox;
+	unsigned long ioa_mailbox;
 	struct ipr_interrupts regs;
 
+	u32 pci_cfg_buf[64];
 	u16 saved_pcix_cmd_reg;
 	u16 reset_retries;
 

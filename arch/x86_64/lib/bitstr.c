@@ -1,5 +1,5 @@
 #include <linux/module.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 
 /* Find string of zero bits in a bitmap */ 
 unsigned long 

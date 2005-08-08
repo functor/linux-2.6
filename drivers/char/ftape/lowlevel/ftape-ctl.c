@@ -726,12 +726,9 @@ int ftape_mmap(struct vm_area_struct *vma)
 		ftape_reset_buffer();
 	}
 	for (i = 0; i < num_buffers; i++) {
-		unsigned long pfn;
-
-		pfn = virt_to_phys(ft_buffer[i]->address) >> PAGE_SHIFT;
-		TRACE_CATCH(remap_pfn_range(vma, vma->vm_start +
+		TRACE_CATCH(remap_page_range(vma, vma->vm_start +
 					     i * FT_BUFF_SIZE,
-					     pfn,
+					     virt_to_phys(ft_buffer[i]->address),
 					     FT_BUFF_SIZE,
 					     vma->vm_page_prot),
 			    _res = -EAGAIN);

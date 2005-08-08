@@ -55,6 +55,4 @@ extern int vc_cleanup_namespace(uint32_t, void __user *);
 extern int vc_set_namespace(uint32_t, void __user *);
 
 #endif	/* __KERNEL__ */
-#else	/* _VX_NAMESPACE_H */
-#warning duplicate inclusion
 #endif	/* _VX_NAMESPACE_H */

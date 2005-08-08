@@ -231,12 +231,14 @@ EXPORT_SYMBOL(pcibios_align_resource);
 static void __init
 pcibios_allocate_bus_resources(struct list_head *bus_list)
 {
+	struct list_head *ln;
 	struct pci_bus *bus;
 	int i;
 	struct resource *res, *pr;
 
 	/* Depth-First Search on bus tree */
-	list_for_each_entry(bus, bus_list, node) {
+	for (ln = bus_list->next; ln != bus_list; ln=ln->next) {
+		bus = pci_bus_b(ln);
 		for (i = 0; i < 4; ++i) {
 			if ((res = bus->resource[i]) == NULL || !res->flags
 			    || res->start > res->end)
@@ -379,6 +381,7 @@ probe_resource(struct pci_bus *parent, struct resource *pr,
 	struct pci_bus *bus;
 	struct pci_dev *dev;
 	struct resource *r;
+	struct list_head *ln;
 	int i;
 
 	for (r = pr->child; r != NULL; r = r->sibling) {
@@ -387,7 +390,9 @@ probe_resource(struct pci_bus *parent, struct resource *pr,
 			return 1;
 		}
 	}
-	list_for_each_entry(bus, &parent->children, node) {
+	for (ln = parent->children.next; ln != &parent->children;
+	     ln = ln->next) {
+		bus = pci_bus_b(ln);
 		for (i = 0; i < 4; ++i) {
 			if ((r = bus->resource[i]) == NULL)
 				continue;
@@ -401,7 +406,8 @@ probe_resource(struct pci_bus *parent, struct resource *pr,
 			}
 		}
 	}
-	list_for_each_entry(dev, &parent->devices, bus_list) {
+	for (ln = parent->devices.next; ln != &parent->devices; ln=ln->next) {
+		dev = pci_dev_b(ln);
 		for (i = 0; i < 6; ++i) {
 			r = &dev->resource[i];
 			if (!r->flags || (r->flags & IORESOURCE_UNSET))
@@ -1096,7 +1102,7 @@ do_update_p2p_io_resource(struct pci_bus *bus, int enable_vga)
 static int __init
 check_for_io_childs(struct pci_bus *bus, struct resource* res, int *found_vga)
 {
-	struct pci_dev *dev;
+	struct list_head *ln;
 	int	i;
 	int	rc = 0;
 
@@ -1104,7 +1110,8 @@ check_for_io_childs(struct pci_bus *bus, struct resource* res, int *found_vga)
 	res->end = ((res->end + __sz) / (__sz + 1)) * (__sz + 1) + __sz; \
     } while (0)
 
-	list_for_each_entry(dev, &bus->devices, bus_list) {
+	for (ln=bus->devices.next; ln != &bus->devices; ln=ln->next) {
+		struct pci_dev *dev = pci_dev_b(ln);
 		u16 class = dev->class >> 8;
 
 		if (class == PCI_CLASS_DISPLAY_VGA ||
@@ -1145,7 +1152,7 @@ check_for_io_childs(struct pci_bus *bus, struct resource* res, int *found_vga)
 static void __init
 do_fixup_p2p_level(struct pci_bus *bus)
 {
-	struct pci_bus *b;
+	struct list_head *ln;
 	int i, parent_io;
 	int has_vga = 0;
 
@@ -1156,7 +1163,8 @@ do_fixup_p2p_level(struct pci_bus *bus)
 	if (parent_io >= 4)
 		return;
 
-	list_for_each_entry(b, &bus->children, node) {
+	for (ln=bus->children.next; ln != &bus->children; ln=ln->next) {
+		struct pci_bus *b = pci_bus_b(ln);
 		struct pci_dev *d = b->self;
 		struct pci_controller* hose = (struct pci_controller *)d->sysdata;
 		struct resource *res = b->resource[0];
@@ -1229,10 +1237,12 @@ do_fixup_p2p_level(struct pci_bus *bus)
 static void
 pcibios_fixup_p2p_bridges(void)
 {
-	struct pci_bus *b;
+	struct list_head *ln;
 
-	list_for_each_entry(b, &pci_root_buses, node)
+	for(ln=pci_root_buses.next; ln != &pci_root_buses; ln=ln->next) {
+		struct pci_bus *b = pci_bus_b(ln);
 		do_fixup_p2p_level(b);
+	}
 }
 
 #endif /* CONFIG_PPC_PMAC */
@@ -1591,7 +1601,7 @@ int pci_mmap_page_range(struct pci_dev *dev, struct vm_area_struct *vma,
 	__pci_mmap_set_flags(dev, vma, mmap_state);
 	__pci_mmap_set_pgprot(dev, vma, mmap_state, write_combine);
 
-	ret = remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
+	ret = remap_page_range(vma, vma->vm_start, vma->vm_pgoff << PAGE_SHIFT,
 			       vma->vm_end - vma->vm_start, vma->vm_page_prot);
 
 	return ret;

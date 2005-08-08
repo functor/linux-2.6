@@ -600,23 +600,23 @@ asmlinkage int solaris_ulimit(int cmd, int val)
 {
 	switch (cmd) {
 	case 1: /* UL_GETFSIZE - in 512B chunks */
-		return current->signal->rlim[RLIMIT_FSIZE].rlim_cur >> 9;
+		return current->rlim[RLIMIT_FSIZE].rlim_cur >> 9;
 	case 2: /* UL_SETFSIZE */
 		if ((unsigned long)val > (LONG_MAX>>9)) return -ERANGE;
 		val <<= 9;
-		task_lock(current->group_leader);
-		if (val > current->signal->rlim[RLIMIT_FSIZE].rlim_max) {
+		lock_kernel();
+		if (val > current->rlim[RLIMIT_FSIZE].rlim_max) {
 			if (!capable(CAP_SYS_RESOURCE)) {
-				task_unlock(current->group_leader);
+				unlock_kernel();
 				return -EPERM;
 			}
-			current->signal->rlim[RLIMIT_FSIZE].rlim_max = val;
+			current->rlim[RLIMIT_FSIZE].rlim_max = val;
 		}
-		current->signal->rlim[RLIMIT_FSIZE].rlim_cur = val;
-		task_unlock(current->group_leader);
+		current->rlim[RLIMIT_FSIZE].rlim_cur = val;
+		unlock_kernel();
 		return 0;
 	case 3: /* UL_GMEMLIM */
-		return current->signal->rlim[RLIMIT_DATA].rlim_cur;
+		return current->rlim[RLIMIT_DATA].rlim_cur;
 	case 4: /* UL_GDESLIM */
 		return NR_OPEN;
 	}

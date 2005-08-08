@@ -1,6 +1,6 @@
 
 /* Overhauled routines for dealing with different mmap regions of flash */
-/* $Id: map.h,v 1.45 2004/09/21 14:31:17 bjd Exp $ */
+/* $Id: map.h,v 1.43 2004/07/14 13:30:27 dwmw2 Exp $ */
 
 #ifndef __LINUX_MTD_MAP_H__
 #define __LINUX_MTD_MAP_H__
@@ -8,7 +8,6 @@
 #include <linux/config.h>
 #include <linux/types.h>
 #include <linux/list.h>
-#include <linux/mtd/compatmac.h>
 #include <asm/unaligned.h>
 #include <asm/system.h>
 #include <asm/io.h>
@@ -56,11 +55,6 @@
 #define map_bankwidth_is_4(map) (0)
 #endif
 
-/* ensure we never evaluate anything shorted than an unsigned long
- * to zero, and ensure we'll never miss the end of an comparison (bjd) */
-
-#define map_calc_words(map) ((map_bankwidth(map) + (sizeof(unsigned long)-1))/ sizeof(unsigned long))
-
 #ifdef CONFIG_MTD_MAP_BANK_WIDTH_8
 # ifdef map_bankwidth
 #  undef map_bankwidth
@@ -69,12 +63,12 @@
 #   undef map_bankwidth_is_large
 #   define map_bankwidth_is_large(map) (map_bankwidth(map) > BITS_PER_LONG/8)
 #   undef map_words
-#   define map_words(map) map_calc_words(map)
+#   define map_words(map) (map_bankwidth(map) / sizeof(unsigned long))
 #  endif
 # else
 #  define map_bankwidth(map) 8
 #  define map_bankwidth_is_large(map) (BITS_PER_LONG < 64)
-#  define map_words(map) map_calc_words(map)
+#  define map_words(map) (map_bankwidth(map) / sizeof(unsigned long))
 # endif
 #define map_bankwidth_is_8(map) (map_bankwidth(map) == 8)
 #undef MAX_MAP_BANKWIDTH
@@ -90,11 +84,11 @@
 #  undef map_bankwidth_is_large
 #  define map_bankwidth_is_large(map) (map_bankwidth(map) > BITS_PER_LONG/8)
 #  undef map_words
-#  define map_words(map) map_calc_words(map)
+#  define map_words(map) (map_bankwidth(map) / sizeof(unsigned long))
 # else
 #  define map_bankwidth(map) 16
 #  define map_bankwidth_is_large(map) (1)
-#  define map_words(map) map_calc_words(map)
+#  define map_words(map) (map_bankwidth(map) / sizeof(unsigned long))
 # endif
 #define map_bankwidth_is_16(map) (map_bankwidth(map) == 16)
 #undef MAX_MAP_BANKWIDTH
@@ -110,11 +104,11 @@
 #  undef map_bankwidth_is_large
 #  define map_bankwidth_is_large(map) (map_bankwidth(map) > BITS_PER_LONG/8)
 #  undef map_words
-#  define map_words(map) map_calc_words(map)
+#  define map_words(map) (map_bankwidth(map) / sizeof(unsigned long))
 # else
 #  define map_bankwidth(map) 32
 #  define map_bankwidth_is_large(map) (1)
-#  define map_words(map) map_calc_words(map)
+#  define map_words(map) (map_bankwidth(map) / sizeof(unsigned long))
 # endif
 #define map_bankwidth_is_32(map) (map_bankwidth(map) == 32)
 #undef MAX_MAP_BANKWIDTH

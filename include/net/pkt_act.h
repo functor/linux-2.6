@@ -3,7 +3,7 @@
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 #include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -60,7 +60,7 @@ tcf_hash_destroy(struct tcf_st *p)
 			*p1p = p->next;
 			write_unlock_bh(&tcf_t_lock);
 #ifdef CONFIG_NET_ESTIMATOR
-			gen_kill_estimator(&p->bstats, &p->rate_est);
+			qdisc_kill_estimator(&p->stats);
 #endif
 			kfree(p);
 			return;
@@ -256,8 +256,9 @@ tcf_hash_create(struct tc_st *parm, struct rtattr *est, struct tc_action *a, int
 	p->tm.install = jiffies;
 	p->tm.lastuse = jiffies;
 #ifdef CONFIG_NET_ESTIMATOR
-	if (est)
-		gen_new_estimator(&p->bstats, &p->rate_est, p->stats_lock, est);
+	if (est) {
+		qdisc_new_estimator(&p->stats, p->stats_lock, est);
+	}
 #endif
 	h = tcf_hash(p->index);
 	write_lock_bh(&tcf_t_lock);

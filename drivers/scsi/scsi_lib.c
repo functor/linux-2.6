@@ -15,7 +15,6 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/pci.h>
-#include <linux/delay.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_dbg.h>
@@ -693,7 +692,6 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 	request_queue_t *q = cmd->device->request_queue;
 	struct request *req = cmd->request;
 	int clear_errors = 1;
-	struct scsi_sense_hdr sshdr;
 
 	/*
 	 * Free up any indirection buffers we allocated for DMA purposes. 
@@ -716,10 +714,7 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 		req->errors = result;
 		if (result) {
 			clear_errors = 0;
-			if (scsi_command_normalize_sense(cmd, &sshdr)) {
-				/*
-				 * SG_IO wants to know about deferred errors
-				 */
+			if (cmd->sense_buffer[0] & 0x70) {
 				int len = 8 + cmd->sense_buffer[7];
 
 				if (len > SCSI_SENSE_BUFFERSIZE)
@@ -728,7 +723,7 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 				req->sense_len = len;
 			}
 		} else
-			req->data_len = cmd->resid;
+			req->data_len -= cmd->bufflen;
 	}
 
 	/*
@@ -778,17 +773,17 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 	 * can choose a block to remap, etc.
 	 */
 	if (driver_byte(result) != 0) {
-		if (scsi_command_normalize_sense(cmd, &sshdr) &&
-				!scsi_sense_is_deferred(&sshdr)) {
+		if ((cmd->sense_buffer[0] & 0x7f) == 0x70) {
 			/*
 			 * If the device is in the process of becoming ready,
 			 * retry.
 			 */
-			if (sshdr.asc == 0x04 && sshdr.ascq == 0x01) {
+			if (cmd->sense_buffer[12] == 0x04 &&
+			    cmd->sense_buffer[13] == 0x01) {
 				scsi_requeue_command(q, cmd);
 				return;
 			}
-			if (sshdr.sense_key == UNIT_ATTENTION) {
+			if ((cmd->sense_buffer[2] & 0xf) == UNIT_ATTENTION) {
 				if (cmd->device->removable) {
 					/* detected disc change.  set a bit 
 					 * and quietly refuse further access.
@@ -817,11 +812,7 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 		 * failed, we may have read past the end of the disk.
 		 */
 
-		/*
-		 * XXX: Following is probably broken since deferred errors
-		 *	fall through [dpg 20040827]
-		 */
-		switch (sshdr.sense_key) {
+		switch (cmd->sense_buffer[2]) {
 		case ILLEGAL_REQUEST:
 			if (cmd->device->use_10_for_rw &&
 			    (cmd->cmnd[0] == READ_10 ||
@@ -843,6 +834,8 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 			       req->rq_disk ? req->rq_disk->disk_name : "");
 			cmd = scsi_end_request(cmd, 0, this_count, 1);
 			return;
+			break;
+		case MEDIUM_ERROR:
 		case VOLUME_OVERFLOW:
 			printk("scsi%d: ERROR on channel %d, id %d, lun %d, CDB: ",
 			       cmd->device->host->host_no, (int) cmd->device->channel,
@@ -1506,7 +1499,8 @@ __scsi_mode_sense(struct scsi_request *sreq, int dbd, int modepage,
 	}
 
 	sreq->sr_cmd_len = 0;
-	memset(sreq->sr_sense_buffer, 0, sizeof(sreq->sr_sense_buffer));
+	sreq->sr_sense_buffer[0] = 0;
+	sreq->sr_sense_buffer[2] = 0;
 	sreq->sr_data_direction = DMA_FROM_DEVICE;
 
 	memset(buffer, 0, len);
@@ -1517,21 +1511,14 @@ __scsi_mode_sense(struct scsi_request *sreq, int dbd, int modepage,
 	 * ILLEGAL REQUEST sense return identifies the actual command
 	 * byte as the problem.  MODE_SENSE commands can return
 	 * ILLEGAL REQUEST if the code page isn't supported */
-
-	if (use_10_for_ms && !scsi_status_is_good(sreq->sr_result) &&
-	    (driver_byte(sreq->sr_result) & DRIVER_SENSE)) {
-		struct scsi_sense_hdr sshdr;
-
-		if (scsi_request_normalize_sense(sreq, &sshdr)) {
-			if ((sshdr.sense_key == ILLEGAL_REQUEST) &&
-			    (sshdr.asc == 0x20) && (sshdr.ascq == 0)) {
-				/* 
-				 * Invalid command operation code
-				 */
-				sreq->sr_device->use_10_for_ms = 0;
-				goto retry;
-			}
-		}
+	if (use_10_for_ms && ! scsi_status_is_good(sreq->sr_result) &&
+	    (driver_byte(sreq->sr_result) & DRIVER_SENSE) &&
+	    sreq->sr_sense_buffer[2] == ILLEGAL_REQUEST &&
+	    (sreq->sr_sense_buffer[4] & 0x40) == 0x40 &&
+	    sreq->sr_sense_buffer[5] == 0 &&
+	    sreq->sr_sense_buffer[6] == 0 ) {
+		sreq->sr_device->use_10_for_ms = 0;
+		goto retry;
 	}
 
 	if(scsi_status_is_good(sreq->sr_result)) {
@@ -1668,6 +1655,7 @@ scsi_device_set_state(struct scsi_device *sdev, enum scsi_device_state state)
 		case SDEV_CREATED:
 		case SDEV_RUNNING:
 		case SDEV_QUIESCE:
+		case SDEV_BLOCK:
 			break;
 		default:
 			goto illegal;
@@ -1743,7 +1731,7 @@ scsi_device_quiesce(struct scsi_device *sdev)
 
 	scsi_run_queue(sdev->request_queue);
 	while (sdev->device_busy) {
-		msleep_interruptible(200);
+		schedule_timeout(HZ/5);
 		scsi_run_queue(sdev->request_queue);
 	}
 	return 0;
@@ -1813,6 +1801,12 @@ EXPORT_SYMBOL(scsi_target_resume);
  *	state, all commands are deferred until the scsi lld reenables
  *	the device with scsi_device_unblock or device_block_tmo fires.
  *	This routine assumes the host_lock is held on entry.
+ *
+ *      As the LLDD/Transport that is calling this function doesn't
+ *	actually know what the device state is, the function may be
+ *	called at an inappropriate time. Therefore, before requesting
+ *	the state change, the function validates that the transition is
+ *	valid.
  **/
 int
 scsi_internal_device_block(struct scsi_device *sdev)
@@ -1820,6 +1814,10 @@ scsi_internal_device_block(struct scsi_device *sdev)
 	request_queue_t *q = sdev->request_queue;
 	unsigned long flags;
 	int err = 0;
+
+	if ((sdev->sdev_state != SDEV_CREATED) &&
+	    (sdev->sdev_state != SDEV_RUNNING))
+		return 0;
 
 	err = scsi_device_set_state(sdev, SDEV_BLOCK);
 	if (err)
@@ -1853,6 +1851,12 @@ EXPORT_SYMBOL_GPL(scsi_internal_device_block);
  *	(which must be a legal transition) allowing the midlayer to
  *	goose the queue for this device.  This routine assumes the 
  *	host_lock is held upon entry.
+ *
+ *      As the LLDD/Transport that is calling this function doesn't
+ *	actually know what the device state is, the function may be
+ *	called at an inappropriate time. Therefore, before requesting
+ *	the state change, the function validates that the transition is
+ *	valid.
  **/
 int
 scsi_internal_device_unblock(struct scsi_device *sdev)
@@ -1860,6 +1864,9 @@ scsi_internal_device_unblock(struct scsi_device *sdev)
 	request_queue_t *q = sdev->request_queue; 
 	int err;
 	unsigned long flags;
+	
+	if (sdev->sdev_state != SDEV_BLOCK)
+		return 0;
 	
 	/* 
 	 * Try to transition the scsi device to SDEV_RUNNING

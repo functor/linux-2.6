@@ -130,7 +130,7 @@ remap_area_pages(unsigned long start, unsigned long phys_addr,
  * 'flags' are the extra L_PTE_ flags that you want to specify for this
  * mapping.  See include/asm-arm/proc-armv/pgtable.h for more information.
  */
-void __iomem *
+void *
 __ioremap(unsigned long phys_addr, size_t size, unsigned long flags,
 	  unsigned long align)
 {
@@ -161,11 +161,11 @@ __ioremap(unsigned long phys_addr, size_t size, unsigned long flags,
 		vfree(addr);
 		return NULL;
 	}
-	return (void __iomem *) (offset + (char *)addr);
+	return (void *) (offset + (char *)addr);
 }
 EXPORT_SYMBOL(__ioremap);
 
-void __iounmap(void __iomem *addr)
+void __iounmap(void *addr)
 {
 	vfree((void *) (PAGE_MASK & (unsigned long) addr));
 }

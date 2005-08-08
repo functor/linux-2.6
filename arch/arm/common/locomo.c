@@ -609,15 +609,17 @@ static void __locomo_remove(struct locomo *lchip)
 static int locomo_probe(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct resource *mem;
-	int irq;
+	struct resource *mem = NULL, *irq = NULL;
+	int i;
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!mem)
-		return -EINVAL;
-	irq = platform_get_irq(pdev, 0);
+	for (i = 0; i < pdev->num_resources; i++) {
+		if (pdev->resource[i].flags & IORESOURCE_MEM)
+			mem = &pdev->resource[i];
+		if (pdev->resource[i].flags & IORESOURCE_IRQ)
+			irq = &pdev->resource[i];
+	}
 
-	return __locomo_probe(dev, mem, irq);
+	return __locomo_probe(dev, mem, irq ? irq->start : NO_IRQ);
 }
 
 static int locomo_remove(struct device *dev)
@@ -627,6 +629,9 @@ static int locomo_remove(struct device *dev)
 	if (lchip) {
 		__locomo_remove(lchip);
 		dev_set_drvdata(dev, NULL);
+
+		kfree(dev->saved_state);
+		dev->saved_state = NULL;
 	}
 
 	return 0;
@@ -751,7 +756,7 @@ module_exit(locomo_exit);
 
 MODULE_DESCRIPTION("Sharp LoCoMo core driver");
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("John Lenz <lenz@cs.wisc.edu>");
+MODULE_AUTHOR("John Lenz <jelenz@students.wisc.edu>");
 
 EXPORT_SYMBOL(locomo_driver_register);
 EXPORT_SYMBOL(locomo_driver_unregister);

@@ -59,8 +59,9 @@ asmlinkage void ev96100_cpu_irq(unsigned int pendin)
 	do_IRQ(ffz8(pending >> 8), regs);
 }
 
-void __init arch_init_irq(void)
+void __init init_IRQ(void)
 {
 	set_except_vector(0, ev96100IRQ);
+	init_generic_irq();
 	mips_cpu_irq_init(0);
 }

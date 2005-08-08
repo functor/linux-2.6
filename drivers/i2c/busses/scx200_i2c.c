@@ -86,7 +86,7 @@ static struct i2c_adapter scx200_i2c_ops = {
 	.name	= "NatSemi SCx200 I2C",
 };
 
-static int scx200_i2c_init(void)
+int scx200_i2c_init(void)
 {
 	pr_debug(NAME ": NatSemi SCx200 I2C Driver\n");
 
@@ -115,7 +115,7 @@ static int scx200_i2c_init(void)
 	return 0;
 }
 
-static void scx200_i2c_cleanup(void)
+void scx200_i2c_cleanup(void)
 {
 	i2c_bit_del_bus(&scx200_i2c_ops);
 }

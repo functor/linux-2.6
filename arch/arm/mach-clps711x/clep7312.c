@@ -23,7 +23,9 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include "common.h"
+extern void clps711x_init_irq(void);
+extern void clps711x_map_io(void); 
+extern void clps711x_init_time(void);
 
 static void __init
 fixup_clep7312(struct machine_desc *desc, struct tag *tags,
@@ -43,6 +45,6 @@ MACHINE_START(CLEP7212, "Cirrus Logic 7212/7312")
 	FIXUP(fixup_clep7312)
 	MAPIO(clps711x_map_io)
 	INITIRQ(clps711x_init_irq)
-	.timer		= &clps711x_timer,
+	INITTIME(clps711x_init_time)
 MACHINE_END
 

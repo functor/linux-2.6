@@ -87,8 +87,8 @@
 
 #define FAT_FSINFO_SIG1	0x41615252
 #define FAT_FSINFO_SIG2	0x61417272
-#define IS_FSINFO(x)	(le32_to_cpu((x)->signature1) == FAT_FSINFO_SIG1 \
-			 && le32_to_cpu((x)->signature2) == FAT_FSINFO_SIG2)
+#define IS_FSINFO(x)	(CF_LE_L((x)->signature1) == FAT_FSINFO_SIG1	\
+			 && CF_LE_L((x)->signature2) == FAT_FSINFO_SIG2)
 
 /*
  * ioctl commands
@@ -232,6 +232,8 @@ static inline void fatwchar_to16(__u8 *dst, const wchar_t *src, size_t len)
 extern int fat_access(struct super_block *sb, int nr, int new_value);
 extern int __fat_access(struct super_block *sb, int nr, int new_value);
 extern int fat_bmap(struct inode *inode, sector_t sector, sector_t *phys);
+extern void fat_cache_init(struct super_block *sb);
+extern void fat_cache_add(struct inode *inode, int f_clu, int d_clu);
 extern void fat_cache_inval_inode(struct inode *inode);
 extern int fat_get_cluster(struct inode *inode, int cluster,
 			   int *fclus, int *dclus);
@@ -259,6 +261,7 @@ extern int fat_get_block(struct inode *inode, sector_t iblock,
 extern void fat_truncate(struct inode *inode);
 
 /* fat/inode.c */
+extern void fat_hash_init(void);
 extern void fat_attach(struct inode *inode, loff_t i_pos);
 extern void fat_detach(struct inode *inode);
 extern struct inode *fat_iget(struct super_block *sb, loff_t i_pos);

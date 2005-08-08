@@ -317,6 +317,7 @@ static int mdc800_usb_waitForIRQ (int mode, int msec)
 	mdc800->camera_request_ready=1+mode;
 
 	add_wait_queue(&mdc800->irq_wait, &wait);
+	set_current_state(TASK_INTERRUPTIBLE);
 	timeout = msec*HZ/1000;
 	while (!mdc800->irq_woken && timeout)
 	{
@@ -324,6 +325,7 @@ static int mdc800_usb_waitForIRQ (int mode, int msec)
 		timeout = schedule_timeout (timeout);
 	}
         remove_wait_queue(&mdc800->irq_wait, &wait);
+	set_current_state(TASK_RUNNING);
 	mdc800->irq_woken = 0;
 
 	if (mdc800->camera_request_ready>0)
@@ -541,9 +543,9 @@ static void mdc800_usb_disconnect (struct usb_interface *intf)
 
 		mdc800->state=NOT_CONNECTED;
 
-		usb_kill_urb(mdc800->irq_urb);
-		usb_kill_urb(mdc800->write_urb);
-		usb_kill_urb(mdc800->download_urb);
+		usb_unlink_urb (mdc800->irq_urb);
+		usb_unlink_urb (mdc800->write_urb);
+		usb_unlink_urb (mdc800->download_urb);
 
 		mdc800->dev = NULL;
 		usb_set_intfdata(intf, NULL);
@@ -647,9 +649,9 @@ static int mdc800_device_release (struct inode* inode, struct file *file)
 	down (&mdc800->io_lock);
 	if (mdc800->open && (mdc800->state != NOT_CONNECTED))
 	{
-		usb_kill_urb(mdc800->irq_urb);
-		usb_kill_urb(mdc800->write_urb);
-		usb_kill_urb(mdc800->download_urb);
+		usb_unlink_urb (mdc800->irq_urb);
+		usb_unlink_urb (mdc800->write_urb);
+		usb_unlink_urb (mdc800->download_urb);
 		mdc800->open=0;
 	}
 	else
@@ -723,6 +725,7 @@ static ssize_t mdc800_device_read (struct file *file, char __user *buf, size_t l
 					set_current_state(TASK_UNINTERRUPTIBLE);
 					timeout = schedule_timeout (timeout);
 				}
+				set_current_state(TASK_RUNNING);
 				remove_wait_queue(&mdc800->download_wait, &wait);
 				mdc800->downloaded = 0;
 				if (mdc800->download_urb->status != 0)
@@ -848,11 +851,12 @@ static ssize_t mdc800_device_write (struct file *file, const char __user *buf, s
 				set_current_state(TASK_UNINTERRUPTIBLE);
 				timeout = schedule_timeout (timeout);
 			}
+                        set_current_state(TASK_RUNNING);
 			remove_wait_queue(&mdc800->write_wait, &wait);
 			mdc800->written = 0;
 			if (mdc800->state == WORKING)
 			{
-				usb_kill_urb(mdc800->write_urb);
+				usb_unlink_urb (mdc800->write_urb);
 				up (&mdc800->io_lock);
 				return -EIO;
 			}

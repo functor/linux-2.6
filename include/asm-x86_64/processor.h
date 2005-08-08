@@ -465,8 +465,6 @@ static inline void __mwait(unsigned long eax, unsigned long ecx)
 
 #define cache_line_size() (boot_cpu_data.x86_cache_alignment)
 
-extern unsigned long boot_option_idle_override;
-
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
 
 #endif /* __ASM_X86_64_PROCESSOR_H */

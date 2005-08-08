@@ -25,7 +25,6 @@
 
 #include "bitmap.h"
 #include "debug.h"
-#include "aops.h"
 #include "ntfs.h"
 
 /**

@@ -562,7 +562,6 @@ static int validate_flash_release(struct inode *inode, struct file *file)
 		validate_flash(args_buf);
 	}
 
-	/* The matching atomic_inc was in rtas_excl_open() */
 	atomic_dec(&dp->count);
 
 	return 0;
@@ -573,8 +572,7 @@ static void remove_flash_pde(struct proc_dir_entry *dp)
 	if (dp) {
 		if (dp->data != NULL)
 			kfree(dp->data);
-		dp->owner = NULL;
-		remove_proc_entry(dp->name, dp->parent);
+		remove_proc_entry(dp->name, NULL);
 	}
 }
 

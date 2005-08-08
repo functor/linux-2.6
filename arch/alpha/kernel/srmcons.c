@@ -132,10 +132,39 @@ srmcons_do_write(struct tty_struct *tty, const char *buf, int count)
 }
 
 static int
-srmcons_write(struct tty_struct *tty,
+srmcons_write(struct tty_struct *tty, int from_user,
 	      const unsigned char *buf, int count)
 {
 	unsigned long flags;
+
+	if (from_user) {
+		char tmp[512];
+		int ret = 0;
+		size_t c;
+
+		while ((c = count) > 0) {
+			if (c > sizeof(tmp))
+				c = sizeof(tmp);
+			
+			c -= copy_from_user(tmp, (const char __user *) buf, c);
+
+			if (!c) { 
+				printk("%s: EFAULT (count %d)\n",
+				       __FUNCTION__, count);
+				return -EFAULT;
+			}
+
+			spin_lock_irqsave(&srmcons_callback_lock, flags);
+			srmcons_do_write(tty, tmp, c);
+			spin_unlock_irqrestore(&srmcons_callback_lock, flags);
+
+			buf += c;
+			count -= c;
+			ret += c;
+		}
+
+		return ret;
+	}
 
 	spin_lock_irqsave(&srmcons_callback_lock, flags);
 	srmcons_do_write(tty, (const char *) buf, count);

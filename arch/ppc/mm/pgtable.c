@@ -153,19 +153,19 @@ void pte_free(struct page *ptepage)
 }
 
 #ifndef CONFIG_44x
-void __iomem *
+void *
 ioremap(phys_addr_t addr, unsigned long size)
 {
 	return __ioremap(addr, size, _PAGE_NO_CACHE);
 }
 #else /* CONFIG_44x */
-void __iomem *
+void *
 ioremap64(unsigned long long addr, unsigned long size)
 {
 	return __ioremap(addr, size, _PAGE_NO_CACHE);
 }
 
-void __iomem *
+void *
 ioremap(phys_addr_t addr, unsigned long size)
 {
 	phys_addr_t addr64 = fixup_bigphys_addr(addr, size);
@@ -174,7 +174,7 @@ ioremap(phys_addr_t addr, unsigned long size)
 }
 #endif /* CONFIG_44x */
 
-void __iomem *
+void *
 __ioremap(phys_addr_t addr, unsigned long size, unsigned long flags)
 {
 	unsigned long v, i;
@@ -257,10 +257,10 @@ __ioremap(phys_addr_t addr, unsigned long size, unsigned long flags)
 	}
 
 out:
-	return (void __iomem *) (v + ((unsigned long)addr & ~PAGE_MASK));
+	return (void *) (v + ((unsigned long)addr & ~PAGE_MASK));
 }
 
-void iounmap(volatile void __iomem *addr)
+void iounmap(void *addr)
 {
 	/*
 	 * If mapped by BATs then there is nothing to do.

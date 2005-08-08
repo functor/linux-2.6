@@ -234,12 +234,6 @@
   -- Mt Rainier support
   -- DVD-RAM write open fixes
 
-  Nov 5 2001, Aug 8 2002. Modified by Andy Polyakov
-  <appro@fy.chalmers.se> to support MMC-3 compliant DVD+RW units.
-
-  Modified by Nigel Kukard <nkukard@lbsd.net> - support DVD+RW
-  2.4.x patch by Andy Polyakov <appro@fy.chalmers.se>
-
 -------------------------------------------------------------------------*/
 
 #define REVISION "Revision: 3.20"
@@ -296,12 +290,12 @@ static int lockdoor = 1;
 static int check_media_type;
 /* automatically restart mrw format */
 static int mrw_format_restart = 1;
-module_param(debug, bool, 0);
-module_param(autoclose, bool, 0);
-module_param(autoeject, bool, 0);
-module_param(lockdoor, bool, 0);
-module_param(check_media_type, bool, 0);
-module_param(mrw_format_restart, bool, 0);
+MODULE_PARM(debug, "i");
+MODULE_PARM(autoclose, "i");
+MODULE_PARM(autoeject, "i");
+MODULE_PARM(lockdoor, "i");
+MODULE_PARM(check_media_type, "i");
+MODULE_PARM(mrw_format_restart, "i");
 
 static spinlock_t cdrom_lock = SPIN_LOCK_UNLOCKED;
 
@@ -856,39 +850,6 @@ static int cdrom_ram_open_write(struct cdrom_device_info *cdi)
 	return ret;
 }
 
-static void cdrom_mmc3_profile(struct cdrom_device_info *cdi)
-{
-	struct packet_command cgc;
-	char buffer[32];
-	int ret, mmc3_profile;
-
-	init_cdrom_command(&cgc, buffer, sizeof(buffer), CGC_DATA_READ);
-
-	cgc.cmd[0] = GPCMD_GET_CONFIGURATION;
-	cgc.cmd[1] = 0;
-	cgc.cmd[2] = cgc.cmd[3] = 0;		/* Starting Feature Number */
-	cgc.cmd[8] = sizeof(buffer);		/* Allocation Length */
-	cgc.quiet = 1;
-
-	if ((ret = cdi->ops->generic_packet(cdi, &cgc)))
-		mmc3_profile = 0xffff;
-	else
-		mmc3_profile = (buffer[6] << 8) | buffer[7];
-
-	cdi->mmc3_profile = mmc3_profile;
-}
-
-static int cdrom_is_dvd_rw(struct cdrom_device_info *cdi)
-{
-	switch (cdi->mmc3_profile) {
-	case 0x12:	/* DVD-RAM	*/
-	case 0x1A:	/* DVD+RW	*/
-		return 0;
-	default:
-		return 1;
-	}
-}
-
 /*
  * returns 0 for ok to open write, non-0 to disallow
  */
@@ -930,48 +891,8 @@ static int cdrom_open_write(struct cdrom_device_info *cdi)
  		ret = cdrom_ram_open_write(cdi);
 	else if (CDROM_CAN(CDC_MO_DRIVE))
 		ret = mo_open_write(cdi);
-	else if (!cdrom_is_dvd_rw(cdi))
-		ret = 0;
 
 	return ret;
-}
-
-static void cdrom_dvd_rw_close_write(struct cdrom_device_info *cdi)
-{
-	struct packet_command cgc;
-
-	if (cdi->mmc3_profile != 0x1a) {
-		cdinfo(CD_CLOSE, "%s: No DVD+RW\n", cdi->name);
-		return;
-	}
-
-	if (!cdi->media_written) {
-		cdinfo(CD_CLOSE, "%s: DVD+RW media clean\n", cdi->name);
-		return;
-	}
-
-	printk(KERN_INFO "cdrom: %s: dirty DVD+RW media, \"finalizing\"\n",
-	       cdi->name);
-
-	init_cdrom_command(&cgc, NULL, 0, CGC_DATA_NONE);
-	cgc.cmd[0] = GPCMD_FLUSH_CACHE;
-	cgc.timeout = 30*HZ;
-	cdi->ops->generic_packet(cdi, &cgc);
-
-	init_cdrom_command(&cgc, NULL, 0, CGC_DATA_NONE);
-	cgc.cmd[0] = GPCMD_CLOSE_TRACK;
-	cgc.timeout = 3000*HZ;
-	cgc.quiet = 1;
-	cdi->ops->generic_packet(cdi, &cgc);
-
-	init_cdrom_command(&cgc, NULL, 0, CGC_DATA_NONE);
-	cgc.cmd[0] = GPCMD_CLOSE_TRACK;
-	cgc.cmd[2] = 2;	 /* Close session */
-	cgc.quiet = 1;
-	cgc.timeout = 3000*HZ;
-	cdi->ops->generic_packet(cdi, &cgc);
-
-	cdi->media_written = 0;
 }
 
 static int cdrom_close_write(struct cdrom_device_info *cdi)
@@ -1006,7 +927,6 @@ int cdrom_open(struct cdrom_device_info *cdi, struct inode *ip, struct file *fp)
 		ret = open_for_data(cdi);
 		if (ret)
 			goto err;
-		cdrom_mmc3_profile(cdi);
 		if (fp->f_mode & FMODE_WRITE) {
 			ret = -EROFS;
 			if (cdrom_open_write(cdi))
@@ -1014,7 +934,6 @@ int cdrom_open(struct cdrom_device_info *cdi, struct inode *ip, struct file *fp)
 			if (!CDROM_CAN(CDC_RAM))
 				goto err;
 			ret = 0;
-			cdi->media_written = 0;
 		}
 	}
 
@@ -1076,8 +995,6 @@ int open_for_data(struct cdrom_device_info * cdi)
 			}
 			cdinfo(CD_OPEN, "the tray is now closed.\n"); 
 		}
-		/* the door should be closed now, check for the disc */
-		ret = cdo->drive_status(cdi, CDSL_CURRENT);
 		if (ret!=CDS_DISC_OK) {
 			ret = -ENOMEDIUM;
 			goto clean_up_and_return;
@@ -1131,8 +1048,7 @@ int open_for_data(struct cdrom_device_info * cdi)
 	This ensures that the drive gets unlocked after a mount fails.  This 
 	is a goto to avoid bloating the driver with redundant code. */ 
 clean_up_and_return:
-	/* Don't log this, its a perfectly normal user occurence */
-	/* cdinfo(CD_WARNING, "open failed.\n");  */
+	cdinfo(CD_WARNING, "open failed.\n"); 
 	if (CDROM_CAN(CDC_LOCK) && cdi->options & CDO_LOCK) {
 			cdo->lock_door(cdi, 0);
 			cdinfo(CD_OPEN, "door unlocked.\n");
@@ -1209,8 +1125,6 @@ int cdrom_release(struct cdrom_device_info *cdi, struct file *fp)
 		cdi->use_count--;
 	if (cdi->use_count == 0)
 		cdinfo(CD_CLOSE, "Use count for \"/dev/%s\" now zero\n", cdi->name);
-	if (cdi->use_count == 0)
-		cdrom_dvd_rw_close_write(cdi);
 	if (cdi->use_count == 0 &&
 	    (cdo->capability & CDC_LOCK) && !keeplocked) {
 		cdinfo(CD_CLOSE, "Unlocking door!\n");
@@ -1417,7 +1331,6 @@ int media_changed(struct cdrom_device_info *cdi, int queue)
 	if (cdi->ops->media_changed(cdi, CDSL_CURRENT)) {
 		cdi->mc_flags = 0x3;    /* set bit on both queues */
 		ret |= 1;
-		cdi->media_written = 0;
 	}
 	cdi->mc_flags &= ~mask;         /* clear bit */
 	return ret;
@@ -1879,7 +1792,7 @@ static int dvd_read_manufact(struct cdrom_device_info *cdi, dvd_struct *s)
 	s->manufact.len = buf[0] << 8 | buf[1];
 	if (s->manufact.len < 0 || s->manufact.len > 2048) {
 		cdinfo(CD_WARNING, "Received invalid manufacture info length"
-				   " (%d)\n", s->manufact.len);
+				   " (%d)\n", s->bca.len);
 		ret = -EIO;
 	} else {
 		memcpy(s->manufact.value, &buf[4], s->manufact.len);
@@ -3339,6 +3252,7 @@ ctl_table cdrom_cdrom_table[] = {
 
 /* Make sure that /proc/sys/dev is there */
 ctl_table cdrom_root_table[] = {
+#ifdef CONFIG_PROC_FS
 	{
 		.ctl_name	= CTL_DEV,
 		.procname	= "dev",
@@ -3346,6 +3260,7 @@ ctl_table cdrom_root_table[] = {
 		.mode		= 0555,
 		.child		= cdrom_cdrom_table,
 	},
+#endif /* CONFIG_PROC_FS */
 	{ .ctl_name = 0 }
 };
 static struct ctl_table_header *cdrom_sysctl_header;

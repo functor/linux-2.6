@@ -45,7 +45,8 @@
  * First port is set to the default port.
  */
 static int ports[IP_VS_APP_MAX_PORTS] = {21, 0};
-module_param_array(ports, int, NULL, 0);
+static int ports_c;
+module_param_array(ports, int, ports_c, 0);
 
 /*
  *	Debug level

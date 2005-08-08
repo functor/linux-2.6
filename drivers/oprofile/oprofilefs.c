@@ -135,8 +135,11 @@ static struct dentry * __oprofilefs_create_file(struct super_block * sb,
 {
 	struct dentry * dentry;
 	struct inode * inode;
-
-	dentry = d_alloc_name(root, name);
+	struct qstr qname;
+	qname.name = name;
+	qname.len = strlen(name);
+	qname.hash = full_name_hash(qname.name, qname.len);
+	dentry = d_alloc(root, &qname);
 	if (!dentry)
 		return NULL;
 	inode = oprofilefs_get_inode(sb, S_IFREG | perm);
@@ -225,8 +228,11 @@ struct dentry * oprofilefs_mkdir(struct super_block * sb,
 {
 	struct dentry * dentry;
 	struct inode * inode;
-
-	dentry = d_alloc_name(root, name);
+	struct qstr qname;
+	qname.name = name;
+	qname.len = strlen(name);
+	qname.hash = full_name_hash(qname.name, qname.len);
+	dentry = d_alloc(root, &qname);
 	if (!dentry)
 		return NULL;
 	inode = oprofilefs_get_inode(sb, S_IFDIR | 0755);

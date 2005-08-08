@@ -72,6 +72,8 @@ static __inline__ void ide_led(int on)
 #define	IDE0_INTERRUPT		13
 
 #ifdef CONFIG_IDE
+#define ide_request_irq(irq,hand,flg,dev,id)    \
+        request_8xxirq((irq),(hand),(flg),(dev),(id))
 #endif
 
 /*-----------------------------------------------------------------------

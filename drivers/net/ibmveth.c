@@ -96,7 +96,6 @@ static void ibmveth_proc_unregister_driver(void);
 static void ibmveth_proc_register_adapter(struct ibmveth_adapter *adapter);
 static void ibmveth_proc_unregister_adapter(struct ibmveth_adapter *adapter);
 static irqreturn_t ibmveth_interrupt(int irq, void *dev_instance, struct pt_regs *regs);
-static inline void ibmveth_schedule_replenishing(struct ibmveth_adapter*);
 
 #ifdef CONFIG_PROC_FS
 #define IBMVETH_PROC_DIR "ibmveth"
@@ -105,7 +104,7 @@ static struct proc_dir_entry *ibmveth_proc_dir;
 
 static const char ibmveth_driver_name[] = "ibmveth";
 static const char ibmveth_driver_string[] = "IBM i/pSeries Virtual Ethernet Driver";
-#define ibmveth_driver_version "1.03"
+#define ibmveth_driver_version "1.02"
 
 MODULE_AUTHOR("Santiago Leon <santil@us.ibm.com>");
 MODULE_DESCRIPTION("IBM i/pSeries Virtual Ethernet Driver");
@@ -260,15 +259,6 @@ static inline int ibmveth_is_replenishing_needed(struct ibmveth_adapter *adapter
 		(atomic_read(&adapter->rx_buff_pool[2].available) < adapter->rx_buff_pool[2].threshold));
 }
 
-/* kick the replenish tasklet if we need replenishing and it isn't already running */
-static inline void ibmveth_schedule_replenishing(struct ibmveth_adapter *adapter)
-{
-	if(ibmveth_is_replenishing_needed(adapter) && 
-	   (atomic_dec_if_positive(&adapter->not_replenishing) == 0)) {	
-		schedule_work(&adapter->replenish_task);
-	}
-}
-
 /* replenish tasklet routine */
 static void ibmveth_replenish_task(struct ibmveth_adapter *adapter) 
 {
@@ -281,8 +271,15 @@ static void ibmveth_replenish_task(struct ibmveth_adapter *adapter)
 	adapter->rx_no_buffer = *(u64*)(((char*)adapter->buffer_list_addr) + 4096 - 8);
 
 	atomic_inc(&adapter->not_replenishing);
+}
 
-	ibmveth_schedule_replenishing(adapter);
+/* kick the replenish tasklet if we need replenishing and it isn't already running */
+static inline void ibmveth_schedule_replenishing(struct ibmveth_adapter *adapter)
+{
+	if(ibmveth_is_replenishing_needed(adapter) && 
+	   (atomic_dec_if_positive(&adapter->not_replenishing) == 0)) {	
+		schedule_work(&adapter->replenish_task);
+	}
 }
 
 /* empty and free ana buffer pool - also used to do cleanup in error paths */

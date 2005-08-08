@@ -12,13 +12,16 @@
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/init.h>
-#include <linux/kernel.h>
-
 #include "isdn_divert.h"
 
 MODULE_DESCRIPTION("ISDN4Linux: Call diversion support");
 MODULE_AUTHOR("Werner Cornelius");
 MODULE_LICENSE("GPL");
+
+/********************/
+/* needed externals */
+/********************/
+extern int printk(const char *fmt,...);
 
 /****************************************/
 /* structure containing interface to hl */
@@ -56,23 +59,23 @@ static int __init divert_init(void)
 /* Module deinit code */
 /**********************/
 static void __exit divert_exit(void)
-{
-  unsigned long flags;
+{ unsigned long flags;
   int i;
 
-  spin_lock_irqsave(&divert_lock, flags);
+  save_flags(flags);
+  cli();
   divert_if.cmd = DIVERT_CMD_REL; /* release */
   if ((i = DIVERT_REG_NAME(&divert_if)) != DIVERT_NO_ERR)
    { printk(KERN_WARNING "dss1_divert: error %d releasing module\n",i);
-     spin_unlock_irqrestore(&divert_lock, flags);
+     restore_flags(flags);
      return;
    } 
   if (divert_dev_deinit()) 
    { printk(KERN_WARNING "dss1_divert: device busy, remove cancelled\n");
-     spin_unlock_irqrestore(&divert_lock, flags);
+     restore_flags(flags);
      return;
    }
-  spin_unlock_irqrestore(&divert_lock, flags);
+  restore_flags(flags);
   deleterule(-1); /* delete all rules and free mem */
   deleteprocs();
   printk(KERN_INFO "dss1_divert module successfully removed \n");

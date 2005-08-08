@@ -9,7 +9,6 @@
  * 	
  */
 
-#include <linux/module.h>
 #include <linux/string.h>
 #include <net/inet_ecn.h>
 #include <net/ip.h>
@@ -19,8 +18,6 @@ int xfrm4_rcv(struct sk_buff *skb)
 {
 	return xfrm4_rcv_encap(skb, 0);
 }
-
-EXPORT_SYMBOL(xfrm4_rcv);
 
 static inline void ipip_ecn_decapsulate(struct sk_buff *skb)
 {

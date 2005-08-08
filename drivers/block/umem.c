@@ -83,15 +83,15 @@ static int debug;
 #define DEBUG_LED_ON_TRANSFER	0x01
 #define DEBUG_BATTERY_POLLING	0x02
 
-module_param(debug, int, 0644);
+MODULE_PARM(debug, "i");
 MODULE_PARM_DESC(debug, "Debug bitmask");
 
 static int pci_read_cmd = 0x0C;		/* Read Multiple */
-module_param(pci_read_cmd, int, 0);
+MODULE_PARM(pci_read_cmd, "i");
 MODULE_PARM_DESC(pci_read_cmd, "PCI read command");
 
 static int pci_write_cmd = 0x0F;	/* Write and Invalidate */
-module_param(pci_write_cmd, int, 0);
+MODULE_PARM(pci_write_cmd, "i");
 MODULE_PARM_DESC(pci_write_cmd, "PCI write command");
 
 static int pci_cmds;

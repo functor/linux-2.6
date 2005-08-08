@@ -556,8 +556,9 @@ static int __init drm_init( void )
 
 	DRM(mem_init)();
 
-	for_each_pci_dev(pdev) 
+	while ((pdev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, pdev)) != NULL) {
 		DRM(probe)(pdev);
+	}
 	return 0;
 }
 

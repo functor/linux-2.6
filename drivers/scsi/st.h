@@ -2,11 +2,13 @@
 #ifndef _ST_H
 #define _ST_H
 
+#ifndef _SCSI_H
+#include "scsi.h"
+#endif
 #include <linux/completion.h>
 
-
 /* The tape buffer descriptor. */
-struct st_buffer {
+typedef struct {
 	unsigned char in_use;
 	unsigned char dma;	/* DMA-able buffer */
 	unsigned char do_dio;   /* direct i/o set up? */
@@ -17,7 +19,7 @@ struct st_buffer {
 	int writing;
 	int midlevel_result;
 	int syscall_result;
-	struct scsi_request *last_SRpnt;
+	Scsi_Request *last_SRpnt;
 	unsigned char *b_data;
 	unsigned short use_sg;	/* zero or max number of s/g segments for this adapter */
 	unsigned short sg_segs;		/* number of segments in s/g list */
@@ -26,7 +28,7 @@ struct st_buffer {
 	unsigned int frp_sg_current;	/* driver buffer length currently in s/g list */
 	struct st_buf_fragment *frp;	/* the allocated buffer fragment list */
 	struct scatterlist sg[1];	/* MUST BE last item */
-};
+} ST_buffer;
 
 /* The tape buffer fragment descriptor */
 struct st_buf_fragment {
@@ -35,7 +37,7 @@ struct st_buf_fragment {
 };
 
 /* The tape mode definition */
-struct st_modedef {
+typedef struct {
 	unsigned char defined;
 	unsigned char sysv;	/* SYS V semantics? */
 	unsigned char do_async_writes;
@@ -46,7 +48,7 @@ struct st_modedef {
 	short default_density;	/* Forced density, -1 = no value */
 	int default_blksize;	/* Forced blocksize, -1 = no value */
 	struct cdev *cdevs[2];  /* Auto-rewind and non-rewind devices */
-};
+} ST_mode;
 
 /* Number of modes can be changed by changing ST_NBR_MODE_BITS. The maximum
    number of modes is 16 (ST_NBR_MODE_BITS 4) */
@@ -59,7 +61,7 @@ struct st_modedef {
 #define ST_MAX_TAPE_ENTRIES  (ST_MAX_TAPES << (ST_NBR_MODE_BITS + 1))
 
 /* The status related to each partition */
-struct st_partstat {
+typedef struct {
 	unsigned char rw;
 	unsigned char eof;
 	unsigned char at_sm;
@@ -67,17 +69,17 @@ struct st_partstat {
 	u32 last_block_visited;
 	int drv_block;		/* The block where the drive head is */
 	int drv_file;
-};
+} ST_partstat;
 
 #define ST_NBR_PARTITIONS 4
 
 /* The tape drive descriptor */
-struct scsi_tape {
+typedef struct {
 	struct scsi_driver *driver;
-	struct scsi_device *device;
+	Scsi_Device *device;
 	struct semaphore lock;	/* For serialization */
 	struct completion wait;	/* For SCSI commands */
-	struct st_buffer *buffer;
+	ST_buffer *buffer;
 
 	/* Drive characteristics */
 	unsigned char omit_blklims;
@@ -103,14 +105,14 @@ struct scsi_tape {
 	unsigned long max_pfn;	/* the maximum page number reachable by the HBA */
 
 	/* Mode characteristics */
-	struct st_modedef modes[ST_NBR_MODES];
+	ST_mode modes[ST_NBR_MODES];
 	int current_mode;
 
 	/* Status variables */
 	int partition;
 	int new_partition;
 	int nbr_partitions;	/* zero until partition support enabled */
-	struct st_partstat ps[ST_NBR_PARTITIONS];
+	ST_partstat ps[ST_NBR_PARTITIONS];
 	unsigned char dirty;
 	unsigned char ready;
 	unsigned char write_prot;
@@ -144,7 +146,7 @@ struct scsi_tape {
 	unsigned char last_sense[16];
 #endif
 	struct gendisk *disk;
-};
+} Scsi_Tape;
 
 /* Bit masks for use_pf */
 #define USE_PF      1

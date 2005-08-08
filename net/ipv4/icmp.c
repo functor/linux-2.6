@@ -338,8 +338,6 @@ int icmp_glue_bits(void *from, char *to, int offset, int len, int odd,
 				      to, len, 0);
 
 	skb->csum = csum_block_add(skb->csum, csum, odd);
-	if (icmp_pointers[icmp_param->data.icmph.type].error)
-		nf_ct_attach(skb, icmp_param->skb);
 	return 0;
 }
 
@@ -1032,23 +1030,6 @@ int icmp_rcv(struct sk_buff *skb)
 			goto error;
   		}
 	}
-
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-	/* VNET: Bypass stack if the echo ID was bound to a (presumably raw) socket */
-	if (vnet_active && skb->sk) {
-		switch (icmph->type) {
-		case ICMP_ECHOREPLY:
-		case ICMP_ECHO:
-		case ICMP_TIMESTAMP:
-		case ICMP_TIMESTAMPREPLY:
-		case ICMP_INFO_REQUEST:
-		case ICMP_INFO_REPLY:
-		case ICMP_ADDRESS:
-		case ICMP_ADDRESSREPLY:
-			goto drop;
-		}
-	}
-#endif
 
 	ICMP_INC_STATS_BH(icmp_pointers[icmph->type].input_entry);
 	icmp_pointers[icmph->type].handler(skb);

@@ -38,6 +38,7 @@
 #include <asm/pgtable.h>
 #include <asm/system.h>
 #include <asm/machdep.h>
+#include <asm/shglcore.h>
 
 #undef DEBUG
 

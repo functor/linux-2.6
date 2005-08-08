@@ -78,17 +78,16 @@ static int __init alsa_seq_oss_init(void)
 		snd_seq_oss_synth_unregister,
 	};
 
-	snd_seq_autoload_lock();
 	if ((rc = register_device()) < 0)
-		goto error;
+		return rc;
 	if ((rc = register_proc()) < 0) {
 		unregister_device();
-		goto error;
+		return rc;
 	}
 	if ((rc = snd_seq_oss_create_client()) < 0) {
 		unregister_proc();
 		unregister_device();
-		goto error;
+		return rc;
 	}
 
 	if ((rc = snd_seq_device_register_driver(SNDRV_SEQ_DEV_ID_OSS, &ops,
@@ -96,15 +95,12 @@ static int __init alsa_seq_oss_init(void)
 		snd_seq_oss_delete_client();
 		unregister_proc();
 		unregister_device();
-		goto error;
+		return rc;
 	}
 
 	/* success */
 	snd_seq_oss_synth_init();
-
- error:
-	snd_seq_autoload_unlock();
-	return rc;
+	return 0;
 }
 
 static void __exit alsa_seq_oss_exit(void)

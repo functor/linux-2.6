@@ -227,7 +227,7 @@ pdev_save_srm_config(struct pci_dev *dev)
 	tmp->next = srm_saved_configs;
 	tmp->dev = dev;
 
-	pci_save_state(dev);
+	pci_save_state(dev, tmp->regs);
 
 	srm_saved_configs = tmp;
 }
@@ -243,7 +243,7 @@ pci_restore_srm_config(void)
 
 	/* Restore SRM config. */
 	for (tmp = srm_saved_configs; tmp; tmp = tmp->next) {
-		pci_restore_state(tmp->dev);
+		pci_restore_state(tmp->dev, tmp->regs);
 	}
 }
 #endif
@@ -280,6 +280,7 @@ pcibios_fixup_bus(struct pci_bus *bus)
 	/* Propagate hose info into the subordinate devices.  */
 
 	struct pci_controller *hose = bus->sysdata;
+	struct list_head *ln;
 	struct pci_dev *dev = bus->self;
 
 	if (!dev) {
@@ -303,7 +304,9 @@ pcibios_fixup_bus(struct pci_bus *bus)
  		pcibios_fixup_device_resources(dev, bus);
 	} 
 
-	list_for_each_entry(dev, &bus->devices, bus_list) {
+	for (ln = bus->devices.next; ln != &bus->devices; ln = ln->next) {
+		struct pci_dev *dev = pci_dev_b(ln);
+
 		pdev_save_srm_config(dev);
 		if ((dev->class >> 8) != PCI_CLASS_BRIDGE_PCI)
 			pcibios_fixup_device_resources(dev, bus);
@@ -400,10 +403,11 @@ pcibios_set_master(struct pci_dev *dev)
 static void __init
 pcibios_claim_one_bus(struct pci_bus *b)
 {
-	struct pci_dev *dev;
+	struct list_head *ld;
 	struct pci_bus *child_bus;
 
-	list_for_each_entry(dev, &b->devices, bus_list) {
+	for (ld = b->devices.next; ld != &b->devices; ld = ld->next) {
+		struct pci_dev *dev = pci_dev_b(ld);
 		int i;
 
 		for (i = 0; i < PCI_NUM_RESOURCES; i++) {
@@ -422,10 +426,12 @@ pcibios_claim_one_bus(struct pci_bus *b)
 static void __init
 pcibios_claim_console_setup(void)
 {
-	struct pci_bus *b;
+	struct list_head *lb;
 
-	list_for_each_entry(b, &pci_root_buses, node)
+	for(lb = pci_root_buses.next; lb != &pci_root_buses; lb = lb->next) {
+		struct pci_bus *b = pci_bus_b(lb);
 		pcibios_claim_one_bus(b);
+	}
 }
 
 void __init

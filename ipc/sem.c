@@ -72,7 +72,6 @@
 #include <linux/smp_lock.h>
 #include <linux/security.h>
 #include <linux/vs_base.h>
-#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
 #include "util.h"
@@ -178,7 +177,7 @@ static int newary (key_t key, int nsems, int semflg)
 
 	sma->sem_perm.mode = (semflg & S_IRWXUGO);
 	sma->sem_perm.key = key;
-	sma->sem_perm.xid = vx_current_xid();
+	sma->sem_perm.xid = current->xid;
 
 	sma->sem_perm.security = NULL;
 	retval = security_sem_alloc(sma);
@@ -541,7 +540,7 @@ static int semctl_nolock(int semid, int semnum, int cmd, int version, union semu
 		struct semid64_ds tbuf;
 		int id;
 
-		if(semid >= sem_ids.entries->size)
+		if(semid >= sem_ids.size)
 			return -EINVAL;
 
 		memset(&tbuf,0,sizeof(tbuf));

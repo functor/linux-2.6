@@ -29,9 +29,10 @@
 #include <linux/i2c-sensor.h>
 
 /* Addresses to scan */
-static unsigned short normal_i2c[] = { 0x28, 0x29, 0x2a, 0x2b, 0x2c,
-					0x2d, 0x2e, 0x2f, I2C_CLIENT_END };
+static unsigned short normal_i2c[] = { I2C_CLIENT_END };
+static unsigned short normal_i2c_range[] = { 0x28, 0x2f, I2C_CLIENT_END };
 static unsigned int normal_isa[] = { I2C_CLIENT_ISA_END };
+static unsigned int normal_isa_range[] = { I2C_CLIENT_ISA_END };
 
 /* Insmod parameters */
 SENSORS_INSMOD_1(lm80);
@@ -144,7 +145,7 @@ static int lm80_write_value(struct i2c_client *client, u8 reg, u8 value);
  * Internal variables
  */
 
-static int lm80_id;
+static int lm80_id = 0;
 
 /*
  * Driver data (common to all clients)
@@ -261,15 +262,14 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct lm80_data *data = i2c_get_clientdata(client);
-	unsigned long min, val;
+	unsigned long min;
 	u8 reg;
 
 	/* Save fan_min */
 	min = FAN_FROM_REG(data->fan_min[nr],
 			   DIV_FROM_REG(data->fan_div[nr]));
 
-	val = simple_strtoul(buf, NULL, 10);
-	data->fan_div[nr] = DIV_TO_REG(val);
+	data->fan_div[nr] = DIV_TO_REG(simple_strtoul(buf, NULL, 10));
 
 	reg = (lm80_read_value(client, LM80_REG_FANDIV) & ~(3 << (2 * (nr + 1))))
 	    | (data->fan_div[nr] << (2 * (nr + 1)));

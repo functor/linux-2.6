@@ -52,6 +52,5 @@ extern asmlinkage long sys_kexec(unsigned long entry, long nr_segments,
 	struct kexec_segment *segments);
 extern struct page *kimage_alloc_control_pages(struct kimage *image, unsigned int order);
 extern struct kimage *kexec_image;
-extern struct kimage *kexec_crash_image;
 #endif
 #endif /* LINUX_KEXEC_H */

@@ -171,8 +171,6 @@ static int hexToLong(char **ptr, long *longValue);
 static unsigned char *mem2hex(char *mem, char *buf, int count, int may_fault);
 void handle_exception(struct gdb_regs *regs);
 
-int kgdb_enabled;
-
 /*
  * spin locks for smp case
  */

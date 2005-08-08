@@ -15,24 +15,31 @@
 #include <linux/init.h>
 #include <asm/ptrace.h>
  
-static int timer_notify(struct pt_regs *regs)
+static int timer_notify(struct notifier_block * self, unsigned long val, void * data)
 {
+	struct pt_regs * regs = (struct pt_regs *)data;
 	int cpu = smp_processor_id();
 	unsigned long eip = profile_pc(regs);
  
 	oprofile_add_sample(eip, !user_mode(regs), 0, cpu);
 	return 0;
 }
+ 
+ 
+static struct notifier_block timer_notifier = {
+	.notifier_call	= timer_notify,
+};
+ 
 
 static int timer_start(void)
 {
-	return register_timer_hook(timer_notify);
+	return register_profile_notifier(&timer_notifier);
 }
 
 
 static void timer_stop(void)
 {
-	unregister_timer_hook(timer_notify);
+	unregister_profile_notifier(&timer_notifier);
 }
 
 

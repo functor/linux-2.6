@@ -445,7 +445,6 @@ void tcp_set_skb_tso_segs(struct sk_buff *skb, unsigned int mss_std)
 		skb_shinfo(skb)->tso_size = mss_std;
 	}
 }
-
 EXPORT_SYMBOL_GPL(tcp_set_skb_tso_segs);
 
 /* Function to create two new TCP segments.  Shrinks the given segment
@@ -780,8 +779,6 @@ int tcp_write_xmit(struct sock *sk, int nonagle)
 	return 0;
 }
 
-EXPORT_SYMBOL_GPL(tcp_write_xmit);
-
 /* This function returns the amount that we can raise the
  * usable window based on the following constraints
  *  
@@ -1075,7 +1072,6 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	   (skb->next != sk->sk_send_head) &&
 	   (skb->next != (struct sk_buff *)&sk->sk_write_queue) &&
 	   (skb_shinfo(skb)->nr_frags == 0 && skb_shinfo(skb->next)->nr_frags == 0) &&
-	   (tcp_skb_pcount(skb) == 1 && tcp_skb_pcount(skb->next) == 1) &&
 	   (sysctl_tcp_retrans_collapse != 0))
 		tcp_retrans_try_collapse(sk, skb, cur_mss);
 
@@ -1110,8 +1106,6 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	if (err == 0) {
 		/* Update global TCP statistics. */
 		TCP_INC_STATS(TCP_MIB_RETRANSSEGS);
-
-		tp->total_retrans++;
 
 #if FASTRETRANS_DEBUG > 0
 		if (TCP_SKB_CB(skb)->sacked&TCPCB_SACKED_RETRANS) {
@@ -1730,3 +1724,4 @@ EXPORT_SYMBOL(tcp_connect);
 EXPORT_SYMBOL(tcp_make_synack);
 EXPORT_SYMBOL(tcp_simple_retransmit);
 EXPORT_SYMBOL(tcp_sync_mss);
+EXPORT_SYMBOL_GPL(tcp_write_xmit);

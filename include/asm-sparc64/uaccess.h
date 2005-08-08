@@ -253,13 +253,12 @@ __asm__ __volatile__(							\
 
 extern int __get_user_bad(void);
 
-extern unsigned long __must_check ___copy_from_user(void *to,
-						    const void __user *from,
-						    unsigned long size);
+extern unsigned long ___copy_from_user(void *to, const void __user *from,
+				       unsigned long size);
 extern unsigned long copy_from_user_fixup(void *to, const void __user *from,
 					  unsigned long size);
-static inline unsigned long __must_check
-copy_from_user(void *to, const void __user *from, unsigned long size)
+static inline unsigned long copy_from_user(void *to, const void __user *from,
+					   unsigned long size)
 {
 	unsigned long ret = ___copy_from_user(to, from, size);
 
@@ -269,13 +268,12 @@ copy_from_user(void *to, const void __user *from, unsigned long size)
 }
 #define __copy_from_user copy_from_user
 
-extern unsigned long __must_check ___copy_to_user(void __user *to,
-						  const void *from,
-						  unsigned long size);
+extern unsigned long ___copy_to_user(void __user *to, const void *from,
+				     unsigned long size);
 extern unsigned long copy_to_user_fixup(void __user *to, const void *from,
 					unsigned long size);
-static inline unsigned long __must_check
-copy_to_user(void __user *to, const void *from, unsigned long size)
+static inline unsigned long copy_to_user(void __user *to, const void *from,
+					 unsigned long size)
 {
 	unsigned long ret = ___copy_to_user(to, from, size);
 
@@ -285,13 +283,12 @@ copy_to_user(void __user *to, const void *from, unsigned long size)
 }
 #define __copy_to_user copy_to_user
 
-extern unsigned long __must_check ___copy_in_user(void __user *to,
-						  const void __user *from,
-						  unsigned long size);
+extern unsigned long ___copy_in_user(void __user *to, const void __user *from,
+				     unsigned long size);
 extern unsigned long copy_in_user_fixup(void __user *to, void __user *from,
 					unsigned long size);
-static inline unsigned long __must_check
-copy_in_user(void __user *to, void __user *from, unsigned long size)
+static inline unsigned long copy_in_user(void __user *to, void __user *from,
+					 unsigned long size)
 {
 	unsigned long ret = ___copy_in_user(to, from, size);
 
@@ -301,10 +298,9 @@ copy_in_user(void __user *to, void __user *from, unsigned long size)
 }
 #define __copy_in_user copy_in_user
 
-extern unsigned long __must_check __bzero_noasi(void __user *, unsigned long);
+extern unsigned long __bzero_noasi(void __user *, unsigned long);
 
-static inline unsigned long __must_check
-__clear_user(void __user *addr, unsigned long size)
+static inline unsigned long __clear_user(void __user *addr, unsigned long size)
 {
 	
 	return __bzero_noasi(addr, size);
@@ -312,7 +308,7 @@ __clear_user(void __user *addr, unsigned long size)
 
 #define clear_user __clear_user
 
-extern long __must_check __strncpy_from_user(char *dest, const char __user *src, long count);
+extern long __strncpy_from_user(char *dest, const char __user *src, long count);
 
 #define strncpy_from_user __strncpy_from_user
 

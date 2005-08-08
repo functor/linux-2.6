@@ -13,7 +13,7 @@
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -47,14 +47,14 @@ bfifo_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 {
 	struct fifo_sched_data *q = qdisc_priv(sch);
 
-	if (sch->qstats.backlog + skb->len <= q->limit) {
+	if (sch->stats.backlog + skb->len <= q->limit) {
 		__skb_queue_tail(&sch->q, skb);
-		sch->qstats.backlog += skb->len;
-		sch->bstats.bytes += skb->len;
-		sch->bstats.packets++;
+		sch->stats.backlog += skb->len;
+		sch->stats.bytes += skb->len;
+		sch->stats.packets++;
 		return 0;
 	}
-	sch->qstats.drops++;
+	sch->stats.drops++;
 #ifdef CONFIG_NET_CLS_POLICE
 	if (sch->reshape_fail==NULL || sch->reshape_fail(skb, sch))
 #endif
@@ -66,8 +66,7 @@ static int
 bfifo_requeue(struct sk_buff *skb, struct Qdisc* sch)
 {
 	__skb_queue_head(&sch->q, skb);
-	sch->qstats.backlog += skb->len;
-	sch->qstats.requeues++;
+	sch->stats.backlog += skb->len;
 	return 0;
 }
 
@@ -78,7 +77,7 @@ bfifo_dequeue(struct Qdisc* sch)
 
 	skb = __skb_dequeue(&sch->q);
 	if (skb)
-		sch->qstats.backlog -= skb->len;
+		sch->stats.backlog -= skb->len;
 	return skb;
 }
 
@@ -90,7 +89,7 @@ fifo_drop(struct Qdisc* sch)
 	skb = __skb_dequeue_tail(&sch->q);
 	if (skb) {
 		unsigned int len = skb->len;
-		sch->qstats.backlog -= len;
+		sch->stats.backlog -= len;
 		kfree_skb(skb);
 		return len;
 	}
@@ -101,7 +100,7 @@ static void
 fifo_reset(struct Qdisc* sch)
 {
 	skb_queue_purge(&sch->q);
-	sch->qstats.backlog = 0;
+	sch->stats.backlog = 0;
 }
 
 static int
@@ -111,11 +110,11 @@ pfifo_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 
 	if (sch->q.qlen < q->limit) {
 		__skb_queue_tail(&sch->q, skb);
-		sch->bstats.bytes += skb->len;
-		sch->bstats.packets++;
+		sch->stats.bytes += skb->len;
+		sch->stats.packets++;
 		return 0;
 	}
-	sch->qstats.drops++;
+	sch->stats.drops++;
 #ifdef CONFIG_NET_CLS_POLICE
 	if (sch->reshape_fail==NULL || sch->reshape_fail(skb, sch))
 #endif
@@ -127,7 +126,6 @@ static int
 pfifo_requeue(struct sk_buff *skb, struct Qdisc* sch)
 {
 	__skb_queue_head(&sch->q, skb);
-	sch->qstats.requeues++;
 	return 0;
 }
 

@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id$
+ * Version:	$Id: tcp_ipv4.c,v 1.240 2002/02/01 22:01:04 davem Exp $
  *
  *		IPv4 specific functions
  *
@@ -449,7 +449,8 @@ static struct sock *__tcp_v4_lookup_listener(struct hlist_head *head, u32 daddr,
 }
 
 /* Optimize the common listener case. */
-struct sock *tcp_v4_lookup_listener(u32 daddr, unsigned short hnum, int dif)
+inline struct sock *tcp_v4_lookup_listener(u32 daddr, unsigned short hnum,
+					   int dif)
 {
 	struct sock *sk = NULL;
 	struct hlist_head *head;
@@ -472,8 +473,6 @@ sherry_cache:
 	read_unlock(&tcp_lhash_lock);
 	return sk;
 }
-
-EXPORT_SYMBOL_GPL(tcp_v4_lookup_listener);
 
 /* Sockets in TCP_CLOSE state are _always_ taken out of the hash, so
  * we need not check it for TCP lookups anymore, thanks Alexey. -DaveM
@@ -535,8 +534,6 @@ inline struct sock *tcp_v4_lookup(u32 saddr, u16 sport, u32 daddr,
 
 	return sk;
 }
-
-EXPORT_SYMBOL_GPL(tcp_v4_lookup);
 
 static inline __u32 tcp_v4_init_sequence(struct sock *sk, struct sk_buff *skb)
 {
@@ -1761,6 +1758,10 @@ csum_err:
 	goto discard;
 }
 
+extern struct proto_ops inet_stream_ops;
+
+extern int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len);
+
 /*
  *	From tcp_input.c
  */
@@ -1812,21 +1813,13 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		goto no_tcp_socket;
 
 process:
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-	/* Silently drop if VNET is active and the context is not
-	 * entitled to read the packet.
+	/* Silently drop if VNET is active (if INET bind() has been
+	 * overridden) and the context is not entitled to read the
+	 * packet.
 	 */
-	if (vnet_active) {
-		/* Transfer ownership of reusable TIME_WAIT buckets to
-		 * whomever VNET decided should own the packet.
-		 */
-		if (sk->sk_state == TCP_TIME_WAIT)
-			sk->sk_xid = skb->xid;
-
-		if ((int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
-			goto discard_it;
-	}
-#endif
+	if (inet_stream_ops.bind != inet_bind &&
+	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
+		goto discard_it;
 
 	if (sk->sk_state == TCP_TIME_WAIT)
 		goto do_time_wait;
@@ -1859,11 +1852,8 @@ no_tcp_socket:
 	if (skb->len < (th->doff << 2) || tcp_checksum_complete(skb)) {
 bad_packet:
 		TCP_INC_STATS_BH(TCP_MIB_INERRS);
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-	} else if (vnet_active && skb->sk) {
+	} else if (!skb->sk) {
 		/* VNET: Suppress RST if the port was bound to a (presumably raw) socket */
-#endif
-	} else {
 		tcp_v4_send_reset(skb);
 	}
 
@@ -2676,7 +2666,6 @@ void tcp4_proc_exit(void)
 
 struct proto tcp_prot = {
 	.name			= "TCP",
-	.owner			= THIS_MODULE,
 	.close			= tcp_close,
 	.connect		= tcp_v4_connect,
 	.disconnect		= tcp_disconnect,
@@ -2734,6 +2723,7 @@ EXPORT_SYMBOL(tcp_unhash);
 EXPORT_SYMBOL(tcp_v4_conn_request);
 EXPORT_SYMBOL(tcp_v4_connect);
 EXPORT_SYMBOL(tcp_v4_do_rcv);
+EXPORT_SYMBOL_GPL(tcp_v4_lookup_listener);
 EXPORT_SYMBOL(tcp_v4_rebuild_header);
 EXPORT_SYMBOL(tcp_v4_remember_stamp);
 EXPORT_SYMBOL(tcp_v4_send_check);
@@ -2743,7 +2733,8 @@ EXPORT_SYMBOL(tcp_v4_syn_recv_sock);
 EXPORT_SYMBOL(tcp_proc_register);
 EXPORT_SYMBOL(tcp_proc_unregister);
 #endif
+#ifdef CONFIG_SYSCTL
 EXPORT_SYMBOL(sysctl_local_port_range);
 EXPORT_SYMBOL(sysctl_max_syn_backlog);
 EXPORT_SYMBOL(sysctl_tcp_low_latency);
-
+#endif

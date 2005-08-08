@@ -356,15 +356,16 @@ acpi_ut_valid_acpi_character (
  * FUNCTION:    acpi_ut_strtoul64
  *
  * PARAMETERS:  String          - Null terminated string
- *              Base            - Radix of the string: 10, 16, or ACPI_ANY_BASE
- *              ret_integer     - Where the converted integer is returned
+ *              Terminater      - Where a pointer to the terminating byte is returned
+ *              Base            - Radix of the string
  *
- * RETURN:      Status and Converted value
+ * RETURN:      Converted value
  *
  * DESCRIPTION: Convert a string into an unsigned value.
- *              NOTE: Does not support Octal strings, not needed.
  *
  ******************************************************************************/
+#define NEGATIVE    1
+#define POSITIVE    0
 
 acpi_status
 acpi_ut_strtoul64 (
@@ -372,40 +373,50 @@ acpi_ut_strtoul64 (
 	u32                             base,
 	acpi_integer                    *ret_integer)
 {
-	u32                             this_digit;
+	u32                             index;
 	acpi_integer                    return_value = 0;
+	acpi_status                     status = AE_OK;
+	acpi_integer                    dividend;
 	acpi_integer                    quotient;
 
 
-	ACPI_FUNCTION_TRACE ("ut_stroul64");
-
+	*ret_integer = 0;
 
 	switch (base) {
-	case ACPI_ANY_BASE:
+	case 0:
+	case 8:
 	case 10:
 	case 16:
 		break;
 
 	default:
-		/* Invalid Base */
-		return_ACPI_STATUS (AE_BAD_PARAMETER);
+		/*
+		 * The specified Base parameter is not in the domain of
+		 * this function:
+		 */
+		return (AE_BAD_PARAMETER);
 	}
 
-	/* Skip over any white space in the buffer */
-
+	/*
+	 * skip over any white space in the buffer:
+	 */
 	while (ACPI_IS_SPACE (*string) || *string == '\t') {
 		++string;
 	}
 
 	/*
 	 * If the input parameter Base is zero, then we need to
-	 * determine if it is decimal or hexadecimal:
+	 * determine if it is octal, decimal, or hexadecimal:
 	 */
 	if (base == 0) {
-		if ((*string == '0') &&
-			(ACPI_TOLOWER (*(++string)) == 'x')) {
-			base = 16;
-			++string;
+		if (*string == '0') {
+			if (ACPI_TOLOWER (*(++string)) == 'x') {
+				base = 16;
+				++string;
+			}
+			else {
+				base = 8;
+			}
 		}
 		else {
 			base = 10;
@@ -413,67 +424,76 @@ acpi_ut_strtoul64 (
 	}
 
 	/*
-	 * For hexadecimal base, skip over the leading
+	 * For octal and hexadecimal bases, skip over the leading
 	 * 0 or 0x, if they are present.
 	 */
+	if (base == 8 && *string == '0') {
+		string++;
+	}
+
 	if (base == 16 &&
 		*string == '0' &&
 		ACPI_TOLOWER (*(++string)) == 'x') {
 		string++;
 	}
 
-	/* Main loop: convert the string to a 64-bit integer */
+	/* Main loop: convert the string to an unsigned long */
 
 	while (*string) {
 		if (ACPI_IS_DIGIT (*string)) {
-			/* Convert ASCII 0-9 to Decimal value */
-
-			this_digit = ((u8) *string) - '0';
+			index = ((u8) *string) - '0';
 		}
 		else {
-			this_digit = (u8) ACPI_TOUPPER (*string);
-			if (ACPI_IS_UPPER ((char) this_digit)) {
-				/* Convert ASCII Hex char to value */
-
-				this_digit = this_digit - 'A' + 10;
+			index = (u8) ACPI_TOUPPER (*string);
+			if (ACPI_IS_UPPER ((char) index)) {
+				index = index - 'A' + 10;
 			}
 			else {
 				goto error_exit;
 			}
 		}
 
-		/* Check to see if digit is out of range */
-
-		if (this_digit >= base) {
+		if (index >= base) {
 			goto error_exit;
 		}
 
-		/* Divide the digit into the correct position */
+		/* Check to see if value is out of range: */
 
-		(void) acpi_ut_short_divide ((ACPI_INTEGER_MAX - (acpi_integer) this_digit),
-				 base, &quotient, NULL);
+		dividend = ACPI_INTEGER_MAX - (acpi_integer) index;
+		(void) acpi_ut_short_divide (&dividend, base, &quotient, NULL);
 		if (return_value > quotient) {
 			goto error_exit;
 		}
 
 		return_value *= base;
-		return_value += this_digit;
+		return_value += index;
 		++string;
 	}
 
 	*ret_integer = return_value;
-	return_ACPI_STATUS (AE_OK);
+	return (status);
 
 
 error_exit:
-	/* Base was set/validated above */
+	switch (base) {
+	case 8:
+		status = AE_BAD_OCTAL_CONSTANT;
+		break;
 
-	if (base == 10) {
-		return_ACPI_STATUS (AE_BAD_DECIMAL_CONSTANT);
+	case 10:
+		status = AE_BAD_DECIMAL_CONSTANT;
+		break;
+
+	case 16:
+		status = AE_BAD_HEX_CONSTANT;
+		break;
+
+	default:
+		/* Base validated above */
+		break;
 	}
-	else {
-		return_ACPI_STATUS (AE_BAD_HEX_CONSTANT);
-	}
+
+	return (status);
 }
 
 
@@ -488,7 +508,7 @@ error_exit:
  * DESCRIPTION: Convert string to uppercase
  *
  ******************************************************************************/
-#ifdef ACPI_FUTURE_USAGE
+
 char *
 acpi_ut_strupr (
 	char                            *src_string)
@@ -508,7 +528,6 @@ acpi_ut_strupr (
 
 	return (src_string);
 }
-#endif  /*  ACPI_FUTURE_USAGE  */
 
 
 /*******************************************************************************

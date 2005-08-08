@@ -334,9 +334,7 @@ struct sk_buff *skb_clone(struct sk_buff *skb, int gfp_mask)
 #endif
 
 #endif
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	C(xid);
-#endif
 	C(truesize);
 	atomic_set(&n->users, 1);
 	C(head);
@@ -396,9 +394,7 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 #endif
 	new->tc_index	= old->tc_index;
 #endif
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	new->xid	= old->xid;
-#endif
 	atomic_set(&new->users, 1);
 	skb_shinfo(new)->tso_size = skb_shinfo(old)->tso_size;
 	skb_shinfo(new)->tso_segs = skb_shinfo(old)->tso_segs;
@@ -1356,7 +1352,7 @@ void skb_add_mtu(int mtu)
 }
 #endif
 
-static inline void skb_split_inside_header(struct sk_buff *skb,
+static void inline skb_split_inside_header(struct sk_buff *skb,
 					   struct sk_buff* skb1,
 					   const u32 len, const int pos)
 {
@@ -1377,7 +1373,7 @@ static inline void skb_split_inside_header(struct sk_buff *skb,
 	skb->tail		   = skb->data + len;
 }
 
-static inline void skb_split_no_header(struct sk_buff *skb,
+static void inline skb_split_no_header(struct sk_buff *skb,
 				       struct sk_buff* skb1,
 				       const u32 len, int pos)
 {

@@ -43,8 +43,6 @@
 #include <linux/lapb.h>
 #include <linux/init.h>
 
-#include <net/x25device.h>
-
 static char bcast_addr[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 /* If this number is made larger, check that the temporary string buffer
@@ -139,7 +137,11 @@ static int lapbeth_data_indication(struct net_device *dev, struct sk_buff *skb)
 	ptr  = skb->data;
 	*ptr = 0x00;
 
-	skb->protocol = x25_type_trans(skb, dev);
+	skb->dev      = dev;
+	skb->protocol = htons(ETH_P_X25);
+	skb->mac.raw  = skb->data;
+	skb->pkt_type = PACKET_HOST;
+
 	skb->dev->last_rx = jiffies;
 	return netif_rx(skb);
 }
@@ -231,7 +233,11 @@ static void lapbeth_connected(struct net_device *dev, int reason)
 	ptr  = skb_put(skb, 1);
 	*ptr = 0x01;
 
-	skb->protocol = x25_type_trans(skb, dev);
+	skb->dev      = dev;
+	skb->protocol = htons(ETH_P_X25);
+	skb->mac.raw  = skb->data;
+	skb->pkt_type = PACKET_HOST;
+
 	skb->dev->last_rx = jiffies;
 	netif_rx(skb);
 }
@@ -249,7 +255,11 @@ static void lapbeth_disconnected(struct net_device *dev, int reason)
 	ptr  = skb_put(skb, 1);
 	*ptr = 0x02;
 
-	skb->protocol = x25_type_trans(skb, dev);
+	skb->dev      = dev;
+	skb->protocol = htons(ETH_P_X25);
+	skb->mac.raw  = skb->data;
+	skb->pkt_type = PACKET_HOST;
+
 	skb->dev->last_rx = jiffies;
 	netif_rx(skb);
 }

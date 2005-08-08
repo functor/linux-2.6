@@ -1280,7 +1280,13 @@ free_unused_pages(unsigned int virtual_start, unsigned int virtual_end)
 	printk("acornfb: freed %dK memory\n", mb_freed);
 }
 
-static int __init acornfb_probe(struct device *dev)
+static struct device acornfb_device = {
+	.bus_id			= "acornfb",
+	.coherent_dma_mask	= 0xffffffff,
+};
+
+int __init
+acornfb_init(void)
 {
 	unsigned long size;
 	u_int h_sync, v_sync;
@@ -1293,7 +1299,7 @@ static int __init acornfb_probe(struct device *dev)
 
 	acornfb_init_fbinfo();
 
-	current_par.dev = dev;
+	current_par.dev = &acornfb_device;
 
 	if (current_par.montype == -1)
 		current_par.montype = acornfb_detect_monitortype();
@@ -1326,6 +1332,7 @@ static int __init acornfb_probe(struct device *dev)
 		}
 	}
 
+	fb_info.currcon	       = -1;
 	fb_info.screen_base    = (char *)SCREEN_BASE;
 	fb_info.fix.smem_start = SCREEN_START;
 	current_par.using_vram = 0;
@@ -1452,17 +1459,6 @@ static int __init acornfb_probe(struct device *dev)
 	if (register_framebuffer(&fb_info) < 0)
 		return -EINVAL;
 	return 0;
-}
-
-static struct device_driver acornfb_driver = {
-	.name	= "acornfb",
-	.bus	= &platform_bus_type,
-	.probe	= acornfb_probe,
-};
-
-static int __init acornfb_init(void)
-{
-	return driver_register(&acornfb_driver);
 }
 
 module_init(acornfb_init);

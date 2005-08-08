@@ -6,6 +6,7 @@
  * Copyright 2002, Yoshinori Sato
  */
 
+#include <linux/kernel.h>
 #include <linux/config.h>
 #include <linux/compiler.h>
 #include <asm/byteorder.h>	/* swab32 */
@@ -180,8 +181,6 @@ H8300_GEN_TEST_BITOP(test_and_change_bit,"bnot")
 #define find_first_zero_bit(addr, size) \
 	find_next_zero_bit((addr), (size), 0)
 
-#define ffs(x) generic_ffs(x)
-
 static __inline__ unsigned long __ffs(unsigned long word)
 {
 	unsigned long result;
@@ -195,6 +194,9 @@ static __inline__ unsigned long __ffs(unsigned long word)
 		: "0"(result),"r"(word));
 	return result;
 }
+
+#define ffs(x) generic_ffs(x)
+#define fls(x) generic_fls(x)
 
 static __inline__ int find_next_zero_bit (void * addr, int size, int offset)
 {
@@ -404,7 +406,5 @@ found_middle:
 #define minix_find_first_zero_bit(addr,size) find_first_zero_bit(addr,size)
 
 #endif /* __KERNEL__ */
-
-#define fls(x) generic_fls(x)
 
 #endif /* _H8300_BITOPS_H */

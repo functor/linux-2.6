@@ -45,9 +45,6 @@
 #include <linux/sysrq.h>
 #include <linux/smp.h>
 #include <linux/netpoll.h>
-#include <asm/unaligned.h>
-
-#include "netdump.h"
 
 MODULE_AUTHOR("Maintainer: Matt Mackall <mpm@selenic.com>");
 MODULE_DESCRIPTION("Console driver for network interfaces");
@@ -61,100 +58,28 @@ static struct netpoll np = {
 	.name = "netconsole",
 	.dev_name = "eth0",
 	.local_port = 6665,
-	.remote_port = 514,
+	.remote_port = 6666,
 	.remote_mac = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 };
 static int configured = 0;
 
-static char netlog_config[256];
-module_param_string(netlog, netlog_config, 256, 0);
-MODULE_PARM_DESC(netlog, " netlog=[src-port]@[src-ip]/[dev],[tgt-port]@<tgt-ip>/[tgt-macaddr]\n");
-static struct netpoll netlog_np = {
-	.name = "netlog",
-	.dev_name = "eth0",
-	.local_port = 6664,
-	.remote_port = 6666,
-	.remote_mac = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
-};
-static int netlog_configured = 0;
-
 #define MAX_PRINT_CHUNK 1000
-#define SYSLOG_HEADER_LEN 4
-
-static int syslog_chars = SYSLOG_HEADER_LEN;
-static unsigned char syslog_line [MAX_PRINT_CHUNK + 10] = {
-	'<',
-	'5',
-	'>',
-	' ',
-	[4 ... MAX_PRINT_CHUNK+5] = '\0',
-};
-static unsigned char netlog_line[MAX_PRINT_CHUNK + HEADER_LEN];
-static unsigned int log_offset;
-
-/*
- * We feed kernel messages char by char, and send the UDP packet
- * one linefeed. We buffer all characters received.
- */
-static inline void feed_syslog_char(const unsigned char c)
-{
-	if (syslog_chars == MAX_PRINT_CHUNK)
-		syslog_chars--;
-	syslog_line[syslog_chars] = c;
-	syslog_chars++;
-	if (c == '\n') {
-		netpoll_send_udp(&np, syslog_line, syslog_chars);
-		syslog_chars = SYSLOG_HEADER_LEN;
-	}
-}
 
 static void write_msg(struct console *con, const char *msg, unsigned int len)
 {
-	int left, i;
+	int frag, left;
 	unsigned long flags;
-	reply_t reply;
-	char *netlog_buf = &netlog_line[HEADER_LEN];
 
-	if (!np.dev && !netlog_np.dev)
-		return;
-
-	if (unlikely(crashdump_mode()))
+	if (!np.dev)
 		return;
 
 	local_irq_save(flags);
 
-	if (np.dev)
-		for (i = 0; i < len; i++)
-			feed_syslog_char(msg[i]);
-
-	if (netlog_np.dev) {
-		left = len;
-		while (left) {
-			if (left > MAX_PRINT_CHUNK)
-				len = MAX_PRINT_CHUNK;
-			else
-				len = left;
-			netlog_line[0] = NETDUMP_VERSION;
-
-			reply.nr = 0;
-			reply.code = REPLY_LOG;
-			reply.info = log_offset;
-
-			put_unaligned(htonl(reply.nr), 
-				      (u32 *)(netlog_line + 1));
-			put_unaligned(htonl(reply.code),
-				      (u32 *)(netlog_line + 5));
-			put_unaligned(htonl(reply.info),
-				      (u32 *)(netlog_line + 9));
-
-			log_offset += len;
-			memcpy(netlog_buf, msg, len);
-
-			netpoll_send_udp(&netlog_np, 
-					 netlog_line, len + HEADER_LEN);
-			msg += len;
-			left -= len;
-		}
+	for(left = len; left; ) {
+		frag = min(left, MAX_PRINT_CHUNK);
+		netpoll_send_udp(&np, msg, frag);
+		msg += frag;
+		left -= frag;
 	}
 
 	local_irq_restore(flags);
@@ -173,29 +98,17 @@ static int option_setup(char *opt)
 
 __setup("netconsole=", option_setup);
 
-static int netlog_option_setup(char *opt)
-{
-	netlog_configured = !netpoll_parse_options(&netlog_np, opt);
-	return 0;
-}
-
-__setup("netlog=", netlog_option_setup);
-
 static int init_netconsole(void)
 {
 	if(strlen(config))
 		option_setup(config);
 
-	if (strlen(netlog_config))
-		netlog_option_setup(netlog_config);
+	if(!configured) {
+		printk("netconsole: not configured, aborting\n");
+		return -EINVAL;
+	}
 
-	if (configured && netpoll_setup(&np))
-		printk("netconsole: failed to configure syslog service\n");
-
-	if (netlog_configured && netpoll_setup(&netlog_np))
-		printk("netconsole: failed to configured netlog service.\n");
-
-	if (!configured && !netlog_configured)
+	if(netpoll_setup(&np))
 		return -EINVAL;
 
 	register_console(&netconsole);
@@ -206,12 +119,7 @@ static int init_netconsole(void)
 static void cleanup_netconsole(void)
 {
 	unregister_console(&netconsole);
-
-	if (configured)
-		netpoll_cleanup(&np);
-
-	if (netlog_configured)
-		netpoll_cleanup(&netlog_np);
+	netpoll_cleanup(&np);
 }
 
 module_init(init_netconsole);

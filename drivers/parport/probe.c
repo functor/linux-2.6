@@ -164,16 +164,8 @@ ssize_t parport_device_id (int devnum, char *buffer, size_t len)
 		if (retval != 2) goto end_id;
 
 		idlen = (length[0] << 8) + length[1] - 2;
-		/*
-		 * Check if the caller-allocated buffer is large enough
-		 * otherwise bail out or there will be an at least off by one.
-		 */
-		if (idlen + 1 < len)
+		if (idlen < len)
 			len = idlen;
-		else {
-			retval = -EINVAL;
-			goto out;
-		}
 		retval = parport_read (dev->port, buffer, len);
 
 		if (retval != len)
@@ -213,12 +205,11 @@ ssize_t parport_device_id (int devnum, char *buffer, size_t len)
 		buffer[len] = '\0';
 		parport_negotiate (dev->port, IEEE1284_MODE_COMPAT);
 	}
+	parport_release (dev);
 
 	if (retval > 2)
 		parse_data (dev->port, dev->daisy, buffer);
 
-out:
-	parport_release (dev);
 	parport_close (dev);
 	return retval;
 }

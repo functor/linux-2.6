@@ -26,6 +26,9 @@
 #include <linux/interrupt.h>
 #include <linux/bitops.h>
 #include <linux/pci.h>
+#include <linux/interrupt.h>
+#include <linux/mm.h>
+#include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
@@ -52,15 +55,10 @@
 /*************************************************************************
  * ENP-2611 timer tick configuration
  *************************************************************************/
-static void __init enp2611_timer_init(void)
+static void __init enp2611_init_time(void)
 {
 	ixp2000_init_time(50 * 1000 * 1000);
 }
-
-static struct enp2611_timer = {
-	.init		= enp2611_timer_init,
-	.offset		= ixp2000_gettimeoffset,
-};
 
 
 /*************************************************************************
@@ -204,7 +202,7 @@ MACHINE_START(ENP2611, "Radisys ENP-2611 PCI network processor board")
 	BOOT_PARAMS(0x00000100)
 	MAPIO(ixp2000_map_io)
 	INITIRQ(ixp2000_init_irq)
-	.timer		= &enp2611_timer,
+	INITTIME(enp2611_init_time)
 	INIT_MACHINE(enp2611_init_machine)
 MACHINE_END
 #endif

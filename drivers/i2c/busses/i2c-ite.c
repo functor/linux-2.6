@@ -62,7 +62,6 @@ static int own;
 static struct iic_ite gpi;
 static wait_queue_head_t iic_wait;
 static int iic_pending;
-static spinlock_t lock;
 
 /* ----- local functions ----------------------------------------------	*/
 
@@ -109,7 +108,6 @@ static int iic_ite_getclock(void *data)
 static void iic_ite_waitforpin(void) {
 
    int timeout = 2;
-   long flags;
 
    /* If interrupts are enabled (which they are), then put the process to
     * sleep.  This process will be awakened by two events -- either the
@@ -118,36 +116,24 @@ static void iic_ite_waitforpin(void) {
     * of time and return.
     */
    if (gpi.iic_irq > 0) {
-	spin_lock_irqsave(&lock, flags);
+	cli();
 	if (iic_pending == 0) {
-		spin_unlock_irqrestore(&lock, flags);
-		if (interruptible_sleep_on_timeout(&iic_wait, timeout*HZ)) {
-			spin_lock_irqsave(&lock, flags);
-			if (iic_pending == 1) {
-				iic_pending = 0;
-			}
-			spin_unlock_irqrestore(&lock, flags);
-		}
-	} else {
+		interruptible_sleep_on_timeout(&iic_wait, timeout*HZ );
+	} else
 		iic_pending = 0;
-		spin_unlock_irqrestore(&lock, flags);
-	}
+	sti();
    } else {
       udelay(100);
    }
 }
 
 
-static irqreturn_t iic_ite_handler(int this_irq, void *dev_id,
-							struct pt_regs *regs)
+static void iic_ite_handler(int this_irq, void *dev_id, struct pt_regs *regs) 
 {
-	spin_lock(&lock);
-	iic_pending = 1;
-	spin_unlock(&lock);
+	
+   iic_pending = 1;
 
-	wake_up_interruptible(&iic_wait);
-
-	return IRQ_HANDLED;
+   wake_up_interruptible(&iic_wait);
 }
 
 
@@ -235,7 +221,6 @@ static int __init iic_ite_init(void)
 
 	iic_ite_data.data = (void *)piic;
 	init_waitqueue_head(&iic_wait);
-	spin_lock_init(&lock);
 	if (iic_hw_resrc_init() == 0) {
 		if (i2c_iic_add_bus(&iic_ite_ops) < 0)
 			return -ENODEV;

@@ -12,22 +12,17 @@
 
 #include "modpost.h"
 
-/* We use the ELF typedefs for kernel_ulong_t but bite the bullet and
- * use either stdint.h or inttypes.h for the rest. */
+/* We use the ELF typedefs, since we can't rely on stdint.h being present. */
+
 #if KERNEL_ELFCLASS == ELFCLASS32
-typedef Elf32_Addr	kernel_ulong_t;
+typedef Elf32_Addr     kernel_ulong_t;
 #else
-typedef Elf64_Addr	kernel_ulong_t;
-#endif
-#ifdef __sun__
-#include <inttypes.h>
-#else
-#include <stdint.h>
+typedef Elf64_Addr     kernel_ulong_t;
 #endif
 
-typedef uint32_t	__u32;
-typedef uint16_t	__u16;
-typedef unsigned char	__u8;
+typedef Elf32_Word     __u32;
+typedef Elf32_Half     __u16;
+typedef unsigned char  __u8;
 
 /* Big exception to the "don't include kernel headers into userspace, which
  * even potentially has different endianness and word sizes, since 

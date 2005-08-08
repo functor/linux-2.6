@@ -36,6 +36,7 @@ static spinlock_t sq_mapping_lock = SPIN_LOCK_UNLOCKED;
 
 /**
  * sq_flush - Flush (prefetch) the store queue cache
+ *
  * @addr: the store queue address to flush
  *
  * Executes a prefetch instruction on the specified store queue cache,
@@ -48,6 +49,7 @@ inline void sq_flush(void *addr)
 
 /**
  * sq_flush_range - Flush (prefetch) a specific SQ range
+ *
  * @start: the store queue address to start flushing from
  * @len: the length to flush
  *
@@ -97,7 +99,7 @@ static unsigned long __sq_get_next_addr(void)
 {
 	if (!list_empty(&sq_mapping_list)) {
 		struct list_head *pos, *tmp;
-
+		
 		/*
 		 * Read one off the list head, as it will have the highest
 		 * mapped allocation. Set the next one up right above it.
@@ -124,10 +126,11 @@ static unsigned long __sq_get_next_addr(void)
 
 /**
  * __sq_remap - Perform a translation from the SQ to a phys addr
- * @map: sq mapping containing phys and store queue addresses.
  *
- * Maps the store queue address specified in the mapping to the physical
- * address specified in the mapping.
+ * @phys: Physical address to map store queues too.
+ * @virt: Associated store queue address.
+ *
+ * Maps the store queue address @virt to the physical address @phys.
  */
 static struct sq_mapping *__sq_remap(struct sq_mapping *map)
 {
@@ -207,6 +210,7 @@ static struct sq_mapping *__sq_remap(struct sq_mapping *map)
 
 /**
  * sq_remap - Map a physical address through the Store Queues
+ *
  * @phys: Physical address of mapping.
  * @size: Length of mapping.
  * @name: User invoking mapping.
@@ -250,6 +254,7 @@ struct sq_mapping *sq_remap(unsigned long phys, unsigned int size, const char *n
 
 /**
  * sq_unmap - Unmap a Store Queue allocation
+ *
  * @map: Pre-allocated Store Queue mapping.
  *
  * Unmaps the store queue allocation @map that was previously created by
@@ -267,6 +272,7 @@ void sq_unmap(struct sq_mapping *map)
 
 /**
  * sq_clear - Clear a store queue range
+ *
  * @addr: Address to start clearing from.
  * @len: Length to clear.
  *
@@ -276,7 +282,7 @@ void sq_unmap(struct sq_mapping *map)
 void sq_clear(unsigned long addr, unsigned int len)
 {
 	int i;
-
+	
 	/* Clear out both queues linearly */
 	for (i = 0; i < 8; i++) {
 		ctrl_outl(0, addr + i + 0);
@@ -288,6 +294,7 @@ void sq_clear(unsigned long addr, unsigned int len)
 
 /**
  * sq_vma_unmap - Unmap a VMA range
+ *
  * @area: VMA containing range.
  * @addr: Start of range.
  * @len: Length of range.
@@ -307,24 +314,25 @@ static void sq_vma_unmap(struct vm_area_struct *area,
 		entry = list_entry(pos, typeof(*entry), list);
 
 		if (entry->sq_addr == addr) {
-			/*
+			/* 
 			 * We could probably get away without doing the tlb flush
 			 * here, as generic code should take care of most of this
 			 * when unmapping the rest of the VMA range for us. Leave
 			 * it in for added sanity for the time being..
 			 */
 			__flush_tlb_page(get_asid(), entry->sq_addr & PAGE_MASK);
-
+			
 			list_del(&entry->list);
 			kfree(entry);
 
 			return;
-		}
+		}	
 	}
 }
 
 /**
  * sq_vma_sync - Sync a VMA range
+ *
  * @area: VMA containing range.
  * @start: Start of range.
  * @len: Length of range.
@@ -351,6 +359,7 @@ static struct vm_operations_struct sq_vma_ops = {
 
 /**
  * sq_mmap - mmap() for /dev/cpu/sq
+ *
  * @file: unused.
  * @vma: VMA to remap.
  *
@@ -364,7 +373,7 @@ static int sq_mmap(struct file *file, struct vm_area_struct *vma)
 	unsigned long size = vma->vm_end - vma->vm_start;
 	struct sq_mapping *map;
 
-	/*
+	/* 
 	 * We're not interested in any arbitrary virtual address that has
 	 * been stuck in the VMA, as we already know what addresses we
 	 * want. Save off the size, and reposition the VMA to begin at
@@ -382,7 +391,7 @@ static int sq_mmap(struct file *file, struct vm_area_struct *vma)
 	if (io_remap_page_range(vma, map->sq_addr, map->addr,
 				size, vma->vm_page_prot))
 		return -EAGAIN;
-
+	
 	vma->vm_ops = &sq_vma_ops;
 
 	return 0;
@@ -397,7 +406,7 @@ static int sq_mapping_read_proc(char *buf, char **start, off_t off,
 
 	list_for_each_prev(pos, &sq_mapping_list) {
 		struct sq_mapping *entry;
-
+		
 		entry = list_entry(pos, typeof(*entry), list);
 
 		p += sprintf(p, "%08lx-%08lx [%08lx]: %s\n", entry->sq_addr,

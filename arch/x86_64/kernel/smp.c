@@ -24,7 +24,105 @@
 #include <asm/mtrr.h>
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
-#include <asm/mach_apic.h>
+
+/*
+ * the following functions deal with sending IPIs between CPUs.
+ *
+ * We use 'broadcast', CPU->CPU IPIs and self-IPIs too.
+ */
+
+static inline unsigned int __prepare_ICR (unsigned int shortcut, int vector)
+{
+	unsigned int icr =  APIC_DM_FIXED | shortcut | vector | APIC_DEST_LOGICAL;
+	if (vector == KDB_VECTOR) 
+		icr = (icr & (~APIC_VECTOR_MASK)) | APIC_DM_NMI; 		
+	return icr;
+}
+
+static inline int __prepare_ICR2 (unsigned int mask)
+{
+	return SET_APIC_DEST_FIELD(mask);
+}
+
+static inline void __send_IPI_shortcut(unsigned int shortcut, int vector)
+{
+	/*
+	 * Subtle. In the case of the 'never do double writes' workaround
+	 * we have to lock out interrupts to be safe.  As we don't care
+	 * of the value read we use an atomic rmw access to avoid costly
+	 * cli/sti.  Otherwise we use an even cheaper single atomic write
+	 * to the APIC.
+	 */
+	unsigned int cfg;
+
+	/*
+	 * Wait for idle.
+	 */
+	apic_wait_icr_idle();
+
+	/*
+	 * No need to touch the target chip field
+	 */
+	cfg = __prepare_ICR(shortcut, vector);
+
+	/*
+	 * Send the IPI. The write to APIC_ICR fires this off.
+	 */
+	apic_write_around(APIC_ICR, cfg);
+}
+
+static inline void send_IPI_allbutself(int vector)
+{
+	/*
+	 * if there are no other CPUs in the system then
+	 * we get an APIC send error if we try to broadcast.
+	 * thus we have to avoid sending IPIs in this case.
+	 */
+	if (num_online_cpus() > 1)
+		__send_IPI_shortcut(APIC_DEST_ALLBUT, vector);
+}
+
+static inline void send_IPI_all(int vector)
+{
+	__send_IPI_shortcut(APIC_DEST_ALLINC, vector);
+}
+
+void send_IPI_self(int vector)
+{
+	__send_IPI_shortcut(APIC_DEST_SELF, vector);
+}
+
+static inline void send_IPI_mask(cpumask_t cpumask, int vector)
+{
+	unsigned long mask = cpus_addr(cpumask)[0];
+	unsigned long cfg;
+	unsigned long flags;
+
+	local_save_flags(flags);
+	local_irq_disable();
+
+	/*
+	 * Wait for idle.
+	 */
+	apic_wait_icr_idle();
+
+	/*
+	 * prepare target chip field
+	 */
+	cfg = __prepare_ICR2(mask);
+	apic_write_around(APIC_ICR2, cfg);
+
+	/*
+	 * program the ICR 
+	 */
+	cfg = __prepare_ICR(0, vector);
+	
+	/*
+	 * Send the IPI. The write to APIC_ICR fires this off.
+	 */
+	apic_write_around(APIC_ICR, cfg);
+	local_irq_restore(flags);
+}
 
 /*
  *	Smarter SMP flushing macros. 
@@ -287,47 +385,31 @@ static struct call_data_struct * call_data;
 static void __smp_call_function (void (*func) (void *info), void *info,
 				int nonatomic, int wait)
 {
-	static struct call_data_struct dumpdata;
-	struct call_data_struct normaldata;
-	struct call_data_struct *data;
+	struct call_data_struct data;
 	int cpus = num_online_cpus()-1;
 
 	if (!cpus)
 		return;
 
-	if (wait == -1) {
-		/* if another cpu beat us, they win! */
-		if (dumpdata.func) {
-			spin_unlock(&call_lock);
-			return;
-		}
-		data = &dumpdata;
-	} else
-		data = &normaldata;
+	data.func = func;
+	data.info = info;
+	atomic_set(&data.started, 0);
+	data.wait = wait;
+	if (wait)
+		atomic_set(&data.finished, 0);
 
-	data->func = func;
-	data->info = info;
-	atomic_set(&data->started, 0);
-	data->wait = wait > 0 ? wait : 0;
-	if (wait > 0)
-		atomic_set(&data->finished, 0);
-
-	call_data = data;
+	call_data = &data;
 	wmb();
 	/* Send a message to all other CPUs and wait for them to respond */
 	send_IPI_allbutself(CALL_FUNCTION_VECTOR);
 
 	/* Wait for response */
-	if (wait >= 0)
-		while (atomic_read(&data->started) != cpus)
-			cpu_relax();
+	while (atomic_read(&data.started) != cpus)
+		barrier();
 
-	if (wait > 0)
-		while (atomic_read(&data->finished) != cpus)
-			cpu_relax();
-
-	if (wait >= 0)
-		call_data = NULL;
+	if (wait)
+		while (atomic_read(&data.finished) != cpus)
+			barrier();
 }
 
 /*
@@ -335,10 +417,8 @@ static void __smp_call_function (void (*func) (void *info), void *info,
  * @func: The function to run. This must be fast and non-blocking.
  * @info: An arbitrary pointer to pass to the function.
  * @nonatomic: currently unused.
- * @wait: If 1, wait (atomically) until function has complete on other CPUs.
- *        If 0, wait for the IPI to be received by other CPUs, but do not wait
- *        for the completion of the IPI on each CPU.  If -1, do not wait for
- *        other CPUs to receive IPI.
+ * @wait: If true, wait (atomically) until function has completed on other
+ *        CPUs.
  *
  * Returns 0 on success, else a negative status code. Does not return until
  * remote CPUs are nearly ready to execute func or are or have executed.
@@ -379,10 +459,11 @@ void smp_send_stop(void)
 	int nolock = 0;
 	/* Don't deadlock on the call lock in panic */
 	if (!spin_trylock(&call_lock)) {
+		udelay(100);
 		/* ignore locking because we have paniced anyways */
 		nolock = 1;
 	}
-	__smp_call_function(smp_really_stop_cpu, NULL, 0, 0);
+	__smp_call_function(smp_really_stop_cpu, NULL, 1, 0);
 	if (!nolock)
 		spin_unlock(&call_lock);
 	smp_stop_cpu();

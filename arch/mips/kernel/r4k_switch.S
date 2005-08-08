@@ -75,8 +75,17 @@
 	and	t0, t0, t1
 	LONG_S	t0, ST_OFF(t3)
 
-	fpu_save_double a0 t1 t0 t2		# c0_status passed in t1
-						# clobbers t0 and t2
+#ifdef CONFIG_MIPS32
+	fpu_save_double a0 t0			# clobbers t0
+#endif
+#ifdef CONFIG_MIPS64
+	sll	t2, t0, 5
+	bgez	t2, 2f
+	sdc1	$f0, (THREAD_FPU + 0x00)(a0)
+        fpu_save_16odd a0
+2:
+        fpu_save_16even a0 t1                   # clobbers t1
+#endif
 1:
 
 	/*
@@ -105,10 +114,18 @@
  * Save a thread's fp context.
  */
 LEAF(_save_fp)
-#ifdef CONFIG_MIPS64
-	mfc0	t1, CP0_STATUS
+#ifdef CONFIG_MIPS32
+	fpu_save_double a0 t1			# clobbers t1
 #endif
-	fpu_save_double a0 t1 t0 t2		# clobbers t1
+#ifdef CONFIG_MIPS64
+	mfc0	t0, CP0_STATUS
+	sll	t1, t0, 5
+	bgez	t1, 1f				# 16 register mode?
+	fpu_save_16odd a0
+1:
+	fpu_save_16even a0 t1			# clobbers t1
+	sdc1	$f0, (THREAD_FPU + 0x00)(a0)
+#endif
 	jr	ra
 	END(_save_fp)
 
@@ -116,7 +133,19 @@ LEAF(_save_fp)
  * Restore a thread's fp context.
  */
 LEAF(_restore_fp)
+#ifdef CONFIG_MIPS32
 	fpu_restore_double a0, t1		# clobbers t1
+#endif
+#ifdef CONFIG_MIPS64
+	mfc0	t0, CP0_STATUS
+	sll	t1, t0, 5
+	bgez	t1, 1f				# 16 register mode?
+
+	fpu_restore_16odd a0
+1:	fpu_restore_16even a0, t0		# clobbers t0
+	 ldc1	$f0, (THREAD_FPU + 0x00)(a0)
+#endif
+
 	jr	ra
 	END(_restore_fp)
 

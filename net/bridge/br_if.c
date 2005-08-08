@@ -147,9 +147,9 @@ static struct net_device *new_bridge_dev(const char *name)
 	br = netdev_priv(dev);
 	br->dev = dev;
 
-	spin_lock_init(&br->lock);
+	br->lock = SPIN_LOCK_UNLOCKED;
 	INIT_LIST_HEAD(&br->port_list);
-	spin_lock_init(&br->hash_lock);
+	br->hash_lock = SPIN_LOCK_UNLOCKED;
 
 	br->bridge_id.prio[0] = 0x80;
 	br->bridge_id.prio[1] = 0x00;

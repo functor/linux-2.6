@@ -36,7 +36,6 @@
 #include "speedstep-lib.h"
 
 #define PFX	"p4-clockmod: "
-#define dprintk(msg...) cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, "p4-clockmod", msg)
 
 /*
  * Duty Cycle (3bits), note DC_DISABLE is not specified in
@@ -63,20 +62,20 @@ static int cpufreq_p4_setdc(unsigned int cpu, unsigned int newstate)
 		return -EINVAL;
 
 	rdmsr(MSR_IA32_THERM_STATUS, l, h);
-
+#if 0
 	if (l & 0x01)
-		dprintk("CPU#%d currently thermal throttled\n", cpu);
-
+		printk(KERN_DEBUG PFX "CPU#%d currently thermal throttled\n", cpu);
+#endif
 	if (has_N44_O17_errata[cpu] && (newstate == DC_25PT || newstate == DC_DFLT))
 		newstate = DC_38PT;
 
 	rdmsr(MSR_IA32_THERM_CONTROL, l, h);
 	if (newstate == DC_DISABLE) {
-		dprintk("CPU#%d disabling modulation\n", cpu);
+		/* printk(KERN_INFO PFX "CPU#%d disabling modulation\n", cpu); */
 		wrmsr(MSR_IA32_THERM_CONTROL, l & ~(1<<4), h);
 	} else {
-		dprintk("CPU#%d setting duty cycle to %d%%\n",
-			cpu, ((125 * newstate) / 10));
+		/* printk(KERN_INFO PFX "CPU#%d setting duty cycle to %d%%\n",
+			cpu, ((125 * newstate) / 10)); */
 		/* bits 63 - 5	: reserved 
 		 * bit  4	: enable/disable
 		 * bits 3-1	: duty cycle
@@ -111,7 +110,7 @@ static int cpufreq_p4_target(struct cpufreq_policy *policy,
 {
 	unsigned int    newstate = DC_RESV;
 	struct cpufreq_freqs freqs;
-	cpumask_t cpus_allowed;
+	cpumask_t cpus_allowed, affected_cpu_map;
 	int i;
 
 	if (cpufreq_frequency_table_target(policy, &p4clockmod_table[0], target_freq, relation, &newstate))
@@ -123,8 +122,18 @@ static int cpufreq_p4_target(struct cpufreq_policy *policy,
 	if (freqs.new == freqs.old)
 		return 0;
 
+	/* switch to physical CPU where state is to be changed*/
+	cpus_allowed = current->cpus_allowed;
+
+	/* only run on CPU to be set, or on its sibling */
+#ifdef CONFIG_SMP
+	affected_cpu_map = cpu_sibling_map[policy->cpu];
+#else
+	affected_cpu_map = cpumask_of_cpu(policy->cpu);
+#endif
+
 	/* notifiers */
-	for_each_cpu_mask(i, policy->cpus) {
+	for_each_cpu_mask(i, affected_cpu_map) {
 		freqs.cpu = i;
 		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
 	}
@@ -132,9 +141,7 @@ static int cpufreq_p4_target(struct cpufreq_policy *policy,
 	/* run on each logical CPU, see section 13.15.3 of IA32 Intel Architecture Software
 	 * Developer's Manual, Volume 3 
 	 */
-	cpus_allowed = current->cpus_allowed;
-
-	for_each_cpu_mask(i, policy->cpus) {
+	for_each_cpu_mask(i, affected_cpu_map) {
 		cpumask_t this_cpu = cpumask_of_cpu(i);
 
 		set_cpus_allowed(current, this_cpu);
@@ -145,7 +152,7 @@ static int cpufreq_p4_target(struct cpufreq_policy *policy,
 	set_cpus_allowed(current, cpus_allowed);
 
 	/* notifiers */
-	for_each_cpu_mask(i, policy->cpus) {
+	for_each_cpu_mask(i, affected_cpu_map) {
 		freqs.cpu = i;
 		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
 	}
@@ -212,10 +219,6 @@ static int cpufreq_p4_cpu_init(struct cpufreq_policy *policy)
 	int cpuid = 0;
 	unsigned int i;
 
-#ifdef CONFIG_SMP
-	policy->cpus = cpu_sibling_map[policy->cpu];
-#endif
-
 	/* Errata workaround */
 	cpuid = (c->x86 << 8) | (c->x86_model << 4) | c->x86_mask;
 	switch (cpuid) {
@@ -224,7 +227,6 @@ static int cpufreq_p4_cpu_init(struct cpufreq_policy *policy)
 	case 0x0f11:
 	case 0x0f12:
 		has_N44_O17_errata[policy->cpu] = 1;
-		dprintk("has errata -- disabling low frequencies\n");
 	}
 	
 	/* get max frequency */
@@ -258,13 +260,14 @@ static int cpufreq_p4_cpu_exit(struct cpufreq_policy *policy)
 
 static unsigned int cpufreq_p4_get(unsigned int cpu)
 {
-	cpumask_t cpus_allowed;
+	cpumask_t cpus_allowed, affected_cpu_map;
 	u32 l, h;
 
 	cpus_allowed = current->cpus_allowed;
+        affected_cpu_map = cpumask_of_cpu(cpu);
 
-	set_cpus_allowed(current, cpumask_of_cpu(cpu));
-	BUG_ON(smp_processor_id() != cpu);
+	set_cpus_allowed(current, affected_cpu_map);
+        BUG_ON(!cpu_isset(smp_processor_id(), affected_cpu_map));
 
 	rdmsr(MSR_IA32_THERM_CONTROL, l, h);
 
@@ -302,7 +305,6 @@ static struct cpufreq_driver p4clockmod_driver = {
 static int __init cpufreq_p4_init(void)
 {	
 	struct cpuinfo_x86 *c = cpu_data;
-	int ret;
 
 	/*
 	 * THERM_CONTROL is architectural for IA32 now, so 
@@ -315,11 +317,9 @@ static int __init cpufreq_p4_init(void)
 		!test_bit(X86_FEATURE_ACC, c->x86_capability))
 		return -ENODEV;
 
-	ret = cpufreq_register_driver(&p4clockmod_driver);
-	if (!ret)
-		printk(KERN_INFO PFX "P4/Xeon(TM) CPU On-Demand Clock Modulation available\n");
+	printk(KERN_INFO PFX "P4/Xeon(TM) CPU On-Demand Clock Modulation available\n");
 
-	return (ret);
+	return cpufreq_register_driver(&p4clockmod_driver);
 }
 
 
@@ -335,3 +335,4 @@ MODULE_LICENSE ("GPL");
 
 late_initcall(cpufreq_p4_init);
 module_exit(cpufreq_p4_exit);
+

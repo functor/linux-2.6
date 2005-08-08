@@ -4,7 +4,6 @@
  */
 
 #include "linux/sys.h"
-#include "linux/ptrace.h"
 #include "asm/errno.h"
 #include "asm/unistd.h"
 #include "asm/ptrace.h"

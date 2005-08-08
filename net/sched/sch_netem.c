@@ -15,7 +15,7 @@
 
 #include <linux/config.h>
 #include <linux/module.h>
-#include <linux/bitops.h>
+#include <asm/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -142,27 +142,23 @@ static int delay_skb(struct Qdisc *sch, struct sk_buff *skb)
 {
 	struct netem_sched_data *q = qdisc_priv(sch);
 	struct netem_skb_cb *cb = (struct netem_skb_cb *)skb->cb;
-	psched_tdiff_t td;
 	psched_time_t now;
 	
 	PSCHED_GET_TIME(now);
-	td = tabledist(q->latency, q->jitter, &q->delay_cor, q->delay_dist);
-	PSCHED_TADD2(now, td, cb->time_to_send);
+	PSCHED_TADD2(now, tabledist(q->latency, q->jitter, 
+				    &q->delay_cor, q->delay_dist),
+		     cb->time_to_send);
 	
 	/* Always queue at tail to keep packets in order */
 	if (likely(q->delayed.qlen < q->limit)) {
 		__skb_queue_tail(&q->delayed, skb);
-		sch->bstats.bytes += skb->len;
-		sch->bstats.packets++;
-
-		if (!timer_pending(&q->timer)) {
-			q->timer.expires = jiffies + PSCHED_US2JIFFIE(td);
-			add_timer(&q->timer);
-		}
+		sch->q.qlen++;
+		sch->stats.bytes += skb->len;
+		sch->stats.packets++;
 		return NET_XMIT_SUCCESS;
 	}
 
-	sch->qstats.drops++;
+	sch->stats.drops++;
 	kfree_skb(skb);
 	return NET_XMIT_DROP;
 }
@@ -176,7 +172,7 @@ static int netem_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	/* Random packet drop 0 => none, ~0 => all */
 	if (q->loss && q->loss >= get_crandom(&q->loss_cor)) {
 		pr_debug("netem_enqueue: random loss\n");
-		sch->qstats.drops++;
+		sch->stats.drops++;
 		return 0;	/* lie about loss so TCP doesn't know */
 	}
 
@@ -199,12 +195,8 @@ static int netem_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 
 		++q->counter;
 		ret = q->qdisc->enqueue(skb, q->qdisc);
-		if (likely(ret == NET_XMIT_SUCCESS)) {
-			sch->q.qlen++;
-			sch->bstats.bytes += skb->len;
-			sch->bstats.packets++;
-		} else
-			sch->qstats.drops++;
+		if (ret)
+			sch->stats.drops++;
 		return ret;
 	}
 	
@@ -219,10 +211,8 @@ static int netem_requeue(struct sk_buff *skb, struct Qdisc *sch)
 	struct netem_sched_data *q = qdisc_priv(sch);
 	int ret;
 
-	if ((ret = q->qdisc->ops->requeue(skb, q->qdisc)) == 0) {
+	if ((ret = q->qdisc->ops->requeue(skb, q->qdisc)) == 0)
 		sch->q.qlen++;
-		sch->qstats.requeues++;
-	}
 
 	return ret;
 }
@@ -234,7 +224,7 @@ static unsigned int netem_drop(struct Qdisc* sch)
 
 	if ((len = q->qdisc->ops->drop(q->qdisc)) != 0) {
 		sch->q.qlen--;
-		sch->qstats.drops++;
+		sch->stats.drops++;
 	}
 	return len;
 }
@@ -247,32 +237,15 @@ static struct sk_buff *netem_dequeue(struct Qdisc *sch)
 {
 	struct netem_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *skb;
-
-	skb = q->qdisc->dequeue(q->qdisc);
-	if (skb) 
-		sch->q.qlen--;
-	return skb;
-}
-
-static void netem_watchdog(unsigned long arg)
-{
-	struct Qdisc *sch = (struct Qdisc *)arg;
-	struct netem_sched_data *q = qdisc_priv(sch);
-	struct net_device *dev = sch->dev;
-	struct sk_buff *skb;
 	psched_time_t now;
 
-	pr_debug("netem_watchdog: fired @%lu\n", jiffies);
-
-	spin_lock_bh(&dev->queue_lock);
 	PSCHED_GET_TIME(now);
-
 	while ((skb = skb_peek(&q->delayed)) != NULL) {
 		const struct netem_skb_cb *cb
 			= (const struct netem_skb_cb *)skb->cb;
 		long delay 
 			= PSCHED_US2JIFFIE(PSCHED_TDIFF(cb->time_to_send, now));
-		pr_debug("netem_watchdog: skb %p@%lu %ld\n",
+		pr_debug("netem_dequeue: delay queue %p@%lu %ld\n",
 			 skb, jiffies, delay);
 
 		/* if more time remaining? */
@@ -283,12 +256,21 @@ static void netem_watchdog(unsigned long arg)
 		__skb_unlink(skb, &q->delayed);
 
 		if (q->qdisc->enqueue(skb, q->qdisc))
-			sch->qstats.drops++;
-		else
-			sch->q.qlen++;
+			sch->stats.drops++;
 	}
-	qdisc_run(dev);
-	spin_unlock_bh(&dev->queue_lock);
+
+	skb = q->qdisc->dequeue(q->qdisc);
+	if (skb) 
+		sch->q.qlen--;
+	return skb;
+}
+
+static void netem_watchdog(unsigned long arg)
+{
+	struct Qdisc *sch = (struct Qdisc *)arg;
+
+	pr_debug("netem_watchdog: fired @%lu\n", jiffies);
+	netif_schedule(sch->dev);
 }
 
 static void netem_reset(struct Qdisc *sch)

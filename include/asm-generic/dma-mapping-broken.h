@@ -9,7 +9,7 @@ dma_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_handle,
 		   int flag)
 {
 	BUG();
-	return NULL;
+	return 0;
 }
 
 static inline void

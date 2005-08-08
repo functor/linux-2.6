@@ -47,11 +47,9 @@ MODULE_DESCRIPTION("Driver for 1-wire Dallas network protocol.");
 
 static int w1_timeout = 10;
 int w1_max_slave_count = 10;
-int w1_max_slave_ttl = 10;
 
 module_param_named(timeout, w1_timeout, int, 0);
 module_param_named(max_slave_count, w1_max_slave_count, int, 0);
-module_param_named(slave_ttl, w1_max_slave_ttl, int, 0);
 
 spinlock_t w1_mlock = SPIN_LOCK_UNLOCKED;
 LIST_HEAD(w1_masters);
@@ -433,7 +431,6 @@ static int w1_attach_slave_device(struct w1_master *dev, struct w1_reg_num *rn)
 		return err;
 	}
 
-	sl->ttl = dev->slave_ttl;
 	dev->slave_count++;
 
 	memcpy(&msg.id.id, rn, sizeof(msg.id.id));
@@ -449,13 +446,8 @@ static void w1_slave_detach(struct w1_slave *sl)
 	
 	dev_info(&sl->dev, "%s: detaching %s.\n", __func__, sl->name);
 
-	while (atomic_read(&sl->refcnt)) {
-		printk(KERN_INFO "Waiting for %s to become free: refcnt=%d.\n",
-				sl->name, atomic_read(&sl->refcnt));
-
-		if (msleep_interruptible(1000))
-			flush_signals(current);
-	}
+	while (atomic_read(&sl->refcnt))
+		schedule_timeout(10);
 
 	sysfs_remove_bin_file (&sl->dev.kobj, &sl->attr_bin);
 	device_remove_file(&sl->dev, &sl->attr_name);
@@ -512,8 +504,8 @@ static void w1_search(struct w1_master *dev)
 			 * All who don't sleep must send ID bit and COMPLEMENT ID bit.
 			 * They actually are ANDed between all senders.
 			 */
-			id_bit = w1_touch_bit(dev, 1);
-			comp_bit = w1_touch_bit(dev, 1);
+			id_bit = w1_read_bit(dev);
+			comp_bit = w1_read_bit(dev);
 
 			if (id_bit && comp_bit)
 				break;
@@ -544,10 +536,7 @@ static void w1_search(struct w1_master *dev)
 			 * and make all who don't have "search_bit" in "i"'th position
 			 * in it's registration number sleep.
 			 */
-			if (dev->bus_master->touch_bit)
-				w1_touch_bit(dev, search_bit);
-			else
-				w1_write_bit(dev, search_bit);
+			w1_write_bit(dev, search_bit);
 
 		}
 #endif
@@ -580,7 +569,7 @@ static void w1_search(struct w1_master *dev)
 		}
 
 		if (slave_count == dev->slave_count &&
-			rn && ((rn >> 56) & 0xff) == w1_calc_crc8((u8 *)&rn, 7)) {
+		    ((rn >> 56) & 0xff) == w1_calc_crc8((u8 *)&rn, 7)) {
 			w1_attach_slave_device(dev, (struct w1_reg_num *) &rn);
 		}
 	}
@@ -729,7 +718,7 @@ int w1_process(void *data)
 		list_for_each_safe(ent, n, &dev->slist) {
 			sl = list_entry(ent, struct w1_slave, w1_slave_entry);
 
-			if (sl && !test_bit(W1_SLAVE_ACTIVE, (unsigned long *)&sl->flags) && !--sl->ttl) {
+			if (sl && !test_bit(W1_SLAVE_ACTIVE, (unsigned long *)&sl->flags)) {
 				list_del (&sl->w1_slave_entry);
 
 				w1_slave_detach (sl);
@@ -737,8 +726,6 @@ int w1_process(void *data)
 
 				dev->slave_count--;
 			}
-			else if (test_bit(W1_SLAVE_ACTIVE, (unsigned long *)&sl->flags))
-				sl->ttl = dev->slave_ttl;
 		}
 		up(&dev->mutex);
 	}

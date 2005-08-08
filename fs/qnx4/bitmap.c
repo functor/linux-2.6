@@ -21,7 +21,8 @@
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/buffer_head.h>
-#include <linux/bitops.h>
+
+#include <asm/bitops.h>
 
 int qnx4_new_block(struct super_block *sb)
 {

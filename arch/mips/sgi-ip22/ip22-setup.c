@@ -29,6 +29,12 @@
 #include <asm/sgi/hpc3.h>
 #include <asm/sgi/ip22.h>
 
+#ifdef CONFIG_KGDB
+extern void rs_kgdb_hook(int);
+extern void breakpoint(void);
+static int remote_debug = 0;
+#endif
+
 unsigned long sgi_gfxaddr;
 
 /*
@@ -37,6 +43,7 @@ unsigned long sgi_gfxaddr;
  *
  * FIXME: provide a mechanism to change the value of stop_a_enabled.
  */
+int serial_console;
 int stop_a_enabled;
 
 void ip22_do_break(void)
@@ -56,6 +63,9 @@ extern void ip22_time_init(void) __init;
 static int __init ip22_setup(void)
 {
 	char *ctype;
+#ifdef CONFIG_KGDB
+	char *kgdb_ttyd;
+#endif
 
 	board_be_init = ip22_be_init;
 	ip22_time_init();
@@ -74,10 +84,9 @@ static int __init ip22_setup(void)
 	indy_sc_init();
 #endif
 
-	/* Set EISA IO port base for Indigo2
-	 * ioremap cannot fail */
-	set_io_port_base((unsigned long)ioremap(0x00080000,
-						0x1fffffff - 0x00080000));
+	/* Set EISA IO port base for Indigo2 */
+	set_io_port_base(KSEG1ADDR(0x00080000));
+
 	/* ARCS console environment variable is set to "g?" for
 	 * graphics console, it is set to "d" for the first serial
 	 * line and "d2" for the second serial line.
@@ -97,9 +106,7 @@ static int __init ip22_setup(void)
 	}
 
 #ifdef CONFIG_KGDB
-	{
-	char *kgdb_ttyd = prom_getcmdline();
-
+	kgdb_ttyd = prom_getcmdline();
 	if ((kgdb_ttyd = strstr(kgdb_ttyd, "kgdb=ttyd")) != NULL) {
 		int line;
 		kgdb_ttyd += strlen("kgdb=ttyd");
@@ -114,9 +121,8 @@ static int __init ip22_setup(void)
 		printk(KERN_INFO "KGDB: Using serial line /dev/ttyd%d for "
 		       "session, please connect your debugger\n", line ? 1:2);
 
-		kgdb_enabled = 1;
+		remote_debug = 1;
 		/* Breakpoints and stuff are in sgi_irq_setup() */
-	}
 	}
 #endif
 

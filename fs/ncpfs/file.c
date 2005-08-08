@@ -170,6 +170,7 @@ ncp_file_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 
 	*ppos = pos;
 
+	if (!IS_RDONLY(inode) || (file && MNT_IS_RDONLY(file->f_vfsmnt))) {
 	file_accessed(file);
 
 	DPRINTK("ncp_file_read: exit %s/%s\n",
@@ -262,7 +263,7 @@ ncp_file_write(struct file *file, const char __user *buf, size_t count, loff_t *
 	}
 	vfree(bouncebuffer);
 
-	inode_update_time(inode, file->f_vfsmnt, 1); /* Both mtime and ctime */
+	inode_update_time(inode, 1);
 
 	*ppos = pos;
 

@@ -635,13 +635,19 @@ static int snd_ctl_elem_info(snd_ctl_file_t *ctl, snd_ctl_elem_info_t __user *_i
 	return result;
 }
 
-int snd_ctl_elem_read(snd_card_t *card, snd_ctl_elem_value_t *control)
+static int snd_ctl_elem_read(snd_card_t *card, snd_ctl_elem_value_t __user *_control)
 {
+	snd_ctl_elem_value_t *control;
 	snd_kcontrol_t *kctl;
 	snd_kcontrol_volatile_t *vd;
 	unsigned int index_offset;
 	int result, indirect;
-
+	
+	control = kmalloc(sizeof(*control), GFP_KERNEL);
+	if (control == NULL)
+		return -ENOMEM;	
+	if (copy_from_user(control, _control, sizeof(*control)))
+		return -EFAULT;
 	down_read(&card->controls_rwsem);
 	kctl = snd_ctl_find_id(card, &control->id);
 	if (kctl == NULL) {
@@ -662,37 +668,27 @@ int snd_ctl_elem_read(snd_card_t *card, snd_ctl_elem_value_t *control)
 		}
 	}
 	up_read(&card->controls_rwsem);
-	return result;
-}
-
-static int snd_ctl_elem_read_user(snd_card_t *card, snd_ctl_elem_value_t __user *_control)
-{
-	snd_ctl_elem_value_t *control;
-	int result;
-	
-	control = kmalloc(sizeof(*control), GFP_KERNEL);
-	if (control == NULL)
-		return -ENOMEM;	
-	if (copy_from_user(control, _control, sizeof(*control))) {
-		kfree(control);
-		return -EFAULT;
-	}
-	result = snd_ctl_elem_read(card, control);
 	if (result >= 0)
 		if (copy_to_user(_control, control, sizeof(*control)))
-			result = -EFAULT;
+			return -EFAULT;
 	kfree(control);
 	return result;
 }
 
-int snd_ctl_elem_write(snd_ctl_file_t *file, snd_ctl_elem_value_t *control)
+static int snd_ctl_elem_write(snd_ctl_file_t *file, snd_ctl_elem_value_t __user *_control)
 {
 	snd_card_t *card = file->card;
+	snd_ctl_elem_value_t *control;
 	snd_kcontrol_t *kctl;
 	snd_kcontrol_volatile_t *vd;
 	unsigned int index_offset;
 	int result, indirect;
 
+	control = kmalloc(sizeof(*control), GFP_KERNEL);
+	if (control == NULL)
+		return -ENOMEM;	
+	if (copy_from_user(control, _control, sizeof(*control)))
+		return -EFAULT;
 	down_read(&card->controls_rwsem);
 	kctl = snd_ctl_find_id(card, &control->id);
 	if (kctl == NULL) {
@@ -715,30 +711,16 @@ int snd_ctl_elem_write(snd_ctl_file_t *file, snd_ctl_elem_value_t *control)
 			if (result > 0) {
 				up_read(&card->controls_rwsem);
 				snd_ctl_notify(card, SNDRV_CTL_EVENT_MASK_VALUE, &control->id);
-				return 0;
+				result = 0;
+				goto __unlocked;
 			}
 		}
 	}
 	up_read(&card->controls_rwsem);
-	return result;
-}
-
-static int snd_ctl_elem_write_user(snd_ctl_file_t *file, snd_ctl_elem_value_t __user *_control)
-{
-	snd_ctl_elem_value_t *control;
-	int result;
-
-	control = kmalloc(sizeof(*control), GFP_KERNEL);
-	if (control == NULL)
-		return -ENOMEM;	
-	if (copy_from_user(control, _control, sizeof(*control))) {
-		kfree(control);
-		return -EFAULT;
-	}
-	result = snd_ctl_elem_write(file, control);
+      __unlocked:
 	if (result >= 0)
 		if (copy_to_user(_control, control, sizeof(*control)))
-			result = -EFAULT;
+			return -EFAULT;
 	kfree(control);
 	return result;
 }
@@ -1063,9 +1045,9 @@ static inline int _snd_ctl_ioctl(struct inode *inode, struct file *file,
 	case SNDRV_CTL_IOCTL_ELEM_INFO:
 		return snd_ctl_elem_info(ctl, argp);
 	case SNDRV_CTL_IOCTL_ELEM_READ:
-		return snd_ctl_elem_read_user(ctl->card, argp);
+		return snd_ctl_elem_read(ctl->card, argp);
 	case SNDRV_CTL_IOCTL_ELEM_WRITE:
-		return snd_ctl_elem_write_user(ctl, argp);
+		return snd_ctl_elem_write(ctl, argp);
 	case SNDRV_CTL_IOCTL_ELEM_LOCK:
 		return snd_ctl_elem_lock(ctl, argp);
 	case SNDRV_CTL_IOCTL_ELEM_UNLOCK:

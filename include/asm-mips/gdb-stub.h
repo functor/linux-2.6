@@ -207,7 +207,6 @@ struct gdb_regs {
  * Prototypes
  */
 
-extern int kgdb_enabled;
 void set_debug_traps(void);
 void set_async_breakpoint(unsigned long *epc);
 

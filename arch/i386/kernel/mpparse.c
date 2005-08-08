@@ -808,6 +808,7 @@ void __init find_smp_config (void)
 		smp_scan_config(address, 0x400);
 }
 
+
 /* --------------------------------------------------------------------------
                             ACPI-based MP Configuration
    -------------------------------------------------------------------------- */
@@ -995,12 +996,6 @@ void __init mp_config_acpi_legacy_irqs (void)
 	mp_bus_id_to_type[MP_ISA_BUS] = MP_BUS_ISA;
 	Dprintk("Bus #%d is ISA\n", MP_ISA_BUS);
 
-	/*
-	 * ES7000 has no legacy identity mappings
-	 */
-	if (es7000_plat)
-		return;
-
 	/* 
 	 * Locate the IOAPIC that manages the ISA IRQs (0-15). 
 	 */
@@ -1054,7 +1049,9 @@ void __init mp_config_acpi_legacy_irqs (void)
 	}
 }
 
-int mp_register_gsi (u32 gsi, int edge_level, int active_high_low)
+int (*platform_rename_gsi)(int ioapic, int gsi);
+
+void mp_register_gsi (u32 gsi, int edge_level, int active_high_low)
 {
 	int			ioapic = -1;
 	int			ioapic_pin = 0;
@@ -1063,19 +1060,19 @@ int mp_register_gsi (u32 gsi, int edge_level, int active_high_low)
 #ifdef CONFIG_ACPI_BUS
 	/* Don't set up the ACPI SCI because it's already set up */
 	if (acpi_fadt.sci_int == gsi)
-		return gsi;
+		return;
 #endif
 
 	ioapic = mp_find_ioapic(gsi);
 	if (ioapic < 0) {
 		printk(KERN_WARNING "No IOAPIC for GSI %u\n", gsi);
-		return gsi;
+		return;
 	}
 
 	ioapic_pin = gsi - mp_ioapic_routing[ioapic].gsi_base;
 
-	if (ioapic_renumber_irq)
-		gsi = ioapic_renumber_irq(ioapic, gsi);
+	if (platform_rename_gsi)
+		gsi = platform_rename_gsi(ioapic, gsi);
 
 	/* 
 	 * Avoid pin reprogramming.  PRTs typically include entries  
@@ -1088,12 +1085,12 @@ int mp_register_gsi (u32 gsi, int edge_level, int active_high_low)
 		printk(KERN_ERR "Invalid reference to IOAPIC pin "
 			"%d-%d\n", mp_ioapic_routing[ioapic].apic_id, 
 			ioapic_pin);
-		return gsi;
+		return;
 	}
 	if ((1<<bit) & mp_ioapic_routing[ioapic].pin_programmed[idx]) {
 		Dprintk(KERN_DEBUG "Pin %d-%d already programmed\n",
 			mp_ioapic_routing[ioapic].apic_id, ioapic_pin);
-		return gsi;
+		return;
 	}
 
 	mp_ioapic_routing[ioapic].pin_programmed[idx] |= (1<<bit);
@@ -1101,7 +1098,6 @@ int mp_register_gsi (u32 gsi, int edge_level, int active_high_low)
 	io_apic_set_pci_routing(ioapic, ioapic_pin, gsi,
 		    edge_level == ACPI_EDGE_SENSITIVE ? 0 : 1,
 		    active_high_low == ACPI_ACTIVE_HIGH ? 0 : 1);
-	return gsi;
 }
 
 #endif /*CONFIG_X86_IO_APIC && (CONFIG_ACPI_INTERPRETER || CONFIG_ACPI_BOOT)*/

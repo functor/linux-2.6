@@ -16,10 +16,9 @@
  *  properties parser
  */
 
-#undef DEBUG
-
 #include <linux/config.h>
 #include <linux/types.h>
+#include <linux/delay.h>
 #include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -34,12 +33,12 @@
 
 #define MAX_LOW_I2C_HOST	4
 
-#ifdef DEBUG
+#if 1
 #define DBG(x...) do {\
 		printk(KERN_DEBUG "KW:" x);	\
 	} while(0)
 #else
-#define DBG(x...)
+#define DBGG(x...)
 #endif
 
 struct low_i2c_host;
@@ -51,11 +50,11 @@ struct low_i2c_host
 	struct device_node	*np;		/* OF device node */
 	struct semaphore	mutex;		/* Access mutex for use by i2c-keywest */
 	low_i2c_func_t		func;		/* Access function */
-	unsigned int		is_open : 1;	/* Poor man's access control */
+	unsigned		is_open : 1;	/* Poor man's access control */
 	int			mode;		/* Current mode */
 	int			channel;	/* Current channel */
 	int			num_channels;	/* Number of channels */
-	void __iomem		*base;		/* For keywest-i2c, base address */
+	unsigned long		base;		/* For keywest-i2c, base address */
 	int			bsteps;		/* And register stepping */
 	int			speed;		/* And speed */
 };
@@ -155,12 +154,14 @@ static const char *__kw_state_names[] = {
 
 static inline u8 __kw_read_reg(struct low_i2c_host *host, reg_t reg)
 {
-	return readb(host->base + (((unsigned int)reg) << host->bsteps));
+	return in_8(((volatile u8 *)host->base)
+		+ (((unsigned)reg) << host->bsteps));
 }
 
 static inline void __kw_write_reg(struct low_i2c_host *host, reg_t reg, u8 val)
 {
-	writeb(val, host->base + (((unsigned)reg) << host->bsteps));
+	out_8(((volatile u8 *)host->base)
+		+ (((unsigned)reg) << host->bsteps), val);
 	(void)__kw_read_reg(host, reg_subaddr);
 }
 
@@ -173,19 +174,14 @@ static inline void __kw_write_reg(struct low_i2c_host *host, reg_t reg, u8 val)
  */
 static u8 kw_wait_interrupt(struct low_i2c_host* host)
 {
-	int i, j;
+	int i;
 	u8 isr;
 	
-	for (i = 0; i < 100000; i++) {
+	for (i = 0; i < 200000; i++) {
 		isr = kw_read_reg(reg_isr) & KW_I2C_IRQ_MASK;
 		if (isr != 0)
 			return isr;
-
-		/* This code is used with the timebase frozen, we cannot rely
-		 * on udelay ! For now, just use a bogus loop
-		 */
-		for (j = 1; j < 10000; j++)
-			mb();
+		udelay(1);
 	}
 	return isr;
 }
@@ -193,8 +189,6 @@ static u8 kw_wait_interrupt(struct low_i2c_host* host)
 static int kw_handle_interrupt(struct low_i2c_host *host, int state, int rw, int *rc, u8 **data, int *len, u8 isr)
 {
 	u8 ack;
-
-	DBG("kw_handle_interrupt(%s, isr: %x)\n", __kw_state_names[state], isr);
 
 	if (isr == 0) {
 		if (state != state_stop) {
@@ -307,9 +301,11 @@ static int keywest_low_i2c_func(struct low_i2c_host *host, u8 addr, u8 subaddr, 
 		break;
 	case pmac_low_i2c_mode_stdsub:
 		mode_reg |= KW_I2C_MODE_STANDARDSUB;
+		kw_write_reg(reg_subaddr, subaddr);
 		break;
 	case pmac_low_i2c_mode_combined:
 		mode_reg |= KW_I2C_MODE_COMBINED;
+		kw_write_reg(reg_subaddr, subaddr);
 		break;
 	}
 
@@ -320,11 +316,6 @@ static int keywest_low_i2c_func(struct low_i2c_host *host, u8 addr, u8 subaddr, 
 
 	/* Set up address and r/w bit */
 	kw_write_reg(reg_addr, addr);
-
-	/* Set up the sub address */
-	if ((mode_reg & KW_I2C_MODE_MODE_MASK) == KW_I2C_MODE_STANDARDSUB
-	    || (mode_reg & KW_I2C_MODE_MODE_MASK) == KW_I2C_MODE_COMBINED)
-		kw_write_reg(reg_subaddr, subaddr);
 
 	/* Start sending address & disable interrupt*/
 	kw_write_reg(reg_ier, 0 /*KW_I2C_IRQ_MASK*/);
@@ -342,7 +333,7 @@ static int keywest_low_i2c_func(struct low_i2c_host *host, u8 addr, u8 subaddr, 
 static void keywest_low_i2c_add(struct device_node *np)
 {
 	struct low_i2c_host	*host = find_low_i2c_host(NULL);
-	u32			*psteps, *prate, steps, aoffset = 0;
+	unsigned long		*psteps, *prate, steps, aoffset = 0;
 	struct device_node	*parent;
 
 	if (host == NULL) {
@@ -354,7 +345,7 @@ static void keywest_low_i2c_add(struct device_node *np)
 
 	init_MUTEX(&host->mutex);
 	host->np = of_node_get(np);	
-	psteps = (u32 *)get_property(np, "AAPL,address-step", NULL);
+	psteps = (unsigned long *)get_property(np, "AAPL,address-step", NULL);
 	steps = psteps ? (*psteps) : 0x10;
 	for (host->bsteps = 0; (steps & 0x01) == 0; host->bsteps++)
 		steps >>= 1;
@@ -366,7 +357,7 @@ static void keywest_low_i2c_add(struct device_node *np)
 	}
 	/* Select interface rate */
 	host->speed = KW_I2C_MODE_100KHZ;
-	prate = (u32 *)get_property(np, "AAPL,i2c-rate", NULL);
+	prate = (unsigned long *)get_property(np, "AAPL,i2c-rate", NULL);
 	if (prate) switch(*prate) {
 	case 100:
 		host->speed = KW_I2C_MODE_100KHZ;
@@ -378,9 +369,8 @@ static void keywest_low_i2c_add(struct device_node *np)
 		host->speed = KW_I2C_MODE_25KHZ;
 		break;
 	}	
-
 	host->mode = pmac_low_i2c_mode_std;
-	host->base = ioremap(np->addrs[0].address + aoffset,
+	host->base = (unsigned long)ioremap(np->addrs[0].address + aoffset,
 						np->addrs[0].size);
 	host->func = keywest_low_i2c_func;
 }

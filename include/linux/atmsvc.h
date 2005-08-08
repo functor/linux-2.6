@@ -14,10 +14,9 @@
 #define ATMSIGD_CTRL _IO('a',ATMIOC_SPECIAL)
 				/* become ATM signaling demon control socket */
 
-enum atmsvc_msg_type { as_catch_null, as_bind, as_connect, as_accept, as_reject,
-		       as_listen, as_okay, as_error, as_indicate, as_close,
-		       as_itf_notify, as_modify, as_identify, as_terminate,
-		       as_addparty, as_dropparty };
+enum atmsvc_msg_type { as_catch_null,as_bind,as_connect,as_accept,as_reject,
+  as_listen,as_okay,as_error,as_indicate,as_close,as_itf_notify,
+  as_modify,as_identify,as_terminate };
 
 struct atmsvc_msg {
 	enum atmsvc_msg_type type;

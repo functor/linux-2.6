@@ -19,11 +19,7 @@ unsigned long swap_token_check;
 struct mm_struct * swap_token_mm = &init_mm;
 
 #define SWAP_TOKEN_CHECK_INTERVAL (HZ * 2)
-#define SWAP_TOKEN_TIMEOUT	0
-/*
- * Currently disabled; Needs further code to work at HZ * 300.
- */
-unsigned long swap_token_default_timeout = SWAP_TOKEN_TIMEOUT;
+#define SWAP_TOKEN_TIMEOUT (HZ * 300)
 
 /*
  * Take the token away if the process had no page faults
@@ -79,10 +75,10 @@ void grab_swap_token(void)
 		if ((reason = should_release_swap_token(mm))) {
 			unsigned long eligible = jiffies;
 			if (reason == SWAP_TOKEN_TIMED_OUT) {
-				eligible += swap_token_default_timeout;
+				eligible += SWAP_TOKEN_TIMEOUT;
 			}
 			mm->swap_token_time = eligible;
-			swap_token_timeout = jiffies + swap_token_default_timeout;
+			swap_token_timeout = jiffies + SWAP_TOKEN_TIMEOUT;
 			swap_token_mm = current->mm;
 		}
 		spin_unlock(&swap_token_lock);

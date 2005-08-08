@@ -29,11 +29,8 @@
 
 #include <linux/module.h>
 #include <linux/i2o.h>
-#include <linux/delay.h>
 
 struct i2o_driver i2o_exec_driver;
-
-static int i2o_exec_lct_notify(struct i2o_controller *c, u32 change_ind);
 
 /* Module internal functions from other sources */
 extern int i2o_device_parse_lct(struct i2o_controller *);
@@ -48,7 +45,7 @@ struct i2o_exec_wait {
 	u32 tcntxt;		/* transaction context from reply */
 	int complete;		/* 1 if reply received otherwise 0 */
 	u32 m;			/* message id */
-	struct i2o_message __iomem *msg;	/* pointer to the reply message */
+	struct i2o_message *msg;	/* pointer to the reply message */
 	struct list_head list;	/* node in global wait list */
 };
 
@@ -112,20 +109,21 @@ int i2o_msg_post_wait_mem(struct i2o_controller *c, u32 m, unsigned long
 			  timeout, struct i2o_dma *dma)
 {
 	DECLARE_WAIT_QUEUE_HEAD(wq);
-	struct i2o_exec_wait *wait;
+	DEFINE_WAIT(wait);
+	struct i2o_exec_wait *iwait;
 	static u32 tcntxt = 0x80000000;
-	struct i2o_message __iomem *msg = c->in_queue.virt + m;
+	struct i2o_message *msg = c->in_queue.virt + m;
 	int rc = 0;
 
-	wait = i2o_exec_wait_alloc();
-	if (!wait)
+	iwait = i2o_exec_wait_alloc();
+	if (!iwait)
 		return -ENOMEM;
 
 	if (tcntxt == 0xffffffff)
 		tcntxt = 0x80000000;
 
 	if (dma)
-		wait->dma = *dma;
+		iwait->dma = *dma;
 
 	/*
 	 * Fill in the message initiator context and transaction context.
@@ -133,8 +131,8 @@ int i2o_msg_post_wait_mem(struct i2o_controller *c, u32 m, unsigned long
 	 * so we could find a POST WAIT reply easier in the reply handler.
 	 */
 	writel(i2o_exec_driver.context, &msg->u.s.icntxt);
-	wait->tcntxt = tcntxt++;
-	writel(wait->tcntxt, &msg->u.s.tcntxt);
+	iwait->tcntxt = tcntxt++;
+	writel(iwait->tcntxt, &msg->u.s.tcntxt);
 
 	/*
 	 * Post the message to the controller. At some point later it will
@@ -142,27 +140,31 @@ int i2o_msg_post_wait_mem(struct i2o_controller *c, u32 m, unsigned long
 	 */
 	i2o_msg_post(c, m);
 
-	if (!wait->complete) {
-		wait->wq = &wq;
+	if (!iwait->complete) {
+		iwait->wq = &wq;
 		/*
 		 * we add elements add the head, because if a entry in the list
 		 * will never be removed, we have to iterate over it every time
 		 */
-		list_add(&wait->list, &i2o_exec_wait_list);
+		list_add(&iwait->list, &i2o_exec_wait_list);
 
-		wait_event_interruptible_timeout(wq, wait->complete,
-			timeout * HZ);
+		prepare_to_wait(&wq, &wait, TASK_INTERRUPTIBLE);
 
-		wait->wq = NULL;
+		if (!iwait->complete)
+			schedule_timeout(timeout * HZ);
+
+		finish_wait(&wq, &wait);
+
+		iwait->wq = NULL;
 	}
 
 	barrier();
 
-	if (wait->complete) {
-		if (readl(&wait->msg->body[0]) >> 24)
-			rc = readl(&wait->msg->body[0]) & 0xff;
-		i2o_flush_reply(c, wait->m);
-		i2o_exec_wait_free(wait);
+	if (iwait->complete) {
+		if (readl(&iwait->msg->body[0]) >> 24)
+			rc = readl(&iwait->msg->body[0]) & 0xff;
+		i2o_flush_reply(c, iwait->m);
+		i2o_exec_wait_free(iwait);
 	} else {
 		/*
 		 * We cannot remove it now. This is important. When it does
@@ -199,14 +201,12 @@ int i2o_msg_post_wait_mem(struct i2o_controller *c, u32 m, unsigned long
  *	message must also be given back to the controller.
  */
 static int i2o_msg_post_wait_complete(struct i2o_controller *c, u32 m,
-				      struct i2o_message __iomem *msg)
+				      struct i2o_message *msg)
 {
 	struct i2o_exec_wait *wait, *tmp;
-	static spinlock_t lock;
+	static spinlock_t lock = SPIN_LOCK_UNLOCKED;
 	int rc = 1;
 	u32 context;
-
-	spin_lock_init(&lock);
 
 	context = readl(&msg->u.s.tcntxt);
 
@@ -322,13 +322,13 @@ static void i2o_exec_lct_modified(struct i2o_controller *c)
 static int i2o_exec_reply(struct i2o_controller *c, u32 m,
 			  struct i2o_message *msg)
 {
-	if (le32_to_cpu(msg->u.head[0]) & MSG_FAIL) {	// Fail bit is set
-		struct i2o_message __iomem *pmsg;	/* preserved message */
+	if (readl(&msg->u.head[0]) & MSG_FAIL) {	// Fail bit is set
+		struct i2o_message *pmsg;	/* preserved message */
 		u32 pm;
 
-		pm = le32_to_cpu(msg->body[3]);
+		pm = readl(&msg->body[3]);
 
-		pmsg = i2o_msg_in_to_virt(c, pm);
+		pmsg = c->in_queue.virt + pm;
 
 		i2o_report_status(KERN_INFO, "i2o_core", msg);
 
@@ -339,10 +339,10 @@ static int i2o_exec_reply(struct i2o_controller *c, u32 m,
 		return -1;
 	}
 
-	if (le32_to_cpu(msg->u.s.tcntxt) & 0x80000000)
+	if (readl(&msg->u.s.tcntxt) & 0x80000000)
 		return i2o_msg_post_wait_complete(c, m, msg);
 
-	if ((le32_to_cpu(msg->u.head[1]) >> 24) == I2O_CMD_LCT_NOTIFY) {
+	if ((readl(&msg->u.head[1]) >> 24) == I2O_CMD_LCT_NOTIFY) {
 		struct work_struct *work;
 
 		pr_debug("%s: LCT notify received\n", c->name);
@@ -395,7 +395,7 @@ static void i2o_exec_event(struct i2o_event *evt)
  */
 int i2o_exec_lct_get(struct i2o_controller *c)
 {
-	struct i2o_message __iomem *msg;
+	struct i2o_message *msg;
 	u32 m;
 	int i = 0;
 	int rc = -EAGAIN;
@@ -435,11 +435,11 @@ int i2o_exec_lct_get(struct i2o_controller *c)
  *	replies immediately after the request. If change_ind > 0 the reply is
  *	send after change indicator of the LCT is > change_ind.
  */
-static int i2o_exec_lct_notify(struct i2o_controller *c, u32 change_ind)
+int i2o_exec_lct_notify(struct i2o_controller *c, u32 change_ind)
 {
 	i2o_status_block *sb = c->status_block.virt;
 	struct device *dev;
-	struct i2o_message __iomem *msg;
+	struct i2o_message *msg;
 	u32 m;
 
 	dev = &c->pdev->dev;
@@ -502,3 +502,4 @@ void __exit i2o_exec_exit(void)
 
 EXPORT_SYMBOL(i2o_msg_post_wait_mem);
 EXPORT_SYMBOL(i2o_exec_lct_get);
+EXPORT_SYMBOL(i2o_exec_lct_notify);

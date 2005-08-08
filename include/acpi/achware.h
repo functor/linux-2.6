@@ -131,12 +131,10 @@ acpi_hw_clear_gpe_block (
 	struct acpi_gpe_xrupt_info      *gpe_xrupt_info,
 	struct acpi_gpe_block_info      *gpe_block);
 
-#ifdef ACPI_FUTURE_USAGE
 acpi_status
 acpi_hw_get_gpe_status (
 	struct acpi_gpe_event_info      *gpe_event_info,
 	acpi_event_status               *event_status);
-#endif
 
 acpi_status
 acpi_hw_disable_all_gpes (
@@ -163,7 +161,6 @@ acpi_hw_enable_wakeup_gpe_block (
 
 /* ACPI Timer prototypes */
 
-#ifdef ACPI_FUTURE_USAGE
 acpi_status
 acpi_get_timer_resolution (
 	u32                             *resolution);
@@ -177,6 +174,6 @@ acpi_get_timer_duration (
 	u32                             start_ticks,
 	u32                             end_ticks,
 	u32                             *time_elapsed);
-#endif  /*  ACPI_FUTURE_USAGE  */
+
 
 #endif /* __ACHWARE_H__ */

@@ -21,10 +21,7 @@
 #include <linux/poll.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <asm/sn/io.h>
 #include <asm/sn/sn_sal.h>
-#include <asm/sn/module.h>
-#include <asm/sn/geo.h>
 #include <asm/sn/nodepda.h>
 #include "snsc.h"
 
@@ -367,15 +364,17 @@ int __init
 scdrv_init(void)
 {
 	geoid_t geoid;
-	cnodeid_t cnode;
+	cmoduleid_t cmod;
+	int i;
 	char devname[32];
 	char *devnamep;
+	module_t *m;
 	struct sysctl_data_s *scd;
 	void *salbuf;
 	struct class_simple *snsc_class;
 	dev_t first_dev, dev;
 
-	if (alloc_chrdev_region(&first_dev, 0, numionodes,
+	if (alloc_chrdev_region(&first_dev, 0, (MAX_SLABS*nummodules),
 				SYSCTL_BASENAME) < 0) {
 		printk("%s: failed to register SN system controller device\n",
 		       __FUNCTION__);
@@ -383,8 +382,16 @@ scdrv_init(void)
 	}
 	snsc_class = class_simple_create(THIS_MODULE, SYSCTL_BASENAME);
 
-	for (cnode = 0; cnode < numionodes; cnode++) {
-			geoid = cnodeid_get_geoid(cnode);
+	for (cmod = 0; cmod < nummodules; cmod++) {
+		m = sn_modules[cmod];
+		for (i = 0; i <= MAX_SLABS; i++) {
+
+			if (m->nodes[i] == -1) {
+				/* node is not alive in module */
+				continue;
+			}
+
+			geoid = m->geoid[i];
 			devnamep = devname;
 			format_module_id(devnamep, geo_module(geoid),
 					 MODULE_FORMAT_BRIEF);
@@ -403,7 +410,7 @@ scdrv_init(void)
 			memset(scd, 0, sizeof (struct sysctl_data_s));
 
 			/* initialize sysctl device data fields */
-			scd->scd_nasid = cnodeid_to_nasid(cnode);
+			scd->scd_nasid = cnodeid_to_nasid(m->nodes[i]);
 			if (!(salbuf = kmalloc(SCDRV_BUFSZ, GFP_KERNEL))) {
 				printk("%s: failed to allocate driver buffer"
 				       "(%s%s)\n", __FUNCTION__,
@@ -424,7 +431,7 @@ scdrv_init(void)
 				continue;
 			}
 
-			dev = first_dev + cnode;
+			dev = first_dev + m->nodes[i];
 			cdev_init(&scd->scd_cdev, &scdrv_fops);
 			if (cdev_add(&scd->scd_cdev, dev, 1)) {
 				printk("%s: failed to register system"
@@ -441,6 +448,7 @@ scdrv_init(void)
 			ia64_sn_irtr_intr_enable(scd->scd_nasid,
 						 0 /*ignored */ ,
 						 SAL_IROUTER_INTR_RECV);
+		}
 	}
 	return 0;
 }

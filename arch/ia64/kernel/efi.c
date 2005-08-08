@@ -28,7 +28,6 @@
 
 #include <asm/io.h>
 #include <asm/kregs.h>
-#include <asm/meminit.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/mca.h>
@@ -325,12 +324,12 @@ efi_memmap_walk (efi_freemem_callback_t callback, void *arg)
 		 * [granule_addr - first_non_wb_addr) is guaranteed to
 		 * be contiguous WB memory.
 		 */
-		granule_addr = GRANULEROUNDDOWN(md->phys_addr);
+		granule_addr = md->phys_addr & ~(IA64_GRANULE_SIZE - 1);
 		first_non_wb_addr = max(first_non_wb_addr, granule_addr);
 
 		if (first_non_wb_addr < md->phys_addr) {
 			trim_bottom(md, granule_addr + IA64_GRANULE_SIZE);
-			granule_addr = GRANULEROUNDDOWN(md->phys_addr);
+			granule_addr = md->phys_addr & ~(IA64_GRANULE_SIZE - 1);
 			first_non_wb_addr = max(first_non_wb_addr, granule_addr);
 		}
 
@@ -344,36 +343,24 @@ efi_memmap_walk (efi_freemem_callback_t callback, void *arg)
 				break;		/* non-WB or hole */
 		}
 
-		last_granule_addr = GRANULEROUNDDOWN(first_non_wb_addr);
+		last_granule_addr = first_non_wb_addr & ~(IA64_GRANULE_SIZE - 1);
 		if (last_granule_addr < md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT))
 			trim_top(md, last_granule_addr);
 
 		if (is_available_memory(md)) {
-			if (md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT) >= max_addr) {
-				if (md->phys_addr >= max_addr)
+			if (md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT) > max_addr) {
+				if (md->phys_addr > max_addr)
 					continue;
 				md->num_pages = (max_addr - md->phys_addr) >> EFI_PAGE_SHIFT;
-				first_non_wb_addr = max_addr;
 			}
 
 			if (total_mem >= mem_limit)
 				continue;
-
-			if (total_mem + (md->num_pages << EFI_PAGE_SHIFT) > mem_limit) {
-				unsigned long limit_addr = md->phys_addr;
-
-				limit_addr += mem_limit - total_mem;
-				limit_addr = GRANULEROUNDDOWN(limit_addr);
-
-				if (md->phys_addr > limit_addr)
-					continue;
-
-				md->num_pages = (limit_addr - md->phys_addr) >>
-				                EFI_PAGE_SHIFT;
-				first_non_wb_addr = max_addr = md->phys_addr +
-				              (md->num_pages << EFI_PAGE_SHIFT);
-			}
 			total_mem += (md->num_pages << EFI_PAGE_SHIFT);
+			if (total_mem > mem_limit) {
+				md->num_pages -= ((total_mem - mem_limit) >> EFI_PAGE_SHIFT);
+				max_addr = md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT);
+			}
 
 			if (md->num_pages == 0)
 				continue;
@@ -508,13 +495,13 @@ efi_init (void)
 	for (cp = saved_command_line; *cp; ) {
 		if (memcmp(cp, "mem=", 4) == 0) {
 			cp += 4;
-			mem_limit = memparse(cp, &end);
+			mem_limit = memparse(cp, &end) - 2;
 			if (end != cp)
 				break;
 			cp = end;
 		} else if (memcmp(cp, "max_addr=", 9) == 0) {
 			cp += 9;
-			max_addr = GRANULEROUNDDOWN(memparse(cp, &end));
+			max_addr = memparse(cp, &end) - 1;
 			if (end != cp)
 				break;
 			cp = end;

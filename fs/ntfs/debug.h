@@ -22,9 +22,13 @@
 #ifndef _LINUX_NTFS_DEBUG_H
 #define _LINUX_NTFS_DEBUG_H
 
+#include <linux/kernel.h>
+#include <linux/string.h>
+#include <linux/spinlock.h>
 #include <linux/fs.h>
 
-#include "runlist.h"
+#include "inode.h"
+#include "attrib.h"
 
 #ifdef DEBUG
 

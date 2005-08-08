@@ -67,7 +67,6 @@ acpi_pci_data_handler (
  * to resolve PCI information for ACPI-PCI devices defined in the namespace.
  * This typically occurs when resolving PCI operation region information.
  */
-#ifdef ACPI_FUTURE_USAGE
 acpi_status
 acpi_os_get_pci_id (
 	acpi_handle		handle,
@@ -115,7 +114,6 @@ acpi_os_get_pci_id (
 
 	return_ACPI_STATUS(AE_OK);
 }
-#endif  /*  ACPI_FUTURE_USAGE  */
 
 	
 int

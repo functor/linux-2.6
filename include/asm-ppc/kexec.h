@@ -2,7 +2,6 @@
 #define _PPC_KEXEC_H
 
 #ifdef CONFIG_KEXEC
-
 /*
  * KEXEC_SOURCE_MEMORY_LIMIT maximum page get_free_page can return.
  * I.e. Maximum page that is mapped directly into kernel memory,
@@ -21,15 +20,6 @@
 #define KEXEC_CONTROL_MEMORY_LIMIT TASK_SIZE
 
 #define KEXEC_CONTROL_CODE_SIZE	4096
-
-
-#ifndef __ASSEMBLY__
-
-struct kimage;
-
-extern void machine_kexec_simple(struct kimage *image);
-
-#endif /* __ASSEMBLY__ */
 
 #endif /* CONFIG_KEXEC */
 

@@ -31,7 +31,6 @@
 #include <linux/security.h>
 #include <linux/bootmem.h>
 #include <linux/vs_base.h>
-#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
 
@@ -110,7 +109,6 @@ struct console_cmdline
 #define MAX_CMDLINECONSOLES 8
 
 static struct console_cmdline console_cmdline[MAX_CMDLINECONSOLES];
-static int selected_console = -1;
 static int preferred_console = -1;
 
 /* Flag: console code may call schedule() */
@@ -143,7 +141,7 @@ static int __init console_setup(char *str)
 		strcpy(name, "ttyS1");
 #endif
 	for(s = name; *s; s++)
-		if ((*s >= '0' && *s <= '9') || *s == ',')
+		if (*s >= '0' && *s <= '9')
 			break;
 	idx = simple_strtoul(s, NULL, 10);
 	*s = 0;
@@ -176,12 +174,12 @@ int __init add_preferred_console(char *name, int idx, char *options)
 	for(i = 0; i < MAX_CMDLINECONSOLES && console_cmdline[i].name[0]; i++)
 		if (strcmp(console_cmdline[i].name, name) == 0 &&
 			  console_cmdline[i].index == idx) {
-				selected_console = i;
+				preferred_console = i;
 				return 0;
 		}
 	if (i == MAX_CMDLINECONSOLES)
 		return -E2BIG;
-	selected_console = i;
+	preferred_console = i;
 	c = &console_cmdline[i];
 	memcpy(c->name, name, sizeof(c->name));
 	c->name[sizeof(c->name) - 1] = 0;
@@ -288,6 +286,7 @@ int do_syslog(int type, char __user * buf, int len)
 			error = __put_user(c,buf);
 			buf++;
 			i++;
+			cond_resched();
 			spin_lock_irq(&logbuf_lock);
 		}
 		spin_unlock_irq(&logbuf_lock);
@@ -329,6 +328,7 @@ int do_syslog(int type, char __user * buf, int len)
 			c = LOG_BUF(j);
 			spin_unlock_irq(&logbuf_lock);
 			error = __put_user(c,&buf[count-1-i]);
+			cond_resched();
 			spin_lock_irq(&logbuf_lock);
 		}
 		spin_unlock_irq(&logbuf_lock);
@@ -344,6 +344,7 @@ int do_syslog(int type, char __user * buf, int len)
 					error = -EFAULT;
 					break;
 				}
+				cond_resched();
 			}
 		}
 		break;
@@ -382,20 +383,6 @@ out:
 asmlinkage long sys_syslog(int type, char __user * buf, int len)
 {
 	return do_syslog(type, buf, len);
-}
-
-/*
- * Crashdump special routine. Don't print to global log_buf, just to the
- * actual console device(s).
- */
-static void crashdump_call_console_drivers(const char *buf, unsigned long len)
-{
-	struct console *con;
-
-	for (con = console_drivers; con; con = con->next) {
-		if ((con->flags & CON_ENABLED) && con->write)
-			con->write(con, buf, len);
-	}
 }
 
 /*
@@ -539,8 +526,6 @@ asmlinkage int printk(const char *fmt, ...)
 	return r;
 }
 
-static volatile int printk_cpu = -1;
-
 asmlinkage int vprintk(const char *fmt, va_list args)
 {
 	unsigned long flags;
@@ -549,21 +534,14 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	static char printk_buf[1024];
 	static int log_level_unknown = 1;
 
-	if (unlikely(oops_in_progress && printk_cpu == smp_processor_id()))
+	if (unlikely(oops_in_progress))
 		zap_locks();
 
 	/* This stops the holder of console_sem just where we want him */
 	spin_lock_irqsave(&logbuf_lock, flags);
-	printk_cpu = smp_processor_id();
 
 	/* Emit the output into the temporary buffer */
 	printed_len = vscnprintf(printk_buf, sizeof(printk_buf), fmt, args);
-
-	if (unlikely(crashdump_mode())) {
-		crashdump_call_console_drivers(printk_buf, printed_len);
-		spin_unlock_irqrestore(&logbuf_lock, flags);
-		goto out;
-	}
 
 	/*
 	 * Copy the output into log_buf.  If the caller didn't provide
@@ -689,10 +667,12 @@ EXPORT_SYMBOL(release_console_sem);
  *
  * Must be called within acquire_console_sem().
  */
-void __sched console_conditional_schedule(void)
+void console_conditional_schedule(void)
 {
-	if (console_may_schedule)
-		cond_resched();
+	if (console_may_schedule && need_resched()) {
+		set_current_state(TASK_RUNNING);
+		schedule();
+	}
 }
 EXPORT_SYMBOL(console_conditional_schedule);
 
@@ -773,9 +753,6 @@ void register_console(struct console * console)
 {
 	int     i;
 	unsigned long flags;
-
-	if (preferred_console < 0)
-		preferred_console = selected_console;
 
 	/*
 	 *	See if we want to use this console driver. If we
@@ -867,7 +844,7 @@ int unregister_console(struct console * console)
 	 * would prevent fbcon from taking over.
 	 */
 	if (console_drivers == NULL)
-		preferred_console = selected_console;
+		preferred_console = -1;
 		
 
 	release_console_sem();
@@ -885,7 +862,7 @@ EXPORT_SYMBOL(unregister_console);
 void tty_write_message(struct tty_struct *tty, char *msg)
 {
 	if (tty && tty->driver->write)
-		tty->driver->write(tty, msg, strlen(msg));
+		tty->driver->write(tty, 0, msg, strlen(msg));
 	return;
 }
 
