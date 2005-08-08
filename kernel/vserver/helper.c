@@ -29,12 +29,13 @@ int do_vshelper(char *name, char *argv[], char *envp[], int sync)
 
 	if ((ret = call_usermodehelper(name, argv, envp, sync))) {
 		printk(	KERN_WARNING
-			"%s: (%s %s) returned with %d\n",
-			name, argv[1], argv[2], ret);
+			"%s: (%s %s) returned %s with %d\n",
+			name, argv[1], argv[2],
+			sync?"sync":"async", ret);
 	}
 	vxdprintk(VXD_CBIT(switch, 1),
-		"%s: (%s %s) returned with %d",
-		name, argv[1], argv[2], ret);
+		"%s: (%s %s) returned %s with %d",
+		name, argv[1], argv[2], sync?"sync":"async", ret);
 	return ret;
 }
 
@@ -82,6 +83,9 @@ long vs_reboot(unsigned int cmd, void * arg)
 	case LINUX_REBOOT_CMD_SW_SUSPEND:
 		argv[1] = "swsusp";
 		break;
+
+	default:
+		return 0;
 	}
 
 	if (do_vshelper(vshelper_path, argv, envp, 1))
@@ -91,9 +95,6 @@ long vs_reboot(unsigned int cmd, void * arg)
 
 
 /*
- *      invoked by vserver sys_reboot(), with
- *      the following arguments
- *
  *      argv [0] = vshelper_path;
  *      argv [1] = action: "startup", "shutdown"
  *      argv [2] = context identifier
@@ -101,7 +102,7 @@ long vs_reboot(unsigned int cmd, void * arg)
  *      envp [*] = type-specific parameters
  */
 
-long vs_context_state(struct vx_info *vxi, unsigned int cmd)
+long vs_state_change(struct vx_info *vxi, unsigned int cmd)
 {
 	char id_buf[8], cmd_buf[16];
 	char *argv[] = {vshelper_path, NULL, id_buf, 0};
@@ -112,10 +113,10 @@ long vs_context_state(struct vx_info *vxi, unsigned int cmd)
 	snprintf(cmd_buf, sizeof(cmd_buf)-1, "VS_CMD=%08x", cmd);
 
 	switch (cmd) {
-	case VS_CONTEXT_CREATED:
+	case VSC_STARTUP:
 		argv[1] = "startup";
 		break;
-	case VS_CONTEXT_DESTROY:
+	case VSC_SHUTDOWN:
 		argv[1] = "shutdown";
 		break;
 	default:

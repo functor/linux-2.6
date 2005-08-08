@@ -33,7 +33,6 @@
 #include <linux/route.h>
 #include <linux/ip.h>
 #include <linux/cache.h>
-#include <linux/vs_context.h>
 #include <linux/vs_network.h>
 
 #ifndef __KERNEL__

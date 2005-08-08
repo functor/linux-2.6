@@ -4084,7 +4084,7 @@ static void __init daring(int *ints, int param, int param2)
 			    FD_SILENT_DCL_CLEAR;
 		} else {
 			default_drive_params[i].params.select_delay =
-			    2 * HZ / 100;
+			    SEL_DLY;
 			default_drive_params[i].params.flags &=
 			    ~FD_SILENT_DCL_CLEAR;
 		}

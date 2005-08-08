@@ -124,6 +124,7 @@
 #include <linux/filter.h>
 #include <linux/vs_socket.h>
 #include <linux/vs_limit.h>
+#include <linux/vs_context.h>
 
 #ifdef CONFIG_INET
 #include <net/tcp.h>

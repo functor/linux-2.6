@@ -1702,6 +1702,20 @@ void proc_pid_flush(struct dentry *proc_dentry)
 	}
 }
 
+#define	VXF_FAKE_INIT	(VXF_INFO_INIT|VXF_STATE_INIT)
+
+static inline int proc_pid_visible(struct task_struct *task, int pid)
+{
+	if ((pid == 1) &&
+		!vx_flags(VXF_FAKE_INIT, VXF_FAKE_INIT))
+		goto visible;
+	if (vx_check(vx_task_xid(task), VX_WATCH|VX_IDENT))
+		goto visible;
+	return 0;
+visible:
+	return 1;
+}
+
 /* SMP-safe */
 struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, struct nameidata *nd)
 {
@@ -1738,7 +1752,8 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, struct
 	if (!task)
 		goto out;
 
-	if (!vx_check(vx_task_xid(task), VX_WATCH|VX_IDENT))
+	/* check for context visibility */
+	if (!proc_pid_visible(task, tgid))
 		goto out_drop_task;
 
 	inode = proc_pid_make_inode(dir->i_sb, task, PROC_TGID_INO);
@@ -1799,7 +1814,8 @@ static struct dentry *proc_task_lookup(struct inode *dir, struct dentry * dentry
 	if (leader->tgid != task->tgid)
 		goto out_drop_task;
 
-	if (!vx_check(vx_task_xid(task), VX_WATCH|VX_IDENT))
+	/* check for context visibility */
+	if (!proc_pid_visible(task, tid))
 		goto out_drop_task;
 
 	inode = proc_pid_make_inode(dir->i_sb, task, PROC_TID_INO);
@@ -1856,7 +1872,8 @@ static int get_tgid_list(int index, unsigned long version, unsigned int *tgids)
 
 		if (!pid_alive(p))
 			continue;
-		if (!vx_check(vx_task_xid(p), VX_WATCH|VX_IDENT))
+		/* check for context visibility */
+		if (!proc_pid_visible(p, tgid))
 			continue;
 		if (--index >= 0)
 			continue;
@@ -1890,7 +1907,8 @@ static int get_tid_list(int index, unsigned int *tids, struct inode *dir)
 	if (pid_alive(task)) do {
 		int tid = task->pid;
 
-		if (!vx_check(vx_task_xid(task), VX_WATCH|VX_IDENT))
+		/* check for context visibility */
+		if (!proc_pid_visible(task, tid))
 			continue;
 		if (--index >= 0)
 			continue;

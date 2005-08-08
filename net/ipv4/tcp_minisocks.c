@@ -31,6 +31,7 @@
 
 #include <linux/vs_limit.h>
 #include <linux/vs_socket.h>
+#include <linux/vs_context.h>
 
 #ifdef CONFIG_SYSCTL
 #define SYNC_INIT 0 /* let the user enable it */
