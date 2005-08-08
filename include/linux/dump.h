@@ -20,7 +20,7 @@
 #ifndef _DUMP_H
 #define _DUMP_H
 
-#if defined(CONFIG_CRASH_DUMP)
+#if defined(CONFIG_CRASH_DUMP) || defined (CONFIG_CRASH_DUMP_MODULE)
 
 #include <linux/list.h>
 #include <linux/notifier.h>

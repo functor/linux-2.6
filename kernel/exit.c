@@ -514,7 +514,7 @@ static inline void __exit_mm(struct task_struct * tsk)
 	task_lock(tsk);
 	tsk->mm = NULL;
 	up_read(&mm->mmap_sem);
-	ckrm_task_clear_mm(tsk, mm);
+	ckrm_task_mm_clear(tsk, mm);
 	enter_lazy_tlb(mm, current);
 	task_unlock(tsk);
 	mmput(mm);
