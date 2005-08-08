@@ -11,8 +11,14 @@
  *
  */
 
+/* Changes
+ * 
+ * 31 Mar 2004: Created
+ * 
+ */
+
 /*
- * CKRM Resource controller for tracking number of tasks in a class.
+ * Code Description: TBD
  */
 
 #include <linux/module.h>
@@ -22,43 +28,44 @@
 #include <asm/div64.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
+#include <linux/ckrm.h>
 #include <linux/ckrm_rc.h>
 #include <linux/ckrm_tc.h>
 #include <linux/ckrm_tsk.h>
 
-#define TOTAL_NUM_TASKS (131072)	/* 128 K */
+#define TOTAL_NUM_TASKS (131072)	// 128 K
 #define NUMTASKS_DEBUG
 #define NUMTASKS_NAME "numtasks"
 
-struct ckrm_numtasks {
-	struct ckrm_core_class *core;	/* the core i am part of... */
-	struct ckrm_core_class *parent;	/* parent of the core above. */
+typedef struct ckrm_numtasks {
+	struct ckrm_core_class *core;	// the core i am part of...
+	struct ckrm_core_class *parent;	// parent of the core above.
 	struct ckrm_shares shares;
-	spinlock_t cnt_lock;	/* always grab parent's lock before child's */
-	int cnt_guarantee;	/* num_tasks guarantee in local units */
-	int cnt_unused;		/* has to borrow if more than this is needed */
-	int cnt_limit;		/* no tasks over this limit. */
-	atomic_t cnt_cur_alloc;	/* current alloc from self */
-	atomic_t cnt_borrowed;	/* borrowed from the parent */
+	spinlock_t cnt_lock;	// always grab parent's lock before child's
+	int cnt_guarantee;	// num_tasks guarantee in local units
+	int cnt_unused;		// has to borrow if more than this is needed
+	int cnt_limit;		// no tasks over this limit.
+	atomic_t cnt_cur_alloc;	// current alloc from self
+	atomic_t cnt_borrowed;	// borrowed from the parent
 
-	int over_guarantee;	/* turn on/off when cur_alloc goes  */
-				/* over/under guarantee */
+	int over_guarantee;	// turn on/off when cur_alloc goes 
+				// over/under guarantee
 
-	/* internally maintained statictics to compare with max numbers */
-	int limit_failures;	/* # failures as request was over the limit */
-	int borrow_sucesses;	/* # successful borrows */
-	int borrow_failures;	/* # borrow failures */
+	// internally maintained statictics to compare with max numbers
+	int limit_failures;	// # failures as request was over the limit
+	int borrow_sucesses;	// # successful borrows
+	int borrow_failures;	// # borrow failures
 
-	/* Maximum the specific statictics has reached. */
+	// Maximum the specific statictics has reached.
 	int max_limit_failures;
 	int max_borrow_sucesses;
 	int max_borrow_failures;
 
-	/* Total number of specific statistics */
+	// Total number of specific statistics
 	int tot_limit_failures;
 	int tot_borrow_sucesses;
 	int tot_borrow_failures;
-};
+} ckrm_numtasks_t;
 
 struct ckrm_res_ctlr numtasks_rcbs;
 
@@ -67,7 +74,7 @@ struct ckrm_res_ctlr numtasks_rcbs;
  * to make share values sane.
  * Does not traverse hierarchy reinitializing children.
  */
-static void numtasks_res_initcls_one(struct ckrm_numtasks * res)
+static void numtasks_res_initcls_one(ckrm_numtasks_t * res)
 {
 	res->shares.my_guarantee = CKRM_SHARE_DONTCARE;
 	res->shares.my_limit = CKRM_SHARE_DONTCARE;
@@ -99,15 +106,27 @@ static void numtasks_res_initcls_one(struct ckrm_numtasks * res)
 	return;
 }
 
-static int numtasks_get_ref_local(struct ckrm_core_class *core, int force)
+#if 0
+static void numtasks_res_initcls(void *my_res)
+{
+	ckrm_numtasks_t *res = my_res;
+
+	/* Write a version which propagates values all the way down 
+	   and replace rcbs callback with that version */
+
+}
+#endif
+
+static int numtasks_get_ref_local(void *arg, int force)
 {
 	int rc, resid = numtasks_rcbs.resid;
-	struct ckrm_numtasks *res;
+	ckrm_numtasks_t *res;
+	ckrm_core_class_t *core = arg;
 
 	if ((resid < 0) || (core == NULL))
 		return 1;
 
-	res = ckrm_get_res_class(core, resid, struct ckrm_numtasks);
+	res = ckrm_get_res_class(core, resid, ckrm_numtasks_t);
 	if (res == NULL)
 		return 1;
 
@@ -133,44 +152,51 @@ static int numtasks_get_ref_local(struct ckrm_core_class *core, int force)
 				res->borrow_failures++;
 				res->tot_borrow_failures++;
 			}
-		} else
+		} else {
 			rc = force;
+		}
 	} else if (res->over_guarantee) {
 		res->over_guarantee = 0;
 
-		if (res->max_limit_failures < res->limit_failures)
+		if (res->max_limit_failures < res->limit_failures) {
 			res->max_limit_failures = res->limit_failures;
-		if (res->max_borrow_sucesses < res->borrow_sucesses)
+		}
+		if (res->max_borrow_sucesses < res->borrow_sucesses) {
 			res->max_borrow_sucesses = res->borrow_sucesses;
-		if (res->max_borrow_failures < res->borrow_failures)
+		}
+		if (res->max_borrow_failures < res->borrow_failures) {
 			res->max_borrow_failures = res->borrow_failures;
+		}
 		res->limit_failures = 0;
 		res->borrow_sucesses = 0;
 		res->borrow_failures = 0;
 	}
 
-	if (!rc)
+	if (!rc) {
 		atomic_dec(&res->cnt_cur_alloc);
+	}
 	return rc;
 }
 
-static void numtasks_put_ref_local(struct ckrm_core_class *core)
+static void numtasks_put_ref_local(void *arg)
 {
 	int resid = numtasks_rcbs.resid;
-	struct ckrm_numtasks *res;
+	ckrm_numtasks_t *res;
+	ckrm_core_class_t *core = arg;
 
-	if ((resid == -1) || (core == NULL))
+	if ((resid == -1) || (core == NULL)) {
 		return;
+	}
 
-	res = ckrm_get_res_class(core, resid, struct ckrm_numtasks);
+	res = ckrm_get_res_class(core, resid, ckrm_numtasks_t);
 	if (res == NULL)
 		return;
-
-	if (atomic_read(&res->cnt_cur_alloc)==0)
+	if (unlikely(atomic_read(&res->cnt_cur_alloc) == 0)) {
+		printk(KERN_WARNING "numtasks_put_ref: Trying to decrement "
+					"counter below 0\n");
 		return;
-
+	}
 	atomic_dec(&res->cnt_cur_alloc);
-
 	if (atomic_read(&res->cnt_borrowed) > 0) {
 		atomic_dec(&res->cnt_borrowed);
 		numtasks_put_ref_local(res->parent);
@@ -181,21 +207,19 @@ static void numtasks_put_ref_local(struct ckrm_core_class *core)
 static void *numtasks_res_alloc(struct ckrm_core_class *core,
 				struct ckrm_core_class *parent)
 {
-	struct ckrm_numtasks *res;
+	ckrm_numtasks_t *res;
 
-	res = kmalloc(sizeof(struct ckrm_numtasks), GFP_ATOMIC);
+	res = kmalloc(sizeof(ckrm_numtasks_t), GFP_ATOMIC);
 
 	if (res) {
-		memset(res, 0, sizeof(struct ckrm_numtasks));
+		memset(res, 0, sizeof(ckrm_numtasks_t));
 		res->core = core;
 		res->parent = parent;
 		numtasks_res_initcls_one(res);
 		res->cnt_lock = SPIN_LOCK_UNLOCKED;
 		if (parent == NULL) {
-			/*
-			 * I am part of root class. So set the max tasks 
-			 * to available default.
-			 */
+			// I am part of root class. So set the max tasks 
+			// to available default
 			res->cnt_guarantee = TOTAL_NUM_TASKS;
 			res->cnt_unused = TOTAL_NUM_TASKS;
 			res->cnt_limit = TOTAL_NUM_TASKS;
@@ -214,36 +238,47 @@ static void *numtasks_res_alloc(struct ckrm_core_class *core,
  */
 static void numtasks_res_free(void *my_res)
 {
-	struct ckrm_numtasks *res = my_res, *parres, *childres;
-	struct ckrm_core_class *child = NULL;
+	ckrm_numtasks_t *res = my_res, *parres, *childres;
+	ckrm_core_class_t *child = NULL;
 	int i, borrowed, maxlimit, resid = numtasks_rcbs.resid;
 
 	if (!res)
 		return;
 
-	/* Assuming there will be no children when this function is called */
+	// Assuming there will be no children when this function is called
 
-	parres = ckrm_get_res_class(res->parent, resid, struct ckrm_numtasks);
+	parres = ckrm_get_res_class(res->parent, resid, ckrm_numtasks_t);
 
-	if ((borrowed = atomic_read(&res->cnt_borrowed)) > 0)
-		for (i = 0; i < borrowed; i++)
-			numtasks_put_ref_local(parres->core);
-
-	/* return child's limit/guarantee to parent node */
+	if (unlikely(atomic_read(&res->cnt_cur_alloc) < 0)) {
+		printk(KERN_WARNING "numtasks_res: counter below 0\n");
+	}
+	if (unlikely(atomic_read(&res->cnt_cur_alloc) > 0 ||
+				atomic_read(&res->cnt_borrowed) > 0)) {
+		printk(KERN_WARNING "numtasks_res_free: resource still "
+		       "alloc'd %p\n", res);
+		if ((borrowed = atomic_read(&res->cnt_borrowed)) > 0) {
+			for (i = 0; i < borrowed; i++) {
+				numtasks_put_ref_local(parres->core);
+			}
+		}
+	}
+	// return child's limit/guarantee to parent node
 	spin_lock(&parres->cnt_lock);
 	child_guarantee_changed(&parres->shares, res->shares.my_guarantee, 0);
 
-	/* run thru parent's children and get the new max_limit of the parent */
+	// run thru parent's children and get the new max_limit of the parent
 	ckrm_lock_hier(parres->core);
 	maxlimit = 0;
 	while ((child = ckrm_get_next_child(parres->core, child)) != NULL) {
-		childres = ckrm_get_res_class(child, resid, struct ckrm_numtasks);
-		if (maxlimit < childres->shares.my_limit)
+		childres = ckrm_get_res_class(child, resid, ckrm_numtasks_t);
+		if (maxlimit < childres->shares.my_limit) {
 			maxlimit = childres->shares.my_limit;
+		}
 	}
 	ckrm_unlock_hier(parres->core);
-	if (parres->shares.cur_max_limit < maxlimit)
+	if (parres->shares.cur_max_limit < maxlimit) {
 		parres->shares.cur_max_limit = maxlimit;
+	}
 
 	spin_unlock(&parres->cnt_lock);
 	kfree(res);
@@ -257,53 +292,53 @@ static void numtasks_res_free(void *my_res)
  * Caller is responsible for protecting res and for the integrity of parres
  */
 static void
-recalc_and_propagate(struct ckrm_numtasks * res, struct ckrm_numtasks * parres)
+recalc_and_propagate(ckrm_numtasks_t * res, ckrm_numtasks_t * parres)
 {
-	struct ckrm_core_class *child = NULL;
-	struct ckrm_numtasks *childres;
+	ckrm_core_class_t *child = NULL;
+	ckrm_numtasks_t *childres;
 	int resid = numtasks_rcbs.resid;
 
 	if (parres) {
 		struct ckrm_shares *par = &parres->shares;
 		struct ckrm_shares *self = &res->shares;
 
-		/* calculate cnt_guarantee and cnt_limit */
-		if ((parres->cnt_guarantee == CKRM_SHARE_DONTCARE) ||
-				(self->my_guarantee == CKRM_SHARE_DONTCARE))
+		// calculate cnt_guarantee and cnt_limit
+		//
+		if (parres->cnt_guarantee == CKRM_SHARE_DONTCARE) {
 			res->cnt_guarantee = CKRM_SHARE_DONTCARE;
-		else if (par->total_guarantee) {
+		} else if (par->total_guarantee) {
 			u64 temp = (u64) self->my_guarantee * parres->cnt_guarantee;
 			do_div(temp, par->total_guarantee);
 			res->cnt_guarantee = (int) temp;
-		} else
+		} else {
 			res->cnt_guarantee = 0;
+		}
 
-		if ((parres->cnt_limit == CKRM_SHARE_DONTCARE) ||
-				(self->my_limit == CKRM_SHARE_DONTCARE))
+		if (parres->cnt_limit == CKRM_SHARE_DONTCARE) {
 			res->cnt_limit = CKRM_SHARE_DONTCARE;
-		else if (par->max_limit) {
+		} else if (par->max_limit) {
 			u64 temp = (u64) self->my_limit * parres->cnt_limit;
 			do_div(temp, par->max_limit);
 			res->cnt_limit = (int) temp;
-		} else
+		} else {
 			res->cnt_limit = 0;
+		}
 
-		/* Calculate unused units */
-		if ((res->cnt_guarantee == CKRM_SHARE_DONTCARE) ||
-				(self->my_guarantee == CKRM_SHARE_DONTCARE))
+		// Calculate unused units
+		if (res->cnt_guarantee == CKRM_SHARE_DONTCARE) {
 			res->cnt_unused = CKRM_SHARE_DONTCARE;
-		else if (self->total_guarantee) {
+		} else if (self->total_guarantee) {
 			u64 temp = (u64) self->unused_guarantee * res->cnt_guarantee;
 			do_div(temp, self->total_guarantee);
 			res->cnt_unused = (int) temp;
-		} else
+		} else {
 			res->cnt_unused = 0;
+		}
 	}
-
-	/* propagate to children */
+	// propagate to children
 	ckrm_lock_hier(res->core);
 	while ((child = ckrm_get_next_child(res->core, child)) != NULL) {
-		childres = ckrm_get_res_class(child, resid, struct ckrm_numtasks);
+		childres = ckrm_get_res_class(child, resid, ckrm_numtasks_t);
 
 		spin_lock(&childres->cnt_lock);
 		recalc_and_propagate(childres, res);
@@ -315,7 +350,7 @@ recalc_and_propagate(struct ckrm_numtasks * res, struct ckrm_numtasks * parres)
 
 static int numtasks_set_share_values(void *my_res, struct ckrm_shares *new)
 {
-	struct ckrm_numtasks *parres, *res = my_res;
+	ckrm_numtasks_t *parres, *res = my_res;
 	struct ckrm_shares *cur = &res->shares, *par;
 	int rc = -EINVAL, resid = numtasks_rcbs.resid;
 
@@ -324,7 +359,7 @@ static int numtasks_set_share_values(void *my_res, struct ckrm_shares *new)
 
 	if (res->parent) {
 		parres =
-		    ckrm_get_res_class(res->parent, resid, struct ckrm_numtasks);
+		    ckrm_get_res_class(res->parent, resid, ckrm_numtasks_t);
 		spin_lock(&parres->cnt_lock);
 		spin_lock(&res->cnt_lock);
 		par = &parres->shares;
@@ -337,26 +372,28 @@ static int numtasks_set_share_values(void *my_res, struct ckrm_shares *new)
 	rc = set_shares(new, cur, par);
 
 	if ((rc == 0) && parres) {
-		/* Calculate parent's unused units */
-		if (parres->cnt_guarantee == CKRM_SHARE_DONTCARE)
+		// Calculate parent's unused units
+		if (parres->cnt_guarantee == CKRM_SHARE_DONTCARE) {
 			parres->cnt_unused = CKRM_SHARE_DONTCARE;
-		else if (par->total_guarantee) {
+		} else if (par->total_guarantee) {
 			u64 temp = (u64) par->unused_guarantee * parres->cnt_guarantee;
 			do_div(temp, par->total_guarantee);
 			parres->cnt_unused = (int) temp;
-		} else
+		} else {
 			parres->cnt_unused = 0;
+		}
 		recalc_and_propagate(res, parres);
 	}
 	spin_unlock(&res->cnt_lock);
-	if (res->parent)
+	if (res->parent) {
 		spin_unlock(&parres->cnt_lock);
+	}
 	return rc;
 }
 
 static int numtasks_get_share_values(void *my_res, struct ckrm_shares *shares)
 {
-	struct ckrm_numtasks *res = my_res;
+	ckrm_numtasks_t *res = my_res;
 
 	if (!res)
 		return -EINVAL;
@@ -366,12 +403,12 @@ static int numtasks_get_share_values(void *my_res, struct ckrm_shares *shares)
 
 static int numtasks_get_stats(void *my_res, struct seq_file *sfile)
 {
-	struct ckrm_numtasks *res = my_res;
+	ckrm_numtasks_t *res = my_res;
 
 	if (!res)
 		return -EINVAL;
 
-	seq_printf(sfile, "---------Number of tasks stats start---------\n");
+	seq_printf(sfile, "Number of tasks resource:\n");
 	seq_printf(sfile, "Total Over limit failures: %d\n",
 		   res->tot_limit_failures);
 	seq_printf(sfile, "Total Over guarantee sucesses: %d\n",
@@ -385,7 +422,6 @@ static int numtasks_get_stats(void *my_res, struct seq_file *sfile)
 		   res->max_borrow_sucesses);
 	seq_printf(sfile, "Maximum Over guarantee failures: %d\n",
 		   res->max_borrow_failures);
-	seq_printf(sfile, "---------Number of tasks stats end---------\n");
 #ifdef NUMTASKS_DEBUG
 	seq_printf(sfile,
 		   "cur_alloc %d; borrowed %d; cnt_guar %d; cnt_limit %d "
@@ -402,7 +438,7 @@ static int numtasks_get_stats(void *my_res, struct seq_file *sfile)
 
 static int numtasks_show_config(void *my_res, struct seq_file *sfile)
 {
-	struct ckrm_numtasks *res = my_res;
+	ckrm_numtasks_t *res = my_res;
 
 	if (!res)
 		return -EINVAL;
@@ -413,18 +449,18 @@ static int numtasks_show_config(void *my_res, struct seq_file *sfile)
 
 static int numtasks_set_config(void *my_res, const char *cfgstr)
 {
-	struct ckrm_numtasks *res = my_res;
+	ckrm_numtasks_t *res = my_res;
 
 	if (!res)
 		return -EINVAL;
-	printk("numtasks config='%s'\n", cfgstr);
+	printk(KERN_DEBUG "numtasks config='%s'\n", cfgstr);
 	return 0;
 }
 
 static void numtasks_change_resclass(void *task, void *old, void *new)
 {
-	struct ckrm_numtasks *oldres = old;
-	struct ckrm_numtasks *newres = new;
+	ckrm_numtasks_t *oldres = old;
+	ckrm_numtasks_t *newres = new;
 
 	if (oldres != (void *)-1) {
 		struct task_struct *tsk = task;
@@ -433,13 +469,13 @@ static void numtasks_change_resclass(void *task, void *old, void *new)
 			    &(tsk->parent->taskclass->core);
 			oldres =
 			    ckrm_get_res_class(old_core, numtasks_rcbs.resid,
-					       struct ckrm_numtasks);
+					       ckrm_numtasks_t);
 		}
-		if (oldres)
-			numtasks_put_ref_local(oldres->core);
+		numtasks_put_ref_local(oldres->core);
 	}
-	if (newres)
+	if (newres) {
 		(void)numtasks_get_ref_local(newres->core, 1);
+	}
 }
 
 struct ckrm_res_ctlr numtasks_rcbs = {
@@ -469,7 +505,7 @@ int __init init_ckrm_numtasks_res(void)
 
 	if (resid == -1) {
 		resid = ckrm_register_res_ctlr(clstype, &numtasks_rcbs);
-		printk("........init_ckrm_numtasks_res -> %d\n", resid);
+		printk(KERN_DEBUG "........init_ckrm_numtasks_res -> %d\n", resid);
 		if (resid != -1) {
 			ckrm_numtasks_register(numtasks_get_ref_local,
 					       numtasks_put_ref_local);
@@ -481,13 +517,14 @@ int __init init_ckrm_numtasks_res(void)
 
 void __exit exit_ckrm_numtasks_res(void)
 {
-	if (numtasks_rcbs.resid != -1)
+	if (numtasks_rcbs.resid != -1) {
 		ckrm_numtasks_register(NULL, NULL);
+	}
 	ckrm_unregister_res_ctlr(&numtasks_rcbs);
 	numtasks_rcbs.resid = -1;
 }
 
 module_init(init_ckrm_numtasks_res)
-module_exit(exit_ckrm_numtasks_res)
+    module_exit(exit_ckrm_numtasks_res)
 
-MODULE_LICENSE("GPL");
+    MODULE_LICENSE("GPL");
