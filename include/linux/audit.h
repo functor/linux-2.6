@@ -205,6 +205,7 @@ struct audit_sig_info {
 struct audit_buffer;
 struct audit_context;
 struct inode;
+struct netlink_skb_parms;
 
 #define AUDITSC_INVALID 0
 #define AUDITSC_SUCCESS 1
@@ -236,7 +237,7 @@ extern int audit_socketcall(int nargs, unsigned long *args);
 extern int audit_sockaddr(int len, void *addr);
 extern int audit_avc_path(struct dentry *dentry, struct vfsmount *mnt);
 extern void audit_signal_info(int sig, struct task_struct *t);
-extern int audit_filter_user(int pid, int type);
+extern int audit_filter_user(struct netlink_skb_parms *cb, int type);
 #else
 #define audit_alloc(t) ({ 0; })
 #define audit_free(t) do { ; } while (0)
@@ -253,7 +254,7 @@ extern int audit_filter_user(int pid, int type);
 #define audit_sockaddr(len, addr) ({ 0; })
 #define audit_avc_path(dentry, mnt) ({ 0; })
 #define audit_signal_info(s,t) do { ; } while (0)
-#define audit_filter_user(p,t) ({ 1; })
+#define audit_filter_user(cb,t) ({ 1; })
 #endif
 
 #ifdef CONFIG_AUDIT
@@ -284,8 +285,8 @@ extern void		    audit_send_reply(int pid, int seq, int type,
 extern void		    audit_log_lost(const char *message);
 extern struct semaphore audit_netlink_sem;
 #else
-#define audit_log(c,t,f,...) do { ; } while (0)
-#define audit_log_start(c,t) ({ NULL; })
+#define audit_log(c,g,t,f,...) do { ; } while (0)
+#define audit_log_start(c,g,t) ({ NULL; })
 #define audit_log_vformat(b,f,a) do { ; } while (0)
 #define audit_log_format(b,f,...) do { ; } while (0)
 #define audit_log_end(b) do { ; } while (0)

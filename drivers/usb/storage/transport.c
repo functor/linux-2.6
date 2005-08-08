@@ -948,8 +948,9 @@ int usb_stor_Bulk_max_lun(struct us_data *us)
 
 int usb_stor_Bulk_transport(struct scsi_cmnd *srb, struct us_data *us)
 {
-	struct bulk_cb_wrap *bcb = (struct bulk_cb_wrap *) us->iobuf;
-	struct bulk_cs_wrap *bcs = (struct bulk_cs_wrap *) us->iobuf;
+	/* Offset into iobuf a little in order to defeat pre-set DMA */
+	struct bulk_cb_wrap *bcb = (struct bulk_cb_wrap *) (us->iobuf + 4);
+	struct bulk_cs_wrap *bcs = (struct bulk_cs_wrap *) (us->iobuf + 4);
 	unsigned int transfer_length = srb->request_bufflen;
 	unsigned int residue;
 	int result;
@@ -960,7 +961,7 @@ int usb_stor_Bulk_transport(struct scsi_cmnd *srb, struct us_data *us)
 	/* Take care of BULK32 devices; set extra byte to 0 */
 	if ( unlikely(us->flags & US_FL_BULK32)) {
 		cbwlen = 32;
-		us->iobuf[31] = 0;
+		((unsigned char *)bcb)[31] = 0;
 	}
 
 	/* set up the command wrapper */

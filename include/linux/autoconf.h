@@ -1,7 +1,7 @@
 /*
  * Automatically generated C config: don't edit
  * Linux kernel version: 2.6.12.2
- * Wed Jul 13 17:05:01 2005
+ * Thu Aug  4 14:53:44 2005
  */
 #define AUTOCONF_INCLUDED
 #define CONFIG_X86 1
@@ -2384,6 +2384,7 @@
 #define CONFIG_USB_EGALAX_MODULE 1
 #define CONFIG_USB_XPAD_MODULE 1
 #define CONFIG_USB_ATI_REMOTE_MODULE 1
+#undef CONFIG_USB_APPLETOUCH
 
 /*
  * USB Imaging devices

@@ -650,15 +650,15 @@ static void cdrom_end_request (ide_drive_t *drive, int uptodate)
 			/*
 			 * now end failed request
 			 */
-			spin_lock_irqsave(&ide_lock, flags);
 			if(blk_fs_request(failed)) {
-				if(__ide_end_request(drive, failed, 0, failed->hard_nr_sectors))
+				if(ide_end_dequeued_request(drive, failed, 0, failed->hard_nr_sectors))
 					BUG();
 			} else {
+				spin_lock_irqsave(&ide_lock, flags);
 				end_that_request_chunk(failed, 0, failed->data_len);
 				end_that_request_last(failed);
+				spin_unlock_irqrestore(&ide_lock, flags);
 			}
-			spin_unlock_irqrestore(&ide_lock, flags);
 		}
 		else
 			cdrom_analyze_sense_data(drive, NULL , sense);

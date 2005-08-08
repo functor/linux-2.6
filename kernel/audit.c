@@ -79,6 +79,8 @@ static int	audit_rate_limit;
 
 /* Number of outstanding audit_buffers allowed. */
 static int	audit_backlog_limit = 64;
+static int	audit_backlog_wait_time = 60 * HZ;
+static int	audit_backlog_wait_overflow = 0;
 
 /* The identity of the user shutting down the audit system. */
 uid_t		audit_sig_uid = -1;
@@ -286,7 +288,7 @@ int kauditd_thread(void *dummy)
 					audit_pid = 0;
 				}
 			} else {
-				printk(KERN_ERR "%s\n", skb->data + NLMSG_SPACE(0));
+				printk(KERN_NOTICE "%s\n", skb->data + NLMSG_SPACE(0));
 				kfree_skb(skb);
 			}
 		} else {
@@ -434,7 +436,7 @@ static int audit_receive_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		if (!audit_enabled && msg_type != AUDIT_USER_AVC)
 			return 0;
 
-		err = audit_filter_user(pid, msg_type);
+		err = audit_filter_user(&NETLINK_CB(skb), msg_type);
 		if (err == 1) {
 			err = 0;
 			ab = audit_log_start(NULL, GFP_KERNEL, msg_type);
@@ -562,7 +564,7 @@ static void audit_buffer_free(struct audit_buffer *ab)
 }
 
 static struct audit_buffer * audit_buffer_alloc(struct audit_context *ctx,
-						int gfp_mask, int type)
+						unsigned int __nocast gfp_mask, int type)
 {
 	unsigned long flags;
 	struct audit_buffer *ab = NULL;
@@ -655,6 +657,7 @@ struct audit_buffer *audit_log_start(struct audit_context *ctx, int gfp_mask,
 	struct timespec		t;
 	unsigned int		serial;
 	int reserve;
+	unsigned long timeout_start = jiffies;
 
 	if (!audit_initialized)
 		return NULL;
@@ -667,8 +670,9 @@ struct audit_buffer *audit_log_start(struct audit_context *ctx, int gfp_mask,
 
 	while (audit_backlog_limit
 	       && skb_queue_len(&audit_skb_queue) > audit_backlog_limit + reserve) {
-		if (gfp_mask & __GFP_WAIT) {
-			int ret = 1;
+		if (gfp_mask & __GFP_WAIT && audit_backlog_wait_time
+		    && time_before(jiffies, timeout_start + audit_backlog_wait_time)) {
+
 			/* Wait for auditd to drain the queue a little */
 			DECLARE_WAITQUEUE(wait, current);
 			set_current_state(TASK_INTERRUPTIBLE);
@@ -676,12 +680,11 @@ struct audit_buffer *audit_log_start(struct audit_context *ctx, int gfp_mask,
 
 			if (audit_backlog_limit &&
 			    skb_queue_len(&audit_skb_queue) > audit_backlog_limit)
-				ret = schedule_timeout(HZ * 60);
+				schedule_timeout(timeout_start + audit_backlog_wait_time - jiffies);
 
 			__set_current_state(TASK_RUNNING);
 			remove_wait_queue(&audit_backlog_wait, &wait);
-			if (ret)
-				continue;
+			continue;
 		}
 		if (audit_rate_check())
 			printk(KERN_WARNING
@@ -690,6 +693,8 @@ struct audit_buffer *audit_log_start(struct audit_context *ctx, int gfp_mask,
 			       skb_queue_len(&audit_skb_queue),
 			       audit_backlog_limit);
 		audit_log_lost("backlog limit exceeded");
+		audit_backlog_wait_time = audit_backlog_wait_overflow;
+		wake_up(&audit_backlog_wait);
 		return NULL;
 	}
 
@@ -868,7 +873,7 @@ void audit_log_end(struct audit_buffer *ab)
 			ab->skb = NULL;
 			wake_up_interruptible(&kauditd_wait);
 		} else {
-			printk("%s\n", ab->skb->data + NLMSG_SPACE(0));
+			printk(KERN_NOTICE "%s\n", ab->skb->data + NLMSG_SPACE(0));
 		}
 	}
 	audit_buffer_free(ab);

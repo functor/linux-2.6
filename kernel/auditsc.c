@@ -40,6 +40,8 @@
 #include <linux/personality.h>
 #include <linux/time.h>
 #include <linux/kthread.h>
+#include <linux/netlink.h>
+#include <linux/compiler.h>
 #include <asm/unistd.h>
 
 /* 0 = no checking
@@ -515,7 +517,7 @@ static enum audit_state audit_filter_syscall(struct task_struct *tsk,
 	int		   word = AUDIT_WORD(ctx->major);
 	int		   bit  = AUDIT_BIT(ctx->major);
 
-	if (audit_pid && ctx->pid == audit_pid)
+	if (audit_pid && tsk->tgid == audit_pid)
 		return AUDIT_DISABLED;
 
 	rcu_read_lock();
@@ -530,35 +532,62 @@ static enum audit_state audit_filter_syscall(struct task_struct *tsk,
 	return AUDIT_BUILD_CONTEXT;
 }
 
-int audit_filter_user(int pid, int type)
+static int audit_filter_user_rules(struct netlink_skb_parms *cb,
+			      struct audit_rule *rule,
+			      enum audit_state *state)
 {
-	struct task_struct *tsk;
+	int i;
+
+	for (i = 0; i < rule->field_count; i++) {
+		u32 field  = rule->fields[i] & ~AUDIT_NEGATE;
+		u32 value  = rule->values[i];
+		int result = 0;
+
+		switch (field) {
+		case AUDIT_PID:
+			result = (cb->creds.pid == value);
+			break;
+		case AUDIT_UID:
+			result = (cb->creds.uid == value);
+			break;
+		case AUDIT_GID:
+			result = (cb->creds.gid == value);
+			break;
+		case AUDIT_LOGINUID:
+			result = (cb->loginuid == value);
+			break;
+		}
+
+		if (rule->fields[i] & AUDIT_NEGATE)
+			result = !result;
+		if (!result)
+			return 0;
+	}
+	switch (rule->action) {
+	case AUDIT_NEVER:    *state = AUDIT_DISABLED;	    break;
+	case AUDIT_POSSIBLE: *state = AUDIT_BUILD_CONTEXT;  break;
+	case AUDIT_ALWAYS:   *state = AUDIT_RECORD_CONTEXT; break;
+	}
+	return 1;
+}
+
+int audit_filter_user(struct netlink_skb_parms *cb, int type)
+{
 	struct audit_entry *e;
 	enum audit_state   state;
 	int ret = 1;
 
-	read_lock(&tasklist_lock);
-	tsk = find_task_by_pid(pid);
-	if (tsk)
-		get_task_struct(tsk);
-	read_unlock(&tasklist_lock);
-
-	if (!tsk)
-		return -ESRCH;
-
 	rcu_read_lock();
 	list_for_each_entry_rcu(e, &audit_filter_list[AUDIT_FILTER_USER], list) {
-		if (audit_filter_rules(tsk, &e->rule, NULL, &state)) {
+		if (audit_filter_user_rules(cb, &e->rule, &state)) {
 			if (state == AUDIT_DISABLED)
 				ret = 0;
 			break;
 		}
 	}
 	rcu_read_unlock();
-	put_task_struct(tsk);
 
-	return 1; /* Audit by default */
-
+	return ret; /* Audit by default */
 }
 
 /* This should be called with task_lock() held. */
@@ -750,13 +779,13 @@ static void audit_log_task_info(struct audit_buffer *ab)
 	up_read(&mm->mmap_sem);
 }
 
-static void audit_log_exit(struct audit_context *context)
+static void audit_log_exit(struct audit_context *context, unsigned int gfp_mask)
 {
 	int i;
 	struct audit_buffer *ab;
 	struct audit_aux_data *aux;
 
-	ab = audit_log_start(context, GFP_KERNEL, AUDIT_SYSCALL);
+	ab = audit_log_start(context, gfp_mask, AUDIT_SYSCALL);
 	if (!ab)
 		return;		/* audit_panic has been called */
 	audit_log_format(ab, "arch=%x syscall=%d",
@@ -872,9 +901,11 @@ void audit_free(struct task_struct *tsk)
 		return;
 
 	/* Check for system calls that do not go through the exit
-	 * function (e.g., exit_group), then free context block. */
+	 * function (e.g., exit_group), then free context block. 
+	 * We use GFP_ATOMIC here because we might be doing this 
+	 * in the context of the idle thread */
 	if (context->in_syscall && context->auditable)
-		audit_log_exit(context);
+		audit_log_exit(context, GFP_ATOMIC);
 
 	audit_free_context(context);
 }
@@ -979,7 +1010,7 @@ void audit_syscall_exit(struct task_struct *tsk, int valid, long return_code)
 		return;
 
 	if (context->in_syscall && context->auditable)
-		audit_log_exit(context);
+		audit_log_exit(context, GFP_KERNEL);
 
 	context->in_syscall = 0;
 	context->auditable  = 0;
@@ -1227,7 +1258,7 @@ void audit_signal_info(int sig, struct task_struct *t)
 	extern pid_t audit_sig_pid;
 	extern uid_t audit_sig_uid;
 
-	if (unlikely(audit_pid && t->pid == audit_pid)) {
+	if (unlikely(audit_pid && t->tgid == audit_pid)) {
 		if (sig == SIGTERM || sig == SIGHUP) {
 			struct audit_context *ctx = current->audit_context;
 			audit_sig_pid = current->pid;
