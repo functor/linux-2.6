@@ -195,7 +195,7 @@ static int newseg (key_t key, int shmflg, size_t size)
 		return -ENOMEM;
 
 	shp->shm_perm.key = key;
-	shp->shm_perm.xid = vx_current_xid();
+	shp->shm_perm.xid = current->xid;
 	shp->shm_flags = (shmflg & S_IRWXUGO);
 	shp->mlock_user = NULL;
 

@@ -2582,7 +2582,7 @@ static int ext3_do_update_inode(handle_t *handle,
 		raw_inode->i_uid_high = 0;
 		raw_inode->i_gid_high = 0;
 	}
-#ifdef CONFIG_INOXID_INTERN
+#ifdef CONFIG_INOXID_GID32
 	raw_inode->i_raw_xid = cpu_to_le16(inode->i_xid);
 #endif
 	raw_inode->i_links_count = cpu_to_le16(inode->i_nlink);

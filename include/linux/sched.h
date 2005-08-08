@@ -30,7 +30,6 @@
 #include <linux/pid.h>
 #include <linux/percpu.h>
 #include <linux/topology.h>
-#include <linux/vs_base.h>
 
 struct exec_domain;
 extern int exec_shield;
@@ -950,23 +949,10 @@ static inline int sas_ss_flags(unsigned long sp)
 #ifdef CONFIG_SECURITY
 /* code is in security.c */
 extern int capable(int cap);
-extern int vx_capable(int cap, int ccap);
 #else
 static inline int capable(int cap)
 {
-	if (vx_check_bit(VXC_CAP_MASK, cap) && !vx_mcaps(1L << cap))
-		return 0;
 	if (cap_raised(current->cap_effective, cap)) {
-		current->flags |= PF_SUPERPRIV;
-		return 1;
-	}
-	return 0;
-}
-
-static inline int vx_capable(int cap, int ccap)
-{
-	if (cap_raised(current->cap_effective, cap) &&
-		vx_ccaps(ccap)) {
 		current->flags |= PF_SUPERPRIV;
 		return 1;
 	}

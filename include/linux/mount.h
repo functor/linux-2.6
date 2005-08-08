@@ -22,7 +22,6 @@
 #define MNT_RDONLY	8
 #define MNT_NOATIME	16
 #define MNT_NODIRATIME	32
-#define MNT_XID		256
 
 struct vfsmount
 {
@@ -40,7 +39,6 @@ struct vfsmount
 	struct list_head mnt_list;
 	struct list_head mnt_fslink;	/* link in fs-specific expiry list */
 	struct namespace *mnt_namespace; /* containing namespace */
-	xid_t mnt_xid;			/* xid tagging used for vfsmount */
 };
 
 #define	MNT_IS_RDONLY(m)	((m) && ((m)->mnt_flags & MNT_RDONLY))

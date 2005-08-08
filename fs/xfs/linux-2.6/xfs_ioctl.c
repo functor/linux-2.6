@@ -1013,7 +1013,7 @@ xfs_ioc_fsgeometry(
 #define LINUX_XFLAG_NODUMP	0x00000040 /* do not dump file */
 #define LINUX_XFLAG_NOATIME	0x00000080 /* do not update atime */
 #define LINUX_XFLAG_BARRIER	0x00004000 /* chroot() barrier */
-#define LINUX_XFLAG_IUNLINK	0x00008000 /* immutable unlink */
+#define LINUX_XFLAG_IUNLINK	0x00008000 /* Immutable unlink */
 
 STATIC unsigned int
 xfs_merge_ioc_xflags(
@@ -1056,8 +1056,6 @@ xfs_di2lxflags(
 		flags |= LINUX_XFLAG_IMMUTABLE;
 	if (di_flags & XFS_DIFLAG_IUNLINK)
 		flags |= LINUX_XFLAG_IUNLINK;
-	if (di_flags & XFS_DIFLAG_BARRIER)
-		flags |= LINUX_XFLAG_BARRIER;
 	if (di_flags & XFS_DIFLAG_APPEND)
 		flags |= LINUX_XFLAG_APPEND;
 	if (di_flags & XFS_DIFLAG_SYNC)

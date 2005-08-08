@@ -4,15 +4,6 @@
 
 menu "Linux VServer"
 
-config	VSERVER_FILESHARING
-	bool	"(PLANETLAB) Disable Hidden File Module"
-	default y
-	help
-	  This retains the module that when a vserver can
-	  see a file, it can also stat and read it.  The
-	  assumption is that chroot() works and vservers
-	  are contained that way.
-
 config	VSERVER_LEGACY
 	bool	"Enable Legacy Kernel API"
 	default y
@@ -100,24 +91,6 @@ config	VSERVER_DEBUG
 	  debugging output at runtime. It adds a probably small
 	  overhead (~ ??%) to all vserver related functions and
 	  increases the kernel size by about 20k.
-
-config	VSERVER_HISTORY
-	bool	"Compile History Tracing"
-	depends on VSERVER_DEBUG
-	default n
-	help
-	  Set this to yes if you want to record the history of
-	  linux-vserver activities, so they can be replayed on
-	  a kernel panic (oops)
-
-config	VSERVER_HISTORY_SIZE
-	int "Per CPU History Size (32-65536)"
-	depends on VSERVER_HISTORY
-	range 32 65536
-	default 64
-	help
-	  This allows you to specify the number of entries in
-	  the per CPU history buffer.
 
 endmenu
 

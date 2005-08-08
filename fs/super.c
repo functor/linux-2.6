@@ -39,8 +39,6 @@
 #include <linux/devpts_fs.h>
 #include <linux/proc_fs.h>
 #include <linux/kobject.h>
-#include <linux/devpts_fs.h>
-#include <linux/proc_fs.h>
 #include <asm/uaccess.h>
 
 

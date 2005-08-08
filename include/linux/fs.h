@@ -126,7 +126,6 @@ extern int dir_notify_enable;
 #define MS_POSIXACL	(1<<16)	/* VFS does not apply the umask */
 #define MS_ONE_SECOND	(1<<17)	/* fs has 1 sec a/m/ctime resolution */
 #define MS_TAGXID	(1<<24) /* tag inodes with context information */
-#define MS_XID		(1<<25) /* use specific xid for this mount */
 #define MS_ACTIVE	(1<<30)
 #define MS_NOUSER	(1<<31)
 
@@ -153,8 +152,8 @@ extern int dir_notify_enable;
 #define S_DIRSYNC	64	/* Directory modifications are synchronous */
 #define S_NOCMTIME	128	/* Do not update file c/mtime */
 #define S_SWAPFILE	256	/* Do not truncate: swapon got its bmaps */
-#define S_BARRIER	1024	/* Barrier for chroot() */
-#define S_IUNLINK	2048	/* Immutable unlink */
+#define S_BARRIER	512	/* Barrier for chroot() */
+#define S_IUNLINK	1024	/* Immutable unlink */
 
 /*
  * Note that nosuid etc flags are inode-specific: setting some file-system

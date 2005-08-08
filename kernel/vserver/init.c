@@ -11,6 +11,7 @@
 
 #include <linux/config.h>
 #include <linux/errno.h>
+#include <linux/vserver.h>
 #include <linux/init.h>
 #include <linux/module.h>
 

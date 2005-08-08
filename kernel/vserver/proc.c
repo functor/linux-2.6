@@ -18,19 +18,15 @@
 #include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/proc_fs.h>
-#include <linux/sched.h>
+#include <linux/vserver.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vs_cvirt.h>
 
-#include <linux/vserver/switch.h>
-
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 
-#include "cvirt_proc.h"
-#include "limit_proc.h"
-#include "sched_proc.h"
 
 static struct proc_dir_entry *proc_virtual;
 
@@ -712,7 +708,7 @@ int proc_virtual_readdir(struct file * filp,
 			filp->f_pos++;
 			/* fall through */
 		case 3:
-			if (vx_current_xid() > 1) {
+			if (current->xid > 1) {
 				ino = fake_ino(1, PROC_XID_INO);
 				if (filldir(dirent, "current", 7,
 					filp->f_pos, ino, DT_LNK) < 0)
@@ -780,7 +776,7 @@ int proc_vnet_readdir(struct file * filp,
 			filp->f_pos++;
 			/* fall through */
 		case 3:
-			if (vx_current_xid() > 1) {
+			if (current->xid > 1) {
 				ino = fake_ino(1, PROC_NID_INO);
 				if (filldir(dirent, "current", 7,
 					filp->f_pos, ino, DT_LNK) < 0)
@@ -828,7 +824,7 @@ void proc_vx_init(void)
 	}
 	proc_virtual = ent;
 
-	ent = proc_mkdir("virtnet", 0);
+	ent = proc_mkdir("vnet", 0);
 	if (ent) {
 		ent->proc_fops = &proc_vnet_dir_operations;
 		ent->proc_iops = &proc_vnet_dir_inode_operations;

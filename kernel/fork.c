@@ -39,12 +39,12 @@
 #include <linux/audit.h>
 #include <linux/profile.h>
 #include <linux/rmap.h>
-#include <linux/ckrm_events.h>
-#include <linux/ckrm_tsk.h>
-#include <linux/ckrm_mem_inline.h>
 #include <linux/vs_network.h>
 #include <linux/vs_limit.h>
 #include <linux/vs_memory.h>
+#include <linux/ckrm.h>
+#include <linux/ckrm_tsk.h>
+#include <linux/ckrm_mem_inline.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -161,9 +161,11 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	ti->task = tsk;
 
 	ckrm_cb_newtask(tsk);
-	ckrm_task_mm_init(tsk);
 	/* One for us, one for whoever does the "release_task()" (usually parent) */
 	atomic_set(&tsk->usage,2);
+#ifdef CONFIG_CKRM_RES_MEM	
+	INIT_LIST_HEAD(&tsk->mm_peers);
+#endif
 	return tsk;
 }
 
@@ -309,7 +311,10 @@ static struct mm_struct * mm_init(struct mm_struct * mm)
 	mm->ioctx_list = NULL;
 	mm->default_kioctx = (struct kioctx)INIT_KIOCTX(mm->default_kioctx, *mm);
 	mm->free_area_cache = TASK_UNMAPPED_BASE;
- 	ckrm_mm_init(mm);
+#ifdef CONFIG_CKRM_RES_MEM
+	INIT_LIST_HEAD(&mm->tasklist);
+	mm->peertask_lock = SPIN_LOCK_UNLOCKED;
+#endif
 
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
@@ -331,7 +336,10 @@ struct mm_struct * mm_alloc(void)
 	if (mm) {
 		memset(mm, 0, sizeof(*mm));
 		mm = mm_init(mm);
-		ckrm_mm_setclass(mm, ckrm_get_mem_class(current));
+#ifdef CONFIG_CKRM_RES_MEM
+		mm->memclass = GET_MEM_CLASS(current);
+		mem_class_get(mm->memclass);
+#endif
 	}
 	return mm;
 }
@@ -346,8 +354,14 @@ void fastcall __mmdrop(struct mm_struct *mm)
 	BUG_ON(mm == &init_mm);
 	mm_free_pgd(mm);
 	destroy_context(mm);
- 	ckrm_mm_clearclass(mm);
 	clr_vx_info(&mm->mm_vx_info);
+#ifdef CONFIG_CKRM_RES_MEM
+	/* class can be null and mm's tasklist can be empty here */
+	if (mm->memclass) {
+		mem_class_put(mm->memclass);
+		mm->memclass = NULL;
+	}
+#endif
 	free_mm(mm);
 }
 
@@ -486,7 +500,6 @@ static int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 		goto free_pt;
 
 good_mm:
-	ckrm_mm_setclass(mm, oldmm->memclass);
 	tsk->mm = mm;
 	tsk->active_mm = mm;
 	ckrm_init_mm_to_task(mm, tsk);
@@ -856,23 +869,6 @@ static task_t *copy_process(unsigned long clone_flags,
 			goto bad_fork_cleanup_vm;
 	}
 
-	p->vx_info = NULL;
-	set_vx_info(&p->vx_info, current->vx_info);
-	p->nx_info = NULL;
-	set_nx_info(&p->nx_info, current->nx_info);
-
-	/* check vserver memory */
-	if (p->mm && !(clone_flags & CLONE_VM)) {
-		if (vx_vmpages_avail(p->mm, p->mm->total_vm))
-			vx_pages_add(p->mm->mm_vx_info, RLIMIT_AS, p->mm->total_vm);
-		else
-			goto bad_fork_free;
-	}
-	if (p->mm && vx_flags(VXF_FORK_RSS, 0)) {
-		if (!vx_rsspages_avail(p->mm, p->mm->rss))
-			goto bad_fork_cleanup_vm;
-	}
-
 	retval = -EAGAIN;
 	if (!vx_nproc_avail(1))
 		goto bad_fork_cleanup_vm;
@@ -1195,11 +1191,13 @@ long do_fork(unsigned long clone_flags,
 			clone_flags |= CLONE_PTRACE;
 	}
 
+#ifdef CONFIG_CKRM_TYPE_TASKCLASS
 	if (numtasks_get_ref(current->taskclass, 0) == 0) {
 		return -ENOMEM;
 	}
-	p = copy_process(clone_flags, stack_start, regs, stack_size, parent_tidptr, child_tidptr, pid);
+#endif
 
+	p = copy_process(clone_flags, stack_start, regs, stack_size, parent_tidptr, child_tidptr, pid);
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.
@@ -1239,7 +1237,9 @@ long do_fork(unsigned long clone_flags,
 				ptrace_notify ((PTRACE_EVENT_VFORK_DONE << 8) | SIGTRAP);
 		}
 	} else {
+#ifdef CONFIG_CKRM_TYPE_TASKCLASS
 		numtasks_put_ref(current->taskclass);
+#endif
 		free_pidmap(pid);
 		pid = PTR_ERR(p);
 	}

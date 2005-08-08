@@ -43,7 +43,6 @@
 #include <linux/types.h>           
 #include <linux/ckrm.h>
 #include <linux/ckrm_ce.h>
-#include <linux/taskdelays.h>
 
 #define CRBCE_UKCC_NAME   "crbce_ukcc"
 #define CRBCE_UKCC_PATH   "/mnt/relayfs"
@@ -101,7 +100,7 @@ struct crbce_hdr {
 struct crbce_hdr_ts {
 	int type;
 	pid_t pid;
-	uint32_t timestamp;  /* in msecs */
+	uint32_t jiffies;
 	uint64_t cls;
 };
 

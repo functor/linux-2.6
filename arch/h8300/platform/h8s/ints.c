@@ -134,7 +134,7 @@ void __init init_IRQ(void)
 	ramvec[TRAP0_VEC] = VECTOR(system_call);
 	ramvec[TRAP3_VEC] = break_vec;
 	interrupt_redirect_table = ramvec;
-#ifdef CRASH_DUMP_VECTOR
+#ifdef DUMP_VECTOR
 	ramvec_p = ramvec;
 	for (i = 0; i < NR_IRQS; i++) {
 		if ((i % 8) == 0)

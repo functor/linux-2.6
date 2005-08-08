@@ -36,7 +36,6 @@
 #include <linux/quotaops.h>
 #include <linux/buffer_head.h>
 #include <linux/smp_lock.h>
-#include <linux/vserver/xid.h>
 #include "xattr.h"
 #include "acl.h"
 
@@ -990,7 +989,6 @@ static struct dentry *ext3_lookup(struct inode * dir, struct dentry *dentry, str
 
 		if (!inode)
 			return ERR_PTR(-EACCES);
-		vx_propagate_xid(nd, inode);
 	}
 	if (inode)
 		return d_splice_alias(inode, dentry);

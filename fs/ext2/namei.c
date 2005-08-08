@@ -31,7 +31,6 @@
  */
 
 #include <linux/pagemap.h>
-#include <linux/vserver/xid.h>
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"
@@ -82,7 +81,6 @@ static struct dentry *ext2_lookup(struct inode * dir, struct dentry *dentry, str
 		inode = iget(dir->i_sb, ino);
 		if (!inode)
 			return ERR_PTR(-EACCES);
-		vx_propagate_xid(nd, inode);
 	}
 	if (inode)
 		return d_splice_alias(inode, dentry);

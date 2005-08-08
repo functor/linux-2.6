@@ -18,7 +18,7 @@
 #include <linux/backing-dev.h>
 #include <linux/buffer_head.h>
 #include <linux/random.h>
-
+#include <linux/vs_base.h>
 #include <linux/vs_dlimit.h>
 
 #include "ext2.h"
@@ -470,7 +470,7 @@ struct inode *ext2_new_inode(struct inode *dir, int mode)
 		return ERR_PTR(-ENOMEM);
 
 	if (sb->s_flags & MS_TAGXID)
-		inode->i_xid = vx_current_xid();
+		inode->i_xid = current->xid;
 	else
 		inode->i_xid = 0;
 

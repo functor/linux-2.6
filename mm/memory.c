@@ -1584,9 +1584,9 @@ retry:
 	 */
 	/* Only go through if we didn't race with anybody else... */
 	if (pte_none(*page_table)) {
-		if (!PageReserved(new_page))
-			// ++mm->rss;
-			vx_rsspages_inc(mm);
+	        if (!PageReserved(new_page)) 
+		        //++mm->rss;
+		        vx_rsspages_inc(mm);
 		flush_icache_page(vma, new_page);
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		if (write_access)

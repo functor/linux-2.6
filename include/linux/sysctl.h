@@ -134,8 +134,8 @@ enum
 	KERN_SPARC_SCONS_PWROFF=64, /* int: serial console power-off halt */
 	KERN_HZ_TIMER=65,	/* int: hz timer on or off */
 	KERN_UNKNOWN_NMI_PANIC=66, /* int: unknown nmi panic flag */
-	KERN_VSHELPER=67,	/* string: path to vshelper policy agent */
-	KERN_SETUID_DUMPABLE=68, /* int: behaviour of dumps for setuid core */
+	KERN_SETUID_DUMPABLE=67, /* int: behaviour of dumps for setuid core */
+	KERN_VSHELPER=68,	/* string: path to vshelper policy agent */
 	KERN_DUMP=69,		/* dir: dump parameters */
 };
 

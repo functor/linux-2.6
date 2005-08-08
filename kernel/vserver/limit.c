@@ -11,11 +11,12 @@
 
 #include <linux/config.h>
 #include <linux/module.h>
+#include <linux/vserver/limit.h>
+#include <linux/vserver/context.h>
+#include <linux/vserver/switch.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_limit.h>
-#include <linux/vserver/limit.h>
-#include <linux/vserver/switch.h>
-#include <linux/vserver/limit_cmd.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>

@@ -44,7 +44,6 @@
 #include <linux/jiffies.h>
 #include <linux/sysrq.h>
 #include <linux/vmalloc.h>
-#include <linux/crash_dump.h>
 #include <linux/vs_base.h>
 #include <linux/vs_cvirt.h>
 
@@ -53,8 +52,6 @@
 #include <asm/io.h>
 #include <asm/tlb.h>
 #include <asm/div64.h>
-
-#include <linux/vs_cvirt.h>
 
 #define LOAD_INT(x) ((x) >> FSHIFT)
 #define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
@@ -658,13 +655,11 @@ void __init proc_misc_init(void)
 				(size_t)high_memory - PAGE_OFFSET + PAGE_SIZE;
 	}
 #endif
-	crash_create_proc_entry();
 #ifdef CONFIG_MAGIC_SYSRQ
 	entry = create_proc_entry("sysrq-trigger", S_IWUSR, NULL);
 	if (entry)
 		entry->proc_fops = &proc_sysrq_trigger_operations;
 #endif
-	crash_enable_by_proc();
 #ifdef CONFIG_PPC32
 	{
 		extern struct file_operations ppc_htab_operations;

@@ -46,7 +46,6 @@
 #include <linux/syscalls.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
-#include <linux/vs_cvirt.h>
 
 #ifndef div_long_long_rem
 #include <asm/div64.h>

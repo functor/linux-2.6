@@ -94,6 +94,7 @@
 
 #include <net/sock.h>
 #include <linux/netfilter.h>
+#include <linux/vs_base.h>
 #include <linux/vs_socket.h>
 
 static int sock_no_open(struct inode *irrelevant, struct file *dontcare);

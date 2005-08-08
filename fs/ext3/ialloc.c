@@ -24,7 +24,6 @@
 #include <linux/random.h>
 #include <linux/vs_dlimit.h>
 #include <linux/bitops.h>
-#include <linux/vs_dlimit.h>
 
 #include <asm/byteorder.h>
 
@@ -448,7 +447,7 @@ struct inode *ext3_new_inode(handle_t *handle, struct inode * dir, int mode)
 		return ERR_PTR(-ENOMEM);
 
 	if (sb->s_flags & MS_TAGXID)
-		inode->i_xid = vx_current_xid();
+		inode->i_xid = current->xid;
 	else
 		inode->i_xid = 0;
 

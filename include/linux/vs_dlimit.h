@@ -1,7 +1,11 @@
 #ifndef _VX_VS_DLIMIT_H
 #define _VX_VS_DLIMIT_H
 
+#include <linux/kernel.h>
+#include <linux/rcupdate.h>
+#include <linux/sched.h>
 
+#include "vserver/context.h"
 #include "vserver/dlimit.h"
 #include "vserver/debug.h"
 
@@ -108,7 +112,7 @@ static inline int __dl_alloc_inode(struct super_block *sb,
 		dli->dl_inodes_used++;
 #if 0
 	else
-		vxwprintk("DLIMIT hit (%p,#%d), inode %d>=%d @ %s:%d",
+		printk("VSW: DLIMIT hit (%p,#%d), inode %d>=%d @ %s:%d\n",
 			sb, xid,
 			dli->dl_inodes_used, dli->dl_inodes_total,
 			file, line);
