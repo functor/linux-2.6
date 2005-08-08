@@ -21,7 +21,6 @@ extern unsigned long min_low_pfn;
  * highest page
  */
 extern unsigned long max_pfn;
-extern unsigned long saved_max_pfn;
 
 /*
  * node_bootmem_map is a map pointer - the bits represent all physical 

@@ -740,7 +740,9 @@ static inline void
 dump_sysrq_register(void) 
 {
 #ifdef CONFIG_MAGIC_SYSRQ
-	register_sysrq_key(DUMP_SYSRQ_KEY, &sysrq_crashdump_op);
+	__sysrq_lock_table();
+	__sysrq_put_key_op(DUMP_SYSRQ_KEY, &sysrq_crashdump_op);
+	__sysrq_unlock_table();
 #endif
 }
 
@@ -748,7 +750,10 @@ static inline void
 dump_sysrq_unregister(void)
 {
 #ifdef CONFIG_MAGIC_SYSRQ
-	unregister_sysrq_key(DUMP_SYSRQ_KEY, &sysrq_crashdump_op);
+	__sysrq_lock_table();
+	if (__sysrq_get_key_op(DUMP_SYSRQ_KEY) == &sysrq_crashdump_op)
+		__sysrq_put_key_op(DUMP_SYSRQ_KEY, NULL);
+	__sysrq_unlock_table();
 #endif
 }
 
