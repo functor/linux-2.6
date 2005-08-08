@@ -190,8 +190,8 @@ struct ext3_group_desc
 #define EXT3_RESERVED_FL		0x80000000 /* reserved for ext3 lib */
 
 #ifdef CONFIG_VSERVER_LEGACY
-#define EXT3_FL_USER_VISIBLE		0x0C03DFFF /* User visible flags */
-#define EXT3_FL_USER_MODIFIABLE		0x0C0380FF /* User modifiable flags */
+#define EXT3_FL_USER_VISIBLE		0x0803DFFF /* User visible flags */
+#define EXT3_FL_USER_MODIFIABLE		0x080380FF /* User modifiable flags */
 #else
 #define EXT3_FL_USER_VISIBLE		0x0003DFFF /* User visible flags */
 #define EXT3_FL_USER_MODIFIABLE		0x000380FF /* User modifiable flags */
