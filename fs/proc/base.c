@@ -1408,13 +1408,6 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 			inode->i_fop = &proc_info_file_operations;
 			ei->op.proc_read = proc_pid_nx_info;
 			break;
-#ifdef CONFIG_DELAY_ACCT
-		case PROC_TID_DELAY_ACCT:
-		case PROC_TGID_DELAY_ACCT:
-			inode->i_fop = &proc_info_file_operations;
-			ei->op.proc_read = proc_pid_schedstat;
-			break;
-#endif
 #ifdef CONFIG_SCHEDSTATS
 		case PROC_TID_SCHEDSTAT:
 		case PROC_TGID_SCHEDSTAT:

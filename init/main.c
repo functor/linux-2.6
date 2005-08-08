@@ -46,8 +46,6 @@
 #include <linux/rmap.h>
 #include <linux/mempolicy.h>
 #include <linux/key.h>
-#include <linux/ckrm_events.h>
-#include <linux/ckrm_sched.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -535,7 +533,6 @@ asmlinkage void __init start_kernel(void)
 	rcu_init();
 	init_IRQ();
 	pidhash_init();
-	ckrm_init();
 	init_timers();
 	softirq_init();
 	time_init();
@@ -729,9 +726,6 @@ static int init(void * unused)
 	 */
 	populate_rootfs();
 	do_basic_setup();
-
-	init_ckrm_sched_res();
-
 	sched_init_smp();
 
 	/*

@@ -25,9 +25,6 @@
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
 #include <linux/mempolicy.h>
-#include <linux/ckrm_events.h>
-#include <linux/ckrm_tsk.h>
-#include <linux/ckrm_mem_inline.h>
 #include <linux/syscalls.h>
 #include <linux/vs_limit.h>
 
@@ -514,7 +511,6 @@ static inline void __exit_mm(struct task_struct * tsk)
 	task_lock(tsk);
 	tsk->mm = NULL;
 	up_read(&mm->mmap_sem);
-	ckrm_task_clear_mm(tsk, mm);
 	enter_lazy_tlb(mm, current);
 	task_unlock(tsk);
 	mmput(mm);
@@ -670,8 +666,6 @@ static void exit_notify(struct task_struct *tsk)
 	int state;
 	struct task_struct *t;
 	struct list_head ptrace_dead, *_p, *_n;
-
-	ckrm_cb_exit(tsk);
 
 	if (signal_pending(tsk) && !tsk->signal->group_exit
 	    && !thread_group_empty(tsk)) {

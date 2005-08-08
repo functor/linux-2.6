@@ -564,16 +564,6 @@ __SYSCALL(__NR_kexec_load, sys_kexec_load)
 __SYSCALL(__NR_waitid, sys_waitid)
 #define __NR_syscall_max __NR_waitid
 
-#ifdef USE_IOPRIO_SYSCALLS
-#warning MEF if necessary may need to adjust ioprio syscalls 
-#define __NR_ioprio_set		247
-__SYSCALL(__NR_ioprio_set, sys_ioprio_set);
-#define __NR_ioprio_get		248
-__SYSCALL(__NR_ioprio_get, sys_ioprio_get);
-#else
-#warning MEF not including sys_ioprio_{set,get} syscalls
-#endif	
-
 #ifndef __NO_STUBS
 
 /* user-visible error numbers are in the range -1 - -4095 */

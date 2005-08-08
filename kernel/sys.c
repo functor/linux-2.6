@@ -26,7 +26,6 @@
 #include <linux/security.h>
 #include <linux/dcookies.h>
 #include <linux/suspend.h>
-#include <linux/ckrm_events.h>
 #include <linux/tty.h>
 #include <linux/vs_cvirt.h>
 #include <linux/compat.h>
@@ -568,7 +567,6 @@ asmlinkage long sys_setregid(gid_t rgid, gid_t egid)
 	current->gid = new_rgid;
 
 	key_fsgid_changed(current);
-	ckrm_cb_gid();
 	return 0;
 }
 
@@ -608,7 +606,6 @@ asmlinkage long sys_setgid(gid_t gid)
 		return -EPERM;
 
 	key_fsgid_changed(current);
-	ckrm_cb_gid();
 
 	return 0;
 }
@@ -699,7 +696,6 @@ asmlinkage long sys_setreuid(uid_t ruid, uid_t euid)
 	current->fsuid = current->euid;
 
 	key_fsuid_changed(current);
-	ckrm_cb_uid();
 
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_RE);
 }
@@ -747,7 +743,6 @@ asmlinkage long sys_setuid(uid_t uid)
 	current->suid = new_suid;
 
 	key_fsuid_changed(current);
-	ckrm_cb_uid();
 
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_ID);
 }
@@ -796,7 +791,6 @@ asmlinkage long sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 		current->suid = suid;
 
 	key_fsuid_changed(current);
-	ckrm_cb_uid();
 
 	return security_task_post_setuid(old_ruid, old_euid, old_suid, LSM_SETID_RES);
 }
@@ -849,7 +843,6 @@ asmlinkage long sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 		current->sgid = sgid;
 
 	key_fsgid_changed(current);
-	ckrm_cb_gid();
 	return 0;
 }
 

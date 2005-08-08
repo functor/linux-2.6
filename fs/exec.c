@@ -47,8 +47,6 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
-#include <linux/ckrm_events.h>
-#include <linux/ckrm_mem_inline.h>
 #include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
@@ -564,7 +562,6 @@ static int exec_mmap(struct mm_struct *mm)
 	activate_mm(active_mm, mm);
 	task_unlock(tsk);
 	arch_pick_mmap_layout(mm);
-	ckrm_task_change_mm(tsk, old_mm, mm);
 	if (old_mm) {
 		if (active_mm != old_mm) BUG();
 		mmput(old_mm);
@@ -796,7 +793,7 @@ void get_task_comm(char *buf, struct task_struct *tsk)
 {
 	/* buf must be at least sizeof(tsk->comm) in size */
 	task_lock(tsk);
-	memcpy(buf, tsk->comm, sizeof(tsk->comm));
+	strncpy(buf, tsk->comm, sizeof(tsk->comm));
 	task_unlock(tsk);
 }
 
@@ -1070,7 +1067,6 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 					fput(bprm->file);
 				bprm->file = NULL;
 				current->did_exec = 1;
-				ckrm_cb_exec(bprm->filename);
 				return retval;
 			}
 			read_lock(&binfmt_lock);
