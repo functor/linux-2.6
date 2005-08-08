@@ -76,7 +76,7 @@ __SYSCALL(__NR_madvise, sys_madvise)
 #define __NR_shmget                             29
 __SYSCALL(__NR_shmget, sys_shmget)
 #define __NR_shmat                              30
-__SYSCALL(__NR_shmat, wrap_sys_shmat)
+__SYSCALL(__NR_shmat, sys_shmat)
 #define __NR_shmctl                             31
 __SYSCALL(__NR_shmctl, sys_shmctl)
 
@@ -772,7 +772,7 @@ asmlinkage long sys_pipe(int *fildes);
 
 asmlinkage long sys_ptrace(long request, long pid,
 				unsigned long addr, long data);
-asmlinkage long sys_iopl(unsigned int level, struct pt_regs regs);
+asmlinkage long sys_iopl(unsigned int level, struct pt_regs *regs);
 asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on);
 struct sigaction;
 asmlinkage long sys_rt_sigaction(int sig,
@@ -790,6 +790,6 @@ asmlinkage long sys_rt_sigaction(int sig,
  * What we want is __attribute__((weak,alias("sys_ni_syscall"))),
  * but it doesn't work on all toolchains, so we just do it by hand
  */
-#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall");
+#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
 
 #endif

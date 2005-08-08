@@ -135,16 +135,12 @@ struct _vx_hist_entry {
 
 struct _vx_hist_entry *vxh_advance(void *loc);
 
-#if	(__GNUC__ > 3)
 #define	VXH_HERE()		\
 	({ __label__ here;	\
 		here:;		\
 		&&here; })
-#else
-#define	VXH_HERE()		\
-	({ __vxh_here:;		\
-		&&__vxh_here; })
-#endif
+
+
 
 static inline void __vxh_copy_vxi(struct _vx_hist_entry *entry, struct vx_info *vxi)
 {

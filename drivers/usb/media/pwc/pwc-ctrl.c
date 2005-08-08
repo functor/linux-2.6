@@ -48,8 +48,6 @@
 #include "pwc-uncompress.h"
 #include "pwc-kiara.h"
 #include "pwc-timon.h"
-#include "pwc-dec1.h"
-#include "pwc-dec23.h"
 
 /* Request types: video */
 #define SET_LUM_CTL			0x01
@@ -151,7 +149,7 @@ static struct Nala_table_entry Nala_table[PSZ_MAX][8] =
 		USB_DIR_OUT | USB_TYPE_VENDOR | USB_RECIP_DEVICE, \
 		value, \
 		pdev->vcinterface, \
-		&buf, buflen, HZ / 2)
+		&buf, buflen, 500)
 
 #define RecvControlMsg(request, value, buflen) \
 	usb_control_msg(pdev->udev, usb_rcvctrlpipe(pdev->udev, 0), \
@@ -159,7 +157,7 @@ static struct Nala_table_entry Nala_table[PSZ_MAX][8] =
 		USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE, \
 		value, \
 		pdev->vcinterface, \
-		&buf, buflen, HZ / 2)
+		&buf, buflen, 500)
 
 
 #if PWC_DEBUG
@@ -194,7 +192,7 @@ static inline int send_video_command(struct usb_device *udev, int index, void *b
 		USB_DIR_OUT | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 		VIDEO_OUTPUT_CONTROL_FORMATTER,
 		index,
-		buf, buflen, HZ);
+		buf, buflen, 1000);
 }
 
 
@@ -246,7 +244,7 @@ static inline int set_video_mode_Nala(struct pwc_device *pdev, int size, int fra
 	   switch(pdev->type) {
 	     case 645:
 	     case 646:
-	       pwc_dec1_init(pdev->type, pdev->release, buf, pdev->decompress_data);
+/*	       pwc_dec1_init(pdev->type, pdev->release, buf, pdev->decompress_data); */
 	       break;
 
 	     case 675:
@@ -256,7 +254,7 @@ static inline int set_video_mode_Nala(struct pwc_device *pdev, int size, int fra
 	     case 730:
 	     case 740:
 	     case 750:
-	       pwc_dec23_init(pdev->type, pdev->release, buf, pdev->decompress_data);
+/*	       pwc_dec23_init(pdev->type, pdev->release, buf, pdev->decompress_data); */
 	       break;
 	   }
 	}
@@ -318,8 +316,8 @@ static inline int set_video_mode_Timon(struct pwc_device *pdev, int size, int fr
 	if (ret < 0)
 		return ret;
 
-	if (pChoose->bandlength > 0 && pdev->vpalette != VIDEO_PALETTE_RAW)
-	   pwc_dec23_init(pdev->type, pdev->release, buf, pdev->decompress_data);
+/* 	if (pChoose->bandlength > 0 && pdev->vpalette != VIDEO_PALETTE_RAW)
+	   pwc_dec23_init(pdev->type, pdev->release, buf, pdev->decompress_data); */
 
 	pdev->cmd_len = 13;
 	memcpy(pdev->cmd_buf, buf, 13);
@@ -341,7 +339,7 @@ static inline int set_video_mode_Timon(struct pwc_device *pdev, int size, int fr
 
 static inline int set_video_mode_Kiara(struct pwc_device *pdev, int size, int frames, int compression, int snapshot)
 {
-	const struct Kiara_table_entry *pChoose = 0;
+	const struct Kiara_table_entry *pChoose = NULL;
 	int fps, ret;
 	unsigned char buf[12];
 	struct Kiara_table_entry RawEntry = {6, 773, 1272, {0xAD, 0xF4, 0x10, 0x27, 0xB6, 0x24, 0x96, 0x02, 0x30, 0x05, 0x03, 0x80}};
@@ -397,8 +395,8 @@ static inline int set_video_mode_Kiara(struct pwc_device *pdev, int size, int fr
 	if (ret < 0)
 		return ret;
 
-	if (pChoose->bandlength > 0 && pdev->vpalette != VIDEO_PALETTE_RAW)
-	  pwc_dec23_init(pdev->type, pdev->release, buf, pdev->decompress_data);
+/*	if (pChoose->bandlength > 0 && pdev->vpalette != VIDEO_PALETTE_RAW)
+	  pwc_dec23_init(pdev->type, pdev->release, buf, pdev->decompress_data); */
 
 	pdev->cmd_len = 12;
 	memcpy(pdev->cmd_buf, buf, 12);
@@ -414,6 +412,44 @@ static inline int set_video_mode_Kiara(struct pwc_device *pdev, int size, int fr
 	else
 		pdev->frame_size = (pdev->image.x * pdev->image.y * 12) / 8;
 	return 0;
+}
+
+
+
+static void pwc_set_image_buffer_size(struct pwc_device *pdev)
+{
+	int i, factor = 0, filler = 0;
+
+	/* for PALETTE_YUV420P */
+	switch(pdev->vpalette)
+	{
+	case VIDEO_PALETTE_YUV420P:
+		factor = 6;
+		filler = 128;
+		break;
+	case VIDEO_PALETTE_RAW:
+		factor = 6; /* can be uncompressed YUV420P */
+		filler = 0;
+		break;
+	}
+
+	/* Set sizes in bytes */
+	pdev->image.size = pdev->image.x * pdev->image.y * factor / 4;
+	pdev->view.size  = pdev->view.x  * pdev->view.y  * factor / 4;
+
+	/* Align offset, or you'll get some very weird results in
+	   YUV420 mode... x must be multiple of 4 (to get the Y's in
+	   place), and y even (or you'll mixup U & V). This is less of a
+	   problem for YUV420P.
+	 */
+	pdev->offset.x = ((pdev->view.x - pdev->image.x) / 2) & 0xFFFC;
+	pdev->offset.y = ((pdev->view.y - pdev->image.y) / 2) & 0xFFFE;
+
+	/* Fill buffers with gray or black */
+	for (i = 0; i < MAX_IMAGES; i++) {
+		if (pdev->image_ptr[i] != NULL)
+			memset(pdev->image_ptr[i], filler, pdev->view.size);
+	}
 }
 
 
@@ -473,44 +509,6 @@ int pwc_set_video_mode(struct pwc_device *pdev, int width, int height, int frame
 	Trace(TRACE_SIZE, "Set viewport to %dx%d, image size is %dx%d.\n", width, height, pwc_image_sizes[size].x, pwc_image_sizes[size].y);
 	return 0;
 }
-
-
-void pwc_set_image_buffer_size(struct pwc_device *pdev)
-{
-	int i, factor = 0, filler = 0;
-
-	/* for PALETTE_YUV420P */
-	switch(pdev->vpalette)
-	{
-	case VIDEO_PALETTE_YUV420P:
-		factor = 6;
-		filler = 128;
-		break;
-	case VIDEO_PALETTE_RAW:
-		factor = 6; /* can be uncompressed YUV420P */
-		filler = 0;
-		break;
-	}
-
-	/* Set sizes in bytes */
-	pdev->image.size = pdev->image.x * pdev->image.y * factor / 4;
-	pdev->view.size  = pdev->view.x  * pdev->view.y  * factor / 4;
-
-	/* Align offset, or you'll get some very weird results in
-	   YUV420 mode... x must be multiple of 4 (to get the Y's in
-	   place), and y even (or you'll mixup U & V). This is less of a
-	   problem for YUV420P.
-	 */
-	pdev->offset.x = ((pdev->view.x - pdev->image.x) / 2) & 0xFFFC;
-	pdev->offset.y = ((pdev->view.y - pdev->image.y) / 2) & 0xFFFE;
-
-	/* Fill buffers with gray or black */
-	for (i = 0; i < MAX_IMAGES; i++) {
-		if (pdev->image_ptr[i] != NULL)
-			memset(pdev->image_ptr[i], filler, pdev->view.size);
-	}
-}
-
 
 
 /* BRIGHTNESS */
@@ -949,7 +947,7 @@ int pwc_set_leds(struct pwc_device *pdev, int on_value, int off_value)
 	return SendControlMsg(SET_STATUS_CTL, LED_FORMATTER, 2);
 }
 
-int pwc_get_leds(struct pwc_device *pdev, int *on_value, int *off_value)
+static int pwc_get_leds(struct pwc_device *pdev, int *on_value, int *off_value)
 {
 	unsigned char buf[2];
 	int ret;
@@ -1087,7 +1085,7 @@ static inline int pwc_get_dynamic_noise(struct pwc_device *pdev, int *noise)
 	return 0;
 }
 
-int pwc_mpt_reset(struct pwc_device *pdev, int flags)
+static int pwc_mpt_reset(struct pwc_device *pdev, int flags)
 {
 	unsigned char buf;
 	
@@ -1100,7 +1098,7 @@ static inline int pwc_mpt_set_angle(struct pwc_device *pdev, int pan, int tilt)
 	unsigned char buf[4];
 	
 	/* set new relative angle; angles are expressed in degrees * 100,
-	   but cam as .5 degree resolution, hence devide by 200. Also
+	   but cam as .5 degree resolution, hence divide by 200. Also
 	   the angle must be multiplied by 64 before it's send to
 	   the cam (??)
 	 */

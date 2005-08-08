@@ -30,6 +30,7 @@
 #include <linux/thread_info.h>
 #include <linux/time.h>
 #include <linux/jiffies.h>
+#include <linux/posix-timers.h>
 #include <linux/cpu.h>
 #include <linux/syscalls.h>
 #include <linux/vs_cvirt.h>
@@ -50,8 +51,9 @@ static void time_interpolator_update(long delta_nsec);
 /*
  * per-CPU timer vector definitions:
  */
-#define TVN_BITS 6
-#define TVR_BITS 8
+
+#define TVN_BITS (CONFIG_BASE_SMALL ? 4 : 6)
+#define TVR_BITS (CONFIG_BASE_SMALL ? 6 : 8)
 #define TVN_SIZE (1 << TVN_BITS)
 #define TVR_SIZE (1 << TVR_BITS)
 #define TVN_MASK (TVN_SIZE - 1)
@@ -589,10 +591,10 @@ long time_tolerance = MAXFREQ;		/* frequency tolerance (ppm)	*/
 long time_precision = 1;		/* clock precision (us)		*/
 long time_maxerror = NTP_PHASE_LIMIT;	/* maximum error (us)		*/
 long time_esterror = NTP_PHASE_LIMIT;	/* estimated error (us)		*/
-long time_phase;			/* phase offset (scaled us)	*/
+static long time_phase;			/* phase offset (scaled us)	*/
 long time_freq = (((NSEC_PER_SEC + HZ/2) % HZ - HZ/2) << SHIFT_USEC) / NSEC_PER_USEC;
 					/* frequency offset (scaled ppm)*/
-long time_adj;				/* tick adjust (scaled 1 / HZ)	*/
+static long time_adj;			/* tick adjust (scaled 1 / HZ)	*/
 long time_reftime;			/* time at last adjustment (s)	*/
 long time_adjust;
 long time_next_adjust;
@@ -834,6 +836,7 @@ void update_process_times(int user_tick)
 	if (rcu_pending(cpu))
 		rcu_check_callbacks(cpu, user_tick);
 	scheduler_tick();
+ 	run_posix_cpu_timers(p);
 }
 
 /*
@@ -853,6 +856,8 @@ static unsigned long count_active_tasks(void)
  * Requires xtime_lock to access.
  */
 unsigned long avenrun[3];
+
+EXPORT_SYMBOL(avenrun);
 
 /*
  * calc_load - given tick count, update the avenrun load estimates.
@@ -958,12 +963,6 @@ asmlinkage unsigned long sys_alarm(unsigned int seconds)
 
 #endif
 
-#ifndef __alpha__
-
-/*
- * The Alpha uses getxpid, getxuid, and getxgid instead.  Maybe this
- * should be moved into arch/i386 instead?
- */
 
 /**
  * sys_getpid - return the thread group id of the current process
@@ -1012,7 +1011,7 @@ asmlinkage long sys_getppid(void)
 		 * Make sure we read the pid before re-reading the
 		 * parent pointer:
 		 */
-		rmb();
+		smp_rmb();
 		parent = me->group_leader->real_parent;
 		if (old != parent)
 			continue;
@@ -1022,6 +1021,20 @@ asmlinkage long sys_getppid(void)
 	}
 	return vx_map_pid(pid);
 }
+
+#ifdef __alpha__
+
+/*
+ * The Alpha uses getxpid, getxuid, and getxgid instead.
+ */
+
+asmlinkage long do_getxpid(long *ppid)
+{
+	*ppid = sys_getppid();
+	return sys_getpid();
+}
+
+#else /* _alpha_ */
 
 asmlinkage long sys_getuid(void)
 {

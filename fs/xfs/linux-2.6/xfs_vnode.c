@@ -156,7 +156,6 @@ vn_initialize(
 
 #ifdef	XFS_VNODE_TRACE
 	vp->v_trace = ktrace_alloc(VNODE_TRACE_SIZE, KM_SLEEP);
-	printk("Allocated VNODE_TRACE at 0x%p\n", vp->v_trace);
 #endif	/* XFS_VNODE_TRACE */
 
 	vn_trace_exit(vp, "vn_initialize", (inst_t *)__return_address);
@@ -203,6 +202,7 @@ vn_revalidate_core(
 	inode->i_nlink	    = vap->va_nlink;
 	inode->i_uid	    = vap->va_uid;
 	inode->i_gid	    = vap->va_gid;
+	inode->i_xid	    = vap->va_xid;
 	inode->i_blocks	    = vap->va_nblocks;
 	inode->i_mtime	    = vap->va_mtime;
 	inode->i_ctime	    = vap->va_ctime;
@@ -432,13 +432,13 @@ vn_remove(
  * Vnode tracing code.
  */
 void
-vn_trace_entry(vnode_t *vp, char *func, inst_t *ra)
+vn_trace_entry(vnode_t *vp, const char *func, inst_t *ra)
 {
 	KTRACE_ENTER(vp, VNODE_KTRACE_ENTRY, func, 0, ra);
 }
 
 void
-vn_trace_exit(vnode_t *vp, char *func, inst_t *ra)
+vn_trace_exit(vnode_t *vp, const char *func, inst_t *ra)
 {
 	KTRACE_ENTER(vp, VNODE_KTRACE_EXIT, func, 0, ra);
 }

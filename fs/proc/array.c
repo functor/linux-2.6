@@ -73,6 +73,7 @@
 #include <linux/highmem.h>
 #include <linux/file.h>
 #include <linux/times.h>
+#include <linux/cpuset.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vs_cvirt.h>
@@ -248,6 +249,8 @@ static inline char * task_sig(struct task_struct *p, char *buffer)
 {
 	sigset_t pending, shpending, blocked, ignored, caught;
 	int num_threads = 0;
+	unsigned long qsize = 0;
+	unsigned long qlim = 0;
 
 	sigemptyset(&pending);
 	sigemptyset(&shpending);
@@ -264,11 +267,14 @@ static inline char * task_sig(struct task_struct *p, char *buffer)
 		blocked = p->blocked;
 		collect_sigign_sigcatch(p, &ignored, &caught);
 		num_threads = atomic_read(&p->signal->count);
+		qsize = atomic_read(&p->user->sigpending);
+		qlim = p->signal->rlim[RLIMIT_SIGPENDING].rlim_cur;
 		spin_unlock_irq(&p->sighand->siglock);
 	}
 	read_unlock(&tasklist_lock);
 
 	buffer += sprintf(buffer, "Threads:\t%d\n", num_threads);
+	buffer += sprintf(buffer, "SigQ:\t%lu/%lu\n", qsize, qlim);
 
 	/* render them all */
 	buffer = render_sigset_t("SigPnd:\t", &pending, buffer);
@@ -310,6 +316,7 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 	}
 	buffer = task_sig(task, buffer);
 	buffer = task_cap(task, buffer);
+	buffer = cpuset_task_status_allowed(task, buffer);
 
 	if (task_vx_flags(task, VXF_INFO_HIDE, 0))
 		goto skip;
@@ -372,6 +379,7 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	unsigned long  min_flt = 0,  maj_flt = 0;
 	cputime_t cutime, cstime, utime, stime;
 	unsigned long rsslim = 0;
+	unsigned long it_real_value = 0;
 	struct task_struct *t;
 	char tcomm[sizeof(task->comm)];
 
@@ -427,6 +435,7 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 			utime = cputime_add(utime, task->signal->utime);
 			stime = cputime_add(stime, task->signal->stime);
 		}
+		it_real_value = task->signal->it_real_value;
 	}
 	pid = vx_info_map_pid(task->vx_info, pid_alive(task) ? task->pid : 0);
 	ppid = (!(pid > 1)) ? 0 : vx_info_map_tgid(task->vx_info,
@@ -491,10 +500,10 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 		priority,
 		nice,
 		num_threads,
-		jiffies_to_clock_t(task->it_real_value),
+		jiffies_to_clock_t(it_real_value),
 		start_time,
 		vsize,
-		mm ? mm->rss : 0, /* you might want to shift this left 3 */
+		mm ? get_mm_counter(mm, rss) : 0, /* you might want to shift this left 3 */
 	        rsslim,
 		mm ? mm->start_code : 0,
 		mm ? mm->end_code : 0,

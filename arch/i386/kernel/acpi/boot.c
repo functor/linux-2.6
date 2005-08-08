@@ -608,6 +608,12 @@ static int __init acpi_parse_fadt(unsigned long phys, unsigned long size)
 	acpi_fadt.sci_int = fadt->sci_int;
 #endif
 
+#ifdef CONFIG_ACPI_BUS
+	/* initialize rev and apic_phys_dest_mode for x86_64 genapic */
+	acpi_fadt.revision = fadt->revision;
+	acpi_fadt.force_apic_physical_destination_mode = fadt->force_apic_physical_destination_mode;
+#endif
+
 #ifdef CONFIG_X86_PM_TIMER
 	/* detect the location of the ACPI PM Timer */
 	if (fadt->revision >= FADT2_REVISION_ID) {
@@ -644,7 +650,7 @@ acpi_find_rsdp (void)
 	 */
 	rsdp_phys = acpi_scan_rsdp (0, 0x400);
 	if (!rsdp_phys)
-		rsdp_phys = acpi_scan_rsdp (0xE0000, 0xFFFFF);
+		rsdp_phys = acpi_scan_rsdp (0xE0000, 0x20000);
 
 	return rsdp_phys;
 }

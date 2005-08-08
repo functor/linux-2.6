@@ -32,7 +32,7 @@
 	.text
 
 /*
- * Returns (address we're running at) - (address we were linked at)
+ * Returns (address we were linked at) - (address we are running at)
  * for use before the text and data are mapped to KERNELBASE.
  */
 
@@ -288,6 +288,26 @@ _GLOBAL(flush_dcache_phys_range)
 	sync
 	isync
 	mtmsr	r5			/* Re-enable MMU Data Relocation */
+	sync
+	isync
+	blr
+
+_GLOBAL(flush_inval_dcache_range)
+ 	ld	r10,PPC64_CACHES@toc(r2)
+	lwz	r7,DCACHEL1LINESIZE(r10)	/* Get dcache line size */
+	addi	r5,r7,-1
+	andc	r6,r3,r5		/* round low to line bdy */
+	subf	r8,r6,r4		/* compute length */
+	add	r8,r8,r5		/* ensure we get enough */
+	lwz	r9,DCACHEL1LOGLINESIZE(r10)/* Get log-2 of dcache line size */
+	srw.	r8,r8,r9		/* compute line count */
+	beqlr				/* nothing to do? */
+	sync
+	isync
+	mtctr	r8
+0:	dcbf	0,r6
+	add	r6,r6,r7
+	bdnz	0b
 	sync
 	isync
 	blr
@@ -660,10 +680,6 @@ _GLOBAL(kernel_thread)
 	ld	r30,-16(r1)
 	blr
 
-#ifndef CONFIG_PPC_PSERIES	/* hack hack hack */
-#define ppc_rtas	sys_ni_syscall
-#endif
-
 /* Why isn't this a) automatic, b) written in 'C'? */	
 	.balign 8
 _GLOBAL(sys_call_table32)
@@ -776,7 +792,7 @@ _GLOBAL(sys_call_table32)
 	.llong .compat_sys_newstat
 	.llong .compat_sys_newlstat
 	.llong .compat_sys_newfstat
-	.llong .sys_uname
+	.llong .sys32_uname
 	.llong .sys_ni_syscall		/* 110 old iopl syscall */
 	.llong .sys_vhangup
 	.llong .sys_ni_syscall		/* old idle syscall */
@@ -939,6 +955,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys32_add_key
 	.llong .sys32_request_key
 	.llong .compat_sys_keyctl
+	.llong .compat_sys_waitid
 
 	.balign 8
 _GLOBAL(sys_call_table)
@@ -1214,3 +1231,4 @@ _GLOBAL(sys_call_table)
 	.llong .sys_add_key
 	.llong .sys_request_key		/* 270 */
 	.llong .sys_keyctl
+	.llong .sys_waitid

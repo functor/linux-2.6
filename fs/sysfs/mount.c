@@ -91,6 +91,7 @@ int __init sysfs_init(void)
 			printk(KERN_ERR "sysfs: could not mount!\n");
 			err = PTR_ERR(sysfs_mount);
 			sysfs_mount = NULL;
+			unregister_filesystem(&sysfs_fs_type);
 			goto out_err;
 		}
 	} else
@@ -99,5 +100,6 @@ out:
 	return err;
 out_err:
 	kmem_cache_destroy(sysfs_dir_cachep);
+	sysfs_dir_cachep = NULL;
 	goto out;
 }

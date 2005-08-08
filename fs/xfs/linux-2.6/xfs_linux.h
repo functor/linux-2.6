@@ -88,6 +88,7 @@
 #include <linux/list.h>
 #include <linux/proc_fs.h>
 #include <linux/version.h>
+#include <linux/sort.h>
 
 #include <asm/page.h>
 #include <asm/div64.h>
@@ -151,6 +152,7 @@ static inline void set_buffer_unwritten_io(struct buffer_head *bh)
 #define current_pid()		(current->pid)
 #define current_fsuid(cred)	(current->fsuid)
 #define current_fsgid(cred)	(current->fsgid)
+#define current_fsxid(cred,vp)	(vx_current_fsxid(LINVFS_GET_IP(vp)->i_sb))
 
 #define NBPP		PAGE_SIZE
 #define DPPSHFT		(PAGE_SHIFT - 9)
@@ -367,5 +369,7 @@ static inline __uint64_t roundup_64(__uint64_t x, __uint32_t y)
 	do_div(x, y);
 	return(x * y);
 }
+
+#define qsort(a, n, s, cmp) sort(a, n, s, cmp, NULL)
 
 #endif /* __XFS_LINUX__ */

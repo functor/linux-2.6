@@ -64,7 +64,7 @@ struct _vx_hist_entry *vxh_advance(void *loc)
 }
 
 
-#define VXH_LOC_FMTS	"(#%04x,*%d): %p"
+#define VXH_LOC_FMTS	"(#%04x,*%d):%p"
 
 #define VXH_LOC_ARGS(e)	(e)->seq, cpu, (e)->loc
 

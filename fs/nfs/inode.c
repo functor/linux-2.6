@@ -65,6 +65,8 @@ static void nfs_umount_begin(struct super_block *);
 static int  nfs_statfs(struct super_block *, struct kstatfs *);
 static int  nfs_show_options(struct seq_file *, struct vfsmount *);
 
+static struct rpc_program	nfs_program;
+
 static struct super_operations nfs_sops = { 
 	.alloc_inode	= nfs_alloc_inode,
 	.destroy_inode	= nfs_destroy_inode,
@@ -79,7 +81,7 @@ static struct super_operations nfs_sops = {
 /*
  * RPC cruft for NFS
  */
-struct rpc_stat			nfs_rpcstat = {
+static struct rpc_stat		nfs_rpcstat = {
 	.program		= &nfs_program
 };
 static struct rpc_version *	nfs_version[] = {
@@ -96,7 +98,7 @@ static struct rpc_version *	nfs_version[] = {
 #endif
 };
 
-struct rpc_program		nfs_program = {
+static struct rpc_program	nfs_program = {
 	.name			= "nfs",
 	.number			= NFS_PROGRAM,
 	.nrvers			= sizeof(nfs_version) / sizeof(nfs_version[0]),
@@ -248,6 +250,7 @@ nfs_sb_init(struct super_block *sb, rpc_authflavor_t authflavor)
 			.fattr = &fattr,
 	};
 	int no_root_error = 0;
+	unsigned long max_rpc_payload;
 
 	/* We probably want something more informative here */
 	snprintf(sb->s_id, sizeof(sb->s_id), "%x:%x", MAJOR(sb->s_dev), MINOR(sb->s_dev));
@@ -283,6 +286,12 @@ nfs_sb_init(struct super_block *sb, rpc_authflavor_t authflavor)
 		server->rsize = nfs_block_size(fsinfo.rtmax, NULL);
 	if (fsinfo.wtmax >= 512 && server->wsize > fsinfo.wtmax)
 		server->wsize = nfs_block_size(fsinfo.wtmax, NULL);
+
+	max_rpc_payload = nfs_block_size(rpc_max_payload(server->client), NULL);
+	if (server->rsize > max_rpc_payload)
+		server->rsize = max_rpc_payload;
+	if (server->wsize > max_rpc_payload)
+		server->wsize = max_rpc_payload;
 
 	server->rpages = (server->rsize + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
 	if (server->rpages > NFS_READ_MAXIOV) {
@@ -320,6 +329,10 @@ nfs_sb_init(struct super_block *sb, rpc_authflavor_t authflavor)
 	sb->s_maxbytes = fsinfo.maxfilesize;
 	if (sb->s_maxbytes > MAX_LFS_FILESIZE) 
 		sb->s_maxbytes = MAX_LFS_FILESIZE; 
+
+	server->client->cl_intr = (server->flags & NFS_MOUNT_INTR) ? 1 : 0;
+	server->client->cl_softrtry = (server->flags & NFS_MOUNT_SOFT) ? 1 : 0;
+	server->client->cl_tagxid = (server->flags & NFS_MOUNT_TAGXID) ? 1 : 0;
 
 	/* We're airborne Set socket buffersize */
 	rpc_setbufsize(server->client, server->wsize + 100, server->rsize + 100);
@@ -368,10 +381,9 @@ nfs_create_client(struct nfs_server *server, const struct nfs_mount_data *data)
 		goto out_fail;
 	}
 
-	clnt->cl_intr     = (server->flags & NFS_MOUNT_INTR) ? 1 : 0;
-	clnt->cl_softrtry = (server->flags & NFS_MOUNT_SOFT) ? 1 : 0;
-	clnt->cl_droppriv = (server->flags & NFS_MOUNT_BROKEN_SUID) ? 1 : 0;
-	clnt->cl_tagxid   = (server->flags & NFS_MOUNT_TAGXID) ? 1 : 0;
+	clnt->cl_intr     = 1;
+	clnt->cl_softrtry = 1;
+	clnt->cl_tagxid   = 1;
 	clnt->cl_chatty   = 1;
 
 	return clnt;
@@ -543,7 +555,6 @@ static int nfs_show_options(struct seq_file *m, struct vfsmount *mnt)
 		{ NFS_MOUNT_NOCTO, ",nocto", "" },
 		{ NFS_MOUNT_NOAC, ",noac", "" },
 		{ NFS_MOUNT_NONLM, ",nolock", ",lock" },
-		{ NFS_MOUNT_BROKEN_SUID, ",broken_suid", "" },
 		{ NFS_MOUNT_TAGXID, ",tagxid", "" },
 		{ 0, NULL, NULL }
 	};
@@ -738,12 +749,7 @@ nfs_fhget(struct super_block *sb, struct nfs_fh *fh, struct nfs_fattr *fattr)
 
 out:
 	return inode;
-/*	FIXME
-fail_dlim:
-	make_bad_inode(inode);
-	iput(inode);
-	inode = NULL;
-*/
+
 out_no_inode:
 	printk("nfs_fhget: iget failed\n");
 	goto out;
@@ -807,7 +813,7 @@ nfs_setattr(struct dentry *dentry, struct iattr *attr)
  * Wait for the inode to get unlocked.
  * (Used for NFS_INO_LOCKED and NFS_INO_REVALIDATING).
  */
-int
+static int
 nfs_wait_on_inode(struct inode *inode, int flag)
 {
 	struct rpc_clnt	*clnt = NFS_CLIENT(inode);
@@ -871,6 +877,12 @@ struct nfs_open_context *get_nfs_open_context(struct nfs_open_context *ctx)
 void put_nfs_open_context(struct nfs_open_context *ctx)
 {
 	if (atomic_dec_and_test(&ctx->count)) {
+		if (!list_empty(&ctx->list)) {
+			struct inode *inode = ctx->dentry->d_inode;
+			spin_lock(&inode->i_lock);
+			list_del(&ctx->list);
+			spin_unlock(&inode->i_lock);
+		}
 		if (ctx->state != NULL)
 			nfs4_close_state(ctx->state, ctx->mode);
 		if (ctx->cred != NULL)
@@ -919,7 +931,7 @@ void nfs_file_clear_open_context(struct file *filp)
 	if (ctx) {
 		filp->private_data = NULL;
 		spin_lock(&inode->i_lock);
-		list_del(&ctx->list);
+		list_move_tail(&ctx->list, &NFS_I(inode)->open_files);
 		spin_unlock(&inode->i_lock);
 		put_nfs_open_context(ctx);
 	}
@@ -933,8 +945,9 @@ int nfs_open(struct inode *inode, struct file *filp)
 	struct nfs_open_context *ctx;
 	struct rpc_cred *cred;
 
-	if ((cred = rpcauth_lookupcred(NFS_CLIENT(inode)->cl_auth, 0)) == NULL)
-		return -ENOMEM;
+	cred = rpcauth_lookupcred(NFS_CLIENT(inode)->cl_auth, 0);
+	if (IS_ERR(cred))
+		return PTR_ERR(cred);
 	ctx = alloc_nfs_open_context(filp->f_dentry, cred);
 	put_rpccred(cred);
 	if (ctx == NULL)
@@ -1574,6 +1587,7 @@ static int nfs4_fill_super(struct super_block *sb, struct nfs4_mount_data *data,
 	if (data->wsize != 0)
 		server->wsize = nfs_block_size(data->wsize, NULL);
 	server->flags = data->flags & NFS_MOUNT_FLAGMASK;
+	server->caps = NFS_CAP_ATOMIC_OPEN;
 
 	server->acregmin = data->acregmin*HZ;
 	server->acregmax = data->acregmax*HZ;
@@ -1641,9 +1655,17 @@ static int nfs4_fill_super(struct super_block *sb, struct nfs4_mount_data *data,
 			err = PTR_ERR(clnt);
 			goto out_fail;
 		}
+		clnt->cl_intr     = 1;
+		clnt->cl_softrtry = 1;
 		clnt->cl_chatty   = 1;
 		clp->cl_rpcclient = clnt;
 		clp->cl_cred = rpcauth_lookupcred(clnt->cl_auth, 0);
+		if (IS_ERR(clp->cl_cred)) {
+			up_write(&clp->cl_sem);
+			err = PTR_ERR(clp->cl_cred);
+			clp->cl_cred = NULL;
+			goto out_fail;
+		}
 		memcpy(clp->cl_ipaddr, server->ip_addr, sizeof(clp->cl_ipaddr));
 		nfs_idmap_new(clp);
 	}
@@ -1666,8 +1688,6 @@ static int nfs4_fill_super(struct super_block *sb, struct nfs4_mount_data *data,
 		return PTR_ERR(clnt);
 	}
 
-	clnt->cl_intr     = (server->flags & NFS4_MOUNT_INTR) ? 1 : 0;
-	clnt->cl_softrtry = (server->flags & NFS4_MOUNT_SOFT) ? 1 : 0;
 	server->client    = clnt;
 
 	if (server->nfs4_state->cl_idmap == NULL) {
@@ -1912,7 +1932,7 @@ static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 	}
 }
  
-int nfs_init_inodecache(void)
+static int nfs_init_inodecache(void)
 {
 	nfs_inode_cachep = kmem_cache_create("nfs_inode_cache",
 					     sizeof(struct nfs_inode),
@@ -1924,7 +1944,7 @@ int nfs_init_inodecache(void)
 	return 0;
 }
 
-void nfs_destroy_inodecache(void)
+static void nfs_destroy_inodecache(void)
 {
 	if (kmem_cache_destroy(nfs_inode_cachep))
 		printk(KERN_INFO "nfs_inode_cache: not all structures were freed\n");
