@@ -7,7 +7,7 @@
  *
  * Version:	@(#)tcp.h	1.0.5	05/23/93
  *
- * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
+ * Authors:	Ross Biro
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
  *
  *		This program is free software; you can redistribute it and/or
@@ -1042,6 +1042,7 @@ static inline void tcp_reset_xmit_timer(struct sock *sk, int what, unsigned long
 #ifdef TCP_DEBUG
 		printk(tcp_timer_bug_msg);
 #endif
+		return;
 	};
 }
 
@@ -1420,19 +1421,20 @@ tcp_nagle_check(const struct tcp_sock *tp, const struct sk_buff *skb,
 		  tcp_minshall_check(tp))));
 }
 
-extern void tcp_set_skb_tso_segs(struct sk_buff *, unsigned int);
+extern void tcp_set_skb_tso_segs(struct sock *, struct sk_buff *);
 
 /* This checks if the data bearing packet SKB (usually sk->sk_send_head)
  * should be put on the wire right now.
  */
-static __inline__ int tcp_snd_test(const struct tcp_sock *tp, 
+static __inline__ int tcp_snd_test(struct sock *sk,
 				   struct sk_buff *skb,
 				   unsigned cur_mss, int nonagle)
 {
+	struct tcp_sock *tp = tcp_sk(sk);
 	int pkts = tcp_skb_pcount(skb);
 
 	if (!pkts) {
-		tcp_set_skb_tso_segs(skb, tp->mss_cache_std);
+		tcp_set_skb_tso_segs(sk, skb);
 		pkts = tcp_skb_pcount(skb);
 	}
 
@@ -1493,7 +1495,7 @@ static __inline__ void __tcp_push_pending_frames(struct sock *sk,
 	if (skb) {
 		if (!tcp_skb_is_last(sk, skb))
 			nonagle = TCP_NAGLE_PUSH;
-		if (!tcp_snd_test(tp, skb, cur_mss, nonagle) ||
+		if (!tcp_snd_test(sk, skb, cur_mss, nonagle) ||
 		    tcp_write_xmit(sk, nonagle))
 			tcp_check_probe_timer(sk, tp);
 	}
@@ -1511,7 +1513,7 @@ static __inline__ int tcp_may_send_now(struct sock *sk, struct tcp_sock *tp)
 	struct sk_buff *skb = sk->sk_send_head;
 
 	return (skb &&
-		tcp_snd_test(tp, skb, tcp_current_mss(sk, 1),
+		tcp_snd_test(sk, skb, tcp_current_mss(sk, 1),
 			     tcp_skb_is_last(sk, skb) ? TCP_NAGLE_PUSH : tp->nonagle));
 }
 
@@ -1918,7 +1920,7 @@ static inline void tcp_v4_setup_caps(struct sock *sk, struct dst_entry *dst)
 {
 	sk->sk_route_caps = dst->dev->features;
 	if (sk->sk_route_caps & NETIF_F_TSO) {
-		if (sk->sk_no_largesend || dst->header_len)
+		if (sock_flag(sk, SOCK_NO_LARGESEND) || dst->header_len)
 			sk->sk_route_caps &= ~NETIF_F_TSO;
 	}
 }

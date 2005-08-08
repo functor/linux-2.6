@@ -88,8 +88,8 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 
 unsigned long arch_align_stack(unsigned long sp)
 {
-	if (current->flags & PF_RELOCEXEC)
-		sp -= ((get_random_int() % 65536) << 4);
+	if (current->flags & PF_RANDOMIZE)
+		sp -= get_random_int() % 8192;
 	return sp & ~0xf;
 }
 

@@ -79,6 +79,9 @@ deps_scripts/kconfig/mconf.o := \
   /usr/include/bits/sys_errlist.h \
   /usr/include/bits/stdio.h \
   /usr/lib/gcc/i386-redhat-linux/3.4.2/include/stdbool.h \
+  /usr/include/libintl.h \
+  /usr/include/locale.h \
+  /usr/include/bits/locale.h \
   scripts/kconfig/lkc_proto.h \
 
 scripts/kconfig/mconf.o: $(deps_scripts/kconfig/mconf.o)

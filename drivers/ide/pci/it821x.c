@@ -688,7 +688,7 @@ static void __devinit init_hwif_it821x(ide_hwif_t *hwif)
 	
 	/* MWDMA/PIO clock switching for pass through mode */
 	if(!idev->smart) {
-		hwif->ide_dma_start = &it821x_dma_start;
+		hwif->dma_start = &it821x_dma_start;
 		hwif->ide_dma_end = &it821x_dma_end;
 	}
 

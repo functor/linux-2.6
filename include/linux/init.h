@@ -46,7 +46,11 @@
 #define __exitdata	__attribute__ ((__section__(".exit.data")))
 #define __exit_call	__attribute_used__ __attribute__ ((__section__ (".exitcall.exit")))
 
+#ifdef MODULE
+#define __exit		__attribute__ ((__section__(".exit.text")))
+#else
 #define __exit		__attribute_used__ __attribute__ ((__section__(".exit.text")))
+#endif
 
 /* For assembly routines */
 #define __INIT		.section	".init.text","ax"

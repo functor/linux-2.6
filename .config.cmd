@@ -18,8 +18,10 @@ deps_config := \
 	drivers/mmc/Kconfig \
 	drivers/usb/gadget/Kconfig \
 	drivers/usb/atm/Kconfig \
+	drivers/usb/misc/sisusbvga/Kconfig \
 	drivers/usb/misc/Kconfig \
 	drivers/usb/serial/Kconfig \
+	drivers/usb/mon/Kconfig \
 	drivers/usb/net/Kconfig \
 	drivers/usb/media/Kconfig \
 	drivers/usb/image/Kconfig \
@@ -46,6 +48,7 @@ deps_config := \
 	drivers/video/backlight/Kconfig \
 	drivers/video/logo/Kconfig \
 	drivers/video/console/Kconfig \
+	drivers/video/geode/Kconfig \
 	drivers/video/Kconfig \
 	drivers/media/common/Kconfig \
 	drivers/media/dvb/frontends/Kconfig \
@@ -67,6 +70,7 @@ deps_config := \
 	drivers/i2c/busses/Kconfig \
 	drivers/i2c/algos/Kconfig \
 	drivers/i2c/Kconfig \
+	drivers/char/tpm/Kconfig \
 	drivers/char/pcmcia/Kconfig \
 	drivers/char/drm/Kconfig \
 	drivers/char/agp/Kconfig \
@@ -75,14 +79,14 @@ deps_config := \
 	drivers/char/ipmi/Kconfig \
 	drivers/serial/Kconfig \
 	drivers/char/Kconfig \
+	drivers/input/gameport/Kconfig \
+	drivers/input/serio/Kconfig \
 	drivers/input/misc/Kconfig \
 	drivers/input/touchscreen/Kconfig \
 	drivers/input/joystick/iforce/Kconfig \
 	drivers/input/joystick/Kconfig \
 	drivers/input/mouse/Kconfig \
 	drivers/input/keyboard/Kconfig \
-	drivers/input/serio/Kconfig \
-	drivers/input/gameport/Kconfig \
 	drivers/input/Kconfig \
 	drivers/telephony/Kconfig \
 	drivers/isdn/hardware/eicon/Kconfig \
@@ -90,7 +94,6 @@ deps_config := \
 	drivers/isdn/hardware/Kconfig \
 	drivers/isdn/capi/Kconfig \
 	drivers/isdn/hysdn/Kconfig \
-	drivers/isdn/tpam/Kconfig \
 	drivers/isdn/act2000/Kconfig \
 	drivers/isdn/sc/Kconfig \
 	drivers/isdn/pcbit/Kconfig \

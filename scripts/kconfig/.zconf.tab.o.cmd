@@ -39,6 +39,9 @@ deps_scripts/kconfig/zconf.tab.o := \
   /usr/lib/gcc/i386-redhat-linux/3.4.2/include/stdbool.h \
   scripts/kconfig/lkc.h \
   scripts/kconfig/expr.h \
+  /usr/include/libintl.h \
+  /usr/include/locale.h \
+  /usr/include/bits/locale.h \
   scripts/kconfig/lkc_proto.h \
   scripts/kconfig/lex.zconf.c \
   /usr/include/errno.h \

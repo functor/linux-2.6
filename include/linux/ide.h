@@ -190,10 +190,7 @@ typedef unsigned char	byte;	/* used everywhere */
 #define WAIT_READY	(5*HZ)		/* 5sec - some laptops are very slow */
 #define WAIT_PIDENTIFY	(10*HZ)	/* 10sec  - should be less than 3ms (?), if all ATAPI CD is closed at boot */
 #define WAIT_WORSTCASE	(30*HZ)	/* 30sec  - worst case when spinning up */
-/* We should make this more tunable and smart: Windows apparently uses 7 secs
-   but we've seen drives take long. Equally some drives can now do fast fails
-   for RAID. Can probably be 10 but lets see if 15 helps */
-#define WAIT_CMD	(15*HZ)	/* 10sec  - maximum wait for an IRQ to happen */
+#define WAIT_CMD	(15*HZ)	/* 15sec  - maximum wait for an IRQ to happen */
 #define WAIT_MIN_SLEEP	(2*HZ/100)	/* 20msec - minimum sleep time */
 
 #define HOST(hwif,chipset)					\
@@ -667,7 +664,6 @@ typedef struct ide_drive_s {
 
 	struct request		*rq;	/* current request */
 	struct ide_drive_s 	*next;	/* circular list of hwgroup drives */
-	struct ide_driver_s	*driver;/* (ide_driver_t *) */
 	void		*driver_data;	/* extra driver data */
 	struct hd_driveid	*id;	/* drive model identification info */
 	struct proc_dir_entry *proc;	/* /proc/ide/ directory entry */
@@ -721,6 +717,7 @@ typedef struct ide_drive_s {
 					 */
 	unsigned scsi		: 1;	/* 0=default, 1=ide-scsi emulation */
 	unsigned sleeping	: 1;	/* 1=sleeping & sleep field valid */
+	unsigned post_reset	: 1;
 
         u8	quirk_list;	/* considered quirky, set for a specific host */
         u8	init_speed;	/* transfer rate set at boot */
@@ -743,7 +740,6 @@ typedef struct ide_drive_s {
 	u8	sect;		/* "real" sectors per track */
 	u8	bios_head;	/* BIOS/fdisk/LILO number of heads */
 	u8	bios_sect;	/* BIOS/fdisk/LILO sectors per track */
-	u8	doing_barrier;	/* state, 1=currently doing flush */
 
 	unsigned int	bios_cyl;	/* BIOS/fdisk/LILO number of cyls */
 	unsigned int	cyl;		/* "real" number of cyls */
@@ -760,15 +756,15 @@ typedef struct ide_drive_s {
 	struct list_head list;
 	struct device	gendev;
 	struct semaphore gendev_rel_sem;	/* to deal with device release() */
-	struct gendisk *disk;
 } ide_drive_t;
+
+#define to_ide_device(dev)container_of(dev, ide_drive_t, gendev)
 
 #define IDE_CHIPSET_PCI_MASK	\
     ((1<<ide_pci)|(1<<ide_cmd646)|(1<<ide_ali14xx))
 #define IDE_CHIPSET_IS_PCI(c)	((IDE_CHIPSET_PCI_MASK >> (c)) & 1)
 
 struct ide_pci_device_s;
-struct ide_task_s;
 
 typedef struct hwif_s {
 	struct hwif_s *next;		/* for linked-list in ide_hwgroup_t */
@@ -776,7 +772,6 @@ typedef struct hwif_s {
 	struct hwgroup_s *hwgroup;	/* actually (ide_hwgroup_t *) */
 	struct proc_dir_entry *proc;	/* /proc/ide/ directory entry */
 
-	u16		key;		/* /proc persistent keying */
 	char name[6];			/* name of interface, eg. "ide0" */
 
 		/* task file registers for pata and sata */
@@ -832,9 +827,6 @@ typedef struct hwif_s {
 //	u8	(*ratemask)(ide_drive_t *);
 //	/* device rate limiter */
 //	u8	(*ratefilter)(ide_drive_t *, u8);
-	/* hwif remove hook, called on unload/pci remove paths*/
-	void	(*remove)(struct hwif_s *);
-	/* allow command filter/control */
 #endif
 
 	void (*ata_input_data)(ide_drive_t *, void *, u32);
@@ -843,9 +835,9 @@ typedef struct hwif_s {
 	void (*atapi_input_bytes)(ide_drive_t *, void *, u32);
 	void (*atapi_output_bytes)(ide_drive_t *, void *, u32);
 
-	int (*ide_dma_setup)(ide_drive_t *);
-	void (*ide_dma_exec_cmd)(ide_drive_t *, u8);
-	void (*ide_dma_start)(ide_drive_t *);
+	int (*dma_setup)(ide_drive_t *);
+	void (*dma_exec_cmd)(ide_drive_t *, u8);
+	void (*dma_start)(ide_drive_t *);
 	int (*ide_dma_end)(ide_drive_t *drive);
 	int (*ide_dma_check)(ide_drive_t *drive);
 	int (*ide_dma_on)(ide_drive_t *drive);
@@ -906,9 +898,7 @@ typedef struct hwif_s {
 
 	unsigned	noprobe    : 1;	/* don't probe for this interface */
 	unsigned	present    : 1;	/* this interface exists */
-	unsigned	configured : 1;	/* this hwif exists and is set up (may not be "present") */
 	unsigned	hold       : 1; /* this interface is always present */
-	unsigned	user_dev   : 1; /* user ioctl created device */
 	unsigned	serialized : 1;	/* serialized all channel operation */
 	unsigned	sharing_irq: 1;	/* 1 = sharing irq with another hwif */
 	unsigned	reset      : 1;	/* reset after probe */
@@ -1014,11 +1004,6 @@ extern int ide_read_setting(ide_drive_t *t, ide_settings_t *setting);
 extern int ide_write_setting(ide_drive_t *drive, ide_settings_t *setting, int val);
 extern void ide_add_generic_settings(ide_drive_t *drive);
 
-extern void *ide_drive_to_key(ide_drive_t *drive);
-extern ide_drive_t *ide_drive_from_key(void *);
-extern void *ide_hwif_to_key(ide_hwif_t *hwif);
-extern ide_hwif_t *ide_hwif_from_key(void *);
-
 /*
  * /proc/ide interface
  */
@@ -1035,7 +1020,7 @@ extern struct proc_dir_entry *proc_ide_root;
 extern void proc_ide_create(void);
 extern void proc_ide_destroy(void);
 extern void create_proc_ide_interfaces(void);
-extern void destroy_proc_ide_interface(ide_hwif_t *);
+void destroy_proc_ide_interface(ide_hwif_t *);
 extern void ide_add_proc_entries(struct proc_dir_entry *, ide_proc_entry_t *, void *);
 extern void ide_remove_proc_entries(struct proc_dir_entry *, ide_proc_entry_t *);
 read_proc_t proc_ide_read_capacity;
@@ -1104,34 +1089,21 @@ enum {
  */
 typedef struct ide_driver_s {
 	struct module			*owner;
-	const char			*name;
 	const char			*version;
 	u8				media;
-	unsigned busy			: 1;
 	unsigned supports_dsc_overlap	: 1;
-	int		(*cleanup)(ide_drive_t *);
 	ide_startstop_t	(*do_request)(ide_drive_t *, struct request *, sector_t);
 	int		(*end_request)(ide_drive_t *, int, int);
 	ide_startstop_t	(*error)(ide_drive_t *, struct request *rq, u8, u8);
 	ide_startstop_t	(*abort)(ide_drive_t *, struct request *rq);
 	int		(*ioctl)(ide_drive_t *, struct inode *, struct file *, unsigned int, unsigned long);
-	void		(*pre_reset)(ide_drive_t *);
-	sector_t	(*capacity)(ide_drive_t *);
-	ide_startstop_t	(*special)(ide_drive_t *);
 	ide_proc_entry_t	*proc;
-	int		(*attach)(ide_drive_t *);
 	void		(*ata_prebuilder)(ide_drive_t *);
 	void		(*atapi_prebuilder)(ide_drive_t *);
-	ide_startstop_t	(*start_power_step)(ide_drive_t *, struct request *);
-	void		(*complete_power_step)(ide_drive_t *, struct request *, u8, u8);
 	struct device_driver	gen_driver;
-	struct list_head drives;
-	struct list_head drivers;
 } ide_driver_t;
 
-#define DRIVER(drive)		((drive)->driver)
-
-extern int generic_ide_ioctl(struct file *, struct block_device *, unsigned, unsigned long);
+int generic_ide_ioctl(ide_drive_t *, struct file *, struct block_device *, unsigned, unsigned long);
 
 /*
  * ide_hwifs[] is the master data structure used to keep track
@@ -1147,7 +1119,7 @@ extern	ide_hwif_t	ide_hwifs[];		/* master data repository */
 extern int noautodma;
 
 extern int ide_end_request (ide_drive_t *drive, int uptodate, int nrsecs);
-extern int ide_end_dequeued_request (ide_drive_t *drive, struct request *rq, int uptodate, int nrsecs);
+extern int __ide_end_request (ide_drive_t *drive, struct request *rq, int uptodate, int nrsecs);
 
 /*
  * This is used on exit from the driver to designate the next irq handler
@@ -1349,9 +1321,7 @@ extern irqreturn_t ide_intr(int irq, void *dev_id, struct pt_regs *regs);
 extern void do_ide_request(request_queue_t *);
 extern void ide_init_subdrivers(void);
 
-extern struct block_device_operations ide_fops[];
-
-extern int ata_attach(ide_drive_t *);
+void ide_init_disk(struct gendisk *, ide_drive_t *);
 
 extern int ideprobe_init(void);
 
@@ -1360,18 +1330,13 @@ extern int ide_pci_register_driver(struct pci_driver *driver);
 extern void ide_pci_unregister_driver(struct pci_driver *driver);
 void ide_pci_setup_ports(struct pci_dev *, struct ide_pci_device_s *, int, ata_index_t *);
 extern void ide_setup_pci_noise (struct pci_dev *dev, struct ide_pci_device_s *d);
-extern void ide_pci_remove_hwifs(struct pci_dev *dev);
 
 extern void default_hwif_iops(ide_hwif_t *);
 extern void default_hwif_mmiops(ide_hwif_t *);
-extern void removed_hwif_iops(ide_hwif_t *);
 extern void default_hwif_transport(ide_hwif_t *);
 
-extern int ide_register_driver(ide_driver_t *driver);
-extern void ide_unregister_driver(ide_driver_t *driver);
-extern int ide_register_subdriver(ide_drive_t *, ide_driver_t *);
-extern int ide_unregister_subdriver (ide_drive_t *drive);
-extern int ide_replace_subdriver(ide_drive_t *drive, const char *driver);
+void ide_register_subdriver(ide_drive_t *, ide_driver_t *);
+void ide_unregister_subdriver(ide_drive_t *, ide_driver_t *);
 
 #define ON_BOARD		1
 #define NEVER_BOARD		0
@@ -1464,12 +1429,14 @@ static inline void ide_release_dma(ide_hwif_t *drive) {;}
 
 extern int ide_hwif_request_regions(ide_hwif_t *hwif);
 extern void ide_hwif_release_regions(ide_hwif_t* hwif);
-extern int ide_unregister_hwif(ide_hwif_t *hwif);
-extern int __ide_unregister_hwif(ide_hwif_t *hwif);
+extern void ide_unregister (unsigned int index);
 
-extern void ide_undecoded_slave(ide_hwif_t *);
+void ide_register_region(struct gendisk *);
+void ide_unregister_region(struct gendisk *);
 
-extern int probe_hwif_init_with_fixup(ide_hwif_t *, void (*)(ide_hwif_t *));
+void ide_undecoded_slave(ide_hwif_t *);
+
+int probe_hwif_init_with_fixup(ide_hwif_t *, void (*)(ide_hwif_t *));
 extern int probe_hwif_init(ide_hwif_t *);
 
 static inline void *ide_get_hwifdata (ide_hwif_t * hwif)

@@ -1135,7 +1135,7 @@ static void __devinit hpt366_clocking(ide_hwif_t *hwif)
 static void __devinit hpt37x_clocking(ide_hwif_t *hwif)
 {
 	struct hpt_info *info = ide_get_hwifdata(hwif);
-	struct pci_device *dev = hwif->pci_dev;
+	struct pci_dev *dev = hwif->pci_dev;
 	int adjust, i;
 	u16 freq;
 	u32 pll;
@@ -1455,7 +1455,7 @@ static void __devinit init_hwif_hpt366(ide_hwif_t *hwif)
 		hwif->ide_dma_test_irq = &hpt374_ide_dma_test_irq;
 		hwif->ide_dma_end = &hpt374_ide_dma_end;
 	} else if (info->revision >= 3) {
-		hwif->ide_dma_start = &hpt370_ide_dma_start;
+		hwif->dma_start = &hpt370_ide_dma_start;
 		hwif->ide_dma_end = &hpt370_ide_dma_end;
 		hwif->ide_dma_timeout = &hpt370_ide_dma_timeout;
 		hwif->ide_dma_lostirq = &hpt370_ide_dma_lostirq;

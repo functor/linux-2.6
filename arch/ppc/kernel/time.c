@@ -89,8 +89,6 @@ unsigned long tb_to_ns_scale;
 
 extern unsigned long wall_jiffies;
 
-static long rtc_time_offset;
-
 DEFINE_SPINLOCK(rtc_lock);
 
 EXPORT_SYMBOL(rtc_lock);
@@ -172,7 +170,7 @@ void timer_interrupt(struct pt_regs * regs)
 		     xtime.tv_sec - last_rtc_update >= 659 &&
 		     abs((xtime.tv_nsec / 1000) - (1000000-1000000/HZ)) < 500000/HZ &&
 		     jiffies - wall_jiffies == 1) {
-		  	if (ppc_md.set_rtc_time(xtime.tv_sec+1 + rtc_time_offset) == 0)
+		  	if (ppc_md.set_rtc_time(xtime.tv_sec+1 + time_offset) == 0)
 				last_rtc_update = xtime.tv_sec+1;
 			else
 				/* Try again one minute later */
@@ -272,7 +270,6 @@ int do_settimeofday(struct timespec *tv)
 
 	time_adjust = 0;                /* stop active adjtime() */
 	time_status |= STA_UNSYNC;
-	time_state = TIME_ERROR;        /* p. 24, (a) */
 	time_maxerror = NTP_PHASE_LIMIT;
 	time_esterror = NTP_PHASE_LIMIT;
 	write_sequnlock_irqrestore(&xtime_lock, flags);
@@ -289,7 +286,7 @@ void __init time_init(void)
 	unsigned old_stamp, stamp, elapsed;
 
         if (ppc_md.time_init != NULL)
-                rtc_time_offset = ppc_md.time_init();
+                time_offset = ppc_md.time_init();
 
 	if (__USE_RTC()) {
 		/* 601 processor: dec counts down by 128 every 128ns */
@@ -334,10 +331,10 @@ void __init time_init(void)
 	set_dec(tb_ticks_per_jiffy);
 
 	/* If platform provided a timezone (pmac), we correct the time */
-        if (rtc_time_offset) {
-		sys_tz.tz_minuteswest = -rtc_time_offset / 60;
+        if (time_offset) {
+		sys_tz.tz_minuteswest = -time_offset / 60;
 		sys_tz.tz_dsttime = 0;
-		xtime.tv_sec -= rtc_time_offset;
+		xtime.tv_sec -= time_offset;
         }
         set_normalized_timespec(&wall_to_monotonic,
                                 -xtime.tv_sec, -xtime.tv_nsec);

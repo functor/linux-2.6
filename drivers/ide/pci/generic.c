@@ -215,11 +215,6 @@ out:
 	return ret;
 }
 
-static void __devexit generic_remove_one(struct pci_dev *dev)
-{
-	ide_pci_remove_hwifs(dev);
-}
-
 static struct pci_device_id generic_pci_tbl[] = {
 	{ PCI_VENDOR_ID_NS,     PCI_DEVICE_ID_NS_87410,            PCI_ANY_ID, PCI_ANY_ID, 0, 0, 1},
 	{ PCI_VENDOR_ID_PCTECH, PCI_DEVICE_ID_PCTECH_SAMURAI_IDE,  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 2},
@@ -246,7 +241,6 @@ static struct pci_driver driver = {
 	.name		= "PCI_IDE",
 	.id_table	= generic_pci_tbl,
 	.probe		= generic_init_one,
-	.remove		= generic_remove_one,
 };
 
 static int generic_ide_init(void)
@@ -255,13 +249,6 @@ static int generic_ide_init(void)
 }
 
 module_init(generic_ide_init);
-
-static void generic_ide_exit(void)
-{
-	return ide_pci_unregister_driver(&driver);
-}
-
-module_exit(generic_ide_exit);
 
 MODULE_AUTHOR("Andre Hedrick");
 MODULE_DESCRIPTION("PCI driver module for generic PCI IDE");

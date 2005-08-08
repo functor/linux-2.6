@@ -48,10 +48,9 @@ static int __init sysenter_setup(void)
 {
 	void *page = (void *)get_zeroed_page(GFP_ATOMIC);
 
-	__set_fixmap(FIX_VSYSCALL, __pa(page), PAGE_KERNEL_RO);
 	sysenter_page = virt_to_page(page);
 
-	if (!boot_cpu_has(X86_FEATURE_SEP)) {
+	if (1 || (!boot_cpu_has(X86_FEATURE_SEP))) {
 		memcpy(page,
 		       &vsyscall_int80_start,
 		       &vsyscall_int80_end - &vsyscall_int80_start);
@@ -63,7 +62,6 @@ static int __init sysenter_setup(void)
 	       &vsyscall_sysenter_end - &vsyscall_sysenter_start);
 
 	on_each_cpu(enable_sep_cpu, NULL, 1, 1);
-
 	return 0;
 }
 
@@ -71,37 +69,61 @@ __initcall(sysenter_setup);
 
 extern void SYSENTER_RETURN_OFFSET;
 
-unsigned int vdso_enabled = 0;
+unsigned int vdso_enabled = 1;
 
-void map_vsyscall(void)
+/*
+ * This is called from binfmt_elf, we create the special vma for the
+ * vDSO and insert it into the mm struct tree.
+ */
+int arch_setup_additional_pages(struct linux_binprm *bprm,
+				int executable_stack)
 {
 	struct thread_info *ti = current_thread_info();
-	struct vm_area_struct *vma;
-	unsigned long addr;
+	unsigned long addr, len;
+	int err;
 
-	if (1 || unlikely(!vdso_enabled)) {
-		current->mm->context.vdso = NULL;
-		return;
-	}
+	current->mm->context.vdso = NULL;
+	if (unlikely(!vdso_enabled) || unlikely(!sysenter_page))
+		return 0;
 
 	/*
 	 * Map the vDSO (it will be randomized):
 	 */
 	down_write(&current->mm->mmap_sem);
-	addr = do_mmap(NULL, 0, 4096, PROT_READ | PROT_EXEC, MAP_PRIVATE, 0);
-	current->mm->context.vdso = (void *)addr;
-	ti->sysenter_return = (void *)addr + (long)&SYSENTER_RETURN_OFFSET;
-	if (addr != -1) {
-		vma = find_vma(current->mm, addr);
-		if (vma) {
-			pgprot_val(vma->vm_page_prot) &= ~_PAGE_RW;
-			get_page(sysenter_page);
-			install_page(current->mm, vma, addr,
-					sysenter_page, vma->vm_page_prot);
-			
-		}
+	len = PAGE_SIZE > ELF_EXEC_PAGESIZE ? PAGE_SIZE : ELF_EXEC_PAGESIZE;
+	addr = get_unmapped_area_prot(NULL, 0, len, 0,
+				      MAP_PRIVATE, PROT_READ | PROT_EXEC);
+	if (unlikely(addr & ~PAGE_MASK)) {
+		up_write(&current->mm->mmap_sem);
+		return addr;
+	}
+	get_page(sysenter_page);
+	err = install_special_mapping(current->mm, addr, len,
+				      VM_DONTEXPAND | VM_READ | VM_EXEC |
+				      VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC,
+				      PAGE_READONLY_EXEC,
+				      &sysenter_page, 1);
+	if (likely(err == 0)) {
+		current->mm->context.vdso = (void *)addr;
+		ti->sysenter_return = &SYSENTER_RETURN_OFFSET + addr;
 	}
 	up_write(&current->mm->mmap_sem);
+	return err;
+}
+
+int in_gate_area_no_task(unsigned long addr)
+{
+	return 0;
+}
+
+int in_gate_area(struct task_struct *task, unsigned long addr)
+{
+	return 0;
+}
+
+struct vm_area_struct *get_gate_vma(struct task_struct *tsk)
+{
+	return NULL;
 }
 
 static int __init vdso_setup(char *str)

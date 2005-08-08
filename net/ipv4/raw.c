@@ -7,7 +7,7 @@
  *
  * Version:	$Id: raw.c,v 1.64 2002/02/01 22:01:04 davem Exp $
  *
- * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
+ * Authors:	Ross Biro
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
  *
  * Fixes:
@@ -457,7 +457,7 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			daddr = ipc.opt->faddr;
 		}
 	}
-	tos = RT_TOS(inet->tos) | sk->sk_localroute;
+	tos = RT_CONN_FLAGS(sk);
 	if (msg->msg_flags & MSG_DONTROUTE)
 		tos |= RTO_ONLINK;
 
@@ -724,7 +724,7 @@ struct proto raw_prot = {
 	.backlog_rcv =	raw_rcv_skb,
 	.hash =		raw_v4_hash,
 	.unhash =	raw_v4_unhash,
-	.slab_obj_size = sizeof(struct raw_sock),
+	.obj_size =	sizeof(struct raw_sock),
 };
 
 #ifdef CONFIG_PROC_FS

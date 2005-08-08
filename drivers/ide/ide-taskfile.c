@@ -147,9 +147,9 @@ ide_startstop_t do_rw_taskfile (ide_drive_t *drive, ide_task_t *task)
 		case WIN_READDMA:
 		case WIN_READDMA_EXT:
 		case WIN_IDENTIFY_DMA:
-			if (!hwif->ide_dma_setup(drive)) {
-				hwif->ide_dma_exec_cmd(drive, taskfile->command);
-				hwif->ide_dma_start(drive);
+			if (!hwif->dma_setup(drive)) {
+				hwif->dma_exec_cmd(drive, taskfile->command);
+				hwif->dma_start(drive);
 				return ide_started;
 			}
 			break;
@@ -181,8 +181,6 @@ ide_startstop_t set_multmode_intr (ide_drive_t *drive)
 	return ide_stopped;
 }
 
-EXPORT_SYMBOL(set_multmode_intr);
-
 /*
  * set_geometry_intr() is invoked on completion of a WIN_SPECIFY cmd.
  */
@@ -207,8 +205,6 @@ ide_startstop_t set_geometry_intr (ide_drive_t *drive)
 	return ide_started;
 }
 
-EXPORT_SYMBOL(set_geometry_intr);
-
 /*
  * recal_intr() is invoked on completion of a WIN_RESTORE (recalibrate) cmd.
  */
@@ -221,8 +217,6 @@ ide_startstop_t recal_intr (ide_drive_t *drive)
 		return ide_error(drive, "recal_intr", stat);
 	return ide_stopped;
 }
-
-EXPORT_SYMBOL(recal_intr);
 
 /*
  * Handler for commands without a data phase
@@ -360,8 +354,12 @@ static ide_startstop_t task_error(ide_drive_t *drive, struct request *rq,
 			break;
 		}
 
-		if (sectors > 0)
-			drive->driver->end_request(drive, 1, sectors);
+		if (sectors > 0) {
+			ide_driver_t *drv;
+
+			drv = *(ide_driver_t **)rq->rq_disk->private_data;
+			drv->end_request(drive, 1, sectors);
+		}
 	}
 	return ide_error(drive, s, stat);
 }
@@ -377,7 +375,8 @@ static void task_end_request(ide_drive_t *drive, struct request *rq, u8 stat)
 			return;
 		}
 	}
-	drive->driver->end_request(drive, 1, rq->hard_nr_sectors);
+
+	ide_end_request(drive, 1, rq->hard_nr_sectors);
 }
 
 /*
@@ -863,9 +862,9 @@ ide_startstop_t flagged_taskfile (ide_drive_t *drive, ide_task_t *task)
 		case TASKFILE_OUT_DMA:
 		case TASKFILE_IN_DMAQ:
 		case TASKFILE_IN_DMA:
-			hwif->ide_dma_setup(drive);
-			hwif->ide_dma_exec_cmd(drive, taskfile->command);
-			hwif->ide_dma_start(drive);
+			hwif->dma_setup(drive);
+			hwif->dma_exec_cmd(drive, taskfile->command);
+			hwif->dma_start(drive);
 			break;
 
 	        default:

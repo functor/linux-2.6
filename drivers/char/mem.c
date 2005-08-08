@@ -23,6 +23,7 @@
 #include <linux/devfs_fs_kernel.h>
 #include <linux/ptrace.h>
 #include <linux/device.h>
+#include <linux/backing-dev.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -34,6 +35,22 @@
 #if defined(CONFIG_S390_TAPE) && defined(CONFIG_S390_TAPE_CHAR)
 extern void tapechar_init(void);
 #endif
+
+static inline int range_is_allowed(unsigned long from, unsigned long to)
+{
+	unsigned long cursor;
+
+	cursor = from >> PAGE_SHIFT;
+	while ((cursor << PAGE_SHIFT) < to) {
+		if (!devmem_is_allowed(cursor)) {
+			printk ("Program %s tried to read /dev/mem between %lx->%lx."
+					"We stopped at %lx\n", current->comm, from, to, cursor);
+			return 0;
+		}
+		cursor++;
+	}
+	return 1;
+}
 
 /*
  * Architectures vary in how they handle caching for addresses
@@ -103,22 +120,7 @@ static inline int valid_phys_addr_range(unsigned long addr, size_t *count)
 }
 #endif
 
-static inline int range_is_allowed(unsigned long from, unsigned long to)
-{
-	unsigned long cursor;
-
-	cursor = from >> PAGE_SHIFT;
-	while ((cursor << PAGE_SHIFT) < to) {
-		if (!devmem_is_allowed(cursor)) {
-			printk ("Program %s tried to read /dev/mem between %lx->%lx."
-					"We stopped at %lx\n", current->comm, from, to, cursor);
-			return 0;
-		}
-		cursor++;
-	}
-	return 1;
-}
-
+#ifndef ARCH_HAS_DEV_MEM
 /*
  * This funcion reads the *physical* memory. The f_pos points directly to the 
  * memory location. 
@@ -247,6 +249,7 @@ static ssize_t write_mem(struct file * file, const char __user * buf,
 	*ppos += written;
 	return written;
 }
+#endif
 
 static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 {
@@ -614,7 +617,6 @@ static int open_port(struct inode * inode, struct file * filp)
 	return capable(CAP_SYS_RAWIO) ? 0 : -EPERM;
 }
 
-#define mmap_kmem	mmap_mem
 #define zero_lseek	null_lseek
 #define full_lseek      null_lseek
 #define write_zero	write_null
@@ -622,6 +624,7 @@ static int open_port(struct inode * inode, struct file * filp)
 #define open_mem	open_port
 #define open_kmem	open_mem
 
+#ifndef ARCH_HAS_DEV_MEM
 static struct file_operations mem_fops = {
 	.llseek		= memory_lseek,
 	.read		= read_mem,
@@ -629,6 +632,9 @@ static struct file_operations mem_fops = {
 	.mmap		= mmap_mem,
 	.open		= open_mem,
 };
+#else
+extern struct file_operations mem_fops;
+#endif
 
 static struct file_operations kmem_fops = {
 	.llseek		= memory_lseek,
@@ -657,6 +663,10 @@ static struct file_operations zero_fops = {
 	.read		= read_zero,
 	.write		= write_zero,
 	.mmap		= mmap_zero,
+};
+
+static struct backing_dev_info zero_bdi = {
+	.capabilities	= BDI_CAP_MAP_COPY,
 };
 
 static struct file_operations full_fops = {
@@ -705,6 +715,7 @@ static int memory_open(struct inode * inode, struct file * filp)
 			break;
 #endif
 		case 5:
+			filp->f_mapping->backing_dev_info = &zero_bdi;
 			filp->f_op = &zero_fops;
 			break;
 		case 7:

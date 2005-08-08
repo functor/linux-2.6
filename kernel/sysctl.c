@@ -74,8 +74,7 @@ extern int proc_unknown_nmi_panic(ctl_table *, int, struct file *,
 
 extern unsigned int vdso_enabled;
 
-int exec_shield = 2;
-int exec_shield_randomize = 1;
+int exec_shield = 1;
 
 static int __init setup_exec_shield(char *str)
 {
@@ -85,15 +84,6 @@ static int __init setup_exec_shield(char *str)
 }
 
 __setup("exec-shield=", setup_exec_shield);
-
-static int __init setup_exec_shield_randomize(char *str)
-{
-        get_option (&str, &exec_shield_randomize);
-
-        return 1;
-}
-
-__setup("exec-shield-randomize=", setup_exec_shield_randomize);
 
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
@@ -143,6 +133,8 @@ extern int sysctl_hz_timer;
 #ifdef CONFIG_BSD_PROCESS_ACCT
 extern int acct_parm[];
 #endif
+
+int randomize_va_space = 1;
 
 static int parse_table(int __user *, int, void __user *, size_t __user *, void __user *, size_t,
 		       ctl_table *, void **);
@@ -299,14 +291,6 @@ static ctl_table kern_table[] = {
 		.ctl_name	= KERN_EXEC_SHIELD,
 		.procname	= "exec-shield",
 		.data		= &exec_shield,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-	{
-		.ctl_name	= KERN_EXEC_SHIELD_RAND,
-		.procname	= "exec-shield-randomize",
-		.data		= &exec_shield_randomize,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
@@ -689,6 +673,15 @@ static ctl_table kern_table[] = {
 		.proc_handler	= &proc_dointvec,
 	},
 #endif
+	{
+		.ctl_name	= KERN_RANDOMIZE,
+		.procname	= "randomize_va_space",
+		.data		= &randomize_va_space,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+
 	{ .ctl_name = 0 }
 };
 
@@ -1423,6 +1416,7 @@ static ssize_t proc_writesys(struct file * file, const char __user * buf,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
+ * @ppos: file position
  *
  * Reads/writes a string from/to the user buffer. If the kernel
  * buffer provided is not large enough to hold the string, the
@@ -1639,6 +1633,7 @@ static int do_proc_dointvec(ctl_table *table, int write, struct file *filp,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
+ * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
  * values from/to the user buffer, treated as an ASCII string. 
@@ -1743,6 +1738,7 @@ static int do_proc_dointvec_minmax_conv(int *negp, unsigned long *lvalp,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
+ * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
  * values from/to the user buffer, treated as an ASCII string.
@@ -1875,6 +1871,7 @@ static int do_proc_doulongvec_minmax(ctl_table *table, int write,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
+ * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned long) unsigned long
  * values from/to the user buffer, treated as an ASCII string.
@@ -1897,6 +1894,7 @@ int proc_doulongvec_minmax(ctl_table *table, int write, struct file *filp,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
+ * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned long) unsigned long
  * values from/to the user buffer, treated as an ASCII string. The values
@@ -1987,6 +1985,7 @@ static int do_proc_dointvec_ms_jiffies_conv(int *negp, unsigned long *lvalp,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
+ * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
  * values from/to the user buffer, treated as an ASCII string. 
@@ -2031,6 +2030,8 @@ int proc_dointvec_userhz_jiffies(ctl_table *table, int write, struct file *filp,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
+ * @ppos: file position
+ * @ppos: the current position in the file
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
  * values from/to the user buffer, treated as an ASCII string. 

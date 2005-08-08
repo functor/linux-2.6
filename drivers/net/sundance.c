@@ -282,6 +282,7 @@ static struct pci_device_id sundance_pci_tbl[] = {
 	{0x1186, 0x1002, 0x1186, 0x1040, 0, 0, 3},
 	{0x1186, 0x1002, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 4},
 	{0x13F0, 0x0201, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 5},
+	{0x13F0, 0x0200, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 6},
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, sundance_pci_tbl);
@@ -299,7 +300,8 @@ static struct pci_id_info pci_id_tbl[] = {
 	{"D-Link DFE-580TX 4 port Server Adapter"},
 	{"D-Link DFE-530TXS FAST Ethernet Adapter"},
 	{"D-Link DL10050-based FAST Ethernet Adapter"},
-	{"Sundance Technology Alta"},
+	{"IC Plus IP100 Fast Ethernet Adapter"},
+	{"IC Plus IP100A Fast Ethernet Adapter" },
 	{NULL,},			/* 0 terminated list. */
 };
 
@@ -1210,9 +1212,11 @@ static irqreturn_t intr_handler(int irq, void *dev_instance, struct pt_regs *rgs
 				}
 				/* Yup, this is a documentation bug.  It cost me *hours*. */
 				iowrite16 (0, ioaddr + TxStatus);
-				tx_status = ioread16 (ioaddr + TxStatus);
-				if (tx_cnt < 0)
+				if (tx_cnt < 0) {
+					iowrite32(5000, ioaddr + DownCounter);
 					break;
+				}
+				tx_status = ioread16 (ioaddr + TxStatus);
 			}
 			hw_frame_id = (tx_status >> 8) & 0xff;
 		} else 	{
@@ -1278,7 +1282,6 @@ static irqreturn_t intr_handler(int irq, void *dev_instance, struct pt_regs *rgs
 	if (netif_msg_intr(np))
 		printk(KERN_DEBUG "%s: exiting interrupt, status=%#4.4x.\n",
 			   dev->name, ioread16(ioaddr + IntrStatus));
-	iowrite32(5000, ioaddr + DownCounter);
 	return IRQ_RETVAL(handled);
 }
 

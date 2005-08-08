@@ -150,7 +150,6 @@ config BLK_DEV_IDEDISK
 
 config IDEDISK_MULTI_MODE
 	bool "Use multi-mode by default"
-	depends on BLK_DEV_IDEDISK
 	help
 	  If you get this error, try to say Y here:
 
@@ -165,13 +164,6 @@ config BLK_DEV_IDECS
 	help
 	  Support for outboard IDE disks, tape drives, and CD-ROM drives
 	  connected through a  PCMCIA card.
-
-config BLK_DEV_DELKIN
-	tristate "Cardbus IDE support (Delkin/ASKA/Workbit)"
-	depends on PCMCIA && PCI
-	help
-	  Support for Delkin, ASKA, and Workbit Cardbus CompactFlash
-	  Adapters.  This may also work for similar SD and XD adapters.
 
 config BLK_DEV_IDECD
 	tristate "Include IDE/ATAPI CDROM support"

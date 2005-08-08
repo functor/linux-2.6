@@ -293,9 +293,9 @@ static void __devinit init_hwif_trm290(ide_hwif_t *hwif)
 	ide_setup_dma(hwif, (hwif->config_data + 4) ^ (hwif->channel ? 0x0080 : 0x0000), 3);
 
 #ifdef CONFIG_BLK_DEV_IDEDMA
-	hwif->ide_dma_setup = &trm290_ide_dma_setup;
-	hwif->ide_dma_exec_cmd = &trm290_ide_dma_exec_cmd;
-	hwif->ide_dma_start = &trm290_ide_dma_start;
+	hwif->dma_setup = &trm290_ide_dma_setup;
+	hwif->dma_exec_cmd = &trm290_ide_dma_exec_cmd;
+	hwif->dma_start = &trm290_ide_dma_start;
 	hwif->ide_dma_end = &trm290_ide_dma_end;
 	hwif->ide_dma_test_irq = &trm290_ide_dma_test_irq;
 #endif /* CONFIG_BLK_DEV_IDEDMA */

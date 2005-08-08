@@ -25,9 +25,259 @@
 #include <asm/pmac_feature.h>
 #endif
 
+/* For detecting supported PC laptops */
+#ifdef CONFIG_X86
+#include <linux/dmi.h>
+#endif
+
 #include "ati_ids.h"
 
-void radeon_pm_disable_dynamic_mode(struct radeonfb_info *rinfo)
+#ifdef CONFIG_X86
+/* This array holds a list of supported PC laptops.
+ * Currently only few IBM models are tested.
+ * If you want to experiment, use dmidecode to find out
+ * vendor and product codes for Your laptop.
+ */
+static struct dmi_system_id __devinitdata radeonfb_dmi_table[] = {
+	{
+		/* Reported by George Avrunin <avrunin@math.umass.edu> */
+		.ident = "IBM ThinkPad T40 (2372-9CU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23729CU"),
+		},
+	},
+	{
+		/* Reported by Pete Toscano <pete@verisignlabs.com> */
+		.ident = "IBM ThinkPad R40 (2722-B3G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2722B3G"),
+		},
+	},
+	{
+		/* Reported by Klaus Kurzmann <mok@fluxnetz.de> */
+		.ident = "IBM ThinkPad T40 (2373-25G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "237325G"),
+		},
+	},
+	{
+		/* Reported by Antti Andreimann <Antti.Andreimann@mail.ee> */
+		.ident = "IBM ThinkPad T41 (2373-2FG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23732FG"),
+		},
+	},
+	{
+		/* Reported by Antti P Miettinen <apm@brigitte.dna.fi> */
+		.ident = "IBM ThinkPad T40 (2373-4G2)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23734G2"),
+	      },
+	},
+	{
+		/* Reported by Pete Toscano <pete@verisignlabs.com> */
+		.ident = "IBM ThinkPad T40 (2373-92G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "237392G"),
+	      },
+	},
+	{
+		/* Reported by Pete Toscano <pete@verisignlabs.com> */
+		.ident = "IBM ThinkPad T40 (2373-8CG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23738CG"),
+		},
+	},
+	{
+		/* Reported by Pete Toscano <pete@verisignlabs.com> */
+		.ident = "IBM ThinkPad T40 (2373-94U)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "237394U"),
+		},
+	},
+	{
+		/* Reported by Manuel Carro <mcarro@fi.upm.es> */
+		.ident = "IBM ThinkPad T40 (2373-94G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "237394G"),
+		},
+	},
+	{
+		/* Reported by Peter Jones <pjones@redhat.com> */
+		.ident = "IBM ThinkPad T41 (2373-9FU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23739FU"),
+		},
+	},
+	{
+		/* Reported by Ajay Ramaswamy <ajay@ramaswamy.net> */
+		.ident = "IBM ThinkPad T41 (2373-9HU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23739HU"),
+	      },
+	},
+	{
+		/* Reported by Peter Jones <pjones@redhat.com> */
+		.ident = "IBM ThinkPad T40 (2373-BU7)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373BU7"),
+		},
+	},
+	{
+		/* Reported by Jerome Poggi <Jerome.Poggi@hsc.fr> */
+		.ident = "IBM ThinkPad T42 (2373-FWG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373FWG"),
+		},
+	},
+	{
+		/* Reported by Juerg Billeter <j@bitron.ch> */
+		.ident = "IBM ThinkPad T40p (2373-G1G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373G1G"),
+		},
+	},
+	{
+		/* Reported by Hartwig, Thomas <t.hartwig@itth.com> */
+		.ident = "IBM ThinkPad T40p (2373-G3G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373G3G"),
+		},
+	},
+	{
+		/* Reported by Eric Benson <eric_a_benson@yahoo.com> */
+		.ident = "IBM ThinkPad T41p (2373-GEU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373GEU"),
+		},
+	},
+	{
+		/* Reported by Dwight Barkley <barkley@maths.warwick.ac.uk> */
+		.ident = "IBM ThinkPad T42 (2373-JTU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373JTU"),
+		},
+	},
+	{
+		/* Reported by Vernon Mauery <vernux@us.ibm.com> */
+		.ident = "IBM ThinkPad T40 (2373-MU4)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373MU4"),
+		},
+	},
+	{
+		/* Reported by Ajay Ramaswamy <ajay@ramaswamy.net> */
+		.ident = "IBM ThinkPad T41 (2373-XNX)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373XNX"),
+	      },
+	},
+	{
+		/* Reported by obi <graziano@cs.ucsb.edu> */
+		.ident = "IBM ThinkPad T41 (2378-DEU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2378DEU"),
+		},
+	},
+	{
+		/* Reported by Volker Braun <vbraun@physics.upenn.edu> */
+		.ident = "IBM ThinkPad T41 (2379-DJU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2379DJU"),
+		},
+	},
+	{
+		/* Reported by Pete Toscano <pete@verisignlabs.com> */
+		.ident = "IBM ThinkPad T42 (2373-FWG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373FWG"),
+		},
+	},
+	{
+		/* Reported by Frank Schmitt <tonne2004@gehheimdienst.de> */
+		.ident = "IBM ThinkPad R40 (2722-3GG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "27223GG"),
+		},
+	},
+	{
+		/* Reported by Nils Trebing <nils.trebing@uni-konstanz.de> */
+		.ident = "IBM ThinkPad R40 (2722-5MG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "27225MG"),
+		},
+	},
+	{
+		/* Reported by Paul Ionescu <i_p_a_u_l@yahoo.com> */
+		.ident = "IBM ThinkPad T41 (2373-TG5)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373TG5"),
+		},
+	},
+	{
+		/* Reported by Michele Lamarca <lammic@gmail.com> */
+		.ident = "IBM ThinkPad T40 (2373-22G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "237322G"),
+		},
+	},
+	{
+		/* Reported by Henrik Brix Andersen <brix@gentoo.org> */
+		.ident = "IBM ThinkPad X31 (2672-XXH)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2672XXH"),
+		},
+	},
+	{
+		/* Reported by Matthew Saltzman <mjs@clemson.edu> */
+		.ident = "IBM ThinkPad T41 (2373-7JU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23737JU"),
+		},
+	},
+	{ },
+	/* Negative reports: */
+	/* IBM thinkpad T30 2366 -> machine hangs 
+	   Reported by: Jakob Schiotz <schiotz@fysik.dtu.dk> */
+	/* IBM thinkpad T42p 2373-KUU -> machine hangs as X starts
+	   Reported by: Dax Kelson <dax@gurulabs.com> */
+	/* IBM ThinkPad X31 2672-XXH -> works, but doesn't fix the LCD 
+	   backlight on during S3 issue.
+	   Reported by: Henrik Brix Andersen <brix@gentoo.org> */
+};
+
+extern int radeon_force_sleep;
+#endif
+
+static void radeon_pm_disable_dynamic_mode(struct radeonfb_info *rinfo)
 {
 	u32 tmp;
 
@@ -229,7 +479,7 @@ void radeon_pm_disable_dynamic_mode(struct radeonfb_info *rinfo)
 	radeon_msleep(16);
 }
 
-void radeon_pm_enable_dynamic_mode(struct radeonfb_info *rinfo)
+static void radeon_pm_enable_dynamic_mode(struct radeonfb_info *rinfo)
 {
 	u32 tmp;
 
@@ -852,7 +1102,14 @@ static void radeon_pm_setup_for_suspend(struct radeonfb_info *rinfo)
 	/* because both INPLL and OUTPLL take the same lock, that's why. */
 	tmp = INPLL( pllMCLK_MISC) | MCLK_MISC__EN_MCLK_TRISTATE_IN_SUSPEND;
 	OUTPLL( pllMCLK_MISC, tmp);
-	
+
+	/* BUS_CNTL1__MOBILE_PLATORM_SEL setting is northbridge chipset
+	 * and radeon chip dependent. Thus we only enable it on Mac for
+	 * now (until we get more info on how to compute the correct
+	 * value for various X86 bridges).
+	 */
+
+#ifdef CONFIG_PPC_PMAC
 	/* AGP PLL control */
 	if (rinfo->family <= CHIP_FAMILY_RV280) {
 		OUTREG(BUS_CNTL1, INREG(BUS_CNTL1) |  BUS_CNTL1__AGPCLK_VALID);
@@ -864,6 +1121,7 @@ static void radeon_pm_setup_for_suspend(struct radeonfb_info *rinfo)
 		OUTREG(BUS_CNTL1, INREG(BUS_CNTL1));
 		OUTREG(BUS_CNTL1, (INREG(BUS_CNTL1) & ~0x4000) | 0x8000);
 	}
+#endif
 
 	OUTREG(CRTC_OFFSET_CNTL, (INREG(CRTC_OFFSET_CNTL)
 				  & ~CRTC_OFFSET_CNTL__CRTC_STEREO_SYNC_OUT_EN));
@@ -1373,7 +1631,9 @@ static void radeon_pm_start_mclk_sclk(struct radeonfb_info *rinfo)
 	/* Reconfigure SPLL charge pump, VCO gain, duty cycle */
 	tmp = INPLL(pllSPLL_CNTL);
 	OUTREG8(CLOCK_CNTL_INDEX, pllSPLL_CNTL + PLL_WR_EN);
+	radeon_pll_errata_after_index(rinfo);
 	OUTREG8(CLOCK_CNTL_DATA + 1, (tmp >> 8) & 0xff);
+	radeon_pll_errata_after_data(rinfo);
 
 	/* Set SPLL feedback divider */
 	tmp = INPLL(pllM_SPLL_REF_FB_DIV);
@@ -1406,7 +1666,9 @@ static void radeon_pm_start_mclk_sclk(struct radeonfb_info *rinfo)
 	/* Reconfigure MPLL charge pump, VCO gain, duty cycle */
 	tmp = INPLL(pllMPLL_CNTL);
 	OUTREG8(CLOCK_CNTL_INDEX, pllMPLL_CNTL + PLL_WR_EN);
+	radeon_pll_errata_after_index(rinfo);
 	OUTREG8(CLOCK_CNTL_DATA + 1, (tmp >> 8) & 0xff);
+	radeon_pll_errata_after_data(rinfo);
 
 	/* Set MPLL feedback divider */
 	tmp = INPLL(pllM_SPLL_REF_FB_DIV);
@@ -1525,7 +1787,9 @@ static void radeon_pm_restore_pixel_pll(struct radeonfb_info *rinfo)
 	u32 tmp;
 
 	OUTREG8(CLOCK_CNTL_INDEX, pllHTOTAL_CNTL + PLL_WR_EN);
+	radeon_pll_errata_after_index(rinfo);
 	OUTREG8(CLOCK_CNTL_DATA, 0);
+	radeon_pll_errata_after_data(rinfo);
 
 	tmp = INPLL(pllVCLK_ECP_CNTL);
 	OUTPLL(pllVCLK_ECP_CNTL, tmp | 0x80);
@@ -1541,11 +1805,9 @@ static void radeon_pm_restore_pixel_pll(struct radeonfb_info *rinfo)
 	 */
 	tmp = INPLL(pllPPLL_CNTL);
 	OUTREG8(CLOCK_CNTL_INDEX, pllSPLL_CNTL + PLL_WR_EN);
+	radeon_pll_errata_after_index(rinfo);
 	OUTREG8(CLOCK_CNTL_DATA + 1, (tmp >> 8) & 0xff);
-
-	/* Not sure what was intended here ... */
-	tmp = INREG(CLOCK_CNTL_INDEX);
-	OUTREG(CLOCK_CNTL_INDEX, tmp);
+	radeon_pll_errata_after_data(rinfo);
 
 	/* Restore our "reference" PPLL divider set by firmware
 	 * according to proper spread spectrum calculations
@@ -1570,6 +1832,8 @@ static void radeon_pm_restore_pixel_pll(struct radeonfb_info *rinfo)
 
 	/* Switch pixel clock to firmware default div 0 */
 	OUTREG8(CLOCK_CNTL_INDEX+1, 0);
+	radeon_pll_errata_after_index(rinfo);
+	radeon_pll_errata_after_data(rinfo);
 }
 
 static void radeon_pm_m10_reconfigure_mc(struct radeonfb_info *rinfo)
@@ -2157,7 +2421,9 @@ static void radeon_reinitialize_QW(struct radeonfb_info *rinfo)
 
 	tmp = INPLL(MPLL_CNTL);
 	OUTREG8(CLOCK_CNTL_INDEX, MPLL_CNTL + PLL_WR_EN);
+	radeon_pll_errata_after_index(rinfo);
 	OUTREG8(CLOCK_CNTL_DATA + 1, (tmp >> 8) & 0xff);
+	radeon_pll_errata_after_data(rinfo);
 
 	tmp = INPLL(M_SPLL_REF_FB_DIV);
 	OUTPLL(M_SPLL_REF_FB_DIV, tmp | 0x5900);
@@ -2178,7 +2444,9 @@ static void radeon_reinitialize_QW(struct radeonfb_info *rinfo)
 
 	tmp = INPLL(SPLL_CNTL);
 	OUTREG8(CLOCK_CNTL_INDEX, SPLL_CNTL + PLL_WR_EN);
+	radeon_pll_errata_after_index(rinfo);
 	OUTREG8(CLOCK_CNTL_DATA + 1, (tmp >> 8) & 0xff);
+	radeon_pll_errata_after_data(rinfo);
 
 	tmp = INPLL(M_SPLL_REF_FB_DIV);
 	OUTPLL(M_SPLL_REF_FB_DIV, tmp | 0x780000);
@@ -2306,7 +2574,9 @@ static void radeon_reinitialize_QW(struct radeonfb_info *rinfo)
 	OUTREG(CRTC_H_SYNC_STRT_WID, 0x008e0580);
 	OUTREG(CRTC_H_TOTAL_DISP, 0x009f00d2);
 	OUTREG8(CLOCK_CNTL_INDEX, HTOTAL_CNTL + PLL_WR_EN);
+	radeon_pll_errata_after_index(rinfo);
 	OUTREG8(CLOCK_CNTL_DATA, 0);
+	radeon_pll_errata_after_data(rinfo);
 	OUTREG(CRTC_V_SYNC_STRT_WID, 0x00830403);
 	OUTREG(CRTC_V_TOTAL_DISP, 0x03ff0429);
 	OUTREG(FP_CRTC_H_TOTAL_DISP, 0x009f0033);
@@ -2328,10 +2598,15 @@ static void radeon_reinitialize_QW(struct radeonfb_info *rinfo)
 	INPLL(PPLL_REF_DIV);
 
 	OUTREG8(CLOCK_CNTL_INDEX, PPLL_CNTL + PLL_WR_EN);
+	radeon_pll_errata_after_index(rinfo);
 	OUTREG8(CLOCK_CNTL_DATA + 1, 0xbc);
+	radeon_pll_errata_after_data(rinfo);
 
 	tmp = INREG(CLOCK_CNTL_INDEX);
+	radeon_pll_errata_after_index(rinfo);
 	OUTREG(CLOCK_CNTL_INDEX, tmp & 0xff);
+	radeon_pll_errata_after_index(rinfo);
+	radeon_pll_errata_after_data(rinfo);
 
 	OUTPLL(PPLL_DIV_0, 0x48090);
 
@@ -2400,7 +2675,8 @@ static void radeon_set_suspend(struct radeonfb_info *rinfo, int suspend)
 	 * including PCI config registers, clocks, AGP conf, ...)
 	 */
 	if (suspend) {
-		printk(KERN_DEBUG "radeonfb: switching to D2 state...\n");
+		printk(KERN_DEBUG "radeonfb (%s): switching to D2 state...\n",
+		       pci_name(rinfo->pdev));
 
 		/* Disable dynamic power management of clocks for the
 		 * duration of the suspend/resume process
@@ -2453,7 +2729,8 @@ static void radeon_set_suspend(struct radeonfb_info *rinfo, int suspend)
 			mdelay(500);
 		}
 	} else {
-		printk(KERN_DEBUG "radeonfb: switching to D0 state...\n");
+		printk(KERN_DEBUG "radeonfb (%s): switching to D0 state...\n",
+		       pci_name(rinfo->pdev));
 
 		/* Switch back PCI powermanagment to D0 */
 		mdelay(200);
@@ -2501,9 +2778,7 @@ static int radeon_restore_pci_cfg(struct radeonfb_info *rinfo)
 }
 
 
-static/*extern*/ int susdisking = 0;
-
-int radeonfb_pci_suspend(struct pci_dev *pdev, u32 state)
+int radeonfb_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 {
         struct fb_info *info = pci_get_drvdata(pdev);
         struct radeonfb_info *rinfo = info->par;
@@ -2522,10 +2797,6 @@ int radeonfb_pci_suspend(struct pci_dev *pdev, u32 state)
 	 */
 	if (state != PM_SUSPEND_MEM)
 		goto done;
-	if (susdisking) {
-		printk("suspending to disk but state = %d\n", state);
-		goto done;
-	}
 
 	acquire_console_sem();
 
@@ -2545,6 +2816,14 @@ int radeonfb_pci_suspend(struct pci_dev *pdev, u32 state)
 	rinfo->asleep = 1;
 	rinfo->lock_blank = 1;
 	del_timer_sync(&rinfo->lvds_timer);
+
+#ifdef CONFIG_PPC_PMAC
+	/* On powermac, we have hooks to properly suspend/resume AGP now,
+	 * use them here. We'll ultimately need some generic support here,
+	 * but the generic code isn't quite ready for that yet
+	 */
+	pmac_suspend_agp_for_card(pdev);
+#endif /* CONFIG_PPC_PMAC */
 
 	/* If we support wakeup from poweroff, we save all regs we can including cfg
 	 * space
@@ -2569,12 +2848,11 @@ int radeonfb_pci_suspend(struct pci_dev *pdev, u32 state)
 			OUTREG(LVDS_PLL_CNTL, (INREG(LVDS_PLL_CNTL) & ~30000) | 0x20000);
 			mdelay(20);
 			OUTREG(LVDS_GEN_CNTL, INREG(LVDS_GEN_CNTL) & ~(LVDS_DIGON));
-
-			// FIXME: Use PCI layer
-			for (i = 0; i < 64; ++i)
-				pci_read_config_dword(rinfo->pdev, i * 4,
-						      &rinfo->cfg_save[i]);
 		}
+		// FIXME: Use PCI layer
+		for (i = 0; i < 64; ++i)
+			pci_read_config_dword(pdev, i * 4, &rinfo->cfg_save[i]);
+		pci_disable_device(pdev);
 	}
 	/* If we support D2, we go to it (should be fixed later with a flag forcing
 	 * D3 only for some laptops)
@@ -2657,13 +2935,22 @@ int radeonfb_pci_resume(struct pci_dev *pdev)
 	rinfo->lock_blank = 0;
 	radeon_screen_blank(rinfo, FB_BLANK_UNBLANK, 1);
 
+#ifdef CONFIG_PPC_PMAC
+	/* On powermac, we have hooks to properly suspend/resume AGP now,
+	 * use them here. We'll ultimately need some generic support here,
+	 * but the generic code isn't quite ready for that yet
+	 */
+	pmac_resume_agp_for_card(pdev);
+#endif /* CONFIG_PPC_PMAC */
+
+
 	/* Check status of dynclk */
 	if (rinfo->dynclk == 1)
 		radeon_pm_enable_dynamic_mode(rinfo);
 	else if (rinfo->dynclk == 0)
 		radeon_pm_disable_dynamic_mode(rinfo);
 
-	pdev->dev.power.power_state = 0;
+	pdev->dev.power.power_state = PMSG_ON;
 
  bail:
 	release_console_sem();
@@ -2727,8 +3014,6 @@ void radeonfb_pm_init(struct radeonfb_info *rinfo, int dynclk)
 		if (!strcmp(rinfo->of_node->name, "ATY,ViaParent")) {
 			rinfo->reinit_func = radeon_reinitialize_M9P;
 			rinfo->pm_mode |= radeon_pm_off;
-			/* Workaround not used for now */
-			rinfo->m9p_workaround = 1;
 		}
 
 		/* If any of the above is set, we assume the machine can sleep/resume.
@@ -2750,6 +3035,29 @@ void radeonfb_pm_init(struct radeonfb_info *rinfo, int dynclk)
 #endif
 	}
 #endif /* defined(CONFIG_PM) && defined(CONFIG_PPC_OF) */
+
+/* The PM code also works on some PC laptops.
+ * Only a few models are actually tested so Your mileage may vary.
+ * We can do D2 on at least M7 and M9 on some IBM ThinkPad T41 models.
+ */
+#if defined(CONFIG_PM) && defined(CONFIG_X86)
+	if (radeon_force_sleep || dmi_check_system(radeonfb_dmi_table)) {
+		if (radeon_force_sleep)
+			printk("radeonfb: forcefully enabling sleep mode\n");
+		else
+			printk("radeonfb: enabling sleep mode\n");
+
+		if (rinfo->is_mobility && rinfo->pm_reg &&
+		    rinfo->family <= CHIP_FAMILY_RV250)
+			rinfo->pm_mode |= radeon_pm_d2;
+
+		/* Power down TV DAC, that saves a significant amount of power,
+		 * we'll have something better once we actually have some TVOut
+		 * support
+		 */
+		OUTREG(TV_DAC_CNTL, INREG(TV_DAC_CNTL) | 0x07000000);
+	}
+#endif /* defined(CONFIG_PM) && defined(CONFIG_X86) */
 }
 
 void radeonfb_pm_exit(struct radeonfb_info *rinfo)

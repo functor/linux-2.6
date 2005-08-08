@@ -40,6 +40,7 @@
 
 #include <asm/intrinsics.h>
 #include <asm/pgtable.h>
+#include <asm/io.h>
 
 /*
  * For historical reasons, the following macros are grossly misnamed:
@@ -71,7 +72,8 @@
 })
 #define access_ok(type, addr, size)	__access_ok((addr), (size), get_fs())
 
-static inline int
+/* this function will go away soon - use access_ok() instead */
+static inline int __deprecated
 verify_area (int type, const void __user *addr, unsigned long size)
 {
 	return access_ok(type, addr, size) ? 0 : -EFAULT;

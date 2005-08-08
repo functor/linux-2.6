@@ -43,16 +43,16 @@
 static loff_t 
 crash_llseek(struct file * file, loff_t offset, int orig)
 {
-        switch (orig) {
-                case 0:
-                        file->f_pos = offset;
-                        return file->f_pos;
-                case 1:
-                        file->f_pos += offset;
-                        return file->f_pos;
-                default:
-                        return -EINVAL;
-        }
+	switch (orig) {
+	case 0:
+		file->f_pos = offset;
+		return file->f_pos;
+	case 1:
+		file->f_pos += offset;
+		return file->f_pos;
+	default:
+		return -EINVAL;
+	}
 }
 
 /*
@@ -74,23 +74,23 @@ crash_read(struct file *file, char *buf, size_t count, loff_t *poff)
 
 	vaddr = map_virtual(offset, &page);
 	if (!vaddr)
-                return -EFAULT;
+		return -EFAULT;
 
-        if (copy_to_user(buf, vaddr, count)) {
+	if (copy_to_user(buf, vaddr, count)) {
 		unmap_virtual(page);
 		return -EFAULT;
 	}
 	unmap_virtual(page);
 
 	read = count;
-        *poff += read;
-        return read;
+	*poff += read;
+	return read;
 }
 
 static struct file_operations crash_fops = {
-	owner:		THIS_MODULE,
-	llseek:		crash_llseek,
-	read:		crash_read,
+	.owner = THIS_MODULE,
+	.llseek = crash_llseek,
+	.read = crash_read,
 };
 
 static struct miscdevice crash_dev = {

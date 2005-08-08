@@ -172,7 +172,6 @@ struct OpenPIC {
     OpenPIC_Processor Processor[OPENPIC_MAX_PROCESSORS];
 };
 
-
     /*
      *  Current Task Priority Register
      */

@@ -88,9 +88,9 @@ int conf_read(const char *name)
 			name = conf_expand_value(name);
 			in = zconf_fopen(name);
 			if (in) {
-				printf("#\n"
-				       "# using defaults found in %s\n"
-				       "#\n", name);
+				printf(_("#\n"
+				         "# using defaults found in %s\n"
+				         "#\n"), name);
 				break;
 			}
 		}
@@ -129,7 +129,7 @@ int conf_read(const char *name)
 				continue;
 			sym = sym_find(line + 9);
 			if (!sym) {
-				fprintf(stderr, "%s:%d: trying to assign nonexistent symbol %s\n", name, lineno, line + 9);
+				//fprintf(stderr, "%s:%d: trying to assign nonexistent symbol %s\n", name, lineno, line + 9);
 				break;
 			}
 			switch (sym->type) {
@@ -154,7 +154,7 @@ int conf_read(const char *name)
 				*p2 = 0;
 			sym = sym_find(line + 7);
 			if (!sym) {
-				fprintf(stderr, "%s:%d: trying to assign nonexistent symbol %s\n", name, lineno, line + 7);
+				//fprintf(stderr, "%s:%d: trying to assign nonexistent symbol %s\n", name, lineno, line + 7);
 				break;
 			}
 			switch (sym->type) {
@@ -312,11 +312,11 @@ int conf_write(const char *name)
 	if (env && *env)
 		use_timestamp = 0;
 
-	fprintf(out, "#\n"
-		     "# Automatically generated make config: don't edit\n"
-		     "# Linux kernel version: %s\n"
-		     "%s%s"
-		     "#\n",
+	fprintf(out, _("#\n"
+		       "# Automatically generated make config: don't edit\n"
+		       "# Linux kernel version: %s\n"
+		       "%s%s"
+		       "#\n"),
 		     sym_get_string_value(sym),
 		     use_timestamp ? "# " : "",
 		     use_timestamp ? ctime(&now) : "");

@@ -37,10 +37,12 @@
 #include <linux/pagemap.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
+#include <linux/random.h>
 
 #include <asm/uaccess.h>
 #include <asm/param.h>
 #include <asm/page.h>
+#include <asm/pgalloc.h>
 
 #include <linux/elf.h>
 
@@ -165,9 +167,14 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr * exec,
 	if (k_platform) {
 		size_t len = strlen(k_platform) + 1;
 
-#ifdef __HAVE_ARCH_ALIGN_STACK
-		p = (unsigned long)arch_align_stack((unsigned long)p);
-#endif
+		/*
+		 * In some cases (e.g. Hyper-Threading), we want to avoid L1
+		 * evictions by the processes running on the same package. One
+		 * thing we can do is to shuffle the initial stack for them.
+		 */
+	 
+		p = arch_align_stack(p);
+
 		u_platform = (elf_addr_t __user *)STACK_ALLOC(p, len);
 		if (__copy_to_user(u_platform, k_platform, len))
 			return -EFAULT;
@@ -537,6 +544,19 @@ out:
 #define INTERPRETER_ELF 2
 
 
+static unsigned long randomize_stack_top(unsigned long stack_top)
+{
+	unsigned int random_variable = 0;
+
+	if (current->flags & PF_RANDOMIZE)
+		random_variable = get_random_int() % (8*1024*1024);
+#ifdef CONFIG_STACK_GROWSUP
+	return PAGE_ALIGN(stack_top + random_variable);
+#else
+	return PAGE_ALIGN(stack_top - random_variable);
+#endif
+}
+
 static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 {
 	struct file *interpreter = NULL; /* to shut gcc up */
@@ -556,7 +576,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	unsigned long reloc_func_desc = 0;
 	char passed_fileno[6];
 	struct files_struct *files;
-	int have_pt_gnu_stack, executable_stack, relocexec, old_relocexec = current->flags & PF_RELOCEXEC;
+	int have_pt_gnu_stack, executable_stack;
 	unsigned long def_flags = 0;
 	struct {
 		struct elfhdr elf_ex;
@@ -724,22 +744,9 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		}
 	have_pt_gnu_stack = (i < loc->elf_ex.e_phnum);
 
-	relocexec = 0;
-
-	if (current->personality == PER_LINUX)
-	switch (exec_shield) {
-	case 1:
-		if (executable_stack == EXSTACK_DISABLE_X) {
-			current->flags |= PF_RELOCEXEC;
-			relocexec = PF_RELOCEXEC;
-		}
-		break;
-
-	case 2:
+	if (current->personality == PER_LINUX && exec_shield == 2) {
 		executable_stack = EXSTACK_DISABLE_X;
-		current->flags |= PF_RELOCEXEC;
-		relocexec = PF_RELOCEXEC;
-		break;
+		current->flags |= PF_RANDOMIZE;
 	}
 
 	/* Some simple consistency checks for the interpreter */
@@ -794,7 +801,6 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	retval = flush_old_exec(bprm);
 	if (retval)
 		goto out_free_dentry;
-	current->flags |= relocexec;
 
 #ifdef __i386__
 	/*
@@ -827,13 +833,16 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 			elf_read_implies_exec(loc->elf_ex, executable_stack))
 		current->personality |= READ_IMPLIES_EXEC;
 
+	if ( !(current->personality & ADDR_NO_RANDOMIZE) && randomize_va_space)
+		current->flags |= PF_RANDOMIZE;
 	arch_pick_mmap_layout(current->mm);
 
 	/* Do this so that we can load the interpreter, if need be.  We will
 	   change some of these later */
-	current->mm->rss = 0;
+	set_mm_counter(current->mm, rss, 0);
 	current->mm->free_area_cache = current->mm->mmap_base;
-	retval = setup_arg_pages(bprm, STACK_TOP, executable_stack);
+	retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
+				 executable_stack);
 	if (retval < 0) {
 		send_sig(SIGKILL, current, 0);
 		goto out_free_dentry;
@@ -992,20 +1001,20 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		elf_entry = loc->elf_ex.e_entry;
 	}
 
-	kfree(elf_phdata);
-
 	if (interpreter_type != INTERPRETER_AOUT)
 		sys_close(elf_exec_fileno);
 
 	set_binfmt(&elf_format);
 
-	/*
-	 * Map the vsyscall trampoline. This address is then passed via
-	 * AT_SYSINFO.
-	 */
-#ifdef __HAVE_ARCH_VSYSCALL
-	map_vsyscall();
-#endif
+#ifdef ARCH_HAS_SETUP_ADDITIONAL_PAGES
+	retval = arch_setup_additional_pages(bprm, executable_stack);
+	if (retval < 0) {
+		send_sig(SIGKILL, current, 0);
+		goto out_free_fh;
+	}
+#endif /* ARCH_HAS_SETUP_ADDITIONAL_PAGES */
+
+	kfree(elf_phdata);
 
 	compute_creds(bprm);
 	current->flags &= ~PF_FORKNOEXEC;
@@ -1021,7 +1030,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	current->mm->start_stack = bprm->p;
 
 #ifdef __HAVE_ARCH_RANDOMIZE_BRK
-	if (current->flags & PF_RELOCEXEC)
+	if (current->flags & PF_RANDOMIZE)
 		randomize_brk(elf_brk);
 #endif
 	if (current->personality & MMAP_PAGE_ZERO) {
@@ -1079,8 +1088,6 @@ out_free_fh:
 	}
 out_free_ph:
 	kfree(elf_phdata);
-	current->flags &= ~PF_RELOCEXEC;
-	current->flags |= old_relocexec;
 	goto out;
 }
 
@@ -1189,7 +1196,7 @@ static int dump_write(struct file *file, const void *addr, int nr)
 	return file->f_op->write(file, addr, nr, &file->f_pos) == nr;
 }
 
-static int dump_seek(struct file *file, off_t off)
+static int dump_seek(struct file *file, loff_t off)
 {
 	if (file->f_op->llseek) {
 		if (file->f_op->llseek(file, off, 0) != off)
@@ -1208,9 +1215,16 @@ static int dump_seek(struct file *file, off_t off)
  */
 static int maydump(struct vm_area_struct *vma)
 {
-	/* Do not dump I/O mapped devices, shared memory, or special mappings */
-	if (vma->vm_flags & (VM_IO | VM_SHARED | VM_RESERVED))
+	/* Do not dump I/O mapped devices or special mappings */
+	if (vma->vm_flags & (VM_IO | VM_RESERVED))
 		return 0;
+
+	if (vma->vm_flags & VM_DONTEXPAND) /* Kludge for vDSO.  */
+		return 1;
+
+	/* Dump shared memory only if mapped from an anonymous file.  */
+	if (vma->vm_flags & VM_SHARED)
+		return vma->vm_file->f_dentry->d_inode->i_nlink == 0;
 
 	/* If it hasn't been written to, don't write it out */
 	if (!vma->anon_vma)
@@ -1671,7 +1685,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 					DUMP_SEEK (file->f_pos + PAGE_SIZE);
 				} else {
 					void *kaddr;
-					flush_cache_page(vma, addr);
+					flush_cache_page(vma, addr, page_to_pfn(page));
 					kaddr = kmap(page);
 					if ((size += PAGE_SIZE) > limit ||
 					    !dump_write(file, kaddr,

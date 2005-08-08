@@ -2,11 +2,6 @@
 # Makefile for the linux kernel.
 #
 
-# Work around GCC bug (http://bugzilla.redhat.com/150020)
-ifeq ($(ARCH),ppc)
-CFLAGS_initramfs.o := -O2
-endif
-
 obj-y				:= main.o version.o mounts.o initramfs.o
 obj-$(CONFIG_GENERIC_CALIBRATE_DELAY) += calibrate.o
 

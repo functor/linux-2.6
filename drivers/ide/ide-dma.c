@@ -175,7 +175,13 @@ ide_startstop_t ide_dma_intr (ide_drive_t *drive)
 		if (!dma_stat) {
 			struct request *rq = HWGROUP(drive)->rq;
 
-			DRIVER(drive)->end_request(drive, 1, rq->nr_sectors);
+			if (rq->rq_disk) {
+				ide_driver_t *drv;
+
+				drv = *(ide_driver_t **)rq->rq_disk->private_data;;
+				drv->end_request(drive, 1, rq->nr_sectors);
+			} else
+				ide_end_request(drive, 1, rq->nr_sectors);
 			return ide_stopped;
 		}
 		printk(KERN_ERR "%s: dma_intr: bad DMA status (dma_stat=%x)\n", 
@@ -921,12 +927,12 @@ void ide_setup_dma (ide_hwif_t *hwif, unsigned long dma_base, unsigned int num_p
 		hwif->ide_dma_host_on = &__ide_dma_host_on;
 	if (!hwif->ide_dma_check)
 		hwif->ide_dma_check = &__ide_dma_check;
-	if (!hwif->ide_dma_setup)
-		hwif->ide_dma_setup = &ide_dma_setup;
-	if (!hwif->ide_dma_exec_cmd)
-		hwif->ide_dma_exec_cmd = &ide_dma_exec_cmd;
-	if (!hwif->ide_dma_start)
-		hwif->ide_dma_start = &ide_dma_start;
+	if (!hwif->dma_setup)
+		hwif->dma_setup = &ide_dma_setup;
+	if (!hwif->dma_exec_cmd)
+		hwif->dma_exec_cmd = &ide_dma_exec_cmd;
+	if (!hwif->dma_start)
+		hwif->dma_start = &ide_dma_start;
 	if (!hwif->ide_dma_end)
 		hwif->ide_dma_end = &__ide_dma_end;
 	if (!hwif->ide_dma_test_irq)

@@ -131,6 +131,7 @@ struct page_state {
 	unsigned long allocstall;	/* direct reclaim calls */
 
 	unsigned long pgrotated;	/* pages rotated to tail of the LRU */
+	unsigned long nr_bounce;	/* pages for bounce buffers */
 };
 
 extern void get_page_state(struct page_state *ret);
@@ -308,7 +309,6 @@ extern void __mod_page_state(unsigned offset, unsigned long delta);
 struct page;	/* forward declaration */
 
 int test_clear_page_dirty(struct page *page);
-int __clear_page_dirty(struct page *page);
 int test_clear_page_writeback(struct page *page);
 int test_set_page_writeback(struct page *page);
 

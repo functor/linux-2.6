@@ -22,12 +22,13 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/ptrace.h>
+#include <linux/posix-timers.h>
+#include <linux/signal.h>
+#include <linux/audit.h>
 #include <asm/param.h>
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 #include <asm/siginfo.h>
-
-extern void k_getrusage(struct task_struct *, int, struct rusage *);
 
 /*
  * SLAB caches for signal bits.
@@ -260,19 +261,23 @@ next_signal(struct sigpending *pending, sigset_t *mask)
 	return sig;
 }
 
-static struct sigqueue *__sigqueue_alloc(struct task_struct *t, int flags)
+static struct sigqueue *__sigqueue_alloc(struct task_struct *t, unsigned int __nocast flags,
+					 int override_rlimit)
 {
 	struct sigqueue *q = NULL;
 
-	if (atomic_read(&t->user->sigpending) <
+	atomic_inc(&t->user->sigpending);
+	if (override_rlimit ||
+	    atomic_read(&t->user->sigpending) <=
 			t->signal->rlim[RLIMIT_SIGPENDING].rlim_cur)
 		q = kmem_cache_alloc(sigqueue_cachep, flags);
-	if (q) {
+	if (unlikely(q == NULL)) {
+		atomic_dec(&t->user->sigpending);
+	} else {
 		INIT_LIST_HEAD(&q->list);
 		q->flags = 0;
 		q->lock = NULL;
 		q->user = get_uid(t->user);
-		atomic_inc(&q->user->sigpending);
 	}
 	return(q);
 }
@@ -347,7 +352,9 @@ void __exit_signal(struct task_struct *tsk)
 	if (!atomic_read(&sig->count))
 		BUG();
 	spin_lock(&sighand->siglock);
+	posix_cpu_timers_exit(tsk);
 	if (atomic_dec_and_test(&sig->count)) {
+		posix_cpu_timers_exit_group(tsk);
 		if (tsk == sig->curr_target)
 			sig->curr_target = next_thread(tsk);
 		tsk->signal = NULL;
@@ -381,6 +388,7 @@ void __exit_signal(struct task_struct *tsk)
 		sig->maj_flt += tsk->maj_flt;
 		sig->nvcsw += tsk->nvcsw;
 		sig->nivcsw += tsk->nivcsw;
+		sig->sched_time += tsk->sched_time;
 		spin_unlock(&sighand->siglock);
 		sig = NULL;	/* Marker for below.  */
 	}
@@ -402,6 +410,7 @@ void __exit_signal(struct task_struct *tsk)
 		 * signals are constrained to threads inside the group.
 		 */
 		exit_itimers(sig);
+		exit_thread_group_keys(sig);
 		kmem_cache_free(signal_cachep, sig);
 	}
 }
@@ -515,7 +524,16 @@ static int __dequeue_signal(struct sigpending *pending, sigset_t *mask,
 {
 	int sig = 0;
 
-	sig = next_signal(pending, mask);
+	/* SIGKILL must have priority, otherwise it is quite easy
+	 * to create an unkillable process, sending sig < SIGKILL
+	 * to self */
+	if (unlikely(sigismember(&pending->signal, SIGKILL))) {
+		if (!sigismember(mask, SIGKILL))
+			sig = SIGKILL;
+	}
+
+	if (likely(!sig))
+		sig = next_signal(pending, mask);
 	if (sig) {
 		if (current->notifier) {
 			if (sigismember(current->notifier_mask, sig)) {
@@ -565,7 +583,15 @@ int dequeue_signal(struct task_struct *tsk, sigset_t *mask, siginfo_t *info)
 	if ( signr &&
 	     ((info->si_code & __SI_MASK) == __SI_TIMER) &&
 	     info->si_sys_private){
+		/*
+		 * Release the siglock to ensure proper locking order
+		 * of timer locks outside of siglocks.  Note, we leave
+		 * irqs disabled here, since the posix-timers code is
+		 * about to disable them again anyway.
+		 */
+		spin_unlock(&tsk->sighand->siglock);
 		do_schedule_next_timer(info);
+		spin_lock(&tsk->sighand->siglock);
 	}
 	return signr;
 }
@@ -632,7 +658,7 @@ static int check_kill_permission(int sig, struct siginfo *info,
 				 struct task_struct *t)
 {
 	int error = -EINVAL;
-	if (sig < 0 || sig > _NSIG)
+	if (!valid_signal(sig))
 		return error;
 	error = -EPERM;
 	if ((!info || ((unsigned long)info != 1 &&
@@ -643,7 +669,11 @@ static int check_kill_permission(int sig, struct siginfo *info,
 	    && (current->uid ^ t->suid) && (current->uid ^ t->uid)
 	    && !capable(CAP_KILL))
 		return error;
-	return security_task_kill(t, info, sig);
+
+	error = security_task_kill(t, info, sig);
+	if (!error)
+		audit_signal_info(sig, t); /* Let audit system see the signal */
+	return error;
 }
 
 /* forward decl */
@@ -794,7 +824,9 @@ static int send_signal(int sig, struct siginfo *info, struct task_struct *t,
 	   make sure at least one signal gets delivered and don't
 	   pass on the info struct.  */
 
-	q = __sigqueue_alloc(t, GFP_ATOMIC);
+	q = __sigqueue_alloc(t, GFP_ATOMIC, (sig < SIGRTMIN &&
+					     ((unsigned long) info < 2 ||
+					      info->si_code >= 0)));
 	if (q) {
 		list_add_tail(&q->list, &signals->list);
 		switch ((unsigned long) info) {
@@ -1037,7 +1069,7 @@ __group_complete_signal(int sig, struct task_struct *p)
 	return;
 }
 
-static int
+int
 __group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 {
 	int ret = 0;
@@ -1260,7 +1292,7 @@ send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 	 * Make sure legacy kernel users don't send in bad values
 	 * (normal paths check this in check_kill_permission).
 	 */
-	if (sig < 0 || sig > _NSIG)
+	if (!valid_signal(sig))
 		return -EINVAL;
 
 	/*
@@ -1348,7 +1380,7 @@ struct sigqueue *sigqueue_alloc(void)
 {
 	struct sigqueue *q;
 
-	if ((q = __sigqueue_alloc(current, GFP_KERNEL)))
+	if ((q = __sigqueue_alloc(current, GFP_KERNEL, 0)))
 		q->flags |= SIGQUEUE_PREALLOC;
 	return(q);
 }
@@ -1535,7 +1567,7 @@ void do_notify_parent(struct task_struct *tsk, int sig)
 		if (psig->action[SIGCHLD-1].sa.sa_handler == SIG_IGN)
 			sig = 0;
 	}
-	if (sig > 0 && sig <= _NSIG)
+	if (valid_signal(sig) && sig > 0)
 		__group_send_sig_info(sig, &info, tsk->parent);
 	__wake_up_parent(tsk, tsk->parent);
 	spin_unlock_irqrestore(&psig->siglock, flags);
@@ -1663,8 +1695,6 @@ void ptrace_notify(int exit_code)
 	ptrace_stop(exit_code, 0, &info);
 	spin_unlock_irq(&current->sighand->siglock);
 }
-
-#ifndef HAVE_ARCH_GET_SIGNAL_TO_DELIVER
 
 static void
 finish_stop(int stop_count)
@@ -1984,8 +2014,6 @@ relock:
 	return signr;
 }
 
-#endif
-
 EXPORT_SYMBOL(recalc_sigpending);
 EXPORT_SYMBOL_GPL(dequeue_signal);
 EXPORT_SYMBOL(flush_signals);
@@ -2241,6 +2269,8 @@ sys_rt_sigtimedwait(const sigset_t __user *uthese,
 			current->state = TASK_INTERRUPTIBLE;
 			timeout = schedule_timeout(timeout);
 
+			if (current->flags & PF_FREEZE)
+				refrigerator(PF_FREEZE);
 			spin_lock_irq(&current->sighand->siglock);
 			sig = dequeue_signal(current, &these, &info);
 			current->blocked = current->real_blocked;
@@ -2388,7 +2418,7 @@ do_sigaction(int sig, const struct k_sigaction *act, struct k_sigaction *oact)
 {
 	struct k_sigaction *k;
 
-	if (sig < 1 || sig > _NSIG || (act && sig_kernel_only(sig)))
+	if (!valid_signal(sig) || sig < 1 || (act && sig_kernel_only(sig)))
 		return -EINVAL;
 
 	k = &current->sighand->action[sig-1];
@@ -2472,7 +2502,7 @@ do_sigaltstack (const stack_t __user *uss, stack_t __user *uoss, unsigned long s
 		int ss_flags;
 
 		error = -EFAULT;
-		if (verify_area(VERIFY_READ, uss, sizeof(*uss))
+		if (!access_ok(VERIFY_READ, uss, sizeof(*uss))
 		    || __get_user(ss_sp, &uss->ss_sp)
 		    || __get_user(ss_flags, &uss->ss_flags)
 		    || __get_user(ss_size, &uss->ss_size))

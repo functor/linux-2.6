@@ -107,74 +107,6 @@ void default_hwif_iops (ide_hwif_t *hwif)
 EXPORT_SYMBOL(default_hwif_iops);
 
 /*
- *	Interface removed
- */
-
-static u8 ide_no_inb(unsigned long port)
-{
-	return 0xFF;
-}
-
-static u16 ide_no_inw (unsigned long port)
-{
-	return 0xFFFF;
-}
-
-static void ide_no_insw (unsigned long port, void *addr, u32 count)
-{
-}
-
-static u32 ide_no_inl (unsigned long port)
-{
-	return 0xFFFFFFFF;
-}
-
-static void ide_no_insl (unsigned long port, void *addr, u32 count)
-{
-}
-
-static void ide_no_outb (u8 val, unsigned long port)
-{
-}
-
-static void ide_no_outbsync (ide_drive_t *drive, u8 addr, unsigned long port)
-{
-}
-
-static void ide_no_outw (u16 val, unsigned long port)
-{
-}
-
-static void ide_no_outsw (unsigned long port, void *addr, u32 count)
-{
-}
-
-static void ide_no_outl (u32 val, unsigned long port)
-{
-}
-
-static void ide_no_outsl (unsigned long port, void *addr, u32 count)
-{
-}
-
-void removed_hwif_iops (ide_hwif_t *hwif)
-{
-	hwif->OUTB	= ide_no_outb;
-	hwif->OUTBSYNC	= ide_no_outbsync;
-	hwif->OUTW	= ide_no_outw;
-	hwif->OUTL	= ide_no_outl;
-	hwif->OUTSW	= ide_no_outsw;
-	hwif->OUTSL	= ide_no_outsl;
-	hwif->INB	= ide_no_inb;
-	hwif->INW	= ide_no_inw;
-	hwif->INL	= ide_no_inl;
-	hwif->INSW	= ide_no_insw;
-	hwif->INSL	= ide_no_insl;
-}
-
-EXPORT_SYMBOL(removed_hwif_iops);
-
-/*
  *	MMIO operations, typically used for SATA controllers
  */
 
@@ -1171,9 +1103,27 @@ static void check_dma_crc(ide_drive_t *drive)
 #endif
 }
 
+static void ide_disk_pre_reset(ide_drive_t *drive)
+{
+	int legacy = (drive->id->cfs_enable_2 & 0x0400) ? 0 : 1;
+
+	drive->special.all = 0;
+	drive->special.b.set_geometry = legacy;
+	drive->special.b.recalibrate  = legacy;
+	if (OK_TO_RESET_CONTROLLER)
+		drive->mult_count = 0;
+	if (!drive->keep_settings && !drive->using_dma)
+		drive->mult_req = 0;
+	if (drive->mult_req != drive->mult_count)
+		drive->special.b.set_multmode = 1;
+}
+
 static void pre_reset(ide_drive_t *drive)
 {
-	DRIVER(drive)->pre_reset(drive);
+	if (drive->media == ide_disk)
+		ide_disk_pre_reset(drive);
+	else
+		drive->post_reset = 1;
 
 	if (!drive->keep_settings) {
 		if (drive->using_dma) {

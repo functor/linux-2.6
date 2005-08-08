@@ -47,6 +47,7 @@
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/ide.h>
+#include <linux/dma-mapping.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -158,11 +159,10 @@ static void __devinit cs5520_init_setup_dma(struct pci_dev *dev, ide_pci_device_
  *	DMA channel
  */
  
-static int cs5520_dma_setup(ide_drive_t *drive)
+static int cs5520_dma_on(ide_drive_t *drive)
 {
-	/* If DMA setup works then VDMA on */
-	drive->vdma = ide_dma_setup(drive) ? 1: 0;
-	return drive->vdma;
+	drive->vdma = 1;
+	return 0;
 }
 
 static void __devinit init_hwif_cs5520(ide_hwif_t *hwif)
@@ -170,7 +170,7 @@ static void __devinit init_hwif_cs5520(ide_hwif_t *hwif)
 	hwif->tuneproc = &cs5520_tune_drive;
 	hwif->speedproc = &cs5520_tune_chipset;
 	hwif->ide_dma_check = &cs5520_config_drive_xfer_rate;
-	hwif->ide_dma_setup = &cs5520_dma_setup;
+	hwif->ide_dma_on = &cs5520_dma_on;
 
 	if(!noautodma)
 		hwif->autodma = 1;
@@ -228,7 +228,7 @@ static int __devinit cs5520_init_one(struct pci_dev *dev, const struct pci_devic
 		return -EBUSY;
 	}
 	pci_set_master(dev);
-	if (pci_set_dma_mask(dev, 0xFFFFFFFF)) {
+	if (pci_set_dma_mask(dev, DMA_32BIT_MASK)) {
 		printk(KERN_WARNING "cs5520: No suitable DMA available.\n");
 		return -ENODEV;
 	}

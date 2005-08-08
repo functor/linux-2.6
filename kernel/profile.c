@@ -22,6 +22,7 @@
 #include <linux/cpumask.h>
 #include <linux/cpu.h>
 #include <linux/profile.h>
+#include <linux/ptrace.h>
 #include <linux/highmem.h>
 #include <asm/sections.h>
 #include <asm/semaphore.h>
@@ -49,15 +50,19 @@ static DECLARE_MUTEX(profile_flip_mutex);
 
 static int __init profile_setup(char * str)
 {
+	static char __initdata schedstr[] = "schedule";
 	int par;
 
-	if (!strncmp(str, "schedule", 8)) {
+	if (!strncmp(str, schedstr, strlen(schedstr))) {
 		prof_on = SCHED_PROFILING;
-		printk(KERN_INFO "kernel schedule profiling enabled\n");
-		if (str[7] == ',')
-			str += 8;
-	}
-	if (get_option(&str,&par)) {
+		if (str[strlen(schedstr)] == ',')
+			str += strlen(schedstr) + 1;
+		if (get_option(&str, &par))
+			prof_shift = par;
+		printk(KERN_INFO
+			"kernel schedule profiling enabled (shift: %ld)\n",
+			prof_shift);
+	} else if (get_option(&str, &par)) {
 		prof_shift = par;
 		prof_on = CPU_PROFILING;
 		printk(KERN_INFO "kernel profiling enabled (shift: %ld)\n",
@@ -184,7 +189,7 @@ void unregister_timer_hook(int (*hook)(struct pt_regs *))
 	WARN_ON(hook != timer_hook);
 	timer_hook = NULL;
 	/* make sure all CPUs see the NULL hook */
-	synchronize_kernel();
+	synchronize_sched();  /* Allow ongoing interrupts to complete. */
 }
 
 EXPORT_SYMBOL_GPL(register_timer_hook);
@@ -522,7 +527,7 @@ static int __init create_hash_tables(void)
 	return 0;
 out_cleanup:
 	prof_on = 0;
-	mb();
+	smp_mb();
 	on_each_cpu(profile_nop, NULL, 0, 1);
 	for_each_online_cpu(cpu) {
 		struct page *page;

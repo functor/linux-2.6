@@ -131,6 +131,8 @@ LIST_HEAD(tty_drivers);			/* linked list of tty drivers */
    vt.c for deeply disgusting hack reasons */
 DECLARE_MUTEX(tty_sem);
 
+int console_use_vt = 1;
+
 #ifdef CONFIG_UNIX98_PTYS
 extern struct tty_driver *ptm_driver;	/* Unix98 pty masters; for /dev/ptmx */
 extern int pty_limit;		/* Config limit on Unix98 ptys */
@@ -185,7 +187,7 @@ char *tty_name(struct tty_struct *tty, char *buf)
 
 EXPORT_SYMBOL(tty_name);
 
-inline int tty_paranoia_check(struct tty_struct *tty, struct inode *inode,
+int tty_paranoia_check(struct tty_struct *tty, struct inode *inode,
 			      const char *routine)
 {
 #ifdef TTY_PARANOIA_CHECK
@@ -1788,8 +1790,7 @@ retry_open:
 		goto got_driver;
 	}
 #ifdef CONFIG_VT
-	if (device == MKDEV(TTY_MAJOR,0)) {
-		extern int fg_console;
+	if (console_use_vt && device == MKDEV(TTY_MAJOR,0)) {
 		extern struct tty_driver *console_driver;
 		driver = console_driver;
 		index = fg_console;
@@ -2016,11 +2017,10 @@ static int tiocswinsz(struct tty_struct *tty, struct tty_struct *real_tty,
 		return 0;
 #ifdef CONFIG_VT
 	if (tty->driver->type == TTY_DRIVER_TYPE_CONSOLE) {
-		unsigned int currcons = tty->index;
 		int rc;
 
 		acquire_console_sem();
-		rc = vc_resize(currcons, tmp_ws.ws_col, tmp_ws.ws_row);
+		rc = vc_resize(tty->driver_data, tmp_ws.ws_col, tmp_ws.ws_row);
 		release_console_sem();
 		if (rc)
 			return -ENXIO;
@@ -2632,6 +2632,7 @@ static void initialize_tty_struct(struct tty_struct *tty)
 	tty->magic = TTY_MAGIC;
 	tty_ldisc_assign(tty, tty_ldisc_get(N_TTY));
 	tty->pgrp = -1;
+	tty->overrun_time = jiffies;
 	tty->flip.char_buf_ptr = tty->flip.char_buf;
 	tty->flip.flag_buf_ptr = tty->flip.flag_buf;
 	INIT_WORK(&tty->flip.work, flush_to_ldisc, tty);
@@ -2967,14 +2968,19 @@ static int __init tty_init(void)
 #endif
 
 #ifdef CONFIG_VT
-	cdev_init(&vc0_cdev, &console_fops);
-	if (cdev_add(&vc0_cdev, MKDEV(TTY_MAJOR, 0), 1) ||
-	    register_chrdev_region(MKDEV(TTY_MAJOR, 0), 1, "/dev/vc/0") < 0)
-		panic("Couldn't register /dev/tty0 driver\n");
-	devfs_mk_cdev(MKDEV(TTY_MAJOR, 0), S_IFCHR|S_IRUSR|S_IWUSR, "vc/0");
-	class_simple_device_add(tty_class, MKDEV(TTY_MAJOR, 0), NULL, "tty0");
+	if (console_use_vt) {
+		cdev_init(&vc0_cdev, &console_fops);
+		if (cdev_add(&vc0_cdev, MKDEV(TTY_MAJOR, 0), 1) ||
+		    register_chrdev_region(MKDEV(TTY_MAJOR, 0), 1,
+					   "/dev/vc/0") < 0)
+			panic("Couldn't register /dev/tty0 driver\n");
+		devfs_mk_cdev(MKDEV(TTY_MAJOR, 0), S_IFCHR|S_IRUSR|S_IWUSR,
+			      "vc/0");
+		class_simple_device_add(tty_class, MKDEV(TTY_MAJOR, 0), NULL,
+					"tty0");
 
-	vty_init();
+		vty_init();
+	}
 #endif
 	return 0;
 }

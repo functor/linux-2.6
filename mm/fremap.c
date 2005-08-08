@@ -30,7 +30,7 @@ static inline void zap_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (pte_present(pte)) {
 		unsigned long pfn = pte_pfn(pte);
 
-		flush_cache_page(vma, addr);
+		flush_cache_page(vma, addr, pfn);
 		pte = ptep_clear_flush(vma, addr, ptep);
 		if (pfn_valid(pfn)) {
 			struct page *page = pfn_to_page(pfn);
@@ -39,13 +39,13 @@ static inline void zap_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 					set_page_dirty(page);
 				page_remove_rmap(page);
 				page_cache_release(page);
-				mm->rss--;
+				dec_mm_counter(mm, rss);
 			}
 		}
 	} else {
 		if (!pte_file(pte))
 			free_swap_and_cache(pte_to_swp_entry(pte));
-		pte_clear(ptep);
+		pte_clear(mm, addr, ptep);
 	}
 }
 
@@ -85,16 +85,18 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * caller about it.
 	 */
 	err = -EINVAL;
-	inode = vma->vm_file->f_mapping->host;
-	size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
-	if (!page->mapping || page->index >= size)
-		goto err_unlock;
+	if (vma->vm_file) {
+		inode = vma->vm_file->f_mapping->host;
+		size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+		if (!page->mapping || page->index >= size)
+			goto err_unlock;
+	}
 
 	zap_pte(mm, vma, addr, pte);
 
-	mm->rss++;
+	inc_mm_counter(mm,rss);
 	flush_icache_page(vma, page);
-	set_pte(pte, mk_pte(page, prot));
+	set_pte_at(mm, addr, pte, mk_pte(page, prot));
 	page_add_file_rmap(page);
 	pte_val = *pte;
 	pte_unmap(pte);
@@ -139,7 +141,7 @@ int install_file_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	zap_pte(mm, vma, addr, pte);
 
-	set_pte(pte, pgoff_to_pte(pgoff));
+	set_pte_at(mm, addr, pte, pgoff_to_pte(pgoff));
 	pte_val = *pte;
 	pte_unmap(pte);
 	update_mmu_cache(vma, addr, pte_val);

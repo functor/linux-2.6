@@ -548,7 +548,7 @@ static struct {
 	unsigned int apic_thmr;
 } apic_pm_state;
 
-static int lapic_suspend(struct sys_device *dev, u32 state)
+static int lapic_suspend(struct sys_device *dev, pm_message_t state)
 {
 	unsigned long flags;
 
@@ -909,7 +909,7 @@ void (*wait_timer_tick)(void) __initdata = wait_8254_wraparound;
 
 #define APIC_DIVISOR 16
 
-void __setup_APIC_LVTT(unsigned int clocks)
+static void __setup_APIC_LVTT(unsigned int clocks)
 {
 	unsigned int lvtt_value, tmp_value, ver;
 
@@ -959,7 +959,7 @@ static void __init setup_APIC_timer(unsigned int clocks)
  * APIC irq that way.
  */
 
-int __init calibrate_APIC_clock(void)
+static int __init calibrate_APIC_clock(void)
 {
 	unsigned long long t1 = 0, t2 = 0;
 	long tt1, tt2;
@@ -1165,7 +1165,7 @@ fastcall void smp_apic_timer_interrupt(struct pt_regs *regs)
 	/*
 	 * the NMI deadlock-detector uses this.
 	 */
-	irq_stat[cpu].apic_timer_irqs++;
+	per_cpu(irq_stat, cpu).apic_timer_irqs++;
 
 	/*
 	 * NOTE! We'd better ACK the irq immediately,
@@ -1265,8 +1265,6 @@ int __init APIC_init_uniprocessor (void)
 
 	setup_local_APIC();
 
-	if (nmi_watchdog == NMI_LOCAL_APIC)
-		check_nmi_watchdog();
 #ifdef CONFIG_X86_IO_APIC
 	if (smp_found_config)
 		if (!skip_ioapic_setup && nr_ioapics)

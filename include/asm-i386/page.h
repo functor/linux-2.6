@@ -129,6 +129,11 @@ extern int devmem_is_allowed(unsigned long pagenr);
 #define __PAGE_OFFSET		(0xC0000000UL)
 #endif
 
+/*
+ * Under exec-shield we don't use the generic fixmap gate area.
+ * The vDSO ("gate area") has a normal vma found the normal ways.
+ */
+#define __HAVE_ARCH_GATE_AREA	1
 
 #define PAGE_OFFSET		((unsigned long)__PAGE_OFFSET)
 #define VMALLOC_RESERVE		((unsigned long)__VMALLOC_RESERVE)

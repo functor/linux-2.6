@@ -415,6 +415,7 @@ static ssize_t raw1394_read(struct file *file, char __user * buffer,
 	struct file_info *fi = (struct file_info *)file->private_data;
 	struct list_head *lh;
 	struct pending_request *req;
+	ssize_t ret;
 
 	if (count != sizeof(struct raw1394_request)) {
 		return -EINVAL;
@@ -447,10 +448,15 @@ static ssize_t raw1394_read(struct file *file, char __user * buffer,
 			req->req.error = RAW1394_ERROR_MEMFAULT;
 		}
 	}
-	__copy_to_user(buffer, &req->req, sizeof(req->req));
+	if (copy_to_user(buffer, &req->req, sizeof(req->req))) {
+		ret = -EFAULT;
+		goto out;
+	}
 
+	ret = (ssize_t) sizeof(struct raw1394_request);
+      out:
 	free_pending_request(req);
-	return sizeof(struct raw1394_request);
+	return ret;
 }
 
 static int state_opened(struct file_info *fi, struct pending_request *req)
@@ -2473,7 +2479,7 @@ static int raw1394_iso_recv_packets(struct file_info *fi, void __user * uaddr)
 		return -EINVAL;
 
 	/* ensure user-supplied buffer is accessible and big enough */
-	if (verify_area(VERIFY_WRITE, upackets.infos,
+	if (!access_ok(VERIFY_WRITE, upackets.infos,
 			upackets.n_packets *
 			sizeof(struct raw1394_iso_packet_info)))
 		return -EFAULT;
@@ -2504,7 +2510,7 @@ static int raw1394_iso_send_packets(struct file_info *fi, void __user * uaddr)
 		return -EINVAL;
 
 	/* ensure user-supplied buffer is accessible and big enough */
-	if (verify_area(VERIFY_READ, upackets.infos,
+	if (!access_ok(VERIFY_READ, upackets.infos,
 			upackets.n_packets *
 			sizeof(struct raw1394_iso_packet_info)))
 		return -EFAULT;
@@ -2731,7 +2737,8 @@ static int raw1394_release(struct inode *inode, struct file *file)
 						    list) {
 					entry = fi_hlp->addr_list.next;
 					while (entry != &(fi_hlp->addr_list)) {
-						arm_addr = list_entry(entry, struct
+						arm_addr = list_entry(entry,
+								      struct
 								      arm_addr,
 								      addr_list);
 						if (arm_addr->start ==
@@ -2843,6 +2850,14 @@ static struct ieee1394_device_id raw1394_id_table[] = {
 	 .match_flags = IEEE1394_MATCH_SPECIFIER_ID | IEEE1394_MATCH_VERSION,
 	 .specifier_id = CAMERA_UNIT_SPEC_ID_ENTRY & 0xffffff,
 	 .version = CAMERA_SW_VERSION_ENTRY & 0xffffff},
+	{
+	 .match_flags = IEEE1394_MATCH_SPECIFIER_ID | IEEE1394_MATCH_VERSION,
+	 .specifier_id = CAMERA_UNIT_SPEC_ID_ENTRY & 0xffffff,
+	 .version = (CAMERA_SW_VERSION_ENTRY + 1) & 0xffffff},
+	{
+	 .match_flags = IEEE1394_MATCH_SPECIFIER_ID | IEEE1394_MATCH_VERSION,
+	 .specifier_id = CAMERA_UNIT_SPEC_ID_ENTRY & 0xffffff,
+	 .version = (CAMERA_SW_VERSION_ENTRY + 2) & 0xffffff},
 	{}
 };
 
@@ -2893,11 +2908,9 @@ static int __init init_raw1394(void)
 		goto out_unreg;
 	}
 	
-	ret = devfs_mk_cdev(MKDEV(
+	devfs_mk_cdev(MKDEV(
 		IEEE1394_MAJOR, IEEE1394_MINOR_BLOCK_RAW1394 * 16),
 		S_IFCHR | S_IRUSR | S_IWUSR, RAW1394_DEVICE_NAME);
-	if (ret)
-		goto out_class;
 
 	cdev_init(&raw1394_cdev, &raw1394_fops);
 	raw1394_cdev.owner = THIS_MODULE;
@@ -2921,7 +2934,6 @@ static int __init init_raw1394(void)
 
 out_dev:
 	devfs_remove(RAW1394_DEVICE_NAME);
-out_class:
 	class_simple_device_remove(MKDEV(
 		IEEE1394_MAJOR, IEEE1394_MINOR_BLOCK_RAW1394 * 16));
 out_unreg:
@@ -2934,10 +2946,10 @@ static void __exit cleanup_raw1394(void)
 {
 	class_simple_device_remove(MKDEV(
 		IEEE1394_MAJOR, IEEE1394_MINOR_BLOCK_RAW1394 * 16));
-	hpsb_unregister_protocol(&raw1394_driver);
 	cdev_del(&raw1394_cdev);
 	devfs_remove(RAW1394_DEVICE_NAME);
 	hpsb_unregister_highlevel(&raw1394_highlevel);
+	hpsb_unregister_protocol(&raw1394_driver);
 }
 
 module_init(init_raw1394);
