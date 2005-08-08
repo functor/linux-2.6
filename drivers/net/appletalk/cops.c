@@ -69,9 +69,9 @@ static const char *version =
 #include <linux/delay.h>	/* For udelay() */
 #include <linux/atalk.h>
 #include <linux/spinlock.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 
@@ -1027,9 +1027,9 @@ static struct net_device_stats *cops_get_stats(struct net_device *dev)
 static struct net_device *cops_dev;
 
 MODULE_LICENSE("GPL");
-MODULE_PARM(io, "i");
-MODULE_PARM(irq, "i");
-MODULE_PARM(board_type, "i");
+module_param(io, int, 0);
+module_param(irq, int, 0);
+module_param(board_type, int, 0);
 
 int init_module(void)
 {

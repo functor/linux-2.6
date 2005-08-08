@@ -1,6 +1,8 @@
 #ifndef __LINUX_PKT_CLS_H
 #define __LINUX_PKT_CLS_H
 
+#include <linux/pkt_sched.h>
+
 /* I think i could have done better macros ; for now this is stolen from
  * some arch/mips code - jhs
 */
@@ -136,9 +138,9 @@ struct tc_police
 
 struct tcf_t
 {
-	__u32   install;
-	__u32   lastuse;
-	__u32   expires;
+	__u64   install;
+	__u64   lastuse;
+	__u64   expires;
 };
 
 struct tc_cnt
@@ -190,6 +192,7 @@ enum
 	TCA_U32_ACT,   
 	TCA_U32_INDEV,
 	TCA_U32_PCNT,
+	TCA_U32_MARK,
 	__TCA_U32_MAX
 };
 
@@ -246,6 +249,7 @@ enum
 	TCA_RSVP_SRC,
 	TCA_RSVP_PINFO,
 	TCA_RSVP_POLICE,
+	TCA_RSVP_ACT,
 	__TCA_RSVP_MAX
 };
 
@@ -277,6 +281,7 @@ enum
 	TCA_ROUTE4_FROM,
 	TCA_ROUTE4_IIF,
 	TCA_ROUTE4_POLICE,
+	TCA_ROUTE4_ACT,
 	__TCA_ROUTE4_MAX
 };
 
@@ -308,6 +313,7 @@ enum
 	TCA_TCINDEX_FALL_THROUGH,
 	TCA_TCINDEX_CLASSID,
 	TCA_TCINDEX_POLICE,
+	TCA_TCINDEX_ACT,
 	__TCA_TCINDEX_MAX
 };
 

@@ -152,7 +152,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 			tmp = get_stack_long(child, addr);
 		else if (addr >= (long) &dummy->fpu &&
 			 addr < (long) &dummy->u_fpvalid) {
-			if (!child->used_math) {
+			if (!tsk_used_math(child)) {
 				if (addr == (long)&dummy->fpu.fpscr)
 					tmp = FPSCR_INIT;
 				else
@@ -161,7 +161,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 				tmp = ((long *)&child->thread.fpu)
 					[(addr - (long)&dummy->fpu) >> 2];
 		} else if (addr == (long) &dummy->u_fpvalid)
-			tmp = child->used_math;
+			tmp = !!tsk_used_math(child);
 		else
 			tmp = 0;
 		ret = put_user(tmp, (unsigned long *)data);
@@ -187,12 +187,12 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 			ret = put_stack_long(child, addr, data);
 		else if (addr >= (long) &dummy->fpu &&
 			 addr < (long) &dummy->u_fpvalid) {
-			child->used_math = 1;
+			set_stopped_child_used_math(child);
 			((long *)&child->thread.fpu)
 				[(addr - (long)&dummy->fpu) >> 2] = data;
 			ret = 0;
 		} else if (addr == (long) &dummy->u_fpvalid) {
-			child->used_math = data?1:0;
+			conditional_stopped_child_used_math(data, child);
 			ret = 0;
 		}
 		break;
@@ -219,7 +219,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
  */
 	case PTRACE_KILL: {
 		ret = 0;
-		if (child->state == TASK_ZOMBIE)	/* already dead */
+		if (child->exit_state == EXIT_ZOMBIE)	/* already dead */
 			break;
 		child->exit_code = SIGKILL;
 		wake_up_process(child);

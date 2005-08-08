@@ -202,7 +202,6 @@ static unsigned long do_lfb_size(struct tdfx_par *par, unsigned short);
  */
 static int  nopan   = 0;
 static int  nowrap  = 1;      // not implemented (yet)
-static int  inverse = 0;
 static char *mode_option __initdata = NULL;
 
 /* ------------------------------------------------------------------------- 
@@ -211,39 +210,19 @@ static char *mode_option __initdata = NULL;
 
 #ifdef VGA_REG_IO 
 static inline  u8 vga_inb(struct tdfx_par *par, u32 reg) { return inb(reg); }
-static inline u16 vga_inw(struct tdfx_par *par, u32 reg) { return inw(reg); }
-static inline u16 vga_inl(struct tdfx_par *par, u32 reg) { return inl(reg); }
 
 static inline void vga_outb(struct tdfx_par *par, u32 reg,  u8 val) { outb(val, reg); }
-static inline void vga_outw(struct tdfx_par *par, u32 reg, u16 val) { outw(val, reg); }
-static inline void vga_outl(struct tdfx_par *par, u32 reg, u32 val) { outl(val, reg); }
 #else
 static inline  u8 vga_inb(struct tdfx_par *par, u32 reg) { 
 	return inb(par->iobase + reg - 0x300); 
 }
-static inline u16 vga_inw(struct tdfx_par *par, u32 reg) { 
-	return inw(par->iobase + reg - 0x300); 
-}
-static inline u16 vga_inl(struct tdfx_par *par, u32 reg) { 
-	return inl(par->iobase + reg - 0x300); 
-}
 static inline void vga_outb(struct tdfx_par *par, u32 reg,  u8 val) { 
 	outb(val, par->iobase + reg - 0x300); 
-}
-static inline void vga_outw(struct tdfx_par *par, u32 reg, u16 val) { 
-	outw(val, par->iobase + reg - 0x300); 
-}
-static inline void vga_outl(struct tdfx_par *par, u32 reg, u32 val) { 
-	outl(val, par->iobase + reg - 0x300); 
 }
 #endif
 
 static inline void gra_outb(struct tdfx_par *par, u32 idx, u8 val) {
 	vga_outb(par, GRA_I, idx); vga_outb(par, GRA_D, val);
-}
-
-static inline u8 gra_inb(struct tdfx_par *par, u32 idx) {
-	vga_outb(par, GRA_I, idx); return vga_inb(par, GRA_D);
 }
 
 static inline void seq_outb(struct tdfx_par *par, u32 idx, u8 val) {
@@ -271,15 +250,6 @@ static inline void att_outb(struct tdfx_par *par, u32 idx, u8 val)
 	vga_outb(par, ATT_IW, val);
 }
 
-static inline u8 att_inb(struct tdfx_par *par, u32 idx) 
-{
-	unsigned char tmp;
-
-	tmp = vga_inb(par, IS1_R);
-	vga_outb(par, ATT_IW, idx);
-	return vga_inb(par, ATT_IW);
-}
-
 static inline void vga_disable_video(struct tdfx_par *par)
 {
 	unsigned char s;
@@ -298,12 +268,6 @@ static inline void vga_enable_video(struct tdfx_par *par)
 	seq_outb(par, 0x00, 0x01);
 	seq_outb(par, 0x01, s);
 	seq_outb(par, 0x00, 0x03);
-}
-
-static inline void vga_disable_palette(struct tdfx_par *par)
-{
-	vga_inb(par, IS1_R);
-	vga_outb(par, ATT_IW, 0x00);
 }
 
 static inline void vga_enable_palette(struct tdfx_par *par)
@@ -838,23 +802,23 @@ static int tdfxfb_blank(int blank, struct fb_info *info)
 	dacmode = tdfx_inl(par, DACMODE);
 
 	switch (blank) {
-		case 0: /* Screen: On; HSync: On, VSync: On */    
+		case FB_BLANK_UNBLANK: /* Screen: On; HSync: On, VSync: On */
 			state    = 0;
 			vgablank = 0;
 			break;
-		case 1: /* Screen: Off; HSync: On, VSync: On */
+		case FB_BLANK_NORMAL: /* Screen: Off; HSync: On, VSync: On */
 			state    = 0;
 			vgablank = 1;
 			break;
-		case 2: /* Screen: Off; HSync: On, VSync: Off */
+		case FB_BLANK_VSYNC_SUSPEND: /* Screen: Off; HSync: On, VSync: Off */
 			state    = BIT(3);
 			vgablank = 1;
 			break;
-		case 3: /* Screen: Off; HSync: Off, VSync: On */
+		case FB_BLANK_HSYNC_SUSPEND: /* Screen: Off; HSync: Off, VSync: On */
 			state    = BIT(1);
 			vgablank = 1;
 			break;
-		case 4: /* Screen: Off; HSync: Off, VSync: Off */
+		case FB_BLANK_POWERDOWN: /* Screen: Off; HSync: Off, VSync: Off */
 			state    = BIT(1) | BIT(3);
 			vgablank = 1;
 			break;
@@ -921,7 +885,6 @@ static void tdfxfb_fillrect(struct fb_info *info, const struct fb_fillrect *rect
 	tdfx_outl(par,	COMMAND_2D, COMMAND_2D_FILLRECT | (tdfx_rop << 24));
 	tdfx_outl(par,	DSTSIZE,    rect->width | (rect->height << 16));
 	tdfx_outl(par,	LAUNCH_2D,  rect->dx | (rect->dy << 16));
-	banshee_wait_idle(info);
 }
 
 /*
@@ -957,7 +920,6 @@ static void tdfxfb_copyarea(struct fb_info *info, const struct fb_copyarea *area
 	tdfx_outl(par,	DSTSIZE,   area->width | (area->height << 16));
 	tdfx_outl(par,	DSTXY,     dx | (dy << 16));
 	tdfx_outl(par,	LAUNCH_2D, sx | (sy << 16)); 
-	banshee_wait_idle(info);
 }
 
 static void tdfxfb_imageblit(struct fb_info *info, const struct fb_image *image) 
@@ -1025,7 +987,6 @@ static void tdfxfb_imageblit(struct fb_info *info, const struct fb_image *image)
 		case 2:  tdfx_outl(par,	LAUNCH_2D,*(u16*)chardata); break;
 		case 3:  tdfx_outl(par,	LAUNCH_2D,*(u16*)chardata | ((chardata[3]) << 24)); break;
 	}
-	banshee_wait_idle(info);
 }
 #endif /* CONFIG_FB_3DFX_ACCEL */
 
@@ -1397,10 +1358,7 @@ void tdfxfb_setup(char *options)
 	while ((this_opt = strsep(&options, ",")) != NULL) {	
 		if (!*this_opt)
 			continue;
-		if (!strcmp(this_opt, "inverse")) {
-			inverse = 1;
-			fb_invert_cmaps();
-		} else if(!strcmp(this_opt, "nopan")) {
+		if(!strcmp(this_opt, "nopan")) {
 			nopan = 1;
 		} else if(!strcmp(this_opt, "nowrap")) {
 			nowrap = 1;

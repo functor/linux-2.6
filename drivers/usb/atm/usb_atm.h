@@ -21,12 +21,29 @@
  *
  ******************************************************************************/
 
+#include <linux/config.h>
 #include <linux/list.h>
-#include <linux/usb.h>
 #include <linux/kref.h>
 #include <linux/atm.h>
 #include <linux/atmdev.h>
 #include <asm/semaphore.h>
+
+/*
+#define DEBUG
+#define VERBOSE_DEBUG
+*/
+
+#if !defined (DEBUG) && defined (CONFIG_USB_DEBUG)
+#	define DEBUG
+#endif
+
+#include <linux/usb.h>
+
+#ifdef DEBUG
+#define UDSL_ASSERT(x)	BUG_ON(!(x))
+#else
+#define UDSL_ASSERT(x)	do { if (!(x)) warn("failed assertion '" #x "' at line %d", __LINE__); } while(0)
+#endif
 
 #define UDSL_MAX_RCV_URBS		4
 #define UDSL_MAX_SND_URBS		4
@@ -91,7 +108,6 @@ struct udsl_control {
 	unsigned int num_cells;
 	unsigned int num_entire;
 	unsigned int pdu_padding;
-	unsigned char cell_header[ATM_CELL_HEADER];
 	unsigned char aal5_trailer[ATM_AAL5_TRAILER];
 };
 

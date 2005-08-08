@@ -83,7 +83,7 @@ unx_create_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
 	if (flags & RPC_TASK_ROOTCREDS) {
 		cred->uc_uid = cred->uc_puid = 0;
 		cred->uc_gid = cred->uc_pgid = 0;
-		cred->uc_xid = cred->uc_pxid = current->xid;
+		cred->uc_xid = cred->uc_pxid = vx_current_xid();
 		cred->uc_gids[0] = NOGROUP;
 	} else {
 		int groups = acred->group_info->ngroups;
@@ -95,7 +95,7 @@ unx_create_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
 		cred->uc_xid = acred->xid;
 		cred->uc_puid = current->uid;
 		cred->uc_pgid = current->gid;
-		cred->uc_pxid = current->xid;
+		cred->uc_pxid = vx_current_xid();
 		for (i = 0; i < groups; i++)
 			cred->uc_gids[i] = GROUP_AT(acred->group_info, i);
 		if (i < NFS_NGROUPS)
@@ -131,7 +131,7 @@ unx_match(struct auth_cred *acred, struct rpc_cred *rcred, int taskflags)
 		 || cred->uc_xid != acred->xid
 		 || cred->uc_puid != current->uid
 		 || cred->uc_pgid != current->gid
-		 || cred->uc_pxid != current->xid)
+		 || cred->uc_pxid != vx_current_xid())
 			return 0;
 
 		groups = acred->group_info->ngroups;
@@ -200,7 +200,7 @@ static int
 unx_refresh(struct rpc_task *task)
 {
 	task->tk_msg.rpc_cred->cr_flags |= RPCAUTH_CRED_UPTODATE;
-	return task->tk_status = -EACCES;
+	return 0;
 }
 
 static u32 *

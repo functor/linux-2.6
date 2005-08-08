@@ -272,7 +272,7 @@ repeat:
 		*new = 1;
 	}
 
-	inode->i_ctime = CURRENT_TIME;
+	inode->i_ctime = CURRENT_TIME_SEC;
 	if (IS_SYNC(inode))
 		ufs_sync_inode (inode);
 	mark_inode_dirty(inode);
@@ -363,7 +363,7 @@ repeat:
 	mark_buffer_dirty(bh);
 	if (IS_SYNC(inode))
 		sync_dirty_buffer(bh);
-	inode->i_ctime = CURRENT_TIME;
+	inode->i_ctime = CURRENT_TIME_SEC;
 	mark_inode_dirty(inode);
 out:
 	brelse (bh);
@@ -629,7 +629,7 @@ void ufs_read_inode (struct inode * inode)
 		}
 	} else
 		init_special_inode(inode, inode->i_mode,
-			old_decode_dev(fs32_to_cpu(sb, ufsi->i_u1.i_data[0])));
+			ufs_get_inode_dev(sb, ufsi));
 
 	brelse (bh);
 
@@ -705,7 +705,7 @@ ufs2_inode :
 		}
 	} else   /* TODO  : here ...*/
 		init_special_inode(inode, inode->i_mode,
-			old_decode_dev(fs32_to_cpu(sb, ufsi->i_u1.i_data[0])));
+			ufs_get_inode_dev(sb, ufsi));
 
 	brelse(bh);
 

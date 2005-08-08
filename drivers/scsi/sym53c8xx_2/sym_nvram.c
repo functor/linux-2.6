@@ -22,32 +22,19 @@
  *
  *-----------------------------------------------------------------------------
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
- * Where this Software is combined with software released under the terms of 
- * the GNU Public License ("GPL") and the terms of the GPL would require the 
- * combined work to also be released under the terms of the GPL, the terms
- * and conditions of this License will apply in addition to those of the
- * GPL with the exception of any terms or conditions of this License that
- * conflict with, or are expressly prohibited by, the GPL.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHORS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include "sym_glue.h"
@@ -81,6 +68,21 @@ void sym_nvram_setup_host(struct sym_hcb *np, struct sym_nvram *nvram)
 	case SYM_TEKRAM_NVRAM:
 		np->myaddr = nvram->data.Tekram.host_id & 0x0f;
 		break;
+#ifdef CONFIG_PARISC
+	case SYM_PARISC_PDC:
+		if (nvram->data.parisc.host_id != -1)
+			np->myaddr = nvram->data.parisc.host_id;
+		if (nvram->data.parisc.factor != -1)
+			np->minsync = nvram->data.parisc.factor;
+		if (nvram->data.parisc.width != -1)
+			np->maxwide = nvram->data.parisc.width;
+		switch (nvram->data.parisc.mode) {
+			case 0: np->scsi_mode = SMODE_SE; break;
+			case 1: np->scsi_mode = SMODE_HVD; break;
+			case 2: np->scsi_mode = SMODE_LVD; break;
+			default: break;
+		}
+#endif
 	default:
 		break;
 	}
@@ -715,6 +717,28 @@ static int sym_read_Tekram_nvram (struct sym_device *np, Tekram_nvram *nvram)
 	return 0;
 }
 
+#ifdef CONFIG_PARISC
+/*
+ * Host firmware (PDC) keeps a table for altering SCSI capabilities.
+ * Many newer machines export one channel of 53c896 chip as SE, 50-pin HD.
+ * Also used for Multi-initiator SCSI clusters to set the SCSI Initiator ID.
+ */
+static int sym_read_parisc_pdc(struct sym_device *np, struct pdc_initiator *pdc)
+{
+	struct hardware_path hwpath;
+	get_pci_node_path(np->pdev, &hwpath);
+	if (!pdc_get_initiator(&hwpath, pdc))
+		return 0;
+
+	return SYM_PARISC_PDC;
+}
+#else
+static int sym_read_parisc_pdc(struct sym_device *np, struct pdc_initiator *x)
+{
+	return 0;
+}
+#endif
+
 /*
  *  Try reading Symbios or Tekram NVRAM
  */
@@ -727,7 +751,7 @@ int sym_read_nvram(struct sym_device *np, struct sym_nvram *nvp)
 		nvp->type = SYM_TEKRAM_NVRAM;
 		sym_display_Tekram_nvram(np, &nvp->data.Tekram);
 	} else {
-		nvp->type = 0;
+		nvp->type = sym_read_parisc_pdc(np, &nvp->data.parisc);
 	}
 	return nvp->type;
 }

@@ -275,7 +275,8 @@ ext2_readdir (struct file * filp, void * dirent, filldir_t filldir)
 				   "bad page in #%lu",
 				   inode->i_ino);
 			filp->f_pos += PAGE_CACHE_SIZE - offset;
-			continue;
+			ret = -EIO;
+			goto done;
 		}
 		kaddr = page_address(page);
 		if (need_revalidate) {
@@ -425,7 +426,7 @@ void ext2_set_link(struct inode *dir, struct ext2_dir_entry_2 *de,
 	ext2_set_de_type (de, inode);
 	err = ext2_commit_chunk(page, from, to);
 	ext2_put_page(page);
-	dir->i_mtime = dir->i_ctime = CURRENT_TIME;
+	dir->i_mtime = dir->i_ctime = CURRENT_TIME_SEC;
 	EXT2_I(dir)->i_flags &= ~EXT2_BTREE_FL;
 	mark_inode_dirty(dir);
 }
@@ -515,7 +516,7 @@ got_it:
 	de->inode = cpu_to_le32(inode->i_ino);
 	ext2_set_de_type (de, inode);
 	err = ext2_commit_chunk(page, from, to);
-	dir->i_mtime = dir->i_ctime = CURRENT_TIME;
+	dir->i_mtime = dir->i_ctime = CURRENT_TIME_SEC;
 	EXT2_I(dir)->i_flags &= ~EXT2_BTREE_FL;
 	mark_inode_dirty(dir);
 	/* OFFSET_CACHE */
@@ -563,7 +564,7 @@ int ext2_delete_entry (struct ext2_dir_entry_2 * dir, struct page * page )
 		pde->rec_len = cpu_to_le16(to-from);
 	dir->inode = 0;
 	err = ext2_commit_chunk(page, from, to);
-	inode->i_ctime = inode->i_mtime = CURRENT_TIME;
+	inode->i_ctime = inode->i_mtime = CURRENT_TIME_SEC;
 	EXT2_I(inode)->i_flags &= ~EXT2_BTREE_FL;
 	mark_inode_dirty(inode);
 out:
@@ -591,6 +592,7 @@ int ext2_make_empty(struct inode *inode, struct inode *parent)
 		goto fail;
 	}
 	kaddr = kmap_atomic(page, KM_USER0);
+       memset(kaddr, 0, chunk_size);
 	de = (struct ext2_dir_entry_2 *)kaddr;
 	de->name_len = 1;
 	de->rec_len = cpu_to_le16(EXT2_DIR_REC_LEN(1));

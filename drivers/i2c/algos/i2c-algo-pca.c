@@ -189,7 +189,7 @@ static int pca_xfer(struct i2c_adapter *i2c_adap,
 
 	state = pca_status(adap);
 	if ( state != 0xF8 ) {
-		printk(KERN_ERR DRIVER ": bus is not idle. status is %#04x\n", state );
+		dev_dbg(&i2c_adap->dev, "bus is not idle. status is %#04x\n", state );
 		/* FIXME: what to do. Force stop ? */
 		return -EREMOTEIO;
 	}
@@ -249,7 +249,7 @@ static int pca_xfer(struct i2c_adapter *i2c_adap,
 			break;
 
 		case 0x20: /* SLA+W has been transmitted; NOT ACK has been received */
-			DEB2("NOT ACK recieved after SLA+W\n");
+			DEB2("NOT ACK received after SLA+W\n");
 			pca_stop(adap);
 			return -EREMOTEIO;
 
@@ -277,7 +277,7 @@ static int pca_xfer(struct i2c_adapter *i2c_adap,
 			return -EREMOTEIO;
 
 		case 0x30: /* Data byte in I2CDAT has been transmitted; NOT ACK has been received */
-			DEB2("NOT ACK recieved after data byte\n");
+			DEB2("NOT ACK received after data byte\n");
 			return -EREMOTEIO;
 
 		case 0x38: /* Arbitration lost during SLA+W, SLA+R or data bytes */
@@ -328,7 +328,7 @@ static int pca_xfer(struct i2c_adapter *i2c_adap,
 
 static u32 pca_func(struct i2c_adapter *adap)
 {
-        return I2C_FUNC_SMBUS_EMUL;
+        return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL;
 }
 
 static int pca_init(struct i2c_algo_pca_data *adap)

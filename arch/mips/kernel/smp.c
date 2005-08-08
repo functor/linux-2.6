@@ -18,7 +18,6 @@
  * Copyright (C) 2000, 2001 Silicon Graphics, Inc.
  * Copyright (C) 2000, 2001, 2003 Broadcom Corporation
  */
-#include <linux/config.h>
 #include <linux/cache.h>
 #include <linux/delay.h>
 #include <linux/init.h>
@@ -44,6 +43,7 @@ cpumask_t cpu_online_map;		/* Bitmask of currently online CPUs */
 int __cpu_number_map[NR_CPUS];		/* Map physical to logical */
 int __cpu_logical_map[NR_CPUS];		/* Map logical to physical */
 
+EXPORT_SYMBOL(phys_cpu_present_map);
 EXPORT_SYMBOL(cpu_online_map);
 
 cycles_t cacheflush_time;
@@ -93,6 +93,7 @@ static void smp_tune_scheduling (void)
 }
 
 extern void __init calibrate_delay(void);
+extern ATTRIB_NORET void cpu_idle(void);
 
 /*
  * First C code run on the secondary CPUs after being started up by
@@ -122,7 +123,7 @@ asmlinkage void start_secondary(void)
 	cpu_idle();
 }
 
-spinlock_t smp_call_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(smp_call_lock);
 
 struct call_data_struct *call_data;
 
@@ -235,7 +236,6 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	init_new_context(current, &init_mm);
 	current_thread_info()->cpu = 0;
 	smp_tune_scheduling();
-	prom_build_cpu_map();
 	prom_prepare_cpus(max_cpus);
 }
 

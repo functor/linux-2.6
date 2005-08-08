@@ -155,7 +155,7 @@ static void mtouchusb_close (struct input_dev *input)
         struct mtouch_usb *mtouch = input->private;
 
         if (!--mtouch->open)
-                usb_unlink_urb (mtouch->irq);
+                usb_kill_urb (mtouch->irq);
 }
 
 static int mtouchusb_alloc_buffers(struct usb_device *udev, struct mtouch_usb *mtouch)
@@ -223,9 +223,9 @@ static int mtouchusb_probe(struct usb_interface *intf, const struct usb_device_i
         mtouch->input.name = mtouch->name;
         mtouch->input.phys = mtouch->phys;
         mtouch->input.id.bustype = BUS_USB;
-        mtouch->input.id.vendor = udev->descriptor.idVendor;
-        mtouch->input.id.product = udev->descriptor.idProduct;
-        mtouch->input.id.version = udev->descriptor.bcdDevice;
+        mtouch->input.id.vendor = le16_to_cpu(udev->descriptor.idVendor);
+        mtouch->input.id.product = le16_to_cpu(udev->descriptor.idProduct);
+        mtouch->input.id.version = le16_to_cpu(udev->descriptor.bcdDevice);
         mtouch->input.dev = &intf->dev;
 
         mtouch->input.evbit[0] = BIT(EV_KEY) | BIT(EV_ABS);
@@ -320,7 +320,7 @@ static void mtouchusb_disconnect(struct usb_interface *intf)
         usb_set_intfdata(intf, NULL);
         if (mtouch) {
                 dbg("%s - mtouch is initialized, cleaning up", __FUNCTION__);
-                usb_unlink_urb(mtouch->irq);
+                usb_kill_urb(mtouch->irq);
                 input_unregister_device(&mtouch->input);
                 usb_free_urb(mtouch->irq);
                 mtouchusb_free_buffers(interface_to_usbdev(intf), mtouch);

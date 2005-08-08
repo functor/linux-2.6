@@ -8,7 +8,7 @@
  * Author: Fabrice Bellard (fabrice.bellard@netgem.com) 
  * Copyright (C) 2000 Netgem S.A.
  *
- * $Id: inftlmount.c,v 1.14 2004/08/09 13:57:42 dwmw2 Exp $
+ * $Id: inftlmount.c,v 1.16 2004/11/22 13:50:53 kalev Exp $
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -41,7 +41,7 @@
 #include <linux/mtd/inftl.h>
 #include <linux/mtd/compatmac.h>
 
-char inftlmountrev[]="$Revision: 1.14 $";
+char inftlmountrev[]="$Revision: 1.16 $";
 
 /*
  * find_boot_record: Find the INFTL Media Header and its Spare copy which
@@ -222,6 +222,8 @@ static int find_boot_record(struct INFTLrecord *inftl)
 			if (ip->Reserved0 != ip->firstUnit) {
 				struct erase_info *instr = &inftl->instr;
 
+				instr->mtd = inftl->mbd.mtd;
+
 				/*
 				 * 	Most likely this is using the
 				 * 	undocumented qiuck mount feature.
@@ -396,6 +398,7 @@ int INFTL_formatblock(struct INFTLrecord *inftl, int block)
 	   _first_? */
 
 	/* Use async erase interface, test return code */
+	instr->mtd = inftl->mbd.mtd;
 	instr->addr = block * inftl->EraseSize;
 	instr->len = inftl->mbd.mtd->erasesize;
 	/* Erase one physical eraseblock at a time, even though the NAND api

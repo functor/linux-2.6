@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2004, R. Byron Moore
+ * Copyright (C) 2000 - 2005, R. Byron Moore
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -434,13 +434,8 @@ acpi_ev_gpe_detect (
 			}
 
 			ACPI_DEBUG_PRINT ((ACPI_DB_INTERRUPTS,
-				"GPE pair: Status %8.8X%8.8X = %02X, Enable %8.8X%8.8X = %02X\n",
-				ACPI_FORMAT_UINT64 (
-					gpe_register_info->status_address.address),
-					status_reg,
-				ACPI_FORMAT_UINT64 (
-					gpe_register_info->enable_address.address),
-					enable_reg));
+				"Read GPE Register at GPE%X: Status=%02X, Enable=%02X\n",
+				gpe_register_info->base_gpe_number, status_reg, enable_reg));
 
 			/* First check if there is anything active at all in this register */
 
@@ -610,8 +605,8 @@ acpi_ev_gpe_dispatch (
 	if ((gpe_event_info->flags & ACPI_GPE_XRUPT_TYPE_MASK) == ACPI_GPE_EDGE_TRIGGERED) {
 		status = acpi_hw_clear_gpe (gpe_event_info);
 		if (ACPI_FAILURE (status)) {
-			ACPI_REPORT_ERROR (("acpi_ev_gpe_dispatch: Unable to clear GPE[%2X]\n",
-				gpe_number));
+			ACPI_REPORT_ERROR (("acpi_ev_gpe_dispatch: %s, Unable to clear GPE[%2X]\n",
+				acpi_format_exception (status), gpe_number));
 			return_VALUE (ACPI_INTERRUPT_NOT_HANDLED);
 		}
 	}
@@ -648,8 +643,8 @@ acpi_ev_gpe_dispatch (
 			status = acpi_hw_clear_gpe (gpe_event_info);
 			if (ACPI_FAILURE (status)) {
 				ACPI_REPORT_ERROR ((
-					"acpi_ev_gpe_dispatch: Unable to clear GPE[%2X]\n",
-					gpe_number));
+					"acpi_ev_gpe_dispatch: %s, Unable to clear GPE[%2X]\n",
+					acpi_format_exception (status), gpe_number));
 				return_VALUE (ACPI_INTERRUPT_NOT_HANDLED);
 			}
 		}
@@ -664,8 +659,8 @@ acpi_ev_gpe_dispatch (
 		status = acpi_ev_disable_gpe (gpe_event_info);
 		if (ACPI_FAILURE (status)) {
 			ACPI_REPORT_ERROR ((
-				"acpi_ev_gpe_dispatch: Unable to disable GPE[%2X]\n",
-				gpe_number));
+				"acpi_ev_gpe_dispatch: %s, Unable to disable GPE[%2X]\n",
+				acpi_format_exception (status), gpe_number));
 			return_VALUE (ACPI_INTERRUPT_NOT_HANDLED);
 		}
 
@@ -673,12 +668,12 @@ acpi_ev_gpe_dispatch (
 		 * Execute the method associated with the GPE
 		 * NOTE: Level-triggered GPEs are cleared after the method completes.
 		 */
-		if (ACPI_FAILURE (acpi_os_queue_for_execution (OSD_PRIORITY_GPE,
-				 acpi_ev_asynch_execute_gpe_method,
-				 gpe_event_info))) {
+		status = acpi_os_queue_for_execution (OSD_PRIORITY_GPE,
+				 acpi_ev_asynch_execute_gpe_method, gpe_event_info);
+		if (ACPI_FAILURE (status)) {
 			ACPI_REPORT_ERROR ((
-				"acpi_ev_gpe_dispatch: Unable to queue handler for GPE[%2X], event is disabled\n",
-				gpe_number));
+				"acpi_ev_gpe_dispatch: %s, Unable to queue handler for GPE[%2X] - event disabled\n",
+				acpi_format_exception (status), gpe_number));
 		}
 		break;
 
@@ -697,8 +692,8 @@ acpi_ev_gpe_dispatch (
 		status = acpi_ev_disable_gpe (gpe_event_info);
 		if (ACPI_FAILURE (status)) {
 			ACPI_REPORT_ERROR ((
-				"acpi_ev_gpe_dispatch: Unable to disable GPE[%2X]\n",
-				gpe_number));
+				"acpi_ev_gpe_dispatch: %s, Unable to disable GPE[%2X]\n",
+				acpi_format_exception (status), gpe_number));
 			return_VALUE (ACPI_INTERRUPT_NOT_HANDLED);
 		}
 		break;

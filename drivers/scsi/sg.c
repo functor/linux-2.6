@@ -7,7 +7,7 @@
  * Original driver (sg.c):
  *        Copyright (C) 1992 Lawrence Foard
  * Version 2 and 3 extensions to driver:
- *        Copyright (C) 1998 - 2004 Douglas Gilbert
+ *        Copyright (C) 1998 - 2005 Douglas Gilbert
  *
  *  Modified  19-JAN-1998  Richard Gooch <rgooch@atnf.csiro.au>  Devfs support
  *
@@ -18,8 +18,8 @@
  *
  */
 
-static int sg_version_num = 30531;	/* 2 digits for each component */
-#define SG_VERSION_STR "3.5.31"
+static int sg_version_num = 30532;	/* 2 digits for each component */
+#define SG_VERSION_STR "3.5.32"
 
 /*
  *  D. P. Gilbert (dgilbert@interlog.com, dougg@triode.net.au), notes:
@@ -60,7 +60,7 @@ static int sg_version_num = 30531;	/* 2 digits for each component */
 
 #ifdef CONFIG_SCSI_PROC_FS
 #include <linux/proc_fs.h>
-static char *sg_version_date = "20040516";
+static char *sg_version_date = "20050117";
 
 static int sg_proc_init(void);
 static void sg_proc_cleanup(void);
@@ -108,7 +108,7 @@ static void sg_remove(struct class_device *);
 
 static Scsi_Request *dummy_cmdp;	/* only used for sizeof */
 
-static rwlock_t sg_dev_arr_lock = RW_LOCK_UNLOCKED;	/* Also used to lock
+static DEFINE_RWLOCK(sg_dev_arr_lock);	/* Also used to lock
 							   file descriptor list for device */
 
 static struct class_interface sg_interface = {
@@ -563,6 +563,20 @@ sg_write(struct file *filp, const char __user *buf, size_t count, loff_t * ppos)
 	hp->usr_ptr = NULL;
 	if (__copy_from_user(cmnd, buf, cmd_size))
 		return -EFAULT;
+	/*
+	 * SG_DXFER_TO_FROM_DEV is functionally equivalent to SG_DXFER_FROM_DEV,
+	 * but is is possible that the app intended SG_DXFER_TO_DEV, because there
+	 * is a non-zero input_size, so emit a warning.
+	 */
+	if (hp->dxfer_direction == SG_DXFER_TO_FROM_DEV)
+		if (printk_ratelimit())
+			printk(KERN_WARNING
+			       "sg_write: data in/out %d/%d bytes for SCSI command 0x%x--"
+			       "guessing data in;\n" KERN_WARNING "   "
+			       "program %s not setting count and/or reply_len properly\n",
+			       old_hdr.reply_len - (int)SZ_SG_HEADER,
+			       input_size, (unsigned int) cmnd[0],
+			       current->comm);
 	k = sg_common_write(sfp, srp, cmnd, sfp->timeout, blocking);
 	return (k < 0) ? k : count;
 }
@@ -576,6 +590,7 @@ sg_new_write(Sg_fd * sfp, const char __user *buf, size_t count,
 	sg_io_hdr_t *hp;
 	unsigned char cmnd[sizeof (dummy_cmdp->sr_cmnd)];
 	int timeout;
+	unsigned long ul_timeout;
 
 	if (count < SZ_SG_IO_HDR)
 		return -EINVAL;
@@ -610,7 +625,8 @@ sg_new_write(Sg_fd * sfp, const char __user *buf, size_t count,
 			return -EBUSY;	/* reserve buffer already being used */
 		}
 	}
-	timeout = msecs_to_jiffies(srp->header.timeout);
+	ul_timeout = msecs_to_jiffies(srp->header.timeout);
+	timeout = (ul_timeout < INT_MAX) ? ul_timeout : INT_MAX;
 	if ((!hp->cmdp) || (hp->cmd_len < 6) || (hp->cmd_len > sizeof (cmnd))) {
 		sg_remove_request(sfp, srp);
 		return -EMSGSIZE;
@@ -719,6 +735,18 @@ sg_common_write(Sg_fd * sfp, Sg_request * srp,
 }
 
 static int
+sg_srp_done(Sg_request *srp, Sg_fd *sfp)
+{
+	unsigned long iflags;
+	int done;
+
+	read_lock_irqsave(&sfp->rq_list_lock, iflags);
+	done = srp->done;
+	read_unlock_irqrestore(&sfp->rq_list_lock, iflags);
+	return done;
+}
+
+static int
 sg_ioctl(struct inode *inode, struct file *filp,
 	 unsigned int cmd_in, unsigned long arg)
 {
@@ -757,7 +785,7 @@ sg_ioctl(struct inode *inode, struct file *filp,
 			while (1) {
 				result = 0;	/* following macro to beat race condition */
 				__wait_event_interruptible(sfp->read_wait,
-					(sdp->detached || sfp->closed || srp->done),
+					(sdp->detached || sfp->closed || sg_srp_done(srp, sfp)),
 							   result);
 				if (sdp->detached)
 					return -ENODEV;
@@ -768,7 +796,9 @@ sg_ioctl(struct inode *inode, struct file *filp,
 				srp->orphan = 1;
 				return result;	/* -ERESTARTSYS because signal hit process */
 			}
+			write_lock_irqsave(&sfp->rq_list_lock, iflags);
 			srp->done = 2;
+			write_unlock_irqrestore(&sfp->rq_list_lock, iflags);
 			result = sg_new_read(sfp, p, SZ_SG_IO_HDR, srp);
 			return (result < 0) ? result : 0;
 		}
@@ -1211,6 +1241,7 @@ sg_cmd_done(Scsi_Cmnd * SCpnt)
 	Sg_device *sdp = NULL;
 	Sg_fd *sfp;
 	Sg_request *srp = NULL;
+	unsigned long iflags;
 
 	if (SCpnt && (SRpnt = SCpnt->sc_request))
 		srp = (Sg_request *) SRpnt->upper_private_data;
@@ -1251,6 +1282,8 @@ sg_cmd_done(Scsi_Cmnd * SCpnt)
 	srp->header.duration =
 	    jiffies_to_msecs(jiffies - srp->header.duration);
 	if (0 != SRpnt->sr_result) {
+		struct scsi_sense_hdr sshdr;
+
 		memcpy(srp->sense_b, SRpnt->sr_sense_buffer,
 		       sizeof (srp->sense_b));
 		srp->header.status = 0xff & SRpnt->sr_result;
@@ -1265,11 +1298,12 @@ sg_cmd_done(Scsi_Cmnd * SCpnt)
 
 		/* Following if statement is a patch supplied by Eric Youngdale */
 		if (driver_byte(SRpnt->sr_result) != 0
-		    && (SRpnt->sr_sense_buffer[0] & 0x7f) == 0x70
-		    && (SRpnt->sr_sense_buffer[2] & 0xf) == UNIT_ATTENTION
+		    && scsi_command_normalize_sense(SCpnt, &sshdr)
+		    && !scsi_sense_is_deferred(&sshdr)
+		    && sshdr.sense_key == UNIT_ATTENTION
 		    && sdp->device->removable) {
-			/* Detected disc change. Set the bit - this may be used if */
-			/* there are filesystems using this device. */
+			/* Detected possible disc change. Set the bit - this */
+			/* may be used if there are filesystems using this device */
 			sdp->device->changed = 1;
 		}
 	}
@@ -1299,8 +1333,10 @@ sg_cmd_done(Scsi_Cmnd * SCpnt)
 	if (sfp && srp) {
 		/* Now wake up any sg_read() that is waiting for this packet. */
 		kill_fasync(&sfp->async_qp, SIGPOLL, POLL_IN);
+		write_lock_irqsave(&sfp->rq_list_lock, iflags);
 		srp->done = 1;
 		wake_up_interruptible(&sfp->read_wait);
+		write_unlock_irqrestore(&sfp->rq_list_lock, iflags);
 	}
 }
 
@@ -1494,7 +1530,7 @@ sg_remove(struct class_device *cl_dev)
 				tsfp = sfp->nextfp;
 				for (srp = sfp->headrp; srp; srp = tsrp) {
 					tsrp = srp->nextrp;
-					if (sfp->closed || (0 == srp->done))
+					if (sfp->closed || (0 == sg_srp_done(srp, sfp)))
 						sg_finish_rem_req(srp);
 				}
 				if (sfp->closed) {
@@ -1540,8 +1576,8 @@ sg_remove(struct class_device *cl_dev)
  * of sysfs parameters (which module_param doesn't yet support).
  * Sysfs parameters defined explicitly below.
  */
-module_param_named(def_reserved_size, def_reserved_size, int, 0);
-module_param_named(allow_dio, sg_allow_dio, int, 0);
+module_param_named(def_reserved_size, def_reserved_size, int, S_IRUGO);
+module_param_named(allow_dio, sg_allow_dio, int, S_IRUGO | S_IWUSR);
 
 MODULE_AUTHOR("Douglas Gilbert");
 MODULE_DESCRIPTION("SCSI generic (sg) driver");
@@ -2407,7 +2443,7 @@ sg_add_sfp(Sg_device * sdp, int dev)
 		return NULL;
 	memset(sfp, 0, sizeof (Sg_fd));
 	init_waitqueue_head(&sfp->read_wait);
-	sfp->rq_list_lock = RW_LOCK_UNLOCKED;
+	rwlock_init(&sfp->rq_list_lock);
 
 	sfp->timeout = SG_DEFAULT_TIMEOUT;
 	sfp->timeout_user = SG_DEFAULT_TIMEOUT_USER;
@@ -2476,7 +2512,7 @@ sg_remove_sfp(Sg_device * sdp, Sg_fd * sfp)
 
 	for (srp = sfp->headrp; srp; srp = tsrp) {
 		tsrp = srp->nextrp;
-		if (srp->done)
+		if (sg_srp_done(srp, sfp))
 			sg_finish_rem_req(srp);
 		else
 			++dirty;
@@ -2573,9 +2609,14 @@ sg_page_free(char *buff, int size)
 	free_pages((unsigned long) buff, order);
 }
 
+#ifndef MAINTENANCE_IN_CMD
+#define MAINTENANCE_IN_CMD 0xa3
+#endif
+
 static unsigned char allow_ops[] = { TEST_UNIT_READY, REQUEST_SENSE,
 	INQUIRY, READ_CAPACITY, READ_BUFFER, READ_6, READ_10, READ_12,
-	MODE_SENSE, MODE_SENSE_10, LOG_SENSE
+	READ_16, MODE_SENSE, MODE_SENSE_10, LOG_SENSE, REPORT_LUNS,
+	SERVICE_ACTION_IN, RECEIVE_DIAGNOSTIC, READ_LONG, MAINTENANCE_IN_CMD
 };
 
 static int

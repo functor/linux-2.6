@@ -64,14 +64,14 @@ static int snd_pmac_dbdma_alloc(pmac_dbdma_t *rec, int size)
 		return -ENOMEM;
 	rec->size = size;
 	memset(rec->space, 0, sizeof(struct dbdma_cmd) * (size + 1));
-	rec->cmds = (void*)DBDMA_ALIGN(rec->space);
+	rec->cmds = (void __iomem *)DBDMA_ALIGN(rec->space);
 	rec->addr = virt_to_bus(rec->cmds);
 	return 0;
 }
 
 static void snd_pmac_dbdma_free(pmac_dbdma_t *rec)
 {
-	if (rec && rec->space)
+	if (rec)
 		kfree(rec->space);
 }
 
@@ -200,7 +200,7 @@ inline static void snd_pmac_dma_run(pmac_stream_t *rec, int status)
 static int snd_pmac_pcm_prepare(pmac_t *chip, pmac_stream_t *rec, snd_pcm_substream_t *subs)
 {
 	int i;
-	volatile struct dbdma_cmd *cp;
+	volatile struct dbdma_cmd __iomem *cp;
 	snd_pcm_runtime_t *runtime = subs->runtime;
 	int rate_index;
 	long offset;
@@ -263,7 +263,7 @@ static int snd_pmac_pcm_prepare(pmac_t *chip, pmac_stream_t *rec, snd_pcm_substr
 static int snd_pmac_pcm_trigger(pmac_t *chip, pmac_stream_t *rec,
 				snd_pcm_substream_t *subs, int cmd)
 {
-	volatile struct dbdma_cmd *cp;
+	volatile struct dbdma_cmd __iomem *cp;
 	int i, command;
 
 	switch (cmd) {
@@ -314,11 +314,12 @@ static snd_pcm_uframes_t snd_pmac_pcm_pointer(pmac_t *chip, pmac_stream_t *rec,
 
 #if 1 /* hmm.. how can we get the current dma pointer?? */
 	int stat;
-	volatile struct dbdma_cmd *cp = &rec->cmd.cmds[rec->cur_period];
+	volatile struct dbdma_cmd __iomem *cp = &rec->cmd.cmds[rec->cur_period];
 	stat = ld_le16(&cp->xfer_status);
 	if (stat & (ACTIVE|DEAD)) {
 		count = in_le16(&cp->res_count);
-		count = rec->period_size - count;
+		if (count)
+			count = rec->period_size - count;
 	}
 #endif
 	count += rec->cur_period * rec->period_size;
@@ -379,7 +380,7 @@ static snd_pcm_uframes_t snd_pmac_capture_pointer(snd_pcm_substream_t *subs)
  */
 static void snd_pmac_pcm_update(pmac_t *chip, pmac_stream_t *rec)
 {
-	volatile struct dbdma_cmd *cp;
+	volatile struct dbdma_cmd __iomem *cp;
 	int c;
 	int stat;
 
@@ -425,10 +426,10 @@ static snd_pcm_hardware_t snd_pmac_playback =
 	.rate_max =		44100,
 	.channels_min =		2,
 	.channels_max =		2,
-	.buffer_bytes_max =	32768,
+	.buffer_bytes_max =	131072,
 	.period_bytes_min =	256,
 	.period_bytes_max =	16384,
-	.periods_min =		1,
+	.periods_min =		3,
 	.periods_max =		PMAC_MAX_FRAGS,
 };
 
@@ -444,10 +445,10 @@ static snd_pcm_hardware_t snd_pmac_capture =
 	.rate_max =		44100,
 	.channels_min =		2,
 	.channels_max =		2,
-	.buffer_bytes_max =	32768,
+	.buffer_bytes_max =	131072,
 	.period_bytes_min =	256,
 	.period_bytes_max =	16384,
-	.periods_min =		1,
+	.periods_min =		3,
 	.periods_max =		PMAC_MAX_FRAGS,
 };
 
@@ -550,6 +551,8 @@ static int snd_pmac_pcm_open(pmac_t *chip, pmac_stream_t *rec, snd_pcm_substream
 	if (chip->can_duplex)
 		snd_pcm_set_sync(subs);
 
+	/* constraints to fix choppy sound */
+	snd_pcm_hw_constraint_integer(runtime, SNDRV_PCM_HW_PARAM_PERIODS);
 	return 0;
 }
 
@@ -818,11 +821,11 @@ static int snd_pmac_free(pmac_t *chip)
 	if (chip->latch_base)
 		iounmap(chip->latch_base);
 	if (chip->awacs)
-		iounmap((void*)chip->awacs);
+		iounmap(chip->awacs);
 	if (chip->playback.dma)
-		iounmap((void*)chip->playback.dma);
+		iounmap(chip->playback.dma);
 	if (chip->capture.dma)
-		iounmap((void*)chip->capture.dma);
+		iounmap(chip->capture.dma);
 	if (chip->node) {
 		for (i = 0; i < 3; i++) {
 			if (chip->of_requested & (1 << i))
@@ -1133,9 +1136,9 @@ int __init snd_pmac_new(snd_card_t *card, pmac_t **chip_return)
 		chip->of_requested |= (1 << i);
 	}
 
-	chip->awacs = (volatile struct awacs_regs *) ioremap(np->addrs[0].address, 0x1000);
-	chip->playback.dma = (volatile struct dbdma_regs *) ioremap(np->addrs[1].address, 0x100);
-	chip->capture.dma = (volatile struct dbdma_regs *) ioremap(np->addrs[2].address, 0x100);
+	chip->awacs = ioremap(np->addrs[0].address, 0x1000);
+	chip->playback.dma = ioremap(np->addrs[1].address, 0x100);
+	chip->capture.dma = ioremap(np->addrs[2].address, 0x100);
 	if (chip->model <= PMAC_BURGUNDY) {
 		if (request_irq(np->intrs[0].line, snd_pmac_ctrl_intr, 0,
 				"PMac", (void*)chip)) {
@@ -1176,15 +1179,14 @@ int __init snd_pmac_new(snd_card_t *card, pmac_t **chip_return)
 		 * sound input.  The 0x100 enables the SCSI bus
 		 * terminator power.
 		 */
-		chip->latch_base = (unsigned char *) ioremap (0xf301a000, 0x1000);
+		chip->latch_base = ioremap (0xf301a000, 0x1000);
 		in_8(chip->latch_base + 0x190);
 	} else if (chip->is_pbook_G3) {
 		struct device_node* mio;
 		for (mio = chip->node->parent; mio; mio = mio->parent) {
 			if (strcmp(mio->name, "mac-io") == 0
 			    && mio->n_addrs > 0) {
-				chip->macio_base = (unsigned char *) ioremap
-					(mio->addrs[0].address, 0x40);
+				chip->macio_base = ioremap(mio->addrs[0].address, 0x40);
 				break;
 			}
 		}
@@ -1249,7 +1251,6 @@ static int snd_pmac_suspend(snd_card_t *card, unsigned int state)
 	if (chip->rx_irq >= 0)
 		disable_irq(chip->rx_irq);
 	snd_pmac_sound_feature(chip, 0);
-	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	return 0;
 }
 
@@ -1276,7 +1277,6 @@ static int snd_pmac_resume(snd_card_t *card, unsigned int state)
 	if (chip->rx_irq >= 0)
 		enable_irq(chip->rx_irq);
 
-	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	return 0;
 }
 

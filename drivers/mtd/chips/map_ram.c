@@ -1,7 +1,7 @@
 /*
  * Common code to handle map devices which are simple RAM
  * (C) 2000 Red Hat. GPL'd.
- * $Id: map_ram.c,v 1.20 2004/08/09 13:19:43 dwmw2 Exp $
+ * $Id: map_ram.c,v 1.22 2005/01/05 18:05:12 dwmw2 Exp $
  */
 
 #include <linux/module.h>
@@ -83,7 +83,7 @@ static struct mtd_info *map_ram_probe(struct map_info *map)
 
 static int mapram_read (struct mtd_info *mtd, loff_t from, size_t len, size_t *retlen, u_char *buf)
 {
-	struct map_info *map = (struct map_info *)mtd->priv;
+	struct map_info *map = mtd->priv;
 
 	map_copy_from(map, buf, from, len);
 	*retlen = len;
@@ -92,7 +92,7 @@ static int mapram_read (struct mtd_info *mtd, loff_t from, size_t len, size_t *r
 
 static int mapram_write (struct mtd_info *mtd, loff_t to, size_t len, size_t *retlen, const u_char *buf)
 {
-	struct map_info *map = (struct map_info *)mtd->priv;
+	struct map_info *map = mtd->priv;
 
 	map_copy_to(map, to, buf, len);
 	*retlen = len;
@@ -103,7 +103,7 @@ static int mapram_erase (struct mtd_info *mtd, struct erase_info *instr)
 {
 	/* Yeah, it's inefficient. Who cares? It's faster than a _real_
 	   flash erase. */
-	struct map_info *map = (struct map_info *)mtd->priv;
+	struct map_info *map = mtd->priv;
 	map_word allff;
 	unsigned long i;
 
@@ -124,7 +124,7 @@ static void mapram_nop(struct mtd_info *mtd)
 	/* Nothing to see here */
 }
 
-int __init map_ram_init(void)
+static int __init map_ram_init(void)
 {
 	register_mtd_chip_driver(&mapram_chipdrv);
 	return 0;

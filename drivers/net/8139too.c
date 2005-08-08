@@ -108,7 +108,6 @@
 #include <linux/mii.h>
 #include <linux/completion.h>
 #include <linux/crc32.h>
-#include <linux/suspend.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <asm/irq.h>
@@ -567,7 +566,6 @@ struct rtl8139_private {
 	void *mmio_addr;
 	int drv_flags;
 	struct pci_dev *pci_dev;
-	u32 pci_state[16];
 	u32 msg_enable;
 	struct net_device_stats stats;
 	unsigned char *rx_ring;
@@ -599,11 +597,12 @@ struct rtl8139_private {
 MODULE_AUTHOR ("Jeff Garzik <jgarzik@pobox.com>");
 MODULE_DESCRIPTION ("RealTek RTL-8139 Fast Ethernet driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DRV_VERSION);
 
-MODULE_PARM (multicast_filter_limit, "i");
-MODULE_PARM (media, "1-" __MODULE_STRING(MAX_UNITS) "i");
-MODULE_PARM (full_duplex, "1-" __MODULE_STRING(MAX_UNITS) "i");
-MODULE_PARM (debug, "i");
+module_param(multicast_filter_limit, int, 0);
+module_param_array(media, int, NULL, 0);
+module_param_array(full_duplex, int, NULL, 0);
+module_param(debug, int, 0);
 MODULE_PARM_DESC (debug, "8139too bitmapped message enable number");
 MODULE_PARM_DESC (multicast_filter_limit, "8139too maximum number of filtered multicast addresses");
 MODULE_PARM_DESC (media, "8139too: Bits 4+9: force full duplex, bit 5: 100Mbps");
@@ -1625,8 +1624,7 @@ static int rtl8139_thread (void *data)
 		do {
 			timeout = interruptible_sleep_on_timeout (&tp->thr_wait, timeout);
 			/* make swsusp happy with our thread */
-			if (current->flags & PF_FREEZE)
-				refrigerator(PF_FREEZE);
+			try_to_freeze(PF_FREEZE);
 		} while (!signal_pending (current) && (timeout > 0));
 
 		if (signal_pending (current)) {
@@ -1636,7 +1634,8 @@ static int rtl8139_thread (void *data)
 		if (tp->time_to_die)
 			break;
 
-		rtnl_lock ();
+		if (rtnl_lock_interruptible ())
+			break;
 		rtl8139_thread_iter (dev, tp, tp->mmio_addr);
 		rtnl_unlock ();
 	}
@@ -2589,7 +2588,7 @@ static int rtl8139_suspend (struct pci_dev *pdev, u32 state)
 	void *ioaddr = tp->mmio_addr;
 	unsigned long flags;
 
-	pci_save_state (pdev, tp->pci_state);
+	pci_save_state (pdev);
 
 	if (!netif_running (dev))
 		return 0;
@@ -2608,7 +2607,7 @@ static int rtl8139_suspend (struct pci_dev *pdev, u32 state)
 
 	spin_unlock_irqrestore (&tp->lock, flags);
 
-	pci_set_power_state (pdev, 3);
+	pci_set_power_state (pdev, PCI_D3hot);
 
 	return 0;
 }
@@ -2617,12 +2616,11 @@ static int rtl8139_suspend (struct pci_dev *pdev, u32 state)
 static int rtl8139_resume (struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata (pdev);
-	struct rtl8139_private *tp = dev->priv;
 
-	pci_restore_state (pdev, tp->pci_state);
+	pci_restore_state (pdev);
 	if (!netif_running (dev))
 		return 0;
-	pci_set_power_state (pdev, 0);
+	pci_set_power_state (pdev, PCI_D0);
 	rtl8139_init_ring (dev);
 	rtl8139_hw_start (dev);
 	netif_device_attach (dev);

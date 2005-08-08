@@ -4,7 +4,7 @@
  *
  *   This driver is the result of the OpenVortex Project from Savannah
  * (savannah.nongnu.org/projects/openvortex). I would like to thank
- * the developers of OpenVortex, Jeff Muizelar and Kester Maddock, from
+ * the developers of OpenVortex, Jeff Muizelaar and Kester Maddock, from
  * whom i got plenty of help, and their codebase was invaluable.
  *   Thanks to the ALSA developers, they helped a lot working out
  * the ALSA part.
@@ -27,15 +27,14 @@ static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;
 static int pcifix[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 255 };
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for " CARD_NAME " soundcard.");
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for " CARD_NAME " soundcard.");
-module_param_array(enable, bool, boot_devs, 0444);
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable " CARD_NAME " soundcard.");
-module_param_array(pcifix, int, boot_devs, 0444);
+module_param_array(pcifix, int, NULL, 0444);
 MODULE_PARM_DESC(pcifix, "Enable VIA-workaround for " CARD_NAME " soundcard.");
 
 MODULE_DESCRIPTION("Aureal vortex");
@@ -171,9 +170,8 @@ snd_vortex_create(snd_card_t * card, struct pci_dev *pci, vortex_t ** rchip)
 	if ((err = pci_request_regions(pci, CARD_NAME_SHORT)) != 0)
 		goto regions_out;
 
-	chip->mmio =
-	    ioremap_nocache(pci_resource_start(pci, 0),
-			    pci_resource_len(pci, 0));
+	chip->mmio = ioremap_nocache(pci_resource_start(pci, 0),
+	                             pci_resource_len(pci, 0));
 	if (!chip->mmio) {
 		printk(KERN_ERR "MMIO area remap failed.\n");
 		err = -ENOMEM;
@@ -188,10 +186,9 @@ snd_vortex_create(snd_card_t * card, struct pci_dev *pci, vortex_t ** rchip)
 		goto core_out;
 	}
 
-	if ((err =
-	     request_irq(pci->irq, vortex_interrupt,
-			 SA_INTERRUPT | SA_SHIRQ, CARD_NAME_SHORT,
-			 (void *)chip)) != 0) {
+	if ((err = request_irq(pci->irq, vortex_interrupt,
+	                       SA_INTERRUPT | SA_SHIRQ, CARD_NAME_SHORT,
+	                       chip)) != 0) {
 		printk(KERN_ERR "cannot grab irq\n");
 		goto irq_out;
 	}
@@ -215,8 +212,7 @@ snd_vortex_create(snd_card_t * card, struct pci_dev *pci, vortex_t ** rchip)
       irq_out:
 	vortex_core_shutdown(chip);
       core_out:
-	//FIXME: the type of chip->mmio might need to be changed??
-	iounmap((void *)chip->mmio);
+	iounmap(chip->mmio);
       ioremap_out:
 	pci_release_regions(chip->pci_dev);
       regions_out:
@@ -316,7 +312,7 @@ snd_vortex_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 #endif
 
 	// (5)
-	strcpy(card->driver, "Aureal Vortex");
+	strcpy(card->driver, CARD_NAME_SHORT);
 	strcpy(card->shortname, CARD_NAME_SHORT);
 	sprintf(card->longname, "%s at 0x%lx irq %i",
 		card->shortname, chip->io, chip->irq);

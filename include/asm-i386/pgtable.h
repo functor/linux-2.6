@@ -50,12 +50,12 @@ void paging_init(void);
  */
 #ifdef CONFIG_X86_PAE
 # include <asm/pgtable-3level-defs.h>
+# define PMD_SIZE	(1UL << PMD_SHIFT)
+# define PMD_MASK	(~(PMD_SIZE-1))
 #else
 # include <asm/pgtable-2level-defs.h>
 #endif
 
-#define PMD_SIZE	(1UL << PMD_SHIFT)
-#define PMD_MASK	(~(PMD_SIZE-1))
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
@@ -293,15 +293,8 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 
 #define page_pte(page) page_pte_prot(page, __pgprot(0))
 
-#define pmd_page_kernel(pmd) \
-((unsigned long) __va(pmd_val(pmd) & PAGE_MASK))
-
-#ifndef CONFIG_DISCONTIGMEM
-#define pmd_page(pmd) (pfn_to_page(pmd_val(pmd) >> PAGE_SHIFT))
-#endif /* !CONFIG_DISCONTIGMEM */
-
 #define pmd_large(pmd) \
-	((pmd_val(pmd) & (_PAGE_PSE|_PAGE_PRESENT)) == (_PAGE_PSE|_PAGE_PRESENT))
+((pmd_val(pmd) & (_PAGE_PSE|_PAGE_PRESENT)) == (_PAGE_PSE|_PAGE_PRESENT))
 
 /*
  * the pgd page can be thought of an array like this: pgd_t[PTRS_PER_PGD]
@@ -310,6 +303,7 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
  * control the given virtual address
  */
 #define pgd_index(address) (((address) >> PGDIR_SHIFT) & (PTRS_PER_PGD-1))
+#define pgd_index_k(addr) pgd_index(addr)
 
 /*
  * pgd_offset() returns a (pgd_t *)
@@ -363,6 +357,8 @@ extern pte_t *lookup_address(unsigned long address);
  static inline int set_kernel_exec(unsigned long vaddr, int enable) { return 0;}
 #endif
 
+extern void noexec_setup(const char *str);
+
 #if defined(CONFIG_HIGHPTE)
 #define pte_offset_map(dir, address) \
 	((pte_t *)kmap_atomic(pmd_page(*(dir)),KM_PTE0) + pte_index(address))
@@ -404,7 +400,8 @@ extern pte_t *lookup_address(unsigned long address);
 #define kern_addr_valid(addr)	(1)
 #endif /* !CONFIG_DISCONTIGMEM */
 
-#define io_remap_page_range remap_page_range
+#define io_remap_page_range(vma, vaddr, paddr, size, prot)		\
+		remap_pfn_range(vma, vaddr, (paddr) >> PAGE_SHIFT, size, prot)
 
 #define __HAVE_ARCH_PTEP_TEST_AND_CLEAR_YOUNG
 #define __HAVE_ARCH_PTEP_TEST_AND_CLEAR_DIRTY

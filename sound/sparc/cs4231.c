@@ -49,13 +49,12 @@
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for Sun CS4231 soundcard.");
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for Sun CS4231 soundcard.");
-module_param_array(enable, bool, boot_devs, 0444);
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable Sun CS4231 soundcard.");
 MODULE_AUTHOR("Jaroslav Kysela, Derrick J. Brashear and David S. Miller");
 MODULE_DESCRIPTION("Sun CS4231");
@@ -391,7 +390,7 @@ static void __cs4231_writeb(cs4231_t *cp, u8 val, void __iomem *reg_addr)
  *  Basic I/O functions
  */
 
-void snd_cs4231_outm(cs4231_t *chip, unsigned char reg,
+static void snd_cs4231_outm(cs4231_t *chip, unsigned char reg,
 		     unsigned char mask, unsigned char value)
 {
 	int timeout;
@@ -474,9 +473,9 @@ static unsigned char snd_cs4231_in(cs4231_t *chip, unsigned char reg)
 	return ret;
 }
 
-#ifdef CONFIG_SND_DEBUG
+#if 0
 
-void snd_cs4231_debug(cs4231_t *chip)
+static void snd_cs4231_debug(cs4231_t *chip)
 {
 	printk("CS4231 REGS:      INDEX = 0x%02x  ",
 	       __cs4231_readb(chip, CS4231P(chip, REGSEL)));
@@ -561,7 +560,6 @@ static void snd_cs4231_mce_down(cs4231_t *chip)
 {
 	unsigned long flags;
 	int timeout;
-	signed long time;
 
 	spin_lock_irqsave(&chip->lock, flags);
 	snd_cs4231_busy_wait(chip);
@@ -570,7 +568,7 @@ static void snd_cs4231_mce_down(cs4231_t *chip)
 #endif
 #ifdef CONFIG_SND_DEBUG
 	if (__cs4231_readb(chip, CS4231P(chip, REGSEL)) & CS4231_INIT)
-		snd_printk("mce_down [0x%lx] - auto calibration time out (0)\n", CS4231P(chip, REGSEL));
+		snd_printk("mce_down [%p] - auto calibration time out (0)\n", CS4231P(chip, REGSEL));
 #endif
 	chip->mce_bit &= ~CS4231_MCE;
 	timeout = __cs4231_readb(chip, CS4231P(chip, REGSEL));
@@ -595,29 +593,29 @@ static void snd_cs4231_mce_down(cs4231_t *chip)
 #if 0
 	printk("(2) timeout = %i, jiffies = %li\n", timeout, jiffies);
 #endif
-	time = HZ / 4;
+	/* in 10ms increments, check condition, up to 250ms */
+	timeout = 25;
 	while (snd_cs4231_in(chip, CS4231_TEST_INIT) & CS4231_CALIB_IN_PROGRESS) {
 		spin_unlock_irqrestore(&chip->lock, flags);
-		if (time <= 0) {
+		if (--timeout < 0) {
 			snd_printk("mce_down - auto calibration time out (2)\n");
 			return;
 		}
-		set_current_state(TASK_INTERRUPTIBLE);
-		time = schedule_timeout(time);
+		msleep(10);
 		spin_lock_irqsave(&chip->lock, flags);
 	}
 #if 0
 	printk("(3) jiffies = %li\n", jiffies);
 #endif
-	time = HZ / 10;
+	/* in 10ms increments, check condition, up to 100ms */
+	timeout = 10;
 	while (__cs4231_readb(chip, CS4231P(chip, REGSEL)) & CS4231_INIT) {
 		spin_unlock_irqrestore(&chip->lock, flags);
-		if (time <= 0) {
+		if (--timeout < 0) {
 			snd_printk("mce_down - auto calibration time out (3)\n");
 			return;
 		}
-		set_current_state(TASK_INTERRUPTIBLE);		
-		time = schedule_timeout(time);
+		msleep(10);
 		spin_lock_irqsave(&chip->lock, flags);
 	}
 	spin_unlock_irqrestore(&chip->lock, flags);
@@ -1348,7 +1346,7 @@ static int snd_cs4231_probe(cs4231_t *chip)
 				break;	/* this is valid value */
 		}
 	}
-	snd_printdd("cs4231: port = 0x%lx, id = 0x%x\n", chip->port, id);
+	snd_printdd("cs4231: port = %p, id = 0x%x\n", chip->port, id);
 	if (id != 0x0a)
 		return -ENODEV;	/* no valid device found */
 

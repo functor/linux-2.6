@@ -15,7 +15,8 @@
 #include <net/addrconf.h>
 
 
-#include <asm/bitops.h>
+#include <linux/bitops.h>
+
 #include <asm/debug.h>
 #include <asm/qdio.h>
 #include <asm/ccwdev.h>
@@ -23,7 +24,7 @@
 
 #include "qeth_mpc.h"
 
-#define VERSION_QETH_H 		"$Revision: 1.113 $"
+#define VERSION_QETH_H 		"$Revision: 1.132 $"
 
 #ifdef CONFIG_QETH_IPV6
 #define QETH_VERSION_IPV6 	":IPv6"
@@ -43,7 +44,7 @@
 #define QETH_DBF_SETUP_LEN 8
 #define QETH_DBF_SETUP_INDEX 3
 #define QETH_DBF_SETUP_NR_AREAS 1
-#define QETH_DBF_SETUP_LEVEL 3
+#define QETH_DBF_SETUP_LEVEL 5
 
 #define QETH_DBF_MISC_NAME "qeth_misc"
 #define QETH_DBF_MISC_LEN 128
@@ -61,13 +62,13 @@
 #define QETH_DBF_CONTROL_LEN 256
 #define QETH_DBF_CONTROL_INDEX 3
 #define QETH_DBF_CONTROL_NR_AREAS 2
-#define QETH_DBF_CONTROL_LEVEL 2
+#define QETH_DBF_CONTROL_LEVEL 5
 
 #define QETH_DBF_TRACE_NAME "qeth_trace"
 #define QETH_DBF_TRACE_LEN 8
 #define QETH_DBF_TRACE_INDEX 2
 #define QETH_DBF_TRACE_NR_AREAS 2
-#define QETH_DBF_TRACE_LEVEL 3
+#define QETH_DBF_TRACE_LEVEL 5
 
 #define QETH_DBF_SENSE_NAME "qeth_sense"
 #define QETH_DBF_SENSE_LEN 64
@@ -91,7 +92,7 @@
 		debug_event(qeth_dbf_##name,level,(void*)(addr),len); \
 	} while (0)
 
-extern DEFINE_PER_CPU(char[256], qeth_dbf_txt_buf);
+DECLARE_PER_CPU(char[256], qeth_dbf_txt_buf);
 
 #define QETH_DBF_TEXT_(name,level,text...)				\
 	do {								\
@@ -329,12 +330,8 @@ qeth_is_ipa_enabled(struct qeth_ipa_info *ipa, enum qeth_ipa_funcs func)
 #define QETH_WATERMARK_PACK_FUZZ 1
 
 #define QETH_IP_HEADER_SIZE 40
-/* VLAN defines */
-#define QETH_EXT_HDR_VLAN_FRAME        0x01
-#define QETH_EXT_HDR_TOKEN_ID          0x02
-#define QETH_EXT_HDR_INCLUDE_VLAN_TAG  0x04
 
-struct qeth_hdr {
+struct qeth_hdr_layer3 {
 	__u8  id;
 	__u8  flags;
 	__u16 inbound_checksum;
@@ -346,6 +343,26 @@ struct qeth_hdr {
 	__u16 frame_offset;
 	__u8  dest_addr[16];
 } __attribute__ ((packed));
+
+struct qeth_hdr_layer2 {
+	__u8 id;
+	__u8 flags[3];
+	__u8 port_no;
+	__u8 hdr_length;
+	__u16 pkt_length;
+	__u16 seq_no;
+	__u16 vlan_id;
+	__u32 reserved;
+	__u8 reserved2[16];
+} __attribute__ ((packed));
+
+struct qeth_hdr {
+	union {
+		struct qeth_hdr_layer2 l2;
+		struct qeth_hdr_layer3 l3;
+	} hdr;
+} __attribute__ ((packed));
+
 
 /* flags for qeth_hdr.flags */
 #define QETH_HDR_PASSTHRU 0x10
@@ -359,11 +376,24 @@ enum qeth_cast_flags {
 	QETH_CAST_NOCAST    = 0x00,
 };
 
+enum qeth_layer2_frame_flags {
+	QETH_LAYER2_FLAG_MULTICAST = 0x01,
+	QETH_LAYER2_FLAG_BROADCAST = 0x02,
+	QETH_LAYER2_FLAG_UNICAST   = 0x04,
+	QETH_LAYER2_FLAG_VLAN      = 0x10,
+};
+
+enum qeth_header_ids {
+	QETH_HEADER_TYPE_LAYER3 = 0x01,
+	QETH_HEADER_TYPE_LAYER2 = 0x02,
+};
 /* flags for qeth_hdr.ext_flags */
-#define QETH_HDR_EXT_VLAN_FRAME      0x01
-#define QETH_HDR_EXT_CSUM_HDR_REQ    0x10
-#define QETH_HDR_EXT_CSUM_TRANSP_REQ 0x20
-#define QETH_HDR_EXT_SRC_MAC_ADDR    0x08
+#define QETH_HDR_EXT_VLAN_FRAME       0x01
+#define QETH_HDR_EXT_TOKEN_ID         0x02
+#define QETH_HDR_EXT_INCLUDE_VLAN_TAG 0x04
+#define QETH_HDR_EXT_SRC_MAC_ADDR     0x08
+#define QETH_HDR_EXT_CSUM_HDR_REQ     0x10
+#define QETH_HDR_EXT_CSUM_TRANSP_REQ  0x20
 
 static inline int
 qeth_is_last_sbale(struct qdio_buffer_element *sbale)
@@ -525,6 +555,7 @@ enum qeth_ip_types {
 	QETH_IP_TYPE_NORMAL,
 	QETH_IP_TYPE_VIPA,
 	QETH_IP_TYPE_RXIP,
+	QETH_IP_TYPE_DEL_ALL_MC,
 };
 
 enum qeth_cmd_buffer_state {
@@ -638,13 +669,13 @@ struct qeth_reply {
 #define QETH_BROADCAST_WITHOUT_ECHO 2
 
 struct qeth_card_info {
-	char if_name[IF_NAME_LEN];
 	unsigned short unit_addr2;
 	unsigned short cula;
 	unsigned short chpid;
 	__u16 func_level;
 	char mcl_level[QETH_MCL_LENGTH + 1];
 	int guestlan;
+	int layer2_mac_registered;
 	int portname_required;
 	int portno;
 	char portname[9];
@@ -672,6 +703,7 @@ struct qeth_card_options {
 	int fake_broadcast;
 	int add_hhlen;
 	int fake_ll;
+	int layer2;
 };
 
 /*
@@ -679,8 +711,7 @@ struct qeth_card_options {
  */
 enum qeth_threads {
 	QETH_SET_IP_THREAD  = 1,
-	QETH_SET_MC_THREAD  = 2,
-	QETH_RECOVER_THREAD = 4,
+	QETH_RECOVER_THREAD = 2,
 };
 
 struct qeth_card {
@@ -714,7 +745,7 @@ struct qeth_card {
 	volatile unsigned long thread_running_mask;
 	spinlock_t ip_lock;
 	struct list_head ip_list;
-	struct list_head ip_tbd_list;
+	struct list_head *ip_tbd_list;
 	struct qeth_ipato ipato;
 	struct list_head cmd_waiter_list;
 	/* QDIO buffer handling */
@@ -723,6 +754,8 @@ struct qeth_card {
 	struct qeth_perf_stats perf_stats;
 #endif /* CONFIG_QETH_PERF_STATS */
 	int use_hard_stop;
+	int (*orig_hard_header)(struct sk_buff *,struct net_device *,
+				unsigned short,void *,void *,unsigned);
 };
 
 struct qeth_card_list_struct {
@@ -742,6 +775,8 @@ extern spinlock_t qeth_notify_lock;
 extern struct list_head qeth_notify_list;
 
 /*some helper functions*/
+
+#define QETH_CARD_IFNAME(card) (((card)->dev)? (card)->dev->name : "")
 
 inline static __u8
 qeth_get_ipa_adp_type(enum qeth_link_types link_type)
@@ -779,9 +814,11 @@ qeth_get_hlen(__u8 link_type)
 }
 
 inline static unsigned short
-qeth_get_netdev_flags(int cardtype)
+qeth_get_netdev_flags(struct qeth_card *card)
 {
-	switch (cardtype) {
+	if (card->options.layer2)
+		return 0;
+	switch (card->info.type) {
 	case QETH_CARD_TYPE_IQD:
 		return IFF_NOARP;
 #ifdef CONFIG_QETH_IPV6
@@ -793,6 +830,17 @@ qeth_get_netdev_flags(int cardtype)
 #endif
 	}
 }
+static inline struct sk_buff *
+qeth_pskb_unshare(struct sk_buff *skb, int pri)
+{
+        struct sk_buff *nskb;
+        if (!skb_cloned(skb))
+                return skb;
+        nskb = skb_copy(skb, pri);
+        kfree_skb(skb); /* free our shared copy */
+        return nskb;
+}
+
 
 inline static int
 qeth_get_initial_mtu_for_card(struct qeth_card * card)
@@ -1035,4 +1083,5 @@ qeth_schedule_recovery(struct qeth_card *);
 
 extern int
 qeth_realloc_buffer_pool(struct qeth_card *, int);
+
 #endif /* __QETH_H__ */

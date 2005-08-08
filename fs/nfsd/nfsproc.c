@@ -128,8 +128,8 @@ nfsd_proc_read(struct svc_rqst *rqstp, struct nfsd_readargs *argp,
 
 	if (NFSSVC_MAXBLKSIZE < argp->count) {
 		printk(KERN_NOTICE
-			"oversized read request from %08x:%d (%d bytes)\n",
-				ntohl(rqstp->rq_addr.sin_addr.s_addr),
+			"oversized read request from %u.%u.%u.%u:%d (%d bytes)\n",
+				NIPQUAD(rqstp->rq_addr.sin_addr.s_addr),
 				ntohs(rqstp->rq_addr.sin_port),
 				argp->count);
 		argp->count = NFSSVC_MAXBLKSIZE;
@@ -540,7 +540,7 @@ static struct svc_procedure		nfsd_procedures2[18] = {
   PROC(symlink,	 symlinkargs,	void,		none,		RC_REPLSTAT, ST),
   PROC(mkdir,	 createargs,	diropres,	fhandle,	RC_REPLBUFF, ST+FH+AT),
   PROC(rmdir,	 diropargs,	void,		none,		RC_REPLSTAT, ST),
-  PROC(readdir,	 readdirargs,	readdirres,	none,		RC_REPLBUFF, 0),
+  PROC(readdir,	 readdirargs,	readdirres,	none,		RC_NOCACHE, 0),
   PROC(statfs,	 fhandle,	statfsres,	none,		RC_NOCACHE, ST+5),
 };
 
@@ -586,7 +586,6 @@ nfserrno (int errno)
 		{ nfserr_dquot, -EDQUOT },
 #endif
 		{ nfserr_stale, -ESTALE },
-		{ nfserr_jukebox, -EWOULDBLOCK },
 		{ nfserr_jukebox, -ETIMEDOUT },
 		{ nfserr_dropit, -EAGAIN },
 		{ nfserr_dropit, -ENOMEM },

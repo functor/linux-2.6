@@ -258,7 +258,7 @@ static int voice_alloc(ymfpci_t *chip, ymfpci_voice_type_t type, int pair, ymfpc
 	return -ENOMEM;
 }
 
-int snd_ymfpci_voice_alloc(ymfpci_t *chip, ymfpci_voice_type_t type, int pair, ymfpci_voice_t **rvoice)
+static int snd_ymfpci_voice_alloc(ymfpci_t *chip, ymfpci_voice_type_t type, int pair, ymfpci_voice_t **rvoice)
 {
 	unsigned long flags;
 	int result;
@@ -278,7 +278,7 @@ int snd_ymfpci_voice_alloc(ymfpci_t *chip, ymfpci_voice_type_t type, int pair, y
 	return result;		
 }
 
-int snd_ymfpci_voice_free(ymfpci_t *chip, ymfpci_voice_t *pvoice)
+static int snd_ymfpci_voice_free(ymfpci_t *chip, ymfpci_voice_t *pvoice)
 {
 	unsigned long flags;
 	
@@ -831,8 +831,7 @@ static void snd_ymfpci_pcm_free_substream(snd_pcm_runtime_t *runtime)
 {
 	ymfpci_pcm_t *ypcm = runtime->private_data;
 	
-	if (ypcm)
-		kfree(ypcm);
+	kfree(ypcm);
 }
 
 static int snd_ymfpci_playback_open_1(snd_pcm_substream_t * substream)
@@ -1714,12 +1713,17 @@ int __devinit snd_ymfpci_mixer(ymfpci_t *chip, int rear_switch)
 	if ((err = snd_ac97_bus(chip->card, 0, &ops, chip, &chip->ac97_bus)) < 0)
 		return err;
 	chip->ac97_bus->private_free = snd_ymfpci_mixer_free_ac97_bus;
+	chip->ac97_bus->no_vra = 1; /* YMFPCI doesn't need VRA */
 
 	memset(&ac97, 0, sizeof(ac97));
 	ac97.private_data = chip;
 	ac97.private_free = snd_ymfpci_mixer_free_ac97;
 	if ((err = snd_ac97_mixer(chip->ac97_bus, &ac97, &chip->ac97)) < 0)
 		return err;
+
+	/* to be sure */
+	snd_ac97_update_bits(chip->ac97, AC97_EXTENDED_STATUS,
+			     AC97_EA_VRA|AC97_EA_VRM, 0);
 
 	for (idx = 0; idx < ARRAY_SIZE(snd_ymfpci_controls); idx++) {
 		if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&snd_ymfpci_controls[idx], chip))) < 0)
@@ -2065,8 +2069,7 @@ static int snd_ymfpci_free(ymfpci_t *chip)
 #endif
 
 #ifdef CONFIG_PM
-	if (chip->saved_regs)
-		vfree(chip->saved_regs);
+	vfree(chip->saved_regs);
 #endif
 	if (chip->mpu_res) {
 		release_resource(chip->mpu_res);
@@ -2085,7 +2088,7 @@ static int snd_ymfpci_free(ymfpci_t *chip)
 	}
 #endif
 	if (chip->reg_area_virt)
-		iounmap((void *)chip->reg_area_virt);
+		iounmap(chip->reg_area_virt);
 	if (chip->work_ptr.area)
 		snd_dma_free_pages(&chip->work_ptr);
 	
@@ -2098,6 +2101,7 @@ static int snd_ymfpci_free(ymfpci_t *chip)
 
 	pci_write_config_word(chip->pci, 0x40, chip->old_legacy_ctrl);
 	
+	pci_disable_device(chip->pci);
 	kfree(chip);
 	return 0;
 }
@@ -2153,7 +2157,7 @@ static int snd_ymfpci_suspend(snd_card_t *card, unsigned int state)
 	chip->saved_ydsxgr_mode = snd_ymfpci_readl(chip, YDSXGR_MODE);
 	snd_ymfpci_writel(chip, YDSXGR_NATIVEDACOUTVOL, 0);
 	snd_ymfpci_disable_dsp(chip);
-	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
+	pci_disable_device(chip->pci);
 	return 0;
 }
 
@@ -2181,7 +2185,6 @@ static int snd_ymfpci_resume(snd_card_t *card, unsigned int state)
 		chip->active_bank = snd_ymfpci_readl(chip, YDSXGR_CTRLSELECT);
 		spin_unlock_irq(&chip->reg_lock);
 	}
-	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	return 0;
 }
 #endif /* CONFIG_PM */
@@ -2204,8 +2207,10 @@ int __devinit snd_ymfpci_create(snd_card_t * card,
 		return err;
 
 	chip = kcalloc(1, sizeof(*chip), GFP_KERNEL);
-	if (chip == NULL)
+	if (chip == NULL) {
+		pci_disable_device(pci);
 		return -ENOMEM;
+	}
 	chip->old_legacy_ctrl = old_legacy_ctrl;
 	spin_lock_init(&chip->reg_lock);
 	spin_lock_init(&chip->voice_lock);
@@ -2217,7 +2222,7 @@ int __devinit snd_ymfpci_create(snd_card_t * card,
 	chip->device_id = pci->device;
 	pci_read_config_byte(pci, PCI_REVISION_ID, (u8 *)&chip->rev);
 	chip->reg_area_phys = pci_resource_start(pci, 0);
-	chip->reg_area_virt = (unsigned long)ioremap_nocache(chip->reg_area_phys, 0x8000);
+	chip->reg_area_virt = ioremap_nocache(chip->reg_area_phys, 0x8000);
 	pci_set_master(pci);
 
 	if ((chip->res_reg_area = request_mem_region(chip->reg_area_phys, 0x8000, "YMFPCI")) == NULL) {
@@ -2261,12 +2266,12 @@ int __devinit snd_ymfpci_create(snd_card_t * card,
 	snd_card_set_pm_callback(card, snd_ymfpci_suspend, snd_ymfpci_resume, chip);
 #endif
 
-	snd_ymfpci_proc_init(card, chip);
-
 	if ((err = snd_device_new(card, SNDRV_DEV_LOWLEVEL, chip, &ops)) < 0) {
 		snd_ymfpci_free(chip);
 		return err;
 	}
+
+	snd_ymfpci_proc_init(card, chip);
 
 	snd_card_set_dev(card, &pci->dev);
 

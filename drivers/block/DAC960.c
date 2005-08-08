@@ -2678,7 +2678,7 @@ DAC960_DetectController(struct pci_dev *PCI_Device,
   DAC960_Controller_T *Controller = NULL;
   unsigned char DeviceFunction = PCI_Device->devfn;
   unsigned char ErrorStatus, Parameter0, Parameter1;
-  unsigned int IRQ_Channel = PCI_Device->irq;
+  unsigned int IRQ_Channel;
   void __iomem *BaseAddress;
   int i;
 
@@ -2738,7 +2738,7 @@ DAC960_DetectController(struct pci_dev *PCI_Device,
   }
   init_waitqueue_head(&Controller->CommandWaitQueue);
   init_waitqueue_head(&Controller->HealthStatusWaitQueue);
-  Controller->queue_lock = SPIN_LOCK_UNLOCKED; 
+  spin_lock_init(&Controller->queue_lock);
   DAC960_AnnounceDriver(Controller);
   /*
     Map the Controller Register Window.
@@ -2958,6 +2958,7 @@ DAC960_DetectController(struct pci_dev *PCI_Device,
   /*
      Acquire shared access to the IRQ Channel.
   */
+  IRQ_Channel = PCI_Device->irq;
   if (request_irq(IRQ_Channel, InterruptHandler, SA_SHIRQ,
 		      Controller->FullModelName, Controller) < 0)
   {

@@ -58,7 +58,6 @@
 #define Dprintk(x...)
 #endif
 
-extern int cpu_idle(void);
 extern cpumask_t cpu_initialized;
 
 /*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*/
@@ -248,7 +247,7 @@ static void __init init_ipi_lock(void)
 	int ipi;
 
 	for (ipi = 0 ; ipi < NR_IPIS ; ipi++)
-		ipi_lock[ipi] = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&ipi_lock[ipi]);
 }
 
 /*==========================================================================*
@@ -433,7 +432,7 @@ int __init start_secondary(void *unused)
 	cpu_init();
 	smp_callin();
 	while (!cpu_isset(smp_processor_id(), smp_commenced_mask))
-		rep_nop();
+		cpu_relax();
 
 	smp_online();
 
@@ -443,7 +442,8 @@ int __init start_secondary(void *unused)
 	 */
 	local_flush_tlb_all();
 
-	return cpu_idle();
+	cpu_idle();
+	return 0;
 }
 
 /*==========================================================================*
@@ -482,7 +482,7 @@ static void __init smp_callin(void)
 		/* Has the boot CPU finished it's STARTUP sequence ? */
 		if (cpu_isset(cpu_id, cpu_callout_map))
 			break;
-		rep_nop();
+		cpu_relax();
 	}
 
 	if (!time_before(jiffies, timeout)) {

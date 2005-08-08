@@ -54,11 +54,11 @@ static struct timer_list ip6_fl_gc_timer = TIMER_INITIALIZER(ip6_fl_gc, 0, 0);
 
 /* FL hash table lock: it protects only of GC */
 
-static rwlock_t ip6_fl_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(ip6_fl_lock);
 
 /* Big socket sock */
 
-static rwlock_t ip6_sk_fl_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(ip6_sk_fl_lock);
 
 
 static __inline__ struct ip6_flowlabel * __fl_lookup(u32 label)
@@ -500,7 +500,7 @@ int ipv6_flowlabel_opt(struct sock *sk, char __user *optval, int optlen)
 					goto release;
 
 				err = -EINVAL;
-				if (ipv6_addr_cmp(&fl1->dst, &fl->dst) ||
+				if (!ipv6_addr_equal(&fl1->dst, &fl->dst) ||
 				    ipv6_opt_cmp(fl1->opt, fl->opt))
 					goto release;
 

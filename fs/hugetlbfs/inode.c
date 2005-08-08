@@ -105,6 +105,7 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
+	unsigned long start_addr;
 
 	if (len & ~HPAGE_MASK)
 		return -EINVAL;
@@ -119,12 +120,25 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 			return addr;
 	}
 
-	addr = ALIGN(mm->free_area_cache, HPAGE_SIZE);
+	start_addr = mm->free_area_cache;
+
+full_search:
+	addr = ALIGN(start_addr, HPAGE_SIZE);
 
 	for (vma = find_vma(mm, addr); ; vma = vma->vm_next) {
 		/* At this point:  (!vma || addr < vma->vm_end). */
-		if (TASK_SIZE - len < addr)
+		if (TASK_SIZE - len < addr) {
+			/*
+			 * Start a new search - just in case we missed
+			 * some holes.
+			 */
+			if (start_addr != TASK_UNMAPPED_BASE) {
+				start_addr = TASK_UNMAPPED_BASE;
+				goto full_search;
+			}
 			return -ENOMEM;
+		}
+
 		if (!vma || addr + len <= vma->vm_start)
 			return addr;
 		addr = ALIGN(vma->vm_end, HPAGE_SIZE);
@@ -154,7 +168,7 @@ static int hugetlbfs_commit_write(struct file *file,
 	return -EINVAL;
 }
 
-void huge_pagevec_release(struct pagevec *pvec)
+static void huge_pagevec_release(struct pagevec *pvec)
 {
 	int i;
 
@@ -164,7 +178,7 @@ void huge_pagevec_release(struct pagevec *pvec)
 	pagevec_reinit(pvec);
 }
 
-void truncate_huge_page(struct page *page)
+static void truncate_huge_page(struct page *page)
 {
 	clear_page_dirty(page);
 	ClearPageUptodate(page);
@@ -172,7 +186,7 @@ void truncate_huge_page(struct page *page)
 	put_page(page);
 }
 
-void truncate_hugepages(struct address_space *mapping, loff_t lstart)
+static void truncate_hugepages(struct address_space *mapping, loff_t lstart)
 {
 	const pgoff_t start = lstart >> HPAGE_SHIFT;
 	struct pagevec pvec;
@@ -211,6 +225,7 @@ static void hugetlbfs_delete_inode(struct inode *inode)
 
 	hlist_del_init(&inode->i_hash);
 	list_del_init(&inode->i_list);
+	list_del_init(&inode->i_sb_list);
 	inode->i_state |= I_FREEING;
 	inodes_stat.nr_inodes--;
 	spin_unlock(&inode_lock);
@@ -253,6 +268,7 @@ static void hugetlbfs_forget_inode(struct inode *inode)
 	hlist_del_init(&inode->i_hash);
 out_truncate:
 	list_del_init(&inode->i_list);
+	list_del_init(&inode->i_sb_list);
 	inode->i_state |= I_FREEING;
 	inodes_stat.nr_inodes--;
 	spin_unlock(&inode_lock);
@@ -479,7 +495,7 @@ static int hugetlbfs_symlink(struct inode *dir,
 /*
  * For direct-IO reads into hugetlb pages
  */
-int hugetlbfs_set_page_dirty(struct page *page)
+static int hugetlbfs_set_page_dirty(struct page *page)
 {
 	return 0;
 }
@@ -656,6 +672,7 @@ hugetlbfs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_blocksize_bits = HPAGE_SHIFT;
 	sb->s_magic = HUGETLBFS_MAGIC;
 	sb->s_op = &hugetlbfs_ops;
+	sb->s_time_gran = 1;
 	inode = hugetlbfs_get_inode(sb, config.uid, config.gid,
 					S_IFDIR | config.mode, 0);
 	if (!inode)
@@ -720,7 +737,7 @@ static struct vfsmount *hugetlbfs_vfsmount;
  */
 static unsigned long hugetlbfs_counter(void)
 {
-	static spinlock_t lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(lock);
 	static unsigned long counter;
 	unsigned long ret;
 

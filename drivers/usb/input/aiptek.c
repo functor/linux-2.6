@@ -837,7 +837,7 @@ static void aiptek_close(struct input_dev *inputdev)
 	struct aiptek *aiptek = inputdev->private;
 
 	if (--aiptek->openCount == 0) {
-		usb_unlink_urb(aiptek->urb);
+		usb_kill_urb(aiptek->urb);
 	}
 }
 
@@ -2137,9 +2137,9 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	aiptek->inputdev.name = "Aiptek";
 	aiptek->inputdev.phys = aiptek->features.usbPath;
 	aiptek->inputdev.id.bustype = BUS_USB;
-	aiptek->inputdev.id.vendor = usbdev->descriptor.idVendor;
-	aiptek->inputdev.id.product = usbdev->descriptor.idProduct;
-	aiptek->inputdev.id.version = usbdev->descriptor.bcdDevice;
+	aiptek->inputdev.id.vendor = le16_to_cpu(usbdev->descriptor.idVendor);
+	aiptek->inputdev.id.product = le16_to_cpu(usbdev->descriptor.idProduct);
+	aiptek->inputdev.id.version = le16_to_cpu(usbdev->descriptor.bcdDevice);
 
 	aiptek->usbdev = usbdev;
 	aiptek->ifnum = intf->altsetting[0].desc.bInterfaceNumber;
@@ -2258,7 +2258,7 @@ static void aiptek_disconnect(struct usb_interface *intf)
 	if (aiptek != NULL) {
 		/* Free & unhook everything from the system.
 		 */
-		usb_unlink_urb(aiptek->urb);
+		usb_kill_urb(aiptek->urb);
 		input_unregister_device(&aiptek->inputdev);
 		aiptek_delete_files(&intf->dev);
 		usb_free_urb(aiptek->urb);

@@ -27,12 +27,9 @@
 #include <asm/mtrr.h>
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
-#include <asm/desc.h>
 #include <asm/arch_hooks.h>
 
 #include <linux/irq.h>
-
-int reboot_smp = 0;
 
 /* TLB state -- visible externally, indexed physically */
 DEFINE_PER_CPU(struct tlb_state, cpu_tlbstate) ____cacheline_aligned = { &init_mm, 0 };
@@ -254,7 +251,7 @@ static __u16 vic_irq_mask[NR_CPUS] __cacheline_aligned;
 static __u16 vic_irq_enable_mask[NR_CPUS] __cacheline_aligned = { 0 };
 
 /* Lock for enable/disable of VIC interrupts */
-static spinlock_t vic_irq_lock __cacheline_aligned = SPIN_LOCK_UNLOCKED;
+static  __cacheline_aligned DEFINE_SPINLOCK(vic_irq_lock);
 
 /* The boot processor is correctly set up in PC mode when it 
  * comes up, but the secondaries need their master/slave 8259
@@ -457,13 +454,12 @@ setup_trampoline(void)
 }
 
 /* Routine initially called when a non-boot CPU is brought online */
-int __init
+static void __init
 start_secondary(void *unused)
 {
 	__u8 cpuid = hard_smp_processor_id();
 	/* external functions not defined in the headers */
 	extern void calibrate_delay(void);
-	extern int cpu_idle(void);
 
 	cpu_init();
 
@@ -520,7 +516,7 @@ start_secondary(void *unused)
 
 	cpu_set(cpuid, cpu_online_map);
 	wmb();
-	return cpu_idle();
+	cpu_idle();
 }
 
 
@@ -785,8 +781,8 @@ initialize_secondary(void)
  * System interrupts occur because some problem was detected on the
  * various busses.  To find out what you have to probe all the
  * hardware via the CAT bus.  FIXME: At the moment we do nothing. */
-asmlinkage void
-smp_vic_sys_interrupt(void)
+fastcall void
+smp_vic_sys_interrupt(struct pt_regs *regs)
 {
 	ack_CPI(VIC_SYS_INT);
 	printk("Voyager SYSTEM INTERRUPT\n");
@@ -795,11 +791,11 @@ smp_vic_sys_interrupt(void)
 /* Handle a voyager CMN_INT; These interrupts occur either because of
  * a system status change or because a single bit memory error
  * occurred.  FIXME: At the moment, ignore all this. */
-asmlinkage void
-smp_vic_cmn_interrupt(void)
+fastcall void
+smp_vic_cmn_interrupt(struct pt_regs *regs)
 {
 	static __u8 in_cmn_int = 0;
-	static spinlock_t cmn_int_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(cmn_int_lock);
 
 	/* common ints are broadcast, so make sure we only do this once */
 	_raw_spin_lock(&cmn_int_lock);
@@ -824,7 +820,7 @@ smp_vic_cmn_interrupt(void)
 /*
  * Reschedule call back. Nothing to do, all the work is done
  * automatically when we return from the interrupt.  */
-asmlinkage void
+static void
 smp_reschedule_interrupt(void)
 {
 	/* do nothing */
@@ -832,7 +828,7 @@ smp_reschedule_interrupt(void)
 
 static struct mm_struct * flush_mm;
 static unsigned long flush_va;
-static spinlock_t tlbstate_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(tlbstate_lock);
 #define FLUSH_ALL	0xffffffff
 
 /*
@@ -855,7 +851,7 @@ leave_mm (unsigned long cpu)
 /*
  * Invalidate call-back
  */
-asmlinkage void 
+static void 
 smp_invalidate_interrupt(void)
 {
 	__u8 cpu = smp_processor_id();
@@ -989,7 +985,7 @@ void flush_tlb_page(struct vm_area_struct * vma, unsigned long va)
 }
 
 /* enable the requested IRQs */
-asmlinkage void
+static void
 smp_enable_irq_interrupt(void)
 {
 	__u8 irq;
@@ -1022,7 +1018,7 @@ smp_stop_cpu_function(void *dummy)
 	       __asm__("hlt");
 }
 
-static spinlock_t call_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(call_lock);
 
 struct call_data_struct {
 	void (*func) (void *info);
@@ -1038,7 +1034,7 @@ static struct call_data_struct * call_data;
  * previously set up.  This is used to schedule a function for
  * execution on all CPU's - set up the function then broadcast a
  * function_interrupt CPI to come here on each CPU */
-asmlinkage void
+static void
 smp_call_function_interrupt(void)
 {
 	void (*func) (void *info) = call_data->func;
@@ -1133,50 +1129,50 @@ smp_call_function (void (*func) (void *info), void *info, int retry,
  * no local APIC, so I can't do this
  *
  * This function is currently a placeholder and is unused in the code */
-asmlinkage void 
-smp_apic_timer_interrupt(struct pt_regs regs)
+fastcall void 
+smp_apic_timer_interrupt(struct pt_regs *regs)
 {
-	wrapper_smp_local_timer_interrupt(&regs);
+	wrapper_smp_local_timer_interrupt(regs);
 }
 
 /* All of the QUAD interrupt GATES */
-asmlinkage void
-smp_qic_timer_interrupt(struct pt_regs regs)
+fastcall void
+smp_qic_timer_interrupt(struct pt_regs *regs)
 {
 	ack_QIC_CPI(QIC_TIMER_CPI);
-	wrapper_smp_local_timer_interrupt(&regs);
+	wrapper_smp_local_timer_interrupt(regs);
 }
 
-asmlinkage void
-smp_qic_invalidate_interrupt(void)
+fastcall void
+smp_qic_invalidate_interrupt(struct pt_regs *regs)
 {
 	ack_QIC_CPI(QIC_INVALIDATE_CPI);
 	smp_invalidate_interrupt();
 }
 
-asmlinkage void
-smp_qic_reschedule_interrupt(void)
+fastcall void
+smp_qic_reschedule_interrupt(struct pt_regs *regs)
 {
 	ack_QIC_CPI(QIC_RESCHEDULE_CPI);
 	smp_reschedule_interrupt();
 }
 
-asmlinkage void
-smp_qic_enable_irq_interrupt(void)
+fastcall void
+smp_qic_enable_irq_interrupt(struct pt_regs *regs)
 {
 	ack_QIC_CPI(QIC_ENABLE_IRQ_CPI);
 	smp_enable_irq_interrupt();
 }
 
-asmlinkage void
-smp_qic_call_function_interrupt(void)
+fastcall void
+smp_qic_call_function_interrupt(struct pt_regs *regs)
 {
 	ack_QIC_CPI(QIC_CALL_FUNCTION_CPI);
 	smp_call_function_interrupt();
 }
 
-asmlinkage void
-smp_vic_cpi_interrupt(struct pt_regs regs)
+fastcall void
+smp_vic_cpi_interrupt(struct pt_regs *regs)
 {
 	__u8 cpu = smp_processor_id();
 
@@ -1186,7 +1182,7 @@ smp_vic_cpi_interrupt(struct pt_regs regs)
 		ack_VIC_CPI(VIC_CPI_LEVEL0);
 
 	if(test_and_clear_bit(VIC_TIMER_CPI, &vic_cpi_mailbox[cpu]))
-		wrapper_smp_local_timer_interrupt(&regs);
+		wrapper_smp_local_timer_interrupt(regs);
 	if(test_and_clear_bit(VIC_INVALIDATE_CPI, &vic_cpi_mailbox[cpu]))
 		smp_invalidate_interrupt();
 	if(test_and_clear_bit(VIC_RESCHEDULE_CPI, &vic_cpi_mailbox[cpu]))

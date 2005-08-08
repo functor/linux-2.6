@@ -1981,12 +1981,8 @@ gadgetfs_create_file (struct super_block *sb, char const *name,
 {
 	struct dentry	*dentry;
 	struct inode	*inode;
-	struct qstr	qname;
 
-	qname.name = name;
-	qname.len = strlen (name);
-	qname.hash = full_name_hash (qname.name, qname.len);
-	dentry = d_alloc (sb->s_root, &qname);
+	dentry = d_alloc_name(sb->s_root, name);
 	if (!dentry)
 		return NULL;
 
@@ -2026,6 +2022,7 @@ gadgetfs_fill_super (struct super_block *sb, void *opts, int silent)
 	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
 	sb->s_magic = GADGETFS_MAGIC;
 	sb->s_op = &gadget_fs_operations;
+	sb->s_time_gran = 1;
 
 	/* root inode */
 	inode = gadgetfs_make_inode (sb,

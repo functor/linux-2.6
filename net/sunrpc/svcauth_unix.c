@@ -97,7 +97,7 @@ struct ip_map {
 };
 static struct cache_head	*ip_table[IP_HASHMAX];
 
-void ip_map_put(struct cache_head *item, struct cache_detail *cd)
+static void ip_map_put(struct cache_head *item, struct cache_detail *cd)
 {
 	struct ip_map *im = container_of(item, struct ip_map,h);
 	if (cache_put(item, cd)) {
@@ -150,11 +150,14 @@ static void ip_map_request(struct cache_detail *cd,
 }
 
 static struct ip_map *ip_map_lookup(struct ip_map *, int);
+
 static int ip_map_parse(struct cache_detail *cd,
 			  char *mesg, int mlen)
 {
 	/* class ipaddress [domainname] */
-	char class[50], buf[50];
+	/* should be safe just to use the start of the input buffer
+	 * for scratch: */
+	char *buf = mesg;
 	int len;
 	int b1,b2,b3,b4;
 	char c;
@@ -167,13 +170,11 @@ static int ip_map_parse(struct cache_detail *cd,
 	mesg[mlen-1] = 0;
 
 	/* class */
-	len = qword_get(&mesg, class, 50);
+	len = qword_get(&mesg, ipm.m_class, sizeof(ipm.m_class));
 	if (len <= 0) return -EINVAL;
-	if (len >= sizeof(ipm.m_class))
-		return -EINVAL;
 
 	/* ip address */
-	len = qword_get(&mesg, buf, 50);
+	len = qword_get(&mesg, buf, mlen);
 	if (len <= 0) return -EINVAL;
 
 	if (sscanf(buf, "%u.%u.%u.%u%c", &b1, &b2, &b3, &b4, &c) != 4)
@@ -184,7 +185,7 @@ static int ip_map_parse(struct cache_detail *cd,
 		return -EINVAL;
 
 	/* domainname, or empty for NEGATIVE */
-	len = qword_get(&mesg, buf, 50);
+	len = qword_get(&mesg, buf, mlen);
 	if (len < 0) return -EINVAL;
 
 	if (len) {
@@ -194,7 +195,6 @@ static int ip_map_parse(struct cache_detail *cd,
 	} else
 		dom = NULL;
 
-	strcpy(ipm.m_class, class);
 	ipm.m_addr.s_addr =
 		htonl((((((b1<<8)|b2)<<8)|b3)<<8)|b4);
 	ipm.h.flags = 0;
@@ -329,14 +329,49 @@ void svcauth_unix_purge(void)
 	cache_purge(&auth_domain_cache);
 }
 
+static int
+svcauth_unix_set_client(struct svc_rqst *rqstp)
+{
+	struct ip_map key, *ipm;
+
+	rqstp->rq_client = NULL;
+	if (rqstp->rq_proc == 0)
+		return SVC_OK;
+
+	strcpy(key.m_class, rqstp->rq_server->sv_program->pg_class);
+	key.m_addr = rqstp->rq_addr.sin_addr;
+
+	ipm = ip_map_lookup(&key, 0);
+
+	if (ipm == NULL)
+		return SVC_DENIED;
+
+	switch (cache_check(&ip_map_cache, &ipm->h, &rqstp->rq_chandle)) {
+		default:
+			BUG();
+		case -EAGAIN:
+			return SVC_DROP;
+		case -ENOENT:
+			return SVC_DENIED;
+		case 0:
+			rqstp->rq_client = &ipm->m_client->h;
+			cache_get(&rqstp->rq_client->h);
+			ip_map_put(&ipm->h, &ip_map_cache);
+			break;
+	}
+	return SVC_OK;
+}
 
 static int
 svcauth_null_accept(struct svc_rqst *rqstp, u32 *authp)
 {
 	struct kvec	*argv = &rqstp->rq_arg.head[0];
 	struct kvec	*resv = &rqstp->rq_res.head[0];
+	struct svc_cred	*cred = &rqstp->rq_cred;
 	int		rv=0;
-	struct ip_map key, *ipm;
+
+	cred->cr_group_info = NULL;
+	rqstp->rq_client = NULL;
 
 	if (argv->iov_len < 3*4)
 		return SVC_GARBAGE;
@@ -353,45 +388,25 @@ svcauth_null_accept(struct svc_rqst *rqstp, u32 *authp)
 	}
 
 	/* Signal that mapping to nobody uid/gid is required */
-	rqstp->rq_cred.cr_uid = (uid_t) -1;
-	rqstp->rq_cred.cr_gid = (gid_t) -1;
-	rqstp->rq_cred.cr_group_info = groups_alloc(0);
-	if (rqstp->rq_cred.cr_group_info == NULL)
+	cred->cr_uid = (uid_t) -1;
+	cred->cr_gid = (gid_t) -1;
+	cred->cr_group_info = groups_alloc(0);
+	if (cred->cr_group_info == NULL)
 		return SVC_DROP; /* kmalloc failure - client must retry */
+
+	rv = svcauth_unix_set_client(rqstp);
+	if (rv == SVC_DENIED)
+		goto badcred;
 
 	/* Put NULL verifier */
 	svc_putu32(resv, RPC_AUTH_NULL);
 	svc_putu32(resv, 0);
 
-	strcpy(key.m_class, rqstp->rq_server->sv_program->pg_class);
-	key.m_addr = rqstp->rq_addr.sin_addr;
-
-	ipm = ip_map_lookup(&key, 0);
-
-	rqstp->rq_client = NULL;
-
-	if (ipm)
-		switch (cache_check(&ip_map_cache, &ipm->h, &rqstp->rq_chandle)) {
-		case -EAGAIN:
-			rv = SVC_DROP;
-			break;
-		case -ENOENT:
-			rv = SVC_OK; /* rq_client is NULL */
-			break;
-		case 0:
-			rqstp->rq_client = &ipm->m_client->h;
-			cache_get(&rqstp->rq_client->h);
-			ip_map_put(&ipm->h, &ip_map_cache);
-			rv = SVC_OK;
-			break;
-		default: BUG();
-		}
-	else rv = SVC_DROP;
-
-	if (rqstp->rq_client == NULL && rqstp->rq_proc != 0)
-		*authp = rpc_autherr_badcred;
-
 	return rv;
+
+badcred:
+	*authp = rpc_autherr_badcred;
+	return SVC_DENIED;
 }
 
 static int
@@ -417,7 +432,7 @@ struct auth_ops svcauth_null = {
 };
 
 
-int
+static int
 svcauth_unix_accept(struct svc_rqst *rqstp, u32 *authp)
 {
 	struct kvec	*argv = &rqstp->rq_arg.head[0];
@@ -426,7 +441,6 @@ svcauth_unix_accept(struct svc_rqst *rqstp, u32 *authp)
 	u32		slen, i;
 	int		len   = argv->iov_len;
 	int		rv=0;
-	struct ip_map key, *ipm;
 
 	cred->cr_group_info = NULL;
 	rqstp->rq_client = NULL;
@@ -458,32 +472,8 @@ svcauth_unix_accept(struct svc_rqst *rqstp, u32 *authp)
 		return SVC_DENIED;
 	}
 
-
-	strcpy(key.m_class, rqstp->rq_server->sv_program->pg_class);
-	key.m_addr = rqstp->rq_addr.sin_addr;
-
-
-	ipm = ip_map_lookup(&key, 0);
-
-	if (ipm)
-		switch (cache_check(&ip_map_cache, &ipm->h, &rqstp->rq_chandle)) {
-		case -EAGAIN:
-			rv = SVC_DROP;
-			break;
-		case -ENOENT:
-			rv = SVC_OK; /* rq_client is NULL */
-			break;
-		case 0:
-			rqstp->rq_client = &ipm->m_client->h;
-			cache_get(&rqstp->rq_client->h);
-			ip_map_put(&ipm->h, &ip_map_cache);
-			rv = SVC_OK;
-			break;
-		default: BUG();
-		}
-	else rv = SVC_DROP;
-
-	if (rv  == SVC_OK && rqstp->rq_client == NULL && rqstp->rq_proc != 0)
+	rv = svcauth_unix_set_client(rqstp);
+	if (rv == SVC_DENIED)
 		goto badcred;
 
 	/* Put NULL verifier */
@@ -497,7 +487,7 @@ badcred:
 	return SVC_DENIED;
 }
 
-int
+static int
 svcauth_unix_release(struct svc_rqst *rqstp)
 {
 	/* Verifier (such as it is) is already in place.

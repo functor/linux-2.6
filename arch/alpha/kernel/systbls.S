@@ -291,7 +291,7 @@ sys_call_table:
 	.quad alpha_ni_syscall			/* 270 */
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall
-	.quad sys_vserver			/* 273 sys_vserver */
+	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 275 */
 	.quad alpha_ni_syscall
@@ -447,7 +447,7 @@ sys_call_table:
 	.quad sys_stat64			/* 425 */
 	.quad sys_lstat64
 	.quad sys_fstat64
-	.quad sys_ni_syscall			/* sys_vserver */
+	.quad sys_vserver			/* sys_vserver */
 	.quad sys_ni_syscall			/* sys_mbind */
 	.quad sys_ni_syscall			/* sys_get_mempolicy */
 	.quad sys_ni_syscall			/* sys_set_mempolicy */

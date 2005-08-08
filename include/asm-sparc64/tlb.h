@@ -86,7 +86,8 @@ static inline void tlb_finish_mmu(struct mmu_gather *mp, unsigned long start, un
 
 	if (rss < freed)
 		freed = rss;
-	mm->rss = rss - freed;
+	// mm->rss = rss - freed;
+	vx_rsspages_sub(mm, freed);
 
 	tlb_flush_mmu(mp);
 
@@ -123,6 +124,7 @@ static inline void tlb_remove_page(struct mmu_gather *mp, struct page *page)
 #define tlb_remove_tlb_entry(mp,ptep,addr) do { } while (0)
 #define pte_free_tlb(mp,ptepage) pte_free(ptepage)
 #define pmd_free_tlb(mp,pmdp) pmd_free(pmdp)
+#define pud_free_tlb(tlb,pudp) __pud_free_tlb(tlb,pudp)
 
 #define tlb_migrate_finish(mm)	do { } while (0)
 #define tlb_start_vma(tlb, vma) do { } while (0)

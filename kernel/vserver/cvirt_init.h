@@ -27,6 +27,14 @@ static inline void vx_info_init_cvirt(struct _vx_cvirt *cvirt)
 	cvirt->load[0] = 0;
 	cvirt->load[1] = 0;
 	cvirt->load[2] = 0;
+
+	atomic_set(&cvirt->total_forks, 0);
+	spin_lock_init(&cvirt->syslog.logbuf_lock);
+	init_waitqueue_head(&cvirt->syslog.log_wait);
+	cvirt->syslog.log_start = 0;
+	cvirt->syslog.log_end = 0;
+	cvirt->syslog.con_start = 0;
+	cvirt->syslog.logged_chars = 0;
 }
 
 static inline void vx_info_exit_cvirt(struct _vx_cvirt *cvirt)
@@ -42,6 +50,9 @@ static inline void vx_info_exit_cvirt(struct _vx_cvirt *cvirt)
 		cvirt, value);
 	vxwprintk((value = atomic_read(&cvirt->nr_uninterruptible)),
 		"!!! cvirt: %p[nr_uninterruptible] = %d on exit.",
+		cvirt, value);
+	vxwprintk((value = atomic_read(&cvirt->nr_onhold)),
+		"!!! cvirt: %p[nr_onhold] = %d on exit.",
 		cvirt, value);
 #endif
 	return;

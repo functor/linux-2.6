@@ -27,14 +27,14 @@
 #include <linux/seq_file.h>
 #include <asm/uaccess.h>
 #include <asm/iSeries/HvLpConfig.h>
-#include <asm/iSeries/ItLpPaca.h>
+#include <asm/lppaca.h>
 #include <asm/iSeries/LparData.h>
 #include <asm/hvcall.h>
 #include <asm/cputable.h>
 #include <asm/rtas.h>
 #include <asm/system.h>
 
-#define MODULE_VERS "1.4"
+#define MODULE_VERS "1.5"
 #define MODULE_NAME "lparcfg"
 
 /* #define LPARCFG_DEBUG */
@@ -70,6 +70,28 @@ static struct proc_dir_entry *proc_ppc64_lparcfg;
 
 #ifdef CONFIG_PPC_ISERIES
 
+/*
+ * For iSeries legacy systems, the PPA purr function is available from the
+ * emulated_time_base field in the paca.
+ */
+static unsigned long get_purr(void)
+{
+	unsigned long sum_purr = 0;
+	int cpu;
+	struct paca_struct *lpaca;
+
+	for_each_cpu(cpu) {
+		lpaca = paca + cpu;
+		sum_purr += lpaca->lppaca.emulated_time_base;
+
+#ifdef PURR_DEBUG
+		printk(KERN_INFO "get_purr for cpu (%d) has value (%ld) \n",
+			cpu, lpaca->lppaca.emulated_time_base);
+#endif
+	}
+	return sum_purr;
+}
+
 #define lparcfg_write NULL
 
 /* 
@@ -81,8 +103,11 @@ static int lparcfg_data(struct seq_file *m, void *v)
 	int shared, entitled_capacity, max_entitled_capacity;
 	int processors, max_processors;
 	struct paca_struct *lpaca = get_paca();
+	unsigned long purr = get_purr();
 
-	shared = (int)(lpaca->lppaca_ptr->xSharedProc);
+	seq_printf(m, "%s %s \n", MODULE_NAME, MODULE_VERS);
+
+	shared = (int)(lpaca->lppaca_ptr->shared_proc);
 	seq_printf(m, "serial_number=%c%c%c%c%c%c%c\n",
 		   e2a(xItExtVpdPanel.mfgID[2]),
 		   e2a(xItExtVpdPanel.mfgID[3]),
@@ -131,6 +156,7 @@ static int lparcfg_data(struct seq_file *m, void *v)
 		seq_printf(m, "pool_capacity=%d\n",
 			   (int)(HvLpConfig_getNumProcsInSharedPool(pool_id) *
 				 100));
+		seq_printf(m, "purr=%ld\n", purr);
 	}
 
 	seq_printf(m, "shared_processor_mode=%d\n", shared);
@@ -192,7 +218,7 @@ static unsigned long get_purr(void);
  * is coming, but at this time is still problematic, so for now this
  * function will return 0.
  */
-static unsigned long get_purr()
+static unsigned long get_purr(void)
 {
 	unsigned long sum_purr = 0;
 	return sum_purr;
@@ -369,7 +395,7 @@ static int lparcfg_data(struct seq_file *m, void *v)
 			   (h_resource >> 0 * 8) & 0xffff);
 
 		/* pool related entries are apropriate for shared configs */
-		if (paca[0].lppaca.xSharedProc) {
+		if (paca[0].lppaca.shared_proc) {
 
 			h_pic(&pool_idle_time, &pool_procs);
 
@@ -418,7 +444,7 @@ static int lparcfg_data(struct seq_file *m, void *v)
 	seq_printf(m, "partition_potential_processors=%d\n",
 		   partition_potential_processors);
 
-	seq_printf(m, "shared_processor_mode=%d\n", paca[0].lppaca.xSharedProc);
+	seq_printf(m, "shared_processor_mode=%d\n", paca[0].lppaca.shared_proc);
 
 	return 0;
 }
@@ -524,10 +550,10 @@ static int lparcfg_open(struct inode *inode, struct file *file)
 }
 
 struct file_operations lparcfg_fops = {
-      owner:THIS_MODULE,
-      read:seq_read,
-      open:lparcfg_open,
-      release:single_release,
+      .owner	= THIS_MODULE,
+      .read	= seq_read,
+      .open	= lparcfg_open,
+      .release	= single_release,
 };
 
 int __init lparcfg_init(void)

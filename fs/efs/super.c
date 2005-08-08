@@ -32,6 +32,26 @@ static struct file_system_type efs_fs_type = {
 	.fs_flags	= FS_REQUIRES_DEV,
 };
 
+static struct pt_types sgi_pt_types[] = {
+	{0x00,		"SGI vh"},
+	{0x01,		"SGI trkrepl"},
+	{0x02,		"SGI secrepl"},
+	{0x03,		"SGI raw"},
+	{0x04,		"SGI bsd"},
+	{SGI_SYSV,	"SGI sysv"},
+	{0x06,		"SGI vol"},
+	{SGI_EFS,	"SGI efs"},
+	{0x08,		"SGI lv"},
+	{0x09,		"SGI rlv"},
+	{0x0A,		"SGI xfs"},
+	{0x0B,		"SGI xfslog"},
+	{0x0C,		"SGI xlv"},
+	{0x82,		"Linux swap"},
+	{0x83,		"Linux native"},
+	{0,		NULL}
+};
+
+
 static kmem_cache_t * efs_inode_cachep;
 
 static struct inode *efs_alloc_inode(struct super_block *sb)
@@ -93,6 +113,10 @@ static struct super_operations efs_superblock_operations = {
 	.put_super	= efs_put_super,
 	.statfs		= efs_statfs,
 	.remount_fs	= efs_remount,
+};
+
+static struct export_operations efs_export_ops = {
+	.get_parent	= efs_get_parent,
 };
 
 static int __init init_efs_fs(void) {
@@ -278,6 +302,7 @@ static int efs_fill_super(struct super_block *s, void *d, int silent)
 		s->s_flags |= MS_RDONLY;
 	}
 	s->s_op   = &efs_superblock_operations;
+	s->s_export_op = &efs_export_ops;
 	root = iget(s, EFS_ROOTINODE);
 	s->s_root = d_alloc_root(root);
  

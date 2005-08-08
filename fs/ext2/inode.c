@@ -53,19 +53,6 @@ static inline int ext2_inode_is_fast_symlink(struct inode *inode)
 		inode->i_blocks - ea_blocks == 0);
 }
 
-/*
- * Called at each iput().
- *
- * The inode may be "bad" if ext2_read_inode() saw an error from
- * ext2_get_inode(), so we need to check that to avoid freeing random disk
- * blocks.
- */
-void ext2_put_inode(struct inode *inode)
-{
-	if (!is_bad_inode(inode))
-		ext2_discard_prealloc(inode);
-}
-
 static void ext2_truncate_nocheck (struct inode * inode);
 
 /*
@@ -370,7 +357,7 @@ static inline int ext2_find_goal(struct inode *inode,
 {
 	struct ext2_inode_info *ei = EXT2_I(inode);
 	write_lock(&ei->i_meta_lock);
-	if (block == ei->i_next_alloc_block + 1) {
+	if ((block == ei->i_next_alloc_block + 1) && ei->i_next_alloc_goal) {
 		ei->i_next_alloc_block++;
 		ei->i_next_alloc_goal++;
 	} 
@@ -509,7 +496,7 @@ static inline int ext2_splice_branch(struct inode *inode,
 
 	/* We are done with atomic stuff, now do the rest of housekeeping */
 
-	inode->i_ctime = CURRENT_TIME;
+	inode->i_ctime = CURRENT_TIME_SEC;
 
 	/* had we spliced it onto indirect block? */
 	if (where->bh)
@@ -540,7 +527,7 @@ changed:
  * reachable from inode.
  */
 
-static int ext2_get_block(struct inode *inode, sector_t iblock, struct buffer_head *bh_result, int create)
+int ext2_get_block(struct inode *inode, sector_t iblock, struct buffer_head *bh_result, int create)
 {
 	int err = -EIO;
 	int offsets[4];
@@ -967,7 +954,7 @@ do_indirects:
 		case EXT2_TIND_BLOCK:
 			;
 	}
-	inode->i_mtime = inode->i_ctime = CURRENT_TIME;
+	inode->i_mtime = inode->i_ctime = CURRENT_TIME_SEC;
 	if (inode_needs_sync(inode)) {
 		sync_mapping_buffers(inode->i_mapping);
 		ext2_sync_inode (inode);
@@ -1030,7 +1017,7 @@ void ext2_set_inode_flags(struct inode *inode)
 {
 	unsigned int flags = EXT2_I(inode)->i_flags;
 
-	inode->i_flags &= ~(S_SYNC|S_APPEND|S_IMMUTABLE|S_NOATIME|S_DIRSYNC);
+	inode->i_flags &= ~(S_SYNC|S_APPEND|S_IMMUTABLE|S_IUNLINK|S_BARRIER|S_NOATIME|S_DIRSYNC);
 	if (flags & EXT2_SYNC_FL)
 		inode->i_flags |= S_SYNC;
 	if (flags & EXT2_APPEND_FL)
@@ -1204,7 +1191,7 @@ static int ext2_update_inode(struct inode * inode, int do_sync)
 		raw_inode->i_uid_high = 0;
 		raw_inode->i_gid_high = 0;
 	}
-#ifdef CONFIG_INOXID_GID32
+#ifdef CONFIG_INOXID_INTERN
 	raw_inode->i_raw_xid = cpu_to_le16(inode->i_xid);
 #endif
 	raw_inode->i_links_count = cpu_to_le16(inode->i_nlink);

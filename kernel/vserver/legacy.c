@@ -4,7 +4,7 @@
  *  Virtual Server: Legacy Funtions
  *
  *  Copyright (C) 2001-2003  Jacques Gelinas
- *  Copyright (C) 2003-2004  Herbert Pötzl
+ *  Copyright (C) 2003-2005  Herbert Pötzl
  *
  *  V0.01  broken out from vcontext.c V0.05
  *
@@ -12,13 +12,11 @@
 
 #include <linux/config.h>
 #include <linux/sched.h>
-#include <linux/namespace.h>
-#include <linux/vserver/legacy.h>
-#include <linux/vserver/namespace.h>
-#include <linux/vserver.h>
-#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
+#include <linux/vserver/legacy.h>
+#include <linux/vserver/namespace.h>
+#include <linux/namespace.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>
@@ -61,8 +59,9 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 		return ret;
 	}
 
-	if (!vx_check(0, VX_ADMIN) ||
-		!capable(CAP_SYS_ADMIN) || vx_flags(VX_INFO_PRIVATE, 0))
+	if (!vx_check(0, VX_ADMIN) || !capable(CAP_SYS_ADMIN)
+		/* might make sense in the future, or not ... */
+		|| vx_flags(VX_INFO_LOCK, 0))
 		return -EPERM;
 
 	/* ugly hack for Spectator */
@@ -82,6 +81,12 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 
 	if (!new_vxi)
 		return -EINVAL;
+
+	ret = -EPERM;
+	if (!vx_info_flags(new_vxi, VXF_STATE_SETUP, 0) &&
+		vx_info_flags(new_vxi, VX_INFO_PRIVATE, 0))
+		goto out_put;
+
 	new_vxi->vx_flags &= ~(VXF_STATE_SETUP|VXF_STATE_INIT);
 
 	ret = vx_migrate_task(current, new_vxi);
@@ -96,75 +101,11 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 				current->namespace, current->fs);
 		if (vc_data.flags & VX_INFO_NPROC)
 			new_vxi->limit.rlim[RLIMIT_NPROC] =
-				current->rlim[RLIMIT_NPROC].rlim_max;
+				current->signal->rlim[RLIMIT_NPROC].rlim_max;
 		ret = new_vxi->vx_id;
 	}
+out_put:
 	put_vx_info(new_vxi);
 	return ret;
 }
-
-
-extern struct nx_info *create_nx_info(void);
-
-/*  set ipv4 root (syscall) */
-
-int vc_set_ipv4root(uint32_t nbip, void __user *data)
-{
-	int i, err = -EPERM;
-	struct vcmd_set_ipv4root_v3 vc_data;
-	struct nx_info *new_nxi, *nxi = current->nx_info;
-
-	if (nbip < 0 || nbip > NB_IPV4ROOT)
-		return -EINVAL;
-	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
-		return -EFAULT;
-
-	if (!nxi || nxi->ipv4[0] == 0 || capable(CAP_NET_ADMIN))
-		// We are allowed to change everything
-		err = 0;
-	else if (nxi) {
-		int found = 0;
-
-		// We are allowed to select a subset of the currently
-		// installed IP numbers. No new one allowed
-		// We can't change the broadcast address though
-		for (i=0; i<nbip; i++) {
-			int j;
-			__u32 nxip = vc_data.nx_mask_pair[i].ip;
-			for (j=0; j<nxi->nbipv4; j++) {
-				if (nxip == nxi->ipv4[j]) {
-					found++;
-					break;
-				}
-			}
-		}
-		if ((found == nbip) &&
-			(vc_data.broadcast == nxi->v4_bcast))
-			err = 0;
-	}
-	if (err)
-		return err;
-
-	new_nxi = create_nx_info();
-	if (!new_nxi)
-		return -EINVAL;
-
-	new_nxi->nbipv4 = nbip;
-	for (i=0; i<nbip; i++) {
-		new_nxi->ipv4[i] = vc_data.nx_mask_pair[i].ip;
-		new_nxi->mask[i] = vc_data.nx_mask_pair[i].mask;
-	}
-	new_nxi->v4_bcast = vc_data.broadcast;
-	// current->nx_info = new_nxi;
-	if (nxi) {
-		printk("!!! switching nx_info %p->%p\n", nxi, new_nxi);
-		clr_nx_info(&current->nx_info);
-	}
-	nx_migrate_task(current, new_nxi);
-	// set_nx_info(&current->nx_info, new_nxi);
-	// current->nid = new_nxi->nx_id;
-	put_nx_info(new_nxi);
-	return 0;
-}
-
 

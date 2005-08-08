@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2004, R. Byron Moore
+ * Copyright (C) 2000 - 2005, R. Byron Moore
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,6 +41,7 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
+#include <linux/module.h>
 
 #include <acpi/acpi.h>
 #include <acpi/actables.h>
@@ -87,21 +88,40 @@ acpi_tb_find_table (
 		return_ACPI_STATUS (AE_AML_STRING_LIMIT);
 	}
 
-	/* Find the table */
+	if (!ACPI_STRNCMP (signature, DSDT_SIG, ACPI_NAME_SIZE)) {
+		/*
+		 * The DSDT pointer is contained in the FADT, not the RSDT.
+		 * This code should suffice, because the only code that would perform
+		 * a "find" on the DSDT is the data_table_region() AML opcode -- in
+		 * which case, the DSDT is guaranteed to be already loaded.
+		 * If this becomes insufficient, the FADT will have to be found first.
+		 */
+		if (!acpi_gbl_DSDT) {
+			return_ACPI_STATUS (AE_NO_ACPI_TABLES);
+		}
 
-	status = acpi_get_firmware_table (signature, 1,
-			   ACPI_LOGICAL_ADDRESSING, &table);
-	if (ACPI_FAILURE (status)) {
-		return_ACPI_STATUS (status);
+		table = acpi_gbl_DSDT;
+	}
+	else {
+		/* Find the table */
+
+		status = acpi_get_firmware_table (signature, 1,
+				   ACPI_LOGICAL_ADDRESSING, &table);
+		if (ACPI_FAILURE (status)) {
+			return_ACPI_STATUS (status);
+		}
 	}
 
 	/* Check oem_id and oem_table_id */
 
-	if ((oem_id[0]     && ACPI_STRCMP (oem_id, table->oem_id)) ||
-		(oem_table_id[0] && ACPI_STRCMP (oem_table_id, table->oem_table_id))) {
+	if ((oem_id[0]     && ACPI_STRNCMP (
+			 oem_id, table->oem_id, sizeof (table->oem_id))) ||
+		(oem_table_id[0] && ACPI_STRNCMP (
+				   oem_table_id, table->oem_table_id, sizeof (table->oem_table_id)))) {
 		return_ACPI_STATUS (AE_AML_NAME_NOT_FOUND);
 	}
 
+	ACPI_DEBUG_PRINT ((ACPI_DB_TABLES, "Found table [%4.4s]\n", table->signature));
 	*table_ptr = table;
 	return_ACPI_STATUS (AE_OK);
 }
@@ -304,6 +324,7 @@ cleanup:
 	}
 	return_ACPI_STATUS (status);
 }
+EXPORT_SYMBOL(acpi_get_firmware_table);
 
 
 /* TBD: Move to a new file */
@@ -339,7 +360,8 @@ acpi_find_root_pointer (
 
 	status = acpi_tb_find_rsdp (&table_info, flags);
 	if (ACPI_FAILURE (status)) {
-		ACPI_DEBUG_PRINT ((ACPI_DB_ERROR, "RSDP structure not found, %s Flags=%X\n",
+		ACPI_DEBUG_PRINT ((ACPI_DB_ERROR,
+			"RSDP structure not found, %s Flags=%X\n",
 			acpi_format_exception (status), flags));
 		return_ACPI_STATUS (AE_NO_ACPI_TABLES);
 	}
@@ -368,35 +390,58 @@ acpi_tb_scan_memory_for_rsdp (
 	u8                              *start_address,
 	u32                             length)
 {
-	u32                             offset;
 	u8                              *mem_rover;
+	u8                              *end_address;
+	u8                              checksum;
 
 
 	ACPI_FUNCTION_TRACE ("tb_scan_memory_for_rsdp");
 
 
-	/* Search from given start addr for the requested length  */
+	end_address = start_address + length;
 
-	for (offset = 0, mem_rover = start_address;
-		 offset < length;
-		 offset += ACPI_RSDP_SCAN_STEP, mem_rover += ACPI_RSDP_SCAN_STEP) {
+	/* Search from given start address for the requested length */
 
+	for (mem_rover = start_address; mem_rover < end_address;
+		 mem_rover += ACPI_RSDP_SCAN_STEP) {
 		/* The signature and checksum must both be correct */
 
-		if (ACPI_STRNCMP ((char *) mem_rover,
-				RSDP_SIG, sizeof (RSDP_SIG)-1) == 0 &&
-			acpi_tb_checksum (mem_rover, ACPI_RSDP_CHECKSUM_LENGTH) == 0) {
-			/* If so, we have found the RSDP */
+		if (ACPI_STRNCMP ((char *) mem_rover, RSDP_SIG, sizeof (RSDP_SIG)-1) != 0) {
+			/* No signature match, keep looking */
+
+			continue;
+		}
+
+		/* Signature matches, check the appropriate checksum */
+
+		if ((ACPI_CAST_PTR (struct rsdp_descriptor, mem_rover))->revision < 2) {
+			/* ACPI version 1.0 */
+
+			checksum = acpi_tb_checksum (mem_rover, ACPI_RSDP_CHECKSUM_LENGTH);
+		}
+		else {
+			/* Post ACPI 1.0, use extended_checksum */
+
+			checksum = acpi_tb_checksum (mem_rover, ACPI_RSDP_XCHECKSUM_LENGTH);
+		}
+
+		if (checksum == 0) {
+			/* Checksum valid, we have found a valid RSDP */
 
 			ACPI_DEBUG_PRINT ((ACPI_DB_INFO,
-				"RSDP located at physical address %p\n",mem_rover));
+				"RSDP located at physical address %p\n", mem_rover));
 			return_PTR (mem_rover);
 		}
+
+		ACPI_DEBUG_PRINT ((ACPI_DB_INFO,
+			"Found an RSDP at physical address %p, but it has a bad checksum\n",
+			mem_rover));
 	}
 
 	/* Searched entire block, no RSDP was found */
 
-	ACPI_DEBUG_PRINT ((ACPI_DB_INFO,"Searched entire block, no RSDP was found.\n"));
+	ACPI_DEBUG_PRINT ((ACPI_DB_INFO,
+		"Searched entire block, no valid RSDP was found.\n"));
 	return_PTR (NULL);
 }
 
@@ -448,7 +493,8 @@ acpi_tb_find_rsdp (
 				  ACPI_EBDA_PTR_LENGTH,
 				  (void *) &table_ptr);
 		if (ACPI_FAILURE (status)) {
-			ACPI_DEBUG_PRINT ((ACPI_DB_ERROR, "Could not map memory at %8.8X for length %X\n",
+			ACPI_DEBUG_PRINT ((ACPI_DB_ERROR,
+				"Could not map memory at %8.8X for length %X\n",
 				ACPI_EBDA_PTR_LOCATION, ACPI_EBDA_PTR_LENGTH));
 			return_ACPI_STATUS (status);
 		}
@@ -467,7 +513,8 @@ acpi_tb_find_rsdp (
 					  ACPI_EBDA_WINDOW_SIZE,
 					  (void *) &table_ptr);
 			if (ACPI_FAILURE (status)) {
-				ACPI_DEBUG_PRINT ((ACPI_DB_ERROR, "Could not map memory at %8.8X for length %X\n",
+				ACPI_DEBUG_PRINT ((ACPI_DB_ERROR,
+					"Could not map memory at %8.8X for length %X\n",
 					physical_address, ACPI_EBDA_WINDOW_SIZE));
 				return_ACPI_STATUS (status);
 			}
@@ -492,7 +539,8 @@ acpi_tb_find_rsdp (
 				  ACPI_HI_RSDP_WINDOW_SIZE,
 				  (void *) &table_ptr);
 		if (ACPI_FAILURE (status)) {
-			ACPI_DEBUG_PRINT ((ACPI_DB_ERROR, "Could not map memory at %8.8X for length %X\n",
+			ACPI_DEBUG_PRINT ((ACPI_DB_ERROR,
+				"Could not map memory at %8.8X for length %X\n",
 				ACPI_HI_RSDP_WINDOW_BASE, ACPI_HI_RSDP_WINDOW_SIZE));
 			return_ACPI_STATUS (status);
 		}

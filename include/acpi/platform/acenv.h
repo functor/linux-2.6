@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2004, R. Byron Moore
+ * Copyright (C) 2000 - 2005, R. Byron Moore
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -57,6 +57,7 @@
 #define ACPI_DISASSEMBLER
 #define ACPI_NO_METHOD_EXECUTION
 #define ACPI_USE_SYSTEM_CLIBRARY
+#define ACPI_ENABLE_OBJECT_CACHE
 #endif
 
 #ifdef _ACPI_EXEC_APP
@@ -67,6 +68,7 @@
 #define ACPI_DEBUGGER
 #define ACPI_DISASSEMBLER
 #define ACPI_USE_SYSTEM_CLIBRARY
+#define ACPI_ENABLE_OBJECT_CACHE
 #endif
 
 #ifdef _ACPI_ASL_COMPILER
@@ -75,6 +77,7 @@
 #define ACPI_DISASSEMBLER
 #define ACPI_CONSTANT_EVAL_ONLY
 #define ACPI_USE_SYSTEM_CLIBRARY
+#define ACPI_ENABLE_OBJECT_CACHE
 #endif
 
 /*
@@ -223,7 +226,11 @@
  */
 
 #define ACPI_STRSTR(s1,s2)      strstr((s1), (s2))
+
+#ifdef ACPI_FUTURE_USAGE
 #define ACPI_STRUPR(s)          (void) acpi_ut_strupr ((s))
+#endif
+
 #define ACPI_STRLEN(s)          (acpi_size) strlen((s))
 #define ACPI_STRCPY(d,s)        (void) strcpy((d), (s))
 #define ACPI_STRNCPY(d,s,n)     (void) strncpy((d), (s), (acpi_size)(n))
@@ -232,6 +239,7 @@
 #define ACPI_STRCAT(d,s)        (void) strcat((d), (s))
 #define ACPI_STRNCAT(d,s,n)     strncat((d), (s), (acpi_size)(n))
 #define ACPI_STRTOUL(d,s,n)     strtoul((d), (s), (acpi_size)(n))
+#define ACPI_MEMCMP(s1,s2,n)    memcmp((s1), (s2), (acpi_size)(n))
 #define ACPI_MEMCPY(d,s,n)      (void) memcpy((d), (s), (acpi_size)(n))
 #define ACPI_MEMSET(d,s,n)      (void) memset((d), (s), (acpi_size)(n))
 
@@ -286,7 +294,11 @@ typedef char *va_list;
 
 
 #define ACPI_STRSTR(s1,s2)      acpi_ut_strstr ((s1), (s2))
+
+#ifdef ACPI_FUTURE_USAGE
 #define ACPI_STRUPR(s)          (void) acpi_ut_strupr ((s))
+#endif
+
 #define ACPI_STRLEN(s)          (acpi_size) acpi_ut_strlen ((s))
 #define ACPI_STRCPY(d,s)        (void) acpi_ut_strcpy ((d), (s))
 #define ACPI_STRNCPY(d,s,n)     (void) acpi_ut_strncpy ((d), (s), (acpi_size)(n))
@@ -295,6 +307,7 @@ typedef char *va_list;
 #define ACPI_STRCAT(d,s)        (void) acpi_ut_strcat ((d), (s))
 #define ACPI_STRNCAT(d,s,n)     acpi_ut_strncat ((d), (s), (acpi_size)(n))
 #define ACPI_STRTOUL(d,s,n)     acpi_ut_strtoul ((d), (s), (acpi_size)(n))
+#define ACPI_MEMCMP(s1,s2,n)    acpi_ut_memcmp((s1), (s2), (acpi_size)(n))
 #define ACPI_MEMCPY(d,s,n)      (void) acpi_ut_memcpy ((d), (s), (acpi_size)(n))
 #define ACPI_MEMSET(d,v,n)      (void) acpi_ut_memset ((d), (v), (acpi_size)(n))
 #define ACPI_TOUPPER            acpi_ut_to_upper

@@ -22,9 +22,9 @@
 #include <linux/quotaops.h>
 #include <linux/buffer_head.h>
 #include <linux/random.h>
+#include <linux/bitops.h>
 #include <linux/vs_dlimit.h>
 
-#include <asm/bitops.h>
 #include <asm/byteorder.h>
 
 #include "xattr.h"
@@ -322,8 +322,6 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent)
 		desc = ext3_get_group_desc (sb, group, &bh);
 		if (!desc || !desc->bg_free_inodes_count)
 			continue;
-		if (sbi->s_debts[group] >= max_debt)
-			continue;
 		if (le16_to_cpu(desc->bg_used_dirs_count) >= max_dirs)
 			continue;
 		if (le16_to_cpu(desc->bg_free_inodes_count) < min_inodes)
@@ -449,7 +447,7 @@ struct inode *ext3_new_inode(handle_t *handle, struct inode * dir, int mode)
 		return ERR_PTR(-ENOMEM);
 
 	if (sb->s_flags & MS_TAGXID)
-		inode->i_xid = current->xid;
+		inode->i_xid = vx_current_xid();
 	else
 		inode->i_xid = 0;
 
@@ -572,7 +570,7 @@ got:
 	/* This is the optimal IO size (for stat), not the fs block size */
 	inode->i_blksize = PAGE_SIZE;
 	inode->i_blocks = 0;
-	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
+	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME_SEC;
 
 	memset(ei->i_data, 0, sizeof(ei->i_data));
 	ei->i_next_alloc_block = 0;
@@ -595,10 +593,11 @@ got:
 	ei->i_file_acl = 0;
 	ei->i_dir_acl = 0;
 	ei->i_dtime = 0;
-#ifdef EXT3_PREALLOCATE
-	ei->i_prealloc_block = 0;
-	ei->i_prealloc_count = 0;
-#endif
+	ei->i_rsv_window.rsv_start = EXT3_RESERVE_WINDOW_NOT_ALLOCATED;
+	ei->i_rsv_window.rsv_end = EXT3_RESERVE_WINDOW_NOT_ALLOCATED;
+	atomic_set(&ei->i_rsv_window.rsv_goal_size, EXT3_DEFAULT_RESERVE_BLOCKS);
+	atomic_set(&ei->i_rsv_window.rsv_alloc_hit, 0);
+	seqlock_init(&ei->i_rsv_window.rsv_seqlock);
 	ei->i_block_group = group;
 
 	ext3_set_inode_flags(inode);
@@ -610,6 +609,9 @@ got:
 	spin_unlock(&sbi->s_next_gen_lock);
 
 	ei->i_state = EXT3_STATE_NEW;
+	ei->i_extra_isize =
+		(EXT3_INODE_SIZE(inode->i_sb) > EXT3_GOOD_OLD_INODE_SIZE) ?
+		sizeof(struct ext3_inode) - EXT3_GOOD_OLD_INODE_SIZE : 0;
 
 	ret = inode;
 	if(DQUOT_ALLOC_INODE(inode)) {
@@ -748,6 +750,7 @@ unsigned long ext3_count_free_inodes (struct super_block * sb)
 		if (!gdp)
 			continue;
 		desc_count += le16_to_cpu(gdp->bg_free_inodes_count);
+		cond_resched();
 	}
 	return desc_count;
 #endif

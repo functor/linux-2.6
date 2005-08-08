@@ -32,7 +32,7 @@
 #include <linux/delay.h>
 #include <linux/irq.h>
 #include <linux/ptrace.h>
-#include <linux/version.h>
+#include <linux/utsname.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -54,10 +54,14 @@ unsigned long kernel_thread_flags = CLONE_VM | CLONE_UNTRACED;
 
 atomic_t hlt_counter = ATOMIC_INIT(0);
 
+unsigned long boot_option_idle_override = 0;
+EXPORT_SYMBOL(boot_option_idle_override);
+
 /*
  * Powermanagement idle function, if any..
  */
 void (*pm_idle)(void);
+static cpumask_t cpu_idle_map;
 
 void disable_hlt(void)
 {
@@ -120,6 +124,23 @@ static void poll_idle (void)
 	}
 }
 
+
+void cpu_idle_wait(void)
+{
+        int cpu;
+        cpumask_t map;
+
+        for_each_online_cpu(cpu)
+                cpu_set(cpu, cpu_idle_map);
+
+        wmb();
+        do {
+                ssleep(1);
+                cpus_and(map, cpu_idle_map, cpu_online_map);
+        } while (!cpus_empty(map));
+}
+EXPORT_SYMBOL_GPL(cpu_idle_wait);
+
 /*
  * The idle thread. There's no useful work to be
  * done, so just try to conserve power and have a
@@ -128,21 +149,20 @@ static void poll_idle (void)
  */
 void cpu_idle (void)
 {
+	int cpu = smp_processor_id();
+
 	/* endless idle loop with no priority at all */
 	while (1) {
 		while (!need_resched()) {
 			void (*idle)(void);
-			/*
-			 * Mark this as an RCU critical section so that
-			 * synchronize_kernel() in the unload path waits
-			 * for our completion.
-			 */
-			rcu_read_lock();
+
+			if (cpu_isset(cpu, cpu_idle_map))
+				cpu_clear(cpu, cpu_idle_map);
+			rmb();
 			idle = pm_idle;
 			if (!idle)
 				idle = default_idle;
 			idle();
-			rcu_read_unlock();
 		}
 		schedule();
 	}
@@ -196,6 +216,7 @@ static int __init idle_setup (char *str)
 		pm_idle = poll_idle;
 	}
 
+	boot_option_idle_override = 1;
 	return 1;
 }
 
@@ -211,7 +232,7 @@ void __show_regs(struct pt_regs * regs)
 	printk("\n");
 	print_modules();
 	printk("Pid: %d, comm: %.20s %s %s\n", 
-	       current->pid, current->comm, print_tainted(), UTS_RELEASE);
+	       current->pid, current->comm, print_tainted(), system_utsname.release);
 	printk("RIP: %04lx:[<%016lx>] ", regs->cs & 0xffff, regs->rip);
 	printk_address(regs->rip); 
 	printk("\nRSP: %04lx:%016lx  EFLAGS: %08lx\n", regs->ss, regs->rsp, regs->eflags);
@@ -293,7 +314,7 @@ void flush_thread(void)
 	 * Forget coprocessor state..
 	 */
 	clear_fpu(tsk);
-	tsk->used_math = 0;
+	clear_used_math();
 }
 
 void release_thread(struct task_struct *dead_task)
@@ -359,7 +380,6 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long rsp,
 	if (rsp == ~0UL) {
 		childregs->rsp = (unsigned long)childregs;
 	}
-	p->set_child_tid = p->clear_child_tid = NULL;
 
 	p->thread.rsp = (unsigned long) childregs;
 	p->thread.rsp0 = (unsigned long) (childregs+1);
@@ -542,8 +562,11 @@ long sys_execve(char __user *name, char __user * __user *argv,
 	if (IS_ERR(filename)) 
 		return error;
 	error = do_execve(filename, argv, envp, &regs); 
-	if (error == 0)
+	if (error == 0) {
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
+	}
 	putname(filename);
 	return error;
 }
@@ -554,6 +577,12 @@ void set_personality_64bit(void)
 
 	/* Make sure to be in 64bit mode */
 	clear_thread_flag(TIF_IA32); 
+
+	/* TBD: overwrites user setup. Should have two bits.
+	   But 64bit processes have always behaved this way,
+	   so it's not too bad. The main problem is just that
+   	   32bit childs are affected again. */
+	current->personality &= ~READ_IMPLIES_EXEC;
 }
 
 asmlinkage long sys_fork(struct pt_regs *regs)

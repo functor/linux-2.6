@@ -155,7 +155,6 @@ static int print_unex = 1;
 #include <linux/kernel.h>
 #include <linux/timer.h>
 #include <linux/workqueue.h>
-#include <linux/version.h>
 #define FDPATCHES
 #include <linux/fdreg.h>
 
@@ -217,7 +216,7 @@ static int use_virtual_dma;
  * record each buffers capabilities
  */
 
-static spinlock_t floppy_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(floppy_lock);
 static struct completion device_release;
 
 static unsigned short virtual_dma_port = 0x3f0;
@@ -359,7 +358,11 @@ static int inr;			/* size of reply buffer, when called from interrupt */
 #define R_SECTOR (reply_buffer[5])
 #define R_SIZECODE (reply_buffer[6])
 
+#if HZ < 12800
 #define SEL_DLY (2*HZ/100)
+#else
+#define SEL_DLY (255)
+#endif
 
 /*
  * this struct defines the different floppy drive types.
@@ -1073,7 +1076,7 @@ static int fd_wait_for_completion(unsigned long delay, timeout_fn function)
 	return 0;
 }
 
-static spinlock_t floppy_hlt_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(floppy_hlt_lock);
 static int hlt_disabled;
 static void floppy_disable_hlt(void)
 {
@@ -1787,10 +1790,11 @@ irqreturn_t floppy_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 		} while ((ST0 & 0x83) != UNIT(current_drive) && inr == 2
 			 && max_sensei);
 	}
-	if (handler)
-		schedule_bh(handler);
-	else
+	if (!handler) {
 		FDCS->reset = 1;
+		return IRQ_NONE;
+	}
+	schedule_bh(handler);
 	is_alive("normal interrupt end");
 
 	/* FIXME! Was it really for us? */
@@ -3318,11 +3322,6 @@ static int invalidate_drive(struct block_device *bdev)
 	return 0;
 }
 
-static inline void clear_write_error(int drive)
-{
-	CLEARSTRUCT(UDRWE);
-}
-
 static inline int set_geometry(unsigned int cmd, struct floppy_struct *g,
 			       int drive, int type, struct block_device *bdev)
 {
@@ -4089,7 +4088,7 @@ static void __init daring(int *ints, int param, int param2)
 			    FD_SILENT_DCL_CLEAR;
 		} else {
 			default_drive_params[i].params.select_delay =
-			    2 * HZ / 100;
+			    SEL_DLY;
 			default_drive_params[i].params.flags &=
 			    ~FD_SILENT_DCL_CLEAR;
 		}
@@ -4124,7 +4123,7 @@ static struct param_table {
 	int *var;
 	int def_param;
 	int param2;
-} config_params[] = {
+} config_params[] __initdata = {
 	{"allowed_drive_mask", NULL, &allowed_drive_mask, 0xff, 0}, /* obsolete */
 	{"all_drives", NULL, &allowed_drive_mask, 0xff, 0},	/* obsolete */
 	{"asus_pci", NULL, &allowed_drive_mask, 0x33, 0},
@@ -4286,6 +4285,13 @@ int __init floppy_init(void)
 	}
 
 	use_virtual_dma = can_use_virtual_dma & 1;
+#if defined(CONFIG_PPC64)
+	if (check_legacy_ioport(FDC1)) {
+		del_timer(&fd_timeout);
+		err = -ENODEV;
+		goto out_unreg_region;
+	}
+#endif
 	fdc_state[0].address = FDC1;
 	if (fdc_state[0].address == -1) {
 		del_timer(&fd_timeout);
@@ -4315,6 +4321,12 @@ int __init floppy_init(void)
 		floppy_track_buffer = NULL;
 		max_buffer_sectors = 0;
 	}
+	/*
+	 * Small 10 msec delay to let through any interrupt that
+	 * initialization might have triggered, to not
+	 * confuse detection:
+	 */
+	msleep(10);
 
 	for (i = 0; i < N_FDC; i++) {
 		fdc = i;
@@ -4407,7 +4419,7 @@ out_put_disk:
 	return err;
 }
 
-static spinlock_t floppy_usage_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(floppy_usage_lock);
 
 static int floppy_grab_irq_and_dma(void)
 {
@@ -4582,8 +4594,6 @@ static void __init parse_floppy_cfg_string(char *cfg)
 
 int init_module(void)
 {
-	printk(KERN_INFO "inserting floppy driver for " UTS_RELEASE "\n");
-
 	if (floppy)
 		parse_floppy_cfg_string(floppy);
 	return floppy_init();
@@ -4623,9 +4633,9 @@ void cleanup_module(void)
 	wait_for_completion(&device_release);
 }
 
-MODULE_PARM(floppy, "s");
-MODULE_PARM(FLOPPY_IRQ, "i");
-MODULE_PARM(FLOPPY_DMA, "i");
+module_param(floppy, charp, 0);
+module_param(FLOPPY_IRQ, int, 0);
+module_param(FLOPPY_DMA, int, 0);
 MODULE_AUTHOR("Alain L. Knaff");
 MODULE_SUPPORTED_DEVICE("fd");
 MODULE_LICENSE("GPL");

@@ -7,6 +7,7 @@
 
 #include <linux/mman.h>
 #include <linux/mm.h>
+#include <linux/syscalls.h>
 #include <linux/vs_memory.h>
 
 
@@ -21,17 +22,15 @@ static int mlock_fixup(struct vm_area_struct * vma,
 		goto out;
 
 	if (start != vma->vm_start) {
-		if (split_vma(mm, vma, start, 1)) {
-			ret = -EAGAIN;
+		ret = split_vma(mm, vma, start, 1);
+		if (ret)
 			goto out;
-		}
 	}
 
 	if (end != vma->vm_end) {
-		if (split_vma(mm, vma, end, 0)) {
-			ret = -EAGAIN;
+		ret = split_vma(mm, vma, end, 0);
+		if (ret)
 			goto out;
-		}
 	}
 
 	/*
@@ -47,12 +46,15 @@ static int mlock_fixup(struct vm_area_struct * vma,
 	pages = (end - start) >> PAGE_SHIFT;
 	if (newflags & VM_LOCKED) {
 		pages = -pages;
-		ret = make_pages_present(start, end);
+		if (!(newflags & VM_IO))
+			ret = make_pages_present(start, end);
 	}
 
 	// vma->vm_mm->locked_vm -= pages;
 	vx_vmlocked_sub(vma->vm_mm, pages);
 out:
+	if (ret == -ENOMEM)
+		ret = -EAGAIN;
 	return ret;
 }
 
@@ -119,7 +121,7 @@ asmlinkage long sys_mlock(unsigned long start, size_t len)
 		goto out;
 	locked = current->mm->locked_vm + grow;
 
-	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+	lock_limit = current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur;
 	lock_limit >>= PAGE_SHIFT;
 
 	/* check against resource limits */
@@ -181,7 +183,7 @@ asmlinkage long sys_mlockall(int flags)
 
 	down_write(&current->mm->mmap_sem);
 
-	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+	lock_limit = current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur;
 	lock_limit >>= PAGE_SHIFT;
 
 	ret = -ENOMEM;
@@ -209,17 +211,17 @@ asmlinkage long sys_munlockall(void)
  * Objects with different lifetime than processes (SHM_LOCK and SHM_HUGETLB
  * shm segments) get accounted against the user_struct instead.
  */
-static spinlock_t shmlock_user_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(shmlock_user_lock);
 
 int user_shm_lock(size_t size, struct user_struct *user)
 {
 	unsigned long lock_limit, locked;
 	int allowed = 0;
 
-	spin_lock(&shmlock_user_lock);
-	locked = size >> PAGE_SHIFT;
-	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+	locked = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	lock_limit = current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur;
 	lock_limit >>= PAGE_SHIFT;
+	spin_lock(&shmlock_user_lock);
 	if (locked + user->locked_shm > lock_limit && !capable(CAP_IPC_LOCK))
 		goto out;
 	get_uid(user);
@@ -233,7 +235,7 @@ out:
 void user_shm_unlock(size_t size, struct user_struct *user)
 {
 	spin_lock(&shmlock_user_lock);
-	user->locked_shm -= (size >> PAGE_SHIFT);
+	user->locked_shm -= (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	spin_unlock(&shmlock_user_lock);
 	free_uid(user);
 }

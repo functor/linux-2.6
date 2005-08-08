@@ -16,7 +16,7 @@
  *    along with this program; if not, write to the Free Software
  *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- *    Questions/Comments/Bugfixes to Cciss-discuss@lists.sourceforge.net
+ *    Questions/Comments/Bugfixes to iss_storagedev@hp.com
  *
  */
 
@@ -46,14 +46,14 @@
 #include <linux/completion.h>
 
 #define CCISS_DRIVER_VERSION(maj,min,submin) ((maj<<16)|(min<<8)|(submin))
-#define DRIVER_NAME "HP CISS Driver (v 2.6.2)"
-#define DRIVER_VERSION CCISS_DRIVER_VERSION(2,6,2)
+#define DRIVER_NAME "HP CISS Driver (v 2.6.4)"
+#define DRIVER_VERSION CCISS_DRIVER_VERSION(2,6,4)
 
 /* Embedded module documentation macros - see modules.h */
 MODULE_AUTHOR("Hewlett-Packard Company");
-MODULE_DESCRIPTION("Driver for HP Controller SA5xxx SA6xxx version 2.6.2");
+MODULE_DESCRIPTION("Driver for HP Controller SA5xxx SA6xxx version 2.6.4");
 MODULE_SUPPORTED_DEVICE("HP SA5i SA5i+ SA532 SA5300 SA5312 SA641 SA642 SA6400"
-			" SA6i V100");
+			" SA6i P600");
 MODULE_LICENSE("GPL");
 
 #include "cciss_cmd.h"
@@ -80,10 +80,8 @@ const struct pci_device_id cciss_pci_device_id[] = {
 		0x0E11, 0x409D, 0, 0, 0},
 	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_CISSC,
 		0x0E11, 0x4091, 0, 0, 0},
-	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_CISSC,
-		0x0E11, 0x409E, 0, 0, 0},
-	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISS,
-		0x103C, 0x3211, 0, 0, 0},
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSA,
+		0x103C, 0x3225, 0, 0, 0},
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, cciss_pci_device_id);
@@ -104,8 +102,7 @@ static struct board_type products[] = {
 	{ 0x409C0E11, "Smart Array 6400", &SA5_access},
 	{ 0x409D0E11, "Smart Array 6400 EM", &SA5_access},
 	{ 0x40910E11, "Smart Array 6i", &SA5_access},
-	{ 0x409E0E11, "Smart Array 6422", &SA5_access},
-	{ 0x3211103C, "Smart Array V100", &SA5_access},
+	{ 0x3225103C, "Smart Array P600", &SA5_access},
 };
 
 /* How long to wait (in millesconds) for board to go into simple mode */
@@ -149,11 +146,18 @@ static void cciss_procinit(int i);
 static void cciss_procinit(int i) {}
 #endif /* CONFIG_PROC_FS */
 
+#ifdef CONFIG_COMPAT
+static long cciss_compat_ioctl(struct file *f, unsigned cmd, unsigned long arg);
+#endif
+
 static struct block_device_operations cciss_fops  = {
 	.owner		= THIS_MODULE,
 	.open		= cciss_open, 
 	.release       	= cciss_release,
         .ioctl		= cciss_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl   = cciss_compat_ioctl,
+#endif
 	.revalidate_disk= cciss_revalidate,
 };
 
@@ -185,9 +189,10 @@ static inline CommandList_struct *removeQ(CommandList_struct **Qptr,
         }
         return c;
 }
-#ifdef CONFIG_PROC_FS
 
 #include "cciss_scsi.c"		/* For SCSI tape support */
+
+#ifdef CONFIG_PROC_FS
 
 /*
  * Report information about this controller.
@@ -438,13 +443,22 @@ static int cciss_open(struct inode *inode, struct file *filep)
 
 	/*
 	 * Root is allowed to open raw volume zero even if it's not configured
-	 * so array config can still work.  I don't think I really like this,
+	 * so array config can still work. Root is also allowed to open any
+	 * volume that has a LUN ID, so it can issue IOCTL to reread the
+	 * disk information.  I don't think I really like this
 	 * but I'm already using way to many device nodes to claim another one
 	 * for "raw controller".
 	 */
 	if (drv->nr_blocks == 0) {
-		if (iminor(inode) != 0)
+		if (iminor(inode) != 0)	{ 	/* not node 0? */
+			/* if not node 0 make sure it is a partition = 0 */
+			if (iminor(inode) & 0x0f) {
 			return -ENXIO;
+				/* if it is, make sure we have a LUN ID */
+			} else if (drv->LunID == 0) {
+				return -ENXIO;
+			}
+		}
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
 	}
@@ -470,80 +484,50 @@ static int cciss_release(struct inode *inode, struct file *filep)
 }
 
 #ifdef CONFIG_COMPAT
-/* for AMD 64 bit kernel compatibility with 32-bit userland ioctls */
-extern long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
-extern int
-register_ioctl32_conversion(unsigned int cmd, int (*handler)(unsigned int,
-      unsigned int, unsigned long, struct file *));
-extern int unregister_ioctl32_conversion(unsigned int cmd);
 
-static int cciss_ioctl32_passthru(unsigned int fd, unsigned cmd, unsigned long arg, struct file *file);
-static int cciss_ioctl32_big_passthru(unsigned int fd, unsigned cmd, unsigned long arg,
-	struct file *file);
-
-typedef int (*handler_type) (unsigned int, unsigned int, unsigned long, struct file *);
-
-static struct ioctl32_map {
-	unsigned int cmd;
-	handler_type handler;
-	int registered;
-} cciss_ioctl32_map[] = {
-	{ CCISS_GETPCIINFO,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_GETINTINFO,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_SETINTINFO,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_GETNODENAME,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_SETNODENAME,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_GETHEARTBEAT,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_GETBUSTYPES,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_GETFIRMVER,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_GETDRIVVER,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_REVALIDVOLS,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_PASSTHRU32,	cciss_ioctl32_passthru, 0 },
-	{ CCISS_DEREGDISK,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_REGNEWDISK,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_REGNEWD,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_RESCANDISK,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_GETLUNINFO,	(handler_type) sys_ioctl, 0 },
-	{ CCISS_BIG_PASSTHRU32,	cciss_ioctl32_big_passthru, 0 },
-};
-#define NCCISS_IOCTL32_ENTRIES (sizeof(cciss_ioctl32_map) / sizeof(cciss_ioctl32_map[0]))
-static void register_cciss_ioctl32(void)
+static int do_ioctl(struct file *f, unsigned cmd, unsigned long arg)
 {
-	int i, rc;
+	int ret;
+	lock_kernel();
+	ret = cciss_ioctl(f->f_dentry->d_inode, f, cmd, arg);
+	unlock_kernel();
+	return ret;
+}
 
-	for (i=0; i < NCCISS_IOCTL32_ENTRIES; i++) {
-		rc = register_ioctl32_conversion(
-			cciss_ioctl32_map[i].cmd,
-			cciss_ioctl32_map[i].handler);
-		if (rc != 0) {
-			printk(KERN_WARNING "cciss: failed to register "
-				"32 bit compatible ioctl 0x%08x\n",
-				cciss_ioctl32_map[i].cmd);
-			cciss_ioctl32_map[i].registered = 0;
-		} else
-			cciss_ioctl32_map[i].registered = 1;
+static int cciss_ioctl32_passthru(struct file *f, unsigned cmd, unsigned long arg);
+static int cciss_ioctl32_big_passthru(struct file *f, unsigned cmd, unsigned long arg);
+
+static long cciss_compat_ioctl(struct file *f, unsigned cmd, unsigned long arg)
+{
+	switch (cmd) {
+	case CCISS_GETPCIINFO:
+	case CCISS_GETINTINFO:
+	case CCISS_SETINTINFO:
+	case CCISS_GETNODENAME:
+	case CCISS_SETNODENAME:
+	case CCISS_GETHEARTBEAT:
+	case CCISS_GETBUSTYPES:
+	case CCISS_GETFIRMVER:
+	case CCISS_GETDRIVVER:
+	case CCISS_REVALIDVOLS:
+	case CCISS_DEREGDISK:
+	case CCISS_REGNEWDISK:
+	case CCISS_REGNEWD:
+	case CCISS_RESCANDISK:
+	case CCISS_GETLUNINFO:
+		return do_ioctl(f, cmd, arg);
+
+	case CCISS_PASSTHRU32:
+		return cciss_ioctl32_passthru(f, cmd, arg);
+	case CCISS_BIG_PASSTHRU32:
+		return cciss_ioctl32_big_passthru(f, cmd, arg);
+
+	default:
+		return -ENOIOCTLCMD;
 	}
 }
-static void unregister_cciss_ioctl32(void)
-{
-	int i, rc;
 
-	for (i=0; i < NCCISS_IOCTL32_ENTRIES; i++) {
-		if (!cciss_ioctl32_map[i].registered)
-			continue;
-		rc = unregister_ioctl32_conversion(
-			cciss_ioctl32_map[i].cmd);
-		if (rc == 0) {
-			cciss_ioctl32_map[i].registered = 0;
-			continue;
-		}
-		printk(KERN_WARNING "cciss: failed to unregister "
-			"32 bit compatible ioctl 0x%08x\n",
-			cciss_ioctl32_map[i].cmd);
-	}
-}
-int cciss_ioctl32_passthru(unsigned int fd, unsigned cmd, unsigned long arg,
-	struct file *file)
+static int cciss_ioctl32_passthru(struct file *f, unsigned cmd, unsigned long arg)
 {
 	IOCTL32_Command_struct __user *arg32 =
 		(IOCTL32_Command_struct __user *) arg;
@@ -564,7 +548,7 @@ int cciss_ioctl32_passthru(unsigned int fd, unsigned cmd, unsigned long arg,
 	if (err)
 		return -EFAULT;
 
-	err = sys_ioctl(fd, CCISS_PASSTHRU, (unsigned long) p);
+	err = do_ioctl(f, CCISS_PASSTHRU, (unsigned long) p);
 	if (err)
 		return err;
 	err |= copy_in_user(&arg32->error_info, &p->error_info, sizeof(arg32->error_info));
@@ -573,8 +557,7 @@ int cciss_ioctl32_passthru(unsigned int fd, unsigned cmd, unsigned long arg,
 	return err;
 }
 
-int cciss_ioctl32_big_passthru(unsigned int fd, unsigned cmd, unsigned long arg,
-	struct file *file)
+static int cciss_ioctl32_big_passthru(struct file *file, unsigned cmd, unsigned long arg)
 {
 	BIG_IOCTL32_Command_struct __user *arg32 =
 		(BIG_IOCTL32_Command_struct __user *) arg;
@@ -596,7 +579,7 @@ int cciss_ioctl32_big_passthru(unsigned int fd, unsigned cmd, unsigned long arg,
 	if (err)
 		 return -EFAULT;
 
-	err = sys_ioctl(fd, CCISS_BIG_PASSTHRU, (unsigned long) p);
+	err = do_ioctl(file, CCISS_BIG_PASSTHRU, (unsigned long) p);
 	if (err)
 		return err;
 	err |= copy_in_user(&arg32->error_info, &p->error_info, sizeof(arg32->error_info));
@@ -604,9 +587,6 @@ int cciss_ioctl32_big_passthru(unsigned int fd, unsigned cmd, unsigned long arg,
 		return -EFAULT;
 	return err;
 }
-#else
-static inline void register_cciss_ioctl32(void) {}
-static inline void unregister_cciss_ioctl32(void) {}
 #endif
 /*
  * ioctl 
@@ -799,7 +779,7 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
  		luninfo.num_opens = drv->usage_count;
  		luninfo.num_parts = 0;
  		/* count partitions 1 to 15 with sizes > 0 */
- 		for(i=1; i <MAX_PART; i++) {
+ 		for (i = 0; i < MAX_PART - 1; i++) {
 			if (!disk->part[i])
 				continue;
 			if (disk->part[i]->nr_sects != 0)
@@ -1090,16 +1070,9 @@ cleanup1:
 		return(status);
 	}
 	default:
-		return -EBADRQC;
+		return -ENOTTY;
 	}
 	
-}
-
-static int cciss_revalidate(struct gendisk *disk)
-{
-	drive_info_struct *drv = disk->private_data;
-	set_capacity(disk, drv->nr_blocks);
-	return 0;
 }
 
 /*
@@ -1153,7 +1126,9 @@ static int revalidate_allvol(ctlr_info_t *host)
 	for (i = 0; i < NWD; i++) {
 		struct gendisk *disk = host->gendisk[i];
 		drive_info_struct *drv = &(host->drv[i]);
-		if (!drv->nr_blocks)
+		/* we must register the controller even if no disks exist */
+		/* this is for the online array utilities */
+		if (!drv->heads && i)
 			continue;
 		blk_queue_hardsect_size(host->queue, drv->block_size);
 		set_capacity(disk, drv->nr_blocks);
@@ -1485,13 +1460,7 @@ static void cciss_geometry_inquiry(int ctlr, int logvol,
 			}
 		}
 	} else { /* Get geometry failed */
-		printk(KERN_WARNING "cciss: reading geometry failed, "
-			"continuing with default geometry\n");
-		drv->block_size = block_size;
-		drv->nr_blocks = total_size;
-		drv->heads = 255;
-		drv->sectors = 32; // Sectors per track
-		drv->cylinders = total_size / 255 / 32;
+		printk(KERN_WARNING "cciss: reading geometry failed\n");
 	}
 	printk(KERN_INFO "      heads= %d, sectors= %d, cylinders= %d\n\n",
 		drv->heads, drv->sectors, drv->cylinders);
@@ -1520,6 +1489,7 @@ cciss_read_capacity(int ctlr, int logvol, ReadCapdata_struct *buf,
 		*total_size, *block_size);
 	return;
 }
+
 static int register_new_disk(ctlr_info_t *h)
 {
         struct gendisk *disk;
@@ -1663,7 +1633,9 @@ static int register_new_disk(ctlr_info_t *h)
 	/* setup partitions per disk */
         disk = h->gendisk[logvol];
 	set_capacity(disk, h->drv[logvol].nr_blocks);
-	add_disk(disk);
+	/* if it's the controller it's already added */
+	if(logvol)
+		add_disk(disk);
 freeret:
 	kfree(ld_buff);
 	kfree(size_buff);
@@ -1675,6 +1647,53 @@ free_err:
 	logvol = -1;
 	goto freeret;
 }
+
+static int cciss_revalidate(struct gendisk *disk)
+{
+	ctlr_info_t *h = get_host(disk);
+	drive_info_struct *drv = get_drv(disk);
+	int logvol;
+	int FOUND=0;
+	unsigned int block_size;
+	unsigned int total_size;
+	ReadCapdata_struct *size_buff = NULL;
+	InquiryData_struct *inq_buff = NULL;
+
+	for(logvol=0; logvol < CISS_MAX_LUN; logvol++)
+	{
+		if(h->drv[logvol].LunID == drv->LunID) {
+			FOUND=1;
+			break;
+		}
+	}
+
+	if (!FOUND) return 1;
+
+	size_buff = kmalloc(sizeof( ReadCapdata_struct), GFP_KERNEL);
+        if (size_buff == NULL)
+        {
+                printk(KERN_WARNING "cciss: out of memory\n");
+                return 1;
+        }
+	inq_buff = kmalloc(sizeof( InquiryData_struct), GFP_KERNEL);
+        if (inq_buff == NULL)
+        {
+                printk(KERN_WARNING "cciss: out of memory\n");
+		kfree(size_buff);
+                return 1;
+        }
+
+	cciss_read_capacity(h->ctlr, logvol, size_buff, 1, &total_size, &block_size);
+	cciss_geometry_inquiry(h->ctlr, logvol, 1, total_size, block_size, inq_buff, drv);
+
+	blk_queue_hardsect_size(h->queue, drv->block_size);
+	set_capacity(disk, drv->nr_blocks);
+
+	kfree(size_buff);
+	kfree(inq_buff);
+	return 0;
+}
+
 /*
  *   Wait polling for a command to complete.
  *   The memory mapped FIFO is polled for the completion.
@@ -2762,7 +2781,9 @@ static int __devinit cciss_init_one(struct pci_dev *pdev,
 		disk->fops = &cciss_fops;
 		disk->queue = hba[i]->queue;
 		disk->private_data = drv;
-		if( !(drv->nr_blocks))
+		/* we must register the controller even if no disks exist */
+		/* this is for the online array utilities */
+		if(!drv->heads && j)
 			continue;
 		blk_queue_hardsect_size(hba[i]->queue, drv->block_size);
 		set_capacity(disk, drv->nr_blocks);
@@ -2867,7 +2888,6 @@ int __init cciss_init(void)
 
 static int __init init_cciss_module(void)
 {
-	register_cciss_ioctl32();
 	return ( cciss_init());
 }
 
@@ -2875,7 +2895,6 @@ static void __exit cleanup_cciss_module(void)
 {
 	int i;
 
-	unregister_cciss_ioctl32();
 	pci_unregister_driver(&cciss_pci_driver);
 	/* double check that all controller entrys have been removed */
 	for (i=0; i< MAX_CTLR; i++) 

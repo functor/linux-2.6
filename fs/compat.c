@@ -25,6 +25,7 @@
 #include <linux/file.h>
 #include <linux/vfs.h>
 #include <linux/ioctl32.h>
+#include <linux/ioctl.h>
 #include <linux/init.h>
 #include <linux/sockios.h>	/* for SIOCDEVPRIVATE */
 #include <linux/smb.h>
@@ -47,6 +48,7 @@
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
+#include <asm/ioctls.h>
 
 /*
  * Not all architectures have sys_utime, so implement this in terms
@@ -117,9 +119,16 @@ static int put_compat_statfs(struct compat_statfs __user *ubuf, struct kstatfs *
 {
 	
 	if (sizeof ubuf->f_blocks == 4) {
-		if ((kbuf->f_blocks | kbuf->f_bfree |
-		     kbuf->f_bavail | kbuf->f_files | kbuf->f_ffree) &
+		if ((kbuf->f_blocks | kbuf->f_bfree | kbuf->f_bavail) &
 		    0xffffffff00000000ULL)
+			return -EOVERFLOW;
+		/* f_files and f_ffree may be -1; it's okay
+		 * to stuff that into 32 bits */
+		if (kbuf->f_files != 0xffffffffffffffffULL
+		 && (kbuf->f_files & 0xffffffff00000000ULL))
+			return -EOVERFLOW;
+		if (kbuf->f_ffree != 0xffffffffffffffffULL
+		 && (kbuf->f_ffree & 0xffffffff00000000ULL))
 			return -EOVERFLOW;
 	}
 	if (verify_area(VERIFY_WRITE, ubuf, sizeof(*ubuf)) ||
@@ -184,9 +193,16 @@ out:
 static int put_compat_statfs64(struct compat_statfs64 __user *ubuf, struct kstatfs *kbuf)
 {
 	if (sizeof ubuf->f_blocks == 4) {
-		if ((kbuf->f_blocks | kbuf->f_bfree |
-		     kbuf->f_bavail | kbuf->f_files | kbuf->f_ffree) &
+		if ((kbuf->f_blocks | kbuf->f_bfree | kbuf->f_bavail) &
 		    0xffffffff00000000ULL)
+			return -EOVERFLOW;
+		/* f_files and f_ffree may be -1; it's okay
+		 * to stuff that into 32 bits */
+		if (kbuf->f_files != 0xffffffffffffffffULL
+		 && (kbuf->f_files & 0xffffffff00000000ULL))
+			return -EOVERFLOW;
+		if (kbuf->f_ffree != 0xffffffffffffffffULL
+		 && (kbuf->f_ffree & 0xffffffff00000000ULL))
 			return -EOVERFLOW;
 	}
 	if (verify_area(VERIFY_WRITE, ubuf, sizeof(*ubuf)) ||
@@ -205,7 +221,7 @@ static int put_compat_statfs64(struct compat_statfs64 __user *ubuf, struct kstat
 	return 0;
 }
 
-asmlinkage long compat_statfs64(const char __user *path, compat_size_t sz, struct compat_statfs64 __user *buf)
+asmlinkage long compat_sys_statfs64(const char __user *path, compat_size_t sz, struct compat_statfs64 __user *buf)
 {
 	struct nameidata nd;
 	int error;
@@ -224,7 +240,7 @@ asmlinkage long compat_statfs64(const char __user *path, compat_size_t sz, struc
 	return error;
 }
 
-asmlinkage long compat_fstatfs64(unsigned int fd, compat_size_t sz, struct compat_statfs64 __user *buf)
+asmlinkage long compat_sys_fstatfs64(unsigned int fd, compat_size_t sz, struct compat_statfs64 __user *buf)
 {
 	struct file * file;
 	struct kstatfs tmp;
@@ -383,77 +399,121 @@ out:
 }
 EXPORT_SYMBOL(unregister_ioctl32_conversion); 
 
+static void compat_ioctl_error(struct file *filp, unsigned int fd,
+		unsigned int cmd, unsigned long arg)
+{
+	char buf[10];
+	char *fn = "?";
+	char *path;
+
+	/* find the name of the device. */
+	path = (char *)__get_free_page(GFP_KERNEL);
+	if (path) {
+		fn = d_path(filp->f_dentry, filp->f_vfsmnt, path, PAGE_SIZE);
+		if (IS_ERR(fn))
+			fn = "?";
+	}
+
+	sprintf(buf,"'%c'", (cmd>>24) & 0x3f);
+	if (!isprint(buf[1]))
+		sprintf(buf, "%02x", buf[1]);
+	printk("ioctl32(%s:%d): Unknown cmd fd(%d) "
+			"cmd(%08x){%s} arg(%08x) on %s\n",
+			current->comm, current->pid,
+			(int)fd, (unsigned int)cmd, buf,
+			(unsigned int)arg, fn);
+
+	if (path)
+		free_page((unsigned long)path);
+}
+
 asmlinkage long compat_sys_ioctl(unsigned int fd, unsigned int cmd,
 				unsigned long arg)
 {
-	struct file * filp;
+	struct file *filp;
 	int error = -EBADF;
 	struct ioctl_trans *t;
+	int fput_needed;
 
-	filp = fget(fd);
-	if(!filp)
-		goto out2;
-
-	if (!filp->f_op || !filp->f_op->ioctl) {
-		error = sys_ioctl (fd, cmd, arg);
+	filp = fget_light(fd, &fput_needed);
+	if (!filp)
 		goto out;
+
+	/* RED-PEN how should LSM module know it's handling 32bit? */
+	error = security_file_ioctl(filp, cmd, arg);
+	if (error)
+		goto out_fput;
+
+	/*
+	 * To allow the compat_ioctl handlers to be self contained
+	 * we need to check the common ioctls here first.
+	 * Just handle them with the standard handlers below.
+	 */
+	switch (cmd) {
+	case FIOCLEX:
+	case FIONCLEX:
+	case FIONBIO:
+	case FIOASYNC:
+	case FIOQSIZE:
+		break;
+
+	case FIBMAP:
+	case FIGETBSZ:
+	case FIONREAD:
+		if (S_ISREG(filp->f_dentry->d_inode->i_mode))
+			break;
+		/*FALL THROUGH*/
+
+	default:
+		if (filp->f_op && filp->f_op->compat_ioctl) {
+			error = filp->f_op->compat_ioctl(filp, cmd, arg);
+			if (error != -ENOIOCTLCMD)
+				goto out_fput;
+		}
+
+		if (!filp->f_op ||
+		    (!filp->f_op->ioctl && !filp->f_op->unlocked_ioctl))
+			goto do_ioctl;
+		break;
 	}
 
+	/* When register_ioctl32_conversion is finally gone remove
+	   this lock! -AK */
 	down_read(&ioctl32_sem);
-
-	t = ioctl32_hash_table[ioctl32_hash (cmd)];
-
-	while (t && t->cmd != cmd)
-		t = t->next;
-	if (t) {
-		if (t->handler) { 
-			lock_kernel();
-			error = t->handler(fd, cmd, arg, filp);
-			unlock_kernel();
-			up_read(&ioctl32_sem);
-		} else {
-			up_read(&ioctl32_sem);
-			error = sys_ioctl(fd, cmd, arg);
-		}
-	} else {
-		up_read(&ioctl32_sem);
-		if (cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15)) {
-			error = siocdevprivate_ioctl(fd, cmd, arg);
-		} else {
-			static int count;
-			if (++count <= 50) {
-				char buf[10];
-				char *fn = "?";
-				char *path;
-
-				path = (char *)__get_free_page(GFP_KERNEL);
-
-				/* find the name of the device. */
-				if (path) {
-			       		fn = d_path(filp->f_dentry,
-						filp->f_vfsmnt, path,
-						PAGE_SIZE);
-					if (IS_ERR(fn))
-						fn = "?";
-				}
-
-				sprintf(buf,"'%c'", (cmd>>24) & 0x3f);
-				if (!isprint(buf[1]))
-				    sprintf(buf, "%02x", buf[1]);
-				printk("ioctl32(%s:%d): Unknown cmd fd(%d) "
-					"cmd(%08x){%s} arg(%08x) on %s\n",
-					current->comm, current->pid,
-					(int)fd, (unsigned int)cmd, buf,
-					(unsigned int)arg, fn);
-				if (path)
-					free_page((unsigned long)path);
-			}
-			error = -EINVAL;
-		}
+	for (t = ioctl32_hash_table[ioctl32_hash(cmd)]; t; t = t->next) {
+		if (t->cmd == cmd)
+			goto found_handler;
 	}
-out:
-	fput(filp);
-out2:
+	up_read(&ioctl32_sem);
+
+	if (S_ISSOCK(filp->f_dentry->d_inode->i_mode) &&
+	    cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15)) {
+		error = siocdevprivate_ioctl(fd, cmd, arg);
+	} else {
+		static int count;
+
+		if (++count <= 50)
+			compat_ioctl_error(filp, fd, cmd, arg);
+		error = -EINVAL;
+	}
+
+	goto out_fput;
+
+ found_handler:
+	if (t->handler) {
+		lock_kernel();
+		error = t->handler(fd, cmd, arg, filp);
+		unlock_kernel();
+		up_read(&ioctl32_sem);
+		goto out_fput;
+	}
+
+	up_read(&ioctl32_sem);
+ do_ioctl:
+	error = vfs_ioctl(filp, fd, cmd, arg);
+ out_fput:
+	fput_light(filp, fput_needed);
+ out:
 	return error;
 }
 
@@ -527,14 +587,7 @@ asmlinkage long compat_sys_fcntl64(unsigned int fd, unsigned int cmd,
 		set_fs(KERNEL_DS);
 		ret = sys_fcntl(fd, cmd, (unsigned long)&f);
 		set_fs(old_fs);
-		if ((cmd == F_GETLK) && (ret == 0)) {
-			/* POSIX-2001 now defines negative l_len */
-			if (f.l_len < 0) {
-				f.l_start += f.l_len;
-				f.l_len = -f.l_len;
-			}
-			if (f.l_start < 0)
-				return -EINVAL;
+		if (cmd == F_GETLK && ret == 0) {
 			if ((f.l_start >= COMPAT_OFF_T_MAX) ||
 			    ((f.l_start + f.l_len) > COMPAT_OFF_T_MAX))
 				ret = -EOVERFLOW;
@@ -555,14 +608,7 @@ asmlinkage long compat_sys_fcntl64(unsigned int fd, unsigned int cmd,
 				((cmd == F_SETLK64) ? F_SETLK : F_SETLKW),
 				(unsigned long)&f);
 		set_fs(old_fs);
-		if ((cmd == F_GETLK64) && (ret == 0)) {
-			/* POSIX-2001 now defines negative l_len */
-			if (f.l_len < 0) {
-				f.l_start += f.l_len;
-				f.l_len = -f.l_len;
-			}
-			if (f.l_start < 0)
-				return -EINVAL;
+		if (cmd == F_GETLK64 && ret == 0) {
 			if ((f.l_start >= COMPAT_LOFF_T_MAX) ||
 			    ((f.l_start + f.l_len) > COMPAT_LOFF_T_MAX))
 				ret = -EOVERFLOW;
@@ -860,7 +906,7 @@ efault:
 	return -EFAULT;
 }
 
-asmlinkage long compat_old_readdir(unsigned int fd,
+asmlinkage long compat_sys_old_readdir(unsigned int fd,
 	struct compat_old_linux_dirent __user *dirent, unsigned int count)
 {
 	int error;
@@ -1080,7 +1126,6 @@ static ssize_t compat_do_readv_writev(int type, struct file *file,
 	int seg;
 	io_fn_t fn;
 	iov_fn_t fnv;
-	struct inode *inode;
 
 	/*
 	 * SuS says "The readv() function *may* fail if the iovcnt argument
@@ -1145,11 +1190,7 @@ static ssize_t compat_do_readv_writev(int type, struct file *file,
 		goto out;
 	}
 
-	inode = file->f_dentry->d_inode;
-	/* VERIFY_WRITE actually means a read, as we write to user space */
-	ret = locks_verify_area((type == READ
-				 ? FLOCK_VERIFY_READ : FLOCK_VERIFY_WRITE),
-				inode, file, *pos, tot_len);
+	ret = rw_verify_area(type, file, pos, tot_len);
 	if (ret)
 		goto out;
 
@@ -1387,25 +1428,25 @@ int compat_do_execve(char * filename,
 	int retval;
 	int i;
 
-	file = open_exec(filename);
-
-	retval = PTR_ERR(file);
-	if (IS_ERR(file))
-		return retval;
-
-	sched_exec();
-
 	retval = -ENOMEM;
 	bprm = kmalloc(sizeof(*bprm), GFP_KERNEL);
 	if (!bprm)
 		goto out_ret;
 	memset(bprm, 0, sizeof(*bprm));
 
+	file = open_exec(filename);
+	retval = PTR_ERR(file);
+	if (IS_ERR(file))
+		goto out_kfree;
+
+	sched_exec();
+
 	bprm->p = PAGE_SIZE*MAX_ARG_PAGES-sizeof(void *);
 	bprm->file = file;
 	bprm->filename = filename;
 	bprm->interp = filename;
 	bprm->mm = mm_alloc();
+	retval = -ENOMEM;
 	if (!bprm->mm)
 		goto out_file;
 
@@ -1472,6 +1513,8 @@ out_file:
 		allow_write_access(bprm->file);
 		fput(bprm->file);
 	}
+
+out_kfree:
 	kfree(bprm);
 
 out_ret:

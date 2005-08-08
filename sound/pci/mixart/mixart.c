@@ -47,13 +47,12 @@ MODULE_SUPPORTED_DEVICE("{{Digigram," CARD_NAME "}}");
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;             /* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;              /* ID for this card */
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;     /* Enable this card */
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for Digigram " CARD_NAME " soundcard.");
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for Digigram " CARD_NAME " soundcard.");
-module_param_array(enable, bool, boot_devs, 0444);
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable Digigram " CARD_NAME " soundcard.");
 
 /*
@@ -527,11 +526,11 @@ static int mixart_set_format(mixart_stream_t *stream, snd_pcm_format_t format)
 		stream_param.sample_type = ST_INTEGER_24BE;
 		stream_param.sample_size = 24;
 		break;
-	case SNDRV_PCM_FMTBIT_FLOAT_LE:
+	case SNDRV_PCM_FORMAT_FLOAT_LE:
 		stream_param.sample_type = ST_FLOATING_POINT_32LE;
 		stream_param.sample_size = 32;
 		break;
-	case  SNDRV_PCM_FMTBIT_FLOAT_BE:
+	case  SNDRV_PCM_FORMAT_FLOAT_BE:
 		stream_param.sample_type = ST_FLOATING_POINT_32BE;
 		stream_param.sample_size = 32;
 		break;
@@ -1020,13 +1019,6 @@ static int __devinit snd_mixart_create(mixart_mgr_t *mgr, snd_card_t *card, int 
 		return err;
 	}
 
-	if (idx == 0) {
-		/* create a DSP loader only on first cardX*/
-		err = snd_mixart_hwdep_new(mgr);
-		if (err < 0)
-			return err;
-	}
-
 	snd_card_set_dev(card, &mgr->pci->dev);
 
 	return 0;
@@ -1078,7 +1070,7 @@ static int snd_mixart_free(mixart_mgr_t *mgr)
 	/* release the i/o ports */
 	for (i = 0; i < 2; i++) {
 		if (mgr->mem[i].virt)
-			iounmap((void *)mgr->mem[i].virt);
+			iounmap(mgr->mem[i].virt);
 	}
 	pci_release_regions(mgr->pci);
 
@@ -1093,6 +1085,7 @@ static int snd_mixart_free(mixart_mgr_t *mgr)
 		mgr->bufferinfo.area = NULL;
 	}
 
+	pci_disable_device(mgr->pci);
 	kfree(mgr);
 	return 0;
 }
@@ -1293,14 +1286,17 @@ static int __devinit snd_mixart_probe(struct pci_dev *pci,
 	/* check if we can restrict PCI DMA transfers to 32 bits */
 	if (pci_set_dma_mask(pci, 0xffffffff) < 0) {
 		snd_printk(KERN_ERR "architecture does not support 32bit PCI busmaster DMA\n");
+		pci_disable_device(pci);
 		return -ENXIO;
 	}
 
 	/*
 	 */
 	mgr = kcalloc(1, sizeof(*mgr), GFP_KERNEL);
-	if (! mgr)
+	if (! mgr) {
+		pci_disable_device(pci);
 		return -ENOMEM;
+	}
 
 	mgr->pci = pci;
 	mgr->irq = -1;
@@ -1308,12 +1304,13 @@ static int __devinit snd_mixart_probe(struct pci_dev *pci,
 	/* resource assignment */
 	if ((err = pci_request_regions(pci, CARD_NAME)) < 0) {
 		kfree(mgr);
+		pci_disable_device(pci);
 		return err;
 	}
 	for (i = 0; i < 2; i++) {
 		mgr->mem[i].phys = pci_resource_start(pci, i);
-		mgr->mem[i].virt = (unsigned long)ioremap_nocache(mgr->mem[i].phys,
-								  pci_resource_len(pci, i));
+		mgr->mem[i].virt = ioremap_nocache(mgr->mem[i].phys,
+						   pci_resource_len(pci, i));
 	}
 
 	if (request_irq(pci->irq, snd_mixart_interrupt, SA_INTERRUPT|SA_SHIRQ, CARD_NAME, (void *)mgr)) {
@@ -1355,7 +1352,7 @@ static int __devinit snd_mixart_probe(struct pci_dev *pci,
 			idx = index[dev];
 		else
 			idx = index[dev] + i;
-		snprintf(tmpid, sizeof(tmpid), "%s-%d", id[dev], i);
+		snprintf(tmpid, sizeof(tmpid), "%s-%d", id[dev] ? id[dev] : "MIXART", i);
 		card = snd_card_new(idx, tmpid, THIS_MODULE, 0);
 
 		if (! card) {
@@ -1406,6 +1403,13 @@ static int __devinit snd_mixart_probe(struct pci_dev *pci,
 	}
 	/* init bufferinfo_array */
 	memset(mgr->bufferinfo.area, 0, size);
+
+	/* set up firmware */
+	err = snd_mixart_setup_firmware(mgr);
+	if (err < 0) {
+		snd_mixart_free(mgr);
+		return err;
+	}
 
 	pci_set_drvdata(pci, mgr);
 	dev++;

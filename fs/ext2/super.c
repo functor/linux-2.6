@@ -122,6 +122,9 @@ static void ext2_put_super (struct super_block * sb)
 			brelse (sbi->s_group_desc[i]);
 	kfree(sbi->s_group_desc);
 	kfree(sbi->s_debts);
+	percpu_counter_destroy(&sbi->s_freeblocks_counter);
+	percpu_counter_destroy(&sbi->s_freeinodes_counter);
+	percpu_counter_destroy(&sbi->s_dirs_counter);
 	brelse (sbi->s_sbh);
 	sb->s_fs_info = NULL;
 	kfree(sbi);
@@ -181,10 +184,9 @@ static void destroy_inodecache(void)
 		printk(KERN_INFO "ext2_inode_cache: not all structures were freed\n");
 }
 
-#ifdef CONFIG_EXT2_FS_POSIX_ACL
-
 static void ext2_clear_inode(struct inode *inode)
 {
+#ifdef CONFIG_EXT2_FS_POSIX_ACL
 	struct ext2_inode_info *ei = EXT2_I(inode);
 
 	if (ei->i_acl && ei->i_acl != EXT2_ACL_NOT_CACHED) {
@@ -195,10 +197,15 @@ static void ext2_clear_inode(struct inode *inode)
 		posix_acl_release(ei->i_default_acl);
 		ei->i_default_acl = EXT2_ACL_NOT_CACHED;
 	}
+#endif
+	if (!is_bad_inode(inode))
+		ext2_discard_prealloc(inode);
 }
 
-#else
-# define ext2_clear_inode NULL
+
+#ifdef CONFIG_QUOTA
+static ssize_t ext2_quota_read(struct super_block *sb, int type, char *data, size_t len, loff_t off);
+static ssize_t ext2_quota_write(struct super_block *sb, int type, const char *data, size_t len, loff_t off);
 #endif
 
 static struct super_operations ext2_sops = {
@@ -206,13 +213,16 @@ static struct super_operations ext2_sops = {
 	.destroy_inode	= ext2_destroy_inode,
 	.read_inode	= ext2_read_inode,
 	.write_inode	= ext2_write_inode,
-	.put_inode	= ext2_put_inode,
 	.delete_inode	= ext2_delete_inode,
 	.put_super	= ext2_put_super,
 	.write_super	= ext2_write_super,
 	.statfs		= ext2_statfs,
 	.remount_fs	= ext2_remount,
 	.clear_inode	= ext2_clear_inode,
+#ifdef CONFIG_QUOTA
+	.quota_read	= ext2_quota_read,
+	.quota_write	= ext2_quota_write,
+#endif
 };
 
 /* Yes, most of these are left as NULL!!
@@ -600,13 +610,9 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 	es = (struct ext2_super_block *) (((char *)bh->b_data) + offset);
 	sbi->s_es = es;
 	sb->s_magic = le16_to_cpu(es->s_magic);
-	sb->s_flags |= MS_ONE_SECOND;
-	if (sb->s_magic != EXT2_SUPER_MAGIC) {
-		if (!silent)
-			printk ("VFS: Can't find ext2 filesystem on dev %s.\n",
-				sb->s_id);
-		goto failed_mount;
-	}
+
+	if (sb->s_magic != EXT2_SUPER_MAGIC)
+		goto cantfind_ext2;
 
 	/* Set defaults before we parse the mount options */
 	def_mount_opts = le32_to_cpu(es->s_default_mount_opts);
@@ -663,7 +669,9 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 		       sb->s_id, le32_to_cpu(features));
 		goto failed_mount;
 	}
+
 	blocksize = BLOCK_SIZE << le32_to_cpu(sbi->s_es->s_log_block_size);
+
 	/* If the blocksize doesn't match, re-read the thing.. */
 	if (sb->s_blocksize != blocksize) {
 		brelse(bh);
@@ -705,35 +713,36 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 			goto failed_mount;
 		}
 	}
+
 	sbi->s_frag_size = EXT2_MIN_FRAG_SIZE <<
 				   le32_to_cpu(es->s_log_frag_size);
-	if (sbi->s_frag_size)
-		sbi->s_frags_per_block = sb->s_blocksize /
-						  sbi->s_frag_size;
-	else
-		sb->s_magic = 0;
+	if (sbi->s_frag_size == 0)
+		goto cantfind_ext2;
+	sbi->s_frags_per_block = sb->s_blocksize / sbi->s_frag_size;
+
 	sbi->s_blocks_per_group = le32_to_cpu(es->s_blocks_per_group);
 	sbi->s_frags_per_group = le32_to_cpu(es->s_frags_per_group);
 	sbi->s_inodes_per_group = le32_to_cpu(es->s_inodes_per_group);
-	sbi->s_inodes_per_block = sb->s_blocksize /
-					   EXT2_INODE_SIZE(sb);
+
+	if (EXT2_INODE_SIZE(sb) == 0)
+		goto cantfind_ext2;
+	sbi->s_inodes_per_block = sb->s_blocksize / EXT2_INODE_SIZE(sb);
+	if (sbi->s_inodes_per_block == 0)
+		goto cantfind_ext2;
 	sbi->s_itb_per_group = sbi->s_inodes_per_group /
-				        sbi->s_inodes_per_block;
+					sbi->s_inodes_per_block;
 	sbi->s_desc_per_block = sb->s_blocksize /
-					 sizeof (struct ext2_group_desc);
+					sizeof (struct ext2_group_desc);
 	sbi->s_sbh = bh;
 	sbi->s_mount_state = le16_to_cpu(es->s_state);
 	sbi->s_addr_per_block_bits =
 		log2 (EXT2_ADDR_PER_BLOCK(sb));
 	sbi->s_desc_per_block_bits =
 		log2 (EXT2_DESC_PER_BLOCK(sb));
-	if (sb->s_magic != EXT2_SUPER_MAGIC) {
-		if (!silent)
-			printk ("VFS: Can't find an ext2 filesystem on dev "
-				"%s.\n",
-				sb->s_id);
-		goto failed_mount;
-	}
+
+	if (sb->s_magic != EXT2_SUPER_MAGIC)
+		goto cantfind_ext2;
+
 	if (sb->s_blocksize != bh->b_size) {
 		if (!silent)
 			printk ("VFS: Unsupported blocksize on dev "
@@ -763,6 +772,8 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 		goto failed_mount;
 	}
 
+	if (EXT2_BLOCKS_PER_GROUP(sb) == 0)
+		goto cantfind_ext2;
 	sbi->s_groups_count = (le32_to_cpu(es->s_blocks_count) -
 				        le32_to_cpu(es->s_first_data_block) +
 				       EXT2_BLOCKS_PER_GROUP(sb) - 1) /
@@ -808,6 +819,7 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 	 */
 	sb->s_op = &ext2_sops;
 	sb->s_export_op = &ext2_export_ops;
+	sb->s_xattr = ext2_xattr_handlers;
 	root = iget(sb, EXT2_ROOT_INO);
 	sb->s_root = d_alloc_root(root);
 	if (!sb->s_root) {
@@ -832,13 +844,19 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 	percpu_counter_mod(&sbi->s_dirs_counter,
 				ext2_count_dirs(sb));
 	return 0;
+
+cantfind_ext2:
+	if (!silent)
+		printk("VFS: Can't find an ext2 filesystem on dev %s.\n",
+		       sb->s_id);
+	goto failed_mount;
+
 failed_mount2:
 	for (i = 0; i < db_count; i++)
 		brelse(sbi->s_group_desc[i]);
 failed_mount_group_desc:
 	kfree(sbi->s_group_desc);
-	if (sbi->s_debts)
-		kfree(sbi->s_debts);
+	kfree(sbi->s_debts);
 failed_mount:
 	brelse(bh);
 failed_sbi:
@@ -1001,6 +1019,111 @@ static struct super_block *ext2_get_sb(struct file_system_type *fs_type,
 {
 	return get_sb_bdev(fs_type, flags, dev_name, data, ext2_fill_super);
 }
+
+#ifdef CONFIG_QUOTA
+
+/* Read data from quotafile - avoid pagecache and such because we cannot afford
+ * acquiring the locks... As quota files are never truncated and quota code
+ * itself serializes the operations (and noone else should touch the files)
+ * we don't have to be afraid of races */
+static ssize_t ext2_quota_read(struct super_block *sb, int type, char *data,
+			       size_t len, loff_t off)
+{
+	struct inode *inode = sb_dqopt(sb)->files[type];
+	sector_t blk = off >> EXT2_BLOCK_SIZE_BITS(sb);
+	int err = 0;
+	int offset = off & (sb->s_blocksize - 1);
+	int tocopy;
+	size_t toread;
+	struct buffer_head tmp_bh;
+	struct buffer_head *bh;
+	loff_t i_size = i_size_read(inode);
+
+	if (off > i_size)
+		return 0;
+	if (off+len > i_size)
+		len = i_size-off;
+	toread = len;
+	while (toread > 0) {
+		tocopy = sb->s_blocksize - offset < toread ?
+				sb->s_blocksize - offset : toread;
+
+		tmp_bh.b_state = 0;
+		err = ext2_get_block(inode, blk, &tmp_bh, 0);
+		if (err)
+			return err;
+		if (!buffer_mapped(&tmp_bh))	/* A hole? */
+			memset(data, 0, tocopy);
+		else {
+			bh = sb_bread(sb, tmp_bh.b_blocknr);
+			if (!bh)
+				return -EIO;
+			memcpy(data, bh->b_data+offset, tocopy);
+			brelse(bh);
+		}
+		offset = 0;
+		toread -= tocopy;
+		data += tocopy;
+		blk++;
+	}
+	return len;
+}
+
+/* Write to quotafile */
+static ssize_t ext2_quota_write(struct super_block *sb, int type,
+				const char *data, size_t len, loff_t off)
+{
+	struct inode *inode = sb_dqopt(sb)->files[type];
+	sector_t blk = off >> EXT2_BLOCK_SIZE_BITS(sb);
+	int err = 0;
+	int offset = off & (sb->s_blocksize - 1);
+	int tocopy;
+	size_t towrite = len;
+	struct buffer_head tmp_bh;
+	struct buffer_head *bh;
+
+	down(&inode->i_sem);
+	while (towrite > 0) {
+		tocopy = sb->s_blocksize - offset < towrite ?
+				sb->s_blocksize - offset : towrite;
+
+		tmp_bh.b_state = 0;
+		err = ext2_get_block(inode, blk, &tmp_bh, 1);
+		if (err)
+			goto out;
+		if (offset || tocopy != EXT2_BLOCK_SIZE(sb))
+			bh = sb_bread(sb, tmp_bh.b_blocknr);
+		else
+			bh = sb_getblk(sb, tmp_bh.b_blocknr);
+		if (!bh) {
+			err = -EIO;
+			goto out;
+		}
+		lock_buffer(bh);
+		memcpy(bh->b_data+offset, data, tocopy);
+		flush_dcache_page(bh->b_page);
+		set_buffer_uptodate(bh);
+		mark_buffer_dirty(bh);
+		unlock_buffer(bh);
+		brelse(bh);
+		offset = 0;
+		towrite -= tocopy;
+		data += tocopy;
+		blk++;
+	}
+out:
+	if (len == towrite)
+		return err;
+	if (inode->i_size < off+len-towrite)
+		i_size_write(inode, off+len-towrite);
+	inode->i_version++;
+	inode->i_mtime = inode->i_ctime = CURRENT_TIME;
+	mark_inode_dirty(inode);
+	up(&inode->i_sem);
+	return len - towrite;
+}
+
+#endif
 
 static struct file_system_type ext2_fs_type = {
 	.owner		= THIS_MODULE,

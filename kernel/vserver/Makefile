@@ -10,4 +10,6 @@ vserver-y	:= switch.o context.o namespace.o sched.o network.o inode.o \
 
 vserver-$(CONFIG_VSERVER_DEBUG) += sysctl.o
 vserver-$(CONFIG_VSERVER_LEGACY) += legacy.o
+vserver-$(CONFIG_VSERVER_LEGACYNET) += legacynet.o
+vserver-$(CONFIG_VSERVER_HISTORY) += history.o
 

@@ -477,14 +477,11 @@ static struct i2c_adapter ali15x3_adapter = {
 };
 
 static struct pci_device_id ali15x3_ids[] = {
-	{
-	.vendor =	PCI_VENDOR_ID_AL,
-	.device =	PCI_DEVICE_ID_AL_M7101,
-	.subvendor =	PCI_ANY_ID,
-	.subdevice =	PCI_ANY_ID,
-	},
+	{ PCI_DEVICE(PCI_VENDOR_ID_AL, PCI_DEVICE_ID_AL_M7101) },
 	{ 0, }
 };
+
+MODULE_DEVICE_TABLE (pci, ali15x3_ids);
 
 static int __devinit ali15x3_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
@@ -517,7 +514,7 @@ static struct pci_driver ali15x3_driver = {
 
 static int __init i2c_ali15x3_init(void)
 {
-	return pci_module_init(&ali15x3_driver);
+	return pci_register_driver(&ali15x3_driver);
 }
 
 static void __exit i2c_ali15x3_exit(void)

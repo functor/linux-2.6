@@ -28,6 +28,7 @@ enum {
 	LINUX_RAID_PARTITION = 0xfd,	/* autodetect RAID partition */
 
 	SOLARIS_X86_PARTITION =	LINUX_SWAP_PARTITION,
+	NEW_SOLARIS_X86_PARTITION = 0xbf,
 
 	DM6_AUX1PARTITION = 0x51,	/* no DDO:  use xlated geom */
 	DM6_AUX3PARTITION = 0x53,	/* no DDO:  use xlated geom */
@@ -127,15 +128,22 @@ struct gendisk {
 #endif
 };
 
+/* Structure for sysfs attributes on block devices */
+struct disk_attribute {
+	struct attribute attr;
+	ssize_t (*show)(struct gendisk *, char *);
+};
+
 /* 
  * Macros to operate on percpu disk statistics:
- * Since writes to disk_stats are serialised through the queue_lock,
- * smp_processor_id() should be enough to get to the per_cpu versions
- * of statistics counters
+ *
+ * The __ variants should only be called in critical sections. The full
+ * variants disable/enable preemption.
  */
 #ifdef	CONFIG_SMP
-#define disk_stat_add(gendiskp, field, addnd) 	\
+#define __disk_stat_add(gendiskp, field, addnd) 	\
 	(per_cpu_ptr(gendiskp->dkstats, smp_processor_id())->field += addnd)
+
 #define disk_stat_read(gendiskp, field)					\
 ({									\
 	typeof(gendiskp->dkstats->field) res = 0;			\
@@ -159,7 +167,8 @@ static inline void disk_stat_set_all(struct gendisk *gendiskp, int value)	{
 }		
 				
 #else
-#define disk_stat_add(gendiskp, field, addnd) (gendiskp->dkstats.field += addnd)
+#define __disk_stat_add(gendiskp, field, addnd) \
+				(gendiskp->dkstats.field += addnd)
 #define disk_stat_read(gendiskp, field)	(gendiskp->dkstats.field)
 
 static inline void disk_stat_set_all(struct gendisk *gendiskp, int value)	{
@@ -167,8 +176,21 @@ static inline void disk_stat_set_all(struct gendisk *gendiskp, int value)	{
 }
 #endif
 
-#define disk_stat_inc(gendiskp, field) disk_stat_add(gendiskp, field, 1)
+#define disk_stat_add(gendiskp, field, addnd)			\
+	do {							\
+		preempt_disable();				\
+		__disk_stat_add(gendiskp, field, addnd);	\
+		preempt_enable();				\
+	} while (0)
+
+#define __disk_stat_dec(gendiskp, field) __disk_stat_add(gendiskp, field, -1)
 #define disk_stat_dec(gendiskp, field) disk_stat_add(gendiskp, field, -1)
+
+#define __disk_stat_inc(gendiskp, field) __disk_stat_add(gendiskp, field, 1)
+#define disk_stat_inc(gendiskp, field) disk_stat_add(gendiskp, field, 1)
+
+#define __disk_stat_sub(gendiskp, field, subnd) \
+		__disk_stat_add(gendiskp, field, -subnd)
 #define disk_stat_sub(gendiskp, field, subnd) \
 		disk_stat_add(gendiskp, field, -subnd)
 
@@ -202,6 +224,7 @@ static inline void free_disk_stats(struct gendisk *disk)
 extern void disk_round_stats(struct gendisk *disk);
 
 /* drivers/block/genhd.c */
+extern int get_blkdev_list(char *);
 extern void add_disk(struct gendisk *disk);
 extern void del_gendisk(struct gendisk *gp);
 extern void unlink_gendisk(struct gendisk *gp);

@@ -80,8 +80,11 @@ asmlinkage int sys32_execve(struct pt_regs *regs)
 		goto out;
 	error = compat_do_execve(filename, compat_ptr(regs->gr[25]),
 				 compat_ptr(regs->gr[24]), regs);
-	if (error == 0)
+	if (error == 0) {
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
+	}
 	putname(filename);
 out:
 
@@ -162,12 +165,6 @@ asmlinkage long sys32_sysctl(struct __sysctl_args32 *args)
 	return error;
 }
 
-#else /* CONFIG_SYSCTL */
-
-asmlinkage long sys32_sysctl(struct __sysctl_args *args)
-{
-	return -ENOSYS;
-}
 #endif /* CONFIG_SYSCTL */
 
 asmlinkage long sys32_sched_rr_get_interval(pid_t pid,
@@ -201,21 +198,6 @@ static inline long get_ts32(struct timespec *o, struct compat_timeval *i)
 		return -EFAULT;
 	o->tv_nsec = usec * 1000;
 	return 0;
-}
-
-asmlinkage long sys32_time(compat_time_t *tloc)
-{
-	struct timeval tv;
-	compat_time_t now32;
-
-	do_gettimeofday(&tv);
-	now32 = tv.tv_sec;
-
-	if (tloc)
-		if (put_user(now32, tloc))
-			now32 = -EFAULT;
-
-	return now32;
 }
 
 asmlinkage int

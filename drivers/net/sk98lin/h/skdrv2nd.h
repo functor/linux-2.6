@@ -266,7 +266,6 @@ struct s_TxD {
 typedef struct s_DevNet DEV_NET;
 
 struct s_DevNet {
-	struct			proc_dir_entry *proc;
 	int             PortNr;
 	int             NetNr;
 	int             Mtu;
@@ -285,7 +284,7 @@ struct s_TxPort {
 	TXD		*pTxdRingPrev;	/* descriptor sent previously */
 	int		TxdRingFree;	/* # of free entrys */
 	spinlock_t	TxDesRingLock;	/* serialize descriptor accesses */
-	caddr_t		HwAddr;		/* bmu registers address */
+	SK_IOC		HwAddr;		/* bmu registers address */
 	int		PortIndex;	/* index number of port (0 or 1) */
 };
 
@@ -301,7 +300,7 @@ struct s_RxPort {
 	int		RxdRingFree;	/* # of free entrys */
 	spinlock_t	RxDesRingLock;	/* serialize descriptor accesses */
 	int		RxFillLimit;	/* limit for buffers in ring */
-	caddr_t		HwAddr;		/* bmu registers address */
+	SK_IOC		HwAddr;		/* bmu registers address */
 	int		PortIndex;	/* index number of port (0 or 1) */
 };
 
@@ -383,6 +382,8 @@ struct s_AC  {
 	SK_CSUM		Csum;		/* for checksum module */
 	SK_RLMT		Rlmt;		/* for rlmt module */
 	spinlock_t	SlowPathLock;	/* Normal IRQ lock */
+	struct timer_list BlinkTimer;	/* for LED blinking */
+	int		LedsOn;
 	SK_PNMI_STRUCT_DATA PnmiStruct;	/* structure to get all Pnmi-Data */
 	int			RlmtMode;	/* link check mode to set */
 	int			RlmtNets;	/* Number of nets */
@@ -395,7 +396,7 @@ struct s_AC  {
 	SK_U32		PciDevId;	/* pci device id */
 	struct SK_NET_DEVICE	*dev[2];	/* pointer to device struct */
 	char		Name[30];	/* driver name */
-	struct SK_NET_DEVICE	*Next;		/* link all devices (for clearing) */
+
 	int		RxBufSize;	/* length of receive buffers */
         struct net_device_stats stats;	/* linux 'netstat -i' statistics */
 	int		Index;		/* internal board index number */

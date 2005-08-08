@@ -338,7 +338,7 @@ void default_idle(void)
 	}
 }
 
-void cpu_idle(void *unused)
+void cpu_idle(void)
 {
 	default_idle();
 }
@@ -688,7 +688,7 @@ void flush_thread(void)
 		last_task_used_math = NULL;
 	}
 	/* Force FPU state to be reinitialised after exec */
-	current->used_math = 0;
+	clear_used_math();
 #endif
 
 	/* if we are a kernel thread, about to change to user thread,
@@ -713,7 +713,7 @@ int dump_fpu(struct pt_regs *regs, elf_fpregset_t *fpu)
 	int fpvalid;
 	struct task_struct *tsk = current;
 
-	fpvalid = tsk->used_math;
+	fpvalid = !!tsk_used_math(tsk);
 	if (fpvalid) {
 		if (current == last_task_used_math) {
 			grab_fpu();
@@ -764,9 +764,6 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long usp,
 
 	childregs->regs[9] = 0; /* Set return value for child */
 	childregs->sr |= SR_FD; /* Invalidate FPU flag */
-
-	/* From sh */
-	p->set_child_tid = p->clear_child_tid = NULL;
 
 	p->thread.sp = (unsigned long) childregs;
 	p->thread.pc = (unsigned long) ret_from_fork;
@@ -862,8 +859,11 @@ asmlinkage int sys_execve(char *ufilename, char **uargv,
 			  (char __user * __user *)uargv,
 			  (char __user * __user *)uenvp,
 			  pregs);
-	if (error == 0)
+	if (error == 0) {
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
+	}
 	putname(filename);
 out:
 	unlock_kernel();

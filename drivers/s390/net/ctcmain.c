@@ -1,5 +1,5 @@
 /*
- * $Id: ctcmain.c,v 1.63 2004/07/28 12:27:54 ptiedem Exp $
+ * $Id: ctcmain.c,v 1.68 2004/12/27 09:25:27 heicarst Exp $
  *
  * CTC / ESCON network driver
  *
@@ -36,7 +36,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * RELEASE-TAG: CTC/ESCON network driver $Revision: 1.63 $
+ * RELEASE-TAG: CTC/ESCON network driver $Revision: 1.68 $
  *
  */
 
@@ -51,6 +51,7 @@
 #include <linux/interrupt.h>
 #include <linux/timer.h>
 #include <linux/sched.h>
+#include <linux/bitops.h>
 
 #include <linux/signal.h>
 #include <linux/string.h>
@@ -65,7 +66,6 @@
 #include <asm/io.h>
 #include <asm/ccwdev.h>
 #include <asm/ccwgroup.h>
-#include <asm/bitops.h>
 #include <asm/uaccess.h>
 
 #include <asm/idals.h>
@@ -320,7 +320,7 @@ static void
 print_banner(void)
 {
 	static int printed = 0;
-	char vbuf[] = "$Revision: 1.63 $";
+	char vbuf[] = "$Revision: 1.68 $";
 	char *version = vbuf;
 
 	if (printed)
@@ -1224,7 +1224,9 @@ ch_action_setmode(fsm_instance * fi, int event, void *arg)
 	fsm_deltimer(&ch->timer);
 	fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC, CH_EVENT_TIMER, ch);
 	fsm_newstate(fi, CH_STATE_SETUPWAIT);
-	if (event == CH_EVENT_TIMER)
+	saveflags = 0;	/* avoids compiler warning with
+			   spin_unlock_irqrestore */
+	if (event == CH_EVENT_TIMER)	// only for timer not yet locked
 		spin_lock_irqsave(get_ccwdev_lock(ch->cdev), saveflags);
 	rc = ccw_device_start(ch->cdev, &ch->ccw[6], (unsigned long) ch, 0xff, 0);
 	if (event == CH_EVENT_TIMER)
@@ -1335,7 +1337,9 @@ ch_action_haltio(fsm_instance * fi, int event, void *arg)
 	DBF_TEXT(trace, 3, __FUNCTION__);
 	fsm_deltimer(&ch->timer);
 	fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC, CH_EVENT_TIMER, ch);
-	if (event == CH_EVENT_STOP)
+	saveflags = 0;	/* avoids comp warning with
+			   spin_unlock_irqrestore */
+	if (event == CH_EVENT_STOP)	// only for STOP not yet locked
 		spin_lock_irqsave(get_ccwdev_lock(ch->cdev), saveflags);
 	oldstate = fsm_getstate(fi);
 	fsm_newstate(fi, CH_STATE_TERM);
@@ -1508,7 +1512,9 @@ ch_action_restart(fsm_instance * fi, int event, void *arg)
 	fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC, CH_EVENT_TIMER, ch);
 	oldstate = fsm_getstate(fi);
 	fsm_newstate(fi, CH_STATE_STARTWAIT);
-	if (event == CH_EVENT_TIMER)
+	saveflags = 0;	/* avoids compiler warning with
+			   spin_unlock_irqrestore */
+	if (event == CH_EVENT_TIMER)	// only for timer not yet locked
 		spin_lock_irqsave(get_ccwdev_lock(ch->cdev), saveflags);
 	rc = ccw_device_halt(ch->cdev, (unsigned long) ch);
 	if (event == CH_EVENT_TIMER)
@@ -1674,7 +1680,9 @@ ch_action_txretry(fsm_instance * fi, int event, void *arg)
 				return;
 			}
 			fsm_addtimer(&ch->timer, 1000, CH_EVENT_TIMER, ch);
-			if (event == CH_EVENT_TIMER)
+			saveflags = 0;	/* avoids compiler warning with
+					   spin_unlock_irqrestore */
+			if (event == CH_EVENT_TIMER) // only for TIMER not yet locked
 				spin_lock_irqsave(get_ccwdev_lock(ch->cdev),
 						  saveflags);
 			rc = ccw_device_start(ch->cdev, &ch->ccw[3],
@@ -1931,6 +1939,7 @@ add_channel(struct ccw_device *cdev, enum channel_types type)
 			   ch_fsm, CH_FSM_LEN, GFP_KERNEL);
 	if (ch->fsm == NULL) {
 		ctc_pr_warn("ctc: Could not create FSM in add_channel\n");
+		kfree(ch->ccw);
 		kfree(ch);
 		return -1;
 	}
@@ -1939,6 +1948,7 @@ add_channel(struct ccw_device *cdev, enum channel_types type)
 					      GFP_KERNEL)) == NULL) {
 		ctc_pr_warn("ctc: Out of memory in add_channel\n");
 		kfree_fsm(ch->fsm);
+		kfree(ch->ccw);
 		kfree(ch);
 		return -1;
 	}
@@ -1951,6 +1961,7 @@ add_channel(struct ccw_device *cdev, enum channel_types type)
 			"using old entry\n", (*c)->id);
 		kfree(ch->irb);
 		kfree_fsm(ch->fsm);
+		kfree(ch->ccw);
 		kfree(ch);
 		return 0;
 	}
@@ -2702,7 +2713,7 @@ buffer_write(struct device *dev, const char *buf, size_t count)
 	struct net_device *ndev;
 	int bs1;
 
-	DBF_TEXT(trace, 5, __FUNCTION__);
+	DBF_TEXT(trace, 3, __FUNCTION__);
 	priv = dev->driver_data;
 	if (!priv)
 		return -ENODEV;
@@ -2827,7 +2838,7 @@ static DEVICE_ATTR(stats, 0644, stats_show, stats_write);
 static int
 ctc_add_attributes(struct device *dev)
 {
-	device_create_file(dev, &dev_attr_buffer);
+//	device_create_file(dev, &dev_attr_buffer);
 	device_create_file(dev, &dev_attr_loglevel);
 	device_create_file(dev, &dev_attr_stats);
 	return 0;
@@ -2838,7 +2849,7 @@ ctc_remove_attributes(struct device *dev)
 {
 	device_remove_file(dev, &dev_attr_stats);
 	device_remove_file(dev, &dev_attr_loglevel);
-	device_remove_file(dev, &dev_attr_buffer);
+//	device_remove_file(dev, &dev_attr_buffer);
 }
 
 
@@ -2980,6 +2991,7 @@ static DEVICE_ATTR(type, 0444, ctc_type_show, NULL);
 static struct attribute *ctc_attr[] = {
 	&dev_attr_protocol.attr,
 	&dev_attr_type.attr,
+	&dev_attr_buffer.attr,
 	NULL,
 };
 

@@ -13,10 +13,13 @@
 #ifdef __KERNEL__
 
 #include <linux/list.h>
+#include <linux/spinlock.h>
+#include <asm/atomic.h>
 
 #define MNT_NOSUID	1
 #define MNT_NODEV	2
 #define MNT_NOEXEC	4
+#define MNT_XID		256
 
 struct vfsmount
 {
@@ -34,6 +37,7 @@ struct vfsmount
 	struct list_head mnt_list;
 	struct list_head mnt_fslink;	/* link in fs-specific expiry list */
 	struct namespace *mnt_namespace; /* containing namespace */
+	xid_t mnt_xid;			/* xid tagging used for vfsmount */
 };
 
 static inline struct vfsmount *mntget(struct vfsmount *mnt)

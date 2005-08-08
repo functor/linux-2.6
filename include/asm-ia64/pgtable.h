@@ -6,7 +6,7 @@
  * the IA-64 page table tree.
  *
  * This hopefully works with any (fixed) IA-64 page-size, as defined
- * in <asm/page.h> (currently 8192).
+ * in <asm/page.h>.
  *
  * Copyright (C) 1998-2004 Hewlett-Packard Co
  *	David Mosberger-Tang <davidm@hpl.hp.com>
@@ -91,7 +91,7 @@
 #define PGDIR_SHIFT		(PAGE_SHIFT + 2*(PAGE_SHIFT-3))
 #define PGDIR_SIZE		(__IA64_UL(1) << PGDIR_SHIFT)
 #define PGDIR_MASK		(~(PGDIR_SIZE-1))
-#define PTRS_PER_PGD		(__IA64_UL(1) << (PAGE_SHIFT-3))
+#define PTRS_PER_PGD		(1UL << (PAGE_SHIFT-3))
 #define USER_PTRS_PER_PGD	(5*PTRS_PER_PGD/8)	/* regions 0-4 are user regions */
 #define FIRST_USER_PGD_NR	0
 
@@ -104,7 +104,7 @@
 #define PMD_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT-3))
 #define PMD_SIZE	(1UL << PMD_SHIFT)
 #define PMD_MASK	(~(PMD_SIZE-1))
-#define PTRS_PER_PMD	(__IA64_UL(1) << (PAGE_SHIFT-3))
+#define PTRS_PER_PMD	(1UL << (PAGE_SHIFT-3))
 
 /*
  * Definitions for third level:
@@ -254,11 +254,12 @@ ia64_phys_addr_valid (unsigned long addr)
 #define pmd_page_kernel(pmd)		((unsigned long) __va(pmd_val(pmd) & _PFN_MASK))
 #define pmd_page(pmd)			virt_to_page((pmd_val(pmd) + PAGE_OFFSET))
 
-#define pgd_none(pgd)			(!pgd_val(pgd))
-#define pgd_bad(pgd)			(!ia64_phys_addr_valid(pgd_val(pgd)))
-#define pgd_present(pgd)		(pgd_val(pgd) != 0UL)
-#define pgd_clear(pgdp)			(pgd_val(*(pgdp)) = 0UL)
-#define pgd_page(pgd)			((unsigned long) __va(pgd_val(pgd) & _PFN_MASK))
+#define pud_none(pud)			(!pud_val(pud))
+#define pud_bad(pud)			(!ia64_phys_addr_valid(pud_val(pud)))
+#define pud_present(pud)		(pud_val(pud) != 0UL)
+#define pud_clear(pudp)			(pud_val(*(pudp)) = 0UL)
+
+#define pud_page(pud)			((unsigned long) __va(pud_val(pud) & _PFN_MASK))
 
 /*
  * The following have defined behavior only work if pte_present() is true.
@@ -309,15 +310,15 @@ pgd_index (unsigned long address)
 }
 
 /* The offset in the 1-level directory is given by the 3 region bits
-   (61..63) and the seven level-1 bits (33-39).  */
+   (61..63) and the level-1 bits.  */
 static inline pgd_t*
 pgd_offset (struct mm_struct *mm, unsigned long address)
 {
 	return mm->pgd + pgd_index(address);
 }
 
-/* In the kernel's mapped region we have a full 43 bit space available and completely
-   ignore the region number (since we know its in region number 5). */
+/* In the kernel's mapped region we completely ignore the region number
+   (since we know it's in region number 5). */
 #define pgd_offset_k(addr) \
 	(init_mm.pgd + (((addr) >> PGDIR_SHIFT) & (PTRS_PER_PGD - 1)))
 
@@ -328,7 +329,7 @@ pgd_offset (struct mm_struct *mm, unsigned long address)
 
 /* Find an entry in the second-level page table.. */
 #define pmd_offset(dir,addr) \
-	((pmd_t *) pgd_page(*(dir)) + (((addr) >> PMD_SHIFT) & (PTRS_PER_PMD - 1)))
+	((pmd_t *) pud_page(*(dir)) + (((addr) >> PMD_SHIFT) & (PTRS_PER_PMD - 1)))
 
 /*
  * Find an entry in the third-level page table.  This looks more complicated than it
@@ -452,7 +453,9 @@ extern void paging_init (void);
 #define pte_to_pgoff(pte)		((pte_val(pte) << 1) >> 3)
 #define pgoff_to_pte(off)		((pte_t) { ((off) << 2) | _PAGE_FILE })
 
-#define io_remap_page_range remap_page_range	/* XXX is this right? */
+/* XXX is this right? */
+#define io_remap_page_range(vma, vaddr, paddr, size, prot)		\
+		remap_pfn_range(vma, vaddr, (paddr) >> PAGE_SHIFT, size, prot)
 
 /*
  * ZERO_PAGE is a global shared page that is always zero: used
@@ -559,5 +562,6 @@ do {											\
 #define __HAVE_ARCH_PTE_SAME
 #define __HAVE_ARCH_PGD_OFFSET_GATE
 #include <asm-generic/pgtable.h>
+#include <asm-generic/pgtable-nopud.h>
 
 #endif /* _ASM_IA64_PGTABLE_H */

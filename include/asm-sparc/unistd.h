@@ -296,8 +296,12 @@
 #define __NR_mq_notify		277
 #define __NR_mq_getsetattr	278
 #define __NR_waitid		279
+#define __NR_sys_setaltroot	280
+#define __NR_add_key		281
+#define __NR_request_key	282
+#define __NR_keyctl		283
 
-/* WARNING: You MAY NOT add syscall numbers larger than 282, since
+/* WARNING: You MAY NOT add syscall numbers larger than 283, since
  *          all of the syscall tables in the Sparc kernel are
  *          sized to have 283 entries (starting at zero).  Therefore
  *          find a free slot in the 0-282 range.
@@ -482,7 +486,6 @@ static __inline__ _syscall1(int,dup,int,fd)
 static __inline__ _syscall3(int,execve,__const__ char *,file,char **,argv,char **,envp)
 static __inline__ _syscall3(int,open,__const__ char *,file,int,flag,int,mode)
 static __inline__ _syscall1(int,close,int,fd)
-static __inline__ _syscall1(int,_exit,int,exitcode)
 static __inline__ _syscall3(pid_t,waitpid,pid_t,pid,int *,wait_stat,int,options)
 
 #include <linux/linkage.h>

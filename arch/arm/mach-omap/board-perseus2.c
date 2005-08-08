@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/device.h>
+#include <linux/delay.h>
 
 #include <asm/hardware.h>
 #include <asm/mach-types.h>
@@ -24,15 +25,9 @@
 #include <asm/arch/gpio.h>
 #include <asm/arch/mux.h>
 #include <asm/arch/fpga.h>
+#include <asm/arch/serial.h>
 
 #include "common.h"
-
-extern void __init omap_init_time(void);
-
-void omap_perseus2_init_irq(void)
-{
-	omap_init_irq();
-}
 
 static struct resource smc91x_resources[] = {
 	[0] = {
@@ -46,6 +41,8 @@ static struct resource smc91x_resources[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 };
+
+static int __initdata p2_serial_ports[OMAP_MAX_NR_PORTS] = {1, 1, 0};
 
 static struct platform_device smc91x_device = {
 	.name		= "smc91x",
@@ -61,6 +58,22 @@ static struct platform_device *devices[] __initdata = {
 static void __init omap_perseus2_init(void)
 {
 	(void) platform_add_devices(devices, ARRAY_SIZE(devices));
+}
+
+static void __init perseus2_init_smc91x(void)
+{
+	fpga_write(1, H2P2_DBG_FPGA_LAN_RESET);
+	mdelay(50);
+	fpga_write(fpga_read(H2P2_DBG_FPGA_LAN_RESET) & ~1,
+		   H2P2_DBG_FPGA_LAN_RESET);
+	mdelay(50);
+}
+
+void omap_perseus2_init_irq(void)
+{
+	omap_init_irq();
+	omap_gpio_init();
+	perseus2_init_smc91x();
 }
 
 /* Only FPGA needs to be mapped here. All others are done with ioremap */
@@ -106,6 +119,7 @@ static void __init omap_perseus2_map_io(void)
 	 * It is used as the Ethernet controller interrupt
 	 */
 	omap_writel(omap_readl(OMAP730_IO_CONF_9) & 0x1FFFFFFF, OMAP730_IO_CONF_9);
+	omap_serial_init(p2_serial_ports);
 }
 
 MACHINE_START(OMAP_PERSEUS2, "OMAP730 Perseus2")
@@ -115,5 +129,5 @@ MACHINE_START(OMAP_PERSEUS2, "OMAP730 Perseus2")
 	MAPIO(omap_perseus2_map_io)
 	INITIRQ(omap_perseus2_init_irq)
 	INIT_MACHINE(omap_perseus2_init)
-	INITTIME(omap_init_time)
+	.timer		= &omap_timer,
 MACHINE_END

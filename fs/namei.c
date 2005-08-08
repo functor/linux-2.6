@@ -25,9 +25,12 @@
 #include <linux/smp_lock.h>
 #include <linux/personality.h>
 #include <linux/security.h>
+#include <linux/syscalls.h>
 #include <linux/mount.h>
 #include <linux/audit.h>
-#include <linux/vs_base.h>
+#include <linux/proc_fs.h>
+#include <linux/vserver/inode.h>
+#include <linux/vserver/debug.h>
 
 #include <asm/namei.h>
 #include <asm/uaccess.h>
@@ -117,13 +120,14 @@ static inline int do_getname(const char __user *filename, char *page)
 	int retval;
 	unsigned long len = PATH_MAX;
 
-	if ((unsigned long) filename >= TASK_SIZE) {
-		if (!segment_eq(get_fs(), KERNEL_DS))
+	if (!segment_eq(get_fs(), KERNEL_DS)) {
+		if ((unsigned long) filename >= TASK_SIZE)
 			return -EFAULT;
-	} else if (TASK_SIZE - (unsigned long) filename < PATH_MAX)
-		len = TASK_SIZE - (unsigned long) filename;
+		if (TASK_SIZE - (unsigned long) filename < PATH_MAX)
+			len = TASK_SIZE - (unsigned long) filename;
+	}
 
-	retval = strncpy_from_user((char *)page, filename, len);
+	retval = strncpy_from_user(page, filename, len);
 	if (retval > 0) {
 		if (retval < len)
 			return 0;
@@ -153,37 +157,36 @@ char * getname(const char __user * filename)
 	return result;
 }
 
-/*
- *	vfs_permission()
+/**
+ * generic_permission  -  check for access rights on a Posix-like filesystem
+ * @inode:	inode to check access rights for
+ * @mask:	right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC)
+ * @check_acl:	optional callback to check for Posix ACLs
  *
- * is used to check for read/write/execute permissions on a file.
+ * Used to check for read/write/execute permissions on a file.
  * We use "fsuid" for this, letting us set arbitrary permissions
  * for filesystem access without changing the "normal" uids which
  * are used for other things..
  */
-int vfs_permission(struct inode * inode, int mask)
+int generic_permission(struct inode *inode, int mask,
+		int (*check_acl)(struct inode *inode, int mask))
 {
 	umode_t			mode = inode->i_mode;
 
-	if (mask & MAY_WRITE) {
-		/*
-		 * Nobody gets write access to a read-only fs.
-		 */
-		if (IS_RDONLY(inode) &&
-		    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
-			return -EROFS;
-
-		/*
-		 * Nobody gets write access to an immutable file.
-		 */
-		if (IS_IMMUTABLE(inode))
-			return -EACCES;
-	}
-
 	if (current->fsuid == inode->i_uid)
 		mode >>= 6;
-	else if (in_group_p(inode->i_gid))
-		mode >>= 3;
+	else {
+		if (IS_POSIXACL(inode) && (mode & S_IRWXG) && check_acl) {
+			int error = check_acl(inode, mask);
+			if (error == -EACCES)
+				goto check_capabilities;
+			else if (error != -EAGAIN)
+				return error;
+		}
+
+		if (in_group_p(inode->i_gid))
+			mode >>= 3;
+	}
 
 	/*
 	 * If the DACs are ok we don't need any capability check.
@@ -191,6 +194,7 @@ int vfs_permission(struct inode * inode, int mask)
 	if (((mode & mask & (MAY_READ|MAY_WRITE|MAY_EXEC)) == mask))
 		return 0;
 
+ check_capabilities:
 	/*
 	 * Read/write DACs are always overridable.
 	 * Executable DACs are overridable if at least one exec bit is set.
@@ -212,32 +216,52 @@ int vfs_permission(struct inode * inode, int mask)
 
 static inline int xid_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN)) {
+		vxwprintk(1, "xid=%d did hit the barrier.",
+			vx_current_xid());
+		return -EACCES;
+	}
 	if (inode->i_xid == 0)
 		return 0;
 	if (vx_check(inode->i_xid, VX_ADMIN|VX_WATCH|VX_IDENT))
 		return 0;
-/*
-	printk("VSW: xid=%d denied access to %p[#%d,%lu] »%*s«.\n",
+
+	vxwprintk(1, "xid=%d denied access to %p[#%d,%lu] »%s«.",
 		vx_current_xid(), inode, inode->i_xid, inode->i_ino,
-		nd->dentry->d_name.len, nd->dentry->d_name.name);
-*/
+		vxd_path(nd->dentry, nd->mnt));
 	return -EACCES;
 }
 
-int permission(struct inode * inode,int mask, struct nameidata *nd)
+int permission(struct inode *inode, int mask, struct nameidata *nd)
 {
-	int retval;
-	int submask;
+	int retval, submask;
+
+	if (mask & MAY_WRITE) {
+		umode_t mode = inode->i_mode;
+
+		/*
+		 * Nobody gets write access to a read-only fs.
+		 */
+		if (IS_RDONLY(inode) &&
+		    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
+			return -EROFS;
+
+		/*
+		 * Nobody gets write access to an immutable file.
+		 */
+		if (IS_IMMUTABLE(inode))
+			return -EACCES;
+	}
+
 
 	/* Ordinary permission routines do not understand MAY_APPEND. */
 	submask = mask & ~MAY_APPEND;
-
 	if ((retval = xid_permission(inode, mask, nd)))
 		return retval;
 	if (inode->i_op && inode->i_op->permission)
 		retval = inode->i_op->permission(inode, submask, nd);
 	else
-		retval = vfs_permission(inode, submask);
+		retval = generic_permission(inode, submask, NULL);
 	if (retval)
 		return retval;
 
@@ -332,7 +356,7 @@ static struct dentry * cached_lookup(struct dentry * parent, struct qstr * name,
 /*
  * Short-cut version of permission(), for calling by
  * path_walk(), when dcache lock is held.  Combines parts
- * of permission() and vfs_permission(), and tests ONLY for
+ * of permission() and generic_permission(), and tests ONLY for
  * MAY_EXEC permission.
  *
  * If appropriate, check DAC only.  If not appropriate, or
@@ -482,6 +506,24 @@ fail:
 	return PTR_ERR(link);
 }
 
+static inline int __do_follow_link(struct dentry *dentry, struct nameidata *nd)
+{
+	int error;
+
+	touch_atime(nd->mnt, dentry);
+	nd_set_link(nd, NULL);
+	error = dentry->d_inode->i_op->follow_link(dentry, nd);
+	if (!error) {
+		char *s = nd_get_link(nd);
+		if (s)
+			error = __vfs_follow_link(nd, s);
+		if (dentry->d_inode->i_op->put_link)
+			dentry->d_inode->i_op->put_link(dentry, nd);
+	}
+
+	return error;
+}
+
 /*
  * This limits recursive symlink follows to 8, while
  * limiting consecutive symlinks to 40.
@@ -504,16 +546,7 @@ static inline int do_follow_link(struct dentry *dentry, struct nameidata *nd)
 	current->link_count++;
 	current->total_link_count++;
 	nd->depth++;
-	touch_atime(nd->mnt, dentry);
-	nd_set_link(nd, NULL);
-	err = dentry->d_inode->i_op->follow_link(dentry, nd);
-	if (!err) {
-		char *s = nd_get_link(nd);
-		if (s)
-			err = __vfs_follow_link(nd, s);
-		if (dentry->d_inode->i_op->put_link)
-			dentry->d_inode->i_op->put_link(dentry, nd);
-	}
+	err = __do_follow_link(dentry, nd);
 	current->link_count--;
 	nd->depth--;
 	return err;
@@ -594,7 +627,7 @@ static inline void follow_dotdot(struct vfsmount **mnt, struct dentry **dentry)
 		if (*dentry == current->fs->root &&
 		    *mnt == current->fs->rootmnt) {
                         read_unlock(&current->fs->lock);
-			break;
+			return;
 		}
                 read_unlock(&current->fs->lock);
 		spin_lock(&dcache_lock);
@@ -636,15 +669,33 @@ static int do_lookup(struct nameidata *nd, struct qstr *name,
 {
 	struct vfsmount *mnt = nd->mnt;
 	struct dentry *dentry = __d_lookup(nd->dentry, name);
+	struct inode *inode;
 
 	if (!dentry)
 		goto need_lookup;
 	if (dentry->d_op && dentry->d_op->d_revalidate)
 		goto need_revalidate;
+	inode = dentry->d_inode;
+	if (!inode)
+		goto done;
+	if (!vx_check(inode->i_xid, VX_WATCH|VX_ADMIN|VX_HOSTID|VX_IDENT))
+		goto hidden;
+	if (inode->i_sb->s_magic == PROC_SUPER_MAGIC) {
+		struct proc_dir_entry *de = PDE(inode);
+
+		if (de && !vx_hide_check(0, de->vx_flags))
+			goto hidden;
+	}
 done:
 	path->mnt = mnt;
 	path->dentry = dentry;
 	return 0;
+hidden:
+	vxwprintk(1, "xid=%d did lookup hidden %p[#%d,%lu] »%s«.",
+		vx_current_xid(), inode, inode->i_xid, inode->i_ino,
+		vxd_path(dentry, mnt));
+	dput(dentry);
+	return -ENOENT;
 
 need_lookup:
 	dentry = real_lookup(nd->dentry, name, nd);
@@ -1470,16 +1521,7 @@ do_link:
 	error = security_inode_follow_link(dentry, nd);
 	if (error)
 		goto exit_dput;
-	touch_atime(nd->mnt, dentry);
-	nd_set_link(nd, NULL);
-	error = dentry->d_inode->i_op->follow_link(dentry, nd);
-	if (!error) {
-		char *s = nd_get_link(nd);
-		if (s)
-			error = __vfs_follow_link(nd, s);
-		if (dentry->d_inode->i_op->put_link)
-			dentry->d_inode->i_op->put_link(dentry, nd);
-	}
+	error = __do_follow_link(dentry, nd);
 	dput(dentry);
 	if (error)
 		return error;
@@ -2338,18 +2380,6 @@ void page_put_link(struct dentry *dentry, struct nameidata *nd)
 	}
 }
 
-int page_follow_link(struct dentry *dentry, struct nameidata *nd)
-{
-	struct page *page = NULL;
-	char *s = page_getlink(dentry, &page);
-	int res = __vfs_follow_link(nd, s);
-	if (page) {
-		kunmap(page);
-		page_cache_release(page);
-	}
-	return res;
-}
-
 int page_symlink(struct inode *inode, const char *symname, int len)
 {
 	struct address_space *mapping = inode->i_mapping;
@@ -2403,10 +2433,8 @@ EXPORT_SYMBOL(follow_up);
 EXPORT_SYMBOL(get_write_access); /* binfmt_aout */
 EXPORT_SYMBOL(getname);
 EXPORT_SYMBOL(lock_rename);
-EXPORT_SYMBOL(lookup_create);
 EXPORT_SYMBOL(lookup_hash);
 EXPORT_SYMBOL(lookup_one_len);
-EXPORT_SYMBOL(page_follow_link);
 EXPORT_SYMBOL(page_follow_link_light);
 EXPORT_SYMBOL(page_put_link);
 EXPORT_SYMBOL(page_readlink);
@@ -2422,7 +2450,7 @@ EXPORT_SYMBOL(vfs_follow_link);
 EXPORT_SYMBOL(vfs_link);
 EXPORT_SYMBOL(vfs_mkdir);
 EXPORT_SYMBOL(vfs_mknod);
-EXPORT_SYMBOL(vfs_permission);
+EXPORT_SYMBOL(generic_permission);
 EXPORT_SYMBOL(vfs_readlink);
 EXPORT_SYMBOL(vfs_rename);
 EXPORT_SYMBOL(vfs_rmdir);

@@ -33,9 +33,9 @@ expand_backing_store (struct vm_area_struct *vma, unsigned long address)
 	unsigned long grow;
 
 	grow = PAGE_SIZE >> PAGE_SHIFT;
-	if (address - vma->vm_start > current->rlim[RLIMIT_STACK].rlim_cur
+	if (address - vma->vm_start > current->signal->rlim[RLIMIT_STACK].rlim_cur
 	    || (((vma->vm_mm->total_vm + grow) << PAGE_SHIFT) >
-		current->rlim[RLIMIT_AS].rlim_cur))
+		current->signal->rlim[RLIMIT_AS].rlim_cur))
 		return -ENOMEM;
 	if (!vx_vmpages_avail(vma->vm_mm, grow) ||
 		((vma->vm_flags & VM_LOCKED) &&
@@ -59,6 +59,7 @@ static int
 mapped_kernel_page_is_present (unsigned long address)
 {
 	pgd_t *pgd;
+	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *ptep, pte;
 
@@ -66,7 +67,11 @@ mapped_kernel_page_is_present (unsigned long address)
 	if (pgd_none(*pgd) || pgd_bad(*pgd))
 		return 0;
 
-	pmd = pmd_offset(pgd, address);
+	pud = pud_offset(pgd, address);
+	if (pud_none(*pud) || pud_bad(*pud))
+		return 0;
+
+	pmd = pmd_offset(pud, address);
 	if (pmd_none(*pmd) || pmd_bad(*pmd))
 		return 0;
 

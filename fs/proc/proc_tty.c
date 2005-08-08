@@ -13,7 +13,7 @@
 #include <linux/stat.h>
 #include <linux/tty.h>
 #include <linux/seq_file.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 
 static int tty_ldiscs_read_proc(char *page, char **start, off_t off,
 				int count, int *eof, void *data);
@@ -32,10 +32,8 @@ static void show_tty_range(struct seq_file *m, struct tty_driver *p,
 	seq_printf(m, "%-20s ", p->driver_name ? p->driver_name : "unknown");
 	seq_printf(m, "/dev/%-8s ", p->name);
 	if (p->num > 1) {
-		char	range[20];
-		sprintf(range, "%d-%d", MINOR(from),
+		seq_printf(m, "%3d %d-%d ", MAJOR(from), MINOR(from),
 			MINOR(from) + num - 1);
-		seq_printf(m, "%3d %7s ", MAJOR(from), range);
 	} else {
 		seq_printf(m, "%3d %7d ", MAJOR(from), MINOR(from));
 	}

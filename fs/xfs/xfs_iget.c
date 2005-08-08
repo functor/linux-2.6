@@ -55,22 +55,32 @@
 #include "xfs_inode.h"
 #include "xfs_quota.h"
 #include "xfs_utils.h"
+#include "xfs_bit.h"
 
 /*
  * Initialize the inode hash table for the newly mounted file system.
- *
- * mp -- this is the mount point structure for the file system being
- *       initialized
+ * Choose an initial table size based on user specified value, else
+ * use a simple algorithm using the maximum number of inodes as an
+ * indicator for table size, and cap it at 16 pages (gettin' big).
  */
 void
 xfs_ihash_init(xfs_mount_t *mp)
 {
-	int	i;
+	__uint64_t	icount;
+	uint		i, flags = KM_SLEEP | KM_MAYFAIL;
 
-	mp->m_ihsize = XFS_BUCKETS(mp);
-	mp->m_ihash = (xfs_ihash_t *)kmem_zalloc(mp->m_ihsize
-				      * sizeof(xfs_ihash_t), KM_SLEEP);
-	ASSERT(mp->m_ihash != NULL);
+	if (!mp->m_ihsize) {
+		icount = mp->m_maxicount ? mp->m_maxicount :
+			 (mp->m_sb.sb_dblocks << mp->m_sb.sb_inopblog);
+		mp->m_ihsize = 1 << max_t(uint, xfs_highbit64(icount) / 3, 8);
+		mp->m_ihsize = min_t(uint, mp->m_ihsize, 16 * PAGE_SIZE);
+	}
+
+	while (!(mp->m_ihash = (xfs_ihash_t *)kmem_zalloc(mp->m_ihsize *
+						sizeof(xfs_ihash_t), flags))) {
+		if ((mp->m_ihsize >>= 1) <= NBPP)
+			flags = KM_SLEEP;
+	}
 	for (i = 0; i < mp->m_ihsize; i++) {
 		rwlock_init(&(mp->m_ihash[i].ih_lock));
 	}
@@ -88,29 +98,19 @@ xfs_ihash_free(xfs_mount_t *mp)
 
 /*
  * Initialize the inode cluster hash table for the newly mounted file system.
- *
- * mp -- this is the mount point structure for the file system being
- *       initialized
+ * Its size is derived from the ihash table size.
  */
 void
 xfs_chash_init(xfs_mount_t *mp)
 {
-	int	i;
+	uint	i;
 
-	/*
-	 * m_chash size is based on m_ihash
-	 * with a minimum of 37 entries
-	 */
-	mp->m_chsize = (XFS_BUCKETS(mp)) /
-			 (XFS_INODE_CLUSTER_SIZE(mp) >> mp->m_sb.sb_inodelog);
-	if (mp->m_chsize < 37) {
-		mp->m_chsize = 37;
-	}
+	mp->m_chsize = max_t(uint, 1, mp->m_ihsize /
+			 (XFS_INODE_CLUSTER_SIZE(mp) >> mp->m_sb.sb_inodelog));
+	mp->m_chsize = min_t(uint, mp->m_chsize, mp->m_ihsize);
 	mp->m_chash = (xfs_chash_t *)kmem_zalloc(mp->m_chsize
 						 * sizeof(xfs_chash_t),
 						 KM_SLEEP);
-	ASSERT(mp->m_chash != NULL);
-
 	for (i = 0; i < mp->m_chsize; i++) {
 		spinlock_init(&mp->m_chash[i].ch_lock,"xfshash");
 	}
@@ -169,6 +169,7 @@ xfs_iget_core(
 	xfs_mount_t	*mp,
 	xfs_trans_t	*tp,
 	xfs_ino_t	ino,
+	uint		flags,
 	uint		lock_flags,
 	xfs_inode_t	**ipp,
 	xfs_daddr_t	bno)
@@ -180,7 +181,6 @@ xfs_iget_core(
 	ulong		version;
 	int		error;
 	/* REFERENCED */
-	int		newnode;
 	xfs_chash_t	*ch;
 	xfs_chashlist_t	*chl, *chlnew;
 	SPLDECL(s);
@@ -193,11 +193,22 @@ again:
 
 	for (ip = ih->ih_next; ip != NULL; ip = ip->i_next) {
 		if (ip->i_ino == ino) {
+			/*
+			 * If INEW is set this inode is being set up
+			 * we need to pause and try again.
+			 */
+			if (ip->i_flags & XFS_INEW) {
+				read_unlock(&ih->ih_lock);
+				delay(1);
+				XFS_STATS_INC(xs_ig_frecycle);
+
+				goto again;
+			}
 
 			inode_vp = XFS_ITOV_NULL(ip);
-
 			if (inode_vp == NULL) {
-				/* If IRECLAIM is set this inode is
+				/*
+				 * If IRECLAIM is set this inode is
 				 * on its way out of the system,
 				 * we need to pause and try again.
 				 */
@@ -250,14 +261,15 @@ again:
 			XFS_STATS_INC(xs_ig_found);
 
 finish_inode:
-			if (lock_flags != 0) {
-				xfs_ilock(ip, lock_flags);
-			}
-
-			newnode = (ip->i_d.di_mode == 0);
-			if (newnode) {
+			if (ip->i_d.di_mode == 0) {
+				if (!(flags & IGET_CREATE))
+					return ENOENT;
 				xfs_iocore_inode_reinit(ip);
 			}
+	
+			if (lock_flags != 0)
+				xfs_ilock(ip, lock_flags);
+
 			ip->i_flags &= ~XFS_ISTALE;
 
 			vn_trace_exit(vp, "xfs_iget.found",
@@ -293,6 +305,11 @@ finish_inode:
 	if (lock_flags != 0) {
 		xfs_ilock(ip, lock_flags);
 	}
+		
+	if ((ip->i_d.di_mode == 0) && !(flags & IGET_CREATE)) {
+		xfs_idestroy(ip);
+		return ENOENT;
+	}
 
 	/*
 	 * Put ip on its hash chain, unless someone else hashed a duplicate
@@ -324,6 +341,7 @@ finish_inode:
 	ih->ih_next = ip;
 	ip->i_udquot = ip->i_gdquot = NULL;
 	ih->ih_version++;
+	ip->i_flags |= XFS_INEW;
 
 	write_unlock(&ih->ih_lock);
 
@@ -404,8 +422,6 @@ finish_inode:
 
 	XFS_MOUNT_IUNLOCK(mp);
 
-	newnode = 1;
-
  return_ip:
 	ASSERT(ip->i_df.if_ext_max ==
 	       XFS_IFORK_DSIZE(ip) / sizeof(xfs_bmbt_rec_t));
@@ -434,6 +450,7 @@ xfs_iget(
 	xfs_mount_t	*mp,
 	xfs_trans_t	*tp,
 	xfs_ino_t	ino,
+	uint		flags,
 	uint		lock_flags,
 	xfs_inode_t	**ipp,
 	xfs_daddr_t	bno)
@@ -454,8 +471,8 @@ retry:
 		if (inode->i_state & I_NEW) {
 inode_allocate:
 			vn_initialize(inode);
-			error = xfs_iget_core(vp, mp, tp, ino,
-						lock_flags, ipp, bno);
+			error = xfs_iget_core(vp, mp, tp, ino, flags,
+					lock_flags, ipp, bno);
 			if (error) {
 				vn_mark_bad(vp);
 				if (inode->i_state & I_NEW)
@@ -576,6 +593,10 @@ xfs_iput_new(xfs_inode_t	*ip,
 
 	vn_trace_entry(vp, "xfs_iput_new", (inst_t *)__return_address);
 
+	if ((ip->i_d.di_mode == 0)) {
+		ASSERT(!(ip->i_flags & XFS_IRECLAIMABLE));
+		vn_mark_bad(vp);
+	}
 	if (inode->i_state & I_NEW)
 		unlock_new_inode(inode);
 	if (lock_flags)

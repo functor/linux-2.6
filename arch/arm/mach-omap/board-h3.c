@@ -28,16 +28,15 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/arch/irqs.h>
+#include <asm/arch/mux.h>
 #include <asm/arch/gpio.h>
 #include <asm/mach-types.h>
+
 #include "common.h"
 
-extern void __init omap_init_time(void);
+extern int omap_gpio_init(void);
 
-void h3_init_irq(void)
-{
-	omap_init_irq();
-}
+static int __initdata h3_serial_ports[OMAP_MAX_NR_PORTS] = {1, 1, 1};
 
 static struct resource smc91x_resources[] = {
 	[0] = {
@@ -46,8 +45,8 @@ static struct resource smc91x_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= 0,
-		.end	= 0,
+		.start	= OMAP_GPIO_IRQ(40),
+		.end	= OMAP_GPIO_IRQ(40),
 		.flags	= IORESOURCE_IRQ,
 	},
 };
@@ -68,15 +67,27 @@ static void __init h3_init(void)
 	(void) platform_add_devices(devices, ARRAY_SIZE(devices));
 }
 
-static struct map_desc h3_io_desc[] __initdata = {
-{ OMAP1710_ETHR_BASE,  OMAP1710_ETHR_START,  OMAP1710_ETHR_SIZE,  MT_DEVICE },
-{ OMAP_NOR_FLASH_BASE, OMAP_NOR_FLASH_START, OMAP_NOR_FLASH_SIZE, MT_DEVICE },
-};
+static void __init h3_init_smc91x(void)
+{
+	omap_cfg_reg(W15_1710_GPIO40);
+	if (omap_request_gpio(40) < 0) {
+		printk("Error requesting gpio 40 for smc91x irq\n");
+		return;
+	}
+	omap_set_gpio_edge_ctrl(40, OMAP_GPIO_FALLING_EDGE);
+}
+
+void h3_init_irq(void)
+{
+	omap_init_irq();
+	omap_gpio_init();
+	h3_init_smc91x();
+}
 
 static void __init h3_map_io(void)
 {
 	omap_map_io();
-	iotable_init(h3_io_desc, ARRAY_SIZE(h3_io_desc));
+	omap_serial_init(h3_serial_ports);
 }
 
 MACHINE_START(OMAP_H3, "TI OMAP1710 H3 board")
@@ -86,5 +97,5 @@ MACHINE_START(OMAP_H3, "TI OMAP1710 H3 board")
 	MAPIO(h3_map_io)
 	INITIRQ(h3_init_irq)
 	INIT_MACHINE(h3_init)
-	INITTIME(omap_init_time)
+	.timer		= &omap_timer,
 MACHINE_END

@@ -1,4 +1,6 @@
 /*
+ * $Id: ir-common.c,v 1.6 2004/12/10 12:33:39 kraxel Exp $
+ *
  * some common structs and functions to handle infrared remotes via
  * input layer ...
  *
@@ -20,6 +22,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 
 #include <media/ir-common.h>
 
@@ -29,11 +32,11 @@ MODULE_AUTHOR("Gerd Knorr <kraxel@bytesex.org> [SuSE Labs]");
 MODULE_LICENSE("GPL");
 
 static int repeat = 1;
-MODULE_PARM(repeat,"i");
+module_param(repeat, int, 0444);
 MODULE_PARM_DESC(repeat,"auto-repeat for IR keys (default: on)");
 
 static int debug = 0;    /* debug level (0,1,2) */
-MODULE_PARM(debug,"i");
+module_param(debug, int, 0644);
 
 #define dprintk(level, fmt, arg...)	if (debug >= level) \
 	printk(KERN_DEBUG fmt , ## arg)
@@ -100,7 +103,7 @@ IR_KEYTAB_TYPE ir_codes_rc5_tv[IR_KEYTAB_SIZE] = {
 	[ 0x2a ] = KEY_RESERVED,        // timed page/channel clck
 	[ 0x2b ] = KEY_RESERVED,        // increment (USA)
 	[ 0x2c ] = KEY_RESERVED,        // decrement (USA)
-	[ 0x2d ] = KEY_RESERVED,        // 
+	[ 0x2d ] = KEY_RESERVED,        //
 	[ 0x2f ] = KEY_RESERVED,        // PIP shift
 	[ 0x31 ] = KEY_RESERVED,        // erase
 	[ 0x34 ] = KEY_RESERVED,        // wind
@@ -141,7 +144,7 @@ void ir_input_init(struct input_dev *dev, struct ir_input_state *ir,
 		   int ir_type, IR_KEYTAB_TYPE *ir_codes)
 {
 	int i;
-	
+
 	ir->ir_type = ir_type;
 	if (ir_codes)
 		memcpy(ir->ir_codes, ir_codes, sizeof(ir->ir_codes));
@@ -171,7 +174,7 @@ void ir_input_keydown(struct input_dev *dev, struct ir_input_state *ir,
 		      u32 ir_key, u32 ir_raw)
 {
 	u32 keycode = IR_KEYCODE(ir->ir_codes, ir_key);
-	
+
 	if (ir->keypressed && ir->keycode != keycode) {
 		ir->keypressed = 0;
 		ir_input_key_event(dev,ir);

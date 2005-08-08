@@ -31,6 +31,7 @@
 #include <linux/time.h>
 #include <linux/jiffies.h>
 #include <linux/cpu.h>
+#include <linux/syscalls.h>
 #include <linux/vs_cvirt.h>
 #include <linux/vserver/sched.h>
 
@@ -242,7 +243,6 @@ void add_timer_on(struct timer_list *timer, int cpu)
 	spin_unlock_irqrestore(&base->lock, flags);
 }
 
-EXPORT_SYMBOL(add_timer_on);
 
 /***
  * mod_timer - modify a timer's timeout
@@ -310,6 +310,8 @@ repeat:
 		goto repeat;
 	}
 	list_del(&timer->entry);
+	/* Need to make sure that anybody who sees a NULL base also sees the list ops */
+	smp_wmb();
 	timer->base = NULL;
 	spin_unlock_irqrestore(&base->lock, flags);
 
@@ -465,7 +467,14 @@ repeat:
 			smp_wmb();
 			timer->base = NULL;
 			spin_unlock_irq(&base->lock);
-			fn(data);
+			{
+				u32 preempt_count = preempt_count();
+				fn(data);
+				if (preempt_count != preempt_count()) {
+					printk("huh, entered %p with %08x, exited with %08x?\n", fn, preempt_count, preempt_count());
+					BUG();
+				}
+			}
 			spin_lock_irq(&base->lock);
 			goto repeat;
 		}
@@ -554,7 +563,7 @@ unsigned long tick_nsec = TICK_NSEC;		/* ACTHZ period (nsec) */
 /* 
  * The current time 
  * wall_to_monotonic is what we need to add to xtime (or xtime corrected 
- * for sub jiffie times) to get to monotonic time.  Monotonic is pegged at zero
+ * for sub jiffie times) to get to monotonic time.  Monotonic is pegged
  * at zero at system boot time, so wall_to_monotonic will be negative,
  * however, we will ALWAYS keep the tv_nsec part positive so we can use
  * the usual normalization.
@@ -677,7 +686,11 @@ static void second_overflow(void)
 	if (ltemp > (MAXPHASE / MINSEC) << SHIFT_UPDATE)
 	    ltemp = (MAXPHASE / MINSEC) << SHIFT_UPDATE;
 	time_offset += ltemp;
+	#if SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE > 0
 	time_adj = -ltemp << (SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE);
+	#else
+	time_adj = -ltemp >> (SHIFT_HZ + SHIFT_UPDATE - SHIFT_SCALE);
+	#endif
     } else {
 	ltemp = time_offset;
 	if (!(time_status & STA_FLL))
@@ -685,7 +698,11 @@ static void second_overflow(void)
 	if (ltemp > (MAXPHASE / MINSEC) << SHIFT_UPDATE)
 	    ltemp = (MAXPHASE / MINSEC) << SHIFT_UPDATE;
 	time_offset -= ltemp;
+	#if SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE > 0
 	time_adj = ltemp << (SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE);
+	#else
+	time_adj = ltemp >> (SHIFT_HZ + SHIFT_UPDATE - SHIFT_SCALE);
+	#endif
     }
 
     /*
@@ -791,66 +808,13 @@ static void update_wall_time(unsigned long ticks)
 	do {
 		ticks--;
 		update_wall_time_one_tick();
+		if (xtime.tv_nsec >= 1000000000) {
+			xtime.tv_nsec -= 1000000000;
+			xtime.tv_sec++;
+			second_overflow();
+		}
 	} while (ticks);
-
-	if (xtime.tv_nsec >= 1000000000) {
-	    xtime.tv_nsec -= 1000000000;
-	    xtime.tv_sec++;
-	    second_overflow();
-	}
 }
-
-static inline void do_process_times(struct task_struct *p,
-	unsigned long user, unsigned long system)
-{
-	unsigned long psecs;
-
-	psecs = (p->utime += user);
-	psecs += (p->stime += system);
-	if (psecs / HZ >= p->rlim[RLIMIT_CPU].rlim_cur) {
-		/* Send SIGXCPU every second.. */
-		if (!(psecs % HZ))
-			send_sig(SIGXCPU, p, 1);
-		/* and SIGKILL when we go over max.. */
-		if (psecs / HZ >= p->rlim[RLIMIT_CPU].rlim_max)
-			send_sig(SIGKILL, p, 1);
-	}
-}
-
-static inline void do_it_virt(struct task_struct * p, unsigned long ticks)
-{
-	unsigned long it_virt = p->it_virt_value;
-
-	if (it_virt) {
-		it_virt -= ticks;
-		if (!it_virt) {
-			it_virt = p->it_virt_incr;
-			send_sig(SIGVTALRM, p, 1);
-		}
-		p->it_virt_value = it_virt;
-	}
-}
-
-static inline void do_it_prof(struct task_struct *p)
-{
-	unsigned long it_prof = p->it_prof_value;
-
-	if (it_prof) {
-		if (--it_prof == 0) {
-			it_prof = p->it_prof_incr;
-			send_sig(SIGPROF, p, 1);
-		}
-		p->it_prof_value = it_prof;
-	}
-}
-
-static void update_one_process(struct task_struct *p, unsigned long user,
-			unsigned long system, int cpu)
-{
-	do_process_times(p, user, system);
-	do_it_virt(p, user);
-	do_it_prof(p);
-}	
 
 /*
  * Called from the timer interrupt handler to charge one tick to the current 
@@ -859,11 +823,17 @@ static void update_one_process(struct task_struct *p, unsigned long user,
 void update_process_times(int user_tick)
 {
 	struct task_struct *p = current;
-	int cpu = smp_processor_id(), system = user_tick ^ 1;
+	int cpu = smp_processor_id();
 
-	update_one_process(p, user_tick, system, cpu);
+	/* Note: this timer irq context must be accounted for as well. */
+	if (user_tick)
+		account_user_time(p, jiffies_to_cputime(1));
+	else
+		account_system_time(p, HARDIRQ_OFFSET, jiffies_to_cputime(1));
 	run_local_timers();
-	scheduler_tick(user_tick, system);
+	if (rcu_pending(cpu))
+		rcu_check_callbacks(cpu, user_tick);
+	scheduler_tick();
 }
 
 /*
@@ -960,11 +930,6 @@ static inline void update_times(void)
 void do_timer(struct pt_regs *regs)
 {
 	jiffies_64++;
-#ifndef CONFIG_SMP
-	/* SMP process accounting uses the local APIC timer */
-
-	update_process_times(user_mode(regs));
-#endif
 	update_times();
 }
 
@@ -1448,9 +1413,9 @@ void __init init_timers(void)
 
 struct time_interpolator *time_interpolator;
 static struct time_interpolator *time_interpolator_list;
-static spinlock_t time_interpolator_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(time_interpolator_lock);
 
-static inline unsigned long time_interpolator_get_cycles(unsigned int src)
+static inline u64 time_interpolator_get_cycles(unsigned int src)
 {
 	unsigned long (*x)(void);
 
@@ -1461,27 +1426,29 @@ static inline unsigned long time_interpolator_get_cycles(unsigned int src)
 			return x();
 
 		case TIME_SOURCE_MMIO64	:
-			return readq(time_interpolator->addr);
+			return readq((void __iomem *) time_interpolator->addr);
 
 		case TIME_SOURCE_MMIO32	:
-			return readl(time_interpolator->addr);
+			return readl((void __iomem *) time_interpolator->addr);
+
 		default: return get_cycles();
 	}
 }
 
-static inline unsigned long time_interpolator_get_counter(void)
+static inline u64 time_interpolator_get_counter(void)
 {
 	unsigned int src = time_interpolator->source;
 
 	if (time_interpolator->jitter)
 	{
-		unsigned long lcycle;
-		unsigned long now;
+		u64 lcycle;
+		u64 now;
 
 		do {
 			lcycle = time_interpolator->last_cycle;
 			now = time_interpolator_get_cycles(src);
-			if (lcycle && time_after(lcycle, now)) return lcycle;
+			if (lcycle && time_after(lcycle, now))
+				return lcycle;
 			/* Keep track of the last timer value returned. The use of cmpxchg here
 			 * will cause contention in an SMP environment.
 			 */
@@ -1498,26 +1465,29 @@ void time_interpolator_reset(void)
 	time_interpolator->last_counter = time_interpolator_get_counter();
 }
 
-unsigned long time_interpolator_resolution(void)
-{
-	if (time_interpolator->frequency < NSEC_PER_SEC)
-		return NSEC_PER_SEC / time_interpolator->frequency;
-	else
-		return 1;
-}
-
-#define GET_TI_NSECS(count,i) ((((count) - i->last_counter) * i->nsec_per_cyc) >> i->shift)
+#define GET_TI_NSECS(count,i) (((((count) - i->last_counter) & (i)->mask) * (i)->nsec_per_cyc) >> (i)->shift)
 
 unsigned long time_interpolator_get_offset(void)
 {
+	/* If we do not have a time interpolator set up then just return zero */
+	if (!time_interpolator)
+		return 0;
+
 	return time_interpolator->offset +
 		GET_TI_NSECS(time_interpolator_get_counter(), time_interpolator);
 }
 
+#define INTERPOLATOR_ADJUST 65536
+#define INTERPOLATOR_MAX_SKIP 10*INTERPOLATOR_ADJUST
+
 static void time_interpolator_update(long delta_nsec)
 {
-	unsigned long counter = time_interpolator_get_counter();
-	unsigned long offset = time_interpolator->offset + GET_TI_NSECS(counter, time_interpolator);
+	u64 counter;
+	unsigned long offset;
+
+	/* If there is no time interpolator set up then do nothing */
+	if (!time_interpolator)
+		return;
 
 	/* The interpolator compensates for late ticks by accumulating
          * the late time in time_interpolator->offset. A tick earlier than
@@ -1526,6 +1496,9 @@ static void time_interpolator_update(long delta_nsec)
 	 * interpolator clock is running slightly slower than the regular clock
 	 * and the tuning logic insures that.
          */
+
+	counter = time_interpolator_get_counter();
+	offset = time_interpolator->offset + GET_TI_NSECS(counter, time_interpolator);
 
 	if (delta_nsec < 0 || (unsigned long) delta_nsec < offset)
 		time_interpolator->offset = offset - delta_nsec;
@@ -1565,7 +1538,11 @@ register_time_interpolator(struct time_interpolator *ti)
 {
 	unsigned long flags;
 
-	ti->nsec_per_cyc = (NSEC_PER_SEC << ti->shift) / ti->frequency;
+	/* Sanity check */
+	if (ti->frequency == 0 || ti->mask == 0)
+		BUG();
+
+	ti->nsec_per_cyc = ((u64)NSEC_PER_SEC << ti->shift) / ti->frequency;
 	spin_lock(&time_interpolator_lock);
 	write_seqlock_irqsave(&xtime_lock, flags);
 	if (is_better_time_interpolator(ti)) {
@@ -1616,7 +1593,7 @@ unregister_time_interpolator(struct time_interpolator *ti)
  */
 void msleep(unsigned int msecs)
 {
-	unsigned long timeout = msecs_to_jiffies(msecs);
+	unsigned long timeout = msecs_to_jiffies(msecs) + 1;
 
 	while (timeout) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
@@ -1632,7 +1609,7 @@ EXPORT_SYMBOL(msleep);
  */
 unsigned long msleep_interruptible(unsigned int msecs)
 {
-	unsigned long timeout = msecs_to_jiffies(msecs);
+	unsigned long timeout = msecs_to_jiffies(msecs) + 1;
 
 	while (timeout && !signal_pending(current)) {
 		set_current_state(TASK_INTERRUPTIBLE);

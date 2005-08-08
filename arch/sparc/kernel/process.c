@@ -45,7 +45,7 @@
 
 /* 
  * Power management idle function 
- * Set in pm platform drivers
+ * Set in pm platform drivers (apc.c and pmc.c)
  */
 void (*pm_idle)(void);
 
@@ -81,10 +81,8 @@ void default_idle(void)
 /*
  * the idle loop on a Sparc... ;)
  */
-int cpu_idle(void)
+void cpu_idle(void)
 {
-	int ret = -EPERM;
-
 	if (current->pid != 0)
 		goto out;
 
@@ -122,21 +120,20 @@ int cpu_idle(void)
 		}
 
 		while((!need_resched()) && pm_idle) {
-			(*pm_idle)();		/* XXX Huh? On sparc?! */
+			(*pm_idle)();
 		}
 
 		schedule();
 		check_pgt_cache();
 	}
-	ret = 0;
 out:
-	return ret;
+	return;
 }
 
 #else
 
 /* This is being executed in task 0 'user space'. */
-int cpu_idle(void)
+void cpu_idle(void)
 {
 	/* endless idle loop with no priority at all */
 	while(1) {
@@ -201,7 +198,7 @@ void machine_power_off(void)
 
 EXPORT_SYMBOL(machine_power_off);
 
-static spinlock_t sparc_backtrace_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(sparc_backtrace_lock);
 
 void __show_backtrace(unsigned long fp)
 {
@@ -480,8 +477,6 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long sp,
 #endif
 	}
 
-	p->set_child_tid = p->clear_child_tid = NULL;
-
 	/*
 	 *  p->thread_info         new_stack   childregs
 	 *  !                      !           !             {if(PSR_PS) }
@@ -554,6 +549,11 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long sp,
 		}
 	}
 
+#ifdef CONFIG_SMP
+	/* FPU must be disabled on SMP. */
+	childregs->psr &= ~PSR_EF;
+#endif
+
 	/* Set the return value for the child. */
 	childregs->u_regs[UREG_I0] = current->pid;
 	childregs->u_regs[UREG_I1] = 1;
@@ -604,7 +604,7 @@ void dump_thread(struct pt_regs * regs, struct user * dump)
  */
 int dump_fpu (struct pt_regs * regs, elf_fpregset_t * fpregs)
 {
-	if (current->used_math == 0) {
+	if (used_math()) {
 		memset(fpregs, 0, sizeof(*fpregs));
 		fpregs->pr_q_entrysize = 8;
 		return 1;
@@ -670,8 +670,11 @@ asmlinkage int sparc_execve(struct pt_regs *regs)
 			  (char __user * __user *)regs->u_regs[base + UREG_I2],
 			  regs);
 	putname(filename);
-	if (error == 0)
+	if (error == 0) {
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
+	}
 out:
 	return error;
 }

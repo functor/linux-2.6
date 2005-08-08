@@ -3,7 +3,7 @@
  *
  *  Virtual Server: Network Support
  *
- *  Copyright (C) 2003-2004  Herbert Pötzl
+ *  Copyright (C) 2003-2005  Herbert Pötzl
  *
  *  V0.01  broken out from vcontext V0.05
  *  V0.02  cleaned up implementation
@@ -14,8 +14,7 @@
 
 #include <linux/config.h>
 #include <linux/slab.h>
-#include <linux/vserver.h>
-#include <linux/vs_base.h>
+#include <linux/vserver/network_cmd.h>
 #include <linux/rcupdate.h>
 #include <net/tcp.h>
 
@@ -70,6 +69,35 @@ static void __dealloc_nx_info(struct nx_info *nxi)
 	kfree(nxi);
 }
 
+static inline int __free_nx_info(struct nx_info *nxi)
+{
+	int usecnt, refcnt;
+
+	BUG_ON(!nxi);
+
+	usecnt = atomic_read(&nxi->nx_usecnt);
+	BUG_ON(usecnt < 0);
+
+	refcnt = atomic_read(&nxi->nx_refcnt);
+	BUG_ON(refcnt < 0);
+
+	if (!usecnt)
+		__dealloc_nx_info(nxi);
+	return usecnt;
+}
+
+/*	exported stuff						*/
+
+void free_nx_info(struct nx_info *nxi)
+{
+	/* context shutdown is mandatory */
+	// BUG_ON(nxi->nx_state != NXS_SHUTDOWN);
+
+	// BUG_ON(nxi->nx_state & NXS_HASHED);
+
+	BUG_ON(__free_nx_info(nxi));
+}
+
 
 /*	hash table for nx_info hash */
 
@@ -100,7 +128,7 @@ static inline void __hash_nx_info(struct nx_info *nxi)
 		"__hash_nx_info: %p[#%d]", nxi, nxi->nx_id);
 	get_nx_info(nxi);
 	head = &nx_info_hash[__hashval(nxi->nx_id)];
-	hlist_add_head_rcu(&nxi->nx_hlist, head);
+	hlist_add_head(&nxi->nx_hlist, head);
 }
 
 /*	__unhash_nx_info()
@@ -110,16 +138,17 @@ static inline void __hash_nx_info(struct nx_info *nxi)
 
 static inline void __unhash_nx_info(struct nx_info *nxi)
 {
+	vxd_assert_lock(&nx_info_hash_lock);
 	vxdprintk(VXD_CBIT(nid, 4),
 		"__unhash_nx_info: %p[#%d]", nxi, nxi->nx_id);
-	hlist_del_rcu(&nxi->nx_hlist);
+	hlist_del(&nxi->nx_hlist);
 	put_nx_info(nxi);
 }
 
 
 /*	__lookup_nx_info()
 
-	* requires the rcu_read_lock()
+	* requires the hash_lock to be held
 	* doesn't increment the nx_refcnt			*/
 
 static inline struct nx_info *__lookup_nx_info(nid_t nid)
@@ -127,7 +156,8 @@ static inline struct nx_info *__lookup_nx_info(nid_t nid)
 	struct hlist_head *head = &nx_info_hash[__hashval(nid)];
 	struct hlist_node *pos;
 
-	hlist_for_each_rcu(pos, head) {
+	vxd_assert_lock(&nx_info_hash_lock);
+	hlist_for_each(pos, head) {
 		struct nx_info *nxi =
 			hlist_entry(pos, struct nx_info, nx_hlist);
 
@@ -149,6 +179,7 @@ static inline nid_t __nx_dynamic_id(void)
 	static nid_t seq = MAX_N_CONTEXT;
 	nid_t barrier = seq;
 
+	vxd_assert_lock(&nx_info_hash_lock);
 	do {
 		if (++seq > MAX_N_CONTEXT)
 			seq = MIN_D_CONTEXT;
@@ -177,6 +208,7 @@ static struct nx_info * __loc_nx_info(int id, int *err)
 		return NULL;
 	}
 
+	/* required to make dynamic xids unique */
 	spin_lock(&nx_info_hash_lock);
 
 	/* dynamic context requested */
@@ -224,29 +256,6 @@ out_unlock:
 /*	exported stuff						*/
 
 
-
-
-void rcu_free_nx_info(struct rcu_head *head)
-{
-	struct nx_info *nxi = container_of(head, struct nx_info, nx_rcu);
-	int usecnt, refcnt;
-
-	BUG_ON(!nxi || !head);
-
-	usecnt = atomic_read(&nxi->nx_usecnt);
-	BUG_ON(usecnt < 0);
-
-	refcnt = atomic_read(&nxi->nx_refcnt);
-	BUG_ON(refcnt < 0);
-
-	vxdprintk(VXD_CBIT(nid, 3),
-		"rcu_free_nx_info(%p): uc=%d", nxi, usecnt);
-	if (!usecnt)
-		__dealloc_nx_info(nxi);
-	else
-		printk("!!! rcu didn't free\n");
-}
-
 void unhash_nx_info(struct nx_info *nxi)
 {
 	spin_lock(&nx_info_hash_lock);
@@ -266,28 +275,28 @@ struct nx_info *locate_nx_info(int id)
 	if (id < 0) {
 		nxi = get_nx_info(current->nx_info);
 	} else {
-		rcu_read_lock();
+		spin_lock(&nx_info_hash_lock);
 		nxi = get_nx_info(__lookup_nx_info(id));
-		rcu_read_unlock();
+		spin_unlock(&nx_info_hash_lock);
 	}
 	return nxi;
 }
 
-/*	nx_info_is_hashed()
+/*	nid_is_hashed()
 
 	* verify that nid is still hashed			*/
 
-int nx_info_is_hashed(nid_t nid)
+int nid_is_hashed(nid_t nid)
 {
 	int hashed;
 
-	rcu_read_lock();
+	spin_lock(&nx_info_hash_lock);
 	hashed = (__lookup_nx_info(nid) != NULL);
-	rcu_read_unlock();
+	spin_unlock(&nx_info_hash_lock);
 	return hashed;
 }
 
-#ifdef	CONFIG_VSERVER_LEGACY
+#ifdef	CONFIG_VSERVER_LEGACYNET
 
 struct nx_info *locate_or_create_nx_info(int id)
 {
@@ -316,12 +325,12 @@ int get_nid_list(int index, unsigned int *nids, int size)
 {
 	int hindex, nr_nids = 0;
 
-	rcu_read_lock();
 	for (hindex = 0; hindex < NX_HASH_SIZE; hindex++) {
 		struct hlist_head *head = &nx_info_hash[hindex];
 		struct hlist_node *pos;
 
-		hlist_for_each_rcu(pos, head) {
+		spin_lock(&nx_info_hash_lock);
+		hlist_for_each(pos, head) {
 			struct nx_info *nxi;
 
 			if (--index > 0)
@@ -329,12 +338,15 @@ int get_nid_list(int index, unsigned int *nids, int size)
 
 			nxi = hlist_entry(pos, struct nx_info, nx_hlist);
 			nids[nr_nids] = nxi->nx_id;
-			if (++nr_nids >= size)
+			if (++nr_nids >= size) {
+				spin_unlock(&nx_info_hash_lock);
 				goto out;
+			}
 		}
+		/* keep the lock time short */
+		spin_unlock(&nx_info_hash_lock);
 	}
 out:
-	rcu_read_unlock();
 	return nr_nids;
 }
 #endif
@@ -696,7 +708,6 @@ int vc_set_ncaps(uint32_t id, void __user *data)
 
 #include <linux/module.h>
 
-EXPORT_SYMBOL_GPL(rcu_free_nx_info);
-EXPORT_SYMBOL_GPL(nx_info_hash_lock);
+EXPORT_SYMBOL_GPL(free_nx_info);
 EXPORT_SYMBOL_GPL(unhash_nx_info);
 

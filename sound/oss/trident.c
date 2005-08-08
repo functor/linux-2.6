@@ -1281,7 +1281,7 @@ alloc_dmabuf(struct dmabuf *dmabuf, struct pci_dev *pci_dev, int order)
 	dmabuf->buforder = order;
 
 	/* now mark the pages as reserved; otherwise */ 
-	/* remap_page_range doesn't do what we want */
+	/* remap_pfn_range doesn't do what we want */
 	pend = virt_to_page(rawbuf + (PAGE_SIZE << order) - 1);
 	for (page = virt_to_page(rawbuf); page <= pend; page++)
 		SetPageReserved(page);
@@ -2223,7 +2223,8 @@ trident_mmap(struct file *file, struct vm_area_struct *vma)
 	if (size > (PAGE_SIZE << dmabuf->buforder))
 		goto out;
 	ret = -EAGAIN;
-	if (remap_page_range(vma, vma->vm_start, virt_to_phys(dmabuf->rawbuf), 
+	if (remap_pfn_range(vma, vma->vm_start,
+			     virt_to_phys(dmabuf->rawbuf) >> PAGE_SHIFT,
 			     size, vma->vm_page_prot))
 		goto out;
 	dmabuf->mapped = 1;
@@ -4013,7 +4014,8 @@ ali_free_other_states_resources(struct trident_state *state)
 	}
 }
 
-struct proc_dir_entry *res;
+static struct proc_dir_entry *res;
+
 static int
 ali_write_proc(struct file *file, const char __user *buffer, unsigned long count, void *data)
 {
@@ -4594,11 +4596,7 @@ trident_init_module(void)
 	       "5050 PCI Audio, version " DRIVER_VERSION ", " __TIME__ " " 
 	       __DATE__ "\n");
 
-	if (!pci_register_driver(&trident_pci_driver)) {
-		pci_unregister_driver(&trident_pci_driver);
-		return -ENODEV;
-	}
-	return 0;
+	return pci_register_driver(&trident_pci_driver);
 }
 
 static void __exit

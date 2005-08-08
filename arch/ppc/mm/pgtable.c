@@ -85,8 +85,7 @@ pgd_t *pgd_alloc(struct mm_struct *mm)
 {
 	pgd_t *ret;
 
-	if ((ret = (pgd_t *)__get_free_pages(GFP_KERNEL, PGDIR_ORDER)) != NULL)
-		clear_pages(ret, PGDIR_ORDER);
+	ret = (pgd_t *)__get_free_pages(GFP_KERNEL|__GFP_ZERO, PGDIR_ORDER);
 	return ret;
 }
 
@@ -102,16 +101,17 @@ pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)
 	extern void *early_get_page(void);
 
 	if (mem_init_done) {
-		pte = (pte_t *)__get_free_page(GFP_KERNEL|__GFP_REPEAT);
+		pte = (pte_t *)__get_free_page(GFP_KERNEL|__GFP_REPEAT|__GFP_ZERO);
 		if (pte) {
 			struct page *ptepage = virt_to_page(pte);
 			ptepage->mapping = (void *) mm;
 			ptepage->index = address & PMD_MASK;
 		}
-	} else
+	} else {
 		pte = (pte_t *)early_get_page();
-	if (pte)
-		clear_page(pte);
+		if (pte)
+			clear_page(pte);
+	}
 	return pte;
 }
 
@@ -153,19 +153,19 @@ void pte_free(struct page *ptepage)
 }
 
 #ifndef CONFIG_44x
-void *
+void __iomem *
 ioremap(phys_addr_t addr, unsigned long size)
 {
 	return __ioremap(addr, size, _PAGE_NO_CACHE);
 }
 #else /* CONFIG_44x */
-void *
+void __iomem *
 ioremap64(unsigned long long addr, unsigned long size)
 {
 	return __ioremap(addr, size, _PAGE_NO_CACHE);
 }
 
-void *
+void __iomem *
 ioremap(phys_addr_t addr, unsigned long size)
 {
 	phys_addr_t addr64 = fixup_bigphys_addr(addr, size);
@@ -174,7 +174,7 @@ ioremap(phys_addr_t addr, unsigned long size)
 }
 #endif /* CONFIG_44x */
 
-void *
+void __iomem *
 __ioremap(phys_addr_t addr, unsigned long size, unsigned long flags)
 {
 	unsigned long v, i;
@@ -257,10 +257,10 @@ __ioremap(phys_addr_t addr, unsigned long size, unsigned long flags)
 	}
 
 out:
-	return (void *) (v + ((unsigned long)addr & ~PAGE_MASK));
+	return (void __iomem *) (v + ((unsigned long)addr & ~PAGE_MASK));
 }
 
-void iounmap(void *addr)
+void iounmap(volatile void __iomem *addr)
 {
 	/*
 	 * If mapped by BATs then there is nothing to do.

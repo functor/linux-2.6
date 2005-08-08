@@ -30,9 +30,9 @@
 #undef DEBUG_PTRACE
 
 #ifdef DEBUG_PTRACE
-#define DBG(x)	printk x
+#define DBG(x...)	printk(x)
 #else
-#define DBG(x)
+#define DBG(x...)
 #endif
 
 #ifdef __LP64__
@@ -141,9 +141,9 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 			if (copied != sizeof(tmp))
 				goto out_tsk;
 			ret = put_user(tmp,(unsigned int *) data);
-			DBG(("sys_ptrace(PEEK%s, %d, %lx, %lx) returning %ld, data %x\n",
+			DBG("sys_ptrace(PEEK%s, %d, %lx, %lx) returning %ld, data %x\n",
 				request == PTRACE_PEEKTEXT ? "TEXT" : "DATA",
-				pid, oaddr, odata, ret, tmp));
+				pid, oaddr, odata, ret, tmp);
 		}
 		else
 #endif
@@ -166,9 +166,9 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 #ifdef __LP64__
 		if (is_compat_task(child)) {
 			unsigned int tmp = (unsigned int)data;
-			DBG(("sys_ptrace(POKE%s, %d, %lx, %lx)\n",
+			DBG("sys_ptrace(POKE%s, %d, %lx, %lx)\n",
 				request == PTRACE_POKETEXT ? "TEXT" : "DATA",
-				pid, oaddr, odata));
+				pid, oaddr, odata);
 			addr &= 0xffffffffL;
 			if (access_process_vm(child, addr, &tmp, sizeof(tmp), 1) == sizeof(tmp))
 				goto out_tsk;
@@ -197,8 +197,8 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 
 			tmp = *(unsigned int *) ((char *) task_regs(child) + addr);
 			ret = put_user(tmp, (unsigned int *) data);
-			DBG(("sys_ptrace(PEEKUSR, %d, %lx, %lx) returning %ld, addr %lx, data %x\n",
-				pid, oaddr, odata, ret, addr, tmp));
+			DBG("sys_ptrace(PEEKUSR, %d, %lx, %lx) returning %ld, addr %lx, data %x\n",
+				pid, oaddr, odata, ret, addr, tmp);
 		}
 		else
 #endif
@@ -237,8 +237,8 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 			 * BEWARE, if you set N, and then single step, it won't
 			 * stop on the nullified instruction.
 			 */
-			DBG(("sys_ptrace(POKEUSR, %d, %lx, %lx)\n",
-				pid, oaddr, odata));
+			DBG("sys_ptrace(POKEUSR, %d, %lx, %lx)\n",
+				pid, oaddr, odata);
 			data &= USER_PSW_BITS;
 			task_regs(child)->gr[0] &= ~USER_PSW_BITS;
 			task_regs(child)->gr[0] |= data;
@@ -251,9 +251,9 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 				goto out_tsk;
 			if ((addr = translate_usr_offset(addr)) < 0)
 				goto out_tsk;
-			DBG(("sys_ptrace(POKEUSR, %d, %lx, %lx) addr %lx\n",
-				pid, oaddr, odata, addr));
-			if (addr >= PT_FR0 && addr <= PT_FR31) {
+			DBG("sys_ptrace(POKEUSR, %d, %lx, %lx) addr %lx\n",
+				pid, oaddr, odata, addr);
+			if (addr >= PT_FR0 && addr <= PT_FR31 + 4) {
 				/* Special case, fp regs are 64 bits anyway */
 				*(unsigned int *) ((char *) task_regs(child) + addr) = data;
 				ret = 0;
@@ -275,7 +275,7 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 				goto out_tsk;
 			if ((addr >= PT_GR1 && addr <= PT_GR31) ||
 					addr == PT_IAOQ0 || addr == PT_IAOQ1 ||
-					(addr >= PT_FR0 && addr <= PT_FR31) ||
+					(addr >= PT_FR0 && addr <= PT_FR31 + 4) ||
 					addr == PT_SAR) {
 				*(unsigned long *) ((char *) task_regs(child) + addr) = data;
 				ret = 0;
@@ -286,8 +286,8 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 	case PTRACE_SYSCALL: /* continue and stop at next (return from) syscall */
 	case PTRACE_CONT:
 		ret = -EIO;
-		DBG(("sys_ptrace(%s)\n",
-			request == PTRACE_SYSCALL ? "SYSCALL" : "CONT"));
+		DBG("sys_ptrace(%s)\n",
+			request == PTRACE_SYSCALL ? "SYSCALL" : "CONT");
 		if ((unsigned long) data > _NSIG)
 			goto out_tsk;
 		child->ptrace &= ~(PT_SINGLESTEP|PT_BLOCKSTEP);
@@ -305,14 +305,14 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 		 * sigkill.  perhaps it should be put in the status
 		 * that it wants to exit.
 		 */
-		DBG(("sys_ptrace(KILL)\n"));
-		if (child->state == TASK_ZOMBIE)	/* already dead */
+		DBG("sys_ptrace(KILL)\n");
+		if (child->exit_state == EXIT_ZOMBIE)	/* already dead */
 			goto out_tsk;
 		child->exit_code = SIGKILL;
 		goto out_wake_notrap;
 
 	case PTRACE_SINGLEBLOCK:
-		DBG(("sys_ptrace(SINGLEBLOCK)\n"));
+		DBG("sys_ptrace(SINGLEBLOCK)\n");
 		ret = -EIO;
 		if ((unsigned long) data > _NSIG)
 			goto out_tsk;
@@ -329,10 +329,11 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 		goto out_wake;
 
 	case PTRACE_SINGLESTEP:
-		DBG(("sys_ptrace(SINGLESTEP)\n"));
+		DBG("sys_ptrace(SINGLESTEP)\n");
 		ret = -EIO;
 		if ((unsigned long) data > _NSIG)
 			goto out_tsk;
+
 		clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
 		child->ptrace &= ~PT_BLOCKSTEP;
 		child->ptrace |= PT_SINGLESTEP;
@@ -354,7 +355,7 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 			/* Don't wake up the child, but let the
 			   parent know something happened. */
 			si.si_code = TRAP_TRACE;
-			si.si_addr = (void *) (task_regs(child)->iaoq[0] & ~3);
+			si.si_addr = (void __user *) (task_regs(child)->iaoq[0] & ~3);
 			si.si_signo = SIGTRAP;
 			si.si_errno = 0;
 			force_sig_info(SIGTRAP, &si, child);
@@ -382,6 +383,10 @@ long sys_ptrace(long request, pid_t pid, long addr, long data)
 		ret = ptrace_detach(child, data);
 		goto out_tsk;
 
+	case PTRACE_GETEVENTMSG:
+                ret = put_user(child->ptrace_message, (unsigned int __user *) data);
+		goto out_tsk;
+
 	default:
 		ret = ptrace_request(child, request, addr, data);
 		goto out_tsk;
@@ -396,8 +401,8 @@ out_tsk:
 	put_task_struct(child);
 out:
 	unlock_kernel();
-	DBG(("sys_ptrace(%ld, %d, %lx, %lx) returning %ld\n",
-		request, pid, oaddr, odata, ret));
+	DBG("sys_ptrace(%ld, %d, %lx, %lx) returning %ld\n",
+		request, pid, oaddr, odata, ret);
 	return ret;
 }
 

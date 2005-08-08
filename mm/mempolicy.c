@@ -66,6 +66,7 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
+#include <linux/nodemask.h>
 #include <linux/gfp.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -74,6 +75,7 @@
 #include <linux/init.h>
 #include <linux/compat.h>
 #include <linux/mempolicy.h>
+#include <asm/tlbflush.h>
 #include <asm/uaccess.h>
 
 static kmem_cache_t *policy_cache;
@@ -95,7 +97,7 @@ static int nodes_online(unsigned long *nodes)
 {
 	DECLARE_BITMAP(online2, MAX_NUMNODES);
 
-	bitmap_copy(online2, node_online_map, MAX_NUMNODES);
+	bitmap_copy(online2, nodes_addr(node_online_map), MAX_NUMNODES);
 	if (bitmap_empty(online2, MAX_NUMNODES))
 		set_bit(0, online2);
 	if (!bitmap_subset(nodes, online2, MAX_NUMNODES))
@@ -232,18 +234,29 @@ static struct mempolicy *mpol_new(int mode, unsigned long *nodes)
 
 /* Ensure all existing pages follow the policy. */
 static int
-verify_pages(unsigned long addr, unsigned long end, unsigned long *nodes)
+verify_pages(struct mm_struct *mm,
+	     unsigned long addr, unsigned long end, unsigned long *nodes)
 {
 	while (addr < end) {
 		struct page *p;
 		pte_t *pte;
 		pmd_t *pmd;
-		pgd_t *pgd = pgd_offset_k(addr);
+		pud_t *pud;
+		pgd_t *pgd;
+		pgd = pgd_offset(mm, addr);
 		if (pgd_none(*pgd)) {
-			addr = (addr + PGDIR_SIZE) & PGDIR_MASK;
+			unsigned long next = (addr + PGDIR_SIZE) & PGDIR_MASK;
+			if (next > addr)
+				break;
+			addr = next;
 			continue;
 		}
-		pmd = pmd_offset(pgd, addr);
+		pud = pud_offset(pgd, addr);
+		if (pud_none(*pud)) {
+			addr = (addr + PUD_SIZE) & PUD_MASK;
+			continue;
+		}
+		pmd = pmd_offset(pud, addr);
 		if (pmd_none(*pmd)) {
 			addr = (addr + PMD_SIZE) & PMD_MASK;
 			continue;
@@ -281,7 +294,8 @@ check_range(struct mm_struct *mm, unsigned long start, unsigned long end,
 		if (prev && prev->vm_end < vma->vm_start)
 			return ERR_PTR(-EFAULT);
 		if ((flags & MPOL_MF_STRICT) && !is_vm_hugetlb_page(vma)) {
-			err = verify_pages(vma->vm_start, vma->vm_end, nodes);
+			err = verify_pages(vma->vm_mm,
+					   vma->vm_start, vma->vm_end, nodes);
 			if (err) {
 				first = ERR_PTR(err);
 				break;
@@ -424,7 +438,7 @@ static void get_zonemask(struct mempolicy *p, unsigned long *nodes)
 	case MPOL_PREFERRED:
 		/* or use current node instead of online map? */
 		if (p->v.preferred_node < 0)
-			bitmap_copy(nodes, node_online_map, MAX_NUMNODES);
+			bitmap_copy(nodes, nodes_addr(node_online_map), MAX_NUMNODES);
 		else
 			__set_bit(p->v.preferred_node, nodes);
 		break;
@@ -475,7 +489,7 @@ asmlinkage long sys_get_mempolicy(int __user *policy,
 
 	if (flags & ~(unsigned long)(MPOL_F_NODE|MPOL_F_ADDR))
 		return -EINVAL;
-	if (nmask != NULL && maxnode < numnodes)
+	if (nmask != NULL && maxnode < MAX_NUMNODES)
 		return -EINVAL;
 	if (flags & MPOL_F_ADDR) {
 		down_read(&mm->mmap_sem);
@@ -510,9 +524,13 @@ asmlinkage long sys_get_mempolicy(int __user *policy,
 	} else
 		pval = pol->policy;
 
-	err = -EFAULT;
+	if (vma) {
+		up_read(&current->mm->mmap_sem);
+		vma = NULL;
+	}
+
 	if (policy && put_user(pval, policy))
-		goto out;
+		return -EFAULT;
 
 	err = 0;
 	if (nmask) {
@@ -529,7 +547,7 @@ asmlinkage long sys_get_mempolicy(int __user *policy,
 
 #ifdef CONFIG_COMPAT
 
-asmlinkage long compat_get_mempolicy(int __user *policy,
+asmlinkage long compat_sys_get_mempolicy(int __user *policy,
 				     compat_ulong_t __user *nmask,
 				     compat_ulong_t maxnode,
 				     compat_ulong_t addr, compat_ulong_t flags)
@@ -557,7 +575,7 @@ asmlinkage long compat_get_mempolicy(int __user *policy,
 	return err;
 }
 
-asmlinkage long compat_set_mempolicy(int mode, compat_ulong_t __user *nmask,
+asmlinkage long compat_sys_set_mempolicy(int mode, compat_ulong_t __user *nmask,
 				     compat_ulong_t maxnode)
 {
 	long err = 0;
@@ -580,7 +598,7 @@ asmlinkage long compat_set_mempolicy(int mode, compat_ulong_t __user *nmask,
 	return sys_set_mempolicy(mode, nm, nr_bits+1);
 }
 
-asmlinkage long compat_mbind(compat_ulong_t start, compat_ulong_t len,
+asmlinkage long compat_sys_mbind(compat_ulong_t start, compat_ulong_t len,
 			     compat_ulong_t mode, compat_ulong_t __user *nmask,
 			     compat_ulong_t maxnode, compat_ulong_t flags)
 {
@@ -692,7 +710,7 @@ static struct page *alloc_page_interleave(unsigned gfp, unsigned order, unsigned
 	struct zonelist *zl;
 	struct page *page;
 
-	BUG_ON(!test_bit(nid, node_online_map));
+	BUG_ON(!node_online(nid));
 	zl = NODE_DATA(nid)->node_zonelists + (gfp & GFP_ZONEMASK);
 	page = __alloc_pages(gfp, order, zl);
 	if (page && page_zone(page) == zl->zones[0]) {
@@ -886,12 +904,12 @@ int mpol_node_valid(int nid, struct vm_area_struct *vma, unsigned long addr)
  *
  * Remember policies even when nobody has shared memory mapped.
  * The policies are kept in Red-Black tree linked from the inode.
- * They are protected by the sp->sem semaphore, which should be held
+ * They are protected by the sp->lock spinlock, which should be held
  * for any accesses to the tree.
  */
 
 /* lookup first element intersecting start-end */
-/* Caller holds sp->sem */
+/* Caller holds sp->lock */
 static struct sp_node *
 sp_lookup(struct shared_policy *sp, unsigned long start, unsigned long end)
 {
@@ -899,13 +917,13 @@ sp_lookup(struct shared_policy *sp, unsigned long start, unsigned long end)
 
 	while (n) {
 		struct sp_node *p = rb_entry(n, struct sp_node, nd);
-		if (start >= p->end) {
+
+		if (start >= p->end)
 			n = n->rb_right;
-		} else if (end < p->start) {
+		else if (end <= p->start)
 			n = n->rb_left;
-		} else {
+		else
 			break;
-		}
 	}
 	if (!n)
 		return NULL;
@@ -923,7 +941,7 @@ sp_lookup(struct shared_policy *sp, unsigned long start, unsigned long end)
 }
 
 /* Insert a new shared policy into the list. */
-/* Caller holds sp->sem */
+/* Caller holds sp->lock */
 static void sp_insert(struct shared_policy *sp, struct sp_node *new)
 {
 	struct rb_node **p = &sp->root.rb_node;
@@ -953,13 +971,15 @@ mpol_shared_policy_lookup(struct shared_policy *sp, unsigned long idx)
 	struct mempolicy *pol = NULL;
 	struct sp_node *sn;
 
-	down(&sp->sem);
+	if (!sp->root.rb_node)
+		return NULL;
+	spin_lock(&sp->lock);
 	sn = sp_lookup(sp, idx, idx+1);
 	if (sn) {
 		mpol_get(sn->policy);
 		pol = sn->policy;
 	}
-	up(&sp->sem);
+	spin_unlock(&sp->lock);
 	return pol;
 }
 
@@ -989,9 +1009,10 @@ sp_alloc(unsigned long start, unsigned long end, struct mempolicy *pol)
 static int shared_policy_replace(struct shared_policy *sp, unsigned long start,
 				 unsigned long end, struct sp_node *new)
 {
-	struct sp_node *n, *new2;
+	struct sp_node *n, *new2 = NULL;
 
-	down(&sp->sem);
+restart:
+	spin_lock(&sp->lock);
 	n = sp_lookup(sp, start, end);
 	/* Take care of old policies in the same range. */
 	while (n && n->start < end) {
@@ -1004,16 +1025,18 @@ static int shared_policy_replace(struct shared_policy *sp, unsigned long start,
 		} else {
 			/* Old policy spanning whole new range. */
 			if (n->end > end) {
-				new2 = sp_alloc(end, n->end, n->policy);
 				if (!new2) {
-					up(&sp->sem);
-					return -ENOMEM;
+					spin_unlock(&sp->lock);
+					new2 = sp_alloc(end, n->end, n->policy);
+					if (!new2)
+						return -ENOMEM;
+					goto restart;
 				}
-				n->end = end;
+				n->end = start;
 				sp_insert(sp, new2);
-			}
-			/* Old crossing beginning, but not end (easy) */
-			if (n->start < start && n->end > start)
+				new2 = NULL;
+				break;
+			} else
 				n->end = start;
 		}
 		if (!next)
@@ -1022,7 +1045,11 @@ static int shared_policy_replace(struct shared_policy *sp, unsigned long start,
 	}
 	if (new)
 		sp_insert(sp, new);
-	up(&sp->sem);
+	spin_unlock(&sp->lock);
+	if (new2) {
+		mpol_free(new2->policy);
+		kmem_cache_free(sn_cache, new2);
+	}
 	return 0;
 }
 
@@ -1055,16 +1082,18 @@ void mpol_free_shared_policy(struct shared_policy *p)
 	struct sp_node *n;
 	struct rb_node *next;
 
-	down(&p->sem);
+	if (!p->root.rb_node)
+		return;
+	spin_lock(&p->lock);
 	next = rb_first(&p->root);
 	while (next) {
 		n = rb_entry(next, struct sp_node, nd);
 		next = rb_next(&n->nd);
-		rb_erase(&n->nd, &p->root);
 		mpol_free(n->policy);
 		kmem_cache_free(sn_cache, n);
 	}
-	up(&p->sem);
+	spin_unlock(&p->lock);
+	p->root = RB_ROOT;
 }
 
 /* assumes fs == KERNEL_DS */
@@ -1081,7 +1110,8 @@ void __init numa_policy_init(void)
 	/* Set interleaving policy for system init. This way not all
 	   the data structures allocated at system boot end up in node zero. */
 
-	if (sys_set_mempolicy(MPOL_INTERLEAVE, node_online_map, MAX_NUMNODES) < 0)
+	if (sys_set_mempolicy(MPOL_INTERLEAVE, nodes_addr(node_online_map),
+							MAX_NUMNODES) < 0)
 		printk("numa_policy_init: interleaving failed\n");
 }
 

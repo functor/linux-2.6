@@ -35,13 +35,9 @@
 
 #include "common.h"
 
-extern void __init omap_init_time(void);
+extern int omap_gpio_init(void);
 
-static struct map_desc h2_io_desc[] __initdata = {
-{ OMAP1610_ETHR_BASE, OMAP1610_ETHR_START, OMAP1610_ETHR_SIZE,MT_DEVICE },
-{ OMAP1610_NOR_FLASH_BASE, OMAP1610_NOR_FLASH_START, OMAP1610_NOR_FLASH_SIZE,
-	MT_DEVICE },
-};
+static int __initdata h2_serial_ports[OMAP_MAX_NR_PORTS] = {1, 1, 1};
 
 static struct resource h2_smc91x_resources[] = {
 	[0] = {
@@ -50,8 +46,8 @@ static struct resource h2_smc91x_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= 0,				/* Really GPIO 0 */
-		.end	= 0,
+		.start	= OMAP_GPIO_IRQ(0),
+		.end	= OMAP_GPIO_IRQ(0),
 		.flags	= IORESOURCE_IRQ,
 	},
 };
@@ -67,9 +63,20 @@ static struct platform_device *h2_devices[] __initdata = {
 	&h2_smc91x_device,
 };
 
+static void __init h2_init_smc91x(void)
+{
+	if ((omap_request_gpio(0)) < 0) {
+		printk("Error requesting gpio 0 for smc91x irq\n");
+		return;
+	}
+	omap_set_gpio_edge_ctrl(0, OMAP_GPIO_FALLING_EDGE);
+}
+
 void h2_init_irq(void)
 {
 	omap_init_irq();
+	omap_gpio_init();
+	h2_init_smc91x();
 }
 
 static struct omap_usb_config h2_usb_config __initdata = {
@@ -80,15 +87,22 @@ static struct omap_usb_config h2_usb_config __initdata = {
 	.hmc_mode	= 19,	// 0:host(off) 1:dev|otg 2:disabled
 	// .hmc_mode	= 21,	// 0:host(off) 1:dev(loopback) 2:host(loopback)
 #elif	defined(CONFIG_USB_OHCI_HCD) || defined(CONFIG_USB_OHCI_HCD_MODULE)
-	/* NONSTANDARD CABLE NEEDED (B-to-Mini-B) */
+	/* needs OTG cable, or NONSTANDARD (B-to-MiniB) */
 	.hmc_mode	= 20,	// 1:dev|otg(off) 1:host 2:disabled
 #endif
 
 	.pins[1]	= 3,
 };
 
+static struct omap_mmc_config h2_mmc_config __initdata = {
+	.mmc_blocks		= 1,
+	.mmc1_power_pin		= -1,	/* tps65010 gpio3 */
+	.mmc1_switch_pin	= OMAP_MPUIO(1),
+};
+
 static struct omap_board_config_kernel h2_config[] = {
 	{ OMAP_TAG_USB,           &h2_usb_config },
+	{ OMAP_TAG_MMC,           &h2_mmc_config },
 };
 
 static void __init h2_init(void)
@@ -101,7 +115,7 @@ static void __init h2_init(void)
 static void __init h2_map_io(void)
 {
 	omap_map_io();
-	iotable_init(h2_io_desc, ARRAY_SIZE(h2_io_desc));
+	omap_serial_init(h2_serial_ports);
 }
 
 MACHINE_START(OMAP_H2, "TI-H2")
@@ -111,5 +125,5 @@ MACHINE_START(OMAP_H2, "TI-H2")
 	MAPIO(h2_map_io)
 	INITIRQ(h2_init_irq)
 	INIT_MACHINE(h2_init)
-	INITTIME(omap_init_time)
+	.timer		= &omap_timer,
 MACHINE_END

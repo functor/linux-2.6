@@ -1,24 +1,17 @@
 /*
  * elevator noop
  */
-#include <linux/kernel.h>
-#include <linux/fs.h>
 #include <linux/blkdev.h>
 #include <linux/elevator.h>
 #include <linux/bio.h>
-#include <linux/config.h>
 #include <linux/module.h>
-#include <linux/slab.h>
 #include <linux/init.h>
-#include <linux/compiler.h>
-
-#include <asm/uaccess.h>
 
 /*
  * See if we can find a request that this buffer can be coalesced with.
  */
-int elevator_noop_merge(request_queue_t *q, struct request **req,
-			struct bio *bio)
+static int elevator_noop_merge(request_queue_t *q, struct request **req,
+			       struct bio *bio)
 {
 	struct list_head *entry = &q->queue_head;
 	struct request *__rq;
@@ -50,21 +43,19 @@ int elevator_noop_merge(request_queue_t *q, struct request **req,
 	return ELEVATOR_NO_MERGE;
 }
 
-void elevator_noop_merge_requests(request_queue_t *q, struct request *req,
-				  struct request *next)
+static void elevator_noop_merge_requests(request_queue_t *q, struct request *req,
+					 struct request *next)
 {
 	list_del_init(&next->queuelist);
 }
 
-void elevator_noop_add_request(request_queue_t *q, struct request *rq,
-			       int where)
+static void elevator_noop_add_request(request_queue_t *q, struct request *rq,
+				      int where)
 {
-	struct list_head *insert = q->queue_head.prev;
-
 	if (where == ELEVATOR_INSERT_FRONT)
-		insert = &q->queue_head;
-
-	list_add_tail(&rq->queuelist, &q->queue_head);
+		list_add(&rq->queuelist, &q->queue_head);
+	else
+		list_add_tail(&rq->queuelist, &q->queue_head);
 
 	/*
 	 * new merges must not precede this barrier
@@ -75,7 +66,7 @@ void elevator_noop_add_request(request_queue_t *q, struct request *rq,
 		q->last_merge = rq;
 }
 
-struct request *elevator_noop_next_request(request_queue_t *q)
+static struct request *elevator_noop_next_request(request_queue_t *q)
 {
 	if (!list_empty(&q->queue_head))
 		return list_entry_rq(q->queue_head.next);
@@ -83,12 +74,31 @@ struct request *elevator_noop_next_request(request_queue_t *q)
 	return NULL;
 }
 
-elevator_t elevator_noop = {
-	.elevator_merge_fn		= elevator_noop_merge,
-	.elevator_merge_req_fn		= elevator_noop_merge_requests,
-	.elevator_next_req_fn		= elevator_noop_next_request,
-	.elevator_add_req_fn		= elevator_noop_add_request,
-	.elevator_name			= "noop",
+static struct elevator_type elevator_noop = {
+	.ops = {
+		.elevator_merge_fn		= elevator_noop_merge,
+		.elevator_merge_req_fn		= elevator_noop_merge_requests,
+		.elevator_next_req_fn		= elevator_noop_next_request,
+		.elevator_add_req_fn		= elevator_noop_add_request,
+	},
+	.elevator_name = "noop",
+	.elevator_owner = THIS_MODULE,
 };
 
-EXPORT_SYMBOL(elevator_noop);
+static int __init noop_init(void)
+{
+	return elv_register(&elevator_noop);
+}
+
+static void __exit noop_exit(void)
+{
+	elv_unregister(&elevator_noop);
+}
+
+module_init(noop_init);
+module_exit(noop_exit);
+
+
+MODULE_AUTHOR("Jens Axboe");
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("No-op IO scheduler");

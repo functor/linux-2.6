@@ -1,7 +1,7 @@
 /*
  * Architecture-specific setup.
  *
- * Copyright (C) 1998-2001, 2003 Hewlett-Packard Co
+ * Copyright (C) 1998-2001, 2003-2004 Hewlett-Packard Co
  *	David Mosberger-Tang <davidm@hpl.hp.com>
  *	Stephane Eranian <eranian@hpl.hp.com>
  * Copyright (C) 2000, Rohit Seth <rohit.seth@intel.com>
@@ -258,25 +258,6 @@ io_port_init (void)
 	num_io_spaces = 1;
 }
 
-#ifdef CONFIG_SERIAL_8250_CONSOLE
-static void __init
-setup_serial_legacy (void)
-{
-	struct uart_port port;
-	unsigned int i, iobase[] = {0x3f8, 0x2f8};
-
-	printk(KERN_INFO "Registering legacy COM ports for serial console\n");
-	memset(&port, 0, sizeof(port));
-	port.iotype = SERIAL_IO_PORT;
-	port.uartclk = BASE_BAUD * 16;
-	for (i = 0; i < ARRAY_SIZE(iobase); i++) {
-		port.line = i;
-		port.iobase = iobase[i];
-		early_serial_setup(&port);
-	}
-}
-#endif
-
 /**
  * early_console_setup - setup debugging console
  *
@@ -287,17 +268,34 @@ setup_serial_legacy (void)
  * Returns non-zero if a console couldn't be setup.
  */
 static inline int __init
-early_console_setup (void)
+early_console_setup (char *cmdline)
 {
 #ifdef CONFIG_SERIAL_SGI_L1_CONSOLE
 	{
 		extern int sn_serial_console_early_setup(void);
-		if(!sn_serial_console_early_setup())
+		if (!sn_serial_console_early_setup())
 			return 0;
 	}
 #endif
+#ifdef CONFIG_EFI_PCDP
+	if (!efi_setup_pcdp_console(cmdline))
+		return 0;
+#endif
+#ifdef CONFIG_SERIAL_8250_CONSOLE
+	if (!early_serial_console_init(cmdline))
+		return 0;
+#endif
 
 	return -1;
+}
+
+static inline void
+mark_bsp_online (void)
+{
+#ifdef CONFIG_SMP
+	/* If we register an early console, allow CPU 0 to printk */
+	cpu_set(smp_processor_id(), cpu_online_map);
+#endif
 }
 
 void __init
@@ -314,14 +312,32 @@ setup_arch (char **cmdline_p)
 	io_port_init();
 
 #ifdef CONFIG_IA64_GENERIC
-	machvec_init(acpi_get_sysname());
+	{
+		const char *mvec_name = strstr (*cmdline_p, "machvec=");
+		char str[64];
+
+		if (mvec_name) {
+			const char *end;
+			size_t len;
+
+			mvec_name += 8;
+			end = strchr (mvec_name, ' ');
+			if (end)
+				len = end - mvec_name;
+			else
+				len = strlen (mvec_name);
+			len = min(len, sizeof (str) - 1);
+			strncpy (str, mvec_name, len);
+			str[len] = '\0';
+			mvec_name = str;
+		} else
+			mvec_name = acpi_get_sysname();
+		machvec_init(mvec_name);
+	}
 #endif
 
-#ifdef CONFIG_SMP
-	/* If we register an early console, allow CPU 0 to printk */
-	if (!early_console_setup())
-		cpu_set(smp_processor_id(), cpu_online_map);
-#endif
+	if (early_console_setup(*cmdline_p) == 0)
+		mark_bsp_online();
 
 #ifdef CONFIG_ACPI_BOOT
 	/* Initialize the ACPI boot-time table parser */
@@ -349,13 +365,6 @@ setup_arch (char **cmdline_p)
 #ifdef CONFIG_ACPI_BOOT
 	acpi_boot_init();
 #endif
-#ifdef CONFIG_EFI_PCDP
-	efi_setup_pcdp_console(*cmdline_p);
-#endif
-#ifdef CONFIG_SERIAL_8250_CONSOLE
-	if (!efi.hcdp)
-		setup_serial_legacy();
-#endif
 
 #ifdef CONFIG_VT
 	if (!conswitchp) {
@@ -378,7 +387,7 @@ setup_arch (char **cmdline_p)
 	/* enable IA-64 Machine Check Abort Handling unless disabled */
 	if (!strstr(saved_command_line, "nomca"))
 		ia64_mca_init();
-	
+
 	platform_setup(cmdline_p);
 	paging_init();
 }
@@ -600,6 +609,14 @@ cpu_init (void)
 
 	cpu_data = per_cpu_init();
 
+	/*
+	 * We set ar.k3 so that assembly code in MCA handler can compute
+	 * physical addresses of per cpu variables with a simple:
+	 *   phys = ar.k3 + &per_cpu_var
+	 */
+	ia64_set_kr(IA64_KR_PER_CPU_DATA,
+		    ia64_tpa(cpu_data) - (long) __per_cpu_start);
+
 	get_max_cacheline_size();
 
 	/*
@@ -646,6 +663,7 @@ cpu_init (void)
 		BUG();
 
 	ia64_mmu_init(ia64_imva(cpu_data));
+	ia64_mca_cpu_init(ia64_imva(cpu_data));
 
 #ifdef CONFIG_IA32_SUPPORT
 	ia32_cpu_init();

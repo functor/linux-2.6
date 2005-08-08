@@ -6,6 +6,7 @@
 
 obj-$(CONFIG_VT)		  += console/
 obj-$(CONFIG_LOGO)		  += logo/
+obj-$(CONFIG_SYSFS)		  += backlight/
 
 obj-$(CONFIG_FB)                  += fbmem.o fbmon.o fbcmap.o fbsysfs.o modedb.o softcursor.o
 # Only include macmodes.o if we have FB support and are PPC
@@ -23,15 +24,20 @@ obj-$(CONFIG_FB_PM2)              += pm2fb.o cfbfillrect.o cfbcopyarea.o cfbimgb
 obj-$(CONFIG_FB_PM3)		  += pm3fb.o
 
 obj-$(CONFIG_FB_MATROX)		  += matrox/ cfbfillrect.o cfbcopyarea.o cfbimgblt.o
-obj-$(CONFIG_FB_RIVA)		  += riva/ cfbimgblt.o vgastate.o
+obj-$(CONFIG_FB_RIVA)		  += riva/ cfbimgblt.o cfbfillrect.o \
+				     cfbcopyarea.o vgastate.o
 obj-$(CONFIG_FB_ATY)		  += aty/ cfbcopyarea.o cfbfillrect.o cfbimgblt.o
 obj-$(CONFIG_FB_ATY128)		  += aty/ cfbcopyarea.o cfbfillrect.o cfbimgblt.o
 obj-$(CONFIG_FB_RADEON)		  += aty/ cfbcopyarea.o cfbfillrect.o cfbimgblt.o
 obj-$(CONFIG_FB_SIS)		  += sis/ cfbcopyarea.o cfbfillrect.o cfbimgblt.o
 obj-$(CONFIG_FB_KYRO)             += kyro/ cfbfillrect.o cfbcopyarea.o cfbimgblt.o
-
+obj-$(CONFIG_FB_SAVAGE)		  += savage/ cfbfillrect.o cfbcopyarea.o \
+				     cfbimgblt.o
 obj-$(CONFIG_FB_I810)             += cfbcopyarea.o cfbfillrect.o cfbimgblt.o \
 				     vgastate.o
+obj-$(CONFIG_FB_INTEL)            += cfbfillrect.o cfbcopyarea.o \
+	                             cfbimgblt.o
+
 obj-$(CONFIG_FB_RADEON_OLD)	  += radeonfb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 obj-$(CONFIG_FB_NEOMAGIC)         += neofb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o vgastate.o
 obj-$(CONFIG_FB_VIRGE)            += virgefb.o
@@ -76,12 +82,8 @@ obj-$(CONFIG_FB_G364)             += g364fb.o cfbfillrect.o cfbcopyarea.o cfbimg
 obj-$(CONFIG_FB_SA1100)           += sa1100fb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 obj-$(CONFIG_FB_SUN3)             += sun3fb.o
 obj-$(CONFIG_FB_HIT)              += hitfb.o cfbfillrect.o cfbimgblt.o
-obj-$(CONFIG_FB_TX3912)           += tx3912fb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 obj-$(CONFIG_FB_EPSON1355)	  += epson1355fb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 obj-$(CONFIG_FB_PVR2)             += pvr2fb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
-obj-$(CONFIG_FB_PMAG_BA)          += pmag-ba-fb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
-obj-$(CONFIG_FB_PMAGB_B)          += pmagb-b-fb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
-obj-$(CONFIG_FB_MAXINE)           += maxinefb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 obj-$(CONFIG_FB_VOODOO1)          += sstfb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 obj-$(CONFIG_FB_ARMCLCD)	  += amba-clcd.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 obj-$(CONFIG_FB_68328)            += 68328fb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
@@ -89,6 +91,13 @@ obj-$(CONFIG_FB_GBE)              += gbefb.o cfbfillrect.o cfbcopyarea.o cfbimgb
 obj-$(CONFIG_FB_CIRRUS)		  += cirrusfb.o cfbfillrect.o cfbimgblt.o cfbcopyarea.o
 obj-$(CONFIG_FB_ASILIANT)	  += asiliantfb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 obj-$(CONFIG_FB_PXA)		  += pxafb.o cfbimgblt.o cfbcopyarea.o cfbfillrect.o
+obj-$(CONFIG_FB_W100)		   += w100fb.o cfbimgblt.o cfbcopyarea.o cfbfillrect.o
+obj-$(CONFIG_FB_AU1100)		  += au1100fb.o fbgen.o
+obj-$(CONFIG_FB_PMAG_AA)	  += pmag-aa-fb.o  cfbfillrect.o cfbcopyarea.o cfbimgblt.o
+obj-$(CONFIG_FB_PMAG_BA)	  += pmag-ba-fb.o  cfbfillrect.o cfbcopyarea.o cfbimgblt.o
+obj-$(CONFIG_FB_PMAGB_B)	  += pmagb-b-fb.o  cfbfillrect.o cfbcopyarea.o cfbimgblt.o
+obj-$(CONFIG_FB_MAXINE)		  += maxinefb.o  cfbfillrect.o cfbcopyarea.o cfbimgblt.o
+obj-$(CONFIG_FB_TX3912)		  += tx3912fb.o  cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 
 # Platform or fallback drivers go here
 obj-$(CONFIG_FB_VESA)             += vesafb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o

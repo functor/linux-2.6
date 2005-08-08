@@ -30,6 +30,7 @@
 #include <linux/pci.h>
 #include "pci_hotplug.h"
 
+#define	PHB     2
 #define	HOTPLUG	1
 #define	EMBEDDED 0
 
@@ -108,13 +109,6 @@ extern struct hotplug_slot_ops rpaphp_hotplug_slot_ops;
 extern struct list_head rpaphp_slot_head;
 extern int num_slots;
 
-static inline int is_hotplug_capable(struct device_node *dn)
-{
-	unsigned char *ptr = get_property(dn, "ibm,fw-pci-hot-plug-ctrl", NULL);
-
-	return (int) (ptr != NULL);
-}
-
 /* function prototypes */
 
 /* rpaphp_pci.c */
@@ -129,7 +123,8 @@ extern struct hotplug_slot *rpaphp_find_hotplug_slot(struct pci_dev *dev);
 /* rpaphp_core.c */
 extern int rpaphp_add_slot(struct device_node *dn);
 extern int rpaphp_remove_slot(struct slot *slot);
-extern char *rpaphp_get_drc_name(struct device_node *dn);
+extern int rpaphp_get_drc_props(struct device_node *dn, int *drc_index,
+		char **drc_name, char **drc_type, int *drc_power_domain);
 
 /* rpaphp_vio.c */
 extern int rpaphp_get_vio_adapter_status(struct slot *slot, int is_init, u8 * value);

@@ -269,8 +269,9 @@
 #define __NR_mq_timedreceive	274
 #define __NR_mq_notify		275
 #define __NR_mq_getsetattr	276
+/* Number 277 is reserved for new sys_kexec_load */
 
-#define NR_syscalls 277
+#define NR_syscalls 278
 
 /* 
  * There are some system calls that are not present on 64 bit, some
@@ -519,7 +520,6 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4,    \
 #define __ARCH_WANT_SYS_GETHOSTNAME
 #define __ARCH_WANT_SYS_PAUSE
 #define __ARCH_WANT_SYS_SIGNAL
-#define __ARCH_WANT_SYS_TIME
 #define __ARCH_WANT_SYS_UTIME
 #define __ARCH_WANT_SYS_SOCKETCALL
 #define __ARCH_WANT_SYS_FADVISE64
@@ -531,9 +531,11 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4,    \
 #define __ARCH_WANT_SYS_SIGPENDING
 #define __ARCH_WANT_SYS_SIGPROCMASK
 #define __ARCH_WANT_SYS_RT_SIGACTION
-# ifndef CONFIG_ARCH_S390X
+# ifdef CONFIG_ARCH_S390_31
 #   define __ARCH_WANT_STAT64
+#   define __ARCH_WANT_SYS_TIME
 # endif
+# define __ARCH_WANT_COMPAT_SYS_TIME
 #endif
 
 #ifdef __KERNEL_SYSCALLS__

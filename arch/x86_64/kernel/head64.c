@@ -11,12 +11,14 @@
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
+#include <linux/percpu.h>
 
 #include <asm/processor.h>
 #include <asm/proto.h>
 #include <asm/smp.h>
 #include <asm/bootsetup.h>
 #include <asm/setup.h>
+#include <asm/desc.h>
 
 /* Don't add a printk in there. printk relies on the PDA which is not initialized 
    yet. */
@@ -59,16 +61,17 @@ static void __init copy_bootdata(char *real_mode_data)
 
 static void __init setup_boot_cpu_data(void)
 {
-	int dummy, eax;
+	unsigned int dummy, eax;
 
 	/* get vendor info */
-	cpuid(0, &boot_cpu_data.cpuid_level,
-	      (int *)&boot_cpu_data.x86_vendor_id[0],
-	      (int *)&boot_cpu_data.x86_vendor_id[8],
-	      (int *)&boot_cpu_data.x86_vendor_id[4]);
+	cpuid(0, (unsigned int *)&boot_cpu_data.cpuid_level,
+	      (unsigned int *)&boot_cpu_data.x86_vendor_id[0],
+	      (unsigned int *)&boot_cpu_data.x86_vendor_id[8],
+	      (unsigned int *)&boot_cpu_data.x86_vendor_id[4]);
 
 	/* get cpu type */
-	cpuid(1, &eax, &dummy, &dummy, (int *) &boot_cpu_data.x86_capability);
+	cpuid(1, &eax, &dummy, &dummy,
+		(unsigned int *) &boot_cpu_data.x86_capability);
 	boot_cpu_data.x86 = (eax >> 8) & 0xf;
 	boot_cpu_data.x86_model = (eax >> 4) & 0xf;
 	boot_cpu_data.x86_mask = eax & 0xf;
@@ -79,7 +82,11 @@ extern char _end[];
 void __init x86_64_start_kernel(char * real_mode_data)
 {
 	char *s;
+	int i;
 
+	for (i = 0; i < 256; i++)
+		set_intr_gate(i, early_idt_handler);
+	asm volatile("lidt %0" :: "m" (idt_descr));
 	clear_bss();
 	pda_init(0);
 	copy_bootdata(real_mode_data);

@@ -16,12 +16,11 @@
  *    along with this program; if not, write to the Free Software
  *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- *    Questions/Comments/Bugfixes to Cpqarray-discuss@lists.sourceforge.net
+ *    Questions/Comments/Bugfixes to iss_storagedev@hp.com
  *
  */
 #include <linux/config.h>	/* CONFIG_PROC_FS */
 #include <linux/module.h>
-#include <linux/version.h>
 #include <linux/types.h>
 #include <linux/pci.h>
 #include <linux/bio.h>
@@ -311,7 +310,7 @@ static int ida_proc_get_info(char *buffer, char **start, off_t offset, int lengt
 }
 #endif /* CONFIG_PROC_FS */
 
-MODULE_PARM(eisa, "1-8i");
+module_param_array(eisa, int, NULL, 0);
 
 /* This is a bit of a hack,
  * necessary to support both eisa and pci
@@ -569,9 +568,9 @@ int __init cpqarray_init_step2(void)
 
 	/* detect controllers */
 	printk(DRIVER_NAME "\n");
-/* TODO: If it's an eisa only system, will rc return negative? */
+
 	rc = pci_register_driver(&cpqarray_pci_driver);
-	if (rc < 0)
+	if (rc)
 		return rc;
 	cpqarray_eisa_detect();
 	
@@ -732,7 +731,6 @@ static void __iomem *remap_pci_mem(ulong base, ulong size)
 }
 
 #ifndef MODULE
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,3,13)
 /*
  * Config string is a comma separated set of i/o addresses of EISA cards.
  */
@@ -749,18 +747,6 @@ static int cpqarray_setup(char *str)
 
 __setup("smart2=", cpqarray_setup);
 
-#else
-
-/*
- * Copy the contents of the ints[] array passed to us by init.
- */
-void cpqarray_setup(char *str, int *ints)
-{
-	int i;
-	for(i=0; i<ints[0] && i<8; i++)
-		eisa[i] = ints[i+1];
-}
-#endif
 #endif
 
 /*

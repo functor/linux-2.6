@@ -3,7 +3,7 @@
  *
  *  Virtual Server Init
  *
- *  Copyright (C) 2004  Herbert Pötzl
+ *  Copyright (C) 2004-2005  Herbert Pötzl
  *
  *  V0.01  basic structure
  *
@@ -11,7 +11,6 @@
 
 #include <linux/config.h>
 #include <linux/errno.h>
-#include <linux/vserver.h>
 #include <linux/init.h>
 #include <linux/module.h>
 

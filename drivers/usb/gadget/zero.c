@@ -75,8 +75,7 @@
 #include <linux/timer.h>
 #include <linux/list.h>
 #include <linux/interrupt.h>
-#include <linux/uts.h>
-#include <linux/version.h>
+#include <linux/utsname.h>
 #include <linux/device.h>
 #include <linux/moduleparam.h>
 
@@ -396,7 +395,7 @@ static const struct usb_descriptor_header *hs_loopback_function [] = {
 
 #endif	/* !CONFIG_USB_GADGET_DUALSPEED */
 
-static char				manufacturer [40];
+static char				manufacturer [50];
 static char				serial [40];
 
 /* static strings, in UTF-8 */
@@ -1188,6 +1187,10 @@ autoconf_fail:
 		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0208);
 	} else if (gadget_is_lh7a40x(gadget)) {
 		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0209);
+	} else if (gadget_is_n9604(gadget)) {
+		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0210);
+	} else if (gadget_is_pxa27x(gadget)) {
+		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0211);
 	} else {
 		/* gadget zero is so simple (for now, no altsettings) that
 		 * it SHOULD NOT have problems with bulk-capable hardware.
@@ -1261,8 +1264,8 @@ autoconf_fail:
 	INFO (dev, "using %s, OUT %s IN %s\n", gadget->name,
 		EP_OUT_NAME, EP_IN_NAME);
 
-	snprintf (manufacturer, sizeof manufacturer,
-		UTS_SYSNAME " " UTS_RELEASE " with %s",
+	snprintf (manufacturer, sizeof manufacturer, "%s %s with %s",
+		system_utsname.sysname, system_utsname.release,
 		gadget->name);
 
 	return 0;

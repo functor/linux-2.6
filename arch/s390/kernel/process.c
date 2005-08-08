@@ -159,11 +159,10 @@ void default_idle(void)
 #endif /* CONFIG_ARCH_S390X */
 }
 
-int cpu_idle(void)
+void cpu_idle(void)
 {
 	for (;;)
 		default_idle();
-	return 0;
 }
 
 void show_regs(struct pt_regs *regs)
@@ -216,8 +215,7 @@ void exit_thread(void)
 
 void flush_thread(void)
 {
-
-        current->used_math = 0;
+	clear_used_math();
 	clear_tsk_thread_flag(current, TIF_USEDFPU);
 }
 
@@ -238,7 +236,6 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long new_stackp,
         frame = ((struct fake_frame *)
 		 (THREAD_SIZE + (unsigned long) p->thread_info)) - 1;
         p->thread.ksp = (unsigned long) frame;
-	p->set_child_tid = p->clear_child_tid = NULL;
 	/* Store access registers to kernel stack of new process. */
         frame->childregs = *regs;
 	frame->childregs.gprs[2] = 0;	/* child returns 0 on fork. */
@@ -340,7 +337,9 @@ asmlinkage long sys_execve(struct pt_regs regs)
         error = do_execve(filename, (char __user * __user *) regs.gprs[3],
 			  (char __user * __user *) regs.gprs[4], &regs);
 	if (error == 0) {
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
 		current->thread.fp_regs.fpc = 0;
 		if (MACHINE_HAS_IEEE)
 			asm volatile("sfpc %0,%0" : : "d" (0));

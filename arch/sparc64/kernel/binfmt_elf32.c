@@ -79,7 +79,7 @@ typedef struct {
 
 #define elf_check_arch(x)	(((x)->e_machine == EM_SPARC) || ((x)->e_machine == EM_SPARC32PLUS))
 
-#define ELF_ET_DYN_BASE         0x08000000
+#define ELF_ET_DYN_BASE         0x70000000
 
 
 #include <asm/processor.h>
@@ -132,10 +132,12 @@ struct elf_prpsinfo32
 
 #include <linux/time.h>
 
-#define jiffies_to_timeval jiffies_to_compat_timeval
+#undef cputime_to_timeval
+#define cputime_to_timeval cputime_to_compat_timeval
 static __inline__ void
-jiffies_to_compat_timeval(unsigned long jiffies, struct compat_timeval *value)
+cputime_to_compat_timeval(const cputime_t cputime, struct compat_timeval *value)
 {
+	unsigned long jiffies = cputime_to_jiffies(cputime);
 	value->tv_usec = (jiffies % HZ) * (1000000L / HZ);
 	value->tv_sec = jiffies / HZ;
 }

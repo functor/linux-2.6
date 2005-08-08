@@ -378,9 +378,9 @@ static void tx_dma_buf_check(pc300_t * card, int ch)
 	     i != ((next_bd + 1) & (N_DMA_TX_BUF - 1));
 	     i = (i + 1) & (N_DMA_TX_BUF - 1), 
 		 ptdescr = (card->hw.rambase + TX_BD_ADDR(ch, i))) {
-		printk("\n CH%d TX%d: next=0x%lx, ptbuf=0x%lx, ST=0x%x, len=%d",
-		       ch, i, (uclong) cpc_readl(&ptdescr->next),
-		       (uclong) cpc_readl(&ptdescr->ptbuf),
+		printk("\n CH%d TX%d: next=0x%x, ptbuf=0x%x, ST=0x%x, len=%d",
+		       ch, i, cpc_readl(&ptdescr->next),
+		       cpc_readl(&ptdescr->ptbuf),
 		       cpc_readb(&ptdescr->status), cpc_readw(&ptdescr->len));
 	}
 	printk("\n");
@@ -400,14 +400,14 @@ static void tx1_dma_buf_check(pc300_t * card, int ch)
 	printk("#CH%d: f_bd = %d(0x%08x), n_bd = %d(0x%08x)\n", ch,
 	       first_bd, TX_BD_ADDR(ch, first_bd),
 	       next_bd, TX_BD_ADDR(ch, next_bd));
-	printk("TX_CDA=0x%08lx, TX_EDA=0x%08lx\n",
-	       (uclong) cpc_readl(scabase + DTX_REG(CDAL, ch)),
-	       (uclong) cpc_readl(scabase + DTX_REG(EDAL, ch)));
+	printk("TX_CDA=0x%08x, TX_EDA=0x%08x\n",
+	       cpc_readl(scabase + DTX_REG(CDAL, ch)),
+	       cpc_readl(scabase + DTX_REG(EDAL, ch)));
 	for (i = 0; i < N_DMA_TX_BUF; i++) {
 		ptdescr = (card->hw.rambase + TX_BD_ADDR(ch, i));
-		printk("\n CH%d TX%d: next=0x%lx, ptbuf=0x%lx, ST=0x%x, len=%d",
-		       ch, i, (uclong) cpc_readl(&ptdescr->next),
-		       (uclong) cpc_readl(&ptdescr->ptbuf),
+		printk("\n CH%d TX%d: next=0x%x, ptbuf=0x%x, ST=0x%x, len=%d",
+		       ch, i, cpc_readl(&ptdescr->next),
+		       cpc_readl(&ptdescr->ptbuf),
 		       cpc_readb(&ptdescr->status), cpc_readw(&ptdescr->len));
 	}
 	printk("\n");
@@ -428,9 +428,9 @@ static void rx_dma_buf_check(pc300_t * card, int ch)
 					      DMA_RX_BD_BASE + ch_factor * sizeof(pcsca_bd_t));
 	     i < N_DMA_RX_BUF; i++, ptdescr++) {
 		if (cpc_readb(&ptdescr->status) & DST_OSB)
-			printk ("\n CH%d RX%d: next=0x%lx, ptbuf=0x%lx, ST=0x%x, len=%d",
-				 ch, i, (uclong) cpc_readl(&ptdescr->next),
-				 (uclong) cpc_readl(&ptdescr->ptbuf),
+			printk ("\n CH%d RX%d: next=0x%x, ptbuf=0x%x, ST=0x%x, len=%d",
+				 ch, i, cpc_readl(&ptdescr->next),
+				 cpc_readl(&ptdescr->ptbuf),
 				 cpc_readb(&ptdescr->status),
 				 cpc_readw(&ptdescr->len));
 	}
@@ -1776,7 +1776,7 @@ void cpc_tx_timeout(struct net_device *dev)
 	pc300_t *card = (pc300_t *) chan->card;
 	struct net_device_stats *stats = hdlc_stats(dev);
 	int ch = chan->channel;
-	uclong flags;
+	unsigned long flags;
 	ucchar ilar;
 
 	stats->tx_errors++;
@@ -1804,7 +1804,7 @@ int cpc_queue_xmit(struct sk_buff *skb, struct net_device *dev)
 	pc300_t *card = (pc300_t *) chan->card;
 	struct net_device_stats *stats = hdlc_stats(dev);
 	int ch = chan->channel;
-	uclong flags;
+	unsigned long flags;
 #ifdef PC300_DEBUG_TX
 	int i;
 #endif
@@ -1959,7 +1959,6 @@ void cpc_net_rx(struct net_device *dev)
 			cpc_trace(dev, skb, 'R');
 		}
 		stats->rx_packets++;
-		skb->mac.raw = skb->data;
 		skb->protocol = hdlc_type_trans(skb, dev);
 		netif_rx(skb);
 	}
@@ -2408,7 +2407,7 @@ void cpc_sca_status(pc300_t * card, int ch)
 {
 	ucchar ilar;
 	void __iomem *scabase = card->hw.scabase;
-	uclong flags;
+	unsigned long flags;
 
 	tx_dma_buf_check(card, ch);
 	rx_dma_buf_check(card, ch);
@@ -2416,12 +2415,12 @@ void cpc_sca_status(pc300_t * card, int ch)
 	printk ("ILAR=0x%02x, WCRL=0x%02x, PCR=0x%02x, BTCR=0x%02x, BOLR=0x%02x\n",
 		 ilar, cpc_readb(scabase + WCRL), cpc_readb(scabase + PCR),
 		 cpc_readb(scabase + BTCR), cpc_readb(scabase + BOLR));
-	printk("TX_CDA=0x%08lx, TX_EDA=0x%08lx\n",
-	       (uclong) cpc_readl(scabase + DTX_REG(CDAL, ch)),
-	       (uclong) cpc_readl(scabase + DTX_REG(EDAL, ch)));
-	printk("RX_CDA=0x%08lx, RX_EDA=0x%08lx, BFL=0x%04x\n",
-	       (uclong) cpc_readl(scabase + DRX_REG(CDAL, ch)),
-	       (uclong) cpc_readl(scabase + DRX_REG(EDAL, ch)),
+	printk("TX_CDA=0x%08x, TX_EDA=0x%08x\n",
+	       cpc_readl(scabase + DTX_REG(CDAL, ch)),
+	       cpc_readl(scabase + DTX_REG(EDAL, ch)));
+	printk("RX_CDA=0x%08x, RX_EDA=0x%08x, BFL=0x%04x\n",
+	       cpc_readl(scabase + DRX_REG(CDAL, ch)),
+	       cpc_readl(scabase + DRX_REG(EDAL, ch)),
 	       cpc_readw(scabase + DRX_REG(BFLL, ch)));
 	printk("DMER=0x%02x, DSR_TX=0x%02x, DSR_RX=0x%02x\n",
 	       cpc_readb(scabase + DMER), cpc_readb(scabase + DSR_TX(ch)),
@@ -2486,7 +2485,7 @@ void cpc_sca_status(pc300_t * card, int ch)
 	       cpc_readb(scabase + M_REG(IE2, ch)),
 	       cpc_readb(scabase + M_REG(IE4, ch)),
 	       cpc_readb(scabase + M_REG(FIE, ch)));
-	printk("IER0=0x%08lx\n", (uclong) cpc_readl(scabase + IER0));
+	printk("IER0=0x%08x\n", cpc_readl(scabase + IER0));
 
 	if (ilar != 0) {
 		CPC_LOCK(card, flags);
@@ -2500,7 +2499,7 @@ void cpc_falc_status(pc300_t * card, int ch)
 {
 	pc300ch_t *chan = &card->chan[ch];
 	falc_t *pfalc = (falc_t *) & chan->falc;
-	uclong flags;
+	unsigned long flags;
 
 	CPC_LOCK(card, flags);
 	printk("CH%d:   %s %s  %d channels\n",
@@ -3180,7 +3179,7 @@ int cpc_close(struct net_device *dev)
 	pc300dev_t *d = (pc300dev_t *) dev->priv;
 	pc300ch_t *chan = (pc300ch_t *) d->chan;
 	pc300_t *card = (pc300_t *) chan->card;
-	uclong flags;
+	unsigned long flags;
 
 #ifdef	PC300_DEBUG_OTHER
 	printk("pc300: cpc_close");
@@ -3407,12 +3406,12 @@ static void cpc_init_card(pc300_t * card)
 					printk("RSV ");
 					break;
 			}
-			printk (" #%d, %ldKB of RAM at 0x%08lx, IRQ%d, channel %d.\n",
+			printk (" #%d, %dKB of RAM at 0x%08x, IRQ%d, channel %d.\n",
 				 board_nbr, card->hw.ramsize / 1024,
 				 card->hw.ramphys, card->hw.irq, i + 1);
 			devcount++;
 		} else {
-			printk ("Dev%d on card(0x%08lx): unable to allocate i/f name.\n",
+			printk ("Dev%d on card(0x%08x): unable to allocate i/f name.\n",
 				 i + 1, card->hw.ramphys);
 			free_netdev(dev);
 			continue;
@@ -3492,7 +3491,7 @@ cpc_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (!request_region(card->hw.iophys, card->hw.iosize, "PLX Registers")) {
 		/* In case we can't allocate it, warn user */
 		printk("WARNING: couldn't allocate I/O region for PC300 board "
-		       "at 0x%08lx!\n", card->hw.ramphys);
+		       "at 0x%08x!\n", card->hw.ramphys);
 	}
 
 	if (card->hw.plxphys) {
@@ -3505,7 +3504,7 @@ cpc_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	if (!request_mem_region(card->hw.plxphys, card->hw.plxsize,
 				"PLX Registers")) {
-		printk("PC300 found at RAM 0x%08lx, "
+		printk("PC300 found at RAM 0x%08x, "
 		       "but could not allocate PLX mem region.\n",
 		       card->hw.ramphys);
 		err = -ENODEV;
@@ -3513,7 +3512,7 @@ cpc_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 	if (!request_mem_region(card->hw.ramphys, card->hw.alloc_ramsize,
 				"On-board RAM")) {
-		printk("PC300 found at RAM 0x%08lx, "
+		printk("PC300 found at RAM 0x%08x, "
 		       "but could not allocate RAM mem region.\n",
 		       card->hw.ramphys);
 		err = -ENODEV;
@@ -3521,7 +3520,7 @@ cpc_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 	if (!request_mem_region(card->hw.scaphys, card->hw.scasize,
 				"SCA-II Registers")) {
-		printk("PC300 found at RAM 0x%08lx, "
+		printk("PC300 found at RAM 0x%08x, "
 		       "but could not allocate SCA mem region.\n",
 		       card->hw.ramphys);
 		err = -ENODEV;
@@ -3601,7 +3600,7 @@ cpc_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	/* Allocate IRQ */
 	if (request_irq(card->hw.irq, cpc_intr, SA_SHIRQ, "Cyclades-PC300", card)) {
-		printk ("PC300 found at RAM 0x%08lx, but could not allocate IRQ%d.\n",
+		printk ("PC300 found at RAM 0x%08x, but could not allocate IRQ%d.\n",
 			 card->hw.ramphys, card->hw.irq);
 		goto err_io_unmap;
 	}

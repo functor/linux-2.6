@@ -268,7 +268,7 @@ static int snd_es18xx_bits(es18xx_t *chip, unsigned char reg,
 	return ret;
 }
 
-inline void snd_es18xx_mixer_write(es18xx_t *chip,
+static inline void snd_es18xx_mixer_write(es18xx_t *chip,
 			    unsigned char reg, unsigned char data)
 {
 	unsigned long flags;
@@ -281,7 +281,7 @@ inline void snd_es18xx_mixer_write(es18xx_t *chip,
 #endif
 }
 
-inline int snd_es18xx_mixer_read(es18xx_t *chip, unsigned char reg)
+static inline int snd_es18xx_mixer_read(es18xx_t *chip, unsigned char reg)
 {
 	unsigned long flags;
 	int data;
@@ -419,6 +419,11 @@ static void snd_es18xx_rate_set(es18xx_t *chip,
 		
 	if ((chip->caps & ES18XX_PCM2) && mode == DAC2) {
 		snd_es18xx_mixer_write(chip, 0x70, bits);
+		/*
+		 * Comment from kernel oss driver:
+		 * FKS: fascinating: 0x72 doesn't seem to work.
+		 */
+		snd_es18xx_write(chip, 0xA2, div0);
 		snd_es18xx_mixer_write(chip, 0x72, div0);
 	} else {
 		snd_es18xx_write(chip, 0xA1, bits);
@@ -1564,7 +1569,7 @@ static void snd_es18xx_pcm_free(snd_pcm_t *pcm)
 	snd_pcm_lib_preallocate_free_for_all(pcm);
 }
 
-int __devinit snd_es18xx_pcm(es18xx_t *chip, int device, snd_pcm_t ** rpcm)
+static int __devinit snd_es18xx_pcm(es18xx_t *chip, int device, snd_pcm_t ** rpcm)
 {
         snd_pcm_t *pcm;
 	char str[16];
@@ -1619,7 +1624,6 @@ static int snd_es18xx_suspend(snd_card_t *card, unsigned int state)
 	snd_es18xx_write(chip, ES18XX_PM, chip->pm_reg);
 	snd_es18xx_write(chip, ES18XX_PM, chip->pm_reg ^= ES18XX_PM_SUS);
 
-	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	return 0;
 }
 
@@ -1630,7 +1634,6 @@ static int snd_es18xx_resume(snd_card_t *card, unsigned int state)
 	/* restore PM register, we won't wake till (not 0x07) i/o activity though */
 	snd_es18xx_write(chip, ES18XX_PM, chip->pm_reg ^= ES18XX_PM_FM);
 
-	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	return 0;
 }
 #endif /* CONFIG_PM */
@@ -1844,7 +1847,7 @@ static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_ISAPNP; /* Enable this car
 static int isapnp[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 1};
 #endif
 static long port[SNDRV_CARDS] = SNDRV_DEFAULT_PORT;	/* 0x220,0x240,0x260,0x280 */
-#ifndef CONFIG_PNP_
+#ifndef CONFIG_PNP
 static long mpu_port[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = -1};
 #else
 static long mpu_port[SNDRV_CARDS] = SNDRV_DEFAULT_PORT;
@@ -1853,29 +1856,28 @@ static long fm_port[SNDRV_CARDS] = SNDRV_DEFAULT_PORT;
 static int irq[SNDRV_CARDS] = SNDRV_DEFAULT_IRQ;	/* 5,7,9,10 */
 static int dma1[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* 0,1,3 */
 static int dma2[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* 0,1,3 */
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for ES18xx soundcard.");
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for ES18xx soundcard.");
-module_param_array(enable, bool, boot_devs, 0444);
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable ES18xx soundcard.");
 #ifdef CONFIG_PNP
-module_param_array(isapnp, bool, boot_devs, 0444);
+module_param_array(isapnp, bool, NULL, 0444);
 MODULE_PARM_DESC(isapnp, "PnP detection for specified soundcard.");
 #endif
-module_param_array(port, long, boot_devs, 0444);
+module_param_array(port, long, NULL, 0444);
 MODULE_PARM_DESC(port, "Port # for ES18xx driver.");
-module_param_array(mpu_port, long, boot_devs, 0444);
+module_param_array(mpu_port, long, NULL, 0444);
 MODULE_PARM_DESC(mpu_port, "MPU-401 port # for ES18xx driver.");
-module_param_array(fm_port, long, boot_devs, 0444);
+module_param_array(fm_port, long, NULL, 0444);
 MODULE_PARM_DESC(fm_port, "FM port # for ES18xx driver.");
-module_param_array(irq, int, boot_devs, 0444);
+module_param_array(irq, int, NULL, 0444);
 MODULE_PARM_DESC(irq, "IRQ # for ES18xx driver.");
-module_param_array(dma1, int, boot_devs, 0444);
+module_param_array(dma1, int, NULL, 0444);
 MODULE_PARM_DESC(dma1, "DMA 1 # for ES18xx driver.");
-module_param_array(dma2, int, boot_devs, 0444);
+module_param_array(dma2, int, NULL, 0444);
 MODULE_PARM_DESC(dma2, "DMA 2 # for ES18xx driver.");
 
 struct snd_audiodrive {
@@ -1984,7 +1986,7 @@ static int __devinit snd_audiodrive_pnp(int dev, struct snd_audiodrive *acard,
 	kfree(cfg);
 	return 0;
 }
-#endif /* CONFIG_PNP_ */
+#endif /* CONFIG_PNP */
 
 static int __devinit snd_audiodrive_probe(int dev, struct pnp_card_link *pcard,
 					  const struct pnp_card_device_id *pid)

@@ -123,6 +123,7 @@
 
 #include <linux/filter.h>
 #include <linux/vs_socket.h>
+#include <linux/vs_limit.h>
 
 #ifdef CONFIG_INET
 #include <net/tcp.h>
@@ -167,7 +168,7 @@ static int sock_set_timeout(long *timeo_p, char __user *optval, int optlen)
 static void sock_warn_obsolete_bsdism(const char *name)
 {
 	static int warned;
-	static char warncomm[16];
+	static char warncomm[TASK_COMM_LEN];
 	if (strcmp(warncomm, current->comm) && warned < 5) { 
 		strcpy(warncomm,  current->comm); 
 		printk(KERN_WARNING "process `%s' is using obsolete "
@@ -175,6 +176,15 @@ static void sock_warn_obsolete_bsdism(const char *name)
 		warned++;
 	}
 }
+
+static void sock_disable_timestamp(struct sock *sk)
+{	
+	if (sock_flag(sk, SOCK_TIMESTAMP)) { 
+		sock_reset_flag(sk, SOCK_TIMESTAMP);
+		net_disable_timestamp();
+	}
+}
+
 
 /*
  *	This is meant for all protocols to use and covers goings on
@@ -659,8 +669,13 @@ void sk_free(struct sock *sk)
 		       __FUNCTION__, atomic_read(&sk->sk_omem_alloc));
 
 	security_sk_free(sk);
-	BUG_ON(sk->sk_vx_info);
-	BUG_ON(sk->sk_nx_info);
+	vx_sock_dec(sk);
+	// BUG_ON(sk->sk_vx_info);
+	clr_vx_info(&sk->sk_vx_info);
+	sk->sk_xid = -1;
+	// BUG_ON(sk->sk_nx_info);
+	clr_nx_info(&sk->sk_nx_info);
+	sk->sk_nid = -1;
 	kmem_cache_free(sk->sk_slab, sk);
 	module_put(owner);
 }
@@ -824,8 +839,10 @@ static long sock_wait_for_wmem(struct sock * sk, long timeo)
  *	Generic send/receive buffer handlers
  */
 
-struct sk_buff *sock_alloc_send_pskb(struct sock *sk, unsigned long header_len,
-				     unsigned long data_len, int noblock, int *errcode)
+static struct sk_buff *sock_alloc_send_pskb(struct sock *sk,
+					    unsigned long header_len,
+					    unsigned long data_len,
+					    int noblock, int *errcode)
 {
 	struct sk_buff *skb;
 	unsigned int gfp_mask;
@@ -912,7 +929,7 @@ struct sk_buff *sock_alloc_send_skb(struct sock *sk, unsigned long size,
 	return sock_alloc_send_pskb(sk, size, 0, noblock, errcode);
 }
 
-void __lock_sock(struct sock *sk)
+static void __lock_sock(struct sock *sk)
 {
 	DEFINE_WAIT(wait);
 
@@ -928,7 +945,7 @@ void __lock_sock(struct sock *sk)
 	finish_wait(&sk->sk_lock.wq, &wait);
 }
 
-void __release_sock(struct sock *sk)
+static void __release_sock(struct sock *sk)
 {
 	struct sk_buff *skb = sk->sk_backlog.head;
 
@@ -941,6 +958,15 @@ void __release_sock(struct sock *sk)
 
 			skb->next = NULL;
 			sk->sk_backlog_rcv(sk, skb);
+
+			/*
+			 * We are in process context here with softirqs
+			 * disabled, use cond_resched_softirq() to preempt.
+			 * This is safe to do because we've taken the backlog
+			 * queue private:
+			 */
+			cond_resched_softirq();
+
 			skb = next;
 		} while (skb != NULL);
 
@@ -979,11 +1005,6 @@ EXPORT_SYMBOL(sk_wait_data);
  * cases where it makes no sense for a protocol to have a "do nothing"
  * function, some default processing is provided.
  */
-
-int sock_no_release(struct socket *sock)
-{
-	return 0;
-}
 
 int sock_no_bind(struct socket *sock, struct sockaddr *saddr, int len)
 {
@@ -1079,7 +1100,7 @@ ssize_t sock_no_sendpage(struct socket *sock, struct page *page, int offset, siz
  *	Default Socket Callbacks
  */
 
-void sock_def_wakeup(struct sock *sk)
+static void sock_def_wakeup(struct sock *sk)
 {
 	read_lock(&sk->sk_callback_lock);
 	if (sk->sk_sleep && waitqueue_active(sk->sk_sleep))
@@ -1087,7 +1108,7 @@ void sock_def_wakeup(struct sock *sk)
 	read_unlock(&sk->sk_callback_lock);
 }
 
-void sock_def_error_report(struct sock *sk)
+static void sock_def_error_report(struct sock *sk)
 {
 	read_lock(&sk->sk_callback_lock);
 	if (sk->sk_sleep && waitqueue_active(sk->sk_sleep))
@@ -1096,7 +1117,7 @@ void sock_def_error_report(struct sock *sk)
 	read_unlock(&sk->sk_callback_lock);
 }
 
-void sock_def_readable(struct sock *sk, int len)
+static void sock_def_readable(struct sock *sk, int len)
 {
 	read_lock(&sk->sk_callback_lock);
 	if (sk->sk_sleep && waitqueue_active(sk->sk_sleep))
@@ -1105,7 +1126,7 @@ void sock_def_readable(struct sock *sk, int len)
 	read_unlock(&sk->sk_callback_lock);
 }
 
-void sock_def_write_space(struct sock *sk)
+static void sock_def_write_space(struct sock *sk)
 {
 	read_lock(&sk->sk_callback_lock);
 
@@ -1124,7 +1145,7 @@ void sock_def_write_space(struct sock *sk)
 	read_unlock(&sk->sk_callback_lock);
 }
 
-void sock_def_destruct(struct sock *sk)
+static void sock_def_destruct(struct sock *sk)
 {
 	if (sk->sk_protinfo)
 		kfree(sk->sk_protinfo);
@@ -1179,8 +1200,8 @@ void sock_init_data(struct socket *sock, struct sock *sk)
 	} else
 		sk->sk_sleep	=	NULL;
 
-	sk->sk_dst_lock		=	RW_LOCK_UNLOCKED;
-	sk->sk_callback_lock	=	RW_LOCK_UNLOCKED;
+	rwlock_init(&sk->sk_dst_lock);
+	rwlock_init(&sk->sk_callback_lock);
 
 	sk->sk_state_change	=	sock_def_wakeup;
 	sk->sk_data_ready	=	sock_def_readable;
@@ -1203,11 +1224,11 @@ void sock_init_data(struct socket *sock, struct sock *sk)
 	sk->sk_stamp.tv_sec     = -1L;
 	sk->sk_stamp.tv_usec    = -1L;
 
-	sk->sk_vx_info		=	NULL;
-	sk->sk_xid		=	0;
-	sk->sk_nx_info		=	NULL;
-	sk->sk_nid		=	0;
-
+	set_vx_info(&sk->sk_vx_info, current->vx_info);
+	sk->sk_xid = vx_current_xid();
+	vx_sock_inc(sk);
+	set_nx_info(&sk->sk_nx_info, current->nx_info);
+	sk->sk_nid = nx_current_nid();
 	atomic_set(&sk->sk_refcnt, 1);
 }
 
@@ -1235,9 +1256,6 @@ void fastcall release_sock(struct sock *sk)
 }
 EXPORT_SYMBOL(release_sock);
 
-/* When > 0 there are consumers of rx skb time stamps */
-atomic_t netstamp_needed = ATOMIC_INIT(0); 
-
 int sock_get_timestamp(struct sock *sk, struct timeval __user *userstamp)
 { 
 	if (!sock_flag(sk, SOCK_TIMESTAMP))
@@ -1255,19 +1273,10 @@ void sock_enable_timestamp(struct sock *sk)
 {	
 	if (!sock_flag(sk, SOCK_TIMESTAMP)) { 
 		sock_set_flag(sk, SOCK_TIMESTAMP);
-		atomic_inc(&netstamp_needed);
+		net_enable_timestamp();
 	}
 }
 EXPORT_SYMBOL(sock_enable_timestamp); 
-
-void sock_disable_timestamp(struct sock *sk)
-{	
-	if (sock_flag(sk, SOCK_TIMESTAMP)) { 
-		sock_reset_flag(sk, SOCK_TIMESTAMP);
-		atomic_dec(&netstamp_needed);
-	}
-}
-EXPORT_SYMBOL(sock_disable_timestamp);
 
 /*
  *	Get a socket option on an socket.
@@ -1377,14 +1386,10 @@ void sk_free_slab(struct proto *prot)
 
 EXPORT_SYMBOL(sk_free_slab);
 
-EXPORT_SYMBOL(__lock_sock);
-EXPORT_SYMBOL(__release_sock);
 EXPORT_SYMBOL(sk_alloc);
 EXPORT_SYMBOL(sk_free);
 EXPORT_SYMBOL(sk_send_sigurg);
-EXPORT_SYMBOL(sock_alloc_send_pskb);
 EXPORT_SYMBOL(sock_alloc_send_skb);
-EXPORT_SYMBOL(sock_getsockopt);
 EXPORT_SYMBOL(sock_init_data);
 EXPORT_SYMBOL(sock_kfree_s);
 EXPORT_SYMBOL(sock_kmalloc);
@@ -1398,14 +1403,12 @@ EXPORT_SYMBOL(sock_no_listen);
 EXPORT_SYMBOL(sock_no_mmap);
 EXPORT_SYMBOL(sock_no_poll);
 EXPORT_SYMBOL(sock_no_recvmsg);
-EXPORT_SYMBOL(sock_no_release);
 EXPORT_SYMBOL(sock_no_sendmsg);
 EXPORT_SYMBOL(sock_no_sendpage);
 EXPORT_SYMBOL(sock_no_setsockopt);
 EXPORT_SYMBOL(sock_no_shutdown);
 EXPORT_SYMBOL(sock_no_socketpair);
 EXPORT_SYMBOL(sock_rfree);
-EXPORT_SYMBOL(sock_rmalloc);
 EXPORT_SYMBOL(sock_setsockopt);
 EXPORT_SYMBOL(sock_wfree);
 EXPORT_SYMBOL(sock_wmalloc);

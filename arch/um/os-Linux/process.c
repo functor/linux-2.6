@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <linux/unistd.h>
+#include <sys/ptrace.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include "os.h"
@@ -94,10 +95,28 @@ void os_kill_process(int pid, int reap_child)
 		
 }
 
+/* Kill off a ptraced child by all means available.  kill it normally first,
+ * then PTRACE_KILL it, then PTRACE_CONT it in case it's in a run state from
+ * which it can't exit directly.
+ */
+
+void os_kill_ptraced_process(int pid, int reap_child)
+{
+	kill(pid, SIGKILL);
+	ptrace(PTRACE_KILL, pid);
+	ptrace(PTRACE_CONT, pid);
+	if(reap_child)
+		CATCH_EINTR(waitpid(pid, NULL, 0));
+}
+
 void os_usr1_process(int pid)
 {
 	kill(pid, SIGUSR1);
 }
+
+/*Don't use the glibc version, which caches the result in TLS. It misses some
+ * syscalls, and also breaks with clone(), which does not unshare the TLS.*/
+inline _syscall0(pid_t, getpid)
 
 int os_getpid(void)
 {

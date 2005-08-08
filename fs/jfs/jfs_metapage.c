@@ -28,10 +28,10 @@
 #include "jfs_txnmgr.h"
 #include "jfs_debug.h"
 
-static spinlock_t meta_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(meta_lock);
 
 #ifdef CONFIG_JFS_STATISTICS
-struct {
+static struct {
 	uint	pagealloc;	/* # of page allocations */
 	uint	pagefree;	/* # of page frees */
 	uint	lockwait;	/* # of sleeping lock_metapage() calls */
@@ -108,9 +108,9 @@ static void init_once(void *foo, kmem_cache_t *cachep, unsigned long flags)
 	}
 }
 
-static inline struct metapage *alloc_metapage(int no_wait)
+static inline struct metapage *alloc_metapage(int gfp_mask)
 {
-	return mempool_alloc(metapage_mempool, no_wait ? GFP_ATOMIC : GFP_NOFS);
+	return mempool_alloc(metapage_mempool, gfp_mask);
 }
 
 static inline void free_metapage(struct metapage *mp)
@@ -289,7 +289,7 @@ again:
 		 */
 		mp = NULL;
 		if (JFS_IP(inode)->fileset == AGGREGATE_I) {
-			mp =  mempool_alloc(metapage_mempool, GFP_ATOMIC);
+			mp = alloc_metapage(GFP_ATOMIC);
 			if (!mp) {
 				/*
 				 * mempool is supposed to protect us from
@@ -306,7 +306,7 @@ again:
 			struct metapage *mp2;
 
 			spin_unlock(&meta_lock);
-			mp =  mempool_alloc(metapage_mempool, GFP_NOFS);
+			mp = alloc_metapage(GFP_NOFS);
 			spin_lock(&meta_lock);
 
 			/* we dropped the meta_lock, we need to search the
@@ -395,14 +395,6 @@ static void __write_metapage(struct metapage * mp)
 	int rc;
 
 	jfs_info("__write_metapage: mp = 0x%p", mp);
-
-	if (test_bit(META_discard, &mp->flag)) {
-		/*
-		 * This metadata is no longer valid
-		 */
-		clear_bit(META_dirty, &mp->flag);
-		return;
-	}
 
 	page_index = mp->page->index;
 	page_offset =
@@ -549,6 +541,7 @@ again:
 				goto again;
 			}
 
+			clear_bit(META_dirty, &mp->flag);
 			set_bit(META_discard, &mp->flag);
 			spin_unlock(&meta_lock);
 		} else {

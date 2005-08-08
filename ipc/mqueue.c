@@ -22,6 +22,9 @@
 #include <linux/msg.h>
 #include <linux/skbuff.h>
 #include <linux/netlink.h>
+#include <linux/syscalls.h>
+#include <linux/vs_context.h>
+#include <linux/vs_limit.h>
 #include <net/sock.h>
 #include "util.h"
 
@@ -145,17 +148,20 @@ static struct inode *mqueue_get_inode(struct super_block *sb, int mode,
 			spin_lock(&mq_lock);
 			if (u->mq_bytes + mq_bytes < u->mq_bytes ||
 		 	    u->mq_bytes + mq_bytes >
-			    p->rlim[RLIMIT_MSGQUEUE].rlim_cur) {
+			    p->signal->rlim[RLIMIT_MSGQUEUE].rlim_cur ||
+			    !vx_ipcmsg_avail(p->vx_info, mq_bytes)) {
 				spin_unlock(&mq_lock);
 				goto out_inode;
 			}
 			u->mq_bytes += mq_bytes;
+			vx_ipcmsg_add(p->vx_info, u, mq_bytes);
 			spin_unlock(&mq_lock);
 
 			info->messages = kmalloc(mq_msg_tblsz, GFP_KERNEL);
 			if (!info->messages) {
 				spin_lock(&mq_lock);
 				u->mq_bytes -= mq_bytes;
+				vx_ipcmsg_sub(p->vx_info, u, mq_bytes);
 				spin_unlock(&mq_lock);
 				goto out_inode;
 			}
@@ -253,10 +259,14 @@ static void mqueue_delete_inode(struct inode *inode)
 		   (info->attr.mq_maxmsg * info->attr.mq_msgsize));
 	user = info->user;
 	if (user) {
+		struct vx_info *vxi = locate_vx_info(user->xid);
+
 		spin_lock(&mq_lock);
 		user->mq_bytes -= mq_bytes;
+		vx_ipcmsg_sub(vxi, user, mq_bytes);
 		queues_count--;
 		spin_unlock(&mq_lock);
+		put_vx_info(vxi);
 		free_uid(user);
 	}
 }
@@ -1218,11 +1228,8 @@ static int __init init_mqueue_fs(void)
 	if (mqueue_inode_cachep == NULL)
 		return -ENOMEM;
 
+	/* ignore failues - they are not fatal */
 	mq_sysctl_table = register_sysctl_table(mq_sysctl_root, 0);
-	if (!mq_sysctl_table) {
-		error = -ENOMEM;
-		goto out_cache;
-	}
 
 	error = register_filesystem(&mqueue_fs_type);
 	if (error)
@@ -1242,8 +1249,8 @@ static int __init init_mqueue_fs(void)
 out_filesystem:
 	unregister_filesystem(&mqueue_fs_type);
 out_sysctl:
-	unregister_sysctl_table(mq_sysctl_table);
-out_cache:
+	if (mq_sysctl_table)
+		unregister_sysctl_table(mq_sysctl_table);
 	if (kmem_cache_destroy(mqueue_inode_cachep)) {
 		printk(KERN_INFO
 			"mqueue_inode_cache: not all structures were freed\n");

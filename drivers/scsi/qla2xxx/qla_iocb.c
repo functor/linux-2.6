@@ -27,6 +27,7 @@
 static inline uint16_t qla2x00_get_cmd_direction(struct scsi_cmnd *cmd);
 static inline cont_entry_t *qla2x00_prep_cont_type0_iocb(scsi_qla_host_t *);
 static inline cont_a64_entry_t *qla2x00_prep_cont_type1_iocb(scsi_qla_host_t *);
+static request_t *qla2x00_req_pkt(scsi_qla_host_t *ha);
 
 /**
  * qla2x00_get_cmd_direction() - Determine control_flag data direction.
@@ -338,15 +339,15 @@ qla2x00_start_scsi(srb_t *sp)
 	uint16_t	cnt;
 	uint16_t	req_cnt;
 	uint16_t	tot_dsds;
-	device_reg_t	*reg;
+	device_reg_t __iomem *reg;
 	char		tag[2];
 
 	/* Setup device pointers. */
 	ret = 0;
 	fclun = sp->lun_queue->fclun;
 	ha = fclun->fcport->ha;
-	cmd = sp->cmd;
 	reg = ha->iobase;
+	cmd = sp->cmd;
 
 	/* Send marker if required */
 	if (ha->marker_needed != 0) {
@@ -418,12 +419,9 @@ qla2x00_start_scsi(srb_t *sp)
 	cmd_pkt->lun = cpu_to_le16(fclun->lun);
 
 	/* Update tagged queuing modifier */
+	cmd_pkt->control_flags = __constant_cpu_to_le16(CF_SIMPLE_TAG);
 	if (scsi_populate_tag_msg(cmd, tag)) {
 		switch (tag[0]) {
-		case MSG_SIMPLE_TAG:
-			cmd_pkt->control_flags =
-			    __constant_cpu_to_le16(CF_SIMPLE_TAG);
-			break;
 		case MSG_HEAD_TAG:
 			cmd_pkt->control_flags =
 			    __constant_cpu_to_le16(CF_HEAD_TAG);
@@ -547,10 +545,10 @@ qla2x00_marker(scsi_qla_host_t *ha, uint16_t loop_id, uint16_t lun,
  *
  * Returns NULL if function failed, else, a pointer to the request packet.
  */
-request_t *
+static request_t *
 qla2x00_req_pkt(scsi_qla_host_t *ha)
 {
-	device_reg_t	*reg = ha->iobase;
+	device_reg_t __iomem *reg = ha->iobase;
 	request_t	*pkt = NULL;
 	uint16_t	cnt;
 	uint32_t	*dword_ptr;
@@ -607,100 +605,6 @@ qla2x00_req_pkt(scsi_qla_host_t *ha)
 }
 
 /**
- * qla2x00_ms_req_pkt() - Retrieve a Management Server request packet from
- * 				the request ring.
- * @ha: HA context
- * @sp: pointer to handle post function call
- *
- * Note: The caller must hold the hardware lock before calling this routine.
- *
- * Returns NULL if function failed, else, a pointer to the request packet.
- */
-request_t *
-qla2x00_ms_req_pkt(scsi_qla_host_t *ha, srb_t  *sp)
-{
-	device_reg_t	*reg = ha->iobase;
-	request_t	*pkt = NULL;
-	uint16_t	cnt, i, index;
-	uint32_t	*dword_ptr;
-	uint32_t	timer;
-	uint8_t		found = 0;
-	uint16_t	req_cnt = 1;
-
-	/* Wait 1 second for slot. */
-	for (timer = HZ; timer; timer--) {
-		if ((req_cnt + 2) >= ha->req_q_cnt) {
-			/* Calculate number of free request entries. */
-			cnt = qla2x00_debounce_register(ISP_REQ_Q_OUT(ha, reg));
-			if (ha->req_ring_index < cnt) {
-				ha->req_q_cnt = cnt - ha->req_ring_index;
-			} else {
-				ha->req_q_cnt = ha->request_q_length -
-				    (ha->req_ring_index - cnt);
-			}
-		}
-
-		/* Check for room in outstanding command list. */
-		cnt = ha->current_outstanding_cmd;
-		for (index = 1; index < MAX_OUTSTANDING_COMMANDS; index++) {
-			cnt++;
-			if (cnt == MAX_OUTSTANDING_COMMANDS)
-				cnt = 1;
-
-			if (ha->outstanding_cmds[cnt] == 0) {
-				found = 1;
-				ha->current_outstanding_cmd = cnt;
-				break;
-			}
-		}
-
-		/* If room for request in request ring. */
-		if (found && (req_cnt + 2) < ha->req_q_cnt) {
-			pkt = ha->request_ring_ptr;
-
-			/* Zero out packet. */
-			dword_ptr = (uint32_t *)pkt;
-			for (i = 0; i < REQUEST_ENTRY_SIZE / 4; i++ )
-				*dword_ptr++ = 0;
-
-			DEBUG5(printk("%s(): putting sp=%p in "
-			    "outstanding_cmds[%x]\n",
-			    __func__,
-			    sp, cnt));
-
-			ha->outstanding_cmds[cnt] = sp;
-
-			/* save the handle */
-			sp->cmd->host_scribble = (unsigned char *) (u_long) cnt;
-			CMD_SP(sp->cmd) = (void *)sp;
-
-			ha->req_q_cnt--;
-			pkt->handle = (uint32_t)cnt;
-
-			/* Set system defined field. */
-			pkt->sys_define = (uint8_t)ha->req_ring_index;
-			pkt->entry_status = 0;
-
-			break;
-		}
-
-		/* Release ring specific lock */
-		spin_unlock(&ha->hardware_lock);
-		udelay(20);
-
-		/* Check for pending interrupts. */
-		qla2x00_poll(ha);
-
-		spin_lock_irq(&ha->hardware_lock);
-	}
-	if (!pkt) {
-		DEBUG2_3(printk("%s(): **** FAILED ****\n", __func__));
-	}
-
-	return (pkt);
-}
-
-/**
  * qla2x00_isp_cmd() - Modify the request ring pointer.
  * @ha: HA context
  *
@@ -709,7 +613,7 @@ qla2x00_ms_req_pkt(scsi_qla_host_t *ha, srb_t  *sp)
 void
 qla2x00_isp_cmd(scsi_qla_host_t *ha)
 {
-	device_reg_t *reg = ha->iobase;
+	device_reg_t __iomem *reg = ha->iobase;
 
 	DEBUG5(printk("%s(): IOCB data:\n", __func__));
 	DEBUG5(qla2x00_dump_buffer(

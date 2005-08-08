@@ -59,7 +59,7 @@ struct usb_ms_header_descriptor {
 	__u8  bDescriptorType;
 	__u8  bDescriptorSubtype;
 	__u8  bcdMSC[2];
-	__u16 wTotalLength;
+	__le16 wTotalLength;
 } __attribute__ ((packed));
 
 struct usb_ms_endpoint_descriptor {
@@ -504,8 +504,7 @@ static snd_rawmidi_ops_t snd_usbmidi_input_ops = {
 static void snd_usbmidi_in_endpoint_delete(snd_usb_midi_in_endpoint_t* ep)
 {
 	if (ep->urb) {
-		if (ep->urb->transfer_buffer)
-			kfree(ep->urb->transfer_buffer);
+		kfree(ep->urb->transfer_buffer);
 		usb_free_urb(ep->urb);
 	}
 	kfree(ep);
@@ -521,7 +520,7 @@ static struct usb_endpoint_descriptor* snd_usbmidi_get_int_epd(snd_usb_midi_t* u
 	struct usb_host_interface *hostif;
 	struct usb_interface_descriptor* intfd;
 
-	if (umidi->chip->dev->descriptor.idVendor != 0x0582)
+	if (le16_to_cpu(umidi->chip->dev->descriptor.idVendor) != 0x0582)
 		return NULL;
 	intf = umidi->iface;
 	if (!intf || intf->num_altsetting != 2)
@@ -632,8 +631,7 @@ static void snd_usbmidi_out_endpoint_delete(snd_usb_midi_out_endpoint_t* ep)
 	if (ep->tasklet.func)
 		tasklet_kill(&ep->tasklet);
 	if (ep->urb) {
-		if (ep->urb->transfer_buffer)
-			kfree(ep->urb->transfer_buffer);
+		kfree(ep->urb->transfer_buffer);
 		usb_free_urb(ep->urb);
 	}
 	kfree(ep);
@@ -715,9 +713,9 @@ void snd_usbmidi_disconnect(struct list_head* p, struct usb_driver *driver)
 	for (i = 0; i < MIDI_MAX_ENDPOINTS; ++i) {
 		snd_usb_midi_endpoint_t* ep = &umidi->endpoints[i];
 		if (ep->out && ep->out->urb)
-			usb_unlink_urb(ep->out->urb);
+			usb_kill_urb(ep->out->urb);
 		if (ep->in && ep->in->urb)
-			usb_unlink_urb(ep->in->urb);
+			usb_kill_urb(ep->in->urb);
 	}
 }
 
@@ -839,8 +837,8 @@ static void snd_usbmidi_init_substream(snd_usb_midi_t* umidi,
 
 	/* TODO: read port name from jack descriptor */
 	name_format = "%s MIDI %d";
-	vendor = umidi->chip->dev->descriptor.idVendor;
-	product = umidi->chip->dev->descriptor.idProduct;
+	vendor = le16_to_cpu(umidi->chip->dev->descriptor.idVendor);
+	product = le16_to_cpu(umidi->chip->dev->descriptor.idProduct);
 	for (i = 0; i < ARRAY_SIZE(snd_usbmidi_port_names); ++i) {
 		if (snd_usbmidi_port_names[i].vendor == vendor &&
 		    snd_usbmidi_port_names[i].product == product &&
@@ -1161,7 +1159,7 @@ void snd_usbmidi_input_stop(struct list_head* p)
 	for (i = 0; i < MIDI_MAX_ENDPOINTS; ++i) {
 		snd_usb_midi_endpoint_t* ep = &umidi->endpoints[i];
 		if (ep->in)
-			usb_unlink_urb(ep->in->urb);
+			usb_kill_urb(ep->in->urb);
 	}
 }
 

@@ -5,7 +5,7 @@
  *
  *	(C) Copyright 2002, Greg Ungerer (gerg@snapgear.com)
  *
- * 	$Id: uclinux.c,v 1.7 2004/07/12 21:59:45 dwmw2 Exp $
+ * 	$Id: uclinux.c,v 1.10 2005/01/05 18:05:13 dwmw2 Exp $
  */
 
 /****************************************************************************/
@@ -47,7 +47,7 @@ struct mtd_partition uclinux_romfs[] = {
 int uclinux_point(struct mtd_info *mtd, loff_t from, size_t len,
 	size_t *retlen, u_char **mtdbuf)
 {
-	struct map_info *map = (struct map_info *) mtd->priv;
+	struct map_info *map = mtd->priv;
 	*mtdbuf = (u_char *) (map->virt + ((int) from));
 	*retlen = len;
 	return(0);
@@ -71,7 +71,7 @@ int __init uclinux_mtd_init(void)
 
 	mapp->virt = ioremap_nocache(mapp->phys, mapp->size);
 
-	if (!mapp->virt) {
+	if (mapp->virt == 0) {
 		printk("uclinux[mtd]: ioremap_nocache() failed\n");
 		return(-EIO);
 	}

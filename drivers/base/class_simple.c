@@ -27,7 +27,7 @@ struct simple_dev {
 #define to_simple_dev(d) container_of(d, struct simple_dev, class_dev)
 
 static LIST_HEAD(simple_dev_list);
-static spinlock_t simple_dev_list_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(simple_dev_list_lock);
 
 static void release_simple_dev(struct class_device *class_dev)
 {
@@ -122,7 +122,7 @@ EXPORT_SYMBOL(class_simple_destroy);
  * be created, showing the dev_t for the device.  The pointer to the struct
  * class_device will be returned from the call.  Any further sysfs files that
  * might be required can be created using this pointer.
- * Note: the struct class_device passed to this function must have previously been
+ * Note: the struct class_simple passed to this function must have previously been
  * created with a call to class_simple_create().
  */
 struct class_device *class_simple_device_add(struct class_simple *cs, dev_t dev, struct device *device, const char *fmt, ...)

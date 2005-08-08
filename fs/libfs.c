@@ -212,6 +212,7 @@ get_sb_pseudo(struct file_system_type *fs_type, char *name,
 	s->s_blocksize_bits = 10;
 	s->s_magic = magic;
 	s->s_op = ops ? ops : &default_ops;
+	s->s_time_gran = 1;
 	root = new_inode(s);
 	if (!root)
 		goto Enomem;
@@ -374,6 +375,7 @@ int simple_fill_super(struct super_block *s, int magic, struct tree_descr *files
 	s->s_blocksize_bits = PAGE_CACHE_SHIFT;
 	s->s_magic = magic;
 	s->s_op = &s_ops;
+	s->s_time_gran = 1;
 
 	inode = new_inode(s);
 	if (!inode)
@@ -391,13 +393,9 @@ int simple_fill_super(struct super_block *s, int magic, struct tree_descr *files
 		return -ENOMEM;
 	}
 	for (i = 0; !files->name || files->name[0]; i++, files++) {
-		struct qstr name;
 		if (!files->name)
 			continue;
-		name.name = files->name;
-		name.len = strlen(name.name);
-		name.hash = full_name_hash(name.name, name.len);
-		dentry = d_alloc(root, &name);
+		dentry = d_alloc_name(root, files->name);
 		if (!dentry)
 			goto out;
 		inode = new_inode(s);
@@ -420,7 +418,7 @@ out:
 	return -ENOMEM;
 }
 
-static spinlock_t pin_fs_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(pin_fs_lock);
 
 int simple_pin_fs(char *name, struct vfsmount **mount, int *count)
 {
@@ -478,7 +476,7 @@ ssize_t simple_read_from_buffer(void __user *to, size_t count, loff_t *ppos,
 char *simple_transaction_get(struct file *file, const char __user *buf, size_t size)
 {
 	struct simple_transaction_argresp *ar;
-	static spinlock_t simple_transaction_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(simple_transaction_lock);
 
 	if (size > SIMPLE_TRANSACTION_LIMIT - 1)
 		return ERR_PTR(-EFBIG);
@@ -526,10 +524,12 @@ EXPORT_SYMBOL(dcache_dir_lseek);
 EXPORT_SYMBOL(dcache_dir_open);
 EXPORT_SYMBOL(dcache_readdir);
 EXPORT_SYMBOL(generic_read_dir);
+EXPORT_SYMBOL(get_sb_pseudo);
 EXPORT_SYMBOL(simple_commit_write);
 EXPORT_SYMBOL(simple_dir_inode_operations);
 EXPORT_SYMBOL(simple_dir_operations);
 EXPORT_SYMBOL(simple_empty);
+EXPORT_SYMBOL(d_alloc_name);
 EXPORT_SYMBOL(simple_fill_super);
 EXPORT_SYMBOL(simple_getattr);
 EXPORT_SYMBOL(simple_link);

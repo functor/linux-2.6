@@ -125,14 +125,8 @@ ahc_linux_eisa_init(void)
 		uint32_t eisa_id;
 		size_t	 id_size;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,0)
-		if (check_region(eisaBase, AHC_EISA_IOSIZE) != 0)
-			continue;
-		request_region(eisaBase, AHC_EISA_IOSIZE, "aic7xxx");
-#else
 		if (request_region(eisaBase, AHC_EISA_IOSIZE, "aic7xxx") == 0)
 			continue;
-#endif
 
 		eisa_id = 0;
 		id_size = sizeof(eisa_id);
@@ -185,10 +179,8 @@ aic7770_linux_config(struct aic7770_identity *entry, aic7770_dev_t dev,
 		return (ENOMEM);
 	strcpy(name, buf);
 	ahc = ahc_alloc(&aic7xxx_driver_template, name);
-	if (ahc == NULL) {
-		free(name, M_DEVBUF);
+	if (ahc == NULL)
 		return (ENOMEM);
-	}
 	error = aic7770_config(ahc, entry, eisaBase);
 	if (error != 0) {
 		ahc->bsh.ioport = 0;
@@ -209,14 +201,8 @@ aic7770_map_registers(struct ahc_softc *ahc, u_int port)
 	/*
 	 * Lock out other contenders for our i/o space.
 	 */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,0)
-	if (check_region(port, AHC_EISA_IOSIZE) != 0)
-		return (ENOMEM);
-	request_region(port, AHC_EISA_IOSIZE, "aic7xxx");
-#else
 	if (request_region(port, AHC_EISA_IOSIZE, "aic7xxx") == 0)
 		return (ENOMEM);
-#endif
 	ahc->tag = BUS_SPACE_PIO;
 	ahc->bsh.ioport = port;
 	return (0);

@@ -330,6 +330,7 @@ static int __init smp_read_mpc(struct mp_config_table *mpc)
 			}
 		}
 	}
+	clustered_apic_check();
 	if (!num_processors)
 		printk(KERN_ERR "SMP mptable: no processors registered!\n");
 	return num_processors;
@@ -575,7 +576,6 @@ static int __init smp_scan_config (unsigned long base, unsigned long length)
 	extern void __bad_mpf_size(void); 
 	unsigned int *bp = phys_to_virt(base);
 	struct intel_mp_floating *mpf;
-	static int printed __initdata; 
 
 	Dprintk("Scan SMP from %p for %ld bytes.\n", bp,length);
 	if (sizeof(*mpf) != 16)
@@ -598,10 +598,6 @@ static int __init smp_scan_config (unsigned long base, unsigned long length)
 		}
 		bp += 4;
 		length -= 16;
-	}
-	if (!printed) {		
-		printk(KERN_INFO "No mptable found.\n");
-		printed = 1;
 	}
 	return 0;
 }
@@ -639,7 +635,11 @@ void __init find_intel_smp (void)
 
 	address = *(unsigned short *)phys_to_virt(0x40E);
 	address <<= 4;
-	smp_scan_config(address, 0x1000);
+	if (smp_scan_config(address, 0x1000))
+		return;
+
+	/* If we have come this far, we did not find an MP table  */
+	 printk(KERN_INFO "No mptable found.\n");
 }
 
 /*
@@ -895,25 +895,25 @@ void __init mp_config_acpi_legacy_irqs (void)
 	return;
 }
 
-void mp_register_gsi (u32 gsi, int edge_level, int active_high_low)
+int mp_register_gsi(u32 gsi, int edge_level, int active_high_low)
 {
 	int			ioapic = -1;
 	int			ioapic_pin = 0;
 	int			idx, bit = 0;
 
 	if (acpi_irq_model != ACPI_IRQ_MODEL_IOAPIC)
-		return;
+		return gsi;
 
 #ifdef CONFIG_ACPI_BUS
 	/* Don't set up the ACPI SCI because it's already set up */
 	if (acpi_fadt.sci_int == gsi)
-		return;
+		return gsi;
 #endif
 
 	ioapic = mp_find_ioapic(gsi);
 	if (ioapic < 0) {
 		printk(KERN_WARNING "No IOAPIC for GSI %u\n", gsi);
-		return;
+		return gsi;
 	}
 
 	ioapic_pin = gsi - mp_ioapic_routing[ioapic].gsi_start;
@@ -929,12 +929,12 @@ void mp_register_gsi (u32 gsi, int edge_level, int active_high_low)
 		printk(KERN_ERR "Invalid reference to IOAPIC pin "
 			"%d-%d\n", mp_ioapic_routing[ioapic].apic_id, 
 			ioapic_pin);
-		return;
+		return gsi;
 	}
 	if ((1<<bit) & mp_ioapic_routing[ioapic].pin_programmed[idx]) {
 		Dprintk(KERN_DEBUG "Pin %d-%d already programmed\n",
 			mp_ioapic_routing[ioapic].apic_id, ioapic_pin);
-		return;
+		return gsi;
 	}
 
 	mp_ioapic_routing[ioapic].pin_programmed[idx] |= (1<<bit);
@@ -942,6 +942,7 @@ void mp_register_gsi (u32 gsi, int edge_level, int active_high_low)
 	io_apic_set_pci_routing(ioapic, ioapic_pin, gsi,
 		edge_level == ACPI_EDGE_SENSITIVE ? 0 : 1,
 		active_high_low == ACPI_ACTIVE_HIGH ? 0 : 1);
+	return gsi;
 }
 
 #endif /*CONFIG_X86_IO_APIC*/

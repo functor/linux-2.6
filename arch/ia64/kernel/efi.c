@@ -28,6 +28,7 @@
 
 #include <asm/io.h>
 #include <asm/kregs.h>
+#include <asm/meminit.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/mca.h>
@@ -324,12 +325,12 @@ efi_memmap_walk (efi_freemem_callback_t callback, void *arg)
 		 * [granule_addr - first_non_wb_addr) is guaranteed to
 		 * be contiguous WB memory.
 		 */
-		granule_addr = md->phys_addr & ~(IA64_GRANULE_SIZE - 1);
+		granule_addr = GRANULEROUNDDOWN(md->phys_addr);
 		first_non_wb_addr = max(first_non_wb_addr, granule_addr);
 
 		if (first_non_wb_addr < md->phys_addr) {
 			trim_bottom(md, granule_addr + IA64_GRANULE_SIZE);
-			granule_addr = md->phys_addr & ~(IA64_GRANULE_SIZE - 1);
+			granule_addr = GRANULEROUNDDOWN(md->phys_addr);
 			first_non_wb_addr = max(first_non_wb_addr, granule_addr);
 		}
 
@@ -343,24 +344,36 @@ efi_memmap_walk (efi_freemem_callback_t callback, void *arg)
 				break;		/* non-WB or hole */
 		}
 
-		last_granule_addr = first_non_wb_addr & ~(IA64_GRANULE_SIZE - 1);
+		last_granule_addr = GRANULEROUNDDOWN(first_non_wb_addr);
 		if (last_granule_addr < md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT))
 			trim_top(md, last_granule_addr);
 
 		if (is_available_memory(md)) {
-			if (md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT) > max_addr) {
-				if (md->phys_addr > max_addr)
+			if (md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT) >= max_addr) {
+				if (md->phys_addr >= max_addr)
 					continue;
 				md->num_pages = (max_addr - md->phys_addr) >> EFI_PAGE_SHIFT;
+				first_non_wb_addr = max_addr;
 			}
 
 			if (total_mem >= mem_limit)
 				continue;
-			total_mem += (md->num_pages << EFI_PAGE_SHIFT);
-			if (total_mem > mem_limit) {
-				md->num_pages -= ((total_mem - mem_limit) >> EFI_PAGE_SHIFT);
-				max_addr = md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT);
+
+			if (total_mem + (md->num_pages << EFI_PAGE_SHIFT) > mem_limit) {
+				unsigned long limit_addr = md->phys_addr;
+
+				limit_addr += mem_limit - total_mem;
+				limit_addr = GRANULEROUNDDOWN(limit_addr);
+
+				if (md->phys_addr > limit_addr)
+					continue;
+
+				md->num_pages = (limit_addr - md->phys_addr) >>
+				                EFI_PAGE_SHIFT;
+				first_non_wb_addr = max_addr = md->phys_addr +
+				              (md->num_pages << EFI_PAGE_SHIFT);
 			}
+			total_mem += (md->num_pages << EFI_PAGE_SHIFT);
 
 			if (md->num_pages == 0)
 				continue;
@@ -401,16 +414,15 @@ efi_memmap_walk (efi_freemem_callback_t callback, void *arg)
  * ITR to enable safe PAL calls in virtual mode.  See IA-64 Processor
  * Abstraction Layer chapter 11 in ADAG
  */
-void
-efi_map_pal_code (void)
+
+void *
+efi_get_pal_addr (void)
 {
 	void *efi_map_start, *efi_map_end, *p;
 	efi_memory_desc_t *md;
 	u64 efi_desc_size;
 	int pal_code_count = 0;
-	u64 mask, psr;
-	u64 vaddr;
-	int cpu;
+	u64 vaddr, mask;
 
 	efi_map_start = __va(ia64_boot_param->efi_memmap);
 	efi_map_end   = efi_map_start + ia64_boot_param->efi_memmap_size;
@@ -454,30 +466,39 @@ efi_map_pal_code (void)
 		if (md->num_pages << EFI_PAGE_SHIFT > IA64_GRANULE_SIZE)
 			panic("Woah!  PAL code size bigger than a granule!");
 
-		mask  = ~((1 << IA64_GRANULE_SHIFT) - 1);
 #if EFI_DEBUG
+		mask  = ~((1 << IA64_GRANULE_SHIFT) - 1);
+
 		printk(KERN_INFO "CPU %d: mapping PAL code [0x%lx-0x%lx) into [0x%lx-0x%lx)\n",
-		       smp_processor_id(), md->phys_addr,
-		       md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT),
-		       vaddr & mask, (vaddr & mask) + IA64_GRANULE_SIZE);
+			smp_processor_id(), md->phys_addr,
+			md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT),
+			vaddr & mask, (vaddr & mask) + IA64_GRANULE_SIZE);
 #endif
-
-		/*
-		 * Cannot write to CRx with PSR.ic=1
-		 */
-		psr = ia64_clear_ic();
-		ia64_itr(0x1, IA64_TR_PALCODE, vaddr & mask,
-			 pte_val(pfn_pte(md->phys_addr >> PAGE_SHIFT, PAGE_KERNEL)),
-			 IA64_GRANULE_SHIFT);
-		ia64_set_psr(psr);		/* restore psr */
-		ia64_srlz_i();
-
-		cpu = smp_processor_id();
-
-		/* insert this TR into our list for MCA recovery purposes */
-		ia64_mca_tlb_list[cpu].pal_base = vaddr & mask;
-		ia64_mca_tlb_list[cpu].pal_paddr = pte_val(mk_pte_phys(md->phys_addr, PAGE_KERNEL));
+		return __va(md->phys_addr);
 	}
+	printk(KERN_WARNING "%s: no PAL-code memory-descriptor found",
+	       __FUNCTION__);
+	return NULL;
+}
+
+void
+efi_map_pal_code (void)
+{
+	void *pal_vaddr = efi_get_pal_addr ();
+	u64 psr;
+
+	if (!pal_vaddr)
+		return;
+
+	/*
+	 * Cannot write to CRx with PSR.ic=1
+	 */
+	psr = ia64_clear_ic();
+	ia64_itr(0x1, IA64_TR_PALCODE, GRANULEROUNDDOWN((unsigned long) pal_vaddr),
+		 pte_val(pfn_pte(__pa(pal_vaddr) >> PAGE_SHIFT, PAGE_KERNEL)),
+		 IA64_GRANULE_SHIFT);
+	ia64_set_psr(psr);		/* restore psr */
+	ia64_srlz_i();
 }
 
 void __init
@@ -495,13 +516,13 @@ efi_init (void)
 	for (cp = saved_command_line; *cp; ) {
 		if (memcmp(cp, "mem=", 4) == 0) {
 			cp += 4;
-			mem_limit = memparse(cp, &end) - 2;
+			mem_limit = memparse(cp, &end);
 			if (end != cp)
 				break;
 			cp = end;
 		} else if (memcmp(cp, "max_addr=", 9) == 0) {
 			cp += 9;
-			max_addr = memparse(cp, &end) - 1;
+			max_addr = GRANULEROUNDDOWN(memparse(cp, &end));
 			if (end != cp)
 				break;
 			cp = end;
@@ -737,6 +758,7 @@ efi_mem_attributes (unsigned long phys_addr)
 	}
 	return 0;
 }
+EXPORT_SYMBOL(efi_mem_attributes);
 
 int
 valid_phys_addr_range (unsigned long phys_addr, unsigned long *size)

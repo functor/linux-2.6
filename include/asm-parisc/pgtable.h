@@ -1,6 +1,8 @@
 #ifndef _PARISC_PGTABLE_H
 #define _PARISC_PGTABLE_H
 
+#include <asm-generic/4level-fixup.h>
+
 #include <linux/config.h>
 #include <asm/fixmap.h>
 
@@ -505,7 +507,8 @@ static inline void ptep_mkdirty(pte_t *ptep)
 
 #endif /* !__ASSEMBLY__ */
 
-#define io_remap_page_range remap_page_range
+#define io_remap_page_range(vma, vaddr, paddr, size, prot)		\
+		remap_pfn_range(vma, vaddr, (paddr) >> PAGE_SHIFT, size, prot)
 
 /* We provide our own get_unmapped_area to provide cache coherency */
 

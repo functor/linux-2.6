@@ -28,7 +28,7 @@
 #include <linux/a.out.h>
 #include <linux/interrupt.h>
 #include <linux/config.h>
-#include <linux/version.h>
+#include <linux/utsname.h>
 #include <linux/delay.h>
 #include <linux/reboot.h>
 #include <linux/init.h>
@@ -57,6 +57,9 @@ asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
 
 int hlt_counter;
 
+unsigned long boot_option_idle_override = 0;
+EXPORT_SYMBOL(boot_option_idle_override);
+
 /*
  * Return saved PC of a blocked thread.
  */
@@ -69,6 +72,7 @@ unsigned long thread_saved_pc(struct task_struct *tsk)
  * Powermanagement idle function, if any..
  */
 void (*pm_idle)(void);
+static cpumask_t cpu_idle_map;
 
 void disable_hlt(void)
 {
@@ -90,12 +94,14 @@ EXPORT_SYMBOL(enable_hlt);
  */
 void default_idle(void)
 {
-	if (!hlt_counter && current_cpu_data.hlt_works_ok) {
+	if (!hlt_counter && boot_cpu_data.hlt_works_ok) {
 		local_irq_disable();
 		if (!need_resched())
 			safe_halt();
 		else
 			local_irq_enable();
+	} else {
+		cpu_relax();
 	}
 }
 
@@ -139,28 +145,43 @@ static void poll_idle (void)
  */
 void cpu_idle (void)
 {
+	int cpu = _smp_processor_id();
+
 	/* endless idle loop with no priority at all */
 	while (1) {
 		while (!need_resched()) {
 			void (*idle)(void);
-			/*
-			 * Mark this as an RCU critical section so that
-			 * synchronize_kernel() in the unload path waits
-			 * for our completion.
-			 */
-			rcu_read_lock();
+
+			if (cpu_isset(cpu, cpu_idle_map))
+				cpu_clear(cpu, cpu_idle_map);
+			rmb();
 			idle = pm_idle;
 
 			if (!idle)
 				idle = default_idle;
 
-			irq_stat[smp_processor_id()].idle_timestamp = jiffies;
+			irq_stat[cpu].idle_timestamp = jiffies;
 			idle();
-			rcu_read_unlock();
 		}
 		schedule();
 	}
 }
+
+void cpu_idle_wait(void)
+{
+	int cpu;
+	cpumask_t map;
+
+	for_each_online_cpu(cpu)
+		cpu_set(cpu, cpu_idle_map);
+
+	wmb();
+	do {
+		ssleep(1);
+		cpus_and(map, cpu_idle_map, cpu_online_map);
+	} while (!cpus_empty(map));
+}
+EXPORT_SYMBOL_GPL(cpu_idle_wait);
 
 /*
  * This uses new MONITOR/MWAIT instructions on P4 processors with PNI,
@@ -214,6 +235,7 @@ static int __init idle_setup (char *str)
 		pm_idle = default_idle;
 	}
 
+	boot_option_idle_override = 1;
 	return 1;
 }
 
@@ -230,7 +252,8 @@ void show_regs(struct pt_regs * regs)
 
 	if (regs->xcs & 3)
 		printk(" ESP: %04x:%08lx",0xffff & regs->xss,regs->esp);
-	printk(" EFLAGS: %08lx    %s  (%s)\n",regs->eflags, print_tainted(),UTS_RELEASE);
+	printk(" EFLAGS: %08lx    %s  (%s)\n",
+	       regs->eflags, print_tainted(), system_utsname.release);
 	printk("EAX: %08lx EBX: %08lx ECX: %08lx EDX: %08lx\n",
 		regs->eax,regs->ebx,regs->ecx,regs->edx);
 	printk("ESI: %08lx EDI: %08lx EBP: %08lx",
@@ -328,7 +351,7 @@ void flush_thread(void)
 	 * Forget coprocessor state..
 	 */
 	clear_fpu(tsk);
-	tsk->used_math = 0;
+	clear_used_math();
 }
 
 void release_thread(struct task_struct *dead_task)
@@ -344,7 +367,7 @@ void release_thread(struct task_struct *dead_task)
 		}
 	}
 
-	release_x86_irqs(dead_task);
+	release_vm86_irqs(dead_task);
 }
 
 /*
@@ -368,7 +391,6 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 	*childregs = *regs;
 	childregs->eax = 0;
 	childregs->esp = esp;
-	p->set_child_tid = p->clear_child_tid = NULL;
 
 	p->thread.esp = (unsigned long) childregs;
 	p->thread.esp0 = (unsigned long) (childregs+1);
@@ -656,7 +678,9 @@ asmlinkage int sys_execve(struct pt_regs regs)
 			(char __user * __user *) regs.edx,
 			&regs);
 	if (error == 0) {
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
 		/* Make sure we don't return using sysenter.. */
 		set_thread_flag(TIF_IRET);
 	}

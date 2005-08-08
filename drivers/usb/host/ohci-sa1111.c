@@ -162,15 +162,14 @@ int usb_hcd_sa1111_probe (const struct hc_driver *driver,
 
 	sa1111_start_hc(dev);
 
-	hcd = driver->hcd_alloc ();
+	hcd = usb_create_hcd (driver);
 	if (hcd == NULL){
 		dbg ("hcd_alloc failed");
 		retval = -ENOMEM;
 		goto err1;
 	}
+	ohci_hcd_init(hcd_to_ohci(hcd));
 
-	hcd->driver = (struct hc_driver *) driver;
-	hcd->description = driver->description;
 	hcd->irq = dev->irq[1];
 	hcd->regs = dev->mapbase;
 	hcd->self.controller = &dev->dev;
@@ -178,28 +177,21 @@ int usb_hcd_sa1111_probe (const struct hc_driver *driver,
 	retval = hcd_buffer_create (hcd);
 	if (retval != 0) {
 		dbg ("pool alloc fail");
-		goto err1;
-	}
-
-	retval = request_irq (hcd->irq, usb_hcd_sa1111_hcim_irq, SA_INTERRUPT,
-			      hcd->description, hcd);
-	if (retval != 0) {
-		dbg("request_irq failed");
-		retval = -EBUSY;
 		goto err2;
 	}
 
+	retval = request_irq (hcd->irq, usb_hcd_sa1111_hcim_irq, SA_INTERRUPT,
+			      hcd->driver->description, hcd);
+	if (retval != 0) {
+		dbg("request_irq failed");
+		retval = -EBUSY;
+		goto err3;
+	}
+
 	info ("%s (SA-1111) at 0x%p, irq %d\n",
-	      hcd->description, hcd->regs, hcd->irq);
+		hcd->driver->description, hcd->regs, hcd->irq);
 
-	usb_bus_init (&hcd->self);
-	hcd->self.op = &usb_hcd_operations;
-	hcd->self.hcpriv = (void *) hcd;
 	hcd->self.bus_name = "sa1111";
-	hcd->product_desc = "SA-1111 OHCI";
-
-	INIT_LIST_HEAD (&hcd->dev_list);
-
 	usb_register_bus (&hcd->self);
 
 	if ((retval = driver->start (hcd)) < 0) 
@@ -211,10 +203,10 @@ int usb_hcd_sa1111_probe (const struct hc_driver *driver,
 	*hcd_out = hcd;
 	return 0;
 
- err2:
+ err3:
 	hcd_buffer_destroy (hcd);
-	if (hcd)
-		driver->hcd_free(hcd);
+ err2:
+	usb_put_hcd(hcd);
  err1:
 	sa1111_stop_hc(dev);
 	release_mem_region(dev->res.start, dev->res.end - dev->res.start + 1);
@@ -237,8 +229,6 @@ int usb_hcd_sa1111_probe (const struct hc_driver *driver,
  */
 void usb_hcd_sa1111_remove (struct usb_hcd *hcd, struct sa1111_dev *dev)
 {
-	void *base;
-
 	info ("remove: %s, state %x", hcd->self.bus_name, hcd->state);
 
 	if (in_interrupt ())
@@ -257,9 +247,6 @@ void usb_hcd_sa1111_remove (struct usb_hcd *hcd, struct sa1111_dev *dev)
 
 	usb_deregister_bus (&hcd->self);
 
-	base = hcd->regs;
-	hcd->driver->hcd_free (hcd);
-
 	sa1111_stop_hc(dev);
 	release_mem_region(dev->res.start, dev->res.end - dev->res.start + 1);
 }
@@ -272,33 +259,14 @@ ohci_sa1111_start (struct usb_hcd *hcd)
 	struct ohci_hcd	*ohci = hcd_to_ohci (hcd);
 	int		ret;
 
-	ohci->hcca = dma_alloc_coherent (hcd->self.controller,
-			sizeof *ohci->hcca, &ohci->hcca_dma, 0);
-	if (!ohci->hcca)
-		return -ENOMEM;
-        
-	memset (ohci->hcca, 0, sizeof (struct ohci_hcca));
-	if ((ret = ohci_mem_init (ohci)) < 0) {
+	if ((ret = ohci_init(ohci)) < 0)
+		return ret;
+
+	if ((ret = ohci_run (ohci)) < 0) {
+		err ("can't start %s", hcd->self.bus_name);
 		ohci_stop (hcd);
 		return ret;
 	}
-	ohci->regs = hcd->regs;
-
-	if (hc_reset (ohci) < 0) {
-		ohci_stop (hcd);
-		return -ENODEV;
-	}
-
-	if (hc_start (ohci) < 0) {
-		err ("can't start %s", ohci->hcd.self.bus_name);
-		ohci_stop (hcd);
-		return -EBUSY;
-	}
-	create_debug_files (ohci);
-
-#ifdef	DEBUG
-	ohci_dump (ohci, 1);
-#endif
 	return 0;
 }
 
@@ -306,6 +274,8 @@ ohci_sa1111_start (struct usb_hcd *hcd)
 
 static const struct hc_driver ohci_sa1111_hc_driver = {
 	.description =		hcd_name,
+	.product_desc =		"SA-1111 OHCI",
+	.hcd_priv_size =	sizeof(struct ohci_hcd),
 
 	/*
 	 * generic hardware linkage
@@ -327,7 +297,6 @@ static const struct hc_driver ohci_sa1111_hc_driver = {
 	 * memory lifecycle (except per-request)
 	 */
 	.hcd_alloc =		ohci_hcd_alloc,
-	.hcd_free =		ohci_hcd_free,
 
 	/*
 	 * managing i/o requests and associated device resources

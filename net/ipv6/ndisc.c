@@ -169,12 +169,33 @@ struct ndisc_options {
 
 #define NDISC_OPT_SPACE(len) (((len)+2+7)&~7)
 
-static u8 *ndisc_fill_option(u8 *opt, int type, void *data, int data_len)
+/*
+ * Return the padding between the option length and the start of the
+ * link addr.  Currently only IP-over-InfiniBand needs this, although
+ * if RFC 3831 IPv6-over-Fibre Channel is ever implemented it may
+ * also need a pad of 2.
+ */
+static int ndisc_addr_option_pad(unsigned short type)
+{
+	switch (type) {
+	case ARPHRD_INFINIBAND: return 2;
+	default:                return 0;
+	}
+}
+
+static u8 *ndisc_fill_addr_option(u8 *opt, int type, void *data, int data_len,
+				  unsigned short addr_type)
 {
 	int space = NDISC_OPT_SPACE(data_len);
+	int pad   = ndisc_addr_option_pad(addr_type);
 
 	opt[0] = type;
 	opt[1] = space>>3;
+
+	memset(opt + 2, 0, pad);
+	opt   += pad;
+	space -= pad;
+
 	memcpy(opt+2, data, data_len);
 	data_len += 2;
 	opt += data_len;
@@ -259,6 +280,9 @@ int ndisc_mc_map(struct in6_addr *addr, char *buf, struct net_device *dev, int d
 		return 0;
 	case ARPHRD_ARCNET:
 		ipv6_arcnet_mc_map(addr, buf);
+		return 0;
+	case ARPHRD_INFINIBAND:
+		ipv6_ib_mc_map(addr, buf);
 		return 0;
 	default:
 		if (dir) {
@@ -396,7 +420,7 @@ static void ndisc_send_na(struct net_device *dev, struct neighbour *neigh,
 		src_addr = solicited_addr;
 		in6_ifa_put(ifp);
 	} else {
-		if (ipv6_dev_get_saddr(dev, daddr, &tmpaddr, 0))
+		if (ipv6_dev_get_saddr(dev, daddr, &tmpaddr))
 			return;
 		src_addr = &tmpaddr;
 	}
@@ -450,7 +474,8 @@ static void ndisc_send_na(struct net_device *dev, struct neighbour *neigh,
 	ipv6_addr_copy(&msg->target, solicited_addr);
 
 	if (inc_opt)
-		ndisc_fill_option(msg->opt, ND_OPT_TARGET_LL_ADDR, dev->dev_addr, dev->addr_len);
+		ndisc_fill_addr_option(msg->opt, ND_OPT_TARGET_LL_ADDR, dev->dev_addr,
+				       dev->addr_len, dev->type);
 
 	/* checksum */
 	msg->icmph.icmp6_cksum = csum_ipv6_magic(src_addr, daddr, len, 
@@ -533,7 +558,8 @@ void ndisc_send_ns(struct net_device *dev, struct neighbour *neigh,
 	ipv6_addr_copy(&msg->target, solicit);
 
 	if (send_llinfo)
-		ndisc_fill_option(msg->opt, ND_OPT_SOURCE_LL_ADDR, dev->dev_addr, dev->addr_len);
+		ndisc_fill_addr_option(msg->opt, ND_OPT_SOURCE_LL_ADDR, dev->dev_addr,
+				       dev->addr_len, dev->type);
 
 	/* checksum */
 	msg->icmph.icmp6_cksum = csum_ipv6_magic(&skb->nh.ipv6h->saddr,
@@ -607,7 +633,8 @@ void ndisc_send_rs(struct net_device *dev, struct in6_addr *saddr,
 	opt = (u8*) (hdr + 1);
 
 	if (dev->addr_len)
-		ndisc_fill_option(opt, ND_OPT_SOURCE_LL_ADDR, dev->dev_addr, dev->addr_len);
+		ndisc_fill_addr_option(opt, ND_OPT_SOURCE_LL_ADDR, dev->dev_addr,
+				       dev->addr_len, dev->type);
 
 	/* checksum */
 	hdr->icmp6_cksum = csum_ipv6_magic(&skb->nh.ipv6h->saddr, daddr, len,
@@ -714,7 +741,8 @@ static void ndisc_recv_ns(struct sk_buff *skb)
 	}
 
 	if (ndopts.nd_opts_src_lladdr) {
-		lladdr = (u8*)(ndopts.nd_opts_src_lladdr + 1);
+		lladdr = (u8*)(ndopts.nd_opts_src_lladdr + 1) +
+			ndisc_addr_option_pad(dev->type);
 		lladdrlen = ndopts.nd_opts_src_lladdr->nd_opt_len << 3;
 		if (lladdrlen != NDISC_OPT_SPACE(dev->addr_len)) {
 			ND_PRINTK2(KERN_WARNING
@@ -871,7 +899,8 @@ static void ndisc_recv_na(struct sk_buff *skb)
 		return;
 	}
 	if (ndopts.nd_opts_tgt_lladdr) {
-		lladdr = (u8*)(ndopts.nd_opts_tgt_lladdr + 1);
+		lladdr = (u8*)(ndopts.nd_opts_tgt_lladdr + 1) +
+			ndisc_addr_option_pad(dev->type);
 		lladdrlen = ndopts.nd_opts_tgt_lladdr->nd_opt_len << 3;
 		if (lladdrlen != NDISC_OPT_SPACE(dev->addr_len)) {
 			ND_PRINTK2(KERN_WARNING
@@ -900,6 +929,9 @@ static void ndisc_recv_na(struct sk_buff *skb)
 	if (neigh) {
 		u8 old_flags = neigh->flags;
 
+		if (neigh->nud_state & NUD_FAILED)
+			goto out;
+
 		neigh_update(neigh, lladdr,
 			     msg->icmph.icmp6_solicited ? NUD_REACHABLE : NUD_STALE,
 			     NEIGH_UPDATE_F_WEAK_OVERRIDE|
@@ -917,14 +949,74 @@ static void ndisc_recv_na(struct sk_buff *skb)
 				ip6_del_rt(rt, NULL, NULL);
 		}
 
+out:
 		neigh_release(neigh);
 	}
+}
+
+static void ndisc_recv_rs(struct sk_buff *skb)
+{
+	struct rs_msg *rs_msg = (struct rs_msg *) skb->h.raw;
+	unsigned long ndoptlen = skb->len - sizeof(*rs_msg);
+	struct neighbour *neigh;
+	struct inet6_dev *idev;
+	struct in6_addr *saddr = &skb->nh.ipv6h->saddr;
+	struct ndisc_options ndopts;
+	u8 *lladdr = NULL;
+	int lladdrlen = 0;
+
+	if (skb->len < sizeof(*rs_msg))
+		return;
+
+	idev = in6_dev_get(skb->dev);
+	if (!idev) {
+		if (net_ratelimit())
+			ND_PRINTK1("ICMP6 RS: can't find in6 device\n");
+		return;
+	}
+
+	/* Don't accept RS if we're not in router mode */
+	if (!idev->cnf.forwarding)
+		goto out;
+
+	/*
+	 * Don't update NCE if src = ::;
+	 * this implies that the source node has no ip address assigned yet.
+	 */
+	if (ipv6_addr_any(saddr))
+		goto out;
+
+	/* Parse ND options */
+	if (!ndisc_parse_options(rs_msg->opt, ndoptlen, &ndopts)) {
+		if (net_ratelimit())
+			ND_PRINTK2("ICMP6 NS: invalid ND option, ignored\n");
+		goto out;
+	}
+
+	if (ndopts.nd_opts_src_lladdr) {
+		lladdr = (u8 *)(ndopts.nd_opts_src_lladdr + 1) +
+			ndisc_addr_option_pad(skb->dev->type);
+		lladdrlen = ndopts.nd_opts_src_lladdr->nd_opt_len << 3;
+		if (lladdrlen != NDISC_OPT_SPACE(skb->dev->addr_len))
+			goto out;
+	}
+
+	neigh = __neigh_lookup(&nd_tbl, saddr, skb->dev, 1);
+	if (neigh) {
+		neigh_update(neigh, lladdr, NUD_STALE,
+			     NEIGH_UPDATE_F_WEAK_OVERRIDE|
+			     NEIGH_UPDATE_F_OVERRIDE|
+			     NEIGH_UPDATE_F_OVERRIDE_ISROUTER);
+		neigh_release(neigh);
+	}
+out:
+	in6_dev_put(idev);
 }
 
 static void ndisc_router_discovery(struct sk_buff *skb)
 {
         struct ra_msg *ra_msg = (struct ra_msg *) skb->h.raw;
-	struct neighbour *neigh;
+	struct neighbour *neigh = NULL;
 	struct inet6_dev *in6_dev;
 	struct rt6_info *rt;
 	int lifetime;
@@ -992,7 +1084,11 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 
 	rt = rt6_get_dflt_router(&skb->nh.ipv6h->saddr, skb->dev);
 
+	if (rt)
+		neigh = rt->rt6i_nexthop;
+
 	if (rt && lifetime == 0) {
+		neigh_clone(neigh);
 		ip6_del_rt(rt, NULL, NULL);
 		rt = NULL;
 	}
@@ -1020,13 +1116,6 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 			return;
 		}
 		neigh->flags |= NTF_ROUTER;
-
-		/*
-		 *	If we where using an "all destinations on link" route
-		 *	delete it
-		 */
-
-		rt6_purge_dflt_routers(RTF_ALLONLINK);
 	}
 
 	if (rt)
@@ -1072,11 +1161,15 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 	 *	Process options.
 	 */
 
-	if (rt && (neigh = rt->rt6i_nexthop) != NULL) {
+	if (!neigh)
+		neigh = __neigh_lookup(&nd_tbl, &skb->nh.ipv6h->saddr,
+				       skb->dev, 1);
+	if (neigh) {
 		u8 *lladdr = NULL;
 		int lladdrlen;
 		if (ndopts.nd_opts_src_lladdr) {
-			lladdr = (u8*)((ndopts.nd_opts_src_lladdr)+1);
+			lladdr = (u8*)((ndopts.nd_opts_src_lladdr)+1) +
+				ndisc_addr_option_pad(skb->dev->type);
 			lladdrlen = ndopts.nd_opts_src_lladdr->nd_opt_len << 3;
 			if (lladdrlen != NDISC_OPT_SPACE(skb->dev->addr_len)) {
 				ND_PRINTK2(KERN_WARNING
@@ -1127,6 +1220,8 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 out:
 	if (rt)
 		dst_release(&rt->u.dst);
+	else if (neigh)
+		neigh_release(neigh);
 	in6_dev_put(in6_dev);
 }
 
@@ -1168,7 +1263,7 @@ static void ndisc_redirect_rcv(struct sk_buff *skb)
 		return;
 	}
 
-	if (ipv6_addr_cmp(dest, target) == 0) {
+	if (ipv6_addr_equal(dest, target)) {
 		on_link = 1;
 	} else if (!(ipv6_addr_type(target) & IPV6_ADDR_LINKLOCAL)) {
 		ND_PRINTK2(KERN_WARNING 
@@ -1196,7 +1291,8 @@ static void ndisc_redirect_rcv(struct sk_buff *skb)
 		return;
 	}
 	if (ndopts.nd_opts_tgt_lladdr) {
-		lladdr = (u8*)(ndopts.nd_opts_tgt_lladdr + 1);
+		lladdr = (u8*)(ndopts.nd_opts_tgt_lladdr + 1) +
+			ndisc_addr_option_pad(skb->dev->type);
 		lladdrlen = ndopts.nd_opts_tgt_lladdr->nd_opt_len << 3;
 		if (lladdrlen != NDISC_OPT_SPACE(skb->dev->addr_len)) {
 			ND_PRINTK2(KERN_WARNING
@@ -1325,7 +1421,8 @@ void ndisc_send_redirect(struct sk_buff *skb, struct neighbour *neigh,
 	 */
 
 	if (dev->addr_len)
-		opt = ndisc_fill_option(opt, ND_OPT_TARGET_LL_ADDR, neigh->ha, dev->addr_len);
+		opt = ndisc_fill_addr_option(opt, ND_OPT_TARGET_LL_ADDR, neigh->ha,
+					     dev->addr_len, dev->type);
 
 	/*
 	 *	build redirect option and copy skb over to the new packet.
@@ -1393,6 +1490,10 @@ int ndisc_rcv(struct sk_buff *skb)
 
 	case NDISC_NEIGHBOUR_ADVERTISEMENT:
 		ndisc_recv_na(skb);
+		break;
+
+	case NDISC_ROUTER_SOLICITATION:
+		ndisc_recv_rs(skb);
 		break;
 
 	case NDISC_ROUTER_ADVERTISEMENT:

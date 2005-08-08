@@ -35,8 +35,9 @@
  *	Put the headers on a Fibre Channel packet. 
  */
  
-int fc_header(struct sk_buff *skb, struct net_device *dev, unsigned short type,
-              void *daddr, void *saddr, unsigned len) 
+static int fc_header(struct sk_buff *skb, struct net_device *dev,
+		     unsigned short type,
+		     void *daddr, void *saddr, unsigned len) 
 {
 	struct fch_hdr *fch;
 	int hdr_len;
@@ -81,7 +82,7 @@ int fc_header(struct sk_buff *skb, struct net_device *dev, unsigned short type,
  *	can now send the packet.
  */
  
-int fc_rebuild_header(struct sk_buff *skb) 
+static int fc_rebuild_header(struct sk_buff *skb) 
 {
 	struct fch_hdr *fch=(struct fch_hdr *)skb->data;
 	struct fcllc *fcllc=(struct fcllc *)(skb->data+sizeof(struct fch_hdr));
@@ -129,3 +130,35 @@ fc_type_trans(struct sk_buff *skb, struct net_device *dev)
 
 	return ntohs(ETH_P_802_2);
 }
+
+static void fc_setup(struct net_device *dev)
+{
+	dev->hard_header	= fc_header;
+	dev->rebuild_header	= fc_rebuild_header;
+                
+	dev->type		= ARPHRD_IEEE802;
+	dev->hard_header_len	= FC_HLEN;
+	dev->mtu		= 2024;
+	dev->addr_len		= FC_ALEN;
+	dev->tx_queue_len	= 100; /* Long queues on fc */
+	dev->flags		= IFF_BROADCAST;
+
+	memset(dev->broadcast, 0xFF, FC_ALEN);
+}
+
+/**
+ * alloc_fcdev - Register fibre channel device
+ * @sizeof_priv: Size of additional driver-private structure to be allocated
+ *	for this fibre channel device
+ *
+ * Fill in the fields of the device structure with fibre channel-generic values.
+ *
+ * Constructs a new net device, complete with a private data area of
+ * size @sizeof_priv.  A 32-byte (not bit) alignment is enforced for
+ * this private data area.
+ */
+struct net_device *alloc_fcdev(int sizeof_priv)
+{
+	return alloc_netdev(sizeof_priv, "fc%d", fc_setup);
+}
+EXPORT_SYMBOL(alloc_fcdev);

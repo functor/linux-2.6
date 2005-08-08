@@ -32,7 +32,8 @@
 typedef enum fe_type {
         FE_QPSK,
         FE_QAM,
-        FE_OFDM
+	FE_OFDM,
+	FE_ATSC
 } fe_type_t;
 
 
@@ -59,7 +60,9 @@ typedef enum fe_caps {
 	FE_CAN_BANDWIDTH_AUTO         = 0x40000,
 	FE_CAN_GUARD_INTERVAL_AUTO    = 0x80000,
 	FE_CAN_HIERARCHY_AUTO         = 0x100000,
-	FE_NEEDS_BENDING              = 0x20000000, // frontend requires frequency bending
+	FE_CAN_8VSB			= 0x200000,
+	FE_CAN_16VSB			= 0x400000,
+	FE_NEEDS_BENDING		= 0x20000000, // not supported anymore, don't use (frontend requires frequency bending)
 	FE_CAN_RECOVER                = 0x40000000, // frontend can recover from a cable unplug automatically
 	FE_CAN_MUTE_TS                = 0x80000000  // frontend can stop spurious TS data output
 } fe_caps_t;
@@ -75,7 +78,7 @@ struct dvb_frontend_info {
 	__u32      symbol_rate_min;
         __u32      symbol_rate_max;
 	__u32      symbol_rate_tolerance;     /* ppm */
-	__u32      notifier_delay;            /* ms */
+	__u32      notifier_delay;		/* DEPRECATED */
 	fe_caps_t  caps;
 };
 
@@ -155,9 +158,10 @@ typedef enum fe_modulation {
         QAM_64,
         QAM_128,
         QAM_256,
-	QAM_AUTO
+	QAM_AUTO,
+	VSB_8,
+	VSB_16
 } fe_modulation_t;
-
 
 typedef enum fe_transmit_mode {
 	TRANSMISSION_MODE_2K,
@@ -203,6 +207,9 @@ struct dvb_qam_parameters {
         fe_modulation_t  modulation;  /* modulation type (see above) */
 };
 
+struct dvb_vsb_parameters {
+	fe_modulation_t	modulation;  /* modulation type (see above) */
+};
 
 struct dvb_ofdm_parameters {
         fe_bandwidth_t      bandwidth;
@@ -216,13 +223,14 @@ struct dvb_ofdm_parameters {
 
 
 struct dvb_frontend_parameters {
-        __u32 frequency;     /* (absolute) frequency in Hz for QAM/OFDM */
+	__u32 frequency;     /* (absolute) frequency in Hz for QAM/OFDM/ATSC */
                                   /* intermediate frequency in kHz for QPSK */
 	fe_spectral_inversion_t inversion;
 	union {
 		struct dvb_qpsk_parameters qpsk;
 		struct dvb_qam_parameters  qam;
 		struct dvb_ofdm_parameters ofdm;
+		struct dvb_vsb_parameters vsb;
 	} u;
 };
 
@@ -254,6 +262,8 @@ struct dvb_frontend_event {
 #define FE_SET_FRONTEND            _IOW('o', 76, struct dvb_frontend_parameters)
 #define FE_GET_FRONTEND            _IOR('o', 77, struct dvb_frontend_parameters)
 #define FE_GET_EVENT               _IOR('o', 78, struct dvb_frontend_event)
+
+#define FE_DISHNETWORK_SEND_LEGACY_CMD _IO('o', 80) /* unsigned int */
 
 
 #endif /*_DVBFRONTEND_H_*/

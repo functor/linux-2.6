@@ -58,7 +58,7 @@ static struct rxrpc_peer_ops afs_peer_ops = {
 };
 
 struct list_head afs_cb_hash_tbl[AFS_CB_HASH_COUNT];
-spinlock_t afs_cb_hash_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(afs_cb_hash_lock);
 
 #ifdef AFS_CACHING_SUPPORT
 static struct cachefs_netfs_operations afs_cache_ops = {
@@ -100,7 +100,7 @@ static int afs_init(void)
 		goto error;
 #endif
 
-#ifdef CONFIG_KEYS
+#ifdef CONFIG_KEYS_TURNED_OFF
 	ret = afs_key_register();
 	if (ret < 0)
 		goto error_cache;
@@ -142,7 +142,7 @@ static int afs_init(void)
  error_kafstimod:
 	afs_kafstimod_stop();
  error_keys:
-#ifdef CONFIG_KEYS
+#ifdef CONFIG_KEYS_TURNED_OFF
 	afs_key_unregister();
  error_cache:
 #endif
@@ -169,7 +169,7 @@ static void __exit afs_exit(void)
 	afs_kafstimod_stop();
 	afs_kafsasyncd_stop();
 	afs_cell_purge();
-#ifdef CONFIG_KEYS
+#ifdef CONFIG_KEYS_TURNED_OFF
 	afs_key_unregister();
 #endif
 #ifdef AFS_CACHING_SUPPORT

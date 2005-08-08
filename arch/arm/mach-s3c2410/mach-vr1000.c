@@ -1,6 +1,6 @@
 /* linux/arch/arm/mach-s3c2410/mach-vr1000.c
  *
- * Copyright (c) 2003,2004 Simtec Electronics
+ * Copyright (c) 2003-2005 Simtec Electronics
  *   Ben Dooks <ben@simtec.co.uk>
  *
  * Machine support for Thorcom VR1000 board. Designed for Thorcom by
@@ -16,6 +16,14 @@
  *     21-Aug-2004 BJD  Added struct s3c2410_board
  *     06-Aug-2004 BJD  Fixed call to time initialisation
  *     05-Apr-2004 BJD  Copied to make mach-vr1000.c
+ *     18-Oct-2004 BJD  Updated board struct
+ *     04-Nov-2004 BJD  Clock and serial configuration update
+ *
+ *     04-Jan-2005 BJD  Updated uart init call
+ *     10-Jan-2005 BJD  Removed include of s3c2410.h
+ *     14-Jan-2005 BJD  Added clock init
+ *     15-Jan-2005 BJD  Add serial port device definition
+ *     20-Jan-2005 BJD  Use UPF_IOREMAP for ports
 */
 
 #include <linux/kernel.h>
@@ -25,12 +33,19 @@
 #include <linux/timer.h>
 #include <linux/init.h>
 
+#include <linux/serial.h>
+#include <linux/tty.h>
+#include <linux/serial_8250.h>
+#include <linux/serial_reg.h>
+
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/mach/irq.h>
 
 #include <asm/arch/bast-map.h>
 #include <asm/arch/vr1000-map.h>
+#include <asm/arch/vr1000-irq.h>
+#include <asm/arch/vr1000-cpld.h>
 
 #include <asm/hardware.h>
 #include <asm/io.h>
@@ -40,7 +55,7 @@
 //#include <asm/debug-ll.h>
 #include <asm/arch/regs-serial.h>
 
-#include "s3c2410.h"
+#include "clock.h"
 #include "devs.h"
 #include "cpu.h"
 #include "usb-simtec.h"
@@ -112,36 +127,122 @@ static struct map_desc vr1000_iodesc[] __initdata = {
 #define ULCON S3C2410_LCON_CS8 | S3C2410_LCON_PNONE | S3C2410_LCON_STOPB
 #define UFCON S3C2410_UFCON_RXTRIG8 | S3C2410_UFCON_FIFOMODE
 
-/* base baud rate for all our UARTs */
-static unsigned long vr1000_serial_clock = 3692307;
+/* uart clock source(s) */
+
+static struct s3c24xx_uart_clksrc vr1000_serial_clocks[] = {
+	[0] = {
+		.name		= "uclk",
+		.divisor	= 1,
+		.min_baud	= 0,
+		.max_baud	= 0,
+	},
+	[1] = {
+		.name		= "pclk",
+		.divisor	= 1,
+		.min_baud	= 0,
+		.max_baud	= 0.
+	}
+};
 
 static struct s3c2410_uartcfg vr1000_uartcfgs[] = {
 	[0] = {
 		.hwport	     = 0,
 		.flags	     = 0,
-		.clock	     = &vr1000_serial_clock,
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
+		.clocks	     = vr1000_serial_clocks,
+		.clocks_size = ARRAY_SIZE(vr1000_serial_clocks),
 	},
 	[1] = {
 		.hwport	     = 1,
 		.flags	     = 0,
-		.clock	     = &vr1000_serial_clock,
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
+		.clocks	     = vr1000_serial_clocks,
+		.clocks_size = ARRAY_SIZE(vr1000_serial_clocks),
 	},
 	/* port 2 is not actually used */
 	[2] = {
 		.hwport	     = 2,
 		.flags	     = 0,
-		.clock	     = &vr1000_serial_clock,
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
+		.clocks	     = vr1000_serial_clocks,
+		.clocks_size = ARRAY_SIZE(vr1000_serial_clocks),
+
 	}
 };
+
+/* definitions for the vr1000 extra 16550 serial ports */
+
+#define VR1000_BAUDBASE (3692307)
+
+#define VR1000_SERIAL_MAPBASE(x) (VR1000_PA_SERIAL + 0x80 + ((x) << 5))
+
+static struct plat_serial8250_port serial_platform_data[] = {
+	[0] = {
+		.mapbase	= VR1000_SERIAL_MAPBASE(0),
+		.irq		= IRQ_VR1000_SERIAL + 0,
+		.flags		= UPF_BOOT_AUTOCONF | UPF_IOREMAP,
+		.iotype		= UPIO_MEM,
+		.regshift	= 0,
+		.uartclk	= VR1000_BAUDBASE,
+	},
+	[1] = {
+		.mapbase	= VR1000_SERIAL_MAPBASE(1),
+		.irq		= IRQ_VR1000_SERIAL + 1,
+		.flags		= UPF_BOOT_AUTOCONF | UPF_IOREMAP,
+		.iotype		= UPIO_MEM,
+		.regshift	= 0,
+		.uartclk	= VR1000_BAUDBASE,
+	},
+	[2] = {
+		.mapbase	= VR1000_SERIAL_MAPBASE(2),
+		.irq		= IRQ_VR1000_SERIAL + 2,
+		.flags		= UPF_BOOT_AUTOCONF | UPF_IOREMAP,
+		.iotype		= UPIO_MEM,
+		.regshift	= 0,
+		.uartclk	= VR1000_BAUDBASE,
+	},
+	[3] = {
+		.mapbase	= VR1000_SERIAL_MAPBASE(3),
+		.irq		= IRQ_VR1000_SERIAL + 3,
+		.flags		= UPF_BOOT_AUTOCONF | UPF_IOREMAP,
+		.iotype		= UPIO_MEM,
+		.regshift	= 0,
+		.uartclk	= VR1000_BAUDBASE,
+	},
+	{ },
+};
+
+static struct platform_device serial_device = {
+	.name			= "serial8250",
+	.id			= 0,
+	.dev			= {
+		.platform_data	= serial_platform_data,
+	},
+};
+
+/* MTD NOR Flash */
+
+static struct resource vr1000_nor_resource[] = {
+	[0] = {
+		.start	= S3C2410_CS1 + 0x4000000,
+		.end	= S3C2410_CS1 + 0x4000000 + SZ_16M - 1,
+		.flags	= IORESOURCE_MEM,
+	}
+};
+
+static struct platform_device vr1000_nor = {
+	.name		= "bast-nor",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(vr1000_nor_resource),
+	.resource	= vr1000_nor_resource,
+};
+
 
 static struct platform_device *vr1000_devices[] __initdata = {
 	&s3c_device_usb,
@@ -149,30 +250,51 @@ static struct platform_device *vr1000_devices[] __initdata = {
 	&s3c_device_wdt,
 	&s3c_device_i2c,
 	&s3c_device_iis,
+	&serial_device,
+	&vr1000_nor,
 };
 
-static struct s3c2410_board vr1000_board __initdata = {
+static struct clk *vr1000_clocks[] = {
+	&s3c24xx_dclk0,
+	&s3c24xx_dclk1,
+	&s3c24xx_clkout0,
+	&s3c24xx_clkout1,
+	&s3c24xx_uclk,
+};
+
+static struct s3c24xx_board vr1000_board __initdata = {
 	.devices       = vr1000_devices,
-	.devices_count = ARRAY_SIZE(vr1000_devices)
+	.devices_count = ARRAY_SIZE(vr1000_devices),
+	.clocks	       = vr1000_clocks,
+	.clocks_count  = ARRAY_SIZE(vr1000_clocks),
 };
 
 
 void __init vr1000_map_io(void)
 {
+	/* initialise clock sources */
+
+	s3c24xx_dclk0.parent = NULL;
+	s3c24xx_dclk0.rate   = 12*1000*1000;
+
+	s3c24xx_dclk1.parent = NULL;
+	s3c24xx_dclk1.rate   = 3692307;
+
+	s3c24xx_clkout0.parent  = &s3c24xx_dclk0;
+	s3c24xx_clkout1.parent  = &s3c24xx_dclk1;
+
+	s3c24xx_uclk.parent  = &s3c24xx_clkout1;
+
 	s3c24xx_init_io(vr1000_iodesc, ARRAY_SIZE(vr1000_iodesc));
-	s3c2410_init_uarts(vr1000_uartcfgs, ARRAY_SIZE(vr1000_uartcfgs));
-	s3c2410_set_board(&vr1000_board);
+	s3c24xx_init_clocks(0);
+	s3c24xx_init_uarts(vr1000_uartcfgs, ARRAY_SIZE(vr1000_uartcfgs));
+	s3c24xx_set_board(&vr1000_board);
 	usb_simtec_init();
 }
 
 void __init vr1000_init_irq(void)
 {
-	s3c2410_init_irq();
-}
-
-void __init vr1000_init_time(void)
-{
-	s3c2410_init_time();
+	s3c24xx_init_irq();
 }
 
 MACHINE_START(VR1000, "Thorcom-VR1000")
@@ -181,5 +303,5 @@ MACHINE_START(VR1000, "Thorcom-VR1000")
      BOOT_PARAMS(S3C2410_SDRAM_PA + 0x100)
      MAPIO(vr1000_map_io)
      INITIRQ(vr1000_init_irq)
-     INITTIME(vr1000_init_time)
+	.timer		= &s3c24xx_timer,
 MACHINE_END

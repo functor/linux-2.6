@@ -30,6 +30,8 @@ struct smp_ops_t {
 	void  (*setup_cpu)(int nr);
 	void  (*take_timebase)(void);
 	void  (*give_timebase)(void);
+	int   (*cpu_disable)(void);
+	void  (*cpu_die)(unsigned int nr);
 };
 #endif
 
@@ -69,6 +71,8 @@ struct machdep_calls {
 				    long index,
 				    long npages);
 	void		(*tce_flush)(struct iommu_table *tbl);
+	void		(*iommu_dev_setup)(struct pci_dev *dev);
+	void		(*iommu_bus_setup)(struct pci_bus *bus);
 
 	int		(*probe)(int platform);
 	void		(*setup_arch)(void);
@@ -86,6 +90,7 @@ struct machdep_calls {
 	void		(*power_off)(void);
 	void		(*halt)(void);
 	void		(*panic)(char *str);
+	void		(*cpu_die)(void);
 
 	int		(*set_rtc_time)(struct rtc_time *);
 	void		(*get_rtc_time)(struct rtc_time *);
@@ -108,12 +113,22 @@ struct machdep_calls {
 	ssize_t		(*nvram_size)(void);		
 	int		(*nvram_sync)(void);
 
+	/* Exception handlers */
+	void		(*system_reset_exception)(struct pt_regs *regs);
+	int 		(*machine_check_exception)(struct pt_regs *regs);
+
 	/* Motherboard/chipset features. This is a kind of general purpose
 	 * hook used to control some machine specific features (like reset
 	 * lines, chip power control, etc...).
 	 */
 	long	 	(*feature_call)(unsigned int feature, ...);
 
+	/* Check availability of legacy devices like i8042 */
+	int 		(*check_legacy_ioport)(unsigned int baseport);
+
+	/* Get legacy PCI/IDE interrupt mapping */ 
+	int		(*pci_get_legacy_ide_irq)(struct pci_dev *dev, int channel);
+	
 };
 
 extern struct machdep_calls ppc_md;

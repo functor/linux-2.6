@@ -49,10 +49,10 @@ static char Utah_pci_IRQ_map[23] __prepdata =
         0,   /* Slot 1  - unused */
         5,   /* Slot 2  - SCSI - NCR825A  */
         0,   /* Slot 3  - unused */
-        1,   /* Slot 4  - Ethernet - DEC2114x */
+        3,   /* Slot 4  - Ethernet - DEC2114x */
         0,   /* Slot 5  - unused */
-        3,   /* Slot 6  - PCI Card slot #1 */
-        4,   /* Slot 7  - PCI Card slot #2 */
+        2,   /* Slot 6  - PCI Card slot #1 */
+        3,   /* Slot 7  - PCI Card slot #2 */
         5,   /* Slot 8  - PCI Card slot #3 */
         5,   /* Slot 9  - PCI Bridge */
              /* added here in case we ever support PCI bridges */
@@ -627,7 +627,7 @@ prep_read_config(struct pci_bus *bus, unsigned int devfn, int offset,
 		 int len, u32 *val)
 {
 	struct pci_controller *hose = bus->sysdata;
-	volatile unsigned char *cfg_data;
+	volatile void __iomem *cfg_data;
 
 	if (bus->number != 0 || DEVNO(devfn) < MIN_DEVNR
 	    || DEVNO(devfn) > MAX_DEVNR)
@@ -640,13 +640,13 @@ prep_read_config(struct pci_bus *bus, unsigned int devfn, int offset,
 	cfg_data = hose->cfg_data + CFGADDR(devfn) + offset;
 	switch (len) {
 	case 1:
-		*val = in_8((u8 *)cfg_data);
+		*val = in_8(cfg_data);
 		break;
 	case 2:
-		*val = in_le16((u16 *)cfg_data);
+		*val = in_le16(cfg_data);
 		break;
 	default:
-		*val = in_le32((u32 *)cfg_data);
+		*val = in_le32(cfg_data);
 		break;
 	}
 	return PCIBIOS_SUCCESSFUL;
@@ -657,7 +657,7 @@ prep_write_config(struct pci_bus *bus, unsigned int devfn, int offset,
 		  int len, u32 val)
 {
 	struct pci_controller *hose = bus->sysdata;
-	volatile unsigned char *cfg_data;
+	volatile void __iomem *cfg_data;
 
 	if (bus->number != 0 || DEVNO(devfn) < MIN_DEVNR
 	    || DEVNO(devfn) > MAX_DEVNR)
@@ -670,13 +670,13 @@ prep_write_config(struct pci_bus *bus, unsigned int devfn, int offset,
 	cfg_data = hose->cfg_data + CFGADDR(devfn) + offset;
 	switch (len) {
 	case 1:
-		out_8((u8 *)cfg_data, val);
+		out_8(cfg_data, val);
 		break;
 	case 2:
-		out_le16((u16 *)cfg_data, val);
+		out_le16(cfg_data, val);
 		break;
 	default:
-		out_le32((u32 *)cfg_data, val);
+		out_le32(cfg_data, val);
 		break;
 	}
 	return PCIBIOS_SUCCESSFUL;
@@ -1069,7 +1069,7 @@ prep_pib_init(void)
 		 * Perform specific configuration for the Via Tech or
 		 * or Winbond PCI-ISA-Bridge part.
 		 */
-		if ((dev = pci_find_device(PCI_VENDOR_ID_VIA,
+		if ((dev = pci_get_device(PCI_VENDOR_ID_VIA,
 					PCI_DEVICE_ID_VIA_82C586_1, dev))) {
 			/*
 			 * PPCBUG does not set the enable bits
@@ -1080,7 +1080,7 @@ prep_pib_init(void)
 			reg |= 0x03; /* IDE: Chip Enable Bits */
 			pci_write_config_byte(dev, 0x40, reg);
 		}
-		if ((dev = pci_find_device(PCI_VENDOR_ID_VIA,
+		if ((dev = pci_get_device(PCI_VENDOR_ID_VIA,
 						PCI_DEVICE_ID_VIA_82C586_2,
 						dev)) && (dev->devfn = 0x5a)) {
 			/* Force correct USB interrupt */
@@ -1089,7 +1089,7 @@ prep_pib_init(void)
 					PCI_INTERRUPT_LINE,
 					dev->irq);
 		}
-		if ((dev = pci_find_device(PCI_VENDOR_ID_WINBOND,
+		if ((dev = pci_get_device(PCI_VENDOR_ID_WINBOND,
 					PCI_DEVICE_ID_WINBOND_83C553, dev))) {
 			 /* Clear PCI Interrupt Routing Control Register. */
 			short_reg = 0x0000;
@@ -1100,9 +1100,10 @@ prep_pib_init(void)
 				pci_write_config_byte(dev, 0x43, reg);
 			}
 		}
+		pci_dev_put(dev);
 	}
 
-	if ((dev = pci_find_device(PCI_VENDOR_ID_WINBOND,
+	if ((dev = pci_get_device(PCI_VENDOR_ID_WINBOND,
 				   PCI_DEVICE_ID_WINBOND_82C105, dev))){
 		if (OpenPIC_Addr){
 			/*
@@ -1121,6 +1122,7 @@ prep_pib_init(void)
 			pci_write_config_dword(dev, 0x40, 0x10ff08a1);
 		}
 	}
+	pci_dev_put(dev);
 }
 
 static void __init
@@ -1207,7 +1209,7 @@ prep_pcibios_fixup(void)
 	printk("Setting PCI interrupts for a \"%s\"\n", Motherboard_map_name);
 
 	/* Iterate through all the PCI devices, setting the IRQ */
-	while ((dev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
+	for_each_pci_dev(dev) {
 		/*
 		 * If we have residual data, then this is easy: query the
 		 * residual data for the IRQ line allocated to the device.
@@ -1260,12 +1262,13 @@ prep_pcibios_after_init(void)
 	 * instead of 0xc0000. vgacon.c (for example) is completely unaware of
 	 * this little quirk.
 	 */
-	dev = pci_find_device(PCI_VENDOR_ID_WD, PCI_DEVICE_ID_WD_90C, NULL);
+	dev = pci_get_device(PCI_VENDOR_ID_WD, PCI_DEVICE_ID_WD_90C, NULL);
 	if (dev) {
 		dev->resource[1].end -= dev->resource[1].start;
 		dev->resource[1].start = 0;
 		/* tell the hardware */
 		pci_write_config_dword(dev, PCI_BASE_ADDRESS_1, 0x0);
+		pci_dev_put(dev);
 	}
 #endif
 }

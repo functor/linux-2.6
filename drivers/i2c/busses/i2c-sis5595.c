@@ -181,9 +181,11 @@ static int sis5595_setup(struct pci_dev *SIS5595_dev)
 
 	if (force_addr) {
 		dev_info(&SIS5595_dev->dev, "forcing ISA address 0x%04X\n", sis5595_base);
-		if (!pci_write_config_word(SIS5595_dev, ACPI_BASE, sis5595_base))
+		if (pci_write_config_word(SIS5595_dev, ACPI_BASE, sis5595_base)
+		    != PCIBIOS_SUCCESSFUL)
 			goto error;
-		if (!pci_read_config_word(SIS5595_dev, ACPI_BASE, &a))
+		if (pci_read_config_word(SIS5595_dev, ACPI_BASE, &a)
+		    != PCIBIOS_SUCCESSFUL)
 			goto error;
 		if ((a & ~(SIS5595_EXTENT - 1)) != sis5595_base) {
 			/* doesn't work for some chips! */
@@ -192,13 +194,16 @@ static int sis5595_setup(struct pci_dev *SIS5595_dev)
 		}
 	}
 
-	if (!pci_read_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, &val))
+	if (pci_read_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, &val)
+	    != PCIBIOS_SUCCESSFUL)
 		goto error;
 	if ((val & 0x80) == 0) {
 		dev_info(&SIS5595_dev->dev, "enabling ACPI\n");
-		if (!pci_write_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, val | 0x80))
+		if (pci_write_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, val | 0x80)
+		    != PCIBIOS_SUCCESSFUL)
 			goto error;
-		if (!pci_read_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, &val))
+		if (pci_read_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, &val)
+		    != PCIBIOS_SUCCESSFUL)
 			goto error;
 		if ((val & 0x80) == 0) {
 			/* doesn't work for some chips? */
@@ -371,6 +376,8 @@ static struct pci_device_id sis5595_ids[] __devinitdata = {
 	{ 0, }
 };
 
+MODULE_DEVICE_TABLE (pci, sis5595_ids);
+
 static int __devinit sis5595_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	if (sis5595_setup(dev)) {
@@ -401,7 +408,7 @@ static struct pci_driver sis5595_driver = {
 
 static int __init i2c_sis5595_init(void)
 {
-	return pci_module_init(&sis5595_driver);
+	return pci_register_driver(&sis5595_driver);
 }
 
 static void __exit i2c_sis5595_exit(void)

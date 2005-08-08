@@ -105,9 +105,9 @@
 #define FD_HD_3 	0x55555555  /* high-density 3.5" (1760K) drive */
 #define FD_DD_5 	0xaaaaaaaa  /* double-density 5.25" (440K) drive */
 
-static long int fd_def_df0 = FD_DD_3;     /* default for df0 if it doesn't identify */
+static unsigned long int fd_def_df0 = FD_DD_3;     /* default for df0 if it doesn't identify */
 
-MODULE_PARM(fd_def_df0,"l");
+module_param(fd_def_df0, ulong, 0);
 MODULE_LICENSE("GPL");
 
 static struct request_queue *floppy_queue;
@@ -163,7 +163,7 @@ static int writepending;
 static int writefromint;
 static char *raw_buf;
 
-static spinlock_t amiflop_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(amiflop_lock);
 
 #define RAW_BUF_SIZE 30000  /* size of raw disk data */
 

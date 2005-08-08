@@ -677,7 +677,7 @@ static int do_ptrace(int request, struct task_struct *child, long addr, long dat
 			/* make sure single-step breakpoint is gone. */
 			child->ptrace &= ~PT_SINGLESTEP;
 			ptrace_cancel_bpt(child);
-			if (child->state != TASK_ZOMBIE) {
+			if (child->exit_state != EXIT_ZOMBIE) {
 				child->exit_code = SIGKILL;
 				wake_up_process(child);
 			}
@@ -717,6 +717,11 @@ static int do_ptrace(int request, struct task_struct *child, long addr, long dat
 		
 		case PTRACE_SETFPREGS:
 			ret = ptrace_setfpregs(child, (void __user *)data);
+			break;
+
+		case PTRACE_GET_THREAD_AREA:
+			ret = put_user(child->thread_info->tp_value,
+				       (unsigned long __user *) data);
 			break;
 
 		default:

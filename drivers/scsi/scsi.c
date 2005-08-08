@@ -98,6 +98,9 @@ static unsigned long serial_number;
  * After the system is up, you may enable logging via the /proc interface.
  */
 unsigned int scsi_logging_level;
+#if defined(CONFIG_SCSI_LOGGING)
+EXPORT_SYMBOL(scsi_logging_level);
+#endif
 
 const char *const scsi_device_types[MAX_SCSI_DEVICE_CODE] = {
 	"Direct-Access    ",
@@ -115,6 +118,7 @@ const char *const scsi_device_types[MAX_SCSI_DEVICE_CODE] = {
 	"RAID             ",
 	"Enclosure        ",
 };
+EXPORT_SYMBOL(scsi_device_types);
 
 /*
  * Function:    scsi_allocate_request
@@ -147,6 +151,7 @@ struct scsi_request *scsi_allocate_request(struct scsi_device *sdev,
 
 	return sreq;
 }
+EXPORT_SYMBOL(scsi_allocate_request);
 
 void __scsi_release_request(struct scsi_request *sreq)
 {
@@ -187,6 +192,7 @@ void scsi_release_request(struct scsi_request *sreq)
 	__scsi_release_request(sreq);
 	kfree(sreq);
 }
+EXPORT_SYMBOL(scsi_release_request);
 
 struct scsi_host_cmd_pool {
 	kmem_cache_t	*slab;
@@ -244,7 +250,13 @@ static struct scsi_cmnd *__scsi_get_command(struct Scsi_Host *shost,
  */
 struct scsi_cmnd *scsi_get_command(struct scsi_device *dev, int gfp_mask)
 {
-	struct scsi_cmnd *cmd = __scsi_get_command(dev->host, gfp_mask);
+	struct scsi_cmnd *cmd;
+
+	/* Bail if we can't get a reference to the device */
+	if (!get_device(&dev->sdev_gendev))
+		return NULL;
+
+	cmd = __scsi_get_command(dev->host, gfp_mask);
 
 	if (likely(cmd != NULL)) {
 		unsigned long flags;
@@ -258,10 +270,12 @@ struct scsi_cmnd *scsi_get_command(struct scsi_device *dev, int gfp_mask)
 		spin_lock_irqsave(&dev->list_lock, flags);
 		list_add_tail(&cmd->list, &dev->cmd_list);
 		spin_unlock_irqrestore(&dev->list_lock, flags);
-	}
+	} else
+		put_device(&dev->sdev_gendev);
 
 	return cmd;
 }				
+EXPORT_SYMBOL(scsi_get_command);
 
 /*
  * Function:	scsi_put_command()
@@ -276,7 +290,8 @@ struct scsi_cmnd *scsi_get_command(struct scsi_device *dev, int gfp_mask)
  */
 void scsi_put_command(struct scsi_cmnd *cmd)
 {
-	struct Scsi_Host *shost = cmd->device->host;
+	struct scsi_device *sdev = cmd->device;
+	struct Scsi_Host *shost = sdev->host;
 	unsigned long flags;
 	
 	/* serious error if the command hasn't come from a device list */
@@ -294,7 +309,10 @@ void scsi_put_command(struct scsi_cmnd *cmd)
 
 	if (likely(cmd != NULL))
 		kmem_cache_free(shost->cmd_pool->slab, cmd);
+
+	put_device(&sdev->sdev_gendev);
 }
+EXPORT_SYMBOL(scsi_put_command);
 
 /*
  * Function:	scsi_setup_command_freelist()
@@ -518,6 +536,26 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 		/* return 0 (because the command has been processed) */
 		goto out;
 	}
+
+	/* Check to see if the scsi lld put this device into state SDEV_BLOCK. */
+	if (unlikely(cmd->device->sdev_state == SDEV_BLOCK)) {
+		/* 
+		 * in SDEV_BLOCK, the command is just put back on the device
+		 * queue.  The suspend state has already blocked the queue so
+		 * future requests should not occur until the device 
+		 * transitions out of the suspend state.
+		 */
+		scsi_queue_insert(cmd, SCSI_MLQUEUE_DEVICE_BUSY);
+
+		SCSI_LOG_MLQUEUE(3, printk("queuecommand : device blocked \n"));
+
+		/*
+		 * NOTE: rtn is still zero here because we don't need the
+		 * queue to be plugged on return (it's already stopped)
+		 */
+		goto out;
+	}
+
 	/* Assign a unique nonzero serial_number. */
 	/* XXX(hch): this is racy */
 	if (++serial_number == 0)
@@ -576,9 +614,7 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 				printk("queuecommand : command too long.\n"));
 		cmd->result = (DID_ABORT << 16);
 
-		spin_lock_irqsave(host->host_lock, flags);
 		scsi_done(cmd);
-		spin_unlock_irqrestore(host->host_lock, flags);
 		goto out;
 	}
 
@@ -889,7 +925,7 @@ EXPORT_SYMBOL(scsi_finish_command);
  */
 void scsi_adjust_queue_depth(struct scsi_device *sdev, int tagged, int tags)
 {
-	static spinlock_t device_request_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(device_request_lock);
 	unsigned long flags;
 
 	/*
@@ -931,6 +967,7 @@ void scsi_adjust_queue_depth(struct scsi_device *sdev, int tagged, int tags)
 	spin_unlock(sdev->request_queue->queue_lock);
 	spin_unlock_irqrestore(&device_request_lock, flags);
 }
+EXPORT_SYMBOL(scsi_adjust_queue_depth);
 
 /*
  * Function:	scsi_track_queue_full()
@@ -981,6 +1018,7 @@ int scsi_track_queue_full(struct scsi_device *sdev, int depth)
 		scsi_adjust_queue_depth(sdev, MSG_SIMPLE_TAG, depth);
 	return depth;
 }
+EXPORT_SYMBOL(scsi_track_queue_full);
 
 /**
  * scsi_device_get  -  get an addition reference to a scsi_device
@@ -1033,6 +1071,7 @@ struct scsi_device *__scsi_iterate_devices(struct Scsi_Host *shost,
 		/* skip devices that we can't get a reference to */
 		if (!scsi_device_get(next))
 			break;
+		next = NULL;
 		list = list->next;
 	}
 	spin_unlock_irqrestore(shost->host_lock, flags);
@@ -1042,6 +1081,28 @@ struct scsi_device *__scsi_iterate_devices(struct Scsi_Host *shost,
 	return next;
 }
 EXPORT_SYMBOL(__scsi_iterate_devices);
+
+/**
+ * starget_for_each_device  -  helper to walk all devices of a target
+ * @starget:	target whose devices we want to iterate over.
+ *
+ * This traverses over each devices of @shost.  The devices have
+ * a reference that must be released by scsi_host_put when breaking
+ * out of the loop.
+ */
+void starget_for_each_device(struct scsi_target *starget, void * data,
+		     void (*fn)(struct scsi_device *, void *))
+{
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct scsi_device *sdev;
+
+	shost_for_each_device(sdev, shost) {
+		if ((sdev->channel == starget->channel) &&
+		    (sdev->id == starget->id))
+			fn(sdev, data);
+	}
+}
+EXPORT_SYMBOL(starget_for_each_device);
 
 /**
  * scsi_device_lookup - find a device given the host (UNLOCKED)
@@ -1103,8 +1164,8 @@ EXPORT_SYMBOL(scsi_device_lookup);
 
 /**
  * scsi_device_cancel - cancel outstanding IO to this device
- * @sdev:	pointer to struct scsi_device
- * @data:	pointer to cancel value.
+ * @sdev:	Pointer to struct scsi_device
+ * @recovery:	Boolean instructing function to recover device or not.
  *
  **/
 int scsi_device_cancel(struct scsi_device *sdev, int recovery)
@@ -1146,6 +1207,7 @@ int scsi_device_cancel(struct scsi_device *sdev, int recovery)
 
 	return 0;
 }
+EXPORT_SYMBOL(scsi_device_cancel);
 
 #ifdef CONFIG_HOTPLUG_CPU
 static int scsi_cpu_notify(struct notifier_block *self,

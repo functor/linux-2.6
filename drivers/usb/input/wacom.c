@@ -608,7 +608,7 @@ static void wacom_close(struct input_dev *dev)
 	struct wacom *wacom = dev->private;
 
 	if (!--wacom->open)
-		usb_unlink_urb(wacom->irq);
+		usb_kill_urb(wacom->irq);
 }
 
 static int wacom_probe(struct usb_interface *intf, const struct usb_device_id *id)
@@ -692,9 +692,9 @@ static int wacom_probe(struct usb_interface *intf, const struct usb_device_id *i
 	wacom->dev.name = wacom->features->name;
 	wacom->dev.phys = wacom->phys;
 	wacom->dev.id.bustype = BUS_USB;
-	wacom->dev.id.vendor = dev->descriptor.idVendor;
-	wacom->dev.id.product = dev->descriptor.idProduct;
-	wacom->dev.id.version = dev->descriptor.bcdDevice;
+	wacom->dev.id.vendor = le16_to_cpu(dev->descriptor.idVendor);
+	wacom->dev.id.product = le16_to_cpu(dev->descriptor.idProduct);
+	wacom->dev.id.version = le16_to_cpu(dev->descriptor.bcdDevice);
 	wacom->dev.dev = &intf->dev;
 	wacom->usbdev = dev;
 
@@ -729,7 +729,7 @@ static void wacom_disconnect(struct usb_interface *intf)
 
 	usb_set_intfdata(intf, NULL);
 	if (wacom) {
-		usb_unlink_urb(wacom->irq);
+		usb_kill_urb(wacom->irq);
 		input_unregister_device(&wacom->dev);
 		usb_free_urb(wacom->irq);
 		usb_buffer_free(interface_to_usbdev(intf), 10, wacom->data, wacom->data_dma);

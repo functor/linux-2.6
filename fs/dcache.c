@@ -15,6 +15,7 @@
  */
 
 #include <linux/config.h>
+#include <linux/syscalls.h>
 #include <linux/string.h>
 #include <linux/mm.h>
 #include <linux/fs.h>
@@ -36,7 +37,7 @@
 
 int sysctl_vfs_cache_pressure = 100;
 
-spinlock_t dcache_lock __cacheline_aligned_in_smp = SPIN_LOCK_UNLOCKED;
+ __cacheline_aligned_in_smp DEFINE_SPINLOCK(dcache_lock);
 seqlock_t rename_lock __cacheline_aligned_in_smp = SEQLOCK_UNLOCKED;
 
 EXPORT_SYMBOL(dcache_lock);
@@ -155,7 +156,7 @@ repeat:
 		spin_unlock(&dcache_lock);
 		return;
 	}
-			
+
 	/*
 	 * AV: ->d_delete() is _NOT_ allowed to block now.
 	 */
@@ -278,14 +279,18 @@ struct dentry * dget_locked(struct dentry *dentry)
 /**
  * d_find_alias - grab a hashed alias of inode
  * @inode: inode in question
+ * @want_discon:  flag, used by d_splice_alias, to request
+ *          that only a DISCONNECTED alias be returned.
  *
- * If inode has a hashed alias - acquire the reference to alias and
- * return it. Otherwise return NULL. Notice that if inode is a directory
- * there can be only one alias and it can be unhashed only if it has
- * no children.
+ * If inode has a hashed alias, or is a directory and has any alias,
+ * acquire the reference to alias and return it. Otherwise return NULL.
+ * Notice that if inode is a directory there can be only one alias and
+ * it can be unhashed only if it has no children, or if it is the root
+ * of a filesystem.
  *
  * If the inode has a DCACHE_DISCONNECTED alias, then prefer
- * any other hashed alias over that one.
+ * any other hashed alias over that one unless @want_discon is set,
+ * in which case only return a DCACHE_DISCONNECTED alias.
  */
 
 static struct dentry * __d_find_alias(struct inode *inode, int want_discon)
@@ -300,7 +305,7 @@ static struct dentry * __d_find_alias(struct inode *inode, int want_discon)
 		next = tmp->next;
 		prefetch(next);
 		alias = list_entry(tmp, struct dentry, d_alias);
- 		if (!d_unhashed(alias)) {
+ 		if (S_ISDIR(inode->i_mode) || !d_unhashed(alias)) {
 			if (alias->d_flags & DCACHE_DISCONNECTED)
 				discon_alias = alias;
 			else if (!want_discon) {
@@ -386,6 +391,8 @@ static void prune_dcache(int count)
 	for (; count ; count--) {
 		struct dentry *dentry;
 		struct list_head *tmp;
+
+		cond_resched_lock(&dcache_lock);
 
 		tmp = dentry_unused.prev;
 		if (tmp == &dentry_unused)
@@ -543,6 +550,13 @@ positive:
  * list for prune_dcache(). We descend to the next level
  * whenever the d_subdirs list is non-empty and continue
  * searching.
+ *
+ * It returns zero iff there are no unused children,
+ * otherwise  it returns the number of children moved to
+ * the end of the unused list. This may not be the total
+ * number of unused children, because select_parent can
+ * drop the lock and return early due to latency
+ * constraints.
  */
 static int select_parent(struct dentry * parent)
 {
@@ -572,6 +586,15 @@ resume:
 			dentry_stat.nr_unused++;
 			found++;
 		}
+
+		/*
+		 * We can return to the caller if we have found some (this
+		 * ensures forward progress). We'll be coming back to find
+		 * the rest.
+		 */
+		if (found && need_resched())
+			goto out;
+
 		/*
 		 * Descend a level if the d_subdirs list is non-empty.
 		 */
@@ -596,6 +619,7 @@ this_parent->d_parent->d_name.name, this_parent->d_name.name, found);
 #endif
 		goto resume;
 	}
+out:
 	spin_unlock(&dcache_lock);
 	return found;
 }
@@ -713,7 +737,7 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 
 	atomic_set(&dentry->d_count, 1);
 	dentry->d_flags = DCACHE_UNHASHED;
-	dentry->d_lock = SPIN_LOCK_UNLOCKED;
+	spin_lock_init(&dentry->d_lock);
 	dentry->d_inode = NULL;
 	dentry->d_parent = NULL;
 	dentry->d_sb = NULL;
@@ -721,7 +745,6 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	dentry->d_fsdata = NULL;
 	dentry->d_mounted = 0;
 	dentry->d_cookie = NULL;
-	dentry->d_bucket = NULL;
 	INIT_HLIST_NODE(&dentry->d_hash);
 	INIT_LIST_HEAD(&dentry->d_lru);
 	INIT_LIST_HEAD(&dentry->d_subdirs);
@@ -741,6 +764,16 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	spin_unlock(&dcache_lock);
 
 	return dentry;
+}
+
+struct dentry *d_alloc_name(struct dentry *parent, const char *name)
+{
+	struct qstr q;
+
+	q.name = name;
+	q.len = strlen(name);
+	q.hash = full_name_hash(q.name, q.len);
+	return d_alloc(parent, &q);
 }
 
 /**
@@ -768,6 +801,54 @@ void d_instantiate(struct dentry *entry, struct inode * inode)
 	spin_unlock(&dcache_lock);
 	security_d_instantiate(entry, inode);
 }
+
+/**
+ * d_instantiate_unique - instantiate a non-aliased dentry
+ * @entry: dentry to instantiate
+ * @inode: inode to attach to this dentry
+ *
+ * Fill in inode information in the entry. On success, it returns NULL.
+ * If an unhashed alias of "entry" already exists, then we return the
+ * aliased dentry instead.
+ *
+ * Note that in order to avoid conflicts with rename() etc, the caller
+ * had better be holding the parent directory semaphore.
+ */
+struct dentry *d_instantiate_unique(struct dentry *entry, struct inode *inode)
+{
+	struct dentry *alias;
+	int len = entry->d_name.len;
+	const char *name = entry->d_name.name;
+	unsigned int hash = entry->d_name.hash;
+
+	BUG_ON(!list_empty(&entry->d_alias));
+	spin_lock(&dcache_lock);
+	if (!inode)
+		goto do_negative;
+	list_for_each_entry(alias, &inode->i_dentry, d_alias) {
+		struct qstr *qstr = &alias->d_name;
+
+		if (qstr->hash != hash)
+			continue;
+		if (alias->d_parent != entry->d_parent)
+			continue;
+		if (qstr->len != len)
+			continue;
+		if (memcmp(qstr->name, name, len))
+			continue;
+		dget_locked(alias);
+		spin_unlock(&dcache_lock);
+		BUG_ON(!d_unhashed(alias));
+		return alias;
+	}
+	list_add(&entry->d_alias, &inode->i_dentry);
+do_negative:
+	entry->d_inode = inode;
+	spin_unlock(&dcache_lock);
+	security_d_instantiate(entry, inode);
+	return NULL;
+}
+EXPORT_SYMBOL(d_instantiate_unique);
 
 /**
  * d_alloc_root - allocate root dentry
@@ -850,12 +931,6 @@ struct dentry * d_alloc_anon(struct inode *inode)
 		res->d_sb = inode->i_sb;
 		res->d_parent = res;
 		res->d_inode = inode;
-
-		/*
-		 * Set d_bucket to an "impossible" bucket address so
-		 * that d_move() doesn't get a false positive
-		 */
-		res->d_bucket = NULL;
 		res->d_flags |= DCACHE_DISCONNECTED;
 		res->d_flags &= ~DCACHE_UNHASHED;
 		list_add(&res->d_alias, &inode->i_dentry);
@@ -978,21 +1053,12 @@ struct dentry * __d_lookup(struct dentry * parent, struct qstr * name)
 
 		dentry = hlist_entry(node, struct dentry, d_hash);
 
-		smp_rmb();
-
 		if (dentry->d_name.hash != hash)
 			continue;
 		if (dentry->d_parent != parent)
 			continue;
 
 		spin_lock(&dentry->d_lock);
-
-		/*
-		 * If lookup ends up in a different bucket due to concurrent
-		 * rename, fail it
-		 */
-		if (unlikely(dentry->d_bucket != head))
-			goto terminate;
 
 		/*
 		 * Recheck the dentry after taking the lock - d_move may have
@@ -1002,7 +1068,11 @@ struct dentry * __d_lookup(struct dentry * parent, struct qstr * name)
 		if (dentry->d_parent != parent)
 			goto next;
 
-		qstr = rcu_dereference(&dentry->d_name);
+		/*
+		 * It is safe to compare names since d_move() cannot
+		 * change the qstr (protected by d_lock).
+		 */
+		qstr = &dentry->d_name;
 		if (parent->d_op && parent->d_op->d_compare) {
 			if (parent->d_op->d_compare(parent, qstr, name))
 				goto next;
@@ -1017,7 +1087,6 @@ struct dentry * __d_lookup(struct dentry * parent, struct qstr * name)
 			atomic_inc(&dentry->d_count);
 			found = dentry;
 		}
-terminate:
 		spin_unlock(&dentry->d_lock);
 		break;
 next:
@@ -1109,6 +1178,13 @@ void d_delete(struct dentry * dentry)
 	spin_unlock(&dcache_lock);
 }
 
+static void __d_rehash(struct dentry * entry, struct hlist_head *list)
+{
+
+ 	entry->d_flags &= ~DCACHE_UNHASHED;
+ 	hlist_add_head_rcu(&entry->d_hash, list);
+}
+
 /**
  * d_rehash	- add an entry back to the hash
  * @entry: dentry to add to the hash
@@ -1122,10 +1198,8 @@ void d_rehash(struct dentry * entry)
 
 	spin_lock(&dcache_lock);
 	spin_lock(&entry->d_lock);
- 	entry->d_flags &= ~DCACHE_UNHASHED;
+	__d_rehash(entry, list);
 	spin_unlock(&entry->d_lock);
-	entry->d_bucket = list;
- 	hlist_add_head_rcu(&entry->d_hash, list);
 	spin_unlock(&dcache_lock);
 }
 
@@ -1203,6 +1277,8 @@ static void switch_names(struct dentry *dentry, struct dentry *target)
 
 void d_move(struct dentry * dentry, struct dentry * target)
 {
+	struct hlist_head *list;
+
 	if (!dentry->d_inode)
 		printk(KERN_WARNING "VFS: moving negative dcache entry\n");
 
@@ -1222,13 +1298,12 @@ void d_move(struct dentry * dentry, struct dentry * target)
 	/* Move the dentry to the target hash queue, if on different bucket */
 	if (dentry->d_flags & DCACHE_UNHASHED)
 		goto already_unhashed;
-	if (dentry->d_bucket != target->d_bucket) {
-		hlist_del_rcu(&dentry->d_hash);
+
+	hlist_del_rcu(&dentry->d_hash);
+
 already_unhashed:
-		dentry->d_bucket = target->d_bucket;
-		hlist_add_head_rcu(&dentry->d_hash, target->d_bucket);
-		dentry->d_flags &= ~DCACHE_UNHASHED;
-	}
+	list = d_hash(target->d_parent, target->d_name.hash);
+	__d_rehash(dentry, list);
 
 	/* Unhash the target: dput() will then get rid of it */
 	__d_drop(target);
@@ -1238,7 +1313,6 @@ already_unhashed:
 
 	/* Switch the names.. */
 	switch_names(dentry, target);
-	smp_wmb();
 	do_switch(dentry->d_name.len, target->d_name.len);
 	do_switch(dentry->d_name.hash, target->d_name.hash);
 
@@ -1567,14 +1641,21 @@ static void __init dcache_init_early(void)
 {
 	int loop;
 
+	/* If hashes are distributed across NUMA nodes, defer
+	 * hash allocation until vmalloc space is available.
+	 */
+	if (hashdist)
+		return;
+
 	dentry_hashtable =
 		alloc_large_system_hash("Dentry cache",
 					sizeof(struct hlist_head),
 					dhash_entries,
 					13,
-					0,
+					HASH_EARLY,
 					&d_hash_shift,
-					&d_hash_mask);
+					&d_hash_mask,
+					0);
 
 	for (loop = 0; loop < (1 << d_hash_shift); loop++)
 		INIT_HLIST_HEAD(&dentry_hashtable[loop]);
@@ -1582,6 +1663,8 @@ static void __init dcache_init_early(void)
 
 static void __init dcache_init(unsigned long mempages)
 {
+	int loop;
+
 	/* 
 	 * A constructor could be added for stable state like the lists,
 	 * but it is probably not worth it because of the cache nature
@@ -1594,6 +1677,23 @@ static void __init dcache_init(unsigned long mempages)
 					 NULL, NULL);
 	
 	set_shrinker(DEFAULT_SEEKS, shrink_dcache_memory);
+
+	/* Hash may have been set up in dcache_init_early */
+	if (!hashdist)
+		return;
+
+	dentry_hashtable =
+		alloc_large_system_hash("Dentry cache",
+					sizeof(struct hlist_head),
+					dhash_entries,
+					13,
+					0,
+					&d_hash_shift,
+					&d_hash_mask,
+					0);
+
+	for (loop = 0; loop < (1 << d_hash_shift); loop++)
+		INIT_HLIST_HEAD(&dentry_hashtable[loop]);
 }
 
 /* SLAB cache for __getname() consumers */
@@ -1655,8 +1755,6 @@ EXPORT_SYMBOL(dget_locked);
 EXPORT_SYMBOL(dput);
 EXPORT_SYMBOL(find_inode_number);
 EXPORT_SYMBOL(have_submounts);
-EXPORT_SYMBOL(is_subdir);
 EXPORT_SYMBOL(names_cachep);
-EXPORT_SYMBOL(shrink_dcache_anon);
 EXPORT_SYMBOL(shrink_dcache_parent);
 EXPORT_SYMBOL(shrink_dcache_sb);

@@ -96,6 +96,7 @@ static void ibmveth_proc_unregister_driver(void);
 static void ibmveth_proc_register_adapter(struct ibmveth_adapter *adapter);
 static void ibmveth_proc_unregister_adapter(struct ibmveth_adapter *adapter);
 static irqreturn_t ibmveth_interrupt(int irq, void *dev_instance, struct pt_regs *regs);
+static inline void ibmveth_schedule_replenishing(struct ibmveth_adapter*);
 
 #ifdef CONFIG_PROC_FS
 #define IBMVETH_PROC_DIR "ibmveth"
@@ -104,7 +105,7 @@ static struct proc_dir_entry *ibmveth_proc_dir;
 
 static const char ibmveth_driver_name[] = "ibmveth";
 static const char ibmveth_driver_string[] = "IBM i/pSeries Virtual Ethernet Driver";
-#define ibmveth_driver_version "1.02"
+#define ibmveth_driver_version "1.03"
 
 MODULE_AUTHOR("Santiago Leon <santil@us.ibm.com>");
 MODULE_DESCRIPTION("IBM i/pSeries Virtual Ethernet Driver");
@@ -217,7 +218,8 @@ static void ibmveth_replenish_buffer_pool(struct ibmveth_adapter *adapter, struc
 		ibmveth_assert(index != IBM_VETH_INVALID_MAP);
 		ibmveth_assert(pool->skbuff[index] == NULL);
 
-		dma_addr = vio_map_single(adapter->vdev, skb->data, pool->buff_size, DMA_FROM_DEVICE);
+		dma_addr = dma_map_single(&adapter->vdev->dev, skb->data,
+				pool->buff_size, DMA_FROM_DEVICE);
 
 		pool->free_map[free_index] = IBM_VETH_INVALID_MAP;
 		pool->dma_addr[index] = dma_addr;
@@ -237,7 +239,9 @@ static void ibmveth_replenish_buffer_pool(struct ibmveth_adapter *adapter, struc
 			pool->free_map[free_index] = IBM_VETH_INVALID_MAP;
 			pool->skbuff[index] = NULL;
 			pool->consumer_index--;
-			vio_unmap_single(adapter->vdev, pool->dma_addr[index], pool->buff_size, DMA_FROM_DEVICE);
+			dma_unmap_single(&adapter->vdev->dev,
+					pool->dma_addr[index], pool->buff_size,
+					DMA_FROM_DEVICE);
 			dev_kfree_skb_any(skb);
 			adapter->replenish_add_buff_failure++;
 			break;
@@ -259,6 +263,15 @@ static inline int ibmveth_is_replenishing_needed(struct ibmveth_adapter *adapter
 		(atomic_read(&adapter->rx_buff_pool[2].available) < adapter->rx_buff_pool[2].threshold));
 }
 
+/* kick the replenish tasklet if we need replenishing and it isn't already running */
+static inline void ibmveth_schedule_replenishing(struct ibmveth_adapter *adapter)
+{
+	if(ibmveth_is_replenishing_needed(adapter) &&
+	   (atomic_dec_if_positive(&adapter->not_replenishing) == 0)) {
+		schedule_work(&adapter->replenish_task);
+	}
+}
+
 /* replenish tasklet routine */
 static void ibmveth_replenish_task(struct ibmveth_adapter *adapter) 
 {
@@ -271,15 +284,8 @@ static void ibmveth_replenish_task(struct ibmveth_adapter *adapter)
 	adapter->rx_no_buffer = *(u64*)(((char*)adapter->buffer_list_addr) + 4096 - 8);
 
 	atomic_inc(&adapter->not_replenishing);
-}
 
-/* kick the replenish tasklet if we need replenishing and it isn't already running */
-static inline void ibmveth_schedule_replenishing(struct ibmveth_adapter *adapter)
-{
-	if(ibmveth_is_replenishing_needed(adapter) && 
-	   (atomic_dec_if_positive(&adapter->not_replenishing) == 0)) {	
-		schedule_work(&adapter->replenish_task);
-	}
+	ibmveth_schedule_replenishing(adapter);
 }
 
 /* empty and free ana buffer pool - also used to do cleanup in error paths */
@@ -296,7 +302,7 @@ static void ibmveth_free_buffer_pool(struct ibmveth_adapter *adapter, struct ibm
 		for(i = 0; i < pool->size; ++i) {
 			struct sk_buff *skb = pool->skbuff[i];
 			if(skb) {
-				vio_unmap_single(adapter->vdev,
+				dma_unmap_single(&adapter->vdev->dev,
 						 pool->dma_addr[i],
 						 pool->buff_size,
 						 DMA_FROM_DEVICE);
@@ -334,7 +340,7 @@ static void ibmveth_remove_buffer_from_pool(struct ibmveth_adapter *adapter, u64
 
 	adapter->rx_buff_pool[pool].skbuff[index] = NULL;
 
-	vio_unmap_single(adapter->vdev,
+	dma_unmap_single(&adapter->vdev->dev,
 			 adapter->rx_buff_pool[pool].dma_addr[index],
 			 adapter->rx_buff_pool[pool].buff_size,
 			 DMA_FROM_DEVICE);
@@ -405,7 +411,9 @@ static void ibmveth_cleanup(struct ibmveth_adapter *adapter)
 {
 	if(adapter->buffer_list_addr != NULL) {
 		if(!dma_mapping_error(adapter->buffer_list_dma)) {
-			vio_unmap_single(adapter->vdev, adapter->buffer_list_dma, 4096, DMA_BIDIRECTIONAL);
+			dma_unmap_single(&adapter->vdev->dev,
+					adapter->buffer_list_dma, 4096,
+					DMA_BIDIRECTIONAL);
 			adapter->buffer_list_dma = DMA_ERROR_CODE;
 		}
 		free_page((unsigned long)adapter->buffer_list_addr);
@@ -414,7 +422,9 @@ static void ibmveth_cleanup(struct ibmveth_adapter *adapter)
 
 	if(adapter->filter_list_addr != NULL) {
 		if(!dma_mapping_error(adapter->filter_list_dma)) {
-			vio_unmap_single(adapter->vdev, adapter->filter_list_dma, 4096, DMA_BIDIRECTIONAL);
+			dma_unmap_single(&adapter->vdev->dev,
+					adapter->filter_list_dma, 4096,
+					DMA_BIDIRECTIONAL);
 			adapter->filter_list_dma = DMA_ERROR_CODE;
 		}
 		free_page((unsigned long)adapter->filter_list_addr);
@@ -423,7 +433,10 @@ static void ibmveth_cleanup(struct ibmveth_adapter *adapter)
 
 	if(adapter->rx_queue.queue_addr != NULL) {
 		if(!dma_mapping_error(adapter->rx_queue.queue_dma)) {
-			vio_unmap_single(adapter->vdev, adapter->rx_queue.queue_dma, adapter->rx_queue.queue_len, DMA_BIDIRECTIONAL);
+			dma_unmap_single(&adapter->vdev->dev,
+					adapter->rx_queue.queue_dma,
+					adapter->rx_queue.queue_len,
+					DMA_BIDIRECTIONAL);
 			adapter->rx_queue.queue_dma = DMA_ERROR_CODE;
 		}
 		kfree(adapter->rx_queue.queue_addr);
@@ -469,9 +482,13 @@ static int ibmveth_open(struct net_device *netdev)
 		return -ENOMEM;
 	}
 
-	adapter->buffer_list_dma = vio_map_single(adapter->vdev, adapter->buffer_list_addr, 4096, DMA_BIDIRECTIONAL);
-	adapter->filter_list_dma = vio_map_single(adapter->vdev, adapter->filter_list_addr, 4096, DMA_BIDIRECTIONAL);
-	adapter->rx_queue.queue_dma = vio_map_single(adapter->vdev, adapter->rx_queue.queue_addr, adapter->rx_queue.queue_len, DMA_BIDIRECTIONAL);
+	adapter->buffer_list_dma = dma_map_single(&adapter->vdev->dev,
+			adapter->buffer_list_addr, 4096, DMA_BIDIRECTIONAL);
+	adapter->filter_list_dma = dma_map_single(&adapter->vdev->dev,
+			adapter->filter_list_addr, 4096, DMA_BIDIRECTIONAL);
+	adapter->rx_queue.queue_dma = dma_map_single(&adapter->vdev->dev,
+			adapter->rx_queue.queue_addr,
+			adapter->rx_queue.queue_len, DMA_BIDIRECTIONAL);
 
 	if((dma_mapping_error(adapter->buffer_list_dma) ) ||
 	   (dma_mapping_error(adapter->filter_list_dma)) ||
@@ -598,7 +615,7 @@ static void netdev_get_drvinfo (struct net_device *dev, struct ethtool_drvinfo *
 }
 
 static u32 netdev_get_link(struct net_device *dev) {
-	return 0;
+	return 1;
 }
 
 static struct ethtool_ops netdev_ethtool_ops = {
@@ -641,7 +658,7 @@ static int ibmveth_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 	/* map the initial fragment */
 	desc[0].fields.length  = nfrags ? skb->len - skb->data_len : skb->len;
-	desc[0].fields.address = vio_map_single(adapter->vdev, skb->data,
+	desc[0].fields.address = dma_map_single(&adapter->vdev->dev, skb->data,
 					desc[0].fields.length, DMA_TO_DEVICE);
 	desc[0].fields.valid   = 1;
 
@@ -659,7 +676,7 @@ static int ibmveth_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 	while(curfrag--) {
 		skb_frag_t *frag = &skb_shinfo(skb)->frags[curfrag];
 		desc[curfrag+1].fields.address
-			= vio_map_single(adapter->vdev,
+			= dma_map_single(&adapter->vdev->dev,
 				page_address(frag->page) + frag->page_offset,
 				frag->size, DMA_TO_DEVICE);
 		desc[curfrag+1].fields.length = frag->size;
@@ -671,7 +688,7 @@ static int ibmveth_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 			adapter->stats.tx_dropped++;
 			/* Free all the mappings we just created */
 			while(curfrag < nfrags) {
-				vio_unmap_single(adapter->vdev,
+				dma_unmap_single(&adapter->vdev->dev,
 						 desc[curfrag+1].fields.address,
 						 desc[curfrag+1].fields.length,
 						 DMA_TO_DEVICE);
@@ -711,7 +728,9 @@ static int ibmveth_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 	}
 
 	do {
-		vio_unmap_single(adapter->vdev, desc[nfrags].fields.address, desc[nfrags].fields.length, DMA_TO_DEVICE);
+		dma_unmap_single(&adapter->vdev->dev,
+				desc[nfrags].fields.address,
+				desc[nfrags].fields.length, DMA_TO_DEVICE);
 	} while(--nfrags >= 0);
 
 	dev_kfree_skb(skb);

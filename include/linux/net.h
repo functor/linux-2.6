@@ -61,8 +61,8 @@ typedef enum {
 #define SOCK_ASYNC_NOSPACE	0
 #define SOCK_ASYNC_WAITDATA	1
 #define SOCK_NOSPACE		2
-#define SOCK_PASS_CRED		16
-#define SOCK_USER_SOCKET	17
+#define SOCK_PASS_CRED		3
+#define SOCK_USER_SOCKET	4
 
 #ifndef ARCH_HAS_SOCKET_TYPES
 /** sock_type - Socket types
@@ -177,7 +177,6 @@ struct kvec;
 extern int	     sock_wake_async(struct socket *sk, int how, int band);
 extern int	     sock_register(struct net_proto_family *fam);
 extern int	     sock_unregister(int family);
-extern struct socket *sock_alloc(void);
 extern int	     sock_create(int family, int type, int proto,
 				 struct socket **res);
 extern int	     sock_create_kern(int family, int type, int proto,
@@ -189,10 +188,6 @@ extern int   	     sock_sendmsg(struct socket *sock, struct msghdr *msg,
 				  size_t len);
 extern int	     sock_recvmsg(struct socket *sock, struct msghdr *msg,
 				  size_t size, int flags);
-extern int	     sock_readv_writev(int type, struct inode *inode,
-				       struct file *file,
-				       const struct iovec *iov, long count,
-				       size_t size);
 extern int 	     sock_map_fd(struct socket *sock);
 extern struct socket *sockfd_lookup(int fd, int *err);
 #define		     sockfd_put(sock) fput(sock->file)

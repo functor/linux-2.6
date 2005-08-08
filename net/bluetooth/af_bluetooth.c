@@ -51,7 +51,7 @@
 #define BT_DBG(D...)
 #endif
 
-#define VERSION "2.6"
+#define VERSION "2.7"
 
 struct proc_dir_entry *proc_bt;
 EXPORT_SYMBOL(proc_bt);
@@ -64,7 +64,7 @@ static kmem_cache_t *bt_sock_cache;
 
 int bt_sock_register(int proto, struct net_proto_family *ops)
 {
-	if (proto >= BT_MAX_PROTO)
+	if (proto < 0 || proto >= BT_MAX_PROTO)
 		return -EINVAL;
 
 	if (bt_proto[proto])
@@ -77,7 +77,7 @@ EXPORT_SYMBOL(bt_sock_register);
 
 int bt_sock_unregister(int proto)
 {
-	if (proto >= BT_MAX_PROTO)
+	if (proto < 0 || proto >= BT_MAX_PROTO)
 		return -EINVAL;
 
 	if (!bt_proto[proto])
@@ -92,7 +92,7 @@ static int bt_sock_create(struct socket *sock, int proto)
 {
 	int err = 0;
 
-	if (proto >= BT_MAX_PROTO)
+	if (proto < 0 || proto >= BT_MAX_PROTO)
 		return -EINVAL;
 
 #if defined(CONFIG_KMOD)
@@ -165,7 +165,7 @@ void bt_accept_enqueue(struct sock *parent, struct sock *sk)
 }
 EXPORT_SYMBOL(bt_accept_enqueue);
 
-static void bt_accept_unlink(struct sock *sk)
+void bt_accept_unlink(struct sock *sk)
 {
 	BT_DBG("sk %p state %d", sk, sk->sk_state);
 
@@ -174,6 +174,7 @@ static void bt_accept_unlink(struct sock *sk)
 	bt_sk(sk)->parent = NULL;
 	sock_put(sk);
 }
+EXPORT_SYMBOL(bt_accept_unlink);
 
 struct sock *bt_accept_dequeue(struct sock *parent, struct socket *newsock)
 {
@@ -186,6 +187,8 @@ struct sock *bt_accept_dequeue(struct sock *parent, struct socket *newsock)
 		sk = (struct sock *) list_entry(p, struct bt_sock, accept_q);
 
 		lock_sock(sk);
+
+		/* FIXME: Is this check still needed */
 		if (sk->sk_state == BT_CLOSED) {
 			release_sock(sk);
 			bt_accept_unlink(sk);
@@ -199,6 +202,7 @@ struct sock *bt_accept_dequeue(struct sock *parent, struct socket *newsock)
 			release_sock(sk);
 			return sk;
 		}
+
 		release_sock(sk);
 	}
 	return NULL;

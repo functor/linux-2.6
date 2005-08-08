@@ -32,6 +32,14 @@ config IP_NF_CT_ACCT
 
 	  If unsure, say `N'.
 
+config IP_NF_CONNTRACK_MARK
+	bool  'Connection mark tracking support'
+	help
+	  This option enables support for connection marks, used by the
+	  `CONNMARK' target and `connmark' match. Similar to the mark value
+	  of packets, but this mark value is kept in the conntrack session
+	  instead of the individual packets.
+	
 config IP_NF_CT_PROTO_SCTP
 	tristate  'SCTP protocol connection tracking support (EXPERIMENTAL)'
 	depends on IP_NF_CONNTRACK && EXPERIMENTAL
@@ -40,7 +48,7 @@ config IP_NF_CT_PROTO_SCTP
 	  be able to do state tracking on SCTP connections.
 
 	  If you want to compile it as a module, say M here and read
-	  Documentation/modules.txt.  If unsure, say `N'.
+	  <file:Documentation/modules.txt>.  If unsure, say `N'.
 
 config IP_NF_FTP
 	tristate "FTP protocol support"
@@ -305,7 +313,7 @@ config IP_NF_MATCH_ADDRTYPE
 	  eg. UNICAST, LOCAL, BROADCAST, ...
 	
 	  If you want to compile it as a module, say M here and read
-	  Documentation/modules.txt.  If unsure, say `N'.
+	  <file:Documentation/modules.txt>.  If unsure, say `N'.
 
 config IP_NF_MATCH_REALM
 	tristate  'realm match support'
@@ -313,13 +321,13 @@ config IP_NF_MATCH_REALM
 	select NET_CLS_ROUTE
 	help
 	  This option adds a `realm' match, which allows you to use the realm
-	  key from the routing subsytem inside iptables.
+	  key from the routing subsystem inside iptables.
 	
 	  This match pretty much resembles the CONFIG_NET_CLS_ROUTE4 option 
 	  in tc world.
 	
 	  If you want to compile it as a module, say M here and read
-	  Documentation/modules.txt.  If unsure, say `N'.
+	  <file:Documentation/modules.txt>.  If unsure, say `N'.
 
 config IP_NF_MATCH_SCTP
 	tristate  'SCTP protocol match support'
@@ -330,7 +338,7 @@ config IP_NF_MATCH_SCTP
 	  and SCTP chunk types.
 
 	  If you want to compile it as a module, say M here and read
-	  Documentation/modules.txt.  If unsure, say `N'.
+	  <file:Documentation/modules.txt>.  If unsure, say `N'.
 
 config IP_NF_MATCH_COMMENT
 	tristate  'comment match support'
@@ -340,7 +348,32 @@ config IP_NF_MATCH_COMMENT
 	  comments in your iptables ruleset.
 
 	  If you want to compile it as a module, say M here and read
-	  Documentation/modules.txt.  If unsure, say `N'.
+	  <file:Documentation/modules.txt>.  If unsure, say `N'.
+
+config IP_NF_MATCH_CONNMARK
+	tristate  'Connection mark match support'
+	depends on IP_NF_CONNTRACK_MARK && IP_NF_IPTABLES
+	help
+	  This option adds a `connmark' match, which allows you to match the
+	  connection mark value previously set for the session by `CONNMARK'. 
+	
+	  If you want to compile it as a module, say M here and read
+	  <file:Documentation/modules.txt>.  The module will be called
+	  ipt_connmark.o.  If unsure, say `N'.
+
+config IP_NF_MATCH_HASHLIMIT
+	tristate  'hashlimit match support'
+	depends on IP_NF_IPTABLES
+	help
+	  This option adds a new iptables `hashlimit' match.  
+
+	  As opposed to `limit', this match dynamically crates a hash table
+	  of limit buckets, based on your selection of source/destination
+	  ip addresses and/or ports.
+
+	  It enables you to express policies like `10kpps for any given
+	  destination IP' or `500pps from any given source IP'  with a single
+	  IPtables rule.
 
 # `filter', generic and specific targets
 config IP_NF_FILTER
@@ -425,7 +458,7 @@ config IP_NF_NAT
 
 config IP_NF_NAT_NEEDED
 	bool
-	depends on IP_NF_CONNTRACK!=y && IP_NF_IPTABLES!=y && (IP_NF_COMPAT_IPCHAINS!=y && IP_NF_COMPAT_IPFWADM || IP_NF_COMPAT_IPCHAINS) || IP_NF_IPTABLES && IP_NF_CONNTRACK && IP_NF_NAT
+	depends on IP_NF_NAT != n
 	default y
 
 config IP_NF_TARGET_MASQUERADE
@@ -470,20 +503,6 @@ config IP_NF_TARGET_SAME
 	  target, but attempts to give clients the same IP for all connections.
 
 	  To compile it as a module, choose M here.  If unsure, say N.
-
-config IP_NF_NAT_LOCAL
-	bool "NAT of local connections (READ HELP)"
-	depends on IP_NF_NAT
-	help
-	  This option enables support for NAT of locally originated connections. 
-	  Enable this if you need to use destination NAT on connections
-	  originating from local processes on the nat box itself.
-
-	  Please note that you will need a recent version (>= 1.2.6a)
-	  of the iptables userspace program in order to use this feature.
-	  See <http://www.iptables.org/> for download instructions.
-
-	  If unsure, say 'N'.
 
 config IP_NF_NAT_SNMP_BASIC
 	tristate "Basic SNMP-ALG support (EXPERIMENTAL)"
@@ -597,6 +616,28 @@ config IP_NF_TARGET_CLASSIFY
 
 	  To compile it as a module, choose M here.  If unsure, say N.
 
+config IP_NF_TARGET_CONNMARK
+	tristate  'CONNMARK target support'
+	depends on IP_NF_CONNTRACK_MARK && IP_NF_MANGLE
+	help
+	  This option adds a `CONNMARK' target, which allows one to manipulate
+	  the connection mark value.  Similar to the MARK target, but
+	  affects the connection mark value rather than the packet mark value.
+	
+	  If you want to compile it as a module, say M here and read
+	  <file:Documentation/modules.txt>.  The module will be called
+	  ipt_CONNMARK.o.  If unsure, say `N'.
+
+config IP_NF_TARGET_CLUSTERIP
+	tristate "CLUSTERIP target support (EXPERIMENTAL)"
+	depends on IP_NF_CONNTRACK_MARK && IP_NF_IPTABLES && EXPERIMENTAL
+	help
+	  The CLUSTERIP target allows you to build load-balancing clusters of
+	  network servers without having a dedicated load-balancing
+	  router/server/switch.
+	
+	  To compile it as a module, choose M here.  If unsure, say N.
+
 # raw + specific targets
 config IP_NF_RAW
 	tristate  'raw table support (required for NOTRACK/TRACE)'
@@ -608,7 +649,6 @@ config IP_NF_RAW
 	
 	  If you want to compile it as a module, say M here and read
 	  <file:Documentation/modules.txt>.  If unsure, say `N'.
-	  help
 
 config IP_NF_TARGET_NOTRACK
 	tristate  'NOTRACK target support'
@@ -651,31 +691,6 @@ config IP_NF_ARP_MANGLE
 	help
 	  Allows altering the ARP packet payload: source and destination
 	  hardware and network addresses.
-
-# Backwards compatibility modules: only if you don't build in the others.
-config IP_NF_COMPAT_IPCHAINS
-	tristate "ipchains (2.2-style) support"
-	depends on IP_NF_CONNTRACK!=y && IP_NF_IPTABLES!=y
-	help
-	  This option places ipchains (with masquerading and redirection
-	  support) back into the kernel, using the new netfilter
-	  infrastructure.  It is not recommended for new installations (see
-	  `Packet filtering').  With this enabled, you should be able to use
-	  the ipchains tool exactly as in 2.2 kernels.
-
-	  To compile it as a module, choose M here.  If unsure, say N.
-
-config IP_NF_COMPAT_IPFWADM
-	tristate "ipfwadm (2.0-style) support"
-	depends on IP_NF_CONNTRACK!=y && IP_NF_IPTABLES!=y && IP_NF_COMPAT_IPCHAINS!=y
-	help
-	  This option places ipfwadm (with masquerading and redirection
-	  support) back into the kernel, using the new netfilter
-	  infrastructure.  It is not recommended for new installations (see
-	  `Packet filtering').  With this enabled, you should be able to use
-	  the ipfwadm tool exactly as in 2.0 kernels.
-
-	  To compile it as a module, choose M here.  If unsure, say N.
 
 endmenu
 

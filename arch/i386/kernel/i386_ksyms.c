@@ -61,7 +61,6 @@ extern unsigned long get_cmos_time(void);
 
 /* platform dependent support */
 EXPORT_SYMBOL(boot_cpu_data);
-EXPORT_SYMBOL(MCA_bus);
 #ifdef CONFIG_DISCONTIGMEM
 EXPORT_SYMBOL(node_data);
 EXPORT_SYMBOL(physnode_map);
@@ -71,15 +70,10 @@ EXPORT_SYMBOL(xquad_portio);
 #endif
 EXPORT_SYMBOL(dump_thread);
 EXPORT_SYMBOL(dump_fpu);
-EXPORT_SYMBOL(dump_extended_fpu);
 EXPORT_SYMBOL_GPL(kernel_fpu_begin);
 EXPORT_SYMBOL(__ioremap);
 EXPORT_SYMBOL(ioremap_nocache);
 EXPORT_SYMBOL(iounmap);
-EXPORT_SYMBOL(enable_irq);
-EXPORT_SYMBOL(disable_irq);
-EXPORT_SYMBOL(disable_irq_nosync);
-EXPORT_SYMBOL(probe_irq_mask);
 EXPORT_SYMBOL(kernel_thread);
 EXPORT_SYMBOL(pm_idle);
 EXPORT_SYMBOL(pm_power_off);
@@ -146,7 +140,6 @@ EXPORT_SYMBOL(__write_lock_failed);
 EXPORT_SYMBOL(__read_lock_failed);
 
 /* Global SMP stuff */
-EXPORT_SYMBOL(synchronize_irq);
 EXPORT_SYMBOL(smp_call_function);
 
 /* TLB flushing */
@@ -179,7 +172,7 @@ EXPORT_SYMBOL(memcmp);
 
 EXPORT_SYMBOL(register_die_notifier);
 #ifdef CONFIG_HAVE_DEC_LOCK
-EXPORT_SYMBOL(atomic_dec_and_lock);
+EXPORT_SYMBOL(_atomic_dec_and_lock);
 #endif
 
 EXPORT_SYMBOL(__PAGE_KERNEL);

@@ -24,7 +24,6 @@
 #include <linux/stddef.h>
 #include <linux/personality.h>
 #include <linux/compiler.h>
-#include <linux/suspend.h>
 #include <asm/ucontext.h>
 #include <asm/uaccess.h>
 #include <asm/i387.h>
@@ -125,6 +124,12 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc, unsigned 
 			if (verify_area(VERIFY_READ, buf, sizeof(*buf)))
 				goto badframe;
 			err |= restore_i387(buf);
+		} else {
+			struct task_struct *me = current;
+			if (used_math()) {
+				clear_fpu(me);
+				clear_used_math();
+			}
 		}
 	}
 
@@ -139,7 +144,7 @@ asmlinkage long sys_rt_sigreturn(struct pt_regs *regs)
 {
 	struct rt_sigframe __user *frame;
 	sigset_t set;
-	long eax;
+	unsigned long eax;
 
 	frame = (struct rt_sigframe __user *)(regs->rsp - 8);
 	if (verify_area(VERIFY_READ, frame, sizeof(*frame))) { 
@@ -246,7 +251,7 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	int err = 0;
 	struct task_struct *me = current;
 
-	if (me->used_math) {
+	if (used_math()) {
 		fp = get_stack(ka, regs, sizeof(struct _fpstate)); 
 		frame = (void __user *)round_down((unsigned long)fp - sizeof(struct rt_sigframe), 16) - 8;
 
@@ -325,7 +330,7 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 
 	set_fs(USER_DS);
 	if (regs->eflags & TF_MASK) {
-		if (current->ptrace & PT_PTRACED) {
+		if ((current->ptrace & (PT_PTRACED | PT_DTRACE)) == (PT_PTRACED | PT_DTRACE)) {
 			ptrace_notify(SIGTRAP);
 		} else {
 			regs->eflags &= ~TF_MASK;
@@ -357,7 +362,7 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 #endif
 
 	/* Are we from a system call? */
-	if (regs->orig_rax >= 0) {
+	if ((long)regs->orig_rax >= 0) {
 		/* If so, check system call restarting.. */
 		switch (regs->rax) {
 		        case -ERESTART_RESTARTBLOCK:
@@ -417,10 +422,8 @@ int do_signal(struct pt_regs *regs, sigset_t *oldset)
 		return 1;
 	} 	
 
-	if (current->flags & PF_FREEZE) {
-		refrigerator(0);
+	if (try_to_freeze(0))
 		goto no_signal;
-	}
 
 	if (!oldset)
 		oldset = &current->blocked;
@@ -442,7 +445,7 @@ int do_signal(struct pt_regs *regs, sigset_t *oldset)
 
  no_signal:
 	/* Did we come from a system call? */
-	if (regs->orig_rax >= 0) {
+	if ((long)regs->orig_rax >= 0) {
 		/* Restart the system call - no handlers present */
 		long res = regs->rax;
 		if (res == -ERESTARTNOHAND ||

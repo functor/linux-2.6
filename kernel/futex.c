@@ -6,7 +6,7 @@
  *  (C) Copyright 2003 Red Hat Inc, All Rights Reserved
  *
  *  Removed page pinning, fix privately mapped COW pages and other cleanups
- *  (C) Copyright 2003 Jamie Lokier
+ *  (C) Copyright 2003, 2004 Jamie Lokier
  *
  *  Thanks to Ben LaHaise for yelling "hashed waitqueues" loudly
  *  enough at me, Linus for the original (flawed) idea, Matthew
@@ -258,6 +258,18 @@ static void drop_key_refs(union futex_key *key)
 	}
 }
 
+static inline int get_futex_value_locked(int *dest, int __user *from)
+{
+	int ret;
+
+	inc_preempt_count();
+	ret = __copy_from_user_inatomic(dest, from, sizeof(int));
+	dec_preempt_count();
+	preempt_check_resched();
+
+	return ret ? -EFAULT : 0;
+}
+
 /*
  * The hash bucket lock must be held when this is called.
  * Afterwards, the futex_q must not be accessed.
@@ -329,6 +341,7 @@ static int futex_requeue(unsigned long uaddr1, unsigned long uaddr2,
 	int ret, drop_count = 0;
 	unsigned int nqueued;
 
+ retry:
 	down_read(&current->mm->mmap_sem);
 
 	ret = get_futex_key(uaddr1, &key1);
@@ -355,9 +368,20 @@ static int futex_requeue(unsigned long uaddr1, unsigned long uaddr2,
 		   before *uaddr1.  */
 		smp_mb();
 
-		if (get_user(curval, (int __user *)uaddr1) != 0) {
-			ret = -EFAULT;
-			goto out;
+		ret = get_futex_value_locked(&curval, (int __user *)uaddr1);
+
+		if (unlikely(ret)) {
+			/* If we would have faulted, release mmap_sem, fault
+			 * it in and start all over again.
+			 */
+			up_read(&current->mm->mmap_sem);
+
+			ret = get_user(curval, (int __user *)uaddr1);
+
+			if (!ret)
+				goto retry;
+
+			return ret;
 		}
 		if (curval != *valp) {
 			ret = -EAGAIN;
@@ -480,6 +504,7 @@ static int futex_wait(unsigned long uaddr, int val, unsigned long time)
 	int ret, curval;
 	struct futex_q q;
 
+ retry:
 	down_read(&current->mm->mmap_sem);
 
 	ret = get_futex_key(uaddr, &q.key);
@@ -489,13 +514,42 @@ static int futex_wait(unsigned long uaddr, int val, unsigned long time)
 	queue_me(&q, -1, NULL);
 
 	/*
-	 * Access the page after the futex is queued.
+	 * Access the page AFTER the futex is queued.
+	 * Order is important:
+	 *
+	 *   Userspace waiter: val = var; if (cond(val)) futex_wait(&var, val);
+	 *   Userspace waker:  if (cond(var)) { var = new; futex_wake(&var); }
+	 *
+	 * The basic logical guarantee of a futex is that it blocks ONLY
+	 * if cond(var) is known to be true at the time of blocking, for
+	 * any cond.  If we queued after testing *uaddr, that would open
+	 * a race condition where we could block indefinitely with
+	 * cond(var) false, which would violate the guarantee.
+	 *
+	 * A consequence is that futex_wait() can return zero and absorb
+	 * a wakeup when *uaddr != val on entry to the syscall.  This is
+	 * rare, but normal.
+	 *
 	 * We hold the mmap semaphore, so the mapping cannot have changed
-	 * since we looked it up.
+	 * since we looked it up in get_futex_key.
 	 */
-	if (get_user(curval, (int __user *)uaddr) != 0) {
-		ret = -EFAULT;
-		goto out_unqueue;
+
+	ret = get_futex_value_locked(&curval, (int __user *)uaddr);
+
+	if (unlikely(ret)) {
+		/* If we would have faulted, release mmap_sem, fault it in and
+		 * start all over again.
+		 */
+		up_read(&current->mm->mmap_sem);
+
+		if (!unqueue_me(&q)) /* There's a chance we got woken already */
+			return 0;
+
+		ret = get_user(curval, (int __user *)uaddr);
+
+		if (!ret)
+			goto retry;
+		return ret;
 	}
 	if (curval != val) {
 		ret = -EWOULDBLOCK;
@@ -538,8 +592,8 @@ static int futex_wait(unsigned long uaddr, int val, unsigned long time)
 		return 0;
 	if (time == 0)
 		return -ETIMEDOUT;
-	/* A spurious wakeup should never happen. */
-	WARN_ON(!signal_pending(current));
+	/* We expect signal_pending(current), but another thread may
+	 * have handled it for us already. */
 	return -EINTR;
 
  out_unqueue:
@@ -732,7 +786,7 @@ static int __init init(void)
 
 	for (i = 0; i < ARRAY_SIZE(futex_queues); i++) {
 		INIT_LIST_HEAD(&futex_queues[i].chain);
-		futex_queues[i].lock = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&futex_queues[i].lock);
 	}
 	return 0;
 }

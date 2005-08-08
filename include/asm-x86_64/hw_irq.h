@@ -87,8 +87,6 @@ extern u8 irq_vector[NR_IRQ_VECTORS];
  * Interrupt entry/exit code at both C and assembly level
  */
 
-extern void mask_irq(unsigned int irq);
-extern void unmask_irq(unsigned int irq);
 extern void disable_8259A_irq(unsigned int irq);
 extern void enable_8259A_irq(unsigned int irq);
 extern int i8259A_irq_pending(unsigned int irq);
@@ -130,7 +128,7 @@ __asm__( \
 	"push $" #nr "-256 ; " \
 	"jmp common_interrupt");
 
-#if defined(CONFIG_X86_IO_APIC) && defined(CONFIG_SMP)
+#if defined(CONFIG_X86_IO_APIC)
 static inline void hw_resend_irq(struct hw_interrupt_type *h, unsigned int i) {
 	if (IO_APIC_IRQ(i))
 		send_IPI_self(IO_APIC_VECTOR(i));

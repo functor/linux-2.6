@@ -526,8 +526,12 @@ static int __devinit snd_ice1712_delta_init(ice1712_t *ice)
 		break;
 	case ICE1712_SUBDEVICE_DELTA1010:
 	case ICE1712_SUBDEVICE_DELTA1010LT:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		ice->num_total_dacs = 8;
 		ice->num_total_adcs = 8;
+		break;
+	case ICE1712_SUBDEVICE_DELTADIO2496:
+		ice->num_total_dacs = 4;	/* two AK4324 codecs */
 		break;
 	case ICE1712_SUBDEVICE_VX442:
 		ice->num_total_dacs = 4;
@@ -551,6 +555,7 @@ static int __devinit snd_ice1712_delta_init(ice1712_t *ice)
 			return err;
 		break;
 	case ICE1712_SUBDEVICE_DELTA1010:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		ice->gpio.set_pro_rate = delta_1010_set_rate_val;
 		break;
 	case ICE1712_SUBDEVICE_DELTADIO2496:
@@ -572,6 +577,7 @@ static int __devinit snd_ice1712_delta_init(ice1712_t *ice)
 	switch (ice->eeprom.subvendor) {
 	case ICE1712_SUBDEVICE_DELTA1010:
 	case ICE1712_SUBDEVICE_DELTADIO2496:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		return 0;
 	}
 
@@ -630,6 +636,7 @@ static int __devinit snd_ice1712_delta_add_controls(ice1712_t *ice)
 	/* 1010 and dio specific controls */
 	switch (ice->eeprom.subvendor) {
 	case ICE1712_SUBDEVICE_DELTA1010:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		err = snd_ctl_add(ice->card, snd_ctl_new1(&snd_ice1712_delta1010_wordclock_select, ice));
 		if (err < 0)
 			return err;
@@ -654,6 +661,7 @@ static int __devinit snd_ice1712_delta_add_controls(ice1712_t *ice)
 	case ICE1712_SUBDEVICE_DELTA1010:
 	case ICE1712_SUBDEVICE_DELTADIO2496:
 	case ICE1712_SUBDEVICE_DELTA66:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		err = snd_ice1712_spdif_build_controls(ice);
 		if (err < 0)
 			return err;
@@ -665,6 +673,7 @@ static int __devinit snd_ice1712_delta_add_controls(ice1712_t *ice)
 	case ICE1712_SUBDEVICE_DELTA1010:
 	case ICE1712_SUBDEVICE_DELTADIO2496:
 	case ICE1712_SUBDEVICE_DELTA66:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		err = snd_ctl_add(ice->card, snd_ctl_new1(&snd_ice1712_delta_spdif_in_status, ice));
 		if (err < 0)
 			return err;
@@ -750,6 +759,13 @@ struct snd_ice1712_card_info snd_ice1712_delta_cards[] __devinitdata = {
 		.chip_init = snd_ice1712_delta_init,
 		.build_controls = snd_ice1712_delta_add_controls,
 		.no_mpu401 = 1,
+	},
+	{
+		.subvendor = ICE1712_SUBDEVICE_MEDIASTATION,
+		.name = "Lionstracs Mediastation",
+		.model = "mediastation",
+		.chip_init = snd_ice1712_delta_init,
+		.build_controls = snd_ice1712_delta_add_controls,
 	},
 	{ } /* terminator */
 };

@@ -89,7 +89,7 @@ static struct list_head ipr_ioa_head = LIST_HEAD_INIT(ipr_ioa_head);
 static unsigned int ipr_log_level = IPR_DEFAULT_LOG_LEVEL;
 static unsigned int ipr_max_speed = 1;
 static int ipr_testmode = 0;
-static spinlock_t ipr_driver_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(ipr_driver_lock);
 
 /* This table describes the differences between DMA controller chips */
 static const struct ipr_chip_cfg_t ipr_chip_cfg[] = {
@@ -312,6 +312,8 @@ struct ipr_error_table_t ipr_error_table[] = {
 	"9041: Array protection temporarily suspended"},
 	{0x066B0200, 0, 1,
 	"9030: Array no longer protected due to missing or failed disk unit"},
+	{0x066B8200, 0, 1,
+	"9042: Corrupt array parity detected on specified device"},
 	{0x07270000, 0, 0,
 	"Failure due to other device"},
 	{0x07278000, 0, 1,
@@ -542,7 +544,7 @@ static int ipr_save_pcix_cmd_reg(struct ipr_ioa_cfg *ioa_cfg)
 		return -EIO;
 	}
 
-	if (pci_read_config_word(ioa_cfg->pdev, pcix_cmd_reg,
+	if (pci_read_config_word(ioa_cfg->pdev, pcix_cmd_reg + PCI_X_CMD,
 				 &ioa_cfg->saved_pcix_cmd_reg) != PCIBIOS_SUCCESSFUL) {
 		dev_err(&ioa_cfg->pdev->dev, "Failed to save PCI-X command register\n");
 		return -EIO;
@@ -564,7 +566,7 @@ static int ipr_set_pcix_cmd_reg(struct ipr_ioa_cfg *ioa_cfg)
 	int pcix_cmd_reg = pci_find_capability(ioa_cfg->pdev, PCI_CAP_ID_PCIX);
 
 	if (pcix_cmd_reg) {
-		if (pci_write_config_word(ioa_cfg->pdev, pcix_cmd_reg,
+		if (pci_write_config_word(ioa_cfg->pdev, pcix_cmd_reg + PCI_X_CMD,
 					  ioa_cfg->saved_pcix_cmd_reg) != PCIBIOS_SUCCESSFUL) {
 			dev_err(&ioa_cfg->pdev->dev, "Failed to setup PCI-X command register\n");
 			return -EIO;
@@ -2608,23 +2610,19 @@ static int ipr_free_dump(struct ipr_ioa_cfg *ioa_cfg) { return 0; };
 #endif
 
 /**
- * ipr_store_queue_depth - Change the device's queue depth
- * @dev:	device struct
- * @buf:	buffer
+ * ipr_change_queue_depth - Change the device's queue depth
+ * @sdev:	scsi device struct
+ * @qdepth:	depth to set
  *
  * Return value:
- * 	number of bytes printed to buffer
+ * 	actual depth set
  **/
-static ssize_t ipr_store_queue_depth(struct device *dev,
-				    const char *buf, size_t count)
+static int ipr_change_queue_depth(struct scsi_device *sdev, int qdepth)
 {
-	struct scsi_device *sdev = to_scsi_device(dev);
 	struct ipr_ioa_cfg *ioa_cfg = (struct ipr_ioa_cfg *)sdev->host->hostdata;
 	struct ipr_resource_entry *res;
-	int qdepth = simple_strtoul(buf, NULL, 10);
 	int tagged = 0;
 	unsigned long lock_flags = 0;
-	ssize_t len = -ENXIO;
 
 	spin_lock_irqsave(ioa_cfg->host->host_lock, lock_flags);
 	res = (struct ipr_resource_entry *)sdev->hostdata;
@@ -2633,22 +2631,12 @@ static ssize_t ipr_store_queue_depth(struct device *dev,
 
 		if (ipr_is_gscsi(res) && res->tcq_active)
 			tagged = MSG_ORDERED_TAG;
-
-		len = strlen(buf);
 	}
 
 	spin_unlock_irqrestore(ioa_cfg->host->host_lock, lock_flags);
 	scsi_adjust_queue_depth(sdev, tagged, qdepth);
-	return len;
+	return qdepth;
 }
-
-static struct device_attribute ipr_queue_depth_attr = {
-	.attr = {
-		.name = 	"queue_depth",
-		.mode =		S_IRUSR | S_IWUSR,
-	},
-	.store = ipr_store_queue_depth
-};
 
 /**
  * ipr_show_tcq_enable - Show if the device is enabled for tcqing
@@ -2758,7 +2746,6 @@ static struct device_attribute ipr_adapter_handle_attr = {
 };
 
 static struct device_attribute *ipr_dev_attrs[] = {
-	&ipr_queue_depth_attr,
 	&ipr_tcqing_attr,
 	&ipr_adapter_handle_attr,
 	NULL,
@@ -3904,7 +3891,8 @@ static int ipr_queuecommand(struct scsi_cmnd *scsi_cmd,
 		ioarcb->cmd_pkt.flags_lo |= ipr_get_task_attributes(scsi_cmd);
 	}
 
-	if (!ipr_is_gscsi(res) && scsi_cmd->cmnd[0] >= 0xC0)
+	if (scsi_cmd->cmnd[0] >= 0xC0 &&
+	    (!ipr_is_gscsi(res) || scsi_cmd->cmnd[0] == IPR_QUERY_RSRC_STATE))
 		ioarcb->cmd_pkt.request_type = IPR_RQTYPE_IOACMD;
 
 	if (ipr_is_ioa_resource(res) && scsi_cmd->cmnd[0] == MODE_SELECT)
@@ -3958,6 +3946,7 @@ static struct scsi_host_template driver_template = {
 	.slave_alloc = ipr_slave_alloc,
 	.slave_configure = ipr_slave_configure,
 	.slave_destroy = ipr_slave_destroy,
+	.change_queue_depth = ipr_change_queue_depth,
 	.bios_param = ipr_biosparam,
 	.can_queue = IPR_MAX_COMMANDS,
 	.this_id = -1,
@@ -4935,7 +4924,7 @@ static int ipr_reset_restore_cfg_space(struct ipr_cmnd *ipr_cmd)
 	int rc;
 
 	ENTER;
-	rc = pci_restore_state(ioa_cfg->pdev, ioa_cfg->pci_cfg_buf);
+	rc = pci_restore_state(ioa_cfg->pdev);
 
 	if (rc != PCIBIOS_SUCCESSFUL) {
 		ipr_cmd->ioasa.ioasc = cpu_to_be32(IPR_IOASC_PCI_ACCESS_ERROR);
@@ -5433,7 +5422,7 @@ static void ipr_free_all_resources(struct ipr_ioa_cfg *ioa_cfg)
 
 	ENTER;
 	free_irq(pdev->irq, ioa_cfg);
-	iounmap((void *) ioa_cfg->hdw_dma_regs);
+	iounmap(ioa_cfg->hdw_dma_regs);
 	pci_release_regions(pdev);
 	ipr_free_mem(ioa_cfg);
 	scsi_host_put(ioa_cfg->host);
@@ -5624,6 +5613,10 @@ static void __devinit ipr_initialize_bus_attr(struct ipr_ioa_cfg *ioa_cfg)
 static void __devinit ipr_init_ioa_cfg(struct ipr_ioa_cfg *ioa_cfg,
 				       struct Scsi_Host *host, struct pci_dev *pdev)
 {
+	const struct ipr_interrupt_offsets *p;
+	struct ipr_interrupts *t;
+	void __iomem *base;
+
 	ioa_cfg->host = host;
 	ioa_cfg->pdev = pdev;
 	ioa_cfg->log_level = ipr_log_level;
@@ -5655,17 +5648,19 @@ static void __devinit ipr_init_ioa_cfg(struct ipr_ioa_cfg *ioa_cfg,
 	host->max_cmd_len = IPR_MAX_CDB_LEN;
 	pci_set_drvdata(pdev, ioa_cfg);
 
-	memcpy(&ioa_cfg->regs, &ioa_cfg->chip_cfg->regs, sizeof(ioa_cfg->regs));
+	p = &ioa_cfg->chip_cfg->regs;
+	t = &ioa_cfg->regs;
+	base = ioa_cfg->hdw_dma_regs;
 
-	ioa_cfg->regs.set_interrupt_mask_reg += ioa_cfg->hdw_dma_regs;
-	ioa_cfg->regs.clr_interrupt_mask_reg += ioa_cfg->hdw_dma_regs;
-	ioa_cfg->regs.sense_interrupt_mask_reg += ioa_cfg->hdw_dma_regs;
-	ioa_cfg->regs.clr_interrupt_reg += ioa_cfg->hdw_dma_regs;
-	ioa_cfg->regs.sense_interrupt_reg += ioa_cfg->hdw_dma_regs;
-	ioa_cfg->regs.ioarrin_reg += ioa_cfg->hdw_dma_regs;
-	ioa_cfg->regs.sense_uproc_interrupt_reg += ioa_cfg->hdw_dma_regs;
-	ioa_cfg->regs.set_uproc_interrupt_reg += ioa_cfg->hdw_dma_regs;
-	ioa_cfg->regs.clr_uproc_interrupt_reg += ioa_cfg->hdw_dma_regs;
+	t->set_interrupt_mask_reg = base + p->set_interrupt_mask_reg;
+	t->clr_interrupt_mask_reg = base + p->clr_interrupt_mask_reg;
+	t->sense_interrupt_mask_reg = base + p->sense_interrupt_mask_reg;
+	t->clr_interrupt_reg = base + p->clr_interrupt_reg;
+	t->sense_interrupt_reg = base + p->sense_interrupt_reg;
+	t->ioarrin_reg = base + p->ioarrin_reg;
+	t->sense_uproc_interrupt_reg = base + p->sense_uproc_interrupt_reg;
+	t->set_uproc_interrupt_reg = base + p->set_uproc_interrupt_reg;
+	t->clr_uproc_interrupt_reg = base + p->clr_uproc_interrupt_reg;
 }
 
 /**
@@ -5681,7 +5676,8 @@ static int __devinit ipr_probe_ioa(struct pci_dev *pdev,
 {
 	struct ipr_ioa_cfg *ioa_cfg;
 	struct Scsi_Host *host;
-	unsigned long ipr_regs, ipr_regs_pci;
+	unsigned long ipr_regs_pci;
+	void __iomem *ipr_regs;
 	u32 rc = PCIBIOS_SUCCESSFUL;
 
 	ENTER;
@@ -5715,8 +5711,7 @@ static int __devinit ipr_probe_ioa(struct pci_dev *pdev,
 		goto out_scsi_host_put;
 	}
 
-	ipr_regs = (unsigned long)ioremap(ipr_regs_pci,
-					  pci_resource_len(pdev, 0));
+	ipr_regs = ioremap(ipr_regs_pci, pci_resource_len(pdev, 0));
 
 	if (!ipr_regs) {
 		dev_err(&pdev->dev,
@@ -5749,7 +5744,7 @@ static int __devinit ipr_probe_ioa(struct pci_dev *pdev,
 	}
 
 	/* Save away PCI config space for use following IOA reset */
-	rc = pci_save_state(pdev, ioa_cfg->pci_cfg_buf);
+	rc = pci_save_state(pdev);
 
 	if (rc != PCIBIOS_SUCCESSFUL) {
 		dev_err(&pdev->dev, "Failed to save PCI config space\n");
@@ -5790,7 +5785,7 @@ out:
 cleanup_nolog:
 	ipr_free_mem(ioa_cfg);
 cleanup_nomem:
-	iounmap((void *) ipr_regs);
+	iounmap(ipr_regs);
 out_release_regions:
 	pci_release_regions(pdev);
 out_scsi_host_put:

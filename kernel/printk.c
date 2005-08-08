@@ -30,7 +30,8 @@
 #include <linux/smp.h>
 #include <linux/security.h>
 #include <linux/bootmem.h>
-#include <linux/vs_base.h>
+#include <linux/syscalls.h>
+#include <linux/vserver/cvirt.h>
 
 #include <asm/uaccess.h>
 
@@ -78,7 +79,7 @@ static int console_locked;
  * It is also used in interesting ways to provide interlocking in
  * release_console_sem().
  */
-static spinlock_t logbuf_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(logbuf_lock);
 
 static char __log_buf[__LOG_BUF_LEN];
 static char *log_buf = __log_buf;
@@ -109,6 +110,7 @@ struct console_cmdline
 #define MAX_CMDLINECONSOLES 8
 
 static struct console_cmdline console_cmdline[MAX_CMDLINECONSOLES];
+static int selected_console = -1;
 static int preferred_console = -1;
 
 /* Flag: console code may call schedule() */
@@ -141,7 +143,7 @@ static int __init console_setup(char *str)
 		strcpy(name, "ttyS1");
 #endif
 	for(s = name; *s; s++)
-		if (*s >= '0' && *s <= '9')
+		if ((*s >= '0' && *s <= '9') || *s == ',')
 			break;
 	idx = simple_strtoul(s, NULL, 10);
 	*s = 0;
@@ -174,12 +176,12 @@ int __init add_preferred_console(char *name, int idx, char *options)
 	for(i = 0; i < MAX_CMDLINECONSOLES && console_cmdline[i].name[0]; i++)
 		if (strcmp(console_cmdline[i].name, name) == 0 &&
 			  console_cmdline[i].index == idx) {
-				preferred_console = i;
+				selected_console = i;
 				return 0;
 		}
 	if (i == MAX_CMDLINECONSOLES)
 		return -E2BIG;
-	preferred_console = i;
+	selected_console = i;
 	c = &console_cmdline[i];
 	memcpy(c->name, name, sizeof(c->name));
 	c->name[sizeof(c->name) - 1] = 0;
@@ -250,21 +252,13 @@ int do_syslog(int type, char __user * buf, int len)
 	unsigned long i, j, limit, count;
 	int do_clear = 0;
 	char c;
-	int error = -EPERM;
-
-	if (!vx_check(0, VX_ADMIN|VX_WATCH))
-		return error;
+	int error;
 
 	error = security_syslog(type);
 	if (error)
 		return error;
 
-	switch (type) {
-	case 0:		/* Close log */
-		break;
-	case 1:		/* Open log */
-		break;
-	case 2:		/* Read from log */
+	if ((type >= 2) && (type <= 4)) {
 		error = -EINVAL;
 		if (!buf || len < 0)
 			goto out;
@@ -274,6 +268,16 @@ int do_syslog(int type, char __user * buf, int len)
 		error = verify_area(VERIFY_WRITE,buf,len);
 		if (error)
 			goto out;
+	}
+	if (!vx_check(0, VX_ADMIN|VX_WATCH))
+		return vx_do_syslog(type, buf, len);
+
+	switch (type) {
+	case 0:		/* Close log */
+		break;
+	case 1:		/* Open log */
+		break;
+	case 2:		/* Read from log */
 		error = wait_event_interruptible(log_wait, (log_start - log_end));
 		if (error)
 			goto out;
@@ -286,6 +290,7 @@ int do_syslog(int type, char __user * buf, int len)
 			error = __put_user(c,buf);
 			buf++;
 			i++;
+			cond_resched();
 			spin_lock_irq(&logbuf_lock);
 		}
 		spin_unlock_irq(&logbuf_lock);
@@ -296,15 +301,6 @@ int do_syslog(int type, char __user * buf, int len)
 		do_clear = 1; 
 		/* FALL THRU */
 	case 3:		/* Read last kernel messages */
-		error = -EINVAL;
-		if (!buf || len < 0)
-			goto out;
-		error = 0;
-		if (!len)
-			goto out;
-		error = verify_area(VERIFY_WRITE,buf,len);
-		if (error)
-			goto out;
 		count = len;
 		if (count > log_buf_len)
 			count = log_buf_len;
@@ -327,6 +323,7 @@ int do_syslog(int type, char __user * buf, int len)
 			c = LOG_BUF(j);
 			spin_unlock_irq(&logbuf_lock);
 			error = __put_user(c,&buf[count-1-i]);
+			cond_resched();
 			spin_lock_irq(&logbuf_lock);
 		}
 		spin_unlock_irq(&logbuf_lock);
@@ -342,6 +339,7 @@ int do_syslog(int type, char __user * buf, int len)
 					error = -EFAULT;
 					break;
 				}
+				cond_resched();
 			}
 		}
 		break;
@@ -613,6 +611,16 @@ void acquire_console_sem(void)
 }
 EXPORT_SYMBOL(acquire_console_sem);
 
+int try_acquire_console_sem(void)
+{
+	if (down_trylock(&console_sem))
+		return -1;
+	console_locked = 1;
+	console_may_schedule = 0;
+	return 0;
+}
+EXPORT_SYMBOL(try_acquire_console_sem);
+
 int is_console_locked(void)
 {
 	return console_locked;
@@ -647,8 +655,9 @@ void release_console_sem(void)
 		_con_start = con_start;
 		_log_end = log_end;
 		con_start = log_end;		/* Flush */
-		spin_unlock_irqrestore(&logbuf_lock, flags);
+		spin_unlock(&logbuf_lock);
 		call_console_drivers(_con_start, _log_end);
+		local_irq_restore(flags);
 	}
 	console_locked = 0;
 	console_may_schedule = 0;
@@ -667,12 +676,10 @@ EXPORT_SYMBOL(release_console_sem);
  *
  * Must be called within acquire_console_sem().
  */
-void console_conditional_schedule(void)
+void __sched console_conditional_schedule(void)
 {
-	if (console_may_schedule && need_resched()) {
-		set_current_state(TASK_RUNNING);
-		schedule();
-	}
+	if (console_may_schedule)
+		cond_resched();
 }
 EXPORT_SYMBOL(console_conditional_schedule);
 
@@ -753,6 +760,9 @@ void register_console(struct console * console)
 {
 	int     i;
 	unsigned long flags;
+
+	if (preferred_console < 0)
+		preferred_console = selected_console;
 
 	/*
 	 *	See if we want to use this console driver. If we
@@ -844,7 +854,7 @@ int unregister_console(struct console * console)
 	 * would prevent fbcon from taking over.
 	 */
 	if (console_drivers == NULL)
-		preferred_console = -1;
+		preferred_console = selected_console;
 		
 
 	release_console_sem();
@@ -862,7 +872,7 @@ EXPORT_SYMBOL(unregister_console);
 void tty_write_message(struct tty_struct *tty, char *msg)
 {
 	if (tty && tty->driver->write)
-		tty->driver->write(tty, 0, msg, strlen(msg));
+		tty->driver->write(tty, msg, strlen(msg));
 	return;
 }
 
@@ -875,7 +885,7 @@ void tty_write_message(struct tty_struct *tty, char *msg)
  */
 int __printk_ratelimit(int ratelimit_jiffies, int ratelimit_burst)
 {
-	static spinlock_t ratelimit_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(ratelimit_lock);
 	static unsigned long toks = 10*5*HZ;
 	static unsigned long last_msg;
 	static int missed;

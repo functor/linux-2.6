@@ -42,7 +42,10 @@
 
 #include "io_ports.h"
 
-static spinlock_t ioapic_lock = SPIN_LOCK_UNLOCKED;
+int (*ioapic_renumber_irq)(int ioapic, int irq);
+atomic_t irq_mis_count;
+
+static DEFINE_SPINLOCK(ioapic_lock);
 
 /*
  *	Is the SiS APIC rmw bug present ?
@@ -254,8 +257,6 @@ static void set_ioapic_affinity_irq(unsigned int irq, cpumask_t cpumask)
 #  define TDprintk(x...) 
 #  define Dprintk(x...) 
 # endif
-
-extern cpumask_t irq_affinity[NR_IRQS];
 
 cpumask_t __cacheline_aligned pending_irq_balance_cpumask[NR_IRQS];
 
@@ -572,6 +573,7 @@ static int balanced_irq(void *unused)
 	for ( ; ; ) {
 		set_current_state(TASK_INTERRUPTIBLE);
 		time_remaining = schedule_timeout(time_remaining);
+		try_to_freeze(PF_FREEZE);
 		if (time_after(jiffies,
 				prev_balance_time+balanced_irq_interval)) {
 			do_irq_balance();
@@ -636,7 +638,7 @@ failed:
 	return 0;
 }
 
-static int __init irqbalance_disable(char *str)
+int __init irqbalance_disable(char *str)
 {
 	irqbalance_disabled = 1;
 	return 0;
@@ -653,7 +655,7 @@ static inline void move_irq(int irq)
 	}
 }
 
-__initcall(balanced_irq_init);
+late_initcall(balanced_irq_init);
 
 #else /* !CONFIG_IRQBALANCE */
 static inline void move_irq(int irq) { }
@@ -728,7 +730,7 @@ __setup("pirq=", ioapic_pirq_setup);
 /*
  * Find the IRQ entry number of a certain pin.
  */
-static int __init find_irq_entry(int apic, int pin, int type)
+static int find_irq_entry(int apic, int pin, int type)
 {
 	int i;
 
@@ -838,7 +840,7 @@ void __init setup_ioapic_dest(void)
 /*
  * EISA Edge/Level control register, ELCR
  */
-static int __init EISA_ELCR(unsigned int irq)
+static int EISA_ELCR(unsigned int irq)
 {
 	if (irq < 16) {
 		unsigned int port = 0x4d0 + (irq >> 3);
@@ -955,7 +957,7 @@ static int __init MPBIOS_polarity(int idx)
 	return polarity;
 }
 
-static int __init MPBIOS_trigger(int idx)
+static int MPBIOS_trigger(int idx)
 {
 	int bus = mp_irqs[idx].mpc_srcbus;
 	int trigger;
@@ -1069,8 +1071,13 @@ static int pin_2_irq(int idx, int apic, int pin)
 			while (i < apic)
 				irq += nr_ioapic_registers[i++];
 			irq += pin;
-			if ((!apic) && (irq < 16)) 
-				irq += 16;
+
+			/*
+			 * For MPS mode, so far only needed by ES7000 platform
+			 */
+			if (ioapic_renumber_irq)
+				irq = ioapic_renumber_irq(apic, irq);
+
 			break;
 		}
 		default:
@@ -1758,7 +1765,7 @@ static int __init timer_irq_works(void)
 
 	local_irq_enable();
 	/* Let ten ticks pass... */
-	mdelay((10 * 1000) / HZ);
+	mdelay((10 * 1000) / HZ + 1);
 
 	/*
 	 * Expect a few ticks at least, to be sure some possible
@@ -1879,9 +1886,7 @@ static void end_level_ioapic_irq (unsigned int irq)
 	ack_APIC_irq();
 
 	if (!(v & (1 << (i & 0x1f)))) {
-#ifdef APIC_MISMATCH_DEBUG
 		atomic_inc(&irq_mis_count);
-#endif
 		spin_lock(&ioapic_lock);
 		__mask_and_edge_IO_APIC_irq(irq);
 		__unmask_and_level_IO_APIC_irq(irq);

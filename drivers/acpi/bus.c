@@ -22,6 +22,7 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/list.h>
@@ -44,8 +45,11 @@ extern void __init acpi_pic_sci_set_trigger(unsigned int irq, u16 trigger);
 #endif
 
 FADT_DESCRIPTOR			acpi_fadt;
+EXPORT_SYMBOL(acpi_fadt);
+
 struct acpi_device		*acpi_root;
 struct proc_dir_entry		*acpi_root_dir;
+EXPORT_SYMBOL(acpi_root_dir);
 
 #define STRUCT_TO_INT(s)	(*((int*)&s))
 
@@ -53,10 +57,6 @@ struct proc_dir_entry		*acpi_root_dir;
                                 Device Management
    -------------------------------------------------------------------------- */
 
-extern void acpi_bus_data_handler (
-	acpi_handle		handle,
-	u32			function,
-	void			*context);
 int
 acpi_bus_get_device (
 	acpi_handle		handle,
@@ -73,13 +73,14 @@ acpi_bus_get_device (
 
 	status = acpi_get_data(handle, acpi_bus_data_handler, (void**) device);
 	if (ACPI_FAILURE(status) || !*device) {
-		ACPI_DEBUG_PRINT((ACPI_DB_WARN, "Error getting context for object [%p]\n",
+		ACPI_DEBUG_PRINT((ACPI_DB_WARN, "No context for object [%p]\n",
 			handle));
 		return_VALUE(-ENODEV);
 	}
 
 	return_VALUE(0);
 }
+EXPORT_SYMBOL(acpi_bus_get_device);
 
 int
 acpi_bus_get_status (
@@ -125,6 +126,7 @@ acpi_bus_get_status (
 
 	return_VALUE(0);
 }
+EXPORT_SYMBOL(acpi_bus_get_status);
 
 
 /* --------------------------------------------------------------------------
@@ -182,6 +184,7 @@ acpi_bus_get_power (
 
 	return_VALUE(0);
 }
+EXPORT_SYMBOL(acpi_bus_get_power);
 
 
 int
@@ -270,6 +273,7 @@ end:
 
 	return_VALUE(result);
 }
+EXPORT_SYMBOL(acpi_bus_set_power);
 
 
 
@@ -277,7 +281,7 @@ end:
                                 Event Management
    -------------------------------------------------------------------------- */
 
-static spinlock_t		acpi_bus_event_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(acpi_bus_event_lock);
 
 LIST_HEAD(acpi_bus_event_list);
 DECLARE_WAIT_QUEUE_HEAD(acpi_bus_event_queue);
@@ -319,6 +323,7 @@ acpi_bus_generate_event (
 
 	return_VALUE(0);
 }
+EXPORT_SYMBOL(acpi_bus_generate_event);
 
 int
 acpi_bus_receive_event (
@@ -332,7 +337,7 @@ acpi_bus_receive_event (
 	ACPI_FUNCTION_TRACE("acpi_bus_receive_event");
 
 	if (!event)
-		return -EINVAL;
+		return_VALUE(-EINVAL);
 
 	if (list_empty(&acpi_bus_event_list)) {
 
@@ -364,6 +369,7 @@ acpi_bus_receive_event (
 
 	return_VALUE(0);
 }
+EXPORT_SYMBOL(acpi_bus_receive_event);
 
 
 /* --------------------------------------------------------------------------
@@ -599,7 +605,7 @@ acpi_early_init (void)
 	ACPI_FUNCTION_TRACE("acpi_early_init");
 
 	if (acpi_disabled)
-		return;
+		return_VOID;
 
 	/* enable workarounds, unless strict ACPI spec. compliance */
 	if (!acpi_strict)
@@ -652,11 +658,11 @@ acpi_early_init (void)
 		goto error0;
 	}
 
-	return;
+	return_VOID;
 
 error0:
 	disable_acpi();
-	return;
+	return_VOID;
 }
 
 static int __init
@@ -743,7 +749,7 @@ static int __init acpi_init (void)
 
 	if (acpi_disabled) {
 		printk(KERN_INFO PREFIX "Interpreter disabled.\n");
-		return -ENODEV;
+		return_VALUE(-ENODEV);
 	}
 
 	firmware_register(&acpi_subsys);

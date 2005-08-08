@@ -68,17 +68,16 @@ static int vid[SNDRV_CARDS] = { [0 ... (SNDRV_CARDS-1)] = -1 }; /* Vendor ID for
 static int pid[SNDRV_CARDS] = { [0 ... (SNDRV_CARDS-1)] = -1 }; /* Product ID for this card */
 static int nrpacks = 4;		/* max. number of packets per urb */
 static int async_unlink = 1;
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for the USB audio adapter.");
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for the USB audio adapter.");
-module_param_array(enable, bool, boot_devs, 0444);
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable USB audio adapter.");
-module_param_array(vid, int, boot_devs, 0444);
+module_param_array(vid, int, NULL, 0444);
 MODULE_PARM_DESC(vid, "Vendor ID for the USB audio device.");
-module_param_array(pid, int, boot_devs, 0444);
+module_param_array(pid, int, NULL, 0444);
 MODULE_PARM_DESC(pid, "Product ID for the USB audio device.");
 module_param(nrpacks, int, 0444);
 MODULE_PARM_DESC(nrpacks, "Max. number of packets per URB.");
@@ -726,7 +725,7 @@ static int deactivate_urbs(snd_usb_substream_t *subs, int force, int can_sleep)
 	subs->running = 0;
 
 	if (!force && subs->stream->chip->shutdown) /* to be sure... */
-		return 0;
+		return -EBADFD;
 
 	async = !can_sleep && async_unlink;
 
@@ -737,11 +736,11 @@ static int deactivate_urbs(snd_usb_substream_t *subs, int force, int can_sleep)
 		if (test_bit(i, &subs->active_mask)) {
 			if (! test_and_set_bit(i, &subs->unlink_mask)) {
 				struct urb *u = subs->dataurb[i].urb;
-				if (async)
+				if (async) {
 					u->transfer_flags |= URB_ASYNC_UNLINK;
-				else
-					u->transfer_flags &= ~URB_ASYNC_UNLINK;
-				usb_unlink_urb(u);
+					usb_unlink_urb(u);
+				} else
+					usb_kill_urb(u);
 			}
 		}
 	}
@@ -750,11 +749,11 @@ static int deactivate_urbs(snd_usb_substream_t *subs, int force, int can_sleep)
 			if (test_bit(i+16, &subs->active_mask)) {
  				if (! test_and_set_bit(i+16, &subs->unlink_mask)) {
 					struct urb *u = subs->syncurb[i].urb;
-					if (async)
+					if (async) {
 						u->transfer_flags |= URB_ASYNC_UNLINK;
-					else
-						u->transfer_flags &= ~URB_ASYNC_UNLINK;
-					usb_unlink_urb(u);
+						usb_unlink_urb(u);
+					} else
+						usb_kill_urb(u);
 				}
 			}
 		}
@@ -770,6 +769,9 @@ static int start_urbs(snd_usb_substream_t *subs, snd_pcm_runtime_t *runtime)
 {
 	unsigned int i;
 	int err;
+
+	if (subs->stream->chip->shutdown)
+		return -EBADFD;
 
 	for (i = 0; i < subs->nurbs; i++) {
 		snd_assert(subs->dataurb[i].urb, return -EINVAL);
@@ -2064,8 +2066,7 @@ static void free_substream(snd_usb_substream_t *subs)
 		return; /* not initialized */
 	list_for_each_safe(p, n, &subs->fmt_list) {
 		struct audioformat *fp = list_entry(p, struct audioformat, list);
-		if (fp->rate_table)
-			kfree(fp->rate_table);
+		kfree(fp->rate_table);
 		kfree(fp);
 	}
 }
@@ -2177,13 +2178,13 @@ static int add_audio_endpoint(snd_usb_audio_t *chip, int stream, struct audiofor
 static int is_big_endian_format(struct usb_device *dev, struct audioformat *fp)
 {
 	/* M-Audio */
-	if (dev->descriptor.idVendor == 0x0763) {
+	if (le16_to_cpu(dev->descriptor.idVendor) == 0x0763) {
 		/* Quattro: captured data only */
-		if (dev->descriptor.idProduct == 0x2001 &&
+		if (le16_to_cpu(dev->descriptor.idProduct) == 0x2001 &&
 		    fp->endpoint & USB_DIR_IN)
 			return 1;
 		/* Audiophile USB */
-		if (dev->descriptor.idProduct == 0x2003)
+		if (le16_to_cpu(dev->descriptor.idProduct) == 0x2003)
 			return 1;
 	}
 	return 0;
@@ -2247,7 +2248,8 @@ static int parse_audio_format_i_type(struct usb_device *dev, struct audioformat 
 		break;
 	case USB_AUDIO_FORMAT_PCM8:
 		/* Dallas DS4201 workaround */
-		if (dev->descriptor.idVendor == 0x04fa && dev->descriptor.idProduct == 0x4201)
+		if (le16_to_cpu(dev->descriptor.idVendor) == 0x04fa &&
+		    le16_to_cpu(dev->descriptor.idProduct) == 0x4201)
 			pcm_format = SNDRV_PCM_FORMAT_S8;
 		else
 			pcm_format = SNDRV_PCM_FORMAT_U8;
@@ -2415,7 +2417,8 @@ static int parse_audio_format(struct usb_device *dev, struct audioformat *fp,
 	/* extigy apparently supports sample rates other than 48k
 	 * but not in ordinary way.  so we enable only 48k atm.
 	 */
-	if (dev->descriptor.idVendor == 0x041e && dev->descriptor.idProduct == 0x3000) {
+	if (le16_to_cpu(dev->descriptor.idVendor) == 0x041e && 
+	    le16_to_cpu(dev->descriptor.idProduct) == 0x3000) {
 		if (fmt[3] == USB_FORMAT_TYPE_I &&
 		    stream == SNDRV_PCM_STREAM_PLAYBACK &&
 		    fp->rates != SNDRV_PCM_RATE_48000)
@@ -2449,7 +2452,7 @@ static int parse_audio_endpoints(snd_usb_audio_t *chip, int iface_no)
 		    (altsd->bInterfaceSubClass != USB_SUBCLASS_AUDIO_STREAMING &&
 		     altsd->bInterfaceSubClass != USB_SUBCLASS_VENDOR_SPEC) ||
 		    altsd->bNumEndpoints < 1 ||
-		    get_endpoint(alts, 0)->wMaxPacketSize == 0)
+		    le16_to_cpu(get_endpoint(alts, 0)->wMaxPacketSize) == 0)
 			continue;
 		/* must be isochronous */
 		if ((get_endpoint(alts, 0)->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) !=
@@ -2512,14 +2515,14 @@ static int parse_audio_endpoints(snd_usb_audio_t *chip, int iface_no)
 		fp->endpoint = get_endpoint(alts, 0)->bEndpointAddress;
 		fp->ep_attr = get_endpoint(alts, 0)->bmAttributes;
 		/* FIXME: decode wMaxPacketSize of high bandwith endpoints */
-		fp->maxpacksize = get_endpoint(alts, 0)->wMaxPacketSize;
+		fp->maxpacksize = le16_to_cpu(get_endpoint(alts, 0)->wMaxPacketSize);
 		fp->attributes = csep[3];
 
 		/* some quirks for attributes here */
 
 		/* workaround for AudioTrak Optoplay */
-		if (dev->descriptor.idVendor == 0x0a92 &&
-		    dev->descriptor.idProduct == 0x0053) {
+		if (le16_to_cpu(dev->descriptor.idVendor) == 0x0a92 &&
+		    le16_to_cpu(dev->descriptor.idProduct) == 0x0053) {
 			/* Optoplay sets the sample rate attribute although
 			 * it seems not supporting it in fact.
 			 */
@@ -2527,8 +2530,8 @@ static int parse_audio_endpoints(snd_usb_audio_t *chip, int iface_no)
 		}
 
 		/* workaround for M-Audio Audiophile USB */
-		if (dev->descriptor.idVendor == 0x0763 &&
-		    dev->descriptor.idProduct == 0x2003) {
+		if (le16_to_cpu(dev->descriptor.idVendor) == 0x0763 &&
+		    le16_to_cpu(dev->descriptor.idProduct) == 0x2003) {
 			/* doesn't set the sample rate attribute, but supports it */
 			fp->attributes |= EP_CS_ATTR_SAMPLE_RATE;
 		}
@@ -2537,11 +2540,11 @@ static int parse_audio_endpoints(snd_usb_audio_t *chip, int iface_no)
 		 * plantronics headset and Griffin iMic have set adaptive-in
 		 * although it's really not...
 		 */
-		if ((dev->descriptor.idVendor == 0x047f &&
-		     dev->descriptor.idProduct == 0x0ca1) ||
+		if ((le16_to_cpu(dev->descriptor.idVendor) == 0x047f &&
+		     le16_to_cpu(dev->descriptor.idProduct) == 0x0ca1) ||
 		    /* Griffin iMic (note that there is an older model 77d:223) */
-		    (dev->descriptor.idVendor == 0x077d &&
-		     dev->descriptor.idProduct == 0x07af)) {
+		    (le16_to_cpu(dev->descriptor.idVendor) == 0x077d &&
+		     le16_to_cpu(dev->descriptor.idProduct) == 0x07af)) {
 			fp->ep_attr &= ~EP_ATTR_MASK;
 			if (stream == SNDRV_PCM_STREAM_PLAYBACK)
 				fp->ep_attr |= EP_ATTR_ADAPTIVE;
@@ -2551,8 +2554,7 @@ static int parse_audio_endpoints(snd_usb_audio_t *chip, int iface_no)
 
 		/* ok, let's parse further... */
 		if (parse_audio_format(dev, fp, format, fmt, stream) < 0) {
-			if (fp->rate_table)
-				kfree(fp->rate_table);
+			kfree(fp->rate_table);
 			kfree(fp);
 			continue;
 		}
@@ -2560,8 +2562,7 @@ static int parse_audio_endpoints(snd_usb_audio_t *chip, int iface_no)
 		snd_printdd(KERN_INFO "%d:%u:%d: add audio endpoint 0x%x\n", dev->devnum, iface_no, i, fp->endpoint);
 		err = add_audio_endpoint(chip, stream, fp);
 		if (err < 0) {
-			if (fp->rate_table)
-				kfree(fp->rate_table);
+			kfree(fp->rate_table);
 			kfree(fp);
 			return err;
 		}
@@ -2694,15 +2695,13 @@ static int create_fixed_stream_quirk(snd_usb_audio_t *chip,
 	err = add_audio_endpoint(chip, stream, fp);
 	if (err < 0) {
 		kfree(fp);
-		if (rate_table)
-			kfree(rate_table);
+		kfree(rate_table);
 		return err;
 	}
 	if (fp->iface != get_iface_desc(&iface->altsetting[0])->bInterfaceNumber ||
 	    fp->altset_idx >= iface->num_altsetting) {
 		kfree(fp);
-		if (rate_table)
-			kfree(rate_table);
+		kfree(rate_table);
 		return -EINVAL;
 	}
 	alts = &iface->altsetting[fp->altset_idx];
@@ -2747,12 +2746,13 @@ static int create_standard_interface_quirk(snd_usb_audio_t *chip,
 }
 
 /*
- * Create a stream for an Edirol UA-700 interface.  The only way
+ * Create a stream for an Edirol UA-700/UA-25 interface.  The only way
  * to detect the sample rate is by looking at wMaxPacketSize.
  */
-static int create_ua700_quirk(snd_usb_audio_t *chip, struct usb_interface *iface)
+static int create_ua700_ua25_quirk(snd_usb_audio_t *chip,
+				   struct usb_interface *iface)
 {
-	static const struct audioformat ua700_format = {
+	static const struct audioformat ua_format = {
 		.format = SNDRV_PCM_FORMAT_S24_3LE,
 		.channels = 2,
 		.fmt_type = USB_FORMAT_TYPE_I,
@@ -2772,15 +2772,28 @@ static int create_ua700_quirk(snd_usb_audio_t *chip, struct usb_interface *iface
 	altsd = get_iface_desc(alts);
 
 	if (altsd->bNumEndpoints == 2) {
-		static const snd_usb_midi_endpoint_info_t ep = {
+		static const snd_usb_midi_endpoint_info_t ua700_ep = {
 			.out_cables = 0x0003,
 			.in_cables  = 0x0003
 		};
-		static const snd_usb_audio_quirk_t quirk = {
+		static const snd_usb_audio_quirk_t ua700_quirk = {
 			.type = QUIRK_MIDI_FIXED_ENDPOINT,
-			.data = &ep
+			.data = &ua700_ep
 		};
-		return snd_usb_create_midi_interface(chip, iface, &quirk);
+		static const snd_usb_midi_endpoint_info_t ua25_ep = {
+			.out_cables = 0x0001,
+			.in_cables  = 0x0001
+		};
+		static const snd_usb_audio_quirk_t ua25_quirk = {
+			.type = QUIRK_MIDI_FIXED_ENDPOINT,
+			.data = &ua25_ep
+		};
+		if (le16_to_cpu(chip->dev->descriptor.idProduct) == 0x002b)
+			return snd_usb_create_midi_interface(chip, iface,
+							     &ua700_quirk);
+		else
+			return snd_usb_create_midi_interface(chip, iface,
+							     &ua25_quirk);
 	}
 
 	if (altsd->bNumEndpoints != 1)
@@ -2789,21 +2802,23 @@ static int create_ua700_quirk(snd_usb_audio_t *chip, struct usb_interface *iface
 	fp = kmalloc(sizeof(*fp), GFP_KERNEL);
 	if (!fp)
 		return -ENOMEM;
-	memcpy(fp, &ua700_format, sizeof(*fp));
+	memcpy(fp, &ua_format, sizeof(*fp));
 
 	fp->iface = altsd->bInterfaceNumber;
 	fp->endpoint = get_endpoint(alts, 0)->bEndpointAddress;
 	fp->ep_attr = get_endpoint(alts, 0)->bmAttributes;
-	fp->maxpacksize = get_endpoint(alts, 0)->wMaxPacketSize;
+	fp->maxpacksize = le16_to_cpu(get_endpoint(alts, 0)->wMaxPacketSize);
 
 	switch (fp->maxpacksize) {
 	case 0x120:
 		fp->rate_max = fp->rate_min = 44100;
 		break;
 	case 0x138:
+	case 0x140:
 		fp->rate_max = fp->rate_min = 48000;
 		break;
 	case 0x258:
+	case 0x260:
 		fp->rate_max = fp->rate_min = 96000;
 		break;
 	default:
@@ -2819,6 +2834,56 @@ static int create_ua700_quirk(snd_usb_audio_t *chip, struct usb_interface *iface
 		kfree(fp);
 		return err;
 	}
+	usb_set_interface(chip->dev, fp->iface, 0);
+	return 0;
+}
+
+/*
+ * Create a stream for an Edirol UA-1000 interface.
+ */
+static int create_ua1000_quirk(snd_usb_audio_t *chip, struct usb_interface *iface)
+{
+	static const struct audioformat ua1000_format = {
+		.format = SNDRV_PCM_FORMAT_S32_LE,
+		.fmt_type = USB_FORMAT_TYPE_I,
+		.altsetting = 1,
+		.altset_idx = 1,
+		.attributes = 0,
+		.rates = SNDRV_PCM_RATE_CONTINUOUS,
+	};
+	struct usb_host_interface *alts;
+	struct usb_interface_descriptor *altsd;
+	struct audioformat *fp;
+	int stream, err;
+
+	if (iface->num_altsetting != 2)
+		return -ENXIO;
+	alts = &iface->altsetting[1];
+	altsd = get_iface_desc(alts);
+	if (alts->extralen != 11 || alts->extra[1] != CS_AUDIO_INTERFACE ||
+	    altsd->bNumEndpoints != 1)
+		return -ENXIO;
+
+	fp = kmalloc(sizeof(*fp), GFP_KERNEL);
+	if (!fp)
+		return -ENOMEM;
+	memcpy(fp, &ua1000_format, sizeof(*fp));
+
+	fp->channels = alts->extra[4];
+	fp->iface = altsd->bInterfaceNumber;
+	fp->endpoint = get_endpoint(alts, 0)->bEndpointAddress;
+	fp->ep_attr = get_endpoint(alts, 0)->bmAttributes;
+	fp->maxpacksize = le16_to_cpu(get_endpoint(alts, 0)->wMaxPacketSize);
+	fp->rate_max = fp->rate_min = combine_triple(&alts->extra[8]);
+
+	stream = (fp->endpoint & USB_DIR_IN)
+		? SNDRV_PCM_STREAM_CAPTURE : SNDRV_PCM_STREAM_PLAYBACK;
+	err = add_audio_endpoint(chip, stream, fp);
+	if (err < 0) {
+		kfree(fp);
+		return err;
+	}
+	/* FIXME: playback must be synchronized to capture */
 	usb_set_interface(chip->dev, fp->iface, 0);
 	return 0;
 }
@@ -2866,8 +2931,8 @@ static int snd_usb_extigy_boot_quirk(struct usb_device *dev, struct usb_interfac
 	struct usb_host_config *config = dev->actconfig;
 	int err;
 
-	if (get_cfg_desc(config)->wTotalLength == EXTIGY_FIRMWARE_SIZE_OLD ||
-	    get_cfg_desc(config)->wTotalLength == EXTIGY_FIRMWARE_SIZE_NEW) {
+	if (le16_to_cpu(get_cfg_desc(config)->wTotalLength) == EXTIGY_FIRMWARE_SIZE_OLD ||
+	    le16_to_cpu(get_cfg_desc(config)->wTotalLength) == EXTIGY_FIRMWARE_SIZE_NEW) {
 		snd_printdd("sending Extigy boot sequence...\n");
 		/* Send message to force it to reconnect with full interface. */
 		err = snd_usb_ctl_msg(dev, usb_sndctrlpipe(dev,0),
@@ -2879,7 +2944,8 @@ static int snd_usb_extigy_boot_quirk(struct usb_device *dev, struct usb_interfac
 		if (err < 0) snd_printdd("error usb_get_descriptor: %d\n", err);
 		err = usb_reset_configuration(dev);
 		if (err < 0) snd_printdd("error usb_reset_configuration: %d\n", err);
-		snd_printdd("extigy_boot: new boot length = %d\n", get_cfg_desc(config)->wTotalLength);
+		snd_printdd("extigy_boot: new boot length = %d\n",
+			    le16_to_cpu(get_cfg_desc(config)->wTotalLength));
 		return -ENODEV; /* quit this anyway */
 	}
 	return 0;
@@ -2910,8 +2976,10 @@ static int snd_usb_create_quirk(snd_usb_audio_t *chip,
 	case QUIRK_AUDIO_STANDARD_INTERFACE:
 	case QUIRK_MIDI_STANDARD_INTERFACE:
 		return create_standard_interface_quirk(chip, iface, quirk);
-	case QUIRK_AUDIO_EDIROL_UA700:
-		return create_ua700_quirk(chip, iface);
+	case QUIRK_AUDIO_EDIROL_UA700_UA25:
+		return create_ua700_ua25_quirk(chip, iface);
+	case QUIRK_AUDIO_EDIROL_UA1000:
+		return create_ua1000_quirk(chip, iface);
 	default:
 		snd_printd(KERN_ERR "invalid quirk type %d\n", quirk->type);
 		return -ENXIO;
@@ -2933,7 +3001,9 @@ static void proc_audio_usbid_read(snd_info_entry_t *entry, snd_info_buffer_t *bu
 {
 	snd_usb_audio_t *chip = entry->private_data;
 	if (! chip->shutdown)
-		snd_iprintf(buffer, "%04x:%04x\n", chip->dev->descriptor.idVendor, chip->dev->descriptor.idProduct);
+		snd_iprintf(buffer, "%04x:%04x\n", 
+			    le16_to_cpu(chip->dev->descriptor.idVendor),
+			    le16_to_cpu(chip->dev->descriptor.idProduct));
 }
 
 static void snd_usb_audio_create_proc(snd_usb_audio_t *chip)
@@ -3014,7 +3084,8 @@ static int snd_usb_audio_create(struct usb_device *dev, int idx,
 
 	strcpy(card->driver, "USB-Audio");
 	sprintf(component, "USB%04x:%04x",
-		dev->descriptor.idVendor, dev->descriptor.idProduct);
+		le16_to_cpu(dev->descriptor.idVendor),
+		le16_to_cpu(dev->descriptor.idProduct));
 	snd_component_add(card, component);
 
 	/* retrieve the device string as shortname */
@@ -3026,7 +3097,8 @@ static int snd_usb_audio_create(struct usb_device *dev, int idx,
       			       card->shortname, sizeof(card->shortname)) <= 0) {
 			/* no name available from anywhere, so use ID */
 			sprintf(card->shortname, "USB Device %#04x:%#04x",
-				dev->descriptor.idVendor, dev->descriptor.idProduct);
+				le16_to_cpu(dev->descriptor.idVendor),
+				le16_to_cpu(dev->descriptor.idProduct));
 		}
 	}
 
@@ -3093,7 +3165,8 @@ static void *snd_usb_audio_probe(struct usb_device *dev,
 
 	/* SB Extigy needs special boot-up sequence */
 	/* if more models come, this will go to the quirk list. */
-	if (dev->descriptor.idVendor == 0x041e && dev->descriptor.idProduct == 0x3000) {
+	if (le16_to_cpu(dev->descriptor.idVendor) == 0x041e && 
+	    le16_to_cpu(dev->descriptor.idProduct) == 0x3000) {
 		if (snd_usb_extigy_boot_quirk(dev, intf) < 0)
 			goto __err_val;
 		config = dev->actconfig;
@@ -3127,8 +3200,8 @@ static void *snd_usb_audio_probe(struct usb_device *dev,
 		}
 		for (i = 0; i < SNDRV_CARDS; i++)
 			if (enable[i] && ! usb_chip[i] &&
-			    (vid[i] == -1 || vid[i] == dev->descriptor.idVendor) &&
-			    (pid[i] == -1 || pid[i] == dev->descriptor.idProduct)) {
+			    (vid[i] == -1 || vid[i] == le16_to_cpu(dev->descriptor.idVendor)) &&
+			    (pid[i] == -1 || pid[i] == le16_to_cpu(dev->descriptor.idProduct))) {
 				if (snd_usb_audio_create(dev, i, quirk, &chip) < 0) {
 					goto __error;
 				}

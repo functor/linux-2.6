@@ -22,7 +22,7 @@
 
 #include "msi.h"
 
-static spinlock_t msi_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(msi_lock);
 static struct msi_desc* msi_desc[NR_IRQS] = { [0 ... NR_IRQS-1] = NULL };
 static kmem_cache_t* msi_cachep;
 
@@ -66,7 +66,7 @@ static void msi_set_mask_bit(unsigned int vector, int flag)
 		int		pos;
 		u32		mask_bits;
 
-		pos = entry->mask_base;
+		pos = (int)entry->mask_base;
 		pci_read_config_dword(entry->dev, pos, &mask_bits);
 		mask_bits &= ~(1);
 		mask_bits |= flag;
@@ -374,19 +374,18 @@ static int msi_init(void)
 
 	if ((status = msi_cache_init()) < 0) {
 		pci_msi_enable = 0;
-		printk(KERN_INFO "WARNING: MSI INIT FAILURE\n");
+		printk(KERN_WARNING "PCI: MSI cache init failed\n");
 		return status;
 	}
 	last_alloc_vector = assign_irq_vector(AUTO_ASSIGN);
 	if (last_alloc_vector < 0) {
 		pci_msi_enable = 0;
-		printk(KERN_INFO "WARNING: ALL VECTORS ARE BUSY\n");
+		printk(KERN_WARNING "PCI: No interrupt vectors available for MSI\n");
 		status = -EBUSY;
 		return status;
 	}
 	vector_irq[last_alloc_vector] = 0;
 	nr_released_vectors++;
-	printk(KERN_INFO "MSI INIT SUCCESS\n");
 
 	return status;
 }
@@ -548,7 +547,7 @@ static int msi_capability_init(struct pci_dev *dev)
 	dev->irq = vector;
 	entry->dev = dev;
 	if (is_mask_bit_support(control)) {
-		entry->mask_base = msi_mask_bits_reg(pos,
+		entry->mask_base = (void __iomem *)msi_mask_bits_reg(pos,
 				is_64bit_address(control));
 	}
 	/* Replace with MSI handler */
@@ -606,7 +605,7 @@ static int msix_capability_init(struct pci_dev *dev,
 	u32 phys_addr, table_offset;
  	u16 control;
 	u8 bir;
-	void *base;
+	void __iomem *base;
 
    	pos = pci_find_capability(dev, PCI_CAP_ID_MSIX);
 	/* Request & Map MSI-X table region */
@@ -642,7 +641,7 @@ static int msix_capability_init(struct pci_dev *dev,
 		entry->msi_attrib.maskbit = 1;
 		entry->msi_attrib.default_vector = dev->irq;
 		entry->dev = dev;
-		entry->mask_base = (unsigned long)base;
+		entry->mask_base = base;
 		if (!head) {
 			entry->link.head = vector;
 			entry->link.tail = vector;
@@ -736,7 +735,9 @@ int pci_enable_msi(struct pci_dev* dev)
 	/* Check whether driver already requested for MSI-X vectors */
    	if ((pos = pci_find_capability(dev, PCI_CAP_ID_MSIX)) > 0 &&
 		!msi_lookup_vector(dev, PCI_CAP_ID_MSIX)) {
-			printk(KERN_INFO "Can't enable MSI. Device already had MSI-X vectors assigned\n");
+			printk(KERN_INFO "PCI: %s: Can't enable MSI.  "
+			       "Device already has MSI-X vectors assigned\n",
+			       pci_name(dev));
 			dev->irq = temp;
 			return -EINVAL;
 	}
@@ -774,9 +775,9 @@ void pci_disable_msi(struct pci_dev* dev)
 	}
 	if (entry->msi_attrib.state) {
 		spin_unlock_irqrestore(&msi_lock, flags);
-		printk(KERN_DEBUG "Driver[%d:%d:%d] unloaded wo doing free_irq on vector->%d\n",
-		dev->bus->number, PCI_SLOT(dev->devfn),	PCI_FUNC(dev->devfn),
-		dev->irq);
+		printk(KERN_WARNING "PCI: %s: pci_disable_msi() called without "
+		       "free_irq() on MSI vector %d\n",
+		       pci_name(dev), dev->irq);
 		BUG_ON(entry->msi_attrib.state > 0);
 	} else {
 		vector_irq[dev->irq] = 0; /* free it */
@@ -806,7 +807,7 @@ static int msi_free_vector(struct pci_dev* dev, int vector, int reassign)
 {
 	struct msi_desc *entry;
 	int head, entry_nr, type;
-	unsigned long base = 0L;
+	void __iomem *base;
 	unsigned long flags;
 
 	spin_lock_irqsave(&msi_lock, flags);
@@ -857,7 +858,7 @@ static int msi_free_vector(struct pci_dev* dev, int vector, int reassign)
 			phys_addr = pci_resource_start (dev, bir);
 			phys_addr += (u32)(table_offset &
 				~PCI_MSIX_FLAGS_BIRMASK);
-			iounmap((void*)base);
+			iounmap(base);
 			release_mem_region(phys_addr,
 				nr_entries * PCI_MSIX_ENTRY_SIZE);
 		}
@@ -869,8 +870,8 @@ static int msi_free_vector(struct pci_dev* dev, int vector, int reassign)
 static int reroute_msix_table(int head, struct msix_entry *entries, int *nvec)
 {
 	int vector = head, tail = 0;
-	int i = 0, j = 0, nr_entries = 0;
-	unsigned long base = 0L;
+	int i, j = 0, nr_entries = 0;
+	void __iomem *base;
 	unsigned long flags;
 
 	spin_lock_irqsave(&msi_lock, flags);
@@ -982,7 +983,9 @@ int pci_enable_msix(struct pci_dev* dev, struct msix_entry *entries, int nvec)
 	/* Check whether driver already requested for MSI vector */
    	if (pci_find_capability(dev, PCI_CAP_ID_MSI) > 0 &&
 		!msi_lookup_vector(dev, PCI_CAP_ID_MSI)) {
-		printk(KERN_INFO "Can't enable MSI-X. Device already had MSI vector assigned\n");
+		printk(KERN_INFO "PCI: %s: Can't enable MSI-X.  "
+		       "Device already has an MSI vector assigned\n",
+		       pci_name(dev));
 		dev->irq = temp;
 		return -EINVAL;
 	}
@@ -1050,9 +1053,9 @@ void pci_disable_msix(struct pci_dev* dev)
 		spin_unlock_irqrestore(&msi_lock, flags);
 		if (warning) {
 			dev->irq = temp;
-			printk(KERN_DEBUG "Driver[%d:%d:%d] unloaded wo doing free_irq on all vectors\n",
-			dev->bus->number, PCI_SLOT(dev->devfn),
-			PCI_FUNC(dev->devfn));
+			printk(KERN_WARNING "PCI: %s: pci_disable_msix() called without "
+			       "free_irq() on all MSI-X vectors\n",
+			       pci_name(dev));
 			BUG_ON(warning > 0);
 		} else {
 			dev->irq = temp;
@@ -1088,9 +1091,9 @@ void msi_remove_pci_irq_vectors(struct pci_dev* dev)
 		state = msi_desc[dev->irq]->msi_attrib.state;
 		spin_unlock_irqrestore(&msi_lock, flags);
 		if (state) {
-			printk(KERN_DEBUG "Driver[%d:%d:%d] unloaded wo doing free_irq on vector->%d\n",
-			dev->bus->number, PCI_SLOT(dev->devfn),
-			PCI_FUNC(dev->devfn), dev->irq);
+			printk(KERN_WARNING "PCI: %s: msi_remove_pci_irq_vectors() "
+			       "called without free_irq() on MSI vector %d\n",
+			       pci_name(dev), dev->irq);
 			BUG_ON(state > 0);
 		} else /* Release MSI vector assigned to this device */
 			msi_free_vector(dev, dev->irq, 0);
@@ -1099,7 +1102,7 @@ void msi_remove_pci_irq_vectors(struct pci_dev* dev)
    	if ((pos = pci_find_capability(dev, PCI_CAP_ID_MSIX)) > 0 &&
 		!msi_lookup_vector(dev, PCI_CAP_ID_MSIX)) {
 		int vector, head, tail = 0, warning = 0;
-		unsigned long base = 0L;
+		void __iomem *base = NULL;
 
 		vector = head = dev->irq;
 		while (head != tail) {
@@ -1129,12 +1132,12 @@ void msi_remove_pci_irq_vectors(struct pci_dev* dev)
 			phys_addr = pci_resource_start (dev, bir);
 			phys_addr += (u32)(table_offset &
 				~PCI_MSIX_FLAGS_BIRMASK);
-			iounmap((void*)base);
+			iounmap(base);
 			release_mem_region(phys_addr, PCI_MSIX_ENTRY_SIZE *
 				multi_msix_capable(control));
-			printk(KERN_DEBUG "Driver[%d:%d:%d] unloaded wo doing free_irq on all vectors\n",
-				dev->bus->number, PCI_SLOT(dev->devfn),
-				PCI_FUNC(dev->devfn));
+			printk(KERN_WARNING "PCI: %s: msi_remove_pci_irq_vectors() "
+			       "called without free_irq() on all MSI-X vectors\n",
+			       pci_name(dev));
 			BUG_ON(warning > 0);
 		}
 		dev->irq = temp;		/* Restore IOAPIC IRQ */

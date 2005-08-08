@@ -173,6 +173,7 @@
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/bitops.h>
 
 #include <net/ax25.h>
 
@@ -180,7 +181,6 @@
 #include <asm/system.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
-#include <asm/bitops.h>
 
 #include "z8530.h"
 
@@ -237,7 +237,7 @@ static io_port Vector_Latch;
 
 /* These provide interrupt save 2-step access to the Z8530 registers */
 
-static spinlock_t iolock = SPIN_LOCK_UNLOCKED;	/* Guards paired accesses */
+static DEFINE_SPINLOCK(iolock);	/* Guards paired accesses */
 
 static inline unsigned char InReg(io_port port, unsigned char reg)
 {

@@ -405,7 +405,7 @@ static int tower_open (struct inode *inode, struct file *file)
 			  dev->udev,
 			  usb_rcvintpipe(dev->udev, dev->interrupt_in_endpoint->bEndpointAddress),
 			  dev->interrupt_in_buffer,
-			  dev->interrupt_in_endpoint->wMaxPacketSize,
+			  le16_to_cpu(dev->interrupt_in_endpoint->wMaxPacketSize),
 			  tower_interrupt_in_callback,
 			  dev,
 			  dev->interrupt_in_interval);
@@ -505,12 +505,12 @@ static void tower_abort_transfers (struct lego_usb_tower *dev)
 		dev->interrupt_in_running = 0;
 		mb();
 		if (dev->interrupt_in_urb != NULL && dev->udev) {
-			usb_unlink_urb (dev->interrupt_in_urb);
+			usb_kill_urb (dev->interrupt_in_urb);
 		}
 	}
 	if (dev->interrupt_out_busy) {
 		if (dev->interrupt_out_urb != NULL && dev->udev) {
-			usb_unlink_urb (dev->interrupt_out_urb);
+			usb_kill_urb (dev->interrupt_out_urb);
 		}
 	}
 
@@ -859,13 +859,6 @@ static int tower_probe (struct usb_interface *interface, const struct usb_device
 		info ("udev is NULL.");
 	}
 
-	/* See if the device offered us matches what we can accept */
-	if ((udev->descriptor.idVendor != LEGO_USB_TOWER_VENDOR_ID) ||
-	    (udev->descriptor.idProduct != LEGO_USB_TOWER_PRODUCT_ID)) {
-		return -ENODEV;
-	}
-
-
 	/* allocate memory for our device state and intialize it */
 
 	dev = kmalloc (sizeof(struct lego_usb_tower), GFP_KERNEL);
@@ -931,7 +924,7 @@ static int tower_probe (struct usb_interface *interface, const struct usb_device
 		err("Couldn't allocate read_buffer");
 		goto error;
 	}
-	dev->interrupt_in_buffer = kmalloc (dev->interrupt_in_endpoint->wMaxPacketSize, GFP_KERNEL);
+	dev->interrupt_in_buffer = kmalloc (le16_to_cpu(dev->interrupt_in_endpoint->wMaxPacketSize), GFP_KERNEL);
 	if (!dev->interrupt_in_buffer) {
 		err("Couldn't allocate interrupt_in_buffer");
 		goto error;

@@ -20,6 +20,7 @@
 #include <linux/initrd.h>
 #include <linux/swap.h>
 #include <linux/unistd.h>
+#include <linux/nodemask.h>	/* for node_online_map */
 
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
@@ -267,8 +268,6 @@ static void __init setup_bootmem(void)
 		NODE_DATA(i)->bdata = &bmem_data[i];
 	}
 	memset(pfnnid_map, 0xff, sizeof(pfnnid_map));
-
-	numnodes = npmem_ranges;
 
 	for (i = 0; i < npmem_ranges; i++)
 		node_set_online(i);
@@ -750,7 +749,7 @@ map_hpux_gateway_page(struct task_struct *tsk, struct mm_struct *mm)
 #if PTRS_PER_PMD == 1
 	pmd = (pmd_t *)__pa(pg_dir);
 #else
-	pmd = (pmd_t *) (PAGE_MASK & pgd_val(*pg_dir));
+	pmd = (pmd_t *) pgd_address(*pg_dir);
 
 	/*
 	 * pmd is physical at this point
@@ -761,7 +760,7 @@ map_hpux_gateway_page(struct task_struct *tsk, struct mm_struct *mm)
 		pmd = (pmd_t *) __pa(pmd);
 	}
 
-	pgd_val(*pg_dir) = _PAGE_TABLE | (unsigned long) pmd;
+	__pgd_val_set(*pg_dir, PxD_FLAG_PRESENT | PxD_FLAG_VALID | (unsigned long) pmd);
 #endif
 	/* now change pmd to kernel virtual addresses */
 
@@ -771,11 +770,11 @@ map_hpux_gateway_page(struct task_struct *tsk, struct mm_struct *mm)
 	 * pg_table is physical at this point
 	 */
 
-	pg_table = (pte_t *) (PAGE_MASK & pmd_val(*pmd));
+	pg_table = (pte_t *) pmd_address(*pmd);
 	if (!pg_table)
 		pg_table = (pte_t *) __pa(get_zeroed_page(GFP_KERNEL));
 
-	pmd_val(*pmd) = _PAGE_TABLE | (unsigned long) pg_table;
+	__pmd_val_set(*pmd, PxD_FLAG_PRESENT | PxD_FLAG_VALID | (unsigned long) pg_table);
 
 	/* now change pg_table to kernel virtual addresses */
 
@@ -804,19 +803,21 @@ void __init paging_init(void)
 		   ZONE_DMA zone. */
 		zones_size[ZONE_DMA] = pmem_ranges[i].pages;
 
-		free_area_init_node(i, NODE_DATA(i), zones_size,
-				pmem_ranges[i].start_pfn, 0);
-
 #ifdef CONFIG_DISCONTIGMEM
+		/* Need to initialize the pfnnid_map before we can initialize
+		   the zone */
 		{
 		    int j;
-		    for (j = (node_start_pfn(i) >> PFNNID_SHIFT);
-			 j <= (node_end_pfn(i) >> PFNNID_SHIFT);
+		    for (j = (pmem_ranges[i].start_pfn >> PFNNID_SHIFT);
+			 j <= ((pmem_ranges[i].start_pfn + pmem_ranges[i].pages) >> PFNNID_SHIFT);
 			 j++) {
 			pfnnid_map[j] = i;
 		    }
 		}
 #endif
+
+		free_area_init_node(i, NODE_DATA(i), zones_size,
+				pmem_ranges[i].start_pfn, NULL);
 	}
 }
 
@@ -852,7 +853,7 @@ static unsigned long space_id_index;
 static unsigned long free_space_ids = NR_SPACE_IDS - 1;
 static unsigned long dirty_space_ids = 0;
 
-static spinlock_t sid_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(sid_lock);
 
 unsigned long alloc_sid(void)
 {

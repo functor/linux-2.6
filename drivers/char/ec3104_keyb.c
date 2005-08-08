@@ -43,9 +43,9 @@
 #include <linux/slab.h>
 #include <linux/kbd_kern.h>
 #include <linux/smp_lock.h>
+#include <linux/bitops.h>
 
 #include <asm/keyboard.h>
-#include <asm/bitops.h>
 #include <asm/uaccess.h>
 #include <asm/irq.h>
 #include <asm/system.h>
@@ -92,7 +92,7 @@ static void aux_write_ack(int val);
 static void __aux_write_ack(int val);
 #endif
 
-static spinlock_t kbd_controller_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(kbd_controller_lock);
 static unsigned char handle_kbd_event(void);
 
 /* used only by send_data - set by keyboard_interrupt */

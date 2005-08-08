@@ -32,9 +32,11 @@
 #include <linux/buffer_head.h>		/* for fsync_super() */
 #include <linux/mount.h>
 #include <linux/security.h>
+#include <linux/syscalls.h>
 #include <linux/vfs.h>
 #include <linux/writeback.h>		/* for the emergency remount stuff */
 #include <linux/idr.h>
+#include <linux/kobject.h>
 #include <linux/devpts_fs.h>
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
@@ -45,7 +47,7 @@ void put_filesystem(struct file_system_type *fs);
 struct file_system_type *get_fs_type(const char *name);
 
 LIST_HEAD(super_blocks);
-spinlock_t sb_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(sb_lock);
 
 /**
  *	alloc_super	-	create new superblock
@@ -70,6 +72,7 @@ static struct super_block *alloc_super(void)
 		INIT_LIST_HEAD(&s->s_files);
 		INIT_LIST_HEAD(&s->s_instances);
 		INIT_HLIST_HEAD(&s->s_anon);
+		INIT_LIST_HEAD(&s->s_inodes);
 		init_rwsem(&s->s_umount);
 		sema_init(&s->s_lock, 1);
 		down_write(&s->s_umount);
@@ -84,6 +87,7 @@ static struct super_block *alloc_super(void)
 		s->dq_op = sb_dquot_ops;
 		s->s_qcop = sb_quotactl_ops;
 		s->s_op = &default_op;
+		s->s_time_gran = 1000000000;
 	}
 out:
 	return s;
@@ -232,10 +236,10 @@ void generic_shutdown_super(struct super_block *sb)
 		dput(root);
 		fsync_super(sb);
 		lock_super(sb);
-		lock_kernel();
 		sb->s_flags &= ~MS_ACTIVE;
 		/* bad name - it should be evict_inodes() */
 		invalidate_inodes(sb);
+		lock_kernel();
 
 		if (sop->write_super && sb->s_dirt)
 			sop->write_super(sb);
@@ -588,7 +592,7 @@ void emergency_remount(void)
  */
 
 static struct idr unnamed_dev_idr;
-static spinlock_t unnamed_dev_lock = SPIN_LOCK_UNLOCKED;/* protects the above */
+static DEFINE_SPINLOCK(unnamed_dev_lock);/* protects the above */
 
 int set_anon_super(struct super_block *s, void *data)
 {
@@ -657,6 +661,16 @@ static int test_bdev_super(struct super_block *s, void *data)
 	return (void *)s->s_bdev == data;
 }
 
+static void bdev_uevent(struct block_device *bdev, enum kobject_action action)
+{
+	if (bdev->bd_disk) {
+		if (bdev->bd_part)
+			kobject_uevent(&bdev->bd_part->kobj, action, NULL);
+		else
+			kobject_uevent(&bdev->bd_disk->kobj, action, NULL);
+	}
+}
+
 struct super_block *get_sb_bdev(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data,
 	int (*fill_super)(struct super_block *, void *, int))
@@ -699,8 +713,10 @@ struct super_block *get_sb_bdev(struct file_system_type *fs_type,
 			up_write(&s->s_umount);
 			deactivate_super(s);
 			s = ERR_PTR(error);
-		} else
+		} else {
 			s->s_flags |= MS_ACTIVE;
+			bdev_uevent(bdev, KOBJ_MOUNT);
+		}
 	}
 
 	return s;
@@ -715,6 +731,8 @@ EXPORT_SYMBOL(get_sb_bdev);
 void kill_block_super(struct super_block *sb)
 {
 	struct block_device *bdev = sb->s_bdev;
+
+	bdev_uevent(bdev, KOBJ_UMOUNT);
 	generic_shutdown_super(sb);
 	set_blocksize(bdev, sb->s_old_blocksize);
 	close_bdev_excl(bdev);
@@ -781,7 +799,7 @@ struct vfsmount *
 do_kern_mount(const char *fstype, int flags, const char *name, void *data)
 {
 	struct file_system_type *type = get_fs_type(fstype);
-	struct super_block *sb = ERR_PTR(-ENOMEM);
+	struct super_block *sb;
 	struct vfsmount *mnt;
 	int error;
 	char *secdata = NULL;
@@ -789,6 +807,12 @@ do_kern_mount(const char *fstype, int flags, const char *name, void *data)
 	if (!type)
 		return ERR_PTR(-ENODEV);
 
+	sb = ERR_PTR(-EPERM);
+	if ((type->fs_flags & FS_BINARY_MOUNTDATA) &&
+		!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_BINARY_MOUNT))
+		goto out;
+
+	sb = ERR_PTR(-ENOMEM);
 	mnt = alloc_vfsmnt(name);
 	if (!mnt)
 		goto out;

@@ -47,7 +47,7 @@ static DECLARE_MUTEX(nf_sockopt_mutex);
 
 struct list_head nf_hooks[NPROTO][NF_MAX_HOOKS];
 static LIST_HEAD(nf_sockopts);
-static spinlock_t nf_hook_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(nf_hook_lock);
 
 /* 
  * A queue handler may be registered for each protocol.  Each is protected by
@@ -58,7 +58,7 @@ static struct nf_queue_handler_t {
 	nf_queue_outfn_t outfn;
 	void *data;
 } queue_handler[NPROTO];
-static rwlock_t queue_handler_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(queue_handler_lock);
 
 int nf_register_hook(struct nf_hook_ops *reg)
 {
@@ -173,7 +173,7 @@ static void debug_print_hooks_ip(unsigned int nf_debug)
 	printk("\n");
 }
 
-void nf_dump_skb(int pf, struct sk_buff *skb)
+static void nf_dump_skb(int pf, struct sk_buff *skb)
 {
 	printk("skb: pf=%i %s dev=%s len=%u\n", 
 	       pf,
@@ -673,6 +673,7 @@ int ip_route_me_harder(struct sk_buff **pskb)
 
 	return 0;
 }
+EXPORT_SYMBOL(ip_route_me_harder);
 
 int skb_ip_make_writable(struct sk_buff **pskb, unsigned int writable_len)
 {
@@ -743,7 +744,7 @@ EXPORT_SYMBOL(skb_ip_make_writable);
 
 static nf_logfn *nf_logging[NPROTO]; /* = NULL */
 static int reported = 0;
-static spinlock_t nf_log_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(nf_log_lock);
 
 int nf_log_register(int pf, nf_logfn *logfn)
 {
@@ -751,10 +752,9 @@ int nf_log_register(int pf, nf_logfn *logfn)
 
 	/* Any setup of logging members must be done before
 	 * substituting pointer. */
-	smp_wmb();
 	spin_lock(&nf_log_lock);
 	if (!nf_logging[pf]) {
-		nf_logging[pf] = logfn;
+		rcu_assign_pointer(nf_logging[pf], logfn);
 		ret = 0;
 	}
 	spin_unlock(&nf_log_lock);
@@ -802,11 +802,20 @@ EXPORT_SYMBOL(nf_log_register);
 EXPORT_SYMBOL(nf_log_unregister);
 EXPORT_SYMBOL(nf_log_packet);
 
-/* This does not belong here, but ipt_REJECT needs it if connection
-   tracking in use: without this, connection may not be in hash table,
-   and hence manufactured ICMP or RST packets will not be associated
-   with it. */
+/* This does not belong here, but locally generated errors need it if connection
+   tracking in use: without this, connection may not be in hash table, and hence
+   manufactured ICMP or RST packets will not be associated with it. */
 void (*ip_ct_attach)(struct sk_buff *, struct sk_buff *);
+
+void nf_ct_attach(struct sk_buff *new, struct sk_buff *skb)
+{
+	void (*attach)(struct sk_buff *, struct sk_buff *);
+
+	if (skb->nfct && (attach = ip_ct_attach) != NULL) {
+		mb(); /* Just to be sure: must be read before executing this */
+		attach(new, skb);
+	}
+}
 
 void __init netfilter_init(void)
 {
@@ -819,7 +828,7 @@ void __init netfilter_init(void)
 }
 
 EXPORT_SYMBOL(ip_ct_attach);
-EXPORT_SYMBOL(ip_route_me_harder);
+EXPORT_SYMBOL(nf_ct_attach);
 EXPORT_SYMBOL(nf_getsockopt);
 EXPORT_SYMBOL(nf_hook_slow);
 EXPORT_SYMBOL(nf_hooks);

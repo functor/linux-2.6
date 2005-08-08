@@ -43,15 +43,14 @@ static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
 static int ac97_clock[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 48000};
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for ATI IXP controller.");
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for ATI IXP controller.");
-module_param_array(enable, bool, boot_devs, 0444);
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable audio part of ATI IXP controller.");
-module_param_array(ac97_clock, int, boot_devs, 0444);
+module_param_array(ac97_clock, int, NULL, 0444);
 MODULE_PARM_DESC(ac97_clock, "AC'97 codec clock (default 48000Hz).");
 
 
@@ -248,7 +247,6 @@ struct snd_atiixp {
 	ac97_t *ac97[NUM_ATI_CODECS];
 
 	spinlock_t reg_lock;
-	spinlock_t ac97_lock;
 
 	atiixp_dma_t dmas[NUM_ATI_DMAS];
 	struct ac97_pcm *pcms[NUM_ATI_PCMS];
@@ -458,20 +456,14 @@ static void snd_atiixp_codec_write(atiixp_t *chip, unsigned short codec, unsigne
 static unsigned short snd_atiixp_ac97_read(ac97_t *ac97, unsigned short reg)
 {
 	atiixp_t *chip = ac97->private_data;
-	unsigned short data;
-	spin_lock(&chip->ac97_lock);
-	data = snd_atiixp_codec_read(chip, ac97->num, reg);
-	spin_unlock(&chip->ac97_lock);
-	return data;
+	return snd_atiixp_codec_read(chip, ac97->num, reg);
     
 }
 
 static void snd_atiixp_ac97_write(ac97_t *ac97, unsigned short reg, unsigned short val)
 {
 	atiixp_t *chip = ac97->private_data;
-	spin_lock(&chip->ac97_lock);
 	snd_atiixp_codec_write(chip, ac97->num, reg, val);
-	spin_unlock(&chip->ac97_lock);
 }
 
 /*
@@ -1132,7 +1124,6 @@ static int snd_atiixp_suspend(snd_card_t *card, unsigned int state)
 
 	pci_set_power_state(chip->pci, 3);
 	pci_disable_device(chip->pci);
-	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	return 0;
 }
 
@@ -1143,6 +1134,7 @@ static int snd_atiixp_resume(snd_card_t *card, unsigned int state)
 
 	pci_enable_device(chip->pci);
 	pci_set_power_state(chip->pci, 0);
+	pci_set_master(chip->pci);
 
 	snd_atiixp_aclink_reset(chip);
 	snd_atiixp_chip_start(chip);
@@ -1151,7 +1143,6 @@ static int snd_atiixp_resume(snd_card_t *card, unsigned int state)
 		if (chip->ac97[i])
 			snd_ac97_resume(chip->ac97[i]);
 
-	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	return 0;
 }
 #endif /* CONFIG_PM */
@@ -1196,6 +1187,7 @@ static int snd_atiixp_free(atiixp_t *chip)
 	if (chip->remap_addr)
 		iounmap(chip->remap_addr);
 	pci_release_regions(chip->pci);
+	pci_disable_device(chip->pci);
 	kfree(chip);
 	return 0;
 }
@@ -1223,22 +1215,24 @@ static int __devinit snd_atiixp_create(snd_card_t *card,
 		return err;
 
 	chip = kcalloc(1, sizeof(*chip), GFP_KERNEL);
-	if (chip == NULL)
+	if (chip == NULL) {
+		pci_disable_device(pci);
 		return -ENOMEM;
+	}
 
 	spin_lock_init(&chip->reg_lock);
-	spin_lock_init(&chip->ac97_lock);
 	init_MUTEX(&chip->open_mutex);
 	chip->card = card;
 	chip->pci = pci;
 	chip->irq = -1;
 	if ((err = pci_request_regions(pci, "ATI IXP MC97")) < 0) {
 		kfree(chip);
+		pci_disable_device(pci);
 		return err;
 	}
 	chip->addr = pci_resource_start(pci, 0);
 	chip->remap_addr = ioremap_nocache(chip->addr, pci_resource_len(pci, 0));
-	if (chip->remap_addr == 0) {
+	if (chip->remap_addr == NULL) {
 		snd_printk(KERN_ERR "AC'97 space ioremap problem\n");
 		snd_atiixp_free(chip);
 		return -EIO;

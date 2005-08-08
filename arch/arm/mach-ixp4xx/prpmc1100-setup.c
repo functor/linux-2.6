@@ -8,6 +8,7 @@
  * Author: Deepak Saxena <dsaxena@plexity.net>
  */
 
+#include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/device.h>
 #include <linux/serial.h>
@@ -79,7 +80,9 @@ static struct platform_device *prpmc1100_devices[] __initdata = {
 
 static void __init prpmc1100_init(void)
 {
-	platform_add_devices(&prpmc1100_devices, ARRAY_SIZE(prpmc1100_devices));
+	ixp4xx_sys_init();
+
+	platform_add_devices(prpmc1100_devices, ARRAY_SIZE(prpmc1100_devices));
 }
 
 MACHINE_START(PRPMC1100, "Motorola PrPMC1100")
@@ -88,7 +91,7 @@ MACHINE_START(PRPMC1100, "Motorola PrPMC1100")
                 IXP4XX_PERIPHERAL_BASE_VIRT)
         MAPIO(prpmc1100_map_io)
         INITIRQ(ixp4xx_init_irq)
-	INITTIME(ixp4xx_init_time)
+	.timer		= &ixp4xx_timer,
         BOOT_PARAMS(0x0100)
 	INIT_MACHINE(prpmc1100_init)
 MACHINE_END

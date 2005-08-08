@@ -26,8 +26,10 @@
 #include <linux/module.h>
 #include <linux/list.h>
 #include <linux/pci.h>
+#include <linux/dma-mapping.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/dmapool.h>
 #include <linux/mempool.h>
 #include <linux/spinlock.h>
 #include <linux/completion.h>
@@ -87,13 +89,9 @@
 
 #if defined(CONFIG_SCSI_QLA6312) || defined(CONFIG_SCSI_QLA6312_MODULE)
 #define IS_QLA6312(ha)	((ha)->pdev->device == PCI_DEVICE_ID_QLOGIC_ISP6312)
-#else
-#define IS_QLA6312(ha)	0
-#endif
-
-#if defined(CONFIG_SCSI_QLA6322) || defined(CONFIG_SCSI_QLA6322_MODULE)
 #define IS_QLA6322(ha)	((ha)->pdev->device == PCI_DEVICE_ID_QLOGIC_ISP6322)
 #else
+#define IS_QLA6312(ha)	0
 #define IS_QLA6322(ha)	0
 #endif
 
@@ -232,6 +230,7 @@
 /* ISP request and response entry counts (37-65535) */
 #define REQUEST_ENTRY_CNT_2100		128	/* Number of request entries. */
 #define REQUEST_ENTRY_CNT_2200		2048	/* Number of request entries. */
+#define REQUEST_ENTRY_CNT_2XXX_EXT_MEM	4096	/* Number of request entries. */
 #define RESPONSE_ENTRY_CNT_2100		64	/* Number of response entries.*/
 #define RESPONSE_ENTRY_CNT_2300		512	/* Number of response entries.*/
 
@@ -343,6 +342,8 @@ typedef volatile struct {
 	volatile uint16_t nvram;	/* NVRAM register. */
 #define NVR_DESELECT		0
 #define NVR_BUSY		BIT_15
+#define NVR_WRT_ENABLE		BIT_14	/* Write enable */
+#define NVR_PR_ENABLE		BIT_13	/* Protection register enable */
 #define NVR_DATA_IN		BIT_3
 #define NVR_DATA_OUT		BIT_2
 #define NVR_SELECT		BIT_1
@@ -1023,9 +1024,27 @@ typedef struct {
 	uint8_t	 special_options[2];
 
 	/* Reserved for expanded RISC parameter block */
-	uint8_t reserved_2[24];
+	uint8_t reserved_2[22];
 
 	/*
+	 * LSB BIT 0 = Tx Sensitivity 1G bit 0
+	 * LSB BIT 1 = Tx Sensitivity 1G bit 1
+	 * LSB BIT 2 = Tx Sensitivity 1G bit 2
+	 * LSB BIT 3 = Tx Sensitivity 1G bit 3
+	 * LSB BIT 4 = Rx Sensitivity 1G bit 0
+	 * LSB BIT 5 = Rx Sensitivity 1G bit 1
+	 * LSB BIT 6 = Rx Sensitivity 1G bit 2
+	 * LSB BIT 7 = Rx Sensitivity 1G bit 3
+	 *            
+	 * MSB BIT 0 = Tx Sensitivity 2G bit 0
+	 * MSB BIT 1 = Tx Sensitivity 2G bit 1
+	 * MSB BIT 2 = Tx Sensitivity 2G bit 2
+	 * MSB BIT 3 = Tx Sensitivity 2G bit 3
+	 * MSB BIT 4 = Rx Sensitivity 2G bit 0
+	 * MSB BIT 5 = Rx Sensitivity 2G bit 1
+	 * MSB BIT 6 = Rx Sensitivity 2G bit 2
+	 * MSB BIT 7 = Rx Sensitivity 2G bit 3
+	 *
 	 * LSB BIT 0 = Output Swing 1G bit 0
 	 * LSB BIT 1 = Output Swing 1G bit 1
 	 * LSB BIT 2 = Output Swing 1G bit 2
@@ -1044,7 +1063,7 @@ typedef struct {
 	 * MSB BIT 6 =
 	 * MSB BIT 7 =
 	 */
-	uint8_t seriallink_options[2];
+	uint8_t seriallink_options[4];
 
 	/*
 	 * NVRAM host parameter block
@@ -1080,13 +1099,13 @@ typedef struct {
 	uint8_t alternate_node_name[WWN_SIZE];
 
 	/*
-	 * BIT 0 = Boot Zoning
+	 * BIT 0 = Selective Login
 	 * BIT 1 = Alt-Boot Enable
-	 * BIT 2 = Report SCSI Path
-	 * BIT 3 = unused
-	 * BIT 4 = unused
-	 * BIT 5 = unused
-	 * BIT 6 = unused
+	 * BIT 2 =
+	 * BIT 3 = Boot Order List
+	 * BIT 4 =
+	 * BIT 5 = Selective LUN
+	 * BIT 6 =
 	 * BIT 7 = unused
 	 */
 	uint8_t efi_parameters;
@@ -1356,6 +1375,7 @@ typedef struct {
 /*
  * Status entry status flags
  */
+#define SF_ABTS_TERMINATED	BIT_10
 #define SF_LOGOUT_SENT		BIT_13
 
 /*
@@ -1614,6 +1634,7 @@ typedef struct os_lun {
     	spinlock_t q_lock;		/* Lun Lock */
 
 	unsigned long q_flag;
+#define LUN_MPIO_RESET_CNTS	1	/* Lun */
 #define LUN_MPIO_BUSY		2	/* Lun is changing paths  */
 #define LUN_EXEC_DELAYED	7	/* Lun execution is delayed */
 
@@ -1736,6 +1757,8 @@ typedef struct fc_port {
 #define FCF_MSA_PORT_ACTIVE	BIT_20
 #define FCF_FAILBACK_DISABLE	BIT_21
 #define FCF_FAILOVER_DISABLE	BIT_22
+#define FCF_DSXXX_DEVICE	BIT_23
+#define FCF_AA_EVA_DEVICE	BIT_24
 
 /* No loop ID flag. */
 #define FC_NO_LOOP_ID		0x1000
@@ -2028,6 +2051,16 @@ struct qla_board_info {
 	struct qla_fw_info *fw_info;
 };
 
+/* Return data from MBC_GET_ID_LIST call. */
+struct gid_list_info {
+	uint8_t	al_pa;
+	uint8_t	area;
+	uint8_t	domain;		
+	uint8_t	loop_id_2100;	/* ISP2100/ISP2200 -- 4 bytes. */
+	uint16_t loop_id;	/* ISP23XX         -- 6 bytes. */
+};
+#define GID_LIST_SIZE (sizeof(struct gid_list_info) * MAX_FIBRE_DEVICES)
+
 /*
  * Linux Host Adapter structure
  */
@@ -2057,6 +2090,7 @@ typedef struct scsi_qla_host {
 		uint32_t	enable_lip_reset	:1;
 		uint32_t	enable_lip_full_login	:1;
 		uint32_t	enable_target_reset	:1;
+		uint32_t	enable_led_scheme	:1;
 	} flags;
 
 	atomic_t	loop_state;
@@ -2092,6 +2126,7 @@ typedef struct scsi_qla_host {
 #define FCPORT_RESCAN_NEEDED	21      /* IO descriptor processing needed */
 #define IODESC_PROCESS_NEEDED	22      /* IO descriptor processing needed */
 #define IOCTL_ERROR_RECOVERY	23      
+#define LOOP_RESET_NEEDED	24
 
 	uint32_t	device_flags;
 #define DFLG_LOCAL_DEVICES		BIT_0
@@ -2113,11 +2148,9 @@ typedef struct scsi_qla_host {
 
 	spinlock_t		hardware_lock ____cacheline_aligned;
 
-	device_reg_t	*iobase;		/* Base I/O address */
+	device_reg_t __iomem *iobase;		/* Base I/O address */
 	unsigned long	pio_address;
 	unsigned long	pio_length;
-	void *		mmio_address;
-	unsigned long	mmio_length;
 #define MIN_IOBASE_LEN		0x100
 
 	/* ISP ring lock, rings, and indexes */
@@ -2239,8 +2272,6 @@ typedef struct scsi_qla_host {
 
 	struct io_descriptor	io_descriptors[MAX_IO_DESCRIPTORS];
 	uint16_t		iodesc_signature;
-	port_database_t		*iodesc_pd;
-	dma_addr_t		iodesc_pd_dma;
 
 	/* OS target queue pointers. */
 	os_tgt_t		*otgt[MAX_FIBRE_DEVICES];
@@ -2275,10 +2306,22 @@ typedef struct scsi_qla_host {
 	uint32_t        timer_active;
 	struct timer_list        timer;
 
-	/* Firmware Initialization Control Block data */
-	dma_addr_t	init_cb_dma;         /* Physical address. */
+	dma_addr_t	gid_list_dma;
+	struct gid_list_info *gid_list;
+
+	dma_addr_t	rlc_rsp_dma;
+	rpt_lun_cmd_rsp_t *rlc_rsp;
+
+	/* Small DMA pool allocations -- maximum 256 bytes in length. */ 
+#define DMA_POOL_SIZE	256
+	struct dma_pool *s_dma_pool;
+
+	dma_addr_t	init_cb_dma;
 	init_cb_t       *init_cb;
-  
+
+	dma_addr_t	iodesc_pd_dma;
+	port_database_t *iodesc_pd;
+
 	/* These are used by mailbox operations. */
 	volatile uint16_t mailbox_out[MAILBOX_REGISTER_COUNT];
 
@@ -2326,7 +2369,7 @@ typedef struct scsi_qla_host {
 	uint32_t	fw_transfer_size;
 
 	uint16_t	fw_options[16];		/* slots: 1,2,3,10,11 */
-	uint8_t		fw_seriallink_options[2];
+	uint8_t		fw_seriallink_options[4];
 
 	/* Firmware dump information. */
 	void		*fw_dump;

@@ -20,6 +20,7 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 #include <asm/pgalloc.h>
+#include <linux/vs_memory.h>
 
 /*
  * TLB handling.  This allows us to remove pages from the page
@@ -91,5 +92,7 @@ tlb_is_full_mm(struct mmu_gather *tlb)
 #define tlb_remove_page(tlb,page)	free_page_and_swap_cache(page)
 #define pte_free_tlb(tlb,ptep)		pte_free(ptep)
 #define pmd_free_tlb(tlb,pmdp)		pmd_free(pmdp)
+
+#define tlb_migrate_finish(mm)		do { } while (0)
 
 #endif

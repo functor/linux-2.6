@@ -24,8 +24,7 @@
 #include <linux/list.h>
 #include <linux/security.h>
 #include <linux/sched.h>
-#include <linux/vs_base.h>
-
+#include <linux/syscalls.h>
 #include <asm/current.h>
 #include <asm/uaccess.h>
 #include "util.h"
@@ -98,7 +97,7 @@ static int newque (key_t key, int msgflg)
 
 	msq->q_perm.mode = (msgflg & S_IRWXUGO);
 	msq->q_perm.key = key;
-	msq->q_perm.xid = current->xid;
+	msq->q_perm.xid = vx_current_xid();
 
 	msq->q_perm.security = NULL;
 	retval = security_msg_queue_alloc(msq);
@@ -383,7 +382,7 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds __user *buf)
 		int success_return;
 		if (!buf)
 			return -EFAULT;
-		if(cmd == MSG_STAT && msqid >= msg_ids.size)
+		if(cmd == MSG_STAT && msqid >= msg_ids.entries->size)
 			return -EINVAL;
 
 		memset(&tbuf,0,sizeof(tbuf));

@@ -57,7 +57,6 @@ struct mmc_data {
 	unsigned int		timeout_clks;	/* data timeout (in clocks) */
 	unsigned int		blksz_bits;	/* data block size */
 	unsigned int		blocks;		/* number of blocks */
-	struct request		*req;		/* request structure */
 	unsigned int		error;		/* data error */
 	unsigned int		flags;
 
@@ -69,6 +68,9 @@ struct mmc_data {
 
 	struct mmc_command	*stop;		/* stop command */
 	struct mmc_request	*mrq;		/* assoicated request */
+
+	unsigned int		sg_len;		/* size of scatter list */
+	struct scatterlist	*sg;		/* I/O scatter list */
 };
 
 struct mmc_request {

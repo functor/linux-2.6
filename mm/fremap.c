@@ -14,6 +14,7 @@
 #include <linux/swapops.h>
 #include <linux/rmap.h>
 #include <linux/module.h>
+#include <linux/syscalls.h>
 #include <linux/vs_memory.h>
 
 #include <asm/mmu_context.h>
@@ -61,8 +62,9 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	pgoff_t size;
 	int err = -ENOMEM;
 	pte_t *pte;
-	pgd_t *pgd;
 	pmd_t *pmd;
+	pud_t *pud;
+	pgd_t *pgd;
 	pte_t pte_val;
 
 	pgd = pgd_offset(mm, addr);
@@ -70,8 +72,12 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	if (!vx_rsspages_avail(mm, 1))
 		goto err_unlock;
+	
+	pud = pud_alloc(mm, pgd, addr);
+	if (!pud)
+		goto err_unlock;
 
-	pmd = pmd_alloc(mm, pgd, addr);
+	pmd = pmd_alloc(mm, pud, addr);
 	if (!pmd)
 		goto err_unlock;
 
@@ -117,14 +123,19 @@ int install_file_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 {
 	int err = -ENOMEM;
 	pte_t *pte;
-	pgd_t *pgd;
 	pmd_t *pmd;
+	pud_t *pud;
+	pgd_t *pgd;
 	pte_t pte_val;
 
 	pgd = pgd_offset(mm, addr);
 	spin_lock(&mm->page_table_lock);
+	
+	pud = pud_alloc(mm, pgd, addr);
+	if (!pud)
+		goto err_unlock;
 
-	pmd = pmd_alloc(mm, pgd, addr);
+	pmd = pmd_alloc(mm, pud, addr);
 	if (!pmd)
 		goto err_unlock;
 

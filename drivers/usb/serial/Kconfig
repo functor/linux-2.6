@@ -89,6 +89,21 @@ config USB_SERIAL_DIGI_ACCELEPORT
 	  To compile this driver as a module, choose M here: the
 	  module will be called digi_acceleport.
 
+config USB_SERIAL_CYPRESS_M8
+	tristate "USB Cypress M8 USB Serial Driver"
+	depends on USB_SERIAL && EXPERIMENTAL
+	help
+	  Say Y here if you want to use a device that contains the Cypress
+	  USB to Serial microcontroller, such as the DeLorme Earthmate GPS.
+
+		Attempted SMP support... send bug reports!
+
+	  Supported microcontrollers in the CY4601 family are:
+		CY7C63741 CY7C63742 CY7C63743 CY7C64013
+	
+	  To compile this driver as a module, choose M here: the
+	  module will be called cypress_m8.
+
 config USB_SERIAL_EMPEG
 	tristate "USB Empeg empeg-car Mark I/II Driver"
 	depends on USB_SERIAL
@@ -186,6 +201,29 @@ config USB_SERIAL_EDGEPORT_TI
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called io_ti.
+
+config USB_SERIAL_GARMIN
+       tristate "USB Garmin GPS driver"
+       depends on USB_SERIAL
+       help
+         Say Y here if you want to connect to your Garmin GPS.
+         Should work with most Garmin GPS devices which have a native USB port.
+
+         See <http://sourceforge.net/projects/garmin-gps> for the latest
+         version of the driver.
+
+         To compile this driver as a module, choose M here: the
+         module will be called garmin_gps.
+
+config USB_SERIAL_IPW
+        tristate "USB IPWireless (3G UMTS TDD) Driver (EXPERIMENTAL)"
+	depends on USB_SERIAL && EXPERIMENTAL
+	help
+	  Say Y here if you want to use a IPWireless USB modem such as
+	  the ones supplied by Axity3G/Sentech South Africa.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called ipw.
 
 config USB_SERIAL_KEYSPAN_PDA
 	tristate "USB Keyspan PDA Single Port Serial Driver"
@@ -354,6 +392,16 @@ config USB_SERIAL_SAFE
 config USB_SERIAL_SAFE_PADDED
 	bool "USB Secure Encapsulated Driver - Padded"
 	depends on USB_SERIAL_SAFE
+
+config USB_SERIAL_TI
+	tristate "USB TI 3410/5052 Serial Driver"
+	depends on USB_SERIAL
+	help
+	  Say Y here if you want to use the TI USB 3410 or 5052
+	  serial devices.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called ti_usb_3410_5052.
 
 config USB_SERIAL_CYBERJACK
 	tristate "USB REINER SCT cyberJack pinpad/e-com chipcard reader (EXPERIMENTAL)"

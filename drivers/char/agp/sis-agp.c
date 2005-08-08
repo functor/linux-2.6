@@ -6,6 +6,7 @@
 #include <linux/pci.h>
 #include <linux/init.h>
 #include <linux/agp_backend.h>
+#include <linux/delay.h>
 #include "agp.h"
 
 #define SIS_ATTBASE	0x90
@@ -85,7 +86,7 @@ static void sis_delayed_enable(u32 mode)
 	command |= AGPSTAT_AGP_ENABLE;
 	rate = (command & 0x7) << 2;
 
-	while ((device = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, device)) != NULL) {
+	for_each_pci_dev(device) {
 		u8 agp = pci_find_capability(device, PCI_CAP_ID_AGP);
 		if (!agp)
 			continue;
@@ -102,8 +103,7 @@ static void sis_delayed_enable(u32 mode)
 		 */
 		if (device->device == agp_bridge->dev->device) {
 			printk(KERN_INFO PFX "SiS delay workaround: giving bridge time to recover.\n");
-			set_current_state(TASK_UNINTERRUPTIBLE);
-			schedule_timeout (1+(HZ*10)/1000);
+			msleep(10);
 		}
 	}
 }
@@ -340,6 +340,8 @@ static struct pci_driver agp_sis_pci_driver = {
 
 static int __init agp_sis_init(void)
 {
+	if (agp_off)
+		return -EINVAL;
 	return pci_module_init(&agp_sis_pci_driver);
 }
 
@@ -351,8 +353,8 @@ static void __exit agp_sis_cleanup(void)
 module_init(agp_sis_init);
 module_exit(agp_sis_cleanup);
 
-MODULE_PARM(agp_sis_force_delay,"i");
+module_param(agp_sis_force_delay, bool, 0);
 MODULE_PARM_DESC(agp_sis_force_delay,"forces sis delay hack");
-MODULE_PARM(agp_sis_agp_spec,"i");
+module_param(agp_sis_agp_spec, int, 0);
 MODULE_PARM_DESC(agp_sis_agp_spec,"0=force sis init, 1=force generic agp3 init, default: autodetect");
 MODULE_LICENSE("GPL and additional rights");

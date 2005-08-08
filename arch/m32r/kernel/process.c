@@ -1,6 +1,5 @@
 /*
  *  linux/arch/m32r/kernel/process.c
- *    orig : sh
  *
  *  Copyright (c) 2001, 2002  Hiroyuki Kondo, Hirokazu Takata,
  *                            Hitoshi Yamamoto
@@ -247,8 +246,6 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long spu,
 	unsigned long sp = (unsigned long)tsk->thread_info + THREAD_SIZE;
 	extern void ret_from_fork(void);
 
-	tsk->set_child_tid = tsk->clear_child_tid = NULL;
-
 	/* Copy registers */
 	sp -= sizeof (struct pt_regs);
 	childregs = (struct pt_regs *)sp;
@@ -292,13 +289,16 @@ asmlinkage int sys_fork(unsigned long r0, unsigned long r1, unsigned long r2,
 }
 
 asmlinkage int sys_clone(unsigned long clone_flags, unsigned long newsp,
-	unsigned long r2, unsigned long r3, unsigned long r4, unsigned long r5,
-	unsigned long r6, struct pt_regs regs)
+			 unsigned long parent_tidptr,
+			 unsigned long child_tidptr,
+			 unsigned long r4, unsigned long r5, unsigned long r6,
+			 struct pt_regs regs)
 {
 	if (!newsp)
 		newsp = regs.spu;
 
-	return do_fork(clone_flags, newsp, &regs, 0, NULL, NULL);
+	return do_fork(clone_flags, newsp, &regs, 0,
+		       (int __user *)parent_tidptr, (int __user *)child_tidptr);
 }
 
 /*
@@ -322,9 +322,10 @@ asmlinkage int sys_vfork(unsigned long r0, unsigned long r1, unsigned long r2,
 /*
  * sys_execve() executes a new program.
  */
-asmlinkage int sys_execve(char __user *ufilename, char __user * __user *uargv, char __user * __user *uenvp,
-  unsigned long r3, unsigned long r4, unsigned long r5, unsigned long r6,
-  struct pt_regs regs)
+asmlinkage int sys_execve(char __user *ufilename, char __user * __user *uargv,
+			  char __user * __user *uenvp,
+			  unsigned long r3, unsigned long r4, unsigned long r5,
+			  unsigned long r6, struct pt_regs regs)
 {
 	int error;
 	char *filename;
@@ -335,8 +336,11 @@ asmlinkage int sys_execve(char __user *ufilename, char __user * __user *uargv, c
 		goto out;
 
 	error = do_execve(filename, uargv, uenvp, &regs);
-	if (error == 0)
+	if (error == 0) {
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
+	}
 	putname(filename);
 out:
 	return error;
@@ -353,4 +357,3 @@ unsigned long get_wchan(struct task_struct *p)
 	/* M32R_FIXME */
 	return (0);
 }
-

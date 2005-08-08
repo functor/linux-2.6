@@ -22,32 +22,19 @@
  *
  *-----------------------------------------------------------------------------
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
- * Where this Software is combined with software released under the terms of 
- * the GNU Public License ("GPL") and the terms of the GPL would require the 
- * combined work to also be released under the terms of the GPL, the terms
- * and conditions of this License will apply in addition to those of the
- * GPL with the exception of any terms or conditions of this License that
- * conflict with, or are expressly prohibited by, the GPL.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHORS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef SYM_GLUE_H
@@ -71,13 +58,6 @@
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
 
-#ifndef bzero
-#define bzero(d, n)	memset((d), 0, (n))
-#endif
-
-/*
- *  General driver includes.
- */
 #include "sym_conf.h"
 #include "sym_defs.h"
 #include "sym_misc.h"
@@ -89,7 +69,6 @@
 
 #define SYM_OPT_HANDLE_DIR_UNKNOWN
 #define SYM_OPT_HANDLE_DEVICE_QUEUEING
-#define SYM_OPT_NVRAM_PRE_READ
 #define SYM_OPT_LIMIT_COMMAND_REORDERING
 #define	SYM_OPT_ANNOUNCE_TRANSFER_RATE
 
@@ -107,10 +86,9 @@
 #define	printf(args...)		printk(args)
 
 /*
- *  Insert a delay in micro-seconds and milli-seconds.
+ *  Insert a delay in micro-seconds
  */
 #define sym_udelay(us)	udelay(us)
-#define sym_mdelay(ms)	mdelay(ms)
 
 /*
  *  A 'read barrier' flushes any data that have been prefetched 
@@ -138,14 +116,6 @@
 typedef struct sym_tcb *tcb_p;
 typedef struct sym_lcb *lcb_p;
 typedef struct sym_ccb *ccb_p;
-typedef struct sym_hcb *hcb_p;
-
-/*
- *  Define a reference to the O/S dependent IO request.
- */
-typedef struct scsi_cmnd *cam_ccb_p;	/* Generic */
-typedef struct scsi_cmnd *cam_scsiio_p;/* SCSI I/O */
-
 
 /*
  *  IO functions definition for big/little endian CPU support.
@@ -396,9 +366,6 @@ struct sym_shcb {
 	u_short		io_ws;		/* IO window size		*/
 	int		irq;		/* IRQ number			*/
 
-	SYM_QUEHEAD	wait_cmdq;	/* Awaiting SCSI commands	*/
-	SYM_QUEHEAD	busy_cmdq;	/* Enqueued SCSI commands	*/
-
 	struct timer_list timer;	/* Timer handler link header	*/
 	u_long		lasttime;
 	u_long		settle_time;	/* Resetting the SCSI BUS	*/
@@ -543,7 +510,7 @@ sym_get_cam_status(struct scsi_cmnd *ccb)
 /*
  *  Async handler for negotiations.
  */
-void sym_xpt_async_nego_wide(hcb_p np, int target);
+void sym_xpt_async_nego_wide(struct sym_hcb *np, int target);
 #define sym_xpt_async_nego_sync(np, target)	\
 	sym_announce_transfer_rate(np, target)
 #define sym_xpt_async_nego_ppr(np, target)	\
@@ -552,14 +519,14 @@ void sym_xpt_async_nego_wide(hcb_p np, int target);
 /*
  *  Build CAM result for a successful IO and for a failed IO.
  */
-static __inline void sym_set_cam_result_ok(hcb_p np, ccb_p cp, int resid)
+static __inline void sym_set_cam_result_ok(struct sym_hcb *np, ccb_p cp, int resid)
 {
 	struct scsi_cmnd *cmd = cp->cam_ccb;
 
 	cmd->resid = resid;
 	cmd->result = (((DID_OK) << 16) + ((cp->ssss_status) & 0x7f));
 }
-void sym_set_cam_result_error(hcb_p np, ccb_p cp, int resid);
+void sym_set_cam_result_error(struct sym_hcb *np, ccb_p cp, int resid);
 
 /*
  *  Other O/S specific methods.
@@ -567,13 +534,12 @@ void sym_set_cam_result_error(hcb_p np, ccb_p cp, int resid);
 #define sym_cam_target_id(ccb)	(ccb)->target
 #define sym_cam_target_lun(ccb)	(ccb)->lun
 #define	sym_freeze_cam_ccb(ccb)	do { ; } while (0)
-void sym_xpt_done(hcb_p np, cam_ccb_p ccb);
-void sym_xpt_done2(hcb_p np, cam_ccb_p ccb, int cam_status);
+void sym_xpt_done(struct sym_hcb *np, struct scsi_cmnd *ccb);
 void sym_print_addr (ccb_p cp);
-void sym_xpt_async_bus_reset(hcb_p np);
-void sym_xpt_async_sent_bdr(hcb_p np, int target);
-int  sym_setup_data_and_start (hcb_p np, cam_scsiio_p csio, ccb_p cp);
-void sym_log_bus_error(hcb_p np);
-void sym_sniff_inquiry(hcb_p np, struct scsi_cmnd *cmd, int resid);
+void sym_xpt_async_bus_reset(struct sym_hcb *np);
+void sym_xpt_async_sent_bdr(struct sym_hcb *np, int target);
+int  sym_setup_data_and_start (struct sym_hcb *np, struct scsi_cmnd *csio, ccb_p cp);
+void sym_log_bus_error(struct sym_hcb *np);
+void sym_sniff_inquiry(struct sym_hcb *np, struct scsi_cmnd *cmd, int resid);
 
 #endif /* SYM_GLUE_H */

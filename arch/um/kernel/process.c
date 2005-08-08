@@ -13,13 +13,14 @@
 #include <setjmp.h>
 #include <sys/time.h>
 #include <sys/ptrace.h>
+
+/*Userspace header, must be after sys/ptrace.h, and both must be included. */
+#include <linux/ptrace.h>
+
 #include <sys/wait.h>
 #include <sys/mman.h>
-#include <asm/ptrace.h>
-#include <asm/sigcontext.h>
 #include <asm/unistd.h>
 #include <asm/page.h>
-#include <asm/user.h>
 #include "user_util.h"
 #include "kern_util.h"
 #include "user.h"
@@ -27,6 +28,7 @@
 #include "signal_kern.h"
 #include "signal_user.h"
 #include "sysdep/ptrace.h"
+#include "sysdep/ptrace_user.h"
 #include "sysdep/sigcontext.h"
 #include "irq_user.h"
 #include "ptrace_user.h"
@@ -39,6 +41,7 @@
 #ifdef UML_CONFIG_MODE_SKAS
 #include "skas.h"
 #include "skas_ptrace.h"
+#include "registers.h"
 #endif
 
 void init_new_thread_stack(void *sig_stack, void (*usr1_handler)(int))
@@ -137,14 +140,31 @@ int start_fork_tramp(void *thread_arg, unsigned long temp_stack,
 
 static int ptrace_child(void *arg)
 {
-	int pid = os_getpid();
+	int ret;
+	int pid = os_getpid(), ppid = getppid();
+	int sc_result;
 
 	if(ptrace(PTRACE_TRACEME, 0, 0, 0) < 0){
 		perror("ptrace");
 		os_kill_process(pid, 0);
 	}
 	os_stop_process(pid);
-	_exit(os_getpid() == pid);
+
+	/*This syscall will be intercepted by the parent. Don't call more than
+	 * once, please.*/
+	sc_result = os_getpid();
+
+	if (sc_result == pid)
+		ret = 1; /*Nothing modified by the parent, we are running
+			   normally.*/
+	else if (sc_result == ppid)
+		ret = 0; /*Expected in check_ptrace and check_sysemu when they
+			   succeed in modifying the stack frame*/
+	else
+		ret = 2; /*Serious trouble! This could be caused by a bug in
+			   host 2.6 SKAS3/2.6 patch before release -V6, together
+			   with a bug in the UML code itself.*/
+	_exit(ret);
 }
 
 static int start_ptraced_child(void **stack_out)
@@ -172,18 +192,36 @@ static int start_ptraced_child(void **stack_out)
 	return(pid);
 }
 
-static void stop_ptraced_child(int pid, void *stack, int exitcode)
+/* When testing for SYSEMU support, if it is one of the broken versions, we must
+ * just avoid using sysemu, not panic, but only if SYSEMU features are broken.
+ * So only for SYSEMU features we test mustpanic, while normal host features
+ * must work anyway!*/
+static int stop_ptraced_child(int pid, void *stack, int exitcode, int mustpanic)
 {
-	int status, n;
+	int status, n, ret = 0;
 
 	if(ptrace(PTRACE_CONT, pid, 0, 0) < 0)
 		panic("check_ptrace : ptrace failed, errno = %d", errno);
 	CATCH_EINTR(n = waitpid(pid, &status, 0));
-	if(!WIFEXITED(status) || (WEXITSTATUS(status) != exitcode))
-		panic("check_ptrace : child exited with status 0x%x", status);
+	if(!WIFEXITED(status) || (WEXITSTATUS(status) != exitcode)) {
+		int exit_with = WEXITSTATUS(status);
+		if (exit_with == 2)
+			printk("check_ptrace : child exited with status 2. "
+			       "Serious trouble happening! Try updating your "
+			       "host skas patch!\nDisabling SYSEMU support.");
+		printk("check_ptrace : child exited with exitcode %d, while "
+		      "expecting %d; status 0x%x", exit_with,
+		      exitcode, status);
+		if (mustpanic)
+			panic("\n");
+		else
+			printk("\n");
+		ret = -1;
+	}
 
 	if(munmap(stack, PAGE_SIZE) < 0)
 		panic("check_ptrace : munmap failed, errno = %d", errno);
+	return ret;
 }
 
 static int force_sysemu_disabled = 0;
@@ -200,50 +238,80 @@ __uml_setup("nosysemu", nosysemu_cmd_param,
 		"    SYSEMU is a performance-patch introduced by Laurent Vivier. It changes\n"
 		"    behaviour of ptrace() and helps reducing host context switch rate.\n"
 		"    To make it working, you need a kernel patch for your host, too.\n"
-		"    See http://perso.wanadoo.fr/laurent.vivier/UML/ for further information.\n");
+		"    See http://perso.wanadoo.fr/laurent.vivier/UML/ for further information.\n\n");
 
 static void __init check_sysemu(void)
 {
 	void *stack;
-	int pid, n, status;
-
-	if (mode_tt)
-		return;
+	int pid, syscall, n, status, count=0;
 
 	printk("Checking syscall emulation patch for ptrace...");
 	sysemu_supported = 0;
 	pid = start_ptraced_child(&stack);
-	if(ptrace(PTRACE_SYSEMU, pid, 0, 0) >= 0) {
-		struct user_regs_struct regs;
 
+	if(ptrace(PTRACE_SYSEMU, pid, 0, 0) < 0)
+		goto fail;
+
+	CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
+	if (n < 0)
+		panic("check_sysemu : wait failed, errno = %d", errno);
+	if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP))
+		panic("check_sysemu : expected SIGTRAP, "
+		      "got status = %d", status);
+
+	n = ptrace(PTRACE_POKEUSER, pid, PT_SYSCALL_RET_OFFSET,
+		   os_getpid());
+	if(n < 0)
+		panic("check_sysemu : failed to modify system "
+		      "call return, errno = %d", errno);
+
+	if (stop_ptraced_child(pid, stack, 0, 0) < 0)
+		goto fail_stopped;
+
+	sysemu_supported = 1;
+	printk("OK\n");
+	set_using_sysemu(!force_sysemu_disabled);
+
+	printk("Checking advanced syscall emulation patch for ptrace...");
+	pid = start_ptraced_child(&stack);
+	while(1){
+		count++;
+		if(ptrace(PTRACE_SYSEMU_SINGLESTEP, pid, 0, 0) < 0)
+			goto fail;
 		CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
-		if (n < 0)
+		if(n < 0)
 			panic("check_ptrace : wait failed, errno = %d", errno);
 		if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP))
-			panic("check_ptrace : expected SIGTRAP, "
+			panic("check_ptrace : expected (SIGTRAP|SYSCALL_TRAP), "
 			      "got status = %d", status);
 
-		if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
-			panic("check_ptrace : failed to read child "
-			      "registers, errno = %d", errno);
-		regs.orig_eax = pid;
-		if (ptrace(PTRACE_SETREGS, pid, 0, &regs) < 0)
-			panic("check_ptrace : failed to modify child "
-			      "registers, errno = %d", errno);
-
-		stop_ptraced_child(pid, stack, 0);
-
-		sysemu_supported = 1;
-		printk("found\n");
+		syscall = ptrace(PTRACE_PEEKUSER, pid, PT_SYSCALL_NR_OFFSET,
+				 0);
+		if(syscall == __NR_getpid){
+			if (!count)
+				panic("check_ptrace : SYSEMU_SINGLESTEP doesn't singlestep");
+			n = ptrace(PTRACE_POKEUSER, pid, PT_SYSCALL_RET_OFFSET,
+				   os_getpid());
+			if(n < 0)
+				panic("check_sysemu : failed to modify system "
+				      "call return, errno = %d", errno);
+			break;
+		}
 	}
-	else
-	{
-		stop_ptraced_child(pid, stack, 1);
-		sysemu_supported = 0;
-		printk("missing\n");
-	}
+	if (stop_ptraced_child(pid, stack, 0, 0) < 0)
+		goto fail_stopped;
 
-	set_using_sysemu(!force_sysemu_disabled);
+	sysemu_supported = 2;
+	printk("OK\n");
+
+	if ( !force_sysemu_disabled )
+		set_using_sysemu(sysemu_supported);
+	return;
+
+fail:
+	stop_ptraced_child(pid, stack, 1, 0);
+fail_stopped:
+	printk("missing\n");
 }
 
 void __init check_ptrace(void)
@@ -254,6 +322,9 @@ void __init check_ptrace(void)
 	printk("Checking that ptrace can change system call numbers...");
 	pid = start_ptraced_child(&stack);
 
+	if (ptrace(PTRACE_OLDSETOPTIONS, pid, 0, (void *)PTRACE_O_TRACESYSGOOD) < 0)
+		panic("check_ptrace: PTRACE_SETOPTIONS failed, errno = %d", errno);
+
 	while(1){
 		if(ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0)
 			panic("check_ptrace : ptrace failed, errno = %d", 
@@ -261,8 +332,8 @@ void __init check_ptrace(void)
 		CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
 		if(n < 0)
 			panic("check_ptrace : wait failed, errno = %d", errno);
-		if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP))
-			panic("check_ptrace : expected SIGTRAP, "
+		if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP + 0x80))
+			panic("check_ptrace : expected SIGTRAP + 0x80, "
 			      "got status = %d", status);
 		
 		syscall = ptrace(PTRACE_PEEKUSER, pid, PT_SYSCALL_NR_OFFSET,
@@ -276,7 +347,7 @@ void __init check_ptrace(void)
 			break;
 		}
 	}
-	stop_ptraced_child(pid, stack, 0);
+	stop_ptraced_child(pid, stack, 0, 1);
 	printk("OK\n");
 	check_sysemu();
 }
@@ -304,9 +375,9 @@ void forward_pending_sigio(int target)
 		kill(target, SIGIO);
 }
 
-int can_do_skas(void)
-{
 #ifdef UML_CONFIG_MODE_SKAS
+static inline int check_skas3_ptrace_support(void)
+{
 	struct ptrace_faultinfo fi;
 	void *stack;
 	int pid, n, ret = 1;
@@ -315,37 +386,43 @@ int can_do_skas(void)
 	pid = start_ptraced_child(&stack);
 
 	n = ptrace(PTRACE_FAULTINFO, pid, 0, &fi);
-	if(n < 0){
+	if (n < 0) {
 		if(errno == EIO)
 			printf("not found\n");
-		else printf("No (unexpected errno - %d)\n", errno);
+		else {
+			perror("not found");
+		}
 		ret = 0;
+	} else {
+		printf("found\n");
 	}
-	else printf("found\n");
 
 	init_registers(pid);
-	stop_ptraced_child(pid, stack, 1);
-
-	printf("Checking for /proc/mm...");
-	if(os_access("/proc/mm", OS_ACC_W_OK) < 0){
-		printf("not found\n");
-		ret = 0;
-	}
-	else printf("found\n");
+	stop_ptraced_child(pid, stack, 1, 1);
 
 	return(ret);
-#else
-	return(0);
-#endif
 }
 
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */
+int can_do_skas(void)
+{
+	int ret = 1;
+
+	printf("Checking for /proc/mm...");
+	if (os_access("/proc/mm", OS_ACC_W_OK) < 0) {
+		printf("not found\n");
+		ret = 0;
+		goto out;
+	} else {
+		printf("found\n");
+	}
+
+	ret = check_skas3_ptrace_support();
+out:
+	return ret;
+}
+#else
+int can_do_skas(void)
+{
+	return(0);
+}
+#endif

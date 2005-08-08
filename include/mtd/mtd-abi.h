@@ -1,11 +1,16 @@
 /*
- * $Id: mtd-abi.h,v 1.5 2004/06/22 09:29:35 gleixner Exp $
+ * $Id: mtd-abi.h,v 1.7 2004/11/23 15:37:32 gleixner Exp $
  *
  * Portions of MTD ABI definition which are shared by kernel and user space 
  */
 
 #ifndef __MTD_ABI_H__
 #define __MTD_ABI_H__
+
+#ifndef __KERNEL__ /* Urgh. The whole point of splitting this out into
+		    separate files was to avoid #ifdef __KERNEL__ */
+#define __user
+#endif
 
 struct erase_info_user {
 	uint32_t start;
@@ -35,6 +40,7 @@ struct mtd_oob_buf {
 #define MTD_XIP			32	// eXecute-In-Place possible
 #define MTD_OOB			64	// Out-of-band data (NAND flash)
 #define MTD_ECC			128	// Device capable of automatic ECC
+#define MTD_NO_VIRTBLOCKS	256	// Virtual blocks not allowed
 
 // Some common devices / combinations of capabilities
 #define MTD_CAP_ROM		0

@@ -71,6 +71,10 @@ asmlinkage void do_softirq(void)
 
 	local_irq_save(flags);
 
+	account_system_vtime(current);
+
+	local_bh_disable();
+
 	if (local_softirq_pending()) {
 		/* Get current stack pointer. */
 		asm volatile("la %0,0(15)" : "=a" (old));
@@ -86,12 +90,16 @@ asmlinkage void do_softirq(void)
 				     "   la    15,0(%1)\n"
 				     : : "a" (new), "a" (old),
 				         "a" (__do_softirq)
-				     : "0", "1", "2", "3", "4", "5",
+				     : "0", "1", "2", "3", "4", "5", "14",
 				       "cc", "memory" );
 		} else
 			/* We are already on the async stack. */
 			__do_softirq();
 	}
+
+	account_system_vtime(current);
+
+	__local_bh_enable();
 
 	local_irq_restore(flags);
 }

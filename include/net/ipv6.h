@@ -149,6 +149,8 @@ extern atomic_t			inet6_sock_nr;
 
 int snmp6_register_dev(struct inet6_dev *idev);
 int snmp6_unregister_dev(struct inet6_dev *idev);
+int snmp6_alloc_dev(struct inet6_dev *idev);
+int snmp6_free_dev(struct inet6_dev *idev);
 int snmp6_mib_init(void *ptr[2], size_t mibsize, size_t mibalign);
 void snmp6_mib_free(void *ptr[2]);
 
@@ -229,8 +231,6 @@ extern int 			ip6_ra_control(struct sock *sk, int sel,
 					       void (*destructor)(struct sock *));
 
 
-extern int			ip6_call_ra_chain(struct sk_buff *skb, int sel);
-
 extern int			ipv6_parse_hopopts(struct sk_buff *skb, int);
 
 extern struct ipv6_txoptions *  ipv6_dup_options(struct sock *sk, struct ipv6_txoptions *opt);
@@ -296,6 +296,15 @@ static inline void ipv6_addr_set(struct in6_addr *addr,
 }
 #endif
 
+static inline int ipv6_addr_equal(const struct in6_addr *a1,
+				  const struct in6_addr *a2)
+{
+	return (a1->s6_addr32[0] == a2->s6_addr32[0] &&
+		a1->s6_addr32[1] == a2->s6_addr32[1] &&
+		a1->s6_addr32[2] == a2->s6_addr32[2] &&
+		a1->s6_addr32[3] == a2->s6_addr32[3]);
+}
+
 static inline int ipv6_addr_any(const struct in6_addr *a)
 {
 	return ((a->s6_addr32[0] | a->s6_addr32[1] | 
@@ -355,7 +364,7 @@ extern int			ip6_dst_lookup(struct sock *sk,
  *	skb processing functions
  */
 
-extern int			ip6_output(struct sk_buff **pskb);
+extern int			ip6_output(struct sk_buff *skb);
 extern int			ip6_forward(struct sk_buff *skb);
 extern int			ip6_input(struct sk_buff *skb);
 extern int			ip6_mc_input(struct sk_buff *skb);

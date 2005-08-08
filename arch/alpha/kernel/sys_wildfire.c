@@ -12,12 +12,12 @@
 #include <linux/sched.h>
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/bitops.h>
 
 #include <asm/ptrace.h>
 #include <asm/system.h>
 #include <asm/dma.h>
 #include <asm/irq.h>
-#include <asm/bitops.h>
 #include <asm/mmu_context.h>
 #include <asm/io.h>
 #include <asm/pgtable.h>
@@ -32,7 +32,7 @@
 
 static unsigned long cached_irq_mask[WILDFIRE_NR_IRQS/(sizeof(long)*8)];
 
-spinlock_t wildfire_irq_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(wildfire_irq_lock);
 
 static int doing_init_irq_hw = 0;
 

@@ -234,6 +234,12 @@
   -- Mt Rainier support
   -- DVD-RAM write open fixes
 
+  Nov 5 2001, Aug 8 2002. Modified by Andy Polyakov
+  <appro@fy.chalmers.se> to support MMC-3 compliant DVD+RW units.
+
+  Modified by Nigel Kukard <nkukard@lbsd.net> - support DVD+RW
+  2.4.x patch by Andy Polyakov <appro@fy.chalmers.se>
+
 -------------------------------------------------------------------------*/
 
 #define REVISION "Revision: 3.20"
@@ -290,14 +296,14 @@ static int lockdoor = 1;
 static int check_media_type;
 /* automatically restart mrw format */
 static int mrw_format_restart = 1;
-MODULE_PARM(debug, "i");
-MODULE_PARM(autoclose, "i");
-MODULE_PARM(autoeject, "i");
-MODULE_PARM(lockdoor, "i");
-MODULE_PARM(check_media_type, "i");
-MODULE_PARM(mrw_format_restart, "i");
+module_param(debug, bool, 0);
+module_param(autoclose, bool, 0);
+module_param(autoeject, bool, 0);
+module_param(lockdoor, bool, 0);
+module_param(check_media_type, bool, 0);
+module_param(mrw_format_restart, bool, 0);
 
-static spinlock_t cdrom_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(cdrom_lock);
 
 static const char *mrw_format_status[] = {
 	"not mrw",
@@ -499,7 +505,7 @@ int cdrom_get_media_event(struct cdrom_device_info *cdi,
  * the first prototypes used 0x2c as the page code for the mrw mode page,
  * subsequently this was changed to 0x03. probe the one used by this drive
  */
-int cdrom_mrw_probe_pc(struct cdrom_device_info *cdi)
+static int cdrom_mrw_probe_pc(struct cdrom_device_info *cdi)
 {
 	struct packet_command cgc;
 	char buffer[16];
@@ -520,7 +526,7 @@ int cdrom_mrw_probe_pc(struct cdrom_device_info *cdi)
 	return 1;
 }
 
-int cdrom_is_mrw(struct cdrom_device_info *cdi, int *write)
+static int cdrom_is_mrw(struct cdrom_device_info *cdi, int *write)
 {
 	struct packet_command cgc;
 	struct mrw_feature_desc *mfd;
@@ -540,6 +546,8 @@ int cdrom_is_mrw(struct cdrom_device_info *cdi, int *write)
 		return ret;
 
 	mfd = (struct mrw_feature_desc *)&buffer[sizeof(struct feature_header)];
+	if (be16_to_cpu(mfd->feature_code) != CDF_MRW)
+		return 1;
 	*write = mfd->write;
 
 	if ((ret = cdrom_mrw_probe_pc(cdi))) {
@@ -672,7 +680,7 @@ static int cdrom_mrw_set_lba_space(struct cdrom_device_info *cdi, int space)
 	return 0;
 }
 
-int cdrom_get_random_writable(struct cdrom_device_info *cdi,
+static int cdrom_get_random_writable(struct cdrom_device_info *cdi,
 			      struct rwrt_feature_desc *rfd)
 {
 	struct packet_command cgc;
@@ -693,7 +701,7 @@ int cdrom_get_random_writable(struct cdrom_device_info *cdi,
 	return 0;
 }
 
-int cdrom_has_defect_mgt(struct cdrom_device_info *cdi)
+static int cdrom_has_defect_mgt(struct cdrom_device_info *cdi)
 {
 	struct packet_command cgc;
 	char buffer[16];
@@ -718,7 +726,7 @@ int cdrom_has_defect_mgt(struct cdrom_device_info *cdi)
 }
 
 
-int cdrom_is_random_writable(struct cdrom_device_info *cdi, int *write)
+static int cdrom_is_random_writable(struct cdrom_device_info *cdi, int *write)
 {
 	struct rwrt_feature_desc rfd;
 	int ret;
@@ -848,6 +856,39 @@ static int cdrom_ram_open_write(struct cdrom_device_info *cdi)
 	return ret;
 }
 
+static void cdrom_mmc3_profile(struct cdrom_device_info *cdi)
+{
+	struct packet_command cgc;
+	char buffer[32];
+	int ret, mmc3_profile;
+
+	init_cdrom_command(&cgc, buffer, sizeof(buffer), CGC_DATA_READ);
+
+	cgc.cmd[0] = GPCMD_GET_CONFIGURATION;
+	cgc.cmd[1] = 0;
+	cgc.cmd[2] = cgc.cmd[3] = 0;		/* Starting Feature Number */
+	cgc.cmd[8] = sizeof(buffer);		/* Allocation Length */
+	cgc.quiet = 1;
+
+	if ((ret = cdi->ops->generic_packet(cdi, &cgc)))
+		mmc3_profile = 0xffff;
+	else
+		mmc3_profile = (buffer[6] << 8) | buffer[7];
+
+	cdi->mmc3_profile = mmc3_profile;
+}
+
+static int cdrom_is_dvd_rw(struct cdrom_device_info *cdi)
+{
+	switch (cdi->mmc3_profile) {
+	case 0x12:	/* DVD-RAM	*/
+	case 0x1A:	/* DVD+RW	*/
+		return 0;
+	default:
+		return 1;
+	}
+}
+
 /*
  * returns 0 for ok to open write, non-0 to disallow
  */
@@ -889,8 +930,48 @@ static int cdrom_open_write(struct cdrom_device_info *cdi)
  		ret = cdrom_ram_open_write(cdi);
 	else if (CDROM_CAN(CDC_MO_DRIVE))
 		ret = mo_open_write(cdi);
+	else if (!cdrom_is_dvd_rw(cdi))
+		ret = 0;
 
 	return ret;
+}
+
+static void cdrom_dvd_rw_close_write(struct cdrom_device_info *cdi)
+{
+	struct packet_command cgc;
+
+	if (cdi->mmc3_profile != 0x1a) {
+		cdinfo(CD_CLOSE, "%s: No DVD+RW\n", cdi->name);
+		return;
+	}
+
+	if (!cdi->media_written) {
+		cdinfo(CD_CLOSE, "%s: DVD+RW media clean\n", cdi->name);
+		return;
+	}
+
+	printk(KERN_INFO "cdrom: %s: dirty DVD+RW media, \"finalizing\"\n",
+	       cdi->name);
+
+	init_cdrom_command(&cgc, NULL, 0, CGC_DATA_NONE);
+	cgc.cmd[0] = GPCMD_FLUSH_CACHE;
+	cgc.timeout = 30*HZ;
+	cdi->ops->generic_packet(cdi, &cgc);
+
+	init_cdrom_command(&cgc, NULL, 0, CGC_DATA_NONE);
+	cgc.cmd[0] = GPCMD_CLOSE_TRACK;
+	cgc.timeout = 3000*HZ;
+	cgc.quiet = 1;
+	cdi->ops->generic_packet(cdi, &cgc);
+
+	init_cdrom_command(&cgc, NULL, 0, CGC_DATA_NONE);
+	cgc.cmd[0] = GPCMD_CLOSE_TRACK;
+	cgc.cmd[2] = 2;	 /* Close session */
+	cgc.quiet = 1;
+	cgc.timeout = 3000*HZ;
+	cdi->ops->generic_packet(cdi, &cgc);
+
+	cdi->media_written = 0;
 }
 
 static int cdrom_close_write(struct cdrom_device_info *cdi)
@@ -925,6 +1006,7 @@ int cdrom_open(struct cdrom_device_info *cdi, struct inode *ip, struct file *fp)
 		ret = open_for_data(cdi);
 		if (ret)
 			goto err;
+		cdrom_mmc3_profile(cdi);
 		if (fp->f_mode & FMODE_WRITE) {
 			ret = -EROFS;
 			if (cdrom_open_write(cdi))
@@ -932,6 +1014,7 @@ int cdrom_open(struct cdrom_device_info *cdi, struct inode *ip, struct file *fp)
 			if (!CDROM_CAN(CDC_RAM))
 				goto err;
 			ret = 0;
+			cdi->media_written = 0;
 		}
 	}
 
@@ -993,6 +1076,8 @@ int open_for_data(struct cdrom_device_info * cdi)
 			}
 			cdinfo(CD_OPEN, "the tray is now closed.\n"); 
 		}
+		/* the door should be closed now, check for the disc */
+		ret = cdo->drive_status(cdi, CDSL_CURRENT);
 		if (ret!=CDS_DISC_OK) {
 			ret = -ENOMEDIUM;
 			goto clean_up_and_return;
@@ -1123,6 +1208,8 @@ int cdrom_release(struct cdrom_device_info *cdi, struct file *fp)
 		cdi->use_count--;
 	if (cdi->use_count == 0)
 		cdinfo(CD_CLOSE, "Use count for \"/dev/%s\" now zero\n", cdi->name);
+	if (cdi->use_count == 0)
+		cdrom_dvd_rw_close_write(cdi);
 	if (cdi->use_count == 0 &&
 	    (cdo->capability & CDC_LOCK) && !keeplocked) {
 		cdinfo(CD_CLOSE, "Unlocking door!\n");
@@ -1329,6 +1416,7 @@ int media_changed(struct cdrom_device_info *cdi, int queue)
 	if (cdi->ops->media_changed(cdi, CDSL_CURRENT)) {
 		cdi->mc_flags = 0x3;    /* set bit on both queues */
 		ret |= 1;
+		cdi->media_written = 0;
 	}
 	cdi->mc_flags &= ~mask;         /* clear bit */
 	return ret;
@@ -1790,7 +1878,7 @@ static int dvd_read_manufact(struct cdrom_device_info *cdi, dvd_struct *s)
 	s->manufact.len = buf[0] << 8 | buf[1];
 	if (s->manufact.len < 0 || s->manufact.len > 2048) {
 		cdinfo(CD_WARNING, "Received invalid manufacture info length"
-				   " (%d)\n", s->bca.len);
+				   " (%d)\n", s->manufact.len);
 		ret = -EIO;
 	} else {
 		memcpy(s->manufact.value, &buf[4], s->manufact.len);
@@ -2988,14 +3076,12 @@ EXPORT_SYMBOL(cdrom_mode_select);
 EXPORT_SYMBOL(cdrom_mode_sense);
 EXPORT_SYMBOL(init_cdrom_command);
 EXPORT_SYMBOL(cdrom_get_media_event);
-EXPORT_SYMBOL(cdrom_is_mrw);
-EXPORT_SYMBOL(cdrom_is_random_writable);
 
 #ifdef CONFIG_SYSCTL
 
 #define CDROM_STR_SIZE 1000
 
-struct cdrom_sysctl_settings {
+static struct cdrom_sysctl_settings {
 	char	info[CDROM_STR_SIZE];	/* general info */
 	int	autoclose;		/* close tray upon mount, etc */
 	int	autoeject;		/* eject on umount */
@@ -3004,7 +3090,7 @@ struct cdrom_sysctl_settings {
 	int	check;			/* check media type */
 } cdrom_sysctl_settings;
 
-int cdrom_sysctl_info(ctl_table *ctl, int write, struct file * filp,
+static int cdrom_sysctl_info(ctl_table *ctl, int write, struct file * filp,
                            void __user *buffer, size_t *lenp, loff_t *ppos)
 {
         int pos;
@@ -3107,7 +3193,7 @@ int cdrom_sysctl_info(ctl_table *ctl, int write, struct file * filp,
    procfs/sysctl yet. When they are, this will naturally disappear. For now
    just update all drives. Later this will become the template on which
    new registered drives will be based. */
-void cdrom_update_settings(void)
+static void cdrom_update_settings(void)
 {
 	struct cdrom_device_info *cdi;
 
@@ -3185,7 +3271,7 @@ static int cdrom_sysctl_handler(ctl_table *ctl, int write, struct file * filp,
 }
 
 /* Place files in /proc/sys/dev/cdrom */
-ctl_table cdrom_table[] = {
+static ctl_table cdrom_table[] = {
 	{
 		.ctl_name	= DEV_CDROM_INFO,
 		.procname	= "info",
@@ -3237,7 +3323,7 @@ ctl_table cdrom_table[] = {
 	{ .ctl_name = 0 }
 };
 
-ctl_table cdrom_cdrom_table[] = {
+static ctl_table cdrom_cdrom_table[] = {
 	{
 		.ctl_name	= DEV_CDROM,
 		.procname	= "cdrom",
@@ -3249,8 +3335,7 @@ ctl_table cdrom_cdrom_table[] = {
 };
 
 /* Make sure that /proc/sys/dev is there */
-ctl_table cdrom_root_table[] = {
-#ifdef CONFIG_PROC_FS
+static ctl_table cdrom_root_table[] = {
 	{
 		.ctl_name	= CTL_DEV,
 		.procname	= "dev",
@@ -3258,7 +3343,6 @@ ctl_table cdrom_root_table[] = {
 		.mode		= 0555,
 		.child		= cdrom_cdrom_table,
 	},
-#endif /* CONFIG_PROC_FS */
 	{ .ctl_name = 0 }
 };
 static struct ctl_table_header *cdrom_sysctl_header;

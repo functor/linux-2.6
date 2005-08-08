@@ -39,10 +39,10 @@
 #include "sir-dev.h"
 #include "irtty-sir.h"
 
-MODULE_PARM(qos_mtt_bits, "i");
-MODULE_PARM_DESC(qos_mtt_bits, "Minimum Turn Time");
-
 static int qos_mtt_bits = 0x03;      /* 5 ms or more */
+
+module_param(qos_mtt_bits, int, 0);
+MODULE_PARM_DESC(qos_mtt_bits, "Minimum Turn Time");
 
 /* ------------------------------------------------------- */
 
@@ -234,7 +234,7 @@ static int irtty_do_write(struct sir_dev *dev, const unsigned char *ptr, size_t 
 	}
 	else
 		writelen = len;
-	return tty->driver->write(tty, 0, ptr, writelen);
+	return tty->driver->write(tty, ptr, writelen);
 }
 
 /* ------------------------------------------------------- */

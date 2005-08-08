@@ -29,6 +29,9 @@
  * It is off by default and can be turned on with this module parameter */
 static int xa_test = 0;
 
+module_param(xa_test, int, S_IRUGO | S_IWUSR);
+
+
 #define IOCTL_RETRIES 3
 
 /* ATAPI drives don't have a SCMD_PLAYAUDIO_TI command.  When these drives
@@ -549,5 +552,17 @@ int sr_dev_ioctl(struct cdrom_device_info *cdi,
 		 unsigned int cmd, unsigned long arg)
 {
 	Scsi_CD *cd = cdi->handle;
+	int ret;
+	
+	ret = scsi_nonblockable_ioctl(cd->device, cmd,
+				      (void __user *)arg, NULL);
+	/*
+	 * ENODEV means that we didn't recognise the ioctl, or that we
+	 * cannot execute it in the current device state.  In either
+	 * case fall through to scsi_ioctl, which will return ENDOEV again
+	 * if it doesn't recognise the ioctl
+	 */
+	if (ret != -ENODEV)
+		return ret;
 	return scsi_ioctl(cd->device, cmd, (void __user *)arg);
 }

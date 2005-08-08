@@ -112,11 +112,11 @@
 #include <linux/cdk.h>
 #include <linux/comstats.h>
 #include <linux/delay.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>
 #include <asm/io.h>
 #include <asm/irq.h>
-#include <asm/bitops.h>
 
 #include <linux/vmalloc.h>
 #include <linux/init.h>
@@ -138,7 +138,7 @@
 #include <linux/proc_fs.h>
 
 static int ip2_read_procmem(char *, char **, off_t, int);
-int ip2_read_proc(char *, char **, off_t, int, int *, void * );
+static int ip2_read_proc(char *, char **, off_t, int, int *, void * );
 
 /********************/
 /* Type Definitions */
@@ -202,7 +202,6 @@ static void do_status(void *p);
 static void ip2_wait_until_sent(PTTY,int);
 
 static void set_params (i2ChanStrPtr, struct termios *);
-static int set_modem_info(i2ChanStrPtr, unsigned int, unsigned int *);
 static int get_serial_info(i2ChanStrPtr, struct serial_struct __user *);
 static int set_serial_info(i2ChanStrPtr, struct serial_struct __user *);
 
@@ -1632,8 +1631,7 @@ ip2_close( PTTY tty, struct file *pFile )
 
 	if (pCh->wopen) {
 		if (pCh->ClosingDelay) {
-			current->state = TASK_INTERRUPTIBLE;
-			schedule_timeout(pCh->ClosingDelay);
+			msleep_interruptible(jiffies_to_msecs(pCh->ClosingDelay));
 		}
 		wake_up_interruptible(&pCh->open_wait);
 	}
@@ -3098,7 +3096,7 @@ ip2_read_procmem(char *buf, char **start, off_t offset, int len)
  * different sources including ip2mkdev.c and a couple of other drivers.
  * The bugs are all mine.  :-)	=mhw=
  */
-int ip2_read_proc(char *page, char **start, off_t off,
+static int ip2_read_proc(char *page, char **start, off_t off,
 				int count, int *eof, void *data)
 {
 	int	i, j, box;

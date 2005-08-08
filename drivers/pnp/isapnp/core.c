@@ -58,13 +58,13 @@ int isapnp_verbose = 1;			/* verbose mode */
 
 MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Generic ISA Plug & Play support");
-MODULE_PARM(isapnp_disable, "i");
+module_param(isapnp_disable, int, 0);
 MODULE_PARM_DESC(isapnp_disable, "ISA Plug & Play disable");
-MODULE_PARM(isapnp_rdp, "i");
+module_param(isapnp_rdp, int, 0);
 MODULE_PARM_DESC(isapnp_rdp, "ISA Plug & Play read data port");
-MODULE_PARM(isapnp_reset, "i");
+module_param(isapnp_reset, int, 0);
 MODULE_PARM_DESC(isapnp_reset, "ISA Plug & Play reset all cards");
-MODULE_PARM(isapnp_verbose, "i");
+module_param(isapnp_verbose, int, 0);
 MODULE_PARM_DESC(isapnp_verbose, "ISA Plug & Play verbose mode");
 MODULE_LICENSE("GPL");
 
@@ -477,12 +477,14 @@ static void __init isapnp_parse_irq_resource(struct pnp_option *option,
 {
 	unsigned char tmp[3];
 	struct pnp_irq *irq;
+	unsigned long bits;
 
 	isapnp_peek(tmp, size);
 	irq = isapnp_alloc(sizeof(struct pnp_irq));
 	if (!irq)
 		return;
-	irq->map = (tmp[1] << 8) | tmp[0];
+	bits = (tmp[1] << 8) | tmp[0];
+	bitmap_copy(irq->map, &bits, 16);
 	if (size > 2)
 		irq->flags = tmp[2];
 	else

@@ -52,6 +52,7 @@
 #include <linux/slab.h>
 #include <linux/pci.h>
 #include <linux/vmalloc.h>
+#include <linux/byteorder/generic.h>
 
 #include <linux/interrupt.h>
 #include <linux/i2c.h>
@@ -176,7 +177,7 @@ const struct zoran_format zoran_formats[] = {
 			 ZORAN_FORMAT_COMPRESSED,
 	}
 };
-const int zoran_num_formats =
+static const int zoran_num_formats =
     (sizeof(zoran_formats) / sizeof(struct zoran_format));
 
 // RJ: Test only - want to test BUZ_USE_HIMEM even when CONFIG_BIGPHYS_AREA is defined
@@ -204,7 +205,7 @@ extern int jpg_bufsize;
 extern int pass_through;
 
 static int lock_norm = 0;	/* 1=Don't change TV standard (norm) */
-MODULE_PARM(lock_norm, "i");
+module_param(lock_norm, int, 0);
 MODULE_PARM_DESC(lock_norm, "Users can't change norm");
 
 #ifdef HAVE_V4L2
@@ -265,7 +266,7 @@ get_high_mem (unsigned long size)
  * if more than one driver at a time has the idea to use this memory!!!!
  */
 
-	volatile unsigned char *mem;
+	volatile unsigned char __iomem *mem;
 	unsigned char c;
 	unsigned long hi_mem_ph;
 	unsigned long i;
@@ -285,21 +286,21 @@ get_high_mem (unsigned long size)
 	for (i = 0; i < size; i++) {
 		/* Check if it is memory */
 		c = i & 0xff;
-		mem[i] = c;
-		if (mem[i] != c)
+		writeb(c, mem + i);
+		if (readb(mem + i) != c)
 			break;
 		c = 255 - c;
-		mem[i] = c;
-		if (mem[i] != c)
+		writeb(c, mem + i);
+		if (readb(mem + i) != c)
 			break;
-		mem[i] = 0;	/* zero out memory */
+		writeb(0, mem + i);	/* zero out memory */
 
 		/* give the kernel air to breath */
 		if ((i & 0x3ffff) == 0x3ffff)
 			schedule();
 	}
 
-	iounmap((void *) mem);
+	iounmap(mem);
 
 	if (i != size) {
 		dprintk(1,
@@ -516,6 +517,16 @@ v4l_fbuffer_free (struct file *file)
  *       virtual addresses) and then again have to make a lot of efforts
  *       to get the physical address.
  *
+ *   Ben Capper:
+ *       On big-endian architectures (such as ppc) some extra steps
+ *       are needed. When reading and writing to the stat_com array
+ *       and fragment buffers, the device expects to see little-
+ *       endian values. The use of cpu_to_le32() and le32_to_cpu()
+ *       in this function (and one or two others in zoran_device.c)
+ *       ensure that these values are always stored in little-endian
+ *       form, regardless of architecture. The zr36057 does Very Bad
+ *       Things on big endian architectures if the stat_com array
+ *       and fragment buffers are not little-endian.
  */
 
 static int
@@ -569,9 +580,9 @@ jpg_fbuffer_alloc (struct file *file)
 				return -ENOBUFS;
 			}
 			fh->jpg_buffers.buffer[i].frag_tab[0] =
-			    virt_to_bus((void *) mem);
+			    cpu_to_le32(virt_to_bus((void *) mem));
 			fh->jpg_buffers.buffer[i].frag_tab[1] =
-			    ((fh->jpg_buffers.buffer_size / 4) << 1) | 1;
+			    cpu_to_le32(((fh->jpg_buffers.buffer_size / 4) << 1) | 1);
 			for (off = 0; off < fh->jpg_buffers.buffer_size;
 			     off += PAGE_SIZE)
 				SetPageReserved(MAP_NR(mem + off));
@@ -591,14 +602,14 @@ jpg_fbuffer_alloc (struct file *file)
 				}
 
 				fh->jpg_buffers.buffer[i].frag_tab[2 * j] =
-				    virt_to_bus((void *) mem);
+				    cpu_to_le32(virt_to_bus((void *) mem));
 				fh->jpg_buffers.buffer[i].frag_tab[2 * j +
 								   1] =
-				    (PAGE_SIZE / 4) << 1;
+				    cpu_to_le32((PAGE_SIZE / 4) << 1);
 				SetPageReserved(MAP_NR(mem));
 			}
 
-			fh->jpg_buffers.buffer[i].frag_tab[2 * j - 1] |= 1;
+			fh->jpg_buffers.buffer[i].frag_tab[2 * j - 1] |= cpu_to_le32(1);
 		}
 	}
 
@@ -631,13 +642,8 @@ jpg_fbuffer_free (struct file *file)
 		//if (alloc_contig) {
 		if (fh->jpg_buffers.need_contiguous) {
 			if (fh->jpg_buffers.buffer[i].frag_tab[0]) {
-				mem =
-				    (unsigned char *) bus_to_virt(fh->
-								  jpg_buffers.
-								  buffer
-								  [i].
-								  frag_tab
-								  [0]);
+				mem = (unsigned char *) bus_to_virt(le32_to_cpu(
+					fh->jpg_buffers.buffer[i].frag_tab[0]));
 				for (off = 0;
 				     off < fh->jpg_buffers.buffer_size;
 				     off += PAGE_SIZE)
@@ -656,13 +662,16 @@ jpg_fbuffer_free (struct file *file)
 					break;
 				ClearPageReserved(MAP_NR
 						  (bus_to_virt
-						   (fh->jpg_buffers.
-						    buffer[i].frag_tab[2 *
-								       j])));
+						   (le32_to_cpu
+						    (fh->jpg_buffers.
+						     buffer[i].frag_tab[2 *
+								       j]))));
 				free_page((unsigned long)
-					  bus_to_virt(fh->jpg_buffers.
+					  bus_to_virt
+					          (le32_to_cpu
+						   (fh->jpg_buffers.
 						      buffer[i].
-						      frag_tab[2 * j]));
+						      frag_tab[2 * j])));
 				fh->jpg_buffers.buffer[i].frag_tab[2 * j] =
 				    0;
 				fh->jpg_buffers.buffer[i].frag_tab[2 * j +
@@ -1917,8 +1926,7 @@ zoran_set_norm (struct zoran *zr,
 		decoder_command(zr, DECODER_SET_NORM, &norm);
 
 		/* let changes come into effect */
-		current->state = TASK_UNINTERRUPTIBLE;
-		schedule_timeout(2 * HZ);
+		ssleep(2);
 
 		decoder_command(zr, DECODER_GET_STATUS, &status);
 		if (!(status & DECODER_STATUS_GOOD)) {
@@ -2006,6 +2014,8 @@ zoran_do_ioctl (struct inode *inode,
 {
 	struct zoran_fh *fh = file->private_data;
 	struct zoran *zr = fh->zr;
+	/* CAREFUL: used in multiple places here */
+	struct zoran_jpg_settings settings;
 
 	/* we might have older buffers lying around... We don't want
 	 * to wait, but we do want to try cleaning them up ASAP. So
@@ -2454,7 +2464,6 @@ zoran_do_ioctl (struct inode *inode,
 	case BUZIOC_S_PARAMS:
 	{
 		struct zoran_params *bparams = arg;
-		struct zoran_jpg_settings settings;
 		int res = 0;
 
 		dprintk(3, KERN_DEBUG "%s: BUZIOC_S_PARAMS\n", ZR_DEVNAME(zr));
@@ -2639,8 +2648,7 @@ zoran_do_ioctl (struct inode *inode,
 		decoder_command(zr, DECODER_SET_NORM, &norm);
 
 		/* sleep 1 second */
-		current->state = TASK_UNINTERRUPTIBLE;
-		schedule_timeout(1 * HZ);
+		ssleep(1);
 
 		/* Get status of video decoder */
 		decoder_command(zr, DECODER_GET_STATUS, &status);
@@ -2912,8 +2920,6 @@ zoran_do_ioctl (struct inode *inode,
 			}
 
 			if (fmt->fmt.pix.pixelformat == V4L2_PIX_FMT_MJPEG) {
-				struct zoran_jpg_settings settings;
-
 				down(&zr->resource_lock);
 
 				settings = fh->jpg_settings;
@@ -3976,7 +3982,8 @@ zoran_do_ioctl (struct inode *inode,
 	{
 		struct v4l2_crop *crop = arg;
 		int res = 0;
-		struct zoran_jpg_settings settings = fh->jpg_settings;
+
+		settings = fh->jpg_settings;
 
 		dprintk(3,
 			KERN_ERR
@@ -4058,8 +4065,9 @@ zoran_do_ioctl (struct inode *inode,
 	case VIDIOC_S_JPEGCOMP:
 	{
 		struct v4l2_jpegcompression *params = arg;
-		struct zoran_jpg_settings settings = fh->jpg_settings;
 		int res = 0;
+
+		settings = fh->jpg_settings;
 
 		dprintk(3,
 			KERN_DEBUG
@@ -4144,8 +4152,7 @@ zoran_do_ioctl (struct inode *inode,
 			down(&zr->resource_lock);
 
 			if (fmt->fmt.pix.pixelformat == V4L2_PIX_FMT_MJPEG) {
-				struct zoran_jpg_settings settings =
-				    fh->jpg_settings;
+				settings = fh->jpg_settings;
 
 				/* we actually need to set 'real' parameters now */
 				if ((fmt->fmt.pix.height * 2) >
@@ -4450,12 +4457,6 @@ static struct vm_operations_struct zoran_vm_ops = {
 	.close = zoran_vm_close,
 };
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
-#define zr_remap_page_range(a,b,c,d,e) remap_page_range(b,c,d,e)
-#else
-#define zr_remap_page_range(a,b,c,d,e) remap_page_range(a,b,c,d,e)
-#endif
-
 static int
 zoran_mmap (struct file           *file,
 	    struct vm_area_struct *vma)
@@ -4547,20 +4548,22 @@ zoran_mmap (struct file           *file,
 			     j < fh->jpg_buffers.buffer_size / PAGE_SIZE;
 			     j++) {
 				fraglen =
-				    (fh->jpg_buffers.buffer[i].
-				     frag_tab[2 * j + 1] & ~1) << 1;
+				    (le32_to_cpu(fh->jpg_buffers.buffer[i].
+				     frag_tab[2 * j + 1]) & ~1) << 1;
 				todo = size;
 				if (todo > fraglen)
 					todo = fraglen;
 				pos =
-				    (unsigned long) fh->jpg_buffers.
-				    buffer[i].frag_tab[2 * j];
-				page = virt_to_phys(bus_to_virt(pos));	/* should just be pos on i386 */
-				if (zr_remap_page_range
-				    (vma, start, page, todo, PAGE_SHARED)) {
+				    le32_to_cpu((unsigned long) fh->jpg_buffers.
+				    buffer[i].frag_tab[2 * j]);
+				/* should just be pos on i386 */
+				page = virt_to_phys(bus_to_virt(pos))
+								>> PAGE_SHIFT;
+				if (remap_pfn_range(vma, start, page,
+							todo, PAGE_SHARED)) {
 					dprintk(1,
 						KERN_ERR
-						"%s: zoran_mmap(V4L) - remap_page_range failed\n",
+						"%s: zoran_mmap(V4L) - remap_pfn_range failed\n",
 						ZR_DEVNAME(zr));
 					res = -EAGAIN;
 					goto jpg_mmap_unlock_and_return;
@@ -4569,8 +4572,8 @@ zoran_mmap (struct file           *file,
 				start += todo;
 				if (size == 0)
 					break;
-				if (fh->jpg_buffers.buffer[i].
-				    frag_tab[2 * j + 1] & 1)
+				if (le32_to_cpu(fh->jpg_buffers.buffer[i].
+				    frag_tab[2 * j + 1]) & 1)
 					break;	/* was last fragment */
 			}
 			fh->jpg_buffers.buffer[i].map = map;
@@ -4641,11 +4644,11 @@ zoran_mmap (struct file           *file,
 			if (todo > fh->v4l_buffers.buffer_size)
 				todo = fh->v4l_buffers.buffer_size;
 			page = fh->v4l_buffers.buffer[i].fbuffer_phys;
-			if (zr_remap_page_range
-			    (vma, start, page, todo, PAGE_SHARED)) {
+			if (remap_pfn_range(vma, start, page >> PAGE_SHIFT,
+							todo, PAGE_SHARED)) {
 				dprintk(1,
 					KERN_ERR
-					"%s: zoran_mmap(V4L)i - remap_page_range failed\n",
+					"%s: zoran_mmap(V4L)i - remap_pfn_range failed\n",
 					ZR_DEVNAME(zr));
 				res = -EAGAIN;
 				goto v4l_mmap_unlock_and_return;
@@ -4695,3 +4698,4 @@ struct video_device zoran_template __devinitdata = {
 	.release = &zoran_vdev_release,
 	.minor = -1
 };
+

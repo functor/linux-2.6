@@ -19,7 +19,6 @@
 #include <linux/delay.h>
 #include <linux/pci.h>
 #include <linux/moduleparam.h>
-#include <linux/suspend.h>
 #include <asm/atomic.h>
 
 #include "ieee1394_types.h"
@@ -70,8 +69,7 @@ static int nodemgr_bus_read(struct csr1212_csr *csr, u64 addr, u16 length,
 		if (!ret)
 			break;
 
-		set_current_state(TASK_INTERRUPTIBLE);
-		if (schedule_timeout (HZ/3))
+		if (msleep_interruptible(334))
 			return -EINTR;
 	}
 
@@ -1481,22 +1479,22 @@ static int nodemgr_host_thread(void *__hi)
 
 		if (down_interruptible(&hi->reset_sem) ||
 		    down_interruptible(&nodemgr_serialize)) {
-			if (current->flags & PF_FREEZE) {
-				refrigerator(0);
+			if (try_to_freeze(PF_FREEZE))
 				continue;
-			}
 			printk("NodeMgr: received unexpected signal?!\n" );
 			break;
 		}
 
-		if (hi->kill_me)
+		if (hi->kill_me) {
+			up(&nodemgr_serialize);
 			break;
+		}
 
 		/* Pause for 1/4 second in 1/16 second intervals,
 		 * to make sure things settle down. */
 		for (i = 0; i < 4 ; i++) {
 			set_current_state(TASK_INTERRUPTIBLE);
-			if (schedule_timeout(HZ/16)) {
+			if (msleep_interruptible(63)) {
 				up(&nodemgr_serialize);
 				goto caught_signal;
 			}
@@ -1514,8 +1512,10 @@ static int nodemgr_host_thread(void *__hi)
 				i = 0;
 
 			/* Check the kill_me again */
-			if (hi->kill_me)
+			if (hi->kill_me) {
+				up(&nodemgr_serialize);
 				goto caught_signal;
+			}
 		}
 
 		if (!nodemgr_check_irm_capability(host, reset_cycles)) {

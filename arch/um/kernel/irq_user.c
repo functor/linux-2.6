@@ -83,8 +83,11 @@ void sigio_handler(int sig, union uml_pt_regs *regs)
 				 * can be freed here.
 				 */
 				next = irq_fd->next;
-				if(irq_fd->freed)
+				if(irq_fd->freed){
 					free_irq(irq_fd->irq, irq_fd->id);
+					free_irq_by_irq_and_dev(irq_fd->irq,
+								irq_fd->id);
+				}
 			}
 		}
 	}
@@ -263,7 +266,7 @@ static int same_irq_and_dev(struct irq_fd *irq, void *d)
 	return((irq->irq == data->irq) && (irq->id == data->dev));
 }
 
-void free_irq_by_irq_and_dev(int irq, void *dev)
+void free_irq_by_irq_and_dev(unsigned int irq, void *dev)
 {
 	struct irq_and_dev data = ((struct irq_and_dev) { .irq  = irq,
 							  .dev  = dev });
@@ -374,6 +377,8 @@ int deactivate_all_fds(void)
 		if(err)
 			return(err);
 	}
+	/* If there is a signal already queued, after unblocking ignore it */
+	set_handler(SIGIO, SIG_IGN, 0, -1);
 
 	return(0);
 }

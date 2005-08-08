@@ -46,7 +46,7 @@ debug_xid:
 
  6  64	"vx_set_init(%p[#%d],%p[#%d,%d,%d])"
 
- 7 128
+ 7 128	"vx_propagate_xid(%p[#%d.%d]): %d"
 
 
 debug_nid:

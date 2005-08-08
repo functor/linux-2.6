@@ -351,8 +351,9 @@ static int __init nsc_ircc_open(int i, chipio_t *info)
 	}
 	MESSAGE("IrDA: Registered device %s\n", dev->name);
 
-	/* Check if user has supplied the dongle id or not */
-	if (!dongle_id) {
+	/* Check if user has supplied a valid dongle id or not */
+	if ((dongle_id <= 0) ||
+	    (dongle_id >= (sizeof(dongle_types) / sizeof(dongle_types[0]))) ) {
 		dongle_id = nsc_ircc_read_dongle_id(self->io.fir_base);
 		
 		MESSAGE("%s, Found dongle: %s\n", driver_name,
@@ -2205,15 +2206,15 @@ MODULE_DESCRIPTION("NSC IrDA Device Driver");
 MODULE_LICENSE("GPL");
 
 
-MODULE_PARM(qos_mtt_bits, "i");
+module_param(qos_mtt_bits, int, 0);
 MODULE_PARM_DESC(qos_mtt_bits, "Minimum Turn Time");
-MODULE_PARM(io,  "1-4i");
+module_param_array(io, int, NULL, 0);
 MODULE_PARM_DESC(io, "Base I/O addresses");
-MODULE_PARM(irq, "1-4i");
+module_param_array(irq, int, NULL, 0);
 MODULE_PARM_DESC(irq, "IRQ lines");
-MODULE_PARM(dma, "1-4i");
+module_param_array(dma, int, NULL, 0);
 MODULE_PARM_DESC(dma, "DMA channels");
-MODULE_PARM(dongle_id, "i");
+module_param(dongle_id, int, 0);
 MODULE_PARM_DESC(dongle_id, "Type-id of used dongle");
 
 module_init(nsc_ircc_init);

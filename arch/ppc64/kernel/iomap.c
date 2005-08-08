@@ -1,3 +1,10 @@
+/*
+ * arch/ppc64/kernel/iomap.c
+ *
+ * ppc64 "iomap" interface implementation.
+ *
+ * (C) Copyright 2004 Linus Torvalds
+ */
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/mm.h>
@@ -106,7 +113,7 @@ void __iomem *pci_iomap(struct pci_dev *dev, int bar, unsigned long max)
 	if (flags & IORESOURCE_IO)
 		return ioport_map(start, len);
 	if (flags & IORESOURCE_MEM)
-		return (void __iomem *) start;
+		return ioremap(start, len);
 	/* What? */
 	return NULL;
 }

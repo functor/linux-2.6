@@ -196,7 +196,7 @@ static void usb_kbd_close(struct input_dev *dev)
 	struct usb_kbd *kbd = dev->private;
 
 	if (!--kbd->open)
-		usb_unlink_urb(kbd->irq);
+		usb_kill_urb(kbd->irq);
 }
 
 static int usb_kbd_alloc_mem(struct usb_device *dev, struct usb_kbd *kbd)
@@ -296,9 +296,9 @@ static int usb_kbd_probe(struct usb_interface *iface,
 	kbd->dev.name = kbd->name;
 	kbd->dev.phys = kbd->phys;	
 	kbd->dev.id.bustype = BUS_USB;
-	kbd->dev.id.vendor = dev->descriptor.idVendor;
-	kbd->dev.id.product = dev->descriptor.idProduct;
-	kbd->dev.id.version = dev->descriptor.bcdDevice;
+	kbd->dev.id.vendor = le16_to_cpu(dev->descriptor.idVendor);
+	kbd->dev.id.product = le16_to_cpu(dev->descriptor.idProduct);
+	kbd->dev.id.version = le16_to_cpu(dev->descriptor.bcdDevice);
 	kbd->dev.dev = &iface->dev;
 
 	if (!(buf = kmalloc(63, GFP_KERNEL))) {
@@ -343,7 +343,7 @@ static void usb_kbd_disconnect(struct usb_interface *intf)
 	
 	usb_set_intfdata(intf, NULL);
 	if (kbd) {
-		usb_unlink_urb(kbd->irq);
+		usb_kill_urb(kbd->irq);
 		input_unregister_device(&kbd->dev);
 		usb_kbd_free_mem(interface_to_usbdev(intf), kbd);
 		kfree(kbd);

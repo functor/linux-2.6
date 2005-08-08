@@ -3,7 +3,7 @@
  *
  *  Virtual Server: Signal Support
  *
- *  Copyright (C) 2003-2004  Herbert Pötzl
+ *  Copyright (C) 2003-2005  Herbert Pötzl
  *
  *  V0.01  broken out from vcontext V0.05
  *
@@ -15,7 +15,6 @@
 #include <asm/errno.h>
 #include <asm/uaccess.h>
 
-#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vserver/signal.h>
 
@@ -46,8 +45,9 @@ int vc_ctx_kill(uint32_t id, void __user *data)
 	retval = -ESRCH;
 	read_lock(&tasklist_lock);
 	switch (vc_data.pid) {
-	case -1:
 	case  0:
+		info.si_code = SI_KERNEL;
+	case -1:
 		for_each_process(p) {
 			int err = 0;
 
@@ -63,8 +63,14 @@ int vc_ctx_kill(uint32_t id, void __user *data)
 		}
 		break;
 
+	case 1:
+		if (vxi->vx_initpid) {
+			vc_data.pid = vxi->vx_initpid;
+			info.si_code = SI_KERNEL;
+		}
+		/* fallthrough */
 	default:
-	p = find_task_by_real_pid(vc_data.pid);
+		p = find_task_by_real_pid(vc_data.pid);
 		if (p) {
 			if (!thread_group_leader(p)) {
 				struct task_struct *tg;

@@ -106,6 +106,7 @@ static inline struct thread_info *stack_thread_info(void)
 #define TIF_IA32		17	/* 32bit process */ 
 #define TIF_FORK		18	/* ret_from_fork */
 #define TIF_ABI_PENDING		19
+#define TIF_MEMDIE		20
 
 #define _TIF_SYSCALL_TRACE	(1<<TIF_SYSCALL_TRACE)
 #define _TIF_NOTIFY_RESUME	(1<<TIF_NOTIFY_RESUME)
@@ -125,7 +126,7 @@ static inline struct thread_info *stack_thread_info(void)
 /* work to do on any return to user space */
 #define _TIF_ALLWORK_MASK 0x0000FFFF	
 
-#define PREEMPT_ACTIVE     0x4000000
+#define PREEMPT_ACTIVE     0x10000000
 
 /*
  * Thread-synchronous status.

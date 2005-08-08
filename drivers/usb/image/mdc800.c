@@ -182,12 +182,47 @@ struct mdc800_data
 /* Specification of the Endpoints */
 static struct usb_endpoint_descriptor mdc800_ed [4] =
 {
-	{ 0,0, 0x01, 0x02,  8, 0,0,0 },
-	{ 0,0, 0x82, 0x03,  8, 0,0,0 },
-	{ 0,0, 0x03, 0x02, 64, 0,0,0 },
-	{ 0,0, 0x84, 0x02, 64, 0,0,0 }
+	{ 
+		.bLength = 		0,
+		.bDescriptorType =	0,
+		.bEndpointAddress =	0x01,
+		.bmAttributes = 	0x02,
+		.wMaxPacketSize =	__constant_cpu_to_le16(8),
+		.bInterval = 		0,
+		.bRefresh = 		0,
+		.bSynchAddress = 	0,
+	},
+	{
+		.bLength = 		0,
+		.bDescriptorType = 	0,
+		.bEndpointAddress = 	0x82,
+		.bmAttributes = 	0x03,
+		.wMaxPacketSize = 	__constant_cpu_to_le16(8),
+		.bInterval = 		0,
+		.bRefresh = 		0,
+		.bSynchAddress = 	0,
+	},
+	{
+		.bLength = 		0,
+		.bDescriptorType = 	0,
+		.bEndpointAddress = 	0x03,
+		.bmAttributes = 	0x02,
+		.wMaxPacketSize = 	__constant_cpu_to_le16(64),
+		.bInterval = 		0,
+		.bRefresh = 		0,
+		.bSynchAddress = 	0,
+	},
+	{
+		.bLength = 		0,
+		.bDescriptorType = 	0,
+		.bEndpointAddress = 	0x84,
+		.bmAttributes = 	0x02,
+		.wMaxPacketSize = 	__constant_cpu_to_le16(64),
+		.bInterval = 		0,
+		.bRefresh = 		0,
+		.bSynchAddress = 	0,
+	},
 };
-
 
 /* The Variable used by the driver */
 static struct mdc800_data* mdc800;
@@ -317,7 +352,6 @@ static int mdc800_usb_waitForIRQ (int mode, int msec)
 	mdc800->camera_request_ready=1+mode;
 
 	add_wait_queue(&mdc800->irq_wait, &wait);
-	set_current_state(TASK_INTERRUPTIBLE);
 	timeout = msec*HZ/1000;
 	while (!mdc800->irq_woken && timeout)
 	{
@@ -325,7 +359,6 @@ static int mdc800_usb_waitForIRQ (int mode, int msec)
 		timeout = schedule_timeout (timeout);
 	}
         remove_wait_queue(&mdc800->irq_wait, &wait);
-	set_current_state(TASK_RUNNING);
 	mdc800->irq_woken = 0;
 
 	if (mdc800->camera_request_ready>0)
@@ -423,7 +456,7 @@ static int mdc800_usb_probe (struct usb_interface *intf,
 	dbg ("(mdc800_usb_probe) called.");
 
 
-	if (mdc800->dev != 0)
+	if (mdc800->dev != NULL)
 	{
 		warn ("only one Mustek MDC800 is supported.");
 		return -ENODEV;
@@ -543,9 +576,9 @@ static void mdc800_usb_disconnect (struct usb_interface *intf)
 
 		mdc800->state=NOT_CONNECTED;
 
-		usb_unlink_urb (mdc800->irq_urb);
-		usb_unlink_urb (mdc800->write_urb);
-		usb_unlink_urb (mdc800->download_urb);
+		usb_kill_urb(mdc800->irq_urb);
+		usb_kill_urb(mdc800->write_urb);
+		usb_kill_urb(mdc800->download_urb);
 
 		mdc800->dev = NULL;
 		usb_set_intfdata(intf, NULL);
@@ -649,9 +682,9 @@ static int mdc800_device_release (struct inode* inode, struct file *file)
 	down (&mdc800->io_lock);
 	if (mdc800->open && (mdc800->state != NOT_CONNECTED))
 	{
-		usb_unlink_urb (mdc800->irq_urb);
-		usb_unlink_urb (mdc800->write_urb);
-		usb_unlink_urb (mdc800->download_urb);
+		usb_kill_urb(mdc800->irq_urb);
+		usb_kill_urb(mdc800->write_urb);
+		usb_kill_urb(mdc800->download_urb);
 		mdc800->open=0;
 	}
 	else
@@ -725,7 +758,6 @@ static ssize_t mdc800_device_read (struct file *file, char __user *buf, size_t l
 					set_current_state(TASK_UNINTERRUPTIBLE);
 					timeout = schedule_timeout (timeout);
 				}
-				set_current_state(TASK_RUNNING);
 				remove_wait_queue(&mdc800->download_wait, &wait);
 				mdc800->downloaded = 0;
 				if (mdc800->download_urb->status != 0)
@@ -851,12 +883,11 @@ static ssize_t mdc800_device_write (struct file *file, const char __user *buf, s
 				set_current_state(TASK_UNINTERRUPTIBLE);
 				timeout = schedule_timeout (timeout);
 			}
-                        set_current_state(TASK_RUNNING);
 			remove_wait_queue(&mdc800->write_wait, &wait);
 			mdc800->written = 0;
 			if (mdc800->state == WORKING)
 			{
-				usb_unlink_urb (mdc800->write_urb);
+				usb_kill_urb(mdc800->write_urb);
 				up (&mdc800->io_lock);
 				return -EIO;
 			}
@@ -1014,7 +1045,7 @@ static int __init usb_mdc800_init (void)
 
 cleanup_on_fail:
 
-	if (mdc800 != 0)
+	if (mdc800 != NULL)
 	{
 		err ("can't alloc memory!");
 

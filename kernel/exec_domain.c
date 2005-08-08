@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/personality.h>
 #include <linux/sched.h>
+#include <linux/syscalls.h>
 #include <linux/sysctl.h>
 #include <linux/types.h>
 
@@ -21,7 +22,7 @@
 static void default_handler(int, struct pt_regs *);
 
 static struct exec_domain *exec_domains = &default_exec_domain;
-static rwlock_t exec_domains_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(exec_domains_lock);
 
 
 static u_long ident_map[32] = {

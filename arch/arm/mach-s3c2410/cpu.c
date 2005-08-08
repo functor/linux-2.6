@@ -38,6 +38,7 @@
 #include <asm/arch/regs-gpio.h>
 
 #include "cpu.h"
+#include "clock.h"
 #include "s3c2410.h"
 #include "s3c2440.h"
 
@@ -45,6 +46,8 @@ struct cpu_table {
 	unsigned long	idcode;
 	unsigned long	idmask;
 	void		(*map_io)(struct map_desc *mach_desc, int size);
+	void		(*init_uarts)(struct s3c2410_uartcfg *cfg, int no);
+	void		(*init_clocks)(int xtal);
 	int		(*init)(void);
 	const char	*name;
 };
@@ -58,32 +61,40 @@ static const char name_s3c2440a[] = "S3C2440A";
 
 static struct cpu_table cpu_ids[] __initdata = {
 	{
-		.idcode	= 0x32410000,
-		.idmask = 0xffffffff,
-		.map_io = s3c2410_map_io,
-		.init   = s3c2410_init,
-		.name   = name_s3c2410
+		.idcode		= 0x32410000,
+		.idmask		= 0xffffffff,
+		.map_io		= s3c2410_map_io,
+		.init_clocks	= s3c2410_init_clocks,
+		.init_uarts	= s3c2410_init_uarts,
+		.init		= s3c2410_init,
+		.name		= name_s3c2410
 	},
 	{
-		.idcode	= 0x3241002,
-		.idmask = 0xffffffff,
-		.map_io = s3c2410_map_io,
-		.init   = s3c2410_init,
-		.name   = name_s3c2410a
+		.idcode		= 0x32410002,
+		.idmask		= 0xffffffff,
+		.map_io		= s3c2410_map_io,
+		.init_clocks	= s3c2410_init_clocks,
+		.init_uarts	= s3c2410_init_uarts,
+		.init		= s3c2410_init,
+		.name		= name_s3c2410a
 	},
 	{
-		.idcode	= 0x32440000,
-		.idmask = 0xffffffff,
-		.map_io = s3c2440_map_io,
-		.init   = s3c2440_init,
-		.name   = name_s3c2440
+		.idcode		= 0x32440000,
+		.idmask		= 0xffffffff,
+		.map_io		= s3c2440_map_io,
+		.init_clocks	= s3c2440_init_clocks,
+		.init_uarts	= s3c2440_init_uarts,
+		.init		= s3c2440_init,
+		.name		= name_s3c2440
 	},
 	{
-		.idcode	= 0x32440001,
-		.idmask = 0xffffffff,
-		.map_io = s3c2440_map_io,
-		.init   = s3c2440_init,
-		.name   = name_s3c2440a
+		.idcode		= 0x32440001,
+		.idmask		= 0xffffffff,
+		.map_io		= s3c2440_map_io,
+		.init_clocks	= s3c2440_init_clocks,
+		.init_uarts	= s3c2440_init_uarts,
+		.init		= s3c2440_init,
+		.name		= name_s3c2440a
 	}
 };
 
@@ -104,13 +115,33 @@ s3c_lookup_cpu(unsigned long idcode)
 	int count;
 
 	tab = cpu_ids;
-	for (count = 0; count < ARRAY_SIZE(cpu_ids); count++) {
+	for (count = 0; count < ARRAY_SIZE(cpu_ids); count++, tab++) {
 		if ((idcode & tab->idmask) == tab->idcode)
 			return tab;
 	}
 
 	return NULL;
 }
+
+/* board information */
+
+static struct s3c24xx_board *board;
+
+void s3c24xx_set_board(struct s3c24xx_board *b)
+{
+	int i;
+
+	board = b;
+
+	if (b->clocks_count != 0) {
+		struct clk **ptr = b->clocks;;
+
+		for (i = b->clocks_count; i > 0; i--, ptr++)
+			s3c24xx_register_clock(*ptr);
+	}
+}
+
+/* cpu information */
 
 static struct cpu_table *cpu;
 
@@ -139,14 +170,71 @@ void __init s3c24xx_init_io(struct map_desc *mach_desc, int size)
 	(cpu->map_io)(mach_desc, size);
 }
 
+/* s3c24xx_init_clocks
+ *
+ * Initialise the clock subsystem and associated information from the
+ * given master crystal value.
+ *
+ * xtal  = 0 -> use default PLL crystal value (normally 12MHz)
+ *      != 0 -> PLL crystal value in Hz
+*/
+
+void __init s3c24xx_init_clocks(int xtal)
+{
+	if (xtal != 0)
+		s3c24xx_xtal = xtal;
+
+	if (cpu == NULL)
+		panic("s3c24xx_init_clocks: no cpu setup?\n");
+
+	if (cpu->init_clocks == NULL)
+		panic("s3c24xx_init_clocks: cpu has no clock init\n");
+	else
+		(cpu->init_clocks)(xtal);
+}
+
+void __init s3c24xx_init_uarts(struct s3c2410_uartcfg *cfg, int no)
+{
+	if (cpu == NULL)
+		return;
+
+	if (cpu->init_uarts == NULL) {
+		printk(KERN_ERR "s3c24xx_init_uarts: cpu has no uart init\n");
+	} else
+		(cpu->init_uarts)(cfg, no);
+}
+
 static int __init s3c_arch_init(void)
 {
+	int ret;
+
 	// do the correct init for cpu
 
 	if (cpu == NULL)
 		panic("s3c_arch_init: NULL cpu\n");
 
-	return (cpu->init)();
+	ret = (cpu->init)();
+	if (ret != 0)
+		return ret;
+
+	if (board != NULL) {
+		struct platform_device **ptr = board->devices;
+		int i;
+
+		for (i = 0; i < board->devices_count; i++, ptr++) {
+			ret = platform_device_register(*ptr);
+
+			if (ret) {
+				printk(KERN_ERR "s3c24xx: failed to add board device %s (%d) @%p\n", (*ptr)->name, ret, *ptr);
+			}
+		}
+
+		/* mask any error, we may not need all these board
+		 * devices */
+		ret = 0;
+	}
+
+	return ret;
 }
 
 arch_initcall(s3c_arch_init);

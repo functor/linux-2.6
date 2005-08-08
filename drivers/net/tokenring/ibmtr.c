@@ -895,7 +895,7 @@ static int tok_open(struct net_device *dev)
 
 	ti->sram_virt &= ~1; /* to reverse what we do in tok_close */
 	/* init the spinlock */
-	ti->lock = SPIN_LOCK_UNLOCKED;
+	spin_lock_init(&ti->lock);
 	init_timer(&ti->tr_timer);
 	
 	i = tok_init_card(dev);
@@ -1945,9 +1945,9 @@ static int mem[IBMTR_MAX_ADAPTERS];
 
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(io, "1-" __MODULE_STRING(IBMTR_MAX_ADAPTERS) "i");
-MODULE_PARM(irq, "1-" __MODULE_STRING(IBMTR_MAX_ADAPTERS) "i");
-MODULE_PARM(mem, "1-" __MODULE_STRING(IBMTR_MAX_ADAPTERS) "i");
+module_param_array(io, int, NULL, 0);
+module_param_array(irq, int, NULL, 0);
+module_param_array(mem, int, NULL, 0);
 
 static int __init ibmtr_init(void)
 {

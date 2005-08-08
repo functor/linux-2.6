@@ -1,4 +1,4 @@
-/* $Id: signal.c,v 1.20 2004/01/13 05:52:11 kkojima Exp $
+/* $Id: signal.c,v 1.21 2004/06/28 13:18:44 doyu Exp $
  *
  *  linux/arch/sh/kernel/signal.c
  *
@@ -24,7 +24,6 @@
 #include <linux/tty.h>
 #include <linux/personality.h>
 #include <linux/binfmts.h>
-#include <linux/suspend.h>
 
 #include <asm/ucontext.h>
 #include <asm/uaccess.h>
@@ -155,7 +154,7 @@ struct rt_sigframe
 	u16 retcode[8];
 };
 
-#ifdef CONFIG_CPU_SH4
+#ifdef CONFIG_SH_FPU
 static inline int restore_sigcontext_fpu(struct sigcontext __user *sc)
 {
 	struct task_struct *tsk = current;
@@ -163,7 +162,7 @@ static inline int restore_sigcontext_fpu(struct sigcontext __user *sc)
 	if (!(cpu_data->flags & CPU_HAS_FPU))
 		return 0;
 
-	tsk->used_math = 1;
+	set_used_math();
 	return __copy_from_user(&tsk->thread.fpu.hard, &sc->sc_fpregs[0],
 				sizeof(long)*(16*2+2));
 }
@@ -176,7 +175,7 @@ static inline int save_sigcontext_fpu(struct sigcontext __user *sc,
 	if (!(cpu_data->flags & CPU_HAS_FPU))
 		return 0;
 
-	if (!tsk->used_math) {
+	if (!used_math()) {
 		__put_user(0, &sc->sc_ownedfp);
 		return 0;
 	}
@@ -186,13 +185,13 @@ static inline int save_sigcontext_fpu(struct sigcontext __user *sc,
 	/* This will cause a "finit" to be triggered by the next
 	   attempted FPU operation by the 'current' process.
 	   */
-	tsk->used_math = 0;
+	clear_used_math();
 
 	unlazy_fpu(tsk, regs);
 	return __copy_to_user(&sc->sc_fpregs[0], &tsk->thread.fpu.hard,
 			      sizeof(long)*(16*2+2));
 }
-#endif /* CONFIG_CPU_SH4 */
+#endif /* CONFIG_SH_FPU */
 
 static int
 restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc, int *r0_p)
@@ -213,14 +212,14 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc, int *r0_p
 	COPY(sr);	COPY(pc);
 #undef COPY
 
-#ifdef CONFIG_CPU_SH4
+#ifdef CONFIG_SH_FPU
 	if (cpu_data->flags & CPU_HAS_FPU) {
 		int owned_fp;
 		struct task_struct *tsk = current;
 
 		regs->sr |= SR_FD; /* Release FPU */
 		clear_fpu(tsk, regs);
-		tsk->used_math = 0;
+		clear_used_math();
 		__get_user (owned_fp, &sc->sc_ownedfp);
 		if (owned_fp)
 			err |= restore_sigcontext_fpu(sc);
@@ -326,7 +325,7 @@ setup_sigcontext(struct sigcontext __user *sc, struct pt_regs *regs,
 	COPY(sr);	COPY(pc);
 #undef COPY
 
-#ifdef CONFIG_CPU_SH4
+#ifdef CONFIG_SH_FPU
 	err |= save_sigcontext_fpu(sc, regs);
 #endif
 
@@ -493,14 +492,12 @@ give_sigsegv:
 
 /*
  * OK, we're invoking a handler
- */	
+ */
 
 static void
-handle_signal(unsigned long sig, siginfo_t *info, sigset_t *oldset,
-	struct pt_regs * regs)
+handle_signal(unsigned long sig, struct k_sigaction *ka, siginfo_t *info,
+	      sigset_t *oldset, struct pt_regs *regs)
 {
-	struct k_sigaction *ka = &current->sighand->action[sig-1];
-
 	/* Are we from a system call? */
 	if (regs->tra >= 0) {
 		/* If so, check system call restarting.. */
@@ -570,6 +567,7 @@ int do_signal(struct pt_regs *regs, sigset_t *oldset)
 {
 	siginfo_t info;
 	int signr;
+	struct k_sigaction ka;
 
 	/*
 	 * We want the common case to go fast, which
@@ -580,18 +578,16 @@ int do_signal(struct pt_regs *regs, sigset_t *oldset)
 	if (!user_mode(regs))
 		return 1;
 
-	if (current->flags & PF_FREEZE) {
-		refrigerator(0);
+	if (try_to_freeze(0))
 		goto no_signal;
-	}
 
 	if (!oldset)
 		oldset = &current->blocked;
 
-	signr = get_signal_to_deliver(&info, regs, NULL);
+	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
 	if (signr > 0) {
 		/* Whee!  Actually deliver the signal.  */
-		handle_signal(signr, &info, oldset, regs);
+		handle_signal(signr, &ka, &info, oldset, regs);
 		return 1;
 	}
 

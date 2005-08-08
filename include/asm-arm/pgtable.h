@@ -10,6 +10,8 @@
 #ifndef _ASMARM_PGTABLE_H
 #define _ASMARM_PGTABLE_H
 
+#include <asm-generic/4level-fixup.h>
+
 #include <asm/memory.h>
 #include <asm/proc-fns.h>
 #include <asm/arch/vmalloc.h>
@@ -80,7 +82,7 @@
  * PMD_SHIFT determines the size of the area a second-level page table can map
  * PGDIR_SHIFT determines what a third-level page table entry can map
  */
-#define PMD_SHIFT		20
+#define PMD_SHIFT		21
 #define PGDIR_SHIFT		21
 
 #define LIBRARY_TEXT_START	0x0c000000
@@ -308,7 +310,7 @@ PTE_BIT_FUNC(mkyoung,   |= L_PTE_YOUNG);
 
 #define set_pmd(pmdp,pmd)		\
 	do {				\
-		*pmdp = pmd;		\
+		*(pmdp) = pmd;		\
 		flush_pmd_entry(pmdp);	\
 	} while (0)
 
@@ -412,7 +414,7 @@ extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
  * into virtual address `from'
  */
 #define io_remap_page_range(vma,from,phys,size,prot) \
-		remap_page_range(vma,from,phys,size,prot)
+		remap_pfn_range(vma, from, (phys) >> PAGE_SHIFT, size, prot)
 
 #define pgtable_cache_init() do { } while (0)
 

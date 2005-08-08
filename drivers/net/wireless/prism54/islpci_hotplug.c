@@ -107,9 +107,6 @@ prism54_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	islpci_private *priv;
 	int rvalue;
 
-	/* TRACE(DRV_NAME); */
-	
-	
 	/* Enable the pci device */
 	if (pci_enable_device(pdev)) {
 		printk(KERN_ERR "%s: pci_enable_device() failed.\n", DRV_NAME);
@@ -166,7 +163,7 @@ prism54_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (rvalue || !mem_addr) {
 		printk(KERN_ERR "%s: PCI device memory region not configured; fix your BIOS or CardBus bridge/drivers\n",
 		       DRV_NAME);
-		goto do_pci_disable_device;
+		goto do_pci_release_regions;
 	}
 
 	/* enable PCI bus-mastering */
@@ -273,7 +270,7 @@ prism54_suspend(struct pci_dev *pdev, u32 state)
 	printk(KERN_NOTICE "%s: got suspend request (state %d)\n",
 	       ndev->name, state);
 
-	pci_save_state(pdev, priv->pci_state);
+	pci_save_state(pdev);
 
 	/* tell the device not to trigger interrupts for now... */
 	isl38xx_disable_interrupts(priv->device_base);
@@ -295,9 +292,11 @@ prism54_resume(struct pci_dev *pdev)
 	islpci_private *priv = ndev ? netdev_priv(ndev) : NULL;
 	BUG_ON(!priv);
 
+	pci_enable_device(pdev);
+
 	printk(KERN_NOTICE "%s: got resume request\n", ndev->name);
 
-	pci_restore_state(pdev, priv->pci_state);
+	pci_restore_state(pdev);
 
 	/* alright let's go into the PREBOOT state */
 	islpci_reset(priv, 1);

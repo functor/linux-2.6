@@ -756,7 +756,7 @@ static int prog_dmabuf(struct sv_state *s, unsigned rec)
 		if ((virt_to_bus(db->rawbuf) + (PAGE_SIZE << db->buforder) - 1) & ~0xffffff)
 			printk(KERN_DEBUG "sv: DMA buffer beyond 16MB: busaddr 0x%lx  size %ld\n", 
 			       virt_to_bus(db->rawbuf), PAGE_SIZE << db->buforder);
-		/* now mark the pages as reserved; otherwise remap_page_range doesn't do what we want */
+		/* now mark the pages as reserved; otherwise remap_pfn_range doesn't do what we want */
 		pend = virt_to_page(db->rawbuf + (PAGE_SIZE << db->buforder) - 1);
 		for (page = virt_to_page(db->rawbuf); page <= pend; page++)
 			SetPageReserved(page);
@@ -1549,7 +1549,9 @@ static int sv_mmap(struct file *file, struct vm_area_struct *vma)
 	if (size > (PAGE_SIZE << db->buforder))
 		goto out;
 	ret = -EAGAIN;
-	if (remap_page_range(vma, vma->vm_start, virt_to_phys(db->rawbuf), size, vma->vm_page_prot))
+	if (remap_pfn_range(vma, vma->vm_start,
+				virt_to_phys(db->rawbuf) >> PAGE_SHIFT,
+				size, vma->vm_page_prot))
 		goto out;
 	db->mapped = 1;
 	ret = 0;
@@ -2451,7 +2453,7 @@ static int wavetable[NR_DEVICE];
 
 static unsigned int devindex;
 
-MODULE_PARM(reverb, "1-" __MODULE_STRING(NR_DEVICE) "i");
+module_param_array(reverb, bool, NULL, 0);
 MODULE_PARM_DESC(reverb, "if 1 enables the reverb circuitry. NOTE: your card must have the reverb RAM");
 #if 0
 MODULE_PARM(wavetable, "1-" __MODULE_STRING(NR_DEVICE) "i");
@@ -2468,7 +2470,7 @@ MODULE_LICENSE("GPL");
 static struct initvol {
 	int mixch;
 	int vol;
-} initvol[] __initdata = {
+} initvol[] __devinitdata = {
 	{ SOUND_MIXER_WRITE_RECLEV, 0x4040 },
 	{ SOUND_MIXER_WRITE_LINE1, 0x4040 },
 	{ SOUND_MIXER_WRITE_CD, 0x4040 },
@@ -2485,7 +2487,7 @@ static struct initvol {
 
 static int __devinit sv_probe(struct pci_dev *pcidev, const struct pci_device_id *pciid)
 {
-	static char __initdata sv_ddma_name[] = "S3 Inc. SonicVibes DDMA Controller";
+	static char __devinitdata sv_ddma_name[] = "S3 Inc. SonicVibes DDMA Controller";
        	struct sv_state *s;
 	mm_segment_t fs;
 	int i, val, ret;

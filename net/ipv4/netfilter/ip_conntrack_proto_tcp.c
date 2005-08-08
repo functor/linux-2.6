@@ -88,7 +88,11 @@ static const char *tcp_conntrack_names[] = {
 
 unsigned long ip_ct_tcp_timeout_syn_sent =      2 MINS;
 unsigned long ip_ct_tcp_timeout_syn_recv =     60 SECS;
-unsigned long ip_ct_tcp_timeout_established =   5 DAYS;
+#if HZ < 9942
+unsigned long ip_ct_tcp_timeout_established =  5U DAYS;
+#else
+unsigned long ip_ct_tcp_timeout_established =  2U DAYS;
+#endif
 unsigned long ip_ct_tcp_timeout_fin_wait =      2 MINS;
 unsigned long ip_ct_tcp_timeout_close_wait =   60 SECS;
 unsigned long ip_ct_tcp_timeout_last_ack =     30 SECS;
@@ -273,9 +277,9 @@ static enum tcp_conntrack tcp_conntracks[2][6][TCP_CONNTRACK_MAX] = {
  *	sCL -> sCL
  */
 /* 	     sNO, sSS, sSR, sES, sFW, sCW, sLA, sTW, sCL, sLI	*/
-/*ack*/	   { sIV, sIV, sIV, sES, sCW, sCW, sTW, sTW, sCL, sIV },
+/*ack*/	   { sIV, sIG, sIV, sES, sCW, sCW, sTW, sTW, sCL, sIV },
 /*
- *	sSS -> sIV	ACK is invalid: we haven't seen a SYN/ACK yet.
+ *	sSS -> sIG	Might be a half-open connection.
  *	sSR -> sIV	Simultaneous open.
  *	sES -> sES	:-)
  *	sFW -> sCW	Normal close request answered by ACK.
@@ -436,7 +440,7 @@ static void tcp_options(const struct sk_buff *skb,
 					state->td_scale = 14;
 				}
 				state->flags |=
-					IP_CT_TCP_STATE_FLAG_WINDOW_SCALE;
+					IP_CT_TCP_FLAG_WINDOW_SCALE;
 			}
 			ptr += opsize - 2;
 			length -= opsize;
@@ -552,8 +556,8 @@ static int tcp_in_window(struct ip_ct_tcp *state,
 			 * Both sides must send the Window Scale option
 			 * to enable window scaling in either direction.
 			 */
-			if (!(sender->flags & IP_CT_TCP_STATE_FLAG_WINDOW_SCALE
-			      && receiver->flags & IP_CT_TCP_STATE_FLAG_WINDOW_SCALE))
+			if (!(sender->flags & IP_CT_TCP_FLAG_WINDOW_SCALE
+			      && receiver->flags & IP_CT_TCP_FLAG_WINDOW_SCALE))
 				sender->td_scale = 
 				receiver->td_scale = 0;
 		} else {
@@ -566,9 +570,11 @@ static int tcp_in_window(struct ip_ct_tcp *state,
 			sender->td_maxwin = (win == 0 ? 1 : win);
 			sender->td_maxend = end + sender->td_maxwin;
 		}
-	} else if (state->state == TCP_CONNTRACK_SYN_SENT
-		   && dir == IP_CT_DIR_ORIGINAL
-		   && after(end, sender->td_end)) {
+	} else if (((state->state == TCP_CONNTRACK_SYN_SENT
+		     && dir == IP_CT_DIR_ORIGINAL)
+		    || (state->state == TCP_CONNTRACK_SYN_RECV
+		        && dir == IP_CT_DIR_REPLY))
+		    && after(end, sender->td_end)) {
 		/*
 		 * RFC 793: "if a TCP is reinitialized ... then it need
 		 * not wait at all; it must only be sure to use sequence 
@@ -663,11 +669,13 @@ static int tcp_in_window(struct ip_ct_tcp *state,
 		if (*index == TCP_ACK_SET) {
 			if (state->last_dir == dir
 			    && state->last_seq == seq
+			    && state->last_ack == ack
 			    && state->last_end == end)
 				state->retrans++;
 			else {
 				state->last_dir = dir;
 				state->last_seq = seq;
+				state->last_ack = ack;
 				state->last_end = end;
 				state->retrans = 0;
 			}
@@ -685,7 +693,7 @@ static int tcp_in_window(struct ip_ct_tcp *state,
 			"ip_ct_tcp: %s ",
 			before(end, sender->td_maxend + 1) ?
 			after(seq, sender->td_end - receiver->td_maxwin - 1) ?
-			before(ack, receiver->td_end + 1) ?
+			before(sack, receiver->td_end + 1) ?
 			after(ack, receiver->td_end - MAXACKWINDOW(sender)) ? "BUG"
 			: "ACK is under the lower bound (possibly overly delayed ACK)"
 			: "ACK is over the upper bound (ACKed data has never seen yet)"
@@ -705,9 +713,9 @@ static int tcp_in_window(struct ip_ct_tcp *state,
 
 #ifdef CONFIG_IP_NF_NAT_NEEDED
 /* Update sender->td_end after NAT successfully mangled the packet */
-int ip_conntrack_tcp_update(struct sk_buff *skb,
-			    struct ip_conntrack *conntrack, 
-			    int dir)
+void ip_conntrack_tcp_update(struct sk_buff *skb,
+			     struct ip_conntrack *conntrack, 
+			     enum ip_conntrack_dir dir)
 {
 	struct iphdr *iph = skb->nh.iph;
 	struct tcphdr *tcph = (void *)skb->nh.iph + skb->nh.iph->ihl*4;
@@ -733,11 +741,8 @@ int ip_conntrack_tcp_update(struct sk_buff *skb,
 		sender->td_scale, 
 		receiver->td_end, receiver->td_maxend, receiver->td_maxwin,
 		receiver->td_scale);
-		
-	return 1;
 }
  
-EXPORT_SYMBOL(ip_conntrack_tcp_update);
 #endif
 
 #define	TH_FIN	0x01
@@ -847,7 +852,9 @@ static int tcp_packet(struct ip_conntrack *conntrack,
 
 	switch (new_state) {
 	case TCP_CONNTRACK_IGNORE:
-		/* Either SYN in ORIGINAL, or SYN/ACK in REPLY direction. */
+		/* Either SYN in ORIGINAL
+		 * or SYN/ACK in REPLY
+		 * or ACK in REPLY direction (half-open connection). */
 		if (index == TCP_SYNACK_SET
 		    && conntrack->proto.tcp.last_index == TCP_SYN_SET
 		    && conntrack->proto.tcp.last_dir != dir
@@ -876,7 +883,7 @@ static int tcp_packet(struct ip_conntrack *conntrack,
 		WRITE_UNLOCK(&tcp_lock);
 		if (LOG_INVALID(IPPROTO_TCP))
 			nf_log_packet(PF_INET, 0, skb, NULL, NULL, 
-				  "ip_ct_tcp: invalid SYN (ignored) ");
+				  "ip_ct_tcp: invalid packet ignored ");
 		return NF_ACCEPT;
 	case TCP_CONNTRACK_MAX:
 		/* Invalid packet */
@@ -901,11 +908,13 @@ static int tcp_packet(struct ip_conntrack *conntrack,
 		break;
 	case TCP_CONNTRACK_CLOSE:
 		if (index == TCP_RST_SET
-		    && test_bit(IPS_SEEN_REPLY_BIT, &conntrack->status)
-		    && conntrack->proto.tcp.last_index <= TCP_SYNACK_SET
+		    && ((test_bit(IPS_SEEN_REPLY_BIT, &conntrack->status)
+		         && conntrack->proto.tcp.last_index <= TCP_SYNACK_SET)
+		        || (!test_bit(IPS_ASSURED_BIT, &conntrack->status)
+			 && conntrack->proto.tcp.last_index == TCP_ACK_SET))
 		    && after(ntohl(th->ack_seq),
 		    	     conntrack->proto.tcp.last_seq)) {
-			/* Ignore RST closing down invalid SYN 
+			/* Ignore RST closing down invalid SYN or ACK
 			   we had let trough. */ 
 		    	WRITE_UNLOCK(&tcp_lock);
 			if (LOG_INVALID(IPPROTO_TCP))
@@ -1056,22 +1065,6 @@ static int tcp_new(struct ip_conntrack *conntrack,
 	return 1;
 }
   
-static int tcp_exp_matches_pkt(struct ip_conntrack_expect *exp,
-			       const struct sk_buff *skb)
-{
-	const struct iphdr *iph = skb->nh.iph;
-	struct tcphdr *th, _tcph;
-	unsigned int datalen;
-
-	th = skb_header_pointer(skb, iph->ihl * 4,
-				sizeof(_tcph), &_tcph);
-	if (th == NULL)
-		return 0;
-	datalen = skb->len - iph->ihl*4 - th->doff*4;
-
-	return between(exp->seq, ntohl(th->seq), ntohl(th->seq) + datalen);
-}
-
 struct ip_conntrack_protocol ip_conntrack_protocol_tcp =
 {
 	.proto 			= IPPROTO_TCP,
@@ -1082,6 +1075,5 @@ struct ip_conntrack_protocol ip_conntrack_protocol_tcp =
 	.print_conntrack 	= tcp_print_conntrack,
 	.packet 		= tcp_packet,
 	.new 			= tcp_new,
-	.exp_matches_pkt	= tcp_exp_matches_pkt,
 	.error			= tcp_error,
 };

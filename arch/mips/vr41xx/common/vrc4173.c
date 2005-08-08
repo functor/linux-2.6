@@ -4,6 +4,7 @@
  *  Copyright (C) 2001-2003  MontaVista Software Inc.
  *    Author: Yoichi Yuasa <yyuasa@mvista.com, or source@mvista.com>
  *  Copyright (C) 2004  Yoichi Yuasa <yuasa@hh.iij4u.or.jp>
+ *  Copyright (C) 2005 Ralf Baechle (ralf@linux-mips.org)
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,7 +20,6 @@
  *  along with this program; if not, write to the Free Software
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
@@ -56,6 +56,9 @@ MODULE_LICENSE("GPL");
 
 #define VRC4173_SYSINT1REG	0x060
 #define VRC4173_MSYSINT1REG	0x06c
+#define VRC4173_MPIUINTREG	0x06e
+#define VRC4173_MAIUINTREG	0x070
+#define VRC4173_MKIUINTREG	0x072
 
 #define VRC4173_SELECTREG	0x09e
  #define SEL3			0x0008
@@ -329,7 +332,7 @@ void vrc4173_enable_piuint(uint16_t mask)
 	spin_unlock_irqrestore(&desc->lock, flags);
 }
 
-EXPORT_SYMBOL(vrc4173_eanble_piuint);
+EXPORT_SYMBOL(vrc4173_enable_piuint);
 
 void vrc4173_disable_piuint(uint16_t mask)
 {

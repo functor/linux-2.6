@@ -871,6 +871,10 @@ xfs_dic2xflags(
 			flags |= XFS_XFLAG_PREALLOC;
 		if (di_flags & XFS_DIFLAG_IMMUTABLE)
 			flags |= XFS_XFLAG_IMMUTABLE;
+		if (di_flags & XFS_DIFLAG_IUNLINK)
+			flags |= XFS_XFLAG_IUNLINK;
+		if (di_flags & XFS_DIFLAG_BARRIER)
+			flags |= XFS_XFLAG_BARRIER;
 		if (di_flags & XFS_DIFLAG_APPEND)
 			flags |= XFS_XFLAG_APPEND;
 		if (di_flags & XFS_DIFLAG_SYNC)
@@ -1163,7 +1167,8 @@ xfs_ialloc(
 	 * This is because we're setting fields here we need
 	 * to prevent others from looking at until we're done.
 	 */
-	error = xfs_trans_iget(tp->t_mountp, tp, ino, XFS_ILOCK_EXCL, &ip);
+	error = xfs_trans_iget(tp->t_mountp, tp, ino,
+			IGET_CREATE, XFS_ILOCK_EXCL, &ip);
 	if (error != 0) {
 		return error;
 	}

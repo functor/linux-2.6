@@ -37,6 +37,7 @@
 #include <linux/bootmem.h>
 #include <linux/highmem.h>
 #include <linux/idr.h>
+#include <linux/nodemask.h>
 
 #include <asm/pgalloc.h>
 #include <asm/page.h>
@@ -52,7 +53,6 @@
 #include <asm/smp.h>
 #include <asm/machdep.h>
 #include <asm/tlb.h>
-#include <asm/naca.h>
 #include <asm/eeh.h>
 #include <asm/processor.h>
 #include <asm/mmzone.h>
@@ -169,7 +169,7 @@ static void map_io_page(unsigned long ea, unsigned long pa, int flags)
 
 		hash = hpt_hash(vpn, 0);
 
-		hpteg = ((hash & htab_data.htab_hash_mask)*HPTES_PER_GROUP);
+		hpteg = ((hash & htab_hash_mask) * HPTES_PER_GROUP);
 
 		/* Panic if a pte grpup is full */
 		if (ppc_md.hpte_insert(hpteg, va, pa >> PAGE_SHIFT, 0,
@@ -263,9 +263,10 @@ int __ioremap_explicit(unsigned long pa, unsigned long ea,
 		 */
 		;
 	} else {
-		area = im_get_area(ea, size, IM_REGION_UNUSED|IM_REGION_SUBSET);
+		area = im_get_area(ea, size,
+			IM_REGION_UNUSED|IM_REGION_SUBSET|IM_REGION_EXISTS);
 		if (area == NULL) {
-			printk(KERN_ERR "could not obtain imalloc area for ea 0x%lx\n", ea);
+			/* Expected when PHB-dlpar is in play */
 			return 1;
 		}
 		if (ea != (unsigned long) area->addr) {
@@ -469,7 +470,7 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 }
 #endif
 
-static spinlock_t mmu_context_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(mmu_context_lock);
 static DEFINE_IDR(mmu_context_idr);
 
 int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
@@ -477,12 +478,18 @@ int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 	int index;
 	int err;
 
+#ifdef CONFIG_HUGETLB_PAGE
+	/* We leave htlb_segs as it was, but for a fork, we need to
+	 * clear the huge_pgdir. */
+	mm->context.huge_pgdir = NULL;
+#endif
+
 again:
 	if (!idr_pre_get(&mmu_context_idr, GFP_KERNEL))
 		return -ENOMEM;
 
 	spin_lock(&mmu_context_lock);
-	err = idr_get_new(&mmu_context_idr, NULL, &index);
+	err = idr_get_new_above(&mmu_context_idr, NULL, 1, &index);
 	spin_unlock(&mmu_context_lock);
 
 	if (err == -EAGAIN)
@@ -507,20 +514,9 @@ void destroy_context(struct mm_struct *mm)
 	spin_unlock(&mmu_context_lock);
 
 	mm->context.id = NO_CONTEXT;
+
+	hugetlb_mm_free_pgd(mm);
 }
-
-static int __init mmu_context_init(void)
-{
-	int index;
-
-	/* Reserve the first (invalid) context*/
-	idr_pre_get(&mmu_context_idr, GFP_KERNEL);
-	idr_get_new(&mmu_context_idr, NULL, &index);
-	BUG_ON(0 != index);
-
-	return 0;
-}
-arch_initcall(mmu_context_init);
 
 /*
  * Do very early mm setup.
@@ -707,7 +703,7 @@ void __init mem_init(void)
 	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
 
 #ifdef CONFIG_DISCONTIGMEM
-        for (nid = 0; nid < numnodes; nid++) {
+        for_each_online_node(nid) {
 		if (NODE_DATA(nid)->node_spanned_pages != 0) {
 			printk("freeing bootmem node %x\n", nid);
 			totalram_pages +=
@@ -873,14 +869,14 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long ea,
 	local_irq_restore(flags);
 }
 
-void * reserve_phb_iospace(unsigned long size)
+void __iomem * reserve_phb_iospace(unsigned long size)
 {
-	void *virt_addr;
+	void __iomem *virt_addr;
 		
 	if (phbs_io_bot >= IMALLOC_BASE) 
 		panic("reserve_phb_iospace(): phb io space overflow\n");
 			
-	virt_addr = (void *) phbs_io_bot;
+	virt_addr = (void __iomem *) phbs_io_bot;
 	phbs_io_bot += size;
 
 	return virt_addr;

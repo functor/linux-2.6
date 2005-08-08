@@ -18,6 +18,7 @@
 #include <linux/security.h>
 #include <linux/mempolicy.h>
 #include <linux/personality.h>
+#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -61,10 +62,36 @@ change_pte_range(pmd_t *pmd, unsigned long address,
 }
 
 static inline void
-change_pmd_range(pgd_t *pgd, unsigned long address,
+change_pmd_range(pud_t *pud, unsigned long address,
 		unsigned long size, pgprot_t newprot)
 {
 	pmd_t * pmd;
+	unsigned long end;
+
+	if (pud_none(*pud))
+		return;
+	if (pud_bad(*pud)) {
+		pud_ERROR(*pud);
+		pud_clear(pud);
+		return;
+	}
+	pmd = pmd_offset(pud, address);
+	address &= ~PUD_MASK;
+	end = address + size;
+	if (end > PUD_SIZE)
+		end = PUD_SIZE;
+	do {
+		change_pte_range(pmd, address, end - address, newprot);
+		address = (address + PMD_SIZE) & PMD_MASK;
+		pmd++;
+	} while (address && (address < end));
+}
+
+static inline void
+change_pud_range(pgd_t *pgd, unsigned long address,
+		unsigned long size, pgprot_t newprot)
+{
+	pud_t * pud;
 	unsigned long end;
 
 	if (pgd_none(*pgd))
@@ -74,15 +101,15 @@ change_pmd_range(pgd_t *pgd, unsigned long address,
 		pgd_clear(pgd);
 		return;
 	}
-	pmd = pmd_offset(pgd, address);
+	pud = pud_offset(pgd, address);
 	address &= ~PGDIR_MASK;
 	end = address + size;
 	if (end > PGDIR_SIZE)
 		end = PGDIR_SIZE;
 	do {
-		change_pte_range(pmd, address, end - address, newprot);
-		address = (address + PMD_SIZE) & PMD_MASK;
-		pmd++;
+		change_pmd_range(pud, address, end - address, newprot);
+		address = (address + PUD_SIZE) & PUD_MASK;
+		pud++;
 	} while (address && (address < end));
 }
 
@@ -90,35 +117,40 @@ static void
 change_protection(struct vm_area_struct *vma, unsigned long start,
 		unsigned long end, pgprot_t newprot)
 {
-	pgd_t *dir;
-	unsigned long beg = start;
+	struct mm_struct *mm = current->mm;
+	pgd_t *pgd;
+	unsigned long beg = start, next;
+	int i;
 
-	dir = pgd_offset(current->mm, start);
+	pgd = pgd_offset(mm, start);
 	flush_cache_range(vma, beg, end);
-	if (start >= end)
-		BUG();
-	spin_lock(&current->mm->page_table_lock);
-	do {
-		change_pmd_range(dir, start, end - start, newprot);
-		start = (start + PGDIR_SIZE) & PGDIR_MASK;
-		dir++;
-	} while (start && (start < end));
+	BUG_ON(start >= end);
+	spin_lock(&mm->page_table_lock);
+	for (i = pgd_index(start); i <= pgd_index(end-1); i++) {
+		next = (start + PGDIR_SIZE) & PGDIR_MASK;
+		if (next <= start || next > end)
+			next = end;
+		change_pud_range(pgd, start, next - start, newprot);
+		start = next;
+		pgd++;
+	}
 	flush_tlb_range(vma, beg, end);
-	spin_unlock(&current->mm->page_table_lock);
-	return;
+	spin_unlock(&mm->page_table_lock);
 }
 
 static int
 mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
-	unsigned long start, unsigned long end, unsigned int newflags)
+	unsigned long start, unsigned long end, unsigned long newflags)
 {
 	struct mm_struct * mm = vma->vm_mm;
+	unsigned long oldflags = vma->vm_flags;
+	long nrpages = (end - start) >> PAGE_SHIFT;
 	unsigned long charged = 0;
 	pgprot_t newprot;
 	pgoff_t pgoff;
 	int error;
 
-	if (newflags == vma->vm_flags) {
+	if (newflags == oldflags) {
 		*pprev = vma;
 		return 0;
 	}
@@ -132,8 +164,8 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	 * a MAP_NORESERVE private mapping to writable will now reserve.
 	 */
 	if (newflags & VM_WRITE) {
-		if (!(vma->vm_flags & (VM_ACCOUNT|VM_WRITE|VM_SHARED|VM_HUGETLB))) {
-			charged = (end - start) >> PAGE_SHIFT;
+		if (!(oldflags & (VM_ACCOUNT|VM_WRITE|VM_SHARED|VM_HUGETLB))) {
+			charged = nrpages;
 			if (security_vm_enough_memory(charged))
 				return -ENOMEM;
 			newflags |= VM_ACCOUNT;
@@ -175,11 +207,11 @@ success:
 	 * vm_flags and vm_page_prot are protected by the mmap_sem
 	 * held in write mode.
 	 */
-	vm_stat_unaccount(vma);
 	vma->vm_flags = newflags;
 	vma->vm_page_prot = newprot;
 	change_protection(vma, start, end, newprot);
-	vm_stat_account(vma);
+	__vm_stat_account(mm, oldflags, vma->vm_file, -nrpages);
+	__vm_stat_account(mm, newflags, vma->vm_file, nrpages);
 	return 0;
 
 fail:
@@ -245,7 +277,7 @@ sys_mprotect(unsigned long start, size_t len, unsigned long prot)
 		prev = vma;
 
 	for (nstart = start ; ; ) {
-		unsigned int newflags;
+		unsigned long newflags;
 
 		/* Here we know that  vma->vm_start <= nstart < vma->vm_end. */
 

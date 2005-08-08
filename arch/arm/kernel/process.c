@@ -97,6 +97,8 @@ void default_idle(void)
  */
 void cpu_idle(void)
 {
+	local_fiq_enable();
+
 	/* endless idle loop with no priority at all */
 	while (1) {
 		void (*idle)(void) = pm_idle;
@@ -349,6 +351,9 @@ copy_thread(int nr, unsigned long clone_flags, unsigned long stack_start,
 	memset(&thread->cpu_context, 0, sizeof(struct cpu_context_save));
 	thread->cpu_context.sp = (unsigned long)childregs;
 	thread->cpu_context.pc = (unsigned long)ret_from_fork;
+
+	if (clone_flags & CLONE_SETTLS)
+		thread->tp_value = regs->ARM_r3;
 
 	return 0;
 }

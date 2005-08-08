@@ -1,6 +1,8 @@
 #ifndef __ASM_SH_PGTABLE_H
 #define __ASM_SH_PGTABLE_H
 
+#include <asm-generic/4level-fixup.h>
+
 /*
  * Copyright (C) 1999 Niibe Yutaka
  * Copyright (C) 2002, 2003, 2004 Paul Mundt
@@ -274,7 +276,8 @@ typedef pte_t *pte_addr_t;
 
 #define kern_addr_valid(addr)	(1)
 
-#define io_remap_page_range remap_page_range
+#define io_remap_page_range(vma, vaddr, paddr, size, prot)		\
+		remap_pfn_range(vma, vaddr, (paddr) >> PAGE_SHIFT, size, prot)
 
 /*
  * No page table caches to initialise
@@ -285,9 +288,9 @@ typedef pte_t *pte_addr_t;
 extern unsigned int kobjsize(const void *objp);
 #endif /* !CONFIG_MMU */
 
-#ifdef CONFIG_CPU_SH4
+#if defined(CONFIG_CPU_SH4) || defined(CONFIG_SH7705_CACHE_32KB)
 #define __HAVE_ARCH_PTEP_GET_AND_CLEAR
-extern inline pte_t ptep_get_and_clear(pte_t *ptep);
+extern pte_t ptep_get_and_clear(pte_t *ptep);
 #endif
 
 #include <asm-generic/pgtable.h>

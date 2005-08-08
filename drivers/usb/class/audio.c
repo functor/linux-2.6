@@ -509,7 +509,10 @@ static int dmabuf_mmap(struct vm_area_struct *vma, struct dmabuf *db, unsigned l
 			return -EINVAL;
 	db->mapped = 1;
 	for(nr = 0; nr < size; nr++) {
-		if (remap_page_range(vma, start, virt_to_phys(db->sgbuf[nr]), PAGE_SIZE, prot))
+		unsigned long pfn;
+
+		pfn = virt_to_phys(db->sgbuf[nr]) >> PAGE_SHIFT;
+		if (remap_pfn_range(vma, start, pfn, PAGE_SIZE, prot))
 			return -EAGAIN;
 		start += PAGE_SIZE;
 	}
@@ -635,13 +638,13 @@ static void usbin_stop(struct usb_audiodev *as)
 		spin_unlock_irqrestore(&as->lock, flags);
 		if (notkilled && signal_pending(current)) {
 			if (i & FLG_URB0RUNNING)
-				usb_unlink_urb(u->durb[0].urb);
+				usb_kill_urb(u->durb[0].urb);
 			if (i & FLG_URB1RUNNING)
-				usb_unlink_urb(u->durb[1].urb);
+				usb_kill_urb(u->durb[1].urb);
 			if (i & FLG_SYNC0RUNNING)
-				usb_unlink_urb(u->surb[0].urb);
+				usb_kill_urb(u->surb[0].urb);
 			if (i & FLG_SYNC1RUNNING)
-				usb_unlink_urb(u->surb[1].urb);
+				usb_kill_urb(u->surb[1].urb);
 			notkilled = 0;
 		}
 	}
@@ -1114,13 +1117,13 @@ static void usbout_stop(struct usb_audiodev *as)
 		spin_unlock_irqrestore(&as->lock, flags);
 		if (notkilled && signal_pending(current)) {
 			if (i & FLG_URB0RUNNING)
-				usb_unlink_urb(u->durb[0].urb);
+				usb_kill_urb(u->durb[0].urb);
 			if (i & FLG_URB1RUNNING)
-				usb_unlink_urb(u->durb[1].urb);
+				usb_kill_urb(u->durb[1].urb);
 			if (i & FLG_SYNC0RUNNING)
-				usb_unlink_urb(u->surb[0].urb);
+				usb_kill_urb(u->surb[0].urb);
 			if (i & FLG_SYNC1RUNNING)
-				usb_unlink_urb(u->surb[1].urb);
+				usb_kill_urb(u->surb[1].urb);
 			notkilled = 0;
 		}
 	}
@@ -1949,15 +1952,12 @@ static inline int prog_dmabuf_out(struct usb_audiodev *as)
 static int usb_audio_open_mixdev(struct inode *inode, struct file *file)
 {
 	unsigned int minor = iminor(inode);
-	struct list_head *devs, *mdevs;
 	struct usb_mixerdev *ms;
 	struct usb_audio_state *s;
 
 	down(&open_sem);
-	list_for_each(devs, &audiodevs) {
-		s = list_entry(devs, struct usb_audio_state, audiodev);
-		list_for_each(mdevs, &s->mixerlist) {
-			ms = list_entry(mdevs, struct usb_mixerdev, list);
+	list_for_each_entry(s, &audiodevs, audiodev) {
+		list_for_each_entry(ms, &s->mixerlist, list) {
 			if (ms->dev_mixer == minor)
 				goto mixer_found;
 		}
@@ -2634,16 +2634,13 @@ static int usb_audio_open(struct inode *inode, struct file *file)
 {
 	unsigned int minor = iminor(inode);
 	DECLARE_WAITQUEUE(wait, current);
-	struct list_head *devs, *adevs;
 	struct usb_audiodev *as;
 	struct usb_audio_state *s;
 
 	for (;;) {
 		down(&open_sem);
-		list_for_each(devs, &audiodevs) {
-			s = list_entry(devs, struct usb_audio_state, audiodev);
-			list_for_each(adevs, &s->audiolist) {
-				as = list_entry(adevs, struct usb_audiodev, list);
+		list_for_each_entry(s, &audiodevs, audiodev) {
+			list_for_each_entry(as, &s->audiolist, list) {
 				if (!((as->dev_audio ^ minor) & ~0xf))
 					goto device_found;
 			}
@@ -2974,7 +2971,8 @@ static void usb_audio_parsestreaming(struct usb_audio_state *s, unsigned char *b
 			}
 			format = (fmt[5] == 2) ? (AFMT_U16_LE | AFMT_U8) : (AFMT_S16_LE | AFMT_S8);
 			/* Dallas DS4201 workaround */
-			if (dev->descriptor.idVendor == 0x04fa && dev->descriptor.idProduct == 0x4201)
+			if (le16_to_cpu(dev->descriptor.idVendor) == 0x04fa && 
+			    le16_to_cpu(dev->descriptor.idProduct) == 0x4201)
 				format = (AFMT_S16_LE | AFMT_S8);
 			fmt = find_csinterface_descriptor(buffer, buflen, NULL, FORMAT_TYPE, asifout, i);
 			if (!fmt) {
@@ -3122,12 +3120,18 @@ static void prepmixch(struct consmixstate *state)
 {
 	struct usb_device *dev = state->s->usbdev;
 	struct mixerchannel *ch;
-	unsigned char buf[2];
+	unsigned char *buf;
 	__s16 v1;
 	unsigned int v2, v3;
 
 	if (!state->nrmixch || state->nrmixch > SOUND_MIXER_NRDEVICES)
 		return;
+	buf = kmalloc(sizeof(*buf) * 2, GFP_KERNEL);
+	if (!buf) {
+		printk(KERN_ERR "prepmixch: out of memory\n") ;
+		return;
+	}
+
 	ch = &state->mixch[state->nrmixch-1];
 	switch (ch->selector) {
 	case 0:  /* mixer unit request */
@@ -3239,13 +3243,16 @@ static void prepmixch(struct consmixstate *state)
 	default:
 		goto err;
 	}
-	return;
 
+ freebuf:
+	kfree(buf);
+	return;
  err:
 	printk(KERN_ERR "usbaudio: mixer request device %u if %u unit %u ch %u selector %u failed\n", 
 	       dev->devnum, state->ctrlif, ch->unitid, ch->chnum, ch->selector);
 	if (state->nrmixch)
 		state->nrmixch--;
+	goto freebuf;
 }
 
 
@@ -3710,7 +3717,7 @@ static struct usb_audio_state *usb_audio_parsecontrol(struct usb_device *dev, un
 		if (alt->desc.bNumEndpoints > 0) {
 			/* Check all endpoints; should they all have a bandwidth of 0 ? */
 			for (k = 0; k < alt->desc.bNumEndpoints; k++) {
-				if (alt->endpoint[k].desc.wMaxPacketSize > 0) {
+				if (le16_to_cpu(alt->endpoint[k].desc.wMaxPacketSize) > 0) {
 					printk(KERN_ERR "usbaudio: device %d audiocontrol interface %u endpoint %d does not have 0 bandwidth at alt[0]\n", dev->devnum, ctrlif, k);
 					break;
 				}
@@ -3794,7 +3801,7 @@ static int usb_audio_probe(struct usb_interface *intf,
 	 * find which configuration number is active
 	 */
 	buffer = dev->rawdescriptors[dev->actconfig - dev->config];
-	buflen = dev->actconfig->desc.wTotalLength;
+	buflen = le16_to_cpu(dev->actconfig->desc.wTotalLength);
 	s = usb_audio_parsecontrol(dev, buffer, buflen, intf->altsetting->desc.bInterfaceNumber);
 	if (s) {
 		usb_set_intfdata (intf, s);
@@ -3809,7 +3816,6 @@ static int usb_audio_probe(struct usb_interface *intf,
 static void usb_audio_disconnect(struct usb_interface *intf)
 {
 	struct usb_audio_state *s = usb_get_intfdata (intf);
-	struct list_head *list;
 	struct usb_audiodev *as;
 	struct usb_mixerdev *ms;
 
@@ -3831,8 +3837,7 @@ static void usb_audio_disconnect(struct usb_interface *intf)
 	usb_set_intfdata (intf, NULL);
 
 	/* deregister all audio and mixer devices, so no new processes can open this device */
-	list_for_each(list, &s->audiolist) {
-		as = list_entry(list, struct usb_audiodev, list);
+	list_for_each_entry(as, &s->audiolist, list) {
 		usbin_disc(as);
 		usbout_disc(as);
 		wake_up(&as->usbin.dma.wait);
@@ -3843,8 +3848,7 @@ static void usb_audio_disconnect(struct usb_interface *intf)
 		}
 		as->dev_audio = -1;
 	}
-	list_for_each(list, &s->mixerlist) {
-		ms = list_entry(list, struct usb_mixerdev, list);
+	list_for_each_entry(ms, &s->mixerlist, list) {
 		if (ms->dev_mixer >= 0) {
 			unregister_sound_mixer(ms->dev_mixer);
 			printk(KERN_INFO "usbaudio: unregister mixer 14,%d\n", ms->dev_mixer);

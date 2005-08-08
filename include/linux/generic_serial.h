@@ -73,7 +73,7 @@ struct gs_port {
 
 
 void gs_put_char(struct tty_struct *tty, unsigned char ch);
-int  gs_write(struct tty_struct *tty, int from_user, 
+int  gs_write(struct tty_struct *tty, 
              const unsigned char *buf, int count);
 int  gs_write_room(struct tty_struct *tty);
 int  gs_chars_in_buffer(struct tty_struct *tty);
@@ -82,7 +82,6 @@ void gs_flush_chars(struct tty_struct *tty);
 void gs_stop(struct tty_struct *tty);
 void gs_start(struct tty_struct *tty);
 void gs_hangup(struct tty_struct *tty);
-void gs_do_softint(void *private_);
 int  gs_block_til_ready(void *port, struct file *filp);
 void gs_close(struct tty_struct *tty, struct file *filp);
 void gs_set_termios (struct tty_struct * tty, 

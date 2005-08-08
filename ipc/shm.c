@@ -26,8 +26,9 @@
 #include <linux/proc_fs.h>
 #include <linux/shmem_fs.h>
 #include <linux/security.h>
-#include <linux/vs_base.h>
-
+#include <linux/syscalls.h>
+#include <linux/vs_context.h>
+#include <linux/vs_limit.h>
 #include <asm/uaccess.h>
 
 #include "util.h"
@@ -112,7 +113,12 @@ static void shm_open (struct vm_area_struct *shmd)
  */
 static void shm_destroy (struct shmid_kernel *shp)
 {
-	shm_tot -= (shp->shm_segsz + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	struct vx_info *vxi = locate_vx_info(shp->shm_perm.xid);
+	int numpages = (shp->shm_segsz + PAGE_SIZE - 1) >> PAGE_SHIFT;
+
+	vx_ipcshm_sub(vxi, shp, numpages);
+	shm_tot -= numpages;
+
 	shm_rmid (shp->id);
 	shm_unlock(shp);
 	if (!is_file_hugepages(shp->shm_file))
@@ -122,6 +128,7 @@ static void shm_destroy (struct shmid_kernel *shp)
 						shp->mlock_user);
 	fput (shp->shm_file);
 	security_shm_free(shp);
+	put_vx_info(vxi);
 	ipc_rcu_putref(shp);
 }
 
@@ -188,13 +195,15 @@ static int newseg (key_t key, int shmflg, size_t size)
 
 	if (shm_tot + numpages >= shm_ctlall)
 		return -ENOSPC;
+	if (!vx_ipcshm_avail(current->vx_info, numpages))
+		return -ENOSPC;
 
 	shp = ipc_rcu_alloc(sizeof(*shp));
 	if (!shp)
 		return -ENOMEM;
 
 	shp->shm_perm.key = key;
-	shp->shm_perm.xid = current->xid;
+	shp->shm_perm.xid = vx_current_xid();
 	shp->shm_flags = (shmflg & S_IRWXUGO);
 	shp->mlock_user = NULL;
 
@@ -236,6 +245,7 @@ static int newseg (key_t key, int shmflg, size_t size)
 	else
 		file->f_op = &shm_file_operations;
 	shm_tot += numpages;
+	vx_ipcshm_add(current->vx_info, key, numpages);
 	shm_unlock(shp);
 	return shp->id;
 
@@ -513,11 +523,6 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 	case SHM_LOCK:
 	case SHM_UNLOCK:
 	{
-		/* Allow superuser to lock segment in memory */
-		if (!can_do_mlock() && cmd == SHM_LOCK) {
-			err = -EPERM;
-			goto out;
-		}
 		shp = shm_lock(shmid);
 		if(shp==NULL) {
 			err = -EINVAL;
@@ -526,6 +531,16 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 		err = shm_checkid(shp,shmid);
 		if(err)
 			goto out_unlock;
+
+		if (!capable(CAP_IPC_LOCK)) {
+			err = -EPERM;
+			if (current->euid != shp->shm_perm.uid &&
+			    current->euid != shp->shm_perm.cuid)
+				goto out_unlock;
+			if (cmd == SHM_LOCK &&
+			    !current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur)
+				goto out_unlock;
+		}
 
 		err = security_shm_shmctl(shp, cmd);
 		if (err)

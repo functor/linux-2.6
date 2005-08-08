@@ -63,6 +63,7 @@ struct w1_slave
 	atomic_t		refcnt;
 	u8			rom[9];
 	u32			flags;
+	int			ttl;
 
 	struct w1_master	*master;
 	struct w1_family 	*family;
@@ -72,6 +73,8 @@ struct w1_slave
 	struct bin_attribute 	attr_bin;
 	struct device_attribute	attr_name, attr_val;
 };
+
+typedef void (* w1_slave_found_callback)(unsigned long, u64);
 
 struct w1_bus_master
 {
@@ -89,6 +92,8 @@ struct w1_bus_master
   	u8			(*touch_bit)(unsigned long, u8);
   
   	u8			(*reset_bus)(unsigned long);
+
+	void			(*search)(unsigned long, w1_slave_found_callback);
 };
 
 struct w1_master
@@ -99,6 +104,7 @@ struct w1_master
 	struct list_head	slist;
 	int			max_slave_count, slave_count;
 	unsigned long		attempts;
+	int			slave_ttl;
 	int			initialized;
 	u32			id;
 
@@ -125,6 +131,7 @@ struct w1_master
 
 int w1_create_master_attributes(struct w1_master *);
 void w1_destroy_master_attributes(struct w1_master *);
+void w1_search(struct w1_master *dev);
 
 #endif /* __KERNEL__ */
 

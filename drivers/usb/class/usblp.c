@@ -222,6 +222,7 @@ static int usblp_cache_device_id_string(struct usblp *usblp);
 
 /* forward reference to make our lives easier */
 static struct usb_driver usblp_driver;
+static DECLARE_MUTEX(usblp_sem);	/* locks the existence of usblp's */
 
 /*
  * Functions for usblp control messages.
@@ -343,7 +344,7 @@ static int usblp_open(struct inode *inode, struct file *file)
 	if (minor < 0)
 		return -ENODEV;
 
-	lock_kernel();
+	down (&usblp_sem);
 
 	retval = -ENODEV;
 	intf = usb_find_interface(&usblp_driver, minor);
@@ -389,7 +390,7 @@ static int usblp_open(struct inode *inode, struct file *file)
 		}
 	}
 out:
-	unlock_kernel();
+	up (&usblp_sem);
 	return retval;
 }
 
@@ -406,22 +407,22 @@ static void usblp_cleanup (struct usblp *usblp)
 
 static void usblp_unlink_urbs(struct usblp *usblp)
 {
-	usb_unlink_urb(usblp->writeurb);
+	usb_kill_urb(usblp->writeurb);
 	if (usblp->bidir)
-		usb_unlink_urb(usblp->readurb);
+		usb_kill_urb(usblp->readurb);
 }
 
 static int usblp_release(struct inode *inode, struct file *file)
 {
 	struct usblp *usblp = file->private_data;
 
-	down (&usblp->sem);
+	down (&usblp_sem);
 	usblp->used = 0;
 	if (usblp->present) {
 		usblp_unlink_urbs(usblp);
-		up(&usblp->sem);
 	} else 		/* finish cleanup from disconnect */
 		usblp_cleanup (usblp);
+	up (&usblp_sem);
 	return 0;
 }
 
@@ -526,7 +527,7 @@ static int usblp_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 			case IOCNR_HP_SET_CHANNEL:
 				if (_IOC_DIR(cmd) != _IOC_WRITE ||
-				    usblp->dev->descriptor.idVendor != 0x03F0 ||
+				    le16_to_cpu(usblp->dev->descriptor.idVendor) != 0x03F0 ||
 				    usblp->quirks & USBLP_QUIRK_BIDIR) {
 					retval = -EINVAL;
 					goto done;
@@ -573,8 +574,8 @@ static int usblp_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 					goto done;
 				}
 
-				twoints[0] = usblp->dev->descriptor.idVendor;
-				twoints[1] = usblp->dev->descriptor.idProduct;
+				twoints[0] = le16_to_cpu(usblp->dev->descriptor.idVendor);
+				twoints[1] = le16_to_cpu(usblp->dev->descriptor.idProduct);
 				if (copy_to_user((void __user *)arg,
 						(unsigned char *)twoints,
 						sizeof(twoints))) {
@@ -909,15 +910,15 @@ static int usblp_probe(struct usb_interface *intf,
 
 	/* Lookup quirks for this printer. */
 	usblp->quirks = usblp_quirks(
-		dev->descriptor.idVendor,
-		dev->descriptor.idProduct);
+		le16_to_cpu(dev->descriptor.idVendor),
+		le16_to_cpu(dev->descriptor.idProduct));
 
 	/* Analyze and pick initial alternate settings and endpoints. */
 	protocol = usblp_select_alts(usblp);
 	if (protocol < 0) {
 		dbg("incompatible printer-class device 0x%4.4X/0x%4.4X",
-			dev->descriptor.idVendor,
-			dev->descriptor.idProduct);
+			le16_to_cpu(dev->descriptor.idVendor),
+			le16_to_cpu(dev->descriptor.idProduct));
 		goto abort;
 	}
 
@@ -937,8 +938,9 @@ static int usblp_probe(struct usb_interface *intf,
 		usblp->minor, usblp->bidir ? "Bi" : "Uni", dev->devnum,
 		usblp->ifnum,
 		usblp->protocol[usblp->current_protocol].alt_setting,
-		usblp->current_protocol, usblp->dev->descriptor.idVendor,
-		usblp->dev->descriptor.idProduct);
+		usblp->current_protocol,
+		le16_to_cpu(usblp->dev->descriptor.idVendor),
+		le16_to_cpu(usblp->dev->descriptor.idProduct));
 
 	usb_set_intfdata (intf, usblp);
 
@@ -1094,7 +1096,7 @@ static int usblp_set_protocol(struct usblp *usblp, int protocol)
 		usblp->writebuf, 0,
 		usblp_bulk_write, usblp);
 
-	usblp->bidir = (usblp->protocol[protocol].epread != 0);
+	usblp->bidir = (usblp->protocol[protocol].epread != NULL);
 	if (usblp->bidir)
 		usb_fill_bulk_urb(usblp->readurb, usblp->dev,
 			usb_rcvbulkpipe(usblp->dev,
@@ -1149,8 +1151,8 @@ static void usblp_disconnect(struct usb_interface *intf)
 		BUG ();
 	}
 
+	down (&usblp_sem);
 	down (&usblp->sem);
-	lock_kernel();
 	usblp->present = 0;
 	usb_set_intfdata (intf, NULL);
 
@@ -1159,12 +1161,11 @@ static void usblp_disconnect(struct usb_interface *intf)
 			usblp->writebuf, usblp->writeurb->transfer_dma);
 	usb_buffer_free (usblp->dev, USBLP_BUF_SIZE,
 			usblp->readbuf, usblp->readurb->transfer_dma);
+	up (&usblp->sem);
 
 	if (!usblp->used)
 		usblp_cleanup (usblp);
-	else 	/* cleanup later, on release */
-		up (&usblp->sem);
-	unlock_kernel();
+	up (&usblp_sem);
 }
 
 static struct usb_device_id usblp_ids [] = {

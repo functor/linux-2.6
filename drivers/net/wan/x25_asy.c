@@ -18,7 +18,7 @@
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <linux/string.h>
 #include <linux/mm.h>
 #include <linux/interrupt.h>
@@ -34,10 +34,12 @@
 #include <linux/init.h>
 #include "x25_asy.h"
 
+#include <net/x25device.h>
+
 static struct net_device **x25_asy_devs;
 static int x25_asy_maxdev = SL_NRUNIT;
 
-MODULE_PARM(x25_asy_maxdev, "i");
+module_param(x25_asy_maxdev, int, 0);
 MODULE_LICENSE("GPL");
 
 static int x25_asy_esc(unsigned char *p, unsigned char *d, int len);
@@ -209,10 +211,8 @@ static void x25_asy_bump(struct x25_asy *sl)
 		return;
 	}
 	skb_push(skb,1);	/* LAPB internal control */
-	skb->dev = sl->dev;
 	memcpy(skb_put(skb,count), sl->rbuff, count);
-	skb->mac.raw=skb->data;
-	skb->protocol=htons(ETH_P_X25);
+	skb->protocol = x25_type_trans(skb, sl->dev);
 	if((err=lapb_data_received(skb->dev, skb))!=LAPB_OK)
 	{
 		kfree_skb(skb);
@@ -253,7 +253,7 @@ static void x25_asy_encaps(struct x25_asy *sl, unsigned char *icp, int len)
 	 *       14 Oct 1994  Dmitry Gorodchanin.
 	 */
 	sl->tty->flags |= (1 << TTY_DO_WRITE_WAKEUP);
-	actual = sl->tty->driver->write(sl->tty, 0, sl->xbuff, count);
+	actual = sl->tty->driver->write(sl->tty, sl->xbuff, count);
 	sl->xleft = count - actual;
 	sl->xhead = sl->xbuff + actual;
 	/* VSV */
@@ -283,7 +283,7 @@ static void x25_asy_write_wakeup(struct tty_struct *tty)
 		return;
 	}
 
-	actual = tty->driver->write(tty, 0, sl->xhead, sl->xleft);
+	actual = tty->driver->write(tty, sl->xhead, sl->xleft);
 	sl->xleft -= actual;
 	sl->xhead += actual;
 }
@@ -419,11 +419,7 @@ static void x25_asy_connected(struct net_device *dev, int reason)
 	ptr  = skb_put(skb, 1);
 	*ptr = 0x01;
 
-	skb->dev      = sl->dev;
-	skb->protocol = htons(ETH_P_X25);
-	skb->mac.raw  = skb->data;
-	skb->pkt_type = PACKET_HOST;
-
+	skb->protocol = x25_type_trans(skb, sl->dev);
 	netif_rx(skb);
 	sl->dev->last_rx = jiffies;
 }
@@ -442,11 +438,7 @@ static void x25_asy_disconnected(struct net_device *dev, int reason)
 	ptr  = skb_put(skb, 1);
 	*ptr = 0x02;
 
-	skb->dev      = sl->dev;
-	skb->protocol = htons(ETH_P_X25);
-	skb->mac.raw  = skb->data;
-	skb->pkt_type = PACKET_HOST;
-
+	skb->protocol = x25_type_trans(skb, sl->dev);
 	netif_rx(skb);
 	sl->dev->last_rx = jiffies;
 }

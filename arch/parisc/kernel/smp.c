@@ -33,10 +33,10 @@
 #include <linux/kernel_stat.h>
 #include <linux/mm.h>
 #include <linux/delay.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>
 #include <asm/atomic.h>
-#include <asm/bitops.h>
 #include <asm/current.h>
 #include <asm/delay.h>
 #include <asm/pgalloc.h>	/* for flush_tlb_all() proto/macro */
@@ -54,7 +54,7 @@
 
 #define kDEBUG 0
 
-spinlock_t smp_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(smp_lock);
 
 volatile struct task_struct *smp_init_current_idle_task;
 
@@ -277,7 +277,7 @@ ipi_send(int cpu, enum ipi_message_type op)
 
 	spin_lock_irqsave(&(p->lock),flags);
 	p->pending_ipi |= 1 << op;
-	__raw_writel(IRQ_OFFSET(IPI_IRQ), cpu_data[cpu].hpa);
+	gsc_writel(IPI_IRQ - CPU_IRQ_BASE, cpu_data[cpu].hpa);
 	spin_unlock_irqrestore(&(p->lock),flags);
 }
 
@@ -332,7 +332,8 @@ smp_call_function (void (*func) (void *info), void *info, int retry, int wait)
 {
 	struct smp_call_struct data;
 	unsigned long timeout;
-	static spinlock_t lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(lock);
+	int retries = 0;
 
 	if (num_online_cpus() < 2)
 		return 0;
@@ -365,21 +366,22 @@ smp_call_function (void (*func) (void *info), void *info, int retry, int wait)
 	/*  Send a message to all other CPUs and wait for them to respond  */
 	send_IPI_allbutself(IPI_CALL_FUNC);
 
+ retry:
 	/*  Wait for response  */
 	timeout = jiffies + HZ;
 	while ( (atomic_read (&data.unstarted_count) > 0) &&
 		time_before (jiffies, timeout) )
 		barrier ();
 
+	if (atomic_read (&data.unstarted_count) > 0) {
+		printk(KERN_CRIT "SMP CALL FUNCTION TIMED OUT! (cpu=%d), try %d\n",
+		      smp_processor_id(), ++retries);
+		goto retry;
+	}
 	/* We either got one or timed out. Release the lock */
 
 	mb();
 	smp_call_function_data = NULL;
-	if (atomic_read (&data.unstarted_count) > 0) {
-		printk(KERN_CRIT "SMP CALL FUNCTION TIMED OUT! (cpu=%d)\n",
-		      smp_processor_id());
-		return -ETIMEDOUT;
-	}
 
 	while (wait && atomic_read (&data.unfinished_count) > 0)
 			barrier ();
@@ -457,7 +459,6 @@ smp_cpu_init(int cpunum)
  */
 void __init smp_callin(void)
 {
-	extern void cpu_idle(void);	/* arch/parisc/kernel/process.c */
 	int slave_id = cpu_now_booting;
 #if 0
 	void *istack;
@@ -532,7 +533,7 @@ int __init smp_boot_one_cpu(int cpuid)
 	** EIR{0}). MEM_RENDEZ is valid only when it is nonzero and the 
 	** contents of memory are valid."
 	*/
-	__raw_writel(IRQ_OFFSET(TIMER_IRQ), cpu_data[cpuid].hpa);
+	gsc_writel(TIMER_IRQ - CPU_IRQ_BASE, cpu_data[cpuid].hpa);
 	mb();
 
 	/* 

@@ -8,8 +8,7 @@
  * Copy data from IO memory space to "real" memory space.
  * This needs to be optimized.
  */
-void
-__ia64_memcpy_fromio (void *to, volatile void __iomem *from, long count)
+void memcpy_fromio(void *to, const volatile void __iomem *from, long count)
 {
 	char *dst = to;
 
@@ -18,30 +17,28 @@ __ia64_memcpy_fromio (void *to, volatile void __iomem *from, long count)
 		*dst++ = readb(from++);
 	}
 }
-EXPORT_SYMBOL(__ia64_memcpy_fromio);
+EXPORT_SYMBOL(memcpy_fromio);
 
 /*
  * Copy data from "real" memory space to IO memory space.
  * This needs to be optimized.
  */
-void
-__ia64_memcpy_toio (volatile void __iomem *to, void *from, long count)
+void memcpy_toio(volatile void __iomem *to, const void *from, long count)
 {
-	char *src = from;
+	const char *src = from;
 
 	while (count) {
 		count--;
 		writeb(*src++, to++);
 	}
 }
-EXPORT_SYMBOL(__ia64_memcpy_toio);
+EXPORT_SYMBOL(memcpy_toio);
 
 /*
  * "memset" on IO memory space.
  * This needs to be optimized.
  */
-void
-__ia64_memset_c_io (volatile void __iomem *dst, unsigned long c, long count)
+void memset_io(volatile void __iomem *dst, int c, long count)
 {
 	unsigned char ch = (char)(c & 0xff);
 
@@ -51,7 +48,7 @@ __ia64_memset_c_io (volatile void __iomem *dst, unsigned long c, long count)
 		dst++;
 	}
 }
-EXPORT_SYMBOL(__ia64_memset_c_io);
+EXPORT_SYMBOL(memset_io);
 
 #ifdef CONFIG_IA64_GENERIC
 
@@ -73,6 +70,7 @@ EXPORT_SYMBOL(__ia64_memset_c_io);
 #undef __ia64_writew
 #undef __ia64_writel
 #undef __ia64_writeq
+#undef __ia64_mmiowb
 
 unsigned int
 __ia64_inb (unsigned long port)
@@ -156,6 +154,12 @@ unsigned long
 __ia64_readq_relaxed (void __iomem *addr)
 {
 	return ___ia64_readq (addr);
+}
+
+void
+__ia64_mmiowb(void)
+{
+	___ia64_mmiowb();
 }
 
 #endif /* CONFIG_IA64_GENERIC */

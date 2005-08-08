@@ -40,13 +40,14 @@ endif
 
 ifeq ($(CONFIG_ARCH_SA1100),y)
 OBJS		+= head-sa1100.o
-ifeq ($(CONFIG_SA1100_NANOENGINE),y)
-  OBJS += hw-bse.o
-endif
 endif
 
 ifeq ($(CONFIG_CPU_XSCALE),y)
 OBJS		+= head-xscale.o
+endif
+
+ifeq ($(CONFIG_PXA_SHARPSL),y)
+OBJS		+= head-sharpsl.o
 endif
 
 ifeq ($(CONFIG_DEBUG_ICEDCC),y)

@@ -46,15 +46,14 @@
 
 static int dsp_map[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS-1)] = 0};
 static int adsp_map[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS-1)] = 1};
-static int nonblock_open;
-static int boot_devs;
+static int nonblock_open = 1;
 
 MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>, Abramo Bagnara <abramo@alsa-project.org>");
 MODULE_DESCRIPTION("PCM OSS emulation for ALSA.");
 MODULE_LICENSE("GPL");
-module_param_array(dsp_map, int, boot_devs, 0444);
+module_param_array(dsp_map, int, NULL, 0444);
 MODULE_PARM_DESC(dsp_map, "PCM device number assigned to 1st OSS device.");
-module_param_array(adsp_map, int, boot_devs, 0444);
+module_param_array(adsp_map, int, NULL, 0444);
 MODULE_PARM_DESC(adsp_map, "PCM device number assigned to 2nd OSS device.");
 module_param(nonblock_open, bool, 0644);
 MODULE_PARM_DESC(nonblock_open, "Don't block opening busy PCM devices.");
@@ -78,7 +77,7 @@ static inline void snd_leave_user(mm_segment_t fs)
 	set_fs(fs);
 }
 
-int snd_pcm_oss_plugin_clear(snd_pcm_substream_t *substream)
+static int snd_pcm_oss_plugin_clear(snd_pcm_substream_t *substream)
 {
 	snd_pcm_runtime_t *runtime = substream->runtime;
 	snd_pcm_plugin_t *plugin, *next;
@@ -93,7 +92,7 @@ int snd_pcm_oss_plugin_clear(snd_pcm_substream_t *substream)
 	return 0;
 }
 
-int snd_pcm_plugin_insert(snd_pcm_plugin_t *plugin)
+static int snd_pcm_plugin_insert(snd_pcm_plugin_t *plugin)
 {
 	snd_pcm_runtime_t *runtime = plugin->plug->runtime;
 	plugin->next = runtime->oss.plugin_first;
@@ -514,8 +513,7 @@ static int snd_pcm_oss_change_params(snd_pcm_substream_t *substream)
 
 	runtime->oss.params = 0;
 	runtime->oss.prepare = 1;
-	if (runtime->oss.buffer != NULL)
-		vfree(runtime->oss.buffer);
+	vfree(runtime->oss.buffer);
 	runtime->oss.buffer = vmalloc(runtime->oss.period_bytes);
 	runtime->oss.buffer_used = 0;
 	if (runtime->dma_area)
@@ -525,12 +523,9 @@ static int snd_pcm_oss_change_params(snd_pcm_substream_t *substream)
 
 	err = 0;
 failure:
-	if (sw_params)
-		kfree(sw_params);
-	if (params)
-		kfree(params);
-	if (sparams)
-		kfree(sparams);
+	kfree(sw_params);
+	kfree(params);
+	kfree(sparams);
 	return err;
 }
 
@@ -830,13 +825,18 @@ static ssize_t snd_pcm_oss_write1(snd_pcm_substream_t *substream, const char __u
 			xfer += tmp;
 			if ((substream->oss.setup != NULL && substream->oss.setup->partialfrag) ||
 			    runtime->oss.buffer_used == runtime->oss.period_bytes) {
-				tmp = snd_pcm_oss_write2(substream, runtime->oss.buffer, runtime->oss.buffer_used, 1);
+				tmp = snd_pcm_oss_write2(substream, runtime->oss.buffer + runtime->oss.period_ptr, 
+							 runtime->oss.buffer_used - runtime->oss.period_ptr, 1);
 				if (tmp <= 0)
 					return xfer > 0 ? (snd_pcm_sframes_t)xfer : tmp;
 				runtime->oss.bytes += tmp;
-				runtime->oss.buffer_used = 0;
 				runtime->oss.period_ptr += tmp;
 				runtime->oss.period_ptr %= runtime->oss.period_bytes;
+				if (runtime->oss.period_ptr == 0 ||
+				    runtime->oss.period_ptr == runtime->oss.buffer_used)
+					runtime->oss.buffer_used = 0;
+				else if ((substream->ffile->f_flags & O_NONBLOCK) != 0)
+					return xfer > 0 ? xfer : -EAGAIN;
 			}
 		} else {
 			tmp = snd_pcm_oss_write2(substream, (char *)buf, runtime->oss.period_bytes, 0);
@@ -846,6 +846,9 @@ static ssize_t snd_pcm_oss_write1(snd_pcm_substream_t *substream, const char __u
 			buf += tmp;
 			bytes -= tmp;
 			xfer += tmp;
+			if ((substream->ffile->f_flags & O_NONBLOCK) != 0 &&
+			    tmp != runtime->oss.period_bytes)
+				break;
 		}
 	}
 	return xfer;
@@ -1664,8 +1667,7 @@ static void snd_pcm_oss_release_substream(snd_pcm_substream_t *substream)
 {
 	snd_pcm_runtime_t *runtime;
 	runtime = substream->runtime;
-	if (runtime->oss.buffer)
-		vfree(runtime->oss.buffer);
+	vfree(runtime->oss.buffer);
 	snd_pcm_oss_plugin_clear(substream);
 	substream->oss.file = NULL;
 	substream->oss.oss = 0;

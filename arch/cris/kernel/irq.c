@@ -36,9 +36,9 @@
 #include <linux/init.h>
 #include <linux/seq_file.h>
 #include <linux/errno.h>
+#include <linux/bitops.h>
 
 #include <asm/io.h>
-#include <asm/bitops.h>
 
 /* Defined in arch specific irq.c */
 extern void arch_setup_irq(int irq);
@@ -158,11 +158,6 @@ asmlinkage void do_IRQ(int irq, struct pt_regs * regs)
 		local_irq_disable();
         }
         irq_exit();
-
-	if (softirq_pending(cpu))
-                do_softirq();
-
-        /* unmasking and bottom half handling is done magically for us. */
 }
 
 /* this function links in a handler into the chain of handlers for the

@@ -42,7 +42,7 @@ struct serport {
 static int serport_serio_write(struct serio *serio, unsigned char data)
 {
 	struct serport *serport = serio->port_data;
-	return -(serport->tty->driver->write(serport->tty, 0, &data, 1) != 1);
+	return -(serport->tty->driver->write(serport->tty, &data, 1) != 1);
 }
 
 static void serport_serio_close(struct serio *serio)
@@ -63,6 +63,9 @@ static int serport_ldisc_open(struct tty_struct *tty)
 	struct serport *serport;
 	struct serio *serio;
 	char name[64];
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
 
 	serport = kmalloc(sizeof(struct serport), GFP_KERNEL);
 	serio = kmalloc(sizeof(struct serio), GFP_KERNEL);

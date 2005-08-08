@@ -207,7 +207,7 @@ struct usb_bluetooth {
 /* local function prototypes */
 static int  bluetooth_open		(struct tty_struct *tty, struct file *filp);
 static void bluetooth_close		(struct tty_struct *tty, struct file *filp);
-static int  bluetooth_write		(struct tty_struct *tty, int from_user, const unsigned char *buf, int count);
+static int  bluetooth_write		(struct tty_struct *tty, const unsigned char *buf, int count);
 static int  bluetooth_write_room	(struct tty_struct *tty);
 static int  bluetooth_chars_in_buffer	(struct tty_struct *tty);
 static void bluetooth_throttle		(struct tty_struct *tty);
@@ -426,14 +426,14 @@ static void bluetooth_close (struct tty_struct *tty, struct file * filp)
 		bluetooth->open_count = 0;
 
 		/* shutdown any in-flight urbs that we know about */
-		usb_unlink_urb (bluetooth->read_urb);
-		usb_unlink_urb (bluetooth->interrupt_in_urb);
+		usb_kill_urb (bluetooth->read_urb);
+		usb_kill_urb (bluetooth->interrupt_in_urb);
 	}
 	up(&bluetooth->lock);
 }
 
 
-static int bluetooth_write (struct tty_struct * tty, int from_user, const unsigned char *buf, int count)
+static int bluetooth_write (struct tty_struct * tty, const unsigned char *buf, int count)
 {
 	struct usb_bluetooth *bluetooth = get_usb_bluetooth ((struct usb_bluetooth *)tty->driver_data, __FUNCTION__);
 	struct urb *urb = NULL;
@@ -471,21 +471,7 @@ static int bluetooth_write (struct tty_struct * tty, int from_user, const unsign
 	printk ("\n");
 #endif
 
-	if (from_user) {
-		temp_buffer = kmalloc (count, GFP_KERNEL);
-		if (temp_buffer == NULL) {
-			err ("%s - out of memory.", __FUNCTION__);
-			retval = -ENOMEM;
-			goto exit;
-		}
-		if (copy_from_user (temp_buffer, (void __user *)buf, count)) {
-			retval = -EFAULT;
-			goto exit;
-		}
-		current_buffer = temp_buffer;
-	} else {
-		current_buffer = buf;
-	}
+	current_buffer = buf;
 
 	switch (*current_buffer) {
 		/* First byte indicates the type of packet */
@@ -705,7 +691,7 @@ void btusb_disable_bulk_read(struct tty_struct *tty){
 	}
 
 	if ((bluetooth->read_urb) && (bluetooth->read_urb->actual_length))
-		usb_unlink_urb(bluetooth->read_urb);
+		usb_kill_urb(bluetooth->read_urb);
 }
 #endif
 
@@ -1100,7 +1086,7 @@ static int usb_bluetooth_probe (struct usb_interface *intf,
 		err("No free urbs available");
 		goto probe_error;
 	}
-	bluetooth->bulk_in_buffer_size = buffer_size = endpoint->wMaxPacketSize;
+	bluetooth->bulk_in_buffer_size = buffer_size = le16_to_cpu(endpoint->wMaxPacketSize);
 	bluetooth->bulk_in_endpointAddress = endpoint->bEndpointAddress;
 	bluetooth->bulk_in_buffer = kmalloc (buffer_size, GFP_KERNEL);
 	if (!bluetooth->bulk_in_buffer) {
@@ -1112,7 +1098,7 @@ static int usb_bluetooth_probe (struct usb_interface *intf,
 
 	endpoint = bulk_out_endpoint[0];
 	bluetooth->bulk_out_endpointAddress = endpoint->bEndpointAddress;
-	bluetooth->bulk_out_buffer_size = endpoint->wMaxPacketSize * 2;
+	bluetooth->bulk_out_buffer_size = le16_to_cpu(endpoint->wMaxPacketSize) * 2;
 
 	endpoint = interrupt_in_endpoint[0];
 	bluetooth->interrupt_in_urb = usb_alloc_urb(0, GFP_KERNEL);
@@ -1120,7 +1106,7 @@ static int usb_bluetooth_probe (struct usb_interface *intf,
 		err("No free urbs available");
 		goto probe_error;
 	}
-	bluetooth->interrupt_in_buffer_size = buffer_size = endpoint->wMaxPacketSize;
+	bluetooth->interrupt_in_buffer_size = buffer_size = le16_to_cpu(endpoint->wMaxPacketSize);
 	bluetooth->interrupt_in_endpointAddress = endpoint->bEndpointAddress;
 	bluetooth->interrupt_in_interval = endpoint->bInterval;
 	bluetooth->interrupt_in_buffer = kmalloc (buffer_size, GFP_KERNEL);
@@ -1179,14 +1165,14 @@ static void usb_bluetooth_disconnect(struct usb_interface *intf)
 		bluetooth->open_count = 0;
 
 		if (bluetooth->read_urb) {
-			usb_unlink_urb (bluetooth->read_urb);
+			usb_kill_urb (bluetooth->read_urb);
 			usb_free_urb (bluetooth->read_urb);
 		}
 		if (bluetooth->bulk_in_buffer)
 			kfree (bluetooth->bulk_in_buffer);
 
 		if (bluetooth->interrupt_in_urb) {
-			usb_unlink_urb (bluetooth->interrupt_in_urb);
+			usb_kill_urb (bluetooth->interrupt_in_urb);
 			usb_free_urb (bluetooth->interrupt_in_urb);
 		}
 		if (bluetooth->interrupt_in_buffer)
@@ -1196,7 +1182,7 @@ static void usb_bluetooth_disconnect(struct usb_interface *intf)
 
 		for (i = 0; i < NUM_CONTROL_URBS; ++i) {
 			if (bluetooth->control_urb_pool[i]) {
-				usb_unlink_urb (bluetooth->control_urb_pool[i]);
+				usb_kill_urb (bluetooth->control_urb_pool[i]);
 				if (bluetooth->control_urb_pool[i]->transfer_buffer)
 					kfree (bluetooth->control_urb_pool[i]->transfer_buffer);
 				usb_free_urb (bluetooth->control_urb_pool[i]);

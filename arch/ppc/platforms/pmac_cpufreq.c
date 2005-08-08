@@ -33,6 +33,8 @@
 #include <asm/sections.h>
 #include <asm/cputable.h>
 #include <asm/time.h>
+#include <asm/system.h>
+#include <asm/open_pic.h>
 
 /* WARNING !!! This will cause calibrate_delay() to be called,
  * but this is an __init function ! So you MUST go edit
@@ -51,10 +53,6 @@
 extern void low_choose_7447a_dfs(int dfs);
 extern void low_choose_750fx_pll(int pll);
 extern void low_sleep_handler(void);
-extern void openpic_suspend(struct sys_device *sysdev, u32 state);
-extern void openpic_resume(struct sys_device *sysdev);
-extern void enable_kernel_altivec(void);
-extern void enable_kernel_fp(void);
 
 /*
  * Currently, PowerMac cpufreq supports only high & low frequencies
@@ -140,11 +138,8 @@ static int __pmac dfs_set_cpu_speed(int low_speed)
 	if (low_speed == 0) {
 		/* ramping up, set voltage first */
 		pmac_call_feature(PMAC_FTR_WRITE_GPIO, NULL, voltage_gpio, 0x05);
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout(HZ/1000);
-	} else {
-		/* ramping down, enable aack delay first */
-		pmac_call_feature(PMAC_FTR_AACK_DELAY_ENABLE, NULL, 1, 0);
+		/* Make sure we sleep for at least 1ms */
+		msleep(1);
 	}
 
 	/* set frequency */
@@ -153,14 +148,18 @@ static int __pmac dfs_set_cpu_speed(int low_speed)
 	if (low_speed == 1) {
 		/* ramping down, set voltage last */
 		pmac_call_feature(PMAC_FTR_WRITE_GPIO, NULL, voltage_gpio, 0x04);
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout(HZ/1000);
-	} else {
-		/* ramping up, disable aack delay last */
-		pmac_call_feature(PMAC_FTR_AACK_DELAY_ENABLE, NULL, 0, 0);
+		msleep(1);
 	}
 
 	return 0;
+}
+
+static unsigned int __pmac dfs_get_cpu_speed(unsigned int cpu)
+{
+	if (mfspr(HID1) & HID1_DFS)
+		return low_freq;
+	else
+		return hi_freq;
 }
 
 
@@ -174,8 +173,7 @@ static int __pmac gpios_set_cpu_speed(int low_speed)
 	if (low_speed == 0) {
 		pmac_call_feature(PMAC_FTR_WRITE_GPIO, NULL, voltage_gpio, 0x05);
 		/* Delay is way too big but it's ok, we schedule */
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout(HZ/100);
+		msleep(10);
 	}
 
 	/* Set frequency */
@@ -192,8 +190,7 @@ static int __pmac gpios_set_cpu_speed(int low_speed)
 	if (low_speed == 1) {
 		pmac_call_feature(PMAC_FTR_WRITE_GPIO, NULL, voltage_gpio, 0x04);
 		/* Delay is way too big but it's ok, we schedule */
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout(HZ/100);
+		msleep(10);
 	}
 
 #ifdef DEBUG_FREQ
@@ -217,7 +214,7 @@ static int __pmac pmu_set_cpu_speed(int low_speed)
 	printk(KERN_DEBUG "HID1, before: %x\n", mfspr(SPRN_HID1));
 #endif
 	/* Disable all interrupt sources on openpic */
-	openpic_suspend(NULL, 1);
+ 	openpic_set_priority(0xf);
 
 	/* Make sure the decrementer won't interrupt us */
 	asm volatile("mtdec %0" : : "r" (0x7fffffff));
@@ -240,10 +237,6 @@ static int __pmac pmu_set_cpu_speed(int low_speed)
 	/* Save & disable L2 and L3 caches */
 	save_l3cr = _get_L3CR();	/* (returns -1 if not available) */
 	save_l2cr = _get_L2CR();	/* (returns -1 if not available) */
-	if (save_l3cr != 0xffffffff && (save_l3cr & L3CR_L3E) != 0)
-		_set_L3CR(save_l3cr & 0x7fffffff);
-	if (save_l2cr != 0xffffffff && (save_l2cr & L2CR_L2E) != 0)
-		_set_L2CR(save_l2cr & 0x7fffffff);
 
 	/* Send the new speed command. My assumption is that this command
 	 * will cause PLL_CFG[0..3] to be changed next time CPU goes to sleep
@@ -284,7 +277,7 @@ static int __pmac pmu_set_cpu_speed(int low_speed)
 	wakeup_decrementer();
 
 	/* Restore interrupts */
-	openpic_resume(NULL);
+ 	openpic_set_priority(0);
 
 	/* Let interrupts flow again ... */
 	local_irq_enable();
@@ -469,14 +462,13 @@ static int __pmac pmac_cpufreq_init_7447A(struct device_node *cpunode)
 {
 	struct device_node *volt_gpio_np;
 	u32 *reg;
+	struct cpufreq_driver *driver = &pmac_cpufreq_driver;
 
 	/* OF only reports the high frequency */
 	hi_freq = cur_freq;
 	low_freq = cur_freq/2;
-	if (mfspr(HID1) & HID1_DFS)
-		cur_freq = low_freq;
-	else
-		cur_freq = hi_freq;
+	driver->get = dfs_get_cpu_speed;
+	cur_freq = driver->get(0);
 
 	volt_gpio_np = of_find_node_by_name(NULL, "cpu-vcore-select");
 	if (!volt_gpio_np){

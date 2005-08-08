@@ -1,4 +1,5 @@
-/* 
+
+/*
     tuner.h - definition for different tuners
 
     Copyright (C) 1997 Markus Schroeder (schroedm@uni-duesseldorf.de)
@@ -69,9 +70,14 @@
 #define TUNER_PHILIPS_ATSC       42
 #define TUNER_PHILIPS_FM1236_MK3 43
 #define TUNER_PHILIPS_4IN1       44	/* ATI TV Wonder Pro - Conexant */
+/* Microtune mergeged with Temic 12/31/1999 partially financed by Alps - these may be similar to Temic */
 #define TUNER_MICROTUNE_4049FM5  45
 #define TUNER_LG_NTSC_TAPE       47
 #define TUNER_TNF_8831BGFF       48
+#define TUNER_MICROTUNE_4042FI5  49	/* FusionHDTV 3 Gold - 4042 FI5 (3X 8147) */
+#define TUNER_TCL_2002N          50
+#define TUNER_PHILIPS_FM1256_IH3   51
+#define TUNER_THOMSON_DTT7610    52
 
 #define NOTUNER 0
 #define PAL     1	/* PAL_BG */
@@ -91,6 +97,8 @@
 #define Microtune 8
 #define HITACHI 9
 #define Panasonic 10
+#define TCL     11
+#define THOMSON 12
 
 #define TUNER_SET_TYPE               _IOW('t',1,int)    /* set tuner type */
 #define TUNER_SET_TVFREQ             _IOW('t',2,int)    /* set tv freq */
@@ -102,10 +110,12 @@
 #define  TDA9887_SET_CONFIG          _IOW('t',5,int)
 /* tv card specific */
 # define TDA9887_PRESENT             (1<<0)
-# define TDA9887_PORT1               (1<<1)
-# define TDA9887_PORT2               (1<<2)
+# define TDA9887_PORT1_INACTIVE      (1<<1)
+# define TDA9887_PORT2_INACTIVE      (1<<2)
 # define TDA9887_QSS                 (1<<3)
 # define TDA9887_INTERCARRIER        (1<<4)
+# define TDA9887_PORT1_ACTIVE        (1<<5)
+# define TDA9887_PORT2_ACTIVE        (1<<6)
 /* config options */
 # define TDA9887_DEEMPHASIS_MASK     (3<<16)
 # define TDA9887_DEEMPHASIS_NONE     (1<<16)

@@ -15,6 +15,7 @@
 #include <asm/pgtable.h>
 #include <asm/shmparam.h>
 #include <asm/tlbflush.h>
+#include <asm/cacheflush.h>
 
 #if SHMLBA > 16384
 #error FIX ME
@@ -27,7 +28,7 @@
 
 static pte_t *from_pte;
 static pte_t *to_pte;
-static spinlock_t v6_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(v6_lock);
 
 #define DCACHE_COLOUR(vaddr) ((vaddr & (SHMLBA - 1)) >> PAGE_SHIFT)
 

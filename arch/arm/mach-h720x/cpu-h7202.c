@@ -5,7 +5,7 @@
  *               2003 Robert Schwebel <r.schwebel@pengutronix.de>
  *               2004 Sascha Hauer    <s.hauer@pengutronix.de>
  *
- * processor specific stuff for the Hynix h7201
+ * processor specific stuff for the Hynix h7202
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -23,6 +23,8 @@
 #include <asm/mach/irq.h>
 #include <asm/mach/time.h>
 #include <linux/device.h>
+#include <linux/serial_8250.h>
+#include "common.h"
 
 static struct resource h7202ps2_resources[] = {
 	[0] = {
@@ -44,12 +46,60 @@ static struct platform_device h7202ps2_device = {
 	.resource	= h7202ps2_resources,
 };
 
-static struct platform_device *devices[] __initdata = {
-	&h7202ps2_device,
+static struct plat_serial8250_port serial_platform_data[] = {
+	{
+		.membase	= (void*)SERIAL0_VIRT,
+		.mapbase	= SERIAL0_BASE,
+		.irq		= IRQ_UART0,
+		.uartclk	= 2*1843200,
+		.regshift	= 2,
+		.iotype		= UPIO_MEM,
+		.flags		= UPF_BOOT_AUTOCONF | UPF_SKIP_TEST,
+	},
+	{
+		.membase	= (void*)SERIAL1_VIRT,
+		.mapbase	= SERIAL1_BASE,
+		.irq		= IRQ_UART1,
+		.uartclk	= 2*1843200,
+		.regshift	= 2,
+		.iotype		= UPIO_MEM,
+		.flags		= UPF_BOOT_AUTOCONF | UPF_SKIP_TEST,
+	},
+#ifdef CONFIG_H7202_SERIAL23
+	{
+		.membase	= (void*)SERIAL2_VIRT,
+		.mapbase	= SERIAL2_BASE,
+		.irq		= IRQ_UART2,
+		.uartclk	= 2*1843200,
+		.regshift	= 2,
+		.iotype		= UPIO_MEM,
+		.flags		= UPF_BOOT_AUTOCONF | UPF_SKIP_TEST,
+	},
+	{
+		.membase	= (void*)SERIAL3_VIRT,
+		.mapbase	= SERIAL3_BASE,
+		.irq		= IRQ_UART3,
+		.uartclk	= 2*1843200,
+		.regshift	= 2,
+		.iotype		= UPIO_MEM,
+		.flags		= UPF_BOOT_AUTOCONF | UPF_SKIP_TEST,
+	},
+#endif
+	{ },
 };
 
-extern unsigned long h720x_gettimeoffset(void);
-extern void __init h720x_init_irq (void);
+static struct platform_device serial_device = {
+	.name			= "serial8250",
+	.id			= 0,
+	.dev			= {
+		.platform_data	= serial_platform_data,
+	},
+};
+
+static struct platform_device *devices[] __initdata = {
+	&h7202ps2_device,
+	&serial_device,
+};
 
 /* Although we have two interrupt lines for the timers, we only have one
  * status register which clears all pending timer interrupts on reading. So
@@ -64,7 +114,9 @@ h7202_timerx_demux_handler(unsigned int irq_unused, struct irqdesc *desc,
 	mask = CPU_REG (TIMER_VIRT, TIMER_TOPSTAT);
 
 	if ( mask & TSTAT_T0INT ) {
+		write_seqlock(&xtime_lock);
 		timer_tick(regs);
+		write_sequnlock(&xtime_lock);
 		if( mask == TSTAT_T0INT )
 			return;
 	}
@@ -128,8 +180,6 @@ static struct irqaction h7202_timer_irq = {
  */
 void __init h7202_init_time(void)
 {
-	gettimeoffset = h720x_gettimeoffset;
-
 	CPU_REG (TIMER_VIRT, TM0_PERIOD) = LATCH;
 	CPU_REG (TIMER_VIRT, TM0_CTRL) = TM_RESET;
 	CPU_REG (TIMER_VIRT, TM0_CTRL) = TM_REPEAT | TM_START;
@@ -137,6 +187,11 @@ void __init h7202_init_time(void)
 
 	setup_irq(IRQ_TIMER0, &h7202_timer_irq);
 }
+
+struct sys_timer h7202_timer = {
+	.init		= h7202_init_time,
+	.offset		= h720x_gettimeoffset,
+};
 
 void __init h7202_init_irq (void)
 {
@@ -161,5 +216,13 @@ void __init init_hw_h7202(void)
 	/* Enable clocks */
 	CPU_REG (PMU_BASE, PMU_PLL_CTRL) |= PLL_2_EN | PLL_1_EN | PLL_3_MUTE;
 
+	CPU_REG (SERIAL0_VIRT, SERIAL_ENABLE) = SERIAL_ENABLE_EN;
+	CPU_REG (SERIAL1_VIRT, SERIAL_ENABLE) = SERIAL_ENABLE_EN;
+#ifdef CONFIG_H7202_SERIAL23
+	CPU_REG (SERIAL2_VIRT, SERIAL_ENABLE) = SERIAL_ENABLE_EN;
+	CPU_REG (SERIAL3_VIRT, SERIAL_ENABLE) = SERIAL_ENABLE_EN;
+	CPU_IO (GPIO_AMULSEL) = AMULSEL_USIN2 | AMULSEL_USOUT2 |
+	                        AMULSEL_USIN3 | AMULSEL_USOUT3;
+#endif
 	(void) platform_add_devices(devices, ARRAY_SIZE(devices));
 }

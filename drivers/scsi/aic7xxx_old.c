@@ -224,7 +224,6 @@
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/byteorder.h>
-#include <linux/version.h>
 #include <linux/string.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
@@ -924,7 +923,7 @@ struct aic7xxx_host {
   volatile long            flags;
   ahc_feature              features;         /* chip features */
   unsigned long            base;             /* card base address */
-  volatile unsigned char  *maddr;            /* memory mapped address */
+  volatile unsigned char  __iomem *maddr;            /* memory mapped address */
   unsigned long            isr_count;        /* Interrupt count */
   unsigned long            spurious_int;
   scb_data_type           *scb_data;
@@ -1233,7 +1232,7 @@ static int aic7xxx_seltime = 0x10;
  */
 #ifdef MODULE
 static char * aic7xxx = NULL;
-MODULE_PARM(aic7xxx, "s");
+module_param(aic7xxx, charp, 0);
 #endif
 
 #define VERBOSE_NORMAL         0x0000
@@ -1838,7 +1837,7 @@ aic7xxx_print_sequencer(struct aic7xxx_host *p, int downloaded)
  * Description:
  *   Return a string describing the driver.
  *-F*************************************************************************/
-const char *
+static const char *
 aic7xxx_info(struct Scsi_Host *dooh)
 {
   static char buffer[256];
@@ -7967,8 +7966,8 @@ aic7xxx_register(Scsi_Host_Template *template, struct aic7xxx_host *p,
     printk(KERN_INFO "(scsi%d) BIOS %sabled, IO Port 0x%lx, IRQ %d\n",
       p->host_no, (p->flags & AHC_BIOS_ENABLED) ? "en" : "dis",
       p->base, p->irq);
-    printk(KERN_INFO "(scsi%d) IO Memory at 0x%lx, MMAP Memory at 0x%lx\n",
-      p->host_no, p->mbase, (unsigned long)p->maddr);
+    printk(KERN_INFO "(scsi%d) IO Memory at 0x%lx, MMAP Memory at %p\n",
+      p->host_no, p->mbase, p->maddr);
   }
 
 #ifdef CONFIG_PCI
@@ -9243,6 +9242,7 @@ aic7xxx_detect(Scsi_Host_Template *template)
 	    {
               /* duplicate PCI entry, skip it */
 	      kfree(temp_p);
+	      temp_p = NULL;
               continue;
 	    }
 	    current_p = current_p->next;
@@ -9310,14 +9310,9 @@ aic7xxx_detect(Scsi_Host_Template *template)
                ((temp_p->chip != (AHC_AIC7870 | AHC_PCI)) &&
                 (temp_p->chip != (AHC_AIC7880 | AHC_PCI))) )
           {
-            unsigned long page_offset, base;
-
-            base = temp_p->mbase & PAGE_MASK;
-            page_offset = temp_p->mbase - base;
-            temp_p->maddr = ioremap_nocache(base, page_offset + 256);
+            temp_p->maddr = ioremap_nocache(temp_p->mbase, 256);
             if(temp_p->maddr)
             {
-              temp_p->maddr += page_offset;
               /*
                * We need to check the I/O with the MMAPed address.  Some machines
                * simply fail to work with MMAPed I/O and certain controllers.
@@ -9334,7 +9329,7 @@ aic7xxx_detect(Scsi_Host_Template *template)
                   PCI_FUNC(temp_p->pci_device_fn));
                 printk(KERN_INFO "aic7xxx: MMAPed I/O failed, reverting to "
                                  "Programmed I/O.\n");
-                iounmap((void *) (((unsigned long) temp_p->maddr) & PAGE_MASK));
+                iounmap(temp_p->maddr);
                 temp_p->maddr = NULL;
                 if(temp_p->base == 0)
                 {
@@ -10568,8 +10563,7 @@ static void
 aic7xxx_panic_abort(struct aic7xxx_host *p, Scsi_Cmnd *cmd)
 {
 
-  printk("aic7xxx driver version %s/%s\n", AIC7XXX_C_VERSION,
-         UTS_RELEASE);
+  printk("aic7xxx driver version %s\n", AIC7XXX_C_VERSION);
   printk("Controller type:\n    %s\n", board_names[p->board_name_index]);
   printk("p->flags=0x%lx, p->chip=0x%x, p->features=0x%x, "
          "sequencer %s paused\n",
@@ -10964,7 +10958,7 @@ aic7xxx_release(struct Scsi_Host *host)
 #ifdef MMAPIO
   if(p->maddr)
   {
-    iounmap((void *) (((unsigned long) p->maddr) & PAGE_MASK));
+    iounmap(p->maddr);
   }
 #endif /* MMAPIO */
   if(!p->pdev)

@@ -6,7 +6,7 @@
  * Bugreports.to..: <Linux390@de.ibm.com>
  * (C) IBM Corporation, IBM Deutschland Entwicklung GmbH, 1999,2000
  *
- * $Revision: 1.60 $
+ * $Revision: 1.63 $
  */
 
 #ifndef DASD_INT_H
@@ -150,6 +150,18 @@ do { \
 	DBF_EVENT(DBF_ALERT, d_string, d_args); \
 } while(0)
 
+/* messages to be written via klogd only */
+#define DEV_MESSAGE_LOG(d_loglevel,d_device,d_string,d_args...)\
+do { \
+	printk(d_loglevel PRINTK_HEADER " %s: " d_string "\n", \
+	       d_device->cdev->dev.bus_id, d_args); \
+} while(0)
+
+#define MESSAGE_LOG(d_loglevel,d_string,d_args...)\
+do { \
+	printk(d_loglevel PRINTK_HEADER " " d_string "\n", d_args); \
+} while(0)
+
 struct dasd_ccw_req {
 	unsigned int magic;		/* Eye catcher */
         struct list_head list;		/* list_head for request queueing. */
@@ -240,7 +252,7 @@ struct dasd_discipline {
 	int (*term_IO) (struct dasd_ccw_req *);
 	struct dasd_ccw_req *(*format_device) (struct dasd_device *,
 					       struct format_data_t *);
-
+	int (*free_cp) (struct dasd_ccw_req *, struct request *);
         /*
          * Error recovery functions. examine_error() returns a value that
          * indicates what to do for an error condition. If examine_error()
@@ -438,6 +450,8 @@ extern struct dasd_profile_info_t dasd_global_profile;
 extern unsigned int dasd_profile_level;
 extern struct block_device_operations dasd_device_operations;
 
+extern kmem_cache_t *dasd_page_cache;
+
 struct dasd_ccw_req *
 dasd_kmalloc_request(char *, int, int, struct dasd_device *);
 struct dasd_ccw_req *
@@ -518,7 +532,8 @@ void dasd_proc_exit(void);
 /* externals in dasd_erp.c */
 struct dasd_ccw_req *dasd_default_erp_action(struct dasd_ccw_req *);
 struct dasd_ccw_req *dasd_default_erp_postaction(struct dasd_ccw_req *);
-struct dasd_ccw_req *dasd_alloc_erp_request(char *, int, int, struct dasd_device *);
+struct dasd_ccw_req *dasd_alloc_erp_request(char *, int, int,
+					    struct dasd_device *);
 void dasd_free_erp_request(struct dasd_ccw_req *, struct dasd_device *);
 void dasd_log_sense(struct dasd_ccw_req *, struct irb *);
 void dasd_log_ccw(struct dasd_ccw_req *, int, __u32);

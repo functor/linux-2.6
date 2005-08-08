@@ -79,7 +79,7 @@ extern int vc_get_dlimit(uint32_t, void __user *);
 
 typedef uint64_t dlsize_t;
 
-
 #endif	/* __KERNEL__ */
-
+#else	/* _VX_DLIMIT_H */
+#warning duplicate inclusion
 #endif	/* _VX_DLIMIT_H */

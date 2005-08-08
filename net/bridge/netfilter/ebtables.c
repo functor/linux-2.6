@@ -90,10 +90,10 @@ static struct ebt_target ebt_standard_target =
 { {NULL, NULL}, EBT_STANDARD_TARGET, NULL, NULL, NULL, NULL};
 
 static inline int ebt_do_watcher (struct ebt_entry_watcher *w,
-   const struct sk_buff *skb, const struct net_device *in,
+   const struct sk_buff *skb, unsigned int hooknr, const struct net_device *in,
    const struct net_device *out)
 {
-	w->u.watcher->watcher(skb, in, out, w->data,
+	w->u.watcher->watcher(skb, hooknr, in, out, w->data,
 	   w->watcher_size);
 	/* watchers don't give a verdict */
 	return 0;
@@ -109,11 +109,17 @@ static inline int ebt_do_match (struct ebt_entry_match *m,
 
 static inline int ebt_dev_check(char *entry, const struct net_device *device)
 {
+	int i = 0;
+	char *devname = device->name;
+
 	if (*entry == '\0')
 		return 0;
 	if (!device)
 		return 1;
-	return !!strcmp(entry, device->name);
+	/* 1 is the wildcard token */
+	while (entry[i] != '\0' && entry[i] != 1 && entry[i] == devname[i])
+		i++;
+	return (devname[i] != entry[i] && entry[i] != 1);
 }
 
 #define FWINV2(bool,invflg) ((bool) ^ !!(e->invflags & invflg))
@@ -202,7 +208,7 @@ unsigned int ebt_do_table (unsigned int hook, struct sk_buff **pskb,
 
 		/* these should only watch: not modify, nor tell us
 		   what to do with the packet */
-		EBT_WATCHER_ITERATE(point, ebt_do_watcher, *pskb, in,
+		EBT_WATCHER_ITERATE(point, ebt_do_watcher, *pskb, hook, in,
 		   out);
 
 		t = (struct ebt_entry_target *)
@@ -1162,7 +1168,7 @@ int ebt_register_table(struct ebt_table *table)
 	}
 
 	table->private = newinfo;
-	table->lock = RW_LOCK_UNLOCKED;
+	rwlock_init(&table->lock);
 	ret = down_interruptible(&ebt_mutex);
 	if (ret != 0)
 		goto free_chainstack;

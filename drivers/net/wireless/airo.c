@@ -33,11 +33,10 @@
 #include <linux/string.h>
 #include <linux/timer.h>
 #include <linux/interrupt.h>
-#include <linux/suspend.h>
 #include <linux/in.h>
+#include <linux/bitops.h>
 #include <asm/io.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
 
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -246,36 +245,36 @@ MODULE_DESCRIPTION("Support for Cisco/Aironet 802.11 wireless ethernet \
 		   for PCMCIA when used with airo_cs.");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_SUPPORTED_DEVICE("Aironet 4500, 4800 and Cisco 340/350");
-MODULE_PARM(io,"1-4i");
-MODULE_PARM(irq,"1-4i");
-MODULE_PARM(basic_rate,"i");
-MODULE_PARM(rates,"1-8i");
-MODULE_PARM(ssids,"1-3s");
-MODULE_PARM(auto_wep,"i");
+module_param_array(io, int, NULL, 0);
+module_param_array(irq, int, NULL, 0);
+module_param(basic_rate, int, 0);
+module_param_array(rates, int, NULL, 0);
+module_param_array(ssids, charp, NULL, 0);
+module_param(auto_wep, int, 0);
 MODULE_PARM_DESC(auto_wep, "If non-zero, the driver will keep looping through \
 the authentication options until an association is made.  The value of \
 auto_wep is number of the wep keys to check.  A value of 2 will try using \
 the key at index 0 and index 1.");
-MODULE_PARM(aux_bap,"i");
+module_param(aux_bap, int, 0);
 MODULE_PARM_DESC(aux_bap, "If non-zero, the driver will switch into a mode \
 than seems to work better for older cards with some older buses.  Before \
 switching it checks that the switch is needed.");
-MODULE_PARM(maxencrypt, "i");
+module_param(maxencrypt, int, 0);
 MODULE_PARM_DESC(maxencrypt, "The maximum speed that the card can do \
 encryption.  Units are in 512kbs.  Zero (default) means there is no limit. \
 Older cards used to be limited to 2mbs (4).");
-MODULE_PARM(adhoc, "i");
+module_param(adhoc, int, 0);
 MODULE_PARM_DESC(adhoc, "If non-zero, the card will start in adhoc mode.");
-MODULE_PARM(probe, "i");
+module_param(probe, int, 0);
 MODULE_PARM_DESC(probe, "If zero, the driver won't start the card.");
 
-MODULE_PARM(proc_uid, "i");
+module_param(proc_uid, int, 0);
 MODULE_PARM_DESC(proc_uid, "The uid that the /proc files will belong to.");
-MODULE_PARM(proc_gid, "i");
+module_param(proc_gid, int, 0);
 MODULE_PARM_DESC(proc_gid, "The gid that the /proc files will belong to.");
-MODULE_PARM(airo_perm, "i");
+module_param(airo_perm, int, 0);
 MODULE_PARM_DESC(airo_perm, "The permission bits of /proc/[driver/]aironet.");
-MODULE_PARM(proc_perm, "i");
+module_param(proc_perm, int, 0);
 MODULE_PARM_DESC(proc_perm, "The permission bits of the files in /proc");
 
 /* This is a kind of sloppy hack to get this information to OUT4500 and
@@ -970,7 +969,7 @@ typedef struct {
  * Host receive descriptor
  */
 typedef struct {
-	unsigned char *card_ram_off;	     /* offset into card memory of the
+	unsigned char __iomem *card_ram_off; /* offset into card memory of the
 						desc */
 	RxFid         rx_desc;		     /* card receive descriptor */
 	char          *virtual_host_addr;    /* virtual address of host receive
@@ -982,7 +981,7 @@ typedef struct {
  * Host transmit descriptor
  */
 typedef struct {
-	unsigned char *card_ram_off;	     /* offset into card memory of the
+	unsigned char __iomem *card_ram_off;	     /* offset into card memory of the
 						desc */
 	TxFid         tx_desc;		     /* card transmit descriptor */
 	char          *virtual_host_addr;    /* virtual address of host receive
@@ -994,7 +993,7 @@ typedef struct {
  * Host RID descriptor
  */
 typedef struct {
-	unsigned char *card_ram_off;      /* offset into card memory of the
+	unsigned char __iomem *card_ram_off;      /* offset into card memory of the
 					     descriptor */
 	Rid           rid_desc;		  /* card RID descriptor */
 	char          *virtual_host_addr; /* virtual address of host receive
@@ -1189,6 +1188,7 @@ struct airo_info {
 	struct iw_statistics	wstats;		// wireless stats
 	unsigned long		scan_timestamp;	/* Time started to scan */
 	struct iw_spy_data	spy_data;
+	struct iw_public_data	wireless_data;
 #endif /* WIRELESS_EXT */
 #ifdef MICSUPPORT
 	/* MIC stuff */
@@ -1202,15 +1202,14 @@ struct airo_info {
 	unsigned long ridbus; // phys addr of config_desc
 	struct sk_buff_head txq;// tx queue used by mpi350 code
 	struct pci_dev          *pci;
-	unsigned char		*pcimem;
-	unsigned char		*pciaux;
+	unsigned char		__iomem *pcimem;
+	unsigned char		__iomem *pciaux;
 	unsigned char		*shared;
 	dma_addr_t		shared_dma;
 	int			power;
 	SsidRid			*SSID;
 	APListRid		*APList;
 #define	PCI_SHARED_LEN		2*MPI_MAX_FIDS*PKTSIZE+RIDSIZE
-	u32			pci_state[16];
 	char			proc_name[IFNAMSIZ];
 };
 
@@ -2029,8 +2028,8 @@ static int mpi_send_packet (struct net_device *dev)
 		memcpy(sendbuf, buffer, len);
 	}
 
-	memcpy((char *)ai->txfids[0].card_ram_off,
-		(char *)&ai->txfids[0].tx_desc, sizeof(TxFid));
+	memcpy_toio(ai->txfids[0].card_ram_off,
+		&ai->txfids[0].tx_desc, sizeof(TxFid));
 
 	OUT4500(ai, EVACK, 8);
 
@@ -2460,7 +2459,7 @@ static int mpi_init_descriptors (struct airo_info *ai)
 	}
 
 	for (i=0; i<MPI_MAX_FIDS; i++) {
-		memcpy(ai->rxfids[i].card_ram_off,
+		memcpy_toio(ai->rxfids[i].card_ram_off,
 			&ai->rxfids[i].rx_desc, sizeof(RxFid));
 	}
 
@@ -2476,7 +2475,7 @@ static int mpi_init_descriptors (struct airo_info *ai)
 
 	for (i=0; i<MPI_MAX_FIDS; i++) {
 		ai->txfids[i].tx_desc.valid = 1;
-		memcpy((char *)ai->txfids[i].card_ram_off,
+		memcpy_toio(ai->txfids[i].card_ram_off,
 			&ai->txfids[i].tx_desc, sizeof(TxFid));
 	}
 	ai->txfids[i-1].tx_desc.eoc = 1; /* Last descriptor has EOC set */
@@ -2501,8 +2500,8 @@ static int mpi_init_descriptors (struct airo_info *ai)
 		return rc;
 	}
 
-	memcpy((char *)ai->config_desc.card_ram_off,
-		(char *)&ai->config_desc.rid_desc, sizeof(Rid));
+	memcpy_toio(ai->config_desc.card_ram_off,
+		&ai->config_desc.rid_desc, sizeof(Rid));
 
 	return rc;
 }
@@ -2520,7 +2519,7 @@ static int mpi_map_card(struct airo_info *ai, struct pci_dev *pci,
 	int rc = -1;
 	int i;
 	unsigned char *busaddroff,*vpackoff;
-	unsigned char *pciaddroff;
+	unsigned char __iomem *pciaddroff;
 
 	mem_start = pci_resource_start(pci, 1);
 	mem_len = pci_resource_len(pci, 1);
@@ -2640,8 +2639,7 @@ static void wifi_setup(struct net_device *dev)
 	dev->set_mac_address = &airo_set_mac_address;
 	dev->do_ioctl = &airo_ioctl;
 #ifdef WIRELESS_EXT
-	dev->get_wireless_stats = airo_get_wireless_stats;
-	dev->wireless_handlers = (struct iw_handler_def *)&airo_handler_def;
+	dev->wireless_handlers = &airo_handler_def;
 #endif /* WIRELESS_EXT */
 	dev->change_mtu = &airo_change_mtu;
 	dev->open = &airo_open;
@@ -2668,6 +2666,9 @@ static struct net_device *init_wifidev(struct airo_info *ai,
 	dev->priv = ethdev->priv;
 	dev->irq = ethdev->irq;
 	dev->base_addr = ethdev->base_addr;
+#ifdef WIRELESS_EXT
+	dev->wireless_data = ethdev->wireless_data;
+#endif /* WIRELESS_EXT */
 	memcpy(dev->dev_addr, ethdev->dev_addr, dev->addr_len);
 	err = register_netdev(dev);
 	if (err<0) {
@@ -2695,7 +2696,8 @@ int reset_card( struct net_device *dev , int lock) {
 }
 
 struct net_device *_init_airo_card( unsigned short irq, int port,
-				    int is_pcmcia, struct pci_dev *pci )
+				    int is_pcmcia, struct pci_dev *pci,
+				    struct device *dmdev )
 {
 	struct net_device *dev;
 	struct airo_info *ai;
@@ -2720,7 +2722,7 @@ struct net_device *_init_airo_card( unsigned short irq, int port,
 		set_bit(FLAG_MPI, &ai->flags);
 	}
         ai->dev = dev;
-	ai->aux_lock = SPIN_LOCK_UNLOCKED;
+	spin_lock_init(&ai->aux_lock);
 	sema_init(&ai->sem, 1);
 	ai->config.len = 0;
 	ai->pci = pci;
@@ -2747,8 +2749,9 @@ struct net_device *_init_airo_card( unsigned short irq, int port,
 	dev->set_mac_address = &airo_set_mac_address;
 	dev->do_ioctl = &airo_ioctl;
 #ifdef WIRELESS_EXT
-	dev->get_wireless_stats = airo_get_wireless_stats;
-	dev->wireless_handlers = (struct iw_handler_def *)&airo_handler_def;
+	dev->wireless_handlers = &airo_handler_def;
+	ai->wireless_data.spy_data = &ai->spy_data;
+	dev->wireless_data = &ai->wireless_data;
 #endif /* WIRELESS_EXT */
 	dev->change_mtu = &airo_change_mtu;
 	dev->open = &airo_open;
@@ -2756,10 +2759,8 @@ struct net_device *_init_airo_card( unsigned short irq, int port,
 	dev->irq = irq;
 	dev->base_addr = port;
 
-	/* what is with PCMCIA ??? */
-	if (pci) {
-		SET_NETDEV_DEV(dev, &pci->dev);
-	}
+	SET_NETDEV_DEV(dev, dmdev);
+
 
 	if (test_bit(FLAG_MPI,&ai->flags))
 		reset_card (dev, 1);
@@ -2841,9 +2842,10 @@ err_out_free:
 	return NULL;
 }
 
-struct net_device *init_airo_card( unsigned short irq, int port, int is_pcmcia )
+struct net_device *init_airo_card( unsigned short irq, int port, int is_pcmcia,
+				  struct device *dmdev)
 {
-	return _init_airo_card ( irq, port, is_pcmcia, NULL);
+	return _init_airo_card ( irq, port, is_pcmcia, NULL, dmdev);
 }
 
 EXPORT_SYMBOL(init_airo_card);
@@ -2915,8 +2917,7 @@ static int airo_thread(void *data) {
 			flush_signals(current);
 
 		/* make swsusp happy with our thread */
-		if (current->flags & PF_FREEZE)
-			refrigerator(PF_FREEZE);
+		try_to_freeze(PF_FREEZE);
 
 		if (test_bit(JOB_DIE, &ai->flags))
 			break;
@@ -3231,7 +3232,7 @@ badrx:
 					goto exitrx;
 				}
 			}
-#ifdef IW_WIRELESS_SPY		/* defined in iw_handler.h */
+#ifdef WIRELESS_SPY
 			if (apriv->spy_data.spy_number > 0) {
 				char *sa;
 				struct iw_quality wstats;
@@ -3251,7 +3252,7 @@ badrx:
 				/* Update spy records */
 				wireless_spy_update(dev, sa, &wstats);
 			}
-#endif /* IW_WIRELESS_SPY */
+#endif /* WIRELESS_SPY */
 			OUT4500( apriv, EVACK, EV_RX);
 
 			if (test_bit(FLAG_802_11, &apriv->flags)) {
@@ -3438,7 +3439,7 @@ static void mpi_receive_802_3(struct airo_info *ai)
 	MICBuffer micbuf;
 #endif
 
-	memcpy ((char *)&rxd, ai->rxfids[0].card_ram_off, sizeof(rxd));
+	memcpy_fromio(&rxd, ai->rxfids[0].card_ram_off, sizeof(rxd));
 	/* Make sure we got something */
 	if (rxd.rdy && rxd.valid == 0) {
 		len = rxd.len + 12;
@@ -3476,7 +3477,7 @@ badmic:
 #else
 		memcpy(buffer, ai->rxfids[0].virtual_host_addr, len);
 #endif
-#ifdef IW_WIRELESS_SPY		/* defined in iw_handler.h */
+#ifdef WIRELESS_SPY
 		if (ai->spy_data.spy_number > 0) {
 			char *sa;
 			struct iw_quality wstats;
@@ -3488,7 +3489,7 @@ badmic:
 			/* Update spy records */
 			wireless_spy_update(ai->dev, sa, &wstats);
 		}
-#endif /* IW_WIRELESS_SPY */
+#endif /* WIRELESS_SPY */
 
 		skb->dev = ai->dev;
 		skb->ip_summed = CHECKSUM_NONE;
@@ -3501,7 +3502,7 @@ badrx:
 		rxd.valid = 1;
 		rxd.rdy = 0;
 		rxd.len = PKTSIZE;
-		memcpy (ai->rxfids[0].card_ram_off, (char *)&rxd, sizeof(rxd));
+		memcpy_toio(ai->rxfids[0].card_ram_off, &rxd, sizeof(rxd));
 	}
 }
 
@@ -3523,7 +3524,7 @@ void mpi_receive_802_11 (struct airo_info *ai)
 	u16 *buffer;
 	char *ptr = ai->rxfids[0].virtual_host_addr+4;
 
-	memcpy ((char *)&rxd, ai->rxfids[0].card_ram_off, sizeof(rxd));
+	memcpy_fromio(&rxd, ai->rxfids[0].card_ram_off, sizeof(rxd));
 	memcpy ((char *)&hdr, ptr, sizeof(hdr));
 	ptr += sizeof(hdr);
 	/* Bad CRC. Ignore packet */
@@ -3607,7 +3608,7 @@ badrx:
 		rxd.valid = 1;
 		rxd.rdy = 0;
 		rxd.len = PKTSIZE;
-		memcpy (ai->rxfids[0].card_ram_off, (char *)&rxd, sizeof(rxd));
+		memcpy_toio(ai->rxfids[0].card_ram_off, &rxd, sizeof(rxd));
 	}
 }
 
@@ -3987,8 +3988,8 @@ static int PC4500_readrid(struct airo_info *ai, u16 rid, void *pBuf, int len, in
 		cmd.cmd = CMD_ACCESS;
 		cmd.parm0 = rid;
 
-		memcpy((char *)ai->config_desc.card_ram_off,
-			(char *)&ai->config_desc.rid_desc, sizeof(Rid));
+		memcpy_toio(ai->config_desc.card_ram_off,
+			&ai->config_desc.rid_desc, sizeof(Rid));
 
 		rc = issuecommand(ai, &cmd, &rsp);
 
@@ -4059,8 +4060,8 @@ static int PC4500_writerid(struct airo_info *ai, u16 rid,
 		cmd.cmd = CMD_WRITERID;
 		cmd.parm0 = rid;
 
-		memcpy((char *)ai->config_desc.card_ram_off,
-			(char *)&ai->config_desc.rid_desc, sizeof(Rid));
+		memcpy_toio(ai->config_desc.card_ram_off,
+			&ai->config_desc.rid_desc, sizeof(Rid));
 
 		if (len < 4 || len > 2047) {
 			printk(KERN_ERR "%s: len=%d\n",__FUNCTION__,len);
@@ -5452,9 +5453,9 @@ static int __devinit airo_pci_probe(struct pci_dev *pdev,
 	pci_set_master(pdev);
 
 	if (pdev->device == 0x5000 || pdev->device == 0xa504)
-			dev = _init_airo_card(pdev->irq, pdev->resource[0].start, 0, pdev);
+			dev = _init_airo_card(pdev->irq, pdev->resource[0].start, 0, pdev, &pdev->dev);
 	else
-			dev = _init_airo_card(pdev->irq, pdev->resource[2].start, 0, pdev);
+			dev = _init_airo_card(pdev->irq, pdev->resource[2].start, 0, pdev, &pdev->dev);
 	if (!dev)
 		return -ENODEV;
 
@@ -5492,7 +5493,7 @@ static int airo_pci_suspend(struct pci_dev *pdev, u32 state)
 	issuecommand(ai, &cmd, &rsp);
 
 	pci_enable_wake(pdev, state, 1);
-	pci_save_state(pdev, ai->pci_state);
+	pci_save_state(pdev);
 	return pci_set_power_state(pdev, state);
 }
 
@@ -5503,7 +5504,7 @@ static int airo_pci_resume(struct pci_dev *pdev)
 	Resp rsp;
 
 	pci_set_power_state(pdev, 0);
-	pci_restore_state(pdev, ai->pci_state);
+	pci_restore_state(pdev);
 	pci_enable_wake(pdev, ai->power, 0);
 
 	if (ai->power > 1) {
@@ -5556,7 +5557,7 @@ static int __init airo_init_module( void )
 		printk( KERN_INFO
 			"airo:  Trying to configure ISA adapter at irq=%d io=0x%x\n",
 			irq[i], io[i] );
-		if (init_airo_card( irq[i], io[i], 0 ))
+		if (init_airo_card( irq[i], io[i], 0, NULL ))
 			have_isa_dev = 1;
 	}
 
@@ -6520,6 +6521,13 @@ static int airo_get_range(struct net_device *dev,
 		range->avg_qual.level = 176;	/* -80 dBm */
 	range->avg_qual.noise = 0;
 
+	/* Event capability (kernel + driver) */
+	range->event_capa[0] = (IW_EVENT_CAPA_K_0 |
+				IW_EVENT_CAPA_MASK(SIOCGIWTHRSPY) |
+				IW_EVENT_CAPA_MASK(SIOCGIWAP) |
+				IW_EVENT_CAPA_MASK(SIOCGIWSCAN));
+	range->event_capa[1] = IW_EVENT_CAPA_K_1;
+	range->event_capa[4] = IW_EVENT_CAPA_MASK(IWEVTXDROP);
 	return 0;
 }
 
@@ -6887,8 +6895,14 @@ static int airo_get_scan(struct net_device *dev,
 	while((!rc) && (BSSList.index != 0xffff)) {
 		/* Translate to WE format this entry */
 		current_ev = airo_translate_scan(dev, current_ev,
-						 extra + IW_SCAN_MAX_DATA,
+						 extra + dwrq->length,
 						 &BSSList);
+
+		/* Check if there is space for one more entry */
+		if((extra + dwrq->length - current_ev) <= IW_EV_ADDR_LEN) {
+			/* Ask user space to try again with a bigger buffer */
+			return -E2BIG;
+		}
 
 		/* Read next entry */
 		rc = PC4500_readrid(ai, RID_BSSLISTNEXT,
@@ -7025,12 +7039,10 @@ static const struct iw_handler_def	airo_handler_def =
 	.num_standard	= sizeof(airo_handler)/sizeof(iw_handler),
 	.num_private	= sizeof(airo_private_handler)/sizeof(iw_handler),
 	.num_private_args = sizeof(airo_private_args)/sizeof(struct iw_priv_args),
-	.standard	= (iw_handler *) airo_handler,
-	.private	= (iw_handler *) airo_private_handler,
-	.private_args	= (struct iw_priv_args *) airo_private_args,
-	.spy_offset	= ((void *) (&((struct airo_info *) NULL)->spy_data) -
-			   (void *) NULL),
-
+	.standard	= airo_handler,
+	.private	= airo_private_handler,
+	.private_args	= airo_private_args,
+	.get_wireless_stats = airo_get_wireless_stats,
 };
 
 #endif /* WIRELESS_EXT */
@@ -7577,7 +7589,7 @@ int flashputbuf(struct airo_info *ai){
 
 	/* Write stuff */
 	if (test_bit(FLAG_MPI,&ai->flags))
-		memcpy(ai->pciaux + 0x8000, ai->flash, FLASHSIZE);
+		memcpy_toio(ai->pciaux + 0x8000, ai->flash, FLASHSIZE);
 	else {
 		OUT4500(ai,AUXPAGE,0x100);
 		OUT4500(ai,AUXOFF,0);

@@ -33,7 +33,6 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/proc_fs.h>
-#include <linux/miscdevice.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/pci.h>
@@ -599,8 +598,8 @@ static int __init shpcd_init(void)
 
 	retval = shpchprm_init(PCI);
 	if (!retval) {
-		retval = pci_module_init(&shpc_driver);
-		dbg("%s: pci_module_init = %d\n", __FUNCTION__, retval);
+		retval = pci_register_driver(&shpc_driver);
+		dbg("%s: pci_register_driver = %d\n", __FUNCTION__, retval);
 		info(DRIVER_DESC " version: " DRIVER_VERSION "\n");
 	}
 

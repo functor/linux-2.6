@@ -126,13 +126,13 @@ extern void ip_mc_drop_socket(struct sock *sk);
  * build a new socket.
  */
 static struct list_head inetsw[SOCK_MAX];
-static spinlock_t inetsw_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(inetsw_lock);
 
 /* New destruction routine */
 
 void inet_sock_destruct(struct sock *sk)
 {
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 
 	__skb_queue_purge(&sk->sk_receive_queue);
 	__skb_queue_purge(&sk->sk_error_queue);
@@ -154,13 +154,6 @@ void inet_sock_destruct(struct sock *sk)
 
 	if (inet->opt)
 		kfree(inet->opt);
-
-	vx_sock_dec(sk);
-	clr_vx_info(&sk->sk_vx_info);
-	sk->sk_xid = -1;
-	clr_nx_info(&sk->sk_nx_info);
-	sk->sk_nid = -1;
-
 	dst_release(sk->sk_dst_cache);
 #ifdef INET_REFCNT_DEBUG
 	atomic_dec(&inet_sock_nr);
@@ -181,7 +174,7 @@ void inet_sock_destruct(struct sock *sk)
 
 static int inet_autobind(struct sock *sk)
 {
-	struct inet_opt *inet;
+	struct inet_sock *inet;
 	/* We may need to bind the socket. */
 	lock_sock(sk);
 	inet = inet_sk(sk);
@@ -240,7 +233,7 @@ static int inet_create(struct socket *sock, int protocol)
 	struct sock *sk;
 	struct list_head *p;
 	struct inet_protosw *answer;
-	struct inet_opt *inet;
+	struct inet_sock *inet;
 	struct proto *answer_prot;
 	unsigned char answer_flags;
 	char answer_no_check;
@@ -320,18 +313,12 @@ override:
 	inet->id = 0;
 
 	sock_init_data(sock, sk);
-	sk_set_owner(sk, THIS_MODULE);
+	sk_set_owner(sk, sk->sk_prot->owner);
 
 	sk->sk_destruct	   = inet_sock_destruct;
 	sk->sk_family	   = PF_INET;
 	sk->sk_protocol	   = protocol;
 	sk->sk_backlog_rcv = sk->sk_prot->backlog_rcv;
-
-	set_vx_info(&sk->sk_vx_info, current->vx_info);
-	sk->sk_xid = vx_current_xid();
-	vx_sock_inc(sk);
-	set_nx_info(&sk->sk_nx_info, current->nx_info);
-	sk->sk_nid = nx_current_nid();
 
 	inet->uc_ttl	= -1;
 	inet->mc_loop	= 1;
@@ -394,11 +381,6 @@ int inet_release(struct socket *sock)
 		    !(current->flags & PF_EXITING))
 			timeout = sk->sk_lingertime;
 		sock->sk = NULL;
-		vx_sock_dec(sk);
-		clr_vx_info(&sk->sk_vx_info);
-	sk->sk_xid = -1;
-		clr_nx_info(&sk->sk_nx_info);
-	sk->sk_nid = -1;
 		sk->sk_prot->close(sk, timeout);
 	}
 	return 0;
@@ -411,7 +393,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 {
 	struct sockaddr_in *addr = (struct sockaddr_in *)uaddr;
 	struct sock *sk = sock->sk;
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	unsigned short snum;
 	int chk_addr_ret;
 	int err;
@@ -683,7 +665,7 @@ int inet_getname(struct socket *sock, struct sockaddr *uaddr,
 			int *uaddr_len, int peer)
 {
 	struct sock *sk		= sock->sk;
-	struct inet_opt *inet	= inet_sk(sk);
+	struct inet_sock *inet	= inet_sk(sk);
 	struct sockaddr_in *sin	= (struct sockaddr_in *)uaddr;
 
 	sin->sin_family = AF_INET;
@@ -719,7 +701,7 @@ int inet_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 }
 
 
-ssize_t inet_sendpage(struct socket *sock, struct page *page, int offset, size_t size, int flags)
+static ssize_t inet_sendpage(struct socket *sock, struct page *page, int offset, size_t size, int flags)
 {
 	struct sock *sk = sock->sk;
 
@@ -869,6 +851,31 @@ struct proto_ops inet_dgram_ops = {
 	.socketpair =	sock_no_socketpair,
 	.accept =	sock_no_accept,
 	.getname =	inet_getname,
+	.poll =		udp_poll,
+	.ioctl =	inet_ioctl,
+	.listen =	sock_no_listen,
+	.shutdown =	inet_shutdown,
+	.setsockopt =	sock_common_setsockopt,
+	.getsockopt =	sock_common_getsockopt,
+	.sendmsg =	inet_sendmsg,
+	.recvmsg =	sock_common_recvmsg,
+	.mmap =		sock_no_mmap,
+	.sendpage =	inet_sendpage,
+};
+
+/*
+ * For SOCK_RAW sockets; should be the same as inet_dgram_ops but without
+ * udp_poll
+ */
+static struct proto_ops inet_sockraw_ops = {
+	.family =	PF_INET,
+	.owner =	THIS_MODULE,
+	.release =	inet_release,
+	.bind =		inet_bind,
+	.connect =	inet_dgram_connect,
+	.socketpair =	sock_no_socketpair,
+	.accept =	sock_no_accept,
+	.getname =	inet_getname,
 	.poll =		datagram_poll,
 	.ioctl =	inet_ioctl,
 	.listen =	sock_no_listen,
@@ -921,7 +928,7 @@ static struct inet_protosw inetsw_array[] =
                .type =       SOCK_RAW,
                .protocol =   IPPROTO_IP,	/* wild card */
                .prot =       &raw_prot,
-               .ops =        &inet_dgram_ops,
+               .ops =        &inet_sockraw_ops,
                .capability = CAP_NET_RAW,
                .no_check =   UDP_CSUM_DEFAULT,
                .flags =      INET_PROTOSW_REUSE,
@@ -1046,7 +1053,7 @@ static int __init init_ipv4_mibs(void)
 	return 0;
 }
 
-int ipv4_proc_init(void);
+static int ipv4_proc_init(void);
 extern void ipfrag_init(void);
 
 static int __init inet_init(void)
@@ -1171,7 +1178,7 @@ extern void tcp4_proc_exit(void);
 extern int  udp4_proc_init(void);
 extern void udp4_proc_exit(void);
 
-int __init ipv4_proc_init(void)
+static int __init ipv4_proc_init(void)
 {
 	int rc = 0;
 
@@ -1201,7 +1208,7 @@ out_raw:
 }
 
 #else /* CONFIG_PROC_FS */
-int __init ipv4_proc_init(void)
+static int __init ipv4_proc_init(void)
 {
 	return 0;
 }
@@ -1225,8 +1232,6 @@ EXPORT_SYMBOL(inet_stream_connect);
 EXPORT_SYMBOL(inet_stream_ops);
 EXPORT_SYMBOL(inet_unregister_protosw);
 EXPORT_SYMBOL(net_statistics);
-EXPORT_SYMBOL(tcp_protocol);
-EXPORT_SYMBOL(udp_protocol);
 
 #ifdef INET_REFCNT_DEBUG
 EXPORT_SYMBOL(inet_sock_nr);

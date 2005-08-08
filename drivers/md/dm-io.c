@@ -149,22 +149,6 @@ static inline unsigned bvec_index(unsigned nr)
 	return 0;
 }
 
-static inline void bs_bio_init(struct bio *bio)
-{
-	bio->bi_next = NULL;
-	bio->bi_flags = 1 << BIO_UPTODATE;
-	bio->bi_rw = 0;
-	bio->bi_vcnt = 0;
-	bio->bi_idx = 0;
-	bio->bi_phys_segments = 0;
-	bio->bi_hw_segments = 0;
-	bio->bi_size = 0;
-	bio->bi_max_vecs = 0;
-	bio->bi_end_io = NULL;
-	atomic_set(&bio->bi_cnt, 1);
-	bio->bi_private = NULL;
-}
-
 static unsigned _bio_count = 0;
 struct bio *bio_set_alloc(struct bio_set *bs, int gfp_mask, int nr_iovecs)
 {
@@ -267,7 +251,7 @@ static int resize_pool(unsigned int new_ios)
 		/* create new pool */
 		_io_pool = mempool_create(new_ios, alloc_io, free_io, NULL);
 		if (!_io_pool)
-			r = -ENOMEM;
+			return -ENOMEM;
 
 		r = bio_set_init(&_bios, "dm-io", 512, 1);
 		if (r) {

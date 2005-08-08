@@ -37,6 +37,8 @@
 #include "cs46xx_lib.h"
 #include "dsp_spos.h"
 
+static int cs46xx_dsp_async_init (cs46xx_t *chip, dsp_scb_descriptor_t * fg_entry);
+
 static wide_opcode_t wide_opcodes[] = { 
 	WIDE_FOR_BEGIN_LOOP,
 	WIDE_FOR_BEGIN_LOOP2,
@@ -289,15 +291,9 @@ void  cs46xx_dsp_spos_destroy (cs46xx_t * chip)
 		cs46xx_dsp_proc_free_scb_desc ( (ins->scbs + i) );
 	}
 
-	if (ins->code.data)
-		kfree(ins->code.data);
-
-	if (ins->symbol_table.symbols)
-		vfree(ins->symbol_table.symbols);
-
-	if (ins->modules)
-		kfree(ins->modules);
-	
+	kfree(ins->code.data);
+	vfree(ins->symbol_table.symbols);
+	kfree(ins->modules);
 	kfree(ins);
 	up(&chip->spos_mutex);
 }
@@ -439,7 +435,7 @@ symbol_entry_t * cs46xx_dsp_lookup_symbol (cs46xx_t * chip, char * symbol_name, 
 }
 
 
-symbol_entry_t * cs46xx_dsp_lookup_symbol_addr (cs46xx_t * chip, u32 address, int symbol_type)
+static symbol_entry_t * cs46xx_dsp_lookup_symbol_addr (cs46xx_t * chip, u32 address, int symbol_type)
 {
 	int i;
 	dsp_spos_instance_t * ins = chip->dsp_spos_instance;
@@ -514,7 +510,7 @@ static void cs46xx_dsp_proc_task_tree_read (snd_info_entry_t *entry, snd_info_bu
 	cs46xx_t *chip = entry->private_data;
 	dsp_spos_instance_t * ins = chip->dsp_spos_instance;
 	int i,j,col;
-	unsigned long dst = chip->region.idx[1].remap_addr + DSP_PARAMETER_BYTE_OFFSET;
+	void __iomem *dst = chip->region.idx[1].remap_addr + DSP_PARAMETER_BYTE_OFFSET;
 
 	down(&chip->spos_mutex);
 	snd_iprintf(buffer, "TASK TREES:\n");
@@ -573,7 +569,7 @@ static void cs46xx_dsp_proc_parameter_dump_read (snd_info_entry_t *entry, snd_in
 	cs46xx_t *chip = entry->private_data;
 	/*dsp_spos_instance_t * ins = chip->dsp_spos_instance; */
 	unsigned int i,col = 0;
-	unsigned long dst = chip->region.idx[1].remap_addr + DSP_PARAMETER_BYTE_OFFSET;
+	void __iomem *dst = chip->region.idx[1].remap_addr + DSP_PARAMETER_BYTE_OFFSET;
 	symbol_entry_t * symbol; 
 
 	for (i = 0;i < DSP_PARAMETER_BYTE_SIZE; i += sizeof(u32),col ++) {
@@ -599,7 +595,7 @@ static void cs46xx_dsp_proc_sample_dump_read (snd_info_entry_t *entry, snd_info_
 {
 	cs46xx_t *chip = entry->private_data;
 	int i,col = 0;
-	unsigned long dst = chip->region.idx[2].remap_addr;
+	void __iomem *dst = chip->region.idx[2].remap_addr;
 
 	snd_iprintf(buffer,"PCMREADER:\n");
 	for (i = PCM_READER_BUF1;i < PCM_READER_BUF1 + 0x30; i += sizeof(u32),col ++) {
@@ -909,12 +905,12 @@ int cs46xx_dsp_proc_done (cs46xx_t *chip)
 static int debug_tree;
 static void _dsp_create_task_tree (cs46xx_t *chip,u32 * task_data, u32  dest, int size)
 {
-	unsigned long spdst = chip->region.idx[1].remap_addr + 
+	void __iomem *spdst = chip->region.idx[1].remap_addr + 
 		DSP_PARAMETER_BYTE_OFFSET + dest * sizeof(u32);
 	int i;
 
 	for (i = 0; i < size; ++i) {
-		if (debug_tree) printk ("addr %08x, val %08x\n",(int)spdst,task_data[i]);
+		if (debug_tree) printk ("addr %p, val %08x\n",spdst,task_data[i]);
 		writel(task_data[i],spdst);
 		spdst += sizeof(u32);
 	}
@@ -923,12 +919,12 @@ static void _dsp_create_task_tree (cs46xx_t *chip,u32 * task_data, u32  dest, in
 static int debug_scb;
 static void _dsp_create_scb (cs46xx_t *chip,u32 * scb_data, u32  dest)
 {
-	unsigned long spdst = chip->region.idx[1].remap_addr + 
+	void __iomem *spdst = chip->region.idx[1].remap_addr + 
 		DSP_PARAMETER_BYTE_OFFSET + dest * sizeof(u32);
 	int i;
 
 	for (i = 0; i < 0x10; ++i) {
-		if (debug_scb) printk ("addr %08x, val %08x\n",(int)spdst,scb_data[i]);
+		if (debug_scb) printk ("addr %p, val %08x\n",spdst,scb_data[i]);
 		writel(scb_data[i],spdst);
 		spdst += sizeof(u32);
 	}
@@ -1019,7 +1015,7 @@ dsp_scb_descriptor_t * cs46xx_dsp_create_scb (cs46xx_t *chip,char * name, u32 * 
 }
 
 
-dsp_task_descriptor_t *  cs46xx_dsp_create_task_tree (cs46xx_t *chip,char * name, u32 * task_data,u32 dest,int size)
+static dsp_task_descriptor_t *  cs46xx_dsp_create_task_tree (cs46xx_t *chip,char * name, u32 * task_data,u32 dest,int size)
 {
 	dsp_task_descriptor_t * desc;
 
@@ -1452,7 +1448,7 @@ int cs46xx_dsp_scb_and_task_init (cs46xx_t *chip)
 	return -EINVAL;
 }
 
-int cs46xx_dsp_async_init (cs46xx_t *chip, dsp_scb_descriptor_t * fg_entry)
+static int cs46xx_dsp_async_init (cs46xx_t *chip, dsp_scb_descriptor_t * fg_entry)
 {
 	dsp_spos_instance_t * ins = chip->dsp_spos_instance;
 	symbol_entry_t * s16_async_codec_input_task;

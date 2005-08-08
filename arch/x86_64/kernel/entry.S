@@ -41,7 +41,6 @@
 #include <asm/unistd.h>
 #include <asm/thread_info.h>
 #include <asm/hw_irq.h>
-#include <asm/errno.h>
 
 	.code64
 
@@ -538,6 +537,9 @@ retint_kernel:
 	CFI_ENDPROC
 	.endm
 
+ENTRY(thermal_interrupt)
+	apicinterrupt THERMAL_APIC_VECTOR,smp_thermal_interrupt
+
 #ifdef CONFIG_SMP	
 ENTRY(reschedule_interrupt)
 	apicinterrupt RESCHEDULE_VECTOR,smp_reschedule_interrupt
@@ -907,6 +909,7 @@ ENTRY(divide_error)
 ENTRY(spurious_interrupt_bug)
 	zeroentry do_spurious_interrupt_bug
 
+#ifdef CONFIG_X86_MCE
 	/* runs on exception stack */
 ENTRY(machine_check)
 	CFI_STARTPROC
@@ -915,6 +918,7 @@ ENTRY(machine_check)
 	paranoidentry do_machine_check
 	jmp paranoid_exit
 	CFI_ENDPROC
+#endif
 
 ENTRY(call_debug)
        zeroentry do_call_debug

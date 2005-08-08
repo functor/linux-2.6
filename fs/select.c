@@ -14,6 +14,7 @@
  *     of fds to overcome nfds < 16390 descriptors limit (Tigran Aivazian).
  */
 
+#include <linux/syscalls.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
@@ -239,6 +240,7 @@ int do_select(int n, fd_set_bits *fds, long *timeout)
 						retval++;
 					}
 				}
+				cond_resched();
 			}
 			if (res_in)
 				*rinp = res_in;
@@ -266,8 +268,6 @@ int do_select(int n, fd_set_bits *fds, long *timeout)
 	*timeout = __timeout;
 	return retval;
 }
-
-EXPORT_SYMBOL(do_select);
 
 static void *select_bits_alloc(int size)
 {

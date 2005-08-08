@@ -244,6 +244,8 @@ static int
 __writeback_single_inode(struct inode *inode,
 			struct writeback_control *wbc)
 {
+	wait_queue_head_t *wqh;
+
 	if ((wbc->sync_mode != WB_SYNC_ALL) && (inode->i_state & I_LOCK)) {
 		list_move(&inode->i_list, &inode->i_sb->s_dirty);
 		return 0;
@@ -252,12 +254,18 @@ __writeback_single_inode(struct inode *inode,
 	/*
 	 * It's a data-integrity sync.  We must wait.
 	 */
-	while (inode->i_state & I_LOCK) {
-		__iget(inode);
-		spin_unlock(&inode_lock);
-		__wait_on_inode(inode);
-		iput(inode);
-		spin_lock(&inode_lock);
+	if (inode->i_state & I_LOCK) {
+		DEFINE_WAIT_BIT(wq, &inode->i_state, __I_LOCK);
+
+		wqh = bit_waitqueue(&inode->i_state, __I_LOCK);
+		do {
+			__iget(inode);
+			spin_unlock(&inode_lock);
+			__wait_on_bit(wqh, &wq, inode_wait,
+							TASK_UNINTERRUPTIBLE);
+			iput(inode);
+			spin_lock(&inode_lock);
+		} while (inode->i_state & I_LOCK);
 	}
 	return __sync_single_inode(inode, wbc);
 }
@@ -370,6 +378,7 @@ sync_sb_inodes(struct super_block *sb, struct writeback_control *wbc)
 			list_move(&inode->i_list, &sb->s_dirty);
 		}
 		spin_unlock(&inode_lock);
+		cond_resched();
 		iput(inode);
 		spin_lock(&inode_lock);
 		if (wbc->nr_to_write <= 0)
@@ -549,22 +558,24 @@ void sync_inodes(int wait)
  *	dirty. This is primarily needed by knfsd.
  */
  
-void write_inode_now(struct inode *inode, int sync)
+int write_inode_now(struct inode *inode, int sync)
 {
+	int ret;
 	struct writeback_control wbc = {
 		.nr_to_write = LONG_MAX,
 		.sync_mode = WB_SYNC_ALL,
 	};
 
 	if (inode->i_mapping->backing_dev_info->memory_backed)
-		return;
+		return 0;
 
 	might_sleep();
 	spin_lock(&inode_lock);
-	__writeback_single_inode(inode, &wbc);
+	ret = __writeback_single_inode(inode, &wbc);
 	spin_unlock(&inode_lock);
 	if (sync)
 		wait_on_inode(inode);
+	return ret;
 }
 EXPORT_SYMBOL(write_inode_now);
 
@@ -633,8 +644,11 @@ int generic_osync_inode(struct inode *inode, struct address_space *mapping, int 
 		need_write_inode_now = 1;
 	spin_unlock(&inode_lock);
 
-	if (need_write_inode_now)
-		write_inode_now(inode, 1);
+	if (need_write_inode_now) {
+		err2 = write_inode_now(inode, 1);
+		if (!err)
+			err = err2;
+	}
 	else
 		wait_on_inode(inode);
 

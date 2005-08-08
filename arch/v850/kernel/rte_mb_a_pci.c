@@ -254,7 +254,7 @@ static void __devinit pcibios_assign_resources (void)
 	struct pci_dev *dev = NULL;
 	struct resource *r;
 
-	while ((dev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
+	for_each_pci_dev(dev) {
 		unsigned di_num;
 		unsigned class = dev->class >> 8;
 
@@ -359,7 +359,7 @@ static struct mb_sram_free_area *mb_sram_free_areas = &mb_sram_free_tail;
 static struct mb_sram_free_area *mb_sram_free_free_areas = 0;
 
 /* Spinlock protecting the above globals.  */
-static spinlock_t mb_sram_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(mb_sram_lock);
 
 /* Allocate a memory block at least SIZE bytes long in the Mother-A SRAM
    space.  */
@@ -514,7 +514,7 @@ static struct dma_mapping *active_dma_mappings = 0;
 static struct dma_mapping *free_dma_mappings = 0;
 
 /* Spinlock protecting the above globals.  */
-static spinlock_t dma_mappings_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(dma_mappings_lock);
 
 static struct dma_mapping *new_dma_mapping (size_t size)
 {

@@ -64,7 +64,8 @@ struct kparam_array
    param_set_XXX and param_check_XXX. */
 #define module_param_named(name, value, type, perm)			   \
 	param_check_##type(name, &(value));				   \
-	module_param_call(name, param_set_##type, param_get_##type, &value, perm)
+	module_param_call(name, param_set_##type, param_get_##type, &value, perm); \
+	__MODULE_INFO(parmtype, name##type, #name ":" #type)
 
 #define module_param(name, type, perm)				\
 	module_param_named(name, name, type, perm)
@@ -74,7 +75,8 @@ struct kparam_array
 	static struct kparam_string __param_string_##name		\
 		= { len, string };					\
 	module_param_call(name, param_set_copystring, param_get_string,	\
-		   &__param_string_##name, perm)
+		   &__param_string_##name, perm);			\
+	__MODULE_INFO(parmtype, name##type, #name ":string")
 
 /* Called on module insert or kernel boot */
 extern int parse_args(const char *name,
@@ -129,16 +131,17 @@ extern int param_set_invbool(const char *val, struct kernel_param *kp);
 extern int param_get_invbool(char *buffer, struct kernel_param *kp);
 #define param_check_invbool(name, p) __param_check(name, p, int)
 
-/* Comma-separated array: num is set to number they actually specified. */
-#define module_param_array_named(name, array, type, num, perm)		\
+/* Comma-separated array: *nump is set to number they actually specified. */
+#define module_param_array_named(name, array, type, nump, perm)		\
 	static struct kparam_array __param_arr_##name			\
-	= { ARRAY_SIZE(array), &num, param_set_##type, param_get_##type,\
+	= { ARRAY_SIZE(array), nump, param_set_##type, param_get_##type,\
 	    sizeof(array[0]), array };					\
 	module_param_call(name, param_array_set, param_array_get, 	\
-			  &__param_arr_##name, perm)
+			  &__param_arr_##name, perm);			\
+	__MODULE_INFO(parmtype, name##type, #name ":array of " #type)
 
-#define module_param_array(name, type, num, perm)		\
-	module_param_array_named(name, name, type, num, perm)
+#define module_param_array(name, type, nump, perm)		\
+	module_param_array_named(name, name, type, nump, perm)
 
 extern int param_array_set(const char *val, struct kernel_param *kp);
 extern int param_array_get(char *buffer, struct kernel_param *kp);
@@ -152,4 +155,15 @@ int param_array(const char *name,
 		void *elem, int elemsize,
 		int (*set)(const char *, struct kernel_param *kp),
 		int *num);
+
+/* for exporting parameters in /sys/parameters */
+
+struct module;
+
+extern int module_param_sysfs_setup(struct module *mod,
+				    struct kernel_param *kparam,
+				    unsigned int num_params);
+
+extern void module_param_sysfs_remove(struct module *mod);
+
 #endif /* _LINUX_MODULE_PARAMS_H */

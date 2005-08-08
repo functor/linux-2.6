@@ -69,7 +69,7 @@ struct fib6_cleaner_t
 	void *arg;
 };
 
-rwlock_t fib6_walker_lock = RW_LOCK_UNLOCKED;
+DEFINE_RWLOCK(fib6_walker_lock);
 
 
 #ifdef CONFIG_IPV6_SUBTREES
@@ -433,7 +433,7 @@ static int fib6_add_rt2node(struct fib6_node *fn, struct rt6_info *rt,
 
 	if (fn->fn_flags&RTN_TL_ROOT &&
 	    fn->leaf == &ip6_null_entry &&
-	    !(rt->rt6i_flags & (RTF_DEFAULT | RTF_ADDRCONF | RTF_ALLONLINK)) ){
+	    !(rt->rt6i_flags & (RTF_DEFAULT | RTF_ADDRCONF)) ){
 		fn->leaf = rt;
 		rt->u.next = NULL;
 		goto out;
@@ -451,8 +451,8 @@ static int fib6_add_rt2node(struct fib6_node *fn, struct rt6_info *rt,
 
 			if (iter->rt6i_dev == rt->rt6i_dev &&
 			    iter->rt6i_idev == rt->rt6i_idev &&
-			    ipv6_addr_cmp(&iter->rt6i_gateway,
-					   &rt->rt6i_gateway) == 0) {
+			    ipv6_addr_equal(&iter->rt6i_gateway,
+					    &rt->rt6i_gateway)) {
 				if (!(iter->rt6i_flags&RTF_EXPIRES))
 					return -EEXIST;
 				iter->rt6i_expires = rt->rt6i_expires;
@@ -1205,7 +1205,7 @@ static int fib6_age(struct rt6_info *rt, void *arg)
 	return 0;
 }
 
-static spinlock_t fib6_gc_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(fib6_gc_lock);
 
 void fib6_run_gc(unsigned long dummy)
 {

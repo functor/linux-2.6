@@ -4,6 +4,7 @@
  *  Copyright (C) 2001-2003 MontaVista Software Inc.
  *    Author: Yoichi Yuasa <yyuasa@mvista.com or source@mvista.com>
  *  Copyright (C) 2004  Yoichi Yuasa <yuasa@hh.iij4u.or.jp>
+ * Copyright (C) 2004 by Ralf Baechle (ralf@linux-mips.org)
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -30,7 +31,6 @@
 
 #include <asm/cpu.h>
 #include <asm/io.h>
-#include <asm/pci_channel.h>
 #include <asm/vr41xx/vr41xx.h>
 
 #include "pci-vr41xx.h"
@@ -270,7 +270,7 @@ static int __init vr41xx_pciu_init(void)
 	/* Clear bus error */
 	readl(BUSERRADREG);
 
-	writel(CONFIG_DONE, PCIENREG);
+	writel(BLOODY_CONFIG_DONE, PCIENREG);
 
 	if (setup->mem_resource != NULL)
 		vr41xx_pci_controller.mem_resource = setup->mem_resource;

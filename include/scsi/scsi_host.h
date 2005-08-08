@@ -71,7 +71,18 @@ struct scsi_host_template {
 	 * Status: OPTIONAL
 	 */
 	int (* ioctl)(struct scsi_device *dev, int cmd, void __user *arg);
-	
+
+
+#ifdef CONFIG_COMPAT
+	/* 
+	 * Compat handler. Handle 32bit ABI.
+	 * When unknown ioctl is passed return -ENOIOCTLCMD.
+	 *
+	 * Status: OPTIONAL
+	 */
+	int (* compat_ioctl)(struct scsi_device *dev, int cmd, void __user *arg);
+#endif
+
 	/*
 	 * The queuecommand function is used to queue up a scsi
 	 * command block to the LLDD.  When the driver finished
@@ -146,15 +157,6 @@ struct scsi_host_template {
 	enum scsi_eh_timer_return (* eh_timed_out)(struct scsi_cmnd *);
 
 	/*
-	 * Old EH handlers, no longer used. Make them warn the user of old
-	 * drivers by using a wrong type
-	 *
-	 * Status: MORE THAN OBSOLETE
-	 */
-	int (* abort)(int);
-	int (* reset)(int, int);
-
-	/*
 	 * Before the mid layer attempts to scan for a new device where none
 	 * currently exists, it will call this entry in your driver.  Should
 	 * your driver need to allocate any structs or perform any other init
@@ -225,13 +227,35 @@ struct scsi_host_template {
 	void (* slave_destroy)(struct scsi_device *);
 
 	/*
+	 * fill in this function to allow the queue depth of this host
+	 * to be changeable (on a per device basis).  returns either
+	 * the current queue depth setting (may be different from what
+	 * was passed in) or an error.  An error should only be
+	 * returned if the requested depth is legal but the driver was
+	 * unable to set it.  If the requested depth is illegal, the
+	 * driver should set and return the closest legal queue depth.
+	 *
+	 */
+	int (* change_queue_depth)(struct scsi_device *, int);
+
+	/*
+	 * fill in this function to allow the changing of tag types
+	 * (this also allows the enabling/disabling of tag command
+	 * queueing).  An error should only be returned if something
+	 * went wrong in the driver while trying to set the tag type.
+	 * If the driver doesn't support the requested tag type, then
+	 * it should set the closest type it does support without
+	 * returning an error.  Returns the actual tag type set.
+	 */
+	int (* change_queue_type)(struct scsi_device *, int);
+
+	/*
 	 * This function determines the bios parameters for a given
 	 * harddisk.  These tend to be numbers that are made up by
 	 * the host adapter.  Parameters:
 	 * size, device, list (heads, sectors, cylinders)
 	 *
-	 * Status: OPTIONAL
-	 */
+	 * Status: OPTIONAL */
 	int (* bios_param)(struct scsi_device *, struct block_device *,
 			sector_t, int []);
 
@@ -511,6 +535,12 @@ struct Scsi_Host {
 	struct list_head sht_legacy_list;
 
 	/*
+	 * Points to the transport data (if any) which is allocated
+	 * separately
+	 */
+	void *shost_data;
+
+	/*
 	 * We should ensure that this is aligned, both for better performance
 	 * and also because some compilers (m68k) don't automatically force
 	 * alignment to a long boundary.
@@ -523,9 +553,13 @@ struct Scsi_Host {
 #define		class_to_shost(d)	\
 	container_of(d, struct Scsi_Host, shost_classdev)
 
+
 extern struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *, int);
-extern int scsi_add_host(struct Scsi_Host *, struct device *);
+extern int __must_check scsi_add_host(struct Scsi_Host *, struct device *);
 extern void scsi_scan_host(struct Scsi_Host *);
+extern void scsi_scan_single_target(struct Scsi_Host *, unsigned int,
+	unsigned int);
+extern void scsi_rescan_device(struct device *);
 extern void scsi_remove_host(struct Scsi_Host *);
 extern struct Scsi_Host *scsi_host_get(struct Scsi_Host *);
 extern void scsi_host_put(struct Scsi_Host *t);
@@ -552,6 +586,7 @@ static inline struct device *scsi_get_device(struct Scsi_Host *shost)
 extern void scsi_unblock_requests(struct Scsi_Host *);
 extern void scsi_block_requests(struct Scsi_Host *);
 
+struct class_container;
 /*
  * These two functions are used to allocate and free a pseudo device
  * which will connect to the host adapter itself rather than any
@@ -561,6 +596,8 @@ extern void scsi_block_requests(struct Scsi_Host *);
  */
 extern void scsi_free_host_dev(struct scsi_device *);
 extern struct scsi_device *scsi_get_host_dev(struct Scsi_Host *);
+int scsi_is_host_device(const struct device *);
+
 
 /* legacy interfaces */
 extern struct Scsi_Host *scsi_register(struct scsi_host_template *, int);

@@ -36,7 +36,7 @@
 int ip6_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 {
 	struct sockaddr_in6	*usin = (struct sockaddr_in6 *) uaddr;
-	struct inet_opt      	*inet = inet_sk(sk);
+	struct inet_sock      	*inet = inet_sk(sk);
 	struct ipv6_pinfo      	*np = inet6_sk(sk);
 	struct in6_addr		*daddr, *final_p = NULL, final;
 	struct dst_entry	*dst;
@@ -190,7 +190,7 @@ ipv4_connected:
 	}
 
 	ip6_dst_store(sk, dst,
-		      !ipv6_addr_cmp(&fl.fl6_dst, &np->daddr) ?
+		      ipv6_addr_equal(&fl.fl6_dst, &np->daddr) ?
 		      &np->daddr : NULL);
 
 	sk->sk_state = TCP_ESTABLISHED;
@@ -335,7 +335,7 @@ int ipv6_recv_error(struct sock *sk, struct msghdr *msg, int len)
 			if (ipv6_addr_type(&sin->sin6_addr) & IPV6_ADDR_LINKLOCAL)
 				sin->sin6_scope_id = IP6CB(skb)->iif;
 		} else {
-			struct inet_opt *inet = inet_sk(sk);
+			struct inet_sock *inet = inet_sk(sk);
 
 			ipv6_addr_set(&sin->sin6_addr, 0, 0,
 				      htonl(0xffff),
@@ -427,9 +427,7 @@ int datagram_send_ctl(struct msghdr *msg, struct flowi *fl,
 		int addr_type;
 		struct net_device *dev = NULL;
 
-		if (cmsg->cmsg_len < sizeof(struct cmsghdr) ||
-		    (unsigned long)(((char*)cmsg - (char*)msg->msg_control)
-				    + cmsg->cmsg_len) > msg->msg_controllen) {
+		if (!CMSG_OK(msg, cmsg)) {
 			err = -EINVAL;
 			goto exit_f;
 		}

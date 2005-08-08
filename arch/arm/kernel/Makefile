@@ -2,7 +2,7 @@
 # Makefile for the linux kernel.
 #
 
-AFLAGS_head.o := -DTEXTADDR=$(TEXTADDR)
+AFLAGS_head.o := -DTEXTADDR=$(TEXTADDR) -DDATAADDR=$(DATAADDR)
 
 # Object file lists.
 
@@ -18,6 +18,7 @@ obj-$(CONFIG_MODULES)		+= armksyms.o module.o
 obj-$(CONFIG_ARTHUR)		+= arthur.o
 obj-$(CONFIG_ISA_DMA)		+= dma-isa.o
 obj-$(CONFIG_PCI)		+= bios32.o
+obj-$(CONFIG_SMP)		+= smp.o
 
 obj-$(CONFIG_IWMMXT)		+= iwmmxt.o
 AFLAGS_iwmmxt.o			:= -Wa,-mcpu=iwmmxt

@@ -121,7 +121,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 			tmp = regs->regs[addr];
 			break;
 		case FPR_BASE ... FPR_BASE + 31:
-			if (child->used_math) {
+			if (tsk_used_math(child)) {
 				fpureg_t *fregs = get_fpu_regs(child);
 
 #ifdef CONFIG_MIPS32
@@ -207,7 +207,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 		case FPR_BASE ... FPR_BASE + 31: {
 			fpureg_t *fregs = get_fpu_regs(child);
 
-			if (!child->used_math) {
+			if (!tsk_used_math(child)) {
 				/* FP not yet used  */
 				memset(&child->thread.fpu.hard, ~0,
 				       sizeof(child->thread.fpu.hard));
@@ -279,7 +279,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 	 */
 	case PTRACE_KILL:
 		ret = 0;
-		if (child->state == TASK_ZOMBIE)	/* already dead */
+		if (child->exit_state == EXIT_ZOMBIE)	/* already dead */
 			break;
 		child->exit_code = SIGKILL;
 		wake_up_process(child);

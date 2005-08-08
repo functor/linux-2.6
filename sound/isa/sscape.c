@@ -47,24 +47,23 @@ static long port[SNDRV_CARDS] __devinitdata = { [0 ... (SNDRV_CARDS-1)] = SNDRV_
 static int irq[SNDRV_CARDS] __devinitdata = SNDRV_DEFAULT_IRQ;
 static int mpu_irq[SNDRV_CARDS] __devinitdata = SNDRV_DEFAULT_IRQ;
 static int dma[SNDRV_CARDS] __devinitdata = SNDRV_DEFAULT_DMA;
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index number for SoundScape soundcard");
 
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "Description for SoundScape card");
 
-module_param_array(port, long, boot_devs, 0444);
+module_param_array(port, long, NULL, 0444);
 MODULE_PARM_DESC(port, "Port # for SoundScape driver.");
 
-module_param_array(irq, int, boot_devs, 0444);
+module_param_array(irq, int, NULL, 0444);
 MODULE_PARM_DESC(irq, "IRQ # for SoundScape driver.");
 
-module_param_array(mpu_irq, int, boot_devs, 0444);
+module_param_array(mpu_irq, int, NULL, 0444);
 MODULE_PARM_DESC(mpu_irq, "MPU401 IRQ # for SoundScape driver.");
 
-module_param_array(dma, int, boot_devs, 0444);
+module_param_array(dma, int, NULL, 0444);
 MODULE_PARM_DESC(dma, "DMA # for SoundScape driver.");
   
 #ifdef CONFIG_PNP
@@ -488,7 +487,7 @@ static int upload_dma_data(struct soundscape *s,
 		 * the userspace pointer ...
 		 */
 		len = min(size, dma.bytes);
-		__copy_from_user(dma.area, data, len);
+		len -= __copy_from_user(dma.area, data, len);
 		data += len;
 		size -= len;
 
@@ -572,8 +571,9 @@ static int sscape_upload_bootblock(struct soundscape *sscape, struct sscape_boot
 		if (data < 0) {
 			snd_printk(KERN_ERR "sscape: timeout reading firmware version\n");
 			ret = -EAGAIN;
-		} else {
-			__copy_to_user(&bb->version, &data, sizeof(bb->version));
+		}
+		else if (__copy_to_user(&bb->version, &data, sizeof(bb->version))) {
+			ret = -EFAULT;
 		}
 	}
 
@@ -592,7 +592,7 @@ static int sscape_upload_microcode(struct soundscape *sscape,
 {
 	unsigned long flags;
 	char __user *code;
-	int err, ret;
+	int err;
 
 	/*
 	 * We are going to have to copy this data into a special
@@ -602,12 +602,11 @@ static int sscape_upload_microcode(struct soundscape *sscape,
 	 * NOTE: This buffer is 64K long! That's WAY too big to
 	 *       copy into a stack-temporary anyway.
 	 */
-	if (get_user(code, &mc->code))
+	if ( get_user(code, &mc->code) ||
+	     !access_ok(VERIFY_READ, code, SSCAPE_MICROCODE_SIZE) )
 		return -EFAULT;
-	if ((err = verify_area(VERIFY_READ, code, SSCAPE_MICROCODE_SIZE)) != 0)
-		return err;
 
-	if ((ret = upload_dma_data(sscape, code, SSCAPE_MICROCODE_SIZE)) == 0) {
+	if ((err = upload_dma_data(sscape, code, SSCAPE_MICROCODE_SIZE)) == 0) {
 		snd_printk(KERN_INFO "sscape: MIDI firmware loaded\n");
 	}
 
@@ -617,7 +616,7 @@ static int sscape_upload_microcode(struct soundscape *sscape,
 
 	initialise_mpu401(sscape->mpu);
 
-	return ret;
+	return err;
 }
 
 /*
@@ -674,14 +673,14 @@ static int sscape_hw_ioctl(snd_hwdep_t * hw, struct file *file,
 			 * DMA-able buffer before we can upload it. We shall therefore
 			 * just check that the data pointer is valid for now ...
 			 */
-			if ((err = verify_area(VERIFY_READ, bb->code, sizeof(bb->code))) != 0)
-				return err;
+			if ( !access_ok(VERIFY_READ, bb->code, sizeof(bb->code)) )
+				return -EFAULT;
 
 			/*
 			 * Now check that we can write the firmware version number too...
 			 */
-			if ((err = verify_area(VERIFY_WRITE, &bb->version, sizeof(bb->version))) != 0)
-				return err;
+			if ( !access_ok(VERIFY_WRITE, &bb->version, sizeof(bb->version)) )
+				return -EFAULT;
 
 			err = sscape_upload_bootblock(sscape, bb);
 		}

@@ -33,9 +33,9 @@
 #include <linux/etherdevice.h>
 #include <linux/init.h>
 #include <linux/random.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>
-#include <asm/bitops.h>
 #include <asm/byteorder.h>
 
 #include <net/irda/irda.h>
@@ -175,9 +175,9 @@ void irlan_provider_connect_response(struct irlan_cb *self,
 	irttp_connect_response(tsap, IRLAN_MTU, NULL);
 }
 
-void irlan_provider_disconnect_indication(void *instance, void *sap, 
-					  LM_REASON reason, 
-					  struct sk_buff *userdata) 
+static void irlan_provider_disconnect_indication(void *instance, void *sap, 
+						 LM_REASON reason, 
+						 struct sk_buff *userdata) 
 {
 	struct irlan_cb *self;
 	struct tsap_cb *tsap;

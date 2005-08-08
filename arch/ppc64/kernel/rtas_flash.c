@@ -105,7 +105,7 @@ struct rtas_validate_flash_t
 	unsigned int update_results;	/* Update results token */
 };
 
-static spinlock_t flash_file_open_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(flash_file_open_lock);
 static struct proc_dir_entry *firmware_flash_pde;
 static struct proc_dir_entry *firmware_update_pde;
 static struct proc_dir_entry *validate_pde;
@@ -562,6 +562,7 @@ static int validate_flash_release(struct inode *inode, struct file *file)
 		validate_flash(args_buf);
 	}
 
+	/* The matching atomic_inc was in rtas_excl_open() */
 	atomic_dec(&dp->count);
 
 	return 0;
@@ -572,7 +573,8 @@ static void remove_flash_pde(struct proc_dir_entry *dp)
 	if (dp) {
 		if (dp->data != NULL)
 			kfree(dp->data);
-		remove_proc_entry(dp->name, NULL);
+		dp->owner = NULL;
+		remove_proc_entry(dp->name, dp->parent);
 	}
 }
 

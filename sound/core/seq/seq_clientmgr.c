@@ -420,7 +420,10 @@ static ssize_t snd_seq_read(struct file *file, char __user *buf, size_t count, l
 			count -= err;
 			buf += err;
 		} else {
-			copy_to_user(buf, &cell->event, sizeof(snd_seq_event_t));
+			if (copy_to_user(buf, &cell->event, sizeof(snd_seq_event_t))) {
+				err = -EFAULT;
+				break;
+			}
 			count -= sizeof(snd_seq_event_t);
 			buf += sizeof(snd_seq_event_t);
 		}
@@ -748,8 +751,8 @@ static int multicast_event(client_t *client, snd_seq_event_t *event,
  *               n == 0 : the event was not passed to any client.
  *               n < 0  : error - event was not processed.
  */
-int snd_seq_deliver_event(client_t *client, snd_seq_event_t *event,
-			  int atomic, int hop)
+static int snd_seq_deliver_event(client_t *client, snd_seq_event_t *event,
+				 int atomic, int hop)
 {
 	int result;
 
@@ -901,7 +904,7 @@ static int snd_seq_client_enqueue_event(client_t *client,
 		return -ENXIO; /* queue is not allocated */
 
 	/* allocate an event cell */
-	err = snd_seq_event_dup(client->pool, event, &cell, !blocking && !atomic, file);
+	err = snd_seq_event_dup(client->pool, event, &cell, !blocking || atomic, file);
 	if (err < 0)
 		return err;
 

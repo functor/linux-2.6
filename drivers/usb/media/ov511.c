@@ -183,7 +183,7 @@ MODULE_PARM_DESC(force_palette, "Force the palette to a specific value");
 module_param(backlight, int, 0);
 MODULE_PARM_DESC(backlight, "For objects that are lit from behind");
 static int num_uv;
-module_param_array(unit_video, int, num_uv, 0);
+module_param_array(unit_video, int, &num_uv, 0);
 MODULE_PARM_DESC(unit_video,
   "Force use of specific minor number(s). 0 is not allowed.");
 module_param(remove_zeros, int, 0);
@@ -324,21 +324,6 @@ static struct symbolic_list urb_errlist[] = {
 /**********************************************************************
  * Memory management
  **********************************************************************/
-
-/* Here we want the physical address of the memory.
- * This is used when initializing the contents of the area.
- */
-static inline unsigned long
-kvirt_to_pa(unsigned long adr)
-{
-	unsigned long kva, ret;
-
-	kva = (unsigned long) page_address(vmalloc_to_page((void *)adr));
-	kva |= adr & (PAGE_SIZE-1); /* restore the offset */
-	ret = __pa(kva);
-	return ret;
-}
-
 static void *
 rvmalloc(unsigned long size)
 {
@@ -3830,7 +3815,7 @@ ov51x_unlink_isoc(struct usb_ov511 *ov)
 	/* Unschedule all of the iso td's */
 	for (n = OV511_NUMSBUF - 1; n >= 0; n--) {
 		if (ov->sbuf[n].urb) {
-			usb_unlink_urb(ov->sbuf[n].urb);
+			usb_kill_urb(ov->sbuf[n].urb);
 			usb_free_urb(ov->sbuf[n].urb);
 			ov->sbuf[n].urb = NULL;
 		}
@@ -3923,15 +3908,11 @@ ov51x_do_dealloc(struct usb_ov511 *ov)
 		ov->fbuf = NULL;
 	}
 
-	if (ov->rawfbuf) {
-		vfree(ov->rawfbuf);
-		ov->rawfbuf = NULL;
-	}
+	vfree(ov->rawfbuf);
+	ov->rawfbuf = NULL;
 
-	if (ov->tempfbuf) {
-		vfree(ov->tempfbuf);
-		ov->tempfbuf = NULL;
-	}
+	vfree(ov->tempfbuf);
+	ov->tempfbuf = NULL;
 
 	for (i = 0; i < OV511_NUMSBUF; i++) {
 		if (ov->sbuf[i].data) {
@@ -4771,9 +4752,8 @@ ov51x_v4l1_mmap(struct file *file, struct vm_area_struct *vma)
 
 	pos = (unsigned long)ov->fbuf;
 	while (size > 0) {
-		page = kvirt_to_pa(pos);
-		if (remap_page_range(vma, start, page, PAGE_SIZE,
-				     PAGE_SHARED)) {
+		page = vmalloc_to_pfn((void *)pos);
+		if (remap_pfn_range(vma, start, page, PAGE_SIZE, PAGE_SHARED)) {
 			up(&ov->lock);
 			return -EAGAIN;
 		}
@@ -5612,7 +5592,7 @@ ov518_configure(struct usb_ov511 *ov)
 		if (ifp) {
 			alt = usb_altnum_to_altsetting(ifp, 7);
 			if (alt)
-				mxps = alt->endpoint[0].desc.wMaxPacketSize;
+				mxps = le16_to_cpu(alt->endpoint[0].desc.wMaxPacketSize);
 		}
 
 		/* Some OV518s have packet numbering by default, some don't */
@@ -5841,7 +5821,7 @@ ov51x_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	ov->auto_gain = autogain;
 	ov->auto_exp = autoexp;
 
-	switch (dev->descriptor.idProduct) {
+	switch (le16_to_cpu(dev->descriptor.idProduct)) {
 	case PROD_OV511:
 		ov->bridge = BRG_OV511;
 		ov->bclass = BCL_OV511;
@@ -5859,13 +5839,13 @@ ov51x_probe(struct usb_interface *intf, const struct usb_device_id *id)
 		ov->bclass = BCL_OV518;
 		break;
 	case PROD_ME2CAM:
-		if (dev->descriptor.idVendor != VEND_MATTEL)
+		if (le16_to_cpu(dev->descriptor.idVendor) != VEND_MATTEL)
 			goto error;
 		ov->bridge = BRG_OV511PLUS;
 		ov->bclass = BCL_OV511;
 		break;
 	default:
-		err("Unknown product ID 0x%04x", dev->descriptor.idProduct);
+		err("Unknown product ID 0x%04x", le16_to_cpu(dev->descriptor.idProduct));
 		goto error;
 	}
 

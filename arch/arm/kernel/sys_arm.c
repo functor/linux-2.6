@@ -51,6 +51,13 @@ asmlinkage int sys_pipe(unsigned long __user *fildes)
 	return error;
 }
 
+/*
+ * This is the lowest virtual address we can permit any user space
+ * mapping to be mapped at.  This is particularly important for
+ * non-high vector CPUs.
+ */
+#define MIN_MAP_ADDR	(PAGE_SIZE)
+
 /* common code for old and new mmaps */
 inline long do_mmap2(
 	unsigned long addr, unsigned long len,
@@ -62,11 +69,7 @@ inline long do_mmap2(
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
-	/*
-	 * If we are doing a fixed mapping, and address < PAGE_SIZE,
-	 * then deny it.
-	 */
-	if (flags & MAP_FIXED && addr < PAGE_SIZE && vectors_base() == 0)
+	if (flags & MAP_FIXED && addr < MIN_MAP_ADDR)
 		goto out;
 
 	error = -EBADF;
@@ -119,12 +122,7 @@ sys_arm_mremap(unsigned long addr, unsigned long old_len,
 {
 	unsigned long ret = -EINVAL;
 
-	/*
-	 * If we are doing a fixed mapping, and address < PAGE_SIZE,
-	 * then deny it.
-	 */
-	if (flags & MREMAP_FIXED && new_addr < PAGE_SIZE &&
-	    vectors_base() == 0)
+	if (flags & MREMAP_FIXED && new_addr < MIN_MAP_ADDR)
 		goto out;
 
 	down_write(&current->mm->mmap_sem);
@@ -243,18 +241,14 @@ asmlinkage int sys_fork(struct pt_regs *regs)
 /* Clone a task - this clones the calling program thread.
  * This is called indirectly via a small wrapper
  */
-asmlinkage int sys_clone(unsigned long clone_flags, unsigned long newsp, struct pt_regs *regs)
+asmlinkage int sys_clone(unsigned long clone_flags, unsigned long newsp,
+			 int __user *parent_tidptr, int tls_val,
+			 int __user *child_tidptr, struct pt_regs *regs)
 {
-	/*
-	 * We don't support SETTID / CLEARTID
-	 */
-	if (clone_flags & (CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID))
-		return -EINVAL;
-
 	if (!newsp)
 		newsp = regs->ARM_sp;
 
-	return do_fork(clone_flags, newsp, regs, 0, NULL, NULL);
+	return do_fork(clone_flags, newsp, regs, 0, parent_tidptr, child_tidptr);
 }
 
 asmlinkage int sys_vfork(struct pt_regs *regs)

@@ -107,7 +107,6 @@ static struct file_operations dtlk_fops =
 };
 
 /* local prototypes */
-static void dtlk_delay(int ms);
 static int dtlk_dev_probe(void);
 static struct dtlk_settings *dtlk_interrogate(void);
 static int dtlk_readable(void);
@@ -146,7 +145,7 @@ static ssize_t dtlk_read(struct file *file, char __user *buf,
 			return i;
 		if (file->f_flags & O_NONBLOCK)
 			break;
-		dtlk_delay(100);
+		msleep_interruptible(100);
 	}
 	if (retries == loops_per_jiffy)
 		printk(KERN_ERR "dtlk_read times out\n");
@@ -191,7 +190,7 @@ static ssize_t dtlk_write(struct file *file, const char __user *buf,
 				   rate to 500 bytes/sec, but that's
 				   still enough to keep up with the
 				   speech synthesizer. */
-				dtlk_delay(1);
+				msleep_interruptible(1);
 			else {
 				/* the RDY bit goes zero 2-3 usec
 				   after writing, and goes 1 again
@@ -199,7 +198,7 @@ static ssize_t dtlk_write(struct file *file, const char __user *buf,
 				   up to 250 usec for the RDY bit to
 				   go nonzero. */
 				for (retries = 0;
-				     retries < loops_per_jiffy / (4000/HZ);
+				     retries < HZ*(loops_per_jiffy >> 3)/500;
 				     retries++)
 					if (inb_p(dtlk_port_tts) &
 					    TTS_WRITABLE)
@@ -212,7 +211,7 @@ static ssize_t dtlk_write(struct file *file, const char __user *buf,
 		if (file->f_flags & O_NONBLOCK)
 			break;
 
-		dtlk_delay(1);
+		msleep_interruptible(1);
 
 		if (++retries > 10 * HZ) { /* wait no more than 10 sec
 					      from last write */
@@ -351,8 +350,7 @@ static int __init dtlk_init(void)
 static void __exit dtlk_cleanup (void)
 {
 	dtlk_write_bytes("goodbye", 8);
-	current->state = TASK_INTERRUPTIBLE;
-	schedule_timeout(5 * HZ / 10);		/* nap 0.50 sec but
+	msleep_interruptible(500);		/* nap 0.50 sec but
 						   could be awakened
 						   earlier by
 						   signals... */
@@ -367,13 +365,6 @@ module_init(dtlk_init);
 module_exit(dtlk_cleanup);
 
 /* ------------------------------------------------------------------------ */
-
-/* sleep for ms milliseconds */
-static void dtlk_delay(int ms)
-{
-	current->state = TASK_INTERRUPTIBLE;
-	schedule_timeout((ms * HZ + 1000 - HZ) / 1000);
-}
 
 static int dtlk_readable(void)
 {
@@ -431,7 +422,7 @@ static int __init dtlk_dev_probe(void)
 			/* posting an index takes 18 msec.  Here, we
 			   wait up to 100 msec to see whether it
 			   appears. */
-			dtlk_delay(100);
+			msleep_interruptible(100);
 			dtlk_has_indexing = dtlk_readable();
 #ifdef TRACING
 			printk(", indexing %d\n", dtlk_has_indexing);
@@ -454,7 +445,7 @@ for (i = 0; i < 10; i++)			\
 				LOOK
 				dtlk_write_bytes("\0012I\r", 4);
 				buffer[b++] = 0;
-				__delay(50 * loops_per_jiffy / (1000/HZ));
+				__delay(50 * (loops_per_jiffy >> 3) * HZ / 125);
 				outb_p(0xff, dtlk_port_lpc);
 				buffer[b++] = 0;
 				LOOK

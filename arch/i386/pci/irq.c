@@ -17,6 +17,7 @@
 #include <asm/smp.h>
 #include <asm/io_apic.h>
 #include <asm/hw_irq.h>
+#include <linux/acpi.h>
 
 #include "pci.h"
 
@@ -27,6 +28,8 @@ static int broken_hp_bios_irq9;
 static int acer_tm360_irqrouting;
 
 static struct irq_routing_table *pirq_table;
+
+static int pirq_enable_irq(struct pci_dev *dev);
 
 /*
  * Never use: 0, 1, 2 (timer, keyboard, and cascade)
@@ -127,8 +130,15 @@ void eisa_set_level_irq(unsigned int irq)
 {
 	unsigned char mask = 1 << (irq & 7);
 	unsigned int port = 0x4d0 + (irq >> 3);
-	unsigned char val = inb(port);
+	unsigned char val;
+	static u16 eisa_irq_mask;
 
+	if (irq >= 16 || (1 << irq) & eisa_irq_mask)
+		return;
+
+	eisa_irq_mask |= (1 << irq);
+	printk("PCI: setting IRQ %u as level-triggered\n", irq);
+	val = inb(port);
 	if (!(val & mask)) {
 		DBG(" -> edge");
 		outb(val | mask, port);
@@ -452,14 +462,16 @@ static int pirq_bios_set(struct pci_dev *router, struct pci_dev *dev, int pirq, 
 
 #endif
 
-
 static __init int intel_router_probe(struct irq_router *r, struct pci_dev *router, u16 device)
 {
+	static struct pci_device_id pirq_440gx[] = {
+		{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82443GX_0) },
+		{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82443GX_2) },
+		{ },
+	};
+
 	/* 440GX has a proprietary PIRQ router -- don't use it */
-	if (	pci_find_device(PCI_VENDOR_ID_INTEL,
-				PCI_DEVICE_ID_INTEL_82443GX_0, NULL) ||
-		pci_find_device(PCI_VENDOR_ID_INTEL,
-				PCI_DEVICE_ID_INTEL_82443GX_2, NULL))
+	if (pci_dev_present(pirq_440gx))
 		return 0;
 
 	switch(device)
@@ -481,6 +493,8 @@ static __init int intel_router_probe(struct irq_router *r, struct pci_dev *route
 		case PCI_DEVICE_ID_INTEL_ESB_1:
 		case PCI_DEVICE_ID_INTEL_ICH6_0:
 		case PCI_DEVICE_ID_INTEL_ICH6_1:
+		case PCI_DEVICE_ID_INTEL_ICH7_0:
+		case PCI_DEVICE_ID_INTEL_ICH7_1:
 			r->name = "PIIX/ICH";
 			r->get = pirq_piix_get;
 			r->set = pirq_piix_set;
@@ -723,7 +737,7 @@ static int pcibios_lookup_irq(struct pci_dev *dev, int assign)
 	if (!pirq_table)
 		return 0;
 	
-	DBG("IRQ for %s:%d", pci_name(dev), pin);
+	DBG("IRQ for %s[%c]", pci_name(dev), 'A' + pin);
 	info = pirq_get_info(dev);
 	if (!info) {
 		DBG(" -> not found in routing table\n");
@@ -804,7 +818,7 @@ static int pcibios_lookup_irq(struct pci_dev *dev, int assign)
 	printk(KERN_INFO "PCI: %s IRQ %d for device %s\n", msg, irq, pci_name(dev));
 
 	/* Update IRQ for all devices with the same pirq value */
-	while ((dev2 = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev2)) != NULL) {
+	while ((dev2 = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, dev2)) != NULL) {
 		pci_read_config_byte(dev2, PCI_INTERRUPT_PIN, &pin);
 		if (!pin)
 			continue;
@@ -838,7 +852,7 @@ static void __init pcibios_fixup_irqs(void)
 	u8 pin;
 
 	DBG("PCI: IRQ fixup\n");
-	while ((dev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
+	while ((dev = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
 		/*
 		 * If the BIOS has set an out of range IRQ number, just ignore it.
 		 * Also keep track of which IRQ's are already in use.
@@ -854,7 +868,7 @@ static void __init pcibios_fixup_irqs(void)
 	}
 
 	dev = NULL;
-	while ((dev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
+	while ((dev = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
 		pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &pin);
 #ifdef CONFIG_X86_IO_APIC
 		/*
@@ -880,16 +894,16 @@ static void __init pcibios_fixup_irqs(void)
 					irq = IO_APIC_get_PCI_irq_vector(bridge->bus->number, 
 							PCI_SLOT(bridge->devfn), pin);
 					if (irq >= 0)
-						printk(KERN_WARNING "PCI: using PPB(B%d,I%d,P%d) to get irq %d\n", 
-							bridge->bus->number, PCI_SLOT(bridge->devfn), pin, irq);
+						printk(KERN_WARNING "PCI: using PPB %s[%c] to get irq %d\n",
+							pci_name(bridge), 'A' + pin, irq);
 				}
 				if (irq >= 0) {
 					if (use_pci_vector() &&
 						!platform_legacy_irq(irq))
 						irq = IO_APIC_VECTOR(irq);
 
-					printk(KERN_INFO "PCI->APIC IRQ transform: (B%d,I%d,P%d) -> %d\n",
-						dev->bus->number, PCI_SLOT(dev->devfn), pin, irq);
+					printk(KERN_INFO "PCI->APIC IRQ transform: %s[%c] -> IRQ %d\n",
+						pci_name(dev), 'A' + pin, irq);
 					dev->irq = irq;
 				}
 			}
@@ -989,19 +1003,30 @@ static int __init pcibios_irq_init(void)
 subsys_initcall(pcibios_irq_init);
 
 
-void pcibios_penalize_isa_irq(int irq)
+static void pirq_penalize_isa_irq(int irq)
 {
 	/*
 	 *  If any ISAPnP device reports an IRQ in its list of possible
 	 *  IRQ's, we try to avoid assigning it to PCI devices.
 	 */
-	pirq_penalty[irq] += 100;
+	if (irq < 16)
+		pirq_penalty[irq] += 100;
 }
 
-int pirq_enable_irq(struct pci_dev *dev)
+void pcibios_penalize_isa_irq(int irq)
+{
+#ifdef CONFIG_ACPI_PCI
+	if (!acpi_noirq)
+		acpi_penalize_isa_irq(irq);
+	else
+#endif
+		pirq_penalize_isa_irq(irq);
+}
+
+static int pirq_enable_irq(struct pci_dev *dev)
 {
 	u8 pin;
-	extern int interrupt_line_quirk;
+	extern int via_interrupt_line_quirk;
 	struct pci_dev *temp_dev;
 
 	pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &pin);
@@ -1028,8 +1053,8 @@ int pirq_enable_irq(struct pci_dev *dev)
 					irq = IO_APIC_get_PCI_irq_vector(bridge->bus->number, 
 							PCI_SLOT(bridge->devfn), pin);
 					if (irq >= 0)
-						printk(KERN_WARNING "PCI: using PPB(B%d,I%d,P%d) to get irq %d\n", 
-							bridge->bus->number, PCI_SLOT(bridge->devfn), pin, irq);
+						printk(KERN_WARNING "PCI: using PPB %s[%c] to get irq %d\n",
+							pci_name(bridge), 'A' + pin, irq);
 					dev = bridge;
 				}
 				dev = temp_dev;
@@ -1038,8 +1063,8 @@ int pirq_enable_irq(struct pci_dev *dev)
 					if (!platform_legacy_irq(irq))
 						irq = IO_APIC_VECTOR(irq);
 #endif
-					printk(KERN_INFO "PCI->APIC IRQ transform: (B%d,I%d,P%d) -> %d\n",
-						dev->bus->number, PCI_SLOT(dev->devfn), pin, irq);
+					printk(KERN_INFO "PCI->APIC IRQ transform: %s[%c] -> IRQ %d\n",
+						pci_name(dev), 'A' + pin, irq);
 					dev->irq = irq;
 					return 0;
 				} else
@@ -1059,7 +1084,7 @@ int pirq_enable_irq(struct pci_dev *dev)
 	}
 	/* VIA bridges use interrupt line for apic/pci steering across
 	   the V-Link */
-	else if (interrupt_line_quirk)
+	else if (via_interrupt_line_quirk)
 		pci_write_config_byte(dev, PCI_INTERRUPT_LINE, dev->irq & 15);
 	return 0;
 }

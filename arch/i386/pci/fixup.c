@@ -227,10 +227,7 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, PCI_ANY_ID, pci_fixup_transparent_
  */
 static void __init pci_fixup_nforce2(struct pci_dev *dev)
 {
-	u32 val, fixed_val;
-	u8 rev;
-
-	pci_read_config_byte(dev, PCI_REVISION_ID, &rev);
+	u32 val;
 
 	/*
 	 * Chip  Old value   New value
@@ -240,18 +237,144 @@ static void __init pci_fixup_nforce2(struct pci_dev *dev)
 	 * Northbridge chip version may be determined by
 	 * reading the PCI revision ID (0xC1 or greater is C18D).
 	 */
-	fixed_val = rev < 0xC1 ? 0x1F01FF01 : 0x9F01FF01;
-
 	pci_read_config_dword(dev, 0x6c, &val);
 
 	/*
-	 * Apply fixup only if C1 Halt Disconnect is enabled
-	 * (bit28) because it is not supported on some boards.
+	 * Apply fixup if needed, but don't touch disconnect state
 	 */
-	if ((val & (1 << 28)) && val != fixed_val) {
+	if ((val & 0x00FF0000) != 0x00010000) {
 		printk(KERN_WARNING "PCI: nForce2 C1 Halt Disconnect fixup\n");
-		pci_write_config_dword(dev, 0x6c, fixed_val);
+		pci_write_config_dword(dev, 0x6c, (val & 0xFF00FFFF) | 0x00010000);
 	}
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_NFORCE2, pci_fixup_nforce2);
 
+/* Max PCI Express root ports */
+#define MAX_PCIEROOT	6
+static int quirk_aspm_offset[MAX_PCIEROOT << 3];
+
+#define GET_INDEX(a, b) (((a - PCI_DEVICE_ID_INTEL_MCH_PA) << 3) + b)
+
+static int quirk_pcie_aspm_read(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 *value)
+{
+	return raw_pci_ops->read(0, bus->number, devfn, where, size, value);
+}
+
+/*
+ * Replace the original pci bus ops for write with a new one that will filter
+ * the request to insure ASPM cannot be enabled.
+ */
+static int quirk_pcie_aspm_write(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 value)
+{
+	u8 offset;
+
+	offset = quirk_aspm_offset[GET_INDEX(bus->self->device, devfn)];
+
+	if ((offset) && (where == offset))
+		value = value & 0xfffffffc;
+	
+	return raw_pci_ops->write(0, bus->number, devfn, where, size, value);
+}
+
+static struct pci_ops quirk_pcie_aspm_ops = {
+	.read = quirk_pcie_aspm_read,
+	.write = quirk_pcie_aspm_write,
+};
+
+/*
+ * Prevents PCI Express ASPM (Active State Power Management) being enabled.
+ *
+ * Save the register offset, where the ASPM control bits are located,
+ * for each PCI Express device that is in the device list of
+ * the root port in an array for fast indexing. Replace the bus ops
+ * with the modified one.
+ */
+static void pcie_rootport_aspm_quirk(struct pci_dev *pdev)
+{
+	int cap_base, i;
+	struct pci_bus  *pbus;
+	struct pci_dev *dev;
+
+	if ((pbus = pdev->subordinate) == NULL)
+		return;
+
+	/*
+	 * Check if the DID of pdev matches one of the six root ports. This
+	 * check is needed in the case this function is called directly by the
+	 * hot-plug driver.
+	 */
+	if ((pdev->device < PCI_DEVICE_ID_INTEL_MCH_PA) ||
+	    (pdev->device > PCI_DEVICE_ID_INTEL_MCH_PC1))
+		return;
+
+	if (list_empty(&pbus->devices)) {
+		/*
+		 * If no device is attached to the root port at power-up or
+		 * after hot-remove, the pbus->devices is empty and this code
+		 * will set the offsets to zero and the bus ops to parent's bus
+		 * ops, which is unmodified.
+	 	 */
+		for (i= GET_INDEX(pdev->device, 0); i <= GET_INDEX(pdev->device, 7); ++i)
+			quirk_aspm_offset[i] = 0;
+
+		pbus->ops = pbus->parent->ops;
+	} else {
+		/*
+		 * If devices are attached to the root port at power-up or
+		 * after hot-add, the code loops through the device list of
+		 * each root port to save the register offsets and replace the
+		 * bus ops.
+		 */
+		list_for_each_entry(dev, &pbus->devices, bus_list) {
+			/* There are 0 to 8 devices attached to this bus */
+			cap_base = pci_find_capability(dev, PCI_CAP_ID_EXP);
+			quirk_aspm_offset[GET_INDEX(pdev->device, dev->devfn)]= cap_base + 0x10;
+		}
+		pbus->ops = &quirk_pcie_aspm_ops;
+	}
+}
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_MCH_PA,	pcie_rootport_aspm_quirk );
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_MCH_PA1,	pcie_rootport_aspm_quirk );
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_MCH_PB,	pcie_rootport_aspm_quirk );
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_MCH_PB1,	pcie_rootport_aspm_quirk );
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_MCH_PC,	pcie_rootport_aspm_quirk );
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_MCH_PC1,	pcie_rootport_aspm_quirk );
+
+/*
+ * Fixup to mark boot BIOS video selected by BIOS before it changes
+ *
+ * From information provided by "Jon Smirl" <jonsmirl@yahoo.com>
+ *
+ * The standard boot ROM sequence for an x86 machine uses the BIOS
+ * to select an initial video card for boot display. This boot video 
+ * card will have it's BIOS copied to C0000 in system RAM. 
+ * IORESOURCE_ROM_SHADOW is used to associate the boot video
+ * card with this copy. On laptops this copy has to be used since
+ * the main ROM may be compressed or combined with another image.
+ * See pci_map_rom() for use of this flag. IORESOURCE_ROM_SHADOW
+ * is marked here since the boot video device will be the only enabled
+ * video device at this point.
+ *
+ */static void __devinit pci_fixup_video(struct pci_dev *pdev)
+{
+	struct pci_dev *bridge;
+	struct pci_bus *bus;
+	u16 l;
+
+	if ((pdev->class >> 8) != PCI_CLASS_DISPLAY_VGA)
+		return;
+
+	/* Is VGA routed to us? */
+	bus = pdev->bus;
+	while (bus) {
+		bridge = bus->self;
+		if (bridge) {
+			pci_read_config_word(bridge, PCI_BRIDGE_CONTROL, &l);
+			if (!(l & PCI_BRIDGE_CTL_VGA))
+				return;
+		}
+		bus = bus->parent;
+	}
+	pdev->resource[PCI_ROM_RESOURCE].flags |= IORESOURCE_ROM_SHADOW;
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_ANY_ID, PCI_ANY_ID, pci_fixup_video);

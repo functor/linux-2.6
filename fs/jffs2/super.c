@@ -3,11 +3,11 @@
  *
  * Copyright (C) 2001-2003 Red Hat, Inc.
  *
- * Created by David Woodhouse <dwmw2@redhat.com>
+ * Created by David Woodhouse <dwmw2@infradead.org>
  *
  * For licensing information, see the file 'LICENCE' in this directory.
  *
- * $Id: super.c,v 1.99 2004/08/24 07:59:57 dwmw2 Exp $
+ * $Id: super.c,v 1.104 2004/11/23 15:37:31 gleixner Exp $
  *
  */
 
@@ -56,6 +56,16 @@ static void jffs2_i_init_once(void * foo, kmem_cache_t * cachep, unsigned long f
 	}
 }
 
+static int jffs2_sync_fs(struct super_block *sb, int wait)
+{
+	struct jffs2_sb_info *c = JFFS2_SB_INFO(sb);
+
+	down(&c->alloc_sem);
+	jffs2_flush_wbuf_pad(c);
+	up(&c->alloc_sem);	
+	return 0;
+}
+
 static struct super_operations jffs2_super_operations =
 {
 	.alloc_inode =	jffs2_alloc_inode,
@@ -67,6 +77,7 @@ static struct super_operations jffs2_super_operations =
 	.remount_fs =	jffs2_remount_fs,
 	.clear_inode =	jffs2_clear_inode,
 	.dirty_inode =	jffs2_dirty_inode,
+	.sync_fs =	jffs2_sync_fs,
 };
 
 static int jffs2_sb_compare(struct super_block *sb, void *data)
@@ -266,7 +277,10 @@ static void jffs2_put_super (struct super_block *sb)
 	up(&c->alloc_sem);
 	jffs2_free_ino_caches(c);
 	jffs2_free_raw_node_refs(c);
-	kfree(c->blocks);
+	if (c->mtd->flags & MTD_NO_VIRTBLOCKS)
+		vfree(c->blocks);
+	else
+		kfree(c->blocks);
 	jffs2_flash_cleanup(c);
 	kfree(c->inocache_list);
 	if (c->mtd->sync)

@@ -1,15 +1,9 @@
 #ifndef _NX_VS_NETWORK_H
 #define _NX_VS_NETWORK_H
 
-#include <linux/kernel.h>
-#include <linux/rcupdate.h>
-#include <linux/sched.h>
 
 #include "vserver/network.h"
 #include "vserver/debug.h"
-
-
-extern int proc_pid_nx_info(struct task_struct *, char *);
 
 
 #define get_nx_info(i)	__get_nx_info(i,__FILE__,__LINE__)
@@ -27,8 +21,7 @@ static inline struct nx_info *__get_nx_info(struct nx_info *nxi,
 }
 
 
-#define free_nx_info(i) \
-	call_rcu(&i->nx_rcu, rcu_free_nx_info);
+extern void free_nx_info(struct nx_info *);
 
 #define put_nx_info(i)	__put_nx_info(i,__FILE__,__LINE__)
 
@@ -60,7 +53,8 @@ static inline void __set_nx_info(struct nx_info **nxp, struct nx_info *nxi,
 		_file, _line);
 
 	atomic_inc(&nxi->nx_refcnt);
-	nxo = xchg(nxp, __get_nx_info(nxi, _file, _line));
+	// nxo = xchg(nxp, __get_nx_info(nxi, _file, _line));
+	nxo = xchg(nxp, nxi);
 	BUG_ON(nxo);
 }
 
@@ -83,7 +77,7 @@ static inline void __clr_nx_info(struct nx_info **nxp,
 
 	if (atomic_dec_and_test(&nxo->nx_refcnt))
 		unhash_nx_info(nxo);
-	__put_nx_info(nxo, _file, _line);
+	// __put_nx_info(nxo, _file, _line);
 }
 
 
@@ -100,19 +94,6 @@ static __inline__ struct nx_info *__task_get_nx_info(struct task_struct *p,
 		p, _file, _line);
 	task_unlock(p);
 	return nxi;
-}
-
-#define nx_verify_info(p,i)	\
-	__nx_verify_info((p)->nx_info,i,__FILE__,__LINE__)
-
-static __inline__ void __nx_verify_info(
-	struct nx_info *ipa, struct nx_info *ipb,
-	const char *_file, int _line)
-{
-	if (ipa == ipb)
-		return;
-	printk(KERN_ERR "ip bad assumption (%p==%p) at %s:%d\n",
-		ipa, ipb, _file, _line);
 }
 
 

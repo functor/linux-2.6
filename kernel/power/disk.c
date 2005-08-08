@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2003 Patrick Mochel
  * Copyright (c) 2003 Open Source Development Lab
+ * Copyright (c) 2004 Pavel Machek <pavel@suse.cz>
  *
  * This file is released under the GPLv2.
  *
@@ -15,10 +16,11 @@
 #include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/fs.h>
+#include <linux/device.h>
 #include "power.h"
 
 
-extern u32 pm_disk_mode;
+extern suspend_disk_method_t pm_disk_mode;
 extern struct pm_ops * pm_ops;
 
 extern int swsusp_suspend(void);
@@ -41,7 +43,7 @@ char resume_file[256] = CONFIG_PM_STD_PARTITION;
  *	there ain't no turning back.
  */
 
-static int power_down(u32 mode)
+static void power_down(suspend_disk_method_t mode)
 {
 	unsigned long flags;
 	int error = 0;
@@ -49,7 +51,7 @@ static int power_down(u32 mode)
 	local_irq_save(flags);
 	switch(mode) {
 	case PM_DISK_PLATFORM:
-		device_power_down(PM_SUSPEND_DISK);
+ 		device_power_down(PMSG_SUSPEND);
 		error = pm_ops->enter(PM_SUSPEND_DISK);
 		break;
 	case PM_DISK_SHUTDOWN:
@@ -67,7 +69,6 @@ static int power_down(u32 mode)
 	   after resume. */
 	printk(KERN_CRIT "Please power me down manually\n");
 	while(1);
-	return 0;
 }
 
 
@@ -85,10 +86,20 @@ static int in_suspend __nosavedata = 0;
 
 static void free_some_memory(void)
 {
-	printk("Freeing memory: ");
-	while (shrink_all_memory(10000))
-		printk(".");
-	printk("|\n");
+	unsigned int i = 0;
+	unsigned int tmp;
+	unsigned long pages = 0;
+	char *p = "-\\|/";
+
+	printk("Freeing memory...  ");
+	while ((tmp = shrink_all_memory(10000))) {
+		pages += tmp;
+		printk("\b%c", p[i]);
+		i++;
+		if (i > 3)
+			i = 0;
+	}
+	printk("\bdone (%li pages freed)\n", pages);
 }
 
 
@@ -133,8 +144,10 @@ static int prepare(void)
 	free_some_memory();
 
 	disable_nonboot_cpus();
-	if ((error = device_suspend(PM_SUSPEND_DISK)))
+	if ((error = device_suspend(PMSG_FREEZE))) {
+		printk("Some devices failed to suspend\n");
 		goto Finish;
+	}
 
 	return 0;
  Finish:
@@ -152,7 +165,7 @@ static int prepare(void)
  *
  *	If we're going through the firmware, then get it over with quickly.
  *
- *	If not, then call pmdis to do it's thing, then figure out how
+ *	If not, then call swsusp to do its thing, then figure out how
  *	to power down the system.
  */
 
@@ -174,18 +187,9 @@ int pm_suspend_disk(void)
 
 	if (in_suspend) {
 		pr_debug("PM: writing image.\n");
-
-		/*
-		 * FIXME: Leftover from swsusp. Are they necessary?
-		 */
-		mb();
-		barrier();
-
 		error = swsusp_write();
-		if (!error) {
-			error = power_down(pm_disk_mode);
-			pr_debug("PM: Power down failed.\n");
-		}
+		if (!error)
+			power_down(pm_disk_mode);
 	} else
 		pr_debug("PM: Image restored successfully.\n");
 	swsusp_free();
@@ -199,7 +203,7 @@ int pm_suspend_disk(void)
  *	software_resume - Resume from a saved image.
  *
  *	Called as a late_initcall (so all devices are discovered and
- *	initialized), we call pmdisk to see if we have a saved image or not.
+ *	initialized), we call swsusp to see if we have a saved image or not.
  *	If so, we quiesce devices, the restore the saved image. We will
  *	return above (in pm_suspend_disk() ) if everything goes well.
  *	Otherwise, we fail gracefully and return to the normally
@@ -219,7 +223,7 @@ static int software_resume(void)
 		return 0;
 	}
 
-	pr_debug("PM: Reading pmdisk image.\n");
+	pr_debug("PM: Reading swsusp image.\n");
 
 	if ((error = swsusp_read()))
 		goto Done;
@@ -282,7 +286,7 @@ static char * pm_disk_modes[] = {
 
 static ssize_t disk_show(struct subsystem * subsys, char * buf)
 {
-	return sprintf(buf,"%s\n",pm_disk_modes[pm_disk_mode]);
+	return sprintf(buf, "%s\n", pm_disk_modes[pm_disk_mode]);
 }
 
 
@@ -292,7 +296,7 @@ static ssize_t disk_store(struct subsystem * s, const char * buf, size_t n)
 	int i;
 	int len;
 	char *p;
-	u32 mode = 0;
+	suspend_disk_method_t mode = 0;
 
 	p = memchr(buf, '\n', n);
 	len = p ? p - buf : n;

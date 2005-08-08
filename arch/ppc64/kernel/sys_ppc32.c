@@ -60,7 +60,6 @@
 #include <linux/ptrace.h>
 #include <linux/aio_abi.h>
 #include <linux/elf.h>
-#include <linux/vs_cvirt.h>
 
 #include <net/scm.h>
 #include <net/sock.h>
@@ -74,6 +73,7 @@
 #include <asm/ppcdebug.h>
 #include <asm/time.h>
 #include <asm/mmu_context.h>
+#include <asm/systemcfg.h>
 
 #include "pci.h"
 
@@ -492,6 +492,7 @@ asmlinkage long sys32_settimeofday(struct compat_timeval __user *tv, struct time
 	return do_sys_settimeofday(tv ? &kts : NULL, tz ? &ktz : NULL);
 }
 
+#ifdef CONFIG_SYSVIPC
 long sys32_ipc(u32 call, u32 first, u32 second, u32 third, compat_uptr_t ptr,
 	       u32 fifth)
 {
@@ -556,6 +557,7 @@ long sys32_ipc(u32 call, u32 first, u32 second, u32 third, compat_uptr_t ptr,
 
 	return -ENOSYS;
 }
+#endif
 
 /* Note: it is necessary to treat out_fd and in_fd as unsigned ints, 
  * with the corresponding cast to a signed int to insure that the 
@@ -622,8 +624,11 @@ long sys32_execve(unsigned long a0, unsigned long a1, unsigned long a2,
 
 	error = compat_do_execve(filename, compat_ptr(a1), compat_ptr(a2), regs);
 
-	if (error == 0)
+	if (error == 0) {
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
+	}
 	putname(filename);
 
 out:
@@ -1101,6 +1106,7 @@ asmlinkage long sys32_umask(u32 mask)
 	return sys_umask((int)mask);
 }
 
+#ifdef CONFIG_SYSCTL
 struct __sysctl_args32 {
 	u32 name;
 	int nlen;
@@ -1150,23 +1156,7 @@ asmlinkage long sys32_sysctl(struct __sysctl_args32 __user *args)
 	}
 	return error;
 }
-
-asmlinkage long sys32_time(compat_time_t __user * tloc)
-{
-	compat_time_t secs;
-
-	struct timeval tv;
-
-	do_gettimeofday( &tv );
-	secs = tv.tv_sec;
-
-	if (tloc) {
-		if (put_user(secs,tloc))
-			secs = -EFAULT;
-	}
-
-	return secs;
-}
+#endif
 
 asmlinkage int sys32_olduname(struct oldold_utsname __user * name)
 {
@@ -1328,3 +1318,21 @@ long ppc32_timer_create(clockid_t clock,
 
 	return err;
 }
+
+asmlinkage long sys32_add_key(const char __user *_type,
+			      const char __user *_description,
+			      const void __user *_payload,
+			      u32 plen,
+			      u32 ringid)
+{
+	return sys_add_key(_type, _description, _payload, plen, ringid);
+}
+
+asmlinkage long sys32_request_key(const char __user *_type,
+				  const char __user *_description,
+				  const char __user *_callout_info,
+				  u32 destringid)
+{
+	return sys_request_key(_type, _description, _callout_info, destringid);
+}
+

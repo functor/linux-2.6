@@ -137,6 +137,7 @@ struct pt_regs * fastcall save_v86_state(struct kernel_vm86_regs * regs)
 static void mark_screen_rdonly(struct task_struct * tsk)
 {
 	pgd_t *pgd;
+	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte, *mapped;
 	int i;
@@ -151,7 +152,15 @@ static void mark_screen_rdonly(struct task_struct * tsk)
 		pgd_clear(pgd);
 		goto out;
 	}
-	pmd = pmd_offset(pgd, 0xA0000);
+	pud = pud_offset(pgd, 0xA0000);
+	if (pud_none(*pud))
+		goto out;
+	if (pud_bad(*pud)) {
+		pud_ERROR(*pud);
+		pud_clear(pud);
+		goto out;
+	}
+	pmd = pmd_offset(pud, 0xA0000);
 	if (pmd_none(*pmd))
 		goto out;
 	if (pmd_bad(*pmd)) {
@@ -704,7 +713,7 @@ static struct vm86_irqs {
 	int sig;
 } vm86_irqs[16];
 
-static spinlock_t irqbits_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(irqbits_lock);
 static int irqbits;
 
 #define ALLOWED_SIGS ( 1 /* 0 = don't send a signal */ \
@@ -723,7 +732,14 @@ static irqreturn_t irq_handler(int intno, void *dev_id, struct pt_regs * regs)
 	irqbits |= irq_bit;
 	if (vm86_irqs[intno].sig)
 		send_sig(vm86_irqs[intno].sig, vm86_irqs[intno].tsk, 1);
-	/* else user will poll for IRQs */
+	spin_unlock_irqrestore(&irqbits_lock, flags);
+	/*
+	 * IRQ will be re-enabled when user asks for the irq (whether
+	 * polling or as a result of the signal)
+	 */
+	disable_irq(intno);
+	return IRQ_HANDLED;
+
 out:
 	spin_unlock_irqrestore(&irqbits_lock, flags);	
 	return IRQ_NONE;
@@ -741,7 +757,7 @@ static inline void free_vm86_irq(int irqnumber)
 	spin_unlock_irqrestore(&irqbits_lock, flags);	
 }
 
-void release_x86_irqs(struct task_struct *task)
+void release_vm86_irqs(struct task_struct *task)
 {
 	int i;
 	for (i = FIRST_VM86_IRQ ; i <= LAST_VM86_IRQ; i++)

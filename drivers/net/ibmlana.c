@@ -88,9 +88,9 @@ History:
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
+#include <linux/bitops.h>
 
 #include <asm/processor.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 
 #define _IBM_LANA_DRIVER_
@@ -885,14 +885,6 @@ static struct net_device_stats *ibmlana_stats(struct net_device *dev)
 	return &priv->stat;
 }
 
-/* we don't support runtime reconfiguration, since am MCA card can
-   be unambigously identified by its POS registers. */
-
-static int ibmlana_config(struct net_device *dev, struct ifmap *map)
-{
-	return 0;
-}
-
 /* switch receiver mode. */
 
 static void ibmlana_set_multicast_list(struct net_device *dev)
@@ -984,7 +976,6 @@ static int ibmlana_probe(struct net_device *dev)
 
 	dev->open = ibmlana_open;
 	dev->stop = ibmlana_close;
-	dev->set_config = ibmlana_config;
 	dev->hard_start_xmit = ibmlana_tx;
 	dev->do_ioctl = NULL;
 	dev->get_stats = ibmlana_stats;
@@ -1029,8 +1020,8 @@ static struct net_device *moddevs[DEVMAX];
 static int irq;
 static int io;
 
-MODULE_PARM(irq, "i");
-MODULE_PARM(io, "i");
+module_param(irq, int, 0);
+module_param(io, int, 0);
 MODULE_PARM_DESC(irq, "IBM LAN/A IRQ number");
 MODULE_PARM_DESC(io, "IBM LAN/A I/O base address");
 MODULE_LICENSE("GPL");

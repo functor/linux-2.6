@@ -44,13 +44,21 @@ static struct linux_binfmt aout_format = {
 	.min_coredump	= PAGE_SIZE
 };
 
-static void set_brk(unsigned long start, unsigned long end)
+#define BAD_ADDR(x)	((unsigned long)(x) >= TASK_SIZE)
+
+static int set_brk(unsigned long start, unsigned long end)
 {
 	start = PAGE_ALIGN(start);
 	end = PAGE_ALIGN(end);
-	if (end <= start)
-		return;
-	do_brk(start, end - start);
+	if (end > start) {
+		unsigned long addr;
+		down_write(&current->mm->mmap_sem);
+		addr = do_brk(start, end - start);
+		up_write(&current->mm->mmap_sem);
+		if (BAD_ADDR(addr))
+			return addr;
+	}
+	return 0;
 }
 
 /*
@@ -108,7 +116,7 @@ static int aout_core_dump(long signr, struct pt_regs * regs, struct file *file)
 	set_fs(KERNEL_DS);
 	has_dumped = 1;
 	current->flags |= PF_DUMPCORE;
-       	strncpy(dump.u_comm, current->comm, sizeof(current->comm));
+       	strncpy(dump.u_comm, current->comm, sizeof(dump.u_comm));
 #ifndef __sparc__
 	dump.u_ar0 = (void *)(((unsigned long)(&dump.regs)) - ((unsigned long)(&dump)));
 #endif
@@ -119,22 +127,22 @@ static int aout_core_dump(long signr, struct pt_regs * regs, struct file *file)
    if we wrote the stack, but not the data area.  */
 #ifdef __sparc__
 	if ((dump.u_dsize+dump.u_ssize) >
-	    current->rlim[RLIMIT_CORE].rlim_cur)
+	    current->signal->rlim[RLIMIT_CORE].rlim_cur)
 		dump.u_dsize = 0;
 #else
 	if ((dump.u_dsize+dump.u_ssize+1) * PAGE_SIZE >
-	    current->rlim[RLIMIT_CORE].rlim_cur)
+	    current->signal->rlim[RLIMIT_CORE].rlim_cur)
 		dump.u_dsize = 0;
 #endif
 
 /* Make sure we have enough room to write the stack and data areas. */
 #ifdef __sparc__
 	if ((dump.u_ssize) >
-	    current->rlim[RLIMIT_CORE].rlim_cur)
+	    current->signal->rlim[RLIMIT_CORE].rlim_cur)
 		dump.u_ssize = 0;
 #else
 	if ((dump.u_ssize+1) * PAGE_SIZE >
-	    current->rlim[RLIMIT_CORE].rlim_cur)
+	    current->signal->rlim[RLIMIT_CORE].rlim_cur)
 		dump.u_ssize = 0;
 #endif
 
@@ -279,7 +287,7 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	 * size limits imposed on them by creating programs with large
 	 * arrays in the data or bss.
 	 */
-	rlim = current->rlim[RLIMIT_DATA].rlim_cur;
+	rlim = current->signal->rlim[RLIMIT_DATA].rlim_cur;
 	if (rlim >= RLIM_INFINITY)
 		rlim = ~0;
 	if (ex.a_data + ex.a_bss > rlim)
@@ -320,10 +328,14 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		loff_t pos = fd_offset;
 		/* Fuck me plenty... */
 		/* <AOL></AOL> */
+		down_write(&current->mm->mmap_sem);	
 		error = do_brk(N_TXTADDR(ex), ex.a_text);
+		up_write(&current->mm->mmap_sem);
 		bprm->file->f_op->read(bprm->file, (char *) N_TXTADDR(ex),
 			  ex.a_text, &pos);
+		down_write(&current->mm->mmap_sem);
 		error = do_brk(N_DATADDR(ex), ex.a_data);
+		up_write(&current->mm->mmap_sem);
 		bprm->file->f_op->read(bprm->file, (char *) N_DATADDR(ex),
 			  ex.a_data, &pos);
 		goto beyond_if;
@@ -343,8 +355,9 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		pos = 32;
 		map_size = ex.a_text+ex.a_data;
 #endif
-
+		down_write(&current->mm->mmap_sem);
 		error = do_brk(text_addr & PAGE_MASK, map_size);
+		up_write(&current->mm->mmap_sem);
 		if (error != (text_addr & PAGE_MASK)) {
 			send_sig(SIGKILL, current, 0);
 			return error;
@@ -379,7 +392,9 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 		if (!bprm->file->f_op->mmap||((fd_offset & ~PAGE_MASK) != 0)) {
 			loff_t pos = fd_offset;
+			down_write(&current->mm->mmap_sem);
 			do_brk(N_TXTADDR(ex), ex.a_text+ex.a_data);
+			up_write(&current->mm->mmap_sem);
 			bprm->file->f_op->read(bprm->file,
 					(char __user *)N_TXTADDR(ex),
 					ex.a_text+ex.a_data, &pos);
@@ -415,9 +430,13 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 beyond_if:
 	set_binfmt(&aout_format);
 
-	set_brk(current->mm->start_brk, current->mm->brk);
+	retval = set_brk(current->mm->start_brk, current->mm->brk);
+	if (retval < 0) {
+		send_sig(SIGKILL, current, 0);
+		return retval;
+	}
 
-	retval = setup_arg_pages(bprm, EXSTACK_DEFAULT);
+	retval = setup_arg_pages(bprm, STACK_TOP, EXSTACK_DEFAULT);
 	if (retval < 0) { 
 		/* Someone check-me: is this error path enough? */ 
 		send_sig(SIGKILL, current, 0); 
@@ -480,8 +499,9 @@ static int load_aout_library(struct file *file)
 			       file->f_dentry->d_name.name);
 			error_time = jiffies;
 		}
-
+		down_write(&current->mm->mmap_sem);
 		do_brk(start_addr, ex.a_text + ex.a_data + ex.a_bss);
+		up_write(&current->mm->mmap_sem);
 		
 		file->f_op->read(file, (char __user *)start_addr,
 			ex.a_text + ex.a_data, &pos);
@@ -505,7 +525,9 @@ static int load_aout_library(struct file *file)
 	len = PAGE_ALIGN(ex.a_text + ex.a_data);
 	bss = ex.a_text + ex.a_data + ex.a_bss;
 	if (bss > len) {
+		down_write(&current->mm->mmap_sem);
 		error = do_brk(start_addr + len, bss - len);
+		up_write(&current->mm->mmap_sem);
 		retval = error;
 		if (error != start_addr + len)
 			goto out;

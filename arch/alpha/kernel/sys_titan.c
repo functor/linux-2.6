@@ -19,12 +19,12 @@
 #include <linux/sched.h>
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/bitops.h>
 
 #include <asm/ptrace.h>
 #include <asm/system.h>
 #include <asm/dma.h>
 #include <asm/irq.h>
-#include <asm/bitops.h>
 #include <asm/mmu_context.h>
 #include <asm/io.h>
 #include <asm/pgtable.h>
@@ -56,7 +56,7 @@ static unsigned long titan_cached_irq_mask;
 /*
  * Need SMP-safe access to interrupt CSRs
  */
-spinlock_t titan_irq_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(titan_irq_lock);
 
 static void
 titan_update_irq_hw(unsigned long mask)

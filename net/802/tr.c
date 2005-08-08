@@ -66,7 +66,7 @@ struct rif_cache_s {
  
 static struct rif_cache_s *rif_table[RIF_TABLE_SIZE];
 
-static spinlock_t rif_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(rif_lock);
 
 
 /*
@@ -98,8 +98,9 @@ static inline unsigned long rif_hash(const unsigned char *addr)
  *	makes this a little more exciting than on ethernet.
  */
  
-int tr_header(struct sk_buff *skb, struct net_device *dev, unsigned short type,
-              void *daddr, void *saddr, unsigned len) 
+static int tr_header(struct sk_buff *skb, struct net_device *dev,
+		     unsigned short type,
+		     void *daddr, void *saddr, unsigned len) 
 {
 	struct trh_hdr *trh;
 	int hdr_len;
@@ -153,7 +154,7 @@ int tr_header(struct sk_buff *skb, struct net_device *dev, unsigned short type,
  *	can now send the packet.
  */
  
-int tr_rebuild_header(struct sk_buff *skb) 
+static int tr_rebuild_header(struct sk_buff *skb) 
 {
 	struct trh_hdr *trh=(struct trh_hdr *)skb->data;
 	struct trllc *trllc=(struct trllc *)(skb->data+sizeof(struct trh_hdr));
@@ -583,6 +584,43 @@ static struct file_operations rif_seq_fops = {
 
 #endif
 
+static void tr_setup(struct net_device *dev)
+{
+	/*
+	 *	Configure and register
+	 */
+	
+	dev->hard_header	= tr_header;
+	dev->rebuild_header	= tr_rebuild_header;
+
+	dev->type		= ARPHRD_IEEE802_TR;
+	dev->hard_header_len	= TR_HLEN;
+	dev->mtu		= 2000;
+	dev->addr_len		= TR_ALEN;
+	dev->tx_queue_len	= 100;	/* Long queues on tr */
+	
+	memset(dev->broadcast,0xFF, TR_ALEN);
+
+	/* New-style flags. */
+	dev->flags		= IFF_BROADCAST | IFF_MULTICAST ;
+}
+
+/**
+ * alloc_trdev - Register token ring device
+ * @sizeof_priv: Size of additional driver-private structure to be allocated
+ *	for this token ring device
+ *
+ * Fill in the fields of the device structure with token ring-generic values.
+ *
+ * Constructs a new net device, complete with a private data area of
+ * size @sizeof_priv.  A 32-byte (not bit) alignment is enforced for
+ * this private data area.
+ */
+struct net_device *alloc_trdev(int sizeof_priv)
+{
+	return alloc_netdev(sizeof_priv, "tr%d", tr_setup);
+}
+
 /*
  *	Called during bootup.  We don't actually have to initialise
  *	too much for this.
@@ -604,3 +642,4 @@ module_init(rif_init);
 
 EXPORT_SYMBOL(tr_source_route);
 EXPORT_SYMBOL(tr_type_trans);
+EXPORT_SYMBOL(alloc_trdev);

@@ -3,7 +3,7 @@
  *
  *  Virtual Server: Context Namespace Support
  *
- *  Copyright (C) 2003-2004  Herbert Pötzl
+ *  Copyright (C) 2003-2005  Herbert Pötzl
  *
  *  V0.01  broken out from context.c 0.07
  *  V0.02  added task locking for namespace
@@ -12,60 +12,15 @@
 
 #include <linux/config.h>
 #include <linux/utsname.h>
-#include <linux/vserver/namespace.h>
-#include <linux/vs_base.h>
+#include <linux/sched.h>
 #include <linux/vs_context.h>
-#include <linux/namespace.h>
+#include <linux/vserver/namespace.h>
 #include <linux/dcache.h>
+#include <linux/mount.h>
 #include <linux/fs.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>
-
-
-int vx_check_vfsmount(struct vx_info *vxi, struct vfsmount *mnt)
-{
-	struct vfsmount *root_mnt, *altroot_mnt;
-	struct dentry *root, *altroot, *point;
-	int r1, r2, s1, s2, ret = 0;
-
-	if (!vxi || !mnt)
-		return 1;
-
-	spin_lock(&dcache_lock);
-	altroot_mnt = current->fs->rootmnt;
-	altroot = current->fs->root;
-	point = altroot;
-
-	if (vxi->vx_fs) {
-		root_mnt = vxi->vx_fs->rootmnt;
-		root = vxi->vx_fs->root;
-	} else {
-		root_mnt = altroot_mnt;
-		root = altroot;
-	}
-	/* printk("··· %p:%p/%p:%p ",
-		root_mnt, root, altroot_mnt, altroot);	*/
-
-	while ((mnt != mnt->mnt_parent) &&
-		(mnt != root_mnt) && (mnt != altroot_mnt)) {
-		point = mnt->mnt_mountpoint;
-		mnt = mnt->mnt_parent;
-	}
-
-	r1 = (mnt == root_mnt);
-	s1 = is_subdir(point, root);
-	r2 = (mnt == altroot_mnt);
-	s2 = is_subdir(point, altroot);
-
-	ret = (((mnt == root_mnt) && is_subdir(point, root)) ||
-		((mnt == altroot_mnt) && is_subdir(point, altroot)));
-	/* printk("··· for %p:%p -> %d:%d/%d:%d = %d\n",
-		mnt, point, r1, s1, r2, s2, ret);	*/
-	spin_unlock(&dcache_lock);
-
-	return (r2 && s2);
-}
 
 
 /* virtual host info names */

@@ -298,8 +298,12 @@
 #define __NR_mq_notify		277
 #define __NR_mq_getsetattr	278
 #define __NR_waitid		279
+/*#define __NR_sys_setaltroot	280 available (was setaltroot) */
+#define __NR_add_key		281
+#define __NR_request_key	282
+#define __NR_keyctl		283
 
-/* WARNING: You MAY NOT add syscall numbers larger than 282, since
+/* WARNING: You MAY NOT add syscall numbers larger than 283, since
  *          all of the syscall tables in the Sparc kernel are
  *          sized to have 283 entries (starting at zero).  Therefore
  *          find a free slot in the 0-282 range.
@@ -485,6 +489,7 @@ asmlinkage long sys_rt_sigaction(int sig,
 #define __ARCH_WANT_SYS_SGETMASK
 #define __ARCH_WANT_SYS_SIGNAL
 #define __ARCH_WANT_SYS_TIME
+#define __ARCH_WANT_COMPAT_SYS_TIME
 #define __ARCH_WANT_SYS_UTIME
 #define __ARCH_WANT_SYS_WAITPID
 #define __ARCH_WANT_SYS_SOCKETCALL

@@ -97,7 +97,7 @@ MODULE_VERSION(EFIVARS_VERSION);
  * efi.get_next_variable() is only called from efivars_init(),
  * which is protected by the BKL, so that path is safe.
  */
-static spinlock_t efivars_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(efivars_lock);
 static LIST_HEAD(efivar_list);
 
 /*
@@ -640,7 +640,7 @@ efivar_create_sysfs_entry(unsigned long variable_name_size,
 	*(short_name + strlen(short_name)) = '-';
 	efi_guid_unparse(vendor_guid, short_name + strlen(short_name));
 
-	kobject_set_name(&new_efivar->kobj, short_name);
+	kobject_set_name(&new_efivar->kobj, "%s", short_name);
 	kobj_set_kset_s(new_efivar, vars_subsys);
 	kobject_register(&new_efivar->kobj);
 

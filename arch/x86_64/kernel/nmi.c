@@ -24,6 +24,7 @@
 #include <linux/module.h>
 #include <linux/sysdev.h>
 #include <linux/nmi.h>
+#include <linux/sysctl.h>
 
 #include <asm/smp.h>
 #include <asm/mtrr.h>
@@ -42,7 +43,7 @@
  * This is maintained separately from nmi_active because the NMI
  * watchdog may also be driven from the I/O APIC timer.
  */
-static spinlock_t lapic_nmi_owner_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(lapic_nmi_owner_lock);
 static unsigned int lapic_nmi_owner;
 #define LAPIC_NMI_WATCHDOG	(1<<0)
 #define LAPIC_NMI_RESERVED	(1<<1)
@@ -54,7 +55,7 @@ static unsigned int lapic_nmi_owner;
  * -1: the lapic NMI watchdog is disabled, but can be enabled
  */
 int nmi_active;		/* oprofile uses this */
-static int panic_on_timeout;
+int panic_on_timeout;
 
 unsigned int nmi_watchdog = NMI_DEFAULT;
 static unsigned int nmi_hz = HZ;
@@ -129,8 +130,12 @@ int __init check_nmi_watchdog (void)
 	mdelay((10*1000)/nmi_hz); // wait 10 ticks
 
 	for (cpu = 0; cpu < NR_CPUS; cpu++) {
-		if (!cpu_online(cpu))
+#ifdef CONFIG_SMP
+		/* Check cpu_callin_map here because that is set
+		   after the timer is started. */
+		if (!cpu_isset(cpu, cpu_callin_map))
 			continue;
+#endif
 		if (cpu_pda[cpu].__nmi_count - counts[cpu] <= 5) {
 			printk("CPU#%d: NMI appears to be stuck (%d)!\n", 
 			       cpu,
@@ -344,8 +349,6 @@ void setup_apic_nmi_watchdog(void)
 	nmi_active = 1;
 }
 
-static spinlock_t nmi_print_lock = SPIN_LOCK_UNLOCKED;
-
 /*
  * the best way to detect whether a CPU has a 'hard lockup' problem
  * is to check it's local APIC timer IRQ counts. If they are not
@@ -395,21 +398,7 @@ void nmi_watchdog_tick (struct pt_regs * regs, unsigned reason)
 				alert_counter[cpu] = 0; 
 				return;
 			} 
-			spin_lock(&nmi_print_lock);
-			/*
-			 * We are in trouble anyway, lets at least try
-			 * to get a message out.
-			 */
-			bust_spinlocks(1);
-			printk("NMI Watchdog detected LOCKUP on CPU%d, registers:\n", cpu);
-			show_registers(regs);
-			if (panic_on_timeout || panic_on_oops)
-				panic("nmi watchdog");
-			printk("console shuts up ...\n");
-			console_silent();
-			spin_unlock(&nmi_print_lock);
-			bust_spinlocks(0);
-			do_exit(SIGSEGV);
+			die_nmi("NMI Watchdog detected LOCKUP on CPU%d", regs);
 		}
 	} else {
 		last_irq_sums[cpu] = sum;
@@ -446,6 +435,49 @@ void unset_nmi_callback(void)
 {
 	nmi_callback = dummy_nmi_callback;
 }
+
+#ifdef CONFIG_SYSCTL
+
+static int unknown_nmi_panic_callback(struct pt_regs *regs, int cpu)
+{
+	unsigned char reason = get_nmi_reason();
+	char buf[64];
+
+	if (!(reason & 0xc0)) {
+		sprintf(buf, "NMI received for unknown reason %02x\n", reason);
+		die_nmi(buf,regs);
+	}
+	return 0;
+}
+
+/*
+ * proc handler for /proc/sys/kernel/unknown_nmi_panic
+ */
+int proc_unknown_nmi_panic(struct ctl_table *table, int write, struct file *file,
+			void __user *buffer, size_t *length, loff_t *ppos)
+{
+	int old_state;
+
+	old_state = unknown_nmi_panic;
+	proc_dointvec(table, write, file, buffer, length, ppos);
+	if (!!old_state == !!unknown_nmi_panic)
+		return 0;
+
+	if (unknown_nmi_panic) {
+		if (reserve_lapic_nmi() < 0) {
+			unknown_nmi_panic = 0;
+			return -EBUSY;
+		} else {
+			set_nmi_callback(unknown_nmi_panic_callback);
+		}
+	} else {
+		release_lapic_nmi();
+		unset_nmi_callback();
+	}
+	return 0;
+}
+
+#endif
 
 EXPORT_SYMBOL(nmi_active);
 EXPORT_SYMBOL(nmi_watchdog);

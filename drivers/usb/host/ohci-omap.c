@@ -42,21 +42,7 @@ extern int ocpi_enable(void);
 static int omap_ohci_clock_power(int on)
 {
 	if (on) {
-		if (cpu_is_omap1510()) {
-			/* Use DPLL, not APLL */
-			omap_writel(omap_readl(ULPD_APLL_CTRL) & ~APLL_NDPLL_SWITCH,
-			       ULPD_APLL_CTRL);
-
-			/* Enable DPLL */
-			omap_writel(omap_readl(ULPD_DPLL_CTRL) | DPLL_PLL_ENABLE,
-			       ULPD_DPLL_CTRL);
-
-			/* Software request for USB 48MHz clock */
-			omap_writel(omap_readl(ULPD_SOFT_REQ) | SOFT_REQ_REG_REQ,
-			       ULPD_SOFT_REQ);
-
-			while (!(omap_readl(ULPD_DPLL_CTRL) & DPLL_LOCK));
-		}
+		/* for 1510, 48MHz DPLL is set up in usb init */
 
 		if (cpu_is_omap16xx()) {
 			/* Enable OHCI */
@@ -98,14 +84,16 @@ static int omap_ohci_transceiver_power(int on)
 {
 	if (on) {
 		if (machine_is_omap_innovator() && cpu_is_omap1510())
-			fpga_write(fpga_read(INNOVATOR_FPGA_CAM_USB_CONTROL) | 0x20, 
+			fpga_write(fpga_read(INNOVATOR_FPGA_CAM_USB_CONTROL)
+				| ((1 << 5/*usb1*/) | (1 << 3/*usb2*/)), 
 			       INNOVATOR_FPGA_CAM_USB_CONTROL);
 		else if (machine_is_omap_osk()) {
 			/* FIXME: GPIO1 -> 1 on the TPS65010 I2C chip */
 		}
 	} else {
 		if (machine_is_omap_innovator() && cpu_is_omap1510())
-			fpga_write(fpga_read(INNOVATOR_FPGA_CAM_USB_CONTROL) & ~0x20, 
+			fpga_write(fpga_read(INNOVATOR_FPGA_CAM_USB_CONTROL)
+				& ~((1 << 5/*usb1*/) | (1 << 3/*usb2*/)), 
 			       INNOVATOR_FPGA_CAM_USB_CONTROL);
 		else if (machine_is_omap_osk()) {
 			/* FIXME: GPIO1 -> 0 on the TPS65010 I2C chip */
@@ -169,7 +157,7 @@ static int omap_1510_local_bus_init(void)
 
 static void start_hnp(struct ohci_hcd *ohci)
 {
-	const unsigned	port = ohci->hcd.self.otg_port - 1;
+	const unsigned	port = ohci_to_hcd(ohci)->self.otg_port - 1;
 	unsigned long	flags;
 
 	otg_start_hnp(ohci->transceiver);
@@ -193,7 +181,7 @@ static int omap_start_hc(struct ohci_hcd *ohci, struct platform_device *pdev)
 	dev_dbg(&pdev->dev, "starting USB Controller\n");
 
 	if (config->otg) {
-		ohci->hcd.self.otg_port = config->otg;
+		ohci_to_hcd(ohci)->self.otg_port = config->otg;
 		/* default/minimum OTG power budget:  8 mA */
 		ohci->power_budget = 8;
 	}
@@ -210,7 +198,7 @@ static int omap_start_hc(struct ohci_hcd *ohci, struct platform_device *pdev)
 		ohci->transceiver = otg_get_transceiver();
 		if (ohci->transceiver) {
 			int	status = otg_set_host(ohci->transceiver,
-						&ohci->hcd.self);
+						&ohci_to_hcd(ohci)->self);
 			dev_dbg(&pdev->dev, "init %s transceiver, status %d\n",
 					ohci->transceiver->label, status);
 			if (status) {
@@ -305,7 +293,7 @@ int usb_hcd_omap_probe (const struct hc_driver *driver,
 		return -EBUSY;
 	}
 
-	hcd = driver->hcd_alloc ();
+	hcd = usb_create_hcd (driver);
 	if (hcd == NULL){
 		dev_dbg(&pdev->dev, "hcd_alloc failed\n");
 		retval = -ENOMEM;
@@ -313,9 +301,8 @@ int usb_hcd_omap_probe (const struct hc_driver *driver,
 	}
 	dev_set_drvdata(&pdev->dev, hcd);
 	ohci = hcd_to_ohci(hcd);
+	ohci_hcd_init(ohci);
 
-	hcd->driver = (struct hc_driver *) driver;
-	hcd->description = driver->description;
 	hcd->irq = pdev->resource[1].start;
 	hcd->regs = (void *)pdev->resource[0].start;
 	hcd->self.controller = &pdev->dev;
@@ -327,26 +314,20 @@ int usb_hcd_omap_probe (const struct hc_driver *driver,
 	retval = hcd_buffer_create (hcd);
 	if (retval != 0) {
 		dev_dbg(&pdev->dev, "pool alloc fail\n");
-		goto err1;
+		goto err2;
 	}
 
 	retval = request_irq (hcd->irq, usb_hcd_irq, 
-			      SA_INTERRUPT, hcd->description, hcd);
+			      SA_INTERRUPT, hcd->driver->description, hcd);
 	if (retval != 0) {
 		dev_dbg(&pdev->dev, "request_irq failed\n");
 		retval = -EBUSY;
-		goto err2;
+		goto err3;
 	}
 
 	dev_info(&pdev->dev, "at 0x%p, irq %d\n", hcd->regs, hcd->irq);
 
-	usb_bus_init (&hcd->self);
-	hcd->self.op = &usb_hcd_operations;
-	hcd->self.hcpriv = (void *) hcd;
 	hcd->self.bus_name = pdev->dev.bus_id;
-	hcd->product_desc = "OMAP OHCI";
-
-	INIT_LIST_HEAD (&hcd->dev_list);
 	usb_register_bus (&hcd->self);
 
 	if ((retval = driver->start (hcd)) < 0) 
@@ -357,17 +338,17 @@ int usb_hcd_omap_probe (const struct hc_driver *driver,
 
 	return 0;
 
- err2:
+ err3:
 	hcd_buffer_destroy (hcd);
-	if (hcd)
-		driver->hcd_free(hcd);
+ err2:
+	dev_set_drvdata(&pdev->dev, NULL);
+	usb_put_hcd(hcd);
  err1:
 	omap_stop_hc(pdev);
 
 	release_mem_region(pdev->resource[0].start, 
 			   pdev->resource[0].end - pdev->resource[0].start + 1);
 
-	dev_set_drvdata(&pdev->dev, 0);
 	return retval;
 }
 
@@ -387,8 +368,6 @@ int usb_hcd_omap_probe (const struct hc_driver *driver,
  */
 void usb_hcd_omap_remove (struct usb_hcd *hcd, struct platform_device *pdev)
 {
-	void *base;
-
 	dev_info(&pdev->dev, "remove: state %x\n", hcd->state);
 
 	if (in_interrupt ())
@@ -410,9 +389,6 @@ void usb_hcd_omap_remove (struct usb_hcd *hcd, struct platform_device *pdev)
 
 	usb_deregister_bus (&hcd->self);
 
-	base = hcd->regs;
-	hcd->driver->hcd_free (hcd);
-
 	omap_stop_hc(pdev);
 
 	release_mem_region(pdev->resource[0].start, 
@@ -428,40 +404,18 @@ ohci_omap_start (struct usb_hcd *hcd)
 	struct ohci_hcd	*ohci = hcd_to_ohci (hcd);
 	int		ret;
 
-	config = hcd->self.controller->platform_data;
-	ohci->hcca = dma_alloc_coherent (hcd->self.controller,
-			sizeof *ohci->hcca, &ohci->hcca_dma, 0);
-	if (!ohci->hcca)
-		return -ENOMEM;
-
-        memset (ohci->hcca, 0, sizeof (struct ohci_hcca));
-	if ((ret = ohci_mem_init (ohci)) < 0) {
-		ohci_stop (hcd);
+	if ((ret = ohci_init(ohci)) < 0)
 		return ret;
-	}
-	ohci->regs = hcd->regs;
 
+	config = hcd->self.controller->platform_data;
 	if (config->otg || config->rwc)
 		writel(OHCI_CTRL_RWC, &ohci->regs->control);
 
-	if (hc_reset (ohci) < 0) {
+	if ((ret = ohci_run (ohci)) < 0) {
+		err ("can't start %s", hcd->self.bus_name);
 		ohci_stop (hcd);
-		return -ENODEV;
+		return ret;
 	}
-
-	if (hc_start (ohci) < 0) {
-		err ("can't start %s", ohci->hcd.self.bus_name);
-		ohci_stop (hcd);
-		return -EBUSY;
-	}
-	if (ohci->power_budget)
-		hub_set_power_budget(ohci->hcd.self.root_hub,
-					ohci->power_budget);
-	create_debug_files (ohci);
-
-#ifdef	DEBUG
-	ohci_dump (ohci, 1);
-#endif
 	return 0;
 }
 
@@ -469,6 +423,8 @@ ohci_omap_start (struct usb_hcd *hcd)
 
 static const struct hc_driver ohci_omap_hc_driver = {
 	.description =		hcd_name,
+	.product_desc =		"OMAP OHCI",
+	.hcd_priv_size =	sizeof(struct ohci_hcd),
 
 	/*
 	 * generic hardware linkage
@@ -481,12 +437,6 @@ static const struct hc_driver ohci_omap_hc_driver = {
 	 */
 	.start =		ohci_omap_start,
 	.stop =			ohci_stop,
-
-	/*
-	 * memory lifecycle (except per-request)
-	 */
-	.hcd_alloc =		ohci_hcd_alloc,
-	.hcd_free =		ohci_hcd_free,
 
 	/*
 	 * managing i/o requests and associated device resources
@@ -553,19 +503,20 @@ static int ohci_omap_suspend(struct device *dev, u32 state, u32 level)
 		return 0;
 
 	dev_dbg(dev, "suspend to %d\n", state);
-	down(&ohci->hcd.self.root_hub->serialize);
-	status = ohci_hub_suspend(&ohci->hcd);
+	down(&ohci_to_hcd(ohci)->self.root_hub->serialize);
+	status = ohci_hub_suspend(ohci_to_hcd(ohci));
 	if (status == 0) {
 		if (state >= 4) {
 			/* power off + reset */
 			OTG_SYSCON_2_REG &= ~UHOST_EN;
-			ohci->hcd.self.root_hub->state = USB_STATE_SUSPENDED;
+			ohci_to_hcd(ohci)->self.root_hub->state =
+					USB_STATE_SUSPENDED;
 			state = 4;
 		}
-		ohci->hcd.state = HCD_STATE_SUSPENDED;
+		ohci_to_hcd(ohci)->state = HCD_STATE_SUSPENDED;
 		dev->power.power_state = state;
 	}
-	up(&ohci->hcd.self.root_hub->serialize);
+	up(&ohci_to_hcd(ohci)->self.root_hub->serialize);
 	return status;
 }
 
@@ -587,11 +538,11 @@ static int ohci_omap_resume(struct device *dev, u32 level)
 		dev_dbg(dev, "resume from %d\n", dev->power.power_state);
 #ifdef	CONFIG_USB_SUSPEND
 		/* get extra cleanup even if remote wakeup isn't in use */
-		status = usb_resume_device(ohci->hcd.self.root_hub);
+		status = usb_resume_device(ohci_to_hcd(ohci)->self.root_hub);
 #else
-		down(&ohci->hcd.self.root_hub->serialize);
-		status = ohci_hub_resume(&ohci->hcd);
-		up(&ohci->hcd.self.root_hub->serialize);
+		down(&ohci_to_hcd(ohci)->self.root_hub->serialize);
+		status = ohci_hub_resume(ohci_to_hcd(ohci));
+		up(&ohci_to_hcd(ohci)->self.root_hub->serialize);
 #endif
 		if (status == 0)
 			dev->power.power_state = 0;

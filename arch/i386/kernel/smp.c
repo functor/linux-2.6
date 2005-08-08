@@ -244,7 +244,7 @@ inline void send_IPI_mask_sequence(cpumask_t mask, int vector)
 static cpumask_t flush_cpumask;
 static struct mm_struct * flush_mm;
 static unsigned long flush_va;
-static spinlock_t tlbstate_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(tlbstate_lock);
 #define FLUSH_ALL	0xffffffff
 
 /*
@@ -308,7 +308,7 @@ static inline void leave_mm (unsigned long cpu)
  * 2) Leave the mm if we are in the lazy tlb mode.
  */
 
-asmlinkage void smp_invalidate_interrupt (void)
+fastcall void smp_invalidate_interrupt(struct pt_regs *regs)
 {
 	unsigned long cpu;
 
@@ -481,7 +481,7 @@ void smp_send_reschedule(int cpu)
  * Structure and data for smp_call_function(). This is designed to minimise
  * static memory requirements. It also looks cleaner.
  */
-static spinlock_t call_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(call_lock);
 
 struct call_data_struct {
 	void (*func) (void *info);
@@ -538,11 +538,11 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 
 	/* Wait for response */
 	while (atomic_read(&data.started) != cpus)
-		barrier();
+		cpu_relax();
 
 	if (wait)
 		while (atomic_read(&data.finished) != cpus)
-			barrier();
+			cpu_relax();
 	spin_unlock(&call_lock);
 
 	return 0;
@@ -579,12 +579,12 @@ void smp_send_stop(void)
  * all the work is done automatically when
  * we return from the interrupt.
  */
-asmlinkage void smp_reschedule_interrupt(void)
+fastcall void smp_reschedule_interrupt(struct pt_regs *regs)
 {
 	ack_APIC_irq();
 }
 
-asmlinkage void smp_call_function_interrupt(void)
+fastcall void smp_call_function_interrupt(struct pt_regs *regs)
 {
 	void (*func) (void *info) = call_data->func;
 	void *info = call_data->info;

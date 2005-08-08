@@ -50,9 +50,7 @@ get_transaction(journal_t *journal, transaction_t *transaction)
 	transaction->t_state = T_RUNNING;
 	transaction->t_tid = journal->j_transaction_sequence++;
 	transaction->t_expires = jiffies + journal->j_commit_interval;
-	INIT_LIST_HEAD(&transaction->t_jcb);
 	spin_lock_init(&transaction->t_handle_lock);
-	spin_lock_init(&transaction->t_jcb_lock);
 
 	/* Set up the commit timer for the new transaction. */
 	journal->j_commit_timer->expires = transaction->t_expires;
@@ -243,7 +241,6 @@ static handle_t *new_handle(int nblocks)
 	memset(handle, 0, sizeof(*handle));
 	handle->h_buffer_credits = nblocks;
 	handle->h_ref = 1;
-	INIT_LIST_HEAD(&handle->h_jcb);
 
 	return handle;
 }
@@ -633,21 +630,22 @@ repeat:
 		 * disk then we cannot do copy-out here. */
 
 		if (jh->b_jlist == BJ_Shadow) {
+			DEFINE_WAIT_BIT(wait, &bh->b_state, BH_Unshadow);
 			wait_queue_head_t *wqh;
-			DEFINE_WAIT(wait);
+
+			wqh = bit_waitqueue(&bh->b_state, BH_Unshadow);
 
 			JBUFFER_TRACE(jh, "on shadow: sleep");
 			jbd_unlock_bh_state(bh);
 			/* commit wakes up all shadow buffers after IO */
-			wqh = bh_waitq_head(bh);
 			for ( ; ; ) {
-				prepare_to_wait(wqh, &wait,
+				prepare_to_wait(wqh, &wait.wait,
 						TASK_UNINTERRUPTIBLE);
 				if (jh->b_jlist != BJ_Shadow)
 					break;
 				schedule();
 			}
-			finish_wait(wqh, &wait);
+			finish_wait(wqh, &wait.wait);
 			goto repeat;
 		}
 
@@ -1200,11 +1198,12 @@ journal_release_buffer(handle_t *handle, struct buffer_head *bh, int credits)
  * Allow this call even if the handle has aborted --- it may be part of
  * the caller's cleanup after an abort.
  */
-void journal_forget(handle_t *handle, struct buffer_head *bh)
+int journal_forget (handle_t *handle, struct buffer_head *bh)
 {
 	transaction_t *transaction = handle->h_transaction;
 	journal_t *journal = transaction->t_journal;
 	struct journal_head *jh;
+	int err = 0;
 
 	BUFFER_TRACE(bh, "entry");
 
@@ -1214,6 +1213,14 @@ void journal_forget(handle_t *handle, struct buffer_head *bh)
 	if (!buffer_jbd(bh))
 		goto not_jbd;
 	jh = bh2jh(bh);
+
+	/* Critical error: attempting to delete a bitmap buffer, maybe?
+	 * Don't do any jbd operations, and return an error. */
+	if (!J_EXPECT_JH(jh, !jh->b_committed_data,
+			 "inconsistent data on disk")) {
+		err = -EIO;
+		goto not_jbd;
+	}
 
 	if (jh->b_transaction == handle->h_transaction) {
 		J_ASSERT_JH(jh, !jh->b_frozen_data);
@@ -1225,7 +1232,6 @@ void journal_forget(handle_t *handle, struct buffer_head *bh)
 		clear_buffer_jbddirty(bh);
 
 		JBUFFER_TRACE(jh, "belongs to current transaction: unfile");
-		J_ASSERT_JH(jh, !jh->b_committed_data);
 
 		__journal_unfile_buffer(jh);
 
@@ -1250,7 +1256,7 @@ void journal_forget(handle_t *handle, struct buffer_head *bh)
 				spin_unlock(&journal->j_list_lock);
 				jbd_unlock_bh_state(bh);
 				__bforget(bh);
-				return;
+				return 0;
 			}
 		}
 	} else if (jh->b_transaction) {
@@ -1272,37 +1278,7 @@ not_jbd:
 	spin_unlock(&journal->j_list_lock);
 	jbd_unlock_bh_state(bh);
 	__brelse(bh);
-	return;
-}
-
-/**
- * void journal_callback_set() -  Register a callback function for this handle.
- * @handle: handle to attach the callback to.
- * @func: function to callback.
- * @jcb:  structure with additional information required by func() , and
- *        some space for jbd internal information.
- * 
- * The function will be
- * called when the transaction that this handle is part of has been
- * committed to disk with the original callback data struct and the
- * error status of the journal as parameters.  There is no guarantee of
- * ordering between handles within a single transaction, nor between
- * callbacks registered on the same handle.
- *
- * The caller is responsible for allocating the journal_callback struct.
- * This is to allow the caller to add as much extra data to the callback
- * as needed, but reduce the overhead of multiple allocations.  The caller
- * allocated struct must start with a struct journal_callback at offset 0,
- * and has the caller-specific data afterwards.
- */
-void journal_callback_set(handle_t *handle,
-			void (*func)(struct journal_callback *jcb, int error),
-			struct journal_callback *jcb)
-{
-	spin_lock(&handle->h_transaction->t_jcb_lock);
-	list_add_tail(&jcb->jcb_list, &handle->h_jcb);
-	spin_unlock(&handle->h_transaction->t_jcb_lock);
-	jcb->jcb_func = func;
+	return err;
 }
 
 /**
@@ -1370,11 +1346,6 @@ int journal_stop(handle_t *handle)
 		if (journal->j_barrier_count)
 			wake_up(&journal->j_wait_transaction_locked);
 	}
-
-	/* Move callbacks from the handle to the transaction. */
-	spin_lock(&transaction->t_jcb_lock);
-	list_splice(&handle->h_jcb, &transaction->t_jcb);
-	spin_unlock(&transaction->t_jcb_lock);
 
 	/*
 	 * If the handle is marked SYNC, we need to set another commit
@@ -1804,10 +1775,10 @@ static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
 			JBUFFER_TRACE(jh, "checkpointed: add to BJ_Forget");
 			ret = __dispose_buffer(jh,
 					journal->j_running_transaction);
+			journal_put_journal_head(jh);
 			spin_unlock(&journal->j_list_lock);
 			jbd_unlock_bh_state(bh);
 			spin_unlock(&journal->j_state_lock);
-			journal_put_journal_head(jh);
 			return ret;
 		} else {
 			/* There is no currently-running transaction. So the
@@ -1818,10 +1789,10 @@ static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
 				JBUFFER_TRACE(jh, "give to committing trans");
 				ret = __dispose_buffer(jh,
 					journal->j_committing_transaction);
+				journal_put_journal_head(jh);
 				spin_unlock(&journal->j_list_lock);
 				jbd_unlock_bh_state(bh);
 				spin_unlock(&journal->j_state_lock);
-				journal_put_journal_head(jh);
 				return ret;
 			} else {
 				/* The orphan record's transaction has
@@ -1842,10 +1813,10 @@ static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
 					journal->j_running_transaction);
 			jh->b_next_transaction = NULL;
 		}
+		journal_put_journal_head(jh);
 		spin_unlock(&journal->j_list_lock);
 		jbd_unlock_bh_state(bh);
 		spin_unlock(&journal->j_state_lock);
-		journal_put_journal_head(jh);
 		return 0;
 	} else {
 		/* Good, the buffer belongs to the running transaction.

@@ -84,6 +84,7 @@ config EQUALIZER
 config TUN
 	tristate "Universal TUN/TAP device driver support"
 	depends on NETDEVICES
+	select CRC32
 	---help---
 	  TUN/TAP provides packet reception and transmission for user space
 	  programs.  It can be viewed as a simple Point-to-Point or Ethernet
@@ -288,7 +289,7 @@ config ZORRO8390
 
 config APNE
 	tristate "PCMCIA NE2000 support"
-	depends on NETDEVICES && AMIGA_PCMCIA
+	depends on NET_ETHERNET && AMIGA_PCMCIA
 	select CRC32
 	help
 	  If you have a PCMCIA NE2000 compatible adapter, say Y.  Otherwise,
@@ -299,7 +300,7 @@ config APNE
 
 config APOLLO_ELPLUS
 	tristate "Apollo 3c505 support"
-	depends on NETDEVICES && APOLLO
+	depends on NET_ETHERNET && APOLLO
 	help
 	  Say Y or M here if your Apollo has a 3Com 3c505 ISA Ethernet card.
 	  If you don't have one made for Apollos, you can use one from a PC,
@@ -308,7 +309,7 @@ config APOLLO_ELPLUS
 
 config MAC8390
 	bool "Macintosh NS 8390 based ethernet cards"
-	depends on NETDEVICES && MAC
+	depends on NET_ETHERNET && MAC
 	select CRC32
 	help
 	  If you want to include a driver to support Nubus or LC-PDS
@@ -318,7 +319,7 @@ config MAC8390
 
 config MAC89x0
 	tristate "Macintosh CS89x0 based ethernet cards"
-	depends on NETDEVICES && MAC && BROKEN
+	depends on NET_ETHERNET && MAC && BROKEN
 	---help---
 	  Support for CS89x0 chipset based Ethernet cards.  If you have a
 	  Nubus or LC-PDS network (Ethernet) card of this type, say Y and
@@ -331,7 +332,7 @@ config MAC89x0
 
 config MACSONIC
 	tristate "Macintosh SONIC based ethernet (onboard, NuBus, LC, CS)"
-	depends on NETDEVICES && MAC
+	depends on NET_ETHERNET && MAC
 	---help---
 	  Support for NatSemi SONIC based Ethernet devices.  This includes
 	  the onboard Ethernet in many Quadras as well as some LC-PDS,
@@ -345,7 +346,7 @@ config MACSONIC
 
 config MACMACE
 	bool "Macintosh (AV) onboard MACE ethernet (EXPERIMENTAL)"
-	depends on NETDEVICES && MAC && EXPERIMENTAL
+	depends on NET_ETHERNET && MAC && EXPERIMENTAL
 	select CRC32
 	help
 	  Support for the onboard AMD 79C940 MACE Ethernet controller used in
@@ -355,7 +356,7 @@ config MACMACE
 
 config MVME147_NET
 	tristate "MVME147 (Lance) Ethernet support"
-	depends on NETDEVICES && MVME147
+	depends on NET_ETHERNET && MVME147
 	select CRC32
 	help
 	  Support for the on-board Ethernet interface on the Motorola MVME147
@@ -365,7 +366,7 @@ config MVME147_NET
 
 config MVME16x_NET
 	tristate "MVME16x Ethernet support"
-	depends on NETDEVICES && MVME16x
+	depends on NET_ETHERNET && MVME16x
 	help
 	  This is the driver for the Ethernet interface on the Motorola
 	  MVME162, 166, 167, 172 and 177 boards.  Say Y here to include the
@@ -374,7 +375,7 @@ config MVME16x_NET
 
 config BVME6000_NET
 	tristate "BVME6000 Ethernet support"
-	depends on NETDEVICES && BVME6000
+	depends on NET_ETHERNET && BVME6000
 	help
 	  This is the driver for the Ethernet interface on BVME4000 and
 	  BVME6000 VME boards.  Say Y here to include the driver for this chip
@@ -383,7 +384,7 @@ config BVME6000_NET
 
 config ATARILANCE
 	tristate "Atari Lance support"
-	depends on NETDEVICES && ATARI
+	depends on NET_ETHERNET && ATARI
 	help
 	  Say Y to include support for several Atari Ethernet adapters based
 	  on the AMD Lance chipset: RieblCard (with or without battery), or
@@ -391,7 +392,7 @@ config ATARILANCE
 
 config ATARI_BIONET
 	tristate "BioNet-100 support"
-	depends on NETDEVICES && ATARI && ATARI_ACSI!=n && BROKEN
+	depends on NET_ETHERNET && ATARI && ATARI_ACSI && BROKEN
 	help
 	  Say Y to include support for BioData's BioNet-100 Ethernet adapter
 	  for the ACSI port. The driver works (has to work...) with a polled
@@ -399,7 +400,7 @@ config ATARI_BIONET
 
 config ATARI_PAMSNET
 	tristate "PAMsNet support"
-	depends on NETDEVICES && ATARI && ATARI_ACSI!=n && BROKEN
+	depends on NET_ETHERNET && ATARI && ATARI_ACSI && BROKEN
 	help
 	  Say Y to include support for the PAMsNet Ethernet adapter for the
 	  ACSI port ("ACSI node"). The driver works (has to work...) with a
@@ -407,7 +408,7 @@ config ATARI_PAMSNET
 
 config SUN3LANCE
 	tristate "Sun3/Sun3x on-board LANCE support"
-	depends on NETDEVICES && (SUN3 || SUN3X)
+	depends on NET_ETHERNET && (SUN3 || SUN3X)
 	help
 	  Most Sun3 and Sun3x motherboards (including the 3/50, 3/60 and 3/80)
 	  featured an AMD Lance 10Mbit Ethernet controller on board; say Y
@@ -420,7 +421,7 @@ config SUN3LANCE
 
 config SUN3_82586
 	tristate "Sun3 on-board Intel 82586 support"
-	depends on NETDEVICES && SUN3
+	depends on NET_ETHERNET && SUN3
 	help
 	  This driver enables support for the on-board Intel 82586 based
 	  Ethernet adapter found on Sun 3/1xx and 3/2xx motherboards.  Note
@@ -429,7 +430,7 @@ config SUN3_82586
 
 config HPLANCE
 	bool "HP on-board LANCE support"
-	depends on NETDEVICES && HP300
+	depends on NET_ETHERNET && DIO
 	select CRC32
 	help
 	  If you want to use the builtin "LANCE" Ethernet controller on an
@@ -691,6 +692,7 @@ config ELMC_II
 config VORTEX
 	tristate "3c590/3c900 series (592/595/597) \"Vortex/Boomerang\" support"
 	depends on NET_VENDOR_3COM && (PCI || EISA)
+	select MII
 	---help---
 	  This option enables driver support for a large number of 10mbps and
 	  10/100mbps EISA, PCI and PCMCIA 3Com network cards:
@@ -1179,37 +1181,38 @@ config IBMVETH
 	  be called ibmveth.
 
 config IBM_EMAC
-       tristate "IBM PPC4xx EMAC driver support"
-       depends on 4xx
-       ---help---
-       This driver supports the IBM PPC4xx EMAC family of on-chip
-       Ethernet controllers.
+	tristate "IBM PPC4xx EMAC driver support"
+	depends on 4xx
+	select CRC32
+	---help---
+	  This driver supports the IBM PPC4xx EMAC family of on-chip
+	  Ethernet controllers.
 
 config IBM_EMAC_ERRMSG
-       bool "Verbose error messages"
-       depends on IBM_EMAC
+	bool "Verbose error messages"
+	depends on IBM_EMAC
 
 config IBM_EMAC_RXB
-       int "Number of receive buffers"
-       depends on IBM_EMAC
-       default "128" if IBM_EMAC4
-       default "64"
+	int "Number of receive buffers"
+	depends on IBM_EMAC
+	default "128" if IBM_EMAC4
+	default "64"
 
 config IBM_EMAC_TXB
-       int "Number of transmit buffers"
-       depends on IBM_EMAC
-       default "128" if IBM_EMAC4
-       default "8"
+	int "Number of transmit buffers"
+	depends on IBM_EMAC
+	default "128" if IBM_EMAC4
+	default "8"
 
 config IBM_EMAC_FGAP
-       int "Frame gap"
-       depends on IBM_EMAC
-       default "8"
+	int "Frame gap"
+	depends on IBM_EMAC
+	default "8"
 
 config IBM_EMAC_SKBRES
-       int "Skb reserve amount"
-       depends on IBM_EMAC
-       default "0"
+	int "Skb reserve amount"
+	depends on IBM_EMAC
+	default "0"
 
 config NET_PCI
 	bool "EISA, VLB, PCI and on board controllers"
@@ -1398,84 +1401,25 @@ config EEPRO100
 	  will be called eepro100.
 
 
-config EEPRO100_PIO
-	bool "Use PIO instead of MMIO" if !X86_VISWS
-	depends on EEPRO100
-	default y if X86_VISWS
-	help
-	  This instructs the driver to use programmed I/O ports (PIO) instead
-	  of PCI shared memory (MMIO).  This can possibly solve some problems
-	  in case your mainboard has memory consistency issues.  If unsure,
-	  say N.
-
 config E100
 	tristate "Intel(R) PRO/100+ support"
 	depends on NET_PCI && PCI
 	select MII
 	---help---
-	  This driver supports Intel(R) PRO/100 family of adapters, which 
-	  includes:
-
-	  Controller  Adapter Name                       Board IDs
-	  ----------  ------------                       ---------
-
-	  82558       PRO/100+ PCI Adapter               668081-xxx, 
-	  689661-xxx
-	  82558       PRO/100+ Management Adapter        691334-xxx, 
-	  701738-xxx,
-	  721383-xxx
-	  82558       PRO/100+ Dual Port Server Adapter  714303-xxx, 
-	  711269-xxx, 
-	  A28276-xxx
-	  82558       PRO/100+ PCI Server Adapter        710550-xxx
-	  82550       PRO/100 S Server Adapter           752438-xxx
-	  82559                                          A56831-xxx, 
-	  A10563-xxx,
-	  A12171-xxx, 
-	  A12321-xxx, 
-	  A12320-xxx, 
-	  A12170-xxx
-	  748568-xxx
-	  748565-xxx
-	  82550       PRO/100 S Desktop Adapter          751767-xxx
-	  82559                                          748592-xxx, 
-	  A12167-xxx, 
-	  A12318-xxx, 
-	  A12317-xxx, 
-	  A12165-xxx,
-	  748569-xxx 
-	  82559       PRO/100+ Server Adapter            729757-xxx
-	  82559       PRO/100 S Management Adapter       748566-xxx, 
-	  748564-xxx
-	  82550       PRO/100 S Dual Port Server Adapter A56831-xxx
-	  82551       PRO/100 M Desktop Adapter          A80897-xxx
-	  PRO/100 S Advanced Management Adapter 
-	  747842-xxx, 
-	  745171-xxx
-	  CNR         PRO/100 VE Desktop Adapter         A10386-xxx, 
-	  A10725-xxx, 
-	  A23801-xxx, 
-	  A19716-xxx
-	  PRO/100 VM Desktop Adapter         A14323-xxx, 
-	  A19725-xxx, 
-	  A23801-xxx, 
-	  A22220-xxx, 
-	  A23796-xxx
-
-
+	  This driver supports Intel(R) PRO/100 family of adapters.
 	  To verify that your adapter is supported, find the board ID number 
 	  on the adapter. Look for a label that has a barcode and a number 
-	  in the format 123456-001 (six digits hyphen three digits). Match 
-	  this to the list of numbers above.
+	  in the format 123456-001 (six digits hyphen three digits). 
 
-	  For more information on how to identify your adapter, go to the 
-	  Adapter & Driver ID Guide at:
+	  Use the above information and the Adapter & Driver ID Guide at:
 
-	  http://support.intel.com/support/network/adapter/pro100/21397.htm
+	  <http://support.intel.com/support/network/adapter/pro100/21397.htm>
+
+          to identify the adapter.
 
 	  For the latest Intel PRO/100 network driver for Linux, see:
 
-	  http://appsr.intel.com/scripts-df/support_intel.asp
+	  <http://appsr.intel.com/scripts-df/support_intel.asp>
 
 	  More specific information on configuring the driver is in 
 	  <file:Documentation/networking/e100.txt>.
@@ -1716,7 +1660,7 @@ config TLAN
 	  <file:Documentation/networking/net-modules.txt>. The module
 	  will be called tlan.
 
-	  Please email feedback to  torben.mathiasen@compaq.com.
+	  Please email feedback to <torben.mathiasen@compaq.com>.
 
 config VIA_RHINE
 	tristate "VIA Rhine support"
@@ -1741,18 +1685,6 @@ config VIA_RHINE_MMIO
 	  processing time in parts of the driver.
 
 	  If unsure, say Y.
-
-config VIA_VELOCITY
-	tristate "VIA Velocity support"
-	depends on NET_PCI && PCI
-	select CRC32
-	select CRC_CCITT
-	select MII
-	help
-	  If you have a VIA "Velocity" based network card say Y here.
-
-	  To compile this driver as a module, choose M here. The module
-	  will be called via-velocity.
 
 config LAN_SAA9730
 	bool "Philips SAA9730 Ethernet support (EXPERIMENTAL)"
@@ -1933,29 +1865,8 @@ config E1000
 	depends on PCI
 	---help---
 	  This driver supports Intel(R) PRO/1000 gigabit ethernet family of
-	  adapters, which includes:
-
-	  Controller  Adapter Name                         Board IDs
-	  ----------  ------------                         ---------
-	  82542       PRO/1000 Gigabit Server Adapter      700262-xxx,
-	  717037-xxx
-	  82543       PRO/1000 F Server Adapter            738640-xxx,
-	  A38888-xxx
-	  82543       PRO/1000 T Server Adapter            A19845-xxx,
-	  A33948-xxx
-	  82544       PRO/1000 XT Server Adapter           A51580-xxx
-	  82544       PRO/1000 XF Server Adapter           A50484-xxx
-	  82544       PRO/1000 T Desktop Adapter           A62947-xxx
-	  82540       PRO/1000 MT Desktop Adapter          A78408-xxx
-	  82541       PRO/1000 MT Desktop Adapter          C91016-xxx
-	  82545       PRO/1000 MT Server Adapter           A92165-xxx
-	  82546       PRO/1000 MT Dual Port Server Adapter A92111-xxx
-	  82545       PRO/1000 MF Server Adapter           A91622-xxx
-	  82545       PRO/1000 MF Server Adapter(LX)       A91624-xxx
-	  82546       PRO/1000 MF Dual Port Server Adapter A91620-xxx 
-
-	  For more information on how to identify your adapter, go to the
-	  Adapter & Driver ID Guide at:
+	  adapters.  For more information on how to identify your adapter, go 
+	  to the Adapter & Driver ID Guide at:
 
 	  <http://support.intel.com/support/network/adapter/pro100/21397.htm>
 
@@ -2061,6 +1972,15 @@ config R8169_NAPI
 
 	  If in doubt, say N.
 
+config R8169_VLAN
+	bool "VLAN support"
+	depends on R8169 && VLAN_8021Q
+	---help---
+	  Say Y here for the r8169 driver to support the functions required
+	  by the kernel 802.1Q code.
+	  
+	  If in doubt, say Y.
+
 config SK98LIN
 	tristate "Marvell Yukon Chipset / SysKonnect SK-98xx Support"
 	depends on PCI
@@ -2130,15 +2050,27 @@ config SK98LIN
 	  The dual link adapters support link-failover and dual port features.
 	  Both Marvell Yukon and SysKonnect SK-98xx/SK-95xx adapters support 
 	  the scatter-gather functionality with sendfile(). Please refer to 
-	  Documentation/networking/sk98lin.txt for more information about
+	  <file:Documentation/networking/sk98lin.txt> for more information about
 	  optional driver parameters.
 	  Questions concerning this driver may be addressed to:
-	      linux@syskonnect.de
+	      <linux@syskonnect.de>
 	  
 	  If you want to compile this driver as a module ( = code which can be
 	  inserted in and removed from the running kernel whenever you want),
-	  say M here and read Documentation/kbuild/modules.txt. The module will
+	  say M here and read <file:Documentation/kbuild/modules.txt>. The module will
 	  be called sk98lin. This is recommended.
+
+config VIA_VELOCITY
+	tristate "VIA Velocity support"
+	depends on NET_PCI && PCI
+	select CRC32
+	select CRC_CCITT
+	select MII
+	help
+	  If you have a VIA "Velocity" based network card say Y here.
+
+	  To compile this driver as a module, choose M here. The module
+	  will be called via-velocity.
 
 config TIGON3
 	tristate "Broadcom Tigon3 support"
@@ -2202,14 +2134,8 @@ config IXGB
 	depends on PCI
 	---help---
 	  This driver supports Intel(R) PRO/10GbE family of
-	  adapters, which includes:
-
-	  Controller  Adapter Name                           Board IDs
-	  ----------  ------------                           ---------
-	  82597EX     Intel(R) PRO/10GbE LR Server Adapter   A82505-xxx
-
-	  For more information on how to identify your adapter, go to the
-	  Adapter & Driver ID Guide at:
+	  adapters.  For more information on how to identify your adapter, go
+	  to the Adapter & Driver ID Guide at:
 
 	  <http://support.intel.com/support/network/adapter/pro100/21397.htm>
 
@@ -2266,6 +2192,17 @@ config S2IO_NAPI
 	  information.
 
 	  If in doubt, say N.
+
+config 2BUFF_MODE
+	bool "Use 2 Buffer Mode on Rx side."
+	depends on S2IO
+	---help---
+	On enabling the 2 buffer mode, the received frame will be
+	split into 2 parts before being DMA'ed to the hosts memory.
+	The parts are the ethernet header and ethernet payload. 
+	This is useful on systems where DMA'ing to to unaligned 
+	physical memory loactions comes with a heavy price.
+	If not sure please say N.
 
 endmenu
 
@@ -2329,7 +2266,7 @@ config SKFP
 	  the driver.
 
 	  Questions concerning this driver can be addressed to:
-	  linux@syskonnect.de
+	  <linux@syskonnect.de>
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called skfp.  This is recommended.
@@ -2525,7 +2462,7 @@ config PPPOE
 
 	  This driver requires the latest version of pppd from the CVS
 	  repository at cvs.samba.org.  Alternatively, see the 
-	  RoaringPenguin package (http://www.roaringpenguin.com/pppoe)
+	  RoaringPenguin package (<http://www.roaringpenguin.com/pppoe>)
 	  which contains instruction on how to use this driver (under 
 	  the heading "Kernel mode PPPoE").
 
@@ -2653,5 +2590,5 @@ config NETCONSOLE
 	depends on NETDEVICES && EXPERIMENTAL
 	---help---
 	If you want to log kernel messages over the network, enable this.
-	See Documentation/networking/netconsole.txt for details.
+	See <file:Documentation/networking/netconsole.txt> for details.
 

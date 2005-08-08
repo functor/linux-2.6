@@ -15,6 +15,7 @@
 #include <linux/init.h>
 #include <linux/bootmem.h>
 #include <linux/highmem.h>
+#include <linux/nodemask.h>
 
 #include <asm/pgalloc.h>
 #include <asm/page.h>
@@ -158,7 +159,7 @@ pgd_t *get_pgd_slow(struct mm_struct *mm)
 
 	init_pgd = pgd_offset_k(0);
 
-	if (vectors_base() == 0) {
+	if (!vectors_high()) {
 		/*
 		 * This lock is here just to satisfy pmd_alloc and pte_lock
 		 */
@@ -239,7 +240,8 @@ free:
 
 /*
  * Create a SECTION PGD between VIRT and PHYS in domain
- * DOMAIN with protection PROT
+ * DOMAIN with protection PROT.  This operates on half-
+ * pgdir entry increments.
  */
 static inline void
 alloc_init_section(unsigned long virt, unsigned long phys, int prot)
@@ -317,14 +319,24 @@ static struct mem_types mem_types[] __initdata = {
 		.prot_sect = PMD_TYPE_SECT | PMD_SECT_MINICACHE,
 		.domain    = DOMAIN_KERNEL,
 	},
-	[MT_VECTORS] = {
+	[MT_LOW_VECTORS] = {
 		.prot_pte  = L_PTE_PRESENT | L_PTE_YOUNG | L_PTE_DIRTY |
 				L_PTE_EXEC,
 		.prot_l1   = PMD_TYPE_TABLE,
 		.domain    = DOMAIN_USER,
 	},
+	[MT_HIGH_VECTORS] = {
+		.prot_pte  = L_PTE_PRESENT | L_PTE_YOUNG | L_PTE_DIRTY |
+				L_PTE_USER | L_PTE_EXEC,
+		.prot_l1   = PMD_TYPE_TABLE,
+		.domain    = DOMAIN_USER,
+	},
 	[MT_MEMORY] = {
 		.prot_sect = PMD_TYPE_SECT | PMD_SECT_AP_WRITE,
+		.domain    = DOMAIN_KERNEL,
+	},
+	[MT_ROM] = {
+		.prot_sect = PMD_TYPE_SECT,
 		.domain    = DOMAIN_KERNEL,
 	}
 };
@@ -353,12 +365,12 @@ static void __init build_mem_type_table(void)
 	}
 
 	if (cpu_arch <= CPU_ARCH_ARMv5) {
-		mem_types[MT_DEVICE].prot_l1       |= PMD_BIT4;
-		mem_types[MT_DEVICE].prot_sect     |= PMD_BIT4;
-		mem_types[MT_CACHECLEAN].prot_sect |= PMD_BIT4;
-		mem_types[MT_MINICLEAN].prot_sect  |= PMD_BIT4;
-		mem_types[MT_VECTORS].prot_l1      |= PMD_BIT4;
-		mem_types[MT_MEMORY].prot_sect     |= PMD_BIT4;
+		for (i = 0; i < ARRAY_SIZE(mem_types); i++) {
+			if (mem_types[i].prot_l1)
+				mem_types[i].prot_l1 |= PMD_BIT4;
+			if (mem_types[i].prot_sect)
+				mem_types[i].prot_sect |= PMD_BIT4;
+		}
 	}
 
 	/*
@@ -370,6 +382,7 @@ static void __init build_mem_type_table(void)
 		 * kernel memory mapping.
 		 */
 		mem_types[MT_MEMORY].prot_sect &= ~PMD_BIT4;
+		mem_types[MT_ROM].prot_sect &= ~PMD_BIT4;
 		/*
 		 * Mark cache clean areas read only from SVC mode
 		 * and no access from userspace.
@@ -381,14 +394,18 @@ static void __init build_mem_type_table(void)
 	cp = &cache_policies[cachepolicy];
 
 	if (cpu_arch >= CPU_ARCH_ARMv5) {
-		mem_types[MT_VECTORS].prot_pte |= cp->pte & PTE_CACHEABLE;
+		mem_types[MT_LOW_VECTORS].prot_pte |= cp->pte & PTE_CACHEABLE;
+		mem_types[MT_HIGH_VECTORS].prot_pte |= cp->pte & PTE_CACHEABLE;
 	} else {
-		mem_types[MT_VECTORS].prot_pte |= cp->pte;
+		mem_types[MT_LOW_VECTORS].prot_pte |= cp->pte;
+		mem_types[MT_HIGH_VECTORS].prot_pte |= cp->pte;
 		mem_types[MT_MINICLEAN].prot_sect &= ~PMD_SECT_TEX(1);
 	}
 
-	mem_types[MT_VECTORS].prot_l1 |= ecc_mask;
+	mem_types[MT_LOW_VECTORS].prot_l1 |= ecc_mask;
+	mem_types[MT_HIGH_VECTORS].prot_l1 |= ecc_mask;
 	mem_types[MT_MEMORY].prot_sect |= ecc_mask | cp->pmd;
+	mem_types[MT_ROM].prot_sect |= cp->pmd;
 
 	for (i = 0; i < 16; i++) {
 		unsigned long v = pgprot_val(protection_map[i]);
@@ -413,6 +430,8 @@ static void __init build_mem_type_table(void)
 		ecc_mask ? "en" : "dis", cp->policy);
 }
 
+#define vectors_base()	(vectors_high() ? 0xffff0000 : 0)
+
 /*
  * Create the page directory entries and any necessary
  * page tables for the mapping specified by `md'.  We
@@ -426,14 +445,14 @@ static void __init create_mapping(struct map_desc *md)
 	pgprot_t prot_pte;
 	long off;
 
-	if (md->virtual != vectors_base() && md->virtual < PAGE_OFFSET) {
+	if (md->virtual != vectors_base() && md->virtual < TASK_SIZE) {
 		printk(KERN_WARNING "BUG: not creating mapping for "
 		       "0x%08lx at 0x%08lx in user region\n",
 		       md->physical, md->virtual);
 		return;
 	}
 
-	if (md->type == MT_DEVICE &&
+	if ((md->type == MT_DEVICE || md->type == MT_ROM) &&
 	    md->virtual >= PAGE_OFFSET && md->virtual < VMALLOC_END) {
 		printk(KERN_WARNING "BUG: mapping for 0x%08lx at 0x%08lx "
 		       "overlaps vmalloc space\n",
@@ -464,6 +483,9 @@ static void __init create_mapping(struct map_desc *md)
 		length -= PAGE_SIZE;
 	}
 
+	/*
+	 * A section mapping covers half a "pgdir" entry.
+	 */
 	while (length >= (PGDIR_SIZE / 2)) {
 		alloc_init_section(virt, virt + off, prot_sect);
 
@@ -505,8 +527,11 @@ void setup_mm_for_reboot(char mode)
 			pmdval |= PMD_BIT4;
 		pmd = pmd_offset(pgd + i, i << PGDIR_SHIFT);
 		set_pmd(pmd, __pmd(pmdval));
+		set_pmd(pmd + 1, __pmd(pmdval + (1 << (PGDIR_SHIFT - 1))));
 	}
 }
+
+extern void _stext, _etext;
 
 /*
  * Setup initial mappings.  We use the page we allocated for zero page to hold
@@ -522,6 +547,14 @@ void __init memtable_init(struct meminfo *mi)
 	build_mem_type_table();
 
 	init_maps = p = alloc_bootmem_low_pages(PAGE_SIZE);
+
+#ifdef CONFIG_XIP_KERNEL
+	p->physical   = CONFIG_XIP_PHYS_ADDR & PMD_MASK;
+	p->virtual    = (unsigned long)&_stext & PMD_MASK;
+	p->length     = ((unsigned long)&_etext - p->virtual + ~PMD_MASK) & PMD_MASK;
+	p->type       = MT_ROM;
+	p ++;
+#endif
 
 	for (i = 0; i < mi->nr_banks; i++) {
 		if (mi->bank[i].size == 0)
@@ -570,15 +603,21 @@ void __init memtable_init(struct meminfo *mi)
 	} while (address != 0);
 
 	/*
-	 * Create a mapping for the machine vectors at virtual address 0
-	 * or 0xffff0000.  We should always try the high mapping.
+	 * Create a mapping for the machine vectors at the high-vectors
+	 * location (0xffff0000).  If we aren't using high-vectors, also
+	 * create a mapping at the low-vectors virtual address.
 	 */
 	init_maps->physical   = virt_to_phys(init_maps);
-	init_maps->virtual    = vectors_base();
+	init_maps->virtual    = 0xffff0000;
 	init_maps->length     = PAGE_SIZE;
-	init_maps->type       = MT_VECTORS;
-
+	init_maps->type       = MT_HIGH_VECTORS;
 	create_mapping(init_maps);
+
+	if (!vectors_high()) {
+		init_maps->virtual = 0;
+		init_maps->type = MT_LOW_VECTORS;
+		create_mapping(init_maps);
+	}
 
 	flush_cache_all();
 	flush_tlb_all();
@@ -663,6 +702,6 @@ void __init create_memmap_holes(struct meminfo *mi)
 {
 	int node;
 
-	for (node = 0; node < numnodes; node++)
+	for_each_online_node(node)
 		free_unused_memmap_node(node, mi);
 }

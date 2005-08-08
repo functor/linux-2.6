@@ -34,13 +34,14 @@
 #include <linux/serialP.h>
 #include <linux/console.h>
 #include <linux/init.h>
+#include <linux/bitops.h>
+#include <linux/delay.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/system.h>
 #include <asm/segment.h>
 #include <asm/semaphore.h>
-#include <asm/bitops.h>
 #include <asm/delay.h>
 #include <asm/coldfire.h>
 #include <asm/mcfsim.h>
@@ -57,9 +58,14 @@ struct timer_list mcfrs_timer_struct;
  *	keep going.  Perhaps one day the cflag settings for the
  *	console can be used instead.
  */
-#if defined(CONFIG_ARNEWSH) || defined(CONFIG_MOTOROLA) || defined(CONFIG_senTec)
+#if defined(CONFIG_ARNEWSH) || defined(CONFIG_MOTOROLA) || defined(CONFIG_senTec) || defined(CONFIG_SNEHA)
 #define	CONSOLE_BAUD_RATE	19200
 #define	DEFAULT_CBAUD		B19200
+#endif
+
+#if defined(CONFIG_HW_FEITH)
+  #define	CONSOLE_BAUD_RATE	38400
+  #define	DEFAULT_CBAUD		B38400
 #endif
 
 #ifndef CONSOLE_BAUD_RATE
@@ -85,8 +91,8 @@ static struct tty_driver *mcfrs_serial_driver;
 #undef SERIAL_DEBUG_OPEN
 #undef SERIAL_DEBUG_FLOW
 
-#ifdef CONFIG_M5282
-#define	IRQBASE	77
+#if defined(CONFIG_M527x) || defined(CONFIG_M528x)
+#define	IRQBASE	(MCFINT_VECBASE+MCFINT_UART0)
 #else
 #define	IRQBASE	73
 #endif
@@ -336,20 +342,24 @@ static inline void receive_chars(struct mcf_serial *info)
 #endif
 
 		tty->flip.count++;
-		if (status & MCFUART_USR_RXERR)
+		if (status & MCFUART_USR_RXERR) {
 			uartp[MCFUART_UCR] = MCFUART_UCR_CMDRESETERR;
-		if (status & MCFUART_USR_RXBREAK) {
-			info->stats.rxbreak++;
-			*tty->flip.flag_buf_ptr++ = TTY_BREAK;
-		} else if (status & MCFUART_USR_RXPARITY) {
-			info->stats.rxparity++;
-			*tty->flip.flag_buf_ptr++ = TTY_PARITY;
-		} else if (status & MCFUART_USR_RXOVERRUN) {
-			info->stats.rxoverrun++;
-			*tty->flip.flag_buf_ptr++ = TTY_OVERRUN;
-		} else if (status & MCFUART_USR_RXFRAMING) {
-			info->stats.rxframing++;
-			*tty->flip.flag_buf_ptr++ = TTY_FRAME;
+			if (status & MCFUART_USR_RXBREAK) {
+				info->stats.rxbreak++;
+				*tty->flip.flag_buf_ptr++ = TTY_BREAK;
+			} else if (status & MCFUART_USR_RXPARITY) {
+				info->stats.rxparity++;
+				*tty->flip.flag_buf_ptr++ = TTY_PARITY;
+			} else if (status & MCFUART_USR_RXOVERRUN) {
+				info->stats.rxoverrun++;
+				*tty->flip.flag_buf_ptr++ = TTY_OVERRUN;
+			} else if (status & MCFUART_USR_RXFRAMING) {
+				info->stats.rxframing++;
+				*tty->flip.flag_buf_ptr++ = TTY_FRAME;
+			} else {
+				/* This should never happen... */
+				*tty->flip.flag_buf_ptr++ = 0;
+			}
 		} else {
 			*tty->flip.flag_buf_ptr++ = 0;
 		}
@@ -723,19 +733,31 @@ static void mcfrs_flush_chars(struct tty_struct *tty)
 	if (serial_paranoia_check(info, tty->name, "mcfrs_flush_chars"))
 		return;
 
+	uartp = (volatile unsigned char *) info->addr;
+
+	/*
+	 * re-enable receiver interrupt
+	 */
+	local_irq_save(flags);
+	if ((!(info->imr & MCFUART_UIR_RXREADY)) &&
+	    (info->flags & ASYNC_INITIALIZED) ) {
+		info->imr |= MCFUART_UIR_RXREADY;
+		uartp[MCFUART_UIMR] = info->imr;
+	}
+	local_irq_restore(flags);
+
 	if (info->xmit_cnt <= 0 || tty->stopped || tty->hw_stopped ||
 	    !info->xmit_buf)
 		return;
 
 	/* Enable transmitter */
 	local_irq_save(flags);
-	uartp = info->addr;
 	info->imr |= MCFUART_UIR_TXREADY;
 	uartp[MCFUART_UIMR] = info->imr;
 	local_irq_restore(flags);
 }
 
-static int mcfrs_write(struct tty_struct * tty, int from_user,
+static int mcfrs_write(struct tty_struct * tty,
 		    const unsigned char *buf, int count)
 {
 	volatile unsigned char	*uartp;
@@ -744,8 +766,8 @@ static int mcfrs_write(struct tty_struct * tty, int from_user,
 	int			c, total = 0;
 
 #if 0
-	printk("%s(%d): mcfrs_write(tty=%x,from_user=%d,buf=%x,count=%d)\n",
-		__FILE__, __LINE__, (int)tty, from_user, (int)buf, count);
+	printk("%s(%d): mcfrs_write(tty=%x,buf=%x,count=%d)\n",
+		__FILE__, __LINE__, (int)tty, (int)buf, count);
 #endif
 
 	if (serial_paranoia_check(info, tty->name, "mcfrs_write"))
@@ -764,19 +786,7 @@ static int mcfrs_write(struct tty_struct * tty, int from_user,
 		if (c <= 0)
 			break;
 
-		if (from_user) {
-			down(&mcfrs_tmp_buf_sem);
-			if (copy_from_user(mcfrs_tmp_buf, buf, c))
-				return -EFAULT;
-
-			local_irq_disable();
-			c = min(c, (int) min(((int)SERIAL_XMIT_SIZE) - info->xmit_cnt - 1,
-				       ((int)SERIAL_XMIT_SIZE) - info->xmit_head));
-			local_irq_restore(flags);
-			memcpy(info->xmit_buf + info->xmit_head, mcfrs_tmp_buf, c);
-			up(&mcfrs_tmp_buf_sem);
-		} else
-			memcpy(info->xmit_buf + info->xmit_head, buf, c);
+		memcpy(info->xmit_buf + info->xmit_head, buf, c);
 
 		local_irq_disable();
 		info->xmit_head = (info->xmit_head + c) & (SERIAL_XMIT_SIZE-1);
@@ -990,12 +1000,12 @@ static void send_break(	struct mcf_serial * info, int duration)
 
 	if (!info->addr)
 		return;
-	current->state = TASK_INTERRUPTIBLE;
+	set_current_state(TASK_INTERRUPTIBLE);
 	uartp = info->addr;
 
 	local_irq_save(flags);
 	uartp[MCFUART_UCR] = MCFUART_UCR_CMDBREAKSTART;
-	schedule_timeout(jiffies + duration);
+	schedule_timeout(duration);
 	uartp[MCFUART_UCR] = MCFUART_UCR_CMDBREAKSTOP;
 	local_irq_restore(flags);
 }
@@ -1242,8 +1252,7 @@ static void mcfrs_close(struct tty_struct *tty, struct file * filp)
 #endif	
 	if (info->blocked_open) {
 		if (info->close_delay) {
-			current->state = TASK_INTERRUPTIBLE;
-			schedule_timeout(info->close_delay);
+			msleep_interruptible(jiffies_to_msecs(info->close_delay));
 		}
 		wake_up_interruptible(&info->open_wait);
 	}
@@ -1308,8 +1317,7 @@ mcfrs_wait_until_sent(struct tty_struct *tty, int timeout)
 			fifo_cnt++;
 		if (fifo_cnt == 0)
 			break;
-		set_current_state(TASK_INTERRUPTIBLE);
-		schedule_timeout(char_time);
+		msleep_interruptible(jiffies_to_msecs(char_time));
 		if (signal_pending(current))
 			break;
 		if (timeout && time_after(jiffies, orig_jiffies + timeout))
@@ -1519,7 +1527,7 @@ static void mcfrs_irqinit(struct mcf_serial *info)
 	*portp = (*portp & ~0x000000ff) | 0x00000055;
 	portp = (volatile unsigned long *) (MCF_MBAR + MCFSIM_PDCNT);
 	*portp = (*portp & ~0x000003fc) | 0x000002a8;
-#elif defined(CONFIG_M5282)
+#elif defined(CONFIG_M527x) || defined(CONFIG_M528x)
 	volatile unsigned char *icrp, *uartp;
 	volatile unsigned long *imrp;
 
@@ -1531,7 +1539,7 @@ static void mcfrs_irqinit(struct mcf_serial *info)
 
 	imrp = (volatile unsigned long *) (MCF_MBAR + MCFICM_INTC0 +
 		MCFINTC_IMRL);
-	*imrp &= ~((1 << (info->irq - 64)) | 1);
+	*imrp &= ~((1 << (info->irq - MCFINT_VECBASE)) | 1);
 #else
 	volatile unsigned char	*icrp, *uartp;
 

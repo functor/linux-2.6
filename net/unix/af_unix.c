@@ -124,10 +124,10 @@
 
 int sysctl_unix_max_dgram_qlen = 10;
 
-kmem_cache_t *unix_sk_cachep;
+static kmem_cache_t *unix_sk_cachep;
 
 struct hlist_head unix_socket_table[UNIX_HASH_SIZE + 1];
-rwlock_t unix_table_lock = RW_LOCK_UNLOCKED;
+DEFINE_RWLOCK(unix_table_lock);
 static atomic_t unix_nr_socks = ATOMIC_INIT(0);
 
 #define unix_sockets_unbound	(&unix_socket_table[UNIX_HASH_SIZE])
@@ -190,18 +190,7 @@ static int unix_mkname(struct sockaddr_un * sunaddr, int len, unsigned *hashp)
 		return -EINVAL;
 	if (!sunaddr || sunaddr->sun_family != AF_UNIX)
 		return -EINVAL;
-	if (sunaddr->sun_path[0])
-	{
-		/*
-		 *	This may look like an off by one error but it is
-		 *	a bit more subtle. 108 is the longest valid AF_UNIX
-		 *	path for a binding. sun_path[108] doesn't as such
-		 *	exist. However in kernel space we are guaranteed that
-		 *	it is a valid memory location in our kernel
-		 *	address buffer.
-		 */
-		if (len > sizeof(*sunaddr))
-			len = sizeof(*sunaddr);
+	if (sunaddr->sun_path[0]) {
 		((char *)sunaddr)[len]=0;
 		len = strlen(sunaddr->sun_path)+1+sizeof(short);
 		return len;
@@ -408,9 +397,6 @@ static int unix_release_sock (struct sock *sk, int embrion)
 		mntput(mnt);
 	}
 
-	vx_sock_dec(sk);
-	clr_vx_info(&sk->sk_vx_info);
-	clr_nx_info(&sk->sk_nx_info);
 	sock_put(sk);
 
 	/* ---- Socket is dead now and most probably destroyed ---- */
@@ -483,6 +469,8 @@ static int unix_dgram_recvmsg(struct kiocb *, struct socket *,
 			      struct msghdr *, size_t, int);
 static int unix_dgram_connect(struct socket *, struct sockaddr *,
 			      int, int);
+static int unix_seqpacket_sendmsg(struct kiocb *, struct socket *,
+				  struct msghdr *, size_t);
 
 static struct proto_ops unix_stream_ops = {
 	.family =	PF_UNIX,
@@ -541,7 +529,7 @@ static struct proto_ops unix_seqpacket_ops = {
 	.shutdown =	unix_shutdown,
 	.setsockopt =	sock_no_setsockopt,
 	.getsockopt =	sock_no_getsockopt,
-	.sendmsg =	unix_dgram_sendmsg,
+	.sendmsg =	unix_seqpacket_sendmsg,
 	.recvmsg =	unix_dgram_recvmsg,
 	.mmap =		sock_no_mmap,
 	.sendpage =	sock_no_sendpage,
@@ -564,11 +552,6 @@ static struct sock * unix_create1(struct socket *sock)
 
 	sock_init_data(sock,sk);
 	sk_set_owner(sk, THIS_MODULE);
-
-	set_vx_info(&sk->sk_vx_info, current->vx_info);
-	sk->sk_xid = vx_current_xid();
-	vx_sock_inc(sk);
-	set_nx_info(&sk->sk_nx_info, current->nx_info);
 
 	sk->sk_write_space	= unix_write_space;
 	sk->sk_max_ack_backlog	= sysctl_unix_max_dgram_qlen;
@@ -1378,9 +1361,11 @@ restart:
 	if (other->sk_shutdown & RCV_SHUTDOWN)
 		goto out_unlock;
 
-	err = security_unix_may_send(sk->sk_socket, other->sk_socket);
-	if (err)
-		goto out_unlock;
+	if (sk->sk_type != SOCK_SEQPACKET) {
+		err = security_unix_may_send(sk->sk_socket, other->sk_socket);
+		if (err)
+			goto out_unlock;
+	}
 
 	if (unix_peer(other) != sk &&
 	    (skb_queue_len(&other->sk_receive_queue) >
@@ -1530,6 +1515,25 @@ out_err:
 	return sent ? : err;
 }
 
+static int unix_seqpacket_sendmsg(struct kiocb *kiocb, struct socket *sock,
+				  struct msghdr *msg, size_t len)
+{
+	int err;
+	struct sock *sk = sock->sk;
+	
+	err = sock_error(sk);
+	if (err)
+		return err;
+
+	if (sk->sk_state != TCP_ESTABLISHED)
+		return -ENOTCONN;
+
+	if (msg->msg_namelen)
+		msg->msg_namelen = 0;
+
+	return unix_dgram_sendmsg(kiocb, sock, msg, len);
+}
+                                                                                            
 static void unix_copy_addr(struct msghdr *msg, struct sock *sk)
 {
 	struct unix_sock *u = unix_sk(sk);
@@ -1559,9 +1563,11 @@ static int unix_dgram_recvmsg(struct kiocb *iocb, struct socket *sock,
 
 	msg->msg_namelen = 0;
 
+	down(&u->readsem);
+
 	skb = skb_recv_datagram(sk, flags, noblock, &err);
 	if (!skb)
-		goto out;
+		goto out_unlock;
 
 	wake_up_interruptible(&u->peer_wait);
 
@@ -1611,6 +1617,8 @@ static int unix_dgram_recvmsg(struct kiocb *iocb, struct socket *sock,
 
 out_free:
 	skb_free_datagram(sk,skb);
+out_unlock:
+	up(&u->readsem);
 out:
 	return err;
 }
@@ -1847,15 +1855,22 @@ static int unix_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		case SIOCINQ:
 		{
 			struct sk_buff *skb;
+
 			if (sk->sk_state == TCP_LISTEN) {
 				err = -EINVAL;
 				break;
 			}
 
 			spin_lock(&sk->sk_receive_queue.lock);
-			skb = skb_peek(&sk->sk_receive_queue);
-			if (skb)
-				amount=skb->len;
+			if (sk->sk_type == SOCK_STREAM ||
+			    sk->sk_type == SOCK_SEQPACKET) {
+				skb_queue_walk(&sk->sk_receive_queue, skb)
+					amount += skb->len;
+			} else {
+				skb = skb_peek(&sk->sk_receive_queue);
+				if (skb)
+					amount=skb->len;
+			}
 			spin_unlock(&sk->sk_receive_queue.lock);
 			err = put_user(amount, (int __user *)arg);
 			break;

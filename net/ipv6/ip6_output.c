@@ -56,12 +56,12 @@
 #include <net/xfrm.h>
 #include <net/checksum.h>
 
-static int ip6_fragment(struct sk_buff **pskb, int (*output)(struct sk_buff**));
+static int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *));
 
 static __inline__ void ipv6_select_ident(struct sk_buff *skb, struct frag_hdr *fhdr)
 {
 	static u32 ipv6_fragmentation_id = 1;
-	static spinlock_t ip6_id_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(ip6_id_lock);
 
 	spin_lock_bh(&ip6_id_lock);
 	fhdr->identification = htonl(ipv6_fragmentation_id);
@@ -108,9 +108,8 @@ static int ip6_dev_loopback_xmit(struct sk_buff *newskb)
 }
 
 
-static int ip6_output2(struct sk_buff **pskb)
+static int ip6_output2(struct sk_buff *skb)
 {
-	struct sk_buff *skb = *pskb;
 	struct dst_entry *dst = skb->dst;
 	struct net_device *dev = dst->dev;
 
@@ -146,14 +145,12 @@ static int ip6_output2(struct sk_buff **pskb)
 	return NF_HOOK(PF_INET6, NF_IP6_POST_ROUTING, skb,NULL, skb->dev,ip6_output_finish);
 }
 
-int ip6_output(struct sk_buff **pskb)
+int ip6_output(struct sk_buff *skb)
 {
-	struct sk_buff *skb = *pskb;
-
-	if ((skb->len > dst_pmtu(skb->dst) || skb_shinfo(skb)->frag_list))
-		return ip6_fragment(pskb, ip6_output2);
+	if (skb->len > dst_pmtu(skb->dst))
+		return ip6_fragment(skb, ip6_output2);
 	else
-		return ip6_output2(pskb);
+		return ip6_output2(skb);
 }
 
 #ifdef CONFIG_NETFILTER
@@ -314,7 +311,7 @@ int ip6_nd_hdr(struct sock *sk, struct sk_buff *skb, struct net_device *dev,
 	return 0;
 }
 
-int ip6_call_ra_chain(struct sk_buff *skb, int sel)
+static int ip6_call_ra_chain(struct sk_buff *skb, int sel)
 {
 	struct ip6_ra_chain *ra;
 	struct sock *last = NULL;
@@ -466,6 +463,7 @@ static void ip6_copy_metadata(struct sk_buff *to, struct sk_buff *from)
 	to->priority = from->priority;
 	to->protocol = from->protocol;
 	to->security = from->security;
+	dst_release(to->dst);
 	to->dst = dst_clone(from->dst);
 	to->dev = from->dev;
 
@@ -518,10 +516,10 @@ int ip6_find_1stfragopt(struct sk_buff *skb, u8 **nexthdr)
 	return offset;
 }
 
-static int ip6_fragment(struct sk_buff **pskb, int (*output)(struct sk_buff**))
+static int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 {
 	struct net_device *dev;
-	struct sk_buff *frag, *skb = *pskb;
+	struct sk_buff *frag;
 	struct rt6_info *rt = (struct rt6_info*)skb->dst;
 	struct ipv6hdr *tmp_hdr;
 	struct frag_hdr *fh;
@@ -595,6 +593,7 @@ static int ip6_fragment(struct sk_buff **pskb, int (*output)(struct sk_buff**))
 			/* Prepare header of the next frame,
 			 * before previous one went down. */
 			if (frag) {
+				frag->ip_summed = CHECKSUM_NONE;
 				frag->h.raw = frag->data;
 				fh = (struct frag_hdr*)__skb_push(frag, sizeof(struct frag_hdr));
 				frag->nh.raw = __skb_push(frag, hlen);
@@ -610,7 +609,7 @@ static int ip6_fragment(struct sk_buff **pskb, int (*output)(struct sk_buff**))
 				ip6_copy_metadata(frag, skb);
 			}
 			
-			err = output(&skb);
+			err = output(skb);
 			if (err || !frag)
 				break;
 
@@ -726,7 +725,7 @@ slow_path:
 
 		IP6_INC_STATS(IPSTATS_MIB_FRAGCREATES);
 
-		err = output(&frag);
+		err = output(frag);
 		if (err)
 			goto fail;
 	}
@@ -748,7 +747,7 @@ int ip6_dst_lookup(struct sock *sk, struct dst_entry **dst, struct flowi *fl)
 	if (sk) {
 		struct ipv6_pinfo *np = inet6_sk(sk);
 	
-		*dst = __sk_dst_check(sk, np->dst_cookie);
+		*dst = sk_dst_check(sk, np->dst_cookie);
 		if (*dst) {
 			struct rt6_info *rt = (struct rt6_info*)*dst;
 	
@@ -771,13 +770,13 @@ int ip6_dst_lookup(struct sock *sk, struct dst_entry **dst, struct flowi *fl)
 				 */
 	
 			if (((rt->rt6i_dst.plen != 128 ||
-			      ipv6_addr_cmp(&fl->fl6_dst, &rt->rt6i_dst.addr))
+			      !ipv6_addr_equal(&fl->fl6_dst, &rt->rt6i_dst.addr))
 			     && (np->daddr_cache == NULL ||
-				 ipv6_addr_cmp(&fl->fl6_dst, np->daddr_cache)))
+				 !ipv6_addr_equal(&fl->fl6_dst, np->daddr_cache)))
 			    || (fl->oif && fl->oif != (*dst)->dev->ifindex)) {
+				dst_release(*dst);
 				*dst = NULL;
-			} else
-				dst_hold(*dst);
+			}
 		}
 	}
 
@@ -812,7 +811,7 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to, int offse
 		    int hlimit, struct ipv6_txoptions *opt, struct flowi *fl, struct rt6_info *rt,
 		    unsigned int flags)
 {
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct sk_buff *skb;
 	unsigned int maxfraglen, fragheaderlen;
@@ -1090,7 +1089,7 @@ int ip6_push_pending_frames(struct sock *sk)
 	struct sk_buff *skb, *tmp_skb;
 	struct sk_buff **tail_skb;
 	struct in6_addr final_dst_buf, *final_dst = &final_dst_buf;
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct ipv6hdr *hdr;
 	struct ipv6_txoptions *opt = np->cork.opt;
@@ -1168,7 +1167,7 @@ error:
 
 void ip6_flush_pending_frames(struct sock *sk)
 {
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct sk_buff *skb;
 

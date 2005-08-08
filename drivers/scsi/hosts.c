@@ -28,6 +28,7 @@
 #include <linux/mm.h>
 #include <linux/init.h>
 #include <linux/completion.h>
+#include <linux/transport_class.h>
 
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
@@ -50,11 +51,6 @@ static struct class shost_class = {
 	.release	= scsi_host_cls_release,
 };
 
-static int scsi_device_cancel_cb(struct device *dev, void *data)
-{
-	return scsi_device_cancel(to_scsi_device(dev), *(int *)data);
-}
-
 /**
  * scsi_host_cancel - cancel outstanding IO to this host
  * @shost:	pointer to struct Scsi_Host
@@ -62,9 +58,12 @@ static int scsi_device_cancel_cb(struct device *dev, void *data)
  **/
 void scsi_host_cancel(struct Scsi_Host *shost, int recovery)
 {
+	struct scsi_device *sdev;
+
 	set_bit(SHOST_CANCEL, &shost->shost_state);
-	device_for_each_child(&shost->shost_gendev, &recovery,
-			      scsi_device_cancel_cb);
+	shost_for_each_device(sdev, shost) {
+		scsi_device_cancel(sdev, recovery);
+	}
 	wait_event(shost->host_wait, (!test_bit(SHOST_RECOVERY,
 						&shost->shost_state)));
 }
@@ -81,9 +80,11 @@ void scsi_remove_host(struct Scsi_Host *shost)
 
 	set_bit(SHOST_DEL, &shost->shost_state);
 
+	transport_unregister_device(&shost->shost_gendev);
 	class_device_unregister(&shost->shost_classdev);
 	device_del(&shost->shost_gendev);
 }
+EXPORT_SYMBOL(scsi_remove_host);
 
 /**
  * scsi_add_host - add a scsi host
@@ -96,7 +97,7 @@ void scsi_remove_host(struct Scsi_Host *shost)
 int scsi_add_host(struct Scsi_Host *shost, struct device *dev)
 {
 	struct scsi_host_template *sht = shost->hostt;
-	int error;
+	int error = -EINVAL;
 
 	printk(KERN_INFO "scsi%d : %s\n", shost->host_no,
 			sht->info ? sht->info(shost) : sht->name);
@@ -104,7 +105,7 @@ int scsi_add_host(struct Scsi_Host *shost, struct device *dev)
 	if (!shost->can_queue) {
 		printk(KERN_ERR "%s: can_queue = 0 no longer supported\n",
 				sht->name);
-		return -EINVAL;
+		goto out;
 	}
 
 	if (!shost->shost_gendev.parent)
@@ -123,13 +124,19 @@ int scsi_add_host(struct Scsi_Host *shost, struct device *dev)
 
 	get_device(&shost->shost_gendev);
 
+	if (shost->transportt->host_size &&
+	    (shost->shost_data = kmalloc(shost->transportt->host_size,
+					 GFP_KERNEL)) == NULL)
+		goto out_del_classdev;
+
 	error = scsi_sysfs_add_host(shost);
 	if (error)
-		goto out_del_classdev;
+		goto out_destroy_host;
 
 	scsi_proc_host_add(shost);
 	return error;
 
+ out_destroy_host:
  out_del_classdev:
 	class_device_del(&shost->shost_classdev);
  out_del_gendev:
@@ -137,6 +144,7 @@ int scsi_add_host(struct Scsi_Host *shost, struct device *dev)
  out:
 	return error;
 }
+EXPORT_SYMBOL(scsi_add_host);
 
 static void scsi_host_dev_release(struct device *dev)
 {
@@ -154,6 +162,7 @@ static void scsi_host_dev_release(struct device *dev)
 
 	scsi_proc_hostdir_rm(shost->hostt);
 	scsi_destroy_command_freelist(shost);
+	kfree(shost->shost_data);
 
 	/*
 	 * Some drivers (eg aha1542) do scsi_register()/scsi_unregister()
@@ -221,10 +230,8 @@ struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *sht, int privsize)
 	shost->max_id = 8;
 	shost->max_lun = 8;
 
-	/* Give each shost a default transportt if the driver
-	 * doesn't yet support Transport Attributes */
-	if (!shost->transportt) 
-		shost->transportt = &blank_transport_template;
+	/* Give each shost a default transportt */
+	shost->transportt = &blank_transport_template;
 
 	/*
 	 * All drivers right now should be able to handle 12 byte
@@ -284,6 +291,7 @@ struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *sht, int privsize)
 		goto fail_destroy_freelist;
 	wait_for_completion(&complete);
 	shost->eh_notify = NULL;
+
 	scsi_proc_hostdir_add(shost->hostt);
 	return shost;
 
@@ -293,6 +301,7 @@ struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *sht, int privsize)
 	kfree(shost);
 	return NULL;
 }
+EXPORT_SYMBOL(scsi_host_alloc);
 
 struct Scsi_Host *scsi_register(struct scsi_host_template *sht, int privsize)
 {
@@ -308,12 +317,14 @@ struct Scsi_Host *scsi_register(struct scsi_host_template *sht, int privsize)
 		list_add_tail(&shost->sht_legacy_list, &sht->legacy_hosts);
 	return shost;
 }
+EXPORT_SYMBOL(scsi_register);
 
 void scsi_unregister(struct Scsi_Host *shost)
 {
 	list_del(&shost->sht_legacy_list);
 	scsi_host_put(shost);
 }
+EXPORT_SYMBOL(scsi_unregister);
 
 /**
  * scsi_host_lookup - get a reference to a Scsi_Host by host no
@@ -341,6 +352,7 @@ struct Scsi_Host *scsi_host_lookup(unsigned short hostnum)
 
 	return shost;
 }
+EXPORT_SYMBOL(scsi_host_lookup);
 
 /**
  * scsi_host_get - inc a Scsi_Host ref count
@@ -353,6 +365,7 @@ struct Scsi_Host *scsi_host_get(struct Scsi_Host *shost)
 		return NULL;
 	return shost;
 }
+EXPORT_SYMBOL(scsi_host_get);
 
 /**
  * scsi_host_put - dec a Scsi_Host ref count
@@ -362,6 +375,7 @@ void scsi_host_put(struct Scsi_Host *shost)
 {
 	put_device(&shost->shost_gendev);
 }
+EXPORT_SYMBOL(scsi_host_put);
 
 int scsi_init_hosts(void)
 {
@@ -372,3 +386,9 @@ void scsi_exit_hosts(void)
 {
 	class_unregister(&shost_class);
 }
+
+int scsi_is_host_device(const struct device *dev)
+{
+	return dev->release == scsi_host_dev_release;
+}
+EXPORT_SYMBOL(scsi_is_host_device);

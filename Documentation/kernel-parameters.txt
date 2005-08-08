@@ -29,6 +29,7 @@ restrictions referred to are that the relevant option is valid if:
 	CD	Appropriate CD support is enabled.
 	DEVFS	devfs support is enabled. 
 	DRM	Direct Rendering Management support is enabled. 
+	EDD	BIOS Enhanced Disk Drive Services (EDD) is enabled
 	EFI	EFI Partitioning (GPT) is enabled
 	EIDE	EIDE/ATAPI support is enabled.
 	FB	The frame buffer device is enabled.
@@ -50,9 +51,11 @@ restrictions referred to are that the relevant option is valid if:
 	MOUSE	Appropriate mouse support is enabled.
 	MTD	MTD support is enabled.
 	NET	Appropriate network support is enabled.
+	NUMA	NUMA support is enabled.
 	NFS	Appropriate NFS support is enabled.
 	OSS	OSS sound support is enabled.
 	PARIDE	The ParIDE subsystem is enabled.
+	PARISC	The PA-RISC architecture is enabled.
 	PCI	PCI bus support is enabled.
 	PCMCIA	The PCMCIA subsystem is enabled.
 	PNP	Plug & Play support is enabled.
@@ -149,6 +152,8 @@ running once the system is up.
 			debugging. After system has booted up, it can be set
 			via /proc/acpi/debug_level.
 
+	acpi_fake_ecdt	[HW,ACPI] Workaround failure due to BIOS lacking ECDT
+
 	ad1816=		[HW,OSS]
 			Format: <io>,<irq>,<dma>,<dma2>
 			See also Documentation/sound/oss/AD1816.
@@ -221,15 +226,19 @@ running once the system is up.
 
 	atascsi=	[HW,SCSI] Atari SCSI
 
-	atkbd.extra=	[HW] Enable extra LEDs and keys on IBM RapidAccess, EzKey
-			and similar keyboards
+	atkbd.extra=	[HW] Enable extra LEDs and keys on IBM RapidAccess,
+			EzKey and similar keyboards
 
 	atkbd.reset=	[HW] Reset keyboard during initialization
 
 	atkbd.set=	[HW] Select keyboard code set 
 			Format: <int> (2 = AT (default) 3 = PS/2)
 
-	atkbd.scroll=	[HW] Enable scroll wheel on MS Office and similar keyboards
+	atkbd.scroll=	[HW] Enable scroll wheel on MS Office and similar
+			keyboards
+
+	atkbd.softraw=	[HW] Choose between synthetic and real raw mode
+			Format: <bool> (0 = real, 1 = synthetic (default))
 	
 	atkbd.softrepeat=
 			[HW] Use software keyboard repeat
@@ -311,8 +320,24 @@ running once the system is up.
 	condev=		[HW,S390] console device
 	conmode=
  
-	console=	[KNL] Output console
-			Console device and comm spec (speed, control, parity).
+	console=	[KNL] Output console device and options.
+
+		tty<n>	Use the virtual console device <n>.
+
+		ttyS<n>[,options]
+			Use the specified serial port.  The options are of
+			the form "bbbbpn", where "bbbb" is the baud rate,
+			"p" is parity ("n", "o", or "e"), and "n" is bits.
+			Default is "9600n8".
+
+			See also Documentation/serial-console.txt.
+
+		uart,io,<addr>[,options]
+		uart,mmio,<addr>[,options]
+			Start an early, polled-mode console on the 8250/16550
+			UART at the specified I/O port or MMIO address,
+			switching to the matching ttyS device later.  The
+			options are the same as for ttyS, above.
 
 	cpcihp_generic=	[HW,PCI] Generic port I/O CompactPCI driver
 			Format: <first_slot>,<last_slot>,<port>,<enum_bit>[,<debug>]
@@ -391,10 +416,14 @@ running once the system is up.
 
 	edb=		[HW,PS2]
 
+	edd=		[EDD]
+			Format: {"of[f]" | "sk[ipmbr]"}
+			See comment in arch/i386/boot/edd.S
+
 	eicon=		[HW,ISDN] 
 			Format: <id>,<membase>,<irq>
 
-	eisa_irq_edge=	[PARISC]
+	eisa_irq_edge=	[PARISC,HW]
 			See header of drivers/parisc/eisa.c.
 
 	elanfreq=	[IA-32]
@@ -403,7 +432,8 @@ running once the system is up.
 
 	elevator=	[IOSCHED]
 			Format: {"as"|"cfq"|"deadline"|"noop"}
-			See Documentation/as-iosched.txt for details
+			See Documentation/block/as-iosched.txt
+			and Documentation/block/deadline-iosched.txt for details.
 
 	es1370=		[HW,OSS]
 			Format: <lineout>[,<micbias>]
@@ -456,6 +486,10 @@ running once the system is up.
  
 	gvp11=		[HW,SCSI]
 
+	hashdist=	[KNL,NUMA] Large hashes allocated during boot
+			are distributed across NUMA nodes.  Defaults on
+			for IA-64, off otherwise.
+
 	hcl=		[IA-64] SGI's Hardware Graph compatibility layer
 
 	hd=		[EIDE] (E)IDE hard drive subsystem geometry
@@ -480,6 +514,8 @@ running once the system is up.
 	i8042.dumbkbd	[HW] Pretend that controlled can only read data from
 			     keyboard and can not control its state
 			     (Don't attempt to blink the leds)
+	i8042.noacpi	[HW] Don't use ACPI to discover KBD/AUX controller
+			     settings
 	i8042.noaux	[HW] Don't check for auxiliary (== mouse) port
 	i8042.nomux	[HW] Don't check presence of an active multiplexing
 			     controller
@@ -488,16 +524,26 @@ running once the system is up.
 
 	i810=		[HW,DRM]
 
+	i8k.force	[HW] Activate i8k driver even if SMM BIOS signature
+			does not match list of supported models.
+	i8k.power_status
+			[HW] Report power status in /proc/i8k
+			(disabled by default)
+	i8k.restricted	[HW] Allow controlling fans only if SYS_ADMIN
+			capability is set.
+
 	ibmmcascsi=	[HW,MCA,SCSI] IBM MicroChannel SCSI adapter
 			See Documentation/mca.txt.
 
 	icn=		[HW,ISDN]
 			Format: <io>[,<membase>[,<icn_id>[,<icn_id2>]]]
 
+	ide=		[HW] (E)IDE subsystem
+			Format: ide=nodma or ide=doubler or ide=reverse
+			See Documentation/ide.txt.
+
 	ide?=		[HW] (E)IDE subsystem
-			Config (iomem/irq), tuning or debugging
-			(serialize,reset,no{dma,tune,probe}) or chipset
-			specific parameters.
+			Format: ide?=noprobe or chipset specific parameters.
 			See Documentation/ide.txt.
 	
 	idebus=		[HW] (E)IDE subsystem - VLB/PCI bus speed
@@ -545,11 +591,13 @@ running once the system is up.
 			Format: <RDP>, <reset>, <pci_scan>, <verbosity>
 
 	isolcpus=	[KNL,SMP] Isolate CPUs from the general scheduler.
-			Format: <cpu number>, ..., <cpu number>
+			Format: <cpu number>,...,<cpu number>
 			This option can be used to specify one or more CPUs
 			to isolate from the general SMP balancing and scheduling
 			algorithms. The only way to move a process onto or off
 			an "isolated" CPU is via the CPU affinity syscalls.
+			<cpu number> begins at 0 and the maximum value is
+			"number of CPUs in system - 1".
 
 			This option is the preferred way to isolate CPUs. The
 			alternative - manually setting the CPU mask of all tasks
@@ -629,7 +677,11 @@ running once the system is up.
 
 	mac53c9x=	[HW,SCSI]
 			Format: <num_esps>,<disconnect>,<nosync>,<can_queue>,<cmd_per_lun>,<sg_tablesize>,<hostid>,<use_tags>
-	
+
+	machvec=	[IA64]
+			Force the use of a particular machine-vector (machvec) in a generic
+			kernel.  Example: machvec=hpzx1_swiotlb
+
 	mad16=		[HW,OSS]
 			Format: <io>,<irq>,<dma>,<dma16>,<mpu_io>,<mpu_irq>,<joystick>
 
@@ -643,9 +695,10 @@ running once the system is up.
 	maxcpus=	[SMP] Maximum number of processors that	an SMP kernel
 			should make use of
 
-	max_scsi_luns=	[SCSI]
+	max_luns=	[SCSI] Maximum number of LUNs to probe
+			Should be between 1 and 2^32-1.
 
-	max_scsi_report_luns=
+	max_report_luns=
 			[SCSI] Maximum number of LUNs received
 			Should be between 1 and 16384.
 
@@ -670,6 +723,9 @@ running once the system is up.
 	mem=nn[KMG]	[KNL,BOOT] Force usage of a specific amount of memory
 			Amount of memory to be used when the kernel is not able
 			to see the whole system memory or for test.
+			[IA-32] Use together with memmap= to avoid physical
+			address space collisions. Without memmap= PCI devices
+			could be placed at addresses belonging to unused RAM.
 
 	mem=nopentium	[BUGS=IA-32] Disable usage of 4MB pages for kernel
 			memory.
@@ -692,7 +748,7 @@ running once the system is up.
 			[KNL,ACPI] Mark specific memory as reserved.
 			Region of memory to be used, from ss to ss+nn.
 
-	meye=		[HW] Set MotionEye Camera parameters
+	meye.*=		[HW] Set MotionEye Camera parameters
 			See Documentation/video4linux/meye.txt.
 
 	mga=		[HW,DRM]
@@ -754,8 +810,8 @@ running once the system is up.
 
 	noalign		[KNL,ARM] 
  
-	noapic		[SMP,APIC] Tells the kernel not to make use of any
-			APIC that may be present on the system.
+	noapic		[SMP,APIC] Tells the kernel to not make use of any
+			IOAPICs that may be present in the system.
 
 	noasync		[HW,M68K] Disables async and sync negotiation for
 			all devices.
@@ -769,13 +825,11 @@ running once the system is up.
 
 	noexec		[IA-64]
 
-	noexec		[i386]
+	noexec		[i386, x86_64]
 			noexec=on: enable non-executable mappings (default)
 			noexec=off: disable nn-executable mappings
 
 	nofxsr		[BUGS=IA-32]
-
-	nohighio	[BUGS=IA-32] Disable highmem block I/O.
 
 	nohlt		[BUGS=ARM]
  
@@ -842,6 +896,13 @@ running once the system is up.
 	panic=		[KNL] Kernel behaviour on panic
 			Format: <timeout>
 
+	parkbd.port=	[HW] Parallel port number the keyboard adapter is
+			connected to, default is 0.
+			Format: <parport#>
+	parkbd.mode=	[HW] Parallel port keyboard adapter mode of operation,
+			0 for XT, 1 for AT (default is AT).
+			Format: <mode> 
+
 	parport=0	[HW,PPT]	Specify parallel ports. 0 disables.
 	parport=auto			Use 'auto' to force the driver to use
 	parport=0xBBB[,IRQ[,DMA]]	any IRQ/DMA settings detected (the
@@ -856,6 +917,16 @@ running once the system is up.
 					Parallel ports are assigned in the
 					order they are specified on the command
 					line, starting with parport0.
+
+	parport_init_mode=
+			[HW,PPT]	Configure VIA parallel port to
+					operate in specific mode. This is
+					necessary on Pegasos computer where
+					firmware has no options for setting up
+					parallel port mode and sets it to
+					spp. Currently this function knows
+					686a and 8231 chips.
+			Format: [spp|ps2|epp|ecp|ecpepp]
 
 	pas2=		[HW,OSS]
 			Format: <io>,<irq>,<dma>,<dma16>,<sb_io>,<sb_irq>,<sb_dma>,<sb_dma16>
@@ -912,6 +983,10 @@ running once the system is up.
 					enabled.
 		noacpi			[IA-32] Do not use ACPI for IRQ routing
 					or for PCI scanning.
+		routeirq		Do IRQ routing for all PCI devices.
+					This is normally done in pci_enable_device(),
+					so this option is a temporary workaround
+					for broken drivers that don't call it.
 
 		firmware		[ARM] Do not re-enumerate the bus but
 					instead just use the configuration
@@ -925,6 +1000,11 @@ running once the system is up.
 	pd.		[PARIDE]
 			See Documentation/paride.txt.
 
+	pdcchassis=	[PARISC,HW] Disable/Enable PDC Chassis Status codes at
+			boot time.
+			Format: { 0 | 1 }
+			See arch/parisc/kernel/pdc_chassis.c
+
 	pf.		[PARIDE]
 			See Documentation/paride.txt.
 
@@ -937,6 +1017,9 @@ running once the system is up.
 	plip=		[PPT,NET] Parallel port network link
 			Format: { parport<nr> | timid | 0 }
 			See also Documentation/parport.txt.
+
+	pnpacpi=	[ACPI]
+			{ off }
 
 	pnpbios=	[ISAPNP]
 			{ on | off | curr | res | no-curr | no-res }
@@ -959,6 +1042,10 @@ running once the system is up.
 			(param: schedule - profile schedule points}
 			(param: profile step/bucket size as a power of 2 for
 				statistical time based profiling)
+
+	processor.max_cstate=   [HW, ACPI]
+			Limit processor to maximum C-state
+			max_cstate=9 overrides any DMI blacklist limit.
 
 	prompt_ramdisk=	[RAM] List of RAM disks to prompt for floppy disk
 			before loading.
@@ -1001,10 +1088,6 @@ running once the system is up.
 			New name for the ramdisk parameter.
 			See Documentation/ramdisk.txt.
 
-	ramdisk_start=	[RAM] Starting block of RAM disk image (so you can
-			place it after the kernel image on a boot floppy).
-			See Documentation/ramdisk.txt.
-
 	reboot=		[BUGS=IA-32,BUGS=ARM,BUGS=IA-64] Rebooting mode
 			Format: <reboot_mode>[,<reboot_mode2>[,...]]
 			See arch/*/kernel/reboot.c.
@@ -1022,6 +1105,9 @@ running once the system is up.
 	ro		[KNL] Mount root device read-only on boot
 
 	root=		[KNL] Root filesystem
+
+	rootdelay=	[KNL] Delay (in seconds) to pause before attempting to
+			mount the root filesystem
 
 	rootflags=	[KNL] Set root filesystem mount option string
 
@@ -1059,8 +1145,6 @@ running once the system is up.
 			(flags are integer value)
 
 	scsi_logging=	[SCSI]
-
-	scsihosts=	[SCSI]
 
 	serialnumber	[BUGS=IA-32]
 
@@ -1219,16 +1303,11 @@ running once the system is up.
 	sonycd535=	[HW,CD]
 			Format: <io>[,<irq>]
 
-	sonypi=		[HW] Sony Programmable I/O Control Device driver
-			Format: <minor>,<verbose>,<fnkeyinit>,<camera>,<compat>,<nojogdial>
+	sonypi.*=	[HW] Sony Programmable I/O Control Device driver
+			See Documentation/sonypi.txt
 
 	specialix=	[HW,SERIAL] Specialix multi-serial port adapter
 			See Documentation/specialix.txt.
-
-	speedstep_coppermine=
-			[HW,IA-32] Take CPU in your notebook as SpeedStep-capable
-			See comment before function speedstep_setup() in
-			arch/i386/kernel/cpu/cpufreq/speedstep.c.
 
 	spia_io_base=	[HW,MTD]
 	spia_fio_base=
@@ -1244,7 +1323,7 @@ running once the system is up.
 	st0x=		[HW,SCSI]
 			See header of drivers/scsi/seagate.c.
 
-	sti=		[HW]
+	sti=		[PARISC,HW]
 			Format: <num>
 			Set the STI (builtin display/keyboard on the HP-PARISC
 			machines) console (graphic card) which should be used
@@ -1277,12 +1356,13 @@ running once the system is up.
 	thash_entries=	[KNL,NET]
 			Set number of hash buckets for TCP connection
 
-	tipar=		[HW]
-			See header of drivers/char/tipar.c.
+	tipar.timeout=	[HW,PPT]
+			Set communications timeout in tenths of a second
+			(default 15).
 
-	tiusb=		[HW,USB] Texas Instruments' USB GraphLink (aka SilverLink)
-			Format: <timeout>
- 
+	tipar.delay=	[HW,PPT]
+			Set inter-bit delay in microseconds (default 10).
+
 	tmc8xx=		[HW,SCSI]
 			See header of drivers/scsi/seagate.c.
 
@@ -1311,6 +1391,8 @@ running once the system is up.
 
 	uart6850=	[HW,OSS]
 			Format: <io>,<irq>
+
+	usb-handoff	[HW] Enable early USB BIOS -> OS handoff
  
 	video=		[FB] Frame buffer configuration
 			See Documentation/fb/modedb.txt.

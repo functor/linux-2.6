@@ -31,6 +31,7 @@
 #include <sound/ac97_codec.h>
 #include <sound/util_mem.h>
 #include <sound/pcm-indirect.h>
+#include <sound/timer.h>
 #include <linux/interrupt.h>
 #include <asm/io.h>
 
@@ -737,6 +738,9 @@
 #define FXGPREGBASE		0x100		/* FX general purpose registers base       	*/
 #define A_FXGPREGBASE		0x400		/* Audigy GPRs, 0x400 to 0x5ff			*/
 
+#define A_TANKMEMCTLREGBASE	0x100		/* Tank memory control registers base - only for Audigy */
+#define A_TANKMEMCTLREG_MASK	0x1f		/* only 5 bits used - only for Audigy */
+
 /* Tank audio data is logarithmically compressed down to 16 bits before writing to TRAM and is	*/
 /* decompressed back to 20 bits on a read.  There are a total of 160 locations, the last 32	*/
 /* locations are for external TRAM. 								*/
@@ -825,6 +829,7 @@ struct _snd_emu10k1_pcm {
 };
 
 typedef struct {
+	/* mono, left, right x 8 sends (4 on emu10k1) */
 	unsigned char send_routing[3][8];
 	unsigned char send_volume[3][8];
 	unsigned short attn[3];
@@ -835,10 +840,10 @@ typedef struct {
 ((route[0] | (route[1] << 4) | (route[2] << 8) | (route[3] << 12)) << 16)
 
 #define snd_emu10k1_compose_audigy_fxrt1(route) \
-(((unsigned int)route[0] | ((unsigned int)route[1] << 8) | ((unsigned int)route[2] << 16) | ((unsigned int)route[3] << 12)) << 24)
+((unsigned int)route[0] | ((unsigned int)route[1] << 8) | ((unsigned int)route[2] << 16) | ((unsigned int)route[3] << 24))
 
 #define snd_emu10k1_compose_audigy_fxrt2(route) \
-(((unsigned int)route[4] | ((unsigned int)route[5] << 8) | ((unsigned int)route[6] << 16) | ((unsigned int)route[7] << 12)) << 24)
+((unsigned int)route[4] | ((unsigned int)route[5] << 8) | ((unsigned int)route[6] << 16) | ((unsigned int)route[7] << 24))
 
 typedef struct snd_emu10k1_memblk {
 	snd_util_memblk_t mem;
@@ -857,7 +862,7 @@ typedef struct {
 	struct list_head list;		/* list link container */
 	unsigned int vcount;
 	unsigned int count;		/* count of GPR (1..16) */
-	unsigned char gpr[32];		/* GPR number(s) */
+	unsigned short gpr[32];		/* GPR number(s) */
 	unsigned int value[32];
 	unsigned int min;		/* minimum range */
 	unsigned int max;		/* maximum range */
@@ -870,7 +875,7 @@ typedef void (snd_fx8010_irq_handler_t)(emu10k1_t *emu, void *private_data);
 typedef struct _snd_emu10k1_fx8010_irq {
 	struct _snd_emu10k1_fx8010_irq *next;
 	snd_fx8010_irq_handler_t *handler;
-	unsigned char gpr_running;
+	unsigned short gpr_running;
 	void *private_data;
 } snd_emu10k1_fx8010_irq_t;
 
@@ -881,12 +886,12 @@ typedef struct {
 	unsigned int channels;		/* 16-bit channels count */
 	unsigned int tram_start;	/* initial ring buffer position in TRAM (in samples) */
 	unsigned int buffer_size;	/* count of buffered samples */
-	unsigned char gpr_size;		/* GPR containing size of ring buffer in samples (host) */
-	unsigned char gpr_ptr;		/* GPR containing current pointer in the ring buffer (host = reset, FX8010) */
-	unsigned char gpr_count;	/* GPR containing count of samples between two interrupts (host) */
-	unsigned char gpr_tmpcount;	/* GPR containing current count of samples to interrupt (host = set, FX8010) */
-	unsigned char gpr_trigger;	/* GPR containing trigger (activate) information (host) */
-	unsigned char gpr_running;	/* GPR containing info if PCM is running (FX8010) */
+	unsigned short gpr_size;		/* GPR containing size of ring buffer in samples (host) */
+	unsigned short gpr_ptr;		/* GPR containing current pointer in the ring buffer (host = reset, FX8010) */
+	unsigned short gpr_count;	/* GPR containing count of samples between two interrupts (host) */
+	unsigned short gpr_tmpcount;	/* GPR containing current count of samples to interrupt (host = set, FX8010) */
+	unsigned short gpr_trigger;	/* GPR containing trigger (activate) information (host) */
+	unsigned short gpr_running;	/* GPR containing info if PCM is running (FX8010) */
 	unsigned char etram[32];	/* external TRAM address & data */
 	snd_pcm_indirect_t pcm_rec;
 	unsigned int tram_pos;
@@ -997,6 +1002,8 @@ struct _snd_emu10k1 {
 	snd_pcm_substream_t *pcm_capture_mic_substream;
 	snd_pcm_substream_t *pcm_capture_efx_substream;
 
+	snd_timer_t *timer;
+
 	emu10k1_midi_t midi;
 	emu10k1_midi_t midi2; /* for audigy */
 
@@ -1016,6 +1023,7 @@ int snd_emu10k1_pcm_mic(emu10k1_t * emu, int device, snd_pcm_t ** rpcm);
 int snd_emu10k1_pcm_efx(emu10k1_t * emu, int device, snd_pcm_t ** rpcm);
 int snd_emu10k1_fx8010_pcm(emu10k1_t * emu, int device, snd_pcm_t ** rpcm);
 int snd_emu10k1_mixer(emu10k1_t * emu);
+int snd_emu10k1_timer(emu10k1_t * emu, int device);
 int snd_emu10k1_fx8010_new(emu10k1_t *emu, int device, snd_hwdep_t ** rhwdep);
 
 irqreturn_t snd_emu10k1_interrupt(int irq, void *dev_id, struct pt_regs *regs);
@@ -1029,7 +1037,6 @@ int snd_emu10k1_fx8010_tram_setup(emu10k1_t *emu, u32 size);
 /* I/O functions */
 unsigned int snd_emu10k1_ptr_read(emu10k1_t * emu, unsigned int reg, unsigned int chn);
 void snd_emu10k1_ptr_write(emu10k1_t *emu, unsigned int reg, unsigned int chn, unsigned int data);
-void snd_emu10k1_efx_write(emu10k1_t *emu, unsigned int pc, unsigned int data);
 unsigned int snd_emu10k1_efx_read(emu10k1_t *emu, unsigned int pc);
 void snd_emu10k1_intr_enable(emu10k1_t *emu, unsigned int intrenb);
 void snd_emu10k1_intr_disable(emu10k1_t *emu, unsigned int intrenb);
@@ -1043,7 +1050,6 @@ static inline unsigned int snd_emu10k1_wc(emu10k1_t *emu) { return (inl(emu->por
 unsigned short snd_emu10k1_ac97_read(ac97_t *ac97, unsigned short reg);
 void snd_emu10k1_ac97_write(ac97_t *ac97, unsigned short reg, unsigned short data);
 unsigned int snd_emu10k1_rate_to_pitch(unsigned int rate);
-unsigned char snd_emu10k1_sum_vol_attn(unsigned int value);
 
 /* memory allocation */
 snd_util_memblk_t *snd_emu10k1_alloc_pages(emu10k1_t *emu, snd_pcm_substream_t *substream);
@@ -1140,6 +1146,13 @@ int snd_emu10k1_fx8010_unregister_irq_handler(emu10k1_t *emu,
 #define ETRAM_DATA(x)	(TANKMEMDATAREGBASE + 0x80 + (x)) /* x = 0x00 - 0x1f */
 #define ITRAM_ADDR(x)	(TANKMEMADDRREGBASE + 0x00 + (x)) /* x = 0x00 - 0x7f */
 #define ETRAM_ADDR(x)	(TANKMEMADDRREGBASE + 0x80 + (x)) /* x = 0x00 - 0x1f */
+
+#define A_ITRAM_DATA(x)	(TANKMEMDATAREGBASE + 0x00 + (x)) /* x = 0x00 - 0xbf */
+#define A_ETRAM_DATA(x)	(TANKMEMDATAREGBASE + 0xc0 + (x)) /* x = 0x00 - 0x3f */
+#define A_ITRAM_ADDR(x)	(TANKMEMADDRREGBASE + 0x00 + (x)) /* x = 0x00 - 0xbf */
+#define A_ETRAM_ADDR(x)	(TANKMEMADDRREGBASE + 0xc0 + (x)) /* x = 0x00 - 0x3f */
+#define A_ITRAM_CTL(x)	(A_TANKMEMCTLREGBASE + 0x00 + (x)) /* x = 0x00 - 0xbf */
+#define A_ETRAM_CTL(x)	(A_TANKMEMCTLREGBASE + 0xc0 + (x)) /* x = 0x00 - 0x3f */
 
 #define A_FXBUS(x)	(0x00 + (x))	/* x = 0x00 - 0x3f? */
 #define A_EXTIN(x)	(0x40 + (x))	/* x = 0x00 - 0x1f? */
@@ -1269,8 +1282,11 @@ int snd_emu10k1_fx8010_unregister_irq_handler(emu10k1_t *emu,
 #define A_C_00100000	0xd5
 #define A_GPR_ACCU	0xd6		/* ACCUM, accumulator */
 #define A_GPR_COND	0xd7		/* CCR, condition register */
-/* 0xd8 = noise1 */
-/* 0xd9 = noise2 */
+#define A_GPR_NOISE0	0xd8		/* noise source */
+#define A_GPR_NOISE1	0xd9		/* noise source */
+#define A_GPR_IRQ	0xda		/* IRQ register */
+#define A_GPR_DBAC	0xdb		/* TRAM Delay Base Address Counter - internal */
+#define A_GPR_DBACE	0xde		/* TRAM Delay Base Address Counter - external */
 
 /* definitions for debug register */
 #define EMU10K1_DBG_ZC			0x80000000	/* zero tram counter */
@@ -1310,7 +1326,7 @@ typedef struct {
 	snd_ctl_elem_id_t id;		/* full control ID definition */
 	unsigned int vcount;		/* visible count */
 	unsigned int count;		/* count of GPR (1..16) */
-	unsigned char gpr[32];		/* GPR number(s) */
+	unsigned short gpr[32];		/* GPR number(s) */
 	unsigned int value[32];		/* initial values */
 	unsigned int min;		/* minimum range */
 	unsigned int max;		/* maximum range */
@@ -1320,8 +1336,8 @@ typedef struct {
 typedef struct {
 	char name[128];
 
-	unsigned long gpr_valid[0x100/(sizeof(unsigned long)*8)]; /* bitmask of valid initializers */
-	unsigned int gpr_map[0x100];	  /* initializers */
+	DECLARE_BITMAP(gpr_valid, 0x200); /* bitmask of valid initializers */
+	u_int32_t __user *gpr_map;	  /* initializers */
 
 	unsigned int gpr_add_control_count; /* count of GPR controls to add/replace */
 	emu10k1_fx8010_control_gpr_t __user *gpr_add_controls; /* GPR controls to add/replace */
@@ -1333,12 +1349,12 @@ typedef struct {
 	unsigned int gpr_list_control_total; /* total count of GPR controls */
 	emu10k1_fx8010_control_gpr_t __user *gpr_list_controls; /* listed GPR controls */
 
-	unsigned long tram_valid[0xa0/(sizeof(unsigned long)*8)]; /* bitmask of valid initializers */
-	unsigned int tram_data_map[0xa0]; /* data initializers */
-	unsigned int tram_addr_map[0xa0]; /* map initializers */
+	DECLARE_BITMAP(tram_valid, 0x100); /* bitmask of valid initializers */
+	u_int32_t __user *tram_data_map;  /* data initializers */
+	u_int32_t __user *tram_addr_map;  /* map initializers */
 
-	unsigned long code_valid[512/(sizeof(unsigned long)*8)];  /* bitmask of valid instructions */
-	unsigned int code[512][2];	  /* one instruction - 64 bits */
+	DECLARE_BITMAP(code_valid, 1024); /* bitmask of valid instructions */
+	u_int32_t __user *code;		  /* one instruction - 64 bits */
 } emu10k1_fx8010_code_t;
 
 typedef struct {
@@ -1354,12 +1370,12 @@ typedef struct {
 	unsigned int channels;		/* 16-bit channels count, zero = remove this substream */
 	unsigned int tram_start;	/* ring buffer position in TRAM (in samples) */
 	unsigned int buffer_size;	/* count of buffered samples */
-	unsigned char gpr_size;		/* GPR containing size of ringbuffer in samples (host) */
-	unsigned char gpr_ptr;		/* GPR containing current pointer in the ring buffer (host = reset, FX8010) */
-	unsigned char gpr_count;	/* GPR containing count of samples between two interrupts (host) */
-	unsigned char gpr_tmpcount;	/* GPR containing current count of samples to interrupt (host = set, FX8010) */
-	unsigned char gpr_trigger;	/* GPR containing trigger (activate) information (host) */
-	unsigned char gpr_running;	/* GPR containing info if PCM is running (FX8010) */
+	unsigned short gpr_size;		/* GPR containing size of ringbuffer in samples (host) */
+	unsigned short gpr_ptr;		/* GPR containing current pointer in the ring buffer (host = reset, FX8010) */
+	unsigned short gpr_count;	/* GPR containing count of samples between two interrupts (host) */
+	unsigned short gpr_tmpcount;	/* GPR containing current count of samples to interrupt (host = set, FX8010) */
+	unsigned short gpr_trigger;	/* GPR containing trigger (activate) information (host) */
+	unsigned short gpr_running;	/* GPR containing info if PCM is running (FX8010) */
 	unsigned char pad;		/* reserved */
 	unsigned char etram[32];	/* external TRAM address & data (one per channel) */
 	unsigned int res2;		/* reserved */

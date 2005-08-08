@@ -53,7 +53,7 @@ struct i2c_dev {
 
 #define I2C_MINORS	256
 static struct i2c_dev *i2c_dev_array[I2C_MINORS];
-static spinlock_t i2c_dev_array_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(i2c_dev_array_lock);
 
 struct i2c_dev *i2c_dev_get_by_minor(unsigned index)
 {
@@ -539,7 +539,7 @@ out_unreg_class:
 out_unreg_chrdev:
 	unregister_chrdev(I2C_MAJOR, "i2c");
 out:
-	printk(KERN_ERR "%s: Driver Initialisation failed", __FILE__);
+	printk(KERN_ERR "%s: Driver Initialisation failed\n", __FILE__);
 	return res;
 }
 

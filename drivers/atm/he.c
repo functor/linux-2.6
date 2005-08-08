@@ -86,44 +86,19 @@
 #undef USE_RBPL_POOL			/* if memory is tight try this */
 #define USE_TPD_POOL
 /* #undef CONFIG_ATM_HE_USE_SUNI */
-
-/* compatibility */
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,69)
-typedef void irqreturn_t;
-#define IRQ_NONE
-#define IRQ_HANDLED
-#define IRQ_RETVAL(x)
-#endif
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,9)
-#define __devexit_p(func)		func
-#endif
-
-#ifndef MODULE_LICENSE
-#define MODULE_LICENSE(x)
-#endif
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,3)
-#define pci_set_drvdata(pci_dev, data)	(pci_dev)->driver_data = (data)
-#define pci_get_drvdata(pci_dev)	(pci_dev)->driver_data
-#endif
+/* #undef HE_DEBUG */
 
 #include "he.h"
-
 #include "suni.h"
-
 #include <linux/atm_he.h>
 
 #define hprintk(fmt,args...)	printk(KERN_ERR DEV_LABEL "%d: " fmt, he_dev->number , ##args)
 
-#undef DEBUG
-#ifdef DEBUG
+#ifdef HE_DEBUG
 #define HPRINTK(fmt,args...)	printk(KERN_DEBUG DEV_LABEL "%d: " fmt, he_dev->number , ##args)
-#else
+#else /* !HE_DEBUG */
 #define HPRINTK(fmt,args...)	do { } while (0)
-#endif /* DEBUG */
-
+#endif /* HE_DEBUG */
 
 /* version definition */
 
@@ -147,13 +122,55 @@ static u8 read_prom_byte(struct he_dev *he_dev, int addr);
 
 /* globals */
 
-struct he_dev *he_devs = NULL;
-static short disable64 = -1;
+static struct he_dev *he_devs;
+static int disable64;
 static short nvpibits = -1;
 static short nvcibits = -1;
 static short rx_skb_reserve = 16;
-static short irq_coalesce = 1;
-static short sdh = 0;
+static int irq_coalesce = 1;
+static int sdh = 0;
+
+/* Read from EEPROM = 0000 0011b */
+static unsigned int readtab[] = {
+	CS_HIGH | CLK_HIGH,
+	CS_LOW | CLK_LOW,
+	CLK_HIGH,               /* 0 */
+	CLK_LOW,
+	CLK_HIGH,               /* 0 */
+	CLK_LOW,
+	CLK_HIGH,               /* 0 */
+	CLK_LOW,
+	CLK_HIGH,               /* 0 */
+	CLK_LOW,
+	CLK_HIGH,               /* 0 */
+	CLK_LOW,
+	CLK_HIGH,               /* 0 */
+	CLK_LOW | SI_HIGH,
+	CLK_HIGH | SI_HIGH,     /* 1 */
+	CLK_LOW | SI_HIGH,
+	CLK_HIGH | SI_HIGH      /* 1 */
+};     
+ 
+/* Clock to read from/write to the EEPROM */
+static unsigned int clocktab[] = {
+	CLK_LOW,
+	CLK_HIGH,
+	CLK_LOW,
+	CLK_HIGH,
+	CLK_LOW,
+	CLK_HIGH,
+	CLK_LOW,
+	CLK_HIGH,
+	CLK_LOW,
+	CLK_HIGH,
+	CLK_LOW,
+	CLK_HIGH,
+	CLK_LOW,
+	CLK_HIGH,
+	CLK_LOW,
+	CLK_HIGH,
+	CLK_LOW
+};     
 
 static struct atmdev_ops he_ops =
 {
@@ -1701,7 +1718,7 @@ he_stop(struct he_dev *he_dev)
 	}
 	
 	if (he_dev->membase)
-		iounmap((void *) he_dev->membase);
+		iounmap(he_dev->membase);
 }
 
 static struct he_tpd *
@@ -2558,8 +2575,8 @@ he_close(struct atm_vcc *vcc)
 			udelay(250);
 		}
 
-		add_wait_queue(&he_vcc->rx_waitq, &wait);
 		set_current_state(TASK_UNINTERRUPTIBLE);
+		add_wait_queue(&he_vcc->rx_waitq, &wait);
 
 		he_writel_rsr0(he_dev, RSR0_CLOSE_CONN, cid);
 		(void) he_readl_rsr0(he_dev, cid);		/* flush posted writes */
@@ -2633,8 +2650,8 @@ he_close(struct atm_vcc *vcc)
 		tpd->vcc = vcc;
 		wmb();
 
-		add_wait_queue(&he_vcc->tx_waitq, &wait);
 		set_current_state(TASK_UNINTERRUPTIBLE);
+		add_wait_queue(&he_vcc->tx_waitq, &wait);
 		__enqueue_tpd(he_dev, tpd, cid);
 		spin_unlock_irqrestore(&he_dev->global_lock, flags);
 
@@ -3032,17 +3049,17 @@ read_prom_byte(struct he_dev *he_dev, int addr)
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("chas williams <chas@cmf.nrl.navy.mil>");
 MODULE_DESCRIPTION("ForeRunnerHE ATM Adapter driver");
-MODULE_PARM(disable64, "h");
+module_param(disable64, bool, 0);
 MODULE_PARM_DESC(disable64, "disable 64-bit pci bus transfers");
-MODULE_PARM(nvpibits, "i");
+module_param(nvpibits, short, 0);
 MODULE_PARM_DESC(nvpibits, "numbers of bits for vpi (default 0)");
-MODULE_PARM(nvcibits, "i");
+module_param(nvcibits, short, 0);
 MODULE_PARM_DESC(nvcibits, "numbers of bits for vci (default 12)");
-MODULE_PARM(rx_skb_reserve, "i");
+module_param(rx_skb_reserve, short, 0);
 MODULE_PARM_DESC(rx_skb_reserve, "padding for receive skb (default 16)");
-MODULE_PARM(irq_coalesce, "i");
+module_param(irq_coalesce, bool, 0);
 MODULE_PARM_DESC(irq_coalesce, "use interrupt coalescing (default 1)");
-MODULE_PARM(sdh, "i");
+module_param(sdh, bool, 0);
 MODULE_PARM_DESC(sdh, "use SDH framing (default 0)");
 
 static struct pci_device_id he_pci_tbl[] = {
@@ -3050,6 +3067,8 @@ static struct pci_device_id he_pci_tbl[] = {
 	  0, 0, 0 },
 	{ 0, }
 };
+
+MODULE_DEVICE_TABLE(pci, he_pci_tbl);
 
 static struct pci_driver he_driver = {
 	.name =		"he",

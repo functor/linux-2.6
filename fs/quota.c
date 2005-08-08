@@ -13,6 +13,10 @@
 #include <linux/kernel.h>
 #include <linux/smp_lock.h>
 #include <linux/security.h>
+#include <linux/syscalls.h>
+#include <linux/buffer_head.h>
+#include <linux/major.h>
+#include <linux/blkdev.h>
 
 /* Check validity of quotactl */
 static int check_quotactl_valid(struct super_block *sb, int type, int cmd, qid_t id)
@@ -94,11 +98,11 @@ static int check_quotactl_valid(struct super_block *sb, int type, int cmd, qid_t
 	if (cmd == Q_GETQUOTA || cmd == Q_XGETQUOTA) {
 		if (((type == USRQUOTA && current->euid != id) ||
 		     (type == GRPQUOTA && !in_egroup_p(id))) &&
-		    !capable(CAP_SYS_ADMIN))
+		    !capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_QUOTA_CTL))
 			return -EPERM;
 	}
 	else if (cmd != Q_GETFMT && cmd != Q_SYNC && cmd != Q_GETINFO && cmd != Q_XGETQSTAT)
-		if (!capable(CAP_SYS_ADMIN))
+		if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_QUOTA_CTL))
 			return -EPERM;
 
 	return security_quotactl (cmd, type, id, sb);
@@ -134,16 +138,54 @@ restart:
 	return NULL;
 }
 
+static void quota_sync_sb(struct super_block *sb, int type)
+{
+	int cnt;
+	struct inode *discard[MAXQUOTAS];
+
+	sb->s_qcop->quota_sync(sb, type);
+	/* This is not very clever (and fast) but currently I don't know about
+	 * any other simple way of getting quota data to disk and we must get
+	 * them there for userspace to be visible... */
+	if (sb->s_op->sync_fs)
+		sb->s_op->sync_fs(sb, 1);
+	sync_blockdev(sb->s_bdev);
+
+	/* Now when everything is written we can discard the pagecache so
+	 * that userspace sees the changes. We need i_sem and so we could
+	 * not do it inside dqonoff_sem. Moreover we need to be carefull
+	 * about races with quotaoff() (that is the reason why we have own
+	 * reference to inode). */
+	down(&sb_dqopt(sb)->dqonoff_sem);
+	for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
+		discard[cnt] = NULL;
+		if (type != -1 && cnt != type)
+			continue;
+		if (!sb_has_quota_enabled(sb, cnt))
+			continue;
+		discard[cnt] = igrab(sb_dqopt(sb)->files[cnt]);
+	}
+	up(&sb_dqopt(sb)->dqonoff_sem);
+	for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
+		if (discard[cnt]) {
+			down(&discard[cnt]->i_sem);
+			truncate_inode_pages(&discard[cnt]->i_data, 0);
+			up(&discard[cnt]->i_sem);
+			iput(discard[cnt]);
+		}
+	}
+}
+
 void sync_dquots(struct super_block *sb, int type)
 {
 	if (sb) {
 		if (sb->s_qcop->quota_sync)
-			sb->s_qcop->quota_sync(sb, type);
+			quota_sync_sb(sb, type);
 	}
 	else {
-		while ((sb = get_super_to_sync(type)) != 0) {
+		while ((sb = get_super_to_sync(type)) != NULL) {
 			if (sb->s_qcop->quota_sync)
-				sb->s_qcop->quota_sync(sb, type);
+				quota_sync_sb(sb, type);
 			drop_super(sb);
 		}
 	}
@@ -258,6 +300,10 @@ static int do_quotactl(struct super_block *sb, int type, int cmd, qid_t id, void
 	return 0;
 }
 
+#ifdef CONFIG_BLK_DEV_VROOT
+extern struct block_device *vroot_get_real_bdev(struct block_device *);
+#endif
+
 /*
  * This is the system call interface. This communicates with
  * the user-level programs. Currently this only supports diskquota
@@ -283,6 +329,22 @@ asmlinkage long sys_quotactl(unsigned int cmd, const char __user *special, qid_t
 		putname(tmp);
 		if (IS_ERR(bdev))
 			return PTR_ERR(bdev);
+#ifdef CONFIG_BLK_DEV_VROOT
+		printk(KERN_INFO "bdev=%p, gendisk=%p inode=%p[%d,%d]\n",
+			bdev, bdev?bdev->bd_disk:0, bdev->bd_inode,
+			imajor(bdev->bd_inode), iminor(bdev->bd_inode));
+
+		if (bdev && bdev->bd_inode &&
+			imajor(bdev->bd_inode) == VROOT_MAJOR) {
+			struct block_device *bdnew =
+				vroot_get_real_bdev(bdev);
+
+			bdput(bdev);
+			if (IS_ERR(bdnew))
+				return PTR_ERR(bdnew);
+			bdev = bdnew;
+		}
+#endif
 		sb = get_super(bdev);
 		bdput(bdev);
 		if (!sb)

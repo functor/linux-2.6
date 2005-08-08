@@ -257,7 +257,7 @@ static struct task_struct *hvcs_task;
 static unsigned long *hvcs_pi_buff;
 
 /* Only allow one hvcs_struct to use the hvcs_pi_buff at a time. */
-static spinlock_t hvcs_pi_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(hvcs_pi_lock);
 
 /* One vty-server per hvcs_struct */
 struct hvcs_struct {
@@ -308,14 +308,14 @@ struct hvcs_struct {
 #define from_kobj(kobj) container_of(kobj, struct hvcs_struct, kobj)
 
 static struct list_head hvcs_structs = LIST_HEAD_INIT(hvcs_structs);
-static spinlock_t hvcs_structs_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(hvcs_structs_lock);
 
 static void hvcs_unthrottle(struct tty_struct *tty);
 static void hvcs_throttle(struct tty_struct *tty);
 static irqreturn_t hvcs_handle_interrupt(int irq, void *dev_instance,
 		struct pt_regs *regs);
 
-static int hvcs_write(struct tty_struct *tty, int from_user,
+static int hvcs_write(struct tty_struct *tty,
 		const unsigned char *buf, int count);
 static int hvcs_write_room(struct tty_struct *tty);
 static int hvcs_chars_in_buffer(struct tty_struct *tty);
@@ -527,7 +527,7 @@ static int khvcsd(void *unused)
 
 static struct vio_device_id hvcs_driver_table[] __devinitdata= {
 	{"serial-server", "hvterm2"},
-	{ 0, }
+	{ NULL, }
 };
 MODULE_DEVICE_TABLE(vio, hvcs_driver_table);
 
@@ -631,7 +631,7 @@ static int __devinit hvcs_probe(
 	/* hvcsd->tty is zeroed out with the memset */
 	memset(hvcsd, 0x00, sizeof(*hvcsd));
 
-	hvcsd->lock = SPIN_LOCK_UNLOCKED;
+	spin_lock_init(&hvcsd->lock);
 	/* Automatically incs the refcount the first time */
 	kobject_init(&hvcsd->kobj);
 	/* Set up the callback for terminating the hvcs_struct's life */
@@ -1183,12 +1183,12 @@ static void hvcs_hangup(struct tty_struct * tty)
  * tty_hangup will allow hvcs_write time to complete execution before it
  * terminates our device.
  */
-static int hvcs_write(struct tty_struct *tty, int from_user,
+static int hvcs_write(struct tty_struct *tty,
 		const unsigned char *buf, int count)
 {
 	struct hvcs_struct *hvcsd = tty->driver_data;
 	unsigned int unit_address;
-	unsigned char *charbuf;
+	const unsigned char *charbuf;
 	unsigned long flags;
 	int total_sent = 0;
 	int tosend = 0;
@@ -1208,21 +1208,7 @@ static int hvcs_write(struct tty_struct *tty, int from_user,
 		count = HVCS_MAX_FROM_USER;
 	}
 
-	if (!from_user)
-		charbuf = (unsigned char *)buf;
-	else {
-		charbuf = kmalloc(count, GFP_KERNEL);
-		if (!charbuf) {
-			printk(KERN_WARNING "HVCS: write -ENOMEM.\n");
-			return -ENOMEM;
-		}
-
-		if (copy_from_user(charbuf, buf, count)) {
-			kfree(charbuf);
-			printk(KERN_WARNING "HVCS: write -EFAULT.\n");
-			return -EFAULT;
-		}
-	}
+	charbuf = buf;
 
 	spin_lock_irqsave(&hvcsd->lock, flags);
 
@@ -1234,8 +1220,6 @@ static int hvcs_write(struct tty_struct *tty, int from_user,
 	 */
 	if (hvcsd->open_count <= 0) {
 		spin_unlock_irqrestore(&hvcsd->lock, flags);
-		if (from_user)
-			kfree(charbuf);
 		return -ENODEV;
 	}
 
@@ -1292,8 +1276,6 @@ static int hvcs_write(struct tty_struct *tty, int from_user,
 	}
 
 	spin_unlock_irqrestore(&hvcsd->lock, flags);
-	if (from_user)
-		kfree(charbuf);
 
 	if (result == -1)
 		return -EIO;
@@ -1381,6 +1363,7 @@ static int __init hvcs_module_init(void)
 
 	hvcs_tty_driver->driver_name = hvcs_driver_name;
 	hvcs_tty_driver->name = hvcs_device_node;
+	hvcs_tty_driver->devfs_name = hvcs_device_node;
 
 	/*
 	 * We'll let the system assign us a major number, indicated by leaving

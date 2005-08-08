@@ -305,7 +305,7 @@ struct _snd_ymfpci {
 	unsigned int device_id;	/* PCI device ID */
 	unsigned int rev;	/* PCI revision */
 	unsigned long reg_area_phys;
-	unsigned long reg_area_virt;
+	void __iomem *reg_area_virt;
 	struct resource *res_reg_area;
 	struct resource *fm_res;
 	struct resource *mpu_res;
@@ -388,9 +388,6 @@ int snd_ymfpci_pcm_spdif(ymfpci_t *chip, int device, snd_pcm_t **rpcm);
 int snd_ymfpci_pcm_4ch(ymfpci_t *chip, int device, snd_pcm_t **rpcm);
 int snd_ymfpci_mixer(ymfpci_t *chip, int rear_switch);
 int snd_ymfpci_timer(ymfpci_t *chip, int device);
-
-int snd_ymfpci_voice_alloc(ymfpci_t *chip, ymfpci_voice_type_t type, int pair, ymfpci_voice_t **rvoice);
-int snd_ymfpci_voice_free(ymfpci_t *chip, ymfpci_voice_t *pvoice);
 
 #if defined(CONFIG_GAMEPORT) || (defined(MODULE) && defined(CONFIG_GAMEPORT_MODULE))
 #define SUPPORT_JOYSTICK

@@ -149,7 +149,7 @@ static const struct class_info clas_info[] =
 
 /*****************************************************************/
 
-void usbdevfs_conn_disc_event(void)
+void usbfs_conn_disc_event(void)
 {
 	conndiscevcnt++;
 	wake_up(&deviceconndiscwq);
@@ -180,7 +180,7 @@ static char *usb_dump_endpoint_descriptor (
 	in = (desc->bEndpointAddress & USB_DIR_IN);
 	dir = in ? 'I' : 'O';
 	if (speed == USB_SPEED_HIGH) {
-		switch (desc->wMaxPacketSize & (0x03 << 11)) {
+		switch (le16_to_cpu(desc->wMaxPacketSize) & (0x03 << 11)) {
 		case 1 << 11:	bandwidth = 2; break;
 		case 2 << 11:	bandwidth = 3; break;
 		}
@@ -227,7 +227,7 @@ static char *usb_dump_endpoint_descriptor (
 
 	start += sprintf(start, format_endpt, desc->bEndpointAddress, dir,
 			 desc->bmAttributes, type,
-			 (desc->wMaxPacketSize & 0x07ff) * bandwidth,
+			 (le16_to_cpu(desc->wMaxPacketSize) & 0x07ff) * bandwidth,
 			 interval, unit);
 	return start;
 }
@@ -335,10 +335,13 @@ static char *usb_dump_config (
  */
 static char *usb_dump_device_descriptor(char *start, char *end, const struct usb_device_descriptor *desc)
 {
+	u16 bcdUSB = le16_to_cpu(desc->bcdUSB);
+	u16 bcdDevice = le16_to_cpu(desc->bcdDevice);
+
 	if (start > end)
 		return start;
 	start += sprintf (start, format_device1,
-			  desc->bcdUSB >> 8, desc->bcdUSB & 0xff,
+			  bcdUSB >> 8, bcdUSB & 0xff,
 			  desc->bDeviceClass,
 			  class_decode (desc->bDeviceClass),
 			  desc->bDeviceSubClass,
@@ -348,8 +351,9 @@ static char *usb_dump_device_descriptor(char *start, char *end, const struct usb
 	if (start > end)
 		return start;
 	start += sprintf(start, format_device2,
-			 desc->idVendor, desc->idProduct,
-			 desc->bcdDevice >> 8, desc->bcdDevice & 0xff);
+			 le16_to_cpu(desc->idVendor),
+			 le16_to_cpu(desc->idProduct),
+			 bcdDevice >> 8, bcdDevice & 0xff);
 	return start;
 }
 
@@ -451,7 +455,7 @@ static char *usb_dump_string(char *start, char *end, const struct usb_device *de
  * nbytes - the maximum number of bytes to write
  * skip_bytes - the number of bytes to skip before writing anything
  * file_offset - the offset into the devices file on completion
- * The caller must own the usbdev->serialize semaphore.
+ * The caller must own the device lock.
  */
 static ssize_t usb_device_dump(char __user **buffer, size_t *nbytes, loff_t *skip_bytes, loff_t *file_offset,
 				struct usb_device *usbdev, struct usb_bus *bus, int level, int index, int count)
@@ -569,7 +573,6 @@ static ssize_t usb_device_dump(char __user **buffer, size_t *nbytes, loff_t *ski
 
 static ssize_t usb_device_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 {
-	struct list_head *buslist;
 	struct usb_bus *bus;
 	ssize_t ret, total_written = 0;
 	loff_t skip_bytes = *ppos;
@@ -581,18 +584,15 @@ static ssize_t usb_device_read(struct file *file, char __user *buf, size_t nbyte
 	if (!access_ok(VERIFY_WRITE, buf, nbytes))
 		return -EFAULT;
 
-	/* enumerate busses */
 	down (&usb_bus_list_lock);
-	list_for_each(buslist, &usb_bus_list) {
-		/* print devices for this bus */
-		bus = list_entry(buslist, struct usb_bus, bus_list);
-
+	/* print devices for all busses */
+	list_for_each_entry(bus, &usb_bus_list, bus_list) {
 		/* recurse through all children of the root hub */
 		if (!bus->root_hub)
 			continue;
-		down(&bus->root_hub->serialize);
+		usb_lock_device(bus->root_hub);
 		ret = usb_device_dump(&buf, &nbytes, &skip_bytes, ppos, bus->root_hub, bus, 0, 0, 0);
-		up(&bus->root_hub->serialize);
+		usb_unlock_device(bus->root_hub);
 		if (ret < 0) {
 			up(&usb_bus_list_lock);
 			return ret;
@@ -682,7 +682,7 @@ static loff_t usb_device_lseek(struct file * file, loff_t offset, int orig)
 	return ret;
 }
 
-struct file_operations usbdevfs_devices_fops = {
+struct file_operations usbfs_devices_fops = {
 	.llseek =	usb_device_lseek,
 	.read =		usb_device_read,
 	.poll =		usb_device_poll,

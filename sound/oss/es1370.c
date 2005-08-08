@@ -573,7 +573,7 @@ static int prog_dmabuf(struct es1370_state *s, struct dmabuf *db, unsigned rate,
 		if (!db->rawbuf)
 			return -ENOMEM;
 		db->buforder = order;
-		/* now mark the pages as reserved; otherwise remap_page_range doesn't do what we want */
+		/* now mark the pages as reserved; otherwise remap_pfn_range doesn't do what we want */
 		pend = virt_to_page(db->rawbuf + (PAGE_SIZE << db->buforder) - 1);
 		for (page = virt_to_page(db->rawbuf); page <= pend; page++)
 			SetPageReserved(page);
@@ -1364,7 +1364,9 @@ static int es1370_mmap(struct file *file, struct vm_area_struct *vma)
 		ret = -EINVAL;
 		goto out;
 	}
-	if (remap_page_range(vma, vma->vm_start, virt_to_phys(db->rawbuf), size, vma->vm_page_prot)) {
+	if (remap_pfn_range(vma, vma->vm_start,
+				virt_to_phys(db->rawbuf) >> PAGE_SHIFT,
+				size, vma->vm_page_prot)) {
 		ret = -EAGAIN;
 		goto out;
 	}
@@ -1940,7 +1942,9 @@ static int es1370_mmap_dac(struct file *file, struct vm_area_struct *vma)
 	if (size > (PAGE_SIZE << s->dma_dac1.buforder))
 		goto out;
 	ret = -EAGAIN;
-	if (remap_page_range(vma, vma->vm_start, virt_to_phys(s->dma_dac1.rawbuf), size, vma->vm_page_prot))
+	if (remap_pfn_range(vma, vma->vm_start,
+			virt_to_phys(s->dma_dac1.rawbuf) >> PAGE_SHIFT,
+			size, vma->vm_page_prot))
 		goto out;
 	s->dma_dac1.mapped = 1;
 	ret = 0;
@@ -2521,9 +2525,9 @@ static int micbias[NR_DEVICE];
 
 static unsigned int devindex;
 
-MODULE_PARM(lineout, "1-" __MODULE_STRING(NR_DEVICE) "i");
+module_param_array(lineout, bool, NULL, 0);
 MODULE_PARM_DESC(lineout, "if 1 the LINE input is converted to LINE out");
-MODULE_PARM(micbias, "1-" __MODULE_STRING(NR_DEVICE) "i");
+module_param_array(micbias, bool, NULL, 0);
 MODULE_PARM_DESC(micbias, "sets the +5V bias for an electret microphone");
 
 MODULE_AUTHOR("Thomas M. Sailer, sailer@ife.ee.ethz.ch, hb9jnx@hb9w.che.eu");

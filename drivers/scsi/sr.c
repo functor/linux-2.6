@@ -59,9 +59,6 @@
 #include "sr.h"
 
 
-MODULE_PARM(xa_test, "i");	/* see sr_ioctl.c */
-
-
 #define SR_DISKS	256
 
 #define MAX_RETRIES	3
@@ -88,7 +85,7 @@ static struct scsi_driver sr_template = {
 };
 
 static unsigned long sr_index_bits[SR_DISKS / BITS_PER_LONG];
-static spinlock_t sr_index_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(sr_index_lock);
 
 /* This semaphore is used to mediate the 0->1 reference get in the
  * face of object destruction (i.e. we can't allow a get on an
@@ -155,9 +152,11 @@ static inline struct scsi_cd *scsi_cd_get(struct gendisk *disk)
 
 static inline void scsi_cd_put(struct scsi_cd *cd)
 {
+	struct scsi_device *sdev = cd->device;
+
 	down(&sr_ref_sem);
-	scsi_device_put(cd->device);
 	kref_put(&cd->kref, sr_kref_release);
+	scsi_device_put(sdev);
 	up(&sr_ref_sem);
 }
 
@@ -377,6 +376,7 @@ static int sr_init_command(struct scsi_cmnd * SCpnt)
 			return 0;
 		SCpnt->cmnd[0] = WRITE_10;
 		SCpnt->sc_data_direction = DMA_TO_DEVICE;
+ 	 	cd->cdi.media_written = 1;
 	} else if (rq_data_dir(SCpnt->request) == READ) {
 		SCpnt->cmnd[0] = READ_10;
 		SCpnt->sc_data_direction = DMA_FROM_DEVICE;
@@ -544,7 +544,6 @@ static int sr_open(struct cdrom_device_info *cdi, int purpose)
 	return 0;
 
 error_out:
-	scsi_cd_put(cd);
 	return retval;	
 }
 
@@ -875,10 +874,10 @@ static void get_capabilities(struct scsi_cd *cd)
 		cd->cdi.mask |= CDC_CLOSE_TRAY; */
 
 	/*
-	 * if DVD-RAM of MRW-W, we are randomly writeable
+	 * if DVD-RAM, MRW-W or CD-RW, we are randomly writable
 	 */
-	if ((cd->cdi.mask & (CDC_DVD_RAM | CDC_MRW_W | CDC_RAM)) !=
-			(CDC_DVD_RAM | CDC_MRW_W | CDC_RAM)) {
+	if ((cd->cdi.mask & (CDC_DVD_RAM | CDC_MRW_W | CDC_RAM | CDC_CD_RW)) !=
+			(CDC_DVD_RAM | CDC_MRW_W | CDC_RAM | CDC_CD_RW)) {
 		cd->device->writeable = 1;
 	}
 

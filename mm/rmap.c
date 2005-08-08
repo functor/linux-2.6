@@ -35,6 +35,7 @@
  *         mm->page_table_lock
  *           zone->lru_lock (in mark_page_accessed)
  *           swap_list_lock (in swap_free etc's swap_info_get)
+ *             mmlist_lock (in mmput, drain_mmlist and others)
  *             swap_device_lock (in swap_duplicate, swap_info_get)
  *             mapping->private_lock (in __set_page_dirty_buffers)
  *             inode_lock (in set_page_dirty's __mark_inode_dirty)
@@ -50,6 +51,7 @@
 #include <linux/swapops.h>
 #include <linux/slab.h>
 #include <linux/init.h>
+#include <linux/acct.h>
 #include <linux/rmap.h>
 #include <linux/rcupdate.h>
 #include <linux/vs_memory.h>
@@ -120,14 +122,7 @@ int anon_vma_prepare(struct vm_area_struct *vma)
 
 void __anon_vma_merge(struct vm_area_struct *vma, struct vm_area_struct *next)
 {
-	if (!vma->anon_vma) {
-		BUG_ON(!next->anon_vma);
-		vma->anon_vma = next->anon_vma;
-		list_add(&vma->anon_vma_node, &next->anon_vma_node);
-	} else {
-		/* if they're both non-null they must be the same */
-		BUG_ON(vma->anon_vma != next->anon_vma);
-	}
+	BUG_ON(vma->anon_vma != next->anon_vma);
 	list_del(&next->anon_vma_node);
 }
 
@@ -254,11 +249,12 @@ unsigned long page_address_in_vma(struct page *page, struct vm_area_struct *vma)
  * repeatedly from either page_referenced_anon or page_referenced_file.
  */
 static int page_referenced_one(struct page *page,
-	struct vm_area_struct *vma, unsigned int *mapcount)
+	struct vm_area_struct *vma, unsigned int *mapcount, int ignore_token)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	unsigned long address;
 	pgd_t *pgd;
+	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
 	int referenced = 0;
@@ -275,7 +271,11 @@ static int page_referenced_one(struct page *page,
 	if (!pgd_present(*pgd))
 		goto out_unlock;
 
-	pmd = pmd_offset(pgd, address);
+	pud = pud_offset(pgd, address);
+	if (!pud_present(*pud))
+		goto out_unlock;
+
+	pmd = pmd_offset(pud, address);
 	if (!pmd_present(*pmd))
 		goto out_unlock;
 
@@ -289,7 +289,7 @@ static int page_referenced_one(struct page *page,
 	if (ptep_clear_flush_young(vma, address, pte))
 		referenced++;
 
-	if (mm != current->mm && has_swap_token(mm))
+	if (mm != current->mm && !ignore_token && has_swap_token(mm))
 		referenced++;
 
 	(*mapcount)--;
@@ -302,7 +302,7 @@ out:
 	return referenced;
 }
 
-static int page_referenced_anon(struct page *page)
+static int page_referenced_anon(struct page *page, int ignore_token)
 {
 	unsigned int mapcount;
 	struct anon_vma *anon_vma;
@@ -315,7 +315,8 @@ static int page_referenced_anon(struct page *page)
 
 	mapcount = page_mapcount(page);
 	list_for_each_entry(vma, &anon_vma->head, anon_vma_node) {
-		referenced += page_referenced_one(page, vma, &mapcount);
+		referenced += page_referenced_one(page, vma, &mapcount,
+							ignore_token);
 		if (!mapcount)
 			break;
 	}
@@ -334,7 +335,7 @@ static int page_referenced_anon(struct page *page)
  *
  * This function is only called from page_referenced for object-based pages.
  */
-static int page_referenced_file(struct page *page)
+static int page_referenced_file(struct page *page, int ignore_token)
 {
 	unsigned int mapcount;
 	struct address_space *mapping = page->mapping;
@@ -372,7 +373,8 @@ static int page_referenced_file(struct page *page)
 			referenced++;
 			break;
 		}
-		referenced += page_referenced_one(page, vma, &mapcount);
+		referenced += page_referenced_one(page, vma, &mapcount,
+							ignore_token);
 		if (!mapcount)
 			break;
 	}
@@ -389,9 +391,12 @@ static int page_referenced_file(struct page *page)
  * Quick test_and_clear_referenced for all mappings to a page,
  * returns the number of ptes which referenced the page.
  */
-int page_referenced(struct page *page, int is_locked)
+int page_referenced(struct page *page, int is_locked, int ignore_token)
 {
 	int referenced = 0;
+
+	if (!swap_token_default_timeout)
+		ignore_token = 1;
 
 	if (page_test_and_clear_young(page))
 		referenced++;
@@ -401,14 +406,15 @@ int page_referenced(struct page *page, int is_locked)
 
 	if (page_mapped(page) && page->mapping) {
 		if (PageAnon(page))
-			referenced += page_referenced_anon(page);
+			referenced += page_referenced_anon(page, ignore_token);
 		else if (is_locked)
-			referenced += page_referenced_file(page);
+			referenced += page_referenced_file(page, ignore_token);
 		else if (TestSetPageLocked(page))
 			referenced++;
 		else {
 			if (page->mapping)
-				referenced += page_referenced_file(page);
+				referenced += page_referenced_file(page,
+								ignore_token);
 			unlock_page(page);
 		}
 	}
@@ -431,6 +437,9 @@ void page_add_anon_rmap(struct page *page,
 
 	BUG_ON(PageReserved(page));
 	BUG_ON(!anon_vma);
+
+	// vma->vm_mm->anon_rss++;
+	vx_anonpages_inc(vma->vm_mm);
 
 	anon_vma = (void *) anon_vma + PAGE_MAPPING_ANON;
 	index = (address - vma->vm_start) >> PAGE_SHIFT;
@@ -497,6 +506,7 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	struct mm_struct *mm = vma->vm_mm;
 	unsigned long address;
 	pgd_t *pgd;
+	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
 	pte_t pteval;
@@ -518,7 +528,11 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	if (!pgd_present(*pgd))
 		goto out_unlock;
 
-	pmd = pmd_offset(pgd, address);
+	pud = pud_offset(pgd, address);
+	if (!pud_present(*pud))
+		goto out_unlock;
+
+	pmd = pmd_offset(pud, address);
 	if (!pmd_present(*pmd))
 		goto out_unlock;
 
@@ -577,12 +591,20 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 		 */
 		BUG_ON(!PageSwapCache(page));
 		swap_duplicate(entry);
+		if (list_empty(&mm->mmlist)) {
+			spin_lock(&mmlist_lock);
+			list_add(&mm->mmlist, &init_mm.mmlist);
+			spin_unlock(&mmlist_lock);
+		}
 		set_pte(pte, swp_entry_to_pte(entry));
 		BUG_ON(pte_file(*pte));
+		// mm->anon_rss--;
+		vx_anonpages_dec(mm);
 	}
 
 	// mm->rss--;
 	vx_rsspages_dec(mm);
+	acct_update_integrals();
 	page_remove_rmap(page);
 	page_cache_release(page);
 
@@ -621,6 +643,7 @@ static void try_to_unmap_cluster(unsigned long cursor,
 {
 	struct mm_struct *mm = vma->vm_mm;
 	pgd_t *pgd;
+	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
 	pte_t pteval;
@@ -646,7 +669,11 @@ static void try_to_unmap_cluster(unsigned long cursor,
 	if (!pgd_present(*pgd))
 		goto out_unlock;
 
-	pmd = pmd_offset(pgd, address);
+	pud = pud_offset(pgd, address);
+	if (!pud_present(*pud))
+		goto out_unlock;
+
+	pmd = pmd_offset(pud, address);
 	if (!pmd_present(*pmd))
 		goto out_unlock;
 
@@ -682,6 +709,7 @@ static void try_to_unmap_cluster(unsigned long cursor,
 
 		page_remove_rmap(page);
 		page_cache_release(page);
+		acct_update_integrals();
 		// mm->rss--;
 		vx_rsspages_dec(mm);
 		(*mapcount)--;

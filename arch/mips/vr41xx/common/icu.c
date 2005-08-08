@@ -4,6 +4,7 @@
  *  Copyright (C) 2001-2002  MontaVista Software Inc.
  *    Author: Yoichi Yuasa <yyuasa@mvista.com or source@mvista.com>
  *  Copyright (C) 2003-2004  Yoichi Yuasa <yuasa@hh.iij4u.or.jp>
+ *  Copyright (C) 2005 Ralf Baechle (ralf@linux-mips.org)
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -28,7 +29,6 @@
  *  Yoichi Yuasa <yuasa@hh.iij4u.or.jp>
  *  - Coped with INTASSIGN of NEC VR4133.
  */
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -747,11 +747,8 @@ static inline void init_vr41xx_icu_irq(void)
 	setup_irq(INT4_CASCADE_IRQ, &icu_cascade);
 }
 
-void __init init_IRQ(void)
+void __init arch_init_irq(void)
 {
-	memset(irq_desc, 0, sizeof(irq_desc));
-
-	init_generic_irq();
 	mips_cpu_irq_init(MIPS_CPU_IRQ_BASE);
 	init_vr41xx_icu_irq();
 	init_vr41xx_giuint_irq();

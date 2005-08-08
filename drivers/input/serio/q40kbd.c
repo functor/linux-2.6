@@ -36,8 +36,8 @@
 #include <linux/serio.h>
 #include <linux/interrupt.h>
 #include <linux/err.h>
+#include <linux/bitops.h>
 
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <asm/q40_master.h>
@@ -48,7 +48,7 @@ MODULE_AUTHOR("Vojtech Pavlik <vojtech@ucw.cz>");
 MODULE_DESCRIPTION("Q40 PS/2 keyboard controller driver");
 MODULE_LICENSE("GPL");
 
-spinlock_t q40kbd_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(q40kbd_lock);
 static struct serio *q40kbd_port;
 static struct platform_device *q40kbd_device;
 

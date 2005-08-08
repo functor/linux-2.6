@@ -43,10 +43,10 @@ Possible options for midisynth module:
 MODULE_AUTHOR("Frank van de Pol <fvdpol@coil.demon.nl>, Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Advanced Linux Sound Architecture sequencer MIDI synth.");
 MODULE_LICENSE("GPL");
-int output_buffer_size = PAGE_SIZE;
+static int output_buffer_size = PAGE_SIZE;
 module_param(output_buffer_size, int, 0644);
 MODULE_PARM_DESC(output_buffer_size, "Output buffer size in bytes.");
-int input_buffer_size = PAGE_SIZE;
+static int input_buffer_size = PAGE_SIZE;
 module_param(input_buffer_size, int, 0644);
 MODULE_PARM_DESC(input_buffer_size, "Input buffer size in bytes.");
 
@@ -279,12 +279,12 @@ static int set_client_name(seq_midisynth_client_t *client, snd_card_t *card,
 	cinfo.client = client->seq_client;
 	cinfo.type = KERNEL_CLIENT;
 	name = rmidi->name[0] ? (const char *)rmidi->name : "External MIDI";
-	snprintf(cinfo.name, sizeof(cinfo.name), "%s - Rawmidi %d", name, card->number);
+	strlcpy(cinfo.name, name, sizeof(cinfo.name));
 	return snd_seq_kernel_client_ctl(client->seq_client, SNDRV_SEQ_IOCTL_SET_CLIENT_INFO, &cinfo);
 }
 
 /* register new midi synth port */
-int
+static int
 snd_seq_midisynth_register_port(snd_seq_device_t *dev)
 {
 	seq_midisynth_client_t *client;
@@ -423,7 +423,7 @@ snd_seq_midisynth_register_port(snd_seq_device_t *dev)
 }
 
 /* release midi synth port */
-int
+static int
 snd_seq_midisynth_unregister_port(snd_seq_device_t *dev)
 {
 	seq_midisynth_client_t *client;
@@ -464,7 +464,9 @@ static int __init alsa_seq_midi_init(void)
 		snd_seq_midisynth_unregister_port,
 	};
 	memset(&synths, 0, sizeof(synths));
+	snd_seq_autoload_lock();
 	snd_seq_device_register_driver(SNDRV_SEQ_DEV_ID_MIDISYNTH, &ops, 0);
+	snd_seq_autoload_unlock();
 	return 0;
 }
 

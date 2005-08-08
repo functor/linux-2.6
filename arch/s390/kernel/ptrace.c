@@ -559,13 +559,13 @@ do_ptrace_emu31(struct task_struct *child, long request, long addr, long data)
 	case PTRACE_GETSIGINFO:
 		if (child->last_siginfo == NULL)
 			return -EINVAL;
-		return copy_siginfo_to_user32((siginfo_t32 __user *) data,
+		return copy_siginfo_to_user32((compat_siginfo_t __user *) data,
 					      child->last_siginfo);
 	case PTRACE_SETSIGINFO:
 		if (child->last_siginfo == NULL)
 			return -EINVAL;
 		return copy_siginfo_from_user32(child->last_siginfo,
-						(siginfo_t32 __user *) data);
+						(compat_siginfo_t __user *) data);
 	}
 	return ptrace_request(child, request, addr, data);
 }
@@ -626,7 +626,7 @@ do_ptrace(struct task_struct *child, long request, long addr, long data)
 		 * perhaps it should be put in the status that it wants to 
 		 * exit.
 		 */
-		if (child->state == TASK_ZOMBIE) /* already dead */
+		if (child->exit_state == EXIT_ZOMBIE) /* already dead */
 			return 0;
 		child->exit_code = SIGKILL;
 		/* make sure the single step bit is not set. */
@@ -640,7 +640,10 @@ do_ptrace(struct task_struct *child, long request, long addr, long data)
 			return -EIO;
 		clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
 		child->exit_code = data;
-		set_single_step(child);
+		if (data)
+			set_tsk_thread_flag(child, TIF_SINGLE_STEP);
+		else
+			set_single_step(child);
 		/* give it a chance to run. */
 		wake_up_process(child);
 		return 0;

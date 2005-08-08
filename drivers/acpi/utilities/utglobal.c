@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2004, R. Byron Moore
+ * Copyright (C) 2000 - 2005, R. Byron Moore
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -42,6 +42,8 @@
  */
 
 #define DEFINE_ACPI_GLOBALS
+
+#include <linux/module.h>
 
 #include <acpi/acpi.h>
 #include <acpi/acnamesp.h>
@@ -142,11 +144,13 @@ unknown:
  */
 
 /* Debug switch - level and trace mask */
-u32                                 acpi_dbg_level = 0;
+u32                                 acpi_dbg_level = ACPI_DEBUG_DEFAULT;
+EXPORT_SYMBOL(acpi_dbg_level);
 
 /* Debug switch - layer (component) mask */
 
-u32                                 acpi_dbg_layer = 0;
+u32                                 acpi_dbg_layer = ACPI_COMPONENT_DEFAULT | ACPI_ALL_DRIVERS;
+EXPORT_SYMBOL(acpi_dbg_layer);
 u32                                 acpi_gbl_nesting_level = 0;
 
 
@@ -215,6 +219,8 @@ const char                          *acpi_gbl_valid_osi_strings[ACPI_NUM_OSI_STR
  * NOTES:
  * 1) _SB_ is defined to be a device to allow \_SB_._INI to be run
  *    during the initialization sequence.
+ * 2) _TZ_ is defined to be a thermal zone in order to allow ASL code to
+ *    perform a Notify() operation on it.
  */
 const struct acpi_predefined_names      acpi_gbl_pre_defined_names[] =
 { {"_GPE",    ACPI_TYPE_LOCAL_SCOPE,      NULL},
@@ -222,12 +228,12 @@ const struct acpi_predefined_names      acpi_gbl_pre_defined_names[] =
 	{"_SB_",    ACPI_TYPE_DEVICE,           NULL},
 	{"_SI_",    ACPI_TYPE_LOCAL_SCOPE,      NULL},
 	{"_TZ_",    ACPI_TYPE_THERMAL,          NULL},
-	{"_REV",    ACPI_TYPE_INTEGER,          "2"},
+	{"_REV",    ACPI_TYPE_INTEGER,          (char *) ACPI_CA_SUPPORT_LEVEL},
 	{"_OS_",    ACPI_TYPE_STRING,           ACPI_OS_NAME},
-	{"_GL_",    ACPI_TYPE_MUTEX,            "0"},
+	{"_GL_",    ACPI_TYPE_MUTEX,            (char *) 1},
 
 #if !defined (ACPI_NO_METHOD_EXECUTION) || defined (ACPI_CONSTANT_EVAL_ONLY)
-	{"_OSI",    ACPI_TYPE_METHOD,           "1"},
+	{"_OSI",    ACPI_TYPE_METHOD,           (char *) 1},
 #endif
 	{NULL,      ACPI_TYPE_ANY,              NULL}              /* Table terminator */
 };
@@ -861,6 +867,7 @@ acpi_ut_init_globals (
 
 	acpi_gbl_system_notify.handler      = NULL;
 	acpi_gbl_device_notify.handler      = NULL;
+	acpi_gbl_exception_handler          = NULL;
 	acpi_gbl_init_handler               = NULL;
 
 	/* Global "typed" ACPI table pointers */

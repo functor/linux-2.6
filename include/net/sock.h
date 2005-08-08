@@ -564,6 +564,8 @@ struct proto {
 	kmem_cache_t		*slab;
 	int			slab_obj_size;
 
+	struct module		*owner;
+
 	char			name[32];
 
 	struct {
@@ -706,8 +708,6 @@ static inline int sk_stream_rmem_schedule(struct sock *sk, struct sk_buff *skb)
  * Since ~2.3.5 it is also exclusive sleep lock serializing
  * accesses from user process context.
  */
-extern void __lock_sock(struct sock *sk);
-extern void __release_sock(struct sock *sk);
 #define sock_owned_by_user(sk)	((sk)->sk_lock.owner)
 
 extern void FASTCALL(lock_sock(struct sock *sk));
@@ -741,11 +741,6 @@ extern struct sk_buff 		*sock_alloc_send_skb(struct sock *sk,
 						     unsigned long size,
 						     int noblock,
 						     int *errcode);
-extern struct sk_buff 		*sock_alloc_send_pskb(struct sock *sk,
-						      unsigned long header_len,
-						      unsigned long data_len,
-						      int noblock,
-						      int *errcode);
 extern void *sock_kmalloc(struct sock *sk, int size, int priority);
 extern void sock_kfree_s(struct sock *sk, void *mem, int size);
 extern void sk_send_sigurg(struct sock *sk);
@@ -754,7 +749,6 @@ extern void sk_send_sigurg(struct sock *sk);
  * Functions to fill in entries in struct proto_ops when a protocol
  * does not implement a particular function.
  */
-extern int                      sock_no_release(struct socket *);
 extern int                      sock_no_bind(struct socket *, 
 					     struct sockaddr *, int);
 extern int                      sock_no_connect(struct socket *,
@@ -804,8 +798,6 @@ extern void sk_common_release(struct sock *sk);
  *	Default socket callbacks and setup code
  */
  
-extern void sock_def_destruct(struct sock *);
-
 /* Initialise core socket variables */
 extern void sock_init_data(struct socket *sock, struct sock *sk);
 
@@ -1281,20 +1273,7 @@ static inline void sk_eat_skb(struct sock *sk, struct sk_buff *skb)
 	__kfree_skb(skb);
 }
 
-extern atomic_t netstamp_needed;
 extern void sock_enable_timestamp(struct sock *sk);
-extern void sock_disable_timestamp(struct sock *sk);
-
-static inline void net_timestamp(struct timeval *stamp) 
-{ 
-	if (atomic_read(&netstamp_needed)) 
-		do_gettimeofday(stamp);
-	else {
-		stamp->tv_sec = 0;
-		stamp->tv_usec = 0;
-	}		
-} 
-
 extern int sock_get_timestamp(struct sock *, struct timeval __user *);
 
 /* 
@@ -1344,6 +1323,13 @@ static inline void sock_valbool_flag(struct sock *sk, int bit, int valbool)
 extern __u32 sysctl_wmem_max;
 extern __u32 sysctl_rmem_max;
 
+#ifdef CONFIG_NET
 int siocdevprivate_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
+#else
+static inline int siocdevprivate_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
+{
+	return -ENODEV;
+}
+#endif
 
 #endif	/* _SOCK_H */

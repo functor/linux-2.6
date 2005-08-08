@@ -35,12 +35,13 @@
  * Among others, it has a higher accuracy than the LM90, much like the
  * LM86 does.
  *
- * This driver also supports the MAX6657 and MAX6658, sensor chips made
- * by Maxim. These chips are similar to the LM86. Complete datasheet
- * can be obtained at Maxim's website at:
+ * This driver also supports the MAX6657, MAX6658 and MAX6659 sensor
+ * chips made by Maxim. These chips are similar to the LM86. Complete
+ * datasheet can be obtained at Maxim's website at:
  *   http://www.maxim-ic.com/quick_view2.cfm/qv_pk/2578
- * Note that there is no way to differenciate between both chips (but
- * no need either).
+ * Note that there is no easy way to differenciate between the three
+ * variants. The extra address and features of the MAX6659 are not
+ * supported by this driver.
  *
  * Since the LM90 was the first chipset supported by this driver, most
  * comments will refer to this chipset, but are actually general and
@@ -70,15 +71,15 @@
 
 /*
  * Addresses to scan
- * Address is fully defined internally and cannot be changed.
+ * Address is fully defined internally and cannot be changed except for
+ * MAX6659.
  * LM86, LM89, LM90, LM99, ADM1032, MAX6657 and MAX6658 have address 0x4c.
  * LM89-1, and LM99-1 have address 0x4d.
+ * MAX6659 can have address 0x4c, 0x4d or 0x4e (unsupported).
  */
 
 static unsigned short normal_i2c[] = { 0x4c, 0x4d, I2C_CLIENT_END };
-static unsigned short normal_i2c_range[] = { I2C_CLIENT_END };
 static unsigned int normal_isa[] = { I2C_CLIENT_ISA_END };
-static unsigned int normal_isa_range[] = { I2C_CLIENT_ISA_END };
 
 /*
  * Insmod parameters
@@ -127,19 +128,24 @@ SENSORS_INSMOD_5(lm90, adm1032, lm99, lm86, max6657);
 
 /*
  * Conversions and various macros
- * The LM90 uses signed 8-bit values for the local temperatures,
- * and signed 11-bit values for the remote temperatures (except
- * T_CRIT). Note that TEMP2_TO_REG does not round values, but
- * stick to the nearest lower value instead. Fixing it is just
- * not worth it.
+ * For local temperatures and limits, critical limits and the hysteresis
+ * value, the LM90 uses signed 8-bit values with LSB = 1 degree Celcius.
+ * For remote temperatures and limits, it uses signed 11-bit values with
+ * LSB = 0.125 degree Celcius, left-justified in 16-bit registers.
  */
 
-#define TEMP1_FROM_REG(val)	((val & 0x80 ? val-0x100 : val) * 1000)
-#define TEMP1_TO_REG(val)	((val < 0 ? val+0x100*1000 : val) / 1000)
-#define TEMP2_FROM_REG(val)	(((val & 0x8000 ? val-0x10000 : val) >> 5) * 125)
-#define TEMP2_TO_REG(val)	((((val / 125) << 5) + (val < 0 ? 0x10000 : 0)) & 0xFFE0)
-#define HYST_FROM_REG(val)	(val * 1000)
-#define HYST_TO_REG(val)	(val <= 0 ? 0 : val >= 31000 ? 31 : val / 1000)
+#define TEMP1_FROM_REG(val)	((val) * 1000)
+#define TEMP1_TO_REG(val)	((val) <= -128000 ? -128 : \
+				 (val) >= 127000 ? 127 : \
+				 (val) < 0 ? ((val) - 500) / 1000 : \
+				 ((val) + 500) / 1000)
+#define TEMP2_FROM_REG(val)	((val) / 32 * 125)
+#define TEMP2_TO_REG(val)	((val) <= -128000 ? 0x8000 : \
+				 (val) >= 127875 ? 0x7FE0 : \
+				 (val) < 0 ? ((val) - 62) / 125 * 32 : \
+				 ((val) + 62) / 125 * 32)
+#define HYST_TO_REG(val)	((val) <= 0 ? 0 : (val) >= 30500 ? 31 : \
+				 ((val) + 500) / 1000)
 
 /*
  * Functions declaration
@@ -176,18 +182,18 @@ struct lm90_data {
 	unsigned long last_updated; /* in jiffies */
 
 	/* registers values */
-	u8 temp_input1, temp_low1, temp_high1; /* local */
-	u16 temp_input2, temp_low2, temp_high2; /* remote, combined */
-	u8 temp_crit1, temp_crit2;
+	s8 temp_input1, temp_low1, temp_high1; /* local */
+	s16 temp_input2, temp_low2, temp_high2; /* remote, combined */
+	s8 temp_crit1, temp_crit2;
 	u8 temp_hyst;
-	u16 alarms; /* bitvector, combined */
+	u8 alarms; /* bitvector */
 };
 
 /*
  * Internal variables
  */
 
-static int lm90_id = 0;
+static int lm90_id;
 
 /*
  * Sysfs stuff
@@ -214,7 +220,8 @@ static ssize_t set_##value(struct device *dev, const char *buf, \
 { \
 	struct i2c_client *client = to_i2c_client(dev); \
 	struct lm90_data *data = i2c_get_clientdata(client); \
-	data->value = TEMP1_TO_REG(simple_strtol(buf, NULL, 10)); \
+	long val = simple_strtol(buf, NULL, 10); \
+	data->value = TEMP1_TO_REG(val); \
 	i2c_smbus_write_byte_data(client, reg, data->value); \
 	return count; \
 }
@@ -224,7 +231,8 @@ static ssize_t set_##value(struct device *dev, const char *buf, \
 { \
 	struct i2c_client *client = to_i2c_client(dev); \
 	struct lm90_data *data = i2c_get_clientdata(client); \
-	data->value = TEMP2_TO_REG(simple_strtol(buf, NULL, 10)); \
+	long val = simple_strtol(buf, NULL, 10); \
+	data->value = TEMP2_TO_REG(val); \
 	i2c_smbus_write_byte_data(client, regh, data->value >> 8); \
 	i2c_smbus_write_byte_data(client, regl, data->value & 0xff); \
 	return count; \
@@ -241,7 +249,7 @@ static ssize_t show_##value(struct device *dev, char *buf) \
 { \
 	struct lm90_data *data = lm90_update_device(dev); \
 	return sprintf(buf, "%d\n", TEMP1_FROM_REG(data->basereg) \
-		       - HYST_FROM_REG(data->temp_hyst)); \
+		       - TEMP1_FROM_REG(data->temp_hyst)); \
 }
 show_temp_hyst(temp_hyst1, temp_crit1);
 show_temp_hyst(temp_hyst2, temp_crit2);
@@ -381,8 +389,17 @@ static int lm90_detect(struct i2c_adapter *adapter, int address, int kind)
 			}
 		} else
 		if (man_id == 0x4D) { /* Maxim */
-			if (address == 0x4C
-			 && (reg_config1 & 0x1F) == 0
+			/*
+			 * The Maxim variants do NOT have a chip_id register.
+			 * Reading from that address will return the last read
+			 * value, which in our case is those of the man_id
+			 * register. Likewise, the config1 register seems to
+			 * lack a low nibble, so the value will be those of the
+			 * previous read, so in our case those of the man_id
+			 * register.
+			 */
+			if (chip_id == man_id
+			 && (reg_config1 & 0x1F) == (man_id & 0x0F)
 			 && reg_convrate <= 0x09) {
 			 	kind = max6657;
 			}

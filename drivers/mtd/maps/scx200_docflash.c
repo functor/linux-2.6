@@ -2,7 +2,7 @@
 
    Copyright (c) 2001,2002 Christer Weinigel <wingel@nano-system.com>
 
-   $Id: scx200_docflash.c,v 1.6 2004/07/12 21:59:45 dwmw2 Exp $ 
+   $Id: scx200_docflash.c,v 1.10 2004/11/28 09:40:40 dwmw2 Exp $ 
 
    National Semiconductor SCx200 flash mapped with DOCCS
 */
@@ -26,22 +26,19 @@ MODULE_AUTHOR("Christer Weinigel <wingel@hack.org>");
 MODULE_DESCRIPTION("NatSemi SCx200 DOCCS Flash Driver");
 MODULE_LICENSE("GPL");
 
-/* Set this to one if you want to partition the flash */
-#define PARTITION 1
-
-MODULE_PARM(probe, "i");
-MODULE_PARM_DESC(probe, "Probe for a BIOS mapping");
-MODULE_PARM(size, "i");
-MODULE_PARM_DESC(size, "Size of the flash mapping");
-MODULE_PARM(width, "i");
-MODULE_PARM_DESC(width, "Data width of the flash mapping (8/16)");
-MODULE_PARM(flashtype, "s");
-MODULE_PARM_DESC(flashtype, "Type of MTD probe to do");
-
 static int probe = 0;		/* Don't autoprobe */
 static unsigned size = 0x1000000; /* 16 MiB the whole ISA address space */
 static unsigned width = 8;	/* Default to 8 bits wide */
 static char *flashtype = "cfi_probe";
+
+module_param(probe, int, 0);
+MODULE_PARM_DESC(probe, "Probe for a BIOS mapping");
+module_param(size, int, 0);
+MODULE_PARM_DESC(size, "Size of the flash mapping");
+module_param(width, int, 0);
+MODULE_PARM_DESC(width, "Data width of the flash mapping (8/16)");
+module_param(flashtype, charp, 0);
+MODULE_PARM_DESC(flashtype, "Type of MTD probe to do");
 
 static struct resource docmem = {
 	.flags = IORESOURCE_MEM,
@@ -50,7 +47,7 @@ static struct resource docmem = {
 
 static struct mtd_info *mymtd;
 
-#if PARTITION
+#ifdef CONFIG_MTD_PARTITIONS
 static struct mtd_partition partition_info[] = {
 	{ 
 		.name   = "DOCCS Boot kernel", 
@@ -81,7 +78,7 @@ static struct map_info scx200_docflash_map = {
 	.name      = "NatSemi SCx200 DOCCS Flash",
 };
 
-int __init init_scx200_docflash(void)
+static int __init init_scx200_docflash(void)
 {
 	unsigned u;
 	unsigned base;
@@ -180,7 +177,7 @@ int __init init_scx200_docflash(void)
 	simple_map_init(&scx200_docflash_map);
 
 	scx200_docflash_map.phys = docmem.start;
-	scx200_docflash_map.virt = (unsigned long)ioremap(docmem.start, scx200_docflash_map.size);
+	scx200_docflash_map.virt = ioremap(docmem.start, scx200_docflash_map.size);
 	if (!scx200_docflash_map.virt) {
 		printk(KERN_ERR NAME ": failed to ioremap the flash\n");
 		release_resource(&docmem);
@@ -190,7 +187,7 @@ int __init init_scx200_docflash(void)
 	mymtd = do_map_probe(flashtype, &scx200_docflash_map);
 	if (!mymtd) {
 		printk(KERN_ERR NAME ": unable to detect flash\n");
-		iounmap((void *)scx200_docflash_map.virt);
+		iounmap(scx200_docflash_map.virt);
 		release_resource(&docmem);
 		return -ENXIO;
 	}
@@ -200,7 +197,7 @@ int __init init_scx200_docflash(void)
 
 	mymtd->owner = THIS_MODULE;
 
-#if PARTITION
+#ifdef CONFIG_MTD_PARTITIONS
 	partition_info[3].offset = mymtd->size-partition_info[3].size;
 	partition_info[2].size = partition_info[3].offset-partition_info[2].offset;
 	add_mtd_partitions(mymtd, partition_info, NUM_PARTITIONS);
@@ -213,7 +210,7 @@ int __init init_scx200_docflash(void)
 static void __exit cleanup_scx200_docflash(void)
 {
 	if (mymtd) {
-#if PARTITION
+#ifdef CONFIG_MTD_PARTITIONS
 		del_mtd_partitions(mymtd);
 #else
 		del_mtd_device(mymtd);
@@ -221,7 +218,7 @@ static void __exit cleanup_scx200_docflash(void)
 		map_destroy(mymtd);
 	}
 	if (scx200_docflash_map.virt) {
-		iounmap((void *)scx200_docflash_map.virt);
+		iounmap(scx200_docflash_map.virt);
 		release_resource(&docmem);
 	}
 }

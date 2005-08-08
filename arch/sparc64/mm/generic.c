@@ -15,15 +15,7 @@
 #include <asm/page.h>
 #include <asm/tlbflush.h>
 
-static inline void forget_pte(pte_t page)
-{
-	if (!pte_none(page)) {
-		printk("forget_pte: old mapping existed!\n");
-		BUG();
-	}
-}
-
-/* Remap IO memory, the same way as remap_page_range(), but use
+/* Remap IO memory, the same way as remap_pfn_range(), but use
  * the obio memory space.
  *
  * They use a pgprot that sets PAGE_IO and does not check the
@@ -43,7 +35,6 @@ static inline void io_remap_pte_range(pte_t * pte, unsigned long address, unsign
 	if (end > PMD_SIZE)
 		end = PMD_SIZE;
 	do {
-		pte_t oldpage;
 		pte_t entry;
 		unsigned long curend = address + PAGE_SIZE;
 		
@@ -75,10 +66,8 @@ static inline void io_remap_pte_range(pte_t * pte, unsigned long address, unsign
 		if (offset & 0x1UL)
 			pte_val(entry) &= ~(_PAGE_E);
 		do {
-			oldpage = *pte;
-			pte_clear(pte);
+			BUG_ON(!pte_none(*pte));
 			set_pte(pte, entry);
-			forget_pte(oldpage);
 			address += PAGE_SIZE;
 			pte++;
 		} while (address < curend);
@@ -107,6 +96,27 @@ static inline int io_remap_pmd_range(pmd_t * pmd, unsigned long address, unsigne
 	return 0;
 }
 
+static inline int io_remap_pud_range(pud_t * pud, unsigned long address, unsigned long size,
+	unsigned long offset, pgprot_t prot, int space)
+{
+	unsigned long end;
+
+	address &= ~PUD_MASK;
+	end = address + size;
+	if (end > PUD_SIZE)
+		end = PUD_SIZE;
+	offset -= address;
+	do {
+		pmd_t *pmd = pmd_alloc(current->mm, pud, address);
+		if (!pud)
+			return -ENOMEM;
+		io_remap_pmd_range(pmd, address, end - address, address + offset, prot, space);
+		address = (address + PUD_SIZE) & PUD_MASK;
+		pud++;
+	} while (address < end);
+	return 0;
+}
+
 int io_remap_page_range(struct vm_area_struct *vma, unsigned long from, unsigned long offset, unsigned long size, pgprot_t prot, int space)
 {
 	int error = 0;
@@ -122,18 +132,18 @@ int io_remap_page_range(struct vm_area_struct *vma, unsigned long from, unsigned
 
 	spin_lock(&mm->page_table_lock);
 	while (from < end) {
-		pmd_t *pmd = pmd_alloc(current->mm, dir, from);
+		pud_t *pud = pud_alloc(current->mm, dir, from);
 		error = -ENOMEM;
-		if (!pmd)
+		if (!pud)
 			break;
-		error = io_remap_pmd_range(pmd, from, end - from, offset + from, prot, space);
+		error = io_remap_pud_range(pud, from, end - from, offset + from, prot, space);
 		if (error)
 			break;
 		from = (from + PGDIR_SIZE) & PGDIR_MASK;
 		dir++;
 	}
+	flush_tlb_range(vma, beg, end);
 	spin_unlock(&mm->page_table_lock);
 
-	flush_tlb_range(vma, beg, end);
 	return error;
 }

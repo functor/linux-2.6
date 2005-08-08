@@ -3,22 +3,24 @@
  *
  *  Virtual Server: Syscall Switch
  *
- *  Copyright (C) 2003-2004  Herbert Pötzl
+ *  Copyright (C) 2003-2005  Herbert Pötzl
  *
  *  V0.01  syscall switch
  *  V0.02  added signal to context
  *  V0.03  added rlimit functions
  *  V0.04  added iattr, task/xid functions
+ *  V0.05  added debug/history stuff
  *
  */
 
 #include <linux/config.h>
 #include <linux/linkage.h>
+#include <linux/sched.h>
 #include <asm/errno.h>
 
-#include <linux/vs_base.h>
-#include <linux/vs_context.h>
+#include <linux/vserver/network.h>
 #include <linux/vserver/switch.h>
+#include <linux/vserver/debug.h>
 
 
 static inline int
@@ -27,13 +29,16 @@ vc_get_version(uint32_t id)
 	return VCI_VERSION;
 }
 
+#include <linux/vserver/context_cmd.h>
+#include <linux/vserver/cvirt_cmd.h>
+#include <linux/vserver/limit_cmd.h>
+#include <linux/vserver/network_cmd.h>
+#include <linux/vserver/sched_cmd.h>
+#include <linux/vserver/debug_cmd.h>
+#include <linux/vserver/inode_cmd.h>
 
 #include <linux/vserver/legacy.h>
-#include <linux/vserver/context.h>
-#include <linux/vserver/network.h>
 #include <linux/vserver/namespace.h>
-#include <linux/vserver/sched.h>
-#include <linux/vserver/limit.h>
 #include <linux/vserver/inode.h>
 #include <linux/vserver/signal.h>
 #include <linux/vserver/dlimit.h>
@@ -42,21 +47,37 @@ vc_get_version(uint32_t id)
 extern asmlinkage long
 sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 {
-	if (!capable(CAP_CONTEXT))
-		return -EPERM;
-
 	vxdprintk(VXD_CBIT(switch, 0),
 		"vc: VCMD_%02d_%d[%d], %d",
 		VC_CATEGORY(cmd), VC_COMMAND(cmd),
 		VC_VERSION(cmd), id);
 
+#ifdef	CONFIG_VSERVER_LEGACY
+	if (!capable(CAP_CONTEXT) &&
+		/* dirty hack for capremove */
+		!(cmd==VCMD_new_s_context && id==-2))
+		return -EPERM;
+#else
+	if (!capable(CAP_CONTEXT))
+		return -EPERM;
+#endif
+
 	switch (cmd) {
 	case VCMD_get_version:
 		return vc_get_version(id);
 
+	case VCMD_dump_history:
+#ifdef	CONFIG_VSERVER_HISTORY
+		return vc_dump_history(id);
+#else
+		return -ENOSYS;
+#endif
+
 #ifdef	CONFIG_VSERVER_LEGACY
 	case VCMD_new_s_context:
 		return vc_new_s_context(id, data);
+#endif
+#ifdef	CONFIG_VSERVER_LEGACYNET
 	case VCMD_set_ipv4root:
 		return vc_set_ipv4root(id, data);
 #endif
@@ -151,9 +172,11 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 	case VCMD_wait_exit:
 		return vc_wait_exit(id, data);
 
-#ifdef	CONFIG_VSERVER_LEGACY
 	case VCMD_create_context:
+#ifdef	CONFIG_VSERVER_LEGACY
 		return vc_ctx_create(id, data);
+#else
+		return -ENOSYS;
 #endif
 
 	case VCMD_get_iattr:

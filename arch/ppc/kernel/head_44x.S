@@ -21,7 +21,7 @@
  * 	Author: MontaVista Software, Inc.
  *         	frank_rowand@mvista.com or source@mvista.com
  * 	   	debbie_chu@mvista.com
- *    Copyright 2002-2004 MontaVista Software, Inc.
+ *    Copyright 2002-2005 MontaVista Software, Inc.
  *      PowerPC 44x support, Matt Porter <mporter@kernel.crashing.org>
  *
  * This program is free software; you can redistribute  it and/or modify it
@@ -185,11 +185,11 @@ skpinv:	addi	r4,r4,1				/* Increment */
 	 * are used for polled operation.
 	 */
  	/* pageid fields */
-	lis	r3,0xe000	
+	lis	r3,UART0_IO_BASE@h
 	ori	r3,r3,PPC44x_TLB_VALID | PPC44x_TLB_256M
 
 	/* xlat fields */
-	lis	r4,0x4000		/* RPN is 0x40000000 */
+	lis	r4,UART0_PHYS_IO_BASE@h		/* RPN depends on SoC */
 	ori	r4,r4,0x0001		/* ERPN is 1 for second 4GB page */
 
 	/* attrib fields */
@@ -414,30 +414,16 @@ interrupt_base:
 	b	data_access
 
 	/* Instruction Storage Interrupt */
-	START_EXCEPTION(InstructionStorage)
-	NORMAL_EXCEPTION_PROLOG
-	mr      r4,r12                  /* Pass SRR0 as arg2 */
-	li      r5,0                    /* Pass zero as arg3 */
-	EXC_XFER_EE_LITE(0x0400, handle_page_fault)
+	INSTRUCTION_STORAGE_EXCEPTION
 
 	/* External Input Interrupt */
 	EXCEPTION(0x0500, ExternalInput, do_IRQ, EXC_XFER_LITE)
 
 	/* Alignment Interrupt */
-	START_EXCEPTION(Alignment)
-	NORMAL_EXCEPTION_PROLOG
-	mfspr   r4,SPRN_DEAR            /* Grab the DEAR and save it */
-	stw     r4,_DEAR(r11)
-	addi    r3,r1,STACK_FRAME_OVERHEAD
-	EXC_XFER_EE(0x0600, AlignmentException)
+	ALIGNMENT_EXCEPTION
 
 	/* Program Interrupt */
-	START_EXCEPTION(Program)
-	NORMAL_EXCEPTION_PROLOG
-	mfspr	r4,SPRN_ESR		/* Grab the ESR and save it */
-	stw	r4,_ESR(r11)
-	addi	r3,r1,STACK_FRAME_OVERHEAD
-	EXC_XFER_STD(0x700, ProgramCheckException)
+	PROGRAM_EXCEPTION
 
 	/* Floating Point Unavailable Interrupt */
 	EXCEPTION(0x2010, FloatingPointUnavailable, UnknownException, EXC_XFER_EE)
@@ -451,12 +437,7 @@ interrupt_base:
 	EXCEPTION(0x2020, AuxillaryProcessorUnavailable, UnknownException, EXC_XFER_EE)
 
 	/* Decrementer Interrupt */
-	START_EXCEPTION(Decrementer)
-	NORMAL_EXCEPTION_PROLOG
-	lis     r0,TSR_DIS@h            /* Setup the DEC interrupt mask */
-	mtspr   SPRN_TSR,r0		/* Clear the DEC interrupt */
-	addi    r3,r1,STACK_FRAME_OVERHEAD
-	EXC_XFER_LITE(0x1000, timer_interrupt)
+	DECREMENTER_EXCEPTION
 
 	/* Fixed Internal Timer Interrupt */
 	/* TODO: Add FIT support */
@@ -599,64 +580,8 @@ interrupt_base:
 	mfspr	r10, SPRG0
 	b	InstructionStorage
 
-/* Check for a single step debug exception while in an exception
- * handler before state has been saved.  This is to catch the case
- * where an instruction that we are trying to single step causes
- * an exception (eg ITLB/DTLB miss) and thus the first instruction of
- * the exception handler generates a single step debug exception.
- *
- * If we get a debug trap on the first instruction of an exception handler,
- * we reset the MSR_DE in the _exception handler's_ MSR (the debug trap is
- * a critical exception, so we are using SPRN_CSRR1 to manipulate the MSR).
- * The exception handler was handling a non-critical interrupt, so it will
- * save (and later restore) the MSR via SPRN_SRR1, which will still have
- * the MSR_DE bit set.
- */
 	/* Debug Interrupt */
-	START_EXCEPTION(Debug)
-	CRITICAL_EXCEPTION_PROLOG
-
-	/*
-	 * If this is a single step or branch-taken exception in an
-	 * exception entry sequence, it was probably meant to apply to
-	 * the code where the exception occurred (since exception entry
-	 * doesn't turn off DE automatically).  We simulate the effect
-	 * of turning off DE on entry to an exception handler by turning
-	 * off DE in the CSRR1 value and clearing the debug status.
-	 */
-	mfspr	r10,SPRN_DBSR		/* check single-step/branch taken */
-	andis.	r10,r10,(DBSR_IC|DBSR_BT)@h
-	beq+	1f
-	andi.	r0,r9,MSR_PR		/* check supervisor */
-	beq	2f			/* branch if we need to fix it up... */
-
-	/* continue normal handling for a critical exception... */
-1:	mfspr	r4,SPRN_DBSR
-	addi	r3,r1,STACK_FRAME_OVERHEAD
-	EXC_XFER_TEMPLATE(DebugException, 0x2002, \
-		(MSR_KERNEL & ~(MSR_ME|MSR_DE|MSR_CE)), \
-		NOCOPY, crit_transfer_to_handler, ret_from_crit_exc)
-
-	/* here it looks like we got an inappropriate debug exception. */
-2:	rlwinm	r9,r9,0,~MSR_DE		/* clear DE in the CSRR1 value */
-	mtspr	SPRN_DBSR,r10		/* clear the IC/BT debug intr status */
-	/* restore state and get out */
-	lwz	r10,_CCR(r11)
-	lwz	r0,GPR0(r11)
-	lwz	r1,GPR1(r11)
-	mtcrf	0x80,r10
-	mtspr	CSRR0,r12
-	mtspr	CSRR1,r9
-	lwz	r9,GPR9(r11)
-
-	mtspr	SPRG2,r8;		/* SPRG2 only used in criticals */
-	lis	r8,crit_save@ha;
-	lwz	r10,crit_r10@l(r8)
-	lwz	r11,crit_r11@l(r8)
-	mfspr	r8,SPRG2
-
-	rfci
-	b	.
+	DEBUG_EXCEPTION
 
 /*
  * Local functions

@@ -158,6 +158,7 @@ void __init iommu_vio_init(void)
 	struct iommu_table *t;
 	struct iommu_table_cb cb;
 	unsigned long cbp;
+	unsigned long itc_entries;
 
 	cb.itc_busno = 255;    /* Bus 255 is the virtual bus */
 	cb.itc_virtbus = 0xff; /* Ask for virtual bus */
@@ -165,12 +166,12 @@ void __init iommu_vio_init(void)
 	cbp = virt_to_abs(&cb);
 	HvCallXm_getTceTableParms(cbp);
 
-	veth_iommu_table.it_size        = cb.itc_size / 2;
+	itc_entries = cb.itc_size * PAGE_SIZE / sizeof(union tce_entry);
+	veth_iommu_table.it_size        = itc_entries / 2;
 	veth_iommu_table.it_busno       = cb.itc_busno;
 	veth_iommu_table.it_offset      = cb.itc_offset;
 	veth_iommu_table.it_index       = cb.itc_index;
 	veth_iommu_table.it_type        = TCE_VB;
-	veth_iommu_table.it_entrysize	= sizeof(union tce_entry);
 	veth_iommu_table.it_blocksize	= 1;
 
 	t = iommu_init_table(&veth_iommu_table);
@@ -178,13 +179,12 @@ void __init iommu_vio_init(void)
 	if (!t)
 		printk("Virtual Bus VETH TCE table failed.\n");
 
-	vio_iommu_table.it_size         = cb.itc_size - veth_iommu_table.it_size;
+	vio_iommu_table.it_size         = itc_entries - veth_iommu_table.it_size;
 	vio_iommu_table.it_busno        = cb.itc_busno;
 	vio_iommu_table.it_offset       = cb.itc_offset +
-		veth_iommu_table.it_size * (PAGE_SIZE/sizeof(union tce_entry));
+					  veth_iommu_table.it_size;
 	vio_iommu_table.it_index        = cb.itc_index;
 	vio_iommu_table.it_type         = TCE_VB;
-	vio_iommu_table.it_entrysize	= sizeof(union tce_entry);
 	vio_iommu_table.it_blocksize	= 1;
 
 	t = iommu_init_table(&vio_iommu_table);
@@ -511,7 +511,6 @@ static struct iommu_table * vio_build_iommu_table(struct vio_dev *dev)
 	unsigned int *dma_window;
 	struct iommu_table *newTceTable;
 	unsigned long offset;
-	unsigned long size;
 	int dma_window_property_size;
 
 	dma_window = (unsigned int *) get_property(dev->dev.platform_data, "ibm,my-dma-window", &dma_window_property_size);
@@ -521,38 +520,18 @@ static struct iommu_table * vio_build_iommu_table(struct vio_dev *dev)
 
 	newTceTable = (struct iommu_table *) kmalloc(sizeof(struct iommu_table), GFP_KERNEL);
 
-	/* RPA docs say that #address-cells is always 1 for virtual
-		devices, but some older boxes' OF returns 2.  This should
-		be removed by GA, unless there is legacy OFs that still
-		have 2 for #address-cells */
-	size = ((dma_window[1+vio_num_address_cells] >> PAGE_SHIFT) << 3)
-		>> PAGE_SHIFT;
-
-	/* This is just an ugly kludge. Remove as soon as the OF for all
-	machines actually follow the spec and encodes the offset field
-	as phys-encode (that is, #address-cells wide)*/
-	if (dma_window_property_size == 12) {
-		size = ((dma_window[1] >> PAGE_SHIFT) << 3) >> PAGE_SHIFT;
-	} else if (dma_window_property_size == 20) {
-		size = ((dma_window[4] >> PAGE_SHIFT) << 3) >> PAGE_SHIFT;
-	} else {
-		printk(KERN_WARNING "vio_build_iommu_table: Invalid size of ibm,my-dma-window=%i, using 0x80 for size\n", dma_window_property_size);
-		size = 0x80;
-	}
-
 	/*  There should be some code to extract the phys-encoded offset
 		using prom_n_addr_cells(). However, according to a comment
 		on earlier versions, it's always zero, so we don't bother */
 	offset = dma_window[1] >>  PAGE_SHIFT;
 
-	/* TCE table size - measured in units of pages of tce table */
-	newTceTable->it_size		= size;
+	/* TCE table size - measured in tce entries */
+	newTceTable->it_size		= dma_window[4] >> PAGE_SHIFT;
 	/* offset for VIO should always be 0 */
 	newTceTable->it_offset		= offset;
 	newTceTable->it_busno		= 0;
 	newTceTable->it_index		= (unsigned long)dma_window[0];
 	newTceTable->it_type		= TCE_VB;
-	newTceTable->it_entrysize	= sizeof(union tce_entry);
 
 	return iommu_init_table(newTceTable);
 }

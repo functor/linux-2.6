@@ -1,6 +1,6 @@
 /* linux/arch/arm/mach-s3c2410/mach-bast.c
  *
- * Copyright (c) 2003,2004 Simtec Electronics
+ * Copyright (c) 2003-2005 Simtec Electronics
  *   Ben Dooks <ben@simtec.co.uk>
  *
  * http://www.simtec.co.uk/products/EB2410ITX/
@@ -18,6 +18,11 @@
  *     05-Sep-2003 BJD  Moved to v2.6 kernel
  *     06-Jan-2003 BJD  Updates for <arch/map.h>
  *     18-Jan-2003 BJD  Added serial port configuration
+ *     05-Oct-2004 BJD  Power management code
+ *     04-Nov-2004 BJD  Updated serial port clocks
+ *     04-Jan-2005 BJD  New uart init call
+ *     10-Jan-2005 BJD  Removed include of s3c2410.h
+ *     14-Jan-2005 BJD  Add support for muitlple NAND devices
 */
 
 #include <linux/kernel.h>
@@ -33,6 +38,7 @@
 #include <asm/mach/irq.h>
 
 #include <asm/arch/bast-map.h>
+#include <asm/arch/bast-irq.h>
 
 #include <asm/hardware.h>
 #include <asm/io.h>
@@ -41,11 +47,22 @@
 
 //#include <asm/debug-ll.h>
 #include <asm/arch/regs-serial.h>
+#include <asm/arch/regs-gpio.h>
+#include <asm/arch/regs-mem.h>
+#include <asm/arch/nand.h>
 
-#include "s3c2410.h"
+#include <linux/mtd/mtd.h>
+#include <linux/mtd/nand.h>
+#include <linux/mtd/nand_ecc.h>
+#include <linux/mtd/partitions.h>
+
+#include "clock.h"
 #include "devs.h"
 #include "cpu.h"
 #include "usb-simtec.h"
+#include "pm.h"
+
+#define COPYRIGHT ", (c) 2004-2005 Simtec Electronics"
 
 /* macros for virtual address mods for the io space entries */
 #define VA_C5(item) ((item) + BAST_VAM_CS5)
@@ -146,35 +163,50 @@ static struct map_desc bast_iodesc[] __initdata = {
 #define ULCON S3C2410_LCON_CS8 | S3C2410_LCON_PNONE | S3C2410_LCON_STOPB
 #define UFCON S3C2410_UFCON_RXTRIG8 | S3C2410_UFCON_FIFOMODE
 
-/* base baud rate for all our UARTs */
-static unsigned long bast_serial_clock = 24*1000*1000;
+static struct s3c24xx_uart_clksrc bast_serial_clocks[] = {
+	[0] = {
+		.name		= "uclk",
+		.divisor	= 1,
+		.min_baud	= 0,
+		.max_baud	= 0,
+	},
+	[1] = {
+		.name		= "pclk",
+		.divisor	= 1,
+		.min_baud	= 0,
+		.max_baud	= 0.
+	}
+};
+
 
 static struct s3c2410_uartcfg bast_uartcfgs[] = {
 	[0] = {
 		.hwport	     = 0,
 		.flags	     = 0,
-		.clock	     = &bast_serial_clock,
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
+		.clocks	     = bast_serial_clocks,
+		.clocks_size = ARRAY_SIZE(bast_serial_clocks)
 	},
 	[1] = {
 		.hwport	     = 1,
 		.flags	     = 0,
-
-		.clock	     = &bast_serial_clock,
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
+		.clocks	     = bast_serial_clocks,
+		.clocks_size = ARRAY_SIZE(bast_serial_clocks)
 	},
 	/* port 2 is not actually used */
 	[2] = {
 		.hwport	     = 2,
 		.flags	     = 0,
-		.clock	     = &bast_serial_clock,
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
+		.clocks	     = bast_serial_clocks,
+		.clocks_size = ARRAY_SIZE(bast_serial_clocks)
 	}
 };
 
@@ -195,6 +227,100 @@ static struct platform_device bast_device_nor = {
 	.resource	= bast_nor_resource,
 };
 
+/* NAND Flash on BAST board */
+
+
+static int smartmedia_map[] = { 0 };
+static int chip0_map[] = { 1 };
+static int chip1_map[] = { 2 };
+static int chip2_map[] = { 3 };
+
+struct mtd_partition bast_default_nand_part[] = {
+	[0] = {
+		.name	= "Boot Agent",
+		.size	= SZ_16K,
+		.offset	= 0
+	},
+	[1] = {
+		.name	= "/boot",
+		.size	= SZ_4M - SZ_16K,
+		.offset	= SZ_16K,
+	},
+	[2] = {
+		.name	= "user",
+		.offset	= SZ_4M,
+		.size	= MTDPART_SIZ_FULL,
+	}
+};
+
+/* the bast has 4 selectable slots for nand-flash, the three
+ * on-board chip areas, as well as the external SmartMedia
+ * slot.
+ *
+ * Note, there is no current hot-plug support for the SmartMedia
+ * socket.
+*/
+
+static struct s3c2410_nand_set bast_nand_sets[] = {
+	[0] = {
+		.name		= "SmartMedia",
+		.nr_chips	= 1,
+		.nr_map		= smartmedia_map,
+		.nr_partitions	= ARRAY_SIZE(bast_default_nand_part),
+		.partitions	= bast_default_nand_part
+	},
+	[1] = {
+		.name		= "chip0",
+		.nr_chips	= 1,
+		.nr_map		= chip0_map,
+		.nr_partitions	= ARRAY_SIZE(bast_default_nand_part),
+		.partitions	= bast_default_nand_part
+	},
+	[2] = {
+		.name		= "chip1",
+		.nr_chips	= 1,
+		.nr_map		= chip1_map,
+		.nr_partitions	= ARRAY_SIZE(bast_default_nand_part),
+		.partitions	= bast_default_nand_part
+	},
+	[3] = {
+		.name		= "chip2",
+		.nr_chips	= 1,
+		.nr_map		= chip2_map,
+		.nr_partitions	= ARRAY_SIZE(bast_default_nand_part),
+		.partitions	= bast_default_nand_part
+	}
+};
+
+static void bast_nand_select(struct s3c2410_nand_set *set, int slot)
+{
+	unsigned int tmp;
+
+	slot = set->nr_map[slot] & 3;
+
+	pr_debug("bast_nand: selecting slot %d (set %p,%p)\n",
+		 slot, set, set->nr_map);
+
+	tmp = __raw_readb(BAST_VA_CTRL2);
+	tmp &= BAST_CPLD_CTLR2_IDERST;
+	tmp |= slot;
+	tmp |= BAST_CPLD_CTRL2_WNAND;
+
+	pr_debug("bast_nand: ctrl2 now %02x\n", tmp);
+
+	__raw_writeb(tmp, BAST_VA_CTRL2);
+}
+
+static struct s3c2410_platform_nand bast_nand_info = {
+	.tacls		= 80,
+	.twrph0		= 80,
+	.twrph1		= 80,
+	.nr_sets	= ARRAY_SIZE(bast_nand_sets),
+	.sets		= bast_nand_sets,
+	.select_chip	= bast_nand_select,
+};
+
+
 /* Standard BAST devices */
 
 static struct platform_device *bast_devices[] __initdata = {
@@ -204,31 +330,80 @@ static struct platform_device *bast_devices[] __initdata = {
 	&s3c_device_i2c,
 	&s3c_device_iis,
  	&s3c_device_rtc,
+	&s3c_device_nand,
 	&bast_device_nor
 };
 
-static struct s3c2410_board bast_board __initdata = {
+static struct clk *bast_clocks[] = {
+	&s3c24xx_dclk0,
+	&s3c24xx_dclk1,
+	&s3c24xx_clkout0,
+	&s3c24xx_clkout1,
+	&s3c24xx_uclk,
+};
+
+static struct s3c24xx_board bast_board __initdata = {
 	.devices       = bast_devices,
-	.devices_count = ARRAY_SIZE(bast_devices)
+	.devices_count = ARRAY_SIZE(bast_devices),
+	.clocks	       = bast_clocks,
+	.clocks_count  = ARRAY_SIZE(bast_clocks)
 };
 
 void __init bast_map_io(void)
 {
+	/* initialise the clocks */
+
+	s3c24xx_dclk0.parent = NULL;
+	s3c24xx_dclk0.rate   = 12*1000*1000;
+
+	s3c24xx_dclk1.parent = NULL;
+	s3c24xx_dclk1.rate   = 24*1000*1000;
+
+	s3c24xx_clkout0.parent  = &s3c24xx_dclk0;
+	s3c24xx_clkout1.parent  = &s3c24xx_dclk1;
+
+	s3c24xx_uclk.parent  = &s3c24xx_clkout1;
+
+	s3c_device_nand.dev.platform_data = &bast_nand_info;
+
 	s3c24xx_init_io(bast_iodesc, ARRAY_SIZE(bast_iodesc));
-	s3c2410_init_uarts(bast_uartcfgs, ARRAY_SIZE(bast_uartcfgs));
-	s3c2410_set_board(&bast_board);
+	s3c24xx_init_clocks(0);
+	s3c24xx_init_uarts(bast_uartcfgs, ARRAY_SIZE(bast_uartcfgs));
+	s3c24xx_set_board(&bast_board);
 	usb_simtec_init();
 }
 
 void __init bast_init_irq(void)
 {
-	s3c2410_init_irq();
+	s3c24xx_init_irq();
 }
 
-void __init bast_init_time(void)
+#ifdef CONFIG_PM
+
+/* bast_init_machine
+ *
+ * enable the power management functions for the EB2410ITX
+*/
+
+static __init void bast_init_machine(void)
 {
-	s3c2410_init_time();
+	unsigned long gstatus4;
+
+	printk(KERN_INFO "BAST Power Manangement" COPYRIGHT "\n");
+
+	gstatus4  = (__raw_readl(S3C2410_BANKCON7) & 0x3) << 30;
+	gstatus4 |= (__raw_readl(S3C2410_BANKCON6) & 0x3) << 28;
+	gstatus4 |= (__raw_readl(S3C2410_BANKSIZE) & S3C2410_BANKSIZE_MASK);
+
+	__raw_writel(gstatus4, S3C2410_GSTATUS4);
+
+	s3c2410_pm_init();
 }
+
+#else
+#define bast_init_machine NULL
+#endif
+
 
 MACHINE_START(BAST, "Simtec-BAST")
      MAINTAINER("Ben Dooks <ben@simtec.co.uk>")
@@ -236,5 +411,6 @@ MACHINE_START(BAST, "Simtec-BAST")
      BOOT_PARAMS(S3C2410_SDRAM_PA + 0x100)
      MAPIO(bast_map_io)
      INITIRQ(bast_init_irq)
-     INITTIME(bast_init_time)
+	.init_machine	= bast_init_machine,
+	.timer		= &s3c24xx_timer,
 MACHINE_END

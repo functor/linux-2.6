@@ -20,7 +20,6 @@ obj-$(CONFIG_ESPSERIAL)		+= esp.o
 obj-$(CONFIG_MVME147_SCC)	+= generic_serial.o vme_scc.o
 obj-$(CONFIG_MVME162_SCC)	+= generic_serial.o vme_scc.o
 obj-$(CONFIG_BVME6000_SCC)	+= generic_serial.o vme_scc.o
-obj-$(CONFIG_SERIAL_TX3912)	+= generic_serial.o serial_tx3912.o
 obj-$(CONFIG_ROCKETPORT)	+= rocket.o
 obj-$(CONFIG_SERIAL167)		+= serial167.o
 obj-$(CONFIG_CYCLADES)		+= cyclades.o
@@ -63,6 +62,8 @@ obj-$(CONFIG_GEN_RTC) += genrtc.o
 obj-$(CONFIG_EFI_RTC) += efirtc.o
 obj-$(CONFIG_SGI_DS1286) += ds1286.o
 obj-$(CONFIG_SGI_IP27_RTC) += ip27-rtc.o
+obj-$(CONFIG_DS1302) += ds1302.o
+obj-$(CONFIG_S3C2410_RTC) += s3c2410-rtc.o
 ifeq ($(CONFIG_GENERIC_NVRAM),y)
   obj-$(CONFIG_NVRAM) += generic_nvram.o
 else

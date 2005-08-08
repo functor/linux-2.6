@@ -18,7 +18,7 @@ enum tcp_conntrack {
 };
 
 /* Window scaling is advertised by the sender */
-#define IP_CT_TCP_STATE_FLAG_WINDOW_SCALE	0x01
+#define IP_CT_TCP_FLAG_WINDOW_SCALE		0x01
 
 /* SACK is permitted by the sender */
 #define IP_CT_TCP_FLAG_SACK_PERM		0x02
@@ -41,6 +41,7 @@ struct ip_ct_tcp
 	u_int8_t	retrans;	/* Number of retransmitted packets */
 	u_int8_t	last_index;	/* Index of the last packet */
 	u_int32_t	last_seq;	/* Last sequence number seen in dir */
+	u_int32_t	last_ack;	/* Last sequence number seen in opposite dir */
 	u_int32_t	last_end;	/* Last seq + len */
 };
 

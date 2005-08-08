@@ -40,9 +40,9 @@
 #include <linux/dma-mapping.h>
 #include <linux/ethtool.h>
 #include <linux/mii.h>
+#include <linux/bitops.h>
 
 #include <asm/processor.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/irq.h>
@@ -475,8 +475,9 @@ void emac_phy_write(struct net_device *dev, int mii_id, int reg, int data)
 
 	out_be32(&emacp->em0stacr, stacr);
 
-	while (((stacr = in_be32(&emacp->em0stacr) & EMAC_STACR_OC) == 0)
-					&& (count++ < 5000))
+	count = 0;
+	while ((((stacr = in_be32(&emacp->em0stacr)) & EMAC_STACR_OC) == 0)
+					&& (count++ < MDIO_DELAY))
 		udelay(1);
 	MDIO_DEBUG((" (count was %d)\n", count));
 
@@ -620,7 +621,7 @@ emac_rx_csum(struct net_device *dev, unsigned short ctrl, struct sk_buff *skb)
 
 static int emac_rx_clean(struct net_device *dev)
 {
-	int i, b, bnum, buf[6];
+	int i, b, bnum = 0, buf[6];
 	int error, frame_length;
 	struct ocp_enet_private *fep = dev->priv;
 	unsigned short ctrl;
@@ -912,7 +913,6 @@ static int emac_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		PKT_DEBUG(("emac_start_xmit() stopping queue\n"));
 		netif_stop_queue(dev);
 		spin_unlock_irqrestore(&fep->lock, flags);
-		restore_flags(flags);
 		return -EBUSY;
 	}
 
@@ -1021,7 +1021,6 @@ static int emac_start_xmit(struct sk_buff *skb, struct net_device *dev)
 static int emac_adjust_to_link(struct ocp_enet_private *fep)
 {
 	emac_t *emacp = fep->emacp;
-	struct ibm_ocp_rgmii *rgmii;
 	unsigned long mode_reg;
 	int full_duplex, speed;
 
@@ -1038,21 +1037,23 @@ static int emac_adjust_to_link(struct ocp_enet_private *fep)
 		speed = fep->phy_mii.speed;
 	}
 
-	if (fep->rgmii_dev)
-		rgmii = RGMII_PRIV(fep->rgmii_dev);
 
 	/* set speed (default is 10Mb) */
 	switch (speed) {
 	case SPEED_1000:
 		mode_reg |= EMAC_M1_JUMBO_ENABLE | EMAC_M1_RFS_16K;
-		if ((rgmii->mode[fep->rgmii_input] == RTBI)
-		    || (rgmii->mode[fep->rgmii_input] == TBI))
-			mode_reg |= EMAC_M1_MF_1000GPCS;
-		else
-			mode_reg |= EMAC_M1_MF_1000MBPS;
-		if (fep->rgmii_dev)
+		if (fep->rgmii_dev) {
+			struct ibm_ocp_rgmii *rgmii = RGMII_PRIV(fep->rgmii_dev);
+
+			if ((rgmii->mode[fep->rgmii_input] == RTBI)
+			    || (rgmii->mode[fep->rgmii_input] == TBI))
+				mode_reg |= EMAC_M1_MF_1000GPCS;
+			else
+				mode_reg |= EMAC_M1_MF_1000MBPS;
+
 			emac_rgmii_port_speed(fep->rgmii_dev, fep->rgmii_input,
 					      1000);
+		}
 		break;
 	case SPEED_100:
 		mode_reg |= EMAC_M1_MF_100MBPS | EMAC_M1_RFS_4K;
@@ -1280,7 +1281,7 @@ static void emac_init_rings(struct net_device *dev)
 	/* Format the receive descriptor ring. */
 	ep->rx_slot = 0;
 	/* Default is MTU=1500 + Ethernet overhead */
-	ep->rx_buffer_size = ENET_DEF_BUF_SIZE;
+	ep->rx_buffer_size = dev->mtu + ENET_HEADER_SIZE + ENET_FCS_SIZE;
 	emac_rx_fill(dev, 0);
 	if (ep->rx_slot != 0) {
 		printk(KERN_ERR
@@ -1362,6 +1363,9 @@ static void emac_reset_configure(struct ocp_enet_private *fep)
 
 	/* set frame gap */
 	out_be32(&emacp->em0ipgvr, CONFIG_IBM_EMAC_FGAP);
+	
+	/* set VLAN Tag Protocol Identifier */
+	out_be32(&emacp->em0vtpid, 0x8100);
 
 	/* Init ring buffers */
 	emac_init_rings(fep->ndev);
@@ -1699,6 +1703,15 @@ struct mal_commac_ops emac_commac_ops = {
 	.rxde = &emac_rxde_dev,
 };
 
+#ifdef CONFIG_NET_POLL_CONTROLLER
+static int emac_netpoll(struct net_device *ndev)
+{
+	emac_rxeob_dev((void *)ndev, 0);
+	emac_txeob_dev((void *)ndev, 0);
+	return 0;
+}
+#endif
+
 static int emac_init_device(struct ocp_device *ocpdev, struct ibm_ocp_mal *mal)
 {
 	int deferred_init = 0;
@@ -1881,6 +1894,9 @@ static int emac_init_device(struct ocp_device *ocpdev, struct ibm_ocp_mal *mal)
 	SET_ETHTOOL_OPS(ndev, &emac_ethtool_ops);
 	if (emacdata->tah_idx >= 0)
 		ndev->features = NETIF_F_IP_CSUM | NETIF_F_SG;
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	ndev->poll_controller = emac_netpoll;
+#endif
 
 	SET_MODULE_OWNER(ndev);
 

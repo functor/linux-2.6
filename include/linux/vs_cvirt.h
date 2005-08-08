@@ -1,9 +1,9 @@
 #ifndef _VX_VS_CVIRT_H
 #define _VX_VS_CVIRT_H
 
+
 #include "vserver/cvirt.h"
 #include "vserver/debug.h"
-#include "vs_base.h"
 
 
 /* utsname virtualization */
@@ -23,6 +23,7 @@ static inline struct new_utsname *vx_new_utsname(void)
 
 #define vx_info_map_pid(v,p) \
 	__vx_info_map_pid((v), (p), __FUNC__, __FILE__, __LINE__)
+#define vx_info_map_tgid(v,p)  vx_info_map_pid(v,p)
 #define vx_map_pid(p)	vx_info_map_pid(current->vx_info, p)
 #define vx_map_tgid(p) vx_map_pid(p)
 
@@ -70,11 +71,9 @@ static inline void vx_activate_task(struct task_struct *p)
 {
 	struct vx_info *vxi;
 
-	// if ((vxi = task_get_vx_info(p))) {
 	if ((vxi = p->vx_info)) {
 		vx_update_load(vxi);
 		atomic_inc(&vxi->cvirt.nr_running);
-		// put_vx_info(vxi);
 	}
 }
 
@@ -82,12 +81,26 @@ static inline void vx_deactivate_task(struct task_struct *p)
 {
 	struct vx_info *vxi;
 
-	// if ((vxi = task_get_vx_info(p))) {
 	if ((vxi = p->vx_info)) {
 		vx_update_load(vxi);
 		atomic_dec(&vxi->cvirt.nr_running);
-		// put_vx_info(vxi);
 	}
+}
+
+static inline void vx_uninterruptible_inc(struct task_struct *p)
+{
+	struct vx_info *vxi;
+
+	if ((vxi = p->vx_info))
+		atomic_inc(&vxi->cvirt.nr_uninterruptible);
+}
+
+static inline void vx_uninterruptible_dec(struct task_struct *p)
+{
+	struct vx_info *vxi;
+
+	if ((vxi = p->vx_info))
+		atomic_dec(&vxi->cvirt.nr_uninterruptible);
 }
 
 

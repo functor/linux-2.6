@@ -94,7 +94,7 @@ atomic_t inet6_sock_nr;
  * build a new socket.
  */
 static struct list_head inetsw6[SOCK_MAX];
-static spinlock_t inetsw6_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(inetsw6_lock);
 
 static void inet6_sock_destruct(struct sock *sk)
 {
@@ -114,10 +114,9 @@ static __inline__ struct ipv6_pinfo *inet6_sk_generic(struct sock *sk)
 
 static int inet6_create(struct socket *sock, int protocol)
 {
-	struct inet_opt *inet;
+	struct inet_sock *inet;
 	struct ipv6_pinfo *np;
 	struct sock *sk;
-	struct tcp6_sock* tcp6sk;
 	struct list_head *p;
 	struct inet_protosw *answer;
 	struct proto *answer_prot;
@@ -174,10 +173,10 @@ static int inet6_create(struct socket *sock, int protocol)
 		goto out;
 
 	sock_init_data(sock, sk);
-	sk_set_owner(sk, THIS_MODULE);
+	sk->sk_prot = answer_prot;
+	sk_set_owner(sk, sk->sk_prot->owner);
 
 	rc = 0;
-	sk->sk_prot = answer_prot;
 	sk->sk_no_check = answer_no_check;
 	if (INET_PROTOSW_REUSE & answer_flags)
 		sk->sk_reuse = 1;
@@ -196,8 +195,7 @@ static int inet6_create(struct socket *sock, int protocol)
 
 	sk->sk_backlog_rcv	= answer->prot->backlog_rcv;
 
-	tcp6sk		= (struct tcp6_sock *)sk;
-	tcp6sk->pinet6 = np = inet6_sk_generic(sk);
+	inet_sk(sk)->pinet6 = np = inet6_sk_generic(sk);
 	np->hop_limit	= -1;
 	np->mcast_hops	= -1;
 	np->mc_loop	= 1;
@@ -252,7 +250,7 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 {
 	struct sockaddr_in6 *addr=(struct sockaddr_in6 *)uaddr;
 	struct sock *sk = sock->sk;
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	__u32 v4addr = 0;
 	unsigned short snum;
@@ -410,7 +408,7 @@ int inet6_getname(struct socket *sock, struct sockaddr *uaddr,
 {
 	struct sockaddr_in6 *sin=(struct sockaddr_in6 *)uaddr;
 	struct sock *sk = sock->sk;
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
   
 	sin->sin6_family = AF_INET6;
@@ -501,7 +499,7 @@ struct proto_ops inet6_dgram_ops = {
 	.socketpair =	sock_no_socketpair,		/* a do nothing	*/
 	.accept =	sock_no_accept,			/* a do nothing	*/
 	.getname =	inet6_getname, 
-	.poll =		datagram_poll,			/* ok		*/
+	.poll =		udp_poll,			/* ok		*/
 	.ioctl =	inet6_ioctl,			/* must change  */
 	.listen =	sock_no_listen,			/* ok		*/
 	.shutdown =	inet_shutdown,			/* ok		*/
@@ -524,11 +522,33 @@ extern void ipv6_sysctl_register(void);
 extern void ipv6_sysctl_unregister(void);
 #endif
 
+/* Same as inet6_dgram_ops, sans udp_poll.  */
+static struct proto_ops inet6_sockraw_ops = {
+	.family =	PF_INET6,
+	.owner =	THIS_MODULE,
+	.release =	inet6_release,
+	.bind =		inet6_bind,
+	.connect =	inet_dgram_connect,		/* ok		*/
+	.socketpair =	sock_no_socketpair,		/* a do nothing	*/
+	.accept =	sock_no_accept,			/* a do nothing	*/
+	.getname =	inet6_getname, 
+	.poll =		datagram_poll,			/* ok		*/
+	.ioctl =	inet6_ioctl,			/* must change  */
+	.listen =	sock_no_listen,			/* ok		*/
+	.shutdown =	inet_shutdown,			/* ok		*/
+	.setsockopt =	sock_common_setsockopt,		/* ok		*/
+	.getsockopt =	sock_common_getsockopt,		/* ok		*/
+	.sendmsg =	inet_sendmsg,			/* ok		*/
+	.recvmsg =	sock_common_recvmsg,		/* ok		*/
+	.mmap =		sock_no_mmap,
+	.sendpage =	sock_no_sendpage,
+};
+
 static struct inet_protosw rawv6_protosw = {
 	.type		= SOCK_RAW,
 	.protocol	= IPPROTO_IP,	/* wild card */
 	.prot		= &rawv6_prot,
-	.ops		= &inet6_dgram_ops,
+	.ops		= &inet6_sockraw_ops,
 	.capability	= CAP_NET_RAW,
 	.no_check	= UDP_CSUM_DEFAULT,
 	.flags		= INET_PROTOSW_REUSE,
@@ -632,8 +652,10 @@ snmp6_mib_free(void *ptr[2])
 {
 	if (ptr == NULL)
 		return;
-	free_percpu(ptr[0]);
-	free_percpu(ptr[1]);
+	if (ptr[0])
+		free_percpu(ptr[0]);
+	if (ptr[1])
+		free_percpu(ptr[1]);
 	ptr[0] = ptr[1] = NULL;
 }
 

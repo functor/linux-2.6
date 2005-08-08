@@ -19,73 +19,10 @@
 #include "os.h"
 #include "user_util.h"
 #include "tlb.h"
-#include "frame.h"
 #include "kern.h"
 #include "mode.h"
 #include "proc_mm.h"
-
-static atomic_t using_sysemu;
-int sysemu_supported;
-
-void set_using_sysemu(int value)
-{
-	atomic_set(&using_sysemu, sysemu_supported && value);
-}
-
-int get_using_sysemu(void)
-{
-	return atomic_read(&using_sysemu);
-}
-
-int proc_read_sysemu(char *buf, char **start, off_t offset, int size,int *eof, void *data)
-{
-	if (snprintf(buf, size, "%d\n", get_using_sysemu()) < size) /*No overflow*/
-		*eof = 1;
-
-	return strlen(buf);
-}
-
-int proc_write_sysemu(struct file *file,const char *buf, unsigned long count,void *data)
-{
-	char tmp[2];
-
-	if (copy_from_user(tmp, buf, 1))
-		return -EFAULT;
-
-	if (tmp[0] == '0' || tmp[0] == '1')
-		set_using_sysemu(tmp[0] - '0');
-	return count; /*We use the first char, but pretend to write everything*/
-}
-
-int __init make_proc_sysemu(void)
-{
-	struct proc_dir_entry *ent;
-	if (mode_tt || !sysemu_supported)
-		return 0;
-
-	ent = create_proc_entry("sysemu", 0600, &proc_root);
-
-	if (ent == NULL)
-	{
-		printk("Failed to register /proc/sysemu\n");
-		return(0);
-	}
-
-	ent->read_proc  = proc_read_sysemu;
-	ent->write_proc = proc_write_sysemu;
-
-	return 0;
-}
-
-late_initcall(make_proc_sysemu);
-
-int singlestepping_skas(void)
-{
-	int ret = current->ptrace & PT_DTRACE;
-
-	current->ptrace &= ~PT_DTRACE;
-	return(ret);
-}
+#include "registers.h"
 
 void *switch_to_skas(void *prev, void *next)
 {
@@ -182,12 +119,7 @@ int copy_thread_skas(int nr, unsigned long clone_flags, unsigned long sp,
 		handler = fork_handler;
 	}
 	else {
-	  	memcpy(p->thread.regs.regs.skas.regs, exec_regs, 
-		       sizeof(p->thread.regs.regs.skas.regs));
-		memcpy(p->thread.regs.regs.skas.fp, exec_fp_regs, 
-		       sizeof(p->thread.regs.regs.skas.fp));
-	  	memcpy(p->thread.regs.regs.skas.xfp, exec_fpx_regs, 
-		       sizeof(p->thread.regs.regs.skas.xfp));
+		init_thread_registers(&p->thread.regs.regs);
                 p->thread.request.u.thread = current->thread.request.u.thread;
 		handler = new_thread_handler;
 	}
@@ -246,7 +178,6 @@ static int start_kernel_proc(void *unused)
 int start_uml_skas(void)
 {
 	start_userspace(0);
-	capture_signal_stack();
 
 	init_new_thread_signals(1);
 	uml_idle_timer();

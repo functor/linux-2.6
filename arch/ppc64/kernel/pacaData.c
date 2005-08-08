@@ -7,28 +7,28 @@
  *      2 of the License, or (at your option) any later version.
  */
 
-#include <asm/types.h>
-#include <asm/page.h>
-#include <stddef.h>
 #include <linux/config.h>
+#include <linux/types.h>
 #include <linux/threads.h>
+#include <linux/module.h>
+
 #include <asm/processor.h>
 #include <asm/ptrace.h>
+#include <asm/page.h>
 
-#include <asm/iSeries/ItLpPaca.h>
+#include <asm/lppaca.h>
 #include <asm/iSeries/ItLpQueue.h>
-#include <asm/naca.h>
 #include <asm/paca.h>
 
-struct naca_struct *naca;
 struct systemcfg *systemcfg;
+EXPORT_SYMBOL(systemcfg);
 
 /* This symbol is provided by the linker - let it fill in the paca
  * field correctly */
 extern unsigned long __toc_start;
 
 /* The Paca is an array with one entry per processor.  Each contains an 
- * ItLpPaca, which contains the information shared between the 
+ * lppaca, which contains the information shared between the
  * hypervisor and Linux.  Each also contains an ItLpRegSave area which
  * is used by the hypervisor to save registers.
  * On systems with hardware multi-threading, there are two threads
@@ -59,14 +59,15 @@ extern unsigned long __toc_start;
 	.stab_real = (asrr), 		/* Real pointer to segment table */ \
 	.stab_addr = (asrv),		/* Virt pointer to segment table */ \
 	.cpu_start = (start),		/* Processor start */		    \
+	.hw_cpu_id = 0xffff,						    \
 	.lppaca = {							    \
-		.xDesc = 0xd397d781,	/* "LpPa" */			    \
-		.xSize = sizeof(struct ItLpPaca),			    \
-		.xFPRegsInUse = 1,					    \
-		.xDynProcStatus = 2,					    \
-		.xDecrVal = 0x00ff0000,					    \
-		.xEndOfQuantum = 0xfffffffffffffffful,			    \
-		.xSLBCount = 64,					    \
+		.desc = 0xd397d781,	/* "LpPa" */			    \
+		.size = sizeof(struct lppaca),				    \
+		.dyn_proc_status = 2,					    \
+		.decr_val = 0x00ff0000,					    \
+		.fpregs_in_use = 1,					    \
+		.end_of_quantum = 0xfffffffffffffffful,			    \
+		.slb_count = 64,					    \
 	},								    \
 	EXTRA_INITS((number), (lpq))					    \
 }
@@ -77,13 +78,16 @@ struct paca_struct paca[] = {
 #else
 	PACAINITDATA( 0, 1, NULL, STAB0_PHYS_ADDR, STAB0_VIRT_ADDR),
 #endif
+#if NR_CPUS > 1
 	PACAINITDATA( 1, 0, NULL, 0, 0),
 	PACAINITDATA( 2, 0, NULL, 0, 0),
 	PACAINITDATA( 3, 0, NULL, 0, 0),
+#if NR_CPUS > 4
 	PACAINITDATA( 4, 0, NULL, 0, 0),
 	PACAINITDATA( 5, 0, NULL, 0, 0),
 	PACAINITDATA( 6, 0, NULL, 0, 0),
 	PACAINITDATA( 7, 0, NULL, 0, 0),
+#if NR_CPUS > 8
 	PACAINITDATA( 8, 0, NULL, 0, 0),
 	PACAINITDATA( 9, 0, NULL, 0, 0),
 	PACAINITDATA(10, 0, NULL, 0, 0),
@@ -206,6 +210,9 @@ struct paca_struct paca[] = {
 	PACAINITDATA(125, 0, NULL, 0, 0),
 	PACAINITDATA(126, 0, NULL, 0, 0),
 	PACAINITDATA(127, 0, NULL, 0, 0),
+#endif
+#endif
+#endif
 #endif
 #endif
 };

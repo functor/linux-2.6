@@ -21,6 +21,7 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 {
 	struct ext3_inode_info *ei = EXT3_I(inode);
 	unsigned int flags;
+	unsigned short rsv_window_size;
 
 	ext3_debug ("cmd = %u, arg = %lu\n", cmd, arg);
 
@@ -89,7 +90,7 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		ei->i_flags = flags;
 
 		ext3_set_inode_flags(inode);
-		inode->i_ctime = CURRENT_TIME;
+		inode->i_ctime = CURRENT_TIME_SEC;
 
 		err = ext3_mark_iloc_dirty(handle, inode, &iloc);
 flags_err:
@@ -123,7 +124,7 @@ flags_err:
 			return PTR_ERR(handle);
 		err = ext3_reserve_inode_write(handle, inode, &iloc);
 		if (err == 0) {
-			inode->i_ctime = CURRENT_TIME;
+			inode->i_ctime = CURRENT_TIME_SEC;
 			inode->i_generation = generation;
 			err = ext3_mark_iloc_dirty(handle, inode, &iloc);
 		}
@@ -154,6 +155,73 @@ flags_err:
 			return ret;
 		}
 #endif
+	case EXT3_IOC_GETRSVSZ:
+		if (test_opt(inode->i_sb, RESERVATION) && S_ISREG(inode->i_mode)) {
+			rsv_window_size = atomic_read(&ei->i_rsv_window.rsv_goal_size);
+			return put_user(rsv_window_size, (int __user *)arg);
+		}
+		return -ENOTTY;
+	case EXT3_IOC_SETRSVSZ:
+		if (!test_opt(inode->i_sb, RESERVATION) ||!S_ISREG(inode->i_mode))
+			return -ENOTTY;
+
+		if (IS_RDONLY(inode))
+			return -EROFS;
+
+		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
+			return -EACCES;
+
+		if (get_user(rsv_window_size, (int __user *)arg))
+			return -EFAULT;
+
+		if (rsv_window_size > EXT3_MAX_RESERVE_BLOCKS)
+			rsv_window_size = EXT3_MAX_RESERVE_BLOCKS;
+		atomic_set(&ei->i_rsv_window.rsv_goal_size, rsv_window_size);
+		return 0;
+	case EXT3_IOC_GROUP_EXTEND: {
+		unsigned long n_blocks_count;
+		struct super_block *sb = inode->i_sb;
+		int err;
+
+		if (!capable(CAP_SYS_RESOURCE))
+			return -EPERM;
+
+		if (IS_RDONLY(inode))
+			return -EROFS;
+
+		if (get_user(n_blocks_count, (__u32 __user *)arg))
+			return -EFAULT;
+
+		err = ext3_group_extend(sb, EXT3_SB(sb)->s_es, n_blocks_count);
+		journal_lock_updates(EXT3_SB(sb)->s_journal);
+		journal_flush(EXT3_SB(sb)->s_journal);
+		journal_unlock_updates(EXT3_SB(sb)->s_journal);
+
+		return err;
+	}
+	case EXT3_IOC_GROUP_ADD: {
+		struct ext3_new_group_data input;
+		struct super_block *sb = inode->i_sb;
+		int err;
+
+		if (!capable(CAP_SYS_RESOURCE))
+			return -EPERM;
+
+		if (IS_RDONLY(inode))
+			return -EROFS;
+
+		if (copy_from_user(&input, (struct ext3_new_group_input __user *)arg,
+				sizeof(input)))
+			return -EFAULT;
+
+		err = ext3_group_add(sb, &input);
+		journal_lock_updates(EXT3_SB(sb)->s_journal);
+		journal_flush(EXT3_SB(sb)->s_journal);
+		journal_unlock_updates(EXT3_SB(sb)->s_journal);
+
+		return err;
+	}
+
 #if defined(CONFIG_VSERVER_LEGACY) && !defined(CONFIG_INOXID_NONE)
 	case EXT3_IOC_SETXID: {
 		handle_t *handle;
@@ -186,6 +254,7 @@ flags_err:
 		return err;
 	}
 #endif
+
 	default:
 		return -ENOTTY;
 	}

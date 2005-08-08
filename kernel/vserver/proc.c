@@ -3,7 +3,7 @@
  *
  *  Virtual Context Support
  *
- *  Copyright (C) 2003-2004  Herbert Pötzl
+ *  Copyright (C) 2003-2005  Herbert Pötzl
  *
  *  V0.01  basic structure
  *  V0.02  adaptation vs1.3.0
@@ -18,15 +18,20 @@
 #include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/proc_fs.h>
-#include <linux/vserver.h>
-#include <linux/vs_base.h>
+#include <linux/sched.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vs_cvirt.h>
 
+#include <linux/vserver/switch.h>
+
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 
+#include "cvirt_proc.h"
+#include "limit_proc.h"
+#include "sched_proc.h"
+#include "vci_config.h"
 
 static struct proc_dir_entry *proc_virtual;
 
@@ -58,9 +63,11 @@ static int proc_virtual_info(int vid, char *buffer)
 	return sprintf(buffer,
 		"VCIVersion:\t%04x:%04x\n"
 		"VCISyscall:\t%d\n"
+		"VCIKernel:\t%08x\n"
 		,VCI_VERSION >> 16
 		,VCI_VERSION & 0xFFFF
 		,__NR_vserver
+		,vci_kernel_config()
 		);
 }
 
@@ -95,13 +102,13 @@ int proc_xid_status (int vid, char *buffer)
 		return 0;
 	length = sprintf(buffer,
 		"UseCnt:\t%d\n"
-		"RefCnt:\t%d\n"
+		"Tasks:\t%d\n"
 		"Flags:\t%016llx\n"
 		"BCaps:\t%016llx\n"
 		"CCaps:\t%016llx\n"
 		"Ticks:\t%d\n"
 		,atomic_read(&vxi->vx_usecnt)
-		,atomic_read(&vxi->vx_refcnt)
+		,atomic_read(&vxi->vx_tasks)
 		,(unsigned long long)vxi->vx_flags
 		,(unsigned long long)vxi->vx_bcaps
 		,(unsigned long long)vxi->vx_ccaps
@@ -261,10 +268,10 @@ static int proc_vid_revalidate(struct dentry * dentry, struct nameidata *nd)
 	vid = inode_vid(inode);
 	switch (inode_type(inode) & PROC_VID_MASK) {
 		case PROC_XID_INO:
-			hashed = vx_info_is_hashed(vid);
+			hashed = xid_is_hashed(vid);
 			break;
 		case PROC_NID_INO:
-			hashed = nx_info_is_hashed(vid);
+			hashed = nid_is_hashed(vid);
 			break;
 	}
 	if (hashed)
@@ -289,7 +296,6 @@ static ssize_t proc_vid_info_read(struct file * file, char * buf,
 	struct inode * inode = file->f_dentry->d_inode;
 	unsigned long page;
 	ssize_t length;
-	ssize_t end;
 	int vid;
 
 	if (count > PROC_BLOCK_SIZE)
@@ -300,22 +306,11 @@ static ssize_t proc_vid_info_read(struct file * file, char * buf,
 	vid = inode_vid(inode);
 	length = PROC_I(inode)->op.proc_vid_read(vid, (char*)page);
 
-	if (length < 0) {
-		free_page(page);
-		return length;
-	}
-	/* Static 4kB (or whatever) block capacity */
-	if (*ppos >= length) {
-		free_page(page);
-		return 0;
-	}
-	if (count + *ppos > length)
-		count = length - *ppos;
-	end = count + *ppos;
-	copy_to_user(buf, (char *) page + *ppos, count);
-	*ppos = end;
+	if (length >= 0)
+		length = simple_read_from_buffer(buf, count, ppos,
+			(char *)page, length);
 	free_page(page);
-	return count;
+	return length;
 }
 
 
@@ -708,7 +703,7 @@ int proc_virtual_readdir(struct file * filp,
 			filp->f_pos++;
 			/* fall through */
 		case 3:
-			if (current->xid > 1) {
+			if (vx_current_xid() > 1) {
 				ino = fake_ino(1, PROC_XID_INO);
 				if (filldir(dirent, "current", 7,
 					filp->f_pos, ino, DT_LNK) < 0)
@@ -776,7 +771,7 @@ int proc_vnet_readdir(struct file * filp,
 			filp->f_pos++;
 			/* fall through */
 		case 3:
-			if (current->xid > 1) {
+			if (vx_current_xid() > 1) {
 				ino = fake_ino(1, PROC_NID_INO);
 				if (filldir(dirent, "current", 7,
 					filp->f_pos, ino, DT_LNK) < 0)
@@ -824,7 +819,7 @@ void proc_vx_init(void)
 	}
 	proc_virtual = ent;
 
-	ent = proc_mkdir("vnet", 0);
+	ent = proc_mkdir("virtnet", 0);
 	if (ent) {
 		ent->proc_fops = &proc_vnet_dir_operations;
 		ent->proc_iops = &proc_vnet_dir_inode_operations;

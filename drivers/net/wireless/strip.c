@@ -85,9 +85,9 @@ static const char StripVersion[] = "1.3A-STUART.CHESHIRE";
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/bitops.h>
 #include <asm/system.h>
 #include <asm/uaccess.h>
-#include <asm/bitops.h>
 
 # include <linux/ctype.h>
 #include <linux/string.h>
@@ -437,7 +437,7 @@ static const long LongTime = 0x7FFFFFFF;
 /* Global variables							*/
 
 static LIST_HEAD(strip_list);
-static spinlock_t strip_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(strip_lock);
 
 /************************************************************************/
 /* Macros								*/
@@ -1250,7 +1250,7 @@ static void ResetRadio(struct strip *strip_info)
 			set_baud(tty, strip_info->user_baud);
 	}
 
-	tty->driver->write(tty, 0, s.string, s.length);
+	tty->driver->write(tty, s.string, s.length);
 #ifdef EXT_COUNTERS
 	strip_info->tx_ebytes += s.length;
 #endif
@@ -1272,7 +1272,7 @@ static void strip_write_some_more(struct tty_struct *tty)
 
 	if (strip_info->tx_left > 0) {
 		int num_written =
-		    tty->driver->write(tty, 0, strip_info->tx_head,
+		    tty->driver->write(tty, strip_info->tx_head,
 				      strip_info->tx_left);
 		strip_info->tx_left -= num_written;
 		strip_info->tx_head += num_written;
@@ -2398,7 +2398,7 @@ static int set_mac_address(struct strip *strip_info,
 	return 0;
 }
 
-static int dev_set_mac_address(struct net_device *dev, void *addr)
+static int strip_set_mac_address(struct net_device *dev, void *addr)
 {
 	struct strip *strip_info = (struct strip *) (dev->priv);
 	struct sockaddr *sa = addr;
@@ -2552,7 +2552,7 @@ static void strip_dev_setup(struct net_device *dev)
 	dev->hard_start_xmit = strip_xmit;
 	dev->hard_header = strip_header;
 	dev->rebuild_header = strip_rebuild_header;
-	dev->set_mac_address = dev_set_mac_address;
+	dev->set_mac_address = strip_set_mac_address;
 	dev->get_stats = strip_get_stats;
 	dev->change_mtu = strip_change_mtu;
 }

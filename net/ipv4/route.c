@@ -65,7 +65,7 @@
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -108,22 +108,22 @@
 
 #define RT_GC_TIMEOUT (300*HZ)
 
-int ip_rt_min_delay		= 2 * HZ;
-int ip_rt_max_delay		= 10 * HZ;
-int ip_rt_max_size;
-int ip_rt_gc_timeout		= RT_GC_TIMEOUT;
-int ip_rt_gc_interval		= 60 * HZ;
-int ip_rt_gc_min_interval	= HZ / 2;
-int ip_rt_redirect_number	= 9;
-int ip_rt_redirect_load		= HZ / 50;
-int ip_rt_redirect_silence	= ((HZ / 50) << (9 + 1));
-int ip_rt_error_cost		= HZ;
-int ip_rt_error_burst		= 5 * HZ;
-int ip_rt_gc_elasticity		= 8;
-int ip_rt_mtu_expires		= 10 * 60 * HZ;
-int ip_rt_min_pmtu		= 512 + 20 + 20;
-int ip_rt_min_advmss		= 256;
-int ip_rt_secret_interval	= 10 * 60 * HZ;
+static int ip_rt_min_delay		= 2 * HZ;
+static int ip_rt_max_delay		= 10 * HZ;
+static int ip_rt_max_size;
+static int ip_rt_gc_timeout		= RT_GC_TIMEOUT;
+static int ip_rt_gc_interval		= 60 * HZ;
+static int ip_rt_gc_min_interval	= HZ / 2;
+static int ip_rt_redirect_number	= 9;
+static int ip_rt_redirect_load		= HZ / 50;
+static int ip_rt_redirect_silence	= ((HZ / 50) << (9 + 1));
+static int ip_rt_error_cost		= HZ;
+static int ip_rt_error_burst		= 5 * HZ;
+static int ip_rt_gc_elasticity		= 8;
+static int ip_rt_mtu_expires		= 10 * 60 * HZ;
+static int ip_rt_min_pmtu		= 512 + 20 + 20;
+static int ip_rt_min_advmss		= 256;
+static int ip_rt_secret_interval	= 10 * 60 * HZ;
 static unsigned long rt_deadline;
 
 #define RTprint(a...)	printk(KERN_DEBUG a)
@@ -138,7 +138,8 @@ static struct timer_list rt_secret_timer;
 
 static struct dst_entry *ipv4_dst_check(struct dst_entry *dst, u32 cookie);
 static void		 ipv4_dst_destroy(struct dst_entry *dst);
-static void		 ipv4_dst_ifdown(struct dst_entry *dst, int how);
+static void		 ipv4_dst_ifdown(struct dst_entry *dst,
+					 struct net_device *dev, int how);
 static struct dst_entry *ipv4_negative_advice(struct dst_entry *dst);
 static void		 ipv4_link_failure(struct sk_buff *skb);
 static void		 ip_rt_update_pmtu(struct dst_entry *dst, u32 mtu);
@@ -582,7 +583,7 @@ static void rt_run_flush(unsigned long dummy)
 	}
 }
 
-static spinlock_t rt_flush_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(rt_flush_lock);
 
 void rt_cache_flush(int delay)
 {
@@ -801,14 +802,13 @@ restart:
 			 * must be visible to another weakly ordered CPU before
 			 * the insertion at the start of the hash chain.
 			 */
-			smp_wmb();
-			rth->u.rt_next = rt_hash_table[hash].chain;
+			rcu_assign_pointer(rth->u.rt_next,
+					   rt_hash_table[hash].chain);
 			/*
 			 * Since lookup is lockfree, the update writes
 			 * must be ordered for consistency on SMP.
 			 */
-			smp_wmb();
-			rt_hash_table[hash].chain = rth;
+			rcu_assign_pointer(rt_hash_table[hash].chain, rth);
 
 			rth->u.dst.__use++;
 			dst_hold(&rth->u.dst);
@@ -902,7 +902,7 @@ restart:
 
 void rt_bind_peer(struct rtable *rt, int create)
 {
-	static spinlock_t rt_peer_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(rt_peer_lock);
 	struct inet_peer *peer;
 
 	peer = inet_getpeer(rt->rt_dst, create);
@@ -926,7 +926,7 @@ void rt_bind_peer(struct rtable *rt, int create)
  */
 static void ip_select_fb_ident(struct iphdr *iph)
 {
-	static spinlock_t ip_fb_id_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(ip_fb_id_lock);
 	static u32 ip_fallback_id;
 	u32 salt;
 
@@ -1343,11 +1343,12 @@ static void ipv4_dst_destroy(struct dst_entry *dst)
 	}
 }
 
-static void ipv4_dst_ifdown(struct dst_entry *dst, int how)
+static void ipv4_dst_ifdown(struct dst_entry *dst, struct net_device *dev,
+			    int how)
 {
 	struct rtable *rt = (struct rtable *) dst;
 	struct in_device *idev = rt->idev;
-	if (idev && idev->dev != &loopback_dev) {
+	if (dev != &loopback_dev && idev && idev->dev == dev) {
 		struct in_device *loopback_idev = in_dev_get(&loopback_dev);
 		if (loopback_idev) {
 			rt->idev = loopback_idev;
@@ -1367,10 +1368,8 @@ static void ipv4_link_failure(struct sk_buff *skb)
 		dst_set_expires(&rt->u.dst, 0);
 }
 
-static int ip_rt_bug(struct sk_buff **pskb)
+static int ip_rt_bug(struct sk_buff *skb)
 {
-	struct sk_buff *skb = *pskb;
-
 	printk(KERN_DEBUG "ip_rt_bug: %u.%u.%u.%u -> %u.%u.%u.%u, %s\n",
 		NIPQUAD(skb->nh.iph->saddr), NIPQUAD(skb->nh.iph->daddr),
 		skb->dev ? skb->dev->name : "?");
@@ -2532,6 +2531,8 @@ ctl_table ipv4_route_table[] = {
 		.proc_handler	= &proc_dointvec,
 	},
 	{
+		/*  Deprecated. Use gc_min_interval_ms */
+ 
 		.ctl_name	= NET_IPV4_ROUTE_GC_MIN_INTERVAL,
 		.procname	= "gc_min_interval",
 		.data		= &ip_rt_gc_min_interval,
@@ -2539,6 +2540,15 @@ ctl_table ipv4_route_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec_jiffies,
 		.strategy	= &sysctl_jiffies,
+	},
+	{
+		.ctl_name	= NET_IPV4_ROUTE_GC_MIN_INTERVAL_MS,
+		.procname	= "gc_min_interval_ms",
+		.data		= &ip_rt_gc_min_interval,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec_ms_jiffies,
+		.strategy	= &sysctl_ms_jiffies,
 	},
 	{
 		.ctl_name	= NET_IPV4_ROUTE_GC_TIMEOUT,
@@ -2758,7 +2768,7 @@ int __init ip_rt_init(void)
 
 	rt_hash_mask--;
 	for (i = 0; i <= rt_hash_mask; i++) {
-		rt_hash_table[i].lock = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&rt_hash_table[i].lock);
 		rt_hash_table[i].chain = NULL;
 	}
 

@@ -277,13 +277,15 @@ void buffer_assertion_failure(struct buffer_head *bh);
 #define J_EXPECT_JH(jh, expr, why...)	J_ASSERT_JH(jh, expr)
 #else
 #define __journal_expect(expr, why...)					     \
-	do {								     \
-		if (!(expr)) {						     \
+	({								     \
+		int val = (expr);					     \
+		if (!val) {						     \
 			printk(KERN_ERR					     \
 				"EXT3-fs unexpected failure: %s;\n",# expr); \
-			printk(KERN_ERR why);				     \
+			printk(KERN_ERR why "\n");			     \
 		}							     \
-	} while (0)
+		val;							     \
+	})
 #define J_EXPECT(expr, why...)		__journal_expect(expr, ## why)
 #define J_EXPECT_BH(bh, expr, why...)	__journal_expect(expr, ## why)
 #define J_EXPECT_JH(jh, expr, why...)	__journal_expect(expr, ## why)
@@ -299,6 +301,7 @@ enum jbd_state_bits {
 	BH_JBDDirty,		/* Is dirty but journaled */
 	BH_State,		/* Pins most journal_head state */
 	BH_JournalHead,		/* Pins bh->b_private and jh->b_bh */
+	BH_Unshadow,		/* Dummy bit, for BJ_Shadow wakeup filtering */
 };
 
 BUFFER_FNS(JBD, jbd)
@@ -351,27 +354,6 @@ static inline void jbd_unlock_bh_journal_head(struct buffer_head *bh)
 	bit_spin_unlock(BH_JournalHead, &bh->b_state);
 }
 
-#define HAVE_JOURNAL_CALLBACK_STATUS
-/**
- *   struct journal_callback - Base structure for callback information.
- *   @jcb_list: list information for other callbacks attached to the same handle.
- *   @jcb_func: Function to call with this callback structure. 
- *
- *   This struct is a 'seed' structure for a using with your own callback
- *   structs. If you are using callbacks you must allocate one of these
- *   or another struct of your own definition which has this struct 
- *   as it's first element and pass it to journal_callback_set().
- *
- *   This is used internally by jbd to maintain callback information.
- *
- *   See journal_callback_set for more information.
- **/
-struct journal_callback {
-	struct list_head jcb_list;		/* t_jcb_lock */
-	void (*jcb_func)(struct journal_callback *jcb, int error);
-	/* user data goes here */
-};
-
 struct jbd_revoke_table_s;
 
 /**
@@ -380,7 +362,6 @@ struct jbd_revoke_table_s;
  * @h_transaction: Which compound transaction is this update a part of?
  * @h_buffer_credits: Number of remaining buffers we are allowed to dirty.
  * @h_ref: Reference count on this handle
- * @h_jcb: List of application registered callbacks for this handle.
  * @h_err: Field for caller's use to track errors through large fs operations
  * @h_sync: flag for sync-on-close
  * @h_jdata: flag to force data journaling
@@ -405,13 +386,6 @@ struct handle_s
 	/* Field for caller's use to track errors through large fs */
 	/* operations */
 	int			h_err;
-
-	/*
-	 * List of application registered callbacks for this handle. The
-	 * function(s) will be called after the transaction that this handle is
-	 * part of has been committed to disk. [t_jcb_lock]
-	 */
-	struct list_head	h_jcb;
 
 	/* Flags [no locking] */
 	unsigned int	h_sync:		1;	/* sync-on-close */
@@ -454,8 +428,6 @@ struct handle_s
  *    j_state_lock
  *    ->j_list_lock			(journal_unmap_buffer)
  *
- *    t_handle_lock
- *    ->t_jcb_lock
  */
 
 struct transaction_s 
@@ -579,15 +551,6 @@ struct transaction_s
 	 */
 	int t_handle_count;
 
-	/*
-	 * Protects the callback list
-	 */
-	spinlock_t		t_jcb_lock;
-	/*
-	 * List of registered callback functions for this transaction.
-	 * Called when the transaction is committed. [t_jcb_lock]
-	 */
-	struct list_head	t_jcb;
 };
 
 /**
@@ -913,17 +876,13 @@ extern int	 journal_dirty_data (handle_t *, struct buffer_head *);
 extern int	 journal_dirty_metadata (handle_t *, struct buffer_head *);
 extern void	 journal_release_buffer (handle_t *, struct buffer_head *,
 						int credits);
-extern void	 journal_forget (handle_t *, struct buffer_head *);
+extern int	 journal_forget (handle_t *, struct buffer_head *);
 extern void	 journal_sync_buffer (struct buffer_head *);
 extern int	 journal_invalidatepage(journal_t *,
 				struct page *, unsigned long);
 extern int	 journal_try_to_free_buffers(journal_t *, struct page *, int);
 extern int	 journal_stop(handle_t *);
 extern int	 journal_flush (journal_t *);
-extern void	 journal_callback_set(handle_t *handle,
-				      void (*fn)(struct journal_callback *,int),
-				      struct journal_callback *jcb);
-
 extern void	 journal_lock_updates (journal_t *);
 extern void	 journal_unlock_updates (journal_t *);
 
@@ -1102,12 +1061,6 @@ static inline int jbd_space_needed(journal_t *journal)
 extern int jbd_blocks_per_page(struct inode *inode);
 
 #ifdef __KERNEL__
-
-#ifdef CONFIG_SMP
-#define assert_spin_locked(lock)	J_ASSERT(spin_is_locked(lock))
-#else
-#define assert_spin_locked(lock)	do {} while(0)
-#endif
 
 #define buffer_trace_init(bh)	do {} while (0)
 #define print_buffer_fields(bh)	do {} while (0)

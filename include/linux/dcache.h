@@ -28,7 +28,7 @@ struct vfsmount;
  * "quick string" -- eases parameter passing, but more importantly
  * saves "metadata" about the string (ie length and the hash).
  *
- * hash comes first so it snuggles against d_parent and d_bucket in the
+ * hash comes first so it snuggles against d_parent in the
  * dentry.
  */
 struct qstr {
@@ -91,7 +91,6 @@ struct dentry {
 	 * so they all fit in a 16-byte range, with 16-byte alignment.
 	 */
 	struct dentry *d_parent;	/* parent directory */
-	struct hlist_head *d_bucket;	/* lookup hash bucket */
 	struct qstr d_name;
 
 	struct list_head d_lru;		/* LRU list */
@@ -200,6 +199,7 @@ static inline int dname_external(struct dentry *dentry)
  * These are the low-level FS interfaces to the dcache..
  */
 extern void d_instantiate(struct dentry *, struct inode *);
+extern struct dentry * d_instantiate_unique(struct dentry *, struct inode *);
 extern void d_delete(struct dentry *);
 
 /* allocate/de-allocate */
@@ -241,6 +241,23 @@ static inline void d_add(struct dentry *entry, struct inode *inode)
 {
 	d_instantiate(entry, inode);
 	d_rehash(entry);
+}
+
+/**
+ * d_add_unique - add dentry to hash queues without aliasing
+ * @entry: dentry to add
+ * @inode: The inode to attach to this dentry
+ *
+ * This adds the entry to the hash queues and initializes @inode.
+ * The entry was actually filled in earlier during d_alloc().
+ */
+static inline struct dentry *d_add_unique(struct dentry *entry, struct inode *inode)
+{
+	struct dentry *res;
+
+	res = d_instantiate_unique(entry, inode);
+	d_rehash(res != NULL ? res : entry);
+	return res;
 }
 
 /* used for rename() and baskets */

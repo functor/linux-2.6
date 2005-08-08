@@ -10,6 +10,7 @@
 #ifdef __KERNEL__
 
 #include <linux/config.h>
+#include <linux/compiler.h>
 #include <asm/page.h>
 
 #ifndef __ASSEMBLY__
@@ -51,7 +52,7 @@ struct thread_info {
 
 #endif
 
-#define PREEMPT_ACTIVE		0x4000000
+#define PREEMPT_ACTIVE		0x10000000
 #ifdef CONFIG_4KSTACKS
 #define THREAD_SIZE            (4096)
 #else
@@ -92,12 +93,7 @@ static inline struct thread_info *current_thread_info(void)
 }
 
 /* how to get the current stack pointer from C */
-static inline unsigned long current_stack_pointer(void)
-{
-	unsigned long ti;
-	__asm__("movl %%esp,%0; ":"=r" (ti) : );
-	return ti;
-}
+register unsigned long current_stack_pointer asm("esp") __attribute_used__;
 
 /* thread information allocation */
 #ifdef CONFIG_DEBUG_STACK_USAGE
@@ -145,6 +141,7 @@ static inline unsigned long current_stack_pointer(void)
 #define TIF_IRET		5	/* return with iret */
 #define TIF_SYSCALL_AUDIT	7	/* syscall auditing active */
 #define TIF_POLLING_NRFLAG	16	/* true if poll_idle() is polling TIF_NEED_RESCHED */
+#define TIF_MEMDIE		17
 
 #define _TIF_SYSCALL_TRACE	(1<<TIF_SYSCALL_TRACE)
 #define _TIF_NOTIFY_RESUME	(1<<TIF_NOTIFY_RESUME)

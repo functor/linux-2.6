@@ -57,15 +57,14 @@ static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card *
  *  High 16-bits are video (radio) device number + 1
  */
 static int tea575x_tuner[SNDRV_CARDS] = { [0 ... (SNDRV_CARDS-1)] = 0 };
-static int boot_devs;
 
-module_param_array(index, int, boot_devs, 0444);
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for the FM801 soundcard.");
-module_param_array(id, charp, boot_devs, 0444);
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for the FM801 soundcard.");
-module_param_array(enable, bool, boot_devs, 0444);
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable FM801 soundcard.");
-module_param_array(tea575x_tuner, bool, boot_devs, 0444);
+module_param_array(tea575x_tuner, bool, NULL, 0444);
 MODULE_PARM_DESC(tea575x_tuner, "Enable TEA575x tuner.");
 
 /*
@@ -209,15 +208,16 @@ static int snd_fm801_update_bits(fm801_t *chip, unsigned short reg,
 				 unsigned short mask, unsigned short value)
 {
 	int change;
+	unsigned long flags;
 	unsigned short old, new;
 
-	spin_lock(&chip->reg_lock);
+	spin_lock_irqsave(&chip->reg_lock, flags);
 	old = inw(chip->port + reg);
 	new = (old & ~mask) | value;
 	change = old != new;
 	if (change)
 		outw(new, chip->port + reg);
-	spin_unlock(&chip->reg_lock);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return change;
 }
 
@@ -416,13 +416,12 @@ static int snd_fm801_hw_free(snd_pcm_substream_t * substream)
 
 static int snd_fm801_playback_prepare(snd_pcm_substream_t * substream)
 {
-	unsigned long flags;
 	fm801_t *chip = snd_pcm_substream_chip(substream);
 	snd_pcm_runtime_t *runtime = substream->runtime;
 
 	chip->ply_size = snd_pcm_lib_buffer_bytes(substream);
 	chip->ply_count = snd_pcm_lib_period_bytes(substream);
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	spin_lock_irq(&chip->reg_lock);
 	chip->ply_ctrl &= ~(FM801_START | FM801_16BIT |
 			     FM801_STEREO | FM801_RATE_MASK |
 			     FM801_CHANNELS_MASK);
@@ -443,19 +442,18 @@ static int snd_fm801_playback_prepare(snd_pcm_substream_t * substream)
 	chip->ply_pos = 0;
 	outl(chip->ply_buffer, FM801_REG(chip, PLY_BUF1));
 	outl(chip->ply_buffer + (chip->ply_count % chip->ply_size), FM801_REG(chip, PLY_BUF2));
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	spin_unlock_irq(&chip->reg_lock);
 	return 0;
 }
 
 static int snd_fm801_capture_prepare(snd_pcm_substream_t * substream)
 {
-	unsigned long flags;
 	fm801_t *chip = snd_pcm_substream_chip(substream);
 	snd_pcm_runtime_t *runtime = substream->runtime;
 
 	chip->cap_size = snd_pcm_lib_buffer_bytes(substream);
 	chip->cap_count = snd_pcm_lib_period_bytes(substream);
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	spin_lock_irq(&chip->reg_lock);
 	chip->cap_ctrl &= ~(FM801_START | FM801_16BIT |
 			     FM801_STEREO | FM801_RATE_MASK);
 	if (snd_pcm_format_width(runtime->format) == 16)
@@ -470,7 +468,7 @@ static int snd_fm801_capture_prepare(snd_pcm_substream_t * substream)
 	chip->cap_pos = 0;
 	outl(chip->cap_buffer, FM801_REG(chip, CAP_BUF1));
 	outl(chip->cap_buffer + (chip->cap_count % chip->cap_size), FM801_REG(chip, CAP_BUF2));
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	spin_unlock_irq(&chip->reg_lock);
 	return 0;
 }
 
@@ -1235,6 +1233,7 @@ static int snd_fm801_free(fm801_t *chip)
 	if (chip->irq >= 0)
 		free_irq(chip->irq, (void *)chip);
 	pci_release_regions(chip->pci);
+	pci_disable_device(chip->pci);
 
 	kfree(chip);
 	return 0;
@@ -1264,14 +1263,17 @@ static int __devinit snd_fm801_create(snd_card_t * card,
 	if ((err = pci_enable_device(pci)) < 0)
 		return err;
 	chip = kcalloc(1, sizeof(*chip), GFP_KERNEL);
-	if (chip == NULL)
+	if (chip == NULL) {
+		pci_disable_device(pci);
 		return -ENOMEM;
+	}
 	spin_lock_init(&chip->reg_lock);
 	chip->card = card;
 	chip->pci = pci;
 	chip->irq = -1;
 	if ((err = pci_request_regions(pci, "FM801")) < 0) {
 		kfree(chip);
+		pci_disable_device(pci);
 		return err;
 	}
 	chip->port = pci_resource_start(pci, 0);

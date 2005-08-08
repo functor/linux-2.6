@@ -11,7 +11,7 @@
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -95,7 +95,7 @@ struct qdisc_estimator_head
 static struct qdisc_estimator_head elist[EST_MAX_INTERVAL+1];
 
 /* Estimator array lock */
-static rwlock_t est_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(est_lock);
 
 static void est_timer(unsigned long arg)
 {

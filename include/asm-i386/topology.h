@@ -66,11 +66,27 @@ static inline cpumask_t pcibus_to_cpumask(int bus)
 	return node_to_cpumask(mp_bus_id_to_node[bus]);
 }
 
-/* Node-to-Node distance */
-#define node_distance(from, to) ((from) != (to))
-
-/* Cross-node load balancing interval. */
-#define NODE_BALANCE_RATE 100
+/* sched_domains SD_NODE_INIT for NUMAQ machines */
+#define SD_NODE_INIT (struct sched_domain) {		\
+	.span			= CPU_MASK_NONE,	\
+	.parent			= NULL,			\
+	.groups			= NULL,			\
+	.min_interval		= 8,			\
+	.max_interval		= 32,			\
+	.busy_factor		= 32,			\
+	.imbalance_pct		= 125,			\
+	.cache_hot_time		= (10*1000000),		\
+	.cache_nice_tries	= 1,			\
+	.per_cpu_gain		= 100,			\
+	.flags			= SD_LOAD_BALANCE	\
+				| SD_BALANCE_EXEC	\
+				| SD_BALANCE_NEWIDLE	\
+				| SD_WAKE_IDLE		\
+				| SD_WAKE_BALANCE,	\
+	.last_balance		= jiffies,		\
+	.balance_interval	= 1,			\
+	.nr_balance_failed	= 0,			\
+}
 
 #else /* !CONFIG_NUMA */
 /*

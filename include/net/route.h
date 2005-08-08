@@ -33,7 +33,6 @@
 #include <linux/route.h>
 #include <linux/ip.h>
 #include <linux/cache.h>
-#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 
@@ -108,7 +107,7 @@ struct rt_cache_stat
 
 extern struct rt_cache_stat *rt_cache_stat;
 #define RT_CACHE_STAT_INC(field)					  \
-		(per_cpu_ptr(rt_cache_stat, smp_processor_id())->field++)
+		(per_cpu_ptr(rt_cache_stat, _smp_processor_id())->field++)
 
 extern struct ip_rt_acct *ip_rt_acct;
 

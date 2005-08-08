@@ -43,17 +43,17 @@ MODULE_LICENSE("GPL");
 
 static int gc[] __initdata = { -1, 0, 0, 0, 0, 0 };
 static int gc_nargs __initdata = 0;
-module_param_array_named(map, gc, int, gc_nargs, 0);
+module_param_array_named(map, gc, int, &gc_nargs, 0);
 MODULE_PARM_DESC(map, "Describers first set of devices (<parport#>,<pad1>,<pad2>,..<pad5>)");
 
 static int gc_2[] __initdata = { -1, 0, 0, 0, 0, 0 };
 static int gc_nargs_2 __initdata = 0;
-module_param_array_named(map2, gc_2, int, gc_nargs_2, 0);
+module_param_array_named(map2, gc_2, int, &gc_nargs_2, 0);
 MODULE_PARM_DESC(map2, "Describers second set of devices");
 
 static int gc_3[] __initdata = { -1, 0, 0, 0, 0, 0 };
 static int gc_nargs_3 __initdata = 0;
-module_param_array_named(map3, gc_3, int, gc_nargs_3, 0);
+module_param_array_named(map3, gc_3, int, &gc_nargs_3, 0);
 MODULE_PARM_DESC(map3, "Describers third set of devices");
 
 __obsolete_setup("gc=");
@@ -89,7 +89,7 @@ static struct gc *gc_base[3];
 static int gc_status_bit[] = { 0x40, 0x80, 0x20, 0x10, 0x08 };
 
 static char *gc_names[] = { NULL, "SNES pad", "NES pad", "NES FourPort", "Multisystem joystick",
-				"Multisystem 2-button joystick", "N64 controller", "PSX controller"
+				"Multisystem 2-button joystick", "N64 controller", "PSX controller",
 				"PSX DDR controller" };
 /*
  * N64 support.
@@ -271,7 +271,7 @@ static void gc_psx_command(struct gc *gc, int b, unsigned char data[GC_PSX_LENGT
 		udelay(gc_psx_delay);
 		read = parport_read_status(gc->pd->port) ^ 0x80;
 		for (j = 0; j < 5; j++)
-			data[j] |= (read & gc_status_bit[j] & gc->pads[GC_PSX]) ? (1 << i) : 0;
+			data[j] |= (read & gc_status_bit[j] & (gc->pads[GC_PSX] | gc->pads[GC_DDR])) ? (1 << i) : 0;
 		parport_write_data(gc->pd->port, cmd | GC_PSX_CLOCK | GC_PSX_POWER);
 		udelay(gc_psx_delay);
 	}
@@ -300,7 +300,7 @@ static void gc_psx_read_packet(struct gc *gc, unsigned char data[5][GC_PSX_LENGT
 	gc_psx_command(gc, 0, data2);							/* Dump status */
 
 	for (i =0; i < 5; i++)								/* Find the longest pad */
-		if((gc_status_bit[i] & gc->pads[GC_PSX]) && (GC_PSX_LEN(id[i]) > max_len))
+		if((gc_status_bit[i] & (gc->pads[GC_PSX] | gc->pads[GC_DDR])) && (GC_PSX_LEN(id[i]) > max_len))
 			max_len = GC_PSX_LEN(id[i]);
 
 	for (i = 0; i < max_len * 2; i++) {						/* Read in all the data */

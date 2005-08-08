@@ -239,7 +239,7 @@ static void sym53c416_set_transfer_counter(int base, unsigned int len)
 	outb((len & 0xFF0000) >> 16, base + TC_HIGH);
 }
 
-static spinlock_t sym53c416_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(sym53c416_lock);
 
 /* Returns the number of bytes read */
 static __inline__ unsigned int sym53c416_read(int base, unsigned char *buffer, unsigned int len)
@@ -852,10 +852,10 @@ static int sym53c416_bios_param(struct scsi_device *sdev,
 MODULE_AUTHOR("Lieven Willems");
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(sym53c416, "1-2i");
-MODULE_PARM(sym53c416_1, "1-2i");
-MODULE_PARM(sym53c416_2, "1-2i");
-MODULE_PARM(sym53c416_3, "1-2i");
+module_param_array(sym53c416, uint, NULL, 0);
+module_param_array(sym53c416_1, uint, NULL, 0);
+module_param_array(sym53c416_2, uint, NULL, 0);
+module_param_array(sym53c416_3, uint, NULL, 0);
 
 #endif
 

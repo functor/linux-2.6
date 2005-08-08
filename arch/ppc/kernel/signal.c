@@ -290,7 +290,7 @@ restore_user_regs(struct pt_regs *regs, struct mcontext __user *sr, int sig)
 
 	/* force the process to reload the FP registers from
 	   current->thread when it next does FP instructions */
-	regs->msr &= ~MSR_FP;
+	regs->msr &= ~(MSR_FP | MSR_FE0 | MSR_FE1);
 	if (__copy_from_user(current->thread.fpr, &sr->mc_fregs,
 			     sizeof(sr->mc_fregs)))
 		return 1;
@@ -319,7 +319,7 @@ restore_user_regs(struct pt_regs *regs, struct mcontext __user *sr, int sig)
 	if (!__get_user(msr, &sr->mc_gregs[PT_MSR]) && (msr & MSR_SPE) != 0) {
 		/* restore spe registers from the stack */
 		if (__copy_from_user(current->thread.evr, &sr->mc_vregs,
-				     sizeof(sr->mc_vregs)))
+				     ELF_NEVRREG * sizeof(u32)))
 			return 1;
 	} else if (current->thread.used_spe)
 		memset(&current->thread.evr, 0, ELF_NEVRREG * sizeof(u32));
@@ -329,6 +329,16 @@ restore_user_regs(struct pt_regs *regs, struct mcontext __user *sr, int sig)
 		return 1;
 #endif /* CONFIG_SPE */
 
+#ifndef CONFIG_SMP
+	preempt_disable();
+	if (last_task_used_math == current)
+		last_task_used_math = NULL;
+	if (last_task_used_altivec == current)
+		last_task_used_altivec = NULL;
+	if (last_task_used_spe == current)
+		last_task_used_spe = NULL;
+	preempt_enable();
+#endif
 	return 0;
 }
 
@@ -496,6 +506,96 @@ int sys_rt_sigreturn(int r3, int r4, int r5, int r6, int r7, int r8,
 
  bad:
 	force_sig(SIGSEGV, current);
+	return 0;
+}
+
+int sys_debug_setcontext(struct ucontext __user *ctx,
+			 int ndbg, struct sig_dbg_op *dbg,
+			 int r6, int r7, int r8,
+			 struct pt_regs *regs)
+{
+	struct sig_dbg_op op;
+	int i;
+	unsigned long new_msr = regs->msr;
+#if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
+	unsigned long new_dbcr0 = current->thread.dbcr0;
+#endif
+
+	for (i=0; i<ndbg; i++) {
+		if (__copy_from_user(&op, dbg, sizeof(op)))
+			return -EFAULT;
+		switch (op.dbg_type) {
+		case SIG_DBG_SINGLE_STEPPING:
+#if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
+			if (op.dbg_value) {
+				new_msr |= MSR_DE;
+				new_dbcr0 |= (DBCR0_IDM | DBCR0_IC);
+			} else {
+				new_msr &= ~MSR_DE;
+				new_dbcr0 &= ~(DBCR0_IDM | DBCR0_IC);
+			}
+#else
+			if (op.dbg_value)
+				new_msr |= MSR_SE;
+			else
+				new_msr &= ~MSR_SE;
+#endif
+			break;
+		case SIG_DBG_BRANCH_TRACING:
+#if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
+			return -EINVAL;
+#else
+			if (op.dbg_value)
+				new_msr |= MSR_BE;
+			else
+				new_msr &= ~MSR_BE;
+#endif
+			break;
+
+		default:
+			return -EINVAL;
+		}
+	}
+
+	/* We wait until here to actually install the values in the
+	   registers so if we fail in the above loop, it will not
+	   affect the contents of these registers.  After this point,
+	   failure is a problem, anyway, and it's very unlikely unless
+	   the user is really doing something wrong. */
+	regs->msr = new_msr;
+#if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
+	current->thread.dbcr0 = new_dbcr0;
+#endif
+
+	/*
+	 * If we get a fault copying the context into the kernel's
+	 * image of the user's registers, we can't just return -EFAULT
+	 * because the user's registers will be corrupted.  For instance
+	 * the NIP value may have been updated but not some of the
+	 * other registers.  Given that we have done the verify_area
+	 * and successfully read the first and last bytes of the region
+	 * above, this should only happen in an out-of-memory situation
+	 * or if another thread unmaps the region containing the context.
+	 * We kill the task with a SIGSEGV in this situation.
+	 */
+	if (do_setcontext(ctx, regs, 1)) {
+		force_sig(SIGSEGV, current);
+		goto out;
+	}
+
+	/*
+	 * It's not clear whether or why it is desirable to save the
+	 * sigaltstack setting on signal delivery and restore it on
+	 * signal return.  But other architectures do this and we have
+	 * always done it up until now so it is probably better not to
+	 * change it.  -- paulus
+	 */
+	do_sigaltstack(&ctx->uc_stack, NULL, regs->gpr[1]);
+
+	sigreturn_exit(regs);
+	/* doesn't actually return back to here */
+
+ out:
 	return 0;
 }
 

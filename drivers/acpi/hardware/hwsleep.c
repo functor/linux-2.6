@@ -6,7 +6,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2004, R. Byron Moore
+ * Copyright (C) 2000 - 2005, R. Byron Moore
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,6 +41,8 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  */
+
+#include <linux/module.h>
 
 #include <acpi/acpi.h>
 
@@ -110,7 +112,7 @@ acpi_set_firmware_waking_vector (
  * DESCRIPTION: Access function for firmware_waking_vector field in FACS
  *
  ******************************************************************************/
-
+#ifdef ACPI_FUTURE_USAGE
 acpi_status
 acpi_get_firmware_waking_vector (
 	acpi_physical_address *physical_address)
@@ -136,6 +138,7 @@ acpi_get_firmware_waking_vector (
 
 	return_ACPI_STATUS (AE_OK);
 }
+#endif
 
 
 /******************************************************************************
@@ -279,15 +282,6 @@ acpi_enter_sleep_state (
 		return_ACPI_STATUS (status);
 	}
 
-	if (sleep_state != ACPI_STATE_S5) {
-		/* Disable BM arbitration */
-
-		status = acpi_set_register (ACPI_BITREG_ARB_DISABLE, 1, ACPI_MTX_DO_NOT_LOCK);
-		if (ACPI_FAILURE (status)) {
-			return_ACPI_STATUS (status);
-		}
-	}
-
 	/*
 	 * 1) Disable/Clear all GPEs
 	 * 2) Enable all wakeup GPEs
@@ -391,6 +385,7 @@ acpi_enter_sleep_state (
 
 	return_ACPI_STATUS (AE_OK);
 }
+EXPORT_SYMBOL(acpi_enter_sleep_state);
 
 
 /******************************************************************************
@@ -456,6 +451,7 @@ acpi_enter_sleep_state_s4bios (
 
 	return_ACPI_STATUS (AE_OK);
 }
+EXPORT_SYMBOL(acpi_enter_sleep_state_s4bios);
 
 
 /******************************************************************************
@@ -575,13 +571,6 @@ acpi_leave_sleep_state (
 			1, ACPI_MTX_DO_NOT_LOCK);
 	(void) acpi_set_register(acpi_gbl_fixed_event_info[ACPI_EVENT_POWER_BUTTON].status_register_id,
 			1, ACPI_MTX_DO_NOT_LOCK);
-
-	/* Enable BM arbitration */
-
-	status = acpi_set_register (ACPI_BITREG_ARB_DISABLE, 0, ACPI_MTX_LOCK);
-	if (ACPI_FAILURE (status)) {
-		return_ACPI_STATUS (status);
-	}
 
 	arg.integer.value = ACPI_SST_WORKING;
 	status = acpi_evaluate_object (NULL, METHOD_NAME__SST, &arg_list, NULL);

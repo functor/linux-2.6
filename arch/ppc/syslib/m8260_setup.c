@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/initrd.h>
+#include <linux/root_dev.h>
 #include <linux/seq_file.h>
 #include <linux/irq.h>
 
@@ -36,6 +37,12 @@ extern void cpm2_reset(void);
 extern void m8260_find_bridges(void);
 extern void idma_pci9_init(void);
 
+/* Place-holder for board-specific init */
+void __attribute__ ((weak)) __init
+m82xx_board_setup(void)
+{
+}
+
 static void __init
 m8260_setup_arch(void)
 {
@@ -55,6 +62,7 @@ m8260_setup_arch(void)
 	if (initrd_start)
 		ROOT_DEV = Root_RAM0;
 #endif
+	m82xx_board_setup();
 }
 
 /* The decrementer counts at the system (internal) clock frequency
@@ -202,7 +210,7 @@ m8260_map_io(void)
 	io_block_mapping(IO_VIRT_ADDR, IO_PHYS_ADDR, 0x10000000, _PAGE_IO);
 }
 
-/* Place-holder for board-specific init */
+/* Place-holder for board-specific ppc_md hooking */
 void __attribute__ ((weak)) __init
 m82xx_board_init(void)
 {
@@ -241,9 +249,6 @@ platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
 		strcpy(cmd_line, (char *)(r6+KERNELBASE));
 	}
 
-	/* Call back for board-specific settings. */
-	m82xx_board_init();
-
 	ppc_md.setup_arch		= m8260_setup_arch;
 	ppc_md.show_cpuinfo		= m8260_show_cpuinfo;
 	ppc_md.init_IRQ			= m8260_init_IRQ;
@@ -259,4 +264,7 @@ platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
 
 	ppc_md.find_end_of_memory	= m8260_find_end_of_memory;
 	ppc_md.setup_io_mappings	= m8260_map_io;
+
+	/* Call back for board-specific settings and overrides. */
+	m82xx_board_init();
 }

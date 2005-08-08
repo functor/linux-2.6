@@ -38,8 +38,11 @@
 #define LOCKD_BUFSIZE		(1024 + NLMSVC_XDRSIZE)
 #define ALLOWED_SIGS		(sigmask(SIGKILL))
 
-extern struct svc_program	nlmsvc_program;
+static struct svc_program	nlmsvc_program;
+
 struct nlmsvc_binding *		nlmsvc_ops;
+EXPORT_SYMBOL(nlmsvc_ops);
+
 static DECLARE_MUTEX(nlmsvc_sema);
 static unsigned int		nlmsvc_users;
 static pid_t			nlmsvc_pid;
@@ -270,6 +273,7 @@ out:
 	up(&nlmsvc_sema);
 	return error;
 }
+EXPORT_SYMBOL(lockd_up);
 
 /*
  * Decrement the user count and bring down lockd if we're the last.
@@ -311,6 +315,7 @@ lockd_down(void)
 out:
 	up(&nlmsvc_sema);
 }
+EXPORT_SYMBOL(lockd_down);
 
 /*
  * Sysctl parameters (same as module parameters, different interface).
@@ -471,11 +476,11 @@ static struct svc_version *	nlmsvc_version[] = {
 static struct svc_stat		nlmsvc_stats;
 
 #define NLM_NRVERS	(sizeof(nlmsvc_version)/sizeof(nlmsvc_version[0]))
-struct svc_program	nlmsvc_program = {
-	.pg_prog	= NLM_PROGRAM,		/* program number */
-	.pg_nvers	= NLM_NRVERS,		/* number of entries in nlmsvc_version */
-	.pg_vers	= nlmsvc_version,	/* version table */
-	.pg_name	= "lockd",		/* service name */
-	.pg_class	= "nfsd",		/* share authentication with nfsd */
-	.pg_stats	= &nlmsvc_stats,	/* stats table */
+static struct svc_program	nlmsvc_program = {
+	.pg_prog		= NLM_PROGRAM,		/* program number */
+	.pg_nvers		= NLM_NRVERS,		/* number of entries in nlmsvc_version */
+	.pg_vers		= nlmsvc_version,	/* version table */
+	.pg_name		= "lockd",		/* service name */
+	.pg_class		= "nfsd",		/* share authentication with nfsd */
+	.pg_stats		= &nlmsvc_stats,	/* stats table */
 };

@@ -6,7 +6,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2004, R. Byron Moore
+ * Copyright (C) 2000 - 2005, R. Byron Moore
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -94,9 +94,7 @@
 	u32                                     bit_length;         /* Length of field in bits */\
 	u32                                     base_byte_offset;   /* Byte offset within containing object */\
 	u8                                      start_field_bit_offset;/* Bit offset within first field datum (0-63) */\
-	u8                                      datum_valid_bits;   /* Valid bit in first "Field datum" */\
-	u8                                      end_field_valid_bits; /* Valid bits in the last "field datum" */\
-	u8                                      end_buffer_valid_bits; /* Valid bits in the last "buffer datum" */\
+	u8                                      access_bit_width;   /* Read/Write size in bits (8-64) */\
 	u32                                     value;              /* Value to store into the Bank or Index register */\
 	struct acpi_namespace_node              *node;              /* Link back to parent node */
 
@@ -135,7 +133,10 @@ struct acpi_object_integer
 	acpi_integer                            value;
 };
 
-
+/*
+ * Note: The String and Buffer object must be identical through the Pointer
+ * element.  There is code that depends on this.
+ */
 struct acpi_object_string           /* Null terminated, ASCII characters only */
 {
 	ACPI_OBJECT_COMMON_HEADER

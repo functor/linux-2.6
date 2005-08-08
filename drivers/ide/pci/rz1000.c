@@ -33,7 +33,7 @@
 
 #include <asm/io.h>
 
-static void __init init_hwif_rz1000 (ide_hwif_t *hwif)
+static void __devinit init_hwif_rz1000 (ide_hwif_t *hwif)
 {
 	u16 reg;
 	struct pci_dev *dev = hwif->pci_dev;
@@ -62,8 +62,7 @@ static ide_pci_device_t rz1000_chipset __devinitdata = {
 
 static int __devinit rz1000_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	ide_setup_pci_device(dev, &rz1000_chipset);
-	return 0;
+	return ide_setup_pci_device(dev, &rz1000_chipset);
 }
 
 static struct pci_device_id rz1000_pci_tbl[] = {

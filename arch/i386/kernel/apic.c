@@ -47,6 +47,24 @@ int apic_verbosity;
 
 static void apic_pm_activate(void);
 
+/*
+ * 'what should we do if we get a hw irq event on an illegal vector'.
+ * each architecture has to answer this themselves.
+ */
+void ack_bad_irq(unsigned int irq)
+{
+	printk("unexpected IRQ trap at vector %02x\n", irq);
+	/*
+	 * Currently unexpected vectors happen only on SMP and APIC.
+	 * We _must_ ack these because every local APIC has only N
+	 * irq slots per priority level, and a 'hanging, unacked' IRQ
+	 * holds up an irq slot - in excessive cases (when multiple
+	 * unexpected vectors occur) that might lock up the APIC
+	 * completely.
+	 */
+	ack_APIC_irq();
+}
+
 void __init apic_intr_init(void)
 {
 #ifdef CONFIG_SMP
@@ -282,6 +300,10 @@ int __init verify_local_APIC(void)
 
 void __init sync_Arb_IDs(void)
 {
+	/* Unsupported on P4 - see Intel Dev. Manual Vol. 3, Ch. 8.6.1 */
+	unsigned int ver = GET_APIC_VERSION(apic_read(APIC_LVR));
+	if (ver >= 0x14)	/* P4 or higher */
+		return;
 	/*
 	 * Wait for idle.
 	 */
@@ -491,12 +513,24 @@ void __init setup_local_APIC (void)
 	apic_pm_activate();
 }
 
+/*
+ * If Linux enabled the LAPIC against the BIOS default
+ * disable it down before re-entering the BIOS on shutdown.
+ * Otherwise the BIOS may get confused and not power-off.
+ */
+void lapic_shutdown(void)
+{
+	if (!cpu_has_apic || !enabled_via_apicbase)
+		return;
+
+	local_irq_disable();
+	disable_local_APIC();
+	local_irq_enable();
+}
+
 #ifdef CONFIG_PM
 
 static struct {
-	/* 'active' is true if the local APIC was enabled by us and
-	   not the BIOS; this signifies that we are also responsible
-	   for disabling it before entering apm/acpi suspend */
 	int active;
 	/* r/w apic fields */
 	unsigned int apic_id;
@@ -584,6 +618,10 @@ static int lapic_resume(struct sys_device *dev)
 	return 0;
 }
 
+/*
+ * This device has no shutdown method - fully functioning local APICs
+ * are needed on every CPU up until machine_halt/restart/poweroff.
+ */
 
 static struct sysdev_class lapic_sysclass = {
 	set_kset_name("lapic"),
@@ -667,7 +705,7 @@ static int __init detect_init_APIC (void)
 	u32 h, l, features;
 	extern void get_cpu_vendor(struct cpuinfo_x86*);
 
-	/* Disabled by DMI scan or kernel option? */
+	/* Disabled by kernel option? */
 	if (enable_local_apic < 0)
 		return -1;
 
@@ -681,8 +719,7 @@ static int __init detect_init_APIC (void)
 			break;
 		goto no_apic;
 	case X86_VENDOR_INTEL:
-		if (boot_cpu_data.x86 == 6 ||
-		    (boot_cpu_data.x86 == 15 && (cpu_has_apic || enable_local_apic > 0)) ||
+		if (boot_cpu_data.x86 == 6 || boot_cpu_data.x86 == 15 ||
 		    (boot_cpu_data.x86 == 5 && cpu_has_apic))
 			break;
 		goto no_apic;
@@ -692,20 +729,23 @@ static int __init detect_init_APIC (void)
 
 	if (!cpu_has_apic) {
 		/*
-		 * Over-ride BIOS and try to enable LAPIC
-		 * only if "lapic" specified
+		 * Over-ride BIOS and try to enable the local
+		 * APIC only if "lapic" specified.
 		 */
-		if (enable_local_apic != 1)
-			goto no_apic;
+		if (enable_local_apic <= 0) {
+			printk("Local APIC disabled by BIOS -- "
+			       "you can enable it with \"lapic\"\n");
+			return -1;
+		}
 		/*
 		 * Some BIOSes disable the local APIC in the
 		 * APIC_BASE MSR. This can only be done in
-		 * software for Intel P6 and AMD K7 (Model > 1).
+		 * software for Intel P6 or later and AMD K7
+		 * (Model > 1) or later.
 		 */
 		rdmsr(MSR_IA32_APICBASE, l, h);
 		if (!(l & MSR_IA32_APICBASE_ENABLE)) {
-			apic_printk(APIC_VERBOSE, "Local APIC disabled "
-					"by BIOS -- reenabling.\n");
+			printk("Local APIC disabled by BIOS -- reenabling.\n");
 			l &= ~MSR_IA32_APICBASE_BASE;
 			l |= MSR_IA32_APICBASE_ENABLE | APIC_DEFAULT_PHYS_BASE;
 			wrmsr(MSR_IA32_APICBASE, l, h);
@@ -732,7 +772,7 @@ static int __init detect_init_APIC (void)
 	if (nmi_watchdog != NMI_NONE)
 		nmi_watchdog = NMI_LOCAL_APIC;
 
-	apic_printk(APIC_VERBOSE, "Found and enabled local APIC!\n");
+	printk("Found and enabled local APIC!\n");
 
 	apic_pm_activate();
 
@@ -759,8 +799,8 @@ void __init init_apic_mappings(void)
 		apic_phys = mp_lapic_addr;
 
 	set_fixmap_nocache(FIX_APIC_BASE, apic_phys);
-	apic_printk(APIC_DEBUG, "mapped APIC to %08lx (%08lx)\n", APIC_BASE,
-			apic_phys);
+	printk(KERN_DEBUG "mapped APIC to %08lx (%08lx)\n", APIC_BASE,
+	       apic_phys);
 
 	/*
 	 * Fetch the APIC ID of the BSP in case we have a
@@ -778,21 +818,23 @@ void __init init_apic_mappings(void)
 			if (smp_found_config) {
 				ioapic_phys = mp_ioapics[i].mpc_apicaddr;
 				if (!ioapic_phys) {
-					printk(KERN_ERR "WARNING: bogus zero IO-APIC address found in MPTABLE, disabling IO/APIC support!\n");
-
+					printk(KERN_ERR
+					       "WARNING: bogus zero IO-APIC "
+					       "address found in MPTABLE, "
+					       "disabling IO/APIC support!\n");
 					smp_found_config = 0;
 					skip_ioapic_setup = 1;
 					goto fake_ioapic_page;
 				}
 			} else {
 fake_ioapic_page:
-				ioapic_phys = (unsigned long) alloc_bootmem_pages(PAGE_SIZE);
+				ioapic_phys = (unsigned long)
+					      alloc_bootmem_pages(PAGE_SIZE);
 				ioapic_phys = __pa(ioapic_phys);
 			}
 			set_fixmap_nocache(idx, ioapic_phys);
-			apic_printk(APIC_DEBUG, "mapped IOAPIC to "
-					"%08lx (%08lx)\n",
-					__fix_to_virt(idx), ioapic_phys);
+			printk(KERN_DEBUG "mapped IOAPIC to %08lx (%08lx)\n",
+			       __fix_to_virt(idx), ioapic_phys);
 			idx++;
 		}
 	}
@@ -834,30 +876,25 @@ static unsigned int __init get_8254_timer_count(void)
 /* next tick in 8254 can be caught by catching timer wraparound */
 static void __init wait_8254_wraparound(void)
 {
-	unsigned int curr_count, prev_count=~0;
-	int delta;
+	unsigned int curr_count, prev_count;
 
 	curr_count = get_8254_timer_count();
-
 	do {
 		prev_count = curr_count;
 		curr_count = get_8254_timer_count();
-		delta = curr_count-prev_count;
 
-	/*
-	 * This limit for delta seems arbitrary, but it isn't, it's
-	 * slightly above the level of error a buggy Mercury/Neptune
-	 * chipset timer can cause.
-	 */
+		/* workaround for broken Mercury/Neptune */
+		if (prev_count >= curr_count + 0x100)
+			curr_count = get_8254_timer_count();
 
-	} while (delta < 300);
+	} while (prev_count >= curr_count);
 }
 
 /*
  * Default initialization for 8254 timers. If we use other timers like HPET,
  * we override this later
  */
-void (*wait_timer_tick)(void) = wait_8254_wraparound;
+void (*wait_timer_tick)(void) __initdata = wait_8254_wraparound;
 
 /*
  * This function sets up the local APIC timer, with a timeout of
@@ -893,7 +930,7 @@ void __setup_APIC_LVTT(unsigned int clocks)
 	apic_write_around(APIC_TMICT, clocks/APIC_DIVISOR);
 }
 
-static void setup_APIC_timer(unsigned int clocks)
+static void __init setup_APIC_timer(unsigned int clocks)
 {
 	unsigned long flags;
 
@@ -1008,9 +1045,7 @@ void __init setup_boot_APIC_clock(void)
 
 void __init setup_secondary_APIC_clock(void)
 {
-	local_irq_disable(); /* FIXME: Do we need this? --RR */
 	setup_APIC_timer(calibration_result);
-	local_irq_enable();
 }
 
 void __init disable_APIC_timer(void)
@@ -1123,7 +1158,7 @@ inline void smp_local_timer_interrupt(struct pt_regs * regs)
  *   interrupt as well. Thus we cannot inline the local irq ... ]
  */
 
-void smp_apic_timer_interrupt(struct pt_regs regs)
+fastcall void smp_apic_timer_interrupt(struct pt_regs *regs)
 {
 	int cpu = smp_processor_id();
 
@@ -1143,14 +1178,14 @@ void smp_apic_timer_interrupt(struct pt_regs regs)
 	 * interrupt lock, which is the WrongThing (tm) to do.
 	 */
 	irq_enter();
-	smp_local_timer_interrupt(&regs);
+	smp_local_timer_interrupt(regs);
 	irq_exit();
 }
 
 /*
  * This interrupt should _never_ happen with our APIC/SMP architecture
  */
-asmlinkage void smp_spurious_interrupt(void)
+fastcall void smp_spurious_interrupt(struct pt_regs *regs)
 {
 	unsigned long v;
 
@@ -1174,7 +1209,7 @@ asmlinkage void smp_spurious_interrupt(void)
  * This interrupt should never happen with our APIC/SMP architecture
  */
 
-asmlinkage void smp_error_interrupt(void)
+fastcall void smp_error_interrupt(struct pt_regs *regs)
 {
 	unsigned long v, v1;
 

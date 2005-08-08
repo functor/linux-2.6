@@ -479,17 +479,17 @@ static	int	use_line_as_bass = 0;
 static	int	use_mic_as_bass = 0;
 static	int	mic_boost = 0;
 static	int	hw_copy = 0;
-MODULE_PARM(mpuio, "i");
-MODULE_PARM(fmio, "i");
-MODULE_PARM(joystick, "i");
-MODULE_PARM(spdif_inverse, "i");
-MODULE_PARM(spdif_loop, "i");
-MODULE_PARM(spdif_out, "i");
-MODULE_PARM(use_line_as_rear, "i");
-MODULE_PARM(use_line_as_bass, "i");
-MODULE_PARM(use_mic_as_bass, "i");
-MODULE_PARM(mic_boost, "i");
-MODULE_PARM(hw_copy, "i");
+module_param(mpuio, int, 0);
+module_param(fmio, int, 0);
+module_param(joystick, bool, 0);
+module_param(spdif_inverse, bool, 0);
+module_param(spdif_loop, bool, 0);
+module_param(spdif_out, bool, 0);
+module_param(use_line_as_rear, bool, 0);
+module_param(use_line_as_bass, bool, 0);
+module_param(use_mic_as_bass, bool, 0);
+module_param(mic_boost, bool, 0);
+module_param(hw_copy, bool, 0);
 MODULE_PARM_DESC(mpuio, "(0x330, 0x320, 0x310, 0x300) Base of MPU-401, 0 to disable");
 MODULE_PARM_DESC(fmio, "(0x388, 0x3C8, 0x3E0) Base of OPL3, 0 to disable");
 MODULE_PARM_DESC(joystick, "(1/0) Enable joystick interface, still need joystick driver");
@@ -1162,15 +1162,6 @@ static inline void enable_dac_unlocked(struct cm_state *s)
 		enable_adc(s);
 }
 
-static inline void enable_dac(struct cm_state *s)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&s->lock, flags);
-	enable_dac_unlocked(s);
-	spin_unlock_irqrestore(&s->lock, flags);
-}
-
 static inline void stop_adc_unlocked(struct cm_state *s)
 {
 	if (s->enable & ENADC) {
@@ -1393,7 +1384,7 @@ static int prog_dmabuf(struct cm_state *s, unsigned rec)
 		if (!db->rawbuf || !db->dmaaddr)
 			return -ENOMEM;
 		db->buforder = order;
-		/* now mark the pages as reserved; otherwise remap_page_range doesn't do what we want */
+		/* now mark the pages as reserved; otherwise remap_pfn_range doesn't do what we want */
 		pend = virt_to_page(db->rawbuf + (PAGE_SIZE << db->buforder) - 1);
 		for (pstart = virt_to_page(db->rawbuf); pstart <= pend; pstart++)
 			SetPageReserved(pstart);
@@ -2301,7 +2292,9 @@ static int cm_mmap(struct file *file, struct vm_area_struct *vma)
 	if (size > (PAGE_SIZE << db->buforder))
 		goto out;
 	ret = -EINVAL;
-	if (remap_page_range(vma, vma->vm_start, virt_to_phys(db->rawbuf), size, vma->vm_page_prot))
+	if (remap_pfn_range(vma, vma->vm_start,
+				virt_to_phys(db->rawbuf) >> PAGE_SHIFT,
+				size, vma->vm_page_prot))
 		goto out;
 	db->mapped = 1;
 	ret = 0;

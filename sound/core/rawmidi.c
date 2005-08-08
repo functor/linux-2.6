@@ -42,10 +42,9 @@ MODULE_LICENSE("GPL");
 #ifdef CONFIG_SND_OSSEMUL
 static int midi_map[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS-1)] = 0};
 static int amidi_map[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS-1)] = 1};
-static int boot_devs;
-module_param_array(midi_map, int, boot_devs, 0444);
+module_param_array(midi_map, int, NULL, 0444);
 MODULE_PARM_DESC(midi_map, "Raw MIDI device number assigned to 1st OSS device.");
-module_param_array(amidi_map, int, boot_devs, 0444);
+module_param_array(amidi_map, int, NULL, 0444);
 MODULE_PARM_DESC(amidi_map, "Raw MIDI device number assigned to 2nd OSS device.");
 #endif /* CONFIG_SND_OSSEMUL */
 
@@ -55,7 +54,7 @@ static int snd_rawmidi_dev_register(snd_device_t *device);
 static int snd_rawmidi_dev_disconnect(snd_device_t *device);
 static int snd_rawmidi_dev_unregister(snd_device_t *device);
 
-snd_rawmidi_t *snd_rawmidi_devices[SNDRV_CARDS * SNDRV_RAWMIDI_DEVICES];
+static snd_rawmidi_t *snd_rawmidi_devices[SNDRV_CARDS * SNDRV_RAWMIDI_DEVICES];
 
 static DECLARE_MUTEX(register_mutex);
 
@@ -748,7 +747,7 @@ static inline int _snd_rawmidi_ioctl(struct inode *inode, struct file *file,
 	case SNDRV_RAWMIDI_IOCTL_DROP:
 	{
 		int val;
-		if (get_user(val, (long __user *) argp))
+		if (get_user(val, (int __user *) argp))
 			return -EFAULT;
 		switch (val) {
 		case SNDRV_RAWMIDI_STREAM_OUTPUT:
@@ -762,7 +761,7 @@ static inline int _snd_rawmidi_ioctl(struct inode *inode, struct file *file,
 	case SNDRV_RAWMIDI_IOCTL_DRAIN:
 	{
 		int val;
-		if (get_user(val, (long __user *) argp))
+		if (get_user(val, (int __user *) argp))
 			return -EFAULT;
 		switch (val) {
 		case SNDRV_RAWMIDI_STREAM_OUTPUT:
@@ -796,8 +795,10 @@ static int snd_rawmidi_ioctl(struct inode *inode, struct file *file,
 	return err;
 }
 
-int snd_rawmidi_control_ioctl(snd_card_t * card, snd_ctl_file_t * control,
-			      unsigned int cmd, unsigned long arg)
+static int snd_rawmidi_control_ioctl(snd_card_t * card,
+				     snd_ctl_file_t * control,
+				     unsigned int cmd,
+				     unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
 	unsigned int tmp;

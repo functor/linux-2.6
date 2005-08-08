@@ -39,7 +39,7 @@ struct resource iomem_resource = {
 
 EXPORT_SYMBOL(iomem_resource);
 
-static rwlock_t resource_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(resource_lock);
 
 #ifdef CONFIG_PROC_FS
 
@@ -57,6 +57,7 @@ static void *r_next(struct seq_file *m, void *v, loff_t *pos)
 }
 
 static void *r_start(struct seq_file *m, loff_t *pos)
+	__acquires(resource_lock)
 {
 	struct resource *p = m->private;
 	loff_t l = 0;
@@ -67,6 +68,7 @@ static void *r_start(struct seq_file *m, loff_t *pos)
 }
 
 static void r_stop(struct seq_file *m, void *v)
+	__releases(resource_lock)
 {
 	read_unlock(&resource_lock);
 }
