@@ -39,7 +39,7 @@ MODULE_DESCRIPTION("ATI IXP MC97 controller");
 MODULE_LICENSE("GPL");
 MODULE_SUPPORTED_DEVICE("{{ATI,IXP150/200/250}}");
 
-static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
+static int index[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = -2}; /* Exclude the first card */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
 static int ac97_clock[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 48000};
@@ -606,21 +606,20 @@ static snd_pcm_uframes_t snd_atiixp_pcm_pointer(snd_pcm_substream_t *substream)
 	snd_pcm_runtime_t *runtime = substream->runtime;
 	atiixp_dma_t *dma = (atiixp_dma_t *)runtime->private_data;
 	unsigned int curptr;
+	int timeout = 1000;
 
-	spin_lock(&chip->reg_lock);
-	curptr = readl(chip->remap_addr + dma->ops->dt_cur);
-	if (curptr < dma->buf_addr) {
-		snd_printdd("curptr = %x, base = %x\n", curptr, dma->buf_addr);
-		curptr = 0;
-	} else {
+	while (timeout--) {
+		curptr = readl(chip->remap_addr + dma->ops->dt_cur);
+		if (curptr < dma->buf_addr)
+			continue;
 		curptr -= dma->buf_addr;
-		if (curptr >= dma->buf_bytes) {
-			snd_printdd("curptr = %x, size = %x\n", curptr, dma->buf_bytes);
-			curptr = 0;
-		}
+		if (curptr >= dma->buf_bytes)
+			continue;
+		return bytes_to_frames(runtime, curptr);
 	}
-	spin_unlock(&chip->reg_lock);
-	return bytes_to_frames(runtime, curptr);
+	snd_printd("atiixp-modem: invalid DMA pointer read 0x%x (buf=%x)\n",
+		   readl(chip->remap_addr + dma->ops->dt_cur), dma->buf_addr);
+	return 0;
 }
 
 /*
@@ -1108,7 +1107,7 @@ static int __devinit snd_atiixp_mixer_new(atiixp_t *chip, int clock)
 /*
  * power management
  */
-static int snd_atiixp_suspend(snd_card_t *card, unsigned int state)
+static int snd_atiixp_suspend(snd_card_t *card, pm_message_t state)
 {
 	atiixp_t *chip = card->pm_private_data;
 	int i;
@@ -1122,18 +1121,18 @@ static int snd_atiixp_suspend(snd_card_t *card, unsigned int state)
 	snd_atiixp_aclink_down(chip);
 	snd_atiixp_chip_stop(chip);
 
-	pci_set_power_state(chip->pci, 3);
+	pci_set_power_state(chip->pci, PCI_D3hot);
 	pci_disable_device(chip->pci);
 	return 0;
 }
 
-static int snd_atiixp_resume(snd_card_t *card, unsigned int state)
+static int snd_atiixp_resume(snd_card_t *card)
 {
 	atiixp_t *chip = card->pm_private_data;
 	int i;
 
 	pci_enable_device(chip->pci);
-	pci_set_power_state(chip->pci, 0);
+	pci_set_power_state(chip->pci, PCI_D0);
 	pci_set_master(chip->pci);
 
 	snd_atiixp_aclink_reset(chip);

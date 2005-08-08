@@ -2306,13 +2306,16 @@ static int journal_init_dev( struct super_block *super,
 	if( !IS_ERR( journal -> j_dev_file ) ) {
 		struct inode *jdev_inode = journal->j_dev_file->f_mapping->host;
 		if( !S_ISBLK( jdev_inode -> i_mode ) ) {
-			reiserfs_warning  (super, "journal_init_dev: '%s' is "
-					   "not a block device", jdev_name );
+			reiserfs_warning(super, "journal_init_dev: '%s' is "
+					 "not a block device", jdev_name );
 			result = -ENOTBLK;
+			release_journal_dev( super, journal );
 		} else  {
 			/* ok */
 			journal->j_dev_bd = I_BDEV(jdev_inode);
 			set_blocksize(journal->j_dev_bd, super->s_blocksize);
+			reiserfs_info(super, "journal_init_dev: journal device: %s\n",
+				      bdevname(journal->j_dev_bd, b));
 		}
 	} else {
 		result = PTR_ERR( journal -> j_dev_file );
@@ -2321,11 +2324,6 @@ static int journal_init_dev( struct super_block *super,
 				  "journal_init_dev: Cannot open '%s': %i",
 				  jdev_name, result );
 	}
-	if( result != 0 ) {
-		release_journal_dev( super, journal );
-	}
-	reiserfs_info(super, "journal_init_dev: journal device: %s\n",
-		bdevname(journal->j_dev_bd, b));
 	return result;
 }
 
@@ -2393,7 +2391,7 @@ int journal_init(struct super_block *p_s_sb, const char * j_dev_name, int old_fo
      jh = (struct reiserfs_journal_header *)(bhjh->b_data);
      
      /* make sure that journal matches to the super block */
-     if (is_reiserfs_jr(rs) && (jh->jh_journal.jp_journal_magic != sb_jp_journal_magic(rs))) {
+     if (is_reiserfs_jr(rs) && (le32_to_cpu(jh->jh_journal.jp_journal_magic) != sb_jp_journal_magic(rs))) {
 	 reiserfs_warning (p_s_sb, "sh-460: journal header magic %x "
 			   "(device %s) does not match to magic found in super "
 			   "block %x",
@@ -3011,6 +3009,8 @@ static int remove_from_transaction(struct super_block *p_s_sb, b_blocknr_t block
 
   if (!already_cleaned) {
     clear_buffer_journal_dirty (bh);
+    clear_buffer_dirty(bh);
+    clear_buffer_journal_test (bh);
     put_bh(bh) ;
     if (atomic_read(&(bh->b_count)) < 0) {
       reiserfs_warning (p_s_sb, "journal-1752: remove from trans, b_count < 0");
@@ -3317,6 +3317,8 @@ int journal_mark_freed(struct reiserfs_transaction_handle *th, struct super_bloc
 	    ** in the current trans
 	    */
             clear_buffer_journal_dirty (cn->bh);
+	    clear_buffer_dirty(cn->bh);
+	    clear_buffer_journal_test(cn->bh);
 	    cleaned = 1 ;
 	    put_bh(cn->bh) ;
 	    if (atomic_read(&(cn->bh->b_count)) < 0) {

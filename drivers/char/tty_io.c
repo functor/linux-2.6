@@ -185,7 +185,7 @@ char *tty_name(struct tty_struct *tty, char *buf)
 
 EXPORT_SYMBOL(tty_name);
 
-inline int tty_paranoia_check(struct tty_struct *tty, struct inode *inode,
+int tty_paranoia_check(struct tty_struct *tty, struct inode *inode,
 			      const char *routine)
 {
 #ifdef TTY_PARANOIA_CHECK
@@ -1789,7 +1789,6 @@ retry_open:
 	}
 #ifdef CONFIG_VT
 	if (device == MKDEV(TTY_MAJOR,0)) {
-		extern int fg_console;
 		extern struct tty_driver *console_driver;
 		driver = console_driver;
 		index = fg_console;
@@ -2016,11 +2015,10 @@ static int tiocswinsz(struct tty_struct *tty, struct tty_struct *real_tty,
 		return 0;
 #ifdef CONFIG_VT
 	if (tty->driver->type == TTY_DRIVER_TYPE_CONSOLE) {
-		unsigned int currcons = tty->index;
 		int rc;
 
 		acquire_console_sem();
-		rc = vc_resize(currcons, tmp_ws.ws_col, tmp_ws.ws_row);
+		rc = vc_resize(tty->driver_data, tmp_ws.ws_col, tmp_ws.ws_row);
 		release_console_sem();
 		if (rc)
 			return -ENXIO;
@@ -2632,6 +2630,7 @@ static void initialize_tty_struct(struct tty_struct *tty)
 	tty->magic = TTY_MAGIC;
 	tty_ldisc_assign(tty, tty_ldisc_get(N_TTY));
 	tty->pgrp = -1;
+	tty->overrun_time = jiffies;
 	tty->flip.char_buf_ptr = tty->flip.char_buf;
 	tty->flip.flag_buf_ptr = tty->flip.flag_buf;
 	INIT_WORK(&tty->flip.work, flush_to_ldisc, tty);

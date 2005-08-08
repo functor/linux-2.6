@@ -151,9 +151,6 @@ MODULE_DEVICE_TABLE(pci, isicom_pci_tbl);
 static int prev_card = 3;	/*	start servicing isi_card[0]	*/
 static struct tty_driver *isicom_normal;
 
-static struct isi_board isi_card[BOARD_COUNT];
-static struct isi_port  isi_ports[PORT_COUNT];
-
 static struct timer_list tx;
 static char re_schedule = 1;
 #ifdef ISICOM_DEBUG
@@ -209,6 +206,9 @@ struct	isi_port {
 	int			xmit_tail;
 	int			xmit_cnt;
 };
+
+static struct isi_board isi_card[BOARD_COUNT];
+static struct isi_port  isi_ports[PORT_COUNT];
 
 /*
  *	Locking functions for card level locking. We need to own both
@@ -381,7 +381,7 @@ static struct file_operations ISILoad_fops = {
 	.ioctl		= ISILoad_ioctl,
 };
 
-struct miscdevice isiloader_device = {
+static struct miscdevice isiloader_device = {
 	ISILOAD_MISC_MINOR, "isictl", &ISILoad_fops
 };
 
@@ -1271,7 +1271,7 @@ static void isicom_shutdown_port(struct isi_port * port)
 	}	
 	port->flags &= ~ASYNC_INITIALIZED;
 	/* 3rd October 2000 : Vinayak P Risbud */
-	port->tty = 0;
+	port->tty = NULL;
 	spin_unlock_irqrestore(&card->card_lock, flags);
 	
 	/*Fix done by Anil .S on 30-04-2001

@@ -252,6 +252,16 @@ static void scsi_wait_done(struct scsi_cmnd *cmd)
 		complete(req->waiting);
 }
 
+/* This is the end routine we get to if a command was never attached
+ * to the request.  Simply complete the request without changing
+ * rq_status; this will cause a DRIVER_ERROR. */
+static void scsi_wait_req_end_io(struct request *req)
+{
+	BUG_ON(!req->waiting);
+
+	complete(req->waiting);
+}
+
 void scsi_wait_req(struct scsi_request *sreq, const void *cmnd, void *buffer,
 		   unsigned bufflen, int timeout, int retries)
 {
@@ -259,6 +269,7 @@ void scsi_wait_req(struct scsi_request *sreq, const void *cmnd, void *buffer,
 	
 	sreq->sr_request->waiting = &wait;
 	sreq->sr_request->rq_status = RQ_SCSI_BUSY;
+	sreq->sr_request->end_io = scsi_wait_req_end_io;
 	scsi_do_req(sreq, cmnd, buffer, bufflen, scsi_wait_done,
 			timeout, retries);
 	wait_for_completion(&wait);
@@ -287,7 +298,6 @@ static int scsi_init_cmd_errh(struct scsi_cmnd *cmd)
 {
 	cmd->owner = SCSI_OWNER_MIDLEVEL;
 	cmd->serial_number = 0;
-	cmd->serial_number_at_timeout = 0;
 	cmd->abort_reason = 0;
 
 	memset(cmd->sense_buffer, 0, sizeof cmd->sense_buffer);
@@ -309,7 +319,6 @@ static int scsi_init_cmd_errh(struct scsi_cmnd *cmd)
 	memcpy(cmd->data_cmnd, cmd->cmnd, sizeof(cmd->cmnd));
 	cmd->buffer = cmd->request_buffer;
 	cmd->bufflen = cmd->request_bufflen;
-	cmd->internal_timeout = NORMAL_TIMEOUT;
 	cmd->abort_reason = 0;
 
 	return 1;
@@ -349,9 +358,9 @@ void scsi_device_unbusy(struct scsi_device *sdev)
 		     shost->host_failed))
 		scsi_eh_wakeup(shost);
 	spin_unlock(shost->host_lock);
-	spin_lock(&sdev->sdev_lock);
+	spin_lock(sdev->request_queue->queue_lock);
 	sdev->device_busy--;
-	spin_unlock_irqrestore(&sdev->sdev_lock, flags);
+	spin_unlock_irqrestore(sdev->request_queue->queue_lock, flags);
 }
 
 /*
@@ -365,10 +374,11 @@ static void scsi_single_lun_run(struct scsi_device *current_sdev)
 {
 	struct Scsi_Host *shost = current_sdev->host;
 	struct scsi_device *sdev, *tmp;
+	struct scsi_target *starget = scsi_target(current_sdev);
 	unsigned long flags;
 
 	spin_lock_irqsave(shost->host_lock, flags);
-	scsi_target(current_sdev)->starget_sdev_user = NULL;
+	starget->starget_sdev_user = NULL;
 	spin_unlock_irqrestore(shost->host_lock, flags);
 
 	/*
@@ -380,10 +390,12 @@ static void scsi_single_lun_run(struct scsi_device *current_sdev)
 	blk_run_queue(current_sdev->request_queue);
 
 	spin_lock_irqsave(shost->host_lock, flags);
-	if (scsi_target(current_sdev)->starget_sdev_user)
+	if (starget->starget_sdev_user)
 		goto out;
-	list_for_each_entry_safe(sdev, tmp, &current_sdev->same_target_siblings,
+	list_for_each_entry_safe(sdev, tmp, &starget->devices,
 			same_target_siblings) {
+		if (sdev == current_sdev)
+			continue;
 		if (scsi_device_get(sdev))
 			continue;
 
@@ -697,6 +709,9 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 	int sense_valid = 0;
 	int sense_deferred = 0;
 
+	if (blk_complete_barrier_rq(q, req, good_bytes >> 9))
+		return;
+
 	/*
 	 * Free up any indirection buffers we allocated for DMA purposes. 
 	 * For the case of a READ, we need to copy the data out of the
@@ -723,7 +738,7 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 		req->errors = result;
 		if (result) {
 			clear_errors = 0;
-			if (sense_valid) {
+			if (sense_valid && req->sense) {
 				/*
 				 * SG_IO wants current and deferred errors
 				 */
@@ -962,6 +977,38 @@ static int scsi_init_io(struct scsi_cmnd *cmd)
 	return BLKPREP_KILL;
 }
 
+static int scsi_prepare_flush_fn(request_queue_t *q, struct request *rq)
+{
+	struct scsi_device *sdev = q->queuedata;
+	struct scsi_driver *drv;
+
+	if (sdev->sdev_state == SDEV_RUNNING) {
+		drv = *(struct scsi_driver **) rq->rq_disk->private_data;
+
+		if (drv->prepare_flush)
+			return drv->prepare_flush(q, rq);
+	}
+
+	return 0;
+}
+
+static void scsi_end_flush_fn(request_queue_t *q, struct request *rq)
+{
+	struct scsi_device *sdev = q->queuedata;
+	struct request *flush_rq = rq->end_io_data;
+	struct scsi_driver *drv;
+
+	if (flush_rq->errors) {
+		printk("scsi: barrier error, disabling flush support\n");
+		blk_queue_ordered(q, QUEUE_ORDERED_NONE);
+	}
+
+	if (sdev->sdev_state == SDEV_RUNNING) {
+		drv = *(struct scsi_driver **) rq->rq_disk->private_data;
+		drv->end_flush(q, rq);
+	}
+}
+
 static int scsi_issue_flush_fn(request_queue_t *q, struct gendisk *disk,
 			       sector_t *error_sector)
 {
@@ -1195,6 +1242,22 @@ static inline int scsi_host_queue_ready(struct request_queue *q,
 }
 
 /*
+ * Kill requests for a dead device
+ */
+static void scsi_kill_requests(request_queue_t *q)
+{
+	struct request *req;
+
+	while ((req = elv_next_request(q)) != NULL) {
+		blkdev_dequeue_request(req);
+		req->flags |= REQ_QUIET;
+		while (end_that_request_first(req, 0, req->nr_sectors))
+			;
+		end_that_request_last(req);
+	}
+}
+
+/*
  * Function:    scsi_request_fn()
  *
  * Purpose:     Main strategy routine for SCSI.
@@ -1208,9 +1271,15 @@ static inline int scsi_host_queue_ready(struct request_queue *q,
 static void scsi_request_fn(struct request_queue *q)
 {
 	struct scsi_device *sdev = q->queuedata;
-	struct Scsi_Host *shost = sdev->host;
+	struct Scsi_Host *shost;
 	struct scsi_cmnd *cmd;
 	struct request *req;
+
+	if (!sdev) {
+		printk("scsi: killing requests for dead queue\n");
+		scsi_kill_requests(q);
+		return;
+	}
 
 	if(!get_device(&sdev->sdev_gendev))
 		/* We must be tearing the block queue down already */
@@ -1220,6 +1289,7 @@ static void scsi_request_fn(struct request_queue *q)
 	 * To start with, we keep looping until the queue is empty, or until
 	 * the host is no longer able to accept any more requests.
 	 */
+	shost = sdev->host;
 	while (!blk_queue_plugged(q)) {
 		int rtn;
 		/*
@@ -1353,7 +1423,7 @@ struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
 	struct Scsi_Host *shost = sdev->host;
 	struct request_queue *q;
 
-	q = blk_init_queue(scsi_request_fn, &sdev->sdev_lock);
+	q = blk_init_queue(scsi_request_fn, NULL);
 	if (!q)
 		return NULL;
 
@@ -1365,6 +1435,17 @@ struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
 	blk_queue_bounce_limit(q, scsi_calculate_bounce_limit(shost));
 	blk_queue_segment_boundary(q, shost->dma_boundary);
 	blk_queue_issue_flush_fn(q, scsi_issue_flush_fn);
+
+	/*
+	 * ordered tags are superior to flush ordering
+	 */
+	if (shost->ordered_tag)
+		blk_queue_ordered(q, QUEUE_ORDERED_TAG);
+	else if (shost->ordered_flush) {
+		blk_queue_ordered(q, QUEUE_ORDERED_FLUSH);
+		q->prepare_flush_fn = scsi_prepare_flush_fn;
+		q->end_flush_fn = scsi_end_flush_fn;
+	}
 
 	if (!shost->use_clustering)
 		clear_bit(QUEUE_FLAG_CLUSTER, &q->queue_flags);
@@ -1886,3 +1967,55 @@ scsi_internal_device_unblock(struct scsi_device *sdev)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(scsi_internal_device_unblock);
+
+static void
+device_block(struct scsi_device *sdev, void *data)
+{
+	scsi_internal_device_block(sdev);
+}
+
+static int
+target_block(struct device *dev, void *data)
+{
+	if (scsi_is_target_device(dev))
+		starget_for_each_device(to_scsi_target(dev), NULL,
+					device_block);
+	return 0;
+}
+
+void
+scsi_target_block(struct device *dev)
+{
+	if (scsi_is_target_device(dev))
+		starget_for_each_device(to_scsi_target(dev), NULL,
+					device_block);
+	else
+		device_for_each_child(dev, NULL, target_block);
+}
+EXPORT_SYMBOL_GPL(scsi_target_block);
+
+static void
+device_unblock(struct scsi_device *sdev, void *data)
+{
+	scsi_internal_device_unblock(sdev);
+}
+
+static int
+target_unblock(struct device *dev, void *data)
+{
+	if (scsi_is_target_device(dev))
+		starget_for_each_device(to_scsi_target(dev), NULL,
+					device_unblock);
+	return 0;
+}
+
+void
+scsi_target_unblock(struct device *dev)
+{
+	if (scsi_is_target_device(dev))
+		starget_for_each_device(to_scsi_target(dev), NULL,
+					device_unblock);
+	else
+		device_for_each_child(dev, NULL, target_unblock);
+}
+EXPORT_SYMBOL_GPL(scsi_target_unblock);

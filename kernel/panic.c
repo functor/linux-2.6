@@ -49,8 +49,7 @@ EXPORT_SYMBOL(panic_blink);
  *	panic - halt the system
  *	@fmt: The text string to print
  *
- *	Display a message, then perform cleanups. Functions in the panic
- *	notifier list are called after the filesystem cache is flushed (when possible).
+ *	Display a message, then perform cleanups.
  *
  *	This function never returns.
  */
@@ -103,9 +102,9 @@ NORET_TYPE void panic(const char * fmt, ...)
 #ifdef __sparc__
 	{
 		extern int stop_a_enabled;
-		/* Make sure the user can actually press L1-A */
+		/* Make sure the user can actually press Stop-A (L1-A) */
 		stop_a_enabled = 1;
-		printk(KERN_EMERG "Press L1-A to return to the boot prom\n");
+		printk(KERN_EMERG "Press Stop-A (L1-A) to return to the boot prom\n");
 	}
 #endif
 #if defined(CONFIG_ARCH_S390)

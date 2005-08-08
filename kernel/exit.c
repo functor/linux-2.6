@@ -25,7 +25,9 @@
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
 #include <linux/mempolicy.h>
+#include <linux/cpuset.h>
 #include <linux/syscalls.h>
+#include <linux/signal.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -36,6 +38,8 @@ extern void sem_exit (void);
 extern struct task_struct *child_reaper;
 
 int getrusage(struct task_struct *, int, struct rusage __user *);
+
+static void exit_mm(struct task_struct * tsk);
 
 static void __unhash_process(struct task_struct *p)
 {
@@ -208,7 +212,7 @@ static inline int has_stopped_jobs(int pgrp)
 }
 
 /**
- * reparent_to_init() - Reparent the calling kernel thread to the init task.
+ * reparent_to_init - Reparent the calling kernel thread to the init task.
  *
  * If a kernel thread is launched as a result of a system call, or if
  * it ever exits, it should generally reparent itself to init so that
@@ -219,7 +223,7 @@ static inline int has_stopped_jobs(int pgrp)
  *
  * NOTE that reparent_to_init() gives the caller full capabilities.
  */
-void reparent_to_init(void)
+static inline void reparent_to_init(void)
 {
 	write_lock_irq(&tasklist_lock);
 
@@ -276,7 +280,7 @@ void set_special_pids(pid_t session, pid_t pgrp)
  */
 int allow_signal(int sig)
 {
-	if (sig < 1 || sig > _NSIG)
+	if (!valid_signal(sig) || sig < 1)
 		return -EINVAL;
 
 	spin_lock_irq(&current->sighand->siglock);
@@ -297,7 +301,7 @@ EXPORT_SYMBOL(allow_signal);
 
 int disallow_signal(int sig)
 {
-	if (sig < 1 || sig > _NSIG)
+	if (!valid_signal(sig) || sig < 1)
 		return -EINVAL;
 
 	spin_lock_irq(&current->sighand->siglock);
@@ -472,7 +476,7 @@ EXPORT_SYMBOL_GPL(exit_fs);
  * Turn us into a lazy TLB process if we
  * aren't already..
  */
-void exit_mm(struct task_struct * tsk)
+static void exit_mm(struct task_struct * tsk)
 {
 	struct mm_struct *mm = tsk->mm;
 
@@ -751,13 +755,6 @@ static void exit_notify(struct task_struct *tsk)
 		state = EXIT_DEAD;
 	tsk->exit_state = state;
 
-	/*
-	 * Clear these here so that update_process_times() won't try to deliver
-	 * itimer, profile or rlimit signals to this task while it is in late exit.
-	 */
-	tsk->it_virt_value = cputime_zero;
-	tsk->it_prof_value = cputime_zero;
-
 	write_unlock_irq(&tasklist_lock);
 
 	list_for_each_safe(_p, _n, &ptrace_dead) {
@@ -797,15 +794,22 @@ fastcall NORET_TYPE void do_exit(long code)
 	}
 
 	tsk->flags |= PF_EXITING;
-	del_timer_sync(&tsk->real_timer);
+
+	/*
+	 * Make sure we don't try to process any timer firings
+	 * while we are already exiting.
+	 */
+ 	tsk->it_virt_expires = cputime_zero;
+ 	tsk->it_prof_expires = cputime_zero;
+	tsk->it_sched_expires = 0;
 
 	if (unlikely(in_atomic()))
 		printk(KERN_INFO "note: %s[%d] exited with preempt_count %d\n",
 				current->comm, current->pid,
 				preempt_count());
 
-	acct_update_integrals();
-	update_mem_hiwater();
+	acct_update_integrals(tsk);
+	update_mem_hiwater(tsk);
 	group_dead = atomic_dec_and_test(&tsk->signal->live);
 	if (group_dead)
 		acct_process(code);
@@ -816,6 +820,7 @@ fastcall NORET_TYPE void do_exit(long code)
 	__exit_fs(tsk);
 	exit_namespace(tsk);
 	exit_thread();
+	cpuset_exit(tsk);
 	exit_keys(tsk);
 
 	if (group_dead && tsk->signal->leader)
@@ -838,6 +843,8 @@ fastcall NORET_TYPE void do_exit(long code)
 	/* Avoid "noreturn function does return".  */
 	for (;;) ;
 }
+
+EXPORT_SYMBOL_GPL(do_exit);
 
 NORET_TYPE void complete_and_exit(struct completion *comp, long code)
 {
