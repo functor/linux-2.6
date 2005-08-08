@@ -54,13 +54,13 @@ static inline int mmap_is_legacy(void)
 	 */
 	if (!test_thread_flag(TIF_32BIT))
 		return 1;
-		
-	if (current->personality & ADDR_COMPAT_LAYOUT) 
+
+	if (current->personality & ADDR_COMPAT_LAYOUT)
 		return 1;
-	
+
 	if (current->rlim[RLIMIT_STACK].rlim_cur == RLIM_INFINITY)
 		return 1;
-		
+
 	return sysctl_legacy_va_layout;
 }
 
@@ -81,7 +81,6 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 	} else {
 		mm->mmap_base = mmap_base();
 		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
-		mm->get_unmapped_exec_area = arch_get_unmapped_exec_area;
 		mm->unmap_area = arch_unmap_area_topdown;
 	}
 }

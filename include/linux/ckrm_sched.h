@@ -62,7 +62,7 @@ struct ckrm_runqueue {
 	CVT_t local_cvt;
 
 	unsigned long lrq_load;
-	int local_weight; 
+	int local_weight;   
 
 
 	/*
@@ -108,14 +108,14 @@ struct ckrm_cpu_class_stat {
 #define CKRM_CPU_CLASS_MAGIC 0x7af2abe3
 
 #define USAGE_SAMPLE_FREQ HZ  //sample every 1 seconds
-#define NS_PER_SAMPLE (USAGE_SAMPLE_FREQ*(NSEC_PER_SEC/HZ))
+#define NS_PER_SAMPLE      (USAGE_SAMPLE_FREQ*(NSEC_PER_SEC/HZ))
 #define USAGE_WINDOW_SIZE 60  //keep the last 60 sample
 
 struct ckrm_usage {
 	unsigned long samples[USAGE_WINDOW_SIZE]; //record usages 
-	unsigned long sample_pointer; //pointer for the sliding window
-	unsigned long long last_ns; //ns for last sample
-	long long last_sample_jiffies; //in number of jiffies
+	unsigned long sample_pointer;  // pointer for the sliding window
+	unsigned long long last_ns;    // ns for last sample
+	long long last_sample_jiffies; // in number of jiffies
 };
 
 /*
@@ -247,7 +247,6 @@ void init_cpu_classes(void);
 void init_cpu_class(struct ckrm_cpu_class *cls,ckrm_shares_t* shares);
 void ckrm_cpu_change_class(void *task, void *old, void *new);
 
-
 #define CPU_DEMAND_ENQUEUE 0
 #define CPU_DEMAND_DEQUEUE 1
 #define CPU_DEMAND_DESCHEDULE 2
@@ -299,7 +298,7 @@ void adjust_local_weight(void);
 
 
 #define MAX_SAVINGS_ABSOLUTE (10LLU*NSEC_PER_SEC)  // 10 seconds
-
+ 
 #define CVT_UPDATE_TICK     ((HZ/2)?:1)
 
 // ABSOLUTE_CKRM_TUNING determines whether classes can make up
@@ -309,10 +308,10 @@ void adjust_local_weight(void);
 
 #ifdef ABSOLUTE_CKRM_TUNING
 
-#define MAX_SAVINGS        MAX_SAVINGS_ABSOLUTE
+#define MAX_SAVINGS          MAX_SAVINGS_ABSOLUTE
 //an absolute bonus of 200ms for classes when reactivated
 #define INTERACTIVE_BONUS(lrq) ((200*NSEC_PER_MS)/local_class_weight(lrq))
-#define SAVINGS_LEAK_SPEED (CVT_UPDATE_TICK/10*NSEC_PER_JIFFIES)
+#define SAVINGS_LEAK_SPEED   (CVT_UPDATE_TICK/10*NSEC_PER_JIFFIES)
 
 #define scale_cvt(val,lrq)   ((val)*local_class_weight(lrq))
 #define unscale_cvt(val,lrq) (do_div(val,local_class_weight(lrq)))
@@ -491,7 +490,7 @@ static inline void update_local_cvt(struct task_struct *p, unsigned long nsec)
 
 	update_class_priority(lrq);
 }
-
+                                                                                
 static inline int class_preempts_curr(struct task_struct * p, struct task_struct* curr)
 {
 	struct cq_node_struct* node1 = &(get_task_lrq(p)->classqueue_linkobj);
@@ -544,7 +543,7 @@ long pid_get_pressure(ckrm_load_t* ckrm_load, int local_group);
 static inline void ckrm_sched_tick(unsigned long j,int this_cpu,struct ckrm_load_struct* ckrm_load)
 {
 	read_lock(&class_list_lock);
-       
+
 #ifdef CONFIG_SMP
 	ckrm_load_sample(ckrm_load,this_cpu);
 #endif

@@ -33,7 +33,7 @@
  * Leave an at least ~128 MB hole.
  */
 #define MIN_GAP (128*1024*1024)
-#define MAX_GAP (TASK_SIZE/6*5)
+#define MAX_GAP (TASK_SIZE_3264/6*5)
 
 static inline unsigned long mmap_base(void)
 {
@@ -44,7 +44,7 @@ static inline unsigned long mmap_base(void)
 	else if (gap > MAX_GAP)
 		gap = MAX_GAP;
 
-	return TASK_SIZE - (gap & PAGE_MASK);
+	return TASK_SIZE_3264 - (gap & PAGE_MASK);
 }
 
 static inline int mmap_is_legacy(void)
@@ -81,7 +81,6 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 	} else {
 		mm->mmap_base = mmap_base();
 		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
-		mm->get_unmapped_exec_area = arch_get_unmapped_exec_area;
 		mm->unmap_area = arch_unmap_area_topdown;
 	}
 }

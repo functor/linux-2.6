@@ -1,21 +1,21 @@
 
 debug_switch:
 
- 0   1	
+ 0   1
 
- 1   2	
+ 1   2
 
- 2   4	
+ 2   4
 
- 3   8	
+ 3   8
 
- 4  16	
+ 4  16
 
- 5  32	
+ 5  32
 
- 6  64	
+ 6  64
 
- 7 128	
+ 7 128
 
 
 debug_xid:
@@ -29,10 +29,10 @@ debug_xid:
  1   2	"alloc_vx_info(%d)*"
 	"loc_vx_info(%d)*"
 	"locate_vx_info(%d)"
-		
+
  2   4	"get_vx_info(%p[#%d.%d])"
 	"put_vx_info(%p[#%d.%d])"
-	
+
  3   8	"set_vx_info(%p[#%d.%d.%d])"
 	"clr_vx_info(%p[#%d.%d.%d])"
 	"rcu_free_vx_info(%p): uc=%d"
@@ -44,9 +44,9 @@ debug_xid:
  5  32	"vx_migrate_task(%p,%p[#%d.%d])"
 	"task_get_vx_info(%p)"
 
- 6  64	
+ 6  64	"vx_set_init(%p[#%d],%p[#%d,%d,%d])"
 
- 7 128	
+ 7 128
 
 
 debug_nid:
@@ -59,10 +59,10 @@ debug_nid:
 
  1   2	"alloc_nx_info(%d)*"
 	"loc_nx_info(%d)*"
-		
+
  2   4	"get_nx_info(%p[#%d.%d])"
 	"put_nx_info(%p[#%d.%d])"
-	
+
  3   8	"set_nx_info(%p[#%d.%d.%d])"
 	"clr_nx_info(%p[#%d.%d.%d])"
 	"rcu_free_nx_info(%p): uc=%d"
@@ -75,9 +75,9 @@ debug_nid:
 	"task_get_nx_info(%p)"
 	"create_nx_info()"
 
- 6  64	
+ 6  64
 
- 7 128	
+ 7 128
 
 
 debug_dlim:
@@ -90,11 +90,11 @@ debug_dlim:
 
  2   4	"get_dl_info(%p[#%d.%d])"
 	"put_dl_info(%p[#%d.%d])"
-	
+
  3   8	"rcu_free_dl_info(%p)"
 	"__hash_dl_info: %p[#%d]"
 	"__unhash_dl_info: %p[#%d]"
-	
+
 
  4  16	"ALLOC (%p,#%d)%c inode (%d)"
 	"FREE  (%p,#%d)%c inode"
@@ -112,39 +112,40 @@ debug_dlim:
 debug_cvirt:
 
 
- 0   1	
+ 0   1
 
- 1   2	
+ 1   2
 
  2   4	"vx_map_tgid: %p/%llx: %d -> %d"
 	"vx_rmap_tgid: %p/%llx: %d -> %d"
-	
- 3   8	
 
- 4  16	
+ 3   8
 
- 5  32	
+ 4  16
 
- 6  64	
+ 5  32
 
- 7 128	
-	
-	
-	
+ 6  64
+
+ 7 128
+
+
+
 debug_net:
 
 
- 0   1	
+ 0   1
 
- 1   2	
+ 1   2
 
- 2   4	"tcp_in_list(%p) %p,%p;%lx"
-	
- 3   8	"inet_bind(%p) %p,%p;%lx"
+ 2   4	"nx_addr_conflict(%p,%p) %d.%d,%d.%d"
+
+ 3   8	"inet_bind(%p)* %p,%p;%lx %d.%d.%d.%d"
+	"inet_bind(%p) %d.%d.%d.%d, %d.%d.%d.%d, %d.%d.%d.%d"
 
  4  16	"ip_route_connect(%p) %p,%p;%lx"
 
- 5  32	"tcp_ipv4_addr_conflict(%p,%p) %p,%p;%lx %p,%p;%lx"
+ 5  32	"__addr_in_socket(%p,%d.%d.%d.%d) %p:%d.%d.%d.%d %p;%lx"
 
  6  64	"sk: %p [#%d] (from %d)"
 	"sk,req: %p [#%d] (from %d)"
@@ -162,9 +163,9 @@ debug_limit:
 
  n 2^n	"vx_acc_cres[%5d,%s,%2d]: %5d%s"
 	"vx_cres_avail[%5d,%s,%2d]: %5ld > %5d + %5d"
-	
+
  m 2^m	"vx_acc_page[%5d,%s,%2d]: %5d%s"
 	"vx_acc_pages[%5d,%s,%2d]: %5d += %5d"
 	"vx_pages_avail[%5d,%s,%2d]: %5ld > %5d + %5d"
-	
-	
+
+

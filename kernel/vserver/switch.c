@@ -42,6 +42,8 @@ vc_get_version(uint32_t id)
 extern asmlinkage long
 sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 {
+	if (!capable(CAP_CONTEXT))
+		return -EPERM;
 
 	vxdprintk(VXD_CBIT(switch, 0),
 		"vc: VCMD_%02d_%d[%d], %d",
@@ -52,7 +54,7 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 	case VCMD_get_version:
 		return vc_get_version(id);
 
-#ifdef	CONFIG_VSERVER_LEGACY		
+#ifdef	CONFIG_VSERVER_LEGACY
 	case VCMD_new_s_context:
 		return vc_new_s_context(id, data);
 	case VCMD_set_ipv4root:
@@ -96,7 +98,7 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 		return vc_set_rlimit(id, data);
 	case VCMD_get_rlimit_mask:
 		return vc_get_rlimit_mask(id, data);
-		
+
 	case VCMD_vx_get_vhi_name:
 		return vc_get_vhi_name(id, data);
 	case VCMD_vx_set_vhi_name:
@@ -122,6 +124,9 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 	case VCMD_get_ncaps:
 		return vc_get_ncaps(id, data);
 
+	case VCMD_set_sched_v2:
+		return vc_set_sched_v2(id, data);
+	/* this is version 3 */
 	case VCMD_set_sched:
 		return vc_set_sched(id, data);
 
@@ -143,7 +148,10 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 	case VCMD_ctx_kill:
 		return vc_ctx_kill(id, data);
 
-#ifdef	CONFIG_VSERVER_LEGACY		
+	case VCMD_wait_exit:
+		return vc_wait_exit(id, data);
+
+#ifdef	CONFIG_VSERVER_LEGACY
 	case VCMD_create_context:
 		return vc_ctx_create(id, data);
 #endif
@@ -157,7 +165,7 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 		return vc_enter_namespace(id, data);
 
 	case VCMD_ctx_create:
-#ifdef	CONFIG_VSERVER_LEGACY		
+#ifdef	CONFIG_VSERVER_LEGACY
 		if (id == 1) {
 			current->xid = 1;
 			return 1;

@@ -23,46 +23,39 @@ static inline void __vx_acc_cres(struct vx_info *vxi,
 			(vxi?vxi->vx_id:-1), vlimit_name[res], res,
 			(vxi?atomic_read(&vxi->limit.rcur[res]):0),
 			(dir>0)?"++":"--", _data, _file, _line);
-        if (vxi) {
-                if (dir > 0)
-                        atomic_inc(&vxi->limit.rcur[res]);
-                else
-                        atomic_dec(&vxi->limit.rcur[res]);
-        }
+	if (vxi) {
+		if (dir > 0)
+			atomic_inc(&vxi->limit.rcur[res]);
+		else
+			atomic_dec(&vxi->limit.rcur[res]);
+	}
 }
 
 #define vx_acc_cres(v,d,p,r) \
 	__vx_acc_cres((v), (r), (d), (p), __FILE__, __LINE__)
 
-#define vx_nproc_inc(p)	\
-	vx_acc_cres(current->vx_info, 1, (p), RLIMIT_NPROC)
-#define vx_nproc_dec(p)	\
-	vx_acc_cres(current->vx_info,-1, (p), RLIMIT_NPROC)
+#define vx_acc_cres_cond(x,d,p,r) \
+	__vx_acc_cres(((x) == current->xid) ? current->vx_info : 0,\
+	(r), (d), (p), __FILE__, __LINE__)
 
-#define vx_files_inc(f)	\
-	vx_acc_cres(current->vx_info, 1, (f), RLIMIT_NOFILE)
-#define vx_files_dec(f)	\
-	vx_acc_cres(current->vx_info,-1, (f), RLIMIT_NOFILE)
+#define vx_nproc_inc(p) \
+	vx_acc_cres((p)->vx_info, 1, (p), RLIMIT_NPROC)
 
-/*
-#define vx_openfd_inc(f) do {					\
-	vx_acc_cres(current->vx_info, 1, RLIMIT_OPENFD);	\
-	printk("vx_openfd_inc: %d[#%d] in %s:%d\n",		\
-		f, current->xid, __FILE__, __LINE__);		\
-	} while (0)
+#define vx_nproc_dec(p) \
+	vx_acc_cres((p)->vx_info,-1, (p), RLIMIT_NPROC)
 
-#define vx_openfd_dec(f) do {					\
-	vx_acc_cres(current->vx_info,-1, RLIMIT_OPENFD);	\
-	printk("vx_openfd_dec: %d[#%d] in %s:%d\n",		\
-		f, current->xid, __FILE__, __LINE__);		\
-	} while (0)
-*/
+#define vx_files_inc(f) \
+	vx_acc_cres_cond((f)->f_xid, 1, (f), RLIMIT_NOFILE)
+
+#define vx_files_dec(f) \
+	vx_acc_cres_cond((f)->f_xid,-1, (f), RLIMIT_NOFILE)
+
 
 #define vx_cres_avail(v,n,r) \
-        __vx_cres_avail((v), (r), (n), __FILE__, __LINE__)
+	__vx_cres_avail((v), (r), (n), __FILE__, __LINE__)
 
 static inline int __vx_cres_avail(struct vx_info *vxi,
-                int res, int num, char *_file, int _line)
+		int res, int num, char *_file, int _line)
 {
 	unsigned long value;
 
@@ -70,21 +63,21 @@ static inline int __vx_cres_avail(struct vx_info *vxi,
 		VXD_RLIMIT(res, RLIMIT_NPROC) ||
 		VXD_RLIMIT(res, VLIMIT_NSOCK))
 		vxlprintk(1, "vx_cres_avail[%5d,%s,%2d]: %5ld > %5d + %5d",
-                        (vxi?vxi->vx_id:-1), vlimit_name[res], res,
+			(vxi?vxi->vx_id:-1), vlimit_name[res], res,
 			(vxi?vxi->limit.rlim[res]:1),
-                        (vxi?atomic_read(&vxi->limit.rcur[res]):0),
+			(vxi?atomic_read(&vxi->limit.rcur[res]):0),
 			num, _file, _line);
-        if (!vxi)
-                return 1;
-	value = atomic_read(&vxi->limit.rcur[res]);	
+	if (!vxi)
+		return 1;
+	value = atomic_read(&vxi->limit.rcur[res]);
 	if (value > vxi->limit.rmax[res])
 		vxi->limit.rmax[res] = value;
-        if (vxi->limit.rlim[res] == RLIM_INFINITY)
-                return 1;
-        if (value + num <= vxi->limit.rlim[res])
-                return 1;
+	if (vxi->limit.rlim[res] == RLIM_INFINITY)
+		return 1;
+	if (value + num <= vxi->limit.rlim[res])
+		return 1;
 	atomic_inc(&vxi->limit.lhit[res]);
-        return 0;
+	return 0;
 }
 
 #define vx_nproc_avail(n) \

@@ -52,31 +52,31 @@ void init_cpu_class(struct ckrm_cpu_class *cls,ckrm_shares_t* shares)
 
 	for (i = 0 ; i < NR_CPUS ; i++) {
 		queue = &cls->local_queues[i];
-		queue->active  = queue->arrays;
-		queue->expired = queue->arrays+1;
-		
-		for (j = 0; j < 2; j++) {
+	queue->active   = queue->arrays;
+	queue->expired  = queue->arrays+1;
+	
+	for (j = 0; j < 2; j++) {
 			array = queue->arrays + j;
-			for (k = 0; k < MAX_PRIO; k++) {
-				INIT_LIST_HEAD(array->queue + k);
-				__clear_bit(k, array->bitmap);
-			}
-			// delimiter for bitsearch
-			__set_bit(MAX_PRIO, array->bitmap);
-			array->nr_active = 0;
+		for (k = 0; k < MAX_PRIO; k++) {
+			INIT_LIST_HEAD(array->queue + k);
+			__clear_bit(k, array->bitmap);
 		}
-
-		queue->expired_timestamp = 0;
-		
-		queue->cpu_class = cls;
+		// delimiter for bitsearch
+		__set_bit(MAX_PRIO, array->bitmap);
+		array->nr_active = 0;
+	}
+	
+	queue->expired_timestamp = 0;
+	
+	queue->cpu_class = cls;
 		queue->classqueue = get_cpu_classqueue(i);
-		queue->top_priority = MAX_PRIO;
-		cq_node_init(&queue->classqueue_linkobj);
+	queue->top_priority = MAX_PRIO;
+	cq_node_init(&queue->classqueue_linkobj);
 		queue->local_cvt = 0;
-		queue->lrq_load = 0;
-		queue->local_weight = cpu_class_weight(cls);
-		queue->uncounted_ns = 0;
-		queue->savings = 0;
+	queue->lrq_load = 0;
+	queue->local_weight = cpu_class_weight(cls);
+	queue->uncounted_ns = 0;
+	queue->savings = 0;
 		queue->magic = 0x43FF43D7;
 	}
 
@@ -100,7 +100,7 @@ struct ckrm_cpu_class * ckrm_get_cpu_class(struct ckrm_core_class *core)
 {
 	struct ckrm_cpu_class * cls;
 	cls = ckrm_get_res_class(core, cpu_rcbs.resid, struct ckrm_cpu_class);
-	if (valid_cpu_class(cls))
+  	if (valid_cpu_class(cls))
 		return cls;
 	else
 		return NULL;
@@ -128,7 +128,7 @@ void* ckrm_alloc_cpu_class(struct ckrm_core_class *core, struct ckrm_core_class 
 			set_default_share(&shares);
 			init_cpu_class(cls,&shares);
 			cls->core = core;
-			cls->parent = parent;
+			cls->parent = parent;			
 		}
 	} else
 		printk(KERN_ERR"alloc_cpu_class failed\n");
@@ -194,8 +194,10 @@ int ckrm_cpu_set_share(void *my_res, struct ckrm_shares *new_share)
         struct ckrm_shares *cur = &cls->shares, *par;
         int rc = -EINVAL;
 
-        if (!cls) 
-                return rc;
+        if (!cls) {
+		printk("ckrm_cpu_set_share: cls == NULL\n");
+		return rc;
+	}
 
         if (cls->parent) {
                 parres = ckrm_get_cpu_class(cls->parent);
@@ -235,7 +237,7 @@ static int ckrm_cpu_get_share(void *my_res,
 {			
 	struct ckrm_cpu_class *cls = my_res;
 
-	if (!cls) 
+        if (!cls)
 		return -EINVAL;
 	*shares = cls->shares;
 	return 0;
@@ -371,7 +373,7 @@ void init_cpu_classes(void)
 	 *  required for E14/E15 since ckrm_init is called after sched_init
 	 */
 	ckrm_alloc_cpu_class(NULL,NULL);
-}
+	}
 
 
 EXPORT_SYMBOL(ckrm_get_cpu_class);

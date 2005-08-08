@@ -60,9 +60,9 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 		}
 		return ret;
 	}
-	
+
 	if (!vx_check(0, VX_ADMIN) ||
-		!capable(CAP_SYS_ADMIN) || vx_flags(VX_INFO_LOCK, 0))
+		!capable(CAP_SYS_ADMIN) || vx_flags(VX_INFO_PRIVATE, 0))
 		return -EPERM;
 
 	/* ugly hack for Spectator */
@@ -74,7 +74,7 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 	if (((ctx > MAX_S_CONTEXT) && (ctx != VX_DYNAMIC_ID)) ||
 		(ctx == 0))
 		return -EINVAL;
-		
+
 	if ((ctx == VX_DYNAMIC_ID) || (ctx < MIN_D_CONTEXT))
 		new_vxi = locate_or_create_vx_info(ctx);
 	else
@@ -83,7 +83,7 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 	if (!new_vxi)
 		return -EINVAL;
 	new_vxi->vx_flags &= ~(VXF_STATE_SETUP|VXF_STATE_INIT);
-	
+
 	ret = vx_migrate_task(current, new_vxi);
 	if (ret == 0) {
 		current->vx_info->vx_bcaps &= (~vc_data.remove_cap);
@@ -124,7 +124,7 @@ int vc_set_ipv4root(uint32_t nbip, void __user *data)
 		err = 0;
 	else if (nxi) {
 		int found = 0;
-		
+
 		// We are allowed to select a subset of the currently
 		// installed IP numbers. No new one allowed
 		// We can't change the broadcast address though
