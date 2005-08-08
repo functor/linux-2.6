@@ -45,6 +45,8 @@ struct mod_arch_specific
 #define MODULE_PROC_FAMILY "ELAN "
 #elif defined CONFIG_MCRUSOE
 #define MODULE_PROC_FAMILY "CRUSOE "
+#elif defined CONFIG_MEFFICEON
+#define MODULE_PROC_FAMILY "EFFICEON "
 #elif defined CONFIG_MWINCHIPC6
 #define MODULE_PROC_FAMILY "WINCHIPC6 "
 #elif defined CONFIG_MWINCHIP2
@@ -65,7 +67,11 @@ struct mod_arch_specific
 #define MODULE_REGPARM ""
 #endif
 
+#ifdef CONFIG_4KSTACKS
 #define MODULE_STACKSIZE "4KSTACKS "
+#else
+#define MODULE_STACKSIZE ""
+#endif
 
 #define MODULE_ARCH_VERMAGIC MODULE_PROC_FAMILY MODULE_REGPARM MODULE_STACKSIZE
 

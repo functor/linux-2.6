@@ -2,7 +2,7 @@ ifneq ($(KERNELRELEASE),)
 
 pwc-objs	:= pwc-if.o pwc-misc.o pwc-ctrl.o pwc-uncompress.o pwc-dec1.o pwc-dec23.o pwc-kiara.o pwc-timon.o
 
-obj-m += pwc.o
+obj-$(CONFIG_USB_PWC) += pwc.o
 
 else
 

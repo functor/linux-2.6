@@ -4,6 +4,7 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
 
+#include <linux/syscalls.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/fs.h>
@@ -86,7 +87,7 @@ static int locate_fd(struct files_struct *files,
 	int error;
 
 	error = -EINVAL;
-	if (orig_start >= current->rlim[RLIMIT_NOFILE].rlim_cur)
+	if (orig_start >= current->signal->rlim[RLIMIT_NOFILE].rlim_cur)
 		goto out;
 
 repeat:
@@ -105,7 +106,7 @@ repeat:
 	}
 	
 	error = -EMFILE;
-	if (newfd >= current->rlim[RLIMIT_NOFILE].rlim_cur)
+	if (newfd >= current->signal->rlim[RLIMIT_NOFILE].rlim_cur)
 		goto out;
 
 	error = expand_files(files, newfd);
@@ -163,7 +164,7 @@ asmlinkage long sys_dup2(unsigned int oldfd, unsigned int newfd)
 	if (newfd == oldfd)
 		goto out_unlock;
 	err = -EBADF;
-	if (newfd >= current->rlim[RLIMIT_NOFILE].rlim_cur)
+	if (newfd >= current->signal->rlim[RLIMIT_NOFILE].rlim_cur)
 		goto out_unlock;
 	get_file(file);			/* We are now finished with oldfd */
 
@@ -362,7 +363,7 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 	return err;
 }
 
-asmlinkage long sys_fcntl(int fd, unsigned int cmd, unsigned long arg)
+asmlinkage long sys_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg)
 {	
 	struct file *filp;
 	long err = -EBADF;
@@ -435,9 +436,9 @@ static inline int sigio_perm(struct task_struct *p,
                              struct fown_struct *fown, int sig)
 {
 	return (((fown->euid == 0) ||
- 	        (fown->euid == p->suid) || (fown->euid == p->uid) ||
- 	        (fown->uid == p->suid) || (fown->uid == p->uid)) &&
- 	        !security_file_send_sigiotask(p, fown, sig));
+		 (fown->euid == p->suid) || (fown->euid == p->uid) ||
+		 (fown->uid == p->suid) || (fown->uid == p->uid)) &&
+		!security_file_send_sigiotask(p, fown, sig));
 }
 
 static void send_sigio_to_task(struct task_struct *p,

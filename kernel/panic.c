@@ -16,7 +16,6 @@
 #include <linux/notifier.h>
 #include <linux/init.h>
 #include <linux/sysrq.h>
-#include <linux/syscalls.h>
 #include <linux/interrupt.h>
 #include <linux/nmi.h>
 
@@ -43,7 +42,7 @@ static long no_blink(long time)
 }
 
 /* Returns how long it waited in ms */
-long (*panic_blink)(long time) = no_blink;
+long (*panic_blink)(long time);
 EXPORT_SYMBOL(panic_blink);
 
 /**
@@ -70,13 +69,18 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
+	if (crashdump_func())
+		BUG();
 	bust_spinlocks(0);
 
 #ifdef CONFIG_SMP
 	smp_send_stop();
 #endif
 
-       notifier_call_chain(&panic_notifier_list, 0, buf);
+	notifier_call_chain(&panic_notifier_list, 0, buf);
+
+	if (!panic_blink)
+		panic_blink = no_blink;
 
 	if (panic_timeout > 0)
 	{
@@ -110,10 +114,10 @@ NORET_TYPE void panic(const char * fmt, ...)
         disabled_wait(caller);
 #endif
 	local_irq_enable();
-	for (i = 0;;) { 
+	for (i = 0;;) {
 		i += panic_blink(i);
-		mdelay(1); 
-		i++; 
+		mdelay(1);
+		i++;
 	}
 }
 

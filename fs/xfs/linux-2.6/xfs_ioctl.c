@@ -270,7 +270,7 @@ xfs_vget_fsop_handlereq(
 	/*
 	 * Get the XFS inode, building a vnode to go with it.
 	 */
-	error = xfs_iget(mp, NULL, ino, XFS_ILOCK_SHARED, &ip, 0);
+	error = xfs_iget(mp, NULL, ino, 0, XFS_ILOCK_SHARED, &ip, 0);
 	if (error)
 		return error;
 	if (ip == NULL)
@@ -508,6 +508,10 @@ xfs_attrmulti_by_handle(
 	if (error)
 		return -error;
 
+	if(am_hreq.opcount > 1024) {
+		VN_RELE(vp);
+		return -XFS_ERROR(ENOMEM);
+	}
 	size = am_hreq.opcount * sizeof(attr_multiop_t);
 	ops = (xfs_attr_multiop_t *)kmalloc(size, GFP_KERNEL);
 	if (!ops) {

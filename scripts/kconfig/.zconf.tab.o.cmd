@@ -1,4 +1,4 @@
-cmd_scripts/kconfig/zconf.tab.o := gcc -Wp,-MD,scripts/kconfig/.zconf.tab.o.d -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer      -Iscripts/kconfig -fPIC -c -o scripts/kconfig/zconf.tab.o scripts/kconfig/zconf.tab.c
+cmd_scripts/kconfig/zconf.tab.o := gcc -Wp,-MD,scripts/kconfig/.zconf.tab.o.d -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer      -Iscripts/kconfig -c -o scripts/kconfig/zconf.tab.o scripts/kconfig/zconf.tab.c
 
 deps_scripts/kconfig/zconf.tab.o := \
   scripts/kconfig/zconf.tab.c \
@@ -58,6 +58,7 @@ deps_scripts/kconfig/zconf.tab.o := \
   /usr/include/getopt.h \
   scripts/kconfig/confdata.c \
     $(wildcard include/config/.h) \
+    $(wildcard include/config/notimestamp.h) \
   /usr/include/sys/stat.h \
   /usr/include/bits/stat.h \
   scripts/kconfig/expr.c \

@@ -21,11 +21,6 @@
 #define	nlm_lck_denied_nolocks	__constant_htonl(NLM_LCK_DENIED_NOLOCKS)
 #define	nlm_lck_blocked		__constant_htonl(NLM_LCK_BLOCKED)
 #define	nlm_lck_denied_grace_period	__constant_htonl(NLM_LCK_DENIED_GRACE_PERIOD)
-/* error codes for internal use */
-/* if a request fails due to kmalloc failure, it gets dropped.
- *  Client should resend eventually
- */
-#define	nlm_lck_dropit		__constant_htonl(30000)
 
 /* Lock info passed via NLM */
 struct nlm_lock {

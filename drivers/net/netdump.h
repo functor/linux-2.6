@@ -31,6 +31,8 @@
 
 #define NETDUMP_VERSION 0x04
 
+#define NETDUMP_VERSION_MAX 0x5
+
 enum netdump_commands {
 	COMM_NONE = 0,
 	COMM_SEND_MEM = 1,
@@ -79,3 +81,10 @@ typedef struct netdump_reply_s {
 
 #define HEADER_LEN (1 + sizeof(reply_t))
 
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+
+#define netdump_mdelay(n) (                             \
+        {                                               \
+                unsigned long __ms=(n);                 \
+                while (__ms--) udelay(1000);            \
+        })

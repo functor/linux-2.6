@@ -14,6 +14,7 @@
 #include <linux/personality.h>
 #include <linux/tty.h>
 #include <linux/namespace.h>
+#include <linux/key.h>
 #include <linux/security.h>
 #include <linux/cpu.h>
 #include <linux/acct.h>
@@ -24,6 +25,7 @@
 #include <linux/mount.h>
 #include <linux/proc_fs.h>
 #include <linux/mempolicy.h>
+#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -92,7 +94,7 @@ repeat:
 	sched_exit(p);
 	write_unlock_irq(&tasklist_lock);
 	spin_unlock(&p->proc_lock);
-	dput(proc_dentry);
+	proc_pid_flush(proc_dentry);
 	release_thread(p);
 	put_task_struct(p);
 
@@ -237,11 +239,11 @@ void reparent_to_init(void)
 	/* rt_priority? */
 	/* signals? */
 	security_task_reparent_to_init(current);
-	memcpy(current->rlim, init_task.rlim, sizeof(*(current->rlim)));
+	memcpy(current->signal->rlim, init_task.signal->rlim,
+	       sizeof(current->signal->rlim));
 	atomic_inc(&(INIT_USER->__count));
-	switch_uid(INIT_USER);
-
 	write_unlock_irq(&tasklist_lock);
+	switch_uid(INIT_USER);
 }
 
 void __set_special_pids(pid_t session, pid_t pgrp)
@@ -330,7 +332,9 @@ void daemonize(const char *name, ...)
 	exit_mm(current);
 
 	set_special_pids(1, 1);
+	down(&tty_sem);
 	current->signal->tty = NULL;
+	up(&tty_sem);
 
 	/* Block and flush all signals */
 	sigfillset(&blocked);
@@ -366,10 +370,8 @@ static inline void close_files(struct files_struct * files)
 		while (set) {
 			if (set & 1) {
 				struct file * file = xchg(&files->fd[i], NULL);
-				if (file) {
+				if (file)
 					filp_close(file, files);
-					cond_resched();
-				}
 			}
 			i++;
 			set >>= 1;
@@ -560,7 +562,7 @@ static inline void reparent_thread(task_t *p, task_t *father, int traced)
 			 * a normal stop since it's no longer being
 			 * traced.
 			 */
-			p->state = TASK_STOPPED;
+			ptrace_untrace(p);
 		}
 	}
 
@@ -760,7 +762,6 @@ static void exit_notify(struct task_struct *tsk)
 	 */
 	tsk->it_virt_value = 0;
 	tsk->it_prof_value = 0;
-	tsk->rlim[RLIMIT_CPU].rlim_cur = RLIM_INFINITY;
 
 	write_unlock_irq(&tasklist_lock);
 
@@ -779,9 +780,10 @@ static void exit_notify(struct task_struct *tsk)
 	tsk->flags |= PF_DEAD;
 }
 
-asmlinkage NORET_TYPE void do_exit(long code)
+fastcall NORET_TYPE void do_exit(long code)
 {
 	struct task_struct *tsk = current;
+	int group_dead;
 
 	profile_task_exit(tsk);
 
@@ -806,7 +808,9 @@ asmlinkage NORET_TYPE void do_exit(long code)
 		ptrace_notify((PTRACE_EVENT_EXIT << 8) | SIGTRAP);
 	}
 
-	acct_process(code);
+	group_dead = atomic_dec_and_test(&tsk->signal->live);
+	if (group_dead)
+		acct_process(code);
 	if (current->tux_info) {
 #ifdef CONFIG_TUX_DEBUG
 		printk("Possibly unexpected TUX-thread exit(%ld) at %p?\n",
@@ -821,8 +825,9 @@ asmlinkage NORET_TYPE void do_exit(long code)
 	__exit_fs(tsk);
 	exit_namespace(tsk);
 	exit_thread();
+	exit_keys(tsk);
 
-	if (tsk->signal->leader)
+	if (group_dead && tsk->signal->leader)
 		disassociate_ctty(1);
 
 	module_put(tsk->thread_info->exec_domain->module);
@@ -1301,6 +1306,8 @@ static inline int my_ptrace_child(struct task_struct *p)
 {
 	if (!(p->ptrace & PT_PTRACED))
 		return 0;
+	if (!(p->ptrace & PT_ATTACHED))
+		return 1;
 	/*
 	 * This child was PTRACE_ATTACH'd.  We should be seeing it only if
 	 * we are the attacher.  If we are the real parent, this is a race

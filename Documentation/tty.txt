@@ -49,10 +49,9 @@ open()		-	Called when the line discipline is attached to
 			discipline for this tty will occur until it
 			completes successfully. Can sleep.
 
-write()		-	A process is writing data from user space
-			through the line discipline. Multiple write calls
-			are serialized by the tty layer for the ldisc. May
-			sleep.
+write()		-	A process is writing data through the line
+			discipline.  Multiple write calls are serialized
+			by the tty layer for the ldisc.  May sleep. 
 
 flush_buffer()	-	May be called at any point between open and close.
 
@@ -93,6 +92,11 @@ write_wakeup()	-	May be called at any point between open and close.
 			is needed but always races versus calls. Thus the
 			ldisc must be careful about setting order and to
 			handle unexpected calls. Must not sleep.
+
+			The driver is forbidden from calling this directly
+			from the ->write call from the ldisc as the ldisc
+			is permitted to call the driver write method from
+			this function. In such a situation defer it.
 
 
 Locking

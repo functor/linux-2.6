@@ -28,7 +28,7 @@ extern unsigned char syscall32_sysenter[], syscall32_sysenter_end[];
 extern int sysctl_vsyscall32;
 
 char *syscall32_page; 
-static int use_sysenter __initdata = -1;
+static int use_sysenter = -1;
 
 /*
  * Map the 32bit vsyscall page on demand.
@@ -50,7 +50,7 @@ int __map_syscall32(struct mm_struct *mm, unsigned long address)
 		if (pte_none(*pte)) { 
 			set_pte(pte, 
 				mk_pte(virt_to_page(syscall32_page), 
-				       PAGE_KERNEL_VSYSCALL)); 
+				       PAGE_KERNEL_VSYSCALL32)); 
 		}
 		/* Flush only the local CPU. Other CPUs taking a fault
 		   will just end up here again */

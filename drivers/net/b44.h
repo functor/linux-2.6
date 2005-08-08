@@ -433,7 +433,6 @@ struct b44 {
 
 	u32			rx_pending;
 	u32			tx_pending;
-	u32			pci_cfg_state[64 / sizeof(u32)];
 	u8			phy_addr;
 	u8			core_unit;
 

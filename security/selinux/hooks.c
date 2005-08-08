@@ -64,6 +64,7 @@
 #include <net/ipv6.h>
 #include <linux/hugetlb.h>
 #include <linux/personality.h>
+#include <linux/sysctl.h>
 
 #include "avc.h"
 #include "objsec.h"
@@ -1884,8 +1885,8 @@ static void selinux_bprm_apply_creds(struct linux_binprm *bprm, int unsafe)
 				  PROCESS__RLIMITINH, NULL);
 		if (rc) {
 			for (i = 0; i < RLIM_NLIMITS; i++) {
-				rlim = current->rlim + i;
-				initrlim = init_task.rlim+i;
+				rlim = current->signal->rlim + i;
+				initrlim = init_task.signal->rlim+i;
 				rlim->rlim_cur = min(rlim->rlim_max,initrlim->rlim_cur);
 			}
 		}
@@ -2544,8 +2545,7 @@ static int selinux_file_set_fowner(struct file *file)
 }
 
 static int selinux_file_send_sigiotask(struct task_struct *tsk,
-				       struct fown_struct *fown,
-				       int signum)
+				       struct fown_struct *fown, int signum)
 {
         struct file *file;
 	u32 perm;
@@ -2673,7 +2673,7 @@ static int selinux_task_setnice(struct task_struct *p, int nice)
 
 static int selinux_task_setrlimit(unsigned int resource, struct rlimit *new_rlim)
 {
-	struct rlimit *old_rlim = current->rlim + resource;
+	struct rlimit *old_rlim = current->signal->rlim + resource;
 	int rc;
 
 	rc = secondary_ops->task_setrlimit(resource, new_rlim);

@@ -34,6 +34,7 @@
 #include <linux/pagemap.h>
 #include <linux/highmem.h>
 #include <linux/spinlock.h>
+#include <linux/key.h>
 #include <linux/personality.h>
 #include <linux/binfmts.h>
 #include <linux/swap.h>
@@ -59,7 +60,6 @@ char core_pattern[65] = "core";
 int suid_dumpable = 0;
 
 EXPORT_SYMBOL(suid_dumpable);
-
 /* The maximal length of core_pattern is also specified in sysctl.c */
 
 static struct linux_binfmt *formats;
@@ -340,6 +340,8 @@ out_sig:
 	force_sig(SIGKILL, current);
 }
 
+#define EXTRA_STACK_VM_PAGES	20	/* random */
+
 int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 {
 	unsigned long stack_base;
@@ -377,14 +379,14 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	memmove(to, to + offset, PAGE_SIZE - offset);
 	kunmap(bprm->page[j - 1]);
 
-	/* Adjust bprm->p to point to the end of the strings. */
-	bprm->p = PAGE_SIZE * i - offset;
-
 	/* Limit stack size to 1GB */
-	stack_base = current->rlim[RLIMIT_STACK].rlim_max;
+	stack_base = current->signal->rlim[RLIMIT_STACK].rlim_max;
 	if (stack_base > (1 << 30))
 		stack_base = 1 << 30;
 	stack_base = PAGE_ALIGN(STACK_TOP - stack_base);
+
+	/* Adjust bprm->p to point to the end of the strings. */
+	bprm->p = stack_base + PAGE_SIZE * i - offset;
 
 	mm->arg_start = stack_base;
 	arg_size = i << PAGE_SHIFT;
@@ -399,11 +401,13 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 #else
 	stack_base = STACK_TOP - MAX_ARG_PAGES * PAGE_SIZE;
 #endif
-	mm->arg_start = bprm->p + stack_base;
+	bprm->p += stack_base;
+	mm->arg_start = bprm->p;
 	arg_size = STACK_TOP - (PAGE_MASK & (unsigned long) mm->arg_start);
 #endif
 
-	bprm->p += stack_base;
+	arg_size += EXTRA_STACK_VM_PAGES * PAGE_SIZE;
+
 	if (bprm->loader)
 		bprm->loader += stack_base;
 	bprm->exec += stack_base;
@@ -424,11 +428,10 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 		mpnt->vm_mm = mm;
 #ifdef CONFIG_STACK_GROWSUP
 		mpnt->vm_start = stack_base;
-		mpnt->vm_end = PAGE_MASK &
-			(PAGE_SIZE - 1 + (unsigned long) bprm->p);
+		mpnt->vm_end = stack_base + arg_size;
 #else
-		mpnt->vm_start = PAGE_MASK & (unsigned long) bprm->p;
 		mpnt->vm_end = STACK_TOP;
+		mpnt->vm_start = mpnt->vm_end - arg_size;
 #endif
 		/* Adjust stack execute permissions; explicitly enable
 		 * for EXSTACK_ENABLE_X, disable for EXSTACK_DISABLE_X
@@ -542,12 +545,6 @@ static int exec_mmap(struct mm_struct *mm)
 	struct task_struct *tsk;
 	struct mm_struct * old_mm, *active_mm;
 
-	/* Add it to the list of mm's */
-	spin_lock(&mmlist_lock);
-	list_add(&mm->mmlist, &init_mm.mmlist);
-	mmlist_nr++;
-	spin_unlock(&mmlist_lock);
-
 	/* Notify parent that we're no longer interested in the old VM */
 	tsk = current;
 	old_mm = current->mm;
@@ -577,7 +574,7 @@ static int exec_mmap(struct mm_struct *mm)
  */
 static inline int de_thread(struct task_struct *tsk)
 {
-	struct signal_struct *newsig, *oldsig = tsk->signal;
+	struct signal_struct *sig = tsk->signal;
 	struct sighand_struct *newsighand, *oldsighand = tsk->sighand;
 	spinlock_t *lock = &oldsighand->siglock;
 	int count;
@@ -586,42 +583,15 @@ static inline int de_thread(struct task_struct *tsk)
 	 * If we don't share sighandlers, then we aren't sharing anything
 	 * and we can just re-use it all.
 	 */
-	if (atomic_read(&oldsighand->count) <= 1)
+	if (atomic_read(&oldsighand->count) <= 1) {
+		BUG_ON(atomic_read(&sig->count) != 1);
+		exit_itimers(sig);
 		return 0;
+	}
 
 	newsighand = kmem_cache_alloc(sighand_cachep, GFP_KERNEL);
 	if (!newsighand)
 		return -ENOMEM;
-
-	spin_lock_init(&newsighand->siglock);
-	atomic_set(&newsighand->count, 1);
-	memcpy(newsighand->action, oldsighand->action, sizeof(newsighand->action));
-
-	/*
-	 * See if we need to allocate a new signal structure
-	 */
-	newsig = NULL;
-	if (atomic_read(&oldsig->count) > 1) {
-		newsig = kmem_cache_alloc(signal_cachep, GFP_KERNEL);
-		if (!newsig) {
-			kmem_cache_free(sighand_cachep, newsighand);
-			return -ENOMEM;
-		}
-		atomic_set(&newsig->count, 1);
-		newsig->group_exit = 0;
-		newsig->group_exit_code = 0;
-		newsig->group_exit_task = NULL;
-		newsig->group_stop_count = 0;
-		newsig->curr_target = NULL;
-		init_sigpending(&newsig->shared_pending);
-		INIT_LIST_HEAD(&newsig->posix_timers);
-
-		newsig->tty = oldsig->tty;
-		newsig->pgrp = oldsig->pgrp;
-		newsig->session = oldsig->session;
-		newsig->leader = oldsig->leader;
-		newsig->tty_old_pgrp = oldsig->tty_old_pgrp;
-	}
 
 	if (thread_group_empty(current))
 		goto no_thread_group;
@@ -632,7 +602,7 @@ static inline int de_thread(struct task_struct *tsk)
 	 */
 	read_lock(&tasklist_lock);
 	spin_lock_irq(lock);
-	if (oldsig->group_exit) {
+	if (sig->group_exit) {
 		/*
 		 * Another group action in progress, just
 		 * return so that the signal is processed.
@@ -640,11 +610,9 @@ static inline int de_thread(struct task_struct *tsk)
 		spin_unlock_irq(lock);
 		read_unlock(&tasklist_lock);
 		kmem_cache_free(sighand_cachep, newsighand);
-		if (newsig)
-			kmem_cache_free(signal_cachep, newsig);
 		return -EAGAIN;
 	}
-	oldsig->group_exit = 1;
+	sig->group_exit = 1;
 	zap_other_threads(current);
 	read_unlock(&tasklist_lock);
 
@@ -654,14 +622,16 @@ static inline int de_thread(struct task_struct *tsk)
 	count = 2;
 	if (current->pid == current->tgid)
 		count = 1;
-	while (atomic_read(&oldsig->count) > count) {
-		oldsig->group_exit_task = current;
-		oldsig->notify_count = count;
+	while (atomic_read(&sig->count) > count) {
+		sig->group_exit_task = current;
+		sig->notify_count = count;
 		__set_current_state(TASK_UNINTERRUPTIBLE);
 		spin_unlock_irq(lock);
 		schedule();
 		spin_lock_irq(lock);
 	}
+	sig->group_exit_task = NULL;
+	sig->notify_count = 0;
 	spin_unlock_irq(lock);
 
 	/*
@@ -736,31 +706,46 @@ static inline int de_thread(struct task_struct *tsk)
 		release_task(leader);
         }
 
+	/*
+	 * Now there are really no other threads at all,
+	 * so it's safe to stop telling them to kill themselves.
+	 */
+	sig->group_exit = 0;
+
 no_thread_group:
+	BUG_ON(atomic_read(&sig->count) != 1);
+	exit_itimers(sig);
 
-	write_lock_irq(&tasklist_lock);
-	spin_lock(&oldsighand->siglock);
-	spin_lock(&newsighand->siglock);
+	if (atomic_read(&oldsighand->count) == 1) {
+		/*
+		 * Now that we nuked the rest of the thread group,
+		 * it turns out we are not sharing sighand any more either.
+		 * So we can just keep it.
+		 */
+		kmem_cache_free(sighand_cachep, newsighand);
+	} else {
+		/*
+		 * Move our state over to newsighand and switch it in.
+		 */
+		spin_lock_init(&newsighand->siglock);
+		atomic_set(&newsighand->count, 1);
+		memcpy(newsighand->action, oldsighand->action,
+		       sizeof(newsighand->action));
 
-	if (current == oldsig->curr_target)
-		oldsig->curr_target = next_thread(current);
-	if (newsig)
-		current->signal = newsig;
-	current->sighand = newsighand;
-	init_sigpending(&current->pending);
-	recalc_sigpending();
+		write_lock_irq(&tasklist_lock);
+		spin_lock(&oldsighand->siglock);
+		spin_lock(&newsighand->siglock);
 
-	spin_unlock(&newsighand->siglock);
-	spin_unlock(&oldsighand->siglock);
-	write_unlock_irq(&tasklist_lock);
+		current->sighand = newsighand;
+		recalc_sigpending();
 
-	if (newsig && atomic_dec_and_test(&oldsig->count)) {
-		exit_itimers(oldsig);
-		kmem_cache_free(signal_cachep, oldsig);
+		spin_unlock(&newsighand->siglock);
+		spin_unlock(&oldsighand->siglock);
+		write_unlock_irq(&tasklist_lock);
+
+		if (atomic_dec_and_test(&oldsighand->count))
+			kmem_cache_free(sighand_cachep, oldsighand);
 	}
-
-	if (atomic_dec_and_test(&oldsighand->count))
-		kmem_cache_free(sighand_cachep, oldsighand);
 
 	if (!thread_group_empty(current))
 		BUG();
@@ -877,8 +862,10 @@ int flush_old_exec(struct linux_binprm * bprm)
 
 	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid || 
 	    permission(bprm->file->f_dentry->d_inode,MAY_READ, NULL) ||
-	    (bprm->interp_flags & BINPRM_FLAGS_ENFORCE_NONDUMP))
+	    (bprm->interp_flags & BINPRM_FLAGS_ENFORCE_NONDUMP)) {
+		suid_keys(current);
 		current->mm->dumpable = suid_dumpable;
+	}
 
 	/* An exec changes our domain. We are no longer part of the thread
 	   group */
@@ -912,7 +899,7 @@ int prepare_binprm(struct linux_binprm *bprm)
 	mode = inode->i_mode;
 	/*
 	 * Check execute perms again - if the caller has CAP_DAC_OVERRIDE,
-	 * vfs_permission lets a non-executable through
+	 * generic_permission lets a non-executable through
 	 */
 	if (!(mode & 0111))	/* with at least _one_ execute bit set */
 		return -EACCES;
@@ -972,6 +959,11 @@ static inline int unsafe_exec(struct task_struct *p)
 void compute_creds(struct linux_binprm *bprm)
 {
 	int unsafe;
+
+	if (bprm->e_uid != current->uid)
+		suid_keys(current);
+	exec_keys(current);
+
 	task_lock(current);
 	unsafe = unsafe_exec(current);
 	security_bprm_apply_creds(bprm, unsafe);
@@ -1117,19 +1109,18 @@ int do_execve(char * filename,
 	int retval;
 	int i;
 
-	file = open_exec(filename);
-
-	retval = PTR_ERR(file);
-	if (IS_ERR(file))
-		return retval;
-
-	sched_exec();
-
 	retval = -ENOMEM;
 	bprm = kmalloc(sizeof(*bprm), GFP_KERNEL);
 	if (!bprm)
 		goto out_ret;
 	memset(bprm, 0, sizeof(*bprm));
+
+	file = open_exec(filename);
+	retval = PTR_ERR(file);
+	if (IS_ERR(file))
+		goto out_kfree;
+
+	sched_exec();
 
 	bprm->p = PAGE_SIZE*MAX_ARG_PAGES-sizeof(void *);
 
@@ -1137,6 +1128,7 @@ int do_execve(char * filename,
 	bprm->filename = filename;
 	bprm->interp = filename;
 	bprm->mm = mm_alloc();
+	retval = -ENOMEM;
 	if (!bprm->mm)
 		goto out_file;
 
@@ -1203,6 +1195,8 @@ out_file:
 		allow_write_access(bprm->file);
 		fput(bprm->file);
 	}
+
+out_kfree:
 	kfree(bprm);
 
 out_ret:
@@ -1346,6 +1340,7 @@ static void zap_threads (struct mm_struct *mm)
 	struct task_struct *g, *p;
 	struct task_struct *tsk = current;
 	struct completion *vfork_done = tsk->vfork_done;
+	int traced = 0;
 
 	/*
 	 * Make sure nobody is waiting for us to release the VM,
@@ -1361,10 +1356,65 @@ static void zap_threads (struct mm_struct *mm)
 		if (mm == p->mm && p != tsk) {
 			force_sig_specific(SIGKILL, p);
 			mm->core_waiters++;
+			if (unlikely(p->ptrace) &&
+			    unlikely(p->parent->mm == mm))
+				traced = 1;
 		}
 	while_each_thread(g,p);
 
 	read_unlock(&tasklist_lock);
+
+	while (unlikely(traced)) {
+		/*
+		 * We are zapping a thread and the thread it ptraces.
+		 * The tracee won't come out of TASK_TRACED state until
+		 * its ptracer detaches.  That happens when the ptracer
+		 * dies, but it synchronizes with us and so won't get
+		 * that far until we finish the core dump.  If we're
+		 * waiting for the tracee to synchronize but it stays
+		 * blocked in TASK_TRACED, then we deadlock.  So, for
+		 * this weirdo case we have to do another round with
+		 * tasklist_lock write-locked to __ptrace_unlink the
+		 * children that might cause this deadlock.  That will
+		 * wake them up to process their pending SIGKILL.
+		 *
+		 * First, give everyone we just killed a chance to run
+		 * so they can all get into the coredump synchronization.
+		 * That should leave only the TASK_TRACED stragglers for
+		 * us to wake up.  If a ptracer is still running, we'll
+		 * have to come around again after letting it finish.
+		 */
+		yield();
+		traced = 0;
+		write_lock_irq(&tasklist_lock);
+		do_each_thread(g,p) {
+			if (mm != p->mm || p == tsk ||
+			    !p->ptrace || p->parent->mm != mm)
+				continue;
+			if ((p->parent->flags & (PF_SIGNALED|PF_EXITING)) ||
+			    (p->parent->state & (TASK_TRACED|TASK_STOPPED))) {
+				/*
+				 * The parent is in the process of exiting
+				 * itself, or else it's stopped right now.
+				 * It cannot be in a ptrace call, and would
+				 * have to read_lock tasklist_lock before
+				 * it could start one, so we are safe here.
+				 */
+				__ptrace_unlink(p);
+			} else {
+				/*
+				 * Blargh!  The ptracer is not dying
+				 * yet, so we cannot be sure that it
+				 * isn't in the middle of a ptrace call.
+				 * We'll have to let it run to get into
+				 * coredump_wait and come around another
+				 * time to detach its tracee.
+				 */
+				traced = 1;
+			}
+		} while_each_thread(g,p);
+		write_unlock_irq(&tasklist_lock);
+	}
 }
 
 static void coredump_wait(struct mm_struct *mm)
@@ -1396,7 +1446,7 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 	int retval = 0;
 	int fsuid = current->fsuid;
 	int flag = 0;
-	
+
 	binfmt = current->binfmt;
 	if (!binfmt || !binfmt->core_dump)
 		goto fail;
@@ -1407,14 +1457,13 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 		up_write(&mm->mmap_sem);
 		goto fail;
 	}
-	
+
 	/*
 	 *	We cannot trust fsuid as being the "true" uid of the
 	 *	process nor do we know its entire history. We only know it
 	 *	was tainted so we dump it as root in mode 2.
 	 */
-	if (mm->dumpable == 2)		/* Setuid core dump mode */
-	{
+	if (mm->dumpable == 2) {	/* Setuid core dump mode */
 		flag = O_EXCL;		/* Stop rewrite attacks */
 		current->fsuid = 0;	/* Dump root private */
 	}
@@ -1424,7 +1473,7 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 	current->signal->group_exit_code = exit_code;
 	coredump_wait(mm);
 
-	if (current->rlim[RLIMIT_CORE].rlim_cur < binfmt->min_coredump)
+	if (current->signal->rlim[RLIMIT_CORE].rlim_cur < binfmt->min_coredump)
 		goto fail_unlock;
 
 	/*
@@ -1454,7 +1503,8 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 
 	retval = binfmt->core_dump(signr, regs, file);
 
-	current->signal->group_exit_code |= 0x80;
+	if (retval)
+		current->signal->group_exit_code |= 0x80;
 close_fail:
 	filp_close(file, NULL);
 fail_unlock:

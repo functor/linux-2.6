@@ -39,7 +39,7 @@ void netdump_rx(struct netpoll *np, short source, char *data, int dlen);
 static void send_netdump_msg(struct netpoll *np, const char *msg, unsigned int msg_len, reply_t *reply);
 static void send_netdump_mem(struct netpoll *np, req_t *req);
 static void netdump_startup_handshake(struct netpoll *np);
-static void netpoll_netdump(struct pt_regs *regs);
+static asmlinkage void netpoll_netdump(struct pt_regs *regs, void *arg);
 static void netpoll_start_netdump(struct pt_regs *regs);
 
 
@@ -90,7 +90,7 @@ static spinlock_t req_lock = SPIN_LOCK_UNLOCKED;
 static int nr_req = 0;
 static LIST_HEAD(request_list);
 
-static unsigned long long t0, jiffy_cycles;
+static unsigned long long t0, jiffy_cycles = 1000 * (1000000/HZ);
 void *netdump_stack;
 
 
@@ -146,16 +146,16 @@ static req_t *alloc_req(void)
 static inline void print_status (req_t *req)
 {
 	static int count = 0;
-	static int prev_jiffies = 0;
+	static unsigned long prev_jiffies = 0;
 
 	if (jiffies/HZ != prev_jiffies/HZ) {
 		prev_jiffies = jiffies;
 		count++;
 		switch (count & 3) {
-			case 0: printk("%d(%ld)/\r", nr_req, jiffies); break;
-			case 1: printk("%d(%ld)|\r", nr_req, jiffies); break;
-			case 2: printk("%d(%ld)\\\r", nr_req, jiffies); break;
-			case 3: printk("%d(%ld)-\r", nr_req, jiffies); break;
+			case 0: printk("%d(%lu)/\r", nr_req, jiffies); break;
+			case 1: printk("%d(%lu)|\r", nr_req, jiffies); break;
+			case 2: printk("%d(%lu)\\\r", nr_req, jiffies); break;
+			case 3: printk("%d(%lu)-\r", nr_req, jiffies); break;
 		}
 	}
 }
@@ -184,13 +184,11 @@ void netdump_rx(struct netpoll *np, short source, char *data, int dlen)
 		return;
 	}
 
-	req->magic = ntohl(__req->magic);
 	req->command = ntohl(__req->command);
 	req->from = ntohl(__req->from);
 	req->to = ntohl(__req->to);
 	req->nr = ntohl(__req->nr);
 
-	Dprintk("... netdump magic:   %08Lx.\n", req->magic);
 	Dprintk("... netdump command: %08x.\n", req->command);
 	Dprintk("... netdump from:    %08x.\n", req->from);
 	Dprintk("... netdump to:      %08x.\n", req->to);
@@ -200,6 +198,8 @@ void netdump_rx(struct netpoll *np, short source, char *data, int dlen)
 }
 
 #define MAX_MSG_LEN HEADER_LEN + 1024
+
+static unsigned char effective_version = NETDUMP_VERSION;
 
 static void send_netdump_msg(struct netpoll *np, const char *msg, unsigned int msg_len, reply_t *reply)
 {
@@ -213,7 +213,7 @@ static void send_netdump_msg(struct netpoll *np, const char *msg, unsigned int m
 		/* NOTREACHED */
 	}
 
-	netpoll_msg[0] = NETDUMP_VERSION;
+	netpoll_msg[0] = effective_version;
 	put_unaligned(htonl(reply->nr), (u32 *) (&netpoll_msg[1]));
 	put_unaligned(htonl(reply->code), (u32 *) (&netpoll_msg[5]));
 	put_unaligned(htonl(reply->info), (u32 *) (&netpoll_msg[9]));
@@ -227,7 +227,7 @@ static void send_netdump_mem(struct netpoll *np, req_t *req)
 	int i;
 	char *kaddr;
 	char str[1024];
-	struct page *page;
+	struct page *page = NULL;
 	unsigned long nr = req->from;
 	int nr_chunks = PAGE_SIZE/1024;
 	reply_t reply;
@@ -242,12 +242,19 @@ static void send_netdump_mem(struct netpoll *np, req_t *req)
 		send_netdump_msg(np, str, strlen(str), &reply);
 		return;
 	}
-	if (page_is_ram(nr))
+	if (platform_page_is_ram(nr)) {
 		page = pfn_to_page(nr);
-	else
-		page = ZERO_PAGE(0);
+		if (page_to_pfn(page) != nr)
+			page = NULL;
+	}
+	if (!page) {
+		reply.code = REPLY_RESERVED;
+		reply.info = platform_next_available(nr);
+		send_netdump_msg(np, str, 0, &reply);
+		return;
+	}
 
-	kaddr = (char *)kmap_atomic(page, KM_NETDUMP);
+	kaddr = (char *)kmap_atomic(page, KM_CRASHDUMP);
 
 	for (i = 0; i < nr_chunks; i++) {
 		unsigned int offset = i*1024;
@@ -258,7 +265,7 @@ static void send_netdump_mem(struct netpoll *np, req_t *req)
 		Dprintk(" ... send_netdump_mem: sent message\n");
 	}
 
-	kunmap_atomic(kaddr, KM_NETDUMP);
+	kunmap_atomic(kaddr, KM_CRASHDUMP);
 	Dprintk(" ... send_netdump_mem: returning\n");
 }
 
@@ -279,10 +286,13 @@ static void netdump_startup_handshake(struct netpoll *np)
 	int i;
 
 repeat:
-	sprintf(tmp, "NETDUMP start, waiting for start-ACK.\n");
+	sprintf(tmp,
+   	    "task_struct:0x%lx page_offset:0x%llx netdump_magic:0x%llx\n",
+		(unsigned long)current, (unsigned long long)PAGE_OFFSET, 
+		(unsigned long long)netdump_magic);
 	reply.code = REPLY_START_NETDUMP;
-	reply.nr = 0;
-	reply.info = 0;
+	reply.nr = platform_machine_type();
+	reply.info = NETDUMP_VERSION_MAX;
 
 	send_netdump_msg(np, tmp, strlen(tmp), &reply);
 
@@ -301,6 +311,17 @@ repeat:
 		kfree(req);
 		goto repeat;
 	}
+
+	/*
+	 *  Negotiate an effective version that works with the server. 
+	 */
+	if ((effective_version = platform_effective_version(req)) == 0) {
+		printk(KERN_ERR
+			"netdump: server cannot handle this client -- rebooting.\n");
+		netdump_mdelay(3000);
+		machine_restart(NULL);
+	}
+
 	kfree(req);
 
 	printk("NETDUMP START!\n");
@@ -311,7 +332,7 @@ static char cpus_frozen[NR_CPUS] = { 0 };
 static void freeze_cpu (void * dummy)
 {
 	cpus_frozen[smp_processor_id()] = 1;
-	for (;;) local_irq_disable();
+	platform_freeze_cpu();
 }
 
 static void netpoll_start_netdump(struct pt_regs *regs)
@@ -327,7 +348,7 @@ static void netpoll_start_netdump(struct pt_regs *regs)
 	if (netdump_mode) {
 		printk(KERN_ERR
 		"netpoll_start_netdump: called recursively.  rebooting.\n");
-		mdelay(3000);
+		netdump_mdelay(3000);
 		machine_restart(NULL);
 	}
 	netdump_mode = 1;
@@ -336,7 +357,7 @@ static void netpoll_start_netdump(struct pt_regs *regs)
 	preempt_disable();
 
 	smp_call_function(freeze_cpu, NULL, 1, -1);
-	mdelay(3000);
+	netdump_mdelay(3000);
 	for (i = 0; i < NR_CPUS; i++) {
 		if (cpus_frozen[i])
 			printk("CPU#%d is frozen.\n", i);
@@ -347,17 +368,20 @@ static void netpoll_start_netdump(struct pt_regs *regs)
 	/*
 	 *  Some platforms may want to execute netdump on its own stack.
 	 */
-	platform_start_netdump(netdump_stack, regs);
+	platform_start_crashdump(netdump_stack, netpoll_netdump, regs);
 
 	preempt_enable_no_resched();
 	local_irq_restore(flags);
 	return;
 }
 
-static void netpoll_netdump(struct pt_regs *regs)
+static char command_tmp[1024];
+
+static asmlinkage void netpoll_netdump(struct pt_regs *regs, void *platform_arg)
 {
 	reply_t reply;
-	char tmp[200];
+	char *tmp = command_tmp;
+	extern unsigned long totalram_pages;
 	struct pt_regs myregs;
 	req_t *req;
 
@@ -405,7 +429,7 @@ static void netpoll_netdump(struct pt_regs *regs)
 		case COMM_REBOOT:
 			Dprintk("got REBOOT command.\n");
 			printk("netdump: rebooting in 3 seconds.\n");
-			mdelay(3000);
+			netdump_mdelay(3000);
 			machine_restart(NULL);
 			break;
 
@@ -427,22 +451,12 @@ static void netpoll_netdump(struct pt_regs *regs)
 			break;
 
 		case COMM_GET_REGS:
-		{
-			char *tmp2 = tmp;
-			elf_gregset_t elf_regs;
-
 			reply.code = REPLY_REGS;
 			reply.nr = req->nr;
-			reply.info = platform_max_pfn();
-			tmp2 = tmp + sprintf(tmp, "Sending register info.\n");
-			ELF_CORE_COPY_REGS(elf_regs, (&myregs));
-			memcpy(tmp2, &elf_regs, sizeof(elf_regs));
-			Dprintk("netdump: sending regs\n");
-			send_netdump_msg(&np, tmp, 
-				strlen(tmp) + sizeof(elf_regs), &reply);
-			Dprintk("netdump: sent regs\n");
+			reply.info = (u32)totalram_pages;
+        		send_netdump_msg(&np, tmp,
+				platform_get_regs(tmp, &myregs), &reply);
 			break;
-		}
 
 		case COMM_GET_NR_PAGES:
 			reply.code = REPLY_NR_PAGES;
@@ -519,6 +533,8 @@ static int init_netdump(void)
 	 *  Allocate a separate stack for netdump.
 	 */
 	platform_init_stack(&netdump_stack);
+
+	platform_jiffy_cycles(&jiffy_cycles);
 
 	printk(KERN_INFO "netdump: network crash dump enabled\n");
 	return 0;

@@ -492,6 +492,8 @@ struct socket *sock_alloc(void)
 	return sock;
 }
 
+EXPORT_SYMBOL_GPL(sock_alloc);
+
 /*
  *	In theory you can't get an open on this inode, but /proc provides
  *	a back door. Remember to keep it shut otherwise you'll let the
@@ -1368,7 +1370,7 @@ asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr, int _
 	if (!sock)
 		goto out;
 
-	err = -EMFILE;
+	err = -ENFILE;
 	if (!(newsock = sock_alloc())) 
 		goto out_put;
 
@@ -2148,7 +2150,6 @@ void socket_seq_show(struct seq_file *seq)
 /* ABI emulation layers need these two */
 EXPORT_SYMBOL(move_addr_to_kernel);
 EXPORT_SYMBOL(move_addr_to_user);
-EXPORT_SYMBOL_GPL(sock_alloc);
 EXPORT_SYMBOL(sock_create);
 EXPORT_SYMBOL(sock_create_kern);
 EXPORT_SYMBOL(sock_create_lite);

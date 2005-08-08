@@ -71,7 +71,7 @@ static struct proc_dir_entry *proc_ppc64_lparcfg;
 #ifdef CONFIG_PPC_ISERIES
 
 /*
- * For iSeries legacy systems, the RPA purr function is available from the
+ * For iSeries legacy systems, the PPA purr function is available from the
  * xEmulatedTimeBase field in the paca.
  */
 static unsigned long get_purr(void)
@@ -105,7 +105,7 @@ static int lparcfg_data(struct seq_file *m, void *v)
 	struct paca_struct *lpaca = get_paca();
 	unsigned long purr = get_purr();
 
-	seq_printf(m, "%s %s\n", MODULE_NAME, MODULE_VERS);
+	seq_printf(m, "%s %s \n", MODULE_NAME, MODULE_VERS);
 
 	shared = (int)(lpaca->lppaca_ptr->xSharedProc);
 	seq_printf(m, "serial_number=%c%c%c%c%c%c%c\n",
@@ -218,7 +218,7 @@ static unsigned long get_purr(void);
  * is coming, but at this time is still problematic, so for now this
  * function will return 0.
  */
-static unsigned long get_purr()
+static unsigned long get_purr(void)
 {
 	unsigned long sum_purr = 0;
 	return sum_purr;
@@ -550,10 +550,10 @@ static int lparcfg_open(struct inode *inode, struct file *file)
 }
 
 struct file_operations lparcfg_fops = {
-      owner:THIS_MODULE,
-      read:seq_read,
-      open:lparcfg_open,
-      release:single_release,
+      .owner	= THIS_MODULE,
+      .read	= seq_read,
+      .open	= lparcfg_open,
+      .release	= single_release,
 };
 
 int __init lparcfg_init(void)

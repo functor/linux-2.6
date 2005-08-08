@@ -80,6 +80,7 @@ static char version[] __devinitdata =
 MODULE_AUTHOR("Florian Schirmer, Pekka Pietikainen, David S. Miller");
 MODULE_DESCRIPTION("Broadcom 4400 10/100 PCI ethernet driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DRV_MODULE_VERSION);
 
 static int b44_debug = -1;	/* -1 == use B44_DEF_MSG_ENABLE as value */
 module_param(b44_debug, int, 0);
@@ -1863,7 +1864,7 @@ static int __devinit b44_init_one(struct pci_dev *pdev,
 
 	pci_set_drvdata(pdev, dev);
 
-	pci_save_state(bp->pdev, bp->pci_cfg_state);
+	pci_save_state(bp->pdev);
 
 	printk(KERN_INFO "%s: Broadcom 4400 10/100BaseT Ethernet ", dev->name);
 	for (i = 0; i < 6; i++)
@@ -1929,7 +1930,7 @@ static int b44_resume(struct pci_dev *pdev)
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct b44 *bp = netdev_priv(dev);
 
-	pci_restore_state(pdev, bp->pci_cfg_state);
+	pci_restore_state(pdev);
 
 	if (!netif_running(dev))
 		return 0;

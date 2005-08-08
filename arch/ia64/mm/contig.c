@@ -19,6 +19,7 @@
 #include <linux/efi.h>
 #include <linux/mm.h>
 #include <linux/swap.h>
+#include <linux/module.h>
 
 #include <asm/meminit.h>
 #include <asm/pgalloc.h>
@@ -62,6 +63,8 @@ show_mem (void)
 	printk("%d pages swap cached\n", cached);
 	printk("%ld pages in page table cache\n", pgtable_cache_size);
 }
+
+EXPORT_SYMBOL_GPL(show_mem);
 
 /* physical address where the bootmem map is located */
 unsigned long bootmap_start;

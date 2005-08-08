@@ -10,6 +10,7 @@ deps_config := \
 	fs/partitions/Kconfig \
 	fs/ncpfs/Kconfig \
 	fs/Kconfig \
+	drivers/mmc/Kconfig \
 	drivers/usb/gadget/Kconfig \
 	drivers/usb/atm/Kconfig \
 	drivers/usb/misc/Kconfig \
@@ -40,12 +41,14 @@ deps_config := \
 	drivers/video/console/Kconfig \
 	drivers/video/Kconfig \
 	drivers/media/common/Kconfig \
+	drivers/media/dvb/frontends/Kconfig \
 	drivers/media/dvb/bt8xx/Kconfig \
 	drivers/media/dvb/b2c2/Kconfig \
+	drivers/media/dvb/cinergyT2/Kconfig \
+	drivers/media/dvb/dibusb/Kconfig \
 	drivers/media/dvb/ttusb-dec/Kconfig \
 	drivers/media/dvb/ttusb-budget/Kconfig \
 	drivers/media/dvb/ttpci/Kconfig \
-	drivers/media/dvb/frontends/Kconfig \
 	drivers/media/dvb/dvb-core/Kconfig \
 	drivers/media/dvb/Kconfig \
 	drivers/media/radio/Kconfig \
@@ -142,9 +145,11 @@ deps_config := \
 	drivers/scsi/aic7xxx/Kconfig.aic7xxx \
 	drivers/scsi/Kconfig \
 	drivers/ide/Kconfig \
+	drivers/block/Kconfig.iosched \
 	drivers/s390/block/Kconfig \
 	drivers/block/paride/Kconfig \
 	drivers/block/Kconfig \
+	drivers/pnp/pnpacpi/Kconfig \
 	drivers/pnp/pnpbios/Kconfig \
 	drivers/pnp/isapnp/Kconfig \
 	drivers/pnp/Kconfig \
@@ -167,7 +172,6 @@ deps_config := \
 	drivers/acpi/Kconfig \
 	kernel/power/Kconfig \
 	drivers/firmware/Kconfig \
-	drivers/block/Kconfig.iosched \
 	init/Kconfig \
 	arch/i386/Kconfig
 

@@ -9,7 +9,7 @@ char *task_mem(struct mm_struct *mm, char *buffer)
 	unsigned long data, text, lib;
 
 	data = mm->total_vm - mm->shared_vm - mm->stack_vm;
-	text = (mm->end_code - mm->start_code) >> 10;
+	text = (PAGE_ALIGN(mm->end_code) - (mm->start_code & PAGE_MASK)) >> 10;
 	lib = (mm->exec_vm << (PAGE_SHIFT-10)) - text;
 	buffer += sprintf(buffer,
 		"VmSize:\t%8lu kB\n"
@@ -19,6 +19,7 @@ char *task_mem(struct mm_struct *mm, char *buffer)
 		"VmStk:\t%8lu kB\n"
 		"VmExe:\t%8lu kB\n"
 		"VmLib:\t%8lu kB\n"
+		"VmPTE:\t%8lu kB\n"
 		"StaBrk:\t%08lx kB\n"
 		"Brk:\t%08lx kB\n"
 		"StaStk:\t%08lx kB\n"
@@ -30,7 +31,9 @@ char *task_mem(struct mm_struct *mm, char *buffer)
 		mm->locked_vm << (PAGE_SHIFT-10),
 		mm->rss << (PAGE_SHIFT-10),
 		data << (PAGE_SHIFT-10),
-		mm->stack_vm << (PAGE_SHIFT-10), text, lib, mm->start_brk, mm->brk, mm->start_stack
+		mm->stack_vm << (PAGE_SHIFT-10), text, lib,
+		(PTRS_PER_PTE*sizeof(pte_t)*mm->nr_ptes) >> 10,
+		mm->start_brk, mm->brk, mm->start_stack
 #if __i386__
 		, mm->context.exec_limit
 #endif
@@ -47,7 +50,8 @@ int task_statm(struct mm_struct *mm, int *shared, int *text,
 	       int *data, int *resident)
 {
 	*shared = mm->rss - mm->anon_rss;
-	*text = (mm->end_code - mm->start_code) >> PAGE_SHIFT;
+	*text = (PAGE_ALIGN(mm->end_code) - (mm->start_code & PAGE_MASK))
+								>> PAGE_SHIFT;
 	*data = mm->total_vm - mm->shared_vm;
 	*resident = mm->rss;
 	return mm->total_vm;

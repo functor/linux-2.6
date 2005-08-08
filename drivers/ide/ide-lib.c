@@ -15,12 +15,12 @@
 #include <linux/delay.h>
 #include <linux/hdreg.h>
 #include <linux/ide.h>
+#include <linux/bitops.h>
 
 #include <asm/byteorder.h>
 #include <asm/irq.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
-#include <asm/bitops.h>
 
 /*
  *	IDE library routines. These are plug in code that most 
@@ -421,8 +421,6 @@ void ide_toggle_bounce(ide_drive_t *drive, int on)
 		blk_queue_bounce_limit(drive->queue, addr);
 }
 
-EXPORT_SYMBOL(ide_toggle_bounce);
-
 /**
  *	ide_set_xfer_rate	-	set transfer rate
  *	@drive: drive to set
@@ -464,8 +462,7 @@ byte ide_dump_atapi_status (ide_drive_t *drive, const char *msg, byte stat)
 
 	status.all = stat;
 	local_irq_set(flags);
-	printk("%s: %s: status=0x%02x", drive->name, msg, stat);
-	printk(" { ");
+	printk("%s: %s: status=0x%02x { ", drive->name, msg, stat);
 	if (status.b.bsy)
 		printk("Busy ");
 	else {
@@ -477,18 +474,17 @@ byte ide_dump_atapi_status (ide_drive_t *drive, const char *msg, byte stat)
 		if (status.b.idx)	printk("Index ");
 		if (status.b.check)	printk("Error ");
 	}
-	printk("}");
-	printk("\n");
+	printk("}\n");
 	if ((status.all & (status.b.bsy|status.b.check)) == status.b.check) {
 		error.all = HWIF(drive)->INB(IDE_ERROR_REG);
-		printk("%s: %s: error=0x%02x", drive->name, msg, error.all);
+		printk("%s: %s: error=0x%02x { ", drive->name, msg, error.all);
 		if (error.b.ili)	printk("IllegalLengthIndication ");
 		if (error.b.eom)	printk("EndOfMedia ");
-		if (error.b.abrt)	printk("Aborted Command ");
+		if (error.b.abrt)	printk("AbortedCommand ");
 		if (error.b.mcr)	printk("MediaChangeRequested ");
-		if (error.b.sense_key)	printk("LastFailedSense 0x%02x ",
+		if (error.b.sense_key)	printk("LastFailedSense=0x%02x ",
 						error.b.sense_key);
-		printk("\n");
+		printk("}\n");
 	}
 	local_irq_restore(flags);
 	return error.all;

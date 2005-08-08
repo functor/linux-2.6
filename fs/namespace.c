@@ -9,6 +9,7 @@
  */
 
 #include <linux/config.h>
+#include <linux/syscalls.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/smp_lock.h>
@@ -104,8 +105,6 @@ struct vfsmount *lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
 	spin_unlock(&vfsmount_lock);
 	return found;
 }
-
-EXPORT_SYMBOL(lookup_mnt);
 
 static inline int check_mnt(struct vfsmount *mnt)
 {
@@ -424,6 +423,7 @@ static int do_umount(struct vfsmount *mnt, int flags)
 		down_write(&sb->s_umount);
 		if (!(sb->s_flags & MS_RDONLY)) {
 			lock_kernel();
+			DQUOT_OFF(sb);
 			retval = do_remount_sb(sb, MS_RDONLY, NULL, 0);
 			unlock_kernel();
 		}
@@ -1209,6 +1209,7 @@ void set_fs_root(struct fs_struct *fs, struct vfsmount *mnt,
 }
 
 EXPORT_SYMBOL_GPL(set_fs_root);
+
 /*
  * Replace the fs->{pwdmnt,pwd} with {mnt,dentry}. Put the old values.
  * It can block. Requires the big lock held.

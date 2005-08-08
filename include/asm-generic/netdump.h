@@ -21,6 +21,8 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#include <asm-generic/crashdump.h>
+
 #ifdef __KERNEL__
 
 #warning netdump is not supported on this platform
@@ -28,28 +30,13 @@ const static int platform_supports_netdump = 0;
 
 static inline int page_is_ram(unsigned long x) { return 0; }
 
-#define platform_timestamp(x) do { (x) = 0; } while (0)  
-
-#define platform_fix_regs() do { } while (0)
-#define platform_init_stack(stackptr) do { } while (0)
-#define platform_cleanup_stack(stackptr) do { } while (0)
-#define platform_start_netdump(stackptr,regs) do { } while (0)
-#define platform_max_pfn() do { int ret = 0; } while (0)
-
-#undef ELF_CORE_COPY_REGS
-#define ELF_CORE_COPY_REGS(x, y) do { struct pt_regs *z; z = (y); } while (0)
-
-#define show_mem() do {} while (0)
-
-#define show_state() do {} while (0)
-
-#define show_regs(x) do { struct pt_regs *z; z = (x); } while (0)
-
-#undef ZERO_PAGE
-static inline struct page *ZERO_PAGE(void *x) { return NULL; }
-
-#undef KM_NETDUMP
-#define KM_NETDUMP 0
+#define platform_machine_type() (EM_NONE)
+#define platform_effective_version(x) (0)
+#define platform_next_available(x) ((u32)0)
+#define platform_freeze_cpu()  do { } while (0)
+#define platform_jiffy_cycles(x)  do { } while (0)
+#define platform_max_pfn() (0)
+#define platform_get_regs(x,y) (0)
 
 #undef kmap_atomic
 #undef kunmap_atomic

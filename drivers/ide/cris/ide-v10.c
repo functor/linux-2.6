@@ -332,9 +332,9 @@ init_e100_ide (void)
                 hwif->atapi_output_bytes = &e100_atapi_output_bytes;
                 hwif->ide_dma_check = &e100_dma_check;
                 hwif->ide_dma_end = &e100_dma_end;
-		hwif->dma_setup = &e100_dma_setup;
-		hwif->dma_exec_cmd = &e100_dma_exec_cmd;
-		hwif->dma_start = &e100_dma_start;
+		hwif->ide_dma_setup = &e100_dma_setup;
+		hwif->ide_dma_exec_cmd = &e100_dma_exec_cmd;
+		hwif->ide_dma_start = &e100_dma_start;
 		hwif->OUTB = &etrax100_ide_outb;
 		hwif->OUTW = &etrax100_ide_outw;
 		hwif->OUTBSYNC = &etrax100_ide_outbsync;

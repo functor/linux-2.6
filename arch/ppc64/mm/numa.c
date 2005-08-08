@@ -14,6 +14,7 @@
 #include <linux/mm.h>
 #include <linux/mmzone.h>
 #include <linux/module.h>
+#include <linux/nodemask.h>
 #include <linux/cpu.h>
 #include <linux/notifier.h>
 #include <asm/lmb.h>
@@ -215,7 +216,7 @@ static int numa_setup_cpu(unsigned long lcpu)
 
 	numa_domain = of_node_numa_domain(cpu);
 
-	if (numa_domain >= MAX_NUMNODES) {
+	if (numa_domain >= numnodes) {
 		/*
 		 * POWER4 LPAR uses 0xffff as invalid node,
 		 * dont warn in this case.
@@ -264,6 +265,7 @@ static int cpu_numa_callback(struct notifier_block *nfb,
 
 static int __init parse_numa_properties(void)
 {
+	struct device_node *cpu = NULL;
 	struct device_node *memory = NULL;
 	int max_domain = 0;
 	long entries = lmb_end_of_DRAM() >> MEMORY_INCREMENT_SHIFT;
@@ -288,6 +290,28 @@ static int __init parse_numa_properties(void)
 		return min_common_depth;
 
 	max_domain = numa_setup_cpu(boot_cpuid);
+
+	/*
+	 * Even though we connect cpus to numa domains later in SMP init,
+	 * we need to know the maximum node id now. This is because each
+	 * node id must have NODE_DATA etc backing it.
+	 * As a result of hotplug we could still have cpus appear later on
+	 * with larger node ids. In that case we force the cpu into node 0.
+	 */
+	for_each_cpu(i) {
+		int numa_domain;
+
+		cpu = find_cpu_node(i);
+
+		if (cpu) {
+			numa_domain = of_node_numa_domain(cpu);
+			of_node_put(cpu);
+
+			if (numa_domain < MAX_NUMNODES &&
+			    max_domain < numa_domain)
+				max_domain = numa_domain;
+		}
+	}
 
 	memory = NULL;
 	while ((memory = of_find_node_by_type(memory, "memory")) != NULL) {
@@ -479,6 +503,10 @@ static unsigned long careful_allocation(int nid, unsigned long size,
 void __init do_init_bootmem(void)
 {
 	int nid;
+	static struct notifier_block ppc64_numa_nb = {
+		.notifier_call = cpu_numa_callback,
+		.priority = 1 /* Must run before sched domains notifier. */
+	};
 
 	min_low_pfn = 0;
 	max_low_pfn = lmb_end_of_DRAM() >> PAGE_SHIFT;
@@ -488,10 +516,8 @@ void __init do_init_bootmem(void)
 		setup_nonnuma();
 	else
 		dump_numa_topology();
-	/*
-	 * This must run before the sched domains notifier.
-	 */
-	hotcpu_notifier(cpu_numa_callback, 1);
+
+	register_cpu_notifier(&ppc64_numa_nb);
 
 	for (nid = 0; nid < numnodes; nid++) {
 		unsigned long start_paddr, end_paddr;

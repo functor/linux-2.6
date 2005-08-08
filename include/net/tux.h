@@ -44,7 +44,7 @@
 #include <net/tux_u.h>
 
 /* Maximum number of threads: */
-#define CONFIG_TUX_NUMTHREADS 32
+#define CONFIG_TUX_NUMTHREADS 16
 
 /* Number of cachemiss/IO threads: */
 #define NR_IO_THREADS 64

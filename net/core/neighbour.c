@@ -59,7 +59,6 @@ static void neigh_app_notify(struct neighbour *n);
 static int pneigh_ifdown(struct neigh_table *tbl, struct net_device *dev);
 void neigh_changeaddr(struct neigh_table *tbl, struct net_device *dev);
 
-static int neigh_glbl_allocs;
 static struct neigh_table *neigh_tables;
 static struct file_operations neigh_stat_seq_fops;
 
@@ -272,7 +271,7 @@ static struct neighbour *neigh_alloc(struct neigh_table *tbl)
 	memset(n, 0, tbl->entry_size);
 
 	skb_queue_head_init(&n->arp_queue);
-	n->lock		  = RW_LOCK_UNLOCKED;
+	rwlock_init(&n->lock);
 	n->updated	  = n->used = now;
 	n->nud_state	  = NUD_NONE;
 	n->output	  = neigh_blackhole;
@@ -282,7 +281,6 @@ static struct neighbour *neigh_alloc(struct neigh_table *tbl)
 	n->timer.data	  = (unsigned long)n;
 
 	NEIGH_CACHE_STAT_INC(tbl, allocs);
-	neigh_glbl_allocs++;
 	n->tbl		  = tbl;
 	atomic_set(&n->refcnt, 1);
 	n->dead		  = 1;
@@ -612,7 +610,6 @@ void neigh_destroy(struct neighbour *neigh)
 
 	NEIGH_PRINTK2("neigh %p is destroyed.\n", neigh);
 
-	neigh_glbl_allocs--;
 	atomic_dec(&neigh->tbl->entries);
 	kmem_cache_free(neigh->tbl->kmem_cachep, neigh);
 }
@@ -1094,7 +1091,7 @@ static void neigh_hh_init(struct neighbour *n, struct dst_entry *dst,
 
 	if (!hh && (hh = kmalloc(sizeof(*hh), GFP_ATOMIC)) != NULL) {
 		memset(hh, 0, sizeof(struct hh_cache));
-		hh->hh_lock = RW_LOCK_UNLOCKED;
+		rwlock_init(&hh->hh_lock);
 		hh->hh_type = protocol;
 		atomic_set(&hh->hh_refcnt, 0);
 		hh->hh_next = NULL;
@@ -1370,7 +1367,7 @@ void neigh_table_init(struct neigh_table *tbl)
 
 	get_random_bytes(&tbl->hash_rnd, sizeof(tbl->hash_rnd));
 
-	tbl->lock	       = RW_LOCK_UNLOCKED;
+	rwlock_init(&tbl->lock);
 	init_timer(&tbl->gc_timer);
 	tbl->gc_timer.data     = (unsigned long)tbl;
 	tbl->gc_timer.function = neigh_periodic_timer;

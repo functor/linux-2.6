@@ -32,16 +32,16 @@ char *defconfig_file;
 static int indent = 1;
 static int valid_stdin = 1;
 static int conf_cnt;
-static char line[128];
+static signed char line[128];
 static struct menu *rootEntry;
 
 static char nohelp_text[] = "Sorry, no help available for this option yet.\n";
 
 static int return_value = 0;
 
-static void strip(char *str)
+static void strip(signed char *str)
 {
-	char *p = str;
+	signed char *p = str;
 	int l;
 
 	while ((isspace(*p)))

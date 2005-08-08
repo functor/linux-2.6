@@ -127,7 +127,7 @@ static inline int dump_task_regs32(struct task_struct *tsk, elf_gregset_t *regs)
 static inline int dump_task_fpu(struct task_struct *tsk, elf_fpregset_t *fpregs)
 {
 	if (tsk == current)
-		save_fp_regs((s390_fp_regs *)fpregs);
+		save_fp_regs((s390_fp_regs *) fpregs);
 	else
 		memcpy(fpregs, &tsk->thread.fp_regs, sizeof(elf_fpregset_t));
 	return 1;

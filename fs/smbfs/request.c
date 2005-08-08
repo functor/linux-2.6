@@ -659,7 +659,6 @@ static int smb_recv_trans2(struct smb_sb_info *server, struct smb_request *req)
 	if (unlikely(parm_disp + parm_count > req->rq_total_parm ||
 		     parm_offset + parm_count > req->rq_rlen))
 		goto out_bad_parm;
-
 	if (unlikely(data_disp + data_count > req->rq_total_data ||
 		     data_offset + data_count > req->rq_rlen))
 		goto out_bad_data;

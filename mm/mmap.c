@@ -137,7 +137,7 @@ asmlinkage unsigned long sys_brk(unsigned long brk)
 	}
 
 	/* Check against rlimit.. */
-	rlim = current->rlim[RLIMIT_DATA].rlim_cur;
+	rlim = current->signal->rlim[RLIMIT_DATA].rlim_cur;
 	if (rlim < RLIM_INFINITY && brk - mm->start_data > rlim)
 		goto out;
 
@@ -146,7 +146,7 @@ asmlinkage unsigned long sys_brk(unsigned long brk)
 		goto out;
 
 	/* Ok, looks good - let it rip. */
-	if (do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
+	if (__do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
 		goto out;
 set_brk:
 	mm->brk = brk;
@@ -751,12 +751,12 @@ void __vm_stat_account(struct mm_struct *mm, unsigned long flags,
 	}
 #endif /* CONFIG_HUGETLB */
 
-	if (file)
+	if (file) {
 		mm->shared_vm += pages;
-	else if (flags & stack_flags)
+		if ((flags & (VM_EXEC|VM_WRITE)) == VM_EXEC)
+			mm->exec_vm += pages;
+	} else if (flags & stack_flags)
 		mm->stack_vm += pages;
-	if (flags & VM_EXEC)
-		mm->exec_vm += pages;
 	if (flags & (VM_RESERVED|VM_IO))
 		mm->reserved_vm += pages;
 }
@@ -840,7 +840,7 @@ unsigned long do_mmap_pgoff(struct file * file, unsigned long addr,
 	if (vm_flags & VM_LOCKED) {
 		unsigned long locked, lock_limit;
 		locked = mm->locked_vm << PAGE_SHIFT;
-		lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+		lock_limit = current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur;
 		locked += len;
 		if (locked > lock_limit && !capable(CAP_IPC_LOCK))
 			return -EAGAIN;
@@ -912,7 +912,7 @@ munmap_back:
 
 	/* Check against address space limit. */
 	if ((mm->total_vm << PAGE_SHIFT) + len
-	    > current->rlim[RLIMIT_AS].rlim_cur)
+	    > current->signal->rlim[RLIMIT_AS].rlim_cur)
 		return -ENOMEM;
 
 	if (accountable && (!(flags & MAP_NORESERVE) ||
@@ -1402,7 +1402,7 @@ static int over_stack_limit(unsigned long sz)
 {
 	if (sz < EXEC_STACK_BIAS)
 		return 0;
-	return (sz - EXEC_STACK_BIAS) > current->rlim[RLIMIT_STACK].rlim_cur;
+	return (sz - EXEC_STACK_BIAS) > current->signal->rlim[RLIMIT_STACK].rlim_cur;
 }
 
 #ifdef CONFIG_STACK_GROWSUP
@@ -1432,7 +1432,12 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 	address += 4 + PAGE_SIZE - 1;
 	address &= PAGE_MASK;
 	grow = (address - vma->vm_end) >> PAGE_SHIFT;
-
+	
+	/* Someone beat us to it */
+	if (grow <= 0) {
+		anon_vma_unlock(vma);
+		return 0;
+	}
 	/* Overcommit.. */
 	if (security_vm_enough_memory(grow)) {
 		anon_vma_unlock(vma);
@@ -1441,7 +1446,14 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 	
 	if (over_stack_limit(address - vma->vm_start) ||
 			((vma->vm_mm->total_vm + grow) << PAGE_SHIFT) >
-			current->rlim[RLIMIT_AS].rlim_cur) {
+			current->signal->rlim[RLIMIT_AS].rlim_cur) {
+		anon_vma_unlock(vma);
+		vm_unacct_memory(grow);
+		return -ENOMEM;
+	}
+	if ((vma->vm_flags & VM_LOCKED) && !capable(CAP_IPC_LOCK) &&
+			((vma->vm_mm->locked_vm + grow) << PAGE_SHIFT) >
+			current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur) {
 		anon_vma_unlock(vma);
 		vm_unacct_memory(grow);
 		return -ENOMEM;
@@ -1495,6 +1507,11 @@ int expand_stack(struct vm_area_struct *vma, unsigned long address)
 	address &= PAGE_MASK;
 	grow = (vma->vm_start - address) >> PAGE_SHIFT;
 
+	/* Someone beat us to it */
+	if (grow <= 0) {
+		anon_vma_unlock(vma);
+		return 0;
+	}
 	/* Overcommit.. */
 	if (security_vm_enough_memory(grow)) {
 		anon_vma_unlock(vma);
@@ -1503,7 +1520,14 @@ int expand_stack(struct vm_area_struct *vma, unsigned long address)
 	
 	if (over_stack_limit(vma->vm_end - address) ||
 			((vma->vm_mm->total_vm + grow) << PAGE_SHIFT) >
-			current->rlim[RLIMIT_AS].rlim_cur) {
+			current->signal->rlim[RLIMIT_AS].rlim_cur) {
+		anon_vma_unlock(vma);
+		vm_unacct_memory(grow);
+		return -ENOMEM;
+	}
+	if ((vma->vm_flags & VM_LOCKED) && !capable(CAP_IPC_LOCK) &&
+			((vma->vm_mm->locked_vm + grow) << PAGE_SHIFT) >
+			current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur) {
 		anon_vma_unlock(vma);
 		vm_unacct_memory(grow);
 		return -ENOMEM;
@@ -1832,7 +1856,7 @@ asmlinkage long sys_munmap(unsigned long addr, size_t len)
  *  anonymous maps.  eventually we may be able to do some
  *  brk-specific accounting here.
  */
-unsigned long do_brk(unsigned long addr, unsigned long len)
+unsigned long __do_brk(unsigned long addr, unsigned long len)
 {
 	struct mm_struct * mm = current->mm;
 	struct vm_area_struct * vma, * prev;
@@ -1853,7 +1877,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	if (mm->def_flags & VM_LOCKED) {
 		unsigned long locked, lock_limit;
 		locked = mm->locked_vm << PAGE_SHIFT;
-		lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+		lock_limit = current->signal->rlim[RLIMIT_MEMLOCK].rlim_cur;
 		locked += len;
 		if (locked > lock_limit && !capable(CAP_IPC_LOCK))
 			return -EAGAIN;
@@ -1872,7 +1896,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 
 	/* Check against address space limits *after* clearing old maps... */
 	if ((mm->total_vm << PAGE_SHIFT) + len
-	    > current->rlim[RLIMIT_AS].rlim_cur)
+	    > current->signal->rlim[RLIMIT_AS].rlim_cur)
 		return -ENOMEM;
 
 	if (mm->map_count > sysctl_max_map_count)
@@ -1914,7 +1938,20 @@ out:
 	return addr;
 }
 
+EXPORT_SYMBOL(__do_brk);
+
+unsigned long do_brk(unsigned long addr, unsigned long len)
+{
+	unsigned long ret;
+	
+	down_write(&current->mm->mmap_sem);
+	ret = __do_brk(addr, len);
+	up_write(&current->mm->mmap_sem);
+	return ret;
+}
+
 EXPORT_SYMBOL(do_brk);
+	
 
 /* Release all mmaps. */
 void exit_mmap(struct mm_struct *mm)

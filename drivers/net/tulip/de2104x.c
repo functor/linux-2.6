@@ -56,7 +56,6 @@ KERN_INFO DRV_NAME " PCI Ethernet driver v" DRV_VERSION " (" DRV_RELDATE ")\n";
 MODULE_AUTHOR("Jeff Garzik <jgarzik@pobox.com>");
 MODULE_DESCRIPTION("Intel/Digital 21040/1 series PCI Ethernet driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION(DRV_VERSION);
 
 static int debug = -1;
 MODULE_PARM (debug, "i");
@@ -288,7 +287,7 @@ struct de_private {
 	unsigned		tx_tail;
 	unsigned		rx_tail;
 
-	void			*regs;
+	void			__iomem *regs;
 	struct net_device	*dev;
 	spinlock_t		lock;
 
@@ -1209,8 +1208,7 @@ static void de_adapter_wake (struct de_private *de)
 		pci_write_config_dword(de->pdev, PCIPM, pmctl);
 
 		/* de4x5.c delays, so we do too */
-		current->state = TASK_UNINTERRUPTIBLE;
-		schedule_timeout(msecs_to_jiffies(10));
+		msleep(10);
 	}
 }
 
@@ -1736,11 +1734,11 @@ static void __init de21040_get_media_info(struct de_private *de)
 }
 
 /* Note: this routine returns extra data bits for size detection. */
-static unsigned __init tulip_read_eeprom(void *regs, int location, int addr_len)
+static unsigned __init tulip_read_eeprom(void __iomem *regs, int location, int addr_len)
 {
 	int i;
 	unsigned retval = 0;
-	void *ee_addr = regs + ROMCmd;
+	void __iomem *ee_addr = regs + ROMCmd;
 	int read_cmd = location | (EE_READ_CMD << addr_len);
 
 	writel(EE_ENB & ~EE_CS, ee_addr);
@@ -1933,7 +1931,7 @@ static int __devinit de_init_one (struct pci_dev *pdev,
 	struct net_device *dev;
 	struct de_private *de;
 	int rc;
-	void *regs;
+	void __iomem *regs;
 	long pciaddr;
 	static int board_idx = -1;
 

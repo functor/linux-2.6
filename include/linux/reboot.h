@@ -39,19 +39,6 @@
 
 #include <linux/notifier.h>
 
-#ifdef CONFIG_X86_64
-
-extern enum reboot_types {
-	BOOT_BIOS = 'b',
-	BOOT_TRIPLE = 't',
-	BOOT_KBD = 'k',
-	BOOT_ACPI = 'a'
-} reboot_type;
-
-extern int reboot_override;
-
-#endif
-
 extern int register_reboot_notifier(struct notifier_block *);
 extern int unregister_reboot_notifier(struct notifier_block *);
 
@@ -63,9 +50,6 @@ extern int unregister_reboot_notifier(struct notifier_block *);
 extern void machine_restart(char *cmd);
 extern void machine_halt(void);
 extern void machine_power_off(void);
-extern void (*machine_reset)(void);
-
-extern void machine_shutdown(void);
 
 #endif
 
