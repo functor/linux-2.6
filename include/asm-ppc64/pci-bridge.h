@@ -33,9 +33,10 @@ enum phb_types {
 struct pci_controller {
 	char what[8];                     /* Eye catcher      */
 	enum phb_types type;              /* Type of hardware */
-	struct pci_controller *next;
 	struct pci_bus *bus;
+	char is_dynamic;
 	void *arch_data;
+	struct list_head list_node;
 
 	int first_busno;
 	int last_busno;
@@ -47,6 +48,7 @@ struct pci_controller {
 	 * the PCI memory space in the CPU bus space
 	 */
 	unsigned long pci_mem_offset;
+	unsigned long pci_io_size;
 
 	struct pci_ops *ops;
 	volatile unsigned int *cfg_addr;
@@ -70,10 +72,12 @@ struct pci_controller {
  * for a device on a PCI bus, given its device_node struct.
  * It returns 0 if OK, -1 on error.
  */
-int pci_device_loc(struct device_node *dev, unsigned char *bus_ptr,
-		   unsigned char *devfn_ptr);
+extern int pci_device_loc(struct device_node *dev, unsigned char *bus_ptr,
+			  unsigned char *devfn_ptr);
 
 struct device_node *fetch_dev_dn(struct pci_dev *dev);
+
+extern int pcibios_remove_root_bus(struct pci_controller *phb);
 
 /* Get a device_node from a pci_dev.  This code must be fast except in the case
  * where the sysdata is incorrect and needs to be fixed up (hopefully just once)
@@ -86,6 +90,9 @@ static inline struct device_node *pci_device_to_OF_node(struct pci_dev *dev)
 	else
 		return fetch_dev_dn(dev);
 }
+
+extern void pci_process_bridge_OF_ranges(struct pci_controller *hose,
+					 struct device_node *dev);
 
 /* Use this macro after the PCI bus walk for max performance when it
  * is known that sysdata is correct.

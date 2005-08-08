@@ -251,10 +251,22 @@ acpi_tb_convert_fadt1 (
 	local_fadt->cst_cnt = 0;
 
 	/*
-	 * Since there isn't any equivalence in 1.0 and since it highly likely
-	 * that a 1.0 system has legacy support.
+	 * Support for ACPI system reset mechanism was introduced between
+	 * Spec revisions 1.0b and 2.0, for legacy free systems..
 	 */
-	local_fadt->iapc_boot_arch = BAF_LEGACY_DEVICES;
+	if (original_fadt->revision == FADT2_INTERIM_REVISION_ID && original_fadt->length == FADT2_INTERIM_LENGTH) {
+		/*
+		 * Copy the entire GAS, plus the 1-byte reset value that
+		 * immediately follows.
+		 */
+		ACPI_MEMCPY (&local_fadt->reset_register, &((FADT_DESCRIPTOR *)original_fadt)->reset_register, sizeof(struct acpi_generic_address) + 1);
+	} else {
+		/*
+		 * Otherwise, there isn't any equivalence in 1.0 and it's
+		 * highly likely that a 1.0 system has legacy support.
+	 	 */
+		local_fadt->iapc_boot_arch = BAF_LEGACY_DEVICES;
+	}
 
 	/*
 	 * Convert the V1.0 block addresses to V2.0 GAS structures

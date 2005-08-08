@@ -150,9 +150,8 @@ struct subprocess_info {
 /*
  * This is the task which runs the usermode application
  */
-static int ____call_usermodehelper(void *data)
+int __exec_usermodehelper(char *path, char **argv, char **envp)
 {
-	struct subprocess_info *sub_info = data;
 	int retval;
 
 	/* Unblock all signals. */
@@ -163,12 +162,28 @@ static int ____call_usermodehelper(void *data)
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
 
+	retval = -EPERM;
+	if (current->fs->root)
+		retval = execve(path, argv, envp);
+
+	return retval;
+}
+
+EXPORT_SYMBOL_GPL(__exec_usermodehelper);
+
+/*
+ * This is the task which runs the usermode application
+ */
+static int ____call_usermodehelper(void *data)
+{
+	struct subprocess_info *sub_info = data;
+	int retval;
+
 	/* We can run anywhere, unlike our parent keventd(). */
 	set_cpus_allowed(current, CPU_MASK_ALL);
 
-	retval = -EPERM;
-	if (current->fs->root)
-		retval = execve(sub_info->path, sub_info->argv,sub_info->envp);
+	retval = __exec_usermodehelper(sub_info->path,
+			sub_info->argv, sub_info->envp);
 
 	/* Exec failed? */
 	sub_info->retval = retval;
@@ -272,10 +287,8 @@ int call_usermodehelper(char *path, char **argv, char **envp, int wait)
 }
 EXPORT_SYMBOL(call_usermodehelper);
 
-static __init int usermodehelper_init(void)
+void __init usermodehelper_init(void)
 {
 	khelper_wq = create_singlethread_workqueue("khelper");
 	BUG_ON(!khelper_wq);
-	return 0;
 }
-core_initcall(usermodehelper_init);

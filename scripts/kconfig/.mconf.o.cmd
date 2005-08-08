@@ -67,6 +67,7 @@ deps_scripts/kconfig/mconf.o := \
   /usr/include/bits/posix_opt.h \
   /usr/include/bits/confname.h \
   /usr/include/getopt.h \
+  /usr/include/regex.h \
   scripts/kconfig/lkc.h \
   scripts/kconfig/expr.h \
   /usr/include/stdio.h \

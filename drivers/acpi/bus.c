@@ -29,6 +29,7 @@
 #include <linux/pm.h>
 #include <linux/device.h>
 #include <linux/proc_fs.h>
+#include <linux/reboot.h>
 #ifdef CONFIG_X86
 #include <asm/mpspec.h>
 #endif
@@ -589,15 +590,49 @@ acpi_bus_init_irq (void)
 	return_VALUE(0);
 }
 
-
-static int __init
-acpi_bus_init (void)
+void
+acpi_machine_reset(void)
 {
-	int			result = 0;
+	acpi_status status;
+	FADT_DESCRIPTOR *f = &acpi_fadt;
+
+	if (f->reset_register.register_bit_width != 8) {
+		printk(KERN_WARNING PREFIX "invalid reset register bit width: 0x%x\n", f->reset_register.register_bit_width);
+		return_VOID;
+	}
+
+	if (f->reset_register.register_bit_offset != 0) {
+		printk(KERN_WARNING PREFIX "invalid reset register bit offset: 0x%x\n", f->reset_register.register_bit_offset);
+		return_VOID;
+	}
+
+	if ((f->reset_register.address_space_id != ACPI_ADR_SPACE_SYSTEM_IO) &&
+		(f->reset_register.address_space_id != ACPI_ADR_SPACE_SYSTEM_MEMORY) &&
+		(f->reset_register.address_space_id != ACPI_ADR_SPACE_PCI_CONFIG)) {
+		printk(KERN_WARNING PREFIX "invalid reset register address space id: 0x%x\n", f->reset_register.address_space_id);
+		return_VOID;
+	}
+
+	status = acpi_hw_low_level_write(f->reset_register.register_bit_width, f->reset_value, &f->reset_register);
+
+	if (status != AE_OK)
+		printk(KERN_WARNING "ACPI system reset failed 0x%x\n", status);
+}
+
+void __init
+acpi_early_init (void)
+{
 	acpi_status		status = AE_OK;
 	struct acpi_buffer	buffer = {sizeof(acpi_fadt), &acpi_fadt};
 
-	ACPI_FUNCTION_TRACE("acpi_bus_init");
+	ACPI_FUNCTION_TRACE("acpi_early_init");
+
+	if (acpi_disabled)
+		return;
+
+	/* enable workarounds, unless strict ACPI spec. compliance */
+	if (!acpi_strict)
+		acpi_gbl_enable_interpreter_slack = TRUE;
 
 	status = acpi_initialize_subsystem();
 	if (ACPI_FAILURE(status)) {
@@ -617,8 +652,25 @@ acpi_bus_init (void)
 	status = acpi_get_table(ACPI_TABLE_FADT, 1, &buffer);
 	if (ACPI_FAILURE(status)) {
 		printk(KERN_ERR PREFIX "Unable to get the FADT\n");
-		goto error1;
+		goto error0;
 	}
+
+#if defined(CONFIG_X86_64)
+	/*
+	 * Set up system reset via ACPI if defined in FADT.
+	 */
+	if (acpi_fadt.revision >= 2) {
+		if (acpi_fadt.reset_reg_sup) {
+			printk(KERN_INFO PREFIX "System reset via FADT Reset Register is supported\n");
+			/* if no 8042 KBD controller exists, use ACPI reset */
+			if (!(acpi_fadt.iapc_boot_arch & BAF_8042_KEYBOARD_CONTROLLER)) {
+				machine_reset = acpi_machine_reset;
+				if (!reboot_override)
+					reboot_type = BOOT_ACPI;
+			}
+		}
+	}
+#endif
 
 #ifdef CONFIG_X86
 	if (!acpi_ioapic) {
@@ -640,12 +692,40 @@ acpi_bus_init (void)
 	}
 #endif
 
-	status = acpi_enable_subsystem(ACPI_FULL_INITIALIZATION);
+	status = acpi_enable_subsystem(~(ACPI_NO_HARDWARE_INIT | ACPI_NO_ACPI_ENABLE));
+	if (ACPI_FAILURE(status)) {
+		printk(KERN_ERR PREFIX "Unable to enable ACPI\n");
+		goto error0;
+	}
+
+	return;
+
+error0:
+	disable_acpi();
+	return;
+}
+
+static int __init
+acpi_bus_init (void)
+{
+	int			result = 0;
+	acpi_status		status = AE_OK;
+	extern acpi_status	acpi_os_initialize1(void);
+
+	ACPI_FUNCTION_TRACE("acpi_bus_init");
+
+	status = acpi_os_initialize1();
+
+	status = acpi_enable_subsystem(ACPI_NO_HARDWARE_INIT | ACPI_NO_ACPI_ENABLE);
 	if (ACPI_FAILURE(status)) {
 		printk(KERN_ERR PREFIX "Unable to start the ACPI Interpreter\n");
 		goto error1;
 	}
 
+	if (ACPI_FAILURE(status)) {
+		printk(KERN_ERR PREFIX "Unable to initialize ACPI OS objects\n");
+		goto error1;
+	}
 #ifdef CONFIG_ACPI_EC
 	/*
 	 * ACPI 2.0 requires the EC driver to be loaded and work before
@@ -693,7 +773,6 @@ acpi_bus_init (void)
 	/* Mimic structured exception handling */
 error1:
 	acpi_terminate();
-error0:
 	return_VALUE(-ENODEV);
 }
 
@@ -707,9 +786,6 @@ static int __init acpi_init (void)
 
 	printk(KERN_INFO PREFIX "Subsystem revision %08x\n",
 		ACPI_CA_VERSION);
-
-	/* Initial core debug level excludes drivers, so include them now */
-	acpi_set_debug(ACPI_DEBUG_LOW);
 
 	if (acpi_disabled) {
 		printk(KERN_INFO PREFIX "Interpreter disabled.\n");

@@ -1,7 +1,7 @@
 #ifndef LINUX_KEXEC_H
 #define LINUX_KEXEC_H
 
-#ifdef CONFIG_KEXEC
+#if CONFIG_KEXEC
 #include <linux/types.h>
 #include <linux/list.h>
 #include <asm/kexec.h>

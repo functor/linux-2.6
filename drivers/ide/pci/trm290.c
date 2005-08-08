@@ -311,6 +311,7 @@ void __devinit init_hwif_trm290(ide_hwif_t *hwif)
 	u8 reg = 0;
 	struct pci_dev *dev = hwif->pci_dev;
 
+	/* FIXME: does this device support PIO LBA48 ? */
 	hwif->no_lba48 = 1;
 	hwif->chipset = ide_trm290;
 	cfgbase = pci_resource_start(dev, 4);
@@ -408,7 +409,7 @@ static struct pci_device_id trm290_pci_tbl[] = {
 MODULE_DEVICE_TABLE(pci, trm290_pci_tbl);
 
 static struct pci_driver driver = {
-	.name		= "TRM290 IDE",
+	.name		= "TRM290_IDE",
 	.id_table	= trm290_pci_tbl,
 	.probe		= trm290_init_one,
 };

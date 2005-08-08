@@ -32,6 +32,7 @@
 #include <linux/topology.h>
 #include <linux/cpu.h>
 #include <linux/notifier.h>
+#include <linux/rwsem.h>
 
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
@@ -85,11 +86,6 @@ struct shrinker {
 	long			nr;	/* objs pending delete */
 };
 
-
-
-void try_to_clip_inodes(void);
-
-
 #define lru_to_page(_head) (list_entry((_head)->prev, struct page, lru))
 
 #ifdef ARCH_HAS_PREFETCH
@@ -127,7 +123,7 @@ int vm_swappiness = 60;
 static long total_memory;
 
 static LIST_HEAD(shrinker_list);
-static DECLARE_MUTEX(shrinker_sem);
+static DECLARE_RWSEM(shrinker_rwsem);
 
 /*
  * Add a shrinker callback to be called from the vm
@@ -141,9 +137,9 @@ struct shrinker *set_shrinker(int seeks, shrinker_t theshrinker)
 	        shrinker->shrinker = theshrinker;
 	        shrinker->seeks = seeks;
 	        shrinker->nr = 0;
-	        down(&shrinker_sem);
+	        down_write(&shrinker_rwsem);
 	        list_add(&shrinker->list, &shrinker_list);
-	        up(&shrinker_sem);
+	        up_write(&shrinker_rwsem);
 	}
 	return shrinker;
 }
@@ -154,13 +150,13 @@ EXPORT_SYMBOL(set_shrinker);
  */
 void remove_shrinker(struct shrinker *shrinker)
 {
-	down(&shrinker_sem);
+	down_write(&shrinker_rwsem);
 	list_del(&shrinker->list);
-	up(&shrinker_sem);
+	up_write(&shrinker_rwsem);
 	kfree(shrinker);
 }
 EXPORT_SYMBOL(remove_shrinker);
- 
+
 #define SHRINK_BATCH 128
 /*
  * Call the shrink functions to age shrinkable caches
@@ -184,11 +180,15 @@ static int shrink_slab(unsigned long scanned, unsigned int gfp_mask,
 {
 	struct shrinker *shrinker;
 
-	if (down_trylock(&shrinker_sem))
+	if (scanned == 0)
+		scanned = SWAP_CLUSTER_MAX;
+
+	if (!down_read_trylock(&shrinker_rwsem))
 		return 0;
 
 	list_for_each_entry(shrinker, &shrinker_list, list) {
 		unsigned long long delta;
+		unsigned long total_scan;
 
 		delta = (4 * scanned) / shrinker->seeks;
 		delta *= (*shrinker->shrinker)(0, gfp_mask);
@@ -197,27 +197,29 @@ static int shrink_slab(unsigned long scanned, unsigned int gfp_mask,
 		if (shrinker->nr < 0)
 			shrinker->nr = LONG_MAX;	/* It wrapped! */
 
-		if (shrinker->nr <= SHRINK_BATCH)
-			continue;
-		while (shrinker->nr) {
-			long this_scan = shrinker->nr;
+		total_scan = shrinker->nr;
+		shrinker->nr = 0;
+
+		while (total_scan >= SHRINK_BATCH) {
+			long this_scan = SHRINK_BATCH;
 			int shrink_ret;
 
-			if (this_scan > 128)
-				this_scan = 128;
 			shrink_ret = (*shrinker->shrinker)(this_scan, gfp_mask);
-			mod_page_state(slabs_scanned, this_scan);
-			shrinker->nr -= this_scan;
 			if (shrink_ret == -1)
 				break;
+			mod_page_state(slabs_scanned, this_scan);
+			total_scan -= this_scan;
+
 			cond_resched();
 		}
+
+		shrinker->nr += total_scan;
 	}
-	up(&shrinker_sem);
+	up_read(&shrinker_rwsem);
 	return 0;
 }
 
-/* Must be called with page's rmap lock held. */
+/* Called without lock on whether page is mapped, so answer is unstable */
 static inline int page_mapping_inuse(struct page *page)
 {
 	struct address_space *mapping;
@@ -377,26 +379,19 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 		if (page_mapped(page) || PageSwapCache(page))
 			sc->nr_scanned++;
 
-		page_map_lock(page);
-		referenced = page_referenced(page);
-		if (referenced && page_mapping_inuse(page)) {
-			/* In active use or really unfreeable.  Activate it. */
-			page_map_unlock(page);
+		referenced = page_referenced(page, 1, sc->priority <= 0);
+		/* In active use or really unfreeable?  Activate it. */
+		if (referenced && page_mapping_inuse(page))
 			goto activate_locked;
-		}
 
 #ifdef CONFIG_SWAP
 		/*
 		 * Anonymous process memory has backing store?
 		 * Try to allocate it some swap space here.
-		 *
-		 * XXX: implement swap clustering ?
 		 */
 		if (PageAnon(page) && !PageSwapCache(page)) {
-			page_map_unlock(page);
 			if (!add_to_swap(page))
 				goto activate_locked;
-			page_map_lock(page);
 		}
 #endif /* CONFIG_SWAP */
 
@@ -411,16 +406,13 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 		if (page_mapped(page) && mapping) {
 			switch (try_to_unmap(page)) {
 			case SWAP_FAIL:
-				page_map_unlock(page);
 				goto activate_locked;
 			case SWAP_AGAIN:
-				page_map_unlock(page);
 				goto keep_locked;
 			case SWAP_SUCCESS:
 				; /* try to free the page below */
 			}
 		}
-		page_map_unlock(page);
 
 		if (PageDirty(page)) {
 			if (referenced)
@@ -724,25 +716,12 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 		page = lru_to_page(&l_hold);
 		list_del(&page->lru);
 		if (page_mapped(page)) {
-			if (!reclaim_mapped) {
+			if (!reclaim_mapped ||
+			    (total_swap_pages == 0 && PageAnon(page)) ||
+			    page_referenced(page, 0, sc->priority <= 0)) {
 				list_add(&page->lru, &l_active);
 				continue;
 			}
-			page_map_lock(page);
-			if (page_referenced(page)) {
-				page_map_unlock(page);
-				list_add(&page->lru, &l_active);
-				continue;
-			}
-			page_map_unlock(page);
-		}
-		/*
-		 * FIXME: need to consider page_count(page) here if/when we
-		 * reap orphaned pages via the LRU (Daniel's locking stuff)
-		 */
-		if (total_swap_pages == 0 && PageAnon(page)) {
-			list_add(&page->lru, &l_active);
-			continue;
 		}
 		list_add(&page->lru, &l_inactive);
 	}
@@ -849,6 +828,8 @@ shrink_zone(struct zone *zone, struct scan_control *sc)
 				break;
 		}
 	}
+
+	throttle_vm_writeout();
 }
 
 /*
@@ -874,6 +855,9 @@ shrink_caches(struct zone **zones, struct scan_control *sc)
 
 	for (i = 0; zones[i] != NULL; i++) {
 		struct zone *zone = zones[i];
+
+		if (zone->present_pages == 0)
+			continue;
 
 		zone->temp_priority = sc->priority;
 		if (zone->prev_priority > sc->priority)
@@ -992,12 +976,16 @@ out:
 static int balance_pgdat(pg_data_t *pgdat, int nr_pages)
 {
 	int to_free = nr_pages;
+	int all_zones_ok;
 	int priority;
 	int i;
-	int total_scanned = 0, total_reclaimed = 0;
+	int total_scanned, total_reclaimed;
 	struct reclaim_state *reclaim_state = current->reclaim_state;
 	struct scan_control sc;
 
+loop_again:
+	total_scanned = 0;
+	total_reclaimed = 0;
 	sc.gfp_mask = GFP_KERNEL;
 	sc.may_writepage = 0;
 	sc.nr_mapped = read_page_state(nr_mapped);
@@ -1011,9 +999,10 @@ static int balance_pgdat(pg_data_t *pgdat, int nr_pages)
 	}
 
 	for (priority = DEF_PRIORITY; priority >= 0; priority--) {
-		int all_zones_ok = 1;
 		int end_zone = 0;	/* Inclusive.  0 = ZONE_DMA */
 		unsigned long lru_pages = 0;
+
+		all_zones_ok = 1;
 
 		if (nr_pages == 0) {
 			/*
@@ -1022,6 +1011,9 @@ static int balance_pgdat(pg_data_t *pgdat, int nr_pages)
 			 */
 			for (i = pgdat->nr_zones - 1; i >= 0; i--) {
 				struct zone *zone = pgdat->node_zones + i;
+
+				if (zone->present_pages == 0)
+					continue;
 
 				if (zone->all_unreclaimable &&
 						priority != DEF_PRIORITY)
@@ -1055,6 +1047,9 @@ scan:
 		for (i = 0; i <= end_zone; i++) {
 			struct zone *zone = pgdat->node_zones + i;
 
+			if (zone->present_pages == 0)
+				continue;
+
 			if (zone->all_unreclaimable && priority != DEF_PRIORITY)
 				continue;
 
@@ -1075,7 +1070,8 @@ scan:
 			total_reclaimed += sc.nr_reclaimed;
 			if (zone->all_unreclaimable)
 				continue;
-			if (zone->pages_scanned > zone->present_pages * 2)
+			if (zone->pages_scanned >= (zone->nr_active +
+							zone->nr_inactive) * 4)
 				zone->all_unreclaimable = 1;
 			/*
 			 * If we've done a decent amount of scanning and
@@ -1096,6 +1092,15 @@ scan:
 		 */
 		if (total_scanned && priority < DEF_PRIORITY - 2)
 			blk_congestion_wait(WRITE, HZ/10);
+
+		/*
+		 * We do this so kswapd doesn't build up large priorities for
+		 * example when it is freeing in parallel with allocators. It
+		 * matches the direct reclaim path behaviour in terms of impact
+		 * on zone->*_priority.
+		 */
+		if (total_reclaimed >= SWAP_CLUSTER_MAX)
+			break;
 	}
 out:
 	for (i = 0; i < pgdat->nr_zones; i++) {
@@ -1103,6 +1108,11 @@ out:
 
 		zone->prev_priority = zone->temp_priority;
 	}
+	if (!all_zones_ok) {
+		cond_resched();
+		goto loop_again;
+	}
+
 	return total_reclaimed;
 }
 
@@ -1155,7 +1165,6 @@ static int kswapd(void *p)
 		prepare_to_wait(&pgdat->kswapd_wait, &wait, TASK_INTERRUPTIBLE);
 		schedule();
 		finish_wait(&pgdat->kswapd_wait, &wait);
-		try_to_clip_inodes();		
 
 		balance_pgdat(pgdat, 0);
 	}
@@ -1167,6 +1176,8 @@ static int kswapd(void *p)
  */
 void wakeup_kswapd(struct zone *zone)
 {
+	if (zone->present_pages == 0)
+		return;
 	if (zone->free_pages > zone->pages_low)
 		return;
 	if (!waitqueue_active(&zone->zone_pgdat->kswapd_wait))

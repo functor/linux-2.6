@@ -235,8 +235,8 @@ static struct vfsmount *afs_mntpt_do_automount(struct dentry *mntpt)
  */
 static int afs_mntpt_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
-	struct dentry *old_dentry;
 	struct vfsmount *newmnt;
+	struct dentry *old_dentry;
 	int err;
 
 	kenter("%p{%s},{%s:%p{%s}}",
@@ -258,6 +258,7 @@ static int afs_mntpt_follow_link(struct dentry *dentry, struct nameidata *nd)
 	nd->dentry = old_dentry;
 
 	path_release(nd);
+
 	if (!err) {
 		mntget(newmnt);
 		nd->mnt = newmnt;

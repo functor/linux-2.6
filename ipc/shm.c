@@ -78,7 +78,7 @@ static inline struct shmid_kernel *shm_rmid(int id)
 
 static inline int shm_addid(struct shmid_kernel *shp)
 {
-	return ipc_addid(&shm_ids, &shp->shm_perm, shm_ctlmni+1);
+	return ipc_addid(&shm_ids, &shp->shm_perm, shm_ctlmni);
 }
 
 
@@ -120,7 +120,7 @@ static void shm_destroy (struct shmid_kernel *shp)
 						shp->mlock_user);
 	fput (shp->shm_file);
 	security_shm_free(shp);
-	ipc_rcu_free(shp, sizeof(struct shmid_kernel));
+	ipc_rcu_putref(shp);
 }
 
 /*
@@ -198,7 +198,7 @@ static int newseg (key_t key, int shmflg, size_t size)
 	shp->shm_perm.security = NULL;
 	error = security_shm_alloc(shp);
 	if (error) {
-		ipc_rcu_free(shp, sizeof(*shp));
+		ipc_rcu_putref(shp);
 		return error;
 	}
 
@@ -240,7 +240,7 @@ no_id:
 	fput(file);
 no_file:
 	security_shm_free(shp);
-	ipc_rcu_free(shp, sizeof(*shp));
+	ipc_rcu_putref(shp);
 	return error;
 }
 
@@ -687,6 +687,10 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg, ulong *raddr)
 		prot = PROT_READ | PROT_WRITE;
 		o_flags = O_RDWR;
 		acc_mode = S_IRUGO | S_IWUGO;
+	}
+	if (shmflg & SHM_EXEC) {
+		prot |= PROT_EXEC;
+		acc_mode |= S_IXUGO;
 	}
 
 	/*

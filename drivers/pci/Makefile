@@ -28,6 +28,11 @@ obj-$(CONFIG_MIPS) += setup-bus.o setup-irq.o
 obj-$(CONFIG_X86_VISWS) += setup-irq.o
 obj-$(CONFIG_PCI_MSI) += msi.o
 
+#
+# ACPI Related PCI FW Functions
+#
+obj-$(CONFIG_ACPI)    += pci-acpi.o
+
 # Cardbus & CompactPCI use setup-bus
 obj-$(CONFIG_HOTPLUG) += setup-bus.o
 
@@ -35,7 +40,7 @@ ifndef CONFIG_X86
 obj-y += syscall.o
 endif
 
-host-progs := gen-devlist
+hostprogs-y := gen-devlist
 
 # Dependencies on generated files need to be listed explicitly
 $(obj)/names.o: $(obj)/devlist.h $(obj)/classlist.h

@@ -276,6 +276,28 @@ void balance_dirty_pages_ratelimited(struct address_space *mapping)
 }
 EXPORT_SYMBOL(balance_dirty_pages_ratelimited);
 
+void throttle_vm_writeout(void)
+{
+	struct writeback_state wbs;
+	long background_thresh;
+	long dirty_thresh;
+
+        for ( ; ; ) {
+		get_dirty_limits(&wbs, &background_thresh, &dirty_thresh);
+
+                /*
+                 * Boost the allowable dirty threshold a bit for page
+                 * allocators so they don't get DoS'ed by heavy writers
+                 */
+                dirty_thresh += dirty_thresh / 10;      /* wheeee... */
+
+                if (wbs.nr_unstable + wbs.nr_writeback <= dirty_thresh)
+                        break;
+                blk_congestion_wait(WRITE, HZ/10);
+        }
+}
+
+
 /*
  * writeback at least _min_pages, and keep writing until the amount of dirty
  * memory is less than the background threshold, or until we're all clean.
@@ -504,6 +526,11 @@ void __init page_writeback_init(void)
 		dirty_background_ratio /= 100;
 		vm_dirty_ratio *= correction;
 		vm_dirty_ratio /= 100;
+
+		if (dirty_background_ratio <= 0)
+			dirty_background_ratio = 1;
+		if (vm_dirty_ratio <= 0)
+			vm_dirty_ratio = 1;
 	}
 	mod_timer(&wb_timer, jiffies + (dirty_writeback_centisecs * HZ) / 100);
 	set_ratelimit();

@@ -668,8 +668,7 @@ static void whiteheat_close(struct usb_serial_port *port, struct file * filp)
 
 	if (port->tty->driver->flush_buffer)
 		port->tty->driver->flush_buffer(port->tty);
-	if (port->tty->ldisc.flush_buffer)
-		port->tty->ldisc.flush_buffer(port->tty);
+	tty_ldisc_flush(port->tty);
 
 	firm_report_tx_done(port);
 
@@ -1120,11 +1119,11 @@ static int firm_send_command (struct usb_serial_port *port, __u8 command, __u8 *
 	command_port->write_urb->transfer_buffer_length = datasize + 1;
 	command_port->write_urb->dev = port->serial->dev;
 	retval = usb_submit_urb (command_port->write_urb, GFP_KERNEL);
-	spin_unlock_irqrestore(&command_info->lock, flags);
 	if (retval) {
 		dbg("%s - submit urb failed", __FUNCTION__);
 		goto exit;
 	}
+	spin_unlock_irqrestore(&command_info->lock, flags);
 
 	/* wait for the command to complete */
 	wait_event_interruptible_timeout(command_info->wait_command, 

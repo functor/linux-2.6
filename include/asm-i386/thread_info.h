@@ -38,7 +38,6 @@ struct thread_info {
 						   0-0xFFFFFFFF for kernel-thread
 						*/
 	void			*sysenter_return;
-	void			*real_stack, *virtual_stack, *user_pgd;
 	struct restart_block    restart_block;
 
 	unsigned long           previous_esp;   /* ESP of the previous stack in case
@@ -64,7 +63,7 @@ struct thread_info {
  */
 #ifndef __ASSEMBLY__
 
-#define INIT_THREAD_INFO(tsk, thread_info)	\
+#define INIT_THREAD_INFO(tsk)			\
 {						\
 	.task		= &tsk,			\
 	.exec_domain	= &default_exec_domain,	\
@@ -75,7 +74,6 @@ struct thread_info {
 	.restart_block = {			\
 		.fn = do_no_restart_syscall,	\
 	},					\
-	.real_stack	= &thread_info,		\
 }
 
 #define init_thread_info	(init_thread_union.thread_info)
@@ -142,7 +140,6 @@ static inline unsigned long current_stack_pointer(void)
 #define TIF_NEED_RESCHED	3	/* rescheduling necessary */
 #define TIF_SINGLESTEP		4	/* restore singlestep on return to user mode */
 #define TIF_IRET		5	/* return with iret */
-#define TIF_DB7			6	/* has debug registers */
 #define TIF_SYSCALL_AUDIT	7	/* syscall auditing active */
 #define TIF_POLLING_NRFLAG	16	/* true if poll_idle() is polling TIF_NEED_RESCHED */
 
@@ -153,12 +150,11 @@ static inline unsigned long current_stack_pointer(void)
 #define _TIF_SINGLESTEP		(1<<TIF_SINGLESTEP)
 #define _TIF_IRET		(1<<TIF_IRET)
 #define _TIF_SYSCALL_AUDIT	(1<<TIF_SYSCALL_AUDIT)
-#define _TIF_DB7		(1<<TIF_DB7)
 #define _TIF_POLLING_NRFLAG	(1<<TIF_POLLING_NRFLAG)
 
 /* work to do on interrupt/exception return */
 #define _TIF_WORK_MASK \
-  (0x0000FFFF & ~(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT))
+  (0x0000FFFF & ~(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT|_TIF_SINGLESTEP))
 #define _TIF_ALLWORK_MASK	0x0000FFFF	/* work to do on any return to u-space */
 
 /*

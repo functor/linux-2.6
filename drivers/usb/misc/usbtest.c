@@ -1054,8 +1054,7 @@ static int unlink1 (struct usbtest_dev *dev, int pipe, int size, int async)
 	urb = simple_alloc_urb (testdev_to_usbdev (dev), pipe, size);
 	if (!urb)
 		return -ENOMEM;
-	if (async)
-		urb->transfer_flags |= URB_ASYNC_UNLINK;
+	urb->transfer_flags |= URB_ASYNC_UNLINK;
 	urb->context = &completion;
 	urb->complete = unlink1_callback;
 
@@ -1074,17 +1073,20 @@ static int unlink1 (struct usbtest_dev *dev, int pipe, int size, int async)
 	 * hcd states and code paths, even with little other system load.
 	 */
 	msleep (jiffies % (2 * INTERRUPT_RATE));
+	if (async) {
 retry:
-	retval = usb_unlink_urb (urb);
-	if (retval == -EBUSY || retval == -EIDRM) {
-		/* we can't unlink urbs while they're completing.
-		 * or if they've completed, and we haven't resubmitted.
-		 * "normal" drivers would prevent resubmission, but
-		 * since we're testing unlink paths, we can't.
-		 */
-		dev_dbg (&dev->intf->dev, "unlink retry\n");
-		goto retry;
-	}
+		retval = usb_unlink_urb (urb);
+		if (retval == -EBUSY || retval == -EIDRM) {
+			/* we can't unlink urbs while they're completing.
+			 * or if they've completed, and we haven't resubmitted.
+			 * "normal" drivers would prevent resubmission, but
+			 * since we're testing unlink paths, we can't.
+			 */
+			dev_dbg (&dev->intf->dev, "unlink retry\n");
+			goto retry;
+		}
+	} else
+		usb_kill_urb (urb);
 	if (!(retval == 0 || retval == -EINPROGRESS)) {
 		dev_dbg (&dev->intf->dev, "unlink fail %d\n", retval);
 		return retval;
@@ -1095,9 +1097,10 @@ retry:
 	simple_free_urb (urb);
 
 	if (async)
-		return (retval != -ECONNRESET) ? -ECONNRESET : 0;
+		return (retval == -ECONNRESET) ? 0 : retval - 1000;
 	else
-		return (retval != -ENOENT) ? -ENOENT : 0;
+		return (retval == -ENOENT || retval == -EPERM) ?
+				0 : retval - 2000;
 }
 
 static int unlink_simple (struct usbtest_dev *dev, int pipe, int len)
@@ -1352,7 +1355,7 @@ static void iso_callback (struct urb *urb, struct pt_regs *regs)
 				"iso test, %lu errors\n",
 				ctx->errors);
 		complete (&ctx->done);
-	} else
+	}
 done:
 	spin_unlock(&ctx->lock);
 }
@@ -1454,8 +1457,10 @@ test_iso_queue (struct usbtest_dev *dev, struct usbtest_param *param,
 		status = usb_submit_urb (urbs [i], SLAB_ATOMIC);
 		if (status < 0) {
 			ERROR (dev, "submit iso[%d], error %d\n", i, status);
-			if (i == 0)
+			if (i == 0) {
+				spin_unlock_irq (&context.lock);
 				goto fail;
+			}
 
 			simple_free_urb (urbs [i]);
 			context.pending--;

@@ -179,14 +179,14 @@ static int newary (key_t key, int nsems, int semflg)
 	sma->sem_perm.security = NULL;
 	retval = security_sem_alloc(sma);
 	if (retval) {
-		ipc_rcu_free(sma, size);
+		ipc_rcu_putref(sma);
 		return retval;
 	}
 
 	id = ipc_addid(&sem_ids, &sma->sem_perm, sc_semmni);
 	if(id == -1) {
 		security_sem_free(sma);
-		ipc_rcu_free(sma, size);
+		ipc_rcu_putref(sma);
 		return -ENOSPC;
 	}
 	used_sems += nsems;
@@ -241,25 +241,6 @@ asmlinkage long sys_semget (key_t key, int nsems, int semflg)
 	return err;
 }
 
-/* doesn't acquire the sem_lock on error! */
-static int sem_revalidate(int semid, struct sem_array* sma, int nsems, short flg)
-{
-	struct sem_array* smanew;
-
-	smanew = sem_lock(semid);
-	if(smanew==NULL)
-		return -EIDRM;
-	if(smanew != sma || sem_checkid(sma,semid) || sma->sem_nsems != nsems) {
-		sem_unlock(smanew);
-		return -EIDRM;
-	}
-
-	if (flg && ipcperms(&sma->sem_perm, flg)) {
-		sem_unlock(smanew);
-		return -EACCES;
-	}
-	return 0;
-}
 /* Manage the doubly linked list sma->sem_pending as a FIFO:
  * insert new queue elements at the tail sma->sem_pending_last.
  */
@@ -376,8 +357,22 @@ static void update_queue (struct sem_array * sma)
 		if (error <= 0) {
 			struct sem_queue *n;
 			remove_from_queue(sma,q);
-			n = q->next;
 			q->status = IN_WAKEUP;
+			/*
+			 * Continue scanning. The next operation
+			 * that must be checked depends on the type of the
+			 * completed operation:
+			 * - if the operation modified the array, then
+			 *   restart from the head of the queue and
+			 *   check for threads that might be waiting
+			 *   for semaphore values to become 0.
+			 * - if the operation didn't modify the array,
+			 *   then just continue.
+			 */
+			if (q->alter)
+				n = sma->sem_pending;
+			else
+				n = q->next;
 			wake_up_process(q->sleeper);
 			/* hands-off: q will disappear immediately after
 			 * writing q->status.
@@ -473,7 +468,7 @@ static void freeary (struct sem_array *sma, int id)
 	used_sems -= sma->sem_nsems;
 	size = sizeof (*sma) + sma->sem_nsems * sizeof (struct sem);
 	security_sem_free(sma);
-	ipc_rcu_free(sma, size);
+	ipc_rcu_putref(sma);
 }
 
 static unsigned long copy_semid_to_user(void __user *buf, struct semid64_ds *in, int version)
@@ -614,13 +609,24 @@ static int semctl_main(int semid, int semnum, int cmd, int version, union semun 
 		int i;
 
 		if(nsems > SEMMSL_FAST) {
+			ipc_rcu_getref(sma);
 			sem_unlock(sma);			
+
 			sem_io = ipc_alloc(sizeof(ushort)*nsems);
-			if(sem_io == NULL)
+			if(sem_io == NULL) {
+				ipc_lock_by_ptr(&sma->sem_perm);
+				ipc_rcu_putref(sma);
+				sem_unlock(sma);
 				return -ENOMEM;
-			err = sem_revalidate(semid, sma, nsems, S_IRUGO);
-			if(err)
+			}
+
+			ipc_lock_by_ptr(&sma->sem_perm);
+			ipc_rcu_putref(sma);
+			if (sma->sem_perm.deleted) {
+				sem_unlock(sma);
+				err = -EIDRM;
 				goto out_free;
+			}
 		}
 
 		for (i = 0; i < sma->sem_nsems; i++)
@@ -636,28 +642,43 @@ static int semctl_main(int semid, int semnum, int cmd, int version, union semun 
 		int i;
 		struct sem_undo *un;
 
+		ipc_rcu_getref(sma);
 		sem_unlock(sma);
 
 		if(nsems > SEMMSL_FAST) {
 			sem_io = ipc_alloc(sizeof(ushort)*nsems);
-			if(sem_io == NULL)
+			if(sem_io == NULL) {
+				ipc_lock_by_ptr(&sma->sem_perm);
+				ipc_rcu_putref(sma);
+				sem_unlock(sma);
 				return -ENOMEM;
+			}
 		}
 
 		if (copy_from_user (sem_io, arg.array, nsems*sizeof(ushort))) {
+			ipc_lock_by_ptr(&sma->sem_perm);
+			ipc_rcu_putref(sma);
+			sem_unlock(sma);
 			err = -EFAULT;
 			goto out_free;
 		}
 
 		for (i = 0; i < nsems; i++) {
 			if (sem_io[i] > SEMVMX) {
+				ipc_lock_by_ptr(&sma->sem_perm);
+				ipc_rcu_putref(sma);
+				sem_unlock(sma);
 				err = -ERANGE;
 				goto out_free;
 			}
 		}
-		err = sem_revalidate(semid, sma, nsems, S_IWUGO);
-		if(err)
+		ipc_lock_by_ptr(&sma->sem_perm);
+		ipc_rcu_putref(sma);
+		if (sma->sem_perm.deleted) {
+			sem_unlock(sma);
+			err = -EIDRM;
 			goto out_free;
+		}
 
 		for (i = 0; i < nsems; i++)
 			sma->sem_base[i].semval = sem_io[i];
@@ -977,11 +998,16 @@ static struct sem_undo *find_undo(int semid)
 		goto out;
 	}
 	nsems = sma->sem_nsems;
+	ipc_rcu_getref(sma);
 	sem_unlock(sma);
 
 	new = (struct sem_undo *) kmalloc(sizeof(struct sem_undo) + sizeof(short)*nsems, GFP_KERNEL);
-	if (!new)
+	if (!new) {
+		ipc_lock_by_ptr(&sma->sem_perm);
+		ipc_rcu_putref(sma);
+		sem_unlock(sma);
 		return ERR_PTR(-ENOMEM);
+	}
 	memset(new, 0, sizeof(struct sem_undo) + sizeof(short)*nsems);
 	new->semadj = (short *) &new[1];
 	new->semid = semid;
@@ -991,13 +1017,18 @@ static struct sem_undo *find_undo(int semid)
 	if (un) {
 		unlock_semundo();
 		kfree(new);
+		ipc_lock_by_ptr(&sma->sem_perm);
+		ipc_rcu_putref(sma);
+		sem_unlock(sma);
 		goto out;
 	}
-	error = sem_revalidate(semid, sma, nsems, 0);
-	if (error) {
+	ipc_lock_by_ptr(&sma->sem_perm);
+	ipc_rcu_putref(sma);
+	if (sma->sem_perm.deleted) {
+		sem_unlock(sma);
 		unlock_semundo();
 		kfree(new);
-		un = ERR_PTR(error);
+		un = ERR_PTR(-EIDRM);
 		goto out;
 	}
 	new->proc_next = ulp->proc_list;
@@ -1101,8 +1132,11 @@ retry_undos:
 		goto out_unlock_free;
 
 	error = try_atomic_semop (sma, sops, nsops, un, current->tgid);
-	if (error <= 0)
-		goto update;
+	if (error <= 0) {
+		if (alter && error == 0)
+			update_queue (sma);
+		goto out_unlock_free;
+	}
 
 	/* We need to sleep on this operation, so we put the current
 	 * task into the pending queue and go to sleep.
@@ -1114,6 +1148,7 @@ retry_undos:
 	queue.undo = un;
 	queue.pid = current->tgid;
 	queue.id = semid;
+	queue.alter = alter;
 	if (alter)
 		append_to_queue(sma ,&queue);
 	else
@@ -1165,9 +1200,6 @@ retry_undos:
 	remove_from_queue(sma,&queue);
 	goto out_unlock_free;
 
-update:
-	if (alter)
-		update_queue (sma);
 out_unlock_free:
 	sem_unlock(sma);
 out_free:
@@ -1269,8 +1301,23 @@ found:
 			struct sem * sem = &sma->sem_base[i];
 			if (u->semadj[i]) {
 				sem->semval += u->semadj[i];
+				/*
+				 * Range checks of the new semaphore value,
+				 * not defined by sus:
+				 * - Some unices ignore the undo entirely
+				 *   (e.g. HP UX 11i 11.22, Tru64 V5.1)
+				 * - some cap the value (e.g. FreeBSD caps
+				 *   at 0, but doesn't enforce SEMVMX)
+				 *
+				 * Linux caps the semaphore value, both at 0
+				 * and at SEMVMX.
+				 *
+				 * 	Manfred <manfred@colorfullife.com>
+				 */
 				if (sem->semval < 0)
-					sem->semval = 0; /* shouldn't happen */
+					sem->semval = 0;
+				if (sem->semval > SEMVMX)
+					sem->semval = SEMVMX;
 				sem->sempid = current->tgid;
 			}
 		}

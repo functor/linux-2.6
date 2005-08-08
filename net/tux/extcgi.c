@@ -87,7 +87,7 @@ repeat:
 repeat_read:
 		Dprintk("reading %d bytes via read().\n", left);
 		oldmm = get_fs(); set_fs(KERNEL_DS);
-		len = read(2, tmp, left);
+		len = sys_read(2, tmp, left);
 		set_fs(oldmm);
 		Dprintk("got %d bytes from read() (total: %d).\n", len, total);
 		if (len > 0)
@@ -275,7 +275,7 @@ static int exec_external_cgi (void *data)
 
 		Dprintk("POST data to CGI:\n");
 		oldmm = get_fs(); set_fs(KERNEL_DS);
-		ret = write(1, req->post_data_str, req->post_data_len);
+		ret = sys_write(1, req->post_data_str, req->post_data_len);
 		set_fs(oldmm);
 		Dprintk("write() returned: %d.\n", ret);
 		if (ret != req->post_data_len)

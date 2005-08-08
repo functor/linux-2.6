@@ -192,23 +192,22 @@ void install_req_dentry (tux_req_t *req, struct dentry *dentry, struct vfsmount 
 	if (req->mnt)
 		TUX_BUG();
 	req->mnt = mnt;
-	if (req->in_file.f_dentry)
+	if (req->in_file && req->in_file->f_dentry)
 		TUX_BUG();
 	if (dentry)
-		open_private_file(&req->in_file, dentry, FMODE_READ);
+		req->in_file = dentry_open(dget(dentry), NULL, O_RDONLY);
 }
 
 void release_req_dentry (tux_req_t *req)
 {
 	if (!req->dentry) {
-		if (req->in_file.f_dentry)
+		if (req->in_file && req->in_file->f_dentry)
 			TUX_BUG();
 		return;
 	}
-	if (req->in_file.f_op && req->in_file.f_op->release)
-		req->in_file.f_op->release(req->dentry->d_inode, &req->in_file);
-	memset(&req->in_file, 0, sizeof(req->in_file));
 
+	fput(req->in_file);
+	req->in_file = NULL;
 	dput(req->dentry);
 	req->dentry = NULL;
 	mntput(req->mnt);
@@ -397,7 +396,7 @@ void print_req (tux_req_t *req)
 		printk("...tp->send_head: %p\n", sk->sk_send_head);
 		printk("...tp->snd_una: %08x\n", tcp_sk(sk)->snd_una);
 		printk("...tp->snd_nxt: %08x\n", tcp_sk(sk)->snd_nxt);
-		printk("...tp->packets_out: %08x\n", tcp_sk(sk)->packets_out);
+		printk("...tp->packets_out: %08x\n", tcp_get_pcount(&tcp_sk(sk)->packets_out));
 	}
 	printk("... meth:{%s}, uri:{%s}, query:{%s}, ver:{%s}\n", req->method_str ? req->method_str : "<null>", req->uri_str ? req->uri_str : "<null>", req->query_str ? req->query_str : "<null>", req->version_str ? req->version_str : "<null>");
 	printk("... post_data:{%s}(%d).\n", req->post_data_str, req->post_data_len);
@@ -601,7 +600,8 @@ restart:
 #if CONFIG_TUX_DEBUG
 		req->bytes_expected = 0;
 #endif
-		req->in_file.f_pos = 0;
+		if (req->in_file)
+			req->in_file->f_pos = 0;
 		req->atom_idx = 0;
 		clear_keepalive(req);
 		req->status = -1;

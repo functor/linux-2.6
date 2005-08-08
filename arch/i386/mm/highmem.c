@@ -41,46 +41,11 @@ void *kmap_atomic(struct page *page, enum km_type type)
 	if (!pte_none(*(kmap_pte-idx)))
 		BUG();
 #endif
-	/*
-	 * If the page is not a normal RAM page, then map it
-	 * uncached to be on the safe side - it could be device
-	 * memory that must not be prefetched:
-	 */
-	if (PageReserved(page))
-		set_pte(kmap_pte-idx, mk_pte(page, kmap_prot_nocache));
-	else
-		set_pte(kmap_pte-idx, mk_pte(page, kmap_prot));
+	set_pte(kmap_pte-idx, mk_pte(page, kmap_prot));
 	__flush_tlb_one(vaddr);
 
 	return (void*) vaddr;
 }
-
-/*
- * page frame number based kmaps - useful for PCI mappings.
- * NOTE: we map the page with the dont-cache flag.
- */
-void *kmap_atomic_nocache_pfn(unsigned long pfn, enum km_type type)
-{
-	enum fixed_addresses idx;
-	unsigned long vaddr;
-
-	/* even !CONFIG_PREEMPT needs this, for in_atomic in do_page_fault */
-	inc_preempt_count();
-	if (pfn < highstart_pfn)
-		return pfn_to_kaddr(pfn);
-
-	idx = type + KM_TYPE_NR*smp_processor_id();
-	vaddr = __fix_to_virt(FIX_KMAP_BEGIN + idx);
-#ifdef CONFIG_DEBUG_HIGHMEM
-	if (!pte_none(*(kmap_pte-idx)))
-		BUG();
-#endif
-	set_pte(kmap_pte-idx, pfn_pte(pfn, kmap_prot_nocache));
-	__flush_tlb_one(vaddr);
-
-	return (void*) vaddr;
-}
-
 
 void kunmap_atomic(void *kvaddr, enum km_type type)
 {

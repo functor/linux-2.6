@@ -47,7 +47,6 @@ static inline dev_info_t *which_dev(mddev_t *mddev, sector_t sector)
 		return hash->dev0;
 }
 
-
 /**
  *	linear_mergeable_bvec -- tell bio layer if a two requests can be merged
  *	@q: request queue
@@ -93,13 +92,35 @@ static void linear_unplug(request_queue_t *q)
 	}
 }
 
+static int linear_issue_flush(request_queue_t *q, struct gendisk *disk,
+			      sector_t *error_sector)
+{
+	mddev_t *mddev = q->queuedata;
+	linear_conf_t *conf = mddev_to_conf(mddev);
+	int i, ret = 0;
+
+	for (i=0; i < mddev->raid_disks; i++) {
+		struct block_device *bdev = conf->disks[i].rdev->bdev;
+		request_queue_t *r_queue = bdev_get_queue(bdev);
+
+		if (!r_queue->issue_flush_fn) {
+			ret = -EOPNOTSUPP;
+			break;
+		}
+		ret = r_queue->issue_flush_fn(r_queue, bdev->bd_disk, error_sector);
+		if (ret)
+			break;
+	}
+	return ret;
+}
 
 static int linear_run (mddev_t *mddev)
 {
 	linear_conf_t *conf;
 	struct linear_hash *table;
 	mdk_rdev_t *rdev;
-	int size, i, nb_zone, cnt;
+	int i, nb_zone, cnt;
+	sector_t size;
 	unsigned int curr_offset;
 	struct list_head *tmp;
 
@@ -137,7 +158,7 @@ static int linear_run (mddev_t *mddev)
 		 */
 		if (rdev->bdev->bd_disk->queue->merge_bvec_fn &&
 		    mddev->queue->max_sectors > (PAGE_SIZE>>9))
-			mddev->queue->max_sectors = (PAGE_SIZE>>9);
+			blk_queue_max_sectors(mddev->queue, PAGE_SIZE>>9);
 
 		disk->size = rdev->size;
 		mddev->array_size += rdev->size;
@@ -200,6 +221,7 @@ static int linear_run (mddev_t *mddev)
 
 	blk_queue_merge_bvec(mddev->queue, linear_mergeable_bvec);
 	mddev->queue->unplug_fn = linear_unplug;
+	mddev->queue->issue_flush_fn = linear_issue_flush;
 	return 0;
 
 out:
@@ -247,10 +269,11 @@ static int linear_make_request (request_queue_t *q, struct bio *bio)
 		char b[BDEVNAME_SIZE];
 
 		printk("linear_make_request: Block %llu out of bounds on "
-			"dev %s size %ld offset %ld\n",
+			"dev %s size %llu offset %llu\n",
 			(unsigned long long)block,
 			bdevname(tmp_dev->rdev->bdev, b),
-			tmp_dev->size, tmp_dev->offset);
+			(unsigned long long)tmp_dev->size,
+		        (unsigned long long)tmp_dev->offset);
 		bio_io_error(bio, bio->bi_size);
 		return 0;
 	}

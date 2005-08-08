@@ -10,7 +10,7 @@
 extern unsigned long loops_per_jiffy;
 
 #include <asm/delay.h>
-#include <asm/hardirq.h>
+#include <linux/hardirq.h>
 /*
  * Using udelay() for intervals greater than a few milliseconds can
  * risk overflow for high loops_per_jiffy (high bogomips) machines. The
@@ -38,5 +38,11 @@ extern unsigned long loops_per_jiffy;
 #endif
 
 void msleep(unsigned int msecs);
+unsigned long msleep_interruptible(unsigned int msecs);
+
+static inline void ssleep(unsigned int seconds)
+{
+	msleep(seconds * 1000);
+}
 
 #endif /* defined(_LINUX_DELAY_H) */

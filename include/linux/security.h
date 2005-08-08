@@ -395,13 +395,13 @@ struct swap_info_struct;
  * 	Return 0 if permission is granted.
  * @inode_getsecurity:
  *	Copy the extended attribute representation of the security label 
- *	associated with @name for @dentry into @buffer.  @buffer may be 
+ *	associated with @name for @inode into @buffer.  @buffer may be
  *	NULL to request the size of the buffer required.  @size indicates
  *	the size of @buffer in bytes.  Note that @name is the remainder
  *	of the attribute name after the security. prefix has been removed.
  *	Return number of bytes used/required on success.
  * @inode_setsecurity:
- *	Set the security label associated with @name for @dentry from the 
+ *	Set the security label associated with @name for @inode from the
  *	extended attribute value @value.  @size indicates the size of the
  *	@value in bytes.  @flags may be XATTR_CREATE, XATTR_REPLACE, or 0.
  *	Note that @name is the remainder of the attribute name after the 
@@ -409,8 +409,9 @@ struct swap_info_struct;
  *	Return 0 on success.
  * @inode_listsecurity:
  *	Copy the extended attribute names for the security labels
- *	associated with @dentry into @buffer.  @buffer may be NULL to 
- *	request the size of the buffer required.  
+ *	associated with @inode into @buffer.  The maximum size of @buffer
+ *	is specified by @buffer_size.  @buffer may be NULL to request
+ *	the size of the buffer required.
  *	Returns number of bytes used/required on success.
  *
  * Security hooks for file operations
@@ -485,16 +486,15 @@ struct swap_info_struct;
  *	@file contains the file structure to update.
  *	Return 0 on success.
  * @file_send_sigiotask:
- *	Check permission for the file owner @fown to send SIGIO to the process
- *	@tsk.  Note that this hook is always called from interrupt.  Note that
- *	the fown_struct, @fown, is never outside the context of a struct file,
- *	so the file structure (and associated security information) can always
- *	be obtained:
+ *     Check permission for the file owner @fown to send SIGIO or SIGURG to the
+ *     process @tsk.  Note that this hook is sometimes called from interrupt.
+ *     Note that the fown_struct, @fown, is never outside the context of a
+ *     struct file, so the file structure (and associated security information)
+ *     can always be obtained:
  *		(struct file *)((long)fown - offsetof(struct file,f_owner));
  * 	@tsk contains the structure of task receiving signal.
  *	@fown contains the file owner information.
- *	@fd contains the file descriptor.
- *	@reason contains the operational flags.
+ *	@sig is the signal that will be sent.  When 0, kernel sends SIGIO.
  *	Return 0 if permission is granted.
  * @file_receive:
  *	This hook allows security modules to control the ability of a process
@@ -1108,9 +1108,9 @@ struct security_operations {
 	int (*inode_getxattr) (struct dentry *dentry, char *name);
 	int (*inode_listxattr) (struct dentry *dentry);
 	int (*inode_removexattr) (struct dentry *dentry, char *name);
-  	int (*inode_getsecurity)(struct dentry *dentry, const char *name, void *buffer, size_t size);
-  	int (*inode_setsecurity)(struct dentry *dentry, const char *name, const void *value, size_t size, int flags);
-  	int (*inode_listsecurity)(struct dentry *dentry, char *buffer);
+  	int (*inode_getsecurity)(struct inode *inode, const char *name, void *buffer, size_t size);
+  	int (*inode_setsecurity)(struct inode *inode, const char *name, const void *value, size_t size, int flags);
+  	int (*inode_listsecurity)(struct inode *inode, char *buffer, size_t buffer_size);
 
 	int (*file_permission) (struct file * file, int mask);
 	int (*file_alloc_security) (struct file * file);
@@ -1124,9 +1124,9 @@ struct security_operations {
 	int (*file_fcntl) (struct file * file, unsigned int cmd,
 			   unsigned long arg);
 	int (*file_set_fowner) (struct file * file);
+
 	int (*file_send_sigiotask) (struct task_struct * tsk,
-				    struct fown_struct * fown,
-				    int fd, int reason);
+				    struct fown_struct * fown, int sig);
 	int (*file_receive) (struct file * file);
 
 	int (*task_create) (unsigned long clone_flags);
@@ -1575,19 +1575,19 @@ static inline int security_inode_removexattr (struct dentry *dentry, char *name)
 	return security_ops->inode_removexattr (dentry, name);
 }
 
-static inline int security_inode_getsecurity(struct dentry *dentry, const char *name, void *buffer, size_t size)
+static inline int security_inode_getsecurity(struct inode *inode, const char *name, void *buffer, size_t size)
 {
-	return security_ops->inode_getsecurity(dentry, name, buffer, size);
+	return security_ops->inode_getsecurity(inode, name, buffer, size);
 }
 
-static inline int security_inode_setsecurity(struct dentry *dentry, const char *name, const void *value, size_t size, int flags) 
+static inline int security_inode_setsecurity(struct inode *inode, const char *name, const void *value, size_t size, int flags)
 {
-	return security_ops->inode_setsecurity(dentry, name, value, size, flags);
+	return security_ops->inode_setsecurity(inode, name, value, size, flags);
 }
 
-static inline int security_inode_listsecurity(struct dentry *dentry, char *buffer)
+static inline int security_inode_listsecurity(struct inode *inode, char *buffer, size_t buffer_size)
 {
-	return security_ops->inode_listsecurity(dentry, buffer);
+	return security_ops->inode_listsecurity(inode, buffer, buffer_size);
 }
 
 static inline int security_file_permission (struct file *file, int mask)
@@ -1641,9 +1641,9 @@ static inline int security_file_set_fowner (struct file *file)
 
 static inline int security_file_send_sigiotask (struct task_struct *tsk,
 						struct fown_struct *fown,
-						int fd, int reason)
+						int sig)
 {
-	return security_ops->file_send_sigiotask (tsk, fown, fd, reason);
+	return security_ops->file_send_sigiotask (tsk, fown, sig);
 }
 
 static inline int security_file_receive (struct file *file)
@@ -2214,17 +2214,17 @@ static inline int security_inode_removexattr (struct dentry *dentry, char *name)
 	return cap_inode_removexattr(dentry, name);
 }
 
-static inline int security_inode_getsecurity(struct dentry *dentry, const char *name, void *buffer, size_t size)
+static inline int security_inode_getsecurity(struct inode *inode, const char *name, void *buffer, size_t size)
 {
 	return -EOPNOTSUPP;
 }
 
-static inline int security_inode_setsecurity(struct dentry *dentry, const char *name, const void *value, size_t size, int flags) 
+static inline int security_inode_setsecurity(struct inode *inode, const char *name, const void *value, size_t size, int flags)
 {
 	return -EOPNOTSUPP;
 }
 
-static inline int security_inode_listsecurity(struct dentry *dentry, char *buffer)
+static inline int security_inode_listsecurity(struct inode *inode, char *buffer, size_t buffer_size)
 {
 	return 0;
 }
@@ -2278,7 +2278,7 @@ static inline int security_file_set_fowner (struct file *file)
 
 static inline int security_file_send_sigiotask (struct task_struct *tsk,
 						struct fown_struct *fown,
-						int fd, int reason)
+						int sig)
 {
 	return 0;
 }

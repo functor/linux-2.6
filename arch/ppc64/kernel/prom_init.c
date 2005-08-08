@@ -675,7 +675,7 @@ static void __init prom_init_mem(void)
 	if ( RELOC(of_platform) == PLATFORM_PSERIES_LPAR )
 		RELOC(alloc_top) = RELOC(rmo_top);
 	else
-		RELOC(alloc_top) = min(0x40000000ul, RELOC(ram_top));
+		RELOC(alloc_top) = RELOC(rmo_top) = min(0x40000000ul, RELOC(ram_top));
 	RELOC(alloc_bottom) = PAGE_ALIGN(RELOC(klimit) - offset + 0x4000);
 	RELOC(alloc_top_high) = RELOC(ram_top);
 
@@ -1108,6 +1108,20 @@ static void __init prom_init_stdout(void)
 		_prom->disp_node = val;
 		prom_setprop(val, "linux,boot-display", NULL, 0);
 	}
+}
+
+static void __init prom_close_stdin(void)
+{
+	unsigned long offset = reloc_offset();
+	struct prom_t *_prom = PTRRELOC(&prom);
+	u32 val;
+
+        if ((long)call_prom(RELOC("getprop"), 4, 1, _prom->chosen,
+			    RELOC("stdin"), &val,
+			    sizeof(val)) <= 0)
+                return;
+
+	call_prom(RELOC("close"), 1, 0, val);
 }
 
 static int __init prom_find_machine_type(void)
@@ -1690,6 +1704,9 @@ unsigned long __init prom_init(unsigned long r3, unsigned long r4, unsigned long
 	 */
        	prom_printf("copying OF device tree ...\n");
        	flatten_device_tree();
+
+	/* in case stdin is USB and still active */
+	prom_close_stdin();
 
 	/*
 	 * Call OF "quiesce" method to shut down pending DMA's from

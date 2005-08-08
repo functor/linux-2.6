@@ -11,13 +11,10 @@
  * exec_limit is used to track the range PROT_EXEC
  * mappings span.
  */
-
-#define MAX_LDT_PAGES 16
-
 typedef struct { 
 	int size;
 	struct semaphore sem;
-	struct page *ldt_pages[MAX_LDT_PAGES];
+	void *ldt;
 	struct desc_struct user_cs;
 	unsigned long exec_limit;
 	void *vdso;

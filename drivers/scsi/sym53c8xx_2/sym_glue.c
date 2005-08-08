@@ -143,13 +143,6 @@ m_addr_t __vtobus(m_pool_ident_t dev_dmat, void *m)
 }
 
 /*
- *  Driver host data structure.
- */
-struct host_data {
-	struct sym_hcb *ncb;
-};
-
-/*
  *  Used by the eh thread to wait for command completion.
  *  It is allocated on the eh thread stack.
  */
@@ -220,47 +213,12 @@ static int __map_scsi_sg_data(struct pci_dev *pdev, struct scsi_cmnd *cmd)
 	return use_sg;
 }
 
-static void __sync_scsi_data_for_cpu(struct pci_dev *pdev, struct scsi_cmnd *cmd)
-{
-	int dma_dir = cmd->sc_data_direction;
-
-	switch(SYM_UCMD_PTR(cmd)->data_mapped) {
-	case 2:
-		pci_dma_sync_sg_for_cpu(pdev, cmd->buffer, cmd->use_sg, dma_dir);
-		break;
-	case 1:
-		pci_dma_sync_single_for_cpu(pdev, SYM_UCMD_PTR(cmd)->data_mapping,
-					    cmd->request_bufflen, dma_dir);
-		break;
-	}
-}
-
-static void __sync_scsi_data_for_device(struct pci_dev *pdev, struct scsi_cmnd *cmd)
-{
-	int dma_dir = cmd->sc_data_direction;
-
-	switch(SYM_UCMD_PTR(cmd)->data_mapped) {
-	case 2:
-		pci_dma_sync_sg_for_device(pdev, cmd->buffer, cmd->use_sg, dma_dir);
-		break;
-	case 1:
-		pci_dma_sync_single_for_device(pdev, SYM_UCMD_PTR(cmd)->data_mapping,
-					       cmd->request_bufflen, dma_dir);
-		break;
-	}
-}
-
 #define unmap_scsi_data(np, cmd)	\
 		__unmap_scsi_data(np->s.device, cmd)
 #define map_scsi_single_data(np, cmd)	\
 		__map_scsi_single_data(np->s.device, cmd)
 #define map_scsi_sg_data(np, cmd)	\
 		__map_scsi_sg_data(np->s.device, cmd)
-#define sync_scsi_data_for_cpu(np, cmd)		\
-		__sync_scsi_data_for_cpu(np->s.device, cmd)
-#define sync_scsi_data_for_device(np, cmd)		\
-		__sync_scsi_data_for_device(np->s.device, cmd)
-
 /*
  *  Complete a pending CAM CCB.
  */
@@ -415,27 +373,6 @@ void sym_set_cam_result_error(struct sym_hcb *np, struct sym_ccb *cp, int resid)
 	csio->result = (drv_status << 24) + (cam_status << 16) + scsi_status;
 }
 
-
-/*
- *  Called on successfull INQUIRY response.
- */
-void sym_sniff_inquiry(struct sym_hcb *np, struct scsi_cmnd *cmd, int resid)
-{
-	int retv;
-
-	if (!cmd || cmd->use_sg)
-		return;
-
-	sync_scsi_data_for_cpu(np, cmd);
-	retv = __sym_sniff_inquiry(np, cmd->device->id, cmd->device->lun,
-				   (u_char *) cmd->request_buffer,
-				   cmd->request_bufflen - resid);
-	sync_scsi_data_for_device(np, cmd);
-	if (retv < 0)
-		return;
-	else if (retv)
-		sym_update_trans_settings(np, &np->target[cmd->device->id]);
-}
 
 /*
  *  Build the scatter/gather array for an I/O.
@@ -730,14 +667,15 @@ void sym_log_bus_error(struct sym_hcb *np)
  */
 static void sym_requeue_awaiting_cmds(struct sym_hcb *np)
 {
-	struct scsi_cmnd *cmd;
-	struct sym_ucmd *ucp = SYM_UCMD_PTR(cmd);
+	struct sym_ucmd *ucp;
 	SYM_QUEHEAD tmp_cmdq;
 	int sts;
 
 	sym_que_move(&np->s.wait_cmdq, &tmp_cmdq);
 
 	while ((ucp = (struct sym_ucmd *) sym_remque_head(&tmp_cmdq)) != 0) {
+		struct scsi_cmnd *cmd;
+
 		sym_insque_tail(&ucp->link_cmdq, &np->s.busy_cmdq);
 		cmd = SYM_SCMD_PTR(ucp);
 		sts = sym_queue_command(np, cmd);
@@ -1118,12 +1056,7 @@ static int sym53c8xx_slave_configure(struct scsi_device *device)
 
 	np = ((struct host_data *) host->hostdata)->ncb;
 	tp = &np->target[device->id];
-
-	/*
-	 *  Get user settings for transfer parameters.
-	 */
-	tp->inq_byte7_valid = (INQ7_SYNC|INQ7_WIDE16);
-	sym_update_trans_settings(np, tp);
+	tp->sdev = device;
 
 	/*
 	 *  Allocate the LCB if not yet.
@@ -1163,7 +1096,8 @@ static int sym53c8xx_slave_configure(struct scsi_device *device)
 	lp->s.scdev_depth = depth_to_use;
 	sym_tune_dev_queuing(np, device->id, device->lun, reqtags);
 
-	spi_dv_device(device);
+	if (!spi_initial_dv(device->sdev_target))
+		spi_dv_device(device);
 
 	return 0;
 }
@@ -2283,6 +2217,7 @@ static int sym_detach(struct sym_hcb *np)
 }
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_VERSION(SYM_VERSION);
 
 /*
  * Driver host template.
@@ -2370,102 +2305,110 @@ static void __devexit sym2_remove(struct pci_dev *pdev)
 	attach_count--;
 }
 
-static void sym2_get_offset(struct scsi_device *sdev)
+static void sym2_get_signalling(struct Scsi_Host *shost)
 {
-	struct sym_hcb *np = ((struct host_data *)sdev->host->hostdata)->ncb;
-	struct sym_tcb *tp = &np->target[sdev->id];
+	struct sym_hcb *np = ((struct host_data *)shost->hostdata)->ncb;
+	enum spi_signal_type type;
 
-	spi_offset(sdev) = tp->tinfo.curr.offset;
+	switch (np->scsi_mode) {
+	case SMODE_SE:
+		type =  SPI_SIGNAL_SE;
+		break;
+	case SMODE_LVD:
+		type = SPI_SIGNAL_LVD;
+		break;
+	case SMODE_HVD:
+		type = SPI_SIGNAL_HVD;
+		break;
+	default:
+		type = SPI_SIGNAL_UNKNOWN;
+		break;
+	}
+	spi_signalling(shost) = type;
 }
 
-static void sym2_set_offset(struct scsi_device *sdev, int offset)
+static void sym2_get_offset(struct scsi_target *starget)
 {
-	struct sym_hcb *np = ((struct host_data *)sdev->host->hostdata)->ncb;
-	struct sym_tcb *tp = &np->target[sdev->id];
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct sym_hcb *np = ((struct host_data *)shost->hostdata)->ncb;
+	struct sym_tcb *tp = &np->target[starget->id];
 
-	if (tp->tinfo.curr.options & PPR_OPT_DT) {
-		if (offset > np->maxoffs_dt)
-			offset = np->maxoffs_dt;
-	} else {
-		if (offset > np->maxoffs)
-			offset = np->maxoffs;
-	}
+	spi_offset(starget) = tp->tinfo.curr.offset;
+}
+
+static void sym2_set_offset(struct scsi_target *starget, int offset)
+{
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct sym_hcb *np = ((struct host_data *)shost->hostdata)->ncb;
+	struct sym_tcb *tp = &np->target[starget->id];
+
 	tp->tinfo.goal.offset = offset;
 }
 
 
-static void sym2_get_period(struct scsi_device *sdev)
+static void sym2_get_period(struct scsi_target *starget)
 {
-	struct sym_hcb *np = ((struct host_data *)sdev->host->hostdata)->ncb;
-	struct sym_tcb *tp = &np->target[sdev->id];
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct sym_hcb *np = ((struct host_data *)shost->hostdata)->ncb;
+	struct sym_tcb *tp = &np->target[starget->id];
 
-	spi_period(sdev) = tp->tinfo.curr.period;
+	spi_period(starget) = tp->tinfo.curr.period;
 }
 
-static void sym2_set_period(struct scsi_device *sdev, int period)
+static void sym2_set_period(struct scsi_target *starget, int period)
 {
-	struct sym_hcb *np = ((struct host_data *)sdev->host->hostdata)->ncb;
-	struct sym_tcb *tp = &np->target[sdev->id];
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct sym_hcb *np = ((struct host_data *)shost->hostdata)->ncb;
+	struct sym_tcb *tp = &np->target[starget->id];
 
-	if (period <= 9 && np->minsync_dt) {
-		if (period < np->minsync_dt)
-			period = np->minsync_dt;
-		tp->tinfo.goal.options = PPR_OPT_DT;
-		tp->tinfo.goal.period = period;
-		if (!tp->tinfo.curr.offset ||
-					tp->tinfo.curr.offset > np->maxoffs_dt)
-			tp->tinfo.goal.offset = np->maxoffs_dt;
-	} else {
-		if (period < np->minsync)
-			period = np->minsync;
-		tp->tinfo.goal.options = 0;
-		tp->tinfo.goal.period = period;
-		if (!tp->tinfo.curr.offset ||
-					tp->tinfo.curr.offset > np->maxoffs)
-			tp->tinfo.goal.offset = np->maxoffs;
-	}
+	/* have to have DT for these transfers */
+	if (period <= np->minsync)
+		tp->tinfo.goal.options |= PPR_OPT_DT;
+
+	tp->tinfo.goal.period = period;
 }
 
-static void sym2_get_width(struct scsi_device *sdev)
+static void sym2_get_width(struct scsi_target *starget)
 {
-	struct sym_hcb *np = ((struct host_data *)sdev->host->hostdata)->ncb;
-	struct sym_tcb *tp = &np->target[sdev->id];
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct sym_hcb *np = ((struct host_data *)shost->hostdata)->ncb;
+	struct sym_tcb *tp = &np->target[starget->id];
 
-	spi_width(sdev) = tp->tinfo.curr.width ? 1 : 0;
+	spi_width(starget) = tp->tinfo.curr.width ? 1 : 0;
 }
 
-static void sym2_set_width(struct scsi_device *sdev, int width)
+static void sym2_set_width(struct scsi_target *starget, int width)
 {
-	struct sym_hcb *np = ((struct host_data *)sdev->host->hostdata)->ncb;
-	struct sym_tcb *tp = &np->target[sdev->id];
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct sym_hcb *np = ((struct host_data *)shost->hostdata)->ncb;
+	struct sym_tcb *tp = &np->target[starget->id];
+
+	/* It is illegal to have DT set on narrow transfers */
+	if (width == 0)
+		tp->tinfo.goal.options &= ~PPR_OPT_DT;
 
 	tp->tinfo.goal.width = width;
 }
 
-static void sym2_get_dt(struct scsi_device *sdev)
+static void sym2_get_dt(struct scsi_target *starget)
 {
-	struct sym_hcb *np = ((struct host_data *)sdev->host->hostdata)->ncb;
-	struct sym_tcb *tp = &np->target[sdev->id];
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct sym_hcb *np = ((struct host_data *)shost->hostdata)->ncb;
+	struct sym_tcb *tp = &np->target[starget->id];
 
-	spi_dt(sdev) = (tp->tinfo.curr.options & PPR_OPT_DT) ? 1 : 0;
+	spi_dt(starget) = (tp->tinfo.curr.options & PPR_OPT_DT) ? 1 : 0;
 }
 
-static void sym2_set_dt(struct scsi_device *sdev, int dt)
+static void sym2_set_dt(struct scsi_target *starget, int dt)
 {
-	struct sym_hcb *np = ((struct host_data *)sdev->host->hostdata)->ncb;
-	struct sym_tcb *tp = &np->target[sdev->id];
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct sym_hcb *np = ((struct host_data *)shost->hostdata)->ncb;
+	struct sym_tcb *tp = &np->target[starget->id];
 
-	if (!dt) {
-		/* if clearing DT, then we may need to reduce the
-		 * period and the offset */
-		if (tp->tinfo.curr.period < np->minsync)
-			tp->tinfo.goal.period = np->minsync;
-		if (tp->tinfo.curr.offset > np->maxoffs)
-			tp->tinfo.goal.offset = np->maxoffs;
-		tp->tinfo.goal.options &= ~PPR_OPT_DT;
-	} else {
+	if (dt)
 		tp->tinfo.goal.options |= PPR_OPT_DT;
-	}
+	else
+		tp->tinfo.goal.options &= ~PPR_OPT_DT;
 }
 	
 
@@ -2482,6 +2425,7 @@ static struct spi_function_template sym2_transport_functions = {
 	.get_dt		= sym2_get_dt,
 	.set_dt		= sym2_set_dt,
 	.show_dt	= 1,
+	.get_signalling	= sym2_get_signalling,
 };
 
 static struct pci_device_id sym2_id_table[] __devinitdata = {

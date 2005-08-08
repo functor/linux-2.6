@@ -383,33 +383,6 @@ void __put_data_sock (tux_req_t *req)
 	req->data_sock = NULL;
 }
 
-/* open-coded sys_close */
-
-long tux_close(unsigned int fd)
-{
-	struct file * filp;
-	struct files_struct *files = current->files;
-
-	spin_lock(&files->file_lock);
-	if (fd >= files->max_fds)
-		goto out_unlock;
-	filp = files->fd[fd];
-	if (!filp)
-		goto out_unlock;
-	files->fd[fd] = NULL;
-	FD_CLR(fd, files->close_on_exec);
-	/* __put_unused_fd(files, fd); */
-	__FD_CLR(fd, files->open_fds);
-	if (fd < files->next_fd)
-		files->next_fd = fd;
-	spin_unlock(&files->file_lock);
-	return filp_close(filp, files);
-
-out_unlock:
-	spin_unlock(&files->file_lock);
-	return -EBADF;
-}
-
 void flush_request (tux_req_t *req, int cachemiss)
 {
 	struct socket *sock;
@@ -439,7 +412,7 @@ void flush_request (tux_req_t *req, int cachemiss)
 	if (sock)
 		sk = sock->sk;
 	Dprintk("FLUSHING req %p <%p> (sock %p, sk %p) (keepalive: %d, status: %d)\n", req, __builtin_return_address(0), sock, sk, req->keep_alive, req->status);
-	if (req->in_file.f_pos)
+	if (req->in_file->f_pos)
 		/*TUX_BUG()*/;
 	release_req_dentry(req);
 	req->private = 0;
@@ -659,6 +632,7 @@ void flush_request (tux_req_t *req, int cachemiss)
 		int fd = req->fd, ret;
 
 		if (fd != -1) {
+			Dprintk("closing req->fd: %d\n", fd);
 			req->fd = -1;
 			ret = tux_close(fd);
 			if (ret)
@@ -674,6 +648,8 @@ out:
 
 static int warn_once = 1;
 
+static loff_t log_filp_last_index;
+
 static unsigned int writeout_log (void)
 {
 	unsigned int len, pending, next_log_tail;
@@ -681,6 +657,8 @@ static unsigned int writeout_log (void)
 	struct file *log_filp;
 	char * str;
 	unsigned int ret;
+	struct inode *inode;
+	struct address_space *mapping;
 
 	if (tux_logging)
 		Dprintk("TUX logger: opening log file {%s}.\n", tux_logfile);
@@ -725,17 +703,21 @@ static unsigned int writeout_log (void)
 	/*
 	 * Sync log data to disk:
 	 */
-	if (log_filp->f_op && log_filp->f_op->fsync) {
-		down(&log_filp->f_dentry->d_inode->i_sem);
-		log_filp->f_op->fsync(log_filp, log_filp->f_dentry, 1);
-		up(&log_filp->f_dentry->d_inode->i_sem);
-	}
+	inode = log_filp->f_dentry->d_inode;
+	mapping = inode->i_mapping;
+	if (mapping->nrpages > 256) {   /* batch stuff up */
+		down(&inode->i_sem);
+		filemap_fdatawrite(inode->i_mapping);
 
-	/*
-	 * Reduce the cache footprint of the logger file - it's
-	 * typically write-once.
-	 */
-	invalidate_inode_pages(log_filp->f_dentry->d_inode->i_mapping);
+		/*
+		 * Now nuke old pagecache up to the place where we just
+		 * started the I/O.   There's no point in trying to invalidate
+		 * pages after that, because they're currently in-flight.
+		 */
+		invalidate_mapping_pages(mapping, 0, log_filp_last_index);
+		log_filp_last_index = log_filp->f_pos >> PAGE_CACHE_SHIFT;
+		up(&inode->i_sem);
+	}
 
 out_lock:
 	spin_lock(&log_lock);
@@ -766,11 +748,10 @@ static int logger_thread (void *data)
 	printk(KERN_NOTICE "TUX: logger thread started.\n");
 #if CONFIG_SMP
 	{
-		cpumask_t log_mask, map;
+		cpumask_t map;
 
-		mask_to_cpumask(log_cpu_mask, &log_mask);
-		cpus_and(map, cpu_online_map, log_mask);
-		if(!(cpus_empty(map)))
+		cpus_and(map, cpu_online_map, tux_log_cpu_mask);
+		if (!(cpus_empty(map)))
 			set_cpus_allowed(current, map);
 
 	}

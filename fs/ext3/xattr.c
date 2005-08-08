@@ -7,6 +7,8 @@
  * Ext3 code with a lot of help from Eric Jarman <ejarman@acm.org>.
  * Extended attributes for symlinks and special files added per
  *  suggestion of Luka Renko <luka.renko@hermes.si>.
+ * xattr consolidation Copyright (c) 2004 James Morris <jmorris@redhat.com>,
+ *  Red Hat Inc.
  */
 
 /*
@@ -95,106 +97,44 @@ static int ext3_xattr_cache_insert(struct buffer_head *);
 static struct buffer_head *ext3_xattr_cache_find(handle_t *, struct inode *,
 						 struct ext3_xattr_header *,
 						 int *);
-static void ext3_xattr_cache_remove(struct buffer_head *);
 static void ext3_xattr_rehash(struct ext3_xattr_header *,
 			      struct ext3_xattr_entry *);
 
 static struct mb_cache *ext3_xattr_cache;
-static struct ext3_xattr_handler *ext3_xattr_handlers[EXT3_XATTR_INDEX_MAX];
-static rwlock_t ext3_handler_lock = RW_LOCK_UNLOCKED;
 
-int
-ext3_xattr_register(int name_index, struct ext3_xattr_handler *handler)
-{
-	int error = -EINVAL;
+static struct xattr_handler *ext3_xattr_handler_map[EXT3_XATTR_INDEX_MAX] = {
+	[EXT3_XATTR_INDEX_USER]		     = &ext3_xattr_user_handler,
+#ifdef CONFIG_EXT3_FS_POSIX_ACL
+	[EXT3_XATTR_INDEX_POSIX_ACL_ACCESS]  = &ext3_xattr_acl_access_handler,
+	[EXT3_XATTR_INDEX_POSIX_ACL_DEFAULT] = &ext3_xattr_acl_default_handler,
+#endif
+	[EXT3_XATTR_INDEX_TRUSTED]	     = &ext3_xattr_trusted_handler,
+#ifdef CONFIG_EXT3_FS_SECURITY
+	[EXT3_XATTR_INDEX_SECURITY]	     = &ext3_xattr_security_handler,
+#endif
+};
 
-	if (name_index > 0 && name_index <= EXT3_XATTR_INDEX_MAX) {
-		write_lock(&ext3_handler_lock);
-		if (!ext3_xattr_handlers[name_index-1]) {
-			ext3_xattr_handlers[name_index-1] = handler;
-			error = 0;
-		}
-		write_unlock(&ext3_handler_lock);
-	}
-	return error;
-}
+struct xattr_handler *ext3_xattr_handlers[] = {
+	&ext3_xattr_user_handler,
+	&ext3_xattr_trusted_handler,
+#ifdef CONFIG_EXT3_FS_POSIX_ACL
+	&ext3_xattr_acl_access_handler,
+	&ext3_xattr_acl_default_handler,
+#endif
+#ifdef CONFIG_EXT3_FS_SECURITY
+	&ext3_xattr_security_handler,
+#endif
+	NULL
+};
 
-void
-ext3_xattr_unregister(int name_index, struct ext3_xattr_handler *handler)
-{
-	if (name_index > 0 || name_index <= EXT3_XATTR_INDEX_MAX) {
-		write_lock(&ext3_handler_lock);
-		ext3_xattr_handlers[name_index-1] = NULL;
-		write_unlock(&ext3_handler_lock);
-	}
-}
-
-static inline const char *
-strcmp_prefix(const char *a, const char *a_prefix)
-{
-	while (*a_prefix && *a == *a_prefix) {
-		a++;
-		a_prefix++;
-	}
-	return *a_prefix ? NULL : a;
-}
-
-/*
- * Decode the extended attribute name, and translate it into
- * the name_index and name suffix.
- */
-static inline struct ext3_xattr_handler *
-ext3_xattr_resolve_name(const char **name)
-{
-	struct ext3_xattr_handler *handler = NULL;
-	int i;
-
-	if (!*name)
-		return NULL;
-	read_lock(&ext3_handler_lock);
-	for (i=0; i<EXT3_XATTR_INDEX_MAX; i++) {
-		if (ext3_xattr_handlers[i]) {
-			const char *n = strcmp_prefix(*name,
-				ext3_xattr_handlers[i]->prefix);
-			if (n) {
-				handler = ext3_xattr_handlers[i];
-				*name = n;
-				break;
-			}
-		}
-	}
-	read_unlock(&ext3_handler_lock);
-	return handler;
-}
-
-static inline struct ext3_xattr_handler *
+static inline struct xattr_handler *
 ext3_xattr_handler(int name_index)
 {
-	struct ext3_xattr_handler *handler = NULL;
-	if (name_index > 0 && name_index <= EXT3_XATTR_INDEX_MAX) {
-		read_lock(&ext3_handler_lock);
-		handler = ext3_xattr_handlers[name_index-1];
-		read_unlock(&ext3_handler_lock);
-	}
+	struct xattr_handler *handler = NULL;
+
+	if (name_index > 0 && name_index <= EXT3_XATTR_INDEX_MAX)
+		handler = ext3_xattr_handler_map[name_index];
 	return handler;
-}
-
-/*
- * Inode operation getxattr()
- *
- * dentry->d_inode->i_sem: don't care
- */
-ssize_t
-ext3_getxattr(struct dentry *dentry, const char *name,
-	      void *buffer, size_t size)
-{
-	struct ext3_xattr_handler *handler;
-	struct inode *inode = dentry->d_inode;
-
-	handler = ext3_xattr_resolve_name(&name);
-	if (!handler)
-		return -EOPNOTSUPP;
-	return handler->get(inode, name, buffer, size);
 }
 
 /*
@@ -206,43 +146,6 @@ ssize_t
 ext3_listxattr(struct dentry *dentry, char *buffer, size_t size)
 {
 	return ext3_xattr_list(dentry->d_inode, buffer, size);
-}
-
-/*
- * Inode operation setxattr()
- *
- * dentry->d_inode->i_sem: down
- */
-int
-ext3_setxattr(struct dentry *dentry, const char *name,
-	      const void *value, size_t size, int flags)
-{
-	struct ext3_xattr_handler *handler;
-	struct inode *inode = dentry->d_inode;
-
-	if (size == 0)
-		value = "";  /* empty EA, do not remove */
-	handler = ext3_xattr_resolve_name(&name);
-	if (!handler)
-		return -EOPNOTSUPP;
-	return handler->set(inode, name, value, size, flags);
-}
-
-/*
- * Inode operation removexattr()
- *
- * dentry->d_inode->i_sem: down
- */
-int
-ext3_removexattr(struct dentry *dentry, const char *name)
-{
-	struct ext3_xattr_handler *handler;
-	struct inode *inode = dentry->d_inode;
-
-	handler = ext3_xattr_resolve_name(&name);
-	if (!handler)
-		return -EOPNOTSUPP;
-	return handler->set(inode, name, NULL, 0, XATTR_REPLACE);
 }
 
 /*
@@ -363,8 +266,8 @@ ext3_xattr_list(struct inode *inode, char *buffer, size_t buffer_size)
 {
 	struct buffer_head *bh = NULL;
 	struct ext3_xattr_entry *entry;
-	size_t size = 0;
-	char *buf, *end;
+	char *end;
+	size_t rest = buffer_size;
 	int error;
 
 	ea_idebug(inode, "buffer=%p, buffer_size=%ld",
@@ -390,44 +293,40 @@ bad_block:	ext3_error(inode->i_sb, "ext3_xattr_list",
 		error = -EIO;
 		goto cleanup;
 	}
-	/* compute the size required for the list of attribute names */
-	for (entry = FIRST_ENTRY(bh); !IS_LAST_ENTRY(entry);
-	     entry = EXT3_XATTR_NEXT(entry)) {
-		struct ext3_xattr_handler *handler;
-		struct ext3_xattr_entry *next =
-			EXT3_XATTR_NEXT(entry);
+
+	/* check the on-disk data structure */
+	entry = FIRST_ENTRY(bh);
+	while (!IS_LAST_ENTRY(entry)) {
+		struct ext3_xattr_entry *next = EXT3_XATTR_NEXT(entry);
+
 		if ((char *)next >= end)
 			goto bad_block;
-
-		handler = ext3_xattr_handler(entry->e_name_index);
-		if (handler)
-			size += handler->list(NULL, inode, entry->e_name,
-					      entry->e_name_len);
+		entry = next;
 	}
-
 	if (ext3_xattr_cache_insert(bh))
 		ea_idebug(inode, "cache insert failed");
-	if (!buffer) {
-		error = size;
-		goto cleanup;
-	} else {
-		error = -ERANGE;
-		if (size > buffer_size)
-			goto cleanup;
-	}
 
 	/* list the attribute names */
-	buf = buffer;
 	for (entry = FIRST_ENTRY(bh); !IS_LAST_ENTRY(entry);
 	     entry = EXT3_XATTR_NEXT(entry)) {
-		struct ext3_xattr_handler *handler;
+		struct xattr_handler *handler =
+			ext3_xattr_handler(entry->e_name_index);
 
-		handler = ext3_xattr_handler(entry->e_name_index);
-		if (handler)
-			buf += handler->list(buf, inode, entry->e_name,
-					     entry->e_name_len);
+		if (handler) {
+			size_t size = handler->list(inode, buffer, rest,
+						    entry->e_name,
+						    entry->e_name_len);
+			if (buffer) {
+				if (size > rest) {
+					error = -ERANGE;
+					goto cleanup;
+				}
+				buffer += size;
+			}
+			rest -= size;
+		}
 	}
-	error = size;
+	error = buffer_size - rest;  /* total size */
 
 cleanup:
 	brelse(bh);
@@ -600,6 +499,7 @@ bad_block:		ext3_error(sb, "ext3_xattr_set",
 	/* Here we know that we can set the new attribute. */
 
 	if (header) {
+		struct mb_cache_entry *ce;
 		int credits = 0;
 
 		/* assert(header == HDR(bh)); */
@@ -611,14 +511,19 @@ bad_block:		ext3_error(sb, "ext3_xattr_set",
 							      &credits);
 		if (error)
 			goto cleanup;
+		ce = mb_cache_entry_get(ext3_xattr_cache, bh->b_bdev,
+					bh->b_blocknr);
 		lock_buffer(bh);
 		if (header->h_refcount == cpu_to_le32(1)) {
 			ea_bdebug(bh, "modifying in-place");
-			ext3_xattr_cache_remove(bh);
+			if (ce)
+				mb_cache_entry_free(ce);
 			/* keep the buffer locked while modifying it. */
 		} else {
 			int offset;
 
+			if (ce)
+				mb_cache_entry_release(ce);
 			unlock_buffer(bh);
 			journal_release_buffer(handle, bh, credits);
 		skip_get_write_access:
@@ -786,8 +691,7 @@ ext3_xattr_set_handle2(handle_t *handle, struct inode *inode,
 					EXT3_SB(sb)->s_es->s_first_data_block) +
 				EXT3_I(inode)->i_block_group *
 				EXT3_BLOCKS_PER_GROUP(sb);
-			int block = ext3_new_block(handle, inode, goal,
-						   NULL, NULL, &error);
+			int block = ext3_new_block(handle, inode, goal, &error);
 			if (error)
 				goto cleanup;
 			ea_idebug(inode, "creating block %d", block);
@@ -826,6 +730,7 @@ getblk_failed:
 
 	error = 0;
 	if (old_bh && old_bh != new_bh) {
+		struct mb_cache_entry *ce;
 		/*
 		 * If there was an old block, and we are no longer using it,
 		 * release the old block.
@@ -833,9 +738,13 @@ getblk_failed:
 		error = ext3_journal_get_write_access(handle, old_bh);
 		if (error)
 			goto cleanup;
+		ce = mb_cache_entry_get(ext3_xattr_cache, old_bh->b_bdev,
+					old_bh->b_blocknr);
 		lock_buffer(old_bh);
 		if (HDR(old_bh)->h_refcount == cpu_to_le32(1)) {
 			/* Free the old block. */
+			if (ce)
+				mb_cache_entry_free(ce);
 			ea_bdebug(old_bh, "freeing");
 			ext3_free_blocks(handle, inode, old_bh->b_blocknr, 1);
 
@@ -846,6 +755,8 @@ getblk_failed:
 			ext3_forget(handle, 1, inode, old_bh,old_bh->b_blocknr);
 		} else {
 			/* Decrement the refcount only. */
+			if (ce)
+				mb_cache_entry_release(ce);
 			HDR(old_bh)->h_refcount = cpu_to_le32(
 				le32_to_cpu(HDR(old_bh)->h_refcount) - 1);
 			DQUOT_FREE_BLOCK(inode, 1);
@@ -907,6 +818,7 @@ void
 ext3_xattr_delete_inode(handle_t *handle, struct inode *inode)
 {
 	struct buffer_head *bh = NULL;
+	struct mb_cache_entry *ce;
 
 	down_write(&EXT3_I(inode)->xattr_sem);
 	if (!EXT3_I(inode)->i_file_acl)
@@ -927,13 +839,18 @@ ext3_xattr_delete_inode(handle_t *handle, struct inode *inode)
 	}
 	if (ext3_journal_get_write_access(handle, bh) != 0)
 		goto cleanup;
+	ce = mb_cache_entry_get(ext3_xattr_cache, bh->b_bdev,
+				bh->b_blocknr);
 	lock_buffer(bh);
 	if (HDR(bh)->h_refcount == cpu_to_le32(1)) {
-		ext3_xattr_cache_remove(bh);
+		if (ce)
+			mb_cache_entry_free(ce);
 		ext3_free_blocks(handle, inode, EXT3_I(inode)->i_file_acl, 1);
 		get_bh(bh);
 		ext3_forget(handle, 1, inode, bh, EXT3_I(inode)->i_file_acl);
 	} else {
+		if (ce)
+			mb_cache_entry_release(ce);
 		HDR(bh)->h_refcount = cpu_to_le32(
 			le32_to_cpu(HDR(bh)->h_refcount) - 1);
 		ext3_journal_dirty_metadata(handle, bh);
@@ -1052,11 +969,19 @@ ext3_xattr_cache_find(handle_t *handle, struct inode *inode,
 	if (!header->h_hash)
 		return NULL;  /* never share */
 	ea_idebug(inode, "looking for cached blocks [%x]", (int)hash);
+again:
 	ce = mb_cache_entry_find_first(ext3_xattr_cache, 0,
 				       inode->i_sb->s_bdev, hash);
 	while (ce) {
-		struct buffer_head *bh = sb_bread(inode->i_sb, ce->e_block);
+		struct buffer_head *bh;
 
+		if (IS_ERR(ce)) {
+			if (PTR_ERR(ce) == -EAGAIN)
+				goto again;
+			break;
+		}
+
+		bh = sb_bread(inode->i_sb, ce->e_block);
 		if (!bh) {
 			ext3_error(inode->i_sb, "ext3_xattr_cache_find",
 				"inode %ld: block %ld read error",
@@ -1087,27 +1012,6 @@ ext3_xattr_cache_find(handle_t *handle, struct inode *inode,
 	return NULL;
 }
 
-/*
- * ext3_xattr_cache_remove()
- *
- * Remove the cache entry of a block from the cache. Called when a
- * block becomes invalid.
- */
-static void
-ext3_xattr_cache_remove(struct buffer_head *bh)
-{
-	struct mb_cache_entry *ce;
-
-	ce = mb_cache_entry_get(ext3_xattr_cache, bh->b_bdev,
-				bh->b_blocknr);
-	if (ce) {
-		ea_bdebug(bh, "removing (%d cache entries remaining)",
-			  atomic_read(&ext3_xattr_cache->c_entry_count)-1);
-		mb_cache_entry_free(ce);
-	} else 
-		ea_bdebug(bh, "no cache entry");
-}
-
 #define NAME_HASH_SHIFT 5
 #define VALUE_HASH_SHIFT 16
 
@@ -1130,7 +1034,7 @@ static inline void ext3_xattr_hash_entry(struct ext3_xattr_header *header,
 	}
 
 	if (entry->e_value_block == 0 && entry->e_value_size != 0) {
-		__u32 *value = (__u32 *)((char *)header +
+		__le32 *value = (__le32 *)((char *)header +
 			le16_to_cpu(entry->e_value_offs));
 		for (n = (le32_to_cpu(entry->e_value_size) +
 		     EXT3_XATTR_ROUND) >> EXT3_XATTR_PAD_BITS; n; n--) {
@@ -1179,51 +1083,12 @@ static void ext3_xattr_rehash(struct ext3_xattr_header *header,
 int __init
 init_ext3_xattr(void)
 {
-	int	err;
-
-	err = ext3_xattr_register(EXT3_XATTR_INDEX_USER,
-				  &ext3_xattr_user_handler);
-	if (err)
-		return err;
-	err = ext3_xattr_register(EXT3_XATTR_INDEX_TRUSTED,
-				  &ext3_xattr_trusted_handler);
-	if (err)
-		goto out;
-#ifdef CONFIG_EXT3_FS_SECURITY
-	err = ext3_xattr_register(EXT3_XATTR_INDEX_SECURITY,
-				  &ext3_xattr_security_handler);
-	if (err)
-		goto out1;
-#endif
-#ifdef CONFIG_EXT3_FS_POSIX_ACL
-	err = init_ext3_acl();
-	if (err)
-		goto out2;
-#endif
 	ext3_xattr_cache = mb_cache_create("ext3_xattr", NULL,
 		sizeof(struct mb_cache_entry) +
 		sizeof(struct mb_cache_entry_index), 1, 6);
-	if (!ext3_xattr_cache) {
-		err = -ENOMEM;
-		goto out3;
-	}
+	if (!ext3_xattr_cache)
+		return -ENOMEM;
 	return 0;
-out3:
-#ifdef CONFIG_EXT3_FS_POSIX_ACL
-	exit_ext3_acl();
-out2:
-#endif
-#ifdef CONFIG_EXT3_FS_SECURITY
-	ext3_xattr_unregister(EXT3_XATTR_INDEX_SECURITY,
-			      &ext3_xattr_security_handler);
-out1:
-#endif
-	ext3_xattr_unregister(EXT3_XATTR_INDEX_TRUSTED,
-			      &ext3_xattr_trusted_handler);
-out:
-	ext3_xattr_unregister(EXT3_XATTR_INDEX_USER,
-			      &ext3_xattr_user_handler);
-	return err;
 }
 
 void
@@ -1232,15 +1097,4 @@ exit_ext3_xattr(void)
 	if (ext3_xattr_cache)
 		mb_cache_destroy(ext3_xattr_cache);
 	ext3_xattr_cache = NULL;
-#ifdef CONFIG_EXT3_FS_POSIX_ACL
-	exit_ext3_acl();
-#endif
-#ifdef CONFIG_EXT3_FS_SECURITY
-	ext3_xattr_unregister(EXT3_XATTR_INDEX_SECURITY,
-			      &ext3_xattr_security_handler);
-#endif
-	ext3_xattr_unregister(EXT3_XATTR_INDEX_TRUSTED,
-			      &ext3_xattr_trusted_handler);
-	ext3_xattr_unregister(EXT3_XATTR_INDEX_USER,
-			      &ext3_xattr_user_handler);
 }

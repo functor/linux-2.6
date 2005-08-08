@@ -365,7 +365,7 @@ static void scsi_single_lun_run(struct scsi_device *current_sdev)
 	unsigned long flags;
 
 	spin_lock_irqsave(shost->host_lock, flags);
-	current_sdev->sdev_target->starget_sdev_user = NULL;
+	scsi_target(current_sdev)->starget_sdev_user = NULL;
 	spin_unlock_irqrestore(shost->host_lock, flags);
 
 	/*
@@ -377,7 +377,7 @@ static void scsi_single_lun_run(struct scsi_device *current_sdev)
 	blk_run_queue(current_sdev->request_queue);
 
 	spin_lock_irqsave(shost->host_lock, flags);
-	if (current_sdev->sdev_target->starget_sdev_user)
+	if (scsi_target(current_sdev)->starget_sdev_user)
 		goto out;
 	list_for_each_entry_safe(sdev, tmp, &current_sdev->same_target_siblings,
 			same_target_siblings) {
@@ -711,8 +711,7 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 	}
 
 	if (blk_pc_request(req)) { /* SG_IO ioctl from block level */
-		req->errors = (driver_byte(result) & DRIVER_SENSE) ?
-			      (CHECK_CONDITION << 1) : (result & 0xff);
+		req->errors = result;
 		if (result) {
 			clear_errors = 0;
 			if (cmd->sense_buffer[0] & 0x70) {
@@ -954,6 +953,22 @@ static int scsi_init_io(struct scsi_cmnd *cmd)
 	return BLKPREP_KILL;
 }
 
+static int scsi_issue_flush_fn(request_queue_t *q, struct gendisk *disk,
+			       sector_t *error_sector)
+{
+	struct scsi_device *sdev = q->queuedata;
+	struct scsi_driver *drv;
+
+	if (sdev->sdev_state != SDEV_RUNNING)
+		return -ENXIO;
+
+	drv = *(struct scsi_driver **) disk->private_data;
+	if (drv->issue_flush)
+		return drv->issue_flush(&sdev->sdev_gendev, error_sector);
+
+	return -EOPNOTSUPP;
+}
+
 static int scsi_prep_fn(struct request_queue *q, struct request *req)
 {
 	struct scsi_device *sdev = q->queuedata;
@@ -1008,7 +1023,8 @@ static int scsi_prep_fn(struct request_queue *q, struct request *req)
 	} else if (req->flags & (REQ_CMD | REQ_BLOCK_PC)) {
 
 		if(unlikely(specials_only)) {
-			if(specials_only == SDEV_QUIESCE)
+			if(specials_only == SDEV_QUIESCE ||
+					specials_only == SDEV_BLOCK)
 				return BLKPREP_DEFER;
 			
 			printk(KERN_ERR "scsi%d (%d:%d): rejecting I/O to device being removed\n",
@@ -1231,10 +1247,10 @@ static void scsi_request_fn(struct request_queue *q)
 		if (!scsi_host_queue_ready(q, shost, sdev))
 			goto not_ready;
 		if (sdev->single_lun) {
-			if (sdev->sdev_target->starget_sdev_user &&
-			    sdev->sdev_target->starget_sdev_user != sdev)
+			if (scsi_target(sdev)->starget_sdev_user &&
+			    scsi_target(sdev)->starget_sdev_user != sdev)
 				goto not_ready;
-			sdev->sdev_target->starget_sdev_user = sdev;
+			scsi_target(sdev)->starget_sdev_user = sdev;
 		}
 		shost->host_busy++;
 
@@ -1304,19 +1320,22 @@ static void scsi_request_fn(struct request_queue *q)
 u64 scsi_calculate_bounce_limit(struct Scsi_Host *shost)
 {
 	struct device *host_dev;
+	u64 bounce_limit = 0xffffffff;
 
 	if (shost->unchecked_isa_dma)
 		return BLK_BOUNCE_ISA;
-
-	host_dev = scsi_get_device(shost);
-	if (PCI_DMA_BUS_IS_PHYS && host_dev && host_dev->dma_mask)
-		return *host_dev->dma_mask;
-
 	/*
 	 * Platforms with virtual-DMA translation
 	 * hardware have no practical limit.
 	 */
-	return BLK_BOUNCE_ANY;
+	if (!PCI_DMA_BUS_IS_PHYS)
+		return BLK_BOUNCE_ANY;
+
+	host_dev = scsi_get_device(shost);
+	if (host_dev && host_dev->dma_mask)
+		bounce_limit = *host_dev->dma_mask;
+
+	return bounce_limit;
 }
 
 struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
@@ -1335,7 +1354,8 @@ struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
 	blk_queue_max_sectors(q, shost->max_sectors);
 	blk_queue_bounce_limit(q, scsi_calculate_bounce_limit(shost));
 	blk_queue_segment_boundary(q, shost->dma_boundary);
- 
+	blk_queue_issue_flush_fn(q, scsi_issue_flush_fn);
+
 	if (!shost->use_clustering)
 		clear_bit(QUEUE_FLAG_CLUSTER, &q->queue_flags);
 	return q;
@@ -1555,6 +1575,35 @@ scsi_mode_sense(struct scsi_device *sdev, int dbd, int modepage,
 	return ret;
 }
 
+int
+scsi_test_unit_ready(struct scsi_device *sdev, int timeout, int retries)
+{
+	struct scsi_request *sreq;
+	char cmd[] = {
+		TEST_UNIT_READY, 0, 0, 0, 0, 0,
+	};
+	int result;
+	
+	sreq = scsi_allocate_request(sdev, GFP_KERNEL);
+	if (!sreq)
+		return -ENOMEM;
+
+	sreq->sr_data_direction = DMA_NONE;
+	scsi_wait_req(sreq, cmd, NULL, 0, timeout, retries);
+
+	if ((driver_byte(sreq->sr_result) & DRIVER_SENSE) &&
+	    ((sreq->sr_sense_buffer[2] & 0x0f) == UNIT_ATTENTION ||
+	     (sreq->sr_sense_buffer[2] & 0x0f) == NOT_READY) &&
+	    sdev->removable) {
+		sdev->changed = 1;
+		sreq->sr_result = 0;
+	}
+	result = sreq->sr_result;
+	scsi_release_request(sreq);
+	return result;
+}
+EXPORT_SYMBOL(scsi_test_unit_ready);
+
 /**
  *	scsi_device_set_state - Take the given device through the device
  *		state model.
@@ -1584,6 +1633,7 @@ scsi_device_set_state(struct scsi_device *sdev, enum scsi_device_state state)
 		case SDEV_CREATED:
 		case SDEV_OFFLINE:
 		case SDEV_QUIESCE:
+		case SDEV_BLOCK:
 			break;
 		default:
 			goto illegal;
@@ -1605,6 +1655,17 @@ scsi_device_set_state(struct scsi_device *sdev, enum scsi_device_state state)
 		case SDEV_CREATED:
 		case SDEV_RUNNING:
 		case SDEV_QUIESCE:
+		case SDEV_BLOCK:
+			break;
+		default:
+			goto illegal;
+		}
+		break;
+
+	case SDEV_BLOCK:
+		switch (oldstate) {
+		case SDEV_CREATED:
+		case SDEV_RUNNING:
 			break;
 		default:
 			goto illegal;
@@ -1616,6 +1677,7 @@ scsi_device_set_state(struct scsi_device *sdev, enum scsi_device_state state)
 		case SDEV_CREATED:
 		case SDEV_RUNNING:
 		case SDEV_OFFLINE:
+		case SDEV_BLOCK:
 			break;
 		default:
 			goto illegal;
@@ -1694,3 +1756,130 @@ scsi_device_resume(struct scsi_device *sdev)
 }
 EXPORT_SYMBOL(scsi_device_resume);
 
+static int
+device_quiesce_fn(struct device *dev, void *data)
+{
+	scsi_device_quiesce(to_scsi_device(dev));
+	return 0;
+}
+
+void
+scsi_target_quiesce(struct scsi_target *starget)
+{
+	device_for_each_child(&starget->dev, NULL, device_quiesce_fn);
+}
+EXPORT_SYMBOL(scsi_target_quiesce);
+
+static int
+device_resume_fn(struct device *dev, void *data)
+{
+	scsi_device_resume(to_scsi_device(dev));
+	return 0;
+}
+
+void
+scsi_target_resume(struct scsi_target *starget)
+{
+	device_for_each_child(&starget->dev, NULL, device_resume_fn);
+}
+EXPORT_SYMBOL(scsi_target_resume);
+
+/**
+ * scsi_internal_device_block - internal function to put a device
+ *				temporarily into the SDEV_BLOCK state
+ * @sdev:	device to block
+ *
+ * Block request made by scsi lld's to temporarily stop all
+ * scsi commands on the specified device.  Called from interrupt
+ * or normal process context.
+ *
+ * Returns zero if successful or error if not
+ *
+ * Notes:       
+ *	This routine transitions the device to the SDEV_BLOCK state
+ *	(which must be a legal transition).  When the device is in this
+ *	state, all commands are deferred until the scsi lld reenables
+ *	the device with scsi_device_unblock or device_block_tmo fires.
+ *	This routine assumes the host_lock is held on entry.
+ *
+ *      As the LLDD/Transport that is calling this function doesn't
+ *	actually know what the device state is, the function may be
+ *	called at an inappropriate time. Therefore, before requesting
+ *	the state change, the function validates that the transition is
+ *	valid.
+ **/
+int
+scsi_internal_device_block(struct scsi_device *sdev)
+{
+	request_queue_t *q = sdev->request_queue;
+	unsigned long flags;
+	int err = 0;
+
+	if ((sdev->sdev_state != SDEV_CREATED) &&
+	    (sdev->sdev_state != SDEV_RUNNING))
+		return 0;
+
+	err = scsi_device_set_state(sdev, SDEV_BLOCK);
+	if (err)
+		return err;
+
+	/* 
+	 * The device has transitioned to SDEV_BLOCK.  Stop the
+	 * block layer from calling the midlayer with this device's
+	 * request queue. 
+	 */
+	spin_lock_irqsave(q->queue_lock, flags);
+	blk_stop_queue(q);
+	spin_unlock_irqrestore(q->queue_lock, flags);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(scsi_internal_device_block);
+ 
+/**
+ * scsi_internal_device_unblock - resume a device after a block request
+ * @sdev:	device to resume
+ *
+ * Called by scsi lld's or the midlayer to restart the device queue
+ * for the previously suspended scsi device.  Called from interrupt or
+ * normal process context.
+ *
+ * Returns zero if successful or error if not.
+ *
+ * Notes:       
+ *	This routine transitions the device to the SDEV_RUNNING state
+ *	(which must be a legal transition) allowing the midlayer to
+ *	goose the queue for this device.  This routine assumes the 
+ *	host_lock is held upon entry.
+ *
+ *      As the LLDD/Transport that is calling this function doesn't
+ *	actually know what the device state is, the function may be
+ *	called at an inappropriate time. Therefore, before requesting
+ *	the state change, the function validates that the transition is
+ *	valid.
+ **/
+int
+scsi_internal_device_unblock(struct scsi_device *sdev)
+{
+	request_queue_t *q = sdev->request_queue; 
+	int err;
+	unsigned long flags;
+	
+	if (sdev->sdev_state != SDEV_BLOCK)
+		return 0;
+	
+	/* 
+	 * Try to transition the scsi device to SDEV_RUNNING
+	 * and goose the device queue if successful.  
+	 */
+	err = scsi_device_set_state(sdev, SDEV_RUNNING);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(q->queue_lock, flags);
+	blk_start_queue(q);
+	spin_unlock_irqrestore(q->queue_lock, flags);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(scsi_internal_device_unblock);

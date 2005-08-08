@@ -19,6 +19,7 @@
 #include <linux/stddef.h>
 #include <linux/personality.h>
 #include <linux/suspend.h>
+#include <linux/ptrace.h>
 #include <linux/elf.h>
 #include <asm/processor.h>
 #include <asm/ucontext.h>
@@ -132,29 +133,28 @@ sys_sigaltstack(unsigned long ebx)
  */
 
 static int
-restore_sigcontext(struct pt_regs *regs,
-		struct sigcontext __user *__sc, int *peax)
+restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc, int *peax)
 {
-	struct sigcontext scratch; /* 88 bytes of scratch area */
+	unsigned int err = 0;
 
 	/* Always make any pending restarted system calls return -EINTR */
 	current_thread_info()->restart_block.fn = do_no_restart_syscall;
 
-	if (copy_from_user(&scratch, __sc, sizeof(scratch)))
-		return -EFAULT;
-
-#define COPY(x)		regs->x = scratch.x
+#define COPY(x)		err |= __get_user(regs->x, &sc->x)
 
 #define COPY_SEG(seg)							\
-	{ unsigned short tmp = scratch.seg;				\
+	{ unsigned short tmp;						\
+	  err |= __get_user(tmp, &sc->seg);				\
 	  regs->x##seg = tmp; }
 
 #define COPY_SEG_STRICT(seg)						\
-	{ unsigned short tmp = scratch.seg;				\
+	{ unsigned short tmp;						\
+	  err |= __get_user(tmp, &sc->seg);				\
 	  regs->x##seg = tmp|3; }
 
 #define GET_SEG(seg)							\
-	{ unsigned short tmp = scratch.seg;				\
+	{ unsigned short tmp;						\
+	  err |= __get_user(tmp, &sc->seg);				\
 	  loadsegment(seg,tmp); }
 
 #define	FIX_EFLAGS	(X86_EFLAGS_AC | X86_EFLAGS_OF | X86_EFLAGS_DF | \
@@ -177,23 +177,27 @@ restore_sigcontext(struct pt_regs *regs,
 	COPY_SEG_STRICT(ss);
 	
 	{
-		unsigned int tmpflags = scratch.eflags;
+		unsigned int tmpflags;
+		err |= __get_user(tmpflags, &sc->eflags);
 		regs->eflags = (regs->eflags & ~FIX_EFLAGS) | (tmpflags & FIX_EFLAGS);
 		regs->orig_eax = -1;		/* disable syscall checks */
 	}
 
 	{
-		struct _fpstate * buf = scratch.fpstate;
+		struct _fpstate __user * buf;
+		err |= __get_user(buf, &sc->fpstate);
 		if (buf) {
 			if (verify_area(VERIFY_READ, buf, sizeof(*buf)))
-				return -EFAULT;
-			if (restore_i387(buf))
-				return -EFAULT;
+				goto badframe;
+			err |= restore_i387(buf);
 		}
 	}
 
-	*peax = scratch.eax;
-	return 0;
+	err |= __get_user(*peax, &sc->eax);
+	return err;
+
+badframe:
+	return 1;
 }
 
 asmlinkage int sys_sigreturn(unsigned long __unused)
@@ -262,47 +266,51 @@ badframe:
  */
 
 static int
-setup_sigcontext(struct sigcontext __user *__sc, struct _fpstate __user *fpstate,
+setup_sigcontext(struct sigcontext __user *sc, struct _fpstate __user *fpstate,
 		 struct pt_regs *regs, unsigned long mask)
 {
-	struct sigcontext sc; /* 88 bytes of scratch area */
-	int tmp;
+	int tmp, err = 0;
+	unsigned long eflags;
 
 	tmp = 0;
 	__asm__("movl %%gs,%0" : "=r"(tmp): "0"(tmp));
-	*(unsigned int *)&sc.gs = tmp;
+	err |= __put_user(tmp, (unsigned int __user *)&sc->gs);
 	__asm__("movl %%fs,%0" : "=r"(tmp): "0"(tmp));
-	*(unsigned int *)&sc.fs = tmp;
-	*(unsigned int *)&sc.es = regs->xes;
-	*(unsigned int *)&sc.ds = regs->xds;
-	sc.edi = regs->edi;
-	sc.esi = regs->esi;
-	sc.ebp = regs->ebp;
-	sc.esp = regs->esp;
-	sc.ebx = regs->ebx;
-	sc.edx = regs->edx;
-	sc.ecx = regs->ecx;
-	sc.eax = regs->eax;
-	sc.trapno = current->thread.trap_no;
-	sc.err = current->thread.error_code;
-	sc.eip = regs->eip;
-	*(unsigned int *)&sc.cs = regs->xcs;
-	sc.eflags = regs->eflags;
-	sc.esp_at_signal = regs->esp;
-	*(unsigned int *)&sc.ss = regs->xss;
+	err |= __put_user(tmp, (unsigned int __user *)&sc->fs);
+
+	err |= __put_user(regs->xes, (unsigned int __user *)&sc->es);
+	err |= __put_user(regs->xds, (unsigned int __user *)&sc->ds);
+	err |= __put_user(regs->edi, &sc->edi);
+	err |= __put_user(regs->esi, &sc->esi);
+	err |= __put_user(regs->ebp, &sc->ebp);
+	err |= __put_user(regs->esp, &sc->esp);
+	err |= __put_user(regs->ebx, &sc->ebx);
+	err |= __put_user(regs->edx, &sc->edx);
+	err |= __put_user(regs->ecx, &sc->ecx);
+	err |= __put_user(regs->eax, &sc->eax);
+	err |= __put_user(current->thread.trap_no, &sc->trapno);
+	err |= __put_user(current->thread.error_code, &sc->err);
+	err |= __put_user(regs->eip, &sc->eip);
+	err |= __put_user(regs->xcs, (unsigned int __user *)&sc->cs);
+	eflags = regs->eflags;
+	if (current->ptrace & PT_PTRACED) {
+		eflags &= ~TF_MASK;
+	}
+	err |= __put_user(eflags, &sc->eflags);
+	err |= __put_user(regs->esp, &sc->esp_at_signal);
+	err |= __put_user(regs->xss, (unsigned int __user *)&sc->ss);
 
 	tmp = save_i387(fpstate);
 	if (tmp < 0)
-		return 1;
-	sc.fpstate = tmp ? fpstate : NULL;
+	  err = 1;
+	else
+	  err |= __put_user(tmp ? fpstate : NULL, &sc->fpstate);
 
 	/* non-iBCS2 extensions.. */
-	sc.oldmask = mask;
-	sc.cr2 = current->thread.cr2;
+	err |= __put_user(mask, &sc->oldmask);
+	err |= __put_user(current->thread.cr2, &sc->cr2);
 
-	if (copy_to_user(__sc, &sc, sizeof(sc)))
-		return 1;
-	return 0;
+	return err;
 }
 
 /*
@@ -343,18 +351,20 @@ static void setup_frame(int sig, struct k_sigaction *ka,
 	void __user *restorer;
 	struct sigframe __user *frame;
 	int err = 0;
+	int usig;
 
 	frame = get_sigframe(ka, regs, sizeof(*frame));
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
 		goto give_sigsegv;
 
-	err |= __put_user((current_thread_info()->exec_domain
-		           && current_thread_info()->exec_domain->signal_invmap
-		           && sig < 32
-		           ? current_thread_info()->exec_domain->signal_invmap[sig]
-		           : sig),
-		          &frame->sig);
+	usig = current_thread_info()->exec_domain
+		&& current_thread_info()->exec_domain->signal_invmap
+		&& sig < 32
+		? current_thread_info()->exec_domain->signal_invmap[sig]
+		: sig;
+
+	err |= __put_user(usig, &frame->sig);
 	if (err)
 		goto give_sigsegv;
 
@@ -393,13 +403,22 @@ static void setup_frame(int sig, struct k_sigaction *ka,
 	/* Set up registers for signal handler */
 	regs->esp = (unsigned long) frame;
 	regs->eip = (unsigned long) ka->sa.sa_handler;
+	regs->eax = (unsigned long) sig;
+	regs->edx = (unsigned long) 0;
+	regs->ecx = (unsigned long) 0;
 
 	set_fs(USER_DS);
 	regs->xds = __USER_DS;
 	regs->xes = __USER_DS;
 	regs->xss = __USER_DS;
 	regs->xcs = __USER_CS;
-	regs->eflags &= ~TF_MASK;
+	if (regs->eflags & TF_MASK) {
+		if (current->ptrace & PT_PTRACED) {
+			ptrace_notify(SIGTRAP);
+		} else {
+			regs->eflags &= ~TF_MASK;
+		}
+	}
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",
@@ -409,9 +428,7 @@ static void setup_frame(int sig, struct k_sigaction *ka,
 	return;
 
 give_sigsegv:
-	if (sig == SIGSEGV)
-		ka->sa.sa_handler = SIG_DFL;
-	force_sig(SIGSEGV, current);
+	force_sigsegv(sig, current);
 }
 
 static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
@@ -420,18 +437,20 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	void __user *restorer;
 	struct rt_sigframe __user *frame;
 	int err = 0;
+	int usig;
 
 	frame = get_sigframe(ka, regs, sizeof(*frame));
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
 		goto give_sigsegv;
 
-	err |= __put_user((current_thread_info()->exec_domain
-		    	   && current_thread_info()->exec_domain->signal_invmap
-		    	   && sig < 32
-		    	   ? current_thread_info()->exec_domain->signal_invmap[sig]
-			   : sig),
-			  &frame->sig);
+	usig = current_thread_info()->exec_domain
+		&& current_thread_info()->exec_domain->signal_invmap
+		&& sig < 32
+		? current_thread_info()->exec_domain->signal_invmap[sig]
+		: sig;
+
+	err |= __put_user(usig, &frame->sig);
 	err |= __put_user(&frame->info, &frame->pinfo);
 	err |= __put_user(&frame->uc, &frame->puc);
 	err |= copy_siginfo_to_user(&frame->info, info);
@@ -441,7 +460,7 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	/* Create the ucontext.  */
 	err |= __put_user(0, &frame->uc.uc_flags);
 	err |= __put_user(0, &frame->uc.uc_link);
-	err |= __put_user(current->sas_ss_sp, (unsigned long *)&frame->uc.uc_stack.ss_sp);
+	err |= __put_user(current->sas_ss_sp, &frame->uc.uc_stack.ss_sp);
 	err |= __put_user(sas_ss_flags(regs->esp),
 			  &frame->uc.uc_stack.ss_flags);
 	err |= __put_user(current->sas_ss_size, &frame->uc.uc_stack.ss_size);
@@ -475,13 +494,22 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	/* Set up registers for signal handler */
 	regs->esp = (unsigned long) frame;
 	regs->eip = (unsigned long) ka->sa.sa_handler;
+	regs->eax = (unsigned long) usig;
+	regs->edx = (unsigned long) &frame->info;
+	regs->ecx = (unsigned long) &frame->uc;
 
 	set_fs(USER_DS);
 	regs->xds = __USER_DS;
 	regs->xes = __USER_DS;
 	regs->xss = __USER_DS;
 	regs->xcs = __USER_CS;
-	regs->eflags &= ~TF_MASK;
+	if (regs->eflags & TF_MASK) {
+		if (current->ptrace & PT_PTRACED) {
+			ptrace_notify(SIGTRAP);
+		} else {
+			regs->eflags &= ~TF_MASK;
+		}
+	}
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",
@@ -491,9 +519,7 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	return;
 
 give_sigsegv:
-	if (sig == SIGSEGV)
-		ka->sa.sa_handler = SIG_DFL;
-	force_sig(SIGSEGV, current);
+	force_sigsegv(sig, current);
 }
 
 /*
@@ -501,11 +527,9 @@ give_sigsegv:
  */	
 
 static void
-handle_signal(unsigned long sig, siginfo_t *info, sigset_t *oldset,
-	struct pt_regs * regs)
+handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
+	      sigset_t *oldset,	struct pt_regs * regs)
 {
-	struct k_sigaction *ka = &current->sighand->action[sig-1];
-
 	/* Are we from a system call? */
 	if (regs->orig_eax >= 0) {
 		/* If so, check system call restarting.. */
@@ -533,9 +557,6 @@ handle_signal(unsigned long sig, siginfo_t *info, sigset_t *oldset,
 	else
 		setup_frame(sig, ka, oldset, regs);
 
-	if (ka->sa.sa_flags & SA_ONESHOT)
-		ka->sa.sa_handler = SIG_DFL;
-
 	if (!(ka->sa.sa_flags & SA_NODEFER)) {
 		spin_lock_irq(&current->sighand->siglock);
 		sigorsets(&current->blocked,&current->blocked,&ka->sa.sa_mask);
@@ -554,6 +575,7 @@ int fastcall do_signal(struct pt_regs *regs, sigset_t *oldset)
 {
 	siginfo_t info;
 	int signr;
+	struct k_sigaction ka;
 
 	/*
 	 * We want the common case to go fast, which
@@ -572,17 +594,19 @@ int fastcall do_signal(struct pt_regs *regs, sigset_t *oldset)
 	if (!oldset)
 		oldset = &current->blocked;
 
-	signr = get_signal_to_deliver(&info, regs, NULL);
+	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
 	if (signr > 0) {
 		/* Reenable any watchpoints before delivering the
 		 * signal to user space. The processor register will
 		 * have been cleared if the watchpoint triggered
 		 * inside the kernel.
 		 */
-		__asm__("movl %0,%%db7"	: : "r" (current->thread.debugreg[7]));
+		if (unlikely(current->thread.debugreg[7])) {
+			__asm__("movl %0,%%db7"	: : "r" (current->thread.debugreg[7]));
+		}
 
 		/* Whee!  Actually deliver the signal.  */
-		handle_signal(signr, &info, oldset, regs);
+		handle_signal(signr, &info, &ka, oldset, regs);
 		return 1;
 	}
 

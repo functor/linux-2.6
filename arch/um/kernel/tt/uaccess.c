@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2000 - 2003 Jeff Dike (jdike@addtoit.com)
  * Licensed under the GPL
  */
@@ -8,7 +8,7 @@
 
 int copy_from_user_tt(void *to, const void *from, int n)
 {
-	if(!access_ok_tt(VERIFY_READ, from, n)) 
+	if(!access_ok_tt(VERIFY_READ, from, n))
 		return(n);
 
 	return(__do_copy_from_user(to, from, n, &current->thread.fault_addr,
@@ -19,7 +19,7 @@ int copy_to_user_tt(void *to, const void *from, int n)
 {
 	if(!access_ok_tt(VERIFY_WRITE, to, n))
 		return(n);
-		
+
 	return(__do_copy_to_user(to, from, n, &current->thread.fault_addr,
 				 &current->thread.fault_catcher));
 }
@@ -28,10 +28,10 @@ int strncpy_from_user_tt(char *dst, const char *src, int count)
 {
 	int n;
 
-	if(!access_ok_tt(VERIFY_READ, src, 1)) 
+	if(!access_ok_tt(VERIFY_READ, src, 1))
 		return(-EFAULT);
 
-	n = __do_strncpy_from_user(dst, src, count, 
+	n = __do_strncpy_from_user(dst, src, count,
 				   &current->thread.fault_addr,
 				   &current->thread.fault_catcher);
 	if(n < 0) return(-EFAULT);

@@ -8,6 +8,7 @@
  *  Copyright (C) 1998-2000 Andre Hedrick (andre@linux-ide.org)
  *  May be copied or modified under the terms of the GNU General Public License
  *  Copyright (C) 2002 Alan Cox <alan@redhat.com>
+ *  ALi (now ULi M5228) support by Clear Zhang <Clear.Zhang@ali.com.tw>
  *
  *  (U)DMA capable version of ali 1533/1543(C), 1535(D)
  *
@@ -752,8 +753,8 @@ static void __init init_hwif_common_ali15x3 (ide_hwif_t *hwif)
 	hwif->tuneproc = &ali15x3_tune_drive;
 	hwif->speedproc = &ali15x3_tune_chipset;
 
-	/* Don't use LBA48 on ALi devices before rev 0xC5 */
-	hwif->no_lba48 = (m5229_revision <= 0xC4) ? 1 : 0;
+	/* don't use LBA48 DMA on ALi devices before rev 0xC5 */
+	hwif->no_lba48_dma = (m5229_revision <= 0xC4) ? 1 : 0;
 
 	if (!hwif->dma_base) {
 		hwif->drives[0].autotune = 1;
@@ -799,7 +800,8 @@ static void __init init_hwif_ali15x3 (ide_hwif_t *hwif)
 				      1, 11, 0, 12, 0, 14, 0, 15 };
 	int irq = -1;
 	
-	hwif->irq = hwif->channel ? 15 : 14;
+	if(hwif->pci_dev->device == PCI_DEVICE_ID_AL_M5229)
+		hwif->irq = hwif->channel ? 15 : 14;
 
 	if (isa_dev) {
 		/*
@@ -888,12 +890,13 @@ static int __devinit alim15x3_init_one(struct pci_dev *dev, const struct pci_dev
 
 static struct pci_device_id alim15x3_pci_tbl[] = {
 	{ PCI_VENDOR_ID_AL, PCI_DEVICE_ID_AL_M5229, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
+	{ PCI_VENDOR_ID_AL, PCI_DEVICE_ID_AL_M5228, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
 	{ 0, },
 };
 MODULE_DEVICE_TABLE(pci, alim15x3_pci_tbl);
 
 static struct pci_driver driver = {
-	.name		= "ALI15x3 IDE",
+	.name		= "ALI15x3_IDE",
 	.id_table	= alim15x3_pci_tbl,
 	.probe		= alim15x3_init_one,
 };

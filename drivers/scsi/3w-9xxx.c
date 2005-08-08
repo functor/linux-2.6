@@ -73,7 +73,7 @@
 #include "3w-9xxx.h"
 
 /* Globals */
-static const char *twa_driver_version="2.26.02.001";
+#define TWA_DRIVER_VERSION "2.26.02.001"
 static TW_Device_Extension *twa_device_extension_list[TW_MAX_SLOT];
 static unsigned int twa_device_extension_count;
 static int twa_major = -1;
@@ -83,6 +83,7 @@ extern struct timezone sys_tz;
 MODULE_AUTHOR ("AMCC");
 MODULE_DESCRIPTION ("3ware 9000 Storage Controller Linux Driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(TWA_DRIVER_VERSION);
 
 /* Function prototypes */
 static void twa_aen_queue_event(TW_Device_Extension *tw_dev, TW_Command_Apache_Header *header);
@@ -138,7 +139,7 @@ static ssize_t twa_show_stats(struct class_device *class_dev, char *buf)
 		       "SCSI Host Resets:          %4d\n"
 		       "SCSI Aborts/Timeouts:      %4d\n"
 		       "AEN's:                     %4d\n", 
-		       twa_driver_version,
+		       TWA_DRIVER_VERSION,
 		       tw_dev->posted_request_count,
 		       tw_dev->max_posted_request_count,
 		       tw_dev->pending_request_count,
@@ -716,7 +717,7 @@ static int twa_chrdev_ioctl(struct inode *inode, struct file *file, unsigned int
 		tw_ioctl->driver_command.status = 0;
 		/* Copy compatiblity struct into ioctl data buffer */
 		tw_compat_info = (TW_Compatibility_Info *)tw_ioctl->data_buffer;
-		strncpy(tw_compat_info->driver_version, twa_driver_version, strlen(twa_driver_version));
+		strncpy(tw_compat_info->driver_version, TWA_DRIVER_VERSION, strlen(TWA_DRIVER_VERSION));
 		tw_compat_info->working_srl = tw_dev->working_srl;
 		tw_compat_info->working_branch = tw_dev->working_branch;
 		tw_compat_info->working_build = tw_dev->working_build;
@@ -1746,6 +1747,7 @@ static int twa_scsi_queue(struct scsi_cmnd *SCpnt, void (*done)(struct scsi_cmnd
 		twa_free_request_id(tw_dev, request_id);
 		SCpnt->result = (DID_ERROR << 16);
 		done(SCpnt);
+		retval = 0;
 	}
 
 	return retval;
@@ -2138,7 +2140,7 @@ static struct pci_driver twa_driver = {
 /* This function is called on driver initialization */
 static int __init twa_init(void)
 {
-	printk(KERN_WARNING "3ware 9000 Storage Controller device driver for Linux v%s.\n", twa_driver_version);
+	printk(KERN_WARNING "3ware 9000 Storage Controller device driver for Linux v%s.\n", TWA_DRIVER_VERSION);
 
 	return pci_module_init(&twa_driver);
 } /* End twa_init() */

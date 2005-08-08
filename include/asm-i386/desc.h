@@ -8,10 +8,12 @@
 
 #include <linux/preempt.h>
 #include <linux/smp.h>
+#include <linux/percpu.h>
 
 #include <asm/mmu.h>
 
-extern struct desc_struct cpu_gdt_table[NR_CPUS][GDT_ENTRIES];
+extern struct desc_struct cpu_gdt_table[GDT_ENTRIES];
+DECLARE_PER_CPU(struct desc_struct, cpu_gdt_table[GDT_ENTRIES]);
 
 struct Xgt_desc_struct {
 	unsigned short size;
@@ -20,13 +22,6 @@ struct Xgt_desc_struct {
 } __attribute__ ((packed));
 
 extern struct Xgt_desc_struct idt_descr, cpu_gdt_descr[NR_CPUS];
-
-extern void trap_init_virtual_IDT(void);
-extern void trap_init_virtual_GDT(void);
-
-asmlinkage int system_call(void);
-asmlinkage void lcall7(void);
-asmlinkage void lcall27(void);
 
 #define load_TR_desc() __asm__ __volatile__("ltr %%ax"::"a" (GDT_ENTRY_TSS*8))
 #define load_LDT_desc() __asm__ __volatile__("lldt %%ax"::"a" (GDT_ENTRY_LDT*8))
@@ -37,7 +32,6 @@ asmlinkage void lcall27(void);
  */
 extern struct desc_struct default_ldt[];
 extern void set_intr_gate(unsigned int irq, void * addr);
-extern void set_trap_gate(unsigned int n, void *addr);
 
 #define _set_tssldt_desc(n,addr,limit,type) \
 __asm__ __volatile__ ("movw %w3,0(%2)\n\t" \
@@ -52,14 +46,15 @@ __asm__ __volatile__ ("movw %w3,0(%2)\n\t" \
 
 static inline void __set_tss_desc(unsigned int cpu, unsigned int entry, void *addr)
 {
-	_set_tssldt_desc(&cpu_gdt_table[cpu][entry], (int)addr, 235, 0x89);
+	_set_tssldt_desc(&per_cpu(cpu_gdt_table, cpu)[entry], (int)addr,
+		offsetof(struct tss_struct, __cacheline_filler) - 1, 0x89);
 }
 
 #define set_tss_desc(cpu,addr) __set_tss_desc(cpu, GDT_ENTRY_TSS, addr)
 
 static inline void set_ldt_desc(unsigned int cpu, void *addr, unsigned int size)
 {
-	_set_tssldt_desc(&cpu_gdt_table[cpu][GDT_ENTRY_LDT], (int)addr, ((size << 3)-1), 0x82);
+	_set_tssldt_desc(&per_cpu(cpu_gdt_table, cpu)[GDT_ENTRY_LDT], (int)addr, ((size << 3)-1), 0x82);
 }
 
 #define LDT_entry_a(info) \
@@ -93,13 +88,36 @@ static inline void set_ldt_desc(unsigned int cpu, void *addr, unsigned int size)
 
 static inline void load_TLS(struct thread_struct *t, unsigned int cpu)
 {
-#define C(i) cpu_gdt_table[cpu][GDT_ENTRY_TLS_MIN + i] = t->tls_array[i]
+#define C(i) per_cpu(cpu_gdt_table, cpu)[GDT_ENTRY_TLS_MIN + i] = t->tls_array[i]
 	C(0); C(1); C(2);
 #undef C
 }
 
-extern struct page *default_ldt_page;
-extern void load_LDT_nolock(mm_context_t *pc, int cpu);
+static inline void clear_LDT(void)
+{
+	int cpu = get_cpu();
+
+	set_ldt_desc(cpu, &default_ldt[0], 5);
+	load_LDT_desc();
+	put_cpu();
+}
+
+/*
+ * load one particular LDT into the current CPU
+ */
+static inline void load_LDT_nolock(mm_context_t *pc, int cpu)
+{
+	void *segments = pc->ldt;
+	int count = pc->size;
+
+	if (likely(!count)) {
+		segments = &default_ldt[0];
+		count = 5;
+	}
+		
+	set_ldt_desc(cpu, segments, count);
+	load_LDT_desc();
+}
 
 static inline void load_LDT(mm_context_t *pc)
 {
@@ -116,12 +134,12 @@ static inline void set_user_cs(struct desc_struct *desc, unsigned long limit)
 }
 
 #define load_user_cs_desc(cpu, mm) \
-    	cpu_gdt_table[(cpu)][GDT_ENTRY_DEFAULT_USER_CS] = (mm)->context.user_cs
+    	per_cpu(cpu_gdt_table, cpu)[GDT_ENTRY_DEFAULT_USER_CS] = (mm)->context.user_cs
 
 extern void arch_add_exec_range(struct mm_struct *mm, unsigned long limit);
 extern void arch_remove_exec_range(struct mm_struct *mm, unsigned long limit);
 extern void arch_flush_exec_range(struct mm_struct *mm);
 
-
 #endif /* !__ASSEMBLY__ */
+
 #endif

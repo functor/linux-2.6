@@ -7,7 +7,7 @@
  * Bugreports.to..: <Linux390@de.ibm.com>
  * (C) IBM Corporation, IBM Deutschland Entwicklung GmbH, 1999-2001
  *
- * $Revision: 1.147 $
+ * $Revision: 1.149 $
  */
 
 #include <linux/config.h>
@@ -1103,13 +1103,16 @@ static void
 dasd_end_request_cb(struct dasd_ccw_req * cqr, void *data)
 {
 	struct request *req;
+	struct dasd_device *device;
+	int status;
 
 	req = (struct request *) data;
-	dasd_profile_end(cqr->device, cqr, req);
-	spin_lock_irq(&cqr->device->request_queue_lock);
-	dasd_end_request(req, (cqr->status == DASD_CQR_DONE));
-	spin_unlock_irq(&cqr->device->request_queue_lock);
-	dasd_sfree_request(cqr, cqr->device);
+	device = cqr->device; 
+	dasd_profile_end(device, cqr, req);
+	status = cqr->device->discipline->free_cp(cqr,req);
+	spin_lock_irq(&device->request_queue_lock);
+	dasd_end_request(req, status);
+	spin_unlock_irq(&device->request_queue_lock);
 }
 
 

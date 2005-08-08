@@ -45,7 +45,7 @@ struct socket * start_listening(tux_socket_t *listen, int nr)
 
 	/* Create a listening socket: */
 
-	err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sock);
+	err = sock_create_kern(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sock);
 	if (err) {
 		printk(KERN_ERR "TUX: error %d creating socket.\n", err);
 		goto error;

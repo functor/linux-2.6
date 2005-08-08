@@ -19,18 +19,13 @@
 #include <asm/msr.h>
 #include <asm/pgtable.h>
 #include <asm/unistd.h>
-#include <linux/highmem.h>
 
 extern asmlinkage void sysenter_entry(void);
 
 void enable_sep_cpu(void *info)
 {
 	int cpu = get_cpu();
-#ifdef CONFIG_X86_HIGH_ENTRY
-	struct tss_struct *tss = (struct tss_struct *) __fix_to_virt(FIX_TSS_0) + cpu;
-#else
-	struct tss_struct *tss = init_tss + cpu;
-#endif
+	struct tss_struct *tss = &per_cpu(init_tss, cpu);
 
 	tss->ss1 = __KERNEL_CS;
 	tss->esp1 = sizeof(struct tss_struct) + (unsigned long) tss;
@@ -51,19 +46,19 @@ struct page *sysenter_page;
 
 static int __init sysenter_setup(void)
 {
-	unsigned long page = get_zeroed_page(GFP_ATOMIC);
+	void *page = (void *)get_zeroed_page(GFP_ATOMIC);
 
 	__set_fixmap(FIX_VSYSCALL, __pa(page), PAGE_KERNEL_RO);
 	sysenter_page = virt_to_page(page);
 
 	if (!boot_cpu_has(X86_FEATURE_SEP)) {
-		memcpy((void *) page,
+		memcpy(page,
 		       &vsyscall_int80_start,
 		       &vsyscall_int80_end - &vsyscall_int80_start);
 		return 0;
 	}
 
-	memcpy((void *) page,
+	memcpy(page,
 	       &vsyscall_sysenter_start,
 	       &vsyscall_sysenter_end - &vsyscall_sysenter_start);
 

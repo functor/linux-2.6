@@ -26,6 +26,7 @@
 #include <linux/kallsyms.h>
 #include <linux/ptrace.h>
 #include <linux/version.h>
+#include <linux/kprobes.h>
 
 #ifdef CONFIG_EISA
 #include <linux/ioport.h>
@@ -48,14 +49,19 @@
 
 #include <asm/smp.h>
 #include <asm/arch_hooks.h>
+#include <asm/kdebug.h>
 
 #include <linux/irq.h>
 #include <linux/module.h>
 
 #include "mach_traps.h"
 
-struct desc_struct default_ldt[] __attribute__((__section__(".data.default_ldt"))) = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
-struct page *default_ldt_page;
+asmlinkage int system_call(void);
+asmlinkage void lcall7(void);
+asmlinkage void lcall27(void);
+
+struct desc_struct default_ldt[] = { { 0, 0 }, { 0, 0 }, { 0, 0 },
+		{ 0, 0 }, { 0, 0 } };
 
 /* Do we ignore FPU interrupts ? */
 char ignore_fpu_irq = 0;
@@ -88,37 +94,40 @@ asmlinkage void spurious_interrupt_bug(void);
 asmlinkage void machine_check(void);
 
 static int kstack_depth_to_print = 24;
+struct notifier_block *i386die_chain;
+static spinlock_t die_notifier_lock = SPIN_LOCK_UNLOCKED;
 
-static int valid_stack_ptr(struct task_struct *task, void *p)
+int register_die_notifier(struct notifier_block *nb)
 {
-	if (p <= (void *)task->thread_info)
-		return 0;
-	if (kstack_end(p))
-		return 0;
-	return 1;
+	int err = 0;
+	unsigned long flags;
+	spin_lock_irqsave(&die_notifier_lock, flags);
+	err = notifier_chain_register(&i386die_chain, nb);
+	spin_unlock_irqrestore(&die_notifier_lock, flags);
+	return err;
 }
 
-#ifdef CONFIG_FRAME_POINTER
-static void print_context_stack(struct task_struct *task, unsigned long *stack,
-			 unsigned long ebp)
+static inline int valid_stack_ptr(struct thread_info *tinfo, void *p)
+{
+	return	p > (void *)tinfo &&
+		p < (void *)tinfo + THREAD_SIZE - 3;
+}
+
+static inline unsigned long print_context_stack(struct thread_info *tinfo,
+				unsigned long *stack, unsigned long ebp)
 {
 	unsigned long addr;
 
-	while (valid_stack_ptr(task, (void *)ebp)) {
+#ifdef	CONFIG_FRAME_POINTER
+	while (valid_stack_ptr(tinfo, (void *)ebp)) {
 		addr = *(unsigned long *)(ebp + 4);
 		printk(" [<%08lx>] ", addr);
 		print_symbol("%s", addr);
 		printk("\n");
 		ebp = *(unsigned long *)ebp;
 	}
-}
 #else
-static void print_context_stack(struct task_struct *task, unsigned long *stack,
-			 unsigned long ebp)
-{
-	unsigned long addr;
-
-	while (!kstack_end(stack)) {
+	while (valid_stack_ptr(tinfo, stack)) {
 		addr = *stack++;
 		if (__kernel_text_address(addr)) {
 			printk(" [<%08lx>]", addr);
@@ -126,8 +135,9 @@ static void print_context_stack(struct task_struct *task, unsigned long *stack,
 			printk("\n");
 		}
 	}
-}
 #endif
+	return ebp;
+}
 
 void show_trace(struct task_struct *task, unsigned long * stack)
 {
@@ -135,11 +145,6 @@ void show_trace(struct task_struct *task, unsigned long * stack)
 
 	if (!task)
 		task = current;
-
-	if (!valid_stack_ptr(task, stack)) {
-		printk("Stack pointer is garbage, not printing trace\n");
-		return;
-	}
 
 	if (task == current) {
 		/* Grab ebp right from our regs */
@@ -153,7 +158,7 @@ void show_trace(struct task_struct *task, unsigned long * stack)
 		struct thread_info *context;
 		context = (struct thread_info *)
 			((unsigned long)stack & (~(THREAD_SIZE - 1)));
-		print_context_stack(task, stack, ebp);
+		ebp = print_context_stack(context, stack, ebp);
 		stack = (unsigned long*)context->previous_esp;
 		if (!stack)
 			break;
@@ -212,7 +217,7 @@ void show_registers(struct pt_regs *regs)
 		ss = regs->xss & 0xffff;
 	}
 	print_modules();
-	printk("CPU:    %d\nEIP:    %04x:[<%08lx>]    %s\nEFLAGS: %08lx"
+	printk("CPU:    %d\nEIP:    %04x:[<%08lx>]    %s VLI\nEFLAGS: %08lx"
 			"   (%s) \n",
 		smp_processor_id(), 0xffff & regs->xcs, regs->eip,
 		print_tainted(), regs->eflags, UTS_RELEASE);
@@ -230,25 +235,25 @@ void show_registers(struct pt_regs *regs)
 	 * time of the fault..
 	 */
 	if (in_kernel) {
+		u8 *eip;
 
 		printk("\nStack: ");
 		show_stack(NULL, (unsigned long*)esp);
 
 		printk("Code: ");
-		if(regs->eip < PAGE_OFFSET)
-			goto bad;
 
-		for(i=0;i<20;i++)
-		{
-			unsigned char c = 0;
-                        if ((user_mode(regs) && get_user(c, &((unsigned char*)regs->eip)[i])) ||
-                            (!user_mode(regs) && __direct_get_user(c, &((unsigned char*)regs->eip)[i]))) {
-			
-bad:
+		eip = (u8 *)regs->eip - 43;
+		for (i = 0; i < 64; i++, eip++) {
+			unsigned char c;
+
+			if (eip < (u8 *)PAGE_OFFSET || __get_user(c, eip)) {
 				printk(" Bad EIP value.");
 				break;
 			}
-			printk("%02x ", c);
+			if (eip == (u8 *)regs->eip)
+				printk("<%02x> ", c);
+			else
+				printk("%02x ", c);
 		}
 	}
 	printk("\n");
@@ -267,14 +272,16 @@ static void handle_BUG(struct pt_regs *regs)
 
 	eip = regs->eip;
 
-	if (__direct_get_user(ud2, (unsigned short *)eip))
+	if (eip < PAGE_OFFSET)
+		goto no_bug;
+	if (__get_user(ud2, (unsigned short *)eip))
 		goto no_bug;
 	if (ud2 != 0x0b0f)
 		goto no_bug;
-	if (__direct_get_user(line, (unsigned short *)(eip + 2)))
+	if (__get_user(line, (unsigned short *)(eip + 2)))
 		goto bug;
-	if (__direct_get_user(file, (char **)(eip + 4)) ||
-			__direct_get_user(c, file))
+	if (__get_user(file, (char **)(eip + 4)) ||
+		(unsigned long)file < PAGE_OFFSET || __get_user(c, file))
 		file = "<bad filename>";
 
 	printk("------------[ cut here ]------------\n");
@@ -288,51 +295,57 @@ bug:
 	printk("Kernel BUG\n");
 }
 
-spinlock_t die_lock = SPIN_LOCK_UNLOCKED;
-static int die_owner = -1;
-
 void die(const char * str, struct pt_regs * regs, long err)
 {
+	static struct {
+		spinlock_t lock;
+		u32 lock_owner;
+		int lock_owner_depth;
+	} die = {
+		.lock =			SPIN_LOCK_UNLOCKED,
+		.lock_owner =		-1,
+		.lock_owner_depth =	0
+	};
 	static int die_counter;
-	int nl = 0;
 
-	console_verbose();
-	local_irq_disable();
-	if (!spin_trylock(&die_lock)) {
-		if (smp_processor_id() != die_owner)
-			spin_lock(&die_lock);
-		/* allow recursive die to fall through */
+	if (die.lock_owner != smp_processor_id()) {
+		console_verbose();
+		spin_lock_irq(&die.lock);
+		die.lock_owner = smp_processor_id();
+		die.lock_owner_depth = 0;
+		bust_spinlocks(1);
 	}
-	die_owner = smp_processor_id();
-	bust_spinlocks(1);
-	handle_BUG(regs);
-	printk(KERN_ALERT "%s: %04lx [#%d]\n", str, err & 0xffff, ++die_counter);
+
+	if (++die.lock_owner_depth < 3) {
+		int nl = 0;
+		handle_BUG(regs);
+		printk(KERN_ALERT "%s: %04lx [#%d]\n", str, err & 0xffff, ++die_counter);
 #ifdef CONFIG_PREEMPT
-	printk("PREEMPT ");
-	nl = 1;
+		printk("PREEMPT ");
+		nl = 1;
 #endif
 #ifdef CONFIG_SMP
-	printk("SMP ");
-	nl = 1;
+		printk("SMP ");
+		nl = 1;
 #endif
 #ifdef CONFIG_DEBUG_PAGEALLOC
-	printk("DEBUG_PAGEALLOC");
-	nl = 1;
+		printk("DEBUG_PAGEALLOC");
+		nl = 1;
 #endif
-	if (nl)
-		printk("\n");
-	show_registers(regs);
-	if (netdump_func)
-		netdump_func(regs);
+		if (nl)
+			printk("\n");
+	notify_die(DIE_OOPS, (char *)str, regs, err, 255, SIGSEGV);
+		show_registers(regs);
+  	} else
+		printk(KERN_ERR "Recursive die() failure, output suppressed\n");
+
 	bust_spinlocks(0);
-	die_owner = -1;
-	spin_unlock_irq(&die_lock);
+	die.lock_owner = -1;
+	spin_unlock_irq(&die.lock);
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 
 	if (panic_on_oops) {
-		if (netdump_func)
-			netdump_func = NULL;
 		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(5 * HZ);
@@ -395,6 +408,9 @@ static inline void do_trap(int trapnr, int signr, char *str, int vm86,
 #define DO_ERROR(trapnr, signr, str, name) \
 asmlinkage void do_##name(struct pt_regs * regs, long error_code) \
 { \
+	if (notify_die(DIE_TRAP, str, regs, error_code, trapnr, signr) \
+						== NOTIFY_STOP) \
+		return; \
 	do_trap(trapnr, signr, str, 0, regs, error_code, NULL); \
 }
 
@@ -406,12 +422,18 @@ asmlinkage void do_##name(struct pt_regs * regs, long error_code) \
 	info.si_errno = 0; \
 	info.si_code = sicode; \
 	info.si_addr = (void __user *)siaddr; \
+	if (notify_die(DIE_TRAP, str, regs, error_code, trapnr, signr) \
+						== NOTIFY_STOP) \
+		return; \
 	do_trap(trapnr, signr, str, 0, regs, error_code, &info); \
 }
 
 #define DO_VM86_ERROR(trapnr, signr, str, name) \
 asmlinkage void do_##name(struct pt_regs * regs, long error_code) \
 { \
+	if (notify_die(DIE_TRAP, str, regs, error_code, trapnr, signr) \
+						== NOTIFY_STOP) \
+		return; \
 	do_trap(trapnr, signr, str, 1, regs, error_code, NULL); \
 }
 
@@ -423,11 +445,16 @@ asmlinkage void do_##name(struct pt_regs * regs, long error_code) \
 	info.si_errno = 0; \
 	info.si_code = sicode; \
 	info.si_addr = (void __user *)siaddr; \
+	if (notify_die(DIE_TRAP, str, regs, error_code, trapnr, signr) \
+						== NOTIFY_STOP) \
+		return; \
 	do_trap(trapnr, signr, str, 1, regs, error_code, &info); \
 }
 
 DO_VM86_ERROR_INFO( 0, SIGFPE,  "divide error", divide_error, FPE_INTDIV, regs->eip)
+#ifndef CONFIG_KPROBES
 DO_VM86_ERROR( 3, SIGTRAP, "int3", int3)
+#endif
 DO_VM86_ERROR( 4, SIGSEGV, "overflow", overflow)
 DO_VM86_ERROR( 5, SIGSEGV, "bounds", bounds)
 DO_ERROR_INFO( 6, SIGILL,  "invalid operand", invalid_op, ILL_ILLOPN, regs->eip)
@@ -435,7 +462,7 @@ DO_ERROR( 9, SIGFPE,  "coprocessor segment overrun", coprocessor_segment_overrun
 DO_ERROR(10, SIGSEGV, "invalid TSS", invalid_TSS)
 DO_ERROR(11, SIGBUS,  "segment not present", segment_not_present)
 DO_ERROR(12, SIGBUS,  "stack segment", stack_segment)
-DO_ERROR_INFO(17, SIGBUS, "alignment check", alignment_check, BUS_ADRALN, get_cr2())
+DO_ERROR_INFO(17, SIGBUS, "alignment check", alignment_check, BUS_ADRALN, 0)
 
 /*
  * the original non-exec stack patch was written by
@@ -443,9 +470,36 @@ DO_ERROR_INFO(17, SIGBUS, "alignment check", alignment_check, BUS_ADRALN, get_cr
  */
 asmlinkage void do_general_protection(struct pt_regs * regs, long error_code)
 {
-	if (regs->eflags & X86_EFLAGS_IF)
-		local_irq_enable();
- 
+	int cpu = get_cpu();
+	struct tss_struct *tss = &per_cpu(init_tss, cpu);
+	struct thread_struct *thread = &current->thread;
+
+	/*
+	 * Perform the lazy TSS's I/O bitmap copy. If the TSS has an
+	 * invalid offset set (the LAZY one) and the faulting thread has
+	 * a valid I/O bitmap pointer, we copy the I/O bitmap in the TSS
+	 * and we set the offset field correctly. Then we let the CPU to
+	 * restart the faulting instruction.
+	 */
+	if (tss->io_bitmap_base == INVALID_IO_BITMAP_OFFSET_LAZY &&
+	    thread->io_bitmap_ptr) {
+		memcpy(tss->io_bitmap, thread->io_bitmap_ptr,
+		       thread->io_bitmap_max);
+		/*
+		 * If the previously set map was extending to higher ports
+		 * than the current one, pad extra space with 0xff (no access).
+		 */
+		if (thread->io_bitmap_max < tss->io_bitmap_max)
+			memset((char *) tss->io_bitmap +
+				thread->io_bitmap_max, 0xff,
+				tss->io_bitmap_max - thread->io_bitmap_max);
+		tss->io_bitmap_max = thread->io_bitmap_max;
+		tss->io_bitmap_base = IO_BITMAP_OFFSET;
+		put_cpu();
+		return;
+	}
+	put_cpu();
+
 	if (regs->eflags & VM_MASK)
 		goto gp_in_vm86;
 
@@ -471,7 +525,7 @@ asmlinkage void do_general_protection(struct pt_regs * regs, long error_code)
 		set_user_cs(&current->mm->context.user_cs, limit);
 
 		desc1 = &current->mm->context.user_cs;
-		desc2 = cpu_gdt_table[cpu] + GDT_ENTRY_DEFAULT_USER_CS;
+		desc2 = per_cpu(cpu_gdt_table, cpu) + GDT_ENTRY_DEFAULT_USER_CS;
 
 		/*
 		 * The CS was not in sync - reload it and retry the
@@ -503,15 +557,19 @@ gp_in_vm86:
 	return;
 
 gp_in_kernel:
-	if (!fixup_exception(regs))
+	if (!fixup_exception(regs)) {
+		if (notify_die(DIE_GPF, "general protection fault", regs,
+				error_code, 13, SIGSEGV) == NOTIFY_STOP);
+			return;
 		die("general protection fault", regs, error_code);
+	}
 }
 
 static void mem_parity_error(unsigned char reason, struct pt_regs * regs)
 {
 	printk("Uhhuh. NMI received. Dazed and confused, but trying to continue\n");
 	printk("You probably have a hardware problem with your RAM chips\n");
-	panic("Halting\n");
+
 	/* Clear and disable the memory parity error line. */
 	clear_mem_error(reason);
 }
@@ -548,11 +606,35 @@ static void unknown_nmi_error(unsigned char reason, struct pt_regs * regs)
 	printk("Do you have a strange power saving mode enabled?\n");
 }
 
+static spinlock_t nmi_print_lock = SPIN_LOCK_UNLOCKED;
+
+void die_nmi (struct pt_regs *regs, const char *msg)
+{
+	spin_lock(&nmi_print_lock);
+	/*
+	* We are in trouble anyway, lets at least try
+	* to get a message out.
+	*/
+	bust_spinlocks(1);
+	printk(msg);
+	printk(" on CPU%d, eip %08lx, registers:\n",
+		smp_processor_id(), regs->eip);
+	show_registers(regs);
+	printk("console shuts up ...\n");
+	console_silent();
+	spin_unlock(&nmi_print_lock);
+	bust_spinlocks(0);
+	do_exit(SIGSEGV);
+}
+
 static void default_do_nmi(struct pt_regs * regs)
 {
 	unsigned char reason = get_nmi_reason();
  
 	if (!(reason & 0xc0)) {
+		if (notify_die(DIE_NMI_IPI, "nmi_ipi", regs, reason, 0, SIGINT)
+							== NOTIFY_STOP)
+			return;
 #ifdef CONFIG_X86_LOCAL_APIC
 		/*
 		 * Ok, so this is none of the documented NMI sources,
@@ -566,6 +648,8 @@ static void default_do_nmi(struct pt_regs * regs)
 		unknown_nmi_error(reason, regs);
 		return;
 	}
+	if (notify_die(DIE_NMI, "nmi", regs, reason, 0, SIGINT) == NOTIFY_STOP)
+		return;
 	if (reason & 0x80)
 		mem_parity_error(reason, regs);
 	if (reason & 0x40)
@@ -609,6 +693,20 @@ void unset_nmi_callback(void)
 	nmi_callback = dummy_nmi_callback;
 }
 
+#ifdef CONFIG_KPROBES
+asmlinkage int do_int3(struct pt_regs *regs, long error_code)
+{
+	if (notify_die(DIE_INT3, "int3", regs, error_code, 3, SIGTRAP)
+			== NOTIFY_STOP)
+		return 1;
+	/* This is an interrupt gate, because kprobes wants interrupts
+	disabled.  Normal trap handlers don't. */
+	restore_interrupts(regs);
+	do_trap(3, SIGTRAP, "int3", 1, regs, error_code, NULL);
+	return 0;
+}
+#endif
+
 /*
  * Our handling of the processor debug registers is non-trivial.
  * We do not clear them on entry and exit from the kernel. Therefore
@@ -639,22 +737,17 @@ asmlinkage void do_debug(struct pt_regs * regs, long error_code)
 
 	__asm__ __volatile__("movl %%db6,%0" : "=r" (condition));
 
+	if (notify_die(DIE_DEBUG, "debug", regs, condition, error_code,
+					SIGTRAP) == NOTIFY_STOP)
+		return;
 	/* It's safe to allow irq's after DR6 has been saved */
 	if (regs->eflags & X86_EFLAGS_IF)
 		local_irq_enable();
 
-	/*
-	 * Mask out spurious debug traps due to lazy DR7 setting or
-	 * due to 4G/4G kernel mode:
-	 */
+	/* Mask out spurious debug traps due to lazy DR7 setting */
 	if (condition & (DR_TRAP0|DR_TRAP1|DR_TRAP2|DR_TRAP3)) {
 		if (!tsk->thread.debugreg[7])
 			goto clear_dr7;
-		if (!user_mode(regs)) {
-			// restore upon return-to-userspace:
-			set_thread_flag(TIF_DB7);
-			goto clear_dr7;
-		}
 	}
 
 	if (regs->eflags & VM_MASK)
@@ -896,53 +989,19 @@ asmlinkage void math_emulate(long arg)
 
 #endif /* CONFIG_MATH_EMULATION */
 
-void __init trap_init_virtual_IDT(void)
+#ifdef CONFIG_X86_F00F_BUG
+void __init trap_init_f00f_bug(void)
 {
-	/*
-	 * "idt" is magic - it overlaps the idt_descr
-	 * variable so that updating idt will automatically
-	 * update the idt descriptor..
-	 */
-	__set_fixmap(FIX_IDT, __pa(&idt_table), PAGE_KERNEL_RO);
-	idt_descr.address = __fix_to_virt(FIX_IDT);
+	__set_fixmap(FIX_F00F_IDT, __pa(&idt_table), PAGE_KERNEL_RO);
 
+	/*
+	 * Update the IDT descriptor and reload the IDT so that
+	 * it uses the read-only mapped virtual address.
+	 */
+	idt_descr.address = fix_to_virt(FIX_F00F_IDT);
 	__asm__ __volatile__("lidt %0" : : "m" (idt_descr));
 }
-
-void __init trap_init_virtual_GDT(void)
-{
-	int cpu = smp_processor_id();
-	struct Xgt_desc_struct *gdt_desc = cpu_gdt_descr + cpu;
-	struct Xgt_desc_struct tmp_desc = {0, 0};
-	struct tss_struct * t;
-
-	__asm__ __volatile__("sgdt %0": "=m" (tmp_desc): :"memory");
-
-#ifdef CONFIG_X86_HIGH_ENTRY
-	if (!cpu) {
-		__set_fixmap(FIX_GDT_0, __pa(cpu_gdt_table), PAGE_KERNEL);
-		__set_fixmap(FIX_GDT_1, __pa(cpu_gdt_table) + PAGE_SIZE, PAGE_KERNEL);
-		__set_fixmap(FIX_TSS_0, __pa(init_tss), PAGE_KERNEL);
-		__set_fixmap(FIX_TSS_1, __pa(init_tss) + 1*PAGE_SIZE, PAGE_KERNEL);
-		__set_fixmap(FIX_TSS_2, __pa(init_tss) + 2*PAGE_SIZE, PAGE_KERNEL);
-		__set_fixmap(FIX_TSS_3, __pa(init_tss) + 3*PAGE_SIZE, PAGE_KERNEL);
-	}
-
-	gdt_desc->address = __fix_to_virt(FIX_GDT_0) + sizeof(cpu_gdt_table[0]) * cpu;
-#else
-	gdt_desc->address = (unsigned long)cpu_gdt_table[cpu];
 #endif
-	__asm__ __volatile__("lgdt %0": "=m" (*gdt_desc));
-
-#ifdef CONFIG_X86_HIGH_ENTRY
-	t = (struct tss_struct *) __fix_to_virt(FIX_TSS_0) + cpu;
-#else
-	t = init_tss + cpu;
-#endif
-	set_tss_desc(cpu, t);
-	cpu_gdt_table[cpu][GDT_ENTRY_TSS].b &= 0xfffffdff;
-	load_TR_desc();
-}
 
 #define _set_gate(gate_addr,type,dpl,addr,seg) \
 do { \
@@ -969,17 +1028,25 @@ void set_intr_gate(unsigned int n, void *addr)
 	_set_gate(idt_table+n,14,0,addr,__KERNEL_CS);
 }
 
-void __init set_trap_gate(unsigned int n, void *addr)
+/*
+ * This routine sets up an interrupt gate at directory privilege level 3.
+ */
+static inline void set_system_intr_gate(unsigned int n, void *addr)
+{
+	_set_gate(idt_table+n, 14, 3, addr, __KERNEL_CS);
+}
+
+static void __init set_trap_gate(unsigned int n, void *addr)
 {
 	_set_gate(idt_table+n,15,0,addr,__KERNEL_CS);
 }
 
-void __init set_system_gate(unsigned int n, void *addr)
+static void __init set_system_gate(unsigned int n, void *addr)
 {
 	_set_gate(idt_table+n,15,3,addr,__KERNEL_CS);
 }
 
-void __init set_call_gate(void *a, void *addr)
+static void __init set_call_gate(void *a, void *addr)
 {
 	_set_gate(a,12,3,addr,__KERNEL_CS);
 }
@@ -1001,12 +1068,11 @@ void __init trap_init(void)
 #ifdef CONFIG_X86_LOCAL_APIC
 	init_apic_mappings();
 #endif
-	init_entry_mappings();
 
 	set_trap_gate(0,&divide_error);
 	set_intr_gate(1,&debug);
 	set_intr_gate(2,&nmi);
-	set_system_gate(3,&int3);	/* int3-5 can be called from all */
+	set_system_intr_gate(3, &int3); /* int3-5 can be called from all */
 	set_system_gate(4,&overflow);
 	set_system_gate(5,&bounds);
 	set_trap_gate(6,&invalid_op);

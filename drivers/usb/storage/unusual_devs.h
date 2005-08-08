@@ -45,11 +45,6 @@
  *
  */
 
-UNUSUAL_DEV(  0x03ee, 0x0000, 0x0000, 0x0245, 
-		"Mitsumi",
-		"CD-R/RW Drive",
-		US_SC_8020, US_PR_CBI, NULL, 0), 
-
 UNUSUAL_DEV(  0x03ee, 0x6901, 0x0000, 0x0100,
 		"Mitsumi",
 		"USB FDD",
@@ -72,16 +67,6 @@ UNUSUAL_DEV(  0x03f0, 0x0307, 0x0001, 0x0001,
 		"CD-Writer+ CD-4e",
 		US_SC_8070, US_PR_SCM_ATAPI, init_8200e, 0), 
 #endif
-
-/* <torsten.scherer@uni-bielefeld.de>: I don't know the name of the bridge
- * manufacturer, but I've got an external USB drive by the Revoltec company
- * that needs this. otherwise the drive is recognized as /dev/sda, but any
- * access to it blocks indefinitely.
- */
-UNUSUAL_DEV(  0x0402, 0x5621, 0x0103, 0x0103,
-		"Revoltec",
-		"USB/IDE Bridge (ATA/ATAPI)",
-		US_SC_DEVICE, US_PR_DEVICE, NULL, US_FL_FIX_INQUIRY),
 
 /* Deduced by Jonathan Woithe <jwoithe@physics.adelaide.edu.au>
  * Entry needed for flags: US_FL_FIX_INQUIRY because initial inquiry message
@@ -373,6 +358,15 @@ UNUSUAL_DEV(  0x057b, 0x0000, 0x0300, 0x9999,
 		US_SC_DEVICE,  US_PR_DEVICE, NULL,
 		US_FL_SINGLE_LUN),
 
+/* Reported by Johann Cardon <johann.cardon@free.fr>
+ * This entry is needed only because the device reports
+ * bInterfaceClass = 0xff (vendor-specific)
+ */
+UNUSUAL_DEV(  0x057b, 0x0022, 0x0000, 0x9999, 
+		"Y-E Data",
+		"Silicon Media R/W",
+		US_SC_DEVICE, US_PR_DEVICE, NULL, 0),
+
 /* Fabrizio Fellini <fello@libero.it> */
 UNUSUAL_DEV(  0x0595, 0x4343, 0x0000, 0x2210,
 		"Fujifilm",
@@ -384,11 +378,15 @@ UNUSUAL_DEV(  0x059f, 0xa601, 0x0200, 0x0200,
 		"USB Hard Disk",
 		US_SC_RBC, US_PR_CB, NULL, 0 ), 
 
-/* Submitted by Jol Bourquard <numlock@freesurf.ch> */
+/* Submitted by Joel Bourquard <numlock@freesurf.ch>
+ * Some versions of this device need the SubClass and Protocol overrides
+ * while others don't.
+ */
 UNUSUAL_DEV(  0x05ab, 0x0060, 0x1104, 0x1110,
 		"In-System",
 		"PyroGate External CD-ROM Enclosure (FCD-523)",
-		US_SC_SCSI, US_PR_BULK, NULL, 0 ),
+		US_SC_SCSI, US_PR_BULK, NULL,
+		US_FL_NEED_OVERRIDE ),
 
 #ifdef CONFIG_USB_STORAGE_ISD200
 UNUSUAL_DEV(  0x05ab, 0x0031, 0x0100, 0x0110,
@@ -415,6 +413,20 @@ UNUSUAL_DEV(  0x05ab, 0x5701, 0x0100, 0x0110,
 		US_SC_ISD200, US_PR_BULK, isd200_Initialization,
 		0 ),
 #endif
+
+/* Reported by Avi Kivity <avi@argo.co.il> */
+UNUSUAL_DEV( 0x05ac, 0x1203, 0x0001, 0x0001,
+		"Apple",
+		"iPod",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_FIX_CAPACITY ),
+
+/* Reported by <swhite-kernel@parthcomp.com> */
+UNUSUAL_DEV( 0x05ac, 0x1202, 0x0001, 0x0001,
+		"Apple",
+		"iPod",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_FIX_CAPACITY ),
 
 #ifdef CONFIG_USB_STORAGE_JUMPSHOT
 UNUSUAL_DEV(  0x05dc, 0x0001, 0x0000, 0x0001,
@@ -482,6 +494,13 @@ UNUSUAL_DEV(  0x066b, 0x0105, 0x0100, 0x0100,
 		US_FL_SINGLE_LUN ),
 #endif
 
+/* Reported by Darsen Lu <darsen@micro.ee.nthu.edu.tw> */
+UNUSUAL_DEV( 0x066f, 0x8000, 0x0001, 0x0001,
+		"SigmaTel",
+		"USBMSC Audio Player",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_FIX_CAPACITY ),
+
 /* Submitted by Benny Sjostrand <benny@hostmobility.com> */
 UNUSUAL_DEV( 0x0686, 0x4011, 0x0001, 0x0001,
 		"Minolta",
@@ -510,11 +529,13 @@ UNUSUAL_DEV(  0x0781, 0x0001, 0x0200, 0x0200,
 		US_SC_SCSI, US_PR_CB, NULL,
 		US_FL_SINGLE_LUN ),
 
+#if !defined(CONFIG_BLK_DEV_UB) && !defined(CONFIG_BLK_DEV_UB_MODULE)
 UNUSUAL_DEV(  0x0781, 0x0002, 0x0009, 0x0009, 
 		"Sandisk",
 		"ImageMate SDDR-31",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_IGNORE_SER ),
+#endif
 
 UNUSUAL_DEV(  0x0781, 0x0100, 0x0100, 0x0100,
 		"Sandisk",
@@ -685,7 +706,7 @@ UNUSUAL_DEV(  0x090a, 0x1001, 0x0100, 0x0100,
 		"Trumpion",
 		"t33520 USB Flash Card Controller",
 		US_SC_DEVICE, US_PR_BULK, NULL,
-		US_FL_MODE_XLATE),
+		US_FL_NEED_OVERRIDE | US_FL_MODE_XLATE),
 
 /* Trumpion Microelectronics MP3 player (felipe_alfaro@linuxmail.org) */
 UNUSUAL_DEV( 0x090a, 0x1200, 0x0000, 0x9999,

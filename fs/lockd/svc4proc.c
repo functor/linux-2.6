@@ -53,8 +53,9 @@ nlm4svc_retrieve_args(struct svc_rqst *rqstp, struct nlm_args *argp,
 		*filp = file;
 
 		/* Set up the missing parts of the file_lock structure */
-		lock->fl.fl_file  = &file->f_file;
+		lock->fl.fl_file  = file->f_file;
 		lock->fl.fl_owner = (fl_owner_t) host;
+		lock->fl.fl_lmops = &nlmsvc_lock_operations;
 	}
 
 	return 0;
@@ -127,9 +128,12 @@ nlm4svc_proc_lock(struct svc_rqst *rqstp, struct nlm_args *argp,
 	}
 
 	/* Obtain client and file */
-	if ((resp->status = nlm4svc_retrieve_args(rqstp, argp, &host, &file)))
+	if ((resp->status = nlm4svc_retrieve_args(rqstp, argp, &host, &file))) {
+		dprintk("lockd: LOCK(args)    status %d\n", ntohl(resp->status));
+		if (resp->status == nlm_lck_dropit)
+			return nlm_lck_dropit;
 		return rpc_success;
-
+	}
 #if 0
 	/* If supplied state doesn't match current state, we assume it's
 	 * an old request that time-warped somehow. Any error return would
@@ -545,10 +549,10 @@ struct nlm_void			{ int dummy; };
    .pc_ressize	= sizeof(struct nlm_##rest),		\
    .pc_xdrressize = respsize,				\
  }
-#define	Ck	(1+8)	/* cookie */
-#define	No	(1+1024/4)	/* netobj */
-#define	St	1	/* status */
-#define	Rg	4	/* range (offset + length) */
+#define	Ck	(1+XDR_QUADLEN(NLM_MAXCOOKIELEN))	/* cookie */
+#define	No	(1+1024/4)				/* netobj */
+#define	St	1					/* status */
+#define	Rg	4					/* range (offset + length) */
 struct svc_procedure		nlmsvc_procedures4[] = {
   PROC(null,		void,		void,		void,	void, 1),
   PROC(test,		testargs,	testres,	args,	res, Ck+St+2+No+Rg),

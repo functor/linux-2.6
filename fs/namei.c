@@ -614,7 +614,7 @@ struct path {
  *  It _is_ time-critical.
  */
 static int do_lookup(struct nameidata *nd, struct qstr *name,
-		     struct path *path)
+		     struct path *path, int atomic)
 {
 	struct vfsmount *mnt = nd->mnt;
 	struct dentry *dentry = __d_lookup(nd->dentry, name);
@@ -629,12 +629,16 @@ done:
 	return 0;
 
 need_lookup:
+	if (atomic)
+		return -EWOULDBLOCKIO;
 	dentry = real_lookup(nd->dentry, name, nd);
 	if (IS_ERR(dentry))
 		goto fail;
 	goto done;
 
 need_revalidate:
+	if (atomic)
+		return -EWOULDBLOCKIO;
 	if (dentry->d_op->d_revalidate(dentry, nd))
 		goto done;
 	if (d_invalidate(dentry))
@@ -730,12 +734,9 @@ int fastcall link_path_walk(const char * name, struct nameidata *nd)
 			if (err < 0)
 				break;
 		}
-		err = -EWOULDBLOCKIO;
-		if (atomic)
-			break;
 		nd->flags |= LOOKUP_CONTINUE;
 		/* This does the actual lookups.. */
-		err = do_lookup(nd, &this, &next);
+		err = do_lookup(nd, &this, &next, atomic);
 		if (err)
 			break;
 		/* Check mountpoints.. */
@@ -797,10 +798,7 @@ last_component:
 			if (err < 0)
 				break;
 		}
-		err = -EWOULDBLOCKIO;
-		if (atomic)
-			break;
-		err = do_lookup(nd, &this, &next);
+		err = do_lookup(nd, &this, &next, atomic);
 		if (err)
 			break;
 		follow_mount(&next.mnt, &next.dentry);
@@ -1103,11 +1101,12 @@ static inline int check_sticky(struct inode *dir, struct inode *inode)
 static inline int may_delete(struct inode *dir,struct dentry *victim,int isdir)
 {
 	int error;
+
 	if (!victim->d_inode)
 		return -ENOENT;
-	if (victim->d_parent->d_inode != dir)
-	        BUG();
-	                
+
+	BUG_ON(victim->d_parent->d_inode != dir);
+
 	error = permission(dir,MAY_WRITE | MAY_EXEC, NULL);
 	if (error)
 		return error;
@@ -1673,7 +1672,7 @@ out:
  * if it cannot handle the case of removing a directory
  * that is still in use by something else..
  */
-static void d_unhash(struct dentry *dentry)
+void dentry_unhash(struct dentry *dentry)
 {
 	dget(dentry);
 	spin_lock(&dcache_lock);
@@ -1703,7 +1702,7 @@ int vfs_rmdir(struct inode *dir, struct dentry *dentry)
 	DQUOT_INIT(dir);
 
 	down(&dentry->d_inode->i_sem);
-	d_unhash(dentry);
+	dentry_unhash(dentry);
 	if (d_mountpoint(dentry))
 		error = -EBUSY;
 	else {
@@ -1834,13 +1833,12 @@ asmlinkage long sys_unlink(const char __user * pathname)
 		dput(dentry);
 	}
 	up(&nd.dentry->d_inode->i_sem);
+	if (inode)
+		iput(inode);	/* truncate the inode here */
 exit1:
 	path_release(&nd);
 exit:
 	putname(name);
-
-	if (inode)
-		iput(inode);	/* truncate the inode here */
 	return error;
 
 slashes:
@@ -2046,7 +2044,7 @@ int vfs_rename_dir(struct inode *old_dir, struct dentry *old_dentry,
 	target = new_dentry->d_inode;
 	if (target) {
 		down(&target->i_sem);
-		d_unhash(new_dentry);
+		dentry_unhash(new_dentry);
 	}
 	if (d_mountpoint(old_dentry)||d_mountpoint(new_dentry))
 		error = -EBUSY;
@@ -2330,18 +2328,6 @@ void page_put_link(struct dentry *dentry, struct nameidata *nd)
 	}
 }
 
-int page_follow_link(struct dentry *dentry, struct nameidata *nd)
-{
-	struct page *page = NULL;
-	char *s = page_getlink(dentry, &page);
-	int res = __vfs_follow_link(nd, s);
-	if (page) {
-		kunmap(page);
-		page_cache_release(page);
-	}
-	return res;
-}
-
 int page_symlink(struct inode *inode, const char *symname, int len)
 {
 	struct address_space *mapping = inode->i_mapping;
@@ -2395,10 +2381,8 @@ EXPORT_SYMBOL(follow_up);
 EXPORT_SYMBOL(get_write_access); /* binfmt_aout */
 EXPORT_SYMBOL(getname);
 EXPORT_SYMBOL(lock_rename);
-EXPORT_SYMBOL(lookup_create);
 EXPORT_SYMBOL(lookup_hash);
 EXPORT_SYMBOL(lookup_one_len);
-EXPORT_SYMBOL(page_follow_link);
 EXPORT_SYMBOL(page_follow_link_light);
 EXPORT_SYMBOL(page_put_link);
 EXPORT_SYMBOL(page_readlink);
@@ -2420,4 +2404,5 @@ EXPORT_SYMBOL(vfs_rename);
 EXPORT_SYMBOL(vfs_rmdir);
 EXPORT_SYMBOL(vfs_symlink);
 EXPORT_SYMBOL(vfs_unlink);
+EXPORT_SYMBOL(dentry_unhash);
 EXPORT_SYMBOL(generic_readlink);

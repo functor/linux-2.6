@@ -548,24 +548,27 @@ struct obsolete_modparm {
 	char type[64-sizeof(void *)];
 	void *addr;
 };
+
+static inline void __deprecated MODULE_PARM_(void) { }
 #ifdef MODULE
 /* DEPRECATED: Do not use. */
 #define MODULE_PARM(var,type)						    \
 struct obsolete_modparm __parm_##var __attribute__((section("__obsparm"))) = \
-{ __stringify(var), type };
-
+{ __stringify(var), type, &MODULE_PARM_ };
 #else
-#define MODULE_PARM(var,type)
+#define MODULE_PARM(var,type) static void __attribute__((__unused__)) *__parm_##var = &MODULE_PARM_;
 #endif
 
 #define __MODULE_STRING(x) __stringify(x)
 
 /* Use symbol_get and symbol_put instead.  You'll thank me. */
 #define HAVE_INTER_MODULE
-extern void inter_module_register(const char *, struct module *, const void *);
-extern void inter_module_unregister(const char *);
-extern const void *inter_module_get(const char *);
-extern const void *inter_module_get_request(const char *, const char *);
-extern void inter_module_put(const char *);
+extern void __deprecated inter_module_register(const char *,
+		struct module *, const void *);
+extern void __deprecated inter_module_unregister(const char *);
+extern const void * __deprecated inter_module_get(const char *);
+extern const void * __deprecated inter_module_get_request(const char *,
+		const char *);
+extern void __deprecated inter_module_put(const char *);
 
 #endif /* _LINUX_MODULE_H */

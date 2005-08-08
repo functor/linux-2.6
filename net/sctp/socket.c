@@ -108,7 +108,6 @@ static void sctp_sock_migrate(struct sock *, struct sock *,
 static char *sctp_hmac_alg = SCTP_COOKIE_HMAC_ALG;
 
 extern kmem_cache_t *sctp_bucket_cachep;
-extern int sctp_assoc_valid(struct sock *sk, struct sctp_association *asoc);
 
 /* Get the sndbuf space available at the time on the association.  */
 static inline int sctp_wspace(struct sctp_association *asoc)
@@ -4052,12 +4051,8 @@ SCTP_STATIC int sctp_msghdr_parse(const struct msghdr *msg,
 	for (cmsg = CMSG_FIRSTHDR(msg);
 	     cmsg != NULL;
 	     cmsg = CMSG_NXTHDR((struct msghdr*)msg, cmsg)) {
-		/* Check for minimum length.  The SCM code has this check.  */
-		if (cmsg->cmsg_len < sizeof(struct cmsghdr) ||
-		    (unsigned long)(((char*)cmsg - (char*)msg->msg_control)
-				    + cmsg->cmsg_len) > msg->msg_controllen) {
+		if (!CMSG_OK(msg, cmsg))
 			return -EINVAL;
-		}
 
 		/* Should we parse this header or ignore?  */
 		if (cmsg->cmsg_level != IPPROTO_SCTP)
@@ -4623,4 +4618,29 @@ struct proto sctp_prot = {
 	.hash        =	sctp_hash,
 	.unhash      =	sctp_unhash,
 	.get_port    =	sctp_get_port,
+	.slab_obj_size = sizeof(struct sctp_sock),
 };
+
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+struct proto sctpv6_prot = {
+	.name		= "SCTPv6",
+	.close		= sctp_close,
+	.connect	= sctp_connect,
+	.disconnect	= sctp_disconnect,
+	.accept		= sctp_accept,
+	.ioctl		= sctp_ioctl,
+	.init		= sctp_init_sock,
+	.destroy	= sctp_destroy_sock,
+	.shutdown	= sctp_shutdown,
+	.setsockopt	= sctp_setsockopt,
+	.getsockopt	= sctp_getsockopt,
+	.sendmsg	= sctp_sendmsg,
+	.recvmsg	= sctp_recvmsg,
+	.bind		= sctp_bind,
+	.backlog_rcv	= sctp_backlog_rcv,
+	.hash		= sctp_hash,
+	.unhash		= sctp_unhash,
+	.get_port	= sctp_get_port,
+	.slab_obj_size	= sizeof(struct sctp6_sock),
+};
+#endif /* defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE) */

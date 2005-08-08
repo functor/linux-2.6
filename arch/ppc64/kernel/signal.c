@@ -26,7 +26,7 @@
 #include <linux/unistd.h>
 #include <linux/stddef.h>
 #include <linux/elf.h>
-#include <asm/ppc32.h>
+#include <linux/ptrace.h>
 #include <asm/sigcontext.h>
 #include <asm/ucontext.h>
 #include <asm/uaccess.h>
@@ -99,7 +99,7 @@ long sys_rt_sigsuspend(sigset_t __user *unewset, size_t sigsetsize, int p3, int 
 		current->state = TASK_INTERRUPTIBLE;
 		schedule();
 		if (do_signal(&saveset, regs))
-			return regs->gpr[3];
+			return 0;
 	}
 }
 
@@ -127,7 +127,7 @@ static long setup_sigcontext(struct sigcontext __user *sc, struct pt_regs *regs,
 	 * v_regs pointer or not
 	 */
 #ifdef CONFIG_ALTIVEC
-	elf_vrreg_t __user *v_regs = (elf_vrreg_t __user *)(((unsigned long)sc->vmx_reserve) & ~0xful);
+	elf_vrreg_t __user *v_regs = (elf_vrreg_t __user *)(((unsigned long)sc->vmx_reserve + 15) & ~0xful);
 #endif
 	long err = 0;
 
@@ -178,7 +178,7 @@ static long restore_sigcontext(struct pt_regs *regs, sigset_t *set, int sig,
 	elf_vrreg_t __user *v_regs;
 #endif
 	unsigned long err = 0;
-	unsigned long save_r13;
+	unsigned long save_r13 = 0;
 	elf_greg_t *gregs = (elf_greg_t *)regs;
 	int i;
 
@@ -371,7 +371,8 @@ badframe:
 	printk("badframe in sys_rt_sigreturn, regs=%p uc=%p &uc->uc_mcontext=%p\n",
 	       regs, uc, &uc->uc_mcontext);
 #endif
-	do_exit(SIGSEGV);
+	force_sig(SIGSEGV, current);
+	return 0;
 }
 
 static void setup_rt_frame(int signr, struct k_sigaction *ka, siginfo_t *info,
@@ -420,7 +421,7 @@ static void setup_rt_frame(int signr, struct k_sigaction *ka, siginfo_t *info,
 
 	/* Allocate a dummy caller frame for the signal handler. */
 	newsp = (unsigned long)frame - __SIGNAL_FRAMESIZE;
-	err |= put_user(0, (unsigned long __user *)newsp);
+	err |= put_user(regs->gpr[1], (unsigned long __user *)newsp);
 
 	/* Set up "regs" so we "return" to the signal handler. */
 	err |= get_user(regs->nip, &funct_desc_ptr->entry);
@@ -439,6 +440,9 @@ static void setup_rt_frame(int signr, struct k_sigaction *ka, siginfo_t *info,
 	if (err)
 		goto badframe;
 
+	if (test_thread_flag(TIF_SINGLESTEP))
+		ptrace_notify(SIGTRAP);
+
 	return;
 
 badframe:
@@ -446,7 +450,7 @@ badframe:
 	printk("badframe in setup_rt_frame, regs=%p frame=%p newsp=%lx\n",
 	       regs, frame, newsp);
 #endif
-	do_exit(SIGSEGV);
+	force_sigsegv(signr, current);
 }
 
 
@@ -459,17 +463,13 @@ static void handle_signal(unsigned long sig, struct k_sigaction *ka,
 	/* Set up Signal Frame */
 	setup_rt_frame(sig, ka, info, oldset, regs);
 
-	if (ka->sa.sa_flags & SA_ONESHOT)
-		ka->sa.sa_handler = SIG_DFL;
-
 	if (!(ka->sa.sa_flags & SA_NODEFER)) {
 		spin_lock_irq(&current->sighand->siglock);
-		sigorsets(&current->blocked,&current->blocked,&ka->sa.sa_mask);
+		sigorsets(&current->blocked, &current->blocked, &ka->sa.sa_mask);
 		sigaddset(&current->blocked,sig);
 		recalc_sigpending();
 		spin_unlock_irq(&current->sighand->siglock);
 	}
-	return;
 }
 
 static inline void syscall_restart(struct pt_regs *regs, struct k_sigaction *ka)
@@ -512,6 +512,7 @@ int do_signal(sigset_t *oldset, struct pt_regs *regs)
 {
 	siginfo_t info;
 	int signr;
+	struct k_sigaction ka;
 
 	/*
 	 * If the current thread is 32 bit - invoke the
@@ -523,14 +524,12 @@ int do_signal(sigset_t *oldset, struct pt_regs *regs)
 	if (!oldset)
 		oldset = &current->blocked;
 
-	signr = get_signal_to_deliver(&info, regs, NULL);
+	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
 	if (signr > 0) {
-		struct k_sigaction *ka = &current->sighand->action[signr-1];
-
 		/* Whee!  Actually deliver the signal.  */
 		if (TRAP(regs) == 0x0C00)
-			syscall_restart(regs, ka);
-		handle_signal(signr, ka, &info, oldset, regs);
+			syscall_restart(regs, &ka);
+		handle_signal(signr, &ka, &info, oldset, regs);
 		return 1;
 	}
 

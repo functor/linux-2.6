@@ -28,10 +28,9 @@ static inline void *kmap(struct page *page)
 
 #define kunmap(page) do { (void) (page); } while (0)
 
-#define kmap_atomic(page, idx)			page_address(page)
-#define kmap_atomic_nocache_pfn(pfn, idx)	pfn_to_kaddr(pfn)
-#define kunmap_atomic(addr, idx)		do { } while (0)
-#define kmap_atomic_to_page(ptr)		virt_to_page(ptr)
+#define kmap_atomic(page, idx)		page_address(page)
+#define kunmap_atomic(addr, idx)	do { } while (0)
+#define kmap_atomic_to_page(ptr)	virt_to_page(ptr)
 
 #endif /* CONFIG_HIGHMEM */
 
@@ -41,6 +40,8 @@ static inline void clear_user_highpage(struct page *page, unsigned long vaddr)
 	void *addr = kmap_atomic(page, KM_USER0);
 	clear_user_page(addr, vaddr, page);
 	kunmap_atomic(addr, KM_USER0);
+	/* Make sure this page is cleared on other CPU's too before using it */
+	smp_wmb();
 }
 
 static inline void clear_highpage(struct page *page)
@@ -74,6 +75,8 @@ static inline void copy_user_highpage(struct page *to, struct page *from, unsign
 	copy_user_page(vto, vfrom, vaddr, to);
 	kunmap_atomic(vfrom, KM_USER0);
 	kunmap_atomic(vto, KM_USER1);
+	/* Make sure this page is cleared on other CPU's too before using it */
+	smp_wmb();
 }
 
 static inline void copy_highpage(struct page *to, struct page *from)

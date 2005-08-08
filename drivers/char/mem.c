@@ -31,9 +31,6 @@
 # include <linux/efi.h>
 #endif
 
-#ifdef CONFIG_FB
-extern void fbmem_init(void);
-#endif
 #if defined(CONFIG_S390_TAPE) && defined(CONFIG_S390_TAPE_CHAR)
 extern void tapechar_init(void);
 #endif
@@ -86,7 +83,7 @@ static inline int uncached_access(struct file *file, unsigned long addr)
 	 * above the IO hole... Ah, and of course, XFree86 doesn't pass
 	 * O_SYNC when mapping us to tap IO space. Surprised ?
 	 */
-	return !page_is_ram(addr);
+	return !page_is_ram(addr >> PAGE_SHIFT);
 #else
 	/*
 	 * Accessing memory above the top the kernel knows about or through a file pointer
@@ -213,7 +210,6 @@ static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 {
 	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 	int uncached;
-	unsigned long cursor;
 
 	uncached = uncached_access(file, offset);
 #ifdef pgprot_noncached
@@ -229,13 +225,6 @@ static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 	 */
 	if (uncached)
 		vma->vm_flags |= VM_IO;
-		
-	cursor = vma->vm_pgoff;
-	while ((cursor << PAGE_SHIFT) < offset + vma->vm_end-vma->vm_start) {
-		if (!devmem_is_allowed(cursor))
-			return -EPERM;
-		cursor++;
-	}
 
 	if (remap_page_range(vma, vma->vm_start, offset, vma->vm_end-vma->vm_start,
 			     vma->vm_page_prot))
@@ -383,7 +372,7 @@ static inline size_t read_zero_pagealigned(char __user * buf, size_t size)
 
 		if (vma->vm_start > addr || (vma->vm_flags & VM_WRITE) == 0)
 			goto out_up;
-		if (vma->vm_flags & VM_SHARED)
+		if (vma->vm_flags & (VM_SHARED | VM_HUGETLB))
 			break;
 		count = vma->vm_end - addr;
 		if (count > size)
@@ -666,7 +655,6 @@ static const struct {
 	struct file_operations	*fops;
 } devlist[] = { /* list of minor devices */
 	{1, "mem",     S_IRUSR | S_IWUSR | S_IRGRP, &mem_fops},
-	{2, "kmem",    S_IRUSR | S_IWUSR | S_IRGRP, &kmem_fops},
 	{3, "null",    S_IRUGO | S_IWUGO,           &null_fops},
 #if defined(CONFIG_ISA) || !defined(__mc68000__)
 	{4, "port",    S_IRUSR | S_IWUSR | S_IRGRP, &port_fops},
@@ -696,9 +684,6 @@ static int __init chr_dev_init(void)
 				S_IFCHR | devlist[i].mode, devlist[i].name);
 	}
 	
-#if defined (CONFIG_FB)
-	fbmem_init();
-#endif
 	return 0;
 }
 

@@ -35,6 +35,10 @@
 #include <linux/pm.h>
 #include <linux/agp_backend.h>
 #include <linux/vmalloc.h>
+#include <linux/mm.h>
+#include <asm/io.h>
+#include <asm/cacheflush.h>
+#include <asm/pgtable.h>
 #include "agp.h"
 
 __u32 *agp_gatt_table;
@@ -45,6 +49,26 @@ int agp_memory_reserved;
  * nice to do this some other way instead of needing this export.
  */
 EXPORT_SYMBOL_GPL(agp_memory_reserved);
+
+#if defined(CONFIG_X86)
+int map_page_into_agp(struct page *page)
+{
+	int i;
+	i = change_page_attr(page, 1, PAGE_KERNEL_NOCACHE);
+	global_flush_tlb();
+	return i;
+}
+EXPORT_SYMBOL_GPL(map_page_into_agp);
+
+int unmap_page_from_agp(struct page *page)
+{
+	int i;
+	i = change_page_attr(page, 1, PAGE_KERNEL);
+	global_flush_tlb();
+	return i;
+}
+EXPORT_SYMBOL_GPL(unmap_page_from_agp);
+#endif
 
 /*
  * Generic routines for handling agp_memory structures -
@@ -736,8 +760,10 @@ int agp_generic_create_gatt_table(void)
 	agp_bridge->gatt_bus_addr = virt_to_phys(agp_bridge->gatt_table_real);
 
 	/* AK: bogus, should encode addresses > 4GB */
-	for (i = 0; i < num_entries; i++)
-		agp_bridge->gatt_table[i] = (unsigned long) agp_bridge->scratch_page;
+	for (i = 0; i < num_entries; i++) {
+		writel(agp_bridge->scratch_page, agp_bridge->gatt_table+i);
+		readl(agp_bridge->gatt_table+i);	/* PCI Posting. */
+	}
 
 	return 0;
 }
@@ -843,9 +869,8 @@ int agp_generic_insert_memory(struct agp_memory * mem, off_t pg_start, int type)
 	j = pg_start;
 
 	while (j < (pg_start + mem->page_count)) {
-		if (!PGE_EMPTY(agp_bridge, agp_bridge->gatt_table[j])) {
+		if (!PGE_EMPTY(agp_bridge, readl(agp_bridge->gatt_table+j)))
 			return -EBUSY;
-		}
 		j++;
 	}
 
@@ -854,10 +879,10 @@ int agp_generic_insert_memory(struct agp_memory * mem, off_t pg_start, int type)
 		mem->is_flushed = TRUE;
 	}
 
-	for (i = 0, j = pg_start; i < mem->page_count; i++, j++)
-		agp_bridge->gatt_table[j] =
-				agp_bridge->driver->mask_memory(
-						mem->memory[i], mem->type);
+	for (i = 0, j = pg_start; i < mem->page_count; i++, j++) {
+		writel(agp_bridge->driver->mask_memory(mem->memory[i], mem->type), agp_bridge->gatt_table+j);
+		readl(agp_bridge->gatt_table+j);	/* PCI Posting. */
+	}
 
 	agp_bridge->driver->tlb_flush(mem);
 	return 0;
@@ -876,10 +901,11 @@ int agp_generic_remove_memory(struct agp_memory *mem, off_t pg_start, int type)
 
 	/* AK: bogus, should encode addresses > 4GB */
 	for (i = pg_start; i < (mem->page_count + pg_start); i++) {
-		agp_bridge->gatt_table[i] =
-		    (unsigned long) agp_bridge->scratch_page;
+		writel(agp_bridge->scratch_page, agp_bridge->gatt_table+i);
+		readl(agp_bridge->gatt_table+i);	/* PCI Posting. */
 	}
 
+	global_cache_flush();
 	agp_bridge->driver->tlb_flush(mem);
 	return 0;
 }

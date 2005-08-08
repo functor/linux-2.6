@@ -121,10 +121,10 @@ static int dummy_vm_enough_memory(long pages)
 	/*
 	 * Sometimes we want to use more memory than we have
 	 */
-	if (sysctl_overcommit_memory == 1)
+	if (sysctl_overcommit_memory == OVERCOMMIT_ALWAYS)
 		return 0;
 
-	if (sysctl_overcommit_memory == 0) {
+	if (sysctl_overcommit_memory == OVERCOMMIT_GUESS) {
 		free = get_page_cache_size();
 		free += nr_free_pages();
 		free += nr_swap_pages;
@@ -174,7 +174,7 @@ static void dummy_bprm_free_security (struct linux_binprm *bprm)
 static void dummy_bprm_apply_creds (struct linux_binprm *bprm, int unsafe)
 {
 	if (bprm->e_uid != current->uid || bprm->e_gid != current->gid) {
-		current->mm->dumpable = 0;
+		current->mm->dumpable = suid_dumpable;
 
 		if ((unsafe & ~LSM_UNSAFE_PTRACE_CAP) && !capable(CAP_SETUID)) {
 			bprm->e_uid = current->uid;
@@ -447,17 +447,17 @@ static int dummy_inode_removexattr (struct dentry *dentry, char *name)
 	return 0;
 }
 
-static int dummy_inode_getsecurity(struct dentry *dentry, const char *name, void *buffer, size_t size)
+static int dummy_inode_getsecurity(struct inode *inode, const char *name, void *buffer, size_t size)
 {
 	return -EOPNOTSUPP;
 }
 
-static int dummy_inode_setsecurity(struct dentry *dentry, const char *name, const void *value, size_t size, int flags) 
+static int dummy_inode_setsecurity(struct inode *inode, const char *name, const void *value, size_t size, int flags)
 {
 	return -EOPNOTSUPP;
 }
 
-static int dummy_inode_listsecurity(struct dentry *dentry, char *buffer)
+static int dummy_inode_listsecurity(struct inode *inode, char *buffer, size_t buffer_size)
 {
 	return 0;
 }
@@ -511,8 +511,7 @@ static int dummy_file_set_fowner (struct file *file)
 }
 
 static int dummy_file_send_sigiotask (struct task_struct *tsk,
-				      struct fown_struct *fown, int fd,
-				      int reason)
+				      struct fown_struct *fown, int sig)
 {
 	return 0;
 }

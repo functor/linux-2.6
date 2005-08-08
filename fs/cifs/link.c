@@ -106,7 +106,7 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 	up(&direntry->d_sb->s_vfs_rename_sem);
 
 	if (!full_path)
-		goto out;
+		goto out_no_free;
 
 	cFYI(1, ("Full path: %s inode = 0x%p", full_path, inode));
 	cifs_sb = CIFS_SB(inode->i_sb);
@@ -126,9 +126,8 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 	else {
 		/* rc = CIFSSMBQueryReparseLinkInfo */
 		/* BB Add code to Query ReparsePoint info */
+		/* BB Add MAC style xsymlink check here if enabled */
 	}
-	/* BB Anything else to do to handle recursive links? */
-	/* BB Should we be using page symlink ops here? */
 
 	if (rc == 0) {
 
@@ -142,6 +141,7 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 
 out:
 	kfree(full_path);
+out_no_free:
 	FreeXid(xid);
 	nd_set_link(nd, target_path);
 	return 0;
@@ -293,10 +293,7 @@ cifs_readlink(struct dentry *direntry, char __user *pBuffer, int buflen)
 					if(referrals)
 						kfree(referrals);
 					kfree(tmp_path);
-					if(referrals) {
-						kfree(referrals);
-					}
-				}
+}
 				/* BB add code like else decode referrals then memcpy to
 				  tmpbuffer and free referrals string array BB */
 			}

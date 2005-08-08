@@ -218,11 +218,16 @@ asmlinkage int handle_IRQ_event(unsigned int irq,
 		struct pt_regs *regs, struct irqaction *action)
 {
 	int status = 1;	/* Force the "do bottom halves" bit */
-	int retval = 0;
+	int ret, retval = 0;
+
+	if (!(action->flags & SA_INTERRUPT))
+		local_irq_enable();
 
 	do {
-		status |= action->flags;
-		retval |= action->handler(irq, action->dev_id, regs);
+		ret = action->handler(irq, action->dev_id, regs);
+		if (ret == IRQ_HANDLED)
+			status |= action->flags;
+		retval |= ret;
 		action = action->next;
 	} while (action);
 	if (status & SA_SAMPLE_RANDOM)
@@ -266,14 +271,105 @@ static void report_bad_irq(int irq, irq_desc_t *desc, irqreturn_t action_ret)
 
 static int noirqdebug;
 
-static int __init noirqdebug_setup(char *str)
+int __init noirqdebug_setup(char *str)
 {
 	noirqdebug = 1;
-	printk("IRQ lockup detection disabled\n");
+	printk(KERN_INFO "IRQ lockup detection disabled\n");
 	return 1;
 }
 
 __setup("noirqdebug", noirqdebug_setup);
+
+static int irqfixup;
+
+static int __init irqfixup_setup(char *str)
+{
+	irqfixup = 1;
+	printk(KERN_WARNING "Misrouted IRQ fixup support enabled.\n");
+	printk(KERN_WARNING "This may impact system performance.\n");
+	return 1;
+}
+
+__setup("irqfixup", irqfixup_setup);
+
+static int __init irqpoll_setup(char *str)
+{
+	irqfixup = 2;
+	printk(KERN_WARNING "Misrouted IRQ fixup and polling support enabled.\n");
+	printk(KERN_WARNING "This may significantly impact system performance.\n");
+	return 1;
+}
+
+__setup("irqpoll", irqpoll_setup);
+
+/*
+ *	Recovery handler for misrouted interrupts
+ */
+
+static asmlinkage int misrouted_irq(int irq, struct pt_regs *regs)
+{
+	int i;
+	irq_desc_t *desc;
+	int ok = 0;
+	int work = 0;	/* Did we do work for a real IRQ */
+	for(i = 1; i < NR_IRQS; i++)
+	{
+		struct irqaction *action;
+		if(i == irq)	/* Already tried */
+			continue;
+		desc = &irq_desc[i];
+		spin_lock(&desc->lock);
+		action = desc->action;
+		/* Already running on another processor */
+		if(desc->status & IRQ_INPROGRESS)
+		{
+			/* Already running: If it is shared get the other
+			   CPU to go looking for our mystery interrupt too */
+			if(desc->action && (desc->action->flags & SA_SHIRQ))
+				desc->status |= IRQ_PENDING;
+			spin_unlock(&desc->lock);
+			continue;
+		}
+		/* Honour the normal IRQ locking */
+		desc->status |= IRQ_INPROGRESS;
+		spin_unlock(&desc->lock);
+		while(action)
+		{
+			/* Only shared IRQ handlers are safe to call */
+			if(action->flags & SA_SHIRQ)
+			{
+				if(action->handler(i, action->dev_id, regs) == IRQ_HANDLED)
+					ok = 1;
+			}
+			action = action->next;
+		}
+		local_irq_disable();
+		/* Now clean up the flags */
+		spin_lock(&desc->lock);
+		action = desc->action;
+
+		/* While we were looking for a fixup someone queued a real
+		   IRQ clashing with our walk */
+
+		while((desc->status & IRQ_PENDING) && action)
+		{
+			/* Perform real IRQ processing for the IRQ we deferred */
+			work = 1;
+			spin_unlock(&desc->lock);
+			handle_IRQ_event(i, regs, action);
+			spin_lock(&desc->lock);
+			desc->status &= ~IRQ_PENDING;
+		}
+		desc->status &= ~IRQ_INPROGRESS;
+		/* If we did actual work for the real IRQ line we must
+		   let the IRQ controller clean up too */
+		if(work)
+			desc->handler->end(i);
+		spin_unlock(&desc->lock);
+	}
+	/* So the caller can adjust the irq error counts */
+	return ok;
+}
 
 /*
  * If 99,900 of the previous 100,000 interrupts have not been handled then
@@ -285,12 +381,60 @@ __setup("noirqdebug", noirqdebug_setup);
  *
  * Called under desc->lock
  */
-static void note_interrupt(int irq, irq_desc_t *desc, irqreturn_t action_ret)
+static void note_interrupt(int irq, irq_desc_t *desc, irqreturn_t action_ret, struct pt_regs *regs)
 {
 	if (action_ret != IRQ_HANDLED) {
 		desc->irqs_unhandled++;
 		if (action_ret != IRQ_NONE)
 			report_bad_irq(irq, desc, action_ret);
+	}
+	if(unlikely(irqfixup))	/* Don't punish working computers */
+	{
+		if((irqfixup == 2 && irq == 0) || action_ret == IRQ_NONE)
+		{
+			int ok;
+			u32 *isp;
+			union irq_ctx * curctx;
+			union irq_ctx * irqctx;
+
+			curctx = (union irq_ctx *) current_thread_info();
+			irqctx = hardirq_ctx[smp_processor_id()];
+
+			spin_unlock(&desc->lock);
+
+			/*
+			 * this is where we switch to the IRQ stack. However, if we are already using
+			 * the IRQ stack (because we interrupted a hardirq handler) we can't do that
+			 * and just have to keep using the current stack (which is the irq stack already
+			 * after all)
+			 */
+
+			if (curctx == irqctx)
+				ok = misrouted_irq(irq, regs);
+			else {
+				/* build the stack frame on the IRQ stack */
+				isp = (u32*) ((char*)irqctx + sizeof(*irqctx));
+				irqctx->tinfo.task = curctx->tinfo.task;
+				irqctx->tinfo.previous_esp = current_stack_pointer();
+
+				*--isp = (u32) regs;
+				*--isp = (u32) irq;
+
+				asm volatile(
+				"       xchgl   %%ebx,%%esp     \n"
+				"       call    misrouted_irq   \n"
+				"       xchgl   %%ebx,%%esp     \n"
+				: "=a"(ok)
+				: "b"(isp)
+				: "memory", "cc", "edx", "ecx"
+				);
+			}
+			spin_lock(&desc->lock);
+			if (curctx != irqctx)
+				irqctx->tinfo.task = NULL;
+			if(action_ret == IRQ_NONE)
+				desc->irqs_unhandled -= ok;
+		}
 	}
 
 	desc->irq_count++;
@@ -483,6 +627,7 @@ asmlinkage unsigned int do_IRQ(struct pt_regs regs)
 	 * useful for irq hardware that does not mask cleanly in an
 	 * SMP environment.
 	 */
+#ifdef CONFIG_4KSTACKS
 
 	for (;;) {
 		irqreturn_t action_ret;
@@ -508,8 +653,6 @@ asmlinkage unsigned int do_IRQ(struct pt_regs regs)
 			/* build the stack frame on the IRQ stack */
 			isp = (u32*) ((char*)irqctx + sizeof(*irqctx));
 			irqctx->tinfo.task = curctx->tinfo.task;
-			irqctx->tinfo.real_stack = curctx->tinfo.real_stack;
-			irqctx->tinfo.virtual_stack = curctx->tinfo.virtual_stack;
 			irqctx->tinfo.previous_esp = current_stack_pointer();
 
 			*--isp = (u32) action;
@@ -529,7 +672,7 @@ asmlinkage unsigned int do_IRQ(struct pt_regs regs)
 		}
 		spin_lock(&desc->lock);
 		if (!noirqdebug)
-			note_interrupt(irq, desc, action_ret);
+			note_interrupt(irq, desc, action_ret, &regs);
 		if (curctx != irqctx)
 			irqctx->tinfo.task = NULL;
 		if (likely(!(desc->status & IRQ_PENDING)))
@@ -537,6 +680,23 @@ asmlinkage unsigned int do_IRQ(struct pt_regs regs)
 		desc->status &= ~IRQ_PENDING;
 	}
 
+#else
+
+	for (;;) {
+		irqreturn_t action_ret;
+
+		spin_unlock(&desc->lock);
+
+		action_ret = handle_IRQ_event(irq, &regs, action);
+
+		spin_lock(&desc->lock);
+		if (!noirqdebug)
+			note_interrupt(irq, desc, action_ret, &regs);
+		if (likely(!(desc->status & IRQ_PENDING)))
+			break;
+		desc->status &= ~IRQ_PENDING;
+	}
+#endif
 	desc->status &= ~IRQ_INPROGRESS;
 
 out:
@@ -975,13 +1135,15 @@ static int irq_affinity_read_proc(char *page, char **start, off_t off,
 	return len;
 }
 
+int no_irq_affinity;
+
 static int irq_affinity_write_proc(struct file *file, const char __user *buffer,
 					unsigned long count, void *data)
 {
 	int irq = (long)data, full_count = count, err;
 	cpumask_t new_value, tmp;
 
-	if (!irq_desc[irq].handler->set_affinity)
+	if (!irq_desc[irq].handler->set_affinity || no_irq_affinity)
 		return -EIO;
 
 	err = cpumask_parse(buffer, count, new_value);
@@ -1005,32 +1167,6 @@ static int irq_affinity_write_proc(struct file *file, const char __user *buffer,
 }
 
 #endif
-
-static int prof_cpu_mask_read_proc (char *page, char **start, off_t off,
-			int count, int *eof, void *data)
-{
-	int len = cpumask_scnprintf(page, count, *(cpumask_t *)data);
-	if (count - len < 2)
-		return -EINVAL;
-	len += sprintf(page + len, "\n");
-	return len;
-}
-
-static int prof_cpu_mask_write_proc (struct file *file, const char __user *buffer,
-					unsigned long count, void *data)
-{
-	cpumask_t *mask = (cpumask_t *)data;
-	unsigned long full_count = count, err;
-	cpumask_t new_value;
-
-	err = cpumask_parse(buffer, count, new_value);
-	if (err)
-		return err;
-
-	*mask = new_value;
-	return full_count;
-}
-
 #define MAX_NAMELEN 10
 
 static void register_irq_proc (unsigned int irq)
@@ -1066,27 +1202,13 @@ static void register_irq_proc (unsigned int irq)
 #endif
 }
 
-unsigned long prof_cpu_mask = -1;
-
 void init_irq_proc (void)
 {
-	struct proc_dir_entry *entry;
 	int i;
 
 	/* create /proc/irq */
 	root_irq_dir = proc_mkdir("irq", NULL);
-
-	/* create /proc/irq/prof_cpu_mask */
-	entry = create_proc_entry("prof_cpu_mask", 0600, root_irq_dir);
-
-	if (!entry)
-	    return;
-
-	entry->nlink = 1;
-	entry->data = (void *)&prof_cpu_mask;
-	entry->read_proc = prof_cpu_mask_read_proc;
-	entry->write_proc = prof_cpu_mask_write_proc;
-
+	create_prof_cpu_mask(root_irq_dir);
 	/*
 	 * Create entries for all existing IRQs.
 	 */
@@ -1152,8 +1274,6 @@ asmlinkage void do_softirq(void)
 		curctx = current_thread_info();
 		irqctx = softirq_ctx[smp_processor_id()];
 		irqctx->tinfo.task = curctx->task;
-		irqctx->tinfo.real_stack = curctx->real_stack;
-		irqctx->tinfo.virtual_stack = curctx->virtual_stack;
 		irqctx->tinfo.previous_esp = current_stack_pointer();
 
 		/* build the stack frame on the softirq stack */

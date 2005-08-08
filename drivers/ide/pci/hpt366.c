@@ -10,6 +10,11 @@
  * donation of an ABit BP6 mainboard, processor, and memory acellerated
  * development and support.
  *
+ *
+ * Highpoint have their own driver (source except for the raid part)
+ * available from http://www.highpoint-tech.com/hpt3xx-opensource-v131.tgz
+ * This may be useful to anyone wanting to work on the mainstream hpt IDE.
+ *
  * Note that final HPT370 support was done by force extraction of GPL.
  *
  * - add function for getting/setting power status of drive
@@ -103,7 +108,10 @@ static int hpt366_get_info (char *buffer, char **addr, off_t offset, int count)
 		u8 c0, c1;
 
 		p += sprintf(p, "\nController: %d\n", i);
-		p += sprintf(p, "Chipset: HPT%s\n", chipset_nums[class_rev]);
+		if(class_rev < 9)
+			p += sprintf(p, "Chipset: HPT%s\n", chipset_nums[class_rev]);
+		else
+			p += sprintf(p, "Chipset: HPT revision %d\n", class_rev);
 		p += sprintf(p, "--------------- Primary Channel "
 				"--------------- Secondary Channel "
 				"--------------\n");
@@ -169,6 +177,12 @@ static int hpt366_get_info (char *buffer, char **addr, off_t offset, int count)
 }
 #endif  /* defined(DISPLAY_HPT366_TIMINGS) && defined(CONFIG_PROC_FS) */
 
+/*
+ *	This wants fixing so that we do everything not by classrev
+ *	(which breaks on the newest chips) but by creating an
+ *	enumeration of chip variants and using that
+ */
+ 
 static u32 hpt_revision (struct pci_dev *dev)
 {
 	u32 class_rev;
@@ -466,7 +480,11 @@ static int config_chipset_for_dma (ide_drive_t *drive)
 {
 	u8 speed = ide_dma_speed(drive, hpt3xx_ratemask(drive));
 
-	if (!(speed))
+	if (!speed)
+		return 0;
+		
+	/* If we don't have any timings we can't do a lot */
+	if (pci_get_drvdata(HWIF(drive)->pci_dev) == NULL)
 		return 0;
 
 	(void) hpt3xx_tune_chipset(drive, speed);
@@ -777,9 +795,6 @@ static int hpt3xx_tristate (ide_drive_t * drive, int state)
 	u8 reg59h = 0, reset	= (hwif->channel) ? 0x80 : 0x40;
 	u8 regXXh = 0, state_reg= (hwif->channel) ? 0x57 : 0x53;
 
-	if (!hwif)
-		return -EINVAL;
-
 //	hwif->bus_state = state;
 
 	pci_read_config_byte(dev, 0x59, &reg59h);
@@ -812,9 +827,6 @@ static int hpt370_busproc(ide_drive_t * drive, int state)
 	struct pci_dev *dev	= hwif->pci_dev;
 	u8 tristate = 0, resetmask = 0, bus_reg = 0;
 	u16 tri_reg;
-
-	if (!hwif)
-		return -EINVAL;
 
 	hwif->bus_state = state;
 
@@ -892,7 +904,11 @@ static int __devinit init_hpt37x(struct pci_dev *dev)
 
 	/*
 	 * default to pci clock. make sure MA15/16 are set to output
-	 * to prevent drives having problems with 40-pin cables.
+	 * to prevent drives having problems with 40-pin cables. Needed
+	 * for some drives such as IBM-DTLA which will not enter ready
+	 * state on reset when PDIAG is a input.
+	 *
+	 * ToDo: should we set 0x21 when using PLL mode ?
 	 */
 	pci_write_config_byte(dev, 0x5b, 0x23);
 
@@ -958,7 +974,7 @@ static int __devinit init_hpt37x(struct pci_dev *dev)
 			/* Unsupported */
 		} else if (pll == F_LOW_PCI_50) {
 			if (hpt_minimum_revision(dev,8))
-				pci_set_drvdata(dev, NULL);
+				pci_set_drvdata(dev, (void *) fifty_base_hpt370a);
 			else if (hpt_minimum_revision(dev,5))
 				pci_set_drvdata(dev, (void *) fifty_base_hpt372);
 			else if (hpt_minimum_revision(dev,4))
@@ -987,15 +1003,13 @@ static int __devinit init_hpt37x(struct pci_dev *dev)
 	 * result in slow reads when using a 33MHz PCI clock. we also
 	 * don't like to use the PLL because it will cause glitches
 	 * on PRST/SRST when the HPT state engine gets reset.
+	 *
+	 * ToDo: Use 66MHz PLL when ATA133 devices are present on a
+	 * 372 device so we can get ATA133 support
 	 */
 	if (pci_get_drvdata(dev)) 
 		goto init_hpt37X_done;
 	
-	if (hpt_minimum_revision(dev,8))
-	{
-		printk(KERN_ERR "HPT374: Only 33MHz PCI timings are supported.\n");
-		return -EOPNOTSUPP;
-	}
 	/*
 	 * adjust PLL based upon PCI clock, enable it, and wait for
 	 * stabilization.
@@ -1041,6 +1055,9 @@ pll_recal:
 	} 
 
 init_hpt37X_done:
+	if (!pci_get_drvdata(dev))
+		printk(KERN_ERR "HPT37X%s: unknown bus timing [%d %d].\n", 
+			is_372n?"N":"", pll, freq);
 	/* reset state engine */
 	pci_write_config_byte(dev, 0x50, 0x37); 
 	pci_write_config_byte(dev, 0x54, 0x37); 
@@ -1403,7 +1420,7 @@ static struct pci_device_id hpt366_pci_tbl[] = {
 MODULE_DEVICE_TABLE(pci, hpt366_pci_tbl);
 
 static struct pci_driver driver = {
-	.name		= "HPT366 IDE",
+	.name		= "HPT366_IDE",
 	.id_table	= hpt366_pci_tbl,
 	.probe		= hpt366_init_one,
 };

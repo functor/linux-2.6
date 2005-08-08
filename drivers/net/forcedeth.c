@@ -75,6 +75,10 @@
  *			   added CK804/MCP04 device IDs, code fixes
  *			   for registers, link status and other minor fixes.
  *	0.28: 21 Jun 2004: Big cleanup, making driver mostly endian safe
+ *	0.29: 31 Aug 2004: Add backup timer for link change notification.
+ *	0.30: 25 Sep 2004: rx checksum support for nf 250 Gb. Add rx reset
+ *			   into nv_close, otherwise reenabling for wol can
+ *			   cause DMA to kfree'd memory.
  *
  * Known bugs:
  * We suspect that on some hardware no TX done interrupts are generated.
@@ -86,7 +90,7 @@
  * DEV_NEED_TIMERIRQ will not harm you on sane hardware, only generating a few
  * superfluous timer interrupts from the nic.
  */
-#define FORCEDETH_VERSION		"0.28"
+#define FORCEDETH_VERSION		"0.30"
 #define DRV_NAME			"forcedeth"
 
 #include <linux/module.h>
@@ -120,10 +124,11 @@
  * Hardware access:
  */
 
-#define DEV_NEED_LASTPACKET1	0x0001
-#define DEV_IRQMASK_1		0x0002
-#define DEV_IRQMASK_2		0x0004
-#define DEV_NEED_TIMERIRQ	0x0008
+#define DEV_NEED_LASTPACKET1	0x0001	/* set LASTPACKET1 in tx flags */
+#define DEV_IRQMASK_1		0x0002  /* use NVREG_IRQMASK_WANTED_1 for irq mask */
+#define DEV_IRQMASK_2		0x0004  /* use NVREG_IRQMASK_WANTED_2 for irq mask */
+#define DEV_NEED_TIMERIRQ	0x0008  /* set the timer irq flag in the irq mask */
+#define DEV_NEED_LINKTIMER	0x0010	/* poll link settings. Relies on the timer irq */
 
 enum {
 	NvRegIrqStatus = 0x000,
@@ -215,6 +220,7 @@ enum {
 #define NVREG_TXRXCTL_BIT2	0x0004
 #define NVREG_TXRXCTL_IDLE	0x0008
 #define NVREG_TXRXCTL_RESET	0x0010
+#define NVREG_TXRXCTL_RXCHECK	0x0400
 	NvRegMIIStatus = 0x180,
 #define NVREG_MIISTAT_ERROR		0x0001
 #define NVREG_MIISTAT_LINKCHANGE	0x0008
@@ -311,6 +317,10 @@ struct ring_desc {
 #define NV_RX_ERROR		(1<<30)
 #define NV_RX_AVAIL		(1<<31)
 
+#define NV_RX2_CHECKSUMMASK	(0x1C000000)
+#define NV_RX2_CHECKSUMOK1	(0x10000000)
+#define NV_RX2_CHECKSUMOK2	(0x14000000)
+#define NV_RX2_CHECKSUMOK3	(0x18000000)
 #define NV_RX2_DESCRIPTORVALID	(1<<29)
 #define NV_RX2_SUBSTRACT1	(1<<25)
 #define NV_RX2_ERROR1		(1<<18)
@@ -367,9 +377,17 @@ struct ring_desc {
 
 #define OOM_REFILL	(1+HZ/20)
 #define POLL_WAIT	(1+HZ/100)
+#define LINK_TIMEOUT	(3*HZ)
 
+/* 
+ * desc_ver values:
+ * This field has two purposes:
+ * - Newer nics uses a different ring layout. The layout is selected by
+ *   comparing np->desc_ver with DESC_VER_xy.
+ * - It contains bits that are forced on when writing to NvRegTxRxControl.
+ */
 #define DESC_VER_1	0x0
-#define DESC_VER_2	0x02100
+#define DESC_VER_2	(0x02100|NVREG_TXRXCTL_RXCHECK)
 
 /* PHY defines */
 #define PHY_OUI_MARVELL	0x5043
@@ -446,6 +464,11 @@ struct fe_priv {
 	struct timer_list oom_kick;
 	struct timer_list nic_poll;
 
+	/* media detection workaround.
+	 * Locking: Within irq hander or disable_irq+spin_lock(&np->lock);
+	 */
+	int need_linktimer;
+	unsigned long link_timeout;
 	/*
 	 * tx specific fields.
 	 */
@@ -1173,6 +1196,15 @@ static void nv_rx_process(struct net_device *dev)
 					goto next_pkt;
 				}
 			}
+			Flags &= NV_RX2_CHECKSUMMASK;
+			if (Flags == NV_RX2_CHECKSUMOK1 ||
+					Flags == NV_RX2_CHECKSUMOK2 ||
+					Flags == NV_RX2_CHECKSUMOK3) {
+				dprintk(KERN_DEBUG "%s: hw checksum hit!.\n", dev->name);
+				np->rx_skbuff[i]->ip_summed = CHECKSUM_UNNECESSARY;
+			} else {
+				dprintk(KERN_DEBUG "%s: hwchecksum miss!.\n", dev->name);
+			}
 		}
 		/* got a valid packet - forward it to the network core */
 		skb = np->rx_skbuff[i];
@@ -1384,6 +1416,25 @@ set_speed:
 	return retval;
 }
 
+static void nv_linkchange(struct net_device *dev)
+{
+	if (nv_update_linkspeed(dev)) {
+		if (netif_carrier_ok(dev)) {
+			nv_stop_rx(dev);
+		} else {
+			netif_carrier_on(dev);
+			printk(KERN_INFO "%s: link up.\n", dev->name);
+		}
+		nv_start_rx(dev);
+	} else {
+		if (netif_carrier_ok(dev)) {
+			netif_carrier_off(dev);
+			printk(KERN_INFO "%s: link down.\n", dev->name);
+			nv_stop_rx(dev);
+		}
+	}
+}
+
 static void nv_link_irq(struct net_device *dev)
 {
 	u8 *base = get_hwbase(dev);
@@ -1391,25 +1442,10 @@ static void nv_link_irq(struct net_device *dev)
 
 	miistat = readl(base + NvRegMIIStatus);
 	writel(NVREG_MIISTAT_MASK, base + NvRegMIIStatus);
-	dprintk(KERN_DEBUG "%s: link change notification, status 0x%x.\n", dev->name, miistat);
+	dprintk(KERN_INFO "%s: link change irq, status 0x%x.\n", dev->name, miistat);
 
-	if (miistat & (NVREG_MIISTAT_LINKCHANGE)) {
-		if (nv_update_linkspeed(dev)) {
-			if (netif_carrier_ok(dev)) {
-				nv_stop_rx(dev);
-			} else {
-				netif_carrier_on(dev);
-				printk(KERN_INFO "%s: link up.\n", dev->name);
-			}
-			nv_start_rx(dev);
-		} else {
-			if (netif_carrier_ok(dev)) {
-				netif_carrier_off(dev);
-				printk(KERN_INFO "%s: link down.\n", dev->name);
-				nv_stop_rx(dev);
-			}
-		}
-	}
+	if (miistat & (NVREG_MIISTAT_LINKCHANGE))
+		nv_linkchange(dev);
 	dprintk(KERN_DEBUG "%s: link change notification done.\n", dev->name);
 }
 
@@ -1451,6 +1487,12 @@ static irqreturn_t nv_nic_irq(int foo, void *data, struct pt_regs *regs)
 			spin_lock(&np->lock);
 			nv_link_irq(dev);
 			spin_unlock(&np->lock);
+		}
+		if (np->need_linktimer && time_after(jiffies, np->link_timeout)) {
+			spin_lock(&np->lock);
+			nv_linkchange(dev);
+			spin_unlock(&np->lock);
+			np->link_timeout = jiffies + LINK_TIMEOUT;
 		}
 		if (events & (NVREG_IRQ_TX_ERR)) {
 			dprintk(KERN_DEBUG "%s: received irq with events 0x%x. Probably TX fail.\n",
@@ -1655,9 +1697,10 @@ static int nv_close(struct net_device *dev)
 	spin_lock_irq(&np->lock);
 	nv_stop_tx(dev);
 	nv_stop_rx(dev);
-	base = get_hwbase(dev);
+	nv_txrx_reset(dev);
 
 	/* disable interrupts on the nic or we will lock up */
+	base = get_hwbase(dev);
 	writel(0, base + NvRegIrqMask);
 	pci_push(base);
 	dprintk(KERN_INFO "%s: Irqmask is zero again\n", dev->name);
@@ -1816,6 +1859,14 @@ static int __devinit nv_probe(struct pci_dev *pci_dev, const struct pci_device_i
 		np->irqmask = NVREG_IRQMASK_WANTED_2;
 	if (id->driver_data & DEV_NEED_TIMERIRQ)
 		np->irqmask |= NVREG_IRQ_TIMER;
+	if (id->driver_data & DEV_NEED_LINKTIMER) {
+		dprintk(KERN_INFO "%s: link timer on.\n", pci_name(pci_dev));
+		np->need_linktimer = 1;
+		np->link_timeout = jiffies + LINK_TIMEOUT;
+	} else {
+		dprintk(KERN_INFO "%s: link timer off.\n", pci_name(pci_dev));
+		np->need_linktimer = 0;
+	}
 
 	/* find a suitable phy */
 	for (i = 1; i < 32; i++) {
@@ -1909,21 +1960,21 @@ static struct pci_device_id pci_tbl[] = {
 		.device = PCI_DEVICE_ID_NVIDIA_NVENET_1,
 		.subvendor = PCI_ANY_ID,
 		.subdevice = PCI_ANY_ID,
-		.driver_data = DEV_IRQMASK_1|DEV_NEED_TIMERIRQ,
+		.driver_data = DEV_IRQMASK_1|DEV_NEED_TIMERIRQ|DEV_NEED_LINKTIMER,
 	},
 	{	/* nForce2 Ethernet Controller */
 		.vendor = PCI_VENDOR_ID_NVIDIA,
 		.device = PCI_DEVICE_ID_NVIDIA_NVENET_2,
 		.subvendor = PCI_ANY_ID,
 		.subdevice = PCI_ANY_ID,
-		.driver_data = DEV_NEED_LASTPACKET1|DEV_IRQMASK_2|DEV_NEED_TIMERIRQ,
+		.driver_data = DEV_NEED_LASTPACKET1|DEV_IRQMASK_2|DEV_NEED_TIMERIRQ|DEV_NEED_LINKTIMER,
 	},
 	{	/* nForce3 Ethernet Controller */
 		.vendor = PCI_VENDOR_ID_NVIDIA,
 		.device = PCI_DEVICE_ID_NVIDIA_NVENET_3,
 		.subvendor = PCI_ANY_ID,
 		.subdevice = PCI_ANY_ID,
-		.driver_data = DEV_NEED_LASTPACKET1|DEV_IRQMASK_2|DEV_NEED_TIMERIRQ,
+		.driver_data = DEV_NEED_LASTPACKET1|DEV_IRQMASK_2|DEV_NEED_TIMERIRQ|DEV_NEED_LINKTIMER,
 	},
 	{	/* nForce3 Ethernet Controller */
 		.vendor = PCI_VENDOR_ID_NVIDIA,

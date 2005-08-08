@@ -292,8 +292,6 @@ void f_delown(struct file *filp)
 	f_modown(filp, 0, 0, 0, 1);
 }
 
-EXPORT_SYMBOL(f_delown);
-
 static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 		struct file *filp)
 {
@@ -434,11 +432,12 @@ static long band_table[NSIGPOLL] = {
 };
 
 static inline int sigio_perm(struct task_struct *p,
-                             struct fown_struct *fown)
+                             struct fown_struct *fown, int sig)
 {
-	return ((fown->euid == 0) ||
+	return (((fown->euid == 0) ||
  	        (fown->euid == p->suid) || (fown->euid == p->uid) ||
- 	        (fown->uid == p->suid) || (fown->uid == p->uid));
+ 	        (fown->uid == p->suid) || (fown->uid == p->uid)) &&
+ 	        !security_file_send_sigiotask(p, fown, sig));
 }
 
 static void send_sigio_to_task(struct task_struct *p,
@@ -446,10 +445,7 @@ static void send_sigio_to_task(struct task_struct *p,
 			       int fd,
 			       int reason)
 {
-	if (!sigio_perm(p, fown))
-		return;
-
-	if (security_file_send_sigiotask(p, fown, fd, reason))
+	if (!sigio_perm(p, fown, fown->signum))
 		return;
 
 	switch (fown->signum) {
@@ -499,11 +495,9 @@ void send_sigio(struct fown_struct *fown, int fd, int band)
 			send_sigio_to_task(p, fown, fd, band);
 		}
 	} else {
-		struct list_head *l;
-		struct pid *pidptr;
-		for_each_task_pid(-pid, PIDTYPE_PGID, p, l, pidptr) {
+		do_each_task_pid(-pid, PIDTYPE_PGID, p) {
 			send_sigio_to_task(p, fown, fd, band);
-		}
+		} while_each_task_pid(-pid, PIDTYPE_PGID, p);
 	}
 	read_unlock(&tasklist_lock);
  out_unlock_fown:
@@ -513,7 +507,7 @@ void send_sigio(struct fown_struct *fown, int fd, int band)
 static void send_sigurg_to_task(struct task_struct *p,
                                 struct fown_struct *fown)
 {
-	if (sigio_perm(p, fown))
+	if (sigio_perm(p, fown, SIGURG))
 		send_group_sig_info(SIGURG, SEND_SIG_PRIV, p);
 }
 
@@ -536,11 +530,9 @@ int send_sigurg(struct fown_struct *fown)
 			send_sigurg_to_task(p, fown);
 		}
 	} else {
-		struct list_head *l;
-		struct pid *pidptr;
-		for_each_task_pid(-pid, PIDTYPE_PGID, p, l, pidptr) {
+		do_each_task_pid(-pid, PIDTYPE_PGID, p) {
 			send_sigurg_to_task(p, fown);
-		}
+		} while_each_task_pid(-pid, PIDTYPE_PGID, p);
 	}
 	read_unlock(&tasklist_lock);
  out_unlock_fown:

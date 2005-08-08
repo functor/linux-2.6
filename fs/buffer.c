@@ -39,6 +39,7 @@
 #include <linux/cpu.h>
 #include <asm/bitops.h>
 
+static int fsync_buffers_list(spinlock_t *lock, struct list_head *list);
 static void invalidate_bh_lrus(void);
 
 #define BH_ENTRY(list) list_entry((list), struct buffer_head, b_assoc_buffers)
@@ -213,7 +214,7 @@ void end_buffer_write_sync(struct buffer_head *bh, int uptodate)
 	if (uptodate) {
 		set_buffer_uptodate(bh);
 	} else {
-		if (printk_ratelimit()) {
+		if (!buffer_eopnotsupp(bh) && printk_ratelimit()) {
 			buffer_io_error(bh);
 			printk(KERN_WARNING "lost page write due to "
 					"I/O error on %s\n",
@@ -505,6 +506,7 @@ __find_get_block_slow(struct block_device *bdev, sector_t block, int unused)
 	struct buffer_head *bh;
 	struct buffer_head *head;
 	struct page *page;
+	int all_mapped = 1;
 
 	index = block >> (PAGE_CACHE_SHIFT - bd_inode->i_blkbits);
 	page = find_get_page(bd_mapping, index);
@@ -522,14 +524,23 @@ __find_get_block_slow(struct block_device *bdev, sector_t block, int unused)
 			get_bh(bh);
 			goto out_unlock;
 		}
+		if (!buffer_mapped(bh))
+			all_mapped = 0;
 		bh = bh->b_this_page;
 	} while (bh != head);
 
-	printk("__find_get_block_slow() failed. "
-		"block=%llu, b_blocknr=%llu\n",
-		(unsigned long long)block, (unsigned long long)bh->b_blocknr);
-	printk("b_state=0x%08lx, b_size=%u\n", bh->b_state, bh->b_size);
-	printk("device blocksize: %d\n", 1 << bd_inode->i_blkbits);
+	/* we might be here because some of the buffers on this page are 
+	 * not mapped.  This is due to various races between
+	 * file io on the block device and getblk.  It gets dealt with
+	 * elsewhere, don't buffer_error if we had some unmapped buffers
+	 */
+	if (all_mapped) {
+		printk("__find_get_block_slow() failed. "
+			"block=%llu, b_blocknr=%llu\n",
+			(unsigned long long)block, (unsigned long long)bh->b_blocknr);
+		printk("b_state=0x%08lx, b_size=%u\n", bh->b_state, bh->b_size);
+		printk("device blocksize: %d\n", 1 << bd_inode->i_blkbits);
+	}
 out_unlock:
 	spin_unlock(&bd_mapping->private_lock);
 	page_cache_release(page);
@@ -725,12 +736,11 @@ still_busy:
  * PageLocked prevents anyone from starting writeback of a page which is
  * under read I/O (PageWriteback is only ever set against a locked page).
  */
-void mark_buffer_async_read(struct buffer_head *bh)
+static void mark_buffer_async_read(struct buffer_head *bh)
 {
 	bh->b_end_io = end_buffer_async_read;
 	set_buffer_async_read(bh);
 }
-EXPORT_SYMBOL(mark_buffer_async_read);
 
 void mark_buffer_async_write(struct buffer_head *bh)
 {
@@ -788,14 +798,6 @@ EXPORT_SYMBOL(mark_buffer_async_write);
  * filesystems (do it inside bforget()).  It could also be done by bringing
  * b_inode back.
  */
-
-void buffer_insert_list(spinlock_t *lock,
-		struct buffer_head *bh, struct list_head *list)
-{
-	spin_lock(lock);
-	list_move_tail(&bh->b_assoc_buffers, list);
-	spin_unlock(lock);
-}
 
 /*
  * The buffer's backing address_space's private_lock must be held
@@ -899,9 +901,12 @@ void mark_buffer_dirty_inode(struct buffer_head *bh, struct inode *inode)
 		if (mapping->assoc_mapping != buffer_mapping)
 			BUG();
 	}
-	if (list_empty(&bh->b_assoc_buffers))
-		buffer_insert_list(&buffer_mapping->private_lock,
-				bh, &mapping->private_list);
+	if (list_empty(&bh->b_assoc_buffers)) {
+		spin_lock(&buffer_mapping->private_lock);
+		list_move_tail(&bh->b_assoc_buffers,
+				&mapping->private_list);
+		spin_unlock(&buffer_mapping->private_lock);
+	}
 }
 EXPORT_SYMBOL(mark_buffer_dirty_inode);
 
@@ -982,7 +987,7 @@ EXPORT_SYMBOL(__set_page_dirty_buffers);
  * the osync code to catch these locked, dirty buffers without requeuing
  * any newly dirty buffers for write.
  */
-int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
+static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
 {
 	struct buffer_head *bh;
 	struct list_head tmp;
@@ -1177,18 +1182,16 @@ init_page_buffers(struct page *page, struct block_device *bdev,
 {
 	struct buffer_head *head = page_buffers(page);
 	struct buffer_head *bh = head;
-	unsigned int b_state;
-
-	b_state = 1 << BH_Mapped;
-	if (PageUptodate(page))
-		b_state |= 1 << BH_Uptodate;
+	int uptodate = PageUptodate(page);
 
 	do {
-		if (!(bh->b_state & (1 << BH_Mapped))) {
+		if (!buffer_mapped(bh)) {
 			init_buffer(bh, NULL, NULL);
 			bh->b_bdev = bdev;
 			bh->b_blocknr = block;
-			bh->b_state = b_state;
+			if (uptodate)
+				set_buffer_uptodate(bh);
+			set_buffer_mapped(bh);
 		}
 		block++;
 		bh = bh->b_this_page;
@@ -1217,8 +1220,10 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 
 	if (page_has_buffers(page)) {
 		bh = page_buffers(page);
-		if (bh->b_size == size)
+		if (bh->b_size == size) {
+			init_page_buffers(page, bdev, block, size);
 			return page;
+		}
 		if (!try_to_free_buffers(page))
 			goto failed;
 	}
@@ -2759,21 +2764,33 @@ static int end_bio_bh_io_sync(struct bio *bio, unsigned int bytes_done, int err)
 	if (bio->bi_size)
 		return 1;
 
+	if (err == -EOPNOTSUPP) {
+		set_bit(BIO_EOPNOTSUPP, &bio->bi_flags);
+		set_bit(BH_Eopnotsupp, &bh->b_state);
+	}
+
 	bh->b_end_io(bh, test_bit(BIO_UPTODATE, &bio->bi_flags));
 	bio_put(bio);
 	return 0;
 }
 
-void submit_bh(int rw, struct buffer_head * bh)
+int submit_bh(int rw, struct buffer_head * bh)
 {
 	struct bio *bio;
+	int ret = 0;
 
 	BUG_ON(!buffer_locked(bh));
 	BUG_ON(!buffer_mapped(bh));
 	BUG_ON(!bh->b_end_io);
 
-	/* Only clear out a write error when rewriting */
-	if (test_set_buffer_req(bh) && rw == WRITE)
+	if (buffer_ordered(bh) && (rw == WRITE))
+		rw = WRITE_BARRIER;
+
+	/*
+	 * Only clear out a write error when rewriting, should this
+	 * include WRITE_SYNC as well?
+	 */
+	if (test_set_buffer_req(bh) && (rw == WRITE || rw == WRITE_BARRIER))
 		clear_buffer_write_io_error(bh);
 
 	/*
@@ -2795,7 +2812,14 @@ void submit_bh(int rw, struct buffer_head * bh)
 	bio->bi_end_io = end_bio_bh_io_sync;
 	bio->bi_private = bh;
 
+	bio_get(bio);
 	submit_bio(rw, bio);
+
+	if (bio_flagged(bio, BIO_EOPNOTSUPP))
+		ret = -EOPNOTSUPP;
+
+	bio_put(bio);
+	return ret;
 }
 
 /**
@@ -2854,20 +2878,30 @@ void ll_rw_block(int rw, int nr, struct buffer_head *bhs[])
 
 /*
  * For a data-integrity writeout, we need to wait upon any in-progress I/O
- * and then start new I/O and then wait upon it.
+ * and then start new I/O and then wait upon it.  The caller must have a ref on
+ * the buffer_head.
  */
-void sync_dirty_buffer(struct buffer_head *bh)
+int sync_dirty_buffer(struct buffer_head *bh)
 {
+	int ret = 0;
+
 	WARN_ON(atomic_read(&bh->b_count) < 1);
 	lock_buffer(bh);
 	if (test_clear_buffer_dirty(bh)) {
 		get_bh(bh);
 		bh->b_end_io = end_buffer_write_sync;
-		submit_bh(WRITE, bh);
+		ret = submit_bh(WRITE, bh);
 		wait_on_buffer(bh);
+		if (buffer_eopnotsupp(bh)) {
+			clear_buffer_eopnotsupp(bh);
+			ret = -EOPNOTSUPP;
+		}
+		if (!ret && !buffer_uptodate(bh))
+			ret = -EIO;
 	} else {
 		unlock_buffer(bh);
 	}
+	return ret;
 }
 
 /*
@@ -3124,14 +3158,12 @@ EXPORT_SYMBOL(block_read_full_page);
 EXPORT_SYMBOL(block_sync_page);
 EXPORT_SYMBOL(block_truncate_page);
 EXPORT_SYMBOL(block_write_full_page);
-EXPORT_SYMBOL(buffer_insert_list);
 EXPORT_SYMBOL(cont_prepare_write);
 EXPORT_SYMBOL(end_buffer_async_write);
 EXPORT_SYMBOL(end_buffer_read_sync);
 EXPORT_SYMBOL(end_buffer_write_sync);
 EXPORT_SYMBOL(file_fsync);
 EXPORT_SYMBOL(fsync_bdev);
-EXPORT_SYMBOL(fsync_buffers_list);
 EXPORT_SYMBOL(generic_block_bmap);
 EXPORT_SYMBOL(generic_commit_write);
 EXPORT_SYMBOL(generic_cont_expand);

@@ -32,6 +32,7 @@
 #include <linux/init.h>
 #include <linux/acpi.h>
 #include <linux/efi.h>
+#include <linux/pci-acpi.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
 #ifdef	CONFIG_IA64
@@ -126,6 +127,10 @@ static u8 * acpi_path_name( acpi_handle	handle)
 
 static void acpi_get__hpp ( struct acpi_bridge	*ab);
 static void acpi_run_oshp ( struct acpi_bridge	*ab);
+static int osc_exist = 0;
+static int oshp_exist = 0;
+static int run__osc_success = 0;
+static int run_oshp_success = 0;
 
 static int acpi_add_slot_to_php_slots(
 	struct acpi_bridge	*ab,
@@ -158,8 +163,9 @@ static int acpi_add_slot_to_php_slots(
 	ab->scanned += 1;
 	if (!ab->_hpp)
 		acpi_get__hpp(ab);
-
-	acpi_run_oshp(ab);
+	
+	if (!osc_exist)
+		acpi_run_oshp(ab);
 
 	if (sun != samesun) {
 		info("acpi_pciehprm:   Slot sun(%x) at s:b:d:f=0x%02x:%02x:%02x:%02x\n", 
@@ -248,8 +254,12 @@ static void acpi_run_oshp ( struct acpi_bridge	*ab)
 	status = acpi_evaluate_object(ab->handle, METHOD_NAME_OSHP, NULL, &ret_buf);
 	if (ACPI_FAILURE(status)) {
 		err("acpi_pciehprm:%s OSHP fails=0x%x\n", path_name, status);
-	} else
+		oshp_exist = (status == 0x5) ? 0 : 1;
+	} else {
+		oshp_exist = 1;
+		run_oshp_success = 1;
 		dbg("acpi_pciehprm:%s OSHP passes =0x%x\n", path_name, status);
+	}
 	return;
 }
 
@@ -1056,6 +1066,16 @@ static struct acpi_bridge * add_host_bridge(
 		kfree(ab);
 		return NULL;
 	}
+	status = pci_osc_control_set (OSC_PCI_EXPRESS_NATIVE_HP_CONTROL); 
+	if (ACPI_FAILURE(status)) {
+		dbg("%s: status %x\n", __FUNCTION__, status);
+	 } else {
+		run__osc_success = 1;
+		osc_exist = 1;
+	}	
+	dbg("%s: status %x run__osc_success %x osc_exist %x \n", 
+		__FUNCTION__, status, run__osc_success, osc_exist);
+	
 	build_a_bridge(ab, ab);
 
 	return ab;
@@ -1140,6 +1160,23 @@ int pciehprm_init(enum php_ctlr_type ctlr_type)
 	rc = pciehprm_acpi_scan_pci();
 	if (rc)
 		return rc;
+
+	if (!osc_exist) {
+		if (!oshp_exist) {
+			err("Both _OSC and OSHP methods do not exist\n");
+			rc = -ENODEV;
+		} else if (!run_oshp_success) {
+			err("Fails to run OSHP to gain control of native hot-plug\n");
+			rc = -ENODEV;
+		}
+	} else if (!run__osc_success) {
+			err("Fails to run _OSC to gain control of native hot-plug\n");
+			rc = -ENODEV;
+	}
+	dbg("%s: run__osc_success %x osc_exist %x\n", __FUNCTION__,
+		run__osc_success, osc_exist);
+	dbg("%s: run_oshp_success %x oshp_exist %x", __FUNCTION__, 
+		run_oshp_success, oshp_exist);
 
 	dbg("pciehprm ACPI init %s\n", (rc)?"fail":"success");
 	return rc;

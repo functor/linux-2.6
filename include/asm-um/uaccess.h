@@ -6,6 +6,8 @@
 #ifndef __UM_UACCESS_H
 #define __UM_UACCESS_H
 
+#include "linux/sched.h"
+
 #define VERIFY_READ 0
 #define VERIFY_WRITE 1
 
@@ -53,7 +55,7 @@
 
 #define get_user(x, ptr) \
 ({ \
-        const __typeof__((*ptr)) *private_ptr = (ptr); \
+        const __typeof__((*(ptr))) *private_ptr = (ptr); \
         (access_ok(VERIFY_READ, private_ptr, sizeof(*private_ptr)) ? \
 	 __get_user(x, private_ptr) : ((x) = 0, -EFAULT)); \
 })

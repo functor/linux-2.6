@@ -6,6 +6,7 @@ deps_scripts/basic/fixdep := \
     $(wildcard include/config/my/option.h) \
     $(wildcard include/config/.h) \
     $(wildcard include/config/foo.h) \
+    $(wildcard include/config/boom.h) \
   /usr/include/sys/types.h \
   /usr/include/features.h \
   /usr/include/sys/cdefs.h \
@@ -57,6 +58,7 @@ deps_scripts/basic/fixdep := \
   /usr/include/linux/limits.h \
   /usr/include/bits/posix2_lim.h \
   /usr/include/ctype.h \
+  /usr/include/arpa/inet.h \
   /usr/include/netinet/in.h \
   /usr/include/stdint.h \
   /usr/include/sys/socket.h \

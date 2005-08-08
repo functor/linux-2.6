@@ -37,15 +37,17 @@
 #include <linux/compiler.h>
 #include <linux/mount.h>
 #include <linux/zlib.h>
+#include <linux/syscalls.h>
+#include <linux/cpumask.h>
 
 #include <net/tcp.h>
 #include <net/tux_u.h>
 
 /* Maximum number of threads: */
-#define CONFIG_TUX_NUMTHREADS 8
+#define CONFIG_TUX_NUMTHREADS 32
 
 /* Number of cachemiss/IO threads: */
-#define NR_IO_THREADS 32
+#define NR_IO_THREADS 64
 
 /* Maximum number of listen sockets per thread: */
 #define CONFIG_TUX_NUMSOCKETS 16
@@ -206,7 +208,7 @@ struct tux_req_struct
 	struct dentry *cwd_dentry;
 	struct vfsmount *cwd_mnt;
 
-	struct file in_file;
+	struct file *in_file;
 	int fd;
 	read_descriptor_t desc;
 	u32 client_addr;
@@ -709,13 +711,13 @@ extern void send_abuf (tux_req_t *req, unsigned int size, unsigned long flags);
 
 extern int idle_event (tux_req_t *req);
 extern int output_space_event (tux_req_t *req);
-extern unsigned int log_cpu_mask;
+extern cpumask_t tux_log_cpu_mask;
 extern unsigned int tux_compression;
 extern unsigned int tux_noid;
 extern unsigned int tux_cgi_inherit_cpu;
 extern unsigned int tux_zerocopy_header;
 extern unsigned int tux_zerocopy_sendfile;
-extern unsigned int tux_cgi_cpu_mask;
+extern cpumask_t tux_cgi_cpu_mask;
 extern tux_proto_t tux_proto_http;
 extern tux_proto_t tux_proto_ftp;
 extern unsigned int tux_all_userspace;
@@ -795,6 +797,6 @@ static inline void put_data_sock (tux_req_t *req)
 	__ptr;								\
 })
 
-extern long tux_close(unsigned int fd);
+#define tux_close(fd) sys_close(fd)
 
 #endif

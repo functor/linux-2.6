@@ -64,6 +64,10 @@ static struct pci_device_id ahd_linux_pci_id_table[] = {
 		0x9005, PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID,
 		PCI_CLASS_STORAGE_SCSI << 8, 0xFFFF00, 0
 	},
+	{
+		0x9005, PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID,
+		PCI_CLASS_STORAGE_RAID << 8, 0xFFFF00, 0
+	},
 	{ 0 }
 };
 
@@ -92,12 +96,14 @@ ahd_linux_pci_dev_remove(struct pci_dev *pdev)
 	if (ahd != NULL) {
 		u_long s;
 
+		TAILQ_REMOVE(&ahd_tailq, ahd, links);
+		ahd_list_unlock(&l);
 		ahd_lock(ahd, &s);
 		ahd_intr_enable(ahd, FALSE);
 		ahd_unlock(ahd, &s);
 		ahd_free(ahd);
-	}
-	ahd_list_unlock(&l);
+	} else
+		ahd_list_unlock(&l);
 }
 #endif /* !LINUX_VERSION_CODE < KERNEL_VERSION(2,4,0) */
 

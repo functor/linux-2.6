@@ -33,6 +33,7 @@ void free_huge_page(struct page *);
 
 extern unsigned long max_huge_pages;
 extern const unsigned long hugetlb_zero, hugetlb_infinity;
+extern int sysctl_hugetlb_shm_group;
 
 #ifndef ARCH_HAS_HUGEPAGE_ONLY_RANGE
 #define is_hugepage_only_range(addr, len)	0

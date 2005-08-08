@@ -67,13 +67,6 @@ wakeup_code:
 	movw	$0x0e00 + 'i', %fs:(0x12)
 	
 	# need a gdt
-	#use the gdt copied in this low mem
-	lea	temp_gdt_table - wakeup_code, %eax
-	xor	%ebx, %ebx
-	movw	%ds, %bx
-	shll	$4, %ebx
-	addl	%ebx, %eax
-	movl	%eax, real_save_gdt + 2 - wakeup_code
 	lgdt	real_save_gdt - wakeup_code
 
 	movl	real_save_cr0 - wakeup_code, %eax
@@ -96,7 +89,6 @@ real_save_cr4:	.long 0
 real_magic:	.long 0
 video_mode:	.long 0
 video_flags:	.long 0
-temp_gdt_table: .fill GDT_ENTRIES, 8, 0
 
 bogus_real_magic:
 	movw	$0x0e00 + 'B', %fs:(0x12)
@@ -239,13 +231,6 @@ ENTRY(acpi_copy_wakeup_routine)
 	movl	%edx, real_save_cr0 - wakeup_start (%eax)
 	sgdt    real_save_gdt - wakeup_start (%eax)
 
-	# gdt wont be addressable from real mode in 4g4g split
-	# copying it to the lower mem
-	xor	%ecx, %ecx
-	movw	saved_gdt, %cx
-	movl	saved_gdt + 2, %esi	
-	lea 	temp_gdt_table - wakeup_start (%eax), %edi	
-	rep movsb
 	movl	saved_videomode, %edx
 	movl	%edx, video_mode - wakeup_start (%eax)
 	movl	acpi_video_flags, %edx

@@ -73,6 +73,11 @@ struct ethtool_ops;
 
 #define MAX_ADDR_LEN	32		/* Largest hardware address length */
 
+/* Driver transmit return codes */
+#define NETDEV_TX_OK 0		/* driver took care of packet */
+#define NETDEV_TX_BUSY 1	/* driver tx path was busy*/
+#define NETDEV_TX_LOCKED -1	/* driver tx lock was already taken */
+
 /*
  *	Compute the worst case header length according to the protocols
  *	used.
@@ -479,7 +484,6 @@ struct net_device
 
 	/* class/net/name entry */
 	struct class_device	class_dev;
-	struct net_device_stats* (*last_stats)(struct net_device *);
 	/* how much padding had been added by alloc_netdev() */
 	int padded;
 };
@@ -520,20 +524,13 @@ extern int			netdev_boot_setup_add(char *name, struct ifmap *map);
 extern int 			netdev_boot_setup_check(struct net_device *dev);
 extern unsigned long		netdev_boot_base(const char *prefix, int unit);
 extern struct net_device    *dev_getbyhwaddr(unsigned short type, char *hwaddr);
-extern struct net_device *__dev_getfirstbyhwtype(unsigned short type);
 extern struct net_device *dev_getfirstbyhwtype(unsigned short type);
 extern void		dev_add_pack(struct packet_type *pt);
 extern void		dev_remove_pack(struct packet_type *pt);
 extern void		__dev_remove_pack(struct packet_type *pt);
-extern int		__dev_get(const char *name);
-static inline int __deprecated dev_get(const char *name)
-{
-	return __dev_get(name);
-}
+
 extern struct net_device	*dev_get_by_flags(unsigned short flags,
 						  unsigned short mask);
-extern struct net_device	*__dev_get_by_flags(unsigned short flags,
-						    unsigned short mask);
 extern struct net_device	*dev_get_by_name(const char *name);
 extern struct net_device	*__dev_get_by_name(const char *name);
 extern int		dev_alloc_name(struct net_device *dev, const char *name);
@@ -547,7 +544,6 @@ extern void		synchronize_net(void);
 extern int 		register_netdevice_notifier(struct notifier_block *nb);
 extern int		unregister_netdevice_notifier(struct notifier_block *nb);
 extern int		call_netdevice_notifiers(unsigned long val, void *v);
-extern int		dev_new_index(void);
 extern struct net_device	*dev_get_by_index(int ifindex);
 extern struct net_device	*__dev_get_by_index(int ifindex);
 extern int		dev_restart(struct net_device *dev);
@@ -677,18 +673,13 @@ extern int		dev_ioctl(unsigned int cmd, void __user *);
 extern int		dev_ethtool(struct ifreq *);
 extern unsigned		dev_get_flags(const struct net_device *);
 extern int		dev_change_flags(struct net_device *, unsigned);
+extern int		dev_change_name(struct net_device *, char *);
 extern int		dev_set_mtu(struct net_device *, int);
 extern void		dev_queue_xmit_nit(struct sk_buff *skb, struct net_device *dev);
 
 extern void		dev_init(void);
 
 extern int		netdev_nit;
-
-/* netconsole rx hook registration */
-extern int netdump_register_hooks(int (*)(struct sk_buff *),
-				  int (*)(struct sk_buff *),
-				  void (*)(struct pt_regs *));
-extern void netdump_unregister_hooks(void);
 
 /* Post buffer to the network code from _non interrupt_ context.
  * see net/core/dev.c for netif_rx description.
@@ -939,8 +930,6 @@ extern void		netdev_state_change(struct net_device *dev);
 /* Load a device via the kmod */
 extern void		dev_load(const char *name);
 extern void		dev_mcast_init(void);
-extern int		netdev_register_fc(struct net_device *dev, void (*stimul)(struct net_device *dev));
-extern void		netdev_unregister_fc(int bit);
 extern int		netdev_max_backlog;
 extern int		weight_p;
 extern unsigned long	netdev_fc_xoff;

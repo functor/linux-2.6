@@ -66,6 +66,10 @@ static int redirect_sock (tux_req_t *req, const int port)
 	/* No secondary server found */
 	if (!sk)
 		goto out;
+	if (sk->sk_family != AF_INET) {
+		sock_put(sk);
+		goto out;
+	}
 
 	/*
 	 * Requeue the 'old' socket as an accept-socket of
@@ -105,7 +109,11 @@ static int redirect_sock (tux_req_t *req, const int port)
 	 * It's now completely up to the secondary
 	 * server to handle this request.
 	 */
-	sock_release(req->sock);
+	if (req->fd != -1) {
+		tux_close(req->fd);
+		req->fd = -1;
+	} else
+		sock_release(req->sock);
 	req->sock = NULL;
 	req->parsed_len = 0;
 	err = 0;

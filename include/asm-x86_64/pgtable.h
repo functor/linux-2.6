@@ -111,7 +111,7 @@ static inline void set_pml4(pml4_t *dst, pml4_t val)
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
-#define USER_PTRS_PER_PGD	(TASK_SIZE/PGDIR_SIZE)
+#define USER_PTRS_PER_PGD	(test_thread_flag(TIF_IA32) ? 4 : TASK_SIZE/PGDIR_SIZE)
 #define FIRST_USER_PGD_NR	0
 
 #define USER_PGD_PTRS (PAGE_OFFSET >> PGDIR_SHIFT)
@@ -424,6 +424,7 @@ extern int kern_addr_valid(unsigned long addr);
 #define io_remap_page_range remap_page_range
 
 #define HAVE_ARCH_UNMAPPED_AREA
+#define HAVE_ARCH_UNMAPPED_AREA_TOPDOWN
 
 #define pgtable_cache_init()   do { } while (0)
 #define check_pgt_cache()      do { } while (0)

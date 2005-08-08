@@ -235,7 +235,7 @@ int generic_send_file (tux_req_t *req, struct socket *sock, int cachemiss)
 	sock_desc.req = req;
 
 repeat:
-	Dprintk("generic_send_file(%p,%d,%p) called, f_pos: %Ld, output_len: %Ld.\n", req, nonblock, sock, req->in_file.f_pos, req->output_len);
+	Dprintk("generic_send_file(%p,%d,%p) called, f_pos: %Ld, output_len: %Ld.\n", req, nonblock, sock, req->in_file->f_pos, req->output_len);
 
 	if (req->proto->check_req_err(req, cachemiss))
 		return -1;
@@ -243,7 +243,7 @@ repeat:
 		len = -5;
 		goto out;
 	}
-	if (req->total_file_len < req->in_file.f_pos)
+	if (req->total_file_len < req->in_file->f_pos)
 		TUX_BUG();
 
 	req->desc.written = 0;
@@ -258,7 +258,7 @@ repeat:
 	req->desc.arg.buf = (char *) &sock_desc;
 	req->desc.error = 0;
 	Dprintk("sendfile(), desc.count: %d.\n", req->desc.count);
-	do_generic_file_read(&req->in_file, &req->in_file.f_pos, &req->desc, sock_send_actor, nonblock);
+	do_generic_file_read(req->in_file, &req->in_file->f_pos, &req->desc, sock_send_actor, nonblock);
 	if (req->desc.written > 0) {
 		req->bytes_sent += req->desc.written;
 		req->output_len -= req->desc.written;
@@ -270,7 +270,7 @@ repeat:
 #if CONFIG_TUX_DEBUG
 		req->bytes_expected = 0;
 #endif
-		req->in_file.f_pos = 0;
+		req->in_file->f_pos = 0;
 		req->error = TUX_ERROR_CONN_CLOSE;
 		zap_request(req, cachemiss);
 		return -1;
@@ -304,7 +304,7 @@ no_write_space:
 		}
 #if CONFIG_TUX_DEBUG
 		if (req->desc.written != want)
-			TDprintk("TUX: sendfile() wrote %d bytes, wanted %d! (pos %Ld) (signals pending: %08lx).\n", req->desc.written, want, req->in_file.f_pos, current->pending.signal.sig[0]);
+			TDprintk("TUX: sendfile() wrote %d bytes, wanted %d! (pos %Ld) (signals pending: %08lx).\n", req->desc.written, want, req->in_file->f_pos, current->pending.signal.sig[0]);
 		else
 			Dprintk("TUX: sendfile() FINISHED for req %p, wrote %d bytes.\n", req, req->desc.written);
 		req->bytes_expected = 0;
@@ -339,7 +339,7 @@ int tux_fetch_file (tux_req_t *req, int nonblock)
 	req->desc.arg.buf = NULL;
 	req->desc.error = 0;
 
-	do_generic_file_read(&req->in_file, &req->in_file.f_pos, &req->desc,
+	do_generic_file_read(req->in_file, &req->in_file->f_pos, &req->desc,
 					file_fetch_actor, nonblock);
 	if (nonblock && (req->desc.error == -EWOULDBLOCKIO))
 		return 1;

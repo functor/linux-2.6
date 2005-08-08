@@ -61,6 +61,7 @@
 #endif
 
 #include <linux/mm.h>		/* For fetching system memory size */
+#include <linux/delay.h>	/* For ssleep/msleep */
 
 /*
  * Lock protecting manipulation of the ahd softc list.
@@ -415,7 +416,6 @@ uint32_t aic79xx_periodic_otag;
 /*
  * Module information and settable options.
  */
-#ifdef MODULE
 static char *aic79xx = NULL;
 /*
  * Just in case someone uses commas to separate items on the insmod
@@ -426,9 +426,8 @@ static char dummy_buffer[60] = "Please don't trounce on me insmod!!\n";
 
 MODULE_AUTHOR("Maintainer: Justin T. Gibbs <gibbs@scsiguy.com>");
 MODULE_DESCRIPTION("Adaptec Aic790X U320 SCSI Host Bus Adapter driver");
-#ifdef MODULE_LICENSE
 MODULE_LICENSE("Dual BSD/GPL");
-#endif
+MODULE_VERSION(AIC79XX_DRIVER_VERSION);
 MODULE_PARM(aic79xx, "s");
 MODULE_PARM_DESC(aic79xx,
 "period delimited, options string.\n"
@@ -463,7 +462,6 @@ MODULE_PARM_DESC(aic79xx,
 "		Change Read Streaming for Controller's 2 and 3\n"
 "\n"
 "	options aic79xx 'aic79xx=rd_strm:{..0xFFF0.0xC0F0}'");
-#endif
 
 static void ahd_linux_handle_scsi_status(struct ahd_softc *,
 					 struct ahd_linux_device *,
@@ -513,9 +511,6 @@ static void ahd_linux_dv_su(struct ahd_softc *ahd,
 			    struct scsi_cmnd *cmd,
 			    struct ahd_devinfo *devinfo,
 			    struct ahd_linux_target *targ);
-static __inline int
-	   ahd_linux_dv_fallback(struct ahd_softc *ahd,
-				 struct ahd_devinfo *devinfo);
 static int ahd_linux_fallback(struct ahd_softc *ahd,
 			      struct ahd_devinfo *devinfo);
 static __inline int ahd_linux_dv_fallback(struct ahd_softc *ahd,
@@ -856,6 +851,7 @@ ahd_linux_detect(Scsi_Host_Template *template)
 {
 	struct	ahd_softc *ahd;
 	int     found;
+	int	error = 0;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
 	/*
@@ -907,7 +903,9 @@ ahd_linux_detect(Scsi_Host_Template *template)
 	ahd_list_lockinit();
 
 #ifdef CONFIG_PCI
-	ahd_linux_pci_init();
+	error = ahd_linux_pci_init();
+	if (error)
+		return error;
 #endif
 
 	/*
@@ -924,7 +922,7 @@ ahd_linux_detect(Scsi_Host_Template *template)
 	spin_lock_irq(&io_request_lock);
 #endif
 	aic79xx_detect_complete++;
-	return (found);
+	return 0;
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
@@ -1565,6 +1563,8 @@ ahd_linux_dev_reset(Scsi_Cmnd *cmd)
 
 	ahd = *(struct ahd_softc **)cmd->device->host->hostdata;
 	recovery_cmd = malloc(sizeof(struct scsi_cmnd), M_DEVBUF, M_WAITOK);
+	if (!recovery_cmd)
+		return (FAILED);
 	memset(recovery_cmd, 0, sizeof(struct scsi_cmnd));
 	recovery_cmd->device = cmd->device;
 	recovery_cmd->scsi_done = ahd_linux_dev_reset_complete;
@@ -1580,10 +1580,12 @@ ahd_linux_dev_reset(Scsi_Cmnd *cmd)
 				   cmd->device->lun, /*alloc*/FALSE);
 	if (dev == NULL) {
 		ahd_midlayer_entrypoint_unlock(ahd, &s);
+		kfree(recovery_cmd);
 		return (FAILED);
 	}
 	if ((scb = ahd_get_scb(ahd, AHD_NEVER_COL_IDX)) == NULL) {
 		ahd_midlayer_entrypoint_unlock(ahd, &s);
+		kfree(recovery_cmd);
 		return (FAILED);
 	}
 	tinfo = ahd_fetch_transinfo(ahd, 'A', ahd->our_id,
@@ -1778,6 +1780,7 @@ ahd_dmamem_alloc(struct ahd_softc *ahd, bus_dma_tag_t dmat, void** vaddr,
 	if (ahd->dev_softc != NULL)
 		if (ahd_pci_set_dma_mask(ahd->dev_softc, 0xFFFFFFFF)) {
 			printk(KERN_WARNING "aic79xx: No suitable DMA available.\n");
+			kfree(map);
 			return (ENODEV);
 		}
 	*vaddr = pci_alloc_consistent(ahd->dev_softc,
@@ -1786,6 +1789,7 @@ ahd_dmamem_alloc(struct ahd_softc *ahd, bus_dma_tag_t dmat, void** vaddr,
 		if (ahd_pci_set_dma_mask(ahd->dev_softc,
 				     ahd->platform_data->hw_dma_mask)) {
 			printk(KERN_WARNING "aic79xx: No suitable DMA available.\n");
+			kfree(map);
 			return (ENODEV);
 		}
 #else /* LINUX_VERSION_CODE < KERNEL_VERSION(2,3,0) */
@@ -2915,6 +2919,19 @@ out:
 	ahd_unlock(ahd, &s);
 }
 
+static __inline int
+ahd_linux_dv_fallback(struct ahd_softc *ahd, struct ahd_devinfo *devinfo)
+{
+	u_long s;
+	int retval;
+
+	ahd_lock(ahd, &s);
+	retval = ahd_linux_fallback(ahd, devinfo);
+	ahd_unlock(ahd, &s);
+
+	return (retval);
+}
+
 static void
 ahd_linux_dv_transition(struct ahd_softc *ahd, struct scsi_cmnd *cmd,
 			struct ahd_devinfo *devinfo,
@@ -3163,7 +3180,7 @@ ahd_linux_dv_transition(struct ahd_softc *ahd, struct scsi_cmnd *cmd,
 				break;
 			}
 			if (status & SSQ_DELAY)
-				scsi_sleep(1 * HZ);
+				ssleep(1);
 
 			break;
 		case SS_START:
@@ -3323,7 +3340,7 @@ ahd_linux_dv_transition(struct ahd_softc *ahd, struct scsi_cmnd *cmd,
 			}
 			if (targ->dv_state_retry <= 10) {
 				if ((status & (SSQ_DELAY_RANDOM|SSQ_DELAY))!= 0)
-					scsi_sleep(ahd->our_id*HZ/10);
+					msleep(ahd->our_id*1000/10);
 				break;
 			}
 #ifdef AHD_DEBUG
@@ -3367,7 +3384,7 @@ ahd_linux_dv_transition(struct ahd_softc *ahd, struct scsi_cmnd *cmd,
 				targ->dv_state_retry--;
 			} else if (targ->dv_state_retry < 60) {
 				if ((status & SSQ_DELAY) != 0)
-					scsi_sleep(1 * HZ);
+					ssleep(1);
 			} else {
 #ifdef AHD_DEBUG
 				if (ahd_debug & AHD_SHOW_DV) {
@@ -3549,19 +3566,6 @@ ahd_linux_dv_su(struct ahd_softc *ahd, struct scsi_cmnd *cmd,
 	cmd->cmd_len = 6;
 	cmd->cmnd[0] = START_STOP_UNIT;
 	cmd->cmnd[4] = le | SSS_START;
-}
-
-static __inline int
-ahd_linux_dv_fallback(struct ahd_softc *ahd, struct ahd_devinfo *devinfo)
-{
-	u_long s;
-	int retval;
-
-	ahd_lock(ahd, &s);
-	retval = ahd_linux_fallback(ahd, devinfo);
-	ahd_unlock(ahd, &s);
-
-	return (retval);
 }
 
 static int
@@ -5078,7 +5082,7 @@ static int __init
 ahd_linux_init(void)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-       return (ahd_linux_detect(&aic79xx_driver_template) ? 0 : -ENODEV);
+	return ahd_linux_detect(&aic79xx_driver_template);
 #else
 	scsi_register_module(MODULE_SCSI_HA, &aic79xx_driver_template);
 	if (aic79xx_driver_template.present == 0) {
@@ -5095,7 +5099,6 @@ static void __exit
 ahd_linux_exit(void)
 {
 	struct ahd_softc *ahd;
-	u_long l;
 
 	/*
 	 * Shutdown DV threads before going into the SCSI mid-layer.
@@ -5103,12 +5106,11 @@ ahd_linux_exit(void)
 	 * kernel so that waiting for our DV threads to exit leads
 	 * to deadlock.
 	 */
-	ahd_list_lock(&l);
 	TAILQ_FOREACH(ahd, &ahd_tailq, links) {
 
 		ahd_linux_kill_dv_thread(ahd);
 	}
-	ahd_list_unlock(&l);
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
 	/*
 	 * In 2.4 we have to unregister from the PCI core _after_

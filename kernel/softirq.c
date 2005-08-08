@@ -15,6 +15,7 @@
 #include <linux/percpu.h>
 #include <linux/cpu.h>
 #include <linux/kthread.h>
+#include <linux/rcupdate.h>
 
 #include <asm/irq.h>
 /*
@@ -75,10 +76,12 @@ asmlinkage void __do_softirq(void)
 	struct softirq_action *h;
 	__u32 pending;
 	int max_restart = MAX_SOFTIRQ_RESTART;
+	int cpu;
 
 	pending = local_softirq_pending();
 
 	local_bh_disable();
+	cpu = smp_processor_id();
 restart:
 	/* Reset the pending bitmask before enabling irqs */
 	local_softirq_pending() = 0;
@@ -88,8 +91,10 @@ restart:
 	h = softirq_vec;
 
 	do {
-		if (pending & 1)
+		if (pending & 1) {
 			h->action(h);
+			rcu_bh_qsctr_inc(cpu);
+		}
 		h++;
 		pending >>= 1;
 	} while (pending);
@@ -171,8 +176,6 @@ void fastcall raise_softirq(unsigned int nr)
 	raise_softirq_irqoff(nr);
 	local_irq_restore(flags);
 }
-
-EXPORT_SYMBOL(raise_softirq);
 
 void open_softirq(int nr, void (*action)(struct softirq_action*), void *data)
 {

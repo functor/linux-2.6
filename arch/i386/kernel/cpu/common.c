@@ -2,6 +2,8 @@
 #include <linux/string.h>
 #include <linux/delay.h>
 #include <linux/smp.h>
+#include <linux/module.h>
+#include <linux/percpu.h>
 #include <asm/semaphore.h>
 #include <asm/processor.h>
 #include <asm/i387.h>
@@ -10,6 +12,9 @@
 #include <asm/mmu_context.h>
 
 #include "cpu.h"
+
+DEFINE_PER_CPU(struct desc_struct, cpu_gdt_table[GDT_ENTRIES]);
+EXPORT_PER_CPU_SYMBOL(cpu_gdt_table);
 
 static int cachesize_override __initdata = -1;
 static int disable_x86_fxsr __initdata = 0;
@@ -380,7 +385,9 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 		clear_bit(X86_FEATURE_PSE, c->x86_capability);
 
 	/* hack: disable SEP for non-NX cpus; SEP breaks Execshield. */
+	#ifdef CONFIG_HIGHMEM64G
 	if (!test_bit(X86_FEATURE_NX, c->x86_capability)) 
+	#endif
 		clear_bit(X86_FEATURE_SEP, c->x86_capability);
 
 	/* If the model name is still unset, do table lookup. */
@@ -505,7 +512,7 @@ void __init early_cpu_init(void)
 void __init cpu_init (void)
 {
 	int cpu = smp_processor_id();
-	struct tss_struct * t = init_tss + cpu;
+	struct tss_struct * t = &per_cpu(init_tss, cpu);
 	struct thread_struct *thread = &current->thread;
 
 	if (test_and_set_bit(cpu, &cpu_initialized)) {
@@ -527,15 +534,17 @@ void __init cpu_init (void)
 	 * Initialize the per-CPU GDT with the boot GDT,
 	 * and set up the GDT descriptor:
 	 */
-	if (cpu) {
-		memcpy(cpu_gdt_table[cpu], cpu_gdt_table[0], GDT_SIZE);
-		cpu_gdt_descr[cpu].size = GDT_SIZE - 1;
-		cpu_gdt_descr[cpu].address = (unsigned long)cpu_gdt_table[cpu];
-	}
+	memcpy(&per_cpu(cpu_gdt_table, cpu), cpu_gdt_table,
+	       GDT_SIZE);
+	cpu_gdt_descr[cpu].size = GDT_SIZE - 1;
+	cpu_gdt_descr[cpu].address =
+	    (unsigned long)&per_cpu(cpu_gdt_table, cpu);
+
 	/*
 	 * Set up the per-thread TLS descriptor cache:
 	 */
-	memcpy(thread->tls_array, cpu_gdt_table[cpu], GDT_ENTRY_TLS_ENTRIES * 8);
+	memcpy(thread->tls_array, &per_cpu(cpu_gdt_table, cpu),
+		GDT_ENTRY_TLS_ENTRIES * 8);
 
 	__asm__ __volatile__("lgdt %0" : : "m" (cpu_gdt_descr[cpu]));
 	__asm__ __volatile__("lidt %0" : : "m" (idt_descr));
@@ -556,17 +565,11 @@ void __init cpu_init (void)
 
 	load_esp0(t, thread);
 	set_tss_desc(cpu,t);
-	cpu_gdt_table[cpu][GDT_ENTRY_TSS].b &= 0xfffffdff;
 	load_TR_desc();
-	if (cpu)
-		load_LDT(&init_mm.context);
+	load_LDT(&init_mm.context);
 
 	/* Set up doublefault TSS pointer in the GDT */
 	__set_tss_desc(cpu, GDT_ENTRY_DOUBLEFAULT_TSS, &doublefault_tss);
-	cpu_gdt_table[cpu][GDT_ENTRY_DOUBLEFAULT_TSS].b &= 0xfffffdff;
-
-	if (cpu)
-		trap_init_virtual_GDT();
 
 	/* Clear %fs and %gs. */
 	asm volatile ("xorl %eax, %eax; movl %eax, %fs; movl %eax, %gs");

@@ -3,12 +3,15 @@ deps_config := \
 	crypto/Kconfig \
 	security/selinux/Kconfig \
 	security/Kconfig \
+	lib/Kconfig.debug \
+	arch/i386/Kconfig.debug \
 	arch/i386/oprofile/Kconfig \
 	fs/nls/Kconfig \
 	fs/partitions/Kconfig \
 	fs/ncpfs/Kconfig \
 	fs/Kconfig \
 	drivers/usb/gadget/Kconfig \
+	drivers/usb/atm/Kconfig \
 	drivers/usb/misc/Kconfig \
 	drivers/usb/serial/Kconfig \
 	drivers/usb/net/Kconfig \
@@ -134,6 +137,7 @@ deps_config := \
 	drivers/scsi/pcmcia/Kconfig \
 	drivers/scsi/arm/Kconfig \
 	drivers/scsi/qla2xxx/Kconfig \
+	drivers/scsi/megaraid/Kconfig.megaraid \
 	drivers/scsi/aic7xxx/Kconfig.aic79xx \
 	drivers/scsi/aic7xxx/Kconfig.aic7xxx \
 	drivers/scsi/Kconfig \

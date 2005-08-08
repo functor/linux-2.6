@@ -12,6 +12,7 @@
 #include <linux/stddef.h>
 #include <linux/types.h>
 #include <linux/compiler.h>
+#include <linux/bitops.h>
 #include <asm/byteorder.h>
 #include <asm/bug.h>
 
@@ -73,6 +74,7 @@ extern void __cond_resched(void);
 	})
 
 extern struct notifier_block *panic_notifier_list;
+extern long (*panic_blink)(long time);
 NORET_TYPE void panic(const char * fmt, ...)
 	__attribute__ ((NORET_AND format (printf, 1, 2)));
 asmlinkage NORET_TYPE void do_exit(long error_code)
@@ -105,6 +107,7 @@ extern int __kernel_text_address(unsigned long addr);
 extern int kernel_text_address(unsigned long addr);
 extern int session_of_pgrp(int pgrp);
 
+asmlinkage int vprintk(const char *fmt, va_list args);
 asmlinkage int printk(const char * fmt, ...)
 	__attribute__ ((format (printf, 1, 2)));
 
@@ -118,6 +121,10 @@ static inline int __attribute_pure__ long_log2(unsigned long x)
 	return r;
 }
 
+static inline unsigned long __attribute_const__ roundup_pow_of_two(unsigned long x)
+{
+	return (1UL << fls(x - 1));
+}
 
 extern int printk_ratelimit(void);
 extern int __printk_ratelimit(int ratelimit_jiffies, int ratelimit_burst);
@@ -138,9 +145,7 @@ extern int oops_in_progress;		/* If set, an oops, panic(), BUG() or die() is in 
 extern int panic_on_oops;
 extern int tainted;
 extern const char *print_tainted(void);
-struct pt_regs;
-extern void (*netdump_func) (struct pt_regs *regs);
-extern int netdump_mode;
+extern void add_taint(unsigned);
 
 /* Values used for system_state */
 extern enum system_states {
@@ -156,6 +161,8 @@ extern enum system_states {
 #define TAINT_FORCED_MODULE		(1<<1)
 #define TAINT_UNSAFE_SMP		(1<<2)
 #define TAINT_FORCED_RMMOD		(1<<3)
+#define TAINT_MACHINE_CHECK		(1<<4)
+#define TAINT_BAD_PAGE			(1<<5)
 
 extern void dump_stack(void);
 

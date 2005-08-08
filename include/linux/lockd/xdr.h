@@ -13,15 +13,19 @@
 #include <linux/nfs.h>
 #include <linux/sunrpc/xdr.h>
 
+#define NLM_MAXCOOKIELEN    	32
 #define NLM_MAXSTRLEN		1024
-
-#define QUADLEN(len)		(((len) + 3) >> 2)
 
 #define	nlm_granted		__constant_htonl(NLM_LCK_GRANTED)
 #define	nlm_lck_denied		__constant_htonl(NLM_LCK_DENIED)
 #define	nlm_lck_denied_nolocks	__constant_htonl(NLM_LCK_DENIED_NOLOCKS)
 #define	nlm_lck_blocked		__constant_htonl(NLM_LCK_BLOCKED)
 #define	nlm_lck_denied_grace_period	__constant_htonl(NLM_LCK_DENIED_GRACE_PERIOD)
+/* error codes for internal use */
+/* if a request fails due to kmalloc failure, it gets dropped.
+ *  Client should resend eventually
+ */
+#define	nlm_lck_dropit		__constant_htonl(30000)
 
 /* Lock info passed via NLM */
 struct nlm_lock {
@@ -33,13 +37,14 @@ struct nlm_lock {
 };
 
 /*
- *	NLM cookies. Technically they can be 1K, Nobody uses over 8 bytes
- *	however.
+ *	NLM cookies. Technically they can be 1K, but Linux only uses 8 bytes.
+ *	FreeBSD uses 16, Apple Mac OS X 10.3 uses 20. Therefore we set it to
+ *	32 bytes.
  */
  
 struct nlm_cookie
 {
-	unsigned char data[8];
+	unsigned char data[NLM_MAXCOOKIELEN];
 	unsigned int len;
 };
 

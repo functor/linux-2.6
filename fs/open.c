@@ -536,6 +536,8 @@ out:
 	return error;
 }
 
+EXPORT_SYMBOL_GPL(sys_chdir);
+
 asmlinkage long sys_fchdir(unsigned int fd)
 {
 	struct file *file;
@@ -591,6 +593,8 @@ dput_and_out:
 out:
 	return error;
 }
+
+EXPORT_SYMBOL_GPL(sys_chroot);
 
 asmlinkage long sys_fchmod(unsigned int fd, mode_t mode)
 {
@@ -1040,6 +1044,7 @@ out_unlock:
 	return -EBADF;
 }
 
+EXPORT_SYMBOL(sys_close);
 
 /*
  * This routine simulates a hangup on the tty, to arrange that users

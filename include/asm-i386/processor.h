@@ -19,6 +19,7 @@
 #include <linux/cache.h>
 #include <linux/config.h>
 #include <linux/threads.h>
+#include <asm/percpu.h>
 
 /* flag for disabling the tsc */
 extern int tsc_disable;
@@ -84,8 +85,8 @@ struct cpuinfo_x86 {
 
 extern struct cpuinfo_x86 boot_cpu_data;
 extern struct cpuinfo_x86 new_cpu_data;
-extern struct tss_struct init_tss[NR_CPUS];
 extern struct tss_struct doublefault_tss;
+DECLARE_PER_CPU(struct tss_struct, init_tss);
 
 #ifdef CONFIG_SMP
 extern struct cpuinfo_x86 cpu_data[];
@@ -99,6 +100,7 @@ extern char ignore_fpu_irq;
 
 extern void identify_cpu(struct cpuinfo_x86 *);
 extern void print_cpu_info(struct cpuinfo_x86 *);
+extern unsigned int init_intel_cacheinfo(struct cpuinfo_x86 *c);
 extern void dodgy_tsc(void);
 
 /*
@@ -286,6 +288,11 @@ extern unsigned int machine_submodel_id;
 extern unsigned int BIOS_revision;
 extern unsigned int mca_pentium_flag;
 
+/*
+ * User space process size: 3GB (default).
+ */
+#define TASK_SIZE	(PAGE_OFFSET)
+
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
@@ -297,13 +304,14 @@ extern unsigned long arch_align_stack(unsigned long sp);
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
 
 /*
- * Size of io_bitmap, covering ports 0 to 0x3ff.
+ * Size of io_bitmap.
  */
-#define IO_BITMAP_BITS  1024
+#define IO_BITMAP_BITS  65536
 #define IO_BITMAP_BYTES (IO_BITMAP_BITS/8)
 #define IO_BITMAP_LONGS (IO_BITMAP_BYTES/sizeof(long))
 #define IO_BITMAP_OFFSET offsetof(struct tss_struct,io_bitmap)
 #define INVALID_IO_BITMAP_OFFSET 0x8000
+#define INVALID_IO_BITMAP_OFFSET_LAZY 0x9000
 
 struct i387_fsave_struct {
 	long	cwd;
@@ -357,6 +365,8 @@ typedef struct {
 	unsigned long seg;
 } mm_segment_t;
 
+struct thread_struct;
+
 struct tss_struct {
 	unsigned short	back_link,__blh;
 	unsigned long	esp0;
@@ -389,9 +399,14 @@ struct tss_struct {
 	 */
 	unsigned long	io_bitmap[IO_BITMAP_LONGS + 1];
 	/*
+	 * Cache the current maximum and the last task that used the bitmap:
+	 */
+	unsigned long io_bitmap_max;
+	struct thread_struct *io_bitmap_owner;
+	/*
 	 * pads the TSS to be cacheline-aligned (size is 0x100)
 	 */
-	unsigned long __cacheline_filler[5];
+	unsigned long __cacheline_filler[35];
 	/*
 	 * .. and then another 0x100 bytes for emergency kernel stack
 	 */
@@ -400,16 +415,9 @@ struct tss_struct {
 
 #define ARCH_MIN_TASKALIGN	16
 
-
-#define STACK_PAGE_COUNT	(4096/PAGE_SIZE)
-
-
-
-
 struct thread_struct {
 /* cached TLS descriptors. */
 	struct desc_struct tls_array[GDT_ENTRY_TLS_ENTRIES];
-	void *stack_page[STACK_PAGE_COUNT];
 	unsigned long	esp0;
 	unsigned long	sysenter_cs;
 	unsigned long	eip;
@@ -429,6 +437,8 @@ struct thread_struct {
 	unsigned int		saved_fs, saved_gs;
 /* IO permissions */
 	unsigned long	*io_bitmap_ptr;
+/* max allowed port in the bitmap, in bytes: */
+	unsigned long	io_bitmap_max;
 };
 
 #define INIT_THREAD  {							\
@@ -446,15 +456,13 @@ struct thread_struct {
 #define INIT_TSS  {							\
 	.esp0		= sizeof(init_stack) + (long)&init_stack,	\
 	.ss0		= __KERNEL_DS,					\
-	.esp1		= sizeof(init_tss[0]) + (long)&init_tss[0],	\
 	.ss1		= __KERNEL_CS,					\
 	.ldt		= GDT_ENTRY_LDT,				\
 	.io_bitmap_base	= INVALID_IO_BITMAP_OFFSET,			\
 	.io_bitmap	= { [ 0 ... IO_BITMAP_LONGS] = ~0 },		\
 }
 
-static inline void
-load_esp0(struct tss_struct *tss, struct thread_struct *thread)
+static inline void load_esp0(struct tss_struct *tss, struct thread_struct *thread)
 {
 	tss->esp0 = thread->esp0;
 	/* This can only happen when SEP is enabled, no need to test "SEP"arately */
@@ -490,23 +498,6 @@ extern void prepare_to_copy(struct task_struct *tsk);
  * create a kernel thread without removing it from tasklists
  */
 extern int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
-
-#ifdef CONFIG_X86_HIGH_ENTRY
-#define virtual_esp0(tsk) \
-	((unsigned long)(tsk)->thread_info->virtual_stack + ((tsk)->thread.esp0 - (unsigned long)(tsk)->thread_info->real_stack))
-#else
-# define virtual_esp0(tsk) ((tsk)->thread.esp0)
-#endif
-
-#define load_virtual_esp0(tss, task)					\
-	do {								\
-		tss->esp0 = virtual_esp0(task);				\
-		if (likely(cpu_has_sep) && unlikely(tss->ss1 != task->thread.sysenter_cs)) {	\
-			tss->ss1 = task->thread.sysenter_cs;		\
-			wrmsr(MSR_IA32_SYSENTER_CS,			\
-				task->thread.sysenter_cs, 0);		\
-		}							\
-	} while (0)
 
 extern unsigned long thread_saved_pc(struct task_struct *tsk);
 void show_trace(struct task_struct *task, unsigned long *stack);
@@ -670,10 +661,5 @@ extern inline void prefetchw(const void *x)
 extern void select_idle_routine(const struct cpuinfo_x86 *c);
 
 #define cache_line_size() (boot_cpu_data.x86_cache_alignment)
-
-#ifdef CONFIG_SCHED_SMT
-#define ARCH_HAS_SCHED_DOMAIN
-#define ARCH_HAS_SCHED_WAKE_IDLE
-#endif
 
 #endif /* __ASM_I386_PROCESSOR_H */

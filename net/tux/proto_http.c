@@ -760,7 +760,7 @@ static int lookup_url (tux_req_t *req, const unsigned int flag)
 	 *  1 : previous check successed, check farther
 	 */
 	int not_modified = -1;
-	int perm = 0, i;
+	int perm = 0;
 	struct dentry *dentry = NULL;
 	struct vfsmount *mnt = NULL;
 	struct inode *inode;
@@ -781,8 +781,6 @@ repeat_lookup:
 	Dprintk("will look up {%s} (%d)\n", filename, req->objectname_len);
 	Dprintk("current->fsuid: %d, current->fsgid: %d, ngroups: %d\n",
 		current->fsuid, current->fsgid, current->group_info->ngroups);
-	for (i = 0; i < current->group_info->ngroups; i++)
-		Dprintk(".. group #%d: %d.\n", i, current->groups[i]);
 
 	dentry = tux_lookup(req, filename, flag, &mnt);
 
@@ -1375,7 +1373,7 @@ static void handle_range(tux_req_t *req)
 	/* ok, the range is valid, use it: */
 
 	req->output_len = req->offset_end - req->offset_start;
-	req->in_file.f_pos = req->offset_start;
+	req->in_file->f_pos = req->offset_start;
 	return;
 
 out_no_range:
@@ -1769,7 +1767,7 @@ static void http_send_body (tux_req_t *req, int cachemiss)
 #if CONFIG_TUX_DEBUG
 		req->bytes_expected = 0;
 #endif
-		req->in_file.f_pos = 0;
+		req->in_file->f_pos = 0;
 		/*
 		 * We are in the middle of a file transfer,
 		 * zap it immediately:
@@ -1813,7 +1811,7 @@ repeat:
 		case -1:
 			break;
 		default:
-			req->in_file.f_pos = 0;
+			req->in_file->f_pos = 0;
 			add_req_to_workqueue(req);
 			break;
 	}
@@ -2040,7 +2038,7 @@ static int http_check_req_err (tux_req_t *req, int cachemiss)
 #if CONFIG_TUX_DEBUG
 	req->bytes_expected = 0;
 #endif
-	req->in_file.f_pos = 0;
+	req->in_file->f_pos = 0;
 	req->error = TUX_ERROR_CONN_CLOSE;
 	zap_request(req, cachemiss);
 

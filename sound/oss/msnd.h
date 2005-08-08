@@ -154,10 +154,11 @@
 #define DSPTOPC_BASED(w)	(((w) - DSP_BASE_ADDR) * 2)
 
 #ifdef SLOWIO
-#  undef outb
-#  undef inb
-#  define outb			outb_p
-#  define inb			inb_p
+#define msnd_outb			outb_p
+#define msnd_inb			inb_p
+#else
+#define msnd_outb			outb
+#define msnd_inb			inb
 #endif
 
 /* JobQueueStruct */
@@ -257,8 +258,6 @@ typedef struct multisound_dev {
 
 int				msnd_register(multisound_dev_t *dev);
 void				msnd_unregister(multisound_dev_t *dev);
-int				msnd_get_num_devs(void);
-multisound_dev_t *		msnd_get_dev(int i);
 
 void				msnd_init_queue(unsigned long, int start, int size);
 
@@ -269,8 +268,6 @@ void				msnd_fifo_make_empty(msnd_fifo *f);
 int				msnd_fifo_write(msnd_fifo *f, const char *buf, size_t len);
 int				msnd_fifo_read(msnd_fifo *f, char *buf, size_t len);
 
-int				msnd_wait_TXDE(multisound_dev_t *dev);
-int				msnd_wait_HC0(multisound_dev_t *dev);
 int				msnd_send_dsp_cmd(multisound_dev_t *dev, BYTE cmd);
 int				msnd_send_word(multisound_dev_t *dev, unsigned char high,
 					       unsigned char mid, unsigned char low);

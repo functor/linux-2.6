@@ -86,6 +86,46 @@ static inline void clear_grace_period(void)
 {
 	nlmsvc_grace_period = 0;
 }
+int
+nlmsvc_dispatch(struct svc_rqst *rqstp, u32 *statp)
+{
+	struct svc_procedure	*procp;
+	kxdrproc_t		xdr;
+	struct kvec *argv;
+	struct kvec *resv;
+
+	dprintk("nlmsvc_dispatch: vers %d proc %d\n",
+				rqstp->rq_vers, rqstp->rq_proc);
+
+	procp = rqstp->rq_procinfo;
+	argv = &rqstp->rq_arg.head[0];
+	resv = &rqstp->rq_res.head[0];
+
+	/* Decode arguments */
+	xdr = procp->pc_decode;
+	if (xdr && !xdr(rqstp, argv->iov_base, rqstp->rq_argp)) {
+		dprintk("nlmsvc_dispatch: failed to decode arguments!\n");
+		*statp = rpc_garbage_args;
+		return 1;
+	}
+	*statp = procp->pc_func(rqstp, rqstp->rq_argp, rqstp->rq_resp);
+	if (*statp == nlm_lck_dropit) {
+		dprintk("nlmsvc_dispatch: dropping request\n");
+		return 0;
+	}
+
+	/* Encode reply */
+	if (*statp == rpc_success && (xdr = procp->pc_encode)
+	 && !xdr(rqstp, resv->iov_base+resv->iov_len, rqstp->rq_resp)) {
+		dprintk("nlmsvc_dispatch: failed to encode reply\n");
+		*statp = rpc_system_err;
+		return 1;
+	}
+
+	dprintk("nlmsvc_dispatch: statp %d\n", ntohl(*statp));
+
+	return 1;
+}
 
 /*
  * This is the lockd kernel thread
@@ -278,6 +318,8 @@ void
 lockd_down(void)
 {
 	static int warned;
+	wait_queue_t __wait;
+	int retries=0;
 
 	down(&nlmsvc_sema);
 	if (nlmsvc_users) {
@@ -294,20 +336,33 @@ lockd_down(void)
 	warned = 0;
 
 	kill_proc(nlmsvc_pid, SIGKILL, 1);
+
+	init_waitqueue_entry(&__wait, current);
+	add_wait_queue(&lockd_exit,  &__wait);
+
 	/*
 	 * Wait for the lockd process to exit, but since we're holding
 	 * the lockd semaphore, we can't wait around forever ...
 	 */
 	clear_thread_flag(TIF_SIGPENDING);
-	interruptible_sleep_on_timeout(&lockd_exit, HZ);
-	if (nlmsvc_pid) {
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	while (nlmsvc_pid) {
+
+		schedule_timeout(HZ);
+		if (retries++ < 3)
+			continue;
+
 		printk(KERN_WARNING 
 			"lockd_down: lockd failed to exit, clearing pid\n");
 		nlmsvc_pid = 0;
 	}
+	set_current_state(TASK_RUNNING);
+	remove_wait_queue(&lockd_exit,  &__wait);
+
 	spin_lock_irq(&current->sighand->siglock);
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
+
 out:
 	up(&nlmsvc_sema);
 }
@@ -409,13 +464,13 @@ MODULE_DESCRIPTION("NFS file locking service version " LOCKD_VERSION ".");
 MODULE_LICENSE("GPL");
 
 module_param_call(nlm_grace_period, param_set_grace_period, param_get_ulong,
-		  &nlm_grace_period, 644);
+		  &nlm_grace_period, 0644);
 module_param_call(nlm_timeout, param_set_timeout, param_get_ulong,
-		  &nlm_timeout, 644);
+		  &nlm_timeout, 0644);
 module_param_call(nlm_udpport, param_set_port, param_get_int,
-		  &nlm_udpport, 644);
+		  &nlm_udpport, 0644);
 module_param_call(nlm_tcpport, param_set_port, param_get_int,
-		  &nlm_tcpport, 644);
+		  &nlm_tcpport, 0644);
 
 /*
  * Initialising and terminating the module.
@@ -444,12 +499,14 @@ static struct svc_version	nlmsvc_version1 = {
 		.vs_vers	= 1,
 		.vs_nproc	= 17,
 		.vs_proc	= nlmsvc_procedures,
+		.vs_dispatch = nlmsvc_dispatch,
 		.vs_xdrsize	= NLMSVC_XDRSIZE,
 };
 static struct svc_version	nlmsvc_version3 = {
 		.vs_vers	= 3,
 		.vs_nproc	= 24,
 		.vs_proc	= nlmsvc_procedures,
+		.vs_dispatch = nlmsvc_dispatch,
 		.vs_xdrsize	= NLMSVC_XDRSIZE,
 };
 #ifdef CONFIG_LOCKD_V4
@@ -457,6 +514,7 @@ static struct svc_version	nlmsvc_version4 = {
 		.vs_vers	= 4,
 		.vs_nproc	= 24,
 		.vs_proc	= nlmsvc_procedures4,
+		.vs_dispatch = nlmsvc_dispatch,
 		.vs_xdrsize	= NLMSVC_XDRSIZE,
 };
 #endif

@@ -123,7 +123,7 @@ struct agp_bridge_data {
 	void *current_size;
 	void *dev_private_data;
 	struct pci_dev *dev;
-	u32 *gatt_table;
+	u32 __iomem *gatt_table;
 	u32 *gatt_table_real;
 	unsigned long scratch_page;
 	unsigned long scratch_page_real;
@@ -140,16 +140,6 @@ struct agp_bridge_data {
 	char major_version;
 	char minor_version;
 };
-
-#define OUTREG64(mmap, addr, val)	__raw_writeq((val), (mmap)+(addr))
-#define OUTREG32(mmap, addr, val)	__raw_writel((val), (mmap)+(addr))
-#define OUTREG16(mmap, addr, val)	__raw_writew((val), (mmap)+(addr))
-#define OUTREG8(mmap, addr, val)	__raw_writeb((val), (mmap)+(addr))
-
-#define INREG64(mmap, addr)		__raw_readq((mmap)+(addr))
-#define INREG32(mmap, addr)		__raw_readl((mmap)+(addr))
-#define INREG16(mmap, addr)		__raw_readw((mmap)+(addr))
-#define INREG8(mmap, addr)		__raw_readb((mmap)+(addr))
 
 #define KB(x)	((x) * 1024)
 #define MB(x)	(KB (KB (x)))

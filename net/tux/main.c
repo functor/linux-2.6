@@ -41,8 +41,8 @@ static void flush_all_requests (threadinfo_t *ti);
 
 void flush_all_signals (void)
 {
-	spin_lock_irq(&current->sighand->siglock);
 	flush_signals(current);
+	spin_lock_irq(&current->sighand->siglock);
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
 }
@@ -192,9 +192,9 @@ int tux_chroot (char *dir)
 	set_fs(KERNEL_DS);
 	cap_raise (current->cap_effective, CAP_SYS_CHROOT);
 
-	err = chroot(dir);
+	err = sys_chroot(dir);
 	if (!err)
-		chdir("/");
+		sys_chdir("/");
 
 	current->cap_effective = saved_cap;
 	set_fs(oldmm);
@@ -446,14 +446,14 @@ static int user_req_start_thread (threadinfo_t *ti)
 	cpu = ti->cpu;
 #if CONFIG_SMP
 	{
-		unsigned int mask;
-		cpumask_t cpu_mask, map;
+		unsigned int home_cpu;
+		cpumask_t map;
 
-		mask = 1 << ((cpu + tux_cpu_offset) % num_online_cpus());
+		home_cpu = (cpu + tux_cpu_offset) % num_online_cpus();
+		map = cpumask_of_cpu(home_cpu);
 
-		mask_to_cpumask(mask, &cpu_mask);
-		cpus_and(map, cpu_mask, cpu_online_map);
-		if(!(cpus_empty(map)))
+		cpus_and(map, map, cpu_online_map);
+		if (!(cpus_empty(map)))
 			set_cpus_allowed(current, map);		
 	}
 #endif
@@ -936,7 +936,7 @@ repeat:
 		case -1:
 			break;
 		default:
-			req->in_file.f_pos = 0;
+			req->in_file->f_pos = 0;
 			add_req_to_workqueue(req);
 			break;
 	}
@@ -977,7 +977,7 @@ fetch_missed:
 		INC_STAT(user_fetch_cachemisses);
 		goto fetch_missed;
 	}
-	req->in_file.f_pos = 0;
+	req->in_file->f_pos = 0;
 	add_req_to_workqueue(req);
 }
 
