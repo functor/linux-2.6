@@ -1856,7 +1856,8 @@ no_tcp_socket:
 	if (skb->len < (th->doff << 2) || tcp_checksum_complete(skb)) {
 bad_packet:
 		TCP_INC_STATS_BH(TCP_MIB_INERRS);
-	} else {
+	} else if (!skb->sk) {
+		/* VNET: Suppress RST if the port was bound to a (presumably raw) socket */
 		tcp_v4_send_reset(skb);
 	}
 

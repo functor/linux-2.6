@@ -24,13 +24,10 @@
 void vx_vsi_uptime(struct timespec *uptime, struct timespec *idle)
 {
 	struct vx_info *vxi = current->vx_info;
-	struct timeval bias;
-
-	jiffies_to_timeval(vxi->cvirt.bias_jiffies - INITIAL_JIFFIES, &bias);
 
 	set_normalized_timespec(uptime,
-		uptime->tv_sec - bias.tv_sec,
-		uptime->tv_nsec - bias.tv_usec*1000);
+		uptime->tv_sec - vxi->cvirt.bias_uptime.tv_sec,
+		uptime->tv_nsec - vxi->cvirt.bias_uptime.tv_nsec);
 	if (!idle)
 		return;
 	set_normalized_timespec(idle,
@@ -43,4 +40,45 @@ uint64_t vx_idle_jiffies()
 {
 	return init_task.utime + init_task.stime;
 }
+
+
+
+static inline uint32_t __update_loadavg(uint32_t load,
+	int wsize, int delta, int n)
+{
+	unsigned long long calc;
+
+	/* just set it to n */
+	if (unlikely(delta >= wsize))
+		return (n << FSHIFT);
+
+	calc = (delta * n) << FSHIFT;
+	calc += (wsize - delta) * load;
+	do_div(calc, wsize);
+	return calc;
+}
+
+
+void vx_update_load(struct vx_info *vxi)
+{
+	uint32_t now, last, delta;
+
+	spin_lock(&vxi->cvirt.load_lock);
+
+	now = jiffies;
+	last = vxi->cvirt.load_last;
+	delta = now - last;
+
+	vxi->cvirt.load[0] = __update_loadavg(vxi->cvirt.load[0],
+		60*HZ, delta, atomic_read(&vxi->cvirt.nr_running));
+	vxi->cvirt.load[1] = __update_loadavg(vxi->cvirt.load[1],
+		5*60*HZ, delta, atomic_read(&vxi->cvirt.nr_running));
+	vxi->cvirt.load[2] = __update_loadavg(vxi->cvirt.load[2],
+		15*60*HZ, delta, atomic_read(&vxi->cvirt.nr_running));
+
+	vxi->cvirt.load_last = now;
+	spin_unlock(&vxi->cvirt.load_lock);
+}
+
+
 

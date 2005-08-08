@@ -43,16 +43,14 @@ static inline struct sock *first_unix_socket(int *i)
 #define forall_unix_sockets(i, s) \
 	for (s = first_unix_socket(&(i)); s; s = next_unix_socket(&(i),(s)))
 
-struct unix_address
-{
+struct unix_address {
 	atomic_t	refcnt;
 	int		len;
 	unsigned	hash;
 	struct sockaddr_un name[0];
 };
 
-struct unix_skb_parms
-{
+struct unix_skb_parms {
 	struct ucred		creds;		/* Skb credentials	*/
 	struct scm_fp_list	*fp;		/* Passed files		*/
 };
@@ -74,6 +72,7 @@ struct unix_sock {
         struct dentry		*dentry;
         struct vfsmount		*mnt;
         struct semaphore        readsem;
+        struct sock		*peer;
         struct sock		*other;
         struct sock		*gc_tree;
         atomic_t                inflight;

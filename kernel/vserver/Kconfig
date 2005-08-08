@@ -25,6 +25,16 @@ config	VSERVER_HARDCPU
 	help
 	  Activate the Hard CPU Limits
 
+config	VSERVER_HARDCPU_IDLE
+	bool	"Limit the IDLE task"
+	depends on VSERVER_HARDCPU
+	default n
+	help
+	  Limit the idle slices, so the the next context
+	  will be scheduled as soon as possible.
+	  might improve interactivity/latency but
+	  increases scheduling overhead.
+
 choice
 	prompt	"Persistent Inode Context Tagging"
 	default	INOXID_UGID24

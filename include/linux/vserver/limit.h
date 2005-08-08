@@ -11,6 +11,7 @@
 
 #define VLIMIT_NSOCK	16
 
+
 extern const char *vlimit_name[NUM_LIMITS];
 
 struct _vx_limit {
@@ -53,19 +54,19 @@ static inline void vx_limit_fixup(struct _vx_limit *limit)
 {
 	unsigned long value;
 	unsigned int lim;
-	
-        for (lim=0; lim<NUM_LIMITS; lim++) {
-                value = atomic_read(&limit->rcur[lim]);
-                if (value > limit->rmax[lim])
+
+	for (lim=0; lim<NUM_LIMITS; lim++) {
+		value = atomic_read(&limit->rcur[lim]);
+		if (value > limit->rmax[lim])
 			limit->rmax[lim] = value;
 		if (limit->rmax[lim] > limit->rlim[lim])
 			limit->rmax[lim] = limit->rlim[lim];
-        }
+	}
 }
 
-#define	VX_LIMIT_FMT	":\t%10d\t%10ld\t%10ld\t%6d\n"
+#define VX_LIMIT_FMT	":\t%10d\t%10ld\t%10ld\t%6d\n"
 
-#define	VX_LIMIT_ARG(r)				\
+#define VX_LIMIT_ARG(r)				\
 		,atomic_read(&limit->rcur[r])	\
 		,limit->rmax[r]			\
 		,limit->rlim[r]			\
@@ -79,7 +80,7 @@ static inline int vx_info_proc_limit(struct _vx_limit *limit, char *buffer)
 		"VM"	VX_LIMIT_FMT
 		"VML"	VX_LIMIT_FMT
 		"RSS"	VX_LIMIT_FMT
-		"FILES"	VX_LIMIT_FMT
+		"FILES" VX_LIMIT_FMT
 		"SOCK"	VX_LIMIT_FMT
 		VX_LIMIT_ARG(RLIMIT_NPROC)
 		VX_LIMIT_ARG(RLIMIT_AS)
@@ -96,7 +97,7 @@ static inline int vx_info_proc_limit(struct _vx_limit *limit, char *buffer)
 
 #include "switch.h"
 
-#define	VXD_RLIMIT(r,l)		(VXD_CBIT(limit, (l)) && ((r) == (l)))
+#define VXD_RLIMIT(r,l)		(VXD_CBIT(limit, (l)) && ((r) == (l)))
 
 /*  rlimit vserver commands */
 
@@ -104,14 +105,14 @@ static inline int vx_info_proc_limit(struct _vx_limit *limit, char *buffer)
 #define VCMD_set_rlimit		VC_CMD(RLIMIT, 2, 0)
 #define VCMD_get_rlimit_mask	VC_CMD(RLIMIT, 3, 0)
 
-struct  vcmd_ctx_rlimit_v0 {
+struct	vcmd_ctx_rlimit_v0 {
 	uint32_t id;
 	uint64_t minimum;
 	uint64_t softlimit;
 	uint64_t maximum;
 };
 
-struct  vcmd_ctx_rlimit_mask_v0 {
+struct	vcmd_ctx_rlimit_mask_v0 {
 	uint32_t minimum;
 	uint32_t softlimit;
 	uint32_t maximum;

@@ -87,7 +87,7 @@ void classqueue_enqueue(struct classqueue_struct *cq,
 	int index;
 
 	//get real index
-	if (cq_nr_member(cq)) {
+	if (cq_nr_member(cq)) {		
 		index = get_index(cq, &prio);
 	} else {		//the first one
 		cq->base = prio;

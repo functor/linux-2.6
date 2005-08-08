@@ -352,7 +352,7 @@ static inline struct task_struct * rq_get_next_task(struct runqueue* rq)
 
 	// it is guaranteed be the ( rq->nr_running > 0 ) check in 
 	// schedule that a task will be found.
-
+	
  retry_next_class:
 	queue = rq_get_next_class(rq);
 	// BUG_ON( !queue );
@@ -376,7 +376,7 @@ static inline struct task_struct * rq_get_next_task(struct runqueue* rq)
 	// BUG_ON(!array->nr_active);
 
 	idx = queue->top_priority;
-	// BUG_ON (idx == MAX_PRIO);
+	//BUG_ON(idx == MAX_PRIO);
 	next = task_list_entry(array->queue[idx].next);
 	return next;
 }
@@ -1596,7 +1596,7 @@ static inline int ckrm_cls_move_tasks(ckrm_lrq_t* src_lrq,ckrm_lrq_t*dst_lrq,
 /*
  * we don't want to migrate tasks that will reverse the balance
  *     or the tasks that make too small difference
- */
+	 */
 #define CKRM_BALANCE_MAX_RATIO	100
 #define CKRM_BALANCE_MIN_RATIO	1
  start:
@@ -1614,11 +1614,11 @@ static inline int ckrm_cls_move_tasks(ckrm_lrq_t* src_lrq,ckrm_lrq_t*dst_lrq,
 		array = src_lrq->active;
 		dst_array = dst_lrq->active;
 	}
-	
- new_array:
+
+new_array:
 	/* Start searching at priority 0: */
 	idx = 0;
- skip_bitmap:
+skip_bitmap:
 	if (!idx)
 		idx = sched_find_first_bit(array->bitmap);
 	else
@@ -1634,14 +1634,14 @@ static inline int ckrm_cls_move_tasks(ckrm_lrq_t* src_lrq,ckrm_lrq_t*dst_lrq,
 		else 
 			goto out; //finished search for this lrq
 	}
-	
+
 	head = array->queue + idx;
 	curr = head->prev;
- skip_queue:
+skip_queue:
 	tmp = list_entry(curr, task_t, run_list);
-	
+
 	curr = curr->prev;
-	
+
 	if (!can_migrate_task(tmp, busiest, this_cpu, sd, idle)) {
 		if (curr != head)
 			goto skip_queue;
@@ -1658,27 +1658,27 @@ static inline int ckrm_cls_move_tasks(ckrm_lrq_t* src_lrq,ckrm_lrq_t*dst_lrq,
 		*pressure_imbalance -= task_load(tmp);
 		pull_task(busiest, array, tmp, 
 			  this_rq, dst_array, this_cpu);
-		pulled++;
+	pulled++;
 
 		if (*pressure_imbalance <= balance_min)
 			goto out;
 	}
 		
-	if (curr != head)
-		goto skip_queue;
-	idx++;
-	goto skip_bitmap;
- out:	       
+		if (curr != head)
+			goto skip_queue;
+		idx++;
+		goto skip_bitmap;
+out:
 	return pulled;
 }
 
 static inline long ckrm_rq_imbalance(runqueue_t *this_rq,runqueue_t *dst_rq)
 {
 	long imbalance;
-	/*
+/*
 	 * make sure after balance, imbalance' > - imbalance/2
 	 * we don't want the imbalance be reversed too much
-	 */
+ */
 	imbalance = pid_get_pressure(rq_ckrm_load(dst_rq),0) 
 		- pid_get_pressure(rq_ckrm_load(this_rq),1);
 	imbalance /= 2;
@@ -1848,15 +1848,15 @@ nextgroup:
 	/* hzheng: debugging: 105 is a magic number
 	 * 100*max_load <= sd->imbalance_pct*this_load)
 	 * should use imbalance_pct instead
-	 */
+		 */
 	if (this_load > avg_load 
 	    || 100*max_load < 105*this_load
 	    || 100*min_load < 70*this_load
 	    )
-		goto out_balanced;
+			goto out_balanced;
 
 	return avg_load;
- out_balanced:
+out_balanced:
 	return 0;
 }
 
@@ -1870,7 +1870,7 @@ ckrm_find_busy_queue(struct sched_domain *sd, int this_cpu,
 		     int nr_group)
 {
 	struct sched_group *group;
-	runqueue_t * busiest=NULL;
+	runqueue_t *busiest = NULL;
 	unsigned long rand;
 	
 	group = sd->groups;
@@ -1880,10 +1880,10 @@ ckrm_find_busy_queue(struct sched_domain *sd, int this_cpu,
 	do {
 		unsigned long load,total_load,max_load;
 		cpumask_t tmp;
-		int i;
+	int i;
 		runqueue_t * grp_busiest;
 
-		cpus_and(tmp, group->cpumask, cpu_online_map);
+	cpus_and(tmp, group->cpumask, cpu_online_map);
 		if (unlikely(cpus_empty(tmp)))
 			goto find_nextgroup;
 
@@ -1893,18 +1893,18 @@ ckrm_find_busy_queue(struct sched_domain *sd, int this_cpu,
 		for_each_cpu_mask(i, tmp) {
 			load = pid_get_pressure(rq_ckrm_load(cpu_rq(i)),0);
 			total_load += load;
-			if (load > max_load) {
-				max_load = load;
+		if (load > max_load) {
+			max_load = load;
 				grp_busiest = cpu_rq(i);
-			}				
 		}
+	}
 
 		total_load = (total_load * SCHED_LOAD_SCALE) / group->cpu_power;
 		if (total_load > avg_load) {
 			busiest = grp_busiest;
 			if (nr_group >= rand)
 				break;
-		}
+}
 	find_nextgroup:		
 		group = group->next;
 		nr_group ++;
@@ -1928,7 +1928,7 @@ static int ckrm_load_balance(int this_cpu, runqueue_t *this_rq,
 		goto out_balanced;
 
 	busiest = ckrm_find_busy_queue(sd,this_cpu,avg_load,idle,nr_group);
-	if (! busiest)
+	if (!busiest)
 		goto out_balanced;
 	/*
 	 * This should be "impossible", but since load
@@ -1954,13 +1954,13 @@ static int ckrm_load_balance(int this_cpu, runqueue_t *this_rq,
 		spin_unlock(&busiest->lock);
 		if (nr_moved) {
 			adjust_local_weight();
-		}
 	}
+			}
 
 	if (!nr_moved) 
 		sd->nr_balance_failed ++;
 	else
-		sd->nr_balance_failed  = 0;		
+		sd->nr_balance_failed = 0;
 
 	/* We were unbalanced, so reset the balancing interval */
 	sd->balance_interval = sd->min_interval;
@@ -1979,7 +1979,7 @@ out_balanced:
  * this_rq->lock is already held
  */
 static inline int load_balance_newidle(int this_cpu, runqueue_t *this_rq,
-				       struct sched_domain *sd)
+				struct sched_domain *sd)
 {
 	int ret;
 	read_lock(&class_list_lock);
@@ -2020,12 +2020,12 @@ static int move_tasks(runqueue_t *this_rq, int this_cpu, runqueue_t *busiest,
 	if (max_nr_move <= 0 || busiest->nr_running <= 1)
 		goto out;
 
-	/*
+/*
 	 * We first consider expired tasks. Those will likely not be
 	 * executed in the near future, and they are most likely to
 	 * be cache-cold, thus switching CPUs has the least effect
 	 * on them.
-	 */
+ */
 	if (busiest->expired->nr_active) {
 		array = busiest->expired;
 		dst_array = this_rq->expired;
@@ -2049,7 +2049,7 @@ skip_bitmap:
 			goto new_array;
 		}
 		goto out;
-	}
+			}
 
 	head = array->queue + idx;
 	curr = head->prev;
@@ -2063,7 +2063,7 @@ skip_queue:
 			goto skip_queue;
 		idx++;
 		goto skip_bitmap;
-	}
+		}
 	pull_task(busiest, array, tmp, this_rq, dst_array, this_cpu);
 	pulled++;
 
@@ -2092,7 +2092,7 @@ find_busiest_group(struct sched_domain *sd, int this_cpu,
 
 	max_load = this_load = total_load = total_pwr = 0;
 
-	do {
+ 	do {
 		cpumask_t tmp;
 		unsigned long load;
 		int local_group;
@@ -2106,7 +2106,7 @@ find_busiest_group(struct sched_domain *sd, int this_cpu,
 		if (unlikely(cpus_empty(tmp)))
 			goto nextgroup;
 
-		for_each_cpu_mask(i, tmp) {
+ 		for_each_cpu_mask(i, tmp) {
 			/* Bias balancing toward cpus of our domain */
 			if (local_group)
 				load = target_load(i);
@@ -2115,7 +2115,7 @@ find_busiest_group(struct sched_domain *sd, int this_cpu,
 
 			nr_cpus++;
 			avg_load += load;
-		}
+ 		}
 
 		if (!nr_cpus)
 			goto nextgroup;
@@ -2173,11 +2173,11 @@ nextgroup:
 			return busiest;
 		}
 
-		/*
+	/*
 		 * OK, we don't have enough imbalance to justify moving tasks,
 		 * however we may be able to increase total CPU power used by
 		 * moving them.
-		 */
+	 */
 
 		pwr_now += busiest->cpu_power*min(SCHED_LOAD_SCALE, max_load);
 		pwr_now += this->cpu_power*min(SCHED_LOAD_SCALE, this_load);
@@ -2202,7 +2202,7 @@ nextgroup:
 
 		*imbalance = 1;
 		return busiest;
-	}
+		}
 
 	/* Get rid of the scaling factor, rounding down as we divide */
 	*imbalance = (*imbalance + 1) / SCHED_LOAD_SCALE;
@@ -2238,7 +2238,7 @@ static runqueue_t *find_busiest_queue(struct sched_group *group)
 			max_load = load;
 			busiest = cpu_rq(i);
 		}
-	}
+}
 
 	return busiest;
 }
@@ -2288,7 +2288,7 @@ static int load_balance(int this_cpu, runqueue_t *this_rq,
 		nr_moved = move_tasks(this_rq, this_cpu, busiest,
 						imbalance, sd, idle);
 		spin_unlock(&busiest->lock);
-	}
+}
 	spin_unlock(&this_rq->lock);
 
 	if (!nr_moved) {
@@ -2307,10 +2307,10 @@ static int load_balance(int this_cpu, runqueue_t *this_rq,
 			if (wake)
 				wake_up_process(busiest->migration_thread);
 
-			/*
+/*
 			 * We've kicked active balancing, reset the failure
 			 * counter.
-			 */
+ */
 			sd->nr_balance_failed = sd->cache_nice_tries;
 		}
 	} else
@@ -2793,14 +2793,14 @@ asmlinkage void __sched schedule(void)
 	int maxidle = -HZ;
 #endif
 
- 	/*
+	/*
 	 * If crash dump is in progress, this other cpu's
 	 * need to wait until it completes.
 	 * NB: this code is optimized away for kernels without
 	 * dumping enabled.
 	 */
-	if (unlikely(dump_oncpu))
-		goto dump_scheduling_disabled;
+	 if (unlikely(dump_oncpu))
+		 goto dump_scheduling_disabled;
 
 	//WARN_ON(system_state == SYSTEM_BOOTING);
 	/*
@@ -2865,8 +2865,9 @@ need_resched:
 	}
 
 	cpu = smp_processor_id();
+
 #ifdef	CONFIG_VSERVER_HARDCPU		
-	if (!list_empty(&rq->hold_queue)) {
+ 	if (!list_empty(&rq->hold_queue)) {
 		struct list_head *l, *n;
 		int ret;
 
@@ -2875,7 +2876,7 @@ need_resched:
 			next = list_entry(l, task_t, run_list);
 			if (vxi == next->vx_info)
 				continue;
-
+			
 			vxi = next->vx_info;
 			ret = vx_tokens_recalc(vxi);
 			// tokens = vx_tokens_avail(next);
@@ -2890,22 +2891,22 @@ need_resched:
 			}
 			if ((ret < 0) && (maxidle < ret))
 				maxidle = ret;
-		}	
+		}
 	}
-	rq->idle_tokens = -maxidle;
-
-pick_next:
+ 	rq->idle_tokens = -maxidle;
+	
+ pick_next:
 #endif
 	if (unlikely(!rq->nr_running)) {
 		idle_balance(cpu, rq);
                 if (!rq->nr_running) {
-                        next = rq->idle;
+		next = rq->idle;
 #ifdef CONFIG_CKRM_CPU_SCHEDULE
                         rq->expired_timestamp = 0;
 #endif
                         wake_sleeping_dependent(cpu, rq);
-                        goto switch_tasks;
-                }
+		goto switch_tasks;
+	}
 	}
 
 	next = rq_get_next_task(rq);
@@ -2916,20 +2917,20 @@ pick_next:
 	}
 
 #ifdef	CONFIG_VSERVER_HARDCPU		
-	vxi = next->vx_info;
-	if (vxi && __vx_flags(vxi->vx_flags,
-		VXF_SCHED_PAUSE|VXF_SCHED_HARD, 0)) {
-		int ret = vx_tokens_recalc(vxi);
-
-		if (unlikely(ret <= 0)) {
-			if (ret && (rq->idle_tokens > -ret))
-				rq->idle_tokens = -ret;
-			deactivate_task(next, rq);
-			list_add_tail(&next->run_list, &rq->hold_queue);
-			next->state |= TASK_ONHOLD;			
-			goto pick_next;
-		}
-	}
+ 	vxi = next->vx_info;
+ 	if (vxi && __vx_flags(vxi->vx_flags,
+			      VXF_SCHED_PAUSE|VXF_SCHED_HARD, 0)) {
+ 		int ret = vx_tokens_recalc(vxi);
+		
+ 		if (unlikely(ret <= 0)) {
+ 			if (ret && (rq->idle_tokens > -ret))
+ 				rq->idle_tokens = -ret;
+ 			deactivate_task(next, rq);
+ 			list_add_tail(&next->run_list, &rq->hold_queue);
+ 			next->state |= TASK_ONHOLD;			
+ 			goto pick_next;
+ 		}
+ 	}
 #endif
 
 	if (!rt_task(next) && next->activated > 0) {
@@ -2980,15 +2981,15 @@ switch_tasks:
 	if (test_thread_flag(TIF_NEED_RESCHED))
 		goto need_resched;
 
-	return;
-
+ 	return;
+	
  dump_scheduling_disabled:
-	/* allow scheduling only if this is the dumping cpu */
-	if (dump_oncpu != smp_processor_id()+1) {
-		while (dump_oncpu)
-			cpu_relax();
-	}
-	return;
+ 	/* allow scheduling only if this is the dumping cpu */
+ 	if (dump_oncpu != smp_processor_id()+1) {
+ 		while (dump_oncpu)
+ 			cpu_relax();
+ 	}
+ 	return;
 }
 
 EXPORT_SYMBOL(schedule);
@@ -3175,11 +3176,11 @@ EXPORT_SYMBOL(wait_for_completion);
 	spin_unlock_irqrestore(&q->lock, flags);
 
 #define SLEEP_ON_BKLCHECK				\
-	if (unlikely(!kernel_locked()) &&		\
-	    sleep_on_bkl_warnings < 10) {		\
-		sleep_on_bkl_warnings++;		\
-		WARN_ON(1);				\
-	}
+ 	if (unlikely(!kernel_locked()) &&		\
+ 	    sleep_on_bkl_warnings < 10) {		\
+ 		sleep_on_bkl_warnings++;		\
+ 		WARN_ON(1);				\
+ 	}
 
 static int sleep_on_bkl_warnings;
 
@@ -3202,7 +3203,7 @@ long fastcall __sched interruptible_sleep_on_timeout(wait_queue_head_t *q, long 
 {
 	SLEEP_ON_VAR
 
-	SLEEP_ON_BKLCHECK
+        SLEEP_ON_BKLCHECK
 
 	current->state = TASK_INTERRUPTIBLE;
 
@@ -3219,7 +3220,7 @@ long fastcall __sched sleep_on_timeout(wait_queue_head_t *q, long timeout)
 {
 	SLEEP_ON_VAR
 
-	SLEEP_ON_BKLCHECK
+        SLEEP_ON_BKLCHECK
 
 	current->state = TASK_UNINTERRUPTIBLE;
 
@@ -3346,7 +3347,6 @@ int task_nice(const task_t *p)
 {
 	return TASK_NICE(p);
 }
-
 EXPORT_SYMBOL(task_nice);
 
 /**
@@ -4650,10 +4650,10 @@ void __init sched_init(void)
 			for (k = 0; k < MAX_PRIO; k++) {
 				INIT_LIST_HEAD(array->queue + k);
 				__clear_bit(k, array->bitmap);
-			}
+		}
 			// delimiter for bitsearch
 			__set_bit(MAX_PRIO, array->bitmap);
-		}
+	}
 
 		rq->active = rq->arrays;
 		rq->expired = rq->arrays + 1;
@@ -4722,7 +4722,7 @@ void __might_sleep(char *file, int line, int atomic_depth)
 		printk("in_atomic():%d[expected: %d], irqs_disabled():%d\n",
 			in_atomic(), atomic_depth, irqs_disabled());
 		dump_stack();
-	}
+}
 #endif
 }
 EXPORT_SYMBOL(__might_sleep);
@@ -4739,7 +4739,7 @@ EXPORT_SYMBOL(__might_sleep);
  * hand while permitting preemption.
  *
  * Called inside preempt_disable().
- */
+	 */
 void __sched __preempt_spin_lock(spinlock_t *lock)
 {
 	if (preempt_count() > 1) {
@@ -4778,14 +4778,14 @@ EXPORT_SYMBOL(__preempt_write_lock);
 int task_running_sys(struct task_struct *p)
 {
        return task_running(task_rq(p),p);
-}
+        	}
 EXPORT_SYMBOL(task_running_sys);
 #endif
 
 #ifdef CONFIG_CKRM_CPU_SCHEDULE
 /**
  * return the classqueue object of a certain processor
- */
+			 */
 struct classqueue_struct * get_cpu_classqueue(int cpu)
 {
 	return (& (cpu_rq(cpu)->classqueue) );
@@ -4799,7 +4799,7 @@ void _ckrm_cpu_change_class(task_t *tsk, struct ckrm_cpu_class *newcls)
 	prio_array_t *array;
 	struct runqueue *rq;
 	unsigned long flags;
-
+	
 	rq = task_rq_lock(tsk,&flags); 
 	array = tsk->array;
 	if (array) {

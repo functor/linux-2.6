@@ -17,9 +17,55 @@
 #include <linux/vs_context.h>
 #include <linux/namespace.h>
 #include <linux/dcache.h>
+#include <linux/fs.h>
 
 #include <asm/errno.h>
 #include <asm/uaccess.h>
+
+
+int vx_check_vfsmount(struct vx_info *vxi, struct vfsmount *mnt)
+{
+	struct vfsmount *root_mnt, *altroot_mnt;
+	struct dentry *root, *altroot, *point;
+	int r1, r2, s1, s2, ret = 0;
+
+	if (!vxi || !mnt)
+		return 1;
+
+	spin_lock(&dcache_lock);
+	altroot_mnt = current->fs->rootmnt;
+	altroot = current->fs->root;
+	point = altroot;
+
+	if (vxi->vx_fs) {
+		root_mnt = vxi->vx_fs->rootmnt;
+		root = vxi->vx_fs->root;
+	} else {
+		root_mnt = altroot_mnt;
+		root = altroot;
+	}
+	/* printk("··· %p:%p/%p:%p ",
+		root_mnt, root, altroot_mnt, altroot);	*/
+
+	while ((mnt != mnt->mnt_parent) &&
+		(mnt != root_mnt) && (mnt != altroot_mnt)) {
+		point = mnt->mnt_mountpoint;
+		mnt = mnt->mnt_parent;
+	}
+
+	r1 = (mnt == root_mnt);
+	s1 = is_subdir(point, root);
+	r2 = (mnt == altroot_mnt);
+	s2 = is_subdir(point, altroot);
+
+	ret = (((mnt == root_mnt) && is_subdir(point, root)) ||
+		((mnt == altroot_mnt) && is_subdir(point, altroot)));
+	/* printk("··· for %p:%p -> %d:%d/%d:%d = %d\n",
+		mnt, point, r1, s1, r2, s2, ret);	*/
+	spin_unlock(&dcache_lock);
+
+	return (r2 && s2);
+}
 
 
 /* virtual host info names */
@@ -57,11 +103,11 @@ int vc_set_vhi_name(uint32_t id, void __user *data)
 		return -EPERM;
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
-	
+
 	vxi = locate_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
-	
+
 	name = vx_vhi_name(vxi, vc_data.field);
 	if (name)
 		memcpy(name, vc_data.name, 65);
@@ -85,7 +131,7 @@ int vc_get_vhi_name(uint32_t id, void __user *data)
 	name = vx_vhi_name(vxi, vc_data.field);
 	if (!name)
 		goto out_put;
-			
+
 	memcpy(vc_data.name, name, 65);
 	if (copy_to_user (data, &vc_data, sizeof(vc_data)))
 		return -EFAULT;
@@ -145,7 +191,7 @@ int vc_enter_namespace(uint32_t id, void *data)
 	old_ns = current->namespace;
 	old_fs = current->fs;
 	get_namespace(vxi->vx_namespace);
-	current->namespace = vxi->vx_namespace;	
+	current->namespace = vxi->vx_namespace;
 	current->fs = fs;
 	task_unlock(current);
 
