@@ -35,6 +35,7 @@
 #include <linux/vs_base.h>
 #include <linux/vs_limit.h>
 #include <linux/nodemask.h>
+#include <linux/ckrm_mem_inline.h>
 
 #include <asm/tlbflush.h>
 
@@ -50,7 +51,7 @@ int sysctl_lower_zone_protection = 0;
 EXPORT_SYMBOL(totalram_pages);
 EXPORT_SYMBOL(nr_swap_pages);
 
-#ifdef CONFIG_CRASH_DUMP
+#ifdef CONFIG_CRASH_DUMP_MODULE
 /* This symbol has to be exported to use 'for_each_pgdat' macro by modules. */
 EXPORT_SYMBOL(pgdat_list);
 #endif
@@ -105,7 +106,8 @@ static void bad_page(const char *function, struct page *page)
 	tainted |= TAINT_BAD_PAGE;
 }
 
-#if !defined(CONFIG_HUGETLB_PAGE) && !defined(CONFIG_CRASH_DUMP)
+#if !defined(CONFIG_HUGETLB_PAGE) && !defined(CONFIG_CRASH_DUMP) \
+	&& !defined(CONFIG_CRASH_DUMP_MODULE)
 #define prep_compound_page(page, order) do { } while (0)
 #define destroy_compound_page(page, order) do { } while (0)
 #else
@@ -275,7 +277,7 @@ free_pages_bulk(struct zone *zone, int count,
 		/* have to delete it as __free_pages_bulk list manipulates */
 		list_del(&page->lru);
 		__free_pages_bulk(page, base, zone, area, order);
-		ckrm_clear_page_class(page);
+ 		ckrm_clear_page_class(page);
 		ret++;
 	}
 	spin_unlock_irqrestore(&zone->lock, flags);
@@ -371,9 +373,7 @@ static void prep_new_page(struct page *page, int order)
 #endif
 			1 << PG_checked | 1 << PG_mappedtodisk);
 	page->private = 0;
-#ifdef CONFIG_CKRM_RES_MEM
-	page->ckrm_zone = NULL;
-#endif
+	ckrm_page_init(page);
 	set_page_refs(page, order);
 }
 
@@ -636,9 +636,8 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 	 */
 	can_try_harder = (unlikely(rt_task(p)) && !in_interrupt()) || !wait;
 
-	if (!ckrm_class_limit_ok((ckrm_get_mem_class(current)))) {
+	if (!in_interrupt() && !ckrm_class_limit_ok(ckrm_get_mem_class(p)))
 		return NULL;
-	}
 
 	zones = zonelist->zones;  /* the list of zones suitable for gfp_mask */
 
@@ -1573,10 +1572,7 @@ static void __init free_area_init_core(struct pglist_data *pgdat,
 		}
 		printk(KERN_DEBUG "  %s zone: %lu pages, LIFO batch:%lu\n",
 				zone_names[j], realsize, batch);
-#ifndef CONFIG_CKRM_RES_MEM
-		INIT_LIST_HEAD(&zone->active_list);
-		INIT_LIST_HEAD(&zone->inactive_list);
-#endif
+		ckrm_init_lists(zone);
 		zone->nr_scan_active = 0;
 		zone->nr_scan_inactive = 0;
 		zone->nr_active = 0;

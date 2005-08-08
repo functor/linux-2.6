@@ -26,8 +26,7 @@
 
 #ifdef CONFIG_CKRM_RES_MEM
 
-#define INACTIVE	0
-#define ACTIVE		1
+#define ckrm_shrink_list_empty() list_empty(&ckrm_shrink_list)
 
 static inline struct ckrm_mem_res *
 ckrm_get_mem_class(struct task_struct *tsk)
@@ -35,8 +34,6 @@ ckrm_get_mem_class(struct task_struct *tsk)
 	return ckrm_get_res_class(tsk->taskclass, mem_rcbs.resid,
 		struct ckrm_mem_res);
 }
-
-#define ckrm_shrink_list_empty()	list_empty(&ckrm_shrink_list)
 
 static inline void
 ckrm_set_shrink(struct ckrm_zone *cz)
@@ -56,6 +53,18 @@ ckrm_clear_shrink(struct ckrm_zone *cz)
 	clear_bit(CLS_SHRINK_BIT, &cz->shrink_flag);
 }
 
+static inline void
+set_page_ckrmzone( struct page *page, struct ckrm_zone *cz)
+{
+	page->ckrm_zone = cz;
+}
+
+static inline struct ckrm_zone *
+page_ckrmzone(struct page *page)
+{
+	return page->ckrm_zone;
+}
+
 /*
  * Currently, a shared page that is shared by multiple classes is charged
  * to a class with max available guarantee. Simply replace this function
@@ -67,7 +76,7 @@ ckrm_mem_share_compare(struct ckrm_mem_res *a, struct ckrm_mem_res *b)
 	if (a == NULL)
 		return -(b != NULL);
 	if (b == NULL)
-		return 0;
+		return 1;
 	if (a->pg_guar == b->pg_guar)
 		return 0;
 	if (a->pg_guar == CKRM_SHARE_DONTCARE)
@@ -81,29 +90,30 @@ static inline void
 incr_use_count(struct ckrm_mem_res *cls, int borrow)
 {
 	extern int ckrm_mem_shrink_at;
-	if (unlikely(!cls))
-		return;
-	BUG_ON(!ckrm_memclass_valid(cls));
-	atomic_inc(&cls->pg_total);
+	struct ckrm_mem_res *parcls = ckrm_get_res_class(cls->parent,
+				mem_rcbs.resid, struct ckrm_mem_res);
 
+	if (!cls)
+		return;
+
+	atomic_inc(&cls->pg_total);
 	if (borrow)
 		cls->pg_lent++;
-	if ((cls->pg_guar == CKRM_SHARE_DONTCARE) ||
-			(atomic_read(&cls->pg_total) > cls->pg_unused)) {
-		struct ckrm_mem_res *parcls = ckrm_get_res_class(cls->parent,
+
+	parcls = ckrm_get_res_class(cls->parent,
 				mem_rcbs.resid, struct ckrm_mem_res);
-		if (parcls) {
-			incr_use_count(parcls, 1);
-			cls->pg_borrowed++;
-		}
-	} else {
+	if (parcls && ((cls->pg_guar == CKRM_SHARE_DONTCARE) ||
+			(atomic_read(&cls->pg_total) > cls->pg_unused))) {
+		incr_use_count(parcls, 1);
+		cls->pg_borrowed++;
+	} else
 		atomic_inc(&ckrm_mem_real_count);
-	}
-	if (unlikely((cls->pg_limit != CKRM_SHARE_DONTCARE) &&
+
+	if ((cls->pg_limit != CKRM_SHARE_DONTCARE) &&
 			(atomic_read(&cls->pg_total) >=
 			((ckrm_mem_shrink_at * cls->pg_limit) / 100)) &&
-			((cls->flags & MEM_AT_LIMIT) != MEM_AT_LIMIT))) {
-		ckrm_at_limit(cls);
+			((cls->flags & CLS_AT_LIMIT) != CLS_AT_LIMIT)) {
+		ckrm_shrink_atlimit(cls);
 	}
 	return;
 }
@@ -111,9 +121,8 @@ incr_use_count(struct ckrm_mem_res *cls, int borrow)
 static inline void
 decr_use_count(struct ckrm_mem_res *cls, int borrowed)
 {
-	if (unlikely(!cls))
+	if (!cls)
 		return;
-	BUG_ON(!ckrm_memclass_valid(cls));
 	atomic_dec(&cls->pg_total);
 	if (borrowed)
 		cls->pg_lent--;
@@ -132,64 +141,50 @@ decr_use_count(struct ckrm_mem_res *cls, int borrowed)
 static inline void
 ckrm_set_page_class(struct page *page, struct ckrm_mem_res *cls)
 {
-	if (unlikely(cls == NULL)) {
+	struct ckrm_zone *new_czone, *old_czone;
+
+	if (!cls) {
+		if (!ckrm_mem_root_class) {
+			set_page_ckrmzone(page, NULL);
+			return;
+		}
 		cls = ckrm_mem_root_class;
 	}
-	if (likely(cls != NULL)) {
-		struct ckrm_zone *czone = &cls->ckrm_zone[page_zonenum(page)];
-		if (unlikely(page->ckrm_zone)) {
-			kref_put(&cls->nr_users, memclass_release);
-		}
-		page->ckrm_zone = czone;
-		kref_get(&cls->nr_users);
-	} else {
-		page->ckrm_zone = NULL;
-	}
-}
+	new_czone = &cls->ckrm_zone[page_zonenum(page)];
+	old_czone = page_ckrmzone(page);
+	
+	if (old_czone)
+		kref_put(&old_czone->memcls->nr_users, memclass_release);
 
-static inline void
-ckrm_set_pages_class(struct page *pages, int numpages, struct ckrm_mem_res *cls)
-{
-	int i;
-	for (i = 0; i < numpages; pages++, i++) {
-		ckrm_set_page_class(pages, cls);
-	}
-}
-
-static inline void
-ckrm_clear_page_class(struct page *page)
-{
-	if (likely(page->ckrm_zone != NULL)) {
-		if (CkrmAccount(page)) {
-			decr_use_count(page->ckrm_zone->memcls, 0);
-			ClearCkrmAccount(page);
-		}
-		kref_put(&page->ckrm_zone->memcls->nr_users, memclass_release);
-		page->ckrm_zone = NULL;
-	}
+	set_page_ckrmzone(page, new_czone);
+	kref_get(&cls->nr_users);
+	incr_use_count(cls, 0);
+	SetPageCkrmAccount(page);
 }
 
 static inline void
 ckrm_change_page_class(struct page *page, struct ckrm_mem_res *newcls)
 {
-	struct ckrm_zone *old_czone = page->ckrm_zone, *new_czone;
+	struct ckrm_zone *old_czone = page_ckrmzone(page), *new_czone;
 	struct ckrm_mem_res *oldcls;
 
-	if (unlikely(!old_czone || !newcls)) {
-		BUG_ON(CkrmAccount(page));
-		return;
+	if  (!newcls) {
+		if (!ckrm_mem_root_class)
+			return;
+		newcls = ckrm_mem_root_class;
 	}
-	BUG_ON(!CkrmAccount(page));
 
 	oldcls = old_czone->memcls;
-	if (oldcls == NULL || (oldcls == newcls))
+	if (oldcls == newcls)
 		return;
 
-	kref_put(&oldcls->nr_users, memclass_release);
-	decr_use_count(oldcls, 0);
+	if (oldcls) {
+		kref_put(&oldcls->nr_users, memclass_release);
+		decr_use_count(oldcls, 0);
+	}
 
-	page->ckrm_zone = new_czone = &newcls->ckrm_zone[page_zonenum(page)];
-
+	new_czone = &newcls->ckrm_zone[page_zonenum(page)];
+	set_page_ckrmzone(page, new_czone);
 	kref_get(&newcls->nr_users);
 	incr_use_count(newcls, 0);
 
@@ -206,33 +201,44 @@ ckrm_change_page_class(struct page *page, struct ckrm_mem_res *newcls)
 }
 
 static inline void
+ckrm_clear_page_class(struct page *page)
+{
+	struct ckrm_zone *czone = page_ckrmzone(page);
+	if (czone != NULL) {
+		if (PageCkrmAccount(page)) {
+			decr_use_count(czone->memcls, 0);
+			ClearPageCkrmAccount(page);
+		}
+		kref_put(&czone->memcls->nr_users, memclass_release);
+		set_page_ckrmzone(page, NULL);
+	}
+}
+
+static inline void
 ckrm_mem_inc_active(struct page *page)
 {
-	struct ckrm_mem_res *cls = ckrm_get_mem_class(current) ?: ckrm_mem_root_class;
+	struct ckrm_mem_res *cls = ckrm_get_mem_class(current)
+						?: ckrm_mem_root_class;
+	struct ckrm_zone *czone;
 
 	if (cls == NULL)
 		return;
-	BUG_ON(CkrmAccount(page));
-	BUG_ON(page->ckrm_zone != NULL);
 
 	ckrm_set_page_class(page, cls);
-	incr_use_count(cls, 0);
-	SetCkrmAccount(page);
-	BUG_ON(page->ckrm_zone == NULL);
-	page->ckrm_zone->nr_active++;
-	list_add(&page->lru, &page->ckrm_zone->active_list);
+	czone = page_ckrmzone(page);
+	czone->nr_active++;
+	list_add(&page->lru, &czone->active_list);
 }
 
 static inline void
 ckrm_mem_dec_active(struct page *page)
 {
-	if (page->ckrm_zone == NULL)
+	struct ckrm_zone *czone = page_ckrmzone(page);
+	if (czone == NULL)
 		return;
-	BUG_ON(page->ckrm_zone->memcls == NULL);
-	BUG_ON(!CkrmAccount(page));
 
 	list_del(&page->lru);
-	page->ckrm_zone->nr_active--;
+	czone->nr_active--;
 	ckrm_clear_page_class(page);
 }
 
@@ -240,39 +246,59 @@ ckrm_mem_dec_active(struct page *page)
 static inline void
 ckrm_mem_inc_inactive(struct page *page)
 {
-	struct ckrm_mem_res *cls = ckrm_get_mem_class(current) ?: ckrm_mem_root_class;
+	struct ckrm_mem_res *cls = ckrm_get_mem_class(current)
+						?: ckrm_mem_root_class;
+	struct ckrm_zone *czone;
 
 	if (cls == NULL)
 		return;
-	BUG_ON(CkrmAccount(page));
-	BUG_ON(page->ckrm_zone != NULL);
 
 	ckrm_set_page_class(page, cls);
-	incr_use_count(cls, 0);
-	SetCkrmAccount(page);
-	BUG_ON(page->ckrm_zone == NULL);
-	page->ckrm_zone->nr_inactive++;
-	list_add(&page->lru, &page->ckrm_zone->inactive_list);
+	czone = page_ckrmzone(page);
+	czone->nr_inactive++;
+	list_add(&page->lru, &czone->inactive_list);
 }
 
 static inline void
 ckrm_mem_dec_inactive(struct page *page)
 {
-	if (page->ckrm_zone == NULL)
+	struct ckrm_zone *czone = page_ckrmzone(page);
+	if (czone == NULL)
 		return;
-	BUG_ON(page->ckrm_zone->memcls == NULL);
-	BUG_ON(!CkrmAccount(page));
 
-	page->ckrm_zone->nr_inactive--;
+	czone->nr_inactive--;
 	list_del(&page->lru);
 	ckrm_clear_page_class(page);
+}
+
+static inline void
+ckrm_zone_add_active(struct ckrm_zone *czone, int cnt)
+{
+	czone->nr_active += cnt;
+}
+
+static inline void
+ckrm_zone_add_inactive(struct ckrm_zone *czone, int cnt)
+{
+	czone->nr_inactive += cnt;
+}
+
+static inline void
+ckrm_zone_sub_active(struct ckrm_zone *czone, int cnt)
+{
+	czone->nr_active -= cnt;
+}
+
+static inline void
+ckrm_zone_sub_inactive(struct ckrm_zone *czone, int cnt)
+{
+	czone->nr_inactive -= cnt;
 }
 
 static inline int
 ckrm_class_limit_ok(struct ckrm_mem_res *cls)
 {
 	int ret;
-	extern int ckrm_mem_fail_over;
 
 	if ((mem_rcbs.resid == -1) || !cls) {
 		return 1;
@@ -281,19 +307,25 @@ ckrm_class_limit_ok(struct ckrm_mem_res *cls)
 		struct ckrm_mem_res *parcls = ckrm_get_res_class(cls->parent,
 					mem_rcbs.resid, struct ckrm_mem_res);
 		ret = (parcls ? ckrm_class_limit_ok(parcls) : 0);
-	} else {
-		ret = (atomic_read(&cls->pg_total) <=
-			((ckrm_mem_fail_over * cls->pg_limit) / 100));
-	}
+	} else
+		ret = (atomic_read(&cls->pg_total) <= cls->pg_limit);
 
-	if (ret == 0) {
-		// if we are failing... just nudge the back end
-		ckrm_at_limit(cls);
-	}
+	/* If we are failing, just nudge the back end */
+	if (ret == 0)
+		ckrm_shrink_atlimit(cls);
+
 	return ret;
 }
 
-// task/mm initializations/cleanup
+static inline void
+ckrm_page_init(struct page *page)
+{
+	page->flags &= ~(1 << PG_ckrm_account);
+	set_page_ckrmzone(page, NULL);
+}
+
+
+/* task/mm initializations/cleanup */
 
 static inline void
 ckrm_task_mm_init(struct task_struct *tsk)
@@ -302,26 +334,42 @@ ckrm_task_mm_init(struct task_struct *tsk)
 }
 
 static inline void
-ckrm_task_change_mm(struct task_struct *tsk, struct mm_struct *oldmm, struct mm_struct *newmm)
+ckrm_task_mm_set(struct mm_struct * mm, struct task_struct *task)
+{
+	spin_lock(&mm->peertask_lock);
+	if (!list_empty(&task->mm_peers)) {
+		printk(KERN_ERR "MEM_RC: Task list NOT empty!! emptying...\n");
+		list_del_init(&task->mm_peers);
+	}
+	list_add_tail(&task->mm_peers, &mm->tasklist);
+	spin_unlock(&mm->peertask_lock);
+	if (mm->memclass != ckrm_get_mem_class(task))
+		ckrm_mem_migrate_mm(mm, NULL);
+	return;
+}
+
+static inline void
+ckrm_task_mm_change(struct task_struct *tsk,
+		struct mm_struct *oldmm, struct mm_struct *newmm)
 {
 	if (oldmm) {
 		spin_lock(&oldmm->peertask_lock);
 		list_del(&tsk->mm_peers);
-		ckrm_mem_evaluate_mm(oldmm, NULL);
+		ckrm_mem_migrate_mm(oldmm, NULL);
 		spin_unlock(&oldmm->peertask_lock);
 	}
 	spin_lock(&newmm->peertask_lock);
 	list_add_tail(&tsk->mm_peers, &newmm->tasklist);
-	ckrm_mem_evaluate_mm(newmm, NULL);
+	ckrm_mem_migrate_mm(newmm, NULL);
 	spin_unlock(&newmm->peertask_lock);
 }
 
 static inline void
-ckrm_task_clear_mm(struct task_struct *tsk, struct mm_struct *mm)
+ckrm_task_mm_clear(struct task_struct *tsk, struct mm_struct *mm)
 {
 	spin_lock(&mm->peertask_lock);
 	list_del_init(&tsk->mm_peers);
-	ckrm_mem_evaluate_mm(mm, NULL);
+	ckrm_mem_migrate_mm(mm, NULL);
 	spin_unlock(&mm->peertask_lock);
 }
 
@@ -348,56 +396,65 @@ ckrm_mm_clearclass(struct mm_struct *mm)
 	}
 }
 
-static inline void
-ckrm_zone_inc_active(struct ckrm_zone *czone, int cnt)
+static inline void ckrm_init_lists(struct zone *zone) 			{}
+
+static inline void ckrm_add_tail_inactive(struct page *page)
 {
-	czone->nr_active += cnt;
+	 struct ckrm_zone *ckrm_zone = page_ckrmzone(page);
+	 list_add_tail(&page->lru, &ckrm_zone->inactive_list);
 }
 
-static inline void
-ckrm_zone_inc_inactive(struct ckrm_zone *czone, int cnt)
+#else
+
+#define ckrm_shrink_list_empty()		(1)
+
+static inline void *
+ckrm_get_memclass(struct task_struct *tsk)
 {
-	czone->nr_inactive += cnt;
+	return NULL;
 }
 
-static inline void
-ckrm_zone_dec_active(struct ckrm_zone *czone, int cnt)
+static inline void ckrm_clear_page_class(struct page *p)		{}
+
+static inline void ckrm_mem_inc_active(struct page *p)			{}
+static inline void ckrm_mem_dec_active(struct page *p)			{}
+static inline void ckrm_mem_inc_inactive(struct page *p)		{}
+static inline void ckrm_mem_dec_inactive(struct page *p)		{}
+
+#define ckrm_zone_add_active(a, b)	do {} while (0)
+#define ckrm_zone_add_inactive(a, b)	do {} while (0)
+#define ckrm_zone_sub_active(a, b)	do {} while (0)
+#define ckrm_zone_sub_inactive(a, b)	do {} while (0)
+
+#define ckrm_class_limit_ok(a)						(1)
+
+static inline void ckrm_page_init(struct page *p)			{}
+static inline void ckrm_task_mm_init(struct task_struct *tsk)		{}
+static inline void ckrm_task_mm_set(struct mm_struct * mm,
+					struct task_struct *task)	{}
+static inline void ckrm_task_mm_change(struct task_struct *tsk,
+		struct mm_struct *oldmm, struct mm_struct *newmm)	{}
+static inline void ckrm_task_mm_clear(struct task_struct *tsk,
+						struct mm_struct *mm)	{}
+
+static inline void ckrm_mm_init(struct mm_struct *mm)			{}
+
+/* using #define instead of static inline as the prototype requires   *
+ * data structures that is available only with the controller enabled */
+#define ckrm_mm_setclass(a, b) 					do {} while(0)
+
+static inline void ckrm_mm_clearclass(struct mm_struct *mm)		{}
+
+static inline void ckrm_init_lists(struct zone *zone)
 {
-	czone->nr_active -= cnt;
+	INIT_LIST_HEAD(&zone->active_list);
+	INIT_LIST_HEAD(&zone->inactive_list);
 }
 
-static inline void
-ckrm_zone_dec_inactive(struct ckrm_zone *czone, int cnt)
+static inline void ckrm_add_tail_inactive(struct page *page)
 {
-	czone->nr_inactive -= cnt;
+	 struct zone *zone = page_zone(page);
+	 list_add_tail(&page->lru, &zone->inactive_list);
 }
-
-#else // !CONFIG_CKRM_RES_MEM
-
-#define ckrm_set_page_class(a,b)	do{}while(0)
-#define ckrm_set_pages_class(a,b,c)	do{}while(0)
-#define ckrm_clear_page_class(a)	do{}while(0)
-#define ckrm_clear_pages_class(a,b)	do{}while(0)
-#define ckrm_change_page_class(a,b)	do{}while(0)
-#define ckrm_change_pages_class(a,b,c)	do{}while(0)
-#define ckrm_mem_inc_active(a)		do{}while(0)
-#define ckrm_mem_dec_active(a)		do{}while(0)
-#define ckrm_mem_inc_inactive(a)	do{}while(0)
-#define ckrm_mem_dec_inactive(a)	do{}while(0)
-#define ckrm_shrink_list_empty()	(1)
-#define ckrm_kick_page(a,b)		(0)
-#define ckrm_class_limit_ok(a)		(1)
-#define ckrm_task_mm_init(a)		do{}while(0)
-#define ckrm_task_clear_mm(a, b)	do{}while(0)
-#define ckrm_task_change_mm(a, b, c)	do{}while(0)
-#define ckrm_mm_init(a)			do{}while(0)
-#define ckrm_mm_setclass(a, b)		do{}while(0)
-#define ckrm_mm_clearclass(a)		do{}while(0)
-#define ckrm_zone_inc_active(a, b)	do{}while(0)
-#define ckrm_zone_inc_inactive(a, b)	do{}while(0)
-#define ckrm_zone_dec_active(a, b)	do{}while(0)
-#define ckrm_zone_dec_inactive(a, b)	do{}while(0)
-
-#endif // CONFIG_CKRM_RES_MEM
-
-#endif // _LINUX_CKRM_MEM_INLINE_H_
+#endif 
+#endif /* _LINUX_CKRM_MEM_INLINE_H_ */
