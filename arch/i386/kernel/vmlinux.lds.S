@@ -2,24 +2,20 @@
  * Written by Martin Mares <mj@atrey.karlin.mff.cuni.cz>;
  */
 
-#define LOAD_OFFSET __PAGE_OFFSET
-
 #include <asm-generic/vmlinux.lds.h>
 #include <asm/thread_info.h>
 #include <asm/page.h>
-#include <asm/segment.h>
 
 OUTPUT_FORMAT("elf32-i386", "elf32-i386", "elf32-i386")
 OUTPUT_ARCH(i386)
-ENTRY(phys_startup_32)
+ENTRY(startup_32)
 jiffies = jiffies_64;
 SECTIONS
 {
-  . = LOAD_OFFSET + KERN_PHYS_OFFSET;
-  phys_startup_32 = startup_32 - LOAD_OFFSET;
+  . = __PAGE_OFFSET + 0x100000;
   /* read-only */
   _text = .;			/* Text and read-only data */
-  .text : AT(ADDR(.text) - LOAD_OFFSET) {
+  .text : {
 	*(.text)
 	SCHED_TEXT
 	LOCK_TEXT
@@ -31,51 +27,49 @@ SECTIONS
 
   . = ALIGN(16);		/* Exception table */
   __start___ex_table = .;
-  __ex_table : AT(ADDR(__ex_table) - LOAD_OFFSET) { *(__ex_table) }
+  __ex_table : { *(__ex_table) }
   __stop___ex_table = .;
 
   RODATA
 
   /* writeable */
-  .data : AT(ADDR(.data) - LOAD_OFFSET) {			/* Data */
+  .data : {			/* Data */
 	*(.data)
 	CONSTRUCTORS
 	}
 
   . = ALIGN(4096);
   __nosave_begin = .;
-  .data_nosave : AT(ADDR(.data_nosave) - LOAD_OFFSET) { *(.data.nosave) }
+  .data_nosave : { *(.data.nosave) }
   . = ALIGN(4096);
   __nosave_end = .;
 
   . = ALIGN(4096);
-  .data.page_aligned : AT(ADDR(.data.page_aligned) - LOAD_OFFSET) { *(.data.idt) }
+  .data.page_aligned : { *(.data.idt) }
 
   . = ALIGN(32);
-  .data.cacheline_aligned : AT(ADDR(.data.cacheline_aligned) - LOAD_OFFSET) {
-	*(.data.cacheline_aligned)
-  }
+  .data.cacheline_aligned : { *(.data.cacheline_aligned) }
 
   _edata = .;			/* End of data section */
 
   . = ALIGN(THREAD_SIZE);	/* init_task */
-  .data.init_task : AT(ADDR(.data.init_task) - LOAD_OFFSET) { *(.data.init_task) }
+  .data.init_task : { *(.data.init_task) }
 
   /* will be freed after init */
   . = ALIGN(4096);		/* Init code and data */
   __init_begin = .;
-  .init.text : AT(ADDR(.init.text) - LOAD_OFFSET) {
+  .init.text : { 
 	_sinittext = .;
 	*(.init.text)
 	_einittext = .;
   }
-  .init.data : AT(ADDR(.init.data) - LOAD_OFFSET) { *(.init.data) }
+  .init.data : { *(.init.data) }
   . = ALIGN(16);
   __setup_start = .;
-  .init.setup : AT(ADDR(.init.setup) - LOAD_OFFSET) { *(.init.setup) }
+  .init.setup : { *(.init.setup) }
   __setup_end = .;
   __initcall_start = .;
-  .initcall.init : AT(ADDR(.initcall.init) - LOAD_OFFSET) {
+  .initcall.init : {
 	*(.initcall1.init) 
 	*(.initcall2.init) 
 	*(.initcall3.init) 
@@ -86,40 +80,33 @@ SECTIONS
   }
   __initcall_end = .;
   __con_initcall_start = .;
-  .con_initcall.init : AT(ADDR(.con_initcall.init) - LOAD_OFFSET) {
-	*(.con_initcall.init)
-  }
+  .con_initcall.init : { *(.con_initcall.init) }
   __con_initcall_end = .;
   SECURITY_INIT
   . = ALIGN(4);
   __alt_instructions = .;
-  .altinstructions : AT(ADDR(.altinstructions) - LOAD_OFFSET) {
-	*(.altinstructions)
-  }
-  __alt_instructions_end = .;
- .altinstr_replacement : AT(ADDR(.altinstr_replacement) - LOAD_OFFSET) {
-	*(.altinstr_replacement)
- }
+  .altinstructions : { *(.altinstructions) } 
+  __alt_instructions_end = .; 
+ .altinstr_replacement : { *(.altinstr_replacement) } 
   /* .exit.text is discard at runtime, not link time, to deal with references
      from .altinstructions and .eh_frame */
-  .exit.text : AT(ADDR(.exit.text) - LOAD_OFFSET) { *(.exit.text) }
-  .exit.data : AT(ADDR(.exit.data) - LOAD_OFFSET) { *(.exit.data) }
+  .exit.text : { *(.exit.text) }
+  .exit.data : { *(.exit.data) }
   . = ALIGN(4096);
   __initramfs_start = .;
-  .init.ramfs : AT(ADDR(.init.ramfs) - LOAD_OFFSET) { *(.init.ramfs) }
+  .init.ramfs : { *(.init.ramfs) }
   __initramfs_end = .;
   . = ALIGN(32);
   __per_cpu_start = .;
-  .data.percpu  : AT(ADDR(.data.percpu) - LOAD_OFFSET) { *(.data.percpu) }
+  .data.percpu  : { *(.data.percpu) }
   __per_cpu_end = .;
   . = ALIGN(4096);
   __init_end = .;
   /* freed after init ends here */
 	
   __bss_start = .;		/* BSS */
-  .bss.page_aligned  : AT(ADDR(.bss.page_aligned) - LOAD_OFFSET) {
-	*(.bss.page_aligned) }
-  .bss : AT(ADDR(.bss) - LOAD_OFFSET) {
+  .bss : {
+	*(.bss.page_aligned)
 	*(.bss)
   }
   . = ALIGN(4);

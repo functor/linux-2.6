@@ -90,6 +90,8 @@ config SYSVIPC
 	  you want to run the DOS emulator dosemu under Linux (read the
 	  DOSEMU-HOWTO, available from <http://www.tldp.org/docs.html#howto>),
 	  you'll need to say Y here.
+	  DOSEMU-HOWTO, available from <http://www.tldp.org/docs.html#howto>),
+	  you'll need to say Y here.
 
 	  You can find documentation about IPC with "info ipc" and also in
 	  section 6.4 of the Linux Programmer's Guide, available from
@@ -153,19 +155,19 @@ config CKRM
 	  one of the resource controllers below. Say N if you are unsure. 
 
 config RCFS_FS
-	tristate "Resource Class File System (User API)"
-	depends on CKRM
-	help
+       tristate "Resource Class File System (User API)"
+       depends on CKRM
+       help
 	  RCFS is the filesystem API for CKRM. This separate configuration 
 	  option is provided only for debugging and will eventually disappear 
 	  since rcfs will be automounted whenever CKRM is configured. 
 
-	  Say N if unsure, Y if you've enabled CKRM, M to debug rcfs 
+          Say N if unsure, Y if you've enabled CKRM, M to debug rcfs 
 	  initialization.
 
 config CKRM_TYPE_TASKCLASS
 	bool "Class Manager for Task Groups"
-	depends on CKRM && RCFS_FS
+	depends on CKRM
 	help
 	  TASKCLASS provides the extensions for CKRM to track task classes
 	  This is the base to enable task class based resource control for
@@ -177,46 +179,21 @@ config CKRM_RES_NULL
 	tristate "Null Tasks Resource Manager"
 	depends on CKRM_TYPE_TASKCLASS
 	default m
-
-config CKRM_RES_MEM
-	bool "Class based physical memory controller"
-	default y
-	depends on CKRM
-	help
-	  Provide the basic support for collecting physical memory usage
-	  information among classes. Say Y if you want to know the memory
-	  usage of each class.
-
-config CKRM_TYPE_SOCKETCLASS
-	bool "Class Manager for socket groups"
-	depends on CKRM && RCFS_FS
 	help
 	  Provides a Null Resource Controller for CKRM that is purely for
 	  demonstration purposes.
 	
 	  Say N if unsure, Y to use the feature.
 
-
 config CKRM_RES_NUMTASKS
 	tristate "Number of Tasks Resource Manager"
 	depends on CKRM_TYPE_TASKCLASS
 	default m
 	help
-	  Provides a Resource Controller for CKRM that allows limiting number of
+	  Provides a Resource Controller for CKRM that allows limiting no of
 	  tasks a task class can have.
 	
 	  Say N if unsure, Y to use the feature.
-
-config CKRM_RES_NUMTASKS_FORKRATE
-	tristate "Number of Tasks Resource Manager for Fork Rate"
-	depends on CKRM_RES_NUMTASKS
-	default y
-	help
-	  Provides a Resource Controller for CKRM that allows limiting the rate
-	  of tasks a task class can fork per hour.
-	
-	  Say N if unsure, Y to use the feature.
-
 
 config CKRM_CPU_SCHEDULE
 	bool "CKRM CPU scheduler"
@@ -239,6 +216,26 @@ config CKRM_RES_BLKIO
 	  alter the actual bandwidth delivered to a class.
 	
 	  Say N if unsure, Y to use the feature.
+
+config CKRM_RES_MEM
+	bool "Class based physical memory controller"
+	default y
+	depends on CKRM
+	help
+	  Provide the basic support for collecting physical memory usage information
+	  among classes. Say Y if you want to know the memory usage of each class.
+
+config CKRM_MEM_LRUORDER_CHANGE
+	bool "Change the LRU ordering of scanned pages"
+	default n
+	depends on CKRM_RES_MEM
+	help
+	  While trying to free pages, by default(n), scanned pages are left were they
+	  are found if they belong to relatively under-used class. In this case the
+	  LRU ordering of the memory subsystemis left intact. If this option is chosen,
+	  then the scanned pages are moved to the tail of the list(active or inactive).
+	  Changing this to yes reduces the checking overhead but violates the approximate
+	  LRU order that is maintained by the paging subsystem.
 
 config CKRM_CPU_SCHEDULE_AT_BOOT
 	bool "Turn on at boot time"
@@ -274,48 +271,29 @@ config CKRM_RES_LISTENAQ
  
 	  If unsure, say N.
 
-choice 
-       prompt "Classification Engine"
-       depends on CKRM && RCFS_FS	      
-       optional
-       help
-	 Select a classification engine (CE) that assists in 
-	 automatic classification of kernel objects managed by CKRM when
-	 they are created. Without a CE, a user must manually 
-	 classify objects into classes. Processes inherit their parent's 
-	 classification.
-
-	 Only one engine can be built into the kernel though all can be
-	 built as modules (only one will load). 
-
-	 If unsure, say N.
-
 config CKRM_RBCE
-	tristate "Vanilla RBCE"
+	tristate "Vanilla Rule-based Classification Engine (RBCE)"
+	depends on CKRM && RCFS_FS
+	default m
 	help
-	  Vanilla Rule-based Classification Engine (RBCE). Rules for
-	  classifying kernel objects are created/deleted/modified through
-	  a RCFS directory using a filesystem interface.
-	
-	  Any CE is optional. If unsure, say N.
+	  Provides an optional module to support creation of rules for automatic
+	  classification of kernel objects. Rules are created/deleted/modified 
+          through an rcfs interface. RBCE is not required for CKRM. 
+ 
+	  If unsure, say N.
 
 config CKRM_CRBCE
-	tristate "Enhanced RBCE"
-	depends on DELAY_ACCT && RELAYFS_FS 
+	tristate "Enhanced Rule-based Classification Engine (RBCE)"
+	depends on CKRM && RCFS_FS && RELAYFS_FS && DELAY_ACCT
+	default m
 	help
-	  Enhanced Rule-based Classification Engine (CRBCE). Like the Vanilla
-	  RBCE, rules for classifying kernel objects are created, deleted and
-	  modified through a RCFS directory using a filesystem interface 
-	  (requires CKRM_RCFS configured).
- 
-	  In addition, CRBCE provides per-process delay data 
-	  (requires DELAY_ACCT configured) and makes information on significant
-	  kernel events available to userspace tools through relayfs 
-	  (requires RELAYFS_FS configured). 
+	  Provides an optional module to support creation of rules for automatic
+	  classification of kernel objects, just like RBCE above. In addition,
+	  CRBCE provides per-process delay data (requires DELAY_ACCT configured)
+	  enabled) and makes information on significant kernel events available
+	  to userspace tools through relayfs (requires RELAYFS_FS configured). 
 	
-	  Any CE is optional. If unsure, say N.
-
-endchoice
+	  If unsure, say N.
 
 endmenu
 
@@ -461,6 +439,7 @@ config DELAY_ACCT
 	  recorded. CPU delays are specified as cpu-wait and cpu-run. 
 	  I/O delays are recorded for memory and regular I/O.
 	  Information is accessible through /proc/<pid>/delay.
+
 
 config KALLSYMS
 	 bool "Load all symbols for debugging/kksymoops" if EMBEDDED
