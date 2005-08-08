@@ -30,7 +30,6 @@
 #include <linux/vserver/debug.h>
 #include <linux/vs_context.h>
 #include <linux/vserver/context_cmd.h>
-#include <linux/ckrm_events.h> /* needed for ckrm_cb_xid() */
 
 #include <asm/errno.h>
 
@@ -564,9 +563,6 @@ int vx_migrate_task(struct task_struct *p, struct vx_info *vxi)
 		// put_vx_info(old_vxi);
 	}
 out:
-
-
-	ckrm_cb_xid(p);
 
 	put_vx_info(old_vxi);
 	return ret;

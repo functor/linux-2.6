@@ -1683,27 +1683,5 @@ static inline char *alloc_secdata(void)
 static inline void free_secdata(void *secdata)
 { }
 #endif	/* CONFIG_SECURITY */
-
-/* io priorities */
-
-#define IOPRIO_NR      21
-
-#define IOPRIO_IDLE	0
-#define IOPRIO_NORM	10
-#define IOPRIO_RT	20
-
-asmlinkage int sys_ioprio_set(int ioprio);
-asmlinkage int sys_ioprio_get(void);
-
-/* common structure for cfq & ckrm I/O controller */
-typedef struct cfqlim {
-	int nskip;
-	unsigned long navsec;
-	int timedout;
-	atomic_t sectorate;
-	u64 sec[2];
-} cfqlim_t ;
-
-
 #endif /* __KERNEL__ */
 #endif /* _LINUX_FS_H */

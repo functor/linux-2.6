@@ -799,14 +799,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newtp->num_sacks = 0;
 		newtp->urg_data = 0;
 		newtp->listen_opt = NULL;
-#ifdef CONFIG_ACCEPT_QUEUES
-		newtp->accept_queue = NULL;
-		memset(newtp->acceptq, 0,sizeof(newtp->acceptq));
-		newtp->class_index = 0;
-
-#else
 		newtp->accept_queue = newtp->accept_queue_tail = NULL;
-#endif
 		/* Deinitialize syn_wait_lock to trap illegal accesses. */
 		memset(&newtp->syn_wait_lock, 0, sizeof(newtp->syn_wait_lock));
 
@@ -1046,7 +1039,7 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 	tcp_synq_unlink(tp, req, prev);
 	tcp_synq_removed(sk, req);
 
-	tcp_acceptq_queue(sk, req, child);
+ 	tcp_acceptq_queue(sk, req, child);
 	return child;
 
 listen_overflow:

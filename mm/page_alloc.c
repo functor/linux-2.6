@@ -31,7 +31,6 @@
 #include <linux/topology.h>
 #include <linux/sysctl.h>
 #include <linux/cpu.h>
-#include <linux/ckrm_mem_inline.h>
 #include <linux/vs_base.h>
 #include <linux/vs_limit.h>
 #include <linux/nodemask.h>
@@ -275,7 +274,6 @@ free_pages_bulk(struct zone *zone, int count,
 		/* have to delete it as __free_pages_bulk list manipulates */
 		list_del(&page->lru);
 		__free_pages_bulk(page, base, zone, area, order);
-		ckrm_clear_page_class(page);
 		ret++;
 	}
 	spin_unlock_irqrestore(&zone->lock, flags);
@@ -366,14 +364,8 @@ static void prep_new_page(struct page *page, int order)
 
 	page->flags &= ~(1 << PG_uptodate | 1 << PG_error |
 			1 << PG_referenced | 1 << PG_arch_1 |
-#ifdef CONFIG_CKRM_RES_MEM
-			1 << PG_ckrm_account |
-#endif
 			1 << PG_checked | 1 << PG_mappedtodisk);
 	page->private = 0;
-#ifdef CONFIG_CKRM_RES_MEM
-	page->ckrm_zone = NULL;
-#endif
 	set_page_refs(page, order);
 }
 
@@ -635,10 +627,6 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 	 * policy
 	 */
 	can_try_harder = (unlikely(rt_task(p)) && !in_interrupt()) || !wait;
-
-	if (!ckrm_class_limit_ok((ckrm_get_mem_class(current)))) {
-		return NULL;
-	}
 
 	zones = zonelist->zones;  /* the list of zones suitable for gfp_mask */
 
@@ -1573,10 +1561,8 @@ static void __init free_area_init_core(struct pglist_data *pgdat,
 		}
 		printk(KERN_DEBUG "  %s zone: %lu pages, LIFO batch:%lu\n",
 				zone_names[j], realsize, batch);
-#ifndef CONFIG_CKRM_RES_MEM
 		INIT_LIST_HEAD(&zone->active_list);
 		INIT_LIST_HEAD(&zone->inactive_list);
-#endif
 		zone->nr_scan_active = 0;
 		zone->nr_scan_inactive = 0;
 		zone->nr_active = 0;

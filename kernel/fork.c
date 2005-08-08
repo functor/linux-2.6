@@ -39,9 +39,6 @@
 #include <linux/audit.h>
 #include <linux/profile.h>
 #include <linux/rmap.h>
-#include <linux/ckrm_events.h>
-#include <linux/ckrm_tsk.h>
-#include <linux/ckrm_mem_inline.h>
 #include <linux/vs_network.h>
 #include <linux/vs_limit.h>
 #include <linux/vs_memory.h>
@@ -160,8 +157,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->thread_info = ti;
 	ti->task = tsk;
 
-	ckrm_cb_newtask(tsk);
-	ckrm_task_mm_init(tsk);
 	/* One for us, one for whoever does the "release_task()" (usually parent) */
 	atomic_set(&tsk->usage,2);
 	return tsk;
@@ -309,7 +304,6 @@ static struct mm_struct * mm_init(struct mm_struct * mm)
 	mm->ioctx_list = NULL;
 	mm->default_kioctx = (struct kioctx)INIT_KIOCTX(mm->default_kioctx, *mm);
 	mm->free_area_cache = TASK_UNMAPPED_BASE;
- 	ckrm_mm_init(mm);
 
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
@@ -331,7 +325,6 @@ struct mm_struct * mm_alloc(void)
 	if (mm) {
 		memset(mm, 0, sizeof(*mm));
 		mm = mm_init(mm);
-		ckrm_mm_setclass(mm, ckrm_get_mem_class(current));
 	}
 	return mm;
 }
@@ -346,7 +339,6 @@ void fastcall __mmdrop(struct mm_struct *mm)
 	BUG_ON(mm == &init_mm);
 	mm_free_pgd(mm);
 	destroy_context(mm);
- 	ckrm_mm_clearclass(mm);
 	clr_vx_info(&mm->mm_vx_info);
 	free_mm(mm);
 }
@@ -486,10 +478,8 @@ static int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 		goto free_pt;
 
 good_mm:
-	ckrm_mm_setclass(mm, oldmm->memclass);
 	tsk->mm = mm;
 	tsk->active_mm = mm;
-	ckrm_init_mm_to_task(mm, tsk);
 	return 0;
 
 free_pt:
@@ -902,7 +892,6 @@ static task_t *copy_process(unsigned long clone_flags,
 	if (p->binfmt && !try_module_get(p->binfmt->module))
 		goto bad_fork_cleanup_put_domain;
 
-	init_delays(p);
 	p->did_exec = 0;
 	copy_flags(clone_flags, p);
 	p->pid = pid;
@@ -1195,9 +1184,6 @@ long do_fork(unsigned long clone_flags,
 			clone_flags |= CLONE_PTRACE;
 	}
 
-	if (numtasks_get_ref(current->taskclass, 0) == 0) {
-		return -ENOMEM;
-	}
 	p = copy_process(clone_flags, stack_start, regs, stack_size, parent_tidptr, child_tidptr, pid);
 
 	/*
@@ -1206,8 +1192,6 @@ long do_fork(unsigned long clone_flags,
 	 */
 	if (!IS_ERR(p)) {
 		struct completion vfork;
-
-		ckrm_cb_fork(p);
 
 		if (clone_flags & CLONE_VFORK) {
 			p->vfork_done = &vfork;
@@ -1239,7 +1223,6 @@ long do_fork(unsigned long clone_flags,
 				ptrace_notify ((PTRACE_EVENT_VFORK_DONE << 8) | SIGTRAP);
 		}
 	} else {
-		numtasks_put_ref(current->taskclass);
 		free_pidmap(pid);
 		pid = PTR_ERR(p);
 	}

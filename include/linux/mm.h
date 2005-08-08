@@ -13,7 +13,6 @@
 #include <linux/rbtree.h>
 #include <linux/prio_tree.h>
 #include <linux/fs.h>
-#include <linux/ckrm_mem.h>
 
 struct mempolicy;
 struct anon_vma;
@@ -238,9 +237,6 @@ struct page {
 	void *virtual;			/* Kernel virtual address (NULL if
 					   not kmapped, ie. highmem) */
 #endif /* WANT_PAGE_VIRTUAL */
-#ifdef CONFIG_CKRM_RES_MEM
-	struct ckrm_zone *ckrm_zone;
-#endif // CONFIG_CKRM_RES_MEM
 };
 
 /*
