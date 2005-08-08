@@ -52,10 +52,12 @@ struct openflags {
 	unsigned int a : 1;	/* O_APPEND */
 	unsigned int e : 1;	/* O_EXCL */
 	unsigned int cl : 1;    /* FD_CLOEXEC */
+	unsigned int d : 1;	/* O_DIRECT */
 };
 
 #define OPENFLAGS() ((struct openflags) { .r = 0, .w = 0, .s = 0, .c = 0, \
- 					  .t = 0, .a = 0, .e = 0, .cl = 0 })
+					  .t = 0, .a = 0, .e = 0, .cl = 0, \
+					  .d = 0 })
 
 static inline struct openflags of_read(struct openflags flags)
 {
@@ -134,6 +136,16 @@ extern int os_mode_fd(int fd, int mode);
 
 extern int os_seek_file(int fd, __u64 offset);
 extern int os_open_file(char *file, struct openflags flags, int mode);
+extern void *os_open_dir(char *dir, int *err_out);
+extern int os_seek_dir(void *stream, unsigned long long pos);
+extern int os_read_dir(void *stream, unsigned long long *ino_out, 
+		       char **name_out);
+extern int os_tell_dir(void *stream);
+extern int os_close_dir(void *stream);
+extern int os_remove_file(const char *file);
+extern int os_move_file(const char *from, const char *to);
+extern int os_truncate_file(const char *file, unsigned long long len);
+extern int os_truncate_fd(int fd, unsigned long long len);
 extern int os_read_file(int fd, void *buf, int len);
 extern int os_write_file(int fd, const void *buf, int count);
 extern int os_file_size(char *file, long long *size_out);

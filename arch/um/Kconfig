@@ -83,6 +83,9 @@ config NET
 
 source "fs/Kconfig.binfmt"
 
+config EXTERNFS
+	tristate "Support for host-based filesystems"
+
 config HOSTFS
 	tristate "Host filesystem"
 	help
@@ -104,11 +107,15 @@ config HOSTFS
         If you'd like to be able to work with files stored on the host,
         say Y or M here; otherwise say N.
 
+config HUMFS
+	tristate 'Usable host filesystem'
+	depends on EXTERNFS
+
 config HPPFS
 	tristate "HoneyPot ProcFS (EXPERIMENTAL)"
 	depends on BROKEN
 	help
-	hppfs (HoneyPot ProcFS) is a filesystem which allows UML /proc
+	hppfs (HoneyPot ProcFS) is a filesystem which allows UML /proc 
 	entries to be overridden, removed, or fabricated from the host.
 	Its purpose is to allow a UML to appear to be a physical machine
 	by removing or changing anything in /proc which gives away the
@@ -210,6 +217,9 @@ config KERNEL_HALF_GIGS
 config HIGHMEM
 	bool "Highmem support"
 	depends on BROKEN
+
+config PROC_MM
+	bool "/proc/mm support"
 
 config KERNEL_STACK_ORDER
 	int "Kernel stack size order"
