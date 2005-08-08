@@ -18,7 +18,7 @@ deps_scripts/kconfig/mconf.o := \
   /usr/include/bits/sigset.h \
   /usr/include/bits/types.h \
   /usr/include/bits/wordsize.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stddef.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/stddef.h \
   /usr/include/bits/typesizes.h \
   /usr/include/bits/signum.h \
   /usr/include/time.h \
@@ -48,14 +48,14 @@ deps_scripts/kconfig/mconf.o := \
   /usr/include/sys/select.h \
   /usr/include/bits/select.h \
   /usr/include/sys/sysmacros.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/limits.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/syslimits.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/limits.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/syslimits.h \
   /usr/include/limits.h \
   /usr/include/bits/posix1_lim.h \
   /usr/include/bits/local_lim.h \
   /usr/include/linux/limits.h \
   /usr/include/bits/posix2_lim.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stdarg.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/stdarg.h \
   /usr/include/stdlib.h \
   /usr/include/alloca.h \
   /usr/include/string.h \
@@ -79,7 +79,7 @@ deps_scripts/kconfig/mconf.o := \
   /usr/include/bits/stdio_lim.h \
   /usr/include/bits/sys_errlist.h \
   /usr/include/bits/stdio.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stdbool.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/stdbool.h \
   scripts/kconfig/lkc_proto.h \
 
 scripts/kconfig/mconf.o: $(deps_scripts/kconfig/mconf.o)

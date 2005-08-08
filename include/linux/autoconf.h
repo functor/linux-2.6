@@ -1,7 +1,7 @@
 /*
  * Automatically generated C config: don't edit
- * Linux kernel version: 2.6.10-ac11
- * Thu Feb  3 14:51:25 2005
+ * Linux kernel version: 2.6.10-ac12
+ * Wed May 18 16:34:50 2005
  */
 #define AUTOCONF_INCLUDED
 #define CONFIG_X86 1
@@ -576,7 +576,7 @@
 /*
  * Some SCSI devices (e.g. CD jukebox) support multiple LUNs
  */
-#undef CONFIG_SCSI_MULTI_LUN
+#define CONFIG_SCSI_MULTI_LUN 1
 #define CONFIG_SCSI_CONSTANTS 1
 #define CONFIG_SCSI_LOGGING 1
 

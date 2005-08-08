@@ -775,7 +775,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	 * Turn off the CS limit completely if exec-shield disabled or
 	 * NX active:
 	 */
-	if (!exec_shield || executable_stack != EXSTACK_DISABLE_X)
+	if (!exec_shield || executable_stack != EXSTACK_DISABLE_X || nx_enabled)
 		arch_add_exec_range(current->mm, -1);
 #endif
 
@@ -797,7 +797,8 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	/* Do this immediately, since STACK_TOP as used in setup_arg_pages
 	   may depend on the personality.  */
 	SET_PERSONALITY(loc->elf_ex, ibcs2_interpreter);
-	if (elf_read_implies_exec(loc->elf_ex, have_pt_gnu_stack))
+	if (exec_shield != 2 &&
+			elf_read_implies_exec(loc->elf_ex, have_pt_gnu_stack))
 		current->personality |= READ_IMPLIES_EXEC;
 
 	arch_pick_mmap_layout(current->mm);
@@ -1052,6 +1053,7 @@ out_free_ph:
 static int load_elf_library(struct file *file)
 {
 	struct elf_phdr *elf_phdata;
+	struct elf_phdr *eppnt;
 	unsigned long elf_bss, bss, len;
 	int retval, error, i, j;
 	struct elfhdr elf_ex;
@@ -1075,41 +1077,44 @@ static int load_elf_library(struct file *file)
 	/* j < ELF_MIN_ALIGN because elf_ex.e_phnum <= 2 */
 
 	error = -ENOMEM;
-	elf_phdata = (struct elf_phdr *) kmalloc(j, GFP_KERNEL);
+	elf_phdata = kmalloc(j, GFP_KERNEL);
 	if (!elf_phdata)
 		goto out;
 
+	eppnt = elf_phdata;
 	error = -ENOEXEC;
-	retval = kernel_read(file, elf_ex.e_phoff, (char *) elf_phdata, j);
+	retval = kernel_read(file, elf_ex.e_phoff, (char *)eppnt, j);
 	if (retval != j)
 		goto out_free_ph;
 
 	for (j = 0, i = 0; i<elf_ex.e_phnum; i++)
-		if ((elf_phdata + i)->p_type == PT_LOAD) j++;
+		if ((eppnt + i)->p_type == PT_LOAD)
+			j++;
 	if (j != 1)
 		goto out_free_ph;
 
-	while (elf_phdata->p_type != PT_LOAD) elf_phdata++;
+	while (eppnt->p_type != PT_LOAD)
+		eppnt++;
 
 	/* Now use mmap to map the library into memory. */
 	down_write(&current->mm->mmap_sem);
 	error = do_mmap(file,
-			ELF_PAGESTART(elf_phdata->p_vaddr),
-			(elf_phdata->p_filesz +
-			 ELF_PAGEOFFSET(elf_phdata->p_vaddr)),
+			ELF_PAGESTART(eppnt->p_vaddr),
+			(eppnt->p_filesz +
+			  ELF_PAGEOFFSET(eppnt->p_vaddr)),
 			PROT_READ | PROT_WRITE | PROT_EXEC,
 			MAP_FIXED | MAP_PRIVATE | MAP_DENYWRITE,
-			(elf_phdata->p_offset -
-			 ELF_PAGEOFFSET(elf_phdata->p_vaddr)));
+			(eppnt->p_offset -
+			 ELF_PAGEOFFSET(eppnt->p_vaddr)));
 	up_write(&current->mm->mmap_sem);
-	if (error != ELF_PAGESTART(elf_phdata->p_vaddr))
+	if (error != ELF_PAGESTART(eppnt->p_vaddr))
 		goto out_free_ph;
 
-	elf_bss = elf_phdata->p_vaddr + elf_phdata->p_filesz;
+	elf_bss = eppnt->p_vaddr + eppnt->p_filesz;
 	padzero(elf_bss);
 
-	len = ELF_PAGESTART(elf_phdata->p_filesz + elf_phdata->p_vaddr + ELF_MIN_ALIGN - 1);
-	bss = elf_phdata->p_memsz + elf_phdata->p_vaddr;
+	len = ELF_PAGESTART(eppnt->p_filesz + eppnt->p_vaddr + ELF_MIN_ALIGN - 1);
+	bss = eppnt->p_memsz + eppnt->p_vaddr;
 	if (bss > len)
 		do_brk(len, bss - len);
 	error = 0;

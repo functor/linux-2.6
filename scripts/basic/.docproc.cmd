@@ -6,7 +6,7 @@ deps_scripts/basic/docproc := \
   /usr/include/features.h \
   /usr/include/sys/cdefs.h \
   /usr/include/gnu/stubs.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stddef.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/stddef.h \
   /usr/include/bits/types.h \
   /usr/include/bits/wordsize.h \
   /usr/include/bits/typesizes.h \
@@ -15,7 +15,7 @@ deps_scripts/basic/docproc := \
   /usr/include/wchar.h \
   /usr/include/bits/wchar.h \
   /usr/include/gconv.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stdarg.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/stdarg.h \
   /usr/include/bits/stdio_lim.h \
   /usr/include/bits/sys_errlist.h \
   /usr/include/bits/stdio.h \
@@ -40,8 +40,8 @@ deps_scripts/basic/docproc := \
   /usr/include/bits/posix_opt.h \
   /usr/include/bits/confname.h \
   /usr/include/getopt.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/limits.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/syslimits.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/limits.h \
+  /usr/lib/gcc/i386-redhat-linux/3.4.3/include/syslimits.h \
   /usr/include/limits.h \
   /usr/include/bits/posix1_lim.h \
   /usr/include/bits/local_lim.h \

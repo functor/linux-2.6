@@ -22,6 +22,7 @@
 
 #include <asm/mtrr.h>
 #include <asm/tlbflush.h>
+#include <asm/desc.h>
 #include <mach_apic.h>
 
 /*
@@ -313,6 +314,8 @@ fastcall void smp_invalidate_interrupt(struct pt_regs *regs)
 	unsigned long cpu;
 
 	cpu = get_cpu();
+	if (current->active_mm)
+		load_user_cs_desc(cpu, current->active_mm);
 
 	if (!cpu_isset(cpu, flush_cpumask))
 		goto out;
