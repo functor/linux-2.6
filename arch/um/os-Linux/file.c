@@ -15,6 +15,8 @@
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/uio.h>
+#include <sys/utsname.h>
+#include <sys/vfs.h>
 #include "os.h"
 #include "user.h"
 #include "kern_util.h"
@@ -266,6 +268,7 @@ int os_open_file(char *file, struct openflags flags, int mode)
 	if(flags.c) f |= O_CREAT;
 	if(flags.t) f |= O_TRUNC;
 	if(flags.e) f |= O_EXCL;
+	if(flags.d) f |= O_DIRECT;
 
 	fd = open64(file, f, mode);
 	if(fd < 0)

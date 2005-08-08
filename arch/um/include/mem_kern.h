@@ -1,4 +1,4 @@
-/*
+/* 
  * Copyright (C) 2003 Jeff Dike (jdike@addtoit.com)
  * Licensed under the GPL
  */
@@ -11,7 +11,7 @@
 
 struct remapper {
 	struct list_head list;
-	int (*proc)(int, unsigned long, int, __u64);
+	int (*proc)(int, unsigned long, int, __u64, int);
 };
 
 extern void register_remapper(struct remapper *info);
