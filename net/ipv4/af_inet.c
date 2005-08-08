@@ -847,13 +847,7 @@ struct proto_ops inet_dgram_ops = {
  * For SOCK_RAW sockets; should be the same as inet_dgram_ops but without
  * udp_poll
  */
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-struct proto_ops inet_sockraw_ops;
-EXPORT_SYMBOL(inet_sockraw_ops);
-#else
-static
-#endif
-struct proto_ops inet_sockraw_ops = {
+static struct proto_ops inet_sockraw_ops = {
 	.family =	PF_INET,
 	.owner =	THIS_MODULE,
 	.release =	inet_release,

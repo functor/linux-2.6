@@ -47,8 +47,8 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
-#include <linux/ckrm_events.h>
-#include <linux/ckrm_mem_inline.h>
+#include <linux/ckrm.h>
+#include <linux/ckrm_mem.h>
 #include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
@@ -564,7 +564,18 @@ static int exec_mmap(struct mm_struct *mm)
 	activate_mm(active_mm, mm);
 	task_unlock(tsk);
 	arch_pick_mmap_layout(mm);
-	ckrm_task_change_mm(tsk, old_mm, mm);
+#ifdef CONFIG_CKRM_RES_MEM
+	if (old_mm) {
+		spin_lock(&old_mm->peertask_lock);
+		list_del(&tsk->mm_peers);
+		ckrm_mem_evaluate_mm(old_mm);
+		spin_unlock(&old_mm->peertask_lock);
+	}
+	spin_lock(&mm->peertask_lock);
+	list_add_tail(&tsk->mm_peers, &mm->tasklist);
+	ckrm_mem_evaluate_mm(mm);
+	spin_unlock(&mm->peertask_lock);
+#endif
 	if (old_mm) {
 		if (active_mm != old_mm) BUG();
 		mmput(old_mm);
@@ -739,11 +750,14 @@ no_thread_group:
 		atomic_set(&newsighand->count, 1);
 		memcpy(newsighand->action, oldsighand->action,
 		       sizeof(newsighand->action));
+
 		write_lock_irq(&tasklist_lock);
 		spin_lock(&oldsighand->siglock);
 		spin_lock(&newsighand->siglock);
+
 		current->sighand = newsighand;
 		recalc_sigpending();
+
 		spin_unlock(&newsighand->siglock);
 		spin_unlock(&oldsighand->siglock);
 		write_unlock_irq(&tasklist_lock);

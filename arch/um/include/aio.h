@@ -1,13 +1,26 @@
 /* 
- * Copyright (C) 2002 Jeff Dike (jdike@karaya.com)
+ * Copyright (C) 2004 Jeff Dike (jdike@karaya.com)
  * Licensed under the GPL
  */
 
-#ifndef __TT_MMU_H
-#define __TT_MMU_H
+#ifndef AIO_H__
+#define AIO_H__
 
-struct mmu_context_tt {
+enum aio_type { AIO_READ, AIO_WRITE, AIO_MMAP };
+
+struct aio_thread_reply {
+	void *data;
+	int err;
 };
+
+struct aio_context {
+	int reply_fd;
+};
+
+#define INIT_AIO_CONTEXT { .reply_fd	= -1 }
+
+extern int submit_aio(enum aio_type type, int fd, char *buf, int len, 
+		      unsigned long long offset, int reply_fd, void *data);
 
 #endif
 

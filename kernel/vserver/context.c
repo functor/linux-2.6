@@ -30,7 +30,7 @@
 #include <linux/vserver/debug.h>
 #include <linux/vs_context.h>
 #include <linux/vserver/context_cmd.h>
-#include <linux/ckrm_events.h> /* needed for ckrm_cb_xid() */
+#include <linux/ckrm.h> /* needed for ckrm_cb_xid() */
 
 #include <asm/errno.h>
 
