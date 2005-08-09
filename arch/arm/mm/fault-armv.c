@@ -8,12 +8,14 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/bitops.h>
 #include <linux/vmalloc.h>
 #include <linux/init.h>
+#include <linux/pagemap.h>
 
 #include <asm/cacheflush.h>
 #include <asm/pgtable.h>
@@ -52,7 +54,7 @@ static int adjust_pte(struct vm_area_struct *vma, unsigned long address)
 	 * fault (ie, is old), we can safely ignore any issues.
 	 */
 	if (pte_present(entry) && pte_val(entry) & shared_pte_mask) {
-		flush_cache_page(vma, address);
+		flush_cache_page(vma, address, pte_pfn(entry));
 		pte_val(entry) &= ~shared_pte_mask;
 		set_pte(pte, entry);
 		flush_tlb_page(vma, address);
@@ -74,51 +76,15 @@ no_pmd:
 	return 0;
 }
 
-void __flush_dcache_page(struct page *page)
-{
-	struct address_space *mapping = page_mapping(page);
-	struct mm_struct *mm = current->active_mm;
-	struct list_head *l;
-
-	__cpuc_flush_dcache_page(page_address(page));
-
-	if (!mapping)
-		return;
-
-	/*
-	 * With a VIVT cache, we need to also write back
-	 * and invalidate any user data.
-	 */
-	list_for_each(l, &mapping->i_mmap_shared) {
-		struct vm_area_struct *mpnt;
-		unsigned long off;
-
-		mpnt = list_entry(l, struct vm_area_struct, shared);
-
-		/*
-		 * If this VMA is not in our MM, we can ignore it.
-		 */
-		if (mpnt->vm_mm != mm)
-			continue;
-
-		if (page->index < mpnt->vm_pgoff)
-			continue;
-
-		off = page->index - mpnt->vm_pgoff;
-		if (off >= (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT)
-			continue;
-
-		flush_cache_page(mpnt, mpnt->vm_start + (off << PAGE_SHIFT));
-	}
-}
-
 static void
 make_coherent(struct vm_area_struct *vma, unsigned long addr, struct page *page, int dirty)
 {
 	struct address_space *mapping = page_mapping(page);
-	struct list_head *l;
 	struct mm_struct *mm = vma->vm_mm;
-	unsigned long pgoff;
+	struct vm_area_struct *mpnt;
+	struct prio_tree_iter iter;
+	unsigned long offset;
+	pgoff_t pgoff;
 	int aliases = 0;
 
 	if (!mapping)
@@ -131,12 +97,8 @@ make_coherent(struct vm_area_struct *vma, unsigned long addr, struct page *page,
 	 * space, then we need to handle them specially to maintain
 	 * cache coherency.
 	 */
-	list_for_each(l, &mapping->i_mmap_shared) {
-		struct vm_area_struct *mpnt;
-		unsigned long off;
-
-		mpnt = list_entry(l, struct vm_area_struct, shared);
-
+	flush_dcache_mmap_lock(mapping);
+	vma_prio_tree_foreach(mpnt, &iter, &mapping->i_mmap, pgoff, pgoff) {
 		/*
 		 * If this VMA is not in our MM, we can ignore it.
 		 * Note that we intentionally mask out the VMA
@@ -144,28 +106,16 @@ make_coherent(struct vm_area_struct *vma, unsigned long addr, struct page *page,
 		 */
 		if (mpnt->vm_mm != mm || mpnt == vma)
 			continue;
-
-		/*
-		 * If the page isn't in this VMA, we can also ignore it.
-		 */
-		if (pgoff < mpnt->vm_pgoff)
+		if (!(mpnt->vm_flags & VM_MAYSHARE))
 			continue;
-
-		off = pgoff - mpnt->vm_pgoff;
-		if (off >= (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT)
-			continue;
-
-		off = mpnt->vm_start + (off << PAGE_SHIFT);
-
-		/*
-		 * Ok, it is within mpnt.  Fix it up.
-		 */
-		aliases += adjust_pte(mpnt, off);
+		offset = (pgoff - mpnt->vm_pgoff) << PAGE_SHIFT;
+		aliases += adjust_pte(mpnt, mpnt->vm_start + offset);
 	}
+	flush_dcache_mmap_unlock(mapping);
 	if (aliases)
 		adjust_pte(vma, addr);
 	else
-		flush_cache_page(vma, addr);
+		flush_cache_page(vma, addr, page_to_pfn(page));
 }
 
 /*
@@ -192,10 +142,21 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long addr, pte_t pte)
 	if (page_mapping(page)) {
 		int dirty = test_and_clear_bit(PG_dcache_dirty, &page->flags);
 
-		if (dirty)
+		if (dirty) {
+			/*
+			 * This is our first userspace mapping of this page.
+			 * Ensure that the physical page is coherent with
+			 * the kernel mapping.
+			 *
+			 * FIXME: only need to do this on VIVT and aliasing
+			 *        VIPT cache architectures.  We can do that
+			 *	  by choosing whether to set this bit...
+			 */
 			__cpuc_flush_dcache_page(page_address(page));
+		}
 
-		make_coherent(vma, addr, page, dirty);
+		if (cache_is_vivt())
+			make_coherent(vma, addr, page, dirty);
 	}
 }
 

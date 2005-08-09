@@ -124,9 +124,9 @@ static const char version[] =
 #include <linux/spinlock.h>
 #include <linux/ethtool.h>
 #include <linux/delay.h>
+#include <linux/bitops.h>
 
 #include <asm/uaccess.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 
 #include <linux/netdevice.h>
@@ -225,7 +225,7 @@ static int __init el1_probe1(struct net_device *dev, int ioaddr)
 	 *	Reserve I/O resource for exclusive use by this driver
 	 */
 
-	if (!request_region(ioaddr, EL1_IO_EXTENT, dev->name))
+	if (!request_region(ioaddr, EL1_IO_EXTENT, DRV_NAME))
 		return -ENODEV;
 
 	/*
@@ -892,8 +892,8 @@ static struct ethtool_ops netdev_ethtool_ops = {
 
 static struct net_device *dev_3c501;
 
-MODULE_PARM(io, "i");
-MODULE_PARM(irq, "i");
+module_param(io, int, 0);
+module_param(irq, int, 0);
 MODULE_PARM_DESC(io, "EtherLink I/O base address");
 MODULE_PARM_DESC(irq, "EtherLink IRQ number");
 

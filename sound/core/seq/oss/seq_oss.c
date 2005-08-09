@@ -22,6 +22,8 @@
 
 #include <sound/driver.h>
 #include <linux/init.h>
+#include <linux/smp_lock.h>
+#include <linux/moduleparam.h>
 #include <sound/core.h>
 #include <sound/minors.h>
 #include <sound/initval.h>
@@ -34,13 +36,12 @@
 MODULE_AUTHOR("Takashi Iwai <tiwai@suse.de>");
 MODULE_DESCRIPTION("OSS-compatible sequencer module");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
 /* Takashi says this is really only for sound-service-0-, but this is OK. */
 MODULE_ALIAS_SNDRV_MINOR(SNDRV_MINOR_OSS_SEQUENCER);
 MODULE_ALIAS_SNDRV_MINOR(SNDRV_MINOR_OSS_MUSIC);
 
 #ifdef SNDRV_SEQ_OSS_DEBUG
-MODULE_PARM(seq_oss_debug, "i");
+module_param(seq_oss_debug, int, 0644);
 MODULE_PARM_DESC(seq_oss_debug, "debug option");
 int seq_oss_debug = 0;
 #endif
@@ -56,9 +57,9 @@ static void unregister_proc(void);
 
 static int odev_open(struct inode *inode, struct file *file);
 static int odev_release(struct inode *inode, struct file *file);
-static ssize_t odev_read(struct file *file, char *buf, size_t count, loff_t *offset);
-static ssize_t odev_write(struct file *file, const char *buf, size_t count, loff_t *offset);
-static int odev_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg);
+static ssize_t odev_read(struct file *file, char __user *buf, size_t count, loff_t *offset);
+static ssize_t odev_write(struct file *file, const char __user *buf, size_t count, loff_t *offset);
+static long odev_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 static unsigned int odev_poll(struct file *file, poll_table * wait);
 #ifdef CONFIG_PROC_FS
 static void info_read(snd_info_entry_t *entry, snd_info_buffer_t *buf);
@@ -77,16 +78,17 @@ static int __init alsa_seq_oss_init(void)
 		snd_seq_oss_synth_unregister,
 	};
 
+	snd_seq_autoload_lock();
 	if ((rc = register_device()) < 0)
-		return rc;
+		goto error;
 	if ((rc = register_proc()) < 0) {
 		unregister_device();
-		return rc;
+		goto error;
 	}
 	if ((rc = snd_seq_oss_create_client()) < 0) {
 		unregister_proc();
 		unregister_device();
-		return rc;
+		goto error;
 	}
 
 	if ((rc = snd_seq_device_register_driver(SNDRV_SEQ_DEV_ID_OSS, &ops,
@@ -94,12 +96,15 @@ static int __init alsa_seq_oss_init(void)
 		snd_seq_oss_delete_client();
 		unregister_proc();
 		unregister_device();
-		return rc;
+		goto error;
 	}
 
 	/* success */
 	snd_seq_oss_synth_init();
-	return 0;
+
+ error:
+	snd_seq_autoload_unlock();
+	return rc;
 }
 
 static void __exit alsa_seq_oss_exit(void)
@@ -154,7 +159,7 @@ odev_release(struct inode *inode, struct file *file)
 }
 
 static ssize_t
-odev_read(struct file *file, char *buf, size_t count, loff_t *offset)
+odev_read(struct file *file, char __user *buf, size_t count, loff_t *offset)
 {
 	seq_oss_devinfo_t *dp;
 	dp = file->private_data;
@@ -164,7 +169,7 @@ odev_read(struct file *file, char *buf, size_t count, loff_t *offset)
 
 
 static ssize_t
-odev_write(struct file *file, const char *buf, size_t count, loff_t *offset)
+odev_write(struct file *file, const char __user *buf, size_t count, loff_t *offset)
 {
 	seq_oss_devinfo_t *dp;
 	dp = file->private_data;
@@ -172,8 +177,8 @@ odev_write(struct file *file, const char *buf, size_t count, loff_t *offset)
 	return snd_seq_oss_write(dp, buf, count, file);
 }
 
-static int
-odev_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
+static long
+odev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	seq_oss_devinfo_t *dp;
 	dp = file->private_data;
@@ -181,6 +186,11 @@ odev_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned lo
 	return snd_seq_oss_ioctl(dp, cmd, arg);
 }
 
+#ifdef CONFIG_COMPAT
+#define odev_ioctl_compat	odev_ioctl
+#else
+#define odev_ioctl_compat	NULL
+#endif
 
 static unsigned int
 odev_poll(struct file *file, poll_table * wait)
@@ -203,7 +213,8 @@ static struct file_operations seq_oss_f_ops =
 	.open =		odev_open,
 	.release =	odev_release,
 	.poll =		odev_poll,
-	.ioctl =	odev_ioctl,
+	.unlocked_ioctl =	odev_ioctl,
+	.compat_ioctl =	odev_ioctl_compat,
 };
 
 static snd_minor_t seq_oss_reg = {

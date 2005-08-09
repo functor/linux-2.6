@@ -32,6 +32,7 @@
 #include <linux/init.h>
 #include <linux/acpi.h>
 #include <linux/efi.h>
+#include <linux/pci-acpi.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
 #ifdef	CONFIG_IA64
@@ -49,6 +50,14 @@
 #define	METHOD_NAME__SUN	"_SUN"
 #define	METHOD_NAME__HPP	"_HPP"
 #define	METHOD_NAME_OSHP	"OSHP"
+
+/* Status code for running acpi method to gain native control */
+#define NC_NOT_RUN	0
+#define OSC_NOT_EXIST	1
+#define OSC_RUN_FAILED	2
+#define OSHP_NOT_EXIST	3
+#define OSHP_RUN_FAILED	4
+#define NC_RUN_SUCCESS	5
 
 #define	PHP_RES_BUS		0xA0
 #define	PHP_RES_IO		0xA1
@@ -125,7 +134,9 @@ static u8 * acpi_path_name( acpi_handle	handle)
 }
 
 static void acpi_get__hpp ( struct acpi_bridge	*ab);
-static void acpi_run_oshp ( struct acpi_bridge	*ab);
+static int acpi_run_oshp ( struct acpi_bridge	*ab);
+static int osc_run_status = NC_NOT_RUN;
+static int oshp_run_status = NC_NOT_RUN;
 
 static int acpi_add_slot_to_php_slots(
 	struct acpi_bridge	*ab,
@@ -158,8 +169,9 @@ static int acpi_add_slot_to_php_slots(
 	ab->scanned += 1;
 	if (!ab->_hpp)
 		acpi_get__hpp(ab);
-
-	acpi_run_oshp(ab);
+	
+	if (osc_run_status == OSC_NOT_EXIST)
+		oshp_run_status = acpi_run_oshp(ab);
 
 	if (sun != samesun) {
 		info("acpi_pciehprm:   Slot sun(%x) at s:b:d:f=0x%02x:%02x:%02x:%02x\n", 
@@ -218,6 +230,10 @@ static void acpi_get__hpp ( struct acpi_bridge	*ab)
 	}
 
 	ab->_hpp = kmalloc (sizeof (struct acpi__hpp), GFP_KERNEL);
+	if (!ab->_hpp) {
+		err ("acpi_pciehprm:%s alloc for _HPP failed\n", path_name);
+		goto free_and_return;
+	}
 	memset(ab->_hpp, 0, sizeof(struct acpi__hpp));
 
 	ab->_hpp->cache_line_size	= nui[0];
@@ -234,19 +250,22 @@ free_and_return:
 	kfree(ret_buf.pointer);
 }
 
-static void acpi_run_oshp ( struct acpi_bridge	*ab)
+static int acpi_run_oshp ( struct acpi_bridge	*ab)
 {
 	acpi_status		status;
 	u8			*path_name = acpi_path_name(ab->handle);
-	struct acpi_buffer	ret_buf = { 0, NULL};
 
 	/* run OSHP */
-	status = acpi_evaluate_object(ab->handle, METHOD_NAME_OSHP, NULL, &ret_buf);
+	status = acpi_evaluate_object(ab->handle, METHOD_NAME_OSHP, NULL, NULL);
 	if (ACPI_FAILURE(status)) {
 		err("acpi_pciehprm:%s OSHP fails=0x%x\n", path_name, status);
-	} else
+		oshp_run_status = (status == AE_NOT_FOUND) ? OSHP_NOT_EXIST : OSHP_RUN_FAILED;
+	} else {
+		oshp_run_status = NC_RUN_SUCCESS;
 		dbg("acpi_pciehprm:%s OSHP passes =0x%x\n", path_name, status);
-	return;
+		dbg("acpi_pciehprm:%s oshp_run_status =0x%x\n", path_name, oshp_run_status);
+	}
+	return oshp_run_status;
 }
 
 static acpi_status acpi_evaluate_crs(
@@ -1052,6 +1071,16 @@ static struct acpi_bridge * add_host_bridge(
 		kfree(ab);
 		return NULL;
 	}
+
+	status = pci_osc_control_set (OSC_PCI_EXPRESS_NATIVE_HP_CONTROL); 
+	if (ACPI_FAILURE(status)) {
+		err("%s: status %x\n", __FUNCTION__, status);
+		osc_run_status = (status == AE_NOT_FOUND) ? OSC_NOT_EXIST : OSC_RUN_FAILED;
+	} else {
+		osc_run_status = NC_RUN_SUCCESS;
+	}	
+	dbg("%s: osc_run_status %x\n", __FUNCTION__, osc_run_status);
+	
 	build_a_bridge(ab, ab);
 
 	return ab;
@@ -1136,6 +1165,11 @@ int pciehprm_init(enum php_ctlr_type ctlr_type)
 	rc = pciehprm_acpi_scan_pci();
 	if (rc)
 		return rc;
+
+	if ((oshp_run_status != NC_RUN_SUCCESS) && (osc_run_status != NC_RUN_SUCCESS)) {
+		err("Fails to gain control of native hot-plug\n");
+		rc = -ENODEV;
+	}
 
 	dbg("pciehprm ACPI init %s\n", (rc)?"fail":"success");
 	return rc;
@@ -1301,6 +1335,7 @@ static struct acpi_php_slot * get_acpi_slot (
 
 }
 
+#if 0
 void * pciehprm_get_slot(struct slot *slot)
 {
 	struct acpi_bridge	*ab = acpi_bridges_head;
@@ -1312,6 +1347,7 @@ void * pciehprm_get_slot(struct slot *slot)
 
 	return (void *)aps;
 }
+#endif
 
 static void pciehprm_dump_func_res( struct pci_func *fun)
 {
@@ -1391,7 +1427,7 @@ static int configure_existing_function(
 
 static int bind_pci_resources_to_slots ( struct controller *ctrl)
 {
-	struct pci_func *func;
+	struct pci_func *func, new_func;
 	int busn = ctrl->slot_bus;
 	int devn, funn;
 	u32	vid;
@@ -1409,11 +1445,19 @@ static int bind_pci_resources_to_slots ( struct controller *ctrl)
 			if (vid != 0xFFFFFFFF) {
 				dbg("%s: vid = %x\n", __FUNCTION__, vid);
 				func = pciehp_slot_find(busn, devn, funn);
-				if (!func)
-					continue;
-				configure_existing_function(ctrl, func);
+				if (!func) {
+					memset(&new_func, 0, sizeof(struct pci_func));
+					new_func.bus = busn;
+					new_func.device = devn;
+					new_func.function = funn;
+					new_func.is_a_board = 1;
+					configure_existing_function(ctrl, &new_func);
+					pciehprm_dump_func_res(&new_func);
+				} else {
+					configure_existing_function(ctrl, func);
+					pciehprm_dump_func_res(func);
+				}
 				dbg("aCCF:existing PCI 0x%x Func ResourceDump\n", ctrl->bus);
-				pciehprm_dump_func_res(func);
 			}
 		}
 	}

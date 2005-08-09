@@ -22,18 +22,14 @@
    SOFTWARE IS DISCLAIMED.
 */
 
-/*
- *  $Id: l2cap.h,v 1.1.1.1 2002/03/08 21:03:15 maxk Exp $
- */
-
 #ifndef __L2CAP_H
 #define __L2CAP_H
 
 /* L2CAP defaults */
-#define L2CAP_DEFAULT_MTU 	672
+#define L2CAP_DEFAULT_MTU	672
 #define L2CAP_DEFAULT_FLUSH_TO	0xFFFF
 
-#define L2CAP_CONN_TIMEOUT 	(HZ * 40)
+#define L2CAP_CONN_TIMEOUT	(HZ * 40)
 
 /* L2CAP socket address */
 struct sockaddr_l2 {
@@ -42,17 +38,19 @@ struct sockaddr_l2 {
 	bdaddr_t	l2_bdaddr;
 };
 
-/* Socket options */
+/* L2CAP socket options */
 #define L2CAP_OPTIONS	0x01
 struct l2cap_options {
 	__u16 omtu;
 	__u16 imtu;
 	__u16 flush_to;
+	__u8  mode;
 };
 
-#define L2CAP_CONNINFO  0x02
+#define L2CAP_CONNINFO	0x02
 struct l2cap_conninfo {
 	__u16 hci_handle;
+	__u8  dev_class[3];
 };
 
 #define L2CAP_LM	0x03
@@ -60,20 +58,8 @@ struct l2cap_conninfo {
 #define L2CAP_LM_AUTH		0x0002
 #define L2CAP_LM_ENCRYPT	0x0004
 #define L2CAP_LM_TRUSTED	0x0008
-
-#define L2CAP_QOS	0x04
-struct l2cap_qos {
-	__u16 service_type;
-	__u32 token_rate;
-	__u32 token_bucket_size;
-	__u32 peak_bandwidth;
-	__u32 latency;
-	__u32 delay_variation;
-};
-
-#define L2CAP_SERV_NO_TRAFFIC	0x00
-#define L2CAP_SERV_BEST_EFFORT	0x01
-#define L2CAP_SERV_GUARANTEED	0x02
+#define L2CAP_LM_RELIABLE	0x0010
+#define L2CAP_LM_SECURE		0x0020
 
 /* L2CAP command codes */
 #define L2CAP_COMMAND_REJ 0x01
@@ -156,6 +142,7 @@ struct l2cap_conf_opt {
 #define L2CAP_CONF_MTU		0x01
 #define L2CAP_CONF_FLUSH_TO	0x02
 #define L2CAP_CONF_QOS		0x03
+#define L2CAP_CONF_RFC		0x04
 
 #define L2CAP_CONF_MAX_SIZE	22
 
@@ -180,6 +167,14 @@ struct l2cap_info_rsp {
 	__u8        data[0];
 } __attribute__ ((packed));
 
+/* info type */
+#define L2CAP_IT_CL_MTU     0x0001
+#define L2CAP_IT_FEAT_MASK  0x0002
+
+/* info result */
+#define L2CAP_IR_SUCCESS    0x0000
+#define L2CAP_IR_NOTSUPP    0x0001
+
 /* ----- L2CAP connections ----- */
 struct l2cap_chan_list {
 	struct sock	*head;
@@ -190,13 +185,13 @@ struct l2cap_chan_list {
 struct l2cap_conn {
 	struct hci_conn	*hcon;
 
-	bdaddr_t 	*dst;
-	bdaddr_t 	*src;
-	
-	unsigned int    mtu;
+	bdaddr_t	*dst;
+	bdaddr_t	*src;
+
+	unsigned int	mtu;
 
 	spinlock_t	lock;
-	
+
 	struct sk_buff *rx_skb;
 	__u32		rx_len;
 	__u8		rx_ident;
@@ -206,9 +201,10 @@ struct l2cap_conn {
 };
 
 /* ----- L2CAP channel and socket info ----- */
-#define l2cap_pi(sk)   ((struct l2cap_pinfo *)sk->sk_protinfo)
+#define l2cap_pi(sk) ((struct l2cap_pinfo *) sk)
 
 struct l2cap_pinfo {
+	struct bt_sock	bt;
 	__u16		psm;
 	__u16		dcid;
 	__u16		scid;
@@ -216,7 +212,7 @@ struct l2cap_pinfo {
 	__u16		imtu;
 	__u16		omtu;
 	__u16		flush_to;
-	
+
 	__u32		link_mode;
 
 	__u8		conf_state;
@@ -227,9 +223,9 @@ struct l2cap_pinfo {
 
 	__u16		sport;
 
-	struct l2cap_conn 	*conn;
-	struct sock 		*next_c;
-	struct sock 		*prev_c;
+	struct l2cap_conn	*conn;
+	struct sock		*next_c;
+	struct sock		*prev_c;
 };
 
 #define L2CAP_CONF_REQ_SENT    0x01

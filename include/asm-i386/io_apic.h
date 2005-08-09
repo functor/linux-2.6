@@ -13,7 +13,7 @@
 
 #ifdef CONFIG_X86_IO_APIC
 
-#ifdef CONFIG_PCI_USE_VECTOR
+#ifdef CONFIG_PCI_MSI
 static inline int use_pci_vector(void)	{return 1;}
 static inline void disable_edge_ioapic_vector(unsigned int vector) { }
 static inline void mask_and_ack_level_ioapic_vector(unsigned int vector) { }
@@ -52,8 +52,6 @@ static inline void end_edge_ioapic_irq (unsigned int irq) { }
 #define ack_edge_ioapic 	ack_edge_ioapic_irq
 #define end_edge_ioapic 	end_edge_ioapic_irq
 #endif
-
-#define APIC_MISMATCH_DEBUG
 
 #define IO_APIC_BASE(idx) \
 		((volatile int *)(__fix_to_virt(FIX_IO_APIC_BASE_0 + idx) \
@@ -188,15 +186,6 @@ static inline void io_apic_modify(unsigned int apic, unsigned int reg, unsigned 
 	*(IO_APIC_BASE(apic)+4) = value;
 }
 
-/*
- * Synchronize the IO-APIC and the CPU by doing
- * a dummy read from the IO-APIC
- */
-static inline void io_apic_sync(unsigned int apic)
-{
-	(void) *(IO_APIC_BASE(apic)+4);
-}
-
 /* 1 if "noapic" boot option passed */
 extern int skip_ioapic_setup;
 
@@ -204,7 +193,7 @@ extern int skip_ioapic_setup;
  * If we use the IO-APIC for IRQ routing, disable automatic
  * assignment of PCI IRQ's.
  */
-#define io_apic_assign_pci_irqs (mp_irq_entries && !skip_ioapic_setup)
+#define io_apic_assign_pci_irqs (mp_irq_entries && !skip_ioapic_setup && io_apic_irqs)
 
 #ifdef CONFIG_ACPI_BOOT
 extern int io_apic_get_unique_id (int ioapic, int apic_id);
@@ -212,6 +201,8 @@ extern int io_apic_get_version (int ioapic);
 extern int io_apic_get_redir_entries (int ioapic);
 extern int io_apic_set_pci_routing (int ioapic, int pin, int irq, int edge_level, int active_high_low);
 #endif /*CONFIG_ACPI_BOOT*/
+
+extern int (*ioapic_renumber_irq)(int ioapic, int irq);
 
 #else  /* !CONFIG_X86_IO_APIC */
 #define io_apic_assign_pci_irqs 0

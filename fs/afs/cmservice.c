@@ -102,8 +102,8 @@ static DECLARE_COMPLETION(kafscmd_dead);
 static DECLARE_WAIT_QUEUE_HEAD(kafscmd_sleepq);
 static LIST_HEAD(kafscmd_attention_list);
 static LIST_HEAD(afscm_calls);
-static spinlock_t afscm_calls_lock = SPIN_LOCK_UNLOCKED;
-static spinlock_t kafscmd_attention_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(afscm_calls_lock);
+static DEFINE_SPINLOCK(kafscmd_attention_lock);
 static int kafscmd_die;
 
 /*****************************************************************************/
@@ -307,10 +307,8 @@ int afscm_start(void)
 		if (ret < 0)
 			goto kill;
 
-#ifdef AFS_AUTOMOUNT_SUPPORT
 		afs_kafstimod_add_timer(&afs_mntpt_expiry_timer,
 					afs_mntpt_expiry_timeout * HZ);
-#endif
 	}
 
 	afscm_usage++;
@@ -392,9 +390,7 @@ void afscm_stop(void)
 		}
 		spin_unlock(&kafscmd_attention_lock);
 
-#ifdef AFS_AUTOMOUNT_SUPPORT
 		afs_kafstimod_del_timer(&afs_mntpt_expiry_timer);
-#endif
 	}
 
 	up_write(&afscm_sem);
@@ -428,7 +424,7 @@ static void _SRXAFSCM_CallBack(struct rxrpc_call *call)
 		{
 			struct afs_callback *cb, *pcb;
 			int loop;
-			u32 *fp, *bp;
+			__be32 *fp, *bp;
 
 			fp = rxrpc_call_alloc_scratch(call, qty);
 

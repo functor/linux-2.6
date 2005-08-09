@@ -1,13 +1,17 @@
 #ifndef _ASM_I386_DMA_MAPPING_H
 #define _ASM_I386_DMA_MAPPING_H
 
+#include <linux/mm.h>
+
 #include <asm/cache.h>
+#include <asm/io.h>
+#include <asm/scatterlist.h>
 
 #define dma_alloc_noncoherent(d, s, h, f) dma_alloc_coherent(d, s, h, f)
 #define dma_free_noncoherent(d, s, v, h) dma_free_coherent(d, s, v, h)
 
 void *dma_alloc_coherent(struct device *dev, size_t size,
-			   dma_addr_t *dma_handle, int flag);
+			   dma_addr_t *dma_handle, unsigned int __nocast flag);
 
 void dma_free_coherent(struct device *dev, size_t size,
 			 void *vaddr, dma_addr_t dma_handle);
@@ -51,7 +55,7 @@ dma_map_page(struct device *dev, struct page *page, unsigned long offset,
 	     size_t size, enum dma_data_direction direction)
 {
 	BUG_ON(direction == DMA_NONE);
-	return (dma_addr_t)(page_to_pfn(page)) * PAGE_SIZE + offset;
+	return page_to_phys(page) + offset;
 }
 
 static inline void
@@ -157,5 +161,17 @@ dma_cache_sync(void *vaddr, size_t size,
 {
 	flush_write_buffers();
 }
+
+#define ARCH_HAS_DMA_DECLARE_COHERENT_MEMORY
+extern int
+dma_declare_coherent_memory(struct device *dev, dma_addr_t bus_addr,
+			    dma_addr_t device_addr, size_t size, int flags);
+
+extern void
+dma_release_declared_memory(struct device *dev);
+
+extern void *
+dma_mark_declared_memory_occupied(struct device *dev,
+				  dma_addr_t device_addr, size_t size);
 
 #endif

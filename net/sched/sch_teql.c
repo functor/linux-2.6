@@ -11,7 +11,7 @@
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -31,6 +31,7 @@
 #include <net/ip.h>
 #include <net/route.h>
 #include <linux/skbuff.h>
+#include <linux/moduleparam.h>
 #include <net/sock.h>
 #include <net/pkt_sched.h>
 
@@ -81,7 +82,7 @@ struct teql_sched_data
 	struct sk_buff_head q;
 };
 
-#define NEXT_SLAVE(q) (((struct teql_sched_data*)((q)->data))->next)
+#define NEXT_SLAVE(q) (((struct teql_sched_data*)qdisc_priv(q))->next)
 
 #define FMASK (IFF_BROADCAST|IFF_POINTOPOINT|IFF_BROADCAST)
 
@@ -91,34 +92,35 @@ static int
 teql_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 {
 	struct net_device *dev = sch->dev;
-	struct teql_sched_data *q = (struct teql_sched_data *)sch->data;
+	struct teql_sched_data *q = qdisc_priv(sch);
 
 	__skb_queue_tail(&q->q, skb);
 	if (q->q.qlen <= dev->tx_queue_len) {
-		sch->stats.bytes += skb->len;
-		sch->stats.packets++;
+		sch->bstats.bytes += skb->len;
+		sch->bstats.packets++;
 		return 0;
 	}
 
 	__skb_unlink(skb, &q->q);
 	kfree_skb(skb);
-	sch->stats.drops++;
+	sch->qstats.drops++;
 	return NET_XMIT_DROP;
 }
 
 static int
 teql_requeue(struct sk_buff *skb, struct Qdisc* sch)
 {
-	struct teql_sched_data *q = (struct teql_sched_data *)sch->data;
+	struct teql_sched_data *q = qdisc_priv(sch);
 
 	__skb_queue_head(&q->q, skb);
+	sch->qstats.requeues++;
 	return 0;
 }
 
 static struct sk_buff *
 teql_dequeue(struct Qdisc* sch)
 {
-	struct teql_sched_data *dat = (struct teql_sched_data *)sch->data;
+	struct teql_sched_data *dat = qdisc_priv(sch);
 	struct sk_buff *skb;
 
 	skb = __skb_dequeue(&dat->q);
@@ -143,7 +145,7 @@ teql_neigh_release(struct neighbour *n)
 static void
 teql_reset(struct Qdisc* sch)
 {
-	struct teql_sched_data *dat = (struct teql_sched_data *)sch->data;
+	struct teql_sched_data *dat = qdisc_priv(sch);
 
 	skb_queue_purge(&dat->q);
 	sch->q.qlen = 0;
@@ -154,7 +156,7 @@ static void
 teql_destroy(struct Qdisc* sch)
 {
 	struct Qdisc *q, *prev;
-	struct teql_sched_data *dat = (struct teql_sched_data *)sch->data;
+	struct teql_sched_data *dat = qdisc_priv(sch);
 	struct teql_master *master = dat->m;
 
 	if ((prev = master->slaves) != NULL) {
@@ -184,7 +186,7 @@ static int teql_qdisc_init(struct Qdisc *sch, struct rtattr *opt)
 {
 	struct net_device *dev = sch->dev;
 	struct teql_master *m = (struct teql_master*)sch->ops;
-	struct teql_sched_data *q = (struct teql_sched_data *)sch->data;
+	struct teql_sched_data *q = qdisc_priv(sch);
 
 	if (dev->hard_header_len > m->dev->hard_header_len)
 		return -EINVAL;
@@ -229,7 +231,7 @@ static int teql_qdisc_init(struct Qdisc *sch, struct rtattr *opt)
 static int
 __teql_resolve(struct sk_buff *skb, struct sk_buff *skb_res, struct net_device *dev)
 {
-	struct teql_sched_data *q = (void*)dev->qdisc->data;
+	struct teql_sched_data *q = qdisc_priv(dev->qdisc);
 	struct neighbour *mn = skb->dst->neighbour;
 	struct neighbour *n = q->ncache;
 
@@ -449,7 +451,7 @@ static __init void teql_master_setup(struct net_device *dev)
 
 static LIST_HEAD(master_dev_list);
 static int max_equalizers = 1;
-MODULE_PARM(max_equalizers, "i");
+module_param(max_equalizers, int, 0);
 MODULE_PARM_DESC(max_equalizers, "Max number of link equalizers");
 
 static int __init teql_init(void)

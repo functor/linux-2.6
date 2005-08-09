@@ -13,12 +13,6 @@
 #include <linux/suspend.h>
 #include <linux/module.h>
 
-#ifdef DEBUG_SLOW
-#define MDELAY(a) mdelay(a)
-#else
-#define MDELAY(a)
-#endif
-
 /* 
  * Timeout for stopping processes
  */
@@ -29,9 +23,10 @@ static inline int freezeable(struct task_struct * p)
 {
 	if ((p == current) || 
 	    (p->flags & PF_NOFREEZE) ||
-	    (p->state == TASK_ZOMBIE) ||
-	    (p->state == TASK_DEAD) ||
-	    (p->state == TASK_STOPPED))
+	    (p->exit_state == EXIT_ZOMBIE) ||
+	    (p->exit_state == EXIT_DEAD) ||
+	    (p->state == TASK_STOPPED) ||
+	    (p->state == TASK_TRACED))
 		return 0;
 	return 1;
 }
@@ -76,6 +71,7 @@ int freeze_processes(void)
 			if (!freezeable(p))
 				continue;
 			if ((p->flags & PF_FROZEN) ||
+			    (p->state == TASK_TRACED) ||
 			    (p->state == TASK_STOPPED))
 				continue;
 
@@ -115,13 +111,11 @@ void thaw_processes(void)
 			wake_up_process(p);
 		} else
 			printk(KERN_INFO " Strange, %s not stopped\n", p->comm );
-		wake_up_process(p);
 	} while_each_thread(g, p);
 
 	read_unlock(&tasklist_lock);
 	schedule();
 	printk( " done\n" );
-	MDELAY(500);
 }
 
 EXPORT_SYMBOL(refrigerator);

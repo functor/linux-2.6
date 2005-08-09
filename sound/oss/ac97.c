@@ -133,7 +133,7 @@ ac97_reset (struct ac97_hwint *dev)
 
 /* Return the contents of register REG; use the cache if the value in it
    is valid.  Returns a negative error code on failure. */
-int
+static int
 ac97_get_register (struct ac97_hwint *dev, u8 reg) 
 {
     if (reg > 127 || (reg & 1))
@@ -226,7 +226,7 @@ ac97_scale_from_oss_val (int value, int maxval, int is_stereo, int inv)
     }
 }
 
-int
+static int
 ac97_set_mixer (struct ac97_hwint *dev, int oss_channel, u16 oss_value)
 {
     int scaled_value;
@@ -262,7 +262,7 @@ ac97_set_mixer (struct ac97_hwint *dev, int oss_channel, u16 oss_value)
     return result;
 }
 
-int
+static int
 ac97_get_mixer_scaled (struct ac97_hwint *dev, int oss_channel)
 {
     struct ac97_chn_desc *channel = ac97_find_chndesc (dev, oss_channel);
@@ -292,7 +292,7 @@ ac97_get_mixer_scaled (struct ac97_hwint *dev, int oss_channel)
 				  channel->is_inverted);
 }
 
-int
+static int
 ac97_get_recmask (struct ac97_hwint *dev)
 {
     int recReg = ac97_get_register (dev, AC97_RECORD_SELECT);
@@ -309,7 +309,7 @@ ac97_get_recmask (struct ac97_hwint *dev)
     }
 }
 
-int
+static int
 ac97_set_recmask (struct ac97_hwint *dev, int oss_recmask)
 {
     int x;
@@ -369,7 +369,7 @@ ac97_set_values (struct ac97_hwint *dev,
 }
 
 int
-ac97_mixer_ioctl (struct ac97_hwint *dev, unsigned int cmd, caddr_t arg)
+ac97_mixer_ioctl (struct ac97_hwint *dev, unsigned int cmd, void __user *arg)
 {
     int ret;
 
@@ -380,7 +380,7 @@ ac97_mixer_ioctl (struct ac97_hwint *dev, unsigned int cmd, caddr_t arg)
 
     case SOUND_MIXER_WRITE_RECSRC:
 	{
-	    if (get_user (ret, (int *) arg))
+	    if (get_user (ret, (int __user *) arg))
 		ret = -EFAULT;
 	    else
 		ret = ac97_set_recmask (dev, ret);
@@ -414,7 +414,7 @@ ac97_mixer_ioctl (struct ac97_hwint *dev, unsigned int cmd, caddr_t arg)
 		ret = 0;
 		if (dir & _SIOC_WRITE) {
 		    int val;
-		    if (get_user (val, (int *) arg) == 0)
+		    if (get_user (val, (int __user *) arg) == 0)
 			ret = ac97_set_mixer (dev, channel, val);
 		    else
 			ret = -EFAULT;
@@ -434,15 +434,12 @@ ac97_mixer_ioctl (struct ac97_hwint *dev, unsigned int cmd, caddr_t arg)
     if (ret < 0)
 	return ret;
     else
-	return put_user(ret, (int *) arg);
+	return put_user(ret, (int __user *) arg);
 }
 
 EXPORT_SYMBOL(ac97_init);
 EXPORT_SYMBOL(ac97_set_values);
-EXPORT_SYMBOL(ac97_set_mixer);
-EXPORT_SYMBOL(ac97_get_register);
 EXPORT_SYMBOL(ac97_put_register);
-EXPORT_SYMBOL(ac97_get_mixer_scaled);
 EXPORT_SYMBOL(ac97_mixer_ioctl);
 EXPORT_SYMBOL(ac97_reset);
 MODULE_LICENSE("GPL");

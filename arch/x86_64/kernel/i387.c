@@ -57,12 +57,12 @@ void __init fpu_init(void)
 	mxcsr_feature_mask_init();
 	/* clean state in init */
 	current_thread_info()->status = 0;
-	current->used_math = 0;
+	clear_used_math();
 }
 
 void init_fpu(struct task_struct *child)
 {
-	if (child->used_math) { 
+	if (tsk_used_math(child)) {
 		if (child == current)
 			unlazy_fpu(child);
 		return;
@@ -70,14 +70,15 @@ void init_fpu(struct task_struct *child)
 	memset(&child->thread.i387.fxsave, 0, sizeof(struct i387_fxsave_struct));
 	child->thread.i387.fxsave.cwd = 0x37f;
 	child->thread.i387.fxsave.mxcsr = 0x1f80;
-	child->used_math = 1;
+	/* only the device not available exception or ptrace can call init_fpu */
+	set_stopped_child_used_math(child);
 }
 
 /*
  * Signal frame handlers.
  */
 
-int save_i387(struct _fpstate *buf)
+int save_i387(struct _fpstate __user *buf)
 {
 	struct task_struct *tsk = current;
 	int err = 0;
@@ -91,11 +92,11 @@ int save_i387(struct _fpstate *buf)
 	if ((unsigned long)buf % 16) 
 		printk("save_i387: bad fpstate %p\n",buf); 
 
-	if (!tsk->used_math) 
+	if (!used_math())
 		return 0;
-	tsk->used_math = 0; /* trigger finit */ 
+	clear_used_math(); /* trigger finit */
 	if (tsk->thread_info->status & TS_USEDFPU) {
-		err = save_i387_checking((struct i387_fxsave_struct *)buf);
+		err = save_i387_checking((struct i387_fxsave_struct __user *)buf);
 		if (err) return err;
 		stts();
 		} else {
@@ -110,14 +111,14 @@ int save_i387(struct _fpstate *buf)
  * ptrace request handlers.
  */
 
-int get_fpregs(struct user_i387_struct *buf, struct task_struct *tsk)
+int get_fpregs(struct user_i387_struct __user *buf, struct task_struct *tsk)
 {
 	init_fpu(tsk);
-	return __copy_to_user((void *)buf, &tsk->thread.i387.fxsave,
+	return __copy_to_user(buf, &tsk->thread.i387.fxsave,
 			       sizeof(struct user_i387_struct)) ? -EFAULT : 0;
 }
 
-int set_fpregs(struct task_struct *tsk, struct user_i387_struct *buf)
+int set_fpregs(struct task_struct *tsk, struct user_i387_struct __user *buf)
 {
 	if (__copy_from_user(&tsk->thread.i387.fxsave, buf, 
 			     sizeof(struct user_i387_struct)))
@@ -133,7 +134,7 @@ int dump_fpu( struct pt_regs *regs, struct user_i387_struct *fpu )
 {
 	struct task_struct *tsk = current;
 
-	if (!tsk->used_math) 
+	if (!used_math())
 		return 0;
 
 	unlazy_fpu(tsk);
@@ -143,7 +144,7 @@ int dump_fpu( struct pt_regs *regs, struct user_i387_struct *fpu )
 
 int dump_task_fpu(struct task_struct *tsk, struct user_i387_struct *fpu)
 {
-	int fpvalid = tsk->used_math;
+	int fpvalid = !!tsk_used_math(tsk);
 
 	if (fpvalid) {
 		if (tsk == current)

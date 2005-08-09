@@ -6,6 +6,7 @@
  *
  *  - flush_tlb_mm(mm) flushes the specified mm context TLB's
  *  - flush_tlb_page(vma, vmaddr) flushes one page
+ *  - flush_tlb_page_nohash(vma, vmaddr) flushes one page if SW loaded TLB
  *  - flush_tlb_range(vma, start, end) flushes a range of pages
  *  - flush_tlb_kernel_range(start, end) flushes a range of kernel pages
  *  - flush_tlb_pgtables(mm, start, end) flushes a range of page tables
@@ -31,14 +32,16 @@ extern void __flush_tlb_pending(struct ppc64_tlb_batch *batch);
 
 static inline void flush_tlb_pending(void)
 {
-	struct ppc64_tlb_batch *batch = &__get_cpu_var(ppc64_tlb_batch);
+	struct ppc64_tlb_batch *batch = &get_cpu_var(ppc64_tlb_batch);
 
 	if (batch->index)
 		__flush_tlb_pending(batch);
+	put_cpu_var(ppc64_tlb_batch);
 }
 
 #define flush_tlb_mm(mm)			flush_tlb_pending()
 #define flush_tlb_page(vma, addr)		flush_tlb_pending()
+#define flush_tlb_page_nohash(vma, addr)       	do { } while (0)
 #define flush_tlb_range(vma, start, end) \
 		do { (void)(start); flush_tlb_pending(); } while (0)
 #define flush_tlb_kernel_range(start, end)	flush_tlb_pending()

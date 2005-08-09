@@ -1,10 +1,16 @@
-/* $Id: fasttimer.c,v 1.4 2003/07/04 08:27:41 starvik Exp $
+/* $Id: fasttimer.c,v 1.6 2004/05/14 10:18:39 starvik Exp $
  * linux/arch/cris/kernel/fasttimer.c
  *
  * Fast timers for ETRAX100/ETRAX100LX
  * This may be useful in other OS than Linux so use 2 space indentation...
  *
  * $Log: fasttimer.c,v $
+ * Revision 1.6  2004/05/14 10:18:39  starvik
+ * Export fast_timer_list
+ *
+ * Revision 1.5  2004/05/14 07:58:01  starvik
+ * Merge of changes from 2.4
+ *
  * Revision 1.4  2003/07/04 08:27:41  starvik
  * Merge of Linux 2.5.74
  *
@@ -130,7 +136,7 @@ static int fast_timers_deleted = 0;
 static int fast_timer_is_init = 0;
 static int fast_timer_ints = 0;
 
-static struct fast_timer *fast_timer_list = NULL;
+struct fast_timer *fast_timer_list = NULL;
 
 #ifdef DEBUG_LOG_INCLUDED
 #define DEBUG_LOG_MAX 128
@@ -325,7 +331,8 @@ void start_one_shot_timer(struct fast_timer *t,
     {
       if (tmp == t)
       {
-        printk("timer name: %s data: 0x%08lX already in list!\n", name, data);
+        printk(KERN_WARNING
+               "timer name: %s data: 0x%08lX already in list!\n", name, data);
         sanity_failed++;
         return;
       }
@@ -592,23 +599,8 @@ void schedule_usleep(unsigned long us)
 
 #ifdef CONFIG_PROC_FS
 static int proc_fasttimer_read(char *buf, char **start, off_t offset, int len
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,2,0)
-                       ,int *eof, void *data_unused
-#else
-                        ,int unused
-#endif
-                               );
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,2,0)
+                       ,int *eof, void *data_unused);
 static struct proc_dir_entry *fasttimer_proc_entry;
-#else
-static struct proc_dir_entry fasttimer_proc_entry =
-{
-  0, 9, "fasttimer",
-  S_IFREG | S_IRUGO, 1, 0, 0,
-  0, NULL /* ops -- default to array */,
-  &proc_fasttimer_read /* get_info */,
-};
-#endif
 #endif /* CONFIG_PROC_FS */
 
 #ifdef CONFIG_PROC_FS
@@ -617,12 +609,7 @@ static struct proc_dir_entry fasttimer_proc_entry =
 #define BIG_BUF_SIZE (500 + NUM_TIMER_STATS * 300)
 
 static int proc_fasttimer_read(char *buf, char **start, off_t offset, int len
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,2,0)
-                       ,int *eof, void *data_unused
-#else
-                        ,int unused
-#endif
-                               )
+                       ,int *eof, void *data_unused)
 {
   unsigned long flags;
   int i = 0;
@@ -784,7 +771,7 @@ static int proc_fasttimer_read(char *buf, char **start, off_t offset, int len
       cli();
       if (t->next != nextt)
       {
-        printk("timer removed!\n");
+        printk(KERN_WARNING "timer removed!\n");
       }
       t = nextt;
     }
@@ -798,9 +785,7 @@ static int proc_fasttimer_read(char *buf, char **start, off_t offset, int len
 
   memcpy(buf, bigbuf + offset, len);
   *start = buf;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,2,0)
   *eof = 1;
-#endif
 
   return len;
 }
@@ -965,7 +950,7 @@ void fast_timer_init(void)
     int i;
 #endif
 
-    printk("fast_timer_init()\n");
+    printk(KERN_INFO "fast_timer_init()\n");
 
 #if 0 && defined(FAST_TIMER_TEST)
     for (i = 0; i <= TIMER0_DIV; i++)
@@ -975,12 +960,8 @@ void fast_timer_init(void)
     }
 #endif
 #ifdef CONFIG_PROC_FS
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,2,0)
    if ((fasttimer_proc_entry = create_proc_entry( "fasttimer", 0, 0 )))
      fasttimer_proc_entry->read_proc = proc_fasttimer_read;
-#else
-    proc_register_dynamic(&proc_root, &fasttimer_proc_entry);
-#endif
 #endif /* PROC_FS */
     if(request_irq(TIMER1_IRQ_NBR, timer1_handler, SA_SHIRQ,
                    "fast timer int", NULL))

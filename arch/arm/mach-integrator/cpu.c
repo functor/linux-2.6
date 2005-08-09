@@ -79,7 +79,7 @@ static int integrator_set_target(struct cpufreq_policy *policy,
 				 unsigned int target_freq,
 				 unsigned int relation)
 {
-	unsigned long cpus_allowed;
+	cpumask_t cpus_allowed;
 	int cpu = policy->cpu;
 	struct icst525_vco vco;
 	struct cpufreq_freqs freqs;
@@ -94,7 +94,7 @@ static int integrator_set_target(struct cpufreq_policy *policy,
 	 * Bind to the specified CPU.  When this call returns,
 	 * we should be running on the right CPU.
 	 */
-	set_cpus_allowed(current, 1 << cpu);
+	set_cpus_allowed(current, cpumask_of_cpu(cpu));
 	BUG_ON(cpu != smp_processor_id());
 
 	/* get current setting */
@@ -152,16 +152,16 @@ static int integrator_set_target(struct cpufreq_policy *policy,
 	return 0;
 }
 
-static int integrator_cpufreq_init(struct cpufreq_policy *policy)
+static unsigned int integrator_get(unsigned int cpu)
 {
-	unsigned long cpus_allowed;
-	unsigned int cpu = policy->cpu;
+	cpumask_t cpus_allowed;
+	unsigned int current_freq;
 	u_int cm_osc;
 	struct icst525_vco vco;
 
 	cpus_allowed = current->cpus_allowed;
 
-	set_cpus_allowed(current, 1 << cpu);
+	set_cpus_allowed(current, cpumask_of_cpu(cpu));
 	BUG_ON(cpu != smp_processor_id());
 
 	/* detect memory etc. */
@@ -175,15 +175,22 @@ static int integrator_cpufreq_init(struct cpufreq_policy *policy)
 	vco.v = cm_osc & 255;
 	vco.r = 22;
 
+	current_freq = icst525_khz(&cclk_params, vco); /* current freq */
+
+	set_cpus_allowed(current, cpus_allowed);
+
+	return current_freq;
+}
+
+static int integrator_cpufreq_init(struct cpufreq_policy *policy)
+{
+
 	/* set default policy and cpuinfo */
 	policy->governor = CPUFREQ_DEFAULT_GOVERNOR;
 	policy->cpuinfo.max_freq = 160000;
 	policy->cpuinfo.min_freq = 12000;
 	policy->cpuinfo.transition_latency = 1000000; /* 1 ms, assumed */
-	policy->cur = policy->min = policy->max =
-		icst525_khz(&cclk_params, vco); /* current freq */
-
-	set_cpus_allowed(current, cpus_allowed);
+	policy->cur = policy->min = policy->max = integrator_get(policy->cpu);
 
 	return 0;
 }
@@ -191,6 +198,7 @@ static int integrator_cpufreq_init(struct cpufreq_policy *policy)
 static struct cpufreq_driver integrator_driver = {
 	.verify		= integrator_verify_policy,
 	.target		= integrator_set_target,
+	.get		= integrator_get,
 	.init		= integrator_cpufreq_init,
 	.name		= "integrator",
 };

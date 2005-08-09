@@ -21,9 +21,7 @@
 #include <linux/interrupt.h>
 
 #include <asm/mtrr.h>
-#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
-#include <mach_ipi.h>
 #include <mach_apic.h>
 
 /*
@@ -105,7 +103,7 @@
  *	about nothing of note with C stepping upwards.
  */
 
-struct tlb_state cpu_tlbstate[NR_CPUS] __cacheline_aligned = {[0 ... NR_CPUS-1] = { &init_mm, 0, }};
+DEFINE_PER_CPU(struct tlb_state, cpu_tlbstate) ____cacheline_aligned = { &init_mm, 0, };
 
 /*
  * the following functions deal with sending IPIs between CPUs.
@@ -123,7 +121,7 @@ static inline int __prepare_ICR2 (unsigned int mask)
 	return SET_APIC_DEST_FIELD(mask);
 }
 
-inline void __send_IPI_shortcut(unsigned int shortcut, int vector)
+void __send_IPI_shortcut(unsigned int shortcut, int vector)
 {
 	/*
 	 * Subtle. In the case of the 'never do double writes' workaround
@@ -158,9 +156,9 @@ void fastcall send_IPI_self(int vector)
 /*
  * This is only used on smaller machines.
  */
-inline void send_IPI_mask_bitmask(cpumask_t cpumask, int vector)
+void send_IPI_mask_bitmask(cpumask_t cpumask, int vector)
 {
-	unsigned long mask = cpus_coerce(cpumask);
+	unsigned long mask = cpus_addr(cpumask)[0];
 	unsigned long cfg;
 	unsigned long flags;
 
@@ -190,7 +188,7 @@ inline void send_IPI_mask_bitmask(cpumask_t cpumask, int vector)
 	local_irq_restore(flags);
 }
 
-inline void send_IPI_mask_sequence(cpumask_t mask, int vector)
+void send_IPI_mask_sequence(cpumask_t mask, int vector)
 {
 	unsigned long cfg, flags;
 	unsigned int query_cpu;
@@ -231,6 +229,8 @@ inline void send_IPI_mask_sequence(cpumask_t mask, int vector)
 	local_irq_restore(flags);
 }
 
+#include <mach_ipi.h> /* must come after the send_IPI functions above for inlining */
+
 /*
  *	Smarter SMP flushing macros. 
  *		c/o Linus Torvalds.
@@ -244,7 +244,7 @@ inline void send_IPI_mask_sequence(cpumask_t mask, int vector)
 static cpumask_t flush_cpumask;
 static struct mm_struct * flush_mm;
 static unsigned long flush_va;
-static spinlock_t tlbstate_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(tlbstate_lock);
 #define FLUSH_ALL	0xffffffff
 
 /*
@@ -256,9 +256,9 @@ static spinlock_t tlbstate_lock = SPIN_LOCK_UNLOCKED;
  */
 static inline void leave_mm (unsigned long cpu)
 {
-	if (cpu_tlbstate[cpu].state == TLBSTATE_OK)
+	if (per_cpu(cpu_tlbstate, cpu).state == TLBSTATE_OK)
 		BUG();
-	cpu_clear(cpu, cpu_tlbstate[cpu].active_mm->cpu_vm_mask);
+	cpu_clear(cpu, per_cpu(cpu_tlbstate, cpu).active_mm->cpu_vm_mask);
 	load_cr3(swapper_pg_dir);
 }
 
@@ -308,7 +308,7 @@ static inline void leave_mm (unsigned long cpu)
  * 2) Leave the mm if we are in the lazy tlb mode.
  */
 
-asmlinkage void smp_invalidate_interrupt (void)
+fastcall void smp_invalidate_interrupt(struct pt_regs *regs)
 {
 	unsigned long cpu;
 
@@ -325,8 +325,8 @@ asmlinkage void smp_invalidate_interrupt (void)
 		 * BUG();
 		 */
 		 
-	if (flush_mm == cpu_tlbstate[cpu].active_mm) {
-		if (cpu_tlbstate[cpu].state == TLBSTATE_OK) {
+	if (flush_mm == per_cpu(cpu_tlbstate, cpu).active_mm) {
+		if (per_cpu(cpu_tlbstate, cpu).state == TLBSTATE_OK) {
 			if (flush_va == FLUSH_ALL)
 				local_flush_tlb();
 			else
@@ -458,13 +458,13 @@ static void do_flush_tlb_all(void* info)
 	unsigned long cpu = smp_processor_id();
 
 	__flush_tlb_all();
-	if (cpu_tlbstate[cpu].state == TLBSTATE_LAZY)
+	if (per_cpu(cpu_tlbstate, cpu).state == TLBSTATE_LAZY)
 		leave_mm(cpu);
 }
 
 void flush_tlb_all(void)
 {
-	on_each_cpu(do_flush_tlb_all, 0, 1, 1);
+	on_each_cpu(do_flush_tlb_all, NULL, 1, 1);
 }
 
 /*
@@ -481,7 +481,7 @@ void smp_send_reschedule(int cpu)
  * Structure and data for smp_call_function(). This is designed to minimise
  * static memory requirements. It also looks cleaner.
  */
-static spinlock_t call_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(call_lock);
 
 struct call_data_struct {
 	void (*func) (void *info);
@@ -519,6 +519,9 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 	if (!cpus)
 		return 0;
 
+	/* Can deadlock when called with interrupts disabled */
+	WARN_ON(irqs_disabled());
+
 	data.func = func;
 	data.info = info;
 	atomic_set(&data.started, 0);
@@ -535,11 +538,11 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 
 	/* Wait for response */
 	while (atomic_read(&data.started) != cpus)
-		barrier();
+		cpu_relax();
 
 	if (wait)
 		while (atomic_read(&data.finished) != cpus)
-			barrier();
+			cpu_relax();
 	spin_unlock(&call_lock);
 
 	return 0;
@@ -576,12 +579,12 @@ void smp_send_stop(void)
  * all the work is done automatically when
  * we return from the interrupt.
  */
-asmlinkage void smp_reschedule_interrupt(void)
+fastcall void smp_reschedule_interrupt(struct pt_regs *regs)
 {
 	ack_APIC_irq();
 }
 
-asmlinkage void smp_call_function_interrupt(void)
+fastcall void smp_call_function_interrupt(struct pt_regs *regs)
 {
 	void (*func) (void *info) = call_data->func;
 	void *info = call_data->info;

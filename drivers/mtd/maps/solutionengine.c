@@ -1,5 +1,5 @@
 /*
- * $Id: solutionengine.c,v 1.10 2003/05/21 12:45:20 dwmw2 Exp $
+ * $Id: solutionengine.c,v 1.14 2004/09/16 23:27:14 gleixner Exp $
  *
  * Flash and EPROM on Hitachi Solution Engine and similar boards.
  *
@@ -17,7 +17,7 @@
 #include <linux/mtd/map.h>
 #include <linux/mtd/partitions.h>
 #include <linux/config.h>
-
+#include <linux/errno.h>
 
 static struct mtd_info *flash_mtd;
 static struct mtd_info *eprom_mtd;
@@ -27,13 +27,13 @@ static struct mtd_partition *parsed_parts;
 struct map_info soleng_eprom_map = {
 	.name = "Solution Engine EPROM",
 	.size = 0x400000,
-	.buswidth = 4,
+	.bankwidth = 4,
 };
 
 struct map_info soleng_flash_map = {
 	.name = "Solution Engine FLASH",
 	.size = 0x400000,
-	.buswidth = 4,
+	.bankwidth = 4,
 };
 
 static const char *probes[] = { "RedBoot", "cmdlinepart", NULL };
@@ -62,9 +62,9 @@ static int __init init_soleng_maps(void)
 
 	/* First probe at offset 0 */
 	soleng_flash_map.phys = 0;
-	soleng_flash_map.virt = P2SEGADDR(0);
+	soleng_flash_map.virt = (void __iomem *)P2SEGADDR(0);
 	soleng_eprom_map.phys = 0x01000000;
-	soleng_eprom_map.virt = P1SEGADDR(0x01000000);
+	soleng_eprom_map.virt = (void __iomem *)P1SEGADDR(0x01000000);
 	simple_map_init(&soleng_eprom_map);
 	simple_map_init(&soleng_flash_map);
 	

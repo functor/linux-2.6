@@ -24,8 +24,6 @@
 
 #include "speedstep-lib.h"
 
-#define PFX "speedstep-smi: "
-
 /* speedstep system management interface port/command.
  *
  * These parameters are got from IST-SMI BIOS call.
@@ -36,6 +34,8 @@ static int		smi_port	= 0;
 static int		smi_cmd		= 0;
 static unsigned int	smi_sig		= 0;
 
+/* info about the processor */
+static unsigned int	speedstep_processor = 0;
 
 /* 
  *   There are only two frequency states for each processor. Values
@@ -56,16 +56,7 @@ static struct cpufreq_frequency_table speedstep_freqs[] = {
  * of DMA activity going on? */
 #define SMI_TRIES 5
 
-/* DEBUG
- *   Define it if you want verbose debug output, e.g. for bug reporting
- */
-//#define SPEEDSTEP_DEBUG
-
-#ifdef SPEEDSTEP_DEBUG
-#define dprintk(msg...) printk(msg)
-#else
-#define dprintk(msg...) do { } while(0)
-#endif
+#define dprintk(msg...) cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, "speedstep-smi", msg)
 
 /**
  * speedstep_smi_ownership
@@ -79,11 +70,15 @@ static int speedstep_smi_ownership (void)
 	command = (smi_sig & 0xffffff00) | (smi_cmd & 0xff);
 	magic = virt_to_phys(magic_data);
 
+	dprintk("trying to obtain ownership with command %x at port %x\n", command, smi_port);
+
 	__asm__ __volatile__(
 		"out %%al, (%%dx)\n"
 		: "=D" (result)
 		: "a" (command), "b" (function), "c" (0), "d" (smi_port), "D" (0), "S" (magic)
 	);
+
+	dprintk("result is %x\n", result);
 
 	return result;
 }
@@ -99,20 +94,31 @@ static int speedstep_smi_ownership (void)
  */
 static int speedstep_smi_get_freqs (unsigned int *low, unsigned int *high)
 {
-	u32 command, result, edi, high_mhz, low_mhz;
+	u32 command, result = 0, edi, high_mhz, low_mhz;
 	u32 state=0;
 	u32 function = GET_SPEEDSTEP_FREQS;
 
-	if (!(ist_info.event & 0xFFFF))
+	if (!(ist_info.event & 0xFFFF)) {
+		dprintk("bug #1422 -- can't read freqs from BIOS\n", result);
 		return -ENODEV;
+	}
 
 	command = (smi_sig & 0xffffff00) | (smi_cmd & 0xff);
+
+	dprintk("trying to determine frequencies with command %x at port %x\n", command, smi_port);
 
 	__asm__ __volatile__("movl $0, %%edi\n"
 		"out %%al, (%%dx)\n"
 		: "=a" (result), "=b" (high_mhz), "=c" (low_mhz), "=d" (state), "=D" (edi)
 		: "a" (command), "b" (function), "c" (state), "d" (smi_port), "S" (0)
 	);
+
+	dprintk("result %x, low_freq %u, high_freq %u\n", result, low_mhz, high_mhz);
+
+	/* abort if results are obviously incorrect... */
+	if ((high_mhz + low_mhz) < 600)
+		return -EINVAL;
+
 	*high = high_mhz * 1000;
 	*low  = low_mhz  * 1000;
 
@@ -131,51 +137,45 @@ static int speedstep_get_state (void)
 
 	command = (smi_sig & 0xffffff00) | (smi_cmd & 0xff);
 
+	dprintk("trying to determine current setting with command %x at port %x\n", command, smi_port);
+
 	__asm__ __volatile__("movl $0, %%edi\n"
 		"out %%al, (%%dx)\n"
 		: "=a" (result), "=b" (state), "=D" (edi)
 		: "a" (command), "b" (function), "c" (0), "d" (smi_port), "S" (0)
 	);
 
-	return state;
+	dprintk("state is %x, result is %x\n", state, result);
+
+	return (state & 1);
 }
+
 
 /**
  * speedstep_set_state - set the SpeedStep state
  * @state: new processor frequency state (SPEEDSTEP_LOW or SPEEDSTEP_HIGH)
- * @notify: whether to call cpufreq_notify_transition
  *
  */
-static void speedstep_set_state (unsigned int state, unsigned int notify)
+static void speedstep_set_state (unsigned int state)
 {
-	unsigned int old_state, result = 0, command, new_state;
+	unsigned int result = 0, command, new_state;
 	unsigned long flags;
-	struct cpufreq_freqs freqs;
 	unsigned int function=SET_SPEEDSTEP_STATE;
 	unsigned int retry = 0;
 
 	if (state > 0x1)
 		return;
 
-	old_state = speedstep_get_state();
-	freqs.old = speedstep_freqs[old_state].frequency;
-	freqs.new = speedstep_freqs[state].frequency;
-	freqs.cpu = 0; /* speedstep.c is UP only driver */
-
-	if (old_state == state)
-		return;
-
-	if (notify)
-		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
-
 	/* Disable IRQs */
 	local_irq_save(flags);
 
 	command = (smi_sig & 0xffffff00) | (smi_cmd & 0xff);
 
+	dprintk("trying to set frequency to state %u with command %x at port %x\n", state, command, smi_port);
+
 	do {
 		if (retry) {
-			dprintk(KERN_INFO "cpufreq: retry %u, previous result %u\n", retry, result);
+			dprintk("retry %u, previous result %u, waiting...\n", retry, result);
 			mdelay(retry * 50);
 		}
 		retry++;
@@ -191,13 +191,10 @@ static void speedstep_set_state (unsigned int state, unsigned int notify)
 	local_irq_restore(flags);
 
 	if (new_state == state) {
-		dprintk(KERN_INFO "cpufreq: change to %u MHz succeeded after %u tries with result %u\n", (freqs.new / 1000), retry, result);
+		dprintk("change to %u MHz succeeded after %u tries with result %u\n", (speedstep_freqs[new_state].frequency / 1000), retry, result);
 	} else {
 		printk(KERN_ERR "cpufreq: change failed with new_state %u and result %u\n", new_state, result);
 	}
-
-	if (notify)
-		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
 
 	return;
 }
@@ -215,11 +212,21 @@ static int speedstep_target (struct cpufreq_policy *policy,
 			unsigned int target_freq, unsigned int relation)
 {
 	unsigned int newstate = 0;
+	struct cpufreq_freqs freqs;
 
 	if (cpufreq_frequency_table_target(policy, &speedstep_freqs[0], target_freq, relation, &newstate))
 		return -EINVAL;
 
-	speedstep_set_state(newstate, 1);
+	freqs.old = speedstep_freqs[speedstep_get_state()].frequency;
+	freqs.new = speedstep_freqs[newstate].frequency;
+	freqs.cpu = 0; /* speedstep.c is UP only driver */
+
+	if (freqs.old == freqs.new)
+		return 0;
+
+	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+	speedstep_set_state(newstate);
+	cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
 
 	return 0;
 }
@@ -249,7 +256,7 @@ static int speedstep_cpu_init(struct cpufreq_policy *policy)
 
 	result = speedstep_smi_ownership();
 	if (result) {
-		dprintk(KERN_INFO "cpufreq: fails an aquiring ownership of a SMI interface.\n");
+		dprintk("fails in aquiring ownership of a SMI interface.\n");
 		return -EINVAL;
 	}
 
@@ -258,29 +265,24 @@ static int speedstep_cpu_init(struct cpufreq_policy *policy)
 				&speedstep_freqs[SPEEDSTEP_HIGH].frequency);
 	if (result) {
 		/* fall back to speedstep_lib.c dection mechanism: try both states out */
-		unsigned int speedstep_processor = speedstep_detect_processor();
-
-		dprintk(KERN_INFO PFX "could not detect low and high frequencies by SMI call.\n");
-		if (!speedstep_processor)
-			return -ENODEV;
-
+		dprintk("could not detect low and high frequencies by SMI call.\n");
 		result = speedstep_get_freqs(speedstep_processor,
 				&speedstep_freqs[SPEEDSTEP_LOW].frequency,
 				&speedstep_freqs[SPEEDSTEP_HIGH].frequency,
 				&speedstep_set_state);
 
 		if (result) {
-			dprintk(KERN_INFO PFX "could not detect two different speeds -- aborting.\n");
+			dprintk("could not detect two different speeds -- aborting.\n");
 			return result;
 		} else
-			dprintk(KERN_INFO PFX "workaround worked.\n");
+			dprintk("workaround worked.\n");
 	}
 
 	/* get current speed setting */
 	state = speedstep_get_state();
 	speed = speedstep_freqs[state].frequency;
 
-	dprintk(KERN_INFO "cpufreq: currently at %s speed setting - %i MHz\n", 
+	dprintk("currently at %s speed setting - %i MHz\n", 
 		(speed == speedstep_freqs[SPEEDSTEP_LOW].frequency) ? "low" : "high",
 		(speed / 1000));
 
@@ -298,11 +300,17 @@ static int speedstep_cpu_init(struct cpufreq_policy *policy)
 	return 0;
 }
 
-
 static int speedstep_cpu_exit(struct cpufreq_policy *policy)
 {
 	cpufreq_frequency_table_put_attr(policy->cpu);
 	return 0;
+}
+
+static unsigned int speedstep_get(unsigned int cpu)
+{
+	if (cpu)
+		return -ENODEV;
+	return speedstep_get_processor_frequency(speedstep_processor);
 }
 
 
@@ -311,7 +319,7 @@ static int speedstep_resume(struct cpufreq_policy *policy)
 	int result = speedstep_smi_ownership();
 
 	if (result)
-		dprintk(KERN_INFO "cpufreq: fails an aquiring ownership of a SMI interface.\n");
+		dprintk("fails in re-aquiring ownership of a SMI interface.\n");
 
 	return result;
 }
@@ -327,6 +335,7 @@ static struct cpufreq_driver speedstep_driver = {
 	.target 	= speedstep_target,
 	.init		= speedstep_cpu_init,
 	.exit		= speedstep_cpu_exit,
+	.get		= speedstep_get,
 	.resume		= speedstep_resume,
 	.owner		= THIS_MODULE,
 	.attr		= speedstep_attr,
@@ -341,14 +350,26 @@ static struct cpufreq_driver speedstep_driver = {
  */
 static int __init speedstep_init(void)
 {
-    struct cpuinfo_x86 *c = cpu_data;
+	speedstep_processor = speedstep_detect_processor();
 
-    if (c->x86_vendor != X86_VENDOR_INTEL) {
-		printk (KERN_INFO PFX "No Intel CPU detected.\n");
+	switch (speedstep_processor) {
+	case SPEEDSTEP_PROCESSOR_PIII_T:
+	case SPEEDSTEP_PROCESSOR_PIII_C:
+	case SPEEDSTEP_PROCESSOR_PIII_C_EARLY:
+		break;
+	case SPEEDSTEP_PROCESSOR_P4M:
+		printk(KERN_INFO "speedstep-smi: you're trying to use this cpufreq driver on a Pentium 4-based CPU. Most likely it will not work.\n");
+		break;
+	default:
+		speedstep_processor = 0;
+	}
+
+	if (!speedstep_processor) {
+		dprintk ("No supported Intel CPU detected.\n");
 		return -ENODEV;
 	}
 
-	dprintk(KERN_DEBUG PFX "signature:0x%.8lx, command:0x%.8lx, event:0x%.8lx, perf_level:0x%.8lx.\n", 
+	dprintk("signature:0x%.8lx, command:0x%.8lx, event:0x%.8lx, perf_level:0x%.8lx.\n", 
 		ist_info.signature, ist_info.command, ist_info.event, ist_info.perf_level);
 
 

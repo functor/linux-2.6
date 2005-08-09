@@ -12,6 +12,30 @@
  *    init_etrax_debug()
  *
  * $Log: debugport.c,v $
+ * Revision 1.19  2004/10/21 07:26:16  starvik
+ * Made it possible to specify console settings on kernel command line.
+ *
+ * Revision 1.18  2004/10/19 13:07:37  starvik
+ * Merge of Linux 2.6.9
+ *
+ * Revision 1.17  2004/09/29 10:33:46  starvik
+ * Resolved a dealock when printing debug from kernel.
+ *
+ * Revision 1.16  2004/08/24 06:12:19  starvik
+ * Whitespace cleanup
+ *
+ * Revision 1.15  2004/08/16 12:37:19  starvik
+ * Merge of Linux 2.6.8
+ *
+ * Revision 1.14  2004/05/17 13:11:29  starvik
+ * Disable DMA until real serial driver is up
+ *
+ * Revision 1.13  2004/05/14 07:58:01  starvik
+ * Merge of changes from 2.4
+ *
+ * Revision 1.12  2003/09/11 07:29:49  starvik
+ * Merge of Linux 2.6.0-test5
+ *
  * Revision 1.11  2003/07/07 09:53:36  starvik
  * Revert all the 2.5.74 merge changes to make the console work again
  *
@@ -59,178 +83,280 @@
 #include <linux/init.h>
 #include <linux/major.h>
 #include <linux/delay.h>
-
+#include <linux/tty.h>
 #include <asm/system.h>
 #include <asm/arch/svinto.h>
 #include <asm/io.h>             /* Get SIMCOUT. */
 
-/* Which serial-port is our debug port ? */
+struct dbg_port
+{
+  unsigned int index;
+  const volatile unsigned* read;
+  volatile char* write;
+  volatile unsigned* xoff;
+  volatile char* baud;
+  volatile char* tr_ctrl;
+  volatile char* rec_ctrl;
+  unsigned long irq;
+  unsigned int started;
+  unsigned long baudrate;
+  unsigned char parity;
+  unsigned int bits;
+};
 
-#if defined(CONFIG_ETRAX_DEBUG_PORT0) || defined(CONFIG_ETRAX_DEBUG_PORT_NULL)
-#define DEBUG_PORT_IDX 0
-#define DEBUG_OCMD R_DMA_CH6_CMD
-#define DEBUG_FIRST R_DMA_CH6_FIRST
-#define DEBUG_OCLRINT R_DMA_CH6_CLR_INTR
-#define DEBUG_STATUS R_DMA_CH6_STATUS
-#define DEBUG_READ R_SERIAL0_READ
-#define DEBUG_WRITE R_SERIAL0_TR_DATA
-#define DEBUG_TR_CTRL R_SERIAL0_TR_CTRL
-#define DEBUG_REC_CTRL R_SERIAL0_REC_CTRL
-#define DEBUG_IRQ IO_STATE(R_IRQ_MASK1_SET, ser0_data, set)
-#define DEBUG_DMA_IRQ_CLR IO_STATE(R_IRQ_MASK2_CLR, dma6_descr, clr)
+struct dbg_port ports[]=
+{
+  {
+    0,
+    R_SERIAL0_READ,
+    R_SERIAL0_TR_DATA,
+    R_SERIAL0_XOFF,
+    R_SERIAL0_BAUD,
+    R_SERIAL0_TR_CTRL,
+    R_SERIAL0_REC_CTRL,
+    IO_STATE(R_IRQ_MASK1_SET, ser0_data, set)
+  },
+  {
+    1,
+    R_SERIAL1_READ,
+    R_SERIAL1_TR_DATA,
+    R_SERIAL1_XOFF,
+    R_SERIAL1_BAUD,
+    R_SERIAL1_TR_CTRL,
+    R_SERIAL1_REC_CTRL,
+    IO_STATE(R_IRQ_MASK1_SET, ser1_data, set)
+  },
+  {
+    2,
+    R_SERIAL2_READ,
+    R_SERIAL2_TR_DATA,
+    R_SERIAL2_XOFF,
+    R_SERIAL2_BAUD,
+    R_SERIAL2_TR_CTRL,
+    R_SERIAL2_REC_CTRL,
+    IO_STATE(R_IRQ_MASK1_SET, ser2_data, set)
+  },
+  {
+    3,
+    R_SERIAL3_READ,
+    R_SERIAL3_TR_DATA,
+    R_SERIAL3_XOFF,
+    R_SERIAL3_BAUD,
+    R_SERIAL3_TR_CTRL,
+    R_SERIAL3_REC_CTRL,
+    IO_STATE(R_IRQ_MASK1_SET, ser3_data, set)
+  }
+};
+
+static struct tty_driver *serial_driver;
+
+struct dbg_port* port =
+#if defined(CONFIG_ETRAX_DEBUG_PORT0)
+  &ports[0];
+#elif defined(CONFIG_ETRAX_DEBUG_PORT1)
+  &ports[1];
+#elif defined(CONFIG_ETRAX_DEBUG_PORT2)
+  &ports[2];
+#elif defined(CONFIG_ETRAX_DEBUG_PORT3)
+  &ports[3];
+#else
+  NULL;
 #endif
-
-#ifdef CONFIG_ETRAX_DEBUG_PORT1
-#define DEBUG_PORT_IDX 1
-#define DEBUG_OCMD R_DMA_CH8_CMD
-#define DEBUG_FIRST R_DMA_CH8_FIRST
-#define DEBUG_OCLRINT R_DMA_CH8_CLR_INTR
-#define DEBUG_STATUS R_DMA_CH8_STATUS
-#define DEBUG_READ R_SERIAL1_READ
-#define DEBUG_WRITE R_SERIAL1_TR_DATA
-#define DEBUG_TR_CTRL R_SERIAL1_TR_CTRL
-#define DEBUG_REC_CTRL R_SERIAL1_REC_CTRL
-#define DEBUG_IRQ IO_STATE(R_IRQ_MASK1_SET, ser1_data, set)
-#define DEBUG_DMA_IRQ_CLR IO_STATE(R_IRQ_MASK2_CLR, dma8_descr, clr)
-#endif
-
-#ifdef CONFIG_ETRAX_DEBUG_PORT2
-#define DEBUG_PORT_IDX 2
-#define DEBUG_OCMD R_DMA_CH2_CMD
-#define DEBUG_FIRST R_DMA_CH2_FIRST
-#define DEBUG_OCLRINT R_DMA_CH2_CLR_INTR
-#define DEBUG_STATUS R_DMA_CH2_STATUS
-#define DEBUG_READ R_SERIAL2_READ
-#define DEBUG_WRITE R_SERIAL2_TR_DATA
-#define DEBUG_TR_CTRL R_SERIAL2_TR_CTRL
-#define DEBUG_REC_CTRL R_SERIAL2_REC_CTRL
-#define DEBUG_IRQ IO_STATE(R_IRQ_MASK1_SET, ser2_data, set)
-#define DEBUG_DMA_IRQ_CLR IO_STATE(R_IRQ_MASK2_CLR, dma2_descr, clr)
-#endif
-
-#ifdef CONFIG_ETRAX_DEBUG_PORT3
-#define DEBUG_PORT_IDX 3
-#define DEBUG_OCMD R_DMA_CH4_CMD
-#define DEBUG_FIRST R_DMA_CH4_FIRST
-#define DEBUG_OCLRINT R_DMA_CH4_CLR_INTR
-#define DEBUG_STATUS R_DMA_CH4_STATUS
-#define DEBUG_READ R_SERIAL3_READ
-#define DEBUG_WRITE R_SERIAL3_TR_DATA
-#define DEBUG_TR_CTRL R_SERIAL3_TR_CTRL
-#define DEBUG_REC_CTRL R_SERIAL3_REC_CTRL
-#define DEBUG_IRQ IO_STATE(R_IRQ_MASK1_SET, ser3_data, set)
-#define DEBUG_DMA_IRQ_CLR IO_STATE(R_IRQ_MASK2_CLR, dma4_descr, clr)
-#endif
-
-#define MIN_SIZE 32 /* Size that triggers the FIFO to flush characters to interface */
-
-/* Write a string of count length to the console (debug port) using DMA, polled
- * for completion. Interrupts are disabled during the whole process. Some
- * caution needs to be taken to not interfere with ttyS business on this port.
+/* Used by serial.c to register a debug_write_function so that the normal
+ * serial driver is used for kernel debug output
  */
+typedef int (*debugport_write_function)(int i, const char *buf, unsigned int len);
 
-static void 
+debugport_write_function debug_write_function = NULL;
+
+static void
+start_port(void)
+{
+	unsigned long rec_ctrl = 0;
+	unsigned long tr_ctrl = 0;
+
+	if (!port)
+		return;
+
+	if (port->started)
+		return;
+	port->started = 1;
+
+	if (port->index == 0)
+	{
+		genconfig_shadow &= ~IO_MASK(R_GEN_CONFIG, dma6);
+		genconfig_shadow |= IO_STATE(R_GEN_CONFIG, dma6, unused);
+	}
+	else if (port->index == 1)
+	{
+		genconfig_shadow &= ~IO_MASK(R_GEN_CONFIG, dma8);
+		genconfig_shadow |= IO_STATE(R_GEN_CONFIG, dma8, usb);
+	}
+	else if (port->index == 2)
+	{
+		genconfig_shadow &= ~IO_MASK(R_GEN_CONFIG, dma2);
+		genconfig_shadow |= IO_STATE(R_GEN_CONFIG, dma2, par0);
+		genconfig_shadow &= ~IO_MASK(R_GEN_CONFIG, dma3);
+		genconfig_shadow |= IO_STATE(R_GEN_CONFIG, dma3, par0);
+		genconfig_shadow |= IO_STATE(R_GEN_CONFIG, ser2, select);
+	}
+	else
+	{
+		genconfig_shadow &= ~IO_MASK(R_GEN_CONFIG, dma4);
+		genconfig_shadow |= IO_STATE(R_GEN_CONFIG, dma4, par1);
+		genconfig_shadow &= ~IO_MASK(R_GEN_CONFIG, dma5);
+		genconfig_shadow |= IO_STATE(R_GEN_CONFIG, dma5, par1);
+		genconfig_shadow |= IO_STATE(R_GEN_CONFIG, ser3, select);
+	}
+
+	*R_GEN_CONFIG = genconfig_shadow;
+
+	*port->xoff =
+		IO_STATE(R_SERIAL0_XOFF, tx_stop, enable) |
+		IO_STATE(R_SERIAL0_XOFF, auto_xoff, disable) |
+		IO_FIELD(R_SERIAL0_XOFF, xoff_char, 0);
+
+	switch (port->baudrate)
+	{
+	case 0:
+	case 115200:
+		*port->baud =
+		  IO_STATE(R_SERIAL0_BAUD, tr_baud, c115k2Hz) |
+		  IO_STATE(R_SERIAL0_BAUD, rec_baud, c115k2Hz);
+		break;
+	case 1200:
+		*port->baud =
+		  IO_STATE(R_SERIAL0_BAUD, tr_baud, c1200Hz) |
+		  IO_STATE(R_SERIAL0_BAUD, rec_baud, c1200Hz);
+		break;
+	case 2400:
+		*port->baud =
+		  IO_STATE(R_SERIAL0_BAUD, tr_baud, c2400Hz) |
+		  IO_STATE(R_SERIAL0_BAUD, rec_baud, c2400Hz);
+		break;
+	case 4800:
+		*port->baud =
+		  IO_STATE(R_SERIAL0_BAUD, tr_baud, c4800Hz) |
+		  IO_STATE(R_SERIAL0_BAUD, rec_baud, c4800Hz);
+		break;
+	case 9600:
+		*port->baud =
+		  IO_STATE(R_SERIAL0_BAUD, tr_baud, c9600Hz) |
+		  IO_STATE(R_SERIAL0_BAUD, rec_baud, c9600Hz);
+		  break;
+	case 19200:
+		*port->baud =
+		  IO_STATE(R_SERIAL0_BAUD, tr_baud, c19k2Hz) |
+		  IO_STATE(R_SERIAL0_BAUD, rec_baud, c19k2Hz);
+		 break;
+	case 38400:
+		*port->baud =
+		  IO_STATE(R_SERIAL0_BAUD, tr_baud, c38k4Hz) |
+		  IO_STATE(R_SERIAL0_BAUD, rec_baud, c38k4Hz);
+		break;
+	case 57600:
+		*port->baud =
+		  IO_STATE(R_SERIAL0_BAUD, tr_baud, c57k6Hz) |
+		  IO_STATE(R_SERIAL0_BAUD, rec_baud, c57k6Hz);
+		break;
+	default:
+		*port->baud =
+		  IO_STATE(R_SERIAL0_BAUD, tr_baud, c115k2Hz) |
+		  IO_STATE(R_SERIAL0_BAUD, rec_baud, c115k2Hz);
+		  break;
+        }
+
+	if (port->parity == 'E') {
+		rec_ctrl =
+		  IO_STATE(R_SERIAL0_REC_CTRL, rec_par, even) |
+		  IO_STATE(R_SERIAL0_REC_CTRL, rec_par_en, enable);
+		tr_ctrl =
+		  IO_STATE(R_SERIAL0_TR_CTRL, tr_par, even) |
+		  IO_STATE(R_SERIAL0_TR_CTRL, tr_par_en, enable);
+	} else if (port->parity == 'O') {
+		rec_ctrl =
+		  IO_STATE(R_SERIAL0_REC_CTRL, rec_par, odd) |
+		  IO_STATE(R_SERIAL0_REC_CTRL, rec_par_en, enable);
+		tr_ctrl =
+		  IO_STATE(R_SERIAL0_TR_CTRL, tr_par, odd) |
+		  IO_STATE(R_SERIAL0_TR_CTRL, tr_par_en, enable);
+	} else {
+		rec_ctrl =
+		  IO_STATE(R_SERIAL0_REC_CTRL, rec_par, even) |
+		  IO_STATE(R_SERIAL0_REC_CTRL, rec_par_en, disable);
+		tr_ctrl =
+		  IO_STATE(R_SERIAL0_TR_CTRL, tr_par, even) |
+		  IO_STATE(R_SERIAL0_TR_CTRL, tr_par_en, disable);
+	}
+
+	if (port->bits == 7)
+	{
+		rec_ctrl |= IO_STATE(R_SERIAL0_REC_CTRL, rec_bitnr, rec_7bit);
+		tr_ctrl |= IO_STATE(R_SERIAL0_TR_CTRL, tr_bitnr, tr_7bit);
+	}
+	else
+	{
+		rec_ctrl |= IO_STATE(R_SERIAL0_REC_CTRL, rec_bitnr, rec_8bit);
+		tr_ctrl |= IO_STATE(R_SERIAL0_TR_CTRL, tr_bitnr, tr_8bit);
+	}
+
+	*port->rec_ctrl =
+		IO_STATE(R_SERIAL0_REC_CTRL, dma_err, stop) |
+		IO_STATE(R_SERIAL0_REC_CTRL, rec_enable, enable) |
+		IO_STATE(R_SERIAL0_REC_CTRL, rts_, active) |
+		IO_STATE(R_SERIAL0_REC_CTRL, sampling, middle) |
+		IO_STATE(R_SERIAL0_REC_CTRL, rec_stick_par, normal) |
+		rec_ctrl;
+
+	*port->tr_ctrl =
+		IO_FIELD(R_SERIAL0_TR_CTRL, txd, 0) |
+		IO_STATE(R_SERIAL0_TR_CTRL, tr_enable, enable) |
+		IO_STATE(R_SERIAL0_TR_CTRL, auto_cts, disabled) |
+		IO_STATE(R_SERIAL0_TR_CTRL, stop_bits, one_bit) |
+		IO_STATE(R_SERIAL0_TR_CTRL, tr_stick_par, normal) |
+		tr_ctrl;
+}
+
+static void
+console_write_direct(struct console *co, const char *buf, unsigned int len)
+{
+	int i;
+	unsigned long flags;
+	local_irq_save(flags);
+	/* Send data */
+	for (i = 0; i < len; i++) {
+		/* Wait until transmitter is ready and send.*/
+		while (!(*port->read & IO_MASK(R_SERIAL0_READ, tr_ready)))
+			;
+		*port->write = buf[i];
+	}
+	local_irq_restore(flags);
+}
+
+static void
 console_write(struct console *co, const char *buf, unsigned int len)
 {
-
-	static struct etrax_dma_descr descr;
-	static struct etrax_dma_descr descr2;
-	static char tmp_buf[MIN_SIZE];
-	static int tmp_size = 0;
-
-	unsigned long flags; 
-	
-#ifdef CONFIG_ETRAX_DEBUG_PORT_NULL
-        /* no debug printout at all */
-        return;
-#endif
+	if (!port)
+		return;
 
 #ifdef CONFIG_SVINTO_SIM
 	/* no use to simulate the serial debug output */
-	SIMCOUT(buf,len);
+	SIMCOUT(buf, len);
 	return;
 #endif
-	
-	local_save_flags(flags);
-	local_irq_disable();
+
+	start_port();
 
 #ifdef CONFIG_ETRAX_KGDB
 	/* kgdb needs to output debug info using the gdb protocol */
 	putDebugString(buf, len);
-	local_irq_restore(flags);
 	return;
 #endif
 
-	/* To make this work together with the real serial port driver
-	 * we have to make sure that everything is flushed when we leave
-	 * here. The following steps are made to assure this:
-	 * 1. Wait until DMA stops, FIFO is empty and serial port pipeline empty.
-	 * 2. Write at least half the FIFO to trigger flush to serial port.
-	 * 3. Wait until DMA stops, FIFO is empty and serial port pipeline empty.
-         */
-
-	/* Do we have enough characters to make the DMA/FIFO happy? */
-	if (tmp_size + len < MIN_SIZE)
-	{
-		int size = min((int)(MIN_SIZE - tmp_size),(int)len);
-		memcpy(&tmp_buf[tmp_size], buf, size);
-		tmp_size += size;
-		len -= size;
-        
-		/* Pad with space if complete line */
-		if (tmp_buf[tmp_size-1] == '\n')
-		{
-			memset(&tmp_buf[tmp_size-1], ' ', MIN_SIZE - tmp_size);
-			tmp_buf[MIN_SIZE - 1] = '\n';
-			tmp_size = MIN_SIZE;
-			len = 0;
-		}
-		else
-		{
-                  /* Wait for more characters */
-			local_irq_restore(flags);
-			return;
-		}
-	}
-
-	/* make sure the transmitter is enabled. 
-	 * NOTE: this overrides any setting done in ttySx, to 8N1, no auto-CTS.
-	 * in the future, move the tr/rec_ctrl shadows from etrax100ser.c to
-	 * shadows.c and use it here as well...
-	 */
-
-	*DEBUG_TR_CTRL = 0x40;
-	while(*DEBUG_OCMD & 7); /* Until DMA is not running */
-	while(*DEBUG_STATUS & 0x7f); /* wait until output FIFO is empty as well */
-	udelay(200); /* Wait for last two characters to leave the serial transmitter */
-
-	if (tmp_size)
-	{
-		descr.ctrl = len ?  0 : d_eop | d_wait | d_eol;
-		descr.sw_len = tmp_size;
-		descr.buf = virt_to_phys(tmp_buf);
-		descr.next = virt_to_phys(&descr2);
-		descr2.ctrl = d_eop | d_wait | d_eol;
-		descr2.sw_len = len;
-		descr2.buf = virt_to_phys((char*)buf);
-	}
+	if (debug_write_function)
+		debug_write_function(co->index, buf, len);
 	else
-	{
-		descr.ctrl = d_eop | d_wait | d_eol;
-		descr.sw_len = len;
-		descr.buf = virt_to_phys((char*)buf);
-	}
-
-	*DEBUG_FIRST = virt_to_phys(&descr); /* write to R_DMAx_FIRST */
-	*DEBUG_OCMD = 1;       /* dma command start -> R_DMAx_CMD */
-
-	/* wait until the output dma channel is ready again */
-	while(*DEBUG_OCMD & 7);
-	while(*DEBUG_STATUS & 0x7f);
-	udelay(200);
-
-	tmp_size = 0;
-	local_irq_restore(flags);
+		console_write_direct(co, buf, len);
 }
 
 /* legacy function */
@@ -247,10 +373,10 @@ int
 getDebugChar(void)
 {
 	unsigned long readval;
-	
+
 	do {
-		readval = *DEBUG_READ;
-	} while(!(readval & IO_MASK(R_SERIAL0_READ, data_avail)));
+		readval = *port->read;
+	} while (!(readval & IO_MASK(R_SERIAL0_READ, data_avail)));
 
 	return (readval & IO_MASK(R_SERIAL0_READ, data_in));
 }
@@ -260,9 +386,9 @@ getDebugChar(void)
 void
 putDebugChar(int val)
 {
-	while(!(*DEBUG_READ & IO_MASK(R_SERIAL0_READ, tr_ready))) ;
-;
-	*DEBUG_WRITE = val;
+	while (!(*port->read & IO_MASK(R_SERIAL0_READ, tr_ready)))
+		;
+	*port->write = val;
 }
 
 /* Enable irq for receiving chars on the debug port, used by kgdb */
@@ -270,46 +396,136 @@ putDebugChar(int val)
 void
 enableDebugIRQ(void)
 {
-	*R_IRQ_MASK1_SET = DEBUG_IRQ;
+	*R_IRQ_MASK1_SET = port->irq;
 	/* use R_VECT_MASK directly, since we really bypass Linux normal
 	 * IRQ handling in kgdb anyway, we don't need to use enable_irq
 	 */
 	*R_VECT_MASK_SET = IO_STATE(R_VECT_MASK_SET, serial, set);
 
-	*DEBUG_REC_CTRL = IO_STATE(R_SERIAL0_REC_CTRL, rec_enable, enable);
+	*port->rec_ctrl = IO_STATE(R_SERIAL0_REC_CTRL, rec_enable, enable);
 }
 
-static kdev_t 
-console_device(struct console *c)
+static struct tty_driver*
+etrax_console_device(struct console* co, int *index)
 {
-         return mk_kdev(TTY_MAJOR, 64 + c->index);
+	return serial_driver;
 }
 
-static int __init 
+static int __init
 console_setup(struct console *co, char *options)
 {
-        return 0;
+	char* s;
+
+	if (options) {
+		port = &ports[co->index];
+		port->baudrate = 115200;
+                port->parity = 'N';
+                port->bits = 8;
+		port->baudrate = simple_strtoul(options, NULL, 10);
+		s = options;
+		while(*s >= '0' && *s <= '9')
+			s++;
+		if (*s) port->parity = *s++;
+		if (*s) port->bits   = *s++ - '0';
+		port->started = 0;
+		start_port();
+	}
+	return 0;
 }
 
 static struct console sercons = {
-	.name    = "ttyS",
-	.write   = console_write,
-	.read    = NULL,
-	.device  = console_device,
-	.unblank = NULL,
-	.setup   = console_setup,
-	.flags   = CON_PRINTBUFFER,
-	.index   = DEBUG_PORT_IDX,
-	.cflag   = 0,
-	.next    = NULL
+	name : "ttyS",
+	write: console_write,
+	read : NULL,
+	device : etrax_console_device,
+	unblank : NULL,
+	setup : console_setup,
+	flags : CON_PRINTBUFFER,
+	index : -1,
+	cflag : 0,
+	next : NULL
+};
+static struct console sercons0 = {
+	name : "ttyS",
+	write: console_write,
+	read : NULL,
+	device : etrax_console_device,
+	unblank : NULL,
+	setup : console_setup,
+	flags : CON_PRINTBUFFER,
+	index : 0,
+	cflag : 0,
+	next : NULL
 };
 
+static struct console sercons1 = {
+	name : "ttyS",
+	write: console_write,
+	read : NULL,
+	device : etrax_console_device,
+	unblank : NULL,
+	setup : console_setup,
+	flags : CON_PRINTBUFFER,
+	index : 1,
+	cflag : 0,
+	next : NULL
+};
+static struct console sercons2 = {
+	name : "ttyS",
+	write: console_write,
+	read : NULL,
+	device : etrax_console_device,
+	unblank : NULL,
+	setup : console_setup,
+	flags : CON_PRINTBUFFER,
+	index : 2,
+	cflag : 0,
+	next : NULL
+};
+static struct console sercons3 = {
+	name : "ttyS",
+	write: console_write,
+	read : NULL,
+	device : etrax_console_device,
+	unblank : NULL,
+	setup : console_setup,
+	flags : CON_PRINTBUFFER,
+	index : 3,
+	cflag : 0,
+	next : NULL
+};
 /*
  *      Register console (for printk's etc)
  */
 
-void __init 
+int __init
 init_etrax_debug(void)
 {
-	register_console(&sercons);
+	static int first = 1;
+
+	if (!first) {
+		if (!port) {
+			register_console(&sercons0);
+			register_console(&sercons1);
+			register_console(&sercons2);
+			register_console(&sercons3);
+			unregister_console(&sercons);
+		}
+		return 0;
+	}
+	first = 0;
+	if (port)
+		register_console(&sercons);
+	return 0;
 }
+
+int __init
+init_console(void)
+{
+	serial_driver = alloc_tty_driver(1);
+	if (!serial_driver)
+		return -ENOMEM;
+	return 0;
+}
+
+__initcall(init_etrax_debug);

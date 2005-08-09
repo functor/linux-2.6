@@ -41,7 +41,7 @@ static int verbose; /* set this to 1 to see debugging messages and whatnot */
 
  
 
-#define PPCSTRUCT(pi) ((PPC *)(pi->private))
+#define PPCSTRUCT(pi) ((Interface *)(pi->private))
 
 /****************************************************************/
 /*
@@ -224,10 +224,10 @@ static void bpck6_log_adapter( PIA *pi, char * scratch, int verbose )
 
 static int bpck6_init_proto(PIA *pi)
 {
-	PPC *p = kmalloc(sizeof(PPC), GFP_KERNEL);
+	Interface *p = kmalloc(sizeof(Interface), GFP_KERNEL);
 
 	if (p) {
-		memset(p, 0, sizeof(PPC));
+		memset(p, 0, sizeof(Interface));
 		pi->private = (unsigned long)p;
 		return 0;
 	}
@@ -277,6 +277,6 @@ static void __exit bpck6_exit(void)
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Micro Solutions Inc.");
 MODULE_DESCRIPTION("BACKPACK Protocol module, compatible with PARIDE");
-MODULE_PARM(verbose,"i");
+module_param(verbose, bool, 0644);
 module_init(bpck6_init)
 module_exit(bpck6_exit)

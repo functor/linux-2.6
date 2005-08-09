@@ -43,13 +43,13 @@ static int scanlog_debug;
 static unsigned int ibm_scan_log_dump;			/* RTAS token */
 static struct proc_dir_entry *proc_ppc64_scan_log_dump;	/* The proc file */
 
-static ssize_t scanlog_read(struct file *file, char *buf,
+static ssize_t scanlog_read(struct file *file, char __user *buf,
 			    size_t count, loff_t *ppos)
 {
         struct inode * inode = file->f_dentry->d_inode;
 	struct proc_dir_entry *dp;
 	unsigned int *data;
-	unsigned long status;
+	int status;
 	unsigned long len, off;
 	unsigned int wait_time;
 
@@ -73,7 +73,7 @@ static ssize_t scanlog_read(struct file *file, char *buf,
 		return -EINVAL;
 	}
 
-	if (verify_area(VERIFY_WRITE, buf, count))
+	if (!access_ok(VERIFY_WRITE, buf, count))
 		return -EFAULT;
 
 	for (;;) {
@@ -81,11 +81,11 @@ static ssize_t scanlog_read(struct file *file, char *buf,
 		spin_lock(&rtas_data_buf_lock);
 		memcpy(rtas_data_buf, data, RTAS_DATA_BUF_SIZE);
 		status = rtas_call(ibm_scan_log_dump, 2, 1, NULL,
-				   __pa(rtas_data_buf), count);
+				   (u32) __pa(rtas_data_buf), (u32) count);
 		memcpy(data, rtas_data_buf, RTAS_DATA_BUF_SIZE);
 		spin_unlock(&rtas_data_buf_lock);
 
-		DEBUG("status=%ld, data[0]=%x, data[1]=%x, data[2]=%x\n",
+		DEBUG("status=%d, data[0]=%x, data[1]=%x, data[2]=%x\n",
 		      status, data[0], data[1], data[2]);
 		switch (status) {
 		    case SCANLOG_COMPLETE:
@@ -118,7 +118,7 @@ static ssize_t scanlog_read(struct file *file, char *buf,
 				wait_time = ms / (1000000/HZ); /* round down is fine */
 				/* Fall through to sleep */
 			} else {
-				printk(KERN_ERR "scanlog: unknown error from rtas: %ld\n", status);
+				printk(KERN_ERR "scanlog: unknown error from rtas: %d\n", status);
 				return -EIO;
 			}
 		}
@@ -129,11 +129,11 @@ static ssize_t scanlog_read(struct file *file, char *buf,
 	/*NOTREACHED*/
 }
 
-static ssize_t scanlog_write(struct file * file, const char * buf,
+static ssize_t scanlog_write(struct file * file, const char __user * buf,
 			     size_t count, loff_t *ppos)
 {
 	char stkbuf[20];
-	unsigned long status;
+	int status;
 
 	if (count > 19) count = 19;
 	if (copy_from_user (stkbuf, buf, count)) {
@@ -144,8 +144,8 @@ static ssize_t scanlog_write(struct file * file, const char * buf,
 	if (buf) {
 		if (strncmp(stkbuf, "reset", 5) == 0) {
 			DEBUG("reset scanlog\n");
-			status = rtas_call(ibm_scan_log_dump, 2, 1, NULL, NULL, 0);
-			DEBUG("rtas returns %ld\n", status);
+			status = rtas_call(ibm_scan_log_dump, 2, 1, NULL, 0, 0);
+			DEBUG("rtas returns %d\n", status);
 		} else if (strncmp(stkbuf, "debugon", 7) == 0) {
 			printk(KERN_ERR "scanlog: debug on\n");
 			scanlog_debug = 1;

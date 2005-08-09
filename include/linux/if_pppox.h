@@ -119,10 +119,13 @@ struct pppoe_opt {
 					     relayed to (PPPoE relaying) */
 };
 
-struct pppox_opt {
+#include <net/sock.h>
+
+struct pppox_sock {
+	/* struct sock must be the first member of pppox_sock */
+	struct sock		sk;
 	struct ppp_channel	chan;
-	struct sock		*sk;
-	struct pppox_opt	*next;	  /* for hash table */
+	struct pppox_sock	*next;	  /* for hash table */
 	union {
 		struct pppoe_opt pppoe;
 	} proto;
@@ -132,7 +135,15 @@ struct pppox_opt {
 #define pppoe_pa	proto.pppoe.pa
 #define pppoe_relay	proto.pppoe.relay
 
-#define pppox_sk(__sk) ((struct pppox_opt *)(__sk)->sk_protinfo)
+static inline struct pppox_sock *pppox_sk(struct sock *sk)
+{
+	return (struct pppox_sock *)sk;
+}
+
+static inline struct sock *sk_pppox(struct pppox_sock *po)
+{
+	return (struct sock *)po;
+}
 
 struct module;
 
@@ -158,8 +169,6 @@ enum {
     PPPOX_ZOMBIE	= 8,  /* dead, but still bound to ppp device */
     PPPOX_DEAD		= 16  /* dead, useless, please clean me up!*/
 };
-
-extern struct ppp_channel_ops pppoe_chan_ops;
 
 #endif /* __KERNEL__ */
 

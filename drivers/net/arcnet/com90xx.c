@@ -155,7 +155,7 @@ static void __init com90xx_probe(void)
 		ioaddr = *port;
 
 		if (!request_region(*port, ARCNET_TOTAL_SIZE, "arcnet (90xx)")) {
-			BUGMSG2(D_INIT_REASONS, "(check_region)\n");
+			BUGMSG2(D_INIT_REASONS, "(request_region)\n");
 			BUGMSG2(D_INIT_REASONS, "S1: ");
 			BUGLVL(D_INIT_REASONS) numprint = 0;
 			*port-- = ports[--numports];
@@ -214,7 +214,7 @@ static void __init com90xx_probe(void)
 		BUGMSG2(D_INIT, "%lXh ", *p);
 
 		if (!request_mem_region(*p, BUFFER_SIZE, "arcnet (90xx)")) {
-			BUGMSG2(D_INIT_REASONS, "(check_mem_region)\n");
+			BUGMSG2(D_INIT_REASONS, "(request_mem_region)\n");
 			BUGMSG2(D_INIT_REASONS, "Stage 3: ");
 			BUGLVL(D_INIT_REASONS) numprint = 0;
 			*p-- = shmems[--numshmems];
@@ -529,7 +529,7 @@ static void com90xx_setmask(struct net_device *dev, int mask)
  */
 int com90xx_reset(struct net_device *dev, int really_reset)
 {
-	struct arcnet_local *lp = (struct arcnet_local *) dev->priv;
+	struct arcnet_local *lp = dev->priv;
 	short ioaddr = dev->base_addr;
 
 	BUGMSG(D_INIT, "Resetting (status=%02Xh)\n", ASTATUS());
@@ -565,8 +565,8 @@ int com90xx_reset(struct net_device *dev, int really_reset)
 static void com90xx_copy_to_card(struct net_device *dev, int bufnum, int offset,
 				 void *buf, int count)
 {
-	struct arcnet_local *lp = (struct arcnet_local *) dev->priv;
-	void *memaddr = lp->mem_start + bufnum * 512 + offset;
+	struct arcnet_local *lp = dev->priv;
+	void __iomem *memaddr = lp->mem_start + bufnum * 512 + offset;
 	TIME("memcpy_toio", count, memcpy_toio(memaddr, buf, count));
 }
 
@@ -574,8 +574,8 @@ static void com90xx_copy_to_card(struct net_device *dev, int bufnum, int offset,
 static void com90xx_copy_from_card(struct net_device *dev, int bufnum, int offset,
 				   void *buf, int count)
 {
-	struct arcnet_local *lp = (struct arcnet_local *) dev->priv;
-	void *memaddr = lp->mem_start + bufnum * 512 + offset;
+	struct arcnet_local *lp = dev->priv;
+	void __iomem *memaddr = lp->mem_start + bufnum * 512 + offset;
 	TIME("memcpy_fromio", count, memcpy_fromio(buf, memaddr, count));
 }
 
@@ -600,7 +600,7 @@ static void __exit com90xx_exit(void)
 
 	for (count = 0; count < numcards; count++) {
 		dev = cards[count];
-		lp = (struct arcnet_local *) dev->priv;
+		lp = dev->priv;
 
 		unregister_netdev(dev);
 		free_irq(dev->irq, dev);

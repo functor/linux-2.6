@@ -155,9 +155,9 @@ promcon_init_unimap(struct vc_data *conp)
 			k++;
 		}
 	set_fs(KERNEL_DS);
-	con_clear_unimap(conp->vc_num, NULL);
-	con_set_unimap(conp->vc_num, k, p);
-	con_protect_unimap(conp->vc_num, 1);
+	con_clear_unimap(conp, NULL);
+	con_set_unimap(conp, k, p);
+	con_protect_unimap(conp, 1);
 	set_fs(old_fs);
 	kfree(p);
 }
@@ -175,7 +175,7 @@ promcon_init(struct vc_data *conp, int init)
 	p = *conp->vc_uni_pagedir_loc;
 	if (conp->vc_uni_pagedir_loc == &conp->vc_uni_pagedir ||
 	    !--conp->vc_uni_pagedir_loc[1])
-		con_free_unimap(conp->vc_num);
+		con_free_unimap(conp);
 	conp->vc_uni_pagedir_loc = promcon_uni_pagedir;
 	promcon_uni_pagedir[1]++;
 	if (!promcon_uni_pagedir[0] && p) {
@@ -183,7 +183,7 @@ promcon_init(struct vc_data *conp, int init)
 	}
 	if (!init) {
 		if (conp->vc_cols != pw + 1 || conp->vc_rows != ph + 1)
-			vc_resize(conp->vc_num, pw + 1, ph + 1);
+			vc_resize(conp, pw + 1, ph + 1);
 	}
 }
 
@@ -192,9 +192,9 @@ promcon_deinit(struct vc_data *conp)
 {
 	/* When closing the last console, reset video origin */
 	if (!--promcon_uni_pagedir[1])
-		con_free_unimap(conp->vc_num);
+		con_free_unimap(conp);
 	conp->vc_uni_pagedir_loc = &conp->vc_uni_pagedir;
-	con_set_default_unimap(conp->vc_num);
+	con_set_default_unimap(conp);
 }
 
 static int
@@ -457,12 +457,6 @@ promcon_cursor(struct vc_data *conp, int mode)
 }
 
 static int
-promcon_font_op(struct vc_data *conp, struct console_font_op *op)
-{
-	return -ENOSYS;
-}
-        
-static int
 promcon_blank(struct vc_data *conp, int blank, int mode_switch)
 {
 	if (blank) {
@@ -574,6 +568,7 @@ static int promcon_dummy(void)
 #define DUMMY (void *) promcon_dummy
 
 const struct consw prom_con = {
+	.owner =		THIS_MODULE,
 	.con_startup =		promcon_startup,
 	.con_init =		promcon_init,
 	.con_deinit =		promcon_deinit,
@@ -585,7 +580,6 @@ const struct consw prom_con = {
 	.con_bmove =		promcon_bmove,
 	.con_switch =		promcon_switch,
 	.con_blank =		promcon_blank,
-	.con_font_op =		promcon_font_op,
 	.con_set_palette =	DUMMY,
 	.con_scrolldelta =	DUMMY,
 #if !(PROMCON_COLOR)

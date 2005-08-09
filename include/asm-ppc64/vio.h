@@ -14,6 +14,7 @@
 #ifndef _ASM_VIO_H
 #define _ASM_VIO_H
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/device.h>
@@ -43,45 +44,20 @@ struct iommu_table;
 
 int vio_register_driver(struct vio_driver *drv);
 void vio_unregister_driver(struct vio_driver *drv);
-const struct vio_device_id * vio_match_device(const struct vio_device_id *ids, 
-						const struct vio_dev *dev);
 
-struct vio_dev * __devinit vio_register_device(struct device_node *node_vdev);
+#ifdef CONFIG_PPC_PSERIES
+struct vio_dev * __devinit vio_register_device_node(
+		struct device_node *node_vdev);
+#endif
 void __devinit vio_unregister_device(struct vio_dev *dev);
 struct vio_dev *vio_find_node(struct device_node *vnode);
 
 const void * vio_get_attribute(struct vio_dev *vdev, void* which, int* length);
 int vio_get_irq(struct vio_dev *dev);
-struct iommu_table * vio_build_iommu_table(struct vio_dev *dev);
 int vio_enable_interrupts(struct vio_dev *dev);
 int vio_disable_interrupts(struct vio_dev *dev);
 
-dma_addr_t vio_map_single(struct vio_dev *dev, void *vaddr, 
-			  size_t size, enum dma_data_direction direction);
-void vio_unmap_single(struct vio_dev *dev, dma_addr_t dma_handle, 
-		      size_t size, enum dma_data_direction direction);
-int vio_map_sg(struct vio_dev *vdev, struct scatterlist *sglist, 
-	       int nelems, enum dma_data_direction direction);
-void vio_unmap_sg(struct vio_dev *vdev, struct scatterlist *sglist, 
-		  int nelems, enum dma_data_direction direction);
-void *vio_alloc_consistent(struct vio_dev *dev, size_t size, 
-			   dma_addr_t *dma_handle);
-void vio_free_consistent(struct vio_dev *dev, size_t size, void *vaddr, 
-			 dma_addr_t dma_handle);
-
-static inline int vio_dma_supported(struct vio_dev *hwdev, u64 mask)
-{
-	return 1;
-}
-
-#define vio_map_page(dev, page, off, size, dir) \
-		vio_map_single(dev, (page_address(page) + (off)), size, dir)
-#define vio_unmap_page(dev,addr,sz,dir) vio_unmap_single(dev,addr,sz,dir)
-
-static inline int vio_set_dma_mask(struct vio_dev *dev, u64 mask)
-{
-	return -EIO;
-}
+extern struct dma_mapping_ops vio_dma_ops;
 
 extern struct bus_type vio_bus_type;
 
@@ -110,9 +86,9 @@ static inline struct vio_driver *to_vio_driver(struct device_driver *drv)
  * The vio_dev structure is used to describe virtual I/O devices.
  */
 struct vio_dev {
-	struct device_node *archdata;   /* Open Firmware node */
-	void *driver_data;              /* data private to the driver */
 	struct iommu_table *iommu_table;     /* vio_map_* uses this */
+	char *name;
+	char *type;
 	uint32_t unit_address;	
 	unsigned int irq;
 

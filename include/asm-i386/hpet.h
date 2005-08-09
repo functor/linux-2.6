@@ -57,9 +57,12 @@
 #define HPET_ID_LEGSUP	0x00008000
 #define HPET_ID_NUMBER	0x00001f00
 #define HPET_ID_REV	0x000000ff
+#define	HPET_ID_NUMBER_SHIFT	8
 
 #define HPET_CFG_ENABLE	0x001
 #define HPET_CFG_LEGACY	0x002
+#define	HPET_LEGACY_8254	2
+#define	HPET_LEGACY_RTC		8
 
 #define HPET_TN_ENABLE		0x004
 #define HPET_TN_PERIODIC	0x008
@@ -87,16 +90,16 @@
  */
 #define HPET_MIN_PERIOD (100000UL)
 
-extern unsigned long hpet_period;	/* fsecs / HPET clock */
 extern unsigned long hpet_tick;  	/* hpet clks count per tick */
 extern unsigned long hpet_address;	/* hpet memory map physical address */
+extern int hpet_use_timer;
 
 extern int hpet_rtc_timer_init(void);
 extern int hpet_enable(void);
+extern int hpet_reenable(void);
 extern int is_hpet_enabled(void);
 extern int is_hpet_capable(void);
 extern int hpet_readl(unsigned long a);
-extern void hpet_writel(unsigned long d, unsigned long a);
 
 #ifdef CONFIG_HPET_EMULATE_RTC
 extern int hpet_mask_rtc_irq_bit(unsigned long bit_mask);

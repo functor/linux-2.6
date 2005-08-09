@@ -43,10 +43,11 @@
 #include <asm/idprom.h>
 #include <asm/head.h>
 #include <asm/starfire.h>
-#include <asm/hardirq.h>
 #include <asm/mmu_context.h>
 #include <asm/timer.h>
 #include <asm/sections.h>
+#include <asm/setup.h>
+#include <asm/mmu.h>
 
 #ifdef CONFIG_IP_PNP
 #include <net/ipconfig.h>
@@ -151,22 +152,26 @@ int prom_callback(long *args)
 			struct task_struct *p;
 			struct mm_struct *mm = NULL;
 			pgd_t *pgdp;
+			pud_t *pudp;
 			pmd_t *pmdp;
 			pte_t *ptep;
 
 			for_each_process(p) {
 				mm = p->mm;
-				if (CTX_HWBITS(mm->context) == ctx)
+				if (CTX_NRBITS(mm->context) == ctx)
 					break;
 			}
 			if (!mm ||
-			    CTX_HWBITS(mm->context) != ctx)
+			    CTX_NRBITS(mm->context) != ctx)
 				goto done;
 
 			pgdp = pgd_offset(mm, va);
 			if (pgd_none(*pgdp))
 				goto done;
-			pmdp = pmd_offset(pgdp, va);
+			pudp = pud_offset(pgdp, va);
+			if (pud_none(*pudp))
+				goto done;
+			pmdp = pmd_offset(pudp, va);
 			if (pmd_none(*pmdp))
 				goto done;
 
@@ -183,12 +188,19 @@ int prom_callback(long *args)
 		}
 
 		if ((va >= KERNBASE) && (va < (KERNBASE + (4 * 1024 * 1024)))) {
+			unsigned long kernel_pctx = 0;
+
+			if (tlb_type == cheetah_plus)
+				kernel_pctx |= (CTX_CHEETAH_PLUS_NUC |
+						CTX_CHEETAH_PLUS_CTX0);
+
 			/* Spitfire Errata #32 workaround */
 			__asm__ __volatile__("stxa	%0, [%1] %2\n\t"
 					     "flush	%%g6"
 					     : /* No outputs */
-					     : "r" (0),
-					     "r" (PRIMARY_CONTEXT), "i" (ASI_DMMU));
+					     : "r" (kernel_pctx),
+					       "r" (PRIMARY_CONTEXT),
+					       "i" (ASI_DMMU));
 
 			/*
 			 * Locked down tlb entry.
@@ -208,6 +220,7 @@ int prom_callback(long *args)
 			 * vmalloc or prom_inherited mapping.
 			 */
 			pgd_t *pgdp;
+			pud_t *pudp;
 			pmd_t *pmdp;
 			pte_t *ptep;
 			int error;
@@ -221,7 +234,10 @@ int prom_callback(long *args)
 			pgdp = pgd_offset_k(va);
 			if (pgd_none(*pgdp))
 				goto done;
-			pmdp = pmd_offset(pgdp, va);
+			pudp = pud_offset(pgdp, va);
+			if (pud_none(*pudp))
+				goto done;
+			pmdp = pmd_offset(pudp, va);
 			if (pmd_none(*pmdp))
 				goto done;
 
@@ -293,7 +309,7 @@ int prom_callback(long *args)
 		unsigned long tte;
 
 		tte = args[3];
-		prom_printf("%lx ", (tte & 0x07FC000000000000) >> 50);
+		prom_printf("%lx ", (tte & 0x07FC000000000000UL) >> 50);
 
 		args[2] = 2;
 		args[args[1] + 3] = 0;
@@ -367,6 +383,17 @@ static void __init process_switch(char c)
 		/* Use PROM debug console. */
 		register_console(&prom_debug_console);
 		break;
+	case 'P':
+		/* Force UltraSPARC-III P-Cache on. */
+		if (tlb_type != cheetah) {
+			printk("BOOT: Ignoring P-Cache force option.\n");
+			break;
+		}
+		cheetah_pcache_forced_on = 1;
+		add_taint(TAINT_MACHINE_CHECK);
+		cheetah_enable_pcache();
+		break;
+
 	default:
 		printk("Unknown boot switch (-%c)\n", c);
 		break;
@@ -451,8 +478,7 @@ extern unsigned short ram_flags;
 
 extern int root_mountflags;
 
-char saved_command_line[256];
-char reboot_command[256];
+char reboot_command[COMMAND_LINE_SIZE];
 
 static struct pt_regs fake_swapper_regs = { { 0, }, 0, 0, 0, 0 };
 

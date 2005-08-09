@@ -95,7 +95,7 @@ static int load_em86(struct linux_binprm *bprm,struct pt_regs *regs)
 	return search_binary_handler(bprm, regs);
 }
 
-struct linux_binfmt em86_format = {
+static struct linux_binfmt em86_format = {
 	.module		= THIS_MODULE,
 	.load_binary	= load_em86,
 };
@@ -110,6 +110,6 @@ static void __exit exit_em86_binfmt(void)
 	unregister_binfmt(&em86_format);
 }
 
-module_init(init_em86_binfmt)
-module_exit(exit_em86_binfmt)
+core_initcall(init_em86_binfmt);
+module_exit(exit_em86_binfmt);
 MODULE_LICENSE("GPL");

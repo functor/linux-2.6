@@ -20,6 +20,26 @@
 #ifndef __QLA_DEF_H
 #define __QLA_DEF_H
 
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/types.h>
+#include <linux/module.h>
+#include <linux/list.h>
+#include <linux/pci.h>
+#include <linux/dma-mapping.h>
+#include <linux/sched.h>
+#include <linux/slab.h>
+#include <linux/dmapool.h>
+#include <linux/mempool.h>
+#include <linux/spinlock.h>
+#include <linux/completion.h>
+#include <asm/semaphore.h>
+
+#include <scsi/scsi.h>
+#include <scsi/scsi_host.h>
+#include <scsi/scsi_device.h>
+#include <scsi/scsi_cmnd.h>
+
 /* XXX(hch): move to pci_ids.h */
 #ifndef PCI_DEVICE_ID_QLOGIC_ISP2300
 #define PCI_DEVICE_ID_QLOGIC_ISP2300	0x2300
@@ -69,13 +89,9 @@
 
 #if defined(CONFIG_SCSI_QLA6312) || defined(CONFIG_SCSI_QLA6312_MODULE)
 #define IS_QLA6312(ha)	((ha)->pdev->device == PCI_DEVICE_ID_QLOGIC_ISP6312)
-#else
-#define IS_QLA6312(ha)	0
-#endif
-
-#if defined(CONFIG_SCSI_QLA6322) || defined(CONFIG_SCSI_QLA6322_MODULE)
 #define IS_QLA6322(ha)	((ha)->pdev->device == PCI_DEVICE_ID_QLOGIC_ISP6322)
 #else
+#define IS_QLA6312(ha)	0
 #define IS_QLA6322(ha)	0
 #endif
 
@@ -154,6 +170,9 @@
 #define RD_REG_BYTE(addr)		readb(addr)
 #define RD_REG_WORD(addr)		readw(addr)
 #define RD_REG_DWORD(addr)		readl(addr)
+#define RD_REG_BYTE_RELAXED(addr)	readb_relaxed(addr)
+#define RD_REG_WORD_RELAXED(addr)	readw_relaxed(addr)
+#define RD_REG_DWORD_RELAXED(addr)	readl_relaxed(addr)
 #define WRT_REG_BYTE(addr, data)	writeb(data,addr)
 #define WRT_REG_WORD(addr, data)	writew(data,addr)
 #define WRT_REG_DWORD(addr, data)	writel(data,addr)
@@ -200,7 +219,7 @@
 /*
  * Timeout timer counts in seconds
  */
-#define PORT_RETRY_TIME			2
+#define PORT_RETRY_TIME			1
 #define LOOP_DOWN_TIMEOUT		60
 #define LOOP_DOWN_TIME			255	/* 240 */
 #define	LOOP_DOWN_RESET			(LOOP_DOWN_TIME - 30)
@@ -209,19 +228,11 @@
 #define MAX_OUTSTANDING_COMMANDS	1024
 
 /* ISP request and response entry counts (37-65535) */
-#define REQUEST_ENTRY_CNT		2048	/* Number of request entries. */
+#define REQUEST_ENTRY_CNT_2100		128	/* Number of request entries. */
+#define REQUEST_ENTRY_CNT_2200		2048	/* Number of request entries. */
+#define REQUEST_ENTRY_CNT_2XXX_EXT_MEM	4096	/* Number of request entries. */
 #define RESPONSE_ENTRY_CNT_2100		64	/* Number of response entries.*/
 #define RESPONSE_ENTRY_CNT_2300		512	/* Number of response entries.*/
-
-/* Calculations for SG segments */
-#define SEGS_PER_REQUEST_32	3 
-#define SEGS_PER_CONT_32	7
-#define SG_SEGMENTS_32 (SEGS_PER_REQUEST_32 + \
-    (SEGS_PER_CONT_32 * (REQUEST_ENTRY_CNT - 2)))     
-#define SEGS_PER_REQUEST_64	2 
-#define SEGS_PER_CONT_64	5
-#define SG_SEGMENTS_64 (SEGS_PER_REQUEST_64 + \
-    (SEGS_PER_CONT_64 * (REQUEST_ENTRY_CNT - 2)))     
 
 /*
  * SCSI Request Block 
@@ -230,6 +241,7 @@ typedef struct srb {
 	struct list_head list;
 
 	struct scsi_qla_host *ha;	/* HA the SP is queued on */
+	struct fc_port *fcport;
 
 	struct scsi_cmnd *cmd;		/* Linux SCSI command pkt */
 
@@ -239,11 +251,6 @@ typedef struct srb {
 
 	/* Request state */
 	uint16_t state;
-
-	/* Target/LUN queue pointers. */
-	struct os_tgt *tgt_queue;	/* ptr to visible ha's target */
-	struct os_lun *lun_queue;	/* ptr to visible ha's lun */
-	struct fc_lun *fclun;		/* FC LUN context pointer. */
 
 	/* Timing counts. */
 	unsigned long e_start;		/* Start of extend timeout */
@@ -270,10 +277,6 @@ typedef struct srb {
 #define SRB_ERR_DEVICE	3		/* Request failed -- "device error" */
 #define SRB_ERR_OTHER	4
 
-	/* Segment/entries counts */
-	uint16_t	req_cnt;	/* !0 indicates counts determined */
-	uint16_t	tot_dsds;
-
 	/* SRB magic number */
 	uint16_t magic;
 #define SRB_MAGIC       0x10CB
@@ -294,7 +297,8 @@ typedef struct srb {
 
 #define SRB_BUSY		BIT_8	/* Command is in busy retry state */
 #define SRB_FO_CANCEL		BIT_9	/* Command don't need to do failover */
-#define	SRB_IOCTL		BIT_10	/* IOCTL command. */
+#define SRB_IOCTL		BIT_10	/* IOCTL command. */
+#define SRB_TAPE		BIT_11	/* FCP2 (Tape) command. */
 
 /*
  * SRB state definitions
@@ -334,6 +338,8 @@ typedef volatile struct {
 	volatile uint16_t nvram;	/* NVRAM register. */
 #define NVR_DESELECT		0
 #define NVR_BUSY		BIT_15
+#define NVR_WRT_ENABLE		BIT_14	/* Write enable */
+#define NVR_PR_ENABLE		BIT_13	/* Protection register enable */
 #define NVR_DATA_IN		BIT_3
 #define NVR_DATA_OUT		BIT_2
 #define NVR_SELECT		BIT_1
@@ -1014,9 +1020,27 @@ typedef struct {
 	uint8_t	 special_options[2];
 
 	/* Reserved for expanded RISC parameter block */
-	uint8_t reserved_2[24];
+	uint8_t reserved_2[22];
 
 	/*
+	 * LSB BIT 0 = Tx Sensitivity 1G bit 0
+	 * LSB BIT 1 = Tx Sensitivity 1G bit 1
+	 * LSB BIT 2 = Tx Sensitivity 1G bit 2
+	 * LSB BIT 3 = Tx Sensitivity 1G bit 3
+	 * LSB BIT 4 = Rx Sensitivity 1G bit 0
+	 * LSB BIT 5 = Rx Sensitivity 1G bit 1
+	 * LSB BIT 6 = Rx Sensitivity 1G bit 2
+	 * LSB BIT 7 = Rx Sensitivity 1G bit 3
+	 *            
+	 * MSB BIT 0 = Tx Sensitivity 2G bit 0
+	 * MSB BIT 1 = Tx Sensitivity 2G bit 1
+	 * MSB BIT 2 = Tx Sensitivity 2G bit 2
+	 * MSB BIT 3 = Tx Sensitivity 2G bit 3
+	 * MSB BIT 4 = Rx Sensitivity 2G bit 0
+	 * MSB BIT 5 = Rx Sensitivity 2G bit 1
+	 * MSB BIT 6 = Rx Sensitivity 2G bit 2
+	 * MSB BIT 7 = Rx Sensitivity 2G bit 3
+	 *
 	 * LSB BIT 0 = Output Swing 1G bit 0
 	 * LSB BIT 1 = Output Swing 1G bit 1
 	 * LSB BIT 2 = Output Swing 1G bit 2
@@ -1035,7 +1059,7 @@ typedef struct {
 	 * MSB BIT 6 =
 	 * MSB BIT 7 =
 	 */
-	uint8_t seriallink_options[2];
+	uint8_t seriallink_options[4];
 
 	/*
 	 * NVRAM host parameter block
@@ -1071,13 +1095,13 @@ typedef struct {
 	uint8_t alternate_node_name[WWN_SIZE];
 
 	/*
-	 * BIT 0 = Boot Zoning
+	 * BIT 0 = Selective Login
 	 * BIT 1 = Alt-Boot Enable
-	 * BIT 2 = Report SCSI Path
-	 * BIT 3 = unused
-	 * BIT 4 = unused
-	 * BIT 5 = unused
-	 * BIT 6 = unused
+	 * BIT 2 =
+	 * BIT 3 = Boot Order List
+	 * BIT 4 =
+	 * BIT 5 = Selective LUN
+	 * BIT 6 =
 	 * BIT 7 = unused
 	 */
 	uint8_t efi_parameters;
@@ -1312,8 +1336,7 @@ typedef struct {
 #define SS_RESIDUAL_UNDER		BIT_11
 #define SS_RESIDUAL_OVER		BIT_10
 #define SS_SENSE_LEN_VALID		BIT_9
-#define SS_RESIDUAL_LEN_VALID		BIT_8	/* ISP2100 only */
-#define SS_RESPONSE_INFO_LEN_VALID	BIT_8	/* ISP2200 and 23xx */
+#define SS_RESPONSE_INFO_LEN_VALID	BIT_8
 
 #define SS_RESERVE_CONFLICT		(BIT_4 | BIT_3)
 #define SS_BUSY_CONDITION		BIT_3
@@ -1348,6 +1371,7 @@ typedef struct {
 /*
  * Status entry status flags
  */
+#define SF_ABTS_TERMINATED	BIT_10
 #define SF_LOGOUT_SENT		BIT_13
 
 /*
@@ -1575,72 +1599,6 @@ typedef struct {
 } rpt_lun_cmd_rsp_t;
 
 /*
- * SCSI Target Queue structure
- */
-typedef struct os_tgt {
-	struct os_lun *olun[MAX_LUNS]; /* LUN context pointer. */
-	struct fc_port *fcport;
-	unsigned long flags;
-	uint8_t port_down_retry_count;
-    	uint32_t down_timer;
-	struct scsi_qla_host *ha;
-
-	/* Persistent binding information */
-	port_id_t d_id;
-	uint8_t node_name[WWN_SIZE];
-	uint8_t port_name[WWN_SIZE];
-} os_tgt_t;
-
-/*
- * SCSI Target Queue flags
- */
-#define TQF_ONLINE		0		/* Device online to OS. */
-#define TQF_SUSPENDED		1
-#define TQF_RETRY_CMDS		2
-
-/*
- * SCSI LUN Queue structure
- */
-typedef struct os_lun {
-	struct fc_lun *fclun;		/* FC LUN context pointer. */
-    	spinlock_t q_lock;		/* Lun Lock */
-
-	unsigned long q_flag;
-#define LUN_MPIO_BUSY		2	/* Lun is changing paths  */
-#define LUN_EXEC_DELAYED	7	/* Lun execution is delayed */
-
-	u_long q_timeout;		/* total command timeouts */
-	atomic_t q_timer;		/* suspend timer */
-	uint32_t q_count;		/* current count */
-	uint32_t q_max;			/* maxmum count lun can be suspended */
-	uint8_t q_state;		/* lun State */
-#define LUN_STATE_READY		1	/* lun is ready for i/o */
-#define LUN_STATE_RUN		2	/* lun has a timer running */
-#define LUN_STATE_WAIT		3	/* lun is suspended */
-#define LUN_STATE_TIMEOUT	4	/* lun has timed out */
-
-	u_long io_cnt;			/* total xfer count since boot */
-	u_long out_cnt;			/* total outstanding IO count */
-	u_long w_cnt;			/* total writes */
-	u_long r_cnt;			/* total reads */
-	u_long avg_time;		/*  */
-} os_lun_t;
-
-
-/* LUN BitMask structure definition, array of 32bit words,
- * 1 bit per lun.  When bit == 1, the lun is masked.
- * Most significant bit of mask[0] is lun 0, bit 24 is lun 7.
- */
-typedef struct lun_bit_mask {
-	/* Must allocate at least enough bits to accomodate all LUNs */
-#if ((MAX_FIBRE_LUNS & 0x7) == 0)
-	uint8_t mask[MAX_FIBRE_LUNS >> 3];
-#else
-	uint8_t mask[(MAX_FIBRE_LUNS + 8) >> 3];
-#endif
-} lun_bit_mask_t;
-
-/*
  * Fibre channel port type.
  */
  typedef enum {
@@ -1657,8 +1615,6 @@ typedef struct lun_bit_mask {
  */
 typedef struct fc_port {
 	struct list_head list;
-	struct list_head fcluns;
-
 	struct scsi_qla_host *ha;
 	struct scsi_qla_host *vis_ha;	/* only used when suspending lun */
 
@@ -1673,8 +1629,7 @@ typedef struct fc_port {
 	atomic_t state;
 	uint32_t flags;
 
-	os_tgt_t *tgt_queue;
-	uint16_t os_target_id;
+	unsigned int os_target_id;
 
 	uint16_t iodesc_idx_sent;
 
@@ -1688,7 +1643,7 @@ typedef struct fc_port {
 	uint8_t mp_byte;		/* multi-path byte (not used) */
     	uint8_t cur_path;		/* current path id */
 
-	lun_bit_mask_t lun_mask;
+	struct fc_rport *rport;
 } fc_port_t;
 
 /*
@@ -1728,28 +1683,11 @@ typedef struct fc_port {
 #define FCF_MSA_PORT_ACTIVE	BIT_20
 #define FCF_FAILBACK_DISABLE	BIT_21
 #define FCF_FAILOVER_DISABLE	BIT_22
+#define FCF_DSXXX_DEVICE	BIT_23
+#define FCF_AA_EVA_DEVICE	BIT_24
 
 /* No loop ID flag. */
 #define FC_NO_LOOP_ID		0x1000
-
-/*
- * Fibre channel LUN structure.
- */
-typedef struct fc_lun {
-        struct list_head list;
-
-	fc_port_t *fcport;
-	fc_port_t *o_fcport;
-	uint16_t lun;
-	atomic_t state;
-	uint8_t device_type;
-
-	uint8_t max_path_retries;
-	uint32_t flags;
-} fc_lun_t;
-
-#define	FLF_VISIBLE_LUN		BIT_0
-#define	FLF_ACTIVE_LUN		BIT_1
 
 /*
  * FC-CT interface
@@ -1931,10 +1869,6 @@ struct ct_sns_pkt {
 #define	RFT_ID_SNS_CMD_SIZE	60
 #define	RFT_ID_SNS_DATA_SIZE	16
 
-#define	RFF_ID_SNS_SCMD_LEN	8
-#define	RFF_ID_SNS_CMD_SIZE	32
-#define	RFF_ID_SNS_DATA_SIZE	16
-
 #define	RNN_ID_SNS_SCMD_LEN	10
 #define	RNN_ID_SNS_CMD_SIZE	36
 #define	RNN_ID_SNS_DATA_SIZE	16
@@ -1970,7 +1904,6 @@ struct sns_cmd_pkt {
 		} cmd;
 
 		uint8_t rft_data[RFT_ID_SNS_DATA_SIZE];
-		uint8_t rff_data[RFF_ID_SNS_DATA_SIZE];
 		uint8_t rnn_data[RNN_ID_SNS_DATA_SIZE];
 		uint8_t gan_data[GA_NXT_SNS_DATA_SIZE];
 		uint8_t gid_data[GID_PT_SNS_DATA_SIZE];
@@ -2025,6 +1958,16 @@ struct qla_board_info {
 	struct qla_fw_info *fw_info;
 };
 
+/* Return data from MBC_GET_ID_LIST call. */
+struct gid_list_info {
+	uint8_t	al_pa;
+	uint8_t	area;
+	uint8_t	domain;		
+	uint8_t	loop_id_2100;	/* ISP2100/ISP2200 -- 4 bytes. */
+	uint16_t loop_id;	/* ISP23XX         -- 6 bytes. */
+};
+#define GID_LIST_SIZE (sizeof(struct gid_list_info) * MAX_FIBRE_DEVICES)
+
 /*
  * Linux Host Adapter structure
  */
@@ -2054,6 +1997,7 @@ typedef struct scsi_qla_host {
 		uint32_t	enable_lip_reset	:1;
 		uint32_t	enable_lip_full_login	:1;
 		uint32_t	enable_target_reset	:1;
+		uint32_t	enable_led_scheme	:1;
 	} flags;
 
 	atomic_t	loop_state;
@@ -2089,6 +2033,7 @@ typedef struct scsi_qla_host {
 #define FCPORT_RESCAN_NEEDED	21      /* IO descriptor processing needed */
 #define IODESC_PROCESS_NEEDED	22      /* IO descriptor processing needed */
 #define IOCTL_ERROR_RECOVERY	23      
+#define LOOP_RESET_NEEDED	24
 
 	uint32_t	device_flags;
 #define DFLG_LOCAL_DEVICES		BIT_0
@@ -2110,11 +2055,9 @@ typedef struct scsi_qla_host {
 
 	spinlock_t		hardware_lock ____cacheline_aligned;
 
-	device_reg_t	*iobase;		/* Base I/O address */
+	device_reg_t __iomem *iobase;		/* Base I/O address */
 	unsigned long	pio_address;
 	unsigned long	pio_length;
-	void *		mmio_address;
-	unsigned long	mmio_length;
 #define MIN_IOBASE_LEN		0x100
 
 	/* ISP ring lock, rings, and indexes */
@@ -2123,6 +2066,7 @@ typedef struct scsi_qla_host {
 	request_t       *request_ring_ptr;  /* Current address. */
 	uint16_t        req_ring_index;     /* Current index. */
 	uint16_t        req_q_cnt;          /* Number of available entries. */
+	uint16_t	request_q_length;
 
 	dma_addr_t	response_dma;       /* Physical address. */
 	response_t      *response_ring;     /* Base virtual address */
@@ -2137,27 +2081,6 @@ typedef struct scsi_qla_host {
 	srb_t		*outstanding_cmds[MAX_OUTSTANDING_COMMANDS];
 	uint32_t	current_outstanding_cmd; 
 	srb_t		*status_srb;	/* Status continuation entry. */
-
-	/*
-	 * Need to hold the list_lock with irq's disabled in order to access
-	 * the following list.
-	 *
-	 * This list_lock is of lower priority than the host_lock.
-	 */
-	spinlock_t		list_lock ____cacheline_aligned;
-						/* lock to guard lists which
-						 * hold srb_t's */
-        struct list_head        retry_queue;    /* watchdog queue */
-        struct list_head        done_queue;     /* job on done queue */
-        struct list_head        failover_queue; /* failover list link. */
-	struct list_head        scsi_retry_queue;     /* SCSI retry queue */
-	struct list_head        pending_queue;	/* SCSI command pending queue */
-
-	unsigned long    done_q_cnt;
-	unsigned long    pending_in_q;
-        uint32_t	retry_q_cnt; 
-        uint32_t	scsi_retry_q_cnt; 
-        uint32_t	failover_cnt; 
 
 	unsigned long	last_irq_cpu;	/* cpu where we got our last irq */
 
@@ -2235,11 +2158,6 @@ typedef struct scsi_qla_host {
 
 	struct io_descriptor	io_descriptors[MAX_IO_DESCRIPTORS];
 	uint16_t		iodesc_signature;
-	port_database_t		*iodesc_pd;
-	dma_addr_t		iodesc_pd_dma;
-
-	/* OS target queue pointers. */
-	os_tgt_t		*otgt[MAX_FIBRE_DEVICES];
 
 	/* RSCN queue. */
 	uint32_t rscn_queue[MAX_RSCN_COUNT];
@@ -2271,17 +2189,30 @@ typedef struct scsi_qla_host {
 	uint32_t        timer_active;
 	struct timer_list        timer;
 
-	/* Firmware Initialization Control Block data */
-	dma_addr_t	init_cb_dma;         /* Physical address. */
+	dma_addr_t	gid_list_dma;
+	struct gid_list_info *gid_list;
+
+	dma_addr_t	rlc_rsp_dma;
+	rpt_lun_cmd_rsp_t *rlc_rsp;
+
+	/* Small DMA pool allocations -- maximum 256 bytes in length. */ 
+#define DMA_POOL_SIZE	256
+	struct dma_pool *s_dma_pool;
+
+	dma_addr_t	init_cb_dma;
 	init_cb_t       *init_cb;
-  
+
+	dma_addr_t	iodesc_pd_dma;
+	port_database_t *iodesc_pd;
+
 	/* These are used by mailbox operations. */
 	volatile uint16_t mailbox_out[MAILBOX_REGISTER_COUNT];
 
 	mbx_cmd_t	*mcp;
 	unsigned long	mbx_cmd_flags;
 #define MBX_INTERRUPT	1
-#define MBX_INTR_WAIT   2
+#define MBX_INTR_WAIT	2
+#define MBX_UPDATE_FLASH_ACTIVE	3
 
 	spinlock_t	mbx_reg_lock;   /* Mbx Cmd Register Lock */
 
@@ -2317,10 +2248,11 @@ typedef struct scsi_qla_host {
 	uint16_t	fw_minor_version;
 	uint16_t	fw_subminor_version;
 	uint16_t	fw_attributes;
+	uint32_t	fw_memory_size;
 	uint32_t	fw_transfer_size;
 
 	uint16_t	fw_options[16];		/* slots: 1,2,3,10,11 */
-	uint8_t		fw_seriallink_options[2];
+	uint8_t		fw_seriallink_options[4];
 
 	/* Firmware dump information. */
 	void		*fw_dump;
@@ -2340,8 +2272,6 @@ typedef struct scsi_qla_host {
 
 	uint8_t     node_name[WWN_SIZE];
 	uint8_t     nvram_version; 
-	uint8_t     optrom_major; 
-	uint8_t     optrom_minor; 
 	uint32_t    isp_abort_cnt;
 
 	/* Adapter I/O statistics for failover */
@@ -2373,8 +2303,6 @@ typedef struct scsi_qla_host {
 #define LOOP_RDY(ha)	(!LOOP_NOT_READY(ha))
 
 #define TGT_Q(ha, t) (ha->otgt[t])
-#define LUN_Q(ha, t, l)	(TGT_Q(ha, t)->olun[l])
-#define GET_LU_Q(ha, t, l) ((TGT_Q(ha,t) != NULL)? TGT_Q(ha, t)->olun[l] : NULL)
 
 #define to_qla_host(x)		((scsi_qla_host_t *) (x)->hostdata)
 
@@ -2432,6 +2360,18 @@ struct _qla2x00stats  {
 #include "qla_gbl.h"
 #include "qla_dbg.h"
 #include "qla_inline.h"
-#include "qla_listops.h"
+
+/*
+* String arrays
+*/
+#define LINESIZE    256
+#define MAXARGS      26
+
+#define CMD_SP(Cmnd)		((Cmnd)->SCp.ptr)
+#define CMD_COMPL_STATUS(Cmnd)  ((Cmnd)->SCp.this_residual)
+#define CMD_RESID_LEN(Cmnd)	((Cmnd)->SCp.buffers_residual)
+#define CMD_SCSI_STATUS(Cmnd)	((Cmnd)->SCp.Status)
+#define CMD_ACTUAL_SNSLEN(Cmnd)	((Cmnd)->SCp.Message)
+#define CMD_ENTRY_STATUS(Cmnd)	((Cmnd)->SCp.have_data_in)
 
 #endif

@@ -15,12 +15,12 @@
 #include <linux/sched.h>
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/bitops.h>
 
 #include <asm/ptrace.h>
 #include <asm/system.h>
 #include <asm/dma.h>
 #include <asm/irq.h>
-#include <asm/bitops.h>
 #include <asm/mmu_context.h>
 #include <asm/io.h>
 #include <asm/pci.h>
@@ -194,27 +194,20 @@ eiger_swizzle(struct pci_dev *dev, u8 *pinp)
 	   case 0x0f: bridge_count = 4; break; /* 4 */
 	};
 
-	/*  Check first for the built-in bridges on hose 0. */
-	if (hose->index == 0
-	    && PCI_SLOT(dev->bus->self->devfn) > 20-bridge_count) {
-		slot = PCI_SLOT(dev->devfn);
-	} else {
-		/* Must be a card-based bridge.  */
-		do {
-			/* Check for built-in bridges on hose 0. */
-			if (hose->index == 0
-			    && (PCI_SLOT(dev->bus->self->devfn)
-				> 20 - bridge_count)) {
-                  		slot = PCI_SLOT(dev->devfn);
-				break;
-			}
-			pin = bridge_swizzle(pin, PCI_SLOT(dev->devfn));
-
-			/* Move up the chain of bridges.  */
-			dev = dev->bus->self;
-			/* Slot of the next bridge.  */
+	slot = PCI_SLOT(dev->devfn);
+	while (dev->bus->self) {
+		/* Check for built-in bridges on hose 0. */
+		if (hose->index == 0
+		    && (PCI_SLOT(dev->bus->self->devfn)
+			> 20 - bridge_count)) {
 			slot = PCI_SLOT(dev->devfn);
-		} while (dev->bus->self);
+			break;
+		}
+		/* Must be a card-based bridge.  */
+		pin = bridge_swizzle(pin, PCI_SLOT(dev->devfn));
+
+		/* Move up the chain of bridges.  */
+		dev = dev->bus->self;
 	}
 	*pinp = pin;
 	return slot;
@@ -229,7 +222,6 @@ struct alpha_machine_vector eiger_mv __initmv = {
 	DO_EV6_MMU,
 	DO_DEFAULT_RTC,
 	DO_TSUNAMI_IO,
-	DO_TSUNAMI_BUS,
 	.machine_check		= tsunami_machine_check,
 	.max_isa_dma_address	= ALPHA_MAX_ISA_DMA_ADDRESS,
 	.min_io_address		= DEFAULT_IO_BASE,

@@ -20,9 +20,10 @@
 #define to_class_dev(obj) container_of(obj,struct class_device,kobj)
 #define to_net_dev(class) container_of(class, struct net_device, class_dev)
 
-static const char *fmt_hex = "%#x\n";
-static const char *fmt_dec = "%d\n";
-static const char *fmt_ulong = "%lu\n";
+static const char fmt_hex[] = "%#x\n";
+static const char fmt_long_hex[] = "%#lx\n";
+static const char fmt_dec[] = "%d\n";
+static const char fmt_ulong[] = "%lu\n";
 
 static inline int dev_isalive(const struct net_device *dev) 
 {
@@ -91,7 +92,7 @@ static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL)		\
 NETDEVICE_ATTR(addr_len, fmt_dec);
 NETDEVICE_ATTR(iflink, fmt_dec);
 NETDEVICE_ATTR(ifindex, fmt_dec);
-NETDEVICE_ATTR(features, fmt_hex);
+NETDEVICE_ATTR(features, fmt_long_hex);
 NETDEVICE_ATTR(type, fmt_dec);
 
 /* use same locking rules as GIFHWADDR ioctl's */
@@ -126,8 +127,18 @@ static ssize_t show_broadcast(struct class_device *dev, char *buf)
 	return -EINVAL;
 }
 
+static ssize_t show_carrier(struct class_device *dev, char *buf)
+{
+	struct net_device *netdev = to_net_dev(dev);
+	if (netif_running(netdev)) {
+		return sprintf(buf, fmt_dec, !!netif_carrier_ok(netdev));
+	}
+	return -EINVAL;
+}
+
 static CLASS_DEVICE_ATTR(address, S_IRUGO, show_address, NULL);
 static CLASS_DEVICE_ATTR(broadcast, S_IRUGO, show_broadcast, NULL);
+static CLASS_DEVICE_ATTR(carrier, S_IRUGO, show_carrier, NULL);
 
 /* read-write attributes */
 NETDEVICE_SHOW(mtu, fmt_dec);
@@ -174,6 +185,22 @@ static ssize_t store_tx_queue_len(struct class_device *dev, const char *buf, siz
 static CLASS_DEVICE_ATTR(tx_queue_len, S_IRUGO | S_IWUSR, show_tx_queue_len, 
 			 store_tx_queue_len);
 
+NETDEVICE_SHOW(weight, fmt_dec);
+
+static int change_weight(struct net_device *net, unsigned long new_weight)
+{
+	net->weight = new_weight;
+	return 0;
+}
+
+static ssize_t store_weight(struct class_device *dev, const char *buf, size_t len)
+{
+	return netdev_store(dev, buf, len, change_weight);
+}
+
+static CLASS_DEVICE_ATTR(weight, S_IRUGO | S_IWUSR, show_weight, 
+			 store_weight);
+
 
 static struct class_device_attribute *net_class_attributes[] = {
 	&class_device_attr_ifindex,
@@ -183,9 +210,11 @@ static struct class_device_attribute *net_class_attributes[] = {
 	&class_device_attr_features,
 	&class_device_attr_mtu,
 	&class_device_attr_flags,
+	&class_device_attr_weight,
 	&class_device_attr_type,
 	&class_device_attr_address,
 	&class_device_attr_broadcast,
+	&class_device_attr_carrier,
 	NULL
 };
 
@@ -356,7 +385,7 @@ static int netdev_hotplug(struct class_device *cd, char **envp,
 	if ((size <= 0) || (i >= num_envp))
 		return -ENOMEM;
 
-	envp[i] = 0;
+	envp[i] = NULL;
 	return 0;
 }
 #endif
@@ -408,13 +437,12 @@ int netdev_register_sysfs(struct net_device *net)
 
 	class_dev->class = &net_class;
 	class_dev->class_data = net;
-	net->last_stats = net->get_stats;
 
 	strlcpy(class_dev->class_id, net->name, BUS_ID_SIZE);
 	if ((ret = class_device_register(class_dev)))
 		goto out;
 
-	for (i = 0; (attr = net_class_attributes[i]); i++) {
+	for (i = 0; (attr = net_class_attributes[i]) != NULL; i++) {
 		if ((ret = class_device_create_file(class_dev, attr)))
 		    goto out_unreg;
 	}

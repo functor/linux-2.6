@@ -91,7 +91,8 @@
 #define __access_ok(addr,size) (__kernel_ok || __user_ok((addr),(size)))
 #define access_ok(type,addr,size) __access_ok((unsigned long)(addr),(size))
 
-extern inline int verify_area(int type, const void __user * addr, unsigned long size)
+/* this function will go away soon - use access_ok() instead */
+extern inline int __deprecated verify_area(int type, const void __user * addr, unsigned long size)
 {
 	return access_ok(type,addr,size) ? 0 : -EFAULT;
 }
@@ -434,6 +435,8 @@ __generic_clear_user_nocheck(void *to, unsigned long n)
 
 #define __copy_to_user(to,from,n)   __generic_copy_to_user_nocheck((to),(from),(n))
 #define __copy_from_user(to,from,n) __generic_copy_from_user_nocheck((to),(from),(n))
+#define __copy_to_user_inatomic __copy_to_user
+#define __copy_from_user_inatomic __copy_from_user
 #define __clear_user(to,n) __generic_clear_user_nocheck((to),(n))
 
 #define strlen_user(str)	strnlen_user((str), 0x7ffffffe)

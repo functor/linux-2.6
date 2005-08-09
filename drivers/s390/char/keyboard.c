@@ -32,11 +32,11 @@ static k_handler_fn K_HANDLERS;
 static k_handler_fn *k_handler[16] = { K_HANDLERS };
 
 /* maximum values each key_handler can handle */
-static const int max_vals[] = {
+static const int kbd_max_vals[] = {
 	255, ARRAY_SIZE(func_table) - 1, NR_FN_HANDLER - 1, 0,
 	NR_DEAD - 1, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
-static const int NR_TYPES = ARRAY_SIZE(max_vals);
+static const int KBD_NR_TYPES = ARRAY_SIZE(kbd_max_vals);
 
 static unsigned char ret_diacr[NR_DEAD] = {
 	'`', '\'', '^', '~', '"', ','
@@ -338,7 +338,7 @@ kbd_keycode(struct kbd_data *kbd, unsigned int keycode)
  * Ioctl stuff.
  */
 static int
-do_kdsk_ioctl(struct kbd_data *kbd, struct kbentry *user_kbe,
+do_kdsk_ioctl(struct kbd_data *kbd, struct kbentry __user *user_kbe,
 	      int cmd, int perm)
 {
 	struct kbentry tmp;
@@ -360,7 +360,7 @@ do_kdsk_ioctl(struct kbd_data *kbd, struct kbentry *user_kbe,
 		key_map = kbd->key_maps[tmp.kb_table];
 		if (key_map) {
 		    val = U(key_map[tmp.kb_index]);
-		    if (KTYP(val) >= NR_TYPES)
+		    if (KTYP(val) >= KBD_NR_TYPES)
 			val = K_HOLE;
 		} else
 		    val = (tmp.kb_index ? K_HOLE : K_NOSUCHMAP);
@@ -378,9 +378,9 @@ do_kdsk_ioctl(struct kbd_data *kbd, struct kbentry *user_kbe,
 			break;
 		}
 
-		if (KTYP(tmp.kb_value) >= NR_TYPES)
+		if (KTYP(tmp.kb_value) >= KBD_NR_TYPES)
 			return -EINVAL;
-		if (KVAL(tmp.kb_value) > max_vals[KTYP(tmp.kb_value)])
+		if (KVAL(tmp.kb_value) > kbd_max_vals[KTYP(tmp.kb_value)])
 			return -EINVAL;
 
 		if (!(key_map = kbd->key_maps[tmp.kb_table])) {
@@ -410,7 +410,7 @@ do_kdsk_ioctl(struct kbd_data *kbd, struct kbentry *user_kbe,
 }
 
 static int
-do_kdgkb_ioctl(struct kbd_data *kbd, struct kbsentry *u_kbs,
+do_kdgkb_ioctl(struct kbd_data *kbd, struct kbsentry __user *u_kbs,
 	       int cmd, int perm)
 {
 	unsigned char kb_func;
@@ -464,8 +464,11 @@ int
 kbd_ioctl(struct kbd_data *kbd, struct file *file,
 	  unsigned int cmd, unsigned long arg)
 {
-	struct kbdiacrs *a;
+	struct kbdiacrs __user *a;
+	void __user *argp;
 	int ct, perm;
+
+	argp = (void __user *)arg;
 
 	/*
 	 * To have permissions to do most of the vt ioctls, we either have
@@ -474,15 +477,15 @@ kbd_ioctl(struct kbd_data *kbd, struct file *file,
 	perm = current->signal->tty == kbd->tty || capable(CAP_SYS_TTY_CONFIG);
 	switch (cmd) {
 	case KDGKBTYPE:
-		return put_user(KB_101, (char*) arg);
+		return put_user(KB_101, (char __user *)argp);
 	case KDGKBENT:
 	case KDSKBENT:
-		return do_kdsk_ioctl(kbd, (struct kbentry *)arg, cmd, perm);
+		return do_kdsk_ioctl(kbd, argp, cmd, perm);
 	case KDGKBSENT:
 	case KDSKBSENT:
-		return do_kdgkb_ioctl(kbd, (struct kbsentry *)arg, cmd, perm);
+		return do_kdgkb_ioctl(kbd, argp, cmd, perm);
 	case KDGKBDIACR:
-		a = (struct kbdiacrs *) arg;
+		a = argp;
 
 		if (put_user(kbd->accent_table_size, &a->kb_cnt))
 			return -EFAULT;
@@ -492,7 +495,7 @@ kbd_ioctl(struct kbd_data *kbd, struct file *file,
 			return -EFAULT;
 		return 0;
 	case KDSKBDIACR:
-		a = (struct kbdiacrs *) arg;
+		a = argp;
 		if (!perm)
 			return -EPERM;
 		if (get_user(ct, &a->kb_cnt))

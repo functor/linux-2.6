@@ -111,7 +111,7 @@ typedef struct port_s {
 
 
 typedef struct card_s {
-	u8 *winbase;		/* ISA window base address */
+	u8 __iomem *winbase;		/* ISA window base address */
 	u32 phy_winbase;	/* ISA physical base address */
 	u32 ram_size;		/* number of bytes */
 	u16 io;			/* IO Base address */
@@ -158,11 +158,6 @@ static __inline__ void openwin(card_t *card, u8 page)
 	outb((psr & ~PSR_PAGEBITS) | page, card->io + N2_PSR);
 }
 
-
-static __inline__ void close_windows(card_t *card)
-{
-	outb(inb(card->io + N2_PCR) & ~PCR_ENWIN, card->io + N2_PCR);
-}
 
 
 #include "hd6457x.c"
@@ -254,7 +249,8 @@ static int n2_close(struct net_device *dev)
 static int n2_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
 	const size_t size = sizeof(sync_serial_settings);
-	sync_serial_settings new_line, *line = ifr->ifr_settings.ifs_ifsu.sync;
+	sync_serial_settings new_line;
+	sync_serial_settings __user *line = ifr->ifr_settings.ifs_ifsu.sync;
 	port_t *port = dev_to_port(dev);
 
 #ifdef DEBUG_RINGS

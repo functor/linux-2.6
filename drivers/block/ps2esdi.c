@@ -108,7 +108,7 @@ static int intg_esdi = 0;       /* If integrated adapter */
 struct ps2esdi_i_struct {
 	unsigned int head, sect, cyl, wpcom, lzone, ctl;
 };
-static spinlock_t ps2esdi_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(ps2esdi_lock);
 static struct request_queue *ps2esdi_queue;
 static struct request *current_req;
 
@@ -177,10 +177,10 @@ static int cyl[MAX_HD] = {-1,-1};
 static int head[MAX_HD] = {-1, -1};
 static int sect[MAX_HD] = {-1, -1};
 
-MODULE_PARM(tp720esdi, "i");
-MODULE_PARM(cyl, "i");
-MODULE_PARM(head, "i");
-MODULE_PARM(track, "i");
+module_param(tp720esdi, bool, 0);
+module_param_array(cyl, int, NULL, 0);
+module_param_array(head, int, NULL, 0);
+module_param_array(sect, int, NULL, 0);
 MODULE_LICENSE("GPL");
 
 int init_module(void) {
@@ -1063,17 +1063,17 @@ static int ps2esdi_ioctl(struct inode *inode,
 			 struct file *file, u_int cmd, u_long arg)
 {
 	struct ps2esdi_i_struct *p = inode->i_bdev->bd_disk->private_data;
-	struct ps2esdi_geometry *geometry = (struct ps2esdi_geometry *) arg;
-	int err;
+	struct ps2esdi_geometry geom;
 
 	if (cmd != HDIO_GETGEO)
 		return -EINVAL;
-	if ((err = verify_area(VERIFY_WRITE, geometry, sizeof(*geometry))))
-		return (err);
-	put_user(p->head, (char *) &geometry->heads);
-	put_user(p->sect, (char *) &geometry->sectors);
-	put_user(p->cyl, (short *) &geometry->cylinders);
-	put_user(get_start_sect(inode->i_bdev), (long *) &geometry->start);
+	memset(&geom, 0, sizeof(geom));
+	geom.heads = p->head;
+	geom.sectors = p->sect;
+	geom.cylinders = p->cyl;
+	geom.start = get_start_sect(inode->i_bdev);
+	if (copy_to_user((void __user *)arg, &geom, sizeof(geom)))
+		return -EFAULT;
 	return 0;
 }
 

@@ -16,6 +16,11 @@ config ASH
 	help
 	  This option enables support for the IBM NP405H evaluation board.
 
+config BUBINGA
+	bool "Bubinga"
+	help
+	  This option enables support for the IBM 405EP evaluation board.
+
 config CPCI405
 	bool "CPCI405"
 	help
@@ -51,6 +56,11 @@ config WALNUT
 	help
 	  This option enables support for the IBM PPC405GP evaluation board.
 
+config XILINX_ML300
+	bool "Xilinx-ML300"
+	help
+	  This option enables support for the Xilinx ML300 evaluation board.
+
 endchoice
 
 choice
@@ -62,6 +72,11 @@ config EBONY
 	bool "Ebony"
 	help
 	  This option enables support for the IBM PPC440GP evaluation board.
+
+config LUAN
+	bool "Luan"
+	help
+	  This option enables support for the IBM PPC440SP evaluation board.
 
 config OCOTEA
 	bool "Ocotea"
@@ -93,9 +108,14 @@ config 440GX
 	depends on OCOTEA
 	default y
 
+config 440SP
+	bool
+	depends on LUAN
+	default y
+
 config 440
 	bool
-	depends on 440GP
+	depends on 440GP || 440SP
 	default y
 
 config 440A
@@ -122,22 +142,32 @@ config BOOKE
 
 config IBM_OCP
 	bool
-	depends on ASH || CPCI405 || EBONY || EP405 || OCOTEA || REDWOOD_5 || REDWOOD_6 || SYCAMORE || WALNUT
+	depends on ASH || BUBINGA || CPCI405 || EBONY || EP405 || LUAN || OCOTEA || REDWOOD_5 || REDWOOD_6 || SYCAMORE || WALNUT
+	default y
+
+config XILINX_OCP
+	bool
+	depends on XILINX_ML300
 	default y
 
 config IBM_EMAC4
 	bool
-	depends on 440GX
+	depends on 440GX || 440SP
 	default y
 
 config BIOS_FIXUP
 	bool
-	depends on EP405 || SYCAMORE || WALNUT
+	depends on BUBINGA || EP405 || SYCAMORE || WALNUT
 	default y
 
 config 403GCX
 	bool
 	depends OAK
+	default y
+
+config 405EP
+	bool
+	depends on BUBINGA
 	default y
 
 config 405GP
@@ -148,6 +178,12 @@ config 405GP
 config 405GPR
 	bool
 	depends on SYCAMORE
+	default y
+
+config VIRTEX_II_PRO
+	bool
+	depends on XILINX_ML300
+	default y
 
 config STB03xxx
 	bool
@@ -156,12 +192,26 @@ config STB03xxx
 
 config EMBEDDEDBOOT
 	bool
-	depends on EP405
+	depends on EP405 || XILINX_ML300
 	default y
 
 config IBM_OPENBIOS
 	bool
-	depends on ASH || REDWOOD_5 || REDWOOD_6 || SYCAMORE || WALNUT
+	depends on ASH || BUBINGA || REDWOOD_5 || REDWOOD_6 || SYCAMORE || WALNUT
+	default y
+
+config PPC4xx_DMA
+	bool "PPC4xx DMA controller support"
+	depends on 4xx
+
+config PPC4xx_EDMA
+	bool
+	depends on !STB03xxx && PPC4xx_DMA
+	default y
+
+config PPC_GEN550
+	bool
+	depends on 4xx
 	default y
 
 config PM

@@ -34,7 +34,7 @@
 #include "udf_i.h"
 #include "udf_sb.h"
 
-extern struct buffer_head *
+struct buffer_head *
 udf_tgetblk(struct super_block *sb, int block)
 {
 	if (UDF_QUERY_FLAG(sb, UDF_FLAG_VARCONV))
@@ -43,7 +43,7 @@ udf_tgetblk(struct super_block *sb, int block)
 		return sb_getblk(sb, block);
 }
 
-extern struct buffer_head *
+struct buffer_head *
 udf_tread(struct super_block *sb, int block)
 {
 	if (UDF_QUERY_FLAG(sb, UDF_FLAG_VARCONV))
@@ -52,7 +52,7 @@ udf_tread(struct super_block *sb, int block)
 		return sb_bread(sb, block);
 }
 
-extern struct genericFormat *
+struct genericFormat *
 udf_add_extendedattr(struct inode * inode, uint32_t size, uint32_t type,
 	uint8_t loc)
 {
@@ -157,7 +157,7 @@ udf_add_extendedattr(struct inode * inode, uint32_t size, uint32_t type,
 	return NULL;
 }
 
-extern struct genericFormat *
+struct genericFormat *
 udf_get_extendedattr(struct inode *inode, uint32_t type, uint8_t subtype)
 {
 	struct genericFormat *gaf;
@@ -207,7 +207,7 @@ udf_get_extendedattr(struct inode *inode, uint32_t type, uint8_t subtype)
  *	July 1, 1997 - Andrew E. Mileski
  *	Written, tested, and released.
  */
-extern struct buffer_head *
+struct buffer_head *
 udf_read_tagged(struct super_block *sb, uint32_t block, uint32_t location, uint16_t *ident)
 {
 	tag *tag_p;
@@ -272,8 +272,8 @@ error_out:
 	return NULL;
 }
 
-extern struct buffer_head *
-udf_read_ptagged(struct super_block *sb, lb_addr loc, uint32_t offset, uint16_t *ident)
+struct buffer_head *
+udf_read_ptagged(struct super_block *sb, kernel_lb_addr loc, uint32_t offset, uint16_t *ident)
 {
 	return udf_read_tagged(sb, udf_get_lb_pblock(sb, loc, offset),
 		loc.logicalBlockNum + offset, ident);
@@ -293,8 +293,8 @@ void udf_update_tag(char *data, int length)
 	length -= sizeof(tag);
 
 	tptr->tagChecksum = 0;
-	tptr->descCRCLength = le16_to_cpu(length);
-	tptr->descCRC = le16_to_cpu(udf_crc(data + sizeof(tag), length, 0));
+	tptr->descCRCLength = cpu_to_le16(length);
+	tptr->descCRC = cpu_to_le16(udf_crc(data + sizeof(tag), length, 0));
 
 	for (i=0; i<16; i++)
 		if (i != 4)
@@ -305,9 +305,9 @@ void udf_new_tag(char *data, uint16_t ident, uint16_t version, uint16_t snum,
 	uint32_t loc, int length)
 {
 	tag *tptr = (tag *)data;
-	tptr->tagIdent = le16_to_cpu(ident);
-	tptr->descVersion = le16_to_cpu(version);
-	tptr->tagSerialNum = le16_to_cpu(snum);
-	tptr->tagLocation = le32_to_cpu(loc);
+	tptr->tagIdent = cpu_to_le16(ident);
+	tptr->descVersion = cpu_to_le16(version);
+	tptr->tagSerialNum = cpu_to_le16(snum);
+	tptr->tagLocation = cpu_to_le32(loc);
 	udf_update_tag(data, length);
 }

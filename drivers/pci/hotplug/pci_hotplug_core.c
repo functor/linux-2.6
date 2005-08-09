@@ -29,6 +29,7 @@
 
 #include <linux/config.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/list.h>
@@ -45,11 +46,7 @@
 #include "pci_hotplug.h"
 
 
-#if !defined(CONFIG_HOTPLUG_PCI_MODULE)
-	#define MY_NAME	"pci_hotplug"
-#else
-	#define MY_NAME	THIS_MODULE->name
-#endif
+#define MY_NAME	"pci_hotplug"
 
 #define dbg(fmt, arg...) do { if (debug) printk(KERN_DEBUG "%s: %s: " fmt , MY_NAME , __FUNCTION__ , ## arg); } while (0)
 #define err(format, arg...) printk(KERN_ERR "%s: " format , MY_NAME , ## arg)
@@ -570,8 +567,13 @@ int pci_hp_register (struct hotplug_slot *slot)
 		return -ENODEV;
 	if ((slot->info == NULL) || (slot->ops == NULL))
 		return -EINVAL;
+	if (slot->release == NULL) {
+		dbg("Why are you trying to register a hotplug slot"
+		    "without a proper release function?\n");
+		return -EINVAL;
+	}
 
-	kobject_set_name(&slot->kobj, slot->name);
+	kobject_set_name(&slot->kobj, "%s", slot->name);
 	kobj_set_kset_s(slot, pci_hotplug_slots_subsys);
 
 	/* this can fail if we have already registered a slot with the same name */
@@ -704,7 +706,7 @@ module_exit(pci_hotplug_exit);
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
-MODULE_PARM(debug, "i");
+module_param(debug, bool, 0644);
 MODULE_PARM_DESC(debug, "Debugging mode enabled or not");
 
 EXPORT_SYMBOL_GPL(pci_hotplug_slots_subsys);

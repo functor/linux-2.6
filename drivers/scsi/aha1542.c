@@ -47,7 +47,7 @@
 #include <asm/io.h>
 
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include "aha1542.h"
 
 #define SCSI_BUF_PA(address)	isa_virt_to_bus(address)
@@ -129,10 +129,10 @@ static int setup_dmaspeed[MAXBOARDS] __initdata = { -1, -1, -1, -1 };
  */
 
 #if defined(MODULE)
-int isapnp = 0;
-int aha1542[] = {0x330, 11, 4, -1};
-MODULE_PARM(aha1542, "1-4i");
-MODULE_PARM(isapnp, "i");
+static int isapnp = 0;
+static int aha1542[] = {0x330, 11, 4, -1};
+module_param_array(aha1542, int, NULL, 0);
+module_param(isapnp, bool, 0);
 
 static struct isapnp_device_id id_table[] __initdata = {
 	{
@@ -167,7 +167,7 @@ struct aha1542_hostdata {
 
 static struct Scsi_Host *aha_host[7];	/* One for each IRQ level (9-15) */
 
-static spinlock_t aha1542_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(aha1542_lock);
 
 
 
@@ -545,7 +545,7 @@ static void aha1542_intr_handle(struct Scsi_Host *shost, void *dev_id, struct pt
 		my_done = SCtmp->scsi_done;
 		if (SCtmp->host_scribble) {
 			kfree(SCtmp->host_scribble);
-			SCtmp->host_scribble = 0;
+			SCtmp->host_scribble = NULL;
 		}
 		/* Fetch the sense data, and tuck it away, in the required slot.  The
 		   Adaptec automatically fetches it, and there is no guarantee that
@@ -951,7 +951,7 @@ fail:
 static char *setup_str[MAXBOARDS] __initdata;
 static int setup_idx = 0;
 
-void __init aha1542_setup(char *str, int *ints)
+static void __init aha1542_setup(char *str, int *ints)
 {
 	const char *ahausage = "aha1542: usage: aha1542=<PORTBASE>[,<BUSON>,<BUSOFF>[,<DMASPEED>]]\n";
 	int setup_portbase;
@@ -1069,7 +1069,7 @@ static int __init aha1542_detect(Scsi_Host_Template * tpnt)
 	/*
 	 *	Find MicroChannel cards (AHA1640)
 	 */
-#ifdef CONFIG_MCA
+#ifdef CONFIG_MCA_LEGACY
 	if(MCA_bus) {
 		int slot = 0;
 		int pos = 0;
@@ -1479,7 +1479,7 @@ static int aha1542_bus_reset(Scsi_Cmnd * SCpnt)
 	 * we are pretty desperate anyways.
 	 */
 	spin_unlock_irq(SCpnt->device->host->host_lock);
-	scsi_sleep(4 * HZ);
+	ssleep(4);
 	spin_lock_irq(SCpnt->device->host->host_lock);
 
 	WAIT(STATUS(SCpnt->device->host->io_port),
@@ -1543,7 +1543,7 @@ static int aha1542_host_reset(Scsi_Cmnd * SCpnt)
 	 * we are pretty desperate anyways.
 	 */
 	spin_unlock_irq(SCpnt->device->host->host_lock);
-	scsi_sleep(4 * HZ);
+	ssleep(4);
 	spin_lock_irq(SCpnt->device->host->host_lock);
 
 	WAIT(STATUS(SCpnt->device->host->io_port),

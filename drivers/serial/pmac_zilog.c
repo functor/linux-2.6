@@ -29,6 +29,10 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
+ * 2004-08-06 Harald Welte <laforge@gnumonks.org>
+ *	- Enable BREAK interrupt
+ *	- Add support for sysreq
+ *
  * TODO:   - Add DMA support
  *         - Defer port shutdown to a few seconds after close
  *         - maybe put something right into uap->clk_divisor
@@ -36,6 +40,7 @@
 
 #undef DEBUG
 #undef DEBUG_HARD
+#undef USE_CTRL_O_SYSRQ
 
 #include <linux/config.h>
 #include <linux/module.h>
@@ -53,16 +58,21 @@
 #include <linux/slab.h>
 #include <linux/adb.h>
 #include <linux/pmu.h>
+#include <linux/bitops.h>
+#include <linux/sysrq.h>
 #include <asm/sections.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/prom.h>
-#include <asm/bitops.h>
 #include <asm/machdep.h>
 #include <asm/pmac_feature.h>
 #include <asm/dbdma.h>
 #include <asm/macio.h>
 #include <asm/semaphore.h>
+
+#if defined (CONFIG_SERIAL_PMACZILOG_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
+#define SUPPORT_SYSRQ
+#endif
 
 #include <linux/serial.h>
 #include <linux/serial_core.h>
@@ -245,7 +255,7 @@ static struct tty_struct *pmz_receive_chars(struct uart_pmac_port *uap,
 			if (tty->flip.count >= TTY_FLIPBUF_SIZE)
 				drop = 1;
 			if (ZS_IS_ASLEEP(uap))
-				return 0;
+				return NULL;
 			if (!ZS_IS_OPEN(uap))
 				goto retry;
 		}
@@ -259,8 +269,27 @@ static struct tty_struct *pmz_receive_chars(struct uart_pmac_port *uap,
 		}
 
 		ch &= uap->parity_mask;
-		if (ch == 0 && uap->prev_status & BRK_ABRT)
-			r1 |= BRK_ABRT;
+		if (ch == 0 && uap->flags & PMACZILOG_FLAG_BREAK) {
+			uap->flags &= ~PMACZILOG_FLAG_BREAK;
+		}
+
+#if defined(CONFIG_MAGIC_SYSRQ) && defined(CONFIG_SERIAL_CORE_CONSOLE)
+#ifdef USE_CTRL_O_SYSRQ
+		/* Handle the SysRq ^O Hack */
+		if (ch == '\x0f') {
+			uap->port.sysrq = jiffies + HZ*5;
+			goto next_char;
+		}
+#endif /* USE_CTRL_O_SYSRQ */
+		if (uap->port.sysrq) {
+			int swallow;
+			spin_unlock(&uap->port.lock);
+			swallow = uart_handle_sysrq_char(&uap->port, ch, regs);
+			spin_lock(&uap->port.lock);
+			if (swallow)
+				goto next_char;
+ 		}
+#endif /* CONFIG_MAGIC_SYSRQ && CONFIG_SERIAL_CORE_CONSOLE */
 
 		/* A real serial line, record the character and status.  */
 		if (drop)
@@ -276,10 +305,8 @@ static struct tty_struct *pmz_receive_chars(struct uart_pmac_port *uap,
 				pmz_debug("pmz: got break !\n");
 				r1 &= ~(PAR_ERR | CRC_ERR);
 				uap->port.icount.brk++;
-				if (uart_handle_break(&uap->port)) {
-					pmz_debug("pmz: do handle break !\n");
+				if (uart_handle_break(&uap->port))
 					goto next_char;
-				}
 			}
 			else if (r1 & PAR_ERR)
 				uap->port.icount.parity++;
@@ -294,10 +321,6 @@ static struct tty_struct *pmz_receive_chars(struct uart_pmac_port *uap,
 				*tty->flip.flag_buf_ptr = TTY_PARITY;
 			else if (r1 & CRC_ERR)
 				*tty->flip.flag_buf_ptr = TTY_FRAME;
-		}
-		if (uart_handle_sysrq_char(&uap->port, ch, regs)) {
-			pmz_debug("pmz: sysrq swallowed the char\n");
-			goto next_char;
 		}
 
 		if (uap->port.ignore_status_mask == 0xff ||
@@ -363,6 +386,9 @@ static void pmz_status_handle(struct uart_pmac_port *uap, struct pt_regs *regs)
 
 		wake_up_interruptible(&uap->port.info->delta_msr_wait);
 	}
+
+	if (status & BRK_ABRT)
+		uap->flags |= PMACZILOG_FLAG_BREAK;
 
 	uap->prev_status = status;
 }
@@ -483,7 +509,7 @@ static irqreturn_t pmz_interrupt(int irq, void *dev_id, struct pt_regs *regs)
        		if (r3 & CHBEXT)
        			pmz_status_handle(uap_b, regs);
        	       	if (r3 & CHBRxIP)
-       			pmz_receive_chars(uap_b, regs);
+       			tty = pmz_receive_chars(uap_b, regs);
        		if (r3 & CHBTxIP)
        			pmz_transmit_chars(uap_b);
 	       	rc = IRQ_HANDLED;
@@ -872,8 +898,8 @@ static int __pmz_startup(struct uart_pmac_port *uap)
 	uap->curregs[R13] = 0;
 	uap->curregs[R14] = BRENAB;
 
-	/* Clear handshaking */
-	uap->curregs[R15] = 0;
+	/* Clear handshaking, enable BREAK interrupts */
+	uap->curregs[R15] = BRKIE;
 
 	/* Master interrupt enable */
 	uap->curregs[R9] |= NV | MIE;
@@ -949,8 +975,7 @@ static int pmz_startup(struct uart_port *port)
 	 */
 	if (pwr_delay != 0) {
 		pmz_debug("pmz: delaying %d ms\n", pwr_delay);
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout((pwr_delay * HZ)/1000);
+		msleep(pwr_delay);
 	}
 
 	/* IrDA reset is done now */
@@ -1309,6 +1334,8 @@ static void __pmz_set_termios(struct uart_port *port, struct termios *termios,
 		/* Load registers to the chip */
 		pmz_maybe_update_regs(uap);
 	}
+	uart_update_timeout(port, termios->c_cflag, baud);
+
 	pmz_debug("pmz: set_termios() done.\n");
 }
 
@@ -1412,7 +1439,7 @@ static int __init pmz_init_port(struct uart_pmac_port *uap)
 	uap->port.mapbase = np->addrs[0].address;
 	uap->port.membase = ioremap(uap->port.mapbase, 0x1000);
       
-	uap->control_reg = (volatile u8 *)uap->port.membase;
+	uap->control_reg = uap->port.membase;
 	uap->data_reg = uap->control_reg + 0x10;
 	
 	/*
@@ -1423,16 +1450,15 @@ static int __init pmz_init_port(struct uart_pmac_port *uap)
 		uap->flags |= PMACZILOG_FLAG_HAS_DMA;
 #endif	
 	if (ZS_HAS_DMA(uap)) {
-		uap->tx_dma_regs = (volatile struct dbdma_regs *)
-			ioremap(np->addrs[np->n_addrs - 2].address, 0x1000);
+		uap->tx_dma_regs = ioremap(np->addrs[np->n_addrs - 2].address, 0x1000);
 		if (uap->tx_dma_regs == NULL) {	
 			uap->flags &= ~PMACZILOG_FLAG_HAS_DMA;
 			goto no_dma;
 		}
-		uap->rx_dma_regs = (volatile struct dbdma_regs *)
-			ioremap(np->addrs[np->n_addrs - 1].address, 0x1000);
+		uap->rx_dma_regs = ioremap(np->addrs[np->n_addrs - 1].address, 0x1000);
 		if (uap->rx_dma_regs == NULL) {	
-			iounmap((void *)uap->tx_dma_regs);
+			iounmap(uap->tx_dma_regs);
+			uap->tx_dma_regs = NULL;
 			uap->flags &= ~PMACZILOG_FLAG_HAS_DMA;
 			goto no_dma;
 		}
@@ -1507,10 +1533,13 @@ static void pmz_dispose_port(struct uart_pmac_port *uap)
 {
 	struct device_node *np;
 
-	iounmap((void *)uap->control_reg);
 	np = uap->node;
+	iounmap(uap->rx_dma_regs);
+	iounmap(uap->tx_dma_regs);
+	iounmap(uap->control_reg);
 	uap->node = NULL;
 	of_node_put(np);
+	memset(uap, 0, sizeof(struct uart_pmac_port));
 }
 
 /*
@@ -1561,7 +1590,7 @@ static int pmz_detach(struct macio_dev *mdev)
 }
 
 
-static int pmz_suspend(struct macio_dev *mdev, u32 pm_state)
+static int pmz_suspend(struct macio_dev *mdev, pm_message_t pm_state)
 {
 	struct uart_pmac_port *uap = dev_get_drvdata(&mdev->ofdev.dev);
 	struct uart_state *state;
@@ -1572,7 +1601,7 @@ static int pmz_suspend(struct macio_dev *mdev, u32 pm_state)
 		return 0;
 	}
 
-	if (pm_state == mdev->ofdev.dev.power_state || pm_state < 2)
+	if (pm_state == mdev->ofdev.dev.power.power_state || pm_state < 2)
 		return 0;
 
 	pmz_debug("suspend, switching to state %d\n", pm_state);
@@ -1616,7 +1645,7 @@ static int pmz_suspend(struct macio_dev *mdev, u32 pm_state)
 
 	pmz_debug("suspend, switching complete\n");
 
-	mdev->ofdev.dev.power_state = pm_state;
+	mdev->ofdev.dev.power.power_state = pm_state;
 
 	return 0;
 }
@@ -1632,7 +1661,7 @@ static int pmz_resume(struct macio_dev *mdev)
 	if (uap == NULL)
 		return 0;
 
-	if (mdev->ofdev.dev.power_state == 0)
+	if (mdev->ofdev.dev.power.power_state == 0)
 		return 0;
 	
 	pmz_debug("resume, switching to state 0\n");
@@ -1680,13 +1709,12 @@ static int pmz_resume(struct macio_dev *mdev)
 	 */
 	if (pwr_delay != 0) {
 		pmz_debug("pmz: delaying %d ms\n", pwr_delay);
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout((pwr_delay * HZ)/1000);
+		msleep(pwr_delay);
 	}
 
 	pmz_debug("resume, switching complete\n");
 
-	mdev->ofdev.dev.power_state = 0;
+	mdev->ofdev.dev.power.power_state = 0;
 
 	return 0;
 }
@@ -1797,7 +1825,7 @@ static int __init pmz_register(void)
 	 * Register this driver with the serial core
 	 */
 	rc = uart_register_driver(&pmz_uart_reg);
-	if (rc != 0)
+	if (rc)
 		return rc;
 
 	/*
@@ -1807,10 +1835,19 @@ static int __init pmz_register(void)
 		struct uart_pmac_port *uport = &pmz_ports[i];
 		/* NULL node may happen on wallstreet */
 		if (uport->node != NULL)
-			uart_add_one_port(&pmz_uart_reg, &uport->port);
+			rc = uart_add_one_port(&pmz_uart_reg, &uport->port);
+		if (rc)
+			goto err_out;
 	}
 
 	return 0;
+err_out:
+	while (i-- > 0) {
+		struct uart_pmac_port *uport = &pmz_ports[i];
+		uart_remove_one_port(&pmz_uart_reg, &uport->port);
+	}
+	uart_unregister_driver(&pmz_uart_reg);
+	return rc;
 }
 
 static struct of_match pmz_match[] = 
@@ -1840,6 +1877,7 @@ static struct macio_driver pmz_driver =
 
 static int __init init_pmz(void)
 {
+	int rc, i;
 	printk(KERN_INFO "%s\n", version);
 
 	/* 
@@ -1861,7 +1899,16 @@ static int __init init_pmz(void)
 	/*
 	 * Now we register with the serial layer
 	 */
-	pmz_register();
+	rc = pmz_register();
+	if (rc) {
+		printk(KERN_ERR 
+			"pmac_zilog: Error registering serial device, disabling pmac_zilog.\n"
+		 	"pmac_zilog: Did another serial driver already claim the minors?\n"); 
+		/* effectively "pmz_unprobe()" */
+		for (i=0; i < pmz_ports_count; i++)
+			pmz_dispose_port(&pmz_ports[i]);
+		return rc;
+	}
 	
 	/*
 	 * Then we register the macio driver itself
@@ -1899,6 +1946,8 @@ static void pmz_console_write(struct console *con, const char *s, unsigned int c
 	unsigned long flags;
 	int i;
 
+	if (ZS_IS_ASLEEP(uap))
+		return;
 	spin_lock_irqsave(&uap->port.lock, flags);
 
 	/* Turn of interrupts and enable the transmitter. */
@@ -1985,8 +2034,6 @@ static int __init pmz_console_init(void)
 	/* Probe ports */
 	pmz_probe();
 
-#ifdef CONFIG_SERIAL_PMACZILOG_CONSOLE
-#endif
 	/* TODO: Autoprobe console based on OF */
 	/* pmz_console.index = i; */
 	register_console(&pmz_console);

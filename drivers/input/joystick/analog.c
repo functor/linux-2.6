@@ -11,18 +11,18 @@
 /*
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or 
+ * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- * 
+ *
  * Should you need to contact me, the author, you can do so either by
  * e-mail - mail your message to <vojtech@ucw.cz>, or by paper mail:
  * Vojtech Pavlik, Simunkova 1594, Prague 8, 182 00 Czech Republic
@@ -40,8 +40,10 @@
 #include <linux/gameport.h>
 #include <asm/timex.h>
 
+#define DRIVER_DESC	"Analog joystick and gamepad driver"
+
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@ucw.cz>");
-MODULE_DESCRIPTION("Analog joystick and gamepad driver");
+MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
 
 /*
@@ -53,7 +55,7 @@ MODULE_LICENSE("GPL");
 static char *js[ANALOG_PORTS];
 static int js_nargs;
 static int analog_options[ANALOG_PORTS];
-module_param_array_named(map, js, charp, js_nargs, 0);
+module_param_array_named(map, js, charp, &js_nargs, 0);
 MODULE_PARM_DESC(map, "Describes analog joysticks type/capabilities");
 
 __obsolete_setup("js=");
@@ -88,7 +90,6 @@ __obsolete_setup("js=");
 
 #define ANALOG_MAX_TIME		3	/* 3 ms */
 #define ANALOG_LOOP_TIME	2000	/* 2 * loop */
-#define ANALOG_REFRESH_TIME	HZ/100	/* 10 ms */
 #define ANALOG_SAITEK_DELAY	200	/* 200 us */
 #define ANALOG_SAITEK_TIME	2000	/* 2000 us */
 #define ANALOG_AXIS_TIME	2	/* 2 * refresh */
@@ -119,7 +120,6 @@ struct analog {
 
 struct analog_port {
 	struct gameport *gameport;
-	struct timer_list timer;
 	struct analog analog[2];
 	unsigned char mask;
 	char saitek;
@@ -132,7 +132,6 @@ struct analog_port {
 	int axes[4];
 	int buttons;
 	int initial[4];
-	int used;
 	int axtime;
 };
 
@@ -142,7 +141,7 @@ struct analog_port {
 
 #ifdef __i386__
 #define GET_TIME(x)	do { if (cpu_has_tsc) rdtscl(x); else x = get_time_pit(); } while (0)
-#define DELTA(x,y)	(cpu_has_tsc?((y)-(x)):((x)-(y)+((x)<(y)?1193182L/HZ:0)))
+#define DELTA(x,y)	(cpu_has_tsc ? ((y) - (x)) : ((x) - (y) + ((x) < (y) ? CLOCK_TICK_RATE / HZ : 0)))
 #define TIME_NAME	(cpu_has_tsc?"TSC":"PIT")
 static unsigned int get_time_pit(void)
 {
@@ -158,11 +157,11 @@ static unsigned int get_time_pit(void)
 
         return count;
 }
-#elif __x86_64__
+#elif defined(__x86_64__)
 #define GET_TIME(x)	rdtscl(x)
 #define DELTA(x,y)	((y)-(x))
 #define TIME_NAME	"TSC"
-#elif __alpha__
+#elif defined(__alpha__)
 #define GET_TIME(x)	do { x = get_cycles(); } while (0)
 #define DELTA(x,y)	((y)-(x))
 #define TIME_NAME	"PCC"
@@ -237,7 +236,7 @@ static int analog_cooked_read(struct analog_port *port)
 
 	loopout = (ANALOG_LOOP_TIME * port->loop) / 1000;
 	timeout = ANALOG_MAX_TIME * port->speed;
-	
+
 	local_irq_save(flags);
 	gameport_trigger(gameport);
 	GET_TIME(now);
@@ -284,7 +283,7 @@ static int analog_button_read(struct analog_port *port, char saitek, char chf)
 
 	u = gameport_read(port->gameport);
 
-	if (!chf) { 
+	if (!chf) {
 		port->buttons = (~u >> 4) & 0xf;
 		return 0;
 	}
@@ -305,12 +304,12 @@ static int analog_button_read(struct analog_port *port, char saitek, char chf)
 }
 
 /*
- * analog_timer() repeatedly polls the Analog joysticks.
+ * analog_poll() repeatedly polls the Analog joysticks.
  */
 
-static void analog_timer(unsigned long data)
+static void analog_poll(struct gameport *gameport)
 {
-	struct analog_port *port = (void *) data;
+	struct analog_port *port = gameport_get_drvdata(gameport);
 	int i;
 
 	char saitek = !!(port->analog[0].mask & ANALOG_SAITEK);
@@ -333,11 +332,9 @@ static void analog_timer(unsigned long data)
 		}
 	}
 
-	for (i = 0; i < 2; i++) 
+	for (i = 0; i < 2; i++)
 		if (port->analog[i].mask)
 			analog_decode(port->analog + i, port->axes, port->initial, port->buttons);
-
-	mod_timer(&port->timer, jiffies + ANALOG_REFRESH_TIME);
 }
 
 /*
@@ -347,8 +344,8 @@ static void analog_timer(unsigned long data)
 static int analog_open(struct input_dev *dev)
 {
 	struct analog_port *port = dev->private;
-	if (!port->used++)
-		mod_timer(&port->timer, jiffies + ANALOG_REFRESH_TIME);	
+
+	gameport_start_polling(port->gameport);
 	return 0;
 }
 
@@ -359,8 +356,8 @@ static int analog_open(struct input_dev *dev)
 static void analog_close(struct input_dev *dev)
 {
 	struct analog_port *port = dev->private;
-	if (!--port->used)
-		del_timer(&port->timer);
+
+	gameport_stop_polling(port->gameport);
 }
 
 /*
@@ -379,7 +376,7 @@ static void analog_calibrate_timer(struct analog_port *port)
 #ifdef FAKE_TIME
 	analog_faketime += 830;
 #endif
-	udelay(1000);
+	mdelay(1);
 	GET_TIME(t2);
 	GET_TIME(t3);
 	local_irq_restore(flags);
@@ -408,7 +405,7 @@ static void analog_calibrate_timer(struct analog_port *port)
 
 static void analog_name(struct analog *analog)
 {
-	sprintf(analog->name, "Analog %d-axis %d-button", 
+	sprintf(analog->name, "Analog %d-axis %d-button",
 		hweight8(analog->mask & ANALOG_AXES_STD),
 		hweight8(analog->mask & ANALOG_BTNS_STD) + !!(analog->mask & ANALOG_BTNS_CHF) * 2 +
 		hweight16(analog->mask & ANALOG_BTNS_GAMEPAD) + !!(analog->mask & ANALOG_HBTN_CHF) * 4);
@@ -450,10 +447,10 @@ static void analog_init_device(struct analog_port *port, struct analog *analog, 
 	analog->dev.close = analog_close;
 	analog->dev.private = port;
 	analog->dev.evbit[0] = BIT(EV_KEY) | BIT(EV_ABS);
-	
+
 	for (i = j = 0; i < 4; i++)
 		if (analog->mask & (1 << i)) {
-			
+
 			t = analog_axes[j];
 			x = port->axes[i];
 			y = (port->axes[0] + port->axes[1]) >> 1;
@@ -481,8 +478,8 @@ static void analog_init_device(struct analog_port *port, struct analog *analog, 
 			j++;
 		}
 
-	for (i = j = 0; i < 3; i++) 
-		if (analog->mask & analog_exts[i]) 
+	for (i = j = 0; i < 3; i++)
+		if (analog->mask & analog_exts[i])
 			for (x = 0; x < 2; x++) {
 				t = analog_hats[j++];
 				set_bit(t, analog->dev.absbit);
@@ -517,7 +514,7 @@ static void analog_init_device(struct analog_port *port, struct analog *analog, 
 	else
 		printk(" [%s timer, %d %sHz clock, %d ns res]\n", TIME_NAME,
 		port->speed > 10000 ? (port->speed + 800) / 1000 : port->speed,
-		port->speed > 10000 ? "M" : "k", 
+		port->speed > 10000 ? "M" : "k",
 		port->speed > 10000 ? (port->loop * 1000) / (port->speed / 1000)
 				    : (port->loop * 1000000) / port->speed);
 }
@@ -580,48 +577,49 @@ static int analog_init_masks(struct analog_port *port)
 
 		gameport_calibrate(port->gameport, port->axes, max);
 	}
-		
-	for (i = 0; i < 4; i++) 
+
+	for (i = 0; i < 4; i++)
 		port->initial[i] = port->axes[i];
 
-	return -!(analog[0].mask || analog[1].mask);	
+	return -!(analog[0].mask || analog[1].mask);
 }
 
-static int analog_init_port(struct gameport *gameport, struct gameport_dev *dev, struct analog_port *port)
+static int analog_init_port(struct gameport *gameport, struct gameport_driver *drv, struct analog_port *port)
 {
 	int i, t, u, v;
 
-	gameport->private = port;
 	port->gameport = gameport;
-	init_timer(&port->timer);
-	port->timer.data = (long) port;
-	port->timer.function = analog_timer;
 
-	if (!gameport_open(gameport, dev, GAMEPORT_MODE_RAW)) {
+	gameport_set_drvdata(gameport, port);
+
+	if (!gameport_open(gameport, drv, GAMEPORT_MODE_RAW)) {
 
 		analog_calibrate_timer(port);
 
 		gameport_trigger(gameport);
 		t = gameport_read(gameport);
-		wait_ms(ANALOG_MAX_TIME);
+		msleep(ANALOG_MAX_TIME);
 		port->mask = (gameport_read(gameport) ^ t) & t & 0xf;
 		port->fuzz = (port->speed * ANALOG_FUZZ_MAGIC) / port->loop / 1000 + ANALOG_FUZZ_BITS;
-	
+
 		for (i = 0; i < ANALOG_INIT_RETRIES; i++) {
-			if (!analog_cooked_read(port)) break;
-			wait_ms(ANALOG_MAX_TIME);
+			if (!analog_cooked_read(port))
+				break;
+			msleep(ANALOG_MAX_TIME);
 		}
 
 		u = v = 0;
 
-		wait_ms(ANALOG_MAX_TIME);
+		msleep(ANALOG_MAX_TIME);
 		t = gameport_time(gameport, ANALOG_MAX_TIME * 1000);
 		gameport_trigger(gameport);
-		while ((gameport_read(port->gameport) & port->mask) && (u < t)) u++; 
+		while ((gameport_read(port->gameport) & port->mask) && (u < t))
+			u++;
 		udelay(ANALOG_SAITEK_DELAY);
 		t = gameport_time(gameport, ANALOG_SAITEK_TIME);
 		gameport_trigger(gameport);
-		while ((gameport_read(port->gameport) & port->mask) && (v < t)) v++; 
+		while ((gameport_read(port->gameport) & port->mask) && (v < t))
+			v++;
 
 		if (v < (u >> 1)) { /* FIXME - more than one port */
 			analog_options[0] |= /* FIXME - more than one port */
@@ -632,59 +630,66 @@ static int analog_init_port(struct gameport *gameport, struct gameport_dev *dev,
 		gameport_close(gameport);
 	}
 
-	if (!gameport_open(gameport, dev, GAMEPORT_MODE_COOKED)) {
+	if (!gameport_open(gameport, drv, GAMEPORT_MODE_COOKED)) {
 
 		for (i = 0; i < ANALOG_INIT_RETRIES; i++)
 			if (!gameport_cooked_read(gameport, port->axes, &port->buttons))
 				break;
 		for (i = 0; i < 4; i++)
-			if (port->axes[i] != -1) port->mask |= 1 << i;
+			if (port->axes[i] != -1)
+				port->mask |= 1 << i;
 
 		port->fuzz = gameport->fuzz;
 		port->cooked = 1;
 		return 0;
 	}
 
-	if (!gameport_open(gameport, dev, GAMEPORT_MODE_RAW))
-		return 0;
-
-	return -1;
+	return gameport_open(gameport, drv, GAMEPORT_MODE_RAW);
 }
 
-static void analog_connect(struct gameport *gameport, struct gameport_dev *dev)
+static int analog_connect(struct gameport *gameport, struct gameport_driver *drv)
 {
 	struct analog_port *port;
 	int i;
+	int err;
 
-	if (!(port = kmalloc(sizeof(struct analog_port), GFP_KERNEL)))
-		return;
-	memset(port, 0, sizeof(struct analog_port));
+	if (!(port = kcalloc(1, sizeof(struct analog_port), GFP_KERNEL)))
+		return - ENOMEM;
 
-	if (analog_init_port(gameport, dev, port)) {
+	err = analog_init_port(gameport, drv, port);
+	if (err) {
 		kfree(port);
-		return;
+		return err;
 	}
 
-	if (analog_init_masks(port)) {
+	err = analog_init_masks(port);
+	if (err) {
 		gameport_close(gameport);
+		gameport_set_drvdata(gameport, NULL);
 		kfree(port);
-		return;
+		return err;
 	}
+
+	gameport_set_poll_handler(gameport, analog_poll);
+	gameport_set_poll_interval(gameport, 10);
 
 	for (i = 0; i < 2; i++)
 		if (port->analog[i].mask)
 			analog_init_device(port, port->analog + i, i);
+
+	return 0;
 }
 
 static void analog_disconnect(struct gameport *gameport)
 {
 	int i;
+	struct analog_port *port = gameport_get_drvdata(gameport);
 
-	struct analog_port *port = gameport->private;
 	for (i = 0; i < 2; i++)
 		if (port->analog[i].mask)
 			input_unregister_device(&port->analog[i].dev);
 	gameport_close(gameport);
+	gameport_set_drvdata(gameport, NULL);
 	printk(KERN_INFO "analog.c: %d out of %d reads (%d%%) on %s failed\n",
 		port->bads, port->reads, port->reads ? (port->bads * 100 / port->reads) : 0,
 		port->gameport->phys);
@@ -696,7 +701,7 @@ struct analog_types {
 	int value;
 };
 
-struct analog_types analog_types[] = {
+static struct analog_types analog_types[] = {
 	{ "none",	0x00000000 },
 	{ "auto",	0x000000ff },
 	{ "2btn",	0x0000003f },
@@ -721,7 +726,7 @@ static void analog_parse_options(void)
 			if (!strcmp(analog_types[j].name, js[i])) {
 				analog_options[i] = analog_types[j].value;
 				break;
-			} 
+			}
 		if (analog_types[j].name) continue;
 
 		analog_options[i] = simple_strtoul(js[i], &end, 0);
@@ -741,21 +746,26 @@ static void analog_parse_options(void)
  * The gameport device structure.
  */
 
-static struct gameport_dev analog_dev = {
-	.connect =	analog_connect,
-	.disconnect =	analog_disconnect,
+static struct gameport_driver analog_drv = {
+	.driver		= {
+		.name	= "analog",
+	},
+	.description	= DRIVER_DESC,
+	.connect	= analog_connect,
+	.disconnect	= analog_disconnect,
 };
 
-int __init analog_init(void)
+static int __init analog_init(void)
 {
 	analog_parse_options();
-	gameport_register_device(&analog_dev);
+	gameport_register_driver(&analog_drv);
+
 	return 0;
 }
 
-void __exit analog_exit(void)
+static void __exit analog_exit(void)
 {
-	gameport_unregister_device(&analog_dev);
+	gameport_unregister_driver(&analog_drv);
 }
 
 module_init(analog_init);

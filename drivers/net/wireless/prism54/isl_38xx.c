@@ -1,4 +1,4 @@
-/*  $Header: /var/lib/cvs/prism54-ng/ksrc/isl_38xx.c,v 1.22 2004/02/28 03:06:07 mcgrof Exp $
+/*
  *  
  *  Copyright (C) 2002 Intersil Americas Inc.
  *  Copyright (C) 2003-2004 Luis R. Rodriguez <mcgrof@ruslug.rutgers.edu>_
@@ -18,24 +18,16 @@
  *
  */
 
-#define __KERNEL_SYSCALLS__
-
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/delay.h>
 
-#include "isl_38xx.h"
-#include <linux/firmware.h>
-
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
-#include <linux/config.h>
-#if !defined(CONFIG_FW_LOADER) && !defined(CONFIG_FW_LOADER_MODULE)
-#error No Firmware Loading configured in the kernel !
-#endif
-
+#include "prismcompat.h"
+#include "isl_38xx.h"
 #include "islpci_dev.h"
 #include "islpci_mgt.h"
 
@@ -52,7 +44,7 @@
  *  register located at offset %ISL38XX_INT_IDENT_REG.
  */
 void
-isl38xx_disable_interrupts(void *device)
+isl38xx_disable_interrupts(void __iomem *device)
 {
 	isl38xx_w32_flush(device, 0x00000000, ISL38XX_INT_EN_REG);
 	udelay(ISL38XX_WRITEIO_DELAY);
@@ -60,7 +52,7 @@ isl38xx_disable_interrupts(void *device)
 
 void
 isl38xx_handle_sleep_request(isl38xx_control_block *control_block,
-			     int *powerstate, void *device_base)
+			     int *powerstate, void __iomem *device_base)
 {
 	/* device requests to go into sleep mode
 	 * check whether the transmit queues for data and management are empty */
@@ -96,7 +88,7 @@ isl38xx_handle_sleep_request(isl38xx_control_block *control_block,
 
 void
 isl38xx_handle_wakeup(isl38xx_control_block *control_block,
-		      int *powerstate, void *device_base)
+		      int *powerstate, void __iomem *device_base)
 {
 	/* device is in active state, update the powerstate flag */
 	*powerstate = ISL38XX_PSM_ACTIVE_STATE;
@@ -118,7 +110,7 @@ isl38xx_handle_wakeup(isl38xx_control_block *control_block,
 }
 
 void
-isl38xx_trigger_device(int asleep, void *device_base)
+isl38xx_trigger_device(int asleep, void __iomem *device_base)
 {
 	struct timeval current_time;
 	u32 reg, counter = 0;
@@ -133,21 +125,21 @@ isl38xx_trigger_device(int asleep, void *device_base)
 #if VERBOSE > SHOW_ERROR_MESSAGES
 		do_gettimeofday(&current_time);
 		DEBUG(SHOW_TRACING, "%08li.%08li Device wakeup triggered\n",
-		      current_time.tv_sec, current_time.tv_usec);
+		      current_time.tv_sec, (long)current_time.tv_usec);
 #endif
 
 		DEBUG(SHOW_TRACING, "%08li.%08li Device register read %08x\n",
-		      current_time.tv_sec, current_time.tv_usec,
+		      current_time.tv_sec, (long)current_time.tv_usec,
 		      readl(device_base + ISL38XX_CTRL_STAT_REG));
 		udelay(ISL38XX_WRITEIO_DELAY);
 
-		if (reg = readl(device_base + ISL38XX_INT_IDENT_REG),
-		    reg == 0xabadface) {
+		reg = readl(device_base + ISL38XX_INT_IDENT_REG);
+		if (reg == 0xabadface) {
 #if VERBOSE > SHOW_ERROR_MESSAGES
 			do_gettimeofday(&current_time);
 			DEBUG(SHOW_TRACING,
 			      "%08li.%08li Device register abadface\n",
-			      current_time.tv_sec, current_time.tv_usec);
+			      current_time.tv_sec, (long)current_time.tv_usec);
 #endif
 			/* read the Device Status Register until Sleepmode bit is set */
 			while (reg = readl(device_base + ISL38XX_CTRL_STAT_REG),
@@ -158,7 +150,7 @@ isl38xx_trigger_device(int asleep, void *device_base)
 
 			DEBUG(SHOW_TRACING,
 			      "%08li.%08li Device register read %08x\n",
-			      current_time.tv_sec, current_time.tv_usec,
+			      current_time.tv_sec, (long)current_time.tv_usec,
 			      readl(device_base + ISL38XX_CTRL_STAT_REG));
 			udelay(ISL38XX_WRITEIO_DELAY);
 
@@ -166,7 +158,7 @@ isl38xx_trigger_device(int asleep, void *device_base)
 			do_gettimeofday(&current_time);
 			DEBUG(SHOW_TRACING,
 			      "%08li.%08li Device asleep counter %i\n",
-			      current_time.tv_sec, current_time.tv_usec,
+			      current_time.tv_sec, (long)current_time.tv_usec,
 			      counter);
 #endif
 		}
@@ -182,7 +174,7 @@ isl38xx_trigger_device(int asleep, void *device_base)
 #if VERBOSE > SHOW_ERROR_MESSAGES
 		do_gettimeofday(&current_time);
 		DEBUG(SHOW_TRACING, "%08li.%08li Device register read %08x\n",
-		      current_time.tv_sec, current_time.tv_usec, reg);
+		      current_time.tv_sec, (long)current_time.tv_usec, reg);
 #endif
 	} else {
 		/* device is (still) awake  */
@@ -198,12 +190,10 @@ isl38xx_trigger_device(int asleep, void *device_base)
 }
 
 void
-isl38xx_interface_reset(void *device_base, dma_addr_t host_address)
+isl38xx_interface_reset(void __iomem *device_base, dma_addr_t host_address)
 {
-	u32 reg;
-
 #if VERBOSE > SHOW_ERROR_MESSAGES
-	DEBUG(SHOW_FUNCTION_CALLS, "isl38xx_interface_reset \n");
+	DEBUG(SHOW_FUNCTION_CALLS, "isl38xx_interface_reset\n");
 #endif
 
 	/* load the address of the control block in the device */
@@ -211,8 +201,7 @@ isl38xx_interface_reset(void *device_base, dma_addr_t host_address)
 	udelay(ISL38XX_WRITEIO_DELAY);
 
 	/* set the reset bit in the Device Interrupt Register */
-	isl38xx_w32_flush(device_base, ISL38XX_DEV_INT_RESET,
-			  ISL38XX_DEV_INT_REG);
+	isl38xx_w32_flush(device_base, ISL38XX_DEV_INT_RESET, ISL38XX_DEV_INT_REG);
 	udelay(ISL38XX_WRITEIO_DELAY);
 
 	/* enable the interrupt for detecting initialization */
@@ -220,143 +209,17 @@ isl38xx_interface_reset(void *device_base, dma_addr_t host_address)
 	/* Note: Do not enable other interrupts here. We want the
 	 * device to have come up first 100% before allowing any other 
 	 * interrupts. */
-	reg = ISL38XX_INT_IDENT_INIT;
-
-	isl38xx_w32_flush(device_base, reg, ISL38XX_INT_EN_REG);
+	isl38xx_w32_flush(device_base, ISL38XX_INT_IDENT_INIT, ISL38XX_INT_EN_REG);
 	udelay(ISL38XX_WRITEIO_DELAY);  /* allow complete full reset */
 }
 
 void
-isl38xx_enable_common_interrupts(void *device_base) {
+isl38xx_enable_common_interrupts(void __iomem *device_base) {
 	u32 reg;
 	reg = ( ISL38XX_INT_IDENT_UPDATE | 
 			ISL38XX_INT_IDENT_SLEEP | ISL38XX_INT_IDENT_WAKEUP);
 	isl38xx_w32_flush(device_base, reg, ISL38XX_INT_EN_REG);
 	udelay(ISL38XX_WRITEIO_DELAY);
-}
-
-int
-isl38xx_upload_firmware(char *fw_id, _REQ_FW_DEV_T dev, void *device_base,
-			dma_addr_t host_address)
-{
-	u32 reg, rc;
-
-#if VERBOSE > SHOW_ERROR_MESSAGES
-	DEBUG(SHOW_ERROR_MESSAGES, "isl38xx_upload_firmware(0x%lx, 0x%lx)\n",
-	      (long) device_base, (long) host_address);
-#endif
-
-	/* clear the RAMBoot and the Reset bit */
-	reg = readl(device_base + ISL38XX_CTRL_STAT_REG);
-	reg &= ~ISL38XX_CTRL_STAT_RESET;
-	reg &= ~ISL38XX_CTRL_STAT_RAMBOOT;
-	writel(reg, device_base + ISL38XX_CTRL_STAT_REG);
-	wmb();
-	udelay(ISL38XX_WRITEIO_DELAY);
-
-	/* set the Reset bit without reading the register ! */
-	reg |= ISL38XX_CTRL_STAT_RESET;
-	writel(reg, device_base + ISL38XX_CTRL_STAT_REG);
-	wmb();
-	udelay(ISL38XX_WRITEIO_DELAY);
-
-	/* clear the Reset bit */
-	reg &= ~ISL38XX_CTRL_STAT_RESET;
-	writel(reg, device_base + ISL38XX_CTRL_STAT_REG);
-	wmb();
-
-	/* wait a while for the device to reboot */
-	mdelay(50);
-
-	{
-		const struct firmware *fw_entry = 0;
-		long fw_len;
-		const u32 *fw_ptr;
-
-		rc = request_firmware(&fw_entry, fw_id, dev);
-		if (rc) {
-			printk(KERN_ERR
-			       "%s: request_firmware() failed for '%s'\n",
-			       "prism54", fw_id);
-			return rc;
-		}
-		/* prepare the Direct Memory Base register */
-		reg = ISL38XX_DEV_FIRMWARE_ADDRES;
-
-		fw_ptr = (u32 *) fw_entry->data;
-		fw_len = fw_entry->size;
-
-		if (fw_len % 4) {
-			printk(KERN_ERR
-			       "%s: firmware '%s' size is not multiple of 32bit, aborting!\n",
-			       "prism54", fw_id);
-			release_firmware(fw_entry);
-			return EILSEQ; /* Illegal byte sequence  */;
-		}
-
-		while (fw_len > 0) {
-			long _fw_len =
-			    (fw_len >
-			     ISL38XX_MEMORY_WINDOW_SIZE) ?
-			    ISL38XX_MEMORY_WINDOW_SIZE : fw_len;
-			u32 *dev_fw_ptr = device_base + ISL38XX_DIRECT_MEM_WIN;
-
-			/* set the cards base address for writting the data */
-			isl38xx_w32_flush(device_base, reg,
-					  ISL38XX_DIR_MEM_BASE_REG);
-			wmb();	/* be paranoid */
-
-			/* increment the write address for next iteration */
-			reg += _fw_len;
-			fw_len -= _fw_len;
-
-			/* write the data to the Direct Memory Window 32bit-wise */
-			/* memcpy_toio() doesn't guarantee 32bit writes :-| */
-			while (_fw_len > 0) {
-				/* use non-swapping writel() */
-				__raw_writel(*fw_ptr, dev_fw_ptr);
-				fw_ptr++, dev_fw_ptr++;
-				_fw_len -= 4;
-			}
-
-			/* flush PCI posting */
-			(void) readl(device_base + ISL38XX_PCI_POSTING_FLUSH);
-			wmb();	/* be paranoid again */
-
-			BUG_ON(_fw_len != 0);
-		}
-
-		BUG_ON(fw_len != 0);
-
-		release_firmware(fw_entry);
-	}
-
-	/* now reset the device
-	 * clear the Reset & ClkRun bit, set the RAMBoot bit */
-	reg = readl(device_base + ISL38XX_CTRL_STAT_REG);
-	reg &= ~ISL38XX_CTRL_STAT_CLKRUN;
-	reg &= ~ISL38XX_CTRL_STAT_RESET;
-	reg |= ISL38XX_CTRL_STAT_RAMBOOT;
-	isl38xx_w32_flush(device_base, reg, ISL38XX_CTRL_STAT_REG);
-	wmb();
-	udelay(ISL38XX_WRITEIO_DELAY);
-
-	/* set the reset bit latches the host override and RAMBoot bits
-	 * into the device for operation when the reset bit is reset */
-	reg |= ISL38XX_CTRL_STAT_RESET;
-	writel(reg, device_base + ISL38XX_CTRL_STAT_REG);
-	/* don't do flush PCI posting here! */
-	wmb();
-	udelay(ISL38XX_WRITEIO_DELAY);
-
-	/* clear the reset bit should start the whole circus */
-	reg &= ~ISL38XX_CTRL_STAT_RESET;
-	writel(reg, device_base + ISL38XX_CTRL_STAT_REG);
-	/* don't do flush PCI posting here! */
-	wmb();
-	udelay(ISL38XX_WRITEIO_DELAY);
-
-	return 0;
 }
 
 int

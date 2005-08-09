@@ -835,6 +835,7 @@ static int matroxfb_set_par(struct fb_info *info)
 			matrox_cfbX_init(PMINFO2);
 		}
 	}
+	ACCESS_FBINFO(initialized) = 1;
 	return 0;
 }
 
@@ -874,6 +875,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 			  unsigned int cmd, unsigned long arg,
 			  struct fb_info *info)
 {
+	void __user *argp = (void __user *)arg;
 	MINFO_FROM_INFO(info);
 	
 	DBG(__FUNCTION__)
@@ -891,7 +893,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 				err = matroxfb_get_vblank(PMINFO &vblank);
 				if (err)
 					return err;
-				if (copy_to_user((struct fb_vblank*)arg, &vblank, sizeof(vblank)))
+				if (copy_to_user(argp, &vblank, sizeof(vblank)))
 					return -EFAULT;
 				return 0;
 			}
@@ -899,7 +901,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 			{
 				u_int32_t crt;
 
-				if (get_user(crt, (u_int32_t *)arg))
+				if (get_user(crt, (u_int32_t __user *)arg))
 					return -EFAULT;
 
 				return matroxfb_wait_for_sync(PMINFO crt);
@@ -910,7 +912,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 				struct matrox_altout *oproc;
 				int val;
 
-				if (copy_from_user(&mom, (struct matroxioc_output_mode*)arg, sizeof(mom)))
+				if (copy_from_user(&mom, argp, sizeof(mom)))
 					return -EFAULT;
 				if (mom.output >= MATROXFB_MAX_OUTPUTS)
 					return -ENXIO;
@@ -960,7 +962,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 				struct matrox_altout *oproc;
 				int val;
 
-				if (copy_from_user(&mom, (struct matroxioc_output_mode*)arg, sizeof(mom)))
+				if (copy_from_user(&mom, argp, sizeof(mom)))
 					return -EFAULT;
 				if (mom.output >= MATROXFB_MAX_OUTPUTS)
 					return -ENXIO;
@@ -975,7 +977,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 				up_read(&ACCESS_FBINFO(altout.lock));
 				if (val)
 					return val;
-				if (copy_to_user((struct matroxioc_output_mode*)arg, &mom, sizeof(mom)))
+				if (copy_to_user(argp, &mom, sizeof(mom)))
 					return -EFAULT;
 				return 0;
 			}
@@ -985,7 +987,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 				int i;
 				int changes;
 
-				if (copy_from_user(&tmp, (u_int32_t*)arg, sizeof(tmp)))
+				if (copy_from_user(&tmp, argp, sizeof(tmp)))
 					return -EFAULT;
 				for (i = 0; i < 32; i++) {
 					if (tmp & (1 << i)) {
@@ -1040,7 +1042,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 						conn |= 1 << i;
 					}
 				}
-				if (put_user(conn, (u_int32_t*)arg))
+				if (put_user(conn, (u_int32_t __user *)arg))
 					return -EFAULT;
 				return 0;
 			}
@@ -1065,7 +1067,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 					if (conn & MATROXFB_OUTPUT_CONN_SECONDARY)
 						conn &= ~MATROXFB_OUTPUT_CONN_DFP;
 				}
-				if (put_user(conn, (u_int32_t*)arg))
+				if (put_user(conn, (u_int32_t __user *)arg))
 					return -EFAULT;
 				return 0;
 			}
@@ -1079,7 +1081,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 						conn |= 1 << i;
 					}
 				}
-				if (put_user(conn, (u_int32_t*)arg))
+				if (put_user(conn, (u_int32_t __user *)arg))
 					return -EFAULT;
 				return 0;
 			}
@@ -1093,7 +1095,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 				sprintf(r.bus_info, "PCI:%s", pci_name(ACCESS_FBINFO(pcidev)));
 				r.version = KERNEL_VERSION(1,0,0);
 				r.capabilities = V4L2_CAP_VIDEO_OUTPUT;
-				if (copy_to_user((void*)arg, &r, sizeof(r)))
+				if (copy_to_user(argp, &r, sizeof(r)))
 					return -EFAULT;
 				return 0;
 				
@@ -1103,7 +1105,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 				struct v4l2_queryctrl qctrl;
 				int err;
 
-				if (copy_from_user(&qctrl, (struct v4l2_queryctrl*)arg, sizeof(qctrl)))
+				if (copy_from_user(&qctrl, argp, sizeof(qctrl)))
 					return -EFAULT;
 
 				down_read(&ACCESS_FBINFO(altout).lock);
@@ -1116,7 +1118,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 				}
 				up_read(&ACCESS_FBINFO(altout).lock);
 				if (err >= 0 &&
-				    copy_to_user((struct v4l2_queryctrl*)arg, &qctrl, sizeof(qctrl)))
+				    copy_to_user(argp, &qctrl, sizeof(qctrl)))
 					return -EFAULT;
 				return err;
 			}
@@ -1125,7 +1127,7 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 				struct v4l2_control ctrl;
 				int err;
 
-				if (copy_from_user(&ctrl, (struct v4l2_control*)arg, sizeof(ctrl)))
+				if (copy_from_user(&ctrl, argp, sizeof(ctrl)))
 					return -EFAULT;
 
 				down_read(&ACCESS_FBINFO(altout).lock);
@@ -1138,16 +1140,17 @@ static int matroxfb_ioctl(struct inode *inode, struct file *file,
 				}
 				up_read(&ACCESS_FBINFO(altout).lock);
 				if (err >= 0 &&
-				    copy_to_user((struct v4l2_control*)arg, &ctrl, sizeof(ctrl)))
+				    copy_to_user(argp, &ctrl, sizeof(ctrl)))
 					return -EFAULT;
 				return err;
 			}
+		case VIDIOC_S_CTRL_OLD:
 		case VIDIOC_S_CTRL:
 			{
 				struct v4l2_control ctrl;
 				int err;
 
-				if (copy_from_user(&ctrl, (struct v4l2_control*)arg, sizeof(ctrl)))
+				if (copy_from_user(&ctrl, argp, sizeof(ctrl)))
 					return -EFAULT;
 
 				down_read(&ACCESS_FBINFO(altout).lock);
@@ -1180,11 +1183,11 @@ static int matroxfb_blank(int blank, struct fb_info *info)
 		return 1;
 
 	switch (blank) {
-		case 1:  seq = 0x20; crtc = 0x00; break; /* works ??? */
-		case 2:  seq = 0x20; crtc = 0x10; break;
-		case 3:  seq = 0x20; crtc = 0x20; break;
-		case 4:  seq = 0x20; crtc = 0x30; break;
-		default: seq = 0x00; crtc = 0x00; break;
+	case FB_BLANK_NORMAL:  seq = 0x20; crtc = 0x00; break; /* works ??? */
+	case FB_BLANK_VSYNC_SUSPEND:  seq = 0x20; crtc = 0x10; break;
+	case FB_BLANK_HSYNC_SUSPEND:  seq = 0x20; crtc = 0x20; break;
+	case FB_BLANK_POWERDOWN:  seq = 0x20; crtc = 0x30; break;
+	default: seq = 0x00; crtc = 0x00; break;
 	}
 
 	CRITBEGIN
@@ -1272,6 +1275,7 @@ static unsigned int maxclk;		/* "matrox:maxclk:xxxxM" */
 static int dfp;				/* "matrox:dfp */
 static int dfp_type = -1;		/* "matrox:dfp:xxx */
 static int memtype = -1;		/* "matrox:memtype:xxx" */
+static char outputs[8];			/* "matrox:outputs:xxx" */
 
 #ifndef MODULE
 static char videomode[64];		/* "matrox:mode:xxxxx" or "matrox:xxxxx" */
@@ -1342,7 +1346,7 @@ static struct video_board vbMillennium2A	= {0x1000000, 0x0800000, FB_ACCEL_MATRO
 #ifdef CONFIG_FB_MATROX_MYSTIQUE
 static struct video_board vbMystique		= {0x0800000, 0x0800000, FB_ACCEL_MATROX_MGA1064SG,	&matrox_mystique};
 #endif	/* CONFIG_FB_MATROX_MYSTIQUE */
-#ifdef CONFIG_FB_MATROX_G100
+#ifdef CONFIG_FB_MATROX_G
 static struct video_board vbG100		= {0x0800000, 0x0800000, FB_ACCEL_MATROX_MGAG100,	&matrox_G100};
 static struct video_board vbG200		= {0x1000000, 0x1000000, FB_ACCEL_MATROX_MGAG200,	&matrox_G100};
 #ifdef CONFIG_FB_MATROX_32MB
@@ -1426,7 +1430,7 @@ static struct board {
 		&vbMystique,
 		"Mystique 220 (PCI)"},
 #endif
-#ifdef CONFIG_FB_MATROX_G100
+#ifdef CONFIG_FB_MATROX_G
 	{PCI_VENDOR_ID_MATROX,	PCI_DEVICE_ID_MATROX_G100_MM,	0xFF,
 		0,			0,
 		DEVF_G100,
@@ -1537,11 +1541,49 @@ static struct fb_videomode defaultmode = {
 
 static int hotplug = 0;
 
+static void setDefaultOutputs(WPMINFO2) {
+	unsigned int i;
+	const char* ptr;
+
+	ACCESS_FBINFO(outputs[0]).default_src = MATROXFB_SRC_CRTC1;
+	if (ACCESS_FBINFO(devflags.g450dac)) {
+		ACCESS_FBINFO(outputs[1]).default_src = MATROXFB_SRC_CRTC1;
+		ACCESS_FBINFO(outputs[2]).default_src = MATROXFB_SRC_CRTC1;
+	} else if (dfp) {
+		ACCESS_FBINFO(outputs[2]).default_src = MATROXFB_SRC_CRTC1;
+	}
+	ptr = outputs;
+	for (i = 0; i < MATROXFB_MAX_OUTPUTS; i++) {
+		char c = *ptr++;
+
+		if (c == 0) {
+			break;
+		}
+		if (c == '0') {
+			ACCESS_FBINFO(outputs[i]).default_src = MATROXFB_SRC_NONE;
+		} else if (c == '1') {
+			ACCESS_FBINFO(outputs[i]).default_src = MATROXFB_SRC_CRTC1;
+		} else if (c == '2' && ACCESS_FBINFO(devflags.crtc2)) {
+			ACCESS_FBINFO(outputs[i]).default_src = MATROXFB_SRC_CRTC2;
+		} else {
+			printk(KERN_ERR "matroxfb: Unknown outputs setting\n");
+			break;
+		}
+	}
+	/* Nullify this option for subsequent adapters */
+	outputs[0] = 0;
+}
+
 static int initMatrox2(WPMINFO struct board* b){
 	unsigned long ctrlptr_phys = 0;
 	unsigned long video_base_phys = 0;
 	unsigned int memsize;
 	int err;
+
+	static struct pci_device_id intel_82437[] = {
+		{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82437) },
+		{ },
+	};
 
 	DBG(__FUNCTION__)
 
@@ -1577,20 +1619,18 @@ static int initMatrox2(WPMINFO struct board* b){
 	ACCESS_FBINFO(devflags.crtc2) = (b->flags & DEVF_CRTC2) != 0;
 	ACCESS_FBINFO(devflags.maven_capable) = (b->flags & DEVF_MAVEN_CAPABLE) != 0;
 	ACCESS_FBINFO(devflags.dualhead) = (b->flags & DEVF_DUALHEAD) != 0;
-	if (b->flags & DEVF_PANELLINK_CAPABLE) {
-		ACCESS_FBINFO(outputs[2]).data = MINFO;
-		ACCESS_FBINFO(outputs[2]).output = &panellink_output;
-		if (dfp)
-			ACCESS_FBINFO(outputs[2]).src = MATROXFB_SRC_CRTC1;
-		else
-			ACCESS_FBINFO(outputs[2]).src = MATROXFB_SRC_NONE;
-		ACCESS_FBINFO(outputs[2]).mode = MATROXFB_OUTPUT_MODE_MONITOR;
-		ACCESS_FBINFO(devflags.panellink) = 1;
-	}
 	ACCESS_FBINFO(devflags.dfp_type) = dfp_type;
 	ACCESS_FBINFO(devflags.g450dac) = (b->flags & DEVF_G450DAC) != 0;
 	ACCESS_FBINFO(devflags.textstep) = ACCESS_FBINFO(devflags.vgastep) * ACCESS_FBINFO(devflags.textmode);
 	ACCESS_FBINFO(devflags.textvram) = 65536 / ACCESS_FBINFO(devflags.textmode);
+	setDefaultOutputs(PMINFO2);
+	if (b->flags & DEVF_PANELLINK_CAPABLE) {
+		ACCESS_FBINFO(outputs[2]).data = MINFO;
+		ACCESS_FBINFO(outputs[2]).output = &panellink_output;
+		ACCESS_FBINFO(outputs[2]).src = ACCESS_FBINFO(outputs[2]).default_src;
+		ACCESS_FBINFO(outputs[2]).mode = MATROXFB_OUTPUT_MODE_MONITOR;
+		ACCESS_FBINFO(devflags.panellink) = 1;
+	}
 
 	if (ACCESS_FBINFO(capable.cross4MB) < 0)
 		ACCESS_FBINFO(capable.cross4MB) = b->flags & DEVF_CROSS4MB;
@@ -1649,7 +1689,7 @@ static int initMatrox2(WPMINFO struct board* b){
 		mga_option |= MX_OPTION_BSWAP;
                 /* disable palette snooping */
                 cmd &= ~PCI_COMMAND_VGA_PALETTE;
-		if (pci_find_device(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82437, NULL)) {
+		if (pci_dev_present(intel_82437)) {
 			if (!(mga_option & 0x20000000) && !ACCESS_FBINFO(devflags.nopciretry)) {
 				printk(KERN_WARNING "matroxfb: Disabling PCI retries due to i82437 present\n");
 			}
@@ -1678,7 +1718,6 @@ static int initMatrox2(WPMINFO struct board* b){
 	}
 	ACCESS_FBINFO(devflags.ydstorg) = 0;
 
-	ACCESS_FBINFO(fbcon.currcon) = -1;
 	ACCESS_FBINFO(video.base) = video_base_phys;
 	ACCESS_FBINFO(video.len_usable) = ACCESS_FBINFO(video.len);
 	if (ACCESS_FBINFO(video.len_usable) > b->base->maxdisplayable)
@@ -1717,6 +1756,12 @@ static int initMatrox2(WPMINFO struct board* b){
 	ACCESS_FBINFO(fbcon.pseudo_palette) = ACCESS_FBINFO(cmap);
 	/* after __init time we are like module... no logo */
 	ACCESS_FBINFO(fbcon.flags) = hotplug ? FBINFO_FLAG_MODULE : FBINFO_FLAG_DEFAULT;
+	ACCESS_FBINFO(fbcon.flags) |= FBINFO_PARTIAL_PAN_OK | 	 /* Prefer panning for scroll under MC viewer/edit */
+				      FBINFO_HWACCEL_COPYAREA |  /* We have hw-assisted bmove */
+				      FBINFO_HWACCEL_FILLRECT |  /* And fillrect */
+				      FBINFO_HWACCEL_IMAGEBLIT | /* And imageblit */
+				      FBINFO_HWACCEL_XPAN |      /* And we support both horizontal */
+				      FBINFO_HWACCEL_YPAN;       /* And vertical panning */
 	ACCESS_FBINFO(video.len_usable) &= PAGE_MASK;
 	fb_alloc_cmap(&ACCESS_FBINFO(fbcon.cmap), 256, 1);
 
@@ -1813,6 +1858,13 @@ static int initMatrox2(WPMINFO struct board* b){
 							to yres_virtual * xres_virtual < 2^32 */
 	}
 	matroxfb_init_fix(PMINFO2);
+	/* Normalize values (namely yres_virtual) */
+	matroxfb_check_var(&vesafb_defined, &ACCESS_FBINFO(fbcon));
+	/* And put it into "current" var. Do NOT program hardware yet, or we'll not take over
+	 * vgacon correctly. fbcon_startup will call fb_set_par for us, WITHOUT check_var,
+	 * and unfortunately it will do it BEFORE vgacon contents is saved, so it won't work
+	 * anyway. But we at least tried... */
+	ACCESS_FBINFO(fbcon.var) = vesafb_defined;
 	err = -EINVAL;
 
 	printk(KERN_INFO "matroxfb: %dx%dx%dbpp (virtual: %dx%d)\n",
@@ -1824,18 +1876,24 @@ static int initMatrox2(WPMINFO struct board* b){
 /* We do not have to set currcon to 0... register_framebuffer do it for us on first console
  * and we do not want currcon == 0 for subsequent framebuffers */
 
+	ACCESS_FBINFO(fbcon).device = &ACCESS_FBINFO(pcidev)->dev;
 	if (register_framebuffer(&ACCESS_FBINFO(fbcon)) < 0) {
 		goto failVideoIO;
 	}
 	printk("fb%d: %s frame buffer device\n",
 	       ACCESS_FBINFO(fbcon.node), ACCESS_FBINFO(fbcon.fix.id));
-	if (ACCESS_FBINFO(fbcon.currcon) < 0) {
-		/* there is no console on this fb... but we have to initialize hardware
-		 * until someone tells me what is proper thing to do */
-		printk(KERN_INFO "fb%d: initializing hardware\n",
-			ACCESS_FBINFO(fbcon.node));
-		fb_set_var(&ACCESS_FBINFO(fbcon), &vesafb_defined);
-	}
+
+	/* there is no console on this fb... but we have to initialize hardware
+	 * until someone tells me what is proper thing to do */
+ 	if (!ACCESS_FBINFO(initialized)) {
+ 		printk(KERN_INFO "fb%d: initializing hardware\n",
+ 		       ACCESS_FBINFO(fbcon.node));
+ 		/* We have to use FB_ACTIVATE_FORCE, as we had to put vesafb_defined to the fbcon.var
+ 		 * already before, so register_framebuffer works correctly. */
+ 		vesafb_defined.activate |= FB_ACTIVATE_FORCE;
+ 		fb_set_var(&ACCESS_FBINFO(fbcon), &vesafb_defined);
+ 	}
+
 	return 0;
 failVideoIO:;
 	matroxfb_g450_shutdown(PMINFO2);
@@ -1850,8 +1908,8 @@ fail:;
 	return err;
 }
 
-LIST_HEAD(matroxfb_list);
-LIST_HEAD(matroxfb_driver_list);
+static LIST_HEAD(matroxfb_list);
+static LIST_HEAD(matroxfb_driver_list);
 
 #define matroxfb_l(x) list_entry(x, struct matrox_fb_info, next_fb)
 #define matroxfb_driver_l(x) list_entry(x, struct matroxfb_driver, node)
@@ -2047,7 +2105,7 @@ static struct pci_device_id matroxfb_devices[] = {
 	{PCI_VENDOR_ID_MATROX,	PCI_DEVICE_ID_MATROX_MYS,
 		PCI_ANY_ID,	PCI_ANY_ID,	0, 0, 0},
 #endif
-#ifdef CONFIG_FB_MATROX_G100
+#ifdef CONFIG_FB_MATROX_G
 	{PCI_VENDOR_ID_MATROX,	PCI_DEVICE_ID_MATROX_G100_MM,
 		PCI_ANY_ID,	PCI_ANY_ID,	0, 0, 0},
 	{PCI_VENDOR_ID_MATROX,	PCI_DEVICE_ID_MATROX_G100_AGP,
@@ -2229,7 +2287,7 @@ static void __exit matrox_done(void) {
 
 /* ************************* init in-kernel code ************************** */
 
-int __init matroxfb_setup(char *options) {
+static int __init matroxfb_setup(char *options) {
 	char *this_opt;
 
 	DBG(__FUNCTION__)
@@ -2288,6 +2346,8 @@ int __init matroxfb_setup(char *options) {
 			mem = simple_strtoul(this_opt+4, NULL, 0);
 		else if (!strncmp(this_opt, "mode:", 5))
 			strlcpy(videomode, this_opt+5, sizeof(videomode));
+		else if (!strncmp(this_opt, "outputs:", 8))
+			strlcpy(outputs, this_opt+8, sizeof(outputs));
 		else if (!strncmp(this_opt, "dfp:", 4)) {
 			dfp_type = simple_strtoul(this_opt+4, NULL, 0);
 			dfp = 1;
@@ -2368,9 +2428,15 @@ int __init matroxfb_setup(char *options) {
 
 static int __initdata initialized = 0;
 
-int __init matroxfb_init(void)
+static int __init matroxfb_init(void)
 {
+	char *option = NULL;
+
 	DBG(__FUNCTION__)
+
+	if (fb_get_options("matroxfb", &option))
+		return -ENODEV;
+	matroxfb_setup(option);
 
 	if (disabled)
 		return -ENXIO;
@@ -2383,6 +2449,8 @@ int __init matroxfb_init(void)
 	return 0;
 }
 
+module_init(matroxfb_init);
+
 #else
 
 /* *************************** init module code **************************** */
@@ -2391,82 +2459,86 @@ MODULE_AUTHOR("(c) 1998-2002 Petr Vandrovec <vandrove@vc.cvut.cz>");
 MODULE_DESCRIPTION("Accelerated FBDev driver for Matrox Millennium/Mystique/G100/G200/G400/G450/G550");
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(mem, "i");
+module_param(mem, int, 0);
 MODULE_PARM_DESC(mem, "Size of available memory in MB, KB or B (2,4,8,12,16MB, default=autodetect)");
-MODULE_PARM(disabled, "i");
+module_param(disabled, int, 0);
 MODULE_PARM_DESC(disabled, "Disabled (0 or 1=disabled) (default=0)");
-MODULE_PARM(noaccel, "i");
+module_param(noaccel, int, 0);
 MODULE_PARM_DESC(noaccel, "Do not use accelerating engine (0 or 1=disabled) (default=0)");
-MODULE_PARM(nopan, "i");
+module_param(nopan, int, 0);
 MODULE_PARM_DESC(nopan, "Disable pan on startup (0 or 1=disabled) (default=0)");
-MODULE_PARM(no_pci_retry, "i");
+module_param(no_pci_retry, int, 0);
 MODULE_PARM_DESC(no_pci_retry, "PCI retries enabled (0 or 1=disabled) (default=0)");
-MODULE_PARM(novga, "i");
+module_param(novga, int, 0);
 MODULE_PARM_DESC(novga, "VGA I/O (0x3C0-0x3DF) disabled (0 or 1=disabled) (default=0)");
-MODULE_PARM(nobios, "i");
+module_param(nobios, int, 0);
 MODULE_PARM_DESC(nobios, "Disables ROM BIOS (0 or 1=disabled) (default=do not change BIOS state)");
-MODULE_PARM(noinit, "i");
+module_param(noinit, int, 0);
 MODULE_PARM_DESC(noinit, "Disables W/SG/SD-RAM and bus interface initialization (0 or 1=do not initialize) (default=0)");
-MODULE_PARM(memtype, "i");
+module_param(memtype, int, 0);
 MODULE_PARM_DESC(memtype, "Memory type for G200/G400 (see Documentation/fb/matroxfb.txt for explanation) (default=3 for G200, 0 for G400)");
-MODULE_PARM(mtrr, "i");
+#ifdef CONFIG_MTRR
+module_param(mtrr, int, 0);
 MODULE_PARM_DESC(mtrr, "This speeds up video memory accesses (0=disabled or 1) (default=1)");
-MODULE_PARM(sgram, "i");
+#endif
+module_param(sgram, int, 0);
 MODULE_PARM_DESC(sgram, "Indicates that G100/G200/G400 has SGRAM memory (0=SDRAM, 1=SGRAM) (default=0)");
-MODULE_PARM(inv24, "i");
+module_param(inv24, int, 0);
 MODULE_PARM_DESC(inv24, "Inverts clock polarity for 24bpp and loop frequency > 100MHz (default=do not invert polarity)");
-MODULE_PARM(inverse, "i");
+module_param(inverse, int, 0);
 MODULE_PARM_DESC(inverse, "Inverse (0 or 1) (default=0)");
 #ifdef CONFIG_FB_MATROX_MULTIHEAD
-MODULE_PARM(dev, "i");
+module_param(dev, int, 0);
 MODULE_PARM_DESC(dev, "Multihead support, attach to device ID (0..N) (default=all working)");
 #else
-MODULE_PARM(dev, "i");
+module_param(dev, int, 0);
 MODULE_PARM_DESC(dev, "Multihead support, attach to device ID (0..N) (default=first working)");
 #endif
-MODULE_PARM(vesa, "i");
+module_param(vesa, int, 0);
 MODULE_PARM_DESC(vesa, "Startup videomode (0x000-0x1FF) (default=0x101)");
-MODULE_PARM(xres, "i");
+module_param(xres, int, 0);
 MODULE_PARM_DESC(xres, "Horizontal resolution (px), overrides xres from vesa (default=vesa)");
-MODULE_PARM(yres, "i");
+module_param(yres, int, 0);
 MODULE_PARM_DESC(yres, "Vertical resolution (scans), overrides yres from vesa (default=vesa)");
-MODULE_PARM(upper, "i");
+module_param(upper, int, 0);
 MODULE_PARM_DESC(upper, "Upper blank space (scans), overrides upper from vesa (default=vesa)");
-MODULE_PARM(lower, "i");
+module_param(lower, int, 0);
 MODULE_PARM_DESC(lower, "Lower blank space (scans), overrides lower from vesa (default=vesa)");
-MODULE_PARM(vslen, "i");
+module_param(vslen, int, 0);
 MODULE_PARM_DESC(vslen, "Vertical sync length (scans), overrides lower from vesa (default=vesa)");
-MODULE_PARM(left, "i");
+module_param(left, int, 0);
 MODULE_PARM_DESC(left, "Left blank space (px), overrides left from vesa (default=vesa)");
-MODULE_PARM(right, "i");
+module_param(right, int, 0);
 MODULE_PARM_DESC(right, "Right blank space (px), overrides right from vesa (default=vesa)");
-MODULE_PARM(hslen, "i");
+module_param(hslen, int, 0);
 MODULE_PARM_DESC(hslen, "Horizontal sync length (px), overrides hslen from vesa (default=vesa)");
-MODULE_PARM(pixclock, "i");
+module_param(pixclock, int, 0);
 MODULE_PARM_DESC(pixclock, "Pixelclock (ns), overrides pixclock from vesa (default=vesa)");
-MODULE_PARM(sync, "i");
+module_param(sync, int, 0);
 MODULE_PARM_DESC(sync, "Sync polarity, overrides sync from vesa (default=vesa)");
-MODULE_PARM(depth, "i");
+module_param(depth, int, 0);
 MODULE_PARM_DESC(depth, "Color depth (0=text,8,15,16,24,32) (default=vesa)");
-MODULE_PARM(maxclk, "i");
+module_param(maxclk, int, 0);
 MODULE_PARM_DESC(maxclk, "Startup maximal clock, 0-999MHz, 1000-999999kHz, 1000000-INF Hz");
-MODULE_PARM(fh, "i");
+module_param(fh, int, 0);
 MODULE_PARM_DESC(fh, "Startup horizontal frequency, 0-999kHz, 1000-INF Hz");
-MODULE_PARM(fv, "i");
+module_param(fv, int, 0);
 MODULE_PARM_DESC(fv, "Startup vertical frequency, 0-INF Hz\n"
 "You should specify \"fv:max_monitor_vsync,fh:max_monitor_hsync,maxclk:max_monitor_dotclock\"\n");
-MODULE_PARM(grayscale, "i");
+module_param(grayscale, int, 0);
 MODULE_PARM_DESC(grayscale, "Sets display into grayscale. Works perfectly with paletized videomode (4, 8bpp), some limitations apply to 16, 24 and 32bpp videomodes (default=nograyscale)");
-MODULE_PARM(cross4MB, "i");
+module_param(cross4MB, int, 0);
 MODULE_PARM_DESC(cross4MB, "Specifies that 4MB boundary can be in middle of line. (default=autodetected)");
-MODULE_PARM(dfp, "i");
+module_param(dfp, int, 0);
 MODULE_PARM_DESC(dfp, "Specifies whether to use digital flat panel interface of G200/G400 (0 or 1) (default=0)");
-MODULE_PARM(dfp_type, "i");
+module_param(dfp_type, int, 0);
 MODULE_PARM_DESC(dfp_type, "Specifies DFP interface type (0 to 255) (default=read from hardware)");
+module_param_string(outputs, outputs, sizeof(outputs), 0);
+MODULE_PARM_DESC(outputs, "Specifies which CRTC is mapped to which output (string of up to three letters, consisting of 0 (disabled), 1 (CRTC1), 2 (CRTC2)) (default=111 for Gx50, 101 for G200/G400 with DFP, and 100 for all other devices)");
 #ifdef CONFIG_PPC_PMAC
-MODULE_PARM(vmode, "i");
+module_param_named(vmode, default_vmode, int, 0);
 MODULE_PARM_DESC(vmode, "Specify the vmode mode number that should be used (640x480 default)");
-MODULE_PARM(cmode, "i");
+module_param_named(cmode, default_cmode, int, 0);
 MODULE_PARM_DESC(cmode, "Specify the video depth that should be used (8bit default)");
 #endif
 

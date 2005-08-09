@@ -173,6 +173,9 @@ filled out, however:
 	2  bootsect-loader
 	3  SYSLINUX
 	4  EtherBoot
+	5  ELILO
+	7  GRuB
+	8  U-BOOT
 
 	Please contact <hpa@zytor.com> if you need a bootloader ID
 	value assigned.
@@ -334,7 +337,7 @@ They should normally not be deleted from the kernel command line even
 though not all of them are actually meaningful to the kernel.  Boot
 loader authors who need additional command line options for the boot
 loader itself should get them registered in
-linux/Documentation/kernel-parameters.txt to make sure they will not
+Documentation/kernel-parameters.txt to make sure they will not
 conflict with actual kernel options now or in the future.
 
   vga=<mode>

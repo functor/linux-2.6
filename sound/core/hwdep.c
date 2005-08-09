@@ -22,6 +22,7 @@
 #include <sound/driver.h>
 #include <linux/major.h>
 #include <linux/init.h>
+#include <linux/smp_lock.h>
 #include <linux/slab.h>
 #include <linux/time.h>
 #include <sound/core.h>
@@ -34,7 +35,7 @@ MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Hardware dependent layer");
 MODULE_LICENSE("GPL");
 
-snd_hwdep_t *snd_hwdep_devices[SNDRV_CARDS * SNDRV_MINOR_HWDEPS];
+static snd_hwdep_t *snd_hwdep_devices[SNDRV_CARDS * SNDRV_MINOR_HWDEPS];
 
 static DECLARE_MUTEX(register_mutex);
 
@@ -49,23 +50,23 @@ static int snd_hwdep_dev_unregister(snd_device_t *device);
 
 static loff_t snd_hwdep_llseek(struct file * file, loff_t offset, int orig)
 {
-	snd_hwdep_t *hw = snd_magic_cast(snd_hwdep_t, file->private_data, return -ENXIO);
+	snd_hwdep_t *hw = file->private_data;
 	if (hw->ops.llseek)
 		return hw->ops.llseek(hw, file, offset, orig);
 	return -ENXIO;
 }
 
-static ssize_t snd_hwdep_read(struct file * file, char *buf, size_t count, loff_t *offset)
+static ssize_t snd_hwdep_read(struct file * file, char __user *buf, size_t count, loff_t *offset)
 {
-	snd_hwdep_t *hw = snd_magic_cast(snd_hwdep_t, file->private_data, return -ENXIO);
+	snd_hwdep_t *hw = file->private_data;
 	if (hw->ops.read)
 		return hw->ops.read(hw, buf, count, offset);
 	return -ENXIO;	
 }
 
-static ssize_t snd_hwdep_write(struct file * file, const char *buf, size_t count, loff_t *offset)
+static ssize_t snd_hwdep_write(struct file * file, const char __user *buf, size_t count, loff_t *offset)
 {
-	snd_hwdep_t *hw = snd_magic_cast(snd_hwdep_t, file->private_data, return -ENXIO);
+	snd_hwdep_t *hw = file->private_data;
 	if (hw->ops.write)
 		return hw->ops.write(hw, buf, count, offset);
 	return -ENXIO;	
@@ -157,7 +158,7 @@ static int snd_hwdep_open(struct inode *inode, struct file * file)
 static int snd_hwdep_release(struct inode *inode, struct file * file)
 {
 	int err = -ENXIO;
-	snd_hwdep_t *hw = snd_magic_cast(snd_hwdep_t, file->private_data, return -ENXIO);
+	snd_hwdep_t *hw = file->private_data;
 	down(&hw->open_mutex);
 	if (hw->ops.release) {
 		err = hw->ops.release(hw, file);
@@ -173,13 +174,13 @@ static int snd_hwdep_release(struct inode *inode, struct file * file)
 
 static unsigned int snd_hwdep_poll(struct file * file, poll_table * wait)
 {
-	snd_hwdep_t *hw = snd_magic_cast(snd_hwdep_t, file->private_data, return 0);
+	snd_hwdep_t *hw = file->private_data;
 	if (hw->ops.poll)
 		return hw->ops.poll(hw, file, wait);
 	return 0;
 }
 
-static int snd_hwdep_info(snd_hwdep_t *hw, snd_hwdep_info_t *_info)
+static int snd_hwdep_info(snd_hwdep_t *hw, snd_hwdep_info_t __user *_info)
 {
 	snd_hwdep_info_t info;
 	
@@ -193,7 +194,7 @@ static int snd_hwdep_info(snd_hwdep_t *hw, snd_hwdep_info_t *_info)
 	return 0;
 }
 
-static int snd_hwdep_dsp_status(snd_hwdep_t *hw, snd_hwdep_dsp_status_t *_info)
+static int snd_hwdep_dsp_status(snd_hwdep_t *hw, snd_hwdep_dsp_status_t __user *_info)
 {
 	snd_hwdep_dsp_status_t info;
 	int err;
@@ -209,7 +210,7 @@ static int snd_hwdep_dsp_status(snd_hwdep_t *hw, snd_hwdep_dsp_status_t *_info)
 	return 0;
 }
 
-static int snd_hwdep_dsp_load(snd_hwdep_t *hw, snd_hwdep_dsp_image_t *_info)
+static int snd_hwdep_dsp_load(snd_hwdep_t *hw, snd_hwdep_dsp_image_t __user *_info)
 {
 	snd_hwdep_dsp_image_t info;
 	int err;
@@ -222,7 +223,7 @@ static int snd_hwdep_dsp_load(snd_hwdep_t *hw, snd_hwdep_dsp_image_t *_info)
 	/* check whether the dsp was already loaded */
 	if (hw->dsp_loaded & (1 << info.index))
 		return -EBUSY;
-	if (verify_area(VERIFY_READ, info.image, info.length))
+	if (!access_ok(VERIFY_READ, info.image, info.length))
 		return -EFAULT;
 	err = hw->ops.dsp_load(hw, &info);
 	if (err < 0)
@@ -231,19 +232,19 @@ static int snd_hwdep_dsp_load(snd_hwdep_t *hw, snd_hwdep_dsp_image_t *_info)
 	return 0;
 }
 
-static int snd_hwdep_ioctl(struct inode *inode, struct file * file,
-			   unsigned int cmd, unsigned long arg)
+static long snd_hwdep_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
 {
-	snd_hwdep_t *hw = snd_magic_cast(snd_hwdep_t, file->private_data, return -ENXIO);
+	snd_hwdep_t *hw = file->private_data;
+	void __user *argp = (void __user *)arg;
 	switch (cmd) {
 	case SNDRV_HWDEP_IOCTL_PVERSION:
-		return put_user(SNDRV_HWDEP_VERSION, (int *)arg);
+		return put_user(SNDRV_HWDEP_VERSION, (int __user *)argp);
 	case SNDRV_HWDEP_IOCTL_INFO:
-		return snd_hwdep_info(hw, (snd_hwdep_info_t *)arg);
+		return snd_hwdep_info(hw, argp);
 	case SNDRV_HWDEP_IOCTL_DSP_STATUS:
-		return snd_hwdep_dsp_status(hw, (snd_hwdep_dsp_status_t *)arg);
+		return snd_hwdep_dsp_status(hw, argp);
 	case SNDRV_HWDEP_IOCTL_DSP_LOAD:
-		return snd_hwdep_dsp_load(hw, (snd_hwdep_dsp_image_t *)arg);
+		return snd_hwdep_dsp_load(hw, argp);
 	}
 	if (hw->ops.ioctl)
 		return hw->ops.ioctl(hw, file, cmd, arg);
@@ -252,7 +253,7 @@ static int snd_hwdep_ioctl(struct inode *inode, struct file * file,
 
 static int snd_hwdep_mmap(struct file * file, struct vm_area_struct * vma)
 {
-	snd_hwdep_t *hw = snd_magic_cast(snd_hwdep_t, file->private_data, return -ENXIO);
+	snd_hwdep_t *hw = file->private_data;
 	if (hw->ops.mmap)
 		return hw->ops.mmap(hw, file, vma);
 	return -ENXIO;
@@ -269,7 +270,7 @@ static int snd_hwdep_control_ioctl(snd_card_t * card, snd_ctl_file_t * control,
 		{
 			int device;
 
-			if (get_user(device, (int *)arg))
+			if (get_user(device, (int __user *)arg))
 				return -EFAULT;
 			device = device < 0 ? 0 : device + 1;
 			while (device < SNDRV_MINOR_HWDEPS) {
@@ -279,13 +280,13 @@ static int snd_hwdep_control_ioctl(snd_card_t * card, snd_ctl_file_t * control,
 			}
 			if (device >= SNDRV_MINOR_HWDEPS)
 				device = -1;
-			if (put_user(device, (int *)arg))
+			if (put_user(device, (int __user *)arg))
 				return -EFAULT;
 			return 0;
 		}
 	case SNDRV_CTL_IOCTL_HWDEP_INFO:
 		{
-			snd_hwdep_info_t *info = (snd_hwdep_info_t *)arg;
+			snd_hwdep_info_t __user *info = (snd_hwdep_info_t __user *)arg;
 			int device;
 			snd_hwdep_t *hwdep;
 
@@ -302,6 +303,12 @@ static int snd_hwdep_control_ioctl(snd_card_t * card, snd_ctl_file_t * control,
 	return -ENOIOCTLCMD;
 }
 
+#ifdef CONFIG_COMPAT
+#include "hwdep_compat.c"
+#else
+#define snd_hwdep_ioctl_compat	NULL
+#endif
+
 /*
 
  */
@@ -315,7 +322,8 @@ static struct file_operations snd_hwdep_f_ops =
 	.open =		snd_hwdep_open,
 	.release =	snd_hwdep_release,
 	.poll =		snd_hwdep_poll,
-	.ioctl =	snd_hwdep_ioctl,
+	.unlocked_ioctl =	snd_hwdep_ioctl,
+	.compat_ioctl =	snd_hwdep_ioctl_compat,
 	.mmap =		snd_hwdep_mmap,
 };
 
@@ -351,7 +359,7 @@ int snd_hwdep_new(snd_card_t * card, char *id, int device, snd_hwdep_t ** rhwdep
 	snd_assert(rhwdep != NULL, return -EINVAL);
 	*rhwdep = NULL;
 	snd_assert(card != NULL, return -ENXIO);
-	hwdep = snd_magic_kcalloc(snd_hwdep_t, 0, GFP_KERNEL);
+	hwdep = kcalloc(1, sizeof(*hwdep), GFP_KERNEL);
 	if (hwdep == NULL)
 		return -ENOMEM;
 	hwdep->card = card;
@@ -377,19 +385,19 @@ static int snd_hwdep_free(snd_hwdep_t *hwdep)
 	snd_assert(hwdep != NULL, return -ENXIO);
 	if (hwdep->private_free)
 		hwdep->private_free(hwdep);
-	snd_magic_kfree(hwdep);
+	kfree(hwdep);
 	return 0;
 }
 
 static int snd_hwdep_dev_free(snd_device_t *device)
 {
-	snd_hwdep_t *hwdep = snd_magic_cast(snd_hwdep_t, device->device_data, return -ENXIO);
+	snd_hwdep_t *hwdep = device->device_data;
 	return snd_hwdep_free(hwdep);
 }
 
 static int snd_hwdep_dev_register(snd_device_t *device)
 {
-	snd_hwdep_t *hwdep = snd_magic_cast(snd_hwdep_t, device->device_data, return -ENXIO);
+	snd_hwdep_t *hwdep = device->device_data;
 	int idx, err;
 	char name[32];
 
@@ -432,7 +440,7 @@ static int snd_hwdep_dev_register(snd_device_t *device)
 
 static int snd_hwdep_dev_unregister(snd_device_t *device)
 {
-	snd_hwdep_t *hwdep = snd_magic_cast(snd_hwdep_t, device->device_data, return -ENXIO);
+	snd_hwdep_t *hwdep = device->device_data;
 	int idx;
 
 	snd_assert(hwdep != NULL, return -ENXIO);
@@ -496,12 +504,14 @@ static int __init alsa_hwdep_init(void)
 	}
 	snd_hwdep_proc_entry = entry;
 	snd_ctl_register_ioctl(snd_hwdep_control_ioctl);
+	snd_ctl_register_ioctl_compat(snd_hwdep_control_ioctl);
 	return 0;
 }
 
 static void __exit alsa_hwdep_exit(void)
 {
 	snd_ctl_unregister_ioctl(snd_hwdep_control_ioctl);
+	snd_ctl_unregister_ioctl_compat(snd_hwdep_control_ioctl);
 	if (snd_hwdep_proc_entry) {
 		snd_info_unregister(snd_hwdep_proc_entry);
 		snd_hwdep_proc_entry = NULL;

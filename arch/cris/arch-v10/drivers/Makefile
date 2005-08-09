@@ -2,8 +2,6 @@
 # Makefile for Etrax-specific drivers
 #
 
-obj-$(CONFIG_ETRAX_ETHERNET)            += ethernet.o
-obj-$(CONFIG_ETRAX_SERIAL)              += serial.o
 obj-$(CONFIG_ETRAX_AXISFLASHMAP)        += axisflashmap.o
 obj-$(CONFIG_ETRAX_I2C) 	        += i2c.o
 obj-$(CONFIG_ETRAX_I2C_EEPROM)          += eeprom.o

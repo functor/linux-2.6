@@ -44,7 +44,6 @@
 #include <linux/ptrace.h>
 
 #include <asm/uaccess.h>
-#include <asm/pgalloc.h>
 #include <asm/io.h>
 #include <asm/tlbflush.h>
 #include <asm/irq.h>
@@ -122,7 +121,7 @@ struct pt_regs * fastcall save_v86_state(struct kernel_vm86_regs * regs)
 		do_exit(SIGSEGV);
 	}
 
-	tss = init_tss + get_cpu();
+	tss = &per_cpu(init_tss, get_cpu());
 	current->thread.esp0 = current->thread.saved_esp0;
 	current->thread.sysenter_cs = __KERNEL_CS;
 	load_esp0(tss, &current->thread);
@@ -138,6 +137,7 @@ struct pt_regs * fastcall save_v86_state(struct kernel_vm86_regs * regs)
 static void mark_screen_rdonly(struct task_struct * tsk)
 {
 	pgd_t *pgd;
+	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte, *mapped;
 	int i;
@@ -145,21 +145,14 @@ static void mark_screen_rdonly(struct task_struct * tsk)
 	preempt_disable();
 	spin_lock(&tsk->mm->page_table_lock);
 	pgd = pgd_offset(tsk->mm, 0xA0000);
-	if (pgd_none(*pgd))
+	if (pgd_none_or_clear_bad(pgd))
 		goto out;
-	if (pgd_bad(*pgd)) {
-		pgd_ERROR(*pgd);
-		pgd_clear(pgd);
+	pud = pud_offset(pgd, 0xA0000);
+	if (pud_none_or_clear_bad(pud))
 		goto out;
-	}
-	pmd = pmd_offset(pgd, 0xA0000);
-	if (pmd_none(*pmd))
+	pmd = pmd_offset(pud, 0xA0000);
+	if (pmd_none_or_clear_bad(pmd))
 		goto out;
-	if (pmd_bad(*pmd)) {
-		pmd_ERROR(*pmd);
-		pmd_clear(pmd);
-		goto out;
-	}
 	pte = mapped = pte_offset_map(pmd, 0xA0000);
 	for (i = 0; i < 32; i++) {
 		if (pte_present(*pte))
@@ -178,8 +171,9 @@ out:
 static int do_vm86_irq_handling(int subfunction, int irqnumber);
 static void do_sys_vm86(struct kernel_vm86_struct *info, struct task_struct *tsk);
 
-asmlinkage int sys_vm86old(struct vm86_struct __user * v86)
+asmlinkage int sys_vm86old(struct pt_regs regs)
 {
+	struct vm86_struct __user *v86 = (struct vm86_struct __user *)regs.ebx;
 	struct kernel_vm86_struct info; /* declare this _on top_,
 					 * this avoids wasting of stack space.
 					 * This remains on the stack until we
@@ -198,7 +192,7 @@ asmlinkage int sys_vm86old(struct vm86_struct __user * v86)
 	if (tmp)
 		goto out;
 	memset(&info.vm86plus, 0, (int)&info.regs32 - (int)&info.vm86plus);
-	info.regs32 = (struct pt_regs *) &v86;
+	info.regs32 = &regs;
 	tsk->thread.vm86_info = v86;
 	do_sys_vm86(&info, tsk);
 	ret = 0;	/* we never return here */
@@ -207,7 +201,7 @@ out:
 }
 
 
-asmlinkage int sys_vm86(unsigned long subfunction, struct vm86plus_struct __user * v86)
+asmlinkage int sys_vm86(struct pt_regs regs)
 {
 	struct kernel_vm86_struct info; /* declare this _on top_,
 					 * this avoids wasting of stack space.
@@ -216,18 +210,19 @@ asmlinkage int sys_vm86(unsigned long subfunction, struct vm86plus_struct __user
 					 */
 	struct task_struct *tsk;
 	int tmp, ret;
+	struct vm86plus_struct __user *v86;
 
 	tsk = current;
-	switch (subfunction) {
+	switch (regs.ebx) {
 		case VM86_REQUEST_IRQ:
 		case VM86_FREE_IRQ:
 		case VM86_GET_IRQ_BITS:
 		case VM86_GET_AND_RESET_IRQ:
-			ret = do_vm86_irq_handling(subfunction,(int)v86);
+			ret = do_vm86_irq_handling(regs.ebx, (int)regs.ecx);
 			goto out;
 		case VM86_PLUS_INSTALL_CHECK:
 			/* NOTE: on old vm86 stuff this will return the error
-			   from verify_area(), because the subfunction is
+			   from access_ok(), because the subfunction is
 			   interpreted as (invalid) address to vm86_struct.
 			   So the installation check works.
 			 */
@@ -239,13 +234,14 @@ asmlinkage int sys_vm86(unsigned long subfunction, struct vm86plus_struct __user
 	ret = -EPERM;
 	if (tsk->thread.saved_esp0)
 		goto out;
+	v86 = (struct vm86plus_struct __user *)regs.ecx;
 	tmp  = copy_from_user(&info, v86, VM86_REGS_SIZE1);
 	tmp += copy_from_user(&info.regs.VM86_REGS_PART2, &v86->regs.VM86_REGS_PART2,
 		(long)&info.regs32 - (long)&info.regs.VM86_REGS_PART2);
 	ret = -EFAULT;
 	if (tmp)
 		goto out;
-	info.regs32 = (struct pt_regs *) &subfunction;
+	info.regs32 = &regs;
 	info.vm86plus.is_vm86pus = 1;
 	tsk->thread.vm86_info = (struct vm86_struct __user *)v86;
 	do_sys_vm86(&info, tsk);
@@ -298,10 +294,10 @@ static void do_sys_vm86(struct kernel_vm86_struct *info, struct task_struct *tsk
  */
 	info->regs32->eax = 0;
 	tsk->thread.saved_esp0 = tsk->thread.esp0;
-	asm volatile("movl %%fs,%0":"=m" (tsk->thread.saved_fs));
-	asm volatile("movl %%gs,%0":"=m" (tsk->thread.saved_gs));
+	asm volatile("mov %%fs,%0":"=m" (tsk->thread.saved_fs));
+	asm volatile("mov %%gs,%0":"=m" (tsk->thread.saved_gs));
 
-	tss = init_tss + get_cpu();
+	tss = &per_cpu(init_tss, get_cpu());
 	tsk->thread.esp0 = (unsigned long) &info->VM86_TSS_ESP0;
 	if (cpu_has_sep)
 		tsk->thread.sysenter_cs = 0;
@@ -392,6 +388,7 @@ static inline unsigned long get_vflags(struct kernel_vm86_regs * regs)
 
 	if (VEFLAGS & VIF_MASK)
 		flags |= IF_MASK;
+	flags |= IOPL_MASK;
 	return flags | (VEFLAGS & current->thread.v86mask);
 }
 
@@ -486,9 +483,10 @@ static inline int is_revectored(int nr, struct revectored_struct * bitmap)
  * in userspace is always better than an Oops anyway.) [KD]
  */
 static void do_int(struct kernel_vm86_regs *regs, int i,
-    unsigned char * ssp, unsigned short sp)
+    unsigned char __user * ssp, unsigned short sp)
 {
-	unsigned long *intr_ptr, segoffs;
+	unsigned long __user *intr_ptr;
+	unsigned long segoffs;
 
 	if (regs->cs == BIOSSEG)
 		goto cannot_handle;
@@ -496,7 +494,7 @@ static void do_int(struct kernel_vm86_regs *regs, int i,
 		goto cannot_handle;
 	if (i==0x21 && is_revectored(AH(regs),&KVM86->int21_revectored))
 		goto cannot_handle;
-	intr_ptr = (unsigned long *) (i << 2);
+	intr_ptr = (unsigned long __user *) (i << 2);
 	if (get_user(segoffs, intr_ptr))
 		goto cannot_handle;
 	if ((segoffs >> 16) == BIOSSEG)
@@ -521,7 +519,7 @@ int handle_vm86_trap(struct kernel_vm86_regs * regs, long error_code, int trapno
 	if (VMPI.is_vm86pus) {
 		if ( (trapno==3) || (trapno==1) )
 			return_to_32bit(regs, VM86_TRAP + (trapno << 8));
-		do_int(regs, trapno, (unsigned char *) (regs->ss << 4), SP(regs));
+		do_int(regs, trapno, (unsigned char __user *) (regs->ss << 4), SP(regs));
 		return 0;
 	}
 	if (trapno !=1)
@@ -541,7 +539,9 @@ int handle_vm86_trap(struct kernel_vm86_regs * regs, long error_code, int trapno
 
 void handle_vm86_fault(struct kernel_vm86_regs * regs, long error_code)
 {
-	unsigned char *csp, *ssp, opcode;
+	unsigned char opcode;
+	unsigned char __user *csp;
+	unsigned char __user *ssp;
 	unsigned short ip, sp;
 	int data32, pref_done;
 
@@ -553,8 +553,8 @@ void handle_vm86_fault(struct kernel_vm86_regs * regs, long error_code)
 		return_to_32bit(regs, VM86_PICRETURN); \
 	return; } while (0)
 
-	csp = (unsigned char *) (regs->cs << 4);
-	ssp = (unsigned char *) (regs->ss << 4);
+	csp = (unsigned char __user *) (regs->cs << 4);
+	ssp = (unsigned char __user *) (regs->ss << 4);
 	sp = SP(regs);
 	ip = IP(regs);
 
@@ -698,7 +698,7 @@ static struct vm86_irqs {
 	int sig;
 } vm86_irqs[16];
 
-static spinlock_t irqbits_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(irqbits_lock);
 static int irqbits;
 
 #define ALLOWED_SIGS ( 1 /* 0 = don't send a signal */ \
@@ -717,7 +717,14 @@ static irqreturn_t irq_handler(int intno, void *dev_id, struct pt_regs * regs)
 	irqbits |= irq_bit;
 	if (vm86_irqs[intno].sig)
 		send_sig(vm86_irqs[intno].sig, vm86_irqs[intno].tsk, 1);
-	/* else user will poll for IRQs */
+	/*
+	 * IRQ will be re-enabled when user asks for the irq (whether
+	 * polling or as a result of the signal)
+	 */
+	disable_irq_nosync(intno);
+	spin_unlock_irqrestore(&irqbits_lock, flags);
+	return IRQ_HANDLED;
+
 out:
 	spin_unlock_irqrestore(&irqbits_lock, flags);	
 	return IRQ_NONE;
@@ -727,15 +734,15 @@ static inline void free_vm86_irq(int irqnumber)
 {
 	unsigned long flags;
 
-	free_irq(irqnumber,0);
-	vm86_irqs[irqnumber].tsk = 0;
+	free_irq(irqnumber, NULL);
+	vm86_irqs[irqnumber].tsk = NULL;
 
 	spin_lock_irqsave(&irqbits_lock, flags);	
 	irqbits &= ~(1 << irqnumber);
 	spin_unlock_irqrestore(&irqbits_lock, flags);	
 }
 
-void release_x86_irqs(struct task_struct *task)
+void release_vm86_irqs(struct task_struct *task)
 {
 	int i;
 	for (i = FIRST_VM86_IRQ ; i <= LAST_VM86_IRQ; i++)
@@ -747,17 +754,20 @@ static inline int get_and_reset_irq(int irqnumber)
 {
 	int bit;
 	unsigned long flags;
+	int ret = 0;
 	
 	if (invalid_vm86_irq(irqnumber)) return 0;
 	if (vm86_irqs[irqnumber].tsk != current) return 0;
 	spin_lock_irqsave(&irqbits_lock, flags);	
 	bit = irqbits & (1 << irqnumber);
 	irqbits &= ~bit;
+	if (bit) {
+		enable_irq(irqnumber);
+		ret = 1;
+	}
+
 	spin_unlock_irqrestore(&irqbits_lock, flags);	
-	if (!bit)
-		return 0;
-	enable_irq(irqnumber);
-	return 1;
+	return ret;
 }
 
 
@@ -778,7 +788,7 @@ static int do_vm86_irq_handling(int subfunction, int irqnumber)
 			if (!((1 << sig) & ALLOWED_SIGS)) return -EPERM;
 			if (invalid_vm86_irq(irq)) return -EPERM;
 			if (vm86_irqs[irq].tsk) return -EPERM;
-			ret = request_irq(irq, &irq_handler, 0, VM86_IRQNAME, 0);
+			ret = request_irq(irq, &irq_handler, 0, VM86_IRQNAME, NULL);
 			if (ret) return ret;
 			vm86_irqs[irq].sig = sig;
 			vm86_irqs[irq].tsk = current;

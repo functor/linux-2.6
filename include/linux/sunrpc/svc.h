@@ -67,7 +67,7 @@ struct svc_serv {
  * read responses (that have a header, and some data pages, and possibly
  * a tail) and means we can share some client side routines.
  *
- * The xdr_buf.head iovec always points to the first page in the rq_*pages
+ * The xdr_buf.head kvec always points to the first page in the rq_*pages
  * list.  The xdr_buf.pages pointer points to the second page on that
  * list.  xdr_buf.tail points to the end of the first page.
  * This assumes that the non-page part of an rpc reply will fit
@@ -78,7 +78,7 @@ struct svc_serv {
  */
 #define RPCSVC_MAXPAGES		((RPCSVC_MAXPAYLOAD+PAGE_SIZE-1)/PAGE_SIZE + 2)
 
-static inline u32 svc_getu32(struct iovec *iov)
+static inline u32 svc_getu32(struct kvec *iov)
 {
 	u32 val, *vp;
 	vp = iov->iov_base;
@@ -87,7 +87,15 @@ static inline u32 svc_getu32(struct iovec *iov)
 	iov->iov_len -= sizeof(u32);
 	return val;
 }
-static inline void svc_putu32(struct iovec *iov, u32 val)
+
+static inline void svc_ungetu32(struct kvec *iov)
+{
+	u32 *vp = (u32 *)iov->iov_base;
+	iov->iov_base = (void *)(vp - 1);
+	iov->iov_len += sizeof(*vp);
+}
+
+static inline void svc_putu32(struct kvec *iov, u32 val)
 {
 	u32 *vp = iov->iov_base + iov->iov_len;
 	*vp = val;
@@ -162,14 +170,14 @@ static inline int
 xdr_argsize_check(struct svc_rqst *rqstp, u32 *p)
 {
 	char *cp = (char *)p;
-	struct iovec *vec = &rqstp->rq_arg.head[0];
+	struct kvec *vec = &rqstp->rq_arg.head[0];
 	return cp - (char*)vec->iov_base <= vec->iov_len;
 }
 
 static inline int
 xdr_ressize_check(struct svc_rqst *rqstp, u32 *p)
 {
-	struct iovec *vec = &rqstp->rq_res.head[0];
+	struct kvec *vec = &rqstp->rq_res.head[0];
 	char *cp = (char*)p;
 
 	vec->iov_len = cp - (char*)vec->iov_base;
@@ -243,6 +251,7 @@ struct svc_program {
 	char *			pg_name;	/* service name */
 	char *			pg_class;	/* class name: services sharing authentication */
 	struct svc_stat *	pg_stats;	/* rpc statistics */
+	int			(*pg_authenticate)(struct svc_rqst *);
 };
 
 /*

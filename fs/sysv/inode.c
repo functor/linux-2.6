@@ -142,8 +142,9 @@ static inline void write3byte(struct sysv_sb_info *sbi,
 }
 
 static struct inode_operations sysv_symlink_inode_operations = {
-	.readlink	= page_readlink,
-	.follow_link	= page_follow_link,
+	.readlink	= generic_readlink,
+	.follow_link	= page_follow_link_light,
+	.put_link	= page_put_link,
 	.getattr	= sysv_getattr,
 };
 
@@ -232,12 +233,12 @@ static struct buffer_head * sysv_update_inode(struct inode * inode)
 	if (!ino || ino > sbi->s_ninodes) {
 		printk("Bad inode number on dev %s: %d is out of range\n",
 		       inode->i_sb->s_id, ino);
-		return 0;
+		return NULL;
 	}
 	raw_inode = sysv_raw_inode(sb, ino, &bh);
 	if (!raw_inode) {
 		printk("unable to read i-node block\n");
-		return 0;
+		return NULL;
 	}
 
 	raw_inode->i_mode = cpu_to_fs16(sbi, inode->i_mode);
@@ -259,13 +260,14 @@ static struct buffer_head * sysv_update_inode(struct inode * inode)
 	return bh;
 }
 
-void sysv_write_inode(struct inode * inode, int wait)
+int sysv_write_inode(struct inode * inode, int wait)
 {
 	struct buffer_head *bh;
 	lock_kernel();
 	bh = sysv_update_inode(inode);
 	brelse(bh);
 	unlock_kernel();
+	return 0;
 }
 
 int sysv_sync_inode(struct inode * inode)
@@ -339,7 +341,7 @@ int __init sysv_init_icache(void)
 {
 	sysv_inode_cachep = kmem_cache_create("sysv_inode_cache",
 			sizeof(struct sysv_inode_info), 0,
-			SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT, 
+			SLAB_RECLAIM_ACCOUNT,
 			init_once, NULL);
 	if (!sysv_inode_cachep)
 		return -ENOMEM;

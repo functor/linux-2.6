@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003  Maciej W. Rozycki
+ * Copyright (C) 2003, 2004  Maciej W. Rozycki
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -13,6 +13,7 @@
 #include <linux/stddef.h>
 
 #include <asm/bugs.h>
+#include <asm/compiler.h>
 #include <asm/cpu.h>
 #include <asm/fpu.h>
 #include <asm/mipsregs.h>
@@ -82,7 +83,7 @@ static inline void mult_sh_align_mod(long *v1, long *v2, long *w,
 		".set	pop"
 		: "=&r" (lv1), "=r" (lw)
 		: "r" (m1), "r" (m2), "r" (s), "I" (0)
-		: "hi", "lo", "accum");
+		: "hi", "lo", GCC_REG_ACCUM);
 	/* We have to use single integers for m1 and m2 and a double
 	 * one for p to be sure the mulsidi3 gcc's RTL multiplication
 	 * instruction has the workaround applied.  Older versions of
@@ -177,7 +178,7 @@ static inline void check_daddi(void)
 	extern asmlinkage void handle_daddi_ov(void);
 	unsigned long flags;
 	void *handler;
-	long v;
+	long v, tmp;
 
 	printk("Checking for the daddi bug... ");
 
@@ -197,13 +198,15 @@ static inline void check_daddi(void)
 		".set	noat\n\t"
 		".set	noreorder\n\t"
 		".set	nomacro\n\t"
+		"addiu	%1, $0, %2\n\t"
+		"dsrl	%1, %1, 1\n\t"
 #ifdef HAVE_AS_SET_DADDI
 		".set	daddi\n\t"
 #endif
-		"daddi	%0, %1, %2\n\t"
+		"daddi	%0, %1, %3\n\t"
 		".set	pop"
-		: "=r" (v)
-		: "r" (0x7fffffffffffedcd), "I" (0x1234));
+		: "=r" (v), "=&r" (tmp)
+		: "I" (0xffffffffffffdb9a), "I" (0x1234));
 	set_except_vector(12, handler);
 	local_irq_restore(flags);
 
@@ -217,9 +220,11 @@ static inline void check_daddi(void)
 	local_irq_save(flags);
 	handler = set_except_vector(12, handle_daddi_ov);
 	asm volatile(
-		"daddi	%0, %1, %2"
-		: "=r" (v)
-		: "r" (0x7fffffffffffedcd), "I" (0x1234));
+		"addiu	%1, $0, %2\n\t"
+		"dsrl	%1, %1, 1\n\t"
+		"daddi	%0, %1, %3"
+		: "=r" (v), "=&r" (tmp)
+		: "I" (0xffffffffffffdb9a), "I" (0x1234));
 	set_except_vector(12, handler);
 	local_irq_restore(flags);
 
@@ -240,7 +245,7 @@ static inline void check_daddi(void)
 
 static inline void check_daddiu(void)
 {
-	long v, w;
+	long v, w, tmp;
 
 	printk("Checking for the daddiu bug... ");
 
@@ -265,15 +270,17 @@ static inline void check_daddiu(void)
 		".set	noat\n\t"
 		".set	noreorder\n\t"
 		".set	nomacro\n\t"
+		"addiu	%2, $0, %3\n\t"
+		"dsrl	%2, %2, 1\n\t"
 #ifdef HAVE_AS_SET_DADDI
 		".set	daddi\n\t"
 #endif
-		"daddiu	%0, %2, %3\n\t"
-		"addiu	%1, $0, %3\n\t"
+		"daddiu	%0, %2, %4\n\t"
+		"addiu	%1, $0, %4\n\t"
 		"daddu	%1, %2\n\t"
 		".set	pop"
-		: "=&r" (v), "=&r" (w)
-		: "r" (0x7fffffffffffedcd), "I" (0x1234));
+		: "=&r" (v), "=&r" (w), "=&r" (tmp)
+		: "I" (0xffffffffffffdb9a), "I" (0x1234));
 
 	if (v == w) {
 		printk("no.\n");
@@ -283,11 +290,13 @@ static inline void check_daddiu(void)
 	printk("yes, workaround... ");
 
 	asm volatile(
-		"daddiu	%0, %2, %3\n\t"
-		"addiu	%1, $0, %3\n\t"
+		"addiu	%2, $0, %3\n\t"
+		"dsrl	%2, %2, 1\n\t"
+		"daddiu	%0, %2, %4\n\t"
+		"addiu	%1, $0, %4\n\t"
 		"daddu	%1, %2"
-		: "=&r" (v), "=&r" (w)
-		: "r" (0x7fffffffffffedcd), "I" (0x1234));
+		: "=&r" (v), "=&r" (w), "=&r" (tmp)
+		: "I" (0xffffffffffffdb9a), "I" (0x1234));
 
 	if (v == w) {
 		printk("yes.\n");

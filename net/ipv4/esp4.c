@@ -1,6 +1,5 @@
 #include <linux/config.h>
 #include <linux/module.h>
-#include <net/inet_ecn.h>
 #include <net/ip.h>
 #include <net/xfrm.h>
 #include <net/esp.h>
@@ -11,8 +10,6 @@
 #include <net/icmp.h>
 #include <net/udp.h>
 
-#define MAX_SG_ONSTACK 4
-
 /* decapsulation data for use when post-processing */
 struct esp_decap_data {
 	xfrm_address_t	saddr;
@@ -20,47 +17,24 @@ struct esp_decap_data {
 	__u8		proto;
 };
 
-int esp_output(struct sk_buff *skb)
+static int esp_output(struct xfrm_state *x, struct sk_buff *skb)
 {
 	int err;
-	struct dst_entry *dst = skb->dst;
-	struct xfrm_state *x  = dst->xfrm;
-	struct iphdr *iph, *top_iph;
+	struct iphdr *top_iph;
 	struct ip_esp_hdr *esph;
 	struct crypto_tfm *tfm;
 	struct esp_data *esp;
 	struct sk_buff *trailer;
-	struct udphdr *uh = NULL;
-	u32 *udpdata32;
-	struct xfrm_encap_tmpl *encap = NULL;
 	int blksize;
 	int clen;
 	int alen;
 	int nfrags;
-	union {
-		struct iphdr	iph;
-		char 		buf[60];
-	} tmp_iph;
 
-	/* First, if the skb is not checksummed, complete checksum. */
-	if (skb->ip_summed == CHECKSUM_HW && skb_checksum_help(skb) == NULL) {
-		err = -EINVAL;
-		goto error_nolock;
-	}
-
-	spin_lock_bh(&x->lock);
-	err = xfrm_check_output(x, skb, AF_INET);
-	if (err)
-		goto error;
-	err = -ENOMEM;
-
-	/* Strip IP header in transport mode. Save it. */
-	if (!x->props.mode) {
-		iph = skb->nh.iph;
-		memcpy(&tmp_iph, iph, iph->ihl*4);
-		__skb_pull(skb, iph->ihl*4);
-	}
+	/* Strip IP+ESP header. */
+	__skb_pull(skb, skb->h.raw - skb->data);
 	/* Now skb is pure payload to encrypt */
+
+	err = -ENOMEM;
 
 	/* Round to block size */
 	clen = skb->len;
@@ -85,93 +59,39 @@ int esp_output(struct sk_buff *skb)
 	*(u8*)(trailer->tail + clen-skb->len - 2) = (clen - skb->len)-2;
 	pskb_put(skb, trailer, clen - skb->len);
 
-	encap = x->encap;
-
-	iph = skb->nh.iph;
-	if (x->props.mode) {
-		top_iph = (struct iphdr*)skb_push(skb, x->props.header_len);
-		esph = (struct ip_esp_hdr*)(top_iph+1);
-		if (encap && encap->encap_type) {
-			switch (encap->encap_type) {
-			case UDP_ENCAP_ESPINUDP:
-				uh = (struct udphdr*) esph;
-				esph = (struct ip_esp_hdr*)(uh+1);
-				top_iph->protocol = IPPROTO_UDP;
-				break;
-			case UDP_ENCAP_ESPINUDP_NON_IKE:
-				uh = (struct udphdr*) esph;
-				udpdata32 = (u32*)(uh+1);
-				udpdata32[0] = udpdata32[1] = 0;
-				esph = (struct ip_esp_hdr*)(udpdata32+2);
-				alen += 2;
-				top_iph->protocol = IPPROTO_UDP;
-				break;
-			default:
-				printk(KERN_INFO
-				       "esp_output(): Unhandled encap: %u\n",
-				       encap->encap_type);
-				top_iph->protocol = IPPROTO_ESP;
-				break;
-			}
-		} else
-			top_iph->protocol = IPPROTO_ESP;
-		*(u8*)(trailer->tail - 1) = IPPROTO_IPIP;
-		top_iph->ihl = 5;
-		top_iph->version = 4;
-		top_iph->tos = iph->tos;	/* DS disclosed */
-		if (x->props.flags & XFRM_STATE_NOECN)
-			IP_ECN_clear(top_iph);
-		top_iph->tot_len = htons(skb->len + alen);
-		top_iph->frag_off = iph->frag_off&htons(IP_DF);
-		if (!(top_iph->frag_off))
-			ip_select_ident(top_iph, dst, 0);
-		top_iph->ttl = iph->ttl;	/* TTL disclosed */
-		top_iph->check = 0;
-		top_iph->saddr = x->props.saddr.a4;
-		top_iph->daddr = x->id.daddr.a4;
-		memset(&(IPCB(skb)->opt), 0, sizeof(struct ip_options));
-	} else {
-		esph = (struct ip_esp_hdr*)skb_push(skb, x->props.header_len);
-		top_iph = (struct iphdr*)skb_push(skb, iph->ihl*4);
-		memcpy(top_iph, &tmp_iph, iph->ihl*4);
-		if (encap && encap->encap_type) {
-			switch (encap->encap_type) {
-			case UDP_ENCAP_ESPINUDP:
-				uh = (struct udphdr*) esph;
-				esph = (struct ip_esp_hdr*)(uh+1);
-				top_iph->protocol = IPPROTO_UDP;
-				break;
-			case UDP_ENCAP_ESPINUDP_NON_IKE:
-				uh = (struct udphdr*) esph;
-				udpdata32 = (u32*)(uh+1);
-				udpdata32[0] = udpdata32[1] = 0;
-				esph = (struct ip_esp_hdr*)(udpdata32+2);
-				alen += 2;
-				top_iph->protocol = IPPROTO_UDP;
-				break;
-			default:
-				printk(KERN_INFO
-				       "esp_output(): Unhandled encap: %u\n",
-				       encap->encap_type);
-				top_iph->protocol = IPPROTO_ESP;
-				break;
-			}
-		} else
-			top_iph->protocol = IPPROTO_ESP;
-		iph = &tmp_iph.iph;
-		top_iph->tot_len = htons(skb->len + alen);
-		top_iph->check = 0;
-		top_iph->frag_off = iph->frag_off;
-		*(u8*)(trailer->tail - 1) = iph->protocol;
-	}
+	__skb_push(skb, skb->data - skb->nh.raw);
+	top_iph = skb->nh.iph;
+	esph = (struct ip_esp_hdr *)(skb->nh.raw + top_iph->ihl*4);
+	top_iph->tot_len = htons(skb->len + alen);
+	*(u8*)(trailer->tail - 1) = top_iph->protocol;
 
 	/* this is non-NULL only with UDP Encapsulation */
-	if (encap && uh) {
+	if (x->encap) {
+		struct xfrm_encap_tmpl *encap = x->encap;
+		struct udphdr *uh;
+		u32 *udpdata32;
+
+		uh = (struct udphdr *)esph;
 		uh->source = encap->encap_sport;
 		uh->dest = encap->encap_dport;
-		uh->len = htons(skb->len + alen - sizeof(struct iphdr));
+		uh->len = htons(skb->len + alen - top_iph->ihl*4);
 		uh->check = 0;
-	}
+
+		switch (encap->encap_type) {
+		default:
+		case UDP_ENCAP_ESPINUDP:
+			esph = (struct ip_esp_hdr *)(uh + 1);
+			break;
+		case UDP_ENCAP_ESPINUDP_NON_IKE:
+			udpdata32 = (u32 *)(uh + 1);
+			udpdata32[0] = udpdata32[1] = 0;
+			esph = (struct ip_esp_hdr *)(udpdata32 + 2);
+			break;
+		}
+
+		top_iph->protocol = IPPROTO_UDP;
+	} else
+		top_iph->protocol = IPPROTO_ESP;
 
 	esph->spi = x->id.spi;
 	esph->seq_no = htonl(++x->replay.oseq);
@@ -180,17 +100,16 @@ int esp_output(struct sk_buff *skb)
 		crypto_cipher_set_iv(tfm, esp->conf.ivec, crypto_tfm_alg_ivsize(tfm));
 
 	do {
-		struct scatterlist sgbuf[nfrags>MAX_SG_ONSTACK ? 0 : nfrags];
-		struct scatterlist *sg = sgbuf;
+		struct scatterlist *sg = &esp->sgbuf[0];
 
-		if (unlikely(nfrags > MAX_SG_ONSTACK)) {
+		if (unlikely(nfrags > ESP_NUM_FAST_SG)) {
 			sg = kmalloc(sizeof(struct scatterlist)*nfrags, GFP_ATOMIC);
 			if (!sg)
 				goto error;
 		}
 		skb_to_sgvec(skb, sg, esph->enc_data+esp->conf.ivlen-skb->data, clen);
 		crypto_cipher_encrypt(tfm, sg, sg, clen);
-		if (unlikely(sg != sgbuf))
+		if (unlikely(sg != &esp->sgbuf[0]))
 			kfree(sg);
 	} while (0);
 
@@ -207,21 +126,9 @@ int esp_output(struct sk_buff *skb)
 
 	ip_send_check(top_iph);
 
-	skb->nh.raw = skb->data;
-
-	x->curlft.bytes += skb->len;
-	x->curlft.packets++;
-	spin_unlock_bh(&x->lock);
-	if ((skb->dst = dst_pop(dst)) == NULL) {
-		err = -EHOSTUNREACH;
-		goto error_nolock;
-	}
-	return NET_XMIT_BYPASS;
+	err = 0;
 
 error:
-	spin_unlock_bh(&x->lock);
-error_nolock:
-	kfree_skb(skb);
 	return err;
 }
 
@@ -230,7 +137,7 @@ error_nolock:
  * expensive, so we only support truncated data, which is the recommended
  * and common case.
  */
-int esp_input(struct xfrm_state *x, struct xfrm_decap_state *decap, struct sk_buff *skb)
+static int esp_input(struct xfrm_state *x, struct xfrm_decap_state *decap, struct sk_buff *skb)
 {
 	struct iphdr *iph;
 	struct ip_esp_hdr *esph;
@@ -278,19 +185,18 @@ int esp_input(struct xfrm_state *x, struct xfrm_decap_state *decap, struct sk_bu
 
         {
 		u8 nexthdr[2];
-		struct scatterlist sgbuf[nfrags>MAX_SG_ONSTACK ? 0 : nfrags];
-		struct scatterlist *sg = sgbuf;
+		struct scatterlist *sg = &esp->sgbuf[0];
 		u8 workbuf[60];
 		int padlen;
 
-		if (unlikely(nfrags > MAX_SG_ONSTACK)) {
+		if (unlikely(nfrags > ESP_NUM_FAST_SG)) {
 			sg = kmalloc(sizeof(struct scatterlist)*nfrags, GFP_ATOMIC);
 			if (!sg)
 				goto out;
 		}
 		skb_to_sgvec(skb, sg, sizeof(struct ip_esp_hdr) + esp->conf.ivlen, elen);
 		crypto_cipher_decrypt(esp->conf.tfm, sg, sg, elen);
-		if (unlikely(sg != sgbuf))
+		if (unlikely(sg != &esp->sgbuf[0]))
 			kfree(sg);
 
 		if (skb_copy_bits(skb, skb->len-alen-2, nexthdr, 2))
@@ -312,28 +218,14 @@ int esp_input(struct xfrm_state *x, struct xfrm_decap_state *decap, struct sk_bu
 			switch (decap->decap_type) {
 			case UDP_ENCAP_ESPINUDP:
 			case UDP_ENCAP_ESPINUDP_NON_IKE:
-
-				if ((void*)uh == (void*)esph) {
-					printk(KERN_DEBUG
-					       "esp_input(): Got ESP; expecting ESPinUDP\n");
-					break;
-				}
-
 				encap_data->proto = AF_INET;
 				encap_data->saddr.a4 = iph->saddr;
 				encap_data->sport = uh->source;
 				encap_len = (void*)esph - (void*)uh;
-				if (encap_len != sizeof(*uh))
-				  printk(KERN_DEBUG
-					 "esp_input(): UDP -> ESP: too much room: %d\n",
-					 encap_len);
 				break;
 
 			default:
-				printk(KERN_INFO
-			       "esp_input(): processing unknown encap type: %u\n",
-				       decap->decap_type);
-				break;
+				goto out;
 			}
 		}
 
@@ -352,7 +244,7 @@ out:
 	return -EINVAL;
 }
 
-int esp_post_input(struct xfrm_state *x, struct xfrm_decap_state *decap, struct sk_buff *skb)
+static int esp_post_input(struct xfrm_state *x, struct xfrm_decap_state *decap, struct sk_buff *skb)
 {
   
 	if (x->encap) {
@@ -366,11 +258,8 @@ int esp_post_input(struct xfrm_state *x, struct xfrm_decap_state *decap, struct 
 		if (encap->encap_type != decap->decap_type)
 			return -EINVAL;
 
-		/* Next, if we don't have an encap type, then ignore it */
-		if (!encap->encap_type)
-			return 0;
-
 		switch (encap->encap_type) {
+		default:
 		case UDP_ENCAP_ESPINUDP:
 		case UDP_ENCAP_ESPINUDP_NON_IKE:
 			/*
@@ -407,11 +296,6 @@ int esp_post_input(struct xfrm_state *x, struct xfrm_decap_state *decap, struct 
 				skb->ip_summed = CHECKSUM_UNNECESSARY;
 
 			break;
-		default:
-			printk(KERN_INFO
-			       "esp4_post_input(): Unhandled encap type: %u\n",
-			       encap->encap_type);
-			break;
 		}
 	}
 	return 0;
@@ -434,7 +318,7 @@ static u32 esp4_get_max_size(struct xfrm_state *x, int mtu)
 	return mtu + x->props.header_len + esp->auth.icv_trunc_len;
 }
 
-void esp4_err(struct sk_buff *skb, u32 info)
+static void esp4_err(struct sk_buff *skb, u32 info)
 {
 	struct iphdr *iph = (struct iphdr*)skb->data;
 	struct ip_esp_hdr *esph = (struct ip_esp_hdr*)(skb->data+(iph->ihl<<2));
@@ -452,7 +336,7 @@ void esp4_err(struct sk_buff *skb, u32 info)
 	xfrm_state_put(x);
 }
 
-void esp_destroy(struct xfrm_state *x)
+static void esp_destroy(struct xfrm_state *x)
 {
 	struct esp_data *esp = x->data;
 
@@ -478,7 +362,7 @@ void esp_destroy(struct xfrm_state *x)
 	kfree(esp);
 }
 
-int esp_init_state(struct xfrm_state *x, void *args)
+static int esp_init_state(struct xfrm_state *x, void *args)
 {
 	struct esp_data *esp = NULL;
 
@@ -506,7 +390,7 @@ int esp_init_state(struct xfrm_state *x, void *args)
 			goto error;
 		esp->auth.icv = esp_hmac_digest;
 
-		aalg_desc = xfrm_aalg_get_byname(x->aalg->alg_name);
+		aalg_desc = xfrm_aalg_get_byname(x->aalg->alg_name, 0);
 		BUG_ON(!aalg_desc);
 
 		if (aalg_desc->uinfo.auth.icv_fullbits/8 !=
@@ -541,27 +425,23 @@ int esp_init_state(struct xfrm_state *x, void *args)
 			goto error;
 		get_random_bytes(esp->conf.ivec, esp->conf.ivlen);
 	}
-	crypto_cipher_setkey(esp->conf.tfm, esp->conf.key, esp->conf.key_len);
+	if (crypto_cipher_setkey(esp->conf.tfm, esp->conf.key, esp->conf.key_len))
+		goto error;
 	x->props.header_len = sizeof(struct ip_esp_hdr) + esp->conf.ivlen;
 	if (x->props.mode)
 		x->props.header_len += sizeof(struct iphdr);
 	if (x->encap) {
 		struct xfrm_encap_tmpl *encap = x->encap;
 
-		if (encap->encap_type) {
-			switch (encap->encap_type) {
-			case UDP_ENCAP_ESPINUDP:
-				x->props.header_len += sizeof(struct udphdr);
-				break;
-			case UDP_ENCAP_ESPINUDP_NON_IKE:
-				x->props.header_len += sizeof(struct udphdr) + 2 * sizeof(u32);
-				break;
-			default:
-				printk (KERN_INFO
-				"esp_init_state(): Unhandled encap type: %u\n",
-					encap->encap_type);
-				break;
-			}
+		switch (encap->encap_type) {
+		default:
+			goto error;
+		case UDP_ENCAP_ESPINUDP:
+			x->props.header_len += sizeof(struct udphdr);
+			break;
+		case UDP_ENCAP_ESPINUDP_NON_IKE:
+			x->props.header_len += sizeof(struct udphdr) + 2 * sizeof(u32);
+			break;
 		}
 	}
 	x->data = esp;
@@ -569,15 +449,9 @@ int esp_init_state(struct xfrm_state *x, void *args)
 	return 0;
 
 error:
-	if (esp) {
-		if (esp->auth.tfm)
-			crypto_free_tfm(esp->auth.tfm);
-		if (esp->auth.work_icv)
-			kfree(esp->auth.work_icv);
-		if (esp->conf.tfm)
-			crypto_free_tfm(esp->conf.tfm);
-		kfree(esp);
-	}
+	x->data = esp;
+	esp_destroy(x);
+	x->data = NULL;
 	return -EINVAL;
 }
 
@@ -594,7 +468,7 @@ static struct xfrm_type esp_type =
 	.output		= esp_output
 };
 
-static struct inet_protocol esp4_protocol = {
+static struct net_protocol esp4_protocol = {
 	.handler	=	xfrm4_rcv,
 	.err_handler	=	esp4_err,
 	.no_policy	=	1,
@@ -604,7 +478,7 @@ static int __init esp4_init(void)
 {
 	struct xfrm_decap_state decap;
 
-	if (sizeof(struct esp_decap_data)  <
+	if (sizeof(struct esp_decap_data)  >
 	    sizeof(decap.decap_data)) {
 		extern void decap_data_too_small(void);
 

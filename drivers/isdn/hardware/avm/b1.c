@@ -67,14 +67,14 @@ avmcard *b1_alloc_card(int nr_controllers)
 
 	card = kmalloc(sizeof(*card), GFP_KERNEL);
 	if (!card)
-		return 0;
+		return NULL;
 
 	memset(card, 0, sizeof(*card));
 
         cinfo = kmalloc(sizeof(*cinfo) * nr_controllers, GFP_KERNEL);
 	if (!cinfo) {
 		kfree(card);
-		return 0;
+		return NULL;
 	}
 	memset(cinfo, 0, sizeof(*cinfo) * nr_controllers);
 
@@ -389,7 +389,7 @@ u16 b1_send_message(struct capi_ctr *ctrl, struct sk_buff *skb)
 					     CAPIMSG_NCCI(skb->data),
 					     CAPIMSG_MSGID(skb->data));
 		if (retval != CAPI_NOERROR) 
-			goto out;
+			return retval;
 
 		dlen = CAPIMSG_DATALEN(skb->data);
 
@@ -399,16 +399,14 @@ u16 b1_send_message(struct capi_ctr *ctrl, struct sk_buff *skb)
 		b1_put_slice(port, skb->data + len, dlen);
 		spin_unlock_irqrestore(&card->lock, flags);
 	} else {
-		retval = CAPI_NOERROR;
-
 	 	spin_lock_irqsave(&card->lock, flags);
 		b1_put_byte(port, SEND_MESSAGE);
 		b1_put_slice(port, skb->data, len);
 		spin_unlock_irqrestore(&card->lock, flags);
 	}
- out:
+
 	dev_kfree_skb_any(skb);
-	return retval;
+	return CAPI_NOERROR;
 }
 
 /* ------------------------------------------------------------- */
@@ -753,7 +751,7 @@ avmcard_dma_alloc(char *name, struct pci_dev *pdev, long rsize, long ssize)
  err_kfree:
 	kfree(p);
  err:
-	return 0;
+	return NULL;
 }
 
 void avmcard_dma_free(avmcard_dmainfo *p)

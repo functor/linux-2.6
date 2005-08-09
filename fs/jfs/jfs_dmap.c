@@ -1,5 +1,5 @@
 /*
- *   Copyright (C) International Business Machines Corp., 2000-2003
+ *   Copyright (C) International Business Machines Corp., 2000-2004
  *
  *   This program is free software;  you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -194,7 +194,7 @@ static s8 budtab[256] = {
 int dbMount(struct inode *ipbmap)
 {
 	struct bmap *bmp;
-	struct dbmap *dbmp_le;
+	struct dbmap_disk *dbmp_le;
 	struct metapage *mp;
 	int i;
 
@@ -216,7 +216,7 @@ int dbMount(struct inode *ipbmap)
 	}
 
 	/* copy the on-disk bmap descriptor to its in-memory version. */
-	dbmp_le = (struct dbmap *) mp->data;
+	dbmp_le = (struct dbmap_disk *) mp->data;
 	bmp->db_mapsize = le64_to_cpu(dbmp_le->dn_mapsize);
 	bmp->db_nfree = le64_to_cpu(dbmp_le->dn_nfree);
 	bmp->db_l2nbperpage = le32_to_cpu(dbmp_le->dn_l2nbperpage);
@@ -301,7 +301,7 @@ int dbUnmount(struct inode *ipbmap, int mounterror)
  */
 int dbSync(struct inode *ipbmap)
 {
-	struct dbmap *dbmp_le;
+	struct dbmap_disk *dbmp_le;
 	struct bmap *bmp = JFS_SBI(ipbmap->i_sb)->bmap;
 	struct metapage *mp;
 	int i;
@@ -318,7 +318,7 @@ int dbSync(struct inode *ipbmap)
 		return -EIO;
 	}
 	/* copy the in-memory version of the bmap to the on-disk version */
-	dbmp_le = (struct dbmap *) mp->data;
+	dbmp_le = (struct dbmap_disk *) mp->data;
 	dbmp_le->dn_mapsize = cpu_to_le64(bmp->db_mapsize);
 	dbmp_le->dn_nfree = cpu_to_le64(bmp->db_nfree);
 	dbmp_le->dn_l2nbperpage = cpu_to_le32(bmp->db_l2nbperpage);
@@ -382,7 +382,7 @@ int dbFree(struct inode *ip, s64 blkno, s64 nblocks)
 	IREAD_LOCK(ipbmap);
 
 	/* block to be freed better be within the mapsize. */
-	if (blkno + nblocks > bmp->db_mapsize) {
+	if (unlikely((blkno == 0) || (blkno + nblocks > bmp->db_mapsize))) {
 		IREAD_UNLOCK(ipbmap);
 		printk(KERN_ERR "blkno = %Lx, nblocks = %Lx\n",
 		       (unsigned long long) blkno,
@@ -471,6 +471,7 @@ dbUpdatePMap(struct inode *ipbmap,
 	struct metapage *mp;
 	struct jfs_log *log;
 	int lsn, difft, diffp;
+	unsigned long flags;
 
 	/* the blocks better be within the mapsize. */
 	if (blkno + nblocks > bmp->db_mapsize) {
@@ -504,6 +505,7 @@ dbUpdatePMap(struct inode *ipbmap,
 					   0);
 			if (mp == NULL)
 				return -EIO;
+			metapage_wait_for_io(mp);
 		}
 		dp = (struct dmap *) mp->data;
 
@@ -578,34 +580,32 @@ dbUpdatePMap(struct inode *ipbmap,
 		if (mp->lsn != 0) {
 			/* inherit older/smaller lsn */
 			logdiff(diffp, mp->lsn, log);
+			LOGSYNC_LOCK(log, flags);
 			if (difft < diffp) {
 				mp->lsn = lsn;
 
 				/* move bp after tblock in logsync list */
-				LOGSYNC_LOCK(log);
 				list_move(&mp->synclist, &tblk->synclist);
-				LOGSYNC_UNLOCK(log);
 			}
 
 			/* inherit younger/larger clsn */
-			LOGSYNC_LOCK(log);
 			logdiff(difft, tblk->clsn, log);
 			logdiff(diffp, mp->clsn, log);
 			if (difft > diffp)
 				mp->clsn = tblk->clsn;
-			LOGSYNC_UNLOCK(log);
+			LOGSYNC_UNLOCK(log, flags);
 		} else {
 			mp->log = log;
 			mp->lsn = lsn;
 
 			/* insert bp after tblock in logsync list */
-			LOGSYNC_LOCK(log);
+			LOGSYNC_LOCK(log, flags);
 
 			log->count++;
 			list_add(&mp->synclist, &tblk->synclist);
 
 			mp->clsn = tblk->clsn;
-			LOGSYNC_UNLOCK(log);
+			LOGSYNC_UNLOCK(log, flags);
 		}
 	}
 
@@ -1204,6 +1204,12 @@ static int dbAllocNext(struct bmap * bmp, struct dmap * dp, s64 blkno,
 	s8 *leaf;
 	u32 mask;
 
+	if (dp->tree.leafidx != cpu_to_le32(LEAFIND)) {
+		jfs_error(bmp->db_ipbmap->i_sb,
+			  "dbAllocNext: Corrupt dmap page");
+		return -EIO;
+	}
+
 	/* pick up a pointer to the leaves of the dmap tree.
 	 */
 	leaf = dp->tree.stree + le32_to_cpu(dp->tree.leafidx);
@@ -1327,7 +1333,15 @@ dbAllocNear(struct bmap * bmp,
 	    struct dmap * dp, s64 blkno, int nblocks, int l2nb, s64 * results)
 {
 	int word, lword, rc;
-	s8 *leaf = dp->tree.stree + le32_to_cpu(dp->tree.leafidx);
+	s8 *leaf;
+
+	if (dp->tree.leafidx != cpu_to_le32(LEAFIND)) {
+		jfs_error(bmp->db_ipbmap->i_sb,
+			  "dbAllocNear: Corrupt dmap page");
+		return -EIO;
+	}
+
+	leaf = dp->tree.stree + le32_to_cpu(dp->tree.leafidx);
 
 	/* determine the word within the dmap that holds the hint
 	 * (i.e. blkno).  also, determine the last word in the dmap
@@ -1488,6 +1502,13 @@ dbAllocAG(struct bmap * bmp, int agno, s64 nblocks, int l2nb, s64 * results)
 		return -EIO;
 	dcp = (struct dmapctl *) mp->data;
 	budmin = dcp->budmin;
+
+	if (dcp->leafidx != cpu_to_le32(CTLLEAFIND)) {
+		jfs_error(bmp->db_ipbmap->i_sb,
+			  "dbAllocAG: Corrupt dmapctl page");
+		release_metapage(mp);
+		return -EIO;
+	}
 
 	/* search the subtree(s) of the dmap control page that describes
 	 * the allocation group, looking for sufficient free space.  to begin,
@@ -1696,6 +1717,13 @@ static int dbFindCtl(struct bmap * bmp, int l2nb, int level, s64 * blkno)
 			return -EIO;
 		dcp = (struct dmapctl *) mp->data;
 		budmin = dcp->budmin;
+
+		if (dcp->leafidx != cpu_to_le32(CTLLEAFIND)) {
+			jfs_error(bmp->db_ipbmap->i_sb,
+				  "dbFindCtl: Corrupt dmapctl page");
+			release_metapage(mp);
+			return -EIO;
+		}
 
 		/* search the tree within the dmap control page for
 		 * sufficent free space.  if sufficient free space is found,
@@ -2458,6 +2486,13 @@ dbAdjCtl(struct bmap * bmp, s64 blkno, int newval, int alloc, int level)
 	if (mp == NULL)
 		return -EIO;
 	dcp = (struct dmapctl *) mp->data;
+
+	if (dcp->leafidx != cpu_to_le32(CTLLEAFIND)) {
+		jfs_error(bmp->db_ipbmap->i_sb,
+			  "dbAdjCtl: Corrupt dmapctl page");
+		release_metapage(mp);
+		return -EIO;
+	}
 
 	/* determine the leaf number corresponding to the block and
 	 * the index within the dmap control tree.
@@ -3747,7 +3782,7 @@ static int dbInitDmap(struct dmap * dp, s64 Blkno, int nblocks)
 
 	/* set the rest of the words in the page to allocated (ONES) */
 	for (i = w; i < LPERDMAP; i++)
-		dp->pmap[i] = dp->wmap[i] = ONES;
+		dp->pmap[i] = dp->wmap[i] = cpu_to_le32(ONES);
 
 	/*
 	 * init tree

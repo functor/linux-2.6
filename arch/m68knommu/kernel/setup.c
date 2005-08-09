@@ -1,7 +1,7 @@
 /*
  *  linux/arch/m68knommu/kernel/setup.c
  *
- *  Copyright (C) 1999-2002  Greg Ungerer (gerg@snapgear.com)
+ *  Copyright (C) 1999-2004  Greg Ungerer (gerg@snapgear.com)
  *  Copyright (C) 1998,1999  D. Jeff Dionne <jeff@lineo.ca>
  *  Copyleft  ()) 2000       James D. Schettine {james@telos-systems.com}
  *  Copyright (C) 1998       Kenneth Albanowski <kjahds@kjahds.com>
@@ -31,6 +31,7 @@
 #include <linux/bootmem.h>
 #include <linux/seq_file.h>
 #include <linux/root_dev.h>
+#include <linux/init.h>
 
 #include <asm/setup.h>
 #include <asm/irq.h>
@@ -44,8 +45,7 @@ unsigned long rom_length;
 unsigned long memory_start;
 unsigned long memory_end;
 
-char command_line[512];
-char saved_command_line[512];
+char command_line[COMMAND_LINE_SIZE];
 
 /* setup some dummy routines */
 static void dummy_waitbut(void)
@@ -106,11 +106,14 @@ void (*mach_power_off)( void ) = NULL;
 #if defined(CONFIG_M5249)
 	#define CPU "COLDFIRE(m5249)"
 #endif
+#if defined(CONFIG_M527x)
+	#define CPU "COLDFIRE(m5270/5271/5274/5275)"
+#endif
 #if defined(CONFIG_M5272)
 	#define CPU "COLDFIRE(m5272)"
 #endif
-#if defined(CONFIG_M5282)
-	#define CPU "COLDFIRE(m5282)"
+#if defined(CONFIG_M528x)
+	#define CPU "COLDFIRE(m5280/5282)"
 #endif
 #if defined(CONFIG_M5307)
 	#define	CPU "COLDFIRE(m5307)"
@@ -216,8 +219,8 @@ void setup_arch(char **cmdline_p)
 
 	/* Keep a copy of command line */
 	*cmdline_p = &command_line[0];
-	memcpy(saved_command_line, command_line, sizeof(saved_command_line));
-	saved_command_line[sizeof(saved_command_line)-1] = 0;
+	memcpy(saved_command_line, command_line, COMMAND_LINE_SIZE);
+	saved_command_line[COMMAND_LINE_SIZE-1] = 0;
 
 #ifdef DEBUG
 	if (strlen(*cmdline_p)) 

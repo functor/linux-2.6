@@ -228,7 +228,7 @@ mvme5100_init_IRQ(void)
 	for (i = 0; i < NUM_8259_INTERRUPTS; i++)
 		irq_desc[i].handler = &i8259_pic;
 
-	i8259_init(NULL);
+	i8259_init(0);
 #else
 	openpic_init(0);
 #endif
@@ -246,8 +246,8 @@ static __inline__ void
 mvme5100_set_bat(void)
 {
 	mb();
-	mtspr(DBAT1U, 0xf0001ffe);
-	mtspr(DBAT1L, 0xf000002a);
+	mtspr(SPRN_DBAT1U, 0xf0001ffe);
+	mtspr(SPRN_DBAT1L, 0xf000002a);
 	mb();
 }
 

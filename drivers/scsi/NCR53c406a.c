@@ -46,15 +46,15 @@
 #include <linux/proc_fs.h>
 #include <linux/stat.h>
 #include <linux/init.h>
+#include <linux/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
-#include <asm/bitops.h>
 #include <asm/irq.h>
 
 #include <linux/blkdev.h>
 #include <linux/spinlock.h>
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 
 /* ============================================================= */
 
@@ -170,7 +170,6 @@ enum Phase {
 /* Static function prototypes */
 static void NCR53c406a_intr(int, void *, struct pt_regs *);
 static irqreturn_t do_NCR53c406a_intr(int, void *, struct pt_regs *);
-static void wait_intr(void);
 static void chip_init(void);
 static void calc_port_addr(void);
 #ifndef IRQ_LEV
@@ -607,22 +606,24 @@ static int NCR53c406a_release(struct Scsi_Host *shost)
 }
 
 /* called from init/main.c */
-static void __init NCR53c406a_setup(char *str, int *ints)
+static int __init NCR53c406a_setup(char *str)
 {
 	static size_t setup_idx = 0;
 	size_t i;
+	int ints[4];
 
 	DEB(printk("NCR53c406a: Setup called\n");
 	    );
 
 	if (setup_idx >= PORT_COUNT - 1) {
 		printk("NCR53c406a: Setup called too many times.  Bad LILO params?\n");
-		return;
+		return 0;
 	}
+	get_options(str, 4, ints);
 	if (ints[0] < 1 || ints[0] > 3) {
 		printk("NCR53c406a: Malformed command line\n");
 		printk("NCR53c406a: Usage: ncr53c406a=<PORTBASE>[,<IRQ>[,<FASTPIO>]]\n");
-		return;
+		return 0;
 	}
 	for (i = 0; i < PORT_COUNT && !port_base; i++)
 		if (ports[i] == ints[1]) {
@@ -632,7 +633,7 @@ static void __init NCR53c406a_setup(char *str, int *ints)
 		}
 	if (!port_base) {
 		printk("NCR53c406a: Invalid PORTBASE 0x%x specified\n", ints[1]);
-		return;
+		return 0;
 	}
 
 	if (ints[0] > 1) {
@@ -655,6 +656,7 @@ static void __init NCR53c406a_setup(char *str, int *ints)
 		fast_pio = ints[3];
 
 	DEB(printk("NCR53c406a: port_base=0x%x, irq=%d, fast_pio=%d\n", port_base, irq_level, fast_pio);)
+	return 1;
 }
 
 __setup("ncr53c406a=", NCR53c406a_setup);
@@ -665,6 +667,7 @@ static const char *NCR53c406a_info(struct Scsi_Host *SChost)
 	return (info_msg);
 }
 
+#if 0
 static void wait_intr(void)
 {
 	unsigned long i = jiffies + WATCHDOG;
@@ -684,6 +687,7 @@ static void wait_intr(void)
 
 	NCR53c406a_intr(0, NULL, NULL);
 }
+#endif
 
 static int NCR53c406a_queue(Scsi_Cmnd * SCpnt, void (*done) (Scsi_Cmnd *))
 {

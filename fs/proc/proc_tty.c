@@ -13,10 +13,7 @@
 #include <linux/stat.h>
 #include <linux/tty.h>
 #include <linux/seq_file.h>
-#include <asm/bitops.h>
-
-extern struct tty_ldisc ldiscs[];
-
+#include <linux/bitops.h>
 
 static int tty_ldiscs_read_proc(char *page, char **start, off_t off,
 				int count, int *eof, void *data);
@@ -35,10 +32,8 @@ static void show_tty_range(struct seq_file *m, struct tty_driver *p,
 	seq_printf(m, "%-20s ", p->driver_name ? p->driver_name : "unknown");
 	seq_printf(m, "/dev/%-8s ", p->name);
 	if (p->num > 1) {
-		char	range[20];
-		sprintf(range, "%d-%d", MINOR(from),
+		seq_printf(m, "%3d %d-%d ", MAJOR(from), MINOR(from),
 			MINOR(from) + num - 1);
-		seq_printf(m, "%3d %7s ", MAJOR(from), range);
 	} else {
 		seq_printf(m, "%3d %7d ", MAJOR(from), MINOR(from));
 	}
@@ -159,12 +154,15 @@ static int tty_ldiscs_read_proc(char *page, char **start, off_t off,
 	int	i;
 	int	len = 0;
 	off_t	begin = 0;
-
+	struct tty_ldisc *ld;
+	
 	for (i=0; i < NR_LDISCS; i++) {
-		if (!(ldiscs[i].flags & LDISC_FLAG_DEFINED))
+		ld = tty_ldisc_get(i);
+		if (ld == NULL)
 			continue;
 		len += sprintf(page+len, "%-10s %2d\n",
-			       ldiscs[i].name ? ldiscs[i].name : "???", i);
+			       ld->name ? ld->name : "???", i);
+		tty_ldisc_put(i);
 		if (len+begin > off+count)
 			break;
 		if (len+begin < off) {
@@ -217,7 +215,7 @@ void proc_tty_unregister_driver(struct tty_driver *driver)
 		
 	remove_proc_entry(driver->driver_name, proc_tty_driver);
 	
-	driver->proc_entry = 0;
+	driver->proc_entry = NULL;
 }
 
 /*
@@ -226,18 +224,18 @@ void proc_tty_unregister_driver(struct tty_driver *driver)
 void __init proc_tty_init(void)
 {
 	struct proc_dir_entry *entry;
-	if (!proc_mkdir("tty", 0))
+	if (!proc_mkdir("tty", NULL))
 		return;
-	proc_tty_ldisc = proc_mkdir("tty/ldisc", 0);
+	proc_tty_ldisc = proc_mkdir("tty/ldisc", NULL);
 	/*
 	 * /proc/tty/driver/serial reveals the exact character counts for
 	 * serial links which is just too easy to abuse for inferring
 	 * password lengths and inter-keystroke timings during password
 	 * entry.
 	 */
-	proc_tty_driver = proc_mkdir_mode("tty/driver", S_IRUSR | S_IXUSR, 0);
+	proc_tty_driver = proc_mkdir_mode("tty/driver", S_IRUSR | S_IXUSR, NULL);
 
-	create_proc_read_entry("tty/ldiscs", 0, 0, tty_ldiscs_read_proc,NULL);
+	create_proc_read_entry("tty/ldiscs", 0, NULL, tty_ldiscs_read_proc, NULL);
 	entry = create_proc_entry("tty/drivers", 0, NULL);
 	if (entry)
 		entry->proc_fops = &proc_tty_drivers_operations;

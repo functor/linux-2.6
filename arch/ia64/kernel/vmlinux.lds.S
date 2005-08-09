@@ -42,6 +42,7 @@ SECTIONS
 	*(.text.ivt)
 	*(.text)
 	SCHED_TEXT
+	LOCK_TEXT
 	*(.gnu.linkonce.t*)
     }
   .text2 : AT(ADDR(.text2) - LOAD_OFFSET)
@@ -135,12 +136,6 @@ SECTIONS
 	  *(.init.setup)
 	  __setup_end = .;
 	}
-  __param : AT(ADDR(__param) - LOAD_OFFSET)
-        {
-	  __start___param = .;
-	  *(__param)
-	  __stop___param = .;
-	}
   .initcall.init : AT(ADDR(.initcall.init) - LOAD_OFFSET)
 	{
 	  __initcall_start = .;
@@ -195,11 +190,10 @@ SECTIONS
   .data : AT(ADDR(.data) - LOAD_OFFSET)
 	{ *(.data) *(.data1) *(.gnu.linkonce.d*) CONSTRUCTORS }
 
-  . = ALIGN(16);
-  __gp = . + 0x200000;	/* gp must be 16-byte aligned for exc. table */
-
+  . = ALIGN(16);	/* gp must be 16-byte aligned for exc. table */
   .got : AT(ADDR(.got) - LOAD_OFFSET)
 	{ *(.got.plt) *(.got) }
+  __gp = ADDR(.got) + 0x200000;
   /* We want the small data sections together, so single-instruction offsets
      can access them all, and initialized data all before uninitialized, so
      we can shorten the on-disk segment size.  */

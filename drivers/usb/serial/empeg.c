@@ -63,14 +63,9 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-
-#ifdef CONFIG_USB_SERIAL_DEBUG
-	static int debug = 1;
-#else
-	static int debug;
-#endif
-
 #include "usb-serial.h"
+
+static int debug;
 
 /*
  * Version Information
@@ -86,7 +81,6 @@
 static int  empeg_open			(struct usb_serial_port *port, struct file *filp);
 static void empeg_close			(struct usb_serial_port *port, struct file *filp);
 static int  empeg_write			(struct usb_serial_port *port,
-					int from_user,
 					const unsigned char *buf,
 					int count);
 static int  empeg_write_room		(struct usb_serial_port *port);
@@ -157,9 +151,6 @@ static int empeg_open (struct usb_serial_port *port, struct file *filp)
 	struct usb_serial *serial = port->serial;
 	int result = 0;
 
-	if (port_paranoia_check (port, __FUNCTION__))
-		return -ENODEV;
-
 	dbg("%s - port %d", __FUNCTION__, port->number);
 
 	/* Force default termio settings */
@@ -190,27 +181,16 @@ static int empeg_open (struct usb_serial_port *port, struct file *filp)
 
 static void empeg_close (struct usb_serial_port *port, struct file * filp)
 {
-	struct usb_serial *serial;
-
-	if (port_paranoia_check (port, __FUNCTION__))
-		return;
-
 	dbg("%s - port %d", __FUNCTION__, port->number);
 
-	serial = get_usb_serial (port, __FUNCTION__);
-	if (!serial)
-		return;
-
-	if (serial->dev) {
-		/* shutdown our bulk read */
-		usb_unlink_urb (port->read_urb);
-	}
+	/* shutdown our bulk read */
+	usb_kill_urb(port->read_urb);
 	/* Uncomment the following line if you want to see some statistics in your syslog */
 	/* dev_info (&port->dev, "Bytes In = %d  Bytes Out = %d\n", bytes_in, bytes_out); */
 }
 
 
-static int empeg_write (struct usb_serial_port *port, int from_user, const unsigned char *buf, int count)
+static int empeg_write (struct usb_serial_port *port, const unsigned char *buf, int count)
 {
 	struct usb_serial *serial = port->serial;
 	struct urb *urb;
@@ -254,16 +234,9 @@ static int empeg_write (struct usb_serial_port *port, int from_user, const unsig
 
 		transfer_size = min (count, URB_TRANSFER_BUFFER_SIZE);
 
-		if (from_user) {
-			if (copy_from_user (urb->transfer_buffer, current_position, transfer_size)) {
-				bytes_sent = -EFAULT;
-				break;
-			}
-		} else {
-			memcpy (urb->transfer_buffer, current_position, transfer_size);
-		}
+		memcpy (urb->transfer_buffer, current_position, transfer_size);
 
-		usb_serial_debug_data (__FILE__, __FUNCTION__, transfer_size, urb->transfer_buffer);
+		usb_serial_debug_data(debug, &port->dev, __FUNCTION__, transfer_size, urb->transfer_buffer);
 
 		/* build up our urb */
 		usb_fill_bulk_urb (
@@ -353,9 +326,6 @@ static void empeg_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 {
 	struct usb_serial_port *port = (struct usb_serial_port *)urb->context;
 
-	if (port_paranoia_check (port, __FUNCTION__))
-		return;
-
 	dbg("%s - port %d", __FUNCTION__, port->number);
 
 	if (urb->status) {
@@ -370,28 +340,19 @@ static void empeg_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 static void empeg_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 {
 	struct usb_serial_port *port = (struct usb_serial_port *)urb->context;
-	struct usb_serial *serial = get_usb_serial (port, __FUNCTION__);
 	struct tty_struct *tty;
 	unsigned char *data = urb->transfer_buffer;
 	int i;
 	int result;
 
-	if (port_paranoia_check (port, __FUNCTION__))
-		return;
-
 	dbg("%s - port %d", __FUNCTION__, port->number);
-
-	if (!serial) {
-		dbg("%s - bad serial pointer, exiting", __FUNCTION__);
-		return;
-	}
 
 	if (urb->status) {
 		dbg("%s - nonzero read bulk status received: %d", __FUNCTION__, urb->status);
 		return;
 	}
 
-	usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, data);
+	usb_serial_debug_data(debug, &port->dev, __FUNCTION__, urb->actual_length, data);
 
 	tty = port->tty;
 
@@ -416,8 +377,8 @@ static void empeg_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 	/* Continue trying to always read  */
 	usb_fill_bulk_urb(
 		port->read_urb,
-		serial->dev, 
-		usb_rcvbulkpipe(serial->dev,
+		port->serial->dev, 
+		usb_rcvbulkpipe(port->serial->dev,
 			port->bulk_in_endpointAddress),
 		port->read_urb->transfer_buffer,
 		port->read_urb->transfer_buffer_length,
@@ -437,7 +398,7 @@ static void empeg_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 static void empeg_throttle (struct usb_serial_port *port)
 {
 	dbg("%s - port %d", __FUNCTION__, port->number);
-	usb_unlink_urb (port->read_urb);
+	usb_kill_urb(port->read_urb);
 }
 
 
@@ -547,11 +508,7 @@ static void empeg_set_termios (struct usb_serial_port *port, struct termios *old
 	 */
 	port->tty->low_latency = 1;
 
-	/* Notify the tty driver that the termios have changed. */
-	port->tty->ldisc.set_termios(port->tty, NULL);
-
 	return;
-
 }
 
 
@@ -593,8 +550,7 @@ failed_usb_register:
 failed_usb_serial_register:
 	for (i = 0; i < NUM_URBS; ++i) {
 		if (write_urb_pool[i]) {
-			if (write_urb_pool[i]->transfer_buffer)
-				kfree(write_urb_pool[i]->transfer_buffer);
+			kfree(write_urb_pool[i]->transfer_buffer);
 			usb_free_urb(write_urb_pool[i]);
 		}
 	}
@@ -614,12 +570,11 @@ static void __exit empeg_exit (void)
 
 	for (i = 0; i < NUM_URBS; ++i) {
 		if (write_urb_pool[i]) {
-			/* FIXME - uncomment the following usb_unlink_urb call when
+			/* FIXME - uncomment the following usb_kill_urb call when
 			 * the host controllers get fixed to set urb->dev = NULL after
 			 * the urb is finished.  Otherwise this call oopses. */
-			/* usb_unlink_urb(write_urb_pool[i]); */
-			if (write_urb_pool[i]->transfer_buffer)
-				kfree(write_urb_pool[i]->transfer_buffer);
+			/* usb_kill_urb(write_urb_pool[i]); */
+			kfree(write_urb_pool[i]->transfer_buffer);
 			usb_free_urb (write_urb_pool[i]);
 		}
 	}
@@ -635,6 +590,5 @@ MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(debug, "i");
+module_param(debug, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "Debug enabled or not");
-

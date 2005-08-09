@@ -351,8 +351,6 @@ char *pcibios_setup(char *option)
 }
 /*****************************************************************************/
 
-struct pci_fixup pcibios_fixups[] = { { 0 } };
-
 void pcibios_fixup_bus(struct pci_bus *b)
 {
 }
@@ -419,7 +417,7 @@ void pci_outw(unsigned short val, unsigned int addr)
 	volatile unsigned short	*sp;
 
 #ifdef DEBUGIO
-	printk(KERN_DEBUG "pci_outw(val=%04x,addr=%x)", val, addr);
+	printk(KERN_DEBUG "pci_outw(val=%04x,addr=%x)\n", val, addr);
 #endif
 
 	rp = (volatile unsigned long *) COMEM_BASE;
@@ -470,7 +468,7 @@ unsigned char pci_inb(unsigned int addr)
 	unsigned char		val;
 
 #ifdef DEBUGIO
-	printk(KERN_DEBUG "pci_inb(addr=%x)", addr);
+	printk(KERN_DEBUG "pci_inb(addr=%x)\n", addr);
 #endif
 
 	rp = (volatile unsigned long *) COMEM_BASE;

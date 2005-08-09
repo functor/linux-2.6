@@ -4,7 +4,7 @@
 /*
  * ELF-specific definitions.
  *
- * Copyright (C) 1998-1999, 2002-2003 Hewlett-Packard Co
+ * Copyright (C) 1998-1999, 2002-2004 Hewlett-Packard Co
  *	David Mosberger-Tang <davidm@hpl.hp.com>
  */
 
@@ -40,7 +40,7 @@
  * the way of the program that it will "exec", and that there is
  * sufficient room for the brk.
  */
-#define ELF_ET_DYN_BASE		(TASK_UNMAPPED_BASE + 0x800000000)
+#define ELF_ET_DYN_BASE		(TASK_UNMAPPED_BASE + 0x800000000UL)
 
 #define PT_IA_64_UNWIND		0x70000001
 
@@ -175,7 +175,7 @@ extern void ia64_elf_core_copy_regs (struct pt_regs *src, elf_gregset_t dst);
 /* This macro yields a string that ld.so will use to load
    implementation specific libraries for optimization.  Not terribly
    relevant until we have real hardware to play with... */
-#define ELF_PLATFORM	0
+#define ELF_PLATFORM	NULL
 
 /*
  * Architecture-neutral AT_ values are in the range 0-17.  Leave some room for more of
@@ -185,9 +185,9 @@ extern void ia64_elf_core_copy_regs (struct pt_regs *src, elf_gregset_t dst);
 #define AT_SYSINFO_EHDR	33
 
 #ifdef __KERNEL__
-struct elf64_hdr;
-extern void ia64_set_personality (struct elf64_hdr *elf_ex, int ibcs2_interpreter);
-#define SET_PERSONALITY(ex, ibcs2)	ia64_set_personality(&(ex), ibcs2)
+#define SET_PERSONALITY(ex, ibcs2)	set_personality(PER_LINUX)
+#define elf_read_implies_exec(ex, executable_stack)					\
+	((executable_stack!=EXSTACK_DISABLE_X) && ((ex).e_flags & EF_IA_64_LINUX_EXECUTABLE_STACK) != 0)
 
 struct task_struct;
 

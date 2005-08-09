@@ -34,17 +34,19 @@ unsigned int csum_partial(const unsigned char *buff, int len, unsigned int sum);
  * this is a new version of the above that records errors it finds in *errp,
  * but continues and zeros the rest of the buffer.
  */
-unsigned int csum_partial_copy_from_user(const char *src, char *dst, int len,
+unsigned int csum_partial_copy_from_user(const unsigned char *src, unsigned char *dst, int len,
                                          unsigned int sum, int *errp);
 
 /*
  * Copy and checksum to user
  */
 #define HAVE_CSUM_COPY_USER
-static inline unsigned int csum_and_copy_to_user (const char *src, char *dst,
+static inline unsigned int csum_and_copy_to_user (const unsigned char *src,
+						  unsigned char __user *dst,
 						  int len, int sum,
 						  int *err_ptr)
 {
+	might_sleep();
 	sum = csum_partial(src, len, sum);
 
 	if (copy_to_user(dst, src, len)) {
@@ -59,8 +61,8 @@ static inline unsigned int csum_and_copy_to_user (const char *src, char *dst,
  * the same as csum_partial, but copies from user space (but on MIPS
  * we have just one address space, so this is identical to the above)
  */
-unsigned int csum_partial_copy_nocheck(const char *src, char *dst, int len,
-				       unsigned int sum);
+unsigned int csum_partial_copy_nocheck(const unsigned char *src, unsigned char *dst,
+				       int len, unsigned int sum);
 
 /*
  *	Fold a partial checksum without adding pseudo headers
@@ -120,10 +122,6 @@ static inline unsigned short ip_fast_csum(unsigned char *iph, unsigned int ihl)
 	return csum_fold(csum);
 }
 
-/*
- * computes the checksum of the TCP/UDP pseudo-header
- * returns a 16-bit checksum, already complemented
- */
 static inline unsigned int csum_tcpudp_nofold(unsigned long saddr,
 	unsigned long daddr, unsigned short len, unsigned short proto,
 	unsigned int sum)

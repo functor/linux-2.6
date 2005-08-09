@@ -146,14 +146,14 @@ typedef struct wavnc_port_info {
 
 static int		nr_waveartist_devs;
 static wavnc_info	adev_info[MAX_AUDIO_DEV];
-static spinlock_t	waveartist_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(waveartist_lock);
 
 #ifndef CONFIG_ARCH_NETWINDER
 #define machine_is_netwinder() 0
 #else
 static struct timer_list vnc_timer;
 static void vnc_configure_mixer(wavnc_info *devc, unsigned int input_mask);
-static int vnc_private_ioctl(int dev, unsigned int cmd, caddr_t arg);
+static int vnc_private_ioctl(int dev, unsigned int cmd, int __user *arg);
 static void vnc_slider_tick(unsigned long data);
 #endif
 
@@ -515,7 +515,7 @@ waveartist_start_input(int dev, unsigned long buf, int __count, int intrflag)
 }
 
 static int
-waveartist_ioctl(int dev, unsigned int cmd, caddr_t arg)
+waveartist_ioctl(int dev, unsigned int cmd, void __user * arg)
 {
 	return -EINVAL;
 }
@@ -1125,7 +1125,7 @@ waveartist_set_mixer(wavnc_info *devc, int dev, unsigned int level)
 }
 
 static int
-waveartist_mixer_ioctl(int dev, unsigned int cmd, caddr_t arg)
+waveartist_mixer_ioctl(int dev, unsigned int cmd, void __user * arg)
 {
 	wavnc_info *devc = (wavnc_info *)audio_devs[dev]->devc;
 	int ret = 0, val, nr;
@@ -1149,7 +1149,7 @@ waveartist_mixer_ioctl(int dev, unsigned int cmd, caddr_t arg)
 	nr = cmd & 0xff;
 
 	if (_SIOC_DIR(cmd) & _SIOC_WRITE) {
-		if (get_user(val, (int *)arg))
+		if (get_user(val, (int __user *)arg))
 			return -EFAULT;
 
 		switch (nr) {
@@ -1196,7 +1196,7 @@ waveartist_mixer_ioctl(int dev, unsigned int cmd, caddr_t arg)
 		}
 
 		if (ret >= 0)
-			ret = put_user(ret, (int *)arg) ? -EFAULT : 0;
+			ret = put_user(ret, (int __user *)arg) ? -EFAULT : 0;
 	}
 
 	return ret;
@@ -1346,18 +1346,20 @@ static int __init probe_waveartist(struct address_info *hw_config)
 		return 0;
 	}
 
-	if (check_region(hw_config->io_base, 15))  {
+	if (!request_region(hw_config->io_base, 15, hw_config->name))  {
 		printk(KERN_WARNING "WaveArtist: I/O port conflict\n");
 		return 0;
 	}
 
 	if (hw_config->irq > 15 || hw_config->irq < 0) {
+		release_region(hw_config->io_base, 15);
 		printk(KERN_WARNING "WaveArtist: Bad IRQ %d\n",
 		       hw_config->irq);
 		return 0;
 	}
 
 	if (hw_config->dma != 3) {
+		release_region(hw_config->io_base, 15);
 		printk(KERN_WARNING "WaveArtist: Bad DMA %d\n",
 		       hw_config->dma);
 		return 0;
@@ -1391,8 +1393,6 @@ attach_waveartist(struct address_info *hw, const struct waveartist_mixer_info *m
 
 	if (hw->dma != hw->dma2 && hw->dma2 != NO_DMA)
 		devc->audio_flags |= DMA_DUPLEX;
-
-	request_region(hw->io_base, 15, devc->hw.name);
 
 	devc->mix = mix;
 	devc->dev_no = waveartist_init(devc);
@@ -1804,7 +1804,7 @@ vnc_slider_tick(unsigned long data)
 }
 
 static int
-vnc_private_ioctl(int dev, unsigned int cmd, caddr_t arg)
+vnc_private_ioctl(int dev, unsigned int cmd, int __user * arg)
 {
 	wavnc_info *devc = (wavnc_info *)audio_devs[dev]->devc;
 	int val;
@@ -1815,7 +1815,7 @@ vnc_private_ioctl(int dev, unsigned int cmd, caddr_t arg)
 		u_int prev_spkr_mute, prev_line_mute, prev_auto_state;
 		int val;
 
-		if (get_user(val, (int *)arg))
+		if (get_user(val, arg))
 			return -EFAULT;
 
 		/* check if parameter is logical */
@@ -1845,7 +1845,7 @@ vnc_private_ioctl(int dev, unsigned int cmd, caddr_t arg)
 	}
 
 	case SOUND_MIXER_PRIVATE2:
-		if (get_user(val, (int *)arg))
+		if (get_user(val, arg))
 			return -EFAULT;
 
 		switch (val) {
@@ -1870,7 +1870,7 @@ vnc_private_ioctl(int dev, unsigned int cmd, caddr_t arg)
 		unsigned long	flags;
 		int		mixer_reg[15], i, val;
 
-		if (get_user(val, (int *)arg))
+		if (get_user(val, arg))
 			return -EFAULT;
 		if (copy_from_user(mixer_reg, (void *)val, sizeof(mixer_reg)))
 			return -EFAULT;
@@ -1917,7 +1917,7 @@ vnc_private_ioctl(int dev, unsigned int cmd, caddr_t arg)
 		      (devc->telephone_detect ? VNC_PHONE_DETECT       : 0) |
 		      (devc->no_autoselect    ? VNC_DISABLE_AUTOSWITCH : 0);
 
-		return put_user(val, (int *)arg) ? -EFAULT : 0;
+		return put_user(val, arg) ? -EFAULT : 0;
 	}
 
 	if (_SIOC_DIR(cmd) & _SIOC_WRITE) {
@@ -1936,7 +1936,7 @@ vnc_private_ioctl(int dev, unsigned int cmd, caddr_t arg)
 		if ((cmd & 0xff) == SOUND_MIXER_SPEAKER) {
 			unsigned int val, l, r;
 
-			if (get_user(val, (int *)arg))
+			if (get_user(val, arg))
 				return -EFAULT;
 
 			l = val & 0x7f;

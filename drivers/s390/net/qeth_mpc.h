@@ -14,7 +14,9 @@
 
 #include <asm/qeth.h>
 
-#define VERSION_QETH_MPC_H "$Revision: 1.27 $"
+#define VERSION_QETH_MPC_H "$Revision: 1.43 $"
+
+extern const char *VERSION_QETH_MPC_C;
 
 #define IPA_PDU_HEADER_SIZE	0x40
 #define QETH_IPA_PDU_LEN_TOTAL(buffer) (buffer+0x0e)
@@ -33,7 +35,8 @@ extern unsigned char IPA_PDU_HEADER[];
 #define OSA_ADDR_LEN		6
 
 #define QETH_TIMEOUT 		(10 * HZ)
-#define QETH_IDX_COMMAND_SEQNO 	-1
+#define QETH_IPA_TIMEOUT 	(45 * HZ)
+#define QETH_IDX_COMMAND_SEQNO 	0xffff0000
 #define SR_INFO_LEN		16
 
 #define QETH_CLEAR_CHANNEL_PARM	-10
@@ -102,6 +105,12 @@ enum qeth_routing_types {
 enum qeth_ipa_cmds {
 	IPA_CMD_STARTLAN              = 0x01,
 	IPA_CMD_STOPLAN               = 0x02,
+	IPA_CMD_SETVMAC 	      = 0x21,
+	IPA_CMD_DELVMAC 	      =	0x22,
+	IPA_CMD_SETGMAC  	      = 0x23,
+	IPA_CMD_DELGMAC 	      = 0x24,
+	IPA_CMD_SETVLAN 	      = 0x25,
+	IPA_CMD_DELVLAN 	      = 0x26,
 	IPA_CMD_SETIP                 = 0xb1,
 	IPA_CMD_DELIP                 = 0xb7,
 	IPA_CMD_QIPASSIST             = 0xb2,
@@ -173,6 +182,9 @@ enum qeth_ipa_funcs {
 	IPA_FULL_VLAN           = 0x00004000L,
 	IPA_SOURCE_MAC          = 0x00010000L,
 	IPA_OSA_MC_ROUTER       = 0x00020000L,
+	IPA_QUERY_ARP_ASSIST	= 0x00040000L,
+	IPA_INBOUND_TSO         = 0x00080000L,
+	IPA_OUTBOUND_TSO        = 0x00100000L,
 };
 
 /* SETIP/DELIP IPA Command: ***************************************************/
@@ -236,6 +248,16 @@ struct qeth_ipacmd_setdelipm {
 	__u8 ip4[4];
 } __attribute__ ((packed));
 
+struct qeth_ipacmd_layer2setdelmac {
+	__u32 mac_length;
+	__u8 mac[6];
+} __attribute__ ((packed));
+
+struct qeth_ipacmd_layer2setdelvlan {
+	__u16 vlan_id;
+} __attribute__ ((packed));
+
+
 struct qeth_ipacmd_setassparms_hdr {
 	__u32 assist_no;
 	__u16 length;
@@ -245,12 +267,29 @@ struct qeth_ipacmd_setassparms_hdr {
 	__u8 seq_no;
 } __attribute__((packed));
 
+struct qeth_arp_query_data {
+	__u16 request_bits;
+	__u16 reply_bits;
+	__u32 no_entries;
+	char data;
+} __attribute__((packed));
+
+/* used as parameter for arp_query reply */
+struct qeth_arp_query_info {
+	__u32 udata_len;
+	__u16 mask_bits;
+	__u32 udata_offset;
+	__u32 no_entries;
+	char *udata;
+};
+
 /* SETASSPARMS IPA Command: */
 struct qeth_ipacmd_setassparms {
 	struct qeth_ipacmd_setassparms_hdr hdr;
 	union {
 		__u32 flags_32bit;
 		struct qeth_arp_cache_entry add_arp_entry;
+		struct qeth_arp_query_data query_arp;
 		__u8 ip[16];
 	} data;
 } __attribute__ ((packed));
@@ -277,19 +316,47 @@ struct qeth_change_addr {
 	__u8 addr[OSA_ADDR_LEN];
 } __attribute__ ((packed));
 
-struct qeth_ipacmd_setadpparms {
+
+struct qeth_snmp_cmd {
+	__u8  token[16];
+	__u32 request;
+	__u32 interface;
+	__u32 returncode;
+	__u32 firmwarelevel;
+	__u32 seqno;
+	__u8  data;
+} __attribute__ ((packed));
+
+struct qeth_snmp_ureq_hdr {
+	__u32   data_len;
+	__u32   req_len;
+	__u32   reserved1;
+	__u32   reserved2;
+} __attribute__ ((packed));
+
+struct qeth_snmp_ureq {
+	struct qeth_snmp_ureq_hdr hdr;
+	struct qeth_snmp_cmd cmd;
+} __attribute__((packed));
+
+struct qeth_ipacmd_setadpparms_hdr {
 	__u32 supp_hw_cmds;
 	__u32 reserved1;
 	__u16 cmdlength;
 	__u16 reserved2;
 	__u32 command_code;
 	__u16 return_code;
-	__u8 frames_used_total;
-	__u8 frame_seq_no;
+	__u8  used_total;
+	__u8  seq_no;
 	__u32 reserved3;
+} __attribute__ ((packed));
+
+struct qeth_ipacmd_setadpparms {
+	struct qeth_ipacmd_setadpparms_hdr hdr;
 	union {
 		struct qeth_query_cmds_supp query_cmds_supp;
 		struct qeth_change_addr change_addr;
+		struct qeth_snmp_cmd snmp;
 		__u32 mode;
 	} data;
 } __attribute__ ((packed));
@@ -333,13 +400,15 @@ struct qeth_ipacmd_hdr {
 struct qeth_ipa_cmd {
 	struct qeth_ipacmd_hdr hdr;
 	union {
-		struct qeth_ipacmd_setdelip4   	setdelip4;
-		struct qeth_ipacmd_setdelip6   	setdelip6;
-		struct qeth_ipacmd_setdelipm	setdelipm;
-		struct qeth_ipacmd_setassparms 	setassparms;
-		struct qeth_create_destroy_address create_destroy_addr;
-		struct qeth_ipacmd_setadpparms 	setadapterparms;
-		struct qeth_set_routing setrtg;
+		struct qeth_ipacmd_setdelip4   		setdelip4;
+		struct qeth_ipacmd_setdelip6   		setdelip6;
+		struct qeth_ipacmd_setdelipm		setdelipm;
+		struct qeth_ipacmd_setassparms 		setassparms;
+		struct qeth_ipacmd_layer2setdelmac  	setdelmac;
+		struct qeth_ipacmd_layer2setdelvlan 	setdelvlan;
+		struct qeth_create_destroy_address 	create_destroy_addr;
+		struct qeth_ipacmd_setadpparms 		setadapterparms;
+		struct qeth_set_routing 		setrtg;
 	} data;
 } __attribute__ ((packed));
 
@@ -357,36 +426,16 @@ enum qeth_ipa_arp_return_codes {
 	QETH_IPA_ARP_RC_Q_NO_DATA    = 0x0008,
 };
 
-#define QETH_QARP_DATA_SIZE 3968
-struct qeth_arp_query_data {
-	__u16 request_bits;
-	__u16 reply_bits;
-	__u32 no_entries;
-	char data[QETH_QARP_DATA_SIZE];
-} __attribute__((packed));
-
-/* used as parameter for arp_query reply */
-struct qeth_arp_query_info {
-	__u32 udata_len;
-	__u32 udata_offset;
-	__u32 no_entries;
-	char *udata;
-};
-
-#define IPA_ARP_CMD_LEN (IPA_PDU_HEADER_SIZE+sizeof(struct qeth_ipa_arp_cmd))
-#define QETH_ARP_CMD_BASE_LEN (sizeof(struct qeth_ipacmd_hdr) + \
+#define QETH_SETASS_BASE_LEN (sizeof(struct qeth_ipacmd_hdr) + \
 			       sizeof(struct qeth_ipacmd_setassparms_hdr))
 #define QETH_IPA_ARP_DATA_POS(buffer) (buffer + IPA_PDU_HEADER_SIZE + \
-				       QETH_ARP_CMD_BASE_LEN)
-struct qeth_ipa_arp_cmd {
-	struct qeth_ipacmd_hdr ihdr;
-	struct qeth_ipacmd_setassparms_hdr shdr;
-	union {
-		struct qeth_arp_query_data query_arp;
-	} data;
-} __attribute__((packed));
+				       QETH_SETASS_BASE_LEN)
+#define QETH_SETADP_BASE_LEN (sizeof(struct qeth_ipacmd_hdr) + \
+			      sizeof(struct qeth_ipacmd_setadpparms_hdr))
+#define QETH_SNMP_SETADP_CMDLENGTH 16
 
-
+#define QETH_ARP_DATA_SIZE 3968
+#define QETH_ARP_CMD_LEN (QETH_ARP_DATA_SIZE + 8)
 /* Helper functions */
 #define IS_IPA_REPLY(cmd) (cmd->hdr.initiator == IPA_CMD_INITIATOR_HOST)
 
@@ -431,6 +480,11 @@ extern unsigned char ULP_ENABLE[];
 		(PDU_ENCAPSULATION(buffer) + 0x17)
 #define QETH_ULP_ENABLE_RESP_LINK_TYPE(buffer) \
 		(PDU_ENCAPSULATION(buffer)+ 0x2b)
+/* Layer 2 defintions */
+#define QETH_PROT_LAYER2 0x08
+#define QETH_PROT_TCPIP  0x03
+#define QETH_ULP_ENABLE_PROT_TYPE(buffer) (buffer+0x50)
+#define QETH_IPA_CMD_PROT_TYPE(buffer) (buffer+0x19)
 
 extern unsigned char ULP_SETUP[];
 #define ULP_SETUP_SIZE 0x6c

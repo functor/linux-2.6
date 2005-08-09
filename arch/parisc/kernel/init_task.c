@@ -27,6 +27,7 @@
 #include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/init_task.h>
+#include <linux/mqueue.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -52,11 +53,17 @@ union thread_union init_thread_union
 	__attribute__((aligned(128))) __attribute__((__section__(".data.init_task"))) =
 		{ INIT_THREAD_INFO(init_task) };
 
-pgd_t swapper_pg_dir[PTRS_PER_PGD] __attribute__ ((aligned(4096))) = { {0}, };
 #ifdef __LP64__
-unsigned long pmd0[PTRS_PER_PMD] __attribute__ ((aligned(4096))) = { 0, };
+/* NOTE: This layout exactly conforms to the hybrid L2/L3 page table layout
+ * with the first pmd adjacent to the pgd and below it. gcc doesn't actually
+ * guarantee that global objects will be laid out in memory in the same order 
+ * as the order of declaration, so put these in different sections and use
+ * the linker script to order them. */
+pmd_t pmd0[PTRS_PER_PMD] __attribute__ ((aligned(PAGE_SIZE))) __attribute__ ((__section__ (".data.vm0.pmd"))) = { {0}, };
+
 #endif
-unsigned long pg0[PT_INITIAL * PTRS_PER_PTE] __attribute__ ((aligned(4096))) = { 0, };
+pgd_t swapper_pg_dir[PTRS_PER_PGD] __attribute__ ((aligned(PAGE_SIZE))) __attribute__ ((__section__ (".data.vm0.pgd"))) = { {0}, };
+pte_t pg0[PT_INITIAL * PTRS_PER_PTE] __attribute__ ((aligned(PAGE_SIZE))) __attribute__ ((__section__ (".data.vm0.pte")))  = { {0}, };
 
 /*
  * Initial task structure.

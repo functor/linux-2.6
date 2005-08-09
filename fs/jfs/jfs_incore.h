@@ -21,7 +21,7 @@
 
 #include <linux/rwsem.h>
 #include <linux/slab.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include "jfs_types.h"
 #include "jfs_xtree.h"
 #include "jfs_dtree.h"
@@ -53,6 +53,7 @@ struct jfs_inode_info {
 	lid_t	blid;		/* lid of pseudo buffer?	*/
 	lid_t	atlhead;	/* anonymous tlock list head	*/
 	lid_t	atltail;	/* anonymous tlock list tail	*/
+	spinlock_t ag_lock;	/* protects active_ag		*/
 	struct list_head anon_inode_list; /* inodes having anonymous txns */
 	/*
 	 * rdwrlock serializes xtree between reads & writes and synchronizes
@@ -152,6 +153,11 @@ struct jfs_sb_info {
 	pxd_t		ait2;		/* pxd describing AIT copy	*/
 	char		uuid[16];	/* 128-bit uuid for volume	*/
 	char		loguuid[16];	/* 128-bit uuid for log	*/
+	/*
+	 * commit_state is used for synchronization of the jfs_commit
+	 * threads.  It is protected by LAZY_LOCK().
+	 */
+	int		commit_state;	/* commit state */
 	/* Formerly in ipimap */
 	uint		gengen;		/* inode generation generator*/
 	uint		inostamp;	/* shows inode belongs to fileset*/
@@ -159,14 +165,23 @@ struct jfs_sb_info {
         /* Formerly in ipbmap */
 	struct bmap	*bmap;		/* incore bmap descriptor	*/
 	struct nls_table *nls_tab;	/* current codepage		*/
+	struct inode *direct_inode;	/* metadata inode */
 	uint		state;		/* mount/recovery state	*/
 	unsigned long	flag;		/* mount time flags */
 	uint		p_state;	/* state prior to going no integrity */
 };
 
+/* jfs_sb_info commit_state */
+#define IN_LAZYCOMMIT 1
+
 static inline struct jfs_inode_info *JFS_IP(struct inode *inode)
 {
 	return list_entry(inode, struct jfs_inode_info, vfs_inode);
+}
+
+static inline int jfs_dirtable_inline(struct inode *inode)
+{
+	return (JFS_IP(inode)->next_index <= (MAX_INLINE_DIRTABLE_ENTRY + 1));
 }
 
 static inline struct jfs_sb_info *JFS_SBI(struct super_block *sb)
@@ -180,5 +195,4 @@ static inline int isReadOnly(struct inode *inode)
 		return 0;
 	return 1;
 }
-
 #endif /* _H_JFS_INCORE */

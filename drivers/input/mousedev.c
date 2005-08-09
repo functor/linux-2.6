@@ -2,6 +2,7 @@
  * Input driver to ExplorerPS/2 device driver module.
  *
  * Copyright (c) 1999-2002 Vojtech Pavlik
+ * Copyright (c) 2004      Dmitry Torokhov
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as published by
@@ -47,29 +48,60 @@ static int yres = CONFIG_INPUT_MOUSEDEV_SCREEN_Y;
 module_param(yres, uint, 0);
 MODULE_PARM_DESC(yres, "Vertical screen resolution");
 
+static unsigned tap_time = 200;
+module_param(tap_time, uint, 0);
+MODULE_PARM_DESC(tap_time, "Tap time for touchpads in absolute mode (msecs)");
+
+struct mousedev_hw_data {
+	int dx, dy, dz;
+	int x, y;
+	int abs_event;
+	unsigned long buttons;
+};
+
 struct mousedev {
 	int exist;
 	int open;
 	int minor;
-	int misc;
 	char name[16];
 	wait_queue_head_t wait;
 	struct list_head list;
 	struct input_handle handle;
+
+	struct mousedev_hw_data packet;
+	unsigned int pkt_count;
+	int old_x[4], old_y[4];
+	int frac_dx, frac_dy;
+	unsigned long touch;
 };
 
+enum mousedev_emul {
+	MOUSEDEV_EMUL_PS2,
+	MOUSEDEV_EMUL_IMPS,
+	MOUSEDEV_EMUL_EXPS
+};
+
+struct mousedev_motion {
+	int dx, dy, dz;
+	unsigned long buttons;
+};
+
+#define PACKET_QUEUE_LEN	16
 struct mousedev_list {
 	struct fasync_struct *fasync;
 	struct mousedev *mousedev;
 	struct list_head node;
-	int dx, dy, dz;
-	int old_x[4], old_y[4];
-	unsigned long buttons;
+
+	struct mousedev_motion packets[PACKET_QUEUE_LEN];
+	unsigned int head, tail;
+	spinlock_t packet_lock;
+	int pos_x, pos_y;
+
 	signed char ps2[6];
 	unsigned char ready, buffer, bufsiz;
-	unsigned char mode, imexseq, impsseq;
-	unsigned int pkt_count;
-	unsigned char touch;
+	unsigned char imexseq, impsseq;
+	enum mousedev_emul mode;
+	unsigned long last_buttons;
 };
 
 #define MOUSEDEV_SEQ_LEN	6
@@ -82,135 +114,228 @@ static struct input_handler mousedev_handler;
 static struct mousedev *mousedev_table[MOUSEDEV_MINORS];
 static struct mousedev mousedev_mix;
 
-#define fx(i)  (list->old_x[(list->pkt_count - (i)) & 03])
-#define fy(i)  (list->old_y[(list->pkt_count - (i)) & 03])
+#define fx(i)  (mousedev->old_x[(mousedev->pkt_count - (i)) & 03])
+#define fy(i)  (mousedev->old_y[(mousedev->pkt_count - (i)) & 03])
 
-static void mousedev_abs_event(struct input_handle *handle, struct mousedev_list *list, unsigned int code, int value)
+static void mousedev_touchpad_event(struct input_dev *dev, struct mousedev *mousedev, unsigned int code, int value)
+{
+	int size, tmp;
+	enum { FRACTION_DENOM = 128 };
+
+	if (mousedev->touch) {
+		size = dev->absmax[ABS_X] - dev->absmin[ABS_X];
+		if (size == 0) size = 256 * 2;
+		switch (code) {
+			case ABS_X:
+				fx(0) = value;
+				if (mousedev->pkt_count >= 2) {
+					tmp = ((value - fx(2)) * (256 * FRACTION_DENOM)) / size;
+					tmp += mousedev->frac_dx;
+					mousedev->packet.dx = tmp / FRACTION_DENOM;
+					mousedev->frac_dx = tmp - mousedev->packet.dx * FRACTION_DENOM;
+				}
+				break;
+
+			case ABS_Y:
+				fy(0) = value;
+				if (mousedev->pkt_count >= 2) {
+					tmp = -((value - fy(2)) * (256 * FRACTION_DENOM)) / size;
+					tmp += mousedev->frac_dy;
+					mousedev->packet.dy = tmp / FRACTION_DENOM;
+					mousedev->frac_dy = tmp - mousedev->packet.dy * FRACTION_DENOM;
+				}
+				break;
+		}
+	}
+}
+
+static void mousedev_abs_event(struct input_dev *dev, struct mousedev *mousedev, unsigned int code, int value)
 {
 	int size;
-	int touchpad;
-
-	/* Ignore joysticks */
-	if (test_bit(BTN_TRIGGER, handle->dev->keybit))
-		return;
-
-	touchpad = test_bit(BTN_TOOL_FINGER, handle->dev->keybit);
 
 	switch (code) {
 		case ABS_X:
-			if (touchpad) {
-				if (list->touch) {
-					fx(0) = value;
-					if (list->pkt_count >= 2)
-						list->dx = ((fx(0) - fx(1)) / 2 + (fx(1) - fx(2)) / 2) / 8;
-				}
-			} else {
-				size = handle->dev->absmax[ABS_X] - handle->dev->absmin[ABS_X];
-				if (size == 0) size = xres;
-				list->dx += (value * xres - list->old_x[0]) / size;
-				list->old_x[0] += list->dx * size;
-			}
+			size = dev->absmax[ABS_X] - dev->absmin[ABS_X];
+			if (size == 0) size = xres;
+			if (value > dev->absmax[ABS_X]) value = dev->absmax[ABS_X];
+			if (value < dev->absmin[ABS_X]) value = dev->absmin[ABS_X];
+			mousedev->packet.x = ((value - dev->absmin[ABS_X]) * xres) / size;
+			mousedev->packet.abs_event = 1;
 			break;
+
 		case ABS_Y:
-			if (touchpad) {
-				if (list->touch) {
-					fy(0) = value;
-					if (list->pkt_count >= 2)
-						list->dy = -((fy(0) - fy(1)) / 2 + (fy(1) - fy(2)) / 2) / 8;
-				}
-			} else {
-				size = handle->dev->absmax[ABS_Y] - handle->dev->absmin[ABS_Y];
-				if (size == 0) size = yres;
-				list->dy -= (value * yres - list->old_y[0]) / size;
-				list->old_y[0] -= list->dy * size;
-			}
+			size = dev->absmax[ABS_Y] - dev->absmin[ABS_Y];
+			if (size == 0) size = yres;
+			if (value > dev->absmax[ABS_Y]) value = dev->absmax[ABS_Y];
+			if (value < dev->absmin[ABS_Y]) value = dev->absmin[ABS_Y];
+			mousedev->packet.y = yres - ((value - dev->absmin[ABS_Y]) * yres) / size;
+			mousedev->packet.abs_event = 1;
 			break;
 	}
 }
 
+static void mousedev_rel_event(struct mousedev *mousedev, unsigned int code, int value)
+{
+	switch (code) {
+		case REL_X:	mousedev->packet.dx += value; break;
+		case REL_Y:	mousedev->packet.dy -= value; break;
+		case REL_WHEEL:	mousedev->packet.dz -= value; break;
+	}
+}
+
+static void mousedev_key_event(struct mousedev *mousedev, unsigned int code, int value)
+{
+	int index;
+
+	switch (code) {
+		case BTN_TOUCH:
+		case BTN_0:
+		case BTN_FORWARD:
+		case BTN_LEFT:		index = 0; break;
+		case BTN_STYLUS:
+		case BTN_1:
+		case BTN_RIGHT:		index = 1; break;
+		case BTN_2:
+		case BTN_STYLUS2:
+		case BTN_MIDDLE:	index = 2; break;
+		case BTN_3:
+		case BTN_BACK:
+		case BTN_SIDE:		index = 3; break;
+		case BTN_4:
+		case BTN_EXTRA:		index = 4; break;
+		default: 		return;
+	}
+
+	if (value) {
+		set_bit(index, &mousedev->packet.buttons);
+		set_bit(index, &mousedev_mix.packet.buttons);
+	} else {
+		clear_bit(index, &mousedev->packet.buttons);
+		clear_bit(index, &mousedev_mix.packet.buttons);
+	}
+}
+
+static void mousedev_notify_readers(struct mousedev *mousedev, struct mousedev_hw_data *packet)
+{
+	struct mousedev_list *list;
+	struct mousedev_motion *p;
+	unsigned long flags;
+
+	list_for_each_entry(list, &mousedev->list, node) {
+		spin_lock_irqsave(&list->packet_lock, flags);
+
+		p = &list->packets[list->head];
+		if (list->ready && p->buttons != mousedev->packet.buttons) {
+			unsigned int new_head = (list->head + 1) % PACKET_QUEUE_LEN;
+			if (new_head != list->tail) {
+				p = &list->packets[list->head = new_head];
+				memset(p, 0, sizeof(struct mousedev_motion));
+			}
+		}
+
+		if (packet->abs_event) {
+			p->dx += packet->x - list->pos_x;
+			p->dy += packet->y - list->pos_y;
+			list->pos_x = packet->x;
+			list->pos_y = packet->y;
+		}
+
+		list->pos_x += packet->dx;
+		list->pos_x = list->pos_x < 0 ? 0 : (list->pos_x >= xres ? xres : list->pos_x);
+		list->pos_y += packet->dy;
+		list->pos_y = list->pos_y < 0 ? 0 : (list->pos_y >= yres ? yres : list->pos_y);
+
+		p->dx += packet->dx;
+		p->dy += packet->dy;
+		p->dz += packet->dz;
+		p->buttons = mousedev->packet.buttons;
+
+		if (p->dx || p->dy || p->dz || p->buttons != list->last_buttons)
+			list->ready = 1;
+
+		spin_unlock_irqrestore(&list->packet_lock, flags);
+
+		if (list->ready)
+			kill_fasync(&list->fasync, SIGIO, POLL_IN);
+	}
+
+	wake_up_interruptible(&mousedev->wait);
+}
+
+static void mousedev_touchpad_touch(struct mousedev *mousedev, int value)
+{
+	if (!value) {
+		if (mousedev->touch &&
+		    time_before(jiffies, mousedev->touch + msecs_to_jiffies(tap_time))) {
+			/*
+			 * Toggle left button to emulate tap.
+			 * We rely on the fact that mousedev_mix always has 0
+			 * motion packet so we won't mess current position.
+			 */
+			set_bit(0, &mousedev->packet.buttons);
+			set_bit(0, &mousedev_mix.packet.buttons);
+			mousedev_notify_readers(mousedev, &mousedev_mix.packet);
+			mousedev_notify_readers(&mousedev_mix, &mousedev_mix.packet);
+			clear_bit(0, &mousedev->packet.buttons);
+			clear_bit(0, &mousedev_mix.packet.buttons);
+		}
+		mousedev->touch = mousedev->pkt_count = 0;
+		mousedev->frac_dx = 0;
+		mousedev->frac_dy = 0;
+	}
+	else
+		if (!mousedev->touch)
+			mousedev->touch = jiffies;
+}
+
 static void mousedev_event(struct input_handle *handle, unsigned int type, unsigned int code, int value)
 {
-	struct mousedev *mousedevs[3] = { handle->private, &mousedev_mix, NULL };
-	struct mousedev **mousedev = mousedevs;
-	struct mousedev_list *list;
-	int index, wake;
+	struct mousedev *mousedev = handle->private;
 
-	while (*mousedev) {
+	switch (type) {
+		case EV_ABS:
+			/* Ignore joysticks */
+			if (test_bit(BTN_TRIGGER, handle->dev->keybit))
+				return;
 
-		wake = 0;
+			if (test_bit(BTN_TOOL_FINGER, handle->dev->keybit))
+				mousedev_touchpad_event(handle->dev, mousedev, code, value);
+			else
+				mousedev_abs_event(handle->dev, mousedev, code, value);
 
-		list_for_each_entry(list, &(*mousedev)->list, node)
-			switch (type) {
-				case EV_ABS:
-					mousedev_abs_event(handle, list, code, value);
-					break;
+			break;
 
-				case EV_REL:
-					switch (code) {
-						case REL_X:	list->dx += value; break;
-						case REL_Y:	list->dy -= value; break;
-						case REL_WHEEL:	if (list->mode) list->dz -= value; break;
-					}
-					break;
+		case EV_REL:
+			mousedev_rel_event(mousedev, code, value);
+			break;
 
-				case EV_KEY:
-					if (code == BTN_TOUCH && test_bit(BTN_TOOL_FINGER, handle->dev->keybit)) {
-						/* Handle touchpad data */
-						list->touch = value;
-						if (!list->touch)
-							list->pkt_count = 0;
-						break;
-					}
-
-					switch (code) {
-						case BTN_TOUCH:
-						case BTN_0:
-						case BTN_FORWARD:
-						case BTN_LEFT:   index = 0; break;
-						case BTN_4:
-						case BTN_EXTRA:  if (list->mode == 2) { index = 4; break; }
-						case BTN_STYLUS:
-						case BTN_1:
-						case BTN_RIGHT:  index = 1; break;
-						case BTN_3:
-						case BTN_BACK:
-						case BTN_SIDE:   if (list->mode == 2) { index = 3; break; }
-						case BTN_2:
-						case BTN_STYLUS2:
-						case BTN_MIDDLE: index = 2; break;	
-						default: return;
-					}
-					switch (value) {
-						case 0: clear_bit(index, &list->buttons); break;
-						case 1: set_bit(index, &list->buttons); break;
-						case 2: return;
-					}
-					break;
-
-				case EV_SYN:
-					switch (code) {
-						case SYN_REPORT:
-							if (list->touch) {
-								list->pkt_count++;
-								/* Input system eats duplicate events,
-								 * but we need all of them to do correct
-								 * averaging so apply present one forward
-								 */
-								fx(0) = fx(1);
-								fy(0) = fy(1);
-							}
-
-							list->ready = 1;
-							kill_fasync(&list->fasync, SIGIO, POLL_IN);
-							wake = 1;
-							break;
-					}
+		case EV_KEY:
+			if (value != 2) {
+				if (code == BTN_TOUCH && test_bit(BTN_TOOL_FINGER, handle->dev->keybit))
+					mousedev_touchpad_touch(mousedev, value);
+				else
+					mousedev_key_event(mousedev, code, value);
 			}
+			break;
 
-		if (wake)
-			wake_up_interruptible(&((*mousedev)->wait));
+		case EV_SYN:
+			if (code == SYN_REPORT) {
+				if (mousedev->touch) {
+					mousedev->pkt_count++;
+					/* Input system eats duplicate events, but we need all of them
+					 * to do correct averaging so apply present one forward
+			 		 */
+					fx(0) = fx(1);
+					fy(0) = fy(1);
+				}
 
-		mousedev++;
+				mousedev_notify_readers(mousedev, &mousedev->packet);
+				mousedev_notify_readers(&mousedev_mix, &mousedev->packet);
+
+				mousedev->packet.dx = mousedev->packet.dy = mousedev->packet.dz = 0;
+				mousedev->packet.abs_event = 0;
+			}
+			break;
 	}
 }
 
@@ -224,8 +349,6 @@ static int mousedev_fasync(int fd, struct file *file, int on)
 
 static void mousedev_free(struct mousedev *mousedev)
 {
-	devfs_remove("input/mouse%d", mousedev->minor);
-	class_simple_device_remove(MKDEV(INPUT_MAJOR, MOUSEDEV_MINOR_BASE + mousedev->minor));
 	mousedev_table[mousedev->minor] = NULL;
 	kfree(mousedev);
 }
@@ -267,7 +390,7 @@ static int mousedev_release(struct inode * inode, struct file * file)
 				mousedev_free(list->mousedev);
 		}
 	}
-	
+
 	kfree(list);
 	return 0;
 }
@@ -293,6 +416,9 @@ static int mousedev_open(struct inode * inode, struct file * file)
 		return -ENOMEM;
 	memset(list, 0, sizeof(struct mousedev_list));
 
+	spin_lock_init(&list->packet_lock);
+	list->pos_x = xres / 2;
+	list->pos_y = yres / 2;
 	list->mousedev = mousedev_table[i];
 	list_add_tail(&list->node, &mousedev_table[i]->list);
 	file->private_data = list;
@@ -301,45 +427,72 @@ static int mousedev_open(struct inode * inode, struct file * file)
 		if (list->mousedev->minor == MOUSEDEV_MIX) {
 			list_for_each_entry(handle, &mousedev_handler.h_list, h_node) {
 				mousedev = handle->private;
-				if (!mousedev->open && mousedev->exist)	
+				if (!mousedev->open && mousedev->exist)
 					input_open_device(handle);
 			}
-		} else 
-			if (!mousedev_mix.open && list->mousedev->exist)	
+		} else
+			if (!mousedev_mix.open && list->mousedev->exist)
 				input_open_device(&list->mousedev->handle);
 	}
 
 	return 0;
 }
 
-static void mousedev_packet(struct mousedev_list *list, unsigned char off)
+static inline int mousedev_limit_delta(int delta, int limit)
 {
-	list->ps2[off] = 0x08 | ((list->dx < 0) << 4) | ((list->dy < 0) << 5) | (list->buttons & 0x07);
-	list->ps2[off + 1] = (list->dx > 127 ? 127 : (list->dx < -127 ? -127 : list->dx));
-	list->ps2[off + 2] = (list->dy > 127 ? 127 : (list->dy < -127 ? -127 : list->dy));
-	list->dx -= list->ps2[off + 1];
-	list->dy -= list->ps2[off + 2];
-	list->bufsiz = off + 3;
+	return delta > limit ? limit : (delta < -limit ? -limit : delta);
+}
 
-	if (list->mode == 2) {
-		list->ps2[off + 3] = (list->dz > 7 ? 7 : (list->dz < -7 ? -7 : list->dz));
-		list->dz -= list->ps2[off + 3];
-		list->ps2[off + 3] = (list->ps2[off + 3] & 0x0f) | ((list->buttons & 0x18) << 1);
-		list->bufsiz++;
-	}
-	
-	if (list->mode == 1) {
-		list->ps2[off + 3] = (list->dz > 127 ? 127 : (list->dz < -127 ? -127 : list->dz));
-		list->dz -= list->ps2[off + 3];
-		list->bufsiz++;
+static void mousedev_packet(struct mousedev_list *list, signed char *ps2_data)
+{
+	struct mousedev_motion *p;
+	unsigned long flags;
+
+	spin_lock_irqsave(&list->packet_lock, flags);
+	p = &list->packets[list->tail];
+
+	ps2_data[0] = 0x08 | ((p->dx < 0) << 4) | ((p->dy < 0) << 5) | (p->buttons & 0x07);
+	ps2_data[1] = mousedev_limit_delta(p->dx, 127);
+	ps2_data[2] = mousedev_limit_delta(p->dy, 127);
+	p->dx -= ps2_data[1];
+	p->dy -= ps2_data[2];
+
+	switch (list->mode) {
+		case MOUSEDEV_EMUL_EXPS:
+			ps2_data[3] = mousedev_limit_delta(p->dz, 7);
+			p->dz -= ps2_data[3];
+			ps2_data[3] = (ps2_data[3] & 0x0f) | ((p->buttons & 0x18) << 1);
+			list->bufsiz = 4;
+			break;
+
+		case MOUSEDEV_EMUL_IMPS:
+			ps2_data[0] |= ((p->buttons & 0x10) >> 3) | ((p->buttons & 0x08) >> 1);
+			ps2_data[3] = mousedev_limit_delta(p->dz, 127);
+			p->dz -= ps2_data[3];
+			list->bufsiz = 4;
+			break;
+
+		case MOUSEDEV_EMUL_PS2:
+		default:
+			ps2_data[0] |= ((p->buttons & 0x10) >> 3) | ((p->buttons & 0x08) >> 1);
+			p->dz = 0;
+			list->bufsiz = 3;
+			break;
 	}
 
-	if (!list->dx && !list->dy && (!list->mode || !list->dz)) list->ready = 0;
-	list->buffer = list->bufsiz;
+	if (!p->dx && !p->dy && !p->dz) {
+		if (list->tail == list->head) {
+			list->ready = 0;
+			list->last_buttons = p->buttons;
+		} else
+			list->tail = (list->tail + 1) % PACKET_QUEUE_LEN;
+	}
+
+	spin_unlock_irqrestore(&list->packet_lock, flags);
 }
 
 
-static ssize_t mousedev_write(struct file * file, const char * buffer, size_t count, loff_t *ppos)
+static ssize_t mousedev_write(struct file * file, const char __user * buffer, size_t count, loff_t *ppos)
 {
 	struct mousedev_list *list = file->private_data;
 	unsigned char c;
@@ -353,31 +506,31 @@ static ssize_t mousedev_write(struct file * file, const char * buffer, size_t co
 		if (c == mousedev_imex_seq[list->imexseq]) {
 			if (++list->imexseq == MOUSEDEV_SEQ_LEN) {
 				list->imexseq = 0;
-				list->mode = 2;
+				list->mode = MOUSEDEV_EMUL_EXPS;
 			}
 		} else list->imexseq = 0;
 
 		if (c == mousedev_imps_seq[list->impsseq]) {
 			if (++list->impsseq == MOUSEDEV_SEQ_LEN) {
 				list->impsseq = 0;
-				list->mode = 1;
+				list->mode = MOUSEDEV_EMUL_IMPS;
 			}
 		} else list->impsseq = 0;
 
 		list->ps2[0] = 0xfa;
-		list->bufsiz = 1;
 
 		switch (c) {
 
 			case 0xeb: /* Poll */
-				mousedev_packet(list, 1);
+				mousedev_packet(list, &list->ps2[1]);
+				list->bufsiz++; /* account for leading ACK */
 				break;
 
 			case 0xf2: /* Get ID */
 				switch (list->mode) {
-					case 0: list->ps2[1] = 0; break;
-					case 1: list->ps2[1] = 3; break;
-					case 2: list->ps2[1] = 4; break;
+					case MOUSEDEV_EMUL_PS2:  list->ps2[1] = 0; break;
+					case MOUSEDEV_EMUL_IMPS: list->ps2[1] = 3; break;
+					case MOUSEDEV_EMUL_EXPS: list->ps2[1] = 4; break;
 				}
 				list->bufsiz = 2;
 				break;
@@ -388,12 +541,14 @@ static ssize_t mousedev_write(struct file * file, const char * buffer, size_t co
 				break;
 
 			case 0xff: /* Reset */
-				list->impsseq = 0;
-				list->imexseq = 0;
-				list->mode = 0;
-				list->ps2[0] = 0xaa;
-				list->ps2[1] = 0x00;
-				list->bufsiz = 2;
+				list->impsseq = list->imexseq = 0;
+				list->mode = MOUSEDEV_EMUL_PS2;
+				list->ps2[1] = 0xaa; list->ps2[2] = 0x00;
+				list->bufsiz = 3;
+				break;
+
+			default:
+				list->bufsiz = 1;
 				break;
 		}
 
@@ -403,11 +558,11 @@ static ssize_t mousedev_write(struct file * file, const char * buffer, size_t co
 	kill_fasync(&list->fasync, SIGIO, POLL_IN);
 
 	wake_up_interruptible(&list->mousedev->wait);
-		
+
 	return count;
 }
 
-static ssize_t mousedev_read(struct file * file, char * buffer, size_t count, loff_t *ppos)
+static ssize_t mousedev_read(struct file * file, char __user * buffer, size_t count, loff_t *ppos)
 {
 	struct mousedev_list *list = file->private_data;
 	int retval = 0;
@@ -415,13 +570,19 @@ static ssize_t mousedev_read(struct file * file, char * buffer, size_t count, lo
 	if (!list->ready && !list->buffer && (file->f_flags & O_NONBLOCK))
 		return -EAGAIN;
 
-	retval = wait_event_interruptible(list->mousedev->wait, list->ready || list->buffer);
+	retval = wait_event_interruptible(list->mousedev->wait,
+					  !list->mousedev->exist || list->ready || list->buffer);
 
 	if (retval)
 		return retval;
 
-	if (!list->buffer && list->ready)
-		mousedev_packet(list, 0);
+	if (!list->mousedev->exist)
+		return -ENODEV;
+
+	if (!list->buffer && list->ready) {
+		mousedev_packet(list, list->ps2);
+		list->buffer = list->bufsiz;
+	}
 
 	if (count > list->buffer)
 		count = list->buffer;
@@ -431,7 +592,7 @@ static ssize_t mousedev_read(struct file * file, char * buffer, size_t count, lo
 	if (copy_to_user(buffer, list->ps2 + list->bufsiz - list->buffer - count, count))
 		return -EFAULT;
 
-	return count;	
+	return count;
 }
 
 /* No kernel lock - fine */
@@ -439,12 +600,11 @@ static unsigned int mousedev_poll(struct file *file, poll_table *wait)
 {
 	struct mousedev_list *list = file->private_data;
 	poll_wait(file, &list->mousedev->wait, wait);
-	if (list->ready || list->buffer)
-		return POLLIN | POLLRDNORM;
-	return 0;
+	return ((list->ready || list->buffer) ? (POLLIN | POLLRDNORM) : 0) |
+		(list->mousedev->exist ? 0 : (POLLHUP | POLLERR));
 }
 
-struct file_operations mousedev_fops = {
+static struct file_operations mousedev_fops = {
 	.owner =	THIS_MODULE,
 	.read =		mousedev_read,
 	.write =	mousedev_write,
@@ -487,7 +647,7 @@ static struct input_handle *mousedev_connect(struct input_handler *handler, stru
 
 	devfs_mk_cdev(MKDEV(INPUT_MAJOR, MOUSEDEV_MINOR_BASE + minor),
 			S_IFCHR|S_IRUGO|S_IWUSR, "input/mouse%d", minor);
-	class_simple_device_add(input_class, 
+	class_simple_device_add(input_class,
 				MKDEV(INPUT_MAJOR, MOUSEDEV_MINOR_BASE + minor),
 				dev->dev, "mouse%d", minor);
 
@@ -497,11 +657,17 @@ static struct input_handle *mousedev_connect(struct input_handler *handler, stru
 static void mousedev_disconnect(struct input_handle *handle)
 {
 	struct mousedev *mousedev = handle->private;
+	struct mousedev_list *list;
 
+	class_simple_device_remove(MKDEV(INPUT_MAJOR, MOUSEDEV_MINOR_BASE + mousedev->minor));
+	devfs_remove("input/mouse%d", mousedev->minor);
 	mousedev->exist = 0;
 
 	if (mousedev->open) {
 		input_close_device(handle);
+		wake_up_interruptible(&mousedev->wait);
+		list_for_each_entry(list, &mousedev->list, node)
+			kill_fasync(&list->fasync, SIGIO, POLL_HUP);
 	} else {
 		if (mousedev_mix.open)
 			input_close_device(handle);
@@ -538,7 +704,7 @@ static struct input_device_id mousedev_ids[] = {
 };
 
 MODULE_DEVICE_TABLE(input, mousedev_ids);
-	
+
 static struct input_handler mousedev_handler = {
 	.event =	mousedev_event,
 	.connect =	mousedev_connect,
@@ -553,6 +719,7 @@ static struct input_handler mousedev_handler = {
 static struct miscdevice psaux_mouse = {
 	PSMOUSE_MINOR, "psaux", &mousedev_fops
 };
+static int psaux_registered;
 #endif
 
 static int __init mousedev_init(void)
@@ -572,7 +739,7 @@ static int __init mousedev_init(void)
 				NULL, "mice");
 
 #ifdef CONFIG_INPUT_MOUSEDEV_PSAUX
-	if (!(mousedev_mix.misc = !misc_register(&psaux_mouse)))
+	if (!(psaux_registered = !misc_register(&psaux_mouse)))
 		printk(KERN_WARNING "mice: could not misc_register the device\n");
 #endif
 
@@ -584,7 +751,7 @@ static int __init mousedev_init(void)
 static void __exit mousedev_exit(void)
 {
 #ifdef CONFIG_INPUT_MOUSEDEV_PSAUX
-	if (mousedev_mix.misc)
+	if (psaux_registered)
 		misc_deregister(&psaux_mouse);
 #endif
 	devfs_remove("input/mice");

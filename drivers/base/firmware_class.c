@@ -12,7 +12,7 @@
 #include <linux/init.h>
 #include <linux/timer.h>
 #include <linux/vmalloc.h>
-#include <asm/hardirq.h>
+#include <linux/interrupt.h>
 #include <linux/bitops.h>
 #include <asm/semaphore.h>
 
@@ -68,7 +68,7 @@ firmware_timeout_show(struct class *class, char *buf)
  *	firmware will be provided.
  *
  *	Note: zero means 'wait for ever'
- *  
+ *
  **/
 static ssize_t
 firmware_timeout_store(struct class *class, const char *buf, size_t count)
@@ -94,19 +94,20 @@ firmware_class_hotplug(struct class_device *class_dev, char **envp,
 		       int num_envp, char *buffer, int buffer_size)
 {
 	struct firmware_priv *fw_priv = class_get_devdata(class_dev);
-	int i = 0;
-	char *scratch = buffer;
+	int i = 0, len = 0;
 
 	if (!test_bit(FW_STATUS_READY, &fw_priv->status))
 		return -ENODEV;
 
-	if (buffer_size < (FIRMWARE_NAME_MAX + 10))
+	if (add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &len,
+			"FIRMWARE=%s", fw_priv->fw_id))
 		return -ENOMEM;
-	if (num_envp < 1)
+	if (add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &len,
+			"TIMEOUT=%i", loading_timeout))
 		return -ENOMEM;
 
-	envp[i++] = scratch;
-	scratch += sprintf(scratch, "FIRMWARE=%s", fw_priv->fw_id) + 1;
+	envp[i] = NULL;
+
 	return 0;
 }
 
@@ -121,7 +122,7 @@ firmware_loading_show(struct class_device *class_dev, char *buf)
 /**
  * firmware_loading_store: - loading control file
  * Description:
- *	The relevant values are: 
+ *	The relevant values are:
  *
  *	 1: Start a load, discarding any previous partial load.
  *	 0: Conclude the load and handle the data to the driver code.
@@ -235,6 +236,8 @@ firmware_data_write(struct kobject *kobj,
 	struct firmware *fw;
 	ssize_t retval;
 
+	if (!capable(CAP_SYS_RAWIO))
+		return -EPERM;
 	down(&fw_lock);
 	fw = fw_priv->fw;
 	if (test_bit(FW_STATUS_DONE, &fw_priv->status)) {
@@ -376,7 +379,7 @@ out:
 	return retval;
 }
 
-/** 
+/**
  * request_firmware: - request firmware to hotplug and wait for it
  * Description:
  *	@firmware will be used to return a firmware image by the name
@@ -420,7 +423,7 @@ request_firmware(const struct firmware **firmware_p, const char *name,
 		add_timer(&fw_priv->timeout);
 	}
 
-	kobject_hotplug("add", &class_dev->kobj);
+	kobject_hotplug(&class_dev->kobj, KOBJ_ADD);
 	wait_for_completion(&fw_priv->completion);
 	set_bit(FW_STATUS_DONE, &fw_priv->status);
 
@@ -439,6 +442,7 @@ request_firmware(const struct firmware **firmware_p, const char *name,
 
 error_kfree_fw:
 	kfree(firmware);
+	*firmware_p = NULL;
 out:
 	return retval;
 }
@@ -457,7 +461,7 @@ release_firmware(const struct firmware *fw)
 
 /**
  * register_firmware: - provide a firmware image for later usage
- * 
+ *
  * Description:
  *	Make sure that @data will be available by requesting firmware @name.
  *
@@ -541,7 +545,7 @@ request_firmware_nowait(
 
 	ret = kernel_thread(request_firmware_work_func, fw_work,
 			    CLONE_FS | CLONE_FILES);
-	
+
 	if (ret < 0) {
 		fw_work->cont(NULL, fw_work->context);
 		return ret;
@@ -580,4 +584,3 @@ EXPORT_SYMBOL(release_firmware);
 EXPORT_SYMBOL(request_firmware);
 EXPORT_SYMBOL(request_firmware_nowait);
 EXPORT_SYMBOL(register_firmware);
-EXPORT_SYMBOL(firmware_class);

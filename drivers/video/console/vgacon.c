@@ -49,10 +49,13 @@
 #include <linux/spinlock.h>
 #include <linux/ioport.h>
 #include <linux/init.h>
+#include <linux/smp_lock.h>
 #include <video/vga.h>
 #include <asm/io.h>
 
-static spinlock_t vga_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(vga_lock);
+static int cursor_size_lastfrom;
+static int cursor_size_lastto;
 static struct vgastate state;
 
 #define BLANK 0x0020
@@ -77,7 +80,6 @@ static void vgacon_deinit(struct vc_data *c);
 static void vgacon_cursor(struct vc_data *c, int mode);
 static int vgacon_switch(struct vc_data *c);
 static int vgacon_blank(struct vc_data *c, int blank, int mode_switch);
-static int vgacon_font_op(struct vc_data *c, struct console_font_op *op);
 static int vgacon_set_palette(struct vc_data *vc, unsigned char *table);
 static int vgacon_scrolldelta(struct vc_data *c, int lines);
 static int vgacon_set_origin(struct vc_data *c);
@@ -335,14 +337,16 @@ static void vgacon_init(struct vc_data *c, int init)
 	c->vc_scan_lines = vga_scan_lines;
 	c->vc_font.height = vga_video_font_height;
 	c->vc_complement_mask = 0x7700;
+	if (vga_512_chars)
+		c->vc_hi_font_mask = 0x0800;
 	p = *c->vc_uni_pagedir_loc;
 	if (c->vc_uni_pagedir_loc == &c->vc_uni_pagedir ||
 	    !--c->vc_uni_pagedir_loc[1])
-		con_free_unimap(c->vc_num);
+		con_free_unimap(c);
 	c->vc_uni_pagedir_loc = vgacon_uni_pagedir;
 	vgacon_uni_pagedir[1]++;
 	if (!vgacon_uni_pagedir[0] && p)
-		con_set_default_unimap(c->vc_num);
+		con_set_default_unimap(c);
 }
 
 static inline void vga_set_mem_top(struct vc_data *c)
@@ -356,10 +360,10 @@ static void vgacon_deinit(struct vc_data *c)
 	if (!--vgacon_uni_pagedir[1]) {
 		c->vc_visible_origin = vga_vram_base;
 		vga_set_mem_top(c);
-		con_free_unimap(c->vc_num);
+		con_free_unimap(c);
 	}
 	c->vc_uni_pagedir_loc = &c->vc_uni_pagedir;
-	con_set_default_unimap(c->vc_num);
+	con_set_default_unimap(c);
 }
 
 static u8 vgacon_build_attr(struct vc_data *c, u8 color, u8 intensity,
@@ -409,17 +413,16 @@ static void vgacon_set_cursor_size(int xpos, int from, int to)
 {
 	unsigned long flags;
 	int curs, cure;
-	static int lastfrom, lastto;
 
 #ifdef TRIDENT_GLITCH
 	if (xpos < 16)
 		from--, to--;
 #endif
 
-	if ((from == lastfrom) && (to == lastto))
+	if ((from == cursor_size_lastfrom) && (to == cursor_size_lastto))
 		return;
-	lastfrom = from;
-	lastto = to;
+	cursor_size_lastfrom = from;
+	cursor_size_lastto = to;
 
 	spin_lock_irqsave(&vga_lock, flags);
 	outb_p(0x0a, vga_video_port_reg);	/* Cursor start */
@@ -764,6 +767,7 @@ static int vgacon_do_font_op(struct vgastate *state,char *arg,int set,int ch512)
 		charmap += 4 * cmapsz;
 #endif
 
+	unlock_kernel();
 	spin_lock_irq(&vga_lock);
 	/* First, the Sequencer */
 	vga_wseq(state->vgabase, VGA_SEQ_RESET, 0x1);
@@ -849,6 +853,7 @@ static int vgacon_do_font_op(struct vgastate *state,char *arg,int set,int ch512)
 		vga_wattr(state->vgabase, VGA_AR_ENABLE_DISPLAY, 0);	
 	}
 	spin_unlock_irq(&vga_lock);
+	lock_kernel();
 	return 0;
 }
 
@@ -859,11 +864,6 @@ static int vgacon_adjust_height(struct vc_data *vc, unsigned fontheight)
 {
 	unsigned char ovr, vde, fsr;
 	int rows, maxscan, i;
-
-	if (fontheight == vc->vc_font.height)
-		return 0;
-
-	vc->vc_font.height = fontheight;
 
 	rows = vc->vc_scan_lines / fontheight;	/* Number of video rows we end up with */
 	maxscan = rows * fontheight - 1;	/* Scan lines to actually display-1 */
@@ -902,44 +902,57 @@ static int vgacon_adjust_height(struct vc_data *vc, unsigned fontheight)
 	for (i = 0; i < MAX_NR_CONSOLES; i++) {
 		struct vc_data *c = vc_cons[i].d;
 
-		if (c && c->vc_sw == &vga_con)
-			vc_resize(c->vc_num, 0, rows);	/* Adjust console size */
+		if (c && c->vc_sw == &vga_con) {
+			if (CON_IS_VISIBLE(c)) {
+			        /* void size to cause regs to be rewritten */
+				cursor_size_lastfrom = 0;
+				cursor_size_lastto = 0;
+				c->vc_sw->con_cursor(c, CM_DRAW);
+			}
+			c->vc_font.height = fontheight;
+			vc_resize(c, 0, rows);	/* Adjust console size */
+		}
 	}
 	return 0;
 }
 
-static int vgacon_font_op(struct vc_data *c, struct console_font_op *op)
+static int vgacon_font_set(struct vc_data *c, struct console_font *font, unsigned flags)
 {
+	unsigned charcount = font->charcount;
 	int rc;
 
 	if (vga_video_type < VIDEO_TYPE_EGAM)
 		return -EINVAL;
 
-	if (op->op == KD_FONT_OP_SET) {
-		if (op->width != 8
-		    || (op->charcount != 256 && op->charcount != 512))
-			return -EINVAL;
-		rc = vgacon_do_font_op(&state, op->data, 1, op->charcount == 512);
-		if (!rc && !(op->flags & KD_FONT_FLAG_DONT_RECALC))
-			rc = vgacon_adjust_height(c, op->height);
-	} else if (op->op == KD_FONT_OP_GET) {
-		op->width = 8;
-		op->height = c->vc_font.height;
-		op->charcount = vga_512_chars ? 512 : 256;
-		if (!op->data)
-			return 0;
-		rc = vgacon_do_font_op(&state, op->data, 0, 0);
-	} else
-		rc = -ENOSYS;
+	if (font->width != 8 || (charcount != 256 && charcount != 512))
+		return -EINVAL;
+
+	rc = vgacon_do_font_op(&state, font->data, 1, charcount == 512);
+	if (rc)
+		return rc;
+
+	if (!(flags & KD_FONT_FLAG_DONT_RECALC))
+		rc = vgacon_adjust_height(c, font->height);
 	return rc;
+}
+
+static int vgacon_font_get(struct vc_data *c, struct console_font *font)
+{
+	if (vga_video_type < VIDEO_TYPE_EGAM)
+		return -EINVAL;
+
+	font->width = 8;
+	font->height = c->vc_font.height;
+	font->charcount = vga_512_chars ? 512 : 256;
+	if (!font->data)
+		return 0;
+	return vgacon_do_font_op(&state, font->data, 0, 0);
 }
 
 #else
 
-static int vgacon_font_op(struct vc_data *c, struct console_font_op *op)
-{
-	return -ENOSYS;
-}
+#define vgacon_font_set NULL
+#define vgacon_font_get NULL
 
 #endif
 
@@ -963,6 +976,8 @@ static int vgacon_scrolldelta(struct vc_data *c, int lines)
 		p = (c->vc_visible_origin - vga_vram_base - ul + we) % we +
 		    lines * c->vc_size_row;
 		st = (c->vc_origin - vga_vram_base - ul + we) % we;
+		if (st < 2 * margin)
+			margin = 0;
 		if (p < margin)
 			p = 0;
 		if (p > st - margin)
@@ -1065,6 +1080,7 @@ static int vgacon_dummy(struct vc_data *c)
 #define DUMMY (void *) vgacon_dummy
 
 const struct consw vga_con = {
+	.owner = THIS_MODULE,
 	.con_startup = vgacon_startup,
 	.con_init = vgacon_init,
 	.con_deinit = vgacon_deinit,
@@ -1076,7 +1092,8 @@ const struct consw vga_con = {
 	.con_bmove = DUMMY,
 	.con_switch = vgacon_switch,
 	.con_blank = vgacon_blank,
-	.con_font_op = vgacon_font_op,
+	.con_font_set = vgacon_font_set,
+	.con_font_get = vgacon_font_get,
 	.con_set_palette = vgacon_set_palette,
 	.con_scrolldelta = vgacon_scrolldelta,
 	.con_set_origin = vgacon_set_origin,

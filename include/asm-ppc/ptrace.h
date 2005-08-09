@@ -47,6 +47,12 @@ struct pt_regs {
 
 #ifndef __ASSEMBLY__
 #define instruction_pointer(regs) ((regs)->nip)
+#ifdef CONFIG_SMP
+extern unsigned long profile_pc(struct pt_regs *regs);
+#else
+#define profile_pc(regs) instruction_pointer(regs)
+#endif
+
 #define user_mode(regs) (((regs)->msr & MSR_PR) != 0)
 
 #define force_successful_syscall_return()   \
@@ -130,5 +136,10 @@ do {									      \
 /* Get/set all the altivec registers vr0..vr31, vscr, vrsave, in one go */
 #define PTRACE_GETVRREGS	18
 #define PTRACE_SETVRREGS	19
+
+/* Get/set all the upper 32-bits of the SPE registers, accumulator, and
+ * spefscr, in one go */
+#define PTRACE_GETEVRREGS	20
+#define PTRACE_SETEVRREGS	21
 
 #endif

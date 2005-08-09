@@ -119,11 +119,12 @@ static int girbil_change_speed(struct irda_task *task)
 			irda_task_next_state(task, IRDA_TASK_CHILD_WAIT);
 
 			/* Give reset 1 sec to finish */
-			ret = MSECS_TO_JIFFIES(1000);
+			ret = msecs_to_jiffies(1000);
 		}
 		break;
 	case IRDA_TASK_CHILD_WAIT:
-		WARNING("%s(), resetting dongle timed out!\n", __FUNCTION__);
+		IRDA_WARNING("%s(), resetting dongle timed out!\n",
+			     __FUNCTION__);
 		ret = -1;
 		break;
 	case IRDA_TASK_CHILD_DONE:
@@ -153,7 +154,7 @@ static int girbil_change_speed(struct irda_task *task)
 		/* Write control bytes */
 		self->write(self->dev, control, 2);
 		irda_task_next_state(task, IRDA_TASK_WAIT);
-		ret = MSECS_TO_JIFFIES(100);
+		ret = msecs_to_jiffies(100);
 		break;
 	case IRDA_TASK_WAIT:
 		/* Go back to normal mode */
@@ -162,7 +163,8 @@ static int girbil_change_speed(struct irda_task *task)
 		self->speed_task = NULL;
 		break;
 	default:
-		ERROR("%s(), unknown state %d\n", __FUNCTION__, task->state);
+		IRDA_ERROR("%s(), unknown state %d\n",
+			   __FUNCTION__, task->state);
 		irda_task_next_state(task, IRDA_TASK_DONE);
 		self->speed_task = NULL;
 		ret = -1;
@@ -194,19 +196,19 @@ static int girbil_reset(struct irda_task *task)
 		self->set_dtr_rts(self->dev, TRUE, FALSE);
 		irda_task_next_state(task, IRDA_TASK_WAIT1);
 		/* Sleep at least 5 ms */
-		ret = MSECS_TO_JIFFIES(20);
+		ret = msecs_to_jiffies(20);
 		break;
 	case IRDA_TASK_WAIT1:
 		/* Set DTR and clear RTS to enter command mode */
 		self->set_dtr_rts(self->dev, FALSE, TRUE);
 		irda_task_next_state(task, IRDA_TASK_WAIT2);
-		ret = MSECS_TO_JIFFIES(20);
+		ret = msecs_to_jiffies(20);
 		break;
 	case IRDA_TASK_WAIT2:
 		/* Write control byte */
 		self->write(self->dev, &control, 1);
 		irda_task_next_state(task, IRDA_TASK_WAIT3);
-		ret = MSECS_TO_JIFFIES(20);
+		ret = msecs_to_jiffies(20);
 		break;
 	case IRDA_TASK_WAIT3:
 		/* Go back to normal mode */
@@ -215,7 +217,8 @@ static int girbil_reset(struct irda_task *task)
 		self->reset_task = NULL;
 		break;
 	default:
-		ERROR("%s(), unknown state %d\n", __FUNCTION__, task->state);
+		IRDA_ERROR("%s(), unknown state %d\n",
+			   __FUNCTION__, task->state);
 		irda_task_next_state(task, IRDA_TASK_DONE);
 		self->reset_task = NULL;
 		ret = -1;

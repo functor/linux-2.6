@@ -50,6 +50,7 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/rtnetlink.h>
+#include <linux/dma-mapping.h>
 
 #include <asm/io.h>
 #include <asm/dma.h>
@@ -207,8 +208,9 @@ int w83977af_open(int i, unsigned int iobase, unsigned int irq,
 	self->tx_buff.truesize = 4000;
 	
 	/* Allocate memory if needed */
-	self->rx_buff.head = (__u8 *) kmalloc(self->rx_buff.truesize,
-					      GFP_KERNEL|GFP_DMA);
+	self->rx_buff.head =
+		dma_alloc_coherent(NULL, self->rx_buff.truesize,
+				   &self->rx_buff_dma, GFP_KERNEL);
 	if (self->rx_buff.head == NULL) {
 		err = -ENOMEM;
 		goto err_out1;
@@ -216,8 +218,9 @@ int w83977af_open(int i, unsigned int iobase, unsigned int irq,
 
 	memset(self->rx_buff.head, 0, self->rx_buff.truesize);
 	
-	self->tx_buff.head = (__u8 *) kmalloc(self->tx_buff.truesize, 
-					      GFP_KERNEL|GFP_DMA);
+	self->tx_buff.head =
+		dma_alloc_coherent(NULL, self->tx_buff.truesize,
+				   &self->tx_buff_dma, GFP_KERNEL);
 	if (self->tx_buff.head == NULL) {
 		err = -ENOMEM;
 		goto err_out2;
@@ -242,19 +245,21 @@ int w83977af_open(int i, unsigned int iobase, unsigned int irq,
 
 	err = register_netdev(dev);
 	if (err) {
-		ERROR("%s(), register_netdevice() failed!\n", __FUNCTION__);
+		IRDA_ERROR("%s(), register_netdevice() failed!\n", __FUNCTION__);
 		goto err_out3;
 	}
-	MESSAGE("IrDA: Registered device %s\n", dev->name);
+	IRDA_MESSAGE("IrDA: Registered device %s\n", dev->name);
 
 	/* Need to store self somewhere */
 	dev_self[i] = self;
 	
 	return 0;
 err_out3:
-	kfree(self->tx_buff.head);
+	dma_free_coherent(NULL, self->tx_buff.truesize,
+			  self->tx_buff.head, self->tx_buff_dma);
 err_out2:	
-	kfree(self->rx_buff.head);
+	dma_free_coherent(NULL, self->rx_buff.truesize,
+			  self->rx_buff.head, self->rx_buff_dma);
 err_out1:
 	free_netdev(dev);
 err_out:
@@ -297,10 +302,12 @@ static int w83977af_close(struct w83977af_ir *self)
 	release_region(self->io.fir_base, self->io.fir_ext);
 
 	if (self->tx_buff.head)
-		kfree(self->tx_buff.head);
+		dma_free_coherent(NULL, self->tx_buff.truesize,
+				  self->tx_buff.head, self->tx_buff_dma);
 	
 	if (self->rx_buff.head)
-		kfree(self->rx_buff.head);
+		dma_free_coherent(NULL, self->rx_buff.truesize,
+				  self->rx_buff.head, self->rx_buff_dma);
 
 	free_netdev(self->netdev);
 
@@ -394,8 +401,8 @@ int w83977af_probe( int iobase, int irq, int dma)
 			switch_bank(iobase, SET7);
 			outb(0x40, iobase+7);
 			
-			MESSAGE("W83977AF (IR) driver loaded. "
-				"Version: 0x%02x\n", version);
+			IRDA_MESSAGE("W83977AF (IR) driver loaded. "
+				     "Version: 0x%02x\n", version);
 			
 			return 0;
 		} else {
@@ -606,10 +613,10 @@ static void w83977af_dma_write(struct w83977af_ir *self, int iobase)
 	disable_dma(self->io.dma);
 	clear_dma_ff(self->io.dma);
 	set_dma_mode(self->io.dma, DMA_MODE_READ);
-	set_dma_addr(self->io.dma, isa_virt_to_bus(self->tx_buff.data));
+	set_dma_addr(self->io.dma, self->tx_buff_dma);
 	set_dma_count(self->io.dma, self->tx_buff.len);
 #else
-	irda_setup_dma(self->io.dma, self->tx_buff.data, self->tx_buff.len, 
+	irda_setup_dma(self->io.dma, self->tx_buff_dma, self->tx_buff.len,
 		       DMA_MODE_WRITE);	
 #endif
 	self->io.direction = IO_XMIT;
@@ -684,7 +691,7 @@ static void w83977af_dma_xmit_complete(struct w83977af_ir *self)
 
 	IRDA_DEBUG(4, "%s(%ld)\n", __FUNCTION__ , jiffies);
 
-	ASSERT(self != NULL, return;);
+	IRDA_ASSERT(self != NULL, return;);
 
 	iobase = self->io.fir_base;
 
@@ -736,7 +743,7 @@ int w83977af_dma_receive(struct w83977af_ir *self)
 	unsigned long flags;
 	__u8 hcr;
 #endif
-	ASSERT(self != NULL, return -1;);
+	IRDA_ASSERT(self != NULL, return -1;);
 
 	IRDA_DEBUG(4, "%s\n", __FUNCTION__ );
 
@@ -763,10 +770,10 @@ int w83977af_dma_receive(struct w83977af_ir *self)
 	disable_dma(self->io.dma);
 	clear_dma_ff(self->io.dma);
 	set_dma_mode(self->io.dma, DMA_MODE_READ);
-	set_dma_addr(self->io.dma, isa_virt_to_bus(self->rx_buff.data));
+	set_dma_addr(self->io.dma, self->rx_buff_dma);
 	set_dma_count(self->io.dma, self->rx_buff.truesize);
 #else
-	irda_setup_dma(self->io.dma, self->rx_buff.data, self->rx_buff.truesize, 
+	irda_setup_dma(self->io.dma, self->rx_buff_dma, self->rx_buff.truesize,
 		       DMA_MODE_READ);
 #endif
 	/* 
@@ -938,7 +945,7 @@ static void w83977af_pio_receive(struct w83977af_ir *self)
 
 	IRDA_DEBUG(4, "%s()\n", __FUNCTION__ );
 
-	ASSERT(self != NULL, return;);
+	IRDA_ASSERT(self != NULL, return;);
 	
 	iobase = self->io.fir_base;
 	
@@ -1156,7 +1163,7 @@ static int w83977af_is_receiving(struct w83977af_ir *self)
 	int iobase;
 	__u8 set;
 
-	ASSERT(self != NULL, return FALSE;);
+	IRDA_ASSERT(self != NULL, return FALSE;);
 
 	if (self->io.speed > 115200) {
 		iobase = self->io.fir_base;
@@ -1190,10 +1197,10 @@ static int w83977af_net_open(struct net_device *dev)
 	
 	IRDA_DEBUG(0, "%s()\n", __FUNCTION__ );
 	
-	ASSERT(dev != NULL, return -1;);
+	IRDA_ASSERT(dev != NULL, return -1;);
 	self = (struct w83977af_ir *) dev->priv;
 	
-	ASSERT(self != NULL, return 0;);
+	IRDA_ASSERT(self != NULL, return 0;);
 	
 	iobase = self->io.fir_base;
 
@@ -1253,11 +1260,11 @@ static int w83977af_net_close(struct net_device *dev)
 
 	IRDA_DEBUG(0, "%s()\n", __FUNCTION__ );
 
-	ASSERT(dev != NULL, return -1;);
+	IRDA_ASSERT(dev != NULL, return -1;);
 	
 	self = (struct w83977af_ir *) dev->priv;
 	
-	ASSERT(self != NULL, return 0;);
+	IRDA_ASSERT(self != NULL, return 0;);
 	
 	iobase = self->io.fir_base;
 
@@ -1300,11 +1307,11 @@ static int w83977af_net_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	unsigned long flags;
 	int ret = 0;
 
-	ASSERT(dev != NULL, return -1;);
+	IRDA_ASSERT(dev != NULL, return -1;);
 
 	self = dev->priv;
 
-	ASSERT(self != NULL, return -1;);
+	IRDA_ASSERT(self != NULL, return -1;);
 
 	IRDA_DEBUG(2, "%s(), %s, (cmd=0x%X)\n", __FUNCTION__ , dev->name, cmd);
 	
@@ -1348,11 +1355,11 @@ MODULE_DESCRIPTION("Winbond W83977AF IrDA Device Driver");
 MODULE_LICENSE("GPL");
 
 
-MODULE_PARM(qos_mtt_bits, "i");
+module_param(qos_mtt_bits, int, 0);
 MODULE_PARM_DESC(qos_mtt_bits, "Mimimum Turn Time");
-MODULE_PARM(io, "1-4i");
+module_param_array(io, int, NULL, 0);
 MODULE_PARM_DESC(io, "Base I/O addresses");
-MODULE_PARM(irq, "1-4i");
+module_param_array(irq, int, NULL, 0);
 MODULE_PARM_DESC(irq, "IRQ lines");
 
 /*

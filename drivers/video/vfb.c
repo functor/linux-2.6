@@ -35,10 +35,7 @@
 
 static void *videomemory;
 static u_long videomemorysize = VIDEOMEMSIZE;
-MODULE_PARM(videomemorysize, "l");
-
-static struct fb_info fb_info;
-static u32 vfb_pseudo_palette[17];
+module_param(videomemorysize, ulong, 0);
 
 static struct fb_var_screeninfo vfb_default __initdata = {
 	.xres =		640,
@@ -73,13 +70,7 @@ static struct fb_fix_screeninfo vfb_fix __initdata = {
 };
 
 static int vfb_enable __initdata = 0;	/* disabled by default */
-MODULE_PARM(vfb_enable, "i");
-
-    /*
-     *  Interface used by the world
-     */
-int vfb_init(void);
-int vfb_setup(char *);
+module_param(vfb_enable, bool, 0);
 
 static int vfb_check_var(struct fb_var_screeninfo *var,
 			 struct fb_info *info);
@@ -382,7 +373,8 @@ static int vfb_mmap(struct fb_info *info, struct file *file,
 	return -EINVAL;
 }
 
-int __init vfb_setup(char *options)
+#ifndef MODULE
+static int __init vfb_setup(char *options)
 {
 	char *this_opt;
 
@@ -399,23 +391,28 @@ int __init vfb_setup(char *options)
 	}
 	return 1;
 }
+#endif  /*  MODULE  */
 
     /*
      *  Initialisation
      */
 
-int __init vfb_init(void)
+static void vfb_platform_release(struct device *device)
 {
-	int retval;
+	// This is called when the reference count goes to zero.
+}
 
-	if (!vfb_enable)
-		return -ENXIO;
+static int __init vfb_probe(struct device *device)
+{
+	struct platform_device *dev = to_platform_device(device);
+	struct fb_info *info;
+	int retval = -ENOMEM;
 
 	/*
 	 * For real video cards we use ioremap.
 	 */
 	if (!(videomemory = vmalloc(videomemorysize)))
-		return -ENOMEM;
+		return retval;
 
 	/*
 	 * VFB must clear memory to prevent kernel info
@@ -425,41 +422,107 @@ int __init vfb_init(void)
 	 */
 	memset(videomemory, 0, videomemorysize);
 
-	fb_info.screen_base = videomemory;
-	fb_info.fbops = &vfb_ops;
+	info = framebuffer_alloc(sizeof(u32) * 256, &dev->dev);
+	if (!info)
+		goto err;
 
-	retval = fb_find_mode(&fb_info.var, &fb_info, NULL,
+	info->screen_base = (char __iomem *)videomemory;
+	info->fbops = &vfb_ops;
+
+	retval = fb_find_mode(&info->var, info, NULL,
 			      NULL, 0, NULL, 8);
 
 	if (!retval || (retval == 4))
-		fb_info.var = vfb_default;
-	fb_info.fix = vfb_fix;
-	fb_info.pseudo_palette = &vfb_pseudo_palette;
-	fb_info.flags = FBINFO_FLAG_DEFAULT;
+		info->var = vfb_default;
+	info->fix = vfb_fix;
+	info->pseudo_palette = info->par;
+	info->par = NULL;
+	info->flags = FBINFO_FLAG_DEFAULT;
 
-	fb_alloc_cmap(&fb_info.cmap, 256, 0);
+	retval = fb_alloc_cmap(&info->cmap, 256, 0);
+	if (retval < 0)
+		goto err1;
 
-	if (register_framebuffer(&fb_info) < 0) {
-		vfree(videomemory);
-		return -EINVAL;
-	}
+	retval = register_framebuffer(info);
+	if (retval < 0)
+		goto err2;
+	dev_set_drvdata(&dev->dev, info);
 
 	printk(KERN_INFO
 	       "fb%d: Virtual frame buffer device, using %ldK of video memory\n",
-	       fb_info.node, videomemorysize >> 10);
+	       info->node, videomemorysize >> 10);
+	return 0;
+err2:
+	fb_dealloc_cmap(&info->cmap);
+err1:
+	framebuffer_release(info);
+err:
+	vfree(videomemory);
+	return retval;
+}
+
+static int vfb_remove(struct device *device)
+{
+	struct fb_info *info = dev_get_drvdata(device);
+
+	if (info) {
+		unregister_framebuffer(info);
+		vfree(videomemory);
+		framebuffer_release(info);
+	}
 	return 0;
 }
 
-#ifdef MODULE
+static struct device_driver vfb_driver = {
+	.name	= "vfb",
+	.bus	= &platform_bus_type,
+	.probe	= vfb_probe,
+	.remove = vfb_remove,
+};
 
-static void __exit vfb_cleanup(void)
+static struct platform_device vfb_device = {
+	.name	= "vfb",
+	.id	= 0,
+	.dev	= {
+		.release = vfb_platform_release,
+	}
+};
+
+static int __init vfb_init(void)
 {
-	unregister_framebuffer(&fb_info);
-	vfree(videomemory);
+	int ret = 0;
+
+#ifndef MODULE
+	char *option = NULL;
+
+	if (fb_get_options("vfb", &option))
+		return -ENODEV;
+	vfb_setup(option);
+#endif
+
+	if (!vfb_enable)
+		return -ENXIO;
+
+	ret = driver_register(&vfb_driver);
+
+	if (!ret) {
+		ret = platform_device_register(&vfb_device);
+		if (ret)
+			driver_unregister(&vfb_driver);
+	}
+	return ret;
 }
 
 module_init(vfb_init);
-module_exit(vfb_cleanup);
+
+#ifdef MODULE
+static void __exit vfb_exit(void)
+{
+	platform_device_unregister(&vfb_device);
+	driver_unregister(&vfb_driver);
+}
+
+module_exit(vfb_exit);
 
 MODULE_LICENSE("GPL");
 #endif				/* MODULE */

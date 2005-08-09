@@ -134,7 +134,7 @@ typedef struct hdlc_device_struct {
 			int dce_pvc_count;
 
 			struct timer_list timer;
-			int last_poll;
+			unsigned long last_poll;
 			int reliable;
 			int dce_changed;
 			int request;
@@ -149,8 +149,9 @@ typedef struct hdlc_device_struct {
 			cisco_proto settings;
 
 			struct timer_list timer;
-			int last_poll;
+			unsigned long last_poll;
 			int up;
+			int request_sent;
 			u32 txseq; /* TX sequence number */
 			u32 rxseq; /* RX sequence number */
 		}cisco;
@@ -242,11 +243,15 @@ static __inline__ struct net_device_stats *hdlc_stats(struct net_device *dev)
 static __inline__ unsigned short hdlc_type_trans(struct sk_buff *skb,
 						 struct net_device *dev)
 {
-	hdlc_device *hdlc = dev_to_hdlc(skb->dev);
+	hdlc_device *hdlc = dev_to_hdlc(dev);
+
+	skb->mac.raw  = skb->data;
+	skb->dev      = dev;
+
 	if (hdlc->proto.type_trans)
 		return hdlc->proto.type_trans(skb, dev);
 	else
-		return __constant_htons(ETH_P_HDLC);
+		return htons(ETH_P_HDLC);
 }
 
 #endif /* __KERNEL */

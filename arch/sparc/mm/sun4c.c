@@ -379,7 +379,7 @@ extern unsigned long invalid_segment_patch1, invalid_segment_patch1_ff;
 extern unsigned long invalid_segment_patch2, invalid_segment_patch2_ff;
 extern unsigned long invalid_segment_patch1_1ff, invalid_segment_patch2_1ff;
 extern unsigned long num_context_patch1, num_context_patch1_16;
-extern unsigned long num_context_patch2, num_context_patch2_16;
+extern unsigned long num_context_patch2_16;
 extern unsigned long vac_linesize_patch, vac_linesize_patch_32;
 extern unsigned long vac_hwflush_patch1, vac_hwflush_patch1_on;
 extern unsigned long vac_hwflush_patch2, vac_hwflush_patch2_on;
@@ -497,7 +497,7 @@ static void __init sun4c_probe_mmu(void)
 	patch_kernel_fault_handler();
 }
 
-volatile unsigned long *sun4c_memerr_reg = 0;
+volatile unsigned long *sun4c_memerr_reg = NULL;
 
 void __init sun4c_probe_memerr_reg(void)
 {
@@ -511,7 +511,8 @@ void __init sun4c_probe_memerr_reg(void)
 		node = prom_searchsiblings(prom_root_node, "memory-error");
 		if (!node)
 			return;
-		prom_getproperty(node, "reg", (char *)regs, sizeof(regs));
+		if (prom_getproperty(node, "reg", (char *)regs, sizeof(regs)) <= 0)
+			return;
 		/* hmm I think regs[0].which_io is zero here anyways */
 		sun4c_memerr_reg = ioremap(regs[0].phys_addr, regs[0].reg_size);
 	}
@@ -599,13 +600,13 @@ static void __init sun4c_init_mmu_entry_pool(void)
 
 	for (i=0; i < SUN4C_MAX_SEGMAPS; i++) {
 		mmu_entry_pool[i].pseg = i;
-		mmu_entry_pool[i].next = 0;
-		mmu_entry_pool[i].prev = 0;
+		mmu_entry_pool[i].next = NULL;
+		mmu_entry_pool[i].prev = NULL;
 		mmu_entry_pool[i].vaddr = 0;
 		mmu_entry_pool[i].locked = 0;
 		mmu_entry_pool[i].ctx = 0;
-		mmu_entry_pool[i].lru_next = 0;
-		mmu_entry_pool[i].lru_prev = 0;
+		mmu_entry_pool[i].lru_next = NULL;
+		mmu_entry_pool[i].lru_prev = NULL;
 	}
 	mmu_entry_pool[invalid_segment].locked = 1;
 }
@@ -1170,7 +1171,7 @@ abend:
 	local_irq_restore(flags);
 	printk("DMA vaddr=0x%p size=%08lx\n", vaddr, size);
 	panic("Out of iobuffer table");
-	return 0;
+	return NULL;
 }
 
 static void sun4c_unlockarea(char *vaddr, unsigned long size)
@@ -1745,6 +1746,11 @@ static int sun4c_pte_present(pte_t pte)
 }
 static void sun4c_pte_clear(pte_t *ptep)	{ *ptep = __pte(0); }
 
+static int sun4c_pte_read(pte_t pte)
+{
+	return (pte_val(pte) & _SUN4C_PAGE_READ);
+}
+
 static int sun4c_pmd_bad(pmd_t pmd)
 {
 	return (((pmd_val(pmd) & ~PAGE_MASK) != PGD_TABLE) ||
@@ -2114,9 +2120,8 @@ void __init sun4c_paging_init(void)
 		zones_size[ZONE_HIGHMEM] = npages;
 		zholes_size[ZONE_HIGHMEM] = npages - calc_highpages();
 
-		free_area_init_node(0, &contig_page_data, NULL, zones_size,
+		free_area_init_node(0, &contig_page_data, zones_size,
 				    pfn_base, zholes_size);
-		mem_map = contig_page_data.node_mem_map;
 	}
 
 	cnt = 0;
@@ -2137,14 +2142,10 @@ void __init ld_mmu_sun4c(void)
 	printk("Loading sun4c MMU routines\n");
 
 	/* First the constants */
-	BTFIXUPSET_SIMM13(pmd_shift, SUN4C_PMD_SHIFT);
-	BTFIXUPSET_SETHI(pmd_size, SUN4C_PMD_SIZE);
-	BTFIXUPSET_SETHI(pmd_mask, SUN4C_PMD_MASK);
 	BTFIXUPSET_SIMM13(pgdir_shift, SUN4C_PGDIR_SHIFT);
 	BTFIXUPSET_SETHI(pgdir_size, SUN4C_PGDIR_SIZE);
 	BTFIXUPSET_SETHI(pgdir_mask, SUN4C_PGDIR_MASK);
 
-	BTFIXUPSET_SIMM13(ptrs_per_pte, SUN4C_PTRS_PER_PTE);
 	BTFIXUPSET_SIMM13(ptrs_per_pmd, SUN4C_PTRS_PER_PMD);
 	BTFIXUPSET_SIMM13(ptrs_per_pgd, SUN4C_PTRS_PER_PGD);
 	BTFIXUPSET_SIMM13(user_ptrs_per_pgd, KERNBASE / SUN4C_PGDIR_SIZE);
@@ -2203,6 +2204,7 @@ void __init ld_mmu_sun4c(void)
 
 	BTFIXUPSET_CALL(pte_present, sun4c_pte_present, BTFIXUPCALL_NORM);
 	BTFIXUPSET_CALL(pte_clear, sun4c_pte_clear, BTFIXUPCALL_STG0O0);
+	BTFIXUPSET_CALL(pte_read, sun4c_pte_read, BTFIXUPCALL_NORM);
 
 	BTFIXUPSET_CALL(pmd_bad, sun4c_pmd_bad, BTFIXUPCALL_NORM);
 	BTFIXUPSET_CALL(pmd_present, sun4c_pmd_present, BTFIXUPCALL_NORM);

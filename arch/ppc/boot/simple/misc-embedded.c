@@ -22,7 +22,6 @@
 #endif
 
 #include "nonstdio.h"
-#include "zlib.h"
 
 /* The linker tells us where the image is. */
 extern char __image_begin, __image_end;
@@ -72,6 +71,14 @@ extern void flush_instruction_cache(void);
 extern void gunzip(void *, int, unsigned char *, int *);
 extern void embed_config(bd_t **bp);
 
+/* Weak function for boards which don't need to build the
+ * board info struct because they are using PPCBoot/U-Boot.
+ */
+void __attribute__ ((weak))
+embed_config(bd_t **bdp)
+{
+}
+
 unsigned long
 load_kernel(unsigned long load_addr, int num_words, unsigned long cksum, bd_t *bp)
 {
@@ -83,7 +90,7 @@ load_kernel(unsigned long load_addr, int num_words, unsigned long cksum, bd_t *b
 	 * initialize the serial console port.
 	 */
 	embed_config(&bp);
-#if defined(CONFIG_SERIAL_CONSOLE) || defined(CONFIG_SERIAL_8250_CONSOLE)
+#if defined(CONFIG_SERIAL_CPM_CONSOLE) || defined(CONFIG_SERIAL_8250_CONSOLE)
 	com_port = serial_init(0, bp);
 #endif
 
@@ -211,7 +218,7 @@ load_kernel(unsigned long load_addr, int num_words, unsigned long cksum, bd_t *b
 	puts("done.\n");
 	{
 		struct bi_record *rec;
-		unsigned long initrd_loc;
+		unsigned long initrd_loc = 0;
 		unsigned long rec_loc = _ALIGN((unsigned long)(zimage_size) +
 				(1 << 20) - 1, (1 << 20));
 		rec = (struct bi_record *)rec_loc;
@@ -260,7 +267,9 @@ load_kernel(unsigned long load_addr, int num_words, unsigned long cksum, bd_t *b
 		rec = (struct bi_record *)((unsigned long)rec + rec->size);
 	}
 	puts("Now booting the kernel\n");
+#if defined(CONFIG_SERIAL_CPM_CONSOLE) || defined(CONFIG_SERIAL_8250_CONSOLE)
 	serial_close(com_port);
+#endif
 
 	return (unsigned long)hold_residual;
 }

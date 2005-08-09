@@ -6,7 +6,9 @@
  * (c) 1999 Machine Vision Holdings, Inc.
  * (c) 1999, 2000 David Woodhouse <dwmw2@infradead.org>
  *
- * $Id: doc2001plus.c,v 1.5 2003/06/11 09:45:19 dwmw2 Exp $
+ * $Id: doc2001plus.c,v 1.13 2005/01/05 18:05:12 dwmw2 Exp $
+ *
+ * Released under GPL
  */
 
 #include <linux/kernel.h>
@@ -21,6 +23,7 @@
 #include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/types.h>
+#include <linux/bitops.h>
 
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
@@ -54,7 +57,7 @@ static struct mtd_info *docmilpluslist = NULL;
 
 
 /* Perform the required delay cycles by writing to the NOP register */
-static void DoC_Delay(unsigned long docptr, int cycles)
+static void DoC_Delay(void __iomem * docptr, int cycles)
 {
 	int i;
 
@@ -65,7 +68,7 @@ static void DoC_Delay(unsigned long docptr, int cycles)
 #define	CDSN_CTRL_FR_B_MASK	(CDSN_CTRL_FR_B0 | CDSN_CTRL_FR_B1)
 
 /* DOC_WaitReady: Wait for RDY line to be asserted by the flash chip */
-static int _DoC_WaitReady(unsigned long docptr)
+static int _DoC_WaitReady(void __iomem * docptr)
 {
 	unsigned int c = 0xffff;
 
@@ -82,7 +85,7 @@ static int _DoC_WaitReady(unsigned long docptr)
 	return (c == 0);
 }
 
-static inline int DoC_WaitReady(unsigned long docptr)
+static inline int DoC_WaitReady(void __iomem * docptr)
 {
 	/* This is inline, to optimise the common case, where it's ready instantly */
 	int ret = 0;
@@ -103,7 +106,7 @@ static inline int DoC_WaitReady(unsigned long docptr)
  * can detect. M-systems suggest always check this on any block level
  * operation and setting to normal mode if in reset mode.
  */
-static inline void DoC_CheckASIC(unsigned long docptr)
+static inline void DoC_CheckASIC(void __iomem * docptr)
 {
 	/* Make sure the DoC is in normal mode */
 	if ((ReadDOC(docptr, Mplus_DOCControl) & DOC_MODE_NORMAL) == 0) {
@@ -115,7 +118,7 @@ static inline void DoC_CheckASIC(unsigned long docptr)
 /* DoC_Command: Send a flash command to the flash chip through the Flash
  * command register. Need 2 Write Pipeline Terminates to complete send.
  */
-static inline void DoC_Command(unsigned long docptr, unsigned char command,
+static inline void DoC_Command(void __iomem * docptr, unsigned char command,
 			       unsigned char xtraflags)
 {
 	WriteDOC(command, docptr, Mplus_FlashCmd);
@@ -130,7 +133,7 @@ static inline void DoC_Address(struct DiskOnChip *doc, int numbytes,
 			       unsigned long ofs, unsigned char xtraflags1,
 			       unsigned char xtraflags2)
 {
-	unsigned long docptr = doc->virtadr;
+	void __iomem * docptr = doc->virtadr;
 
 	/* Allow for possible Mill Plus internal flash interleaving */
 	ofs >>= doc->interleave;
@@ -160,14 +163,14 @@ static inline void DoC_Address(struct DiskOnChip *doc, int numbytes,
 }
 
 /* DoC_SelectChip: Select a given flash chip within the current floor */
-static int DoC_SelectChip(unsigned long docptr, int chip)
+static int DoC_SelectChip(void __iomem * docptr, int chip)
 {
 	/* No choice for flash chip on Millennium Plus */
 	return 0;
 }
 
 /* DoC_SelectFloor: Select a given floor (bank of flash chips) */
-static int DoC_SelectFloor(unsigned long docptr, int floor)
+static int DoC_SelectFloor(void __iomem * docptr, int floor)
 {
 	WriteDOC((floor & 0x3), docptr, Mplus_DeviceSelect);
 	return 0;
@@ -183,24 +186,35 @@ static int DoC_SelectFloor(unsigned long docptr, int floor)
  *  | Data 0    | ECC 0 |Flags0 |Flags1 | Data 1       |ECC 1    | OOB 1 + 2 |
  *  +-----------+-------+-------+-------+--------------+---------+-----------+
  */
+/* FIXME: This lives in INFTL not here. Other users of flash devices
+   may not want it */
 static unsigned int DoC_GetDataOffset(struct mtd_info *mtd, loff_t *from)
 {
-	unsigned int ofs = *from & 0x3ff;
-	unsigned int cmd;
+	struct DiskOnChip *this = mtd->priv;
 
-	if (ofs < 512) {
-		cmd = NAND_CMD_READ0;
-		ofs &= 0x1ff;
-	} else if (ofs < 1014) {
-		cmd = NAND_CMD_READ1;
-		ofs = (ofs & 0x1ff) + 10;
+	if (this->interleave) {
+		unsigned int ofs = *from & 0x3ff;
+		unsigned int cmd;
+
+		if (ofs < 512) {
+			cmd = NAND_CMD_READ0;
+			ofs &= 0x1ff;
+		} else if (ofs < 1014) {
+			cmd = NAND_CMD_READ1;
+			ofs = (ofs & 0x1ff) + 10;
+		} else {
+			cmd = NAND_CMD_READOOB;
+			ofs = ofs - 1014;
+		}
+
+		*from = (*from & ~0x3ff) | ofs;
+		return cmd;
 	} else {
-		cmd = NAND_CMD_READOOB;
-		ofs = ofs - 1014;
+		/* No interleave */
+		if ((*from) & 0x100)
+			return NAND_CMD_READ1;
+		return NAND_CMD_READ0;
 	}
-
-	*from = (*from & ~0x3ff) | ofs;
-	return cmd;
 }
 
 static unsigned int DoC_GetECCOffset(struct mtd_info *mtd, loff_t *from)
@@ -239,7 +253,7 @@ static unsigned int DoC_GetHdrOffset(struct mtd_info *mtd, loff_t *from)
 	return cmd;
 }
 
-static inline void MemReadDOC(unsigned long docptr, unsigned char *buf, int len)
+static inline void MemReadDOC(void __iomem * docptr, unsigned char *buf, int len)
 {
 #ifndef USE_MEMCPY
 	int i;
@@ -250,7 +264,7 @@ static inline void MemReadDOC(unsigned long docptr, unsigned char *buf, int len)
 #endif
 }
 
-static inline void MemWriteDOC(unsigned long docptr, unsigned char *buf, int len)
+static inline void MemWriteDOC(void __iomem * docptr, unsigned char *buf, int len)
 {
 #ifndef USE_MEMCPY
 	int i;
@@ -266,7 +280,7 @@ static int DoC_IdentChip(struct DiskOnChip *doc, int floor, int chip)
 {
 	int mfr, id, i, j;
 	volatile char dummy;
-	unsigned long docptr = doc->virtadr;
+	void __iomem * docptr = doc->virtadr;
 
 	/* Page in the required floor/chip */
 	DoC_SelectFloor(docptr, floor);
@@ -294,10 +308,12 @@ static int DoC_IdentChip(struct DiskOnChip *doc, int floor, int chip)
 	dummy = ReadDOC(docptr, Mplus_ReadPipeInit);
 
 	mfr = ReadDOC(docptr, Mil_CDSN_IO);
-	dummy = ReadDOC(docptr, Mil_CDSN_IO); /* 2 way interleave */
+	if (doc->interleave)
+		dummy = ReadDOC(docptr, Mil_CDSN_IO); /* 2 way interleave */
 
 	id  = ReadDOC(docptr, Mil_CDSN_IO);
-	dummy = ReadDOC(docptr, Mil_CDSN_IO); /* 2 way interleave */
+	if (doc->interleave)
+		dummy = ReadDOC(docptr, Mil_CDSN_IO); /* 2 way interleave */
 
 	dummy = ReadDOC(docptr, Mplus_LastDataRead);
 	dummy = ReadDOC(docptr, Mplus_LastDataRead);
@@ -321,10 +337,7 @@ static int DoC_IdentChip(struct DiskOnChip *doc, int floor, int chip)
 			       nand_manuf_ids[j].name, nand_flash_ids[i].name);
 			doc->mfr = mfr;
 			doc->id = id;
-			doc->interleave = 0;
-			if (doc->ChipID == DOC_ChipID_DocMilPlus32)
-				doc->interleave = 1;
-			doc->chipshift = nand_flash_ids[i].chipshift;
+			doc->chipshift = ffs((nand_flash_ids[i].chipsize << 20)) - 1;
 			doc->erasesize = nand_flash_ids[i].erasesize << doc->interleave;
 			break;
 		}
@@ -345,6 +358,21 @@ static void DoC_ScanChips(struct DiskOnChip *this)
 	this->numchips = 0;
 	this->mfr = 0;
 	this->id = 0;
+
+	/* Work out the intended interleave setting */
+	this->interleave = 0;
+	if (this->ChipID == DOC_ChipID_DocMilPlus32)
+		this->interleave = 1;
+
+	/* Check the ASIC agrees */
+	if ( (this->interleave << 2) != 
+	     (ReadDOC(this->virtadr, Mplus_Configuration) & 4)) {
+		u_char conf = ReadDOC(this->virtadr, Mplus_Configuration);
+		printk(KERN_NOTICE "Setting DiskOnChip Millennium Plus interleave to %s\n",
+		       this->interleave?"on (16-bit)":"off (8-bit)");
+		conf ^= 4;
+		WriteDOC(conf, this->virtadr, Mplus_Configuration);
+	}
 
 	/* For each floor, find the number of valid chips it contains */
 	for (floor = 0,ret = 1; floor < MAX_FLOORS_MPLUS; floor++) {
@@ -430,24 +458,24 @@ static const char im_name[] = "DoCMilPlus_init";
  */
 static void DoCMilPlus_init(struct mtd_info *mtd)
 {
-	struct DiskOnChip *this = (struct DiskOnChip *)mtd->priv;
+	struct DiskOnChip *this = mtd->priv;
 	struct DiskOnChip *old = NULL;
 
 	/* We must avoid being called twice for the same device. */
 	if (docmilpluslist)
-		old = (struct DiskOnChip *)docmilpluslist->priv;
+		old = docmilpluslist->priv;
 
 	while (old) {
 		if (DoCMilPlus_is_alias(this, old)) {
 			printk(KERN_NOTICE "Ignoring DiskOnChip Millennium "
 				"Plus at 0x%lX - already configured\n",
 				this->physadr);
-			iounmap((void *)this->virtadr);
+			iounmap(this->virtadr);
 			kfree(mtd);
 			return;
 		}
 		if (old->nextdoc)
-			old = (struct DiskOnChip *)old->nextdoc->priv;
+			old = old->nextdoc->priv;
 		else
 			old = NULL;
 	}
@@ -486,7 +514,7 @@ static void DoCMilPlus_init(struct mtd_info *mtd)
 
 	if (!this->totlen) {
 		kfree(mtd);
-		iounmap((void *)this->virtadr);
+		iounmap(this->virtadr);
 	} else {
 		this->nextdoc = docmilpluslist;
 		docmilpluslist = mtd;
@@ -502,8 +530,8 @@ static int doc_dumpblk(struct mtd_info *mtd, loff_t from)
 {
 	int i;
 	loff_t fofs;
-	struct DiskOnChip *this = (struct DiskOnChip *)mtd->priv;
-	unsigned long docptr = this->virtadr;
+	struct DiskOnChip *this = mtd->priv;
+	void __iomem * docptr = this->virtadr;
 	struct Nand *mychip = &this->chips[from >> (this->chipshift)];
 	unsigned char *bp, buf[1056];
 	char c[32];
@@ -587,8 +615,8 @@ static int doc_read_ecc(struct mtd_info *mtd, loff_t from, size_t len,
 	volatile char dummy;
 	loff_t fofs;
 	unsigned char syndrome[6];
-	struct DiskOnChip *this = (struct DiskOnChip *)mtd->priv;
-	unsigned long docptr = this->virtadr;
+	struct DiskOnChip *this = mtd->priv;
+	void __iomem * docptr = this->virtadr;
 	struct Nand *mychip = &this->chips[from >> (this->chipshift)];
 
 	/* Don't allow read past end of device */
@@ -726,8 +754,8 @@ static int doc_write_ecc(struct mtd_info *mtd, loff_t to, size_t len,
 	int i, before, ret = 0;
 	loff_t fto;
 	volatile char dummy;
-	struct DiskOnChip *this = (struct DiskOnChip *)mtd->priv;
-	unsigned long docptr = this->virtadr;
+	struct DiskOnChip *this = mtd->priv;
+	void __iomem * docptr = this->virtadr;
 	struct Nand *mychip = &this->chips[to >> (this->chipshift)];
 
 	/* Don't allow write past end of device */
@@ -739,7 +767,7 @@ static int doc_write_ecc(struct mtd_info *mtd, loff_t to, size_t len,
 		return -EINVAL;
 
 	/* Determine position of OOB flags, before or after data */
-	before = to & 0x200;
+	before = (this->interleave && (to & 0x200));
 
 	DoC_CheckASIC(docptr);
 
@@ -852,8 +880,8 @@ static int doc_read_oob(struct mtd_info *mtd, loff_t ofs, size_t len,
 			size_t *retlen, u_char *buf)
 {
 	loff_t fofs, base;
-	struct DiskOnChip *this = (struct DiskOnChip *)mtd->priv;
-	unsigned long docptr = this->virtadr;
+	struct DiskOnChip *this = mtd->priv;
+	void __iomem * docptr = this->virtadr;
 	struct Nand *mychip = &this->chips[ofs >> this->chipshift];
 	size_t i, size, got, want;
 
@@ -886,7 +914,10 @@ static int doc_read_oob(struct mtd_info *mtd, loff_t ofs, size_t len,
 		/* Figure out which region we are accessing... */
 		fofs = ofs;
 		base = ofs & 0xf;
-		if (base < 6) {
+		if (!this->interleave) {
+			DoC_Command(docptr, NAND_CMD_READOOB, 0);
+			size = 16 - base;
+		} else if (base < 6) {
 			DoC_Command(docptr, DoC_GetECCOffset(mtd, &fofs), 0);
 			size = 6 - base;
 		} else if (base < 8) {
@@ -927,8 +958,8 @@ static int doc_write_oob(struct mtd_info *mtd, loff_t ofs, size_t len,
 {
 	volatile char dummy;
 	loff_t fofs, base;
-	struct DiskOnChip *this = (struct DiskOnChip *)mtd->priv;
-	unsigned long docptr = this->virtadr;
+	struct DiskOnChip *this = mtd->priv;
+	void __iomem * docptr = this->virtadr;
 	struct Nand *mychip = &this->chips[ofs >> this->chipshift];
 	size_t i, size, got, want;
 	int ret = 0;
@@ -963,7 +994,10 @@ static int doc_write_oob(struct mtd_info *mtd, loff_t ofs, size_t len,
 		/* Figure out which region we are accessing... */
 		fofs = ofs;
 		base = ofs & 0x0f;
-		if (base < 6) {
+		if (!this->interleave) {
+			WriteDOC(NAND_CMD_READOOB, docptr, Mplus_FlashCmd);
+			size = 16 - base;
+		} else if (base < 6) {
 			WriteDOC(DoC_GetECCOffset(mtd, &fofs), docptr, Mplus_FlashCmd);
 			size = 6 - base;
 		} else if (base < 8) {
@@ -1024,10 +1058,10 @@ static int doc_write_oob(struct mtd_info *mtd, loff_t ofs, size_t len,
 int doc_erase(struct mtd_info *mtd, struct erase_info *instr)
 {
 	volatile char dummy;
-	struct DiskOnChip *this = (struct DiskOnChip *)mtd->priv;
+	struct DiskOnChip *this = mtd->priv;
 	__u32 ofs = instr->addr;
 	__u32 len = instr->len;
-	unsigned long docptr = this->virtadr;
+	void __iomem * docptr = this->virtadr;
 	struct Nand *mychip = &this->chips[ofs >> this->chipshift];
 
 	DoC_CheckASIC(docptr);
@@ -1077,8 +1111,7 @@ int doc_erase(struct mtd_info *mtd, struct erase_info *instr)
 	/* Disable flash internally */
 	WriteDOC(0, docptr, Mplus_FlashSelect);
 
-	if (instr->callback) 
-		instr->callback(instr);
+	mtd_erase_callback(instr);
 
 	return 0;
 }
@@ -1089,7 +1122,7 @@ int doc_erase(struct mtd_info *mtd, struct erase_info *instr)
  *
  ****************************************************************************/
 
-int __init init_doc2001plus(void)
+static int __init init_doc2001plus(void)
 {
 	inter_module_register(im_name, THIS_MODULE, &DoCMilPlus_init);
 	return 0;
@@ -1101,12 +1134,12 @@ static void __exit cleanup_doc2001plus(void)
 	struct DiskOnChip *this;
 
 	while ((mtd=docmilpluslist)) {
-		this = (struct DiskOnChip *)mtd->priv;
+		this = mtd->priv;
 		docmilpluslist = this->nextdoc;
 			
 		del_mtd_device(mtd);
 			
-		iounmap((void *)this->virtadr);
+		iounmap(this->virtadr);
 		kfree(this->chips);
 		kfree(mtd);
 	}

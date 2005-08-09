@@ -67,6 +67,7 @@
 #include <linux/stddef.h>
 #include <linux/sched.h>
 #include <linux/ioport.h>
+#include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/init.h>
 #include <asm/io.h>
@@ -125,8 +126,8 @@
 
 /* If force_addr is set to anything different from 0, we forcibly enable
    the device at the given address. */
-static int force_addr = 0;
-MODULE_PARM(force_addr, "i");
+static u16 force_addr = 0;
+module_param(force_addr, ushort, 0);
 MODULE_PARM_DESC(force_addr,
 		 "Initialize the base address of the i2c controller");
 
@@ -296,7 +297,7 @@ static int ali15x3_transaction(struct i2c_adapter *adap)
 	/* We will always wait for a fraction of a second! */
 	timeout = 0;
 	do {
-		i2c_delay(1);
+		msleep(1);
 		temp = inb_p(SMBHSTSTS);
 	} while ((!(temp & (ALI15X3_STS_ERR | ALI15X3_STS_DONE)))
 		 && (timeout++ < MAX_TIMEOUT));
@@ -353,7 +354,7 @@ static s32 ali15x3_access(struct i2c_adapter * adap, u16 addr,
 	for (timeout = 0;
 	     (timeout < MAX_TIMEOUT) && !(temp & ALI15X3_STS_IDLE);
 	     timeout++) {
-		i2c_delay(1);
+		msleep(1);
 		temp = inb_p(SMBHSTSTS);
 	}
 	if (timeout >= MAX_TIMEOUT) {
@@ -470,20 +471,17 @@ static struct i2c_algorithm smbus_algorithm = {
 
 static struct i2c_adapter ali15x3_adapter = {
 	.owner		= THIS_MODULE,
-	.class          = I2C_ADAP_CLASS_SMBUS,
+	.class          = I2C_CLASS_HWMON,
 	.algo		= &smbus_algorithm,
 	.name		= "unset",
 };
 
 static struct pci_device_id ali15x3_ids[] = {
-	{
-	.vendor =	PCI_VENDOR_ID_AL,
-	.device =	PCI_DEVICE_ID_AL_M7101,
-	.subvendor =	PCI_ANY_ID,
-	.subdevice =	PCI_ANY_ID,
-	},
+	{ PCI_DEVICE(PCI_VENDOR_ID_AL, PCI_DEVICE_ID_AL_M7101) },
 	{ 0, }
 };
+
+MODULE_DEVICE_TABLE (pci, ali15x3_ids);
 
 static int __devinit ali15x3_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
@@ -508,7 +506,7 @@ static void __devexit ali15x3_remove(struct pci_dev *dev)
 }
 
 static struct pci_driver ali15x3_driver = {
-	.name		= "ali15x3 smbus",
+	.name		= "ali15x3_smbus",
 	.id_table	= ali15x3_ids,
 	.probe		= ali15x3_probe,
 	.remove		= __devexit_p(ali15x3_remove),
@@ -516,7 +514,7 @@ static struct pci_driver ali15x3_driver = {
 
 static int __init i2c_ali15x3_init(void)
 {
-	return pci_module_init(&ali15x3_driver);
+	return pci_register_driver(&ali15x3_driver);
 }
 
 static void __exit i2c_ali15x3_exit(void)

@@ -11,7 +11,7 @@
  * Derived from drivers/mtd/autcpu12.c
  *       Copyright (c) 2001 Thomas Gleixner (gleixner@autronix.de)
  *
- * $Id: tx4925ndfmc.c,v 1.2 2004/03/27 19:55:53 gleixner Exp $
+ * $Id: tx4925ndfmc.c,v 1.5 2004/10/05 13:50:20 gleixner Exp $
  *
  * Copyright (C) 2001 Toshiba Corporation 
  * 
@@ -38,14 +38,6 @@ extern struct nand_oobinfo jffs2_oobinfo;
  * MTD structure for RBTX4925 board
  */
 static struct mtd_info *tx4925ndfmc_mtd = NULL;
-
-/*
- * Module stuff
- */
-#if LINUX_VERSION_CODE < 0x20212 && defined(MODULE)
-#define tx4925ndfmc_init init_module
-#define tx4925ndfmc_cleanup cleanup_module
-#endif
 
 /*
  * Define partitions for flash devices
@@ -348,8 +340,8 @@ int __init tx4925ndfmc_init (void)
 	tx4925ndfmc_mtd->priv = this;
 
 	/* Set address of NAND IO lines */
-	this->IO_ADDR_R = (unsigned long)&(tx4925_ndfmcptr->dtr);
-	this->IO_ADDR_W = (unsigned long)&(tx4925_ndfmcptr->dtr);
+	this->IO_ADDR_R = (void __iomem *)&(tx4925_ndfmcptr->dtr);
+	this->IO_ADDR_W = (void __iomem *)&(tx4925_ndfmcptr->dtr);
 	this->hwcontrol = tx4925ndfmc_hwcontrol;
 	this->enable_hwecc = tx4925ndfmc_enable_hwecc;
 	this->calculate_ecc = tx4925ndfmc_readecc;
@@ -368,14 +360,6 @@ int __init tx4925ndfmc_init (void)
 	/* Scan to find existance of the device */
 	if (nand_scan (tx4925ndfmc_mtd, 1)) {
 		err = -ENXIO;
-		goto out_ior;
-	}
-
-	/* Allocate memory for internal data buffer */
-	this->data_buf = kmalloc (sizeof(u_char) * (tx4925ndfmc_mtd->oobblock + tx4925ndfmc_mtd->oobsize), GFP_KERNEL);
-	if (!this->data_buf) {
-		printk ("Unable to allocate NAND data buffer for RBTX4925.\n");
-		err = -ENOMEM;
 		goto out_ior;
 	}
 
@@ -399,14 +383,12 @@ int __init tx4925ndfmc_init (void)
 		default: {
 			printk ("Unsupported SmartMedia device\n"); 
 			err = -ENXIO;
-			goto out_buf;
+			goto out_ior;
 		}
 	}
 #endif /* ifdef CONFIG_MTD_CMDLINE_PARTS */
 	goto out;
 
-out_buf:
-	kfree (this->data_buf);    
 out_ior:
 out:
 	return err;
@@ -420,16 +402,8 @@ module_init(tx4925ndfmc_init);
 #ifdef MODULE
 static void __exit tx4925ndfmc_cleanup (void)
 {
-	struct nand_chip *this = (struct nand_chip *) &tx4925ndfmc_mtd[1];
-
-	/* Unregister partitions */
-	del_mtd_partitions(tx4925ndfmc_mtd);
-	
-	/* Unregister the device */
-	del_mtd_device (tx4925ndfmc_mtd);
-
-	/* Free internal data buffers */
-	kfree (this->data_buf);
+	/* Release resources, unregister device */
+	nand_release (tx4925ndfmc_mtd);
 
 	/* Free the MTD device structure */
 	kfree (tx4925ndfmc_mtd);

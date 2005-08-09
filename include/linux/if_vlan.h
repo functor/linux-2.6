@@ -18,10 +18,10 @@
 /* externally defined structs */
 struct vlan_group;
 struct net_device;
-struct sk_buff;
 struct packet_type;
 struct vlan_collection;
 struct vlan_dev_info;
+struct hlist_node;
 
 #include <linux/proc_fs.h> /* for proc_dir_entry */
 #include <linux/netdevice.h>
@@ -47,6 +47,13 @@ struct vlan_ethhdr {
    unsigned short	h_vlan_encapsulated_proto; /* packet type ID field (or len) */
 };
 
+#include <linux/skbuff.h>
+
+static inline struct vlan_ethhdr *vlan_eth_hdr(const struct sk_buff *skb)
+{
+	return (struct vlan_ethhdr *)skb->mac.raw;
+}
+
 struct vlan_hdr {
    unsigned short       h_vlan_TCI;                /* Encapsulates priority and VLAN ID */
    unsigned short       h_vlan_encapsulated_proto; /* packet type ID field (or len) */
@@ -55,7 +62,7 @@ struct vlan_hdr {
 #define VLAN_VID_MASK	0xfff
 
 /* found in socket.c */
-extern void vlan_ioctl_set(int (*hook)(unsigned long));
+extern void vlan_ioctl_set(int (*hook)(void __user *));
 
 #define VLAN_NAME "vlan"
 
@@ -67,9 +74,9 @@ extern void vlan_ioctl_set(int (*hook)(unsigned long));
 
 struct vlan_group {
 	int real_dev_ifindex; /* The ifindex of the ethernet(like) device the vlan is attached to. */
+	struct hlist_node	hlist;	/* linked list */
 	struct net_device *vlan_devices[VLAN_GROUP_ARRAY_LEN];
-
-	struct vlan_group *next; /* the next in the list */
+	struct rcu_head		rcu;
 };
 
 struct vlan_priority_tci_mapping {
@@ -151,7 +158,7 @@ static inline int __vlan_hwaccel_rx(struct sk_buff *skb,
 	skb->real_dev = skb->dev;
 	skb->dev = grp->vlan_devices[vlan_tag & VLAN_VID_MASK];
 	if (skb->dev == NULL) {
-		kfree_skb(skb);
+		dev_kfree_skb_any(skb);
 
 		/* Not NET_RX_DROP, this is not being dropped
 		 * due to congestion.
@@ -179,7 +186,7 @@ static inline int __vlan_hwaccel_rx(struct sk_buff *skb,
 		 * This allows the VLAN to have a different MAC than the underlying
 		 * device, and still route correctly.
 		 */
-		if (!memcmp(skb->mac.ethernet->h_dest, skb->dev->dev_addr, ETH_ALEN))
+		if (!memcmp(eth_hdr(skb)->h_dest, skb->dev->dev_addr, ETH_ALEN))
 			skb->pkt_type = PACKET_HOST;
 		break;
 	};
@@ -359,7 +366,9 @@ enum vlan_ioctl_cmds {
 	GET_VLAN_INGRESS_PRIORITY_CMD,
 	GET_VLAN_EGRESS_PRIORITY_CMD,
 	SET_VLAN_NAME_TYPE_CMD,
-	SET_VLAN_FLAG_CMD
+	SET_VLAN_FLAG_CMD,
+	GET_VLAN_REALDEV_NAME_CMD, /* If this works, you know it's a VLAN device, btw */
+	GET_VLAN_VID_CMD /* Get the VID of this VLAN (specified by name) */
 };
 
 enum vlan_name_types {

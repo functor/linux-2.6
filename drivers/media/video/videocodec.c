@@ -43,15 +43,10 @@
 #include <asm/uaccess.h>
 #endif
 
-#include <linux/version.h>
-#ifndef KERNEL_VERSION
-#define KERNEL_VERSION(a,b,c) ((a)*65536+(b)*256+(c))
-#endif
-
 #include "videocodec.h"
 
 static int debug = 0;
-MODULE_PARM(debug, "i");
+module_param(debug, int, 0);
 MODULE_PARM_DESC(debug, "Debug level (0-4)");
 
 #define dprintk(num, format, args...) \
@@ -458,7 +453,7 @@ videocodec_init (void)
 	videocodec_buf = NULL;
 	videocodec_bufsize = 0;
 
-	videocodec_proc_entry = create_proc_entry("videocodecs", 0, 0);
+	videocodec_proc_entry = create_proc_entry("videocodecs", 0, NULL);
 	if (videocodec_proc_entry) {
 		videocodec_proc_entry->read_proc = videocodec_info;
 		videocodec_proc_entry->write_proc = NULL;
@@ -475,7 +470,7 @@ static void __exit
 videocodec_exit (void)
 {
 #ifdef CONFIG_PROC_FS
-	remove_proc_entry("videocodecs", 0);
+	remove_proc_entry("videocodecs", NULL);
 	if (videocodec_buf)
 		kfree(videocodec_buf);
 #endif

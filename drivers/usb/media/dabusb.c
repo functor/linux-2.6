@@ -61,7 +61,7 @@
 
 static dabusb_t dabusb[NRDABUSB];
 static int buffers = 256;
-extern struct usb_driver dabusb_driver;
+static struct usb_driver dabusb_driver;
 
 /*-------------------------------------------------------------------*/
 
@@ -109,16 +109,13 @@ static void dump_urb (struct urb *urb)
 static int dabusb_cancel_queue (pdabusb_t s, struct list_head *q)
 {
 	unsigned long flags;
-	struct list_head *p;
 	pbuff_t b;
 
 	dbg("dabusb_cancel_queue");
 
 	spin_lock_irqsave (&s->lock, flags);
 
-	for (p = q->next; p != q; p = p->next) {
-		b = list_entry (p, buff_t, buff_list);
-
+	list_for_each_entry(b, q, buff_list) {
 #ifdef DEBUG
 		dump_urb(b->purb);
 #endif
@@ -141,8 +138,7 @@ static int dabusb_free_queue (struct list_head *q)
 #ifdef DEBUG 
 		dump_urb(b->purb);
 #endif
-		if (b->purb->transfer_buffer)
-			kfree (b->purb->transfer_buffer);
+		kfree(b->purb->transfer_buffer);
 		usb_free_urb(b->purb);
 		tmp = p->next;
 		list_del (p);
@@ -476,7 +472,7 @@ static int dabusb_startrek (pdabusb_t s)
 	return 0;
 }
 
-static ssize_t dabusb_read (struct file *file, char *buf, size_t count, loff_t * ppos)
+static ssize_t dabusb_read (struct file *file, char __user *buf, size_t count, loff_t * ppos)
 {
 	pdabusb_t s = (pdabusb_t) file->private_data;
 	unsigned long flags;
@@ -598,7 +594,7 @@ static int dabusb_open (struct inode *inode, struct file *file)
 		if (file->f_flags & O_NONBLOCK) {
 			return -EBUSY;
 		}
-		schedule_timeout (HZ / 2);
+		msleep_interruptible(500);
 
 		if (signal_pending (current)) {
 			return -EAGAIN;
@@ -616,7 +612,7 @@ static int dabusb_open (struct inode *inode, struct file *file)
 	file->f_pos = 0;
 	file->private_data = s;
 
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int dabusb_release (struct inode *inode, struct file *file)
@@ -670,7 +666,7 @@ static int dabusb_ioctl (struct inode *inode, struct file *file, unsigned int cm
 			break;
 		}
 
-		if (copy_from_user (pbulk, (void *) arg, sizeof (bulk_transfer_t))) {
+		if (copy_from_user (pbulk, (void __user *) arg, sizeof (bulk_transfer_t))) {
 			ret = -EFAULT;
 			kfree (pbulk);
 			break;
@@ -678,18 +674,18 @@ static int dabusb_ioctl (struct inode *inode, struct file *file, unsigned int cm
 
 		ret=dabusb_bulk (s, pbulk);
 		if(ret==0)
-			if (copy_to_user((void *)arg, pbulk,
+			if (copy_to_user((void __user *)arg, pbulk,
 					 sizeof(bulk_transfer_t)))
 				ret = -EFAULT;
 		kfree (pbulk);
 		break;
 
 	case IOCTL_DAB_OVERRUNS:
-		ret = put_user (s->overruns, (unsigned int *) arg);
+		ret = put_user (s->overruns, (unsigned int __user *) arg);
 		break;
 
 	case IOCTL_DAB_VERSION:
-		ret = put_user (version, (unsigned int *) arg);
+		ret = put_user (version, (unsigned int __user *) arg);
 		break;
 
 	default:
@@ -727,13 +723,16 @@ static int dabusb_probe (struct usb_interface *intf,
 	pdabusb_t s;
 
 	dbg("dabusb: probe: vendor id 0x%x, device id 0x%x ifnum:%d",
-	  usbdev->descriptor.idVendor, usbdev->descriptor.idProduct, intf->altsetting->desc.bInterfaceNumber);
+	    le16_to_cpu(usbdev->descriptor.idVendor),
+	    le16_to_cpu(usbdev->descriptor.idProduct),
+	    intf->altsetting->desc.bInterfaceNumber);
 
 	/* We don't handle multiple configurations */
 	if (usbdev->descriptor.bNumConfigurations != 1)
 		return -ENODEV;
 
-	if (intf->altsetting->desc.bInterfaceNumber != _DABUSB_IF && usbdev->descriptor.idProduct == 0x9999)
+	if (intf->altsetting->desc.bInterfaceNumber != _DABUSB_IF &&
+	    le16_to_cpu(usbdev->descriptor.idProduct) == 0x9999)
 		return -ENODEV;
 
 
@@ -749,7 +748,7 @@ static int dabusb_probe (struct usb_interface *intf,
 		err("reset_configuration failed");
 		goto reject;
 	}
-	if (usbdev->descriptor.idProduct == 0x2131) {
+	if (le16_to_cpu(usbdev->descriptor.idProduct) == 0x2131) {
 		dabusb_loadmem (s, NULL);
 		goto reject;
 	}
@@ -868,7 +867,7 @@ MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL");
 
-MODULE_PARM (buffers, "i");
+module_param(buffers, int, 0);
 MODULE_PARM_DESC (buffers, "Number of buffers (default=256)");
 
 module_init (dabusb_init);

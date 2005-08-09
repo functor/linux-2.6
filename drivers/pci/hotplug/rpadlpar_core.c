@@ -18,65 +18,78 @@
 #include <linux/pci.h>
 #include <asm/pci-bridge.h>
 #include <asm/semaphore.h>
+#include <asm/rtas.h>
 #include "../pci.h"
 #include "rpaphp.h"
 #include "rpadlpar.h"
 
 static DECLARE_MUTEX(rpadlpar_sem);
 
-static inline int is_hotplug_capable(struct device_node *dn)
-{
-	unsigned char *ptr = get_property(dn, "ibm,fw-pci-hot-plug-ctrl", NULL);
-
-	return (int) (ptr != NULL);
-}
-
-static char *get_node_drc_name(struct device_node *dn)
-{
-	char *ptr = NULL;
-	int *drc_names;
-
-	drc_names = (int *) get_property(dn, "ibm,drc-names", NULL);
-	if (drc_names)
-		ptr = (char *) &drc_names[1];
-
-	return ptr;
-}
+#define NODE_TYPE_VIO  1
+#define NODE_TYPE_SLOT 2
+#define NODE_TYPE_PHB  3
 
 static struct device_node *find_php_slot_vio_node(char *drc_name)
 {
 	struct device_node *child;
 	struct device_node *parent = of_find_node_by_name(NULL, "vdevice");
+	char *loc_code;
 
 	if (!parent)
 		return NULL;
 
-	for (child = of_get_next_child(parent, NULL);	
-	     child; child = of_get_next_child(parent, child)) {
-	
-		char *loc_code;
-	
+	for (child = of_get_next_child(parent, NULL);
+		child; child = of_get_next_child(parent, child)) {
 		loc_code = get_property(child, "ibm,loc-code", NULL);
-		if (loc_code && !strcmp(loc_code, drc_name))
+		if (loc_code && !strncmp(loc_code, drc_name, strlen(drc_name)))
 			return child;
 	}
 
 	return NULL;
 }
 
-static struct device_node *find_php_slot_pci_node(char *drc_name)
+/* Find dlpar-capable pci node that contains the specified name and type */
+static struct device_node *find_php_slot_pci_node(char *drc_name,
+						  char *drc_type)
 {
 	struct device_node *np = NULL;
 	char *name;
+	char *type;
+	int rc;
 
-	while ((np = of_find_node_by_type(np, "pci")))
-		if (is_hotplug_capable(np)) {
-			name = get_node_drc_name(np);
-			if (name && (!strcmp(drc_name, name)))
+	while ((np = of_find_node_by_type(np, "pci"))) {
+		rc = rpaphp_get_drc_props(np, NULL, &name, &type, NULL);
+		if (rc == 0)
+			if (!strcmp(drc_name, name) && !strcmp(drc_type, type))
 				break;
-		}
+	}
 
 	return np;
+}
+
+static struct device_node *find_newly_added_node(char *drc_name, int *node_type)
+{
+	struct device_node *dn;
+
+	dn = find_php_slot_pci_node(drc_name, "SLOT");
+	if (dn) {
+		*node_type = NODE_TYPE_SLOT;
+		return dn;
+	}
+
+	dn = find_php_slot_pci_node(drc_name, "PHB");
+	if (dn) {
+		*node_type = NODE_TYPE_PHB;
+		return dn;
+	}
+
+	dn = find_php_slot_vio_node(drc_name);
+	if (dn) {
+		*node_type = NODE_TYPE_VIO;
+		return dn;
+	}
+
+	return NULL;
 }
 
 static struct slot *find_slot(char *drc_name)
@@ -129,7 +142,7 @@ static int pci_add_secondary_bus(struct device_node *dn,
 	child = pci_add_new_bus(bridge_dev->bus, bridge_dev, sec_busno);
 	if (!child) {
 		printk(KERN_ERR "%s: could not add secondary bus\n", __FUNCTION__);
-		return 1;
+		return -ENOMEM;
 	}
 
 	sprintf(child->name, "PCI Bus #%02x", child->number);
@@ -145,12 +158,8 @@ static int pci_add_secondary_bus(struct device_node *dn,
 
 	dn->bussubno = child->number;
 
-	/* ioremap() for child bus */
-	if (remap_bus_range(child)) {
-		printk(KERN_ERR "%s: could not ioremap() child bus\n",
-			__FUNCTION__);
-		return 1;
-	}
+	/* ioremap() for child bus, which may or may not succeed */
+	remap_bus_range(child);
 
 	return 0;
 }
@@ -195,7 +204,7 @@ static int dlpar_pci_remove_bus(struct pci_dev *bridge_dev)
 	if (!bridge_dev) {
 		printk(KERN_ERR "%s: unexpected null device\n",
 			__FUNCTION__);
-		return 1;
+		return -EINVAL;
 	}
 
 	secondary_bus = bridge_dev->subordinate;
@@ -203,7 +212,7 @@ static int dlpar_pci_remove_bus(struct pci_dev *bridge_dev)
 	if (unmap_bus_range(secondary_bus)) {
 		printk(KERN_ERR "%s: failed to unmap bus range\n",
 			__FUNCTION__);
-		return 1;
+		return -ERANGE;
 	}
 
 	pci_remove_bus_device(bridge_dev);
@@ -225,6 +234,71 @@ static inline int dlpar_add_pci_slot(char *drc_name, struct device_node *dn)
 	return 0;
 }
 
+static int dlpar_remove_root_bus(struct pci_controller *phb)
+{
+	struct pci_bus *phb_bus;
+	int rc;
+
+	phb_bus = phb->bus;
+	if (!(list_empty(&phb_bus->children) &&
+	      list_empty(&phb_bus->devices))) {
+		return -EBUSY;
+	}
+
+	rc = pcibios_remove_root_bus(phb);
+	if (rc)
+		return -EIO;
+
+	device_unregister(phb_bus->bridge);
+	pci_remove_bus(phb_bus);
+
+	return 0;
+}
+
+static int dlpar_remove_phb(struct slot *slot)
+{
+	struct pci_controller *phb;
+	struct device_node *dn;
+	int rc = 0;
+
+	dn = slot->dn;
+	if (!dn) {
+		printk(KERN_ERR "%s: unexpected NULL slot device node\n",
+				__FUNCTION__);
+		return -EIO;
+	}
+
+	phb = dn->phb;
+	if (!phb) {
+		printk(KERN_ERR "%s: unexpected NULL phb pointer\n",
+				__FUNCTION__);
+		return -EIO;
+	}
+
+	if (rpaphp_remove_slot(slot)) {
+		printk(KERN_ERR "%s: unable to remove hotplug slot %s\n",
+			__FUNCTION__, slot->location);
+		return -EIO;
+	}
+
+	rc = dlpar_remove_root_bus(phb);
+	if (rc < 0)
+		return rc;
+
+	return 0;
+}
+
+static int dlpar_add_phb(struct device_node *dn)
+{
+	struct pci_controller *phb;
+
+	phb = init_phb_dynamic(dn);
+	if (!phb)
+		return -EINVAL;
+
+	return 0;
+}
+
 /**
  * dlpar_add_slot - DLPAR add an I/O Slot
  * @drc_name: drc-name of newly added slot
@@ -240,7 +314,8 @@ static inline int dlpar_add_pci_slot(char *drc_name, struct device_node *dn)
  */
 int dlpar_add_slot(char *drc_name)
 {
-	struct device_node *dn;
+	struct device_node *dn = NULL;
+	int node_type;
 	int rc = 0;
 
 	if (down_interruptible(&rpadlpar_sem))
@@ -252,18 +327,27 @@ int dlpar_add_slot(char *drc_name)
 		goto exit;
 	}
 
-	dn = find_php_slot_vio_node(drc_name);
+	dn = find_newly_added_node(drc_name, &node_type);
 	if (!dn) {
-		dn = find_php_slot_pci_node(drc_name);
-		if (dn)
-			rc = dlpar_add_pci_slot(drc_name, dn);
-		else {
-			rc = -ENODEV;
-			goto exit;
-		}
+		rc = -ENODEV;
+		goto exit;
 	}
 
-	/* Add hotplug slot for new VIOA or PCI */
+	switch (node_type) {
+		case NODE_TYPE_VIO:
+			/* Just add hotplug slot */
+			break;
+		case NODE_TYPE_SLOT:
+			rc = dlpar_add_pci_slot(drc_name, dn);
+			break;
+		case NODE_TYPE_PHB:
+			rc = dlpar_add_phb(dn);
+			break;
+		default:
+			printk("%s: unexpected node type\n", __FUNCTION__);
+			return -EIO;
+	}
+
 	if (!rc && rpaphp_add_slot(dn)) {
 		printk(KERN_ERR "%s: unable to add hotplug slot %s\n",
 			__FUNCTION__, drc_name);
@@ -309,11 +393,7 @@ int dlpar_remove_vio_slot(struct slot *slot, char *drc_name)
  */
 int dlpar_remove_pci_slot(struct slot *slot, char *drc_name)
 {
-	struct device_node *dn = find_php_slot_pci_node(drc_name);
 	struct pci_dev *bridge_dev;
-
-	if (!dn)
-		return -ENODEV;
 
 	bridge_dev = slot->bridge;
 	if (!bridge_dev) {
@@ -330,6 +410,7 @@ int dlpar_remove_pci_slot(struct slot *slot, char *drc_name)
 	}
 
 	/* Remove pci bus */
+
 	if (dlpar_pci_remove_bus(bridge_dev)) {
 		printk(KERN_ERR "%s: unable to remove pci bus %s\n",
 			__FUNCTION__, drc_name);
@@ -358,24 +439,32 @@ int dlpar_remove_slot(char *drc_name)
 
 	if (down_interruptible(&rpadlpar_sem))
 		return -ERESTARTSYS;
-	
+
+	if (!find_php_slot_vio_node(drc_name) &&
+	    !find_php_slot_pci_node(drc_name, "SLOT") &&
+	    !find_php_slot_pci_node(drc_name, "PHB")) {
+		rc = -ENODEV;
+		goto exit;
+	}
+
 	slot = find_slot(drc_name);
 	if (!slot) {
 		rc = -EINVAL;
 		goto exit;
 	}
 	
-	switch (slot->dev_type) {
-		case PCI_DEV:
-			rc = dlpar_remove_pci_slot(slot, drc_name);
-			break;
+	if (slot->type == PHB) {
+		rc = dlpar_remove_phb(slot);
+	} else {
+		switch (slot->dev_type) {
+			case PCI_DEV:
+				rc = dlpar_remove_pci_slot(slot, drc_name);
+				break;
 
-		case VIO_DEV:
-			rc = dlpar_remove_vio_slot(slot, drc_name);
-			break;
-
-		default:
-			rc = -EIO;
+			case VIO_DEV:
+				rc = dlpar_remove_vio_slot(slot, drc_name);
+				break;
+		}
 	}
 exit:
 	up(&rpadlpar_sem);

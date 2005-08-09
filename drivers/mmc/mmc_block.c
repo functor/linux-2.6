@@ -180,7 +180,6 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 
 		brq.cmd.arg = req->sector << 9;
 		brq.cmd.flags = MMC_RSP_R1;
-		brq.data.req = req;
 		brq.data.timeout_ns = card->csd.tacc_ns * 10;
 		brq.data.timeout_clks = card->csd.tacc_clks * 10;
 		brq.data.blksz_bits = md->block_bits;
@@ -199,6 +198,9 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 			brq.data.blocks = 1;
 		}
 		brq.mrq.stop = brq.data.blocks > 1 ? &brq.stop : NULL;
+
+		brq.data.sg = mq->sg;
+		brq.data.sg_len = blk_rq_map_sg(req->q, req, brq.data.sg);
 
 		mmc_wait_for_req(card->host, &brq.mrq);
 		if (brq.cmd.error) {
@@ -330,6 +332,18 @@ static struct mmc_blk_data *mmc_blk_alloc(struct mmc_card *card)
 		md->disk->queue = md->queue.queue;
 		md->disk->driverfs_dev = &card->dev;
 
+		/*
+		 * As discussed on lkml, GENHD_FL_REMOVABLE should:
+		 *
+		 * - be set for removable media with permanent block devices
+		 * - be unset for removable block devices with permanent media
+		 *
+		 * Since MMC block devices clearly fall under the second
+		 * case, we do not set GENHD_FL_REMOVABLE.  Userspace
+		 * should use the block device creation/destruction hotplug
+		 * messages to tell when the card is present.
+		 */
+
 		sprintf(md->disk->disk_name, "mmcblk%d", devidx);
 		sprintf(md->disk->devfs_name, "mmc/blk%d", devidx);
 
@@ -369,7 +383,10 @@ static int mmc_blk_probe(struct mmc_card *card)
 	struct mmc_blk_data *md;
 	int err;
 
-	if (card->csd.cmdclass & ~0x1ff)
+	/*
+	 * Check that the card supports the command class(es) we need.
+	 */
+	if (!(card->csd.cmdclass & CCC_BLOCK_READ))
 		return -ENODEV;
 
 	if (card->csd.read_blkbits < 9) {
@@ -423,7 +440,7 @@ static void mmc_blk_remove(struct mmc_card *card)
 }
 
 #ifdef CONFIG_PM
-static int mmc_blk_suspend(struct mmc_card *card, u32 state)
+static int mmc_blk_suspend(struct mmc_card *card, pm_message_t state)
 {
 	struct mmc_blk_data *md = mmc_get_drvdata(card);
 

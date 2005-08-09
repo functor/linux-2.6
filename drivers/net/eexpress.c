@@ -7,7 +7,7 @@
  * Support for 8-bit mode by Zoltan Szilagyi <zoltans@cs.arizona.edu>
  *
  * Many modifications, and currently maintained, by
- *  Philip Blundell <Philip.Blundell@pobox.com>
+ *  Philip Blundell <philb@gnu.org>
  * Added the Compaq LTE  Alan Cox <alan@redhat.com>
  * Added MCA support Adam Fritzler <mid@auk.cx>
  *
@@ -115,9 +115,9 @@
 #include <linux/slab.h>
 #include <linux/mca-legacy.h>
 #include <linux/spinlock.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 
@@ -230,7 +230,7 @@ static unsigned short start_code[] = {
 /* maps irq number to EtherExpress magic value */
 static char irqrmap[] = { 0,0,1,2,3,4,0,0,0,1,5,6,0,0,0,0 };
 
-#ifdef CONFIG_MCA
+#ifdef CONFIG_MCA_LEGACY
 /* mapping of the first four bits of the second POS register */
 static unsigned short mca_iomap[] = {
 	0x270, 0x260, 0x250, 0x240, 0x230, 0x220, 0x210, 0x200,
@@ -345,7 +345,7 @@ static int __init do_express_probe(struct net_device *dev)
 
 	dev->if_port = 0xff; /* not set */
 
-#ifdef CONFIG_MCA
+#ifdef CONFIG_MCA_LEGACY
 	if (MCA_bus) {
 		int slot = 0;
 
@@ -423,6 +423,7 @@ static int __init do_express_probe(struct net_device *dev)
 	return -ENODEV;
 }
 
+#ifndef MODULE
 struct net_device * __init express_probe(int unit)
 {
 	struct net_device *dev = alloc_etherdev(sizeof(struct net_local));
@@ -443,6 +444,7 @@ struct net_device * __init express_probe(int unit)
 	free_netdev(dev);
 	return ERR_PTR(err);
 }
+#endif
 
 /*
  * open and initialize the adapter, ready for use
@@ -1689,8 +1691,8 @@ static struct net_device *dev_eexp[EEXP_MAX_CARDS];
 static int irq[EEXP_MAX_CARDS];
 static int io[EEXP_MAX_CARDS];
 
-MODULE_PARM(io, "1-" __MODULE_STRING(EEXP_MAX_CARDS) "i");
-MODULE_PARM(irq, "1-" __MODULE_STRING(EEXP_MAX_CARDS) "i");
+module_param_array(io, int, NULL, 0);
+module_param_array(irq, int, NULL, 0);
 MODULE_PARM_DESC(io, "EtherExpress 16 I/O base address(es)");
 MODULE_PARM_DESC(irq, "EtherExpress 16 IRQ number(s)");
 MODULE_LICENSE("GPL");

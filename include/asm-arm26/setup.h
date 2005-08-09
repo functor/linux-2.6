@@ -8,7 +8,7 @@
  * published by the Free Software Foundation.
  *
  *  Structure passed to kernel to tell it about the
- *  hardware it's running on.  See linux/Documentation/arm/Setup
+ *  hardware it's running on.  See Documentation/arm/Setup
  *  for more info.
  */
 #ifndef __ASMARM_SETUP_H
@@ -171,7 +171,7 @@ struct tagtable {
 	int (*parse)(const struct tag *);
 };
 
-#define __tag __attribute__((unused, __section__(".taglist")))
+#define __tag __attribute_used__ __attribute__((__section__(".taglist")))
 #define __tagtable(tag, fn) \
 static struct tagtable __tagtable_##fn __tag = { tag, fn }
 

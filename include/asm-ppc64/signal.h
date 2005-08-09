@@ -2,6 +2,7 @@
 #define _ASMPPC64_SIGNAL_H
 
 #include <linux/types.h>
+#include <linux/compiler.h>
 #include <asm/siginfo.h>
 
 /* Avoid too many header ordering problems.  */
@@ -95,42 +96,20 @@ typedef struct {
 
 #define MINSIGSTKSZ	2048
 #define SIGSTKSZ	8192
-#ifdef __KERNEL__
 
-/*
- * These values of sa_flags are used only by the kernel as part of the
- * irq handling routines.
- *
- * SA_INTERRUPT is also used by the irq handling routines.
- * SA_SHIRQ is for shared interrupt support on PCI and EISA.
- */
-#define SA_PROBE		SA_ONESHOT
-#define SA_SAMPLE_RANDOM	SA_RESTART
-#define SA_SHIRQ		0x04000000
-#endif
-
-#define SIG_BLOCK          0	/* for blocking signals */
-#define SIG_UNBLOCK        1	/* for unblocking signals */
-#define SIG_SETMASK        2	/* for setting the signal mask */
-
-/* Type of a signal handler.  */
-typedef void (*__sighandler_t)(int);
-
-#define SIG_DFL	((__sighandler_t)0)	/* default signal handling */
-#define SIG_IGN	((__sighandler_t)1)	/* ignore signal */
-#define SIG_ERR	((__sighandler_t)-1)	/* error return from signal */
+#include <asm-generic/signal.h>
 
 struct old_sigaction {
 	__sighandler_t sa_handler;
 	old_sigset_t sa_mask;
 	unsigned long sa_flags;
-	void (*sa_restorer)(void);
+	__sigrestore_t sa_restorer;
 };
 
 struct sigaction {
 	__sighandler_t sa_handler;
 	unsigned long sa_flags;
-	void (*sa_restorer)(void);
+	__sigrestore_t sa_restorer;
 	sigset_t sa_mask;		/* mask last for extensibility */
 };
 
@@ -139,7 +118,7 @@ struct k_sigaction {
 };
 
 typedef struct sigaltstack {
-	void *ss_sp;
+	void __user *ss_sp;
 	int ss_flags;
 	size_t ss_size;
 } stack_t;

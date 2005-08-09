@@ -66,11 +66,12 @@
  * one transfer.  Its "virtual" BMC supports some commands that are longer
  * than 128 bytes.  Use the full 256, plus NetFn/LUN, Cmd, cCode, plus
  * some overhead.  It would be nice to base this on the "BT Capabilities"
- * but that's too hard to propogate to the rest of the driver. */
+ * but that's too hard to propagate to the rest of the driver. */
 #define IPMI_MAX_MSG_LENGTH	272	/* multiple of 16 */
 
 #define IPMI_CC_NO_ERROR		0x00
 #define IPMI_NODE_BUSY_ERR		0xc0
+#define IPMI_INVALID_COMMAND_ERR	0xc1
 #define IPMI_ERR_MSG_TRUNCATED		0xc6
 #define IPMI_LOST_ARBITRATION_ERR	0x81
 #define IPMI_ERR_UNSPECIFIED		0xff

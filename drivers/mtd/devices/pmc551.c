@@ -1,5 +1,5 @@
 /*
- * $Id: pmc551.c,v 1.24 2003/05/20 21:03:08 dwmw2 Exp $
+ * $Id: pmc551.c,v 1.30 2005/01/05 18:05:13 dwmw2 Exp $
  *
  * PMC551 PCI Mezzanine Ram Device
  *
@@ -109,17 +109,11 @@
 #include <linux/mtd/pmc551.h>
 #include <linux/mtd/compatmac.h>
 
-#if LINUX_VERSION_CODE > 0x20300
-#define PCI_BASE_ADDRESS(dev) (dev->resource[0].start)
-#else
-#define PCI_BASE_ADDRESS(dev) (dev->base_address[0])
-#endif
-
 static struct mtd_info *pmc551list;
 
 static int pmc551_erase (struct mtd_info *mtd, struct erase_info *instr)
 {
-        struct mypriv *priv = (struct mypriv *)mtd->priv;
+        struct mypriv *priv = mtd->priv;
         u32 soff_hi, soff_lo; /* start address offset hi/lo */
         u32 eoff_hi, eoff_lo; /* end address offset hi/lo */
         unsigned long end;
@@ -175,16 +169,14 @@ out:
 	printk(KERN_DEBUG "pmc551_erase() done\n");
 #endif
 
-        if (instr->callback) {
-                (*(instr->callback))(instr);
-	}
+        mtd_erase_callback(instr);
         return 0;
 }
 
 
 static int pmc551_point (struct mtd_info *mtd, loff_t from, size_t len, size_t *retlen, u_char **mtdbuf)
 {
-        struct mypriv *priv = (struct mypriv *)mtd->priv;
+        struct mypriv *priv = mtd->priv;
         u32 soff_hi;
         u32 soff_lo;
 
@@ -225,7 +217,7 @@ static void pmc551_unpoint (struct mtd_info *mtd, u_char *addr, loff_t from, siz
 
 static int pmc551_read (struct mtd_info *mtd, loff_t from, size_t len, size_t *retlen, u_char *buf)
 {
-        struct mypriv *priv = (struct mypriv *)mtd->priv;
+        struct mypriv *priv = mtd->priv;
         u32 soff_hi, soff_lo; /* start address offset hi/lo */
         u32 eoff_hi, eoff_lo; /* end address offset hi/lo */
         unsigned long end;
@@ -287,7 +279,7 @@ out:
 
 static int pmc551_write (struct mtd_info *mtd, loff_t to, size_t len, size_t *retlen, const u_char *buf)
 {
-        struct mypriv *priv = (struct mypriv *)mtd->priv;
+        struct mypriv *priv = mtd->priv;
         u32 soff_hi, soff_lo; /* start address offset hi/lo */
         u32 eoff_hi, eoff_lo; /* end address offset hi/lo */
         unsigned long end;
@@ -564,7 +556,7 @@ static u32 fixup_pmc551 (struct pci_dev *dev)
 	       (size<1024)?size:(size<1048576)?size>>10:size>>20,
                (size<1024)?'B':(size<1048576)?'K':'M',
 	       size, ((dcmd&(0x1<<3)) == 0)?"non-":"",
-               PCI_BASE_ADDRESS(dev)&PCI_BASE_ADDRESS_MEM_MASK );
+               (dev->resource[0].start)&PCI_BASE_ADDRESS_MEM_MASK );
 
         /*
          * Check to see the state of the memory
@@ -638,10 +630,6 @@ static u32 fixup_pmc551 (struct pci_dev *dev)
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Mark Ferrell <mferrell@mvista.com>");
 MODULE_DESCRIPTION(PMC551_VERSION);
-MODULE_PARM(msize, "i");
-MODULE_PARM_DESC(msize, "memory size in Megabytes [1 - 1024]");
-MODULE_PARM(asize, "i");
-MODULE_PARM_DESC(asize, "aperture size, must be <= memsize [1-1024]");
 
 /*
  * Stuff these outside the ifdef so as to not bust compiled in driver support
@@ -653,10 +641,15 @@ static int asize=CONFIG_MTD_PMC551_APERTURE_SIZE
 static int asize=0;
 #endif
 
+module_param(msize, int, 0);
+MODULE_PARM_DESC(msize, "memory size in Megabytes [1 - 1024]");
+module_param(asize, int, 0);
+MODULE_PARM_DESC(asize, "aperture size, must be <= memsize [1-1024]");
+
 /*
  * PMC551 Card Initialization
  */
-int __init init_pmc551(void)
+static int __init init_pmc551(void)
 {
         struct pci_dev *PCI_Device = NULL;
         struct mypriv *priv;
@@ -694,7 +687,7 @@ int __init init_pmc551(void)
                 }
 
                 printk(KERN_NOTICE "pmc551: Found PCI V370PDC at 0x%lX\n",
-				    PCI_BASE_ADDRESS(PCI_Device));
+				    PCI_Device->resource[0].start);
 
                 /*
                  * The PMC551 device acts VERY weird if you don't init it
@@ -748,7 +741,7 @@ int __init init_pmc551(void)
 			printk(KERN_NOTICE "pmc551: Using specified aperture size %dM\n", asize>>20);
 			priv->asize = asize;
 		}
-                priv->start = ioremap((PCI_BASE_ADDRESS(PCI_Device)
+                priv->start = ioremap(((PCI_Device->resource[0].start)
                                        & PCI_BASE_ADDRESS_MEM_MASK),
                                       priv->asize);
 		
@@ -828,7 +821,7 @@ static void __exit cleanup_pmc551(void)
 	struct mypriv *priv;
 
 	while((mtd=pmc551list)) {
-		priv = (struct mypriv *)mtd->priv;
+		priv = mtd->priv;
 		pmc551list = priv->nextpmc551;
 		
 		if(priv->start) {

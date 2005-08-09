@@ -1,6 +1,6 @@
 /* Derived from Applicom driver ac.c for SCO Unix                            */
 /* Ported by David Woodhouse, Axiom (Cambridge) Ltd.                         */
-/* dwmw2@redhat.com  30/8/98                                                 */
+/* dwmw2@infradead.org 30/8/98                                               */
 /* $Id: ac.c,v 1.30 2000/03/22 16:03:57 dwmw2 Exp $			     */
 /* This module is for Linux 2.1 and 2.2 series kernels.                      */
 /*****************************************************************************/
@@ -79,17 +79,13 @@ MODULE_DEVICE_TABLE(pci, applicom_pci_tbl);
 MODULE_AUTHOR("David Woodhouse & Applicom International");
 MODULE_DESCRIPTION("Driver for Applicom Profibus card");
 MODULE_LICENSE("GPL");
-MODULE_PARM(irq, "i");
-MODULE_PARM_DESC(irq, "IRQ of the Applicom board");
-MODULE_PARM(mem, "i");
-MODULE_PARM_DESC(mem, "Shared Memory Address of Applicom board");
 
 MODULE_SUPPORTED_DEVICE("ac");
 
 
 static struct applicom_board {
 	unsigned long PhysIO;
-	unsigned long RamIO;
+	void __iomem *RamIO;
 	wait_queue_head_t FlagSleepSend;
 	long irq;
 	spinlock_t mutex;
@@ -98,6 +94,11 @@ static struct applicom_board {
 static unsigned int irq = 0;	/* interrupt number IRQ       */
 static unsigned long mem = 0;	/* physical segment of board  */
 
+module_param(irq, uint, 0);
+MODULE_PARM_DESC(irq, "IRQ of the Applicom board");
+module_param(mem, ulong, 0);
+MODULE_PARM_DESC(mem, "Shared Memory Address of Applicom board");
+
 static unsigned int numboards;	/* number of installed boards */
 static volatile unsigned char Dummy;
 static DECLARE_WAIT_QUEUE_HEAD(FlagSleepRec);
@@ -105,8 +106,8 @@ static unsigned int WriteErrorCount;	/* number of write error      */
 static unsigned int ReadErrorCount;	/* number of read error       */
 static unsigned int DeviceErrorCount;	/* number of device error     */
 
-static ssize_t ac_read (struct file *, char *, size_t, loff_t *);
-static ssize_t ac_write (struct file *, const char *, size_t, loff_t *);
+static ssize_t ac_read (struct file *, char __user *, size_t, loff_t *);
+static ssize_t ac_write (struct file *, const char __user *, size_t, loff_t *);
 static int ac_ioctl(struct inode *, struct file *, unsigned int,
 		    unsigned long);
 static irqreturn_t ac_interrupt(int, void *, struct pt_regs *);
@@ -127,7 +128,7 @@ static struct miscdevice ac_miscdev = {
 
 static int dummy;	/* dev_id for request_irq() */
 
-static int ac_register_board(unsigned long physloc, unsigned long loc, 
+static int ac_register_board(unsigned long physloc, void __iomem *loc, 
 		      unsigned char boardno)
 {
 	volatile unsigned char byte_reset_it;
@@ -179,11 +180,11 @@ void cleanup_module(void)
 
 		if (!apbs[i].RamIO)
 			continue;
-		
-		iounmap((void *) apbs[i].RamIO);
 
 		if (apbs[i].irq)
 			free_irq(apbs[i].irq, &dummy);
+
+		iounmap(apbs[i].RamIO);
 	}
 }
 
@@ -193,14 +194,14 @@ int __init applicom_init(void)
 {
 	int i, numisa = 0;
 	struct pci_dev *dev = NULL;
-	void *RamIO;
+	void __iomem *RamIO;
 	int boardno;
 
 	printk(KERN_INFO "Applicom driver: $Id: ac.c,v 1.30 2000/03/22 16:03:57 dwmw2 Exp $\n");
 
 	/* No mem and irq given - check for a PCI card */
 
-	while ( (dev = pci_find_class(PCI_CLASS_OTHERS << 16, dev))) {
+	while ( (dev = pci_get_class(PCI_CLASS_OTHERS << 16, dev))) {
 
 		if (dev->vendor != PCI_VENDOR_ID_APPLICOM)
 			continue;
@@ -223,8 +224,8 @@ int __init applicom_init(void)
 		       applicom_pci_devnames[dev->device-1], dev->resource[0].start, 
 		       dev->irq);
 
-		if (!(boardno = ac_register_board(dev->resource[0].start,
-						  (unsigned long)RamIO,0))) {
+		boardno = ac_register_board(dev->resource[0].start, RamIO,0);
+		if (!boardno) {
 			printk(KERN_INFO "ac.o: PCI Applicom device doesn't have correct signature.\n");
 			iounmap(RamIO);
 			pci_disable_device(dev);
@@ -235,7 +236,7 @@ int __init applicom_init(void)
 			printk(KERN_INFO "Could not allocate IRQ %d for PCI Applicom device.\n", dev->irq);
 			iounmap(RamIO);
 			pci_disable_device(dev);
-			apbs[boardno - 1].RamIO = 0;
+			apbs[boardno - 1].RamIO = NULL;
 			continue;
 		}
 
@@ -270,7 +271,7 @@ int __init applicom_init(void)
 		}
 
 		if (!(boardno = ac_register_board((unsigned long)mem+ (LEN_RAM_IO*i),
-						  (unsigned long)RamIO,i+1))) {
+						  RamIO,i+1))) {
 			iounmap(RamIO);
 			continue;
 		}
@@ -280,8 +281,8 @@ int __init applicom_init(void)
 		if (!numisa) {
 			if (request_irq(irq, &ac_interrupt, SA_SHIRQ, "Applicom ISA", &dummy)) {
 				printk(KERN_WARNING "Could not allocate IRQ %d for ISA Applicom device.\n", irq);
-				iounmap((void *) RamIO);
-				apbs[boardno - 1].RamIO = 0;
+				iounmap(RamIO);
+				apbs[boardno - 1].RamIO = NULL;
 			}
 			else
 				apbs[boardno - 1].irq = irq;
@@ -343,7 +344,7 @@ int __init applicom_init(void)
 __initcall(applicom_init);
 #endif
 
-static ssize_t ac_write(struct file *file, const char *buf, size_t count, loff_t * ppos)
+static ssize_t ac_write(struct file *file, const char __user *buf, size_t count, loff_t * ppos)
 {
 	unsigned int NumCard;	/* Board number 1 -> 8           */
 	unsigned int IndexCard;	/* Index board number 0 -> 7     */
@@ -449,7 +450,7 @@ static ssize_t ac_write(struct file *file, const char *buf, size_t count, loff_t
 	   because it works with 2.2 still */
 	{
 		unsigned char *from = (unsigned char *) &tmpmailbox;
-		unsigned long to = (unsigned long) apbs[IndexCard].RamIO + RAM_FROM_PC;
+		void __iomem *to = apbs[IndexCard].RamIO + RAM_FROM_PC;
 		int c;
 
 		for (c = 0; c < sizeof(struct mailbox); c++)
@@ -467,10 +468,10 @@ static ssize_t ac_write(struct file *file, const char *buf, size_t count, loff_t
 	return 0;
 }
 
-static int do_ac_read(int IndexCard, char *buf,
+static int do_ac_read(int IndexCard, char __user *buf,
 		struct st_ram_io *st_loc, struct mailbox *mailbox)
 {
-	unsigned long from = (unsigned long)apbs[IndexCard].RamIO + RAM_TO_PC;
+	void __iomem *from = apbs[IndexCard].RamIO + RAM_TO_PC;
 	unsigned char *to = (unsigned char *)&mailbox;
 #ifdef DEBUG
 	int c;
@@ -521,7 +522,7 @@ static int do_ac_read(int IndexCard, char *buf,
 	return (sizeof(struct st_ram_io) + sizeof(struct mailbox));
 }
 
-static ssize_t ac_read (struct file *filp, char *buf, size_t count, loff_t *ptr)
+static ssize_t ac_read (struct file *filp, char __user *buf, size_t count, loff_t *ptr)
 {
 	unsigned long flags;
 	unsigned int i;
@@ -685,10 +686,11 @@ static int ac_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
 {				/* @ ADG ou ATO selon le cas */
 	int i;
 	unsigned char IndexCard;
-	unsigned long pmem;
+	void __iomem *pmem;
 	int ret = 0;
 	volatile unsigned char byte_reset_it;
 	struct st_ram_io *adgl;
+	void __user *argp = (void __user *)arg;
 
 	/* In general, the device is only openable by root anyway, so we're not
 	   particularly concerned that bogus ioctls can flood the console. */
@@ -697,7 +699,7 @@ static int ac_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
 	if (!adgl)
 		return -ENOMEM;
 
-	if (copy_from_user(adgl, (void *)arg,sizeof(struct st_ram_io))) {
+	if (copy_from_user(adgl, argp, sizeof(struct st_ram_io))) {
 		kfree(adgl);
 		return -EFAULT;
 	}
@@ -721,7 +723,7 @@ static int ac_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
 		pmem = apbs[IndexCard].RamIO;
 		for (i = 0; i < sizeof(struct st_ram_io); i++)
 			((unsigned char *)adgl)[i]=readb(pmem++);
-		if (copy_to_user((void *)arg, adgl, sizeof(struct st_ram_io)))
+		if (copy_to_user(argp, adgl, sizeof(struct st_ram_io)))
 			ret = -EFAULT;
 		break;
 	case 1:
@@ -742,7 +744,7 @@ static int ac_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
 			(readb(apbs[IndexCard].RamIO + SERIAL_NUMBER + 1) << 8) + 
 			(readb(apbs[IndexCard].RamIO + SERIAL_NUMBER + 2) );
 
-		if (copy_to_user((void *)arg, adgl, sizeof(struct st_ram_io)))
+		if (copy_to_user(argp, adgl, sizeof(struct st_ram_io)))
 			ret = -EFAULT;
 		break;
 	case 2:
@@ -768,7 +770,7 @@ static int ac_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
 		pmem = apbs[IndexCard].RamIO + TIC_OWNER_TO_PC;
 		adgl->tic_owner_to_pc     = readb(pmem++);
 		adgl->numcard_owner_to_pc = readb(pmem);
-		if (copy_to_user((void *)arg, adgl,sizeof(struct st_ram_io)))
+		if (copy_to_user(argp, adgl,sizeof(struct st_ram_io)))
 			ret = -EFAULT;
 		break;
 	case 5:

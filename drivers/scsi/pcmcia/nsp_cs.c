@@ -38,7 +38,6 @@
 #include <linux/ioport.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
-#include <linux/module.h>
 #include <linux/major.h>
 #include <linux/blkdev.h>
 #include <linux/stat.h>
@@ -47,7 +46,7 @@
 #include <asm/irq.h>
 
 #include <../drivers/scsi/scsi.h>
-#include <../drivers/scsi/hosts.h>
+#include <scsi/scsi_host.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_ioctl.h>
@@ -73,21 +72,13 @@ MODULE_LICENSE("GPL");
 /*====================================================================*/
 /* Parameters that can be set with 'insmod' */
 
-static unsigned int irq_mask = 0xffff;
-MODULE_PARM     (irq_mask, "i");
-MODULE_PARM_DESC(irq_mask, "IRQ mask bits (default: 0xffff)");
-
-static int       irq_list[4] = { -1 };
-MODULE_PARM     (irq_list, "1-4i");
-MODULE_PARM_DESC(irq_list, "Use specified IRQ number. (default: auto select)");
-
 static int       nsp_burst_mode = BURST_MEM32;
-MODULE_PARM     (nsp_burst_mode, "i");
+module_param(nsp_burst_mode, int, 0);
 MODULE_PARM_DESC(nsp_burst_mode, "Burst transfer mode (0=io8, 1=io32, 2=mem32(default))");
 
 /* Release IO ports after configuration? */
 static int       free_ports = 0;
-MODULE_PARM     (free_ports, "i");
+module_param(free_ports, bool, 0);
 MODULE_PARM_DESC(free_ports, "Release IO ports after configuration? (default: 0 (=no))");
 
 /* /usr/src/linux/drivers/scsi/hosts.h */
@@ -227,7 +218,7 @@ static int nsp_queuecommand(Scsi_Cmnd *SCpnt, void (*done)(Scsi_Cmnd *))
 		nsp_msg(KERN_DEBUG, "CurrentSC!=NULL this can't be happen");
 		SCpnt->result   = DID_BAD_TARGET << 16;
 		nsp_scsi_done(SCpnt);
-		return SCSI_MLQUEUE_HOST_BUSY;
+		return 0;
 	}
 
 #if 0
@@ -274,7 +265,7 @@ static int nsp_queuecommand(Scsi_Cmnd *SCpnt, void (*done)(Scsi_Cmnd *))
 		nsp_dbg(NSP_DEBUG_QUEUECOMMAND, "selection fail");
 		SCpnt->result   = DID_BUS_BUSY << 16;
 		nsp_scsi_done(SCpnt);
-		return SCSI_MLQUEUE_DEVICE_BUSY;
+		return 0;
 	}
 
 
@@ -315,7 +306,7 @@ static void nsphw_init_sync(nsp_hw_data *data)
 	int i;
 
 	/* setup sync data */
-	for ( i = 0; i < NUMBER(data->Sync); i++ ) {
+	for ( i = 0; i < ARRAY_SIZE(data->Sync); i++ ) {
 		data->Sync[i] = tmp_sync;
 	}
 }
@@ -600,7 +591,7 @@ static int nsp_xfer(Scsi_Cmnd *SCpnt, int phase)
 	unsigned int  base = SCpnt->device->host->io_port;
 	nsp_hw_data  *data = (nsp_hw_data *)SCpnt->device->host->hostdata;
 	char	     *buf  = data->MsgBuffer;
-	int	      len  = MIN(MSGBUF_SIZE, data->MsgLen);
+	int	      len  = min(MSGBUF_SIZE, data->MsgLen);
 	int	      ptr;
 	int	      ret;
 
@@ -774,7 +765,7 @@ static void nsp_pio_read(Scsi_Cmnd *SCpnt)
 			continue;
 		}
 
-		res = MIN(res, SCpnt->SCp.this_residual);
+		res = min(res, SCpnt->SCp.this_residual);
 
 		switch (data->TransferMode) {
 		case MODE_IO32:
@@ -868,7 +859,7 @@ static void nsp_pio_write(Scsi_Cmnd *SCpnt)
 			continue;
 		}
 
-		res = MIN(SCpnt->SCp.this_residual, WFIFO_CRIT);
+		res = min(SCpnt->SCp.this_residual, WFIFO_CRIT);
 
 		//nsp_dbg(NSP_DEBUG_DATA_IO, "ptr=0x%p this=0x%x res=0x%x", SCpnt->SCp.ptr, SCpnt->SCp.this_residual, res);
 		switch (data->TransferMode) {
@@ -1490,7 +1481,7 @@ nsp_proc_info(
 	spin_unlock_irqrestore(&(data->Lock), flags);
 
 	SPRINTF("SDTR status\n");
-	for(id = 0; id < NUMBER(data->Sync); id++) {
+	for(id = 0; id < ARRAY_SIZE(data->Sync); id++) {
 
 		SPRINTF("id %d: ", id);
 
@@ -1529,12 +1520,12 @@ nsp_proc_info(
 	thislength = pos - (buffer + offset);
 
 	if(thislength < 0) {
-		*start = 0;
+		*start = NULL;
                 return 0;
         }
 
 
-	thislength = MIN(thislength, length);
+	thislength = min(thislength, length);
 	*start = buffer + offset;
 
 	return thislength;
@@ -1626,7 +1617,7 @@ static dev_link_t *nsp_cs_attach(void)
 	scsi_info_t  *info;
 	client_reg_t  client_reg;
 	dev_link_t   *link;
-	int	      ret, i;
+	int	      ret;
 	nsp_hw_data  *data = &nsp_data_base;
 
 	nsp_dbg(NSP_DEBUG_INIT, "in");
@@ -1648,14 +1639,7 @@ static dev_link_t *nsp_cs_attach(void)
 
 	/* Interrupt setup */
 	link->irq.Attributes	 = IRQ_TYPE_EXCLUSIVE | IRQ_HANDLE_PRESENT;
-	link->irq.IRQInfo1	 = IRQ_INFO2_VALID    | IRQ_LEVEL_ID;
-	if (irq_list[0] == -1) {
-		link->irq.IRQInfo2 = irq_mask;
-	} else {
-		for (i = 0; i < 4; i++) {
-			link->irq.IRQInfo2 |= BIT(irq_list[i]);
-		}
-	}
+	link->irq.IRQInfo1	 = IRQ_LEVEL_ID;
 
 	/* Interrupt handler */
 	link->irq.Handler	 = &nspintr;
@@ -1673,7 +1657,6 @@ static dev_link_t *nsp_cs_attach(void)
 	link->next               = dev_list;
 	dev_list                 = link;
 	client_reg.dev_info	 = &dev_info;
-	client_reg.Attributes	 = INFO_IO_CLIENT | INFO_CARD_SHARE;
 	client_reg.EventMask	 =
 		CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL |
 		CS_EVENT_RESET_PHYSICAL | CS_EVENT_CARD_RESET	|
@@ -1937,10 +1920,10 @@ static void nsp_cs_config(dev_link_t *link)
 	nsp_dbg(NSP_DEBUG_INIT, "host=0x%p", host);
 
 	for (dev = host->host_queue; dev != NULL; dev = dev->next) {
-		unsigned long arg[2], id;
-		kernel_scsi_ioctl(dev, SCSI_IOCTL_GET_IDLUN, arg);
-		id = (arg[0] & 0x0f) + ((arg[0] >> 4) & 0xf0) +
-			((arg[0] >> 8) & 0xf00) + ((arg[0] >> 12) & 0xf000);
+		unsigned long id;
+		id = (dev->id & 0x0f) + ((dev->lun & 0x0f) << 4) +
+			((dev->channel & 0x0f) << 8) +
+			((dev->host->host_no & 0x0f) << 12);
 		node = &info->node[info->ndev];
 		node->minor = 0;
 		switch (dev->type) {
@@ -2195,10 +2178,9 @@ static void __exit nsp_cs_exit(void)
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,68))
 	pcmcia_unregister_driver(&nsp_driver);
+	BUG_ON(dev_list != NULL);
 #else
 	unregister_pcmcia_driver(&dev_info);
-#endif
-
 	/* XXX: this really needs to move into generic code.. */
 	while (dev_list != NULL) {
 		if (dev_list->state & DEV_CONFIG) {
@@ -2206,6 +2188,7 @@ static void __exit nsp_cs_exit(void)
 		}
 		nsp_cs_detach(dev_list);
 	}
+#endif
 }
 
 

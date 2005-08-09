@@ -105,6 +105,8 @@
 #include <linux/mm.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
+#include <linux/init.h>
+#include <linux/sysrq.h>
 
 #include <asm/cacheflush.h>
 #include <asm/system.h>
@@ -232,7 +234,7 @@ mem2hex(const char *mem, char *buf, int count)
 	} else {
 		/* error condition */
 	}
-	debugger_fault_handler = 0;
+	debugger_fault_handler = NULL;
 	*buf = 0;
 	return buf;
 }
@@ -298,7 +300,7 @@ hex2mem(char *buf, char *mem, int count)
 	} else {
 		/* error condition */
 	}
-	debugger_fault_handler = 0;
+	debugger_fault_handler = NULL;
 	return mem;
 }
 
@@ -329,7 +331,7 @@ hexToInt(char **ptr, int *intValue)
 	} else {
 		/* error condition */
 	}
-	debugger_fault_handler = 0;
+	debugger_fault_handler = NULL;
 
 	return (numChars);
 }
@@ -496,7 +498,7 @@ static struct hard_trap_info
 	unsigned int tt;		/* Trap type code for powerpc */
 	unsigned char signo;		/* Signal that we map this trap into */
 } hard_trap_info[] = {
-#if defined(CONFIG_40x)
+#if defined(CONFIG_40x) || defined(CONFIG_BOOKE)
 	{ 0x100, SIGINT  },		/* critical input interrupt */
 	{ 0x200, SIGSEGV },		/* machine check */
 	{ 0x300, SIGSEGV },		/* data storage */
@@ -519,7 +521,7 @@ static struct hard_trap_info
 	** 0x1100  data TLB miss
 	** 0x1200  instruction TLB miss
 	*/
-	{ 0x2000, SIGTRAP},		/* debug */
+	{ 0x2002, SIGTRAP},		/* debug */
 #else
 	{ 0x200, SIGSEGV },		/* machine check */
 	{ 0x300, SIGSEGV },		/* address error (store) */
@@ -600,11 +602,6 @@ handle_exception (struct pt_regs *regs)
 	sigval = computeSignal(regs->trap);
 	ptr = remcomOutBuffer;
 
-#if defined(CONFIG_40x)
-	*ptr++ = 'S';
-	*ptr++ = hexchars[sigval >> 4];
-	*ptr++ = hexchars[sigval & 0xf];
-#else
 	*ptr++ = 'T';
 	*ptr++ = hexchars[sigval >> 4];
 	*ptr++ = hexchars[sigval & 0xf];
@@ -618,8 +615,6 @@ handle_exception (struct pt_regs *regs)
 	*ptr++ = ':';
 	ptr = mem2hex(((char *)regs) + SP_REGNUM*4, ptr, 4);
 	*ptr++ = ';';
-#endif
-
 	*ptr++ = 0;
 
 	putpacket(remcomOutBuffer);
@@ -772,10 +767,6 @@ handle_exception (struct pt_regs *regs)
  * some location may have changed something that is in the instruction cache.
  */
 			kgdb_flush_cache_all();
-#if defined(CONFIG_40x)
-			strcpy(remcomOutBuffer, "OK");
-			putpacket(remcomOutBuffer);
-#endif
 			mtmsr(msr);
 
 			kgdb_interruptible(1);
@@ -789,10 +780,9 @@ handle_exception (struct pt_regs *regs)
 
 		case 's':
 			kgdb_flush_cache_all();
-#if defined(CONFIG_40x)
+#if defined(CONFIG_40x) || defined(CONFIG_BOOKE)
+			mtspr(SPRN_DBCR0, mfspr(SPRN_DBCR0) | DBCR0_IC);
 			regs->msr |= MSR_DE;
-			regs->dbcr0 |= (DBCR0_IDM | DBCR0_IC);
-			mtmsr(msr);
 #else
 			regs->msr |= MSR_SE;
 #endif
@@ -855,3 +845,23 @@ kgdb_output_string (const char* s, unsigned int count)
 	return 1;
 }
 #endif
+
+static void sysrq_handle_gdb(int key, struct pt_regs *pt_regs,
+			     struct tty_struct *tty)
+{
+	printk("Entering GDB stub\n");
+	breakpoint();
+}
+static struct sysrq_key_op sysrq_gdb_op = {
+        .handler        = sysrq_handle_gdb,
+        .help_msg       = "Gdb",
+        .action_msg     = "GDB",
+};
+
+static int gdb_register_sysrq(void)
+{
+	printk("Registering GDB sysrq handler\n");
+	register_sysrq_key('g', &sysrq_gdb_op);
+	return 0;
+}
+module_init(gdb_register_sysrq);

@@ -67,7 +67,7 @@ sys_ipc (uint call, int first, int second, int third, void __user *ptr, long fif
 		break;
 	case SEMTIMEDOP:
 		ret = sys_semtimedop (first, (struct sembuf __user *)ptr,
-				      second, (const struct timespec *) fifth);
+				      second, (const struct timespec __user *) fifth);
 		break;
 	case SEMGET:
 		ret = sys_semget (first, second, third);
@@ -77,8 +77,8 @@ sys_ipc (uint call, int first, int second, int third, void __user *ptr, long fif
 
 		if (!ptr)
 			break;
-		if ((ret = verify_area (VERIFY_READ, ptr, sizeof(long)))
-		    || (ret = get_user(fourth.__pad, (void *__user *)ptr)))
+		if ((ret = access_ok(VERIFY_READ, ptr, sizeof(long)) ? 0 : -EFAULT)
+		    || (ret = get_user(fourth.__pad, (void __user *__user *)ptr)))
 			break;
 		ret = sys_semctl (first, second, third, fourth);
 		break;
@@ -93,7 +93,7 @@ sys_ipc (uint call, int first, int second, int third, void __user *ptr, long fif
 
 			if (!ptr)
 				break;
-			if ((ret = verify_area (VERIFY_READ, ptr, sizeof(tmp)))
+			if ((ret = access_ok(VERIFY_READ, ptr, sizeof(tmp)) ? 0 : -EFAULT)
 			    || (ret = copy_from_user(&tmp,
 					(struct ipc_kludge __user *) ptr,
 					sizeof (tmp)) ? -EFAULT : 0))
@@ -117,8 +117,8 @@ sys_ipc (uint call, int first, int second, int third, void __user *ptr, long fif
 	case SHMAT: {
 		ulong raddr;
 
-		if ((ret = verify_area(VERIFY_WRITE, (ulong __user *) third,
-				       sizeof(ulong))))
+		if ((ret = access_ok(VERIFY_WRITE, (ulong __user *) third,
+				       sizeof(ulong)) ? 0 : -EFAULT))
 			break;
 		ret = do_shmat (first, (char __user *) ptr, second, &raddr);
 		if (ret)
@@ -208,17 +208,17 @@ out:
  * sys_select() with the appropriate args. -- Cort
  */
 int
-ppc_select(int n, fd_set *inp, fd_set *outp, fd_set *exp, struct timeval *tvp)
+ppc_select(int n, fd_set __user *inp, fd_set __user *outp, fd_set __user *exp, struct timeval __user *tvp)
 {
 	if ( (unsigned long)n >= 4096 )
 	{
 		unsigned long __user *buffer = (unsigned long __user *)n;
-		if (verify_area(VERIFY_READ, buffer, 5*sizeof(unsigned long))
+		if (!access_ok(VERIFY_READ, buffer, 5*sizeof(unsigned long))
 		    || __get_user(n, buffer)
-		    || __get_user(inp, ((fd_set **)(buffer+1)))
-		    || __get_user(outp, ((fd_set **)(buffer+2)))
-		    || __get_user(exp, ((fd_set **)(buffer+3)))
-		    || __get_user(tvp, ((struct timeval **)(buffer+4))))
+		    || __get_user(inp, ((fd_set __user * __user *)(buffer+1)))
+		    || __get_user(outp, ((fd_set  __user * __user *)(buffer+2)))
+		    || __get_user(exp, ((fd_set  __user * __user *)(buffer+3)))
+		    || __get_user(tvp, ((struct timeval  __user * __user *)(buffer+4))))
 			return -EFAULT;
 	}
 	return sys_select(n, inp, outp, exp, tvp);

@@ -14,7 +14,6 @@
 #define __ASM_IBMNP405H_H__
 
 #include <linux/config.h>
-#include <asm/ibm_ocp.h>
 
 /* ibm405.h at bottom of this file */
 
@@ -42,9 +41,6 @@
 #define PPC4xx_ONB_IO_ADDR	((uint)0xef600000)
 #define PPC4xx_ONB_IO_SIZE	((uint)4*1024)
 
-#define OPB_BASE_START	0x40000000
-#define EBIU_BASE_START	0xF0100000
-
 /* serial port defines */
 #define RS_TABLE_SIZE	4
 
@@ -53,27 +49,8 @@
 #define PCIL0_BASE	0xEF400000
 #define UART0_IO_BASE	0xEF600300
 #define UART1_IO_BASE	0xEF600400
-#define IIC0_BASE	0xEF600500
 #define OPB0_BASE	0xEF600600
-#define GPIO0_BASE	0xEF600700
 #define EMAC0_BASE	0xEF600800
-#define EMAC1_BASE	0xEF600900
-#define EMAC2_BASE	0xEF600a00
-#define EMAC3_BASE	0xEF600b00
-#define ZMII0_BASE	0xEF600C10
-#define BL_MAC_WOL	41 	/* WOL */
-#define BL_MAL_SERR	45	/* MAL SERR */
-#define BL_MAL_TXDE	46	/* MAL TXDE */
-#define BL_MAL_RXDE	47	/* MAL RXDE */
-#define BL_MAL_TXEOB	17	/* MAL TX EOB */
-#define BL_MAL_RXEOB	18	/* MAL RX EOB */
-#define BL_MAC_ETH0	37	/* MAC */
-#define BL_MAC_ETH1	38	/* MAC */
-#define BL_MAC_ETH2	39	/* MAC */
-#define BL_MAC_ETH3	40	/* MAC */
-
-#define EMAC_NUMS	4
-#define IIC0_IRQ	2
 
 #define BD_EMAC_ADDR(e,i) bi_enetaddr[e][i]
 
@@ -155,8 +132,7 @@
 #define DCRN_UIC1_BASE	0x0D0
 #define DCRN_CPC0_EPRCSR 0x0F3
 
-#define UIC0_UIC1NC      30	/* UIC1 non-critical interrupt */
-#define UIC0_UIC1CR      31	/* UIC1 critical interrupt */
+#define UIC0_UIC1NC	0x00000002
 
 #define CHR1_CETE	0x00000004	/* CPU external timer enable */
 #define UIC0	DCRN_UIC0_BASE
@@ -164,7 +140,6 @@
 
 #undef NR_UICS
 #define NR_UICS	2
-#define UIC_CASCADE_MASK 0x0003	/* bits 30 & 31 */
 
 /* EMAC DCRN's FIXME: armin */
 #define DCRN_MALRXCTP2R(base)	((base) + 0x42)	/* Channel Rx 2 Channel Table Pointer */

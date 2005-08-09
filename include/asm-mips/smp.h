@@ -51,8 +51,6 @@ extern cpumask_t phys_cpu_present_map;
 extern cpumask_t cpu_online_map;
 #define cpu_possible_map	phys_cpu_present_map
 
-#define cpu_online(cpu)		cpu_isset(cpu, cpu_online_map)
-
 extern cpumask_t cpu_callout_map;
 /* We don't mark CPUs online until __cpu_up(), so we need another measure */
 static inline int num_booting_cpus(void)
@@ -70,11 +68,6 @@ static inline int num_booting_cpus(void)
 extern void core_send_ipi(int cpu, unsigned int action);
 
 /*
- * Detect available CPUs, populate phys_cpu_present_map
- */
-extern void prom_build_cpu_map(void);
-
-/*
  * Firmware CPU startup hook
  */
 extern void prom_boot_secondary(int cpu, struct task_struct *idle);
@@ -86,15 +79,9 @@ extern void prom_boot_secondary(int cpu, struct task_struct *idle);
 extern void prom_init_secondary(void);
 
 /*
- * Callout to firmware before smp_init
+ * Detect available CPUs, populate phys_cpu_present_map before smp_init
  */
 extern void prom_prepare_cpus(unsigned int max_cpus);
-
-/*
- * Do whatever setup needs to be done for SMP at the board level.  Return
- * the number of cpus in the system, including this one
- */
-extern int prom_setup_smp(void);
 
 /*
  * Last chance for the board code to finish SMP initialization before

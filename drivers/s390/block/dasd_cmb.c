@@ -1,5 +1,5 @@
 /*
- * linux/drivers/s390/block/dasd_cmb.c ($Revision: 1.6 $)
+ * linux/drivers/s390/block/dasd_cmb.c ($Revision: 1.9 $)
  *
  * Linux on zSeries Channel Measurement Facility support
  *  (dasd device driver interface)
@@ -23,7 +23,6 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 #include <linux/init.h>
-#include <linux/ioctl32.h>
 #include <linux/module.h>
 #include <asm/ccwdev.h>
 #include <asm/cmb.h>
@@ -58,7 +57,7 @@ static int
 dasd_ioctl_readall_cmb(struct block_device *bdev, int no, long args)
 {
 	struct dasd_device *device;
-	struct cmbdata * __user udata;
+	struct cmbdata __user *udata;
 	struct cmbdata data;
 	size_t size;
 	int ret;
@@ -66,7 +65,7 @@ dasd_ioctl_readall_cmb(struct block_device *bdev, int no, long args)
 	device = bdev->bd_disk->private_data;
 	if (!device)
 		return -EINVAL;
-	udata = (void *) args;
+	udata = (void __user *) args;
 	size = _IOC_SIZE(no);
 
 	if (!access_ok(VERIFY_WRITE, udata, size))
@@ -84,27 +83,13 @@ dasd_ioctl_readall_cmb(struct block_device *bdev, int no, long args)
 static inline int
 ioctl_reg(unsigned int no, dasd_ioctl_fn_t handler)
 {
-	int ret;
-	ret = dasd_ioctl_no_register(THIS_MODULE, no, handler);
-#ifdef CONFIG_COMPAT
-	if (ret)
-		return ret;
-
-	ret = register_ioctl32_conversion(no, NULL);
-	if (ret)
-		dasd_ioctl_no_unregister(THIS_MODULE, no, handler);
-#endif
-	return ret;
+	return dasd_ioctl_no_register(THIS_MODULE, no, handler);
 }
 
 static inline void
 ioctl_unreg(unsigned int no, dasd_ioctl_fn_t handler)
 {
 	dasd_ioctl_no_unregister(THIS_MODULE, no, handler);
-#ifdef CONFIG_COMPAT
-	unregister_ioctl32_conversion(no);
-#endif
-
 }
 
 static void

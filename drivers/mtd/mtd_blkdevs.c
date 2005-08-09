@@ -1,5 +1,5 @@
 /*
- * $Id: mtd_blkdevs.c,v 1.16 2003/06/23 13:34:43 dwmw2 Exp $
+ * $Id: mtd_blkdevs.c,v 1.24 2004/11/16 18:28:59 dwmw2 Exp $
  *
  * (C) 2003 David Woodhouse <dwmw2@infradead.org>
  *
@@ -81,7 +81,7 @@ static int mtd_blktrans_thread(void *arg)
 	struct request_queue *rq = tr->blkcore_priv->rq;
 
 	/* we might get involved when memory gets low, so use PF_MEMALLOC */
-	current->flags |= PF_MEMALLOC;
+	current->flags |= PF_MEMALLOC | PF_NOFREEZE;
 
 	daemonize("%sd", tr->name);
 
@@ -143,7 +143,7 @@ static void mtd_blktrans_request(struct request_queue *rq)
 }
 
 
-int blktrans_open(struct inode *i, struct file *f)
+static int blktrans_open(struct inode *i, struct file *f)
 {
 	struct mtd_blktrans_dev *dev;
 	struct mtd_blktrans_ops *tr;
@@ -174,7 +174,7 @@ int blktrans_open(struct inode *i, struct file *f)
 	return ret;
 }
 
-int blktrans_release(struct inode *i, struct file *f)
+static int blktrans_release(struct inode *i, struct file *f)
 {
 	struct mtd_blktrans_dev *dev;
 	struct mtd_blktrans_ops *tr;
@@ -220,7 +220,7 @@ static int blktrans_ioctl(struct inode *inode, struct file *file,
 				return ret;
 
 			g.start = get_start_sect(inode->i_bdev);
-			if (copy_to_user((void *)arg, &g, sizeof(g)))
+			if (copy_to_user((void __user *)arg, &g, sizeof(g)))
 				return -EFAULT;
 			return 0;
 		} /* else */
@@ -295,7 +295,10 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 	snprintf(gd->devfs_name, sizeof(gd->devfs_name),
 		 "%s/%c", tr->name, (tr->part_bits?'a':'0') + new->devnum);
 
-	set_capacity(gd, new->size);
+	/* 2.5 has capacity in units of 512 bytes while still
+	   having BLOCK_SIZE_BITS set to 10. Just to keep us amused. */
+	set_capacity(gd, (new->size * new->blksize) >> 9);
+
 	gd->private_data = new;
 	new->blkcore_priv = gd;
 	gd->queue = tr->blkcore_priv->rq;
@@ -323,7 +326,7 @@ int del_mtd_blktrans_dev(struct mtd_blktrans_dev *old)
 	return 0;
 }
 
-void blktrans_notify_remove(struct mtd_info *mtd)
+static void blktrans_notify_remove(struct mtd_info *mtd)
 {
 	struct list_head *this, *this2, *next;
 
@@ -339,7 +342,7 @@ void blktrans_notify_remove(struct mtd_info *mtd)
 	}
 }
 
-void blktrans_notify_add(struct mtd_info *mtd)
+static void blktrans_notify_add(struct mtd_info *mtd)
 {
 	struct list_head *this;
 

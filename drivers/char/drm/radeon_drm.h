@@ -144,8 +144,16 @@
 #define RADEON_EMIT_PP_TEX_SIZE_0                   73
 #define RADEON_EMIT_PP_TEX_SIZE_1                   74
 #define RADEON_EMIT_PP_TEX_SIZE_2                   75
-#define RADEON_MAX_STATE_PACKETS                    76
-
+#define R200_EMIT_RB3D_BLENDCOLOR                   76
+#define R200_EMIT_TCL_POINT_SPRITE_CNTL             77
+#define RADEON_EMIT_PP_CUBIC_FACES_0                78
+#define RADEON_EMIT_PP_CUBIC_OFFSETS_T0             79
+#define RADEON_EMIT_PP_CUBIC_FACES_1                80
+#define RADEON_EMIT_PP_CUBIC_OFFSETS_T1             81
+#define RADEON_EMIT_PP_CUBIC_FACES_2                82
+#define RADEON_EMIT_PP_CUBIC_OFFSETS_T2             83
+#define R200_EMIT_PP_TRI_PERF_CNTL                  84
+#define RADEON_MAX_STATE_PACKETS                    85
 
 /* Commands understood by cmd_buffer ioctl.  More can be added but
  * obviously these can't be removed or changed:
@@ -191,7 +199,10 @@ typedef union {
 #define RADEON_FRONT			0x1
 #define RADEON_BACK			0x2
 #define RADEON_DEPTH			0x4
-#define RADEON_STENCIL                  0x8
+#define RADEON_STENCIL			0x8
+#define RADEON_CLEAR_FASTZ		0x80000000
+#define RADEON_USE_HIERZ		0x40000000
+#define RADEON_USE_COMP_ZBUF		0x20000000
 
 /* Primitive types
  */
@@ -225,6 +236,15 @@ typedef union {
 
 #define RADEON_MAX_TEXTURE_LEVELS	12
 #define RADEON_MAX_TEXTURE_UNITS	3
+
+#define RADEON_MAX_SURFACES		8
+
+/* Blits have strict offset rules.  All blit offset must be aligned on
+ * a 1K-byte boundary.
+ */
+#define RADEON_OFFSET_SHIFT             10
+#define RADEON_OFFSET_ALIGN             (1 << RADEON_OFFSET_SHIFT)
+#define RADEON_OFFSET_MASK              (RADEON_OFFSET_ALIGN - 1)
 
 #endif /* __RADEON_SAREA_DEFINES__ */
 
@@ -353,6 +373,7 @@ typedef struct {
         int pfState;                /* number of 3d windows (0,1,2ormore) */
         int pfCurrentPage;	    /* which buffer is being displayed? */
 	int crtc2_base;		    /* CRTC2 frame offset */
+	int tiling_enabled;	/* set by drm, read by 2d + 3d clients */
 } drm_radeon_sarea_t;
 
 
@@ -365,37 +386,69 @@ typedef struct {
 /* Radeon specific ioctls
  * The device specific ioctl range is 0x40 to 0x79.
  */
-#define DRM_IOCTL_RADEON_CP_INIT    DRM_IOW( 0x40, drm_radeon_init_t)
-#define DRM_IOCTL_RADEON_CP_START   DRM_IO(  0x41)
-#define DRM_IOCTL_RADEON_CP_STOP    DRM_IOW( 0x42, drm_radeon_cp_stop_t)
-#define DRM_IOCTL_RADEON_CP_RESET   DRM_IO(  0x43)
-#define DRM_IOCTL_RADEON_CP_IDLE    DRM_IO(  0x44)
-#define DRM_IOCTL_RADEON_RESET      DRM_IO(  0x45)
-#define DRM_IOCTL_RADEON_FULLSCREEN DRM_IOW( 0x46, drm_radeon_fullscreen_t)
-#define DRM_IOCTL_RADEON_SWAP       DRM_IO(  0x47)
-#define DRM_IOCTL_RADEON_CLEAR      DRM_IOW( 0x48, drm_radeon_clear_t)
-#define DRM_IOCTL_RADEON_VERTEX     DRM_IOW( 0x49, drm_radeon_vertex_t)
-#define DRM_IOCTL_RADEON_INDICES    DRM_IOW( 0x4a, drm_radeon_indices_t)
-#define DRM_IOCTL_RADEON_STIPPLE    DRM_IOW( 0x4c, drm_radeon_stipple_t)
-#define DRM_IOCTL_RADEON_INDIRECT   DRM_IOWR(0x4d, drm_radeon_indirect_t)
-#define DRM_IOCTL_RADEON_TEXTURE    DRM_IOWR(0x4e, drm_radeon_texture_t)
-#define DRM_IOCTL_RADEON_VERTEX2    DRM_IOW( 0x4f, drm_radeon_vertex2_t)
-#define DRM_IOCTL_RADEON_CMDBUF     DRM_IOW( 0x50, drm_radeon_cmd_buffer_t)
-#define DRM_IOCTL_RADEON_GETPARAM   DRM_IOWR(0x51, drm_radeon_getparam_t)
-#define DRM_IOCTL_RADEON_FLIP	    DRM_IO(  0x52)
-#define DRM_IOCTL_RADEON_ALLOC      DRM_IOWR( 0x53, drm_radeon_mem_alloc_t)
-#define DRM_IOCTL_RADEON_FREE       DRM_IOW( 0x54, drm_radeon_mem_free_t)
-#define DRM_IOCTL_RADEON_INIT_HEAP  DRM_IOW( 0x55, drm_radeon_mem_init_heap_t)
-#define DRM_IOCTL_RADEON_IRQ_EMIT   DRM_IOWR( 0x56, drm_radeon_irq_emit_t)
-#define DRM_IOCTL_RADEON_IRQ_WAIT   DRM_IOW( 0x57, drm_radeon_irq_wait_t)
-/* added by Charl P. Botha - see radeon_cp.c for details */
-#define DRM_IOCTL_RADEON_CP_RESUME  DRM_IO(0x58)
+#define DRM_RADEON_CP_INIT    0x00 
+#define DRM_RADEON_CP_START   0x01 
+#define DRM_RADEON_CP_STOP    0x02
+#define DRM_RADEON_CP_RESET   0x03
+#define DRM_RADEON_CP_IDLE    0x04
+#define DRM_RADEON_RESET      0x05 
+#define DRM_RADEON_FULLSCREEN 0x06
+#define DRM_RADEON_SWAP       0x07 
+#define DRM_RADEON_CLEAR      0x08 
+#define DRM_RADEON_VERTEX     0x09
+#define DRM_RADEON_INDICES    0x0A
+#define DRM_RADEON_NOT_USED
+#define DRM_RADEON_STIPPLE    0x0C
+#define DRM_RADEON_INDIRECT   0x0D
+#define DRM_RADEON_TEXTURE    0x0E
+#define DRM_RADEON_VERTEX2    0x0F
+#define DRM_RADEON_CMDBUF     0x10
+#define DRM_RADEON_GETPARAM   0x11
+#define DRM_RADEON_FLIP       0x12
+#define DRM_RADEON_ALLOC      0x13
+#define DRM_RADEON_FREE       0x14
+#define DRM_RADEON_INIT_HEAP  0x15
+#define DRM_RADEON_IRQ_EMIT   0x16
+#define DRM_RADEON_IRQ_WAIT   0x17
+#define DRM_RADEON_CP_RESUME  0x18
+#define DRM_RADEON_SETPARAM   0x19
+#define DRM_RADEON_SURF_ALLOC 0x1a
+#define DRM_RADEON_SURF_FREE  0x1b
+
+#define DRM_IOCTL_RADEON_CP_INIT    DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_CP_INIT, drm_radeon_init_t)
+#define DRM_IOCTL_RADEON_CP_START   DRM_IO(  DRM_COMMAND_BASE + DRM_RADEON_CP_START)
+#define DRM_IOCTL_RADEON_CP_STOP    DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_CP_STOP, drm_radeon_cp_stop_t)
+#define DRM_IOCTL_RADEON_CP_RESET   DRM_IO(  DRM_COMMAND_BASE + DRM_RADEON_CP_RESET)
+#define DRM_IOCTL_RADEON_CP_IDLE    DRM_IO(  DRM_COMMAND_BASE + DRM_RADEON_CP_IDLE)
+#define DRM_IOCTL_RADEON_RESET      DRM_IO(  DRM_COMMAND_BASE + DRM_RADEON_RESET)
+#define DRM_IOCTL_RADEON_FULLSCREEN DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_FULLSCREEN, drm_radeon_fullscreen_t)
+#define DRM_IOCTL_RADEON_SWAP       DRM_IO(  DRM_COMMAND_BASE + DRM_RADEON_SWAP)
+#define DRM_IOCTL_RADEON_CLEAR      DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_CLEAR, drm_radeon_clear_t)
+#define DRM_IOCTL_RADEON_VERTEX     DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_VERTEX, drm_radeon_vertex_t)
+#define DRM_IOCTL_RADEON_INDICES    DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_INDICES, drm_radeon_indices_t)
+#define DRM_IOCTL_RADEON_STIPPLE    DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_STIPPLE, drm_radeon_stipple_t)
+#define DRM_IOCTL_RADEON_INDIRECT   DRM_IOWR(DRM_COMMAND_BASE + DRM_RADEON_INDIRECT, drm_radeon_indirect_t)
+#define DRM_IOCTL_RADEON_TEXTURE    DRM_IOWR(DRM_COMMAND_BASE + DRM_RADEON_TEXTURE, drm_radeon_texture_t)
+#define DRM_IOCTL_RADEON_VERTEX2    DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_VERTEX2, drm_radeon_vertex2_t)
+#define DRM_IOCTL_RADEON_CMDBUF     DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_CMDBUF, drm_radeon_cmd_buffer_t)
+#define DRM_IOCTL_RADEON_GETPARAM   DRM_IOWR(DRM_COMMAND_BASE + DRM_RADEON_GETPARAM, drm_radeon_getparam_t)
+#define DRM_IOCTL_RADEON_FLIP       DRM_IO(  DRM_COMMAND_BASE + DRM_RADEON_FLIP)
+#define DRM_IOCTL_RADEON_ALLOC      DRM_IOWR(DRM_COMMAND_BASE + DRM_RADEON_ALLOC, drm_radeon_mem_alloc_t)
+#define DRM_IOCTL_RADEON_FREE       DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_FREE, drm_radeon_mem_free_t)
+#define DRM_IOCTL_RADEON_INIT_HEAP  DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_INIT_HEAP, drm_radeon_mem_init_heap_t)
+#define DRM_IOCTL_RADEON_IRQ_EMIT   DRM_IOWR(DRM_COMMAND_BASE + DRM_RADEON_IRQ_EMIT, drm_radeon_irq_emit_t)
+#define DRM_IOCTL_RADEON_IRQ_WAIT   DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_IRQ_WAIT, drm_radeon_irq_wait_t)
+#define DRM_IOCTL_RADEON_CP_RESUME  DRM_IO(  DRM_COMMAND_BASE + DRM_RADEON_CP_RESUME)
+#define DRM_IOCTL_RADEON_SETPARAM   DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_SETPARAM, drm_radeon_setparam_t)
+#define DRM_IOCTL_RADEON_SURF_ALLOC DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_SURF_ALLOC, drm_radeon_surface_alloc_t)
+#define DRM_IOCTL_RADEON_SURF_FREE  DRM_IOW( DRM_COMMAND_BASE + DRM_RADEON_SURF_FREE, drm_radeon_surface_free_t)
 
 typedef struct drm_radeon_init {
 	enum {
 		RADEON_INIT_CP    = 0x01,
 		RADEON_CLEANUP_CP = 0x02,
-		RADEON_INIT_R200_CP = 0x03
+		RADEON_INIT_R200_CP = 0x03,
+		RADEON_INIT_R300_CP = 0x04
 	} func;
 	unsigned long sarea_priv_offset;
 	int is_pci;
@@ -447,7 +500,7 @@ typedef struct drm_radeon_clear {
 	unsigned int clear_depth;
 	unsigned int color_mask;
 	unsigned int depth_mask;   /* misnamed field:  should be stencil */
-	drm_radeon_clear_rect_t *depth_boxes;
+	drm_radeon_clear_rect_t __user *depth_boxes;
 } drm_radeon_clear_t;
 
 typedef struct drm_radeon_vertex {
@@ -473,9 +526,9 @@ typedef struct drm_radeon_vertex2 {
 	int idx;			/* Index of vertex buffer */
 	int discard;			/* Client finished with buffer? */
 	int nr_states;
-	drm_radeon_state_t *state;
+	drm_radeon_state_t __user *state;
 	int nr_prims;
-	drm_radeon_prim_t *prim;
+	drm_radeon_prim_t __user *prim;
 } drm_radeon_vertex2_t;
 
 /* v1.3 - obsoletes drm_radeon_vertex2
@@ -490,28 +543,28 @@ typedef struct drm_radeon_vertex2 {
  */
 typedef struct drm_radeon_cmd_buffer {
 	int bufsz;
-	char *buf;
+	char __user *buf;
 	int nbox;
-	drm_clip_rect_t *boxes;
+	drm_clip_rect_t __user *boxes;
 } drm_radeon_cmd_buffer_t;
 
 typedef struct drm_radeon_tex_image {
 	unsigned int x, y;		/* Blit coordinates */
 	unsigned int width, height;
-	const void *data;
+	const void __user *data;
 } drm_radeon_tex_image_t;
 
 typedef struct drm_radeon_texture {
-	int offset;
+	unsigned int offset;
 	int pitch;
 	int format;
 	int width;			/* Texture image coordinates */
 	int height;
-	drm_radeon_tex_image_t *image;
+	drm_radeon_tex_image_t __user *image;
 } drm_radeon_texture_t;
 
 typedef struct drm_radeon_stipple {
-	unsigned int *mask;
+	unsigned int __user *mask;
 } drm_radeon_stipple_t;
 
 typedef struct drm_radeon_indirect {
@@ -537,10 +590,11 @@ typedef struct drm_radeon_indirect {
 #define RADEON_PARAM_STATUS_HANDLE         8
 #define RADEON_PARAM_SAREA_HANDLE          9
 #define RADEON_PARAM_GART_TEX_HANDLE       10
+#define RADEON_PARAM_SCRATCH_OFFSET        11
 
 typedef struct drm_radeon_getparam {
 	int param;
-	int *value;
+	void __user *value;
 } drm_radeon_getparam_t;
 
 /* 1.6: Set up a memory manager for regions of shared memory:
@@ -552,7 +606,7 @@ typedef struct drm_radeon_mem_alloc {
 	int region;
 	int alignment;
 	int size;
-	int *region_offset;	/* offset from start of fb or GART */
+	int __user *region_offset;	/* offset from start of fb or GART */
 } drm_radeon_mem_alloc_t;
 
 typedef struct drm_radeon_mem_free {
@@ -570,12 +624,36 @@ typedef struct drm_radeon_mem_init_heap {
 /* 1.6: Userspace can request & wait on irq's:
  */
 typedef struct drm_radeon_irq_emit {
-	int *irq_seq;
+	int __user *irq_seq;
 } drm_radeon_irq_emit_t;
 
 typedef struct drm_radeon_irq_wait {
 	int irq_seq;
 } drm_radeon_irq_wait_t;
 
+
+/* 1.10: Clients tell the DRM where they think the framebuffer is located in
+ * the card's address space, via a new generic ioctl to set parameters
+ */
+
+typedef struct drm_radeon_setparam {
+	unsigned int param;
+	int64_t      value;
+} drm_radeon_setparam_t;
+
+#define RADEON_SETPARAM_FB_LOCATION    1	/* determined framebuffer location */
+#define RADEON_SETPARAM_SWITCH_TILING  2	/* enable/disable color tiling */
+
+/* 1.14: Clients can allocate/free a surface
+ */
+typedef struct drm_radeon_surface_alloc {
+	unsigned int address;
+	unsigned int size;
+	unsigned int flags;
+} drm_radeon_surface_alloc_t;
+
+typedef struct drm_radeon_surface_free {
+	unsigned int address;
+} drm_radeon_surface_free_t;
 
 #endif

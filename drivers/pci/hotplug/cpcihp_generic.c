@@ -45,7 +45,7 @@
 #define DRIVER_AUTHOR	"Scott Murray <scottm@somanetworks.com>"
 #define DRIVER_DESC	"Generic port I/O CompactPCI Hot Plug Driver"
 
-#if !defined(CONFIG_HOTPLUG_CPCI_GENERIC_MODULE)
+#if !defined(MODULE)
 #define MY_NAME	"cpcihp_generic"
 #else
 #define MY_NAME	THIS_MODULE->name
@@ -63,7 +63,7 @@
 
 /* local variables */
 static int debug;
-static char* bridge;
+static char *bridge;
 static u8 bridge_busnr;
 static u8 bridge_slot;
 static struct pci_bus *bus;
@@ -75,73 +75,6 @@ static u8 enum_mask;
 
 static struct cpci_hp_controller_ops generic_hpc_ops;
 static struct cpci_hp_controller generic_hpc;
-
-/* The following allows configuring the driver when it's compiled into the kernel */
-#ifndef MODULE
-static int __init cpcihp_generic_setup(char* str)
-{
-	char* p;
-	unsigned long tmp;
-
-	if(!str)
-		return -EINVAL;
-	bridge = str;
-
-	p = strchr(str, ',');
-	str = p + 1;
-	if(!(p && *str && *p == ','))
-		goto setup_error;
-	tmp = simple_strtoul(str, &p, 0);
-	if(p == str || tmp > 0xff) {
-		err("hotplug bus first slot number out of range");
-		goto setup_error;
-	}
-	first_slot = (u8) tmp;
-
-	str = p + 1;		
-	if(!(*str && *p == ','))
-		return -EINVAL;
-	tmp = simple_strtoul(str, &p, 0);
-	if(p == str || tmp > 0xff) {
-		err("hotplug bus last slot number out of range");
-		goto setup_error;
-	}
-	last_slot = (u8) tmp;
-
-	str = p + 1;
-	if(!(*str && *p == ','))
-		goto setup_error;
-	tmp = simple_strtoul(str, &p, 0);
-	if(p == str || tmp > 0xffff) {
-		err("port number out of range");
-		goto setup_error;
-	}
-	port = (u16) tmp;
-
-	str = p + 1;
-	if(!(*str && *p == ','))
-		goto setup_error;
-	tmp = simple_strtoul(str, &p, 0);
-	if(p == str) {
-		err("invalid #ENUM bit number");
-		goto setup_error;
-	}
-	enum_bit = (u8) tmp;
-
-	str = p + 1;
-	if(*str && *p == ',') {
-		tmp = simple_strtoul(str, &p, 0);
-		if(p != str)
-			debug = (int) tmp;
-	}
-	return 0;
-setup_error:
-	bridge = NULL;
-	return -EINVAL;
-}
-
-__setup("cpcihp_generic=", cpcihp_generic_setup);
-#endif
 
 static int __init validate_parameters(void)
 {
@@ -276,15 +209,15 @@ module_exit(cpcihp_generic_exit);
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
-MODULE_PARM(debug, "i");
+module_param(debug, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "Debugging mode enabled or not");
-MODULE_PARM(bridge, "s");
+module_param(bridge, charp, 0);
 MODULE_PARM_DESC(bridge, "Hotswap bus bridge device, <bus>:<slot> (bus and slot are in hexadecimal)");
-MODULE_PARM(first_slot, "b");
+module_param(first_slot, byte, 0);
 MODULE_PARM_DESC(first_slot, "Hotswap bus first slot number");
-MODULE_PARM(last_slot, "b");
+module_param(last_slot, byte, 0);
 MODULE_PARM_DESC(last_slot, "Hotswap bus last slot number");
-MODULE_PARM(port, "h");
+module_param(port, ushort, 0);
 MODULE_PARM_DESC(port, "#ENUM signal I/O port");
-MODULE_PARM(enum_bit, "i");
+module_param(enum_bit, uint, 0);
 MODULE_PARM_DESC(enum_bit, "#ENUM signal bit (0-7)");

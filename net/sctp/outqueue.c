@@ -98,16 +98,6 @@ static inline void sctp_outq_tail_data(struct sctp_outq *q,
 	return;
 }
 
-/* Insert a chunk behind chunk 'pos'. */
-static inline void sctp_outq_insert_data(struct sctp_outq *q,
-					 struct sctp_chunk *ch,
-					 struct sctp_chunk *pos)
-{
-	__skb_insert((struct sk_buff *)ch, (struct sk_buff *)pos->prev,
-		     (struct sk_buff *)pos, pos->list);
-	q->out_qlen += ch->skb->len;
-}
-
 /*
  * SFR-CACC algorithm:
  * D) If count_of_newacks is greater than or equal to 2
@@ -200,19 +190,6 @@ static inline int sctp_cacc_skip(struct sctp_transport *primary,
 	return 0;
 }
 
-/* Generate a new outqueue.  */
-struct sctp_outq *sctp_outq_new(struct sctp_association *asoc)
-{
-	struct sctp_outq *q;
-
-	q = t_new(struct sctp_outq, GFP_KERNEL);
-	if (q) {
-		sctp_outq_init(asoc, q);
-		q->malloced = 1;
-	}
-	return q;
-}
-
 /* Initialize an existing sctp_outq.  This does the boring stuff.
  * You still need to define handlers if you really want to DO
  * something with this structure...
@@ -245,7 +222,7 @@ void sctp_outq_teardown(struct sctp_outq *q)
 	/* Throw away unacknowledged chunks. */
 	list_for_each(pos, &q->asoc->peer.transport_addr_list) {
 		transport = list_entry(pos, struct sctp_transport, transports);
-		while ((lchunk = sctp_list_dequeue(&transport->transmitted))) {
+		while ((lchunk = sctp_list_dequeue(&transport->transmitted)) != NULL) {
 			chunk = list_entry(lchunk, struct sctp_chunk,
 					   transmitted_list);
 			/* Mark as part of a failed message. */
@@ -282,7 +259,7 @@ void sctp_outq_teardown(struct sctp_outq *q)
 	}
 
 	/* Throw away any leftover data chunks. */
-	while ((chunk = sctp_outq_dequeue_data(q))) {
+	while ((chunk = sctp_outq_dequeue_data(q)) != NULL) {
 
 		/* Mark as send failure. */
 		sctp_chunk_fail(chunk, q->error);
@@ -292,7 +269,7 @@ void sctp_outq_teardown(struct sctp_outq *q)
 	q->error = 0;
 
 	/* Throw away any leftover control chunks. */
-	while ((chunk = (struct sctp_chunk *) skb_dequeue(&q->control)))
+	while ((chunk = (struct sctp_chunk *) skb_dequeue(&q->control)) != NULL)
 		sctp_chunk_free(chunk);
 }
 
@@ -349,15 +326,15 @@ int sctp_outq_tail(struct sctp_outq *q, struct sctp_chunk *chunk)
 
 			sctp_outq_tail_data(q, chunk);
 			if (chunk->chunk_hdr->flags & SCTP_DATA_UNORDERED)
-				SCTP_INC_STATS(SctpOutUnorderChunks);
+				SCTP_INC_STATS(SCTP_MIB_OUTUNORDERCHUNKS);
 			else
-				SCTP_INC_STATS(SctpOutOrderChunks);
+				SCTP_INC_STATS(SCTP_MIB_OUTORDERCHUNKS);
 			q->empty = 0;
 			break;
 		};
 	} else {
 		__skb_queue_tail(&q->control, (struct sk_buff *) chunk);
-		SCTP_INC_STATS(SctpOutCtrlChunks);
+		SCTP_INC_STATS(SCTP_MIB_OUTCTRLCHUNKS);
 	}
 
 	if (error < 0)
@@ -372,7 +349,7 @@ int sctp_outq_tail(struct sctp_outq *q, struct sctp_chunk *chunk)
 /* Insert a chunk into the sorted list based on the TSNs.  The retransmit list
  * and the abandoned list are in ascending order.
  */
-void sctp_insert_list(struct list_head *head, struct list_head *new)
+static void sctp_insert_list(struct list_head *head, struct list_head *new)
 {
 	struct list_head *pos;
 	struct sctp_chunk *nchunk, *lchunk;
@@ -525,10 +502,10 @@ static int sctp_outq_flush_rtx(struct sctp_outq *q, struct sctp_packet *pkt,
 			       int rtx_timeout, int *start_timer)
 {
 	struct list_head *lqueue;
-	struct list_head *lchunk;
+	struct list_head *lchunk, *lchunk1;
 	struct sctp_transport *transport = pkt->transport;
 	sctp_xmit_t status;
-	struct sctp_chunk *chunk;
+	struct sctp_chunk *chunk, *chunk1;
 	struct sctp_association *asoc;
 	int error = 0;
 
@@ -615,6 +592,12 @@ static int sctp_outq_flush_rtx(struct sctp_outq *q, struct sctp_packet *pkt,
 			 * the transmitted list.
 			 */
 			list_add_tail(lchunk, &transport->transmitted);
+
+			/* Mark the chunk as ineligible for fast retransmit 
+			 * after it is retransmitted.
+			 */
+			chunk->fast_retransmit = 0;
+
 			*start_timer = 1;
 			q->empty = 0;
 
@@ -622,6 +605,18 @@ static int sctp_outq_flush_rtx(struct sctp_outq *q, struct sctp_packet *pkt,
 			lchunk = sctp_list_dequeue(lqueue);
 			break;
 		};
+
+		/* If we are here due to a retransmit timeout or a fast
+		 * retransmit and if there are any chunks left in the retransmit
+		 * queue that could not fit in the PMTU sized packet, they need			 * to be marked as ineligible for a subsequent fast retransmit.
+		 */
+		if (rtx_timeout && !lchunk) {
+			list_for_each(lchunk1, lqueue) {
+				chunk1 = list_entry(lchunk1, struct sctp_chunk,
+						    transmitted_list);
+				chunk1->fast_retransmit = 0;
+			}
+		}
 	}
 
 	return error;
@@ -681,17 +676,26 @@ int sctp_outq_flush(struct sctp_outq *q, int rtx_timeout)
 	 */
 
 	queue = &q->control;
-	while ((chunk = (struct sctp_chunk *)skb_dequeue(queue))) {
+	while ((chunk = (struct sctp_chunk *)skb_dequeue(queue)) != NULL) {
 		/* Pick the right transport to use. */
 		new_transport = chunk->transport;
 
 		if (!new_transport) {
 			new_transport = asoc->peer.active_path;
 		} else if (!new_transport->active) {
-			/* If the chunk is Heartbeat, send it to
-			 * chunk->transport, even it's inactive.
+			/* If the chunk is Heartbeat or Heartbeat Ack, 
+			 * send it to chunk->transport, even if it's 
+			 * inactive.
+			 *
+			 * 3.3.6 Heartbeat Acknowledgement:
+			 * ...  
+			 * A HEARTBEAT ACK is always sent to the source IP
+			 * address of the IP datagram containing the
+			 * HEARTBEAT chunk to which this ack is responding.
+			 * ...  
 			 */
-			if (chunk->chunk_hdr->type != SCTP_CID_HEARTBEAT)
+			if (chunk->chunk_hdr->type != SCTP_CID_HEARTBEAT &&
+			    chunk->chunk_hdr->type != SCTP_CID_HEARTBEAT_ACK)
 				new_transport = asoc->peer.active_path;
 		}
 
@@ -812,7 +816,7 @@ int sctp_outq_flush(struct sctp_outq *q, int rtx_timeout)
 		start_timer = 0;
 		queue = &q->out;
 
-		while ((chunk = sctp_outq_dequeue_data(q))) {
+		while ((chunk = sctp_outq_dequeue_data(q)) != NULL) {
 			/* RFC 2960 6.5 Every DATA chunk MUST carry a valid
 			 * stream identifier.
 			 */
@@ -866,7 +870,7 @@ int sctp_outq_flush(struct sctp_outq *q, int rtx_timeout)
 			SCTP_DEBUG_PRINTK("TX TSN 0x%x skb->head "
 					"%p skb->users %d.\n",
 					ntohl(chunk->subh.data_hdr->tsn),
-					chunk->skb ?chunk->skb->head : 0,
+					chunk->skb ?chunk->skb->head : NULL,
 					chunk->skb ?
 					atomic_read(&chunk->skb->users) : -1);
 
@@ -1725,6 +1729,6 @@ static void sctp_generate_fwdtsn(struct sctp_outq *q, __u32 ctsn)
 
 	if (ftsn_chunk) {
 		__skb_queue_tail(&q->control, (struct sk_buff *)ftsn_chunk);
-		SCTP_INC_STATS(SctpOutCtrlChunks);
+		SCTP_INC_STATS(SCTP_MIB_OUTCTRLCHUNKS);
 	}
 }

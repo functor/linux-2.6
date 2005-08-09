@@ -40,12 +40,6 @@
 #define OMAP730_SRAM_SIZE	(SZ_128K + SZ_64K + SZ_8K)
 #define OMAP730_SRAM_START	0x20000000
 
-#define OMAP730_MCBSP1_BASE	0xfffb1000
-#define OMAP730_MCBSP1_SIZE	(SZ_1K * 2)
-#define OMAP730_MCBSP1_START	0xfffb1000
-
-#define OMAP730_MCBSP2_BASE	0xfffb1800
-
 #define OMAP730_DSP_BASE	0xE0000000
 #define OMAP730_DSP_SIZE	0x50000
 #define OMAP730_DSP_START	0xE0000000
@@ -105,8 +99,8 @@
  * OMAP730 PCC_UPLD configuration registers
  * ----------------------------------------------------------------------------
  */
-#define OMAP730_PCC_UPLD_CTRL_REG_BASE	(0xfffe0900)
-#define OMAP730_PCC_UPLD_CTRL_REG	(OMAP730_PCC_UPLD_CTRL_REG_BASE + 0x00)
+#define OMAP730_PCC_UPLD_CTRL_BASE	(0xfffe0900)
+#define OMAP730_PCC_UPLD_CTRL		(OMAP730_PCC_UPLD_CTRL_BASE + 0x00)
 
 #endif /*  __ASM_ARCH_OMAP730_H */
 

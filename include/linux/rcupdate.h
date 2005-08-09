@@ -36,41 +36,36 @@
 #ifdef __KERNEL__
 
 #include <linux/cache.h>
-#include <linux/list.h>
 #include <linux/spinlock.h>
 #include <linux/threads.h>
 #include <linux/percpu.h>
 #include <linux/cpumask.h>
+#include <linux/seqlock.h>
 
 /**
  * struct rcu_head - callback structure for use with RCU
- * @list: list_head to queue the update requests
+ * @next: next update requests in a list
  * @func: actual update function to call after the grace period.
- * @arg: argument to be passed to the actual update function.
  */
 struct rcu_head {
-	struct list_head list;
-	void (*func)(void *obj);
-	void *arg;
+	struct rcu_head *next;
+	void (*func)(struct rcu_head *head);
 };
 
-#define RCU_HEAD_INIT(head) \
-		{ .list = LIST_HEAD_INIT(head.list), .func = NULL, .arg = NULL }
+#define RCU_HEAD_INIT(head) { .next = NULL, .func = NULL }
 #define RCU_HEAD(head) struct rcu_head head = RCU_HEAD_INIT(head)
 #define INIT_RCU_HEAD(ptr) do { \
-       INIT_LIST_HEAD(&(ptr)->list); (ptr)->func = NULL; (ptr)->arg = NULL; \
+       (ptr)->next = NULL; (ptr)->func = NULL; \
 } while (0)
 
 
 
-/* Control variables for rcupdate callback mechanism. */
+/* Global control variables for rcupdate callback mechanism. */
 struct rcu_ctrlblk {
-	spinlock_t	mutex;		/* Guard this struct                  */
-	long		curbatch;	/* Current batch number.	      */
-	long		maxbatch;	/* Max requested batch number.        */
-	cpumask_t	rcu_cpu_mask; 	/* CPUs that need to switch in order  */
-					/* for current batch to proceed.      */
-};
+	long	cur;		/* Current batch number.                      */
+	long	completed;	/* Number of the last completed batch         */
+	int	next_pending;	/* Is the next batch already waiting?         */
+} ____cacheline_maxaligned_in_smp;
 
 /* Is batch a before batch b ? */
 static inline int rcu_batch_before(long a, long b)
@@ -90,47 +85,204 @@ static inline int rcu_batch_after(long a, long b)
  * curlist - current batch for which quiescent cycle started if any
  */
 struct rcu_data {
-	long		qsctr;		 /* User-mode/idle loop etc. */
-        long            last_qsctr;	 /* value of qsctr at beginning */
-                                         /* of rcu grace period */
-        long  	       	batch;           /* Batch # for current RCU batch */
-        struct list_head  nxtlist;
-        struct list_head  curlist;
+	/* 1) quiescent state handling : */
+	long		quiescbatch;     /* Batch # for grace period */
+	int		passed_quiesc;	 /* User-mode/idle loop etc. */
+	int		qs_pending;	 /* core waits for quiesc state */
+
+	/* 2) batch handling */
+	long  	       	batch;           /* Batch # for current RCU batch */
+	struct rcu_head *nxtlist;
+	struct rcu_head **nxttail;
+	struct rcu_head *curlist;
+	struct rcu_head **curtail;
+	struct rcu_head *donelist;
+	struct rcu_head **donetail;
+	int cpu;
 };
 
 DECLARE_PER_CPU(struct rcu_data, rcu_data);
+DECLARE_PER_CPU(struct rcu_data, rcu_bh_data);
 extern struct rcu_ctrlblk rcu_ctrlblk;
+extern struct rcu_ctrlblk rcu_bh_ctrlblk;
 
-#define RCU_qsctr(cpu) 		(per_cpu(rcu_data, (cpu)).qsctr)
-#define RCU_last_qsctr(cpu) 	(per_cpu(rcu_data, (cpu)).last_qsctr)
-#define RCU_batch(cpu) 		(per_cpu(rcu_data, (cpu)).batch)
-#define RCU_nxtlist(cpu) 	(per_cpu(rcu_data, (cpu)).nxtlist)
-#define RCU_curlist(cpu) 	(per_cpu(rcu_data, (cpu)).curlist)
-
-#define RCU_QSCTR_INVALID	0
-
-static inline int rcu_pending(int cpu) 
+/*
+ * Increment the quiescent state counter.
+ * The counter is a bit degenerated: We do not need to know
+ * how many quiescent states passed, just if there was at least
+ * one since the start of the grace period. Thus just a flag.
+ */
+static inline void rcu_qsctr_inc(int cpu)
 {
-	if ((!list_empty(&RCU_curlist(cpu)) &&
-	     rcu_batch_before(RCU_batch(cpu), rcu_ctrlblk.curbatch)) ||
-	    (list_empty(&RCU_curlist(cpu)) &&
-			 !list_empty(&RCU_nxtlist(cpu))) ||
-	    cpu_isset(cpu, rcu_ctrlblk.rcu_cpu_mask))
-		return 1;
-	else
-		return 0;
+	struct rcu_data *rdp = &per_cpu(rcu_data, cpu);
+	rdp->passed_quiesc = 1;
+}
+static inline void rcu_bh_qsctr_inc(int cpu)
+{
+	struct rcu_data *rdp = &per_cpu(rcu_bh_data, cpu);
+	rdp->passed_quiesc = 1;
 }
 
+static inline int __rcu_pending(struct rcu_ctrlblk *rcp,
+						struct rcu_data *rdp)
+{
+	/* This cpu has pending rcu entries and the grace period
+	 * for them has completed.
+	 */
+	if (rdp->curlist && !rcu_batch_before(rcp->completed, rdp->batch))
+		return 1;
+
+	/* This cpu has no pending entries, but there are new entries */
+	if (!rdp->curlist && rdp->nxtlist)
+		return 1;
+
+	/* This cpu has finished callbacks to invoke */
+	if (rdp->donelist)
+		return 1;
+
+	/* The rcu core waits for a quiescent state from the cpu */
+	if (rdp->quiescbatch != rcp->cur || rdp->qs_pending)
+		return 1;
+
+	/* nothing to do */
+	return 0;
+}
+
+static inline int rcu_pending(int cpu)
+{
+	return __rcu_pending(&rcu_ctrlblk, &per_cpu(rcu_data, cpu)) ||
+		__rcu_pending(&rcu_bh_ctrlblk, &per_cpu(rcu_bh_data, cpu));
+}
+
+/**
+ * rcu_read_lock - mark the beginning of an RCU read-side critical section.
+ *
+ * When synchronize_rcu() is invoked on one CPU while other CPUs
+ * are within RCU read-side critical sections, then the
+ * synchronize_rcu() is guaranteed to block until after all the other
+ * CPUs exit their critical sections.  Similarly, if call_rcu() is invoked
+ * on one CPU while other CPUs are within RCU read-side critical
+ * sections, invocation of the corresponding RCU callback is deferred
+ * until after the all the other CPUs exit their critical sections.
+ *
+ * Note, however, that RCU callbacks are permitted to run concurrently
+ * with RCU read-side critical sections.  One way that this can happen
+ * is via the following sequence of events: (1) CPU 0 enters an RCU
+ * read-side critical section, (2) CPU 1 invokes call_rcu() to register
+ * an RCU callback, (3) CPU 0 exits the RCU read-side critical section,
+ * (4) CPU 2 enters a RCU read-side critical section, (5) the RCU
+ * callback is invoked.  This is legal, because the RCU read-side critical
+ * section that was running concurrently with the call_rcu() (and which
+ * therefore might be referencing something that the corresponding RCU
+ * callback would free up) has completed before the corresponding
+ * RCU callback is invoked.
+ *
+ * RCU read-side critical sections may be nested.  Any deferred actions
+ * will be deferred until the outermost RCU read-side critical section
+ * completes.
+ *
+ * It is illegal to block while in an RCU read-side critical section.
+ */
 #define rcu_read_lock()		preempt_disable()
+
+/**
+ * rcu_read_unlock - marks the end of an RCU read-side critical section.
+ *
+ * See rcu_read_lock() for more information.
+ */
 #define rcu_read_unlock()	preempt_enable()
+
+/*
+ * So where is rcu_write_lock()?  It does not exist, as there is no
+ * way for writers to lock out RCU readers.  This is a feature, not
+ * a bug -- this property is what provides RCU's performance benefits.
+ * Of course, writers must coordinate with each other.  The normal
+ * spinlock primitives work well for this, but any other technique may be
+ * used as well.  RCU does not care how the writers keep out of each
+ * others' way, as long as they do so.
+ */
+
+/**
+ * rcu_read_lock_bh - mark the beginning of a softirq-only RCU critical section
+ *
+ * This is equivalent of rcu_read_lock(), but to be used when updates
+ * are being done using call_rcu_bh(). Since call_rcu_bh() callbacks
+ * consider completion of a softirq handler to be a quiescent state,
+ * a process in RCU read-side critical section must be protected by
+ * disabling softirqs. Read-side critical sections in interrupt context
+ * can use just rcu_read_lock().
+ *
+ */
+#define rcu_read_lock_bh()	local_bh_disable()
+
+/*
+ * rcu_read_unlock_bh - marks the end of a softirq-only RCU critical section
+ *
+ * See rcu_read_lock_bh() for more information.
+ */
+#define rcu_read_unlock_bh()	local_bh_enable()
+
+/**
+ * rcu_dereference - fetch an RCU-protected pointer in an
+ * RCU read-side critical section.  This pointer may later
+ * be safely dereferenced.
+ *
+ * Inserts memory barriers on architectures that require them
+ * (currently only the Alpha), and, more importantly, documents
+ * exactly which pointers are protected by RCU.
+ */
+
+#define rcu_dereference(p)     ({ \
+				typeof(p) _________p1 = p; \
+				smp_read_barrier_depends(); \
+				(_________p1); \
+				})
+
+/**
+ * rcu_assign_pointer - assign (publicize) a pointer to a newly
+ * initialized structure that will be dereferenced by RCU read-side
+ * critical sections.  Returns the value assigned.
+ *
+ * Inserts memory barriers on architectures that require them
+ * (pretty much all of them other than x86), and also prevents
+ * the compiler from reordering the code that initializes the
+ * structure after the pointer assignment.  More importantly, this
+ * call documents which pointers will be dereferenced by RCU read-side
+ * code.
+ */
+
+#define rcu_assign_pointer(p, v)	({ \
+						smp_wmb(); \
+						(p) = (v); \
+					})
+
+/**
+ * synchronize_sched - block until all CPUs have exited any non-preemptive
+ * kernel code sequences.
+ *
+ * This means that all preempt_disable code sequences, including NMI and
+ * hardware-interrupt handlers, in progress on entry will have completed
+ * before this primitive returns.  However, this does not guarantee that
+ * softirq handlers will have completed, since in some kernels
+ *
+ * This primitive provides the guarantees made by the (deprecated)
+ * synchronize_kernel() API.  In contrast, synchronize_rcu() only
+ * guarantees that rcu_read_lock() sections will have completed.
+ */
+#define synchronize_sched() synchronize_rcu()
 
 extern void rcu_init(void);
 extern void rcu_check_callbacks(int cpu, int user);
+extern void rcu_restart_cpu(int cpu);
 
 /* Exported interfaces */
 extern void FASTCALL(call_rcu(struct rcu_head *head, 
-                          void (*func)(void *arg), void *arg));
-extern void synchronize_kernel(void);
+				void (*func)(struct rcu_head *head)));
+extern void FASTCALL(call_rcu_bh(struct rcu_head *head,
+				void (*func)(struct rcu_head *head)));
+extern __deprecated_for_modules void synchronize_kernel(void);
+extern void synchronize_rcu(void);
+void synchronize_idle(void);
 
 #endif /* __KERNEL__ */
 #endif /* __LINUX_RCUPDATE_H */

@@ -38,9 +38,6 @@ static volatile u32 *intc;
 #define intc_in_be32(addr)            mfdcr((addr))
 #endif
 
-/* Global Variables */
-struct hw_interrupt_type *ppc4xx_pic;
-
 static void
 xilinx_intc_enable(unsigned int irq)
 {
@@ -115,6 +112,16 @@ xilinx_pic_get_irq(struct pt_regs *regs)
 void __init
 ppc4xx_pic_init(void)
 {
+	int i;
+
+	/*
+	 * NOTE: The assumption here is that NR_IRQS is 32 or less
+	 * (NR_IRQS is 32 for PowerPC 405 cores by default).
+	 */
+#if (NR_IRQS > 32)
+#error NR_IRQS > 32 not supported
+#endif
+
 #if XPAR_XINTC_USE_DCR == 0
 	intc = ioremap(XPAR_INTC_0_BASEADDR, 32);
 
@@ -137,6 +144,14 @@ ppc4xx_pic_init(void)
 	/* Turn on the Master Enable. */
 	intc_out_be32(intc + MER, 0x3UL);
 
-	ppc4xx_pic = &xilinx_intc;
 	ppc_md.get_irq = xilinx_pic_get_irq;
+
+	for (i = 0; i < NR_IRQS; ++i) {
+		irq_desc[i].handler = &xilinx_intc;
+
+		if (XPAR_INTC_0_KIND_OF_INTR & (0x00000001 << i))
+			irq_desc[i].status &= ~IRQ_LEVEL;
+		else
+			irq_desc[i].status |= IRQ_LEVEL;
+	}
 }

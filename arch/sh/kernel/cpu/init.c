@@ -24,8 +24,8 @@ extern void detect_cpu_and_cache_system(void);
  * Generic wrapper for command line arguments to disable on-chip
  * peripherals (nofpu, nodsp, and so forth).
  */
-#define onchip_setup(x) 			\
-static int x##_disabled __initdata = 0; 	\
+#define onchip_setup(x)				\
+static int x##_disabled __initdata = 0;		\
 						\
 static int __init x##_setup(char *opts)		\
 {						\
@@ -42,7 +42,7 @@ onchip_setup(dsp);
  */
 static void __init cache_init(void)
 {
-	unsigned long ccr, flags = 0;
+	unsigned long ccr, flags;
 
 	if (cpu_data->type == CPU_SH_NONE)
 		panic("Unknown CPU");
@@ -54,42 +54,50 @@ static void __init cache_init(void)
 	 * If the cache is already enabled .. flush it.
 	 */
 	if (ccr & CCR_CACHE_ENABLE) {
-		unsigned long entries, i, j;
+		unsigned long ways, waysize, addrstart;
 
-		entries = cpu_data->dcache.sets;
+		waysize = cpu_data->dcache.sets;
 
 		/*
 		 * If the OC is already in RAM mode, we only have
 		 * half of the entries to flush..
 		 */
 		if (ccr & CCR_CACHE_ORA)
-			entries >>= 1;
+			waysize >>= 1;
 
-		for (i = 0; i < entries; i++) {
-			for (j = 0; j < cpu_data->dcache.ways; j++) {
-				unsigned long data, addr;
+		waysize <<= cpu_data->dcache.entry_shift;
 
-				addr = CACHE_OC_ADDRESS_ARRAY |
-					(j << cpu_data->dcache.way_shift) |
-					(i << cpu_data->dcache.entry_shift);
+#ifdef CCR_CACHE_EMODE
+		/* If EMODE is not set, we only have 1 way to flush. */
+		if (!(ccr & CCR_CACHE_EMODE))
+			ways = 1;
+		else
+#endif
+			ways = cpu_data->dcache.ways;
 
-				data = ctrl_inl(addr);
+		addrstart = CACHE_OC_ADDRESS_ARRAY;
+		do {
+			unsigned long addr;
 
-				if ((data & (SH_CACHE_UPDATED | SH_CACHE_VALID))
-					== (SH_CACHE_UPDATED | SH_CACHE_VALID))
-					ctrl_outl(data & ~SH_CACHE_UPDATED, addr);
-			}
-		}
+			for (addr = addrstart;
+			     addr < addrstart + waysize;
+			     addr += cpu_data->dcache.linesz)
+				ctrl_outl(0, addr);
+
+			addrstart += cpu_data->dcache.way_incr;
+		} while (--ways);
 	}
 
-	/* 
+	/*
 	 * Default CCR values .. enable the caches
-	 * and flush them immediately..
+	 * and invalidate them immediately..
 	 */
-	flags |= CCR_CACHE_ENABLE | CCR_CACHE_INVALIDATE;
-	
+	flags = CCR_CACHE_ENABLE | CCR_CACHE_INVALIDATE;
+
 #ifdef CCR_CACHE_EMODE
-	flags |= (ccr & CCR_CACHE_EMODE);
+	/* Force EMODE if possible */
+	if (cpu_data->dcache.ways > 1)
+		flags |= CCR_CACHE_EMODE;
 #endif
 
 #ifdef CONFIG_SH_WRITETHROUGH
@@ -145,14 +153,14 @@ static void __init dsp_init(void)
 
 	/* If the DSP bit is still set, this CPU has a DSP */
 	if (sr & SR_DSP)
-		set_bit(CPU_HAS_DSP, &(cpu_data->flags));
-	
+		cpu_data->flags |= CPU_HAS_DSP;
+
 	/* Now that we've determined the DSP status, clear the DSP bit. */
 	release_dsp();
 }
 #endif /* CONFIG_SH_DSP */
 
-/*
+/**
  * sh_cpu_init
  *
  * This is our initial entry point for each CPU, and is invoked on the boot
@@ -184,15 +192,15 @@ asmlinkage void __init sh_cpu_init(void)
 	}
 
 	/* FPU initialization */
-	if (test_bit(CPU_HAS_FPU, &(cpu_data->flags))) {
+	if ((cpu_data->flags & CPU_HAS_FPU)) {
 		clear_thread_flag(TIF_USEDFPU);
-		current->used_math = 0;
+		clear_used_math();
 	}
 
 #ifdef CONFIG_SH_DSP
 	/* Probe for DSP */
 	dsp_init();
-	
+
 	/* Disable the DSP */
 	if (dsp_disabled) {
 		printk("DSP Disabled\n");

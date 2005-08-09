@@ -48,6 +48,8 @@
 #include <net/addrconf.h>
 #include <net/ip6_tunnel.h>
 #include <net/xfrm.h>
+#include <net/dsfield.h>
+#include <net/inet_ecn.h>
 
 MODULE_AUTHOR("Ville Nuorvala");
 MODULE_DESCRIPTION("IPv6-in-IPv6 tunnel");
@@ -83,7 +85,7 @@ static struct ip6_tnl *tnls_wc[1];
 static struct ip6_tnl **tnls[2] = { tnls_wc, tnls_r_l };
 
 /* lock for the tunnel lists */
-static rwlock_t ip6ip6_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(ip6ip6_lock);
 
 static inline struct dst_entry *ip6_tnl_dst_check(struct ip6_tnl *t)
 {
@@ -92,6 +94,7 @@ static inline struct dst_entry *ip6_tnl_dst_check(struct ip6_tnl *t)
 	if (dst && dst->obsolete && 
 	    dst->ops->check(dst, t->dst_cookie) == NULL) {
 		t->dst_cache = NULL;
+		dst_release(dst);
 		return NULL;
 	}
 
@@ -123,7 +126,7 @@ static inline void ip6_tnl_dst_store(struct ip6_tnl *t, struct dst_entry *dst)
  *   else %NULL
  **/
 
-struct ip6_tnl *
+static struct ip6_tnl *
 ip6ip6_tnl_lookup(struct in6_addr *remote, struct in6_addr *local)
 {
 	unsigned h0 = HASH(remote);
@@ -131,8 +134,8 @@ ip6ip6_tnl_lookup(struct in6_addr *remote, struct in6_addr *local)
 	struct ip6_tnl *t;
 
 	for (t = tnls_r_l[h0 ^ h1]; t; t = t->next) {
-		if (!ipv6_addr_cmp(local, &t->parms.laddr) &&
-		    !ipv6_addr_cmp(remote, &t->parms.raddr) &&
+		if (ipv6_addr_equal(local, &t->parms.laddr) &&
+		    ipv6_addr_equal(remote, &t->parms.raddr) &&
 		    (t->dev->flags & IFF_UP))
 			return t;
 	}
@@ -178,10 +181,10 @@ ip6ip6_tnl_link(struct ip6_tnl *t)
 {
 	struct ip6_tnl **tp = ip6ip6_bucket(&t->parms);
 
-	write_lock_bh(&ip6ip6_lock);
 	t->next = *tp;
-	write_unlock_bh(&ip6ip6_lock);
+	write_lock_bh(&ip6ip6_lock);
 	*tp = t;
+	write_unlock_bh(&ip6ip6_lock);
 }
 
 /**
@@ -282,8 +285,8 @@ ip6ip6_tnl_locate(struct ip6_tnl_parm *p, struct ip6_tnl **pt, int create)
 		return -EINVAL;
 
 	for (t = *ip6ip6_bucket(p); t; t = t->next) {
-		if (!ipv6_addr_cmp(local, &t->parms.laddr) &&
-		    !ipv6_addr_cmp(remote, &t->parms.raddr)) {
+		if (ipv6_addr_equal(local, &t->parms.laddr) &&
+		    ipv6_addr_equal(remote, &t->parms.raddr)) {
 			*pt = t;
 			return (create ? -EEXIST : 0);
 		}
@@ -387,8 +390,9 @@ parse_tlv_tnl_enc_lim(struct sk_buff *skb, __u8 * raw)
  *   to the specifications in RFC 2473.
  **/
 
-void ip6ip6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
-		   int type, int code, int offset, __u32 info)
+static void 
+ip6ip6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
+	   int type, int code, int offset, __u32 info)
 {
 	struct ipv6hdr *ipv6h = (struct ipv6hdr *) skb->data;
 	struct ip6_tnl *t;
@@ -489,6 +493,15 @@ out:
 	read_unlock(&ip6ip6_lock);
 }
 
+static inline void ip6ip6_ecn_decapsulate(struct ipv6hdr *outer_iph,
+					  struct sk_buff *skb)
+{
+	struct ipv6hdr *inner_iph = skb->nh.ipv6h;
+
+	if (INET_ECN_is_ce(ipv6_get_dsfield(outer_iph)))
+		IP6_ECN_set_ce(inner_iph);
+}
+
 /**
  * ip6ip6_rcv - decapsulate IPv6 packet and retransmit it locally
  *   @skb: received socket buffer
@@ -496,7 +509,8 @@ out:
  * Return: 0
  **/
 
-int ip6ip6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
+static int 
+ip6ip6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 {
 	struct sk_buff *skb = *pskb;
 	struct ipv6hdr *ipv6h;
@@ -510,6 +524,11 @@ int ip6ip6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 	read_lock(&ip6ip6_lock);
 
 	if ((t = ip6ip6_tnl_lookup(&ipv6h->saddr, &ipv6h->daddr)) != NULL) {
+		if (!xfrm6_policy_check(NULL, XFRM_POLICY_IN, skb)) {
+			kfree_skb(skb);
+			return 0;
+		}
+
 		if (!(t->parms.flags & IP6_TNL_F_CAP_RCV)) {
 			t->stat.rx_dropped++;
 			read_unlock(&ip6ip6_lock);
@@ -524,6 +543,9 @@ int ip6ip6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 		skb->dev = t->dev;
 		dst_release(skb->dst);
 		skb->dst = NULL;
+		if (t->parms.flags & IP6_TNL_F_RCV_DSCP_COPY)
+			ipv6_copy_dscp(ipv6h, skb->nh.ipv6h);
+		ip6ip6_ecn_decapsulate(ipv6h, skb);
 		t->stat.rx_packets++;
 		t->stat.rx_bytes += skb->len;
 		netif_rx(skb);
@@ -533,8 +555,7 @@ int ip6ip6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 	read_unlock(&ip6ip6_lock);
 	icmpv6_send(skb, ICMPV6_DEST_UNREACH, ICMPV6_ADDR_UNREACH, 0, skb->dev);
 discard:
-	kfree_skb(skb);
-	return 0;
+	return 1;
 }
 
 static inline struct ipv6_txoptions *create_tel(__u8 encap_limit)
@@ -582,7 +603,7 @@ static inline struct ipv6_txoptions *create_tel(__u8 encap_limit)
 static inline int
 ip6ip6_tnl_addr_conflict(struct ip6_tnl *t, struct ipv6hdr *hdr)
 {
-	return !ipv6_addr_cmp(&t->parms.raddr, &hdr->saddr);
+	return ipv6_addr_equal(&t->parms.raddr, &hdr->saddr);
 }
 
 /**
@@ -598,7 +619,8 @@ ip6ip6_tnl_addr_conflict(struct ip6_tnl *t, struct ipv6hdr *hdr)
  *   0
  **/
 
-int ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
+static int 
+ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ip6_tnl *t = (struct ip6_tnl *) dev->priv;
 	struct net_device_stats *stats = &t->stat;
@@ -614,6 +636,7 @@ int ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 	u8 proto;
 	int err;
 	int pkt_len;
+	int dsfield;
 
 	if (t->recursion++) {
 		stats->collisions++;
@@ -639,6 +662,7 @@ int ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 	memcpy(&fl, &t->fl, sizeof (fl));
 	proto = fl.proto;
 
+	dsfield = ipv6_get_dsfield(ipv6h);
 	if ((t->parms.flags & IP6_TNL_F_USE_ORIG_TCLASS))
 		fl.fl6_flowlabel |= (*(__u32 *) ipv6h & IPV6_TCLASS_MASK);
 	if ((t->parms.flags & IP6_TNL_F_USE_ORIG_FLOWLABEL))
@@ -665,14 +689,14 @@ int ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 			       t->parms.name);
 		goto tx_err_dst_release;
 	}
-	mtu = dst_pmtu(dst) - sizeof (*ipv6h);
+	mtu = dst_mtu(dst) - sizeof (*ipv6h);
 	if (opt) {
 		max_headroom += 8;
 		mtu -= 8;
 	}
 	if (mtu < IPV6_MIN_MTU)
 		mtu = IPV6_MIN_MTU;
-	if (skb->dst && mtu < dst_pmtu(skb->dst)) {
+	if (skb->dst && mtu < dst_mtu(skb->dst)) {
 		struct rt6_info *rt = (struct rt6_info *) skb->dst;
 		rt->rt6i_flags |= RTF_MODIFIED;
 		rt->u.dst.metrics[RTAX_MTU-1] = mtu;
@@ -710,18 +734,14 @@ int ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 	skb->nh.raw = skb_push(skb, sizeof(struct ipv6hdr));
 	ipv6h = skb->nh.ipv6h;
 	*(u32*)ipv6h = fl.fl6_flowlabel | htonl(0x60000000);
+	dsfield = INET_ECN_encapsulate(0, dsfield);
+	ipv6_change_dsfield(ipv6h, ~INET_ECN_MASK, dsfield);
 	ipv6h->payload_len = htons(skb->len - sizeof(struct ipv6hdr));
 	ipv6h->hop_limit = t->parms.hop_limit;
 	ipv6h->nexthdr = proto;
 	ipv6_addr_copy(&ipv6h->saddr, &fl.fl6_src);
 	ipv6_addr_copy(&ipv6h->daddr, &fl.fl6_dst);
-#ifdef CONFIG_NETFILTER
-	nf_conntrack_put(skb->nfct);
-	skb->nfct = NULL;
-#ifdef CONFIG_NETFILTER_DEBUG
-	skb->nf_debug = 0;
-#endif
-#endif
+	nf_reset(skb);
 	pkt_len = skb->len;
 	err = NF_HOOK(PF_INET6, NF_IP6_LOCAL_OUT, skb, NULL, 
 		      skb->dst->dev, dst_output);
@@ -862,6 +882,7 @@ ip6ip6_tnl_change(struct ip6_tnl *t, struct ip6_tnl_parm *p)
 	t->parms.hop_limit = p->hop_limit;
 	t->parms.encap_limit = p->encap_limit;
 	t->parms.flowinfo = p->flowinfo;
+	t->parms.link = p->link;
 	ip6ip6_tnl_link_config(t);
 	return 0;
 }
@@ -1079,7 +1100,8 @@ ip6ip6_tnl_dev_init(struct net_device *dev)
  * Return: 0
  **/
 
-int ip6ip6_fb_tnl_dev_init(struct net_device *dev)
+static int 
+ip6ip6_fb_tnl_dev_init(struct net_device *dev)
 {
 	struct ip6_tnl *t = dev->priv;
 	ip6ip6_tnl_dev_init_gen(dev);
@@ -1088,10 +1110,9 @@ int ip6ip6_fb_tnl_dev_init(struct net_device *dev)
 	return 0;
 }
 
-static struct inet6_protocol ip6ip6_protocol = {
+static struct xfrm6_tunnel ip6ip6_handler = {
 	.handler = ip6ip6_rcv,
 	.err_handler = ip6ip6_err,
-	.flags = INET6_PROTO_FINAL
 };
 
 /**
@@ -1104,9 +1125,9 @@ static int __init ip6_tunnel_init(void)
 {
 	int  err;
 
-	if ((err = inet6_add_protocol(&ip6ip6_protocol, IPPROTO_IPV6)) < 0) {
-		printk(KERN_ERR "Failed to register IPv6 protocol\n");
-		return err;
+	if (xfrm6_tunnel_register(&ip6ip6_handler) < 0) {
+		printk(KERN_ERR "ip6ip6 init: can't register tunnel\n");
+		return -EAGAIN;
 	}
 	ip6ip6_fb_tnl_dev = alloc_netdev(sizeof(struct ip6_tnl), "ip6tnl0",
 					 ip6ip6_tnl_dev_setup);
@@ -1123,7 +1144,7 @@ static int __init ip6_tunnel_init(void)
 	}
 	return 0;
 fail:
-	inet6_del_protocol(&ip6ip6_protocol, IPPROTO_IPV6);
+	xfrm6_tunnel_deregister(&ip6ip6_handler);
 	return err;
 }
 
@@ -1133,8 +1154,10 @@ fail:
 
 static void __exit ip6_tunnel_cleanup(void)
 {
+	if (xfrm6_tunnel_deregister(&ip6ip6_handler) < 0)
+		printk(KERN_INFO "ip6ip6 close: can't deregister tunnel\n");
+
 	unregister_netdev(ip6ip6_fb_tnl_dev);
-	inet6_del_protocol(&ip6ip6_protocol, IPPROTO_IPV6);
 }
 
 module_init(ip6_tunnel_init);

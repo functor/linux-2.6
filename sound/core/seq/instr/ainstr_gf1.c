@@ -30,10 +30,6 @@
 MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Advanced Linux Sound Architecture GF1 (GUS) Patch support.");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_SUPPORTED_DEVICE("sound");
-
-char *snd_seq_gf1_id = SNDRV_SEQ_INSTR_ID_GUS_PATCH;
 
 static unsigned int snd_seq_gf1_size(unsigned int size, unsigned int format)
 {
@@ -48,7 +44,7 @@ static unsigned int snd_seq_gf1_size(unsigned int size, unsigned int format)
 
 static int snd_seq_gf1_copy_wave_from_stream(snd_gf1_ops_t *ops,
 					     gf1_instrument_t *ip,
-					     char **data,
+					     char __user **data,
 					     long *len,
 					     int atomic)
 {
@@ -64,7 +60,7 @@ static int snd_seq_gf1_copy_wave_from_stream(snd_gf1_ops_t *ops,
 		return -EFAULT;
 	*data += sizeof(xp);
 	*len -= sizeof(xp);
-	wp = (gf1_wave_t *)snd_kcalloc(sizeof(*wp), gfp_mask);
+	wp = kcalloc(1, sizeof(*wp), gfp_mask);
 	if (wp == NULL)
 		return -ENOMEM;
 	wp->share_id[0] = le32_to_cpu(xp.share_id[0]);
@@ -141,7 +137,8 @@ static void snd_seq_gf1_instr_free(snd_gf1_ops_t *ops,
 }
 
 static int snd_seq_gf1_put(void *private_data, snd_seq_kinstr_t *instr,
-			   char *instr_data, long len, int atomic, int cmd)
+			   char __user *instr_data, long len, int atomic,
+			   int cmd)
 {
 	snd_gf1_ops_t *ops = (snd_gf1_ops_t *)private_data;
 	gf1_instrument_t *ip;
@@ -192,7 +189,7 @@ static int snd_seq_gf1_put(void *private_data, snd_seq_kinstr_t *instr,
 
 static int snd_seq_gf1_copy_wave_to_stream(snd_gf1_ops_t *ops,
 					   gf1_instrument_t *ip,
-					   char **data,
+					   char __user **data,
 					   long *len,
 					   int atomic)
 {
@@ -253,7 +250,8 @@ static int snd_seq_gf1_copy_wave_to_stream(snd_gf1_ops_t *ops,
 }
 
 static int snd_seq_gf1_get(void *private_data, snd_seq_kinstr_t *instr,
-			   char *instr_data, long len, int atomic, int cmd)
+			   char __user *instr_data, long len, int atomic,
+			   int cmd)
 {
 	snd_gf1_ops_t *ops = (snd_gf1_ops_t *)private_data;
 	gf1_instrument_t *ip;
@@ -331,7 +329,7 @@ int snd_seq_gf1_init(snd_gf1_ops_t *ops,
 	ops->private_data = private_data;
 	ops->kops.private_data = ops;
 	ops->kops.add_len = sizeof(gf1_instrument_t);
-	ops->kops.instr_type = snd_seq_gf1_id;
+	ops->kops.instr_type = SNDRV_SEQ_INSTR_ID_GUS_PATCH;
 	ops->kops.put = snd_seq_gf1_put;
 	ops->kops.get = snd_seq_gf1_get;
 	ops->kops.get_size = snd_seq_gf1_get_size;
@@ -357,5 +355,4 @@ static void __exit alsa_ainstr_gf1_exit(void)
 module_init(alsa_ainstr_gf1_init)
 module_exit(alsa_ainstr_gf1_exit)
 
-EXPORT_SYMBOL(snd_seq_gf1_id);
 EXPORT_SYMBOL(snd_seq_gf1_init);

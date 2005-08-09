@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004 Silicon Graphics, Inc.  All Rights Reserved.
+ * Copyright (c) 2004-2005 Silicon Graphics, Inc.  All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -30,12 +30,5 @@
  * http://oss.sgi.com/projects/GenInfo/SGIGPLNoticeExplan/
  */
 
-#include <linux/config.h>
-
-#ifdef CONFIG_COMPAT
-extern int xfs_ioctl32_init(void);
-extern void xfs_ioctl32_exit(void);
-#else
-static inline int xfs_ioctl32_init(void) { return 0; }
-static inline void xfs_ioctl32_exit(void) { }
-#endif
+long linvfs_compat_ioctl(struct file *f, unsigned cmd, unsigned long arg);
+long linvfs_compat_invis_ioctl(struct file *f, unsigned cmd, unsigned long arg);

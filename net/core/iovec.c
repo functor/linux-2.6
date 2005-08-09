@@ -33,7 +33,7 @@
  *	Verify iovec. The caller must ensure that the iovec is big enough
  *	to hold the message iovec.
  *
- *	Save time not doing verify_area. copy_*_user will make this work
+ *	Save time not doing access_ok. copy_*_user will make this work
  *	in any case.
  */
 
@@ -99,28 +99,6 @@ int memcpy_toiovec(struct iovec *iov, unsigned char *kdata, int len)
 }
 
 /*
- *	In kernel copy to iovec. Returns -EFAULT on error.
- *
- *	Note: this modifies the original iovec.
- */
- 
-void memcpy_tokerneliovec(struct iovec *iov, unsigned char *kdata, int len)
-{
-	while (len > 0) {
-		if (iov->iov_len) {
-			int copy = min_t(unsigned int, iov->iov_len, len);
-			memcpy(iov->iov_base, kdata, copy);
-			kdata += copy;
-			len -= copy;
-			iov->iov_len -= copy;
-			iov->iov_base += copy;
-		}
-		iov++;
-	}
-}
-
-
-/*
  *	Copy iovec to kernel. Returns -EFAULT on error.
  *
  *	Note: this modifies the original iovec.
@@ -157,7 +135,7 @@ int memcpy_fromiovecend(unsigned char *kdata, struct iovec *iov, int offset,
 	}
 
 	while (len > 0) {
-		u8 *base = iov->iov_base + offset;
+		u8 __user *base = iov->iov_base + offset;
 		int copy = min_t(unsigned int, len, iov->iov_len - offset);
 
 		offset = 0;
@@ -192,7 +170,7 @@ int csum_partial_copy_fromiovecend(unsigned char *kdata, struct iovec *iov,
 	}
 
 	while (len > 0) {
-		u8 *base = iov->iov_base + offset;
+		u8 __user *base = iov->iov_base + offset;
 		int copy = min_t(unsigned int, len, iov->iov_len - offset);
 
 		offset = 0;
@@ -259,4 +237,3 @@ EXPORT_SYMBOL(csum_partial_copy_fromiovecend);
 EXPORT_SYMBOL(memcpy_fromiovec);
 EXPORT_SYMBOL(memcpy_fromiovecend);
 EXPORT_SYMBOL(memcpy_toiovec);
-EXPORT_SYMBOL(memcpy_tokerneliovec);

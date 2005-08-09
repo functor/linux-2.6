@@ -231,8 +231,12 @@ takara_swizzle(struct pci_dev *dev, u8 *pinp)
 	int slot = PCI_SLOT(dev->devfn);
 	int pin = *pinp;
 	unsigned int ctlreg = inl(0x500);
-	unsigned int busslot = PCI_SLOT(dev->bus->self->devfn);
+	unsigned int busslot;
 
+	if (!dev->bus->self)
+		return slot;
+
+	busslot = PCI_SLOT(dev->bus->self->devfn);
 	/* Check for built-in bridges.  */
 	if (dev->bus->number != 0
 	    && busslot > 16
@@ -273,7 +277,6 @@ struct alpha_machine_vector takara_mv __initmv = {
 	DO_EV5_MMU,
 	DO_DEFAULT_RTC,
 	DO_CIA_IO,
-	DO_CIA_BUS,
 	.machine_check		= cia_machine_check,
 	.max_isa_dma_address	= ALPHA_MAX_ISA_DMA_ADDRESS,
 	.min_io_address		= DEFAULT_IO_BASE,

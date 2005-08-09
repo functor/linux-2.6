@@ -61,7 +61,7 @@ static int alloc_ldt(mm_context_t *pc, int mincount, int reload)
 		load_LDT(pc);
 		mask = cpumask_of_cpu(smp_processor_id());
 		if (!cpus_equal(current->mm->cpu_vm_mask, mask))
-			smp_call_function(flush_ldt, 0, 1, 1);
+			smp_call_function(flush_ldt, NULL, 1, 1);
 		preempt_enable();
 #else
 		load_LDT(pc);
@@ -142,12 +142,17 @@ static int read_ldt(void __user * ptr, unsigned long bytecount)
 		err = -EFAULT;
 	up(&mm->context.sem);
 	if (err < 0)
-		return err;
+		goto error_return;
 	if (size != bytecount) {
 		/* zero-fill the rest */
-		clear_user(ptr+size, bytecount-size);
+		if (clear_user(ptr+size, bytecount-size) != 0) {
+			err = -EFAULT;
+			goto error_return;
+		}
 	}
 	return bytecount;
+error_return:
+	return err;
 }
 
 static int read_default_ldt(void __user * ptr, unsigned long bytecount)

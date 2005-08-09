@@ -60,14 +60,19 @@ struct pt_regs {
 
 #ifdef __KERNEL__
 
+#include <linux/linkage.h>
+
 /*
  * Does the process account for user or for system time?
  */
 #define user_mode(regs) (((regs)->cp0_status & KU_MASK) == KU_USER)
 
 #define instruction_pointer(regs) ((regs)->cp0_epc)
+#define profile_pc(regs) instruction_pointer(regs)
 
 extern void show_regs(struct pt_regs *);
+
+extern asmlinkage void do_syscall_trace(struct pt_regs *regs, int entryexit);
 
 #endif
 

@@ -17,7 +17,7 @@
  *	Fixes
  *		Felix Koop	:	NR_CPUS used properly
  *		Jose Renau	:	Handle single CPU case.
- *		Alan Cox	:	By repeated request 8) - Total BogoMIP report.
+ *		Alan Cox	:	By repeated request 8) - Total BogoMIPS report.
  *		Greg Wright	:	Fix for kernel stacks panic.
  *		Erich Boleyn	:	MP v1.4 and additional changes.
  *	Matthias Sattler	:	Changes for 2.1 kernel map.
@@ -39,6 +39,7 @@
 #include <linux/kernel.h>
 
 #include <linux/mm.h>
+#include <linux/sched.h>
 #include <linux/kernel_stat.h>
 #include <linux/smp_lock.h>
 #include <linux/irq.h>
@@ -46,7 +47,6 @@
 
 #include <linux/delay.h>
 #include <linux/mc146818rtc.h>
-#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm/desc.h>
 #include <asm/arch_hooks.h>
@@ -61,19 +61,23 @@ static int __initdata smp_b_stepping;
 /* Number of siblings per CPU package */
 int smp_num_siblings = 1;
 int phys_proc_id[NR_CPUS]; /* Package ID of each logical CPU */
+EXPORT_SYMBOL(phys_proc_id);
+int cpu_core_id[NR_CPUS]; /* Core ID of each logical CPU */
+EXPORT_SYMBOL(cpu_core_id);
 
 /* bitmap of online cpus */
 cpumask_t cpu_online_map;
 
-static cpumask_t cpu_callin_map;
+cpumask_t cpu_callin_map;
 cpumask_t cpu_callout_map;
 static cpumask_t smp_commenced_mask;
 
 /* Per CPU bogomips and other parameters */
 struct cpuinfo_x86 cpu_data[NR_CPUS] __cacheline_aligned;
 
-/* Set when the idlers are all forked */
-int smp_threads_ready;
+u8 x86_cpu_to_apicid[NR_CPUS] =
+			{ [0 ... NR_CPUS-1] = 0xff };
+EXPORT_SYMBOL(x86_cpu_to_apicid);
 
 /*
  * Trampoline 80x86 program as an array.
@@ -82,6 +86,9 @@ int smp_threads_ready;
 extern unsigned char trampoline_data [];
 extern unsigned char trampoline_end  [];
 static unsigned char *trampoline_base;
+static int trampoline_exec;
+
+static void map_cpu_to_logical_apicid(void);
 
 /*
  * Currently trivial. Write the real->protected mode
@@ -108,6 +115,10 @@ void __init smp_alloc_memory(void)
 	 */
 	if (__pa(trampoline_base) >= 0x9F000)
 		BUG();
+	/*
+	 * Make the SMP trampoline executable:
+	 */
+	trampoline_exec = set_kernel_exec((unsigned long)trampoline_base, 1);
 }
 
 /*
@@ -182,34 +193,6 @@ static unsigned long long tsc_values[NR_CPUS];
 
 #define NR_LOOPS 5
 
-/*
- * accurate 64-bit/32-bit division, expanded to 32-bit divisions and 64-bit
- * multiplication. Not terribly optimized but we need it at boot time only
- * anyway.
- *
- * result == a / b
- *	== (a1 + a2*(2^32)) / b
- *	== a1/b + a2*(2^32/b)
- *	== a1/b + a2*((2^32-1)/b) + a2/b + (a2*((2^32-1) % b))/b
- *		    ^---- (this multiplication can overflow)
- */
-
-static unsigned long long __init div64 (unsigned long long a, unsigned long b0)
-{
-	unsigned int a1, a2;
-	unsigned long long res;
-
-	a1 = ((unsigned int*)&a)[0];
-	a2 = ((unsigned int*)&a)[1];
-
-	res = a1/b0 +
-		(unsigned long long)a2 * (unsigned long long)(0xffffffff/b0) +
-		a2 / b0 +
-		(a2 * (0xffffffff % b0)) / b0;
-
-	return res;
-}
-
 static void __init synchronize_tsc_bp (void)
 {
 	int i;
@@ -219,7 +202,7 @@ static void __init synchronize_tsc_bp (void)
 	unsigned long one_usec;
 	int buggy = 0;
 
-	printk("checking TSC synchronization across %u CPUs: ", num_booting_cpus());
+	printk(KERN_INFO "checking TSC synchronization across %u CPUs: ", num_booting_cpus());
 
 	/* convert from kcyc/sec to cyc/usec */
 	one_usec = cpu_khz / 1000;
@@ -274,7 +257,8 @@ static void __init synchronize_tsc_bp (void)
 			sum += t0;
 		}
 	}
-	avg = div64(sum, num_booting_cpus());
+	avg = sum;
+	do_div(avg, num_booting_cpus());
 
 	sum = 0;
 	for (i = 0; i < NR_CPUS; i++) {
@@ -292,18 +276,18 @@ static void __init synchronize_tsc_bp (void)
 				buggy = 1;
 				printk("\n");
 			}
-			realdelta = div64(delta, one_usec);
+			realdelta = delta;
+			do_div(realdelta, one_usec);
 			if (tsc_values[i] < avg)
 				realdelta = -realdelta;
 
-			printk("BIOS BUG: CPU#%d improperly initialized, has %ld usecs TSC skew! FIXED.\n", i, realdelta);
+			printk(KERN_INFO "CPU#%d had %ld usecs TSC skew, fixed it up.\n", i, realdelta);
 		}
 
 		sum += delta;
 	}
 	if (!buggy)
 		printk("passed.\n");
-		;
 }
 
 static void __init synchronize_tsc_ap (void)
@@ -336,7 +320,7 @@ extern void calibrate_delay(void);
 
 static atomic_t init_deasserted;
 
-void __init smp_callin(void)
+static void __init smp_callin(void)
 {
 	int cpuid, phys_id;
 	unsigned long timeout;
@@ -400,8 +384,6 @@ void __init smp_callin(void)
 	setup_local_APIC();
 	map_cpu_to_logical_apicid();
 
-	local_irq_enable();
-
 	/*
 	 * Get our bogomips.
 	 */
@@ -414,7 +396,7 @@ void __init smp_callin(void)
  	smp_store_cpu_info(cpuid);
 
 	disable_APIC_timer();
-	local_irq_disable();
+
 	/*
 	 * Allow the master to continue.
 	 */
@@ -427,14 +409,12 @@ void __init smp_callin(void)
 		synchronize_tsc_ap();
 }
 
-int cpucount;
-
-extern int cpu_idle(void);
+static int cpucount;
 
 /*
  * Activate a secondary processor.
  */
-int __init start_secondary(void *unused)
+static void __init start_secondary(void *unused)
 {
 	/*
 	 * Dont put anything before smp_callin(), SMP
@@ -458,8 +438,12 @@ int __init start_secondary(void *unused)
 	 */
 	local_flush_tlb();
 	cpu_set(smp_processor_id(), cpu_online_map);
+
+	/* We can take interrupts now: we're officially "up". */
+	local_irq_enable();
+
 	wmb();
-	return cpu_idle();
+	cpu_idle();
 }
 
 /*
@@ -486,16 +470,6 @@ extern struct {
 	void * esp;
 	unsigned short ss;
 } stack_start;
-
-static struct task_struct * __init fork_by_hand(void)
-{
-	struct pt_regs regs;
-	/*
-	 * don't care about the eip and regs settings since
-	 * we'll never reschedule the forked task.
-	 */
-	return copy_process(CLONE_VM|CLONE_IDLETASK, 0, &regs, 0, NULL, NULL);
-}
 
 #ifdef CONFIG_NUMA
 
@@ -533,7 +507,7 @@ static inline void unmap_cpu_to_node(int cpu)
 
 u8 cpu_2_logical_apicid[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
 
-void map_cpu_to_logical_apicid(void)
+static void map_cpu_to_logical_apicid(void)
 {
 	int cpu = smp_processor_id();
 	int apicid = logical_smp_processor_id();
@@ -542,7 +516,7 @@ void map_cpu_to_logical_apicid(void)
 	map_cpu_to_node(cpu, apicid_to_node(apicid));
 }
 
-void unmap_cpu_to_logical_apicid(int cpu)
+static void unmap_cpu_to_logical_apicid(int cpu)
 {
 	cpu_2_logical_apicid[cpu] = BAD_APICID;
 	unmap_cpu_to_node(cpu);
@@ -792,21 +766,10 @@ static int __init do_boot_cpu(int apicid)
 	 * We can't use kernel_thread since we must avoid to
 	 * reschedule the child.
 	 */
-	idle = fork_by_hand();
+	idle = fork_idle(cpu);
 	if (IS_ERR(idle))
 		panic("failed fork for CPU %d", cpu);
-	wake_up_forked_process(idle);
-
-	/*
-	 * We remove it from the pidhash and the runqueue
-	 * once we got the process:
-	 */
-	init_idle(idle, cpu);
-
 	idle->thread.eip = (unsigned long) start_secondary;
-
-	unhash_process(idle);
-
 	/* start_eip had better be page-aligned! */
 	start_eip = setup_trampoline();
 
@@ -870,6 +833,7 @@ static int __init do_boot_cpu(int apicid)
 			inquire_remote_apic(apicid);
 		}
 	}
+	x86_cpu_to_apicid[cpu] = apicid;
 	if (boot_error) {
 		/* Try to put things back the way they were before ... */
 		unmap_cpu_to_logical_apicid(cpu);
@@ -883,9 +847,6 @@ static int __init do_boot_cpu(int apicid)
 
 	return boot_error;
 }
-
-cycles_t cacheflush_time;
-unsigned long cache_decay_ticks;
 
 static void smp_tune_scheduling (void)
 {
@@ -907,7 +868,6 @@ static void smp_tune_scheduling (void)
 		 * this basically disables processor-affinity
 		 * scheduling on SMP without a TSC.
 		 */
-		cacheflush_time = 0;
 		return;
 	} else {
 		cachesize = boot_cpu_data.x86_cache_size;
@@ -915,17 +875,7 @@ static void smp_tune_scheduling (void)
 			cachesize = 16; /* Pentiums, 2x8kB cache */
 			bandwidth = 100;
 		}
-
-		cacheflush_time = (cpu_khz>>10) * (cachesize<<10) / bandwidth;
 	}
-
-	cache_decay_ticks = (long)cacheflush_time/cpu_khz + 1;
-
-	printk("per-CPU timeslice cutoff: %ld.%02ld usecs.\n",
-		(long)cacheflush_time/(cpu_khz/1000),
-		((long)cacheflush_time*100/(cpu_khz/1000)) % 100);
-	printk("task migration cache decay timeout: %ld msecs.\n",
-		cache_decay_ticks);
 }
 
 /*
@@ -936,7 +886,9 @@ static int boot_cpu_logical_apicid;
 /* Where the IO area was mapped on multiquad, always 0 otherwise */
 void *xquad_portio;
 
-int cpu_sibling_map[NR_CPUS] __cacheline_aligned;
+cpumask_t cpu_sibling_map[NR_CPUS] __cacheline_aligned;
+cpumask_t cpu_core_map[NR_CPUS] __cacheline_aligned;
+EXPORT_SYMBOL(cpu_core_map);
 
 static void __init smp_boot_cpus(unsigned int max_cpus)
 {
@@ -952,9 +904,15 @@ static void __init smp_boot_cpus(unsigned int max_cpus)
 
 	boot_cpu_physical_apicid = GET_APIC_ID(apic_read(APIC_ID));
 	boot_cpu_logical_apicid = logical_smp_processor_id();
+	x86_cpu_to_apicid[0] = boot_cpu_physical_apicid;
 
 	current_thread_info()->cpu = 0;
 	smp_tune_scheduling();
+	cpus_clear(cpu_sibling_map[0]);
+	cpu_set(0, cpu_sibling_map[0]);
+
+	cpus_clear(cpu_core_map[0]);
+	cpu_set(0, cpu_core_map[0]);
 
 	/*
 	 * If we couldn't find an SMP configuration at boot time,
@@ -968,6 +926,8 @@ static void __init smp_boot_cpus(unsigned int max_cpus)
 			printk(KERN_NOTICE "Local APIC not detected."
 					   " Using dummy APIC emulation.\n");
 		map_cpu_to_logical_apicid();
+		cpu_set(0, cpu_sibling_map[0]);
+		cpu_set(0, cpu_core_map[0]);
 		return;
 	}
 
@@ -991,6 +951,8 @@ static void __init smp_boot_cpus(unsigned int max_cpus)
 		printk(KERN_ERR "... forcing use of dummy APIC emulation. (tell your hw vendor)\n");
 		smpboot_clear_io_apic_irqs();
 		phys_cpu_present_map = physid_mask_of_physid(0);
+		cpu_set(0, cpu_sibling_map[0]);
+		cpu_set(0, cpu_core_map[0]);
 		return;
 	}
 
@@ -1004,6 +966,8 @@ static void __init smp_boot_cpus(unsigned int max_cpus)
 		printk(KERN_INFO "SMP mode deactivated, forcing use of dummy APIC emulation.\n");
 		smpboot_clear_io_apic_irqs();
 		phys_cpu_present_map = physid_mask_of_physid(0);
+		cpu_set(0, cpu_sibling_map[0]);
+		cpu_set(0, cpu_core_map[0]);
 		return;
 	}
 
@@ -1081,31 +1045,50 @@ static void __init smp_boot_cpus(unsigned int max_cpus)
 	Dprintk("Boot done.\n");
 
 	/*
-	 * If Hyper-Threading is avaialble, construct cpu_sibling_map[], so
-	 * that we can tell the sibling CPU efficiently.
+	 * construct cpu_sibling_map[], so that we can tell sibling CPUs
+	 * efficiently.
 	 */
-	if (cpu_has_ht && smp_num_siblings > 1) {
-		for (cpu = 0; cpu < NR_CPUS; cpu++)
-			cpu_sibling_map[cpu] = NO_PROC_ID;
-		
-		for (cpu = 0; cpu < NR_CPUS; cpu++) {
-			int 	i;
-			if (!cpu_isset(cpu, cpu_callout_map))
-				continue;
+	for (cpu = 0; cpu < NR_CPUS; cpu++) {
+		cpus_clear(cpu_sibling_map[cpu]);
+		cpus_clear(cpu_core_map[cpu]);
+	}
 
+	for (cpu = 0; cpu < NR_CPUS; cpu++) {
+		struct cpuinfo_x86 *c = cpu_data + cpu;
+		int siblings = 0;
+		int i;
+		if (!cpu_isset(cpu, cpu_callout_map))
+			continue;
+
+		if (smp_num_siblings > 1) {
 			for (i = 0; i < NR_CPUS; i++) {
-				if (i == cpu || !cpu_isset(i, cpu_callout_map))
+				if (!cpu_isset(i, cpu_callout_map))
 					continue;
-				if (phys_proc_id[cpu] == phys_proc_id[i]) {
-					cpu_sibling_map[cpu] = i;
-					printk("cpu_sibling_map[%d] = %d\n", cpu, cpu_sibling_map[cpu]);
-					break;
+				if (cpu_core_id[cpu] == cpu_core_id[i]) {
+					siblings++;
+					cpu_set(i, cpu_sibling_map[cpu]);
 				}
 			}
-			if (cpu_sibling_map[cpu] == NO_PROC_ID) {
-				smp_num_siblings = 1;
-				printk(KERN_WARNING "WARNING: No sibling found for CPU %d.\n", cpu);
+		} else {
+			siblings++;
+			cpu_set(cpu, cpu_sibling_map[cpu]);
+		}
+
+		if (siblings != smp_num_siblings) {
+			printk(KERN_WARNING "WARNING: %d siblings found for CPU%d, should be %d\n", siblings, cpu, smp_num_siblings);
+			smp_num_siblings = siblings;
+		}
+
+		if (c->x86_num_cores > 1) {
+			for (i = 0; i < NR_CPUS; i++) {
+				if (!cpu_isset(i, cpu_callout_map))
+					continue;
+				if (phys_proc_id[cpu] == phys_proc_id[i]) {
+					cpu_set(i, cpu_core_map[cpu]);
+				}
 			}
+		} else {
+			cpu_core_map[cpu] = cpu_sibling_map[cpu];
 		}
 	}
 
@@ -1158,10 +1141,13 @@ int __devinit __cpu_up(unsigned int cpu)
 void __init smp_cpus_done(unsigned int max_cpus)
 {
 #ifdef CONFIG_X86_IO_APIC
-	cpumask_t targets = CPU_MASK_ALL;
-	setup_ioapic_dest(targets);
+	setup_ioapic_dest();
 #endif
 	zap_low_mappings();
+	/*
+	 * Disable executability of the SMP trampoline:
+	 */
+	set_kernel_exec((unsigned long)trampoline_base, trampoline_exec);
 }
 
 void __init smp_intr_init(void)

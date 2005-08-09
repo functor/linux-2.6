@@ -6,6 +6,7 @@
 
 #ifdef __KERNEL__
 #ifndef __ASSEMBLY__
+#include <linux/config.h>
 #include <linux/personality.h>
 #include <linux/types.h>
 #include <linux/compat.h>
@@ -144,7 +145,6 @@ struct sigstack {
 #define SA_ONESHOT	_SV_RESET
 #define SA_INTERRUPT	0x10u
 #define SA_NOMASK	0x20u
-#define SA_SHIRQ	0x40u
 #define SA_NOCLDWAIT    0x100u
 #define SA_SIGINFO      0x200u
 
@@ -164,11 +164,6 @@ struct sigstack {
 
 #ifdef __KERNEL__
 /*
- * These values of sa_flags are used only by the kernel as part of the
- * irq handling routines.
- *
- * SA_INTERRUPT is also used by the irq handling routines.
- *
  * DJHR
  * SA_STATIC_ALLOC is used for the SPARC system to indicate that this
  * interrupt handler's irq structure should be statically allocated
@@ -179,40 +174,32 @@ struct sigstack {
  * statically allocated data.. which is NOT GOOD.
  *
  */
-#define SA_PROBE SA_ONESHOT
-#define SA_SAMPLE_RANDOM SA_RESTART
 #define SA_STATIC_ALLOC		0x80
 #endif
 
-/* Type of a signal handler.  */
-#ifdef __KERNEL__
-typedef void (*__sighandler_t)(int, struct sigcontext *);
-#else
-typedef void (*__sighandler_t)(int);
-#endif
-
-#define SIG_DFL	((__sighandler_t)0)	/* default signal handling */
-#define SIG_IGN	((__sighandler_t)1)	/* ignore signal */
-#define SIG_ERR	((__sighandler_t)-1)	/* error return from signal */
+#include <asm-generic/signal.h>
 
 struct __new_sigaction {
 	__sighandler_t		sa_handler;
 	unsigned long		sa_flags;
-	void 			(*sa_restorer)(void);     /* not used by Linux/SPARC yet */
+	__sigrestore_t 		sa_restorer;  /* not used by Linux/SPARC yet */
 	__new_sigset_t		sa_mask;
 };
 
 #ifdef __KERNEL__
+
+#ifdef CONFIG_COMPAT
 struct __new_sigaction32 {
 	unsigned		sa_handler;
 	unsigned int    	sa_flags;
 	unsigned		sa_restorer;     /* not used by Linux/SPARC yet */
 	compat_sigset_t 	sa_mask;
 };
+#endif
 
 struct k_sigaction {
 	struct __new_sigaction 	sa;
-	void			*ka_restorer;
+	void __user		*ka_restorer;
 };
 #endif
 
@@ -224,6 +211,8 @@ struct __old_sigaction {
 };
 
 #ifdef __KERNEL__
+
+#ifdef CONFIG_COMPAT
 struct __old_sigaction32 {
 	unsigned		sa_handler;
 	compat_old_sigset_t  	sa_mask;
@@ -232,18 +221,23 @@ struct __old_sigaction32 {
 };
 #endif
 
+#endif
+
 typedef struct sigaltstack {
-	void			*ss_sp;
+	void			__user *ss_sp;
 	int			ss_flags;
 	size_t			ss_size;
 } stack_t;
 
 #ifdef __KERNEL__
+
+#ifdef CONFIG_COMPAT
 typedef struct sigaltstack32 {
 	u32			ss_sp;
 	int			ss_flags;
 	compat_size_t		ss_size;
 } stack_t32;
+#endif
 
 struct signal_deliver_cookie {
 	int restart_syscall;
@@ -252,8 +246,6 @@ struct signal_deliver_cookie {
 
 struct pt_regs;
 extern void ptrace_signal_deliver(struct pt_regs *regs, void *cookie);
-
-#define HAVE_ARCH_SYS_PAUSE
 
 #endif /* !(__KERNEL__) */
 

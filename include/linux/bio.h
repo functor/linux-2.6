@@ -25,6 +25,15 @@
 
 /* Platforms may set this to teach the BIO layer about IOMMU hardware. */
 #include <asm/io.h>
+
+#if defined(BIO_VMERGE_MAX_SIZE) && defined(BIO_VMERGE_BOUNDARY)
+#define BIOVEC_VIRT_START_SIZE(x) (bvec_to_phys(x) & (BIO_VMERGE_BOUNDARY - 1))
+#define BIOVEC_VIRT_OVERSIZE(x)	((x) > BIO_VMERGE_MAX_SIZE)
+#else
+#define BIOVEC_VIRT_START_SIZE(x)	0
+#define BIOVEC_VIRT_OVERSIZE(x)		0
+#endif
+
 #ifndef BIO_VMERGE_BOUNDARY
 #define BIO_VMERGE_BOUNDARY	0
 #endif
@@ -50,6 +59,7 @@ struct bio_vec {
 	unsigned int	bv_offset;
 };
 
+struct bio_set;
 struct bio;
 typedef int (bio_end_io_t) (struct bio *, unsigned int, int);
 typedef void (bio_destructor_t) (struct bio *);
@@ -81,6 +91,15 @@ struct bio {
 	unsigned short		bi_hw_segments;
 
 	unsigned int		bi_size;	/* residual I/O count */
+
+	/*
+	 * To keep track of the max hw size, we account for the
+	 * sizes of the first and last virtually mergeable segments
+	 * in this bio
+	 */
+	unsigned int		bi_hw_front_size;
+	unsigned int		bi_hw_back_size;
+
 	unsigned int		bi_max_vecs;	/* max bvl_vecs we can hold */
 
 	struct bio_vec		*bi_io_vec;	/* the actual vec list */
@@ -91,6 +110,7 @@ struct bio {
 	void			*bi_private;
 
 	bio_destructor_t	*bi_destructor;	/* destructor */
+	struct bio_set		*bi_set;	/* memory pools set */
 };
 
 /*
@@ -102,6 +122,8 @@ struct bio {
 #define BIO_SEG_VALID	3	/* nr_hw_seg valid */
 #define BIO_CLONED	4	/* doesn't own data */
 #define BIO_BOUNCED	5	/* bio is a bounce bio */
+#define BIO_USER_MAPPED 6	/* contains user pages */
+#define BIO_EOPNOTSUPP	7	/* not supported */
 #define bio_flagged(bio, flag)	((bio)->bi_flags & (1 << (flag)))
 
 /*
@@ -141,6 +163,8 @@ struct bio {
 #define bio_data(bio)		(page_address(bio_page((bio))) + bio_offset((bio)))
 #define bio_barrier(bio)	((bio)->bi_rw & (1 << BIO_RW_BARRIER))
 #define bio_sync(bio)		((bio)->bi_rw & (1 << BIO_RW_SYNC))
+#define bio_failfast(bio)	((bio)->bi_rw & (1 << BIO_RW_FAILFAST))
+#define bio_rw_ahead(bio)	((bio)->bi_rw & (1 << BIO_RW_AHEAD))
 
 /*
  * will die
@@ -166,8 +190,15 @@ struct bio {
 
 #define __BVEC_END(bio)		bio_iovec_idx((bio), (bio)->bi_vcnt - 1)
 #define __BVEC_START(bio)	bio_iovec_idx((bio), (bio)->bi_idx)
+
+/*
+ * allow arch override, for eg virtualized architectures (put in asm/io.h)
+ */
+#ifndef BIOVEC_PHYS_MERGEABLE
 #define BIOVEC_PHYS_MERGEABLE(vec1, vec2)	\
 	((bvec_to_phys((vec1)) + (vec1)->bv_len) == bvec_to_phys((vec2)))
+#endif
+
 #define BIOVEC_VIRT_MERGEABLE(vec1, vec2)	\
 	((((bvec_to_phys((vec1)) + (vec1)->bv_len) | bvec_to_phys((vec2))) & (BIO_VMERGE_BOUNDARY - 1)) == 0)
 #define __BIO_SEG_BOUNDARY(addr1, addr2, mask) \
@@ -229,7 +260,11 @@ extern struct bio_pair *bio_split(struct bio *bi, mempool_t *pool,
 extern mempool_t *bio_split_pool;
 extern void bio_pair_release(struct bio_pair *dbio);
 
-extern struct bio *bio_alloc(int, int);
+extern struct bio_set *bioset_create(int, int, int);
+extern void bioset_free(struct bio_set *);
+
+extern struct bio *bio_alloc(unsigned int __nocast, int);
+extern struct bio *bio_alloc_bioset(unsigned int __nocast, int, struct bio_set *);
 extern void bio_put(struct bio *);
 
 extern void bio_endio(struct bio *, unsigned int, int);
@@ -238,7 +273,7 @@ extern int bio_phys_segments(struct request_queue *, struct bio *);
 extern int bio_hw_segments(struct request_queue *, struct bio *);
 
 extern void __bio_clone(struct bio *, struct bio *);
-extern struct bio *bio_clone(struct bio *, int);
+extern struct bio *bio_clone(struct bio *, unsigned int __nocast);
 
 extern void bio_init(struct bio *);
 
@@ -246,9 +281,12 @@ extern int bio_add_page(struct bio *, struct page *, unsigned int,unsigned int);
 extern int bio_get_nr_vecs(struct block_device *);
 extern struct bio *bio_map_user(struct request_queue *, struct block_device *,
 				unsigned long, unsigned int, int);
-extern void bio_unmap_user(struct bio *, int);
+extern void bio_unmap_user(struct bio *);
 extern void bio_set_pages_dirty(struct bio *bio);
 extern void bio_check_pages_dirty(struct bio *bio);
+extern struct bio *bio_copy_user(struct request_queue *, unsigned long, unsigned int, int);
+extern int bio_uncopy_user(struct bio *);
+void zero_fill_bio(struct bio *bio);
 
 #ifdef CONFIG_HIGHMEM
 /*

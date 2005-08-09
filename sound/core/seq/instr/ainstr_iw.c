@@ -30,10 +30,6 @@
 MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Advanced Linux Sound Architecture IWFFFF support.");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_SUPPORTED_DEVICE("sound");
-
-char *snd_seq_iwffff_id = SNDRV_SEQ_INSTR_ID_INTERWAVE;
 
 static unsigned int snd_seq_iwffff_size(unsigned int size, unsigned int format)
 {
@@ -60,7 +56,7 @@ static int snd_seq_iwffff_copy_env_from_stream(__u32 req_stype,
 					       iwffff_layer_t *lp,
 					       iwffff_env_t *ep,
 					       iwffff_xenv_t *ex,
-					       char **data,
+					       char __user **data,
 					       long *len,
 					       int gfp_mask)
 {
@@ -96,7 +92,7 @@ static int snd_seq_iwffff_copy_env_from_stream(__u32 req_stype,
 		points_size = (le16_to_cpu(rx.nattack) + le16_to_cpu(rx.nrelease)) * 2 * sizeof(__u16);
 		if (points_size > *len)
 			return -EINVAL;
-		rp = (iwffff_env_record_t *)snd_kcalloc(sizeof(*rp) + points_size, gfp_mask);
+		rp = kcalloc(1, sizeof(*rp) + points_size, gfp_mask);
 		if (rp == NULL)
 			return -ENOMEM;
 		rp->nattack = le16_to_cpu(rx.nattack);
@@ -126,7 +122,7 @@ static int snd_seq_iwffff_copy_env_from_stream(__u32 req_stype,
 
 static int snd_seq_iwffff_copy_wave_from_stream(snd_iwffff_ops_t *ops,
 						iwffff_layer_t *lp,
-					        char **data,
+					        char __user **data,
 					        long *len,
 					        int atomic)
 {
@@ -142,7 +138,7 @@ static int snd_seq_iwffff_copy_wave_from_stream(snd_iwffff_ops_t *ops,
 		return -EFAULT;
 	*data += sizeof(xp);
 	*len -= sizeof(xp);
-	wp = (iwffff_wave_t *)snd_kcalloc(sizeof(*wp), gfp_mask);
+	wp = kcalloc(1, sizeof(*wp), gfp_mask);
 	if (wp == NULL)
 		return -ENOMEM;
 	wp->share_id[0] = le32_to_cpu(xp.share_id[0]);
@@ -230,7 +226,8 @@ static void snd_seq_iwffff_instr_free(snd_iwffff_ops_t *ops,
 }
 
 static int snd_seq_iwffff_put(void *private_data, snd_seq_kinstr_t *instr,
-			      char *instr_data, long len, int atomic, int cmd)
+			      char __user *instr_data, long len, int atomic,
+			      int cmd)
 {
 	snd_iwffff_ops_t *ops = (snd_iwffff_ops_t *)private_data;
 	iwffff_instrument_t *ip;
@@ -274,7 +271,7 @@ static int snd_seq_iwffff_put(void *private_data, snd_seq_kinstr_t *instr,
 			snd_seq_iwffff_instr_free(ops, ip, atomic);
 			return -EINVAL;
 		}
-		lp = (iwffff_layer_t *)snd_kcalloc(sizeof(*lp), gfp_mask);
+		lp = kcalloc(1, sizeof(*lp), gfp_mask);
 		if (lp == NULL) {
 			snd_seq_iwffff_instr_free(ops, ip, atomic);
 			return -ENOMEM;
@@ -350,7 +347,7 @@ static int snd_seq_iwffff_copy_env_to_stream(__u32 req_stype,
 					     iwffff_layer_t *lp,
 					     iwffff_xenv_t *ex,
 					     iwffff_env_t *ep,
-					     char **data,
+					     char __user **data,
 					     long *len)
 {
 	iwffff_env_record_t *rp;
@@ -395,7 +392,7 @@ static int snd_seq_iwffff_copy_env_to_stream(__u32 req_stype,
 
 static int snd_seq_iwffff_copy_wave_to_stream(snd_iwffff_ops_t *ops,
 					      iwffff_layer_t *lp,
-					      char **data,
+					      char __user **data,
 					      long *len,
 					      int atomic)
 {
@@ -449,14 +446,14 @@ static int snd_seq_iwffff_copy_wave_to_stream(snd_iwffff_ops_t *ops,
 }
 
 static int snd_seq_iwffff_get(void *private_data, snd_seq_kinstr_t *instr,
-			      char *instr_data, long len, int atomic, int cmd)
+			      char __user *instr_data, long len, int atomic, int cmd)
 {
 	snd_iwffff_ops_t *ops = (snd_iwffff_ops_t *)private_data;
 	iwffff_instrument_t *ip;
 	iwffff_xinstrument_t ix;
 	iwffff_layer_t *lp;
 	iwffff_xlayer_t lx;
-	char *layer_instr_data;
+	char __user *layer_instr_data;
 	int err;
 	
 	if (cmd != SNDRV_SEQ_INSTR_GET_CMD_FULL)
@@ -596,7 +593,7 @@ int snd_seq_iwffff_init(snd_iwffff_ops_t *ops,
 	ops->private_data = private_data;
 	ops->kops.private_data = ops;
 	ops->kops.add_len = sizeof(iwffff_instrument_t);
-	ops->kops.instr_type = snd_seq_iwffff_id;
+	ops->kops.instr_type = SNDRV_SEQ_INSTR_ID_INTERWAVE;
 	ops->kops.put = snd_seq_iwffff_put;
 	ops->kops.get = snd_seq_iwffff_get;
 	ops->kops.get_size = snd_seq_iwffff_get_size;
@@ -622,5 +619,4 @@ static void __exit alsa_ainstr_iw_exit(void)
 module_init(alsa_ainstr_iw_init)
 module_exit(alsa_ainstr_iw_exit)
 
-EXPORT_SYMBOL(snd_seq_iwffff_id);
 EXPORT_SYMBOL(snd_seq_iwffff_init);

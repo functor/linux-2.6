@@ -35,18 +35,24 @@
 
 
 /* List of all pfkey sockets. */
-HLIST_HEAD(pfkey_table);
+static HLIST_HEAD(pfkey_table);
 static DECLARE_WAIT_QUEUE_HEAD(pfkey_table_wait);
-static rwlock_t pfkey_table_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(pfkey_table_lock);
 static atomic_t pfkey_table_users = ATOMIC_INIT(0);
 
 static atomic_t pfkey_socks_nr = ATOMIC_INIT(0);
 
-struct pfkey_opt {
-	int	registered;
-	int	promisc;
+struct pfkey_sock {
+	/* struct sock must be the first member of struct pfkey_sock */
+	struct sock	sk;
+	int		registered;
+	int		promisc;
 };
-#define pfkey_sk(__sk) ((struct pfkey_opt *)(__sk)->sk_protinfo)
+
+static inline struct pfkey_sock *pfkey_sk(struct sock *sk)
+{
+	return (struct pfkey_sock *)sk;
+}
 
 static void pfkey_sock_destruct(struct sock *sk)
 {
@@ -59,8 +65,6 @@ static void pfkey_sock_destruct(struct sock *sk)
 
 	BUG_TRAP(!atomic_read(&sk->sk_rmem_alloc));
 	BUG_TRAP(!atomic_read(&sk->sk_wmem_alloc));
-
-	kfree(pfkey_sk(sk));
 
 	atomic_dec(&pfkey_socks_nr);
 }
@@ -125,10 +129,15 @@ static void pfkey_remove(struct sock *sk)
 	pfkey_table_ungrab();
 }
 
+static struct proto key_proto = {
+	.name	  = "KEY",
+	.owner	  = THIS_MODULE,
+	.obj_size = sizeof(struct pfkey_sock),
+};
+
 static int pfkey_create(struct socket *sock, int protocol)
 {
 	struct sock *sk;
-	struct pfkey_opt *pfk;
 	int err;
 
 	if (!capable(CAP_NET_ADMIN))
@@ -139,21 +148,12 @@ static int pfkey_create(struct socket *sock, int protocol)
 		return -EPROTONOSUPPORT;
 
 	err = -ENOMEM;
-	sk = sk_alloc(PF_KEY, GFP_KERNEL, 1, NULL);
+	sk = sk_alloc(PF_KEY, GFP_KERNEL, &key_proto, 1);
 	if (sk == NULL)
 		goto out;
 	
 	sock->ops = &pfkey_ops;
 	sock_init_data(sock, sk);
-	sk_set_owner(sk, THIS_MODULE);
-
-	err = -ENOMEM;
-	pfk = sk->sk_protinfo = kmalloc(sizeof(*pfk), GFP_KERNEL);
-	if (!pfk) {
-		sk_free(sk);
-		goto out;
-	}
-	memset(pfk, 0, sizeof(*pfk));
 
 	sk->sk_family = PF_KEY;
 	sk->sk_destruct = pfkey_sock_destruct;
@@ -233,7 +233,7 @@ static int pfkey_broadcast(struct sk_buff *skb, int allocation,
 
 	pfkey_lock_table();
 	sk_for_each(sk, node, &pfkey_table) {
-		struct pfkey_opt *pfk = pfkey_sk(sk);
+		struct pfkey_sock *pfk = pfkey_sk(sk);
 		int err2;
 
 		/* Yes, it means that if you are meant to receive this
@@ -598,7 +598,7 @@ static struct sk_buff * pfkey_xfrm_state2msg(struct xfrm_state *x, int add_keys,
 	/* address family check */
 	sockaddr_size = pfkey_sockaddr_size(x->props.family);
 	if (!sockaddr_size)
-		ERR_PTR(-EINVAL);
+		return ERR_PTR(-EINVAL);
 
 	/* base, SA, (lifetime (HSC),) address(SD), (address(P),)
 	   key(AE), (identity(SD),) (sensitivity)> */
@@ -665,24 +665,26 @@ static struct sk_buff * pfkey_xfrm_state2msg(struct xfrm_state *x, int add_keys,
 		sa->sadb_sa_state = SADB_SASTATE_DEAD;
 	sa->sadb_sa_auth = 0;
 	if (x->aalg) {
-		struct xfrm_algo_desc *a = xfrm_aalg_get_byname(x->aalg->alg_name);
+		struct xfrm_algo_desc *a = xfrm_aalg_get_byname(x->aalg->alg_name, 0);
 		sa->sadb_sa_auth = a ? a->desc.sadb_alg_id : 0;
 	}
 	sa->sadb_sa_encrypt = 0;
 	BUG_ON(x->ealg && x->calg);
 	if (x->ealg) {
-		struct xfrm_algo_desc *a = xfrm_ealg_get_byname(x->ealg->alg_name);
+		struct xfrm_algo_desc *a = xfrm_ealg_get_byname(x->ealg->alg_name, 0);
 		sa->sadb_sa_encrypt = a ? a->desc.sadb_alg_id : 0;
 	}
 	/* KAME compatible: sadb_sa_encrypt is overloaded with calg id */
 	if (x->calg) {
-		struct xfrm_algo_desc *a = xfrm_calg_get_byname(x->calg->alg_name);
+		struct xfrm_algo_desc *a = xfrm_calg_get_byname(x->calg->alg_name, 0);
 		sa->sadb_sa_encrypt = a ? a->desc.sadb_alg_id : 0;
 	}
 
 	sa->sadb_sa_flags = 0;
 	if (x->props.flags & XFRM_STATE_NOECN)
 		sa->sadb_sa_flags |= SADB_SAFLAGS_NOECN;
+	if (x->props.flags & XFRM_STATE_DECAP_DSCP)
+		sa->sadb_sa_flags |= SADB_SAFLAGS_DECAP_DSCP;
 
 	/* hard time */
 	if (hsc & 2) {
@@ -965,6 +967,8 @@ static struct xfrm_state * pfkey_msg2xfrm_state(struct sadb_msg *hdr,
 	x->props.replay_window = sa->sadb_sa_replay;
 	if (sa->sadb_sa_flags & SADB_SAFLAGS_NOECN)
 		x->props.flags |= XFRM_STATE_NOECN;
+	if (sa->sadb_sa_flags & SADB_SAFLAGS_DECAP_DSCP)
+		x->props.flags |= XFRM_STATE_DECAP_DSCP;
 
 	lifetime = (struct sadb_lifetime*) ext_hdrs[SADB_EXT_LIFETIME_HARD-1];
 	if (lifetime != NULL) {
@@ -1059,7 +1063,7 @@ static struct xfrm_state * pfkey_msg2xfrm_state(struct sadb_msg *hdr,
 		struct sadb_address *addr = ext_hdrs[SADB_EXT_ADDRESS_PROXY-1];
 
 		/* Nobody uses this, but we try. */
-		pfkey_sadb_addr2xfrm_addr(addr, &x->sel.saddr);
+		x->sel.family = pfkey_sadb_addr2xfrm_addr(addr, &x->sel.saddr);
 		x->sel.prefixlen_s = addr->sadb_address_prefixlen;
 	}
 
@@ -1156,7 +1160,16 @@ static int pfkey_getspi(struct sock *sk, struct sk_buff *skb, struct sadb_msg *h
 		break;
 #endif
 	}
-	if (xdaddr)
+
+	if (hdr->sadb_msg_seq) {
+		x = xfrm_find_acq_byseq(hdr->sadb_msg_seq);
+		if (x && xfrm_addr_cmp(&x->id.daddr, xdaddr, family)) {
+			xfrm_state_put(x);
+			x = NULL;
+		}
+	}
+
+	if (!x)
 		x = xfrm_find_acq(mode, reqid, proto, xdaddr, xsaddr, 1, family);
 
 	if (x == NULL)
@@ -1173,10 +1186,10 @@ static int pfkey_getspi(struct sock *sk, struct sk_buff *skb, struct sadb_msg *h
 			min_spi = range->sadb_spirange_min;
 			max_spi = range->sadb_spirange_max;
 		} else {
-			min_spi = htonl(0x100);
-			max_spi = htonl(0x0fffffff);
+			min_spi = 0x100;
+			max_spi = 0x0fffffff;
 		}
-		xfrm_alloc_spi(x, min_spi, max_spi);
+		xfrm_alloc_spi(x, htonl(min_spi), htonl(max_spi));
 		if (x->id.spi)
 			resp_skb = pfkey_xfrm_state2msg(x, 0, 3);
 	}
@@ -1405,7 +1418,7 @@ out_put_algs:
 
 static int pfkey_register(struct sock *sk, struct sk_buff *skb, struct sadb_msg *hdr, void **ext_hdrs)
 {
-	struct pfkey_opt *pfk = pfkey_sk(sk);
+	struct pfkey_sock *pfk = pfkey_sk(sk);
 	struct sk_buff *supp_skb;
 
 	if (hdr->sadb_msg_satype > SADB_SATYPE_MAX)
@@ -1501,7 +1514,7 @@ static int pfkey_dump(struct sock *sk, struct sk_buff *skb, struct sadb_msg *hdr
 
 static int pfkey_promisc(struct sock *sk, struct sk_buff *skb, struct sadb_msg *hdr, void **ext_hdrs)
 {
-	struct pfkey_opt *pfk = pfkey_sk(sk);
+	struct pfkey_sock *pfk = pfkey_sk(sk);
 	int satype = hdr->sadb_msg_satype;
 
 	if (hdr->sadb_msg_len == (sizeof(*hdr) / sizeof(uint64_t))) {
@@ -1976,7 +1989,7 @@ static int pfkey_spddelete(struct sock *sk, struct sk_buff *skb, struct sadb_msg
 	memset(&sel, 0, sizeof(sel));
 
 	sa = ext_hdrs[SADB_EXT_ADDRESS_SRC-1], 
-	pfkey_sadb_addr2xfrm_addr(sa, &sel.saddr);
+	sel.family = pfkey_sadb_addr2xfrm_addr(sa, &sel.saddr);
 	sel.prefixlen_s = sa->sadb_address_prefixlen;
 	sel.proto = pfkey_proto_to_xfrm(sa->sadb_address_proto);
 	sel.sport = ((struct sockaddr_in *)(sa+1))->sin_port;
@@ -2331,7 +2344,7 @@ static u32 get_acqseq(void)
 {
 	u32 res;
 	static u32 acqseq;
-	static spinlock_t acqseq_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(acqseq_lock);
 
 	spin_lock_bh(&acqseq_lock);
 	res = (++acqseq ? : ++acqseq);
@@ -2726,7 +2739,7 @@ static int pfkey_recvmsg(struct kiocb *kiocb,
 	int copied, err;
 
 	err = -EINVAL;
-	if (flags & ~(MSG_PEEK|MSG_DONTWAIT|MSG_TRUNC))
+	if (flags & ~(MSG_PEEK|MSG_DONTWAIT|MSG_TRUNC|MSG_CMSG_COMPAT))
 		goto out;
 
 	msg->msg_namelen = 0;
@@ -2848,18 +2861,40 @@ static struct xfrm_mgr pfkeyv2_mgr =
 static void __exit ipsec_pfkey_exit(void)
 {
 	xfrm_unregister_km(&pfkeyv2_mgr);
-	remove_proc_entry("net/pfkey", 0);
+	remove_proc_entry("net/pfkey", NULL);
 	sock_unregister(PF_KEY);
+	proto_unregister(&key_proto);
 }
 
 static int __init ipsec_pfkey_init(void)
 {
-	sock_register(&pfkey_family_ops);
+	int err = proto_register(&key_proto, 0);
+
+	if (err != 0)
+		goto out;
+
+	err = sock_register(&pfkey_family_ops);
+	if (err != 0)
+		goto out_unregister_key_proto;
 #ifdef CONFIG_PROC_FS
-	create_proc_read_entry("net/pfkey", 0, 0, pfkey_read_proc, NULL);
+	err = -ENOMEM;
+	if (create_proc_read_entry("net/pfkey", 0, NULL, pfkey_read_proc, NULL) == NULL)
+		goto out_sock_unregister;
 #endif
-	xfrm_register_km(&pfkeyv2_mgr);
-	return 0;
+	err = xfrm_register_km(&pfkeyv2_mgr);
+	if (err != 0)
+		goto out_remove_proc_entry;
+out:
+	return err;
+out_remove_proc_entry:
+#ifdef CONFIG_PROC_FS
+	remove_proc_entry("net/pfkey", NULL);
+out_sock_unregister:
+#endif
+	sock_unregister(PF_KEY);
+out_unregister_key_proto:
+	proto_unregister(&key_proto);
+	goto out;
 }
 
 module_init(ipsec_pfkey_init);

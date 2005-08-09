@@ -66,6 +66,7 @@ struct senseid {
 struct ccw_device_private {
 	int state;		/* device state */
 	atomic_t onoff;
+	unsigned long registered;
 	__u16 devno;		/* device number */
 	__u16 irq;		/* subchannel number */
 	__u8 imask;		/* lpm mask for SNID/SID/SPGID */
@@ -83,6 +84,7 @@ struct ccw_device_private {
 		unsigned int doverify:1;    /* delayed path verification */
 		unsigned int donotify:1;    /* call notify function */
 		unsigned int recog_done:1;  /* dev. recog. complete */
+		unsigned int fake_irb:1;    /* deliver faked irb */
 	} __attribute__((packed)) flags;
 	unsigned long intparm;	/* user interruption parameter */
 	struct qdio_irq *qdio_data;
@@ -135,8 +137,11 @@ void device_set_disconnected(struct subchannel *);
 void device_trigger_reprobe(struct subchannel *);
 
 /* Helper functions for vary on/off. */
+int device_is_online(struct subchannel *);
 void device_set_waiting(struct subchannel *);
-void device_call_nopath_notify(struct subchannel *);
+
+/* Machine check helper function. */
+void device_kill_pending_timer(struct subchannel *);
 
 /* Helper functions to build lists for the slow path. */
 int css_enqueue_subchannel_slow(unsigned long schid);
@@ -144,4 +149,7 @@ void css_walk_subchannel_slow_list(void (*fn)(unsigned long));
 void css_clear_subchannel_slow_list(void);
 int css_slow_subchannels_exist(void);
 extern int need_rescan;
+
+extern struct workqueue_struct *slow_path_wq;
+extern struct work_struct slow_path_work;
 #endif

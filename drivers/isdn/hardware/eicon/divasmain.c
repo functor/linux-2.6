@@ -1,4 +1,4 @@
-/* $Id: divasmain.c,v 1.55 2004/04/08 01:17:58 armin Exp $
+/* $Id: divasmain.c,v 1.55.4.6 2005/02/09 19:28:20 armin Exp $
  *
  * Low level driver for Eicon DIVA Server ISDN cards.
  *
@@ -41,7 +41,7 @@
 #include "diva_dma.h"
 #include "diva_pci.h"
 
-static char *main_revision = "$Revision: 1.55 $";
+static char *main_revision = "$Revision: 1.55.4.6 $";
 
 static int major;
 
@@ -51,7 +51,7 @@ MODULE_DESCRIPTION("Kernel driver for Eicon DIVA Server cards");
 MODULE_AUTHOR("Cytronics & Melware, Eicon Networks");
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(dbgmask, "i");
+module_param(dbgmask, int, 0);
 MODULE_PARM_DESC(dbgmask, "initial debug mask");
 
 static char *DRIVERNAME =
@@ -157,7 +157,7 @@ MODULE_DEVICE_TABLE(pci, divas_pci_tbl);
 
 static int divas_init_one(struct pci_dev *pdev,
 			  const struct pci_device_id *ent);
-static void divas_remove_one(struct pci_dev *pdev);
+static void __devexit divas_remove_one(struct pci_dev *pdev);
 
 static struct pci_driver diva_pci_driver = {
 	.name     = "divas",
@@ -435,16 +435,14 @@ diva_os_register_io_port(void *adapter, int on, unsigned long port,
 	return (0);
 }
 
-void *divasa_remap_pci_bar(diva_os_xdi_adapter_t *a, int id, unsigned long bar, unsigned long area_length)
+void __iomem *divasa_remap_pci_bar(diva_os_xdi_adapter_t *a, int id, unsigned long bar, unsigned long area_length)
 {
-	void *ret;
-
-	ret = (void *) ioremap(bar, area_length);
-	DBG_TRC(("remap(%08x)->%08x", bar, ret));
+	void __iomem *ret = ioremap(bar, area_length);
+	DBG_TRC(("remap(%08x)->%p", bar, ret));
 	return (ret);
 }
 
-void divasa_unmap_pci_bar(void *bar)
+void divasa_unmap_pci_bar(void __iomem *bar)
 {
 	if (bar) {
 		iounmap(bar);
@@ -454,32 +452,32 @@ void divasa_unmap_pci_bar(void *bar)
 /*********************************************************
  ** I/O port access 
  *********************************************************/
-byte __inline__ inpp(void *addr)
+byte __inline__ inpp(void __iomem *addr)
 {
 	return (inb((unsigned long) addr));
 }
 
-word __inline__ inppw(void *addr)
+word __inline__ inppw(void __iomem *addr)
 {
 	return (inw((unsigned long) addr));
 }
 
-void __inline__ inppw_buffer(void *addr, void *P, int length)
+void __inline__ inppw_buffer(void __iomem *addr, void *P, int length)
 {
 	insw((unsigned long) addr, (word *) P, length >> 1);
 }
 
-void __inline__ outppw_buffer(void *addr, void *P, int length)
+void __inline__ outppw_buffer(void __iomem *addr, void *P, int length)
 {
 	outsw((unsigned long) addr, (word *) P, length >> 1);
 }
 
-void __inline__ outppw(void *addr, word w)
+void __inline__ outppw(void __iomem *addr, word w)
 {
 	outw(w, (unsigned long) addr);
 }
 
-void __inline__ outpp(void *addr, word p)
+void __inline__ outpp(void __iomem *addr, word p)
 {
 	outb(p, (unsigned long) addr);
 }
@@ -556,7 +554,7 @@ void diva_os_remove_soft_isr(diva_os_soft_isr_t * psoft_isr)
 		tasklet_kill(&pdpc->divas_task);
 		flush_scheduled_work();
 		mem = psoft_isr->object;
-		psoft_isr->object = 0;
+		psoft_isr->object = NULL;
 		diva_os_free(0, mem);
 	}
 }
@@ -565,7 +563,7 @@ void diva_os_remove_soft_isr(diva_os_soft_isr_t * psoft_isr)
  * kernel/user space copy functions
  */
 static int
-xdi_copy_to_user(void *os_handle, void *dst, const void *src, int length)
+xdi_copy_to_user(void *os_handle, void __user *dst, const void *src, int length)
 {
 	if (copy_to_user(dst, src, length)) {
 		return (-EFAULT);
@@ -574,7 +572,7 @@ xdi_copy_to_user(void *os_handle, void *dst, const void *src, int length)
 }
 
 static int
-xdi_copy_from_user(void *os_handle, void *dst, const void *src, int length)
+xdi_copy_from_user(void *os_handle, void *dst, const void __user *src, int length)
 {
 	if (copy_from_user(dst, src, length)) {
 		return (-EFAULT);
@@ -598,7 +596,7 @@ static int divas_release(struct inode *inode, struct file *file)
 	return (0);
 }
 
-static ssize_t divas_write(struct file *file, const char *buf,
+static ssize_t divas_write(struct file *file, const char __user *buf,
 			   size_t count, loff_t * ppos)
 {
 	int ret = -EINVAL;
@@ -629,7 +627,7 @@ static ssize_t divas_write(struct file *file, const char *buf,
 	return (ret);
 }
 
-static ssize_t divas_read(struct file *file, char *buf,
+static ssize_t divas_read(struct file *file, char __user *buf,
 			  size_t count, loff_t * ppos)
 {
 	int ret = -EINVAL;
@@ -703,7 +701,7 @@ static int DIVA_INIT_FUNCTION divas_register_chrdev(void)
 static int __devinit divas_init_one(struct pci_dev *pdev,
 				    const struct pci_device_id *ent)
 {
-	void *pdiva = 0;
+	void *pdiva = NULL;
 	u8 pci_latency;
 	u8 new_latency = 32;
 
@@ -825,7 +823,7 @@ static int DIVA_INIT_FUNCTION divas_init(void)
 		goto out;
 	}
 
-	if ((ret = pci_module_init(&diva_pci_driver))) {
+	if ((ret = pci_register_driver(&diva_pci_driver))) {
 #ifdef MODULE
 		remove_divas_proc();
 		divas_unregister_chrdev();

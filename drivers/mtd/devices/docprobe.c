@@ -4,7 +4,7 @@
 /* (C) 1999 Machine Vision Holdings, Inc.			*/
 /* (C) 1999-2003 David Woodhouse <dwmw2@infradead.org>		*/
 
-/* $Id: docprobe.c,v 1.36 2003/05/23 11:29:34 dwmw2 Exp $	*/
+/* $Id: docprobe.c,v 1.44 2005/01/05 12:40:36 dwmw2 Exp $	*/
 
 
 
@@ -62,7 +62,7 @@
 
 
 static unsigned long doc_config_location = CONFIG_MTD_DOCPROBE_ADDRESS;
-MODULE_PARM(doc_config_location, "l");
+module_param(doc_config_location, ulong, 0);
 MODULE_PARM_DESC(doc_config_location, "Physical memory address at which to probe for DiskOnChip");
 
 static unsigned long __initdata doc_locations[] = {
@@ -94,9 +94,9 @@ static unsigned long __initdata doc_locations[] = {
 
 /* doccheck: Probe a given memory window to see if there's a DiskOnChip present */
 
-static inline int __init doccheck(unsigned long potential, unsigned long physadr)
+static inline int __init doccheck(void __iomem *potential, unsigned long physadr)
 {
-	unsigned long window=potential;
+	void __iomem *window=potential;
 	unsigned char tmp, tmpb, tmpc, ChipID;
 #ifndef DOC_PASSIVE_PROBE
 	unsigned char tmp2;
@@ -135,6 +135,9 @@ static inline int __init doccheck(unsigned long potential, unsigned long physadr
 		 window, DOCControl);
 #endif /* !DOC_PASSIVE_PROBE */	
 
+	/* We need to read the ChipID register four times. For some
+	   newer DiskOnChip 2000 units, the first three reads will
+	   return the DiskOnChip Millennium ident. Don't ask. */
 	ChipID = ReadDOC(window, ChipID);
   
 	switch (ChipID) {
@@ -148,6 +151,12 @@ static inline int __init doccheck(unsigned long potential, unsigned long physadr
 		break;
 		
 	case DOC_ChipID_DocMil:
+		/* Check for the new 2000 with Millennium ASIC */
+		ReadDOC(window, ChipID);
+		ReadDOC(window, ChipID);
+		if (ReadDOC(window, ChipID) != DOC_ChipID_DocMil)
+			ChipID = DOC_ChipID_Doc2kTSOP;
+
 		/* Check the TOGGLE bit in the ECC register */
 		tmp  = ReadDOC(window, ECCConf) & DOC_TOGGLE_BIT;
 		tmpb = ReadDOC(window, ECCConf) & DOC_TOGGLE_BIT;
@@ -191,7 +200,6 @@ static inline int __init doccheck(unsigned long potential, unsigned long physadr
 			tmpc = ReadDOC(window, Mplus_Toggle) & DOC_TOGGLE_BIT;
 			if (tmp != tmpb && tmp == tmpc)
 					return ChipID;
-			break;
 		default:
 			break;
 		}
@@ -199,8 +207,8 @@ static inline int __init doccheck(unsigned long potential, unsigned long physadr
 
 	default:
 
-#ifndef CONFIG_MTD_DOCPROBE_55AA
-		printk(KERN_WARNING "Possible DiskOnChip with unknown ChipID %2.2X found at 0x%lx\n",
+#ifdef CONFIG_MTD_DOCPROBE_55AA
+		printk(KERN_DEBUG "Possible DiskOnChip with unknown ChipID %2.2X found at 0x%lx\n",
 		       ChipID, physadr);
 #endif
 #ifndef DOC_PASSIVE_PROBE
@@ -225,7 +233,7 @@ static int docfound;
 
 static void __init DoC_Probe(unsigned long physadr)
 {
-	unsigned long docptr;
+	void __iomem *docptr;
 	struct DiskOnChip *this;
 	struct mtd_info *mtd;
 	int ChipID;
@@ -235,18 +243,24 @@ static void __init DoC_Probe(unsigned long physadr)
 	char *im_modname = NULL;
 	void (*initroutine)(struct mtd_info *) = NULL;
 
-	docptr = (unsigned long)ioremap(physadr, DOC_IOREMAP_LEN);
+	docptr = ioremap(physadr, DOC_IOREMAP_LEN);
 	
 	if (!docptr)
 		return;
 	
 	if ((ChipID = doccheck(docptr, physadr))) {
+		if (ChipID == DOC_ChipID_Doc2kTSOP) {
+			/* Remove this at your own peril. The hardware driver works but nothing prevents you from erasing bad blocks */
+			printk(KERN_NOTICE "Refusing to drive DiskOnChip 2000 TSOP until Bad Block Table is correctly supported by INFTL\n");
+			iounmap(docptr);
+			return;
+		}
 		docfound = 1;
 		mtd = kmalloc(sizeof(struct DiskOnChip) + sizeof(struct mtd_info), GFP_KERNEL);
 
 		if (!mtd) {
 			printk(KERN_WARNING "Cannot allocate memory for data structures. Dropping.\n");
-			iounmap((void *)docptr);
+			iounmap(docptr);
 			return;
 		}
 		
@@ -262,6 +276,12 @@ static void __init DoC_Probe(unsigned long physadr)
 		sprintf(namebuf, "with ChipID %2.2X", ChipID);
 
 		switch(ChipID) {
+		case DOC_ChipID_Doc2kTSOP:
+			name="2000 TSOP";
+			im_funcname = "DoC2k_init";
+			im_modname = "doc2000";
+			break;
+			
 		case DOC_ChipID_Doc2k:
 			name="2000";
 			im_funcname = "DoC2k_init";
@@ -298,7 +318,7 @@ static void __init DoC_Probe(unsigned long physadr)
 		printk(KERN_NOTICE "Cannot find driver for DiskOnChip %s at 0x%lX\n", name, physadr);
 		kfree(mtd);
 	}
-	iounmap((void *)docptr);
+	iounmap(docptr);
 }
 
 
@@ -308,7 +328,7 @@ static void __init DoC_Probe(unsigned long physadr)
  *
  ****************************************************************************/
 
-int __init init_doc(void)
+static int __init init_doc(void)
 {
 	int i;
 	

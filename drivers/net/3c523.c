@@ -104,10 +104,10 @@
 #include <linux/delay.h>
 #include <linux/mca-legacy.h>
 #include <linux/ethtool.h>
+#include <linux/bitops.h>
 
 #include <asm/uaccess.h>
 #include <asm/processor.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 
 #include "3c523.h"
@@ -445,7 +445,7 @@ static int __init do_elmc_probe(struct net_device *dev)
 			slot = mca_find_adapter(ELMC_MCA_ID, slot + 1);
 			continue;
 		}
-		if (!request_region(dev->base_addr, ELMC_IO_EXTENT, dev->name)) {
+		if (!request_region(dev->base_addr, ELMC_IO_EXTENT, DRV_NAME)) {
 			slot = mca_find_adapter(ELMC_MCA_ID, slot + 1);
 			continue;
 		}
@@ -585,6 +585,7 @@ static void cleanup_card(struct net_device *dev)
 	release_region(dev->base_addr, ELMC_IO_EXTENT);
 }
 
+#ifndef MODULE
 struct net_device * __init elmc_probe(int unit)
 {
 	struct net_device *dev = alloc_etherdev(sizeof(struct priv));
@@ -609,6 +610,7 @@ out:
 	free_netdev(dev);
 	return ERR_PTR(err);
 }
+#endif
 
 /**********************************************
  * init the chip (elmc-interrupt should be disabled?!)
@@ -1269,8 +1271,8 @@ static struct ethtool_ops netdev_ethtool_ops = {
 static struct net_device *dev_elmc[MAX_3C523_CARDS];
 static int irq[MAX_3C523_CARDS];
 static int io[MAX_3C523_CARDS];
-MODULE_PARM(irq, "1-" __MODULE_STRING(MAX_3C523_CARDS) "i");
-MODULE_PARM(io, "1-" __MODULE_STRING(MAX_3C523_CARDS) "i");
+module_param_array(irq, int, NULL, 0);
+module_param_array(io, int, NULL, 0);
 MODULE_PARM_DESC(io, "EtherLink/MC I/O base address(es)");
 MODULE_PARM_DESC(irq, "EtherLink/MC IRQ number(s)");
 

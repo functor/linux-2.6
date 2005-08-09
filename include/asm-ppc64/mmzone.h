@@ -12,7 +12,7 @@
 
 #ifdef CONFIG_DISCONTIGMEM
 
-extern struct pglist_data node_data[];
+extern struct pglist_data *node_data[];
 
 /*
  * Following are specific to this numa platform.
@@ -23,7 +23,6 @@ extern char *numa_memory_lookup_table;
 extern cpumask_t numa_cpumask_lookup_table[];
 extern int nr_cpus_in_node[];
 
-#define MAX_MEMORY (1UL << 41)
 /* 16MB regions */
 #define MEMORY_INCREMENT_SHIFT 24
 #define MEMORY_INCREMENT (1UL << MEMORY_INCREMENT_SHIFT)
@@ -53,7 +52,7 @@ static inline int pa_to_nid(unsigned long pa)
 /*
  * Return a pointer to the node data for node n.
  */
-#define NODE_DATA(nid)		(&node_data[nid])
+#define NODE_DATA(nid)		(node_data[nid])
 
 #define node_localnr(pfn, nid)	((pfn) - NODE_DATA(nid)->node_start_pfn)
 

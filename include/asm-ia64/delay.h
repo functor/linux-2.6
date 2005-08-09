@@ -44,6 +44,12 @@ ia64_set_itv (unsigned long val)
 	ia64_srlz_d();
 }
 
+static __inline__ unsigned long
+ia64_get_itv (void)
+{
+	return ia64_getreg(_IA64_REG_CR_ITV);
+}
+
 static __inline__ void
 ia64_set_itc (unsigned long val)
 {
@@ -85,7 +91,7 @@ udelay (unsigned long usecs)
 	unsigned long cycles = usecs*local_cpu_data->cyc_per_usec;
 
 	while (ia64_get_itc() - start < cycles)
-		/* skip */;
+		cpu_relax();
 }
 
 #endif /* _ASM_IA64_DELAY_H */

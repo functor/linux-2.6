@@ -52,7 +52,7 @@
 #include <asm/mac_via.h>
 
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include "mac_scsi.h"
 #include "NCR5380.h"
 
@@ -302,7 +302,7 @@ int macscsi_detect(Scsi_Host_Template * tpnt)
 
     if (instance->irq != SCSI_IRQ_NONE)
 	if (request_irq(instance->irq, NCR5380_intr, IRQ_FLG_SLOW, 
-		"ncr5380", NCR5380_intr)) {
+		"ncr5380", instance)) {
 	    printk(KERN_WARNING "scsi%d: IRQ%d not free, interrupts disabled\n",
 		   instance->host_no, instance->irq);
 	    instance->irq = SCSI_IRQ_NONE;
@@ -326,6 +326,7 @@ int macscsi_release (struct Scsi_Host *shpnt)
 {
 	if (shpnt->irq != SCSI_IRQ_NONE)
 		free_irq (shpnt->irq, NCR5380_intr);
+	NCR5380_exit(shpnt);
 
 	return 0;
 }

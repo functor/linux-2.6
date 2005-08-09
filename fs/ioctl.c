@@ -4,20 +4,49 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
 
+#include <linux/config.h>
+#include <linux/syscalls.h>
 #include <linux/mm.h>
 #include <linux/smp_lock.h>
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/security.h>
+#include <linux/module.h>
 
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 
-static int file_ioctl(struct file *filp,unsigned int cmd,unsigned long arg)
+static long do_ioctl(struct file *filp, unsigned int cmd,
+		unsigned long arg)
+{
+	int error = -ENOTTY;
+
+	if (!filp->f_op)
+		goto out;
+
+	if (filp->f_op->unlocked_ioctl) {
+		error = filp->f_op->unlocked_ioctl(filp, cmd, arg);
+		if (error == -ENOIOCTLCMD)
+			error = -EINVAL;
+		goto out;
+	} else if (filp->f_op->ioctl) {
+		lock_kernel();
+		error = filp->f_op->ioctl(filp->f_dentry->d_inode,
+					  filp, cmd, arg);
+		unlock_kernel();
+	}
+
+ out:
+	return error;
+}
+
+static int file_ioctl(struct file *filp, unsigned int cmd,
+		unsigned long arg)
 {
 	int error;
 	int block;
 	struct inode * inode = filp->f_dentry->d_inode;
+	int __user *p = (int __user *)arg;
 
 	switch (cmd) {
 		case FIBMAP:
@@ -29,42 +58,37 @@ static int file_ioctl(struct file *filp,unsigned int cmd,unsigned long arg)
 				return -EINVAL;
 			if (!capable(CAP_SYS_RAWIO))
 				return -EPERM;
-			if ((error = get_user(block, (int *) arg)) != 0)
+			if ((error = get_user(block, p)) != 0)
 				return error;
 
+			lock_kernel();
 			res = mapping->a_ops->bmap(mapping, block);
-			return put_user(res, (int *) arg);
+			unlock_kernel();
+			return put_user(res, p);
 		}
 		case FIGETBSZ:
 			if (inode->i_sb == NULL)
 				return -EBADF;
-			return put_user(inode->i_sb->s_blocksize, (int *) arg);
+			return put_user(inode->i_sb->s_blocksize, p);
 		case FIONREAD:
-			return put_user(i_size_read(inode) - filp->f_pos, (int *) arg);
+			return put_user(i_size_read(inode) - filp->f_pos, p);
 	}
-	if (filp->f_op && filp->f_op->ioctl)
-		return filp->f_op->ioctl(inode, filp, cmd, arg);
-	return -ENOTTY;
+
+	return do_ioctl(filp, cmd, arg);
 }
 
-
-asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
-{	
-	struct file * filp;
+/*
+ * When you add any new common ioctls to the switches above and below
+ * please update compat_sys_ioctl() too.
+ *
+ * vfs_ioctl() is not for drivers and not intended to be EXPORT_SYMBOL()'d.
+ * It's just a simple helper for sys_ioctl and compat_sys_ioctl.
+ */
+int vfs_ioctl(struct file *filp, unsigned int fd, unsigned int cmd, unsigned long arg)
+{
 	unsigned int flag;
-	int on, error = -EBADF;
+	int on, error = 0;
 
-	filp = fget(fd);
-	if (!filp)
-		goto out;
-
-	error = security_file_ioctl(filp, cmd, arg);
-	if (error) {
-                fput(filp);
-                goto out;
-        }
-
-	lock_kernel();
 	switch (cmd) {
 		case FIOCLEX:
 			set_close_on_exec(fd, 1);
@@ -96,8 +120,11 @@ asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 
 			/* Did FASYNC state change ? */
 			if ((flag ^ filp->f_flags) & FASYNC) {
-				if (filp->f_op && filp->f_op->fasync)
+				if (filp->f_op && filp->f_op->fasync) {
+					lock_kernel();
 					error = filp->f_op->fasync(fd, filp, on);
+					unlock_kernel();
+				}
 				else error = -ENOTTY;
 			}
 			if (error != 0)
@@ -120,15 +147,40 @@ asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 				error = -ENOTTY;
 			break;
 		default:
-			error = -ENOTTY;
 			if (S_ISREG(filp->f_dentry->d_inode->i_mode))
 				error = file_ioctl(filp, cmd, arg);
-			else if (filp->f_op && filp->f_op->ioctl)
-				error = filp->f_op->ioctl(filp->f_dentry->d_inode, filp, cmd, arg);
+			else
+				error = do_ioctl(filp, cmd, arg);
+			break;
 	}
-	unlock_kernel();
-	fput(filp);
-
-out:
 	return error;
 }
+
+asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
+{
+	struct file * filp;
+	int error = -EBADF;
+	int fput_needed;
+
+	filp = fget_light(fd, &fput_needed);
+	if (!filp)
+		goto out;
+
+	error = security_file_ioctl(filp, cmd, arg);
+	if (error)
+		goto out_fput;
+
+	error = vfs_ioctl(filp, fd, cmd, arg);
+ out_fput:
+	fput_light(filp, fput_needed);
+ out:
+	return error;
+}
+
+/*
+ * Platforms implementing 32 bit compatibility ioctl handlers in
+ * modules need this exported
+ */
+#ifdef CONFIG_COMPAT
+EXPORT_SYMBOL(sys_ioctl);
+#endif

@@ -14,12 +14,12 @@
 #include <linux/sched.h>
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/bitops.h>
 
 #include <asm/ptrace.h>
 #include <asm/system.h>
 #include <asm/dma.h>
 #include <asm/irq.h>
-#include <asm/bitops.h>
 #include <asm/mmu_context.h>
 #include <asm/io.h>
 #include <asm/pgtable.h>
@@ -51,7 +51,7 @@ sx164_init_irq(void)
 	if (alpha_using_srm)
 		init_srm_irqs(40, 0x3f0000);
 	else
-		init_pyxis_irqs(0xff00003f0000);
+		init_pyxis_irqs(0xff00003f0000UL);
 
 	setup_irq(16+6, &timer_cascade_irqaction);
 }
@@ -158,7 +158,6 @@ struct alpha_machine_vector sx164_mv __initmv = {
 	DO_EV5_MMU,
 	DO_DEFAULT_RTC,
 	DO_PYXIS_IO,
-	DO_CIA_BUS,
 	.machine_check		= cia_machine_check,
 	.max_isa_dma_address	= ALPHA_MAX_ISA_DMA_ADDRESS,
 	.min_io_address		= DEFAULT_IO_BASE,

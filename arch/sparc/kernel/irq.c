@@ -45,7 +45,6 @@
 #include <asm/io.h>
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
-#include <asm/hardirq.h>
 #include <asm/pcic.h>
 #include <asm/cacheflush.h>
 
@@ -160,7 +159,7 @@ struct irqaction *irq_action[NR_IRQS] = {
 };
 
 /* Used to protect the IRQ action lists */
-spinlock_t irq_action_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(irq_action_lock);
 
 int show_interrupts(struct seq_file *p, void *v)
 {
@@ -216,7 +215,8 @@ void free_irq(unsigned int irq, void *dev_id)
 	if (sparc_cpu_model == sun4d) {
 		extern void sun4d_free_irq(unsigned int, void *);
 		
-		return sun4d_free_irq(irq, dev_id);
+		sun4d_free_irq(irq, dev_id);
+		return;
 	}
 	cpu_irq = irq & (NR_IRQS - 1);
         if (cpu_irq > 14) {  /* 14 irq levels on the sparc */
@@ -335,7 +335,7 @@ void handler_irq(int irq, struct pt_regs * regs)
 	kstat_cpu(cpu).irqs[irq]++;
 	do {
 		if (!action || !action->handler)
-			unexpected_irq(irq, 0, regs);
+			unexpected_irq(irq, NULL, regs);
 		action->handler(irq, action->dev_id, regs);
 		action = action->next;
 	} while (action);
@@ -448,7 +448,7 @@ int request_fast_irq(unsigned int irq,
 
 	action->handler = handler;
 	action->flags = irqflags;
-	action->mask = 0;
+	cpus_clear(action->mask);
 	action->name = devname;
 	action->dev_id = NULL;
 	action->next = NULL;
@@ -528,7 +528,7 @@ int request_irq(unsigned int irq,
 
 	action->handler = handler;
 	action->flags = irqflags;
-	action->mask = 0;
+	cpus_clear(action->mask);
 	action->name = devname;
 	action->next = NULL;
 	action->dev_id = dev_id;

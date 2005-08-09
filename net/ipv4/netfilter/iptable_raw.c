@@ -8,72 +8,79 @@
 
 #define RAW_VALID_HOOKS ((1 << NF_IP_PRE_ROUTING) | (1 << NF_IP_LOCAL_OUT))
 
-/* Standard entry. */
-struct ipt_standard
-{
-	struct ipt_entry entry;
-	struct ipt_standard_target target;
-};
-
-struct ipt_error_target
-{
-	struct ipt_entry_target target;
-	char errorname[IPT_FUNCTION_MAXNAMELEN];
-};
-
-struct ipt_error
-{
-	struct ipt_entry entry;
-	struct ipt_error_target target;
-};
-
 static struct
 {
 	struct ipt_replace repl;
 	struct ipt_standard entries[2];
 	struct ipt_error term;
-} initial_table __initdata
-= { { "raw", RAW_VALID_HOOKS, 3,
-      sizeof(struct ipt_standard) * 2 + sizeof(struct ipt_error),
-      { [NF_IP_PRE_ROUTING] 0,
-	[NF_IP_LOCAL_OUT] sizeof(struct ipt_standard) },
-      { [NF_IP_PRE_ROUTING] 0,
-	[NF_IP_LOCAL_OUT] sizeof(struct ipt_standard) },
-      0, NULL, { } },
-    {
-	    /* PRE_ROUTING */
-	    { { { { 0 }, { 0 }, { 0 }, { 0 }, "", "", { 0 }, { 0 }, 0, 0, 0 },
-		0,
-		sizeof(struct ipt_entry),
-		sizeof(struct ipt_standard),
-		0, { 0, 0 }, { } },
-	      { { { { IPT_ALIGN(sizeof(struct ipt_standard_target)), "" } }, { } },
-		-NF_ACCEPT - 1 } },
-	    /* LOCAL_OUT */
-	    { { { { 0 }, { 0 }, { 0 }, { 0 }, "", "", { 0 }, { 0 }, 0, 0, 0 },
-		0,
-		sizeof(struct ipt_entry),
-		sizeof(struct ipt_standard),
-		0, { 0, 0 }, { } },
-	      { { { { IPT_ALIGN(sizeof(struct ipt_standard_target)), "" } }, { } },
-		-NF_ACCEPT - 1 } }
-    },
-    /* ERROR */
-    { { { { 0 }, { 0 }, { 0 }, { 0 }, "", "", { 0 }, { 0 }, 0, 0, 0 },
-	0,
-	sizeof(struct ipt_entry),
-	sizeof(struct ipt_error),
-	0, { 0, 0 }, { } },
-      { { { { IPT_ALIGN(sizeof(struct ipt_error_target)), IPT_ERROR_TARGET } },
-	  { } },
-	"ERROR"
-      }
-    }
+} initial_table __initdata = {
+	.repl = {
+		.name = "raw", 
+		.valid_hooks = RAW_VALID_HOOKS, 
+		.num_entries = 3,
+		.size = sizeof(struct ipt_standard) * 2 + sizeof(struct ipt_error),
+		.hook_entry = { 
+			[NF_IP_PRE_ROUTING] = 0,
+			[NF_IP_LOCAL_OUT] = sizeof(struct ipt_standard) },
+		.underflow = { 
+			[NF_IP_PRE_ROUTING] = 0,
+			[NF_IP_LOCAL_OUT]  = sizeof(struct ipt_standard) },
+	},
+	.entries = {
+	     /* PRE_ROUTING */
+	     { 
+		     .entry = { 
+			     .target_offset = sizeof(struct ipt_entry),
+			     .next_offset = sizeof(struct ipt_standard),
+		     },
+		     .target = { 
+			  .target = { 
+				  .u = {
+					  .target_size = IPT_ALIGN(sizeof(struct ipt_standard_target)),
+				  },
+			  },
+			  .verdict = -NF_ACCEPT - 1,
+		     },
+	     },
+
+	     /* LOCAL_OUT */
+	     {
+		     .entry = {
+			     .target_offset = sizeof(struct ipt_entry),
+			     .next_offset = sizeof(struct ipt_standard),
+		     },
+		     .target = {
+			     .target = {
+				     .u = {
+					     .target_size = IPT_ALIGN(sizeof(struct ipt_standard_target)),
+				     },
+			     },
+			     .verdict = -NF_ACCEPT - 1,
+		     },
+	     },
+	},
+	/* ERROR */
+	.term = {
+		.entry = {
+			.target_offset = sizeof(struct ipt_entry),
+			.next_offset = sizeof(struct ipt_error),
+		},
+		.target = {
+			.target = {
+				.u = {
+					.user = {
+						.target_size = IPT_ALIGN(sizeof(struct ipt_error_target)), 
+						.name = IPT_ERROR_TARGET,
+					},
+				},
+			},
+			.errorname = "ERROR",
+		},
+	}
 };
 
 static struct ipt_table packet_raw = { 
 	.name = "raw", 
-	.table = &initial_table.repl,
 	.valid_hooks =  RAW_VALID_HOOKS, 
 	.lock = RW_LOCK_UNLOCKED, 
 	.me = THIS_MODULE
@@ -96,13 +103,15 @@ static struct nf_hook_ops ipt_ops[] = {
 	  .hook = ipt_hook, 
 	  .pf = PF_INET, 
 	  .hooknum = NF_IP_PRE_ROUTING, 
-	  .priority = NF_IP_PRI_RAW
+	  .priority = NF_IP_PRI_RAW,
+	  .owner = THIS_MODULE,
 	},
 	{
 	  .hook = ipt_hook, 
 	  .pf = PF_INET, 
 	  .hooknum = NF_IP_LOCAL_OUT, 
-	  .priority = NF_IP_PRI_RAW
+	  .priority = NF_IP_PRI_RAW,
+	  .owner = THIS_MODULE,
 	},
 };
 
@@ -111,7 +120,7 @@ static int __init init(void)
 	int ret;
 
 	/* Register table */
-	ret = ipt_register_table(&packet_raw);
+	ret = ipt_register_table(&packet_raw, &initial_table.repl);
 	if (ret < 0)
 		return ret;
 

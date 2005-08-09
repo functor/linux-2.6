@@ -24,7 +24,7 @@
 #define CPU_PARAMS	boot_cpu_data
 #define M32R_MCICAR	 0xfffffff0
 #define M32R_MCDCAR	 0xfffffff4
-#define	M32R_MCCR 	 0xfffffffc
+#define M32R_MCCR 	 0xfffffffc
 #define M32R_BSCR0	 0xffffffd2
 
 ;BSEL
@@ -73,6 +73,11 @@ ENTRY(boot)
     || defined(CONFIG_CHIP_OPSP)
 	ldi	r0, #-4              ;LDIMM	(r0, M32R_MCCR)
 	ldi	r1, #0x73		; cache on (with invalidation)
+;	ldi	r1, #0x00		; cache off
+	st	r1, @r0
+#elif defined(CONFIG_CHIP_M32102)
+	ldi	r0, #-4              ;LDIMM	(r0, M32R_MCCR)
+	ldi	r1, #0x101		; cache on (with invalidation)
 ;	ldi	r1, #0x00		; cache off
 	st	r1, @r0
 #else

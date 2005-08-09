@@ -16,13 +16,6 @@
 #include <linux/tty.h>
 #include <linux/module.h>
 #include <linux/usb.h>
-
-#ifdef CONFIG_USB_SERIAL_DEBUG
-	static int debug = 1;
-#else
-	static int debug;
-#endif
-
 #include "usb-serial.h"
 
 /* EZ-USB Control and Status Register.  Bit 0 controls 8051 reset */
@@ -35,7 +28,7 @@ int ezusb_writememory (struct usb_serial *serial, int address, unsigned char *da
 
 	/* dbg("ezusb_writememory %x, %d", address, length); */
 	if (!serial->dev) {
-		dbg("%s - no physical device present, failing.", __FUNCTION__);
+		err("%s - no physical device present, failing.", __FUNCTION__);
 		return -ENODEV;
 	}
 
@@ -45,19 +38,19 @@ int ezusb_writememory (struct usb_serial *serial, int address, unsigned char *da
 		return -ENOMEM;
 	}
 	memcpy (transfer_buffer, data, length);
-	result = usb_control_msg (serial->dev, usb_sndctrlpipe(serial->dev, 0), bRequest, 0x40, address, 0, transfer_buffer, length, 3*HZ);
+	result = usb_control_msg (serial->dev, usb_sndctrlpipe(serial->dev, 0), bRequest, 0x40, address, 0, transfer_buffer, length, 3000);
 	kfree (transfer_buffer);
 	return result;
 }
 
 int ezusb_set_reset (struct usb_serial *serial, unsigned char reset_bit)
 {
-	int	response;
-	dbg("%s - %d", __FUNCTION__, reset_bit);
+	int response;
+
+	/* dbg("%s - %d", __FUNCTION__, reset_bit); */
 	response = ezusb_writememory (serial, CPUCS_REG, &reset_bit, 1, 0xa0);
-	if (response < 0) {
+	if (response < 0)
 		dev_err(&serial->dev->dev, "%s- %d failed\n", __FUNCTION__, reset_bit);
-	}
 	return response;
 }
 

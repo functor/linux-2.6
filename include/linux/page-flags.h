@@ -69,15 +69,13 @@
 #define PG_private		12	/* Has something at ->private */
 #define PG_writeback		13	/* Page is under writeback */
 #define PG_nosave		14	/* Used for system suspend/resume */
-#define PG_maplock		15	/* Lock bit for rmap to ptes */
+#define PG_compound		15	/* Part of a compound page */
 
-#define PG_direct		16	/* ->pte_chain points directly at pte */
+#define PG_swapcache		16	/* Swap page: swp_entry_t in private */
 #define PG_mappedtodisk		17	/* Has blocks allocated on-disk */
 #define PG_reclaim		18	/* To be reclaimed asap */
-#define PG_compound		19	/* Part of a compound page */
-#define PG_anon			20	/* Anonymous page: anon_vma in mapping*/
-#define PG_swapcache		21	/* Swap page: swp_entry_t in private */
-
+#define PG_nosave_free		19	/* Free, should not be written */
+#define PG_uncached		20	/* Page has been mapped as uncached */
 
 /*
  * Global page accounting.  One instance per CPU.  Only unsigned longs are
@@ -133,38 +131,35 @@ struct page_state {
 	unsigned long allocstall;	/* direct reclaim calls */
 
 	unsigned long pgrotated;	/* pages rotated to tail of the LRU */
-} ____cacheline_aligned;
-
-DECLARE_PER_CPU(struct page_state, page_states);
+	unsigned long nr_bounce;	/* pages for bounce buffers */
+};
 
 extern void get_page_state(struct page_state *ret);
 extern void get_full_page_state(struct page_state *ret);
+extern unsigned long __read_page_state(unsigned offset);
+extern void __mod_page_state(unsigned offset, unsigned long delta);
 
-#define mod_page_state(member, delta)					\
-	do {								\
-		unsigned long flags;					\
-		local_irq_save(flags);					\
-		__get_cpu_var(page_states).member += (delta);		\
-		local_irq_restore(flags);				\
-	} while (0)
+#define read_page_state(member) \
+	__read_page_state(offsetof(struct page_state, member))
 
+#define mod_page_state(member, delta)	\
+	__mod_page_state(offsetof(struct page_state, member), (delta))
 
 #define inc_page_state(member)	mod_page_state(member, 1UL)
 #define dec_page_state(member)	mod_page_state(member, 0UL - 1)
 #define add_page_state(member,delta) mod_page_state(member, (delta))
 #define sub_page_state(member,delta) mod_page_state(member, 0UL - (delta))
 
-#define mod_page_state_zone(zone, member, delta)			\
-	do {								\
-		unsigned long flags;					\
-		local_irq_save(flags);					\
-		if (is_highmem(zone))					\
-			__get_cpu_var(page_states).member##_high += (delta);\
-		else if (is_normal(zone))				\
-			__get_cpu_var(page_states).member##_normal += (delta);\
-		else							\
-			__get_cpu_var(page_states).member##_dma += (delta);\
-		local_irq_restore(flags);				\
+#define mod_page_state_zone(zone, member, delta)				\
+	do {									\
+		unsigned offset;						\
+		if (is_highmem(zone))						\
+			offset = offsetof(struct page_state, member##_high);	\
+		else if (is_normal(zone))					\
+			offset = offsetof(struct page_state, member##_normal);	\
+		else								\
+			offset = offsetof(struct page_state, member##_dma);	\
+		__mod_page_state(offset, (delta));				\
 	} while (0)
 
 /*
@@ -190,16 +185,10 @@ extern void get_full_page_state(struct page_state *ret);
 #define ClearPageReferenced(page)	clear_bit(PG_referenced, &(page)->flags)
 #define TestClearPageReferenced(page) test_and_clear_bit(PG_referenced, &(page)->flags)
 
-#ifndef arch_set_page_uptodate
-#define arch_set_page_uptodate(page) do { } while (0)
-#endif
-
 #define PageUptodate(page)	test_bit(PG_uptodate, &(page)->flags)
-#define SetPageUptodate(page) \
-	do {								\
-		arch_set_page_uptodate(page);				\
-		set_bit(PG_uptodate, &(page)->flags);			\
-	} while (0)
+#ifndef SetPageUptodate
+#define SetPageUptodate(page)	set_bit(PG_uptodate, &(page)->flags)
+#endif
 #define ClearPageUptodate(page)	clear_bit(PG_uptodate, &(page)->flags)
 
 #define PageDirty(page)		test_bit(PG_dirty, &(page)->flags)
@@ -238,10 +227,13 @@ extern void get_full_page_state(struct page_state *ret);
 #define PageReserved(page)	test_bit(PG_reserved, &(page)->flags)
 #define SetPageReserved(page)	set_bit(PG_reserved, &(page)->flags)
 #define ClearPageReserved(page)	clear_bit(PG_reserved, &(page)->flags)
+#define __ClearPageReserved(page)	__clear_bit(PG_reserved, &(page)->flags)
 
 #define SetPagePrivate(page)	set_bit(PG_private, &(page)->flags)
 #define ClearPagePrivate(page)	clear_bit(PG_private, &(page)->flags)
 #define PagePrivate(page)	test_bit(PG_private, &(page)->flags)
+#define __SetPagePrivate(page)  __set_bit(PG_private, &(page)->flags)
+#define __ClearPagePrivate(page) __clear_bit(PG_private, &(page)->flags)
 
 #define PageWriteback(page)	test_bit(PG_writeback, &(page)->flags)
 #define SetPageWriteback(page)						\
@@ -281,11 +273,9 @@ extern void get_full_page_state(struct page_state *ret);
 #define ClearPageNosave(page)		clear_bit(PG_nosave, &(page)->flags)
 #define TestClearPageNosave(page)	test_and_clear_bit(PG_nosave, &(page)->flags)
 
-#define PageDirect(page)	test_bit(PG_direct, &(page)->flags)
-#define SetPageDirect(page)	set_bit(PG_direct, &(page)->flags)
-#define TestSetPageDirect(page)	test_and_set_bit(PG_direct, &(page)->flags)
-#define ClearPageDirect(page)		clear_bit(PG_direct, &(page)->flags)
-#define TestClearPageDirect(page)	test_and_clear_bit(PG_direct, &(page)->flags)
+#define PageNosaveFree(page)	test_bit(PG_nosave_free, &(page)->flags)
+#define SetPageNosaveFree(page)	set_bit(PG_nosave_free, &(page)->flags)
+#define ClearPageNosaveFree(page)		clear_bit(PG_nosave_free, &(page)->flags)
 
 #define PageMappedToDisk(page)	test_bit(PG_mappedtodisk, &(page)->flags)
 #define SetPageMappedToDisk(page) set_bit(PG_mappedtodisk, &(page)->flags)
@@ -296,13 +286,13 @@ extern void get_full_page_state(struct page_state *ret);
 #define ClearPageReclaim(page)	clear_bit(PG_reclaim, &(page)->flags)
 #define TestClearPageReclaim(page) test_and_clear_bit(PG_reclaim, &(page)->flags)
 
+#ifdef CONFIG_HUGETLB_PAGE
 #define PageCompound(page)	test_bit(PG_compound, &(page)->flags)
+#else
+#define PageCompound(page)	0
+#endif
 #define SetPageCompound(page)	set_bit(PG_compound, &(page)->flags)
 #define ClearPageCompound(page)	clear_bit(PG_compound, &(page)->flags)
-
-#define PageAnon(page)		test_bit(PG_anon, &(page)->flags)
-#define SetPageAnon(page)	set_bit(PG_anon, &(page)->flags)
-#define ClearPageAnon(page)	clear_bit(PG_anon, &(page)->flags)
 
 #ifdef CONFIG_SWAP
 #define PageSwapCache(page)	test_bit(PG_swapcache, &(page)->flags)
@@ -312,10 +302,13 @@ extern void get_full_page_state(struct page_state *ret);
 #define PageSwapCache(page)	0
 #endif
 
+#define PageUncached(page)	test_bit(PG_uncached, &(page)->flags)
+#define SetPageUncached(page)	set_bit(PG_uncached, &(page)->flags)
+#define ClearPageUncached(page)	clear_bit(PG_uncached, &(page)->flags)
+
 struct page;	/* forward declaration */
 
 int test_clear_page_dirty(struct page *page);
-int __clear_page_dirty(struct page *page);
 int test_clear_page_writeback(struct page *page);
 int test_set_page_writeback(struct page *page);
 

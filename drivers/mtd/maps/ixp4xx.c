@@ -1,5 +1,5 @@
 /*
- * $Id: ixp4xx.c,v 1.1 2004/05/13 22:21:26 dsaxena Exp $
+ * $Id: ixp4xx.c,v 1.7 2004/11/04 13:24:15 gleixner Exp $
  *
  * drivers/mtd/maps/ixp4xx.c
  *
@@ -39,10 +39,11 @@
 #define	BYTE1(h)	((h) & 0xFF)
 #endif
 
-static __u16
-ixp4xx_read16(struct map_info *map, unsigned long ofs)
+static map_word ixp4xx_read16(struct map_info *map, unsigned long ofs)
 {
-	return *(__u16 *) (map->map_priv_1 + ofs);
+	map_word val;
+	val.x[0] = *(__u16 *) (map->map_priv_1 + ofs);
+	return val;
 }
 
 /*
@@ -50,9 +51,8 @@ ixp4xx_read16(struct map_info *map, unsigned long ofs)
  * when attached to a 16-bit wide device (such as the 28F128J3A),
  * so we can't just memcpy_fromio().
  */
-static void
-ixp4xx_copy_from(struct map_info *map, void *to,
-		 unsigned long from, ssize_t len)
+static void ixp4xx_copy_from(struct map_info *map, void *to,
+			     unsigned long from, ssize_t len)
 {
 	int i;
 	u8 *dest = (u8 *) to;
@@ -69,10 +69,22 @@ ixp4xx_copy_from(struct map_info *map, void *to,
 		dest[len - 1] = BYTE0(src[i]);
 }
 
-static void
-ixp4xx_write16(struct map_info *map, __u16 d, unsigned long adr)
+/* 
+ * Unaligned writes are ignored, causing the 8-bit
+ * probe to fail and proceed to the 16-bit probe (which succeeds).
+ */
+static void ixp4xx_probe_write16(struct map_info *map, map_word d, unsigned long adr)
 {
-	*(__u16 *) (map->map_priv_1 + adr) = d;
+	if (!(adr & 1))
+	       *(__u16 *) (map->map_priv_1 + adr) = d.x[0];
+}
+
+/* 
+ * Fast write16 function without the probing check above
+ */
+static void ixp4xx_write16(struct map_info *map, map_word d, unsigned long adr)
+{
+       *(__u16 *) (map->map_priv_1 + adr) = d.x[0];
 }
 
 struct ixp4xx_flash_info {
@@ -84,12 +96,12 @@ struct ixp4xx_flash_info {
 
 static const char *probes[] = { "RedBoot", "cmdlinepart", NULL };
 
-static int
-ixp4xx_flash_remove(struct device *_dev)
+static int ixp4xx_flash_remove(struct device *_dev)
 {
 	struct platform_device *dev = to_platform_device(_dev);
 	struct flash_platform_data *plat = dev->dev.platform_data;
 	struct ixp4xx_flash_info *info = dev_get_drvdata(&dev->dev);
+	map_word d;
 
 	dev_set_drvdata(&dev->dev, NULL);
 
@@ -99,7 +111,8 @@ ixp4xx_flash_remove(struct device *_dev)
 	/*
 	 * This is required for a soft reboot to work.
 	 */
-	ixp4xx_write16(&info->map, 0xff, 0x55 * 0x2);
+	d.x[0] = 0xff;
+	ixp4xx_write16(&info->map, d, 0x55 * 0x2);
 
 	if (info->mtd) {
 		del_mtd_partitions(info->mtd);
@@ -168,10 +181,10 @@ static int ixp4xx_flash_probe(struct device *_dev)
 	 * any board use 8-bit access, we'll fixup the driver to
 	 * handle that.
 	 */
-	info->map.buswidth = 2;
+	info->map.bankwidth = 2;
 	info->map.name = dev->dev.bus_id;
-	info->map.read16 = ixp4xx_read16,
-	info->map.write16 = ixp4xx_write16,
+	info->map.read = ixp4xx_read16,
+	info->map.write = ixp4xx_probe_write16,
 	info->map.copy_from = ixp4xx_copy_from,
 
 	info->res = request_mem_region(dev->resource->start, 
@@ -183,9 +196,8 @@ static int ixp4xx_flash_probe(struct device *_dev)
 		goto Error;
 	}
 
-	info->map.map_priv_1 =
-	    (unsigned long) ioremap(dev->resource->start, 
-				    dev->resource->end - dev->resource->start + 1);
+	info->map.map_priv_1 = ioremap(dev->resource->start,
+			    dev->resource->end - dev->resource->start + 1);
 	if (!info->map.map_priv_1) {
 		printk(KERN_ERR "IXP4XXFlash: Failed to ioremap region\n");
 		err = -EIO;
@@ -199,6 +211,9 @@ static int ixp4xx_flash_probe(struct device *_dev)
 		goto Error;
 	}
 	info->mtd->owner = THIS_MODULE;
+	
+	/* Use the fast version */
+	info->map.write = ixp4xx_write16,
 
 	err = parse_mtd_partitions(info->mtd, probes, &info->partitions, 0);
 	if (err > 0) {

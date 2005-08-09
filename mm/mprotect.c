@@ -16,151 +16,102 @@
 #include <linux/fs.h>
 #include <linux/highmem.h>
 #include <linux/security.h>
+#include <linux/mempolicy.h>
+#include <linux/personality.h>
+#include <linux/syscalls.h>
 
 #include <asm/uaccess.h>
-#include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
-static inline void
-change_pte_range(pmd_t *pmd, unsigned long address,
-		unsigned long size, pgprot_t newprot)
+static void change_pte_range(struct mm_struct *mm, pmd_t *pmd,
+		unsigned long addr, unsigned long end, pgprot_t newprot)
 {
-	pte_t * pte;
-	unsigned long end;
+	pte_t *pte;
 
-	if (pmd_none(*pmd))
-		return;
-	if (pmd_bad(*pmd)) {
-		pmd_ERROR(*pmd);
-		pmd_clear(pmd);
-		return;
-	}
-	pte = pte_offset_map(pmd, address);
-	address &= ~PMD_MASK;
-	end = address + size;
-	if (end > PMD_SIZE)
-		end = PMD_SIZE;
+	pte = pte_offset_map(pmd, addr);
 	do {
 		if (pte_present(*pte)) {
-			pte_t entry;
+			pte_t ptent;
 
 			/* Avoid an SMP race with hardware updated dirty/clean
 			 * bits by wiping the pte and then setting the new pte
 			 * into place.
 			 */
-			entry = ptep_get_and_clear(pte);
-			set_pte(pte, pte_modify(entry, newprot));
+			ptent = pte_modify(ptep_get_and_clear(mm, addr, pte), newprot);
+			set_pte_at(mm, addr, pte, ptent);
+			lazy_mmu_prot_update(ptent);
 		}
-		address += PAGE_SIZE;
-		pte++;
-	} while (address && (address < end));
+	} while (pte++, addr += PAGE_SIZE, addr != end);
 	pte_unmap(pte - 1);
 }
 
-static inline void
-change_pmd_range(pgd_t *pgd, unsigned long address,
-		unsigned long size, pgprot_t newprot)
+static inline void change_pmd_range(struct mm_struct *mm, pud_t *pud,
+		unsigned long addr, unsigned long end, pgprot_t newprot)
 {
-	pmd_t * pmd;
-	unsigned long end;
+	pmd_t *pmd;
+	unsigned long next;
 
-	if (pgd_none(*pgd))
-		return;
-	if (pgd_bad(*pgd)) {
-		pgd_ERROR(*pgd);
-		pgd_clear(pgd);
-		return;
-	}
-	pmd = pmd_offset(pgd, address);
-	address &= ~PGDIR_MASK;
-	end = address + size;
-	if (end > PGDIR_SIZE)
-		end = PGDIR_SIZE;
+	pmd = pmd_offset(pud, addr);
 	do {
-		change_pte_range(pmd, address, end - address, newprot);
-		address = (address + PMD_SIZE) & PMD_MASK;
-		pmd++;
-	} while (address && (address < end));
+		next = pmd_addr_end(addr, end);
+		if (pmd_none_or_clear_bad(pmd))
+			continue;
+		change_pte_range(mm, pmd, addr, next, newprot);
+	} while (pmd++, addr = next, addr != end);
 }
 
-static void
-change_protection(struct vm_area_struct *vma, unsigned long start,
-		unsigned long end, pgprot_t newprot)
+static inline void change_pud_range(struct mm_struct *mm, pgd_t *pgd,
+		unsigned long addr, unsigned long end, pgprot_t newprot)
 {
-	pgd_t *dir;
-	unsigned long beg = start;
+	pud_t *pud;
+	unsigned long next;
 
-	dir = pgd_offset(current->mm, start);
-	flush_cache_range(vma, beg, end);
-	if (start >= end)
-		BUG();
-	spin_lock(&current->mm->page_table_lock);
+	pud = pud_offset(pgd, addr);
 	do {
-		change_pmd_range(dir, start, end - start, newprot);
-		start = (start + PGDIR_SIZE) & PGDIR_MASK;
-		dir++;
-	} while (start && (start < end));
-	flush_tlb_range(vma, beg, end);
-	spin_unlock(&current->mm->page_table_lock);
-	return;
+		next = pud_addr_end(addr, end);
+		if (pud_none_or_clear_bad(pud))
+			continue;
+		change_pmd_range(mm, pud, addr, next, newprot);
+	} while (pud++, addr = next, addr != end);
 }
-/*
- * Try to merge a vma with the previous flag, return 1 if successful or 0 if it
- * was impossible.
- */
-static int
-mprotect_attempt_merge(struct vm_area_struct *vma, struct vm_area_struct *prev,
-		unsigned long end, int newflags)
+
+static void change_protection(struct vm_area_struct *vma,
+		unsigned long addr, unsigned long end, pgprot_t newprot)
 {
-	struct mm_struct * mm;
+	struct mm_struct *mm = vma->vm_mm;
+	pgd_t *pgd;
+	unsigned long next;
+	unsigned long start = addr;
 
-	if (!prev || !vma)
-		return 0;
-	mm = vma->vm_mm;
-	if (prev->vm_end != vma->vm_start)
-		return 0;
-	if (!can_vma_merge(prev, newflags))
-		return 0;
-	if (vma->vm_file || (vma->vm_flags & VM_SHARED))
-		return 0;
-
-	/*
-	 * If the whole area changes to the protection of the previous one
-	 * we can just get rid of it.
-	 */
-	if (end == vma->vm_end) {
-		spin_lock(&mm->page_table_lock);
-		prev->vm_end = end;
-		__vma_unlink(mm, vma, prev);
-		spin_unlock(&mm->page_table_lock);
-
-		kmem_cache_free(vm_area_cachep, vma);
-		mm->map_count--;
-		return 1;
-	} 
-
-	/*
-	 * Otherwise extend it.
-	 */
+	BUG_ON(addr >= end);
+	pgd = pgd_offset(mm, addr);
+	flush_cache_range(vma, addr, end);
 	spin_lock(&mm->page_table_lock);
-	prev->vm_end = end;
-	vma->vm_start = end;
+	do {
+		next = pgd_addr_end(addr, end);
+		if (pgd_none_or_clear_bad(pgd))
+			continue;
+		change_pud_range(mm, pgd, addr, next, newprot);
+	} while (pgd++, addr = next, addr != end);
+	flush_tlb_range(vma, start, end);
 	spin_unlock(&mm->page_table_lock);
-	return 1;
 }
 
 static int
 mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
-	unsigned long start, unsigned long end, unsigned int newflags)
+	unsigned long start, unsigned long end, unsigned long newflags)
 {
-	struct mm_struct * mm = vma->vm_mm;
+	struct mm_struct *mm = vma->vm_mm;
+	unsigned long oldflags = vma->vm_flags;
+	long nrpages = (end - start) >> PAGE_SHIFT;
 	unsigned long charged = 0;
 	pgprot_t newprot;
+	pgoff_t pgoff;
 	int error;
 
-	if (newflags == vma->vm_flags) {
+	if (newflags == oldflags) {
 		*pprev = vma;
 		return 0;
 	}
@@ -174,9 +125,8 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	 * a MAP_NORESERVE private mapping to writable will now reserve.
 	 */
 	if (newflags & VM_WRITE) {
-		if (!(vma->vm_flags & (VM_ACCOUNT|VM_WRITE|VM_SHARED))
-				&& VM_MAYACCT(vma)) {
-			charged = (end - start) >> PAGE_SHIFT;
+		if (!(oldflags & (VM_ACCOUNT|VM_WRITE|VM_SHARED|VM_HUGETLB))) {
+			charged = nrpages;
 			if (security_vm_enough_memory(charged))
 				return -ENOMEM;
 			newflags |= VM_ACCOUNT;
@@ -185,24 +135,24 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 
 	newprot = protection_map[newflags & 0xf];
 
-	if (start == vma->vm_start) {
-		/*
-		 * Try to merge with the previous vma.
-		 */
-		if (mprotect_attempt_merge(vma, *pprev, end, newflags)) {
-			vma = *pprev;
-			goto success;
-		}
-	} else {
+	/*
+	 * First try to merge with previous and/or next vma.
+	 */
+	pgoff = vma->vm_pgoff + ((start - vma->vm_start) >> PAGE_SHIFT);
+	*pprev = vma_merge(mm, *pprev, start, end, newflags,
+			vma->anon_vma, vma->vm_file, pgoff, vma_policy(vma));
+	if (*pprev) {
+		vma = *pprev;
+		goto success;
+	}
+
+	*pprev = vma;
+
+	if (start != vma->vm_start) {
 		error = split_vma(mm, vma, start, 1);
 		if (error)
 			goto fail;
 	}
-	/*
-	 * Unless it returns an error, this function always sets *pprev to
-	 * the first vma for which vma->vm_end >= end.
-	 */
-	*pprev = vma;
 
 	if (end != vma->vm_end) {
 		error = split_vma(mm, vma, end, 0);
@@ -210,12 +160,16 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 			goto fail;
 	}
 
-	spin_lock(&mm->page_table_lock);
+success:
+	/*
+	 * vm_flags and vm_page_prot are protected by the mmap_sem
+	 * held in write mode.
+	 */
 	vma->vm_flags = newflags;
 	vma->vm_page_prot = newprot;
-	spin_unlock(&mm->page_table_lock);
-success:
 	change_protection(vma, start, end, newprot);
+	__vm_stat_account(mm, oldflags, vma->vm_file, -nrpages);
+	__vm_stat_account(mm, newflags, vma->vm_file, nrpages);
 	return 0;
 
 fail:
@@ -226,8 +180,8 @@ fail:
 asmlinkage long
 sys_mprotect(unsigned long start, size_t len, unsigned long prot)
 {
-	unsigned long vm_flags, nstart, end, tmp;
-	struct vm_area_struct * vma, * next, * prev;
+	unsigned long vm_flags, nstart, end, tmp, reqprot;
+	struct vm_area_struct *vma, *prev;
 	int error = -EINVAL;
 	const int grows = prot & (PROT_GROWSDOWN|PROT_GROWSUP);
 	prot &= ~(PROT_GROWSDOWN|PROT_GROWSUP);
@@ -236,14 +190,22 @@ sys_mprotect(unsigned long start, size_t len, unsigned long prot)
 
 	if (start & ~PAGE_MASK)
 		return -EINVAL;
+	if (!len)
+		return 0;
 	len = PAGE_ALIGN(len);
 	end = start + len;
-	if (end < start)
+	if (end <= start)
 		return -ENOMEM;
 	if (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC | PROT_SEM))
 		return -EINVAL;
-	if (end == start)
-		return 0;
+
+	reqprot = prot;
+	/*
+	 * Does the application expect PROT_READ to imply PROT_EXEC:
+	 */
+	if (unlikely((prot & PROT_READ) &&
+			(current->personality & READ_IMPLIES_EXEC)))
+		prot |= PROT_EXEC;
 
 	vm_flags = calc_vm_prot_bits(prot);
 
@@ -271,10 +233,11 @@ sys_mprotect(unsigned long start, size_t len, unsigned long prot)
 				goto out;
 		}
 	}
+	if (start > vma->vm_start)
+		prev = vma;
 
 	for (nstart = start ; ; ) {
-		unsigned int newflags;
-		int last = 0;
+		unsigned long newflags;
 
 		/* Here we know that  vma->vm_start <= nstart < vma->vm_end. */
 
@@ -290,42 +253,28 @@ sys_mprotect(unsigned long start, size_t len, unsigned long prot)
 			goto out;
 		}
 
-		error = security_file_mprotect(vma, prot);
+		error = security_file_mprotect(vma, reqprot, prot);
 		if (error)
 			goto out;
 
-		if (vma->vm_end > end) {
-			error = mprotect_fixup(vma, &prev, nstart, end, newflags);
-			goto out;
-		}
-		if (vma->vm_end == end)
-			last = 1;
-
 		tmp = vma->vm_end;
-		next = vma->vm_next;
+		if (tmp > end)
+			tmp = end;
 		error = mprotect_fixup(vma, &prev, nstart, tmp, newflags);
 		if (error)
 			goto out;
-		if (last)
-			break;
 		nstart = tmp;
-		vma = next;
+
+		if (nstart < prev->vm_end)
+			nstart = prev->vm_end;
+		if (nstart >= end)
+			goto out;
+
+		vma = prev->vm_next;
 		if (!vma || vma->vm_start != nstart) {
 			error = -ENOMEM;
 			goto out;
 		}
-	}
-
-	if (next && prev->vm_end == next->vm_start &&
-			can_vma_merge(next, prev->vm_flags) &&
-			!prev->vm_file && !(prev->vm_flags & VM_SHARED)) {
-		spin_lock(&prev->vm_mm->page_table_lock);
-		prev->vm_end = next->vm_end;
-		__vma_unlink(prev->vm_mm, next, prev);
-		spin_unlock(&prev->vm_mm->page_table_lock);
-
-		kmem_cache_free(vm_area_cachep, next);
-		prev->vm_mm->map_count--;
 	}
 out:
 	up_write(&current->mm->mmap_sem);

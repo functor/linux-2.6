@@ -6,7 +6,7 @@
 #include <linux/workqueue.h>
 #include <asm/ccwdev.h>
 
-#define VERSION_LCS_H "$Revision: 1.15 $"
+#define VERSION_LCS_H "$Revision: 1.19 $"
 
 #define LCS_DBF_TEXT(level, name, text) \
 	do { \
@@ -152,6 +152,12 @@ enum lcs_dev_states {
 	DEV_STATE_RECOVER,
 };
 
+enum lcs_threads {
+	LCS_SET_MC_THREAD 	= 1,
+	LCS_STARTLAN_THREAD	= 2,
+	LCS_STOPLAN_THREAD	= 4,
+	LCS_STARTUP_THREAD	= 8,
+};
 /**
  * LCS struct declarations
  */
@@ -221,8 +227,8 @@ struct lcs_cmd {
 				struct lcs_ip_mac_pair
 				ip_mac_pair[32];
 				__u32	  response_data;
-			} lcs_ipass_ctlmsg;
-		} lcs_qipassist;
+			} lcs_ipass_ctlmsg __attribute ((packed));
+		} lcs_qipassist __attribute__ ((packed));
 #endif /*CONFIG_IP_MULTICAST */
 	} cmd __attribute__ ((packed));
 }  __attribute__ ((packed));
@@ -247,9 +253,11 @@ struct lcs_buffer {
 struct lcs_reply {
 	struct list_head list;
 	__u16 sequence_no;
+	atomic_t refcnt;
 	/* Callback for completion notification. */
 	void (*callback)(struct lcs_card *, struct lcs_cmd *);
 	wait_queue_head_t wait_q;
+	struct lcs_card *card;
 	int received;
 	int rc;
 };
@@ -268,11 +276,13 @@ struct lcs_channel {
 	int buf_idx;
 };
 
+
 /**
  * definition of the lcs card
  */
 struct lcs_card {
 	spinlock_t lock;
+	spinlock_t ipm_lock;
 	enum lcs_dev_states state;
 	struct net_device *dev;
 	struct net_device_stats stats;
@@ -286,7 +296,11 @@ struct lcs_card {
 	int lancmd_timeout;
 
 	struct work_struct kernel_thread_starter;
-	unsigned long thread_mask;
+	spinlock_t mask_lock;
+	unsigned long thread_start_mask;
+	unsigned long thread_running_mask;
+	unsigned long thread_allowed_mask;
+	wait_queue_head_t wait_q;
 
 #ifdef CONFIG_IP_MULTICAST
 	struct list_head ipm_list;
@@ -295,6 +309,7 @@ struct lcs_card {
 	__u16 ip_assists_supported;
 	__u16 ip_assists_enabled;
 	__s8 lan_type;
+	__u32 pkt_seq;
 	__u16 sequence_no;
 	__s16 portno;
 	/* Some info copied from probeinfo */

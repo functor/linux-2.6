@@ -56,7 +56,7 @@ static char *hw;		/* pointer to hw=xxx command line string */
 typedef struct card_s {
 	struct net_device *dev;
 	spinlock_t lock;	/* TX lock */
-	u8 *win0base;		/* ISA window base address */
+	u8 __iomem *win0base;	/* ISA window base address */
 	u32 phy_winbase;	/* ISA physical base address */
 	sync_serial_settings settings;
 	int rxpart;		/* partial frame received, next frame invalid*/
@@ -111,9 +111,6 @@ static inline void openwin(card_t *card, u8 page)
 	card->page = page;
 	writeb(page, card->win0base + C101_PAGE);
 }
-
-
-#define close_windows(card) {} /* no hardware support */
 
 
 #include "hd6457x.c"
@@ -220,7 +217,8 @@ static int c101_close(struct net_device *dev)
 static int c101_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
 	const size_t size = sizeof(sync_serial_settings);
-	sync_serial_settings new_line, *line = ifr->ifr_settings.ifs_ifsu.sync;
+	sync_serial_settings new_line;
+	sync_serial_settings __user *line = ifr->ifr_settings.ifs_ifsu.sync;
 	port_t *port = dev_to_port(dev);
 
 #ifdef DEBUG_RINGS
@@ -378,8 +376,6 @@ static int __init c101_run(unsigned long irq, unsigned long winbase)
 		c101_destroy_card(card);
 		return result;
 	}
-
-	/* XXX: are we OK with having that done when card is already up? */
 
 	sca_init_sync_port(card); /* Set up C101 memory */
 	hdlc_set_carrier(!(sca_in(MSCI1_OFFSET + ST3, card) & ST3_DCD), dev);

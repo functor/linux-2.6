@@ -4,6 +4,41 @@
  * "ACCEL_MMIO" ifdef branches in XFree86
  * --dte
  */
+
+static void radeon_fixup_offset(struct radeonfb_info *rinfo)
+{
+	u32 local_base;
+
+	/* *** Ugly workaround *** */
+	/*
+	 * On some platforms, the video memory is mapped at 0 in radeon chip space
+	 * (like PPCs) by the firmware. X will always move it up so that it's seen
+	 * by the chip to be at the same address as the PCI BAR.
+	 * That means that when switching back from X, there is a mismatch between
+	 * the offsets programmed into the engine. This means that potentially,
+	 * accel operations done before radeonfb has a chance to re-init the engine
+	 * will have incorrect offsets, and potentially trash system memory !
+	 *
+	 * The correct fix is for fbcon to never call any accel op before the engine
+	 * has properly been re-initialized (by a call to set_var), but this is a
+	 * complex fix. This workaround in the meantime, called before every accel
+	 * operation, makes sure the offsets are in sync.
+	 */
+
+	radeon_fifo_wait (1);
+	local_base = INREG(MC_FB_LOCATION) << 16;
+	if (local_base == rinfo->fb_local_base)
+		return;
+
+	rinfo->fb_local_base = local_base;
+
+	radeon_fifo_wait (3);
+	OUTREG(DEFAULT_PITCH_OFFSET, (rinfo->pitch << 0x16) |
+				     (rinfo->fb_local_base >> 10));
+	OUTREG(DST_PITCH_OFFSET, (rinfo->pitch << 0x16) | (rinfo->fb_local_base >> 10));
+	OUTREG(SRC_PITCH_OFFSET, (rinfo->pitch << 0x16) | (rinfo->fb_local_base >> 10));
+}
+
 static void radeonfb_prim_fillrect(struct radeonfb_info *rinfo, 
 				   const struct fb_fillrect *region)
 {
@@ -13,7 +48,10 @@ static void radeonfb_prim_fillrect(struct radeonfb_info *rinfo,
 		rinfo->dp_gui_master_cntl  /* contains, like GMC_DST_32BPP */
                 | GMC_BRUSH_SOLID_COLOR
                 | ROP3_P);
-	OUTREG(DP_BRUSH_FRGD_CLR, region->color);
+	if (radeon_get_dstbpp(rinfo->depth) != DST_8BPP)
+		OUTREG(DP_BRUSH_FRGD_CLR, rinfo->pseudo_palette[region->color]);
+	else
+		OUTREG(DP_BRUSH_FRGD_CLR, region->color);
 	OUTREG(DP_WRITE_MSK, 0xffffffff);
 	OUTREG(DP_CNTL, (DST_X_LEFT_TO_RIGHT | DST_Y_TOP_TO_BOTTOM));
 
@@ -30,13 +68,15 @@ void radeonfb_fillrect(struct fb_info *info, const struct fb_fillrect *region)
   
 	if (info->state != FBINFO_STATE_RUNNING)
 		return;
-	if (radeon_accel_disabled()) {
+	if (info->flags & FBINFO_HWACCEL_DISABLED) {
 		cfb_fillrect(info, region);
 		return;
 	}
 
-	vxres = info->var.xres;
-	vyres = info->var.yres;
+	radeon_fixup_offset(rinfo);
+
+	vxres = info->var.xres_virtual;
+	vyres = info->var.yres_virtual;
 
 	memcpy(&modded, region, sizeof(struct fb_fillrect));
 
@@ -53,19 +93,33 @@ void radeonfb_fillrect(struct fb_info *info, const struct fb_fillrect *region)
 static void radeonfb_prim_copyarea(struct radeonfb_info *rinfo, 
 				   const struct fb_copyarea *area)
 {
+	int xdir, ydir;
+	u32 sx, sy, dx, dy, w, h;
+
+	w = area->width; h = area->height;
+	dx = area->dx; dy = area->dy;
+	sx = area->sx; sy = area->sy;
+	xdir = sx - dx;
+	ydir = sy - dy;
+
+	if ( xdir < 0 ) { sx += w-1; dx += w-1; }
+	if ( ydir < 0 ) { sy += h-1; dy += h-1; }
+
 	radeon_fifo_wait(3);
 	OUTREG(DP_GUI_MASTER_CNTL,
 		rinfo->dp_gui_master_cntl /* i.e. GMC_DST_32BPP */
+		| GMC_BRUSH_NONE
 		| GMC_SRC_DSTCOLOR
 		| ROP3_S 
-		| DP_SRC_RECT );
+		| DP_SRC_SOURCE_MEMORY );
 	OUTREG(DP_WRITE_MSK, 0xffffffff);
-	OUTREG(DP_CNTL, (DST_X_LEFT_TO_RIGHT | DST_Y_TOP_TO_BOTTOM));
+	OUTREG(DP_CNTL, (xdir>=0 ? DST_X_LEFT_TO_RIGHT : 0)
+			| (ydir>=0 ? DST_Y_TOP_TO_BOTTOM : 0));
 
 	radeon_fifo_wait(3);
-	OUTREG(SRC_Y_X, (area->sy << 16) | area->sx);
-	OUTREG(DST_Y_X, (area->dy << 16) | area->dx);
-	OUTREG(DST_HEIGHT_WIDTH, (area->height << 16) | area->width);
+	OUTREG(SRC_Y_X, (sy << 16) | sx);
+	OUTREG(DST_Y_X, (dy << 16) | dx);
+	OUTREG(DST_HEIGHT_WIDTH, (h << 16) | w);
 }
 
 
@@ -83,13 +137,15 @@ void radeonfb_copyarea(struct fb_info *info, const struct fb_copyarea *area)
   
 	if (info->state != FBINFO_STATE_RUNNING)
 		return;
-	if (radeon_accel_disabled()) {
+	if (info->flags & FBINFO_HWACCEL_DISABLED) {
 		cfb_copyarea(info, area);
 		return;
 	}
 
-	vxres = info->var.xres;
-	vyres = info->var.yres;
+	radeon_fixup_offset(rinfo);
+
+	vxres = info->var.xres_virtual;
+	vyres = info->var.yres_virtual;
 
 	if(!modded.width || !modded.height ||
 	   modded.sx >= vxres || modded.sy >= vyres ||
@@ -132,32 +188,6 @@ void radeonfb_engine_reset(struct radeonfb_info *rinfo)
 	u32 host_path_cntl;
 
 	radeon_engine_flush (rinfo);
-
-    	/* Some ASICs have bugs with dynamic-on feature, which are  
-     	 * ASIC-version dependent, so we force all blocks on for now
-     	 * -- from XFree86
-     	 * We don't do that on macs, things just work here with dynamic
-     	 * clocking... --BenH
-	 */
-#ifdef CONFIG_ALL_PPC
-	if (_machine != _MACH_Pmac && rinfo->hasCRTC2)
-#else
-	if (rinfo->has_CRTC2)
-#endif	
-	{
-		u32 tmp;
-
-		tmp = INPLL(SCLK_CNTL);
-		OUTPLL(SCLK_CNTL, ((tmp & ~DYN_STOP_LAT_MASK) |
-				   CP_MAX_DYN_STOP_LAT |
-				   SCLK_FORCEON_MASK));
-
-		if (rinfo->family == CHIP_FAMILY_RV200)
-		{
-			tmp = INPLL(SCLK_MORE_CNTL);
-			OUTPLL(SCLK_MORE_CNTL, tmp | SCLK_MORE_FORCEON);
-		}
-	}
 
 	clock_cntl_index = INREG(CLOCK_CNTL_INDEX);
 	mclk_cntl = INPLL(MCLK_CNTL);
@@ -218,8 +248,6 @@ void radeonfb_engine_reset(struct radeonfb_info *rinfo)
 
 	OUTREG(CLOCK_CNTL_INDEX, clock_cntl_index);
 	OUTPLL(MCLK_CNTL, mclk_cntl);
-	if (rinfo->R300_cg_workaround)
-		R300_cg_workardound(rinfo);
 }
 
 void radeonfb_engine_init (struct radeonfb_info *rinfo)

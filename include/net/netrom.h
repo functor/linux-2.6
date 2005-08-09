@@ -8,6 +8,7 @@
 #define _NETROM_H 
 #include <linux/netrom.h>
 #include <linux/list.h>
+#include <net/sock.h>
 
 #define	NR_NETWORK_LEN			15
 #define	NR_TRANSPORT_LEN		5
@@ -55,7 +56,8 @@ enum {
 #define NR_MAX_WINDOW_SIZE		127			/* Maximum Window Allowable - 127 */
 #define	NR_MAX_PACKET_SIZE		236			/* Maximum Packet Length - 236 */
 
-typedef struct {
+struct nr_sock {
+	struct sock		sock;
 	ax25_address		user_addr, source_addr, dest_addr;
 	struct net_device		*device;
 	unsigned char		my_index,   my_id;
@@ -72,10 +74,9 @@ typedef struct {
 	struct sk_buff_head	ack_queue;
 	struct sk_buff_head	reseq_queue;
 	struct sk_buff_head	frag_queue;
-	struct sock		*sk;		/* Backlink to socket */
-} nr_cb;
+};
 
-#define nr_sk(__sk) ((nr_cb *)(__sk)->sk_protinfo)
+#define nr_sk(sk) ((struct nr_sock *)(sk))
 
 struct nr_neigh {
 	struct hlist_node	neigh_node;
@@ -111,9 +112,6 @@ struct nr_node {
 /*********************************************************************
  *	nr_node & nr_neigh lists, refcounting and locking
  *********************************************************************/
-
-extern struct hlist_head nr_node_list;
-extern struct hlist_head nr_neigh_list;
 
 #define nr_node_hold(__nr_node) \
 	atomic_inc(&((__nr_node)->refcount))
@@ -206,7 +204,7 @@ extern void nr_check_iframes_acked(struct sock *, unsigned short);
 extern void nr_rt_device_down(struct net_device *);
 extern struct net_device *nr_dev_first(void);
 extern struct net_device *nr_dev_get(ax25_address *);
-extern int  nr_rt_ioctl(unsigned int, void *);
+extern int  nr_rt_ioctl(unsigned int, void __user *);
 extern void nr_link_failed(ax25_cb *, int);
 extern int  nr_route_frame(struct sk_buff *, ax25_cb *);
 extern struct file_operations nr_nodes_fops;
@@ -224,6 +222,7 @@ extern void nr_transmit_refusal(struct sk_buff *, int);
 extern void nr_disconnect(struct sock *, int);
 
 /* nr_timer.c */
+extern void nr_init_timers(struct sock *sk);
 extern void nr_start_heartbeat(struct sock *);
 extern void nr_start_t1timer(struct sock *);
 extern void nr_start_t2timer(struct sock *);

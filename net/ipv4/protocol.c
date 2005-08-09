@@ -7,7 +7,7 @@
  *
  * Version:	$Id: protocol.c,v 1.14 2001/05/18 02:25:49 davem Exp $
  *
- * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
+ * Authors:	Ross Biro
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
  *
  * Fixes:
@@ -48,14 +48,14 @@
 #include <net/ipip.h>
 #include <linux/igmp.h>
 
-struct inet_protocol *inet_protos[MAX_INET_PROTOS];
-static spinlock_t inet_proto_lock = SPIN_LOCK_UNLOCKED;
+struct net_protocol *inet_protos[MAX_INET_PROTOS];
+static DEFINE_SPINLOCK(inet_proto_lock);
 
 /*
  *	Add a protocol handler to the hash tables
  */
 
-int inet_add_protocol(struct inet_protocol *prot, unsigned char protocol)
+int inet_add_protocol(struct net_protocol *prot, unsigned char protocol)
 {
 	int hash, ret;
 
@@ -77,7 +77,7 @@ int inet_add_protocol(struct inet_protocol *prot, unsigned char protocol)
  *	Remove a protocol from the hash tables.
  */
  
-int inet_del_protocol(struct inet_protocol *prot, unsigned char protocol)
+int inet_del_protocol(struct net_protocol *prot, unsigned char protocol)
 {
 	int hash, ret;
 

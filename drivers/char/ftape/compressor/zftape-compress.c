@@ -27,11 +27,6 @@
  *     changed * appropriately. See below.
  */
 
- char zftc_src[] ="$Source: /homes/cvs/ftape-stacked/ftape/compressor/zftape-compress.c,v $";
- char zftc_rev[] = "$Revision: 1.1.6.1 $";
- char zftc_dat[] = "$Date: 1997/11/16 15:15:56 $";
-
-#include <linux/version.h>
 #include <linux/errno.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -74,10 +69,10 @@ static unsigned int zftc_rd_compressed   = 0;
 /* forward */
 static int  zftc_write(int *write_cnt,
 		       __u8 *dst_buf, const int seg_sz,
-		       const __u8 *src_buf, const int req_len,
+		       const __u8 __user *src_buf, const int req_len,
 		       const zft_position *pos, const zft_volinfo *volume);
 static int  zftc_read(int *read_cnt,
-		      __u8  *dst_buf, const int to_do,
+		      __u8  __user *dst_buf, const int to_do,
 		      const __u8 *src_buf, const int seg_sz,
 		      const zft_position *pos, const zft_volinfo *volume);
 static int  zftc_seek(unsigned int new_block_pos, 
@@ -539,7 +534,7 @@ static int start_new_cseg(cmpr_info *cluster,
  */
 static int zftc_write(int *write_cnt,
 		      __u8 *dst_buf, const int seg_sz,
-		      const __u8 *src_buf, const int req_len,
+		      const __u8 __user *src_buf, const int req_len,
 		      const zft_position *pos, const zft_volinfo *volume)
 {
 	int req_len_left = req_len;
@@ -656,7 +651,7 @@ static int zftc_write(int *write_cnt,
  * be set to 0 
  */
 static int zftc_read (int *read_cnt, 
-		      __u8  *dst_buf, const int to_do, 
+		      __u8  __user *dst_buf, const int to_do, 
 		      const __u8 *src_buf, const int seg_sz, 
 		      const zft_position *pos, const zft_volinfo *volume)
 {          
@@ -1177,12 +1172,11 @@ int zft_compressor_init(void)
         if (TRACE_LEVEL >= ft_t_info) {
 		printk(
 KERN_INFO "(c) 1997 Claus-Justus Heine (claus@momo.math.rwth-aachen.de)\n"
-KERN_INFO "Compressor for zftape (lzrw3 algorithm)\n"
-KERN_INFO "Compiled for kernel version %s\n", UTS_RELEASE);
+KERN_INFO "Compressor for zftape (lzrw3 algorithm)\n");
         }
 #else /* !MODULE */
 	/* print a short no-nonsense boot message */
-	printk("zftape compressor v1.00a 970514 for Linux " UTS_RELEASE "\n");
+	printk("zftape compressor v1.00a 970514\n");
 	printk("For use with " FTAPE_VERSION "\n");
 #endif /* MODULE */
 	TRACE(ft_t_info, "zft_compressor_init @ 0x%p", zft_compressor_init);

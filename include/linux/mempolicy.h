@@ -30,7 +30,7 @@
 #include <linux/bitmap.h>
 #include <linux/slab.h>
 #include <linux/rbtree.h>
-#include <asm/semaphore.h>
+#include <linux/spinlock.h>
 
 struct vm_area_struct;
 
@@ -67,9 +67,6 @@ struct mempolicy {
 		/* undefined for default */
 	} v;
 };
-
-/* An NULL mempolicy pointer is a synonym of &default_policy. */
-extern struct mempolicy default_policy;
 
 /*
  * Support for managing mempolicy data objects (clone, copy, destroy)
@@ -137,13 +134,13 @@ struct sp_node {
 
 struct shared_policy {
 	struct rb_root root;
-	struct semaphore sem;
+	spinlock_t lock;
 };
 
 static inline void mpol_shared_policy_init(struct shared_policy *info)
 {
 	info->root = RB_ROOT;
-	init_MUTEX(&info->sem);
+	spin_lock_init(&info->lock);
 }
 
 int mpol_set_shared_policy(struct shared_policy *info,
@@ -152,6 +149,9 @@ int mpol_set_shared_policy(struct shared_policy *info,
 void mpol_free_shared_policy(struct shared_policy *p);
 struct mempolicy *mpol_shared_policy_lookup(struct shared_policy *sp,
 					    unsigned long idx);
+
+extern void numa_default_policy(void);
+extern void numa_policy_init(void);
 
 #else
 
@@ -214,6 +214,14 @@ mpol_shared_policy_lookup(struct shared_policy *sp, unsigned long idx)
 
 #define vma_policy(vma) NULL
 #define vma_set_policy(vma, pol) do {} while(0)
+
+static inline void numa_policy_init(void)
+{
+}
+
+static inline void numa_default_policy(void)
+{
+}
 
 #endif /* CONFIG_NUMA */
 #endif /* __KERNEL__ */

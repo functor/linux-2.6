@@ -66,11 +66,11 @@ static int
 			struct file *);
 static ssize_t
 	dev_irnet_write(struct file *,
-			const char *,
+			const char __user *,
 			size_t,
 			loff_t *),
 	dev_irnet_read(struct file *,
-		       char *,
+		       char __user *,
 		       size_t,
 		       loff_t *);
 static unsigned int
@@ -114,13 +114,6 @@ static struct miscdevice irnet_misc_device =
 	IRNET_MINOR,
 	"irnet",
 	&irnet_device_fops
-};
-
-/* Generic PPP callbacks (to call us) */
-struct ppp_channel_ops irnet_ppp_ops =
-{
-  ppp_irnet_send,
-  ppp_irnet_ioctl
 };
 
 #endif /* IRNET_PPP_H */

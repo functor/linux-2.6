@@ -9,6 +9,8 @@
 #include <linux/fcntl.h>
 #include <linux/init.h>
 #include <linux/delay.h>
+#include <linux/fs.h>
+
 #include <asm/uaccess.h>
 #include <asm/sections.h>
 #include <asm/prom.h>
@@ -21,7 +23,7 @@
 
 static unsigned long anslcd_short_delay = 80;
 static unsigned long anslcd_long_delay = 3280;
-static volatile unsigned char* anslcd_ptr;
+static volatile unsigned char __iomem *anslcd_ptr;
 
 #undef DEBUG
 
@@ -49,17 +51,17 @@ anslcd_write_byte_data ( unsigned char c )
 }
 
 static ssize_t __pmac
-anslcd_write( struct file * file, const char * buf, 
+anslcd_write( struct file * file, const char __user * buf, 
 				size_t count, loff_t *ppos )
 {
-	const char * p = buf;
+	const char __user *p = buf;
 	int i;
 
 #ifdef DEBUG
 	printk(KERN_DEBUG "LCD: write\n");
 #endif
 
-	if ( verify_area(VERIFY_READ, buf, count) )
+	if (!access_ok(VERIFY_READ, buf, count))
 		return -EFAULT;
 	for ( i = *ppos; count > 0; ++i, ++p, --count ) 
 	{
@@ -75,7 +77,7 @@ static int __pmac
 anslcd_ioctl( struct inode * inode, struct file * file,
 				unsigned int cmd, unsigned long arg )
 {
-	char ch, *temp;
+	char ch, __user *temp;
 
 #ifdef DEBUG
 	printk(KERN_DEBUG "LCD: ioctl(%d,%d)\n",cmd,arg);
@@ -91,7 +93,7 @@ anslcd_ioctl( struct inode * inode, struct file * file,
 		anslcd_write_byte_ctrl ( 0x02 );
 		return 0;
 	case ANSLCD_SENDCTRL:
-		temp = (char *) arg;
+		temp = (char __user *) arg;
 		__get_user(ch, temp);
 		for (; ch; temp++) { /* FIXME: This is ugly, but should work, as a \0 byte is not a valid command code */
 			anslcd_write_byte_ctrl ( ch );
@@ -136,7 +138,7 @@ const char anslcd_logo[] =	"********************"  /* Line #1 */
 				"*    Welcome to    *"  /* Line #2 */
 				"********************"; /* Line #4 */
 
-int __init
+static int __init
 anslcd_init(void)
 {
 	int a;
@@ -149,7 +151,7 @@ anslcd_init(void)
 	if (strcmp(node->parent->name, "gc"))
 		return -ENODEV;
 
-	anslcd_ptr = (volatile unsigned char*)ioremap(ANSLCD_ADDR, 0x20);
+	anslcd_ptr = ioremap(ANSLCD_ADDR, 0x20);
 	
 	retval = misc_register(&anslcd_dev);
 	if(retval < 0){
@@ -173,5 +175,12 @@ anslcd_init(void)
 	return 0;
 }
 
-__initcall(anslcd_init);
+static void __exit
+anslcd_exit(void)
+{
+	misc_deregister(&anslcd_dev);
+	iounmap(anslcd_ptr);
+}
 
+module_init(anslcd_init);
+module_exit(anslcd_exit);

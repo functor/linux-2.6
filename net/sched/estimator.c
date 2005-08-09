@@ -11,7 +11,7 @@
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -66,14 +66,10 @@
 
    * Minimal interval is HZ/4=250msec (it is the greatest common divisor
      for HZ=100 and HZ=1024 8)), maximal interval
-     is (HZ/4)*2^EST_MAX_INTERVAL = 8sec. Shorter intervals
+     is (HZ*2^EST_MAX_INTERVAL)/4 = 8sec. Shorter intervals
      are too expensive, longer ones can be implemented
      at user level painlessly.
  */
-
-#if (HZ%4) != 0
-#error Bad HZ value.
-#endif
 
 #define EST_MAX_INTERVAL	5
 
@@ -81,6 +77,7 @@ struct qdisc_estimator
 {
 	struct qdisc_estimator	*next;
 	struct tc_stats		*stats;
+	spinlock_t		*stats_lock;
 	unsigned		interval;
 	int			ewma_log;
 	u64			last_bytes;
@@ -98,7 +95,7 @@ struct qdisc_estimator_head
 static struct qdisc_estimator_head elist[EST_MAX_INTERVAL+1];
 
 /* Estimator array lock */
-static rwlock_t est_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(est_lock);
 
 static void est_timer(unsigned long arg)
 {
@@ -112,7 +109,7 @@ static void est_timer(unsigned long arg)
 		u32 npackets;
 		u32 rate;
 
-		spin_lock(st->lock);
+		spin_lock(e->stats_lock);
 		nbytes = st->bytes;
 		npackets = st->packets;
 		rate = (nbytes - e->last_bytes)<<(7 - idx);
@@ -124,14 +121,14 @@ static void est_timer(unsigned long arg)
 		e->last_packets = npackets;
 		e->avpps += ((long)rate - (long)e->avpps) >> e->ewma_log;
 		e->stats->pps = (e->avpps+0x1FF)>>10;
-		spin_unlock(st->lock);
+		spin_unlock(e->stats_lock);
 	}
 
-	mod_timer(&elist[idx].timer, jiffies + ((HZ/4)<<idx));
+	mod_timer(&elist[idx].timer, jiffies + ((HZ<<idx)/4));
 	read_unlock(&est_lock);
 }
 
-int qdisc_new_estimator(struct tc_stats *stats, struct rtattr *opt)
+int qdisc_new_estimator(struct tc_stats *stats, spinlock_t *stats_lock, struct rtattr *opt)
 {
 	struct qdisc_estimator *est;
 	struct tc_estimator *parm = RTA_DATA(opt);
@@ -149,6 +146,7 @@ int qdisc_new_estimator(struct tc_stats *stats, struct rtattr *opt)
 	memset(est, 0, sizeof(*est));
 	est->interval = parm->interval + 2;
 	est->stats = stats;
+	est->stats_lock = stats_lock;
 	est->ewma_log = parm->ewma_log;
 	est->last_bytes = stats->bytes;
 	est->avbps = stats->bps<<5;
@@ -159,7 +157,7 @@ int qdisc_new_estimator(struct tc_stats *stats, struct rtattr *opt)
 	if (est->next == NULL) {
 		init_timer(&elist[est->interval].timer);
 		elist[est->interval].timer.data = est->interval;
-		elist[est->interval].timer.expires = jiffies + ((HZ/4)<<est->interval);
+		elist[est->interval].timer.expires = jiffies + ((HZ<<est->interval)/4);
 		elist[est->interval].timer.function = est_timer;
 		add_timer(&elist[est->interval].timer);
 	}

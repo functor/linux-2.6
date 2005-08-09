@@ -50,8 +50,10 @@
 #define read_cpuid(reg)							\
 	({								\
 		unsigned int __val;					\
-		asm("mrc%? p15, 0, %0, c0, c0, " __stringify(reg)	\
-		    : "=r" (__val));					\
+		asm("mrc	p15, 0, %0, c0, c0, " __stringify(reg)	\
+		    : "=r" (__val)					\
+		    :							\
+		    : "cc");						\
 		__val;							\
 	})
 
@@ -61,14 +63,16 @@
  * the compiler from one version to another so a bit of paranoia won't hurt.
  * This string is meant to be concatenated with the inline asm string and
  * will cause compilation to stop on mismatch.
+ * (for details, see gcc PR 15089)
  */
 #define __asmeq(x, y)  ".ifnc " x "," y " ; .err ; .endif\n\t"
 
 #ifndef __ASSEMBLY__
 
-#include <linux/kernel.h>
+#include <linux/linkage.h>
 
 struct thread_info;
+struct task_struct;
 
 /* information about the system we're running on */
 extern unsigned int system_rev;
@@ -95,6 +99,9 @@ void hook_fault_code(int nr, int (*fn)(unsigned long, unsigned int,
 #define tas(ptr) (xchg((ptr),1))
 
 extern asmlinkage void __backtrace(void);
+extern asmlinkage void c_backtrace(unsigned long fp, int pmode);
+extern void show_pte(struct mm_struct *mm, unsigned long addr);
+extern void __show_regs(struct pt_regs *);
 
 extern int cpu_architecture(void);
 
@@ -124,9 +131,9 @@ extern unsigned long cr_alignment;	/* defined in entry-armv.S */
 extern unsigned int user_debug;
 
 #if __LINUX_ARM_ARCH__ >= 4
-#define vectors_base()	((cr_alignment & CR_V) ? 0xffff0000 : 0)
+#define vectors_high()	(cr_alignment & CR_V)
 #else
-#define vectors_base()	(0)
+#define vectors_high()	(0)
 #endif
 
 #define mb() __asm__ __volatile__ ("" : : : "memory")
@@ -137,22 +144,46 @@ extern unsigned int user_debug;
 #define set_wmb(var, value) do { var = value; wmb(); } while (0)
 #define nop() __asm__ __volatile__("mov\tr0,r0\t@ nop\n\t");
 
-#define prepare_to_switch()    do { } while(0)
+#ifdef CONFIG_SMP
+/*
+ * Define our own context switch locking.  This allows us to enable
+ * interrupts over the context switch, otherwise we end up with high
+ * interrupt latency.  The real problem area is switch_mm() which may
+ * do a full cache flush.
+ */
+#define prepare_arch_switch(rq,next)					\
+do {									\
+	spin_lock(&(next)->switch_lock);				\
+	spin_unlock_irq(&(rq)->lock);					\
+} while (0)
+
+#define finish_arch_switch(rq,prev)					\
+	spin_unlock(&(prev)->switch_lock)
+
+#define task_running(rq,p)						\
+	((rq)->curr == (p) || spin_is_locked(&(p)->switch_lock))
+#else
+/*
+ * Our UP-case is more simple, but we assume knowledge of how
+ * spin_unlock_irq() and friends are implemented.  This avoids
+ * us needlessly decrementing and incrementing the preempt count.
+ */
+#define prepare_arch_switch(rq,next)	local_irq_enable()
+#define finish_arch_switch(rq,prev)	spin_unlock(&(rq)->lock)
+#define task_running(rq,p)		((rq)->curr == (p))
+#endif
 
 /*
  * switch_to(prev, next) should switch from task `prev' to `next'
- * `prev' will never be the same as `next'.
- * The `mb' is to tell GCC not to cache `current' across this call.
+ * `prev' will never be the same as `next'.  schedule() itself
+ * contains the memory barrier to tell GCC not to cache `current'.
  */
-struct thread_info;
-struct task_struct;
 extern struct task_struct *__switch_to(struct task_struct *, struct thread_info *, struct thread_info *);
 
-#define switch_to(prev,next,last)						\
-	do {									\
-		last = __switch_to(prev,prev->thread_info,next->thread_info);	\
-		mb();								\
-	} while (0)
+#define switch_to(prev,next,last)					\
+do {									\
+	last = __switch_to(prev,prev->thread_info,next->thread_info);	\
+} while (0)
 
 /*
  * CPU interrupt mask handling.
@@ -223,7 +254,7 @@ extern struct task_struct *__switch_to(struct task_struct *, struct thread_info 
 /*
  * Enable FIQs
  */
-#define __stf()							\
+#define local_fiq_enable()					\
 	({							\
 		unsigned long temp;				\
 	__asm__ __volatile__(					\
@@ -238,7 +269,7 @@ extern struct task_struct *__switch_to(struct task_struct *, struct thread_info 
 /*
  * Disable FIQs
  */
-#define __clf()							\
+#define local_fiq_disable()					\
 	({							\
 		unsigned long temp;				\
 	__asm__ __volatile__(					\
@@ -272,6 +303,13 @@ extern struct task_struct *__switch_to(struct task_struct *, struct thread_info 
 	: "r" (x)						\
 	: "memory", "cc")
 
+#define irqs_disabled()			\
+({					\
+	unsigned long flags;		\
+	local_save_flags(flags);	\
+	flags & PSR_I_BIT;		\
+})
+
 #ifdef CONFIG_SMP
 #error SMP not supported
 
@@ -286,16 +324,6 @@ extern struct task_struct *__switch_to(struct task_struct *, struct thread_info 
 #define smp_rmb()		barrier()
 #define smp_wmb()		barrier()
 #define smp_read_barrier_depends()		do { } while(0)
-
-#define clf()			__clf()
-#define stf()			__stf()
-
-#define irqs_disabled()			\
-({					\
-	unsigned long flags;		\
-	local_save_flags(flags);	\
-	flags & PSR_I_BIT;		\
-})
 
 #if defined(CONFIG_CPU_SA1100) || defined(CONFIG_CPU_SA110)
 /*
@@ -357,6 +385,8 @@ static inline unsigned long __xchg(unsigned long x, volatile void *ptr, int size
 #endif /* CONFIG_SMP */
 
 #endif /* __ASSEMBLY__ */
+
+#define arch_align_stack(x) (x)
 
 #endif /* __KERNEL__ */
 

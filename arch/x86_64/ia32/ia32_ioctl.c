@@ -21,7 +21,7 @@
 #ifndef TIOCGDEV
 #define TIOCGDEV       _IOR('T',0x32, unsigned int)
 #endif
-static int tiocgdev(unsigned fd, unsigned cmd,  unsigned int *ptr) 
+static int tiocgdev(unsigned fd, unsigned cmd,  unsigned int __user *ptr) 
 { 
 
 	struct file *file = fget(fd);
@@ -54,7 +54,7 @@ static int rtc32_ioctl(unsigned fd, unsigned cmd, unsigned long arg)
 		ret = sys_ioctl(fd, RTC_IRQP_READ, (unsigned long)&val); 
 		set_fs(oldfs); 
 		if (!ret)
-			ret = put_user(val, (unsigned int*) arg); 
+			ret = put_user(val, (unsigned int __user *) arg); 
 		return ret; 
 
 	case RTC_IRQP_SET32: 
@@ -66,7 +66,7 @@ static int rtc32_ioctl(unsigned fd, unsigned cmd, unsigned long arg)
 		ret = sys_ioctl(fd, RTC_EPOCH_READ, (unsigned long) &val); 
 		set_fs(oldfs); 
 		if (!ret)
-			ret = put_user(val, (unsigned int*) arg); 
+			ret = put_user(val, (unsigned int __user *) arg); 
 		return ret; 
 
 	case RTC_EPOCH_SET32:
@@ -113,7 +113,7 @@ static int mtrr_ioctl32(unsigned int fd, unsigned int cmd, unsigned long arg)
 	struct mtrr_gentry g;
 	struct mtrr_sentry s;
 	int get = 0, err = 0; 
-	struct mtrr_gentry32 *g32 = (struct mtrr_gentry32 *)arg; 
+	struct mtrr_gentry32 __user *g32 = (struct mtrr_gentry32 __user *)arg; 
 	mm_segment_t oldfs = get_fs(); 
 
 	switch (cmd) { 
@@ -139,7 +139,7 @@ static int mtrr_ioctl32(unsigned int fd, unsigned int cmd, unsigned long arg)
 
 		arg = (unsigned long)&g; 
 	} else { 
-		struct mtrr_sentry32 *s32 = (struct mtrr_sentry32 *)arg;
+		struct mtrr_sentry32 __user *s32 = (struct mtrr_sentry32 __user *)arg;
 		err = get_user(s.base, &s32->base);
 		err |= get_user(s.size, &s32->size);
 		err |= get_user(s.type, &s32->type);
@@ -171,23 +171,8 @@ struct ioctl_trans ioctl_start[] = {
 COMPATIBLE_IOCTL(HDIO_SET_KEEPSETTINGS)
 COMPATIBLE_IOCTL(HDIO_SCAN_HWIF)
 COMPATIBLE_IOCTL(BLKRASET)
-COMPATIBLE_IOCTL(BLKFRASET)
 COMPATIBLE_IOCTL(0x4B50)   /* KDGHWCLK - not in the kernel, but don't complain */
 COMPATIBLE_IOCTL(0x4B51)   /* KDSHWCLK - not in the kernel, but don't complain */
-COMPATIBLE_IOCTL(RTC_AIE_ON)
-COMPATIBLE_IOCTL(RTC_AIE_OFF)
-COMPATIBLE_IOCTL(RTC_UIE_ON)
-COMPATIBLE_IOCTL(RTC_UIE_OFF)
-COMPATIBLE_IOCTL(RTC_PIE_ON)
-COMPATIBLE_IOCTL(RTC_PIE_OFF)
-COMPATIBLE_IOCTL(RTC_WIE_ON)
-COMPATIBLE_IOCTL(RTC_WIE_OFF)
-COMPATIBLE_IOCTL(RTC_ALM_SET)
-COMPATIBLE_IOCTL(RTC_ALM_READ)
-COMPATIBLE_IOCTL(RTC_RD_TIME)
-COMPATIBLE_IOCTL(RTC_SET_TIME)
-COMPATIBLE_IOCTL(RTC_WKALM_SET)
-COMPATIBLE_IOCTL(RTC_WKALM_RD)
 COMPATIBLE_IOCTL(FIOQSIZE)
 
 /* And these ioctls need translation */

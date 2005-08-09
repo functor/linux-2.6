@@ -3,11 +3,11 @@
  *
  * Copyright (C) 2001, 2002 Red Hat, Inc.
  *
- * Created by David Woodhouse <dwmw2@redhat.com>
+ * Created by David Woodhouse <dwmw2@infradead.org>
  *
  * For licensing information, see the file 'LICENCE' in this directory.
  *
- * $Id: writev.c,v 1.4 2003/10/04 08:33:07 dwmw2 Exp $
+ * $Id: writev.c,v 1.6 2004/11/16 20:36:12 dwmw2 Exp $
  *
  */
 
@@ -18,7 +18,7 @@
 /* This ought to be in core MTD code. All registered MTD devices
    without writev should have this put in place. Bug the MTD
    maintainer */
-static inline int mtd_fake_writev(struct mtd_info *mtd, const struct iovec *vecs,
+static inline int mtd_fake_writev(struct mtd_info *mtd, const struct kvec *vecs,
 				  unsigned long count, loff_t to, size_t *retlen)
 {
 	unsigned long i;
@@ -39,7 +39,7 @@ static inline int mtd_fake_writev(struct mtd_info *mtd, const struct iovec *vecs
 	return ret;
 }
 
-int jffs2_flash_direct_writev(struct jffs2_sb_info *c, const struct iovec *vecs,
+int jffs2_flash_direct_writev(struct jffs2_sb_info *c, const struct kvec *vecs,
 			      unsigned long count, loff_t to, size_t *retlen)
 {
 	if (c->mtd->writev)

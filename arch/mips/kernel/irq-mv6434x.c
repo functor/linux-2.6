@@ -16,7 +16,7 @@
 #include <linux/kernel_stat.h>
 #include <asm/io.h>
 #include <asm/irq.h>
-#include <asm/mv64340.h>
+#include <linux/mv643xx.h>
 
 static unsigned int irq_base;
 
@@ -44,7 +44,7 @@ static inline void mask_mv64340_irq(unsigned int irq)
 		MV_WRITE(MV64340_INTERRUPT0_MASK_0_LOW, value);
 	} else {
 		value = MV_READ(MV64340_INTERRUPT0_MASK_0_HIGH);
-		value &= ~(1 << (irq - (irq_base - 32)));
+		value &= ~(1 << (irq - irq_base - 32));
 		MV_WRITE(MV64340_INTERRUPT0_MASK_0_HIGH, value);
 	}
 }
@@ -60,7 +60,7 @@ static inline void unmask_mv64340_irq(unsigned int irq)
 		MV_WRITE(MV64340_INTERRUPT0_MASK_0_LOW, value);
 	} else {
 		value = MV_READ(MV64340_INTERRUPT0_MASK_0_HIGH);
-		value |= 1 << (irq - (irq_base - 32));
+		value |= 1 << (irq - irq_base - 32);
 		MV_WRITE(MV64340_INTERRUPT0_MASK_0_HIGH, value);
 	}
 }

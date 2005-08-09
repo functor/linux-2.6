@@ -32,12 +32,13 @@ typedef struct sndrv_hwdep_dsp_image snd_hwdep_dsp_image_t;
 
 typedef struct _snd_hwdep_ops {
 	long long (*llseek) (snd_hwdep_t *hw, struct file * file, long long offset, int orig);
-	long (*read) (snd_hwdep_t * hw, char *buf, long count, loff_t *offset);
-	long (*write) (snd_hwdep_t * hw, const char *buf, long count, loff_t *offset);
+	long (*read) (snd_hwdep_t * hw, char __user *buf, long count, loff_t *offset);
+	long (*write) (snd_hwdep_t * hw, const char __user *buf, long count, loff_t *offset);
 	int (*open) (snd_hwdep_t * hw, struct file * file);
 	int (*release) (snd_hwdep_t * hw, struct file * file);
 	unsigned int (*poll) (snd_hwdep_t * hw, struct file * file, poll_table * wait);
 	int (*ioctl) (snd_hwdep_t * hw, struct file * file, unsigned int cmd, unsigned long arg);
+	int (*ioctl_compat) (snd_hwdep_t * hw, struct file * file, unsigned int cmd, unsigned long arg);
 	int (*mmap) (snd_hwdep_t * hw, struct file * file, struct vm_area_struct * vma);
 	int (*dsp_status) (snd_hwdep_t * hw, snd_hwdep_dsp_status_t * status);
 	int (*dsp_load) (snd_hwdep_t * hw, snd_hwdep_dsp_image_t * image);

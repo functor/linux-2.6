@@ -176,7 +176,7 @@ static u32	mac[  SBNI_MAX_NUM_CARDS ] __initdata;
 
 #ifndef MODULE
 typedef u32  iarr[];
-static iarr  *dest[5] = { &io, &irq, &baud, &rxl, &mac };
+static iarr __initdata *dest[5] = { &io, &irq, &baud, &rxl, &mac };
 #endif
 
 /* A zero-terminated list of I/O addresses to be probed on ISA bus */
@@ -294,7 +294,7 @@ sbni_pci_probe( struct net_device  *dev )
 {
 	struct pci_dev  *pdev = NULL;
 
-	while( (pdev = pci_find_class( PCI_CLASS_NETWORK_OTHER << 8, pdev ))
+	while( (pdev = pci_get_class( PCI_CLASS_NETWORK_OTHER << 8, pdev ))
 	       != NULL ) {
 		int  pci_irq_line;
 		unsigned long  pci_ioaddr;
@@ -331,10 +331,14 @@ sbni_pci_probe( struct net_device  *dev )
 		/* avoiding re-enable dual adapters */
 		if( (pci_ioaddr & 7) == 0  &&  pci_enable_device( pdev ) ) {
 			release_region( pci_ioaddr, SBNI_IO_EXTENT );
+			pci_dev_put( pdev );
 			return  -EIO;
 		}
 		if( sbni_probe1( dev, pci_ioaddr, pci_irq_line ) ) {
 			SET_NETDEV_DEV(dev, &pdev->dev);
+			/* not the best thing to do, but this is all messed up 
+			   for hotplug systems anyway... */
+			pci_dev_put( pdev );
 			return  0;
 		}
 	}
@@ -349,7 +353,7 @@ sbni_probe1( struct net_device  *dev,  unsigned long  ioaddr,  int  irq )
 
 	if( sbni_card_probe( ioaddr ) ) {
 		release_region( ioaddr, SBNI_IO_EXTENT );
-		return  0;
+		return NULL;
 	}
 
 	outb( 0, ioaddr + CSR0 );
@@ -368,7 +372,7 @@ sbni_probe1( struct net_device  *dev,  unsigned long  ioaddr,  int  irq )
 			printk( KERN_ERR "%s: can't detect device irq!\n",
 				dev->name );
 			release_region( ioaddr, SBNI_IO_EXTENT );
-			return  0;
+			return NULL;
 		}
 	} else if( irq == 2 )
 		irq = 9;
@@ -381,7 +385,7 @@ sbni_probe1( struct net_device  *dev,  unsigned long  ioaddr,  int  irq )
 	if( !nl ) {
 		printk( KERN_ERR "%s: unable to get memory!\n", dev->name );
 		release_region( ioaddr, SBNI_IO_EXTENT );
-		return  0;
+		return NULL;
 	}
 
 	dev->priv = nl;
@@ -1342,7 +1346,7 @@ sbni_ioctl( struct net_device  *dev,  struct ifreq  *ifr,  int  cmd )
 			return  -EPERM;
 
 		spin_lock( &nl->lock );
-		flags = *(struct sbni_flags*) &ifr->ifr_data;
+		flags = *(struct sbni_flags*) &ifr->ifr_ifru;
 		if( flags.fixed_rxl )
 			nl->delta_rxl = 0,
 			nl->cur_rxl_index = flags.rxl;
@@ -1481,14 +1485,12 @@ set_multicast_list( struct net_device  *dev )
 
 
 #ifdef MODULE
-
-MODULE_PARM(	io,	"1-" __MODULE_STRING( SBNI_MAX_NUM_CARDS ) "i" );
-MODULE_PARM(	irq,	"1-" __MODULE_STRING( SBNI_MAX_NUM_CARDS ) "i" );
-MODULE_PARM(	baud,	"1-" __MODULE_STRING( SBNI_MAX_NUM_CARDS ) "i" );
-MODULE_PARM(	rxl,	"1-" __MODULE_STRING( SBNI_MAX_NUM_CARDS ) "i" );
-MODULE_PARM(	mac,	"1-" __MODULE_STRING( SBNI_MAX_NUM_CARDS ) "i" );
-
-MODULE_PARM(	skip_pci_probe,	"i" );
+module_param_array(io, int, NULL, 0);
+module_param_array(irq, int, NULL, 0);
+module_param_array(baud, int, NULL, 0);
+module_param_array(rxl, int, NULL, 0);
+module_param_array(mac, int, NULL, 0);
+module_param(skip_pci_probe, bool, 0);
 
 MODULE_LICENSE("GPL");
 
@@ -1578,7 +1580,7 @@ calc_crc32( u32  crc,  u8  *p,  u32  len )
 	register u32  _crc;
 	_crc = crc;
 	
-	__asm __volatile (
+	__asm__ __volatile__ (
 		"xorl	%%ebx, %%ebx\n"
 		"movl	%2, %%esi\n" 
 		"movl	%3, %%ecx\n" 

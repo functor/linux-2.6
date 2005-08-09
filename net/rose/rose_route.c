@@ -40,11 +40,11 @@
 static unsigned int rose_neigh_no = 1;
 
 static struct rose_node  *rose_node_list;
-static spinlock_t rose_node_list_lock = SPIN_LOCK_UNLOCKED;
-struct rose_neigh *rose_neigh_list;
-static spinlock_t rose_neigh_list_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(rose_node_list_lock);
+static struct rose_neigh *rose_neigh_list;
+static DEFINE_SPINLOCK(rose_neigh_list_lock);
 static struct rose_route *rose_route_list;
-static spinlock_t rose_route_list_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(rose_route_list_lock);
 
 struct rose_neigh *rose_loopback_neigh;
 
@@ -206,7 +206,6 @@ static void rose_remove_node(struct rose_node *rose_node)
 {
 	struct rose_node *s;
 
-	spin_lock_bh(&rose_node_list_lock);
 	if ((s = rose_node_list) == rose_node) {
 		rose_node_list = rose_node->next;
 		kfree(rose_node);
@@ -588,7 +587,7 @@ static int rose_clear_routes(void)
 /*
  *	Check that the device given is a valid AX.25 interface that is "up".
  */
-struct net_device *rose_ax25_dev_get(char *devname)
+static struct net_device *rose_ax25_dev_get(char *devname)
 {
 	struct net_device *dev;
 
@@ -710,7 +709,7 @@ out:
 /*
  *	Handle the ioctls that control the routing functions.
  */
-int rose_rt_ioctl(unsigned int cmd, void *arg)
+int rose_rt_ioctl(unsigned int cmd, void __user *arg)
 {
 	struct rose_route_struct rose_route;
 	struct net_device *dev;
@@ -728,7 +727,8 @@ int rose_rt_ioctl(unsigned int cmd, void *arg)
 		}
 		if (rose_route.mask > 10) /* Mask can't be more than 10 digits */
 			return -EINVAL;
-
+		if (rose_route.ndigis > 8) /* No more than 8 digipeats */
+			return -EINVAL;
 		err = rose_add_node(&rose_route, dev);
 		dev_put(dev);
 		return err;
@@ -899,7 +899,8 @@ int rose_route_frame(struct sk_buff *skb, ax25_cb *ax25)
 	 */
 	if ((sk = rose_find_socket(lci, rose_neigh)) != NULL) {
 		if (frametype == ROSE_CALL_REQUEST) {
-			rose_cb *rose = rose_sk(sk);
+			struct rose_sock *rose = rose_sk(sk);
+
 			/* Remove an existing unused socket */
 			rose_clear_queues(sk);
 			rose->cause	 = ROSE_NETWORK_CONGESTION;

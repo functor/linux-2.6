@@ -222,14 +222,14 @@ Here is pseudo-code showing how this might be done:
 	struct pci_dev *pdev;
 
 	...
-	if (pci_set_dma_mask(pdev, PLAYBACK_ADDRESS_BITS)) {
+	if (!pci_set_dma_mask(pdev, PLAYBACK_ADDRESS_BITS)) {
 		card->playback_enabled = 1;
 	} else {
 		card->playback_enabled = 0;
 		printk(KERN_WARN "%s: Playback disabled due to DMA limitations.\n",
 		       card->name);
 	}
-	if (pci_set_dma_mask(pdev, RECORD_ADDRESS_BITS)) {
+	if (!pci_set_dma_mask(pdev, RECORD_ADDRESS_BITS)) {
 		card->record_enabled = 1;
 	} else {
 		card->record_enabled = 0;
@@ -443,15 +443,9 @@ Only streaming mappings specify a direction, consistent mappings
 implicitly have a direction attribute setting of
 PCI_DMA_BIDIRECTIONAL.
 
-The SCSI subsystem provides mechanisms for you to easily obtain
-the direction to use, in the SCSI command:
-
-	scsi_to_pci_dma_dir(SCSI_DIRECTION)
-
-Where SCSI_DIRECTION is obtained from the 'sc_data_direction'
-member of the SCSI command your driver is working on.  The
-mentioned interface above returns a value suitable for passing
-into the streaming DMA mapping interfaces below.
+The SCSI subsystem tells you the direction to use in the
+'sc_data_direction' member of the SCSI command your driver is
+working on.
 
 For Networking drivers, it's a rather simple affair.  For transmit
 packets, map/unmap them with the PCI_DMA_TODEVICE direction

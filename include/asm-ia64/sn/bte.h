@@ -3,7 +3,7 @@
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * Copyright (c) 2000-2003 Silicon Graphics, Inc.  All Rights Reserved.
+ * Copyright (c) 2000-2005 Silicon Graphics, Inc.  All Rights Reserved.
  */
 
 
@@ -13,8 +13,12 @@
 #include <linux/timer.h>
 #include <linux/spinlock.h>
 #include <linux/cache.h>
+#include <asm/sn/pda.h>
 #include <asm/sn/types.h>
+#include <asm/sn/shub_mmr.h>
 
+#define IBCT_NOTIFY             (0x1UL << 4)
+#define IBCT_ZFIL_MODE          (0x1UL << 0)
 
 /* #define BTE_DEBUG */
 /* #define BTE_DEBUG_VERBOSE */
@@ -39,8 +43,36 @@
 
 
 /* Define hardware */
-#define BTES_PER_NODE 2
+#define BTES_PER_NODE (is_shub2() ? 4 : 2)
+#define MAX_BTES_PER_NODE 4
 
+#define BTE2OFF_CTRL	(0)
+#define BTE2OFF_SRC	(SH2_BT_ENG_SRC_ADDR_0 - SH2_BT_ENG_CSR_0)
+#define BTE2OFF_DEST	(SH2_BT_ENG_DEST_ADDR_0 - SH2_BT_ENG_CSR_0)
+#define BTE2OFF_NOTIFY	(SH2_BT_ENG_NOTIF_ADDR_0 - SH2_BT_ENG_CSR_0)
+
+#define BTE_BASE_ADDR(interface) 				\
+    (is_shub2() ? (interface == 0) ? SH2_BT_ENG_CSR_0 :		\
+		  (interface == 1) ? SH2_BT_ENG_CSR_1 :		\
+		  (interface == 2) ? SH2_BT_ENG_CSR_2 :		\
+		  		     SH2_BT_ENG_CSR_3 		\
+		: (interface == 0) ? IIO_IBLS0 : IIO_IBLS1)
+
+#define BTE_SOURCE_ADDR(base)					\
+    (is_shub2() ? base + (BTE2OFF_SRC/8) 			\
+		: base + (BTEOFF_SRC/8))
+
+#define BTE_DEST_ADDR(base)					\
+    (is_shub2() ? base + (BTE2OFF_DEST/8) 			\
+		: base + (BTEOFF_DEST/8))
+
+#define BTE_CTRL_ADDR(base)					\
+    (is_shub2() ? base + (BTE2OFF_CTRL/8) 			\
+		: base + (BTEOFF_CTRL/8))
+
+#define BTE_NOTIF_ADDR(base)					\
+    (is_shub2() ? base + (BTE2OFF_NOTIFY/8) 			\
+		: base + (BTEOFF_NOTIFY/8))
 
 /* Define hardware modes */
 #define BTE_NOTIFY (IBCT_NOTIFY)
@@ -48,36 +80,38 @@
 #define BTE_ZERO_FILL (BTE_NOTIFY | IBCT_ZFIL_MODE)
 /* Use a reserved bit to let the caller specify a wait for any BTE */
 #define BTE_WACQUIRE (0x4000)
+/* Use the BTE on the node with the destination memory */
+#define BTE_USE_DEST (BTE_WACQUIRE << 1)
+/* Use any available BTE interface on any node for the transfer */
+#define BTE_USE_ANY (BTE_USE_DEST << 1)
 /* macro to force the IBCT0 value valid */
 #define BTE_VALID_MODE(x) ((x) & (IBCT_NOTIFY | IBCT_ZFIL_MODE))
 
-
-/*
- * Handle locking of the bte interfaces.
- *
- * All transfers spinlock the interface before setting up the SHUB
- * registers.  Sync transfers hold the lock until all processing is
- * complete.  Async transfers release the lock as soon as the transfer
- * is initiated.
- *
- * To determine if an interface is available, we must check both the
- * busy bit and the spinlock for that interface.
- */
-#define BTE_LOCK_IF_AVAIL(_x) (\
-	(*pda->cpu_bte_if[_x]->most_rcnt_na & (IBLS_BUSY | IBLS_ERROR)) && \
-	(!(spin_trylock(&(pda->cpu_bte_if[_x]->spinlock)))) \
-	)
+#define BTE_ACTIVE		(IBLS_BUSY | IBLS_ERROR)
+#define BTE_WORD_AVAILABLE	(IBLS_BUSY << 1)
+#define BTE_WORD_BUSY		(~BTE_WORD_AVAILABLE)
 
 /*
  * Some macros to simplify reading.
  * Start with macros to locate the BTE control registers.
  */
-#define BTEREG_LNSTAT_ADDR ((u64 *)(bte->bte_base_addr))
-#define BTEREG_SRC_ADDR ((u64 *)(bte->bte_base_addr + BTEOFF_SRC))
-#define BTEREG_DEST_ADDR ((u64 *)(bte->bte_base_addr + BTEOFF_DEST))
-#define BTEREG_CTRL_ADDR ((u64 *)(bte->bte_base_addr + BTEOFF_CTRL))
-#define BTEREG_NOTIF_ADDR ((u64 *)(bte->bte_base_addr + BTEOFF_NOTIFY))
+#define BTE_LNSTAT_LOAD(_bte)						\
+			HUB_L(_bte->bte_base_addr)
+#define BTE_LNSTAT_STORE(_bte, _x)					\
+			HUB_S(_bte->bte_base_addr, (_x))
+#define BTE_SRC_STORE(_bte, _x)						\
+			HUB_S(_bte->bte_source_addr, (_x))
+#define BTE_DEST_STORE(_bte, _x)					\
+			HUB_S(_bte->bte_destination_addr, (_x))
+#define BTE_CTRL_STORE(_bte, _x)					\
+			HUB_S(_bte->bte_control_addr, (_x))
+#define BTE_NOTIF_STORE(_bte, _x)					\
+			HUB_S(_bte->bte_notify_addr, (_x))
 
+#define BTE_START_TRANSFER(_bte, _len, _mode)				\
+	is_shub2() ? BTE_CTRL_STORE(_bte, IBLS_BUSY | (_mode << 24) | _len) \
+		: BTE_LNSTAT_STORE(_bte, _len);				\
+		  BTE_CTRL_STORE(_bte, _mode)
 
 /* Possible results from bte_copy and bte_unaligned_copy */
 /* The following error codes map into the BTE hardware codes
@@ -110,16 +144,20 @@ typedef enum {
  * to work with a BTE.
  */
 struct bteinfo_s {
-	u64 volatile notify ____cacheline_aligned;
-	char *bte_base_addr ____cacheline_aligned;
+	volatile u64 notify ____cacheline_aligned;
+	u64 *bte_base_addr ____cacheline_aligned;
+	u64 *bte_source_addr;
+	u64 *bte_destination_addr;
+	u64 *bte_control_addr;
+	u64 *bte_notify_addr;
 	spinlock_t spinlock;
 	cnodeid_t bte_cnode;	/* cnode                            */
 	int bte_error_count;	/* Number of errors encountered     */
 	int bte_num;		/* 0 --> BTE0, 1 --> BTE1           */
 	int cleanup_active;	/* Interface is locked for cleanup  */
 	volatile bte_result_t bh_error;	/* error while processing   */
-	u64 volatile *most_rcnt_na;
-	void *scratch_buf;	/* Node local scratch buffer        */
+	volatile u64 *most_rcnt_na;
+	struct bteinfo_s *btes_to_try[MAX_BTES_PER_NODE];
 };
 
 
@@ -130,6 +168,8 @@ extern bte_result_t bte_copy(u64, u64, u64, u64, void *);
 extern bte_result_t bte_unaligned_copy(u64, u64, u64, u64);
 extern void bte_error_handler(unsigned long);
 
+#define bte_zero(dest, len, mode, notification) \
+	bte_copy(0, dest, len, ((mode) | BTE_ZERO_FILL), notification)
 
 /*
  * The following is the prefered way of calling bte_unaligned_copy

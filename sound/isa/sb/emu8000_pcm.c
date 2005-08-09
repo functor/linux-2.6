@@ -23,8 +23,6 @@
 #include <sound/initval.h>
 #include <sound/pcm.h>
 
-#define chip_t emu8000_t
-
 /*
  * define the following if you want to use this pcm with non-interleaved mode
  */
@@ -235,7 +233,7 @@ static int emu8k_pcm_open(snd_pcm_substream_t *subs)
 	emu8k_pcm_t *rec;
 	snd_pcm_runtime_t *runtime = subs->runtime;
 
-	rec = snd_kcalloc(sizeof(*rec), GFP_KERNEL);
+	rec = kcalloc(1, sizeof(*rec), GFP_KERNEL);
 	if (! rec)
 		return -ENOMEM;
 
@@ -262,9 +260,8 @@ static int emu8k_pcm_open(snd_pcm_substream_t *subs)
 static int emu8k_pcm_close(snd_pcm_substream_t *subs)
 {
 	emu8k_pcm_t *rec = subs->runtime->private_data;
-	if (rec)
-		kfree(rec);
-	subs->runtime->private_data = 0;
+	kfree(rec);
+	subs->runtime->private_data = NULL;
 	return 0;
 }
 
@@ -515,12 +512,12 @@ static int emu8k_pcm_silence(snd_pcm_substream_t *subs,
 static int emu8k_pcm_copy(snd_pcm_substream_t *subs,
 			  int voice,
 			  snd_pcm_uframes_t pos,
-			  void *src,
+			  void __user *src,
 			  snd_pcm_uframes_t count)
 {
 	emu8k_pcm_t *rec = subs->runtime->private_data;
 	emu8000_t *emu = rec->emu;
-	unsigned short *buf = src;
+	unsigned short __user *buf = src;
 
 	snd_emu8000_write_wait(emu, 1);
 	EMU8000_SMALW_WRITE(emu, pos + rec->loop_start[0]);

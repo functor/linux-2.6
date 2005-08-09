@@ -6,6 +6,7 @@
  * based on code from Oliver Jowett <oliver@jowett.manawatu.gen.nz>
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/mm.h>
 #include <linux/console.h>
@@ -33,12 +34,12 @@ void sun3_leds(unsigned int i)
 
 static int sun3x_get_hardware_list(char *buffer)
 {
-	
+
 	int len = 0;
 
 	len += sprintf(buffer + len, "PROM Revision:\t%s\n",
 		       romvec->pv_monid);
-	
+
 	return len;
 
 }
@@ -62,7 +63,7 @@ void __init config_sun3x(void)
 	mach_request_irq     = sun3_request_irq;
 	mach_free_irq        = sun3_free_irq;
 	mach_process_int     = sun3_process_int;
-    
+
 	mach_gettimeoffset   = sun3x_gettimeoffset;
 	mach_reset           = sun3x_reboot;
 
@@ -70,10 +71,14 @@ void __init config_sun3x(void)
 	mach_get_model       = sun3_get_model;
 	mach_get_hardware_list = sun3x_get_hardware_list;
 
+#ifdef CONFIG_DUMMY_CONSOLE
+	conswitchp	     = &dummy_con;
+#endif
+
 	sun3_intreg = (unsigned char *)SUN3X_INTREG;
 
 	/* only the serial console is known to work anyway... */
-#if 0    
+#if 0
 	switch (*(unsigned char *)SUN3X_EEPROM_CONS) {
 	case 0x10:
 		serial_console = 1;

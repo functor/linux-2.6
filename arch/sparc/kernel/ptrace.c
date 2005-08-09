@@ -18,6 +18,7 @@
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/security.h>
+#include <linux/signal.h>
 
 #include <asm/pgtable.h>
 #include <asm/system.h>
@@ -48,10 +49,12 @@ static inline void pt_succ_return(struct pt_regs *regs, unsigned long value)
 }
 
 static void
-pt_succ_return_linux(struct pt_regs *regs, unsigned long value, long *addr)
+pt_succ_return_linux(struct pt_regs *regs, unsigned long value, long __user *addr)
 {
-	if(put_user(value, addr))
-		return pt_error_return(regs, EFAULT);
+	if (put_user(value, addr)) {
+		pt_error_return(regs, EFAULT);
+		return;
+	}
 	regs->u_regs[UREG_I0] = 0;
 	regs->psr &= ~PSR_C;
 	regs->pc = regs->npc;
@@ -59,7 +62,7 @@ pt_succ_return_linux(struct pt_regs *regs, unsigned long value, long *addr)
 }
 
 static void
-pt_os_succ_return (struct pt_regs *regs, unsigned long val, long *addr)
+pt_os_succ_return (struct pt_regs *regs, unsigned long val, long __user *addr)
 {
 	if (current->personality == PER_SUNOS)
 		pt_succ_return (regs, val);
@@ -69,7 +72,7 @@ pt_os_succ_return (struct pt_regs *regs, unsigned long val, long *addr)
 
 /* Fuck me gently with a chainsaw... */
 static inline void read_sunos_user(struct pt_regs *regs, unsigned long offset,
-				   struct task_struct *tsk, long *addr)
+				   struct task_struct *tsk, long __user *addr)
 {
 	struct pt_regs *cregs = tsk->thread.kregs;
 	struct thread_info *t = tsk->thread_info;
@@ -283,17 +286,17 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 			       s, (int) request, (int) pid, addr, data, addr2);
 	}
 #endif
-	if(request == PTRACE_TRACEME) {
-		int ret;
+	if (request == PTRACE_TRACEME) {
+		int my_ret;
 
 		/* are we already being traced? */
 		if (current->ptrace & PT_PTRACED) {
 			pt_error_return(regs, EPERM);
 			goto out;
 		}
-		ret = security_ptrace(current->parent, current);
-		if (ret) {
-			pt_error_return(regs, -ret);
+		my_ret = security_ptrace(current->parent, current);
+		if (my_ret) {
+			pt_error_return(regs, -my_ret);
 			goto out;
 		}
 
@@ -303,7 +306,7 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 		goto out;
 	}
 #ifndef ALLOW_INIT_TRACING
-	if(pid == 1) {
+	if (pid == 1) {
 		/* Can't dork with init. */
 		pt_error_return(regs, EPERM);
 		goto out;
@@ -343,14 +346,14 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 
 		if (access_process_vm(child, addr,
 				      &tmp, sizeof(tmp), 0) == sizeof(tmp))
-			pt_os_succ_return(regs, tmp, (long *)data);
+			pt_os_succ_return(regs, tmp, (long __user *)data);
 		else
 			pt_error_return(regs, EIO);
 		goto out_tsk;
 	}
 
 	case PTRACE_PEEKUSR:
-		read_sunos_user(regs, addr, child, (long *) data);
+		read_sunos_user(regs, addr, child, (long __user *) data);
 		goto out_tsk;
 
 	case PTRACE_POKEUSR:
@@ -368,12 +371,12 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 	}
 
 	case PTRACE_GETREGS: {
-		struct pt_regs *pregs = (struct pt_regs *) addr;
+		struct pt_regs __user *pregs = (struct pt_regs __user *) addr;
 		struct pt_regs *cregs = child->thread.kregs;
 		int rval;
 
-		rval = verify_area(VERIFY_WRITE, pregs, sizeof(struct pt_regs));
-		if(rval) {
+		if (!access_ok(VERIFY_WRITE, pregs, sizeof(struct pt_regs))) {
+			rval = -EFAULT;
 			pt_error_return(regs, -rval);
 			goto out_tsk;
 		}
@@ -391,7 +394,7 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 	}
 
 	case PTRACE_SETREGS: {
-		struct pt_regs *pregs = (struct pt_regs *) addr;
+		struct pt_regs __user *pregs = (struct pt_regs __user *) addr;
 		struct pt_regs *cregs = child->thread.kregs;
 		unsigned long psr, pc, npc, y;
 		int i;
@@ -399,9 +402,8 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 		/* Must be careful, tracing process can only set certain
 		 * bits in the psr.
 		 */
-		i = verify_area(VERIFY_READ, pregs, sizeof(struct pt_regs));
-		if(i) {
-			pt_error_return(regs, -i);
+		if (!access_ok(VERIFY_READ, pregs, sizeof(struct pt_regs))) {
+			pt_error_return(regs, EFAULT);
 			goto out_tsk;
 		}
 		__get_user(psr, (&pregs->psr));
@@ -411,7 +413,7 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 		psr &= PSR_ICC;
 		cregs->psr &= ~PSR_ICC;
 		cregs->psr |= psr;
-		if(!((pc | npc) & 3)) {
+		if (!((pc | npc) & 3)) {
 			cregs->pc = pc;
 			cregs->npc =npc;
 		}
@@ -433,11 +435,12 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 				unsigned long *insnaddr;
 				unsigned long insn;
 			} fpq[16];
-		} *fps = (struct fps *) addr;
+		};
+		struct fps __user *fps = (struct fps __user *) addr;
 		int i;
 
-		i = verify_area(VERIFY_WRITE, fps, sizeof(struct fps));
-		if(i) {
+		if (!access_ok(VERIFY_WRITE, fps, sizeof(struct fps))) {
+			i = -EFAULT;
 			pt_error_return(regs, -i);
 			goto out_tsk;
 		}
@@ -467,11 +470,12 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 				unsigned long *insnaddr;
 				unsigned long insn;
 			} fpq[16];
-		} *fps = (struct fps *) addr;
+		};
+		struct fps __user *fps = (struct fps __user *) addr;
 		int i;
 
-		i = verify_area(VERIFY_READ, fps, sizeof(struct fps));
-		if(i) {
+		if (!access_ok(VERIFY_READ, fps, sizeof(struct fps))) {
+			i = -EFAULT;
 			pt_error_return(regs, -i);
 			goto out_tsk;
 		}
@@ -489,7 +493,8 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 
 	case PTRACE_READTEXT:
 	case PTRACE_READDATA: {
-		int res = ptrace_readdata(child, addr, (void *) addr2, data);
+		int res = ptrace_readdata(child, addr,
+					  (void __user *) addr2, data);
 
 		if (res == data) {
 			pt_succ_return(regs, 0);
@@ -504,7 +509,8 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 
 	case PTRACE_WRITETEXT:
 	case PTRACE_WRITEDATA: {
-		int res = ptrace_writedata(child, (void *) addr2, addr, data);
+		int res = ptrace_writedata(child, (void __user *) addr2,
+					   addr, data);
 
 		if (res == data) {
 			pt_succ_return(regs, 0);
@@ -521,21 +527,9 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
 		addr = 1;
 
 	case PTRACE_CONT: { /* restart after signal. */
-		if (data > _NSIG) {
+		if (!valid_signal(data)) {
 			pt_error_return(regs, EIO);
 			goto out_tsk;
-		}
-		if (addr != 1) {
-			if (addr & 3) {
-				pt_error_return(regs, EINVAL);
-				goto out_tsk;
-			}
-#ifdef DEBUG_PTRACE
-			printk ("Original: %08lx %08lx\n", child->thread.kregs->pc, child->thread.kregs->npc);
-			printk ("Continuing with %08lx %08lx\n", addr, addr+4);
-#endif
-			child->thread.kregs->pc = addr;
-			child->thread.kregs->npc = addr + 4;
 		}
 
 		if (request == PTRACE_SYSCALL)
@@ -561,7 +555,7 @@ asmlinkage void do_ptrace(struct pt_regs *regs)
  * exit.
  */
 	case PTRACE_KILL: {
-		if (child->state == TASK_ZOMBIE) {	/* already dead */
+		if (child->exit_state == EXIT_ZOMBIE) {	/* already dead */
 			pt_succ_return(regs, 0);
 			goto out_tsk;
 		}
@@ -608,12 +602,9 @@ asmlinkage void syscall_trace(void)
 		return;
 	if (!(current->ptrace & PT_PTRACED))
 		return;
-	current->exit_code = SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
-					? 0x80 : 0);
-	current->state = TASK_STOPPED;
 	current->thread.flags ^= MAGIC_CONSTANT;
-	notify_parent(current, SIGCHLD);
-	schedule();
+	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
+				 ? 0x80 : 0));
 	/*
 	 * this isn't the same as continuing with a signal, but it will do
 	 * for normal use.  strace only continues with a signal if the

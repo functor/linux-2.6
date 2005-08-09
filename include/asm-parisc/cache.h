@@ -34,6 +34,7 @@ extern void flush_data_cache_local(void);  /* flushes local data-cache only */
 extern void flush_instruction_cache_local(void); /* flushes local code-cache only */
 #ifdef CONFIG_SMP
 extern void flush_data_cache(void); /* flushes data-cache only (all processors) */
+extern void flush_instruction_cache(void); /* flushes i-cache only (all processors) */
 #else
 #define flush_data_cache flush_data_cache_local
 #define flush_instruction_cache flush_instruction_cache_local
@@ -52,6 +53,8 @@ extern void disable_sr_hashing(void);   /* turns off space register hashing */
 extern void disable_sr_hashing_asm(int); /* low level support for above */
 extern void free_sid(unsigned long);
 unsigned long alloc_sid(void);
+extern void flush_user_dcache_page(unsigned long);
+extern void flush_user_icache_page(unsigned long);
 
 struct seq_file;
 extern void show_cache_info(struct seq_file *m);

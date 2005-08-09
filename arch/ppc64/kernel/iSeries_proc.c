@@ -20,11 +20,11 @@
 #include <linux/init.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/param.h>		/* for HZ */
 #include <asm/paca.h>
 #include <asm/processor.h>
 #include <asm/time.h>
-#include <asm/naca.h>
-#include <asm/iSeries/ItLpPaca.h>
+#include <asm/lppaca.h>
 #include <asm/iSeries/ItLpQueue.h>
 #include <asm/iSeries/HvCallXm.h>
 #include <asm/iSeries/IoHriMainStore.h>
@@ -68,7 +68,7 @@ static int proc_lpevents_show(struct seq_file *m, void *v)
 	seq_printf(m, "\n  events processed by processor:\n");
 
 	for_each_online_cpu(i)
-		seq_printf(m, "    CPU%02d  %10u\n", i, paca[i].lpEvent_count);
+		seq_printf(m, "    CPU%02d  %10u\n", i, paca[i].lpevent_count);
 
 	return 0;
 }

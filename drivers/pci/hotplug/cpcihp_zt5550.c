@@ -32,6 +32,7 @@
 
 #include <linux/config.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/pci.h>
@@ -42,11 +43,7 @@
 #define DRIVER_AUTHOR	"Scott Murray <scottm@somanetworks.com>"
 #define DRIVER_DESC	"ZT5550 CompactPCI Hot Plug Driver"
 
-#if !defined(CONFIG_HOTPLUG_PCI_CPCI_ZT5550_MODULE)
 #define MY_NAME	"cpcihp_zt5550"
-#else
-#define MY_NAME	THIS_MODULE->name
-#endif
 
 #define dbg(format, arg...)					\
 	do {							\
@@ -72,11 +69,11 @@ static struct pci_bus *bus0;
 static struct pci_dev *hc_dev;
 
 /* Host controller register addresses */
-static void *hc_registers;
-static void *csr_hc_index;
-static void *csr_hc_data;
-static void *csr_int_status;
-static void *csr_int_mask;
+static void __iomem *hc_registers;
+static void __iomem *csr_hc_index;
+static void __iomem *csr_hc_data;
+static void __iomem *csr_int_status;
+static void __iomem *csr_int_mask;
 
 
 static int zt5550_hc_config(struct pci_dev *pdev)
@@ -175,7 +172,7 @@ static int zt5550_hc_enable_irq(void)
 	return 0;
 }
 
-int zt5550_hc_disable_irq(void)
+static int zt5550_hc_disable_irq(void)
 {
 	u8 reg;
 
@@ -222,12 +219,13 @@ static int zt5550_hc_init_one (struct pci_dev *pdev, const struct pci_device_id 
 	dbg("registered controller");
 
 	/* Look for first device matching cPCI bus's bridge vendor and device IDs */
-	if(!(bus0_dev = pci_find_device(PCI_VENDOR_ID_DEC,
+	if(!(bus0_dev = pci_get_device(PCI_VENDOR_ID_DEC,
 					 PCI_DEVICE_ID_DEC_21154, NULL))) {
 		status = -ENODEV;
 		goto init_register_error;
 	}
 	bus0 = bus0_dev->subordinate;
+	pci_dev_put(bus0_dev);
 
 	status = cpci_hp_register_bus(bus0, 0x0a, 0x0f);
 	if(status != 0) {
@@ -285,7 +283,7 @@ static int __init zt5550_init(void)
 	if(!r)
 		return -EBUSY;
 
-	return pci_module_init(&zt5550_hc_driver);
+	return pci_register_driver(&zt5550_hc_driver);
 }
 
 static void __exit
@@ -301,7 +299,7 @@ module_exit(zt5550_exit);
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
-MODULE_PARM(debug, "i");
+module_param(debug, bool, 0644);
 MODULE_PARM_DESC(debug, "Debugging mode enabled or not");
-MODULE_PARM(poll, "i");
+module_param(poll, bool, 0644);
 MODULE_PARM_DESC(poll, "#ENUM polling mode enabled or not");

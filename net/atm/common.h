@@ -19,15 +19,10 @@ int vcc_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *m,
 		size_t total_len);
 unsigned int vcc_poll(struct file *file, struct socket *sock, poll_table *wait);
 int vcc_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
-int vcc_setsockopt(struct socket *sock, int level, int optname, char *optval,
-		   int optlen);
-int vcc_getsockopt(struct socket *sock, int level, int optname, char *optval,
-		   int *optlen);
-
-void atm_shutdown_dev(struct atm_dev *dev);
-
-void pppoatm_ioctl_set(int (*hook)(struct atm_vcc *, unsigned int, unsigned long));
-void br2684_ioctl_set(int (*hook)(struct atm_vcc *, unsigned int, unsigned long));
+int vcc_setsockopt(struct socket *sock, int level, int optname,
+		   char __user *optval, int optlen);
+int vcc_getsockopt(struct socket *sock, int level, int optname,
+		   char __user *optval, int __user *optlen);
 
 int atmpvc_init(void);
 void atmpvc_exit(void);
@@ -50,12 +45,6 @@ static inline void atm_proc_exit(void)
 #endif /* CONFIG_PROC_FS */
 
 /* SVC */
-
-void svc_callback(struct atm_vcc *vcc);
 int svc_change_qos(struct atm_vcc *vcc,struct atm_qos *qos);
-
-/* p2mp */
-
-int create_leaf(struct socket *leaf,struct socket *session);
 
 #endif

@@ -43,7 +43,6 @@
  */
 #define PARAM			ZERO_PGE
 #define COMMAND_LINE		((char*)(PARAM + 0x0000))
-#define COMMAND_LINE_SIZE	256
 #define INITRD_START		(*(unsigned long *) (PARAM+0x100))
 #define INITRD_SIZE		(*(unsigned long *) (PARAM+0x108))
 
@@ -56,9 +55,9 @@
  */
 struct el_common {
 	unsigned int	size;		/* size in bytes of logout area */
-	int		sbz1	: 30;	/* should be zero */
-	int		err2	:  1;	/* second error */
-	int		retry	:  1;	/* retry flag */
+	unsigned int	sbz1	: 30;	/* should be zero */
+	unsigned int	err2	:  1;	/* second error */
+	unsigned int	retry	:  1;	/* retry flag */
 	unsigned int	proc_offset;	/* processor-specific offset */
 	unsigned int	sys_offset;	/* system-specific offset */
 	unsigned int	code;		/* machine check code */
@@ -621,5 +620,7 @@ __cmpxchg(volatile void *ptr, unsigned long old, unsigned long new, int size)
   })
 
 #endif /* __ASSEMBLY__ */
+
+#define arch_align_stack(x) (x)
 
 #endif

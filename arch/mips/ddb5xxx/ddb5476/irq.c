@@ -107,15 +107,15 @@ static void nile4_irq_setup(void)
 	/* memory resource acquire in ddb_setup */
 }
 
-static struct irqaction irq_cascade = { no_action, 0, 0, "cascade", NULL, NULL };
-static struct irqaction irq_error = { no_action, 0, 0, "error", NULL, NULL };
+static struct irqaction irq_cascade = { no_action, 0, CPU_MASK_NONE, "cascade", NULL, NULL };
+static struct irqaction irq_error = { no_action, 0, CPU_MASK_NONE, "error", NULL, NULL };
 
 extern asmlinkage void ddb5476_handle_int(void);
 extern int setup_irq(unsigned int irq, struct irqaction *irqaction);
 extern void mips_cpu_irq_init(u32 irq_base);
 extern void vrc5476_irq_init(u32 irq_base);
 
-void __init ddb5476_irq_setup(void)
+void __init arch_init_irq(void)
 {
 	/* hardware initialization */
 	nile4_irq_setup();

@@ -35,8 +35,8 @@ ohci_pci_reset (struct usb_hcd *hcd)
 {
 	struct ohci_hcd	*ohci = hcd_to_ohci (hcd);
 
-	ohci->regs = hcd->regs;
-	return hc_reset (ohci);
+	ohci_hcd_init (ohci);
+	return ohci_init (ohci);
 }
 
 static int __devinit
@@ -44,11 +44,6 @@ ohci_pci_start (struct usb_hcd *hcd)
 {
 	struct ohci_hcd	*ohci = hcd_to_ohci (hcd);
 	int		ret;
-
-	ohci->hcca = dma_alloc_coherent (hcd->self.controller,
-			sizeof *ohci->hcca, &ohci->hcca_dma, 0);
-	if (!ohci->hcca)
-		return -ENOMEM;
 
 	if(hcd->self.controller && hcd->self.controller->bus == &pci_bus_type) {
 		struct pci_dev *pdev = to_pci_dev(hcd->self.controller);
@@ -59,7 +54,8 @@ ohci_pci_start (struct usb_hcd *hcd)
 		if (pdev->vendor == PCI_VENDOR_ID_AMD
 				&& pdev->device == 0x740c) {
 			ohci->flags = OHCI_QUIRK_AMD756;
-			ohci_info (ohci, "AMD756 erratum 4 workaround\n");
+			ohci_dbg (ohci, "AMD756 erratum 4 workaround\n");
+			// also somewhat erratum 10 (suspend/resume issues)
 		}
 
 		/* FIXME for some of the early AMD 760 southbridges, OHCI
@@ -72,7 +68,7 @@ ohci_pci_start (struct usb_hcd *hcd)
 		 */
 		else if (pdev->vendor == PCI_VENDOR_ID_OPTI
 				&& pdev->device == 0xc861) {
-			ohci_info (ohci,
+			ohci_dbg (ohci,
 				"WARNING: OPTi workarounds unavailable\n");
 		}
 
@@ -88,105 +84,56 @@ ohci_pci_start (struct usb_hcd *hcd)
 			if (b && b->device == PCI_DEVICE_ID_NS_87560_LIO
 					&& b->vendor == PCI_VENDOR_ID_NS) {
 				ohci->flags |= OHCI_QUIRK_SUPERIO;
-				ohci_info (ohci, "Using NSC SuperIO setup\n");
+				ohci_dbg (ohci, "Using NSC SuperIO setup\n");
 			}
 		}
-	
+
+		/* Check for Compaq's ZFMicro chipset, which needs short 
+		 * delays before control or bulk queues get re-activated
+		 * in finish_unlinks()
+		 */
+		else if (pdev->vendor == PCI_VENDOR_ID_COMPAQ
+				&& pdev->device  == 0xa0f8) {
+			ohci->flags |= OHCI_QUIRK_ZFMICRO;
+			ohci_dbg (ohci,
+				"enabled Compaq ZFMicro chipset quirk\n");
+		}
 	}
 
-        memset (ohci->hcca, 0, sizeof (struct ohci_hcca));
-	if ((ret = ohci_mem_init (ohci)) < 0) {
+	/* NOTE: there may have already been a first reset, to
+	 * keep bios/smm irqs from making trouble
+	 */
+	if ((ret = ohci_run (ohci)) < 0) {
+		ohci_err (ohci, "can't start\n");
 		ohci_stop (hcd);
 		return ret;
 	}
-
-	if (hc_start (ohci) < 0) {
-		ohci_err (ohci, "can't start\n");
-		ohci_stop (hcd);
-		return -EBUSY;
-	}
-	create_debug_files (ohci);
-
-#ifdef	DEBUG
-	ohci_dump (ohci, 1);
-#endif
 	return 0;
 }
 
 #ifdef	CONFIG_PM
 
-static int ohci_pci_suspend (struct usb_hcd *hcd, u32 state)
+static int ohci_pci_suspend (struct usb_hcd *hcd, pm_message_t message)
 {
 	struct ohci_hcd		*ohci = hcd_to_ohci (hcd);
-	u16			cmd;
-	u32			tmp;
 
-	if ((ohci->hc_control & OHCI_CTRL_HCFS) != OHCI_USB_OPER) {
-		ohci_dbg (ohci, "can't suspend (state is %s)\n",
-			hcfs2string (ohci->hc_control & OHCI_CTRL_HCFS));
-		return -EIO;
-	}
+	/* suspend root hub, hoping it keeps power during suspend */
+	if (time_before (jiffies, ohci->next_statechange))
+		msleep (100);
 
-	/* act as if usb suspend can always be used */
-	ohci_dbg (ohci, "suspend to %d\n", state);
-	
-	/* First stop processing */
-  	spin_lock_irq (&ohci->lock);
-	ohci->hc_control &=
-		~(OHCI_CTRL_PLE|OHCI_CTRL_CLE|OHCI_CTRL_BLE|OHCI_CTRL_IE);
-	writel (ohci->hc_control, &ohci->regs->control);
-	writel (OHCI_INTR_SF, &ohci->regs->intrstatus);
-	(void) readl (&ohci->regs->intrstatus);
-  	spin_unlock_irq (&ohci->lock);
-
-	/* Wait a frame or two */
-	mdelay (1);
-	if (!readl (&ohci->regs->intrstatus) & OHCI_INTR_SF)
-		mdelay (1);
-		
-#ifdef CONFIG_PMAC_PBOOK
-	if (_machine == _MACH_Pmac)
-		disable_irq ((to_pci_dev(hcd->self.controller))->irq);
- 	/* else, 2.4 assumes shared irqs -- don't disable */
+#ifdef	CONFIG_USB_SUSPEND
+	(void) usb_suspend_device (hcd->self.root_hub, message);
+#else
+	usb_lock_device (hcd->self.root_hub);
+	(void) ohci_hub_suspend (hcd);
+	usb_unlock_device (hcd->self.root_hub);
 #endif
 
-	/* Enable remote wakeup */
-	writel (readl (&ohci->regs->intrenable) | OHCI_INTR_RD,
-		&ohci->regs->intrenable);
-
-	/* Suspend chip and let things settle down a bit */
-  	spin_lock_irq (&ohci->lock);
- 	ohci->hc_control = OHCI_USB_SUSPEND;
- 	writel (ohci->hc_control, &ohci->regs->control);
-	(void) readl (&ohci->regs->control);
-  	spin_unlock_irq (&ohci->lock);
-
-	set_current_state (TASK_UNINTERRUPTIBLE);
-	schedule_timeout (HZ/2);
-
-	tmp = readl (&ohci->regs->control) | OHCI_CTRL_HCFS;
-	switch (tmp) {
-		case OHCI_USB_RESET:
-		case OHCI_USB_RESUME:
-		case OHCI_USB_OPER:
-			ohci_err (ohci, "can't suspend; hcfs %d\n", tmp);
-			break;
-		case OHCI_USB_SUSPEND:
-			ohci_dbg (ohci, "suspended\n");
-			break;
-	}
-
-	/* In some rare situations, Apple's OHCI have happily trashed
-	 * memory during sleep. We disable its bus master bit during
-	 * suspend
-	 */
-	pci_read_config_word (to_pci_dev(hcd->self.controller), PCI_COMMAND, 
-				&cmd);
-	cmd &= ~PCI_COMMAND_MASTER;
-	pci_write_config_word (to_pci_dev(hcd->self.controller), PCI_COMMAND, 
-				cmd);
+	/* let things settle down a bit */
+	msleep (100);
+	
 #ifdef CONFIG_PMAC_PBOOK
-	{
+	if (_machine == _MACH_Pmac) {
 	   	struct device_node	*of_node;
  
 		/* Disable USB PAD & cell clock */
@@ -194,7 +141,7 @@ static int ohci_pci_suspend (struct usb_hcd *hcd, u32 state)
 		if (of_node)
 			pmac_call_feature(PMAC_FTR_USB_ENABLE, of_node, 0, 0);
 	}
-#endif
+#endif /* CONFIG_PMAC_PBOOK */
 	return 0;
 }
 
@@ -202,11 +149,10 @@ static int ohci_pci_suspend (struct usb_hcd *hcd, u32 state)
 static int ohci_pci_resume (struct usb_hcd *hcd)
 {
 	struct ohci_hcd		*ohci = hcd_to_ohci (hcd);
-	int			temp;
 	int			retval = 0;
 
 #ifdef CONFIG_PMAC_PBOOK
-	{
+	if (_machine == _MACH_Pmac) {
 		struct device_node *of_node;
 
 		/* Re-enable USB PAD & cell clock */
@@ -214,92 +160,20 @@ static int ohci_pci_resume (struct usb_hcd *hcd)
 		if (of_node)
 			pmac_call_feature (PMAC_FTR_USB_ENABLE, of_node, 0, 1);
 	}
-#endif
-	/* did we suspend, or were we powered off? */
-	ohci->hc_control = readl (&ohci->regs->control);
-	temp = ohci->hc_control & OHCI_CTRL_HCFS;
+#endif /* CONFIG_PMAC_PBOOK */
 
-#ifdef DEBUG
-	/* the registers may look crazy here */
-	ohci_dump_status (ohci, 0, 0);
-#endif
-
-	/* Re-enable bus mastering */
-	pci_set_master (to_pci_dev(ohci->hcd.self.controller));
-	
-	switch (temp) {
-
-	case OHCI_USB_RESET:	// lost power
-restart:
-		ohci_info (ohci, "USB restart\n");
-		retval = hc_restart (ohci);
-		break;
-
-	case OHCI_USB_SUSPEND:	// host wakeup
-	case OHCI_USB_RESUME:	// remote wakeup
-		ohci_info (ohci, "USB continue from %s wakeup\n",
-			 (temp == OHCI_USB_SUSPEND)
-				? "host" : "remote");
-
-		/* we "should" only need RESUME if we're SUSPENDed ... */
-		ohci->hc_control = OHCI_USB_RESUME;
-		writel (ohci->hc_control, &ohci->regs->control);
-		(void) readl (&ohci->regs->control);
-		/* Some controllers (lucent) need extra-long delays */
-		mdelay (35); /* no schedule here ! */
-
-		temp = readl (&ohci->regs->control);
-		temp = ohci->hc_control & OHCI_CTRL_HCFS;
-		if (temp != OHCI_USB_RESUME) {
-			ohci_err (ohci, "controller won't resume\n");
-			/* maybe we can reset */
-			goto restart;
-		}
-
-		/* Then re-enable operations */
-		writel (OHCI_USB_OPER, &ohci->regs->control);
-		(void) readl (&ohci->regs->control);
-		mdelay (3);
-
-		spin_lock_irq (&ohci->lock);
-		ohci->hc_control = OHCI_CONTROL_INIT | OHCI_USB_OPER;
-		if (!ohci->ed_rm_list) {
-			if (ohci->ed_controltail)
-				ohci->hc_control |= OHCI_CTRL_CLE;
-			if (ohci->ed_bulktail)
-				ohci->hc_control |= OHCI_CTRL_BLE;
-		}
-		if (hcd_to_bus (&ohci->hcd)->bandwidth_isoc_reqs
-				|| hcd_to_bus (&ohci->hcd)->bandwidth_int_reqs)
-			ohci->hc_control |= OHCI_CTRL_PLE|OHCI_CTRL_IE;
-		hcd->state = USB_STATE_RUNNING;
-		writel (ohci->hc_control, &ohci->regs->control);
-
-		/* trigger a start-frame interrupt (why?) */
-		writel (OHCI_INTR_SF, &ohci->regs->intrstatus);
-		writel (OHCI_INTR_SF, &ohci->regs->intrenable);
-
-		writel (OHCI_INTR_WDH, &ohci->regs->intrdisable);	
-		(void) readl (&ohci->regs->intrdisable);
-		spin_unlock_irq (&ohci->lock);
-
-#ifdef CONFIG_PMAC_PBOOK
-		if (_machine == _MACH_Pmac)
-			enable_irq (to_pci_dev(hcd->self.controller)->irq);
+	/* resume root hub */
+	if (time_before (jiffies, ohci->next_statechange))
+		msleep (100);
+#ifdef	CONFIG_USB_SUSPEND
+	/* get extra cleanup even if remote wakeup isn't in use */
+	retval = usb_resume_device (hcd->self.root_hub);
+#else
+	usb_lock_device (hcd->self.root_hub);
+	retval = ohci_hub_resume (hcd);
+	usb_unlock_device (hcd->self.root_hub);
 #endif
 
-		/* Check for a pending done list */
-		if (ohci->hcca->done_head)
-			dl_done_list (ohci, dl_reverse_done_list (ohci), NULL);
-		writel (OHCI_INTR_WDH, &ohci->regs->intrenable); 
-
-		/* assume there are TDs on the bulk and control lists */
-		writel (OHCI_BLF | OHCI_CLF, &ohci->regs->cmdstatus);
-		break;
-
-	default:
-		ohci_warn (ohci, "odd PCI resume\n");
-	}
 	return retval;
 }
 
@@ -310,6 +184,8 @@ restart:
 
 static const struct hc_driver ohci_pci_hc_driver = {
 	.description =		hcd_name,
+	.product_desc =		"OHCI Host Controller",
+	.hcd_priv_size =	sizeof(struct ohci_hcd),
 
 	/*
 	 * generic hardware linkage
@@ -329,12 +205,6 @@ static const struct hc_driver ohci_pci_hc_driver = {
 	.stop =			ohci_stop,
 
 	/*
-	 * memory lifecycle (except per-request)
-	 */
-	.hcd_alloc =		ohci_hcd_alloc,
-	.hcd_free =		ohci_hcd_free,
-
-	/*
 	 * managing i/o requests and associated device resources
 	 */
 	.urb_enqueue =		ohci_urb_enqueue,
@@ -351,6 +221,11 @@ static const struct hc_driver ohci_pci_hc_driver = {
 	 */
 	.hub_status_data =	ohci_hub_status_data,
 	.hub_control =		ohci_hub_control,
+#ifdef	CONFIG_USB_SUSPEND
+	.hub_suspend =		ohci_hub_suspend,
+	.hub_resume =		ohci_hub_resume,
+#endif
+	.start_port_reset =	ohci_start_port_reset,
 };
 
 /*-------------------------------------------------------------------------*/
@@ -385,9 +260,9 @@ static int __init ohci_hcd_pci_init (void)
 	if (usb_disabled())
 		return -ENODEV;
 
-	printk (KERN_DEBUG "%s: block sizes: ed %Zd td %Zd\n", hcd_name,
+	pr_debug ("%s: block sizes: ed %Zd td %Zd\n", hcd_name,
 		sizeof (struct ed), sizeof (struct td));
-	return pci_module_init (&ohci_pci_driver);
+	return pci_register_driver (&ohci_pci_driver);
 }
 module_init (ohci_hcd_pci_init);
 

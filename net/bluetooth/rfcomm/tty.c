@@ -77,7 +77,7 @@ struct rfcomm_dev {
 };
 
 static LIST_HEAD(rfcomm_dev_list);
-static rwlock_t rfcomm_dev_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(rfcomm_dev_lock);
 
 static void rfcomm_dev_data_ready(struct rfcomm_dlc *dlc, struct sk_buff *skb);
 static void rfcomm_dev_state_change(struct rfcomm_dlc *dlc, int err);
@@ -302,13 +302,13 @@ static struct sk_buff *rfcomm_wmalloc(struct rfcomm_dev *dev, unsigned long size
 
 #define NOCAP_FLAGS ((1 << RFCOMM_REUSE_DLC) | (1 << RFCOMM_RELEASE_ONHUP))
 
-static int rfcomm_create_dev(struct sock *sk, unsigned long arg)
+static int rfcomm_create_dev(struct sock *sk, void __user *arg)
 {
 	struct rfcomm_dev_req req;
 	struct rfcomm_dlc *dlc;
 	int id;
 
-	if (copy_from_user(&req, (void *) arg, sizeof(req)))
+	if (copy_from_user(&req, arg, sizeof(req)))
 		return -EFAULT;
 
 	BT_DBG("sk %p dev_id %id flags 0x%x", sk, req.dev_id, req.flags);
@@ -344,12 +344,12 @@ static int rfcomm_create_dev(struct sock *sk, unsigned long arg)
 	return id;
 }
 
-static int rfcomm_release_dev(unsigned long arg)
+static int rfcomm_release_dev(void __user *arg)
 {
 	struct rfcomm_dev_req req;
 	struct rfcomm_dev *dev;
 
-	if (copy_from_user(&req, (void *) arg, sizeof(req)))
+	if (copy_from_user(&req, arg, sizeof(req)))
 		return -EFAULT;
 
 	BT_DBG("dev_id %id flags 0x%x", req.dev_id, req.flags);
@@ -370,7 +370,7 @@ static int rfcomm_release_dev(unsigned long arg)
 	return 0;
 }
 
-static int rfcomm_get_dev_list(unsigned long arg)
+static int rfcomm_get_dev_list(void __user *arg)
 {
 	struct rfcomm_dev_list_req *dl;
 	struct rfcomm_dev_info *di;
@@ -380,7 +380,7 @@ static int rfcomm_get_dev_list(unsigned long arg)
 
 	BT_DBG("");
 
-	if (get_user(dev_num, (u16 *) arg))
+	if (get_user(dev_num, (u16 __user *) arg))
 		return -EFAULT;
 
 	if (!dev_num || dev_num > (PAGE_SIZE * 4) / sizeof(*di))
@@ -412,13 +412,13 @@ static int rfcomm_get_dev_list(unsigned long arg)
 	dl->dev_num = n;
 	size = sizeof(*dl) + n * sizeof(*di);
 
-	err = copy_to_user((void *) arg, dl, size);
+	err = copy_to_user(arg, dl, size);
 	kfree(dl);
 
 	return err ? -EFAULT : 0;
 }
 
-static int rfcomm_get_dev_info(unsigned long arg)
+static int rfcomm_get_dev_info(void __user *arg)
 {
 	struct rfcomm_dev *dev;
 	struct rfcomm_dev_info di;
@@ -426,7 +426,7 @@ static int rfcomm_get_dev_info(unsigned long arg)
 
 	BT_DBG("");
 
-	if (copy_from_user(&di, (void *)arg, sizeof(di)))
+	if (copy_from_user(&di, arg, sizeof(di)))
 		return -EFAULT;
 
 	if (!(dev = rfcomm_dev_get(di.id)))
@@ -438,16 +438,16 @@ static int rfcomm_get_dev_info(unsigned long arg)
 	bacpy(&di.src, &dev->src);
 	bacpy(&di.dst, &dev->dst);
 
-	if (copy_to_user((void *)arg, &di, sizeof(di)))
+	if (copy_to_user(arg, &di, sizeof(di)))
 		err = -EFAULT;
 
 	rfcomm_dev_put(dev);
 	return err;
 }
 
-int rfcomm_dev_ioctl(struct sock *sk, unsigned int cmd, unsigned long arg)
+int rfcomm_dev_ioctl(struct sock *sk, unsigned int cmd, void __user *arg)
 {
-	BT_DBG("cmd %d arg %ld", cmd, arg);
+	BT_DBG("cmd %d arg %p", cmd, arg);
 
 	switch (cmd) {
 	case RFCOMMCREATEDEV:
@@ -645,32 +645,26 @@ static void rfcomm_tty_close(struct tty_struct *tty, struct file *filp)
 	rfcomm_dev_put(dev);
 }
 
-static int rfcomm_tty_write(struct tty_struct *tty, int from_user, const unsigned char *buf, int count)
+static int rfcomm_tty_write(struct tty_struct *tty, const unsigned char *buf, int count)
 {
 	struct rfcomm_dev *dev = (struct rfcomm_dev *) tty->driver_data;
 	struct rfcomm_dlc *dlc = dev->dlc;
 	struct sk_buff *skb;
 	int err = 0, sent = 0, size;
 
-	BT_DBG("tty %p from_user %d count %d", tty, from_user, count);
+	BT_DBG("tty %p count %d", tty, count);
 
 	while (count) {
 		size = min_t(uint, count, dlc->mtu);
 
-		if (from_user)
-			skb = rfcomm_wmalloc(dev, size + RFCOMM_SKB_RESERVE, GFP_KERNEL);
-		else
-			skb = rfcomm_wmalloc(dev, size + RFCOMM_SKB_RESERVE, GFP_ATOMIC);
+		skb = rfcomm_wmalloc(dev, size + RFCOMM_SKB_RESERVE, GFP_ATOMIC);
 		
 		if (!skb)
 			break;
 
 		skb_reserve(skb, RFCOMM_SKB_HEAD_RESERVE);
 
-		if (from_user)
-			copy_from_user(skb_put(skb, size), buf + sent, size);
-		else
-			memcpy(skb_put(skb, size), buf + sent, size);
+		memcpy(skb_put(skb, size), buf + sent, size);
 
 		if ((err = rfcomm_dlc_send(dlc, skb)) < 0) {
 			kfree_skb(skb);

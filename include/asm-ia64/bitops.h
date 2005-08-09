@@ -11,7 +11,7 @@
 
 #include <linux/compiler.h>
 #include <linux/types.h>
-
+#include <asm/bitops.h>
 #include <asm/intrinsics.h>
 
 /**
@@ -314,8 +314,8 @@ __ffs (unsigned long x)
 #ifdef __KERNEL__
 
 /*
- * find_last_zero_bit - find the last zero bit in a 64 bit quantity
- * @x: The value to search
+ * Return bit number of last (most-significant) bit set.  Undefined
+ * for x==0.  Bits are numbered from 0..63 (e.g., ia64_fls(9) == 3).
  */
 static inline unsigned long
 ia64_fls (unsigned long x)
@@ -327,10 +327,23 @@ ia64_fls (unsigned long x)
 	return exp - 0xffff;
 }
 
+/*
+ * Find the last (most significant) bit set.  Returns 0 for x==0 and
+ * bits are numbered from 1..32 (e.g., fls(9) == 4).
+ */
 static inline int
-fls (int x)
+fls (int t)
 {
-	return ia64_fls((unsigned int) x);
+	unsigned long x = t & 0xffffffffu;
+
+	if (!x)
+		return 0;
+	x |= x >> 1;
+	x |= x >> 2;
+	x |= x >> 4;
+	x |= x >> 8;
+	x |= x >> 16;
+	return ia64_popcnt(x);
 }
 
 /*
@@ -353,98 +366,26 @@ hweight64 (unsigned long x)
 	return result;
 }
 
-#define hweight32(x) hweight64 ((x) & 0xfffffffful)
-#define hweight16(x) hweight64 ((x) & 0xfffful)
-#define hweight8(x)  hweight64 ((x) & 0xfful)
+#define hweight32(x)	(unsigned int) hweight64((x) & 0xfffffffful)
+#define hweight16(x)	(unsigned int) hweight64((x) & 0xfffful)
+#define hweight8(x)	(unsigned int) hweight64((x) & 0xfful)
 
 #endif /* __KERNEL__ */
 
-/*
- * Find next zero bit in a bitmap reasonably efficiently..
- */
-static inline int
-find_next_zero_bit (void *addr, unsigned long size, unsigned long offset)
-{
-	unsigned long *p = ((unsigned long *) addr) + (offset >> 6);
-	unsigned long result = offset & ~63UL;
-	unsigned long tmp;
+extern int __find_next_zero_bit (const void *addr, unsigned long size,
+			unsigned long offset);
+extern int __find_next_bit(const void *addr, unsigned long size,
+			unsigned long offset);
 
-	if (offset >= size)
-		return size;
-	size -= result;
-	offset &= 63UL;
-	if (offset) {
-		tmp = *(p++);
-		tmp |= ~0UL >> (64-offset);
-		if (size < 64)
-			goto found_first;
-		if (~tmp)
-			goto found_middle;
-		size -= 64;
-		result += 64;
-	}
-	while (size & ~63UL) {
-		if (~(tmp = *(p++)))
-			goto found_middle;
-		result += 64;
-		size -= 64;
-	}
-	if (!size)
-		return result;
-	tmp = *p;
-found_first:
-	tmp |= ~0UL << size;
-	if (tmp == ~0UL)		/* any bits zero? */
-		return result + size;	/* nope */
-found_middle:
-	return result + ffz(tmp);
-}
+#define find_next_zero_bit(addr, size, offset) \
+			__find_next_zero_bit((addr), (size), (offset))
+#define find_next_bit(addr, size, offset) \
+			__find_next_bit((addr), (size), (offset))
 
 /*
  * The optimizer actually does good code for this case..
  */
 #define find_first_zero_bit(addr, size) find_next_zero_bit((addr), (size), 0)
-
-/*
- * Find next bit in a bitmap reasonably efficiently..
- */
-static inline int
-find_next_bit(const void *addr, unsigned long size, unsigned long offset)
-{
-	unsigned long *p = ((unsigned long *) addr) + (offset >> 6);
-	unsigned long result = offset & ~63UL;
-	unsigned long tmp;
-
-	if (offset >= size)
-		return size;
-	size -= result;
-	offset &= 63UL;
-	if (offset) {
-		tmp = *(p++);
-		tmp &= ~0UL << offset;
-		if (size < 64)
-			goto found_first;
-		if (tmp)
-			goto found_middle;
-		size -= 64;
-		result += 64;
-	}
-	while (size & ~63UL) {
-		if ((tmp = *(p++)))
-			goto found_middle;
-		result += 64;
-		size -= 64;
-	}
-	if (!size)
-		return result;
-	tmp = *p;
-  found_first:
-	tmp &= ~0UL >> (64-size);
-	if (tmp == 0UL)		/* Are any bits set? */
-		return result + size; /* Nope. */
-  found_middle:
-	return result + __ffs(tmp);
-}
 
 #define find_first_bit(addr, size) find_next_bit((addr), (size), 0)
 

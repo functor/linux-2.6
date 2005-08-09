@@ -17,7 +17,7 @@
 #include <asm/system.h>
 
 #include "../scsi.h"
-#include "../hosts.h"
+#include <scsi/scsi_host.h>
 
 #define AUTOSENSE
 /*#define PSEUDO_DMA*/
@@ -179,6 +179,7 @@ static void __devexit oakscsi_remove(struct expansion_card *ec)
 	ecard_set_drvdata(ec, NULL);
 	scsi_remove_host(host);
 
+	NCR5380_exit(host);
 	release_region(host->io_port, host->n_io_port);
 	scsi_host_put(host);
 }

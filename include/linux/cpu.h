@@ -27,10 +27,14 @@
 
 struct cpu {
 	int node_id;		/* The node which contains the CPU */
+	int no_control;		/* Should the sysfs control file be created? */
 	struct sys_device sysdev;
 };
 
 extern int register_cpu(struct cpu *, int, struct node *);
+#ifdef CONFIG_HOTPLUG_CPU
+extern void unregister_cpu(struct cpu *, struct node *);
+#endif
 struct notifier_block;
 
 #ifdef CONFIG_SMP
@@ -60,7 +64,8 @@ extern struct semaphore cpucontrol;
 #define unlock_cpu_hotplug()	up(&cpucontrol)
 #define lock_cpu_hotplug_interruptible() down_interruptible(&cpucontrol)
 #define hotcpu_notifier(fn, pri) {				\
-	static struct notifier_block fn##_nb = { fn, pri };	\
+	static struct notifier_block fn##_nb =			\
+		{ .notifier_call = fn, .priority = pri };	\
 	register_cpu_notifier(&fn##_nb);			\
 }
 int cpu_down(unsigned int cpu);
@@ -72,7 +77,7 @@ int cpu_down(unsigned int cpu);
 #define hotcpu_notifier(fn, pri)
 
 /* CPUs don't go offline once they're online w/o CONFIG_HOTPLUG_CPU */
-#define cpu_is_offline(cpu) 0
+static inline int cpu_is_offline(int cpu) { return 0; }
 #endif
 
 #endif /* _LINUX_CPU_H_ */

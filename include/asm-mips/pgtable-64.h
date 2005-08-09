@@ -29,11 +29,10 @@
  * that the failure is recognized later on. Linux does not seem to
  * handle these failures very well though. The empty_bad_page_table has
  * invalid pte entries in it, to force page faults.
- * Vmalloc handling: vmalloc uses swapper_pg_dir[0] (returned by
- * pgd_offset_k), which is initalized to point to kpmdtbl. kpmdtbl is
- * the only single page pmd in the system. kpmdtbl entries point into
- * kptbl[] array. We reserve 1 << PGD_ORDER pages to hold the
- * vmalloc range translations, which the fault handler looks at.
+ *
+ * Kernel mappings: kernel mappings are held in the swapper_pg_table.
+ * The layout is identical to userspace except it's indexed with the
+ * fault address - VMALLOC_START.
  */
 
 /* PMD_SHIFT determines the size of the area a second-level page table can map */
@@ -53,7 +52,11 @@
  * We used to implement 41 bits by having an order 1 pmd level but that seemed
  * rather pointless.
  *
- * For 16kB page size we use a 2 level page tree which permit a total of
+ * For 8kB page size we use a 3 level page tree which permits a total of
+ * 8TB of address space.  Alternatively a 33-bit / 8GB organization using
+ * two levels would be easy to implement.
+ *
+ * For 16kB page size we use a 2 level page tree which permits a total of
  * 36 bits of virtual address space.  We could add a third leve. but it seems
  * like at the moment there's no need for this.
  *
@@ -62,7 +65,12 @@
  */
 #ifdef CONFIG_PAGE_SIZE_4KB
 #define PGD_ORDER		1
-#define PMD_ORDER		1
+#define PMD_ORDER		0
+#define PTE_ORDER		0
+#endif
+#ifdef CONFIG_PAGE_SIZE_8KB
+#define PGD_ORDER		0
+#define PMD_ORDER		0
 #define PTE_ORDER		0
 #endif
 #ifdef CONFIG_PAGE_SIZE_16KB
@@ -81,11 +89,11 @@
 #define PTRS_PER_PTE	((PAGE_SIZE << PTE_ORDER) / sizeof(pte_t))
 
 #define USER_PTRS_PER_PGD	(TASK_SIZE / PGDIR_SIZE)
-#define FIRST_USER_PGD_NR	0
+#define FIRST_USER_ADDRESS	0
 
 #define VMALLOC_START		XKSEG
 #define VMALLOC_END	\
-	(VMALLOC_START + ((1 << PGD_ORDER) * PTRS_PER_PTE * PAGE_SIZE))
+	(VMALLOC_START + PTRS_PER_PGD * PTRS_PER_PMD * PTRS_PER_PTE * PAGE_SIZE)
 
 #define pte_ERROR(e) \
 	printk("%s:%d: bad pte %016lx.\n", __FILE__, __LINE__, pte_val(e))
@@ -148,16 +156,6 @@ static inline void pgd_clear(pgd_t *pgdp)
 #define pfn_pte(pfn, prot)	__pte(((pfn) << PAGE_SHIFT) | pgprot_val(prot))
 #endif
 
-/*
- * Bits 0, 1, 2, 7 and 8 are taken, split up the 27 bits of offset
- * into this range:
- */
-#define pte_to_pgoff(_pte) \
-	((((_pte).pte >> 3) & 0x1f ) + (((_pte).pte >> 9) << 6 ))
-
-#define pgoff_to_pte(off) \
-	((pte_t) { (((off) & 0x1f) << 3) + (((off) >> 6) << 9) + _PAGE_FILE })
-
 #define __pgd_offset(address)	pgd_index(address)
 #define page_pte(page) page_pte_prot(page, __pgprot(0))
 
@@ -214,12 +212,16 @@ static inline pte_t mk_swap_pte(unsigned long type, unsigned long offset)
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
 
-typedef pte_t *pte_addr_t;
-
 /*
- * Used for the b0rked handling of kernel pagetables on the 64-bit kernel.
+ * Bits 0, 1, 2, 7 and 8 are taken, split up the 32 bits of offset
+ * into this range:
  */
-extern pte_t kptbl[(PAGE_SIZE << PGD_ORDER)/sizeof(pte_t)];
-extern pmd_t kpmdtbl[PTRS_PER_PMD];
+#define PTE_FILE_MAX_BITS	32
+
+#define pte_to_pgoff(_pte) \
+	((((_pte).pte >> 3) & 0x1f ) + (((_pte).pte >> 9) << 6 ))
+
+#define pgoff_to_pte(off) \
+	((pte_t) { (((off) & 0x1f) << 3) + (((off) >> 6) << 9) + _PAGE_FILE })
 
 #endif /* _ASM_PGTABLE_64_H */

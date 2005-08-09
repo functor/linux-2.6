@@ -26,6 +26,7 @@
 #include <linux/ptrace.h>
 #include <linux/user.h>
 #include <linux/security.h>
+#include <linux/signal.h>
 
 #include <asm/uaccess.h>
 #include <asm/page.h>
@@ -89,7 +90,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 		ret = -EIO;
 		if (copied != sizeof(tmp))
 			break;
-		ret = put_user(tmp, (u32*)data);
+		ret = put_user(tmp, (u32 __user *)data);
 		break;
 	}
 
@@ -106,19 +107,19 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 	case PPC_PTRACE_PEEKDATA_3264: {
 		u32 tmp;
 		int copied;
-		u32* addrOthers;
+		u32 __user * addrOthers;
 
 		ret = -EIO;
 
 		/* Get the addr in the other process that we want to read */
-		if (get_user(addrOthers, (u32**)addr) != 0)
+		if (get_user(addrOthers, (u32 __user * __user *)addr) != 0)
 			break;
 
 		copied = access_process_vm(child, (u64)addrOthers, &tmp,
 				sizeof(tmp), 0);
 		if (copied != sizeof(tmp))
 			break;
-		ret = put_user(tmp, (u32*)data);
+		ret = put_user(tmp, (u32 __user *)data);
 		break;
 	}
 
@@ -136,8 +137,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 		if (index < PT_FPR0) {
 			tmp = get_reg(child, index);
 		} else {
-			if (child->thread.regs->msr & MSR_FP)
-				giveup_fpu(child);
+			flush_fp_to_thread(child);
 			/*
 			 * the user space code considers the floating point
 			 * to be an array of unsigned int (32 bits) - the
@@ -145,7 +145,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 			 */
 			tmp = ((unsigned int *)child->thread.fpr)[index - PT_FPR0];
 		}
-		ret = put_user((unsigned int)tmp, (u32*)data);
+		ret = put_user((unsigned int)tmp, (u32 __user *)data);
 		break;
 	}
   
@@ -179,14 +179,13 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 			break;
 
 		if (numReg >= PT_FPR0) {
-			if (child->thread.regs->msr & MSR_FP)
-				giveup_fpu(child);
+			flush_fp_to_thread(child);
 			tmp = ((unsigned long int *)child->thread.fpr)[numReg - PT_FPR0];
 		} else { /* register within PT_REGS struct */
 			tmp = get_reg(child, numReg);
 		} 
 		reg32bits = ((u32*)&tmp)[part];
-		ret = put_user(reg32bits, (u32*)data);
+		ret = put_user(reg32bits, (u32 __user *)data);
 		break;
 	}
 
@@ -215,11 +214,11 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 	case PPC_PTRACE_POKETEXT_3264:
 	case PPC_PTRACE_POKEDATA_3264: {
 		u32 tmp = data;
-		u32* addrOthers;
+		u32 __user * addrOthers;
 
 		/* Get the addr in the other process that we want to write into */
 		ret = -EIO;
-		if (get_user(addrOthers, (u32**)addr) != 0)
+		if (get_user(addrOthers, (u32 __user * __user *)addr) != 0)
 			break;
 		ret = 0;
 		if (access_process_vm(child, (u64)addrOthers, &tmp,
@@ -244,8 +243,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 		if (index < PT_FPR0) {
 			ret = put_reg(child, index, data);
 		} else {
-			if (child->thread.regs->msr & MSR_FP)
-				giveup_fpu(child);
+			flush_fp_to_thread(child);
 			/*
 			 * the user space code considers the floating point
 			 * to be an array of unsigned int (32 bits) - the
@@ -283,8 +281,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 				|| ((numReg > PT_CCR) && (numReg < PT_FPR0)))
 			break;
 		if (numReg >= PT_FPR0) {
-			if (child->thread.regs->msr & MSR_FP)
-				giveup_fpu(child);
+			flush_fp_to_thread(child);
 		}
 		if (numReg == PT_MSR)
 			data = (data & MSR_DEBUGCHANGE)
@@ -297,7 +294,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 	case PTRACE_SYSCALL: /* continue and stop at next (return from) syscall */
 	case PTRACE_CONT: { /* restart after signal. */
 		ret = -EIO;
-		if ((unsigned long) data > _NSIG)
+		if (!valid_signal(data))
 			break;
 		if (request == PTRACE_SYSCALL)
 			set_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
@@ -318,7 +315,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 	 */
 	case PTRACE_KILL: {
 		ret = 0;
-		if (child->state == TASK_ZOMBIE)	/* already dead */
+		if (child->exit_state == EXIT_ZOMBIE)	/* already dead */
 			break;
 		child->exit_code = SIGKILL;
 		/* make sure the single step bit is not set. */
@@ -329,7 +326,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 
 	case PTRACE_SINGLESTEP: {  /* set the trap flag. */
 		ret = -EIO;
-		if ((unsigned long) data > _NSIG)
+		if (!valid_signal(data))
 			break;
 		clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
 		set_single_step(child);
@@ -347,7 +344,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 	case PPC_PTRACE_GETREGS: { /* Get GPRs 0 - 31. */
 		int i;
 		unsigned long *reg = &((unsigned long *)child->thread.regs)[0];
-		unsigned int *tmp = (unsigned int *)addr;
+		unsigned int __user *tmp = (unsigned int __user *)addr;
 
 		for (i = 0; i < 32; i++) {
 			ret = put_user(*reg, tmp);
@@ -362,7 +359,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 	case PPC_PTRACE_SETREGS: { /* Set GPRs 0 - 31. */
 		int i;
 		unsigned long *reg = &((unsigned long *)child->thread.regs)[0];
-		unsigned int *tmp = (unsigned int *)addr;
+		unsigned int __user *tmp = (unsigned int __user *)addr;
 
 		for (i = 0; i < 32; i++) {
 			ret = get_user(*reg, tmp);
@@ -377,10 +374,9 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 	case PPC_PTRACE_GETFPREGS: { /* Get FPRs 0 - 31. */
 		int i;
 		unsigned long *reg = &((unsigned long *)child->thread.fpr)[0];
-		unsigned int *tmp = (unsigned int *)addr;
+		unsigned int __user *tmp = (unsigned int __user *)addr;
 
-		if (child->thread.regs->msr & MSR_FP)
-			giveup_fpu(child);
+		flush_fp_to_thread(child);
 
 		for (i = 0; i < 32; i++) {
 			ret = put_user(*reg, tmp);
@@ -395,10 +391,9 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 	case PPC_PTRACE_SETFPREGS: { /* Get FPRs 0 - 31. */
 		int i;
 		unsigned long *reg = &((unsigned long *)child->thread.fpr)[0];
-		unsigned int *tmp = (unsigned int *)addr;
+		unsigned int __user *tmp = (unsigned int __user *)addr;
 
-		if (child->thread.regs->msr & MSR_FP)
-			giveup_fpu(child);
+		flush_fp_to_thread(child);
 
 		for (i = 0; i < 32; i++) {
 			ret = get_user(*reg, tmp);
@@ -410,7 +405,9 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 		break;
 	}
 
-
+       case PTRACE_GETEVENTMSG:
+                ret = put_user(child->ptrace_message, (unsigned int __user *) data);
+                break;
 
 	default:
 		ret = ptrace_request(child, request, addr, data);

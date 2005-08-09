@@ -3,6 +3,8 @@
  * Author: MontaVista Software, Inc.
  *         	ppopov@mvista.com or source@mvista.com
  *
+ * Updates to 2.6, Pete Popov, Embedded Alley Solutions, Inc.
+ *
  *  This program is free software; you can redistribute  it and/or modify it
  *  under  the terms of  the GNU General  Public License as published by the
  *  Free Software Foundation;  either version 2 of the  License, or (at your
@@ -40,11 +42,6 @@
 #include <asm/mach-au1x00/au1000.h>
 #include <asm/time.h>
 
-#ifdef CONFIG_BLK_DEV_INITRD
-extern unsigned long initrd_start, initrd_end;
-extern void * __rd_start, * __rd_end;
-#endif
-
 extern char * __init prom_getcmdline(void);
 extern void __init board_setup(void);
 extern void au1000_restart(char *);
@@ -56,49 +53,26 @@ extern void (*board_time_init)(void);
 extern void au1x_time_init(void);
 extern void (*board_timer_setup)(struct irqaction *irq);
 extern void au1x_timer_setup(struct irqaction *irq);
-#if defined(CONFIG_64BIT_PHYS_ADDR) && (defined(CONFIG_SOC_AU1500) || defined(CONFIG_SOC_AU1550))
-extern phys_t (*fixup_bigphys_addr)(phys_t phys_addr, phys_t size);
-static phys_t au1500_fixup_bigphys_addr(phys_t phys_addr, phys_t size);
-#endif
 extern void au1xxx_time_init(void);
 extern void au1xxx_timer_setup(struct irqaction *irq);
+extern void set_cpuspec(void);
 
 static int __init au1x00_setup(void)
 {
+	struct	cpu_spec *sp;
 	char *argptr;
 	unsigned long prid, cpupll, bclk = 1;
 
-	/* Various early Au1000 Errata corrected by this */
-	set_c0_config(1<<19); /* Config[OD] */
+	set_cpuspec();
+	sp = cur_cpu_spec[0];
 
 	board_setup();  /* board specific setup */
 
 	prid = read_c0_prid();
-	switch (prid)
-	{
-		case 0x00030100: printk("Au1000 DA "); bclk = 0; break;
-	 	case 0x00030201: printk("Au1000 HA "); bclk = 0; break;
-		case 0x00030202: printk("Au1000 HB "); bclk = 0; break;
-		case 0x00030203: printk("Au1000 HC "); break;
-		case 0x00030204: printk("Au1000 HD "); break;
-
-		case 0x01030200: printk("Au1500 AB "); break;
-		case 0x01030201: printk("Au1500 AC "); break;
-		case 0x01030202: printk("Au1500 AD "); break;
-
-		case 0x02030200: printk("Au1100 AB "); break;
-		case 0x02030201: printk("Au1100 BA "); break;
-		case 0x02030202: printk("Au1100 BC "); break;
-		case 0x02030203: printk("Au1100 BD "); break;
-		case 0x02030204: printk("Au1100 BE "); break;
-
-		case 0x03030200: printk("Au1550 AA "); break;
-
-		default: printk("Unknown Au1x00! "); bclk = 0; break;
-	}
 	cpupll = (au_readl(0xB1900060) & 0x3F) * 12;
-	printk("(PRId %08X) @ %dMHZ\n", prid, cpupll);
+	printk("(PRId %08lx) @ %ldMHZ\n", prid, cpupll);
 
+	bclk = sp->cpu_bclk;
 	if (bclk)
 	{
 		/* Enable BCLK switching */
@@ -106,6 +80,15 @@ static int __init au1x00_setup(void)
 		au_writel(bclk | 0x60, 0xB190003C);
 		printk("BCLK switching enabled!\n");
 	}
+
+	if (sp->cpu_od) {
+		/* Various early Au1000 Errata corrected by this */
+		set_c0_config(1<<19); /* Set Config[OD] */
+	}
+	else {
+		/* Clear to obtain best system bus performance */
+		clear_c0_config(1<<19); /* Clear Config[OD] */
+ 	}
 
 	argptr = prom_getcmdline();
 
@@ -157,9 +140,6 @@ static int __init au1x00_setup(void)
 	_machine_power_off = au1000_power_off;
 	board_time_init = au1xxx_time_init;
 	board_timer_setup = au1xxx_timer_setup;
-#if defined(CONFIG_64BIT_PHYS_ADDR) && (defined(CONFIG_SOC_AU1500) || defined(CONFIG_SOC_AU1550))
-	fixup_bigphys_addr = au1500_fixup_bigphys_addr;
-#endif
 
 	/* IO/MEM resources. */
 	set_io_port_base(0);
@@ -168,62 +148,48 @@ static int __init au1x00_setup(void)
 	iomem_resource.start = IOMEM_RESOURCE_START;
 	iomem_resource.end = IOMEM_RESOURCE_END;
 
-#ifdef CONFIG_BLK_DEV_INITRD
-	ROOT_DEV = MKDEV(RAMDISK_MAJOR, 0);
-	initrd_start = (unsigned long)&__rd_start;
-	initrd_end = (unsigned long)&__rd_end;
-#endif
-
-#if defined (CONFIG_USB_OHCI) || defined (CONFIG_AU1X00_USB_DEVICE)
-#ifdef CONFIG_USB_OHCI
-	if ((argptr = strstr(argptr, "usb_ohci=")) == NULL) {
-	        char usb_args[80];
-		argptr = prom_getcmdline();
-		memset(usb_args, 0, sizeof(usb_args));
-		sprintf(usb_args, " usb_ohci=base:0x%x,len:0x%x,irq:%d",
-			USB_OHCI_BASE, USB_OHCI_LEN, AU1000_USB_HOST_INT);
-		strcat(argptr, usb_args);
-	}
-#endif
-
-#ifdef CONFIG_USB_OHCI
-	/* enable host controller and wait for reset done */
-	au_writel(0x08, USB_HOST_CONFIG);
-	udelay(1000);
-	au_writel(0x0E, USB_HOST_CONFIG);
-	udelay(1000);
-	au_readl(USB_HOST_CONFIG); /* throw away first read */
-	while (!(au_readl(USB_HOST_CONFIG) & 0x10))
-		au_readl(USB_HOST_CONFIG);
-#endif
-#endif /* defined (CONFIG_USB_OHCI) || defined (CONFIG_AU1X00_USB_DEVICE) */
-
 	while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_E0S);
 	au_writel(SYS_CNTRL_E0 | SYS_CNTRL_EN0, SYS_COUNTER_CNTRL);
 	au_sync();
 	while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_T0S);
 	au_writel(0, SYS_TOYTRIM);
+
 	return 0;
 }
 
 early_initcall(au1x00_setup);
 
-#if defined(CONFIG_64BIT_PHYS_ADDR) && (defined(CONFIG_SOC_AU1500) || defined(CONFIG_SOC_AU1550))
-/* This routine should be valid for all Au1500 based boards */
-static phys_t au1500_fixup_bigphys_addr(phys_t phys_addr, phys_t size)
+#if defined(CONFIG_64BIT_PHYS_ADDR)
+/* This routine should be valid for all Au1x based boards */
+phys_t fixup_bigphys_addr(phys_t phys_addr, phys_t size)
 {
-	u32 pci_start = (u32)Au1500_PCI_MEM_START;
-	u32 pci_end = (u32)Au1500_PCI_MEM_END;
+	u32 start, end;
 
 	/* Don't fixup 36 bit addresses */
 	if ((phys_addr >> 32) != 0) return phys_addr;
 
+#ifdef CONFIG_PCI
+	start = (u32)Au1500_PCI_MEM_START;
+	end = (u32)Au1500_PCI_MEM_END;
 	/* check for pci memory window */
-	if ((phys_addr >= pci_start) && ((phys_addr + size) < pci_end)) {
-		return (phys_t)((phys_addr - pci_start) +
-				     Au1500_PCI_MEM_START);
+	if ((phys_addr >= start) && ((phys_addr + size) < end)) {
+		return (phys_t)((phys_addr - start) + Au1500_PCI_MEM_START);
 	}
-	else 
-		return phys_addr;
+#endif
+
+	/* All Au1x SOCs have a pcmcia controller */
+	/* We setup our 32 bit pseudo addresses to be equal to the
+	 * 36 bit addr >> 4, to make it easier to check the address
+	 * and fix it.
+	 * The Au1x socket 0 phys attribute address is 0xF 4000 0000.
+	 * The pseudo address we use is 0xF400 0000. Any address over
+	 * 0xF400 0000 is a pcmcia pseudo address.
+	 */
+	if ((phys_addr >= 0xF4000000) && (phys_addr < 0xFFFFFFFF)) {
+		return (phys_t)(phys_addr << 4);
+	}
+
+	/* default nop */
+	return phys_addr;
 }
 #endif

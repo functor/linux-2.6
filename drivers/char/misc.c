@@ -63,13 +63,8 @@ static DECLARE_MUTEX(misc_sem);
 #define DYNAMIC_MINORS 64 /* like dynamic majors */
 static unsigned char misc_minors[DYNAMIC_MINORS / 8];
 
-#ifdef CONFIG_SGI_NEWPORT_GFX
-extern void gfx_register(void);
-#endif
-extern void streamable_init(void);
 extern int rtc_DP8570A_init(void);
 extern int rtc_MK48T08_init(void);
-extern int ds1286_init(void);
 extern int pmu_device_init(void);
 extern int tosh_init(void);
 extern int i8k_init(void);
@@ -212,10 +207,9 @@ static struct file_operations misc_fops = {
 int misc_register(struct miscdevice * misc)
 {
 	struct miscdevice *c;
-	struct class_device *class;
 	dev_t dev;
 	int err;
-	
+
 	down(&misc_sem);
 	list_for_each_entry(c, &misc_list, list) {
 		if (c->minor == misc->minor) {
@@ -229,8 +223,7 @@ int misc_register(struct miscdevice * misc)
 		while (--i >= 0)
 			if ( (misc_minors[i>>3] & (1 << (i&7))) == 0)
 				break;
-		if (i<0)
-		{
+		if (i<0) {
 			up(&misc_sem);
 			return -EBUSY;
 		}
@@ -245,10 +238,10 @@ int misc_register(struct miscdevice * misc)
 	}
 	dev = MKDEV(MISC_MAJOR, misc->minor);
 
-	class = class_simple_device_add(misc_class, dev,
-					misc->dev, misc->name);
-	if (IS_ERR(class)) {
-		err = PTR_ERR(class);
+	misc->class = class_simple_device_add(misc_class, dev,
+					      misc->dev, misc->name);
+	if (IS_ERR(misc->class)) {
+		err = PTR_ERR(misc->class);
 		goto out;
 	}
 
@@ -318,20 +311,8 @@ static int __init misc_init(void)
 #ifdef CONFIG_BVME6000
 	rtc_DP8570A_init();
 #endif
-#ifdef CONFIG_SGI_DS1286
-	ds1286_init();
-#endif
 #ifdef CONFIG_PMAC_PBOOK
 	pmu_device_init();
-#endif
-#ifdef CONFIG_SGI_NEWPORT_GFX
-	gfx_register ();
-#endif
-#ifdef CONFIG_SGI_IP22
-	streamable_init ();
-#endif
-#ifdef CONFIG_SGI_NEWPORT_GFX
-	gfx_register ();
 #endif
 #ifdef CONFIG_TOSHIBA
 	tosh_init();

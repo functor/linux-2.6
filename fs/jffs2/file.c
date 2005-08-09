@@ -3,11 +3,11 @@
  *
  * Copyright (C) 2001-2003 Red Hat, Inc.
  *
- * Created by David Woodhouse <dwmw2@redhat.com>
+ * Created by David Woodhouse <dwmw2@infradead.org>
  *
  * For licensing information, see the file 'LICENCE' in this directory.
  *
- * $Id: file.c,v 1.96 2003/10/11 11:47:23 dwmw2 Exp $
+ * $Id: file.c,v 1.99 2004/11/16 20:36:11 dwmw2 Exp $
  *
  */
 
@@ -25,6 +25,11 @@
 extern int generic_file_open(struct inode *, struct file *) __attribute__((weak));
 extern loff_t generic_file_llseek(struct file *file, loff_t offset, int origin) __attribute__((weak));
 
+static int jffs2_commit_write (struct file *filp, struct page *pg,
+			       unsigned start, unsigned end);
+static int jffs2_prepare_write (struct file *filp, struct page *pg,
+				unsigned start, unsigned end);
+static int jffs2_readpage (struct file *filp, struct page *pg);
 
 int jffs2_fsync(struct file *filp, struct dentry *dentry, int datasync)
 {
@@ -65,17 +70,16 @@ struct address_space_operations jffs2_file_address_operations =
 	.commit_write =	jffs2_commit_write
 };
 
-int jffs2_do_readpage_nolock (struct inode *inode, struct page *pg)
+static int jffs2_do_readpage_nolock (struct inode *inode, struct page *pg)
 {
 	struct jffs2_inode_info *f = JFFS2_INODE_INFO(inode);
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(inode->i_sb);
 	unsigned char *pg_buf;
 	int ret;
 
-	D1(printk(KERN_DEBUG "jffs2_do_readpage_nolock(): ino #%lu, page at offset 0x%lx\n", inode->i_ino, pg->index << PAGE_CACHE_SHIFT));
+	D2(printk(KERN_DEBUG "jffs2_do_readpage_nolock(): ino #%lu, page at offset 0x%lx\n", inode->i_ino, pg->index << PAGE_CACHE_SHIFT));
 
-	if (!PageLocked(pg))
-                PAGE_BUG(pg);
+	BUG_ON(!PageLocked(pg));
 
 	pg_buf = kmap(pg);
 	/* FIXME: Can kmap fail? */
@@ -93,7 +97,7 @@ int jffs2_do_readpage_nolock (struct inode *inode, struct page *pg)
 	flush_dcache_page(pg);
 	kunmap(pg);
 
-	D1(printk(KERN_DEBUG "readpage finished\n"));
+	D2(printk(KERN_DEBUG "readpage finished\n"));
 	return 0;
 }
 
@@ -105,7 +109,7 @@ int jffs2_do_readpage_unlock(struct inode *inode, struct page *pg)
 }
 
 
-int jffs2_readpage (struct file *filp, struct page *pg)
+static int jffs2_readpage (struct file *filp, struct page *pg)
 {
 	struct jffs2_inode_info *f = JFFS2_INODE_INFO(pg->mapping->host);
 	int ret;
@@ -116,7 +120,8 @@ int jffs2_readpage (struct file *filp, struct page *pg)
 	return ret;
 }
 
-int jffs2_prepare_write (struct file *filp, struct page *pg, unsigned start, unsigned end)
+static int jffs2_prepare_write (struct file *filp, struct page *pg,
+				unsigned start, unsigned end)
 {
 	struct inode *inode = pg->mapping->host;
 	struct jffs2_inode_info *f = JFFS2_INODE_INFO(inode);
@@ -198,7 +203,8 @@ int jffs2_prepare_write (struct file *filp, struct page *pg, unsigned start, uns
 	return ret;
 }
 
-int jffs2_commit_write (struct file *filp, struct page *pg, unsigned start, unsigned end)
+static int jffs2_commit_write (struct file *filp, struct page *pg,
+			       unsigned start, unsigned end)
 {
 	/* Actually commit the write from the page cache page we're looking at.
 	 * For now, we write the full page out each time. It sucks, but it's simple
@@ -207,6 +213,7 @@ int jffs2_commit_write (struct file *filp, struct page *pg, unsigned start, unsi
 	struct jffs2_inode_info *f = JFFS2_INODE_INFO(inode);
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(inode->i_sb);
 	struct jffs2_raw_inode *ri;
+	unsigned aligned_start = start & ~3;
 	int ret = 0;
 	uint32_t writtenlen = 0;
 
@@ -240,9 +247,9 @@ int jffs2_commit_write (struct file *filp, struct page *pg, unsigned start, unsi
 	   hurt to do it again. The alternative is ifdefs, which are ugly. */
 	kmap(pg);
 
-	ret = jffs2_write_inode_range(c, f, ri, page_address(pg) + start,
-				      (pg->index << PAGE_CACHE_SHIFT) + start,
-				      end - start, &writtenlen);
+	ret = jffs2_write_inode_range(c, f, ri, page_address(pg) + aligned_start,
+				      (pg->index << PAGE_CACHE_SHIFT) + aligned_start,
+				      end - aligned_start, &writtenlen);
 
 	kunmap(pg);
 
@@ -250,6 +257,12 @@ int jffs2_commit_write (struct file *filp, struct page *pg, unsigned start, unsi
 		/* There was an error writing. */
 		SetPageError(pg);
 	}
+	
+	/* Adjust writtenlen for the padding we did, so we don't confuse our caller */
+	if (writtenlen < (start&3))
+		writtenlen = 0;
+	else
+		writtenlen -= (start&3);
 
 	if (writtenlen) {
 		if (inode->i_size < (pg->index << PAGE_CACHE_SHIFT) + start + writtenlen) {

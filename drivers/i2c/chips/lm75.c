@@ -22,16 +22,16 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/jiffies.h>
 #include <linux/i2c.h>
 #include <linux/i2c-sensor.h>
 #include "lm75.h"
 
 
 /* Addresses to scan */
-static unsigned short normal_i2c[] = { I2C_CLIENT_END };
-static unsigned short normal_i2c_range[] = { 0x48, 0x4f, I2C_CLIENT_END };
+static unsigned short normal_i2c[] = { 0x48, 0x49, 0x4a, 0x4b, 0x4c,
+					0x4d, 0x4e, 0x4f, I2C_CLIENT_END };
 static unsigned int normal_isa[] = { I2C_CLIENT_ISA_END };
-static unsigned int normal_isa_range[] = { I2C_CLIENT_ISA_END };
 
 /* Insmod parameters */
 SENSORS_INSMOD_1(lm75);
@@ -74,8 +74,6 @@ static struct i2c_driver lm75_driver = {
 	.detach_client	= lm75_detach_client,
 };
 
-static int lm75_id = 0;
-
 #define show(value)	\
 static ssize_t show_##value(struct device *dev, char *buf)		\
 {									\
@@ -92,8 +90,11 @@ static ssize_t set_##value(struct device *dev, const char *buf, size_t count)	\
 	struct i2c_client *client = to_i2c_client(dev);		\
 	struct lm75_data *data = i2c_get_clientdata(client);	\
 	int temp = simple_strtoul(buf, NULL, 10);		\
+								\
+	down(&data->update_lock);				\
 	data->value = LM75_TEMP_TO_REG(temp);			\
 	lm75_write_value(client, reg, data->value);		\
+	up(&data->update_lock);					\
 	return count;						\
 }
 set(temp_max, LM75_REG_TEMP_OS);
@@ -105,7 +106,7 @@ static DEVICE_ATTR(temp1_input, S_IRUGO, show_temp_input, NULL);
 
 static int lm75_attach_adapter(struct i2c_adapter *adapter)
 {
-	if (!(adapter->class & I2C_ADAP_CLASS_SMBUS))
+	if (!(adapter->class & I2C_CLASS_HWMON))
 		return 0;
 	return i2c_detect(adapter, &addr_data, lm75_detect);
 }
@@ -113,7 +114,7 @@ static int lm75_attach_adapter(struct i2c_adapter *adapter)
 /* This function is called by i2c_detect */
 static int lm75_detect(struct i2c_adapter *adapter, int address, int kind)
 {
-	int i, cur, conf, hyst, os;
+	int i;
 	struct i2c_client *new_client;
 	struct lm75_data *data;
 	int err = 0;
@@ -149,16 +150,41 @@ static int lm75_detect(struct i2c_adapter *adapter, int address, int kind)
 	new_client->driver = &lm75_driver;
 	new_client->flags = 0;
 
-	/* Now, we do the remaining detection. It is lousy. */
+	/* Now, we do the remaining detection. There is no identification-
+	   dedicated register so we have to rely on several tricks:
+	   unused bits, registers cycling over 8-address boundaries,
+	   addresses 0x04-0x07 returning the last read value.
+	   The cycling+unused addresses combination is not tested,
+	   since it would significantly slow the detection down and would
+	   hardly add any value. */
 	if (kind < 0) {
+		int cur, conf, hyst, os;
+
+		/* Unused addresses */
 		cur = i2c_smbus_read_word_data(new_client, 0);
 		conf = i2c_smbus_read_byte_data(new_client, 1);
 		hyst = i2c_smbus_read_word_data(new_client, 2);
+		if (i2c_smbus_read_word_data(new_client, 4) != hyst
+		 || i2c_smbus_read_word_data(new_client, 5) != hyst
+		 || i2c_smbus_read_word_data(new_client, 6) != hyst
+		 || i2c_smbus_read_word_data(new_client, 7) != hyst)
+		 	goto exit_free;
 		os = i2c_smbus_read_word_data(new_client, 3);
-		for (i = 0; i <= 0x1f; i++)
-			if ((i2c_smbus_read_byte_data(new_client, i * 8 + 1) != conf) ||
-			    (i2c_smbus_read_word_data(new_client, i * 8 + 2) != hyst) ||
-			    (i2c_smbus_read_word_data(new_client, i * 8 + 3) != os))
+		if (i2c_smbus_read_word_data(new_client, 4) != os
+		 || i2c_smbus_read_word_data(new_client, 5) != os
+		 || i2c_smbus_read_word_data(new_client, 6) != os
+		 || i2c_smbus_read_word_data(new_client, 7) != os)
+		 	goto exit_free;
+
+		/* Unused bits */
+		if (conf & 0xe0)
+		 	goto exit_free;
+
+		/* Addresses cycling */
+		for (i = 8; i < 0xff; i += 8)
+			if (i2c_smbus_read_byte_data(new_client, i + 1) != conf
+			 || i2c_smbus_read_word_data(new_client, i + 2) != hyst
+			 || i2c_smbus_read_word_data(new_client, i + 3) != os)
 				goto exit_free;
 	}
 
@@ -172,8 +198,6 @@ static int lm75_detect(struct i2c_adapter *adapter, int address, int kind)
 
 	/* Fill in the remaining client fields and put it into the global list */
 	strlcpy(new_client->name, name, I2C_NAME_SIZE);
-
-	new_client->id = lm75_id++;
 	data->valid = 0;
 	init_MUTEX(&data->update_lock);
 
@@ -239,8 +263,8 @@ static struct lm75_data *lm75_update_device(struct device *dev)
 
 	down(&data->update_lock);
 
-	if ((jiffies - data->last_updated > HZ + HZ / 2) ||
-	    (jiffies < data->last_updated) || !data->valid) {
+	if (time_after(jiffies, data->last_updated + HZ + HZ / 2)
+	    || !data->valid) {
 		dev_dbg(&client->dev, "Starting lm75 update\n");
 
 		data->temp_input = lm75_read_value(client, LM75_REG_TEMP);

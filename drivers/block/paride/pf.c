@@ -156,36 +156,15 @@ enum {D_PRT, D_PRO, D_UNI, D_MOD, D_SLV, D_LUN, D_DLY};
 
 static spinlock_t pf_spin_lock;
 
-#ifndef MODULE
-
-#include "setup.h"
-
-static STT pf_stt[7] = {
-	{"drive0", 7, drive0},
-	{"drive1", 7, drive1},
-	{"drive2", 7, drive2},
-	{"drive3", 7, drive3},
-	{"disable", 1, &disable},
-	{"cluster", 1, &cluster},
-	{"nice", 1, &nice}
-};
-
-void pf_setup(char *str, int *ints)
-{
-	generic_setup(pf_stt, 7, str);
-}
-
-#endif
-
-MODULE_PARM(verbose, "i");
-MODULE_PARM(major, "i");
-MODULE_PARM(name, "s");
-MODULE_PARM(cluster, "i");
-MODULE_PARM(nice, "i");
-MODULE_PARM(drive0, "1-7i");
-MODULE_PARM(drive1, "1-7i");
-MODULE_PARM(drive2, "1-7i");
-MODULE_PARM(drive3, "1-7i");
+module_param(verbose, bool, 0644);
+module_param(major, int, 0);
+module_param(name, charp, 0);
+module_param(cluster, int, 0);
+module_param(nice, int, 0);
+module_param_array(drive0, int, NULL, 0);
+module_param_array(drive1, int, NULL, 0);
+module_param_array(drive2, int, NULL, 0);
+module_param_array(drive3, int, NULL, 0);
 
 #include "paride.h"
 #include "pseudo.h"
@@ -256,7 +235,7 @@ struct pf_unit {
 	struct gendisk *disk;
 };
 
-struct pf_unit units[PF_UNITS];
+static struct pf_unit units[PF_UNITS];
 
 static int pf_identify(struct pf_unit *pf);
 static void pf_lock(struct pf_unit *pf, int func);
@@ -290,7 +269,7 @@ static struct block_device_operations pf_fops = {
 	.media_changed	= pf_check_media,
 };
 
-void pf_init_units(void)
+static void __init pf_init_units(void)
 {
 	struct pf_unit *pf;
 	int unit;
@@ -337,7 +316,7 @@ static int pf_open(struct inode *inode, struct file *file)
 static int pf_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct pf_unit *pf = inode->i_bdev->bd_disk->private_data;
-	struct hd_geometry *geo = (struct hd_geometry *) arg;
+	struct hd_geometry __user *geo = (struct hd_geometry __user *) arg;
 	struct hd_geometry g;
 	sector_t capacity;
 
@@ -841,7 +820,7 @@ static inline void next_request(int success)
 /* detach from the calling context - in case the spinlock is held */
 static void do_pf_read(void)
 {
-	ps_set_intr(do_pf_read_start, 0, 0, nice);
+	ps_set_intr(do_pf_read_start, NULL, 0, nice);
 }
 
 static void do_pf_read_start(void)
@@ -887,7 +866,7 @@ static void do_pf_read_drq(void)
 
 static void do_pf_write(void)
 {
-	ps_set_intr(do_pf_write_start, 0, 0, nice);
+	ps_set_intr(do_pf_write_start, NULL, 0, nice);
 }
 
 static void do_pf_write_start(void)

@@ -72,11 +72,13 @@ static const char version[] =
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
+#include <linux/bitops.h>
 
-#include <asm/bitops.h>
 #include <asm/io.h>
 
 #include "smc9194.h"
+
+#define DRV_NAME "smc9194"
 
 /*------------------------------------------------------------------------
  .
@@ -94,16 +96,51 @@ static const char version[] =
 #define USE_32_BIT 1
 #endif
 
+#if defined(__H8300H__) || defined(__H8300S__)
+#define NO_AUTOPROBE
+#undef insl
+#undef outsl
+#define insl(a,b,l)  io_insl_noswap(a,b,l)
+#define outsl(a,b,l) io_outsl_noswap(a,b,l)
+#endif
+
 /*
  .the SMC9194 can be at any of the following port addresses.  To change,
  .for a slightly different card, you can add it to the array.  Keep in
  .mind that the array must end in zero.
 */
-static unsigned int smc_portlist[] __initdata = { 
-	0x200, 0x220, 0x240, 0x260, 0x280, 0x2A0, 0x2C0, 0x2E0,
-	0x300, 0x320, 0x340, 0x360, 0x380, 0x3A0, 0x3C0, 0x3E0, 0
+
+struct devlist {
+	unsigned int port;
+	unsigned int irq;
 };
 
+#if defined(CONFIG_H8S_EDOSK2674)
+static struct devlist smc_devlist[] __initdata = {
+	{.port = 0xf80000, .irq = 16},
+	{.port = 0,        .irq = 0 },
+};
+#else
+static struct devlist smc_devlist[] __initdata = {
+	{.port = 0x200, .irq = 0},
+	{.port = 0x220, .irq = 0},
+	{.port = 0x240, .irq = 0},
+	{.port = 0x260, .irq = 0},
+	{.port = 0x280, .irq = 0},
+	{.port = 0x2A0, .irq = 0},
+	{.port = 0x2C0, .irq = 0},
+	{.port = 0x2E0, .irq = 0},
+	{.port = 0x300, .irq = 0},
+	{.port = 0x320, .irq = 0},
+	{.port = 0x340, .irq = 0},
+	{.port = 0x360, .irq = 0},
+	{.port = 0x380, .irq = 0},
+	{.port = 0x3A0, .irq = 0},
+	{.port = 0x3C0, .irq = 0},
+	{.port = 0x3E0, .irq = 0},
+	{.port = 0,     .irq = 0},
+};
+#endif
 /*
  . Wait time for memory to be free.  This probably shouldn't be
  . tuned that much, as waiting for this means nothing else happens
@@ -466,7 +503,7 @@ static void smc_setmulticast( int ioaddr, int count, struct dev_mc_list * addrs 
 static int smc_wait_to_send_packet( struct sk_buff * skb, struct net_device * dev )
 {
 	struct smc_local *lp = netdev_priv(dev);
-	unsigned short ioaddr 	= dev->base_addr;
+	unsigned int ioaddr 	= dev->base_addr;
 	word 			length;
 	unsigned short 		numPages;
 	word			time_out;
@@ -580,7 +617,7 @@ static void smc_hardware_send_packet( struct net_device * dev )
 	byte	 		packet_no;
 	struct sk_buff * 	skb = lp->saved_skb;
 	word			length;
-	unsigned short		ioaddr;
+	unsigned int		ioaddr;
 	byte			* buf;
 
 	ioaddr = dev->base_addr;
@@ -635,7 +672,11 @@ static void smc_hardware_send_packet( struct net_device * dev )
 #ifdef USE_32_BIT
 	if ( length & 0x2  ) {
 		outsl(ioaddr + DATA_1, buf,  length >> 2 );
+#if !defined(__H8300H__) && !defined(__H8300S__)
 		outw( *((word *)(buf + (length & 0xFFFFFFFC))),ioaddr +DATA_1);
+#else
+		ctrl_outw( *((word *)(buf + (length & 0xFFFFFFFC))),ioaddr +DATA_1);
+#endif
 	}
 	else
 		outsl(ioaddr + DATA_1, buf,  length >> 2 );
@@ -691,9 +732,12 @@ static int ifport;
 struct net_device * __init smc_init(int unit)
 {
 	struct net_device *dev = alloc_etherdev(sizeof(struct smc_local));
-	unsigned *port;
+	static struct devlist *smcdev = smc_devlist;
 	int err = 0;
 
+#ifndef NO_AUTOPROBE
+	smcdev = smc_devlist;
+#endif
 	if (!dev)
 		return ERR_PTR(-ENODEV);
 
@@ -711,11 +755,11 @@ struct net_device * __init smc_init(int unit)
 	} else if (io != 0) {	/* Don't probe at all. */
 		err = -ENXIO;
 	} else {
-		for (port = smc_portlist; *port; port++) {
-			if (smc_probe(dev, *port) == 0)
+		for (;smcdev->port; smcdev++) {
+			if (smc_probe(dev, smcdev->port) == 0)
 				break;
 		}
-		if (!*port)
+		if (!smcdev->port)
 			err = -ENODEV;
 	}
 	if (err)
@@ -741,6 +785,7 @@ out:
 */
 int __init smc_findirq( int ioaddr )
 {
+#ifndef NO_AUTOPROBE
 	int	timeout = 20;
 	unsigned long cookie;
 
@@ -795,6 +840,14 @@ int __init smc_findirq( int ioaddr )
 
 	/* and return what I found */
 	return probe_irq_off(cookie);
+#else /* NO_AUTOPROBE */
+	struct devlist *smcdev;
+	for (smcdev = smc_devlist; smcdev->port; smcdev++) {
+		if (smcdev->port == ioaddr)
+			return smcdev->irq;
+	}
+	return 0;
+#endif
 }
 
 /*----------------------------------------------------------------------
@@ -843,7 +896,7 @@ static int __init smc_probe(struct net_device *dev, int ioaddr)
 	word memory_cfg_register;
 
 	/* Grab the region so that no one else tries to probe our ioports. */
-	if (!request_region(ioaddr, SMC_IO_EXTENT, dev->name))
+	if (!request_region(ioaddr, SMC_IO_EXTENT, DRV_NAME))
 		return -EBUSY;
 
 	dev->irq = irq;
@@ -863,6 +916,7 @@ static int __init smc_probe(struct net_device *dev, int ioaddr)
 		retval = -ENODEV;
 		goto err_out;
 	}
+#if !defined(CONFIG_H8S_EDOSK2674)
 	/* well, we've already written once, so hopefully another time won't
  	   hurt.  This time, I need to switch the bank register to bank 1,
 	   so I can access the base address register */
@@ -877,6 +931,10 @@ static int __init smc_probe(struct net_device *dev, int ioaddr)
 		retval = -ENODEV;
 		goto err_out;
 	}
+#else
+	(void)base_address_register; /* Warning suppression */
+#endif
+
 
 	/*  check if the revision register is something that I recognize.
 	    These might need to be added to later, as future revisions
@@ -1001,9 +1059,9 @@ static int __init smc_probe(struct net_device *dev, int ioaddr)
 	memset(dev->priv, 0, sizeof(struct smc_local));
 
 	/* Grab the IRQ */
-      	retval = request_irq(dev->irq, &smc_interrupt, 0, dev->name, dev);
+      	retval = request_irq(dev->irq, &smc_interrupt, 0, DRV_NAME, dev);
       	if (retval) {
-		printk("%s: unable to get IRQ %d (irqval=%d).\n", dev->name,
+		printk("%s: unable to get IRQ %d (irqval=%d).\n", DRV_NAME,
 			dev->irq, retval);
   	  	goto err_out;
       	}
@@ -1131,133 +1189,6 @@ static void smc_timeout(struct net_device *dev)
 	/* clear anything saved */
 	((struct smc_local *)dev->priv)->saved_skb = NULL;
 	netif_wake_queue(dev);
-}
-
-/*--------------------------------------------------------------------
- .
- . This is the main routine of the driver, to handle the device when
- . it needs some attention.
- .
- . So:
- .   first, save state of the chipset
- .   branch off into routines to handle each case, and acknowledge
- .	    each to the interrupt register
- .   and finally restore state.
- .
- ---------------------------------------------------------------------*/
-
-static irqreturn_t smc_interrupt(int irq, void * dev_id,  struct pt_regs * regs)
-{
-	struct net_device *dev 	= dev_id;
-	int ioaddr 		= dev->base_addr;
-	struct smc_local *lp = netdev_priv(dev);
-
-	byte	status;
-	word	card_stats;
-	byte	mask;
-	int	timeout;
-	/* state registers */
-	word	saved_bank;
-	word	saved_pointer;
-	int handled = 0;
-
-
-	PRINTK3((CARDNAME": SMC interrupt started \n"));
-
-	saved_bank = inw( ioaddr + BANK_SELECT );
-
-	SMC_SELECT_BANK(2);
-	saved_pointer = inw( ioaddr + POINTER );
-
-	mask = inb( ioaddr + INT_MASK );
-	/* clear all interrupts */
-	outb( 0, ioaddr + INT_MASK );
-
-
-	/* set a timeout value, so I don't stay here forever */
-	timeout = 4;
-
-	PRINTK2((KERN_WARNING CARDNAME ": MASK IS %x \n", mask ));
-	do {
-		/* read the status flag, and mask it */
-		status = inb( ioaddr + INTERRUPT ) & mask;
-		if (!status )
-			break;
-
-		handled = 1;
-
-		PRINTK3((KERN_WARNING CARDNAME
-			": Handling interrupt status %x \n", status ));
-
-		if (status & IM_RCV_INT) {
-			/* Got a packet(s). */
-			PRINTK2((KERN_WARNING CARDNAME
-				": Receive Interrupt\n"));
-			smc_rcv(dev);
-		} else if (status & IM_TX_INT ) {
-			PRINTK2((KERN_WARNING CARDNAME
-				": TX ERROR handled\n"));
-			smc_tx(dev);
-			outb(IM_TX_INT, ioaddr + INTERRUPT );
-		} else if (status & IM_TX_EMPTY_INT ) {
-			/* update stats */
-			SMC_SELECT_BANK( 0 );
-			card_stats = inw( ioaddr + COUNTER );
-			/* single collisions */
-			lp->stats.collisions += card_stats & 0xF;
-			card_stats >>= 4;
-			/* multiple collisions */
-			lp->stats.collisions += card_stats & 0xF;
-
-			/* these are for when linux supports these statistics */
-
-			SMC_SELECT_BANK( 2 );
-			PRINTK2((KERN_WARNING CARDNAME
-				": TX_BUFFER_EMPTY handled\n"));
-			outb( IM_TX_EMPTY_INT, ioaddr + INTERRUPT );
-			mask &= ~IM_TX_EMPTY_INT;
-			lp->stats.tx_packets += lp->packets_waiting;
-			lp->packets_waiting = 0;
-
-		} else if (status & IM_ALLOC_INT ) {
-			PRINTK2((KERN_DEBUG CARDNAME
-				": Allocation interrupt \n"));
-			/* clear this interrupt so it doesn't happen again */
-			mask &= ~IM_ALLOC_INT;
-
-			smc_hardware_send_packet( dev );
-
-			/* enable xmit interrupts based on this */
-			mask |= ( IM_TX_EMPTY_INT | IM_TX_INT );
-
-			/* and let the card send more packets to me */
-			netif_wake_queue(dev);
-			
-			PRINTK2((CARDNAME": Handoff done successfully.\n"));
-		} else if (status & IM_RX_OVRN_INT ) {
-			lp->stats.rx_errors++;
-			lp->stats.rx_fifo_errors++;
-			outb( IM_RX_OVRN_INT, ioaddr + INTERRUPT );
-		} else if (status & IM_EPH_INT ) {
-			PRINTK((CARDNAME ": UNSUPPORTED: EPH INTERRUPT \n"));
-		} else if (status & IM_ERCV_INT ) {
-			PRINTK((CARDNAME ": UNSUPPORTED: ERCV INTERRUPT \n"));
-			outb( IM_ERCV_INT, ioaddr + INTERRUPT );
-		}
-	} while ( timeout -- );
-
-
-	/* restore state register */
-	SMC_SELECT_BANK( 2 );
-	outb( mask, ioaddr + INT_MASK );
-
-	PRINTK3(( KERN_WARNING CARDNAME ": MASK is now %x \n", mask ));
-	outw( saved_pointer, ioaddr + POINTER );
-
-	SMC_SELECT_BANK( saved_bank );
-
-	PRINTK3((CARDNAME ": Interrupt done\n"));
-	return IRQ_RETVAL(handled);
 }
 
 /*-------------------------------------------------------------
@@ -1451,6 +1382,134 @@ static void smc_tx( struct net_device * dev )
 	return;
 }
 
+/*--------------------------------------------------------------------
+ .
+ . This is the main routine of the driver, to handle the device when
+ . it needs some attention.
+ .
+ . So:
+ .   first, save state of the chipset
+ .   branch off into routines to handle each case, and acknowledge
+ .	    each to the interrupt register
+ .   and finally restore state.
+ .
+ ---------------------------------------------------------------------*/
+
+static irqreturn_t smc_interrupt(int irq, void * dev_id,  struct pt_regs * regs)
+{
+	struct net_device *dev 	= dev_id;
+	int ioaddr 		= dev->base_addr;
+	struct smc_local *lp = netdev_priv(dev);
+
+	byte	status;
+	word	card_stats;
+	byte	mask;
+	int	timeout;
+	/* state registers */
+	word	saved_bank;
+	word	saved_pointer;
+	int handled = 0;
+
+
+	PRINTK3((CARDNAME": SMC interrupt started \n"));
+
+	saved_bank = inw( ioaddr + BANK_SELECT );
+
+	SMC_SELECT_BANK(2);
+	saved_pointer = inw( ioaddr + POINTER );
+
+	mask = inb( ioaddr + INT_MASK );
+	/* clear all interrupts */
+	outb( 0, ioaddr + INT_MASK );
+
+
+	/* set a timeout value, so I don't stay here forever */
+	timeout = 4;
+
+	PRINTK2((KERN_WARNING CARDNAME ": MASK IS %x \n", mask ));
+	do {
+		/* read the status flag, and mask it */
+		status = inb( ioaddr + INTERRUPT ) & mask;
+		if (!status )
+			break;
+
+		handled = 1;
+
+		PRINTK3((KERN_WARNING CARDNAME
+			": Handling interrupt status %x \n", status ));
+
+		if (status & IM_RCV_INT) {
+			/* Got a packet(s). */
+			PRINTK2((KERN_WARNING CARDNAME
+				": Receive Interrupt\n"));
+			smc_rcv(dev);
+		} else if (status & IM_TX_INT ) {
+			PRINTK2((KERN_WARNING CARDNAME
+				": TX ERROR handled\n"));
+			smc_tx(dev);
+			outb(IM_TX_INT, ioaddr + INTERRUPT );
+		} else if (status & IM_TX_EMPTY_INT ) {
+			/* update stats */
+			SMC_SELECT_BANK( 0 );
+			card_stats = inw( ioaddr + COUNTER );
+			/* single collisions */
+			lp->stats.collisions += card_stats & 0xF;
+			card_stats >>= 4;
+			/* multiple collisions */
+			lp->stats.collisions += card_stats & 0xF;
+
+			/* these are for when linux supports these statistics */
+
+			SMC_SELECT_BANK( 2 );
+			PRINTK2((KERN_WARNING CARDNAME
+				": TX_BUFFER_EMPTY handled\n"));
+			outb( IM_TX_EMPTY_INT, ioaddr + INTERRUPT );
+			mask &= ~IM_TX_EMPTY_INT;
+			lp->stats.tx_packets += lp->packets_waiting;
+			lp->packets_waiting = 0;
+
+		} else if (status & IM_ALLOC_INT ) {
+			PRINTK2((KERN_DEBUG CARDNAME
+				": Allocation interrupt \n"));
+			/* clear this interrupt so it doesn't happen again */
+			mask &= ~IM_ALLOC_INT;
+
+			smc_hardware_send_packet( dev );
+
+			/* enable xmit interrupts based on this */
+			mask |= ( IM_TX_EMPTY_INT | IM_TX_INT );
+
+			/* and let the card send more packets to me */
+			netif_wake_queue(dev);
+
+			PRINTK2((CARDNAME": Handoff done successfully.\n"));
+		} else if (status & IM_RX_OVRN_INT ) {
+			lp->stats.rx_errors++;
+			lp->stats.rx_fifo_errors++;
+			outb( IM_RX_OVRN_INT, ioaddr + INTERRUPT );
+		} else if (status & IM_EPH_INT ) {
+			PRINTK((CARDNAME ": UNSUPPORTED: EPH INTERRUPT \n"));
+		} else if (status & IM_ERCV_INT ) {
+			PRINTK((CARDNAME ": UNSUPPORTED: ERCV INTERRUPT \n"));
+			outb( IM_ERCV_INT, ioaddr + INTERRUPT );
+		}
+	} while ( timeout -- );
+
+
+	/* restore state register */
+	SMC_SELECT_BANK( 2 );
+	outb( mask, ioaddr + INT_MASK );
+
+	PRINTK3(( KERN_WARNING CARDNAME ": MASK is now %x \n", mask ));
+	outw( saved_pointer, ioaddr + POINTER );
+
+	SMC_SELECT_BANK( saved_bank );
+
+	PRINTK3((CARDNAME ": Interrupt done\n"));
+	return IRQ_RETVAL(handled);
+}
+
+
 /*----------------------------------------------------
  . smc_close
  .
@@ -1541,9 +1600,9 @@ static void smc_set_multicast_list(struct net_device *dev)
 static struct net_device *devSMC9194;
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(io, "i");
-MODULE_PARM(irq, "i");
-MODULE_PARM(ifport, "i");
+module_param(io, int, 0);
+module_param(irq, int, 0);
+module_param(ifport, int, 0);
 MODULE_PARM_DESC(io, "SMC 99194 I/O base address");
 MODULE_PARM_DESC(irq, "SMC 99194 IRQ number");
 MODULE_PARM_DESC(ifport, "SMC 99194 interface port (0-default, 1-TP, 2-AUI)");

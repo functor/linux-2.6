@@ -9,49 +9,93 @@
 
 /* Types of messages */
 
-#define RTM_BASE	0x10
+enum {
+	RTM_BASE	= 16,
+#define RTM_BASE	RTM_BASE
 
-#define	RTM_NEWLINK	(RTM_BASE+0)
-#define	RTM_DELLINK	(RTM_BASE+1)
-#define	RTM_GETLINK	(RTM_BASE+2)
-#define	RTM_SETLINK	(RTM_BASE+3)
+	RTM_NEWLINK	= 16,
+#define RTM_NEWLINK	RTM_NEWLINK
+	RTM_DELLINK,
+#define RTM_DELLINK	RTM_DELLINK
+	RTM_GETLINK,
+#define RTM_GETLINK	RTM_GETLINK
+	RTM_SETLINK,
+#define RTM_SETLINK	RTM_SETLINK
 
-#define	RTM_NEWADDR	(RTM_BASE+4)
-#define	RTM_DELADDR	(RTM_BASE+5)
-#define	RTM_GETADDR	(RTM_BASE+6)
+	RTM_NEWADDR	= 20,
+#define RTM_NEWADDR	RTM_NEWADDR
+	RTM_DELADDR,
+#define RTM_DELADDR	RTM_DELADDR
+	RTM_GETADDR,
+#define RTM_GETADDR	RTM_GETADDR
 
-#define	RTM_NEWROUTE	(RTM_BASE+8)
-#define	RTM_DELROUTE	(RTM_BASE+9)
-#define	RTM_GETROUTE	(RTM_BASE+10)
+	RTM_NEWROUTE	= 24,
+#define RTM_NEWROUTE	RTM_NEWROUTE
+	RTM_DELROUTE,
+#define RTM_DELROUTE	RTM_DELROUTE
+	RTM_GETROUTE,
+#define RTM_GETROUTE	RTM_GETROUTE
 
-#define	RTM_NEWNEIGH	(RTM_BASE+12)
-#define	RTM_DELNEIGH	(RTM_BASE+13)
-#define	RTM_GETNEIGH	(RTM_BASE+14)
+	RTM_NEWNEIGH	= 28,
+#define RTM_NEWNEIGH	RTM_NEWNEIGH
+	RTM_DELNEIGH,
+#define RTM_DELNEIGH	RTM_DELNEIGH
+	RTM_GETNEIGH,
+#define RTM_GETNEIGH	RTM_GETNEIGH
 
-#define	RTM_NEWRULE	(RTM_BASE+16)
-#define	RTM_DELRULE	(RTM_BASE+17)
-#define	RTM_GETRULE	(RTM_BASE+18)
+	RTM_NEWRULE	= 32,
+#define RTM_NEWRULE	RTM_NEWRULE
+	RTM_DELRULE,
+#define RTM_DELRULE	RTM_DELRULE
+	RTM_GETRULE,
+#define RTM_GETRULE	RTM_GETRULE
 
-#define	RTM_NEWQDISC	(RTM_BASE+20)
-#define	RTM_DELQDISC	(RTM_BASE+21)
-#define	RTM_GETQDISC	(RTM_BASE+22)
+	RTM_NEWQDISC	= 36,
+#define RTM_NEWQDISC	RTM_NEWQDISC
+	RTM_DELQDISC,
+#define RTM_DELQDISC	RTM_DELQDISC
+	RTM_GETQDISC,
+#define RTM_GETQDISC	RTM_GETQDISC
 
-#define	RTM_NEWTCLASS	(RTM_BASE+24)
-#define	RTM_DELTCLASS	(RTM_BASE+25)
-#define	RTM_GETTCLASS	(RTM_BASE+26)
+	RTM_NEWTCLASS	= 40,
+#define RTM_NEWTCLASS	RTM_NEWTCLASS
+	RTM_DELTCLASS,
+#define RTM_DELTCLASS	RTM_DELTCLASS
+	RTM_GETTCLASS,
+#define RTM_GETTCLASS	RTM_GETTCLASS
 
-#define	RTM_NEWTFILTER	(RTM_BASE+28)
-#define	RTM_DELTFILTER	(RTM_BASE+29)
-#define	RTM_GETTFILTER	(RTM_BASE+30)
+	RTM_NEWTFILTER	= 44,
+#define RTM_NEWTFILTER	RTM_NEWTFILTER
+	RTM_DELTFILTER,
+#define RTM_DELTFILTER	RTM_DELTFILTER
+	RTM_GETTFILTER,
+#define RTM_GETTFILTER	RTM_GETTFILTER
 
-#define RTM_NEWPREFIX	(RTM_BASE+36)
-#define RTM_GETPREFIX	(RTM_BASE+38)
+	RTM_NEWACTION	= 48,
+#define RTM_NEWACTION   RTM_NEWACTION
+	RTM_DELACTION,
+#define RTM_DELACTION   RTM_DELACTION
+	RTM_GETACTION,
+#define RTM_GETACTION   RTM_GETACTION
 
-#define	RTM_GETMULTICAST (RTM_BASE+42)
+	RTM_NEWPREFIX	= 52,
+#define RTM_NEWPREFIX	RTM_NEWPREFIX
+	RTM_GETPREFIX	= 54,
+#define RTM_GETPREFIX	RTM_GETPREFIX
 
-#define	RTM_GETANYCAST	(RTM_BASE+46)
+	RTM_GETMULTICAST = 58,
+#define RTM_GETMULTICAST RTM_GETMULTICAST
 
-#define	RTM_MAX		(RTM_BASE+47)
+	RTM_GETANYCAST	= 62,
+#define RTM_GETANYCAST	RTM_GETANYCAST
+
+	__RTM_MAX,
+#define RTM_MAX		(((__RTM_MAX + 3) & ~3) - 1)
+};
+
+#define RTM_NR_MSGTYPES	(RTM_MAX + 1 - RTM_BASE)
+#define RTM_NR_FAMILIES	(RTM_NR_MSGTYPES >> 2)
+#define RTM_FAM(cmd)	(((cmd) - RTM_BASE) >> 2)
 
 /* 
    Generic structure for encapsulation of optional route information.
@@ -69,7 +113,8 @@ struct rtattr
 
 #define RTA_ALIGNTO	4
 #define RTA_ALIGN(len) ( ((len)+RTA_ALIGNTO-1) & ~(RTA_ALIGNTO-1) )
-#define RTA_OK(rta,len) ((len) > 0 && (rta)->rta_len >= sizeof(struct rtattr) && \
+#define RTA_OK(rta,len) ((len) >= (int)sizeof(struct rtattr) && \
+			 (rta)->rta_len >= sizeof(struct rtattr) && \
 			 (rta)->rta_len <= (len))
 #define RTA_NEXT(rta,attrlen)	((attrlen) -= RTA_ALIGN((rta)->rta_len), \
 				 (struct rtattr*)(((char*)(rta)) + RTA_ALIGN((rta)->rta_len)))
@@ -118,9 +163,10 @@ enum
 	RTN_THROW,		/* Not in this table		*/
 	RTN_NAT,		/* Translate this address	*/
 	RTN_XRESOLVE,		/* Use external resolver	*/
+	__RTN_MAX
 };
 
-#define RTN_MAX RTN_XRESOLVE
+#define RTN_MAX (__RTN_MAX - 1)
 
 
 /* rtm_protocol */
@@ -183,9 +229,10 @@ enum rt_class_t
 /* User defined values */
 	RT_TABLE_DEFAULT=253,
 	RT_TABLE_MAIN=254,
-	RT_TABLE_LOCAL=255
+	RT_TABLE_LOCAL=255,
+	__RT_TABLE_MAX
 };
-#define RT_TABLE_MAX RT_TABLE_LOCAL
+#define RT_TABLE_MAX (__RT_TABLE_MAX - 1)
 
 
 
@@ -207,9 +254,11 @@ enum rtattr_type_t
 	RTA_FLOW,
 	RTA_CACHEINFO,
 	RTA_SESSION,
+	RTA_MP_ALGO,
+	__RTA_MAX
 };
 
-#define RTA_MAX RTA_SESSION
+#define RTA_MAX (__RTA_MAX - 1)
 
 #define RTM_RTA(r)  ((struct rtattr*)(((char*)(r)) + NLMSG_ALIGN(sizeof(struct rtmsg))))
 #define RTM_PAYLOAD(n) NLMSG_PAYLOAD(n,sizeof(struct rtmsg))
@@ -294,13 +343,15 @@ enum
 #define RTAX_INITCWND RTAX_INITCWND
 	RTAX_FEATURES,
 #define RTAX_FEATURES RTAX_FEATURES
+	__RTAX_MAX
 };
 
-#define RTAX_MAX RTAX_FEATURES
+#define RTAX_MAX (__RTAX_MAX - 1)
 
 #define RTAX_FEATURE_ECN	0x00000001
 #define RTAX_FEATURE_SACK	0x00000002
 #define RTAX_FEATURE_TIMESTAMP	0x00000004
+#define RTAX_FEATURE_ALLFRAG	0x00000008
 
 struct rta_session
 {
@@ -345,10 +396,11 @@ enum
 	IFA_BROADCAST,
 	IFA_ANYCAST,
 	IFA_CACHEINFO,
-	IFA_MULTICAST
+	IFA_MULTICAST,
+	__IFA_MAX
 };
 
-#define IFA_MAX IFA_CACHEINFO
+#define IFA_MAX (__IFA_MAX - 1)
 
 /* ifa_flags */
 
@@ -399,10 +451,12 @@ enum
 	NDA_UNSPEC,
 	NDA_DST,
 	NDA_LLADDR,
-	NDA_CACHEINFO
+	NDA_CACHEINFO,
+	NDA_PROBES,
+	__NDA_MAX
 };
 
-#define NDA_MAX NDA_CACHEINFO
+#define NDA_MAX (__NDA_MAX - 1)
 
 #define NDA_RTA(r)  ((struct rtattr*)(((char*)(r)) + NLMSG_ALIGN(sizeof(struct ndmsg))))
 #define NDA_PAYLOAD(n) NLMSG_PAYLOAD(n,sizeof(struct ndmsg))
@@ -485,9 +539,10 @@ enum
 	PREFIX_UNSPEC,
 	PREFIX_ADDRESS,
 	PREFIX_CACHEINFO,
+	__PREFIX_MAX
 };
 
-#define PREFIX_MAX	PREFIX_CACHEINFO
+#define PREFIX_MAX	(__PREFIX_MAX - 1)
 
 struct prefix_cacheinfo
 {
@@ -529,6 +584,17 @@ struct rtnl_link_stats
 	__u32	tx_compressed;
 };
 
+/* The struct should be in sync with struct ifmap */
+struct rtnl_link_ifmap
+{
+	__u64	mem_start;
+	__u64	mem_end;
+	__u64	base_addr;
+	__u16	irq;
+	__u8	dma;
+	__u8	port;
+};
+
 enum
 {
 	IFLA_UNSPEC,
@@ -549,10 +615,17 @@ enum
 #define IFLA_WIRELESS IFLA_WIRELESS
 	IFLA_PROTINFO,		/* Protocol specific information for a link */
 #define IFLA_PROTINFO IFLA_PROTINFO
+	IFLA_TXQLEN,
+#define IFLA_TXQLEN IFLA_TXQLEN
+	IFLA_MAP,
+#define IFLA_MAP IFLA_MAP
+	IFLA_WEIGHT,
+#define IFLA_WEIGHT IFLA_WEIGHT
+	__IFLA_MAX
 };
 
 
-#define IFLA_MAX IFLA_PROTINFO
+#define IFLA_MAX (__IFLA_MAX - 1)
 
 #define IFLA_RTA(r)  ((struct rtattr*)(((char*)(r)) + NLMSG_ALIGN(sizeof(struct ifinfomsg))))
 #define IFLA_PAYLOAD(n) NLMSG_PAYLOAD(n,sizeof(struct ifinfomsg))
@@ -595,7 +668,10 @@ enum
 	IFLA_INET6_STATS,	/* statistics			*/
 	IFLA_INET6_MCAST,	/* MC things. What of them?	*/
 	IFLA_INET6_CACHEINFO,	/* time values and max reasm size */
+	__IFLA_INET6_MAX
 };
+
+#define IFLA_INET6_MAX	(__IFLA_INET6_MAX - 1)
 
 struct ifla_cacheinfo
 {
@@ -604,8 +680,6 @@ struct ifla_cacheinfo
 	__u32	reachable_time;
 	__u32	retrans_time;
 };
-
-#define IFLA_INET6_MAX	IFLA_INET6_CACHEINFO
 
 /*****************************************************************
  *		Traffic control messages.
@@ -630,17 +704,16 @@ enum
 	TCA_STATS,
 	TCA_XSTATS,
 	TCA_RATE,
+	TCA_FCNT,
+	TCA_STATS2,
+	__TCA_MAX
 };
 
-#define TCA_MAX TCA_RATE
+#define TCA_MAX (__TCA_MAX - 1)
 
 #define TCA_RTA(r)  ((struct rtattr*)(((char*)(r)) + NLMSG_ALIGN(sizeof(struct tcmsg))))
 #define TCA_PAYLOAD(n) NLMSG_PAYLOAD(n,sizeof(struct tcmsg))
 
-
-/* SUMMARY: maximal rtattr understood by kernel */
-
-#define RTATTR_MAX		RTA_MAX
 
 /* RTnetlink multicast groups */
 
@@ -663,12 +736,25 @@ enum
 
 #define RTMGRP_IPV6_PREFIX	0x20000
 
+/* TC action piece */
+struct tcamsg
+{
+	unsigned char	tca_family;
+	unsigned char	tca__pad1;
+	unsigned short	tca__pad2;
+};
+#define TA_RTA(r)  ((struct rtattr*)(((char*)(r)) + NLMSG_ALIGN(sizeof(struct tcamsg))))
+#define TA_PAYLOAD(n) NLMSG_PAYLOAD(n,sizeof(struct tcamsg))
+#define TCA_ACT_TAB 1 /* attr type must be >=1 */	
+#define TCAA_MAX 1
+
 /* End of information exported to user level */
 
 #ifdef __KERNEL__
 
 #include <linux/config.h>
 
+extern size_t rtattr_strlcpy(char *dest, const struct rtattr *rta, size_t size);
 static __inline__ int rtattr_strcmp(const struct rtattr *rta, const char *str)
 {
 	int len = strlen(str) + 1;
@@ -676,6 +762,9 @@ static __inline__ int rtattr_strcmp(const struct rtattr *rta, const char *str)
 }
 
 extern int rtattr_parse(struct rtattr *tb[], int maxattr, struct rtattr *rta, int len);
+
+#define rtattr_parse_nested(tb, max, rta) \
+	rtattr_parse((tb), (max), RTA_DATA((rta)), RTA_PAYLOAD((rta)))
 
 extern struct sock *rtnl;
 
@@ -686,7 +775,6 @@ struct rtnetlink_link
 };
 
 extern struct rtnetlink_link * rtnetlink_links[NPROTO];
-extern int rtnetlink_dump_ifinfo(struct sk_buff *skb, struct netlink_callback *cb);
 extern int rtnetlink_send(struct sk_buff *skb, u32 pid, u32 group, int echo);
 extern int rtnetlink_put_metrics(struct sk_buff *skb, u32 *metrics);
 
@@ -697,6 +785,11 @@ extern void __rta_fill(struct sk_buff *skb, int attrtype, int attrlen, const voi
 		 goto rtattr_failure; \
    	__rta_fill(skb, attrtype, attrlen, data); }) 
 
+#define RTA_PUT_NOHDR(skb, attrlen, data) \
+({	if (unlikely(skb_tailroom(skb) < (int)(attrlen))) \
+		goto rtattr_failure; \
+	memcpy(skb_put(skb, RTA_ALIGN(attrlen)), data, attrlen); })
+		
 static inline struct rtattr *
 __rta_reserve(struct sk_buff *skb, int attrtype, int attrlen)
 {
@@ -718,10 +811,6 @@ extern void rtmsg_ifinfo(int type, struct net_device *dev, unsigned change);
 
 extern struct semaphore rtnl_sem;
 
-#define rtnl_exlock()		do { } while(0)
-#define rtnl_exunlock()		do { } while(0)
-#define rtnl_exlock_nowait()	(0)
-
 #define rtnl_shlock()		down(&rtnl_sem)
 #define rtnl_shlock_nowait()	down_trylock(&rtnl_sem)
 
@@ -731,6 +820,7 @@ extern struct semaphore rtnl_sem;
 		        } while(0)
 
 extern void rtnl_lock(void);
+extern int rtnl_lock_interruptible(void);
 extern void rtnl_unlock(void);
 extern void rtnetlink_init(void);
 

@@ -34,6 +34,7 @@
 #include <linux/suspend.h>
 #include <linux/pagemap.h>
 #include <asm/uaccess.h>
+#include <asm/page.h>
 #include <linux/proc_fs.h>
 
 EXPORT_SYMBOL(journal_start);
@@ -54,7 +55,6 @@ EXPORT_SYMBOL(journal_sync_buffer);
 #endif
 EXPORT_SYMBOL(journal_flush);
 EXPORT_SYMBOL(journal_revoke);
-EXPORT_SYMBOL(journal_callback_set);
 
 EXPORT_SYMBOL(journal_init_dev);
 EXPORT_SYMBOL(journal_init_inode);
@@ -73,11 +73,11 @@ EXPORT_SYMBOL(journal_ack_err);
 EXPORT_SYMBOL(journal_clear_err);
 EXPORT_SYMBOL(log_wait_commit);
 EXPORT_SYMBOL(journal_start_commit);
+EXPORT_SYMBOL(journal_force_commit_nested);
 EXPORT_SYMBOL(journal_wipe);
 EXPORT_SYMBOL(journal_blocks_per_page);
 EXPORT_SYMBOL(journal_invalidatepage);
 EXPORT_SYMBOL(journal_try_to_free_buffers);
-EXPORT_SYMBOL(journal_bmap);
 EXPORT_SYMBOL(journal_force_commit);
 
 static int journal_convert_superblock_v1(journal_t *, journal_superblock_t *);
@@ -151,6 +151,9 @@ int kjournald(void *arg)
 	spin_lock(&journal->j_state_lock);
 
 loop:
+	if (journal->j_flags & JFS_UNMOUNT)
+		goto end_loop;
+
 	jbd_debug(1, "commit_sequence=%d, commit_request=%d\n",
 		journal->j_commit_sequence, journal->j_commit_request);
 
@@ -160,7 +163,7 @@ loop:
 		del_timer_sync(journal->j_commit_timer);
 		journal_commit_transaction(journal);
 		spin_lock(&journal->j_state_lock);
-		goto end_loop;
+		goto loop;
 	}
 
 	wake_up(&journal->j_wait_done_commit);
@@ -208,10 +211,9 @@ loop:
 		journal->j_commit_request = transaction->t_tid;
 		jbd_debug(1, "woke because of timeout\n");
 	}
-end_loop:
-	if (!(journal->j_flags & JFS_UNMOUNT))
-		goto loop;
+	goto loop;
 
+end_loop:
 	spin_unlock(&journal->j_state_lock);
 	del_timer_sync(journal->j_commit_timer);
 	journal->j_task = NULL;
@@ -324,8 +326,8 @@ repeat:
 	/*
 	 * Check for escaping
 	 */
-	if (*((unsigned int *)(mapped_data + new_offset)) ==
-				htonl(JFS_MAGIC_NUMBER)) {
+	if (*((__be32 *)(mapped_data + new_offset)) ==
+				cpu_to_be32(JFS_MAGIC_NUMBER)) {
 		need_copy_out = 1;
 		do_escape = 1;
 	}
@@ -465,6 +467,39 @@ int log_start_commit(journal_t *journal, tid_t tid)
 }
 
 /*
+ * Force and wait upon a commit if the calling process is not within
+ * transaction.  This is used for forcing out undo-protected data which contains
+ * bitmaps, when the fs is running out of space.
+ *
+ * We can only force the running transaction if we don't have an active handle;
+ * otherwise, we will deadlock.
+ *
+ * Returns true if a transaction was started.
+ */
+int journal_force_commit_nested(journal_t *journal)
+{
+	transaction_t *transaction = NULL;
+	tid_t tid;
+
+	spin_lock(&journal->j_state_lock);
+	if (journal->j_running_transaction && !current->journal_info) {
+		transaction = journal->j_running_transaction;
+		__log_start_commit(journal, transaction->t_tid);
+	} else if (journal->j_committing_transaction)
+		transaction = journal->j_committing_transaction;
+
+	if (!transaction) {
+		spin_unlock(&journal->j_state_lock);
+		return 0;	/* Nothing to retry */
+	}
+
+	tid = transaction->t_tid;
+	spin_unlock(&journal->j_state_lock);
+	log_wait_commit(journal, tid);
+	return 1;
+}
+
+/*
  * Start a commit of the current running transaction (if any).  Returns true
  * if a transaction was started, and fills its tid in at *ptid
  */
@@ -585,9 +620,13 @@ int journal_bmap(journal_t *journal, unsigned long blocknr,
  * We play buffer_head aliasing tricks to write data/metadata blocks to
  * the journal without copying their contents, but for journal
  * descriptor blocks we do need to generate bona fide buffers.
+ *
+ * After the caller of journal_get_descriptor_buffer() has finished modifying
+ * the buffer's contents they really should run flush_dcache_page(bh->b_page).
+ * But we don't bother doing that, so there will be coherency problems with
+ * mmaps of blockdevs which hold live JBD-controlled filesystems.
  */
-
-struct journal_head * journal_get_descriptor_buffer(journal_t *journal)
+struct journal_head *journal_get_descriptor_buffer(journal_t *journal)
 {
 	struct buffer_head *bh;
 	unsigned long blocknr;
@@ -599,8 +638,10 @@ struct journal_head * journal_get_descriptor_buffer(journal_t *journal)
 		return NULL;
 
 	bh = __getblk(journal->j_dev, blocknr, journal->j_blocksize);
+	lock_buffer(bh);
 	memset(bh->b_data, 0, journal->j_blocksize);
-	bh->b_state |= (1 << BH_Dirty);
+	set_buffer_uptodate(bh);
+	unlock_buffer(bh);
 	BUFFER_TRACE(bh, "return this buffer");
 	return journal_add_journal_head(bh);
 }
@@ -680,6 +721,7 @@ journal_t * journal_init_dev(struct block_device *bdev,
 {
 	journal_t *journal = journal_init_common();
 	struct buffer_head *bh;
+	int n;
 
 	if (!journal)
 		return NULL;
@@ -694,6 +736,17 @@ journal_t * journal_init_dev(struct block_device *bdev,
 	J_ASSERT(bh != NULL);
 	journal->j_sb_buffer = bh;
 	journal->j_superblock = (journal_superblock_t *)bh->b_data;
+
+	/* journal descriptor can store up to n blocks -bzzz */
+	n = journal->j_blocksize / sizeof(journal_block_tag_t);
+	journal->j_wbufsize = n;
+	journal->j_wbuf = kmalloc(n * sizeof(struct buffer_head*), GFP_KERNEL);
+	if (!journal->j_wbuf) {
+		printk(KERN_ERR "%s: Cant allocate bhs for commit thread\n",
+			__FUNCTION__);
+		kfree(journal);
+		journal = NULL;
+	}
 
 	return journal;
 }
@@ -711,6 +764,7 @@ journal_t * journal_init_inode (struct inode *inode)
 	struct buffer_head *bh;
 	journal_t *journal = journal_init_common();
 	int err;
+	int n;
 	unsigned long blocknr;
 
 	if (!journal)
@@ -726,6 +780,17 @@ journal_t * journal_init_inode (struct inode *inode)
 
 	journal->j_maxlen = inode->i_size >> inode->i_sb->s_blocksize_bits;
 	journal->j_blocksize = inode->i_sb->s_blocksize;
+
+	/* journal descriptor can store up to n blocks -bzzz */
+	n = journal->j_blocksize / sizeof(journal_block_tag_t);
+	journal->j_wbufsize = n;
+	journal->j_wbuf = kmalloc(n * sizeof(struct buffer_head*), GFP_KERNEL);
+	if (!journal->j_wbuf) {
+		printk(KERN_ERR "%s: Cant allocate bhs for commit thread\n",
+			__FUNCTION__);
+		kfree(journal);
+		return NULL;
+	}
 
 	err = journal_bmap(journal, 0, &blocknr);
 	/* If that failed, give up */
@@ -768,8 +833,8 @@ static int journal_reset(journal_t *journal)
 	journal_superblock_t *sb = journal->j_superblock;
 	unsigned int first, last;
 
-	first = ntohl(sb->s_first);
-	last = ntohl(sb->s_maxlen);
+	first = be32_to_cpu(sb->s_first);
+	last = be32_to_cpu(sb->s_maxlen);
 
 	journal->j_first = first;
 	journal->j_last = last;
@@ -846,12 +911,12 @@ int journal_create(journal_t *journal)
 	/* OK, fill in the initial static fields in the new superblock */
 	sb = journal->j_superblock;
 
-	sb->s_header.h_magic	 = htonl(JFS_MAGIC_NUMBER);
-	sb->s_header.h_blocktype = htonl(JFS_SUPERBLOCK_V2);
+	sb->s_header.h_magic	 = cpu_to_be32(JFS_MAGIC_NUMBER);
+	sb->s_header.h_blocktype = cpu_to_be32(JFS_SUPERBLOCK_V2);
 
-	sb->s_blocksize	= htonl(journal->j_blocksize);
-	sb->s_maxlen	= htonl(journal->j_maxlen);
-	sb->s_first	= htonl(1);
+	sb->s_blocksize	= cpu_to_be32(journal->j_blocksize);
+	sb->s_maxlen	= cpu_to_be32(journal->j_maxlen);
+	sb->s_first	= cpu_to_be32(1);
 
 	journal->j_transaction_sequence = 1;
 
@@ -894,9 +959,9 @@ void journal_update_superblock(journal_t *journal, int wait)
 	jbd_debug(1,"JBD: updating superblock (start %ld, seq %d, errno %d)\n",
 		  journal->j_tail, journal->j_tail_sequence, journal->j_errno);
 
-	sb->s_sequence = htonl(journal->j_tail_sequence);
-	sb->s_start    = htonl(journal->j_tail);
-	sb->s_errno    = htonl(journal->j_errno);
+	sb->s_sequence = cpu_to_be32(journal->j_tail_sequence);
+	sb->s_start    = cpu_to_be32(journal->j_tail);
+	sb->s_errno    = cpu_to_be32(journal->j_errno);
 	spin_unlock(&journal->j_state_lock);
 
 	BUFFER_TRACE(bh, "marking dirty");
@@ -947,13 +1012,13 @@ static int journal_get_superblock(journal_t *journal)
 
 	err = -EINVAL;
 
-	if (sb->s_header.h_magic != htonl(JFS_MAGIC_NUMBER) ||
-	    sb->s_blocksize != htonl(journal->j_blocksize)) {
+	if (sb->s_header.h_magic != cpu_to_be32(JFS_MAGIC_NUMBER) ||
+	    sb->s_blocksize != cpu_to_be32(journal->j_blocksize)) {
 		printk(KERN_WARNING "JBD: no valid journal superblock found\n");
 		goto out;
 	}
 
-	switch(ntohl(sb->s_header.h_blocktype)) {
+	switch(be32_to_cpu(sb->s_header.h_blocktype)) {
 	case JFS_SUPERBLOCK_V1:
 		journal->j_format_version = 1;
 		break;
@@ -965,9 +1030,9 @@ static int journal_get_superblock(journal_t *journal)
 		goto out;
 	}
 
-	if (ntohl(sb->s_maxlen) < journal->j_maxlen)
-		journal->j_maxlen = ntohl(sb->s_maxlen);
-	else if (ntohl(sb->s_maxlen) > journal->j_maxlen) {
+	if (be32_to_cpu(sb->s_maxlen) < journal->j_maxlen)
+		journal->j_maxlen = be32_to_cpu(sb->s_maxlen);
+	else if (be32_to_cpu(sb->s_maxlen) > journal->j_maxlen) {
 		printk (KERN_WARNING "JBD: journal file too short\n");
 		goto out;
 	}
@@ -995,11 +1060,11 @@ static int load_superblock(journal_t *journal)
 
 	sb = journal->j_superblock;
 
-	journal->j_tail_sequence = ntohl(sb->s_sequence);
-	journal->j_tail = ntohl(sb->s_start);
-	journal->j_first = ntohl(sb->s_first);
-	journal->j_last = ntohl(sb->s_maxlen);
-	journal->j_errno = ntohl(sb->s_errno);
+	journal->j_tail_sequence = be32_to_cpu(sb->s_sequence);
+	journal->j_tail = be32_to_cpu(sb->s_start);
+	journal->j_first = be32_to_cpu(sb->s_first);
+	journal->j_last = be32_to_cpu(sb->s_maxlen);
+	journal->j_errno = be32_to_cpu(sb->s_errno);
 
 	return 0;
 }
@@ -1100,12 +1165,17 @@ void journal_destroy(journal_t *journal)
 		iput(journal->j_inode);
 	if (journal->j_revoke)
 		journal_destroy_revoke(journal);
+	kfree(journal->j_wbuf);
 	kfree(journal);
 }
 
 
 /**
  *int journal_check_used_features () - Check if features specified are used.
+ * @journal: Journal to check.
+ * @compat: bitmask of compatible features
+ * @ro: bitmask of features that force read-only mount
+ * @incompat: bitmask of incompatible features
  * 
  * Check whether the journal uses all of a given set of
  * features.  Return true (non-zero) if it does. 
@@ -1133,6 +1203,10 @@ int journal_check_used_features (journal_t *journal, unsigned long compat,
 
 /**
  * int journal_check_available_features() - Check feature set in journalling layer
+ * @journal: Journal to check.
+ * @compat: bitmask of compatible features
+ * @ro: bitmask of features that force read-only mount
+ * @incompat: bitmask of incompatible features
  * 
  * Check whether the journaling code supports the use of
  * all of a given set of features on this journal.  Return true
@@ -1165,6 +1239,10 @@ int journal_check_available_features (journal_t *journal, unsigned long compat,
 
 /**
  * int journal_set_features () - Mark a given journal feature in the superblock
+ * @journal: Journal to act on.
+ * @compat: bitmask of compatible features
+ * @ro: bitmask of features that force read-only mount
+ * @incompat: bitmask of incompatible features
  *
  * Mark a given journal feature as present on the
  * superblock.  Returns true if the requested features could be set. 
@@ -1197,6 +1275,7 @@ int journal_set_features (journal_t *journal, unsigned long compat,
 
 /**
  * int journal_update_format () - Update on-disk journal structure.
+ * @journal: Journal to act on.
  *
  * Given an initialised but unloaded journal struct, poke about in the
  * on-disk structure to update it to the most recent supported version.
@@ -1212,7 +1291,7 @@ int journal_update_format (journal_t *journal)
 
 	sb = journal->j_superblock;
 
-	switch (ntohl(sb->s_header.h_blocktype)) {
+	switch (be32_to_cpu(sb->s_header.h_blocktype)) {
 	case JFS_SUPERBLOCK_V2:
 		return 0;
 	case JFS_SUPERBLOCK_V1:
@@ -1234,7 +1313,7 @@ static int journal_convert_superblock_v1(journal_t *journal,
 
 	/* Pre-initialise new fields to zero */
 	offset = ((char *) &(sb->s_feature_compat)) - ((char *) sb);
-	blocksize = ntohl(sb->s_blocksize);
+	blocksize = be32_to_cpu(sb->s_blocksize);
 	memset(&sb->s_feature_compat, 0, blocksize-offset);
 
 	sb->s_nr_users = cpu_to_be32(1);
@@ -1497,6 +1576,7 @@ int journal_errno(journal_t *journal)
 
 /** 
  * int journal_clear_err () - clears the journal's error state
+ * @journal: journal to act on.
  *
  * An error must be cleared or Acked to take a FS out of readonly
  * mode.
@@ -1516,6 +1596,7 @@ int journal_clear_err(journal_t *journal)
 
 /** 
  * void journal_ack_err() - Ack journal err.
+ * @journal: journal to act on.
  *
  * An error must be cleared or Acked to take a FS out of readonly
  * mode.
@@ -1534,11 +1615,7 @@ int journal_blocks_per_page(struct inode *inode)
 }
 
 /*
- * Simple support for retying memory allocations.  Introduced to help to
- * debug different VM deadlock avoidance strategies. 
- */
-/*
- * Simple support for retying memory allocations.  Introduced to help to
+ * Simple support for retrying memory allocations.  Introduced to help to
  * debug different VM deadlock avoidance strategies. 
  */
 void * __jbd_kmalloc (const char *where, size_t size, int flags, int retry)
@@ -1577,7 +1654,7 @@ static void journal_destroy_journal_head_cache(void)
 {
 	J_ASSERT(journal_head_cache != NULL);
 	kmem_cache_destroy(journal_head_cache);
-	journal_head_cache = 0;
+	journal_head_cache = NULL;
 }
 
 /*
@@ -1726,6 +1803,7 @@ static void __journal_remove_journal_head(struct buffer_head *bh)
 		if (jh->b_transaction == NULL &&
 				jh->b_next_transaction == NULL &&
 				jh->b_cp_transaction == NULL) {
+			J_ASSERT_JH(jh, jh->b_jlist == BJ_None);
 			J_ASSERT_BH(bh, buffer_jbd(bh));
 			J_ASSERT_BH(bh, jh2bh(jh) == bh);
 			BUFFER_TRACE(bh, "remove journal_head");

@@ -5,7 +5,7 @@
  *
  * Copyright 2001 MontaVista Software Inc.
  * Author: Jun Sun, jsun@mvista.com or jsun@junsun.net
- * Copyright (C) 2000, 2001 Ralf Baechle (ralf@gnu.org)
+ * Copyright (C) 2000, 01, 05 Ralf Baechle (ralf@linux-mips.org)
  *
  *  This program is free software; you can redistribute  it and/or modify it
  *  under  the terms of  the GNU General  Public License as published by the
@@ -28,7 +28,6 @@
  *  675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/kernel_stat.h>
@@ -41,11 +40,12 @@
 #include <linux/timex.h>
 #include <linux/slab.h>
 #include <linux/random.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <asm/bootinfo.h>
 #include <asm/io.h>
-#include <asm/irq.h>
+#include <asm/irq_cpu.h>
 #include <asm/mipsregs.h>
+#include <asm/mv64340.h>
 #include <asm/system.h>
 
 extern asmlinkage void ocelot_handle_int(void);
@@ -53,14 +53,14 @@ extern void uart_irq_init(void);
 extern void cpci_irq_init(void);
 
 static struct irqaction cascade_fpga = {
-	no_action, SA_INTERRUPT, 0, "cascade via FPGA", NULL, NULL
+	no_action, SA_INTERRUPT, CPU_MASK_NONE, "cascade via FPGA", NULL, NULL
 };
 
 static struct irqaction cascade_mv64340 = {
-	no_action, SA_INTERRUPT, 0, "cascade via MV64340", NULL, NULL
+	no_action, SA_INTERRUPT, CPU_MASK_NONE, "cascade via MV64340", NULL, NULL
 };
 
-void __init init_IRQ(void)
+void __init arch_init_irq(void)
 {
 	/*
 	 * Clear all of the interrupts while we change the able around a bit.
@@ -70,7 +70,6 @@ void __init init_IRQ(void)
 
 	/* Sets the first-level interrupt dispatcher. */
 	set_except_vector(0, ocelot_handle_int);
-	init_generic_irq();
 	mips_cpu_irq_init(0);
 
 	/* set up the cascading interrupts */
@@ -81,10 +80,4 @@ void __init init_IRQ(void)
 	mv64340_irq_init(16);
 	uart_irq_init();
 	cpci_irq_init();
-
-#ifdef CONFIG_KGDB
-	printk("start kgdb ...\n");
-	set_debug_traps();
-	breakpoint();	/* you may move this line to whereever you want :-) */
-#endif
 }

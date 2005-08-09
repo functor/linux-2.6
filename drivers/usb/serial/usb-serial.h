@@ -1,7 +1,7 @@
 /*
  * USB Serial Converter driver
  *
- *	Copyright (C) 1999 - 2003
+ *	Copyright (C) 1999 - 2004
  *	    Greg Kroah-Hartman (greg@kroah.com)
  *
  *	This program is free software; you can redistribute it and/or modify
@@ -62,15 +62,11 @@
 
 #define MAX_NUM_PORTS		8	/* The maximum number of ports one device can grab at once */
 
-#define USB_SERIAL_MAGIC	0x6702	/* magic number for usb_serial struct */
-#define USB_SERIAL_PORT_MAGIC	0x7301	/* magic number for usb_serial_port struct */
-
 /* parity check flag */
 #define RELEVANT_IFLAG(iflag)	(iflag & (IGNBRK|BRKINT|IGNPAR|PARMRK|INPCK))
 
 /**
  * usb_serial_port: structure for the specific ports of a device.
- * @magic: magic number for internal validity of this pointer.
  * @serial: pointer back to the struct usb_serial owner of this port.
  * @tty: pointer to the corresponding tty for this port.
  * @number: the number of the port (the minor number).
@@ -78,6 +74,11 @@
  * @interrupt_in_urb: pointer to the interrupt in struct urb for this port.
  * @interrupt_in_endpointAddress: endpoint address for the interrupt in pipe
  *	for this port.
+ * @interrupt_out_buffer: pointer to the interrupt out buffer for this port.
+ * @interrupt_out_size: the size of the interrupt_out_buffer, in bytes.
+ * @interrupt_out_urb: pointer to the interrupt out struct urb for this port.
+ * @interrupt_out_endpointAddress: endpoint address for the interrupt out pipe
+ * 	for this port.
  * @bulk_in_buffer: pointer to the bulk in buffer for this port.
  * @read_urb: pointer to the bulk in struct urb for this port.
  * @bulk_in_endpointAddress: endpoint address for the bulk in pipe for this
@@ -95,8 +96,7 @@
  * ports of a device.
  */
 struct usb_serial_port {
-	int			magic;
-	struct usb_serial	*serial;
+	struct usb_serial *	serial;
 	struct tty_struct *	tty;
 	unsigned char		number;
 
@@ -104,7 +104,13 @@ struct usb_serial_port {
 	struct urb *		interrupt_in_urb;
 	__u8			interrupt_in_endpointAddress;
 
+	unsigned char *		interrupt_out_buffer;
+	int			interrupt_out_size;
+	struct urb *		interrupt_out_urb;
+	__u8			interrupt_out_endpointAddress;
+
 	unsigned char *		bulk_in_buffer;
+	int			bulk_in_size;
 	struct urb *		read_urb;
 	__u8			bulk_in_endpointAddress;
 
@@ -133,17 +139,15 @@ static inline void usb_set_serial_port_data (struct usb_serial_port *port, void 
 
 /**
  * usb_serial - structure used by the usb-serial core for a device
- * @magic: magic number for internal validity of this pointer.
  * @dev: pointer to the struct usb_device for this device
  * @type: pointer to the struct usb_serial_device_type for this device
  * @interface: pointer to the struct usb_interface for this device
  * @minor: the starting minor number for this device
  * @num_ports: the number of ports this device has
  * @num_interrupt_in: number of interrupt in endpoints we have
+ * @num_interrupt_out: number of interrupt out endpoints we have
  * @num_bulk_in: number of bulk in endpoints we have
  * @num_bulk_out: number of bulk out endpoints we have
- * @vendor: vendor id of this device
- * @product: product id of this device
  * @port: array of struct usb_serial_port structures for the different ports.
  * @private: place to put any driver specific information that is needed.  The
  *	usb-serial driver is required to manage this data, the usb-serial core
@@ -151,7 +155,6 @@ static inline void usb_set_serial_port_data (struct usb_serial_port *port, void 
  *	usb_set_serial_data() to access this.
  */
 struct usb_serial {
-	int				magic;
 	struct usb_device *		dev;
 	struct usb_serial_device_type *	type;
 	struct usb_interface *		interface;
@@ -159,10 +162,9 @@ struct usb_serial {
 	unsigned char			num_ports;
 	unsigned char			num_port_pointers;
 	char				num_interrupt_in;
+	char				num_interrupt_out;
 	char				num_bulk_in;
 	char				num_bulk_out;
-	__u16				vendor;
-	__u16				product;
 	struct usb_serial_port *	port[MAX_NUM_PORTS];
 	struct kref			kref;
 	void *				private;
@@ -193,6 +195,8 @@ static inline void usb_set_serial_data (struct usb_serial *serial, void *data)
  * @id_table: pointer to a list of usb_device_id structures that define all
  *	of the devices this structure can support.
  * @num_interrupt_in: the number of interrupt in endpoints this device will
+ *	have.
+ * @num_interrupt_out: the number of interrupt out endpoints this device will
  *	have.
  * @num_bulk_in: the number of bulk in endpoints this device will have.
  * @num_bulk_out: the number of bulk out endpoints this device will have.
@@ -226,6 +230,7 @@ struct usb_serial_device_type {
 	char	*short_name;
 	const struct usb_device_id *id_table;
 	char	num_interrupt_in;
+	char	num_interrupt_out;
 	char	num_bulk_in;
 	char	num_bulk_out;
 	char	num_ports;
@@ -245,7 +250,7 @@ struct usb_serial_device_type {
 	/* serial function calls */
 	int  (*open)		(struct usb_serial_port *port, struct file * filp);
 	void (*close)		(struct usb_serial_port *port, struct file * filp);
-	int  (*write)		(struct usb_serial_port *port, int from_user, const unsigned char *buf, int count);
+	int  (*write)		(struct usb_serial_port *port, const unsigned char *buf, int count);
 	int  (*write_room)	(struct usb_serial_port *port);
 	int  (*ioctl)		(struct usb_serial_port *port, struct file * file, unsigned int cmd, unsigned long arg);
 	void (*set_termios)	(struct usb_serial_port *port, struct termios * old);
@@ -257,6 +262,7 @@ struct usb_serial_device_type {
 	int  (*tiocmset)	(struct usb_serial_port *port, struct file *file, unsigned int set, unsigned int clear);
 
 	void (*read_int_callback)(struct urb *urb, struct pt_regs *regs);
+	void (*write_int_callback)(struct urb *urb, struct pt_regs *regs);
 	void (*read_bulk_callback)(struct urb *urb, struct pt_regs *regs);
 	void (*write_bulk_callback)(struct urb *urb, struct pt_regs *regs);
 };
@@ -284,7 +290,7 @@ static inline void usb_serial_console_exit (void) { }
 /* Functions needed by other parts of the usbserial core */
 extern struct usb_serial *usb_serial_get_by_index (unsigned int minor);
 extern int usb_serial_generic_open (struct usb_serial_port *port, struct file *filp);
-extern int usb_serial_generic_write (struct usb_serial_port *port, int from_user, const unsigned char *buf, int count);
+extern int usb_serial_generic_write (struct usb_serial_port *port, const unsigned char *buf, int count);
 extern void usb_serial_generic_close (struct usb_serial_port *port, struct file *filp);
 extern int usb_serial_generic_write_room (struct usb_serial_port *port);
 extern int usb_serial_generic_chars_in_buffer (struct usb_serial_port *port);
@@ -301,74 +307,20 @@ extern struct usb_serial_device_type usb_serial_generic_device;
 extern struct bus_type usb_serial_bus_type;
 extern struct tty_driver *usb_serial_tty_driver;
 
-/* Inline functions to check the sanity of a pointer that is passed to us */
-static inline int serial_paranoia_check (struct usb_serial *serial, const char *function)
-{
-	if (!serial) {
-		dbg("%s - serial == NULL", function);
-		return -1;
-	}
-	if (serial->magic != USB_SERIAL_MAGIC) {
-		dbg("%s - bad magic number for serial", function);
-		return -1;
-	}
-	if (!serial->type) {
-		dbg("%s - serial->type == NULL!", function);
-		return -1;
-	}
-
-	return 0;
-}
-
-
-static inline int port_paranoia_check (struct usb_serial_port *port, const char *function)
-{
-	if (!port) {
-		dbg("%s - port == NULL", function);
-		return -1;
-	}
-	if (port->magic != USB_SERIAL_PORT_MAGIC) {
-		dbg("%s - bad magic number for port", function);
-		return -1;
-	}
-	if (!port->serial) {
-		dbg("%s - port->serial == NULL", function);
-		return -1;
-	}
-
-	return 0;
-}
-
-
-static inline struct usb_serial* get_usb_serial (struct usb_serial_port *port, const char *function) 
-{ 
-	/* if no port was specified, or it fails a paranoia check */
-	if (!port || 
-		port_paranoia_check (port, function) ||
-		serial_paranoia_check (port->serial, function)) {
-		/* then say that we don't have a valid usb_serial thing, which will
-		 * end up genrating -ENODEV return values */ 
-		return NULL;
-	}
-
-	return port->serial;
-}
-
-
-static inline void usb_serial_debug_data (const char *file, const char *function, int size, const unsigned char *data)
+static inline void usb_serial_debug_data(int debug,
+					 struct device *dev,
+					 const char *function, int size,
+					 const unsigned char *data)
 {
 	int i;
 
-	if (!debug)
-		return;
-	
-	printk (KERN_DEBUG "%s: %s - length = %d, data = ", file, function, size);
-	for (i = 0; i < size; ++i) {
-		printk ("%.2x ", data[i]);
+	if (debug) {
+		dev_printk(KERN_DEBUG, dev, "%s - length = %d, data = ", function, size);
+		for (i = 0; i < size; ++i)
+			printk ("%.2x ", data[i]);
+		printk ("\n");
 	}
-	printk ("\n");
 }
-
 
 /* Use our own dbg macro */
 #undef dbg

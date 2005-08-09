@@ -107,7 +107,7 @@ static volatile unsigned char sjcd_completion_status = 0;
 static volatile unsigned char sjcd_completion_error = 0;
 static unsigned short sjcd_command_is_in_progress = 0;
 static unsigned short sjcd_error_reported = 0;
-static spinlock_t sjcd_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(sjcd_lock);
 
 static int sjcd_open_count;
 
@@ -116,7 +116,7 @@ static struct sjcd_play_msf sjcd_playing;
 
 static int sjcd_base = SJCD_BASE_ADDR;
 
-MODULE_PARM(sjcd_base, "i");
+module_param(sjcd_base, int, 0);
 
 static DECLARE_WAIT_QUEUE_HEAD(sjcd_waitq);
 
@@ -716,12 +716,10 @@ static int sjcd_tray_open(void)
 static int sjcd_ioctl(struct inode *ip, struct file *fp,
 		      unsigned int cmd, unsigned long arg)
 {
+	void __user *argp = (void __user *)arg;
 #if defined( SJCD_TRACE )
 	printk("SJCD:ioctl\n");
 #endif
-
-	if (ip == NULL)
-		return (-EINVAL);
 
 	sjcd_get_status();
 	if (!sjcd_status_valid)
@@ -795,7 +793,7 @@ static int sjcd_ioctl(struct inode *ip, struct file *fp,
 #if defined( SJCD_TRACE )
 			printk("SJCD: ioctl: playtrkind\n");
 #endif
-			if (!copy_from_user(&ti, (void *) arg, sizeof(ti))) {
+			if (!copy_from_user(&ti, argp, sizeof(ti))) {
 				s = 0;
 				if (ti.cdti_trk0 < sjcd_first_track_no)
 					return (-EINVAL);
@@ -833,8 +831,8 @@ static int sjcd_ioctl(struct inode *ip, struct file *fp,
 			printk("SJCD: ioctl: playmsf\n");
 #endif
 			if ((s =
-			     verify_area(VERIFY_READ, (void *) arg,
-					 sizeof(sjcd_msf))) == 0) {
+			     access_ok(VERIFY_READ, argp, sizeof(sjcd_msf))
+			     		? 0 : -EFAULT) == 0) {
 				if (sjcd_audio_status == CDROM_AUDIO_PLAY) {
 					sjcd_send_cmd(SCMD_PAUSE);
 					(void) sjcd_receive_status();
@@ -842,7 +840,7 @@ static int sjcd_ioctl(struct inode *ip, struct file *fp,
 					    CDROM_AUDIO_NO_STATUS;
 				}
 
-				if (copy_from_user(&sjcd_msf, (void *) arg,
+				if (copy_from_user(&sjcd_msf, argp,
 					       sizeof(sjcd_msf)))
 					return (-EFAULT);
 
@@ -877,7 +875,7 @@ static int sjcd_ioctl(struct inode *ip, struct file *fp,
 #endif
 			toc_header.cdth_trk0 = sjcd_first_track_no;
 			toc_header.cdth_trk1 = sjcd_last_track_no;
-			if (copy_to_user((void *)arg, &toc_header,
+			if (copy_to_user(argp, &toc_header,
 					 sizeof(toc_header)))
 				return -EFAULT;
 			return 0;
@@ -890,11 +888,11 @@ static int sjcd_ioctl(struct inode *ip, struct file *fp,
 			printk("SJCD: ioctl: readtocentry\n");
 #endif
 			if ((s =
-			     verify_area(VERIFY_WRITE, (void *) arg,
-					 sizeof(toc_entry))) == 0) {
+			     access_ok(VERIFY_WRITE, argp, sizeof(toc_entry))
+			     		? 0 : -EFAULT) == 0) {
 				struct sjcd_hw_disk_info *tp;
 
-				if (copy_from_user(&toc_entry, (void *) arg,
+				if (copy_from_user(&toc_entry, argp,
 					       sizeof(toc_entry)))
 					return (-EFAULT);
 				if (toc_entry.cdte_track == CDROM_LEADOUT)
@@ -931,7 +929,7 @@ static int sjcd_ioctl(struct inode *ip, struct file *fp,
 				default:
 					return (-EINVAL);
 				}
-				if (copy_to_user((void *) arg, &toc_entry,
+				if (copy_to_user(argp, &toc_entry,
 						 sizeof(toc_entry)))
 					s = -EFAULT;
 			}
@@ -945,11 +943,11 @@ static int sjcd_ioctl(struct inode *ip, struct file *fp,
 			printk("SJCD: ioctl: subchnl\n");
 #endif
 			if ((s =
-			     verify_area(VERIFY_WRITE, (void *) arg,
-					 sizeof(subchnl))) == 0) {
+			     access_ok(VERIFY_WRITE, argp, sizeof(subchnl))
+			     		? 0 : -EFAULT) == 0) {
 				struct sjcd_hw_qinfo q_info;
 
-				if (copy_from_user(&subchnl, (void *) arg,
+				if (copy_from_user(&subchnl, argp,
 					       sizeof(subchnl)))
 					return (-EFAULT);
 
@@ -990,7 +988,7 @@ static int sjcd_ioctl(struct inode *ip, struct file *fp,
 				default:
 					return (-EINVAL);
 				}
-				if (copy_to_user((void *) arg, &subchnl,
+				if (copy_to_user(argp, &subchnl,
 					         sizeof(subchnl)))
 					s = -EFAULT;
 			}
@@ -1004,11 +1002,11 @@ static int sjcd_ioctl(struct inode *ip, struct file *fp,
 			printk("SJCD: ioctl: volctrl\n");
 #endif
 			if ((s =
-			     verify_area(VERIFY_READ, (void *) arg,
-					 sizeof(vol_ctrl))) == 0) {
+			     access_ok(VERIFY_READ, argp, sizeof(vol_ctrl))
+			     		? 0 : -EFAULT) == 0) {
 				unsigned char dummy[4];
 
-				if (copy_from_user(&vol_ctrl, (void *) arg,
+				if (copy_from_user(&vol_ctrl, argp,
 					       sizeof(vol_ctrl)))
 					return (-EFAULT);
 				sjcd_send_4_cmd(SCMD_SET_VOLUME,
@@ -1038,8 +1036,7 @@ static int sjcd_ioctl(struct inode *ip, struct file *fp,
 #if defined( SJCD_TRACE )
 			printk("SJCD: ioctl: statistic\n");
 #endif
-			if (copy_to_user((void *)arg, &statistic,
-					 sizeof(statistic)))
+			if (copy_to_user(argp, &statistic, sizeof(statistic)))
 				return -EFAULT;
 			return 0;
 		}

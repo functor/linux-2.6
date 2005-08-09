@@ -12,9 +12,11 @@
 #include <linux/blkdev.h>
 #include <linux/device.h>
 
+#include <scsi/scsi.h>
+#include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
+#include <scsi/scsi_tcq.h>
 #include <scsi/scsi_transport.h>
-#include "scsi.h"
 
 #include "scsi_priv.h"
 #include "scsi_logging.h"
@@ -29,6 +31,7 @@ static struct {
 	{ SDEV_DEL, "deleted" },
 	{ SDEV_QUIESCE, "quiesce" },
 	{ SDEV_OFFLINE,	"offline" },
+	{ SDEV_BLOCK,	"blocked" },
 };
 
 const char *scsi_device_state_name(enum scsi_device_state state)
@@ -99,7 +102,7 @@ show_##name (struct class_device *class_dev, char *buf)			\
  */
 #define shost_rd_attr2(name, field, format_string)			\
 	shost_show_function(name, field, format_string)			\
-static CLASS_DEVICE_ATTR(name, S_IRUGO, show_##name, NULL)
+static CLASS_DEVICE_ATTR(name, S_IRUGO, show_##name, NULL);
 
 #define shost_rd_attr(field, format_string) \
 shost_rd_attr2(field, field, format_string)
@@ -151,26 +154,35 @@ void scsi_device_dev_release(struct device *dev)
 {
 	struct scsi_device *sdev;
 	struct device *parent;
+	struct scsi_target *starget;
 	unsigned long flags;
 
 	parent = dev->parent;
 	sdev = to_scsi_device(dev);
+	starget = to_scsi_target(parent);
 
 	spin_lock_irqsave(sdev->host->host_lock, flags);
+	starget->reap_ref++;
 	list_del(&sdev->siblings);
 	list_del(&sdev->same_target_siblings);
 	list_del(&sdev->starved_entry);
-	if (sdev->single_lun && --sdev->sdev_target->starget_refcnt == 0)
-		kfree(sdev->sdev_target);
 	spin_unlock_irqrestore(sdev->host->host_lock, flags);
 
-	if (sdev->request_queue)
+	if (sdev->request_queue) {
+		sdev->request_queue->queuedata = NULL;
 		scsi_free_queue(sdev->request_queue);
+		/* temporary expedient, try to catch use of queue lock
+		 * after free of sdev */
+		sdev->request_queue = NULL;
+	}
+
+	scsi_target_reap(scsi_target(sdev));
 
 	kfree(sdev->inquiry);
 	kfree(sdev);
 
-	put_device(parent);
+	if (parent)
+		put_device(parent);
 }
 
 struct class sdev_class = {
@@ -181,7 +193,10 @@ struct class sdev_class = {
 /* all probing is done in the individual ->probe routines */
 static int scsi_bus_match(struct device *dev, struct device_driver *gendrv)
 {
-	return 1;
+	struct scsi_device *sdp = to_scsi_device(dev);
+	if (sdp->no_uld_attach)
+		return 0;
+	return (sdp->inq_periph_qual == SCSI_INQ_PQ_CON)? 1: 0;
 }
 
 struct bus_type scsi_bus_type = {
@@ -227,8 +242,8 @@ sdev_show_##field (struct device *dev, char *buf)				\
  * read only field.
  */
 #define sdev_rd_attr(field, format_string)				\
-	sdev_show_function(field, format_string)				\
-static DEVICE_ATTR(field, S_IRUGO, sdev_show_##field, NULL)
+	sdev_show_function(field, format_string)			\
+static DEVICE_ATTR(field, S_IRUGO, sdev_show_##field, NULL);
 
 
 /*
@@ -246,7 +261,7 @@ sdev_store_##field (struct device *dev, const char *buf, size_t count)	\
 	snscanf (buf, 20, format_string, &sdev->field);			\
 	return count;							\
 }									\
-static DEVICE_ATTR(field, S_IRUGO | S_IWUSR, sdev_show_##field, sdev_store_##field)
+static DEVICE_ATTR(field, S_IRUGO | S_IWUSR, sdev_show_##field, sdev_store_##field);
 
 /* Currently we don't export bit fields, but we might in future,
  * so leave this code in */
@@ -271,7 +286,7 @@ sdev_store_##field (struct device *dev, const char *buf, size_t count)	\
 	}								\
 	return ret;							\
 }									\
-static DEVICE_ATTR(field, S_IRUGO | S_IWUSR, sdev_show_##field, sdev_store_##field)
+static DEVICE_ATTR(field, S_IRUGO | S_IWUSR, sdev_show_##field, sdev_store_##field);
 
 /*
  * scsi_sdev_check_buf_bit: return 0 if buf is "0", return 1 if buf is "1",
@@ -302,12 +317,32 @@ sdev_rd_attr (model, "%.16s\n");
 sdev_rd_attr (rev, "%.4s\n");
 
 static ssize_t
+sdev_show_timeout (struct device *dev, char *buf)
+{
+	struct scsi_device *sdev;
+	sdev = to_scsi_device(dev);
+	return snprintf (buf, 20, "%d\n", sdev->timeout / HZ);
+}
+
+static ssize_t
+sdev_store_timeout (struct device *dev, const char *buf, size_t count)
+{
+	struct scsi_device *sdev;
+	int timeout;
+	sdev = to_scsi_device(dev);
+	sscanf (buf, "%d\n", &timeout);
+	sdev->timeout = timeout * HZ;
+	return count;
+}
+static DEVICE_ATTR(timeout, S_IRUGO | S_IWUSR, sdev_show_timeout, sdev_store_timeout);
+
+static ssize_t
 store_rescan_field (struct device *dev, const char *buf, size_t count) 
 {
 	scsi_rescan_device(dev);
 	return count;
 }
-static DEVICE_ATTR(rescan, S_IWUSR, NULL, store_rescan_field)
+static DEVICE_ATTR(rescan, S_IWUSR, NULL, store_rescan_field);
 
 static ssize_t sdev_store_delete(struct device *dev, const char *buf,
 				 size_t count)
@@ -352,13 +387,52 @@ show_state_field(struct device *dev, char *buf)
 	return snprintf(buf, 20, "%s\n", name);
 }
 
-DEVICE_ATTR(state, S_IRUGO | S_IWUSR, show_state_field, store_state_field);
+static DEVICE_ATTR(state, S_IRUGO | S_IWUSR, show_state_field, store_state_field);
+
+static ssize_t
+show_queue_type_field(struct device *dev, char *buf)
+{
+	struct scsi_device *sdev = to_scsi_device(dev);
+	const char *name = "none";
+
+	if (sdev->ordered_tags)
+		name = "ordered";
+	else if (sdev->simple_tags)
+		name = "simple";
+
+	return snprintf(buf, 20, "%s\n", name);
+}
+
+static DEVICE_ATTR(queue_type, S_IRUGO, show_queue_type_field, NULL);
+
+static ssize_t
+show_iostat_counterbits(struct device *dev, char *buf)
+{
+	return snprintf(buf, 20, "%d\n", (int)sizeof(atomic_t) * 8);
+}
+
+static DEVICE_ATTR(iocounterbits, S_IRUGO, show_iostat_counterbits, NULL);
+
+#define show_sdev_iostat(field)						\
+static ssize_t								\
+show_iostat_##field(struct device *dev, char *buf)			\
+{									\
+	struct scsi_device *sdev = to_scsi_device(dev);			\
+	unsigned long long count = atomic_read(&sdev->field);		\
+	return snprintf(buf, 20, "0x%llx\n", count);			\
+}									\
+static DEVICE_ATTR(field, S_IRUGO, show_iostat_##field, NULL)
+
+show_sdev_iostat(iorequest_cnt);
+show_sdev_iostat(iodone_cnt);
+show_sdev_iostat(ioerr_cnt);
 
 
 /* Default template for device attributes.  May NOT be modified */
 static struct device_attribute *scsi_sysfs_sdev_attrs[] = {
 	&dev_attr_device_blocked,
 	&dev_attr_queue_depth,
+	&dev_attr_queue_type,
 	&dev_attr_type,
 	&dev_attr_scsi_level,
 	&dev_attr_vendor,
@@ -367,8 +441,84 @@ static struct device_attribute *scsi_sysfs_sdev_attrs[] = {
 	&dev_attr_rescan,
 	&dev_attr_delete,
 	&dev_attr_state,
+	&dev_attr_timeout,
+	&dev_attr_iocounterbits,
+	&dev_attr_iorequest_cnt,
+	&dev_attr_iodone_cnt,
+	&dev_attr_ioerr_cnt,
 	NULL
 };
+
+static ssize_t sdev_store_queue_depth_rw(struct device *dev, const char *buf,
+					 size_t count)
+{
+	int depth, retval;
+	struct scsi_device *sdev = to_scsi_device(dev);
+	struct scsi_host_template *sht = sdev->host->hostt;
+
+	if (!sht->change_queue_depth)
+		return -EINVAL;
+
+	depth = simple_strtoul(buf, NULL, 0);
+
+	if (depth < 1)
+		return -EINVAL;
+
+	retval = sht->change_queue_depth(sdev, depth);
+	if (retval < 0)
+		return retval;
+
+	return count;
+}
+
+static struct device_attribute sdev_attr_queue_depth_rw =
+	__ATTR(queue_depth, S_IRUGO | S_IWUSR, sdev_show_queue_depth,
+	       sdev_store_queue_depth_rw);
+
+static ssize_t sdev_store_queue_type_rw(struct device *dev, const char *buf,
+					size_t count)
+{
+	struct scsi_device *sdev = to_scsi_device(dev);
+	struct scsi_host_template *sht = sdev->host->hostt;
+	int tag_type = 0, retval;
+	int prev_tag_type = scsi_get_tag_type(sdev);
+
+	if (!sdev->tagged_supported || !sht->change_queue_type)
+		return -EINVAL;
+
+	if (strncmp(buf, "ordered", 7) == 0)
+		tag_type = MSG_ORDERED_TAG;
+	else if (strncmp(buf, "simple", 6) == 0)
+		tag_type = MSG_SIMPLE_TAG;
+	else if (strncmp(buf, "none", 4) != 0)
+		return -EINVAL;
+
+	if (tag_type == prev_tag_type)
+		return count;
+
+	retval = sht->change_queue_type(sdev, tag_type);
+	if (retval < 0)
+		return retval;
+
+	return count;
+}
+
+static struct device_attribute sdev_attr_queue_type_rw =
+	__ATTR(queue_type, S_IRUGO | S_IWUSR, show_queue_type_field,
+	       sdev_store_queue_type_rw);
+
+static struct device_attribute *attr_changed_internally(
+		struct Scsi_Host *shost,
+		struct device_attribute * attr)
+{
+	if (!strcmp("queue_depth", attr->attr.name)
+	    && shost->hostt->change_queue_depth)
+		return &sdev_attr_queue_depth_rw;
+	else if (!strcmp("queue_type", attr->attr.name)
+	    && shost->hostt->change_queue_type)
+		return &sdev_attr_queue_type_rw;
+	return attr;
+}
 
 
 static struct device_attribute *attr_overridden(
@@ -416,7 +566,6 @@ static int attr_add(struct device *dev, struct device_attribute *attr)
  **/
 int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 {
-	struct class_device_attribute **attrs;
 	int error, i;
 
 	if ((error = scsi_device_set_state(sdev, SDEV_RUNNING)) != 0)
@@ -424,29 +573,19 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 
 	error = device_add(&sdev->sdev_gendev);
 	if (error) {
+		put_device(sdev->sdev_gendev.parent);
 		printk(KERN_INFO "error 1\n");
 		return error;
 	}
-
 	error = class_device_add(&sdev->sdev_classdev);
 	if (error) {
 		printk(KERN_INFO "error 2\n");
 		goto clean_device;
 	}
+
 	/* take a reference for the sdev_classdev; this is
 	 * released by the sdev_class .release */
 	get_device(&sdev->sdev_gendev);
-
-	if (sdev->transport_classdev.class) {
-		error = class_device_add(&sdev->transport_classdev);
-		if (error)
-			goto clean_device2;
-		/* take a reference for the transport_classdev; this
-		 * is released by the transport_class .release */
-		get_device(&sdev->sdev_gendev);
-		
-	}
-
 	if (sdev->host->hostt->sdev_attrs) {
 		for (i = 0; sdev->host->hostt->sdev_attrs[i]; i++) {
 			error = attr_add(&sdev->sdev_gendev,
@@ -461,8 +600,10 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 	for (i = 0; scsi_sysfs_sdev_attrs[i]; i++) {
 		if (!attr_overridden(sdev->host->hostt->sdev_attrs,
 					scsi_sysfs_sdev_attrs[i])) {
-			error = device_create_file(&sdev->sdev_gendev,
-					scsi_sysfs_sdev_attrs[i]);
+			struct device_attribute * attr = 
+				attr_changed_internally(sdev->host, 
+							scsi_sysfs_sdev_attrs[i]);
+			error = device_create_file(&sdev->sdev_gendev, attr);
 			if (error) {
 				scsi_remove_device(sdev);
 				goto out;
@@ -470,27 +611,15 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 		}
 	}
 
- 	if (sdev->transport_classdev.class) {
- 		attrs = sdev->host->transportt->attrs;
- 		for (i = 0; attrs[i]; i++) {
- 			error = class_device_create_file(&sdev->transport_classdev,
- 							 attrs[i]);
- 			if (error) {
- 				scsi_remove_device(sdev);
-				goto out;
-			}
- 		}
- 	}
-
+	transport_add_device(&sdev->sdev_gendev);
  out:
 	return error;
 
- clean_device2:
-	class_device_del(&sdev->sdev_classdev);
  clean_device:
 	scsi_device_set_state(sdev, SDEV_CANCEL);
 
 	device_del(&sdev->sdev_gendev);
+	transport_destroy_device(&sdev->sdev_gendev);
 	put_device(&sdev->sdev_gendev);
 
 	return error;
@@ -502,20 +631,69 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
  **/
 void scsi_remove_device(struct scsi_device *sdev)
 {
+	struct Scsi_Host *shost = sdev->host;
+
+	down(&shost->scan_mutex);
 	if (scsi_device_set_state(sdev, SDEV_CANCEL) != 0)
-		return;
+		goto out;
 
 	class_device_unregister(&sdev->sdev_classdev);
-	if (sdev->transport_classdev.class)
-		class_device_unregister(&sdev->transport_classdev);
 	device_del(&sdev->sdev_gendev);
 	scsi_device_set_state(sdev, SDEV_DEL);
 	if (sdev->host->hostt->slave_destroy)
 		sdev->host->hostt->slave_destroy(sdev);
-	if (sdev->host->transportt->cleanup)
-		sdev->host->transportt->cleanup(sdev);
+	transport_unregister_device(&sdev->sdev_gendev);
 	put_device(&sdev->sdev_gendev);
+out:
+	up(&shost->scan_mutex);
 }
+EXPORT_SYMBOL(scsi_remove_device);
+
+void __scsi_remove_target(struct scsi_target *starget)
+{
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	unsigned long flags;
+	struct scsi_device *sdev, *tmp;
+
+	spin_lock_irqsave(shost->host_lock, flags);
+	starget->reap_ref++;
+	list_for_each_entry_safe(sdev, tmp, &shost->__devices, siblings) {
+		if (sdev->channel != starget->channel ||
+		    sdev->id != starget->id)
+			continue;
+		spin_unlock_irqrestore(shost->host_lock, flags);
+		scsi_remove_device(sdev);
+		spin_lock_irqsave(shost->host_lock, flags);
+	}
+	spin_unlock_irqrestore(shost->host_lock, flags);
+	scsi_target_reap(starget);
+}
+
+/**
+ * scsi_remove_target - try to remove a target and all its devices
+ * @dev: generic starget or parent of generic stargets to be removed
+ *
+ * Note: This is slightly racy.  It is possible that if the user
+ * requests the addition of another device then the target won't be
+ * removed.
+ */
+void scsi_remove_target(struct device *dev)
+{
+	struct device *rdev, *idev, *next;
+
+	if (scsi_is_target_device(dev)) {
+		__scsi_remove_target(to_scsi_target(dev));
+		return;
+	}
+
+	rdev = get_device(dev);
+	list_for_each_entry_safe(idev, next, &dev->children, node) {
+		if (scsi_is_target_device(idev))
+			__scsi_remove_target(to_scsi_target(idev));
+	}
+	put_device(rdev);
+}
+EXPORT_SYMBOL(scsi_remove_target);
 
 int scsi_register_driver(struct device_driver *drv)
 {
@@ -523,6 +701,7 @@ int scsi_register_driver(struct device_driver *drv)
 
 	return driver_register(drv);
 }
+EXPORT_SYMBOL(scsi_register_driver);
 
 int scsi_register_interface(struct class_interface *intf)
 {
@@ -530,6 +709,7 @@ int scsi_register_interface(struct class_interface *intf)
 
 	return class_interface_register(intf);
 }
+EXPORT_SYMBOL(scsi_register_interface);
 
 
 static struct class_device_attribute *class_attr_overridden(
@@ -597,9 +777,43 @@ int scsi_sysfs_add_host(struct Scsi_Host *shost)
 		}
 	}
 
+	transport_register_device(&shost->shost_gendev);
 	return 0;
 }
 
+void scsi_sysfs_device_initialize(struct scsi_device *sdev)
+{
+	unsigned long flags;
+	struct Scsi_Host *shost = sdev->host;
+	struct scsi_target  *starget = sdev->sdev_target;
+
+	device_initialize(&sdev->sdev_gendev);
+	sdev->sdev_gendev.bus = &scsi_bus_type;
+	sdev->sdev_gendev.release = scsi_device_dev_release;
+	sprintf(sdev->sdev_gendev.bus_id,"%d:%d:%d:%d",
+		sdev->host->host_no, sdev->channel, sdev->id,
+		sdev->lun);
+	
+	class_device_initialize(&sdev->sdev_classdev);
+	sdev->sdev_classdev.dev = &sdev->sdev_gendev;
+	sdev->sdev_classdev.class = &sdev_class;
+	snprintf(sdev->sdev_classdev.class_id, BUS_ID_SIZE,
+		 "%d:%d:%d:%d", sdev->host->host_no,
+		 sdev->channel, sdev->id, sdev->lun);
+	sdev->scsi_level = SCSI_2;
+	transport_setup_device(&sdev->sdev_gendev);
+	spin_lock_irqsave(shost->host_lock, flags);
+	list_add_tail(&sdev->same_target_siblings, &starget->devices);
+	list_add_tail(&sdev->siblings, &shost->__devices);
+	spin_unlock_irqrestore(shost->host_lock, flags);
+}
+
+int scsi_is_sdev_device(const struct device *dev)
+{
+	return dev->release == scsi_device_dev_release;
+}
+EXPORT_SYMBOL(scsi_is_sdev_device);
+
 /* A blank transport template that is used in drivers that don't
  * yet implement Transport Attributes */
-struct scsi_transport_template blank_transport_template = { 0, };
+struct scsi_transport_template blank_transport_template = { { { {NULL, }, }, }, };

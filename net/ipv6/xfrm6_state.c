@@ -16,7 +16,7 @@
 #include <linux/ipsec.h>
 #include <net/ipv6.h>
 
-extern struct xfrm_state_afinfo xfrm6_state_afinfo;
+static struct xfrm_state_afinfo xfrm6_state_afinfo;
 
 static void
 __xfrm6_init_tempsel(struct xfrm_state *x, struct flowi *fl,
@@ -27,9 +27,9 @@ __xfrm6_init_tempsel(struct xfrm_state *x, struct flowi *fl,
 	 * to current session. */
 	ipv6_addr_copy((struct in6_addr *)&x->sel.daddr, &fl->fl6_dst);
 	ipv6_addr_copy((struct in6_addr *)&x->sel.saddr, &fl->fl6_src);
-	x->sel.dport = fl->fl_ip_dport;
+	x->sel.dport = xfrm_flowi_dport(fl);
 	x->sel.dport_mask = ~0;
-	x->sel.sport = fl->fl_ip_sport;
+	x->sel.sport = xfrm_flowi_sport(fl);
 	x->sel.sport_mask = ~0;
 	x->sel.prefixlen_d = 128;
 	x->sel.prefixlen_s = 128;
@@ -55,7 +55,7 @@ __xfrm6_state_lookup(xfrm_address_t *daddr, u32 spi, u8 proto)
 	list_for_each_entry(x, xfrm6_state_afinfo.state_byspi+h, byspi) {
 		if (x->props.family == AF_INET6 &&
 		    spi == x->id.spi &&
-		    !ipv6_addr_cmp((struct in6_addr *)daddr, (struct in6_addr *)x->id.daddr.a6) &&
+		    ipv6_addr_equal((struct in6_addr *)daddr, (struct in6_addr *)x->id.daddr.a6) &&
 		    proto == x->id.proto) {
 			xfrm_state_hold(x);
 			return x;
@@ -76,23 +76,18 @@ __xfrm6_find_acq(u8 mode, u32 reqid, u8 proto,
 
 	list_for_each_entry(x, xfrm6_state_afinfo.state_bydst+h, bydst) {
 		if (x->props.family == AF_INET6 &&
-		    !ipv6_addr_cmp((struct in6_addr *)daddr, (struct in6_addr *)x->id.daddr.a6) &&
+		    ipv6_addr_equal((struct in6_addr *)daddr, (struct in6_addr *)x->id.daddr.a6) &&
 		    mode == x->props.mode &&
 		    proto == x->id.proto &&
-		    !ipv6_addr_cmp((struct in6_addr *)saddr, (struct in6_addr *)x->props.saddr.a6) &&
+		    ipv6_addr_equal((struct in6_addr *)saddr, (struct in6_addr *)x->props.saddr.a6) &&
 		    reqid == x->props.reqid &&
-		    x->km.state == XFRM_STATE_ACQ) {
-			    if (!x0)
-				    x0 = x;
-			    if (x->id.spi)
-				    continue;
+		    x->km.state == XFRM_STATE_ACQ &&
+		    !x->id.spi) {
 			    x0 = x;
 			    break;
 		    }
 	}
-	if (x0) {
-		xfrm_state_hold(x0);
-	} else if (create && (x0 = xfrm_state_alloc()) != NULL) {
+	if (!x0 && create && (x0 = xfrm_state_alloc()) != NULL) {
 		ipv6_addr_copy((struct in6_addr *)x0->sel.daddr.a6,
 			       (struct in6_addr *)daddr);
 		ipv6_addr_copy((struct in6_addr *)x0->sel.saddr.a6,
@@ -110,11 +105,14 @@ __xfrm6_find_acq(u8 mode, u32 reqid, u8 proto,
 		x0->props.reqid = reqid;
 		x0->lft.hard_add_expires_seconds = XFRM_ACQ_EXPIRES;
 		xfrm_state_hold(x0);
-		mod_timer(&x0->timer, jiffies + XFRM_ACQ_EXPIRES*HZ);
+		x0->timer.expires = jiffies + XFRM_ACQ_EXPIRES*HZ;
+		add_timer(&x0->timer);
 		xfrm_state_hold(x0);
 		list_add_tail(&x0->bydst, xfrm6_state_afinfo.state_bydst+h);
 		wake_up(&km_waitq);
 	}
+	if (x0)
+		xfrm_state_hold(x0);
 	return x0;
 }
 
@@ -131,7 +129,7 @@ void __init xfrm6_state_init(void)
 	xfrm_state_register_afinfo(&xfrm6_state_afinfo);
 }
 
-void __exit xfrm6_state_fini(void)
+void xfrm6_state_fini(void)
 {
 	xfrm_state_unregister_afinfo(&xfrm6_state_afinfo);
 }

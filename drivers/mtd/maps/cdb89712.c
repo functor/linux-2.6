@@ -1,7 +1,7 @@
 /*
  * Flash on Cirrus CDB89712
  *
- * $Id: cdb89712.c,v 1.7 2003/05/21 12:45:18 dwmw2 Exp $
+ * $Id: cdb89712.c,v 1.10 2004/11/04 13:24:14 gleixner Exp $
  */
 
 #include <linux/module.h>
@@ -23,7 +23,7 @@ static struct mtd_info *flash_mtd;
 struct map_info cdb89712_flash_map = {
 	.name = "flash",
 	.size = FLASH_SIZE,
-	.buswidth = FLASH_WIDTH,
+	.bankwidth = FLASH_WIDTH,
 	.phys = FLASH_START,
 };
 
@@ -44,7 +44,7 @@ static int __init init_cdb89712_flash (void)
 		goto out;
 	}
 	
-	cdb89712_flash_map.virt = (unsigned long)ioremap(FLASH_START, FLASH_SIZE);
+	cdb89712_flash_map.virt = ioremap(FLASH_START, FLASH_SIZE);
 	if (!cdb89712_flash_map.virt) {
 		printk(KERN_NOTICE "Failed to ioremap Cdb89712 FLASH space\n");
 		err = -EIO;
@@ -93,7 +93,7 @@ static struct mtd_info *sram_mtd;
 struct map_info cdb89712_sram_map = {
 	.name = "SRAM",
 	.size = SRAM_SIZE,
-	.buswidth = SRAM_WIDTH,
+	.bankwidth = SRAM_WIDTH,
 	.phys = SRAM_START,
 };
 
@@ -114,7 +114,7 @@ static int __init init_cdb89712_sram (void)
 		goto out;
 	}
 	
-	cdb89712_sram_map.virt = (unsigned long)ioremap(SRAM_START, SRAM_SIZE);
+	cdb89712_sram_map.virt = ioremap(SRAM_START, SRAM_SIZE);
 	if (!cdb89712_sram_map.virt) {
 		printk(KERN_NOTICE "Failed to ioremap Cdb89712 SRAM space\n");
 		err = -EIO;
@@ -161,7 +161,7 @@ static struct mtd_info *bootrom_mtd;
 struct map_info cdb89712_bootrom_map = {
 	.name = "BootROM",
 	.size = BOOTROM_SIZE,
-	.buswidth = BOOTROM_WIDTH,
+	.bankwidth = BOOTROM_WIDTH,
 	.phys = BOOTROM_START,
 };
 
@@ -182,7 +182,7 @@ static int __init init_cdb89712_bootrom (void)
 		goto out;
 	}
 	
-	cdb89712_bootrom_map.virt = (unsigned long)ioremap(BOOTROM_START, BOOTROM_SIZE);
+	cdb89712_bootrom_map.virt = ioremap(BOOTROM_START, BOOTROM_SIZE);
 	if (!cdb89712_bootrom_map.virt) {
 		printk(KERN_NOTICE "Failed to ioremap Cdb89712 BootROM space\n");
 		err = -EIO;

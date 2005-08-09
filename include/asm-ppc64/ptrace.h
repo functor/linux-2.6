@@ -60,7 +60,14 @@ struct pt_regs32 {
 	PPC_REG_32 result; 	/* Result of a system call */
 };
 
+#define instruction_pointer(regs) ((regs)->nip)
+#ifdef CONFIG_SMP
+extern unsigned long profile_pc(struct pt_regs *regs);
+#else
+#define profile_pc(regs) instruction_pointer(regs)
 #endif
+
+#endif /* __ASSEMBLY__ */
 
 #define STACK_FRAME_OVERHEAD	112	/* size of minimum stack frame */
 
@@ -68,8 +75,19 @@ struct pt_regs32 {
 #define __SIGNAL_FRAMESIZE	128
 #define __SIGNAL_FRAMESIZE32	64
 
-#define instruction_pointer(regs) ((regs)->nip)
 #define user_mode(regs) ((((regs)->msr) >> MSR_PR_LG) & 0x1)
+
+#define force_successful_syscall_return()   \
+		(current_thread_info()->syscall_noerror = 1)
+
+/*
+ * We use the least-significant bit of the trap field to indicate
+ * whether we have saved the full set of registers, or only a
+ * partial set.  A 1 there means the partial set.
+ */
+#define FULL_REGS(regs)		(((regs)->trap & 1) == 0)
+#define TRAP(regs)		((regs)->trap & ~0xF)
+#define CHECK_FULL_REGS(regs)	BUG_ON(regs->trap & 1)
 
 /*
  * Offsets used by 'ptrace' system call interface.
@@ -124,7 +142,7 @@ struct pt_regs32 {
 /* Kernel and userspace will both use this PT_FPSCR value.  32-bit apps will have
  * visibility to the asm-ppc/ptrace.h header instead of this one.
  */
-#define PT_FPSCR (PT_FPR0 + 32 + 1)	  /* each FP reg occupies 1 slot in 64-bit space */
+#define PT_FPSCR (PT_FPR0 + 32)	  /* each FP reg occupies 1 slot in 64-bit space */
 
 #ifdef __KERNEL__
 #define PT_FPSCR32 (PT_FPR0 + 2*32 + 1)	  /* each FP reg occupies 2 32-bit userspace slots */

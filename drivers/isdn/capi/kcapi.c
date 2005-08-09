@@ -24,6 +24,8 @@
 #include <linux/capi.h>
 #include <linux/kernelcapi.h>
 #include <linux/init.h>
+#include <linux/moduleparam.h>
+#include <linux/delay.h>
 #include <asm/uaccess.h>
 #include <linux/isdn/capicmd.h>
 #include <linux/isdn/capiutil.h>
@@ -40,7 +42,7 @@ static int showcapimsgs = 0;
 MODULE_DESCRIPTION("CAPI4Linux: kernel CAPI layer");
 MODULE_AUTHOR("Carsten Paeth");
 MODULE_LICENSE("GPL");
-MODULE_PARM(showcapimsgs, "i");
+module_param(showcapimsgs, uint, 0);
 
 /* ------------------------------------------------------------- */
 
@@ -61,9 +63,9 @@ static char capi_manufakturer[64] = "AVM Berlin";
 #define NCCI2CTRL(ncci)    (((ncci) >> 24) & 0x7f)
 
 LIST_HEAD(capi_drivers);
-rwlock_t capi_drivers_list_lock = RW_LOCK_UNLOCKED;
+DEFINE_RWLOCK(capi_drivers_list_lock);
 
-static rwlock_t application_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(application_lock);
 static DECLARE_MUTEX(controller_sem);
 
 struct capi20_appl *capi_applications[CAPI_MAXAPPL];
@@ -148,7 +150,10 @@ static void register_appl(struct capi_ctr *card, u16 applid, capi_register_param
 {
 	card = capi_ctr_get(card);
 
-	card->register_appl(card, applid, rparam);
+	if (card)
+		card->register_appl(card, applid, rparam);
+	else
+		printk(KERN_WARNING "%s: cannot get card resources\n", __FUNCTION__);
 }
 
 
@@ -171,10 +176,15 @@ static void notify_up(u32 contr)
 	if (showcapimsgs & 1) {
 	        printk(KERN_DEBUG "kcapi: notify up contr %d\n", contr);
 	}
-
+	if (!card) {
+		printk(KERN_WARNING "%s: invalid contr %d\n", __FUNCTION__, contr);
+		return;
+	}
 	for (applid = 1; applid <= CAPI_MAXAPPL; applid++) {
 		ap = get_capi_appl_by_nr(applid);
-		if (ap && ap->callback && !ap->release_in_progress)
+		if (!ap || ap->release_in_progress) continue;
+		register_appl(card, applid, &ap->rparam);
+		if (ap->callback && !ap->release_in_progress)
 			ap->callback(KCI_CONTRUP, contr, &card->profile);
 	}
 }
@@ -193,7 +203,7 @@ static void notify_down(u32 contr)
 	for (applid = 1; applid <= CAPI_MAXAPPL; applid++) {
 		ap = get_capi_appl_by_nr(applid);
 		if (ap && ap->callback && !ap->release_in_progress)
-			ap->callback(KCI_CONTRDOWN, contr, 0);
+			ap->callback(KCI_CONTRDOWN, contr, NULL);
 	}
 }
 
@@ -317,18 +327,7 @@ EXPORT_SYMBOL(capi_ctr_handle_message);
 
 void capi_ctr_ready(struct capi_ctr * card)
 {
-	u16 appl;
-	struct capi20_appl *ap;
-
 	card->cardstate = CARD_RUNNING;
-
-	down(&controller_sem);
-	for (appl = 1; appl <= CAPI_MAXAPPL; appl++) {
-		ap = get_capi_appl_by_nr(appl);
-		if (!ap || ap->release_in_progress) continue;
-		register_appl(card, appl, &ap->rparam);
-	}
-	up(&controller_sem);
 
         printk(KERN_NOTICE "kcapi: card %d \"%s\" ready.\n",
 	       card->cnr, card->name);
@@ -421,7 +420,7 @@ attach_capi_ctr(struct capi_ctr *card)
 	card->traceflag = showcapimsgs;
 
 	sprintf(card->procfn, "capi/controllers/%d", card->cnr);
-	card->procent = create_proc_entry(card->procfn, 0, 0);
+	card->procent = create_proc_entry(card->procfn, 0, NULL);
 	if (card->procent) {
 	   card->procent->read_proc = 
 		(int (*)(char *,char **,off_t,int,int *,void *))
@@ -445,8 +444,8 @@ int detach_capi_ctr(struct capi_ctr *card)
 	ncards--;
 
 	if (card->procent) {
-	   remove_proc_entry(card->procfn, 0);
-	   card->procent = 0;
+	   remove_proc_entry(card->procfn, NULL);
+	   card->procent = NULL;
 	}
 	capi_cards[card->cnr - 1] = NULL;
 	printk(KERN_NOTICE "kcapi: Controller %d: %s unregistered\n",
@@ -524,7 +523,7 @@ u16 capi20_register(struct capi20_appl *ap)
 	ap->nrecvdatapkt = 0;
 	ap->nsentctlpkt = 0;
 	ap->nsentdatapkt = 0;
-	ap->callback = 0;
+	ap->callback = NULL;
 	init_MUTEX(&ap->recv_sem);
 	skb_queue_head_init(&ap->recv_queue);
 	INIT_WORK(&ap->recv_work, recv_handler, (void *)ap);
@@ -711,14 +710,14 @@ u16 capi20_get_profile(u32 contr, struct capi_profile *profp)
 EXPORT_SYMBOL(capi20_get_profile);
 
 #ifdef CONFIG_AVMB1_COMPAT
-static int old_capi_manufacturer(unsigned int cmd, void *data)
+static int old_capi_manufacturer(unsigned int cmd, void __user *data)
 {
 	avmb1_loadandconfigdef ldef;
 	avmb1_extcarddef cdef;
 	avmb1_resetdef rdef;
 	capicardparams cparams;
 	struct capi_ctr *card;
-	struct capi_driver *driver = 0;
+	struct capi_driver *driver = NULL;
 	capiloaddata ldata;
 	struct list_head *l;
 	unsigned long flags;
@@ -728,12 +727,12 @@ static int old_capi_manufacturer(unsigned int cmd, void *data)
 	case AVMB1_ADDCARD:
 	case AVMB1_ADDCARD_WITH_TYPE:
 		if (cmd == AVMB1_ADDCARD) {
-		   if ((retval = copy_from_user((void *) &cdef, data,
+		   if ((retval = copy_from_user(&cdef, data,
 					    sizeof(avmb1_carddef))))
 			   return retval;
 		   cdef.cardtype = AVM_CARDTYPE_B1;
 		} else {
-		   if ((retval = copy_from_user((void *) &cdef, data,
+		   if ((retval = copy_from_user(&cdef, data,
 					    sizeof(avmb1_extcarddef))))
 			   return retval;
 		}
@@ -758,7 +757,7 @@ static int old_capi_manufacturer(unsigned int cmd, void *data)
 				}
 				break;
 			default:
-				driver = 0;
+				driver = NULL;
 				break;
 		}
 		if (!driver) {
@@ -780,13 +779,13 @@ static int old_capi_manufacturer(unsigned int cmd, void *data)
 	case AVMB1_LOAD_AND_CONFIG:
 
 		if (cmd == AVMB1_LOAD) {
-			if (copy_from_user((void *)&ldef, data,
+			if (copy_from_user(&ldef, data,
 					   sizeof(avmb1_loaddef)))
 				return -EFAULT;
 			ldef.t4config.len = 0;
-			ldef.t4config.data = 0;
+			ldef.t4config.data = NULL;
 		} else {
-			if (copy_from_user((void *)&ldef, data,
+			if (copy_from_user(&ldef, data,
 					   sizeof(avmb1_loadandconfigdef)))
 				return -EFAULT;
 		}
@@ -831,8 +830,7 @@ static int old_capi_manufacturer(unsigned int cmd, void *data)
 
 		while (card->cardstate != CARD_RUNNING) {
 
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(HZ/10);	/* 0.1 sec */
+			msleep_interruptible(100);	/* 0.1 sec */
 
 			if (signal_pending(current)) {
 				capi_ctr_put(card);
@@ -843,7 +841,7 @@ static int old_capi_manufacturer(unsigned int cmd, void *data)
 		return 0;
 
 	case AVMB1_RESETCARD:
-		if (copy_from_user((void *)&rdef, data, sizeof(avmb1_resetdef)))
+		if (copy_from_user(&rdef, data, sizeof(avmb1_resetdef)))
 			return -EFAULT;
 		card = get_capi_ctr_by_nr(rdef.contr);
 		if (!card)
@@ -856,8 +854,7 @@ static int old_capi_manufacturer(unsigned int cmd, void *data)
 
 		while (card->cardstate > CARD_DETECTED) {
 
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(HZ/10);	/* 0.1 sec */
+			msleep_interruptible(100);	/* 0.1 sec */
 
 			if (signal_pending(current))
 				return -EINTR;
@@ -869,7 +866,7 @@ static int old_capi_manufacturer(unsigned int cmd, void *data)
 }
 #endif
 
-int capi20_manufacturer(unsigned int cmd, void *data)
+int capi20_manufacturer(unsigned int cmd, void __user *data)
 {
         struct capi_ctr *card;
 
@@ -886,7 +883,7 @@ int capi20_manufacturer(unsigned int cmd, void *data)
 	{
 		kcapi_flagdef fdef;
 
-		if (copy_from_user((void *)&fdef, data, sizeof(kcapi_flagdef)))
+		if (copy_from_user(&fdef, data, sizeof(kcapi_flagdef)))
 			return -EFAULT;
 
 		card = get_capi_ctr_by_nr(fdef.contr);
@@ -901,13 +898,12 @@ int capi20_manufacturer(unsigned int cmd, void *data)
 	case KCAPI_CMD_ADDCARD:
 	{
 		struct list_head *l;
-		struct capi_driver *driver = 0;
+		struct capi_driver *driver = NULL;
 		capicardparams cparams;
 		kcapi_carddef cdef;
 		int retval;
 
-		if ((retval = copy_from_user((void *) &cdef, data,
-							sizeof(cdef))))
+		if ((retval = copy_from_user(&cdef, data, sizeof(cdef))))
 			return retval;
 
 		cparams.port = cdef.port;

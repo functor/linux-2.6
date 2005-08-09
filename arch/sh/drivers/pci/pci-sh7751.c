@@ -31,6 +31,9 @@
 #include "pci-sh7751.h"
 
 static unsigned int pci_probe = PCI_PROBE_CONF1;
+extern int pci_fixup_pcic(void);
+
+void pcibios_fixup_irqs(void) __attribute__ ((weak));
 
 /*
  * Direct access to PCI hardware...
@@ -74,7 +77,8 @@ static int sh7751_pci_read(struct pci_bus *bus, unsigned int devfn,
 }
 
 /* 
- * Since SH7751 only does 32bit access we'll have to do a read,mask,write operation.  
+ * Since SH7751 only does 32bit access we'll have to do a read,
+ * mask,write operation.
  * We'll allow an odd byte offset, though it should be illegal.
  */ 
 static int sh7751_pci_write(struct pci_bus *bus, unsigned int devfn,
@@ -165,7 +169,7 @@ static void __init pci_fixup_ide_bases(struct pci_dev *d)
 	 */
 	if ((d->class >> 8) != PCI_CLASS_STORAGE_IDE)
 		return;
-	pr_debug("PCI: IDE base address fixup for %s\n", d->slot_name);
+	pr_debug("PCI: IDE base address fixup for %s\n", pci_name(d));
 	for(i=0; i<4; i++) {
 		struct resource *r = &d->resource[i];
 		if ((r->start & ~0x80) == 0x374) {
@@ -175,12 +179,7 @@ static void __init pci_fixup_ide_bases(struct pci_dev *d)
 	}
 }
 
-
-/* Add future fixups here... */
-struct pci_fixup pcibios_fixups[] = {
-	{ PCI_FIXUP_HEADER,	PCI_ANY_ID,	PCI_ANY_ID,	pci_fixup_ide_bases },
-	{ 0 }
-};
+DECLARE_PCI_FIXUP_HEADER(PCI_ANY_ID, PCI_ANY_ID, pci_fixup_ide_bases);
 
 /*
  *  Called after each bus is probed, but before its children
@@ -258,22 +257,22 @@ int __init sh7751_pcic_init(struct sh7751_pci_address_map *map)
 	outl(0, PCI_REG(SH7751_PCICLKR));
 	/* Clear Powerdown IRQ's (not done in reset) */
 	word = SH7751_PCIPINT_D3 | SH7751_PCIPINT_D0;
-	outl(word, PCI_REG(SH7751_PCICLKR));
+	outl(word, PCI_REG(SH7751_PCIPINT));
 
 	/*
-	 * XXX: This code is unused for the SnapGear boards as it is done in
-	 * the bootloader and doing it here means the MAC addresses loaded by
-	 * the bootloader get lost.
+	 * This code is unused for some boards as it is done in the
+	 * bootloader and doing it here means the MAC addresses loaded
+	 * by the bootloader get lost.
 	 */
-#ifndef CONFIG_SH_SECUREEDGE5410
-	/* toggle PCI reset pin */
-	word = SH7751_PCICR_PREFIX | SH7751_PCICR_PRST;
-	outl(word,PCI_REG(SH7751_PCICR));    
-	/* Wait for a long time... not 1 sec. but long enough */
-	mdelay(100);
-	word = SH7751_PCICR_PREFIX;
-	outl(word,PCI_REG(SH7751_PCICR)); 
-#endif
+	if (!(map->flags & SH7751_PCIC_NO_RESET)) {
+		/* toggle PCI reset pin */
+		word = SH7751_PCICR_PREFIX | SH7751_PCICR_PRST;
+		outl(word,PCI_REG(SH7751_PCICR));
+		/* Wait for a long time... not 1 sec. but long enough */
+		mdelay(100);
+		word = SH7751_PCICR_PREFIX;
+		outl(word,PCI_REG(SH7751_PCICR));
+	}
 	
 	/* set the command/status bits to:
 	 * Wait Cycle Control + Parity Enable + Bus Master +
@@ -363,7 +362,11 @@ int __init sh7751_pcic_init(struct sh7751_pci_address_map *map)
 	 * TODO: add support for the internal error interrupts and
 	 * DMA interrupts...
 	 */
-	 
+
+#ifdef CONFIG_SH_RTS7751R2D
+	pci_fixup_pcic();
+#endif
+
 	/* SH7751 init done, set central function init complete */
 	/* use round robin mode to stop a device starving/overruning */
 	word = SH7751_PCICR_PREFIX | SH7751_PCICR_CFIN | SH7751_PCICR_ARBM;
@@ -398,11 +401,11 @@ static int sh7751_pci_lookup_irq(struct pci_dev *dev, u8 slot, u8 pin)
 	/* now lookup the actual IRQ on a platform specific basis (pci-'platform'.c) */
 	irq = pcibios_map_platform_irq(slot,pin);
 	if( irq < 0 ) {
-		pr_debug("PCI: Error mapping IRQ on device %s\n", dev->slot_name);
+		pr_debug("PCI: Error mapping IRQ on device %s\n", pci_name(dev));
 		return irq;
 	}
-	
-	pr_debug("Setting IRQ for slot %s to %d\n", dev->slot_name, irq);
+
+	pr_debug("Setting IRQ for slot %s to %d\n", pci_name(dev), irq);
 
 	return irq;
 }

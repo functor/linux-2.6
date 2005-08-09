@@ -7,7 +7,7 @@
  *
  * Version:	@(#)ip.h	1.0.2	05/07/93
  *
- * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
+ * Authors:	Ross Biro
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
  *		Alan Cox, <gw4pts@gw4pts.ampr.org>
  *
@@ -32,12 +32,9 @@
 #include <linux/in_route.h>
 #include <net/route.h>
 #include <net/arp.h>
-
-#ifndef _SNMP_H
 #include <net/snmp.h>
-#endif
 
-#include <net/sock.h>	/* struct sock */
+struct sock;
 
 struct inet_skb_parm
 {
@@ -112,6 +109,9 @@ extern ssize_t		ip_append_page(struct sock *sk, struct page *page,
 extern int		ip_push_pending_frames(struct sock *sk);
 extern void		ip_flush_pending_frames(struct sock *sk);
 
+/* datagram.c */
+extern int		ip4_datagram_connect(struct sock *sk, 
+					     struct sockaddr *uaddr, int addr_len);
 
 /*
  *	Map a multicast IP onto multicast MAC for type Token Ring.
@@ -131,10 +131,10 @@ static inline void ip_tr_mc_map(u32 addr, char *buf)
 }
 
 struct ip_reply_arg {
-	struct iovec iov[1];   
-	u32 	     csum; 
-	int	     csumoffset; /* u16 offset of csum in iov[0].iov_base */
-				 /* -1 if not needed */ 
+	struct kvec iov[1];   
+	u32 	    csum; 
+	int	    csumoffset; /* u16 offset of csum in iov[0].iov_base */
+				/* -1 if not needed */ 
 }; 
 
 void ip_send_reply(struct sock *sk, struct sk_buff *skb, struct ip_reply_arg *arg,
@@ -150,7 +150,7 @@ struct ipv4_config
 };
 
 extern struct ipv4_config ipv4_config;
-DECLARE_SNMP_STAT(struct ip_mib, ip_statistics);
+DECLARE_SNMP_STAT(struct ipstats_mib, ip_statistics);
 #define IP_INC_STATS(field)		SNMP_INC_STATS(ip_statistics, field)
 #define IP_INC_STATS_BH(field)		SNMP_INC_STATS_BH(ip_statistics, field)
 #define IP_INC_STATS_USER(field) 	SNMP_INC_STATS_USER(ip_statistics, field)
@@ -163,6 +163,7 @@ DECLARE_SNMP_STAT(struct linux_mib, net_statistics);
 
 extern int sysctl_local_port_range[2];
 extern int sysctl_ip_default_ttl;
+extern int sysctl_ip_nonlocal_bind;
 
 #ifdef CONFIG_INET
 /* The function in 2.2 was invalid, producing wrong result for
@@ -229,6 +230,39 @@ static inline void ip_eth_mc_map(u32 addr, char *buf)
 	buf[3]=addr&0x7F;
 }
 
+/*
+ *	Map a multicast IP onto multicast MAC for type IP-over-InfiniBand.
+ *	Leave P_Key as 0 to be filled in by driver.
+ */
+
+static inline void ip_ib_mc_map(u32 addr, char *buf)
+{
+	buf[0]  = 0;		/* Reserved */
+	buf[1]  = 0xff;		/* Multicast QPN */
+	buf[2]  = 0xff;
+	buf[3]  = 0xff;
+	addr    = ntohl(addr);
+	buf[4]  = 0xff;
+	buf[5]  = 0x12;		/* link local scope */
+	buf[6]  = 0x40;		/* IPv4 signature */
+	buf[7]  = 0x1b;
+	buf[8]  = 0;		/* P_Key */
+	buf[9]  = 0;
+	buf[10] = 0;
+	buf[11] = 0;
+	buf[12] = 0;
+	buf[13] = 0;
+	buf[14] = 0;
+	buf[15] = 0;
+	buf[19] = addr & 0xff;
+	addr  >>= 8;
+	buf[18] = addr & 0xff;
+	addr  >>= 8;
+	buf[17] = addr & 0xff;
+	addr  >>= 8;
+	buf[16] = addr & 0x0f;
+}
+
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 #include <linux/ipv6.h>
 #endif
@@ -253,8 +287,20 @@ extern int	ip_call_ra_chain(struct sk_buff *skb);
 /*
  *	Functions provided by ip_fragment.o
  */
- 
-struct sk_buff *ip_defrag(struct sk_buff *skb);
+
+enum ip_defrag_users
+{
+	IP_DEFRAG_LOCAL_DELIVER,
+	IP_DEFRAG_CALL_RA_CHAIN,
+	IP_DEFRAG_CONNTRACK_IN,
+	IP_DEFRAG_CONNTRACK_OUT,
+	IP_DEFRAG_NAT_OUT,
+	IP_DEFRAG_VS_IN,
+	IP_DEFRAG_VS_OUT,
+	IP_DEFRAG_VS_FWD
+};
+
+struct sk_buff *ip_defrag(struct sk_buff *skb, u32 user);
 extern int ip_frag_nqueues;
 extern atomic_t ip_frag_mem;
 
@@ -284,8 +330,8 @@ extern int ip_options_rcv_srr(struct sk_buff *skb);
 
 extern void	ip_cmsg_recv(struct msghdr *msg, struct sk_buff *skb);
 extern int	ip_cmsg_send(struct msghdr *msg, struct ipcm_cookie *ipc);
-extern int	ip_setsockopt(struct sock *sk, int level, int optname, char *optval, int optlen);
-extern int	ip_getsockopt(struct sock *sk, int level, int optname, char *optval, int *optlen);
+extern int	ip_setsockopt(struct sock *sk, int level, int optname, char __user *optval, int optlen);
+extern int	ip_getsockopt(struct sock *sk, int level, int optname, char __user *optval, int __user *optlen);
 extern int	ip_ra_control(struct sock *sk, unsigned char on, void (*destructor)(struct sock *));
 
 extern int 	ip_recv_error(struct sock *sk, struct msghdr *msg, int len);
@@ -294,17 +340,15 @@ extern void	ip_icmp_error(struct sock *sk, struct sk_buff *skb, int err,
 extern void	ip_local_error(struct sock *sk, int err, u32 daddr, u16 dport,
 			       u32 info);
 
-extern int ipv4_proc_init(void);
-
 /* sysctl helpers - any sysctl which holds a value that ends up being
  * fed into the routing cache should use these handlers.
  */
 int ipv4_doint_and_flush(ctl_table *ctl, int write,
-			 struct file* filp, void *buffer,
-			 size_t *lenp);
-int ipv4_doint_and_flush_strategy(ctl_table *table, int *name, int nlen,
-				  void *oldval, size_t *oldlenp,
-				  void *newval, size_t newlen, 
+			 struct file* filp, void __user *buffer,
+			 size_t *lenp, loff_t *ppos);
+int ipv4_doint_and_flush_strategy(ctl_table *table, int __user *name, int nlen,
+				  void __user *oldval, size_t __user *oldlenp,
+				  void __user *newval, size_t newlen, 
 				  void **context);
 
 #endif	/* _IP_H */

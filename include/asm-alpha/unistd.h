@@ -373,8 +373,12 @@
 #define __NR_mq_timedreceive		435
 #define __NR_mq_notify			436
 #define __NR_mq_getsetattr		437
+#define __NR_waitid			438
+#define __NR_add_key			439
+#define __NR_request_key		440
+#define __NR_keyctl			441
 
-#define NR_SYSCALLS			438
+#define NR_SYSCALLS			442
 
 #if defined(__GNUC__)
 
@@ -558,6 +562,19 @@ type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4,type5 arg5, type6 arg6)\
 
 #endif /* __LIBRARY__ && __GNUC__ */
 
+#ifdef __KERNEL__
+#define __ARCH_WANT_IPC_PARSE_VERSION
+#define __ARCH_WANT_OLD_READDIR
+#define __ARCH_WANT_STAT64
+#define __ARCH_WANT_SYS_GETHOSTNAME
+#define __ARCH_WANT_SYS_SOCKETCALL
+#define __ARCH_WANT_SYS_FADVISE64
+#define __ARCH_WANT_SYS_GETPGRP
+#define __ARCH_WANT_SYS_OLD_GETRLIMIT
+#define __ARCH_WANT_SYS_OLDUMOUNT
+#define __ARCH_WANT_SYS_SIGPENDING
+#endif
+
 #ifdef __KERNEL_SYSCALLS__
 
 #include <linux/compiler.h>
@@ -604,7 +621,7 @@ static inline long read(int fd, char * buf, size_t nr)
 	return sys_read(fd, buf, nr);
 }
 
-extern long execve(char *, char **, char **);
+extern int execve(char *, char **, char **);
 
 static inline long setsid(void)
 {
@@ -637,6 +654,6 @@ asmlinkage long sys_rt_sigaction(int sig,
    have declarations.  If we use no prototype, then we get warnings from
    -Wstrict-prototypes.  Ho hum.  */
 
-#define cond_syscall(x)  asm(".weak\t" #x "\n" #x " = sys_ni_syscall");
+#define cond_syscall(x)  asm(".weak\t" #x "\n" #x " = sys_ni_syscall")
 
 #endif /* _ALPHA_UNISTD_H */

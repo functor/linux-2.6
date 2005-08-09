@@ -9,19 +9,29 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#include <asm/atomic.h>
+#include <linux/config.h>
+#include <linux/threads.h>
 
 /*
  * Maximum number of interrupt sources that we can handle.
  */
 #define NR_IRQS		512
 
-extern void disable_irq(unsigned int);
-extern void disable_irq_nosync(unsigned int);
-extern void enable_irq(unsigned int);
-
 /* this number is used when no interrupt has been assigned */
 #define NO_IRQ			(-1)
+
+/*
+ * These constants are used for passing information about interrupt
+ * signal polarity and level/edge sensing to the low-level PIC chip
+ * drivers.
+ */
+#define IRQ_SENSE_MASK		0x1
+#define IRQ_SENSE_LEVEL		0x1	/* interrupt on active level */
+#define IRQ_SENSE_EDGE		0x0	/* interrupt triggered by edge */
+
+#define IRQ_POLARITY_MASK	0x2
+#define IRQ_POLARITY_POSITIVE	0x2	/* high level or low->high edge */
+#define IRQ_POLARITY_NEGATIVE	0x0	/* low level or high->low edge */
 
 #define get_irq_desc(irq) (&irq_desc[(irq)])
 
@@ -44,6 +54,8 @@ static inline unsigned int virt_irq_to_real(unsigned int virt_irq)
 {
 	return virt_irq_to_real_map[virt_irq];
 }
+
+extern unsigned int real_irq_to_virt_slowpath(unsigned int real_irq);
 
 /*
  * Because many systems have two overlapping names spaces for
@@ -75,9 +87,29 @@ static __inline__ int irq_canonicalize(int irq)
 	return irq;
 }
 
+extern int distribute_irqs;
+
 struct irqaction;
 struct pt_regs;
-int handle_IRQ_event(unsigned int, struct pt_regs *, struct irqaction *);
+
+#ifdef CONFIG_IRQSTACKS
+/*
+ * Per-cpu stacks for handling hard and soft interrupts.
+ */
+extern struct thread_info *hardirq_ctx[NR_CPUS];
+extern struct thread_info *softirq_ctx[NR_CPUS];
+
+extern void irq_ctx_init(void);
+extern void call_do_softirq(struct thread_info *tp);
+extern int call_handle_IRQ_event(int irq, struct pt_regs *regs,
+			struct irqaction *action, struct thread_info *tp);
+
+#define __ARCH_HAS_DO_SOFTIRQ
+
+#else
+#define irq_ctx_init()
+
+#endif /* CONFIG_IRQSTACKS */
 
 #endif /* _ASM_IRQ_H */
 #endif /* __KERNEL__ */

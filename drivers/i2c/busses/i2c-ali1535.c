@@ -59,6 +59,7 @@
 #include <linux/kernel.h>
 #include <linux/stddef.h>
 #include <linux/sched.h>
+#include <linux/delay.h>
 #include <linux/ioport.h>
 #include <linux/i2c.h>
 #include <linux/init.h>
@@ -136,7 +137,7 @@
 
 
 static unsigned short ali1535_smba;
-DECLARE_MUTEX(i2c_ali1535_sem);
+static DECLARE_MUTEX(i2c_ali1535_sem);
 
 /* Detect whether a ALI1535 can be found, and initialize it, where necessary.
    Note the differences between kernels with the old PCI BIOS interface and
@@ -276,7 +277,7 @@ static int ali1535_transaction(struct i2c_adapter *adap)
 	/* We will always wait for a fraction of a second! */
 	timeout = 0;
 	do {
-		i2c_delay(1);
+		msleep(1);
 		temp = inb_p(SMBHSTSTS);
 	} while (((temp & ALI1535_STS_BUSY) && !(temp & ALI1535_STS_IDLE))
 		 && (timeout++ < MAX_TIMEOUT));
@@ -350,7 +351,7 @@ static s32 ali1535_access(struct i2c_adapter *adap, u16 addr,
 	for (timeout = 0;
 	     (timeout < MAX_TIMEOUT) && !(temp & ALI1535_STS_IDLE);
 	     timeout++) {
-		i2c_delay(1);
+		msleep(1);
 		temp = inb_p(SMBHSTSTS);
 	}
 	if (timeout >= MAX_TIMEOUT)
@@ -464,7 +465,7 @@ EXIT:
 }
 
 
-u32 ali1535_func(struct i2c_adapter *adapter)
+static u32 ali1535_func(struct i2c_adapter *adapter)
 {
 	return I2C_FUNC_SMBUS_QUICK | I2C_FUNC_SMBUS_BYTE |
 	    I2C_FUNC_SMBUS_BYTE_DATA | I2C_FUNC_SMBUS_WORD_DATA |
@@ -480,20 +481,17 @@ static struct i2c_algorithm smbus_algorithm = {
 
 static struct i2c_adapter ali1535_adapter = {
 	.owner		= THIS_MODULE,
-	.class          = I2C_ADAP_CLASS_SMBUS,
+	.class          = I2C_CLASS_HWMON,
 	.algo		= &smbus_algorithm,
 	.name		= "unset",
 };
 
 static struct pci_device_id ali1535_ids[] = {
-	{
-		.vendor =	PCI_VENDOR_ID_AL,
-		.device =	PCI_DEVICE_ID_AL_M7101,
-		.subvendor =	PCI_ANY_ID,
-		.subdevice =	PCI_ANY_ID,
-	},
+	{ PCI_DEVICE(PCI_VENDOR_ID_AL, PCI_DEVICE_ID_AL_M7101) },
 	{ },
 };
+
+MODULE_DEVICE_TABLE (pci, ali1535_ids);
 
 static int __devinit ali1535_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
@@ -526,7 +524,7 @@ static struct pci_driver ali1535_driver = {
 
 static int __init i2c_ali1535_init(void)
 {
-	return pci_module_init(&ali1535_driver);
+	return pci_register_driver(&ali1535_driver);
 }
 
 static void __exit i2c_ali1535_exit(void)

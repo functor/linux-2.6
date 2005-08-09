@@ -45,11 +45,13 @@ asmlinkage void ret_from_fork(void);
  */
 void default_idle(void)
 {
-	while(1) {
-		if (need_resched())
-			__asm__("stop #0x2000" : : : "cc");
-		schedule();
+	local_irq_disable();
+ 	while (!need_resched()) {
+		/* This stop will re-enable interrupts */
+ 		__asm__("stop #0x2000" : : : "cc");
+		local_irq_disable();
 	}
+	local_irq_enable();
 }
 
 void (*idle)(void) = default_idle;
@@ -63,7 +65,12 @@ void (*idle)(void) = default_idle;
 void cpu_idle(void)
 {
 	/* endless idle loop with no priority at all */
-	idle();
+	while (1) {
+		idle();
+		preempt_enable_no_resched();
+		schedule();
+		preempt_disable();
+	}
 }
 
 void machine_restart(char * __unused)
@@ -188,7 +195,7 @@ asmlinkage int m68k_clone(struct pt_regs *regs)
 	newsp = regs->d2;
 	if (!newsp)
 		newsp = rdusp();
-        return do_fork(clone_flags & ~CLONE_IDLETASK, newsp, regs, 0, NULL, NULL);
+        return do_fork(clone_flags, newsp, regs, 0, NULL, NULL);
 }
 
 int copy_thread(int nr, unsigned long clone_flags,
@@ -199,7 +206,7 @@ int copy_thread(int nr, unsigned long clone_flags,
 	struct switch_stack * childstack, *stack;
 	unsigned long stack_offset, *retp;
 
-	stack_offset = KTHREAD_SIZE - sizeof(struct pt_regs);
+	stack_offset = THREAD_SIZE - sizeof(struct pt_regs);
 	childregs = (struct pt_regs *) ((unsigned long) p->thread_info + stack_offset);
 
 	*childregs = *regs;
@@ -342,7 +349,7 @@ void dump(struct pt_regs *fp)
 			(int) current->mm->brk);
 		printk(KERN_EMERG "USER-STACK=%08x  KERNEL-STACK=%08x\n\n",
 			(int) current->mm->start_stack,
-			(int)(((unsigned long) current) + KTHREAD_SIZE));
+			(int)(((unsigned long) current) + THREAD_SIZE));
 	}
 
 	printk(KERN_EMERG "PC: %08lx\n", fp->pc);
@@ -404,12 +411,6 @@ out:
 	return error;
 }
 
-/*
- * These bracket the sleeping functions..
- */
-#define first_sched	((unsigned long) scheduling_functions_start_here)
-#define last_sched	((unsigned long) scheduling_functions_end_here)
-
 unsigned long get_wchan(struct task_struct *p)
 {
 	unsigned long fp, pc;
@@ -425,7 +426,7 @@ unsigned long get_wchan(struct task_struct *p)
 		    fp >= 8184+stack_page)
 			return 0;
 		pc = ((unsigned long *)fp)[1];
-		if (pc < first_sched || pc >= last_sched)
+		if (!in_sched_functions(pc))
 			return pc;
 		fp = *(unsigned long *) fp;
 	} while (count++ < 16);
@@ -440,8 +441,7 @@ unsigned long thread_saved_pc(struct task_struct *tsk)
 	struct switch_stack *sw = (struct switch_stack *)tsk->thread.ksp;
 
 	/* Check whether the thread is blocked in resume() */
-	if (sw->retpc > (unsigned long)scheduling_functions_start_here &&
-	    sw->retpc < (unsigned long)scheduling_functions_end_here)
+	if (in_sched_functions(sw->retpc))
 		return ((unsigned long *)sw->a6)[1];
 	else
 		return sw->retpc;

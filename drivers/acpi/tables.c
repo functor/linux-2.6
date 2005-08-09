@@ -101,7 +101,7 @@ acpi_table_print (
 	else
 		name = header->signature;
 
-	printk(KERN_INFO PREFIX "%.4s (v%3.3d %6.6s %8.8s 0x%08x %.4s 0x%08x) @ 0x%p\n",
+	printk(KERN_DEBUG PREFIX "%.4s (v%3.3d %6.6s %8.8s 0x%08x %.4s 0x%08x) @ 0x%p\n",
 		name, header->revision, header->oem_id,
 		header->oem_table_id, header->oem_revision,
 		header->asl_compiler_id, header->asl_compiler_revision,
@@ -131,7 +131,7 @@ acpi_table_print_madt_entry (
 	{
 		struct acpi_table_ioapic *p =
 			(struct acpi_table_ioapic*) header;
-		printk(KERN_INFO PREFIX "IOAPIC (id[0x%02x] address[0x%08x] global_irq_base[0x%x])\n",
+		printk(KERN_INFO PREFIX "IOAPIC (id[0x%02x] address[0x%08x] gsi_base[%d])\n",
 			p->id, p->address, p->global_irq_base);
 	}
 		break;
@@ -185,8 +185,8 @@ acpi_table_print_madt_entry (
 	{
 		struct acpi_table_iosapic *p =
 			(struct acpi_table_iosapic*) header;
-		printk(KERN_INFO PREFIX "IOSAPIC (id[0x%x] global_irq_base[0x%x] address[%p])\n",
-			p->id, p->global_irq_base, (void *) (unsigned long) p->address);
+		printk(KERN_INFO PREFIX "IOSAPIC (id[0x%x] address[%p] gsi_base[%d])\n",
+			p->id, (void *) (unsigned long) p->address, p->global_irq_base);
 	}
 		break;
 
@@ -286,7 +286,7 @@ acpi_get_table_header_early (
 			*header = (void *) __acpi_map_table(fadt->V1_dsdt,
 					sizeof(struct acpi_table_header));
 		} else
-			*header = 0;
+			*header = NULL;
 
 		if (!*header) {
 			printk(KERN_WARNING PREFIX "Unable to map DSDT\n");
@@ -343,10 +343,11 @@ acpi_table_parse_madt_family (
 	entry = (acpi_table_entry_header *)
 		((unsigned long) madt + madt_size);
 
-	while (((unsigned long) entry) < madt_end) {
+	while (((unsigned long) entry) + sizeof(acpi_table_entry_header) < madt_end) {
 		if (entry->type == entry_id &&
 		    (!max_entries || count++ < max_entries))
-			handler(entry);
+			if (handler(entry, madt_end))
+				return -EINVAL;
 
 		entry = (acpi_table_entry_header *)
 			((unsigned long) entry + entry->length);
@@ -586,7 +587,7 @@ acpi_table_init (void)
 		return -ENODEV;
 	}
 
-	printk(KERN_INFO PREFIX "RSDP (v%3.3d %6.6s                                    ) @ 0x%p\n",
+	printk(KERN_DEBUG PREFIX "RSDP (v%3.3d %6.6s                                ) @ 0x%p\n",
 		rsdp->revision, rsdp->oem_id, (void *) rsdp_phys);
 
 	if (rsdp->revision < 2)

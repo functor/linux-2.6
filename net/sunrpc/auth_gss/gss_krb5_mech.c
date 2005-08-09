@@ -40,7 +40,6 @@
 #include <linux/slab.h>
 #include <linux/sunrpc/auth.h>
 #include <linux/in.h>
-#include <linux/sunrpc/svcauth_gss.h>
 #include <linux/sunrpc/gss_krb5.h>
 #include <linux/sunrpc/xdr.h>
 #include <linux/crypto.h>
@@ -49,49 +48,48 @@
 # define RPCDBG_FACILITY	RPCDBG_AUTH
 #endif
 
-struct xdr_netobj gss_mech_krb5_oid =
-   {9, "\052\206\110\206\367\022\001\002\002"};
-
-static inline int
-get_bytes(char **ptr, const char *end, void *res, int len)
+static const void *
+simple_get_bytes(const void *p, const void *end, void *res, int len)
 {
-	char *p, *q;
-	p = *ptr;
-	q = p + len;
-	if (q > end || q < p)
-		return -1;
+	const void *q = (const void *)((const char *)p + len);
+	if (unlikely(q > end || q < p))
+		return ERR_PTR(-EFAULT);
 	memcpy(res, p, len);
-	*ptr = q;
-	return 0;
+	return q;
 }
 
-static inline int
-get_netobj(char **ptr, const char *end, struct xdr_netobj *res)
+static const void *
+simple_get_netobj(const void *p, const void *end, struct xdr_netobj *res)
 {
-	char *p, *q;
-	p = *ptr;
-	if (get_bytes(&p, end, &res->len, sizeof(res->len)))
-		return -1;
-	q = p + res->len;
-	if (q > end || q < p)
-		return -1;
-	if (!(res->data = kmalloc(res->len, GFP_KERNEL)))
-		return -1;
-	memcpy(res->data, p, res->len);
-	*ptr = q;
-	return 0;
+	const void *q;
+	unsigned int len;
+
+	p = simple_get_bytes(p, end, &len, sizeof(len));
+	if (IS_ERR(p))
+		return p;
+	q = (const void *)((const char *)p + len);
+	if (unlikely(q > end || q < p))
+		return ERR_PTR(-EFAULT);
+	res->data = kmalloc(len, GFP_KERNEL);
+	if (unlikely(res->data == NULL))
+		return ERR_PTR(-ENOMEM);
+	memcpy(res->data, p, len);
+	res->len = len;
+	return q;
 }
 
-static inline int
-get_key(char **p, char *end, struct crypto_tfm **res)
+static inline const void *
+get_key(const void *p, const void *end, struct crypto_tfm **res)
 {
 	struct xdr_netobj	key;
 	int			alg, alg_mode;
 	char			*alg_name;
 
-	if (get_bytes(p, end, &alg, sizeof(alg)))
+	p = simple_get_bytes(p, end, &alg, sizeof(alg));
+	if (IS_ERR(p))
 		goto out_err;
-	if ((get_netobj(p, end, &key)))
+	p = simple_get_netobj(p, end, &key);
+	if (IS_ERR(p))
 		goto out_err;
 
 	switch (alg) {
@@ -100,7 +98,7 @@ get_key(char **p, char *end, struct crypto_tfm **res)
 			alg_mode = CRYPTO_TFM_MODE_CBC;
 			break;
 		default:
-			dprintk("RPC: get_key: unsupported algorithm %d\n", alg);
+			dprintk("RPC:      get_key: unsupported algorithm %d\n", alg);
 			goto out_err_free_key;
 	}
 	if (!(*res = crypto_alloc_tfm(alg_name, alg_mode)))
@@ -109,53 +107,66 @@ get_key(char **p, char *end, struct crypto_tfm **res)
 		goto out_err_free_tfm;
 
 	kfree(key.data);
-	return 0;
+	return p;
 
 out_err_free_tfm:
 	crypto_free_tfm(*res);
 out_err_free_key:
 	kfree(key.data);
+	p = ERR_PTR(-EINVAL);
 out_err:
-	return -1;
+	return p;
 }
 
-static u32
-gss_import_sec_context_kerberos(struct xdr_netobj *inbuf,
+static int
+gss_import_sec_context_kerberos(const void *p,
+				size_t len,
 				struct gss_ctx *ctx_id)
 {
-	char	*p = inbuf->data;
-	char	*end = inbuf->data + inbuf->len;
+	const void *end = (const void *)((const char *)p + len);
 	struct	krb5_ctx *ctx;
 
 	if (!(ctx = kmalloc(sizeof(*ctx), GFP_KERNEL)))
 		goto out_err;
 	memset(ctx, 0, sizeof(*ctx));
 
-	if (get_bytes(&p, end, &ctx->initiate, sizeof(ctx->initiate)))
+	p = simple_get_bytes(p, end, &ctx->initiate, sizeof(ctx->initiate));
+	if (IS_ERR(p))
 		goto out_err_free_ctx;
-	if (get_bytes(&p, end, &ctx->seed_init, sizeof(ctx->seed_init)))
+	p = simple_get_bytes(p, end, &ctx->seed_init, sizeof(ctx->seed_init));
+	if (IS_ERR(p))
 		goto out_err_free_ctx;
-	if (get_bytes(&p, end, ctx->seed, sizeof(ctx->seed)))
+	p = simple_get_bytes(p, end, ctx->seed, sizeof(ctx->seed));
+	if (IS_ERR(p))
 		goto out_err_free_ctx;
-	if (get_bytes(&p, end, &ctx->signalg, sizeof(ctx->signalg)))
+	p = simple_get_bytes(p, end, &ctx->signalg, sizeof(ctx->signalg));
+	if (IS_ERR(p))
 		goto out_err_free_ctx;
-	if (get_bytes(&p, end, &ctx->sealalg, sizeof(ctx->sealalg)))
+	p = simple_get_bytes(p, end, &ctx->sealalg, sizeof(ctx->sealalg));
+	if (IS_ERR(p))
 		goto out_err_free_ctx;
-	if (get_bytes(&p, end, &ctx->endtime, sizeof(ctx->endtime)))
+	p = simple_get_bytes(p, end, &ctx->endtime, sizeof(ctx->endtime));
+	if (IS_ERR(p))
 		goto out_err_free_ctx;
-	if (get_bytes(&p, end, &ctx->seq_send, sizeof(ctx->seq_send)))
+	p = simple_get_bytes(p, end, &ctx->seq_send, sizeof(ctx->seq_send));
+	if (IS_ERR(p))
 		goto out_err_free_ctx;
-	if (get_netobj(&p, end, &ctx->mech_used))
+	p = simple_get_netobj(p, end, &ctx->mech_used);
+	if (IS_ERR(p))
 		goto out_err_free_ctx;
-	if (get_key(&p, end, &ctx->enc))
+	p = get_key(p, end, &ctx->enc);
+	if (IS_ERR(p))
 		goto out_err_free_mech;
-	if (get_key(&p, end, &ctx->seq))
+	p = get_key(p, end, &ctx->seq);
+	if (IS_ERR(p))
 		goto out_err_free_key1;
-	if (p != end)
+	if (p != end) {
+		p = ERR_PTR(-EFAULT);
 		goto out_err_free_key2;
+	}
 
 	ctx_id->internal_ctx_id = ctx;
-	dprintk("Succesfully imported new context.\n");
+	dprintk("RPC:      Succesfully imported new context.\n");
 	return 0;
 
 out_err_free_key2:
@@ -167,7 +178,7 @@ out_err_free_mech:
 out_err_free_ctx:
 	kfree(ctx);
 out_err:
-	return GSS_S_FAILURE;
+	return PTR_ERR(p);
 }
 
 static void
@@ -197,7 +208,7 @@ gss_verify_mic_kerberos(struct gss_ctx		*ctx,
 	if (!maj_stat && qop_state)
 	    *qstate = qop_state;
 
-	dprintk("RPC: gss_verify_mic_kerberos returning %d\n", maj_stat);
+	dprintk("RPC:      gss_verify_mic_kerberos returning %d\n", maj_stat);
 	return maj_stat;
 }
 
@@ -211,41 +222,52 @@ gss_get_mic_kerberos(struct gss_ctx	*ctx,
 
 	err = krb5_make_token(kctx, qop, message, mic_token, KG_TOK_MIC_MSG);
 
-	dprintk("RPC: gss_get_mic_kerberos returning %d\n",err);
+	dprintk("RPC:      gss_get_mic_kerberos returning %d\n",err);
 
 	return err;
 }
 
 static struct gss_api_ops gss_kerberos_ops = {
-	.name			= "krb5",
 	.gss_import_sec_context	= gss_import_sec_context_kerberos,
 	.gss_get_mic		= gss_get_mic_kerberos,
 	.gss_verify_mic		= gss_verify_mic_kerberos,
 	.gss_delete_sec_context	= gss_delete_sec_context_kerberos,
 };
 
-/* XXX error checking? reference counting? */
+static struct pf_desc gss_kerberos_pfs[] = {
+	[0] = {
+		.pseudoflavor = RPC_AUTH_GSS_KRB5,
+		.service = RPC_GSS_SVC_NONE,
+		.name = "krb5",
+	},
+	[1] = {
+		.pseudoflavor = RPC_AUTH_GSS_KRB5I,
+		.service = RPC_GSS_SVC_INTEGRITY,
+		.name = "krb5i",
+	},
+};
+
+static struct gss_api_mech gss_kerberos_mech = {
+	.gm_name	= "krb5",
+	.gm_owner	= THIS_MODULE,
+	.gm_ops		= &gss_kerberos_ops,
+	.gm_pf_num	= ARRAY_SIZE(gss_kerberos_pfs),
+	.gm_pfs		= gss_kerberos_pfs,
+};
+
 static int __init init_kerberos_module(void)
 {
-	struct gss_api_mech *gm;
+	int status;
 
-	if (gss_mech_register(&gss_mech_krb5_oid, &gss_kerberos_ops))
+	status = gss_mech_register(&gss_kerberos_mech);
+	if (status)
 		printk("Failed to register kerberos gss mechanism!\n");
-	gm = gss_mech_get_by_OID(&gss_mech_krb5_oid);
-	gss_register_triple(RPC_AUTH_GSS_KRB5 , gm, 0, RPC_GSS_SVC_NONE);
-	gss_register_triple(RPC_AUTH_GSS_KRB5I, gm, 0, RPC_GSS_SVC_INTEGRITY);
-	if (svcauth_gss_register_pseudoflavor(RPC_AUTH_GSS_KRB5, "krb5"))
-		printk("Failed to register %s with server!\n", "krb5");
-	if (svcauth_gss_register_pseudoflavor(RPC_AUTH_GSS_KRB5I, "krb5i"))
-		printk("Failed to register %s with server!\n", "krb5i");
-	gss_mech_put(gm);
-	return 0;
+	return status;
 }
 
 static void __exit cleanup_kerberos_module(void)
 {
-	gss_unregister_triple(RPC_AUTH_GSS_KRB5I);
-	gss_unregister_triple(RPC_AUTH_GSS_KRB5);
+	gss_mech_unregister(&gss_kerberos_mech);
 }
 
 MODULE_LICENSE("GPL");

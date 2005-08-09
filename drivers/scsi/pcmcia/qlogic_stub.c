@@ -46,8 +46,8 @@
 #include <linux/interrupt.h>
 
 #include "scsi.h"
-#include "hosts.h"
-#include "../qlogicfas.h"
+#include <scsi/scsi_host.h>
+#include "../qlogicfas408.h"
 
 #include <pcmcia/version.h>
 #include <pcmcia/cs_types.h>
@@ -56,33 +56,40 @@
 #include <pcmcia/ds.h>
 #include <pcmcia/ciscode.h>
 
+/* Set the following to 2 to use normal interrupt (active high/totempole-
+ * tristate), otherwise use 0 (REQUIRED FOR PCMCIA) for active low, open
+ * drain
+ */
+#define INT_TYPE	0
 
-extern Scsi_Host_Template qlogicfas_driver_template;
-extern void qlogicfas_preset(int port, int irq);
-extern int qlogicfas_bus_reset(Scsi_Cmnd *);
-extern irqreturn_t do_ql_ihandl(int irq, void *dev_id, struct pt_regs *regs);
-
-static char *qlogic_name = "qlogic_cs";
+static char qlogic_name[] = "qlogic_cs";
 
 #ifdef PCMCIA_DEBUG
 static int pc_debug = PCMCIA_DEBUG;
-MODULE_PARM(pc_debug, "i");
+module_param(pc_debug, int, 0644);
 #define DEBUG(n, args...) if (pc_debug>(n)) printk(KERN_DEBUG args)
 static char *version = "qlogic_cs.c 1.79-ac 2002/10/26 (David Hinds)";
 #else
 #define DEBUG(n, args...)
 #endif
 
-/*====================================================================*/
-
-/* Parameters that can be set with 'insmod' */
-
-/* Bit map of interrupts to choose from */
-static unsigned int irq_mask = 0xdeb8;
-static int irq_list[4] = { -1 };
-
-MODULE_PARM(irq_mask, "i");
-MODULE_PARM(irq_list, "1-4i");
+static Scsi_Host_Template qlogicfas_driver_template = {
+	.module			= THIS_MODULE,
+	.name			= qlogic_name,
+	.proc_name		= qlogic_name,
+	.info			= qlogicfas408_info,
+	.queuecommand		= qlogicfas408_queuecommand,
+	.eh_abort_handler	= qlogicfas408_abort,
+	.eh_bus_reset_handler	= qlogicfas408_bus_reset,
+	.eh_device_reset_handler= qlogicfas408_device_reset,
+	.eh_host_reset_handler	= qlogicfas408_host_reset,
+	.bios_param		= qlogicfas408_biosparam,
+	.can_queue		= 1,
+	.this_id		= -1,
+	.sg_tablesize		= SG_ALL,
+	.cmd_per_lun		= 1,
+	.use_clustering		= DISABLE_CLUSTERING,
+};
 
 /*====================================================================*/
 
@@ -110,29 +117,17 @@ static struct Scsi_Host *qlogic_detect(Scsi_Host_Template *host,
 	int qltyp;		/* type of chip */
 	int qinitid;
 	struct Scsi_Host *shost;	/* registered host structure */
-	qlogicfas_priv_t priv;
+	struct qlogicfas408_priv *priv;
 
-	qltyp = inb(qbase + 0xe) & 0xf8;
+	qltyp = qlogicfas408_get_chip_type(qbase, INT_TYPE);
 	qinitid = host->this_id;
 	if (qinitid < 0)
 		qinitid = 7;	/* if no ID, use 7 */
-	outb(1, qbase + 8);	/* set for PIO pseudo DMA */
-	REG0;
-	outb(0x40 | qlcfg8 | qinitid, qbase + 8);	/* (ini) bus id, disable scsi rst */
-	outb(qlcfg5, qbase + 5);	/* select timer */
-	outb(qlcfg9, qbase + 9);	/* prescaler */
 
-#if QL_RESET_AT_START
-	outb(3, qbase + 3);
-	REG1;
-	/* FIXME: timeout */
-	while (inb(qbase + 0xf) & 4)
-		cpu_relax();
-	REG0;
-#endif
+	qlogicfas408_setup(qbase, qinitid, INT_TYPE);
 
 	host->name = qlogic_name;
-	shost = scsi_host_alloc(host, sizeof(struct qlogicfas_priv));
+	shost = scsi_host_alloc(host, sizeof(struct qlogicfas408_priv));
 	if (!shost)
 		goto err;
 	shost->io_port = qbase;
@@ -141,12 +136,14 @@ static struct Scsi_Host *qlogic_detect(Scsi_Host_Template *host,
 	if (qlirq != -1)
 		shost->irq = qlirq;
 
-	priv = (qlogicfas_priv_t)&(shost->hostdata[0]);
+	priv = get_priv_by_host(shost);
 	priv->qlirq = qlirq;
 	priv->qbase = qbase;
 	priv->qinitid = qinitid;
+	priv->shost = shost;
+	priv->int_type = INT_TYPE;					
 
-	if (request_irq(qlirq, do_ql_ihandl, 0, qlogic_name, shost))
+	if (request_irq(qlirq, qlogicfas408_ihandl, 0, qlogic_name, shost))
 		goto free_scsi_host;
 
 	sprintf(priv->qinfo,
@@ -174,7 +171,7 @@ static dev_link_t *qlogic_attach(void)
 	scsi_info_t *info;
 	client_reg_t client_reg;
 	dev_link_t *link;
-	int i, ret;
+	int ret;
 
 	DEBUG(0, "qlogic_attach()\n");
 
@@ -189,12 +186,7 @@ static dev_link_t *qlogic_attach(void)
 	link->io.Attributes1 = IO_DATA_PATH_WIDTH_AUTO;
 	link->io.IOAddrLines = 10;
 	link->irq.Attributes = IRQ_TYPE_EXCLUSIVE;
-	link->irq.IRQInfo1 = IRQ_INFO2_VALID | IRQ_LEVEL_ID;
-	if (irq_list[0] == -1)
-		link->irq.IRQInfo2 = irq_mask;
-	else
-		for (i = 0; i < 4; i++)
-			link->irq.IRQInfo2 |= 1 << irq_list[i];
+	link->irq.IRQInfo1 = IRQ_LEVEL_ID;
 	link->conf.Attributes = CONF_ENABLE_IRQ;
 	link->conf.Vcc = 50;
 	link->conf.IntType = INT_MEMORY_AND_IO;
@@ -204,7 +196,6 @@ static dev_link_t *qlogic_attach(void)
 	link->next = dev_list;
 	dev_list = link;
 	client_reg.dev_info = &dev_info;
-	client_reg.Attributes = INFO_IO_CLIENT | INFO_CARD_SHARE;
 	client_reg.event_handler = &qlogic_event;
 	client_reg.EventMask = CS_EVENT_RESET_REQUEST | CS_EVENT_CARD_RESET | CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL | CS_EVENT_PM_SUSPEND | CS_EVENT_PM_RESUME;
 	client_reg.Version = 0x0210;
@@ -307,9 +298,6 @@ static void qlogic_config(dev_link_t * link)
 		outb(0x04, link->io.BasePort1 + 0xd);
 	}
 
-	qlogicfas_driver_template.name = qlogic_name;
-	qlogicfas_driver_template.proc_name = qlogic_name;
-
 	/* The KXL-810AN has a bigger IO port window */
 	if (link->io.NumPorts1 == 32)
 		host = qlogic_detect(&qlogicfas_driver_template, link,
@@ -402,7 +390,7 @@ static int qlogic_event(event_t event, int priority, event_callback_args_t * arg
 				outb(0x04, link->io.BasePort1 + 0xd);
 			}
 			/* Ugggglllyyyy!!! */
-			qlogicfas_bus_reset(NULL);
+			qlogicfas408_bus_reset(NULL);
 		}
 		break;
 	}
@@ -427,10 +415,7 @@ static int __init init_qlogic_cs(void)
 static void __exit exit_qlogic_cs(void)
 {
 	pcmcia_unregister_driver(&qlogic_cs_driver);
-
-	/* XXX: this really needs to move into generic code.. */
-	while (dev_list != NULL)
-		qlogic_detach(dev_list);
+	BUG_ON(dev_list != NULL);
 }
 
 MODULE_AUTHOR("Tom Zerucha, Michael Griffith");

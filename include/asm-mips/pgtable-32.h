@@ -74,7 +74,7 @@ extern int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 #define PTRS_PER_PTE	((PAGE_SIZE << PTE_ORDER) / sizeof(pte_t))
 
 #define USER_PTRS_PER_PGD	(0x80000000UL/PGDIR_SIZE)
-#define FIRST_USER_PGD_NR	0
+#define FIRST_USER_ADDRESS	0
 
 #define VMALLOC_START     KSEG2
 
@@ -98,7 +98,7 @@ extern int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 
 extern void load_pgd(unsigned long pg_dir);
 
-extern pmd_t invalid_pte_table[PAGE_SIZE/sizeof(pmd_t)];
+extern pte_t invalid_pte_table[PAGE_SIZE/sizeof(pte_t)];
 
 /*
  * Empty pgd/pmd entries point to the invalid_pte_table.
@@ -130,8 +130,21 @@ static inline int pgd_bad(pgd_t pgd)		{ return 0; }
 static inline int pgd_present(pgd_t pgd)	{ return 1; }
 static inline void pgd_clear(pgd_t *pgdp)	{ }
 
+#if defined(CONFIG_64BIT_PHYS_ADDR) && defined(CONFIG_CPU_MIPS32)
 #define pte_page(x)		pfn_to_page(pte_pfn(x))
+#define pte_pfn(x)		((unsigned long)((x).pte_high >> 6))
+static inline pte_t
+pfn_pte(unsigned long pfn, pgprot_t prot)
+{
+	pte_t pte;
+	pte.pte_high = (pfn << 6) | (pgprot_val(prot) & 0x3f);
+	pte.pte_low = pgprot_val(prot);
+	return pte;
+}
 
+#else
+
+#define pte_page(x)		pfn_to_page(pte_pfn(x))
 
 #ifdef CONFIG_CPU_VR41XX
 #define pte_pfn(x)		((unsigned long)((x).pte >> (PAGE_SHIFT + 2)))
@@ -140,36 +153,10 @@ static inline void pgd_clear(pgd_t *pgdp)	{ }
 #define pte_pfn(x)		((unsigned long)((x).pte >> PAGE_SHIFT))
 #define pfn_pte(pfn, prot)	__pte(((pfn) << PAGE_SHIFT) | pgprot_val(prot))
 #endif
-
-#if defined(CONFIG_CPU_R3000) || defined(CONFIG_CPU_TX39XX)
-
-/*
- * Bits 0, 1, 2, 9 and 10 are taken, split up the 27 bits of offset
- * into this range:
- */
-#define pte_to_pgoff(_pte) \
-	((((_pte).pte >> 3) & 0x3f ) + (((_pte).pte >> 11) << 8 ))
-
-#define pgoff_to_pte(off) \
-	((pte_t) { (((off) & 0x3f) << 3) + (((off) >> 8) << 11) + _PAGE_FILE })
-
-#else
-
-/*
- * Bits 0, 1, 2, 7 and 8 are taken, split up the 27 bits of offset
- * into this range:
- */
-#define pte_to_pgoff(_pte) \
-	((((_pte).pte >> 3) & 0x1f ) + (((_pte).pte >> 9) << 6 ))
- 
-#define pgoff_to_pte(off) \
-	((pte_t) { (((off) & 0x1f) << 3) + (((off) >> 6) << 9) + _PAGE_FILE })
-
-#endif
+#endif /* defined(CONFIG_64BIT_PHYS_ADDR) && defined(CONFIG_CPU_MIPS32) */
 
 #define __pgd_offset(address)	pgd_index(address)
-#define __pmd_offset(address) \
-	(((address) >> PMD_SHIFT) & (PTRS_PER_PMD-1))
+#define __pmd_offset(address)	(((address) >> PMD_SHIFT) & (PTRS_PER_PMD-1))
 
 /* to find an entry in a kernel page-table-directory */
 #define pgd_offset_k(address) pgd_offset(&init_mm, address)
@@ -200,26 +187,57 @@ static inline pmd_t *pmd_offset(pgd_t *dir, unsigned long address)
 #define pte_unmap(pte) ((void)(pte))
 #define pte_unmap_nested(pte) ((void)(pte))
 
-/* Swap entries must have VALID and GLOBAL bits cleared. */
 #if defined(CONFIG_CPU_R3000) || defined(CONFIG_CPU_TX39XX)
 
-#define __swp_type(x)		(((x).val >> 1) & 0x7f)
-#define __swp_offset(x)		((x).val >> 10)
-#define __swp_entry(type,offset)	((swp_entry_t) { ((type) << 1) | ((offset) << 10) })
+/* Swap entries must have VALID bit cleared. */
+#define __swp_type(x)		(((x).val >> 10) & 0x1f)
+#define __swp_offset(x)		((x).val >> 15)
+#define __swp_entry(type,offset)	\
+	((swp_entry_t) { ((type) << 10) | ((offset) << 15) })
+
+/*
+ * Bits 0, 1, 2, 9 and 10 are taken, split up the 27 bits of offset
+ * into this range:
+ */
+#define PTE_FILE_MAX_BITS	27
+
+#define pte_to_pgoff(_pte) \
+	((((_pte).pte >> 3) & 0x3f ) + (((_pte).pte >> 11) << 8 ))
+
+#define pgoff_to_pte(off) \
+	((pte_t) { (((off) & 0x3f) << 3) + (((off) >> 8) << 11) + _PAGE_FILE })
+
 #else
 
-#define __swp_type(x)		(((x).val >> 1) & 0x1f)
-#define __swp_offset(x)		((x).val >> 8)
-#define __swp_entry(type,offset)	((swp_entry_t) { ((type) << 1) | ((offset) << 8) })
+/* Swap entries must have VALID and GLOBAL bits cleared. */
+#define __swp_type(x)		(((x).val >> 8) & 0x1f)
+#define __swp_offset(x)		((x).val >> 13)
+#define __swp_entry(type,offset)	\
+		((swp_entry_t) { ((type) << 8) | ((offset) << 13) })
+
+/*
+ * Bits 0, 1, 2, 7 and 8 are taken, split up the 27 bits of offset
+ * into this range:
+ */
+#define PTE_FILE_MAX_BITS	27
+
+#if defined(CONFIG_64BIT_PHYS_ADDR) && defined(CONFIG_CPU_MIPS32)
+	/* fixme */
+#define pte_to_pgoff(_pte) (((_pte).pte_high >> 6) + ((_pte).pte_high & 0x3f))
+#define pgoff_to_pte(off) \
+ 	((pte_t){(((off) & 0x3f) + ((off) << 6) + _PAGE_FILE)})
+
+#else
+#define pte_to_pgoff(_pte) \
+	((((_pte).pte >> 3) & 0x1f ) + (((_pte).pte >> 9) << 6 ))
+
+#define pgoff_to_pte(off) \
+	((pte_t) { (((off) & 0x1f) << 3) + (((off) >> 6) << 9) + _PAGE_FILE })
+#endif
+
 #endif
 
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
-
-#ifdef CONFIG_64BIT_PHYS_ADDR
-typedef u64 pte_addr_t;
-#else
-typedef pte_t *pte_addr_t;
-#endif
 
 #endif /* _ASM_PGTABLE_32_H */

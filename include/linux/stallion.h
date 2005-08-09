@@ -3,7 +3,7 @@
 /*
  *	stallion.h  -- stallion multiport serial driver.
  *
- *	Copyright (C) 1996-1998  Stallion Technologies (support@stallion.oz.au).
+ *	Copyright (C) 1996-1998  Stallion Technologies
  *	Copyright (C) 1994-1996  Greg Ungerer.
  *
  *	This program is free software; you can redistribute it and/or modify
@@ -126,7 +126,7 @@ typedef struct stlbrd {
 	int		nrbnks;
 	int		irq;
 	int		irqtype;
-	void		(*isr)(struct stlbrd *brdp);
+	int		(*isr)(struct stlbrd *brdp);
 	unsigned int	ioaddr1;
 	unsigned int	ioaddr2;
 	unsigned int	iosize1;

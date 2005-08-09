@@ -17,6 +17,9 @@
  */
 typedef struct {
 	volatile unsigned long lock;
+#ifdef CONFIG_PREEMPT
+	unsigned int break_lock;
+#endif
 } spinlock_t;
 
 #define SPIN_LOCK_UNLOCKED	(spinlock_t) { 0 }
@@ -25,6 +28,7 @@ typedef struct {
 
 #define spin_is_locked(x)	((x)->lock != 0)
 #define spin_unlock_wait(x)	do { barrier(); } while (spin_is_locked(x))
+#define _raw_spin_lock_flags(lock, flags) _raw_spin_lock(lock)
 
 /*
  * Simple spin lock operations.  There are two variants, one clears IRQ's
@@ -47,9 +51,7 @@ static inline void _raw_spin_lock(spinlock_t *lock)
 
 static inline void _raw_spin_unlock(spinlock_t *lock)
 {
-#ifdef CONFIG_DEBUG_SPINLOCK
-	BUG_ON(!spin_is_locked(lock));
-#endif
+	assert_spin_locked(lock);
 
 	lock->lock = 0;
 }
@@ -67,12 +69,14 @@ static inline void _raw_spin_unlock(spinlock_t *lock)
 typedef struct {
 	spinlock_t lock;
 	atomic_t counter;
+#ifdef CONFIG_PREEMPT
+	unsigned int break_lock;
+#endif
 } rwlock_t;
 
 #define RW_LOCK_BIAS		0x01000000
 #define RW_LOCK_UNLOCKED	(rwlock_t) { { 0 }, { RW_LOCK_BIAS } }
 #define rwlock_init(x)		do { *(x) = RW_LOCK_UNLOCKED; } while (0)
-#define rwlock_is_locked(x)	(atomic_read(&(x)->counter) != RW_LOCK_BIAS)
 
 static inline void _raw_read_lock(rwlock_t *rw)
 {
@@ -103,6 +107,8 @@ static inline void _raw_write_unlock(rwlock_t *rw)
 	atomic_set(&rw->counter, 0);
 	_raw_spin_unlock(&rw->lock);
 }
+
+#define _raw_read_trylock(lock) generic_raw_read_trylock(lock)
 
 static inline int _raw_write_trylock(rwlock_t *rw)
 {

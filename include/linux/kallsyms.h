@@ -7,6 +7,8 @@
 
 #include <linux/config.h>
 
+#define KSYM_NAME_LEN 127
+
 #ifdef CONFIG_KALLSYMS
 /* Lookup the address for a symbol. Returns 0 if not found. */
 unsigned long kallsyms_lookup_name(const char *name);
@@ -45,6 +47,16 @@ __attribute__((format(printf,1,2)));
 static inline void __check_printsym_format(const char *fmt, ...)
 {
 }
+/* ia64 and ppc64 use function descriptors, which contain the real address */
+#if defined(CONFIG_IA64) || defined(CONFIG_PPC64)
+#define print_fn_descriptor_symbol(fmt, addr)		\
+do {						\
+	unsigned long *__faddr = (unsigned long*) addr;		\
+	print_symbol(fmt, __faddr[0]);		\
+} while (0)
+#else
+#define print_fn_descriptor_symbol(fmt, addr) print_symbol(fmt, addr)
+#endif
 
 #define print_symbol(fmt, addr)			\
 do {						\

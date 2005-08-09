@@ -17,13 +17,16 @@
 #define SELINUX_MAGIC 0xf97cff8c
 
 /* Identify specific policy version changes */
-#define POLICYDB_VERSION_BASE  15
-#define POLICYDB_VERSION_BOOL  16
-#define POLICYDB_VERSION_IPV6  17
+#define POLICYDB_VERSION_BASE		15
+#define POLICYDB_VERSION_BOOL		16
+#define POLICYDB_VERSION_IPV6		17
+#define POLICYDB_VERSION_NLCLASS	18
+#define POLICYDB_VERSION_VALIDATETRANS	19
+#define POLICYDB_VERSION_MLS		19
 
 /* Range of policy versions we understand*/
 #define POLICYDB_VERSION_MIN   POLICYDB_VERSION_BASE
-#define POLICYDB_VERSION_MAX   POLICYDB_VERSION_IPV6
+#define POLICYDB_VERSION_MAX   POLICYDB_VERSION_MLS
 
 #ifdef CONFIG_SECURITY_SELINUX_BOOTPARAM
 extern int selinux_enabled;
@@ -31,11 +34,7 @@ extern int selinux_enabled;
 #define selinux_enabled 1
 #endif
 
-#ifdef CONFIG_SECURITY_SELINUX_MLS
-#define selinux_mls_enabled 1
-#else
-#define selinux_mls_enabled 0
-#endif
+extern int selinux_mls_enabled;
 
 int security_load_policy(void * data, size_t len);
 
@@ -77,6 +76,9 @@ int security_netif_sid(char *name, u32 *if_sid,
 
 int security_node_sid(u16 domain, void *addr, u32 addrlen,
 	u32 *out_sid);
+
+int security_validate_transition(u32 oldsid, u32 newsid, u32 tasksid,
+                                 u16 tclass);
 
 #define SECURITY_FS_USE_XATTR		1 /* use xattr */
 #define SECURITY_FS_USE_TRANS		2 /* use transition SIDs, e.g. devpts/tmpfs */

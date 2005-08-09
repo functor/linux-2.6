@@ -20,6 +20,9 @@
 *!                                  in the spin-lock.
 *!
 *!  $Log: eeprom.c,v $
+*!  Revision 1.10  2003/09/11 07:29:48  starvik
+*!  Merge of Linux 2.6.0-test5
+*!
 *!  Revision 1.9  2003/07/04 08:27:37  starvik
 *!  Merge of Linux 2.5.74
 *!
@@ -441,9 +444,9 @@ int __init eeprom_init(void)
 static int eeprom_open(struct inode * inode, struct file * file)
 {
 
-  if(iminor(inode) != EEPROM_MINOR_NR)
+  if(MINOR(inode->i_rdev) != EEPROM_MINOR_NR)
      return -ENXIO;
-  if(imajor(inode) != EEPROM_MAJOR_NR)
+  if(MAJOR(inode->i_rdev) != EEPROM_MAJOR_NR)
      return -ENXIO;
 
   if( eeprom.size > 0 )
@@ -596,7 +599,7 @@ static ssize_t eeprom_write(struct file * file, const char * buf, size_t count,
   int i, written, restart=1;
   unsigned long p;
 
-  if (verify_area(VERIFY_READ, buf, count))
+  if (!access_ok(VERIFY_READ, buf, count))
   {
     return -EFAULT;
   }

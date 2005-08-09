@@ -2,7 +2,6 @@
 #define _FPU_PROTO_H
 
 /* errors.c */
-extern void Un_impl(void);
 extern void FPU_illegal(void);
 extern void FPU_printall(void);
 asmlinkage void FPU_exception(int n);
@@ -41,7 +40,6 @@ extern void fsubp_(void);
 extern void fdivrp(void);
 extern void fdivp_(void);
 /* fpu_aux.c */
-extern void fclex(void);
 extern void finit(void);
 extern void finit_(void);
 extern void fstsw_(void);
@@ -69,7 +67,6 @@ extern int isNaN(FPU_REG const *ptr);
 extern void FPU_pop(void);
 extern int FPU_empty_i(int stnr);
 extern int FPU_stackoverflow(FPU_REG **st_new_ptr);
-extern void FPU_sync_tags(void);
 extern void FPU_copy_to_regi(FPU_REG const *r, u_char tag, int stnr);
 extern void FPU_copy_to_reg1(FPU_REG const *r, u_char tag);
 extern void FPU_copy_to_reg0(FPU_REG const *r, u_char tag);
@@ -77,13 +74,13 @@ extern void FPU_copy_to_reg0(FPU_REG const *r, u_char tag);
 extern void FPU_triga(void);
 extern void FPU_trigb(void);
 /* get_address.c */
-extern void *FPU_get_address(u_char FPU_modrm, unsigned long *fpu_eip,
+extern void __user *FPU_get_address(u_char FPU_modrm, unsigned long *fpu_eip,
 			 struct address *addr, fpu_addr_modes addr_modes);
-extern void *FPU_get_address_16(u_char FPU_modrm, unsigned long *fpu_eip,
+extern void __user *FPU_get_address_16(u_char FPU_modrm, unsigned long *fpu_eip,
 			    struct address *addr, fpu_addr_modes addr_modes);
 /* load_store.c */
 extern int FPU_load_store(u_char type, fpu_addr_modes addr_modes,
-			    void *data_address);
+			    void __user *data_address);
 /* poly_2xm1.c */
 extern int poly_2xm1(u_char sign, FPU_REG *arg, FPU_REG *result);
 /* poly_atan.c */
@@ -112,26 +109,26 @@ extern void fucompp(void);
 /* reg_constant.c */
 extern void fconst(void);
 /* reg_ld_str.c */
-extern int FPU_load_extended(long double *s, int stnr);
-extern int FPU_load_double(double *dfloat, FPU_REG *loaded_data);
-extern int FPU_load_single(float *single, FPU_REG *loaded_data);
-extern int FPU_load_int64(long long *_s);
-extern int FPU_load_int32(long *_s, FPU_REG *loaded_data);
-extern int FPU_load_int16(short *_s, FPU_REG *loaded_data);
-extern int FPU_load_bcd(u_char *s);
+extern int FPU_load_extended(long double __user *s, int stnr);
+extern int FPU_load_double(double __user *dfloat, FPU_REG *loaded_data);
+extern int FPU_load_single(float __user *single, FPU_REG *loaded_data);
+extern int FPU_load_int64(long long __user *_s);
+extern int FPU_load_int32(long __user *_s, FPU_REG *loaded_data);
+extern int FPU_load_int16(short __user *_s, FPU_REG *loaded_data);
+extern int FPU_load_bcd(u_char __user *s);
 extern int FPU_store_extended(FPU_REG *st0_ptr, u_char st0_tag,
-			      long double *d);
-extern int FPU_store_double(FPU_REG *st0_ptr, u_char st0_tag, double *dfloat);
-extern int FPU_store_single(FPU_REG *st0_ptr, u_char st0_tag, float *single);
-extern int FPU_store_int64(FPU_REG *st0_ptr, u_char st0_tag, long long *d);
-extern int FPU_store_int32(FPU_REG *st0_ptr, u_char st0_tag, long *d);
-extern int FPU_store_int16(FPU_REG *st0_ptr, u_char st0_tag, short *d);
-extern int FPU_store_bcd(FPU_REG *st0_ptr, u_char st0_tag, u_char *d);
+			      long double __user *d);
+extern int FPU_store_double(FPU_REG *st0_ptr, u_char st0_tag, double __user *dfloat);
+extern int FPU_store_single(FPU_REG *st0_ptr, u_char st0_tag, float __user *single);
+extern int FPU_store_int64(FPU_REG *st0_ptr, u_char st0_tag, long long __user *d);
+extern int FPU_store_int32(FPU_REG *st0_ptr, u_char st0_tag, long __user *d);
+extern int FPU_store_int16(FPU_REG *st0_ptr, u_char st0_tag, short __user *d);
+extern int FPU_store_bcd(FPU_REG *st0_ptr, u_char st0_tag, u_char __user *d);
 extern int FPU_round_to_int(FPU_REG *r, u_char tag);
-extern u_char *fldenv(fpu_addr_modes addr_modes, u_char *s);
-extern void frstor(fpu_addr_modes addr_modes, u_char *data_address);
-extern u_char *fstenv(fpu_addr_modes addr_modes, u_char *d);
-extern void fsave(fpu_addr_modes addr_modes, u_char *data_address);
+extern u_char __user *fldenv(fpu_addr_modes addr_modes, u_char __user *s);
+extern void frstor(fpu_addr_modes addr_modes, u_char __user *data_address);
+extern u_char __user *fstenv(fpu_addr_modes addr_modes, u_char __user *d);
+extern void fsave(fpu_addr_modes addr_modes, u_char __user *data_address);
 extern int FPU_tagof(FPU_REG *ptr);
 /* reg_mul.c */
 extern int FPU_mul(FPU_REG const *b, u_char tagb, int deststnr, int control_w);

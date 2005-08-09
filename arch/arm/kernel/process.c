@@ -73,7 +73,10 @@ __setup("hlt", hlt_setup);
  * The following aren't currently used.
  */
 void (*pm_idle)(void);
+EXPORT_SYMBOL(pm_idle);
+
 void (*pm_power_off)(void);
+EXPORT_SYMBOL(pm_power_off);
 
 /*
  * This is our default idle handler.  We need to disable
@@ -94,6 +97,8 @@ void default_idle(void)
  */
 void cpu_idle(void)
 {
+	local_fiq_enable();
+
 	/* endless idle loop with no priority at all */
 	while (1) {
 		void (*idle)(void) = pm_idle;
@@ -163,12 +168,11 @@ void machine_restart(char * __unused)
 
 EXPORT_SYMBOL(machine_restart);
 
-void show_regs(struct pt_regs * regs)
+void __show_regs(struct pt_regs *regs)
 {
-	unsigned long flags;
+	unsigned long flags = condition_codes(regs);
 
-	flags = condition_codes(regs);
-
+	printk("CPU: %d\n", smp_processor_id());
 	print_symbol("PC is at %s\n", instruction_pointer(regs));
 	print_symbol("LR is at %s\n", regs->ARM_lr);
 	printk("pc : [<%08lx>]    lr : [<%08lx>]    %s\n"
@@ -208,6 +212,14 @@ void show_regs(struct pt_regs * regs)
 	}
 }
 
+void show_regs(struct pt_regs * regs)
+{
+	printk("\n");
+	printk("Pid: %d, comm: %20s\n", current->pid, current->comm);
+	__show_regs(regs);
+	__backtrace();
+}
+
 void show_fpregs(struct user_fp *regs)
 {
 	int i;
@@ -244,8 +256,6 @@ static unsigned long *thread_info_head;
 static unsigned int nr_thread_info;
 
 #define EXTRA_TASK_STRUCT	4
-#define ll_alloc_task_struct() ((struct thread_info *) __get_free_pages(GFP_KERNEL,1))
-#define ll_free_task_struct(p) free_pages((unsigned long)(p),1)
 
 struct thread_info *alloc_thread_info(struct task_struct *task)
 {
@@ -262,17 +272,16 @@ struct thread_info *alloc_thread_info(struct task_struct *task)
 	}
 
 	if (!thread)
-		thread = ll_alloc_task_struct();
+		thread = (struct thread_info *)
+			   __get_free_pages(GFP_KERNEL, THREAD_SIZE_ORDER);
 
-#ifdef CONFIG_MAGIC_SYSRQ
+#ifdef CONFIG_DEBUG_STACK_USAGE
 	/*
 	 * The stack must be cleared if you want SYSRQ-T to
 	 * give sensible stack usage information
 	 */
-	if (thread) {
-		char *p = (char *)thread;
-		memzero(p+KERNEL_STACK_SIZE, KERNEL_STACK_SIZE);
-	}
+	if (thread)
+		memzero(thread, THREAD_SIZE);
 #endif
 	return thread;
 }
@@ -285,7 +294,7 @@ void free_thread_info(struct thread_info *thread)
 		thread_info_head = p;
 		nr_thread_info += 1;
 	} else
-		ll_free_task_struct(thread);
+		free_pages((unsigned long)thread, THREAD_SIZE_ORDER);
 }
 
 /*
@@ -301,6 +310,7 @@ static void default_fp_init(union fp_state *fp)
 }
 
 void (*fp_init)(union fp_state *) = default_fp_init;
+EXPORT_SYMBOL(fp_init);
 
 void flush_thread(void)
 {
@@ -309,11 +319,23 @@ void flush_thread(void)
 
 	memset(thread->used_cp, 0, sizeof(thread->used_cp));
 	memset(&tsk->thread.debug, 0, sizeof(struct debug_info));
+#if defined(CONFIG_IWMMXT)
+	iwmmxt_task_release(thread);
+#endif
 	fp_init(&thread->fpstate);
+#if defined(CONFIG_VFP)
+	vfp_flush_thread(&thread->vfpstate);
+#endif
 }
 
 void release_thread(struct task_struct *dead_task)
 {
+#if defined(CONFIG_VFP)
+	vfp_release_thread(&dead_task->thread_info->vfpstate);
+#endif
+#if defined(CONFIG_IWMMXT)
+	iwmmxt_task_release(dead_task->thread_info);
+#endif
 }
 
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
@@ -325,7 +347,7 @@ copy_thread(int nr, unsigned long clone_flags, unsigned long stack_start,
 	struct thread_info *thread = p->thread_info;
 	struct pt_regs *childregs;
 
-	childregs = ((struct pt_regs *)((unsigned long)thread + THREAD_SIZE - 8)) - 1;
+	childregs = ((struct pt_regs *)((unsigned long)thread + THREAD_START_SP)) - 1;
 	*childregs = *regs;
 	childregs->ARM_r0 = 0;
 	childregs->ARM_sp = stack_start;
@@ -333,6 +355,9 @@ copy_thread(int nr, unsigned long clone_flags, unsigned long stack_start,
 	memset(&thread->cpu_context, 0, sizeof(struct cpu_context_save));
 	thread->cpu_context.sp = (unsigned long)childregs;
 	thread->cpu_context.pc = (unsigned long)ret_from_fork;
+
+	if (clone_flags & CLONE_SETTLS)
+		thread->tp_value = regs->ARM_r3;
 
 	return 0;
 }
@@ -350,6 +375,7 @@ int dump_fpu (struct pt_regs *regs, struct user_fp *fp)
 
 	return used_math != 0;
 }
+EXPORT_SYMBOL(dump_fpu);
 
 /*
  * fill in the user structure for a core dump..
@@ -378,6 +404,7 @@ void dump_thread(struct pt_regs * regs, struct user * dump)
 	dump->regs = *regs;
 	dump->u_fpvalid = dump_fpu (regs, &dump->u_fp);
 }
+EXPORT_SYMBOL(dump_thread);
 
 /*
  * Shuffle the argument into the correct register before calling the
@@ -385,13 +412,15 @@ void dump_thread(struct pt_regs * regs, struct user * dump)
  * the thread function, and r3 points to the exit function.
  */
 extern void kernel_thread_helper(void);
-asm(	".align\n"
+asm(	".section .text\n"
+"	.align\n"
 "	.type	kernel_thread_helper, #function\n"
 "kernel_thread_helper:\n"
 "	mov	r0, r1\n"
 "	mov	lr, r3\n"
 "	mov	pc, r2\n"
-"	.size	kernel_thread_helper, . - kernel_thread_helper");
+"	.size	kernel_thread_helper, . - kernel_thread_helper\n"
+"	.previous");
 
 /*
  * Create a kernel thread.
@@ -410,30 +439,28 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 
 	return do_fork(flags|CLONE_VM|CLONE_UNTRACED, 0, &regs, 0, NULL, NULL);
 }
-
-/*
- * These bracket the sleeping functions..
- */
-#define first_sched	((unsigned long) scheduling_functions_start_here)
-#define last_sched	((unsigned long) scheduling_functions_end_here)
+EXPORT_SYMBOL(kernel_thread);
 
 unsigned long get_wchan(struct task_struct *p)
 {
 	unsigned long fp, lr;
-	unsigned long stack_page;
+	unsigned long stack_start, stack_end;
 	int count = 0;
 	if (!p || p == current || p->state == TASK_RUNNING)
 		return 0;
 
-	stack_page = 4096 + (unsigned long)p->thread_info;
+	stack_start = (unsigned long)(p->thread_info + 1);
+	stack_end = ((unsigned long)p->thread_info) + THREAD_SIZE;
+
 	fp = thread_saved_fp(p);
 	do {
-		if (fp < stack_page || fp > 4092+stack_page)
+		if (fp < stack_start || fp > stack_end)
 			return 0;
 		lr = pc_pointer (((unsigned long *)fp)[-1]);
-		if (lr < first_sched || lr > last_sched)
+		if (!in_sched_functions(lr))
 			return lr;
 		fp = *(unsigned long *) (fp - 12);
 	} while (count ++ < 16);
 	return 0;
 }
+EXPORT_SYMBOL(get_wchan);

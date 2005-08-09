@@ -33,18 +33,17 @@
 
 #include "opl4_local.h"
 #include <linux/init.h>
+#include <linux/moduleparam.h>
 #include <sound/initval.h>
 
 MODULE_AUTHOR("Clemens Ladisch <clemens@ladisch.de>");
 MODULE_DESCRIPTION("OPL4 wavetable synth driver");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_CLASSES("{sound}");
 
 int volume_boost = 8;
 
-MODULE_PARM(volume_boost, "i");
+module_param(volume_boost, int, 0644);
 MODULE_PARM_DESC(volume_boost, "Additional volume for OPL4 wavetable sounds.");
-MODULE_PARM_SYNTAX(volume_boost, "default:8");
 
 static int snd_opl4_seq_use_inc(opl4_t *opl4)
 {
@@ -60,7 +59,7 @@ static void snd_opl4_seq_use_dec(opl4_t *opl4)
 
 static int snd_opl4_seq_use(void *private_data, snd_seq_port_subscribe_t *info)
 {
-	opl4_t *opl4 = snd_magic_cast(opl4_t, private_data, return -ENXIO);
+	opl4_t *opl4 = private_data;
 	int err;
 
 	down(&opl4->access_mutex);
@@ -87,7 +86,7 @@ static int snd_opl4_seq_use(void *private_data, snd_seq_port_subscribe_t *info)
 
 static int snd_opl4_seq_unuse(void *private_data, snd_seq_port_subscribe_t *info)
 {
-	opl4_t *opl4 = snd_magic_cast(opl4_t, private_data, return -ENXIO);
+	opl4_t *opl4 = private_data;
 
 	snd_opl4_synth_shutdown(opl4);
 
@@ -111,7 +110,7 @@ static snd_midi_op_t opl4_ops = {
 static int snd_opl4_seq_event_input(snd_seq_event_t *ev, int direct,
 				    void *private_data, int atomic, int hop)
 {
-	opl4_t *opl4 = snd_magic_cast(opl4_t, private_data, return -ENXIO);
+	opl4_t *opl4 = private_data;
 
 	snd_midi_process_event(&opl4_ops, ev, opl4->chset);
 	return 0;
@@ -119,7 +118,7 @@ static int snd_opl4_seq_event_input(snd_seq_event_t *ev, int direct,
 
 static void snd_opl4_seq_free_port(void *private_data)
 {
-	opl4_t *opl4 = snd_magic_cast(opl4_t, private_data, return);
+	opl4_t *opl4 = private_data;
 
 	snd_midi_channel_free_set(opl4->chset);
 }

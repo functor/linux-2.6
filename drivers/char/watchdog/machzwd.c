@@ -88,12 +88,6 @@ static unsigned short zf_readw(unsigned char port)
 	return inw(DATA_W);
 }
 
-static unsigned short zf_readb(unsigned char port)
-{
-	outb(port, INDEX);
-	return inb(DATA_B);
-}
-
 
 MODULE_AUTHOR("Fernando Fuganti <fuganti@conectiva.com.br>");
 MODULE_DESCRIPTION("MachZ ZF-Logic Watchdog driver");
@@ -155,13 +149,6 @@ static unsigned long next_heartbeat = 0;
 #endif
 
 
-/* STATUS register functions */
-
-static inline unsigned char zf_get_status(void)
-{
-	return zf_readb(STATUS);
-}
-
 static inline void zf_set_status(unsigned char new)
 {
 	zf_writeb(STATUS, new);
@@ -182,22 +169,6 @@ static inline void zf_set_control(unsigned short new)
 
 
 /* WD#? counter functions */
-/*
- *	Just get current counter value
- */
-
-static inline unsigned short zf_get_timer(unsigned char n)
-{
-	switch(n){
-		case WD1:
-			return zf_readw(COUNTER_1);
-		case WD2:
-			return zf_readb(COUNTER_2);
-		default:
-			return 0;
-	}
-}
-
 /*
  *	Just set counter value
  */
@@ -302,13 +273,9 @@ static void zf_ping(unsigned long data)
 	}
 }
 
-static ssize_t zf_write(struct file *file, const char *buf, size_t count,
+static ssize_t zf_write(struct file *file, const char __user *buf, size_t count,
 								loff_t *ppos)
 {
-	/*  Can't seek (pwrite) on this device  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
-
 	/* See if we got the magic character */
 	if(count){
 
@@ -352,15 +319,16 @@ static ssize_t zf_write(struct file *file, const char *buf, size_t count,
 static int zf_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 	unsigned long arg)
 {
+	void __user *argp = (void __user *)arg;
+	int __user *p = argp;
 	switch(cmd){
 		case WDIOC_GETSUPPORT:
-			if (copy_to_user((struct watchdog_info *)arg,
-					 &zf_info, sizeof(zf_info)))
+			if (copy_to_user(argp, &zf_info, sizeof(zf_info)))
 				return -EFAULT;
 			break;
 
 		case WDIOC_GETSTATUS:
-			return put_user(0, (int *) arg);
+			return put_user(0, p);
 
 		case WDIOC_KEEPALIVE:
 			zf_ping(0);
@@ -388,7 +356,7 @@ static int zf_open(struct inode *inode, struct file *file)
 
 	zf_timer_on();
 
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int zf_close(struct inode *inode, struct file *file)
@@ -428,6 +396,7 @@ static int zf_notify_sys(struct notifier_block *this, unsigned long code,
 
 static struct file_operations zf_fops = {
 	.owner          = THIS_MODULE,
+	.llseek         = no_llseek,
 	.write          = zf_write,
 	.ioctl          = zf_ioctl,
 	.open           = zf_open,
@@ -519,7 +488,7 @@ out:
 }
 
 
-void __exit zf_exit(void)
+static void __exit zf_exit(void)
 {
 	zf_timer_off();
 

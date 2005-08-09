@@ -26,9 +26,10 @@
 #include <asm-generic/vmlinux.lds.h>
 /* needed for the processor specific cache alignment size */	
 #include <asm/cache.h>
+#include <asm/page.h>
 	
 /* ld script to make hppa Linux kernel */
-#ifndef CONFIG_PARISC64
+#ifndef CONFIG_64BIT
 OUTPUT_FORMAT("elf32-hppa-linux")
 OUTPUT_ARCH(hppa)
 #else
@@ -37,7 +38,7 @@ OUTPUT_ARCH(hppa:hppa2.0w)
 #endif
 
 ENTRY(_stext)
-#ifndef CONFIG_PARISC64
+#ifndef CONFIG_64BIT
 jiffies = jiffies_64 + 4;
 #else
 jiffies = jiffies_64;
@@ -45,13 +46,18 @@ jiffies = jiffies_64;
 SECTIONS
 {
 
-  . = 0x10100000;
+  . = KERNEL_BINARY_TEXT_START;
 
   _text = .;			/* Text and read-only data */
   .text ALIGN(16) : {
-	*(.text*)
+	*(.text)
 	SCHED_TEXT
-	*(.PARISC.unwind)
+	LOCK_TEXT
+	*(.text.do_softirq)
+	*(.text.sys_exit)
+	*(.text.do_sigaltstack)
+	*(.text.do_fork)
+	*(.text.*)
 	*(.fixup)
 	*(.lock.text)		/* out-of-line lock text */
 	*(.gnu.warning)
@@ -72,8 +78,15 @@ SECTIONS
   __ex_table : { *(__ex_table) }
   __stop___ex_table = .;
 
+  __start___unwind = .;         /* unwind info */
+  .PARISC.unwind : { *(.PARISC.unwind) }
+  __stop___unwind = .;
+ 
   .data : {			/* Data */
 	*(.data)
+	*(.data.vm0.pmd)
+	*(.data.vm0.pgd)
+	*(.data.vm0.pte)
 	CONSTRUCTORS
 	}
 
@@ -88,6 +101,10 @@ SECTIONS
   . = ALIGN(L1_CACHE_BYTES);
   .data.cacheline_aligned : { *(.data.cacheline_aligned) }
 
+  /* PA-RISC locks requires 16-byte alignment */
+  . = ALIGN(16);
+  .data.lock_aligned : { *(.data.lock_aligned) }
+
   _edata = .;			/* End of data section */
 
   . = ALIGN(16384); 		/* init_task */
@@ -98,7 +115,7 @@ SECTIONS
   . = ALIGN(16384);	
   init_istack : { *(init_istack) }
 
-#ifdef CONFIG_PARISC64
+#ifdef CONFIG_64BIT
   . = ALIGN(16);               /* Linkage tables */
   .opd : { *(.opd) } PROVIDE (__gp = .); 
   .plt : { *(.plt) } 
@@ -117,9 +134,6 @@ SECTIONS
   __setup_start = .;
   .init.setup : { *(.init.setup) }
   __setup_end = .;
-  __start___param = .;
-  __param : { *(__param) }
-  __stop___param = .;
   __initcall_start = .;
   .initcall.init : {
 	*(.initcall1.init) 
@@ -169,7 +183,7 @@ SECTIONS
   /* Sections to be discarded */
   /DISCARD/ : {
 	*(.exitcall.exit)
-#ifdef CONFIG_PARISC64
+#ifdef CONFIG_64BIT
 	/* temporary hack until binutils is fixed to not emit these
 	 for static binaries */
 	*(.interp)

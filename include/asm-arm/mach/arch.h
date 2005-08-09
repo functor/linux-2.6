@@ -8,20 +8,15 @@
  * published by the Free Software Foundation.
  */
 
-/*
- * The size of struct machine_desc
- *   (for assembler code)
- */
-#define SIZEOF_MACHINE_DESC	52
-
 #ifndef __ASSEMBLY__
 
 struct tag;
 struct meminfo;
+struct sys_timer;
 
 struct machine_desc {
 	/*
-	 * Note! The first four elements are used
+	 * Note! The first five elements are used
 	 * by assembler code in head-armv.S
 	 */
 	unsigned int		nr;		/* architecture number	*/
@@ -45,6 +40,7 @@ struct machine_desc {
 					 struct meminfo *);
 	void			(*map_io)(void);/* IO mapping function	*/
 	void			(*init_irq)(void);
+	struct sys_timer	*timer;		/* system tick timer	*/
 	void			(*init_machine)(void);
 };
 

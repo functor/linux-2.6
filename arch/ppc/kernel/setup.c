@@ -7,6 +7,7 @@
 #include <linux/string.h>
 #include <linux/sched.h>
 #include <linux/init.h>
+#include <linux/kernel.h>
 #include <linux/reboot.h>
 #include <linux/delay.h>
 #include <linux/initrd.h>
@@ -16,6 +17,7 @@
 #include <linux/seq_file.h>
 #include <linux/root_dev.h>
 #include <linux/cpu.h>
+#include <linux/console.h>
 
 #include <asm/residual.h>
 #include <asm/io.h>
@@ -37,6 +39,11 @@
 #include <asm/sections.h>
 #include <asm/nvram.h>
 #include <asm/xmon.h>
+#include <asm/ocp.h>
+
+#if defined(CONFIG_85xx) || defined(CONFIG_83xx)
+#include <asm/ppc_sys.h>
+#endif
 
 #if defined CONFIG_KGDB
 #include <asm/kgdb.h>
@@ -53,8 +60,6 @@ extern void ppc6xx_idle(void);
 extern void power4_idle(void);
 
 extern boot_infos_t *boot_infos;
-char saved_command_line[COMMAND_LINE_SIZE];
-unsigned char aux_device_present;
 struct ide_machdep_calls ppc_ide_md;
 char *sysmap;
 unsigned long sysmap_size;
@@ -177,7 +182,7 @@ int show_cpuinfo(struct seq_file *m, void *v)
 	pvr = cpu_data[i].pvr;
 	lpj = cpu_data[i].loops_per_jiffy;
 #else
-	pvr = mfspr(PVR);
+	pvr = mfspr(SPRN_PVR);
 	lpj = loops_per_jiffy;
 #endif
 
@@ -216,19 +221,26 @@ int show_cpuinfo(struct seq_file *m, void *v)
 			return err;
 	}
 
-	switch (PVR_VER(pvr)) {
-	case 0x0020:	/* 403 family */
-		maj = PVR_MAJ(pvr) + 1;
+	/* If we are a Freescale core do a simple check so
+	 * we dont have to keep adding cases in the future */
+	if ((PVR_VER(pvr) & 0x8000) == 0x8000) {
+		maj = PVR_MAJ(pvr);
 		min = PVR_MIN(pvr);
-		break;
-	case 0x1008:	/* 740P/750P ?? */
-		maj = ((pvr >> 8) & 0xFF) - 1;
-		min = pvr & 0xFF;
-		break;
-	default:
-		maj = (pvr >> 8) & 0xFF;
-		min = pvr & 0xFF;
-		break;
+	} else {
+		switch (PVR_VER(pvr)) {
+			case 0x0020:	/* 403 family */
+				maj = PVR_MAJ(pvr) + 1;
+				min = PVR_MIN(pvr);
+				break;
+			case 0x1008:	/* 740P/750P ?? */
+				maj = ((pvr >> 8) & 0xFF) - 1;
+				min = pvr & 0xFF;
+				break;
+			default:
+				maj = (pvr >> 8) & 0xFF;
+				min = pvr & 0xFF;
+				break;
+		}
 	}
 
 	seq_printf(m, "revision\t: %hd.%hd (pvr %04x %04x)\n",
@@ -236,6 +248,12 @@ int show_cpuinfo(struct seq_file *m, void *v)
 
 	seq_printf(m, "bogomips\t: %lu.%02lu\n",
 		   lpj / (500000/HZ), (lpj / (5000/HZ)) % 100);
+
+#if defined(CONFIG_85xx) || defined(CONFIG_83xx)
+	if (cur_ppc_sys_spec->ppc_sys_name)
+		seq_printf(m, "chipset\t\t: %s\n",
+			cur_ppc_sys_spec->ppc_sys_name);
+#endif
 
 #ifdef CONFIG_SMP
 	seq_printf(m, "\n");
@@ -329,14 +347,15 @@ int __openfirmware
 of_show_percpuinfo(struct seq_file *m, int i)
 {
 	struct device_node *cpu_node;
-	int *fp, s;
+	u32 *fp;
+	int s;
 	
 	cpu_node = find_type_devices("cpu");
 	if (!cpu_node)
 		return 0;
 	for (s = 0; s < i && cpu_node->next; s++)
 		cpu_node = cpu_node->next;
-	fp = (int *) get_property(cpu_node, "clock-frequency", NULL);
+	fp = (u32 *)get_property(cpu_node, "clock-frequency", NULL);
 	if (fp)
 		seq_printf(m, "clock\t\t: %dMHz\n", *fp / 1000000);
 	return 0;
@@ -417,7 +436,6 @@ platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
 	 * are used for initrd_start and initrd_size,
 	 * otherwise they contain 0xdeadbeef.
 	 */
-	cmd_line[0] = 0;
 	if (r3 >= 0x4000 && r3 < 0x800000 && r4 == 0) {
 		strlcpy(cmd_line, (char *)r3 + KERNELBASE,
 			sizeof(cmd_line));
@@ -473,6 +491,63 @@ platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
 		break;
 	}
 }
+
+#ifdef CONFIG_SERIAL_CORE_CONSOLE
+extern char *of_stdout_device;
+
+static int __init set_preferred_console(void)
+{
+	struct device_node *prom_stdout;
+	char *name;
+	int offset = 0;
+
+	if (of_stdout_device == NULL)
+		return -ENODEV;
+
+	/* The user has requested a console so this is already set up. */
+	if (strstr(saved_command_line, "console="))
+		return -EBUSY;
+
+	prom_stdout = find_path_device(of_stdout_device);
+	if (!prom_stdout)
+		return -ENODEV;
+
+	name = (char *)get_property(prom_stdout, "name", NULL);
+	if (!name)
+		return -ENODEV;
+
+	if (strcmp(name, "serial") == 0) {
+		int i;
+		u32 *reg = (u32 *)get_property(prom_stdout, "reg", &i);
+		if (i > 8) {
+			switch (reg[1]) {
+				case 0x3f8:
+					offset = 0;
+					break;
+				case 0x2f8:
+					offset = 1;
+					break;
+				case 0x898:
+					offset = 2;
+					break;
+				case 0x890:
+					offset = 3;
+					break;
+				default:
+					/* We dont recognise the serial port */
+					return -ENODEV;
+			}
+		}
+	} else if (strcmp(name, "ch-a") == 0)
+		offset = 0;
+	else if (strcmp(name, "ch-b") == 0)
+		offset = 1;
+	else
+		return -ENODEV;
+	return add_preferred_console("ttyS", offset, NULL);
+}
+console_initcall(set_preferred_console);
+#endif /* CONFIG_SERIAL_CORE_CONSOLE */
 #endif /* CONFIG_PPC_MULTIPLATFORM */
 
 struct bi_record *find_bootinfo(void)
@@ -557,7 +632,7 @@ machine_init(unsigned long r3, unsigned long r4, unsigned long r5,
 /* Checks "l2cr=xxxx" command-line option */
 int __init ppc_setup_l2cr(char *str)
 {
-	if (cur_cpu_spec[0]->cpu_features & CPU_FTR_L2CR) {
+	if (cpu_has_feature(CPU_FTR_L2CR)) {
 		unsigned long val = simple_strtoul(str, NULL, 0);
 		printk(KERN_INFO "l2cr set to %lx\n", val);
 		_set_L2CR(0);		/* force invalidate by disable cache */
@@ -567,7 +642,7 @@ int __init ppc_setup_l2cr(char *str)
 }
 __setup("l2cr=", ppc_setup_l2cr);
 
-#ifdef CONFIG_NVRAM
+#ifdef CONFIG_GENERIC_NVRAM
 
 /* Generic nvram hooks used by drivers/char/gen_nvram.c */
 unsigned char nvram_read_byte(int addr)
@@ -620,7 +695,6 @@ arch_initcall(ppc_init);
 /* Warning, IO base is not yet inited */
 void __init setup_arch(char **cmdline_p)
 {
-	extern int panic_timeout;
 	extern char *klimit;
 	extern void do_init_bootmem(void);
 
@@ -638,7 +712,7 @@ void __init setup_arch(char **cmdline_p)
 #ifdef CONFIG_XMON
 	xmon_map_scc();
 	if (strstr(cmd_line, "xmon"))
-		xmon(0);
+		xmon(NULL);
 #endif /* CONFIG_XMON */
 	if ( ppc_md.progress ) ppc_md.progress("setup_arch: enter", 0x3eab);
 
@@ -659,7 +733,7 @@ void __init setup_arch(char **cmdline_p)
 	 * Systems with OF can look in the properties on the cpu node(s)
 	 * for a possibly more accurate value.
 	 */
-	if (cur_cpu_spec[0]->cpu_features & CPU_FTR_SPLIT_ID_CACHE) {
+	if (cpu_has_feature(CPU_FTR_SPLIT_ID_CACHE)) {
 		dcache_bsize = cur_cpu_spec[0]->dcache_bsize;
 		icache_bsize = cur_cpu_spec[0]->icache_bsize;
 		ucache_bsize = 0;
@@ -676,12 +750,24 @@ void __init setup_arch(char **cmdline_p)
 	init_mm.brk = (unsigned long) klimit;
 
 	/* Save unparsed command line copy for /proc/cmdline */
-	strlcpy(saved_command_line, cmd_line, sizeof(saved_command_line));
+	strlcpy(saved_command_line, cmd_line, COMMAND_LINE_SIZE);
 	*cmdline_p = cmd_line;
+
+	parse_early_param();
 
 	/* set up the bootmem stuff with available memory */
 	do_init_bootmem();
 	if ( ppc_md.progress ) ppc_md.progress("setup_arch: bootmem", 0x3eab);
+
+#ifdef CONFIG_PPC_OCP
+	/* Initialize OCP device list */
+	ocp_early_init();
+	if ( ppc_md.progress ) ppc_md.progress("ocp: exit", 0x3eab);
+#endif
+
+#ifdef CONFIG_DUMMY_CONSOLE
+	conswitchp = &dummy_con;
+#endif
 
 	ppc_md.setup_arch();
 	if ( ppc_md.progress ) ppc_md.progress("arch: exit", 0x3eab);

@@ -143,21 +143,22 @@ ccw_device_sense_pgid_irq(struct ccw_device *cdev, enum dev_event dev_event)
 	int ret;
 
 	irb = (struct irb *) __LC_IRB;
-	/*
-	 * Unsolicited interrupts may pertain to an earlier status pending or
-	 * busy condition on the subchannel. Retry sense pgid.
-	 */
+	/* Retry sense pgid for cc=1. */
 	if (irb->scsw.stctl ==
 	    (SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS)) {
-		ret = __ccw_device_sense_pgid_start(cdev);
-		if (ret && ret != -EBUSY)
-			ccw_device_sense_pgid_done(cdev, ret);
+		if (irb->scsw.cc == 1) {
+			ret = __ccw_device_sense_pgid_start(cdev);
+			if (ret && ret != -EBUSY)
+				ccw_device_sense_pgid_done(cdev, ret);
+		}
 		return;
 	}
 	if (ccw_device_accumulate_and_sense(cdev, irb) != 0)
 		return;
 	sch = to_subchannel(cdev->dev.parent);
-	switch (__ccw_device_check_sense_pgid(cdev)) {
+	ret = __ccw_device_check_sense_pgid(cdev);
+	memset(&cdev->private->irb, 0, sizeof(struct irb));
+	switch (ret) {
 	/* 0, -ETIME, -EOPNOTSUPP, -EAGAIN, -EACCES or -EUSERS */
 	case 0:			/* Sense Path Group ID successful. */
 		if (cdev->private->pgid.inf.ps.state1 == SNID_STATE1_RESET)
@@ -308,21 +309,22 @@ ccw_device_verify_irq(struct ccw_device *cdev, enum dev_event dev_event)
 {
 	struct subchannel *sch;
 	struct irb *irb;
+	int ret;
 
 	irb = (struct irb *) __LC_IRB;
-	/*
-	 * Unsolicited interrupts may pertain to an earlier status pending or
-	 * busy condition on the subchannel. Restart path verification.
-	 */
+	/* Retry set pgid for cc=1. */
 	if (irb->scsw.stctl ==
 	    (SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS)) {
-		__ccw_device_verify_start(cdev);
+		if (irb->scsw.cc == 1)
+			__ccw_device_verify_start(cdev);
 		return;
 	}
 	if (ccw_device_accumulate_and_sense(cdev, irb) != 0)
 		return;
 	sch = to_subchannel(cdev->dev.parent);
-	switch (__ccw_device_check_pgid(cdev)) {
+	ret = __ccw_device_check_pgid(cdev);
+	memset(&cdev->private->irb, 0, sizeof(struct irb));
+	switch (ret) {
 	/* 0, -ETIME, -EAGAIN, -EOPNOTSUPP or -EACCES */
 	case 0:
 		/* Establish or Resign Path Group done. Update vpm. */
@@ -338,6 +340,10 @@ ccw_device_verify_irq(struct ccw_device *cdev, enum dev_event dev_event)
 		 * One of those strange devices which claim to be able
 		 * to do multipathing but not for Set Path Group ID.
 		 */
+		if (cdev->private->flags.pgid_single) {
+			ccw_device_verify_done(cdev, -EOPNOTSUPP);
+			break;
+		}
 		cdev->private->flags.pgid_single = 1;
 		/* fall through. */
 	case -EAGAIN:		/* Try again. */
@@ -393,14 +399,18 @@ ccw_device_disband_irq(struct ccw_device *cdev, enum dev_event dev_event)
 	int ret;
 
 	irb = (struct irb *) __LC_IRB;
-	/* Ignore unsolicited interrupts. */
+	/* Retry set pgid for cc=1. */
 	if (irb->scsw.stctl ==
-	    		(SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS))
+	    (SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS)) {
+		if (irb->scsw.cc == 1)
+			__ccw_device_disband_start(cdev);
 		return;
+	}
 	if (ccw_device_accumulate_and_sense(cdev, irb) != 0)
 		return;
 	sch = to_subchannel(cdev->dev.parent);
 	ret = __ccw_device_check_pgid(cdev);
+	memset(&cdev->private->irb, 0, sizeof(struct irb));
 	switch (ret) {
 	/* 0, -ETIME, -EAGAIN, -EOPNOTSUPP or -EACCES */
 	case 0:			/* disband successful. */

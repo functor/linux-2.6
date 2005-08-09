@@ -44,6 +44,7 @@
 #include <linux/sched.h>
 #include <linux/stddef.h>
 #include <linux/unistd.h>
+#include <linux/kallsyms.h>
 
 #include <asm/io.h>
 #include <asm/offsets.h>
@@ -51,8 +52,9 @@
 #include <asm/pdc_chassis.h>
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>
+#include <asm/unwind.h>
 
-int hlt_counter;
+static int hlt_counter;
 
 /*
  * Power off function, if any
@@ -249,7 +251,7 @@ int
 sys_clone(unsigned long clone_flags, unsigned long usp,
 	  struct pt_regs *regs)
 {
-	int *user_tid = (int *)regs->gr[26];
+	int __user *user_tid = (int __user *)regs->gr[26];
 
 	/* usp must be word aligned.  This also prevents users from
 	 * passing in the value 1 (which is the signal for a special
@@ -260,7 +262,7 @@ sys_clone(unsigned long clone_flags, unsigned long usp,
 	if(usp == 0)
 		usp = regs->gr[30];
 
-	return do_fork(clone_flags & ~CLONE_IDLETASK, usp, regs, 0, user_tid, NULL);
+	return do_fork(clone_flags, usp, regs, 0, user_tid, NULL);
 }
 
 int
@@ -355,16 +357,40 @@ asmlinkage int sys_execve(struct pt_regs *regs)
 	int error;
 	char *filename;
 
-	filename = getname((char *) regs->gr[26]);
+	filename = getname((const char __user *) regs->gr[26]);
 	error = PTR_ERR(filename);
 	if (IS_ERR(filename))
 		goto out;
-	error = do_execve(filename, (char **) regs->gr[25],
-		(char **) regs->gr[24], regs);
-	if (error == 0)
+	error = do_execve(filename, (char __user **) regs->gr[25],
+		(char __user **) regs->gr[24], regs);
+	if (error == 0) {
+		task_lock(current);
 		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
+	}
 	putname(filename);
 out:
 
 	return error;
+}
+
+unsigned long 
+get_wchan(struct task_struct *p)
+{
+	struct unwind_frame_info info;
+	unsigned long ip;
+	int count = 0;
+	/*
+	 * These bracket the sleeping functions..
+	 */
+
+	unwind_frame_init_from_blocked_task(&info, p);
+	do {
+		if (unwind_once(&info) < 0)
+			return 0;
+		ip = info.ip;
+		if (!in_sched_functions(ip))
+			return ip;
+	} while (count++ < 16);
+	return 0;
 }

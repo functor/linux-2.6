@@ -45,7 +45,7 @@ config BPQETHER
 
 config DMASCC
 	tristate "High-speed (DMA) SCC driver for AX.25"
-	depends on ISA && AX25 && BROKEN_ON_SMP
+	depends on ISA && AX25 && BROKEN_ON_SMP && ISA_DMA_API
 	---help---
 	  This is a driver for high-speed SCC boards, i.e. those supporting
 	  DMA on one port. You usually use those boards to connect your
@@ -78,7 +78,7 @@ config DMASCC
 
 config SCC
 	tristate "Z8530 SCC driver"
-	depends on ISA && AX25
+	depends on ISA && AX25 && ISA_DMA_API
 	---help---
 	  These cards are used to connect your Linux box to an amateur radio
 	  in order to communicate with other computers. If you want to use
@@ -113,6 +113,7 @@ config SCC_TRXECHO
 config BAYCOM_SER_FDX
 	tristate "BAYCOM ser12 fullduplex driver for AX.25"
 	depends on AX25
+	select CRC_CCITT
 	---help---
 	  This is one of two drivers for Baycom style simple amateur radio
 	  modems that connect to a serial interface. The driver supports the
@@ -132,6 +133,7 @@ config BAYCOM_SER_FDX
 config BAYCOM_SER_HDX
 	tristate "BAYCOM ser12 halfduplex driver for AX.25"
 	depends on AX25
+	select CRC_CCITT
 	---help---
 	  This is one of two drivers for Baycom style simple amateur radio
 	  modems that connect to a serial interface. The driver supports the
@@ -149,6 +151,7 @@ config BAYCOM_SER_HDX
 config BAYCOM_PAR
 	tristate "BAYCOM picpar and par96 driver for AX.25"
 	depends on PARPORT && AX25
+	select CRC_CCITT
 	---help---
 	  This is a driver for Baycom style simple amateur radio modems that
 	  connect to a parallel interface. The driver supports the picpar and
@@ -163,6 +166,7 @@ config BAYCOM_PAR
 config BAYCOM_EPP
 	tristate "BAYCOM epp driver for AX.25"
 	depends on PARPORT && AX25 && !64BIT
+	select CRC_CCITT
 	---help---
 	  This is a driver for Baycom style simple amateur radio modems that
 	  connect to a parallel interface. The driver supports the EPP

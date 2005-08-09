@@ -33,12 +33,15 @@
 
 #define	 RPCDBG_FACILITY RPCDBG_CACHE
 
+static void cache_defer_req(struct cache_req *req, struct cache_head *item);
+static void cache_revisit_request(struct cache_head *item);
+
 void cache_init(struct cache_head *h)
 {
 	time_t now = get_seconds();
 	h->next = NULL;
 	h->flags = 0;
-	atomic_set(&h->refcnt, 0);
+	atomic_set(&h->refcnt, 1);
 	h->expiry_time = now + CACHE_NEW_EXPIRY;
 	h->last_refresh = now;
 }
@@ -158,7 +161,7 @@ void cache_fresh(struct cache_detail *detail,
  */
 
 static LIST_HEAD(cache_list);
-static spinlock_t cache_list_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(cache_list_lock);
 static struct cache_detail *current_detail;
 static int current_index;
 
@@ -214,6 +217,7 @@ void cache_register(struct cache_detail *cd)
 	cd->entries = 0;
 	atomic_set(&cd->readers, 0);
 	cd->last_close = 0;
+	cd->last_warn = -1;
 	list_add(&cd->others, &cache_list);
 	spin_unlock(&cache_list_lock);
 
@@ -255,39 +259,13 @@ int cache_unregister(struct cache_detail *cd)
 	return 0;
 }
 
-struct cache_detail *cache_find(char *name)
-{
-	struct list_head *l;
-
-	spin_lock(&cache_list_lock);
-	list_for_each(l, &cache_list) {
-		struct cache_detail *cd = list_entry(l, struct cache_detail, others);
-		
-		if (strcmp(cd->name, name)==0) {
-			atomic_inc(&cd->inuse);
-			spin_unlock(&cache_list_lock);
-			return cd;
-		}
-	}
-	spin_unlock(&cache_list_lock);
-	return NULL;
-}
-
-/* cache_drop must be called on any cache returned by
- * cache_find, after it has been used
- */
-void cache_drop(struct cache_detail *detail)
-{
-	atomic_dec(&detail->inuse);
-}
-
 /* clean cache tries to find something to clean
  * and cleans it.
  * It returns 1 if it cleaned something,
  *            0 if it didn't find anything this time
  *           -1 if it fell off the end of the list.
  */
-int cache_clean(void)
+static int cache_clean(void)
 {
 	int rv = 0;
 	struct list_head *next;
@@ -343,12 +321,10 @@ int cache_clean(void)
 			if (test_and_clear_bit(CACHE_PENDING, &ch->flags))
 				queue_loose(current_detail, ch);
 
-			if (!atomic_read(&ch->refcnt))
+			if (atomic_read(&ch->refcnt) == 1)
 				break;
 		}
 		if (ch) {
-			cache_get(ch);
-			clear_bit(CACHE_HASHED, &ch->flags);
 			*cp = ch->next;
 			ch->next = NULL;
 			current_detail->entries--;
@@ -399,9 +375,10 @@ void cache_flush(void)
 
 void cache_purge(struct cache_detail *detail)
 {
-	detail->flush_time = get_seconds()+1;
+	detail->flush_time = LONG_MAX;
 	detail->nextcheck = get_seconds();
 	cache_flush();
+	detail->flush_time = 1;
 }
 
 
@@ -426,12 +403,12 @@ void cache_purge(struct cache_detail *detail)
 
 #define	DFR_MAX	300	/* ??? */
 
-spinlock_t cache_defer_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(cache_defer_lock);
 static LIST_HEAD(cache_defer_list);
 static struct list_head cache_defer_hash[DFR_HASHSIZE];
 static int cache_defer_cnt;
 
-void cache_defer_req(struct cache_req *req, struct cache_head *item)
+static void cache_defer_req(struct cache_req *req, struct cache_head *item)
 {
 	struct cache_deferred_req *dreq;
 	int hash = DFR_HASH(item);
@@ -481,7 +458,7 @@ void cache_defer_req(struct cache_req *req, struct cache_head *item)
 	}
 }
 
-void cache_revisit_request(struct cache_head *item)
+static void cache_revisit_request(struct cache_head *item)
 {
 	struct cache_deferred_req *dreq;
 	struct list_head pending;
@@ -554,7 +531,7 @@ void cache_clean_deferred(void *owner)
  *
  */
 
-static spinlock_t queue_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(queue_lock);
 static DECLARE_MUTEX(queue_io_sem);
 
 struct cache_queue {
@@ -574,15 +551,12 @@ struct cache_reader {
 };
 
 static ssize_t
-cache_read(struct file *filp, char *buf, size_t count, loff_t *ppos)
+cache_read(struct file *filp, char __user *buf, size_t count, loff_t *ppos)
 {
 	struct cache_reader *rp = filp->private_data;
 	struct cache_request *rq;
 	struct cache_detail *cd = PDE(filp->f_dentry->d_inode)->data;
 	int err;
-
-	if (ppos != &filp->f_pos)
-		return -ESPIPE;
 
 	if (count == 0)
 		return 0;
@@ -652,44 +626,33 @@ cache_read(struct file *filp, char *buf, size_t count, loff_t *ppos)
 	return err ? err :  count;
 }
 
+static char write_buf[8192]; /* protected by queue_io_sem */
+
 static ssize_t
-cache_write(struct file *filp, const char *buf, size_t count,
+cache_write(struct file *filp, const char __user *buf, size_t count,
 	    loff_t *ppos)
 {
 	int err;
-	char *page;
 	struct cache_detail *cd = PDE(filp->f_dentry->d_inode)->data;
-
-	if (ppos != &filp->f_pos)
-		return -ESPIPE;
 
 	if (count == 0)
 		return 0;
-	if (count > PAGE_SIZE)
+	if (count >= sizeof(write_buf))
 		return -EINVAL;
 
 	down(&queue_io_sem);
 
-	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (page == NULL) {
+	if (copy_from_user(write_buf, buf, count)) {
 		up(&queue_io_sem);
-		return -ENOMEM;
-	}
-
-	if (copy_from_user(page, buf, count)) {
-		up(&queue_io_sem);
-		kfree(page);
 		return -EFAULT;
 	}
-	if (count < PAGE_SIZE)
-		page[count] = '\0';
+	write_buf[count] = '\0';
 	if (cd->cache_parse)
-		err = cd->cache_parse(cd, page, count);
+		err = cd->cache_parse(cd, write_buf, count);
 	else
 		err = -EINVAL;
 
 	up(&queue_io_sem);
-	kfree(page);
 	return err ? err : count;
 }
 
@@ -750,7 +713,7 @@ cache_ioctl(struct inode *ino, struct file *filp,
 		}
 	spin_unlock(&queue_lock);
 
-	return put_user(len, (int *)arg);
+	return put_user(len, (int __user *)arg);
 }
 
 static int
@@ -758,6 +721,7 @@ cache_open(struct inode *inode, struct file *filp)
 {
 	struct cache_reader *rp = NULL;
 
+	nonseekable_open(inode, filp);
 	if (filp->f_mode & FMODE_READ) {
 		struct cache_detail *cd = PDE(inode)->data;
 
@@ -913,7 +877,14 @@ void qword_addhex(char **bpp, int *lp, char *buf, int blen)
 	*lp = len;
 }
 
-			
+static void warn_no_listener(struct cache_detail *detail)
+{
+	if (detail->last_warn != detail->last_close) {
+		detail->last_warn = detail->last_close;
+		if (detail->warn_no_listener)
+			detail->warn_no_listener(detail);
+	}
+}
 
 /*
  * register an upcall request to user-space.
@@ -931,9 +902,10 @@ static int cache_make_upcall(struct cache_detail *detail, struct cache_head *h)
 		return -EINVAL;
 
 	if (atomic_read(&detail->readers) == 0 &&
-	    detail->last_close < get_seconds() - 60)
-		/* nobody is listening */
-		return -EINVAL;
+	    detail->last_close < get_seconds() - 30) {
+			warn_no_listener(detail);
+			return -EINVAL;
+	}
 
 	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
 	if (!buf)
@@ -1122,7 +1094,7 @@ static int c_show(struct seq_file *m, void *p)
 	return cd->cache_show(m, cd, cp);
 }
 
-struct seq_operations cache_content_op = {
+static struct seq_operations cache_content_op = {
 	.start	= c_start,
 	.next	= c_next,
 	.stop	= c_stop,
@@ -1165,7 +1137,7 @@ static struct file_operations content_file_operations = {
 	.release	= content_release,
 };
 
-static ssize_t read_flush(struct file *file, char *buf,
+static ssize_t read_flush(struct file *file, char __user *buf,
 			    size_t count, loff_t *ppos)
 {
 	struct cache_detail *cd = PDE(file->f_dentry->d_inode)->data;
@@ -1186,7 +1158,7 @@ static ssize_t read_flush(struct file *file, char *buf,
 	return len;
 }
 
-static ssize_t write_flush(struct file * file, const char * buf,
+static ssize_t write_flush(struct file * file, const char __user * buf,
 			     size_t count, loff_t *ppos)
 {
 	struct cache_detail *cd = PDE(file->f_dentry->d_inode)->data;
@@ -1211,6 +1183,7 @@ static ssize_t write_flush(struct file * file, const char * buf,
 }
 
 static struct file_operations cache_flush_operations = {
+	.open		= nonseekable_open,
 	.read		= read_flush,
 	.write		= write_flush,
 };

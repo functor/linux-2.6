@@ -17,7 +17,7 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA
 
-   $Id: sbc_gxx.c,v 1.26 2003/05/26 08:50:36 dwmw2 Exp $
+   $Id: sbc_gxx.c,v 1.33 2004/11/28 09:40:40 dwmw2 Exp $
 
 The SBC-MediaGX / SBC-GXx has up to 16 MiB of 
 Intel StrataFlash (28F320/28F640) in x8 mode.  
@@ -84,8 +84,8 @@ separate MTD devices.
 // Globals
 
 static volatile int page_in_window = -1; // Current page in window.
-static unsigned long iomapadr;
-static spinlock_t sbc_gxx_spin = SPIN_LOCK_UNLOCKED;
+static void __iomem *iomapadr;
+static DEFINE_SPINLOCK(sbc_gxx_spin);
 
 /* partition_info gives details on the logical partitions that the split the 
  * single flash device into. If the size if zero we use up to the end of the
@@ -114,32 +114,12 @@ static inline void sbc_gxx_page(struct map_info *map, unsigned long ofs)
 }
 
 
-static __u8 sbc_gxx_read8(struct map_info *map, unsigned long ofs)
+static map_word sbc_gxx_read8(struct map_info *map, unsigned long ofs)
 {
-	__u8 ret;
+	map_word ret;
 	spin_lock(&sbc_gxx_spin);
 	sbc_gxx_page(map, ofs);
-	ret = readb(iomapadr + (ofs & WINDOW_MASK));
-	spin_unlock(&sbc_gxx_spin);
-	return ret;
-}
-
-static __u16 sbc_gxx_read16(struct map_info *map, unsigned long ofs)
-{
-	__u16 ret;
-	spin_lock(&sbc_gxx_spin);
-	sbc_gxx_page(map, ofs);
-	ret = readw(iomapadr + (ofs & WINDOW_MASK));
-	spin_unlock(&sbc_gxx_spin);
-	return ret;
-}
-
-static __u32 sbc_gxx_read32(struct map_info *map, unsigned long ofs)
-{
-	__u32 ret;
-	spin_lock(&sbc_gxx_spin);
-	sbc_gxx_page(map, ofs);
-	ret = readl(iomapadr + (ofs & WINDOW_MASK));
+	ret.x[0] = readb(iomapadr + (ofs & WINDOW_MASK));
 	spin_unlock(&sbc_gxx_spin);
 	return ret;
 }
@@ -161,27 +141,11 @@ static void sbc_gxx_copy_from(struct map_info *map, void *to, unsigned long from
 	}
 }
 
-static void sbc_gxx_write8(struct map_info *map, __u8 d, unsigned long adr)
+static void sbc_gxx_write8(struct map_info *map, map_word d, unsigned long adr)
 {
 	spin_lock(&sbc_gxx_spin);
 	sbc_gxx_page(map, adr);
-	writeb(d, iomapadr + (adr & WINDOW_MASK));
-	spin_unlock(&sbc_gxx_spin);
-}
-
-static void sbc_gxx_write16(struct map_info *map, __u16 d, unsigned long adr)
-{
-	spin_lock(&sbc_gxx_spin);
-	sbc_gxx_page(map, adr);
-	writew(d, iomapadr + (adr & WINDOW_MASK));
-	spin_unlock(&sbc_gxx_spin);
-}
-
-static void sbc_gxx_write32(struct map_info *map, __u32 d, unsigned long adr)
-{
-	spin_lock(&sbc_gxx_spin);
-	sbc_gxx_page(map, adr);
-	writel(d, iomapadr + (adr & WINDOW_MASK));
+	writeb(d.x[0], iomapadr + (adr & WINDOW_MASK));
 	spin_unlock(&sbc_gxx_spin);
 }
 
@@ -208,14 +172,10 @@ static struct map_info sbc_gxx_map = {
 	.size = MAX_SIZE_KiB*1024, /* this must be set to a maximum possible amount
 			 of flash so the cfi probe routines find all
 			 the chips */
-	.buswidth = 1,
-	.read8 = sbc_gxx_read8,
-	.read16 = sbc_gxx_read16,
-	.read32 = sbc_gxx_read32,
+	.bankwidth = 1,
+	.read = sbc_gxx_read8,
 	.copy_from = sbc_gxx_copy_from,
-	.write8 = sbc_gxx_write8,
-	.write16 = sbc_gxx_write16,
-	.write32 = sbc_gxx_write32,
+	.write = sbc_gxx_write8,
 	.copy_to = sbc_gxx_copy_to
 };
 
@@ -229,13 +189,13 @@ static void cleanup_sbc_gxx(void)
 		map_destroy( all_mtd );
 	}
 
-	iounmap((void *)iomapadr);
+	iounmap(iomapadr);
 	release_region(PAGE_IO,PAGE_IO_SIZE);
 }
 
-int __init init_sbc_gxx(void)
+static int __init init_sbc_gxx(void)
 {
-  	iomapadr = (unsigned long)ioremap(WINDOW_START, WINDOW_LENGTH);
+  	iomapadr = ioremap(WINDOW_START, WINDOW_LENGTH);
 	if (!iomapadr) {
 		printk( KERN_ERR"%s: failed to ioremap memory region\n",
 			sbc_gxx_map.name );
@@ -246,7 +206,7 @@ int __init init_sbc_gxx(void)
 		printk( KERN_ERR"%s: IO ports 0x%x-0x%x in use\n",
 			sbc_gxx_map.name,
 			PAGE_IO, PAGE_IO+PAGE_IO_SIZE-1 );
-		iounmap((void *)iomapadr);
+		iounmap(iomapadr);
 		return -EAGAIN;
 	}
 		

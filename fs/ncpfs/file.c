@@ -99,7 +99,7 @@ out:
 }
 
 static ssize_t
-ncp_file_read(struct file *file, char *buf, size_t count, loff_t *ppos)
+ncp_file_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
 	struct dentry *dentry = file->f_dentry;
 	struct inode *inode = dentry->d_inode;
@@ -115,11 +115,6 @@ ncp_file_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 
 	if (!ncp_conn_valid(NCP_SERVER(inode)))
 		return -EIO;
-	if (!S_ISREG(inode->i_mode)) {
-		DPRINTK("ncp_file_read: read from non-file, mode %07o\n",
-			inode->i_mode);
-		return -EINVAL;
-	}
 
 	pos = *ppos;
 
@@ -175,10 +170,8 @@ ncp_file_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 
 	*ppos = pos;
 
-	if (!IS_RDONLY(inode)) {
-		inode->i_atime = CURRENT_TIME;
-	}
-	
+	file_accessed(file);
+
 	DPRINTK("ncp_file_read: exit %s/%s\n",
 		dentry->d_parent->d_name.name, dentry->d_name.name);
 outrel:
@@ -187,7 +180,7 @@ outrel:
 }
 
 static ssize_t
-ncp_file_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
+ncp_file_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
 	struct dentry *dentry = file->f_dentry;
 	struct inode *inode = dentry->d_inode;
@@ -201,11 +194,6 @@ ncp_file_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
 		dentry->d_parent->d_name.name, dentry->d_name.name);
 	if (!ncp_conn_valid(NCP_SERVER(inode)))
 		return -EIO;
-	if (!S_ISREG(inode->i_mode)) {
-		DPRINTK("ncp_file_write: write to non-file, mode %07o\n",
-			inode->i_mode);
-		return -EINVAL;
-	}
 	if ((ssize_t) count < 0)
 		return -EINVAL;
 	pos = *ppos;
@@ -273,8 +261,9 @@ ncp_file_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
 		}
 	}
 	vfree(bouncebuffer);
-	inode->i_mtime = inode->i_atime = CURRENT_TIME;
-	
+
+	inode_update_time(inode, 1);
+
 	*ppos = pos;
 
 	if (pos > inode->i_size) {

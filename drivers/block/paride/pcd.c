@@ -142,34 +142,14 @@ enum {D_PRT, D_PRO, D_UNI, D_MOD, D_SLV, D_DLY};
 
 static spinlock_t pcd_lock;
 
-#ifndef MODULE
-
-#include "setup.h"
-
-static STT pcd_stt[6] = {
-	{"drive0", 6, drive0},
-	{"drive1", 6, drive1},
-	{"drive2", 6, drive2},
-	{"drive3", 6, drive3},
-	{"disable", 1, &disable},
-	{"nice", 1, &nice}
-};
-
-void pcd_setup(char *str, int *ints)
-{
-	generic_setup(pcd_stt, 6, str);
-}
-
-#endif
-
-MODULE_PARM(verbose, "i");
-MODULE_PARM(major, "i");
-MODULE_PARM(name, "s");
-MODULE_PARM(nice, "i");
-MODULE_PARM(drive0, "1-6i");
-MODULE_PARM(drive1, "1-6i");
-MODULE_PARM(drive2, "1-6i");
-MODULE_PARM(drive3, "1-6i");
+module_param(verbose, bool, 0644);
+module_param(major, int, 0);
+module_param(name, charp, 0);
+module_param(nice, int, 0);
+module_param_array(drive0, int, NULL, 0);
+module_param_array(drive1, int, NULL, 0);
+module_param_array(drive2, int, NULL, 0);
+module_param_array(drive3, int, NULL, 0);
 
 #include "paride.h"
 #include "pseudo.h"
@@ -198,7 +178,7 @@ static int pcd_get_mcn(struct cdrom_device_info *cdi, struct cdrom_mcn *mcn);
 static int pcd_audio_ioctl(struct cdrom_device_info *cdi,
 			   unsigned int cmd, void *arg);
 static int pcd_packet(struct cdrom_device_info *cdi,
-		      struct cdrom_generic_command *cgc);
+		      struct packet_command *cgc);
 
 static int pcd_detect(void);
 static void pcd_probe_capabilities(void);
@@ -218,7 +198,7 @@ struct pcd_unit {
 	struct gendisk *disk;
 };
 
-struct pcd_unit pcd[PCD_UNITS];
+static struct pcd_unit pcd[PCD_UNITS];
 
 static char pcd_scratch[64];
 static char pcd_buffer[2048];	/* raw block buffer */
@@ -259,7 +239,7 @@ static int pcd_block_ioctl(struct inode *inode, struct file *file,
 				unsigned cmd, unsigned long arg)
 {
 	struct pcd_unit *cd = inode->i_bdev->bd_disk->private_data;
-	return cdrom_ioctl(&cd->info, inode, cmd, arg);
+	return cdrom_ioctl(file, &cd->info, inode, cmd, arg);
 }
 
 static int pcd_block_media_changed(struct gendisk *disk)
@@ -501,7 +481,7 @@ static int pcd_atapi(struct pcd_unit *cd, char *cmd, int dlen, char *buf, char *
 	return r;
 }
 
-static int pcd_packet(struct cdrom_device_info *cdi, struct cdrom_generic_command *cgc)
+static int pcd_packet(struct cdrom_device_info *cdi, struct packet_command *cgc)
 {
 	return pcd_atapi(cdi->handle, cgc->cmd, cgc->buflen, cgc->buffer,
 			 "generic packet");
@@ -752,7 +732,7 @@ static void do_pcd_request(request_queue_t * q)
 			pcd_count = pcd_req->current_nr_sectors;
 			pcd_buf = pcd_req->buffer;
 			pcd_busy = 1;
-			ps_set_intr(do_pcd_read, 0, 0, nice);
+			ps_set_intr(do_pcd_read, NULL, 0, nice);
 			return;
 		} else
 			end_request(pcd_req, 0);

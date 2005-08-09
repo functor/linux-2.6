@@ -23,35 +23,27 @@
 
 /*-------------------------------------------------------------------------*/
 
-static struct usb_hcd *ohci_hcd_alloc (void)
+static void ohci_hcd_init (struct ohci_hcd *ohci)
 {
-	struct ohci_hcd *ohci;
-
-	ohci = (struct ohci_hcd *) kmalloc (sizeof *ohci, GFP_KERNEL);
-	if (ohci != 0) {
-		memset (ohci, 0, sizeof (struct ohci_hcd));
-		ohci->hcd.product_desc = "OHCI Host Controller";
-		return &ohci->hcd;
-	}
-	return 0;
-}
-
-static void ohci_hcd_free (struct usb_hcd *hcd)
-{
-	kfree (hcd_to_ohci (hcd));
+	ohci->next_statechange = jiffies;
+	spin_lock_init (&ohci->lock);
+	INIT_LIST_HEAD (&ohci->pending);
+	INIT_WORK (&ohci->rh_resume, ohci_rh_resume, ohci_to_hcd(ohci));
 }
 
 /*-------------------------------------------------------------------------*/
 
 static int ohci_mem_init (struct ohci_hcd *ohci)
 {
-	ohci->td_cache = dma_pool_create ("ohci_td", ohci->hcd.self.controller,
+	ohci->td_cache = dma_pool_create ("ohci_td",
+		ohci_to_hcd(ohci)->self.controller,
 		sizeof (struct td),
 		32 /* byte alignment */,
 		0 /* no page-crossing issues */);
 	if (!ohci->td_cache)
 		return -ENOMEM;
-	ohci->ed_cache = dma_pool_create ("ohci_ed", ohci->hcd.self.controller,
+	ohci->ed_cache = dma_pool_create ("ohci_ed",
+		ohci_to_hcd(ohci)->self.controller,
 		sizeof (struct ed),
 		16 /* byte alignment */,
 		0 /* no page-crossing issues */);
@@ -66,11 +58,11 @@ static void ohci_mem_cleanup (struct ohci_hcd *ohci)
 {
 	if (ohci->td_cache) {
 		dma_pool_destroy (ohci->td_cache);
-		ohci->td_cache = 0;
+		ohci->td_cache = NULL;
 	}
 	if (ohci->ed_cache) {
 		dma_pool_destroy (ohci->ed_cache);
-		ohci->ed_cache = 0;
+		ohci->ed_cache = NULL;
 	}
 }
 
@@ -100,7 +92,7 @@ td_alloc (struct ohci_hcd *hc, int mem_flags)
 	if (td) {
 		/* in case hc fetches it, make it look dead */
 		memset (td, 0, sizeof *td);
-		td->hwNextTD = cpu_to_le32 (dma);
+		td->hwNextTD = cpu_to_hc32 (hc, dma);
 		td->td_dma = dma;
 		/* hashed in td_fill */
 	}
@@ -116,7 +108,7 @@ td_free (struct ohci_hcd *hc, struct td *td)
 		prev = &(*prev)->td_hash;
 	if (*prev)
 		*prev = td->td_hash;
-	else if ((td->hwINFO & TD_DONE) != 0)
+	else if ((td->hwINFO & cpu_to_hc32(hc, TD_DONE)) != 0)
 		ohci_dbg (hc, "no hash for td %p\n", td);
 	dma_pool_free (hc->td_cache, td, td->td_dma);
 }

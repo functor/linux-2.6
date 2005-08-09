@@ -126,7 +126,7 @@ static void receive_char(struct r3964_info *pInfo, const unsigned char c);
 static void receive_error(struct r3964_info *pInfo, const char flag);
 static void on_timeout(unsigned long priv);
 static int enable_signals(struct r3964_info *pInfo, pid_t pid, int arg);
-static int read_telegram(struct r3964_info *pInfo, pid_t pid, unsigned char *buf);
+static int read_telegram(struct r3964_info *pInfo, pid_t pid, unsigned char __user *buf);
 static void add_msg(struct r3964_client_info *pClient, int msg_id, int arg,
              int error_code, struct r3964_block_header *pBlock);
 static struct r3964_message* remove_msg(struct r3964_info *pInfo, 
@@ -137,7 +137,7 @@ static void remove_client_block(struct r3964_info *pInfo,
 static int  r3964_open(struct tty_struct *tty);
 static void r3964_close(struct tty_struct *tty);
 static ssize_t r3964_read(struct tty_struct *tty, struct file *file,
-                     unsigned char *buf, size_t nr);
+                     unsigned char __user *buf, size_t nr);
 static ssize_t r3964_write(struct tty_struct * tty, struct file * file,
                       const unsigned char * buf, size_t nr);
 static int r3964_ioctl(struct tty_struct * tty, struct file * file,
@@ -910,7 +910,7 @@ static int enable_signals(struct r3964_info *pInfo, pid_t pid, int arg)
    return 0;
 }
 
-static int read_telegram(struct r3964_info *pInfo, pid_t pid, unsigned char *buf)
+static int read_telegram(struct r3964_info *pInfo, pid_t pid, unsigned char __user *buf)
 {
     struct r3964_client_info *pClient;
     struct r3964_block_header *block;
@@ -1185,7 +1185,7 @@ static void r3964_close(struct tty_struct *tty)
 }
 
 static ssize_t r3964_read(struct tty_struct *tty, struct file *file,
-			  unsigned char *buf, size_t nr)
+			  unsigned char __user *buf, size_t nr)
 {
    struct r3964_info *pInfo=(struct r3964_info*)tty->disc_data;
    struct r3964_client_info *pClient;
@@ -1252,7 +1252,6 @@ static ssize_t r3964_write(struct tty_struct * tty, struct file * file,
    struct r3964_block_header *pHeader;
    struct r3964_client_info *pClient;
    unsigned char *new_data;
-   int status;
    int pid;
    
    TRACE_L("write request, %d characters", count);
@@ -1262,12 +1261,6 @@ static ssize_t r3964_write(struct tty_struct * tty, struct file * file,
 
    if(!pInfo)
       return -EIO;
-
-   status = verify_area (VERIFY_READ, data, count);
-   if (status != 0) 
-   {
-      return status;
-   }
 
 /*
  * Ensure that the caller does not wish to send too much.
@@ -1283,7 +1276,7 @@ static ssize_t r3964_write(struct tty_struct * tty, struct file * file,
       count = R3964_MTU;
    }
 /*
- * Allocate a buffer for the data and fetch it from the user space.
+ * Allocate a buffer for the data and copy it from the buffer with header prepended
  */
    new_data = kmalloc (count+sizeof(struct r3964_block_header), GFP_KERNEL);
    TRACE_M("r3964_write - kmalloc %x",(int)new_data);
@@ -1310,7 +1303,7 @@ static ssize_t r3964_write(struct tty_struct * tty, struct file * file,
       pHeader->owner = pClient;
    }
 
-   __copy_from_user(pHeader->data, data, count); /* We already verified this */
+   memcpy(pHeader->data, data, count); /* We already verified this */
 
    if(pInfo->flags & R3964_DEBUG)
    {
@@ -1348,7 +1341,7 @@ static int r3964_ioctl(struct tty_struct * tty, struct file * file,
             pInfo->flags &= ~R3964_BCC;
          return 0;
       case R3964_READ_TELEGRAM:
-         return read_telegram(pInfo, current->pid, (unsigned char *)arg);
+         return read_telegram(pInfo, current->pid, (unsigned char __user *)arg);
       default:
          return -ENOIOCTLCMD;
    }

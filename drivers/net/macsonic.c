@@ -42,10 +42,10 @@
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
 #include <linux/module.h>
+#include <linux/bitops.h>
 
 #include <asm/bootinfo.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
 #include <asm/pgtable.h>
 #include <asm/io.h>
 #include <asm/hwtest.h>
@@ -53,7 +53,6 @@
 #include <asm/macintosh.h>
 #include <asm/macints.h>
 #include <asm/mac_via.h>
-#include <asm/pgalloc.h>
 
 #define SREGS_PAD(n)    u16 n;
 
@@ -613,7 +612,6 @@ static struct net_device *dev_macsonic;
 
 MODULE_PARM(sonic_debug, "i");
 MODULE_PARM_DESC(sonic_debug, "macsonic debug level (1-4)");
-MODULE_LICENSE("GPL");
 
 int
 init_module(void)
@@ -640,6 +638,7 @@ cleanup_module(void)
 #define vdma_free(baz)
 #define sonic_chiptomem(bat) (bat)
 #define PHYSADDR(quux) (quux)
+#define CPHYSADDR(quux) (quux)
 
 #define sonic_request_irq       request_irq
 #define sonic_free_irq          free_irq

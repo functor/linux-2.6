@@ -15,6 +15,7 @@
 
 #include <linux/module.h>
 #include <linux/i2o.h>
+#include <linux/delay.h>
 
 /* Exec OSM functions */
 extern struct bus_type i2o_bus_type;
@@ -34,7 +35,7 @@ extern struct bus_type i2o_bus_type;
 static inline int i2o_device_issue_claim(struct i2o_device *dev, u32 cmd,
 					 u32 type)
 {
-	struct i2o_message *msg;
+	struct i2o_message __iomem *msg;
 	u32 m;
 
 	m = i2o_msg_get_wait(dev->iop, &msg, I2O_TIMEOUT_MESSAGE_GET);
@@ -65,10 +66,11 @@ int i2o_device_claim(struct i2o_device *dev)
 
 	rc = i2o_device_issue_claim(dev, I2O_CMD_UTIL_CLAIM, I2O_CLAIM_PRIMARY);
 	if (!rc)
-		pr_debug("claim of device %d succeded\n", dev->lct_data.tid);
+		pr_debug("i2o: claim of device %d succeded\n",
+			 dev->lct_data.tid);
 	else
-		pr_debug("claim of device %d failed %d\n", dev->lct_data.tid,
-			 rc);
+		pr_debug("i2o: claim of device %d failed %d\n",
+			 dev->lct_data.tid, rc);
 
 	up(&dev->lock);
 
@@ -106,15 +108,14 @@ int i2o_device_claim_release(struct i2o_device *dev)
 		if (!rc)
 			break;
 
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout(HZ);
+		ssleep(1);
 	}
 
 	if (!rc)
-		pr_debug("claim release of device %d succeded\n",
+		pr_debug("i2o: claim release of device %d succeded\n",
 			 dev->lct_data.tid);
 	else
-		pr_debug("claim release of device %d failed %d\n",
+		pr_debug("i2o: claim release of device %d failed %d\n",
 			 dev->lct_data.tid, rc);
 
 	up(&dev->lock);
@@ -133,7 +134,7 @@ static void i2o_device_release(struct device *dev)
 {
 	struct i2o_device *i2o_dev = to_i2o_device(dev);
 
-	pr_debug("Release I2O device %s\n", dev->bus_id);
+	pr_debug("i2o: device %s released\n", dev->bus_id);
 
 	kfree(i2o_dev);
 };
@@ -211,8 +212,8 @@ static struct i2o_device *i2o_device_alloc(void)
  *	Returns a pointer to the I2O device on success or negative error code
  *	on failure.
  */
-struct i2o_device *i2o_device_add(struct i2o_controller *c,
-				  i2o_lct_entry * entry)
+static struct i2o_device *i2o_device_add(struct i2o_controller *c,
+					 i2o_lct_entry * entry)
 {
 	struct i2o_device *dev;
 
@@ -241,7 +242,7 @@ struct i2o_device *i2o_device_add(struct i2o_controller *c,
 
 	i2o_driver_notify_device_add_all(dev);
 
-	pr_debug("I2O device %s added\n", dev->device.bus_id);
+	pr_debug("i2o: device %s added\n", dev->device.bus_id);
 
 	return dev;
 };
@@ -304,7 +305,8 @@ int i2o_device_parse_lct(struct i2o_controller *c)
 
 	max = (lct->table_size - 3) / 9;
 
-	pr_debug("LCT has %d entries (LCT size: %d)\n", max, lct->table_size);
+	pr_debug("%s: LCT has %d entries (LCT size: %d)\n", c->name, max,
+		 lct->table_size);
 
 	/* remove devices, which are not in the LCT anymore */
 	list_for_each_entry_safe(dev, tmp, &c->devices, list) {
@@ -446,7 +448,7 @@ static struct class_interface i2o_device_class_interface = {
 int i2o_parm_issue(struct i2o_device *i2o_dev, int cmd, void *oplist,
 		   int oplen, void *reslist, int reslen)
 {
-	struct i2o_message *msg;
+	struct i2o_message __iomem *msg;
 	u32 m;
 	u32 *res32 = (u32 *) reslist;
 	u32 *restmp = (u32 *) reslist;
@@ -547,47 +549,6 @@ int i2o_parm_field_get(struct i2o_device *i2o_dev, int group, int field,
 }
 
 /*
- *	Set a scalar group value or a whole group.
- */
-int i2o_parm_field_set(struct i2o_device *i2o_dev, int group, int field,
-		       void *buf, int buflen)
-{
-	u16 *opblk;
-	u8 resblk[8 + buflen];	/* 8 bytes for header */
-	int size;
-
-	opblk = kmalloc(buflen + 64, GFP_KERNEL);
-	if (opblk == NULL) {
-		printk(KERN_ERR "i2o: no memory for operation buffer.\n");
-		return -ENOMEM;
-	}
-
-	opblk[0] = 1;		/* operation count */
-	opblk[1] = 0;		/* pad */
-	opblk[2] = I2O_PARAMS_FIELD_SET;
-	opblk[3] = group;
-
-	if (field == -1) {	/* whole group */
-		opblk[4] = -1;
-		memcpy(opblk + 5, buf, buflen);
-	} else {		/* single field */
-
-		opblk[4] = 1;
-		opblk[5] = field;
-		memcpy(opblk + 6, buf, buflen);
-	}
-
-	size = i2o_parm_issue(i2o_dev, I2O_CMD_UTIL_PARAMS_SET, opblk,
-			      12 + buflen, resblk, sizeof(resblk));
-
-	kfree(opblk);
-	if (size > buflen)
-		return buflen;
-
-	return size;
-}
-
-/*
  * 	if oper == I2O_PARAMS_TABLE_GET, get from all rows
  * 		if fieldcount == -1 return all fields
  *			ibuf and ibuflen are unused (use NULL, 0)
@@ -669,6 +630,5 @@ void i2o_device_exit(void)
 EXPORT_SYMBOL(i2o_device_claim);
 EXPORT_SYMBOL(i2o_device_claim_release);
 EXPORT_SYMBOL(i2o_parm_field_get);
-EXPORT_SYMBOL(i2o_parm_field_set);
 EXPORT_SYMBOL(i2o_parm_table_get);
 EXPORT_SYMBOL(i2o_parm_issue);

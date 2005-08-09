@@ -1,4 +1,4 @@
-/* $Id: idifunc.c,v 1.14.4.2 2004/05/09 16:42:20 armin Exp $
+/* $Id: idifunc.c,v 1.14.4.4 2004/08/28 20:03:53 armin Exp $
  *
  * Driver for Eicon DIVA Server ISDN cards.
  * User Mode IDI Interface 
@@ -24,8 +24,6 @@ extern char *DRIVERRELEASE_IDI;
 extern void DIVA_DIDD_Read(void *, int);
 extern int diva_user_mode_idi_create_adapter(const DESCRIPTOR *, int);
 extern void diva_user_mode_idi_remove_adapter(int);
-
-#define MAX_DESCRIPTORS  32
 
 static dword notify_handle;
 static DESCRIPTOR DAdapter;
@@ -199,7 +197,7 @@ static int DIVA_INIT_FUNCTION connect_didd(void)
 			req.didd_notify.e.Rc =
 			    IDI_SYNC_REQ_DIDD_REGISTER_ADAPTER_NOTIFY;
 			req.didd_notify.info.callback = (void *)didd_callback;
-			req.didd_notify.info.context = 0;
+			req.didd_notify.info.context = NULL;
 			DAdapter.request((ENTITY *) & req);
 			if (req.didd_notify.e.Rc != 0xff) {
 				stop_dbg();

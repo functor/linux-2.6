@@ -309,8 +309,8 @@ static void emu10k1_unregister_devices(struct emu10k1_card *card)
 	unregister_sound_dsp(card->audio_dev);
 }
 
-int emu10k1_info_proc (char *page, char **start, off_t off,
-		    int count, int *eof, void *data)
+static int emu10k1_info_proc (char *page, char **start, off_t off,
+			      int count, int *eof, void *data)
 {
 	struct emu10k1_card *card = data;
 	int len = 0;
@@ -342,26 +342,26 @@ static int __devinit emu10k1_proc_init(struct emu10k1_card *card)
 {
 	char s[48];
 
-	if (!proc_mkdir ("driver/emu10k1", 0)) {
+	if (!proc_mkdir ("driver/emu10k1", NULL)) {
 		printk(KERN_ERR "emu10k1: unable to create proc directory driver/emu10k1\n");
 		goto err_out;
 	}
 
 	sprintf(s, "driver/emu10k1/%s", pci_name(card->pci_dev));
-	if (!proc_mkdir (s, 0)) {
+	if (!proc_mkdir (s, NULL)) {
 		printk(KERN_ERR "emu10k1: unable to create proc directory %s\n", s);
 		goto err_emu10k1_proc;
 	}
 
 	sprintf(s, "driver/emu10k1/%s/info", pci_name(card->pci_dev));
-	if (!create_proc_read_entry (s, 0, 0, emu10k1_info_proc, card)) {
+	if (!create_proc_read_entry (s, 0, NULL, emu10k1_info_proc, card)) {
 		printk(KERN_ERR "emu10k1: unable to create proc entry %s\n", s);
 		goto err_dev_proc;
 	}
 
 	if (!card->is_aps) {
 		sprintf(s, "driver/emu10k1/%s/ac97", pci_name(card->pci_dev));
-		if (!create_proc_read_entry (s, 0, 0, ac97_read_proc, card->ac97)) {
+		if (!create_proc_read_entry (s, 0, NULL, ac97_read_proc, card->ac97)) {
 			printk(KERN_ERR "emu10k1: unable to create proc entry %s\n", s);
 			goto err_proc_ac97;
 		}
@@ -524,7 +524,7 @@ static void __devinit timer_init(struct emu10k1_card *card)
 {
 	INIT_LIST_HEAD(&card->timers);
 	card->timer_delay = TIMER_STOPPED;
-	card->timer_lock = SPIN_LOCK_UNLOCKED;
+	spin_lock_init(&card->timer_lock);
 }
 
 static void __devinit addxmgr_init(struct emu10k1_card *card)
@@ -873,7 +873,7 @@ static int __devinit fx_init(struct emu10k1_card *card)
 		sblive_writeptr(card, DBG, 0, 0);
 	}
 
-	mgr->lock = SPIN_LOCK_UNLOCKED;
+	spin_lock_init(&mgr->lock);
 
 	// Set up Volume controls, try to keep this the same for both Audigy and Live
 

@@ -1,6 +1,9 @@
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
+/* _XOPEN_SOURCE is needed for pread, but we define _GNU_SOURCE, which defines
+ * that.
+ */
 #include <unistd.h>
 #include <byteswap.h>
 #include <sys/time.h>
@@ -27,20 +30,20 @@ struct cow_header_v1 {
 #define PATH_LEN_V2 MAXPATHLEN
 
 struct cow_header_v2 {
-	unsigned long magic;
-	unsigned long version;
+	__u32 magic;
+	__u32 version;
 	char backing_file[PATH_LEN_V2];
 	time_t mtime;
 	__u64 size;
 	int sectorsize;
 };
 
-/* Define PATH_LEN_V3 as the usual value of MAXPATHLEN, just hard-code it in 
+/* Define PATH_LEN_V3 as the usual value of MAXPATHLEN, just hard-code it in
  * case other systems have different values for MAXPATHLEN
  */
 #define PATH_LEN_V3 4096
 
-/* Changes from V2 - 
+/* Changes from V2 -
  *	PATH_LEN_V3 as described above
  *	Explicitly specify field bit lengths for systems with different
  *		lengths for the usual C types.  Not sure whether char or
@@ -67,7 +70,7 @@ struct cow_header_v2 {
 struct cow_header_v3 {
 	__u32 magic;
 	__u32 version;
-	time_t mtime;
+	__u32 mtime;
 	__u64 size;
 	__u32 sectorsize;
 	__u32 alignment;
@@ -90,15 +93,15 @@ union cow_header {
 #define DIV_ROUND(x, len) (((x) + (len) - 1) / (len))
 #define ROUND_UP(x, align) DIV_ROUND(x, align) * (align)
 
-void cow_sizes(int version, __u64 size, int sectorsize, int align, 
-	       int bitmap_offset, unsigned long *bitmap_len_out, 
+void cow_sizes(int version, __u64 size, int sectorsize, int align,
+	       int bitmap_offset, unsigned long *bitmap_len_out,
 	       int *data_offset_out)
 {
 	if(version < 3){
 		*bitmap_len_out = (size + sectorsize - 1) / (8 * sectorsize);
 
 		*data_offset_out = bitmap_offset + *bitmap_len_out;
-		*data_offset_out = (*data_offset_out + sectorsize - 1) / 
+		*data_offset_out = (*data_offset_out + sectorsize - 1) /
 			sectorsize;
 		*data_offset_out *= sectorsize;
 	}
@@ -117,7 +120,7 @@ static int absolutize(char *to, int size, char *from)
 	int remaining;
 
 	if(getcwd(save_cwd, sizeof(save_cwd)) == NULL) {
-		cow_printf("absolutize : unable to get cwd - errno = %d\n", 
+		cow_printf("absolutize : unable to get cwd - errno = %d\n",
 			   errno);
 		return(-1);
 	}
@@ -126,7 +129,7 @@ static int absolutize(char *to, int size, char *from)
 		*slash = '\0';
 		if(chdir(from)){
 			*slash = '/';
-			cow_printf("absolutize : Can't cd to '%s' - " 
+			cow_printf("absolutize : Can't cd to '%s' - "
 				   "errno = %d\n", from, errno);
 			return(-1);
 		}
@@ -158,8 +161,8 @@ static int absolutize(char *to, int size, char *from)
 	return(0);
 }
 
-int write_cow_header(char *cow_file, int fd, char *backing_file, 
-		     int sectorsize, int alignment, long long *size)
+int write_cow_header(char *cow_file, int fd, char *backing_file,
+		     int sectorsize, int alignment, unsigned long long *size)
 {
 	struct cow_header_v3 *header;
 	unsigned long modtime;
@@ -183,12 +186,12 @@ int write_cow_header(char *cow_file, int fd, char *backing_file,
 	err = -EINVAL;
 	if(strlen(backing_file) > sizeof(header->backing_file) - 1){
 		cow_printf("Backing file name \"%s\" is too long - names are "
-			   "limited to %d characters\n", backing_file, 
+			   "limited to %d characters\n", backing_file,
 			   sizeof(header->backing_file) - 1);
 		goto out_free;
 	}
 
-	if(absolutize(header->backing_file, sizeof(header->backing_file), 
+	if(absolutize(header->backing_file, sizeof(header->backing_file),
 		      backing_file))
 		goto out_free;
 
@@ -234,10 +237,10 @@ int file_reader(__u64 offset, char *buf, int len, void *arg)
 
 /* XXX Need to sanity-check the values read from the header */
 
-int read_cow_header(int (*reader)(__u64, char *, int, void *), void *arg, 
-		    __u32 *version_out, char **backing_file_out, 
-		    time_t *mtime_out, __u64 *size_out, 
-		    int *sectorsize_out, __u32 *align_out, 
+int read_cow_header(int (*reader)(__u64, char *, int, void *), void *arg,
+		    __u32 *version_out, char **backing_file_out,
+		    time_t *mtime_out, unsigned long long *size_out,
+		    int *sectorsize_out, __u32 *align_out,
 		    int *bitmap_offset_out)
 {
 	union cow_header *header;
@@ -310,7 +313,7 @@ int read_cow_header(int (*reader)(__u64, char *, int, void *), void *arg,
 	}
 	else {
 		cow_printf("read_cow_header - invalid COW version\n");
-		goto out;		
+		goto out;
 	}
 	err = -ENOMEM;
 	*backing_file_out = cow_strdup(file);
@@ -326,18 +329,18 @@ int read_cow_header(int (*reader)(__u64, char *, int, void *), void *arg,
 }
 
 int init_cow_file(int fd, char *cow_file, char *backing_file, int sectorsize,
-		  int alignment, int *bitmap_offset_out, 
+		  int alignment, int *bitmap_offset_out,
 		  unsigned long *bitmap_len_out, int *data_offset_out)
 {
-	__u64 size, offset;
+	unsigned long long size, offset;
 	char zero = 0;
 	int err;
 
-	err = write_cow_header(cow_file, fd, backing_file, sectorsize, 
+	err = write_cow_header(cow_file, fd, backing_file, sectorsize,
 			       alignment, &size);
-	if(err) 
+	if(err)
 		goto out;
-	
+
 	*bitmap_offset_out = ROUND_UP(sizeof(struct cow_header_v3), alignment);
 	cow_sizes(COW_VERSION, size, sectorsize, alignment, *bitmap_offset_out,
 		  bitmap_len_out, data_offset_out);
@@ -349,9 +352,9 @@ int init_cow_file(int fd, char *cow_file, char *backing_file, int sectorsize,
 		goto out;
 	}
 
-	/* does not really matter how much we write it is just to set EOF 
+	/* does not really matter how much we write it is just to set EOF
 	 * this also sets the entire COW bitmap
-	 * to zero without having to allocate it 
+	 * to zero without having to allocate it
 	 */
 	err = cow_write_file(fd, &zero, sizeof(zero));
 	if(err != sizeof(zero)){

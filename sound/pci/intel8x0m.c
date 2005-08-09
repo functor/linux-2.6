@@ -30,45 +30,46 @@
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
-#include <linux/gameport.h>
+#include <linux/moduleparam.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/ac97_codec.h>
 #include <sound/info.h>
-#include <sound/mpu401.h>
-#define SNDRV_GET_ID
+#include <sound/control.h>
 #include <sound/initval.h>
 
 MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
-MODULE_DESCRIPTION("Intel 82801AA,82901AB,i810,i820,i830,i840,i845,MX440 modem");
+MODULE_DESCRIPTION("Intel 82801AA,82901AB,i810,i820,i830,i840,i845,MX440; SiS 7013; NVidia MCP/2/2S/3 modems");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_DEVICES("{{Intel,82801AA-ICH},"
+MODULE_SUPPORTED_DEVICE("{{Intel,82801AA-ICH},"
 		"{Intel,82901AB-ICH0},"
 		"{Intel,82801BA-ICH2},"
 		"{Intel,82801CA-ICH3},"
 		"{Intel,82801DB-ICH4},"
 		"{Intel,ICH5},"
-	        "{Intel,MX440}}");
+		"{Intel,ICH6},"
+		"{Intel,ICH7},"
+	        "{Intel,MX440},"
+		"{SiS,7013},"
+		"{NVidia,NForce Modem},"
+		"{NVidia,NForce2 Modem},"
+		"{NVidia,NForce2s Modem},"
+		"{NVidia,NForce3 Modem},"
+		"{AMD,AMD768}}");
 
-
-static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
+static int index[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = -2}; /* Exclude the first card */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
 static int ac97_clock[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 0};
 
-MODULE_PARM(index, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for Intel i8x0 modemcard.");
-MODULE_PARM_SYNTAX(index, SNDRV_INDEX_DESC);
-MODULE_PARM(id, "1-" __MODULE_STRING(SNDRV_CARDS) "s");
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for Intel i8x0 modemcard.");
-MODULE_PARM_SYNTAX(id, SNDRV_ID_DESC);
-MODULE_PARM(enable, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable Intel i8x0 modemcard.");
-MODULE_PARM_SYNTAX(enable, SNDRV_ENABLE_DESC);
-MODULE_PARM(ac97_clock, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(ac97_clock, int, NULL, 0444);
 MODULE_PARM_DESC(ac97_clock, "AC'97 codec clock (0 = auto-detect).");
-MODULE_PARM_SYNTAX(ac97_clock, SNDRV_ENABLED ",default:0");
 
 /*
  *  Direct registers
@@ -95,20 +96,28 @@ MODULE_PARM_SYNTAX(ac97_clock, SNDRV_ENABLED ",default:0");
 #ifndef PCI_DEVICE_ID_INTEL_ICH5_6
 #define PCI_DEVICE_ID_INTEL_ICH5_6	0x24d6
 #endif
+#ifndef PCI_DEVICE_ID_INTEL_ICH6_6
+#define PCI_DEVICE_ID_INTEL_ICH6_6	0x266d
+#endif
+#ifndef PCI_DEVICE_ID_INTEL_ICH7_6
+#define PCI_DEVICE_ID_INTEL_ICH7_6	0x27dd
+#endif
 #ifndef PCI_DEVICE_ID_SI_7013
 #define PCI_DEVICE_ID_SI_7013		0x7013
 #endif
-#if 0
-#ifndef PCI_DEVICE_ID_NVIDIA_MCP_AUDIO
-#define PCI_DEVICE_ID_NVIDIA_MCP_AUDIO	0x01b1
+#ifndef PCI_DEVICE_ID_NVIDIA_MCP_MODEM
+#define PCI_DEVICE_ID_NVIDIA_MCP_MODEM	0x01c1
 #endif
-#ifndef PCI_DEVICE_ID_NVIDIA_MCP2_AUDIO
-#define PCI_DEVICE_ID_NVIDIA_MCP2_AUDIO	0x006a
+#ifndef PCI_DEVICE_ID_NVIDIA_MCP2_MODEM
+#define PCI_DEVICE_ID_NVIDIA_MCP2_MODEM	0x0069
 #endif
-#ifndef PCI_DEVICE_ID_NVIDIA_MCP3_AUDIO
-#define PCI_DEVICE_ID_NVIDIA_MCP3_AUDIO	0x00da
+#ifndef PCI_DEVICE_ID_NVIDIA_MCP2S_MODEM
+#define PCI_DEVICE_ID_NVIDIA_MCP2S_MODEM 0x0089
 #endif
+#ifndef PCI_DEVICE_ID_NVIDIA_MCP3_MODEM
+#define PCI_DEVICE_ID_NVIDIA_MCP3_MODEM	0x00d9
 #endif
+
 
 enum { DEVICE_INTEL, DEVICE_SIS, DEVICE_ALI, DEVICE_NFORCE };
 
@@ -227,23 +236,18 @@ typedef struct {
 } ichdev_t;
 
 typedef struct _snd_intel8x0m intel8x0_t;
-#define chip_t intel8x0_t
 
 struct _snd_intel8x0m {
 	unsigned int device_type;
-	char ac97_name[64];
-	char ctrl_name[64];
 
 	int irq;
 
 	unsigned int mmio;
 	unsigned long addr;
-	unsigned long remap_addr;
-	struct resource *res;
+	void __iomem *remap_addr;
 	unsigned int bm_mmio;
 	unsigned long bmaddr;
-	unsigned long remap_bmaddr;
-	struct resource *res_bm;
+	void __iomem *remap_bmaddr;
 
 	struct pci_dev *pci;
 	snd_card_t *card;
@@ -252,24 +256,18 @@ struct _snd_intel8x0m {
 	snd_pcm_t *pcm[2];
 	ichdev_t ichd[2];
 
-	int in_ac97_init: 1;
+	unsigned int in_ac97_init: 1;
 
 	ac97_bus_t *ac97_bus;
 	ac97_t *ac97;
 
 	spinlock_t reg_lock;
-	spinlock_t ac97_lock;
 	
-	struct snd_dma_device dma_dev;
 	struct snd_dma_buffer bdbars;
 	u32 bdbars_count;
 	u32 int_sta_reg;		/* interrupt status register */
 	u32 int_sta_mask;		/* interrupt status mask */
 	unsigned int pcm_pos_shift;
-	
-#ifdef CONFIG_PM
-	int in_suspend;
-#endif
 };
 
 static struct pci_device_id snd_intel8x0m_ids[] = {
@@ -279,22 +277,75 @@ static struct pci_device_id snd_intel8x0m_ids[] = {
 	{ 0x8086, 0x2486, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL },	/* ICH3 */
 	{ 0x8086, 0x24c6, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL }, /* ICH4 */
 	{ 0x8086, 0x24d6, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL }, /* ICH5 */
+	{ 0x8086, 0x266d, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL },	/* ICH6 */
+	{ 0x8086, 0x27dd, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL },	/* ICH7 */
 	{ 0x8086, 0x7196, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL },	/* 440MX */
 	{ 0x1022, 0x7446, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL },	/* AMD768 */
-#if 0
-	/* TODO: support needed */
 	{ 0x1039, 0x7013, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_SIS },	/* SI7013 */
-	{ 0x10de, 0x01b1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_NFORCE },	/* NFORCE */
-	{ 0x10de, 0x006a, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_NFORCE },	/* NFORCE2 */
-	{ 0x10de, 0x00da, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_NFORCE },	/* NFORCE3 */
+	{ 0x10de, 0x01c1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_NFORCE }, /* NFORCE */
+	{ 0x10de, 0x0069, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_NFORCE }, /* NFORCE2 */
+	{ 0x10de, 0x0089, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_NFORCE }, /* NFORCE2s */
+	{ 0x10de, 0x00d9, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_NFORCE }, /* NFORCE3 */
+#if 0
 	{ 0x1022, 0x746d, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_INTEL },	/* AMD8111 */
 	{ 0x10b9, 0x5455, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEVICE_ALI },   /* Ali5455 */
 #endif
 	{ 0, }
 };
+static int snd_intel8x0m_switch_default_get(snd_kcontrol_t *kcontrol,
+					    snd_ctl_elem_value_t *ucontrol);
+static int snd_intel8x0m_switch_default_put(snd_kcontrol_t *kcontrol,
+					    snd_ctl_elem_value_t *ucontrol);
+static int snd_intel8x0m_switch_default_info(snd_kcontrol_t *kcontrol,
+					     snd_ctl_elem_info_t *uinfo);
+
+#define PRIVATE_VALUE_INITIALIZER(r,m) (((r) & 0xffff) << 16 | ((m) & 0xffff))
+#define PRIVATE_VALUE_MASK(control) ((control)->private_value & 0xffff)
+#define PRIVATE_VALUE_REG(control) (((control)->private_value >> 16) & 0xffff)
+
+static snd_kcontrol_new_t snd_intel8x0m_mixer_switches[] __devinitdata = {
+  { .name  = "Off-hook Switch",
+    .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+    .info  = snd_intel8x0m_switch_default_info,
+    .get   = snd_intel8x0m_switch_default_get,
+    .put   = snd_intel8x0m_switch_default_put,
+    .private_value = PRIVATE_VALUE_INITIALIZER(AC97_GPIO_STATUS,AC97_GPIO_LINE1_OH)
+  }
+};
 
 MODULE_DEVICE_TABLE(pci, snd_intel8x0m_ids);
 
+static int snd_intel8x0m_switch_default_info(snd_kcontrol_t *kcontrol,
+					     snd_ctl_elem_info_t *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = 1;
+	return 0;
+}
+
+static int snd_intel8x0m_switch_default_get(snd_kcontrol_t *kcontrol,
+					    snd_ctl_elem_value_t *ucontrol)
+{
+	unsigned short mask = PRIVATE_VALUE_MASK(kcontrol);
+	unsigned short reg = PRIVATE_VALUE_REG(kcontrol);
+	intel8x0_t *chip = snd_kcontrol_chip(kcontrol);
+	unsigned int status;
+	status = snd_ac97_read(chip->ac97, reg) & mask ? 1 : 0;
+	ucontrol->value.integer.value[0] = status;
+	return 0;
+}
+static int snd_intel8x0m_switch_default_put(snd_kcontrol_t *kcontrol,
+					    snd_ctl_elem_value_t *ucontrol)
+{
+	unsigned short mask = PRIVATE_VALUE_MASK(kcontrol);
+	unsigned short reg = PRIVATE_VALUE_REG(kcontrol);
+	intel8x0_t *chip = snd_kcontrol_chip(kcontrol);
+	unsigned short new_status = ucontrol->value.integer.value[0] ? mask : ~mask;
+	return snd_ac97_update_bits(chip->ac97, reg,
+				    mask, new_status);
+}
 /*
  *  Lowlevel I/O - busmaster
  */
@@ -329,6 +380,14 @@ static void iputbyte(intel8x0_t *chip, u32 offset, u8 val)
 		writeb(val, chip->remap_bmaddr + offset);
 	else
 		outb(val, chip->bmaddr + offset);
+}
+
+static void iputword(intel8x0_t *chip, u32 offset, u16 val)
+{
+	if (chip->bm_mmio)
+		writew(val, chip->remap_bmaddr + offset);
+	else
+		outw(val, chip->bmaddr + offset);
 }
 
 static void iputdword(intel8x0_t *chip, u32 offset, u32 val)
@@ -411,25 +470,22 @@ static void snd_intel8x0_codec_write(ac97_t *ac97,
 				     unsigned short reg,
 				     unsigned short val)
 {
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, ac97->private_data, return);
+	intel8x0_t *chip = ac97->private_data;
 	
-	spin_lock(&chip->ac97_lock);
 	if (snd_intel8x0m_codec_semaphore(chip, ac97->num) < 0) {
 		if (! chip->in_ac97_init)
 			snd_printk("codec_write %d: semaphore is not ready for register 0x%x\n", ac97->num, reg);
 	}
 	iaputword(chip, reg + ac97->num * 0x80, val);
-	spin_unlock(&chip->ac97_lock);
 }
 
 static unsigned short snd_intel8x0_codec_read(ac97_t *ac97,
 					      unsigned short reg)
 {
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, ac97->private_data, return ~0);
+	intel8x0_t *chip = ac97->private_data;
 	unsigned short res;
 	unsigned int tmp;
 
-	spin_lock(&chip->ac97_lock);
 	if (snd_intel8x0m_codec_semaphore(chip, ac97->num) < 0) {
 		if (! chip->in_ac97_init)
 			snd_printk("codec_read %d: semaphore is not ready for register 0x%x\n", ac97->num, reg);
@@ -444,7 +500,6 @@ static unsigned short snd_intel8x0_codec_read(ac97_t *ac97,
 			res = 0xffff;
 		}
 	}
-	spin_unlock(&chip->ac97_lock);
 	return res;
 }
 
@@ -545,13 +600,17 @@ static inline void snd_intel8x0_update(intel8x0_t *chip, ichdev_t *ichdev)
 
 static irqreturn_t snd_intel8x0_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, dev_id, return IRQ_NONE);
+	intel8x0_t *chip = dev_id;
 	ichdev_t *ichdev;
 	unsigned int status;
 	unsigned int i;
 
 	spin_lock(&chip->reg_lock);
 	status = igetdword(chip, chip->int_sta_reg);
+	if (status == 0xffffffff) { /* we are not yet resumed */
+		spin_unlock(&chip->reg_lock);
+		return IRQ_NONE;
+	}
 	if ((status & chip->int_sta_mask) == 0) {
 		if (status)
 			iputdword(chip, chip->int_sta_reg, status);
@@ -641,17 +700,12 @@ static snd_pcm_uframes_t snd_intel8x0_pcm_pointer(snd_pcm_substream_t * substrea
 
 static int snd_intel8x0m_pcm_trigger(snd_pcm_substream_t *substream, int cmd)
 {
-	ichdev_t *ichdev = get_ichdev(substream);
 	/* hook off/on on start/stop */
-	/* TODO: move it to ac97 controls */
+	/* Moved this to mixer control */
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
-		snd_ac97_update_bits(ichdev->ac97, AC97_GPIO_STATUS,
-				     AC97_GPIO_LINE1_OH, AC97_GPIO_LINE1_OH);
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
-		snd_ac97_update_bits(ichdev->ac97, AC97_GPIO_STATUS,
-				     AC97_GPIO_LINE1_OH, ~AC97_GPIO_LINE1_OH);
 		break;
 	default:
 		return -EINVAL;
@@ -687,9 +741,9 @@ static snd_pcm_hardware_t snd_intel8x0m_stream =
 	.rate_max =		16000,
 	.channels_min =		1,
 	.channels_max =		1,
-	.buffer_bytes_max =	32 * 1024,
+	.buffer_bytes_max =	64 * 1024,
 	.period_bytes_min =	32,
-	.period_bytes_max =	32 * 1024,
+	.period_bytes_max =	64 * 1024,
 	.periods_min =		1,
 	.periods_max =		1024,
 	.fifo_size =		0,
@@ -821,8 +875,8 @@ static struct ich_pcm_table intel_pcms[] __devinitdata = {
 		.suffix = "Modem",
 		.playback_ops = &snd_intel8x0m_playback_ops,
 		.capture_ops = &snd_intel8x0m_capture_ops,
-		.prealloc_size = 4 * 1024,
-		.prealloc_max_size = 16 * 1024,
+		.prealloc_size = 32 * 1024,
+		.prealloc_max_size = 64 * 1024,
 	},
 };
 
@@ -875,45 +929,47 @@ static int __devinit snd_intel8x0_pcm(intel8x0_t *chip)
 
 static void snd_intel8x0_mixer_free_ac97_bus(ac97_bus_t *bus)
 {
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, bus->private_data, return);
+	intel8x0_t *chip = bus->private_data;
 	chip->ac97_bus = NULL;
 }
 
 static void snd_intel8x0_mixer_free_ac97(ac97_t *ac97)
 {
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, ac97->private_data, return);
+	intel8x0_t *chip = ac97->private_data;
 	chip->ac97 = NULL;
 }
 
 
 static int __devinit snd_intel8x0_mixer(intel8x0_t *chip, int ac97_clock)
 {
-	ac97_bus_t bus, *pbus;
-	ac97_t ac97, *x97;
+	ac97_bus_t *pbus;
+	ac97_template_t ac97;
+	ac97_t *x97;
 	int err;
 	unsigned int glob_sta = 0;
+	unsigned int idx;
+	static ac97_bus_ops_t ops = {
+		.write = snd_intel8x0_codec_write,
+		.read = snd_intel8x0_codec_read,
+	};
 
 	chip->in_ac97_init = 1;
-	memset(&bus, 0, sizeof(bus));
-	bus.private_data = chip;
-	bus.private_free = snd_intel8x0_mixer_free_ac97_bus;
-	if (ac97_clock >= 8000 && ac97_clock <= 48000)
-		bus.clock = ac97_clock;
-	else
-		bus.clock = 48000;
 	
 	memset(&ac97, 0, sizeof(ac97));
 	ac97.private_data = chip;
 	ac97.private_free = snd_intel8x0_mixer_free_ac97;
+	ac97.scaps = AC97_SCAP_SKIP_AUDIO;
 
 	glob_sta = igetdword(chip, ICHREG(GLOB_STA));
-	bus.write = snd_intel8x0_codec_write;
-	bus.read = snd_intel8x0_codec_read;
-	bus.vra = 1;
 
-	if ((err = snd_ac97_bus(chip->card, &bus, &pbus)) < 0)
+	if ((err = snd_ac97_bus(chip->card, 0, &ops, chip, &pbus)) < 0)
 		goto __err;
+	pbus->private_free = snd_intel8x0_mixer_free_ac97_bus;
+	pbus->shared_type = AC97_SHARED_TYPE_ICH;	/* shared with audio driver */
+	if (ac97_clock >= 8000 && ac97_clock <= 48000)
+		pbus->clock = ac97_clock;
 	chip->ac97_bus = pbus;
+
 	ac97.pci = chip->pci;
 	ac97.num = glob_sta & ICH_SCR ? 1 : 0;
 	if ((err = snd_ac97_mixer(pbus, &ac97, &x97)) < 0) {
@@ -923,9 +979,13 @@ static int __devinit snd_intel8x0_mixer(intel8x0_t *chip, int ac97_clock)
 		return err;
 	}
 	chip->ac97 = x97;
-	if(ac97_is_modem(x97) && !chip->ichd[ICHD_MDMIN].ac97 ) {
+	if(ac97_is_modem(x97) && !chip->ichd[ICHD_MDMIN].ac97) {
 		chip->ichd[ICHD_MDMIN].ac97 = x97;
 		chip->ichd[ICHD_MDMOUT].ac97 = x97;
+	}
+	for (idx = 0; idx < ARRAY_SIZE(snd_intel8x0m_mixer_switches); idx++) {
+		if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&snd_intel8x0m_mixer_switches[idx], chip))) < 0)
+			goto __err;
 	}
 
 	chip->in_ac97_init = 0;
@@ -1018,6 +1078,11 @@ static int snd_intel8x0m_ich_chip_init(intel8x0_t *chip, int probing)
 		} while (time_after_eq(end_time, jiffies));
 	}
 
+	if (chip->device_type == DEVICE_SIS) {
+		/* unmute the output on SIS7012 */
+		iputword(chip, 0x4c, igetword(chip, 0x4c) | 1);
+	}
+
       	return 0;
 }
 
@@ -1058,22 +1123,16 @@ static int snd_intel8x0_free(intel8x0_t *chip)
 	synchronize_irq(chip->irq);
       __hw_end:
 	if (chip->bdbars.area)
-		snd_dma_free_pages(&chip->dma_dev, &chip->bdbars);
+		snd_dma_free_pages(&chip->bdbars);
 	if (chip->remap_addr)
-		iounmap((void *) chip->remap_addr);
+		iounmap(chip->remap_addr);
 	if (chip->remap_bmaddr)
-		iounmap((void *) chip->remap_bmaddr);
-	if (chip->res) {
-		release_resource(chip->res);
-		kfree_nocheck(chip->res);
-	}
-	if (chip->res_bm) {
-		release_resource(chip->res_bm);
-		kfree_nocheck(chip->res_bm);
-	}
+		iounmap(chip->remap_bmaddr);
 	if (chip->irq >= 0)
 		free_irq(chip->irq, (void *)chip);
-	snd_magic_kfree(chip);
+	pci_release_regions(chip->pci);
+	pci_disable_device(chip->pci);
+	kfree(chip);
 	return 0;
 }
 
@@ -1081,78 +1140,36 @@ static int snd_intel8x0_free(intel8x0_t *chip)
 /*
  * power management
  */
-static void intel8x0_suspend(intel8x0_t *chip)
+static int intel8x0m_suspend(snd_card_t *card, pm_message_t state)
 {
-	snd_card_t *card = chip->card;
+	intel8x0_t *chip = card->pm_private_data;
 	int i;
 
-	if (chip->in_suspend ||
-	    card->power_state == SNDRV_CTL_POWER_D3hot)
-		return;
-
-	chip->in_suspend = 1;
 	for (i = 0; i < chip->pcm_devs; i++)
 		snd_pcm_suspend_all(chip->pcm[i]);
-	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
+	if (chip->ac97)
+		snd_ac97_suspend(chip->ac97);
+	pci_disable_device(chip->pci);
+	return 0;
 }
 
-static void intel8x0_resume(intel8x0_t *chip)
+static int intel8x0m_resume(snd_card_t *card)
 {
-	snd_card_t *card = chip->card;
-
-	if (! chip->in_suspend ||
-	    card->power_state == SNDRV_CTL_POWER_D0)
-		return;
-
+	intel8x0_t *chip = card->pm_private_data;
 	pci_enable_device(chip->pci);
 	pci_set_master(chip->pci);
 	snd_intel8x0_chip_init(chip, 0);
 	if (chip->ac97)
 		snd_ac97_resume(chip->ac97);
 
-	chip->in_suspend = 0;
-	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
-}
-
-static int snd_intel8x0m_suspend(struct pci_dev *dev, u32 state)
-{
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, pci_get_drvdata(dev), return -ENXIO);
-	intel8x0_suspend(chip);
 	return 0;
 }
-static int snd_intel8x0m_resume(struct pci_dev *dev)
-{
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, pci_get_drvdata(dev), return -ENXIO);
-	intel8x0_resume(chip);
-	return 0;
-}
-
-/* callback */
-static int snd_intel8x0_set_power_state(snd_card_t *card, unsigned int power_state)
-{
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, card->power_state_private_data, return -ENXIO);
-	switch (power_state) {
-	case SNDRV_CTL_POWER_D0:
-	case SNDRV_CTL_POWER_D1:
-	case SNDRV_CTL_POWER_D2:
-		intel8x0_resume(chip);
-		break;
-	case SNDRV_CTL_POWER_D3hot:
-	case SNDRV_CTL_POWER_D3cold:
-		intel8x0_suspend(chip);
-		break;
-	default:
-		return -EINVAL;
-	}
-	return 0;
-}
-
 #endif /* CONFIG_PM */
 
 static void snd_intel8x0m_proc_read(snd_info_entry_t * entry,
 				   snd_info_buffer_t * buffer)
 {
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, entry->private_data, return);
+	intel8x0_t *chip = entry->private_data;
 	unsigned int tmp;
 
 	snd_iprintf(buffer, "Intel8x0m\n\n");
@@ -1178,7 +1195,7 @@ static void __devinit snd_intel8x0m_proc_init(intel8x0_t * chip)
 
 static int snd_intel8x0_dev_free(snd_device_t *device)
 {
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, device->device_data, return -ENXIO);
+	intel8x0_t *chip = device->device_data;
 	return snd_intel8x0_free(chip);
 }
 
@@ -1211,72 +1228,54 @@ static int __devinit snd_intel8x0m_create(snd_card_t * card,
 	if ((err = pci_enable_device(pci)) < 0)
 		return err;
 
-	chip = snd_magic_kcalloc(intel8x0_t, 0, GFP_KERNEL);
-	if (chip == NULL)
+	chip = kcalloc(1, sizeof(*chip), GFP_KERNEL);
+	if (chip == NULL) {
+		pci_disable_device(pci);
 		return -ENOMEM;
+	}
 	spin_lock_init(&chip->reg_lock);
-	spin_lock_init(&chip->ac97_lock);
 	chip->device_type = device_type;
 	chip->card = card;
 	chip->pci = pci;
 	chip->irq = -1;
-	snd_intel8x0m_proc_init(chip);
-	sprintf(chip->ac97_name, "%s - AC'97", card->shortname);
-	sprintf(chip->ctrl_name, "%s - Controller", card->shortname);
+
+	if ((err = pci_request_regions(pci, card->shortname)) < 0) {
+		kfree(chip);
+		pci_disable_device(pci);
+		return err;
+	}
+
 	if (device_type == DEVICE_ALI) {
 		/* ALI5455 has no ac97 region */
 		chip->bmaddr = pci_resource_start(pci, 0);
-		if ((chip->res_bm = request_region(chip->bmaddr, 256, chip->ctrl_name)) == NULL) {
-			snd_printk("unable to grab ports 0x%lx-0x%lx\n", chip->bmaddr, chip->bmaddr + 256 - 1);
-			snd_intel8x0_free(chip);
-			return -EBUSY;
-		}
 		goto port_inited;
 	}
 
 	if (pci_resource_flags(pci, 2) & IORESOURCE_MEM) {	/* ICH4 and Nforce */
 		chip->mmio = 1;
 		chip->addr = pci_resource_start(pci, 2);
-		if ((chip->res = request_mem_region(chip->addr, 512, chip->ac97_name)) == NULL) {
-			snd_printk("unable to grab I/O memory 0x%lx-0x%lx\n", chip->addr, chip->addr + 512 - 1);
-			snd_intel8x0_free(chip);
-			return -EBUSY;
-		}
-		chip->remap_addr = (unsigned long) ioremap_nocache(chip->addr, 512);
-		if (chip->remap_addr == 0) {
+		chip->remap_addr = ioremap_nocache(chip->addr,
+						   pci_resource_len(pci, 2));
+		if (chip->remap_addr == NULL) {
 			snd_printk("AC'97 space ioremap problem\n");
 			snd_intel8x0_free(chip);
 			return -EIO;
 		}
 	} else {
 		chip->addr = pci_resource_start(pci, 0);
-		if ((chip->res = request_region(chip->addr, 256, chip->ac97_name)) == NULL) {
-			snd_printk("unable to grab ports 0x%lx-0x%lx\n", chip->addr, chip->addr + 256 - 1);
-			snd_intel8x0_free(chip);
-			return -EBUSY;
-		}
 	}
 	if (pci_resource_flags(pci, 3) & IORESOURCE_MEM) {	/* ICH4 */
 		chip->bm_mmio = 1;
 		chip->bmaddr = pci_resource_start(pci, 3);
-		if ((chip->res_bm = request_mem_region(chip->bmaddr, 256, chip->ctrl_name)) == NULL) {
-			snd_printk("unable to grab I/O memory 0x%lx-0x%lx\n", chip->bmaddr, chip->bmaddr + 512 - 1);
-			snd_intel8x0_free(chip);
-			return -EBUSY;
-		}
-		chip->remap_bmaddr = (unsigned long) ioremap_nocache(chip->bmaddr, 256);
-		if (chip->remap_bmaddr == 0) {
+		chip->remap_bmaddr = ioremap_nocache(chip->bmaddr,
+						     pci_resource_len(pci, 3));
+		if (chip->remap_bmaddr == NULL) {
 			snd_printk("Controller space ioremap problem\n");
 			snd_intel8x0_free(chip);
 			return -EIO;
 		}
 	} else {
 		chip->bmaddr = pci_resource_start(pci, 1);
-		if ((chip->res_bm = request_region(chip->bmaddr, 128, chip->ctrl_name)) == NULL) {
-			snd_printk("unable to grab ports 0x%lx-0x%lx\n", chip->bmaddr, chip->bmaddr + 128 - 1);
-			snd_intel8x0_free(chip);
-			return -EBUSY;
-		}
 	}
 
  port_inited:
@@ -1314,10 +1313,9 @@ static int __devinit snd_intel8x0m_create(snd_card_t * card,
 
 	/* allocate buffer descriptor lists */
 	/* the start of each lists must be aligned to 8 bytes */
-	memset(&chip->dma_dev, 0, sizeof(chip->dma_dev));
-	chip->dma_dev.type = SNDRV_DMA_TYPE_DEV;
-	chip->dma_dev.dev = snd_dma_pci_data(pci);
-	if (snd_dma_alloc_pages(&chip->dma_dev, chip->bdbars_count * sizeof(u32) * ICH_MAX_FRAGS * 2, &chip->bdbars) < 0) {
+	if (snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, snd_dma_pci_data(pci),
+				chip->bdbars_count * sizeof(u32) * ICH_MAX_FRAGS * 2,
+				&chip->bdbars) < 0) {
 		snd_intel8x0_free(chip);
 		return -ENOMEM;
 	}
@@ -1338,10 +1336,7 @@ static int __devinit snd_intel8x0m_create(snd_card_t * card,
 		return err;
 	}
 
-#ifdef CONFIG_PM
-	card->set_power_state = snd_intel8x0_set_power_state;
-	card->power_state_private_data = chip;
-#endif
+	snd_card_set_pm_callback(card, intel8x0m_suspend, intel8x0m_resume, chip);
 
 	if ((err = snd_device_new(card, SNDRV_DEV_LOWLEVEL, chip, &ops)) < 0) {
 		snd_intel8x0_free(chip);
@@ -1365,16 +1360,19 @@ static struct shortname_table {
 	{ PCI_DEVICE_ID_INTEL_ICH3_6, "Intel 82801CA-ICH3" },
 	{ PCI_DEVICE_ID_INTEL_ICH4_6, "Intel 82801DB-ICH4" },
 	{ PCI_DEVICE_ID_INTEL_ICH5_6, "Intel ICH5" },
+	{ PCI_DEVICE_ID_INTEL_ICH6_6, "Intel ICH6" },
+	{ PCI_DEVICE_ID_INTEL_ICH7_6, "Intel ICH7" },
 	{ 0x7446, "AMD AMD768" },
-#if 0
 	{ PCI_DEVICE_ID_SI_7013, "SiS SI7013" },
-	{ PCI_DEVICE_ID_NVIDIA_MCP_AUDIO, "NVidia nForce" },
-	{ PCI_DEVICE_ID_NVIDIA_MCP2_AUDIO, "NVidia nForce2" },
-	{ PCI_DEVICE_ID_NVIDIA_MCP3_AUDIO, "NVidia nForce3" },
+	{ PCI_DEVICE_ID_NVIDIA_MCP_MODEM, "NVidia nForce" },
+	{ PCI_DEVICE_ID_NVIDIA_MCP2_MODEM, "NVidia nForce2" },
+	{ PCI_DEVICE_ID_NVIDIA_MCP2S_MODEM, "NVidia nForce2s" },
+	{ PCI_DEVICE_ID_NVIDIA_MCP3_MODEM, "NVidia nForce3" },
+#if 0
 	{ 0x5455, "ALi M5455" },
 	{ 0x746d, "AMD AMD8111" },
 #endif
-	{ 0, 0 },
+	{ 0 },
 };
 
 static int __devinit snd_intel8x0m_probe(struct pci_dev *pci,
@@ -1397,15 +1395,7 @@ static int __devinit snd_intel8x0m_probe(struct pci_dev *pci,
 	if (card == NULL)
 		return -ENOMEM;
 
-	switch (pci_id->driver_data) {
-	case DEVICE_NFORCE:
-		strcpy(card->driver, "NFORCE");
-		break;
-	default:
-		strcpy(card->driver, "ICH");
-		break;
-	}
-
+	strcpy(card->driver, "ICH-MODEM");
 	strcpy(card->shortname, "Intel ICH");
 	for (name = shortnames; name->id; name++) {
 		if (pci->device == name->id) {
@@ -1429,6 +1419,8 @@ static int __devinit snd_intel8x0m_probe(struct pci_dev *pci,
 		return err;
 	}
 	
+	snd_intel8x0m_proc_init(chip);
+
 	sprintf(card->longname, "%s at 0x%lx, irq %i",
 		card->shortname, chip->addr, chip->irq);
 
@@ -1436,16 +1428,14 @@ static int __devinit snd_intel8x0m_probe(struct pci_dev *pci,
 		snd_card_free(card);
 		return err;
 	}
-	pci_set_drvdata(pci, chip);
+	pci_set_drvdata(pci, card);
 	dev++;
 	return 0;
 }
 
 static void __devexit snd_intel8x0m_remove(struct pci_dev *pci)
 {
-	intel8x0_t *chip = snd_magic_cast(intel8x0_t, pci_get_drvdata(pci), return);
-	if (chip)
-		snd_card_free(chip->card);
+	snd_card_free(pci_get_drvdata(pci));
 	pci_set_drvdata(pci, NULL);
 }
 
@@ -1454,25 +1444,13 @@ static struct pci_driver driver = {
 	.id_table = snd_intel8x0m_ids,
 	.probe = snd_intel8x0m_probe,
 	.remove = __devexit_p(snd_intel8x0m_remove),
-#ifdef CONFIG_PM
-	.suspend = snd_intel8x0m_suspend,
-	.resume = snd_intel8x0m_resume,
-#endif
+	SND_PCI_PM_CALLBACKS
 };
 
 
 static int __init alsa_card_intel8x0m_init(void)
 {
-	int err;
-
-        if ((err = pci_module_init(&driver)) < 0) {
-#ifdef MODULE
-		printk(KERN_ERR "Intel ICH modemcard not found or device busy\n");
-#endif
-                return err;
-        }
-
-        return 0;
+	return pci_module_init(&driver);
 }
 
 static void __exit alsa_card_intel8x0m_exit(void)
@@ -1482,26 +1460,3 @@ static void __exit alsa_card_intel8x0m_exit(void)
 
 module_init(alsa_card_intel8x0m_init)
 module_exit(alsa_card_intel8x0m_exit)
-
-#ifndef MODULE
-
-/* format is: snd-intel8x0=enable,index,id,ac97_clock,mpu_port,joystick */
-
-static int __init alsa_card_intel8x0m_setup(char *str)
-{
-	static unsigned __initdata nr_dev = 0;
-
-	if (nr_dev >= SNDRV_CARDS)
-		return 0;
-	(void)(get_option(&str,&enable[nr_dev]) == 2 &&
-	       get_option(&str,&index[nr_dev]) == 2 &&
-	       get_id(&str,&id[nr_dev]) == 2 &&
-	       get_option(&str,&ac97_clock[nr_dev]) == 2
-	       );
-	nr_dev++;
-	return 1;
-}
-
-__setup("snd-intel8x0m=", alsa_card_intel8x0m_setup);
-
-#endif /* ifndef MODULE */

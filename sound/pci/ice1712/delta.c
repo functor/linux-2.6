@@ -126,7 +126,7 @@ static void ap_cs8427_codec_deassert(ice1712_t *ice, unsigned char tmp)
 /* sequential write */
 static int ap_cs8427_sendbytes(snd_i2c_device_t *device, unsigned char *bytes, int count)
 {
-	ice1712_t *ice = snd_magic_cast(ice1712_t, device->bus->private_data, return -EIO);
+	ice1712_t *ice = device->bus->private_data;
 	int res = count;
 	unsigned char tmp;
 
@@ -143,7 +143,7 @@ static int ap_cs8427_sendbytes(snd_i2c_device_t *device, unsigned char *bytes, i
 /* sequential read */
 static int ap_cs8427_readbytes(snd_i2c_device_t *device, unsigned char *bytes, int count)
 {
-	ice1712_t *ice = snd_magic_cast(ice1712_t, device->bus->private_data, return -EIO);
+	ice1712_t *ice = device->bus->private_data;
 	int res = count;
 	unsigned char tmp;
 	
@@ -526,8 +526,12 @@ static int __devinit snd_ice1712_delta_init(ice1712_t *ice)
 		break;
 	case ICE1712_SUBDEVICE_DELTA1010:
 	case ICE1712_SUBDEVICE_DELTA1010LT:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		ice->num_total_dacs = 8;
 		ice->num_total_adcs = 8;
+		break;
+	case ICE1712_SUBDEVICE_DELTADIO2496:
+		ice->num_total_dacs = 4;	/* two AK4324 codecs */
 		break;
 	case ICE1712_SUBDEVICE_VX442:
 		ice->num_total_dacs = 4;
@@ -551,6 +555,7 @@ static int __devinit snd_ice1712_delta_init(ice1712_t *ice)
 			return err;
 		break;
 	case ICE1712_SUBDEVICE_DELTA1010:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		ice->gpio.set_pro_rate = delta_1010_set_rate_val;
 		break;
 	case ICE1712_SUBDEVICE_DELTADIO2496:
@@ -572,6 +577,7 @@ static int __devinit snd_ice1712_delta_init(ice1712_t *ice)
 	switch (ice->eeprom.subvendor) {
 	case ICE1712_SUBDEVICE_DELTA1010:
 	case ICE1712_SUBDEVICE_DELTADIO2496:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		return 0;
 	}
 
@@ -630,6 +636,7 @@ static int __devinit snd_ice1712_delta_add_controls(ice1712_t *ice)
 	/* 1010 and dio specific controls */
 	switch (ice->eeprom.subvendor) {
 	case ICE1712_SUBDEVICE_DELTA1010:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		err = snd_ctl_add(ice->card, snd_ctl_new1(&snd_ice1712_delta1010_wordclock_select, ice));
 		if (err < 0)
 			return err;
@@ -654,6 +661,7 @@ static int __devinit snd_ice1712_delta_add_controls(ice1712_t *ice)
 	case ICE1712_SUBDEVICE_DELTA1010:
 	case ICE1712_SUBDEVICE_DELTADIO2496:
 	case ICE1712_SUBDEVICE_DELTA66:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		err = snd_ice1712_spdif_build_controls(ice);
 		if (err < 0)
 			return err;
@@ -665,6 +673,7 @@ static int __devinit snd_ice1712_delta_add_controls(ice1712_t *ice)
 	case ICE1712_SUBDEVICE_DELTA1010:
 	case ICE1712_SUBDEVICE_DELTADIO2496:
 	case ICE1712_SUBDEVICE_DELTA66:
+	case ICE1712_SUBDEVICE_MEDIASTATION:
 		err = snd_ctl_add(ice->card, snd_ctl_new1(&snd_ice1712_delta_spdif_in_status, ice));
 		if (err < 0)
 			return err;
@@ -692,56 +701,71 @@ static int __devinit snd_ice1712_delta_add_controls(ice1712_t *ice)
 /* entry point */
 struct snd_ice1712_card_info snd_ice1712_delta_cards[] __devinitdata = {
 	{
-		ICE1712_SUBDEVICE_DELTA1010,
-		"M Audio Delta 1010",
-		snd_ice1712_delta_init,
-		snd_ice1712_delta_add_controls,
+		.subvendor = ICE1712_SUBDEVICE_DELTA1010,
+		.name = "M Audio Delta 1010",
+		.model = "delta1010",
+		.chip_init = snd_ice1712_delta_init,
+		.build_controls = snd_ice1712_delta_add_controls,
 	},
 	{
-		ICE1712_SUBDEVICE_DELTADIO2496,
-		"M Audio Delta DiO 2496",
-		snd_ice1712_delta_init,
-		snd_ice1712_delta_add_controls,
-		1, /* NO MPU */
+		.subvendor = ICE1712_SUBDEVICE_DELTADIO2496,
+		.name = "M Audio Delta DiO 2496",
+		.model = "dio2496",
+		.chip_init = snd_ice1712_delta_init,
+		.build_controls = snd_ice1712_delta_add_controls,
+		.no_mpu401 = 1,
 	},
 	{
-		ICE1712_SUBDEVICE_DELTA66,
-		"M Audio Delta 66",
-		snd_ice1712_delta_init,
-		snd_ice1712_delta_add_controls,
-		1, /* NO MPU */
+		.subvendor = ICE1712_SUBDEVICE_DELTA66,
+		.name = "M Audio Delta 66",
+		.model = "delta66",
+		.chip_init = snd_ice1712_delta_init,
+		.build_controls = snd_ice1712_delta_add_controls,
+		.no_mpu401 = 1,
 	},
 	{
-		ICE1712_SUBDEVICE_DELTA44,
-		"M Audio Delta 44",
-		snd_ice1712_delta_init,
-		snd_ice1712_delta_add_controls,
-		1, /* NO MPU */
+		.subvendor = ICE1712_SUBDEVICE_DELTA44,
+		.name = "M Audio Delta 44",
+		.model = "delta44",
+		.chip_init = snd_ice1712_delta_init,
+		.build_controls = snd_ice1712_delta_add_controls,
+		.no_mpu401 = 1,
 	},
 	{
-		ICE1712_SUBDEVICE_AUDIOPHILE,
-		"M Audio Audiophile 24/96",
-		snd_ice1712_delta_init,
-		snd_ice1712_delta_add_controls,
+		.subvendor = ICE1712_SUBDEVICE_AUDIOPHILE,
+		.name = "M Audio Audiophile 24/96",
+		.model = "audiophile",
+		.chip_init = snd_ice1712_delta_init,
+		.build_controls = snd_ice1712_delta_add_controls,
 	},
 	{
-		ICE1712_SUBDEVICE_DELTA410,
-		"M Audio Delta 410",
-		snd_ice1712_delta_init,
-		snd_ice1712_delta_add_controls,
+		.subvendor = ICE1712_SUBDEVICE_DELTA410,
+		.name = "M Audio Delta 410",
+		.model = "delta410",
+		.chip_init = snd_ice1712_delta_init,
+		.build_controls = snd_ice1712_delta_add_controls,
 	},
 	{
-		ICE1712_SUBDEVICE_DELTA1010LT,
-		"M Audio Delta 1010LT",
-		snd_ice1712_delta_init,
-		snd_ice1712_delta_add_controls,
+		.subvendor = ICE1712_SUBDEVICE_DELTA1010LT,
+		.name = "M Audio Delta 1010LT",
+		.model = "delta1010lt",
+		.chip_init = snd_ice1712_delta_init,
+		.build_controls = snd_ice1712_delta_add_controls,
 	},
 	{
-		ICE1712_SUBDEVICE_VX442,
-		"Digigram VX442",
-		snd_ice1712_delta_init,
-		snd_ice1712_delta_add_controls,
-		1, /* NO MPU */
+		.subvendor = ICE1712_SUBDEVICE_VX442,
+		.name = "Digigram VX442",
+		.model = "vx442",
+		.chip_init = snd_ice1712_delta_init,
+		.build_controls = snd_ice1712_delta_add_controls,
+		.no_mpu401 = 1,
+	},
+	{
+		.subvendor = ICE1712_SUBDEVICE_MEDIASTATION,
+		.name = "Lionstracs Mediastation",
+		.model = "mediastation",
+		.chip_init = snd_ice1712_delta_init,
+		.build_controls = snd_ice1712_delta_add_controls,
 	},
 	{ } /* terminator */
 };

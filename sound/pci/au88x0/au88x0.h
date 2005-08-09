@@ -17,6 +17,7 @@
 #ifndef __SOUND_AU88X0_H
 #define __SOUND_AU88X0_H
 
+#ifdef __KERNEL__
 #include <sound/driver.h>
 #include <linux/init.h>
 #include <linux/pci.h>
@@ -27,6 +28,8 @@
 #include <sound/mpu401.h>
 #include <sound/hwdep.h>
 #include <sound/ac97_codec.h>
+
+#endif
 
 #ifndef CHIP_AU8820
 #include "au88x0_eq.h"
@@ -69,20 +72,20 @@
 #define IRQ_MODEM	0x4000
 
 /* ADB Resource */
-#define VORTEX_RESOURCE_DMA		0x00000000
-#define VORTEX_RESOURCE_SRC		0x00000001
+#define VORTEX_RESOURCE_DMA	0x00000000
+#define VORTEX_RESOURCE_SRC	0x00000001
 #define VORTEX_RESOURCE_MIXIN	0x00000002
 #define VORTEX_RESOURCE_MIXOUT	0x00000003
-#define VORTEX_RESOURCE_A3D		0x00000004
+#define VORTEX_RESOURCE_A3D	0x00000004
 #define VORTEX_RESOURCE_LAST	0x00000005
 
 /* Check for SDAC bit in "Extended audio ID" AC97 register */
-#define VORTEX_IS_QUAD(x) ((x->codec == NULL) ?  0 : (x->codec->ext_id|0x80))
+//#define VORTEX_IS_QUAD(x) (((x)->codec == NULL) ?  0 : ((x)->codec->ext_id&0x80))
+#define VORTEX_IS_QUAD(x) ((x)->isquad)
 /* Check if chip has bug. */
 #define IS_BAD_CHIP(x) (\
-	(x->rev < 3 && x->device == PCI_DEVICE_ID_AUREAL_VORTEX) || \
-	(x->rev < 0xfe && x->device == PCI_DEVICE_ID_AUREAL_VORTEX2) || \
-	(x->rev < 0xfe && x->device == PCI_DEVICE_ID_AUREAL_ADVANTAGE))
+	(x->rev == 0xfe && x->device == PCI_DEVICE_ID_AUREAL_VORTEX_2) || \
+	(x->rev == 0xfe && x->device == PCI_DEVICE_ID_AUREAL_ADVANTAGE))
 
 
 /* PCM devices */
@@ -144,12 +147,12 @@ struct snd_vortex {
 #endif
 
 	/* Global resources */
-	char mixcapt[2];
-	char mixplayb[4];
+	s8 mixcapt[2];
+	s8 mixplayb[4];
 #ifndef CHIP_AU8820
-	char mixspdif[2];
-	char mixa3d[2];		/* mixers which collect all a3d streams. */
-	char mixxtlk[2];	/* crosstalk canceler mixer inputs. */
+	s8 mixspdif[2];
+	s8 mixa3d[2];	/* mixers which collect all a3d streams. */
+	s8 mixxtlk[2];	/* crosstalk canceler mixer inputs. */
 #endif
 	u32 fixed_res[5];
 
@@ -162,12 +165,14 @@ struct snd_vortex {
 	int xt_mode;		/* 1: speakers, 0:headphones. */
 #endif
 
+	int isquad;		/* cache of extended ID codec flag. */
+
 	/* Gameport stuff. */
 	struct gameport *gameport;
 
 	/* PCI hardware resources */
 	unsigned long io;
-	unsigned long *mmio;
+	unsigned long __iomem *mmio;
 	unsigned int irq;
 	spinlock_t lock;
 
@@ -177,8 +182,6 @@ struct snd_vortex {
 	u16 device;
 	u8 rev;
 };
-
-#define chip_t vortex_t
 
 /* Functions. */
 
@@ -208,6 +211,7 @@ static void vortex_adbdma_startfifo(vortex_t * vortex, int adbdma);
 static void vortex_adbdma_pausefifo(vortex_t * vortex, int adbdma);
 static void vortex_adbdma_resumefifo(vortex_t * vortex, int adbdma);
 static int inline vortex_adbdma_getlinearpos(vortex_t * vortex, int adbdma);
+static void vortex_adbdma_resetup(vortex_t *vortex, int adbdma);
 
 #ifndef CHIP_AU8810
 static void vortex_wtdma_startfifo(vortex_t * vortex, int wtdma);
@@ -268,7 +272,7 @@ static void vortex_Vort3D_InitializeSource(a3dsrc_t * a, int en);
 
 /* Driver stuff. */
 static int __devinit vortex_gameport_register(vortex_t * card);
-static int __devexit vortex_gameport_unregister(vortex_t * card);
+static void vortex_gameport_unregister(vortex_t * card);
 #ifndef CHIP_AU8820
 static int __devinit vortex_eq_init(vortex_t * vortex);
 static int __devexit vortex_eq_free(vortex_t * vortex);

@@ -9,6 +9,9 @@
  * Changes by Ronald Bultje <rbultje@ronald.bitfreak.net>
  *    - moved over to linux>=2.4.x i2c protocol (1/1/2003)
  *
+ * Changes by Michael Hunold <michael@mihu.de>
+ *    - implemented DECODER_SET_GPIO, DECODER_INIT, DECODER_SET_VBI_BYPASS
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -57,7 +60,7 @@ MODULE_LICENSE("GPL");
 #include <linux/video_decoder.h>
 
 static int debug = 0;
-MODULE_PARM(debug, "i");
+module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "Debug level (0-1)");
 
 #define dprintk(num, format, args...) \
@@ -112,7 +115,7 @@ saa7111_write_block (struct i2c_client *client,
 		u8 block_data[32];
 
 		msg.addr = client->addr;
-		msg.flags = client->flags;
+		msg.flags = 0;
 		while (len >= 2) {
 			msg.buf = (char *) block_data;
 			msg.len = 0;
@@ -142,6 +145,13 @@ saa7111_write_block (struct i2c_client *client,
 	return ret;
 }
 
+static int
+saa7111_init_decoder (struct i2c_client *client,
+	      struct video_decoder_init *init)
+{
+	return saa7111_write_block(client, init->data, init->len);
+}
+
 static inline int
 saa7111_read (struct i2c_client *client,
 	      u8                 reg)
@@ -151,7 +161,7 @@ saa7111_read (struct i2c_client *client,
 
 /* ----------------------------------------------------------------------- */
 
-static const unsigned char init[] = {
+static const unsigned char saa7111_i2c_init[] = {
 	0x00, 0x00,		/* 00 - ID byte */
 	0x01, 0x00,		/* 01 - reserved */
 
@@ -201,8 +211,18 @@ saa7111_command (struct i2c_client *client,
 	switch (cmd) {
 
 	case 0:
-		//saa7111_write_block(client, init, sizeof(init));
-		break;
+	case DECODER_INIT:
+	{
+		struct video_decoder_init *init = arg;
+		if (NULL != init)
+			return saa7111_init_decoder(client, init);
+		else {
+			struct video_decoder_init vdi;
+			vdi.data = saa7111_i2c_init;
+			vdi.len = sizeof(saa7111_i2c_init);
+			return saa7111_init_decoder(client, &vdi);
+		}
+	}
 
 	case DECODER_DUMP:
 	{
@@ -274,6 +294,32 @@ saa7111_command (struct i2c_client *client,
 	}
 		break;
 
+	case DECODER_SET_GPIO:
+	{
+		int *iarg = arg;
+		if (0 != *iarg) {
+			saa7111_write(client, 0x11,
+				(decoder->reg[0x11] | 0x80));
+		} else {
+			saa7111_write(client, 0x11,
+				(decoder->reg[0x11] & 0x7f));
+		}
+		break;
+	}
+
+	case DECODER_SET_VBI_BYPASS:
+	{
+		int *iarg = arg;
+		if (0 != *iarg) {
+			saa7111_write(client, 0x13,
+				(decoder->reg[0x13] & 0xf0) | 0x0a);
+		} else {
+			saa7111_write(client, 0x13,
+				(decoder->reg[0x13] & 0xf0));
+		}
+		break;
+	}
+
 	case DECODER_SET_NORM:
 	{
 		int *iarg = arg;
@@ -296,7 +342,7 @@ saa7111_command (struct i2c_client *client,
 
 		case VIDEO_MODE_SECAM:
 			saa7111_write(client, 0x08,
-				      (decoder->reg[0x0e] & 0x3f) | 0x00);
+				      (decoder->reg[0x08] & 0x3f) | 0x00);
 			saa7111_write(client, 0x0e,
 				      (decoder->reg[0x0e] & 0x8f) | 0x50);
 			break;
@@ -454,7 +500,6 @@ static struct i2c_client_address_data addr_data = {
 	.force			= force
 };
 
-static int saa7111_i2c_id = 0;
 static struct i2c_driver i2c_driver_saa7111;
 
 static int
@@ -465,6 +510,7 @@ saa7111_detect_client (struct i2c_adapter *adapter,
 	int i;
 	struct i2c_client *client;
 	struct saa7111 *decoder;
+	struct video_decoder_init vdi;
 
 	dprintk(1,
 		KERN_INFO
@@ -483,9 +529,7 @@ saa7111_detect_client (struct i2c_adapter *adapter,
 	client->adapter = adapter;
 	client->driver = &i2c_driver_saa7111;
 	client->flags = I2C_CLIENT_ALLOW_USE;
-	client->id = saa7111_i2c_id++;
-	snprintf(I2C_NAME(client), sizeof(I2C_NAME(client)) - 1,
-		"saa7111[%d]", client->id);
+	strlcpy(I2C_NAME(client), "saa7111", sizeof(I2C_NAME(client)));
 
 	decoder = kmalloc(sizeof(struct saa7111), GFP_KERNEL);
 	if (decoder == NULL) {
@@ -509,7 +553,9 @@ saa7111_detect_client (struct i2c_adapter *adapter,
 		return i;
 	}
 
-	i = saa7111_write_block(client, init, sizeof(init));
+	vdi.data = saa7111_i2c_init;
+	vdi.len = sizeof(saa7111_i2c_init);
+	i = saa7111_init_decoder(client, &vdi);
 	if (i < 0) {
 		dprintk(1, KERN_ERR "%s_attach error: init status %d\n",
 			I2C_NAME(client), i);

@@ -95,10 +95,9 @@ struct uart_sunsu_port {
 	enum su_type		su_type;
 	unsigned int		type_probed;	/* XXX Stupid */
 	int			port_node;
-	unsigned int		irq;
 
 #ifdef CONFIG_SERIO
-	struct serio		serio;
+	struct serio		*serio;
 	int			serio_open;
 #endif
 };
@@ -310,7 +309,7 @@ static void sunsu_enable_ms(struct uart_port *port)
 	spin_unlock_irqrestore(&up->port.lock, flags);
 }
 
-static _INLINE_ void
+static _INLINE_ struct tty_struct *
 receive_chars(struct uart_sunsu_port *up, unsigned char *status, struct pt_regs *regs)
 {
 	struct tty_struct *tty = up->port.info->tty;
@@ -322,7 +321,7 @@ receive_chars(struct uart_sunsu_port *up, unsigned char *status, struct pt_regs 
 		if (unlikely(tty->flip.count >= TTY_FLIPBUF_SIZE)) {
 			tty->flip.work.func((void *)tty);
 			if (tty->flip.count >= TTY_FLIPBUF_SIZE)
-				return; // if TTY_DONT_FLIP is set
+				return tty; // if TTY_DONT_FLIP is set
 		}
 		ch = serial_inp(up, UART_RX);
 		*tty->flip.char_buf_ptr = ch;
@@ -396,10 +395,11 @@ receive_chars(struct uart_sunsu_port *up, unsigned char *status, struct pt_regs 
 	ignore_char:
 		*status = serial_inp(up, UART_LSR);
 	} while ((*status & UART_LSR_DR) && (max_count-- > 0));
-	tty_flip_buffer_push(tty);
 
 	if (saw_console_brk)
 		sun_do_break();
+
+	return tty;
 }
 
 static _INLINE_ void transmit_chars(struct uart_sunsu_port *up)
@@ -464,12 +464,23 @@ static irqreturn_t sunsu_serial_interrupt(int irq, void *dev_id, struct pt_regs 
 	spin_lock_irqsave(&up->port.lock, flags);
 
 	do {
+		struct tty_struct *tty;
+
 		status = serial_inp(up, UART_LSR);
+		tty = NULL;
 		if (status & UART_LSR_DR)
-			receive_chars(up, &status, regs);
+			tty = receive_chars(up, &status, regs);
 		check_modem_status(up);
 		if (status & UART_LSR_THRE)
 			transmit_chars(up);
+
+		spin_unlock_irqrestore(&up->port.lock, flags);
+
+		if (tty)
+			tty_flip_buffer_push(tty);
+
+		spin_lock_irqsave(&up->port.lock, flags);
+
 	} while (!(serial_in(up, UART_IIR) & UART_IIR_NO_INT));
 
 	spin_unlock_irqrestore(&up->port.lock, flags);
@@ -508,7 +519,7 @@ static void receive_kbd_ms_chars(struct uart_sunsu_port *up, struct pt_regs *reg
 		/* Stop-A is handled by drivers/char/keyboard.c now. */
 		if (up->su_type == SU_PORT_KBD) {
 #ifdef CONFIG_SERIO
-			serio_interrupt(&up->serio, ch, 0, regs);
+			serio_interrupt(up->serio, ch, 0, regs);
 #endif
 		} else if (up->su_type == SU_PORT_MS) {
 			int ret = suncore_mouse_baud_detection(ch, is_break);
@@ -522,7 +533,7 @@ static void receive_kbd_ms_chars(struct uart_sunsu_port *up, struct pt_regs *reg
 
 			case 0:
 #ifdef CONFIG_SERIO
-				serio_interrupt(&up->serio, ch, 0, regs);
+				serio_interrupt(up->serio, ch, 0, regs);
 #endif
 				break;
 			};
@@ -672,14 +683,14 @@ static int sunsu_startup(struct uart_port *port)
 	}
 
 	if (up->su_type != SU_PORT_PORT) {
-		retval = request_irq(up->irq, sunsu_kbd_ms_interrupt,
+		retval = request_irq(up->port.irq, sunsu_kbd_ms_interrupt,
 				     SA_SHIRQ, su_typev[up->su_type], up);
 	} else {
-		retval = request_irq(up->irq, sunsu_serial_interrupt,
+		retval = request_irq(up->port.irq, sunsu_serial_interrupt,
 				     SA_SHIRQ, su_typev[up->su_type], up);
 	}
 	if (retval) {
-		printk("su: Cannot register IRQ %d\n", up->irq);
+		printk("su: Cannot register IRQ %d\n", up->port.irq);
 		return retval;
 	}
 
@@ -767,7 +778,7 @@ static void sunsu_shutdown(struct uart_port *port)
 	 */
 	(void) serial_in(up, UART_RX);
 
-	free_irq(up->irq, up);
+	free_irq(up->port.irq, up);
 }
 
 static void
@@ -978,11 +989,11 @@ static struct uart_sunsu_port sunsu_ports[UART_NR];
 
 #ifdef CONFIG_SERIO
 
-static spinlock_t sunsu_serio_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(sunsu_serio_lock);
 
 static int sunsu_serio_write(struct serio *serio, unsigned char ch)
 {
-	struct uart_sunsu_port *up = serio->driver;
+	struct uart_sunsu_port *up = serio->port_data;
 	unsigned long flags;
 	int lsr;
 
@@ -1002,7 +1013,7 @@ static int sunsu_serio_write(struct serio *serio, unsigned char ch)
 
 static int sunsu_serio_open(struct serio *serio)
 {
-	struct uart_sunsu_port *up = serio->driver;
+	struct uart_sunsu_port *up = serio->port_data;
 	unsigned long flags;
 	int ret;
 
@@ -1019,7 +1030,7 @@ static int sunsu_serio_open(struct serio *serio)
 
 static void sunsu_serio_close(struct serio *serio)
 {
-	struct uart_sunsu_port *up = serio->driver;
+	struct uart_sunsu_port *up = serio->port_data;
 	unsigned long flags;
 
 	spin_lock_irqsave(&sunsu_serio_lock, flags);
@@ -1033,7 +1044,7 @@ static void sunsu_autoconfig(struct uart_sunsu_port *up)
 {
 	unsigned char status1, status2, scratch, scratch2, scratch3;
 	unsigned char save_lcr, save_mcr;
-	struct linux_ebus_device *dev = 0;
+	struct linux_ebus_device *dev = NULL;
 	struct linux_ebus *ebus;
 #ifdef CONFIG_SPARC64
 	struct sparc_isa_bridge *isa_br;
@@ -1066,7 +1077,7 @@ static void sunsu_autoconfig(struct uart_sunsu_port *up)
 				 * This is correct on both architectures.
 				 */
 				up->port.mapbase = dev->resource[0].start;
-				up->irq = dev->irqs[0];
+				up->port.irq = dev->irqs[0];
 				goto ebus_done;
 			}
 		}
@@ -1079,7 +1090,7 @@ static void sunsu_autoconfig(struct uart_sunsu_port *up)
 				/* Same on sparc64. Cool architecure... */
 				up->port.membase = (char *) isa_dev->resource.start;
 				up->port.mapbase = isa_dev->resource.start;
-				up->irq = isa_dev->irq;
+				up->port.irq = isa_dev->irq;
 				goto ebus_done;
 			}
 		}
@@ -1121,7 +1132,7 @@ static void sunsu_autoconfig(struct uart_sunsu_port *up)
 	/*
 	 * There is no intr property on MrCoffee, so hardwire it.
 	 */
-	up->irq = IRQ_4M(13);
+	up->port.irq = IRQ_4M(13);
 #endif
 
 ebus_done:
@@ -1272,54 +1283,68 @@ static struct uart_driver sunsu_reg = {
 	.major			= TTY_MAJOR,
 };
 
-static int __init sunsu_kbd_ms_init(void)
+static int __init sunsu_kbd_ms_init(struct uart_sunsu_port *up, int channel)
 {
-	struct uart_sunsu_port *up;
-	int i;
-
-	for (i = 0, up = sunsu_ports; i < 2; i++, up++) {
-		up->port.line = i;
-		up->port.type = PORT_UNKNOWN;
-		up->port.uartclk = (SU_BASE_BAUD * 16);
-
-		if (up->su_type == SU_PORT_KBD)
-			up->cflag = B1200 | CS8 | CLOCAL | CREAD;
-		else
-			up->cflag = B4800 | CS8 | CLOCAL | CREAD;
-
-		sunsu_autoconfig(up);
-		if (up->port.type == PORT_UNKNOWN)
-			continue;
-
-		printk(KERN_INFO "su%d at 0x%p (irq = %s) is a %s\n",
-		       i,
-		       up->port.membase, __irq_itoa(up->irq),
-		       sunsu_type(&up->port));
-
+	int quot, baud;
 #ifdef CONFIG_SERIO
-		memset(&up->serio, 0, sizeof(up->serio));
-
-		up->serio.driver = up;
-
-		up->serio.type = SERIO_RS232;
-		if (up->su_type == SU_PORT_KBD) {
-			up->serio.type |= SERIO_SUNKBD;
-			up->serio.name = "sukbd";
-		} else {
-			up->serio.type |= (SERIO_SUN | (1 << 16));
-			up->serio.name = "sums";
-		}
-		up->serio.phys = (i == 0 ? "su/serio0" : "su/serio1");
-
-		up->serio.write = sunsu_serio_write;
-		up->serio.open = sunsu_serio_open;
-		up->serio.close = sunsu_serio_close;
-
-		serio_register_port(&up->serio);
+	struct serio *serio;
 #endif
 
-		sunsu_startup(&up->port);
+	up->port.line = channel;
+	up->port.type = PORT_UNKNOWN;
+	up->port.uartclk = (SU_BASE_BAUD * 16);
+
+	if (up->su_type == SU_PORT_KBD) {
+		up->cflag = B1200 | CS8 | CLOCAL | CREAD;
+		baud = 1200;
+	} else {
+		up->cflag = B4800 | CS8 | CLOCAL | CREAD;
+		baud = 4800;
 	}
+	quot = up->port.uartclk / (16 * baud);
+
+	sunsu_autoconfig(up);
+	if (up->port.type == PORT_UNKNOWN)
+		return -1;
+
+	printk(KERN_INFO "su%d at 0x%p (irq = %s) is a %s\n",
+	       channel,
+	       up->port.membase, __irq_itoa(up->port.irq),
+	       sunsu_type(&up->port));
+
+#ifdef CONFIG_SERIO
+	up->serio = serio = kmalloc(sizeof(struct serio), GFP_KERNEL);
+	if (serio) {
+		memset(serio, 0, sizeof(*serio));
+
+		serio->port_data = up;
+
+		serio->id.type = SERIO_RS232;
+		if (up->su_type == SU_PORT_KBD) {
+			serio->id.proto = SERIO_SUNKBD;
+			strlcpy(serio->name, "sukbd", sizeof(serio->name));
+		} else {
+			serio->id.proto = SERIO_SUN;
+			serio->id.extra = 1;
+			strlcpy(serio->name, "sums", sizeof(serio->name));
+		}
+		strlcpy(serio->phys, (channel == 0 ? "su/serio0" : "su/serio1"),
+			sizeof(serio->phys));
+
+		serio->write = sunsu_serio_write;
+		serio->open = sunsu_serio_open;
+		serio->close = sunsu_serio_close;
+
+		serio_register_port(serio);
+	} else {
+		printk(KERN_WARNING "su%d: not enough memory for serio port\n",
+			channel);
+	}
+#endif
+
+	sunsu_change_speed(&up->port, up->cflag, 0, quot);
+
+	sunsu_startup(&up->port);
 	return 0;
 }
 
@@ -1517,6 +1542,7 @@ static int __init sunsu_serial_init(void)
 	if (ret < 0)
 		return ret;
 
+	sunsu_serial_console_init();
 	for (i = 0; i < UART_NR; i++) {
 		struct uart_sunsu_port *up = &sunsu_ports[i];
 
@@ -1668,10 +1694,12 @@ static int __init sunsu_probe(void)
 	if (scan.msx != -1 && scan.kbx != -1) {
 		sunsu_ports[0].su_type = SU_PORT_MS;
 		sunsu_ports[0].port_node = scan.msnode;
+		sunsu_kbd_ms_init(&sunsu_ports[0], 0);
+
 		sunsu_ports[1].su_type = SU_PORT_KBD;
 		sunsu_ports[1].port_node = scan.kbnode;
+		sunsu_kbd_ms_init(&sunsu_ports[1], 1);
 
-		sunsu_kbd_ms_init();
 		return 0;
 	}
 
@@ -1687,7 +1715,6 @@ static int __init sunsu_probe(void)
 	 * Console must be initiated after the generic initialization.
 	 */
        	sunsu_serial_init();
-	sunsu_serial_console_init();
 
 	return 0;
 }
@@ -1703,7 +1730,10 @@ static void __exit sunsu_exit(void)
 		if (up->su_type == SU_PORT_MS ||
 		    up->su_type == SU_PORT_KBD) {
 #ifdef CONFIG_SERIO
-			serio_unregister_port(&up->serio);
+			if (up->serio) {
+				serio_unregister_port(up->serio);
+				up->serio = NULL;
+			}
 #endif
 		} else if (up->port.type != PORT_UNKNOWN) {
 			uart_remove_one_port(&sunsu_reg, &up->port);

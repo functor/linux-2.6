@@ -13,7 +13,7 @@
 
 #ifdef CONFIG_X86_IO_APIC
 
-#ifdef CONFIG_PCI_USE_VECTOR
+#ifdef CONFIG_PCI_MSI
 static inline int use_pci_vector(void)	{return 1;}
 static inline void disable_edge_ioapic_vector(unsigned int vector) { }
 static inline void mask_and_ack_level_ioapic_vector(unsigned int vector) { }
@@ -199,10 +199,9 @@ extern int skip_ioapic_setup;
  * If we use the IO-APIC for IRQ routing, disable automatic
  * assignment of PCI IRQ's.
  */
-#define io_apic_assign_pci_irqs (mp_irq_entries && !skip_ioapic_setup)
+#define io_apic_assign_pci_irqs (mp_irq_entries && !skip_ioapic_setup && io_apic_irqs)
 
 #ifdef CONFIG_ACPI_BOOT
-extern int io_apic_get_unique_id (int ioapic, int apic_id);
 extern int io_apic_get_version (int ioapic);
 extern int io_apic_get_redir_entries (int ioapic);
 extern int io_apic_set_pci_routing (int ioapic, int pin, int irq, int, int);

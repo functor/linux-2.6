@@ -1,5 +1,5 @@
 /*
- * $Id: cstm_mips_ixx.c,v 1.9 2003/05/21 12:45:18 dwmw2 Exp $
+ * $Id: cstm_mips_ixx.c,v 1.12 2004/11/04 13:24:14 gleixner Exp $
  *
  * Mapping of a custom board with both AMD CFI and JEDEC flash in partitions.
  * Config with both CFI and JEDEC device support.
@@ -58,7 +58,7 @@
 #if defined(CONFIG_MIPS_ITE8172) || defined(CONFIG_MIPS_IVR)
 void cstm_mips_ixx_set_vpp(struct map_info *map,int vpp)
 {
-	static spinlock_t vpp_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(vpp_lock);
 	static int vpp_count = 0;
 	unsigned long flags;
 
@@ -104,7 +104,7 @@ struct cstm_mips_ixx_info {
 	char *name;
 	unsigned long window_addr;
 	unsigned long window_size;
-	int buswidth;
+	int bankwidth;
 	int num_partitions;
 };
 
@@ -116,7 +116,7 @@ const struct cstm_mips_ixx_info cstm_mips_ixx_board_desc[PHYSMAP_NUMBER] =
         "big flash",     // name
 	0x08000000,      // window_addr
 	0x02000000,      // window_size
-        4,               // buswidth
+        4,               // bankwidth
 	1,               // num_partitions
     }
 
@@ -138,7 +138,7 @@ const struct cstm_mips_ixx_info cstm_mips_ixx_board_desc[PHYSMAP_NUMBER] =
         "MTD flash",                   // name
 	CONFIG_MTD_CSTM_MIPS_IXX_START,      // window_addr
 	CONFIG_MTD_CSTM_MIPS_IXX_LEN,        // window_size
-        CONFIG_MTD_CSTM_MIPS_IXX_BUSWIDTH,   // buswidth
+        CONFIG_MTD_CSTM_MIPS_IXX_BUSWIDTH,   // bankwidth
 	1,                             // num_partitions
     },
 
@@ -170,14 +170,14 @@ int __init init_cstm_mips_ixx(void)
 
 
 		cstm_mips_ixx_map[i].phys = cstm_mips_ixx_board_desc[i].window_addr;
-		cstm_mips_ixx_map[i].virt = (unsigned long)ioremap(cstm_mips_ixx_board_desc[i].window_addr, cstm_mips_ixx_board_desc[i].window_size);
+		cstm_mips_ixx_map[i].virt = ioremap(cstm_mips_ixx_board_desc[i].window_addr, cstm_mips_ixx_board_desc[i].window_size);
 		if (!cstm_mips_ixx_map[i].virt) {
 			printk(KERN_WARNING "Failed to ioremap\n");
 			return -EIO;
 	        }
 		cstm_mips_ixx_map[i].name = cstm_mips_ixx_board_desc[i].name;
 		cstm_mips_ixx_map[i].size = cstm_mips_ixx_board_desc[i].window_size;
-		cstm_mips_ixx_map[i].buswidth = cstm_mips_ixx_board_desc[i].buswidth;
+		cstm_mips_ixx_map[i].bankwidth = cstm_mips_ixx_board_desc[i].bankwidth;
 #if defined(CONFIG_MIPS_ITE8172) || defined(CONFIG_MIPS_IVR)
                 cstm_mips_ixx_map[i].set_vpp = cstm_mips_ixx_set_vpp;
 #endif

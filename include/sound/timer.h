@@ -40,8 +40,7 @@ typedef struct sndrv_timer_status snd_timer_status_t;
 typedef struct sndrv_timer_read snd_timer_read_t;
 typedef struct sndrv_timer_tread snd_timer_tread_t;
 
-#define _snd_timer_chip(timer) ((timer)->private_data)
-#define snd_timer_chip(timer) snd_magic_cast1(chip_t, _snd_timer_chip(timer), return -ENXIO)
+#define snd_timer_chip(timer) ((timer)->private_data)
 
 #define SNDRV_TIMER_DEVICES	16
 
@@ -60,6 +59,7 @@ typedef struct sndrv_timer_tread snd_timer_tread_t;
 #define SNDRV_TIMER_IFLG_FAST	  0x00000010	/* fast callback (do not use tasklet) */
 #define SNDRV_TIMER_IFLG_CALLBACK 0x00000020	/* timer callback is active */
 #define SNDRV_TIMER_IFLG_EXCLUSIVE 0x00000040	/* exclusive owner - no more instances */
+#define SNDRV_TIMER_IFLG_EARLY_EVENT 0x00000080	/* write early event to the poll queue */
 
 #define SNDRV_TIMER_FLG_CHANGE	0x00000001
 #define SNDRV_TIMER_FLG_RESCHED	0x00000002	/* need reschedule */

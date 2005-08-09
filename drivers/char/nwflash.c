@@ -43,11 +43,7 @@
 static void kick_open(void);
 static int get_flash_id(void);
 static int erase_block(int nBlock);
-static int write_block(unsigned long p, const char *buf, int count);
-static int flash_ioctl(struct inode *inodep, struct file *filep, unsigned int cmd, unsigned long arg);
-static ssize_t flash_read(struct file *file, char *buf, size_t count, loff_t * ppos);
-static ssize_t flash_write(struct file *file, const char *buf, size_t count, loff_t * ppos);
-static loff_t flash_llseek(struct file *file, loff_t offset, int orig);
+static int write_block(unsigned long p, const char __user *buf, int count);
 
 #define KFLASH_SIZE	1024*1024	//1 Meg
 #define KFLASH_SIZE4	4*1024*1024	//4 Meg
@@ -63,15 +59,6 @@ static int gbFlashSize = KFLASH_SIZE;
 static DECLARE_MUTEX(nwflash_sem);
 
 extern spinlock_t gpio_lock;
-
-/*
- * the delay routine - it is often required to let the flash "breeze"...
- */
-void flash_wait(int timeout)
-{
-	current->state = TASK_INTERRUPTIBLE;
-	schedule_timeout(timeout);
-}
 
 static int get_flash_id(void)
 {
@@ -132,15 +119,16 @@ static int flash_ioctl(struct inode *inodep, struct file *filep, unsigned int cm
 	return 0;
 }
 
-static ssize_t flash_read(struct file *file, char *buf, size_t size, loff_t * ppos)
+static ssize_t flash_read(struct file *file, char __user *buf, size_t size,
+			  loff_t *ppos)
 {
 	unsigned long p = *ppos;
 	unsigned int count = size;
 	int ret = 0;
 
 	if (flashdebug)
-		printk(KERN_DEBUG "flash_read: flash_read: offset=0x%lX, buffer=%p, count=0x%X.\n",
-		       p, buf, count);
+		printk(KERN_DEBUG "flash_read: flash_read: offset=0x%lX, "
+		       "buffer=%p, count=0x%X.\n", p, buf, count);
 
 	if (count)
 		ret = -ENXIO;
@@ -166,7 +154,8 @@ static ssize_t flash_read(struct file *file, char *buf, size_t size, loff_t * pp
 	return ret;
 }
 
-static ssize_t flash_write(struct file *file, const char *buf, size_t size, loff_t * ppos)
+static ssize_t flash_write(struct file *file, const char __user *buf,
+			   size_t size, loff_t * ppos)
 {
 	unsigned long p = *ppos;
 	unsigned int count = size;
@@ -193,7 +182,7 @@ static ssize_t flash_write(struct file *file, const char *buf, size_t size, loff
 	if (count > gbFlashSize - p)
 		count = gbFlashSize - p;
 			
-	if (verify_area(VERIFY_READ, buf, count))
+	if (!access_ok(VERIFY_READ, buf, count))
 		return -EFAULT;
 
 	/*
@@ -244,8 +233,9 @@ static ssize_t flash_write(struct file *file, const char *buf, size_t size, loff
 			break;
 		}
 		if (flashdebug)
-			printk(KERN_DEBUG "flash_write: writing offset %lX, from buf "
-				"%p, bytes left %X.\n", p, buf, count - written);
+			printk(KERN_DEBUG "flash_write: writing offset %lX, "
+			       "from buf %p, bytes left %X.\n", p, buf,
+			       count - written);
 
 		/*
 		 * write_block will limit write to space left in this block
@@ -402,7 +392,7 @@ static int erase_block(int nBlock)
 	/*
 	 * wait 10 ms
 	 */
-	flash_wait(HZ / 100);
+	msleep(10);
 
 	/*
 	 * wait while erasing in process (up to 10 sec)
@@ -410,7 +400,7 @@ static int erase_block(int nBlock)
 	timeout = jiffies + 10 * HZ;
 	c1 = 0;
 	while (!(c1 & 0x80) && time_before(jiffies, timeout)) {
-		flash_wait(HZ / 100);
+		msleep(10);
 		/*
 		 * read any address
 		 */
@@ -441,7 +431,7 @@ static int erase_block(int nBlock)
 	/*
 	 * just to make sure - verify if erased OK...
 	 */
-	flash_wait(HZ / 100);
+	msleep(10);
 
 	pWritePtr = (unsigned char *) ((unsigned int) (FLASH_BASE + (nBlock << 16)));
 
@@ -460,7 +450,7 @@ static int erase_block(int nBlock)
 /*
  * write_block will limit number of bytes written to the space in this block
  */
-static int write_block(unsigned long p, const char *buf, int count)
+static int write_block(unsigned long p, const char __user *buf, int count)
 {
 	volatile unsigned int c1;
 	volatile unsigned int c2;
@@ -588,7 +578,7 @@ static int write_block(unsigned long p, const char *buf, int count)
 				/*
 				 * wait couple ms
 				 */
-				flash_wait(HZ / 100);
+				msleep(10);
 				/*
 				 * red LED == write
 				 */
@@ -613,7 +603,7 @@ static int write_block(unsigned long p, const char *buf, int count)
 	leds_event(led_amber_off);
 	leds_event(led_green_on);
 
-	flash_wait(HZ / 100);
+	msleep(10);
 
 	pWritePtr = (unsigned char *) ((unsigned int) (FLASH_BASE + p));
 
@@ -706,7 +696,7 @@ static void __exit nwflash_exit(void)
 
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(flashdebug, "i");
+module_param(flashdebug, bool, 0644);
 
 module_init(nwflash_init);
 module_exit(nwflash_exit);

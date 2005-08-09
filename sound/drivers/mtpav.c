@@ -55,8 +55,8 @@
 #include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <linux/ioport.h>
+#include <linux/moduleparam.h>
 #include <sound/core.h>
-#define SNDRV_GET_ID
 #include <sound/initval.h>
 #include <sound/rawmidi.h>
 #include <linux/delay.h>
@@ -69,8 +69,7 @@
 MODULE_AUTHOR("Michael T. Mayers");
 MODULE_DESCRIPTION("MOTU MidiTimePiece AV multiport MIDI");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_DEVICES("{{MOTU,MidiTimePiece AV multiport MIDI}}");
+MODULE_SUPPORTED_DEVICE("{{MOTU,MidiTimePiece AV multiport MIDI}}");
 
 // io resources
 #define MTPAV_IOBASE		0x378
@@ -83,21 +82,16 @@ static long port = MTPAV_IOBASE;	/* 0x378, 0x278 */
 static int irq = MTPAV_IRQ;		/* 7, 5 */
 static int hwports = MTPAV_MAX_PORTS;	/* use hardware ports 1-8 */
 
-MODULE_PARM(index, "i");
+module_param(index, int, 0444);
 MODULE_PARM_DESC(index, "Index value for MotuMTPAV MIDI.");
-MODULE_PARM_SYNTAX(index, SNDRV_INDEX_DESC);
-MODULE_PARM(id, "s");
+module_param(id, charp, 0444);
 MODULE_PARM_DESC(id, "ID string for MotuMTPAV MIDI.");
-MODULE_PARM_SYNTAX(id, SNDRV_ID_DESC);
-MODULE_PARM(port, "l");
+module_param(port, long, 0444);
 MODULE_PARM_DESC(port, "Parallel port # for MotuMTPAV MIDI.");
-MODULE_PARM_SYNTAX(port, SNDRV_ENABLED ",allows:{{0x378},{0x278}},dialog:list");
-MODULE_PARM(irq, "i");
+module_param(irq, int, 0444);
 MODULE_PARM_DESC(irq, "Parallel IRQ # for MotuMTPAV MIDI.");
-MODULE_PARM_SYNTAX(irq,  SNDRV_ENABLED ",allows:{{7},{5}},dialog:list");
-MODULE_PARM(hwports, "i");
+module_param(hwports, int, 0444);
 MODULE_PARM_DESC(hwports, "Hardware ports # for MotuMTPAV MIDI.");
-MODULE_PARM_SYNTAX(hwports, SNDRV_ENABLED ",allows:{{1,8}},dialog:list");
 
 /*
  *      defines
@@ -419,10 +413,11 @@ static void snd_mtpav_input_trigger(snd_rawmidi_substream_t * substream, int up)
 
 static void snd_mtpav_output_timer(unsigned long data)
 {
-	mtpav_t *chip = snd_magic_cast(mtpav_t, (void *)data, return);
+	unsigned long flags;
+	mtpav_t *chip = (mtpav_t *)data;
 	int p;
 
-	spin_lock(&chip->spinlock);
+	spin_lock_irqsave(&chip->spinlock, flags);
 	/* reprogram timer */
 	chip->timer.expires = 1 + jiffies;
 	add_timer(&chip->timer);
@@ -432,7 +427,7 @@ static void snd_mtpav_output_timer(unsigned long data)
 		if ((portp->mode & MTPAV_MODE_OUTPUT_TRIGGERED) && portp->output)
 			snd_mtpav_output_port_write(portp, portp->output);
 	}
-	spin_unlock(&chip->spinlock);
+	spin_unlock_irqrestore(&chip->spinlock, flags);
 }
 
 /* spinlock held! */
@@ -520,9 +515,7 @@ static void snd_mtpav_inmidi_process(mtpav_t *mcrd, u8 inbyte)
 
 	portp = &mcrd->ports[mcrd->inmidiport];
 	if (portp->mode & MTPAV_MODE_INPUT_TRIGGERED) {
-		spin_unlock(&mcrd->spinlock);
 		snd_rawmidi_receive(portp->input, &inbyte, 1);
-		spin_lock(&mcrd->spinlock);
 	}
 }
 
@@ -587,7 +580,7 @@ static void snd_mtpav_read_bytes(mtpav_t * mcrd)
 
 static irqreturn_t snd_mtpav_irqh(int irq, void *dev_id, struct pt_regs *regs)
 {
-	mtpav_t *mcard = snd_magic_cast(mtpav_t, dev_id, return IRQ_NONE);
+	mtpav_t *mcard = dev_id;
 
 	//printk("irqh()\n");
 	spin_lock(&mcard->spinlock);
@@ -695,7 +688,7 @@ static int snd_mtpav_get_RAWMIDI(mtpav_t * mcard)
 
 static mtpav_t *new_mtpav(void)
 {
-	mtpav_t *ncrd = (mtpav_t *) snd_magic_kcalloc(mtpav_t, 0, GFP_KERNEL);
+	mtpav_t *ncrd = kcalloc(1, sizeof(*ncrd), GFP_KERNEL);
 	if (ncrd != NULL) {
 		spin_lock_init(&ncrd->spinlock);
 
@@ -728,7 +721,7 @@ static void free_mtpav(mtpav_t * crd)
 		release_resource(crd->res_port);
 		kfree_nocheck(crd->res_port);
 	}
-	snd_magic_kfree(crd);
+	kfree(crd);
 }
 
 /*
@@ -800,25 +793,3 @@ static void __exit alsa_card_mtpav_exit(void)
 
 module_init(alsa_card_mtpav_init)
 module_exit(alsa_card_mtpav_exit)
-
-#ifndef MODULE
-
-/* format is: snd-mtpav=enable,index,id,
-			port,irq,hwports */
-
-static int __init alsa_card_mtpav_setup(char *str)
-{
-        int __attribute__ ((__unused__)) enable = 1;
-
-	(void)(get_option(&str,&enable) == 2 &&
-	       get_option(&str,&index) == 2 &&
-	       get_id(&str,&id) == 2 &&
-	       get_option_long(&str,&port) == 2 &&
-	       get_option(&str,&irq) == 2 &&
-	       get_option(&str,&hwports) == 2);
-	return 1;
-}
-
-__setup("snd-mtpav=", alsa_card_mtpav_setup);
-
-#endif /* ifndef MODULE */

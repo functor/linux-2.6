@@ -38,9 +38,6 @@ struct tc_stats
 	__u32	pps;			/* Current flow packet rate */
 	__u32	qlen;
 	__u32	backlog;
-#ifdef __KERNEL__
-	spinlock_t *lock;
-#endif
 };
 
 struct tc_estimator
@@ -103,34 +100,6 @@ struct tc_prio_qopt
 	__u8	priomap[TC_PRIO_MAX+1];	/* Map: logical priority -> PRIO band */
 };
 
-/* CSZ section */
-
-struct tc_csz_qopt
-{
-	int		flows;		/* Maximal number of guaranteed flows */
-	unsigned char	R_log;		/* Fixed point position for round number */
-	unsigned char	delta_log;	/* Log of maximal managed time interval */
-	__u8		priomap[TC_PRIO_MAX+1];	/* Map: logical priority -> CSZ band */
-};
-
-struct tc_csz_copt
-{
-	struct tc_ratespec slice;
-	struct tc_ratespec rate;
-	struct tc_ratespec peakrate;
-	__u32		limit;
-	__u32		buffer;
-	__u32		mtu;
-};
-
-enum
-{
-	TCA_CSZ_UNSPEC,
-	TCA_CSZ_PARMS,
-	TCA_CSZ_RTAB,
-	TCA_CSZ_PTAB,
-};
-
 /* TBF section */
 
 struct tc_tbf_qopt
@@ -148,7 +117,10 @@ enum
 	TCA_TBF_PARMS,
 	TCA_TBF_RTAB,
 	TCA_TBF_PTAB,
+	__TCA_TBF_MAX,
 };
+
+#define TCA_TBF_MAX (__TCA_TBF_MAX - 1)
 
 
 /* TEQL section */
@@ -182,7 +154,10 @@ enum
 	TCA_RED_UNSPEC,
 	TCA_RED_PARMS,
 	TCA_RED_STAB,
+	__TCA_RED_MAX,
 };
+
+#define TCA_RED_MAX (__TCA_RED_MAX - 1)
 
 struct tc_red_qopt
 {
@@ -214,7 +189,10 @@ enum
        TCA_GRED_PARMS,
        TCA_GRED_STAB,
        TCA_GRED_DPS,
+	   __TCA_GRED_MAX,
 };
+
+#define TCA_GRED_MAX (__TCA_GRED_MAX - 1)
 
 #define TCA_SET_OFF TCA_GRED_PARMS
 struct tc_gred_qopt
@@ -280,7 +258,11 @@ enum
 	TCA_HTB_INIT,
 	TCA_HTB_CTAB,
 	TCA_HTB_RTAB,
+	__TCA_HTB_MAX,
 };
+
+#define TCA_HTB_MAX (__TCA_HTB_MAX - 1)
+
 struct tc_htb_xstats
 {
 	__u32 lends;
@@ -318,8 +300,11 @@ enum
 	TCA_HFSC_RSC,
 	TCA_HFSC_FSC,
 	TCA_HFSC_USC,
-	TCA_HFSC_MAX = TCA_HFSC_USC
+	__TCA_HFSC_MAX,
 };
+
+#define TCA_HFSC_MAX (__TCA_HFSC_MAX - 1)
+
 
 /* CBQ section */
 
@@ -401,9 +386,10 @@ enum
 	TCA_CBQ_RATE,
 	TCA_CBQ_RTAB,
 	TCA_CBQ_POLICE,
+	__TCA_CBQ_MAX,
 };
 
-#define TCA_CBQ_MAX	TCA_CBQ_POLICE
+#define TCA_CBQ_MAX	(__TCA_CBQ_MAX - 1)
 
 /* dsmark section */
 
@@ -413,10 +399,11 @@ enum {
 	TCA_DSMARK_DEFAULT_INDEX,
 	TCA_DSMARK_SET_TC_INDEX,
 	TCA_DSMARK_MASK,
-	TCA_DSMARK_VALUE
+	TCA_DSMARK_VALUE,
+	__TCA_DSMARK_MAX,
 };
 
-#define TCA_DSMARK_MAX TCA_DSMARK_VALUE
+#define TCA_DSMARK_MAX (__TCA_DSMARK_MAX - 1)
 
 /* ATM  section */
 
@@ -427,15 +414,48 @@ enum {
 	TCA_ATM_HDR,		/* LL header */
 	TCA_ATM_EXCESS,		/* excess traffic class (0 for CLP)  */
 	TCA_ATM_ADDR,		/* PVC address (for output only) */
-	TCA_ATM_STATE		/* VC state (ATM_VS_*; for output only) */
+	TCA_ATM_STATE,		/* VC state (ATM_VS_*; for output only) */
+	__TCA_ATM_MAX,
 };
 
-#define TCA_ATM_MAX	TCA_ATM_STATE
+#define TCA_ATM_MAX	(__TCA_ATM_MAX - 1)
 
-/* Delay section */
-struct tc_dly_qopt
+/* Network emulator */
+
+enum
 {
-	__u32	latency;
-	__u32   limit;
-};	
+	TCA_NETEM_UNSPEC,
+	TCA_NETEM_CORR,
+	TCA_NETEM_DELAY_DIST,
+	TCA_NETEM_REORDER,
+	__TCA_NETEM_MAX,
+};
+
+#define TCA_NETEM_MAX (__TCA_NETEM_MAX - 1)
+
+struct tc_netem_qopt
+{
+	__u32	latency;	/* added delay (us) */
+	__u32   limit;		/* fifo limit (packets) */
+	__u32	loss;		/* random packet loss (0=none ~0=100%) */
+	__u32	gap;		/* re-ordering gap (0 for none) */
+	__u32   duplicate;	/* random packet dup  (0=none ~0=100%) */
+	__u32	jitter;		/* random jitter in latency (us) */
+};
+
+struct tc_netem_corr
+{
+	__u32	delay_corr;	/* delay correlation */
+	__u32	loss_corr;	/* packet loss correlation */
+	__u32	dup_corr;	/* duplicate correlation  */
+};
+
+struct tc_netem_reorder
+{
+	__u32	probability;
+	__u32	correlation;
+};
+
+#define NETEM_DIST_SCALE	8192
+
 #endif

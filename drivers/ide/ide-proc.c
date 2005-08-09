@@ -8,37 +8,6 @@
 /*
  * This is the /proc/ide/ filesystem implementation.
  *
- * The major reason this exists is to provide sufficient access
- * to driver and config data, such that user-mode programs can
- * be developed to handle chipset tuning for most PCI interfaces.
- * This should provide better utilities, and less kernel bloat.
- *
- * The entire pci config space for a PCI interface chipset can be
- * retrieved by just reading it.  e.g.    "cat /proc/ide3/config"
- *
- * To modify registers *safely*, do something like:
- *   echo "P40:88" >/proc/ide/ide3/config
- * That expression writes 0x88 to pci config register 0x40
- * on the chip which controls ide3.  Multiple tuples can be issued,
- * and the writes will be completed as an atomic set:
- *   echo "P40:88 P41:35 P42:00 P43:00" >/proc/ide/ide3/config
- *
- * All numbers must be specified using pairs of ascii hex digits.
- * It is important to note that these writes will be performed
- * after waiting for the IDE controller (both interfaces)
- * to be completely idle, to ensure no corruption of I/O in progress.
- *
- * Non-PCI registers can also be written, using "R" in place of "P"
- * in the above examples.  The size of the port transfer is determined
- * by the number of pairs of hex digits given for the data.  If a two
- * digit value is given, the write will be a byte operation; if four
- * digits are used, the write will be performed as a 16-bit operation;
- * and if eight digits are specified, a 32-bit "dword" write will be
- * performed.  Odd numbers of digits are not permitted.
- *
- * If there is an error *anywhere* in the string of registers/data
- * then *none* of the writes will be performed.
- *
  * Drive/Driver settings can be retrieved by reading the drive's
  * "settings" files.  e.g.    "cat /proc/ide0/hda/settings"
  * To write a new value "val" into a specific setting "name", use:
@@ -50,10 +19,6 @@
  * SENSE CAPABILITIES command to /dev/hda, and then dump out the
  * returned data as 256 16-bit words.  The "hdparm" utility will
  * be updated someday soon to use this mechanism.
- *
- * Feel free to develop and distribute fancy GUI configuration
- * utilities for your favorite PCI chipsets.  I'll be working on
- * one for the Promise 20246 someday soon.  -ml
  *
  */
 
@@ -74,258 +39,6 @@
 
 #include <asm/io.h>
 
-static int ide_getxdigit(char c)
-{
-	int digit;
-	if (isdigit(c))
-		digit = c - '0';
-	else if (isxdigit(c))
-		digit = tolower(c) - 'a' + 10;
-	else
-		digit = -1;
-	return digit;
-}
-
-static int xx_xx_parse_error (const char *data, unsigned long len, const char *msg)
-{
-	char errbuf[16];
-	int i;
-	if (len >= sizeof(errbuf))
-		len = sizeof(errbuf) - 1;
-	for (i = 0; i < len; ++i) {
-		char c = data[i];
-		if (!c || c == '\n')
-			c = '\0';
-		else if (iscntrl(c))
-			c = '?';
-		errbuf[i] = c;
-	}
-	errbuf[i] = '\0';
-	printk("proc_ide: error: %s: '%s'\n", msg, errbuf);
-	return -EINVAL;
-}
-
-static int proc_ide_write_config
-	(struct file *file, const char *buffer, unsigned long count, void *data)
-{
-	ide_hwif_t	*hwif = (ide_hwif_t *)data;
-	int		for_real = 0;
-	unsigned long	startn = 0, n, flags;
-	const char	*start = NULL, *msg = NULL;
-
-	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO))
-		return -EACCES;
-	/*
-	 * Skip over leading whitespace
-	 */
-	while (count && isspace(*buffer)) {
-		--count;
-		++buffer;
-	}
-	/*
-	 * Do one full pass to verify all parameters,
-	 * then do another to actually write the regs.
-	 */
-	spin_lock_irqsave(&ide_lock, flags);
-	do {
-		const char *p;
-		if (for_real) {
-			unsigned long timeout = jiffies + (3 * HZ);
-			ide_hwgroup_t *mygroup = (ide_hwgroup_t *)(hwif->hwgroup);
-			ide_hwgroup_t *mategroup = NULL;
-			if (hwif->mate && hwif->mate->hwgroup)
-				mategroup = (ide_hwgroup_t *)(hwif->mate->hwgroup);
-			spin_lock_irqsave(&ide_lock, flags);
-			while (mygroup->busy ||
-			       (mategroup && mategroup->busy)) {
-				spin_unlock_irqrestore(&ide_lock, flags);
-				if (time_after(jiffies, timeout)) {
-					printk("/proc/ide/%s/config: channel(s) busy, cannot write\n", hwif->name);
-					spin_unlock_irqrestore(&ide_lock, flags);
-					return -EBUSY;
-				}
-				spin_lock_irqsave(&ide_lock, flags);
-			}
-		}
-		p = buffer;
-		n = count;
-		while (n > 0) {
-			int d, digits;
-			unsigned int reg = 0, val = 0, is_pci;
-			start = p;
-			startn = n--;
-			switch (*p++) {
-				case 'R':	is_pci = 0;
-						break;
-				case 'P':	is_pci = 1;
-#ifdef CONFIG_BLK_DEV_IDEPCI
-						if (hwif->pci_dev && !hwif->pci_dev->vendor)
-							break;
-#endif	/* CONFIG_BLK_DEV_IDEPCI */
-						msg = "not a PCI device";
-						goto parse_error;
-				default:	msg = "expected 'R' or 'P'";
-						goto parse_error;
-			}
-			digits = 0;
-			while (n > 0 && (d = ide_getxdigit(*p)) >= 0) {
-				reg = (reg << 4) | d;
-				--n;
-				++p;
-				++digits;
-			}
-			if (!digits || (digits > 4) || (is_pci && reg > 0xff)) {
-				msg = "bad/missing register number";
-				goto parse_error;
-			}
-			if (n-- == 0 || *p++ != ':') {
-				msg = "missing ':'";
-				goto parse_error;
-			}
-			digits = 0;
-			while (n > 0 && (d = ide_getxdigit(*p)) >= 0) {
-				val = (val << 4) | d;
-				--n;
-				++p;
-				++digits;
-			}
-			if (digits != 2 && digits != 4 && digits != 8) {
-				msg = "bad data, 2/4/8 digits required";
-				goto parse_error;
-			}
-			if (n > 0 && !isspace(*p)) {
-				msg = "expected whitespace after data";
-				goto parse_error;
-			}
-			while (n > 0 && isspace(*p)) {
-				--n;
-				++p;
-			}
-#ifdef CONFIG_BLK_DEV_IDEPCI
-			if (is_pci && (reg & ((digits >> 1) - 1))) {
-				msg = "misaligned access";
-				goto parse_error;
-			}
-#endif	/* CONFIG_BLK_DEV_IDEPCI */
-			if (for_real) {
-#if 0
-				printk("proc_ide_write_config: type=%c, reg=0x%x, val=0x%x, digits=%d\n", is_pci ? "PCI" : "non-PCI", reg, val, digits);
-#endif
-				if (is_pci) {
-#ifdef CONFIG_BLK_DEV_IDEPCI
-					int rc = 0;
-					struct pci_dev *dev = hwif->pci_dev;
-					switch (digits) {
-						case 2:	msg = "byte";
-							rc = pci_write_config_byte(dev, reg, val);
-							break;
-						case 4:	msg = "word";
-							rc = pci_write_config_word(dev, reg, val);
-							break;
-						case 8:	msg = "dword";
-							rc = pci_write_config_dword(dev, reg, val);
-							break;
-					}
-					if (rc) {
-						spin_unlock_irqrestore(&ide_lock, flags);
-						printk("proc_ide_write_config: error writing %s at bus %02x dev %02x reg 0x%x value 0x%x\n",
-							msg, dev->bus->number, dev->devfn, reg, val);
-						printk("proc_ide_write_config: error %d\n", rc);
-						return -EIO;
-					}
-#endif	/* CONFIG_BLK_DEV_IDEPCI */
-				} else {	/* not pci */
-#if !defined(__mc68000__) && !defined(CONFIG_APUS)
-
-/*
- * Geert Uytterhoeven
- *
- * unless you can explain me what it really does.
- * On m68k, we don't have outw() and outl() yet,
- * and I need a good reason to implement it.
- * 
- * BTW, IMHO the main remaining portability problem with the IDE driver 
- * is that it mixes IO (ioport) and MMIO (iomem) access on different platforms.
- * 
- * I think all accesses should be done using
- * 
- *     ide_in[bwl](ide_device_instance, offset)
- *     ide_out[bwl](ide_device_instance, value, offset)
- * 
- * so the architecture specific code can #define ide_{in,out}[bwl] to the
- * appropriate function.
- * 
- */
-					switch (digits) {
-						case 2:	hwif->OUTB(val, reg);
-							break;
-						case 4:	hwif->OUTW(val, reg);
-							break;
-						case 8:	hwif->OUTL(val, reg);
-							break;
-					}
-#endif /* !__mc68000__ && !CONFIG_APUS */
-				}
-			}
-		}
-	} while (!for_real++);
-	spin_unlock_irqrestore(&ide_lock, flags);
-	return count;
-parse_error:
-	spin_unlock_irqrestore(&ide_lock, flags);
-	printk("parse error\n");
-	return xx_xx_parse_error(start, startn, msg);
-}
-
-int proc_ide_read_config
-	(char *page, char **start, off_t off, int count, int *eof, void *data)
-{
-	char		*out = page;
-	int		len;
-
-#ifdef CONFIG_BLK_DEV_IDEPCI
-	ide_hwif_t	*hwif = (ide_hwif_t *)data;
-	struct pci_dev	*dev = hwif->pci_dev;
-	if ((hwif->pci_dev && hwif->pci_dev->vendor) && dev && dev->bus) {
-		int reg = 0;
-
-		out += sprintf(out, "pci bus %02x device %02x vendor %04x "
-				"device %04x channel %d\n",
-			dev->bus->number, dev->devfn,
-			hwif->pci_dev->vendor, hwif->pci_dev->device,
-			hwif->channel);
-		do {
-			u8 val;
-			int rc = pci_read_config_byte(dev, reg, &val);
-			if (rc) {
-				printk("proc_ide_read_config: error %d reading"
-					" bus %02x dev %02x reg 0x%02x\n",
-					rc, dev->bus->number, dev->devfn, reg);
-				out += sprintf(out, "??%c",
-					(++reg & 0xf) ? ' ' : '\n');
-			} else
-				out += sprintf(out, "%02x%c",
-					val, (++reg & 0xf) ? ' ' : '\n');
-		} while (reg < 0x100);
-	} else
-#endif	/* CONFIG_BLK_DEV_IDEPCI */
-		out += sprintf(out, "(none)\n");
-	len = out - page;
-	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
-}
-
-EXPORT_SYMBOL(proc_ide_read_config);
-
-static int ide_getdigit(char c)
-{
-	int digit;
-	if (isdigit(c))
-		digit = c - '0';
-	else
-		digit = -1;
-	return digit;
-}
-
 static int proc_ide_read_imodel
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
@@ -345,23 +58,19 @@ static int proc_ide_read_imodel
 		case ide_qd65xx:	name = "qd65xx";	break;
 		case ide_umc8672:	name = "umc8672";	break;
 		case ide_ht6560b:	name = "ht6560b";	break;
-		case ide_pdc4030:	name = "pdc4030";	break;
 		case ide_rz1000:	name = "rz1000";	break;
 		case ide_trm290:	name = "trm290";	break;
 		case ide_cmd646:	name = "cmd646";	break;
 		case ide_cy82c693:	name = "cy82c693";	break;
 		case ide_4drives:	name = "4drives";	break;
 		case ide_pmac:		name = "mac-io";	break;
-		case ide_pc9800:	name = "pc9800";	break;
 		default:		name = "(unknown)";	break;
 	}
 	len = sprintf(page, "%s\n", name);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
-EXPORT_SYMBOL(proc_ide_read_imodel);
-
-int proc_ide_read_mate
+static int proc_ide_read_mate
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
 	ide_hwif_t	*hwif = (ide_hwif_t *) data;
@@ -374,9 +83,7 @@ int proc_ide_read_mate
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
-EXPORT_SYMBOL(proc_ide_read_mate);
-
-int proc_ide_read_channel
+static int proc_ide_read_channel
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
 	ide_hwif_t	*hwif = (ide_hwif_t *) data;
@@ -388,9 +95,7 @@ int proc_ide_read_channel
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
-EXPORT_SYMBOL(proc_ide_read_channel);
-
-int proc_ide_read_identify
+static int proc_ide_read_identify
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
 	ide_drive_t	*drive = (ide_drive_t *)data;
@@ -398,27 +103,12 @@ int proc_ide_read_identify
 	int		err = 0;
 
 	len = sprintf(page, "\n");
-	
-	if (drive)
-	{
-		unsigned short *val = (unsigned short *) page;
-		
-		/*
-		 *	The current code can't handle a driverless
-		 *	identify query taskfile. Now the right fix is
-		 *	to add a 'default' driver but that is a bit
-		 *	more work. 
-		 *
-		 *	FIXME: this has to be fixed for hotswap devices
-		 */
-		 
-		if(DRIVER(drive))
-			err = taskfile_lib_get_identify(drive, page);
-		else	/* This relies on the ID changes */
-			val = (unsigned short *)drive->id;
 
-		if(!err)
-		{						
+	if (drive) {
+		unsigned short *val = (unsigned short *) page;
+
+		err = taskfile_lib_get_identify(drive, page);
+		if (!err) {
 			char *out = ((char *)page) + (SECTOR_WORDS * 4);
 			page = out;
 			do {
@@ -432,15 +122,27 @@ int proc_ide_read_identify
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
-EXPORT_SYMBOL(proc_ide_read_identify);
+static void proc_ide_settings_warn(void)
+{
+	static int warned = 0;
 
-int proc_ide_read_settings
+	if (warned)
+		return;
+
+	printk(KERN_WARNING "Warning: /proc/ide/hd?/settings interface is "
+			    "obsolete, and will be removed soon!\n");
+	warned = 1;
+}
+
+static int proc_ide_read_settings
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
 	ide_drive_t	*drive = (ide_drive_t *) data;
 	ide_settings_t	*setting = (ide_settings_t *) drive->settings;
 	char		*out = page;
 	int		len, rc, mul_factor, div_factor;
+
+	proc_ide_settings_warn();
 
 	down(&ide_setting_sem);
 	out += sprintf(out, "name\t\t\tvalue\t\tmin\t\tmax\t\tmode\n");
@@ -466,41 +168,54 @@ int proc_ide_read_settings
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
-EXPORT_SYMBOL(proc_ide_read_settings);
-
 #define MAX_LEN	30
 
-int proc_ide_write_settings
-	(struct file *file, const char *buffer, unsigned long count, void *data)
+static int proc_ide_write_settings(struct file *file, const char __user *buffer,
+				   unsigned long count, void *data)
 {
 	ide_drive_t	*drive = (ide_drive_t *) data;
 	char		name[MAX_LEN + 1];
-	int		for_real = 0, len;
+	int		for_real = 0;
 	unsigned long	n;
-	const char	*start = NULL;
 	ide_settings_t	*setting;
+	char *buf, *s;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
+
+	proc_ide_settings_warn();
+
+	if (count >= PAGE_SIZE)
+		return -EINVAL;
+
+	s = buf = (char *)__get_free_page(GFP_USER);
+	if (!buf)
+		return -ENOMEM;
+
+	if (copy_from_user(buf, buffer, count)) {
+		free_page((unsigned long)buf);
+		return -EFAULT;
+	}
+
+	buf[count] = '\0';
+
 	/*
 	 * Skip over leading whitespace
 	 */
-	while (count && isspace(*buffer)) {
+	while (count && isspace(*s)) {
 		--count;
-		++buffer;
+		++s;
 	}
 	/*
 	 * Do one full pass to verify all parameters,
 	 * then do another to actually write the new settings.
 	 */
 	do {
-		const char *p;
-		p = buffer;
+		char *p = s;
 		n = count;
 		while (n > 0) {
-			int d, digits;
-			unsigned int val = 0;
-			start = p;
+			unsigned val;
+			char *q = p;
 
 			while (n > 0 && *p != ':') {
 				--n;
@@ -508,30 +223,27 @@ int proc_ide_write_settings
 			}
 			if (*p != ':')
 				goto parse_error;
-			len = min(p - start, MAX_LEN);
-			strncpy(name, start, min(len, MAX_LEN));
-			name[len] = 0;
+			if (p - q > MAX_LEN)
+				goto parse_error;
+			memcpy(name, q, p - q);
+			name[p - q] = 0;
 
 			if (n > 0) {
 				--n;
 				p++;
 			} else
 				goto parse_error;
-			
-			digits = 0;
-			while (n > 0 && (d = ide_getdigit(*p)) >= 0) {
-				val = (val * 10) + d;
-				--n;
-				++p;
-				++digits;
-			}
+
+			val = simple_strtoul(p, &q, 10);
+			n -= q - p;
+			p = q;
 			if (n > 0 && !isspace(*p))
 				goto parse_error;
 			while (n > 0 && isspace(*p)) {
 				--n;
 				++p;
 			}
-			
+
 			down(&ide_setting_sem);
 			setting = ide_find_setting_by_name(drive, name);
 			if (!setting)
@@ -544,26 +256,22 @@ int proc_ide_write_settings
 			up(&ide_setting_sem);
 		}
 	} while (!for_real++);
+	free_page((unsigned long)buf);
 	return count;
 parse_error:
+	free_page((unsigned long)buf);
 	printk("proc_ide_write_settings(): parse error\n");
 	return -EINVAL;
 }
 
-EXPORT_SYMBOL(proc_ide_write_settings);
-
 int proc_ide_read_capacity
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) data;
-	int		len;
-
-	len = sprintf(page,"%llu\n",
-		      (long long) (DRIVER(drive)->capacity(drive)));
+	int len = sprintf(page,"%llu\n", (long long)0x7fffffff);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
-EXPORT_SYMBOL(proc_ide_read_capacity);
+EXPORT_SYMBOL_GPL(proc_ide_read_capacity);
 
 int proc_ide_read_geometry
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
@@ -583,7 +291,7 @@ int proc_ide_read_geometry
 
 EXPORT_SYMBOL(proc_ide_read_geometry);
 
-int proc_ide_read_dmodel
+static int proc_ide_read_dmodel
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
 	ide_drive_t	*drive = (ide_drive_t *) data;
@@ -595,37 +303,64 @@ int proc_ide_read_dmodel
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
-EXPORT_SYMBOL(proc_ide_read_dmodel);
-
-int proc_ide_read_driver
+static int proc_ide_read_driver
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
 	ide_drive_t	*drive = (ide_drive_t *) data;
-	ide_driver_t	*driver = drive->driver;
+	struct device	*dev = &drive->gendev;
+	ide_driver_t	*ide_drv;
 	int		len;
 
-	len = sprintf(page, "%s version %s\n",
-			driver->name, driver->version);
+	down_read(&dev->bus->subsys.rwsem);
+	if (dev->driver) {
+		ide_drv = container_of(dev->driver, ide_driver_t, gen_driver);
+		len = sprintf(page, "%s version %s\n",
+				dev->driver->name, ide_drv->version);
+	} else
+		len = sprintf(page, "ide-default version 0.9.newide\n");
+	up_read(&dev->bus->subsys.rwsem);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
 
-EXPORT_SYMBOL(proc_ide_read_driver);
+static int ide_replace_subdriver(ide_drive_t *drive, const char *driver)
+{
+	struct device *dev = &drive->gendev;
+	int ret = 1;
 
-int proc_ide_write_driver
-	(struct file *file, const char *buffer, unsigned long count, void *data)
+	down_write(&dev->bus->subsys.rwsem);
+	device_release_driver(dev);
+	/* FIXME: device can still be in use by previous driver */
+	strlcpy(drive->driver_req, driver, sizeof(drive->driver_req));
+	device_attach(dev);
+	drive->driver_req[0] = 0;
+	if (dev->driver == NULL)
+		device_attach(dev);
+	if (dev->driver && !strcmp(dev->driver->name, driver))
+		ret = 0;
+	up_write(&dev->bus->subsys.rwsem);
+
+	return ret;
+}
+
+static int proc_ide_write_driver
+	(struct file *file, const char __user *buffer, unsigned long count, void *data)
 {
 	ide_drive_t	*drive = (ide_drive_t *) data;
+	char name[32];
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
-	if (ide_replace_subdriver(drive, buffer))
+	if (count > 31)
+		count = 31;
+	if (copy_from_user(name, buffer, count))
+		return -EFAULT;
+	name[count] = '\0';
+	if (ide_replace_subdriver(drive, name))
 		return -EINVAL;
 	return count;
 }
 
-EXPORT_SYMBOL(proc_ide_write_driver);
-
-int proc_ide_read_media
+static int proc_ide_read_media
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
 	ide_drive_t	*drive = (ide_drive_t *) data;
@@ -648,8 +383,6 @@ int proc_ide_read_media
 	len = strlen(media);
 	PROC_IDE_READ_RETURN(page,start,off,count,eof,len);
 }
-
-EXPORT_SYMBOL(proc_ide_read_media);
 
 static ide_proc_entry_t generic_drive_entries[] = {
 	{ "driver",	S_IFREG|S_IRUGO,	proc_ide_read_driver,	proc_ide_write_driver },
@@ -677,8 +410,6 @@ void ide_add_proc_entries(struct proc_dir_entry *dir, ide_proc_entry_t *p, void 
 	}
 }
 
-EXPORT_SYMBOL(ide_add_proc_entries);
-
 void ide_remove_proc_entries(struct proc_dir_entry *dir, ide_proc_entry_t *p)
 {
 	if (!dir || !p)
@@ -689,9 +420,7 @@ void ide_remove_proc_entries(struct proc_dir_entry *dir, ide_proc_entry_t *p)
 	}
 }
 
-EXPORT_SYMBOL(ide_remove_proc_entries);
-
-void create_proc_ide_drives(ide_hwif_t *hwif)
+static void create_proc_ide_drives(ide_hwif_t *hwif)
 {
 	int	d;
 	struct proc_dir_entry *ent;
@@ -715,14 +444,9 @@ void create_proc_ide_drives(ide_hwif_t *hwif)
 	}
 }
 
-EXPORT_SYMBOL(create_proc_ide_drives);
-
-void destroy_proc_ide_device(ide_hwif_t *hwif, ide_drive_t *drive)
+static void destroy_proc_ide_device(ide_hwif_t *hwif, ide_drive_t *drive)
 {
-	ide_driver_t *driver = drive->driver;
-
 	if (drive->proc) {
-		ide_remove_proc_entries(drive->proc, driver->proc);
 		ide_remove_proc_entries(drive->proc, generic_drive_entries);
 		remove_proc_entry(drive->name, proc_ide_root);
 		remove_proc_entry(drive->name, hwif->proc);
@@ -730,9 +454,7 @@ void destroy_proc_ide_device(ide_hwif_t *hwif, ide_drive_t *drive)
 	}
 }
 
-EXPORT_SYMBOL(destroy_proc_ide_device);
-
-void destroy_proc_ide_drives(ide_hwif_t *hwif)
+static void destroy_proc_ide_drives(ide_hwif_t *hwif)
 {
 	int	d;
 
@@ -743,11 +465,8 @@ void destroy_proc_ide_drives(ide_hwif_t *hwif)
 	}
 }
 
-EXPORT_SYMBOL(destroy_proc_ide_drives);
-
 static ide_proc_entry_t hwif_entries[] = {
 	{ "channel",	S_IFREG|S_IRUGO,	proc_ide_read_channel,	NULL },
-	{ "config",	S_IFREG|S_IRUGO|S_IWUSR,proc_ide_read_config,	proc_ide_write_config },
 	{ "mate",	S_IFREG|S_IRUGO,	proc_ide_read_mate,	NULL },
 	{ "model",	S_IFREG|S_IRUGO,	proc_ide_read_imodel,	NULL },
 	{ NULL,	0, NULL, NULL }
@@ -783,39 +502,42 @@ void ide_pci_create_host_proc(const char *name, get_info_t *get_info)
 EXPORT_SYMBOL_GPL(ide_pci_create_host_proc);
 #endif
 
-void destroy_proc_ide_interfaces(void)
+void destroy_proc_ide_interface(ide_hwif_t *hwif)
 {
-	int	h;
-
-	for (h = 0; h < MAX_HWIFS; h++) {
-		ide_hwif_t *hwif = &ide_hwifs[h];
-		int exist = (hwif->proc != NULL);
-#if 0
-		if (!hwif->present)
-			continue;
-#endif
-		if (exist) {
-			destroy_proc_ide_drives(hwif);
-			ide_remove_proc_entries(hwif->proc, hwif_entries);
-			remove_proc_entry(hwif->name, proc_ide_root);
-			hwif->proc = NULL;
-		} else
-			continue;
+	if (hwif->proc) {
+		destroy_proc_ide_drives(hwif);
+		ide_remove_proc_entries(hwif->proc, hwif_entries);
+		remove_proc_entry(hwif->name, proc_ide_root);
+		hwif->proc = NULL;
 	}
 }
 
-EXPORT_SYMBOL(destroy_proc_ide_interfaces);
+static int proc_print_driver(struct device_driver *drv, void *data)
+{
+	ide_driver_t *ide_drv = container_of(drv, ide_driver_t, gen_driver);
+	struct seq_file *s = data;
 
-extern struct seq_operations ide_drivers_op;
+	seq_printf(s, "%s version %s\n", drv->name, ide_drv->version);
+
+	return 0;
+}
+
+static int ide_drivers_show(struct seq_file *s, void *p)
+{
+	bus_for_each_drv(&ide_bus_type, NULL, s, proc_print_driver);
+	return 0;
+}
+
 static int ide_drivers_open(struct inode *inode, struct file *file)
 {
-	return seq_open(file, &ide_drivers_op);
+	return single_open(file, &ide_drivers_show, NULL);
 }
+
 static struct file_operations ide_drivers_operations = {
 	.open		= ide_drivers_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
-	.release	= seq_release,
+	.release	= single_release,
 };
 
 void proc_ide_create(void)
@@ -832,13 +554,8 @@ void proc_ide_create(void)
 		entry->proc_fops = &ide_drivers_operations;
 }
 
-EXPORT_SYMBOL(proc_ide_create);
-
 void proc_ide_destroy(void)
 {
-	remove_proc_entry("ide/drivers", proc_ide_root);
-	destroy_proc_ide_interfaces();
-	remove_proc_entry("ide", 0);
+	remove_proc_entry("drivers", proc_ide_root);
+	remove_proc_entry("ide", NULL);
 }
-
-EXPORT_SYMBOL(proc_ide_destroy);

@@ -132,6 +132,22 @@ changes occur:
 	translations for software managed TLB configurations.
 	The sparc64 port currently does this.
 
+7) void tlb_migrate_finish(struct mm_struct *mm)
+
+	This interface is called at the end of an explicit
+	process migration. This interface provides a hook
+	to allow a platform to update TLB or context-specific
+	information for the address space.
+
+	The ia64 sn2 platform is one example of a platform
+	that uses this interface.
+
+8) void lazy_mmu_prot_update(pte_t pte)
+	This interface is called whenever the protection on
+	any user PTEs change.  This interface provides a notification
+	to architecture specific code to take appropiate action.
+
+
 Next, we have the cache flushing interfaces.  In general, when Linux
 is changing an existing virtual-->physical mapping to a new value,
 the sequence will be in one of the following forms:
@@ -144,7 +160,7 @@ the sequence will be in one of the following forms:
 	   change_range_of_page_tables(mm, start, end);
 	   flush_tlb_range(vma, start, end);
 
-	3) flush_cache_page(vma, addr);
+	3) flush_cache_page(vma, addr, pfn);
 	   set_pte(pte_pointer, new_pte_val);
 	   flush_tlb_page(vma, addr);
 
@@ -192,7 +208,7 @@ Here are the routines, one by one:
 	call flush_cache_page (see below) for each entry which may be
 	modified.
 
-3) void flush_cache_page(struct vm_area_struct *vma, unsigned long addr)
+3) void flush_cache_page(struct vm_area_struct *vma, unsigned long addr, unsigned long pfn)
 
 	This time we need to remove a PAGE_SIZE sized range
 	from the cache.  The 'vma' is the backing structure used by
@@ -202,8 +218,14 @@ Here are the routines, one by one:
 	executable (and thus could be in the 'instruction cache' in
 	"Harvard" type cache layouts).
 
+	The 'pfn' indicates the physical page frame (shift this value
+	left by PAGE_SHIFT to get the physical address) that 'addr'
+	translates to.  It is this mapping which should be removed from
+	the cache.
+
 	After running, there will be no entries in the cache for
-	'vma->vm_mm' for virtual address 'addr'.
+	'vma->vm_mm' for virtual address 'addr' which translates
+	to 'pfn'.
 
 	This is used primarily during fault processing.
 
@@ -322,10 +344,10 @@ maps this page at its virtual address.
 	about doing this.
 
 	The idea is, first at flush_dcache_page() time, if
-	page->mapping->i_mmap{,_shared} are empty lists, just mark the
-	architecture private page flag bit.  Later, in
-	update_mmu_cache(), a check is made of this flag bit, and if
-	set the flush is done and the flag bit is cleared.
+	page->mapping->i_mmap is an empty tree and ->i_mmap_nonlinear
+	an empty list, just mark the architecture private page flag bit.
+	Later, in update_mmu_cache(), a check is made of this flag bit,
+	and if set the flush is done and the flag bit is cleared.
 
 	IMPORTANT NOTE: It is often important, if you defer the flush,
 			that the actual flush occurs on the same CPU
@@ -342,10 +364,6 @@ maps this page at its virtual address.
 	When the kernel needs to copy arbitrary data in and out
 	of arbitrary user pages (f.e. for ptrace()) it will use
 	these two routines.
-
-	The page has been kmap()'d, and flush_cache_page() has
-	just been called for the user mapping of this page (if
-	necessary).
 
 	Any necessary cache flushing or other coherency operations
 	that need to occur should happen here.  If the processor's

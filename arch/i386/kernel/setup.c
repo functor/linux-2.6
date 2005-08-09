@@ -33,12 +33,14 @@
 #include <linux/bootmem.h>
 #include <linux/seq_file.h>
 #include <linux/console.h>
+#include <linux/mca.h>
 #include <linux/root_dev.h>
 #include <linux/highmem.h>
 #include <linux/module.h>
 #include <linux/efi.h>
 #include <linux/init.h>
 #include <linux/edd.h>
+#include <linux/nodemask.h>
 #include <video/edid.h>
 #include <asm/e820.h>
 #include <asm/mpspec.h>
@@ -47,8 +49,9 @@
 #include <asm/sections.h>
 #include <asm/io_apic.h>
 #include <asm/ist.h>
-#include <asm/std_resources.h>
+#include <asm/io.h>
 #include "setup_arch_pre.h"
+#include <bios_ebda.h>
 
 /* This value is set up by the early boot code to point to the value
    immediately after the boot time page tables.  It contains a *physical*
@@ -57,14 +60,13 @@ unsigned long init_pg_tables_end __initdata = ~0UL;
 
 int disable_pse __initdata = 0;
 
-static inline char * __init machine_specific_memory_setup(void);
-
 /*
  * Machine setup..
  */
 
 #ifdef CONFIG_EFI
 int efi_enabled = 0;
+EXPORT_SYMBOL(efi_enabled);
 #endif
 
 /* cpu data as detected by the assembly code in head.S */
@@ -73,7 +75,6 @@ struct cpuinfo_x86 new_cpu_data __initdata = { 0, 0, 0, 0, -1, 1, 0, 0, -1 };
 struct cpuinfo_x86 boot_cpu_data = { 0, 0, 0, 0, -1, 1, 0, 0, -1 };
 
 unsigned long mmu_cr4_features;
-EXPORT_SYMBOL_GPL(mmu_cr4_features);
 
 #ifdef	CONFIG_ACPI_INTERPRETER
 	int acpi_disabled = 0;
@@ -87,7 +88,6 @@ int __initdata acpi_force = 0;
 extern acpi_interrupt_flags	acpi_sci_flags;
 #endif
 
-int MCA_bus;
 /* for MCA, but anyone else can use it if they want */
 unsigned int machine_id;
 unsigned int machine_submodel_id;
@@ -96,6 +96,9 @@ unsigned int mca_pentium_flag;
 
 /* For PCI or other memory-mapped resources */
 unsigned long pci_mem_start = 0x10000000;
+
+/* Boot loader ID as an integer, for the benefit of proc_dointvec */
+int bootloader_type;
 
 /* user-defined highmem size */
 static unsigned int highmem_pages = -1;
@@ -114,8 +117,6 @@ struct edid_info edid_info;
 struct ist_info ist_info;
 struct e820map e820;
 
-unsigned char aux_device_present;
-
 extern void early_cpu_init(void);
 extern void dmi_scan_machine(void);
 extern void generic_apic_probe(char *);
@@ -128,12 +129,211 @@ unsigned long saved_videomode;
 #define RAMDISK_LOAD_FLAG		0x4000	
 
 static char command_line[COMMAND_LINE_SIZE];
-       char saved_command_line[COMMAND_LINE_SIZE];
 
 unsigned char __initdata boot_params[PARAM_SIZE];
 
-static struct resource code_resource = { "Kernel code", 0x100000, 0 };
-static struct resource data_resource = { "Kernel data", 0, 0 };
+static struct resource data_resource = {
+	.name	= "Kernel data",
+	.start	= 0,
+	.end	= 0,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
+};
+
+static struct resource code_resource = {
+	.name	= "Kernel code",
+	.start	= 0,
+	.end	= 0,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
+};
+
+static struct resource system_rom_resource = {
+	.name	= "System ROM",
+	.start	= 0xf0000,
+	.end	= 0xfffff,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_READONLY | IORESOURCE_MEM
+};
+
+static struct resource extension_rom_resource = {
+	.name	= "Extension ROM",
+	.start	= 0xe0000,
+	.end	= 0xeffff,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_READONLY | IORESOURCE_MEM
+};
+
+static struct resource adapter_rom_resources[] = { {
+	.name 	= "Adapter ROM",
+	.start	= 0xc8000,
+	.end	= 0,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_READONLY | IORESOURCE_MEM
+}, {
+	.name 	= "Adapter ROM",
+	.start	= 0,
+	.end	= 0,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_READONLY | IORESOURCE_MEM
+}, {
+	.name 	= "Adapter ROM",
+	.start	= 0,
+	.end	= 0,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_READONLY | IORESOURCE_MEM
+}, {
+	.name 	= "Adapter ROM",
+	.start	= 0,
+	.end	= 0,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_READONLY | IORESOURCE_MEM
+}, {
+	.name 	= "Adapter ROM",
+	.start	= 0,
+	.end	= 0,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_READONLY | IORESOURCE_MEM
+}, {
+	.name 	= "Adapter ROM",
+	.start	= 0,
+	.end	= 0,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_READONLY | IORESOURCE_MEM
+} };
+
+#define ADAPTER_ROM_RESOURCES \
+	(sizeof adapter_rom_resources / sizeof adapter_rom_resources[0])
+
+static struct resource video_rom_resource = {
+	.name 	= "Video ROM",
+	.start	= 0xc0000,
+	.end	= 0xc7fff,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_READONLY | IORESOURCE_MEM
+};
+
+static struct resource video_ram_resource = {
+	.name	= "Video RAM area",
+	.start	= 0xa0000,
+	.end	= 0xbffff,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
+};
+
+static struct resource standard_io_resources[] = { {
+	.name	= "dma1",
+	.start	= 0x0000,
+	.end	= 0x001f,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_IO
+}, {
+	.name	= "pic1",
+	.start	= 0x0020,
+	.end	= 0x0021,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_IO
+}, {
+	.name   = "timer0",
+	.start	= 0x0040,
+	.end    = 0x0043,
+	.flags  = IORESOURCE_BUSY | IORESOURCE_IO
+}, {
+	.name   = "timer1",
+	.start  = 0x0050,
+	.end    = 0x0053,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_IO
+}, {
+	.name	= "keyboard",
+	.start	= 0x0060,
+	.end	= 0x006f,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_IO
+}, {
+	.name	= "dma page reg",
+	.start	= 0x0080,
+	.end	= 0x008f,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_IO
+}, {
+	.name	= "pic2",
+	.start	= 0x00a0,
+	.end	= 0x00a1,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_IO
+}, {
+	.name	= "dma2",
+	.start	= 0x00c0,
+	.end	= 0x00df,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_IO
+}, {
+	.name	= "fpu",
+	.start	= 0x00f0,
+	.end	= 0x00ff,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_IO
+} };
+
+#define STANDARD_IO_RESOURCES \
+	(sizeof standard_io_resources / sizeof standard_io_resources[0])
+
+#define romsignature(x) (*(unsigned short *)(x) == 0xaa55)
+
+static int __init romchecksum(unsigned char *rom, unsigned long length)
+{
+	unsigned char *p, sum = 0;
+
+	for (p = rom; p < rom + length; p++)
+		sum += *p;
+	return sum == 0;
+}
+
+static void __init probe_roms(void)
+{
+	unsigned long start, length, upper;
+	unsigned char *rom;
+	int	      i;
+
+	/* video rom */
+	upper = adapter_rom_resources[0].start;
+	for (start = video_rom_resource.start; start < upper; start += 2048) {
+		rom = isa_bus_to_virt(start);
+		if (!romsignature(rom))
+			continue;
+
+		video_rom_resource.start = start;
+
+		/* 0 < length <= 0x7f * 512, historically */
+		length = rom[2] * 512;
+
+		/* if checksum okay, trust length byte */
+		if (length && romchecksum(rom, length))
+			video_rom_resource.end = start + length - 1;
+
+		request_resource(&iomem_resource, &video_rom_resource);
+		break;
+	}
+
+	start = (video_rom_resource.end + 1 + 2047) & ~2047UL;
+	if (start < upper)
+		start = upper;
+
+	/* system rom */
+	request_resource(&iomem_resource, &system_rom_resource);
+	upper = system_rom_resource.start;
+
+	/* check for extension rom (ignore length byte!) */
+	rom = isa_bus_to_virt(extension_rom_resource.start);
+	if (romsignature(rom)) {
+		length = extension_rom_resource.end - extension_rom_resource.start + 1;
+		if (romchecksum(rom, length)) {
+			request_resource(&iomem_resource, &extension_rom_resource);
+			upper = extension_rom_resource.start;
+		}
+	}
+
+	/* check for adapter roms on 2k boundaries */
+	for (i = 0; i < ADAPTER_ROM_RESOURCES && start < upper; start += 2048) {
+		rom = isa_bus_to_virt(start);
+		if (!romsignature(rom))
+			continue;
+
+		/* 0 < length <= 0x7f * 512, historically */
+		length = rom[2] * 512;
+
+		/* but accept any length that fits if checksum okay */
+		if (!length || start + length > upper || !romchecksum(rom, length))
+			continue;
+
+		adapter_rom_resources[i].start = start;
+		adapter_rom_resources[i].end = start + length - 1;
+		request_resource(&iomem_resource, &adapter_rom_resources[i]);
+
+		start = adapter_rom_resources[i++].end & ~2047UL;
+	}
+}
 
 static void __init limit_regions(unsigned long long size)
 {
@@ -225,10 +425,10 @@ struct change_member {
 	struct e820entry *pbios; /* pointer to original bios entry */
 	unsigned long long addr; /* address for this change point */
 };
-struct change_member change_point_list[2*E820MAX] __initdata;
-struct change_member *change_point[2*E820MAX] __initdata;
-struct e820entry *overlap_list[E820MAX] __initdata;
-struct e820entry new_bios[E820MAX] __initdata;
+static struct change_member change_point_list[2*E820MAX] __initdata;
+static struct change_member *change_point[2*E820MAX] __initdata;
+static struct e820entry *overlap_list[E820MAX] __initdata;
+static struct e820entry new_bios[E820MAX] __initdata;
 
 static int __init sanitize_e820_map(struct e820entry * biosmap, char * pnr_map)
 {
@@ -435,13 +635,9 @@ static int __init copy_e820_map(struct e820entry * biosmap, int nr_map)
 }
 
 #if defined(CONFIG_EDD) || defined(CONFIG_EDD_MODULE)
-unsigned char eddnr;
-struct edd_info edd[EDDMAXNR];
-unsigned int edd_disk80_sig;
+struct edd edd;
 #ifdef CONFIG_EDD_MODULE
-EXPORT_SYMBOL(eddnr);
 EXPORT_SYMBOL(edd);
-EXPORT_SYMBOL(edd_disk80_sig);
 #endif
 /**
  * copy_edd() - Copy the BIOS EDD information
@@ -450,12 +646,15 @@ EXPORT_SYMBOL(edd_disk80_sig);
  */
 static inline void copy_edd(void)
 {
-     eddnr = EDD_NR;
-     memcpy(edd, EDD_BUF, sizeof(edd));
-     edd_disk80_sig = DISK80_SIGNATURE;
+     memcpy(edd.mbr_signature, EDD_MBR_SIGNATURE, sizeof(edd.mbr_signature));
+     memcpy(edd.edd_info, EDD_BUF, sizeof(edd.edd_info));
+     edd.mbr_signature_nr = EDD_MBR_SIG_NR;
+     edd.edd_info_nr = EDD_NR;
 }
 #else
-#define copy_edd() do {} while (0)
+static inline void copy_edd(void)
+{
+}
 #endif
 
 /*
@@ -463,14 +662,6 @@ static inline void copy_edd(void)
  * It does not work on many machines.
  */
 #define LOWMEMSIZE()	(0x9f000)
-
-static void __init setup_memory_region(void)
-{
-	char *who = machine_specific_memory_setup();
-	printk(KERN_INFO "BIOS-provided physical RAM map:\n");
-	print_memory_map(who);
-} /* setup_memory_region */
-
 
 static void __init parse_cmdline_early (char ** cmdline_p)
 {
@@ -482,6 +673,8 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 	saved_command_line[COMMAND_LINE_SIZE-1] = '\0';
 
 	for (;;) {
+		if (c != ' ')
+			goto next_char;
 		/*
 		 * "mem=nopentium" disables the 4MB page tables.
 		 * "mem=XXX[kKmM]" defines a memory region from HIGH_MEM
@@ -492,7 +685,7 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 		 * HPA tells me bootloaders need to parse mem=, so no new
 		 * option should be mem=  [also see Documentation/i386/boot.txt]
 		 */
-		if (c == ' ' && !memcmp(from, "mem=", 4)) {
+		if (!memcmp(from, "mem=", 4)) {
 			if (to != command_line)
 				to--;
 			if (!memcmp(from+4, "nopentium", 9)) {
@@ -514,7 +707,7 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 			}
 		}
 
-		if (c == ' ' && !memcmp(from, "memmap=", 7)) {
+		else if (!memcmp(from, "memmap=", 7)) {
 			if (to != command_line)
 				to--;
 			if (!memcmp(from+7, "exactmap", 8)) {
@@ -546,6 +739,10 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 				}
 			}
 		}
+
+		else if (!memcmp(from, "noexec=", 7))
+			noexec_setup(from + 7);
+
 
 #ifdef  CONFIG_X86_SMP
 		/*
@@ -622,9 +819,18 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 		 * This works even on boxes that have no highmem otherwise.
 		 * This also works to reduce highmem size on bigger boxes.
 		 */
-		if (c == ' ' && !memcmp(from, "highmem=", 8))
+		else if (!memcmp(from, "highmem=", 8))
 			highmem_pages = memparse(from+8, &from) >> PAGE_SHIFT;
 	
+		/*
+		 * vmalloc=size forces the vmalloc area to be exactly 'size'
+		 * bytes. This can be used to increase (or decrease) the
+		 * vmalloc area - the default is 128m.
+		 */
+		else if (!memcmp(from, "vmalloc=", 8))
+			__VMALLOC_RESERVE = memparse(from+8, &from);
+
+	next_char:
 		c = *(from++);
 		if (!c)
 			break;
@@ -743,8 +949,6 @@ unsigned long __init find_max_low_pfn(void)
 	return max_low_pfn;
 }
 
-#ifndef CONFIG_DISCONTIGMEM
-
 /*
  * Free all available memory for boot time allocation.  Used
  * as a callback function by efi_memory_walk()
@@ -807,15 +1011,26 @@ static void __init register_bootmem_low_pages(unsigned long max_low_pfn)
 	}
 }
 
+/*
+ * workaround for Dell systems that neglect to reserve EBDA
+ */
+static void __init reserve_ebda_region(void)
+{
+	unsigned int addr;
+	addr = get_bios_ebda();
+	if (addr)
+		reserve_bootmem(addr, PAGE_SIZE);	
+}
+
+#ifndef CONFIG_DISCONTIGMEM
+void __init setup_bootmem_allocator(void);
 static unsigned long __init setup_memory(void)
 {
-	unsigned long bootmap_size, start_pfn, max_low_pfn;
-
 	/*
 	 * partially used pages are not usable - thus
 	 * we are rounding upwards:
 	 */
-	start_pfn = PFN_UP(init_pg_tables_end);
+	min_low_pfn = PFN_UP(init_pg_tables_end);
 
 	find_max_pfn();
 
@@ -831,10 +1046,43 @@ static unsigned long __init setup_memory(void)
 #endif
 	printk(KERN_NOTICE "%ldMB LOWMEM available.\n",
 			pages_to_mb(max_low_pfn));
+
+	setup_bootmem_allocator();
+
+	return max_low_pfn;
+}
+
+void __init zone_sizes_init(void)
+{
+	unsigned long zones_size[MAX_NR_ZONES] = {0, 0, 0};
+	unsigned int max_dma, low;
+
+	max_dma = virt_to_phys((char *)MAX_DMA_ADDRESS) >> PAGE_SHIFT;
+	low = max_low_pfn;
+
+	if (low < max_dma)
+		zones_size[ZONE_DMA] = low;
+	else {
+		zones_size[ZONE_DMA] = max_dma;
+		zones_size[ZONE_NORMAL] = low - max_dma;
+#ifdef CONFIG_HIGHMEM
+		zones_size[ZONE_HIGHMEM] = highend_pfn - low;
+#endif
+	}
+	free_area_init(zones_size);
+}
+#else
+extern unsigned long setup_memory(void);
+extern void zone_sizes_init(void);
+#endif /* !CONFIG_DISCONTIGMEM */
+
+void __init setup_bootmem_allocator(void)
+{
+	unsigned long bootmap_size;
 	/*
 	 * Initialize the boot-time allocator (with low memory only):
 	 */
-	bootmap_size = init_bootmem(start_pfn, max_low_pfn);
+	bootmap_size = init_bootmem(min_low_pfn, max_low_pfn);
 
 	register_bootmem_low_pages(max_low_pfn);
 
@@ -844,7 +1092,7 @@ static unsigned long __init setup_memory(void)
 	 * the (very unlikely) case of us accidentally initializing the
 	 * bootmem allocator with an invalid RAM area.
 	 */
-	reserve_bootmem(HIGH_MEMORY, (PFN_PHYS(start_pfn) +
+	reserve_bootmem(HIGH_MEMORY, (PFN_PHYS(min_low_pfn) +
 			 bootmap_size + PAGE_SIZE-1) - (HIGH_MEMORY));
 
 	/*
@@ -852,6 +1100,9 @@ static unsigned long __init setup_memory(void)
 	 * enabling clean reboots, SMP operation, laptop functions.
 	 */
 	reserve_bootmem(0, PAGE_SIZE);
+
+	/* reserve EBDA region, it's a 4K region */
+	reserve_ebda_region();
 
     /* could be an AMD 768MPX chipset. Reserve a page  before VGA to prevent
        PCI prefetch into it (errata #56). Usually the page is reserved anyways,
@@ -898,11 +1149,25 @@ static unsigned long __init setup_memory(void)
 		}
 	}
 #endif
-	return max_low_pfn;
 }
-#else
-extern unsigned long setup_memory(void);
-#endif /* !CONFIG_DISCONTIGMEM */
+
+/*
+ * The node 0 pgdat is initialized before all of these because
+ * it's needed for bootmem.  node>0 pgdats have their virtual
+ * space allocated before the pagetables are in place to access
+ * them, so they can't be cleared then.
+ *
+ * This should all compile down to nothing when NUMA is off.
+ */
+void __init remapped_pgdat_init(void)
+{
+	int nid;
+
+	for_each_online_node(nid) {
+		if (nid != 0)
+			memset(NODE_DATA(nid), 0, sizeof(struct pglist_data));
+	}
+}
 
 /*
  * Request address space for all standard RAM and ROM resources
@@ -944,9 +1209,11 @@ legacy_init_iomem_resources(struct resource *code_resource, struct resource *dat
 /*
  * Request address space for all standard resources
  */
-static void __init register_memory(unsigned long max_low_pfn)
+static void __init register_memory(void)
 {
-	unsigned long low_mem_size;
+	unsigned long gapstart, gapsize;
+	unsigned long long last;
+	int	      i;
 
 	if (efi_enabled)
 		efi_initialize_iomem_resources(&code_resource, &data_resource);
@@ -954,15 +1221,52 @@ static void __init register_memory(unsigned long max_low_pfn)
 		legacy_init_iomem_resources(&code_resource, &data_resource);
 
 	/* EFI systems may still have VGA */
-	request_graphics_resource();
+	request_resource(&iomem_resource, &video_ram_resource);
 
 	/* request I/O space for devices used on all i[345]86 PCs */
-	request_standard_io_resources();
+	for (i = 0; i < STANDARD_IO_RESOURCES; i++)
+		request_resource(&ioport_resource, &standard_io_resources[i]);
 
-	/* Tell the PCI layer not to allocate too close to the RAM area.. */
-	low_mem_size = ((max_low_pfn << PAGE_SHIFT) + 0xfffff) & ~0xfffff;
-	if (low_mem_size > pci_mem_start)
-		pci_mem_start = low_mem_size;
+	/*
+	 * Search for the bigest gap in the low 32 bits of the e820
+	 * memory space.
+	 */
+	last = 0x100000000ull;
+	gapstart = 0x10000000;
+	gapsize = 0x400000;
+	i = e820.nr_map;
+	while (--i >= 0) {
+		unsigned long long start = e820.map[i].addr;
+		unsigned long long end = start + e820.map[i].size;
+
+		/*
+		 * Since "last" is at most 4GB, we know we'll
+		 * fit in 32 bits if this condition is true
+		 */
+		if (last > end) {
+			unsigned long gap = last - end;
+
+			if (gap > gapsize) {
+				gapsize = gap;
+				gapstart = end;
+			}
+		}
+		if (start < last)
+			last = start;
+	}
+
+	/*
+	 * Start allocating dynamic PCI memory a bit into the gap,
+	 * aligned up to the nearest megabyte.
+	 *
+	 * Question: should we try to pad it up a bit (do something
+	 * like " + (gapsize >> 3)" in there too?). We now have the
+	 * technology.
+	 */
+	pci_mem_start = (gapstart + 0xfffff) & ~0xfffff;
+
+	printk("Allocating PCI resources starting at %08lx (gap: %08lx:%08lx)\n",
+		pci_mem_start, gapstart, gapsize);
 }
 
 /* Use inline assembly to define this because the nops are defined 
@@ -1018,7 +1322,7 @@ static struct nop {
 } noptypes[] = { 
      { X86_FEATURE_K8, k8_nops }, 
      { X86_FEATURE_K7, k7_nops }, 
-     { -1, 0 }
+     { -1, NULL }
 }; 
 
 /* Replace instructions with better alternatives for this CPU type.
@@ -1072,6 +1376,17 @@ static int __init noreplacement_setup(char *s)
 
 __setup("noreplacement", noreplacement_setup); 
 
+static char * __init machine_specific_memory_setup(void);
+
+#ifdef CONFIG_MCA
+static void set_mca_bus(int x)
+{
+	MCA_bus = x;
+}
+#else
+static void set_mca_bus(int x) { }
+#endif
+
 /*
  * Determine if we were loaded by an EFI loader.  If so, then we have also been
  * passed the efi memmap, systab, etc., so we should use these data structures
@@ -1107,12 +1422,12 @@ void __init setup_arch(char **cmdline_p)
 	ist_info = IST_INFO;
 	saved_videomode = VIDEO_MODE;
 	if( SYS_DESC_TABLE.length != 0 ) {
-		MCA_bus = SYS_DESC_TABLE.table[3] &0x2;
+		set_mca_bus(SYS_DESC_TABLE.table[3] & 0x2);
 		machine_id = SYS_DESC_TABLE.table[0];
 		machine_submodel_id = SYS_DESC_TABLE.table[1];
 		BIOS_revision = SYS_DESC_TABLE.table[2];
 	}
-	aux_device_present = AUX_DEVICE_INFO;
+	bootloader_type = LOADER_TYPE;
 
 #ifdef CONFIG_BLK_DEV_RAM
 	rd_image_start = RAMDISK_FLAGS & RAMDISK_IMAGE_START_MASK;
@@ -1122,8 +1437,10 @@ void __init setup_arch(char **cmdline_p)
 	ARCH_SETUP
 	if (efi_enabled)
 		efi_init();
-	else
-		setup_memory_region();
+	else {
+		printk(KERN_INFO "BIOS-provided physical RAM map:\n");
+		print_memory_map(machine_specific_memory_setup());
+	}
 
 	copy_edd();
 
@@ -1145,13 +1462,24 @@ void __init setup_arch(char **cmdline_p)
 
 	/*
 	 * NOTE: before this point _nobody_ is allowed to allocate
-	 * any memory using the bootmem allocator.
+	 * any memory using the bootmem allocator.  Although the
+	 * alloctor is now initialised only the first 8Mb of the kernel
+	 * virtual address space has been mapped.  All allocations before
+	 * paging_init() has completed must use the alloc_bootmem_low_pages()
+	 * variant (which allocates DMA'able memory) and care must be taken
+	 * not to exceed the 8Mb limit.
 	 */
 
 #ifdef CONFIG_SMP
 	smp_alloc_memory(); /* AP processor realmode stacks in low memory*/
 #endif
 	paging_init();
+	remapped_pgdat_init();
+	zone_sizes_init();
+
+	/*
+	 * NOTE: at this point the bootmem allocator is fully available.
+	 */
 
 #ifdef CONFIG_EARLY_PRINTK
 	{
@@ -1174,17 +1502,20 @@ void __init setup_arch(char **cmdline_p)
 	if (efi_enabled)
 		efi_map_memmap();
 
+#ifdef CONFIG_ACPI_BOOT
 	/*
 	 * Parse the ACPI tables for possible boot-time SMP configuration.
 	 */
+	acpi_boot_table_init();
 	acpi_boot_init();
+#endif
 
 #ifdef CONFIG_X86_LOCAL_APIC
 	if (smp_found_config)
 		get_smp_config();
 #endif
 
-	register_memory(max_low_pfn);
+	register_memory();
 
 #ifdef CONFIG_VT
 #if defined(CONFIG_VGA_CONSOLE)

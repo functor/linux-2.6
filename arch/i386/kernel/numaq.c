@@ -28,10 +28,9 @@
 #include <linux/bootmem.h>
 #include <linux/mmzone.h>
 #include <linux/module.h>
+#include <linux/nodemask.h>
 #include <asm/numaq.h>
-
-/* These are needed before the pgdat's are created */
-extern long node_start_pfn[], node_end_pfn[];
+#include <asm/topology.h>
 
 #define	MB_TO_PAGES(addr) ((addr) << (20 - PAGE_SHIFT))
 
@@ -39,8 +38,7 @@ extern long node_start_pfn[], node_end_pfn[];
  * Function: smp_dump_qct()
  *
  * Description: gets memory layout from the quad config table.  This
- * function also increments numnodes with the number of nodes (quads)
- * present.
+ * function also updates node_online_map with the nodes (quads) present.
  */
 static void __init smp_dump_qct(void)
 {
@@ -49,52 +47,22 @@ static void __init smp_dump_qct(void)
 	struct sys_cfg_data *scd =
 		(struct sys_cfg_data *)__va(SYS_CFG_DATA_PRIV_ADDR);
 
-	numnodes = 0;
-	for(node = 0; node < MAX_NUMNODES; node++) {
-		if(scd->quads_present31_0 & (1 << node)) {
+	nodes_clear(node_online_map);
+	for_each_node(node) {
+		if (scd->quads_present31_0 & (1 << node)) {
 			node_set_online(node);
-			numnodes++;
 			eq = &scd->eq[node];
 			/* Convert to pages */
 			node_start_pfn[node] = MB_TO_PAGES(
 				eq->hi_shrd_mem_start - eq->priv_mem_size);
 			node_end_pfn[node] = MB_TO_PAGES(
 				eq->hi_shrd_mem_start + eq->hi_shrd_mem_size);
-		}
-	}
-}
 
-/*
- * for each node mark the regions
- *        TOPOFMEM = hi_shrd_mem_start + hi_shrd_mem_size
- *
- * need to be very careful to not mark 1024+ as belonging
- * to node 0. will want 1027 to show as belonging to node 1
- * example:
- *  TOPOFMEM = 1024
- * 1024 >> 8 = 4 (subtract 1 for starting at 0]
- * tmpvar = TOPOFMEM - 256 = 768
- * 1024 >> 8 = 4 (subtract 1 for starting at 0]
- * 
- */
-static void __init initialize_physnode_map(void)
-{
-	int nid;
-	unsigned int topofmem, cur;
-	struct eachquadmem *eq;
- 	struct sys_cfg_data *scd =
-		(struct sys_cfg_data *)__va(SYS_CFG_DATA_PRIV_ADDR);
-
-	
-	for(nid = 0; nid < numnodes; nid++) {
-		if(scd->quads_present31_0 & (1 << nid)) {
-			eq = &scd->eq[nid];
-			cur = eq->hi_shrd_mem_start;
-			topofmem = eq->hi_shrd_mem_start + eq->hi_shrd_mem_size;
-			while (cur < topofmem) {
-				physnode_map[cur >> 8] = nid;
-				cur ++;
-			}
+			memory_present(node,
+				node_start_pfn[node], node_end_pfn[node]);
+			node_remap_size[node] = node_memmap_size_bytes(node,
+							node_start_pfn[node],
+							node_end_pfn[node]);
 		}
 	}
 }
@@ -107,6 +75,5 @@ static void __init initialize_physnode_map(void)
 int __init get_memcfg_numaq(void)
 {
 	smp_dump_qct();
-	initialize_physnode_map();
 	return 1;
 }

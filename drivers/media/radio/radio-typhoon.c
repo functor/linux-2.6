@@ -305,17 +305,17 @@ MODULE_AUTHOR("Dr. Henrik Seidel");
 MODULE_DESCRIPTION("A driver for the Typhoon radio card (a.k.a. EcoRadio).");
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(io, "i");
-MODULE_PARM_DESC(io, "I/O address of the Typhoon card (0x316 or 0x336)");
-MODULE_PARM(mutefreq, "i");
-MODULE_PARM_DESC(mutefreq, "Frequency used when muting the card (in kHz)");
-MODULE_PARM(radio_nr, "i");
-
 static int io = -1;
 static int radio_nr = -1;
 
+module_param(io, int, 0);
+MODULE_PARM_DESC(io, "I/O address of the Typhoon card (0x316 or 0x336)");
+module_param(radio_nr, int, 0);
+
 #ifdef MODULE
 static unsigned long mutefreq = 0;
+module_param(mutefreq, ulong, 0);
+MODULE_PARM_DESC(mutefreq, "Frequency used when muting the card (in kHz)");
 #endif
 
 static int __init typhoon_init(void)
@@ -326,7 +326,6 @@ static int __init typhoon_init(void)
 		return -EINVAL;
 	}
 	typhoon_unit.iobase = io;
-	init_MUTEX(&typhoon_unit.lock);
 
 	if (mutefreq < 87000 || mutefreq > 108500) {
 		printk(KERN_ERR "radio-typhoon: You must set a frequency (in kHz) used when muting the card,\n");
@@ -337,6 +336,7 @@ static int __init typhoon_init(void)
 #endif /* MODULE */
 
 	printk(KERN_INFO BANNER);
+	init_MUTEX(&typhoon_unit.lock);
 	io = typhoon_unit.iobase;
 	if (!request_region(io, 8, "typhoon")) {
 		printk(KERN_ERR "radio-typhoon: port 0x%x already in use\n",

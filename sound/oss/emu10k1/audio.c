@@ -49,8 +49,11 @@
 static void calculate_ofrag(struct woinst *);
 static void calculate_ifrag(struct wiinst *);
 
+static void emu10k1_waveout_bh(unsigned long refdata);
+static void emu10k1_wavein_bh(unsigned long refdata);
+
 /* Audio file operations */
-static ssize_t emu10k1_audio_read(struct file *file, char *buffer, size_t count, loff_t * ppos)
+static ssize_t emu10k1_audio_read(struct file *file, char __user *buffer, size_t count, loff_t * ppos)
 {
 	struct emu10k1_wavedevice *wave_dev = (struct emu10k1_wavedevice *) file->private_data;
 	struct wiinst *wiinst = wave_dev->wiinst;
@@ -58,9 +61,6 @@ static ssize_t emu10k1_audio_read(struct file *file, char *buffer, size_t count,
 	unsigned long flags;
 
 	DPD(3, "emu10k1_audio_read(), buffer=%p, count=%d\n", buffer, (u32) count);
-
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 
 	if (!access_ok(VERIFY_WRITE, buffer, count))
 		return -EFAULT;
@@ -112,7 +112,7 @@ static ssize_t emu10k1_audio_read(struct file *file, char *buffer, size_t count,
 		    || (bytestocopy >= count)) {
 			bytestocopy = min_t(u32, bytestocopy, count);
 
-			emu10k1_wavein_xferdata(wiinst, (u8 *) buffer, &bytestocopy);
+			emu10k1_wavein_xferdata(wiinst, (u8 __user *)buffer, &bytestocopy);
 
 			count -= bytestocopy;
 			buffer += bytestocopy;
@@ -137,7 +137,7 @@ static ssize_t emu10k1_audio_read(struct file *file, char *buffer, size_t count,
 	return ret;
 }
 
-static ssize_t emu10k1_audio_write(struct file *file, const char *buffer, size_t count, loff_t * ppos)
+static ssize_t emu10k1_audio_write(struct file *file, const char __user *buffer, size_t count, loff_t * ppos)
 {
 	struct emu10k1_wavedevice *wave_dev = (struct emu10k1_wavedevice *) file->private_data;
 	struct woinst *woinst = wave_dev->woinst;
@@ -145,9 +145,6 @@ static ssize_t emu10k1_audio_write(struct file *file, const char *buffer, size_t
 	unsigned long flags;
 
 	DPD(3, "emu10k1_audio_write(), buffer=%p, count=%d\n", buffer, (u32) count);
-
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 
 	if (!access_ok(VERIFY_READ, buffer, count))
 		return -EFAULT;
@@ -212,7 +209,7 @@ static ssize_t emu10k1_audio_write(struct file *file, const char *buffer, size_t
 
 			bytestocopy = min_t(u32, bytestocopy, count);
 
-			emu10k1_waveout_xferdata(woinst, (u8 *) buffer, &bytestocopy);
+			emu10k1_waveout_xferdata(woinst, (u8 __user *) buffer, &bytestocopy);
 
 			count -= bytestocopy;
 			buffer += bytestocopy * woinst->num_voices;
@@ -254,6 +251,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 	int val = 0;
 	u32 bytestocopy;
 	unsigned long flags;
+	int __user *p = (int __user *)arg;
 
 	DPF(4, "emu10k1_audio_ioctl()\n");
 
@@ -266,7 +264,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 	switch (cmd) {
 	case OSS_GETVERSION:
 		DPF(2, "OSS_GETVERSION:\n");
-		return put_user(SOUND_VERSION, (int *) arg);
+		return put_user(SOUND_VERSION, p);
 
 	case SNDCTL_DSP_RESET:
 		DPF(2, "SNDCTL_DSP_RESET:\n");
@@ -352,11 +350,11 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 		DPF(2, "SNDCTL_DSP_GETCAPS:\n");
 		return put_user(DSP_CAP_DUPLEX | DSP_CAP_REALTIME |
 				DSP_CAP_TRIGGER | DSP_CAP_MMAP |
-				DSP_CAP_COPROC| DSP_CAP_MULTI, (int *) arg);
+				DSP_CAP_COPROC| DSP_CAP_MULTI, p);
 	case SNDCTL_DSP_SPEED:
 		DPF(2, "SNDCTL_DSP_SPEED:\n");
 
-		if (get_user(val, (int *) arg))
+		if (get_user(val, p))
 			return -EFAULT;
 
 		DPD(2, "val is %d\n", val);
@@ -402,21 +400,21 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 				DPD(2, "set playback sampling rate -> %d\n", val);
 			}
 
-			return put_user(val, (int *) arg);
+			return put_user(val, p);
 		} else {
 			if (file->f_mode & FMODE_READ)
 				val = wiinst->format.samplingrate;
 			else if (file->f_mode & FMODE_WRITE)
 				val = woinst->format.samplingrate;
 
-			return put_user(val, (int *) arg);
+			return put_user(val, p);
 		}
 		break;
 
 	case SNDCTL_DSP_STEREO:
 		DPF(2, "SNDCTL_DSP_STEREO:\n");
 
-		if (get_user(val, (int *) arg))
+		if (get_user(val, p))
 			return -EFAULT;
 
 		DPD(2, " val is %d\n", val);
@@ -460,14 +458,14 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 			DPD(2, "set playback stereo -> %d\n", val);
 		}
 
-		return put_user(val, (int *) arg);
+		return put_user(val, p);
 
 		break;
 
 	case SNDCTL_DSP_CHANNELS:
 		DPF(2, "SNDCTL_DSP_CHANNELS:\n");
 
-		if (get_user(val, (int *) arg))
+		if (get_user(val, p))
 			return -EFAULT;
 
 		DPD(2, " val is %d\n", val);
@@ -510,14 +508,14 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 				DPD(2, "set playback number of channels -> %d\n", val);
 			}
 
-			return put_user(val, (int *) arg);
+			return put_user(val, p);
 		} else {
 			if (file->f_mode & FMODE_READ)
 				val = wiinst->format.channels;
 			else if (file->f_mode & FMODE_WRITE)
 				val = woinst->format.channels;
 
-			return put_user(val, (int *) arg);
+			return put_user(val, p);
 		}
 		break;
 
@@ -533,12 +531,12 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 						     wave_dev->card->pt.enable_gpr_name) >= 0)
 				val |= AFMT_AC3;
 		}
-		return put_user(val, (int *) arg);
+		return put_user(val, p);
 
 	case SNDCTL_DSP_SETFMT:	/* Same as SNDCTL_DSP_SAMPLESIZE */
 		DPF(2, "SNDCTL_DSP_SETFMT:\n");
 
-		if (get_user(val, (int *) arg))
+		if (get_user(val, p))
 			return -EFAULT;
 
 		DPD(2, " val is %d\n", val);
@@ -582,14 +580,14 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 				DPD(2, "set playback format -> %d\n", val);
 			}
 
-			return put_user(val, (int *) arg);
+			return put_user(val, p);
 		} else {
 			if (file->f_mode & FMODE_READ)
 				val = wiinst->format.id;
 			else if (file->f_mode & FMODE_WRITE)
 				val = woinst->format.id;
 
-			return put_user(val, (int *) arg);
+			return put_user(val, p);
 		}
 		break;
 
@@ -600,7 +598,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 		else if (file->f_mode & FMODE_WRITE)
 			val = woinst->format.bitsperchannel;
 
-		return put_user(val, (int *) arg);
+		return put_user(val, p);
 
 	case SOUND_PCM_READ_RATE:
 
@@ -609,7 +607,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 		else if (file->f_mode & FMODE_WRITE)
 			val = woinst->format.samplingrate;
 
-		return put_user(val, (int *) arg);
+		return put_user(val, p);
 
 	case SOUND_PCM_READ_CHANNELS:
 
@@ -618,7 +616,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 		else if (file->f_mode & FMODE_WRITE)
 			val = woinst->format.channels;
 
-		return put_user(val, (int *) arg);
+		return put_user(val, p);
 
 	case SOUND_PCM_WRITE_FILTER:
 		DPF(2, "SOUND_PCM_WRITE_FILTER: not implemented\n");
@@ -641,12 +639,12 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 		if (file->f_mode & FMODE_READ && (wave_dev->enablebits & PCM_ENABLE_INPUT))
 			val |= PCM_ENABLE_INPUT;
 
-		return put_user(val, (int *) arg);
+		return put_user(val, p);
 
 	case SNDCTL_DSP_SETTRIGGER:
 		DPF(2, "SNDCTL_DSP_SETTRIGGER:\n");
 
-		if (get_user(val, (int *) arg))
+		if (get_user(val, p))
 			return -EFAULT;
 
 		if (file->f_mode & FMODE_WRITE) {
@@ -708,7 +706,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 			info.fragstotal = woinst->buffer.numfrags * woinst->num_voices;
 			info.fragments = info.bytes / info.fragsize;
 
-			if (copy_to_user((int *) arg, &info, sizeof(info)))
+			if (copy_to_user(p, &info, sizeof(info)))
 				return -EFAULT;
 		}
 		break;
@@ -737,7 +735,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 			info.fragments = info.bytes / wiinst->buffer.fragment_size;
 			info.fragsize = wiinst->buffer.fragment_size;
 
-			if (copy_to_user((int *) arg, &info, sizeof(info)))
+			if (copy_to_user(p, &info, sizeof(info)))
 				return -EFAULT;
 		}
 		break;
@@ -765,7 +763,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 		val *= woinst->num_voices;
 		spin_unlock_irqrestore(&woinst->lock, flags);
 
-		return put_user(val, (int *) arg);
+		return put_user(val, p);
 
 	case SNDCTL_DSP_GETIPTR:
 		{
@@ -795,7 +793,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 
 			spin_unlock_irqrestore(&wiinst->lock, flags);
 
-			if (copy_to_user((void *) arg, &cinfo, sizeof(cinfo)))
+			if (copy_to_user(p, &cinfo, sizeof(cinfo)))
 				return -EFAULT;
 		}
 		break;
@@ -841,7 +839,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 
 			spin_unlock_irqrestore(&woinst->lock, flags);
 
-			if (copy_to_user((void *) arg, &cinfo, sizeof(cinfo)))
+			if (copy_to_user(p, &cinfo, sizeof(cinfo)))
 				return -EFAULT;
 		}
 		break;
@@ -867,7 +865,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 			spin_unlock_irqrestore(&wiinst->lock, flags);
 		}
 
-		return put_user(val, (int *) arg);
+		return put_user(val, p);
 
 		break;
 
@@ -892,7 +890,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 	case SNDCTL_DSP_SETFRAGMENT:
 		DPF(2, "SNDCTL_DSP_SETFRAGMENT:\n");
 
-		if (get_user(val, (int *) arg))
+		if (get_user(val, p))
 			return -EFAULT;
 
 		DPD(2, "val is %#x\n", val);
@@ -930,7 +928,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 			if (!buf)
 				return -ENOMEM;
 
-			if (copy_from_user(buf, (copr_buffer *) arg, sizeof(copr_buffer))) {
+			if (copy_from_user(buf, p, sizeof(copr_buffer))) {
 				kfree (buf);
 				return -EFAULT;
 			}
@@ -969,7 +967,7 @@ static int emu10k1_audio_ioctl(struct inode *inode, struct file *file, unsigned 
 				for (i = 0; i < buf->len; i++)
 					((u32 *) buf->data)[i] = sblive_readptr(wave_dev->card, buf->offs + i, buf->flags);
 
-				if (copy_to_user((copr_buffer *) arg, buf, sizeof(copr_buffer))) {
+				if (copy_to_user(p, buf, sizeof(copr_buffer))) {
 					kfree(buf);
 					return -EFAULT;
 				}
@@ -1037,7 +1035,7 @@ static struct page *emu10k1_mm_nopage (struct vm_area_struct * vma, unsigned lon
 	return dmapage;
 }
 
-struct vm_operations_struct emu10k1_mm_ops = {
+static struct vm_operations_struct emu10k1_mm_ops = {
 	.nopage         = emu10k1_mm_nopage,
 };
 
@@ -1196,7 +1194,7 @@ match:
 		wiinst->mmapped = 0;
 		wiinst->total_recorded = 0;
 		wiinst->blocks = 0;
-		wiinst->lock = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&wiinst->lock);
 		tasklet_init(&wiinst->timer.tasklet, emu10k1_wavein_bh, (unsigned long) wave_dev);
 		wave_dev->wiinst = wiinst;
 		emu10k1_wavein_setformat(wave_dev, &wiinst->format);
@@ -1240,7 +1238,7 @@ match:
 		woinst->total_copied = 0;
 		woinst->total_played = 0;
 		woinst->blocks = 0;
-		woinst->lock = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&woinst->lock);
 		tasklet_init(&woinst->timer.tasklet, emu10k1_waveout_bh, (unsigned long) wave_dev);
 		wave_dev->woinst = woinst;
 		emu10k1_waveout_setformat(wave_dev, &woinst->format);
@@ -1248,7 +1246,7 @@ match:
 
 	file->private_data = (void *) wave_dev;
 
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int emu10k1_audio_release(struct inode *inode, struct file *file)
@@ -1511,7 +1509,7 @@ static void calculate_ifrag(struct wiinst *wiinst)
 	return;
 }
 
-void emu10k1_wavein_bh(unsigned long refdata)
+static void emu10k1_wavein_bh(unsigned long refdata)
 {
 	struct emu10k1_wavedevice *wave_dev = (struct emu10k1_wavedevice *) refdata;
 	struct wiinst *wiinst = wave_dev->wiinst;
@@ -1542,7 +1540,7 @@ void emu10k1_wavein_bh(unsigned long refdata)
 	return;
 }
 
-void emu10k1_waveout_bh(unsigned long refdata)
+static void emu10k1_waveout_bh(unsigned long refdata)
 {
 	struct emu10k1_wavedevice *wave_dev = (struct emu10k1_wavedevice *) refdata;
 	struct woinst *woinst = wave_dev->woinst;

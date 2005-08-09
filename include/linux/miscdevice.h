@@ -19,6 +19,7 @@
 #define SUN_OPENPROM_MINOR 139
 #define DMAPI_MINOR		140	/* DMAPI */
 #define NVRAM_MINOR 144
+#define SGI_MMTIMER        153
 #define STORE_QUEUE_MINOR	155
 #define I2O_MINOR 166
 #define MICROCODE_MINOR		184
@@ -26,25 +27,19 @@
 #define MPT_MINOR	220
 #define MISC_DYNAMIC_MINOR 255
 
-#define SGI_GRAPHICS_MINOR   146
-#define SGI_OPENGL_MINOR     147
-#define SGI_GFX_MINOR        148
-#define SGI_STREAMS_MOUSE    149
-#define SGI_STREAMS_KEYBOARD 150
-/* drivers/sgi/char/usema.c */
-#define SGI_USEMACLONE	     151
-
 #define TUN_MINOR	     200
+#define	HPET_MINOR	     228
 
 struct device;
+struct class_device;
 
-struct miscdevice 
-{
+struct miscdevice  {
 	int minor;
 	const char *name;
 	struct file_operations *fops;
 	struct list_head list;
 	struct device *dev;
+	struct class_device *class;
 	char devfs_name[64];
 };
 

@@ -78,6 +78,7 @@
  **************************************************************************/
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/blkdev.h>
 #include <linux/errno.h>
@@ -87,14 +88,14 @@
 #include <linux/delay.h>
 #include <linux/mca.h>
 #include <linux/spinlock.h>
+#include <scsi/scsicam.h>
 #include <linux/mca-legacy.h>
 
 #include <asm/io.h>
 #include <asm/system.h>
 
 #include "scsi.h"
-#include "hosts.h"
-#include "fd_mcs.h"
+#include <scsi/scsi_host.h>
 
 #define DRIVER_VERSION "v0.2 by ZP Gu<zpg@castle.net>"
 
@@ -102,14 +103,12 @@
 
 #define DEBUG            0	/* Enable debugging output */
 #define ENABLE_PARITY    1	/* Enable SCSI Parity */
-#define DO_DETECT        0	/* Do device detection here (see scsi.c) */
 
 /* END OF USER DEFINABLE OPTIONS */
 
 #if DEBUG
 #define EVERY_ACCESS     0	/* Write a line on every scsi access */
 #define ERRORS_ONLY      1	/* Only write a line if there is an error */
-#define DEBUG_DETECT     1	/* Debug fd_mcs_detect() */
 #define DEBUG_MESSAGES   1	/* Debug MESSAGE IN phase */
 #define DEBUG_ABORT      1	/* Debug abort() routine */
 #define DEBUG_RESET      1	/* Debug reset() routine */
@@ -117,7 +116,6 @@
 #else
 #define EVERY_ACCESS     0	/* LEAVE THESE ALONE--CHANGE THE ONES ABOVE */
 #define ERRORS_ONLY      0
-#define DEBUG_DETECT     0
 #define DEBUG_MESSAGES   0
 #define DEBUG_ABORT      0
 #define DEBUG_RESET      0
@@ -287,7 +285,7 @@ static irqreturn_t fd_mcs_intr(int irq, void *dev_id, struct pt_regs *regs);
 
 static unsigned long addresses[] = { 0xc8000, 0xca000, 0xce000, 0xde000 };
 static unsigned short ports[] = { 0x140, 0x150, 0x160, 0x170 };
-static unsigned short ints[] = { 3, 5, 10, 11, 12, 14, 15, 0 };
+static unsigned short interrupts[] = { 3, 5, 10, 11, 12, 14, 15, 0 };
 
 /* host information */
 static int found = 0;
@@ -296,16 +294,20 @@ static struct Scsi_Host *hosts[FD_MAX_HOSTS + 1] = { NULL };
 static int user_fifo_count = 0;
 static int user_fifo_size = 0;
 
-static void fd_mcs_setup(char *str, int *ints)
+static int __init fd_mcs_setup(char *str)
 {
 	static int done_setup = 0;
+	int ints[3];
 
+	get_options(str, 3, ints);
 	if (done_setup++ || ints[0] < 1 || ints[0] > 2 || ints[1] < 1 || ints[1] > 16) {
 		printk("fd_mcs: usage: fd_mcs=FIFO_COUNT, FIFO_SIZE\n");
+		return 0;
 	}
 
 	user_fifo_count = ints[0] >= 1 ? ints[1] : 0;
 	user_fifo_size = ints[0] >= 2 ? ints[2] : 0;
+	return 1;
 }
 
 __setup("fd_mcs=", fd_mcs_setup);
@@ -390,7 +392,7 @@ static int fd_mcs_detect(Scsi_Host_Template * tpnt)
 			} else {
 				bios = addresses[pos2 >> 6];
 				port = ports[(pos2 >> 4) & 0x03];
-				irq = ints[(pos2 >> 1) & 0x07];
+				irq = interrupts[(pos2 >> 1) & 0x07];
 			}
 
 			if (irq) {
@@ -426,6 +428,7 @@ static int fd_mcs_detect(Scsi_Host_Template * tpnt)
 				FIFO_COUNT = user_fifo_count ? user_fifo_count : fd_mcs_adapters[loop].fifo_count;
 				FIFO_Size = user_fifo_size ? user_fifo_size : fd_mcs_adapters[loop].fifo_size;
 
+/* FIXME: Do we need to keep this bit of code inside NOT_USED around at all? */
 #ifdef NOT_USED
 				/* *************************************************** */
 				/* Try to toggle 32-bit mode.  This only
@@ -504,59 +507,6 @@ static int fd_mcs_detect(Scsi_Host_Template * tpnt)
 				outb(0, SCSI_Mode_Cntl_port);
 				outb(PARITY_MASK, TMC_Cntl_port);
 				/* done reset */
-
-#if DO_DETECT
-				/* scan devices attached */
-				{
-					const int buflen = 255;
-					int i, j, retcode;
-					Scsi_Cmnd SCinit;
-					unsigned char do_inquiry[] = { INQUIRY, 0, 0, 0, buflen, 0 };
-					unsigned char do_request_sense[] = { REQUEST_SENSE,
-						0, 0, 0, buflen, 0
-					};
-					unsigned char do_read_capacity[] = { READ_CAPACITY,
-						0, 0, 0, 0, 0, 0, 0, 0, 0
-					};
-					unsigned char buf[buflen];
-
-					SCinit.request_buffer = SCinit.buffer = buf;
-					SCinit.request_bufflen = SCinit.bufflen = sizeof(buf) - 1;
-					SCinit.use_sg = 0;
-					SCinit.lun = 0;
-					SCinit.host = shpnt;
-
-					printk("fd_mcs: detection routine scanning for devices:\n");
-					for (i = 0; i < 8; i++) {
-						if (i == shpnt->this_id)	/* Skip host adapter */
-							continue;
-						SCinit.target = i;
-						memcpy(SCinit.cmnd, do_request_sense, sizeof(do_request_sense));
-						retcode = fd_mcs_command(&SCinit);
-						if (!retcode) {
-							memcpy(SCinit.cmnd, do_inquiry, sizeof(do_inquiry));
-							retcode = fd_mcs_command(&SCinit);
-							if (!retcode) {
-								printk("     SCSI ID %d: ", i);
-								for (j = 8; j < (buf[4] < 32 ? buf[4] : 32); j++)
-									printk("%c", buf[j] >= 20 ? buf[j] : ' ');
-								memcpy(SCinit.cmnd, do_read_capacity, sizeof(do_read_capacity));
-								retcode = fd_mcs_command(&SCinit);
-								if (!retcode) {
-									unsigned long blocks, size, capacity;
-
-									blocks = (buf[0] << 24) | (buf[1] << 16)
-									    | (buf[2] << 8) | buf[3];
-									size = (buf[4] << 24) | (buf[5] << 16) | (buf[6] << 8) | buf[7];
-									capacity = +(+(blocks / 1024L) * +(size * 10L)) / 1024L;
-
-									printk("%lu MB (%lu byte blocks)\n", ((capacity + 5L) / 10L), size);
-								}
-							}
-						}
-					}
-				}
-#endif
 			}
 		}
 
@@ -1337,23 +1287,14 @@ static int fd_mcs_bus_reset(Scsi_Cmnd * SCpnt) {
 static int fd_mcs_biosparam(struct scsi_device * disk, struct block_device *bdev,
 			    sector_t capacity, int *info_array) 
 {
-	unsigned char buf[512 + sizeof(int) * 2];
+	unsigned char *p = scsi_bios_ptable(bdev);
 	int size = capacity;
-	int *sizes = (int *) buf;
-	unsigned char *data = (unsigned char *) (sizes + 2);
-	unsigned char do_read[] = { READ_6, 0, 0, 0, 1, 0 };
-	int retcode;
 
 	/* BIOS >= 3.4 for MCA cards */
 	/* This algorithm was provided by Future Domain (much thanks!). */
 
-	sizes[0] = 0;	/* zero bytes out */
-	sizes[1] = 512;	/* one sector in */
-	memcpy(data, do_read, sizeof(do_read));
-	retcode = kernel_scsi_ioctl(disk, SCSI_IOCTL_SEND_COMMAND, (void *) buf);
-	if (!retcode	/* SCSI command ok */
-	    && data[511] == 0xaa && data[510] == 0x55	/* Partition table valid */
-	    && data[0x1c2]) {	/* Partition type */
+	if (p && p[65] == 0xaa && p[64] == 0x55	/* Partition table valid */
+	    && p[4]) {	/* Partition type */
 		/* The partition table layout is as follows:
 
 		   Start: 0x1b3h
@@ -1383,8 +1324,8 @@ static int fd_mcs_biosparam(struct scsi_device * disk, struct block_device *bdev
 		   Future Domain algorithm, but it seemed to be a reasonable thing
 		   to do, especially in the Linux and BSD worlds. */
 
-		info_array[0] = data[0x1c3] + 1;	/* heads */
-		info_array[1] = data[0x1c4] & 0x3f;	/* sectors */
+		info_array[0] = p[5] + 1;	/* heads */
+		info_array[1] = p[6] & 0x3f;	/* sectors */
 	} else {
 		/* Note that this new method guarantees that there will always be
 		   less than 1024 cylinders on a platter.  This is good for drives
@@ -1403,6 +1344,7 @@ static int fd_mcs_biosparam(struct scsi_device * disk, struct block_device *bdev
 	}
 	/* For both methods, compute the cylinders */
 	info_array[2] = (unsigned int) size / (info_array[0] * info_array[1]);
+	kfree(p);
 	return 0;
 }
 

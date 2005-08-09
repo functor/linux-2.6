@@ -144,6 +144,7 @@ Include Files
 #include <linux/skbuff.h>
 #include <linux/if_arp.h>
 #include <linux/ioport.h>
+#include <linux/bitops.h>
 
 #include <pcmcia/version.h>
 #include <pcmcia/cs_types.h>
@@ -155,7 +156,6 @@ Include Files
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
 
 /* ----------------------------------------------------------------------------
 Defines
@@ -405,15 +405,10 @@ Parameters
 MODULE_DESCRIPTION("New Media PCMCIA ethernet driver");
 MODULE_LICENSE("GPL");
 
-#define INT_MODULE_PARM(n, v) static int n = v; MODULE_PARM(n, "i")
-
-static int irq_list[4] = { -1 };
-MODULE_PARM(irq_list, "1-4i");
+#define INT_MODULE_PARM(n, v) static int n = v; module_param(n, int, 0)
 
 /* 0=auto, 1=10baseT, 2 = 10base2, default=auto */
 INT_MODULE_PARM(if_port, 0);
-/* Bit map of interrupts to choose from */
-INT_MODULE_PARM(irq_mask, 0xdeb8);
 
 #ifdef PCMCIA_DEBUG
 INT_MODULE_PARM(pc_debug, PCMCIA_DEBUG);
@@ -461,7 +456,7 @@ static dev_link_t *nmclan_attach(void)
     dev_link_t *link;
     struct net_device *dev;
     client_reg_t client_reg;
-    int i, ret;
+    int ret;
 
     DEBUG(0, "nmclan_attach()\n");
     DEBUG(1, "%s\n", rcsid);
@@ -479,12 +474,7 @@ static dev_link_t *nmclan_attach(void)
     link->io.Attributes1 = IO_DATA_PATH_WIDTH_AUTO;
     link->io.IOAddrLines = 5;
     link->irq.Attributes = IRQ_TYPE_EXCLUSIVE | IRQ_HANDLE_PRESENT;
-    link->irq.IRQInfo1 = IRQ_INFO2_VALID|IRQ_LEVEL_ID;
-    if (irq_list[0] == -1)
-	link->irq.IRQInfo2 = irq_mask;
-    else
-	for (i = 0; i < 4; i++)
-	    link->irq.IRQInfo2 |= 1 << irq_list[i];
+    link->irq.IRQInfo1 = IRQ_LEVEL_ID;
     link->irq.Handler = &mace_interrupt;
     link->irq.Instance = dev;
     link->conf.Attributes = CONF_ENABLE_IRQ;
@@ -512,7 +502,6 @@ static dev_link_t *nmclan_attach(void)
     link->next = dev_list;
     dev_list = link;
     client_reg.dev_info = &dev_info;
-    client_reg.Attributes = INFO_IO_CLIENT | INFO_CARD_SHARE;
     client_reg.EventMask =
 	CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL |
 	CS_EVENT_RESET_PHYSICAL | CS_EVENT_CARD_RESET |
@@ -551,6 +540,9 @@ static void nmclan_detach(dev_link_t *link)
     if (*linkp == NULL)
 	return;
 
+    if (link->dev)
+	unregister_netdev(dev);
+
     if (link->state & DEV_CONFIG)
 	nmclan_release(link);
 
@@ -559,8 +551,6 @@ static void nmclan_detach(dev_link_t *link)
 
     /* Unlink device structure, free bits */
     *linkp = link->next;
-    if (link->dev)
-	unregister_netdev(dev);
     free_netdev(dev);
 } /* nmclan_detach */
 
@@ -571,7 +561,7 @@ mace_read
 	assuming that during normal operation, the MACE is always in
 	bank 0.
 ---------------------------------------------------------------------------- */
-static int mace_read(mace_private *lp, ioaddr_t ioaddr, int reg)
+static int mace_read(mace_private *lp, kio_addr_t ioaddr, int reg)
 {
   int data = 0xFF;
   unsigned long flags;
@@ -598,7 +588,7 @@ mace_write
 	are assuming that during normal operation, the MACE is always in
 	bank 0.
 ---------------------------------------------------------------------------- */
-static void mace_write(mace_private *lp, ioaddr_t ioaddr, int reg, int data)
+static void mace_write(mace_private *lp, kio_addr_t ioaddr, int reg, int data)
 {
   unsigned long flags;
 
@@ -620,7 +610,7 @@ static void mace_write(mace_private *lp, ioaddr_t ioaddr, int reg, int data)
 mace_init
 	Resets the MACE chip.
 ---------------------------------------------------------------------------- */
-static int mace_init(mace_private *lp, ioaddr_t ioaddr, char *enet_addr)
+static int mace_init(mace_private *lp, kio_addr_t ioaddr, char *enet_addr)
 {
   int i;
   int ct = 0;
@@ -712,7 +702,7 @@ static void nmclan_config(dev_link_t *link)
   cisparse_t parse;
   u_char buf[64];
   int i, last_ret, last_fn;
-  ioaddr_t ioaddr;
+  kio_addr_t ioaddr;
 
   DEBUG(0, "nmclan_config(0x%p)\n", link);
 
@@ -774,6 +764,7 @@ static void nmclan_config(dev_link_t *link)
 
   link->dev = &lp->node;
   link->state &= ~DEV_CONFIG_PENDING;
+  SET_NETDEV_DEV(dev, &handle_to_dev(handle));
 
   i = register_netdev(dev);
   if (i != 0) {
@@ -834,10 +825,8 @@ static int nmclan_event(event_t event, int priority,
   switch (event) {
     case CS_EVENT_CARD_REMOVAL:
       link->state &= ~DEV_PRESENT;
-      if (link->state & DEV_CONFIG) {
+      if (link->state & DEV_CONFIG)
 	netif_device_detach(dev);
-	nmclan_release(link);
-      }
       break;
     case CS_EVENT_CARD_INSERTION:
       link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
@@ -946,7 +935,7 @@ mace_open
 ---------------------------------------------------------------------------- */
 static int mace_open(struct net_device *dev)
 {
-  ioaddr_t ioaddr = dev->base_addr;
+  kio_addr_t ioaddr = dev->base_addr;
   mace_private *lp = netdev_priv(dev);
   dev_link_t *link = &lp->link;
 
@@ -969,7 +958,7 @@ mace_close
 ---------------------------------------------------------------------------- */
 static int mace_close(struct net_device *dev)
 {
-  ioaddr_t ioaddr = dev->base_addr;
+  kio_addr_t ioaddr = dev->base_addr;
   mace_private *lp = netdev_priv(dev);
   dev_link_t *link = &lp->link;
 
@@ -1042,7 +1031,7 @@ static void mace_tx_timeout(struct net_device *dev)
 static int mace_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
   mace_private *lp = netdev_priv(dev);
-  ioaddr_t ioaddr = dev->base_addr;
+  kio_addr_t ioaddr = dev->base_addr;
 
   netif_stop_queue(dev);
 
@@ -1103,7 +1092,7 @@ static irqreturn_t mace_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
   struct net_device *dev = (struct net_device *) dev_id;
   mace_private *lp = netdev_priv(dev);
-  ioaddr_t ioaddr = dev->base_addr;
+  kio_addr_t ioaddr = dev->base_addr;
   int status;
   int IntrCnt = MACE_MAX_IR_ITERATIONS;
 
@@ -1245,7 +1234,7 @@ mace_rx
 static int mace_rx(struct net_device *dev, unsigned char RxCnt)
 {
   mace_private *lp = netdev_priv(dev);
-  ioaddr_t ioaddr = dev->base_addr;
+  kio_addr_t ioaddr = dev->base_addr;
   unsigned char rx_framecnt;
   unsigned short rx_status;
 
@@ -1409,7 +1398,7 @@ update_stats
 	card's SRAM fast enough.  If this happens, something is
 	seriously wrong with the hardware.
 ---------------------------------------------------------------------------- */
-static void update_stats(ioaddr_t ioaddr, struct net_device *dev)
+static void update_stats(kio_addr_t ioaddr, struct net_device *dev)
 {
   mace_private *lp = netdev_priv(dev);
 
@@ -1473,7 +1462,7 @@ updateCRC
 	Modified from Am79C90 data sheet.
 ---------------------------------------------------------------------------- */
 
-#if BROKEN_MULTICAST
+#ifdef BROKEN_MULTICAST
 
 static void updateCRC(int *CRC, int bit)
 {
@@ -1555,7 +1544,7 @@ static void restore_multicast_list(struct net_device *dev)
   mace_private *lp = netdev_priv(dev);
   int num_addrs = lp->multicast_num_addrs;
   int *ladrf = lp->multicast_ladrf;
-  ioaddr_t ioaddr = dev->base_addr;
+  kio_addr_t ioaddr = dev->base_addr;
   int i;
 
   DEBUG(2, "%s: restoring Rx mode to %d addresses.\n",
@@ -1647,7 +1636,7 @@ static void set_multicast_list(struct net_device *dev)
 
 static void restore_multicast_list(struct net_device *dev)
 {
-  ioaddr_t ioaddr = dev->base_addr;
+  kio_addr_t ioaddr = dev->base_addr;
   mace_private *lp = netdev_priv(dev);
 
   DEBUG(2, "%s: restoring Rx mode to %d addresses.\n", dev->name,
@@ -1703,8 +1692,7 @@ static int __init init_nmclan_cs(void)
 static void __exit exit_nmclan_cs(void)
 {
 	pcmcia_unregister_driver(&nmclan_cs_driver);
-	while (dev_list != NULL)
-		nmclan_detach(dev_list);
+	BUG_ON(dev_list != NULL);
 }
 
 module_init(init_nmclan_cs);

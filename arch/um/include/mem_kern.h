@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2003 Jeff Dike (jdike@addtoit.com)
  * Licensed under the GPL
  */

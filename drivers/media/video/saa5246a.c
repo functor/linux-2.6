@@ -1,9 +1,10 @@
 /*
- * Driver for the SAA5246A videotext decoder chip from Philips.
+ * Driver for the SAA5246A or SAA5281 Teletext (=Videotext) decoder chips from
+ * Philips.
  *
- * Only capturing of videotext pages is tested. The SAA5246A chip also has
- * a TV output but my hardware doesn't use it. For this reason this driver
- * does not support changing any TV display settings.
+ * Only capturing of Teletext pages is tested. The videotext chips also have a
+ * TV output but my hardware doesn't use it. For this reason this driver does
+ * not support changing any TV display settings.
  *
  * Copyright (C) 2004 Michael Geng <linux@MichaelGeng.de>
  *
@@ -47,6 +48,10 @@
 #include <linux/videodev.h>
 #include "saa5246a.h"
 
+MODULE_AUTHOR("Michael Geng <linux@MichaelGeng.de>");
+MODULE_DESCRIPTION("Philips SAA5246A, SAA5281 Teletext decoder driver");
+MODULE_LICENSE("GPL");
+
 struct saa5246a_device
 {
 	u8     pgbuf[NUM_DAUS][VTX_VIRTUALSIZE];
@@ -60,18 +65,7 @@ static struct video_device saa_template;	/* Declared near bottom */
 /* Addresses to scan */
 static unsigned short normal_i2c[]	 = { I2C_ADDRESS, I2C_CLIENT_END };
 static unsigned short normal_i2c_range[] = { I2C_CLIENT_END };
-static unsigned short probe[2]		 = { I2C_CLIENT_END, I2C_CLIENT_END };
-static unsigned short probe_range[2]	 = { I2C_CLIENT_END, I2C_CLIENT_END };
-static unsigned short ignore[2]		 = { I2C_CLIENT_END, I2C_CLIENT_END };
-static unsigned short ignore_range[2]	 = { I2C_CLIENT_END, I2C_CLIENT_END };
-static unsigned short force[2]		 = { I2C_CLIENT_END, I2C_CLIENT_END };
-
-static struct i2c_client_address_data addr_data = {
-	normal_i2c, normal_i2c_range,
-	probe, probe_range,
-	ignore, ignore_range,
-	force
-};
+I2C_CLIENT_INSMOD;
 
 static struct i2c_client client_template;
 
@@ -143,7 +137,7 @@ static int saa5246a_attach(struct i2c_adapter *adap, int addr, int kind)
  */
 static int saa5246a_probe(struct i2c_adapter *adap)
 {
-	if (adap->class & I2C_ADAP_CLASS_TV_ANALOG)
+	if (adap->class & I2C_CLASS_TV_ANALOG)
 		return i2c_probe(adap, &addr_data, saa5246a_attach);
 	return 0;
 }
@@ -180,7 +174,6 @@ static struct i2c_driver i2c_driver_videotext =
 };
 
 static struct i2c_client client_template = {
-	.id 		= -1,
 	.driver		= &i2c_driver_videotext,
 	.name		= "(unset)",
 };
@@ -480,73 +473,76 @@ static inline int saa5246a_get_status(struct saa5246a_device *t,
 static inline int saa5246a_get_page(struct saa5246a_device *t,
 	vtx_pagereq_t *req)
 {
-	int start, end;
+	int start, end, size;
+	char *buf;
+	int err;
 
 	if (req->pgbuf < 0 || req->pgbuf >= NUM_DAUS ||
 	    req->start < 0 || req->start > req->end || req->end >= VTX_PAGESIZE)
 		return -EINVAL;
+
+	buf = kmalloc(VTX_PAGESIZE, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
 	/* Read "normal" part of page */
+	err = -EIO;
+
 	end = min(req->end, VTX_PAGESIZE - 1);
 	if (i2c_senddata(t, SAA5246A_REGISTER_R8,
+			req->pgbuf | R8_DO_NOT_CLEAR_MEMORY,
+			ROW(req->start), COLUMN(req->start), COMMAND_END))
+		goto out;
+	if (i2c_getdata(t, end - req->start + 1, buf))
+		goto out;
+	err = -EFAULT;
+	if (copy_to_user(req->buffer, buf, end - req->start + 1))
+		goto out;
 
-		req->pgbuf |
-		R8_DO_NOT_CLEAR_MEMORY,
-
-		ROW(req->start),
-
-		COLUMN(req->start),
-
-		COMMAND_END) ||
-		i2c_getdata(t, end - req->start + 1, req->buffer))
-	{
-		return -EIO;
-	}
 	/* Always get the time from buffer 4, since this stupid SAA5246A only
 	 * updates the currently displayed buffer...
 	 */
-	if (REQ_CONTAINS_TIME(req))
-	{
+	if (REQ_CONTAINS_TIME(req)) {
 		start = max(req->start, POS_TIME_START);
 		end   = min(req->end,   POS_TIME_END);
+		size = end - start + 1;
+		err = -EINVAL;
+		if (size < 0)
+			goto out;
+		err = -EIO;
 		if (i2c_senddata(t, SAA5246A_REGISTER_R8,
-
-			R8_ACTIVE_CHAPTER_4 |
-			R8_DO_NOT_CLEAR_MEMORY,
-
-			R9_CURSER_ROW_0,
-
-			start,
-
-			COMMAND_END) ||
-			i2c_getdata(t, end - start + 1,
-				req->buffer + start - req->start))
-		{
-			return -EIO;
-		}
+				R8_ACTIVE_CHAPTER_4 | R8_DO_NOT_CLEAR_MEMORY,
+				R9_CURSER_ROW_0, start, COMMAND_END))
+			goto out;
+		if (i2c_getdata(t, size, buf))
+			goto out;
+		err = -EFAULT;
+		if (copy_to_user(req->buffer + start - req->start, buf, size))
+			goto out;
 	}
 	/* Insert the header from buffer 4 only, if acquisition circuit is still searching for a page */
-	if (REQ_CONTAINS_HEADER(req) && t->is_searching[req->pgbuf])
-	{
+	if (REQ_CONTAINS_HEADER(req) && t->is_searching[req->pgbuf]) {
 		start = max(req->start, POS_HEADER_START);
 		end   = min(req->end,   POS_HEADER_END);
+		size = end - start + 1;
+		err = -EINVAL;
+		if (size < 0)
+			goto out;
+		err = -EIO;
 		if (i2c_senddata(t, SAA5246A_REGISTER_R8,
-
-			R8_ACTIVE_CHAPTER_4 |
-			R8_DO_NOT_CLEAR_MEMORY,
-
-			R9_CURSER_ROW_0,
-
-			start,
-
-			COMMAND_END) ||
-			i2c_getdata(t, end - start + 1,
-				req->buffer + start - req->start))
-		{
-			return -EIO;
-		}
+				R8_ACTIVE_CHAPTER_4 | R8_DO_NOT_CLEAR_MEMORY,
+				R9_CURSER_ROW_0, start, COMMAND_END))
+			goto out;
+		if (i2c_getdata(t, end - start + 1, buf))
+			goto out;
+		err = -EFAULT;
+		if (copy_to_user(req->buffer + start - req->start, buf, size))
+			goto out;
 	}
-
-	return 0;
+	err = 0;
+out:
+	kfree(buf);
+	return err;
 }
 
 /* Stops the acquisition circuit given in dau_no. The page buffer associated
@@ -674,6 +670,54 @@ static int do_saa5246a_ioctl(struct inode *inode, struct file *file,
 }
 
 /*
+ * Translates old vtx IOCTLs to new ones
+ *
+ * This keeps new kernel versions compatible with old userspace programs.
+ */
+static inline unsigned int vtx_fix_command(unsigned int cmd)
+{
+	switch (cmd) {
+	case VTXIOCGETINFO_OLD:
+		cmd = VTXIOCGETINFO;
+		break;
+	case VTXIOCCLRPAGE_OLD:
+		cmd = VTXIOCCLRPAGE;
+		break;
+	case VTXIOCCLRFOUND_OLD:
+		cmd = VTXIOCCLRFOUND;
+		break;
+	case VTXIOCPAGEREQ_OLD:
+		cmd = VTXIOCPAGEREQ;
+		break;
+	case VTXIOCGETSTAT_OLD:
+		cmd = VTXIOCGETSTAT;
+		break;
+	case VTXIOCGETPAGE_OLD:
+		cmd = VTXIOCGETPAGE;
+		break;
+	case VTXIOCSTOPDAU_OLD:
+		cmd = VTXIOCSTOPDAU;
+		break;
+	case VTXIOCPUTPAGE_OLD:
+		cmd = VTXIOCPUTPAGE;
+		break;
+	case VTXIOCSETDISP_OLD:
+		cmd = VTXIOCSETDISP;
+		break;
+	case VTXIOCPUTSTAT_OLD:
+		cmd = VTXIOCPUTSTAT;
+		break;
+	case VTXIOCCLRCACHE_OLD:
+		cmd = VTXIOCCLRCACHE;
+		break;
+	case VTXIOCSETVIRT_OLD:
+		cmd = VTXIOCSETVIRT;
+		break;
+	}
+	return cmd;
+}
+
+/*
  *	Handle the locking
  */
 static int saa5246a_ioctl(struct inode *inode, struct file *file,
@@ -683,6 +727,7 @@ static int saa5246a_ioctl(struct inode *inode, struct file *file,
 	struct saa5246a_device *t = vd->priv;
 	int err;
 
+	cmd = vtx_fix_command(cmd);
 	down(&t->lock);
 	err = video_usercopy(inode, file, cmd, arg, do_saa5246a_ioctl);
 	up(&t->lock);
@@ -764,8 +809,8 @@ static int saa5246a_release(struct inode *inode, struct file *file)
 
 static int __init init_saa_5246a (void)
 {
-	printk(KERN_INFO "SAA5246A driver (" IF_NAME
-		" interface) for VideoText version %d.%d\n",
+	printk(KERN_INFO
+		"SAA5246A (or compatible) Teletext decoder driver version %d.%d\n",
 		MAJOR_VERSION, MINOR_VERSION);
 	return i2c_add_driver(&i2c_driver_videotext);
 }
@@ -796,5 +841,3 @@ static struct video_device saa_template =
 	.release  = video_device_release,
 	.minor    = -1,
 };
-
-MODULE_LICENSE("GPL");

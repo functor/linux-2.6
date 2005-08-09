@@ -25,12 +25,12 @@
 #include <linux/interrupt.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
+#include <linux/moduleparam.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/ac97_codec.h>
 #include <sound/mpu401.h>
 #include <sound/opl3.h>
-#define SNDRV_GET_ID
 #include <sound/initval.h>
 
 #include <asm/io.h>
@@ -40,13 +40,10 @@
 #define TEA575X_RADIO 1
 #endif
 
-#define chip_t fm801_t
-
 MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("ForteMedia FM801");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_DEVICES("{{ForteMedia,FM801},"
+MODULE_SUPPORTED_DEVICE("{{ForteMedia,FM801},"
 		"{Genius,SoundMaker Live 5.1}}");
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
@@ -61,18 +58,14 @@ static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card *
  */
 static int tea575x_tuner[SNDRV_CARDS] = { [0 ... (SNDRV_CARDS-1)] = 0 };
 
-MODULE_PARM(index, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for the FM801 soundcard.");
-MODULE_PARM_SYNTAX(index, SNDRV_INDEX_DESC);
-MODULE_PARM(id, "1-" __MODULE_STRING(SNDRV_CARDS) "s");
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for the FM801 soundcard.");
-MODULE_PARM_SYNTAX(id, SNDRV_ID_DESC);
-MODULE_PARM(enable, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable FM801 soundcard.");
-MODULE_PARM_SYNTAX(enable, SNDRV_ENABLE_DESC);
-MODULE_PARM(tea575x_tuner, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(tea575x_tuner, int, NULL, 0444);
 MODULE_PARM_DESC(tea575x_tuner, "Enable TEA575x tuner.");
-MODULE_PARM_SYNTAX(tea575x_tuner, SNDRV_ENABLE_DESC);
 
 /*
  *  Direct registers
@@ -160,7 +153,6 @@ struct _snd_fm801 {
 	int irq;
 
 	unsigned long port;	/* I/O port number */
-	struct resource *res_port;
 	unsigned int multichannel: 1,	/* multichannel support */
 		     secondary: 1;	/* secondary codec */
 	unsigned char secondary_addr;	/* address of the secondary codec */
@@ -216,15 +208,16 @@ static int snd_fm801_update_bits(fm801_t *chip, unsigned short reg,
 				 unsigned short mask, unsigned short value)
 {
 	int change;
+	unsigned long flags;
 	unsigned short old, new;
 
-	spin_lock(&chip->reg_lock);
+	spin_lock_irqsave(&chip->reg_lock, flags);
 	old = inw(chip->port + reg);
 	new = (old & ~mask) | value;
 	change = old != new;
 	if (change)
 		outw(new, chip->port + reg);
-	spin_unlock(&chip->reg_lock);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return change;
 }
 
@@ -232,7 +225,7 @@ static void snd_fm801_codec_write(ac97_t *ac97,
 				  unsigned short reg,
 				  unsigned short val)
 {
-	fm801_t *chip = snd_magic_cast(fm801_t, ac97->private_data, return);
+	fm801_t *chip = ac97->private_data;
 	int idx;
 
 	/*
@@ -263,7 +256,7 @@ static void snd_fm801_codec_write(ac97_t *ac97,
 
 static unsigned short snd_fm801_codec_read(ac97_t *ac97, unsigned short reg)
 {
-	fm801_t *chip = snd_magic_cast(fm801_t, ac97->private_data, return -ENXIO);
+	fm801_t *chip = ac97->private_data;
 	int idx;
 
 	/*
@@ -307,10 +300,8 @@ static unsigned int rates[] = {
   38400, 44100, 48000
 };
 
-#define RATES sizeof(rates) / sizeof(rates[0])
-
 static snd_pcm_hw_constraint_list_t hw_constraints_rates = {
-	.count = RATES,
+	.count = ARRAY_SIZE(rates),
 	.list = rates,
 	.mask = 0,
 };
@@ -335,11 +326,11 @@ static unsigned short snd_fm801_rate_bits(unsigned int rate)
 {
 	unsigned int idx;
 
-	for (idx = 0; idx < 11; idx++)
+	for (idx = 0; idx < ARRAY_SIZE(rates); idx++)
 		if (rates[idx] == rate)
 			return idx;
 	snd_BUG();
-	return RATES - 1;
+	return ARRAY_SIZE(rates) - 1;
 }
 
 /*
@@ -425,13 +416,12 @@ static int snd_fm801_hw_free(snd_pcm_substream_t * substream)
 
 static int snd_fm801_playback_prepare(snd_pcm_substream_t * substream)
 {
-	unsigned long flags;
 	fm801_t *chip = snd_pcm_substream_chip(substream);
 	snd_pcm_runtime_t *runtime = substream->runtime;
 
 	chip->ply_size = snd_pcm_lib_buffer_bytes(substream);
 	chip->ply_count = snd_pcm_lib_period_bytes(substream);
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	spin_lock_irq(&chip->reg_lock);
 	chip->ply_ctrl &= ~(FM801_START | FM801_16BIT |
 			     FM801_STEREO | FM801_RATE_MASK |
 			     FM801_CHANNELS_MASK);
@@ -452,19 +442,18 @@ static int snd_fm801_playback_prepare(snd_pcm_substream_t * substream)
 	chip->ply_pos = 0;
 	outl(chip->ply_buffer, FM801_REG(chip, PLY_BUF1));
 	outl(chip->ply_buffer + (chip->ply_count % chip->ply_size), FM801_REG(chip, PLY_BUF2));
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	spin_unlock_irq(&chip->reg_lock);
 	return 0;
 }
 
 static int snd_fm801_capture_prepare(snd_pcm_substream_t * substream)
 {
-	unsigned long flags;
 	fm801_t *chip = snd_pcm_substream_chip(substream);
 	snd_pcm_runtime_t *runtime = substream->runtime;
 
 	chip->cap_size = snd_pcm_lib_buffer_bytes(substream);
 	chip->cap_count = snd_pcm_lib_period_bytes(substream);
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	spin_lock_irq(&chip->reg_lock);
 	chip->cap_ctrl &= ~(FM801_START | FM801_16BIT |
 			     FM801_STEREO | FM801_RATE_MASK);
 	if (snd_pcm_format_width(runtime->format) == 16)
@@ -479,49 +468,47 @@ static int snd_fm801_capture_prepare(snd_pcm_substream_t * substream)
 	chip->cap_pos = 0;
 	outl(chip->cap_buffer, FM801_REG(chip, CAP_BUF1));
 	outl(chip->cap_buffer + (chip->cap_count % chip->cap_size), FM801_REG(chip, CAP_BUF2));
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	spin_unlock_irq(&chip->reg_lock);
 	return 0;
 }
 
 static snd_pcm_uframes_t snd_fm801_playback_pointer(snd_pcm_substream_t * substream)
 {
 	fm801_t *chip = snd_pcm_substream_chip(substream);
-	unsigned long flags;
 	size_t ptr;
 
 	if (!(chip->ply_ctrl & FM801_START))
 		return 0;
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	spin_lock(&chip->reg_lock);
 	ptr = chip->ply_pos + (chip->ply_count - 1) - inw(FM801_REG(chip, PLY_COUNT));
 	if (inw(FM801_REG(chip, IRQ_STATUS)) & FM801_IRQ_PLAYBACK) {
 		ptr += chip->ply_count;
 		ptr %= chip->ply_size;
 	}
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	spin_unlock(&chip->reg_lock);
 	return bytes_to_frames(substream->runtime, ptr);
 }
 
 static snd_pcm_uframes_t snd_fm801_capture_pointer(snd_pcm_substream_t * substream)
 {
 	fm801_t *chip = snd_pcm_substream_chip(substream);
-	unsigned long flags;
 	size_t ptr;
 
 	if (!(chip->cap_ctrl & FM801_START))
 		return 0;
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	spin_lock(&chip->reg_lock);
 	ptr = chip->cap_pos + (chip->cap_count - 1) - inw(FM801_REG(chip, CAP_COUNT));
 	if (inw(FM801_REG(chip, IRQ_STATUS)) & FM801_IRQ_CAPTURE) {
 		ptr += chip->cap_count;
 		ptr %= chip->cap_size;
 	}
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	spin_unlock(&chip->reg_lock);
 	return bytes_to_frames(substream->runtime, ptr);
 }
 
 static irqreturn_t snd_fm801_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
-	fm801_t *chip = snd_magic_cast(fm801_t, dev_id, return IRQ_NONE);
+	fm801_t *chip = dev_id;
 	unsigned short status;
 	unsigned int tmp;
 
@@ -679,7 +666,7 @@ static snd_pcm_ops_t snd_fm801_capture_ops = {
 
 static void snd_fm801_pcm_free(snd_pcm_t *pcm)
 {
-	fm801_t *chip = snd_magic_cast(fm801_t, pcm->private_data, return);
+	fm801_t *chip = pcm->private_data;
 	chip->pcm = NULL;
 	snd_pcm_lib_preallocate_free_for_all(pcm);
 }
@@ -1075,10 +1062,10 @@ static int snd_fm801_get_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t 
 	int mask = (kcontrol->private_value >> 16) & 0xff;
 	int invert = (kcontrol->private_value >> 24) & 0xff;
 
-	spin_lock(&chip->reg_lock);
+	spin_lock_irq(&chip->reg_lock);
 	ucontrol->value.integer.value[0] = (inw(chip->port + reg) >> shift_left) & mask;
 	ucontrol->value.integer.value[1] = (inw(chip->port + reg) >> shift_right) & mask;
-	spin_unlock(&chip->reg_lock);
+	spin_unlock_irq(&chip->reg_lock);
 	if (invert) {
 		ucontrol->value.integer.value[0] = mask - ucontrol->value.integer.value[0];
 		ucontrol->value.integer.value[1] = mask - ucontrol->value.integer.value[1];
@@ -1175,13 +1162,13 @@ FM801_SINGLE("IEC958 Playback Switch", FM801_GEN_CTRL, 2, 1, 0),
 
 static void snd_fm801_mixer_free_ac97_bus(ac97_bus_t *bus)
 {
-	fm801_t *chip = snd_magic_cast(fm801_t, bus->private_data, return);
+	fm801_t *chip = bus->private_data;
 	chip->ac97_bus = NULL;
 }
 
 static void snd_fm801_mixer_free_ac97(ac97_t *ac97)
 {
-	fm801_t *chip = snd_magic_cast(fm801_t, ac97->private_data, return);
+	fm801_t *chip = ac97->private_data;
 	if (ac97->num == 0) {
 		chip->ac97 = NULL;
 	} else {
@@ -1191,18 +1178,17 @@ static void snd_fm801_mixer_free_ac97(ac97_t *ac97)
 
 static int __devinit snd_fm801_mixer(fm801_t *chip)
 {
-	ac97_bus_t bus;
-	ac97_t ac97;
+	ac97_template_t ac97;
 	unsigned int i;
 	int err;
+	static ac97_bus_ops_t ops = {
+		.write = snd_fm801_codec_write,
+		.read = snd_fm801_codec_read,
+	};
 
-	memset(&bus, 0, sizeof(bus));
-	bus.write = snd_fm801_codec_write;
-	bus.read = snd_fm801_codec_read;
-	bus.private_data = chip;
-	bus.private_free = snd_fm801_mixer_free_ac97_bus;
-	if ((err = snd_ac97_bus(chip->card, &bus, &chip->ac97_bus)) < 0)
+	if ((err = snd_ac97_bus(chip->card, 0, &ops, chip, &chip->ac97_bus)) < 0)
 		return err;
+	chip->ac97_bus->private_free = snd_fm801_mixer_free_ac97_bus;
 
 	memset(&ac97, 0, sizeof(ac97));
 	ac97.private_data = chip;
@@ -1244,20 +1230,18 @@ static int snd_fm801_free(fm801_t *chip)
 #ifdef TEA575X_RADIO
 	snd_tea575x_exit(&chip->tea);
 #endif
-	if (chip->res_port) {
-		release_resource(chip->res_port);
-		kfree_nocheck(chip->res_port);
-	}
 	if (chip->irq >= 0)
 		free_irq(chip->irq, (void *)chip);
+	pci_release_regions(chip->pci);
+	pci_disable_device(chip->pci);
 
-	snd_magic_kfree(chip);
+	kfree(chip);
 	return 0;
 }
 
 static int snd_fm801_dev_free(snd_device_t *device)
 {
-	fm801_t *chip = snd_magic_cast(fm801_t, device->device_data, return -ENXIO);
+	fm801_t *chip = device->device_data;
 	return snd_fm801_free(chip);
 }
 
@@ -1278,19 +1262,21 @@ static int __devinit snd_fm801_create(snd_card_t * card,
 	*rchip = NULL;
 	if ((err = pci_enable_device(pci)) < 0)
 		return err;
-	chip = snd_magic_kcalloc(fm801_t, 0, GFP_KERNEL);
-	if (chip == NULL)
+	chip = kcalloc(1, sizeof(*chip), GFP_KERNEL);
+	if (chip == NULL) {
+		pci_disable_device(pci);
 		return -ENOMEM;
+	}
 	spin_lock_init(&chip->reg_lock);
 	chip->card = card;
 	chip->pci = pci;
 	chip->irq = -1;
-	chip->port = pci_resource_start(pci, 0);
-	if ((chip->res_port = request_region(chip->port, 0x80, "FM801")) == NULL) {
-		snd_printk("unable to grab region 0x%lx-0x%lx\n", chip->port, chip->port + 0x80 - 1);
-		snd_fm801_free(chip);
-		return -EBUSY;
+	if ((err = pci_request_regions(pci, "FM801")) < 0) {
+		kfree(chip);
+		pci_disable_device(pci);
+		return err;
 	}
+	chip->port = pci_resource_start(pci, 0);
 	if (request_irq(pci->irq, snd_fm801_interrupt, SA_INTERRUPT|SA_SHIRQ, "FM801", (void *)chip)) {
 		snd_printk("unable to grab IRQ %d\n", chip->irq);
 		snd_fm801_free(chip);
@@ -1482,15 +1468,7 @@ static struct pci_driver driver = {
 
 static int __init alsa_card_fm801_init(void)
 {
-	int err;
-
-	if ((err = pci_module_init(&driver)) < 0) {
-#ifdef MODULE
-		printk(KERN_ERR "ForteMedia FM801 soundcard not found or device busy\n");
-#endif
-		return err;
-	}
-	return 0;
+	return pci_module_init(&driver);
 }
 
 static void __exit alsa_card_fm801_exit(void)
@@ -1500,25 +1478,3 @@ static void __exit alsa_card_fm801_exit(void)
 
 module_init(alsa_card_fm801_init)
 module_exit(alsa_card_fm801_exit)
-
-#ifndef MODULE
-
-/* format is: snd-fm801=enable,index,id,tea575x_tuner */
-
-static int __init alsa_card_fm801_setup(char *str)
-{
-	static unsigned __initdata nr_dev = 0;
-
-	if (nr_dev >= SNDRV_CARDS)
-		return 0;
-	(void)(get_option(&str,&enable[nr_dev]) == 2 &&
-	       get_option(&str,&index[nr_dev]) == 2 &&
-	       get_id(&str,&id[nr_dev]) == 2 &&
-	       get_option(&str,&tea575x_tuner[nr_dev]));
-	nr_dev++;
-	return 1;
-}
-
-__setup("snd-fm801=", alsa_card_fm801_setup);
-
-#endif /* ifndef MODULE */

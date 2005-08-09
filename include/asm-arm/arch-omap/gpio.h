@@ -32,18 +32,18 @@
 
 #define OMAP_MPUIO_BASE			0xfffb5000
 #define OMAP_MPUIO_INPUT_LATCH		0x00
-#define OMAP_MPUIO_OUTPUT_REG		0x04
+#define OMAP_MPUIO_OUTPUT		0x04
 #define OMAP_MPUIO_IO_CNTL		0x08
 #define OMAP_MPUIO_KBR_LATCH		0x10
-#define OMAP_MPUIO_KBC_REG		0x14
-#define OMAP_MPUIO_GPIO_EVENT_MODE_REG	0x18
-#define OMAP_MPUIO_GPIO_INT_EDGE_REG	0x1c
+#define OMAP_MPUIO_KBC			0x14
+#define OMAP_MPUIO_GPIO_EVENT_MODE	0x18
+#define OMAP_MPUIO_GPIO_INT_EDGE	0x1c
 #define OMAP_MPUIO_KBD_INT		0x20
 #define OMAP_MPUIO_GPIO_INT		0x24
 #define OMAP_MPUIO_KBD_MASKIT		0x28
 #define OMAP_MPUIO_GPIO_MASKIT		0x2c
-#define OMAP_MPUIO_GPIO_DEBOUNCING_REG	0x30
-#define OMAP_MPUIO_LATCH_REG		0x34
+#define OMAP_MPUIO_GPIO_DEBOUNCING	0x30
+#define OMAP_MPUIO_LATCH		0x34
 
 #define OMAP_MPUIO(nr)		(OMAP_MAX_GPIO_LINES + (nr))
 #define OMAP_GPIO_IS_MPUIO(nr)	((nr) >= OMAP_MAX_GPIO_LINES)
@@ -58,6 +58,7 @@
 #define OMAP_GPIO_RISING_EDGE	  0x02
 #define OMAP_GPIO_BOTH_EDGES	  0x03
 
+extern int omap_gpio_init(void);	/* Call from board init only */
 extern int omap_request_gpio(int gpio);
 extern void omap_free_gpio(int gpio);
 extern void omap_set_gpio_direction(int gpio, int is_input);

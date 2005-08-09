@@ -282,7 +282,7 @@ void
 cia_pci_tbi_try2(struct pci_controller *hose,
 		 dma_addr_t start, dma_addr_t end)
 {
-	unsigned long bus_addr;
+	void __iomem *bus_addr;
 	int ctrl;
 
 	/* Put the chip into PCI loopback mode.  */
@@ -351,7 +351,7 @@ verify_tb_operation(void)
 	struct pci_iommu_arena *arena = pci_isa_hose->sg_isa;
 	int ctrl, addr0, tag0, pte0, data0;
 	int temp, use_tbia_try2 = 0;
-	unsigned long bus_addr;
+	void __iomem *bus_addr;
 
 	/* pyxis -- tbia is broken */
 	if (pci_isa_hose->dense_io_base)
@@ -762,7 +762,7 @@ do_init_arch(int is_pyxis)
 		*(vip)CIA_IOC_PCI_W3_MASK = 0xfff00000;
 		*(vip)CIA_IOC_PCI_T3_BASE = 0 >> 2;
 
-		alpha_mv.pci_dac_offset = 0x200000000;
+		alpha_mv.pci_dac_offset = 0x200000000UL;
 		*(vip)CIA_IOC_PCI_W_DAC = alpha_mv.pci_dac_offset >> 32;
 	}
 

@@ -48,8 +48,8 @@
 #define ENABLE_PCI
 #endif /* CONFIG_PCI */
 
-#define putUser(arg1, arg2) put_user(arg1, (unsigned long *)arg2)
-#define getUser(arg1, arg2) get_user(arg1, (unsigned int *)arg2)
+#define putUser(arg1, arg2) put_user(arg1, (unsigned long __user *)arg2)
+#define getUser(arg1, arg2) get_user(arg1, (unsigned __user *)arg2)
 
 #ifdef ENABLE_PCI
 #include <linux/pci.h>
@@ -74,7 +74,6 @@
 #define DIGIINFOMAJOR       35  /* For Digi specific ioctl */ 
 
 
-#define MIN(a,b)	((a) < (b) ? (a) : (b))
 #define MAXCARDS 7
 #define epcaassert(x, msg)  if (!(x)) epca_error(__LINE__, msg)
 
@@ -218,8 +217,8 @@ static void setup_empty_event(struct tty_struct *tty, struct channel *ch);
 void epca_setup(char *, int *);
 void console_print(const char *);
 
-static int get_termio(struct tty_struct *, struct termio *);
-static int pc_write(struct tty_struct *, int, const unsigned char *, int);
+static int get_termio(struct tty_struct *, struct termio __user *);
+static int pc_write(struct tty_struct *, const unsigned char *, int);
 int pc_init(void);
 
 #ifdef ENABLE_PCI
@@ -551,9 +550,7 @@ static void pc_close(struct tty_struct * tty, struct file * filp)
 		if (tty->driver->flush_buffer)
 			tty->driver->flush_buffer(tty);
 
-		if (tty->ldisc.flush_buffer)
-			tty->ldisc.flush_buffer(tty);
-
+		tty_ldisc_flush(tty);
 		shutdown(ch);
 		tty->closing = 0;
 		ch->event = 0;
@@ -564,8 +561,7 @@ static void pc_close(struct tty_struct * tty, struct file * filp)
 
 			if (ch->close_delay) 
 			{
-				current->state = TASK_INTERRUPTIBLE;
-				schedule_timeout(ch->close_delay);
+				msleep_interruptible(jiffies_to_msecs(ch->close_delay));
 			}
 
 			wake_up_interruptible(&ch->open_wait);
@@ -657,10 +653,7 @@ static void pc_hangup(struct tty_struct *tty)
 		cli();
 		if (tty->driver->flush_buffer)
 			tty->driver->flush_buffer(tty);
-
-		if (tty->ldisc.flush_buffer)
-			tty->ldisc.flush_buffer(tty);
-
+		tty_ldisc_flush(tty);
 		shutdown(ch);
 
 		ch->tty   = NULL;
@@ -676,7 +669,7 @@ static void pc_hangup(struct tty_struct *tty)
 
 /* ------------------ Begin pc_write  ------------------------- */
 
-static int pc_write(struct tty_struct * tty, int from_user,
+static int pc_write(struct tty_struct * tty,
                     const unsigned char *buf, int bytesAvailable)
 { /* Begin pc_write */
 
@@ -713,171 +706,6 @@ static int pc_write(struct tty_struct * tty, int from_user,
 
 	bc   = ch->brdchan;
 	size = ch->txbufsize;
-
-	if (from_user) 
-	{ /* Begin from_user */
-
-		save_flags(flags);
-		cli();
-
-		globalwinon(ch);
-
-		/* -----------------------------------------------------------------	
-			Anding against size will wrap the pointer back to its beginning 
-			position if it is necessary.  This will only work if size is
-			a power of 2 which should always be the case.  Size is determined 
-			by the cards on board FEP/OS.
-		-------------------------------------------------------------------- */	
-
-		/* head refers to the next empty location in which data may be stored */ 
-
-		head = bc->tin & (size - 1);
-
-		/* tail refers to the next data byte to be transmitted */ 
-
-		tail = bc->tout;
-
-		/* Consider changing this to a do statement to make sure */
-
-		if (tail != bc->tout)
-			tail = bc->tout;
-
-		/* ------------------------------------------------------------------	
-			Anding against size will wrap the pointer back to its beginning 
-			position if it is necessary.  This will only work if size is
-			a power of 2 which should always be the case.  Size is determined 
-			by the cards on board FEP/OS.
-		--------------------------------------------------------------------- */	
-
-		tail &= (size - 1);
-
-		/* -----------------------------------------------------------------
-			Two situations can affect how space in the transmit buffer
-			is calculated.  You can have a situation where the transmit
-			in pointer (tin) head has wrapped around and actually has a 
-			lower address than the transmit out pointer (tout) tail; or
-			the transmit in pointer (tin) head will not be wrapped around
-			yet, and have a higher address than the transmit out pointer
-			(tout) tail.  Obviously space available in the transmit buffer
-			is calculated differently for each case.
-
-			Example 1:
-			
-			Consider a 10 byte buffer where head is a pointer to the next
-			empty location in the buffer and tail is a pointer to the next 
-			byte to transmit.  In this example head will not have wrapped 
-			around and therefore head > tail.  
-
-			0      1      2      3      4      5      6      7      8      9   
-		                tail                               head
-
-			The above diagram shows that buffer locations 2,3,4,5 and 6 have
-			data to be transmitted, while head points at the next empty
-			location.  To calculate how much space is available first we have
-			to determine if the head pointer (tin) has wrapped.  To do this
-			compare the head pointer to the tail pointer,  If head is equal
-			or greater than tail; then it has not wrapped; and the space may
-			be calculated by subtracting tail from head and then subtracting
-			that value from the buffers size.  A one is subtracted from the
-			new value to indicate how much space is available between the 
-			head pointer and end of buffer; as well as the space between the
-			beginning of the buffer and the tail.  If the head is not greater
-			or equal to the tail this indicates that the head has wrapped
-			around to the beginning of the buffer.  To calculate the space 
-			available in this case simply subtract head from tail.  This new 
-			value minus one represents the space available betwwen the head 
-			and tail pointers.  In this example head (7) is greater than tail (2)
-			and therefore has not wrapped around.  We find the space by first
-			subtracting tail from head (7-2=5).  We then subtract this value
-			from the buffer size of ten and subtract one (10-5-1=4).  The space
-			remaining is 4 bytes. 
-
-			Example 2:
-			
-			Consider a 10 byte buffer where head is a pointer to the next
-			empty location in the buffer and tail is a pointer to the next 
-			byte to transmit.  In this example head will wrapped around and 
-			therefore head < tail.  
-
-			0      1      2      3      4      5      6      7      8      9   
-		                head                               tail
-
-			The above diagram shows that buffer locations 7,8,9,0 and 1 have
-			data to be transmitted, while head points at the next empty
-			location.  To find the space available we compare head to tail.  If
-			head is not equal to, or greater than tail this indicates that head
-			has wrapped around. In this case head (2) is not equal to, or
-			greater than tail (7) and therefore has already wrapped around.  To
-			calculate the available space between the two pointers we subtract
-			head from tail (7-2=5).  We then subtract one from this new value
-			(5-1=4).  We have 5 bytes empty remaining in the buffer.  Unlike the
-			previous example these five bytes are located between the head and
-			tail pointers. 
-
-		----------------------------------------------------------------------- */
-
-		dataLen = (head >= tail) ? (size - (head - tail) - 1) : (tail - head - 1);
-
-		/* ----------------------------------------------------------------------
-			In this case bytesAvailable has been passed into pc_write and
-			represents the amount of data that needs to be written.  dataLen
-			represents the amount of space available on the card.  Whichever
-			value is smaller will be the amount actually written. 
-			bytesAvailable will then take on this newly calculated value.
-		---------------------------------------------------------------------- */
-
-		bytesAvailable = MIN(dataLen, bytesAvailable);
-
-		/* First we read the data in from the file system into a temp buffer */
-
-		memoff(ch);
-		restore_flags(flags);
-
-		if (bytesAvailable) 
-		{ /* Begin bytesAvailable */
-
-			/* Can the user buffer be accessed at the moment ? */
-			if (verify_area(VERIFY_READ, (char*)buf, bytesAvailable))
-				bytesAvailable = 0; /* Can't do; try again later */
-			else  /* Evidently it can, began transmission */
-			{ /* Begin if area verified */
-				/* ---------------------------------------------------------------
-					The below function reads data from user memory.  This routine
-					can not be used in an interrupt routine. (Because it may 
-					generate a page fault)  It can only be called while we can the
-					user context is accessible. 
-
-					The prototype is :
-					inline void copy_from_user(void * to, const void * from,
-					                          unsigned long count);
-
-					I also think (Check hackers guide) that optimization must
-					be turned ON.  (Which sounds strange to me...)
-	
-					Remember copy_from_user WILL generate a page fault if the
-					user memory being accessed has been swapped out.  This can
-					cause this routine to temporarily sleep while this page
-					fault is occurring.
-				
-				----------------------------------------------------------------- */
-
-				if (copy_from_user(ch->tmp_buf, buf,
-						   bytesAvailable))
-					return -EFAULT;
-
-			} /* End if area verified */
-
-		} /* End bytesAvailable */
-
-		/* ------------------------------------------------------------------ 
-			Set buf to this address for the moment.  tmp_buf was allocated in
-			post_fep_init.
-		--------------------------------------------------------------------- */
-		buf = ch->tmp_buf;
-
-	} /* End from_user */
-
-	/* All data is now local */
 
 	amountCopied = 0;
 	save_flags(flags);
@@ -921,7 +749,7 @@ static int pc_write(struct tty_struct * tty, int from_user,
 			space; reduce the amount of data to fit the space.
 	---------------------------------------------------------------------- */
 
-	bytesAvailable = MIN(remain, bytesAvailable);
+	bytesAvailable = min(remain, bytesAvailable);
 
 	txwinon(ch);
 	while (bytesAvailable > 0) 
@@ -932,7 +760,7 @@ static int pc_write(struct tty_struct * tty, int from_user,
 			data copy fills to the end of card buffer.
 		------------------------------------------------------------------- */
 
-		dataLen = MIN(bytesAvailable, dataLen);
+		dataLen = min(bytesAvailable, dataLen);
 		memcpy(ch->txptr + head, buf, dataLen);
 		buf += dataLen;
 		head += dataLen;
@@ -969,7 +797,7 @@ static void pc_put_char(struct tty_struct *tty, unsigned char c)
 { /* Begin pc_put_char */
 
    
-	pc_write(tty, 0, &c, 1);
+	pc_write(tty, &c, 1);
 	return;
 
 } /* End pc_put_char */
@@ -1129,8 +957,7 @@ static void pc_flush_buffer(struct tty_struct *tty)
 	restore_flags(flags);
 
 	wake_up_interruptible(&tty->write_wait);
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) && tty->ldisc.write_wakeup)
-		(tty->ldisc.write_wakeup)(tty);
+	tty_wakeup(tty);
 
 } /* End pc_flush_buffer */
 
@@ -1984,7 +1811,7 @@ static void post_fep_init(unsigned int crd)
 		ch->boardnum   = crd;
 		ch->channelnum = i;
 		ch->magic      = EPCA_MAGIC;
-		ch->tty        = 0;
+		ch->tty        = NULL;
 
 		if (shrinkmem) 
 		{
@@ -2271,9 +2098,7 @@ static void doevent(int crd)
 				{ /* Begin if LOWWAIT */
 
 					ch->statusflags &= ~LOWWAIT;
-					if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-						  tty->ldisc.write_wakeup)
-						(tty->ldisc.write_wakeup)(tty);
+					tty_wakeup(tty);
 					wake_up_interruptible(&tty->write_wait);
 
 				} /* End if LOWWAIT */
@@ -2290,9 +2115,7 @@ static void doevent(int crd)
 				{ /* Begin if EMPTYWAIT */
 
 					ch->statusflags &= ~EMPTYWAIT;
-					if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-						  tty->ldisc.write_wakeup)
-						(tty->ldisc.write_wakeup)(tty);
+					tty_wakeup(tty);
 
 					wake_up_interruptible(&tty->write_wait);
 
@@ -2728,7 +2551,7 @@ static void receive_data(struct channel *ch)
 { /* Begin receive_data */
 
 	unchar *rptr;
-	struct termios *ts = 0;
+	struct termios *ts = NULL;
 	struct tty_struct *tty;
 	volatile struct board_chan *bc;
 	register int dataToRead, wrapgap, bytesAvailable;
@@ -2851,8 +2674,6 @@ static void receive_data(struct channel *ch)
 static int info_ioctl(struct tty_struct *tty, struct file * file,
 		    unsigned int cmd, unsigned long arg)
 {
-	int error;
-	
 	switch (cmd) 
 	{ /* Begin switch cmd */
 
@@ -2862,13 +2683,7 @@ static int info_ioctl(struct tty_struct *tty, struct file * file,
 			struct digi_info di ;
 			int brd;
 
-			getUser(brd, (unsigned int *)arg);
-
-			if ((error = verify_area(VERIFY_WRITE, (char*)arg, sizeof(di))))
-			{
-				printk(KERN_ERR "DIGI_GETINFO : verify area size 0x%x failed\n",sizeof(di));
-				return(error);
-			}
+			getUser(brd, (unsigned int __user *)arg);
 
 			if ((brd < 0) || (brd >= num_cards) || (num_cards == 0))
 				return (-ENODEV);
@@ -2882,7 +2697,7 @@ static int info_ioctl(struct tty_struct *tty, struct file * file,
 			di.port = boards[brd].port ;
 			di.membase = boards[brd].membase ;
 
-			if (copy_to_user((char *)arg, &di, sizeof (di)))
+			if (copy_to_user((void __user *)arg, &di, sizeof (di)))
 				return -EFAULT;
 			break;
 
@@ -3020,6 +2835,7 @@ static int pc_tiocmset(struct tty_struct *tty, struct file *file,
 	epcaparam(tty,ch);
 	memoff(ch);
 	restore_flags(flags);
+	return 0;
 }
 
 static int pc_ioctl(struct tty_struct *tty, struct file * file,
@@ -3027,12 +2843,13 @@ static int pc_ioctl(struct tty_struct *tty, struct file * file,
 { /* Begin pc_ioctl */
 
 	digiflow_t dflow;
-	int retval, error;
+	int retval;
 	unsigned long flags;
 	unsigned int mflag, mstat;
 	unsigned char startc, stopc;
 	volatile struct board_chan *bc;
 	struct channel *ch = (struct channel *) tty->driver_data;
+	void __user *argp = (void __user *)arg;
 	
 	if (ch)
 		bc = ch->brdchan;
@@ -3054,13 +2871,13 @@ static int pc_ioctl(struct tty_struct *tty, struct file * file,
 	{ /* Begin switch cmd */
 
 		case TCGETS:
-			if (copy_to_user((struct termios *)arg, 
+			if (copy_to_user(argp, 
 					 tty->termios, sizeof(struct termios)))
 				return -EFAULT;
 			return(0);
 
 		case TCGETA:
-			return get_termio(tty, (struct termio *)arg);
+			return get_termio(tty, argp);
 
 		case TCSBRK:	/* SVID version: non-zero arg --> no break */
 
@@ -3090,21 +2907,16 @@ static int pc_ioctl(struct tty_struct *tty, struct file * file,
 			return 0;
 
 		case TIOCGSOFTCAR:
-
-			error = verify_area(VERIFY_WRITE, (void *) arg,sizeof(long));
-			if (error)
-				return error;
-
-			putUser(C_CLOCAL(tty) ? 1 : 0,
-			            (unsigned long *) arg);
+			if (put_user(C_CLOCAL(tty)?1:0, (unsigned long __user *)arg))
+				return -EFAULT;
 			return 0;
 
 		case TIOCSSOFTCAR:
-			/*RONNIE PUT VERIFY_READ (See above) check here */
 		{
 			unsigned int value;
 
-			getUser(value, (unsigned int *)arg);
+			if (get_user(value, (unsigned __user *)argp))
+				return -EFAULT;
 			tty->termios->c_cflag =
 				((tty->termios->c_cflag & ~CLOCAL) |
 				 (value ? CLOCAL : 0));
@@ -3113,12 +2925,12 @@ static int pc_ioctl(struct tty_struct *tty, struct file * file,
 
 		case TIOCMODG:
 			mflag = pc_tiocmget(tty, file);
-			if (putUser(mflag, (unsigned int *) arg))
+			if (put_user(mflag, (unsigned long __user *)argp))
 				return -EFAULT;
 			break;
 
 		case TIOCMODS:
-			if (getUser(mstat, (unsigned int *)arg))
+			if (get_user(mstat, (unsigned __user *)argp))
 				return -EFAULT;
 			return pc_tiocmset(tty, file, mstat, ~mstat);
 
@@ -3141,8 +2953,7 @@ static int pc_ioctl(struct tty_struct *tty, struct file * file,
 			break;
 
 		case DIGI_GETA:
-			if (copy_to_user((char*)arg, &ch->digiext,
-					 sizeof(digi_t)))
+			if (copy_to_user(argp, &ch->digiext, sizeof(digi_t)))
 				return -EFAULT;
 			break;
 
@@ -3157,6 +2968,7 @@ static int pc_ioctl(struct tty_struct *tty, struct file * file,
 			}
 			else 
 			{
+				/* ldisc lock already held in ioctl */
 				if (tty->ldisc.flush_buffer)
 					tty->ldisc.flush_buffer(tty);
 			}
@@ -3164,8 +2976,7 @@ static int pc_ioctl(struct tty_struct *tty, struct file * file,
 			/* Fall Thru */
 
 		case DIGI_SETA:
-			if (copy_from_user(&ch->digiext, (char*)arg,
-					   sizeof(digi_t)))
+			if (copy_from_user(&ch->digiext, argp, sizeof(digi_t)))
 				return -EFAULT;
 			
 			if (ch->digiext.digi_flags & DIGI_ALTPIN) 
@@ -3209,7 +3020,7 @@ static int pc_ioctl(struct tty_struct *tty, struct file * file,
 			memoff(ch);
 			restore_flags(flags);
 
-			if (copy_to_user((char*)arg, &dflow, sizeof(dflow)))
+			if (copy_to_user(argp, &dflow, sizeof(dflow)))
 				return -EFAULT;
 			break;
 
@@ -3226,7 +3037,7 @@ static int pc_ioctl(struct tty_struct *tty, struct file * file,
 				stopc = ch->stopca;
 			}
 
-			if (copy_from_user(&dflow, (char*)arg, sizeof(dflow)))
+			if (copy_from_user(&dflow, argp, sizeof(dflow)))
 				return -EFAULT;
 
 			if (dflow.startc != startc || dflow.stopc != stopc) 
@@ -3329,7 +3140,6 @@ static void do_softint(void *private_)
 		}
 
 	} /* End EPCA_MAGIC */
-	MOD_DEC_USE_COUNT;
 } /* End do_softint */
 
 /* ------------------------------------------------------------
@@ -3555,17 +3365,9 @@ static void setup_empty_event(struct tty_struct *tty, struct channel *ch)
 
 /* --------------------- Begin get_termio ----------------------- */
 
-static int get_termio(struct tty_struct * tty, struct termio * termio)
+static int get_termio(struct tty_struct * tty, struct termio __user * termio)
 { /* Begin get_termio */
-	int error;
-
-	error = verify_area(VERIFY_WRITE, termio, sizeof (struct termio));
-	if (error)
-		return error;
-
-	kernel_termios_to_user_termio(termio, tty->termios);
-
-	return 0;
+	return kernel_termios_to_user_termio(termio, tty->termios);
 } /* End get_termio */
 /* ---------------------- Begin epca_setup  -------------------------- */
 void epca_setup(char *str, int *ints)
@@ -3974,23 +3776,12 @@ MODULE_DEVICE_TABLE(pci, epca_pci_tbl);
 
 int __init init_PCI (void)
 { /* Begin init_PCI */
-	
-	int pci_count;
-	
 	memset (&epca_driver, 0, sizeof (epca_driver));
 	epca_driver.name = "epca";
 	epca_driver.id_table = epca_pci_tbl;
 	epca_driver.probe = epca_init_one;
 
-	pci_count = pci_register_driver (&epca_driver);
-	
-	if (pci_count <= 0) {
-		pci_unregister_driver (&epca_driver);
-		pci_count = 0;
-	}
-
-	return(pci_count);
-
+	return pci_register_driver(&epca_driver);
 } /* End init_PCI */
 
 #endif /* ENABLE_PCI */

@@ -3,7 +3,7 @@
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * Copyright (C) 2004 Silicon Graphics, Inc. All rights reserved.
+ * Copyright (C) 2004-2005 Silicon Graphics, Inc. All rights reserved.
  *
  * SGI Altix topology and hardware performance monitoring API.
  * Mark Goodwin <markgw@sgi.com>. 
@@ -28,17 +28,23 @@
 #include <linux/vmalloc.h>
 #include <linux/seq_file.h>
 #include <linux/miscdevice.h>
+#include <linux/utsname.h>
 #include <linux/cpumask.h>
 #include <linux/smp_lock.h>
+#include <linux/nodemask.h>
 #include <asm/processor.h>
 #include <asm/topology.h>
 #include <asm/smp.h>
 #include <asm/semaphore.h>
 #include <asm/segment.h>
 #include <asm/uaccess.h>
-#include <asm-ia64/sal.h>
-#include <asm-ia64/sn/sn_sal.h>
-#include <asm-ia64/sn/sn2/sn_hwperf.h>
+#include <asm/sal.h>
+#include <asm/sn/io.h>
+#include <asm/sn/sn_sal.h>
+#include <asm/sn/module.h>
+#include <asm/sn/geo.h>
+#include <asm/sn/sn2/sn_hwperf.h>
+#include <asm/sn/addrs.h>
 
 static void *sn_hwperf_salheap = NULL;
 static int sn_hwperf_obj_cnt = 0;
@@ -77,24 +83,48 @@ out:
 	return e;
 }
 
+static int sn_hwperf_location_to_bpos(char *location,
+	int *rack, int *bay, int *slot, int *slab)
+{
+	char type;
+
+	/* first scan for an old style geoid string */
+	if (sscanf(location, "%03d%c%02d#%d",
+		rack, &type, bay, slab) == 4)
+		*slot = 0; 
+	else /* scan for a new bladed geoid string */
+	if (sscanf(location, "%03d%c%02d^%02d#%d",
+		rack, &type, bay, slot, slab) != 5)
+		return -1; 
+	/* success */
+	return 0;
+}
+
 static int sn_hwperf_geoid_to_cnode(char *location)
 {
 	int cnode;
-	int mod, slot, slab;
-	int cmod, cslot, cslab;
+	geoid_t geoid;
+	moduleid_t module_id;
+	int rack, bay, slot, slab;
+	int this_rack, this_bay, this_slot, this_slab;
 
-	if (sscanf(location, "%03dc%02d#%d", &mod, &slot, &slab) != 3)
+	if (sn_hwperf_location_to_bpos(location, &rack, &bay, &slot, &slab))
 		return -1;
-	for (cnode = 0; cnode < numnodes; cnode++) {
-		/* XXX: need a better way than this ... */
-		if (sscanf(NODEPDA(cnode)->hwg_node_name,
-		   "hw/module/%03dc%02d/slab/%d", &cmod, &cslot, &cslab) == 3) {
-			if (mod == cmod && slot == cslot && slab == cslab)
-				break;
+
+	for (cnode = 0; cnode < numionodes; cnode++) {
+		geoid = cnodeid_get_geoid(cnode);
+		module_id = geo_module(geoid);
+		this_rack = MODULE_GET_RACK(module_id);
+		this_bay = MODULE_GET_BPOS(module_id);
+		this_slot = geo_slot(geoid);
+		this_slab = geo_slab(geoid);
+		if (rack == this_rack && bay == this_bay &&
+			slot == this_slot && slab == this_slab) {
+			break;
 		}
 	}
 
-	return cnode < numnodes ? cnode : -1;
+	return cnode < numionodes ? cnode : -1;
 }
 
 static int sn_hwperf_obj_to_cnode(struct sn_hwperf_object_info * obj)
@@ -113,62 +143,70 @@ static int sn_hwperf_generic_ordinal(struct sn_hwperf_object_info *obj,
 	for (ordinal=0, p=objs; p != obj; p++) {
 		if (SN_HWPERF_FOREIGN(p))
 			continue;
-		if (p->location[3] == obj->location[3])
+		if (SN_HWPERF_SAME_OBJTYPE(p, obj))
 			ordinal++;
 	}
 
 	return ordinal;
 }
 
-#ifndef MODULE_IOBRICK 
-/* this will be available when ioif TIO support is added */
-#define MODULE_IOBRICK (MODULE_OPUSBRICK+1)
-#endif
+static const char *slabname_node =	"node"; /* SHub asic */
+static const char *slabname_ionode =	"ionode"; /* TIO asic */
+static const char *slabname_router =	"router"; /* NL3R or NL4R */
+static const char *slabname_other =	"other"; /* unknown asic */
 
-static const char *sn_hwperf_get_brickname(struct sn_hwperf_object_info *obj,
-				struct sn_hwperf_object_info *objs, int *ordinal)
+static const char *sn_hwperf_get_slabname(struct sn_hwperf_object_info *obj,
+			struct sn_hwperf_object_info *objs, int *ordinal)
 {
-	int i;
-	const char *objtype = NULL;
+	int isnode;
+	const char *slabname = slabname_other;
 
-	for (i=0; i < MAX_BRICK_TYPES; i++) {
-		if (brick_types[i] != obj->location[3])
-			continue;
-		switch (i) {
-		case MODULE_CBRICK:
-		    objtype = "node";
-		    *ordinal = sn_hwperf_obj_to_cnode(obj); /* cnodeid */
-		    break;
-
-		case MODULE_RBRICK:
-		    objtype = "router";
-		    *ordinal = sn_hwperf_generic_ordinal(obj, objs);
-		    break;
-
-		case MODULE_IOBRICK:
-		    objtype = "ionode";
-		    *ordinal = sn_hwperf_generic_ordinal(obj, objs);
-		    break;
-		}
-		break;
+	if ((isnode = SN_HWPERF_IS_NODE(obj)) || SN_HWPERF_IS_IONODE(obj)) {
+	    	slabname = isnode ? slabname_node : slabname_ionode;
+		*ordinal = sn_hwperf_obj_to_cnode(obj);
 	}
-
-	if (i == MAX_BRICK_TYPES) {
-		objtype = "other";
+	else {
 		*ordinal = sn_hwperf_generic_ordinal(obj, objs);
+		if (SN_HWPERF_IS_ROUTER(obj))
+			slabname = slabname_router;
 	}
 
-	return objtype;
+	return slabname;
+}
+
+static void print_pci_topology(struct seq_file *s,
+	struct sn_hwperf_object_info *obj, int *ordinal,
+	u64 rack, u64 bay, u64 slot, u64 slab)
+{
+	char *p1;
+	char *p2;
+	char *pg;
+
+	if (!(pg = (char *)get_zeroed_page(GFP_KERNEL)))
+		return; /* ignore */
+	if (ia64_sn_ioif_get_pci_topology(rack, bay, slot, slab,
+		__pa(pg), PAGE_SIZE) == SN_HWPERF_OP_OK) {
+		for (p1=pg; *p1 && p1 < pg + PAGE_SIZE;) {
+			if (!(p2 = strchr(p1, '\n')))
+				break;
+			*p2 = '\0';
+			seq_printf(s, "pcibus %d %s-%s\n",
+				*ordinal, obj->location, p1);
+			(*ordinal)++;
+			p1 = p2 + 1;
+		}
+	}
+	free_page((unsigned long)pg);
 }
 
 static int sn_topology_show(struct seq_file *s, void *d)
 {
 	int sz;
 	int pt;
-	int e;
+	int e = 0;
 	int i;
 	int j;
-	const char *brickname;
+	const char *slabname;
 	int ordinal;
 	cpumask_t cpumask;
 	char slice;
@@ -177,11 +215,44 @@ static int sn_topology_show(struct seq_file *s, void *d)
 	struct sn_hwperf_object_info *p;
 	struct sn_hwperf_object_info *obj = d;	/* this object */
 	struct sn_hwperf_object_info *objs = s->private; /* all objects */
+	int rack, bay, slot, slab;
+	u8 shubtype;
+	u8 system_size;
+	u8 sharing_size;
+	u8 partid;
+	u8 coher;
+	u8 nasid_shift;
+	u8 region_size;
+	u16 nasid_mask;
+	int nasid_msb;
+	int pci_bus_ordinal = 0;
 
 	if (obj == objs) {
-		seq_printf(s, "# sn_topology version 1\n");
+		seq_printf(s, "# sn_topology version 2\n");
 		seq_printf(s, "# objtype ordinal location partition"
 			" [attribute value [, ...]]\n");
+
+		if (ia64_sn_get_sn_info(0,
+			&shubtype, &nasid_mask, &nasid_shift, &system_size,
+			&sharing_size, &partid, &coher, &region_size))
+			BUG();
+		for (nasid_msb=63; nasid_msb > 0; nasid_msb--) {
+			if (((u64)nasid_mask << nasid_shift) & (1ULL << nasid_msb))
+				break;
+		}
+		seq_printf(s, "partition %u %s local "
+			"shubtype %s, "
+			"nasid_mask 0x%016lx, "
+			"nasid_bits %d:%d, "
+			"system_size %d, "
+			"sharing_size %d, "
+			"coherency_domain %d, "
+			"region_size %d\n",
+
+			partid, system_utsname.nodename,
+			shubtype ? "shub2" : "shub1", 
+			(u64)nasid_mask << nasid_shift, nasid_msb, nasid_shift,
+			system_size, sharing_size, coher, region_size);
 	}
 
 	if (SN_HWPERF_FOREIGN(obj)) {
@@ -189,27 +260,27 @@ static int sn_topology_show(struct seq_file *s, void *d)
 		return 0;
 	}
 
-	for (i = 0; obj->name[i]; i++) {
+	for (i = 0; i < SN_HWPERF_MAXSTRING && obj->name[i]; i++) {
 		if (obj->name[i] == ' ')
 			obj->name[i] = '_';
 	}
 
-	brickname = sn_hwperf_get_brickname(obj, objs, &ordinal);
-	seq_printf(s, "%s %d %s %s asic %s", brickname, ordinal, obj->location,
+	slabname = sn_hwperf_get_slabname(obj, objs, &ordinal);
+	seq_printf(s, "%s %d %s %s asic %s", slabname, ordinal, obj->location,
 		obj->sn_hwp_this_part ? "local" : "shared", obj->name);
 
-	if (obj->location[3] != 'c')
+	if (!SN_HWPERF_IS_NODE(obj) && !SN_HWPERF_IS_IONODE(obj))
 		seq_putc(s, '\n');
 	else {
 		seq_printf(s, ", nasid 0x%x", cnodeid_to_nasid(ordinal));
-		for (i=0; i < numnodes; i++) {
+		for (i=0; i < numionodes; i++) {
 			seq_printf(s, i ? ":%d" : ", dist %d",
 				node_distance(ordinal, i));
 		}
 		seq_putc(s, '\n');
 
 		/*
-		 * CPUs on this node
+		 * CPUs on this node, if any
 		 */
 		cpumask = node_to_cpumask(ordinal);
 		for_each_online_cpu(i) {
@@ -228,6 +299,17 @@ static int sn_topology_show(struct seq_file *s, void *d)
 				}
 				seq_putc(s, '\n');
 			}
+		}
+
+		/*
+		 * PCI busses attached to this node, if any
+		 */
+		if (sn_hwperf_location_to_bpos(obj->location,
+			&rack, &bay, &slot, &slab)) {
+			/* export pci bus info */
+			print_pci_topology(s, obj, &pci_bus_ordinal,
+				rack, bay, slot, slab);
+
 		}
 	}
 
@@ -253,10 +335,15 @@ static int sn_topology_show(struct seq_file *s, void *d)
 					break;
 				}
 			}
-			if (i >= sn_hwperf_obj_cnt)
-				continue;
 			seq_printf(s, "numalink %d %s-%d",
 			    ordinal+pt, obj->location, ptdata[pt].port);
+
+			if (i >= sn_hwperf_obj_cnt) {
+				/* no connection */
+				seq_puts(s, " local endpoint disconnected"
+					    ", protocol unknown\n");
+				continue;
+			}
 
 			if (obj->sn_hwp_this_part && p->sn_hwp_this_part)
 				/* both ends local to this partition */
@@ -276,9 +363,8 @@ static int sn_topology_show(struct seq_file *s, void *d)
 			 */
 			seq_printf(s, " endpoint %s-%d, protocol %s\n",
 				p->location, ptdata[pt].conn_port,
-				strcmp(obj->name, "NL3Router") == 0 ||
-				strcmp(p->name, "NL3Router") == 0 ?
-				"LLP3" : "LLP4");
+				(SN_HWPERF_IS_NL3ROUTER(obj) ||
+				SN_HWPERF_IS_NL3ROUTER(p)) ?  "LLP3" : "LLP4");
 		}
 		vfree(ptdata);
 	}
@@ -378,6 +464,45 @@ out:
 	return r;
 }
 
+/* map SAL hwperf error code to system error code */
+static int sn_hwperf_map_err(int hwperf_err)
+{
+	int e;
+
+	switch(hwperf_err) {
+	case SN_HWPERF_OP_OK:
+		e = 0;
+		break;
+
+	case SN_HWPERF_OP_NOMEM:
+		e = -ENOMEM;
+		break;
+
+	case SN_HWPERF_OP_NO_PERM:
+		e = -EPERM;
+		break;
+
+	case SN_HWPERF_OP_IO_ERROR:
+		e = -EIO;
+		break;
+
+	case SN_HWPERF_OP_BUSY:
+		e = -EBUSY;
+		break;
+
+	case SN_HWPERF_OP_RECONFIGURE:
+		e = -EAGAIN;
+		break;
+
+	case SN_HWPERF_OP_INVAL:
+	default:
+		e = -EINVAL;
+		break;
+	}
+
+	return e;
+}
+
 /*
  * ioctl for "sn_hwperf" misc device
  */
@@ -405,7 +530,7 @@ sn_hwperf_ioctl(struct inode *in, struct file *fp, u32 op, u64 arg)
 		r = -EINVAL;
 		goto error;
 	}
-	r = copy_from_user(&a, (const void *)arg,
+	r = copy_from_user(&a, (const void __user *)arg,
 		sizeof(struct sn_hwperf_ioctl_args));
 	if (r != 0) {
 		r = -EFAULT;
@@ -426,7 +551,7 @@ sn_hwperf_ioctl(struct inode *in, struct file *fp, u32 op, u64 arg)
 	}
 
 	if (op & SN_HWPERF_OP_MEM_COPYIN) {
-		r = copy_from_user(p, (const void *)a.ptr, a.sz);
+		r = copy_from_user(p, (const void __user *)a.ptr, a.sz);
 		if (r != 0) {
 			r = -EFAULT;
 			goto error;
@@ -473,7 +598,7 @@ sn_hwperf_ioctl(struct inode *in, struct file *fp, u32 op, u64 arg)
 
 	case SN_HWPERF_GET_NODE_NASID:
 		if (a.sz != sizeof(u64) ||
-		   (node = a.arg) < 0 || node >= numnodes) {
+		   (node = a.arg) < 0 || node >= numionodes) {
 			r = -EINVAL;
 			goto error;
 		}
@@ -515,18 +640,27 @@ sn_hwperf_ioctl(struct inode *in, struct file *fp, u32 op, u64 arg)
 		op_info.v0 = &v0;
 		op_info.op = op;
 		r = sn_hwperf_op_cpu(&op_info);
+		if (r) {
+			r = sn_hwperf_map_err(r);
+			a.v0 = v0;
+			goto error;
+		}
 		break;
 
 	default:
 		/* all other ops are a direct SAL call */
 		r = ia64_sn_hwperf_op(sn_hwperf_master_nasid, op,
 			      a.arg, a.sz, (u64) p, 0, 0, &v0);
+		if (r) {
+			r = sn_hwperf_map_err(r);
+			goto error;
+		}
 		a.v0 = v0;
 		break;
 	}
 
 	if (op & SN_HWPERF_OP_MEM_COPYOUT) {
-		r = copy_to_user((void *)a.ptr, p, a.sz);
+		r = copy_to_user((void __user *)a.ptr, p, a.sz);
 		if (r != 0) {
 			r = -EFAULT;
 			goto error;
@@ -534,8 +668,7 @@ sn_hwperf_ioctl(struct inode *in, struct file *fp, u32 op, u64 arg)
 	}
 
 error:
-	if (p)
-		vfree(p);
+	vfree(p);
 
 	lock_kernel();
 	return r;
@@ -646,7 +779,6 @@ int sn_topology_release(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq = file->private_data;
 
-	if (seq->private)
-		vfree(seq->private);
+	vfree(seq->private);
 	return seq_release(inode, file);
 }

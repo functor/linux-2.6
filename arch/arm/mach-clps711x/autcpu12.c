@@ -35,8 +35,7 @@
 #include <asm/mach/map.h>
 #include <asm/arch/autcpu12.h>
 
-extern void clps711x_map_io(void);
-extern void clps711x_init_irq(void);
+#include "common.h"
 
 /*
  * The on-chip registers are given a size of 1MB so that a section can
@@ -65,5 +64,6 @@ MACHINE_START(AUTCPU12, "autronix autcpu12")
 	BOOT_PARAMS(0xc0020000)
 	MAPIO(autcpu12_map_io)
 	INITIRQ(clps711x_init_irq)
+	.timer		= &clps711x_timer,
 MACHINE_END
 

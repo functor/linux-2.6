@@ -29,8 +29,6 @@
 #include <asm/io.h>
 #include <asm/dma.h>
 
-#include "sl82c105.h"
-
 #undef DEBUG
 
 #ifdef DEBUG
@@ -238,15 +236,13 @@ static int sl82c105_ide_dma_lost_irq(ide_drive_t *drive)
  * The generic IDE core will have disabled the BMEN bit before this
  * function is called.
  */
-static int sl82c105_ide_dma_begin(ide_drive_t *drive)
+static void sl82c105_ide_dma_start(ide_drive_t *drive)
 {
 	ide_hwif_t *hwif = HWIF(drive);
 	struct pci_dev *dev = hwif->pci_dev;
 
-//	DBG(("sl82c105_ide_dma_begin(drive:%s)\n", drive->name));
-
 	sl82c105_reset_host(dev);
-	return __ide_dma_begin(drive);
+	ide_dma_start(drive);
 }
 
 static int sl82c105_ide_dma_timeout(ide_drive_t *drive)
@@ -471,7 +467,7 @@ static void __init init_hwif_sl82c105(ide_hwif_t *hwif)
 	hwif->ide_dma_on = &sl82c105_ide_dma_on;
 	hwif->ide_dma_off_quietly = &sl82c105_ide_dma_off_quietly;
 	hwif->ide_dma_lostirq = &sl82c105_ide_dma_lost_irq;
-	hwif->ide_dma_begin = &sl82c105_ide_dma_begin;
+	hwif->dma_start = &sl82c105_ide_dma_start;
 	hwif->ide_dma_timeout = &sl82c105_ide_dma_timeout;
 
 	if (!noautodma)
@@ -481,13 +477,20 @@ static void __init init_hwif_sl82c105(ide_hwif_t *hwif)
 #endif /* CONFIG_BLK_DEV_IDEDMA */
 }
 
+static ide_pci_device_t sl82c105_chipset __devinitdata = {
+	.name		= "W82C105",
+	.init_chipset	= init_chipset_sl82c105,
+	.init_hwif	= init_hwif_sl82c105,
+	.init_dma	= init_dma_sl82c105,
+	.channels	= 2,
+	.autodma	= NOAUTODMA,
+	.enablebits	= {{0x40,0x01,0x01}, {0x40,0x10,0x10}},
+	.bootable	= ON_BOARD,
+};
+
 static int __devinit sl82c105_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	ide_pci_device_t *d = &sl82c105_chipsets[id->driver_data];
-	if (dev->device != d->device)
-		BUG();
-	ide_setup_pci_device(dev, d);
-	return 0;
+	return ide_setup_pci_device(dev, &sl82c105_chipset);
 }
 
 static struct pci_device_id sl82c105_pci_tbl[] = {
@@ -497,7 +500,7 @@ static struct pci_device_id sl82c105_pci_tbl[] = {
 MODULE_DEVICE_TABLE(pci, sl82c105_pci_tbl);
 
 static struct pci_driver driver = {
-	.name		= "W82C105 IDE",
+	.name		= "W82C105_IDE",
 	.id_table	= sl82c105_pci_tbl,
 	.probe		= sl82c105_init_one,
 };

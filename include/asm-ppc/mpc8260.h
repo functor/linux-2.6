@@ -16,12 +16,16 @@
 #include <platforms/est8260.h>
 #endif
 
+#ifdef CONFIG_SBC82xx
+#include <platforms/sbc82xx.h>
+#endif
+
 #ifdef CONFIG_SBS8260
 #include <platforms/sbs8260.h>
 #endif
 
-#ifdef CONFIG_RPX6
-#include <platforms/rpxsuper.h>
+#ifdef CONFIG_RPX8260
+#include <platforms/rpx8260.h>
 #endif
 
 #ifdef CONFIG_WILLOW
@@ -30,6 +34,14 @@
 
 #ifdef CONFIG_TQM8260
 #include <platforms/tqm8260.h>
+#endif
+
+#if defined(CONFIG_PQ2ADS) || defined (CONFIG_PQ2FADS)
+#include <platforms/pq2ads.h>
+#endif
+
+#ifdef CONFIG_PCI_8260
+#include <syslib/m82xx_pci.h>
 #endif
 
 /* Make sure the memory translation stuff is there if PCI not used.

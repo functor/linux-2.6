@@ -11,6 +11,12 @@
  * partition split defined below.
  *
  * $Log: axisflashmap.c,v $
+ * Revision 1.10  2004/08/16 12:37:22  starvik
+ * Merge of Linux 2.6.8
+ *
+ * Revision 1.8  2004/05/14 07:58:03  starvik
+ * Merge of changes from 2.4
+ *
  * Revision 1.6  2003/07/04 08:27:37  starvik
  * Merge of Linux 2.5.74
  *
@@ -150,24 +156,27 @@
 #define FLASH_CACHED_ADDR    KSEG_F
 #endif
 
+#if CONFIG_ETRAX_FLASH_BUSWIDTH==1
+#define flash_data __u8
+#elif CONFIG_ETRAX_FLASH_BUSWIDTH==2
+#define flash_data __u16
+#elif CONFIG_ETRAX_FLASH_BUSWIDTH==4
+#define flash_data __u16
+#endif
+
 /* From head.S */
 extern unsigned long romfs_start, romfs_length, romfs_in_flash;
 
+/* The master mtd for the entire flash. */
+struct mtd_info* axisflash_mtd = NULL;
+
 /* Map driver functions. */
 
-static __u8 flash_read8(struct map_info *map, unsigned long ofs)
+static map_word flash_read(struct map_info *map, unsigned long ofs)
 {
-	return *(__u8 *)(map->map_priv_1 + ofs);
-}
-
-static __u16 flash_read16(struct map_info *map, unsigned long ofs)
-{
-	return *(__u16 *)(map->map_priv_1 + ofs);
-}
-
-static __u32 flash_read32(struct map_info *map, unsigned long ofs)
-{
-	return *(volatile unsigned int *)(map->map_priv_1 + ofs);
+	map_word tmp;
+	tmp.x[0] = *(flash_data *)(map->map_priv_1 + ofs);
+	return tmp;
 }
 
 static void flash_copy_from(struct map_info *map, void *to,
@@ -176,19 +185,9 @@ static void flash_copy_from(struct map_info *map, void *to,
 	memcpy(to, (void *)(map->map_priv_1 + from), len);
 }
 
-static void flash_write8(struct map_info *map, __u8 d, unsigned long adr)
+static void flash_write(struct map_info *map, map_word d, unsigned long adr)
 {
-	*(__u8 *)(map->map_priv_1 + adr) = d;
-}
-
-static void flash_write16(struct map_info *map, __u16 d, unsigned long adr)
-{
-	*(__u16 *)(map->map_priv_1 + adr) = d;
-}
-
-static void flash_write32(struct map_info *map, __u32 d, unsigned long adr)
-{
-	*(__u32 *)(map->map_priv_1 + adr) = d;
+	*(flash_data *)(map->map_priv_1 + adr) = (flash_data)d.x[0];
 }
 
 /*
@@ -209,14 +208,10 @@ static void flash_write32(struct map_info *map, __u32 d, unsigned long adr)
 static struct map_info map_cse0 = {
 	.name = "cse0",
 	.size = MEM_CSE0_SIZE,
-	.buswidth = CONFIG_ETRAX_FLASH_BUSWIDTH,
-	.read8 = flash_read8,
-	.read16 = flash_read16,
-	.read32 = flash_read32,
+	.bankwidth = CONFIG_ETRAX_FLASH_BUSWIDTH,
+	.read = flash_read,
 	.copy_from = flash_copy_from,
-	.write8 = flash_write8,
-	.write16 = flash_write16,
-	.write32 = flash_write32,
+	.write = flash_write,
 	.map_priv_1 = FLASH_UNCACHED_ADDR
 };
 
@@ -229,14 +224,10 @@ static struct map_info map_cse0 = {
 static struct map_info map_cse1 = {
 	.name = "cse1",
 	.size = MEM_CSE1_SIZE,
-	.buswidth = CONFIG_ETRAX_FLASH_BUSWIDTH,
-	.read8 = flash_read8,
-	.read16 = flash_read16,
-	.read32 = flash_read32,
+	.bankwidth = CONFIG_ETRAX_FLASH_BUSWIDTH,
+	.read = flash_read,
 	.copy_from = flash_copy_from,
-	.write8 = flash_write8,
-	.write16 = flash_write16,
-	.write32 = flash_write32,
+	.write = flash_write,
 	.map_priv_1 = FLASH_UNCACHED_ADDR + MEM_CSE0_SIZE
 };
 
@@ -314,7 +305,8 @@ static struct mtd_info *probe_cs(struct map_info *map_cs)
 {
 	struct mtd_info *mtd_cs = NULL;
 
-	printk("%s: Probing a 0x%08lx bytes large window at 0x%08lx.\n",
+	printk(KERN_INFO
+               "%s: Probing a 0x%08lx bytes large window at 0x%08lx.\n",
 	       map_cs->name, map_cs->size, map_cs->map_priv_1);
 
 #ifdef CONFIG_MTD_AMDSTD
@@ -398,7 +390,7 @@ static int __init init_axis_flash(void)
 	struct mtd_info *mymtd;
 	int err = 0;
 	int pidx = 0;
-	struct partitiontable_head *ptable_head;
+	struct partitiontable_head *ptable_head = NULL;
 	struct partitiontable_entry *ptable;
 	int use_default_ptable = 1; /* Until proven otherwise. */
 	const char *pmsg = "  /dev/flash%d at 0x%08x, size 0x%08x\n";
@@ -407,19 +399,22 @@ static int __init init_axis_flash(void)
 		/* There's no reason to use this module if no flash chip can
 		 * be identified. Make sure that's understood.
 		 */
-		panic("axisflashmap found no flash chip!\n");
+		printk(KERN_INFO "axisflashmap: Found no flash chip.\n");
+	} else {
+		printk(KERN_INFO "%s: 0x%08x bytes of flash memory.\n",
+		       mymtd->name, mymtd->size);
+		axisflash_mtd = mymtd;
 	}
 
-	printk("%s: 0x%08x bytes of flash memory.\n",
-	       mymtd->name, mymtd->size);
-
-	mymtd->owner = THIS_MODULE;
-
-	ptable_head = (struct partitiontable_head *)(FLASH_CACHED_ADDR +
-		      CONFIG_ETRAX_PTABLE_SECTOR + PARTITION_TABLE_OFFSET);
+	if (mymtd) {
+		mymtd->owner = THIS_MODULE;
+		ptable_head = (struct partitiontable_head *)(FLASH_CACHED_ADDR +
+			      CONFIG_ETRAX_PTABLE_SECTOR +
+			      PARTITION_TABLE_OFFSET);
+	}
 	pidx++;  /* First partition is always set to the default. */
 
-	if ((ptable_head->magic == PARTITION_TABLE_MAGIC)
+	if (ptable_head && (ptable_head->magic == PARTITION_TABLE_MAGIC)
 	    && (ptable_head->size <
 		(MAX_PARTITIONS * sizeof(struct partitiontable_entry) +
 		PARTITIONTABLE_END_MARKER_SIZE))
@@ -454,7 +449,7 @@ static int __init init_axis_flash(void)
 		ptable_ok = (csum == ptable_head->checksum);
 
 		/* Read the entries and use/show the info.  */
-		printk(" Found a%s partition table at 0x%p-0x%p.\n",
+		printk(KERN_INFO " Found a%s partition table at 0x%p-0x%p.\n",
 		       (ptable_ok ? " valid" : "n invalid"), ptable_head,
 		       max_addr);
 
@@ -486,22 +481,25 @@ static int __init init_axis_flash(void)
 		axis_partitions[pidx].offset = romfs_start - FLASH_CACHED_ADDR;
 		axis_partitions[pidx].mask_flags |= MTD_WRITEABLE;
 
-		printk(" Adding readonly flash partition for romfs image:\n");
+		printk(KERN_INFO
+                       " Adding readonly flash partition for romfs image:\n");
 		printk(pmsg, pidx, axis_partitions[pidx].offset,
 		       axis_partitions[pidx].size);
 		pidx++;
 	}
 
-	if (use_default_ptable) {
-		printk(" Using default partition table.\n");
-		err = add_mtd_partitions(mymtd, axis_default_partitions,
-		                         NUM_DEFAULT_PARTITIONS);
-	} else {
-		err = add_mtd_partitions(mymtd, axis_partitions, pidx);
-	}
+        if (mymtd) {
+		if (use_default_ptable) {
+			printk(KERN_INFO " Using default partition table.\n");
+			err = add_mtd_partitions(mymtd, axis_default_partitions,
+						 NUM_DEFAULT_PARTITIONS);
+		} else {
+			err = add_mtd_partitions(mymtd, axis_partitions, pidx);
+		}
 
-	if (err) {
-		panic("axisflashmap could not add MTD partitions!\n");
+		if (err) {
+			panic("axisflashmap could not add MTD partitions!\n");
+		}
 	}
 
 	if (!romfs_in_flash) {
@@ -522,7 +520,7 @@ static int __init init_axis_flash(void)
 			      "mtd_info!\n");
 		}
 
-		printk(" Adding RAM partition for romfs image:\n");
+		printk(KERN_INFO " Adding RAM partition for romfs image:\n");
 		printk(pmsg, pidx, romfs_start, romfs_length);
 
 		err = mtdram_init_device(mtd_ram, (void*)romfs_start, 
@@ -539,3 +537,5 @@ static int __init init_axis_flash(void)
 
 /* This adds the above to the kernels init-call chain. */
 module_init(init_axis_flash);
+
+EXPORT_SYMBOL(axisflash_mtd);

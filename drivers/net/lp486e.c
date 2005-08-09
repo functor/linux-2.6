@@ -70,10 +70,12 @@ All other communication is through memory!
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
+#include <linux/bitops.h>
 
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
+
+#define DRV_NAME "lp486e"
 
 /* debug print flags */
 #define LOG_SRCDST    0x80000000
@@ -110,8 +112,10 @@ enum commands {
 	CmdDiagnose = 7
 };
 
-char *CUcmdnames[8] = { "NOP", "IASetup", "Configure", "MulticastList",
-			"Tx", "TDR", "Dump", "Diagnose" };
+#if 0
+static const char *CUcmdnames[8] = { "NOP", "IASetup", "Configure", "MulticastList",
+				     "Tx", "TDR", "Dump", "Diagnose" };
+#endif
 
 /* Status word bits */
 #define	STAT_CX		0x8000	/* The CU finished executing a command
@@ -477,7 +481,7 @@ remove_rx_bufs(struct net_device *dev) {
 		kfree(rfd);
 	} while (rfd != lp->rx_tail);
 
-	lp->rx_tail = 0;
+	lp->rx_tail = NULL;
 
 #if 0
 	for (lp->rbd_list) {
@@ -958,7 +962,7 @@ static void print_eth(char *add)
 		(unsigned char) add[12], (unsigned char) add[13]);
 }
 
-int __init lp486e_probe(struct net_device *dev) {
+static int __init lp486e_probe(struct net_device *dev) {
 	struct i596_private *lp;
 	unsigned char eth_addr[6] = { 0, 0xaa, 0, 0, 0, 0 };
 	unsigned char *bios;
@@ -970,7 +974,7 @@ int __init lp486e_probe(struct net_device *dev) {
 		return -ENODEV;
 	probed++;
 
-	if (!request_region(IOADDR, LP486E_TOTAL_SIZE, dev->name)) {
+	if (!request_region(IOADDR, LP486E_TOTAL_SIZE, DRV_NAME)) {
 		printk(KERN_ERR "lp486e: IO address 0x%x in use\n", IOADDR);
 		return -EBUSY;
 	}
@@ -1300,18 +1304,18 @@ MODULE_AUTHOR("Ard van Breemen <ard@cstmel.nl.eu.org>");
 MODULE_DESCRIPTION("Intel Panther onboard i82596 driver");
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(debug, "i");
-//MODULE_PARM(max_interrupt_work, "i");
-//MODULE_PARM(reverse_probe, "i");
-//MODULE_PARM(rx_copybreak, "i");
-MODULE_PARM(options, "1-" __MODULE_STRING(MAX_UNITS) "i");
-MODULE_PARM(full_duplex, "1-" __MODULE_STRING(MAX_UNITS) "i");
-
 static struct net_device *dev_lp486e;
 static int full_duplex;
 static int options;
 static int io = IOADDR;
 static int irq = IRQ;
+
+module_param(debug, int, 0);
+//module_param(max_interrupt_work, int, 0);
+//module_param(reverse_probe, int, 0);
+//module_param(rx_copybreak, int, 0);
+module_param(options, int, 0);
+module_param(full_duplex, int, 0);
 
 static int __init lp486e_init_module(void) {
 	int err;

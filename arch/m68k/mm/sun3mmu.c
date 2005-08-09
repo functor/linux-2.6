@@ -1,4 +1,4 @@
-/* 
+/*
  * linux/arch/m68k/mm/sun3mmu.c
  *
  * Implementations of mm routines specific to the sun3 MMU.
@@ -7,7 +7,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -64,12 +63,12 @@ void __init paging_init(void)
 
 	size = num_pages * sizeof(pte_t);
 	size = (size + PAGE_SIZE) & ~(PAGE_SIZE-1);
-	
+
 	next_pgtable = (unsigned long)alloc_bootmem_pages(size);
 	bootmem_end = (next_pgtable + size + PAGE_SIZE) & PAGE_MASK;
 
 	/* Map whole memory from PAGE_OFFSET (0x0E000000) */
-	pg_dir += PAGE_OFFSET >> PGDIR_SHIFT; 
+	pg_dir += PAGE_OFFSET >> PGDIR_SHIFT;
 
 	while (address < (unsigned long)high_memory) {
 		pg_table = (pte_t *) __pa (next_pgtable);
@@ -95,7 +94,7 @@ void __init paging_init(void)
 	/* memory sizing is a hack stolen from motorola.c..  hope it works for us */
 	zones_size[0] = ((unsigned long)high_memory - PAGE_OFFSET) >> PAGE_SHIFT;
 	zones_size[1] = 0;
-	
+
 	free_area_init(zones_size);
 
 }

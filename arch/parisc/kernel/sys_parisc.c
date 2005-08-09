@@ -32,7 +32,7 @@
 #include <linux/smp_lock.h>
 #include <linux/syscalls.h>
 
-int sys_pipe(int *fildes)
+int sys_pipe(int __user *fildes)
 {
 	int fd[2];
 	int error;
@@ -68,17 +68,8 @@ static unsigned long get_unshared_area(unsigned long addr, unsigned long len)
  * existing mapping and use the same offset.  New scheme is to use the
  * address of the kernel data structure as the seed for the offset.
  * We'll see how that works...
- */
-#if 0
-static int get_offset(struct address_space *mapping)
-{
-	struct vm_area_struct *vma = list_entry(mapping->i_mmap_shared.next,
-			struct vm_area_struct, shared);
-	return (vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT)) &
-		(SHMLBA - 1);
-}
-#else
-/* The mapping is cacheline aligned, so there's no information in the bottom
+ *
+ * The mapping is cacheline aligned, so there's no information in the bottom
  * few bits of the address.  We're looking for 10 bits (4MB / 4k), so let's
  * drop the bottom 8 bits and use bits 8-17.  
  */
@@ -87,13 +78,12 @@ static int get_offset(struct address_space *mapping)
 	int offset = (unsigned long) mapping << (PAGE_SHIFT - 8);
 	return offset & 0x3FF000;
 }
-#endif
 
 static unsigned long get_shared_area(struct address_space *mapping,
 		unsigned long addr, unsigned long len, unsigned long pgoff)
 {
 	struct vm_area_struct *vma;
-	int offset = get_offset(mapping);
+	int offset = mapping ? get_offset(mapping) : 0;
 
 	addr = DCACHE_ALIGN(addr - offset) + offset;
 
@@ -117,8 +107,10 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	if (!addr)
 		addr = TASK_UNMAPPED_BASE;
 
-	if (filp && (flags & MAP_SHARED)) {
+	if (filp) {
 		addr = get_shared_area(filp->f_mapping, addr, len, pgoff);
+	} else if(flags & MAP_SHARED) {
+		addr = get_shared_area(NULL, addr, len, pgoff);
 	} else {
 		addr = get_unshared_area(addr, len);
 	}
@@ -169,21 +161,10 @@ asmlinkage unsigned long sys_mmap(unsigned long addr, unsigned long len,
 	}
 }
 
-long sys_shmat_wrapper(int shmid, char *shmaddr, int shmflag)
-{
-	unsigned long raddr;
-	int r;
-
-	r = do_shmat(shmid, shmaddr, shmflag, &raddr);
-	if (r < 0)
-		return r;
-	return raddr;
-}
-
 /* Fucking broken ABI */
 
-#ifdef CONFIG_PARISC64
-asmlinkage long parisc_truncate64(const char * path,
+#ifdef CONFIG_64BIT
+asmlinkage long parisc_truncate64(const char __user * path,
 					unsigned int high, unsigned int low)
 {
 	return sys_truncate(path, (long)high << 32 | low);
@@ -197,7 +178,7 @@ asmlinkage long parisc_ftruncate64(unsigned int fd,
 
 /* stubs for the benefit of the syscall_table since truncate64 and truncate 
  * are identical on LP64 */
-asmlinkage long sys_truncate64(const char * path, unsigned long length)
+asmlinkage long sys_truncate64(const char __user * path, unsigned long length)
 {
 	return sys_truncate(path, length);
 }
@@ -211,7 +192,7 @@ asmlinkage long sys_fcntl64(unsigned int fd, unsigned int cmd, unsigned long arg
 }
 #else
 
-asmlinkage long parisc_truncate64(const char * path,
+asmlinkage long parisc_truncate64(const char __user * path,
 					unsigned int high, unsigned int low)
 {
 	return sys_truncate64(path, (loff_t)high << 32 | low);
@@ -224,13 +205,13 @@ asmlinkage long parisc_ftruncate64(unsigned int fd,
 }
 #endif
 
-asmlinkage ssize_t parisc_pread64(unsigned int fd, char *buf, size_t count,
+asmlinkage ssize_t parisc_pread64(unsigned int fd, char __user *buf, size_t count,
 					unsigned int high, unsigned int low)
 {
 	return sys_pread64(fd, buf, count, (loff_t)high << 32 | low);
 }
 
-asmlinkage ssize_t parisc_pwrite64(unsigned int fd, const char *buf,
+asmlinkage ssize_t parisc_pwrite64(unsigned int fd, const char __user *buf,
 			size_t count, unsigned int high, unsigned int low)
 {
 	return sys_pwrite64(fd, buf, count, (loff_t)high << 32 | low);
@@ -240,6 +221,14 @@ asmlinkage ssize_t parisc_readahead(int fd, unsigned int high, unsigned int low,
 		                    size_t count)
 {
 	return sys_readahead(fd, (loff_t)high << 32 | low, count);
+}
+
+asmlinkage long parisc_fadvise64_64(int fd,
+			unsigned int high_off, unsigned int low_off,
+			unsigned int high_len, unsigned int low_len, int advice)
+{
+	return sys_fadvise64_64(fd, (loff_t)high_off << 32 | low_off,
+			(loff_t)high_len << 32 | low_len, advice);
 }
 
 asmlinkage unsigned long sys_alloc_hugepages(int key, unsigned long addr, unsigned long len, int prot, int flag)

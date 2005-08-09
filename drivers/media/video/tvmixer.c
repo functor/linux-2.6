@@ -1,4 +1,5 @@
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/string.h>
@@ -20,7 +21,7 @@
 #define DEV_MAX  4
 
 static int devnr = -1;
-MODULE_PARM(devnr,"i");
+module_param(devnr, int, 0644);
 
 MODULE_AUTHOR("Gerd Knorr");
 MODULE_LICENSE("GPL");
@@ -77,16 +78,18 @@ static int tvmixer_ioctl(struct inode *inode, struct file *file, unsigned int cm
 	int left,right,ret,val = 0;
         struct TVMIXER *mix = file->private_data;
 	struct i2c_client *client = mix->dev;
+	void __user *argp = (void __user *)arg;
+	int __user *p = argp;
 
 	if (NULL == client)
 		return -ENODEV;
-	
+
         if (cmd == SOUND_MIXER_INFO) {
                 mixer_info info;
                 strlcpy(info.id, "tv card", sizeof(info.id));
                 strlcpy(info.name, i2c_clientname(client), sizeof(info.name));
                 info.modify_counter = 42 /* FIXME */;
-                if (copy_to_user((void *)arg, &info, sizeof(info)))
+                if (copy_to_user(argp, &info, sizeof(info)))
                         return -EFAULT;
                 return 0;
         }
@@ -94,15 +97,15 @@ static int tvmixer_ioctl(struct inode *inode, struct file *file, unsigned int cm
                 _old_mixer_info info;
                 strlcpy(info.id, "tv card", sizeof(info.id));
                 strlcpy(info.name, i2c_clientname(client), sizeof(info.name));
-                if (copy_to_user((void *)arg, &info, sizeof(info)))
+                if (copy_to_user(argp, &info, sizeof(info)))
                         return -EFAULT;
                 return 0;
         }
         if (cmd == OSS_GETVERSION)
-                return put_user(SOUND_VERSION, (int *)arg);
+                return put_user(SOUND_VERSION, p);
 
 	if (_SIOC_DIR(cmd) & _SIOC_WRITE)
-		if (get_user(val, (int *)arg))
+		if (get_user(val, p))
 			return -EFAULT;
 
 	/* read state */
@@ -146,7 +149,7 @@ static int tvmixer_ioctl(struct inode *inode, struct file *file, unsigned int cm
 			 va.volume) / 32768;
 		ret = v4l_to_mix2(left,right);
 		break;
-		
+
 	case MIXER_WRITE(SOUND_MIXER_BASS):
 		va.bass = mix_to_v4l(val);
 		client->driver->command(client,VIDIOCSAUDIO,&va);
@@ -168,7 +171,7 @@ static int tvmixer_ioctl(struct inode *inode, struct file *file, unsigned int cm
 	default:
 		return -EINVAL;
 	}
-	if (put_user(ret, (int *)arg))
+	if (put_user(ret, p))
 		return -EFAULT;
 	return 0;
 }
@@ -263,8 +266,8 @@ static int tvmixer_clients(struct i2c_client *client)
 	struct video_audio va;
 	int i,minor;
 
-#ifdef I2C_ADAP_CLASS_TV_ANALOG
-	if (!(client->adapter->class & I2C_ADAP_CLASS_TV_ANALOG))
+#ifdef I2C_CLASS_TV_ANALOG
+	if (!(client->adapter->class & I2C_CLASS_TV_ANALOG))
 		return -1;
 #else
 	/* TV card ??? */
@@ -322,26 +325,26 @@ static int tvmixer_clients(struct i2c_client *client)
 	devices[i].dev   = client;
 	printk("tvmixer: %s (%s) registered with minor %d\n",
 	       client->name,client->adapter->name,minor);
-	
+
 	return 0;
 }
 
 /* ----------------------------------------------------------------------- */
 
-static int tvmixer_init_module(void)
+static int __init tvmixer_init_module(void)
 {
 	int i;
-	
+
 	for (i = 0; i < DEV_MAX; i++)
 		devices[i].minor = -1;
-	i2c_add_driver(&driver);
-	return 0;
+
+	return i2c_add_driver(&driver);
 }
 
-static void tvmixer_cleanup_module(void)
+static void __exit tvmixer_cleanup_module(void)
 {
 	int i;
-	
+
 	i2c_del_driver(&driver);
 	for (i = 0; i < DEV_MAX; i++) {
 		if (devices[i].minor != -1) {

@@ -3,11 +3,11 @@
  *
  * Copyright (C) 2001-2003 Red Hat, Inc.
  *
- * Created by David Woodhouse <dwmw2@redhat.com>
+ * Created by David Woodhouse <dwmw2@infradead.org>
  *
  * For licensing information, see the file 'LICENCE' in this directory.
  *
- * $Id: super.c,v 1.90 2003/10/11 11:47:23 dwmw2 Exp $
+ * $Id: super.c,v 1.104 2004/11/23 15:37:31 gleixner Exp $
  *
  */
 
@@ -24,6 +24,7 @@
 #include <linux/mtd/mtd.h>
 #include <linux/ctype.h>
 #include <linux/namei.h>
+#include "compr.h"
 #include "nodelist.h"
 
 static void jffs2_put_super(struct super_block *);
@@ -55,6 +56,16 @@ static void jffs2_i_init_once(void * foo, kmem_cache_t * cachep, unsigned long f
 	}
 }
 
+static int jffs2_sync_fs(struct super_block *sb, int wait)
+{
+	struct jffs2_sb_info *c = JFFS2_SB_INFO(sb);
+
+	down(&c->alloc_sem);
+	jffs2_flush_wbuf_pad(c);
+	up(&c->alloc_sem);	
+	return 0;
+}
+
 static struct super_operations jffs2_super_operations =
 {
 	.alloc_inode =	jffs2_alloc_inode,
@@ -66,6 +77,7 @@ static struct super_operations jffs2_super_operations =
 	.remount_fs =	jffs2_remount_fs,
 	.clear_inode =	jffs2_clear_inode,
 	.dirty_inode =	jffs2_dirty_inode,
+	.sync_fs =	jffs2_sync_fs,
 };
 
 static int jffs2_sb_compare(struct super_block *sb, void *data)
@@ -129,7 +141,7 @@ static struct super_block *jffs2_get_sb_mtd(struct file_system_type *fs_type,
 		  mtd->index, mtd->name));
 
 	sb->s_op = &jffs2_super_operations;
-	sb->s_flags |= MS_NOATIME;
+	sb->s_flags = flags | MS_NOATIME;
 
 	ret = jffs2_do_fill_super(sb, data, (flags&MS_VERBOSE)?1:0);
 
@@ -265,8 +277,11 @@ static void jffs2_put_super (struct super_block *sb)
 	up(&c->alloc_sem);
 	jffs2_free_ino_caches(c);
 	jffs2_free_raw_node_refs(c);
-	kfree(c->blocks);
-	jffs2_nand_flash_cleanup(c);
+	if (c->mtd->flags & MTD_NO_VIRTBLOCKS)
+		vfree(c->blocks);
+	else
+		kfree(c->blocks);
+	jffs2_flash_cleanup(c);
 	kfree(c->inocache_list);
 	if (c->mtd->sync)
 		c->mtd->sync(c->mtd);
@@ -294,28 +309,28 @@ static int __init init_jffs2_fs(void)
 	int ret;
 
 	printk(KERN_INFO "JFFS2 version 2.2."
-#ifdef CONFIG_FS_JFFS2_NAND
+#ifdef CONFIG_JFFS2_FS_NAND
 	       " (NAND)"
 #endif
 	       " (C) 2001-2003 Red Hat, Inc.\n");
 
 	jffs2_inode_cachep = kmem_cache_create("jffs2_i",
 					     sizeof(struct jffs2_inode_info),
-					     0, SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT,
+					     0, SLAB_RECLAIM_ACCOUNT,
 					     jffs2_i_init_once, NULL);
 	if (!jffs2_inode_cachep) {
 		printk(KERN_ERR "JFFS2 error: Failed to initialise inode cache\n");
 		return -ENOMEM;
 	}
-	ret = jffs2_zlib_init();
+	ret = jffs2_compressors_init();
 	if (ret) {
-		printk(KERN_ERR "JFFS2 error: Failed to initialise zlib workspaces\n");
+		printk(KERN_ERR "JFFS2 error: Failed to initialise compressors\n");
 		goto out;
 	}
 	ret = jffs2_create_slab_caches();
 	if (ret) {
 		printk(KERN_ERR "JFFS2 error: Failed to initialise slab caches\n");
-		goto out_zlib;
+		goto out_compressors;
 	}
 	ret = register_filesystem(&jffs2_fs_type);
 	if (ret) {
@@ -326,9 +341,10 @@ static int __init init_jffs2_fs(void)
 
  out_slab:
 	jffs2_destroy_slab_caches();
- out_zlib:
-	jffs2_zlib_exit();
+ out_compressors:
+	jffs2_compressors_exit();
  out:
+	kmem_cache_destroy(jffs2_inode_cachep);
 	return ret;
 }
 
@@ -336,7 +352,7 @@ static void __exit exit_jffs2_fs(void)
 {
 	unregister_filesystem(&jffs2_fs_type);
 	jffs2_destroy_slab_caches();
-	jffs2_zlib_exit();
+	jffs2_compressors_exit();
 	kmem_cache_destroy(jffs2_inode_cachep);
 }
 

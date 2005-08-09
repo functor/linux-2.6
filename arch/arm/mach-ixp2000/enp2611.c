@@ -6,7 +6,7 @@
  * Created 2004 by Lennert Buytenhek from the ixdp2x01 code.  The
  * original version carries the following notices:
  *
- * Original Author: Andrzej Mialwoski <andrzej.mialwoski@intel.com>
+ * Original Author: Andrzej Mialkowski <andrzej.mialkowski@intel.com>
  * Maintainer: Deepak Saxena <dsaxena@plexity.net>
  *
  * Copyright (C) 2002-2003 Intel Corp.
@@ -26,9 +26,6 @@
 #include <linux/interrupt.h>
 #include <linux/bitops.h>
 #include <linux/pci.h>
-#include <linux/interrupt.h>
-#include <linux/mm.h>
-#include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
@@ -55,10 +52,15 @@
 /*************************************************************************
  * ENP-2611 timer tick configuration
  *************************************************************************/
-static void __init enp2611_init_time(void)
+static void __init enp2611_timer_init(void)
 {
 	ixp2000_init_time(50 * 1000 * 1000);
 }
+
+static struct sys_timer enp2611_timer = {
+	.init		= enp2611_timer_init,
+	.offset		= ixp2000_gettimeoffset,
+};
 
 
 /*************************************************************************
@@ -122,19 +124,27 @@ static int __init enp2611_pci_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
 {
 	int irq;
 
-	if (dev->bus->number == 0x00 && PCI_SLOT(dev->devfn) == 0x01) {
+	if (dev->bus->number == 0 && PCI_SLOT(dev->devfn) == 0) {
+		/* IXP2400. */
+		irq = IRQ_IXP2000_PCIA;
+	} else if (dev->bus->number == 0 && PCI_SLOT(dev->devfn) == 1) {
 		/* 21555 non-transparent bridge.  */
 		irq = IRQ_IXP2000_PCIB;
-	} else if (dev->bus->number == 0x01 && PCI_SLOT(dev->devfn) == 0x00) {
+	} else if (dev->bus->number == 0 && PCI_SLOT(dev->devfn) == 4) {
+		/* PCI2050B transparent bridge.  */
+		irq = -1;
+	} else if (dev->bus->number == 1 && PCI_SLOT(dev->devfn) == 0) {
 		/* 82559 ethernet.  */
 		irq = IRQ_IXP2000_PCIA;
+	} else if (dev->bus->number == 1 && PCI_SLOT(dev->devfn) == 1) {
+		/* SPI-3 option board.  */
+		irq = IRQ_IXP2000_PCIB;
 	} else {
-		printk(KERN_INFO "enp2611_pci_map_irq for unknown device\n");
-		irq = IRQ_IXP2000_PCI;
+		printk(KERN_ERR "enp2611_pci_map_irq() called for unknown "
+				"device PCI:%d:%d:%d\n", dev->bus->number,
+				PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn));
+		irq = -1;
 	}
-
-	printk(KERN_INFO "Assigned IRQ %d to PCI:%d:%d:%d\n", irq,
-		dev->bus->number, PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn));
 
 	return irq;
 }
@@ -149,7 +159,9 @@ struct hw_pci enp2611_pci __initdata = {
 
 int __init enp2611_pci_init(void)
 {
-	pci_common_init(&enp2611_pci);
+	if (machine_is_enp2611())
+		pci_common_init(&enp2611_pci);
+
 	return 0;
 }
 
@@ -195,16 +207,14 @@ static void __init enp2611_init_machine(void)
 }
 
 
-#ifdef CONFIG_ARCH_ENP2611
 MACHINE_START(ENP2611, "Radisys ENP-2611 PCI network processor board")
 	MAINTAINER("Lennert Buytenhek <buytenh@wantstofly.org>")
 	BOOT_MEM(0x00000000, IXP2000_UART_PHYS_BASE, IXP2000_UART_VIRT_BASE)
 	BOOT_PARAMS(0x00000100)
 	MAPIO(ixp2000_map_io)
 	INITIRQ(ixp2000_init_irq)
-	INITTIME(enp2611_init_time)
+	.timer		= &enp2611_timer,
 	INIT_MACHINE(enp2611_init_machine)
 MACHINE_END
-#endif
 
 

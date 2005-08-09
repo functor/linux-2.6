@@ -7,89 +7,25 @@
 #include <linux/sched.h>
 #include <linux/mm.h>
 
-#include <asm/page.h>
 #include <asm/spitfire.h>
-#include <asm/pgtable.h>
 #include <asm/cpudata.h>
+#include <asm/cacheflush.h>
 
 /* Page table allocation/freeing. */
 #ifdef CONFIG_SMP
 /* Sliiiicck */
-#define pgt_quicklists	cpu_data(smp_processor_id())
+#define pgt_quicklists	local_cpu_data()
 #else
 extern struct pgtable_cache_struct {
 	unsigned long *pgd_cache;
 	unsigned long *pte_cache[2];
 	unsigned int pgcache_size;
-	unsigned int pgdcache_size;
 } pgt_quicklists;
 #endif
 #define pgd_quicklist		(pgt_quicklists.pgd_cache)
 #define pmd_quicklist		((unsigned long *)0)
 #define pte_quicklist		(pgt_quicklists.pte_cache)
 #define pgtable_cache_size	(pgt_quicklists.pgcache_size)
-#define pgd_cache_size		(pgt_quicklists.pgdcache_size)
-
-#ifndef CONFIG_SMP
-
-static __inline__ void free_pgd_fast(pgd_t *pgd)
-{
-	struct page *page = virt_to_page(pgd);
-
-	preempt_disable();
-	if (!page->lru.prev) {
-		page->lru.next = (void *) pgd_quicklist;
-		pgd_quicklist = (unsigned long *)page;
-	}
-	page->lru.prev = (void *)
-	  (((unsigned long)page->lru.prev) |
-	   (((unsigned long)pgd & (PAGE_SIZE / 2)) ? 2 : 1));
-	pgd_cache_size++;
-	preempt_enable();
-}
-
-static __inline__ pgd_t *get_pgd_fast(void)
-{
-        struct page *ret;
-
-	preempt_disable();
-        if ((ret = (struct page *)pgd_quicklist) != NULL) {
-                unsigned long mask = (unsigned long)ret->lru.prev;
-		unsigned long off = 0;
-
-		if (mask & 1)
-			mask &= ~1;
-		else {
-			off = PAGE_SIZE / 2;
-			mask &= ~2;
-		}
-		ret->lru.prev = (void *) mask;
-		if (!mask)
-			pgd_quicklist = (unsigned long *)ret->lru.next;
-                ret = (struct page *)(__page_address(ret) + off);
-                pgd_cache_size--;
-		preempt_enable();
-        } else {
-		struct page *page;
-
-		preempt_enable();
-		page = alloc_page(GFP_KERNEL|__GFP_REPEAT);
-		if (page) {
-			ret = (struct page *)page_address(page);
-			clear_page(ret);
-			page->lru.prev = (void *) 2UL;
-
-			preempt_disable();
-			page->lru.next = (void *) pgd_quicklist;
-			pgd_quicklist = (unsigned long *)page;
-			pgd_cache_size++;
-			preempt_enable();
-		}
-        }
-        return (pgd_t *)ret;
-}
-
-#else /* CONFIG_SMP */
 
 static __inline__ void free_pgd_fast(pgd_t *pgd)
 {
@@ -124,9 +60,7 @@ static __inline__ void free_pgd_slow(pgd_t *pgd)
 	free_page((unsigned long)pgd);
 }
 
-#endif /* CONFIG_SMP */
-
-#if (L1DCACHE_SIZE > PAGE_SIZE)			/* is there D$ aliasing problem */
+#ifdef DCACHE_ALIASING_POSSIBLE
 #define VPTE_COLOR(address)		(((address) >> (PAGE_SHIFT + 10)) & 1UL)
 #define DCACHE_COLOR(address)		(((address) >> PAGE_SHIFT) & 1UL)
 #else
@@ -134,7 +68,7 @@ static __inline__ void free_pgd_slow(pgd_t *pgd)
 #define DCACHE_COLOR(address)		0
 #endif
 
-#define pgd_populate(MM, PGD, PMD)	pgd_set(PGD, PMD)
+#define pud_populate(MM, PUD, PMD)	pud_set(PUD, PMD)
 
 static __inline__ pmd_t *pmd_alloc_one_fast(struct mm_struct *mm, unsigned long address)
 {
@@ -194,9 +128,11 @@ static inline struct page *
 pte_alloc_one(struct mm_struct *mm, unsigned long addr)
 {
 	pte_t *pte = pte_alloc_one_kernel(mm, addr);
+
 	if (pte)
 		return virt_to_page(pte);
-	return 0;
+
+	return NULL;
 }
 
 static __inline__ pte_t *pte_alloc_one_fast(struct mm_struct *mm, unsigned long address)
@@ -230,8 +166,16 @@ static __inline__ void free_pte_slow(pte_t *pte)
 	free_page((unsigned long)pte);
 }
 
-#define pte_free_kernel(pte)	free_pte_fast(pte)
-#define pte_free(pte)		free_pte_fast(page_address(pte))
+static inline void pte_free_kernel(pte_t *pte)
+{
+	free_pte_fast(pte);
+}
+
+static inline void pte_free(struct page *ptepage)
+{
+	free_pte_fast(page_address(ptepage));
+}
+
 #define pmd_free(pmd)		free_pmd_fast(pmd)
 #define pgd_free(pgd)		free_pgd_fast(pgd)
 #define pgd_alloc(mm)		get_pgd_fast()

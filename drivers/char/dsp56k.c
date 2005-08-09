@@ -58,12 +58,6 @@
 #define DSP56K_TRANSMIT		(dsp56k_host_interface.isr & DSP56K_ISR_TXDE)
 #define DSP56K_RECEIVE		(dsp56k_host_interface.isr & DSP56K_ISR_RXDF)
 
-#define wait_some(n) \
-{ \
-	set_current_state(TASK_INTERRUPTIBLE); \
-	schedule_timeout(n); \
-}
-
 #define handshake(count, maxio, timeout, ENABLE, f) \
 { \
 	long i, t, m; \
@@ -71,13 +65,13 @@
 		m = min_t(unsigned long, count, maxio); \
 		for (i = 0; i < m; i++) { \
 			for (t = 0; t < timeout && !ENABLE; t++) \
-				wait_some(HZ/50); \
+				msleep(20); \
 			if(!ENABLE) \
 				return -EIO; \
 			f; \
 		} \
 		count -= m; \
-		if (m == maxio) wait_some(HZ/50); \
+		if (m == maxio) msleep(20); \
 	} \
 }
 
@@ -85,7 +79,7 @@
 { \
 	int t; \
 	for(t = 0; t < n && !DSP56K_TRANSMIT; t++) \
-		wait_some(HZ/100); \
+		msleep(10); \
 	if(!DSP56K_TRANSMIT) { \
 		return -EIO; \
 	} \
@@ -95,7 +89,7 @@
 { \
 	int t; \
 	for(t = 0; t < n && !DSP56K_RECEIVE; t++) \
-		wait_some(HZ/100); \
+		msleep(10); \
 	if(!DSP56K_RECEIVE) { \
 		return -EIO; \
 	} \
@@ -293,10 +287,10 @@ static ssize_t dsp56k_write(struct file *file, const char *buf, size_t count,
 		}
 		case 2:  /* 16 bit */
 		{
-			short *data;
+			const short *data;
 
 			count /= 2;
-			data = (short*) buf;
+			data = (const short *)buf;
 			handshake(count, dsp56k.maxio, dsp56k.timeout, DSP56K_TRANSMIT,
 				  get_user(dsp56k_host_interface.data.w[1], data+n++));
 			return 2*n;
@@ -312,10 +306,10 @@ static ssize_t dsp56k_write(struct file *file, const char *buf, size_t count,
 		}
 		case 4:  /* 32 bit */
 		{
-			long *data;
+			const long *data;
 
 			count /= 4;
-			data = (long*) buf;
+			data = (const long *)buf;
 			handshake(count, dsp56k.maxio, dsp56k.timeout, DSP56K_TRANSMIT,
 				  get_user(dsp56k_host_interface.data.l, data+n++));
 			return 4*n;

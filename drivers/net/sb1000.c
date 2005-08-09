@@ -49,16 +49,17 @@ static char version[] = "sb1000.c:v1.1.2 6/01/98 (fventuri@mediaone.net)\n";
 #include <linux/delay.h>	/* for udelay() */
 #include <linux/etherdevice.h>
 #include <linux/pnp.h>
+#include <linux/init.h>
+#include <linux/bitops.h>
 
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/processor.h>
 #include <asm/uaccess.h>
 
 #ifdef SB1000_DEBUG
-int sb1000_debug = SB1000_DEBUG;
+static int sb1000_debug = SB1000_DEBUG;
 #else
-int sb1000_debug = 1;
+static int sb1000_debug = 1;
 #endif
 
 static const int SB1000_IO_EXTENT = 8;
@@ -115,15 +116,15 @@ static inline int sb1000_start_get_set_command(const int ioaddr[],
 static inline int sb1000_end_get_set_command(const int ioaddr[],
 	const char* name);
 static inline int sb1000_activate(const int ioaddr[], const char* name);
-static inline int sb1000_get_firmware_version(const int ioaddr[],
+static int sb1000_get_firmware_version(const int ioaddr[],
 	const char* name, unsigned char version[], int do_end);
-static inline int sb1000_get_frequency(const int ioaddr[], const char* name,
+static int sb1000_get_frequency(const int ioaddr[], const char* name,
 	int* frequency);
-static inline int sb1000_set_frequency(const int ioaddr[], const char* name,
+static int sb1000_set_frequency(const int ioaddr[], const char* name,
 	int frequency);
-static inline int sb1000_get_PIDs(const int ioaddr[], const char* name,
+static int sb1000_get_PIDs(const int ioaddr[], const char* name,
 	short PID[]);
-static inline int sb1000_set_PIDs(const int ioaddr[], const char* name,
+static int sb1000_set_PIDs(const int ioaddr[], const char* name,
 	const short PID[]);
 
 /* SB1000 commands for frame rx interrupt */
@@ -251,7 +252,7 @@ static struct pnp_driver sb1000_driver = {
  * SB1000 hardware routines to be used during open/configuration phases
  */
 
-const int TimeOutJiffies = (875 * HZ) / 100;
+static const int TimeOutJiffies = (875 * HZ) / 100;
 
 static inline void nicedelay(unsigned long usecs)
 {
@@ -362,7 +363,7 @@ card_send_command(const int ioaddr[], const char* name,
 /*
  * SB1000 hardware routines to be used during frame rx interrupt
  */
-const int Sb1000TimeOutJiffies = 7 * HZ;
+static const int Sb1000TimeOutJiffies = 7 * HZ;
 
 /* Card Wait For Ready (to be used during frame rx) */
 static inline int
@@ -551,7 +552,7 @@ sb1000_activate(const int ioaddr[], const char* name)
 }
 
 /* get SB1000 firmware version */
-static inline int
+static int
 sb1000_get_firmware_version(const int ioaddr[], const char* name,
 	unsigned char version[], int do_end)
 {
@@ -574,7 +575,7 @@ sb1000_get_firmware_version(const int ioaddr[], const char* name,
 }
 
 /* get SB1000 frequency */
-static inline int
+static int
 sb1000_get_frequency(const int ioaddr[], const char* name, int* frequency)
 {
 	unsigned char st[7];
@@ -591,7 +592,7 @@ sb1000_get_frequency(const int ioaddr[], const char* name, int* frequency)
 }
 
 /* set SB1000 frequency */
-static inline int
+static int
 sb1000_set_frequency(const int ioaddr[], const char* name, int frequency)
 {
 	unsigned char st[7];
@@ -621,7 +622,7 @@ sb1000_set_frequency(const int ioaddr[], const char* name, int frequency)
 }
 
 /* get SB1000 PIDs */
-static inline int
+static int
 sb1000_get_PIDs(const int ioaddr[], const char* name, short PID[])
 {
 	unsigned char st[7];
@@ -655,7 +656,7 @@ sb1000_get_PIDs(const int ioaddr[], const char* name, short PID[])
 }
 
 /* set SB1000 PIDs */
-static inline int
+static int
 sb1000_set_PIDs(const int ioaddr[], const char* name, const short PID[])
 {
 	unsigned char st[7];
@@ -798,7 +799,7 @@ skipped_frame:
 			skb ? session_id : session_id | 0x40, frame_id);
 	if (skb) {
 		dev_kfree_skb(skb);
-		skb = 0;
+		skb = NULL;
 	}
 
 good_frame:
@@ -874,7 +875,7 @@ printk("cm0: IP identification: %02x%02x  fragment offset: %02x%02x\n", buffer[3
 	dev->last_rx = jiffies;
 	stats->rx_bytes+=dlen;
 	stats->rx_packets++;
-	lp->rx_skb[ns] = 0;
+	lp->rx_skb[ns] = NULL;
 	lp->rx_session_id[ns] |= 0x40;
 	return 0;
 
@@ -892,7 +893,7 @@ dropped_frame:
 	if (ns < NPIDS) {
 		if ((skb = lp->rx_skb[ns])) {
 			dev_kfree_skb(skb);
-			lp->rx_skb[ns] = 0;
+			lp->rx_skb[ns] = NULL;
 		}
 		lp->rx_session_id[ns] |= 0x40;
 	}
@@ -1030,14 +1031,14 @@ static int sb1000_dev_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	case SIOCGCMFREQUENCY:		/* get frequency */
 		if ((status = sb1000_get_frequency(ioaddr, name, &frequency)))
 			return status;
-		if(put_user(frequency, (int*) ifr->ifr_data))
+		if(put_user(frequency, (int __user *) ifr->ifr_data))
 			return -EFAULT;
 		break;
 
 	case SIOCSCMFREQUENCY:		/* set frequency */
 		if (!capable(CAP_NET_ADMIN))
 			return -EPERM;
-		if(get_user(frequency, (int*) ifr->ifr_data))
+		if(get_user(frequency, (int __user *) ifr->ifr_data))
 			return -EFAULT;
 		if ((status = sb1000_set_frequency(ioaddr, name, frequency)))
 			return status;

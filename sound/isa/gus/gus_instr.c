@@ -29,9 +29,9 @@
  */
 
 int snd_gus_iwffff_put_sample(void *private_data, iwffff_wave_t *wave,
-			      char *data, long len, int atomic)
+			      char __user *data, long len, int atomic)
 {
-	snd_gus_card_t *gus = snd_magic_cast(snd_gus_card_t, private_data, return -ENXIO);
+	snd_gus_card_t *gus = private_data;
 	snd_gf1_mem_block_t *block;
 	int err;
 
@@ -59,9 +59,9 @@ int snd_gus_iwffff_put_sample(void *private_data, iwffff_wave_t *wave,
 }
 
 int snd_gus_iwffff_get_sample(void *private_data, iwffff_wave_t *wave,
-			      char *data, long len, int atomic)
+			      char __user *data, long len, int atomic)
 {
-	snd_gus_card_t *gus = snd_magic_cast(snd_gus_card_t, private_data, return -ENXIO);
+	snd_gus_card_t *gus = private_data;
 
 	return snd_gus_dram_read(gus, data, wave->address.memory, wave->size,
 				 wave->format & IWFFFF_WAVE_ROM ? 1 : 0);
@@ -70,7 +70,7 @@ int snd_gus_iwffff_get_sample(void *private_data, iwffff_wave_t *wave,
 int snd_gus_iwffff_remove_sample(void *private_data, iwffff_wave_t *wave,
 				 int atomic)
 {
-	snd_gus_card_t *gus = snd_magic_cast(snd_gus_card_t, private_data, return -ENXIO);
+	snd_gus_card_t *gus = private_data;
 
 	if (wave->format & IWFFFF_WAVE_ROM)
 		return 0;	/* it's probably ok - verify the address? */	
@@ -82,9 +82,9 @@ int snd_gus_iwffff_remove_sample(void *private_data, iwffff_wave_t *wave,
  */
 
 int snd_gus_gf1_put_sample(void *private_data, gf1_wave_t *wave,
-			   char *data, long len, int atomic)
+			   char __user *data, long len, int atomic)
 {
-	snd_gus_card_t *gus = snd_magic_cast(snd_gus_card_t, private_data, return -ENXIO);
+	snd_gus_card_t *gus = private_data;
 	snd_gf1_mem_block_t *block;
 	int err;
 
@@ -110,9 +110,9 @@ int snd_gus_gf1_put_sample(void *private_data, gf1_wave_t *wave,
 }
 
 int snd_gus_gf1_get_sample(void *private_data, gf1_wave_t *wave,
-			   char *data, long len, int atomic)
+			   char __user *data, long len, int atomic)
 {
-	snd_gus_card_t *gus = snd_magic_cast(snd_gus_card_t, private_data, return -ENXIO);
+	snd_gus_card_t *gus = private_data;
 
 	return snd_gus_dram_read(gus, data, wave->address.memory, wave->size, 0);
 }
@@ -120,7 +120,7 @@ int snd_gus_gf1_get_sample(void *private_data, gf1_wave_t *wave,
 int snd_gus_gf1_remove_sample(void *private_data, gf1_wave_t *wave,
 			      int atomic)
 {
-	snd_gus_card_t *gus = snd_magic_cast(snd_gus_card_t, private_data, return -ENXIO);
+	snd_gus_card_t *gus = private_data;
 
 	return snd_gf1_mem_free(&gus->gf1.mem_alloc, wave->address.memory);
 }
@@ -130,9 +130,9 @@ int snd_gus_gf1_remove_sample(void *private_data, gf1_wave_t *wave,
  */
 
 int snd_gus_simple_put_sample(void *private_data, simple_instrument_t *instr,
-			      char *data, long len, int atomic)
+			      char __user *data, long len, int atomic)
 {
-	snd_gus_card_t *gus = snd_magic_cast(snd_gus_card_t, private_data, return -ENXIO);
+	snd_gus_card_t *gus = private_data;
 	snd_gf1_mem_block_t *block;
 	int err;
 
@@ -157,9 +157,9 @@ int snd_gus_simple_put_sample(void *private_data, simple_instrument_t *instr,
 }
 
 int snd_gus_simple_get_sample(void *private_data, simple_instrument_t *instr,
-			      char *data, long len, int atomic)
+			      char __user *data, long len, int atomic)
 {
-	snd_gus_card_t *gus = snd_magic_cast(snd_gus_card_t, private_data, return -ENXIO);
+	snd_gus_card_t *gus = private_data;
 
 	return snd_gus_dram_read(gus, data, instr->address.memory, instr->size, 0);
 }
@@ -167,7 +167,7 @@ int snd_gus_simple_get_sample(void *private_data, simple_instrument_t *instr,
 int snd_gus_simple_remove_sample(void *private_data, simple_instrument_t *instr,
 			         int atomic)
 {
-	snd_gus_card_t *gus = snd_magic_cast(snd_gus_card_t, private_data, return -ENXIO);
+	snd_gus_card_t *gus = private_data;
 
 	return snd_gf1_mem_free(&gus->gf1.mem_alloc, instr->address.memory);
 }

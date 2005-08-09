@@ -32,8 +32,8 @@
 #include <asm/system.h>
 #include <linux/init.h>
 
-static volatile unsigned char *via;
-static spinlock_t cuda_lock = SPIN_LOCK_UNLOCKED;
+static volatile unsigned char __iomem *via;
+static DEFINE_SPINLOCK(cuda_lock);
 
 #ifdef CONFIG_MAC
 #define CUDA_IRQ IRQ_MAC_ADB
@@ -160,7 +160,7 @@ find_via_cuda(void)
 	if (vias->n_addrs < 1 || vias->n_intrs < 1)
 	    return 0;
     }
-    via = (volatile unsigned char *) ioremap(vias->addrs->address, 0x2000);
+    via = ioremap(vias->addrs->address, 0x2000);
 
     cuda_state = idle;
     sys_ctrler = SYS_CTRLER_CUDA;
@@ -386,7 +386,7 @@ cuda_write(struct adb_request *req)
 	req->complete = 1;
 	return -EINVAL;
     }
-    req->next = 0;
+    req->next = NULL;
     req->sent = 0;
     req->complete = 0;
     req->reply_len = 0;
@@ -437,7 +437,7 @@ cuda_poll(void)
      * disable_irq(), would that work on m68k ? --BenH
      */
     local_irq_save(flags);
-    cuda_interrupt(0, 0, 0);
+    cuda_interrupt(0, NULL, NULL);
     local_irq_restore(flags);
 }
 

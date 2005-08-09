@@ -7,6 +7,7 @@
 #include <linux/pagemap.h>
 #include <linux/mount.h>
 #include <linux/vfs.h>
+#include <asm/uaccess.h>
 
 int simple_getattr(struct vfsmount *mnt, struct dentry *dentry,
 		   struct kstat *stat)
@@ -26,14 +27,27 @@ int simple_statfs(struct super_block *sb, struct kstatfs *buf)
 }
 
 /*
- * Lookup the data. This is trivial - if the dentry didn't already
- * exist, we know it is negative.
+ * Retaining negative dentries for an in-memory filesystem just wastes
+ * memory and lookup time: arrange for them to be deleted immediately.
  */
+static int simple_delete_dentry(struct dentry *dentry)
+{
+	return 1;
+}
 
+/*
+ * Lookup the data. This is trivial - if the dentry didn't already
+ * exist, we know it is negative.  Set d_op to delete negative dentries.
+ */
 struct dentry *simple_lookup(struct inode *dir, struct dentry *dentry, struct nameidata *nd)
 {
+	static struct dentry_operations simple_dentry_operations = {
+		.d_delete = simple_delete_dentry,
+	};
+
 	if (dentry->d_name.len > NAME_MAX)
 		return ERR_PTR(-ENAMETOOLONG);
+	dentry->d_op = &simple_dentry_operations;
 	d_add(dentry, NULL);
 	return NULL;
 }
@@ -198,6 +212,7 @@ get_sb_pseudo(struct file_system_type *fs_type, char *name,
 	s->s_blocksize_bits = 10;
 	s->s_magic = magic;
 	s->s_op = ops ? ops : &default_ops;
+	s->s_time_gran = 1;
 	root = new_inode(s);
 	if (!root)
 		goto Enomem;
@@ -360,6 +375,7 @@ int simple_fill_super(struct super_block *s, int magic, struct tree_descr *files
 	s->s_blocksize_bits = PAGE_CACHE_SHIFT;
 	s->s_magic = magic;
 	s->s_op = &s_ops;
+	s->s_time_gran = 1;
 
 	inode = new_inode(s);
 	if (!inode)
@@ -377,13 +393,9 @@ int simple_fill_super(struct super_block *s, int magic, struct tree_descr *files
 		return -ENOMEM;
 	}
 	for (i = 0; !files->name || files->name[0]; i++, files++) {
-		struct qstr name;
 		if (!files->name)
 			continue;
-		name.name = files->name;
-		name.len = strlen(name.name);
-		name.hash = full_name_hash(name.name, name.len);
-		dentry = d_alloc(root, &name);
+		dentry = d_alloc_name(root, files->name);
 		if (!dentry)
 			goto out;
 		inode = new_inode(s);
@@ -406,7 +418,7 @@ out:
 	return -ENOMEM;
 }
 
-static spinlock_t pin_fs_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(pin_fs_lock);
 
 int simple_pin_fs(char *name, struct vfsmount **mount, int *count)
 {
@@ -439,15 +451,85 @@ void simple_release_fs(struct vfsmount **mount, int *count)
 	mntput(mnt);
 }
 
+ssize_t simple_read_from_buffer(void __user *to, size_t count, loff_t *ppos,
+				const void *from, size_t available)
+{
+	loff_t pos = *ppos;
+	if (pos < 0)
+		return -EINVAL;
+	if (pos >= available)
+		return 0;
+	if (count > available - pos)
+		count = available - pos;
+	if (copy_to_user(to, from + pos, count))
+		return -EFAULT;
+	*ppos = pos + count;
+	return count;
+}
+
+/*
+ * Transaction based IO.
+ * The file expects a single write which triggers the transaction, and then
+ * possibly a read which collects the result - which is stored in a
+ * file-local buffer.
+ */
+char *simple_transaction_get(struct file *file, const char __user *buf, size_t size)
+{
+	struct simple_transaction_argresp *ar;
+	static DEFINE_SPINLOCK(simple_transaction_lock);
+
+	if (size > SIMPLE_TRANSACTION_LIMIT - 1)
+		return ERR_PTR(-EFBIG);
+
+	ar = (struct simple_transaction_argresp *)get_zeroed_page(GFP_KERNEL);
+	if (!ar)
+		return ERR_PTR(-ENOMEM);
+
+	spin_lock(&simple_transaction_lock);
+
+	/* only one write allowed per open */
+	if (file->private_data) {
+		spin_unlock(&simple_transaction_lock);
+		free_page((unsigned long)ar);
+		return ERR_PTR(-EBUSY);
+	}
+
+	file->private_data = ar;
+
+	spin_unlock(&simple_transaction_lock);
+
+	if (copy_from_user(ar->data, buf, size))
+		return ERR_PTR(-EFAULT);
+
+	return ar->data;
+}
+
+ssize_t simple_transaction_read(struct file *file, char __user *buf, size_t size, loff_t *pos)
+{
+	struct simple_transaction_argresp *ar = file->private_data;
+
+	if (!ar)
+		return 0;
+	return simple_read_from_buffer(buf, size, pos, ar->data, ar->size);
+}
+
+int simple_transaction_release(struct inode *inode, struct file *file)
+{
+	free_page((unsigned long)file->private_data);
+	return 0;
+}
+
 EXPORT_SYMBOL(dcache_dir_close);
 EXPORT_SYMBOL(dcache_dir_lseek);
 EXPORT_SYMBOL(dcache_dir_open);
 EXPORT_SYMBOL(dcache_readdir);
 EXPORT_SYMBOL(generic_read_dir);
+EXPORT_SYMBOL(get_sb_pseudo);
 EXPORT_SYMBOL(simple_commit_write);
 EXPORT_SYMBOL(simple_dir_inode_operations);
 EXPORT_SYMBOL(simple_dir_operations);
 EXPORT_SYMBOL(simple_empty);
+EXPORT_SYMBOL(d_alloc_name);
 EXPORT_SYMBOL(simple_fill_super);
 EXPORT_SYMBOL(simple_getattr);
 EXPORT_SYMBOL(simple_link);
@@ -461,3 +543,7 @@ EXPORT_SYMBOL(simple_rmdir);
 EXPORT_SYMBOL(simple_statfs);
 EXPORT_SYMBOL(simple_sync_file);
 EXPORT_SYMBOL(simple_unlink);
+EXPORT_SYMBOL(simple_read_from_buffer);
+EXPORT_SYMBOL(simple_transaction_get);
+EXPORT_SYMBOL(simple_transaction_read);
+EXPORT_SYMBOL(simple_transaction_release);

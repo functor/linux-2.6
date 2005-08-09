@@ -28,28 +28,21 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/ioport.h>
+#include <linux/jiffies.h>
 #include <linux/i2c.h>
 #include <linux/i2c-sensor.h>
 #include <linux/init.h>
 #include <asm/io.h>
 
 static unsigned short normal_i2c[] = { I2C_CLIENT_END };
-static unsigned short normal_i2c_range[] = { I2C_CLIENT_END };
 /* Address is autodetected, there is no default value */
 static unsigned int normal_isa[] = { 0x0000, I2C_CLIENT_ISA_END };
-static unsigned int normal_isa_range[] = { I2C_CLIENT_ISA_END };
 static struct i2c_force_data forces[] = {{NULL}};
 
 enum chips { any_chip, smsc47m1 };
 static struct i2c_address_data addr_data = {
 	.normal_i2c		= normal_i2c,
-	.normal_i2c_range	= normal_i2c_range,
 	.normal_isa		= normal_isa,
-	.normal_isa_range	= normal_isa_range,
-	.probe			= normal_i2c,		/* cheat */
-	.probe_range		= normal_i2c_range,	/* cheat */
-	.ignore			= normal_i2c,		/* cheat */
-	.ignore_range		= normal_i2c_range,	/* cheat */
 	.forces			= forces,
 };
 
@@ -116,7 +109,6 @@ superio_exit(void)
 struct smsc47m1_data {
 	struct i2c_client client;
 	struct semaphore lock;
-	int sysctl_id;
 
 	struct semaphore update_lock;
 	unsigned long last_updated;	/* In jiffies */
@@ -140,8 +132,6 @@ static void smsc47m1_write_value(struct i2c_client *client, u8 reg, u8 value);
 static struct smsc47m1_data *smsc47m1_update_device(struct device *dev,
 		int init);
 
-
-static int smsc47m1_id;
 
 static struct i2c_driver smsc47m1_driver = {
 	.owner		= THIS_MODULE,
@@ -182,13 +172,13 @@ static ssize_t get_fan_div(struct device *dev, char *buf, int nr)
 	return sprintf(buf, "%d\n", DIV_FROM_REG(data->fan_div[nr]));
 }
 
-static ssize_t get_fan_pwm(struct device *dev, char *buf, int nr)
+static ssize_t get_pwm(struct device *dev, char *buf, int nr)
 {
 	struct smsc47m1_data *data = smsc47m1_update_device(dev, 0);
 	return sprintf(buf, "%d\n", PWM_FROM_REG(data->pwm[nr]));
 }
 
-static ssize_t get_fan_pwm_en(struct device *dev, char *buf, int nr)
+static ssize_t get_pwm_en(struct device *dev, char *buf, int nr)
 {
 	struct smsc47m1_data *data = smsc47m1_update_device(dev, 0);
 	return sprintf(buf, "%d\n", PWM_EN_FROM_REG(data->pwm[nr]));
@@ -205,16 +195,20 @@ static ssize_t set_fan_min(struct device *dev, const char *buf,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct smsc47m1_data *data = i2c_get_clientdata(client);
+	long rpmdiv, val = simple_strtol(buf, NULL, 10);
 
-	long rpmdiv = simple_strtol(buf, NULL, 10)
-		    * DIV_FROM_REG(data->fan_div[nr]);
+	down(&data->update_lock);
+	rpmdiv = val * DIV_FROM_REG(data->fan_div[nr]);
 
-	if (983040 > 192 * rpmdiv || 2 * rpmdiv > 983040)
+	if (983040 > 192 * rpmdiv || 2 * rpmdiv > 983040) {
+		up(&data->update_lock);
 		return -EINVAL;
+	}
 
 	data->fan_preload[nr] = 192 - ((983040 + rpmdiv / 2) / rpmdiv);
 	smsc47m1_write_value(client, SMSC47M1_REG_FAN_PRELOAD(nr),
 			     data->fan_preload[nr]);
+	up(&data->update_lock);
 
 	return count;
 }
@@ -234,12 +228,16 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 
 	if (new_div == old_div) /* No change */
 		return count;
+
+	down(&data->update_lock);
 	switch (new_div) {
 	case 1: data->fan_div[nr] = 0; break;
 	case 2: data->fan_div[nr] = 1; break;
 	case 4: data->fan_div[nr] = 2; break;
 	case 8: data->fan_div[nr] = 3; break;
-	default: return -EINVAL;
+	default:
+		up(&data->update_lock);
+		return -EINVAL;
 	}
 
 	tmp = smsc47m1_read_value(client, SMSC47M1_REG_FANDIV) & 0x0F;
@@ -252,11 +250,12 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 	data->fan_preload[nr] = SENSORS_LIMIT(tmp, 0, 191);
 	smsc47m1_write_value(client, SMSC47M1_REG_FAN_PRELOAD(nr),
 			     data->fan_preload[nr]);
+	up(&data->update_lock);
 
 	return count;
 }
 
-static ssize_t set_fan_pwm(struct device *dev, const char *buf,
+static ssize_t set_pwm(struct device *dev, const char *buf,
 		size_t count, int nr)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -267,15 +266,17 @@ static ssize_t set_fan_pwm(struct device *dev, const char *buf,
 	if (val < 0 || val > 255)
 		return -EINVAL;
 
+	down(&data->update_lock);
 	data->pwm[nr] &= 0x81; /* Preserve additional bits */
 	data->pwm[nr] |= PWM_TO_REG(val);
-
 	smsc47m1_write_value(client, SMSC47M1_REG_PWM(nr),
 			     data->pwm[nr]);
+	up(&data->update_lock);
+
 	return count;
 }
 
-static ssize_t set_fan_pwm_en(struct device *dev, const char *buf,
+static ssize_t set_pwm_en(struct device *dev, const char *buf,
 		size_t count, int nr)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -286,11 +287,12 @@ static ssize_t set_fan_pwm_en(struct device *dev, const char *buf,
 	if (val != 0 && val != 1)
 		return -EINVAL;
 
+	down(&data->update_lock);
 	data->pwm[nr] &= 0xFE; /* preserve the other bits */
 	data->pwm[nr] |= !val;
-
 	smsc47m1_write_value(client, SMSC47M1_REG_PWM(nr),
 			     data->pwm[nr]);
+	up(&data->update_lock);
 
 	return count;
 }
@@ -298,43 +300,43 @@ static ssize_t set_fan_pwm_en(struct device *dev, const char *buf,
 #define fan_present(offset)						\
 static ssize_t get_fan##offset (struct device *dev, char *buf)		\
 {									\
-	return get_fan(dev, buf, 0x##offset - 1);			\
+	return get_fan(dev, buf, offset - 1);				\
 }									\
 static ssize_t get_fan##offset##_min (struct device *dev, char *buf)	\
 {									\
-	return get_fan_min(dev, buf, 0x##offset - 1);			\
+	return get_fan_min(dev, buf, offset - 1);			\
 }									\
 static ssize_t set_fan##offset##_min (struct device *dev,		\
 		const char *buf, size_t count)				\
 {									\
-	return set_fan_min(dev, buf, count, 0x##offset - 1);		\
+	return set_fan_min(dev, buf, count, offset - 1);		\
 }									\
 static ssize_t get_fan##offset##_div (struct device *dev, char *buf)	\
 {									\
-	return get_fan_div(dev, buf, 0x##offset - 1);			\
+	return get_fan_div(dev, buf, offset - 1);			\
 }									\
 static ssize_t set_fan##offset##_div (struct device *dev,		\
 		const char *buf, size_t count)				\
 {									\
-	return set_fan_div(dev, buf, count, 0x##offset - 1);		\
+	return set_fan_div(dev, buf, count, offset - 1);		\
 }									\
-static ssize_t get_fan##offset##_pwm (struct device *dev, char *buf)	\
+static ssize_t get_pwm##offset (struct device *dev, char *buf)		\
 {									\
-	return get_fan_pwm(dev, buf, 0x##offset - 1);			\
+	return get_pwm(dev, buf, offset - 1);				\
 }									\
-static ssize_t set_fan##offset##_pwm (struct device *dev,		\
+static ssize_t set_pwm##offset (struct device *dev,			\
 		const char *buf, size_t count)				\
 {									\
-	return set_fan_pwm(dev, buf, count, 0x##offset - 1);		\
+	return set_pwm(dev, buf, count, offset - 1);			\
 }									\
-static ssize_t get_fan##offset##_pwm_en (struct device *dev, char *buf)	\
+static ssize_t get_pwm##offset##_en (struct device *dev, char *buf)	\
 {									\
-	return get_fan_pwm_en(dev, buf, 0x##offset - 1);		\
+	return get_pwm_en(dev, buf, offset - 1);			\
 }									\
-static ssize_t set_fan##offset##_pwm_en (struct device *dev,		\
+static ssize_t set_pwm##offset##_en (struct device *dev,		\
 		const char *buf, size_t count)				\
 {									\
-	return set_fan_pwm_en(dev, buf, count, 0x##offset - 1);		\
+	return set_pwm_en(dev, buf, count, offset - 1);			\
 }									\
 static DEVICE_ATTR(fan##offset##_input, S_IRUGO, get_fan##offset,	\
 		NULL);							\
@@ -342,10 +344,10 @@ static DEVICE_ATTR(fan##offset##_min, S_IRUGO | S_IWUSR,		\
 		get_fan##offset##_min, set_fan##offset##_min);		\
 static DEVICE_ATTR(fan##offset##_div, S_IRUGO | S_IWUSR,		\
 		get_fan##offset##_div, set_fan##offset##_div);		\
-static DEVICE_ATTR(fan##offset##_pwm, S_IRUGO | S_IWUSR,		\
-		get_fan##offset##_pwm, set_fan##offset##_pwm);		\
-static DEVICE_ATTR(fan##offset##_pwm_enable, S_IRUGO | S_IWUSR,		\
-		get_fan##offset##_pwm_en, set_fan##offset##_pwm_en);
+static DEVICE_ATTR(pwm##offset, S_IRUGO | S_IWUSR,			\
+		get_pwm##offset, set_pwm##offset);			\
+static DEVICE_ATTR(pwm##offset##_enable, S_IRUGO | S_IWUSR,		\
+		get_pwm##offset##_en, set_pwm##offset##_en);
 
 fan_present(1);
 fan_present(2);
@@ -402,12 +404,13 @@ static int smsc47m1_detect(struct i2c_adapter *adapter, int address, int kind)
 	struct i2c_client *new_client;
 	struct smsc47m1_data *data;
 	int err = 0;
+	int fan1, fan2, pwm1, pwm2;
 
 	if (!i2c_is_isa_adapter(adapter)) {
 		return 0;
 	}
 
-	if (!request_region(address, SMSC_EXTENT, "smsc47m1")) {
+	if (!request_region(address, SMSC_EXTENT, smsc47m1_driver.name)) {
 		dev_err(&adapter->dev, "Region 0x%x already in use!\n", address);
 		return -EBUSY;
 	}
@@ -427,9 +430,23 @@ static int smsc47m1_detect(struct i2c_adapter *adapter, int address, int kind)
 	new_client->flags = 0;
 
 	strlcpy(new_client->name, "smsc47m1", I2C_NAME_SIZE);
-
-	new_client->id = smsc47m1_id++;
 	init_MUTEX(&data->update_lock);
+
+	/* If no function is properly configured, there's no point in
+	   actually registering the chip. */
+	fan1 = (smsc47m1_read_value(new_client, SMSC47M1_REG_TPIN(0)) & 0x05)
+	       == 0x05;
+	fan2 = (smsc47m1_read_value(new_client, SMSC47M1_REG_TPIN(1)) & 0x05)
+	       == 0x05;
+	pwm1 = (smsc47m1_read_value(new_client, SMSC47M1_REG_PPIN(0)) & 0x05)
+	       == 0x04;
+	pwm2 = (smsc47m1_read_value(new_client, SMSC47M1_REG_PPIN(1)) & 0x05)
+	       == 0x04;
+	if (!(fan1 || fan2 || pwm1 || pwm2)) {
+		dev_warn(&new_client->dev, "Device is not configured, will not use\n");
+		err = -ENODEV;
+		goto error_free;
+	}
 
 	if ((err = i2c_attach_client(new_client)))
 		goto error_free;
@@ -442,8 +459,7 @@ static int smsc47m1_detect(struct i2c_adapter *adapter, int address, int kind)
 	   function. */
 	smsc47m1_update_device(&new_client->dev, 1);
 
-	if ((smsc47m1_read_value(new_client, SMSC47M1_REG_TPIN(0)) & 0x05)
-	    == 0x05) {
+	if (fan1) {
 		device_create_file(&new_client->dev, &dev_attr_fan1_input);
 		device_create_file(&new_client->dev, &dev_attr_fan1_min);
 		device_create_file(&new_client->dev, &dev_attr_fan1_div);
@@ -451,8 +467,7 @@ static int smsc47m1_detect(struct i2c_adapter *adapter, int address, int kind)
 		dev_dbg(&new_client->dev, "Fan 1 not enabled by hardware, "
 			"skipping\n");
 
-	if ((smsc47m1_read_value(new_client, SMSC47M1_REG_TPIN(1)) & 0x05)
-	    == 0x05) {
+	if (fan2) {
 		device_create_file(&new_client->dev, &dev_attr_fan2_input);
 		device_create_file(&new_client->dev, &dev_attr_fan2_min);
 		device_create_file(&new_client->dev, &dev_attr_fan2_div);
@@ -460,17 +475,15 @@ static int smsc47m1_detect(struct i2c_adapter *adapter, int address, int kind)
 		dev_dbg(&new_client->dev, "Fan 2 not enabled by hardware, "
 			"skipping\n");
 
-	if ((smsc47m1_read_value(new_client, SMSC47M1_REG_PPIN(0)) & 0x05)
-	    == 0x04) {
-		device_create_file(&new_client->dev, &dev_attr_fan1_pwm);
-		device_create_file(&new_client->dev, &dev_attr_fan1_pwm_enable);
+	if (pwm1) {
+		device_create_file(&new_client->dev, &dev_attr_pwm1);
+		device_create_file(&new_client->dev, &dev_attr_pwm1_enable);
 	} else
 		dev_dbg(&new_client->dev, "PWM 1 not enabled by hardware, "
 			"skipping\n");
-	if ((smsc47m1_read_value(new_client, SMSC47M1_REG_PPIN(1)) & 0x05)
-	    == 0x04) {
-		device_create_file(&new_client->dev, &dev_attr_fan2_pwm);
-		device_create_file(&new_client->dev, &dev_attr_fan2_pwm_enable);
+	if (pwm2) {
+		device_create_file(&new_client->dev, &dev_attr_pwm2);
+		device_create_file(&new_client->dev, &dev_attr_pwm2_enable);
 	} else
 		dev_dbg(&new_client->dev, "PWM 2 not enabled by hardware, "
 			"skipping\n");
@@ -527,8 +540,7 @@ static struct smsc47m1_data *smsc47m1_update_device(struct device *dev,
 
 	down(&data->update_lock);
 
-	if ((jiffies - data->last_updated > HZ + HZ / 2) ||
-	    (jiffies < data->last_updated) || init) {
+	if (time_after(jiffies, data->last_updated + HZ + HZ / 2) || init) {
 		int i;
 
 		for (i = 0; i < 2; i++) {

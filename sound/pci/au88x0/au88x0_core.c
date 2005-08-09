@@ -21,7 +21,7 @@
  These functions are mainly the result of translations made
  from the original disassembly of the au88x0 binary drivers,
  written by Aureal before they went down.
- Many thanks to the Jeff Muizelar, Kester Maddock, and whoever
+ Many thanks to the Jeff Muizelaar, Kester Maddock, and whoever
  contributed to the OpenVortex project.
  The author of this file, put the few available pieces together
  and translated the rest of the riddle (Mix, Src and connection stuff).
@@ -72,6 +72,7 @@
             into au88x0_pcm.c .
  06-06-2003 Buffer shifter bugfix. Mixer volume fix.
  07-12-2003 A3D routing finally fixed. Believed to be OK.
+ 25-03-2004 Many thanks to Claudia, for such valuable bug reports.
  
 */
 
@@ -772,7 +773,9 @@ vortex_src_delWTD(vortex_t * vortex, unsigned char src, unsigned char ch)
 	return 1;
 }
 
- /*FIFO*/ static void
+ /*FIFO*/ 
+
+static void
 vortex_fifo_clearadbdata(vortex_t * vortex, int fifo, int x)
 {
 	for (x--; x >= 0; x--)
@@ -1220,6 +1223,33 @@ static int vortex_adbdma_bufshift(vortex_t * vortex, int adbdma)
 	return delta;
 }
 
+
+static void vortex_adbdma_resetup(vortex_t *vortex, int adbdma) {
+	stream_t *dma = &vortex->dma_adb[adbdma];
+	int p, pp, i;
+
+	/* refresh hw page table */
+	for (i=0 ; i < 4 && i < dma->nr_periods; i++) {
+		/* p: audio buffer page index */
+		p = dma->period_virt + i;
+		if (p >= dma->nr_periods)
+			p -= dma->nr_periods;
+		/* pp: hardware DMA page index. */
+		pp = dma->period_real + i;
+		if (dma->nr_periods < 4) {
+			if (pp >= dma->nr_periods)
+				pp -= dma->nr_periods;
+		}
+		else {
+			if (pp >= 4)
+				pp -= 4;
+		}
+		hwwrite(vortex->mmio, VORTEX_ADBDMA_BUFBASE+(((adbdma << 2)+pp) << 2), snd_sgbuf_get_addr(dma->sgbuf, dma->period_bytes * p));
+		/* Force write thru cache. */
+		hwread(vortex->mmio, VORTEX_ADBDMA_BUFBASE + (((adbdma << 2)+pp) << 2));
+	}
+}
+
 static int inline vortex_adbdma_getlinearpos(vortex_t * vortex, int adbdma)
 {
 	stream_t *dma = &vortex->dma_adb[adbdma];
@@ -1345,31 +1375,29 @@ vortex_wtdma_setbuffers(vortex_t * vortex, int wtdma,
 	dma->nr_periods = count;
 	dma->sgbuf = sgbuf;
 
-	psize--;
-
 	dma->cfg0 = 0;
 	dma->cfg1 = 0;
 	switch (count) {
 		/* Four or more pages */
 	default:
 	case 4:
-		dma->cfg1 |= 0x88000000 | 0x44000000 | 0x30000000 | psize;
-		hwwrite(vortex->mmio, VORTEX_WTDMA_BUFBASE + (wtdma << 4),
+		dma->cfg1 |= 0x88000000 | 0x44000000 | 0x30000000 | (psize-1);
+		hwwrite(vortex->mmio, VORTEX_WTDMA_BUFBASE + (wtdma << 4) + 0xc,
 			snd_sgbuf_get_addr(sgbuf, psize * 3));
 		/* 3 pages */
 	case 3:
 		dma->cfg0 |= 0x12000000;
-		dma->cfg1 |= 0x80000000 | 0x40000000 | (psize << 0xc);
-		hwwrite(vortex->mmio, VORTEX_WTDMA_BUFBASE + (wtdma << 4),
+		dma->cfg1 |= 0x80000000 | 0x40000000 | ((psize-1) << 0xc);
+		hwwrite(vortex->mmio, VORTEX_WTDMA_BUFBASE + (wtdma << 4)  + 0x8,
 			snd_sgbuf_get_addr(sgbuf, psize * 2));
 		/* 2 pages */
 	case 2:
-		dma->cfg0 |= 0x88000000 | 0x44000000 | 0x10000000 | psize;
-		hwwrite(vortex->mmio, VORTEX_WTDMA_BUFBASE + (wtdma << 4),
+		dma->cfg0 |= 0x88000000 | 0x44000000 | 0x10000000 | (psize-1);
+		hwwrite(vortex->mmio, VORTEX_WTDMA_BUFBASE + (wtdma << 4) + 0x4,
 			snd_sgbuf_get_addr(sgbuf, psize));
 		/* 1 page */
 	case 1:
-		dma->cfg0 |= 0x80000000 | 0x40000000 | (psize << 0xc);
+		dma->cfg0 |= 0x80000000 | 0x40000000 | ((psize-1) << 0xc);
 		hwwrite(vortex->mmio, VORTEX_WTDMA_BUFBASE + (wtdma << 4),
 			snd_sgbuf_get_addr(sgbuf, 0));
 		break;
@@ -1575,11 +1603,11 @@ static void vortex_adb_init(vortex_t * vortex)
 	/* it looks like we are writing more than we need to...
 	 * if we write what we are supposed to it breaks things... */
 	hwwrite(vortex->mmio, VORTEX_ADB_SR, 0);
-	for (i = 0; i < VORTEX_ADB_RTBASE_SIZE; i++)
+	for (i = 0; i < VORTEX_ADB_RTBASE_COUNT; i++)
 		hwwrite(vortex->mmio, VORTEX_ADB_RTBASE + (i << 2),
 			hwread(vortex->mmio,
 			       VORTEX_ADB_RTBASE + (i << 2)) | ROUTE_MASK);
-	for (i = 0; i < VORTEX_ADB_CHNBASE_SIZE; i++) {
+	for (i = 0; i < VORTEX_ADB_CHNBASE_COUNT; i++) {
 		hwwrite(vortex->mmio, VORTEX_ADB_CHNBASE + (i << 2),
 			hwread(vortex->mmio,
 			       VORTEX_ADB_CHNBASE + (i << 2)) | ROUTE_MASK);
@@ -1922,6 +1950,9 @@ vortex_connect_codecplay(vortex_t * vortex, int en, unsigned char mixers[])
 	// Connect front channels through EQ.
 	vortex_connection_mix_adb(vortex, en, 0x11, mixers[0], ADB_EQIN(0));
 	vortex_connection_mix_adb(vortex, en, 0x11, mixers[1], ADB_EQIN(1));
+	/* Lower volume, since EQ has some gain. */
+	vortex_mix_setvolumebyte(vortex, mixers[0], 0);
+	vortex_mix_setvolumebyte(vortex, mixers[1], 0);
 	vortex_route(vortex, en, 0x11, ADB_EQOUT(0), ADB_CODECOUT(0));
 	vortex_route(vortex, en, 0x11, ADB_EQOUT(1), ADB_CODECOUT(1));
 
@@ -2007,9 +2038,11 @@ vortex_adb_checkinout(vortex_t * vortex, int resmap[], int out, int restype)
 }
 
 /* Default Connections  */
+static int
+vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type);
+
 static void vortex_connect_default(vortex_t * vortex, int en)
 {
-	// FIXME: check if checkout was succesful.
 	// Connect AC97 codec.
 	vortex->mixplayb[0] = vortex_adb_checkinout(vortex, vortex->fixed_res, en,
 				  VORTEX_RESOURCE_MIXOUT);
@@ -2044,7 +2077,7 @@ static void vortex_connect_default(vortex_t * vortex, int en)
 #ifndef CHIP_AU8810
 	vortex_wt_connect(vortex, en);
 #endif
-	// A3D (crosstalk canceler and A3D slices).
+	// A3D (crosstalk canceler and A3D slices). AU8810 disabled for now.
 #ifndef CHIP_AU8820
 	vortex_Vort3D_connect(vortex, en);
 #endif
@@ -2053,18 +2086,7 @@ static void vortex_connect_default(vortex_t * vortex, int en)
 	// Connect DSP interface for SQ3500 turbo (not here i think...)
 
 	// Connect AC98 modem codec
- 	
- 	/* Fast Play Workaround. Revision 0xFE does not seem to need it. */
- 	printk(KERN_INFO "vortex: revision = 0x%x, device = %d\n", vortex->rev, vortex->device);
- 	if (IS_BAD_CHIP(vortex)) {
- 		printk(KERN_INFO "vortex: Erratum workaround enabled.\n");
- #ifndef CHIP_AU8820
- 		vortex->fixed_res[VORTEX_RESOURCE_DMA] = 0x00000001;
- #endif
- 		// Channel swapping workaround. We are nuking registers somewhere, or
- 		// its a hardware bug.
- 		vortex->fixed_res[VORTEX_RESOURCE_SRC] = 0x00000001;
- 	}
+	
 }
 
 /*
@@ -2081,12 +2103,11 @@ vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type)
 {
 	stream_t *stream;
 	int i, en;
-
+	
 	if ((nr_ch == 3)
 	    || ((dir == SNDRV_PCM_STREAM_CAPTURE) && (nr_ch > 2)))
 		return -EBUSY;
 
-	spin_lock(&vortex->lock);
 	if (dma >= 0) {
 		en = 0;
 		vortex_adb_checkinout(vortex,
@@ -2105,7 +2126,6 @@ vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type)
 	stream->dir = dir;
 	stream->type = type;
 
-	// FIXME: check for success of checkout or checkin.
 	/* PLAYBACK ROUTES. */
 	if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
 		int src[4], mix[4], ch_top;
@@ -2165,8 +2185,7 @@ vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type)
 		for (i = 0; i < nr_ch; i++) {
 			if (stream->type == VORTEX_PCM_ADB) {
 				vortex_connection_adbdma_src(vortex, en,
-							     src[nr_ch - 1], 
-							     //src[0], 
+							     src[nr_ch - 1],
 							     dma,
 							     src[i]);
 				vortex_connection_src_mixin(vortex, en,
@@ -2188,7 +2207,7 @@ vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type)
 #ifndef CHIP_AU8820
 			if (stream->type == VORTEX_PCM_A3D) {
 				vortex_connection_adbdma_src(vortex, en,
-							     src[0], 
+							     src[nr_ch - 1], 
 								 dma,
 							     src[i]);
 				vortex_route(vortex, en, 0x11, ADB_SRCOUT(src[i]), ADB_A3DIN(a3d));
@@ -2237,7 +2256,7 @@ vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type)
 				     ADB_SPDIFOUT(1));
 		}
 #endif
-		/* CAPTURE ROUTES. */
+	/* CAPTURE ROUTES. */
 	} else {
 		int src[2], mix[2];
 
@@ -2271,7 +2290,7 @@ vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type)
 			vortex_connection_mixin_mix(vortex, en,
 						    MIX_CAPT(1), mix[0], 0);
 			vortex_connection_src_adbdma(vortex, en,
-						     src[nr_ch - 1],
+						     src[0],
 						     src[0], dma);
 		} else {
 			vortex_connection_mixin_mix(vortex, en,
@@ -2279,12 +2298,11 @@ vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type)
 			vortex_connection_mix_src(vortex, en, 0x11, mix[1],
 						  src[1]);
 			vortex_connection_src_src_adbdma(vortex, en,
-							 src[0], src[0],
+							 src[1], src[0],
 							 src[1], dma);
 		}
 	}
 	vortex->dma_adb[dma].nr_ch = nr_ch;
-	spin_unlock(&vortex->lock);
 
 #if 0
 	/* AC97 Codec channel setup. FIXME: this has no effect on some cards !! */
@@ -2369,7 +2387,7 @@ static void vortex_disable_int(vortex_t * card)
 
 static irqreturn_t vortex_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
-	vortex_t *vortex = snd_magic_cast(vortex_t, dev_id, return IRQ_NONE);
+	vortex_t *vortex = dev_id;
 	int i, handled;
 	u32 source;
 
@@ -2413,22 +2431,28 @@ static irqreturn_t vortex_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	}
 	if (source & IRQ_PCMOUT) {
 		/* ALSA period acknowledge. */
+		spin_lock(&vortex->lock);
 		for (i = 0; i < NR_ADB; i++) {
 			if (vortex->dma_adb[i].fifo_status == FIFO_START) {
 				if (vortex_adbdma_bufshift(vortex, i)) ;
+				spin_unlock(&vortex->lock);
 				snd_pcm_period_elapsed(vortex->dma_adb[i].
 						       substream);
+				spin_lock(&vortex->lock);
 			}
 		}
 #ifndef CHIP_AU8810
 		for (i = 0; i < NR_WT; i++) {
 			if (vortex->dma_wt[i].fifo_status == FIFO_START) {
 				if (vortex_wtdma_bufshift(vortex, i)) ;
+				spin_unlock(&vortex->lock);
 				snd_pcm_period_elapsed(vortex->dma_wt[i].
 						       substream);
+				spin_lock(&vortex->lock);
 			}
 		}
 #endif
+		spin_unlock(&vortex->lock);
 		handled = 1;
 	}
 	//Acknowledge the Timer interrupt
@@ -2456,33 +2480,34 @@ static void vortex_codec_init(vortex_t * vortex)
 	int i;
 
 	for (i = 0; i < 32; i++) {
-		hwwrite(vortex->mmio, (VORTEX_CODEC_CHN + (i << 2)), 0);
-		udelay(2000);
+		/* the windows driver writes -i, so we write -i */
+		hwwrite(vortex->mmio, (VORTEX_CODEC_CHN + (i << 2)), -i);
+		msleep(2);
 	}
 	if (0) {
 		hwwrite(vortex->mmio, VORTEX_CODEC_CTRL, 0x8068);
-		udelay(1000);
+		msleep(1);
 		hwwrite(vortex->mmio, VORTEX_CODEC_CTRL, 0x00e8);
-		udelay(1000);
+		msleep(1);
 	} else {
 		hwwrite(vortex->mmio, VORTEX_CODEC_CTRL, 0x00a8);
-		udelay(2000);
+		msleep(2);
 		hwwrite(vortex->mmio, VORTEX_CODEC_CTRL, 0x80a8);
-		udelay(2000);
+		msleep(2);
 		hwwrite(vortex->mmio, VORTEX_CODEC_CTRL, 0x80e8);
-		udelay(2000);
+		msleep(2);
 		hwwrite(vortex->mmio, VORTEX_CODEC_CTRL, 0x80a8);
-		udelay(2000);
+		msleep(2);
 		hwwrite(vortex->mmio, VORTEX_CODEC_CTRL, 0x00a8);
-		udelay(2000);
+		msleep(2);
 		hwwrite(vortex->mmio, VORTEX_CODEC_CTRL, 0x00e8);
 	}
 	for (i = 0; i < 32; i++) {
-		hwwrite(vortex->mmio, (VORTEX_CODEC_CHN + (i << 2)), 0);
-		udelay(5000);
+		hwwrite(vortex->mmio, (VORTEX_CODEC_CHN + (i << 2)), -i);
+		msleep(5);
 	}
 	hwwrite(vortex->mmio, VORTEX_CODEC_CTRL, 0xe8);
-	udelay(1000);
+	msleep(1);
 	/* Enable codec channels 0 and 1. */
 	hwwrite(vortex->mmio, VORTEX_CODEC_EN,
 		hwread(vortex->mmio, VORTEX_CODEC_EN) | EN_CODEC);
@@ -2493,16 +2518,13 @@ vortex_codec_write(ac97_t * codec, unsigned short addr, unsigned short data)
 {
 
 	vortex_t *card = (vortex_t *) codec->private_data;
-	unsigned long flags;
 	unsigned int lifeboat = 0;
-	spin_lock_irqsave(&card->lock, flags);
 
 	/* wait for transactions to clear */
 	while (!(hwread(card->mmio, VORTEX_CODEC_CTRL) & 0x100)) {
 		udelay(100);
 		if (lifeboat++ > POLL_COUNT) {
 			printk(KERN_ERR "vortex: ac97 codec stuck busy\n");
-			spin_unlock_irqrestore(&card->lock, flags);
 			return;
 		}
 	}
@@ -2514,8 +2536,6 @@ vortex_codec_write(ac97_t * codec, unsigned short addr, unsigned short data)
 
 	/* Flush Caches. */
 	hwread(card->mmio, VORTEX_CODEC_IO);
-
-	spin_unlock_irqrestore(&card->lock, flags);
 }
 
 static unsigned short vortex_codec_read(ac97_t * codec, unsigned short addr)
@@ -2523,17 +2543,13 @@ static unsigned short vortex_codec_read(ac97_t * codec, unsigned short addr)
 
 	vortex_t *card = (vortex_t *) codec->private_data;
 	u32 read_addr, data;
-	unsigned long flags;
 	unsigned lifeboat = 0;
-
-	spin_lock_irqsave(&card->lock, flags);
 
 	/* wait for transactions to clear */
 	while (!(hwread(card->mmio, VORTEX_CODEC_CTRL) & 0x100)) {
 		udelay(100);
 		if (lifeboat++ > POLL_COUNT) {
 			printk(KERN_ERR "vortex: ac97 codec stuck busy\n");
-			spin_unlock_irqrestore(&card->lock, flags);
 			return 0xffff;
 		}
 	}
@@ -2542,20 +2558,15 @@ static unsigned short vortex_codec_read(ac97_t * codec, unsigned short addr)
 	hwwrite(card->mmio, VORTEX_CODEC_IO, read_addr);
 
 	/* wait for address */
-	{
+	do {
 		udelay(100);
 		data = hwread(card->mmio, VORTEX_CODEC_IO);
 		if (lifeboat++ > POLL_COUNT) {
 			printk(KERN_ERR "vortex: ac97 address never arrived\n");
-			spin_unlock_irqrestore(&card->lock, flags);
 			return 0xffff;
 		}
-	}
-	while ((data & VORTEX_CODEC_ADDMASK) !=
-	       (addr << VORTEX_CODEC_ADDSHIFT)) ;
-
-	/* Unlock. */
-	spin_unlock_irqrestore(&card->lock, flags);
+	} while ((data & VORTEX_CODEC_ADDMASK) !=
+		 (addr << VORTEX_CODEC_ADDSHIFT));
 
 	/* return data. */
 	return (u16) (data & VORTEX_CODEC_DATMASK);
@@ -2651,10 +2662,10 @@ static int vortex_core_init(vortex_t * vortex)
 	printk(KERN_INFO "Vortex: init.... ");
 	/* Hardware Init. */
 	hwwrite(vortex->mmio, VORTEX_CTRL, 0xffffffff);
-	udelay(5000);
+	msleep(5);
 	hwwrite(vortex->mmio, VORTEX_CTRL,
 		hwread(vortex->mmio, VORTEX_CTRL) & 0xffdfffff);
-	udelay(5000);
+	msleep(5);
 	/* Reset IRQ flags */
 	hwwrite(vortex->mmio, VORTEX_IRQ_SOURCE, 0xffffffff);
 	hwread(vortex->mmio, VORTEX_IRQ_STAT);
@@ -2721,7 +2732,7 @@ static int vortex_core_shutdown(vortex_t * vortex)
 
 	hwwrite(vortex->mmio, VORTEX_IRQ_CTRL, 0);
 	hwwrite(vortex->mmio, VORTEX_CTRL, 0);
-	udelay(5000);
+	msleep(5);
 	hwwrite(vortex->mmio, VORTEX_IRQ_SOURCE, 0xffff);
 
 	printk(KERN_INFO "done.\n");

@@ -22,11 +22,7 @@
    SOFTWARE IS DISCLAIMED.
 */
 
-/*
- * HCI Connection handling.
- *
- * $Id: hci_conn.c,v 1.2 2002/04/17 17:37:16 maxk Exp $
- */
+/* Bluetooth HCI connection handling. */
 
 #include <linux/config.h>
 #include <linux/module.h>
@@ -34,7 +30,6 @@
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
-#include <linux/major.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/poll.h>
@@ -54,10 +49,10 @@
 
 #ifndef CONFIG_BT_HCI_CORE_DEBUG
 #undef  BT_DBG
-#define BT_DBG( A... )
+#define BT_DBG(D...)
 #endif
 
-void hci_acl_connect(struct hci_conn *conn)
+static void hci_acl_connect(struct hci_conn *conn)
 {
 	struct hci_dev *hdev = conn->hdev;
 	struct inquiry_entry *ie;
@@ -73,11 +68,12 @@ void hci_acl_connect(struct hci_conn *conn)
 	bacpy(&cp.bdaddr, &conn->dst);
 	cp.pscan_rep_mode = 0x02;
 
-	if ((ie = inquiry_cache_lookup(hdev, &conn->dst)) &&
+	if ((ie = hci_inquiry_cache_lookup(hdev, &conn->dst)) &&
 			inquiry_entry_age(ie) <= INQUIRY_ENTRY_AGE_MAX) {
-		cp.pscan_rep_mode = ie->info.pscan_rep_mode;
-		cp.pscan_mode     = ie->info.pscan_mode;
-		cp.clock_offset   = ie->info.clock_offset | __cpu_to_le16(0x8000);
+		cp.pscan_rep_mode = ie->data.pscan_rep_mode;
+		cp.pscan_mode     = ie->data.pscan_mode;
+		cp.clock_offset   = ie->data.clock_offset | __cpu_to_le16(0x8000);
+		memcpy(conn->dev_class, ie->data.dev_class, 3);
 	}
 
 	cp.pkt_type = __cpu_to_le16(hdev->pkt_type & ACL_PTYPE_MASK);
@@ -167,21 +163,22 @@ struct hci_conn *hci_conn_add(struct hci_dev *hdev, int type, bdaddr_t *dst)
 	hci_dev_hold(hdev);
 
 	tasklet_disable(&hdev->tx_task);
-	hci_conn_hash_add(hdev, conn);
-	tasklet_enable(&hdev->tx_task);
 
+	hci_conn_hash_add(hdev, conn);
 	if (hdev->notify)
 		hdev->notify(hdev, HCI_NOTIFY_CONN_ADD);
+
+	tasklet_enable(&hdev->tx_task);
 
 	return conn;
 }
 
 int hci_conn_del(struct hci_conn *conn)
 {
-	struct hci_dev  *hdev = conn->hdev;
+	struct hci_dev *hdev = conn->hdev;
 
 	BT_DBG("%s conn %p handle %d", hdev->name, conn, conn->handle);
-	
+
 	hci_conn_del_timer(conn);
 
 	if (conn->type == SCO_LINK) {
@@ -199,11 +196,12 @@ int hci_conn_del(struct hci_conn *conn)
 		hdev->acl_cnt += conn->sent;
 	}
 
+	tasklet_disable(&hdev->tx_task);
+
+	hci_conn_hash_del(hdev, conn);
 	if (hdev->notify)
 		hdev->notify(hdev, HCI_NOTIFY_CONN_DEL);
 
-	tasklet_disable(&hdev->tx_task);
-	hci_conn_hash_del(hdev, conn);
 	tasklet_enable(&hdev->tx_task);
 
 	skb_queue_purge(&conn->data_q);
@@ -226,14 +224,14 @@ struct hci_dev *hci_get_route(bdaddr_t *dst, bdaddr_t *src)
 
 	list_for_each(p, &hci_dev_list) {
 		struct hci_dev *d = list_entry(p, struct hci_dev, list);
-		
-		if (!test_bit(HCI_UP, &d->flags))
+
+		if (!test_bit(HCI_UP, &d->flags) || test_bit(HCI_RAW, &d->flags))
 			continue;
 
 		/* Simple routing: 
-	 	 * 	No source address - find interface with bdaddr != dst 
-	 	 *	Source address 	  - find interface with bdaddr == src 
-	 	 */
+		 *   No source address - find interface with bdaddr != dst
+		 *   Source address    - find interface with bdaddr == src
+		 */
 
 		if (use_src) {
 			if (!bacmp(&d->bdaddr, src)) {
@@ -252,6 +250,7 @@ struct hci_dev *hci_get_route(bdaddr_t *dst, bdaddr_t *src)
 	read_unlock_bh(&hci_dev_list_lock);
 	return hdev;
 }
+EXPORT_SYMBOL(hci_get_route);
 
 /* Create SCO or ACL connection.
  * Device _must_ be locked */
@@ -294,15 +293,16 @@ struct hci_conn * hci_connect(struct hci_dev *hdev, int type, bdaddr_t *dst)
 		return acl;
 	}
 }
+EXPORT_SYMBOL(hci_connect);
 
 /* Authenticate remote device */
 int hci_conn_auth(struct hci_conn *conn)
 {
 	BT_DBG("conn %p", conn);
-	
+
 	if (conn->link_mode & HCI_LM_AUTH)
 		return 1;
-	
+
 	if (!test_and_set_bit(HCI_CONN_AUTH_PEND, &conn->pend)) {
 		struct hci_cp_auth_requested cp;
 		cp.handle = __cpu_to_le16(conn->handle);
@@ -310,15 +310,16 @@ int hci_conn_auth(struct hci_conn *conn)
 	}
 	return 0;
 }
+EXPORT_SYMBOL(hci_conn_auth);
 
 /* Enable encryption */
 int hci_conn_encrypt(struct hci_conn *conn)
 {
 	BT_DBG("conn %p", conn);
-	
+
 	if (conn->link_mode & HCI_LM_ENCRYPT)
 		return 1;
-	
+
 	if (test_and_set_bit(HCI_CONN_ENCRYPT_PEND, &conn->pend))
 		return 0;
 
@@ -330,12 +331,45 @@ int hci_conn_encrypt(struct hci_conn *conn)
 	}
 	return 0;
 }
+EXPORT_SYMBOL(hci_conn_encrypt);
+
+/* Change link key */
+int hci_conn_change_link_key(struct hci_conn *conn)
+{
+	BT_DBG("conn %p", conn);
+
+	if (!test_and_set_bit(HCI_CONN_AUTH_PEND, &conn->pend)) {
+		struct hci_cp_change_conn_link_key cp;
+		cp.handle = __cpu_to_le16(conn->handle);
+		hci_send_cmd(conn->hdev, OGF_LINK_CTL, OCF_CHANGE_CONN_LINK_KEY, sizeof(cp), &cp);
+	}
+	return 0;
+}
+EXPORT_SYMBOL(hci_conn_change_link_key);
+
+/* Switch role */
+int hci_conn_switch_role(struct hci_conn *conn, uint8_t role)
+{
+	BT_DBG("conn %p", conn);
+
+	if (!role && conn->link_mode & HCI_LM_MASTER)
+		return 1;
+
+	if (!test_and_set_bit(HCI_CONN_RSWITCH_PEND, &conn->pend)) {
+		struct hci_cp_switch_role cp;
+		bacpy(&cp.bdaddr, &conn->dst);
+		cp.role = role;
+		hci_send_cmd(conn->hdev, OGF_LINK_POLICY, OCF_SWITCH_ROLE, sizeof(cp), &cp);
+	}
+	return 0;
+}
+EXPORT_SYMBOL(hci_conn_switch_role);
 
 /* Drop all connection on the device */
 void hci_conn_hash_flush(struct hci_dev *hdev)
 {
 	struct hci_conn_hash *h = &hdev->conn_hash;
-        struct list_head *p;
+	struct list_head *p;
 
 	BT_DBG("hdev %s", hdev->name);
 
@@ -353,7 +387,7 @@ void hci_conn_hash_flush(struct hci_dev *hdev)
 	}
 }
 
-int hci_get_conn_list(unsigned long arg)
+int hci_get_conn_list(void __user *arg)
 {
 	struct hci_conn_list_req req, *cl;
 	struct hci_conn_info *ci;
@@ -361,7 +395,7 @@ int hci_get_conn_list(unsigned long arg)
 	struct list_head *p;
 	int n = 0, size, err;
 
-	if (copy_from_user(&req, (void *) arg, sizeof(req)))
+	if (copy_from_user(&req, arg, sizeof(req)))
 		return -EFAULT;
 
 	if (!req.conn_num || req.conn_num > (PAGE_SIZE * 2) / sizeof(*ci))
@@ -401,20 +435,20 @@ int hci_get_conn_list(unsigned long arg)
 
 	hci_dev_put(hdev);
 
-	err = copy_to_user((void *) arg, cl, size);
+	err = copy_to_user(arg, cl, size);
 	kfree(cl);
 
 	return err ? -EFAULT : 0;
 }
 
-int hci_get_conn_info(struct hci_dev *hdev, unsigned long arg)
+int hci_get_conn_info(struct hci_dev *hdev, void __user *arg)
 {
 	struct hci_conn_info_req req;
 	struct hci_conn_info ci;
 	struct hci_conn *conn;
-	char *ptr = (void *) arg + sizeof(req);
+	char __user *ptr = arg + sizeof(req);
 
-	if (copy_from_user(&req, (void *) arg, sizeof(req)))
+	if (copy_from_user(&req, arg, sizeof(req)))
 		return -EFAULT;
 
 	hci_dev_lock_bh(hdev);

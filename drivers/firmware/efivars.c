@@ -23,6 +23,10 @@
  *
  * Changelog:
  *
+ *  17 May 2004 - Matt Domsch <Matt_Domsch@dell.com>
+ *   remove check for efi_enabled in exit
+ *   add MODULE_VERSION
+ *
  *  26 Apr 2004 - Matt Domsch <Matt_Domsch@dell.com>
  *   minor bug fixes
  *
@@ -77,11 +81,13 @@
 
 #include <asm/uaccess.h>
 
+#define EFIVARS_VERSION "0.08"
+#define EFIVARS_DATE "2004-May-17"
+
 MODULE_AUTHOR("Matt Domsch <Matt_Domsch@Dell.com>");
 MODULE_DESCRIPTION("sysfs interface to EFI Variables");
 MODULE_LICENSE("GPL");
-
-#define EFIVARS_VERSION "0.07 2004-Apr-26"
+MODULE_VERSION(EFIVARS_VERSION);
 
 /*
  * efivars_lock protects two things:
@@ -91,7 +97,7 @@ MODULE_LICENSE("GPL");
  * efi.get_next_variable() is only called from efivars_init(),
  * which is protected by the BKL, so that path is safe.
  */
-static spinlock_t efivars_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(efivars_lock);
 static LIST_HEAD(efivar_list);
 
 /*
@@ -128,7 +134,7 @@ struct efivar_attribute {
 
 #define EFI_ATTR(_name, _mode, _show, _store) \
 struct subsys_attribute efi_attr_##_name = { \
-	.attr {.name = __stringify(_name), .mode = _mode, .owner = THIS_MODULE}, \
+	.attr = {.name = __stringify(_name), .mode = _mode, .owner = THIS_MODULE}, \
 	.show = _show, \
 	.store = _store, \
 };
@@ -634,7 +640,7 @@ efivar_create_sysfs_entry(unsigned long variable_name_size,
 	*(short_name + strlen(short_name)) = '-';
 	efi_guid_unparse(vendor_guid, short_name + strlen(short_name));
 
-	kobject_set_name(&new_efivar->kobj, short_name);
+	kobject_set_name(&new_efivar->kobj, "%s", short_name);
 	kobj_set_kset_s(new_efivar, vars_subsys);
 	kobject_register(&new_efivar->kobj);
 
@@ -659,31 +665,49 @@ efivars_init(void)
 {
 	efi_status_t status = EFI_NOT_FOUND;
 	efi_guid_t vendor_guid;
-	efi_char16_t *variable_name = kmalloc(1024, GFP_KERNEL);
+	efi_char16_t *variable_name;
 	struct subsys_attribute *attr;
 	unsigned long variable_name_size = 1024;
-	int i, rc = 0, error = 0;
+	int i, error = 0;
 
-	printk(KERN_INFO "EFI Variables Facility v%s\n", EFIVARS_VERSION);
+	if (!efi_enabled)
+		return -ENODEV;
+
+	variable_name = kmalloc(variable_name_size, GFP_KERNEL);
+	if (!variable_name) {
+		printk(KERN_ERR "efivars: Memory allocation failed.\n");
+		return -ENOMEM;
+	}
+
+	memset(variable_name, 0, variable_name_size);
+
+	printk(KERN_INFO "EFI Variables Facility v%s %s\n", EFIVARS_VERSION,
+	       EFIVARS_DATE);
 
 	/*
 	 * For now we'll register the efi subsys within this driver
 	 */
 
-	rc = firmware_register(&efi_subsys);
+	error = firmware_register(&efi_subsys);
 
-	if (rc)
-		return rc;
+	if (error) {
+		printk(KERN_ERR "efivars: Firmware registration failed with error %d.\n", error);
+		goto out_free;
+	}
 
 	kset_set_kset_s(&vars_subsys, efi_subsys);
-	subsystem_register(&vars_subsys);
+
+	error = subsystem_register(&vars_subsys);
+
+	if (error) {
+		printk(KERN_ERR "efivars: Subsystem registration failed with error %d.\n", error);
+		goto out_firmware_unregister;
+	}
 
 	/*
 	 * Per EFI spec, the maximum storage allocated for both
 	 * the variable name and variable data is 1024 bytes.
 	 */
-
-	memset(variable_name, 0, 1024);
 
 	do {
 		variable_name_size = 1024;
@@ -724,8 +748,20 @@ efivars_init(void)
 			error = subsys_create_file(&efi_subsys, attr);
 	}
 
+	if (error)
+		printk(KERN_ERR "efivars: Sysfs attribute export failed with error %d.\n", error);
+	else
+		goto out_free;
+
+	subsystem_unregister(&vars_subsys);
+
+out_firmware_unregister:
+	firmware_unregister(&efi_subsys);
+
+out_free:
 	kfree(variable_name);
-	return 0;
+
+	return error;
 }
 
 static void __exit

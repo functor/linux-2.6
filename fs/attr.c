@@ -14,6 +14,7 @@
 #include <linux/fcntl.h>
 #include <linux/quotaops.h>
 #include <linux/security.h>
+#include <linux/time.h>
 
 /* Taken over from the old code... */
 
@@ -35,7 +36,8 @@ int inode_change_ok(struct inode *inode, struct iattr *attr)
 
 	/* Make sure caller can chgrp. */
 	if ((ia_valid & ATTR_GID) &&
-	    (!in_group_p(attr->ia_gid) && attr->ia_gid != inode->i_gid) &&
+	    (current->fsuid != inode->i_uid ||
+	    (!in_group_p(attr->ia_gid) && attr->ia_gid != inode->i_gid)) &&
 	    !capable(CAP_CHOWN))
 		goto error;
 
@@ -86,11 +88,14 @@ int inode_setattr(struct inode * inode, struct iattr * attr)
 	if (ia_valid & ATTR_GID)
 		inode->i_gid = attr->ia_gid;
 	if (ia_valid & ATTR_ATIME)
-		inode->i_atime = attr->ia_atime;
+		inode->i_atime = timespec_trunc(attr->ia_atime,
+						inode->i_sb->s_time_gran);
 	if (ia_valid & ATTR_MTIME)
-		inode->i_mtime = attr->ia_mtime;
+		inode->i_mtime = timespec_trunc(attr->ia_mtime,
+						inode->i_sb->s_time_gran);
 	if (ia_valid & ATTR_CTIME)
-		inode->i_ctime = attr->ia_ctime;
+		inode->i_ctime = timespec_trunc(attr->ia_ctime,
+						inode->i_sb->s_time_gran);
 	if (ia_valid & ATTR_MODE) {
 		umode_t mode = attr->ia_mode;
 
@@ -130,13 +135,16 @@ int setattr_mask(unsigned int ia_valid)
 int notify_change(struct dentry * dentry, struct iattr * attr)
 {
 	struct inode *inode = dentry->d_inode;
-	mode_t mode = inode->i_mode;
+	mode_t mode;
 	int error;
-	struct timespec now = CURRENT_TIME;
+	struct timespec now;
 	unsigned int ia_valid = attr->ia_valid;
 
 	if (!inode)
 		BUG();
+
+	mode = inode->i_mode;
+	now = current_fs_time(inode->i_sb);
 
 	attr->ia_ctime = now;
 	if (!(ia_valid & ATTR_ATIME_SET))
@@ -166,6 +174,9 @@ int notify_change(struct dentry * dentry, struct iattr * attr)
 	if (!attr->ia_valid)
 		return 0;
 
+	if (ia_valid & ATTR_SIZE)
+		down_write(&dentry->d_inode->i_alloc_sem);
+
 	if (inode->i_op && inode->i_op->setattr) {
 		error = security_inode_setattr(dentry, attr);
 		if (!error)
@@ -182,6 +193,10 @@ int notify_change(struct dentry * dentry, struct iattr * attr)
 				error = inode_setattr(inode, attr);
 		}
 	}
+
+	if (ia_valid & ATTR_SIZE)
+		up_write(&dentry->d_inode->i_alloc_sem);
+
 	if (!error) {
 		unsigned long dn_mask = setattr_mask(ia_valid);
 		if (dn_mask)

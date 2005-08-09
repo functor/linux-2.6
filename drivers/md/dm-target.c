@@ -7,6 +7,7 @@
 #include "dm.h"
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/kmod.h>
 #include <linux/bio.h>
 #include <linux/slab.h>
@@ -119,10 +120,9 @@ int dm_register_target(struct target_type *t)
 		return -ENOMEM;
 
 	down_write(&_lock);
-	if (__find_target_type(t->name)) {
-		kfree(ti);
+	if (__find_target_type(t->name))
 		rv = -EEXIST;
-	} else
+	else
 		list_add(&ti->list, &_targets);
 
 	up_write(&_lock);
@@ -181,7 +181,7 @@ static struct target_type error_target = {
 	.map  = io_err_map,
 };
 
-int dm_target_init(void)
+int __init dm_target_init(void)
 {
 	return dm_register_target(&error_target);
 }

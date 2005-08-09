@@ -9,6 +9,8 @@
 #ifndef __ASM_ARM_CHECKSUM_H
 #define __ASM_ARM_CHECKSUM_H
 
+#include <linux/in6.h>
+
 /*
  * computes the checksum of a memory block at buff, length len,
  * and adds in "sum" (32-bit)
@@ -35,7 +37,7 @@ unsigned int
 csum_partial_copy_nocheck(const char *src, char *dst, int len, int sum);
 
 unsigned int
-csum_partial_copy_from_user(const char *src, char *dst, int len, int sum, int *err_ptr);
+csum_partial_copy_from_user(const char __user *src, char *dst, int len, int sum, int *err_ptr);
 
 /*
  * This is the old (and unsafe) way of doing checksums, a warning message will

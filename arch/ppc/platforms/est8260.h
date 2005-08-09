@@ -6,10 +6,13 @@
 #ifndef __EST8260_PLATFORM
 #define __EST8260_PLATFORM
 
-#define IMAP_ADDR		((uint)0xf0000000)
+#define CPM_MAP_ADDR		((uint)0xf0000000)
 
 #define BOOTROM_RESTART_ADDR	((uint)0xff000104)
 
+/* For our show_cpuinfo hooks. */
+#define CPUINFO_VENDOR		"EST Corporation"
+#define CPUINFO_MACHINE		"SBC8260 PowerPC"
 
 /* A Board Information structure that is given to a program when
  * prom starts it up.

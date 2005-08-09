@@ -18,7 +18,7 @@
 #include <linux/vfs.h>
 
 static void minix_read_inode(struct inode * inode);
-static void minix_write_inode(struct inode * inode, int wait);
+static int minix_write_inode(struct inode * inode, int wait);
 static int minix_statfs(struct super_block *sb, struct kstatfs *buf);
 static int minix_remount (struct super_block * sb, int * flags, char * data);
 
@@ -79,7 +79,7 @@ static int init_inodecache(void)
 {
 	minix_inode_cachep = kmem_cache_create("minix_inode_cache",
 					     sizeof(struct minix_inode_info),
-					     0, SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT,
+					     0, SLAB_RECLAIM_ACCOUNT,
 					     init_once, NULL);
 	if (minix_inode_cachep == NULL)
 		return -ENOMEM;
@@ -343,8 +343,9 @@ static struct address_space_operations minix_aops = {
 };
 
 static struct inode_operations minix_symlink_inode_operations = {
-	.readlink	= page_readlink,
-	.follow_link	= page_follow_link,
+	.readlink	= generic_readlink,
+	.follow_link	= page_follow_link_light,
+	.put_link	= page_put_link,
 	.getattr	= minix_getattr,
 };
 
@@ -452,7 +453,7 @@ static struct buffer_head * V1_minix_update_inode(struct inode * inode)
 
 	raw_inode = minix_V1_raw_inode(inode->i_sb, inode->i_ino, &bh);
 	if (!raw_inode)
-		return 0;
+		return NULL;
 	raw_inode->i_mode = inode->i_mode;
 	raw_inode->i_uid = fs_high2lowuid(inode->i_uid);
 	raw_inode->i_gid = fs_high2lowgid(inode->i_gid);
@@ -479,7 +480,7 @@ static struct buffer_head * V2_minix_update_inode(struct inode * inode)
 
 	raw_inode = minix_V2_raw_inode(inode->i_sb, inode->i_ino, &bh);
 	if (!raw_inode)
-		return 0;
+		return NULL;
 	raw_inode->i_mode = inode->i_mode;
 	raw_inode->i_uid = fs_high2lowuid(inode->i_uid);
 	raw_inode->i_gid = fs_high2lowgid(inode->i_gid);
@@ -504,9 +505,10 @@ static struct buffer_head *minix_update_inode(struct inode *inode)
 		return V2_minix_update_inode(inode);
 }
 
-static void minix_write_inode(struct inode * inode, int wait)
+static int minix_write_inode(struct inode * inode, int wait)
 {
 	brelse(minix_update_inode(inode));
+	return 0;
 }
 
 int minix_sync_inode(struct inode * inode)

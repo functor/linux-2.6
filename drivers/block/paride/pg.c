@@ -161,35 +161,17 @@ enum {D_PRT, D_PRO, D_UNI, D_MOD, D_SLV, D_DLY};
 #include <linux/slab.h>
 #include <linux/mtio.h>
 #include <linux/pg.h>
+#include <linux/device.h>
 
 #include <asm/uaccess.h>
 
-#ifndef MODULE
-
-#include "setup.h"
-
-static STT pg_stt[5] = {
-	{"drive0", 6, drive0},
-	{"drive1", 6, drive1},
-	{"drive2", 6, drive2},
-	{"drive3", 6, drive3},
-	{"disable", 1, &disable}
-};
-
-void pg_setup(char *str, int *ints)
-{
-	generic_setup(pg_stt, 5, str);
-}
-
-#endif
-
-MODULE_PARM(verbose, "i");
-MODULE_PARM(major, "i");
-MODULE_PARM(name, "s");
-MODULE_PARM(drive0, "1-6i");
-MODULE_PARM(drive1, "1-6i");
-MODULE_PARM(drive2, "1-6i");
-MODULE_PARM(drive3, "1-6i");
+module_param(verbose, bool, 0644);
+module_param(major, int, 0);
+module_param(name, charp, 0);
+module_param_array(drive0, int, NULL, 0);
+module_param_array(drive1, int, NULL, 0);
+module_param_array(drive2, int, NULL, 0);
+module_param_array(drive3, int, NULL, 0);
 
 #include "paride.h"
 
@@ -211,9 +193,9 @@ MODULE_PARM(drive3, "1-6i");
 
 static int pg_open(struct inode *inode, struct file *file);
 static int pg_release(struct inode *inode, struct file *file);
-static ssize_t pg_read(struct file *filp, char *buf,
+static ssize_t pg_read(struct file *filp, char __user *buf,
 		       size_t count, loff_t * ppos);
-static ssize_t pg_write(struct file *filp, const char *buf,
+static ssize_t pg_write(struct file *filp, const char __user *buf,
 			size_t count, loff_t * ppos);
 static int pg_detect(void);
 
@@ -234,11 +216,13 @@ struct pg {
 	char name[PG_NAMELEN];	/* pg0, pg1, ... */
 };
 
-struct pg devices[PG_UNITS];
+static struct pg devices[PG_UNITS];
 
 static int pg_identify(struct pg *dev, int log);
 
 static char pg_scratch[512];	/* scratch block buffer */
+
+static struct class_simple *pg_class;
 
 /* kernel glue structures */
 
@@ -259,7 +243,7 @@ static void pg_init_units(void)
 		int *parm = *drives[unit];
 		struct pg *dev = &devices[unit];
 		dev->pi = &dev->pia;
-		set_bit(0, &dev->access);
+		clear_bit(0, &dev->access);
 		dev->busy = 0;
 		dev->present = 0;
 		dev->bufptr = NULL;
@@ -568,7 +552,7 @@ static int pg_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static ssize_t pg_write(struct file *filp, const char *buf, size_t count, loff_t *ppos)
+static ssize_t pg_write(struct file *filp, const char __user *buf, size_t count, loff_t *ppos)
 {
 	struct pg *dev = filp->private_data;
 	struct pg_write_hdr hdr;
@@ -579,7 +563,7 @@ static ssize_t pg_write(struct file *filp, const char *buf, size_t count, loff_t
 	if (count < hs)
 		return -EINVAL;
 
-	if (copy_from_user((char *) &hdr, buf, hs))
+	if (copy_from_user(&hdr, buf, hs))
 		return -EFAULT;
 
 	if (hdr.magic != PG_MAGIC)
@@ -616,7 +600,7 @@ static ssize_t pg_write(struct file *filp, const char *buf, size_t count, loff_t
 	return count;
 }
 
-static ssize_t pg_read(struct file *filp, char *buf, size_t count, loff_t *ppos)
+static ssize_t pg_read(struct file *filp, char __user *buf, size_t count, loff_t *ppos)
 {
 	struct pg *dev = filp->private_data;
 	struct pg_read_hdr hdr;
@@ -648,7 +632,7 @@ static ssize_t pg_read(struct file *filp, char *buf, size_t count, loff_t *ppos)
 	hdr.duration = (jiffies - dev->start + HZ / 2) / HZ;
 	hdr.scsi = dev->status & 0x0f;
 
-	if (copy_to_user(buf, (char *) &hdr, hs))
+	if (copy_to_user(buf, &hdr, hs))
 		return -EFAULT;
 	if (copy > 0)
 		if (copy_to_user(buf + hs, dev->bufptr, copy))
@@ -658,15 +642,19 @@ static ssize_t pg_read(struct file *filp, char *buf, size_t count, loff_t *ppos)
 
 static int __init pg_init(void)
 {
-	int unit;
+	int unit, err = 0;
 
-	if (disable)
-		return -1;
+	if (disable){
+		err = -1;
+		goto out;
+	}
 
 	pg_init_units();
 
-	if (pg_detect())
-		return -1;
+	if (pg_detect()) {
+		err = -1;
+		goto out;
+	}
 
 	if (register_chrdev(major, name, &pg_fops)) {
 		printk("pg_init: unable to get major number %d\n", major);
@@ -675,18 +663,37 @@ static int __init pg_init(void)
 			if (dev->present)
 				pi_release(dev->pi);
 		}
-		return -1;
+		err = -1;
+		goto out;
+	}
+	pg_class = class_simple_create(THIS_MODULE, "pg");
+	if (IS_ERR(pg_class)) {
+		err = PTR_ERR(pg_class);
+		goto out_chrdev;
 	}
 	devfs_mk_dir("pg");
 	for (unit = 0; unit < PG_UNITS; unit++) {
 		struct pg *dev = &devices[unit];
 		if (dev->present) {
-			devfs_mk_cdev(MKDEV(major, unit),
+			class_simple_device_add(pg_class, MKDEV(major, unit), 
+					NULL, "pg%u", unit);
+			err = devfs_mk_cdev(MKDEV(major, unit),
 				      S_IFCHR | S_IRUSR | S_IWUSR, "pg/%u",
 				      unit);
+			if (err) 
+				goto out_class;
 		}
 	}
-	return 0;
+	err = 0;
+	goto out;
+
+out_class:
+	class_simple_device_remove(MKDEV(major, unit));
+	class_simple_destroy(pg_class);
+out_chrdev:
+	unregister_chrdev(major, "pg");
+out:
+	return err;
 }
 
 static void __exit pg_exit(void)
@@ -695,10 +702,12 @@ static void __exit pg_exit(void)
 
 	for (unit = 0; unit < PG_UNITS; unit++) {
 		struct pg *dev = &devices[unit];
-		if (dev->present)
+		if (dev->present) {
+			class_simple_device_remove(MKDEV(major, unit));
 			devfs_remove("pg/%u", unit);
+		}
 	}
-
+	class_simple_destroy(pg_class);
 	devfs_remove("pg");
 	unregister_chrdev(major, name);
 

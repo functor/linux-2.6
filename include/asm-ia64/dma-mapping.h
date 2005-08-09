@@ -5,6 +5,8 @@
  * Copyright (C) 2003-2004 Hewlett-Packard Co
  *	David Mosberger-Tang <davidm@hpl.hp.com>
  */
+#include <linux/config.h>
+#include <asm/machvec.h>
 
 #define dma_alloc_coherent	platform_dma_alloc_coherent
 #define dma_alloc_noncoherent	platform_dma_alloc_coherent	/* coherent mem. is cheap */

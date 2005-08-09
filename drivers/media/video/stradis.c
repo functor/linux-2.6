@@ -60,7 +60,7 @@ static struct saa7146 saa7146s[SAA7146_MAX];
 static int saa_num = 0;		/* number of SAA7146s in use */
 
 static int video_nr = -1;
-MODULE_PARM(video_nr,"i");
+module_param(video_nr, int, 0);
 MODULE_LICENSE("GPL");
 
 
@@ -96,13 +96,6 @@ MODULE_LICENSE("GPL");
 #define debVideo	(NewCard ? nDebVideo : oDebVideo)
 #define debAudio	(NewCard ? nDebAudio : oDebAudio)
 #define debDMA		(NewCard ? nDebDMA : oDebDMA)
-
-#ifdef DEBUG
-int stradis_driver(void)	/* for the benefit of ksymoops */
-{
-	return 1;
-}
-#endif
 
 #ifdef USE_RESCUE_EEPROM_SDM275
 static unsigned char rescue_eeprom[64] = {
@@ -1322,7 +1315,7 @@ static int saa_ioctl(struct inode *inode, struct file *file,
 		     unsigned int cmd, unsigned long argl)
 {
 	struct saa7146 *saa = file->private_data;
-	void *arg = (void *)argl;
+	void __user *arg = (void __user *)argl;
 
 	switch (cmd) {
 	case VIDIOCGCAP:
@@ -1580,7 +1573,7 @@ static int saa_ioctl(struct inode *inode, struct file *file,
 			vu.radio = VIDEO_NO_UNIT;
 			vu.audio = VIDEO_NO_UNIT;
 			vu.teletext = VIDEO_NO_UNIT;
-			if (copy_to_user((void *) arg, (void *) &vu, sizeof(vu)))
+			if (copy_to_user(arg, &vu, sizeof(vu)))
 				return -EFAULT;
 			return 0;
 		}
@@ -1754,16 +1747,14 @@ static int saa_ioctl(struct inode *inode, struct file *file,
 			struct video_code ucode;
 			__u8 *udata;
 			int i;
-			if (copy_from_user((void *) &ucode, arg,
-			    sizeof(ucode)))
+			if (copy_from_user(&ucode, arg, sizeof(ucode)))
 				return -EFAULT;
 			if (ucode.datasize > 65536 || ucode.datasize < 1024 ||
 			    strncmp(ucode.loadwhat, "dec", 3))
 				return -EINVAL;
 			if ((udata = vmalloc(ucode.datasize)) == NULL)
 				return -ENOMEM;
-			if (copy_from_user((void *) udata, ucode.data,
-			    ucode.datasize)) {
+			if (copy_from_user(udata, ucode.data, ucode.datasize)) {
 				vfree(udata);
 				return -EFAULT;
 			}
@@ -1814,13 +1805,13 @@ static int saa_mmap(struct file *file, struct vm_area_struct *vma)
 	return -EINVAL;
 }
 
-static ssize_t saa_read(struct file *file, char *buf,
+static ssize_t saa_read(struct file *file, char __user *buf,
 			size_t count, loff_t *ppos)
 {
 	return -EINVAL;
 }
 
-static ssize_t saa_write(struct file *file, const char *buf,
+static ssize_t saa_write(struct file *file, const char __user *buf,
 			 size_t count, loff_t *ppos)
 {
 	struct saa7146 *saa = file->private_data;
@@ -2190,12 +2181,9 @@ static void release_saa(void)
 		/* unmap and free memory */
 		saa->audhead = saa->audtail = saa->osdhead = 0;
 		saa->vidhead = saa->vidtail = saa->osdtail = 0;
-		if (saa->vidbuf)
-			vfree(saa->vidbuf);
-		if (saa->audbuf)
-			vfree(saa->audbuf);
-		if (saa->osdbuf)
-			vfree(saa->osdbuf);
+		vfree(saa->vidbuf);
+		vfree(saa->audbuf);
+		vfree(saa->osdbuf);
 		if (saa->dmavid2)
 			kfree((void *) saa->dmavid2);
 		saa->audbuf = saa->vidbuf = saa->osdbuf = NULL;

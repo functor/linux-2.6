@@ -15,7 +15,7 @@ SECTIONS
 	SCHED_TEXT
 	*(.fixup)
 	*(.gnu.warning)
-	} = 0x4e75
+	} :text = 0x4e75
 
   . = ALIGN(16);		/* Exception table */
   __start___ex_table = .;
@@ -34,14 +34,14 @@ SECTIONS
   .bss : { *(.bss) }		/* BSS */
 
   . = ALIGN(16);
-  .data.cacheline_aligned : { *(.data.cacheline_aligned) }
+  .data.cacheline_aligned : { *(.data.cacheline_aligned) } :data
 
   _edata = .;			/* End of data section */
 
   /* will be freed after init */
   . = ALIGN(4096);		/* Init code and data */
   __init_begin = .;
-  .init.text : { 
+  .init.text : {
 	_sinittext = .;
 	*(.init.text)
 	_einittext = .;
@@ -51,17 +51,14 @@ SECTIONS
   __setup_start = .;
   .init.setup : { *(.init.setup) }
   __setup_end = .;
-  __start___param = .;
-  __param : { *(__param) }
-  __stop___param = .;
   __initcall_start = .;
   .initcall.init : {
-	*(.initcall1.init) 
-	*(.initcall2.init) 
-	*(.initcall3.init) 
-	*(.initcall4.init) 
-	*(.initcall5.init) 
-	*(.initcall6.init) 
+	*(.initcall1.init)
+	*(.initcall2.init)
+	*(.initcall3.init)
+	*(.initcall4.init)
+	*(.initcall5.init)
+	*(.initcall6.init)
 	*(.initcall7.init)
   }
   __initcall_end = .;

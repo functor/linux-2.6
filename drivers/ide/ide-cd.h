@@ -79,8 +79,6 @@ struct ide_cd_config_flags {
 	__u8 dvd		: 1; /* Drive is a DVD-ROM */
 	__u8 dvd_r		: 1; /* Drive can write DVD-R */
 	__u8 dvd_ram		: 1; /* Drive can write DVD-RAM */
-	__u8 mrw		: 1; /* drive can read mrw */
-	__u8 mrw_w		: 1; /* drive can write mrw */
 	__u8 ram		: 1; /* generic WRITE (dvd-ram/mrw) */
 	__u8 test_write		: 1; /* Drive can fake writes */
 	__u8 supp_disc_present	: 1; /* Changer can report exact contents
@@ -462,6 +460,10 @@ struct atapi_changer_info {
 
 /* Extra per-device info for cdrom drives. */
 struct cdrom_info {
+	ide_drive_t	*drive;
+	ide_driver_t	*driver;
+	struct gendisk	*disk;
+	struct kref	kref;
 
 	/* Buffer for table of contents.  NULL if we haven't allocated
 	   a TOC buffer for this device yet. */
@@ -521,7 +523,7 @@ struct cdrom_info {
 
  /* The generic packet command opcodes for CD/DVD Logical Units,
  * From Table 57 of the SFF8090 Ver. 3 (Mt. Fuji) draft standard. */ 
-const struct {
+static const struct {
 	unsigned short packet_command;
 	const char * const text;
 } packet_command_texts[] = {
@@ -579,7 +581,7 @@ const struct {
 
 
 /* From Table 303 of the SFF8090 Ver. 3 (Mt. Fuji) draft standard. */
-const char * const sense_key_texts[16] = {
+static const char * const sense_key_texts[16] = {
 	"No sense data",
 	"Recovered error",
 	"Not ready",
@@ -599,7 +601,7 @@ const char * const sense_key_texts[16] = {
 };
 
 /* From Table 304 of the SFF8090 Ver. 3 (Mt. Fuji) draft standard. */
-const struct {
+static const struct {
 	unsigned long asc_ascq;
 	const char * const text;
 } sense_data_texts[] = {

@@ -48,7 +48,7 @@ asmlinkage int sys_tas(int *addr)
 #else /* CONFIG_SMP */
 #include <linux/spinlock.h>
 
-static spinlock_t tas_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(tas_lock);
 
 asmlinkage int sys_tas(int *addr)
 {
@@ -57,10 +57,10 @@ asmlinkage int sys_tas(int *addr)
 	if (!access_ok(VERIFY_WRITE, addr, sizeof (int)))
 		return -EFAULT;
 
-	spin_lock(&tas_lock);
+	_raw_spin_lock(&tas_lock);
 	oldval = *addr;
 	*addr = 1;
-	spin_unlock(&tas_lock);
+	_raw_spin_unlock(&tas_lock);
 
 	return oldval;
 }
@@ -171,9 +171,9 @@ asmlinkage int sys_ipc(uint call, int first, int second,
 	case SHMAT: {
 		ulong raddr;
 
-		if ((ret = verify_area(VERIFY_WRITE, (ulong __user *) third,
-				      sizeof(ulong))))
-			return ret;
+		if (!access_ok(VERIFY_WRITE, (ulong __user *) third,
+				      sizeof(ulong)))
+			return -EFAULT;
 		ret = do_shmat (first, (char __user *) ptr, second, &raddr);
 		if (ret)
 			return ret;

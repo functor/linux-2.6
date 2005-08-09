@@ -33,20 +33,20 @@ typedef struct gus_proc_private {
 } gus_proc_private_t;
 
 static long snd_gf1_mem_proc_dump(snd_info_entry_t *entry, void *file_private_data,
-			          struct file *file, char *buf, long count)
+			          struct file *file, char __user *buf,
+			          unsigned long count, unsigned long pos)
 {
 	long size;
-	gus_proc_private_t *priv = snd_magic_cast(gus_proc_private_t, entry->private_data, return -ENXIO);
+	gus_proc_private_t *priv = entry->private_data;
 	snd_gus_card_t *gus = priv->gus;
 	int err;
 
 	size = count;
-	if (file->f_pos + size > priv->size)
-		size = (long)priv->size - file->f_pos;
+	if (pos + size > priv->size)
+		size = (long)priv->size - pos;
 	if (size > 0) {
-		if ((err = snd_gus_dram_read(gus, buf, file->f_pos, size, priv->rom)) < 0)
+		if ((err = snd_gus_dram_read(gus, buf, pos, size, priv->rom)) < 0)
 			return err;
-		file->f_pos += size;
 		return size;
 	}
 	return 0;
@@ -58,7 +58,7 @@ static long long snd_gf1_mem_proc_llseek(snd_info_entry_t *entry,
 					long long offset,
 					int orig)
 {
-	gus_proc_private_t *priv = snd_magic_cast(gus_proc_private_t, entry->private_data, return -ENXIO);
+	gus_proc_private_t *priv = entry->private_data;
 
 	switch (orig) {
 	case 0:	/* SEEK_SET */
@@ -80,8 +80,8 @@ static long long snd_gf1_mem_proc_llseek(snd_info_entry_t *entry,
 
 static void snd_gf1_mem_proc_free(snd_info_entry_t *entry)
 {
-	gus_proc_private_t *priv = snd_magic_cast(gus_proc_private_t, entry->private_data, return);
-	snd_magic_kfree(priv);
+	gus_proc_private_t *priv = entry->private_data;
+	kfree(priv);
 }
 
 static struct snd_info_entry_ops snd_gf1_mem_proc_ops = {
@@ -98,7 +98,7 @@ int snd_gf1_mem_proc_init(snd_gus_card_t * gus)
 
 	for (idx = 0; idx < 4; idx++) {
 		if (gus->gf1.mem_alloc.banks_8[idx].size > 0) {
-			priv = snd_magic_kcalloc(gus_proc_private_t, 0, GFP_KERNEL);
+			priv = kcalloc(1, sizeof(*priv), GFP_KERNEL);
 			if (priv == NULL)
 				return -ENOMEM;
 			priv->gus = gus;
@@ -115,7 +115,7 @@ int snd_gf1_mem_proc_init(snd_gus_card_t * gus)
 	}
 	for (idx = 0; idx < 4; idx++) {
 		if (gus->gf1.rom_present & (1 << idx)) {
-			priv = snd_magic_kcalloc(gus_proc_private_t, 0, GFP_KERNEL);
+			priv = kcalloc(1, sizeof(*priv), GFP_KERNEL);
 			if (priv == NULL)
 				return -ENOMEM;
 			priv->rom = 1;

@@ -48,15 +48,33 @@
 #include <net/sctp/sctp.h>
 #include <net/sctp/sm.h>
 
-static inline void sctp_ulpevent_set_owner(struct sctp_ulpevent *event,
-					   const struct sctp_association *asoc);
-static inline void sctp_ulpevent_release_owner(struct sctp_ulpevent *event);
 static void sctp_ulpevent_receive_data(struct sctp_ulpevent *event,
 				       struct sctp_association *asoc);
 static void sctp_ulpevent_release_data(struct sctp_ulpevent *event);
 
+/* Stub skb destructor.  */
+static void sctp_stub_rfree(struct sk_buff *skb)
+{
+/* WARNING:  This function is just a warning not to use the
+ * skb destructor.  If the skb is shared, we may get the destructor
+ * callback on some processor that does not own the sock_lock.  This
+ * was occuring with PACKET socket applications that were monitoring
+ * our skbs.   We can't take the sock_lock, because we can't risk
+ * recursing if we do really own the sock lock.  Instead, do all
+ * of our rwnd manipulation while we own the sock_lock outright.
+ */
+}
+
+/* Initialize an ULP event from an given skb.  */
+SCTP_STATIC void sctp_ulpevent_init(struct sctp_ulpevent *event, int msg_flags)
+{
+	memset(event, 0, sizeof(struct sctp_ulpevent));
+	event->msg_flags = msg_flags;
+}
+
 /* Create a new sctp_ulpevent.  */
-struct sctp_ulpevent *sctp_ulpevent_new(int size, int msg_flags, int gfp)
+SCTP_STATIC struct sctp_ulpevent *sctp_ulpevent_new(int size, int msg_flags,
+						    int gfp)
 {
 	struct sctp_ulpevent *event;
 	struct sk_buff *skb;
@@ -74,17 +92,34 @@ fail:
 	return NULL;
 }
 
-/* Initialize an ULP event from an given skb.  */
-void sctp_ulpevent_init(struct sctp_ulpevent *event, int msg_flags)
-{
-	memset(event, 0, sizeof(struct sctp_ulpevent));
-	event->msg_flags = msg_flags;
-}
-
 /* Is this a MSG_NOTIFICATION?  */
 int sctp_ulpevent_is_notification(const struct sctp_ulpevent *event)
 {
 	return MSG_NOTIFICATION == (event->msg_flags & MSG_NOTIFICATION);
+}
+
+/* Hold the association in case the msg_name needs read out of
+ * the association.
+ */
+static inline void sctp_ulpevent_set_owner(struct sctp_ulpevent *event,
+					   const struct sctp_association *asoc)
+{
+	struct sk_buff *skb;
+
+	/* Cast away the const, as we are just wanting to
+	 * bump the reference count.
+	 */
+	sctp_association_hold((struct sctp_association *)asoc);
+	skb = sctp_event2skb(event);
+	skb->sk = asoc->base.sk;
+	event->asoc = (struct sctp_association *)asoc;
+	skb->destructor = sctp_stub_rfree;
+}
+
+/* A simple destructor to give up the reference to the association. */
+static inline void sctp_ulpevent_release_owner(struct sctp_ulpevent *event)
+{
+	sctp_association_put(event->asoc);
 }
 
 /* Create and initialize an SCTP_ASSOC_CHANGE event.
@@ -528,7 +563,7 @@ struct sctp_ulpevent *sctp_ulpevent_make_shutdown_event(
 	struct sctp_shutdown_event *sse;
 	struct sk_buff *skb;
 
-	event = sctp_ulpevent_new(sizeof(struct sctp_assoc_change),
+	event = sctp_ulpevent_new(sizeof(struct sctp_shutdown_event),
 				  MSG_NOTIFICATION, gfp);
 	if (!event)
 		goto fail;
@@ -572,6 +607,40 @@ struct sctp_ulpevent *sctp_ulpevent_make_shutdown_event(
 	 */
 	sctp_ulpevent_set_owner(event, asoc);
 	sse->sse_assoc_id = sctp_assoc2id(asoc);
+
+	return event;
+
+fail:
+	return NULL;
+}
+
+/* Create and initialize a SCTP_ADAPTION_INDICATION notification.
+ *
+ * Socket Extensions for SCTP
+ * 5.3.1.6 SCTP_ADAPTION_INDICATION
+ */
+struct sctp_ulpevent *sctp_ulpevent_make_adaption_indication(
+	const struct sctp_association *asoc, int gfp)
+{
+	struct sctp_ulpevent *event;
+	struct sctp_adaption_event *sai;
+	struct sk_buff *skb;
+
+	event = sctp_ulpevent_new(sizeof(struct sctp_adaption_event),
+				  MSG_NOTIFICATION, gfp);
+	if (!event)
+		goto fail;
+
+	skb = sctp_event2skb(event);
+	sai = (struct sctp_adaption_event *)
+		skb_put(skb, sizeof(struct sctp_adaption_event));
+
+	sai->sai_type = SCTP_ADAPTION_INDICATION;
+	sai->sai_flags = 0;
+	sai->sai_length = sizeof(struct sctp_adaption_event);
+	sai->sai_adaption_ind = asoc->peer.adaption_ind;
+	sctp_ulpevent_set_owner(event, asoc);
+	sai->sai_assoc_id = sctp_assoc2id(asoc);
 
 	return event;
 
@@ -644,8 +713,8 @@ fail:
  *
  * 5.3.1.7 SCTP_PARTIAL_DELIVERY_EVENT
  *
- *   When a reciever is engaged in a partial delivery of a
- *   message this notification will be used to inidicate
+ *   When a receiver is engaged in a partial delivery of a
+ *   message this notification will be used to indicate
  *   various events.
  */
 struct sctp_ulpevent *sctp_ulpevent_make_pdapi(
@@ -655,7 +724,7 @@ struct sctp_ulpevent *sctp_ulpevent_make_pdapi(
 	struct sctp_pdapi_event *pd;
 	struct sk_buff *skb;
 
-	event = sctp_ulpevent_new(sizeof(struct sctp_assoc_change),
+	event = sctp_ulpevent_new(sizeof(struct sctp_pdapi_event),
 				  MSG_NOTIFICATION, gfp);
 	if (!event)
 		goto fail;
@@ -787,43 +856,6 @@ void sctp_ulpevent_read_sndrcvinfo(const struct sctp_ulpevent *event,
 
 	put_cmsg(msghdr, IPPROTO_SCTP, SCTP_SNDRCV,
 		 sizeof(struct sctp_sndrcvinfo), (void *)&sinfo);
-}
-
-/* Stub skb destructor.  */
-static void sctp_stub_rfree(struct sk_buff *skb)
-{
-/* WARNING:  This function is just a warning not to use the
- * skb destructor.  If the skb is shared, we may get the destructor
- * callback on some processor that does not own the sock_lock.  This
- * was occuring with PACKET socket applications that were monitoring
- * our skbs.   We can't take the sock_lock, because we can't risk
- * recursing if we do really own the sock lock.  Instead, do all
- * of our rwnd manipulation while we own the sock_lock outright.
- */
-}
-
-/* Hold the association in case the msg_name needs read out of
- * the association.
- */
-static inline void sctp_ulpevent_set_owner(struct sctp_ulpevent *event,
-					   const struct sctp_association *asoc)
-{
-	struct sk_buff *skb;
-
-	/* Cast away the const, as we are just wanting to
-	 * bump the reference count.
-	 */
-	sctp_association_hold((struct sctp_association *)asoc);
-	skb = sctp_event2skb(event);
-	skb->sk = asoc->base.sk;
-	event->asoc = (struct sctp_association *)asoc;
-	skb->destructor = sctp_stub_rfree;
-}
-
-/* A simple destructor to give up the reference to the association. */
-static inline void sctp_ulpevent_release_owner(struct sctp_ulpevent *event)
-{
-	sctp_association_put(event->asoc);
 }
 
 /* Do accounting for bytes received and hold a reference to the association

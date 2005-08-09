@@ -36,6 +36,7 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/kernel.h>
+#include <linux/delay.h>
 #include <linux/stddef.h>
 #include <linux/sched.h>
 #include <linux/ioport.h>
@@ -49,9 +50,6 @@
 				(was i2c-sis645.c from lm_sensors 2.7.0)
 */
 #define SIS96x_VERSION "1.0.0"
-
-/* SiS96x SMBus PCI device ID */
-#define PCI_DEVICE_ID_SI_SMBUS 0x16
 
 /* base address register in PCI config space */
 #define SIS96x_BAR 0x04
@@ -139,7 +137,7 @@ static int sis96x_transaction(int size)
 
 	/* We will always wait for a fraction of a second! */
 	do {
-		i2c_delay(1);
+		msleep(1);
 		temp = sis96x_read(SMB_STS);
 	} while (!(temp & 0x0e) && (timeout++ < MAX_TIMEOUT));
 
@@ -260,22 +258,17 @@ static struct i2c_algorithm smbus_algorithm = {
 
 static struct i2c_adapter sis96x_adapter = {
 	.owner		= THIS_MODULE,
-	.class		= I2C_ADAP_CLASS_SMBUS,
+	.class		= I2C_CLASS_HWMON,
 	.algo		= &smbus_algorithm,
 	.name		= "unset",
 };
 
 static struct pci_device_id sis96x_ids[] = {
-
-	{
-		.vendor	=	PCI_VENDOR_ID_SI,
-		.device =	PCI_DEVICE_ID_SI_SMBUS,
-		.subvendor =	PCI_ANY_ID,
-		.subdevice =	PCI_ANY_ID,
-	},
-
+	{ PCI_DEVICE(PCI_VENDOR_ID_SI, PCI_DEVICE_ID_SI_SMBUS) },
 	{ 0, }
 };
+
+MODULE_DEVICE_TABLE (pci, sis96x_ids);
 
 static int __devinit sis96x_probe(struct pci_dev *dev,
 				const struct pci_device_id *id)
@@ -338,7 +331,7 @@ static void __devexit sis96x_remove(struct pci_dev *dev)
 }
 
 static struct pci_driver sis96x_driver = {
-	.name		= "sis96x smbus",
+	.name		= "sis96x_smbus",
 	.id_table	= sis96x_ids,
 	.probe		= sis96x_probe,
 	.remove		= __devexit_p(sis96x_remove),
@@ -347,7 +340,7 @@ static struct pci_driver sis96x_driver = {
 static int __init i2c_sis96x_init(void)
 {
 	printk(KERN_INFO "i2c-sis96x version %s\n", SIS96x_VERSION);
-	return pci_module_init(&sis96x_driver);
+	return pci_register_driver(&sis96x_driver);
 }
 
 static void __exit i2c_sis96x_exit(void)

@@ -16,7 +16,7 @@
 #include <linux/if_arp.h>
 #include <linux/skbuff.h>
 #endif
-
+#include <linux/compiler.h>
 #include <linux/netfilter_arp.h>
 
 #define ARPT_FUNCTION_MAXNAMELEN 30
@@ -154,7 +154,7 @@ struct arpt_entry
 #define ARPT_CONTINUE 0xFFFFFFFF
 
 /* For standard target */
-#define ARPT_RETURN (-NF_MAX_VERDICT - 1)
+#define ARPT_RETURN (-NF_REPEAT - 1)
 
 /* The argument to ARPT_SO_GET_INFO */
 struct arpt_getinfo
@@ -205,7 +205,7 @@ struct arpt_replace
 	/* Number of counters (must be equal to current number of entries). */
 	unsigned int num_counters;
 	/* The old entries' counters. */
-	struct arpt_counters *counters;
+	struct arpt_counters __user *counters;
 
 	/* The entries (hang off end: not really an array). */
 	struct arpt_entry entries[0];
@@ -312,9 +312,6 @@ struct arpt_table
 	/* A unique name... */
 	char name[ARPT_TABLE_MAXNAMELEN];
 
-	/* Seed table: copied in register_table */
-	struct arpt_replace *table;
-
 	/* What hooks you will enter on */
 	unsigned int valid_hooks;
 
@@ -328,7 +325,8 @@ struct arpt_table
 	struct module *me;
 };
 
-extern int arpt_register_table(struct arpt_table *table);
+extern int arpt_register_table(struct arpt_table *table,
+			       const struct arpt_replace *repl);
 extern void arpt_unregister_table(struct arpt_table *table);
 extern unsigned int arpt_do_table(struct sk_buff **pskb,
 				  unsigned int hook,

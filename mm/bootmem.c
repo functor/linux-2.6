@@ -16,8 +16,10 @@
 #include <linux/init.h>
 #include <linux/bootmem.h>
 #include <linux/mmzone.h>
+#include <linux/module.h>
 #include <asm/dma.h>
 #include <asm/io.h>
+#include "internal.h"
 
 /*
  * Access to this subsystem has to be serialized externally. (this is
@@ -26,6 +28,10 @@
 unsigned long max_low_pfn;
 unsigned long min_low_pfn;
 unsigned long max_pfn;
+
+EXPORT_SYMBOL(max_pfn);		/* This is exported so
+				 * dma_get_required_mask(), which uses
+				 * it, can be an inline function */
 
 /* return the number of _pages_ that will be allocated for the boot bitmap */
 unsigned long __init bootmem_bootmap_pages (unsigned long pages)
@@ -82,14 +88,11 @@ static void __init reserve_bootmem_core(bootmem_data_t *bdata, unsigned long add
 							PAGE_SIZE-1)/PAGE_SIZE;
 	unsigned long end = (addr + size + PAGE_SIZE-1)/PAGE_SIZE;
 
-	if (!size) BUG();
+	BUG_ON(!size);
+	BUG_ON(sidx >= eidx);
+	BUG_ON((addr >> PAGE_SHIFT) >= bdata->node_low_pfn);
+	BUG_ON(end > bdata->node_low_pfn);
 
-	if (sidx >= eidx)
-		BUG();
-	if ((addr >> PAGE_SHIFT) >= bdata->node_low_pfn)
-		BUG();
-	if (end > bdata->node_low_pfn)
-		BUG();
 	for (i = sidx; i < eidx; i++)
 		if (test_and_set_bit(i, bdata->node_bootmem_map)) {
 #ifdef CONFIG_DEBUG_BOOTMEM
@@ -110,9 +113,8 @@ static void __init free_bootmem_core(bootmem_data_t *bdata, unsigned long addr, 
 	unsigned long eidx = (addr + size - bdata->node_boot_start)/PAGE_SIZE;
 	unsigned long end = (addr + size)/PAGE_SIZE;
 
-	if (!size) BUG();
-	if (end > bdata->node_low_pfn)
-		BUG();
+	BUG_ON(!size);
+	BUG_ON(end > bdata->node_low_pfn);
 
 	if (addr < bdata->last_success)
 		bdata->last_success = addr;
@@ -124,7 +126,7 @@ static void __init free_bootmem_core(bootmem_data_t *bdata, unsigned long addr, 
 	sidx = start - (bdata->node_boot_start/PAGE_SIZE);
 
 	for (i = sidx; i < eidx; i++) {
-		if (!test_and_clear_bit(i, bdata->node_bootmem_map))
+		if (unlikely(!test_and_clear_bit(i, bdata->node_bootmem_map)))
 			BUG();
 	}
 }
@@ -140,7 +142,7 @@ static void __init free_bootmem_core(bootmem_data_t *bdata, unsigned long addr, 
  *
  * alignment has to be a power of 2 value.
  *
- * NOTE:  This function is _not_ reenetrant.
+ * NOTE:  This function is _not_ reentrant.
  */
 static void * __init
 __alloc_bootmem_core(struct bootmem_data *bdata, unsigned long size,
@@ -152,7 +154,6 @@ __alloc_bootmem_core(struct bootmem_data *bdata, unsigned long size,
 
 	if(!size) {
 		printk("__alloc_bootmem_core(): zero-sized request\n");
-		dump_stack();
 		BUG();
 	}
 	BUG_ON(align & (align-1));
@@ -259,23 +260,43 @@ static unsigned long __init free_all_bootmem_core(pg_data_t *pgdat)
 	unsigned long i, count, total = 0;
 	unsigned long idx;
 	unsigned long *map; 
+	int gofast = 0;
 
-	if (!bdata->node_bootmem_map) BUG();
+	BUG_ON(!bdata->node_bootmem_map);
 
 	count = 0;
 	/* first extant page of the node */
 	page = virt_to_page(phys_to_virt(bdata->node_boot_start));
 	idx = bdata->node_low_pfn - (bdata->node_boot_start >> PAGE_SHIFT);
 	map = bdata->node_bootmem_map;
+	/* Check physaddr is O(LOG2(BITS_PER_LONG)) page aligned */
+	if (bdata->node_boot_start == 0 ||
+	    ffs(bdata->node_boot_start) - PAGE_SHIFT > ffs(BITS_PER_LONG))
+		gofast = 1;
 	for (i = 0; i < idx; ) {
 		unsigned long v = ~map[i / BITS_PER_LONG];
-		if (v) {
+		if (gofast && v == ~0UL) {
+			int j, order;
+
+			count += BITS_PER_LONG;
+			__ClearPageReserved(page);
+			order = ffs(BITS_PER_LONG) - 1;
+			set_page_refs(page, order);
+			for (j = 1; j < BITS_PER_LONG; j++) {
+				if (j + 16 < BITS_PER_LONG)
+					prefetchw(page + j + 16);
+				__ClearPageReserved(page + j);
+			}
+			__free_pages(page, order);
+			i += BITS_PER_LONG;
+			page += BITS_PER_LONG;
+		} else if (v) {
 			unsigned long m;
 			for (m = 1; m && i < idx; m<<=1, page++, i++) {
 				if (v & m) {
 					count++;
-					ClearPageReserved(page);
-					set_page_count(page, 1);
+					__ClearPageReserved(page);
+					set_page_refs(page, 0);
 					__free_page(page);
 				}
 			}
@@ -294,7 +315,7 @@ static unsigned long __init free_all_bootmem_core(pg_data_t *pgdat)
 	count = 0;
 	for (i = 0; i < ((bdata->node_low_pfn-(bdata->node_boot_start >> PAGE_SHIFT))/8 + PAGE_SIZE-1)/PAGE_SIZE; i++,page++) {
 		count++;
-		ClearPageReserved(page);
+		__ClearPageReserved(page);
 		set_page_count(page, 1);
 		__free_page(page);
 	}
@@ -324,31 +345,29 @@ unsigned long __init free_all_bootmem_node (pg_data_t *pgdat)
 	return(free_all_bootmem_core(pgdat));
 }
 
-#ifndef CONFIG_DISCONTIGMEM
 unsigned long __init init_bootmem (unsigned long start, unsigned long pages)
 {
 	max_low_pfn = pages;
 	min_low_pfn = start;
-	return(init_bootmem_core(&contig_page_data, start, 0, pages));
+	return(init_bootmem_core(NODE_DATA(0), start, 0, pages));
 }
 
 #ifndef CONFIG_HAVE_ARCH_BOOTMEM_NODE
 void __init reserve_bootmem (unsigned long addr, unsigned long size)
 {
-	reserve_bootmem_core(contig_page_data.bdata, addr, size);
+	reserve_bootmem_core(NODE_DATA(0)->bdata, addr, size);
 }
 #endif /* !CONFIG_HAVE_ARCH_BOOTMEM_NODE */
 
 void __init free_bootmem (unsigned long addr, unsigned long size)
 {
-	free_bootmem_core(contig_page_data.bdata, addr, size);
+	free_bootmem_core(NODE_DATA(0)->bdata, addr, size);
 }
 
 unsigned long __init free_all_bootmem (void)
 {
-	return(free_all_bootmem_core(&contig_page_data));
+	return(free_all_bootmem_core(NODE_DATA(0)));
 }
-#endif /* !CONFIG_DISCONTIGMEM */
 
 void * __init __alloc_bootmem (unsigned long size, unsigned long align, unsigned long goal)
 {
@@ -376,11 +395,6 @@ void * __init __alloc_bootmem_node (pg_data_t *pgdat, unsigned long size, unsign
 	if (ptr)
 		return (ptr);
 
-	/*
-	 * Whoops, we cannot satisfy the allocation request.
-	 */
-	printk(KERN_ALERT "bootmem alloc of %lu bytes failed!\n", size);
-	panic("Out of memory");
-	return NULL;
+	return __alloc_bootmem(size, align, goal);
 }
 

@@ -54,7 +54,6 @@ static const char ep0name[] = "ep0-control";
 /*
   Local definintions.
 */
-#define UDC_PROC_FILE
 
 #ifndef NO_STATES
 static char *state_names[] = {
@@ -192,7 +191,7 @@ static __inline__ void usb_clear(u32 val, u32 port)
  */
 #define is_usb_connected() 		get_portc_pdr(2)
 
-#ifdef UDC_PROC_FILE
+#ifdef CONFIG_USB_GADGET_DEBUG_FILES
 
 static const char proc_node_name[] = "driver/udc";
 
@@ -248,12 +247,12 @@ udc_proc_read(char *page, char **start, off_t off, int count,
 #define create_proc_files() 	create_proc_read_entry(proc_node_name, 0, NULL, udc_proc_read, dev)
 #define remove_proc_files() 	remove_proc_entry(proc_node_name, NULL)
 
-#else				/* !UDC_PROC_FILE */
+#else	/* !CONFIG_USB_GADGET_DEBUG_FILES */
 
 #define create_proc_files() do {} while (0)
 #define remove_proc_files() do {} while (0)
 
-#endif				/* UDC_PROC_FILE */
+#endif	/* CONFIG_USB_GADGET_DEBUG_FILES */
 
 /*
  * 	udc_disable - disable USB device controller
@@ -706,7 +705,7 @@ void nuke(struct lh7a40x_ep *ep, int status)
 		done(ep, req, status);
 	}
 
-	/* Disable IRQ if EP is enabled (has decriptor) */
+	/* Disable IRQ if EP is enabled (has descriptor) */
 	if (ep->desc)
 		pio_irq_disable(ep_index(ep));
 }

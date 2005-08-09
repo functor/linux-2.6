@@ -101,6 +101,11 @@ __acpi_release_global_lock (unsigned int *lock)
         :"=r"(n_hi), "=r"(n_lo)     \
         :"0"(n_hi), "1"(n_lo))
 
+/*
+ * Refer Intel ACPI _PDC support document for bit definitions
+ */
+#define ACPI_PDC_EST_CAPABILITY_SMP 	0xa
+#define ACPI_PDC_EST_CAPABILITY_MSR	0x1
 
 #ifdef CONFIG_ACPI_BOOT 
 extern int acpi_lapic;
@@ -122,10 +127,12 @@ static inline void disable_acpi(void)
 #define FIX_ACPI_PAGES 4
 
 extern int acpi_gsi_to_irq(u32 gsi, unsigned int *irq);
+
 #ifdef CONFIG_X86_IO_APIC
 extern int skip_ioapic_setup;
-extern int acpi_irq_to_vector(u32 irq);	/* deprecated in favor of acpi_gsi_to_irq */
 extern int acpi_skip_timer_override;
+
+extern void check_acpi_pci(void);
 
 static inline void disable_ioapic_setup(void)
 {
@@ -138,8 +145,8 @@ static inline int ioapic_setup_disabled(void)
 }
 
 #else
-static inline void disable_ioapic_setup(void)
-{ }
+static inline void disable_ioapic_setup(void) { }
+static inline void check_acpi_pci(void) { }
 
 #endif
 
@@ -167,7 +174,6 @@ static inline int acpi_irq_balance_set(char *str) { return 0; }
 
 /* routines for saving/restoring kernel state */
 extern int acpi_save_state_mem(void);
-extern int acpi_save_state_disk(void);
 extern void acpi_restore_state_mem(void);
 
 extern unsigned long acpi_wakeup_address;
@@ -176,6 +182,8 @@ extern unsigned long acpi_wakeup_address;
 extern void acpi_reserve_bootmem(void);
 
 #endif /*CONFIG_ACPI_SLEEP*/
+
+extern u8 x86_acpiid_to_apicid[];
 
 #endif /*__KERNEL__*/
 

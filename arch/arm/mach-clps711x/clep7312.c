@@ -23,15 +23,13 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-extern void clps711x_init_irq(void);
-extern void clps711x_map_io(void); 
+#include "common.h"
 
 static void __init
 fixup_clep7312(struct machine_desc *desc, struct tag *tags,
 	    char **cmdline, struct meminfo *mi)
 {
 	mi->nr_banks=1;
-	mi->end = 0xc0FFFFFF;
 	mi->bank[0].start = 0xc0000000;
 	mi->bank[0].size = 0x01000000;
 	mi->bank[0].node = 0;
@@ -45,5 +43,6 @@ MACHINE_START(CLEP7212, "Cirrus Logic 7212/7312")
 	FIXUP(fixup_clep7312)
 	MAPIO(clps711x_map_io)
 	INITIRQ(clps711x_init_irq)
+	.timer		= &clps711x_timer,
 MACHINE_END
 

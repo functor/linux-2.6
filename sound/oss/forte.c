@@ -45,7 +45,6 @@
 #include <linux/proc_fs.h>
 
 #include <asm/uaccess.h>
-#include <asm/hardirq.h>
 #include <asm/io.h>
 
 #define DRIVER_NAME	"forte"
@@ -239,7 +238,7 @@ forte_ac97_wait (struct forte_chip *chip)
  * @reg:	register to read
  */
 
-u16
+static u16
 forte_ac97_read (struct ac97_codec *codec, u8 reg)
 {
 	u16 ret = 0;
@@ -284,7 +283,7 @@ forte_ac97_read (struct ac97_codec *codec, u8 reg)
  * @val:	value to write
  */
 
-void
+static void
 forte_ac97_write (struct ac97_codec *codec, u8 reg, u16 val)
 {
 	struct forte_chip *chip = codec->private_data;
@@ -849,6 +848,8 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 	struct forte_chip *chip;
 	struct audio_buf_info abi;
 	struct count_info cinfo;
+	void __user *argp = (void __user *)arg;
+	int __user *p = argp;
 
 	chip = file->private_data;
 	
@@ -865,24 +866,24 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 	switch (cmd) {
 
 	case OSS_GETVERSION:
-		return put_user (SOUND_VERSION, (int *) arg);
+		return put_user (SOUND_VERSION, p);
 
 	case SNDCTL_DSP_GETCAPS:
 		DPRINTK ("%s: GETCAPS\n", __FUNCTION__);
 
 		ival = FORTE_CAPS; /* DUPLEX */
-		return put_user (ival, (int *) arg);
+		return put_user (ival, p);
 
 	case SNDCTL_DSP_GETFMTS:
 		DPRINTK ("%s: GETFMTS\n", __FUNCTION__);
 
 		ival = FORTE_FMTS; /* U8, 16LE */
-		return put_user (ival, (int *) arg);
+		return put_user (ival, p);
 
 	case SNDCTL_DSP_SETFMT:	/* U8, 16LE */
 		DPRINTK ("%s: SETFMT\n", __FUNCTION__);
 
-		if (get_user (ival, (int *) arg))
+		if (get_user (ival, p))
 			return -EFAULT;
 
 		spin_lock_irq (&chip->lock);
@@ -899,12 +900,12 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 	
-		return put_user (rval, (int *) arg);
+		return put_user (rval, p);
 
 	case SNDCTL_DSP_STEREO:	/* 0 - mono, 1 - stereo */
 		DPRINTK ("%s: STEREO\n", __FUNCTION__);
 
-		if (get_user (ival, (int *) arg))
+		if (get_user (ival, p))
 			return -EFAULT;
 
 		spin_lock_irq (&chip->lock);
@@ -921,12 +922,12 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 
-                return put_user (rval, (int *) arg);
+                return put_user (rval, p);
 
 	case SNDCTL_DSP_CHANNELS: /* 1 - mono, 2 - stereo */
 		DPRINTK ("%s: CHANNELS\n", __FUNCTION__);
 
-		if (get_user (ival, (int *) arg))
+		if (get_user (ival, p))
 			return -EFAULT;
 
 		spin_lock_irq (&chip->lock);
@@ -943,12 +944,12 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 
-                return put_user (rval, (int *) arg);
+                return put_user (rval, p);
 
 	case SNDCTL_DSP_SPEED:
 		DPRINTK ("%s: SPEED\n", __FUNCTION__);
 
-		if (get_user (ival, (int *) arg))
+		if (get_user (ival, p))
                         return -EFAULT;
 
 		spin_lock_irq (&chip->lock);
@@ -965,7 +966,7 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 
-                return put_user(rval, (int*) arg);
+                return put_user(rval, p);
 
 	case SNDCTL_DSP_GETBLKSIZE:
 		DPRINTK ("%s: GETBLKSIZE\n", __FUNCTION__);
@@ -980,7 +981,7 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 
-                return put_user (ival, (int *) arg);
+                return put_user (ival, p);
 
 	case SNDCTL_DSP_RESET:
 		DPRINTK ("%s: RESET\n", __FUNCTION__);
@@ -1022,7 +1023,7 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 	case SNDCTL_DSP_SETFRAGMENT:
 		DPRINTK ("%s: SETFRAGMENT\n", __FUNCTION__);
 
-		if (get_user (ival, (int *) arg))
+		if (get_user (ival, p))
 			return -EFAULT;
 
 		spin_lock_irq (&chip->lock);
@@ -1041,7 +1042,7 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 
-		return put_user (ival, (int *) arg);
+		return put_user (ival, p);
                 
         case SNDCTL_DSP_GETISPACE:
 		DPRINTK ("%s: GETISPACE\n", __FUNCTION__);
@@ -1065,7 +1066,7 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 
-		return copy_to_user ((void *) arg, &abi, sizeof (abi)) ? -EFAULT : 0;
+		return copy_to_user (argp, &abi, sizeof (abi)) ? -EFAULT : 0;
 
 	case SNDCTL_DSP_GETIPTR:
 		DPRINTK ("%s: GETIPTR\n", __FUNCTION__);
@@ -1086,7 +1087,7 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 
-		return copy_to_user ((void *) arg, &cinfo, sizeof (cinfo)) ? -EFAULT : 0;
+		return copy_to_user (argp, &cinfo, sizeof (cinfo)) ? -EFAULT : 0;
 
         case SNDCTL_DSP_GETOSPACE:
 		if (!wr)
@@ -1114,7 +1115,7 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 		
-		return copy_to_user ((void *) arg, &abi, sizeof (abi)) ? -EFAULT : 0;
+		return copy_to_user (argp, &abi, sizeof (abi)) ? -EFAULT : 0;
 
 	case SNDCTL_DSP_GETOPTR:
 		if (!wr)
@@ -1133,7 +1134,7 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 
-		return copy_to_user ((void *) arg, &cinfo, sizeof (cinfo)) ? -EFAULT : 0;
+		return copy_to_user (argp, &cinfo, sizeof (cinfo)) ? -EFAULT : 0;
 
 	case SNDCTL_DSP_GETODELAY:
 		if (!wr)
@@ -1157,7 +1158,7 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 
 		spin_unlock_irq (&chip->lock);
 
-		return put_user (ival, (int *) arg);
+		return put_user (ival, p);
 
 	case SNDCTL_DSP_SETDUPLEX:
 		DPRINTK ("%s: SETDUPLEX\n", __FUNCTION__);
@@ -1167,11 +1168,11 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 	case SNDCTL_DSP_GETTRIGGER:
 		DPRINTK ("%s: GETTRIGGER\n", __FUNCTION__);
 		
-		return put_user (chip->trigger, (int *) arg);
+		return put_user (chip->trigger, p);
 		
 	case SNDCTL_DSP_SETTRIGGER:
 
-		if (get_user (ival, (int *) arg))
+		if (get_user (ival, p))
 			return -EFAULT;
 
 		DPRINTK ("%s: SETTRIGGER %d\n", __FUNCTION__, ival);
@@ -1207,15 +1208,15 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 		
 	case SOUND_PCM_READ_RATE:
 		DPRINTK ("%s: PCM_READ_RATE\n", __FUNCTION__);		
-		return put_user (chip->play.rate, (int *) arg);
+		return put_user (chip->play.rate, p);
 
 	case SOUND_PCM_READ_CHANNELS:
 		DPRINTK ("%s: PCM_READ_CHANNELS\n", __FUNCTION__);
-		return put_user (chip->play.stereo, (int *) arg);
+		return put_user (chip->play.stereo, p);
 
 	case SOUND_PCM_READ_BITS:
 		DPRINTK ("%s: PCM_READ_BITS\n", __FUNCTION__);		
-		return put_user (chip->play.format, (int *) arg);
+		return put_user (chip->play.format, p);
 
 	case SNDCTL_DSP_NONBLOCK:
 		DPRINTK ("%s: DSP_NONBLOCK\n", __FUNCTION__);		
@@ -1223,7 +1224,7 @@ forte_dsp_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 		return 0;
 
 	default:
-		DPRINTK ("Unsupported ioctl: %x (%p)\n", cmd, (void *) arg);
+		DPRINTK ("Unsupported ioctl: %x (%p)\n", cmd, argp);
 		break;
 	}
 
@@ -1263,7 +1264,7 @@ forte_dsp_open (struct inode *inode, struct file *file)
 	if (file->f_mode & FMODE_READ)
 		forte_channel_init (forte, &forte->rec);
 
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 
@@ -1408,7 +1409,8 @@ forte_dsp_mmap (struct file *file, struct vm_area_struct *vma)
                 goto out;
 	}
 
-        if (remap_page_range (vma, vma->vm_start, virt_to_phys (channel->buf),
+        if (remap_pfn_range(vma, vma->vm_start,
+			      virt_to_phys(channel->buf) >> PAGE_SHIFT,
 			      size, vma->vm_page_prot)) {
 		DPRINTK ("%s: remap el a no worko\n", __FUNCTION__);
 		ret = -EAGAIN;
@@ -1428,16 +1430,13 @@ forte_dsp_mmap (struct file *file, struct vm_area_struct *vma)
  */
 
 static ssize_t 
-forte_dsp_write (struct file *file, const char *buffer, size_t bytes, 
+forte_dsp_write (struct file *file, const char __user *buffer, size_t bytes, 
 		 loff_t *ppos)
 {
 	struct forte_chip *chip;
 	struct forte_channel *channel;
 	unsigned int i = bytes, sz = 0;
 	unsigned long flags;
-
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 
 	if (!access_ok (VERIFY_READ, buffer, bytes))
 		return -EFAULT;
@@ -1536,16 +1535,13 @@ forte_dsp_write (struct file *file, const char *buffer, size_t bytes,
  */
 
 static ssize_t 
-forte_dsp_read (struct file *file, char *buffer, size_t bytes, 
+forte_dsp_read (struct file *file, char __user *buffer, size_t bytes, 
 		loff_t *ppos)
 {
 	struct forte_chip *chip;
 	struct forte_channel *channel;
 	unsigned int i = bytes, sz;
 	unsigned long flags;
-
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 
 	if (!access_ok (VERIFY_WRITE, buffer, bytes))
 		return -EFAULT;
@@ -1845,15 +1841,15 @@ forte_proc_read (char *page, char **start, off_t off, int count,
 static int __init 
 forte_proc_init (void)
 {
-	if (!proc_mkdir ("driver/forte", 0))
+	if (!proc_mkdir ("driver/forte", NULL))
 		return -EIO;
 
-	if (!create_proc_read_entry ("driver/forte/chip", 0, 0, forte_proc_read, forte)) {
+	if (!create_proc_read_entry ("driver/forte/chip", 0, NULL, forte_proc_read, forte)) {
 		remove_proc_entry ("driver/forte", NULL);
 		return -EIO;
 	}
 
-	if (!create_proc_read_entry("driver/forte/ac97", 0, 0, ac97_read_proc, forte->ac97)) {
+	if (!create_proc_read_entry("driver/forte/ac97", 0, NULL, ac97_read_proc, forte->ac97)) {
 		remove_proc_entry ("driver/forte/chip", NULL);
 		remove_proc_entry ("driver/forte", NULL);
 		return -EIO;
@@ -2116,12 +2112,7 @@ forte_init_module (void)
 {
 	printk (KERN_INFO PFX DRIVER_VERSION "\n");
 
-	if (!pci_register_driver (&forte_pci_driver)) {
-		pci_unregister_driver (&forte_pci_driver);
-		return -ENODEV;
-	}
-
-	return 0;
+	return pci_register_driver (&forte_pci_driver);
 }
 
 

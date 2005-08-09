@@ -29,10 +29,6 @@
     file under either the MPL or the GPL.
     
 ======================================================================*/
-/*
- * Please see linux/Documentation/arm/SA1100/PCMCIA for more information
- * on the low-level kernel interface.
- */
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -43,7 +39,7 @@
 #include <pcmcia/cs.h>
 #include <pcmcia/ss.h>
 
-#include "sa1100.h"
+#include "sa1100_generic.h"
 
 static int (*sa11x0_pcmcia_hw_init[])(struct device *dev) = {
 #ifdef CONFIG_SA1100_ASSABET
@@ -52,35 +48,14 @@ static int (*sa11x0_pcmcia_hw_init[])(struct device *dev) = {
 #ifdef CONFIG_SA1100_CERF
 	pcmcia_cerf_init,
 #endif
-#ifdef CONFIG_SA1100_FLEXANET
-	pcmcia_flexanet_init,
-#endif
-#ifdef CONFIG_SA1100_FREEBIRD
-	pcmcia_freebird_init,
-#endif
-#ifdef CONFIG_SA1100_GRAPHICSCLIENT
-	pcmcia_gcplus_init,
-#endif
 #ifdef CONFIG_SA1100_H3600
 	pcmcia_h3600_init,
-#endif
-#ifdef CONFIG_SA1100_PANGOLIN
-	pcmcia_pangolin_init,
 #endif
 #ifdef CONFIG_SA1100_SHANNON
 	pcmcia_shannon_init,
 #endif
 #ifdef CONFIG_SA1100_SIMPAD
 	pcmcia_simpad_init,
-#endif
-#ifdef CONFIG_SA1100_STORK
-	pcmcia_stork_init,
-#endif
-#ifdef CONFIG_SA1100_TRIZEPS
-	pcmcia_trizeps_init,
-#endif
-#ifdef CONFIG_SA1100_YOPY
-	pcmcia_yopy_init,
 #endif
 };
 
@@ -100,7 +75,7 @@ static int sa11x0_drv_pcmcia_probe(struct device *dev)
 	return ret;
 }
 
-static int sa11x0_drv_pcmcia_suspend(struct device *dev, u32 state, u32 level)
+static int sa11x0_drv_pcmcia_suspend(struct device *dev, pm_message_t state, u32 level)
 {
 	int ret = 0;
 	if (level == SUSPEND_SAVE_STATE)
@@ -118,7 +93,7 @@ static int sa11x0_drv_pcmcia_resume(struct device *dev, u32 level)
 
 static struct device_driver sa11x0_pcmcia_driver = {
 	.probe		= sa11x0_drv_pcmcia_probe,
-	.remove		= sa11xx_drv_pcmcia_remove,
+	.remove		= soc_common_drv_pcmcia_remove,
 	.name		= "sa11x0-pcmcia",
 	.bus		= &platform_bus_type,
 	.suspend 	= sa11x0_drv_pcmcia_suspend,

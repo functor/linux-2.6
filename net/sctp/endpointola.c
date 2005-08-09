@@ -63,6 +63,81 @@
 /* Forward declarations for internal helpers. */
 static void sctp_endpoint_bh_rcv(struct sctp_endpoint *ep);
 
+/*
+ * Initialize the base fields of the endpoint structure.
+ */
+static struct sctp_endpoint *sctp_endpoint_init(struct sctp_endpoint *ep,
+						struct sock *sk, int gfp)
+{
+	struct sctp_sock *sp = sctp_sk(sk);
+	memset(ep, 0, sizeof(struct sctp_endpoint));
+
+	/* Initialize the base structure. */
+	/* What type of endpoint are we?  */
+	ep->base.type = SCTP_EP_TYPE_SOCKET;
+
+	/* Initialize the basic object fields. */
+	atomic_set(&ep->base.refcnt, 1);
+	ep->base.dead = 0;
+	ep->base.malloced = 1;
+
+	/* Create an input queue.  */
+	sctp_inq_init(&ep->base.inqueue);
+
+	/* Set its top-half handler */
+	sctp_inq_set_th_handler(&ep->base.inqueue,
+				(void (*)(void *))sctp_endpoint_bh_rcv, ep);
+
+	/* Initialize the bind addr area */
+	sctp_bind_addr_init(&ep->base.bind_addr, 0);
+	rwlock_init(&ep->base.addr_lock);
+
+	/* Remember who we are attached to.  */
+	ep->base.sk = sk;
+	sock_hold(ep->base.sk);
+
+	/* Create the lists of associations.  */
+	INIT_LIST_HEAD(&ep->asocs);
+
+	/* Set up the base timeout information.  */
+	ep->timeouts[SCTP_EVENT_TIMEOUT_NONE] = 0;
+	ep->timeouts[SCTP_EVENT_TIMEOUT_T1_COOKIE] =
+		SCTP_DEFAULT_TIMEOUT_T1_COOKIE;
+	ep->timeouts[SCTP_EVENT_TIMEOUT_T1_INIT] =
+		SCTP_DEFAULT_TIMEOUT_T1_INIT;
+	ep->timeouts[SCTP_EVENT_TIMEOUT_T2_SHUTDOWN] =
+		msecs_to_jiffies(sp->rtoinfo.srto_initial);
+	ep->timeouts[SCTP_EVENT_TIMEOUT_T3_RTX] = 0;
+	ep->timeouts[SCTP_EVENT_TIMEOUT_T4_RTO] = 0;
+
+	/* sctpimpguide-05 Section 2.12.2
+	 * If the 'T5-shutdown-guard' timer is used, it SHOULD be set to the
+	 * recommended value of 5 times 'RTO.Max'.
+	 */
+        ep->timeouts[SCTP_EVENT_TIMEOUT_T5_SHUTDOWN_GUARD]
+		= 5 * msecs_to_jiffies(sp->rtoinfo.srto_max);
+
+	ep->timeouts[SCTP_EVENT_TIMEOUT_HEARTBEAT] =
+		SCTP_DEFAULT_TIMEOUT_HEARTBEAT;
+	ep->timeouts[SCTP_EVENT_TIMEOUT_SACK] =
+		SCTP_DEFAULT_TIMEOUT_SACK;
+	ep->timeouts[SCTP_EVENT_TIMEOUT_AUTOCLOSE] =
+		sp->autoclose * HZ;
+
+	/* Use SCTP specific send buffer space queues.  */
+	ep->sndbuf_policy = sctp_sndbuf_policy;
+	sk->sk_write_space = sctp_write_space;
+	sock_set_flag(sk, SOCK_USE_WRITE_QUEUE);
+
+	/* Initialize the secret key used with cookie. */
+	get_random_bytes(&ep->secret_key[0], SCTP_SECRET_SIZE);
+	ep->last_key = ep->current_key = 0;
+	ep->key_changed_at = jiffies;
+
+	ep->debug_name = "unnamedEndpoint";
+	return ep;
+}
+
 /* Create a sctp_endpoint with all that boring stuff initialized.
  * Returns NULL if there isn't enough memory.
  */
@@ -84,80 +159,6 @@ fail_init:
 	kfree(ep);
 fail:
 	return NULL;
-}
-
-/*
- * Initialize the base fields of the endpoint structure.
- */
-struct sctp_endpoint *sctp_endpoint_init(struct sctp_endpoint *ep,
-					 struct sock *sk, int gfp)
-{
-	struct sctp_opt *sp = sctp_sk(sk);
-	memset(ep, 0, sizeof(struct sctp_endpoint));
-
-	/* Initialize the base structure. */
-	/* What type of endpoint are we?  */
-	ep->base.type = SCTP_EP_TYPE_SOCKET;
-
-	/* Initialize the basic object fields. */
-	atomic_set(&ep->base.refcnt, 1);
-	ep->base.dead = 0;
-	ep->base.malloced = 1;
-
-	/* Create an input queue.  */
-	sctp_inq_init(&ep->base.inqueue);
-
-	/* Set its top-half handler */
-	sctp_inq_set_th_handler(&ep->base.inqueue,
-				(void (*)(void *))sctp_endpoint_bh_rcv, ep);
-
-	/* Initialize the bind addr area */
-	sctp_bind_addr_init(&ep->base.bind_addr, 0);
-	ep->base.addr_lock = RW_LOCK_UNLOCKED;
-
-	/* Remember who we are attached to.  */
-	ep->base.sk = sk;
-	sock_hold(ep->base.sk);
-
-	/* Create the lists of associations.  */
-	INIT_LIST_HEAD(&ep->asocs);
-
-	/* Set up the base timeout information.  */
-	ep->timeouts[SCTP_EVENT_TIMEOUT_NONE] = 0;
-	ep->timeouts[SCTP_EVENT_TIMEOUT_T1_COOKIE] =
-		SCTP_DEFAULT_TIMEOUT_T1_COOKIE;
-	ep->timeouts[SCTP_EVENT_TIMEOUT_T1_INIT] =
-		SCTP_DEFAULT_TIMEOUT_T1_INIT;
-	ep->timeouts[SCTP_EVENT_TIMEOUT_T2_SHUTDOWN] =
-		MSECS_TO_JIFFIES(sp->rtoinfo.srto_initial);
-	ep->timeouts[SCTP_EVENT_TIMEOUT_T3_RTX] = 0;
-	ep->timeouts[SCTP_EVENT_TIMEOUT_T4_RTO] = 0;
-
-	/* sctpimpguide-05 Section 2.12.2
-	 * If the 'T5-shutdown-guard' timer is used, it SHOULD be set to the
-	 * recommended value of 5 times 'RTO.Max'.
-	 */
-        ep->timeouts[SCTP_EVENT_TIMEOUT_T5_SHUTDOWN_GUARD]
-		= 5 * MSECS_TO_JIFFIES(sp->rtoinfo.srto_max);
-
-	ep->timeouts[SCTP_EVENT_TIMEOUT_HEARTBEAT] =
-		SCTP_DEFAULT_TIMEOUT_HEARTBEAT;
-	ep->timeouts[SCTP_EVENT_TIMEOUT_SACK] =
-		SCTP_DEFAULT_TIMEOUT_SACK;
-	ep->timeouts[SCTP_EVENT_TIMEOUT_AUTOCLOSE] =
-		sp->autoclose * HZ;
-
-	/* Use SCTP specific send buffer space queues.  */
-	sk->sk_write_space = sctp_write_space;
-	sk->sk_use_write_queue = 1;
-
-	/* Initialize the secret key used with cookie. */
-	get_random_bytes(&ep->secret_key[0], SCTP_SECRET_SIZE);
-	ep->last_key = ep->current_key = 0;
-	ep->key_changed_at = jiffies;
-
-	ep->debug_name = "unnamedEndpoint";
-	return ep;
 }
 
 /* Add an association to an endpoint.  */
@@ -184,7 +185,7 @@ void sctp_endpoint_free(struct sctp_endpoint *ep)
 }
 
 /* Final destructor for endpoint.  */
-void sctp_endpoint_destroy(struct sctp_endpoint *ep)
+static void sctp_endpoint_destroy(struct sctp_endpoint *ep)
 {
 	SCTP_ASSERT(ep->base.dead, "Endpoint is not dead", return);
 
@@ -257,7 +258,7 @@ out:
  * We do a linear search of the associations for this endpoint.
  * We return the matching transport address too.
  */
-struct sctp_association *__sctp_endpoint_lookup_assoc(
+static struct sctp_association *__sctp_endpoint_lookup_assoc(
 	const struct sctp_endpoint *ep,
 	const union sctp_addr *paddr,
 	struct sctp_transport **transport)
@@ -345,7 +346,7 @@ static void sctp_endpoint_bh_rcv(struct sctp_endpoint *ep)
 	sk = ep->base.sk;
 
 	while (NULL != (chunk = sctp_inq_pop(inqueue))) {
-		subtype.chunk = chunk->chunk_hdr->type;
+		subtype = SCTP_ST_CHUNK(chunk->chunk_hdr->type);
 
 		/* We might have grown an association since last we
 		 * looked, so try again.
@@ -369,7 +370,7 @@ static void sctp_endpoint_bh_rcv(struct sctp_endpoint *ep)
 		if (asoc && sctp_chunk_is_data(chunk))
 			asoc->peer.last_data_from = chunk->transport;
 		else
-			SCTP_INC_STATS(SctpInCtrlChunks);
+			SCTP_INC_STATS(SCTP_MIB_INCTRLCHUNKS);
 
 		if (chunk->transport)
 			chunk->transport->last_time_heard = jiffies;

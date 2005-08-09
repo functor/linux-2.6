@@ -1,9 +1,10 @@
 #ifndef _PARISC_DMA_MAPPING_H
 #define _PARISC_DMA_MAPPING_H
 
-#include <linux/mm.h>
 #include <linux/config.h>
+#include <linux/mm.h>
 #include <asm/cacheflush.h>
+#include <asm/scatterlist.h>
 
 /* See Documentation/DMA-mapping.txt */
 struct hppa_dma_ops {
@@ -246,5 +247,8 @@ int ccio_allocate_resource(const struct parisc_device *dev,
 struct parisc_device;
 void * sba_get_iommu(struct parisc_device *dev);
 #endif
+
+/* At the moment, we panic on error for IOMMU resource exaustion */
+#define dma_mapping_error(x)	0
 
 #endif

@@ -105,14 +105,18 @@
 #define	MPC10X_CFG_PICR1_ADDR_MAP_MASK	0x00010000
 #define	MPC10X_CFG_PICR1_ADDR_MAP_A	0x00010000
 #define	MPC10X_CFG_PICR1_ADDR_MAP_B	0x00000000
+#define	MPC10X_CFG_PICR1_SPEC_PCI_RD	0x00000004
 #define	MPC10X_CFG_PICR1_ST_GATH_EN	0x00000040
+
+#define	MPC10X_CFG_PICR2_REG		0xac
+#define	MPC10X_CFG_PICR2_COPYBACK_OPT	0x00000001
 
 #define	MPC10X_CFG_MAPB_OPTIONS_REG	0xe0
 #define	MPC10X_CFG_MAPB_OPTIONS_CFAE	0x80	/* CPU_FD_ALIAS_EN */
 #define	MPC10X_CFG_MAPB_OPTIONS_PFAE	0x40	/* PCI_FD_ALIAS_EN */
 #define	MPC10X_CFG_MAPB_OPTIONS_DR	0x20	/* DLL_RESET */
-#define	MPC10X_CFG_MAPB_OPTIONS_PCICH	0x80	/* PCI_COMPATIBILITY_HOLE */
-#define	MPC10X_CFG_MAPB_OPTIONS_PROCCH	0x40	/* PROC_COMPATIBILITY_HOLE */
+#define	MPC10X_CFG_MAPB_OPTIONS_PCICH	0x08	/* PCI_COMPATIBILITY_HOLE */
+#define	MPC10X_CFG_MAPB_OPTIONS_PROCCH	0x04	/* PROC_COMPATIBILITY_HOLE */
 
 /* Define offsets for the memory controller registers in the config space */
 #define MPC10X_MCTLR_MEM_START_1	0x80	/* Banks 0-3 */
@@ -163,5 +167,8 @@ int mpc10x_bridge_init(struct pci_controller *hose,
 unsigned long mpc10x_get_mem_size(uint mem_map);
 int mpc10x_enable_store_gathering(struct pci_controller *hose);
 int mpc10x_disable_store_gathering(struct pci_controller *hose);
+
+/* For MPC107 boards that use the built-in openpic */
+void mpc10x_set_openpic(void);
 
 #endif	/* __PPC_KERNEL_MPC10X_H */

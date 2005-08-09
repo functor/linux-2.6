@@ -15,6 +15,7 @@
 
 #include <linux/config.h>
 #include <linux/swap.h>
+#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 
 /*
@@ -87,11 +88,11 @@ tlb_finish_mmu(struct mmu_gather *tlb, unsigned long start, unsigned long end)
 {
 	int freed = tlb->freed;
 	struct mm_struct *mm = tlb->mm;
-	int rss = mm->rss;
+	int rss = get_mm_counter(mm, rss);
 
 	if (rss < freed)
 		freed = rss;
-	mm->rss = rss - freed;
+	add_mm_counter(mm, rss, -freed);
 	tlb_flush_mmu(tlb, start, end);
 
 	/* keep the page table cache within bounds */
@@ -140,10 +141,20 @@ static inline void tlb_remove_page(struct mmu_gather *tlb, struct page *page)
 		__pte_free_tlb(tlb, ptep);			\
 	} while (0)
 
+#ifndef __ARCH_HAS_4LEVEL_HACK
+#define pud_free_tlb(tlb, pudp)					\
+	do {							\
+		tlb->need_flush = 1;				\
+		__pud_free_tlb(tlb, pudp);			\
+	} while (0)
+#endif
+
 #define pmd_free_tlb(tlb, pmdp)					\
 	do {							\
 		tlb->need_flush = 1;				\
 		__pmd_free_tlb(tlb, pmdp);			\
 	} while (0)
+
+#define tlb_migrate_finish(mm) do {} while (0)
 
 #endif /* _ASM_GENERIC__TLB_H */

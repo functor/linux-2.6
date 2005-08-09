@@ -174,8 +174,8 @@ static size_t get_history_info(char *buf)
 	return len;
 }
 
-int ftape_read_proc(char *page, char **start, off_t off,
-		    int count, int *eof, void *data)
+static int ftape_read_proc(char *page, char **start, off_t off,
+			   int count, int *eof, void *data)
 {
 	char *ptr = page;
 	size_t len;
@@ -192,7 +192,7 @@ int ftape_read_proc(char *page, char **start, off_t off,
 	ptr += get_history_info(ptr);
 
 	len = strlen(page);
-	*start = 0;
+	*start = NULL;
 	if (off+count >= len) {
 		*eof = 1;
 	} else {

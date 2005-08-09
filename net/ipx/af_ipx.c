@@ -78,7 +78,7 @@ static struct datalink_proto *pSNAP_datalink;
 static struct proto_ops ipx_dgram_ops;
 
 LIST_HEAD(ipx_interfaces);
-spinlock_t ipx_interfaces_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(ipx_interfaces_lock);
 
 struct ipx_interface *ipx_primary_net;
 struct ipx_interface *ipx_internal_net;
@@ -90,7 +90,7 @@ extern int ipxrtr_route_packet(struct sock *sk, struct sockaddr_ipx *usipx,
 			       struct iovec *iov, int len, int noblock);
 extern int ipxrtr_route_skb(struct sk_buff *skb);
 extern struct ipx_route *ipxrtr_lookup(__u32 net);
-extern int ipxrtr_ioctl(unsigned int cmd, void *arg);
+extern int ipxrtr_ioctl(unsigned int cmd, void __user *arg);
 
 #undef IPX_REFCNT_DEBUG
 #ifdef IPX_REFCNT_DEBUG
@@ -114,7 +114,7 @@ static void ipxcfg_set_auto_select(char val)
 		ipx_primary_net = ipx_interfaces_head();
 }
 
-static int ipxcfg_get_config_data(struct ipx_config_data *arg)
+static int ipxcfg_get_config_data(struct ipx_config_data __user *arg)
 {
 	struct ipx_config_data vals;
 
@@ -277,7 +277,7 @@ static struct sock *ipxitf_find_internal_socket(struct ipx_interface *intrfc,
 	spin_lock_bh(&intrfc->if_sklist_lock);
 
 	sk_for_each(s, node, &intrfc->if_sklist) {
-		struct ipx_opt *ipxs = ipx_sk(s);
+		struct ipx_sock *ipxs = ipx_sk(s);
 
 		if (ipxs->port == port &&
 		    !memcmp(ipx_node, ipxs->node, IPX_NODE_LEN))
@@ -291,7 +291,7 @@ found:
 }
 #endif
 
-void __ipxitf_down(struct ipx_interface *intrfc)
+static void __ipxitf_down(struct ipx_interface *intrfc)
 {
 	struct sock *s;
 	struct hlist_node *node, *t;
@@ -302,13 +302,13 @@ void __ipxitf_down(struct ipx_interface *intrfc)
 	spin_lock_bh(&intrfc->if_sklist_lock);
 	/* error sockets */
 	sk_for_each_safe(s, node, t, &intrfc->if_sklist) {
-		struct ipx_opt *ipxs = ipx_sk(s);
+		struct ipx_sock *ipxs = ipx_sk(s);
 
 		s->sk_err = ENOLINK;
 		s->sk_error_report(s);
 		ipxs->intrfc = NULL;
 		ipxs->port   = 0;
-		s->sk_zapped = 1;	/* Indicates it is no longer bound */
+		sock_set_flag(s, SOCK_ZAPPED); /* Indicates it is no longer bound */
 		sk_del_node_init(s);
 	}
 	INIT_HLIST_HEAD(&intrfc->if_sklist);
@@ -333,6 +333,12 @@ void ipxitf_down(struct ipx_interface *intrfc)
 	spin_lock_bh(&ipx_interfaces_lock);
 	__ipxitf_down(intrfc);
 	spin_unlock_bh(&ipx_interfaces_lock);
+}
+
+static __inline__ void __ipxitf_put(struct ipx_interface *intrfc)
+{
+	if (atomic_dec_and_test(&intrfc->refcnt))
+		__ipxitf_down(intrfc);
 }
 
 static int ipxitf_device_event(struct notifier_block *notifier,
@@ -394,7 +400,7 @@ static int ipxitf_demux_socket(struct ipx_interface *intrfc,
 	spin_lock_bh(&intrfc->if_sklist_lock);
 
 	sk_for_each(s, node, &intrfc->if_sklist) {
-		struct ipx_opt *ipxs = ipx_sk(s);
+		struct ipx_sock *ipxs = ipx_sk(s);
 
 		if (ipxs->port == ipx->ipx_dest.sock &&
 		    (is_broadcast || !memcmp(ipx->ipx_dest.node,
@@ -1141,7 +1147,7 @@ out:
 	return intrfc;
 }
 
-static int ipxitf_ioctl(unsigned int cmd, void *arg)
+static int ipxitf_ioctl(unsigned int cmd, void __user *arg)
 {
 	int rc = -EINVAL;
 	struct ifreq ifr;
@@ -1204,14 +1210,14 @@ static int ipxitf_ioctl(unsigned int cmd, void *arg)
 	}
 	case SIOCAIPXITFCRT: 
 		rc = -EFAULT;
-		if (get_user(val, (unsigned char *) arg))
+		if (get_user(val, (unsigned char __user *) arg))
 			break;
 		rc = 0;
 		ipxcfg_auto_create_interfaces = val;
 		break;
 	case SIOCAIPXPRISLT: 
 		rc = -EFAULT;
-		if (get_user(val, (unsigned char *) arg))
+		if (get_user(val, (unsigned char __user *) arg))
 			break;
 		rc = 0;
 		ipxcfg_set_auto_select(val);
@@ -1285,7 +1291,7 @@ const char *ipx_device_name(struct ipx_interface *intrfc)
  * socket object. */
 
 static int ipx_setsockopt(struct socket *sock, int level, int optname,
-			  char *optval, int optlen)
+			  char __user *optval, int optlen)
 {
 	struct sock *sk = sock->sk;
 	int opt;
@@ -1295,7 +1301,7 @@ static int ipx_setsockopt(struct socket *sock, int level, int optname,
 		goto out;
 
 	rc = -EFAULT;
-	if (get_user(opt, (unsigned int *)optval))
+	if (get_user(opt, (unsigned int __user *)optval))
 		goto out;
 
 	rc = -ENOPROTOOPT;
@@ -1309,7 +1315,7 @@ out:
 }
 
 static int ipx_getsockopt(struct socket *sock, int level, int optname,
-	char *optval, int *optlen)
+	char __user *optval, int __user *optlen)
 {
 	struct sock *sk = sock->sk;
 	int val = 0;
@@ -1339,49 +1345,41 @@ out:
 	return rc;
 }
 
+static struct proto ipx_proto = {
+	.name	  = "IPX",
+	.owner	  = THIS_MODULE,
+	.obj_size = sizeof(struct ipx_sock),
+};
+
 static int ipx_create(struct socket *sock, int protocol)
 {
 	int rc = -ESOCKTNOSUPPORT;
-	struct ipx_opt *ipx = NULL;
 	struct sock *sk;
 
-	switch (sock->type) {
-	case SOCK_DGRAM:
-		sk = sk_alloc(PF_IPX, GFP_KERNEL, 1, NULL);
-        	rc = -ENOMEM;
-		if (!sk)
-			goto out;
-		ipx = sk->sk_protinfo = kmalloc(sizeof(*ipx), GFP_KERNEL);
-		if (!ipx)
-			goto outsk;
-		memset(ipx, 0, sizeof(*ipx));
-                sock->ops = &ipx_dgram_ops;
-                break;
-	case SOCK_SEQPACKET:
-		/*
-		 * SPX support is not anymore in the kernel sources. If
-		 * you want to ressurrect it, completing it and making
-		 * it understand shared skbs, be fully multithreaded,
-		 * etc, grab the sources in an early 2.5 kernel tree.
-		 */
-	case SOCK_STREAM:       /* Allow higher levels to piggyback */
-	default:
+	/*
+	 * SPX support is not anymore in the kernel sources. If you want to
+	 * ressurrect it, completing it and making it understand shared skbs,
+	 * be fully multithreaded, etc, grab the sources in an early 2.5 kernel
+	 * tree.
+	 */
+	if (sock->type != SOCK_DGRAM)
 		goto out;
-	}
+
+       	rc = -ENOMEM;
+	sk = sk_alloc(PF_IPX, GFP_KERNEL, &ipx_proto, 1);
+	if (!sk)
+		goto out;
 #ifdef IPX_REFCNT_DEBUG
         atomic_inc(&ipx_sock_nr);
         printk(KERN_DEBUG "IPX socket %p created, now we have %d alive\n", sk,
 			atomic_read(&ipx_sock_nr));
 #endif
 	sock_init_data(sock, sk);
-	sk_set_owner(sk, THIS_MODULE);
 	sk->sk_no_check = 1;		/* Checksum off by default */
+	sock->ops = &ipx_dgram_ops;
 	rc = 0;
 out:
 	return rc;
-outsk:
-	sk_free(sk);
-	goto out;
 }
 
 static int ipx_release(struct socket *sock)
@@ -1427,12 +1425,12 @@ static unsigned short ipx_first_free_socketnum(struct ipx_interface *intrfc)
 static int ipx_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 {
 	struct sock *sk = sock->sk;
-	struct ipx_opt *ipxs = ipx_sk(sk);
+	struct ipx_sock *ipxs = ipx_sk(sk);
 	struct ipx_interface *intrfc;
 	struct sockaddr_ipx *addr = (struct sockaddr_ipx *)uaddr;
 	int rc = -EINVAL;
 
-	if (!sk->sk_zapped || addr_len != sizeof(struct sockaddr_ipx))
+	if (!sock_flag(sk, SOCK_ZAPPED) || addr_len != sizeof(struct sockaddr_ipx))
 		goto out;
 
 	intrfc = ipxitf_find_using_net(addr->sipx_network);
@@ -1510,7 +1508,7 @@ static int ipx_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 #endif	/* CONFIG_IPX_INTERN */
 
 	ipxitf_insert_socket(intrfc, sk);
-	sk->sk_zapped = 0;
+	sock_reset_flag(sk, SOCK_ZAPPED);
 
 	rc = 0;
 out_put:
@@ -1523,7 +1521,7 @@ static int ipx_connect(struct socket *sock, struct sockaddr *uaddr,
 	int addr_len, int flags)
 {
 	struct sock *sk = sock->sk;
-	struct ipx_opt *ipxs = ipx_sk(sk);
+	struct ipx_sock *ipxs = ipx_sk(sk);
 	struct sockaddr_ipx *addr;
 	int rc = -EINVAL;
 	struct ipx_route *rt;
@@ -1587,7 +1585,7 @@ static int ipx_getname(struct socket *sock, struct sockaddr *uaddr,
 	struct ipx_address *addr;
 	struct sockaddr_ipx sipx;
 	struct sock *sk = sock->sk;
-	struct ipx_opt *ipxs = ipx_sk(sk);
+	struct ipx_sock *ipxs = ipx_sk(sk);
 	int rc;
 
 	*uaddr_len = sizeof(struct sockaddr_ipx);
@@ -1621,6 +1619,7 @@ static int ipx_getname(struct socket *sock, struct sockaddr *uaddr,
 
 	sipx.sipx_family = AF_IPX;
 	sipx.sipx_type	 = ipxs->type;
+	sipx.sipx_zero	 = 0;
 	memcpy(uaddr, &sipx, sizeof(sipx));
 
 	rc = 0;
@@ -1628,7 +1627,7 @@ out:
 	return rc;
 }
 
-int ipx_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt)
+static int ipx_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt)
 {
 	/* NULL here for pt means the packet was looped back */
 	struct ipx_interface *intrfc;
@@ -1686,7 +1685,7 @@ static int ipx_sendmsg(struct kiocb *iocb, struct socket *sock,
 	struct msghdr *msg, size_t len)
 {
 	struct sock *sk = sock->sk;
-	struct ipx_opt *ipxs = ipx_sk(sk);
+	struct ipx_sock *ipxs = ipx_sk(sk);
 	struct sockaddr_ipx *usipx = (struct sockaddr_ipx *)msg->msg_name;
 	struct sockaddr_ipx local_sipx;
 	int rc = -EINVAL;
@@ -1695,7 +1694,7 @@ static int ipx_sendmsg(struct kiocb *iocb, struct socket *sock,
 	/* Socket gets bound below anyway */
 /*	if (sk->sk_zapped)
 		return -EIO; */	/* Socket not bound */
-	if (flags & ~MSG_DONTWAIT)
+	if (flags & ~(MSG_DONTWAIT|MSG_CMSG_COMPAT))
 		goto out;
 
 	/* Max possible packet size limited by 16 bit pktsize in header */
@@ -1751,7 +1750,7 @@ static int ipx_recvmsg(struct kiocb *iocb, struct socket *sock,
 		struct msghdr *msg, size_t size, int flags)
 {
 	struct sock *sk = sock->sk;
-	struct ipx_opt *ipxs = ipx_sk(sk);
+	struct ipx_sock *ipxs = ipx_sk(sk);
 	struct sockaddr_ipx *sipx = (struct sockaddr_ipx *)msg->msg_name;
 	struct ipxhdr *ipx = NULL;
 	struct sk_buff *skb;
@@ -1778,7 +1777,7 @@ static int ipx_recvmsg(struct kiocb *iocb, struct socket *sock,
 	}
 	
 	rc = -ENOTCONN;
-	if (sk->sk_zapped)
+	if (sock_flag(sk, SOCK_ZAPPED))
 		goto out;
 
 	skb = skb_recv_datagram(sk, flags & ~MSG_DONTWAIT,
@@ -1808,6 +1807,7 @@ static int ipx_recvmsg(struct kiocb *iocb, struct socket *sock,
 		memcpy(sipx->sipx_node, ipx->ipx_source.node, IPX_NODE_LEN);
 		sipx->sipx_network	= IPX_SKB_CB(skb)->ipx_source_net;
 		sipx->sipx_type 	= ipx->ipx_type;
+		sipx->sipx_zero		= 0;
 	}
 	rc = copied;
 
@@ -1823,13 +1823,14 @@ static int ipx_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	int rc = 0;
 	long amount = 0;
 	struct sock *sk = sock->sk;
+	void __user *argp = (void __user *)arg;
 
 	switch (cmd) {
 	case TIOCOUTQ:
 		amount = sk->sk_sndbuf - atomic_read(&sk->sk_wmem_alloc);
 		if (amount < 0)
 			amount = 0;
-		rc = put_user(amount, (int *)arg);
+		rc = put_user(amount, (int __user *)argp);
 		break;
 	case TIOCINQ: {
 		struct sk_buff *skb = skb_peek(&sk->sk_receive_queue);
@@ -1837,14 +1838,14 @@ static int ipx_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		 * user tasks fiddle here */
 		if (skb)
 			amount = skb->len - sizeof(struct ipxhdr);
-		rc = put_user(amount, (int *)arg);
+		rc = put_user(amount, (int __user *)argp);
 		break;
 	}
 	case SIOCADDRT:
 	case SIOCDELRT:
 		rc = -EPERM;
 		if (capable(CAP_NET_ADMIN))
-			rc = ipxrtr_ioctl(cmd, (void *)arg);
+			rc = ipxrtr_ioctl(cmd, argp);
 		break;
 	case SIOCSIFADDR:
 	case SIOCAIPXITFCRT:
@@ -1853,10 +1854,10 @@ static int ipx_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		if (!capable(CAP_NET_ADMIN))
 			break;
 	case SIOCGIFADDR:
-		rc = ipxitf_ioctl(cmd, (void *)arg);
+		rc = ipxitf_ioctl(cmd, argp);
 		break;
 	case SIOCIPXCFGDATA:
-		rc = ipxcfg_get_config_data((void *)arg);
+		rc = ipxcfg_get_config_data(argp);
 		break;
 	case SIOCIPXNCPCONN:
 		/*
@@ -1867,12 +1868,12 @@ static int ipx_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
         	if (!capable(CAP_NET_ADMIN))
 			break;
 		rc = get_user(ipx_sk(sk)->ipx_ncp_conn,
-			      (const unsigned short *)(arg));
+			      (const unsigned short __user *)argp);
 		break;
 	case SIOCGSTAMP:
 		rc = -EINVAL;
 		if (sk) 
-			rc = sock_get_timestamp(sk, (struct timeval *)arg);
+			rc = sock_get_timestamp(sk, argp);
 		break;
 	case SIOCGIFDSTADDR:
 	case SIOCSIFDSTADDR:
@@ -1883,7 +1884,7 @@ static int ipx_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		rc = -EINVAL;
 		break;
 	default:
-		rc = dev_ioctl(cmd,(void *) arg);
+		rc = dev_ioctl(cmd, argp);
 		break;
 	}
 
@@ -1956,6 +1957,11 @@ static char ipx_snap_err_msg[] __initdata =
 
 static int __init ipx_init(void)
 {
+	int rc = proto_register(&ipx_proto, 1);
+
+	if (rc != 0)
+		goto out;
+
 	sock_register(&ipx_family_ops);
 
 	pEII_datalink = make_EII_client();
@@ -1981,7 +1987,8 @@ static int __init ipx_init(void)
 	register_netdevice_notifier(&ipx_dev_notifier);
 	ipx_register_sysctl();
 	ipx_proc_init();
-	return 0;
+out:
+	return rc;
 }
 
 static void __exit ipx_proto_finito(void)
@@ -2007,6 +2014,7 @@ static void __exit ipx_proto_finito(void)
 	destroy_EII_client(pEII_datalink);
 	pEII_datalink = NULL;
 
+	proto_unregister(&ipx_proto);
 	sock_unregister(ipx_family_ops.family);
 }
 

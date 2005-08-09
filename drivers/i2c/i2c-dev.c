@@ -53,9 +53,9 @@ struct i2c_dev {
 
 #define I2C_MINORS	256
 static struct i2c_dev *i2c_dev_array[I2C_MINORS];
-static spinlock_t i2c_dev_array_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(i2c_dev_array_lock);
 
-struct i2c_dev *i2c_dev_get_by_minor(unsigned index)
+static struct i2c_dev *i2c_dev_get_by_minor(unsigned index)
 {
 	struct i2c_dev *i2c_dev;
 
@@ -65,7 +65,7 @@ struct i2c_dev *i2c_dev_get_by_minor(unsigned index)
 	return i2c_dev;
 }
 
-struct i2c_dev *i2c_dev_get_by_adapter(struct i2c_adapter *adap)
+static struct i2c_dev *i2c_dev_get_by_adapter(struct i2c_adapter *adap)
 {
 	struct i2c_dev *i2c_dev = NULL;
 
@@ -107,13 +107,6 @@ static void return_i2c_dev(struct i2c_dev *i2c_dev)
 	i2c_dev_array[i2c_dev->minor] = NULL;
 	spin_unlock(&i2c_dev_array_lock);
 }
-
-static ssize_t show_dev(struct class_device *class_dev, char *buf)
-{
-	struct i2c_dev *i2c_dev = to_i2c_dev(class_dev);
-	return print_dev_t(buf, MKDEV(I2C_MAJOR, i2c_dev->minor));
-}
-static CLASS_DEVICE_ATTR(dev, S_IRUGO, show_dev, NULL);
 
 static ssize_t show_adapter_name(struct class_device *class_dev, char *buf)
 {
@@ -173,15 +166,15 @@ static ssize_t i2cdev_write (struct file *file, const char __user *buf, size_t c
 	return ret;
 }
 
-int i2cdev_ioctl (struct inode *inode, struct file *file, unsigned int cmd, 
-                  unsigned long arg)
+static int i2cdev_ioctl(struct inode *inode, struct file *file,
+		unsigned int cmd, unsigned long arg)
 {
 	struct i2c_client *client = (struct i2c_client *)file->private_data;
 	struct i2c_rdwr_ioctl_data rdwr_arg;
 	struct i2c_smbus_ioctl_data data_arg;
 	union i2c_smbus_data temp;
 	struct i2c_msg *rdwr_pa;
-	u8 **data_ptrs;
+	u8 __user **data_ptrs;
 	int i,datasize,res;
 	unsigned long funcs;
 
@@ -238,8 +231,7 @@ int i2cdev_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 			return -EFAULT;
 		}
 
-		data_ptrs = (u8 **) kmalloc(rdwr_arg.nmsgs * sizeof(u8 *),
-					    GFP_KERNEL);
+		data_ptrs = kmalloc(rdwr_arg.nmsgs * sizeof(u8 __user *), GFP_KERNEL);
 		if (data_ptrs == NULL) {
 			kfree(rdwr_pa);
 			return -ENOMEM;
@@ -252,7 +244,7 @@ int i2cdev_ioctl (struct inode *inode, struct file *file, unsigned int cmd,
 				res = -EINVAL;
 				break;
 			}
-			data_ptrs[i] = rdwr_pa[i].buf;
+			data_ptrs[i] = (u8 __user *)rdwr_pa[i].buf;
 			rdwr_pa[i].buf = kmalloc(rdwr_pa[i].len, GFP_KERNEL);
 			if(rdwr_pa[i].buf == NULL) {
 				res = -ENOMEM;
@@ -452,11 +444,11 @@ static int i2cdev_attach_adapter(struct i2c_adapter *adap)
 	else
 		i2c_dev->class_dev.dev = adap->dev.parent;
 	i2c_dev->class_dev.class = &i2c_dev_class;
+	i2c_dev->class_dev.devt = MKDEV(I2C_MAJOR, i2c_dev->minor);
 	snprintf(i2c_dev->class_dev.class_id, BUS_ID_SIZE, "i2c-%d", i2c_dev->minor);
 	retval = class_device_register(&i2c_dev->class_dev);
 	if (retval)
 		goto error;
-	class_device_create_file(&i2c_dev->class_dev, &class_device_attr_dev);
 	class_device_create_file(&i2c_dev->class_dev, &class_device_attr_name);
 	return 0;
 error:
@@ -508,7 +500,6 @@ static struct i2c_driver i2cdev_driver = {
 
 static struct i2c_client i2cdev_client_template = {
 	.name		= "I2C /dev entry",
-	.id		= 1,
 	.addr		= -1,
 	.driver		= &i2cdev_driver,
 };
@@ -519,20 +510,29 @@ static int __init i2c_dev_init(void)
 
 	printk(KERN_INFO "i2c /dev entries driver\n");
 
-	if (register_chrdev(I2C_MAJOR,"i2c",&i2cdev_fops)) {
-		printk(KERN_ERR "i2c-dev.o: unable to get major %d for i2c bus\n",
-		       I2C_MAJOR);
-		return -EIO;
-	}
+	res = register_chrdev(I2C_MAJOR, "i2c", &i2cdev_fops);
+	if (res)
+		goto out;
+
+	res = class_register(&i2c_dev_class);
+	if (res)
+		goto out_unreg_chrdev;
+
+	res = i2c_add_driver(&i2cdev_driver);
+	if (res)
+		goto out_unreg_class;
+
 	devfs_mk_dir("i2c");
-	class_register(&i2c_dev_class);
-	if ((res = i2c_add_driver(&i2cdev_driver))) {
-		printk(KERN_ERR "i2c-dev.o: Driver registration failed, module not inserted.\n");
-		devfs_remove("i2c");
-		unregister_chrdev(I2C_MAJOR,"i2c");
-		return res;
-	}
+
 	return 0;
+
+out_unreg_class:
+	class_unregister(&i2c_dev_class);
+out_unreg_chrdev:
+	unregister_chrdev(I2C_MAJOR, "i2c");
+out:
+	printk(KERN_ERR "%s: Driver Initialisation failed\n", __FILE__);
+	return res;
 }
 
 static void __exit i2c_dev_exit(void)

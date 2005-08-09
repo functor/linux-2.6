@@ -28,9 +28,9 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/crc32.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>
-#include <asm/bitops.h>
 #include <asm/irq.h>
 #include <asm/io.h>
 #include <asm/dma.h>
@@ -53,25 +53,31 @@ static const char version[] =
 #ifdef __arm__
 static void write_rreg(u_long base, u_int reg, u_int val)
 {
-	__asm__("str%?h	%1, [%2]	@ NET_RAP
-		str%?h	%0, [%2, #-4]	@ NET_RDP
-		" : : "r" (val), "r" (reg), "r" (ISAIO_BASE + 0x0464));
+	__asm__(
+	"str%?h	%1, [%2]	@ NET_RAP\n\t"
+	"str%?h	%0, [%2, #-4]	@ NET_RDP"
+	:
+	: "r" (val), "r" (reg), "r" (ISAIO_BASE + 0x0464));
 }
 
 static inline unsigned short read_rreg(u_long base_addr, u_int reg)
 {
 	unsigned short v;
-	__asm__("str%?h	%1, [%2]	@ NET_RAP
-		ldr%?h	%0, [%2, #-4]	@ NET_RDP
-		" : "=r" (v): "r" (reg), "r" (ISAIO_BASE + 0x0464));
+	__asm__(
+	"str%?h	%1, [%2]	@ NET_RAP\n\t"
+	"ldr%?h	%0, [%2, #-4]	@ NET_RDP"
+	: "=r" (v)
+	: "r" (reg), "r" (ISAIO_BASE + 0x0464));
 	return v;
 }
 
 static inline void write_ireg(u_long base, u_int reg, u_int val)
 {
-	__asm__("str%?h	%1, [%2]	@ NET_RAP
-		str%?h	%0, [%2, #8]	@ NET_IDP
-		" : : "r" (val), "r" (reg), "r" (ISAIO_BASE + 0x0464));
+	__asm__(
+	"str%?h	%1, [%2]	@ NET_RAP\n\t"
+	"str%?h	%0, [%2, #8]	@ NET_IDP"
+	:
+	: "r" (val), "r" (reg), "r" (ISAIO_BASE + 0x0464));
 }
 
 static inline unsigned short read_ireg(u_long base_addr, u_int reg)
@@ -101,16 +107,16 @@ am_writebuffer(struct net_device *dev, u_int offset, unsigned char *buf, unsigne
 	}
 	while (length > 8) {
 		unsigned int tmp, tmp2;
-		__asm__ __volatile__("
-			ldm%?ia	%1!, {%2, %3}
-			str%?h	%2, [%0], #4
-			mov%?	%2, %2, lsr #16
-			str%?h	%2, [%0], #4
-			str%?h	%3, [%0], #4
-			mov%?	%3, %3, lsr #16
-			str%?h	%3, [%0], #4
-		" : "=&r" (offset), "=&r" (buf), "=r" (tmp), "=r" (tmp2)
-		  : "0" (offset), "1" (buf));
+		__asm__ __volatile__(
+			"ldm%?ia	%1!, {%2, %3}\n\t"
+			"str%?h	%2, [%0], #4\n\t"
+			"mov%?	%2, %2, lsr #16\n\t"
+			"str%?h	%2, [%0], #4\n\t"
+			"str%?h	%3, [%0], #4\n\t"
+			"mov%?	%3, %3, lsr #16\n\t"
+			"str%?h	%3, [%0], #4"
+		: "=&r" (offset), "=&r" (buf), "=r" (tmp), "=r" (tmp2)
+		: "0" (offset), "1" (buf));
 		length -= 8;
 	}
 	while (length > 0) {
@@ -128,36 +134,36 @@ am_readbuffer(struct net_device *dev, u_int offset, unsigned char *buf, unsigned
 	length = (length + 1) & ~1;
 	if ((int)buf & 2) {
 		unsigned int tmp;
-		__asm__ __volatile__("
-			ldr%?h	%2, [%0], #4
-			str%?b	%2, [%1], #1
-			mov%?	%2, %2, lsr #8
-			str%?b	%2, [%1], #1
-		" : "=&r" (offset), "=&r" (buf), "=r" (tmp): "0" (offset), "1" (buf));
+		__asm__ __volatile__(
+			"ldr%?h	%2, [%0], #4\n\t"
+			"str%?b	%2, [%1], #1\n\t"
+			"mov%?	%2, %2, lsr #8\n\t"
+			"str%?b	%2, [%1], #1"
+		: "=&r" (offset), "=&r" (buf), "=r" (tmp): "0" (offset), "1" (buf));
 		length -= 2;
 	}
 	while (length > 8) {
 		unsigned int tmp, tmp2, tmp3;
-		__asm__ __volatile__("
-			ldr%?h	%2, [%0], #4
-			ldr%?h	%3, [%0], #4
-			orr%?	%2, %2, %3, lsl #16
-			ldr%?h	%3, [%0], #4
-			ldr%?h	%4, [%0], #4
-			orr%?	%3, %3, %4, lsl #16
-			stm%?ia	%1!, {%2, %3}
-		" : "=&r" (offset), "=&r" (buf), "=r" (tmp), "=r" (tmp2), "=r" (tmp3)
-		  : "0" (offset), "1" (buf));
+		__asm__ __volatile__(
+			"ldr%?h	%2, [%0], #4\n\t"
+			"ldr%?h	%3, [%0], #4\n\t"
+			"orr%?	%2, %2, %3, lsl #16\n\t"
+			"ldr%?h	%3, [%0], #4\n\t"
+			"ldr%?h	%4, [%0], #4\n\t"
+			"orr%?	%3, %3, %4, lsl #16\n\t"
+			"stm%?ia	%1!, {%2, %3}"
+		: "=&r" (offset), "=&r" (buf), "=r" (tmp), "=r" (tmp2), "=r" (tmp3)
+		: "0" (offset), "1" (buf));
 		length -= 8;
 	}
 	while (length > 0) {
 		unsigned int tmp;
-		__asm__ __volatile__("
-			ldr%?h	%2, [%0], #4
-			str%?b	%2, [%1], #1
-			mov%?	%2, %2, lsr #8
-			str%?b	%2, [%1], #1
-		" : "=&r" (offset), "=&r" (buf), "=r" (tmp) : "0" (offset), "1" (buf));
+		__asm__ __volatile__(
+			"ldr%?h	%2, [%0], #4\n\t"
+			"str%?b	%2, [%1], #1\n\t"
+			"mov%?	%2, %2, lsr #8\n\t"
+			"str%?b	%2, [%1], #1"
+		: "=&r" (offset), "=&r" (buf), "=r" (tmp) : "0" (offset), "1" (buf));
 		length -= 2;
 	}
 }
@@ -618,10 +624,21 @@ am79c961_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 		if (status & CSR0_CERR) {
 			handled = 1;
 			mod_timer(&priv->timer, jiffies);
+		}
 	} while (--n && status & (CSR0_RINT | CSR0_TINT));
 
 	return IRQ_RETVAL(handled);
 }
+
+#ifdef CONFIG_NET_POLL_CONTROLLER
+static void am79c961_poll_controller(struct net_device *dev)
+{
+	unsigned long flags;
+	local_irq_save(flags);
+	am79c961_interrupt(dev->irq, dev, NULL);
+	local_irq_restore(flags);
+}
+#endif
 
 /*
  * Initialise the chip.  Note that we always expect
@@ -714,6 +731,9 @@ static int __init am79c961_init(void)
 	dev->get_stats		= am79c961_getstats;
 	dev->set_multicast_list	= am79c961_setmulticastlist;
 	dev->tx_timeout		= am79c961_timeout;
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	dev->poll_controller	= am79c961_poll_controller;
+#endif
 
 	ret = register_netdev(dev);
 	if (ret == 0)

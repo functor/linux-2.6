@@ -17,9 +17,12 @@
 #include <linux/sched.h>
 #include <linux/threads.h>
 #include <linux/init.h>
+#include <linux/module.h>
+
 #include <asm/cputable.h>
 
 struct cpu_spec* cur_cpu_spec = NULL;
+EXPORT_SYMBOL(cur_cpu_spec);
 
 /* NOTE:
  * Unlike ppc32, ppc64 will only call this once for the boot CPU, it's
@@ -141,7 +144,8 @@ struct cpu_spec	cpu_specs[] = {
 	    0xffff0000, 0x003a0000, "POWER5 (gr)",
 	    CPU_FTR_SPLIT_ID_CACHE | CPU_FTR_USE_TB | CPU_FTR_HPTE_TABLE |
 		    CPU_FTR_PPCAS_ARCH_V2 | CPU_FTR_MMCRA | CPU_FTR_SMT |
-		    CPU_FTR_COHERENT_ICACHE | CPU_FTR_LOCKLESS_TLBIE,
+		    CPU_FTR_COHERENT_ICACHE | CPU_FTR_LOCKLESS_TLBIE |
+		    CPU_FTR_MMCRA_SIHV,
 	    COMMON_USER_PPC64,
 	    128, 128,
 	    __setup_cpu_power4,
@@ -151,7 +155,8 @@ struct cpu_spec	cpu_specs[] = {
 	    0xffff0000, 0x003b0000, "POWER5 (gs)",
 	    CPU_FTR_SPLIT_ID_CACHE | CPU_FTR_USE_TB | CPU_FTR_HPTE_TABLE |
 		    CPU_FTR_PPCAS_ARCH_V2 | CPU_FTR_MMCRA | CPU_FTR_SMT |
-		    CPU_FTR_COHERENT_ICACHE | CPU_FTR_LOCKLESS_TLBIE,
+		    CPU_FTR_COHERENT_ICACHE | CPU_FTR_LOCKLESS_TLBIE |
+		    CPU_FTR_MMCRA_SIHV,
 	    COMMON_USER_PPC64,
 	    128, 128,
 	    __setup_cpu_power4,

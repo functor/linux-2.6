@@ -4,37 +4,42 @@
 #define _SPARC64_PAGE_H
 
 #include <linux/config.h>
+#include <asm/const.h>
 
+#if defined(CONFIG_SPARC64_PAGE_SIZE_8KB)
 #define PAGE_SHIFT   13
-#ifndef __ASSEMBLY__
-/* I have my suspicions... -DaveM */
-#define PAGE_SIZE    (1UL << PAGE_SHIFT)
+#elif defined(CONFIG_SPARC64_PAGE_SIZE_64KB)
+#define PAGE_SHIFT   16
+#elif defined(CONFIG_SPARC64_PAGE_SIZE_512KB)
+#define PAGE_SHIFT   19
+#elif defined(CONFIG_SPARC64_PAGE_SIZE_4MB)
+#define PAGE_SHIFT   22
 #else
-#define PAGE_SIZE    (1 << PAGE_SHIFT)
+#error No page size specified in kernel configuration
 #endif
 
+#define PAGE_SIZE    (_AC(1,UL) << PAGE_SHIFT)
 #define PAGE_MASK    (~(PAGE_SIZE-1))
-
 
 #ifdef __KERNEL__
 
 #ifndef __ASSEMBLY__
 
-/* Sparc64 is slow at multiplication, we prefer to use some extra space. */
-#define WANT_PAGE_VIRTUAL 1
-
 extern void _clear_page(void *page);
 #define clear_page(X)	_clear_page((void *)(X))
 struct page;
 extern void clear_user_page(void *addr, unsigned long vaddr, struct page *page);
-#define copy_page(X,Y)	__memcpy((void *)(X), (void *)(Y), PAGE_SIZE)
+#define copy_page(X,Y)	memcpy((void *)(X), (void *)(Y), PAGE_SIZE)
 extern void copy_user_page(void *to, void *from, unsigned long vaddr, struct page *topage);
 
-/* GROSS, defining this makes gcc pass these types as aggregates,
- * and thus on the stack, turn this crap off... -DaveM
+/* Unlike sparc32, sparc64's parameter passing API is more
+ * sane in that structures which as small enough are passed
+ * in registers instead of on the stack.  Thus, setting
+ * STRICT_MM_TYPECHECKS does not generate worse code so
+ * let's enable it to get the type checking.
  */
 
-/* #define STRICT_MM_TYPECHECKS */
+#define STRICT_MM_TYPECHECKS
 
 #ifdef STRICT_MM_TYPECHECKS
 /* These are used to make use of C type-checking.. */
@@ -42,25 +47,19 @@ typedef struct { unsigned long pte; } pte_t;
 typedef struct { unsigned long iopte; } iopte_t;
 typedef struct { unsigned int pmd; } pmd_t;
 typedef struct { unsigned int pgd; } pgd_t;
-typedef struct { unsigned long ctxd; } ctxd_t;
 typedef struct { unsigned long pgprot; } pgprot_t;
-typedef struct { unsigned long iopgprot; } iopgprot_t;
 
 #define pte_val(x)	((x).pte)
 #define iopte_val(x)	((x).iopte)
 #define pmd_val(x)      ((x).pmd)
 #define pgd_val(x)	((x).pgd)
-#define ctxd_val(x)	((x).ctxd)
 #define pgprot_val(x)	((x).pgprot)
-#define iopgprot_val(x)	((x).iopgprot)
 
 #define __pte(x)	((pte_t) { (x) } )
 #define __iopte(x)	((iopte_t) { (x) } )
 #define __pmd(x)        ((pmd_t) { (x) } )
 #define __pgd(x)	((pgd_t) { (x) } )
-#define __ctxd(x)	((ctxd_t) { (x) } )
 #define __pgprot(x)	((pgprot_t) { (x) } )
-#define __iopgprot(x)	((iopgprot_t) { (x) } )
 
 #else
 /* .. while these make it easier on the compiler */
@@ -68,25 +67,19 @@ typedef unsigned long pte_t;
 typedef unsigned long iopte_t;
 typedef unsigned int pmd_t;
 typedef unsigned int pgd_t;
-typedef unsigned long ctxd_t;
 typedef unsigned long pgprot_t;
-typedef unsigned long iopgprot_t;
 
 #define pte_val(x)	(x)
 #define iopte_val(x)	(x)
 #define pmd_val(x)      (x)
 #define pgd_val(x)	(x)
-#define ctxd_val(x)	(x)
 #define pgprot_val(x)	(x)
-#define iopgprot_val(x)	(x)
 
 #define __pte(x)	(x)
 #define __iopte(x)	(x)
 #define __pmd(x)        (x)
 #define __pgd(x)	(x)
-#define __ctxd(x)	(x)
 #define __pgprot(x)	(x)
-#define __iopgprot(x)	(x)
 
 #endif /* (STRICT_MM_TYPECHECKS) */
 
@@ -99,13 +92,13 @@ typedef unsigned long iopgprot_t;
 #endif
 
 #ifdef CONFIG_HUGETLB_PAGE
-#define HPAGE_SIZE		((1UL) << HPAGE_SHIFT)
+#define HPAGE_SIZE		(_AC(1,UL) << HPAGE_SHIFT)
 #define HPAGE_MASK		(~(HPAGE_SIZE - 1UL))
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
 #endif
 
 #define TASK_UNMAPPED_BASE	(test_thread_flag(TIF_32BIT) ? \
-				 (0x0000000070000000UL) : (PAGE_OFFSET))
+				 (_AC(0x0000000070000000,UL)) : (PAGE_OFFSET))
 
 #endif /* !(__ASSEMBLY__) */
 
@@ -115,19 +108,21 @@ typedef unsigned long iopgprot_t;
 /* We used to stick this into a hard-coded global register (%g4)
  * but that does not make sense anymore.
  */
-#define PAGE_OFFSET		0xFFFFF80000000000
+#define PAGE_OFFSET		_AC(0xFFFFF80000000000,UL)
+
+#ifndef __ASSEMBLY__
 
 #define __pa(x)			((unsigned long)(x) - PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long) (x) + PAGE_OFFSET))
 
 /* PFNs are real physical page numbers.  However, mem_map only begins to record
  * per-page information starting at pfn_base.  This is to handle systems where
- * the first physical page in the machine is at some huge physical address, such
- * as 4GB.   This is common on a partitioned E10000, for example.
+ * the first physical page in the machine is at some huge physical address,
+ * such as 4GB.   This is common on a partitioned E10000, for example.
  */
+extern struct page *pfn_to_page(unsigned long pfn);
+extern unsigned long page_to_pfn(struct page *);
 
-#define pfn_to_page(pfn)	(mem_map + ((pfn)-(pfn_base)))
-#define page_to_pfn(page)	((unsigned long)(((page) - mem_map) + pfn_base))
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr)>>PAGE_SHIFT)
 
 #define pfn_valid(pfn)		(((pfn)-(pfn_base)) < max_mapnr)
@@ -135,8 +130,6 @@ typedef unsigned long iopgprot_t;
 
 #define virt_to_phys __pa
 #define phys_to_virt __va
-
-#ifndef __ASSEMBLY__
 
 /* The following structure is used to hold the physical
  * memory configuration of the machine.  This is filled in

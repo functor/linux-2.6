@@ -1,7 +1,7 @@
 /*
  * lm90.c - Part of lm_sensors, Linux kernel modules for hardware
  *          monitoring
- * Copyright (C) 2003  Jean Delvare <khali@linux-fr.org>
+ * Copyright (C) 2003-2004  Jean Delvare <khali@linux-fr.org>
  *
  * Based on the lm83 driver. The LM90 is a sensor chip made by National
  * Semiconductor. It reports up to two temperatures (its own plus up to
@@ -10,11 +10,46 @@
  * obtained from National's website at:
  *   http://www.national.com/pf/LM/LM90.html
  *
+ * This driver also supports the LM89 and LM99, two other sensor chips
+ * made by National Semiconductor. Both have an increased remote
+ * temperature measurement accuracy (1 degree), and the LM99
+ * additionally shifts remote temperatures (measured and limits) by 16
+ * degrees, which allows for higher temperatures measurement. The
+ * driver doesn't handle it since it can be done easily in user-space.
+ * Complete datasheets can be obtained from National's website at:
+ *   http://www.national.com/pf/LM/LM89.html
+ *   http://www.national.com/pf/LM/LM99.html
+ * Note that there is no way to differenciate between both chips.
+ *
+ * This driver also supports the LM86, another sensor chip made by
+ * National Semiconductor. It is exactly similar to the LM90 except it
+ * has a higher accuracy.
+ * Complete datasheet can be obtained from National's website at:
+ *   http://www.national.com/pf/LM/LM86.html
+ *
  * This driver also supports the ADM1032, a sensor chip made by Analog
  * Devices. That chip is similar to the LM90, with a few differences
  * that are not handled by this driver. Complete datasheet can be
  * obtained from Analog's website at:
  *   http://products.analog.com/products/info.asp?product=ADM1032
+ * Among others, it has a higher accuracy than the LM90, much like the
+ * LM86 does.
+ *
+ * This driver also supports the MAX6657, MAX6658 and MAX6659 sensor
+ * chips made by Maxim. These chips are similar to the LM86. Complete
+ * datasheet can be obtained at Maxim's website at:
+ *   http://www.maxim-ic.com/quick_view2.cfm/qv_pk/2578
+ * Note that there is no easy way to differenciate between the three
+ * variants. The extra address and features of the MAX6659 are not
+ * supported by this driver.
+ *
+ * This driver also supports the ADT7461 chip from Analog Devices but
+ * only in its "compatability mode". If an ADT7461 chip is found but
+ * is configured in non-compatible mode (where its temperature
+ * register values are decoded differently) it is ignored by this
+ * driver. Complete datasheet can be obtained from Analog's website
+ * at:
+ *   http://products.analog.com/products/info.asp?product=ADT7461
  *
  * Since the LM90 was the first chipset supported by this driver, most
  * comments will refer to this chipset, but are actually general and
@@ -39,24 +74,28 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/jiffies.h>
 #include <linux/i2c.h>
 #include <linux/i2c-sensor.h>
 
 /*
  * Addresses to scan
- * Address is fully defined internally and cannot be changed.
+ * Address is fully defined internally and cannot be changed except for
+ * MAX6659.
+ * LM86, LM89, LM90, LM99, ADM1032, MAX6657 and MAX6658 have address 0x4c.
+ * LM89-1, and LM99-1 have address 0x4d.
+ * MAX6659 can have address 0x4c, 0x4d or 0x4e (unsupported).
+ * ADT7461 always has address 0x4c.
  */
 
-static unsigned short normal_i2c[] = { 0x4c, I2C_CLIENT_END };
-static unsigned short normal_i2c_range[] = { I2C_CLIENT_END };
+static unsigned short normal_i2c[] = { 0x4c, 0x4d, I2C_CLIENT_END };
 static unsigned int normal_isa[] = { I2C_CLIENT_ISA_END };
-static unsigned int normal_isa_range[] = { I2C_CLIENT_ISA_END };
 
 /*
  * Insmod parameters
  */
 
-SENSORS_INSMOD_2(lm90, adm1032);
+SENSORS_INSMOD_6(lm90, adm1032, lm99, lm86, max6657, adt7461);
 
 /*
  * The LM90 registers
@@ -99,19 +138,37 @@ SENSORS_INSMOD_2(lm90, adm1032);
 
 /*
  * Conversions and various macros
- * The LM90 uses signed 8-bit values for the local temperatures,
- * and signed 11-bit values for the remote temperatures (except
- * T_CRIT). Note that TEMP2_TO_REG does not round values, but
- * stick to the nearest lower value instead. Fixing it is just
- * not worth it.
+ * For local temperatures and limits, critical limits and the hysteresis
+ * value, the LM90 uses signed 8-bit values with LSB = 1 degree Celcius.
+ * For remote temperatures and limits, it uses signed 11-bit values with
+ * LSB = 0.125 degree Celcius, left-justified in 16-bit registers.
  */
 
-#define TEMP1_FROM_REG(val)	((val & 0x80 ? val-0x100 : val) * 1000)
-#define TEMP1_TO_REG(val)	((val < 0 ? val+0x100*1000 : val) / 1000)
-#define TEMP2_FROM_REG(val)	(((val & 0x8000 ? val-0x10000 : val) >> 5) * 125)
-#define TEMP2_TO_REG(val)	((((val / 125) << 5) + (val < 0 ? 0x10000 : 0)) & 0xFFE0)
-#define HYST_FROM_REG(val)	(val * 1000)
-#define HYST_TO_REG(val)	(val <= 0 ? 0 : val >= 31000 ? 31 : val / 1000)
+#define TEMP1_FROM_REG(val)	((val) * 1000)
+#define TEMP1_TO_REG(val)	((val) <= -128000 ? -128 : \
+				 (val) >= 127000 ? 127 : \
+				 (val) < 0 ? ((val) - 500) / 1000 : \
+				 ((val) + 500) / 1000)
+#define TEMP2_FROM_REG(val)	((val) / 32 * 125)
+#define TEMP2_TO_REG(val)	((val) <= -128000 ? 0x8000 : \
+				 (val) >= 127875 ? 0x7FE0 : \
+				 (val) < 0 ? ((val) - 62) / 125 * 32 : \
+				 ((val) + 62) / 125 * 32)
+#define HYST_TO_REG(val)	((val) <= 0 ? 0 : (val) >= 30500 ? 31 : \
+				 ((val) + 500) / 1000)
+
+/* 
+ * ADT7461 is almost identical to LM90 except that attempts to write
+ * values that are outside the range 0 < temp < 127 are treated as
+ * the boundary value. 
+ */
+
+#define TEMP1_TO_REG_ADT7461(val) ((val) <= 0 ? 0 : \
+				 (val) >= 127000 ? 127 : \
+				 ((val) + 500) / 1000)
+#define TEMP2_TO_REG_ADT7461(val) ((val) <= 0 ? 0 : \
+				 (val) >= 127750 ? 0x7FC0 : \
+				 ((val) + 125) / 250 * 64)
 
 /*
  * Functions declaration
@@ -146,20 +203,15 @@ struct lm90_data {
 	struct semaphore update_lock;
 	char valid; /* zero until following fields are valid */
 	unsigned long last_updated; /* in jiffies */
+	int kind;
 
 	/* registers values */
-	u8 temp_input1, temp_low1, temp_high1; /* local */
-	u16 temp_input2, temp_low2, temp_high2; /* remote, combined */
-	u8 temp_crit1, temp_crit2;
+	s8 temp_input1, temp_low1, temp_high1; /* local */
+	s16 temp_input2, temp_low2, temp_high2; /* remote, combined */
+	s8 temp_crit1, temp_crit2;
 	u8 temp_hyst;
-	u16 alarms; /* bitvector, combined */
+	u8 alarms; /* bitvector */
 };
-
-/*
- * Internal variables
- */
-
-static int lm90_id = 0;
 
 /*
  * Sysfs stuff
@@ -186,8 +238,15 @@ static ssize_t set_##value(struct device *dev, const char *buf, \
 { \
 	struct i2c_client *client = to_i2c_client(dev); \
 	struct lm90_data *data = i2c_get_clientdata(client); \
-	data->value = TEMP1_TO_REG(simple_strtol(buf, NULL, 10)); \
+	long val = simple_strtol(buf, NULL, 10); \
+ \
+	down(&data->update_lock); \
+	if (data->kind == adt7461) \
+		data->value = TEMP1_TO_REG_ADT7461(val); \
+	else \
+		data->value = TEMP1_TO_REG(val); \
 	i2c_smbus_write_byte_data(client, reg, data->value); \
+	up(&data->update_lock); \
 	return count; \
 }
 #define set_temp2(value, regh, regl) \
@@ -196,9 +255,16 @@ static ssize_t set_##value(struct device *dev, const char *buf, \
 { \
 	struct i2c_client *client = to_i2c_client(dev); \
 	struct lm90_data *data = i2c_get_clientdata(client); \
-	data->value = TEMP2_TO_REG(simple_strtol(buf, NULL, 10)); \
+	long val = simple_strtol(buf, NULL, 10); \
+ \
+	down(&data->update_lock); \
+	if (data->kind == adt7461) \
+		data->value = TEMP2_TO_REG_ADT7461(val); \
+	else \
+		data->value = TEMP2_TO_REG(val); \
 	i2c_smbus_write_byte_data(client, regh, data->value >> 8); \
 	i2c_smbus_write_byte_data(client, regl, data->value & 0xff); \
+	up(&data->update_lock); \
 	return count; \
 }
 set_temp1(temp_low1, LM90_REG_W_LOCAL_LOW);
@@ -213,7 +279,7 @@ static ssize_t show_##value(struct device *dev, char *buf) \
 { \
 	struct lm90_data *data = lm90_update_device(dev); \
 	return sprintf(buf, "%d\n", TEMP1_FROM_REG(data->basereg) \
-		       - HYST_FROM_REG(data->temp_hyst)); \
+		       - TEMP1_FROM_REG(data->temp_hyst)); \
 }
 show_temp_hyst(temp_hyst1, temp_crit1);
 show_temp_hyst(temp_hyst2, temp_crit2);
@@ -223,10 +289,14 @@ static ssize_t set_temp_hyst1(struct device *dev, const char *buf,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct lm90_data *data = i2c_get_clientdata(client);
-	int hyst = TEMP1_FROM_REG(data->temp_crit1) -
-		   simple_strtol(buf, NULL, 10);
+	long val = simple_strtol(buf, NULL, 10);
+	long hyst;
+
+	down(&data->update_lock);
+	hyst = TEMP1_FROM_REG(data->temp_crit1) - val;
 	i2c_smbus_write_byte_data(client, LM90_REG_W_TCRIT_HYST,
 				  HYST_TO_REG(hyst));
+	up(&data->update_lock);
 	return count;
 }
 
@@ -261,7 +331,7 @@ static DEVICE_ATTR(alarms, S_IRUGO, show_alarms, NULL);
 
 static int lm90_attach_adapter(struct i2c_adapter *adapter)
 {
-	if (!(adapter->class & I2C_ADAP_CLASS_SMBUS))
+	if (!(adapter->class & I2C_CLASS_HWMON))
 		return 0;
 	return i2c_detect(adapter, &addr_data, lm90_detect);
 }
@@ -276,7 +346,6 @@ static int lm90_detect(struct i2c_adapter *adapter, int address, int kind)
 	struct lm90_data *data;
 	int err = 0;
 	const char *name = "";
-	u8 reg_config1=0, reg_convrate=0;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA))
 		goto exit;
@@ -306,43 +375,73 @@ static int lm90_detect(struct i2c_adapter *adapter, int address, int kind)
 	 * requested, so both the detection and the identification steps
 	 * are skipped.
 	 */
-	if (kind < 0) { /* detection */
-		reg_config1 = i2c_smbus_read_byte_data(new_client,
-			      LM90_REG_R_CONFIG1);
-		reg_convrate = i2c_smbus_read_byte_data(new_client,
-			       LM90_REG_R_CONVRATE);
 
-		if ((reg_config1 & 0x2A) != 0x00
-		 || reg_convrate > 0x0A) {
-			dev_dbg(&adapter->dev,
-				"LM90 detection failed at 0x%02x.\n",
-				address);
-			goto exit_free;
-		}
-	}
+	/* Default to an LM90 if forced */
+	if (kind == 0)
+		kind = lm90;
 
-	if (kind <= 0) { /* identification */
-		u8 man_id, chip_id;
+	if (kind < 0) { /* detection and identification */
+		u8 man_id, chip_id, reg_config1, reg_convrate;
 
 		man_id = i2c_smbus_read_byte_data(new_client,
 			 LM90_REG_R_MAN_ID);
 		chip_id = i2c_smbus_read_byte_data(new_client,
 			  LM90_REG_R_CHIP_ID);
+		reg_config1 = i2c_smbus_read_byte_data(new_client,
+			      LM90_REG_R_CONFIG1);
+		reg_convrate = i2c_smbus_read_byte_data(new_client,
+			       LM90_REG_R_CONVRATE);
 		
 		if (man_id == 0x01) { /* National Semiconductor */
-			if (chip_id >= 0x21 && chip_id < 0x30 /* LM90 */
-			 && (kind == 0 /* skip detection */
-			  || ((i2c_smbus_read_byte_data(new_client,
-				LM90_REG_R_CONFIG2) & 0xF8) == 0x00
-			   && reg_convrate <= 0x09))) {
-				kind = lm90;
+			u8 reg_config2;
+
+			reg_config2 = i2c_smbus_read_byte_data(new_client,
+				      LM90_REG_R_CONFIG2);
+
+			if ((reg_config1 & 0x2A) == 0x00
+			 && (reg_config2 & 0xF8) == 0x00
+			 && reg_convrate <= 0x09) {
+				if (address == 0x4C
+				 && (chip_id & 0xF0) == 0x20) { /* LM90 */
+					kind = lm90;
+				} else
+				if ((chip_id & 0xF0) == 0x30) { /* LM89/LM99 */
+					kind = lm99;
+				} else
+				if (address == 0x4C
+				 && (chip_id & 0xF0) == 0x10) { /* LM86 */
+					kind = lm86;
+				}
 			}
-		}
-		else if (man_id == 0x41) { /* Analog Devices */
-			if ((chip_id & 0xF0) == 0x40 /* ADM1032 */
-			 && (kind == 0 /* skip detection */
-			  || (reg_config1 & 0x3F) == 0x00)) {
+		} else
+		if (man_id == 0x41) { /* Analog Devices */
+			if (address == 0x4C
+			 && (chip_id & 0xF0) == 0x40 /* ADM1032 */
+			 && (reg_config1 & 0x3F) == 0x00
+			 && reg_convrate <= 0x0A) {
 				kind = adm1032;
+			} else
+			if (address == 0x4c
+			 && chip_id == 0x51 /* ADT7461 */
+			 && (reg_config1 & 0x1F) == 0x00 /* check compat mode */
+			 && reg_convrate <= 0x0A) {
+				kind = adt7461;
+			}
+		} else
+		if (man_id == 0x4D) { /* Maxim */
+			/*
+			 * The Maxim variants do NOT have a chip_id register.
+			 * Reading from that address will return the last read
+			 * value, which in our case is those of the man_id
+			 * register. Likewise, the config1 register seems to
+			 * lack a low nibble, so the value will be those of the
+			 * previous read, so in our case those of the man_id
+			 * register.
+			 */
+			if (chip_id == man_id
+			 && (reg_config1 & 0x1F) == (man_id & 0x0F)
+			 && reg_convrate <= 0x09) {
+			 	kind = max6657;
 			}
 		}
 
@@ -358,12 +457,20 @@ static int lm90_detect(struct i2c_adapter *adapter, int address, int kind)
 		name = "lm90";
 	} else if (kind == adm1032) {
 		name = "adm1032";
+	} else if (kind == lm99) {
+		name = "lm99";
+	} else if (kind == lm86) {
+		name = "lm86";
+	} else if (kind == max6657) {
+		name = "max6657";
+	} else if (kind == adt7461) {
+		name = "adt7461";
 	}
 
 	/* We can fill in the remaining client fields */
 	strlcpy(new_client->name, name, I2C_NAME_SIZE);
-	new_client->id = lm90_id++;
 	data->valid = 0;
+	data->kind = kind;
 	init_MUTEX(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
@@ -430,9 +537,7 @@ static struct lm90_data *lm90_update_device(struct device *dev)
 
 	down(&data->update_lock);
 
-	if ((jiffies - data->last_updated > HZ * 2) ||
-	    (jiffies < data->last_updated) ||
-	    !data->valid) {
+	if (time_after(jiffies, data->last_updated + HZ * 2) || !data->valid) {
 		u8 oldh, newh;
 
 		dev_dbg(&client->dev, "Updating lm90 data.\n");

@@ -10,7 +10,7 @@
  *
  * To do:
  *
- * - /proc/adb to list the devices and infos
+ * - /sys/bus/adb to list the devices and infos
  * - more /dev/adb to allow userland to receive the
  *   flow of auto-polling datas from a given device.
  * - move bus probe to a kernel thread
@@ -23,7 +23,6 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/fs.h>
-#include <linux/devfs_fs_kernel.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/smp_lock.h>
@@ -36,6 +35,9 @@
 #include <linux/delay.h>
 #include <linux/spinlock.h>
 #include <linux/completion.h>
+#include <linux/device.h>
+#include <linux/devfs_fs_kernel.h>
+
 #include <asm/uaccess.h>
 #include <asm/semaphore.h>
 #ifdef CONFIG_PPC
@@ -74,6 +76,8 @@ static struct adb_driver *adb_driver_list[] = {
 #endif
 	NULL
 };
+
+static struct class_simple *adb_dev_class;
 
 struct adb_driver *adb_controller;
 struct notifier_block *adb_client_list = NULL;
@@ -116,7 +120,7 @@ static struct adb_handler {
  * called.
  */
 static DECLARE_MUTEX(adb_handler_sem);
-static rwlock_t adb_handler_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(adb_handler_lock);
 
 #if 0
 static void printADBreply(struct adb_request *req)
@@ -135,10 +139,9 @@ static void printADBreply(struct adb_request *req)
 static __inline__ void adb_wait_ms(unsigned int ms)
 {
 	if (current->pid && adb_probe_task_pid &&
-	  adb_probe_task_pid == current->pid) {
-		set_task_state(current, TASK_UNINTERRUPTIBLE);
-		schedule_timeout(1 + ms * HZ / 1000);
-	} else
+	  adb_probe_task_pid == current->pid)
+		msleep(ms);
+	else
 		mdelay(ms);
 }
 
@@ -557,7 +560,7 @@ adb_unregister(int index)
 			write_lock_irq(&adb_handler_lock);
 		}
 		ret = 0;
-		adb_handler[index].handler = 0;
+		adb_handler[index].handler = NULL;
 	}
 	write_unlock_irq(&adb_handler_lock);
 	up(&adb_handler_sem);
@@ -752,7 +755,7 @@ static int adb_release(struct inode *inode, struct file *file)
 static ssize_t adb_read(struct file *file, char __user *buf,
 			size_t count, loff_t *ppos)
 {
-	int ret;
+	int ret = 0;
 	struct adbdev_state *state = file->private_data;
 	struct adb_request *req;
 	wait_queue_t wait = __WAITQUEUE_INITIALIZER(wait,current);
@@ -762,9 +765,8 @@ static ssize_t adb_read(struct file *file, char __user *buf,
 		return -EINVAL;
 	if (count > sizeof(req->reply))
 		count = sizeof(req->reply);
-	ret = verify_area(VERIFY_WRITE, buf, count);
-	if (ret)
-		return ret;
+	if (!access_ok(VERIFY_WRITE, buf, count))
+		return -EFAULT;
 
 	req = NULL;
 	spin_lock_irqsave(&state->lock, flags);
@@ -821,9 +823,8 @@ static ssize_t adb_write(struct file *file, const char __user *buf,
 		return -EINVAL;
 	if (adb_controller == NULL)
 		return -ENXIO;
-	ret = verify_area(VERIFY_READ, buf, count);
-	if (ret)
-		return ret;
+	if (!access_ok(VERIFY_READ, buf, count))
+		return -EFAULT;
 
 	req = (struct adb_request *) kmalloc(sizeof(struct adb_request),
 					     GFP_KERNEL);
@@ -883,6 +884,7 @@ out:
 }
 
 static struct file_operations adb_fops = {
+	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
 	.read		= adb_read,
 	.write		= adb_write,
@@ -893,9 +895,16 @@ static struct file_operations adb_fops = {
 static void
 adbdev_init(void)
 {
-	if (register_chrdev(ADB_MAJOR, "adb", &adb_fops))
+	if (register_chrdev(ADB_MAJOR, "adb", &adb_fops)) {
 		printk(KERN_ERR "adb: unable to get major %d\n", ADB_MAJOR);
-	else
-		devfs_mk_cdev(MKDEV(ADB_MAJOR, 0),
-				S_IFCHR | S_IRUSR | S_IWUSR, "adb");
+		return;
+	}
+
+	devfs_mk_cdev(MKDEV(ADB_MAJOR, 0), S_IFCHR | S_IRUSR | S_IWUSR, "adb");
+
+	adb_dev_class = class_simple_create(THIS_MODULE, "adb");
+	if (IS_ERR(adb_dev_class)) {
+		return;
+	}
+	class_simple_device_add(adb_dev_class, MKDEV(ADB_MAJOR, 0), NULL, "adb");
 }

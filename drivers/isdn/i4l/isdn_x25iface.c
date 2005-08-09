@@ -8,7 +8,7 @@
  * stuff needed to support the Linux X.25 PLP code on top of devices that
  * can provide a lab_b service using the concap_proto mechanism.
  * This module supports a network interface wich provides lapb_sematics
- * -- as defined in ../../Documentation/networking/x25-iface.txt -- to
+ * -- as defined in Documentation/networking/x25-iface.txt -- to
  * the upper layer and assumes that the lower layer provides a reliable
  * data link service by means of the concap_device_ops callbacks.
  *
@@ -21,6 +21,7 @@
 #include <linux/netdevice.h>
 #include <linux/concap.h>
 #include <linux/wanrouter.h>
+#include <net/x25device.h>
 #include "isdn_x25iface.h"
 
 /* for debugging messages not to cause an oops when device pointer is NULL*/
@@ -79,7 +80,7 @@ static int pdata_is_bad( ix25_pdata_t * pda ){
 
 /* create a new x25 interface protocol instance
  */
-struct concap_proto * isdn_x25iface_proto_new()
+struct concap_proto * isdn_x25iface_proto_new(void)
 {
 	ix25_pdata_t * tmp = kmalloc(sizeof(ix25_pdata_t),GFP_KERNEL);
 	IX25DEBUG("isdn_x25iface_proto_new\n");
@@ -191,12 +192,9 @@ int isdn_x25iface_receive(struct concap_proto *cprot, struct sk_buff *skb)
   	IX25DEBUG( "isdn_x25iface_receive %s \n", MY_DEVNAME(cprot->net_dev) );
 	if ( ( (ix25_pdata_t*) (cprot->proto_data) ) 
 	     -> state == WAN_CONNECTED ){
-		skb -> dev = cprot -> net_dev;
-		skb -> protocol = htons(ETH_P_X25);
-		skb -> pkt_type = PACKET_HOST;
 		if( skb_push(skb, 1)){
 			skb -> data[0]=0x00;
-			skb -> mac.raw = skb -> data;
+			skb->protocol = x25_type_trans(skb, cprot->net_dev);
 			netif_rx(skb);
 			return 0;
 		}
@@ -224,10 +222,7 @@ int isdn_x25iface_connect_ind(struct concap_proto *cprot)
 	*state_p = WAN_CONNECTED;
 	if( skb ){
 		*( skb_put(skb, 1) ) = 0x01;
-		skb -> mac.raw = skb -> data;
-		skb -> dev  = cprot -> net_dev;
-		skb -> protocol = htons(ETH_P_X25);
-		skb -> pkt_type = PACKET_HOST;
+		skb->protocol = x25_type_trans(skb, cprot->net_dev);
 		netif_rx(skb);
 		return 0;
 	} else {
@@ -256,10 +251,7 @@ int isdn_x25iface_disconn_ind(struct concap_proto *cprot)
 	skb = dev_alloc_skb(1);
 	if( skb ){
 		*( skb_put(skb, 1) ) = 0x02;
-		skb -> mac.raw = skb -> data;
-		skb -> dev  = cprot -> net_dev;
-		skb -> protocol = htons(ETH_P_X25);
-		skb -> pkt_type = PACKET_HOST;
+		skb->protocol = x25_type_trans(skb, cprot->net_dev);
 		netif_rx(skb);
 		return 0;
 	} else {
@@ -270,13 +262,12 @@ int isdn_x25iface_disconn_ind(struct concap_proto *cprot)
 }
 
 /* process a frame handed over to us from linux network layer. First byte
-   semantics as defined in ../../Documentation/networking/x25-iface.txt 
+   semantics as defined in Documentation/networking/x25-iface.txt
    */
 int isdn_x25iface_xmit(struct concap_proto *cprot, struct sk_buff *skb)
 {
 	unsigned char firstbyte = skb->data[0];
-	unsigned *state = 
-		&( ( (ix25_pdata_t*) (cprot -> proto_data) ) -> state  );
+	enum wan_states *state = &((ix25_pdata_t*)cprot->proto_data)->state;
 	int ret = 0;
 	IX25DEBUG( "isdn_x25iface_xmit: %s first=%x state=%d \n", MY_DEVNAME(cprot -> net_dev), firstbyte, *state );
 	switch ( firstbyte ){

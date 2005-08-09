@@ -11,15 +11,15 @@
 #include <linux/pnpbios.h>
 #include <linux/device.h>
 #include <linux/pnp.h>
-#include <asm/page.h>
-#include <asm/system.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
-#include <asm/desc.h>
 #include <linux/slab.h>
 #include <linux/kmod.h>
 #include <linux/completion.h>
 #include <linux/spinlock.h>
+
+#include <asm/page.h>
+#include <asm/desc.h>
 #include <asm/system.h>
 #include <asm/byteorder.h>
 
@@ -69,14 +69,14 @@ __asm__(
 
 #define Q_SET_SEL(cpu, selname, address, size) \
 do { \
-set_base(cpu_gdt_table[cpu][(selname) >> 3], __va((u32)(address))); \
-set_limit(cpu_gdt_table[cpu][(selname) >> 3], size); \
+set_base(per_cpu(cpu_gdt_table,cpu)[(selname) >> 3], __va((u32)(address))); \
+set_limit(per_cpu(cpu_gdt_table,cpu)[(selname) >> 3], size); \
 } while(0)
 
 #define Q2_SET_SEL(cpu, selname, address, size) \
 do { \
-set_base(cpu_gdt_table[cpu][(selname) >> 3], (u32)(address)); \
-set_limit(cpu_gdt_table[cpu][(selname) >> 3], size); \
+set_base(per_cpu(cpu_gdt_table,cpu)[(selname) >> 3], (u32)(address)); \
+set_limit(per_cpu(cpu_gdt_table,cpu)[(selname) >> 3], size); \
 } while(0)
 
 static struct desc_struct bad_bios_desc = { 0, 0x00409200 };
@@ -115,8 +115,8 @@ static inline u16 call_pnp_bios(u16 func, u16 arg1, u16 arg2, u16 arg3,
 		return PNP_FUNCTION_NOT_SUPPORTED;
 
 	cpu = get_cpu();
-	save_desc_40 = cpu_gdt_table[cpu][0x40 / 8];
-	cpu_gdt_table[cpu][0x40 / 8] = bad_bios_desc;
+	save_desc_40 = per_cpu(cpu_gdt_table,cpu)[0x40 / 8];
+	per_cpu(cpu_gdt_table,cpu)[0x40 / 8] = bad_bios_desc;
 
 	/* On some boxes IRQ's during PnP BIOS calls are deadly.  */
 	spin_lock_irqsave(&pnp_bios_lock, flags);
@@ -158,14 +158,14 @@ static inline u16 call_pnp_bios(u16 func, u16 arg1, u16 arg2, u16 arg3,
 	);
 	spin_unlock_irqrestore(&pnp_bios_lock, flags);
 
-	cpu_gdt_table[cpu][0x40 / 8] = save_desc_40;
+	per_cpu(cpu_gdt_table,cpu)[0x40 / 8] = save_desc_40;
 	put_cpu();
 
 	/* If we get here and this is set then the PnP BIOS faulted on us. */
 	if(pnp_bios_is_utter_crap)
 	{
 		printk(KERN_ERR "PnPBIOS: Warning! Your PnP BIOS caused a fatal error. Attempting to continue\n");
-		printk(KERN_ERR "PnPBIOS: You may need to reboot with the \"nobiospnp\" option to operate stably\n");
+		printk(KERN_ERR "PnPBIOS: You may need to reboot with the \"pnpbios=off\" option to operate stably\n");
 		printk(KERN_ERR "PnPBIOS: Check with your vendor for an updated BIOS\n");
 	}
 
@@ -260,7 +260,7 @@ static int __pnp_bios_dev_node_info(struct pnp_dev_node_info *data)
 	if (!pnp_bios_present())
 		return PNP_FUNCTION_NOT_SUPPORTED;
 	status = call_pnp_bios(PNP_GET_NUM_SYS_DEV_NODES, 0, PNP_TS1, 2, PNP_TS1, PNP_DS, 0, 0,
-			       data, sizeof(struct pnp_dev_node_info), 0, 0);
+			       data, sizeof(struct pnp_dev_node_info), NULL, 0);
 	data->no_nodes &= 0xff;
 	return status;
 }
@@ -323,7 +323,7 @@ static int __pnp_bios_set_dev_node(u8 nodenum, char boot, struct pnp_bios_node *
 	if ( !boot && pnpbios_dont_use_current_config )
 		return PNP_FUNCTION_NOT_SUPPORTED;
 	status = call_pnp_bios(PNP_SET_SYS_DEV_NODE, nodenum, 0, PNP_TS1, boot ? 2 : 1, PNP_DS, 0, 0,
-			       data, 65536, 0, 0);
+			       data, 65536, NULL, 0);
 	return status;
 }
 
@@ -353,7 +353,7 @@ static int pnp_bios_get_event(u16 *event)
 	if (!pnp_bios_present())
 		return PNP_FUNCTION_NOT_SUPPORTED;
 	status = call_pnp_bios(PNP_GET_EVENT, 0, PNP_TS1, PNP_DS, 0, 0 ,0 ,0,
-			       event, sizeof(u16), 0, 0);
+			       event, sizeof(u16), NULL, 0);
 	return status;
 }
 #endif
@@ -381,7 +381,7 @@ int pnp_bios_dock_station_info(struct pnp_docking_station_info *data)
 	if (!pnp_bios_present())
 		return PNP_FUNCTION_NOT_SUPPORTED;
 	status = call_pnp_bios(PNP_GET_DOCKING_STATION_INFORMATION, 0, PNP_TS1, PNP_DS, 0, 0, 0, 0,
-			       data, sizeof(struct pnp_docking_station_info), 0, 0);
+			       data, sizeof(struct pnp_docking_station_info), NULL, 0);
 	return status;
 }
 
@@ -411,7 +411,7 @@ static int __pnp_bios_get_stat_res(char *info)
 	if (!pnp_bios_present())
 		return PNP_FUNCTION_NOT_SUPPORTED;
 	status = call_pnp_bios(PNP_GET_STATIC_ALLOCED_RES_INFO, 0, PNP_TS1, PNP_DS, 0, 0, 0, 0,
-			       info, 65536, 0, 0);
+			       info, 65536, NULL, 0);
 	return status;
 }
 
@@ -448,7 +448,7 @@ static int __pnp_bios_isapnp_config(struct pnp_isa_config_struc *data)
 	if (!pnp_bios_present())
 		return PNP_FUNCTION_NOT_SUPPORTED;
 	status = call_pnp_bios(PNP_GET_PNP_ISA_CONFIG_STRUC, 0, PNP_TS1, PNP_DS, 0, 0, 0, 0,
-			       data, sizeof(struct pnp_isa_config_struc), 0, 0);
+			       data, sizeof(struct pnp_isa_config_struc), NULL, 0);
 	return status;
 }
 
@@ -470,7 +470,7 @@ static int __pnp_bios_escd_info(struct escd_info_struc *data)
 	if (!pnp_bios_present())
 		return ESCD_FUNCTION_NOT_SUPPORTED;
 	status = call_pnp_bios(PNP_GET_ESCD_INFO, 0, PNP_TS1, 2, PNP_TS1, 4, PNP_TS1, PNP_DS,
-			       data, sizeof(struct escd_info_struc), 0, 0);
+			       data, sizeof(struct escd_info_struc), NULL, 0);
 	return status;
 }
 

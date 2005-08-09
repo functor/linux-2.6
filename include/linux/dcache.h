@@ -27,12 +27,14 @@ struct vfsmount;
 /*
  * "quick string" -- eases parameter passing, but more importantly
  * saves "metadata" about the string (ie length and the hash).
+ *
+ * hash comes first so it snuggles against d_parent in the
+ * dentry.
  */
 struct qstr {
-	const unsigned char * name;
-	unsigned int len;
 	unsigned int hash;
-	char name_str[0];
+	unsigned int len;
+	const unsigned char *name;
 };
 
 struct dentry_stat_t {
@@ -74,38 +76,38 @@ full_name_hash(const unsigned char *name, unsigned int len)
 	return end_name_hash(hash);
 }
 
-#define DNAME_INLINE_LEN_MIN 24
-
 struct dcookie_struct;
- 
+
+#define DNAME_INLINE_LEN_MIN 36
+
 struct dentry {
 	atomic_t d_count;
+	unsigned int d_flags;		/* protected by d_lock */
 	spinlock_t d_lock;		/* per dentry lock */
-	unsigned long d_vfs_flags;	/* moved here to be on same cacheline */
-	struct inode  * d_inode;	/* Where the name belongs to - NULL is negative */
+	struct inode *d_inode;		/* Where the name belongs to - NULL is
+					 * negative */
+	/*
+	 * The next three fields are touched by __d_lookup.  Place them here
+	 * so they all fit in a 16-byte range, with 16-byte alignment.
+	 */
+	struct dentry *d_parent;	/* parent directory */
+	struct qstr d_name;
+
 	struct list_head d_lru;		/* LRU list */
 	struct list_head d_child;	/* child of parent list */
 	struct list_head d_subdirs;	/* our children */
 	struct list_head d_alias;	/* inode alias list */
 	unsigned long d_time;		/* used by d_revalidate */
-	struct dentry_operations  *d_op;
-	struct super_block * d_sb;	/* The root of the dentry tree */
-	unsigned int d_flags;
-	int d_mounted;
-	void * d_fsdata;		/* fs-specific data */
+	struct dentry_operations *d_op;
+	struct super_block *d_sb;	/* The root of the dentry tree */
+	void *d_fsdata;			/* fs-specific data */
  	struct rcu_head d_rcu;
-	struct dcookie_struct * d_cookie; /* cookie, if any */
-	unsigned long d_move_count;	/* to indicated moved dentry while lockless lookup */
-	struct qstr * d_qstr;		/* quick str ptr used in lockless lookup and concurrent d_move */
-	struct dentry * d_parent;	/* parent directory */
-	struct qstr d_name;
+	struct dcookie_struct *d_cookie; /* cookie, if any */
 	struct hlist_node d_hash;	/* lookup hash list */	
-	struct hlist_head * d_bucket;	/* lookup hash bucket */
-	unsigned char d_iname[DNAME_INLINE_LEN_MIN]; /* small names */
+	int d_mounted;
+	unsigned char d_iname[DNAME_INLINE_LEN_MIN];	/* small names */
 };
 
-#define DNAME_INLINE_LEN	(sizeof(struct dentry)-offsetof(struct dentry,d_iname))
- 
 struct dentry_operations {
 	int (*d_revalidate)(struct dentry *, struct nameidata *);
 	int (*d_hash) (struct dentry *, struct qstr *);
@@ -124,13 +126,13 @@ struct dentry_operations {
 
 /*
 locking rules:
-		big lock	dcache_lock	may block
-d_revalidate:	no		no		yes
-d_hash		no		no		yes
-d_compare:	no		yes		no
-d_delete:	no		yes		no
-d_release:	no		no		yes
-d_iput:		no		no		yes
+		big lock	dcache_lock	d_lock   may block
+d_revalidate:	no		no		no       yes
+d_hash		no		no		no       yes
+d_compare:	no		yes		yes      no
+d_delete:	no		yes		no       no
+d_release:	no		no		no       yes
+d_iput:		no		no		no       yes
  */
 
 /* d_flags entries */
@@ -160,23 +162,22 @@ extern spinlock_t dcache_lock;
  * d_drop - drop a dentry
  * @dentry: dentry to drop
  *
- * d_drop() unhashes the entry from the parent
- * dentry hashes, so that it won't be found through
- * a VFS lookup any more. Note that this is different
- * from deleting the dentry - d_delete will try to
- * mark the dentry negative if possible, giving a
- * successful _negative_ lookup, while d_drop will
+ * d_drop() unhashes the entry from the parent dentry hashes, so that it won't
+ * be found through a VFS lookup any more. Note that this is different from
+ * deleting the dentry - d_delete will try to mark the dentry negative if
+ * possible, giving a successful _negative_ lookup, while d_drop will
  * just make the cache lookup fail.
  *
- * d_drop() is used mainly for stuff that wants
- * to invalidate a dentry for some reason (NFS
- * timeouts or autofs deletes).
+ * d_drop() is used mainly for stuff that wants to invalidate a dentry for some
+ * reason (NFS timeouts or autofs deletes).
+ *
+ * __d_drop requires dentry->d_lock.
  */
 
 static inline void __d_drop(struct dentry *dentry)
 {
-	if (!(dentry->d_vfs_flags & DCACHE_UNHASHED)) {
-		dentry->d_vfs_flags |= DCACHE_UNHASHED;
+	if (!(dentry->d_flags & DCACHE_UNHASHED)) {
+		dentry->d_flags |= DCACHE_UNHASHED;
 		hlist_del_rcu(&dentry->d_hash);
 	}
 }
@@ -184,19 +185,22 @@ static inline void __d_drop(struct dentry *dentry)
 static inline void d_drop(struct dentry *dentry)
 {
 	spin_lock(&dcache_lock);
+	spin_lock(&dentry->d_lock);
  	__d_drop(dentry);
+	spin_unlock(&dentry->d_lock);
 	spin_unlock(&dcache_lock);
 }
 
-static inline int dname_external(struct dentry *d)
+static inline int dname_external(struct dentry *dentry)
 {
-	return d->d_name.name != d->d_iname; 
+	return dentry->d_name.name != dentry->d_iname;
 }
 
 /*
  * These are the low-level FS interfaces to the dcache..
  */
 extern void d_instantiate(struct dentry *, struct inode *);
+extern struct dentry * d_instantiate_unique(struct dentry *, struct inode *);
 extern void d_delete(struct dentry *);
 
 /* allocate/de-allocate */
@@ -238,6 +242,23 @@ static inline void d_add(struct dentry *entry, struct inode *inode)
 {
 	d_instantiate(entry, inode);
 	d_rehash(entry);
+}
+
+/**
+ * d_add_unique - add dentry to hash queues without aliasing
+ * @entry: dentry to add
+ * @inode: The inode to attach to this dentry
+ *
+ * This adds the entry to the hash queues and initializes @inode.
+ * The entry was actually filled in earlier during d_alloc().
+ */
+static inline struct dentry *d_add_unique(struct dentry *entry, struct inode *inode)
+{
+	struct dentry *res;
+
+	res = d_instantiate_unique(entry, inode);
+	d_rehash(res != NULL ? res : entry);
+	return res;
 }
 
 /* used for rename() and baskets */
@@ -287,7 +308,7 @@ extern struct dentry * dget_locked(struct dentry *);
  
 static inline int d_unhashed(struct dentry *dentry)
 {
-	return (dentry->d_vfs_flags & DCACHE_UNHASHED);
+	return (dentry->d_flags & DCACHE_UNHASHED);
 }
 
 static inline struct dentry *dget_parent(struct dentry *dentry)
@@ -309,6 +330,8 @@ static inline int d_mountpoint(struct dentry *dentry)
 
 extern struct vfsmount *lookup_mnt(struct vfsmount *, struct dentry *);
 extern struct dentry *lookup_create(struct nameidata *nd, int is_dir);
+
+extern int sysctl_vfs_cache_pressure;
 
 #endif /* __KERNEL__ */
 

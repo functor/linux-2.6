@@ -2,9 +2,9 @@
  * linux/arch/m68k/motorola.c
  *
  * Routines specific to the Motorola MMU, originally from:
- * linux/arch/m68k/init.c 
+ * linux/arch/m68k/init.c
  * which are Copyright (C) 1995 Hamish Macdonald
- * 
+ *
  * Moved 8/20/1999 Sam Creasey
  */
 
@@ -99,7 +99,7 @@ static pmd_t * __init kernel_ptr_table(void)
 	return last_pgtable;
 }
 
-static unsigned long __init 
+static unsigned long __init
 map_chunk (unsigned long addr, long size)
 {
 #define PTRTREESIZE (256*1024)
@@ -258,7 +258,7 @@ void __init paging_init(void)
 	printk ("before free_area_init\n");
 #endif
 	zones_size[0] = (mach_max_dma_address < (unsigned long)high_memory ?
-			 mach_max_dma_address : (unsigned long)high_memory);
+			 (mach_max_dma_address+1) : (unsigned long)high_memory);
 	zones_size[1] = (unsigned long)high_memory - zones_size[0];
 
 	zones_size[0] = (zones_size[0] - PAGE_OFFSET) >> PAGE_SHIFT;

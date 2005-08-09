@@ -51,20 +51,33 @@ config UNIX98_PTY_COUNT
 	  When not in use, each additional set of 256 PTYs occupy
 	  approximately 8 KB of kernel memory on 32-bit architectures.
 
+source "drivers/char/watchdog/Kconfig"
+
 comment "S/390 character device drivers"
 
 config TN3270
-	tristate "Support for locally attached 3270 tubes"
+	tristate "Support for locally attached 3270 terminals"
 	help
-	  Include support for IBM 3270 line-mode terminals.
+	  Include support for IBM 3270 terminals.
+
+config TN3270_TTY
+	tristate "Support for tty input/output on 3270 terminals"
+	depends on TN3270
+	help
+	  Include support for using an IBM 3270 terminal as a Linux tty.
+
+config TN3270_FS
+	tristate "Support for fullscreen applications on 3270 terminals"
+	depends on TN3270
+	help
+	  Include support for fullscreen applications on an IBM 3270 terminal.
 
 config TN3270_CONSOLE
-	bool "Support for console on 3270 line mode terminal"
-	depends on TN3270=y
+	bool "Support for console on 3270 terminal"
+	depends on TN3270=y && TN3270_TTY=y
 	help
-	  Include support for using an IBM 3270 line-mode terminal as a Linux
-	  system console.  Available only if 3270 support is compiled in
-	  statically.
+	  Include support for using an IBM 3270 terminal as a Linux system
+	  console.  Available only if 3270 support is compiled in statically.
 
 config TN3215
 	bool "Support for 3215 line mode terminal"
@@ -149,7 +162,7 @@ config S390_TAPE_BLOCK
 	  devices using the block device interface.  This interface is similar
 	  to CD-ROM devices on other platforms.  The tapes can only be
 	  accessed read-only when using this interface.  Have a look at
-	  Documentation/s390/TAPE for further information about creating
+	  <file:Documentation/s390/TAPE> for further information about creating
 	  volumes for and using this interface.  It is safe to say "Y" here.
 
 comment "S/390 tape hardware support"
@@ -162,6 +175,23 @@ config S390_TAPE_34XX
 	  Select this option if you want to access IBM 3480/3490 magnetic
 	  tape subsystems and 100% compatibles.
 	  It is safe to say "Y" here.
+
+
+
+config VMLOGRDR
+	tristate "Support for the z/VM recording system services (VM only)"
+	depends on IUCV
+	help
+	  Select this option if you want to be able to receive records collected
+	  by the z/VM recording system services, eg. from *LOGREC, *ACCOUNT or
+	  *SYMPTOM.
+	  This driver depends on the IUCV support driver.
+
+config MONREADER
+	tristate "API for reading z/VM monitor service records"
+	depends on IUCV
+	help
+	  Character device driver for reading z/VM monitor service records
 
 endmenu
 

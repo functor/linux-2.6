@@ -1,10 +1,13 @@
-/* $Id: cache-sh4.c,v 1.26 2004/02/19 12:47:24 lethal Exp $
- *
- *  linux/arch/sh/mm/cache-sh4.c
+/*
+ * arch/sh/mm/cache-sh4.c
  *
  * Copyright (C) 1999, 2000, 2002  Niibe Yutaka
  * Copyright (C) 2001, 2002, 2003, 2004  Paul Mundt
  * Copyright (C) 2003  Richard Curnow
+ *
+ * This file is subject to the terms and conditions of the GNU General Public
+ * License.  See the file "COPYING" in the main directory of this archive
+ * for more details.
  */
 
 #include <linux/config.h>
@@ -27,133 +30,6 @@ extern void __flush_cache_4096_all(unsigned long start);
 static void __flush_cache_4096_all_ex(unsigned long start);
 extern void __flush_dcache_all(void);
 static void __flush_dcache_all_ex(void);
-
-int __init detect_cpu_and_cache_system(void)
-{
-	unsigned long pvr, prr, ccr, cvr;
-	unsigned long size;
-
-	static unsigned long sizes[16] = {
-		[1] = (1 << 12),
-		[2] = (1 << 13),
-		[4] = (1 << 14),
-		[8] = (1 << 15),
-		[9] = (1 << 16)
-	};
-
-	pvr = (ctrl_inl(CCN_PVR) >> 8) & 0xffff;
-	prr = (ctrl_inl(CCN_PRR) >> 4) & 0xff;
-	cvr = (ctrl_inl(CCN_CVR));
-
-	/*
-	 * Setup some sane SH-4 defaults for the icache
-	 */
-	cpu_data->icache.way_shift	= 13;
-	cpu_data->icache.entry_shift	= 5;
-	cpu_data->icache.entry_mask	= 0x1fe0;
-	cpu_data->icache.sets		= 256;
-	cpu_data->icache.ways		= 1;
-	cpu_data->icache.linesz		= L1_CACHE_BYTES;
-
-	/*
-	 * And again for the dcache ..
-	 */
-	cpu_data->dcache.way_shift	= 14;
-	cpu_data->dcache.entry_shift	= 5;
-	cpu_data->dcache.entry_mask	= 0x3fe0;
-	cpu_data->dcache.sets		= 512;
-	cpu_data->dcache.ways		= 1;
-	cpu_data->dcache.linesz		= L1_CACHE_BYTES;
-
-	/* Set the FPU flag, virtually all SH-4's have one */
-	set_bit(CPU_HAS_FPU, &(cpu_data->flags));
-
-	/*
-	 * Probe the underlying processor version/revision and
-	 * adjust cpu_data setup accordingly.
-	 */
-	switch (pvr) {
-	case 0x205:
-		cpu_data->type = CPU_SH7750;
-		set_bit(CPU_HAS_P2_FLUSH_BUG, &(cpu_data->flags));
-		break;
-	case 0x206:
-		cpu_data->type = CPU_SH7750S;
-
-		/* 
-		 * FIXME: This is needed for 7750, but do we need it for the
-		 * 7750S too? For now, assume we do.. -- PFM
-		 */
-		set_bit(CPU_HAS_P2_FLUSH_BUG, &(cpu_data->flags));
-
-		break;
-	case 0x1100:
-		cpu_data->type = CPU_SH7751;
-		break;
-	case 0x8000:
-		cpu_data->type = CPU_ST40RA;
-		break;
-	case 0x8100:
-		cpu_data->type = CPU_ST40GX1;
-		break;
-	case 0x700:
-		cpu_data->type = CPU_SH4_501;
-		cpu_data->icache.ways = 2;
-		cpu_data->dcache.ways = 2;
-
-		/* No FPU on the SH4-500 series.. */
-		clear_bit(CPU_HAS_FPU, &(cpu_data->flags));
-		break;
-	case 0x600:
-		cpu_data->type = CPU_SH4_202;
-		cpu_data->icache.ways = 2;
-		cpu_data->dcache.ways = 2;
-		break;
-	case 0x500 ... 0x501:
-		switch (prr) {
-		    case 0x10: cpu_data->type = CPU_SH7750R; break;
-		    case 0x11: cpu_data->type = CPU_SH7751R; break;
-		    case 0x50: cpu_data->type = CPU_SH7760;  break;
-		}
-
-		cpu_data->icache.ways = 2;
-		cpu_data->dcache.ways = 2;
-
-		break;
-	default:
-		cpu_data->type = CPU_SH_NONE;
-		break;
-	}
-
-	/*
-	 * On anything that's not a direct-mapped cache, look to the CVR
-	 * for I/D-cache specifics.
-	 */
-	if (cpu_data->dcache.ways > 1) {
-		jump_to_P2();
-		ccr = ctrl_inl(CCR);
-
-		/* Force EMODE */
-		if (!(ccr & CCR_CACHE_EMODE)) {
-			ccr |= CCR_CACHE_EMODE;
-			ctrl_outl(ccr, CCR);
-		}
-
-		back_to_P1();
-
-		size = sizes[(cvr >> 20) & 0xf];
-		cpu_data->icache.way_shift	=  (size >> 1);
-		cpu_data->icache.entry_mask	= ((size >> 2) - (1 << 5));
-		cpu_data->icache.sets		=  (size >> 6);
-
-		size = sizes[(cvr >> 16) & 0xf];
-		cpu_data->dcache.way_shift	=  (size >> 1);
-		cpu_data->dcache.entry_mask	= ((size >> 2) - (1 << 5));
-		cpu_data->dcache.sets		=  (size >> 6);
-	}
-
-	return 0;
-}
 
 /*
  * SH-4 has virtually indexed and physically tagged cache.
@@ -250,7 +126,7 @@ static void __flush_cache_4096_all_ex(unsigned long start)
 	int i;
 
 	entry_offset = 1 << cpu_data->dcache.entry_shift;
-	for (i = 0; i < cpu_data->dcache.ways; i++, start += (1 << cpu_data->dcache.way_shift)) {
+	for (i = 0; i < cpu_data->dcache.ways; i++, start += cpu_data->dcache.way_incr) {
 		for (addr = CACHE_OC_ADDRESS_ARRAY + start;
 		     addr < CACHE_OC_ADDRESS_ARRAY + 4096 + start;
 		     addr += entry_offset) {
@@ -297,7 +173,7 @@ void flush_cache_sigtramp(unsigned long addr)
 
 	local_irq_save(flags);
 	jump_to_P2();
-	for(i = 0; i < cpu_data->icache.ways; i++, index += (1 << cpu_data->icache.way_shift))
+	for(i = 0; i < cpu_data->icache.ways; i++, index += cpu_data->icache.way_incr)
 		ctrl_outl(0, index);	/* Clear out Valid-bit */
 	back_to_P1();
 	local_irq_restore(flags);
@@ -313,12 +189,13 @@ static inline void flush_cache_4096(unsigned long start,
 	 * SH7751, SH7751R, and ST40 have no restriction to handle cache.
 	 * (While SH7750 must do that at P2 area.)
 	 */
-	if (test_bit(CPU_HAS_P2_FLUSH_BUG, &(cpu_data->flags))) {
+	if ((cpu_data->flags & CPU_HAS_P2_FLUSH_BUG)
+	   || start < CACHE_OC_ADDRESS_ARRAY) {
 		local_irq_save(flags);
-		__flush_cache_4096(start | SH_CACHE_ASSOC, phys | 0x80000000, 0x20000000);
+		__flush_cache_4096(start | SH_CACHE_ASSOC, P1SEGADDR(phys), 0x20000000);
 		local_irq_restore(flags);
-	} else if (start >= CACHE_OC_ADDRESS_ARRAY) {
-		__flush_cache_4096(start | SH_CACHE_ASSOC, phys | 0x80000000, 0);
+	} else {
+		__flush_cache_4096(start | SH_CACHE_ASSOC, P1SEGADDR(phys), 0);
 	}
 }
 
@@ -381,10 +258,16 @@ void flush_cache_mm(struct mm_struct *mm)
 	flush_cache_all();
 }
 
-static void __flush_cache_page(struct vm_area_struct *vma,
-			       unsigned long address,
-			       unsigned long phys)
+/*
+ * Write back and invalidate I/D-caches for the page.
+ *
+ * ADDR: Virtual Address (U0 address)
+ * PFN: Physical page number
+ */
+void flush_cache_page(struct vm_area_struct *vma, unsigned long address, unsigned long pfn)
 {
+	unsigned long phys = pfn << PAGE_SHIFT;
+
 	/* We only need to flush D-cache when we have alias */
 	if ((address^phys) & CACHE_ALIAS) {
 		/* Loop 4K of the D-cache */
@@ -465,32 +348,6 @@ void flush_cache_range(struct vm_area_struct *vma, unsigned long start,
 }
 
 /*
- * Write back and invalidate I/D-caches for the page.
- *
- * ADDR: Virtual Address (U0 address)
- */
-void flush_cache_page(struct vm_area_struct *vma, unsigned long address)
-{
-	pgd_t *dir;
-	pmd_t *pmd;
-	pte_t *pte;
-	pte_t entry;
-	unsigned long phys;
-
-	dir = pgd_offset(vma->vm_mm, address);
-	pmd = pmd_offset(dir, address);
-	if (pmd_none(*pmd) || pmd_bad(*pmd))
-		return;
-	pte = pte_offset_kernel(pmd, address);
-	entry = *pte;
-	if (!(pte_val(entry) & _PAGE_PRESENT))
-		return;
-
-	phys = pte_val(entry)&PTE_PHYS_MASK;
-	__flush_cache_page(vma, address, phys);
-}
-
-/*
  * flush_icache_user_range
  * @vma: VMA of the process
  * @page: page
@@ -500,6 +357,6 @@ void flush_cache_page(struct vm_area_struct *vma, unsigned long address)
 void flush_icache_user_range(struct vm_area_struct *vma,
 			     struct page *page, unsigned long addr, int len)
 {
-	__flush_cache_page(vma, addr, PHYSADDR(page_address(page)));
+	flush_cache_page(vma, addr, page_to_pfn(page));
 }
 

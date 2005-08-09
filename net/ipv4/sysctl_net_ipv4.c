@@ -23,6 +23,7 @@ extern int sysctl_ip_nonlocal_bind;
 extern int sysctl_icmp_echo_ignore_all;
 extern int sysctl_icmp_echo_ignore_broadcasts;
 extern int sysctl_icmp_ignore_bogus_error_responses;
+extern int sysctl_icmp_errors_use_inbound_ifaddr;
 
 /* From ip_fragment.c */
 extern int sysctl_ipfrag_low_thresh;
@@ -62,12 +63,12 @@ extern ctl_table ipv4_route_table[];
 
 static
 int ipv4_sysctl_forward(ctl_table *ctl, int write, struct file * filp,
-			void *buffer, size_t *lenp)
+			void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int val = ipv4_devconf.forwarding;
 	int ret;
 
-	ret = proc_dointvec(ctl, write, filp, buffer, lenp);
+	ret = proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
 
 	if (write && ipv4_devconf.forwarding != val)
 		inet_forward_change();
@@ -75,9 +76,10 @@ int ipv4_sysctl_forward(ctl_table *ctl, int write, struct file * filp,
 	return ret;
 }
 
-static int ipv4_sysctl_forward_strategy(ctl_table *table, int *name, int nlen,
-			 void *oldval, size_t *oldlenp,
-			 void *newval, size_t newlen, 
+static int ipv4_sysctl_forward_strategy(ctl_table *table,
+			 int __user *name, int nlen,
+			 void __user *oldval, size_t __user *oldlenp,
+			 void __user *newval, size_t newlen, 
 			 void **context)
 {
 	int *valp = table->data;
@@ -89,7 +91,7 @@ static int ipv4_sysctl_forward_strategy(ctl_table *table, int *name, int nlen,
 	if (newlen != sizeof(int))
 		return -EINVAL;
 
-	if (get_user(new, (int *)newval))
+	if (get_user(new, (int __user *)newval))
 		return -EFAULT;
 
 	if (new == *valp)
@@ -395,6 +397,14 @@ ctl_table ipv4_table[] = {
 		.proc_handler	= &proc_dointvec
 	},
 	{
+		.ctl_name	= NET_IPV4_ICMP_ERRORS_USE_INBOUND_IFADDR,
+		.procname	= "icmp_errors_use_inbound_ifaddr",
+		.data		= &sysctl_icmp_errors_use_inbound_ifaddr,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec
+	},
+	{
 		.ctl_name	= NET_IPV4_ROUTE,
 		.procname	= "route",
 		.maxlen		= 0,
@@ -661,6 +671,30 @@ ctl_table ipv4_table[] = {
 		.ctl_name	= NET_TCP_BIC_LOW_WINDOW,
 		.procname	= "tcp_bic_low_window",
 		.data		= &sysctl_tcp_bic_low_window,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= NET_TCP_MODERATE_RCVBUF,
+		.procname	= "tcp_moderate_rcvbuf",
+		.data		= &sysctl_tcp_moderate_rcvbuf,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= NET_TCP_TSO_WIN_DIVISOR,
+		.procname	= "tcp_tso_win_divisor",
+		.data		= &sysctl_tcp_tso_win_divisor,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= NET_TCP_BIC_BETA,
+		.procname	= "tcp_bic_beta",
+		.data		= &sysctl_tcp_bic_beta,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,

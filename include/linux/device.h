@@ -15,7 +15,6 @@
 #include <linux/ioport.h>
 #include <linux/kobject.h>
 #include <linux/list.h>
-#include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/pm.h>
@@ -54,11 +53,14 @@ struct bus_type {
 	struct kset		drivers;
 	struct kset		devices;
 
+	struct bus_attribute	* bus_attrs;
+	struct device_attribute	* dev_attrs;
+	struct driver_attribute	* drv_attrs;
+
 	int		(*match)(struct device * dev, struct device_driver * drv);
-	struct device * (*add)	(struct device * parent, char * bus_id);
 	int		(*hotplug) (struct device *dev, char **envp, 
 				    int num_envp, char *buffer, int buffer_size);
-	int		(*suspend)(struct device * dev, u32 state);
+	int		(*suspend)(struct device * dev, pm_message_t state);
 	int		(*resume)(struct device * dev);
 };
 
@@ -90,11 +92,7 @@ struct bus_attribute {
 };
 
 #define BUS_ATTR(_name,_mode,_show,_store)	\
-struct bus_attribute bus_attr_##_name = { 		\
-	.attr = {.name = __stringify(_name), .mode = _mode, .owner = THIS_MODULE },	\
-	.show	= _show,				\
-	.store	= _store,				\
-};
+struct bus_attribute bus_attr_##_name = __ATTR(_name,_mode,_show,_store)
 
 extern int bus_create_file(struct bus_type *, struct bus_attribute *);
 extern void bus_remove_file(struct bus_type *, struct bus_attribute *);
@@ -103,14 +101,16 @@ struct device_driver {
 	char			* name;
 	struct bus_type		* bus;
 
-	struct semaphore	unload_sem;
+	struct completion	unloaded;
 	struct kobject		kobj;
 	struct list_head	devices;
+
+	struct module 		* owner;
 
 	int	(*probe)	(struct device * dev);
 	int 	(*remove)	(struct device * dev);
 	void	(*shutdown)	(struct device * dev);
-	int	(*suspend)	(struct device * dev, u32 state, u32 level);
+	int	(*suspend)	(struct device * dev, pm_message_t state, u32 level);
 	int	(*resume)	(struct device * dev, u32 level);
 };
 
@@ -120,6 +120,7 @@ extern void driver_unregister(struct device_driver * drv);
 
 extern struct device_driver * get_driver(struct device_driver * drv);
 extern void put_driver(struct device_driver * drv);
+extern struct device_driver *driver_find(const char *name, struct bus_type *bus);
 
 
 /* driverfs interface for exporting driver attributes */
@@ -131,11 +132,7 @@ struct driver_attribute {
 };
 
 #define DRIVER_ATTR(_name,_mode,_show,_store)	\
-struct driver_attribute driver_attr_##_name = { 		\
-	.attr = {.name = __stringify(_name), .mode = _mode, .owner = THIS_MODULE },	\
-	.show	= _show,				\
-	.store	= _store,				\
-};
+struct driver_attribute driver_attr_##_name = __ATTR(_name,_mode,_show,_store)
 
 extern int driver_create_file(struct device_driver *, struct driver_attribute *);
 extern void driver_remove_file(struct device_driver *, struct driver_attribute *);
@@ -150,6 +147,10 @@ struct class {
 	struct subsystem	subsys;
 	struct list_head	children;
 	struct list_head	interfaces;
+	struct semaphore	sem;	/* locks both the children and interfaces lists */
+
+	struct class_attribute		* class_attrs;
+	struct class_device_attribute	* class_dev_attrs;
 
 	int	(*hotplug)(struct class_device *dev, char **envp, 
 			   int num_envp, char *buffer, int buffer_size);
@@ -172,11 +173,7 @@ struct class_attribute {
 };
 
 #define CLASS_ATTR(_name,_mode,_show,_store)			\
-struct class_attribute class_attr_##_name = { 			\
-	.attr = {.name = __stringify(_name), .mode = _mode, .owner = THIS_MODULE },	\
-	.show	= _show,					\
-	.store	= _store,					\
-};
+struct class_attribute class_attr_##_name = __ATTR(_name,_mode,_show,_store) 
 
 extern int class_create_file(struct class *, const struct class_attribute *);
 extern void class_remove_file(struct class *, const struct class_attribute *);
@@ -187,6 +184,7 @@ struct class_device {
 
 	struct kobject		kobj;
 	struct class		* class;	/* required */
+	dev_t			devt;		/* dev_t, creates the sysfs "dev" */
 	struct device		* dev;		/* not necessary, but nice to have */
 	void			* class_data;	/* class-specific data */
 
@@ -224,17 +222,17 @@ struct class_device_attribute {
 };
 
 #define CLASS_DEVICE_ATTR(_name,_mode,_show,_store)		\
-struct class_device_attribute class_device_attr_##_name = { 	\
-	.attr = {.name = __stringify(_name), .mode = _mode, .owner = THIS_MODULE },	\
-	.show	= _show,					\
-	.store	= _store,					\
-};
+struct class_device_attribute class_device_attr_##_name = 	\
+	__ATTR(_name,_mode,_show,_store)
 
 extern int class_device_create_file(struct class_device *, 
 				    const struct class_device_attribute *);
 extern void class_device_remove_file(struct class_device *, 
 				     const struct class_device_attribute *);
-
+extern int class_device_create_bin_file(struct class_device *,
+					struct bin_attribute *);
+extern void class_device_remove_bin_file(struct class_device *,
+					 struct bin_attribute *);
 
 struct class_interface {
 	struct list_head	node;
@@ -274,14 +272,6 @@ struct device {
 	void		*platform_data;	/* Platform specific data (e.g. ACPI,
 					   BIOS data relevant to device) */
 	struct dev_pm_info	power;
-	u32		power_state;	/* Current operating state. In
-					   ACPI-speak, this is D0-D3, D0
-					   being fully functional, and D3
-					   being off. */
-
-	unsigned char *saved_state;	/* saved device state */
-	u32		detach_state;	/* State to enter when device is
-					   detached from its driver. */
 
 	u64		*dma_mask;	/* dma mask (if dma'able device) */
 	u64		coherent_dma_mask;/* Like dma_mask, but for
@@ -291,6 +281,9 @@ struct device {
 					     allocations such descriptors. */
 
 	struct list_head	dma_pools;	/* dma pools (if dma'ble) */
+
+	struct dma_coherent_mem	*dma_mem; /* internal for coherent mem
+					     override */
 
 	void	(*release)(struct device * dev);
 };
@@ -325,11 +318,13 @@ extern int device_for_each_child(struct device *, void *,
 		     int (*fn)(struct device *, void *));
 
 /*
- * Manual binding of a device to driver. See drivers/base/bus.c 
+ * Manual binding of a device to driver. See drivers/base/bus.c
  * for information on use.
  */
+extern int  driver_probe_device(struct device_driver * drv, struct device * dev);
 extern void device_bind_driver(struct device * dev);
 extern void device_release_driver(struct device * dev);
+extern int  device_attach(struct device * dev);
 extern void driver_attach(struct device_driver * drv);
 
 
@@ -342,11 +337,7 @@ struct device_attribute {
 };
 
 #define DEVICE_ATTR(_name,_mode,_show,_store) \
-struct device_attribute dev_attr_##_name = { 		\
-	.attr = {.name = __stringify(_name), .mode = _mode, .owner = THIS_MODULE },	\
-	.show	= _show,				\
-	.store	= _store,				\
-};
+struct device_attribute dev_attr_##_name = __ATTR(_name,_mode,_show,_store)
 
 
 extern int device_create_file(struct device *device, struct device_attribute * entry);
@@ -390,6 +381,14 @@ extern void platform_device_unregister(struct platform_device *);
 extern struct bus_type platform_bus_type;
 extern struct device platform_bus;
 
+extern struct resource *platform_get_resource(struct platform_device *, unsigned int, unsigned int);
+extern int platform_get_irq(struct platform_device *, unsigned int);
+extern struct resource *platform_get_resource_byname(struct platform_device *, unsigned int, char *);
+extern int platform_get_irq_byname(struct platform_device *, char *);
+extern int platform_add_devices(struct platform_device **, int);
+
+extern struct platform_device *platform_device_register_simple(char *, unsigned int, struct resource *, unsigned int);
+
 /* drivers/base/power.c */
 extern void device_shutdown(void);
 
@@ -400,13 +399,13 @@ extern void firmware_unregister(struct subsystem *);
 
 /* debugging and troubleshooting/diagnostic helpers. */
 #define dev_printk(level, dev, format, arg...)	\
-	printk(level "%s %s: " format , (dev)->driver->name , (dev)->bus_id , ## arg)
+	printk(level "%s %s: " format , (dev)->driver ? (dev)->driver->name : "" , (dev)->bus_id , ## arg)
 
 #ifdef DEBUG
 #define dev_dbg(dev, format, arg...)		\
 	dev_printk(KERN_DEBUG , dev , format , ## arg)
 #else
-#define dev_dbg(dev, format, arg...) do {} while (0)
+#define dev_dbg(dev, format, arg...) do { (void)(dev); } while (0)
 #endif
 
 #define dev_err(dev, format, arg...)		\

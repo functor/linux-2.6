@@ -59,7 +59,7 @@ config VT_CONSOLE
 
 config HW_CONSOLE
 	bool
-	depends on VT && !S390 && !UM
+	depends on VT && !S390 && !UML
 	default y
 
 config SERIAL_NONSTANDARD
@@ -112,14 +112,12 @@ config CYCLADES
 	tristate "Cyclades async mux support"
 	depends on SERIAL_NONSTANDARD
 	---help---
-	  This is a driver for a card that gives you many serial ports. You
-	  would need something like this to connect more than two modems to
+	  This driver supports Cyclades Z and Y multiserial boards.
+	  You would need something like this to connect more than two modems to
 	  your Linux box, for instance in order to become a dial-in server.
+
 	  For information about the Cyclades-Z card, read
 	  <file:drivers/char/README.cycladesZ>.
-
-	  As of 1.3.9x kernels, this driver's minor numbers start at 0 instead
-	  of 32.
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called cyclades.
@@ -150,29 +148,12 @@ config DIGIEPCA
 	  you have a card like this, say Y here and read the file
 	  <file:Documentation/digiepca.txt>.
 
-	  NOTE: There is another, separate driver for the Digiboard PC boards:
-	  "Digiboard PC/Xx Support" below. You should (and can) only select
-	  one of the two drivers.
-
 	  To compile this driver as a module, choose M here: the
 	  module will be called epca.
 
-config DIGI
-	tristate "Digiboard PC/Xx Support"
-	depends on SERIAL_NONSTANDARD && DIGIEPCA=n && BROKEN_ON_SMP
-	help
-	  This is a driver for the Digiboard PC/Xe, PC/Xi, and PC/Xeve cards
-	  that give you many serial ports. You would need something like this
-	  to connect more than two modems to your Linux box, for instance in
-	  order to become a dial-in server. If you have a card like that, say
-	  Y here and read the file <file:Documentation/digiboard.txt>.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called pcxx.
-
 config ESPSERIAL
 	tristate "Hayes ESP serial port support"
-	depends on SERIAL_NONSTANDARD && ISA && BROKEN_ON_SMP
+	depends on SERIAL_NONSTANDARD && ISA && BROKEN_ON_SMP && ISA_DMA_API
 	help
 	  This is a driver which supports Hayes ESP serial ports.  Both single
 	  port cards and multiport cards are supported.  Make sure to read
@@ -194,7 +175,7 @@ config MOXA_INTELLIO
 
 config MOXA_SMARTIO
 	tristate "Moxa SmartIO support"
-	depends on SERIAL_NONSTANDARD && BROKEN_ON_SMP
+	depends on SERIAL_NONSTANDARD
 	help
 	  Say Y here if you have a Moxa SmartIO multiport serial card.
 
@@ -205,7 +186,7 @@ config MOXA_SMARTIO
 
 config ISI
 	tristate "Multi-Tech multiport card support (EXPERIMENTAL)"
-	depends on SERIAL_NONSTANDARD && EXPERIMENTAL && BROKEN_ON_SMP && m
+	depends on SERIAL_NONSTANDARD
 	help
 	  This is a driver for the Multi-Tech cards which provide several
 	  serial ports.  The driver is experimental and can currently only be
@@ -214,7 +195,7 @@ config ISI
 
 config SYNCLINK
 	tristate "Microgate SyncLink card support"
-	depends on SERIAL_NONSTANDARD
+	depends on SERIAL_NONSTANDARD && PCI && ISA_DMA_API
 	help
 	  Provides support for the SyncLink ISA and PCI multiprotocol serial
 	  adapters. These adapters support asynchronous and HDLC bit
@@ -266,7 +247,7 @@ config RISCOM8
 
 config SPECIALIX
 	tristate "Specialix IO8+ card support"
-	depends on SERIAL_NONSTANDARD && BROKEN_ON_SMP
+	depends on SERIAL_NONSTANDARD
 	help
 	  This is a driver for the Specialix IO8+ multiport card (both the
 	  ISA and the PCI version) which gives you many serial ports. You
@@ -290,7 +271,7 @@ config SPECIALIX_RTSCTS
 
 config SX
 	tristate "Specialix SX (and SI) card support"
-	depends on SERIAL_NONSTANDARD && BROKEN_ON_SMP
+	depends on SERIAL_NONSTANDARD
 	help
 	  This is a driver for the SX and SI multiport serial cards.
 	  Please read the file <file:Documentation/sx.txt> for details.
@@ -350,44 +331,12 @@ config ISTALLION
 	  To compile this driver as a module, choose M here: the
 	  module will be called istallion.
 
-config SERIAL_TX3912
-	bool "TMPTX3912/PR31700 serial port support"
-	depends on SERIAL_NONSTANDARD && MIPS && BROKEN_ON_SMP
-	help
-	  The TX3912 is a Toshiba RISC processor based o the MIPS 3900 core;
-	  see <http://www.toshiba.com/taec/components/Generic/risc/tx3912.htm>.
-	  Say Y here to enable kernel support for the on-board serial port.
-
-config SERIAL_TX3912_CONSOLE
-	bool "Console on TMPTX3912/PR31700 serial port"
-	depends on SERIAL_TX3912
-	help
-	  The TX3912 is a Toshiba RISC processor based o the MIPS 3900 core;
-	  see <http://www.toshiba.com/taec/components/Generic/risc/tx3912.htm>.
-	  Say Y here to direct console I/O to the on-board serial port.
-
 config AU1000_UART
 	bool "Enable Au1000 UART Support"
 	depends on SERIAL_NONSTANDARD && MIPS
 	help
 	  If you have an Alchemy AU1000 processor (MIPS based) and you want
 	  to use serial ports, say Y.  Otherwise, say N.
-
-config SGI_L1_SERIAL
-	bool "SGI Altix L1 serial support"
-	depends on SERIAL_NONSTANDARD && IA64
-	help
-	  If you have an SGI Altix and you want to use the serial port
-	  connected to the system controller (you want this!), say Y.
-	  Otherwise, say N.
-
-config SGI_L1_SERIAL_CONSOLE
-	bool "SGI Altix L1 serial console support"
-	depends on SGI_L1_SERIAL
-	help
-	  If you have an SGI Altix and you would like to use the system
-	  controller serial port as your console (you want this!),
-	  say Y.  Otherwise, say N.
 
 config AU1000_SERIAL_CONSOLE
 	bool "Enable Au1000 serial console"
@@ -442,6 +391,28 @@ config A2232
 	  will also be built as a module. This has to be loaded before
 	  "ser_a2232". If you want to do this, answer M here.
 
+config SGI_SNSC
+	bool "SGI Altix system controller communication support"
+	depends on (IA64_SGI_SN2 || IA64_GENERIC)
+	help
+	  If you have an SGI Altix and you want to enable system
+	  controller communication from user space (you want this!),
+	  say Y.  Otherwise, say N.
+
+config SGI_TIOCX
+       bool "SGI TIO CX driver support"
+       depends on (IA64_SGI_SN2 || IA64_GENERIC)
+       help
+         If you have an SGI Altix and you have fpga devices attached
+         to your TIO, say Y here, otherwise say N.
+
+config SGI_MBCS
+       tristate "SGI FPGA Core Services driver support"
+       depends on SGI_TIOCX
+       help
+         If you have an SGI Altix with an attached SABrick
+         say Y or M here, otherwise say N.
+
 source "drivers/serial/Kconfig"
 
 config UNIX98_PTYS
@@ -488,6 +459,7 @@ config LEGACY_PTYS
 config LEGACY_PTY_COUNT
 	int "Maximum number of legacy PTY in use"
 	depends on LEGACY_PTYS
+	range 1 256
 	default "256"
 	---help---
 	  The maximum number of legacy PTYs that can be used at any one time.
@@ -588,49 +560,22 @@ config HVC_CONSOLE
 	  console. This driver allows each pSeries partition to have a console
 	  which is accessed via the HMC.
 
-config PC9800_OLDLP
-	tristate "NEC PC-9800 old-style printer port support"
-	depends on X86_PC9800 && !PARPORT
-	---help---
-	  If you intend to attach a printer to the parallel port of NEC PC-9801
-	  /PC-9821 with OLD compatibility mode, Say Y.
-
-config PC9800_OLDLP_CONSOLE
-	bool "Support for console on line printer"
-	depends on PC9800_OLDLP
-
-config QIC02_TAPE
-	tristate "QIC-02 tape support"
+config HVCS
+	tristate "IBM Hypervisor Virtual Console Server support"
+	depends on PPC_PSERIES
 	help
-	  If you have a non-SCSI tape drive like that, say Y.
+	  Partitionable IBM Power5 ppc64 machines allow hosting of
+	  firmware virtual consoles from one Linux partition by
+	  another Linux partition.  This driver allows console data
+	  from Linux partitions to be accessed through TTY device
+	  interfaces in the device tree of a Linux partition running
+	  this driver.
 
 	  To compile this driver as a module, choose M here: the
-	  module will be called tpqic02.
-
-config QIC02_DYNCONF
-	bool "Do you want runtime configuration for QIC-02"
-	depends on QIC02_TAPE
-	help
-	  You can either configure this driver once and for all by editing a
-	  header file (<file:include/linux/tpqic02.h>), in which case you
-	  should say N, or you can fetch a program via anonymous FTP which is
-	  able to configure this driver during runtime.  The program to do
-	  this is called 'qic02conf' and it is part of the
-	  tpqic02-support-X.Y.tar.gz support package.
-
-	  If you want to use the qic02conf program, say Y.
-
-comment "Edit configuration parameters in ./include/linux/tpqic02.h!"
-	depends on QIC02_TAPE && !QIC02_DYNCONF
-
-comment "Setting runtime QIC-02 configuration is done with qic02conf"
-	depends on QIC02_TAPE && QIC02_DYNCONF
-
-comment "from the tpqic02-support package.  It is available at"
-	depends on QIC02_TAPE && QIC02_DYNCONF
-
-comment "metalab.unc.edu or ftp://titus.cfw.com/pub/Linux/util/"
-	depends on QIC02_TAPE && QIC02_DYNCONF
+	  module will be called hvcs.ko.  Additionally, this module
+	  will depend on arch specific APIs exported from hvcserver.ko
+	  which will also be compiled when this driver is built as a
+	  module.
 
 source "drivers/char/ipmi/Kconfig"
 
@@ -742,7 +687,7 @@ config NVRAM
 
 config RTC
 	tristate "Enhanced Real Time Clock Support"
-	depends on !PPC32 && !PARISC && !IA64 && !X86_PC9800 && !M68K
+	depends on !PPC32 && !PARISC && !IA64 && !M68K
 	---help---
 	  If you say Y here and create a character special file /dev/rtc with
 	  major number 10 and minor number 135 using mknod ("man mknod"), you
@@ -766,9 +711,31 @@ config RTC
 	  To compile this driver as a module, choose M here: the
 	  module will be called rtc.
 
+config SGI_DS1286
+	tristate "SGI DS1286 RTC support"
+	depends on SGI_IP22
+	help
+	  If you say Y here and create a character special file /dev/rtc with
+	  major number 10 and minor number 135 using mknod ("man mknod"), you
+	  will get access to the real time clock built into your computer.
+	  Every SGI has such a clock built in. It reports status information
+	  via the file /proc/rtc and its behaviour is set by various ioctls on
+	  /dev/rtc.
+
+config SGI_IP27_RTC
+	bool "SGI M48T35 RTC support"
+	depends on SGI_IP27
+	help
+	  If you say Y here and create a character special file /dev/rtc with
+	  major number 10 and minor number 135 using mknod ("man mknod"), you
+	  will get access to the real time clock built into your computer.
+	  Every SGI has such a clock built in. It reports status information
+	  via the file /proc/rtc and its behaviour is set by various ioctls on
+	  /dev/rtc.
+
 config GEN_RTC
 	tristate "Generic /dev/rtc emulation"
-	depends on RTC!=y && !IA64
+	depends on RTC!=y && !IA64 && !ARM
 	---help---
 	  If you say Y here and create a character special file /dev/rtc with
 	  major number 10 and minor number 135 using mknod ("man mknod"), you
@@ -795,24 +762,33 @@ config EFI_RTC
 	bool "EFI Real Time Clock Services"
 	depends on IA64
 
-config RTC98
-	tristate "NEC PC-9800 Real Time Clock Support"
-	depends on X86_PC9800
-	default y
-	---help---
-	  If you say Y here and create a character special file /dev/rtc with
-	  major number 10 and minor number 135 using mknod ("man mknod"), you
-	  will get access to the real time clock (or hardware clock) built
-
-config H8
-	bool "Tadpole ANA H8 Support (OBSOLETE)"
-	depends on OBSOLETE && ALPHA_BOOK1
+config DS1302
+	tristate "DS1302 RTC support"
+	depends on M32R && (PLAT_M32700UT || PLAT_OPSPUT)
 	help
-	  The Hitachi H8/337 is a microcontroller used to deal with the power
-	  and thermal environment. If you say Y here, you will be able to
-	  communicate with it via a character special device.
+	  If you say Y here and create a character special file /dev/rtc with
+	  major number 121 and minor number 0 using mknod ("man mknod"), you
+	  will get access to the real time clock (or hardware clock) built
+	  into your computer.
 
-	  If unsure, say N.
+config S3C2410_RTC
+	bool "S3C2410 RTC Driver"
+	depends on ARCH_S3C2410
+	help
+	  RTC (Realtime Clock) driver for the clock inbuilt into the
+	  Samsung S3C2410. This can provide periodic interrupt rates
+	  from 1Hz to 64Hz for user programs, and wakeup from Alarm.
+
+config RTC_VR41XX
+	tristate "NEC VR4100 series Real Time Clock Support"
+	depends on CPU_VR41XX
+
+config COBALT_LCD
+	bool "Support for Cobalt LCD"
+	depends on MIPS_COBALT
+	help
+	  This option enables support for the LCD display and buttons found
+	  on Cobalt systems through a misc device.
 
 config DTLK
 	tristate "Double Talk PC internal speech card support"
@@ -838,6 +814,7 @@ config R3964
 
 config APPLICOM
 	tristate "Applicom intelligent fieldbus card support"
+	depends on PCI
 	---help---
 	  This driver provides the kernel-side support for the intelligent
 	  fieldbus cards made by Applicom International. More information
@@ -852,7 +829,7 @@ config APPLICOM
 
 config SONYPI
 	tristate "Sony Vaio Programmable I/O Control Device support (EXPERIMENTAL)"
-	depends on EXPERIMENTAL && X86 && PCI && !64BIT
+	depends on EXPERIMENTAL && X86 && PCI && INPUT && !64BIT
 	---help---
 	  This driver enables access to the Sony Programmable I/O Control
 	  Device which can be found in many (all ?) Sony Vaio laptops.
@@ -863,12 +840,16 @@ config SONYPI
 	  To compile this driver as a module, choose M here: the
 	  module will be called sonypi.
 
+config TANBAC_TB0219
+	tristate "TANBAC TB0219 base board support"
+	depends TANBAC_TB0229
+
 
 menu "Ftape, the floppy tape device driver"
 
 config FTAPE
 	tristate "Ftape (QIC-80/Travan) support"
-	depends on BROKEN_ON_SMP
+	depends on BROKEN_ON_SMP && (ALPHA || X86)
 	---help---
 	  If you have a tape drive that is connected to your floppy
 	  controller, say Y here.
@@ -959,6 +940,37 @@ config RAW_DRIVER
           kernels.  Applications should simply open the device (eg /dev/hda1)
           with the O_DIRECT flag.
 
+config HPET
+	bool "HPET - High Precision Event Timer" if (X86 || IA64)
+	default n
+	depends on ACPI
+	help
+	  If you say Y here, you will have a miscdevice named "/dev/hpet/".  Each
+	  open selects one of the timers supported by the HPET.  The timers are
+	  non-periodioc and/or periodic.
+
+config HPET_RTC_IRQ
+	bool "HPET Control RTC IRQ" if !HPET_EMULATE_RTC
+	default n
+	depends on HPET
+	help
+	  If you say Y here, you will disable RTC_IRQ in drivers/char/rtc.c. It
+	  is assumed the platform called hpet_alloc with the RTC IRQ values for
+	  the HPET timers.
+
+config HPET_MMAP
+	bool "Allow mmap of HPET"
+	default y
+	depends on HPET
+	help
+	  If you say Y here, user applications will be able to mmap
+	  the HPET registers.
+
+	  In some hardware implementations, the page containing HPET
+	  registers may also contain other things that shouldn't be
+	  exposed to the user.  If this applies to your hardware,
+	  say N here.
+
 config MAX_RAW_DEVS
 	int "Maximum number of RAW devices to support (1-8192)"
 	depends on RAW_DRIVER
@@ -970,11 +982,21 @@ config MAX_RAW_DEVS
 
 config HANGCHECK_TIMER
 	tristate "Hangcheck timer"
-	depends on X86_64 || X86
+	depends on X86_64 || X86 || IA64 || PPC64 || ARCH_S390
 	help
 	  The hangcheck-timer module detects when the system has gone
 	  out to lunch past a certain margin.  It can reboot the system
 	  or merely print a warning.
+
+config MMTIMER
+	tristate "MMTIMER Memory mapped RTC for SGI Altix"
+	depends on IA64_GENERIC || IA64_SGI_SN2
+	default y
+	help
+	  The mmtimer device allows direct userspace access to the
+	  Altix system timer.
+
+source "drivers/char/tpm/Kconfig"
 
 endmenu
 

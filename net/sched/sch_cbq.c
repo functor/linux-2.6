@@ -14,7 +14,7 @@
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -146,7 +146,10 @@ struct cbq_class
 	long			avgidle;
 	long			deficit;	/* Saved deficit for WRR */
 	unsigned long		penalized;
-	struct tc_stats		stats;
+	struct gnet_stats_basic bstats;
+	struct gnet_stats_queue qstats;
+	struct gnet_stats_rate_est rate_est;
+	spinlock_t		*stats_lock;
 	struct tc_cbq_xstats	xstats;
 
 	struct tcf_proto	*filter_list;
@@ -238,9 +241,9 @@ cbq_reclassify(struct sk_buff *skb, struct cbq_class *this)
  */
 
 static struct cbq_class *
-cbq_classify(struct sk_buff *skb, struct Qdisc *sch)
+cbq_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data*)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *head = &q->link;
 	struct cbq_class **defmap;
 	struct cbq_class *cl = NULL;
@@ -252,11 +255,11 @@ cbq_classify(struct sk_buff *skb, struct Qdisc *sch)
 	 */
 	if (TC_H_MAJ(prio^sch->handle) == 0 &&
 	    (cl = cbq_class_lookup(q, prio)) != NULL)
-			return cl;
+		return cl;
 
+	*qerr = NET_XMIT_DROP;
 	for (;;) {
 		int result = 0;
-
 		defmap = head->defaults;
 
 		/*
@@ -275,7 +278,15 @@ cbq_classify(struct sk_buff *skb, struct Qdisc *sch)
 				goto fallback;
 		}
 
-#ifdef CONFIG_NET_CLS_POLICE
+#ifdef CONFIG_NET_CLS_ACT
+		switch (result) {
+		case TC_ACT_QUEUED:
+		case TC_ACT_STOLEN: 
+			*qerr = NET_XMIT_SUCCESS;
+		case TC_ACT_SHOT:
+			return NULL;
+		}
+#elif defined(CONFIG_NET_CLS_POLICE)
 		switch (result) {
 		case TC_POLICE_RECLASSIFY:
 			return cbq_reclassify(skb, cl);
@@ -318,7 +329,7 @@ fallback:
 
 static __inline__ void cbq_activate_class(struct cbq_class *cl)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data*)cl->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(cl->qdisc);
 	int prio = cl->cpriority;
 	struct cbq_class *cl_tail;
 
@@ -342,7 +353,7 @@ static __inline__ void cbq_activate_class(struct cbq_class *cl)
 
 static void cbq_deactivate_class(struct cbq_class *this)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data*)this->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(this->qdisc);
 	int prio = this->cpriority;
 	struct cbq_class *cl;
 	struct cbq_class *cl_prev = q->active[prio];
@@ -393,49 +404,50 @@ cbq_mark_toplevel(struct cbq_sched_data *q, struct cbq_class *cl)
 static int
 cbq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
-	struct cbq_class *cl = cbq_classify(skb, sch);
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	int len = skb->len;
-	int ret = NET_XMIT_POLICED;
+	int ret;
+	struct cbq_class *cl = cbq_classify(skb, sch, &ret);
 
 #ifdef CONFIG_NET_CLS_POLICE
 	q->rx_class = cl;
 #endif
-	if (cl) {
-#ifdef CONFIG_NET_CLS_POLICE
-		cl->q->__parent = sch;
-#endif
-		if ((ret = cl->q->enqueue(skb, cl->q)) == 0) {
-			sch->q.qlen++;
-			sch->stats.packets++;
-			sch->stats.bytes+=len;
-			cbq_mark_toplevel(q, cl);
-			if (!cl->next_alive)
-				cbq_activate_class(cl);
-			return 0;
-		}
+	if (cl == NULL) {
+		if (ret == NET_XMIT_DROP)
+			sch->qstats.drops++;
+		kfree_skb(skb);
+		return ret;
 	}
 
-	sch->stats.drops++;
-	if (cl == NULL)
-		kfree_skb(skb);
-	else {
+#ifdef CONFIG_NET_CLS_POLICE
+	cl->q->__parent = sch;
+#endif
+	if ((ret = cl->q->enqueue(skb, cl->q)) == NET_XMIT_SUCCESS) {
+		sch->q.qlen++;
+		sch->bstats.packets++;
+		sch->bstats.bytes+=len;
 		cbq_mark_toplevel(q, cl);
-		cl->stats.drops++;
+		if (!cl->next_alive)
+			cbq_activate_class(cl);
+		return ret;
 	}
+
+	sch->qstats.drops++;
+	cbq_mark_toplevel(q, cl);
+	cl->qstats.drops++;
 	return ret;
 }
 
 static int
 cbq_requeue(struct sk_buff *skb, struct Qdisc *sch)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *cl;
 	int ret;
 
 	if ((cl = q->tx_class) == NULL) {
 		kfree_skb(skb);
-		sch->stats.drops++;
+		sch->qstats.drops++;
 		return NET_XMIT_CN;
 	}
 	q->tx_class = NULL;
@@ -448,12 +460,13 @@ cbq_requeue(struct sk_buff *skb, struct Qdisc *sch)
 #endif
 	if ((ret = cl->q->ops->requeue(skb, cl->q)) == 0) {
 		sch->q.qlen++;
+		sch->qstats.requeues++;
 		if (!cl->next_alive)
 			cbq_activate_class(cl);
 		return 0;
 	}
-	sch->stats.drops++;
-	cl->stats.drops++;
+	sch->qstats.drops++;
+	cl->qstats.drops++;
 	return ret;
 }
 
@@ -463,7 +476,7 @@ cbq_requeue(struct sk_buff *skb, struct Qdisc *sch)
 
 static void cbq_ovl_classic(struct cbq_class *cl)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)cl->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(cl->qdisc);
 	psched_tdiff_t delay = PSCHED_TDIFF(cl->undertime, q->now);
 
 	if (!cl->delayed) {
@@ -517,7 +530,7 @@ static void cbq_ovl_classic(struct cbq_class *cl)
 
 static void cbq_ovl_rclassic(struct cbq_class *cl)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)cl->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(cl->qdisc);
 	struct cbq_class *this = cl;
 
 	do {
@@ -536,7 +549,7 @@ static void cbq_ovl_rclassic(struct cbq_class *cl)
 
 static void cbq_ovl_delay(struct cbq_class *cl)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)cl->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(cl->qdisc);
 	psched_tdiff_t delay = PSCHED_TDIFF(cl->undertime, q->now);
 
 	if (!cl->delayed) {
@@ -572,7 +585,7 @@ static void cbq_ovl_delay(struct cbq_class *cl)
 
 static void cbq_ovl_lowprio(struct cbq_class *cl)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data*)cl->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(cl->qdisc);
 
 	cl->penalized = jiffies + cl->penalty;
 
@@ -641,7 +654,7 @@ static unsigned long cbq_undelay_prio(struct cbq_sched_data *q, int prio)
 static void cbq_undelay(unsigned long arg)
 {
 	struct Qdisc *sch = (struct Qdisc*)arg;
-	struct cbq_sched_data *q = (struct cbq_sched_data*)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	long delay = 0;
 	unsigned pmask;
 
@@ -678,7 +691,7 @@ static int cbq_reshape_fail(struct sk_buff *skb, struct Qdisc *child)
 {
 	int len = skb->len;
 	struct Qdisc *sch = child->__parent;
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *cl = q->rx_class;
 
 	q->rx_class = NULL;
@@ -692,17 +705,17 @@ static int cbq_reshape_fail(struct sk_buff *skb, struct Qdisc *child)
 
 		if (cl->q->enqueue(skb, cl->q) == 0) {
 			sch->q.qlen++;
-			sch->stats.packets++;
-			sch->stats.bytes+=len;
+			sch->bstats.packets++;
+			sch->bstats.bytes+=len;
 			if (!cl->next_alive)
 				cbq_activate_class(cl);
 			return 0;
 		}
-		sch->stats.drops++;
+		sch->qstats.drops++;
 		return 0;
 	}
 
-	sch->stats.drops++;
+	sch->qstats.drops++;
 	return -1;
 }
 #endif
@@ -751,8 +764,8 @@ cbq_update(struct cbq_sched_data *q)
 		long avgidle = cl->avgidle;
 		long idle;
 
-		cl->stats.packets++;
-		cl->stats.bytes += len;
+		cl->bstats.packets++;
+		cl->bstats.bytes += len;
 
 		/*
 		   (now - last) is total time between packet right edges.
@@ -826,7 +839,7 @@ cbq_update(struct cbq_sched_data *q)
 static __inline__ struct cbq_class *
 cbq_under_limit(struct cbq_class *cl)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data*)cl->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(cl->qdisc);
 	struct cbq_class *this_cl = cl;
 
 	if (cl->tparent == NULL)
@@ -850,7 +863,7 @@ cbq_under_limit(struct cbq_class *cl)
 		   no another solution exists.
 		 */
 		if ((cl = cl->borrow) == NULL) {
-			this_cl->stats.overlimits++;
+			this_cl->qstats.overlimits++;
 			this_cl->overlimit(this_cl);
 			return NULL;
 		}
@@ -866,7 +879,7 @@ cbq_under_limit(struct cbq_class *cl)
 static __inline__ struct sk_buff *
 cbq_dequeue_prio(struct Qdisc *sch, int prio)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *cl_tail, *cl_prev, *cl;
 	struct sk_buff *skb;
 	int deficit;
@@ -969,7 +982,7 @@ next_class:
 static __inline__ struct sk_buff *
 cbq_dequeue_1(struct Qdisc *sch)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *skb;
 	unsigned activemask;
 
@@ -988,7 +1001,7 @@ static struct sk_buff *
 cbq_dequeue(struct Qdisc *sch)
 {
 	struct sk_buff *skb;
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	psched_time_t now;
 	psched_tdiff_t incr;
 
@@ -1053,8 +1066,8 @@ cbq_dequeue(struct Qdisc *sch)
 	   Sigh... start watchdog timer in the last case. */
 
 	if (sch->q.qlen) {
-		sch->stats.overlimits++;
-		if (q->wd_expires && !netif_queue_stopped(sch->dev)) {
+		sch->qstats.overlimits++;
+		if (q->wd_expires) {
 			long delay = PSCHED_US2JIFFIE(q->wd_expires);
 			if (delay <= 0)
 				delay = 1;
@@ -1113,7 +1126,7 @@ static void cbq_normalize_quanta(struct cbq_sched_data *q, int prio)
 
 static void cbq_sync_defmap(struct cbq_class *cl)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data*)cl->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(cl->qdisc);
 	struct cbq_class *split = cl->split;
 	unsigned h;
 	int i;
@@ -1179,7 +1192,7 @@ static void cbq_change_defmap(struct cbq_class *cl, u32 splitid, u32 def, u32 ma
 static void cbq_unlink_class(struct cbq_class *this)
 {
 	struct cbq_class *cl, **clp;
-	struct cbq_sched_data *q = (struct cbq_sched_data*)this->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(this->qdisc);
 
 	for (clp = &q->classes[cbq_hash(this->classid)]; (cl = *clp) != NULL; clp = &cl->next) {
 		if (cl == this) {
@@ -1212,7 +1225,7 @@ static void cbq_unlink_class(struct cbq_class *this)
 
 static void cbq_link_class(struct cbq_class *this)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data*)this->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(this->qdisc);
 	unsigned h = cbq_hash(this->classid);
 	struct cbq_class *parent = this->tparent;
 
@@ -1233,7 +1246,7 @@ static void cbq_link_class(struct cbq_class *this)
 
 static unsigned int cbq_drop(struct Qdisc* sch)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *cl, *cl_head;
 	int prio;
 	unsigned int len;
@@ -1256,7 +1269,7 @@ static unsigned int cbq_drop(struct Qdisc* sch)
 static void
 cbq_reset(struct Qdisc* sch)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *cl;
 	int prio;
 	unsigned h;
@@ -1326,7 +1339,7 @@ static void cbq_addprio(struct cbq_sched_data *q, struct cbq_class *cl)
 
 static int cbq_set_wrr(struct cbq_class *cl, struct tc_cbq_wrropt *wrr)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)cl->qdisc->data;
+	struct cbq_sched_data *q = qdisc_priv(cl->qdisc);
 
 	if (wrr->allot)
 		cl->allot = wrr->allot;
@@ -1395,11 +1408,11 @@ static int cbq_set_fopt(struct cbq_class *cl, struct tc_cbq_fopt *fopt)
 
 static int cbq_init(struct Qdisc *sch, struct rtattr *opt)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data*)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct rtattr *tb[TCA_CBQ_MAX];
 	struct tc_ratespec *r;
 
-	if (rtattr_parse(tb, TCA_CBQ_MAX, RTA_DATA(opt), RTA_PAYLOAD(opt)) < 0 ||
+	if (rtattr_parse_nested(tb, TCA_CBQ_MAX, opt) < 0 ||
 	    tb[TCA_CBQ_RTAB-1] == NULL || tb[TCA_CBQ_RATE-1] == NULL ||
 	    RTA_PAYLOAD(tb[TCA_CBQ_RATE-1]) < sizeof(struct tc_ratespec))
 		return -EINVAL;
@@ -1432,7 +1445,7 @@ static int cbq_init(struct Qdisc *sch, struct rtattr *opt)
 	q->link.ewma_log = TC_CBQ_DEF_EWMA;
 	q->link.avpkt = q->link.allot/2;
 	q->link.minidle = -0x7FFFFFFF;
-	q->link.stats.lock = &sch->dev->queue_lock;
+	q->link.stats_lock = &sch->dev->queue_lock;
 
 	init_timer(&q->wd_timer);
 	q->wd_timer.data = (unsigned long)sch;
@@ -1574,19 +1587,9 @@ static int cbq_dump_attr(struct sk_buff *skb, struct cbq_class *cl)
 	return 0;
 }
 
-int cbq_copy_xstats(struct sk_buff *skb, struct tc_cbq_xstats *st)
-{
-	RTA_PUT(skb, TCA_XSTATS, sizeof(*st), st);
-	return 0;
-
-rtattr_failure:
-	return -1;
-}
-
-
 static int cbq_dump(struct Qdisc *sch, struct sk_buff *skb)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data*)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	unsigned char	 *b = skb->tail;
 	struct rtattr *rta;
 
@@ -1595,13 +1598,6 @@ static int cbq_dump(struct Qdisc *sch, struct sk_buff *skb)
 	if (cbq_dump_attr(skb, &q->link) < 0)
 		goto rtattr_failure;
 	rta->rta_len = skb->tail - b;
-	spin_lock_bh(&sch->dev->queue_lock);
-	q->link.xstats.avgidle = q->link.avgidle;
-	if (cbq_copy_xstats(skb, &q->link.xstats)) {
-		spin_unlock_bh(&sch->dev->queue_lock);
-		goto rtattr_failure;
-	}
-	spin_unlock_bh(&sch->dev->queue_lock);
 	return skb->len;
 
 rtattr_failure:
@@ -1610,10 +1606,18 @@ rtattr_failure:
 }
 
 static int
+cbq_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
+{
+	struct cbq_sched_data *q = qdisc_priv(sch);
+
+	q->link.xstats.avgidle = q->link.avgidle;
+	return gnet_stats_copy_app(d, &q->link.xstats, sizeof(q->link.xstats));
+}
+
+static int
 cbq_dump_class(struct Qdisc *sch, unsigned long arg,
 	       struct sk_buff *skb, struct tcmsg *tcm)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data*)sch->data;
 	struct cbq_class *cl = (struct cbq_class*)arg;
 	unsigned char	 *b = skb->tail;
 	struct rtattr *rta;
@@ -1630,26 +1634,35 @@ cbq_dump_class(struct Qdisc *sch, unsigned long arg,
 	if (cbq_dump_attr(skb, cl) < 0)
 		goto rtattr_failure;
 	rta->rta_len = skb->tail - b;
-	cl->stats.qlen = cl->q->q.qlen;
-	if (qdisc_copy_stats(skb, &cl->stats))
-		goto rtattr_failure;
-	spin_lock_bh(&sch->dev->queue_lock);
-	cl->xstats.avgidle = cl->avgidle;
-	cl->xstats.undertime = 0;
-	if (!PSCHED_IS_PASTPERFECT(cl->undertime))
-		cl->xstats.undertime = PSCHED_TDIFF(cl->undertime, q->now);
-	q->link.xstats.avgidle = q->link.avgidle;
-	if (cbq_copy_xstats(skb, &cl->xstats)) {
-		spin_unlock_bh(&sch->dev->queue_lock);
-		goto rtattr_failure;
-	}
-	spin_unlock_bh(&sch->dev->queue_lock);
-
 	return skb->len;
 
 rtattr_failure:
 	skb_trim(skb, b - skb->data);
 	return -1;
+}
+
+static int
+cbq_dump_class_stats(struct Qdisc *sch, unsigned long arg,
+	struct gnet_dump *d)
+{
+	struct cbq_sched_data *q = qdisc_priv(sch);
+	struct cbq_class *cl = (struct cbq_class*)arg;
+
+	cl->qstats.qlen = cl->q->q.qlen;
+	cl->xstats.avgidle = cl->avgidle;
+	cl->xstats.undertime = 0;
+
+	if (!PSCHED_IS_PASTPERFECT(cl->undertime))
+		cl->xstats.undertime = PSCHED_TDIFF(cl->undertime, q->now);
+
+	if (gnet_stats_copy_basic(d, &cl->bstats) < 0 ||
+#ifdef CONFIG_NET_ESTIMATOR
+	    gnet_stats_copy_rate_est(d, &cl->rate_est) < 0 ||
+#endif
+	    gnet_stats_copy_queue(d, &cl->qstats) < 0)
+		return -1;
+
+	return gnet_stats_copy_app(d, &cl->xstats, sizeof(cl->xstats));
 }
 
 static int cbq_graft(struct Qdisc *sch, unsigned long arg, struct Qdisc *new,
@@ -1689,7 +1702,7 @@ cbq_leaf(struct Qdisc *sch, unsigned long arg)
 
 static unsigned long cbq_get(struct Qdisc *sch, u32 classid)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *cl = cbq_class_lookup(q, classid);
 
 	if (cl) {
@@ -1709,43 +1722,49 @@ static void cbq_destroy_filters(struct cbq_class *cl)
 	}
 }
 
-static void cbq_destroy_class(struct cbq_class *cl)
+static void cbq_destroy_class(struct Qdisc *sch, struct cbq_class *cl)
 {
+	struct cbq_sched_data *q = qdisc_priv(sch);
+
+	BUG_TRAP(!cl->filters);
+
 	cbq_destroy_filters(cl);
 	qdisc_destroy(cl->q);
 	qdisc_put_rtab(cl->R_tab);
 #ifdef CONFIG_NET_ESTIMATOR
-	qdisc_kill_estimator(&cl->stats);
+	gen_kill_estimator(&cl->bstats, &cl->rate_est);
 #endif
-	kfree(cl);
+	if (cl != &q->link)
+		kfree(cl);
 }
 
 static void
 cbq_destroy(struct Qdisc* sch)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *cl;
 	unsigned h;
 
 #ifdef CONFIG_NET_CLS_POLICE
 	q->rx_class = NULL;
 #endif
-	for (h = 0; h < 16; h++) {
+	/*
+	 * Filters must be destroyed first because we don't destroy the
+	 * classes from root to leafs which means that filters can still
+	 * be bound to classes which have been destroyed already. --TGR '04
+	 */
+	for (h = 0; h < 16; h++)
 		for (cl = q->classes[h]; cl; cl = cl->next)
 			cbq_destroy_filters(cl);
-	}
 
 	for (h = 0; h < 16; h++) {
 		struct cbq_class *next;
 
 		for (cl = q->classes[h]; cl; cl = next) {
 			next = cl->next;
-			if (cl != &q->link)
-				cbq_destroy_class(cl);
+			cbq_destroy_class(sch, cl);
 		}
 	}
-
-	qdisc_put_rtab(q->link.R_tab);
 }
 
 static void cbq_put(struct Qdisc *sch, unsigned long arg)
@@ -1754,7 +1773,7 @@ static void cbq_put(struct Qdisc *sch, unsigned long arg)
 
 	if (--cl->refcnt == 0) {
 #ifdef CONFIG_NET_CLS_POLICE
-		struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+		struct cbq_sched_data *q = qdisc_priv(sch);
 
 		spin_lock_bh(&sch->dev->queue_lock);
 		if (q->rx_class == cl)
@@ -1762,7 +1781,7 @@ static void cbq_put(struct Qdisc *sch, unsigned long arg)
 		spin_unlock_bh(&sch->dev->queue_lock);
 #endif
 
-		cbq_destroy_class(cl);
+		cbq_destroy_class(sch, cl);
 	}
 }
 
@@ -1771,15 +1790,14 @@ cbq_change_class(struct Qdisc *sch, u32 classid, u32 parentid, struct rtattr **t
 		 unsigned long *arg)
 {
 	int err;
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *cl = (struct cbq_class*)*arg;
 	struct rtattr *opt = tca[TCA_OPTIONS-1];
 	struct rtattr *tb[TCA_CBQ_MAX];
 	struct cbq_class *parent;
 	struct qdisc_rate_table *rtab = NULL;
 
-	if (opt==NULL ||
-	    rtattr_parse(tb, TCA_CBQ_MAX, RTA_DATA(opt), RTA_PAYLOAD(opt)))
+	if (opt==NULL || rtattr_parse_nested(tb, TCA_CBQ_MAX, opt))
 		return -EINVAL;
 
 	if (tb[TCA_CBQ_OVL_STRATEGY-1] &&
@@ -1859,10 +1877,9 @@ cbq_change_class(struct Qdisc *sch, u32 classid, u32 parentid, struct rtattr **t
 		sch_tree_unlock(sch);
 
 #ifdef CONFIG_NET_ESTIMATOR
-		if (tca[TCA_RATE-1]) {
-			qdisc_kill_estimator(&cl->stats);
-			qdisc_new_estimator(&cl->stats, tca[TCA_RATE-1]);
-		}
+		if (tca[TCA_RATE-1])
+			gen_replace_estimator(&cl->bstats, &cl->rate_est,
+				cl->stats_lock, tca[TCA_RATE-1]);
 #endif
 		return 0;
 	}
@@ -1922,7 +1939,7 @@ cbq_change_class(struct Qdisc *sch, u32 classid, u32 parentid, struct rtattr **t
 	cl->allot = parent->allot;
 	cl->quantum = cl->allot;
 	cl->weight = cl->R_tab->rate.rate;
-	cl->stats.lock = &sch->dev->queue_lock;
+	cl->stats_lock = &sch->dev->queue_lock;
 
 	sch_tree_lock(sch);
 	cbq_link_class(cl);
@@ -1952,7 +1969,8 @@ cbq_change_class(struct Qdisc *sch, u32 classid, u32 parentid, struct rtattr **t
 
 #ifdef CONFIG_NET_ESTIMATOR
 	if (tca[TCA_RATE-1])
-		qdisc_new_estimator(&cl->stats, tca[TCA_RATE-1]);
+		gen_new_estimator(&cl->bstats, &cl->rate_est,
+			cl->stats_lock, tca[TCA_RATE-1]);
 #endif
 
 	*arg = (unsigned long)cl;
@@ -1965,7 +1983,7 @@ failure:
 
 static int cbq_delete(struct Qdisc *sch, unsigned long arg)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *cl = (struct cbq_class*)arg;
 
 	if (cl->filters || cl->children || cl == &q->link)
@@ -1996,14 +2014,14 @@ static int cbq_delete(struct Qdisc *sch, unsigned long arg)
 	sch_tree_unlock(sch);
 
 	if (--cl->refcnt == 0)
-		cbq_destroy_class(cl);
+		cbq_destroy_class(sch, cl);
 
 	return 0;
 }
 
 static struct tcf_proto **cbq_find_tcf(struct Qdisc *sch, unsigned long arg)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *cl = (struct cbq_class *)arg;
 
 	if (cl == NULL)
@@ -2015,7 +2033,7 @@ static struct tcf_proto **cbq_find_tcf(struct Qdisc *sch, unsigned long arg)
 static unsigned long cbq_bind_filter(struct Qdisc *sch, unsigned long parent,
 				     u32 classid)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct cbq_class *p = (struct cbq_class*)parent;
 	struct cbq_class *cl = cbq_class_lookup(q, classid);
 
@@ -2037,7 +2055,7 @@ static void cbq_unbind_filter(struct Qdisc *sch, unsigned long arg)
 
 static void cbq_walk(struct Qdisc *sch, struct qdisc_walker *arg)
 {
-	struct cbq_sched_data *q = (struct cbq_sched_data *)sch->data;
+	struct cbq_sched_data *q = qdisc_priv(sch);
 	unsigned h;
 
 	if (arg->stop)
@@ -2072,6 +2090,7 @@ static struct Qdisc_class_ops cbq_class_ops = {
 	.bind_tcf	=	cbq_bind_filter,
 	.unbind_tcf	=	cbq_unbind_filter,
 	.dump		=	cbq_dump_class,
+	.dump_stats	=	cbq_dump_class_stats,
 };
 
 static struct Qdisc_ops cbq_qdisc_ops = {
@@ -2088,6 +2107,7 @@ static struct Qdisc_ops cbq_qdisc_ops = {
 	.destroy	=	cbq_destroy,
 	.change		=	NULL,
 	.dump		=	cbq_dump,
+	.dump_stats	=	cbq_dump_stats,
 	.owner		=	THIS_MODULE,
 };
 

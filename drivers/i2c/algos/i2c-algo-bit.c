@@ -381,7 +381,13 @@ static inline int readbytes(struct i2c_adapter *i2c_adap, struct i2c_msg *msg)
 			break;
 		}
 
-		if ( count > 1 ) {		/* send ack */
+		temp++;
+		count--;
+
+		if (msg->flags & I2C_M_NO_RD_ACK)
+			continue;
+
+		if ( count > 0 ) {		/* send ack */
 			sdalo(adap);
 			DEBPROTO(printk(" Am "));
 		} else {
@@ -395,8 +401,6 @@ static inline int readbytes(struct i2c_adapter *i2c_adap, struct i2c_msg *msg)
 		};
 		scllo(adap);
 		sdahi(adap);
-		temp++;
-		count--;
 	}
 	return rdcount;
 }
@@ -507,8 +511,8 @@ static int bit_xfer(struct i2c_adapter *i2c_adap,
 
 static u32 bit_func(struct i2c_adapter *adap)
 {
-	return I2C_FUNC_SMBUS_EMUL | I2C_FUNC_10BIT_ADDR | 
-	       I2C_FUNC_PROTOCOL_MANGLING;
+	return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL | 
+	       I2C_FUNC_10BIT_ADDR | I2C_FUNC_PROTOCOL_MANGLING;
 }
 
 
@@ -561,8 +565,8 @@ MODULE_AUTHOR("Simon G. Vogl <simon@tk.uni-linz.ac.at>");
 MODULE_DESCRIPTION("I2C-Bus bit-banging algorithm");
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(bit_test, "i");
-MODULE_PARM(i2c_debug,"i");
+module_param(bit_test, bool, 0);
+module_param(i2c_debug, int, S_IRUGO | S_IWUSR);
 
 MODULE_PARM_DESC(bit_test, "Test the lines of the bus to see if it is stuck");
 MODULE_PARM_DESC(i2c_debug,

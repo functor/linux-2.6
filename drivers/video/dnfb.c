@@ -118,23 +118,23 @@ static struct fb_ops dn_fb_ops = {
 };
 
 struct fb_var_screeninfo dnfb_var __devinitdata = {
-	.xres		1280,
-	.yres		1024,
-	.xres_virtual	2048,
-	.yres_virtual	1024,
-	.bits_per_pixel	1,
-	.height		-1,
-	.width		-1,
-	.vmode		FB_VMODE_NONINTERLACED,
+	.xres		= 1280,
+	.yres		= 1024,
+	.xres_virtual	= 2048,
+	.yres_virtual	= 1024,
+	.bits_per_pixel	= 1,
+	.height		= -1,
+	.width		= -1,
+	.vmode		= FB_VMODE_NONINTERLACED,
 };
 
 static struct fb_fix_screeninfo dnfb_fix __devinitdata = {
-	.id		"Apollo Mono",
-	.smem_start	(FRAME_BUFFER_START + IO_BASE),
-	.smem_len	FRAME_BUFFER_LEN,
-	.type		FB_TYPE_PACKED_PIXELS,
-	.visual		FB_VISUAL_MONO10,
-	.line_length	256,
+	.id		= "Apollo Mono",
+	.smem_start	= (FRAME_BUFFER_START + IO_BASE),
+	.smem_len	= FRAME_BUFFER_LEN,
+	.type		= FB_TYPE_PACKED_PIXELS,
+	.visual		= FB_VISUAL_MONO10,
+	.line_length	= 256,
 };
 
 static int dnfb_blank(int blank, struct fb_info *info)
@@ -239,6 +239,9 @@ static int __devinit dnfb_probe(struct device *device)
 	info->fbops = &dn_fb_ops;
 	info->fix = dnfb_fix;
 	info->var = dnfb_var;
+	info->var.red.length = 1;
+	info->var.red.offset = 0;
+	info->var.green = info->var.blue = info->var.red;
 	info->screen_base = (u_char *) info->fix.smem_start;
 
 	err = fb_alloc_cmap(&info->cmap, 2, 0);
@@ -281,6 +284,9 @@ int __init dnfb_init(void)
 {
 	int ret;
 
+	if (fb_get_options("dnfb", NULL))
+		return -ENODEV;
+
 	ret = driver_register(&dnfb_driver);
 
 	if (!ret) {
@@ -290,5 +296,7 @@ int __init dnfb_init(void)
 	}
 	return ret;
 }
+
+module_init(dnfb_init);
 
 MODULE_LICENSE("GPL");

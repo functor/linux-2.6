@@ -12,6 +12,7 @@
  *  have a non-standard calling sequence on the Linux/arm
  *  platform.
  */
+#include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -61,11 +62,7 @@ inline long do_mmap2(
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
-	/*
-	 * If we are doing a fixed mapping, and address < PAGE_SIZE,
-	 * then deny it.
-	 */
-	if (flags & MAP_FIXED && addr < PAGE_SIZE && vectors_base() == 0)
+	if (flags & MAP_FIXED && addr < FIRST_USER_ADDRESS)
 		goto out;
 
 	error = -EBADF;
@@ -118,12 +115,7 @@ sys_arm_mremap(unsigned long addr, unsigned long old_len,
 {
 	unsigned long ret = -EINVAL;
 
-	/*
-	 * If we are doing a fixed mapping, and address < PAGE_SIZE,
-	 * then deny it.
-	 */
-	if (flags & MREMAP_FIXED && new_addr < PAGE_SIZE &&
-	    vectors_base() == 0)
+	if (flags & MREMAP_FIXED && new_addr < FIRST_USER_ADDRESS)
 		goto out;
 
 	down_write(&current->mm->mmap_sem);
@@ -170,14 +162,18 @@ asmlinkage int sys_ipc(uint call, int first, int second, int third,
 
 	switch (call) {
 	case SEMOP:
-		return sys_semop(first, (struct sembuf __user *)ptr, second);
+		return sys_semtimedop (first, (struct sembuf __user *)ptr, second, NULL);
+	case SEMTIMEDOP:
+		return sys_semtimedop(first, (struct sembuf __user *)ptr, second,
+					(const struct timespec __user *)fifth);
+
 	case SEMGET:
 		return sys_semget (first, second, third);
 	case SEMCTL: {
 		union semun fourth;
 		if (!ptr)
 			return -EINVAL;
-		if (get_user(fourth.__pad, (void __user **) ptr))
+		if (get_user(fourth.__pad, (void __user * __user *) ptr))
 			return -EFAULT;
 		return sys_semctl (first, second, third, fourth);
 	}
@@ -216,11 +212,8 @@ asmlinkage int sys_ipc(uint call, int first, int second, int third,
 				return ret;
 			return put_user(raddr, (ulong __user *)third);
 		}
-		case 1:	/* iBCS2 emulator entry point */
-			if (!segment_eq(get_fs(), get_ds()))
-				return -EINVAL;
-			return do_shmat(first, (char __user *) ptr,
-					second, (ulong __user *) third);
+		case 1: /* Of course, we don't support iBCS2! */
+			return -EINVAL;
 		}
 	case SHMDT: 
 		return sys_shmdt ((char __user *)ptr);
@@ -245,18 +238,14 @@ asmlinkage int sys_fork(struct pt_regs *regs)
 /* Clone a task - this clones the calling program thread.
  * This is called indirectly via a small wrapper
  */
-asmlinkage int sys_clone(unsigned long clone_flags, unsigned long newsp, struct pt_regs *regs)
+asmlinkage int sys_clone(unsigned long clone_flags, unsigned long newsp,
+			 int __user *parent_tidptr, int tls_val,
+			 int __user *child_tidptr, struct pt_regs *regs)
 {
-	/*
-	 * We don't support SETTID / CLEARTID
-	 */
-	if (clone_flags & (CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID))
-		return -EINVAL;
-
 	if (!newsp)
 		newsp = regs->ARM_sp;
 
-	return do_fork(clone_flags & ~CLONE_IDLETASK, newsp, regs, 0, NULL, NULL);
+	return do_fork(clone_flags, newsp, regs, 0, parent_tidptr, child_tidptr);
 }
 
 asmlinkage int sys_vfork(struct pt_regs *regs)
@@ -282,3 +271,43 @@ asmlinkage int sys_execve(char __user *filenamei, char __user * __user *argv,
 out:
 	return error;
 }
+
+long execve(const char *filename, char **argv, char **envp)
+{
+	struct pt_regs regs;
+	int ret;
+
+	memset(&regs, 0, sizeof(struct pt_regs));
+	ret = do_execve((char *)filename, (char __user * __user *)argv,
+			(char __user * __user *)envp, &regs);
+	if (ret < 0)
+		goto out;
+
+	/*
+	 * Save argc to the register structure for userspace.
+	 */
+	regs.ARM_r0 = ret;
+
+	/*
+	 * We were successful.  We won't be returning to our caller, but
+	 * instead to user space by manipulating the kernel stack.
+	 */
+	asm(	"add	r0, %0, %1\n\t"
+		"mov	r1, %2\n\t"
+		"mov	r2, %3\n\t"
+		"bl	memmove\n\t"	/* copy regs to top of stack */
+		"mov	r8, #0\n\t"	/* not a syscall */
+		"mov	r9, %0\n\t"	/* thread structure */
+		"mov	sp, r0\n\t"	/* reposition stack pointer */
+		"b	ret_to_user"
+		:
+		: "r" (current_thread_info()),
+		  "Ir" (THREAD_START_SP - sizeof(regs)),
+		  "r" (&regs),
+		  "Ir" (sizeof(regs))
+		: "r0", "r1", "r2", "r3", "ip", "memory");
+
+ out:
+	return ret;
+}
+EXPORT_SYMBOL(execve);

@@ -32,7 +32,7 @@
 	.text
 
 /*
- * Returns (address we're running at) - (address we were linked at)
+ * Returns (address we were linked at) - (address we are running at)
  * for use before the text and data are mapped to KERNELBASE.
  */
 
@@ -85,16 +85,17 @@ _GLOBAL(local_irq_restore)
 	cmpw	0,r3,r5
 	beqlr
 	/* are we enabling interrupts? */
-	cmpi	0,r3,0
+	cmpdi	0,r3,0
 	stb	r3,PACAPROCENABLED(r13)
 	beqlr
 	/* Check pending interrupts */
 	/*   A decrementer, IPI or PMC interrupt may have occurred
 	 *   while we were in the hypervisor (which enables) */
-	CHECKANYINT(r4,r5)
+	ld	r4,PACALPPACA+LPPACAANYINT(r13)
+	cmpdi	r4,0
 	beqlr
 
-	/* 
+	/*
 	 * Handle pending interrupts in interrupt context
 	 */
 	li	r0,0x5555
@@ -102,26 +103,76 @@ _GLOBAL(local_irq_restore)
 	blr
 #endif /* CONFIG_PPC_ISERIES */
 
-/*
- * Flush instruction cache.
- */
-_GLOBAL(flush_instruction_cache)
-
-/*
- * This is called by kgdb code
- * and should probably go away
- * to be replaced by invalidating
- * the cache lines that are actually
- * modified
- */
-	/* use invalidate-all bit in HID0
-	 *  - is this consistent across all 64-bit cpus?  -- paulus */
-	mfspr	r3,HID0
-	ori	r3,r3,HID0_ICFI
-	mtspr	HID0,r3
-	sync
-	isync
+#ifdef CONFIG_IRQSTACKS
+_GLOBAL(call_do_softirq)
+	mflr	r0
+	std	r0,16(r1)
+	stdu	r1,THREAD_SIZE-112(r3)
+	mr	r1,r3
+	bl	.__do_softirq
+	ld	r1,0(r1)
+	ld	r0,16(r1)
+	mtlr	r0
 	blr
+
+_GLOBAL(call_handle_IRQ_event)
+	mflr	r0
+	std	r0,16(r1)
+	stdu	r1,THREAD_SIZE-112(r6)
+	mr	r1,r6
+	bl	.handle_IRQ_event
+	ld	r1,0(r1)
+	ld	r0,16(r1)
+	mtlr	r0
+	blr
+#endif /* CONFIG_IRQSTACKS */
+
+	/*
+ * To be called by C code which needs to do some operations with MMU
+ * disabled. Note that interrupts have to be disabled by the caller
+ * prior to calling us. The code called _MUST_ be in the RMO of course
+ * and part of the linear mapping as we don't attempt to translate the
+ * stack pointer at all. The function is called with the stack switched
+ * to this CPU emergency stack
+ *
+ * prototype is void *call_with_mmu_off(void *func, void *data);
+ *
+ * the called function is expected to be of the form
+ *
+ * void *called(void *data); 
+ */
+_GLOBAL(call_with_mmu_off)
+	mflr	r0			/* get link, save it on stackframe */
+	std	r0,16(r1)
+	mr	r1,r5			/* save old stack ptr */
+	ld	r1,PACAEMERGSP(r13)	/* get emerg. stack */
+	subi	r1,r1,STACK_FRAME_OVERHEAD
+	std	r0,16(r1)		/* save link on emerg. stack */
+	std	r5,0(r1)		/* save old stack ptr in backchain */
+	ld	r3,0(r3)		/* get to real function ptr (assume same TOC) */
+	bl	2f			/* we need LR to return, continue at label 2 */
+
+	ld	r0,16(r1)		/* we return here from the call, get LR and */
+	ld	r1,0(r1)		/* .. old stack ptr */
+	mtspr	SPRN_SRR0,r0		/* and get back to virtual mode with these */
+	mfmsr	r4
+	ori	r4,r4,MSR_IR|MSR_DR
+	mtspr	SPRN_SRR1,r4
+	rfid
+
+2:	mtspr	SPRN_SRR0,r3		/* coming from above, enter real mode */
+	mr	r3,r4			/* get parameter */
+	mfmsr	r0
+	ori	r0,r0,MSR_IR|MSR_DR
+	xori	r0,r0,MSR_IR|MSR_DR
+	mtspr	SPRN_SRR1,r0
+	rfid
+
+
+	.section	".toc","aw"
+PPC64_CACHES:
+	.tc		ppc64_caches[TC],ppc64_caches
+	.section	".text"
 
 /*
  * Write any modified data cache blocks out to memory
@@ -141,11 +192,8 @@ _GLOBAL(__flush_icache_range)
  * and in some cases i-cache and d-cache line sizes differ from
  * each other.
  */
-	LOADADDR(r10,naca)		/* Get Naca address */
-	ld	r10,0(r10)
-	LOADADDR(r11,systemcfg)		/* Get systemcfg address */
-	ld	r11,0(r11)
-	lwz	r7,DCACHEL1LINESIZE(r11)/* Get cache line size */
+ 	ld	r10,PPC64_CACHES@toc(r2)
+	lwz	r7,DCACHEL1LINESIZE(r10)/* Get cache line size */
 	addi	r5,r7,-1
 	andc	r6,r3,r5		/* round low to line bdy */
 	subf	r8,r6,r4		/* compute length */
@@ -161,7 +209,7 @@ _GLOBAL(__flush_icache_range)
 
 /* Now invalidate the instruction cache */
 	
-	lwz	r7,ICACHEL1LINESIZE(r11)	/* Get Icache line size */
+	lwz	r7,ICACHEL1LINESIZE(r10)	/* Get Icache line size */
 	addi	r5,r7,-1
 	andc	r6,r3,r5		/* round low to line bdy */
 	subf	r8,r6,r4		/* compute length */
@@ -190,11 +238,8 @@ _GLOBAL(flush_dcache_range)
  * 
  * Different systems have different cache line sizes
  */
-	LOADADDR(r10,naca)		/* Get Naca address */
-	ld	r10,0(r10)
-	LOADADDR(r11,systemcfg)		/* Get systemcfg address */
-	ld	r11,0(r11)
-	lwz	r7,DCACHEL1LINESIZE(r11)	/* Get dcache line size */
+ 	ld	r10,PPC64_CACHES@toc(r2)
+	lwz	r7,DCACHEL1LINESIZE(r10)	/* Get dcache line size */
 	addi	r5,r7,-1
 	andc	r6,r3,r5		/* round low to line bdy */
 	subf	r8,r6,r4		/* compute length */
@@ -220,11 +265,8 @@ _GLOBAL(flush_dcache_range)
  *    flush all bytes from start to stop-1 inclusive
  */
 _GLOBAL(flush_dcache_phys_range)
-	LOADADDR(r10,naca)		/* Get Naca address */
-	ld	r10,0(r10)
-	LOADADDR(r11,systemcfg)		/* Get systemcfg address */
-	ld	r11,0(r11)
-	lwz	r7,DCACHEL1LINESIZE(r11)	/* Get dcache line size */
+ 	ld	r10,PPC64_CACHES@toc(r2)
+	lwz	r7,DCACHEL1LINESIZE(r10)	/* Get dcache line size */
 	addi	r5,r7,-1
 	andc	r6,r3,r5		/* round low to line bdy */
 	subf	r8,r6,r4		/* compute length */
@@ -250,6 +292,26 @@ _GLOBAL(flush_dcache_phys_range)
 	isync
 	blr
 
+_GLOBAL(flush_inval_dcache_range)
+ 	ld	r10,PPC64_CACHES@toc(r2)
+	lwz	r7,DCACHEL1LINESIZE(r10)	/* Get dcache line size */
+	addi	r5,r7,-1
+	andc	r6,r3,r5		/* round low to line bdy */
+	subf	r8,r6,r4		/* compute length */
+	add	r8,r8,r5		/* ensure we get enough */
+	lwz	r9,DCACHEL1LOGLINESIZE(r10)/* Get log-2 of dcache line size */
+	srw.	r8,r8,r9		/* compute line count */
+	beqlr				/* nothing to do? */
+	sync
+	isync
+	mtctr	r8
+0:	dcbf	0,r6
+	add	r6,r6,r7
+	bdnz	0b
+	sync
+	isync
+	blr
+
 
 /*
  * Flush a particular page from the data cache to RAM.
@@ -266,13 +328,10 @@ _GLOBAL(__flush_dcache_icache)
  */
 
 /* Flush the dcache */
-	LOADADDR(r7,naca)
-	ld	r7,0(r7)
-	LOADADDR(r8,systemcfg)			/* Get systemcfg address */
-	ld	r8,0(r8)
+ 	ld	r7,PPC64_CACHES@toc(r2)
 	clrrdi	r3,r3,12           	    /* Page align */
 	lwz	r4,DCACHEL1LINESPERPAGE(r7)	/* Get # dcache lines per page */
-	lwz	r5,DCACHEL1LINESIZE(r8)		/* Get dcache line size */
+	lwz	r5,DCACHEL1LINESIZE(r7)		/* Get dcache line size */
 	mr	r6,r3
 	mtctr	r4
 0:	dcbst	0,r6
@@ -283,7 +342,7 @@ _GLOBAL(__flush_dcache_icache)
 /* Now invalidate the icache */	
 
 	lwz	r4,ICACHEL1LINESPERPAGE(r7)	/* Get # icache lines per page */
-	lwz	r5,ICACHEL1LINESIZE(r8)		/* Get icache line size */
+	lwz	r5,ICACHEL1LINESIZE(r7)		/* Get icache line size */
 	mtctr	r4
 1:	icbi	0,r3
 	add	r3,r3,r5
@@ -316,6 +375,8 @@ _GLOBAL(_insb)
 	eieio
 	stbu	r5,1(r4)
 	bdnz	00b
+	twi	0,r5,0
+	isync
 	blr
 
 _GLOBAL(_outsb)
@@ -325,8 +386,8 @@ _GLOBAL(_outsb)
 	blelr-
 00:	lbzu	r5,1(r4)
 	stb	r5,0(r3)
-	eieio
 	bdnz	00b
+	sync
 	blr	
 
 _GLOBAL(_insw)
@@ -338,6 +399,8 @@ _GLOBAL(_insw)
 	eieio
 	sthu	r5,2(r4)
 	bdnz	00b
+	twi	0,r5,0
+	isync
 	blr
 
 _GLOBAL(_outsw)
@@ -346,9 +409,9 @@ _GLOBAL(_outsw)
 	subi	r4,r4,2
 	blelr-
 00:	lhzu	r5,2(r4)
-	eieio
 	sthbrx	r5,0,r3	
 	bdnz	00b
+	sync
 	blr	
 
 _GLOBAL(_insl)
@@ -360,6 +423,8 @@ _GLOBAL(_insl)
 	eieio
 	stwu	r5,4(r4)
 	bdnz	00b
+	twi	0,r5,0
+	isync
 	blr
 
 _GLOBAL(_outsl)
@@ -369,8 +434,8 @@ _GLOBAL(_outsl)
 	blelr-
 00:	lwzu	r5,4(r4)
 	stwbrx	r5,0,r3
-	eieio
 	bdnz	00b
+	sync
 	blr	
 
 /* _GLOBAL(ide_insw) now in drivers/ide/ide-iops.c */
@@ -383,6 +448,8 @@ _GLOBAL(_insw_ns)
 	eieio
 	sthu	r5,2(r4)
 	bdnz	00b
+	twi	0,r5,0
+	isync
 	blr
 
 /* _GLOBAL(ide_outsw) now in drivers/ide/ide-iops.c */
@@ -393,8 +460,8 @@ _GLOBAL(_outsw_ns)
 	blelr-
 00:	lhzu	r5,2(r4)
 	sth	r5,0(r3)
-	eieio
 	bdnz	00b
+	sync
 	blr	
 
 _GLOBAL(_insl_ns)
@@ -406,6 +473,8 @@ _GLOBAL(_insl_ns)
 	eieio
 	stwu	r5,4(r4)
 	bdnz	00b
+	twi	0,r5,0
+	isync
 	blr
 
 _GLOBAL(_outsl_ns)
@@ -415,27 +484,10 @@ _GLOBAL(_outsl_ns)
 	blelr-
 00:	lwzu	r5,4(r4)
 	stw	r5,0(r3)
-	eieio
 	bdnz	00b
+	sync
 	blr	
 
-_GLOBAL(abs)
-	cmpi	0,r3,0
-	bge	10f
-	neg	r3,r3
-10:	blr
-
-_GLOBAL(_get_PVR)
-	mfspr	r3,PVR
-	blr
-
-_GLOBAL(_get_PIR)
-	mfspr	r3,PIR
-	blr
-
-_GLOBAL(_get_HID0)
-	mfspr	r3,HID0
-	blr
 
 _GLOBAL(cvt_fd)
 	lfd	0,0(r5)		/* load up fpscr value */
@@ -532,6 +584,69 @@ _GLOBAL(do_cpu_ftr_fixups)
 	isync
 	b	1b
 
+#if defined(CONFIG_PPC_PMAC) || defined(CONFIG_PPC_MAPLE)
+/*
+ * Do an IO access in real mode
+ */
+_GLOBAL(real_readb)
+	mfmsr	r7
+	ori	r0,r7,MSR_DR
+	xori	r0,r0,MSR_DR
+	sync
+	mtmsrd	r0
+	sync
+	isync
+	mfspr	r6,SPRN_HID4
+	rldicl	r5,r6,32,0
+	ori	r5,r5,0x100
+	rldicl	r5,r5,32,0
+	sync
+	mtspr	SPRN_HID4,r5
+	isync
+	slbia
+	isync
+	lbz	r3,0(r3)
+	sync
+	mtspr	SPRN_HID4,r6
+	isync
+	slbia
+	isync
+	mtmsrd	r7
+	sync
+	isync
+	blr
+
+	/*
+ * Do an IO access in real mode
+ */
+_GLOBAL(real_writeb)
+	mfmsr	r7
+	ori	r0,r7,MSR_DR
+	xori	r0,r0,MSR_DR
+	sync
+	mtmsrd	r0
+	sync
+	isync
+	mfspr	r6,SPRN_HID4
+	rldicl	r5,r6,32,0
+	ori	r5,r5,0x100
+	rldicl	r5,r5,32,0
+	sync
+	mtspr	SPRN_HID4,r5
+	isync
+	slbia
+	isync
+	stb	r3,0(r4)
+	sync
+	mtspr	SPRN_HID4,r6
+	isync
+	slbia
+	isync
+	mtmsrd	r7
+	sync
+	isync
+	blr
+#endif /* defined(CONFIG_PPC_PMAC) || defined(CONFIG_PPC_MAPLE) */
 
 /*
  * Create a kernel thread
@@ -548,7 +663,7 @@ _GLOBAL(kernel_thread)
 	li	r4,0		/* new sp (unused) */
 	li	r0,__NR_clone
 	sc
-	cmpi	0,r3,0		/* parent or child? */
+	cmpdi	0,r3,0		/* parent or child? */
 	bne	1f		/* return if parent */
 	li	r0,0
 	stdu	r0,-STACK_FRAME_OVERHEAD(r1)
@@ -565,16 +680,12 @@ _GLOBAL(kernel_thread)
 	ld	r30,-16(r1)
 	blr
 
-#ifdef CONFIG_PPC_ISERIES	/* hack hack hack */
-#define ppc_rtas	sys_ni_syscall
-#endif
-
 /* Why isn't this a) automatic, b) written in 'C'? */	
 	.balign 8
 _GLOBAL(sys_call_table32)
 	.llong .sys_restart_syscall	/* 0 */
 	.llong .sys_exit
-	.llong .sys_fork
+	.llong .ppc_fork
 	.llong .sys_read
 	.llong .sys_write
 	.llong .sys32_open		/* 5 */
@@ -585,7 +696,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys_unlink      	/* 10 */
 	.llong .sys32_execve
 	.llong .sys_chdir
-	.llong .sys32_time
+	.llong .compat_sys_time
 	.llong .sys_mknod
 	.llong .sys_chmod		/* 15 */
 	.llong .sys_lchown
@@ -597,7 +708,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys_oldumount
 	.llong .sys_setuid
 	.llong .sys_getuid
-	.llong .ppc64_sys32_stime       /* 25 */
+	.llong .compat_sys_stime	/* 25 */
 	.llong .sys32_ptrace
 	.llong .sys_alarm
 	.llong .sys_ni_syscall		/* old fstat syscall */
@@ -644,7 +755,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys32_ssetmask
 	.llong .sys_setreuid	        /* 70 */
 	.llong .sys_setregid
-	.llong .sys32_sigsuspend
+	.llong .ppc32_sigsuspend
 	.llong .compat_sys_sigpending
 	.llong .sys32_sethostname
 	.llong .compat_sys_setrlimit	        /* 75 */
@@ -681,7 +792,7 @@ _GLOBAL(sys_call_table32)
 	.llong .compat_sys_newstat
 	.llong .compat_sys_newlstat
 	.llong .compat_sys_newfstat
-	.llong .sys_uname
+	.llong .sys32_uname
 	.llong .sys_ni_syscall		/* 110 old iopl syscall */
 	.llong .sys_vhangup
 	.llong .sys_ni_syscall		/* old idle syscall */
@@ -692,7 +803,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys32_ipc
 	.llong .sys_fsync
 	.llong .ppc32_sigreturn
-	.llong .sys_clone		/* 120 */
+	.llong .ppc_clone		/* 120 */
 	.llong .sys32_setdomainname
 	.llong .ppc64_newuname
 	.llong .sys_ni_syscall		/* old modify_ldt syscall */
@@ -717,8 +828,8 @@ _GLOBAL(sys_call_table32)
 	.llong .ppc32_select
 	.llong .sys_flock
 	.llong .sys_msync
-	.llong .sys32_readv		/* 145 */
-	.llong .sys32_writev
+	.llong .compat_sys_readv	/* 145 */
+	.llong .compat_sys_writev
 	.llong .sys32_getsid
 	.llong .sys_fdatasync
 	.llong .sys32_sysctl
@@ -740,7 +851,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys_getresuid	        /* 165 */
 	.llong .sys_ni_syscall		/* old query_module syscall */
 	.llong .sys_poll
-	.llong .sys32_nfsservctl
+	.llong .compat_sys_nfsservctl
 	.llong .sys_setresgid
 	.llong .sys_getresgid	        /* 170 */
 	.llong .sys32_prctl
@@ -748,9 +859,9 @@ _GLOBAL(sys_call_table32)
 	.llong .sys32_rt_sigaction
 	.llong .sys32_rt_sigprocmask
 	.llong .sys32_rt_sigpending     /* 175 */
-	.llong .sys32_rt_sigtimedwait
+	.llong .compat_sys_rt_sigtimedwait
 	.llong .sys32_rt_sigqueueinfo
-	.llong .sys32_rt_sigsuspend
+	.llong .ppc32_rt_sigsuspend
 	.llong .sys32_pread64
 	.llong .sys32_pwrite64	        /* 180 */
 	.llong .sys_chown
@@ -761,7 +872,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys32_sendfile
 	.llong .sys_ni_syscall		/* reserved for streams1 */
 	.llong .sys_ni_syscall		/* reserved for streams2 */
-	.llong .sys_vfork
+	.llong .ppc_vfork
 	.llong .compat_sys_getrlimit	        /* 190 */
 	.llong .sys32_readahead
 	.llong .sys32_mmap2
@@ -813,39 +924,44 @@ _GLOBAL(sys_call_table32)
 	.llong .sys_epoll_wait
 	.llong .sys_remap_file_pages
 	.llong .ppc32_timer_create	/* 240 */
-	.llong .compat_timer_settime
-	.llong .compat_timer_gettime
+	.llong .compat_sys_timer_settime
+	.llong .compat_sys_timer_gettime
 	.llong .sys_timer_getoverrun
 	.llong .sys_timer_delete
-	.llong .compat_clock_settime	/* 245 */
-	.llong .compat_clock_gettime
-	.llong .compat_clock_getres
-	.llong .compat_clock_nanosleep
+	.llong .compat_sys_clock_settime	/* 245 */
+	.llong .compat_sys_clock_gettime
+	.llong .compat_sys_clock_getres
+	.llong .compat_sys_clock_nanosleep
 	.llong .ppc32_swapcontext
 	.llong .sys32_tgkill		/* 250 */
 	.llong .sys32_utimes
-	.llong .compat_statfs64
-	.llong .compat_fstatfs64
+	.llong .compat_sys_statfs64
+	.llong .compat_sys_fstatfs64
 	.llong .ppc32_fadvise64_64	/* 32bit only fadvise64_64 */
 	.llong .ppc_rtas		/* 255 */
 	.llong .sys_ni_syscall		/* 256 reserved for sys_debug_setcontext */
 	.llong .sys_ni_syscall		/* 257 reserved for vserver */
 	.llong .sys_ni_syscall		/* 258 reserved for new sys_remap_file_pages */
-	.llong .sys_ni_syscall		/* 259 reserved for new sys_mbind */
-	.llong .sys_ni_syscall		/* 260 reserved for new sys_get_mempolicy */
-	.llong .sys_ni_syscall		/* 261 reserved for new sys_set_mempolicy */
+	.llong .compat_sys_mbind
+	.llong .compat_sys_get_mempolicy	/* 260 */
+	.llong .compat_sys_set_mempolicy
 	.llong .compat_sys_mq_open
 	.llong .sys_mq_unlink
 	.llong .compat_sys_mq_timedsend
 	.llong .compat_sys_mq_timedreceive /* 265 */
 	.llong .compat_sys_mq_notify
 	.llong .compat_sys_mq_getsetattr
+	.llong .sys_ni_syscall		/* 268 reserved for sys_kexec_load */
+	.llong .sys32_add_key
+	.llong .sys32_request_key
+	.llong .compat_sys_keyctl
+	.llong .compat_sys_waitid
 
 	.balign 8
 _GLOBAL(sys_call_table)
 	.llong .sys_restart_syscall	/* 0 */
 	.llong .sys_exit
-	.llong .sys_fork
+	.llong .ppc_fork
 	.llong .sys_read
 	.llong .sys_write
 	.llong .sys_open		/* 5 */
@@ -868,7 +984,7 @@ _GLOBAL(sys_call_table)
 	.llong .sys_ni_syscall		/* old umount syscall */
 	.llong .sys_setuid
 	.llong .sys_getuid
-	.llong .ppc64_sys_stime		/* 25 */
+	.llong .sys_stime		/* 25 */
 	.llong .sys_ptrace
 	.llong .sys_alarm
 	.llong .sys_ni_syscall		/* old fstat syscall */
@@ -963,7 +1079,7 @@ _GLOBAL(sys_call_table)
 	.llong .sys_ipc
 	.llong .sys_fsync
 	.llong .sys_ni_syscall
-	.llong .sys_clone		/* 120 */
+	.llong .ppc_clone		/* 120 */
 	.llong .sys_setdomainname
 	.llong .ppc64_newuname
 	.llong .sys_ni_syscall		/* old modify_ldt syscall */
@@ -1021,7 +1137,7 @@ _GLOBAL(sys_call_table)
 	.llong .sys_rt_sigpending	/* 175 */
 	.llong .sys_rt_sigtimedwait
 	.llong .sys_rt_sigqueueinfo
-	.llong .sys_rt_sigsuspend
+	.llong .ppc64_rt_sigsuspend
 	.llong .sys_pread64
 	.llong .sys_pwrite64	        /* 180 */
 	.llong .sys_chown
@@ -1029,10 +1145,10 @@ _GLOBAL(sys_call_table)
 	.llong .sys_capget
 	.llong .sys_capset
 	.llong .sys_sigaltstack	        /* 185 */
-	.llong .sys_sendfile
+	.llong .sys_sendfile64
 	.llong .sys_ni_syscall		/* reserved for streams1 */
 	.llong .sys_ni_syscall		/* reserved for streams2 */
-	.llong .sys_vfork
+	.llong .ppc_vfork
 	.llong .sys_getrlimit	        /* 190 */
 	.llong .sys_readahead
 	.llong .sys_ni_syscall		/* 32bit only mmap2 */
@@ -1102,12 +1218,17 @@ _GLOBAL(sys_call_table)
 	.llong .sys_ni_syscall		/* 256 reserved for sys_debug_setcontext */
 	.llong .sys_ni_syscall		/* 257 reserved for vserver */
 	.llong .sys_ni_syscall		/* 258 reserved for new sys_remap_file_pages */
-	.llong .sys_ni_syscall		/* 259 reserved for new sys_mbind */
-	.llong .sys_ni_syscall		/* 260 reserved for new sys_get_mempolicy */
-	.llong .sys_ni_syscall		/* 261 reserved for new sys_set_mempolicy */
+	.llong .sys_mbind
+	.llong .sys_get_mempolicy	/* 260 */
+	.llong .sys_set_mempolicy
 	.llong .sys_mq_open
 	.llong .sys_mq_unlink
 	.llong .sys_mq_timedsend
 	.llong .sys_mq_timedreceive	/* 265 */
 	.llong .sys_mq_notify
 	.llong .sys_mq_getsetattr
+	.llong .sys_ni_syscall		/* 268 reserved for sys_kexec_load */
+	.llong .sys_add_key
+	.llong .sys_request_key		/* 270 */
+	.llong .sys_keyctl
+	.llong .sys_waitid

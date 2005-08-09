@@ -6,7 +6,11 @@
 
 /* PAGE_SHIFT determines the page size */
 #define PAGE_SHIFT	13
+#ifndef __ASSEMBLY__
 #define PAGE_SIZE	(1UL << PAGE_SHIFT)
+#else
+#define PAGE_SIZE	(1 << PAGE_SHIFT)
+#endif
 #define PAGE_MASK	(~(PAGE_SIZE-1))
 
 #ifdef __KERNEL__
@@ -17,13 +21,18 @@
 #define clear_user_page(page, vaddr, pg)    clear_page(page)
 #define copy_user_page(to, from, vaddr, pg) copy_page(to, from)
 
+#define alloc_zeroed_user_highpage(vma, vaddr) alloc_page_vma(GFP_HIGHUSER | __GFP_ZERO, vma, vaddr)
+#define __HAVE_ARCH_ALLOC_ZEROED_USER_HIGHPAGE
+
 /*
  * These are used to make use of C type-checking..
  */
+#ifndef __ASSEMBLY__
 typedef struct { unsigned long pte; } pte_t;
 typedef struct { unsigned long pmd; } pmd_t;
 typedef struct { unsigned long pgd; } pgd_t;
 typedef struct { unsigned long pgprot; } pgprot_t;
+#endif
 
 #define pte_val(x)	((x).pte)
 #define pmd_val(x)	((x).pmd)
@@ -51,7 +60,7 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 
 #define virt_to_page(kaddr)    (mem_map + (((unsigned long)(kaddr) - PAGE_OFFSET) >> PAGE_SHIFT))
 #define VALID_PAGE(page)       (((page) - mem_map) < max_mapnr)
-#define virt_addr_valid(kaddr)	pfn_valid((kaddr) >> PAGE_SHIFT)
+#define virt_addr_valid(kaddr)	pfn_valid((unsigned)(kaddr) >> PAGE_SHIFT)
 
 /* convert a page (based on mem_map and forward) to a physical address
  * do this by figuring out the virtual address and then use __pa
@@ -68,12 +77,6 @@ typedef struct { unsigned long pgprot; } pgprot_t;
   printk("kernel BUG at %s:%d!\n", __FILE__, __LINE__); \
 } while (0)
 
-#define PAGE_BUG(page) do { \
-         BUG(); \
-} while (0)
-
-#endif /* __ASSEMBLY__ */
-
 /* Pure 2^n version of get_order */
 static inline int get_order(unsigned long size)
 {
@@ -87,6 +90,7 @@ static inline int get_order(unsigned long size)
 	} while (size);
 	return order;
 }
+#endif /* __ASSEMBLY__ */
 
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)

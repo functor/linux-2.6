@@ -22,6 +22,7 @@
 
 #include <linux/config.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/types.h>
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
@@ -42,6 +43,10 @@ int io_bat_index;
 #define HAVE_BATS	1
 #endif
 
+#if defined(CONFIG_FSL_BOOKE)
+#define HAVE_TLBCAM	1
+#endif
+
 extern char etext[], _stext[];
 
 #ifdef CONFIG_SMP
@@ -59,7 +64,17 @@ void setbat(int index, unsigned long virt, unsigned long phys,
 #define p_mapped_by_bats(x)	(0UL)
 #endif /* HAVE_BATS */
 
-#ifdef CONFIG_44x
+#ifdef HAVE_TLBCAM
+extern unsigned int tlbcam_index;
+extern unsigned int num_tlbcam_entries;
+extern unsigned long v_mapped_by_tlbcam(unsigned long va);
+extern unsigned long p_mapped_by_tlbcam(unsigned long pa);
+#else /* !HAVE_TLBCAM */
+#define v_mapped_by_tlbcam(x)	(0UL)
+#define p_mapped_by_tlbcam(x)	(0UL)
+#endif /* HAVE_TLBCAM */
+
+#ifdef CONFIG_PTE_64BIT
 /* 44x uses an 8kB pgdir because it has 8-byte Linux PTEs. */
 #define PGDIR_ORDER	1
 #else
@@ -70,8 +85,7 @@ pgd_t *pgd_alloc(struct mm_struct *mm)
 {
 	pgd_t *ret;
 
-	if ((ret = (pgd_t *)__get_free_pages(GFP_KERNEL, PGDIR_ORDER)) != NULL)
-		clear_pages(ret, PGDIR_ORDER);
+	ret = (pgd_t *)__get_free_pages(GFP_KERNEL|__GFP_ZERO, PGDIR_ORDER);
 	return ret;
 }
 
@@ -86,18 +100,19 @@ pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)
 	extern int mem_init_done;
 	extern void *early_get_page(void);
 
-	if (mem_init_done)
-		pte = (pte_t *)__get_free_page(GFP_KERNEL|__GFP_REPEAT);
-	else
+	if (mem_init_done) {
+		pte = (pte_t *)__get_free_page(GFP_KERNEL|__GFP_REPEAT|__GFP_ZERO);
+	} else {
 		pte = (pte_t *)early_get_page();
-	if (pte)
-		clear_page(pte);
+		if (pte)
+			clear_page(pte);
+	}
 	return pte;
 }
 
 struct page *pte_alloc_one(struct mm_struct *mm, unsigned long address)
 {
-	struct page *pte;
+	struct page *ptepage;
 
 #ifdef CONFIG_HIGHPTE
 	int flags = GFP_KERNEL | __GFP_HIGHMEM | __GFP_REPEAT;
@@ -105,10 +120,10 @@ struct page *pte_alloc_one(struct mm_struct *mm, unsigned long address)
 	int flags = GFP_KERNEL | __GFP_REPEAT;
 #endif
 
-	pte = alloc_pages(flags, 0);
-	if (pte)
-		clear_highpage(pte);
-	return pte;
+	ptepage = alloc_pages(flags, 0);
+	if (ptepage)
+		clear_highpage(ptepage);
+	return ptepage;
 }
 
 void pte_free_kernel(pte_t *pte)
@@ -119,37 +134,37 @@ void pte_free_kernel(pte_t *pte)
 	free_page((unsigned long)pte);
 }
 
-void pte_free(struct page *pte)
+void pte_free(struct page *ptepage)
 {
 #ifdef CONFIG_SMP
 	hash_page_sync();
 #endif
-	__free_page(pte);
+	__free_page(ptepage);
 }
 
-#ifndef CONFIG_44x
-void *
+#ifndef CONFIG_PHYS_64BIT
+void __iomem *
 ioremap(phys_addr_t addr, unsigned long size)
 {
 	return __ioremap(addr, size, _PAGE_NO_CACHE);
 }
-#else /* CONFIG_44x */
-void *
+#else /* CONFIG_PHYS_64BIT */
+void __iomem *
 ioremap64(unsigned long long addr, unsigned long size)
 {
 	return __ioremap(addr, size, _PAGE_NO_CACHE);
 }
 
-void *
+void __iomem *
 ioremap(phys_addr_t addr, unsigned long size)
 {
 	phys_addr_t addr64 = fixup_bigphys_addr(addr, size);
 
 	return ioremap64(addr64, size);
 }
-#endif /* CONFIG_44x */
+#endif /* CONFIG_PHYS_64BIT */
 
-void *
+void __iomem *
 __ioremap(phys_addr_t addr, unsigned long size, unsigned long flags)
 {
 	unsigned long v, i;
@@ -178,7 +193,7 @@ __ioremap(phys_addr_t addr, unsigned long size, unsigned long flags)
 	 */
 	if ( mem_init_done && (p < virt_to_phys(high_memory)) )
 	{
-		printk("__ioremap(): phys addr "PTE_FMT" is RAM lr %p\n", p,
+		printk("__ioremap(): phys addr "PHYS_FMT" is RAM lr %p\n", p,
 		       __builtin_return_address(0));
 		return NULL;
 	}
@@ -198,6 +213,9 @@ __ioremap(phys_addr_t addr, unsigned long size, unsigned long flags)
 	 *  -- Cort
 	 */
 	if ((v = p_mapped_by_bats(p)) /*&& p_mapped_by_bats(p+size-1)*/ )
+		goto out;
+
+	if ((v = p_mapped_by_tlbcam(p)))
 		goto out;
 
 	if (mem_init_done) {
@@ -229,10 +247,10 @@ __ioremap(phys_addr_t addr, unsigned long size, unsigned long flags)
 	}
 
 out:
-	return (void *) (v + ((unsigned long)addr & ~PAGE_MASK));
+	return (void __iomem *) (v + ((unsigned long)addr & ~PAGE_MASK));
 }
 
-void iounmap(void *addr)
+void iounmap(volatile void __iomem *addr)
 {
 	/*
 	 * If mapped by BATs then there is nothing to do.
@@ -243,6 +261,18 @@ void iounmap(void *addr)
 	if (addr > high_memory && (unsigned long) addr < ioremap_bot)
 		vunmap((void *) (PAGE_MASK & (unsigned long)addr));
 }
+
+void __iomem *ioport_map(unsigned long port, unsigned int len)
+{
+	return (void __iomem *) (port + _IO_BASE);
+}
+
+void ioport_unmap(void __iomem *addr)
+{
+	/* Nothing to do */
+}
+EXPORT_SYMBOL(ioport_map);
+EXPORT_SYMBOL(ioport_unmap);
 
 int
 map_page(unsigned long va, phys_addr_t pa, int flags)
@@ -258,7 +288,7 @@ map_page(unsigned long va, phys_addr_t pa, int flags)
 	pg = pte_alloc_kernel(&init_mm, pd, va);
 	if (pg != 0) {
 		err = 0;
-		set_pte(pg, pfn_pte(pa >> PAGE_SHIFT, __pgprot(flags)));
+		set_pte_at(&init_mm, va, pg, pfn_pte(pa >> PAGE_SHIFT, __pgprot(flags)));
 		if (mem_init_done)
 			flush_HPTE(0, va, pmd_val(*pd));
 	}
@@ -290,6 +320,9 @@ void __init mapin_ram(void)
 /* is x a power of 2? */
 #define is_power_of_2(x)	((x) != 0 && (((x) & ((x) - 1)) == 0))
 
+/* is x a power of 4? */
+#define is_power_of_4(x)	((x) != 0 && (((x) & (x-1)) == 0) && (ffs(x) & 1))
+
 /*
  * Set up a mapping for a block of I/O.
  * virt, phys, size must all be page-aligned.
@@ -314,6 +347,18 @@ void __init io_block_mapping(unsigned long virt, phys_addr_t phys,
 		return;
 	}
 #endif /* HAVE_BATS */
+
+#ifdef HAVE_TLBCAM
+	/*
+	 * Use a CAM for this if possible...
+	 */
+	if (tlbcam_index < num_tlbcam_entries && is_power_of_4(size)
+	    && (virt & (size - 1)) == 0 && (phys & (size - 1)) == 0) {
+		settlbcam(tlbcam_index, virt, phys, size, flags, 0);
+		++tlbcam_index;
+		return;
+	}
+#endif /* HAVE_TLBCAM */
 
 	/* No BATs available, put it in the page tables. */
 	for (i = 0; i < size; i += PAGE_SIZE)

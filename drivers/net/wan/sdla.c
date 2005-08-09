@@ -51,9 +51,9 @@
 #include <linux/if_arp.h>
 #include <linux/if_frad.h>
 #include <linux/sdla.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/uaccess.h>
@@ -69,7 +69,7 @@ static unsigned int valid_mem[]  __initdata = {
                                     0xD0000, 0xD2000, 0xD4000, 0xD6000, 0xD8000, 0xDA000, 0xDC000, 0xDE000,
                                     0xE0000, 0xE2000, 0xE4000, 0xE6000, 0xE8000, 0xEA000, 0xEC000, 0xEE000}; 
 
-static spinlock_t sdla_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(sdla_lock);
 
 /*********************************************************
  *
@@ -1095,7 +1095,7 @@ static int sdla_open(struct net_device *dev)
 	return(0);
 }
 
-static int sdla_config(struct net_device *dev, struct frad_conf *conf, int get)
+static int sdla_config(struct net_device *dev, struct frad_conf __user *conf, int get)
 {
 	struct frad_local *flp;
 	struct conf_data  data;
@@ -1193,7 +1193,7 @@ static int sdla_config(struct net_device *dev, struct frad_conf *conf, int get)
 	return(0);
 }
 
-static int sdla_xfer(struct net_device *dev, struct sdla_mem *info, int read)
+static int sdla_xfer(struct net_device *dev, struct sdla_mem __user *info, int read)
 {
 	struct sdla_mem mem;
 	char	*temp;
@@ -1271,7 +1271,7 @@ static int sdla_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	{
 		case FRAD_GET_CONF:
 		case FRAD_SET_CONF:
-			return(sdla_config(dev, (struct frad_conf *)ifr->ifr_data, cmd == FRAD_GET_CONF));
+			return(sdla_config(dev, ifr->ifr_data, cmd == FRAD_GET_CONF));
 
 		case SDLA_IDENTIFY:
 			ifr->ifr_flags = flp->type;
@@ -1306,7 +1306,9 @@ NOTE:  This is rather a useless action right now, as the
 
 		case SDLA_WRITEMEM:
 		case SDLA_READMEM:
-			return(sdla_xfer(dev, (struct sdla_mem *)ifr->ifr_data, cmd == SDLA_READMEM));
+			if(!capable(CAP_SYS_RAWIO))
+				return -EPERM;
+			return(sdla_xfer(dev, ifr->ifr_data, cmd == SDLA_READMEM));
 
 		case SDLA_START:
 			sdla_start(dev);

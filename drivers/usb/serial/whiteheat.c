@@ -80,16 +80,11 @@
 #include <linux/usb.h>
 #include <linux/serial_reg.h>
 #include <linux/serial.h>
-
-#ifdef CONFIG_USB_SERIAL_DEBUG
-	static int debug = 1;
-#else
-	static int debug;
-#endif
-
 #include "usb-serial.h"
 #include "whiteheat_fw.h"		/* firmware for the ConnectTech WhiteHEAT device */
 #include "whiteheat.h"			/* WhiteHEAT specific commands */
+
+static int debug;
 
 #ifndef CMSPAR
 #define CMSPAR 0
@@ -148,7 +143,7 @@ static int  whiteheat_attach		(struct usb_serial *serial);
 static void whiteheat_shutdown		(struct usb_serial *serial);
 static int  whiteheat_open		(struct usb_serial_port *port, struct file *filp);
 static void whiteheat_close		(struct usb_serial_port *port, struct file *filp);
-static int  whiteheat_write		(struct usb_serial_port *port, int from_user, const unsigned char *buf, int count);
+static int  whiteheat_write		(struct usb_serial_port *port, const unsigned char *buf, int count);
 static int  whiteheat_write_room	(struct usb_serial_port *port);
 static int  whiteheat_ioctl		(struct usb_serial_port *port, struct file * file, unsigned int cmd, unsigned long arg);
 static void whiteheat_set_termios	(struct usb_serial_port *port, struct termios * old);
@@ -259,6 +254,7 @@ static int firm_report_tx_done(struct usb_serial_port *port);
 
 #define COMMAND_PORT		4
 #define COMMAND_TIMEOUT		(2*HZ)	/* 2 second timeout for a command */
+#define	COMMAND_TIMEOUT_MS	2000
 #define CLOSING_DELAY		(30 * HZ)
 
 
@@ -384,7 +380,7 @@ static int whiteheat_attach (struct usb_serial *serial)
          * unlinking bug in disguise. Same for the call below.
          */
 	usb_clear_halt(serial->dev, pipe);
-	ret = usb_bulk_msg (serial->dev, pipe, command, 2, &alen, COMMAND_TIMEOUT);
+	ret = usb_bulk_msg (serial->dev, pipe, command, 2, &alen, COMMAND_TIMEOUT_MS);
 	if (ret) {
 		err("%s: Couldn't send command [%d]", serial->type->name, ret);
 		goto no_firmware;
@@ -396,7 +392,7 @@ static int whiteheat_attach (struct usb_serial *serial)
 	pipe = usb_rcvbulkpipe (serial->dev, command_port->bulk_in_endpointAddress);
 	/* See the comment on the usb_clear_halt() above */
 	usb_clear_halt(serial->dev, pipe);
-	ret = usb_bulk_msg (serial->dev, pipe, result, sizeof(*hw_info) + 1, &alen, COMMAND_TIMEOUT);
+	ret = usb_bulk_msg (serial->dev, pipe, result, sizeof(*hw_info) + 1, &alen, COMMAND_TIMEOUT_MS);
 	if (ret) {
 		err("%s: Couldn't get results [%d]", serial->type->name, ret);
 		goto no_firmware;
@@ -673,8 +669,7 @@ static void whiteheat_close(struct usb_serial_port *port, struct file * filp)
 
 	if (port->tty->driver->flush_buffer)
 		port->tty->driver->flush_buffer(port->tty);
-	if (port->tty->ldisc.flush_buffer)
-		port->tty->ldisc.flush_buffer(port->tty);
+	tty_ldisc_flush(port->tty);
 
 	firm_report_tx_done(port);
 
@@ -685,7 +680,7 @@ static void whiteheat_close(struct usb_serial_port *port, struct file * filp)
 	list_for_each_safe(tmp, tmp2, &info->rx_urbs_submitted) {
 		wrap = list_entry(tmp, struct whiteheat_urb_wrap, list);
 		urb = wrap->urb;
-		usb_unlink_urb(urb);
+		usb_kill_urb(urb);
 		list_del(tmp);
 		list_add(tmp, &info->rx_urbs_free);
 	}
@@ -696,7 +691,7 @@ static void whiteheat_close(struct usb_serial_port *port, struct file * filp)
 	list_for_each_safe(tmp, tmp2, &info->tx_urbs_submitted) {
 		wrap = list_entry(tmp, struct whiteheat_urb_wrap, list);
 		urb = wrap->urb;
-		usb_unlink_urb(urb);
+		usb_kill_urb(urb);
 		list_del(tmp);
 		list_add(tmp, &info->tx_urbs_free);
 	}
@@ -708,7 +703,7 @@ static void whiteheat_close(struct usb_serial_port *port, struct file * filp)
 }
 
 
-static int whiteheat_write(struct usb_serial_port *port, int from_user, const unsigned char *buf, int count)
+static int whiteheat_write(struct usb_serial_port *port, const unsigned char *buf, int count)
 {
 	struct usb_serial *serial = port->serial;
 	struct whiteheat_private *info = usb_get_serial_port_data(port);
@@ -740,14 +735,9 @@ static int whiteheat_write(struct usb_serial_port *port, int from_user, const un
 		wrap = list_entry(tmp, struct whiteheat_urb_wrap, list);
 		urb = wrap->urb;
 		bytes = (count > port->bulk_out_size) ? port->bulk_out_size : count;
-		if (from_user) {
-			if (copy_from_user(urb->transfer_buffer, buf + sent, bytes))
-				return -EFAULT;
-		} else {
-			memcpy (urb->transfer_buffer, buf + sent, bytes);
-		}
+		memcpy (urb->transfer_buffer, buf + sent, bytes);
 
-		usb_serial_debug_data (__FILE__, __FUNCTION__, bytes, urb->transfer_buffer);
+		usb_serial_debug_data(debug, &port->dev, __FUNCTION__, bytes, urb->transfer_buffer);
 
 		urb->dev = serial->dev;
 		urb->transfer_buffer_length = bytes;
@@ -835,6 +825,7 @@ static int whiteheat_tiocmset (struct usb_serial_port *port, struct file *file,
 static int whiteheat_ioctl (struct usb_serial_port *port, struct file * file, unsigned int cmd, unsigned long arg)
 {
 	struct serial_struct serstruct;
+	void __user *user_arg = (void __user *)arg;
 
 	dbg("%s - port %d, cmd 0x%.4x", __FUNCTION__, port->number, cmd);
 
@@ -851,13 +842,13 @@ static int whiteheat_ioctl (struct usb_serial_port *port, struct file * file, un
 			serstruct.close_delay = CLOSING_DELAY;
 			serstruct.closing_wait = CLOSING_DELAY;
 
-			if (copy_to_user((void *)arg, &serstruct, sizeof(serstruct)))
+			if (copy_to_user(user_arg, &serstruct, sizeof(serstruct)))
 				return -EFAULT;
 
 			break;
 
 		case TIOCSSERIAL:
-			if (copy_from_user(&serstruct, (void *)arg, sizeof(serstruct)))
+			if (copy_from_user(&serstruct, user_arg, sizeof(serstruct)))
 				return -EFAULT;
 
 			/*
@@ -974,17 +965,12 @@ static void command_port_write_callback (struct urb *urb, struct pt_regs *regs)
 		dbg ("nonzero urb status: %d", urb->status);
 		return;
 	}
-
-	usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, urb->transfer_buffer);
-
-	return;
 }
 
 
 static void command_port_read_callback (struct urb *urb, struct pt_regs *regs)
 {
 	struct usb_serial_port *command_port = (struct usb_serial_port *)urb->context;
-	struct usb_serial *serial = get_usb_serial (command_port, __FUNCTION__);
 	struct whiteheat_command_private *command_info;
 	unsigned char *data = urb->transfer_buffer;
 	int result;
@@ -997,12 +983,7 @@ static void command_port_read_callback (struct urb *urb, struct pt_regs *regs)
 		return;
 	}
 
-	if (!serial) {
-		dbg("%s - bad serial pointer, exiting", __FUNCTION__);
-		return;
-	}
-	
-	usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, data);
+	usb_serial_debug_data(debug, &command_port->dev, __FUNCTION__, urb->actual_length, data);
 
 	command_info = usb_get_serial_port_data(command_port);
 	if (!command_info) {
@@ -1029,7 +1010,7 @@ static void command_port_read_callback (struct urb *urb, struct pt_regs *regs)
 	}
 	
 	/* Continue trying to always read */
-	command_port->read_urb->dev = serial->dev;
+	command_port->read_urb->dev = command_port->serial->dev;
 	result = usb_submit_urb(command_port->read_urb, GFP_ATOMIC);
 	spin_unlock_irqrestore(&command_info->lock, flags);
 	if (result)
@@ -1040,7 +1021,6 @@ static void command_port_read_callback (struct urb *urb, struct pt_regs *regs)
 static void whiteheat_read_callback(struct urb *urb, struct pt_regs *regs)
 {
 	struct usb_serial_port *port = (struct usb_serial_port *)urb->context;
-	struct usb_serial *serial = get_usb_serial (port, __FUNCTION__);
 	struct whiteheat_urb_wrap *wrap;
 	unsigned char *data = urb->transfer_buffer;
 	struct whiteheat_private *info = usb_get_serial_port_data(port);
@@ -1057,14 +1037,6 @@ static void whiteheat_read_callback(struct urb *urb, struct pt_regs *regs)
 	list_del(&wrap->list);
 	spin_unlock(&info->lock);
 
-	if (!serial) {
-		dbg("%s - bad serial pointer, exiting", __FUNCTION__);
-		spin_lock(&info->lock);
-		list_add(&wrap->list, &info->rx_urbs_free);
-		spin_unlock(&info->lock);
-		return;
-	}
-
 	if (urb->status) {
 		dbg("%s - nonzero read bulk status received: %d", __FUNCTION__, urb->status);
 		spin_lock(&info->lock);
@@ -1073,7 +1045,7 @@ static void whiteheat_read_callback(struct urb *urb, struct pt_regs *regs)
 		return;
 	}
 
-	usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, data);
+	usb_serial_debug_data(debug, &port->dev, __FUNCTION__, urb->actual_length, data);
 
 	spin_lock(&info->lock);
 	list_add_tail(&wrap->list, &info->rx_urb_q);
@@ -1091,7 +1063,6 @@ static void whiteheat_read_callback(struct urb *urb, struct pt_regs *regs)
 static void whiteheat_write_callback(struct urb *urb, struct pt_regs *regs)
 {
 	struct usb_serial_port *port = (struct usb_serial_port *)urb->context;
-	struct usb_serial *serial = get_usb_serial (port, __FUNCTION__);
 	struct whiteheat_private *info = usb_get_serial_port_data(port);
 	struct whiteheat_urb_wrap *wrap;
 
@@ -1107,11 +1078,6 @@ static void whiteheat_write_callback(struct urb *urb, struct pt_regs *regs)
 	list_del(&wrap->list);
 	list_add(&wrap->list, &info->tx_urbs_free);
 	spin_unlock(&info->lock);
-
-	if (!serial) {
-		dbg("%s - bad serial pointer, exiting", __FUNCTION__);
-		return;
-	}
 
 	if (urb->status) {
 		dbg("%s - nonzero write bulk status received: %d", __FUNCTION__, urb->status);
@@ -1149,11 +1115,11 @@ static int firm_send_command (struct usb_serial_port *port, __u8 command, __u8 *
 	command_port->write_urb->transfer_buffer_length = datasize + 1;
 	command_port->write_urb->dev = port->serial->dev;
 	retval = usb_submit_urb (command_port->write_urb, GFP_KERNEL);
-	spin_unlock_irqrestore(&command_info->lock, flags);
 	if (retval) {
 		dbg("%s - submit urb failed", __FUNCTION__);
 		goto exit;
 	}
+	spin_unlock_irqrestore(&command_info->lock, flags);
 
 	/* wait for the command to complete */
 	wait_event_interruptible_timeout(command_info->wait_command, 
@@ -1373,7 +1339,7 @@ static void stop_command_port(struct usb_serial *serial)
 	spin_lock_irqsave(&command_info->lock, flags);
 	command_info->port_running--;
 	if (!command_info->port_running)
-		usb_unlink_urb(command_port->read_urb);
+		usb_kill_urb(command_port->read_urb);
 	spin_unlock_irqrestore(&command_info->lock, flags);
 }
 
@@ -1401,7 +1367,7 @@ static int start_port_read(struct usb_serial_port *port)
 			list_for_each_safe(tmp, tmp2, &info->rx_urbs_submitted) {
 				wrap = list_entry(tmp, struct whiteheat_urb_wrap, list);
 				urb = wrap->urb;
-				usb_unlink_urb(urb);
+				usb_kill_urb(urb);
 				list_del(tmp);
 				list_add(tmp, &info->rx_urbs_free);
 			}
@@ -1539,8 +1505,8 @@ MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(urb_pool_size, "i");
+module_param(urb_pool_size, int, 0);
 MODULE_PARM_DESC(urb_pool_size, "Number of urbs to use for buffering");
 
-MODULE_PARM(debug, "i");
+module_param(debug, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "Debug enabled or not");

@@ -1,7 +1,7 @@
 /*
  * logfile.c - NTFS kernel journal handling. Part of the Linux-NTFS project.
  *
- * Copyright (c) 2002-2004 Anton Altaparmakov.
+ * Copyright (c) 2002-2004 Anton Altaparmakov
  *
  * This program/include file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as published
@@ -25,11 +25,15 @@
 #include <linux/fs.h>
 #include <linux/highmem.h>
 #include <linux/buffer_head.h>
+#include <linux/bitops.h>
 
+#include "attrib.h"
+#include "aops.h"
+#include "debug.h"
 #include "logfile.h"
+#include "malloc.h"
 #include "volume.h"
 #include "ntfs.h"
-#include "debug.h"
 
 /**
  * ntfs_check_restart_page_header - check the page header for consistency
@@ -455,7 +459,11 @@ BOOL ntfs_check_logfile(struct inode *log_vi)
 	else
 		log_page_size = PAGE_CACHE_SIZE;
 	log_page_mask = log_page_size - 1;
-	log_page_bits = ffs(log_page_size) - 1;
+	/*
+	 * Use generic_ffs() instead of ffs() to enable the compiler to
+	 * optimize log_page_size and log_page_bits into constants.
+	 */
+	log_page_bits = generic_ffs(log_page_size) - 1;
 	size &= ~(log_page_size - 1);
 	/*
 	 * Ensure the log file is big enough to store at least the two restart
@@ -492,7 +500,7 @@ BOOL ntfs_check_logfile(struct inode *log_vi)
 		 * empty block after a non-empty block has been encountered
 		 * means we are done.
 		 */
-		if (!ntfs_is_empty_recordp(kaddr))
+		if (!ntfs_is_empty_recordp((le32*)kaddr))
 			logfile_is_empty = FALSE;
 		else if (!logfile_is_empty)
 			break;
@@ -500,20 +508,20 @@ BOOL ntfs_check_logfile(struct inode *log_vi)
 		 * A log record page means there cannot be a restart page after
 		 * this so no need to continue searching.
 		 */
-		if (ntfs_is_rcrd_recordp(kaddr))
+		if (ntfs_is_rcrd_recordp((le32*)kaddr))
 			break;
 		/*
 		 * A modified by chkdsk restart page means we cannot handle
 		 * this log file.
 		 */
-		if (ntfs_is_chkd_recordp(kaddr)) {
+		if (ntfs_is_chkd_recordp((le32*)kaddr)) {
 			ntfs_error(vol->sb, "$LogFile has been modified by "
 					"chkdsk.  Mount this volume in "
 					"Windows.");
 			goto err_out;
 		}
 		/* If not a restart page, continue. */
-		if (!ntfs_is_rstr_recordp(kaddr)) {
+		if (!ntfs_is_rstr_recordp((le32*)kaddr)) {
 			/* Skip to the minimum page size for the next one. */
 			if (!pos)
 				pos = NTFS_BLOCK_SIZE >> 1;
@@ -667,7 +675,7 @@ err_out:
  * @log_vi:	struct inode of loaded journal $LogFile to empty
  *
  * Empty the contents of the $LogFile journal @log_vi and return TRUE on
- * success FALSE on error.
+ * success and FALSE on error.
  *
  * This function assumes that the $LogFile journal has already been consistency
  * checked by a call to ntfs_check_logfile() and that ntfs_is_logfile_clean()
@@ -676,60 +684,20 @@ err_out:
 BOOL ntfs_empty_logfile(struct inode *log_vi)
 {
 	ntfs_volume *vol = NTFS_SB(log_vi->i_sb);
-	struct address_space *mapping;
-	pgoff_t idx, end;
 
 	ntfs_debug("Entering.");
-	if (NVolLogFileEmpty(vol))
-		goto done;
-	mapping = log_vi->i_mapping;
-	end = (log_vi->i_size + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
-	for (idx = 0; idx < end; ++idx) {
-		struct page *page;
-		u8 *kaddr;
-
-		/* Find or create the current page.  (The page is locked.) */
-		page = grab_cache_page(mapping, idx);
-		if (unlikely(!page)) {
-			ntfs_error(vol->sb, "Insufficient memory to grab "
-					"$LogFile page (index %lu).", idx);
+	if (!NVolLogFileEmpty(vol)) {
+		int err;
+		
+		err = ntfs_attr_set(NTFS_I(log_vi), 0, log_vi->i_size, 0xff);
+		if (unlikely(err)) {
+			ntfs_error(vol->sb, "Failed to fill $LogFile with "
+					"0xff bytes (error code %i).", err);
 			return FALSE;
 		}
-		/*
-		 * Set all bytes in the page to 0xff.  It doesn't matter if we
-		 * go beyond i_size, because ntfs_writepage() will take care of
-		 * that for us.
-		 */
-		kaddr = (u8*)kmap_atomic(page, KM_USER0);
-		memset(kaddr, 0xff, PAGE_CACHE_SIZE);
-		flush_dcache_page(page);
-		kunmap_atomic(kaddr, KM_USER0);
-		/*
-		 * If the page has buffers, mark them uptodate since buffer
-		 * state and not page state is definitive in 2.6 kernels.
-		 */
-		if (page_has_buffers(page)) {
-			struct buffer_head *bh, *head;
-
-			bh = head = page_buffers(page);
-			do {
-				set_buffer_uptodate(bh);
-			} while ((bh = bh->b_this_page) != head);
-		}
-		/* Now that buffers are uptodate, set the page uptodate, too. */
-		SetPageUptodate(page);
-		/*
-		 * Set the page and all its buffers dirty and mark the inode
-		 * dirty, too. The VM will write the page later on.
-		 */
-		set_page_dirty(page);
-		/* Finally unlock and release the page. */
-		unlock_page(page);
-		page_cache_release(page);
+		/* Set the flag so we do not have to do it again on remount. */
+		NVolSetLogFileEmpty(vol);
 	}
-	/* We set the flag so we do not clear the log file again on remount. */
-	NVolSetLogFileEmpty(vol);
-done:
 	ntfs_debug("Done.");
 	return TRUE;
 }

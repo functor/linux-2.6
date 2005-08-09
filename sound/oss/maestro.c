@@ -262,11 +262,11 @@ MODULE_DESCRIPTION("ESS Maestro Driver");
 MODULE_LICENSE("GPL");
 
 #ifdef M_DEBUG
-MODULE_PARM(debug,"i");
+module_param(debug, bool, 0644);
 #endif
-MODULE_PARM(dsps_order,"i");
-MODULE_PARM(use_pm,"i");
-MODULE_PARM(clocking, "i");
+module_param(dsps_order, int, 0);
+module_param(use_pm, int, 0);
+module_param(clocking, int, 0);
 
 /* --------------------------------------------------------------------- */
 #define DRIVER_VERSION "0.15"
@@ -344,7 +344,7 @@ enum {
 
 /* these masks indicate which units we care about at
 	which states */
-u16 acpi_state_mask[] = {
+static u16 acpi_state_mask[] = {
 	[ACPI_D0] = ACPI_ALL,
 	[ACPI_D1] = ACPI_SLEEP,
 	[ACPI_D2] = ACPI_SLEEP,
@@ -610,7 +610,7 @@ static u16 maestro_ac97_get(struct ess_card *card, u8 cmd)
 	be sure to fill it in if you add oss mixers
 	to anyone's supported mixer defines */
 
- unsigned int mixer_defaults[SOUND_MIXER_NRDEVICES] = {
+static unsigned int mixer_defaults[SOUND_MIXER_NRDEVICES] = {
 	[SOUND_MIXER_VOLUME] =          0x3232,
 	[SOUND_MIXER_BASS] =            0x3232,
 	[SOUND_MIXER_TREBLE] =          0x3232,
@@ -2025,7 +2025,9 @@ mixer_push_state(struct ess_card *card)
 static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long arg)
 {
 	int i, val=0;
-       unsigned long flags;
+	unsigned long flags;
+	void __user *argp = (void __user *)arg;
+	int __user *p = argp;
 
 	VALIDATE_CARD(card);
         if (cmd == SOUND_MIXER_INFO) {
@@ -2034,7 +2036,7 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 		strlcpy(info.id, card_names[card->card_type], sizeof(info.id));
 		strlcpy(info.name, card_names[card->card_type], sizeof(info.name));
 		info.modify_counter = card->mix.modcnt;
-		if (copy_to_user((void *)arg, &info, sizeof(info)))
+		if (copy_to_user(argp, &info, sizeof(info)))
 			return -EFAULT;
 		return 0;
 	}
@@ -2043,12 +2045,12 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 		memset(&info, 0, sizeof(info));
 		strlcpy(info.id, card_names[card->card_type], sizeof(info.id));
 		strlcpy(info.name, card_names[card->card_type], sizeof(info.name));
-		if (copy_to_user((void *)arg, &info, sizeof(info)))
+		if (copy_to_user(argp, &info, sizeof(info)))
 			return -EFAULT;
 		return 0;
 	}
 	if (cmd == OSS_GETVERSION)
-		return put_user(SOUND_VERSION, (int *)arg);
+		return put_user(SOUND_VERSION, p);
 
 	if (_IOC_TYPE(cmd) != 'M' || _IOC_SIZE(cmd) != sizeof(int))
                 return -EINVAL;
@@ -2098,7 +2100,7 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 
 			break;
 		}
-		return put_user(val,(int *)arg);
+		return put_user(val, p);
 	}
 	
         if (_IOC_DIR(cmd) != (_IOC_WRITE|_IOC_READ))
@@ -2106,7 +2108,7 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 	
 	card->mix.modcnt++;
 
-	if (get_user(val, (int *)arg))
+	if (get_user(val, p))
 		return -EFAULT;
 
 	switch (_IOC_NR(cmd)) {
@@ -2156,7 +2158,7 @@ static int ess_open_mixdev(struct inode *inode, struct file *file)
 	if (!card)
 		return -ENODEV;
 	file->private_data = card;
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int ess_release_mixdev(struct inode *inode, struct file *file)
@@ -2262,7 +2264,7 @@ comb_stereo(unsigned char *real_buffer,unsigned char  *tmp_buffer, int offset,
 	to be copied to the user's buffer.  it is filled by the interrupt
 	handler and drained by this loop. */
 static ssize_t 
-ess_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
+ess_read(struct file *file, char __user *buffer, size_t count, loff_t *ppos)
 {
 	struct ess_state *s = (struct ess_state *)file->private_data;
 	ssize_t ret;
@@ -2272,8 +2274,6 @@ ess_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 	unsigned char *combbuf = NULL;
 	
 	VALIDATE_STATE(s);
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 	if (s->dma_adc.mapped)
 		return -ENXIO;
 	if (!s->dma_adc.ready && (ret = prog_dmabuf(s, 1)))
@@ -2361,7 +2361,7 @@ rec_return_free:
 }
 
 static ssize_t 
-ess_write(struct file *file, const char *buffer, size_t count, loff_t *ppos)
+ess_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos)
 {
 	struct ess_state *s = (struct ess_state *)file->private_data;
 	ssize_t ret;
@@ -2370,8 +2370,6 @@ ess_write(struct file *file, const char *buffer, size_t count, loff_t *ppos)
 	int cnt;
 	
 	VALIDATE_STATE(s);
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 	if (s->dma_dac.mapped)
 		return -ENXIO;
 	if (!s->dma_dac.ready && (ret = prog_dmabuf(s, 0)))
@@ -2522,7 +2520,9 @@ static int ess_mmap(struct file *file, struct vm_area_struct *vma)
 	if (size > (PAGE_SIZE << db->buforder))
 		goto out;
 	ret = -EAGAIN;
-	if (remap_page_range(vma, vma->vm_start, virt_to_phys(db->rawbuf), size, vma->vm_page_prot))
+	if (remap_pfn_range(vma, vma->vm_start,
+			virt_to_phys(db->rawbuf) >> PAGE_SHIFT,
+			size, vma->vm_page_prot))
 		goto out;
 	db->mapped = 1;
 	ret = 0;
@@ -2539,6 +2539,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
         count_info cinfo;
 	int val, mapped, ret;
 	unsigned char fmtm, fmtd;
+	void __user *argp = (void __user *)arg;
+	int __user *p = argp;
 
 /*	printk("maestro: ess_ioctl: cmd %d\n", cmd);*/
 	
@@ -2547,7 +2549,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		((file->f_mode & FMODE_READ) && s->dma_adc.mapped);
 	switch (cmd) {
 	case OSS_GETVERSION:
-		return put_user(SOUND_VERSION, (int *)arg);
+		return put_user(SOUND_VERSION, p);
 
 	case SNDCTL_DSP_SYNC:
 		if (file->f_mode & FMODE_WRITE)
@@ -2559,7 +2561,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		return 0;
 
 	case SNDCTL_DSP_GETCAPS:
-		return put_user(DSP_CAP_DUPLEX | DSP_CAP_REALTIME | DSP_CAP_TRIGGER | DSP_CAP_MMAP, (int *)arg);
+		return put_user(DSP_CAP_DUPLEX | DSP_CAP_REALTIME | DSP_CAP_TRIGGER | DSP_CAP_MMAP, p);
 		
         case SNDCTL_DSP_RESET:
 		if (file->f_mode & FMODE_WRITE) {
@@ -2575,7 +2577,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		return 0;
 
         case SNDCTL_DSP_SPEED:
-                if (get_user(val, (int *)arg))
+                if (get_user(val, p))
 			return -EFAULT;
 		if (val >= 0) {
 			if (file->f_mode & FMODE_READ) {
@@ -2589,10 +2591,10 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 				set_dac_rate(s, val);
 			}
 		}
-		return put_user((file->f_mode & FMODE_READ) ? s->rateadc : s->ratedac, (int *)arg);
+		return put_user((file->f_mode & FMODE_READ) ? s->rateadc : s->ratedac, p);
 		
         case SNDCTL_DSP_STEREO:
-		if (get_user(val, (int *)arg))
+		if (get_user(val, p))
 			return -EFAULT;
 		fmtd = 0;
 		fmtm = ~0;
@@ -2616,7 +2618,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		return 0;
 
         case SNDCTL_DSP_CHANNELS:
-                if (get_user(val, (int *)arg))
+                if (get_user(val, p))
 			return -EFAULT;
 		if (val != 0) {
 			fmtd = 0;
@@ -2640,13 +2642,13 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			set_fmt(s, fmtm, fmtd);
 		}
 		return put_user((s->fmt & ((file->f_mode & FMODE_READ) ? (ESS_FMT_STEREO << ESS_ADC_SHIFT) 
-					   : (ESS_FMT_STEREO << ESS_DAC_SHIFT))) ? 2 : 1, (int *)arg);
+					   : (ESS_FMT_STEREO << ESS_DAC_SHIFT))) ? 2 : 1, p);
 		
 	case SNDCTL_DSP_GETFMTS: /* Returns a mask */
-                return put_user(AFMT_U8|AFMT_S16_LE, (int *)arg);
+                return put_user(AFMT_U8|AFMT_S16_LE, p);
 		
 	case SNDCTL_DSP_SETFMT: /* Selects ONE fmt*/
-		if (get_user(val, (int *)arg))
+		if (get_user(val, p))
 			return -EFAULT;
 		if (val != AFMT_QUERY) {
 			fmtd = 0;
@@ -2678,7 +2680,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			: (ESS_FMT_16BIT << ESS_DAC_SHIFT))) ? 
 				AFMT_S16_LE : 
 				AFMT_U8, 
-			(int *)arg);
+			p);
 		
 	case SNDCTL_DSP_POST:
                 return 0;
@@ -2689,10 +2691,10 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			val |= PCM_ENABLE_INPUT;
 		if ((file->f_mode & FMODE_WRITE) && (s->enable & DAC_RUNNING)) 
 			val |= PCM_ENABLE_OUTPUT;
-		return put_user(val, (int *)arg);
+		return put_user(val, p);
 		
 	case SNDCTL_DSP_SETTRIGGER:
-		if (get_user(val, (int *)arg))
+		if (get_user(val, p))
 			return -EFAULT;
 		if (file->f_mode & FMODE_READ) {
 			if (val & PCM_ENABLE_INPUT) {
@@ -2724,7 +2726,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
                 abinfo.fragstotal = s->dma_dac.numfrag;
                 abinfo.fragments = abinfo.bytes >> s->dma_dac.fragshift;      
 		spin_unlock_irqrestore(&s->lock, flags);
-		return copy_to_user((void *)arg, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
+		return copy_to_user(argp, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
 
 	case SNDCTL_DSP_GETISPACE:
 		if (!(file->f_mode & FMODE_READ))
@@ -2738,7 +2740,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
                 abinfo.fragstotal = s->dma_adc.numfrag;
                 abinfo.fragments = abinfo.bytes >> s->dma_adc.fragshift;      
 		spin_unlock_irqrestore(&s->lock, flags);
-		return copy_to_user((void *)arg, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
+		return copy_to_user(argp, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
 		
         case SNDCTL_DSP_NONBLOCK:
                 file->f_flags |= O_NONBLOCK;
@@ -2753,7 +2755,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		ess_update_ptr(s);
                 val = s->dma_dac.count;
 		spin_unlock_irqrestore(&s->lock, flags);
-		return put_user(val, (int *)arg);
+		return put_user(val, p);
 
         case SNDCTL_DSP_GETIPTR:
 		if (!(file->f_mode & FMODE_READ))
@@ -2768,7 +2770,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		if (s->dma_adc.mapped)
 			s->dma_adc.count &= s->dma_adc.fragsize-1;
 		spin_unlock_irqrestore(&s->lock, flags);
-		if (copy_to_user((void *)arg, &cinfo, sizeof(cinfo)))
+		if (copy_to_user(argp, &cinfo, sizeof(cinfo)))
 			return -EFAULT;
 		return 0;
 
@@ -2785,7 +2787,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		if (s->dma_dac.mapped)
 			s->dma_dac.count &= s->dma_dac.fragsize-1;
 		spin_unlock_irqrestore(&s->lock, flags);
-		if (copy_to_user((void *)arg, &cinfo, sizeof(cinfo)))
+		if (copy_to_user(argp, &cinfo, sizeof(cinfo)))
 			return -EFAULT;
 		return 0;
 
@@ -2793,14 +2795,14 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		if (file->f_mode & FMODE_WRITE) {
 			if ((val = prog_dmabuf(s, 0)))
 				return val;
-			return put_user(s->dma_dac.fragsize, (int *)arg);
+			return put_user(s->dma_dac.fragsize, p);
 		}
 		if ((val = prog_dmabuf(s, 1)))
 			return val;
-		return put_user(s->dma_adc.fragsize, (int *)arg);
+		return put_user(s->dma_adc.fragsize, p);
 
         case SNDCTL_DSP_SETFRAGMENT:
-                if (get_user(val, (int *)arg))
+                if (get_user(val, p))
 			return -EFAULT;
 		M_printk("maestro: SETFRAGMENT: %0x\n",val);
 		if (file->f_mode & FMODE_READ) {
@@ -2829,7 +2831,7 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		if ((file->f_mode & FMODE_READ && s->dma_adc.subdivision) ||
 		    (file->f_mode & FMODE_WRITE && s->dma_dac.subdivision))
 			return -EINVAL;
-                if (get_user(val, (int *)arg))
+                if (get_user(val, p))
 			return -EFAULT;
 		if (val != 1 && val != 2 && val != 4)
 			return -EINVAL;
@@ -2840,15 +2842,15 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		return 0;
 
         case SOUND_PCM_READ_RATE:
-		return put_user((file->f_mode & FMODE_READ) ? s->rateadc : s->ratedac, (int *)arg);
+		return put_user((file->f_mode & FMODE_READ) ? s->rateadc : s->ratedac, p);
 
         case SOUND_PCM_READ_CHANNELS:
 		return put_user((s->fmt & ((file->f_mode & FMODE_READ) ? (ESS_FMT_STEREO << ESS_ADC_SHIFT) 
-					   : (ESS_FMT_STEREO << ESS_DAC_SHIFT))) ? 2 : 1, (int *)arg);
+					   : (ESS_FMT_STEREO << ESS_DAC_SHIFT))) ? 2 : 1, p);
 
         case SOUND_PCM_READ_BITS:
 		return put_user((s->fmt & ((file->f_mode & FMODE_READ) ? (ESS_FMT_16BIT << ESS_ADC_SHIFT) 
-					   : (ESS_FMT_16BIT << ESS_DAC_SHIFT))) ? 16 : 8, (int *)arg);
+					   : (ESS_FMT_16BIT << ESS_DAC_SHIFT))) ? 16 : 8, p);
 
         case SOUND_PCM_WRITE_FILTER:
         case SNDCTL_DSP_SETSYNCRO:
@@ -2953,7 +2955,7 @@ allocate_buffers(struct ess_state *s)
 
 	}
 
-	/* now mark the pages as reserved; otherwise remap_page_range doesn't do what we want */
+	/* now mark the pages as reserved; otherwise remap_pfn_range doesn't do what we want */
 	pend = virt_to_page(rawbuf + (PAGE_SIZE << order) - 1);
 	for (page = virt_to_page(rawbuf); page <= pend; page++)
 		SetPageReserved(page);
@@ -3078,7 +3080,7 @@ ess_open(struct inode *inode, struct file *file)
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
 
 	up(&s->open_sem);
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int 
@@ -3361,7 +3363,7 @@ maestro_config(struct ess_card *card)
 /* this guy tries to find the pci power management
  * register bank.  this should really be in core
  * code somewhere.  1 on success. */
-int
+static int
 parse_power(struct ess_card *card, struct pci_dev *pcidev)
 {
 	u32 n;
@@ -3627,7 +3629,7 @@ static struct pci_driver maestro_pci_driver = {
 	.remove	  = maestro_remove,
 };
 
-int __init init_maestro(void)
+static int __init init_maestro(void)
 {
 	int rc;
 
@@ -3664,7 +3666,7 @@ static int maestro_notifier(struct notifier_block *nb, unsigned long event, void
 /* --------------------------------------------------------------------- */
 
 
-void cleanup_maestro(void) {
+static void cleanup_maestro(void) {
 	M_printk("maestro: unloading\n");
 	pci_unregister_driver(&maestro_pci_driver);
 	pm_unregister_all(maestro_pm_callback);

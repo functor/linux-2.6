@@ -41,11 +41,11 @@
 static unsigned int nr_neigh_no = 1;
 
 static HLIST_HEAD(nr_node_list);
-static spinlock_t nr_node_list_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(nr_node_list_lock);
 static HLIST_HEAD(nr_neigh_list);
-static spinlock_t nr_neigh_list_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(nr_neigh_list_lock);
 
-struct nr_node *nr_node_get(ax25_address *callsign)
+static struct nr_node *nr_node_get(ax25_address *callsign)
 {
 	struct nr_node *found = NULL;
 	struct nr_node *nr_node;
@@ -62,7 +62,8 @@ struct nr_node *nr_node_get(ax25_address *callsign)
 	return found;
 }
 
-struct nr_neigh *nr_neigh_get_dev(ax25_address *callsign, struct net_device *dev)
+static struct nr_neigh *nr_neigh_get_dev(ax25_address *callsign,
+					 struct net_device *dev)
 {
 	struct nr_neigh *found = NULL;
 	struct nr_neigh *nr_neigh;
@@ -186,7 +187,7 @@ static int nr_add_node(ax25_address *nr, const char *mnemonic, ax25_address *ax2
 		nr_node->which = 0;
 		nr_node->count = 1;
 		atomic_set(&nr_node->refcount, 1);
-		nr_node->node_lock = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&nr_node->node_lock);
 
 		nr_node->routes[0].quality   = quality;
 		nr_node->routes[0].obs_count = obs_count;
@@ -647,7 +648,7 @@ static ax25_digi *nr_call_to_digi(int ndigis, ax25_address *digipeaters)
 /*
  *	Handle the ioctls that control the routing functions.
  */
-int nr_rt_ioctl(unsigned int cmd, void *arg)
+int nr_rt_ioctl(unsigned int cmd, void __user *arg)
 {
 	struct nr_route_struct nr_route;
 	struct net_device *dev;

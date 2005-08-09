@@ -47,15 +47,6 @@ config DEBUG_ERRORS
 	  you are concerned with the code size or don't want to see these
 	  messages.
 
-config DEBUG_INFO
-	bool "Include GDB debugging information in kernel binary"
-	help
-	  Say Y here to include source-level debugging information in the
-	  `vmlinux' binary image. This is handy if you want to use gdb or
-	  addr2line to debug the kernel. It has no impact on the in-memory
-	  footprint of the running kernel but it can increase the amount of
-	  time and disk space needed for compilation of the kernel. If in
-	  doubt say N.
 
 # These options are only for real kernel hackers who want to get their hands dirty.
 config DEBUG_LL
@@ -104,12 +95,15 @@ config DEBUG_S3C2410_PORT
 	  before it is used.
 
 config DEBUG_S3C2410_UART
-	depends on DEBUG_LL && ARCH_S3C2410
+	depends on ARCH_S3C2410
 	int "S3C2410 UART to use for low-level debug"
 	default "0"
 	help
 	  Choice for UART for kernel low-level using S3C2410 UARTS,
 	  should be between zero and two. The port must have been
 	  initalised by the boot-loader before use.
+
+	  The uncompressor code port configuration is now handled
+	  by CONFIG_S3C2410_LOWLEVEL_UART_PORT.
 
 endmenu

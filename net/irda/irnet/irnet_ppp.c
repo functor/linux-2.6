@@ -16,6 +16,12 @@
 #include "irnet_ppp.h"		/* Private header */
 /* Please put other headers in irnet.h - Thanks */
 
+/* Generic PPP callbacks (to call us) */
+static struct ppp_channel_ops irnet_ppp_ops = {
+	.start_xmit = ppp_irnet_send,
+	.ioctl = ppp_irnet_ioctl
+};
+
 /************************* CONTROL CHANNEL *************************/
 /*
  * When a pppd instance is not active on /dev/irnet, it acts as a control
@@ -35,7 +41,7 @@
  */
 static inline ssize_t
 irnet_ctrl_write(irnet_socket *	ap,
-		 const char *	buf,
+		 const char __user *buf,
 		 size_t		count)
 {
   char		command[IRNET_MAX_COMMAND];
@@ -165,18 +171,44 @@ irnet_ctrl_write(irnet_socket *	ap,
 #ifdef INITIAL_DISCOVERY
 /*------------------------------------------------------------------*/
 /*
- * Function irnet_read_discovery_log (self)
+ * Function irnet_get_discovery_log (self)
+ *
+ *    Query the content on the discovery log if not done
+ *
+ * This function query the current content of the discovery log
+ * at the startup of the event channel and save it in the internal struct.
+ */
+static void
+irnet_get_discovery_log(irnet_socket *	ap)
+{
+  __u16		mask = irlmp_service_to_hint(S_LAN);
+
+  /* Ask IrLMP for the current discovery log */
+  ap->discoveries = irlmp_get_discoveries(&ap->disco_number, mask,
+					  DISCOVERY_DEFAULT_SLOTS);
+
+  /* Check if the we got some results */
+  if(ap->discoveries == NULL)
+    ap->disco_number = -1;
+
+  DEBUG(CTRL_INFO, "Got the log (0x%p), size is %d\n",
+	ap->discoveries, ap->disco_number);
+}
+
+/*------------------------------------------------------------------*/
+/*
+ * Function irnet_read_discovery_log (self, event)
  *
  *    Read the content on the discovery log
  *
  * This function dump the current content of the discovery log
  * at the startup of the event channel.
- * Return 1 if written on the control channel...
+ * Return 1 if wrote an event on the control channel...
  *
  * State of the ap->disco_XXX variables :
- *	at socket creation :	disco_index = 0 ; disco_number = 0
- *	while reading :		disco_index = X ; disco_number = Y
- *	After reading :		disco_index = Y ; disco_number = -1
+ * Socket creation :  discoveries = NULL ; disco_index = 0 ; disco_number = 0
+ * While reading :    discoveries = ptr  ; disco_index = X ; disco_number = Y
+ * After reading :    discoveries = NULL ; disco_index = Y ; disco_number = -1
  */
 static inline int
 irnet_read_discovery_log(irnet_socket *	ap,
@@ -195,19 +227,8 @@ irnet_read_discovery_log(irnet_socket *	ap,
     }
 
   /* Test if it's the first time and therefore we need to get the log */
-  if(ap->disco_index == 0)
-    {
-      __u16		mask = irlmp_service_to_hint(S_LAN);
-
-      /* Ask IrLMP for the current discovery log */
-      ap->discoveries = irlmp_get_discoveries(&ap->disco_number, mask,
-					      DISCOVERY_DEFAULT_SLOTS);
-      /* Check if the we got some results */
-      if(ap->discoveries == NULL)
-	ap->disco_number = -1;
-      DEBUG(CTRL_INFO, "Got the log (0x%p), size is %d\n",
-	    ap->discoveries, ap->disco_number);
-    }
+  if(ap->discoveries == NULL)
+    irnet_get_discovery_log(ap);
 
   /* Check if we have more item to dump */
   if(ap->disco_index < ap->disco_number)
@@ -254,7 +275,7 @@ irnet_read_discovery_log(irnet_socket *	ap,
 static inline ssize_t
 irnet_ctrl_read(irnet_socket *	ap,
 		struct file *	file,
-		char *		buf,
+		char __user *	buf,
 		size_t		count)
 {
   DECLARE_WAITQUEUE(wait, current);
@@ -411,7 +432,14 @@ irnet_ctrl_poll(irnet_socket *	ap,
     mask |= POLLIN | POLLRDNORM;
 #ifdef INITIAL_DISCOVERY
   if(ap->disco_number != -1)
-    mask |= POLLIN | POLLRDNORM;
+    {
+      /* Test if it's the first time and therefore we need to get the log */
+      if(ap->discoveries == NULL)
+	irnet_get_discovery_log(ap);
+      /* Recheck */
+      if(ap->disco_number != -1)
+	mask |= POLLIN | POLLRDNORM;
+    }
 #endif /* INITIAL_DISCOVERY */
 
   DEXIT(CTRL_TRACE, " - mask=0x%X\n", mask);
@@ -529,7 +557,7 @@ dev_irnet_close(struct inode *	inode,
  */
 static ssize_t
 dev_irnet_write(struct file *	file,
-		const char *	buf,
+		const char __user *buf,
 		size_t		count,
 		loff_t *	ppos)
 {
@@ -553,7 +581,7 @@ dev_irnet_write(struct file *	file,
  */
 static ssize_t
 dev_irnet_read(struct file *	file,
-	       char *		buf,
+	       char __user *	buf,
 	       size_t		count,
 	       loff_t *		ppos)
 {
@@ -610,6 +638,7 @@ dev_irnet_ioctl(struct inode *	inode,
   irnet_socket *	ap = (struct irnet_socket *) file->private_data;
   int			err;
   int			val;
+  void __user *argp = (void __user *)arg;
 
   DENTER(FS_TRACE, "(file=0x%p, ap=0x%p, cmd=0x%X)\n",
 	 file, ap, cmd);
@@ -626,7 +655,7 @@ dev_irnet_ioctl(struct inode *	inode,
     {
       /* Set discipline (should be N_SYNC_PPP or N_TTY) */
     case TIOCSETD:
-      if(get_user(val, (int *) arg))
+      if(get_user(val, (int __user *)argp))
 	break;
       if((val == N_SYNC_PPP) || (val == N_PPP))
 	{
@@ -665,7 +694,7 @@ dev_irnet_ioctl(struct inode *	inode,
     case PPPIOCGCHAN:
       if(!ap->ppp_open)
 	break;
-      if(put_user(ppp_channel_index(&ap->chan), (int *) arg))
+      if(put_user(ppp_channel_index(&ap->chan), (int __user *)argp))
 	break;
       DEBUG(FS_INFO, "Query channel.\n");
       err = 0;
@@ -673,7 +702,7 @@ dev_irnet_ioctl(struct inode *	inode,
     case PPPIOCGUNIT:
       if(!ap->ppp_open)
 	break;
-      if(put_user(ppp_unit_number(&ap->chan), (int *) arg))
+      if(put_user(ppp_unit_number(&ap->chan), (int __user *)argp))
 	break;
       DEBUG(FS_INFO, "Query unit number.\n");
       err = 0;
@@ -703,14 +732,14 @@ dev_irnet_ioctl(struct inode *	inode,
       /* Get termios */
     case TCGETS:
       DEBUG(FS_INFO, "Get termios.\n");
-      if(kernel_termios_to_user_termios((struct termios *)arg, &ap->termios))
+      if(kernel_termios_to_user_termios((struct termios __user *)argp, &ap->termios))
 	break;
       err = 0;
       break;
       /* Set termios */
     case TCSETSF:
       DEBUG(FS_INFO, "Set termios.\n");
-      if(user_termios_to_kernel_termios(&ap->termios, (struct termios *) arg))
+      if(user_termios_to_kernel_termios(&ap->termios, (struct termios __user *)argp))
 	break;
       err = 0;
       break;
@@ -743,7 +772,7 @@ dev_irnet_ioctl(struct inode *	inode,
     case FIONREAD:
       DEBUG(FS_INFO, "FIONREAD\n");
       val = 0;
-      if(put_user(val, (int *) arg))
+      if(put_user(val, (int __user *)argp))
 	break;
       err = 0;
       break;
@@ -950,6 +979,7 @@ ppp_irnet_ioctl(struct ppp_channel *	chan,
   int			err;
   int			val;
   u32			accm[8];
+  void __user *argp = (void __user *)arg;
 
   DENTER(PPP_TRACE, "(channel=0x%p, ap=0x%p, cmd=0x%X)\n",
 	 chan, ap, cmd);
@@ -963,12 +993,12 @@ ppp_irnet_ioctl(struct ppp_channel *	chan,
       /* PPP flags */
     case PPPIOCGFLAGS:
       val = ap->flags | ap->rbits;
-      if(put_user(val, (int *) arg))
+      if(put_user(val, (int __user *) argp))
 	break;
       err = 0;
       break;
     case PPPIOCSFLAGS:
-      if(get_user(val, (int *) arg))
+      if(get_user(val, (int __user *) argp))
 	break;
       ap->flags = val & ~SC_RCV_BITS;
       ap->rbits = val & SC_RCV_BITS;
@@ -977,32 +1007,32 @@ ppp_irnet_ioctl(struct ppp_channel *	chan,
 
       /* Async map stuff - all dummy to please pppd */
     case PPPIOCGASYNCMAP:
-      if(put_user(ap->xaccm[0], (u32 *) arg))
+      if(put_user(ap->xaccm[0], (u32 __user *) argp))
 	break;
       err = 0;
       break;
     case PPPIOCSASYNCMAP:
-      if(get_user(ap->xaccm[0], (u32 *) arg))
+      if(get_user(ap->xaccm[0], (u32 __user *) argp))
 	break;
       err = 0;
       break;
     case PPPIOCGRASYNCMAP:
-      if(put_user(ap->raccm, (u32 *) arg))
+      if(put_user(ap->raccm, (u32 __user *) argp))
 	break;
       err = 0;
       break;
     case PPPIOCSRASYNCMAP:
-      if(get_user(ap->raccm, (u32 *) arg))
+      if(get_user(ap->raccm, (u32 __user *) argp))
 	break;
       err = 0;
       break;
     case PPPIOCGXASYNCMAP:
-      if(copy_to_user((void *) arg, ap->xaccm, sizeof(ap->xaccm)))
+      if(copy_to_user(argp, ap->xaccm, sizeof(ap->xaccm)))
 	break;
       err = 0;
       break;
     case PPPIOCSXASYNCMAP:
-      if(copy_from_user(accm, (void *) arg, sizeof(accm)))
+      if(copy_from_user(accm, argp, sizeof(accm)))
 	break;
       accm[2] &= ~0x40000000U;		/* can't escape 0x5e */
       accm[3] |= 0x60000000U;		/* must escape 0x7d, 0x7e */
@@ -1012,12 +1042,12 @@ ppp_irnet_ioctl(struct ppp_channel *	chan,
 
       /* Max PPP frame size */
     case PPPIOCGMRU:
-      if(put_user(ap->mru, (int *) arg))
+      if(put_user(ap->mru, (int __user *) argp))
 	break;
       err = 0;
       break;
     case PPPIOCSMRU:
-      if(get_user(val, (int *) arg))
+      if(get_user(val, (int __user *) argp))
 	break;
       if(val < PPP_MRU)
 	val = PPP_MRU;
@@ -1093,11 +1123,11 @@ irnet_init(void)
 /*
  * Module exit
  */
-void __exit
+static void __exit
 irnet_cleanup(void)
 {
   irda_irnet_cleanup();
-  return ppp_irnet_cleanup();
+  ppp_irnet_cleanup();
 }
 
 /*------------------------------------------------------------------*/
@@ -1109,3 +1139,4 @@ module_exit(irnet_cleanup);
 MODULE_AUTHOR("Jean Tourrilhes <jt@hpl.hp.com>");
 MODULE_DESCRIPTION("IrNET : Synchronous PPP over IrDA"); 
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_CHARDEV(10, 187);

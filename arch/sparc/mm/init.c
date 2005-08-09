@@ -59,9 +59,6 @@ unsigned long highstart_pfn, highend_pfn;
 pte_t *kmap_pte;
 pgprot_t kmap_prot;
 
-EXPORT_SYMBOL(kmap_prot);
-EXPORT_SYMBOL(kmap_pte);
-
 #define kmap_get_fixmap_pte(vaddr) \
 	pte_offset_kernel(pmd_offset(pgd_offset_k(vaddr), (vaddr)), (vaddr))
 
@@ -76,7 +73,7 @@ void show_mem(void)
 {
 	printk("Mem-info:\n");
 	show_free_areas();
-	printk("Free swap:       %6dkB\n",
+	printk("Free swap:       %6ldkB\n",
 	       nr_swap_pages << (PAGE_SHIFT-10));
 	printk("%ld pages of RAM\n", totalram_pages);
 	printk("%d free pages\n", nr_free_pages());
@@ -100,7 +97,7 @@ void __init sparc_context_init(int numctx)
 
 		clist = (ctx_list_pool + ctx);
 		clist->ctx_number = ctx;
-		clist->ctx_mm = 0;
+		clist->ctx_mm = NULL;
 	}
 	ctx_free.next = ctx_free.prev = &ctx_free;
 	ctx_used.next = ctx_used.prev = &ctx_used;
@@ -388,7 +385,7 @@ void map_high_region(unsigned long start_pfn, unsigned long end_pfn)
 
 		ClearPageReserved(page);
 		set_bit(PG_highmem, &page->flags);
-		atomic_set(&page->count, 1);
+		set_page_count(page, 1);
 		__free_page(page);
 		totalhigh_pages++;
 	}
@@ -401,8 +398,6 @@ void __init mem_init(void)
 	int initpages = 0; 
 	int reservedpages = 0;
 	int i;
-
-	highmem_start_page = pfn_to_page(highstart_pfn);
 
 	if (PKMAP_BASE+LAST_PKMAP*PAGE_SIZE >= FIXADDR_START) {
 		prom_printf("BUG: fixmap and pkmap areas overlap\n");

@@ -16,8 +16,6 @@
  * General Public License for more details.
  *
  */
-#include "qla_os.h"
-
 #include "qla_def.h"
 
 /**
@@ -49,8 +47,6 @@
 /* Local Prototypes. */
 static inline uint32_t qla2x00_to_handle(uint16_t, uint16_t, uint16_t);
 static inline uint16_t qla2x00_handle_to_idx(uint32_t);
-static inline uint16_t qla2x00_handle_to_iter(uint32_t);
-static inline uint16_t qla2x00_handle_to_type(uint32_t);
 static inline uint32_t qla2x00_iodesc_to_handle(struct io_descriptor *);
 static inline struct io_descriptor *qla2x00_handle_to_iodesc(scsi_qla_host_t *,
     uint32_t);
@@ -89,7 +85,7 @@ static int qla2x00_send_login_iocb_cb(scsi_qla_host_t *, struct io_descriptor *,
 /** 
  * Mailbox IOCB callback array.
  **/
-int (*iocb_function_cb_list[LAST_IOCB_CB])
+static int (*iocb_function_cb_list[LAST_IOCB_CB])
 	(scsi_qla_host_t *, struct io_descriptor *, struct mbx_entry *) = {
 
 	qla2x00_send_abort_iocb_cb,
@@ -129,30 +125,6 @@ static inline uint16_t
 qla2x00_handle_to_idx(uint32_t handle)
 {
 	return ((uint16_t)(((handle) >> HDL_INDEX_SHIFT) & HDL_INDEX_MASK));
-}
-
-/**
- * qla2x00_handle_to_type() - Retrive the descriptor type for a given handle.
- * @handle: descriptor handle
- *
- * Returns the descriptor type specified by the @handle.
- */
-static inline uint16_t
-qla2x00_handle_to_type(uint32_t handle)
-{
-	return ((uint16_t)(((handle) >> HDL_TYPE_SHIFT) & HDL_TYPE_MASK));
-}
-
-/**
- * qla2x00_handle_to_iter() - Retrive the rolling signature for a given handle.
- * @handle: descriptor handle
- *
- * Returns the signature specified by the @handle.
- */
-static inline uint16_t
-qla2x00_handle_to_iter(uint32_t handle)
-{
-	return ((uint16_t)(((handle) >> HDL_ITER_SHIFT) & HDL_ITER_MASK));
 }
 
 /**
@@ -244,6 +216,20 @@ qla2x00_free_iodesc(struct io_descriptor *iodesc)
 }
 
 /**
+ * qla2x00_remove_iodesc_timer() - Remove an active timer from an IO descriptor.
+ * @iodesc: io descriptor
+ */
+static inline void
+qla2x00_remove_iodesc_timer(struct io_descriptor *iodesc)
+{
+	if (iodesc->timer.function != NULL) {
+		del_timer_sync(&iodesc->timer);
+		iodesc->timer.data = (unsigned long) NULL;
+		iodesc->timer.function = NULL;
+	}
+}
+
+/**
  * qla2x00_init_io_descriptors() - Initialize the pool of IO descriptors.
  * @ha: HA context
  */
@@ -283,6 +269,8 @@ qla2x00_iodesc_timeout(unsigned long data)
 
 	qla2x00_free_iodesc(iodesc);
 
+	qla_printk(KERN_WARNING, iodesc->ha,
+	    "IO descriptor timeout. Scheduling ISP abort.\n");
 	set_bit(ISP_ABORT_NEEDED, &iodesc->ha->dpc_flags);
 }
 
@@ -309,20 +297,6 @@ qla2x00_add_iodesc_timer(struct io_descriptor *iodesc)
 	iodesc->timer.function =
 	    (void (*) (unsigned long)) qla2x00_iodesc_timeout;
 	add_timer(&iodesc->timer);
-}
-
-/**
- * qla2x00_remove_iodesc_timer() - Remove an active timer from an IO descriptor.
- * @iodesc: io descriptor
- */
-static inline void
-qla2x00_remove_iodesc_timer(struct io_descriptor *iodesc)
-{
-	if (iodesc->timer.function != NULL) {
-		del_timer_sync(&iodesc->timer);
-		iodesc->timer.data = (unsigned long) NULL;
-		iodesc->timer.function = NULL;
-	}
 }
 
 /** 
@@ -374,10 +348,9 @@ static inline struct mbx_entry *
 qla2x00_get_mbx_iocb_entry(scsi_qla_host_t *ha, uint32_t handle)
 {
 	uint16_t cnt;
-	device_reg_t *reg;
+	device_reg_t __iomem *reg = ha->iobase;
 	struct mbx_entry *mbxentry;
 
-	reg = ha->iobase;
 	mbxentry = NULL;
 
 	if (ha->req_q_cnt < 3) {
@@ -385,7 +358,7 @@ qla2x00_get_mbx_iocb_entry(scsi_qla_host_t *ha, uint32_t handle)
 		if  (ha->req_ring_index < cnt)
 			ha->req_q_cnt = cnt - ha->req_ring_index;
 		else
-			ha->req_q_cnt = REQUEST_ENTRY_CNT -
+			ha->req_q_cnt = ha->request_q_length -
 			    (ha->req_ring_index - cnt);
 	}
 	if (ha->req_q_cnt >= 3) {
@@ -436,6 +409,7 @@ qla2x00_send_abort_iocb(scsi_qla_host_t *ha, struct io_descriptor *iodesc,
 	    cpu_to_le16(iodesc->remote_fcport->loop_id);
 	mbxentry->mb2 = LSW(handle_to_abort);
 	mbxentry->mb3 = MSW(handle_to_abort);
+	wmb();
 
 	qla2x00_add_iodesc_timer(iodesc);
 
@@ -512,6 +486,7 @@ qla2x00_send_adisc_iocb(scsi_qla_host_t *ha, struct io_descriptor *iodesc,
 	mbxentry->mb6 = cpu_to_le16(MSW(MSD(ha->iodesc_pd_dma)));
 	mbxentry->mb7 = cpu_to_le16(LSW(MSD(ha->iodesc_pd_dma)));
 	mbxentry->mb10 = __constant_cpu_to_le16(BIT_0);
+	wmb();
 
 	qla2x00_add_iodesc_timer(iodesc);
 
@@ -623,6 +598,7 @@ qla2x00_send_logout_iocb(scsi_qla_host_t *ha, struct io_descriptor *iodesc,
 	mbxentry->mb0 = __constant_cpu_to_le16(MBC_LOGOUT_FABRIC_PORT);
 	mbxentry->mb1 = mbxentry->loop_id.extended =
 	    cpu_to_le16(iodesc->remote_fcport->loop_id);
+	wmb();
 
 	qla2x00_add_iodesc_timer(iodesc);
 
@@ -700,6 +676,7 @@ qla2x00_send_login_iocb(scsi_qla_host_t *ha, struct io_descriptor *iodesc,
 	mbxentry->mb2 = cpu_to_le16(d_id->b.domain);
 	mbxentry->mb3 = cpu_to_le16(d_id->b.area << 8 | d_id->b.al_pa);
 	mbxentry->mb10 = __constant_cpu_to_le16(BIT_0);
+	wmb();
 
 	qla2x00_add_iodesc_timer(iodesc);
 

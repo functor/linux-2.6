@@ -9,7 +9,7 @@
  *
  * Based on work Copyright (C) 2002-2003 Intel Corporation
  * 
- * This file is licensed under  the terms of the GNU General Public 
+ * This file is licensed under the terms of the GNU General Public
  * License version 2. This program is licensed "as is" without any 
  * warranty of any kind, whether express or implied.
  */
@@ -33,16 +33,14 @@
 #include <asm/mach-types.h>
 #include <asm/irq.h>
 #include <asm/system.h>
-#include <asm/hardware.h>
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
-#include <asm/mach-types.h>
 
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
 #include <asm/mach/irq.h>
 
-static spinlock_t ixp2000_slowport_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(ixp2000_slowport_lock);
 static unsigned long ixp2000_slowport_irq_flags;
 
 /*************************************************************************
@@ -81,31 +79,11 @@ void ixp2000_release_slowport(struct slowport_cfg *old_cfg)
 /*************************************************************************
  * Chip specific mappings shared by all IXP2000 systems
  *************************************************************************/
-static struct map_desc ixp2000_small_io_desc[] __initdata = {
+static struct map_desc ixp2000_io_desc[] __initdata = {
 	{
-		.virtual	= IXP2000_GLOBAL_REG_VIRT_BASE,
-		.physical	= IXP2000_GLOBAL_REG_PHYS_BASE,
-		.length		= IXP2000_GLOBAL_REG_SIZE,
-		.type		= MT_DEVICE
-	}, {
-		.virtual	= IXP2000_GPIO_VIRT_BASE,
-		.physical	= IXP2000_GPIO_PHYS_BASE,
-		.length		= IXP2000_GPIO_SIZE,
-		.type		= MT_DEVICE
-	}, {
-		.virtual	= IXP2000_TIMER_VIRT_BASE,
-		.physical	= IXP2000_TIMER_PHYS_BASE,
-		.length		= IXP2000_TIMER_SIZE,
-		.type		= MT_DEVICE
-	}, {
-		.virtual	= IXP2000_UART_VIRT_BASE,
-		.physical	= IXP2000_UART_PHYS_BASE,
-		.length		= IXP2000_UART_SIZE,
-		.type		= MT_DEVICE
-	}, {
-		.virtual	= IXP2000_SLOWPORT_CSR_VIRT_BASE,
-		.physical	= IXP2000_SLOWPORT_CSR_PHYS_BASE,
-		.length		= IXP2000_SLOWPORT_CSR_SIZE,
+		.virtual	= IXP2000_CAP_VIRT_BASE,
+		.physical	= IXP2000_CAP_PHYS_BASE,
+		.length		= IXP2000_CAP_SIZE,
 		.type		= MT_DEVICE
 	}, {
 		.virtual	= IXP2000_INTCTL_VIRT_BASE,
@@ -117,11 +95,7 @@ static struct map_desc ixp2000_small_io_desc[] __initdata = {
 		.physical	= IXP2000_PCI_CREG_PHYS_BASE,
 		.length		= IXP2000_PCI_CREG_SIZE,
 		.type		= MT_DEVICE
-	}
-};
-
-static struct map_desc ixp2000_large_io_desc[] __initdata = {
-	{
+	}, {
 		.virtual	= IXP2000_PCI_CSR_VIRT_BASE,
 		.physical	= IXP2000_PCI_CSR_PHYS_BASE,
 		.length		= IXP2000_PCI_CSR_SIZE,
@@ -159,9 +133,27 @@ static struct uart_port ixp2000_serial_port = {
 
 void __init ixp2000_map_io(void)
 {
-	iotable_init(ixp2000_small_io_desc, ARRAY_SIZE(ixp2000_small_io_desc));
-	iotable_init(ixp2000_large_io_desc, ARRAY_SIZE(ixp2000_large_io_desc));
+	extern unsigned int processor_id;
+
+	/*
+	 * On IXP2400 CPUs we need to use MT_IXP2000_DEVICE for
+	 * tweaking the PMDs so XCB=101. On IXP2800s we use the normal
+	 * PMD flags.
+	 */
+	if ((processor_id & 0xfffffff0) == 0x69054190) {
+		int i;
+
+		printk(KERN_INFO "Enabling IXP2400 erratum #66 workaround\n");
+
+		for(i=0;i<ARRAY_SIZE(ixp2000_io_desc);i++)
+			ixp2000_io_desc[i].type = MT_IXP2000_DEVICE;
+	}
+
+	iotable_init(ixp2000_io_desc, ARRAY_SIZE(ixp2000_io_desc));
 	early_serial_setup(&ixp2000_serial_port);
+
+	/* Set slowport to 8-bit mode.  */
+	ixp2000_reg_write(IXP2000_SLOWPORT_FRM, 1);
 }
 
 /*************************************************************************
@@ -169,23 +161,30 @@ void __init ixp2000_map_io(void)
  *************************************************************************/
 static unsigned ticks_per_jiffy;
 static unsigned ticks_per_usec;
+static unsigned next_jiffy_time;
 
-static unsigned long ixp2000_gettimeoffset (void)
+unsigned long ixp2000_gettimeoffset (void)
 {
-	unsigned long elapsed;
+ 	unsigned long offset;
 
-	/* Get ticks since last perfect jiffy */
-	elapsed = ticks_per_jiffy - *IXP2000_T1_CSR;
+	offset = next_jiffy_time - *IXP2000_T4_CSR;
 
-	return elapsed / ticks_per_usec;
+	return offset / ticks_per_usec;
 }
 
 static int ixp2000_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
+	write_seqlock(&xtime_lock);
+
 	/* clear timer 1 */
 	ixp2000_reg_write(IXP2000_T1_CLR, 1);
 	
-	timer_tick(regs);
+	while ((next_jiffy_time - *IXP2000_T4_CSR) > ticks_per_jiffy) {
+		timer_tick(regs);
+		next_jiffy_time -= ticks_per_jiffy;
+	}
+
+	write_sequnlock(&xtime_lock);
 
 	return IRQ_HANDLED;
 }
@@ -198,16 +197,21 @@ static struct irqaction ixp2000_timer_irq = {
 
 void __init ixp2000_init_time(unsigned long tick_rate)
 {
-	gettimeoffset = ixp2000_gettimeoffset;
-
 	ixp2000_reg_write(IXP2000_T1_CLR, 0);
-	ixp2000_reg_write(IXP2000_T2_CLR, 0);
+	ixp2000_reg_write(IXP2000_T4_CLR, 0);
 
 	ticks_per_jiffy = (tick_rate + HZ/2) / HZ;
 	ticks_per_usec = tick_rate / 1000000;
 
-	ixp2000_reg_write(IXP2000_T1_CLD, ticks_per_jiffy);
+	ixp2000_reg_write(IXP2000_T1_CLD, ticks_per_jiffy - 1);
 	ixp2000_reg_write(IXP2000_T1_CTL, (1 << 7));
+
+	/*
+	 * We use T4 as a monotonic counter to track missed jiffies
+	 */
+	ixp2000_reg_write(IXP2000_T4_CLD, -1);
+	ixp2000_reg_write(IXP2000_T4_CTL, (1 << 7));
+ 	next_jiffy_time = 0xffffffff;
 
 	/* register for interrupt */
 	setup_irq(IRQ_IXP2000_TIMER1, &ixp2000_timer_irq);
@@ -309,41 +313,6 @@ static struct irqchip ixp2000_pci_irq_chip = {
 	.unmask	= ixp2000_pci_irq_unmask
 };
 
-/*
- * Error interrupts. These are used extensively by the microengine drivers
- */
-static void ixp2000_err_irq_handler(unsigned int irq, struct irqdesc *desc,  struct pt_regs *regs)
-{
-	int i;
-	unsigned long status = *IXP2000_IRQ_ERR_STATUS;
-
-
-	for (i = 0; i <= 12; i++) {
-		if (status & (1 << i)) {
-			desc = irq_desc + IRQ_IXP2000_DRAM0_MIN_ERR + i;
-			desc->handle(IRQ_IXP2000_DRAM0_MIN_ERR + i, desc, regs);
-		}
-	}
-}
-
-static void ixp2000_err_irq_mask(unsigned int irq)
-{
-	ixp2000_reg_write(IXP2000_IRQ_ERR_ENABLE_CLR,
-			(1 << (irq - IRQ_IXP2000_DRAM0_MIN_ERR)));
-}
-
-static void ixp2000_err_irq_unmask(unsigned int irq)
-{
-	ixp2000_reg_write(IXP2000_IRQ_ERR_ENABLE_SET,
-			(1 << (irq - IRQ_IXP2000_DRAM0_MIN_ERR)));
-}
-
-static struct irqchip ixp2000_err_irq_chip = {
-	.ack	= ixp2000_err_irq_mask,
-	.mask	= ixp2000_err_irq_mask,
-	.unmask	= ixp2000_err_irq_unmask
-};
-
 static void ixp2000_irq_mask(unsigned int irq)
 {
 	ixp2000_reg_write(IXP2000_IRQ_ENABLE_CLR, (1 << irq));
@@ -387,7 +356,7 @@ void __init ixp2000_init_irq(void)
 	 * we mark the reserved IRQs as invalid. This makes
 	 * our mask/unmask code much simpler.
 	 */
-	for (irq = IRQ_IXP2000_SWI; irq <= IRQ_IXP2000_THDB3; irq++) {
+	for (irq = IRQ_IXP2000_SOFT_INT; irq <= IRQ_IXP2000_THDB3; irq++) {
 		if((1 << irq) & IXP2000_VALID_IRQ_MASK) {
 			set_irq_chip(irq, &ixp2000_irq_chip);
 			set_irq_handler(irq, do_level_IRQ);
@@ -407,20 +376,15 @@ void __init ixp2000_init_irq(void)
 	set_irq_chained_handler(IRQ_IXP2000_GPIO, ixp2000_GPIO_irq_handler);
 
 	/*
-	 * Enable PCI irq
+	 * Enable PCI irqs.  The actual PCI[AB] decoding is done in
+	 * entry-macro.S, so we don't need a chained handler for the
+	 * PCI interrupt source.
 	 */
-	*(IXP2000_IRQ_ENABLE_SET) = (1 << IRQ_IXP2000_PCI);
+	ixp2000_reg_write(IXP2000_IRQ_ENABLE_SET, (1 << IRQ_IXP2000_PCI));
 	for (irq = IRQ_IXP2000_PCIA; irq <= IRQ_IXP2000_PCIB; irq++) {
 		set_irq_chip(irq, &ixp2000_pci_irq_chip);
 		set_irq_handler(irq, do_level_IRQ);
 		set_irq_flags(irq, IRQF_VALID);
 	}
-
-	for (irq = IRQ_IXP2000_DRAM0_MIN_ERR; irq <= IRQ_IXP2000_SP_INT; irq++) {
-		set_irq_chip(irq, &ixp2000_err_irq_chip);
-		set_irq_handler(irq, do_level_IRQ);
-		set_irq_flags(irq, IRQF_VALID);
-	}       
-	set_irq_chained_handler(IRQ_IXP2000_ERRSUM, ixp2000_err_irq_handler);
 }
 

@@ -45,10 +45,10 @@
 #include <linux/init.h>
 #include <linux/wait.h>
 #include <linux/sched.h>
+#include <linux/moduleparam.h>
 #include <sound/core.h>
 #include <sound/seq_kernel.h>
 #include <sound/seq_virmidi.h>
-#define SNDRV_GET_ID
 #include <sound/initval.h>
 
 /* hack: OSS defines midi_devs, so undefine it (versioned symbols) */
@@ -57,8 +57,7 @@
 MODULE_AUTHOR("Takashi Iwai <tiwai@suse.de>");
 MODULE_DESCRIPTION("Dummy soundcard for virtual rawmidi devices");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_DEVICES("{{ALSA,Virtual rawmidi device}}");
+MODULE_SUPPORTED_DEVICE("{{ALSA,Virtual rawmidi device}}");
 
 #define MAX_MIDI_DEVICES	8
 
@@ -67,18 +66,14 @@ static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
 static int enable[SNDRV_CARDS] = {1, [1 ... (SNDRV_CARDS - 1)] = 0};
 static int midi_devs[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 4};
 
-MODULE_PARM(index, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for virmidi soundcard.");
-MODULE_PARM_SYNTAX(index, SNDRV_INDEX_DESC);
-MODULE_PARM(id, "1-" __MODULE_STRING(SNDRV_CARDS) "s");
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for virmidi soundcard.");
-MODULE_PARM_SYNTAX(id, SNDRV_ID_DESC);
-MODULE_PARM(enable, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable this soundcard.");
-MODULE_PARM_SYNTAX(enable, SNDRV_ENABLE_DESC);
-MODULE_PARM(midi_devs, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(midi_devs, int, NULL, 0444);
 MODULE_PARM_DESC(midi_devs, "MIDI devices # (1-8)");
-MODULE_PARM_SYNTAX(midi_devs, SNDRV_ENABLED ",allows:{{1,8}}");
 
 typedef struct snd_card_virmidi {
 	snd_card_t *card;
@@ -112,7 +107,7 @@ static int __init snd_card_virmidi_probe(int dev)
 		snd_virmidi_dev_t *rdev;
 		if ((err = snd_virmidi_new(card, idx, &rmidi)) < 0)
 			goto __nodev;
-		rdev = snd_magic_cast(snd_virmidi_dev_t, rmidi->private_data, continue);
+		rdev = rmidi->private_data;
 		vmidi->midi[idx] = rmidi;
 		strcpy(rmidi->name, "Virtual Raw MIDI");
 		rdev->seq_mode = SNDRV_VIRMIDI_SEQ_DISPATCH;
@@ -162,25 +157,3 @@ static void __exit alsa_card_virmidi_exit(void)
 
 module_init(alsa_card_virmidi_init)
 module_exit(alsa_card_virmidi_exit)
-
-#ifndef MODULE
-
-/* format is: snd-virmidi=enable,index,id,midi_devs */
-
-static int __init alsa_card_virmidi_setup(char *str)
-{
-	static unsigned __initdata nr_dev = 0;
-
-	if (nr_dev >= SNDRV_CARDS)
-		return 0;
-	(void)(get_option(&str,&enable[nr_dev]) == 2 &&
-	       get_option(&str,&index[nr_dev]) == 2 &&
-	       get_id(&str,&id[nr_dev]) == 2 &&
-	       get_option(&str,&midi_devs[nr_dev]) == 2);
-	nr_dev++;
-	return 1;
-}
-
-__setup("snd-virmidi=", alsa_card_virmidi_setup);
-
-#endif /* ifndef MODULE */

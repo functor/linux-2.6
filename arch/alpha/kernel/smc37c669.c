@@ -996,7 +996,7 @@ static SMC37c669_CONFIG_REGS *SMC37c669 __initdata = NULL;
 ** and standard ISA IRQs.
 **
 */
-static SMC37c669_IRQ_TRANSLATION_ENTRY *SMC37c669_irq_table __initdata = 0; 
+static SMC37c669_IRQ_TRANSLATION_ENTRY *SMC37c669_irq_table __initdata; 
 
 /*
 ** The following definition is for the default IRQ 
@@ -1045,7 +1045,7 @@ static SMC37c669_IRQ_TRANSLATION_ENTRY *SMC37c669_irq_tables[] __initdata =
 ** ISA DMA channels.
 **
 */
-static SMC37c669_DRQ_TRANSLATION_ENTRY *SMC37c669_drq_table __initdata = 0;
+static SMC37c669_DRQ_TRANSLATION_ENTRY *SMC37c669_drq_table __initdata;
 
 /*
 ** The following definition is the default DRQ
@@ -1104,7 +1104,7 @@ static int SMC37c669_xlate_drq(
     int drq 
 );
 
-static spinlock_t smc_lock __cacheline_aligned = SPIN_LOCK_UNLOCKED;
+static  __cacheline_aligned DEFINE_SPINLOCK(smc_lock);
 
 /*
 **++

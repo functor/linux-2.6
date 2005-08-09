@@ -64,8 +64,6 @@ static void kill_bdev(struct block_device *bdev)
 
 int set_blocksize(struct block_device *bdev, int size)
 {
-	int oldsize;
-
 	/* Size must be a power of two, and between 512 and PAGE_SIZE */
 	if (size > PAGE_SIZE || size < 512 || (size & (size-1)))
 		return -EINVAL;
@@ -74,15 +72,13 @@ int set_blocksize(struct block_device *bdev, int size)
 	if (size < bdev_hardsect_size(bdev))
 		return -EINVAL;
 
-	oldsize = bdev->bd_block_size;
-	if (oldsize == size)
-		return 0;
-
-	/* Ok, we're actually changing the blocksize.. */
-	sync_blockdev(bdev);
-	bdev->bd_block_size = size;
-	bdev->bd_inode->i_blkbits = blksize_bits(size);
-	kill_bdev(bdev);
+	/* Don't change the size if it is same as current */
+	if (bdev->bd_block_size != size) {
+		sync_blockdev(bdev);
+		bdev->bd_block_size = size;
+		bdev->bd_inode->i_blkbits = blksize_bits(size);
+		kill_bdev(bdev);
+	}
 	return 0;
 }
 
@@ -90,12 +86,15 @@ EXPORT_SYMBOL(set_blocksize);
 
 int sb_set_blocksize(struct super_block *sb, int size)
 {
-	int bits;
-	if (set_blocksize(sb->s_bdev, size) < 0)
+	int bits = 9; /* 2^9 = 512 */
+
+	if (set_blocksize(sb->s_bdev, size))
 		return 0;
+	/* If we get here, we know size is power of two
+	 * and it's value is between 512 and PAGE_SIZE */
 	sb->s_blocksize = size;
-	for (bits = 9, size >>= 9; size >>= 1; bits++)
-		;
+	for (size >>= 10; size; size >>= 1)
+		++bits;
 	sb->s_blocksize_bits = bits;
 	return sb->s_blocksize;
 }
@@ -138,13 +137,26 @@ static int
 blkdev_get_blocks(struct inode *inode, sector_t iblock,
 		unsigned long max_blocks, struct buffer_head *bh, int create)
 {
-	if ((iblock + max_blocks) > max_block(I_BDEV(inode)))
-		return -EIO;
+	sector_t end_block = max_block(I_BDEV(inode));
+
+	if ((iblock + max_blocks) > end_block) {
+		max_blocks = end_block - iblock;
+		if ((long)max_blocks <= 0) {
+			if (create)
+				return -EIO;	/* write fully beyond EOF */
+			/*
+			 * It is a read which is fully beyond EOF.  We return
+			 * a !buffer_mapped buffer
+			 */
+			max_blocks = 0;
+		}
+	}
 
 	bh->b_bdev = I_BDEV(inode);
 	bh->b_blocknr = iblock;
 	bh->b_size = max_blocks << inode->i_blkbits;
-	set_buffer_mapped(bh);
+	if (max_blocks)
+		set_buffer_mapped(bh);
 	return 0;
 }
 
@@ -225,7 +237,7 @@ static int block_fsync(struct file *filp, struct dentry *dentry, int datasync)
  * pseudo-fs
  */
 
-static spinlock_t bdev_lock __cacheline_aligned_in_smp = SPIN_LOCK_UNLOCKED;
+static  __cacheline_aligned_in_smp DEFINE_SPINLOCK(bdev_lock);
 static kmem_cache_t * bdev_cachep;
 
 static struct inode *bdev_alloc_inode(struct super_block *sb)
@@ -238,7 +250,10 @@ static struct inode *bdev_alloc_inode(struct super_block *sb)
 
 static void bdev_destroy_inode(struct inode *inode)
 {
-	kmem_cache_free(bdev_cachep, BDEV_I(inode));
+	struct bdev_inode *bdi = BDEV_I(inode);
+
+	bdi->bdev.bd_inode_backing_dev_info = NULL;
+	kmem_cache_free(bdev_cachep, bdi);
 }
 
 static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
@@ -303,14 +318,9 @@ struct super_block *blockdev_superblock;
 void __init bdev_cache_init(void)
 {
 	int err;
-	bdev_cachep = kmem_cache_create("bdev_cache",
-					sizeof(struct bdev_inode),
-					0,
-					SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT,
-					init_once,
-					NULL);
-	if (!bdev_cachep)
-		panic("Cannot create bdev_cache SLAB cache");
+	bdev_cachep = kmem_cache_create("bdev_cache", sizeof(struct bdev_inode),
+			0, SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT|SLAB_PANIC,
+			init_once, NULL);
 	err = register_filesystem(&bd_type);
 	if (err)
 		panic("Cannot register bdev pseudo-fs");
@@ -520,7 +530,7 @@ int check_disk_change(struct block_device *bdev)
 	if (!bdops->media_changed(bdev->bd_disk))
 		return 0;
 
-	if (__invalidate_device(bdev, 0))
+	if (__invalidate_device(bdev))
 		printk("VFS: busy inodes on changed media.\n");
 
 	if (bdops->revalidate_disk)
@@ -669,7 +679,7 @@ int blkdev_get(struct block_device *bdev, mode_t mode, unsigned flags)
 
 EXPORT_SYMBOL(blkdev_get);
 
-int blkdev_open(struct inode * inode, struct file * filp)
+static int blkdev_open(struct inode * inode, struct file * filp)
 {
 	struct block_device *bdev;
 	int res;
@@ -697,8 +707,6 @@ int blkdev_open(struct inode * inode, struct file * filp)
 	blkdev_put(bdev);
 	return res;
 }
-
-EXPORT_SYMBOL(blkdev_open);
 
 int blkdev_put(struct block_device *bdev)
 {
@@ -796,12 +804,13 @@ struct file_operations def_blk_fops = {
 	.mmap		= generic_file_mmap,
 	.fsync		= block_fsync,
 	.ioctl		= block_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= compat_blkdev_ioctl,
+#endif
 	.readv		= generic_file_readv,
 	.writev		= generic_file_write_nolock,
 	.sendfile	= generic_file_sendfile,
 };
-
-EXPORT_SYMBOL(def_blk_fops);
 
 int ioctl_by_bdev(struct block_device *bdev, unsigned cmd, unsigned long arg)
 {

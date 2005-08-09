@@ -12,6 +12,7 @@
 #include <linux/init.h>
 #include <linux/kernel_stat.h>
 #include <linux/sysdev.h>
+#include <linux/bitops.h>
 
 #include <asm/acpi.h>
 #include <asm/atomic.h>
@@ -19,7 +20,6 @@
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/hw_irq.h>
-#include <asm/bitops.h>
 #include <asm/pgtable.h>
 #include <asm/delay.h>
 #include <asm/desc.h>
@@ -47,6 +47,12 @@
 	BI(x,8) BI(x,9) BI(x,a) BI(x,b) \
 	BI(x,c) BI(x,d) BI(x,e) BI(x,f)
 
+#define BUILD_14_IRQS(x) \
+	BI(x,0) BI(x,1) BI(x,2) BI(x,3) \
+	BI(x,4) BI(x,5) BI(x,6) BI(x,7) \
+	BI(x,8) BI(x,9) BI(x,a) BI(x,b) \
+	BI(x,c) BI(x,d)
+
 /*
  * ISA PIC or low IO-APIC triggered (INTA-cycle or APIC) interrupts:
  * (these are usually mapped to vectors 0x20-0x2f)
@@ -68,9 +74,15 @@ BUILD_16_IRQS(0x0)
 BUILD_16_IRQS(0x4) BUILD_16_IRQS(0x5) BUILD_16_IRQS(0x6) BUILD_16_IRQS(0x7)
 BUILD_16_IRQS(0x8) BUILD_16_IRQS(0x9) BUILD_16_IRQS(0xa) BUILD_16_IRQS(0xb)
 BUILD_16_IRQS(0xc) BUILD_16_IRQS(0xd)
+
+#ifdef CONFIG_PCI_MSI
+	BUILD_14_IRQS(0xe)
+#endif
+
 #endif
 
 #undef BUILD_16_IRQS
+#undef BUILD_14_IRQS
 #undef BI
 
 
@@ -83,6 +95,12 @@ BUILD_16_IRQS(0xc) BUILD_16_IRQS(0xd)
 	IRQ(x,8), IRQ(x,9), IRQ(x,a), IRQ(x,b), \
 	IRQ(x,c), IRQ(x,d), IRQ(x,e), IRQ(x,f)
 
+#define IRQLIST_14(x) \
+	IRQ(x,0), IRQ(x,1), IRQ(x,2), IRQ(x,3), \
+	IRQ(x,4), IRQ(x,5), IRQ(x,6), IRQ(x,7), \
+	IRQ(x,8), IRQ(x,9), IRQ(x,a), IRQ(x,b), \
+	IRQ(x,c), IRQ(x,d)
+
 void (*interrupt[NR_IRQS])(void) = {
 	IRQLIST_16(0x0),
 
@@ -91,11 +109,17 @@ void (*interrupt[NR_IRQS])(void) = {
 	IRQLIST_16(0x4), IRQLIST_16(0x5), IRQLIST_16(0x6), IRQLIST_16(0x7),
 	IRQLIST_16(0x8), IRQLIST_16(0x9), IRQLIST_16(0xa), IRQLIST_16(0xb),
 	IRQLIST_16(0xc), IRQLIST_16(0xd)
+
+#ifdef CONFIG_PCI_MSI
+	, IRQLIST_14(0xe)
+#endif
+
 #endif
 };
 
 #undef IRQ
 #undef IRQLIST_16
+#undef IRQLIST_14
 
 /*
  * This is the 'legacy' 8259A Programmable Interrupt Controller,
@@ -106,7 +130,7 @@ void (*interrupt[NR_IRQS])(void) = {
  * moves to arch independent land
  */
 
-spinlock_t i8259A_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(i8259A_lock);
 
 static void end_8259A_irq (unsigned int irq)
 {
@@ -124,7 +148,7 @@ static void end_8259A_irq (unsigned int irq)
 
 #define shutdown_8259A_irq	disable_8259A_irq
 
-void mask_and_ack_8259A(unsigned int);
+static void mask_and_ack_8259A(unsigned int);
 
 static unsigned int startup_8259A_irq(unsigned int irq)
 { 
@@ -248,7 +272,7 @@ static inline int i8259A_irq_real(unsigned int irq)
  * first, _then_ send the EOI, and the order of EOI
  * to the two 8259s is important!
  */
-void mask_and_ack_8259A(unsigned int irq)
+static void mask_and_ack_8259A(unsigned int irq)
 {
 	unsigned int irqmask = 1 << irq;
 	unsigned long flags;
@@ -305,7 +329,7 @@ spurious_8259A_irq:
 		 * lets ACK and report it. [once per IRQ]
 		 */
 		if (!(spurious_irq_mask & irqmask)) {
-			printk("spurious 8259A interrupt: IRQ%d.\n", irq);
+			printk(KERN_DEBUG "spurious 8259A interrupt: IRQ%d.\n", irq);
 			spurious_irq_mask |= irqmask;
 		}
 		atomic_inc(&irq_err_count);
@@ -318,7 +342,7 @@ spurious_8259A_irq:
 	}
 }
 
-void __init init_8259A(int auto_eoi)
+void init_8259A(int auto_eoi)
 {
 	unsigned long flags;
 
@@ -361,11 +385,62 @@ void __init init_8259A(int auto_eoi)
 	spin_unlock_irqrestore(&i8259A_lock, flags);
 }
 
+static char irq_trigger[2];
+/**
+ * ELCR registers (0x4d0, 0x4d1) control edge/level of IRQ
+ */
+static void restore_ELCR(char *trigger)
+{
+	outb(trigger[0], 0x4d0);
+	outb(trigger[1], 0x4d1);
+}
+
+static void save_ELCR(char *trigger)
+{
+	/* IRQ 0,1,2,8,13 are marked as reserved */
+	trigger[0] = inb(0x4d0) & 0xF8;
+	trigger[1] = inb(0x4d1) & 0xDE;
+}
+
+static int i8259A_resume(struct sys_device *dev)
+{
+	init_8259A(0);
+	restore_ELCR(irq_trigger);
+	return 0;
+}
+
+static int i8259A_suspend(struct sys_device *dev, pm_message_t state)
+{
+	save_ELCR(irq_trigger);
+	return 0;
+}
+
+static struct sysdev_class i8259_sysdev_class = {
+	set_kset_name("i8259"),
+	.suspend = i8259A_suspend,
+	.resume = i8259A_resume,
+};
+
+static struct sys_device device_i8259A = {
+	.id	= 0,
+	.cls	= &i8259_sysdev_class,
+};
+
+static int __init i8259A_init_sysfs(void)
+{
+	int error = sysdev_class_register(&i8259_sysdev_class);
+	if (!error)
+		error = sysdev_register(&device_i8259A);
+	return error;
+}
+
+device_initcall(i8259A_init_sysfs);
+
 /*
  * IRQ2 is cascade interrupt to second interrupt controller
  */
 
-static struct irqaction irq2 = { no_action, 0, 0, "cascade", NULL, NULL};
+static struct irqaction irq2 = { no_action, 0, CPU_MASK_NONE, "cascade", NULL, NULL};
 
 void __init init_ISA_irqs (void)
 {
@@ -378,7 +453,7 @@ void __init init_ISA_irqs (void)
 
 	for (i = 0; i < NR_IRQS; i++) {
 		irq_desc[i].status = IRQ_DISABLED;
-		irq_desc[i].action = 0;
+		irq_desc[i].action = NULL;
 		irq_desc[i].depth = 1;
 
 		if (i < 16) {
@@ -401,6 +476,8 @@ void error_interrupt(void);
 void reschedule_interrupt(void);
 void call_function_interrupt(void);
 void invalidate_interrupt(void);
+void thermal_interrupt(void);
+void i8254_timer_resume(void);
 
 static void setup_timer(void)
 {
@@ -415,6 +492,11 @@ static int timer_resume(struct sys_device *dev)
 {
 	setup_timer();
 	return 0;
+}
+
+void i8254_timer_resume(void)
+{
+	setup_timer();
 }
 
 static struct sysdev_class timer_sysclass = {
@@ -475,6 +557,7 @@ void __init init_IRQ(void)
 	/* IPI for generic function call */
 	set_intr_gate(CALL_FUNCTION_VECTOR, call_function_interrupt);
 #endif	
+	set_intr_gate(THERMAL_APIC_VECTOR, thermal_interrupt);
 
 #ifdef CONFIG_X86_LOCAL_APIC
 	/* self generated IPI for local APIC timer */

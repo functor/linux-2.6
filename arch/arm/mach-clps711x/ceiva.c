@@ -34,7 +34,7 @@
 
 #include <asm/mach/map.h>
 
-extern void clps711x_init_irq(void);
+#include "common.h"
 
 static struct map_desc ceiva_io_desc[] __initdata = {
  /* virtual, physical, length, type */
@@ -58,4 +58,5 @@ MACHINE_START(CEIVA, "CEIVA/Polaroid Photo MAX Digital Picture Frame")
 	BOOT_PARAMS(0xc0000100)
 	MAPIO(ceiva_map_io)
 	INITIRQ(clps711x_init_irq)
+	.timer		= &clps711x_timer,
 MACHINE_END

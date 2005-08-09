@@ -20,6 +20,11 @@
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>
 
+static char *sender = "VMRMSVM";
+module_param(sender, charp, 0);
+MODULE_PARM_DESC(sender,
+		 "Guest name that may send SMSG messages (default VMRMSVM)");
+
 #include "../../../drivers/s390/net/smsgiucv.h"
 
 #define CMM_NR_PAGES ((PAGE_SIZE / sizeof(unsigned long)) - 2)
@@ -123,7 +128,6 @@ cmm_thread(void *dummy)
 	int rc;
 
 	daemonize("cmmthread");
-	set_cpus_allowed(current, cpumask_of_cpu(0));
 	while (1) {
 		rc = wait_event_interruptible(cmm_thread_wait,
 			(cmm_pages != cmm_pages_target ||
@@ -255,13 +259,13 @@ static struct ctl_table cmm_table[];
 
 static int
 cmm_pages_handler(ctl_table *ctl, int write, struct file *filp,
-		  void *buffer, size_t *lenp)
+		  void *buffer, size_t *lenp, loff_t *ppos)
 {
 	char buf[16], *p;
 	long pages;
 	int len;
 
-	if (!*lenp || (filp->f_pos && !write)) {
+	if (!*lenp || (*ppos && !write)) {
 		*lenp = 0;
 		return 0;
 	}
@@ -290,19 +294,19 @@ cmm_pages_handler(ctl_table *ctl, int write, struct file *filp,
 			return -EFAULT;
 	}
 	*lenp = len;
-	filp->f_pos += len;
+	*ppos += len;
 	return 0;
 }
 
 static int
 cmm_timeout_handler(ctl_table *ctl, int write, struct file *filp,
-		    void *buffer, size_t *lenp)
+		    void *buffer, size_t *lenp, loff_t *ppos)
 {
 	char buf[64], *p;
 	long pages, seconds;
 	int len;
 
-	if (!*lenp || (filp->f_pos && !write)) {
+	if (!*lenp || (*ppos && !write)) {
 		*lenp = 0;
 		return 0;
 	}
@@ -327,7 +331,7 @@ cmm_timeout_handler(ctl_table *ctl, int write, struct file *filp,
 			return -EFAULT;
 	}
 	*lenp = len;
-	filp->f_pos += len;
+	*ppos += len;
 	return 0;
 }
 
@@ -368,10 +372,12 @@ static struct ctl_table cmm_dir_table[] = {
 #ifdef CONFIG_CMM_IUCV
 #define SMSG_PREFIX "CMM"
 static void
-cmm_smsg_target(char *msg)
+cmm_smsg_target(char *from, char *msg)
 {
 	long pages, seconds;
 
+	if (strlen(sender) > 0 && strcmp(from, sender) != 0)
+		return;
 	if (!cmm_skip_blanks(msg + strlen(SMSG_PREFIX), &msg))
 		return;
 	if (strncmp(msg, "SHRINK", 6) == 0) {

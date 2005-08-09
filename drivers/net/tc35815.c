@@ -49,9 +49,9 @@ static const char *version =
 #include <linux/pci.h>
 #include <linux/proc_fs.h>
 #include <linux/spinlock.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/byteorder.h>
@@ -1717,7 +1717,7 @@ tc35815_killall(void)
 }
 
 static struct pci_driver tc35815_driver = {
-	.name =TC35815_MODULE_NAME,
+	.name = TC35815_MODULE_NAME,
 	.probe = tc35815_probe,
 	.remove = NULL,
 	.id_table = tc35815_pci_tbl,

@@ -29,7 +29,6 @@
 #define	DEFAULT_GPIO_SET	0x26
 
 #define	PEGASUS_PRESENT		0x00000001
-#define	PEGASUS_RUNNING		0x00000002
 #define	PEGASUS_TX_BUSY		0x00000004
 #define	PEGASUS_RX_BUSY		0x00000008
 #define	CTRL_URB_RUNNING	0x00000010
@@ -76,6 +75,7 @@ enum pegasus_registers {
 	EthTxStat0 = 0x2b,
 	EthTxStat1 = 0x2c,
 	EthRxStat = 0x2d,
+	WakeupControl = 0x78,
 	Reg7b = 0x7b,
 	Gpio0 = 0x7e,
 	Gpio1 = 0x7f,
@@ -85,14 +85,18 @@ enum pegasus_registers {
 
 typedef struct pegasus {
 	struct usb_device	*usb;
+	struct usb_interface	*intf;
 	struct net_device	*net;
 	struct net_device_stats	stats;
 	struct mii_if_info	mii;
 	unsigned		flags;
 	unsigned		features;
+	u32			msg_enable;
+	u32			wolopts;
 	int			dev_index;
 	int			intr_interval;
 	struct tasklet_struct	rx_tl;
+	struct work_struct	carrier_check;
 	struct urb		*ctrl_urb, *rx_urb, *tx_urb, *intr_urb;
 	struct sk_buff		*rx_pool[RX_SKBS];
 	struct sk_buff		*rx_skb;
@@ -121,6 +125,7 @@ struct usb_eth_dev {
 #define	VENDOR_ADMTEK		0x07a6
 #define	VENDOR_AEILAB		0x3334
 #define	VENDOR_ALLIEDTEL	0x07c9
+#define	VENDOR_ATEN		0x0557
 #define	VENDOR_BELKIN		0x050d
 #define	VENDOR_BILLIONTON	0x08dd
 #define	VENDOR_COMPAQ		0x049f
@@ -136,6 +141,7 @@ struct usb_eth_dev {
 #define	VENDOR_LANEED		0x056e
 #define	VENDOR_LINKSYS		0x066b
 #define	VENDOR_MELCO		0x0411
+#define	VENDOR_MICROSOFT	0x045e
 #define	VENDOR_MOBILITY		0x1342
 #define	VENDOR_NETGEAR		0x0846
 #define	VENDOR_OCT		0x0b39
@@ -148,6 +154,8 @@ struct usb_eth_dev {
 #else	/* PEGASUS_DEV */
 
 PEGASUS_DEV( "3Com USB Ethernet 3C460B", VENDOR_3COM, 0x4601,
+		DEFAULT_GPIO_RESET | PEGASUS_II )
+PEGASUS_DEV( "ATEN USB Ethernet UC-110T", VENDOR_ATEN, 0x2007,
 		DEFAULT_GPIO_RESET | PEGASUS_II )
 PEGASUS_DEV( "USB HPNA/Ethernet", VENDOR_ABOCOM, 0x110c,
 		DEFAULT_GPIO_RESET | PEGASUS_II | HAS_HOME_PNA )
@@ -264,6 +272,8 @@ PEGASUS_DEV( "MELCO/BUFFALO LUA-TX", VENDOR_MELCO, 0x0001,
 PEGASUS_DEV( "MELCO/BUFFALO LUA-TX", VENDOR_MELCO, 0x0005,
 		DEFAULT_GPIO_RESET )
 PEGASUS_DEV( "MELCO/BUFFALO LUA2-TX", VENDOR_MELCO, 0x0009,
+		DEFAULT_GPIO_RESET | PEGASUS_II )
+PEGASUS_DEV( "Microsoft MN-110", VENDOR_MICROSOFT, 0x007a,
 		DEFAULT_GPIO_RESET | PEGASUS_II )
 PEGASUS_DEV( "NETGEAR FA101", VENDOR_NETGEAR, 0x1020,
 		DEFAULT_GPIO_RESET | PEGASUS_II )

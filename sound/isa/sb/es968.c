@@ -24,20 +24,17 @@
 #include <linux/init.h>
 #include <linux/time.h>
 #include <linux/pnp.h>
+#include <linux/moduleparam.h>
 #include <sound/core.h>
-#define SNDRV_GET_ID
 #include <sound/initval.h>
 #include <sound/sb.h>
-
-#define chip_t sb_t
 
 #define PFX "es968: "
 
 MODULE_AUTHOR("Massimo Piccioni <dafastidio@libero.it>");
 MODULE_DESCRIPTION("ESS AudioDrive ES968");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_DEVICES("{{ESS,AudioDrive ES968}}");
+MODULE_SUPPORTED_DEVICE("{{ESS,AudioDrive ES968}}");
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
@@ -46,24 +43,18 @@ static long port[SNDRV_CARDS] = SNDRV_DEFAULT_PORT;	/* PnP setup */
 static int irq[SNDRV_CARDS] = SNDRV_DEFAULT_IRQ;	/* Pnp setup */
 static int dma8[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* PnP setup */
 
-MODULE_PARM(index, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for es968 based soundcard.");
-MODULE_PARM_SYNTAX(index, SNDRV_INDEX_DESC);
-MODULE_PARM(id, "1-" __MODULE_STRING(SNDRV_CARDS) "s");
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for es968 based soundcard.");
-MODULE_PARM_SYNTAX(id, SNDRV_ID_DESC);
-MODULE_PARM(enable, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable es968 based soundcard.");
-MODULE_PARM_SYNTAX(enable, SNDRV_ENABLE_DESC);
-MODULE_PARM(port, "1-" __MODULE_STRING(SNDRV_CARDS) "l");
+module_param_array(port, long, NULL, 0444);
 MODULE_PARM_DESC(port, "Port # for es968 driver.");
-MODULE_PARM_SYNTAX(port, SNDRV_PORT12_DESC);
-MODULE_PARM(irq, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(irq, int, NULL, 0444);
 MODULE_PARM_DESC(irq, "IRQ # for es968 driver.");
-MODULE_PARM_SYNTAX(irq, SNDRV_IRQ_DESC);
-MODULE_PARM(dma8, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(dma8, int, NULL, 0444);
 MODULE_PARM_DESC(dma8, "8-bit DMA # for es968 driver.");
-MODULE_PARM_SYNTAX(dma8, SNDRV_DMA8_DESC);
 
 struct snd_card_es968 {
 	struct pnp_dev *dev;
@@ -81,7 +72,7 @@ MODULE_DEVICE_TABLE(pnp_card, snd_es968_pnpids);
 static irqreturn_t snd_card_es968_interrupt(int irq, void *dev_id,
 					    struct pt_regs *regs)
 {
-	sb_t *chip = snd_magic_cast(sb_t, dev_id, return IRQ_NONE);
+	sb_t *chip = dev_id;
 
 	if (chip->open & SB_OPEN_PCM) {
 		return snd_sb8dsp_interrupt(chip);
@@ -242,28 +233,3 @@ static void __exit alsa_card_es968_exit(void)
 
 module_init(alsa_card_es968_init)
 module_exit(alsa_card_es968_exit)
-
-#ifndef MODULE
-
-/* format is: snd-es968=enable,index,id,
-			port,irq,dma1 */
-
-static int __init alsa_card_es968_setup(char *str)
-{
-	static unsigned __initdata nr_dev = 0;
-
-	if (nr_dev >= SNDRV_CARDS)
-		return 0;
-	(void)(get_option(&str,&enable[nr_dev]) == 2 &&
-	       get_option(&str,&index[nr_dev]) == 2 &&
-	       get_id(&str,&id[nr_dev]) == 2 &&
-	       get_option_long(&str,&port[nr_dev]) == 2 &&
-	       get_option(&str,&irq[nr_dev]) == 2 &&
-	       get_option(&str,&dma8[nr_dev]) == 2);
-	nr_dev++;
-	return 1;
-}
-
-__setup("snd-es968=", alsa_card_es968_setup);
-
-#endif /* ifndef MODULE */

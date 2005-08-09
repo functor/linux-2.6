@@ -10,17 +10,22 @@
 #include <linux/hugetlb.h>
 #include <linux/sysctl.h>
 #include <linux/highmem.h>
+#include <linux/nodemask.h>
 
 const unsigned long hugetlb_zero = 0, hugetlb_infinity = ~0UL;
 static unsigned long nr_huge_pages, free_huge_pages;
 unsigned long max_huge_pages;
 static struct list_head hugepage_freelists[MAX_NUMNODES];
-static spinlock_t hugetlb_lock = SPIN_LOCK_UNLOCKED;
+static unsigned int nr_huge_pages_node[MAX_NUMNODES];
+static unsigned int free_huge_pages_node[MAX_NUMNODES];
+static DEFINE_SPINLOCK(hugetlb_lock);
 
 static void enqueue_huge_page(struct page *page)
 {
-	list_add(&page->lru,
-		 &hugepage_freelists[page_zone(page)->zone_pgdat->node_id]);
+	int nid = page_to_nid(page);
+	list_add(&page->lru, &hugepage_freelists[nid]);
+	free_huge_pages++;
+	free_huge_pages_node[nid]++;
 }
 
 static struct page *dequeue_huge_page(void)
@@ -38,6 +43,8 @@ static struct page *dequeue_huge_page(void)
 		page = list_entry(hugepage_freelists[nid].next,
 				  struct page, lru);
 		list_del(&page->lru);
+		free_huge_pages--;
+		free_huge_pages_node[nid]--;
 	}
 	return page;
 }
@@ -46,9 +53,13 @@ static struct page *alloc_fresh_huge_page(void)
 {
 	static int nid = 0;
 	struct page *page;
-	page = alloc_pages_node(nid, GFP_HIGHUSER|__GFP_COMP,
+	page = alloc_pages_node(nid, GFP_HIGHUSER|__GFP_COMP|__GFP_NOWARN,
 					HUGETLB_PAGE_ORDER);
-	nid = (nid + 1) % numnodes;
+	nid = (nid + 1) % num_online_nodes();
+	if (page) {
+		nr_huge_pages++;
+		nr_huge_pages_node[page_to_nid(page)]++;
+	}
 	return page;
 }
 
@@ -57,10 +68,10 @@ void free_huge_page(struct page *page)
 	BUG_ON(page_count(page));
 
 	INIT_LIST_HEAD(&page->lru);
+	page[1].mapping = NULL;
 
 	spin_lock(&hugetlb_lock);
 	enqueue_huge_page(page);
-	free_huge_pages++;
 	spin_unlock(&hugetlb_lock);
 }
 
@@ -75,7 +86,6 @@ struct page *alloc_huge_page(void)
 		spin_unlock(&hugetlb_lock);
 		return NULL;
 	}
-	free_huge_pages--;
 	spin_unlock(&hugetlb_lock);
 	set_page_count(page, 1);
 	page[1].mapping = (void *)free_huge_page;
@@ -114,10 +124,12 @@ static int __init hugetlb_setup(char *s)
 }
 __setup("hugepages=", hugetlb_setup);
 
+#ifdef CONFIG_SYSCTL
 static void update_and_free_page(struct page *page)
 {
 	int i;
 	nr_huge_pages--;
+	nr_huge_pages_node[page_zone(page)->zone_pgdat->node_id]--;
 	for (i = 0; i < (HPAGE_SIZE / PAGE_SIZE); i++) {
 		page[i].flags &= ~(1 << PG_locked | 1 << PG_error | 1 << PG_referenced |
 				1 << PG_dirty | 1 << PG_active | 1 << PG_reserved |
@@ -129,27 +141,27 @@ static void update_and_free_page(struct page *page)
 }
 
 #ifdef CONFIG_HIGHMEM
-static int try_to_free_low(unsigned long count)
+static void try_to_free_low(unsigned long count)
 {
-	int i;
+	int i, nid;
 	for (i = 0; i < MAX_NUMNODES; ++i) {
-		struct page *page;
-		list_for_each_entry(page, &hugepage_freelists[i], lru) {
+		struct page *page, *next;
+		list_for_each_entry_safe(page, next, &hugepage_freelists[i], lru) {
 			if (PageHighMem(page))
 				continue;
 			list_del(&page->lru);
 			update_and_free_page(page);
-			--free_huge_pages;
-			if (!--count)
-				return 0;
+			nid = page_zone(page)->zone_pgdat->node_id;
+			free_huge_pages--;
+			free_huge_pages_node[nid]--;
+			if (count >= nr_huge_pages)
+				return;
 		}
 	}
-	return count;
 }
 #else
-static inline int try_to_free_low(unsigned long count)
+static inline void try_to_free_low(unsigned long count)
 {
-	return count;
 }
 #endif
 
@@ -161,15 +173,14 @@ static unsigned long set_max_huge_pages(unsigned long count)
 			return nr_huge_pages;
 		spin_lock(&hugetlb_lock);
 		enqueue_huge_page(page);
-		free_huge_pages++;
-		nr_huge_pages++;
 		spin_unlock(&hugetlb_lock);
 	}
 	if (count >= nr_huge_pages)
 		return nr_huge_pages;
 
 	spin_lock(&hugetlb_lock);
-	for (count = try_to_free_low(count); count < nr_huge_pages; --free_huge_pages) {
+	try_to_free_low(count);
+	while (count < nr_huge_pages) {
 		struct page *page = dequeue_huge_page();
 		if (!page)
 			break;
@@ -179,11 +190,11 @@ static unsigned long set_max_huge_pages(unsigned long count)
 	return nr_huge_pages;
 }
 
-#ifdef CONFIG_SYSCTL
 int hugetlb_sysctl_handler(struct ctl_table *table, int write,
-			   struct file *file, void *buffer, size_t *length)
+			   struct file *file, void __user *buffer,
+			   size_t *length, loff_t *ppos)
 {
-	proc_doulongvec_minmax(table, write, file, buffer, length);
+	proc_doulongvec_minmax(table, write, file, buffer, length, ppos);
 	max_huge_pages = set_max_huge_pages(max_huge_pages);
 	return 0;
 }
@@ -198,6 +209,15 @@ int hugetlb_report_meminfo(char *buf)
 			nr_huge_pages,
 			free_huge_pages,
 			HPAGE_SIZE/1024);
+}
+
+int hugetlb_report_node_meminfo(int nid, char *buf)
+{
+	return sprintf(buf,
+		"Node %d HugePages_Total: %5u\n"
+		"Node %d HugePages_Free:  %5u\n",
+		nid, nr_huge_pages_node[nid],
+		nid, free_huge_pages_node[nid]);
 }
 
 int is_hugepage_mem_enough(size_t size)

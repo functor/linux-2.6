@@ -12,8 +12,12 @@
 
 	.section	.bss
 	.export real_stack
+	.export real32_stack
+	.export real64_stack
 	.align	64
 real_stack:
+real32_stack:
+real64_stack:
 	.block	8192
 
 #ifdef __LP64__
@@ -26,6 +30,7 @@ real_stack:
 
 save_cr_space:
 	.block	REG_SZ * N_SAVED_REGS
+save_cr_end:
 
 
 /************************ 32-bit real-mode calls ***********************/
@@ -76,8 +81,7 @@ real32_call_asm:
 	rsm	PSW_SM_W, %r0		/* go narrow */
 #endif
 
-	ldil	L%PA(ric_ret), %r2
-	ldo	R%PA(ric_ret)(%r2), %r2
+	load32	PA(ric_ret), %r2
 	bv	0(%r31)
 	nop
 ric_ret:
@@ -123,7 +127,7 @@ save_control_regs:
 	nop
 
 restore_control_regs:
-	load32	PA(save_cr_space+(N_SAVED_REGS*REG_SZ)), %r26
+	load32	PA(save_cr_end), %r26
 	POP_CR(%cr15, %r26)
 	POP_CR(%cr31, %r26)
 	POP_CR(%cr30, %r26)
@@ -144,7 +148,7 @@ restore_control_regs:
 rfi_virt2real:
 	/* switch to real mode... */
 	ssm		0,0		/* See "relied upon translation" */
-	nop				/* comment in interruption.S */
+	nop				/* PA 2.0 Arch. F-5 */
 	nop
 	nop
 	nop
@@ -181,7 +185,7 @@ rfi_v2r_1:
 	.align 128
 rfi_real2virt:
 	ssm		0,0		/* See "relied upon translation" */
-	nop				/* comment in interruption.S */
+	nop				/* PA 2.0 Arch. F-5 */
 	nop
 	nop
 	nop

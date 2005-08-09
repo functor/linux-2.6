@@ -39,7 +39,7 @@ struct errormsg {
 	struct sockaddr_in		icmp_src;	/* ICMP packet source address */
 };
 
-static spinlock_t rxrpc_transports_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(rxrpc_transports_lock);
 static struct list_head rxrpc_transports = LIST_HEAD_INIT(rxrpc_transports);
 
 __RXACCT_DECL(atomic_t rxrpc_transport_count);
@@ -147,16 +147,6 @@ int rxrpc_create_transport(unsigned short port,
 	_leave(" = %d", ret);
 	return ret;
 } /* end rxrpc_create_transport() */
-
-/*****************************************************************************/
-/*
- * clear the connections on a transport endpoint
- */
-void rxrpc_clear_transport(struct rxrpc_transport *trans)
-{
-	//struct rxrpc_connection *conn;
-
-} /* end rxrpc_clear_transport() */
 
 /*****************************************************************************/
 /*
@@ -457,8 +447,8 @@ void rxrpc_trans_receive_packet(struct rxrpc_transport *trans)
 	struct rxrpc_peer *peer;
 	struct sk_buff *pkt;
 	int ret;
-	u32 addr;
-	u16 port;
+	__be32 addr;
+	__be16 port;
 
 	LIST_HEAD(msgq);
 
@@ -611,9 +601,8 @@ int rxrpc_trans_immediate_abort(struct rxrpc_transport *trans,
 	struct rxrpc_header ahdr;
 	struct sockaddr_in sin;
 	struct msghdr msghdr;
-	struct iovec iov[2];
-	mm_segment_t oldfs;
-	uint32_t _error;
+	struct kvec iov[2];
+	__be32 _error;
 	int len, ret;
 
 	_enter("%p,%p,%d", trans, msg, error);
@@ -649,8 +638,6 @@ int rxrpc_trans_immediate_abort(struct rxrpc_transport *trans,
 
 	msghdr.msg_name		= &sin;
 	msghdr.msg_namelen	= sizeof(sin);
-	msghdr.msg_iov		= iov;
-	msghdr.msg_iovlen	= 2;
 	msghdr.msg_control	= NULL;
 	msghdr.msg_controllen	= 0;
 	msghdr.msg_flags	= MSG_DONTWAIT;
@@ -658,14 +645,11 @@ int rxrpc_trans_immediate_abort(struct rxrpc_transport *trans,
 	_net("Sending message type %d of %d bytes to %08x:%d",
 	     ahdr.type,
 	     len,
-	     htonl(sin.sin_addr.s_addr),
-	     htons(sin.sin_port));
+	     ntohl(sin.sin_addr.s_addr),
+	     ntohs(sin.sin_port));
 
 	/* send the message */
-	oldfs = get_fs();
-	set_fs(KERNEL_DS);
-	ret = sock_sendmsg(trans->socket, &msghdr, len);
-	set_fs(oldfs);
+	ret = kernel_sendmsg(trans->socket, &msghdr, iov, 2, len);
 
 	_leave(" = %d", ret);
 	return ret;
@@ -684,8 +668,7 @@ static void rxrpc_trans_receive_error_report(struct rxrpc_transport *trans)
 	struct list_head connq, *_p;
 	struct errormsg emsg;
 	struct msghdr msg;
-	mm_segment_t oldfs;
-	uint16_t port;
+	__be16 port;
 	int local, err;
 
 	_enter("%p", trans);
@@ -696,17 +679,12 @@ static void rxrpc_trans_receive_error_report(struct rxrpc_transport *trans)
 		/* try and receive an error message */
 		msg.msg_name	= &sin;
 		msg.msg_namelen	= sizeof(sin);
-		msg.msg_iov	= NULL;
-		msg.msg_iovlen	= 0;
 		msg.msg_control	= &emsg;
 		msg.msg_controllen = sizeof(emsg);
 		msg.msg_flags	= 0;
 
-		oldfs = get_fs();
-		set_fs(KERNEL_DS);
-		err = sock_recvmsg(trans->socket, &msg, 0,
+		err = kernel_recvmsg(trans->socket, &msg, NULL, 0, 0,
 				   MSG_ERRQUEUE | MSG_DONTWAIT | MSG_TRUNC);
-		set_fs(oldfs);
 
 		if (err == -EAGAIN) {
 			_leave("");

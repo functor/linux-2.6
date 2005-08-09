@@ -45,7 +45,7 @@
 #include "../sound_config.h"
 #endif
 
-static spinlock_t midi_spinlock __attribute((unused)) = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(midi_spinlock __attribute((unused)));
 
 static void init_midi_hdr(struct midi_hdr *midihdr)
 {
@@ -185,7 +185,7 @@ match:
 
 	up(&card->open_sem);
 
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int emu10k1_midi_release(struct inode *inode, struct file *file)
@@ -244,7 +244,7 @@ static int emu10k1_midi_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static ssize_t emu10k1_midi_read(struct file *file, char *buffer, size_t count, loff_t * pos)
+static ssize_t emu10k1_midi_read(struct file *file, char __user *buffer, size_t count, loff_t * pos)
 {
 	struct emu10k1_mididevice *midi_dev = (struct emu10k1_mididevice *) file->private_data;
 	ssize_t ret = 0;
@@ -252,9 +252,6 @@ static ssize_t emu10k1_midi_read(struct file *file, char *buffer, size_t count, 
 	unsigned long flags;
 
 	DPD(4, "emu10k1_midi_read(), count %#x\n", (u32) count);
-
-	if (pos != &file->f_pos)
-		return -ESPIPE;
 
 	if (!access_ok(VERIFY_WRITE, buffer, count))
 		return -EFAULT;
@@ -319,17 +316,13 @@ static ssize_t emu10k1_midi_read(struct file *file, char *buffer, size_t count, 
 	return ret;
 }
 
-static ssize_t emu10k1_midi_write(struct file *file, const char *buffer, size_t count, loff_t * pos)
+static ssize_t emu10k1_midi_write(struct file *file, const char __user *buffer, size_t count, loff_t * pos)
 {
 	struct emu10k1_mididevice *midi_dev = (struct emu10k1_mididevice *) file->private_data;
 	struct midi_hdr *midihdr;
-	ssize_t ret = 0;
 	unsigned long flags;
 
 	DPD(4, "emu10k1_midi_write(), count=%#x\n", (u32) count);
-
-	if (pos != &file->f_pos)
-		return -ESPIPE;
 
 	if (!access_ok(VERIFY_READ, buffer, count))
 		return -EFAULT;
@@ -350,7 +343,7 @@ static ssize_t emu10k1_midi_write(struct file *file, const char *buffer, size_t 
 	if (copy_from_user(midihdr->data, buffer, count)) {
 		kfree(midihdr->data);
 		kfree(midihdr);
-		return ret ? ret : -EFAULT;
+		return -EFAULT;
 	}
 
 	spin_lock_irqsave(&midi_spinlock, flags);
@@ -532,7 +525,7 @@ void emu10k1_seq_midi_close(int dev)
 
 	if (card->seq_mididev) {
 		kfree(card->seq_mididev);
-		card->seq_mididev = 0;
+		card->seq_mididev = NULL;
 	}
 }
 

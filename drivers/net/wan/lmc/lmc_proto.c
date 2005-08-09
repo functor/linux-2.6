@@ -36,11 +36,11 @@
 #include <linux/inet.h>
 #include <linux/workqueue.h>
 #include <linux/proc_fs.h>
+#include <linux/bitops.h>
 
 #include <net/syncppp.h>
 
 #include <asm/processor.h>             /* Processor type for cache alignment. */
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <linux/smp.h>
@@ -112,7 +112,7 @@ void lmc_proto_attach(lmc_softc_t *sc) /*FOLD00*/
              * They set a few basics because they don't use sync_ppp
              */
             dev->flags |= IFF_POINTOPOINT;
-            dev->hard_header = 0;
+            dev->hard_header = NULL;
             dev->hard_header_len = 0;
             dev->addr_len = 0;
         }

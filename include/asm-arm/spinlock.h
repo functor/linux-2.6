@@ -17,6 +17,9 @@
  */
 typedef struct {
 	volatile unsigned int lock;
+#ifdef CONFIG_PREEMPT
+	unsigned int break_lock;
+#endif
 } spinlock_t;
 
 #define SPIN_LOCK_UNLOCKED	(spinlock_t) { 0 }
@@ -24,6 +27,7 @@ typedef struct {
 #define spin_lock_init(x)	do { *(x) = SPIN_LOCK_UNLOCKED; } while (0)
 #define spin_is_locked(x)	((x)->lock != 0)
 #define spin_unlock_wait(x)	do { barrier(); } while (spin_is_locked(x))
+#define _raw_spin_lock_flags(lock, flags) _raw_spin_lock(lock)
 
 static inline void _raw_spin_lock(spinlock_t *lock)
 {
@@ -69,6 +73,9 @@ static inline void _raw_spin_unlock(spinlock_t *lock)
  */
 typedef struct {
 	volatile unsigned int lock;
+#ifdef CONFIG_PREEMPT
+	unsigned int break_lock;
+#endif
 } rwlock_t;
 
 #define RW_LOCK_UNLOCKED	(rwlock_t) { 0 }
@@ -88,7 +95,7 @@ static inline void _raw_write_lock(rwlock_t *rw)
 "	strexeq	%0, %2, [%1]\n"
 "	teq	%0, #0\n"
 "	bne	1b"
-	: "=r" (tmp)
+	: "=&r" (tmp)
 	: "r" (&rw->lock), "r" (0x80000000)
 	: "cc", "memory");
 }
@@ -142,6 +149,8 @@ static inline void _raw_read_unlock(rwlock_t *rw)
 	: "cc", "memory");
 }
 
+#define _raw_read_trylock(lock) generic_raw_read_trylock(lock)
+
 static inline int _raw_write_trylock(rwlock_t *rw)
 {
 	unsigned long tmp;
@@ -150,7 +159,7 @@ static inline int _raw_write_trylock(rwlock_t *rw)
 "1:	ldrex	%0, [%1]\n"
 "	teq	%0, #0\n"
 "	strexeq	%0, %2, [%1]"
-	: "=r" (tmp)
+	: "=&r" (tmp)
 	: "r" (&rw->lock), "r" (0x80000000)
 	: "cc", "memory");
 

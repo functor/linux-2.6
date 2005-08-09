@@ -66,7 +66,7 @@ static int alloc_ldt(mm_context_t *pc, unsigned mincount, int reload)
 		mask = cpumask_of_cpu(smp_processor_id());
 		load_LDT(pc);
 		if (!cpus_equal(current->mm->cpu_vm_mask, mask))
-			smp_call_function(flush_ldt, 0, 1, 1);
+			smp_call_function(flush_ldt, NULL, 1, 1);
 		preempt_enable();
 #else
 		load_LDT(pc);
@@ -125,7 +125,7 @@ void destroy_context(struct mm_struct *mm)
 	}
 }
 
-static int read_ldt(void * ptr, unsigned long bytecount)
+static int read_ldt(void __user * ptr, unsigned long bytecount)
 {
 	int err;
 	unsigned long size;
@@ -135,6 +135,7 @@ static int read_ldt(void * ptr, unsigned long bytecount)
 		return 0;
 	if (bytecount > LDT_ENTRY_SIZE*LDT_ENTRIES)
 		bytecount = LDT_ENTRY_SIZE*LDT_ENTRIES;
+
 	down(&mm->context.sem);
 	size = mm->context.size*LDT_ENTRY_SIZE;
 	if (size > bytecount)
@@ -145,15 +146,20 @@ static int read_ldt(void * ptr, unsigned long bytecount)
 		err = -EFAULT;
 	up(&mm->context.sem);
 	if (err < 0)
-	return err;
+		goto error_return;
 	if (size != bytecount) {
 		/* zero-fill the rest */
-		clear_user(ptr+size, bytecount-size);
+		if (clear_user(ptr+size, bytecount-size) != 0) {
+			err = -EFAULT;
+			goto error_return;
+		}
 	}
 	return bytecount;
+error_return:
+	return err;
 }
 
-static int read_default_ldt(void * ptr, unsigned long bytecount)
+static int read_default_ldt(void __user * ptr, unsigned long bytecount)
 {
 	/* Arbitrary number */ 
 	/* x86-64 default LDT is all zeros */
@@ -164,7 +170,7 @@ static int read_default_ldt(void * ptr, unsigned long bytecount)
 	return bytecount; 
 }
 
-static int write_ldt(void * ptr, unsigned long bytecount, int oldmode)
+static int write_ldt(void __user * ptr, unsigned long bytecount, int oldmode)
 {
 	struct task_struct *me = current;
 	struct mm_struct * mm = me->mm;
@@ -225,7 +231,7 @@ out:
 	return error;
 }
 
-asmlinkage int sys_modify_ldt(int func, void *ptr, unsigned long bytecount)
+asmlinkage int sys_modify_ldt(int func, void __user *ptr, unsigned long bytecount)
 {
 	int ret = -ENOSYS;
 

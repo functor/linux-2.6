@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/delay.h>
 #include <asm/oplib.h>
 #include <asm/ebus.h>
 #define __KERNEL_SYSCALLS__
@@ -451,7 +452,7 @@ static void fans_full_blast(void)
 	}
 }
 
-#define POLL_INTERVAL	(5 * HZ)
+#define POLL_INTERVAL	(5 * 1000)
 static unsigned long last_warning_jiffies;
 static struct task_struct *kenvctrld_task;
 
@@ -467,8 +468,7 @@ static int kenvctrld(void *__unused)
 		struct bbc_cpu_temperature *tp;
 		struct bbc_fan_control *fp;
 
-		current->state = TASK_INTERRUPTIBLE;
-		schedule_timeout(POLL_INTERVAL);
+		msleep_interruptible(POLL_INTERVAL);
 		if (signal_pending(current))
 			break;
 
@@ -622,9 +622,7 @@ void bbc_envctrl_cleanup(void)
 			read_unlock(&tasklist_lock);
 			if (!found)
 				break;
-			current->state = TASK_INTERRUPTIBLE;
-			schedule_timeout(HZ);
-			current->state = TASK_RUNNING;
+			msleep(1000);
 		}
 		kenvctrld_task = NULL;
 	}

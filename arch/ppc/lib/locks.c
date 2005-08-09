@@ -7,6 +7,7 @@
 #include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/spinlock.h>
+#include <linux/module.h>
 #include <asm/ppc_asm.h>
 #include <asm/smp.h>
 
@@ -22,7 +23,7 @@
  * since they may inhibit forward progress by other CPUs in getting
  * a lock.
  */
-unsigned long __spin_trylock(volatile unsigned long *lock)
+static inline unsigned long __spin_trylock(volatile unsigned long *lock)
 {
 	unsigned long ret;
 
@@ -62,6 +63,7 @@ void _raw_spin_lock(spinlock_t *lock)
 	lock->owner_pc = (unsigned long)__builtin_return_address(0);
 	lock->owner_cpu = cpu;
 }
+EXPORT_SYMBOL(_raw_spin_lock);
 
 int _raw_spin_trylock(spinlock_t *lock)
 {
@@ -71,6 +73,7 @@ int _raw_spin_trylock(spinlock_t *lock)
 	lock->owner_pc = (unsigned long)__builtin_return_address(0);
 	return 1;
 }
+EXPORT_SYMBOL(_raw_spin_trylock);
 
 void _raw_spin_unlock(spinlock_t *lp)
 {
@@ -86,98 +89,102 @@ void _raw_spin_unlock(spinlock_t *lp)
 	wmb();
 	lp->lock = 0;
 }
-
+EXPORT_SYMBOL(_raw_spin_unlock);
 
 /*
- * Just like x86, implement read-write locks as a 32-bit counter
- * with the high bit (sign) being the "write" bit.
- * -- Cort
+ * For rwlocks, zero is unlocked, -1 is write-locked,
+ * positive is read-locked.
  */
+static __inline__ int __read_trylock(rwlock_t *rw)
+{
+	signed int tmp;
+
+	__asm__ __volatile__(
+"2:	lwarx	%0,0,%1		# __read_trylock\n\
+	addic.	%0,%0,1\n\
+	ble-	1f\n"
+	PPC405_ERR77(0,%1)
+"	stwcx.	%0,0,%1\n\
+	bne-	2b\n\
+	isync\n\
+1:"
+	: "=&r"(tmp)
+	: "r"(&rw->lock)
+	: "cr0", "memory");
+
+	return tmp;
+}
+
+int _raw_read_trylock(rwlock_t *rw)
+{
+	return __read_trylock(rw) > 0;
+}
+EXPORT_SYMBOL(_raw_read_trylock);
+
 void _raw_read_lock(rwlock_t *rw)
 {
-	unsigned long stuck = INIT_STUCK;
-	int cpu = smp_processor_id();
+	unsigned int stuck;
 
-again:
-	/* get our read lock in there */
-	atomic_inc((atomic_t *) &(rw)->lock);
-	if ( (signed long)((rw)->lock) < 0) /* someone has a write lock */
-	{
-		/* turn off our read lock */
-		atomic_dec((atomic_t *) &(rw)->lock);
-		/* wait for the write lock to go away */
-		while ((signed long)((rw)->lock) < 0)
-		{
-			if(!--stuck)
-			{
-				printk("_read_lock(%p) CPU#%d\n", rw, cpu);
+	while (__read_trylock(rw) <= 0) {
+		stuck = INIT_STUCK;
+		while (!read_can_lock(rw)) {
+			if (--stuck == 0) {
+				printk("_read_lock(%p) CPU#%d lock %d\n",
+				       rw, _smp_processor_id(), rw->lock);
 				stuck = INIT_STUCK;
 			}
 		}
-		/* try to get the read lock again */
-		goto again;
 	}
-	wmb();
 }
+EXPORT_SYMBOL(_raw_read_lock);
 
 void _raw_read_unlock(rwlock_t *rw)
 {
 	if ( rw->lock == 0 )
-		printk("_read_unlock(): %s/%d (nip %08lX) lock %lx\n",
+		printk("_read_unlock(): %s/%d (nip %08lX) lock %d\n",
 		       current->comm,current->pid,current->thread.regs->nip,
 		      rw->lock);
 	wmb();
 	atomic_dec((atomic_t *) &(rw)->lock);
 }
+EXPORT_SYMBOL(_raw_read_unlock);
 
 void _raw_write_lock(rwlock_t *rw)
 {
-	unsigned long stuck = INIT_STUCK;
-	int cpu = smp_processor_id();
+	unsigned int stuck;
 
-again:
-	if ( test_and_set_bit(31,&(rw)->lock) ) /* someone has a write lock */
-	{
-		while ( (rw)->lock & (1<<31) ) /* wait for write lock */
-		{
-			if(!--stuck)
-			{
-				printk("write_lock(%p) CPU#%d lock %lx)\n",
-				       rw, cpu,rw->lock);
+	while (cmpxchg(&rw->lock, 0, -1) != 0) {
+		stuck = INIT_STUCK;
+		while (!write_can_lock(rw)) {
+			if (--stuck == 0) {
+				printk("write_lock(%p) CPU#%d lock %d)\n",
+				       rw, _smp_processor_id(), rw->lock);
 				stuck = INIT_STUCK;
 			}
-			barrier();
 		}
-		goto again;
-	}
-
-	if ( (rw)->lock & ~(1<<31)) /* someone has a read lock */
-	{
-		/* clear our write lock and wait for reads to go away */
-		clear_bit(31,&(rw)->lock);
-		while ( (rw)->lock & ~(1<<31) )
-		{
-			if(!--stuck)
-			{
-				printk("write_lock(%p) 2 CPU#%d lock %lx)\n",
-				       rw, cpu,rw->lock);
-				stuck = INIT_STUCK;
-			}
-			barrier();
-		}
-		goto again;
 	}
 	wmb();
 }
+EXPORT_SYMBOL(_raw_write_lock);
+
+int _raw_write_trylock(rwlock_t *rw)
+{
+	if (cmpxchg(&rw->lock, 0, -1) != 0)
+		return 0;
+	wmb();
+	return 1;
+}
+EXPORT_SYMBOL(_raw_write_trylock);
 
 void _raw_write_unlock(rwlock_t *rw)
 {
-	if ( !(rw->lock & (1<<31)) )
-		printk("_write_lock(): %s/%d (nip %08lX) lock %lx\n",
+	if (rw->lock >= 0)
+		printk("_write_lock(): %s/%d (nip %08lX) lock %d\n",
 		      current->comm,current->pid,current->thread.regs->nip,
 		      rw->lock);
 	wmb();
-	clear_bit(31,&(rw)->lock);
+	rw->lock = 0;
 }
+EXPORT_SYMBOL(_raw_write_unlock);
 
 #endif

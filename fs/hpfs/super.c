@@ -191,7 +191,7 @@ static int init_inodecache(void)
 {
 	hpfs_inode_cachep = kmem_cache_create("hpfs_inode_cache",
 					     sizeof(struct hpfs_inode_info),
-					     0, SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT,
+					     0, SLAB_RECLAIM_ACCOUNT,
 					     init_once, NULL);
 	if (hpfs_inode_cachep == NULL)
 		return -ENOMEM;
@@ -246,9 +246,9 @@ static match_table_t tokens = {
 	{Opt_err, NULL},
 };
 
-int parse_opts(char *opts, uid_t *uid, gid_t *gid, umode_t *umask,
-	       int *lowercase, int *conv, int *eas, int *chk, int *errs,
-	       int *chkdsk, int *timeshift)
+static int parse_opts(char *opts, uid_t *uid, gid_t *gid, umode_t *umask,
+		      int *lowercase, int *conv, int *eas, int *chk, int *errs,
+		      int *chkdsk, int *timeshift)
 {
 	char *p;
 	int option;
@@ -542,6 +542,7 @@ static int hpfs_fill_super(struct super_block *s, void *options, int silent)
 	sbi->sb_was_error = 0;
 	sbi->sb_cp_table = NULL;
 	sbi->sb_c_bitmap = -1;
+	sbi->sb_max_fwd_alloc = 0xffffff;
 	
 	/* Load bitmap directory */
 	if (!(sbi->sb_bmp_dir = hpfs_load_bitmap_directory(s, superblock->bitmaps)))

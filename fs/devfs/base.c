@@ -677,13 +677,13 @@
 #include <linux/rwsem.h>
 #include <linux/sched.h>
 #include <linux/namei.h>
+#include <linux/bitops.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/processor.h>
 #include <asm/system.h>
 #include <asm/pgtable.h>
-#include <asm/bitops.h>
 #include <asm/atomic.h>
 
 #define DEVFS_VERSION            "2004-01-31"
@@ -831,7 +831,7 @@ static kmem_cache_t *devfsd_buf_cache;
 #ifdef CONFIG_DEVFS_DEBUG
 static unsigned int devfs_debug_init __initdata = DEBUG_NONE;
 static unsigned int devfs_debug = DEBUG_NONE;
-static spinlock_t stat_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(stat_lock);
 static unsigned int stat_num_entries;
 static unsigned int stat_num_bytes;
 #endif
@@ -848,21 +848,23 @@ static unsigned int boot_options = OPTION_NONE;
 static devfs_handle_t _devfs_walk_path(struct devfs_entry *dir,
 				       const char *name, int namelen,
 				       int traverse_symlink);
-static ssize_t devfsd_read(struct file *file, char *buf, size_t len,
+static ssize_t devfsd_read(struct file *file, char __user *buf, size_t len,
 			   loff_t * ppos);
 static int devfsd_ioctl(struct inode *inode, struct file *file,
 			unsigned int cmd, unsigned long arg);
 static int devfsd_close(struct inode *inode, struct file *file);
 #ifdef CONFIG_DEVFS_DEBUG
-static ssize_t stat_read(struct file *file, char *buf, size_t len,
+static ssize_t stat_read(struct file *file, char __user *buf, size_t len,
 			 loff_t * ppos);
 static struct file_operations stat_fops = {
+	.open = nonseekable_open,
 	.read = stat_read,
 };
 #endif
 
 /*  Devfs daemon file operations  */
 static struct file_operations devfsd_fops = {
+	.open = nonseekable_open,
 	.read = devfsd_read,
 	.ioctl = devfsd_ioctl,
 	.release = devfsd_close,
@@ -964,7 +966,7 @@ static struct devfs_entry *_devfs_alloc_entry(const char *name,
 {
 	struct devfs_entry *new;
 	static unsigned long inode_counter = FIRST_INODE;
-	static spinlock_t counter_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(counter_lock);
 
 	if (name && (namelen < 1))
 		namelen = strlen(name);
@@ -1061,7 +1063,7 @@ static int _devfs_append_entry(devfs_handle_t dir, devfs_handle_t de,
 static struct devfs_entry *_devfs_get_root_entry(void)
 {
 	struct devfs_entry *new;
-	static spinlock_t root_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(root_lock);
 
 	if (root_entry)
 		return root_entry;
@@ -1800,7 +1802,6 @@ static int __init devfs_setup(char *str)
 
 __setup("devfs=", devfs_setup);
 
-EXPORT_SYMBOL(devfs_mk_symlink);
 EXPORT_SYMBOL(devfs_mk_dir);
 EXPORT_SYMBOL(devfs_remove);
 
@@ -2490,28 +2491,11 @@ static int devfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
 	return 0;
 }				/*  End Function devfs_mknod  */
 
-static int devfs_readlink(struct dentry *dentry, char *buffer, int buflen)
-{
-	int err;
-	struct devfs_entry *de;
-
-	de = get_devfs_entry_from_vfs_inode(dentry->d_inode);
-	if (!de)
-		return -ENODEV;
-	err = vfs_readlink(dentry, buffer, buflen, de->u.symlink.linkname);
-	return err;
-}				/*  End Function devfs_readlink  */
-
 static int devfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
-	int err;
-	struct devfs_entry *de;
-
-	de = get_devfs_entry_from_vfs_inode(dentry->d_inode);
-	if (!de)
-		return -ENODEV;
-	err = vfs_follow_link(nd, de->u.symlink.linkname);
-	return err;
+	struct devfs_entry *p = get_devfs_entry_from_vfs_inode(dentry->d_inode);
+	nd_set_link(nd, p ? p->u.symlink.linkname : ERR_PTR(-ENODEV));
+	return 0;
 }				/*  End Function devfs_follow_link  */
 
 static struct inode_operations devfs_iops = {
@@ -2529,7 +2513,7 @@ static struct inode_operations devfs_dir_iops = {
 };
 
 static struct inode_operations devfs_symlink_iops = {
-	.readlink = devfs_readlink,
+	.readlink = generic_readlink,
 	.follow_link = devfs_follow_link,
 	.setattr = devfs_notify_change,
 };
@@ -2549,6 +2533,7 @@ static int devfs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_blocksize_bits = 10;
 	sb->s_magic = DEVFS_SUPER_MAGIC;
 	sb->s_op = &devfs_sops;
+	sb->s_time_gran = 1;
 	if ((root_inode = _devfs_get_vfs_inode(sb, root_entry, NULL)) == NULL)
 		goto out_no_root;
 	sb->s_root = d_alloc_root(root_inode);
@@ -2579,7 +2564,7 @@ static struct file_system_type devfs_fs_type = {
 
 /*  File operations for devfsd follow  */
 
-static ssize_t devfsd_read(struct file *file, char *buf, size_t len,
+static ssize_t devfsd_read(struct file *file, char __user *buf, size_t len,
 			   loff_t * ppos)
 {
 	int done = FALSE;
@@ -2591,9 +2576,6 @@ static ssize_t devfsd_read(struct file *file, char *buf, size_t len,
 	struct devfsd_notify_struct *info = fs_info->devfsd_info;
 	DECLARE_WAITQUEUE(wait, current);
 
-	/*  Can't seek (pread) on this device  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 	/*  Verify the task has grabbed the queue  */
 	if (fs_info->devfsd_task != current)
 		return -EPERM;
@@ -2693,7 +2675,7 @@ static int devfsd_ioctl(struct inode *inode, struct file *file,
 	switch (cmd) {
 	case DEVFSDIOC_GET_PROTO_REV:
 		ival = DEVFSD_PROTOCOL_REVISION_KERNEL;
-		if (copy_to_user((void *)arg, &ival, sizeof ival))
+		if (copy_to_user((void __user *)arg, &ival, sizeof ival))
 			return -EFAULT;
 		break;
 	case DEVFSDIOC_SET_EVENT_MASK:
@@ -2701,7 +2683,7 @@ static int devfsd_ioctl(struct inode *inode, struct file *file,
 		   work even if the global kernel lock were to be removed, because it
 		   doesn't matter who gets in first, as long as only one gets it  */
 		if (fs_info->devfsd_task == NULL) {
-			static spinlock_t lock = SPIN_LOCK_UNLOCKED;
+			static DEFINE_SPINLOCK(lock);
 
 			if (!spin_trylock(&lock))
 				return -EBUSY;
@@ -2732,7 +2714,7 @@ static int devfsd_ioctl(struct inode *inode, struct file *file,
 		/*break; */
 #ifdef CONFIG_DEVFS_DEBUG
 	case DEVFSDIOC_SET_DEBUG_MASK:
-		if (copy_from_user(&ival, (void *)arg, sizeof ival))
+		if (copy_from_user(&ival, (void __user *)arg, sizeof ival))
 			return -EFAULT;
 		devfs_debug = ival;
 		break;
@@ -2772,7 +2754,7 @@ static int devfsd_close(struct inode *inode, struct file *file)
 }				/*  End Function devfsd_close  */
 
 #ifdef CONFIG_DEVFS_DEBUG
-static ssize_t stat_read(struct file *file, char *buf, size_t len,
+static ssize_t stat_read(struct file *file, char __user *buf, size_t len,
 			 loff_t * ppos)
 {
 	ssize_t num;
@@ -2780,9 +2762,6 @@ static ssize_t stat_read(struct file *file, char *buf, size_t len,
 
 	num = sprintf(txt, "Number of entries: %u  number of bytes: %u\n",
 		      stat_num_entries, stat_num_bytes) + 1;
-	/*  Can't seek (pread) on this device  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 	if (*ppos >= num)
 		return 0;
 	if (*ppos + len > num)

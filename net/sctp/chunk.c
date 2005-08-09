@@ -51,7 +51,7 @@
  */
 
 /* Initialize datamsg from memory. */
-void sctp_datamsg_init(struct sctp_datamsg *msg)
+static void sctp_datamsg_init(struct sctp_datamsg *msg)
 {
 	atomic_set(&msg->refcnt, 1);
 	msg->send_failed = 0;
@@ -62,7 +62,7 @@ void sctp_datamsg_init(struct sctp_datamsg *msg)
 }
 
 /* Allocate and initialize datamsg. */
-struct sctp_datamsg *sctp_datamsg_new(int gfp)
+SCTP_STATIC struct sctp_datamsg *sctp_datamsg_new(int gfp)
 {
 	struct sctp_datamsg *msg;
 	msg = kmalloc(sizeof(struct sctp_datamsg), gfp);
@@ -77,7 +77,7 @@ static void sctp_datamsg_destroy(struct sctp_datamsg *msg)
 {
 	struct list_head *pos, *temp;
 	struct sctp_chunk *chunk;
-	struct sctp_opt *sp;
+	struct sctp_sock *sp;
 	struct sctp_ulpevent *ev;
 	struct sctp_association *asoc = NULL;
 	int error = 0, notify;
@@ -124,7 +124,7 @@ static void sctp_datamsg_destroy(struct sctp_datamsg *msg)
 }
 
 /* Hold a reference. */
-void sctp_datamsg_hold(struct sctp_datamsg *msg)
+static void sctp_datamsg_hold(struct sctp_datamsg *msg)
 {
 	atomic_inc(&msg->refcnt);
 }
@@ -151,7 +151,7 @@ void sctp_datamsg_track(struct sctp_chunk *chunk)
 }
 
 /* Assign a chunk to this datamsg. */
-void sctp_datamsg_assign(struct sctp_datamsg *msg, struct sctp_chunk *chunk)
+static void sctp_datamsg_assign(struct sctp_datamsg *msg, struct sctp_chunk *chunk)
 {
 	sctp_datamsg_hold(msg);
 	chunk->msg = msg;
@@ -186,7 +186,7 @@ struct sctp_datamsg *sctp_datamsg_from_user(struct sctp_association *asoc,
 	if (sinfo->sinfo_timetolive) {
 		/* sinfo_timetolive is in milliseconds */
 		msg->expires_at = jiffies +
-				    MSECS_TO_JIFFIES(sinfo->sinfo_timetolive);
+				    msecs_to_jiffies(sinfo->sinfo_timetolive);
 		msg->can_abandon = 1;
 		SCTP_DEBUG_PRINTK("%s: msg:%p expires_at: %ld jiffies:%ld\n",
 				  __FUNCTION__, msg, msg->expires_at, jiffies);
@@ -215,7 +215,7 @@ struct sctp_datamsg *sctp_datamsg_from_user(struct sctp_association *asoc,
 	offset = 0;
 
 	if ((whole > 1) || (whole && over))
-		SCTP_INC_STATS_USER(SctpFragUsrMsgs);
+		SCTP_INC_STATS_USER(SCTP_MIB_FRAGUSRMSGS);
 
 	/* Create chunks for all the full sized DATA chunks. */
 	for (i=0, len=first_len; i < whole; i++) {

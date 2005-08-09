@@ -9,7 +9,6 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 
-#include "qla_os.h"
 #include "qla_def.h"
 
 static char qla_driver_name[] = "qla2322";
@@ -106,3 +105,4 @@ module_exit(qla2322_exit);
 MODULE_AUTHOR("QLogic Corporation");
 MODULE_DESCRIPTION("QLogic ISP2322 FC-SCSI Host Bus Adapter driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(QLA2XXX_VERSION);

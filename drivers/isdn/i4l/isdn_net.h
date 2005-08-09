@@ -39,8 +39,8 @@ extern int isdn_net_stat_callback(int, isdn_ctrl *);
 extern int isdn_net_setcfg(isdn_net_ioctl_cfg *);
 extern int isdn_net_getcfg(isdn_net_ioctl_cfg *);
 extern int isdn_net_addphone(isdn_net_ioctl_phone *);
-extern int isdn_net_getphones(isdn_net_ioctl_phone *, char *);
-extern int isdn_net_getpeer(isdn_net_ioctl_phone *, isdn_net_ioctl_phone *);
+extern int isdn_net_getphones(isdn_net_ioctl_phone *, char __user *);
+extern int isdn_net_getpeer(isdn_net_ioctl_phone *, isdn_net_ioctl_phone __user *);
 extern int isdn_net_delphone(isdn_net_ioctl_phone *);
 extern int isdn_net_find_icall(int, int, int, setup_parm *);
 extern void isdn_net_hangup(struct net_device *);
@@ -78,18 +78,19 @@ static __inline__ isdn_net_local * isdn_net_get_locked_lp(isdn_net_dev *nd)
 
 	spin_lock_irqsave(&nd->queue_lock, flags);
 	lp = nd->queue;         /* get lp on top of queue */
-	spin_lock_bh(&nd->queue->xmit_lock);
+	spin_lock(&nd->queue->xmit_lock);
 	while (isdn_net_lp_busy(nd->queue)) {
-		spin_unlock_bh(&nd->queue->xmit_lock);
+		spin_unlock(&nd->queue->xmit_lock);
 		nd->queue = nd->queue->next;
 		if (nd->queue == lp) { /* not found -- should never happen */
 			lp = NULL;
 			goto errout;
 		}
-		spin_lock_bh(&nd->queue->xmit_lock);
+		spin_lock(&nd->queue->xmit_lock);
 	}
 	lp = nd->queue;
 	nd->queue = nd->queue->next;
+	local_bh_disable();
 errout:
 	spin_unlock_irqrestore(&nd->queue_lock, flags);
 	return lp;

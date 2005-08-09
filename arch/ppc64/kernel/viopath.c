@@ -37,9 +37,12 @@
 #include <linux/dma-mapping.h>
 #include <linux/wait.h>
 #include <linux/seq_file.h>
+#include <linux/smp_lock.h>
+#include <linux/interrupt.h>
 
-#include <asm/hardirq.h>
+#include <asm/system.h>
 #include <asm/uaccess.h>
+#include <asm/iSeries/HvTypes.h>
 #include <asm/iSeries/LparData.h>
 #include <asm/iSeries/HvLpEvent.h>
 #include <asm/iSeries/HvLpConfig.h>
@@ -54,15 +57,15 @@
  * But this allows for other support in the future.
  */
 static struct viopathStatus {
-	int isOpen:1;		/* Did we open the path?            */
-	int isActive:1;		/* Do we have a mon msg outstanding */
+	int isOpen;		/* Did we open the path?            */
+	int isActive;		/* Do we have a mon msg outstanding */
 	int users[VIO_MAX_SUBTYPES];
 	HvLpInstanceId mSourceInst;
 	HvLpInstanceId mTargetInst;
 	int numberAllocated;
 } viopathStatus[HVMAXARCHITECTEDLPS];
 
-static spinlock_t statuslock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(statuslock);
 
 /*
  * For each kind of event we allocate a buffer that is
@@ -77,12 +80,12 @@ static void handleMonitorEvent(struct HvLpEvent *event);
 /*
  * We use this structure to handle asynchronous responses.  The caller
  * blocks on the semaphore and the handler posts the semaphore.  However,
- * if in_atomic() is true in the caller, then wait_atomic is used ...
+ * if system_state is not SYSTEM_RUNNING, then wait_atomic is used ...
  */
-struct doneAllocParms_t {
-	struct semaphore *sem;
+struct alloc_parms {
+	struct semaphore sem;
 	int number;
-	atomic_t *wait_atomic;
+	atomic_t wait_atomic;
 	int used_wait_atomic;
 };
 
@@ -95,9 +98,9 @@ static u8 viomonseq = 22;
 /* Our hosting logical partition.  We get this at startup
  * time, and different modules access this variable directly.
  */
-HvLpIndex viopath_hostLp = 0xff;	/* HvLpIndexInvalid */
+HvLpIndex viopath_hostLp = HvLpIndexInvalid;
 EXPORT_SYMBOL(viopath_hostLp);
-HvLpIndex viopath_ourLp = 0xff;
+HvLpIndex viopath_ourLp = HvLpIndexInvalid;
 EXPORT_SYMBOL(viopath_ourLp);
 
 /* For each kind of incoming event we set a pointer to a
@@ -108,88 +111,10 @@ static vio_event_handler_t *vio_handler[VIO_MAX_SUBTYPES];
 #define VIOPATH_KERN_WARN	KERN_WARNING "viopath: "
 #define VIOPATH_KERN_INFO	KERN_INFO "viopath: "
 
-static unsigned char e2a(unsigned char x)
-{
-	switch (x) {
-	case 0xF0:
-		return '0';
-	case 0xF1:
-		return '1';
-	case 0xF2:
-		return '2';
-	case 0xF3:
-		return '3';
-	case 0xF4:
-		return '4';
-	case 0xF5:
-		return '5';
-	case 0xF6:
-		return '6';
-	case 0xF7:
-		return '7';
-	case 0xF8:
-		return '8';
-	case 0xF9:
-		return '9';
-	case 0xC1:
-		return 'A';
-	case 0xC2:
-		return 'B';
-	case 0xC3:
-		return 'C';
-	case 0xC4:
-		return 'D';
-	case 0xC5:
-		return 'E';
-	case 0xC6:
-		return 'F';
-	case 0xC7:
-		return 'G';
-	case 0xC8:
-		return 'H';
-	case 0xC9:
-		return 'I';
-	case 0xD1:
-		return 'J';
-	case 0xD2:
-		return 'K';
-	case 0xD3:
-		return 'L';
-	case 0xD4:
-		return 'M';
-	case 0xD5:
-		return 'N';
-	case 0xD6:
-		return 'O';
-	case 0xD7:
-		return 'P';
-	case 0xD8:
-		return 'Q';
-	case 0xD9:
-		return 'R';
-	case 0xE2:
-		return 'S';
-	case 0xE3:
-		return 'T';
-	case 0xE4:
-		return 'U';
-	case 0xE5:
-		return 'V';
-	case 0xE6:
-		return 'W';
-	case 0xE7:
-		return 'X';
-	case 0xE8:
-		return 'Y';
-	case 0xE9:
-		return 'Z';
-	}
-	return ' ';
-}
-
 static int proc_viopath_show(struct seq_file *m, void *v)
 {
 	char *buf;
+	u16 vlanMap;
 	dma_addr_t handle;
 	HvLpEvent_Rc hvrc;
 	DECLARE_MUTEX_LOCKED(Semaphore);
@@ -216,12 +141,11 @@ static int proc_viopath_show(struct seq_file *m, void *v)
 
 	down(&Semaphore);
 
-	dma_unmap_single(iSeries_vio_dev, handle, PAGE_SIZE, DMA_FROM_DEVICE);
-	kfree(buf);
+	vlanMap = HvLpConfig_getVirtualLanIndexMap();
 
-	buf[PAGE_SIZE] = '\0';
+	buf[PAGE_SIZE-1] = '\0';
 	seq_printf(m, "%s", buf);
-
+	seq_printf(m, "AVAILABLE_VETH=%x\n", vlanMap);
 	seq_printf(m, "SRLNBR=%c%c%c%c%c%c%c\n",
 		   e2a(xItExtVpdPanel.mfgID[2]),
 		   e2a(xItExtVpdPanel.mfgID[3]),
@@ -230,6 +154,9 @@ static int proc_viopath_show(struct seq_file *m, void *v)
 		   e2a(xItExtVpdPanel.systemSerial[3]),
 		   e2a(xItExtVpdPanel.systemSerial[4]),
 		   e2a(xItExtVpdPanel.systemSerial[5]));
+
+	dma_unmap_single(iSeries_vio_dev, handle, PAGE_SIZE, DMA_FROM_DEVICE);
+	kfree(buf);
 
 	return 0;
 }
@@ -274,7 +201,7 @@ EXPORT_SYMBOL(viopath_isactive);
 
 /*
  * We cache the source and target instance ids for each
- * partition.  
+ * partition.
  */
 HvLpInstanceId viopath_sourceinst(HvLpIndex lp)
 {
@@ -524,36 +451,33 @@ static void vio_handleEvent(struct HvLpEvent *event, struct pt_regs *regs)
 
 static void viopath_donealloc(void *parm, int number)
 {
-	struct doneAllocParms_t *parmsp = (struct doneAllocParms_t *)parm;
+	struct alloc_parms *parmsp = parm;
 
 	parmsp->number = number;
 	if (parmsp->used_wait_atomic)
-		atomic_set(parmsp->wait_atomic, 0);
+		atomic_set(&parmsp->wait_atomic, 0);
 	else
-		up(parmsp->sem);
+		up(&parmsp->sem);
 }
 
 static int allocateEvents(HvLpIndex remoteLp, int numEvents)
 {
-	struct doneAllocParms_t parms;
-	DECLARE_MUTEX_LOCKED(Semaphore);
-	atomic_t wait_atomic;
+	struct alloc_parms parms;
 
-	if (in_atomic()) {
+	if (system_state != SYSTEM_RUNNING) {
 		parms.used_wait_atomic = 1;
-		atomic_set(&wait_atomic, 1);
-		parms.wait_atomic = &wait_atomic;
+		atomic_set(&parms.wait_atomic, 1);
 	} else {
 		parms.used_wait_atomic = 0;
-		parms.sem = &Semaphore;
+		init_MUTEX_LOCKED(&parms.sem);
 	}
-	mf_allocateLpEvents(remoteLp, HvLpEvent_Type_VirtualIo, 250,	/* It would be nice to put a real number here! */
+	mf_allocate_lp_events(remoteLp, HvLpEvent_Type_VirtualIo, 250,	/* It would be nice to put a real number here! */
 			    numEvents, &viopath_donealloc, &parms);
-	if (in_atomic()) {
-		while (atomic_read(&wait_atomic))
+	if (system_state != SYSTEM_RUNNING) {
+		while (atomic_read(&parms.wait_atomic))
 			mb();
 	} else
-		down(&Semaphore);
+		down(&parms.sem);
 	return parms.number;
 }
 
@@ -632,8 +556,7 @@ int viopath_close(HvLpIndex remoteLp, int subtype, int numReq)
 	unsigned long flags;
 	int i;
 	int numOpen;
-	struct doneAllocParms_t doneAllocParms;
-	DECLARE_MUTEX_LOCKED(Semaphore);
+	struct alloc_parms parms;
 
 	if ((remoteLp >= HvMaxArchitectedLps) || (remoteLp == HvLpIndexInvalid))
 		return -EINVAL;
@@ -654,11 +577,11 @@ int viopath_close(HvLpIndex remoteLp, int subtype, int numReq)
 
 	spin_unlock_irqrestore(&statuslock, flags);
 
-	doneAllocParms.used_wait_atomic = 0;
-	doneAllocParms.sem = &Semaphore;
-	mf_deallocateLpEvents(remoteLp, HvLpEvent_Type_VirtualIo,
-			      numReq, &viopath_donealloc, &doneAllocParms);
-	down(&Semaphore);
+	parms.used_wait_atomic = 0;
+	init_MUTEX_LOCKED(&parms.sem);
+	mf_deallocate_lp_events(remoteLp, HvLpEvent_Type_VirtualIo,
+			      numReq, &viopath_donealloc, &parms);
+	down(&parms.sem);
 
 	spin_lock_irqsave(&statuslock, flags);
 	for (i = 0, numOpen = 0; i < VIO_MAX_SUBTYPES; i++)

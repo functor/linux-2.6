@@ -3,10 +3,12 @@
  *
  * Copyright (C) 1998-2003 Hewlett-Packard Co
  *	David Mosberger-Tang <davidm@hpl.hp.com>
+ * 04/11/17 Ashok Raj	<ashok.raj@intel.com> Added CPU Hotplug Support
  */
 #define __KERNEL_SYSCALLS__	/* see <asm/unistd.h> */
 #include <linux/config.h>
 
+#include <linux/cpu.h>
 #include <linux/pm.h>
 #include <linux/elf.h>
 #include <linux/errno.h>
@@ -14,6 +16,7 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/notifier.h>
 #include <linux/personality.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -22,16 +25,23 @@
 #include <linux/thread_info.h>
 #include <linux/unistd.h>
 #include <linux/efi.h>
+#include <linux/interrupt.h>
+#include <linux/delay.h>
 
+#include <asm/cpu.h>
 #include <asm/delay.h>
 #include <asm/elf.h>
 #include <asm/ia32.h>
+#include <asm/irq.h>
 #include <asm/pgalloc.h>
 #include <asm/processor.h>
 #include <asm/sal.h>
+#include <asm/tlbflush.h>
 #include <asm/uaccess.h>
 #include <asm/unwind.h>
 #include <asm/user.h>
+
+#include "entry.h"
 
 #ifdef CONFIG_PERFMON
 # include <asm/perfmon.h>
@@ -40,7 +50,10 @@
 #include "sigframe.h"
 
 void (*ia64_mark_idle)(int);
+static DEFINE_PER_CPU(unsigned int, cpu_idle_state);
 
+unsigned long boot_option_idle_override = 0;
+EXPORT_SYMBOL(boot_option_idle_override);
 
 void
 ia64_do_show_stack (struct unw_frame_info *info, void *arg)
@@ -68,12 +81,12 @@ void
 show_stack (struct task_struct *task, unsigned long *sp)
 {
 	if (!task)
-		unw_init_running(ia64_do_show_stack, 0);
+		unw_init_running(ia64_do_show_stack, NULL);
 	else {
 		struct unw_frame_info info;
 
 		unw_init_from_blocked_task(&info, task);
-		ia64_do_show_stack(&info, 0);
+		ia64_do_show_stack(&info, NULL);
 	}
 }
 
@@ -90,6 +103,7 @@ show_regs (struct pt_regs *regs)
 {
 	unsigned long ip = regs->cr_iip + ia64_psr(regs)->ri;
 
+	print_modules();
 	printk("\nPid: %d, CPU %d, comm: %20s\n", current->pid, smp_processor_id(), current->comm);
 	printk("psr : %016lx ifs : %016lx ip  : [<%016lx>]    %s\n",
 	       regs->cr_ipsr, regs->cr_ifs, ip, print_tainted());
@@ -131,7 +145,7 @@ show_regs (struct pt_regs *regs)
 		ndirty = (regs->loadrs >> 19);
 		bsp = ia64_rse_skip_regs((unsigned long *) regs->ar_bspstore, ndirty);
 		for (i = 0; i < sof; ++i) {
-			get_user(val, ia64_rse_skip_regs(bsp, i));
+			get_user(val, (unsigned long __user *) ia64_rse_skip_regs(bsp, i));
 			printk("r%-3u:%c%016lx%s", 32 + i, is_nat ? '*' : ' ', val,
 			       ((i == sof - 1) || (i % 3) == 2) ? "\n" : " ");
 		}
@@ -159,7 +173,9 @@ do_notify_resume_user (sigset_t *oldset, struct sigscratch *scr, long in_syscall
 		ia64_do_signal(oldset, scr, in_syscall);
 }
 
-static int pal_halt = 1;
+static int pal_halt        = 1;
+static int can_do_pal_halt = 1;
+
 static int __init nohalt_setup(char * str)
 {
 	pal_halt = 0;
@@ -167,38 +183,104 @@ static int __init nohalt_setup(char * str)
 }
 __setup("nohalt", nohalt_setup);
 
+void
+update_pal_halt_status(int status)
+{
+	can_do_pal_halt = pal_halt && status;
+}
+
 /*
  * We use this if we don't have any better idle routine..
  */
 void
 default_idle (void)
 {
-	unsigned long pmu_active = ia64_getreg(_IA64_REG_PSR) & (IA64_PSR_PP | IA64_PSR_UP);
-
 	while (!need_resched())
-		if (pal_halt && !pmu_active)
+		if (can_do_pal_halt)
 			safe_halt();
+		else
+			cpu_relax();
 }
 
+#ifdef CONFIG_HOTPLUG_CPU
+/* We don't actually take CPU down, just spin without interrupts. */
+static inline void play_dead(void)
+{
+	extern void ia64_cpu_local_tick (void);
+	unsigned int this_cpu = smp_processor_id();
+
+	/* Ack it */
+	__get_cpu_var(cpu_state) = CPU_DEAD;
+
+	max_xtp();
+	local_irq_disable();
+	idle_task_exit();
+	ia64_jump_to_sal(&sal_boot_rendez_state[this_cpu]);
+	/*
+	 * The above is a point of no-return, the processor is
+	 * expected to be in SAL loop now.
+	 */
+	BUG();
+}
+#else
+static inline void play_dead(void)
+{
+	BUG();
+}
+#endif /* CONFIG_HOTPLUG_CPU */
+
+void cpu_idle_wait(void)
+{
+	unsigned int cpu, this_cpu = get_cpu();
+	cpumask_t map;
+
+	set_cpus_allowed(current, cpumask_of_cpu(this_cpu));
+	put_cpu();
+
+	cpus_clear(map);
+	for_each_online_cpu(cpu) {
+		per_cpu(cpu_idle_state, cpu) = 1;
+		cpu_set(cpu, map);
+	}
+
+	__get_cpu_var(cpu_idle_state) = 0;
+
+	wmb();
+	do {
+		ssleep(1);
+		for_each_online_cpu(cpu) {
+			if (cpu_isset(cpu, map) && !per_cpu(cpu_idle_state, cpu))
+				cpu_clear(cpu, map);
+		}
+		cpus_and(map, map, cpu_online_map);
+	} while (!cpus_empty(map));
+}
+EXPORT_SYMBOL_GPL(cpu_idle_wait);
+
 void __attribute__((noreturn))
-cpu_idle (void *unused)
+cpu_idle (void)
 {
 	void (*mark_idle)(int) = ia64_mark_idle;
 
 	/* endless idle loop with no priority at all */
 	while (1) {
-		void (*idle)(void) = pm_idle;
-		if (!idle)
-			idle = default_idle;
-
 #ifdef CONFIG_SMP
 		if (!need_resched())
 			min_xtp();
 #endif
-
 		while (!need_resched()) {
+			void (*idle)(void);
+
+			if (__get_cpu_var(cpu_idle_state))
+				__get_cpu_var(cpu_idle_state) = 0;
+
+			rmb();
 			if (mark_idle)
 				(*mark_idle)(1);
+
+			idle = pm_idle;
+			if (!idle)
+				idle = default_idle;
 			(*idle)();
 		}
 
@@ -210,6 +292,8 @@ cpu_idle (void *unused)
 #endif
 		schedule();
 		check_pgt_cache();
+		if (cpu_is_offline(smp_processor_id()))
+			play_dead();
 	}
 }
 
@@ -397,6 +481,10 @@ copy_thread (int nr, unsigned long clone_flags,
 		ia32_save_state(p);
 		if (clone_flags & CLONE_SETTLS)
 			retval = ia32_clone_tls(p, child_ptregs);
+
+		/* Copy partially mapped page list */
+		if (!retval)
+			retval = ia32_copy_partial_page_list(p, clone_flags);
 	}
 #endif
 
@@ -555,29 +643,21 @@ dump_fpu (struct pt_regs *pt, elf_fpregset_t dst)
 	return 1;	/* f0-f31 are always valid so we always return 1 */
 }
 
-asmlinkage long
-sys_execve (char *filename, char **argv, char **envp, struct pt_regs *regs)
+long
+sys_execve (char __user *filename, char __user * __user *argv, char __user * __user *envp,
+	    struct pt_regs *regs)
 {
+	char *fname;
 	int error;
 
-	filename = getname(filename);
-	error = PTR_ERR(filename);
-	if (IS_ERR(filename))
+	fname = getname(filename);
+	error = PTR_ERR(fname);
+	if (IS_ERR(fname))
 		goto out;
-	error = do_execve(filename, argv, envp, regs);
-	putname(filename);
+	error = do_execve(fname, argv, envp, regs);
+	putname(fname);
 out:
 	return error;
-}
-
-void
-ia64_set_personality (struct elf64_hdr *elf_ex, int ibcs2_interpreter)
-{
-	set_personality(PER_LINUX);
-	if (elf_ex->e_flags & EF_IA_64_LINUX_EXECUTABLE_STACK)
-		current->thread.flags |= IA64_THREAD_XSTACK;
-	else
-		current->thread.flags &= ~IA64_THREAD_XSTACK;
 }
 
 pid_t
@@ -600,7 +680,7 @@ kernel_thread (int (*fn)(void *), void *arg, unsigned long flags)
 	regs.pt.cr_ifs = 1UL << 63;		/* mark as valid, empty frame */
 	regs.sw.ar_fpsr = regs.pt.ar_fpsr = ia64_getreg(_IA64_REG_AR_FPSR);
 	regs.sw.ar_bspstore = (unsigned long) current + IA64_RBS_OFFSET;
-
+	regs.sw.pr = (1 << PRED_KERNEL_STACK);
 	return do_fork(flags | CLONE_VM | CLONE_UNTRACED, 0, &regs.pt, 0, NULL, NULL);
 }
 EXPORT_SYMBOL(kernel_thread);
@@ -630,6 +710,8 @@ flush_thread (void)
 	/* drop floating-point and debug-register state if it exists: */
 	current->thread.flags &= ~(IA64_THREAD_FPH_VALID | IA64_THREAD_DBG_VALID);
 	ia64_drop_fpu(current);
+	if (IS_IA32_PROCESS(ia64_task_regs(current)))
+		ia32_drop_partial_page_list(current);
 }
 
 /*
@@ -649,6 +731,8 @@ exit_thread (void)
 	if (current->thread.flags & IA64_THREAD_DBG_VALID)
 		pfm_release_debug_registers(current);
 #endif
+	if (IS_IA32_PROCESS(ia64_task_regs(current)))
+		ia32_drop_partial_page_list(current);
 }
 
 unsigned long
@@ -657,11 +741,6 @@ get_wchan (struct task_struct *p)
 	struct unw_frame_info info;
 	unsigned long ip;
 	int count = 0;
-	/*
-	 * These bracket the sleeping functions..
-	 */
-#	define first_sched	((unsigned long) scheduling_functions_start_here)
-#	define last_sched	((unsigned long) scheduling_functions_end_here)
 
 	/*
 	 * Note: p may not be a blocked task (it could be current or
@@ -676,12 +755,10 @@ get_wchan (struct task_struct *p)
 		if (unw_unwind(&info) < 0)
 			return 0;
 		unw_get_ip(&info, &ip);
-		if (ip < first_sched || ip >= last_sched)
+		if (!in_sched_functions(ip))
 			return ip;
 	} while (count++ < 16);
 	return 0;
-#	undef first_sched
-#	undef last_sched
 }
 
 void
@@ -710,7 +787,7 @@ cpu_halt (void)
 void
 machine_restart (char *restart_cmd)
 {
-	(*efi.reset_system)(EFI_RESET_WARM, 0, 0, 0);
+	(*efi.reset_system)(EFI_RESET_WARM, 0, 0, NULL);
 }
 
 EXPORT_SYMBOL(machine_restart);

@@ -141,7 +141,7 @@ struct iforce {
 	struct circ_buf xmit;
 	unsigned char xmit_data[XMIT_SIZE];
 	long xmit_flags[1];
-	
+
 					/* Force Feedback */
 	wait_queue_head_t wait;
 	struct resource device_memory;
@@ -187,5 +187,5 @@ int iforce_upload_constant(struct iforce*, struct ff_effect*, int is_update);
 int iforce_upload_condition(struct iforce*, struct ff_effect*, int is_update);
 
 /* Public variables */
-extern struct serio_dev iforce_serio_dev;
+extern struct serio_driver iforce_serio_drv;
 extern struct usb_driver iforce_usb_driver;

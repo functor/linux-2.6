@@ -30,10 +30,6 @@
 MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Advanced Linux Sound Architecture Simple Instrument support.");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_SUPPORTED_DEVICE("sound");
-
-char *snd_seq_simple_id = SNDRV_SEQ_INSTR_ID_SIMPLE;
 
 static unsigned int snd_seq_simple_size(unsigned int size, unsigned int format)
 {
@@ -55,7 +51,8 @@ static void snd_seq_simple_instr_free(snd_simple_ops_t *ops,
 }
 
 static int snd_seq_simple_put(void *private_data, snd_seq_kinstr_t *instr,
-			      char *instr_data, long len, int atomic, int cmd)
+			      char __user *instr_data, long len,
+			      int atomic, int cmd)
 {
 	snd_simple_ops_t *ops = (snd_simple_ops_t *)private_data;
 	simple_instrument_t *ip;
@@ -103,7 +100,8 @@ static int snd_seq_simple_put(void *private_data, snd_seq_kinstr_t *instr,
 }
 
 static int snd_seq_simple_get(void *private_data, snd_seq_kinstr_t *instr,
-			      char *instr_data, long len, int atomic, int cmd)
+			      char __user *instr_data, long len,
+			      int atomic, int cmd)
 {
 	snd_simple_ops_t *ops = (snd_simple_ops_t *)private_data;
 	simple_instrument_t *ip;
@@ -188,7 +186,7 @@ int snd_seq_simple_init(snd_simple_ops_t *ops,
 	ops->private_data = private_data;
 	ops->kops.private_data = ops;
 	ops->kops.add_len = sizeof(simple_instrument_t);
-	ops->kops.instr_type = snd_seq_simple_id;
+	ops->kops.instr_type = SNDRV_SEQ_INSTR_ID_SIMPLE;
 	ops->kops.put = snd_seq_simple_put;
 	ops->kops.get = snd_seq_simple_get;
 	ops->kops.get_size = snd_seq_simple_get_size;
@@ -214,5 +212,4 @@ static void __exit alsa_ainstr_simple_exit(void)
 module_init(alsa_ainstr_simple_init)
 module_exit(alsa_ainstr_simple_exit)
 
-EXPORT_SYMBOL(snd_seq_simple_id);
 EXPORT_SYMBOL(snd_seq_simple_init);

@@ -32,6 +32,7 @@
  */
 
 #include <linux/types.h>
+#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/sunrpc/sched.h>
@@ -151,21 +152,22 @@ g_token_size(struct xdr_netobj *mech, unsigned int body_size)
 	return(1 + der_length_size(body_size) + body_size);
 }
 
+EXPORT_SYMBOL(g_token_size);
+
 /* fills in a buffer with the token header.  The buffer is assumed to
    be the right size.  buf is advanced past the token header */
 
 void
-g_make_token_header(struct xdr_netobj *mech, int body_size, unsigned char **buf,
-		int tok_type)
+g_make_token_header(struct xdr_netobj *mech, int body_size, unsigned char **buf)
 {
 	*(*buf)++ = 0x60;
 	der_write_length(buf, 4 + mech->len + body_size);
 	*(*buf)++ = 0x06;
 	*(*buf)++ = (unsigned char) mech->len;
 	TWRITE_STR(*buf, mech->data, ((int) mech->len));
-	*(*buf)++ = (unsigned char) ((tok_type>>8)&0xff);
-	*(*buf)++ = (unsigned char) (tok_type&0xff);
 }
+
+EXPORT_SYMBOL(g_make_token_header);
 
 /*
  * Given a buffer containing a token, reads and verifies the token,
@@ -177,7 +179,7 @@ g_make_token_header(struct xdr_netobj *mech, int body_size, unsigned char **buf,
  */
 u32
 g_verify_token_header(struct xdr_netobj *mech, int *body_size,
-		      unsigned char **buf_in, int tok_type, int toksize)
+		      unsigned char **buf_in, int toksize)
 {
 	unsigned char *buf = *buf_in;
 	int seqsize;
@@ -221,9 +223,6 @@ g_verify_token_header(struct xdr_netobj *mech, int *body_size,
 	if (ret)
 		return(ret);
 
-	if ((*buf++ != ((tok_type>>8)&0xff)) || (*buf++ != (tok_type&0xff))) 
-		return(G_WRONG_TOKID);
-
 	if (!ret) {
 		*buf_in = buf;
 		*body_size = toksize;
@@ -232,38 +231,5 @@ g_verify_token_header(struct xdr_netobj *mech, int *body_size,
 	return(ret);
 }
 
-/* Given a buffer containing a token, returns a copy of the mech oid in
- * the parameter mech. */
-u32
-g_get_mech_oid(struct xdr_netobj *mech, struct xdr_netobj * in_buf)
-{
-	unsigned char *buf = in_buf->data;
-	int len = in_buf->len;
-	int ret=0;
-	int seqsize;
+EXPORT_SYMBOL(g_verify_token_header);
 
-	if ((len-=1) < 0)
-		return(G_BAD_TOK_HEADER);
-	if (*buf++ != 0x60)
-		return(G_BAD_TOK_HEADER);
-
-	if ((seqsize = der_read_length(&buf, &len)) < 0)
-		return(G_BAD_TOK_HEADER);
-
-	if ((len-=1) < 0)
-		return(G_BAD_TOK_HEADER);
-	if (*buf++ != 0x06)
-		return(G_BAD_TOK_HEADER);
-
-	if ((len-=1) < 0)
-		return(G_BAD_TOK_HEADER);
-	mech->len = *buf++;
-
-	if ((len-=mech->len) < 0)
-		return(G_BAD_TOK_HEADER);
-	if (!(mech->data = kmalloc(mech->len, GFP_KERNEL))) 
-		return(G_BUFFER_ALLOC);
-	memcpy(mech->data, buf, mech->len);
-
-	return ret;
-}

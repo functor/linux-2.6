@@ -16,6 +16,7 @@
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/ptrace.h>
+#include <linux/suspend.h>
 #include <linux/mman.h>
 #include <linux/mm.h>
 #include <asm/io.h>
@@ -44,7 +45,7 @@ main(void)
 	DEFINE(THREAD_FPEXC_MODE, offsetof(struct thread_struct, fpexc_mode));
 	DEFINE(THREAD_FPR0, offsetof(struct thread_struct, fpr[0]));
 	DEFINE(THREAD_FPSCR, offsetof(struct thread_struct, fpscr));
-#ifdef CONFIG_4xx
+#if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
 	DEFINE(THREAD_DBCR0, offsetof(struct thread_struct, dbcr0));
 	DEFINE(PT_PTRACED, PT_PTRACED);
 #endif
@@ -54,6 +55,12 @@ main(void)
 	DEFINE(THREAD_VSCR, offsetof(struct thread_struct, vscr));
 	DEFINE(THREAD_USED_VR, offsetof(struct thread_struct, used_vr));
 #endif /* CONFIG_ALTIVEC */
+#ifdef CONFIG_SPE
+	DEFINE(THREAD_EVR0, offsetof(struct thread_struct, evr[0]));
+	DEFINE(THREAD_ACC, offsetof(struct thread_struct, acc));
+	DEFINE(THREAD_SPEFSCR, offsetof(struct thread_struct, spefscr));
+	DEFINE(THREAD_USED_SPE, offsetof(struct thread_struct, used_spe));
+#endif /* CONFIG_SPE */
 	/* Interrupt register frame */
 	DEFINE(STACK_FRAME_OVERHEAD, STACK_FRAME_OVERHEAD);
 	DEFINE(INT_FRAME_SIZE, STACK_FRAME_OVERHEAD + sizeof(struct pt_regs));
@@ -122,6 +129,17 @@ main(void)
 	DEFINE(CPU_SPEC_PVR_VALUE, offsetof(struct cpu_spec, pvr_value));
 	DEFINE(CPU_SPEC_FEATURES, offsetof(struct cpu_spec, cpu_features));
 	DEFINE(CPU_SPEC_SETUP, offsetof(struct cpu_spec, cpu_setup));
+
+	DEFINE(TI_TASK, offsetof(struct thread_info, task));
+	DEFINE(TI_EXECDOMAIN, offsetof(struct thread_info, exec_domain));
+	DEFINE(TI_FLAGS, offsetof(struct thread_info, flags));
+	DEFINE(TI_LOCAL_FLAGS, offsetof(struct thread_info, local_flags));
+	DEFINE(TI_CPU, offsetof(struct thread_info, cpu));
+	DEFINE(TI_PREEMPT, offsetof(struct thread_info, preempt_count));
+
+	DEFINE(pbe_address, offsetof(struct pbe, address));
+	DEFINE(pbe_orig_address, offsetof(struct pbe, orig_address));
+	DEFINE(pbe_next, offsetof(struct pbe, next));
 
 	DEFINE(NUM_USER_SEGMENTS, TASK_SIZE>>28);
 	return 0;

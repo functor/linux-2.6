@@ -126,7 +126,7 @@ extern void fpsave(unsigned long *fpregs, unsigned long *fsr,
 #define switch_to(prev, next, last) do {						\
 	SWITCH_ENTER(prev);								\
 	SWITCH_DO_LAZY_FPU(next);							\
-	next->active_mm->cpu_vm_mask |= (1 << smp_processor_id());			\
+	cpu_set(smp_processor_id(), next->active_mm->cpu_vm_mask);			\
 	__asm__ __volatile__(								\
 	"sethi	%%hi(here - 0x8), %%o7\n\t"						\
 	"mov	%%g6, %%g3\n\t"								\
@@ -195,12 +195,12 @@ static inline unsigned long getipl(void)
 #define read_barrier_depends()	do { } while(0)
 #define set_mb(__var, __value)  do { __var = __value; mb(); } while(0)
 #define set_wmb(__var, __value) set_mb(__var, __value)
-#define smp_mb()	__asm__ __volatile__("":::"memory");
-#define smp_rmb()	__asm__ __volatile__("":::"memory");
-#define smp_wmb()	__asm__ __volatile__("":::"memory");
+#define smp_mb()	__asm__ __volatile__("":::"memory")
+#define smp_rmb()	__asm__ __volatile__("":::"memory")
+#define smp_wmb()	__asm__ __volatile__("":::"memory")
 #define smp_read_barrier_depends()	do { } while(0)
 
-#define nop() __asm__ __volatile__ ("nop");
+#define nop() __asm__ __volatile__ ("nop")
 
 /* This has special calling conventions */
 #ifndef CONFIG_SMP
@@ -256,5 +256,7 @@ extern void die_if_kernel(char *str, struct pt_regs *regs) __attribute__ ((noret
 #endif /* __KERNEL__ */
 
 #endif /* __ASSEMBLY__ */
+
+#define arch_align_stack(x) (x)
 
 #endif /* !(__SPARC_SYSTEM_H) */

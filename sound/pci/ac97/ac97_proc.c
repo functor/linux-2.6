@@ -34,18 +34,68 @@
  * proc interface
  */
 
+static void snd_ac97_proc_read_functions(ac97_t *ac97, snd_info_buffer_t *buffer)
+{
+	int header = 0, function;
+	unsigned short info, sense_info;
+	static const char *function_names[12] = {
+		"Master Out", "AUX Out", "Center/LFE Out", "SPDIF Out",
+		"Phone In", "Mic 1", "Mic 2", "Line In", "CD In", "Video In",
+		"Aux In", "Mono Out"
+	};
+	static const char *locations[8] = {
+		"Rear I/O Panel", "Front Panel", "Motherboard", "Dock/External",
+		"reserved", "reserved", "reserved", "NC/unused"
+	};
+
+	for (function = 0; function < 12; ++function) {
+		snd_ac97_write(ac97, AC97_FUNC_SELECT, function << 1);
+		info = snd_ac97_read(ac97, AC97_FUNC_INFO);
+		if (!(info & 0x0001))
+			continue;
+		if (!header) {
+			snd_iprintf(buffer, "\n                    Gain     Inverted  Buffer delay  Location\n");
+			header = 1;
+		}
+		sense_info = snd_ac97_read(ac97, AC97_SENSE_INFO);
+		snd_iprintf(buffer, "%-17s: %3d.%d dBV    %c      %2d/fs         %s\n",
+			    function_names[function],
+			    (info & 0x8000 ? -1 : 1) * ((info & 0x7000) >> 12) * 3 / 2,
+			    ((info & 0x0800) >> 11) * 5,
+			    info & 0x0400 ? 'X' : '-',
+			    (info & 0x03e0) >> 5,
+			    locations[sense_info >> 13]);
+	}
+}
+
 static void snd_ac97_proc_read_main(ac97_t *ac97, snd_info_buffer_t * buffer, int subidx)
 {
 	char name[64];
 	unsigned short val, tmp, ext, mext;
-	static const char *spdif_slots[4] = { " SPDIF=3/4", " SPDIF=7/8", " SPDIF=6/9", " SPDIF=res" };
+	static const char *spdif_slots[4] = { " SPDIF=3/4", " SPDIF=7/8", " SPDIF=6/9", " SPDIF=10/11" };
 	static const char *spdif_rates[4] = { " Rate=44.1kHz", " Rate=res", " Rate=48kHz", " Rate=32kHz" };
 	static const char *spdif_rates_cs4205[4] = { " Rate=48kHz", " Rate=44.1kHz", " Rate=res", " Rate=res" };
+	static const char *double_rate_slots[4] = { "10/11", "7/8", "reserved", "reserved" };
 
 	snd_ac97_get_name(NULL, ac97->id, name, 0);
 	snd_iprintf(buffer, "%d-%d/%d: %s\n\n", ac97->addr, ac97->num, subidx, name);
 	if ((ac97->scaps & AC97_SCAP_AUDIO) == 0)
 		goto __modem;
+
+	if ((ac97->ext_id & AC97_EI_REV_MASK) >= AC97_EI_REV_23) {
+		val = snd_ac97_read(ac97, AC97_INT_PAGING);
+		snd_ac97_update_bits(ac97, AC97_INT_PAGING,
+				     AC97_PAGE_MASK, AC97_PAGE_1);
+		tmp = snd_ac97_read(ac97, AC97_CODEC_CLASS_REV);
+		snd_iprintf(buffer, "Revision         : 0x%02x\n", tmp & 0xff);
+		snd_iprintf(buffer, "Compat. Class    : 0x%02x\n", (tmp >> 8) & 0x1f);
+		snd_iprintf(buffer, "Subsys. Vendor ID: 0x%04x\n",
+			    snd_ac97_read(ac97, AC97_PCI_SVID));
+		snd_iprintf(buffer, "Subsys. ID       : 0x%04x\n\n",
+			    snd_ac97_read(ac97, AC97_PCI_SID));
+		snd_ac97_update_bits(ac97, AC97_INT_PAGING,
+				     AC97_PAGE_MASK, val & AC97_PAGE_MASK);
+	}
 
 	// val = snd_ac97_read(ac97, AC97_RESET);
 	val = ac97->caps;
@@ -88,6 +138,9 @@ static void snd_ac97_proc_read_main(ac97_t *ac97, snd_info_buffer_t * buffer, in
 		    val & 0x0200 ? "Mic" : "MIX",
 		    val & 0x0100 ? "Mic2" : "Mic1",
 		    val & 0x0080 ? "on" : "off");
+	if (ac97->ext_id & AC97_EI_DRA)
+		snd_iprintf(buffer, "Double rate slots: %s\n",
+			    double_rate_slots[(val >> 10) & 3]);
 
 	ext = snd_ac97_read(ac97, AC97_EXTENDED_ID);
 	if (ext == 0)
@@ -185,6 +238,14 @@ static void snd_ac97_proc_read_main(ac97_t *ac97, snd_info_buffer_t * buffer, in
 			}
 		}
 	}
+	if ((ac97->ext_id & AC97_EI_REV_MASK) >= AC97_EI_REV_23) {
+		val = snd_ac97_read(ac97, AC97_INT_PAGING);
+		snd_ac97_update_bits(ac97, AC97_INT_PAGING,
+				     AC97_PAGE_MASK, AC97_PAGE_1);
+		snd_ac97_proc_read_functions(ac97, buffer);
+		snd_ac97_update_bits(ac97, AC97_INT_PAGING,
+				     AC97_PAGE_MASK, val & AC97_PAGE_MASK);
+	}
 
 
       __modem:
@@ -233,11 +294,11 @@ static void snd_ac97_proc_read_main(ac97_t *ac97, snd_info_buffer_t * buffer, in
 
 static void snd_ac97_proc_read(snd_info_entry_t *entry, snd_info_buffer_t * buffer)
 {
-	ac97_t *ac97 = snd_magic_cast(ac97_t, entry->private_data, return);
+	ac97_t *ac97 = entry->private_data;
 	
+	down(&ac97->page_mutex);
 	if ((ac97->id & 0xffffff40) == AC97_ID_AD1881) {	// Analog Devices AD1881/85/86
 		int idx;
-		down(&ac97->spec.ad18xx.mutex);
 		for (idx = 0; idx < 3; idx++)
 			if (ac97->spec.ad18xx.id[idx]) {
 				/* select single codec */
@@ -248,7 +309,6 @@ static void snd_ac97_proc_read(snd_info_entry_t *entry, snd_info_buffer_t * buff
 			}
 		/* select all codecs */
 		snd_ac97_update_bits(ac97, AC97_AD_SERIAL_CFG, 0x7000, 0x7000);
-		up(&ac97->spec.ad18xx.mutex);
 		
 		snd_iprintf(buffer, "\nAD18XX configuration\n");
 		snd_iprintf(buffer, "Unchained        : 0x%04x,0x%04x,0x%04x\n",
@@ -262,7 +322,27 @@ static void snd_ac97_proc_read(snd_info_entry_t *entry, snd_info_buffer_t * buff
 	} else {
 		snd_ac97_proc_read_main(ac97, buffer, 0);
 	}
+	up(&ac97->page_mutex);
 }
+
+#ifdef CONFIG_SND_DEBUG
+/* direct register write for debugging */
+static void snd_ac97_proc_regs_write(snd_info_entry_t *entry, snd_info_buffer_t *buffer)
+{
+	ac97_t *ac97 = entry->private_data;
+	char line[64];
+	unsigned int reg, val;
+	down(&ac97->page_mutex);
+	while (!snd_info_get_line(buffer, line, sizeof(line))) {
+		if (sscanf(line, "%x %x", &reg, &val) != 2)
+			continue;
+		/* register must be even */
+		if (reg < 0x80 && (reg & 1) == 0 && val <= 0xffff)
+			snd_ac97_write_cache(ac97, reg, val);
+	}
+	up(&ac97->page_mutex);
+}
+#endif
 
 static void snd_ac97_proc_regs_read_main(ac97_t *ac97, snd_info_buffer_t * buffer, int subidx)
 {
@@ -277,12 +357,12 @@ static void snd_ac97_proc_regs_read_main(ac97_t *ac97, snd_info_buffer_t * buffe
 static void snd_ac97_proc_regs_read(snd_info_entry_t *entry, 
 				    snd_info_buffer_t * buffer)
 {
-	ac97_t *ac97 = snd_magic_cast(ac97_t, entry->private_data, return);
+	ac97_t *ac97 = entry->private_data;
 
+	down(&ac97->page_mutex);
 	if ((ac97->id & 0xffffff40) == AC97_ID_AD1881) {	// Analog Devices AD1881/85/86
 
 		int idx;
-		down(&ac97->spec.ad18xx.mutex);
 		for (idx = 0; idx < 3; idx++)
 			if (ac97->spec.ad18xx.id[idx]) {
 				/* select single codec */
@@ -292,10 +372,10 @@ static void snd_ac97_proc_regs_read(snd_info_entry_t *entry,
 			}
 		/* select all codecs */
 		snd_ac97_update_bits(ac97, AC97_AD_SERIAL_CFG, 0x7000, 0x7000);
-		up(&ac97->spec.ad18xx.mutex);
 	} else {
 		snd_ac97_proc_regs_read_main(ac97, buffer, 0);
 	}	
+	up(&ac97->page_mutex);
 }
 
 void snd_ac97_proc_init(ac97_t * ac97)
@@ -319,6 +399,11 @@ void snd_ac97_proc_init(ac97_t * ac97)
 	sprintf(name, "%s#%d-%d+regs", prefix, ac97->addr, ac97->num);
 	if ((entry = snd_info_create_card_entry(ac97->bus->card, name, ac97->bus->proc)) != NULL) {
 		snd_info_set_text_ops(entry, ac97, 1024, snd_ac97_proc_regs_read);
+#ifdef CONFIG_SND_DEBUG
+		entry->mode |= S_IWUSR;
+		entry->c.text.write_size = 1024;
+		entry->c.text.write = snd_ac97_proc_regs_write;
+#endif
 		if (snd_info_register(entry) < 0) {
 			snd_info_free_entry(entry);
 			entry = NULL;

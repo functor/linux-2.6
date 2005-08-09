@@ -3,11 +3,11 @@
  *
  * Copyright (C) 2001-2003 Red Hat, Inc.
  *
- * Created by David Woodhouse <dwmw2@redhat.com>
+ * Created by David Woodhouse <dwmw2@infradead.org>
  *
  * For licensing information, see the file 'LICENCE' in this directory.
  *
- * $Id: nodelist.c,v 1.80 2003/10/04 08:33:06 dwmw2 Exp $
+ * $Id: nodelist.c,v 1.90 2004/12/08 17:59:20 dwmw2 Exp $
  *
  */
 
@@ -58,7 +58,7 @@ void jffs2_add_fd_to_list(struct jffs2_sb_info *c, struct jffs2_full_dirent *new
 /* Put a new tmp_dnode_info into the list, keeping the list in 
    order of increasing version
 */
-void jffs2_add_tn_to_list(struct jffs2_tmp_dnode_info *tn, struct jffs2_tmp_dnode_info **list)
+static void jffs2_add_tn_to_list(struct jffs2_tmp_dnode_info *tn, struct jffs2_tmp_dnode_info **list)
 {
 	struct jffs2_tmp_dnode_info **prev = list;
 	
@@ -92,48 +92,61 @@ static void jffs2_free_full_dirent_list(struct jffs2_full_dirent *fd)
 	}
 }
 
+/* Returns first valid node after 'ref'. May return 'ref' */
+static struct jffs2_raw_node_ref *jffs2_first_valid_node(struct jffs2_raw_node_ref *ref)
+{
+	while (ref && ref->next_in_ino) {
+		if (!ref_obsolete(ref))
+			return ref;
+		D1(printk(KERN_DEBUG "node at 0x%08x is obsoleted. Ignoring.\n", ref_offset(ref)));
+		ref = ref->next_in_ino;
+	}
+	return NULL;
+}
 
 /* Get tmp_dnode_info and full_dirent for all non-obsolete nodes associated
    with this ino, returning the former in order of version */
 
-int jffs2_get_inode_nodes(struct jffs2_sb_info *c, ino_t ino, struct jffs2_inode_info *f,
+int jffs2_get_inode_nodes(struct jffs2_sb_info *c, struct jffs2_inode_info *f,
 			  struct jffs2_tmp_dnode_info **tnp, struct jffs2_full_dirent **fdp,
 			  uint32_t *highest_version, uint32_t *latest_mctime,
 			  uint32_t *mctime_ver)
 {
-	struct jffs2_raw_node_ref *ref = f->inocache->nodes;
+	struct jffs2_raw_node_ref *ref, *valid_ref;
 	struct jffs2_tmp_dnode_info *tn, *ret_tn = NULL;
 	struct jffs2_full_dirent *fd, *ret_fd = NULL;
-
 	union jffs2_node_union node;
 	size_t retlen;
 	int err;
 
 	*mctime_ver = 0;
-
-	D1(printk(KERN_DEBUG "jffs2_get_inode_nodes(): ino #%lu\n", ino));
-	if (!f->inocache->nodes) {
-		printk(KERN_WARNING "Eep. no nodes for ino #%lu\n", (unsigned long)ino);
-	}
+	
+	D1(printk(KERN_DEBUG "jffs2_get_inode_nodes(): ino #%u\n", f->inocache->ino));
 
 	spin_lock(&c->erase_completion_lock);
 
-	for (ref = f->inocache->nodes; ref && ref->next_in_ino; ref = ref->next_in_ino) {
-		/* Work out whether it's a data node or a dirent node */
-		if (ref_obsolete(ref)) {
-			/* FIXME: On NAND flash we may need to read these */
-			D1(printk(KERN_DEBUG "node at 0x%08x is obsoleted. Ignoring.\n", ref_offset(ref)));
-			continue;
-		}
+	valid_ref = jffs2_first_valid_node(f->inocache->nodes);
+
+	if (!valid_ref)
+		printk(KERN_WARNING "Eep. No valid nodes for ino #%u\n", f->inocache->ino);
+
+	while (valid_ref) {
 		/* We can hold a pointer to a non-obsolete node without the spinlock,
 		   but _obsolete_ nodes may disappear at any time, if the block
-		   they're in gets erased */
+		   they're in gets erased. So if we mark 'ref' obsolete while we're
+		   not holding the lock, it can go away immediately. For that reason,
+		   we find the next valid node first, before processing 'ref'.
+		*/
+		ref = valid_ref;
+		valid_ref = jffs2_first_valid_node(ref->next_in_ino);
 		spin_unlock(&c->erase_completion_lock);
 
 		cond_resched();
 
 		/* FIXME: point() */
-		err = jffs2_flash_read(c, (ref_offset(ref)), min_t(uint32_t, ref->totlen, sizeof(node)), &retlen, (void *)&node);
+		err = jffs2_flash_read(c, (ref_offset(ref)), 
+				       min_t(uint32_t, ref_totlen(c, NULL, ref), sizeof(node)),
+				       &retlen, (void *)&node);
 		if (err) {
 			printk(KERN_WARNING "error %d reading node at 0x%08x in get_inode_nodes()\n", err, ref_offset(ref));
 			goto free_out;
@@ -141,7 +154,7 @@ int jffs2_get_inode_nodes(struct jffs2_sb_info *c, ino_t ino, struct jffs2_inode
 			
 
 			/* Check we've managed to read at least the common node header */
-		if (retlen < min_t(uint32_t, ref->totlen, sizeof(node.u))) {
+		if (retlen < min_t(uint32_t, ref_totlen(c, NULL, ref), sizeof(node.u))) {
 			printk(KERN_WARNING "short read in get_inode_nodes()\n");
 			err = -EIO;
 			goto free_out;
@@ -181,7 +194,6 @@ int jffs2_get_inode_nodes(struct jffs2_sb_info *c, ino_t ino, struct jffs2_inode
 				err = -ENOMEM;
 				goto free_out;
 			}
-			memset(fd,0,sizeof(struct jffs2_full_dirent) + node.d.nsize+1);
 			fd->raw = ref;
 			fd->version = je32_to_cpu(node.d.version);
 			fd->ino = je32_to_cpu(node.d.ino);
@@ -219,6 +231,7 @@ int jffs2_get_inode_nodes(struct jffs2_sb_info *c, ino_t ino, struct jffs2_inode
 			}
 			fd->nhash = full_name_hash(fd->name, node.d.nsize);
 			fd->next = NULL;
+			fd->name[node.d.nsize] = '\0';
 				/* Wheee. We now have a complete jffs2_full_dirent structure, with
 				   the name in it and everything. Link it into the list 
 				*/
@@ -246,7 +259,7 @@ int jffs2_get_inode_nodes(struct jffs2_sb_info *c, ino_t ino, struct jffs2_inode
 
 			/* If we've never checked the CRCs on this node, check them now. */
 			if (ref_flags(ref) == REF_UNCHECKED) {
-				uint32_t crc;
+				uint32_t crc, len;
 				struct jffs2_eraseblock *jeb;
 
 				crc = crc32(0, &node, sizeof(node.i)-8);
@@ -321,10 +334,12 @@ int jffs2_get_inode_nodes(struct jffs2_sb_info *c, ino_t ino, struct jffs2_inode
 				/* Mark the node as having been checked and fix the accounting accordingly */
 				spin_lock(&c->erase_completion_lock);
 				jeb = &c->blocks[ref->flash_offset / c->sector_size];
-				jeb->used_size += ref->totlen;
-				jeb->unchecked_size -= ref->totlen;
-				c->used_size += ref->totlen;
-				c->unchecked_size -= ref->totlen;
+				len = ref_totlen(c, jeb, ref);
+
+				jeb->used_size += len;
+				jeb->unchecked_size -= len;
+				c->used_size += len;
+				c->unchecked_size -= len;
 
 				/* If node covers at least a whole page, or if it starts at the 
 				   beginning of a page and runs to the end of the file, or if 
@@ -377,6 +392,7 @@ int jffs2_get_inode_nodes(struct jffs2_sb_info *c, ino_t ino, struct jffs2_inode
 		default:
 			if (ref_flags(ref) == REF_UNCHECKED) {
 				struct jffs2_eraseblock *jeb;
+				uint32_t len;
 
 				printk(KERN_ERR "Eep. Unknown node type %04x at %08x was marked REF_UNCHECKED\n",
 				       je16_to_cpu(node.u.nodetype), ref_offset(ref));
@@ -384,10 +400,12 @@ int jffs2_get_inode_nodes(struct jffs2_sb_info *c, ino_t ino, struct jffs2_inode
 				/* Mark the node as having been checked and fix the accounting accordingly */
 				spin_lock(&c->erase_completion_lock);
 				jeb = &c->blocks[ref->flash_offset / c->sector_size];
-				jeb->used_size += ref->totlen;
-				jeb->unchecked_size -= ref->totlen;
-				c->used_size += ref->totlen;
-				c->unchecked_size -= ref->totlen;
+				len = ref_totlen(c, jeb, ref);
+
+				jeb->used_size += len;
+				jeb->unchecked_size -= len;
+				c->used_size += len;
+				c->unchecked_size -= len;
 
 				mark_ref_normal(ref);
 				spin_unlock(&c->erase_completion_lock);
@@ -631,6 +649,8 @@ void jffs2_kill_fragtree(struct rb_root *root, struct jffs2_sb_info *c)
 
 		jffs2_free_node_frag(frag);
 		frag = parent;
+
+		cond_resched();
 	}
 }
 

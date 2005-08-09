@@ -36,8 +36,8 @@
 
 #define DEFAULT_BASE 0x378
 
-static int base;
-MODULE_PARM(base, "i");
+static u16 base;
+module_param(base, ushort, 0);
 MODULE_PARM_DESC(base, "Base I/O address");
 
 /* ----- Low-level parallel port access ----------------------------------- */
@@ -112,7 +112,7 @@ static struct i2c_algo_bit_data parport_algo_data = {
 
 static struct i2c_adapter parport_adapter = {
 	.owner		= THIS_MODULE,
-	.class		= I2C_ADAP_CLASS_SMBUS,
+	.class		= I2C_CLASS_HWMON,
 	.id		= I2C_HW_B_LP,
 	.algo_data	= &parport_algo_data,
 	.name		= "Parallel port adapter (light)",

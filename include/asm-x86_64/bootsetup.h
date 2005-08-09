@@ -2,7 +2,8 @@
 #ifndef _X86_64_BOOTSETUP_H
 #define _X86_64_BOOTSETUP_H 1
 
-extern char x86_boot_params[2048];
+#define BOOT_PARAM_SIZE		4096
+extern char x86_boot_params[BOOT_PARAM_SIZE];
 
 /*
  * This is set up by the setup-routine at boot-time
@@ -25,12 +26,12 @@ extern char x86_boot_params[2048];
 #define KERNEL_START (*(unsigned int *) (PARAM+0x214))
 #define INITRD_START (*(unsigned int *) (PARAM+0x218))
 #define INITRD_SIZE (*(unsigned int *) (PARAM+0x21c))
-#define EDID_INFO (*(struct edid_info *) (PARAM+0x440))
-#define DISK80_SIGNATURE (*(unsigned int*) (PARAM+DISK80_SIG_BUFFER))
+#define EDID_INFO (*(struct edid_info *) (PARAM+0x140))
 #define EDD_NR     (*(unsigned char *) (PARAM+EDDNR))
+#define EDD_MBR_SIG_NR (*(unsigned char *) (PARAM+EDD_MBR_SIG_NR_BUF))
+#define EDD_MBR_SIGNATURE ((unsigned int *) (PARAM+EDD_MBR_SIG_BUF))
 #define EDD_BUF     ((struct edd_info *) (PARAM+EDDBUF))
 #define COMMAND_LINE saved_command_line
-#define COMMAND_LINE_SIZE 256
 
 #define RAMDISK_IMAGE_START_MASK  	0x07FF
 #define RAMDISK_PROMPT_FLAG		0x8000

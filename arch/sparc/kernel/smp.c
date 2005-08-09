@@ -30,21 +30,18 @@
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/oplib.h>
-#include <asm/hardirq.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 #include <asm/cpudata.h>
 
 volatile int smp_processors_ready = 0;
 int smp_num_cpus = 1;
-int smp_threads_ready=0;
 volatile unsigned long cpu_callin_map[NR_CPUS] __initdata = {0,};
 unsigned char boot_cpu_id = 0;
 unsigned char boot_cpu_id4 = 0; /* boot_cpu_id << 2 */
 int smp_activated = 0;
 volatile int __cpu_number_map[NR_CPUS];
 volatile int __cpu_logical_map[NR_CPUS];
-cycles_t cacheflush_time = 0; /* XXX */
 
 cpumask_t cpu_online_map = CPU_MASK_NONE;
 cpumask_t phys_cpu_present_map = CPU_MASK_NONE;
@@ -127,7 +124,9 @@ void smp_flush_tlb_all(void)
 void smp_flush_cache_mm(struct mm_struct *mm)
 {
 	if(mm->context != NO_CONTEXT) {
-		if(mm->cpu_vm_mask != (1 << smp_processor_id()))
+		cpumask_t cpu_mask = mm->cpu_vm_mask;
+		cpu_clear(smp_processor_id(), cpu_mask);
+		if (!cpus_empty(cpu_mask))
 			xc1((smpfunc_t) BTFIXUP_CALL(local_flush_cache_mm), (unsigned long) mm);
 		local_flush_cache_mm(mm);
 	}
@@ -136,10 +135,12 @@ void smp_flush_cache_mm(struct mm_struct *mm)
 void smp_flush_tlb_mm(struct mm_struct *mm)
 {
 	if(mm->context != NO_CONTEXT) {
-		if(mm->cpu_vm_mask != (1 << smp_processor_id())) {
+		cpumask_t cpu_mask = mm->cpu_vm_mask;
+		cpu_clear(smp_processor_id(), cpu_mask);
+		if (!cpus_empty(cpu_mask)) {
 			xc1((smpfunc_t) BTFIXUP_CALL(local_flush_tlb_mm), (unsigned long) mm);
 			if(atomic_read(&mm->mm_users) == 1 && current->active_mm == mm)
-				mm->cpu_vm_mask = (1 << smp_processor_id());
+				mm->cpu_vm_mask = cpumask_of_cpu(smp_processor_id());
 		}
 		local_flush_tlb_mm(mm);
 	}
@@ -151,7 +152,9 @@ void smp_flush_cache_range(struct vm_area_struct *vma, unsigned long start,
 	struct mm_struct *mm = vma->vm_mm;
 
 	if (mm->context != NO_CONTEXT) {
-		if(mm->cpu_vm_mask != (1 << smp_processor_id()))
+		cpumask_t cpu_mask = mm->cpu_vm_mask;
+		cpu_clear(smp_processor_id(), cpu_mask);
+		if (!cpus_empty(cpu_mask))
 			xc3((smpfunc_t) BTFIXUP_CALL(local_flush_cache_range), (unsigned long) vma, start, end);
 		local_flush_cache_range(vma, start, end);
 	}
@@ -163,7 +166,9 @@ void smp_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 	struct mm_struct *mm = vma->vm_mm;
 
 	if (mm->context != NO_CONTEXT) {
-		if(mm->cpu_vm_mask != (1 << smp_processor_id()))
+		cpumask_t cpu_mask = mm->cpu_vm_mask;
+		cpu_clear(smp_processor_id(), cpu_mask);
+		if (!cpus_empty(cpu_mask))
 			xc3((smpfunc_t) BTFIXUP_CALL(local_flush_tlb_range), (unsigned long) vma, start, end);
 		local_flush_tlb_range(vma, start, end);
 	}
@@ -174,7 +179,9 @@ void smp_flush_cache_page(struct vm_area_struct *vma, unsigned long page)
 	struct mm_struct *mm = vma->vm_mm;
 
 	if(mm->context != NO_CONTEXT) {
-		if(mm->cpu_vm_mask != (1 << smp_processor_id()))
+		cpumask_t cpu_mask = mm->cpu_vm_mask;
+		cpu_clear(smp_processor_id(), cpu_mask);
+		if (!cpus_empty(cpu_mask))
 			xc2((smpfunc_t) BTFIXUP_CALL(local_flush_cache_page), (unsigned long) vma, page);
 		local_flush_cache_page(vma, page);
 	}
@@ -185,10 +192,17 @@ void smp_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 	struct mm_struct *mm = vma->vm_mm;
 
 	if(mm->context != NO_CONTEXT) {
-		if(mm->cpu_vm_mask != (1 << smp_processor_id()))
+		cpumask_t cpu_mask = mm->cpu_vm_mask;
+		cpu_clear(smp_processor_id(), cpu_mask);
+		if (!cpus_empty(cpu_mask))
 			xc2((smpfunc_t) BTFIXUP_CALL(local_flush_tlb_page), (unsigned long) vma, page);
 		local_flush_tlb_page(vma, page);
 	}
+}
+
+void smp_reschedule_irq(void)
+{
+	set_need_resched();
 }
 
 void smp_flush_page_to_ram(unsigned long page)
@@ -207,7 +221,9 @@ void smp_flush_page_to_ram(unsigned long page)
 
 void smp_flush_sig_insns(struct mm_struct *mm, unsigned long insn_addr)
 {
-	if(mm->cpu_vm_mask != (1 << smp_processor_id()))
+	cpumask_t cpu_mask = mm->cpu_vm_mask;
+	cpu_clear(smp_processor_id(), cpu_mask);
+	if (!cpus_empty(cpu_mask))
 		xc2((smpfunc_t) BTFIXUP_CALL(local_flush_sig_insns), (unsigned long) mm, insn_addr);
 	local_flush_sig_insns(mm, insn_addr);
 }
@@ -215,7 +231,7 @@ void smp_flush_sig_insns(struct mm_struct *mm, unsigned long insn_addr)
 extern unsigned int lvl14_resolution;
 
 /* /proc/profile writes can call this, don't __init it please. */
-static spinlock_t prof_setup_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(prof_setup_lock);
 
 int setup_profiling_timer(unsigned int multiplier)
 {

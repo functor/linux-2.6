@@ -177,7 +177,7 @@ titan_parse_p_perror(int which, int port, u64 perror, int print)
 #define TITAN__PCHIP_PERROR__CMD__S	(52)
 #define TITAN__PCHIP_PERROR__CMD__M	(0x0f)
 #define TITAN__PCHIP_PERROR__ADDR__S	(14)
-#define TITAN__PCHIP_PERROR__ADDR__M	(0x1ffffffff)
+#define TITAN__PCHIP_PERROR__ADDR__M	(0x1fffffffful)
 
 	if (!(perror & TITAN__PCHIP_PERROR__ERRMASK))
 		return MCHK_DISPOSITION_UNKNOWN_ERROR;
@@ -407,8 +407,10 @@ titan_machine_check(u64 vector, u64 la_ptr, struct pt_regs *regs)
 	/*
 	 * Only handle system errors here 
 	 */
-	if ((vector != SCB_Q_SYSMCHK) && (vector != SCB_Q_SYSERR)) 
-		return ev6_machine_check(vector, la_ptr, regs);
+	if ((vector != SCB_Q_SYSMCHK) && (vector != SCB_Q_SYSERR)) {
+		ev6_machine_check(vector, la_ptr, regs);
+		return;
+	}
 
 	/* 
 	 * It's a system error, handle it here

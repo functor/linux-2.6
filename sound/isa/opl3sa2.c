@@ -25,11 +25,11 @@
 #include <linux/pm.h>
 #include <linux/slab.h>
 #include <linux/pnp.h>
+#include <linux/moduleparam.h>
 #include <sound/core.h>
 #include <sound/cs4231.h>
 #include <sound/mpu401.h>
 #include <sound/opl3.h>
-#define SNDRV_GET_ID
 #include <sound/initval.h>
 
 #include <asm/io.h>
@@ -37,8 +37,7 @@
 MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Yamaha OPL3SA2+");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_DEVICES("{{Yamaha,YMF719E-S},"
+MODULE_SUPPORTED_DEVICE("{{Yamaha,YMF719E-S},"
 		"{Genius,Sound Maker 3DX},"
 		"{Yamaha,OPL3SA3},"
 		"{Intel,AL440LX sound},"
@@ -60,47 +59,34 @@ static int dma1[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* 1,3,5,6,7 */
 static int dma2[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* 1,3,5,6,7 */
 static int opl3sa3_ymode[SNDRV_CARDS] = { [0 ... (SNDRV_CARDS-1)] = 0 };   /* 0,1,2,3 */ /*SL Added*/
 
-MODULE_PARM(index, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for OPL3-SA soundcard.");
-MODULE_PARM_SYNTAX(index, SNDRV_INDEX_DESC);
-MODULE_PARM(id, "1-" __MODULE_STRING(SNDRV_CARDS) "s");
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for OPL3-SA soundcard.");
-MODULE_PARM_SYNTAX(id, SNDRV_ID_DESC);
-MODULE_PARM(enable, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable OPL3-SA soundcard.");
-MODULE_PARM_SYNTAX(enable, SNDRV_ENABLE_DESC);
 #ifdef CONFIG_PNP
-MODULE_PARM(isapnp, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(isapnp, bool, NULL, 0444);
 MODULE_PARM_DESC(isapnp, "PnP detection for specified soundcard.");
-MODULE_PARM_SYNTAX(isapnp, SNDRV_ISAPNP_DESC);
 #endif
-MODULE_PARM(port, "1-" __MODULE_STRING(SNDRV_CARDS) "l");
+module_param_array(port, long, NULL, 0444);
 MODULE_PARM_DESC(port, "Port # for OPL3-SA driver.");
-MODULE_PARM_SYNTAX(port, SNDRV_ENABLED ",allows:{{0xf86},{0x370},{0x100}},dialog:list");
-MODULE_PARM(sb_port, "1-" __MODULE_STRING(SNDRV_CARDS) "l");
+module_param_array(sb_port, long, NULL, 0444);
 MODULE_PARM_DESC(sb_port, "SB port # for OPL3-SA driver.");
-MODULE_PARM_SYNTAX(sb_port, SNDRV_ENABLED ",allows:{{0x220},{0x240},{0x260}},dialog:list");
-MODULE_PARM(wss_port, "1-" __MODULE_STRING(SNDRV_CARDS) "l");
+module_param_array(wss_port, long, NULL, 0444);
 MODULE_PARM_DESC(wss_port, "WSS port # for OPL3-SA driver.");
-MODULE_PARM_SYNTAX(wss_port, SNDRV_ENABLED ",allows:{{0x530},{0xe80},{0xf40},{0x604}},dialog:list");
-MODULE_PARM(fm_port, "1-" __MODULE_STRING(SNDRV_CARDS) "l");
+module_param_array(fm_port, long, NULL, 0444);
 MODULE_PARM_DESC(fm_port, "FM port # for OPL3-SA driver.");
-MODULE_PARM_SYNTAX(fm_port, SNDRV_ENABLED ",allows:{{0x388}},dialog:list");
-MODULE_PARM(midi_port, "1-" __MODULE_STRING(SNDRV_CARDS) "l");
+module_param_array(midi_port, long, NULL, 0444);
 MODULE_PARM_DESC(midi_port, "MIDI port # for OPL3-SA driver.");
-MODULE_PARM_SYNTAX(midi_port, SNDRV_ENABLED ",allows:{{0x330},{0x300}},dialog:list");
-MODULE_PARM(irq, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(irq, int, NULL, 0444);
 MODULE_PARM_DESC(irq, "IRQ # for OPL3-SA driver.");
-MODULE_PARM_SYNTAX(irq, SNDRV_ENABLED ",allows:{{0},{1},{3},{5},{9},{11},{12},{15}},dialog:list");
-MODULE_PARM(dma1, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(dma1, int, NULL, 0444);
 MODULE_PARM_DESC(dma1, "DMA1 # for OPL3-SA driver.");
-MODULE_PARM_SYNTAX(dma1, SNDRV_ENABLED ",allows:{{1},{3},{5},{6},{7}},dialog:list");
-MODULE_PARM(dma2, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(dma2, int, NULL, 0444);
 MODULE_PARM_DESC(dma2, "DMA2 # for OPL3-SA driver.");
-MODULE_PARM_SYNTAX(dma2, SNDRV_ENABLED ",allows:{{1},{3},{5},{6},{7}},dialog:list");
-MODULE_PARM(opl3sa3_ymode, "1-" __MODULE_STRING(SNDRV_CARDS) "i"); /* SL Added */
+module_param_array(opl3sa3_ymode, int, NULL, 0444);
 MODULE_PARM_DESC(opl3sa3_ymode, "Speaker size selection for 3D Enhancement mode: Desktop/Large Notebook/Small Notebook/HiFi.");
-MODULE_PARM_SYNTAX(opl3sa3_ymode, SNDRV_ENABLED ",allows:{{0,3}},dialog:list");  /* SL Added */
 
 /* control ports */
 #define OPL3SA2_PM_CTRL		0x01
@@ -130,7 +116,6 @@ MODULE_PARM_SYNTAX(opl3sa3_ymode, SNDRV_ENABLED ",allows:{{0,3}},dialog:list"); 
 #define OPL3SA2_PM_D3	(OPL3SA2_PM_ADOWN|OPL3SA2_PM_PSV|OPL3SA2_PM_PDN|OPL3SA2_PM_PDX)
 
 typedef struct snd_opl3sa2 opl3sa2_t;
-#define chip_t opl3sa2_t
 
 struct snd_opl3sa2 {
 	snd_card_t *card;
@@ -151,7 +136,6 @@ struct snd_opl3sa2 {
 	snd_kcontrol_t *master_switch;
 	snd_kcontrol_t *master_volume;
 #ifdef CONFIG_PM
-	struct pm_dev *pm_dev;
 	void (*cs4231_suspend)(cs4231_t *);
 	void (*cs4231_resume)(cs4231_t *);
 #endif
@@ -168,6 +152,8 @@ static struct pnp_card_device_id snd_opl3sa2_pnpids[] = {
 	{ .id = "YMH0030", .devs = { { "YMH0021" } } },
 	/* Yamaha OPL3-SA2 */
 	{ .id = "YMH0800", .devs = { { "YMH0021" } } },
+	/* Yamaha OPL3-SA2 */
+	{ .id = "YMH0801", .devs = { { "YMH0021" } } },
 	/* NeoMagic MagicWave 3DX */
 	{ .id = "NMX2200", .devs = { { "YMH2210" } } },
 	/* --- */
@@ -302,7 +288,7 @@ static int __init snd_opl3sa2_detect(opl3sa2_t *chip)
 static irqreturn_t snd_opl3sa2_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
 	unsigned short status;
-	opl3sa2_t *chip = snd_magic_cast(opl3sa2_t, dev_id, return IRQ_NONE);
+	opl3sa2_t *chip = dev_id;
 	int handled = 0;
 
 	if (chip == NULL || chip->card == NULL)
@@ -355,7 +341,7 @@ static int snd_opl3sa2_info_single(snd_kcontrol_t *kcontrol, snd_ctl_elem_info_t
 	return 0;
 }
 
-int snd_opl3sa2_get_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
+static int snd_opl3sa2_get_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
 {
 	opl3sa2_t *chip = snd_kcontrol_chip(kcontrol);
 	unsigned long flags;
@@ -372,7 +358,7 @@ int snd_opl3sa2_get_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * uco
 	return 0;
 }
 
-int snd_opl3sa2_put_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
+static int snd_opl3sa2_put_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
 {
 	opl3sa2_t *chip = snd_kcontrol_chip(kcontrol);
 	unsigned long flags;
@@ -402,7 +388,7 @@ int snd_opl3sa2_put_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * uco
   .get = snd_opl3sa2_get_double, .put = snd_opl3sa2_put_double, \
   .private_value = left_reg | (right_reg << 8) | (shift_left << 16) | (shift_right << 19) | (mask << 24) | (invert << 22) }
 
-int snd_opl3sa2_info_double(snd_kcontrol_t *kcontrol, snd_ctl_elem_info_t * uinfo)
+static int snd_opl3sa2_info_double(snd_kcontrol_t *kcontrol, snd_ctl_elem_info_t * uinfo)
 {
 	int mask = (kcontrol->private_value >> 24) & 0xff;
 
@@ -413,7 +399,7 @@ int snd_opl3sa2_info_double(snd_kcontrol_t *kcontrol, snd_ctl_elem_info_t * uinf
 	return 0;
 }
 
-int snd_opl3sa2_get_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
+static int snd_opl3sa2_get_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
 {
 	opl3sa2_t *chip = snd_kcontrol_chip(kcontrol);
 	unsigned long flags;
@@ -435,7 +421,7 @@ int snd_opl3sa2_get_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * uco
 	return 0;
 }
 
-int snd_opl3sa2_put_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
+static int snd_opl3sa2_put_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
 {
 	opl3sa2_t *chip = snd_kcontrol_chip(kcontrol);
 	unsigned long flags;
@@ -475,16 +461,12 @@ int snd_opl3sa2_put_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * uco
 	return change;
 }
 
-#define OPL3SA2_CONTROLS (sizeof(snd_opl3sa2_controls)/sizeof(snd_kcontrol_new_t))
-
 static snd_kcontrol_new_t snd_opl3sa2_controls[] = {
 OPL3SA2_DOUBLE("Master Playback Switch", 0, 0x07, 0x08, 7, 7, 1, 1),
 OPL3SA2_DOUBLE("Master Playback Volume", 0, 0x07, 0x08, 0, 0, 15, 1),
 OPL3SA2_SINGLE("Mic Playback Switch", 0, 0x09, 7, 1, 1),
 OPL3SA2_SINGLE("Mic Playback Volume", 0, 0x09, 0, 31, 1)
 };
-
-#define OPL3SA2_TONE_CONTROLS (sizeof(snd_opl3sa2_tone_controls)/sizeof(snd_kcontrol_new_t))
 
 static snd_kcontrol_new_t snd_opl3sa2_tone_controls[] = {
 OPL3SA2_DOUBLE("3D Control - Wide", 0, 0x14, 0x14, 4, 0, 7, 0),
@@ -494,7 +476,7 @@ OPL3SA2_DOUBLE("Tone Control - Treble", 0, 0x16, 0x16, 4, 0, 7, 0)
 
 static void snd_opl3sa2_master_free(snd_kcontrol_t *kcontrol)
 {
-	opl3sa2_t *chip = snd_magic_cast(opl3sa2_t, _snd_kcontrol_chip(kcontrol), return);
+	opl3sa2_t *chip = snd_kcontrol_chip(kcontrol);
 	chip->master_switch = NULL;
 	chip->master_volume = NULL;
 }
@@ -529,7 +511,7 @@ static int __init snd_opl3sa2_mixer(opl3sa2_t *chip)
         if ((err = snd_ctl_rename_id(card, &id1, &id2)) < 0)
                 return err;
 	/* add OPL3SA2 controls */
-	for (idx = 0; idx < OPL3SA2_CONTROLS; idx++) {
+	for (idx = 0; idx < ARRAY_SIZE(snd_opl3sa2_controls); idx++) {
 		if ((err = snd_ctl_add(card, kctl = snd_ctl_new1(&snd_opl3sa2_controls[idx], chip))) < 0)
 			return err;
 		switch (idx) {
@@ -538,7 +520,7 @@ static int __init snd_opl3sa2_mixer(opl3sa2_t *chip)
 		}
 	}
 	if (chip->version > 2) {
-		for (idx = 0; idx < OPL3SA2_TONE_CONTROLS; idx++)
+		for (idx = 0; idx < ARRAY_SIZE(snd_opl3sa2_tone_controls); idx++)
 			if ((err = snd_ctl_add(card, snd_ctl_new1(&snd_opl3sa2_tone_controls[idx], chip))) < 0)
 				return err;
 	}
@@ -547,12 +529,9 @@ static int __init snd_opl3sa2_mixer(opl3sa2_t *chip)
 
 /* Power Management support functions */
 #ifdef CONFIG_PM
-static void snd_opl3sa2_suspend(opl3sa2_t *chip)
+static int snd_opl3sa2_suspend(snd_card_t *card, pm_message_t state)
 {
-	snd_card_t *card = chip->card;
-
-	if (card->power_state == SNDRV_CTL_POWER_D3hot)
-		return;
+	opl3sa2_t *chip = card->pm_private_data;
 
 	snd_pcm_suspend_all(chip->cs4231->pcm); /* stop before saving regs */
 	chip->cs4231_suspend(chip->cs4231);
@@ -560,16 +539,13 @@ static void snd_opl3sa2_suspend(opl3sa2_t *chip)
 	/* power down */
 	snd_opl3sa2_write(chip, OPL3SA2_PM_CTRL, OPL3SA2_PM_D3);
 
-	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
+	return 0;
 }
 
-static void snd_opl3sa2_resume(opl3sa2_t *chip)
+static int snd_opl3sa2_resume(snd_card_t *card)
 {
-	snd_card_t *card = chip->card;
+	opl3sa2_t *chip = card->pm_private_data;
 	int i;
-
-	if (card->power_state == SNDRV_CTL_POWER_D0)
-		return;
 
 	/* power up */
 	snd_opl3sa2_write(chip, OPL3SA2_PM_CTRL, OPL3SA2_PM_D0);
@@ -586,44 +562,8 @@ static void snd_opl3sa2_resume(opl3sa2_t *chip)
 	/* restore cs4231 */
 	chip->cs4231_resume(chip->cs4231);
 
-	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
-}
-
-/* callback for control API */
-static int snd_opl3sa2_set_power_state(snd_card_t *card, unsigned int power_state)
-{
-	opl3sa2_t *chip = (opl3sa2_t *) card->power_state_private_data;
-	switch (power_state) {
-	case SNDRV_CTL_POWER_D0:
-	case SNDRV_CTL_POWER_D1:
-	case SNDRV_CTL_POWER_D2:
-		snd_opl3sa2_resume(chip);
-		break;
-	case SNDRV_CTL_POWER_D3hot:
-	case SNDRV_CTL_POWER_D3cold:
-		snd_opl3sa2_suspend(chip);
-		break;
-	default:
-		return -EINVAL;
-	}
 	return 0;
 }
-
-static int snd_opl3sa2_pm_callback(struct pm_dev *dev, pm_request_t rqst, void *data)
-{
-	opl3sa2_t *chip = snd_magic_cast(opl3sa2_t, dev->data, return 0);
-
-	switch (rqst) {
-	case PM_SUSPEND:
-		snd_opl3sa2_suspend(chip);
-		break;
-	case PM_RESUME:
-		snd_opl3sa2_resume(chip);
-		break;
-	}
-	return 0;
-}
-
 #endif /* CONFIG_PM */
 
 #ifdef CONFIG_PNP
@@ -688,23 +628,19 @@ static int __init snd_opl3sa2_pnp(int dev, opl3sa2_t *chip,
 
 static int snd_opl3sa2_free(opl3sa2_t *chip)
 {
-#ifdef CONFIG_PM
-	if (chip->pm_dev)
-		pm_unregister(chip->pm_dev);
-#endif
 	if (chip->irq >= 0)
 		free_irq(chip->irq, (void *)chip);
 	if (chip->res_port) {
 		release_resource(chip->res_port);
 		kfree_nocheck(chip->res_port);
 	}
-	snd_magic_kfree(chip);
+	kfree(chip);
 	return 0;
 }
 
 static int snd_opl3sa2_dev_free(snd_device_t *device)
 {
-	opl3sa2_t *chip = snd_magic_cast(opl3sa2_t, device->device_data, return -ENXIO);
+	opl3sa2_t *chip = device->device_data;
 	return snd_opl3sa2_free(chip);
 }
 
@@ -749,7 +685,7 @@ static int __devinit snd_opl3sa2_probe(int dev,
 		return -ENOMEM;
 	strcpy(card->driver, "OPL3SA2");
 	strcpy(card->shortname, "Yamaha OPL3-SA2");
-	chip = snd_magic_kcalloc(opl3sa2_t, 0, GFP_KERNEL);
+	chip = kcalloc(1, sizeof(*chip), GFP_KERNEL);
 	if (chip == NULL) {
 		err = -ENOMEM;
 		goto __error;
@@ -775,7 +711,7 @@ static int __devinit snd_opl3sa2_probe(int dev,
 		chip->single_dma = 1;
 	if ((err = snd_opl3sa2_detect(chip)) < 0)
 		goto __error;
-	if (request_irq(xirq, snd_opl3sa2_interrupt, SA_INTERRUPT, "OPL3-SA2/3", (void *)chip)) {
+	if (request_irq(xirq, snd_opl3sa2_interrupt, SA_INTERRUPT, "OPL3-SA2", (void *)chip)) {
 		snd_printk(KERN_ERR "opl3sa2: can't grab IRQ %d\n", xirq);
 		err = -ENODEV;
 		goto __error;
@@ -816,22 +752,12 @@ static int __devinit snd_opl3sa2_probe(int dev,
 			goto __error;
 	}
 #ifdef CONFIG_PM
-	/* Power Management */
-	chip->pm_dev = pm_register(PM_ISA_DEV, 0, snd_opl3sa2_pm_callback);
-	if (chip->pm_dev) {
-		chip->pm_dev->data = chip;
-		/* remember callbacks for cs4231 - they are called inside
-		 * opl3sa2 pm callback
-		 */
-		chip->cs4231_suspend = chip->cs4231->suspend;
-		chip->cs4231_resume = chip->cs4231->resume;
-		/* now clear callbacks for cs4231 */
-		chip->cs4231->suspend = NULL;
-		chip->cs4231->resume = NULL;
-		/* set control api callback */
-		card->set_power_state = snd_opl3sa2_set_power_state;
-		card->power_state_private_data = chip;
-	}
+	chip->cs4231_suspend = chip->cs4231->suspend;
+	chip->cs4231_resume = chip->cs4231->resume;
+	/* now clear callbacks for cs4231 */
+	chip->cs4231->suspend = NULL;
+	chip->cs4231->resume = NULL;
+	snd_card_set_isa_pm_callback(card, snd_opl3sa2_suspend, snd_opl3sa2_resume, chip);
 #endif
 
 	sprintf(card->longname, "%s at 0x%lx, irq %d, dma %d",
@@ -861,7 +787,7 @@ static int __devinit snd_opl3sa2_pnp_detect(struct pnp_card_link *card,
         int res;
 
         for ( ; dev < SNDRV_CARDS; dev++) {
-                if (!enable[dev] && !isapnp[dev])
+                if (!enable[dev] || !isapnp[dev])
                         continue;
                 res = snd_opl3sa2_probe(dev, card, id);
                 if (res < 0)
@@ -932,42 +858,3 @@ static void __exit alsa_card_opl3sa2_exit(void)
 
 module_init(alsa_card_opl3sa2_init)
 module_exit(alsa_card_opl3sa2_exit)
-
-#ifndef MODULE
-
-/* format is: snd-opl3sa2=enable,index,id,isapnp,
-			  port,sb_port,wss_port,fm_port,
-			  midi_port,irq,dma1,dma2,
-			  opl3sa3_ymode */
-
-static int __init alsa_card_opl3sa2_setup(char *str)
-{
-	static unsigned __initdata nr_dev = 0;
-	int __attribute__ ((__unused__)) pnp = INT_MAX;
-
-	if (nr_dev >= SNDRV_CARDS)
-		return 0;
-	(void)(get_option(&str,&enable[nr_dev]) == 2 &&
-	       get_option(&str,&index[nr_dev]) == 2 &&
-	       get_id(&str,&id[nr_dev]) == 2 &&
-	       get_option(&str,&pnp) == 2 &&
-	       get_option_long(&str,&port[nr_dev]) == 2 &&
-	       get_option_long(&str,&sb_port[nr_dev]) == 2 &&
-	       get_option_long(&str,&wss_port[nr_dev]) == 2 &&
-	       get_option_long(&str,&fm_port[nr_dev]) == 2 &&
-	       get_option_long(&str,&midi_port[nr_dev]) == 2 &&
-	       get_option(&str,&irq[nr_dev]) == 2 &&
-	       get_option(&str,&dma1[nr_dev]) == 2 &&
-	       get_option(&str,&dma2[nr_dev]) == 2 &&
-	       get_option(&str,&opl3sa3_ymode[nr_dev]) == 2);
-#ifdef CONFIG_PNP
-	if (pnp != INT_MAX)
-		isapnp[nr_dev] = pnp;
-#endif
-	nr_dev++;
-	return 1;
-}
-
-__setup("snd-opl3sa2=", alsa_card_opl3sa2_setup);
-
-#endif /* ifndef MODULE */

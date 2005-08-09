@@ -102,11 +102,11 @@ DRV_NAME ".c:v" DRV_VERSION " " DRV_RELDATE " Richard Procter <rnp@paradise.net.
 #include <linux/wait.h>
 #include <linux/ethtool.h>
 #include <linux/completion.h>
+#include <linux/bitops.h>
 
 #include <asm/semaphore.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 
@@ -197,7 +197,7 @@ struct mca_adapters_t {
 	char		*name;
 };
 
-const struct mca_adapters_t mc32_adapters[] = {
+static const struct mca_adapters_t mc32_adapters[] = {
 	{ 0x0041, "3COM EtherLink MC/32" },
 	{ 0x8EF5, "IBM High Performance Lan Adapter" },
 	{ 0x0000, NULL }
@@ -287,6 +287,7 @@ struct net_device *__init mc32_probe(int unit)
 			
 		}
 	}
+	free_netdev(dev);
 	return ERR_PTR(-ENODEV);
 }
 
@@ -434,10 +435,10 @@ static int __init mc32_probe1(struct net_device *dev, int slot)
 	 *	Grab the IRQ
 	 */
 
-	err = request_irq(dev->irq, &mc32_interrupt, SA_SHIRQ | SA_SAMPLE_RANDOM, dev->name, dev);
+	err = request_irq(dev->irq, &mc32_interrupt, SA_SHIRQ | SA_SAMPLE_RANDOM, DRV_NAME, dev);
 	if (err) {
 		release_region(dev->base_addr, MC32_IO_EXTENT);
-		printk(KERN_ERR "%s: unable to get IRQ %d.\n", dev->name, dev->irq);
+		printk(KERN_ERR "%s: unable to get IRQ %d.\n", DRV_NAME, dev->irq);
 		goto err_exit_ports;
 	}
 
@@ -750,18 +751,15 @@ static int mc32_load_rx_ring(struct net_device *dev)
 	
 	rx_base=lp->rx_chain;
 
-	for(i=0; i<RX_RING_LEN; i++)
-	{
+	for(i=0; i<RX_RING_LEN; i++) {
 		lp->rx_ring[i].skb=alloc_skb(1532, GFP_KERNEL);
-		skb_reserve(lp->rx_ring[i].skb, 18);  
-
-		if(lp->rx_ring[i].skb==NULL)
-		{
-			for(;i>=0;i--)
+		if (lp->rx_ring[i].skb==NULL) {
+			for (;i>=0;i--)
 				kfree_skb(lp->rx_ring[i].skb);
 			return -ENOBUFS;
 		}
-		
+		skb_reserve(lp->rx_ring[i].skb, 18);
+
 		p=isa_bus_to_virt(lp->base+rx_base);
 				
 		p->control=0;

@@ -5,9 +5,13 @@
 #ifndef _CRIS_PGTABLE_H
 #define _CRIS_PGTABLE_H
 
+#include <asm-generic/4level-fixup.h>
+
+#ifndef __ASSEMBLY__
 #include <linux/config.h>
 #include <linux/sched.h>
 #include <asm/mmu.h>
+#endif
 #include <asm/arch/pgtable.h>
 
 /*
@@ -21,14 +25,17 @@
  * This file contains the functions and defines necessary to modify and use
  * the CRIS page table tree.
  */
-
+#ifndef __ASSEMBLY__
 extern void paging_init(void);
+#endif
 
 /* Certain architectures need to do special things when pte's
  * within a page table are directly modified.  Thus, the following
  * hook is made available.
  */
 #define set_pte(pteptr, pteval) ((*(pteptr)) = (pteval))
+#define set_pte_at(mm,addr,ptep,pteval) set_pte(ptep,pteval)
+
 /*
  * (pmds are folded into pgds so this doesn't get actually called,
  * but the define is needed for a generic inline function.)
@@ -69,11 +76,13 @@ extern void paging_init(void);
  */
 
 #define USER_PTRS_PER_PGD       (TASK_SIZE/PGDIR_SIZE)
-#define FIRST_USER_PGD_NR       0
+#define FIRST_USER_ADDRESS      0
 
 /* zero page used for uninitialized stuff */
+#ifndef __ASSEMBLY__
 extern unsigned long empty_zero_page;
 #define ZERO_PAGE(vaddr) (virt_to_page(empty_zero_page))
+#endif
 
 /* number of bits that fit into a memory pointer */
 #define BITS_PER_PTR			(8*sizeof(unsigned long))
@@ -94,7 +103,7 @@ extern unsigned long empty_zero_page;
 
 #define pte_none(x)	(!pte_val(x))
 #define pte_present(x)	(pte_val(x) & _PAGE_PRESENT)
-#define pte_clear(xp)	do { pte_val(*(xp)) = 0; } while (0)
+#define pte_clear(mm,addr,xp)	do { pte_val(*(xp)) = 0; } while (0)
 
 #define pmd_none(x)	(!pmd_val(x))
 /* by removing the _PAGE_KERNEL bit from the comparision, the same pmd_bad
@@ -103,6 +112,8 @@ extern unsigned long empty_zero_page;
 #define	pmd_bad(x)	((pmd_val(x) & (~PAGE_MASK & ~_PAGE_KERNEL)) != _PAGE_TABLE)
 #define pmd_present(x)	(pmd_val(x) & _PAGE_PRESENT)
 #define pmd_clear(xp)	do { pmd_val(*(xp)) = 0; } while (0)
+
+#ifndef __ASSEMBLY__
 
 /*
  * The "pgd_xxx()" functions here are trivial for a folded two-level
@@ -337,6 +348,5 @@ extern inline void update_mmu_cache(struct vm_area_struct * vma,
 #define pte_to_pgoff(x)	(pte_val(x) >> 6)
 #define pgoff_to_pte(x)	__pte(((x) << 6) | _PAGE_FILE)
 
-typedef pte_t *pte_addr_t;
-
+#endif /* __ASSEMBLY__ */
 #endif /* _CRIS_PGTABLE_H */

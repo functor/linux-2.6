@@ -46,7 +46,7 @@ MODULE_LICENSE("GPL");
 
 static struct pi_protocol *protocols[MAX_PROTOS];
 
-static spinlock_t pi_spinlock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(pi_spinlock);
 
 void pi_write_regr(PIA * pi, int cont, int regr, int val)
 {
@@ -140,7 +140,7 @@ static void pi_claim(PIA * pi)
 #endif
 }
 
-void pi_unclaim(PIA * pi)
+static void pi_unclaim(PIA * pi)
 {
 	pi->claimed = 0;
 #ifdef CONFIG_PARPORT
@@ -148,8 +148,6 @@ void pi_unclaim(PIA * pi)
 		parport_release((struct pardevice *) (pi->pardev));
 #endif
 }
-
-EXPORT_SYMBOL(pi_unclaim);
 
 void pi_connect(PIA * pi)
 {
@@ -264,7 +262,7 @@ void pi_unregister(PIP * pr)
 		printk("paride: %s not registered\n", pr->name);
 		return;
 	}
-	protocols[pr->index] = 0;
+	protocols[pr->index] = NULL;
 }
 
 EXPORT_SYMBOL(pi_unregister);

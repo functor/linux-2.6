@@ -2,8 +2,8 @@
  * volume.h - Defines for volume structures in NTFS Linux kernel driver. Part
  *	      of the Linux-NTFS project.
  *
- * Copyright (c) 2001-2004 Anton Altaparmakov.
- * Copyright (c) 2002 Richard Russon.
+ * Copyright (c) 2001-2004 Anton Altaparmakov
+ * Copyright (c) 2002 Richard Russon
  *
  * This program/include file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as published
@@ -23,6 +23,8 @@
 
 #ifndef _LINUX_NTFS_VOLUME_H
 #define _LINUX_NTFS_VOLUME_H
+
+#include <linux/rwsem.h>
 
 #include "types.h"
 #include "layout.h"
@@ -72,17 +74,31 @@ typedef struct {
 	u64 serial_no;			/* The volume serial number. */
 	/* Mount specific NTFS information. */
 	u32 upcase_len;			/* Number of entries in upcase[]. */
-	uchar_t *upcase;		/* The upcase table. */
+	ntfschar *upcase;		/* The upcase table. */
+
+	s32 attrdef_size;		/* Size of the attribute definition
+					   table in bytes. */
+	ATTR_DEF *attrdef;		/* Table of attribute definitions.
+					   Obtained from FILE_AttrDef. */
+
+#ifdef NTFS_RW
+	/* Variables used by the cluster and mft allocators. */
+	s64 mft_data_pos;		/* Mft record number at which to
+					   allocate the next mft record. */
 	LCN mft_zone_start;		/* First cluster of the mft zone. */
 	LCN mft_zone_end;		/* First cluster beyond the mft zone. */
+	LCN mft_zone_pos;		/* Current position in the mft zone. */
+	LCN data1_zone_pos;		/* Current position in the first data
+					   zone. */
+	LCN data2_zone_pos;		/* Current position in the second data
+					   zone. */
+#endif /* NTFS_RW */
+
 	struct inode *mft_ino;		/* The VFS inode of $MFT. */
 
 	struct inode *mftbmp_ino;	/* Attribute inode for $MFT/$BITMAP. */
 	struct rw_semaphore mftbmp_lock; /* Lock for serializing accesses to the
 					    mft record bitmap ($MFT/$BITMAP). */
-	unsigned long nr_mft_records;	/* Number of mft records == number of
-					   bits in mft bitmap. */
-
 #ifdef NTFS_RW
 	struct inode *mftmirr_ino;	/* The VFS inode of $MFTMirr. */
 	int mftmirr_size;		/* Size of mft mirror in mft records. */
@@ -103,6 +119,13 @@ typedef struct {
 					   directory. */
 	struct inode *secure_ino;	/* The VFS inode of $Secure (NTFS3.0+
 					   only, otherwise NULL). */
+	struct inode *extend_ino;	/* The VFS inode of $Extend (NTFS3.0+
+					   only, otherwise NULL). */
+#ifdef NTFS_RW
+	/* $Quota stuff is NTFS3.0+ specific.  Unused/NULL otherwise. */
+	struct inode *quota_ino;	/* The VFS inode of $Quota. */
+	struct inode *quota_q_ino;	/* Attribute inode for $Quota/$Q. */
+#endif /* NTFS_RW */
 	struct nls_table *nls_map;
 } ntfs_volume;
 
@@ -117,6 +140,7 @@ typedef enum {
 				      Otherwise be case insensitive and create
 				      file names in WIN32 namespace. */
 	NV_LogFileEmpty,	/* 1: $LogFile journal is empty. */
+	NV_QuotaOutOfDate,	/* 1: $Quota is out of date. */
 } ntfs_volume_flags;
 
 /*
@@ -142,5 +166,6 @@ NVOL_FNS(Errors)
 NVOL_FNS(ShowSystemFiles)
 NVOL_FNS(CaseSensitive)
 NVOL_FNS(LogFileEmpty)
+NVOL_FNS(QuotaOutOfDate)
 
 #endif /* _LINUX_NTFS_VOLUME_H */

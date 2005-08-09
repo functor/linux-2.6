@@ -20,8 +20,6 @@
     Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.		     */
 /* ------------------------------------------------------------------------- */
 
-/* $Id: i2c-id.h,v 1.68 2003/02/25 02:55:18 mds Exp $ */
-
 #ifndef LINUX_I2C_ID_H
 #define LINUX_I2C_ID_H
 
@@ -101,6 +99,15 @@
 #define I2C_DRIVERID_UDA1342	53	/* UDA1342 audio codec		*/
 #define I2C_DRIVERID_ADV7170	54	/* video encoder		*/
 #define I2C_DRIVERID_RADEON	55	/* I2C bus on Radeon boards	*/
+#define I2C_DRIVERID_MAX1617	56	/* temp sensor			*/
+#define I2C_DRIVERID_SAA7191	57	/* video encoder		*/
+#define I2C_DRIVERID_INDYCAM	58	/* SGI IndyCam			*/
+#define I2C_DRIVERID_BT832	59	/* CMOS camera video processor	*/
+#define I2C_DRIVERID_TDA9887	60	/* TDA988x IF-PLL demodulator	*/
+#define I2C_DRIVERID_OVCAMCHIP	61	/* OmniVision CMOS image sens.	*/
+#define I2C_DRIVERID_TDA7313	62	/* TDA7313 audio processor	*/
+#define I2C_DRIVERID_MAX6900	63	/* MAX6900 real-time clock	*/
+#define I2C_DRIVERID_SAA7114H	64	/* video decoder		*/
 
 
 #define I2C_DRIVERID_EXP0	0xF0	/* experimental use id's	*/
@@ -158,6 +165,7 @@
 #define I2C_DRIVERID_ASB100 1043
 #define I2C_DRIVERID_FSCHER 1046
 #define I2C_DRIVERID_W83L785TS 1047
+#define I2C_DRIVERID_SMSC47B397 1050
 
 /*
  * ---- Adapter types ----------------------------------------------------
@@ -185,7 +193,16 @@
 #define I2C_ALGO_MPC8XX 0x110000	/* MPC8xx PowerPC I2C algorithm */
 #define I2C_ALGO_OCP    0x120000	/* IBM or otherwise On-chip I2C algorithm */
 #define I2C_ALGO_BITHS	0x130000	/* enhanced bit style adapters	*/
-#define I2C_ALGO_OCP_IOP3XX  0x140000	/* XSCALE IOP3XX On-chip I2C alg */
+#define I2C_ALGO_IOP3XX	0x140000	/* XSCALE IOP3XX On-chip I2C alg */
+#define I2C_ALGO_SIBYTE 0x150000	/* Broadcom SiByte SOCs		*/
+#define I2C_ALGO_SGI	0x160000	/* SGI algorithm		*/
+
+#define I2C_ALGO_USB	0x170000	/* USB algorithm		*/
+#define I2C_ALGO_VIRT	0x180000	/* Virtual bus adapter		*/
+
+#define I2C_ALGO_MV64XXX 0x190000	/* Marvell mv64xxx i2c ctlr	*/
+#define I2C_ALGO_PCA	0x1a0000	/* PCA 9564 style adapters	*/
+#define I2C_ALGO_AU1550	0x1b0000        /* Au1550 PSC algorithm		*/
 
 #define I2C_ALGO_EXP	0x800000	/* experimental			*/
 
@@ -222,14 +239,19 @@
 #define I2C_HW_B_OMAHA  0x14    /* Omaha I2C interface (ARM)		*/
 #define I2C_HW_B_GUIDE  0x15    /* Guide bit-basher			*/
 #define I2C_HW_B_IXP2000 0x16	/* GPIO on IXP2000 systems              */
-#define I2C_HW_B_IXP425 0x17	/* GPIO on IXP425 systems		*/
+#define I2C_HW_B_IXP4XX 0x17	/* GPIO on IXP4XX systems		*/
 #define I2C_HW_B_S3VIA	0x18	/* S3Via ProSavage adapter		*/
 #define I2C_HW_B_ZR36067 0x19	/* Zoran-36057/36067 based boards	*/
+#define I2C_HW_B_PCILYNX 0x1a	/* TI PCILynx I2C adapter		*/
+#define I2C_HW_B_CX2388x 0x1b	/* connexant 2388x based tv cards	*/
 
 /* --- PCF 8584 based algorithms					*/
 #define I2C_HW_P_LP	0x00	/* Parallel port interface		*/
 #define I2C_HW_P_ISA	0x01	/* generic ISA Bus inteface card	*/
 #define I2C_HW_P_ELEK	0x02	/* Elektor ISA Bus inteface card	*/
+
+/* --- PCA 9564 based algorithms */
+#define I2C_HW_A_ISA	0x00	/* generic ISA Bus interface card	*/
 
 /* --- ACPI Embedded controller algorithms                              */
 #define I2C_HW_ACPI_EC          0x00
@@ -246,8 +268,18 @@
 /* --- PowerPC on-chip adapters						*/
 #define I2C_HW_OCP 0x00	/* IBM on-chip I2C adapter 	*/
 
+/* --- Broadcom SiByte adapters						*/
+#define I2C_HW_SIBYTE	0x00
+
+/* --- SGI adapters							*/
+#define I2C_HW_SGI_VINO	0x00
+#define I2C_HW_SGI_MACE	0x01
+
 /* --- XSCALE on-chip adapters                          */
-#define I2C_HW_IOP321 0x00
+#define I2C_HW_IOP3XX 0x00
+
+/* --- Au1550 PSC adapters adapters					*/
+#define I2C_HW_AU1550_PSC	0x00
 
 /* --- SMBus only adapters						*/
 #define I2C_HW_SMBUS_PIIX4	0x00
@@ -264,6 +296,10 @@
 #define I2C_HW_SMBUS_SCX200	0x0b
 #define I2C_HW_SMBUS_NFORCE2	0x0c
 #define I2C_HW_SMBUS_W9968CF	0x0d
+#define I2C_HW_SMBUS_OV511	0x0e	/* OV511(+) USB 1.1 webcam ICs	*/
+#define I2C_HW_SMBUS_OV518	0x0f	/* OV518(+) USB 1.1 webcam ICs	*/
+#define I2C_HW_SMBUS_OV519	0x10	/* OV519 USB 1.1 webcam IC	*/
+#define I2C_HW_SMBUS_OVFX2	0x11	/* Cypress/OmniVision FX2 webcam */
 
 /* --- ISA pseudo-adapter						*/
 #define I2C_HW_ISA 0x00
@@ -276,5 +312,8 @@
 
 /* --- MCP107 adapter */
 #define I2C_HW_MPC107 0x00
+
+/* --- Marvell mv64xxx i2c adapter */
+#define I2C_HW_MV64XXX 0x00
 
 #endif /* LINUX_I2C_ID_H */

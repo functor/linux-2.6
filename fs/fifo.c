@@ -45,6 +45,9 @@ static int fifo_open(struct inode *inode, struct file *filp)
 	}
 	filp->f_version = 0;
 
+	/* We can only do regular read/write on fifos */
+	filp->f_mode &= (FMODE_READ | FMODE_WRITE);
+
 	switch (filp->f_mode) {
 	case 1:
 	/*
@@ -132,12 +135,8 @@ err_wr:
 	goto err;
 
 err:
-	if (!PIPE_READERS(*inode) && !PIPE_WRITERS(*inode)) {
-		struct pipe_inode_info *info = inode->i_pipe;
-		inode->i_pipe = NULL;
-		free_page((unsigned long)info->base);
-		kfree(info);
-	}
+	if (!PIPE_READERS(*inode) && !PIPE_WRITERS(*inode))
+		free_pipe_info(inode);
 
 err_nocleanup:
 	up(PIPE_SEM(*inode));

@@ -42,8 +42,6 @@
  *
  *****************************************************************************/
 
-static char ixjuser_h_rcsid[] = "$Id: ixjuser.h,v 4.1 2001/08/05 00:17:37 craigs Exp $";
-
 #include <linux/telephony.h>
 
 
@@ -350,7 +348,7 @@ typedef enum {
 typedef struct {
 	int elements_used;
 	IXJ_CADENCE_TERM termination;
-	IXJ_CADENCE_ELEMENT *ce;
+	IXJ_CADENCE_ELEMENT __user *ce;
 } IXJ_CADENCE;
 
 #define IXJCTL_TONE_CADENCE		_IOW ('q', 0xCA, IXJ_CADENCE *)

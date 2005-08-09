@@ -55,10 +55,8 @@
 #include <asm/setup.h>
 
 #include "mmu_decl.h"
-#include "mem_pieces.h"
 
 extern char etext[], _stext[];
-extern struct mem_pieces phys_avail;
 
 /* Used by the 44x TLB replacement exception handler.
  * Just needed it declared someplace.
@@ -72,7 +70,7 @@ unsigned int tlb_44x_hwater = 62;
 static void __init
 ppc44x_pin_tlb(int slot, unsigned int virt, unsigned int phys)
 {
-	unsigned long attrib;
+	unsigned long attrib = 0;
 
 	__asm__ __volatile__("\
 	clrrwi	%2,%2,10\n\
@@ -93,23 +91,17 @@ ppc44x_pin_tlb(int slot, unsigned int virt, unsigned int phys)
 }
 
 /*
- * Configure PPC44x TLB for AS0 exception processing.
+ * MMU_init_hw does the chip-specific initialization of the MMU hardware.
  */
-static void __init
-ppc44x_tlb_config(void)
+void __init MMU_init_hw(void)
+{
+	flush_instruction_cache();
+}
+
+unsigned long __init mmu_mapin_ram(void)
 {
 	unsigned int pinned_tlbs = 1;
 	int i;
-
-	/*
-	 * If lowmem is not on a pin tlb entry size boundary,
-	 * then reserve the last page of system memory. This
-	 * eliminates the possibility of a speculative dcache
-	 * fetch past the end of system memory that would
-	 * result in a machine check exception.
-	 */
-	if (total_lowmem | (PPC44x_PIN_SIZE - 1))
-		mem_pieces_remove(&phys_avail, total_lowmem - PAGE_SIZE, PAGE_SIZE, 1);
 
 	/* Determine number of entries necessary to cover lowmem */
 	pinned_tlbs = (unsigned int)
@@ -124,39 +116,6 @@ ppc44x_tlb_config(void)
 			unsigned int phys_addr = (PPC44x_LOW_SLOT-i) * PPC44x_PIN_SIZE;
 			ppc44x_pin_tlb(i, phys_addr+PAGE_OFFSET, phys_addr);
 		}
-}
 
-/*
- * MMU_init_hw does the chip-specific initialization of the MMU hardware.
- */
-void __init MMU_init_hw(void)
-{
-	flush_instruction_cache();
-
-	ppc44x_tlb_config();
-}
-
-/* TODO: Add large page lowmem mapping support */
-unsigned long __init mmu_mapin_ram(void)
-{
-	unsigned long v, s, f = _PAGE_GUARDED;
-	phys_addr_t p;
-
-	v = KERNELBASE;
-	p = PPC_MEMSTART;
-
-	for (s = 0; s < total_lowmem; s += PAGE_SIZE) {
-		if ((char *) v >= _stext && (char *) v < etext)
-			f |= _PAGE_RAM_TEXT;
-		else
-			f |= _PAGE_RAM;
-		map_page(v, p, f);
-		v += PAGE_SIZE;
-		p += PAGE_SIZE;
-	}
-
-	if (ppc_md.progress)
-		ppc_md.progress("MMU:mmu_mapin_ram done", 0x401);
-
-	return s;
+	return total_lowmem;
 }

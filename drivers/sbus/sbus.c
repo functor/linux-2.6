@@ -192,7 +192,7 @@ static void __init sbus_do_child_siblings(int start_node,
 	while((this_node = prom_getsibling(this_node)) != 0) {
 		this_dev->next = kmalloc(sizeof(struct sbus_dev), GFP_ATOMIC);
 		this_dev = this_dev->next;
-		this_dev->next = 0;
+		this_dev->next = NULL;
 		this_dev->parent = parent;
 
 		this_dev->bus = sbus;
@@ -202,7 +202,7 @@ static void __init sbus_do_child_siblings(int start_node,
 			this_dev->child = kmalloc(sizeof(struct sbus_dev),
 						  GFP_ATOMIC);
 			this_dev->child->bus = sbus;
-			this_dev->child->next = 0;
+			this_dev->child->next = NULL;
 			fill_sbus_device(prom_getchild(this_node), this_dev->child);
 			sbus_do_child_siblings(prom_getchild(this_node),
 					       this_dev->child, this_dev, sbus);
@@ -217,6 +217,8 @@ static void __init sbus_do_child_siblings(int start_node,
  * prom_sbus_ranges_init(), with all sun4d stuff cut away.
  * Ask DaveM what is going on here, how is sun4d supposed to work... XXX
  */
+/* added back sun4d patch from Thomas Bogendoerfer - should be OK (crn) */
+
 static void __init sbus_bus_ranges_init(int parent_node, struct sbus_bus *sbus)
 {
 	int len;
@@ -229,6 +231,20 @@ static void __init sbus_bus_ranges_init(int parent_node, struct sbus_bus *sbus)
 		return;
 	}
 	sbus->num_sbus_ranges = len / sizeof(struct linux_prom_ranges);
+#ifdef CONFIG_SPARC32
+	if (sparc_cpu_model == sun4d) {
+		struct linux_prom_ranges iounit_ranges[PROMREG_MAX];
+		int num_iounit_ranges;
+
+		len = prom_getproperty(parent_node, "ranges",
+				       (char *) iounit_ranges,
+				       sizeof (iounit_ranges));
+		if (len != -1) {
+			num_iounit_ranges = (len/sizeof(struct linux_prom_ranges));
+			prom_adjust_ranges (sbus->sbus_ranges, sbus->num_sbus_ranges, iounit_ranges, num_iounit_ranges);
+		}
+	}
+#endif
 }
 
 static void __init __apply_ranges_to_regs(struct linux_prom_ranges *ranges,
@@ -308,6 +324,10 @@ static void __init sbus_fixup_all_regs(struct sbus_dev *first_sdev)
 
 extern void register_proc_sparc_ioport(void);
 extern void firetruck_init(void);
+
+#ifdef CONFIG_SUN4
+extern void sun4_dvma_init(void);
+#endif
 
 static int __init sbus_init(void)
 {
@@ -439,7 +459,7 @@ static int __init sbus_init(void)
 						  GFP_ATOMIC);
 			/* Fill it */
 			this_dev->child->bus = sbus;
-			this_dev->child->next = 0;
+			this_dev->child->next = NULL;
 			fill_sbus_device(prom_getchild(sbus_devs),
 					 this_dev->child);
 			sbus_do_child_siblings(prom_getchild(sbus_devs),
@@ -469,7 +489,7 @@ static int __init sbus_init(void)
 							  GFP_ATOMIC);
 				/* Fill it */
 				this_dev->child->bus = sbus;
-				this_dev->child->next = 0;
+				this_dev->child->next = NULL;
 				fill_sbus_device(prom_getchild(sbus_devs),
 						 this_dev->child);
 				sbus_do_child_siblings(prom_getchild(sbus_devs),

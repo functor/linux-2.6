@@ -12,6 +12,7 @@
  *  Changelog:
  *    19-06-2003     BJD     Created file
  *    12-03-2004     BJD     Updated include protection
+ *    10-03-2005     LCVR    Changed S3C2410_VA to S3C24XX_VA
  */
 
 
@@ -20,8 +21,8 @@
 
 /* interrupt controller */
 
-#define S3C2410_IRQREG(x)   ((x) + S3C2410_VA_IRQ)
-#define S3C2410_EINTREG(x)  ((x) + S3C2410_VA_GPIO)
+#define S3C2410_IRQREG(x)   ((x) + S3C24XX_VA_IRQ)
+#define S3C2410_EINTREG(x)  ((x) + S3C24XX_VA_GPIO)
 
 #define S3C2410_SRCPND	       S3C2410_IRQREG(0x000)
 #define S3C2410_INTMOD	       S3C2410_IRQREG(0x004)
@@ -31,6 +32,11 @@
 #define S3C2410_INTOFFSET      S3C2410_IRQREG(0x014)
 #define S3C2410_SUBSRCPND      S3C2410_IRQREG(0x018)
 #define S3C2410_INTSUBMSK      S3C2410_IRQREG(0x01C)
+
+/* mask: 0=enable, 1=disable
+ * 1 bit EINT, 4=EINT4, 23=EINT23
+ * EINT0,1,2,3 are not handled here.
+*/
 
 #define S3C2410_EINTMASK       S3C2410_EINTREG(0x0A4)
 #define S3C2410_EINTPEND       S3C2410_EINTREG(0X0A8)

@@ -103,9 +103,9 @@
 #include <linux/string.h>	/* used in new tty drivers */
 #include <linux/signal.h>	/* used in new tty drivers */
 #include <linux/if.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>
-#include <asm/bitops.h>
 #include <asm/termios.h>
 #include <asm/uaccess.h>
 
@@ -177,14 +177,14 @@ static struct n_hdlc *n_hdlc_alloc (void);
 static int debuglevel;
 
 /* max frame size for memory allocations */
-static ssize_t maxframe = 4096;
+static int maxframe = 4096;
 
 /* TTY callbacks */
 
 static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct file *file,
-			   __u8 *buf, size_t nr);
+			   __u8 __user *buf, size_t nr);
 static ssize_t n_hdlc_tty_write(struct tty_struct *tty, struct file *file,
-			    const __u8 *buf, size_t nr);
+			    const unsigned char *buf, size_t nr);
 static int n_hdlc_tty_ioctl(struct tty_struct *tty, struct file *file,
 			    unsigned int cmd, unsigned long arg);
 static unsigned int n_hdlc_tty_poll(struct tty_struct *tty, struct file *filp,
@@ -294,7 +294,7 @@ static void n_hdlc_tty_close(struct tty_struct *tty)
 #endif
 		tty->disc_data = NULL;
 		if (tty == n_hdlc->backup_tty)
-			n_hdlc->backup_tty = 0;
+			n_hdlc->backup_tty = NULL;
 		if (tty != n_hdlc->tty)
 			return;
 		if (n_hdlc->backup_tty) {
@@ -402,7 +402,7 @@ static void n_hdlc_send_frames(struct n_hdlc *n_hdlc, struct tty_struct *tty)
 			
 		/* Send the next block of data to device */
 		tty->flags |= (1 << TTY_DO_WRITE_WAKEUP);
-		actual = tty->driver->write(tty, 0, tbuf->buf, tbuf->count);
+		actual = tty->driver->write(tty, tbuf->buf, tbuf->count);
 		    
 		/* if transmit error, throw frame away by */
 		/* pretending it was accepted by driver */
@@ -572,10 +572,9 @@ static void n_hdlc_tty_receive(struct tty_struct *tty, const __u8 *data,
  * Returns the number of bytes returned or error code.
  */
 static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct file *file,
-			   __u8 *buf, size_t nr)
+			   __u8 __user *buf, size_t nr)
 {
 	struct n_hdlc *n_hdlc = tty2n_hdlc(tty);
-	int error;
 	int ret;
 	struct n_hdlc_buf *rbuf;
 
@@ -587,11 +586,10 @@ static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct file *file,
 		return -EIO;
 
 	/* verify user access to buffer */
-	error = verify_area (VERIFY_WRITE, buf, nr);
-	if (error != 0) {
-		printk(KERN_WARNING"%s(%d) n_hdlc_tty_read() can't verify user "
-		"buffer\n",__FILE__,__LINE__);
-		return (error);
+	if (!access_ok(VERIFY_WRITE, buf, nr)) {
+		printk(KERN_WARNING "%s(%d) n_hdlc_tty_read() can't verify user "
+		"buffer\n", __FILE__, __LINE__);
+		return -EFAULT;
 	}
 
 	for (;;) {
@@ -649,7 +647,7 @@ static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct file *file,
  * Returns the number of bytes written (or error code).
  */
 static ssize_t n_hdlc_tty_write(struct tty_struct *tty, struct file *file,
-			    const __u8 *data, size_t count)
+			    const unsigned char *data, size_t count)
 {
 	struct n_hdlc *n_hdlc = tty2n_hdlc (tty);
 	int error = 0;
@@ -672,7 +670,7 @@ static ssize_t n_hdlc_tty_write(struct tty_struct *tty, struct file *file,
 		if (debuglevel & DEBUG_LEVEL_INFO)
 			printk (KERN_WARNING
 				"n_hdlc_tty_write: truncating user packet "
-				"from %lu to %Zd\n", (unsigned long) count,
+				"from %lu to %d\n", (unsigned long) count,
 				maxframe );
 		count = maxframe;
 	}
@@ -704,16 +702,12 @@ static ssize_t n_hdlc_tty_write(struct tty_struct *tty, struct file *file,
 
 	if (!error) {		
 		/* Retrieve the user's buffer */
-		if (copy_from_user(tbuf->buf, data, count)) {
-			/* return tx buffer to free list */
-			n_hdlc_buf_put(&n_hdlc->tx_free_buf_list,tbuf);
-			error = -EFAULT;
-		} else {
-			/* Send the data */
-			tbuf->count = error = count;
-			n_hdlc_buf_put(&n_hdlc->tx_buf_list,tbuf);
-			n_hdlc_send_frames(n_hdlc,tty);
-		}
+		memcpy(tbuf->buf, data, count);
+
+		/* Send the data */
+		tbuf->count = error = count;
+		n_hdlc_buf_put(&n_hdlc->tx_buf_list,tbuf);
+		n_hdlc_send_frames(n_hdlc,tty);
 	}
 
 	return error;
@@ -755,7 +749,7 @@ static int n_hdlc_tty_ioctl(struct tty_struct *tty, struct file *file,
 		else
 			count = 0;
 		spin_unlock_irqrestore(&n_hdlc->rx_buf_list.spinlock,flags);
-		error = put_user(count, (int *)arg);
+		error = put_user(count, (int __user *)arg);
 		break;
 
 	case TIOCOUTQ:
@@ -767,7 +761,7 @@ static int n_hdlc_tty_ioctl(struct tty_struct *tty, struct file *file,
 		if (n_hdlc->tx_buf_list.head)
 			count += n_hdlc->tx_buf_list.head->count;
 		spin_unlock_irqrestore(&n_hdlc->tx_buf_list.spinlock,flags);
-		error = put_user(count, (int*)arg);
+		error = put_user(count, (int __user *)arg);
 		break;
 
 	default:
@@ -829,7 +823,7 @@ static struct n_hdlc *n_hdlc_alloc(void)
 	struct n_hdlc *n_hdlc = kmalloc(sizeof(*n_hdlc), GFP_KERNEL);
 
 	if (!n_hdlc)
-		return 0;
+		return NULL;
 
 	memset(n_hdlc, 0, sizeof(*n_hdlc));
 
@@ -979,6 +973,6 @@ module_exit(n_hdlc_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Paul Fulghum paulkf@microgate.com");
-MODULE_PARM(debuglevel, "i");
-MODULE_PARM(maxframe, "i");
+module_param(debuglevel, int, 0);
+module_param(maxframe, int, 0);
 MODULE_ALIAS_LDISC(N_HDLC);

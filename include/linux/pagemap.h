@@ -8,6 +8,7 @@
 #include <linux/fs.h>
 #include <linux/list.h>
 #include <linux/highmem.h>
+#include <linux/compiler.h>
 #include <asm/uaccess.h>
 #include <linux/gfp.h>
 
@@ -18,7 +19,7 @@
 #define	AS_EIO		(__GFP_BITS_SHIFT + 0)	/* IO error on async write */
 #define AS_ENOSPC	(__GFP_BITS_SHIFT + 1)	/* ENOSPC on async write */
 
-static inline int mapping_gfp_mask(struct address_space * mapping)
+static inline unsigned int __nocast mapping_gfp_mask(struct address_space * mapping)
 {
 	return mapping->flags & __GFP_BITS_MASK;
 }
@@ -136,7 +137,18 @@ static inline void pagecache_acct(int count)
 
 static inline unsigned long get_page_cache_size(void)
 {
-        return atomic_read(&nr_pagecache);
+	int ret = atomic_read(&nr_pagecache);
+	if (unlikely(ret < 0))
+		ret = 0;
+	return ret;
+}
+
+/*
+ * Return byte-offset into filesystem object for page.
+ */
+static inline loff_t page_offset(struct page *page)
+{
+	return ((loff_t)page->index) << PAGE_CACHE_SHIFT;
 }
 
 static inline pgoff_t linear_page_index(struct vm_area_struct *vma,
@@ -152,6 +164,7 @@ extern void FASTCALL(unlock_page(struct page *page));
 
 static inline void lock_page(struct page *page)
 {
+	might_sleep();
 	if (TestSetPageLocked(page))
 		__lock_page(page);
 }
@@ -220,13 +233,13 @@ static inline void fault_in_pages_readable(const char __user *uaddr, int size)
 	volatile char c;
 	int ret;
 
-	ret = __get_user(c, (char *)uaddr);
+	ret = __get_user(c, uaddr);
 	if (ret == 0) {
 		const char __user *end = uaddr + size - 1;
 
 		if (((unsigned long)uaddr & PAGE_MASK) !=
 				((unsigned long)end & PAGE_MASK))
-		 	__get_user(c, (char *)end);
+		 	__get_user(c, end);
 	}
 }
 

@@ -52,6 +52,7 @@ static int handle_pm_event (struct pm_dev *dev, pm_request_t rqst, void *data);
 /* These belong in linux/pci.h. */
 #define PCI_DEVICE_ID_NEOMAGIC_NM256AV_AUDIO 0x8005
 #define PCI_DEVICE_ID_NEOMAGIC_NM256ZX_AUDIO 0x8006
+#define PCI_DEVICE_ID_NEOMAGIC_NM256XL_PLUS_AUDIO 0x8016
 
 /* List of cards.  */
 static struct nm256_info *nmcard_list;
@@ -156,7 +157,7 @@ static int samplerates[9] = {
  * attempted.
  */
 
-int
+static int
 nm256_setInfo (int dev, struct nm256_info *card)
 {
     int x;
@@ -928,7 +929,7 @@ nm256_resetAC97 (struct ac97_hwint *dev)
  * mixer ioctl to the AC97 driver.
  */
 static int
-nm256_default_mixer_ioctl (int dev, unsigned int cmd, caddr_t arg)
+nm256_default_mixer_ioctl (int dev, unsigned int cmd, void __user *arg)
 {
     struct nm256_info *card = nm256_find_card_for_mixer (dev);
     if (card != NULL)
@@ -1010,7 +1011,7 @@ nm256_peek_for_sig (struct nm256_info *card)
     u32 port1offset 
 	= card->port[0].physaddr + card->port[0].end_offset - 0x0400;
     /* The signature is located 1K below the end of video RAM.  */
-    char *temp = ioremap_nocache (port1offset, 16);
+    char __iomem *temp = ioremap_nocache (port1offset, 16);
     /* Default buffer end is 5120 bytes below the top of RAM.  */
     u32 default_value = card->port[0].end_offset - 0x1400;
     u32 sig;
@@ -1046,7 +1047,7 @@ nm256_peek_for_sig (struct nm256_info *card)
  * VERSTR is a human-readable version string.
  */
 
-static int __init
+static int __devinit
 nm256_install(struct pci_dev *pcidev, enum nm256rev rev, char *verstr)
 {
     struct nm256_info *card;
@@ -1275,6 +1276,8 @@ nm256_probe(struct pci_dev *pcidev,const struct pci_device_id *pciid)
 	return nm256_install(pcidev, REV_NM256AV, "256AV");
     if (pcidev->device == PCI_DEVICE_ID_NEOMAGIC_NM256ZX_AUDIO)
 	return nm256_install(pcidev, REV_NM256ZX, "256ZX");
+    if (pcidev->device == PCI_DEVICE_ID_NEOMAGIC_NM256XL_PLUS_AUDIO)
+	return nm256_install(pcidev, REV_NM256ZX, "256XL+");
     return -1; /* should not come here ... */
 }
 
@@ -1415,7 +1418,7 @@ nm256_audio_close(int dev)
 
 /* Standard ioctl handler. */
 static int
-nm256_audio_ioctl(int dev, unsigned int cmd, caddr_t arg)
+nm256_audio_ioctl(int dev, unsigned int cmd, void __user *arg)
 {
     int ret;
     u32 oldinfo;
@@ -1439,7 +1442,7 @@ nm256_audio_ioctl(int dev, unsigned int cmd, caddr_t arg)
     switch (cmd)
 	{
 	case SOUND_PCM_WRITE_RATE:
-	    if (get_user(ret, (int *) arg))
+	    if (get_user(ret, (int __user *) arg))
 		return -EFAULT;
 
 	    if (ret != 0) {
@@ -1458,7 +1461,7 @@ nm256_audio_ioctl(int dev, unsigned int cmd, caddr_t arg)
 	    break;
 
 	case SNDCTL_DSP_STEREO:
-	    if (get_user(ret, (int *) arg))
+	    if (get_user(ret, (int __user *) arg))
 		return -EFAULT;
 
 	    card->sinfo[w].stereo = ret ? 1 : 0;
@@ -1469,7 +1472,7 @@ nm256_audio_ioctl(int dev, unsigned int cmd, caddr_t arg)
 	    break;
 
 	case SOUND_PCM_WRITE_CHANNELS:
-	    if (get_user(ret, (int *) arg))
+	    if (get_user(ret, (int __user *) arg))
 		return -EFAULT;
 
 	    if (ret < 1 || ret > 3)
@@ -1487,7 +1490,7 @@ nm256_audio_ioctl(int dev, unsigned int cmd, caddr_t arg)
 	    break;
 
 	case SNDCTL_DSP_SETFMT:
-	    if (get_user(ret, (int *) arg))
+	    if (get_user(ret, (int __user *) arg))
 		return -EFAULT;
 
 	    if (ret != 0) {
@@ -1508,7 +1511,7 @@ nm256_audio_ioctl(int dev, unsigned int cmd, caddr_t arg)
 	default:
 	    return -EINVAL;
 	}
-    return put_user(ret, (int *) arg);
+    return put_user(ret, (int __user *) arg);
 }
 
 /*
@@ -1662,23 +1665,25 @@ static struct pci_device_id nm256_pci_tbl[] = {
 	PCI_ANY_ID, PCI_ANY_ID, 0, 0},
 	{PCI_VENDOR_ID_NEOMAGIC, PCI_DEVICE_ID_NEOMAGIC_NM256ZX_AUDIO,
 	PCI_ANY_ID, PCI_ANY_ID, 0, 0},
+	{PCI_VENDOR_ID_NEOMAGIC, PCI_DEVICE_ID_NEOMAGIC_NM256XL_PLUS_AUDIO,
+	PCI_ANY_ID, PCI_ANY_ID, 0, 0},
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, nm256_pci_tbl);
 MODULE_LICENSE("GPL");
 
 
-struct pci_driver nm256_pci_driver = {
+static struct pci_driver nm256_pci_driver = {
 	.name		= "nm256_audio",
 	.id_table	= nm256_pci_tbl,
 	.probe		= nm256_probe,
 	.remove		= nm256_remove,
 };
 
-MODULE_PARM (usecache, "i");
-MODULE_PARM (buffertop, "i");
-MODULE_PARM (nm256_debug, "i");
-MODULE_PARM (force_load, "i");
+module_param(usecache, bool, 0);
+module_param(buffertop, int, 0);
+module_param(nm256_debug, bool, 0644);
+module_param(force_load, bool, 0);
 
 static int __init do_init_nm256(void)
 {

@@ -41,10 +41,12 @@
 #include <linux/interrupt.h>
 #include <linux/init.h>
 #include <linux/bcd.h>
+#include <linux/profile.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/hwrpb.h>
+#include <asm/8253pit.h>
 
 #include <linux/mc146818rtc.h>
 #include <linux/time.h>
@@ -61,7 +63,7 @@ extern unsigned long wall_jiffies;	/* kernel/timer.c */
 
 static int set_rtc_mmss(unsigned long);
 
-spinlock_t rtc_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(rtc_lock);
 
 #define TICK_SIZE (tick_nsec / 1000)
 
@@ -117,8 +119,7 @@ irqreturn_t timer_interrupt(int irq, void *dev, struct pt_regs * regs)
 
 #ifndef CONFIG_SMP
 	/* Not SMP, do kernel PC profiling here.  */
-	if (!user_mode(regs))
-		alpha_do_profile(regs->pc);
+	profile_tick(CPU_PROFILING, regs);
 #endif
 
 	write_seqlock(&xtime_lock);
@@ -137,6 +138,9 @@ irqreturn_t timer_interrupt(int irq, void *dev, struct pt_regs * regs)
 
 	while (nticks > 0) {
 		do_timer(regs);
+#ifndef CONFIG_SMP
+		update_process_times(user_mode(regs));
+#endif
 		nticks--;
 	}
 
@@ -254,12 +258,11 @@ validate_cc_value(unsigned long cc)
  * arch/i386/time.c.
  */
 
-#define PIC_TICK_RATE	1193180UL
 #define CALIBRATE_LATCH	0xffff
 #define TIMEOUT_COUNT	0x100000
 
 static unsigned long __init
-calibrate_cc_with_pic(void)
+calibrate_cc_with_pit(void)
 {
 	int cc, count = 0;
 
@@ -287,7 +290,7 @@ calibrate_cc_with_pic(void)
 	if (count <= 1 || count == TIMEOUT_COUNT)
 		return 0;
 
-	return ((long)cc * PIC_TICK_RATE) / (CALIBRATE_LATCH + 1);
+	return ((long)cc * PIT_TICK_RATE) / (CALIBRATE_LATCH + 1);
 }
 
 /* The Linux interpretation of the CMOS clock register contents:
@@ -313,7 +316,7 @@ time_init(void)
 
 	/* Calibrate CPU clock -- attempt #1.  */
 	if (!est_cycle_freq)
-		est_cycle_freq = validate_cc_value(calibrate_cc_with_pic());
+		est_cycle_freq = validate_cc_value(calibrate_cc_with_pit());
 
 	cc1 = rpcc_after_update_in_progress();
 
@@ -366,7 +369,7 @@ time_init(void)
 		BCD_TO_BIN(year);
 	}
 
-	/* PC-like is standard; used for year < 20 || year >= 70 */
+	/* PC-like is standard; used for year >= 70 */
 	epoch = 1900;
 	if (year < 20)
 		epoch = 2000;
@@ -523,7 +526,6 @@ EXPORT_SYMBOL(do_settimeofday);
  *      sets the minutes. Usually you won't notice until after reboot!
  */
 
-extern int abs(int);
 
 static int
 set_rtc_mmss(unsigned long nowtime)

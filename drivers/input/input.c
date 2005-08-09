@@ -17,9 +17,8 @@
 #include <linux/module.h>
 #include <linux/random.h>
 #include <linux/major.h>
-#include <linux/pm.h>
 #include <linux/proc_fs.h>
-#include <linux/kmod.h>
+#include <linux/kobject_uevent.h>
 #include <linux/interrupt.h>
 #include <linux/poll.h>
 #include <linux/device.h>
@@ -51,29 +50,18 @@ static struct input_handler *input_table[8];
 
 #ifdef CONFIG_PROC_FS
 static struct proc_dir_entry *proc_bus_input_dir;
-DECLARE_WAIT_QUEUE_HEAD(input_devices_poll_wait);
+static DECLARE_WAIT_QUEUE_HEAD(input_devices_poll_wait);
 static int input_devices_state;
 #endif
-
-static inline unsigned int ms_to_jiffies(unsigned int ms)
-{
-        unsigned int j;
-        j = (ms * HZ + 500) / 1000;
-        return (j > 0) ? j : 1;
-}
-
 
 void input_event(struct input_dev *dev, unsigned int type, unsigned int code, int value)
 {
 	struct input_handle *handle;
 
-	if (dev->pm_dev)
-		pm_access(dev->pm_dev);
-
 	if (type > EV_MAX || !test_bit(type, dev->evbit))
 		return;
 
-	add_mouse_randomness((type << 4) ^ code ^ (code >> 4) ^ value);
+	add_input_randomness(type, code, value);
 
 	switch (type) {
 
@@ -100,13 +88,13 @@ void input_event(struct input_dev *dev, unsigned int type, unsigned int code, in
 
 			change_bit(code, dev->key);
 
-			if (test_bit(EV_REP, dev->evbit) && dev->rep[REP_PERIOD] && dev->timer.data && value) {
+			if (test_bit(EV_REP, dev->evbit) && dev->rep[REP_PERIOD] && dev->rep[REP_DELAY] && dev->timer.data && value) {
 				dev->repeat_key = code;
-				mod_timer(&dev->timer, jiffies + ms_to_jiffies(dev->rep[REP_DELAY]));
+				mod_timer(&dev->timer, jiffies + msecs_to_jiffies(dev->rep[REP_DELAY]));
 			}
 
 			break;
-		
+
 		case EV_ABS:
 
 			if (code > ABS_MAX || !test_bit(code, dev->absbit))
@@ -144,27 +132,27 @@ void input_event(struct input_dev *dev, unsigned int type, unsigned int code, in
 			if (code > MSC_MAX || !test_bit(code, dev->mscbit))
 				return;
 
-			if (dev->event) dev->event(dev, type, code, value);	
-	
+			if (dev->event) dev->event(dev, type, code, value);
+
 			break;
 
 		case EV_LED:
-	
+
 			if (code > LED_MAX || !test_bit(code, dev->ledbit) || !!test_bit(code, dev->led) == value)
 				return;
 
 			change_bit(code, dev->led);
-			if (dev->event) dev->event(dev, type, code, value);	
-	
+			if (dev->event) dev->event(dev, type, code, value);
+
 			break;
 
 		case EV_SND:
-	
+
 			if (code > SND_MAX || !test_bit(code, dev->sndbit))
 				return;
 
-			if (dev->event) dev->event(dev, type, code, value);	
-	
+			if (dev->event) dev->event(dev, type, code, value);
+
 			break;
 
 		case EV_REP:
@@ -181,7 +169,7 @@ void input_event(struct input_dev *dev, unsigned int type, unsigned int code, in
 			break;
 	}
 
-	if (type != EV_SYN) 
+	if (type != EV_SYN)
 		dev->sync = 0;
 
 	if (dev->grab)
@@ -202,7 +190,8 @@ static void input_repeat_key(unsigned long data)
 	input_event(dev, EV_KEY, dev->repeat_key, 2);
 	input_sync(dev);
 
-	mod_timer(&dev->timer, jiffies + ms_to_jiffies(dev->rep[REP_PERIOD]));
+	if (dev->rep[REP_PERIOD])
+		mod_timer(&dev->timer, jiffies + msecs_to_jiffies(dev->rep[REP_PERIOD]));
 }
 
 int input_accept_process(struct input_handle *handle, struct file *file)
@@ -230,8 +219,6 @@ void input_release_device(struct input_handle *handle)
 
 int input_open_device(struct input_handle *handle)
 {
-	if (handle->dev->pm_dev)
-		pm_access(handle->dev->pm_dev);
 	handle->open++;
 	if (handle->dev->open)
 		return handle->dev->open(handle->dev);
@@ -249,8 +236,6 @@ int input_flush_device(struct input_handle* handle, struct file* file)
 void input_close_device(struct input_handle *handle)
 {
 	input_release_device(handle);
-	if (handle->dev->pm_dev)
-		pm_dev_idle(handle->dev->pm_dev);
 	if (handle->dev->close)
 		handle->dev->close(handle->dev);
 	handle->open--;
@@ -282,11 +267,11 @@ static struct input_device_id *input_match_device(struct input_device_id *id, st
 		if (id->flags & INPUT_DEVICE_ID_MATCH_VENDOR)
 			if (id->id.vendor != dev->id.vendor)
 				continue;
-	
+
 		if (id->flags & INPUT_DEVICE_ID_MATCH_PRODUCT)
 			if (id->id.product != dev->id.product)
 				continue;
-		
+
 		if (id->flags & INPUT_DEVICE_ID_MATCH_VERSION)
 			if (id->id.version != dev->id.version)
 				continue;
@@ -351,11 +336,11 @@ static void input_call_hotplug(char *verb, struct input_dev *dev)
 	}
 	if (in_interrupt()) {
 		printk(KERN_ERR "input.c: calling hotplug from interrupt\n");
-		return; 
+		return;
 	}
 	if (!current->fs->root) {
 		printk(KERN_WARNING "input.c: calling hotplug without valid filesystem\n");
-		return; 
+		return;
 	}
 	if (!(envp = (char **) kmalloc(20 * sizeof(char *), GFP_KERNEL))) {
 		printk(KERN_ERR "input.c: not enough memory allocating hotplug environment\n");
@@ -369,7 +354,7 @@ static void input_call_hotplug(char *verb, struct input_dev *dev)
 
 	argv[0] = hotplug_path;
 	argv[1] = "input";
-	argv[2] = 0;
+	argv[2] = NULL;
 
 	envp[i++] = "HOME=/";
 	envp[i++] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
@@ -381,17 +366,17 @@ static void input_call_hotplug(char *verb, struct input_dev *dev)
 
 	envp[i++] = scratch;
 	scratch += sprintf(scratch, "PRODUCT=%x/%x/%x/%x",
-		dev->id.bustype, dev->id.vendor, dev->id.product, dev->id.version) + 1; 
-	
+		dev->id.bustype, dev->id.vendor, dev->id.product, dev->id.version) + 1;
+
 	if (dev->name) {
 		envp[i++] = scratch;
-		scratch += sprintf(scratch, "NAME=%s", dev->name) + 1; 
+		scratch += sprintf(scratch, "NAME=%s", dev->name) + 1;
 	}
 
 	if (dev->phys) {
 		envp[i++] = scratch;
-		scratch += sprintf(scratch, "PHYS=%s", dev->phys) + 1; 
-	}	
+		scratch += sprintf(scratch, "PHYS=%s", dev->phys) + 1;
+	}
 
 	SPRINTF_BIT_A(evbit, "EV=", EV_MAX);
 	SPRINTF_BIT_A2(keybit, "KEY=", KEY_MAX, EV_KEY);
@@ -402,7 +387,7 @@ static void input_call_hotplug(char *verb, struct input_dev *dev)
 	SPRINTF_BIT_A2(sndbit, "SND=", SND_MAX, EV_SND);
 	SPRINTF_BIT_A2(ffbit,  "FF=",  FF_MAX, EV_FF);
 
-	envp[i++] = 0;
+	envp[i++] = NULL;
 
 #ifdef INPUT_DEBUG
 	printk(KERN_DEBUG "input.c: calling %s %s [%s %s %s %s %s]\n",
@@ -468,9 +453,6 @@ void input_unregister_device(struct input_dev *dev)
 
 	if (!dev) return;
 
-	if (dev->pm_dev)
-		pm_unregister(dev->pm_dev);
-
 	del_timer_sync(&dev->timer);
 
 	list_for_each_safe(node, next, &dev->h_list) {
@@ -506,7 +488,7 @@ void input_register_handler(struct input_handler *handler)
 		input_table[handler->minor >> 5] = handler;
 
 	list_add_tail(&handler->node, &input_handler_list);
-	
+
 	list_for_each_entry(dev, &input_dev_list, node)
 		if (!handler->blacklist || !input_match_device(handler->blacklist, dev))
 			if ((id = input_match_device(handler->id_table, dev)))

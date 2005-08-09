@@ -35,6 +35,7 @@
 #define TTY3270_STRING_PAGES 5
 
 struct tty_driver *tty3270_driver;
+static int tty3270_max_index;
 
 struct raw3270_fn tty3270_fn;
 
@@ -123,16 +124,13 @@ void
 tty3270_set_timer(struct tty3270 *tp, int expires)
 {
 	if (expires == 0) {
-		if (timer_pending(&tp->timer)) {
+		if (timer_pending(&tp->timer) && del_timer(&tp->timer))
 			raw3270_put_view(&tp->view);
-			del_timer(&tp->timer);
-		}
 		return;
 	}
-	if (timer_pending(&tp->timer)) {
-		if (mod_timer(&tp->timer, jiffies + expires))
-			return;
-	}
+	if (timer_pending(&tp->timer) &&
+	    mod_timer(&tp->timer, jiffies + expires))
+		return;
 	raw3270_get_view(&tp->view);
 	tp->timer.function = (void (*)(unsigned long)) tty3270_update;
 	tp->timer.data = (unsigned long) tp;
@@ -708,6 +706,7 @@ tty3270_alloc_view(void)
 	if (!tp->freemem_pages)
 		goto out_tp;
 	INIT_LIST_HEAD(&tp->freemem);
+	init_timer(&tp->timer);
 	for (pages = 0; pages < TTY3270_STRING_PAGES; pages++) {
 		tp->freemem_pages[pages] = (void *)
 			__get_free_pages(GFP_KERNEL|GFP_DMA, 0);
@@ -836,6 +835,22 @@ tty3270_free(struct raw3270_view *view)
 	tty3270_free_view((struct tty3270 *) view);
 }
 
+/*
+ * Delayed freeing of tty3270 views.
+ */
+static void
+tty3270_del_views(void)
+{
+	struct tty3270 *tp;
+	int i;
+
+	for (i = 0; i < tty3270_max_index; i++) {
+		tp = (struct tty3270 *) raw3270_find_view(&tty3270_fn, i);
+		if (!IS_ERR(tp))
+			raw3270_del_view(&tp->view);
+	}
+}
+
 struct raw3270_fn tty3270_fn = {
 	.activate = tty3270_activate,
 	.deactivate = tty3270_deactivate,
@@ -867,6 +882,12 @@ tty3270_open(struct tty_struct *tty, struct file * filp)
 		tp->inattr = TF_INPUT;
 		return 0;
 	}
+	if (tty3270_max_index < tty->index + 1)
+		tty3270_max_index = tty->index + 1;
+
+	/* Quick exit if there is no device for tty->index. */
+	if (PTR_ERR(tp) == -ENODEV)
+		return -ENODEV;
 
 	/* Allocate tty3270 structure on first open. */
 	tp = tty3270_alloc_view();
@@ -1576,11 +1597,10 @@ tty3270_do_write(struct tty3270 *tp, const unsigned char *buf, int count)
  * String write routine for 3270 ttys
  */
 static int
-tty3270_write(struct tty_struct * tty, int from_user,
+tty3270_write(struct tty_struct * tty,
 	      const unsigned char *buf, int count)
 {
 	struct tty3270 *tp;
-	int length, ret;
 
 	tp = tty->driver_data;
 	if (!tp)
@@ -1589,26 +1609,8 @@ tty3270_write(struct tty_struct * tty, int from_user,
 		tty3270_do_write(tp, tp->char_buf, tp->char_count);
 		tp->char_count = 0;
 	}
-	if (!from_user) {
-		tty3270_do_write(tp, buf, count);
-		return count;
-	}
-	ret = 0;
-	while (count > 0) {
-		length = count < TTY3270_CHAR_BUF_SIZE ?
-			count : TTY3270_CHAR_BUF_SIZE;
-		length -= copy_from_user(tp->char_buf, buf, length);
-		if (length == 0) {
-			if (!ret)
-				ret = -EFAULT;
-			break;
-		}
-		tty3270_do_write(tp, tp->char_buf, count);
-		buf += length;
-		count -= length;
-		ret += length;
-	}
-	return ret;
+	tty3270_do_write(tp, buf, count);
+	return count;
 }
 
 /*
@@ -1778,9 +1780,6 @@ tty3270_init(void)
 	struct tty_driver *driver;
 	int ret;
 
-	ret = raw3270_init();
-	if (ret)
-		return ret;
 	driver = alloc_tty_driver(256);
 	if (!driver)
 		return -ENOMEM;
@@ -1807,6 +1806,14 @@ tty3270_init(void)
 		return ret;
 	}
 	tty3270_driver = driver;
+	ret = raw3270_register_notifier(tty3270_notifier);
+	if (ret) {
+		printk(KERN_ERR "tty3270 notifier registration failed "
+		       "with %d\n", ret);
+		put_tty_driver(driver);
+		return ret;
+
+	}
 	return 0;
 }
 
@@ -1815,10 +1822,11 @@ tty3270_exit(void)
 {
 	struct tty_driver *driver;
 
+	raw3270_unregister_notifier(tty3270_notifier);
 	driver = tty3270_driver;
 	tty3270_driver = 0;
 	tty_unregister_driver(driver);
-	raw3270_exit();
+	tty3270_del_views();
 }
 
 MODULE_LICENSE("GPL");

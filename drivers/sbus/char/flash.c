@@ -22,8 +22,9 @@
 #include <asm/io.h>
 #include <asm/sbus.h>
 #include <asm/ebus.h>
+#include <asm/upa.h>
 
-static spinlock_t flash_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(flash_lock);
 static struct {
 	unsigned long read_base;	/* Physical read address */
 	unsigned long write_base;	/* Physical write address */
@@ -65,7 +66,7 @@ flash_mmap(struct file *file, struct vm_area_struct *vma)
 
 	if ((vma->vm_pgoff << PAGE_SHIFT) > size)
 		return -ENXIO;
-	addr += (vma->vm_pgoff << PAGE_SHIFT);
+	addr = vma->vm_pgoff + (addr >> PAGE_SHIFT);
 
 	if (vma->vm_end - (vma->vm_start + (vma->vm_pgoff << PAGE_SHIFT)) > size)
 		size = vma->vm_end - (vma->vm_start + (vma->vm_pgoff << PAGE_SHIFT));
@@ -74,7 +75,7 @@ flash_mmap(struct file *file, struct vm_area_struct *vma)
 	pgprot_val(vma->vm_page_prot) |= _PAGE_E;
 	vma->vm_flags |= (VM_SHM | VM_LOCKED);
 
-	if (remap_page_range(vma, vma->vm_start, addr, size, vma->vm_page_prot))
+	if (io_remap_pfn_range(vma, vma->vm_start, addr, size, vma->vm_page_prot))
 		return -EAGAIN;
 		
 	return 0;
@@ -105,7 +106,7 @@ flash_llseek(struct file *file, long long offset, int origin)
 }
 
 static ssize_t
-flash_read(struct file * file, char * buf,
+flash_read(struct file * file, char __user * buf,
 	   size_t count, loff_t *ppos)
 {
 	unsigned long p = file->f_pos;
@@ -115,7 +116,7 @@ flash_read(struct file * file, char * buf,
 		count = flash.read_size - p;
 
 	for (i = 0; i < count; i++) {
-		u8 data = readb(flash.read_base + p + i);
+		u8 data = upa_readb(flash.read_base + p + i);
 		if (put_user(data, buf))
 			return -EFAULT;
 		buf++;
@@ -161,10 +162,10 @@ static struct miscdevice flash_dev = { FLASH_MINOR, "flash", &flash_fops };
 static int __init flash_init(void)
 {
 	struct sbus_bus *sbus;
-	struct sbus_dev *sdev = 0;
+	struct sbus_dev *sdev = NULL;
 #ifdef CONFIG_PCI
 	struct linux_ebus *ebus;
-	struct linux_ebus_device *edev = 0;
+	struct linux_ebus_device *edev = NULL;
 	struct linux_prom_registers regs[2];
 	int len, nregs;
 #endif

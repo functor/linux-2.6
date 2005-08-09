@@ -67,7 +67,7 @@ static int xd[5] = { -1,-1,-1,-1, };
 /* Above may need to be increased if a problem with the 2nd drive detection
    (ST11M controller) or resetting a controller (WD) appears */
 
-XD_INFO xd_info[XD_MAXDRIVES];
+static XD_INFO xd_info[XD_MAXDRIVES];
 
 /* If you try this driver and find that your card is not detected by the driver at bootup, you need to add your BIOS
    signature and details to the following list of signatures. A BIOS signature is a string embedded into the first
@@ -96,7 +96,7 @@ XD_INFO xd_info[XD_MAXDRIVES];
 #include <asm/page.h>
 #define xd_dma_mem_alloc(size) __get_dma_pages(GFP_KERNEL,get_order(size))
 #define xd_dma_mem_free(addr, size) free_pages(addr, get_order(size))
-static char *xd_dma_buffer = 0;
+static char *xd_dma_buffer;
 
 static XD_SIGNATURE xd_sigs[] __initdata = {
 	{ 0x0000,"Override geometry handler",NULL,xd_override_init_drive,"n unknown" }, /* Pat Mackinlay, pat@it.com.au */
@@ -123,7 +123,7 @@ static unsigned int xd_bases[] __initdata =
 	0xE0000
 };
 
-static spinlock_t xd_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(xd_lock);
 
 static struct gendisk *xd_gendisk[2];
 
@@ -266,7 +266,7 @@ Enomem:
 /* xd_detect: scan the possible BIOS ROM locations for the signature strings */
 static u_char __init xd_detect (u_char *controller, unsigned int *address)
 {
-	u_char i,j,found = 0;
+	int i, j;
 
 	if (xd_override)
 	{
@@ -275,15 +275,23 @@ static u_char __init xd_detect (u_char *controller, unsigned int *address)
 		return(1);
 	}
 
-	for (i = 0; i < (sizeof(xd_bases) / sizeof(xd_bases[0])) && !found; i++)
-		for (j = 1; j < (sizeof(xd_sigs) / sizeof(xd_sigs[0])) && !found; j++)
-			if (isa_check_signature(xd_bases[i] + xd_sigs[j].offset,xd_sigs[j].string,strlen(xd_sigs[j].string))) {
+	for (i = 0; i < (sizeof(xd_bases) / sizeof(xd_bases[0])); i++) {
+		void __iomem *p = ioremap(xd_bases[i], 0x2000);
+		if (!p)
+			continue;
+		for (j = 1; j < (sizeof(xd_sigs) / sizeof(xd_sigs[0])); j++) {
+			const char *s = xd_sigs[j].string;
+			if (check_signature(p + xd_sigs[j].offset, s, strlen(s))) {
 				*controller = j;
 				xd_type = j;
 				*address = xd_bases[i];
-				found++;
+				iounmap(p);
+				return 1;
 			}
-	return (found);
+		}
+		iounmap(p);
+	}
+	return 0;
 }
 
 /* do_xd_request: handle an incoming request */
@@ -330,12 +338,12 @@ static int xd_ioctl (struct inode *inode,struct file *file,u_int cmd,u_long arg)
 		case HDIO_GETGEO:
 		{
 			struct hd_geometry g;
-			struct hd_geometry *geometry = (struct hd_geometry *) arg;
+			struct hd_geometry __user *geom= (void __user *)arg;
 			g.heads = p->heads;
 			g.sectors = p->sectors;
 			g.cylinders = p->cylinders;
 			g.start = get_start_sect(inode->i_bdev);
-			return copy_to_user(geometry, &g, sizeof g) ? -EFAULT : 0;
+			return copy_to_user(geom, &g, sizeof(g)) ? -EFAULT : 0;
 		}
 		case HDIO_SET_DMA:
 			if (!capable(CAP_SYS_ADMIN)) return -EACCES;
@@ -344,7 +352,7 @@ static int xd_ioctl (struct inode *inode,struct file *file,u_int cmd,u_long arg)
 			if (nodma && xd_dma_buffer) {
 				xd_dma_mem_free((unsigned long)xd_dma_buffer,
 						xd_maxsectors * 0x200);
-				xd_dma_buffer = 0;
+				xd_dma_buffer = NULL;
 			} else if (!nodma && !xd_dma_buffer) {
 				xd_dma_buffer = (char *)xd_dma_mem_alloc(xd_maxsectors * 0x200);
 				if (!xd_dma_buffer) {
@@ -354,9 +362,9 @@ static int xd_ioctl (struct inode *inode,struct file *file,u_int cmd,u_long arg)
 			}
 			return 0;
 		case HDIO_GET_DMA:
-			return put_user(!nodma, (long *) arg);
+			return put_user(!nodma, (long __user *) arg);
 		case HDIO_GET_MULTCOUNT:
-			return put_user(xd_maxsectors, (long *) arg);
+			return put_user(xd_maxsectors, (long __user *) arg);
 		default:
 			return -EINVAL;
 	}
@@ -448,7 +456,7 @@ static void xd_recalibrate (u_char drive)
 	u_char cmdblk[6];
 	
 	xd_build(cmdblk,CMD_RECALIBRATE,drive,0,0,0,0,0);
-	if (xd_command(cmdblk,PIO_MODE,0,0,0,XD_TIMEOUT * 8))
+	if (xd_command(cmdblk,PIO_MODE,NULL,NULL,NULL,XD_TIMEOUT * 8))
 		printk("xd%c: warning! error recalibrating, controller may be unstable\n", 'a'+drive);
 }
 
@@ -607,7 +615,7 @@ static u_int xd_command (u_char *command,u_char mode,u_char *indata,u_char *outd
 
 	if (csb & CSB_ERROR) {									/* read sense data if error */
 		xd_build(cmdblk,CMD_SENSE,(csb & CSB_LUN) >> 5,0,0,0,0,0);
-		if (xd_command(cmdblk,0,sense,0,0,XD_TIMEOUT))
+		if (xd_command(cmdblk,0,sense,NULL,NULL,XD_TIMEOUT))
 			printk("xd: warning! sense command failed!\n");
 	}
 
@@ -624,7 +632,7 @@ static u_char __init xd_initdrives (void (*init_drive)(u_char drive))
 
 	for (i = 0; i < XD_MAXDRIVES; i++) {
 		xd_build(cmdblk,CMD_TESTREADY,i,0,0,0,0,0);
-		if (!xd_command(cmdblk,PIO_MODE,0,0,0,XD_TIMEOUT * 8)) {
+		if (!xd_command(cmdblk,PIO_MODE,NULL,NULL,NULL,XD_TIMEOUT*8)) {
 			set_current_state(TASK_INTERRUPTIBLE);
 			schedule_timeout(XD_INIT_DISK_DELAY);
 
@@ -714,7 +722,7 @@ static void __init xd_dtc_init_drive (u_char drive)
 	u_char cmdblk[6],buf[64];
 
 	xd_build(cmdblk,CMD_DTCGETGEOM,drive,0,0,0,0,0);
-	if (!xd_command(cmdblk,PIO_MODE,buf,0,0,XD_TIMEOUT * 2)) {
+	if (!xd_command(cmdblk,PIO_MODE,buf,NULL,NULL,XD_TIMEOUT * 2)) {
 		xd_info[drive].heads = buf[0x0A];			/* heads */
 		xd_info[drive].cylinders = ((u_short *) (buf))[0x04];	/* cylinders */
 		xd_info[drive].sectors = 17;				/* sectors */
@@ -729,7 +737,7 @@ static void __init xd_dtc_init_drive (u_char drive)
 
 		xd_setparam(CMD_DTCSETPARAM,drive,xd_info[drive].heads,xd_info[drive].cylinders,((u_short *) (buf + 1))[0x05],((u_short *) (buf + 1))[0x06],buf[0x0F]);
 		xd_build(cmdblk,CMD_DTCSETSTEP,drive,0,0,0,0,7);
-		if (xd_command(cmdblk,PIO_MODE,0,0,0,XD_TIMEOUT * 2))
+		if (xd_command(cmdblk,PIO_MODE,NULL,NULL,NULL,XD_TIMEOUT * 2))
 			printk("xd_dtc_init_drive: error setting step rate for xd%c\n", 'a'+drive);
 	}
 	else
@@ -785,7 +793,7 @@ static void __init xd_wd_init_drive (u_char drive)
 		xd_irq = 9;
 	rll = (jumper_state & 0x30) ? (0x04 << wd_1002) : 0;
 	xd_build(cmdblk,CMD_READ,drive,0,0,0,1,0);
-	if (!xd_command(cmdblk,PIO_MODE,buf,0,0,XD_TIMEOUT * 2)) {
+	if (!xd_command(cmdblk,PIO_MODE,buf,NULL,NULL,XD_TIMEOUT * 2)) {
 		xd_info[drive].heads = buf[0x1AF];				/* heads */
 		xd_info[drive].cylinders = ((u_short *) (buf + 1))[0xD6];	/* cylinders */
 		xd_info[drive].sectors = 17;					/* sectors */
@@ -862,7 +870,7 @@ static void __init xd_seagate_init_drive (u_char drive)
 	u_char cmdblk[6],buf[0x200];
 
 	xd_build(cmdblk,CMD_ST11GETGEOM,drive,0,0,0,1,0);
-	if (!xd_command(cmdblk,PIO_MODE,buf,0,0,XD_TIMEOUT * 2)) {
+	if (!xd_command(cmdblk,PIO_MODE,buf,NULL,NULL,XD_TIMEOUT * 2)) {
 		xd_info[drive].heads = buf[0x04];				/* heads */
 		xd_info[drive].cylinders = (buf[0x02] << 8) | buf[0x03];	/* cylinders */
 		xd_info[drive].sectors = buf[0x05];				/* sectors */
@@ -987,7 +995,7 @@ static void __init xd_override_init_drive (u_char drive)
 			while (min[i] != max[i] - 1) {
 				test[i] = (min[i] + max[i]) / 2;
 				xd_build(cmdblk,CMD_SEEK,drive,(u_char) test[0],(u_short) test[1],(u_char) test[2],0,0);
-				if (!xd_command(cmdblk,PIO_MODE,0,0,0,XD_TIMEOUT * 2))
+				if (!xd_command(cmdblk,PIO_MODE,NULL,NULL,NULL,XD_TIMEOUT * 2))
 					min[i] = test[i];
 				else
 					max[i] = test[i];
@@ -1039,16 +1047,16 @@ static void __init xd_setparam (u_char command,u_char drive,u_char heads,u_short
 
 	/* Some controllers require geometry info as data, not command */
 
-	if (xd_command(cmdblk,PIO_MODE,0,&cmdblk[6],0,XD_TIMEOUT * 2))
+	if (xd_command(cmdblk,PIO_MODE,NULL,&cmdblk[6],NULL,XD_TIMEOUT * 2))
 		printk("xd: error setting characteristics for xd%c\n", 'a'+drive);
 }
 
 
 #ifdef MODULE
 
-MODULE_PARM(xd, "1-4i");
-MODULE_PARM(xd_geo, "3-6i");
-MODULE_PARM(nodma, "i");
+module_param_array(xd, int, NULL, 0);
+module_param_array(xd_geo, int, NULL, 0);
+module_param(nodma, bool, 0);
 
 MODULE_LICENSE("GPL");
 

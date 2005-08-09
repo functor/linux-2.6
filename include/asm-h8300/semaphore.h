@@ -26,21 +26,14 @@ struct semaphore {
 	atomic_t count;
 	int sleepers;
 	wait_queue_head_t wait;
-#if WAITQUEUE_DEBUG
-	long __magic;
-#endif
 };
 
-#if WAITQUEUE_DEBUG
-# define __SEM_DEBUG_INIT(name) \
-		, (long)&(name).__magic
-#else
-# define __SEM_DEBUG_INIT(name)
-#endif
-
-#define __SEMAPHORE_INITIALIZER(name,count) \
-{ ATOMIC_INIT(count), 0, __WAIT_QUEUE_HEAD_INITIALIZER((name).wait) \
-	__SEM_DEBUG_INIT(name) }
+#define __SEMAPHORE_INITIALIZER(name, n)				\
+{									\
+	.count		= ATOMIC_INIT(n),				\
+	.sleepers	= 0,						\
+	.wait		= __WAIT_QUEUE_HEAD_INITIALIZER((name).wait)	\
+}
 
 #define __MUTEX_INITIALIZER(name) \
 	__SEMAPHORE_INITIALIZER(name,1)
@@ -87,16 +80,13 @@ static inline void down(struct semaphore * sem)
 {
 	register atomic_t *count asm("er0");
 
-#if WAITQUEUE_DEBUG
-	CHECK_MAGIC(sem->__magic);
-#endif
 	might_sleep();
 
 	count = &(sem->count);
 	__asm__ __volatile__(
 		"stc ccr,r3l\n\t"
 		"orc #0x80,ccr\n\t"
-		"mov.l %0, er1\n\t"
+		"mov.l %2, er1\n\t"
 		"dec.l #1,er1\n\t"
 		"mov.l er1,%0\n\t"
 		"bpl 1f\n\t"
@@ -107,8 +97,8 @@ static inline void down(struct semaphore * sem)
 		"1:\n\t"
 		"ldc r3l,ccr\n"
 		"2:"
-		: "+m"(*count)
-		: "g"(sem)
+		: "=m"(*count)
+		: "g"(sem),"m"(*count)
 		: "cc",  "er1", "er2", "er3");
 }
 
@@ -116,16 +106,13 @@ static inline int down_interruptible(struct semaphore * sem)
 {
 	register atomic_t *count asm("er0");
 
-#if WAITQUEUE_DEBUG
-	CHECK_MAGIC(sem->__magic);
-#endif
 	might_sleep();
 
 	count = &(sem->count);
 	__asm__ __volatile__(
 		"stc ccr,r1l\n\t"
 		"orc #0x80,ccr\n\t"
-		"mov.l %1, er2\n\t"
+		"mov.l %3, er2\n\t"
 		"dec.l #1,er2\n\t"
 		"mov.l er2,%1\n\t"
 		"bpl 1f\n\t"
@@ -137,8 +124,8 @@ static inline int down_interruptible(struct semaphore * sem)
 		"ldc r1l,ccr\n\t"
 		"sub.l %0,%0\n\t"
 		"2:\n\t"
-		: "=r" (count),"+m" (*count)
-		: "g"(sem)
+		: "=r" (count),"=m" (*count)
+		: "g"(sem),"m"(*count)
 		: "cc", "er1", "er2", "er3");
 	return (int)count;
 }
@@ -147,15 +134,11 @@ static inline int down_trylock(struct semaphore * sem)
 {
 	register atomic_t *count asm("er0");
 
-#if WAITQUEUE_DEBUG
-	CHECK_MAGIC(sem->__magic);
-#endif
-
 	count = &(sem->count);
 	__asm__ __volatile__(
 		"stc ccr,r3l\n\t"
 		"orc #0x80,ccr\n\t"
-		"mov.l %0,er2\n\t"
+		"mov.l %3,er2\n\t"
 		"dec.l #1,er2\n\t"
 		"mov.l er2,%0\n\t"
 		"bpl 1f\n\t"
@@ -171,8 +154,8 @@ static inline int down_trylock(struct semaphore * sem)
 		"ldc r3l,ccr\n\t"
 		"sub.l %1,%1\n"
 		"2:"
-		: "+m" (*count),"=r"(count)
-		: "g"(sem)
+		: "=m" (*count),"=r"(count)
+		: "g"(sem),"m"(*count)
 		: "cc", "er1","er2", "er3");
 	return (int)count;
 }
@@ -187,15 +170,11 @@ static inline void up(struct semaphore * sem)
 {
 	register atomic_t *count asm("er0");
 
-#if WAITQUEUE_DEBUG
-	CHECK_MAGIC(sem->__magic);
-#endif
-
 	count = &(sem->count);
 	__asm__ __volatile__(
 		"stc ccr,r3l\n\t"
 		"orc #0x80,ccr\n\t"
-		"mov.l %0,er1\n\t"
+		"mov.l %2,er1\n\t"
 		"inc.l #1,er1\n\t"
 		"mov.l er1,%0\n\t"
 		"ldc r3l,ccr\n\t"
@@ -205,8 +184,8 @@ static inline void up(struct semaphore * sem)
 		"mov.l %1,er0\n\t"
 		"jsr @___up\n"
 		"1:"
-		: "+m"(*count)
-		: "g"(sem)
+		: "=m"(*count)
+		: "g"(sem),"m"(*count)
 		: "cc", "er1", "er2", "er3");
 }
 

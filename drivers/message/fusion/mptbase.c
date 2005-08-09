@@ -137,22 +137,14 @@ int mpt_stm_index = -1;
 
 struct proc_dir_entry *mpt_proc_root_dir;
 
-DmpServices_t *DmpService;
-
-void *mpt_v_ASCQ_TablePtr;
-const char **mpt_ScsiOpcodesPtr;
-int mpt_ASCQ_TableSz;
-
-
 #define WHOINIT_UNKNOWN		0xAA
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
  *  Private data...
  */
-					/* Adapter lookup table */
-       MPT_ADAPTER		*mpt_adapters[MPT_MAX_ADAPTERS];
-static MPT_ADAPTER_TRACKER	 MptAdapters;
+					/* Adapter link list */
+LIST_HEAD(ioc_list);
 					/* Callback lookup table */
 static MPT_CALLBACK		 MptCallbacks[MPT_MAX_PROTOCOL_DRIVERS];
 					/* Protocol driver class lookup table */
@@ -163,10 +155,8 @@ static MPT_EVHANDLER		 MptEvHandlers[MPT_MAX_PROTOCOL_DRIVERS];
 static MPT_RESETHANDLER		 MptResetHandlers[MPT_MAX_PROTOCOL_DRIVERS];
 static struct mpt_pci_driver 	*MptDeviceDriverHandlers[MPT_MAX_PROTOCOL_DRIVERS];
 
-static int	FusionInitCalled = 0;
 static int	mpt_base_index = -1;
 static int	last_drv_idx = -1;
-static int	isense_idx = -1;
 
 static DECLARE_WAIT_QUEUE_HEAD(mpt_waitq);
 
@@ -176,10 +166,12 @@ static DECLARE_WAIT_QUEUE_HEAD(mpt_waitq);
  */
 static irqreturn_t mpt_interrupt(int irq, void *bus_id, struct pt_regs *r);
 static int	mpt_base_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *req, MPT_FRAME_HDR *reply);
-
+static int	mpt_handshake_req_reply_wait(MPT_ADAPTER *ioc, int reqBytes,
+			u32 *req, int replyBytes, u16 *u16reply, int maxwait,
+			int sleepFlag);
 static int	mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag);
-static void	mpt_detect_bound_ports(MPT_ADAPTER *this, struct pci_dev *pdev);
-static void	mpt_adapter_disable(MPT_ADAPTER *ioc, int freeup);
+static void	mpt_detect_bound_ports(MPT_ADAPTER *ioc, struct pci_dev *pdev);
+static void	mpt_adapter_disable(MPT_ADAPTER *ioc);
 static void	mpt_adapter_dispose(MPT_ADAPTER *ioc);
 
 static void	MptDisplayIocCapabilities(MPT_ADAPTER *ioc);
@@ -210,8 +202,6 @@ static int	SendEventNotification(MPT_ADAPTER *ioc, u8 EvSwitch);
 static int	SendEventAck(MPT_ADAPTER *ioc, EventNotificationReply_t *evnp);
 
 #ifdef CONFIG_PROC_FS
-static int	procmpt_create(void);
-static int	procmpt_destroy(void);
 static int	procmpt_summary_read(char *buf, char **start, off_t offset,
 				int request, int *eof, void *data);
 static int	procmpt_version_read(char *buf, char **start, off_t offset,
@@ -223,6 +213,7 @@ static void	mpt_get_fw_exp_ver(char *buf, MPT_ADAPTER *ioc);
 
 //int		mpt_HardResetHandler(MPT_ADAPTER *ioc, int sleepFlag);
 static int	ProcessEventNotification(MPT_ADAPTER *ioc, EventNotificationReply_t *evReply, int *evHandlers);
+static void	mpt_sp_ioc_info(MPT_ADAPTER *ioc, u32 ioc_status, MPT_FRAME_HDR *mf);
 static void	mpt_fc_log_info(MPT_ADAPTER *ioc, u32 log_info);
 static void	mpt_sp_log_info(MPT_ADAPTER *ioc, u32 log_info);
 
@@ -233,36 +224,13 @@ static void mptbase_shutdown(struct device * );
 static int  __init    fusion_init  (void);
 static void __exit    fusion_exit  (void);
 
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-/*
- *  more Private data...
- */
-#ifdef CONFIG_PROC_FS
-struct _mpt_proc_list {
-	const char	*name;
-	int		(*f)(char *, char **, off_t, int, int *, void *);
-} mpt_proc_list[] = {
-	{ "summary", procmpt_summary_read},
-	{ "version", procmpt_version_read},
-};
-#define MPT_PROC_ENTRIES (sizeof(mpt_proc_list)/sizeof(mpt_proc_list[0]))
-
-struct _mpt_ioc_proc_list {
-	const char	*name;
-	int		(*f)(char *, char **, off_t, int, int *, void *);
-} mpt_ioc_proc_list[] = {
-	{ "info", procmpt_iocinfo_read},
-	{ "summary", procmpt_summary_read},
-};
-#define MPT_IOC_PROC_ENTRIES (sizeof(mpt_ioc_proc_list)/sizeof(mpt_ioc_proc_list[0]))
-
-#endif
-
 /****************************************************************************
  * Supported hardware
  */
 
 static struct pci_device_id mptbase_pci_table[] = {
+	{ PCI_VENDOR_ID_LSI_LOGIC, PCI_DEVICE_ID_LSI_FC909,
+		PCI_ANY_ID, PCI_ANY_ID },
 	{ PCI_VENDOR_ID_LSI_LOGIC, PCI_DEVICE_ID_LSI_FC929,
 		PCI_ANY_ID, PCI_ANY_ID },
 	{ PCI_VENDOR_ID_LSI_LOGIC, PCI_DEVICE_ID_LSI_FC919,
@@ -279,7 +247,8 @@ static struct pci_device_id mptbase_pci_table[] = {
 };
 MODULE_DEVICE_TABLE(pci, mptbase_pci_table);
 
-#define CHIPREG_READ32(addr) 		readl(addr)
+#define CHIPREG_READ32(addr) 		readl_relaxed(addr)
+#define CHIPREG_READ32_dmasync(addr)	readl(addr)
 #define CHIPREG_WRITE32(addr,val) 	writel(val, addr)
 #define CHIPREG_PIO_WRITE32(addr,val)	outl(val, (unsigned long)addr)
 #define CHIPREG_PIO_READ32(addr) 	inl((unsigned long)addr)
@@ -315,24 +284,7 @@ mpt_interrupt(int irq, void *bus_id, struct pt_regs *r)
 	int		 type;
 	int		 freeme;
 
-	ioc = bus_id;
-
-#ifdef MPT_DEBUG_IRQ
-	/*
-	 * Verify ioc pointer is ok
-	 */
-	{
-		MPT_ADAPTER	*iocCmp;
-		iocCmp = mpt_adapter_find_first();
-		while ((ioc != iocCmp)  && iocCmp)
-			iocCmp = mpt_adapter_find_next(iocCmp);
-
-		if (!iocCmp) {
-			printk(KERN_WARNING "mpt_interrupt: Invalid ioc!\n");
-			return IRQ_NONE;
-		}
-	}
-#endif
+	ioc = (MPT_ADAPTER *)bus_id;
 
 	/*
 	 *  Drain the reply FIFO!
@@ -344,7 +296,7 @@ mpt_interrupt(int irq, void *bus_id, struct pt_regs *r)
 	 */
 	while (1) {
 
-		if ((pa = CHIPREG_READ32(&ioc->chip->ReplyFifo)) == 0xFFFFFFFF)
+		if ((pa = CHIPREG_READ32_dmasync(&ioc->chip->ReplyFifo)) == 0xFFFFFFFF)
 			return IRQ_HANDLED;
 
 		cb_idx = 0;
@@ -374,8 +326,8 @@ mpt_interrupt(int irq, void *bus_id, struct pt_regs *r)
 			cb_idx = mr->u.frame.hwhdr.msgctxu.fld.cb_idx;
 			mf = MPT_INDEX_2_MFPTR(ioc, req_idx);
 
-			dprintk((MYIOC_s_INFO_FMT "Got non-TURBO reply=%p\n",
-					ioc->name, mr));
+			dmfprintk((MYIOC_s_INFO_FMT "Got non-TURBO reply=%p req_idx=%x\n",
+					ioc->name, mr, req_idx));
 			DBG_DUMP_REPLY_FRAME(mr)
 
 			/* NEW!  20010301 -sralston
@@ -384,16 +336,20 @@ mpt_interrupt(int irq, void *bus_id, struct pt_regs *r)
 			ioc_stat = le16_to_cpu(mr->u.reply.IOCStatus);
 			if (ioc_stat & MPI_IOCSTATUS_FLAG_LOG_INFO_AVAILABLE) {
 				u32	 log_info = le32_to_cpu(mr->u.reply.IOCLogInfo);
-				if ((int)ioc->chip_type <= (int)FC929)
+				if (ioc->bus_type == FC)
 					mpt_fc_log_info(ioc, log_info);
-				else
+				else if (ioc->bus_type == SCSI)
 					mpt_sp_log_info(ioc, log_info);
+			}
+			if (ioc_stat & MPI_IOCSTATUS_MASK) {
+				if (ioc->bus_type == SCSI)
+					mpt_sp_ioc_info(ioc, (u32)ioc_stat, mf);
 			}
 		} else {
 			/*
 			 *  Process turbo (context) reply...
 			 */
-			dirqprintk((MYIOC_s_INFO_FMT "Got TURBO reply(=%08x)\n", ioc->name, pa));
+			dmfprintk((MYIOC_s_INFO_FMT "Got TURBO reply req_idx=%08x\n", ioc->name, pa));
 			type = (pa >> MPI_CONTEXT_REPLY_TYPE_SHIFT);
 			if (type == MPI_CONTEXT_REPLY_TYPE_SCSI_TARGET) {
 				cb_idx = mpt_stm_index;
@@ -433,7 +389,7 @@ mpt_interrupt(int irq, void *bus_id, struct pt_regs *r)
 		}
 
 #ifdef MPT_DEBUG_IRQ
-		if ((int)ioc->chip_type > (int)FC929) {
+		if (ioc->bus_type == SCSI) {
 			/* Verify mf, mr are reasonable.
 			 */
 			if ((mf) && ((mf >= MPT_INDEX_2_MFPTR(ioc, ioc->req_depth))
@@ -478,7 +434,7 @@ mpt_interrupt(int irq, void *bus_id, struct pt_regs *r)
 
 			/*  Put Request back on FreeQ!  */
 			spin_lock_irqsave(&ioc->FreeQlock, flags);
-			Q_ADD_TAIL(&ioc->FreeQ, &mf->u.frame.linkage, MPT_FRAME_HDR);
+			list_add_tail(&mf->u.frame.linkage.list, &ioc->FreeQ);
 #ifdef MFCNT
 			ioc->mfcnt--;
 #endif
@@ -541,7 +497,7 @@ mpt_base_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 		results = ProcessEventNotification(ioc, pEvReply, &evHandlers);
 		if (results != evHandlers) {
 			/* CHECKME! Any special handling needed here? */
-			dprintk((MYIOC_s_WARN_FMT "Called %d event handlers, sum results = %d\n",
+			devtprintk((MYIOC_s_WARN_FMT "Called %d event handlers, sum results = %d\n",
 					ioc->name, evHandlers, results));
 		}
 
@@ -574,7 +530,7 @@ mpt_base_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 			del_timer(&pCfg->timer);
 
 			spin_lock_irqsave(&ioc->FreeQlock, flags);
-			Q_DEL_ITEM(&pCfg->linkage);
+			list_del(&pCfg->linkage);
 			spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 			/*
@@ -644,22 +600,6 @@ mpt_register(MPT_CALLBACK cbfunc, MPT_DRIVER_CLASS dclass)
 
 	last_drv_idx = -1;
 
-#ifndef MODULE
-	/*
-	 *  Handle possibility of the mptscsih_detect() routine getting
-	 *  called *before* fusion_init!
-	 */
-	if (!FusionInitCalled) {
-		dprintk((KERN_INFO MYNAM ": Hmmm, calling fusion_init from mpt_register!\n"));
-		/*
-		 *  NOTE! We'll get recursion here, as fusion_init()
-		 *  calls mpt_register()!
-		 */
-		fusion_init();
-		FusionInitCalled++;
-	}
-#endif
-
 	/*
 	 *  Search for empty callback slot in this order: {N,...,7,6,5,...,1}
 	 *  (slot/handle 0 is reserved!)
@@ -694,8 +634,6 @@ mpt_deregister(int cb_idx)
 		MptEvHandlers[cb_idx] = NULL;
 
 		last_drv_idx++;
-		if (isense_idx != -1 && isense_idx <= cb_idx)
-			isense_idx++;
 	}
 }
 
@@ -797,8 +735,7 @@ mpt_device_driver_register(struct mpt_pci_driver * dd_cbfunc, int cb_idx)
 	MptDeviceDriverHandlers[cb_idx] = dd_cbfunc;
 
 	/* call per pci device probe entry point */
-	for(ioc = mpt_adapter_find_first(); ioc != NULL;
-	  ioc = mpt_adapter_find_next(ioc)) {
+	list_for_each_entry(ioc, &ioc_list, list) {
 		if(dd_cbfunc->probe) {
 			error = dd_cbfunc->probe(ioc->pcidev,
 			  ioc->pcidev->driver->id_table);
@@ -817,9 +754,19 @@ mpt_device_driver_register(struct mpt_pci_driver * dd_cbfunc, int cb_idx)
 void
 mpt_device_driver_deregister(int cb_idx)
 {
+	struct mpt_pci_driver *dd_cbfunc;
+	MPT_ADAPTER	*ioc;
+
 	if (cb_idx < 1 || cb_idx >= MPT_MAX_PROTOCOL_DRIVERS)
 		return;
 
+	dd_cbfunc = MptDeviceDriverHandlers[cb_idx];
+
+	list_for_each_entry(ioc, &ioc_list, list) {
+		if (dd_cbfunc->remove)
+			dd_cbfunc->remove(ioc->pcidev);
+	}
+	
 	MptDeviceDriverHandlers[cb_idx] = NULL;
 }
 
@@ -829,60 +776,61 @@ mpt_device_driver_deregister(int cb_idx)
  *	mpt_get_msg_frame - Obtain a MPT request frame from the pool (of 1024)
  *	allocated per MPT adapter.
  *	@handle: Handle of registered MPT protocol driver
- *	@iocid: IOC unique identifier (integer)
+ *	@ioc: Pointer to MPT adapter structure
  *
  *	Returns pointer to a MPT request frame or %NULL if none are available
  *	or IOC is not active.
  */
 MPT_FRAME_HDR*
-mpt_get_msg_frame(int handle, int iocid)
+mpt_get_msg_frame(int handle, MPT_ADAPTER *ioc)
 {
 	MPT_FRAME_HDR *mf;
-	MPT_ADAPTER *iocp;
 	unsigned long flags;
+	u16	 req_idx;	/* Request index */
 
 	/* validate handle and ioc identifier */
-	iocp = mpt_adapters[iocid];
 
 #ifdef MFCNT
-	if (!iocp->active)
+	if (!ioc->active)
 		printk(KERN_WARNING "IOC Not Active! mpt_get_msg_frame returning NULL!\n");
 #endif
 
 	/* If interrupts are not attached, do not return a request frame */
-	if (!iocp->active)
+	if (!ioc->active)
 		return NULL;
 
-	spin_lock_irqsave(&iocp->FreeQlock, flags);
-	if (! Q_IS_EMPTY(&iocp->FreeQ)) {
+	spin_lock_irqsave(&ioc->FreeQlock, flags);
+	if (!list_empty(&ioc->FreeQ)) {
 		int req_offset;
 
-		mf = iocp->FreeQ.head;
-		Q_DEL_ITEM(&mf->u.frame.linkage);
+		mf = list_entry(ioc->FreeQ.next, MPT_FRAME_HDR,
+				u.frame.linkage.list);
+		list_del(&mf->u.frame.linkage.list);
 		mf->u.frame.hwhdr.msgctxu.fld.cb_idx = handle;	/* byte */
-		req_offset = (u8 *)mf - (u8 *)iocp->req_frames;
+		req_offset = (u8 *)mf - (u8 *)ioc->req_frames;
 								/* u16! */
-		mf->u.frame.hwhdr.msgctxu.fld.req_idx =
-				cpu_to_le16(req_offset / iocp->req_sz);
+		req_idx = cpu_to_le16(req_offset / ioc->req_sz);
+		mf->u.frame.hwhdr.msgctxu.fld.req_idx = req_idx;
 		mf->u.frame.hwhdr.msgctxu.fld.rsvd = 0;
+		ioc->RequestNB[req_idx] = ioc->NB_for_64_byte_frame; /* Default, will be changed if necessary in SG generation */
 #ifdef MFCNT
-		iocp->mfcnt++;
+		ioc->mfcnt++;
 #endif
 	}
 	else
 		mf = NULL;
-	spin_unlock_irqrestore(&iocp->FreeQlock, flags);
+	spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 #ifdef MFCNT
 	if (mf == NULL)
-		printk(KERN_WARNING "IOC Active. No free Msg Frames! Count 0x%x Max 0x%x\n", iocp->mfcnt, iocp->req_depth);
+		printk(KERN_WARNING "IOC Active. No free Msg Frames! Count 0x%x Max 0x%x\n", ioc->mfcnt, ioc->req_depth);
 	mfcounter++;
 	if (mfcounter == PRINT_MF_COUNT)
-		printk(KERN_INFO "MF Count 0x%x Max 0x%x \n", iocp->mfcnt, iocp->req_depth);
+		printk(KERN_INFO "MF Count 0x%x Max 0x%x \n", ioc->mfcnt, ioc->req_depth);
 #endif
 
 	dmfprintk((KERN_INFO MYNAM ": %s: mpt_get_msg_frame(%d,%d), got mf=%p\n",
-			iocp->name, handle, iocid, mf));
+			ioc->name, handle, ioc->id, mf));
 	return mf;
 }
 
@@ -891,83 +839,73 @@ mpt_get_msg_frame(int handle, int iocid)
  *	mpt_put_msg_frame - Send a protocol specific MPT request frame
  *	to a IOC.
  *	@handle: Handle of registered MPT protocol driver
- *	@iocid: IOC unique identifier (integer)
+ *	@ioc: Pointer to MPT adapter structure
  *	@mf: Pointer to MPT request frame
  *
  *	This routine posts a MPT request frame to the request post FIFO of a
  *	specific MPT adapter.
  */
 void
-mpt_put_msg_frame(int handle, int iocid, MPT_FRAME_HDR *mf)
+mpt_put_msg_frame(int handle, MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf)
 {
-	MPT_ADAPTER *iocp;
+	u32 mf_dma_addr;
+	int req_offset;
+	u16	 req_idx;	/* Request index */
 
-	iocp = mpt_adapters[iocid];
-	if (iocp != NULL) {
-		u32 mf_dma_addr;
-		int req_offset;
-
-		/* ensure values are reset properly! */
-		mf->u.frame.hwhdr.msgctxu.fld.cb_idx = handle;		/* byte */
-		req_offset = (u8 *)mf - (u8 *)iocp->req_frames;
-									/* u16! */
-		mf->u.frame.hwhdr.msgctxu.fld.req_idx = cpu_to_le16(req_offset / iocp->req_sz);
-		mf->u.frame.hwhdr.msgctxu.fld.rsvd = 0;
+	/* ensure values are reset properly! */
+	mf->u.frame.hwhdr.msgctxu.fld.cb_idx = handle;		/* byte */
+	req_offset = (u8 *)mf - (u8 *)ioc->req_frames;
+								/* u16! */
+	req_idx = cpu_to_le16(req_offset / ioc->req_sz);
+	mf->u.frame.hwhdr.msgctxu.fld.req_idx = req_idx;
+	mf->u.frame.hwhdr.msgctxu.fld.rsvd = 0;
 
 #ifdef MPT_DEBUG_MSG_FRAME
-		{
-			u32	*m = mf->u.frame.hwhdr.__hdr;
-			int	 ii, n;
+	{
+		u32	*m = mf->u.frame.hwhdr.__hdr;
+		int	 ii, n;
 
-			printk(KERN_INFO MYNAM ": %s: About to Put msg frame @ %p:\n" KERN_INFO " ",
-					iocp->name, m);
-			n = iocp->req_sz/4 - 1;
-			while (m[n] == 0)
-				n--;
-			for (ii=0; ii<=n; ii++) {
-				if (ii && ((ii%8)==0))
-					printk("\n" KERN_INFO " ");
-				printk(" %08x", le32_to_cpu(m[ii]));
-			}
-			printk("\n");
+		printk(KERN_INFO MYNAM ": %s: About to Put msg frame @ %p:\n" KERN_INFO " ",
+				ioc->name, m);
+		n = ioc->req_sz/4 - 1;
+		while (m[n] == 0)
+			n--;
+		for (ii=0; ii<=n; ii++) {
+			if (ii && ((ii%8)==0))
+				printk("\n" KERN_INFO " ");
+			printk(" %08x", le32_to_cpu(m[ii]));
 		}
+		printk("\n");
+	}
 #endif
 
-		mf_dma_addr = iocp->req_frames_low_dma + req_offset;
-		CHIPREG_WRITE32(&iocp->chip->RequestFifo, mf_dma_addr);
-	} else {
-		printk (KERN_ERR
-		    "mpt_put_msg_frame: Invalid iocid=%d\n", iocid);
-	}
-
+	mf_dma_addr = (ioc->req_frames_low_dma + req_offset) | ioc->RequestNB[req_idx];  
+	dsgprintk((MYIOC_s_INFO_FMT "mf_dma_addr=%x req_idx=%d RequestNB=%x\n", ioc->name, mf_dma_addr, req_idx, ioc->RequestNB[req_idx]));
+	CHIPREG_WRITE32(&ioc->chip->RequestFifo, mf_dma_addr);
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /**
  *	mpt_free_msg_frame - Place MPT request frame back on FreeQ.
  *	@handle: Handle of registered MPT protocol driver
- *	@iocid: IOC unique identifier (integer)
+ *	@ioc: Pointer to MPT adapter structure
  *	@mf: Pointer to MPT request frame
  *
  *	This routine places a MPT request frame back on the MPT adapter's
  *	FreeQ.
  */
 void
-mpt_free_msg_frame(int handle, int iocid, MPT_FRAME_HDR *mf)
+mpt_free_msg_frame(MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf)
 {
-	MPT_ADAPTER *iocp;
 	unsigned long flags;
 
-	iocp = mpt_adapters[iocid];
-	if (iocp != NULL) {
-		/*  Put Request back on FreeQ!  */
-		spin_lock_irqsave(&iocp->FreeQlock, flags);
-		Q_ADD_TAIL(&iocp->FreeQ, &mf->u.frame.linkage, MPT_FRAME_HDR);
+	/*  Put Request back on FreeQ!  */
+	spin_lock_irqsave(&ioc->FreeQlock, flags);
+	list_add_tail(&mf->u.frame.linkage.list, &ioc->FreeQ);
 #ifdef MFCNT
-		iocp->mfcnt--;
+	ioc->mfcnt--;
 #endif
-		spin_unlock_irqrestore(&iocp->FreeQlock, flags);
-	}
+	spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -1001,45 +939,10 @@ mpt_add_sge(char *pAddr, u32 flagslength, dma_addr_t dma_addr)
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /**
- *	mpt_add_chain - Place a chain SGE at address pAddr.
- *	@pAddr: virtual address for SGE
- *	@next: nextChainOffset value (u32's)
- *	@length: length of next SGL segment
- *	@dma_addr: Physical address
- *
- *	This routine places a MPT request frame back on the MPT adapter's
- *	FreeQ.
- */
-void
-mpt_add_chain(char *pAddr, u8 next, u16 length, dma_addr_t dma_addr)
-{
-	if (sizeof(dma_addr_t) == sizeof(u64)) {
-		SGEChain64_t *pChain = (SGEChain64_t *) pAddr;
-		u32 tmp = dma_addr & 0xFFFFFFFF;
-
-		pChain->Length = cpu_to_le16(length);
-		pChain->Flags = MPI_SGE_FLAGS_CHAIN_ELEMENT | mpt_addr_size();
-
-		pChain->NextChainOffset = next;
-
-		pChain->Address.Low = cpu_to_le32(tmp);
-		tmp = (u32) ((u64)dma_addr >> 32);
-		pChain->Address.High = cpu_to_le32(tmp);
-	} else {
-		SGEChain32_t *pChain = (SGEChain32_t *) pAddr;
-		pChain->Length = cpu_to_le16(length);
-		pChain->Flags = MPI_SGE_FLAGS_CHAIN_ELEMENT | mpt_addr_size();
-		pChain->NextChainOffset = next;
-		pChain->Address = cpu_to_le32(dma_addr);
-	}
-}
-
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-/**
  *	mpt_send_handshake_request - Send MPT request via doorbell
  *	handshake method.
  *	@handle: Handle of registered MPT protocol driver
- *	@iocid: IOC unique identifier (integer)
+ *	@ioc: Pointer to MPT adapter structure
  *	@reqBytes: Size of the request in bytes
  *	@req: Pointer to MPT request frame
  *	@sleepFlag: Use schedule if CAN_SLEEP else use udelay.
@@ -1053,126 +956,80 @@ mpt_add_chain(char *pAddr, u8 next, u16 length, dma_addr_t dma_addr)
  *	Returns 0 for success, non-zero for failure.
  */
 int
-mpt_send_handshake_request(int handle, int iocid, int reqBytes, u32 *req, int sleepFlag)
+mpt_send_handshake_request(int handle, MPT_ADAPTER *ioc, int reqBytes, u32 *req, int sleepFlag)
 {
-	MPT_ADAPTER	*iocp;
 	int		 r = 0;
+	u8	*req_as_bytes;
+	int	 ii;
 
-	iocp = mpt_adapters[iocid];
-	if (iocp != NULL) {
-		u8	*req_as_bytes;
-		int	 ii;
+	/* State is known to be good upon entering
+	 * this function so issue the bus reset
+	 * request.
+	 */
 
-		/* State is known to be good upon entering
-		 * this function so issue the bus reset
-		 * request.
-		 */
-
-		/*
-		 * Emulate what mpt_put_msg_frame() does /wrt to sanity
-		 * setting cb_idx/req_idx.  But ONLY if this request
-		 * is in proper (pre-alloc'd) request buffer range...
-		 */
-		ii = MFPTR_2_MPT_INDEX(iocp,(MPT_FRAME_HDR*)req);
-		if (reqBytes >= 12 && ii >= 0 && ii < iocp->req_depth) {
-			MPT_FRAME_HDR *mf = (MPT_FRAME_HDR*)req;
-			mf->u.frame.hwhdr.msgctxu.fld.req_idx = cpu_to_le16(ii);
-			mf->u.frame.hwhdr.msgctxu.fld.cb_idx = handle;
-		}
-
-		/* Make sure there are no doorbells */
-		CHIPREG_WRITE32(&iocp->chip->IntStatus, 0);
-
-		CHIPREG_WRITE32(&iocp->chip->Doorbell,
-				((MPI_FUNCTION_HANDSHAKE<<MPI_DOORBELL_FUNCTION_SHIFT) |
-				 ((reqBytes/4)<<MPI_DOORBELL_ADD_DWORDS_SHIFT)));
-
-		/* Wait for IOC doorbell int */
-		if ((ii = WaitForDoorbellInt(iocp, 5, sleepFlag)) < 0) {
-			return ii;
-		}
-
-		/* Read doorbell and check for active bit */
-		if (!(CHIPREG_READ32(&iocp->chip->Doorbell) & MPI_DOORBELL_ACTIVE))
-				return -5;
-
-		dhsprintk((KERN_INFO MYNAM ": %s: mpt_send_handshake_request start, WaitCnt=%d\n",
-				iocp->name, ii));
-
-		CHIPREG_WRITE32(&iocp->chip->IntStatus, 0);
-
-		if ((r = WaitForDoorbellAck(iocp, 5, sleepFlag)) < 0) {
-			return -2;
-		}
-
-		/* Send request via doorbell handshake */
-		req_as_bytes = (u8 *) req;
-		for (ii = 0; ii < reqBytes/4; ii++) {
-			u32 word;
-
-			word = ((req_as_bytes[(ii*4) + 0] <<  0) |
-				(req_as_bytes[(ii*4) + 1] <<  8) |
-				(req_as_bytes[(ii*4) + 2] << 16) |
-				(req_as_bytes[(ii*4) + 3] << 24));
-			CHIPREG_WRITE32(&iocp->chip->Doorbell, word);
-			if ((r = WaitForDoorbellAck(iocp, 5, sleepFlag)) < 0) {
-				r = -3;
-				break;
-			}
-		}
-
-		if (r >= 0 && WaitForDoorbellInt(iocp, 10, sleepFlag) >= 0)
-			r = 0;
-		else
-			r = -4;
-
-		/* Make sure there are no doorbells */
-		CHIPREG_WRITE32(&iocp->chip->IntStatus, 0);
+	/*
+	 * Emulate what mpt_put_msg_frame() does /wrt to sanity
+	 * setting cb_idx/req_idx.  But ONLY if this request
+	 * is in proper (pre-alloc'd) request buffer range...
+	 */
+	ii = MFPTR_2_MPT_INDEX(ioc,(MPT_FRAME_HDR*)req);
+	if (reqBytes >= 12 && ii >= 0 && ii < ioc->req_depth) {
+		MPT_FRAME_HDR *mf = (MPT_FRAME_HDR*)req;
+		mf->u.frame.hwhdr.msgctxu.fld.req_idx = cpu_to_le16(ii);
+		mf->u.frame.hwhdr.msgctxu.fld.cb_idx = handle;
 	}
 
+	/* Make sure there are no doorbells */
+	CHIPREG_WRITE32(&ioc->chip->IntStatus, 0);
+	
+	CHIPREG_WRITE32(&ioc->chip->Doorbell,
+			((MPI_FUNCTION_HANDSHAKE<<MPI_DOORBELL_FUNCTION_SHIFT) |
+			 ((reqBytes/4)<<MPI_DOORBELL_ADD_DWORDS_SHIFT)));
+
+	/* Wait for IOC doorbell int */
+	if ((ii = WaitForDoorbellInt(ioc, 5, sleepFlag)) < 0) {
+		return ii;
+	}
+
+	/* Read doorbell and check for active bit */
+	if (!(CHIPREG_READ32(&ioc->chip->Doorbell) & MPI_DOORBELL_ACTIVE))
+		return -5;
+
+	dhsprintk((KERN_INFO MYNAM ": %s: mpt_send_handshake_request start, WaitCnt=%d\n",
+			ioc->name, ii));
+
+	CHIPREG_WRITE32(&ioc->chip->IntStatus, 0);
+
+	if ((r = WaitForDoorbellAck(ioc, 5, sleepFlag)) < 0) {
+		return -2;
+	}
+		
+	/* Send request via doorbell handshake */
+	req_as_bytes = (u8 *) req;
+	for (ii = 0; ii < reqBytes/4; ii++) {
+		u32 word;
+
+		word = ((req_as_bytes[(ii*4) + 0] <<  0) |
+			(req_as_bytes[(ii*4) + 1] <<  8) |
+			(req_as_bytes[(ii*4) + 2] << 16) |
+			(req_as_bytes[(ii*4) + 3] << 24));
+		CHIPREG_WRITE32(&ioc->chip->Doorbell, word);
+		if ((r = WaitForDoorbellAck(ioc, 5, sleepFlag)) < 0) {
+			r = -3;
+			break;
+		}
+	}
+
+	if (r >= 0 && WaitForDoorbellInt(ioc, 10, sleepFlag) >= 0)
+		r = 0;
+	else
+		r = -4;
+
+	/* Make sure there are no doorbells */
+	CHIPREG_WRITE32(&ioc->chip->IntStatus, 0);
+	
 	return r;
 }
-
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-/**
- *	mpt_adapter_find_first - Find first MPT adapter pointer.
- *
- *	Returns first MPT adapter pointer or %NULL if no MPT adapters
- *	are present.
- */
-MPT_ADAPTER *
-mpt_adapter_find_first(void)
-{
-	MPT_ADAPTER *this;
-
-	if (! Q_IS_EMPTY(&MptAdapters))
-		this = MptAdapters.head;
-	else
-		this = NULL;
-
-	return this;
-}
-
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-/**
- *	mpt_adapter_find_next - Find next MPT adapter pointer.
- *	@prev: Pointer to previous MPT adapter
- *
- *	Returns next MPT adapter pointer or %NULL if there are no more.
- */
-MPT_ADAPTER *
-mpt_adapter_find_next(MPT_ADAPTER *prev)
-{
-	MPT_ADAPTER *next;
-
-	if (prev && (prev->forw != (MPT_ADAPTER*)&MptAdapters.head))
-		next = prev->forw;
-	else
-		next = NULL;
-
-	return next;
-}
-
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /**
@@ -1186,18 +1043,17 @@ mpt_adapter_find_next(MPT_ADAPTER *prev)
 int
 mpt_verify_adapter(int iocid, MPT_ADAPTER **iocpp)
 {
-	MPT_ADAPTER *p;
+	MPT_ADAPTER *ioc;
 
+	list_for_each_entry(ioc,&ioc_list,list) {
+		if (ioc->id == iocid) {
+			*iocpp =ioc;
+			return iocid;
+		} 
+	}
+	
 	*iocpp = NULL;
-	if (iocid >= MPT_MAX_ADAPTERS)
-		return -1;
-
-	p = mpt_adapters[iocid];
-	if (p == NULL)
-		return -1;
-
-	*iocpp = p;
-	return iocid;
+	return -1;
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -1221,7 +1077,7 @@ static int __devinit
 mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	MPT_ADAPTER	*ioc;
-	u8		*mem;
+	u8		__iomem *mem;
 	unsigned long	 mem_phys;
 	unsigned long	 port;
 	u32		 msize;
@@ -1231,9 +1087,15 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	u64		 mask = 0xffffffffffffffffULL;
 	u8		 revision;
 	u8		 pcixcmd;
+	static int	 mpt_ids = 0;
+#ifdef CONFIG_PROC_FS
+	struct proc_dir_entry *dent, *ent;
+#endif
 
 	if (pci_enable_device(pdev))
 		return r;
+	
+	dinitprintk((KERN_WARNING MYNAM ": mpt_adapter_install\n"));
 	
 	if (!pci_set_dma_mask(pdev, mask)) {
 		dprintk((KERN_INFO MYNAM
@@ -1259,9 +1121,8 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ioc->alloc_total = sizeof(MPT_ADAPTER);
 	ioc->req_sz = MPT_DEFAULT_FRAME_SIZE;		/* avoid div by zero! */
 	ioc->reply_sz = MPT_REPLY_FRAME_SIZE;
-
+	
 	ioc->pcidev = pdev;
-
 	ioc->diagPending = 0;
 	spin_lock_init(&ioc->diagLock);
 
@@ -1284,32 +1145,23 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* Initialize the running configQ head.
 	 */
-	Q_INIT(&ioc->configQ, Q_ITEM);
+	INIT_LIST_HEAD(&ioc->configQ);
 
 	/* Find lookup slot. */
-	for (ii=0; ii < MPT_MAX_ADAPTERS; ii++) {
-		if (mpt_adapters[ii] == NULL) {
-			ioc->id = ii;		/* Assign adapter unique id (lookup) */
-			break;
-		}
-	}
-	if (ii == MPT_MAX_ADAPTERS) {
-		printk(KERN_ERR MYNAM ": ERROR - mpt_adapters[%d] table overflow!\n", ii);
-		kfree(ioc);
-		return -ENFILE;
-	}
-
+	INIT_LIST_HEAD(&ioc->list);
+	ioc->id = mpt_ids++;
+	
 	mem_phys = msize = 0;
 	port = psize = 0;
 	for (ii=0; ii < DEVICE_COUNT_RESOURCE; ii++) {
-		if (pdev->PCI_BASEADDR_FLAGS(ii) & PCI_BASE_ADDRESS_SPACE_IO) {
+		if (pci_resource_flags(pdev, ii) & PCI_BASE_ADDRESS_SPACE_IO) {
 			/* Get I/O space! */
-			port = pdev->PCI_BASEADDR_START(ii);
-			psize = PCI_BASEADDR_SIZE(pdev,ii);
+			port = pci_resource_start(pdev, ii);
+			psize = pci_resource_len(pdev,ii);
 		} else {
 			/* Get memmap */
-			mem_phys = pdev->PCI_BASEADDR_START(ii);
-			msize = PCI_BASEADDR_SIZE(pdev,ii);
+			mem_phys = pci_resource_start(pdev, ii);
+			msize = pci_resource_len(pdev,ii);
 			break;
 		}
 	}
@@ -1321,8 +1173,8 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return -EINVAL;
 	}
 
-	dprintk((KERN_INFO MYNAM ": MPT adapter @ %lx, msize=%dd bytes\n", mem_phys, msize));
-	dprintk((KERN_INFO MYNAM ": (port i/o @ %lx, psize=%dd bytes)\n", port, psize));
+	dinitprintk((KERN_INFO MYNAM ": MPT adapter @ %lx, msize=%dd bytes\n", mem_phys, msize));
+	dinitprintk((KERN_INFO MYNAM ": (port i/o @ %lx, psize=%dd bytes)\n", port, psize));
 
 	mem = NULL;
 	/* Get logical ptr for PciMem0 space */
@@ -1334,33 +1186,36 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return -EINVAL;
 	}
 	ioc->memmap = mem;
-	dprintk((KERN_INFO MYNAM ": mem = %p, mem_phys = %lx\n", mem, mem_phys));
+	dinitprintk((KERN_INFO MYNAM ": mem = %p, mem_phys = %lx\n", mem, mem_phys));
 
-	dprintk((KERN_INFO MYNAM ": facts @ %p, pfacts[0] @ %p\n",
+	dinitprintk((KERN_INFO MYNAM ": facts @ %p, pfacts[0] @ %p\n",
 			&ioc->facts, &ioc->pfacts[0]));
 
 	ioc->mem_phys = mem_phys;
-	ioc->chip = (SYSIF_REGS*)mem;
+	ioc->chip = (SYSIF_REGS __iomem *)mem;
 
-	/* Save Port IO values incase we need to do downloadboot */
+	/* Save Port IO values in case we need to do downloadboot */
 	{
 		u8 *pmem = (u8*)port;
 		ioc->pio_mem_phys = port;
-		ioc->pio_chip = (SYSIF_REGS*)pmem;
+		ioc->pio_chip = (SYSIF_REGS __iomem *)pmem;
 	}
 
-	ioc->chip_type = FCUNK;
+	if (pdev->device == MPI_MANUFACTPAGE_DEVICEID_FC909) {
+		ioc->prod_name = "LSIFC909";
+		ioc->bus_type = FC;
+	}
 	if (pdev->device == MPI_MANUFACTPAGE_DEVICEID_FC929) {
-		ioc->chip_type = FC929;
 		ioc->prod_name = "LSIFC929";
+		ioc->bus_type = FC;
 	}
 	else if (pdev->device == MPI_MANUFACTPAGE_DEVICEID_FC919) {
-		ioc->chip_type = FC919;
 		ioc->prod_name = "LSIFC919";
+		ioc->bus_type = FC;
 	}
 	else if (pdev->device == MPI_MANUFACTPAGE_DEVICEID_FC929X) {
-		ioc->chip_type = FC929X;
 		pci_read_config_byte(pdev, PCI_CLASS_REVISION, &revision);
+		ioc->bus_type = FC;
 		if (revision < XL_929) {
 			ioc->prod_name = "LSIFC929X";
 			/* 929X Chip Fix. Set Split transactions level
@@ -1379,8 +1234,8 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		}
 	}
 	else if (pdev->device == MPI_MANUFACTPAGE_DEVICEID_FC919X) {
-		ioc->chip_type = FC919X;
 		ioc->prod_name = "LSIFC919X";
+		ioc->bus_type = FC;
 		/* 919X Chip Fix. Set Split transactions level
 		 * for PCIX. Set MOST bits to zero.
 		 */
@@ -1389,8 +1244,8 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		pci_write_config_byte(pdev, 0x6a, pcixcmd);
 	}
 	else if (pdev->device == MPI_MANUFACTPAGE_DEVID_53C1030) {
-		ioc->chip_type = C1030;
 		ioc->prod_name = "LSI53C1030";
+		ioc->bus_type = SCSI;
 		/* 1030 Chip Fix. Disable Split transactions
 		 * for PCIX. Set MOST bits to zero if Rev < C0( = 8).
 		 */
@@ -1402,13 +1257,12 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		}
 	}
 	else if (pdev->device == MPI_MANUFACTPAGE_DEVID_1030_53C1035) {
-		ioc->chip_type = C1035;
 		ioc->prod_name = "LSI53C1035";
+		ioc->bus_type = SCSI;
 	}
 
 	sprintf(ioc->name, "ioc%d", ioc->id);
 
-	Q_INIT(&ioc->FreeQ, MPT_FRAME_HDR);
 	spin_lock_init(&ioc->FreeQlock);
 
 	/* Disable all! */
@@ -1416,11 +1270,8 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ioc->active = 0;
 	CHIPREG_WRITE32(&ioc->chip->IntStatus, 0);
 
-	/* tack onto tail of our MPT adapter list */
-	Q_ADD_TAIL(&MptAdapters, ioc, MPT_ADAPTER);
-
 	/* Set lookup ptr. */
-	mpt_adapters[ioc->id] = ioc;
+	list_add_tail(&ioc->list, &ioc_list);
 
 	ioc->pci_irq = -1;
 	if (pdev->irq) {
@@ -1434,8 +1285,7 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			printk(MYIOC_s_ERR_FMT "Unable to allocate interrupt %s!\n",
 					ioc->name, __irq_itoa(pdev->irq));
 #endif
-			Q_DEL_ITEM(ioc);
-			mpt_adapters[ioc->id] = NULL;
+			list_del(&ioc->list);
 			iounmap(mem);
 			kfree(ioc);
 			return -EBUSY;
@@ -1456,9 +1306,7 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* NEW!  20010220 -sralston
 	 * Check for "bound ports" (929, 929X, 1030, 1035) to reduce redundant resets.
 	 */
-	if ((ioc->chip_type == FC929) || (ioc->chip_type == C1030)
-			|| (ioc->chip_type == C1035) || (ioc->chip_type == FC929X))
-		mpt_detect_bound_ports(ioc, pdev);
+	mpt_detect_bound_ports(ioc, pdev);
 
 	if ((r = mpt_do_ioc_recovery(ioc,
 	  MPT_HOSTEVENT_IOC_BRINGUP, CAN_SLEEP)) != 0) {
@@ -1466,8 +1314,7 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		  ": WARNING - %s did not initialize properly! (%d)\n",
 		  ioc->name, r);
 
-		Q_DEL_ITEM(ioc);
-		mpt_adapters[ioc->id] = NULL;
+		list_del(&ioc->list);
 		free_irq(ioc->pci_irq, ioc);
 		iounmap(mem);
 		kfree(ioc);
@@ -1483,6 +1330,25 @@ mptbase_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		}
 	}
 
+#ifdef CONFIG_PROC_FS
+	/*
+	 *  Create "/proc/mpt/iocN" subdirectory entry for each MPT adapter.
+	 */
+	dent = proc_mkdir(ioc->name, mpt_proc_root_dir);
+	if (dent) {
+		ent = create_proc_entry("info", S_IFREG|S_IRUGO, dent);
+		if (ent) {
+			ent->read_proc = procmpt_iocinfo_read;
+			ent->data = ioc;
+		}
+		ent = create_proc_entry("summary", S_IFREG|S_IRUGO, dent);
+		if (ent) {
+			ent->read_proc = procmpt_summary_read;
+			ent->data = ioc;
+		}
+	}
+#endif
+
 	return 0;
 }
 
@@ -1497,8 +1363,16 @@ static void __devexit
 mptbase_remove(struct pci_dev *pdev)
 {
 	MPT_ADAPTER 	*ioc = pci_get_drvdata(pdev);
+	char pname[32];
 	int ii;
 
+	sprintf(pname, MPT_PROCFS_MPTBASEDIR "/%s/summary", ioc->name);
+	remove_proc_entry(pname, NULL);
+	sprintf(pname, MPT_PROCFS_MPTBASEDIR "/%s/info", ioc->name);
+	remove_proc_entry(pname, NULL);
+	sprintf(pname, MPT_PROCFS_MPTBASEDIR "/%s", ioc->name);
+	remove_proc_entry(pname, NULL);
+	
 	/* call per device driver remove entry point */
 	for(ii=0; ii<MPT_MAX_PROTOCOL_DRIVERS; ii++) {
 		if(MptDeviceDriverHandlers[ii] &&
@@ -1506,19 +1380,18 @@ mptbase_remove(struct pci_dev *pdev)
 			MptDeviceDriverHandlers[ii]->remove(pdev);
 		}
 	}
-
+	
 	/* Disable interrupts! */
 	CHIPREG_WRITE32(&ioc->chip->IntMask, 0xFFFFFFFF);
 
 	ioc->active = 0;
-	mpt_sync_irq(pdev->irq);
+	synchronize_irq(pdev->irq);
 
 	/* Clear any lingering interrupt */
 	CHIPREG_WRITE32(&ioc->chip->IntStatus, 0);
 
 	CHIPREG_READ32(&ioc->chip->IntStatus);
 
-	Q_DEL_ITEM(ioc);
 	mpt_adapter_dispose(ioc);
 
 	pci_set_drvdata(pdev, NULL);
@@ -1556,7 +1429,7 @@ mptbase_shutdown(struct device * dev)
  *
  */
 static int
-mptbase_suspend(struct pci_dev *pdev, u32 state)
+mptbase_suspend(struct pci_dev *pdev, pm_message_t state)
 {
 	u32 device_state;
 	MPT_ADAPTER *ioc = pci_get_drvdata(pdev);
@@ -1588,7 +1461,7 @@ mptbase_suspend(struct pci_dev *pdev, u32 state)
 		}
 	}
 
-	pci_save_state(pdev, ioc->PciState);
+	pci_save_state(pdev);
 
 	/* put ioc into READY_STATE */
 	if(SendIocReset(ioc, MPI_FUNCTION_IOC_MESSAGE_UNIT_RESET, CAN_SLEEP)) {
@@ -1628,7 +1501,7 @@ mptbase_resume(struct pci_dev *pdev)
 		ioc->name, pdev, pci_name(pdev), device_state);
 
 	pci_set_power_state(pdev, 0);
-	pci_restore_state(pdev, ioc->PciState);
+	pci_restore_state(pdev);
 	pci_enable_device(pdev);
 
 	/* enable interrupts */
@@ -1698,7 +1571,7 @@ mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag)
 	int	 hard_reset_done = 0;
 	int	 alt_ioc_ready = 0;
 	int	 hard;
-	int	 r;
+	int	 rc=0;
 	int	 ii;
 	int	 handlers;
 	int	 ret = 0;
@@ -1748,31 +1621,37 @@ mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag)
 	 * and 1 if a hard reset was performed.
 	 */
 	if (hard_reset_done && reset_alt_ioc_active && ioc->alt_ioc) {
-		if ((r = MakeIocReady(ioc->alt_ioc, 0, sleepFlag)) == 0)
+		if ((rc = MakeIocReady(ioc->alt_ioc, 0, sleepFlag)) == 0)
 			alt_ioc_ready = 1;
 		else
 			printk(KERN_WARNING MYNAM
-					": alt-%s: (%d) Not ready WARNING!\n",
-					ioc->alt_ioc->name, r);
+					": alt-%s: Not ready WARNING!\n",
+					ioc->alt_ioc->name);
 	}
 
-	/* Get IOC facts! Allow 1 retry */
-	if ((r = GetIocFacts(ioc, sleepFlag, reason)) != 0)
-		r = GetIocFacts(ioc, sleepFlag, reason);
+	for (ii=0; ii<5; ii++) {
+		/* Get IOC facts! Allow 5 retries */
+		if ((rc = GetIocFacts(ioc, sleepFlag, reason)) == 0)
+			break;
+	}
+	
 
-	if (r) {
+	if (ii == 5) {
+		dinitprintk((MYIOC_s_INFO_FMT "Retry IocFacts failed rc=%x\n", ioc->name, rc));
 		ret = -2;
 	} else if (reason == MPT_HOSTEVENT_IOC_BRINGUP) {
 		MptDisplayIocCapabilities(ioc);
 	}
-
+	
 	if (alt_ioc_ready) {
-		if ((r = GetIocFacts(ioc->alt_ioc, sleepFlag, reason)) != 0) {
+		if ((rc = GetIocFacts(ioc->alt_ioc, sleepFlag, reason)) != 0) {
+			dinitprintk((MYIOC_s_INFO_FMT "Initial Alt IocFacts failed rc=%x\n", ioc->name, rc));
 			/* Retry - alt IOC was initialized once
 			 */
-			r = GetIocFacts(ioc->alt_ioc, sleepFlag, reason);
+			rc = GetIocFacts(ioc->alt_ioc, sleepFlag, reason);
 		}
-		if (r) {
+		if (rc) {
+			dinitprintk((MYIOC_s_INFO_FMT "Retry Alt IocFacts failed rc=%x\n", ioc->name, rc));
 			alt_ioc_ready = 0;
 			reset_alt_ioc_active = 0;
 		} else if (reason == MPT_HOSTEVENT_IOC_BRINGUP) {
@@ -1785,29 +1664,29 @@ mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag)
 	 * init as upper addresses are needed for init.
 	 * If fails, continue with alt-ioc processing
 	 */
-	if ((ret == 0) && ((r = PrimeIocFifos(ioc)) != 0))
+	if ((ret == 0) && ((rc = PrimeIocFifos(ioc)) != 0))
 		ret = -3;
 
 	/* May need to check/upload firmware & data here!
 	 * If fails, continue with alt-ioc processing
 	 */
-	if ((ret == 0) && ((r = SendIocInit(ioc, sleepFlag)) != 0))
+	if ((ret == 0) && ((rc = SendIocInit(ioc, sleepFlag)) != 0))
 		ret = -4;
 // NEW!
-	if (alt_ioc_ready && ((r = PrimeIocFifos(ioc->alt_ioc)) != 0)) {
+	if (alt_ioc_ready && ((rc = PrimeIocFifos(ioc->alt_ioc)) != 0)) {
 		printk(KERN_WARNING MYNAM ": alt-%s: (%d) FIFO mgmt alloc WARNING!\n",
-				ioc->alt_ioc->name, r);
+				ioc->alt_ioc->name, rc);
 		alt_ioc_ready = 0;
 		reset_alt_ioc_active = 0;
 	}
 
 	if (alt_ioc_ready) {
-		if ((r = SendIocInit(ioc->alt_ioc, sleepFlag)) != 0) {
+		if ((rc = SendIocInit(ioc->alt_ioc, sleepFlag)) != 0) {
 			alt_ioc_ready = 0;
 			reset_alt_ioc_active = 0;
 			printk(KERN_WARNING MYNAM
 				": alt-%s: (%d) init failure WARNING!\n",
-					ioc->alt_ioc->name, r);
+					ioc->alt_ioc->name, rc);
 		}
 	}
 
@@ -1819,18 +1698,8 @@ mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag)
 			/* Controller is not operational, cannot do upload
 			 */
 			if (ret == 0) {
-				r = mpt_do_upload(ioc, sleepFlag);
-				if (r != 0)
-					printk(KERN_WARNING MYNAM ": firmware upload failure!\n");
-			}
-
-			/* Handle the alt IOC too */
-			if ((alt_ioc_ready) && (ioc->alt_ioc->upload_fw)){
-				ddlprintk((MYIOC_s_INFO_FMT
-					"Alt-ioc firmware upload required!\n",
-					ioc->name));
-				r = mpt_do_upload(ioc->alt_ioc, sleepFlag);
-				if (r != 0)
+				rc = mpt_do_upload(ioc, sleepFlag);
+				if (rc != 0)
 					printk(KERN_WARNING MYNAM ": firmware upload failure!\n");
 			}
 		}
@@ -1869,7 +1738,7 @@ mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag)
 	 *	and we try GetLanConfigPages again...
 	 */
 	if ((ret == 0) && (reason == MPT_HOSTEVENT_IOC_BRINGUP)) {
-		if ((int)ioc->chip_type <= (int)FC929) {
+		if (ioc->bus_type == FC) {
 			/*
 			 *  Pre-fetch FC port WWN and stuff...
 			 *  (FCPortPage0_t stuff)
@@ -1924,19 +1793,19 @@ mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag)
 	 * MptResetHandlers[] registered yet.
 	 */
 	if (hard_reset_done) {
-		r = handlers = 0;
+		rc = handlers = 0;
 		for (ii=MPT_MAX_PROTOCOL_DRIVERS-1; ii; ii--) {
 			if ((ret == 0) && MptResetHandlers[ii]) {
 				dprintk((MYIOC_s_INFO_FMT "Calling IOC post_reset handler #%d\n",
 						ioc->name, ii));
-				r += (*(MptResetHandlers[ii]))(ioc, MPT_IOC_POST_RESET);
+				rc += (*(MptResetHandlers[ii]))(ioc, MPT_IOC_POST_RESET);
 				handlers++;
 			}
 
 			if (alt_ioc_ready && MptResetHandlers[ii]) {
 				dprintk((MYIOC_s_INFO_FMT "Calling alt-%s post_reset handler #%d\n",
 						ioc->name, ioc->alt_ioc->name, ii));
-				r += (*(MptResetHandlers[ii]))(ioc->alt_ioc, MPT_IOC_POST_RESET);
+				rc += (*(MptResetHandlers[ii]))(ioc->alt_ioc, MPT_IOC_POST_RESET);
 				handlers++;
 			}
 		}
@@ -1960,15 +1829,15 @@ mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag)
 static void
 mpt_detect_bound_ports(MPT_ADAPTER *ioc, struct pci_dev *pdev)
 {
-	MPT_ADAPTER *ioc_srch = mpt_adapter_find_first();
 	unsigned int match_lo, match_hi;
+	MPT_ADAPTER *ioc_srch;
 
 	match_lo = pdev->devfn-1;
 	match_hi = pdev->devfn+1;
 	dprintk((MYIOC_s_INFO_FMT "PCI bus/devfn=%x/%x, searching for devfn match on %x or %x\n",
 			ioc->name, pdev->bus->number, pdev->devfn, match_lo, match_hi));
 
-	while (ioc_srch != NULL) {
+	list_for_each_entry(ioc_srch, &ioc_list, list) {
 		struct pci_dev *_pcidev = ioc_srch->pcidev;
 
 		if ((_pcidev->device == pdev->device) &&
@@ -1990,7 +1859,6 @@ mpt_detect_bound_ports(MPT_ADAPTER *ioc, struct pci_dev *pdev)
 			ioc->alt_ioc = ioc_srch;
 			break;
 		}
-		ioc_srch = mpt_adapter_find_next(ioc_srch);
 	}
 }
 
@@ -1998,105 +1866,90 @@ mpt_detect_bound_ports(MPT_ADAPTER *ioc, struct pci_dev *pdev)
 /*
  *	mpt_adapter_disable - Disable misbehaving MPT adapter.
  *	@this: Pointer to MPT adapter structure
- *	@free: Free up alloc'd reply, request, etc.
  */
 static void
-mpt_adapter_disable(MPT_ADAPTER *this, int freeup)
+mpt_adapter_disable(MPT_ADAPTER *ioc)
 {
-	if (this != NULL) {
-		int sz=0;
-		u32 state;
-		int ret;
+	int sz;
+	int ret;
 
-		/* Disable the FW */
-		state = mpt_GetIocState(this, 1);
-		if (state == MPI_IOC_STATE_OPERATIONAL) {
-			SendIocReset(this, MPI_FUNCTION_IOC_MESSAGE_UNIT_RESET, NO_SLEEP);
+	if (ioc->cached_fw != NULL) {
+		ddlprintk((KERN_INFO MYNAM ": mpt_adapter_disable: Pushing FW onto adapter\n"));
+		if ((ret = mpt_downloadboot(ioc, NO_SLEEP)) < 0) {
+			printk(KERN_WARNING MYNAM
+				": firmware downloadboot failure (%d)!\n", ret);
 		}
+	}
 
-		if (this->cached_fw != NULL) {
-			ddlprintk((KERN_INFO MYNAM ": Pushing FW onto adapter\n"));
+	/* Disable adapter interrupts! */
+	CHIPREG_WRITE32(&ioc->chip->IntMask, 0xFFFFFFFF);
+	ioc->active = 0;
+	/* Clear any lingering interrupt */
+	CHIPREG_WRITE32(&ioc->chip->IntStatus, 0);
 
-			if ((ret = mpt_downloadboot(this, NO_SLEEP)) < 0) {
-				printk(KERN_WARNING MYNAM
-					": firmware downloadboot failure (%d)!\n", ret);
-			}
-		}
+	if (ioc->alloc != NULL) {
+		sz = ioc->alloc_sz;
+		dexitprintk((KERN_INFO MYNAM ": %s.free  @ %p, sz=%d bytes\n",
+		 	ioc->name, ioc->alloc, ioc->alloc_sz));
+		pci_free_consistent(ioc->pcidev, sz,
+				ioc->alloc, ioc->alloc_dma);
+		ioc->reply_frames = NULL;
+		ioc->req_frames = NULL;
+		ioc->alloc = NULL;
+		ioc->alloc_total -= sz;
+	}
 
-		/* Disable adapter interrupts! */
-		CHIPREG_WRITE32(&this->chip->IntMask, 0xFFFFFFFF);
-		this->active = 0;
-		/* Clear any lingering interrupt */
-		CHIPREG_WRITE32(&this->chip->IntStatus, 0);
+	if (ioc->sense_buf_pool != NULL) {
+		sz = (ioc->req_depth * MPT_SENSE_BUFFER_ALLOC);
+		pci_free_consistent(ioc->pcidev, sz,
+				ioc->sense_buf_pool, ioc->sense_buf_pool_dma);
+		ioc->sense_buf_pool = NULL;
+		ioc->alloc_total -= sz;
+	}
 
-		if (freeup && this->fifo_pool != NULL) {
-			pci_free_consistent(this->pcidev,
-				this->fifo_pool_sz,
-				this->fifo_pool, this->fifo_pool_dma);
-			this->reply_frames = NULL;
-			this->reply_alloc = NULL;
-			this->req_frames = NULL;
-			this->req_alloc = NULL;
-			this->chain_alloc = NULL;
-			this->fifo_pool = NULL;
-			this->alloc_total -= this->fifo_pool_sz;
-		}
-		if (freeup && this->sense_buf_pool != NULL) {
-			sz = (this->req_depth * MPT_SENSE_BUFFER_ALLOC);
-			pci_free_consistent(this->pcidev, sz,
-					this->sense_buf_pool, this->sense_buf_pool_dma);
-			this->sense_buf_pool = NULL;
-			this->alloc_total -= sz;
-		}
+	if (ioc->events != NULL){
+		sz = MPTCTL_EVENT_LOG_SIZE * sizeof(MPT_IOCTL_EVENTS);
+		kfree(ioc->events);
+		ioc->events = NULL;
+		ioc->alloc_total -= sz;
+	}
 
-		if (freeup && this->events != NULL){
-			sz = MPTCTL_EVENT_LOG_SIZE * sizeof(MPT_IOCTL_EVENTS);
-			kfree(this->events);
-			this->events = NULL;
-			this->alloc_total -= sz;
-		}
+	if (ioc->cached_fw != NULL) {
+		sz = ioc->facts.FWImageSize;
+		pci_free_consistent(ioc->pcidev, sz,
+			ioc->cached_fw, ioc->cached_fw_dma);
+		ioc->cached_fw = NULL;
+		ioc->alloc_total -= sz;
+	}
 
-		if (freeup && this->cached_fw != NULL) {
-			int ii = 0;
+	if (ioc->spi_data.nvram != NULL) {
+		kfree(ioc->spi_data.nvram);
+		ioc->spi_data.nvram = NULL;
+	}
 
-			while ((ii < this->num_fw_frags) && (this->cached_fw[ii]!= NULL)) {
-				sz = this->cached_fw[ii]->size;
-				pci_free_consistent(this->pcidev, sz,
-					this->cached_fw[ii]->fw, this->cached_fw[ii]->fw_dma);
-				this->cached_fw[ii]->fw = NULL;
-				this->alloc_total -= sz;
+	if (ioc->spi_data.pIocPg3 != NULL) {
+		kfree(ioc->spi_data.pIocPg3);
+		ioc->spi_data.pIocPg3 = NULL;
+	}
 
-				kfree(this->cached_fw[ii]);
-				this->cached_fw[ii] = NULL;
-				this->alloc_total -= sizeof(fw_image_t);
+	if (ioc->spi_data.pIocPg4 != NULL) {
+		sz = ioc->spi_data.IocPg4Sz;
+		pci_free_consistent(ioc->pcidev, sz, 
+			ioc->spi_data.pIocPg4,
+			ioc->spi_data.IocPg4_dma);
+		ioc->spi_data.pIocPg4 = NULL;
+		ioc->alloc_total -= sz;
+	}
 
-				ii++;
-			}
+	if (ioc->ReqToChain != NULL) {
+		kfree(ioc->ReqToChain);
+		kfree(ioc->RequestNB);
+		ioc->ReqToChain = NULL;
+	}
 
-			kfree(this->cached_fw);
-			this->cached_fw = NULL;
-			sz = this->num_fw_frags * sizeof(void *);
-			this->alloc_total -= sz;
-		}
-
-		if (freeup && this->spi_data.nvram != NULL) {
-			kfree(this->spi_data.nvram);
-			this->spi_data.nvram = NULL;
-		}
-
-		if (freeup && this->spi_data.pIocPg3 != NULL) {
-			kfree(this->spi_data.pIocPg3);
-			this->spi_data.pIocPg3 = NULL;
-		}
-
-		if (freeup && this->spi_data.pIocPg4 != NULL) {
-			sz = this->spi_data.IocPg4Sz;
-			pci_free_consistent(this->pcidev, sz,
-				this->spi_data.pIocPg4,
-				this->spi_data.IocPg4_dma);
-			this->spi_data.pIocPg4 = NULL;
-			this->alloc_total -= sz;
-		}
+	if (ioc->ChainToChain != NULL) {
+		kfree(ioc->ChainToChain);
+		ioc->ChainToChain = NULL;
 	}
 }
 
@@ -2104,48 +1957,43 @@ mpt_adapter_disable(MPT_ADAPTER *this, int freeup)
 /*
  *	mpt_adapter_dispose - Free all resources associated with a MPT
  *	adapter.
- *	@this: Pointer to MPT adapter structure
+ *	@ioc: Pointer to MPT adapter structure
  *
  *	This routine unregisters h/w resources and frees all alloc'd memory
  *	associated with a MPT adapter structure.
  */
 static void
-mpt_adapter_dispose(MPT_ADAPTER *this)
+mpt_adapter_dispose(MPT_ADAPTER *ioc)
 {
-	if (this != NULL) {
+	if (ioc != NULL) {
 		int sz_first, sz_last;
 
-		sz_first = this->alloc_total;
+		sz_first = ioc->alloc_total;
 
-		if (this->alt_ioc != NULL) {
-			this->alt_ioc->alt_ioc = NULL;
-			this->alt_ioc = NULL;
+		mpt_adapter_disable(ioc);
+
+		if (ioc->pci_irq != -1) {
+			free_irq(ioc->pci_irq, ioc);
+			ioc->pci_irq = -1;
 		}
 
-		mpt_adapter_disable(this, 1);
-
-		if (this->pci_irq != -1) {
-			free_irq(this->pci_irq, this);
-			this->pci_irq = -1;
-		}
-
-		if (this->memmap != NULL)
-			iounmap((u8 *) this->memmap);
+		if (ioc->memmap != NULL)
+			iounmap(ioc->memmap);
 
 #if defined(CONFIG_MTRR) && 0
-		if (this->mtrr_reg > 0) {
-			mtrr_del(this->mtrr_reg, 0, 0);
-			dprintk((KERN_INFO MYNAM ": %s: MTRR region de-registered\n", this->name));
+		if (ioc->mtrr_reg > 0) {
+			mtrr_del(ioc->mtrr_reg, 0, 0);
+			dprintk((KERN_INFO MYNAM ": %s: MTRR region de-registered\n", ioc->name));
 		}
 #endif
 
 		/*  Zap the adapter lookup ptr!  */
-		mpt_adapters[this->id] = NULL;
+		list_del(&ioc->list);
 
-		sz_last = this->alloc_total;
+		sz_last = ioc->alloc_total;
 		dprintk((KERN_INFO MYNAM ": %s: free'd %d of %d bytes\n",
-				this->name, sz_first-sz_last+(int)sizeof(*this), sz_first));
-		kfree(this);
+				ioc->name, sz_first-sz_last+(int)sizeof(*ioc), sz_first));
+		kfree(ioc);
 	}
 }
 
@@ -2233,19 +2081,8 @@ MakeIocReady(MPT_ADAPTER *ioc, int force, int sleepFlag)
 	}
 
 	/* Is it already READY? */
-	if (!statefault && (ioc_state & MPI_IOC_STATE_MASK) == MPI_IOC_STATE_READY) {
-		if ((int)ioc->chip_type <= (int)FC929)
-			return 0;
-		else {
-			/* Workaround from broken 1030 FW.
-			 * Force a diagnostic reset if fails.
-			 */
-			if ((r = SendIocReset(ioc, MPI_FUNCTION_IOC_MESSAGE_UNIT_RESET, sleepFlag)) == 0)
-				return 0;
-			else
-				statefault = 4;
-		}
-	}
+	if (!statefault && (ioc_state & MPI_IOC_STATE_MASK) == MPI_IOC_STATE_READY) 
+		return 0;
 
 	/*
 	 *	Check to see if IOC is in FAULT state.
@@ -2262,7 +2099,7 @@ MakeIocReady(MPT_ADAPTER *ioc, int force, int sleepFlag)
 	 *	Hmmm...  Did it get left operational?
 	 */
 	if ((ioc_state & MPI_IOC_STATE_MASK) == MPI_IOC_STATE_OPERATIONAL) {
-		dprintk((MYIOC_s_WARN_FMT "IOC operational unexpected\n",
+		dinitprintk((MYIOC_s_WARN_FMT "IOC operational unexpected\n",
 				ioc->name));
 
 		/* Check WhoInit.
@@ -2319,13 +2156,12 @@ MakeIocReady(MPT_ADAPTER *ioc, int force, int sleepFlag)
 		ii++; cntdn--;
 		if (!cntdn) {
 			printk(MYIOC_s_ERR_FMT "Wait IOC_READY state timeout(%d)!\n",
-					ioc->name, (ii+5)/HZ);
+					ioc->name, (int)((ii+5)/HZ));
 			return -ETIME;
 		}
 
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1);
+			msleep_interruptible(1);
 		} else {
 			mdelay (1);	/* 1 msec delay */
 		}
@@ -2383,7 +2219,9 @@ GetIocFacts(MPT_ADAPTER *ioc, int sleepFlag, int reason)
 	int			 r;
 	int			 req_sz;
 	int			 reply_sz;
-	u32			 status;
+	int			 sz;
+	u32			 status, vv;
+	u8			 shiftFactor=1;
 
 	/* IOC *must* NOT be in RESET state! */
 	if (ioc->last_state == MPI_IOC_STATE_RESET) {
@@ -2406,7 +2244,9 @@ GetIocFacts(MPT_ADAPTER *ioc, int sleepFlag, int reason)
 	get_facts.Function = MPI_FUNCTION_IOC_FACTS;
 	/* Assert: All other get_facts fields are zero! */
 
-	dprintk((MYIOC_s_INFO_FMT "Sending get IocFacts request\n", ioc->name));
+	dinitprintk((MYIOC_s_INFO_FMT 
+	    "Sending get IocFacts request req_sz=%d reply_sz=%d\n", 
+	    ioc->name, req_sz, reply_sz));
 
 	/* No non-zero fields in the get_facts request are greater than
 	 * 1 byte in size, so we can just fire it off as is.
@@ -2479,6 +2319,13 @@ GetIocFacts(MPT_ADAPTER *ioc, int sleepFlag, int reason)
 			facts->FWImageSize = le32_to_cpu(facts->FWImageSize);
 		}
 
+		sz = facts->FWImageSize;
+		if ( sz & 0x01 )
+			sz += 1;
+		if ( sz & 0x02 )
+			sz += 2;
+		facts->FWImageSize = sz;
+		
 		if (!facts->RequestFrameSize) {
 			/*  Something is wrong!  */
 			printk(MYIOC_s_ERR_FMT "IOC reported invalid 0 request size!\n",
@@ -2486,6 +2333,18 @@ GetIocFacts(MPT_ADAPTER *ioc, int sleepFlag, int reason)
 			return -55;
 		}
 
+		r = sz = le32_to_cpu(facts->BlockSize);
+		vv = ((63 / (sz * 4)) + 1) & 0x03;
+		ioc->NB_for_64_byte_frame = vv;
+		while ( sz )
+		{
+			shiftFactor++;
+			sz = sz >> 1;
+		}
+		ioc->NBShiftFactor  = shiftFactor;
+		dinitprintk((MYIOC_s_INFO_FMT "NB_for_64_byte_frame=%x NBShiftFactor=%x BlockSize=%x\n",
+					ioc->name, vv, shiftFactor, r));
+    
 		if (reason == MPT_HOSTEVENT_IOC_BRINGUP) {
 			/*
 			 * Set values for this IOC's request & reply frame sizes,
@@ -2496,9 +2355,9 @@ GetIocFacts(MPT_ADAPTER *ioc, int sleepFlag, int reason)
 			ioc->reply_sz = MPT_REPLY_FRAME_SIZE;
 			ioc->reply_depth = min_t(int, MPT_DEFAULT_REPLY_DEPTH, facts->ReplyQueueDepth);
 
-			dprintk((MYIOC_s_INFO_FMT "reply_sz=%3d, reply_depth=%4d\n",
+			dinitprintk((MYIOC_s_INFO_FMT "reply_sz=%3d, reply_depth=%4d\n",
 				ioc->name, ioc->reply_sz, ioc->reply_depth));
-			dprintk((MYIOC_s_INFO_FMT "req_sz  =%3d, req_depth  =%4d\n",
+			dinitprintk((MYIOC_s_INFO_FMT "req_sz  =%3d, req_depth  =%4d\n",
 				ioc->name, ioc->req_sz, ioc->req_depth));
 
 			/* Get port facts! */
@@ -2506,8 +2365,10 @@ GetIocFacts(MPT_ADAPTER *ioc, int sleepFlag, int reason)
 				return r;
 		}
 	} else {
-		printk(MYIOC_s_ERR_FMT "Invalid IOC facts reply!\n",
-				ioc->name);
+		printk(MYIOC_s_ERR_FMT 
+		     "Invalid IOC facts reply, msgLength=%d offsetof=%zd!\n",
+		     ioc->name, facts->MsgLength, (offsetof(IOCFactsReply_t,
+		     RequestFrameSize)/sizeof(u32)));
 		return -66;
 	}
 
@@ -2554,7 +2415,7 @@ GetPortFacts(MPT_ADAPTER *ioc, int portnum, int sleepFlag)
 	get_pfacts.PortNumber = portnum;
 	/* Assert: All other get_pfacts fields are zero! */
 
-	dprintk((MYIOC_s_INFO_FMT "Sending get PortFacts(%d) request\n",
+	dinitprintk((MYIOC_s_INFO_FMT "Sending get PortFacts(%d) request\n",
 			ioc->name, portnum));
 
 	/* No non-zero fields in the get_pfacts request are greater than
@@ -2605,43 +2466,33 @@ SendIocInit(MPT_ADAPTER *ioc, int sleepFlag)
 	memset(&init_reply, 0, sizeof(init_reply));
 
 	ioc_init.WhoInit = MPI_WHOINIT_HOST_DRIVER;
-/*	ioc_init.ChainOffset = 0;			*/
 	ioc_init.Function = MPI_FUNCTION_IOC_INIT;
-/*	ioc_init.Flags = 0;				*/
 
 	/* If we are in a recovery mode and we uploaded the FW image,
 	 * then this pointer is not NULL. Skip the upload a second time.
 	 * Set this flag if cached_fw set for either IOC.
 	 */
-	ioc->upload_fw = 0;
-	ioc_init.Flags = 0;
-	if (ioc->facts.Flags & MPI_IOCFACTS_FLAGS_FW_DOWNLOAD_BOOT) {
-		if ((ioc->cached_fw) || (ioc->alt_ioc && ioc->alt_ioc->cached_fw))
-			ioc_init.Flags = MPI_IOCINIT_FLAGS_DISCARD_FW_IMAGE;
-		else
-			ioc->upload_fw = 1;
-	}
-	ddlprintk((MYIOC_s_INFO_FMT "flags %d, upload_fw %d \n",
-		   ioc->name, ioc_init.Flags, ioc->upload_fw));
+	if (ioc->facts.Flags & MPI_IOCFACTS_FLAGS_FW_DOWNLOAD_BOOT)
+		ioc->upload_fw = 1;
+	else
+		ioc->upload_fw = 0;
+	ddlprintk((MYIOC_s_INFO_FMT "upload_fw %d facts.Flags=%x\n",
+		   ioc->name, ioc->upload_fw, ioc->facts.Flags));
 
-	if ((int)ioc->chip_type <= (int)FC929) {
+	if (ioc->bus_type == FC)
 		ioc_init.MaxDevices = MPT_MAX_FC_DEVICES;
-	} else {
+	else
 		ioc_init.MaxDevices = MPT_MAX_SCSI_DEVICES;
-	}
+	
 	ioc_init.MaxBuses = MPT_MAX_BUS;
 
-/*	ioc_init.MsgFlags = 0;				*/
-/*	ioc_init.MsgContext = cpu_to_le32(0x00000000);	*/
 	ioc_init.ReplyFrameSize = cpu_to_le16(ioc->reply_sz);	/* in BYTES */
-		
-	ioc->facts.RequestFrameSize = ioc_init.ReplyFrameSize;
 
 	if (sizeof(dma_addr_t) == sizeof(u64)) {
 		/* Save the upper 32-bits of the request
 		 * (reply) and sense buffers.
 		 */
-		ioc_init.HostMfaHighAddr = cpu_to_le32((u32)((u64)ioc->req_frames_dma >> 32));
+		ioc_init.HostMfaHighAddr = cpu_to_le32((u32)((u64)ioc->alloc_dma >> 32));
 		ioc_init.SenseBufferHighAddr = cpu_to_le32((u32)((u64)ioc->sense_buf_pool_dma >> 32));
 	} else {
 		/* Force 32-bit addressing */
@@ -2652,7 +2503,7 @@ SendIocInit(MPT_ADAPTER *ioc, int sleepFlag)
 	ioc->facts.CurrentHostMfaHighAddr = ioc_init.HostMfaHighAddr;
 	ioc->facts.CurrentSenseBufferHighAddr = ioc_init.SenseBufferHighAddr;
 
-	dprintk((MYIOC_s_INFO_FMT "Sending IOCInit (req @ %p)\n",
+	dhsprintk((MYIOC_s_INFO_FMT "Sending IOCInit (req @ %p)\n",
 			ioc->name, &ioc_init));
 
 	r = mpt_handshake_req_reply_wait(ioc, sizeof(IOCInit_t), (u32*)&ioc_init,
@@ -2664,6 +2515,9 @@ SendIocInit(MPT_ADAPTER *ioc, int sleepFlag)
 	 * since we don't even look at it's contents.
 	 */
 
+	dhsprintk((MYIOC_s_INFO_FMT "Sending PortEnable (req @ %p)\n",
+			ioc->name, &ioc_init));
+	
 	if ((r = SendPortEnable(ioc, 0, sleepFlag)) != 0)
 		return r;
 
@@ -2676,15 +2530,14 @@ SendIocInit(MPT_ADAPTER *ioc, int sleepFlag)
 	state = mpt_GetIocState(ioc, 1);
 	while (state != MPI_IOC_STATE_OPERATIONAL && --cntdn) {
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1);
+			msleep_interruptible(1);
 		} else {
 			mdelay(1);
 		}
 
 		if (!cntdn) {
 			printk(MYIOC_s_ERR_FMT "Wait IOC_OP state timeout(%d)!\n",
-					ioc->name, (count+5)/HZ);
+					ioc->name, (int)((count+5)/HZ));
 			return -9;
 		}
 
@@ -2730,12 +2583,12 @@ SendPortEnable(MPT_ADAPTER *ioc, int portnum, int sleepFlag)
 /*	port_enable.MsgFlags = 0;		*/
 /*	port_enable.MsgContext = 0;		*/
 
-	dprintk((MYIOC_s_INFO_FMT "Sending Port(%d)Enable (req @ %p)\n",
+	dinitprintk((MYIOC_s_INFO_FMT "Sending Port(%d)Enable (req @ %p)\n",
 			ioc->name, portnum, &port_enable));
 
 	/* RAID FW may take a long time to enable
 	 */
-	if ((int)ioc->chip_type <= (int)FC929) {
+	if (ioc->bus_type == FC) {
 		ii = mpt_handshake_req_reply_wait(ioc, req_sz, (u32*)&port_enable,
 				reply_sz, (u16*)&reply_buf, 65 /*seconds*/, sleepFlag);
 	} else {
@@ -2754,136 +2607,37 @@ SendPortEnable(MPT_ADAPTER *ioc, int portnum, int sleepFlag)
 }
 
 /*
- * Inputs: size - total FW bytes
- * Outputs: frags - number of fragments needed
- * Return NULL if failed.
+ *	ioc: Pointer to MPT_ADAPTER structure
+ *      size - total FW bytes
  */
-void *
-mpt_alloc_fw_memory(MPT_ADAPTER *ioc, int size, int *frags, int *alloc_sz)
+void
+mpt_alloc_fw_memory(MPT_ADAPTER *ioc, int size)
 {
-	fw_image_t	**cached_fw;
-	u8		*mem;
-	dma_addr_t	fw_dma;
-	int		alloc_total = 0;
-	int		bytes_left, bytes, num_frags;
-	int		sz, ii;
-
-	/* cached_fw
-	 */
-	sz = ioc->num_fw_frags * sizeof(void *);
-	mem = kmalloc(sz, GFP_ATOMIC);
-	if (mem == NULL)
-		return NULL;
-
-	memset(mem, 0, sz);
-	cached_fw = (fw_image_t **)mem;
-	alloc_total += sz;
-
-	/* malloc fragment memory
-	 * fw_image_t struct and dma for fw data
-	 */
-	bytes_left = size;
-	ii = 0;
-	num_frags = 0;
-	bytes = bytes_left;
-	while((bytes_left) && (num_frags < ioc->num_fw_frags)) {
-		if (cached_fw[ii] == NULL) {
-			mem = kmalloc(sizeof(fw_image_t), GFP_ATOMIC);
-			if (mem == NULL)
-				break;
-
-			memset(mem, 0, sizeof(fw_image_t));
-			cached_fw[ii] = (fw_image_t *)mem;
-			alloc_total += sizeof(fw_image_t);
-		}
-
-		mem = pci_alloc_consistent(ioc->pcidev, bytes, &fw_dma);
-		if (mem == NULL) {
-			if (bytes > 0x10000)
-				bytes = 0x10000;
-			else if (bytes > 0x8000)
-				bytes = 0x8000;
-			else if (bytes > 0x4000)
-				bytes = 0x4000;
-			else if (bytes > 0x2000)
-				bytes = 0x2000;
-			else if (bytes > 0x1000)
-				bytes = 0x1000;
-			else
-				break;
-
-			continue;
-		}
-
-		cached_fw[ii]->fw = mem;
-		cached_fw[ii]->fw_dma = fw_dma;
-		cached_fw[ii]->size = bytes;
-		memset(mem, 0, bytes);
-		alloc_total += bytes;
-
-		bytes_left -= bytes;
-
-		num_frags++;
-		ii++;
+	if (ioc->cached_fw)
+		return;  /* use already allocated memory */
+	if (ioc->alt_ioc && ioc->alt_ioc->cached_fw) {
+		ioc->cached_fw = ioc->alt_ioc->cached_fw;  /* use alt_ioc's memory */
+		ioc->cached_fw_dma = ioc->alt_ioc->cached_fw_dma;
+	} else {
+		if ( (ioc->cached_fw = pci_alloc_consistent(ioc->pcidev, size, &ioc->cached_fw_dma) ) )
+			ioc->alloc_total += size;
 	}
-
-	if (bytes_left ) {
-		/* Major Failure.
-		 */
-		mpt_free_fw_memory(ioc, cached_fw);
-		return NULL;
-	}
-
-	*frags = num_frags;
-	*alloc_sz = alloc_total;
-
-	return (void *) cached_fw;
 }
-
 /*
  * If alt_img is NULL, delete from ioc structure.
  * Else, delete a secondary image in same format.
  */
 void
-mpt_free_fw_memory(MPT_ADAPTER *ioc, fw_image_t **alt_img)
+mpt_free_fw_memory(MPT_ADAPTER *ioc)
 {
-	fw_image_t **cached_fw;
-	int ii;
 	int sz;
-	int alloc_freed = 0;
 
-	if (alt_img != NULL)
-		cached_fw = alt_img;
-	else
-		cached_fw = ioc->cached_fw;
-
-	if (cached_fw == NULL)
-		return;
-
-	ii = 0;
-	while ((ii < ioc->num_fw_frags) && (cached_fw[ii]!= NULL)) {
-		sz = cached_fw[ii]->size;
-		if (sz > 0) {
-			pci_free_consistent(ioc->pcidev, sz,
-						cached_fw[ii]->fw, cached_fw[ii]->fw_dma);
-		}
-		cached_fw[ii]->fw = NULL;
-		alloc_freed += sz;
-
-		kfree(cached_fw[ii]);
-		cached_fw[ii] = NULL;
-		alloc_freed += sizeof(fw_image_t);
-
-		ii++;
-	}
-
-	kfree(cached_fw);
-	cached_fw = NULL;
-	sz = ioc->num_fw_frags * sizeof(void *);
-	alloc_freed += sz;
-
-	if (alt_img == NULL)
-		ioc->alloc_total -= alloc_freed;
+	sz = ioc->facts.FWImageSize;
+	dinitprintk((KERN_WARNING MYNAM "free_fw_memory: FW Image  @ %p[%p], sz=%d[%x] bytes\n",
+		 ioc->cached_fw, (void *)(ulong)ioc->cached_fw_dma, sz, sz));
+	pci_free_consistent(ioc->pcidev, sz,
+			ioc->cached_fw, ioc->cached_fw_dma);
+	ioc->cached_fw = NULL;
 
 	return;
 }
@@ -2912,34 +2666,25 @@ mpt_do_upload(MPT_ADAPTER *ioc, int sleepFlag)
 	FWUploadReply_t		*preply;
 	FWUploadTCSGE_t		*ptcsge;
 	int			 sgeoffset;
+	u32			 flagsLength;
 	int			 ii, sz, reply_sz;
-	int			 cmdStatus, freeMem = 0;
-	int			 num_frags, alloc_sz;
+	int			 cmdStatus;
 
-	/* If the image size is 0 or if the pointer is
-	 * not NULL (error), we are done.
+	/* If the image size is 0, we are done.
 	 */
-	if (((sz = ioc->facts.FWImageSize) == 0) || ioc->cached_fw)
+	if ((sz = ioc->facts.FWImageSize) == 0)
 		return 0;
 
-	ioc->num_fw_frags = ioc->req_sz - sizeof(FWUpload_t) + sizeof(dma_addr_t) + sizeof(u32) -1;
-	ioc->num_fw_frags /= sizeof(dma_addr_t) + sizeof(u32);
+	mpt_alloc_fw_memory(ioc, sz);
 
-	ioc->cached_fw = (fw_image_t **) mpt_alloc_fw_memory(ioc,
-			ioc->facts.FWImageSize, &num_frags, &alloc_sz);
-
+	dinitprintk((KERN_WARNING MYNAM ": FW Image  @ %p[%p], sz=%d[%x] bytes\n",
+		 ioc->cached_fw, (void *)(ulong)ioc->cached_fw_dma, sz, sz));
+	
 	if (ioc->cached_fw == NULL) {
 		/* Major Failure.
 		 */
-		mpt_free_fw_memory(ioc, NULL);
-		ioc->cached_fw = NULL;
-		
 		return -ENOMEM;
 	}
-	ioc->alloc_total += alloc_sz;
-
-	ddlprintk((KERN_INFO MYNAM ": FW Image  @ %p, sz=%d bytes\n",
-		 (void *)(ulong)ioc->cached_fw, ioc->facts.FWImageSize));
 
 	prequest = (FWUpload_t *)&request;
 	preply = (FWUploadReply_t *)&reply;
@@ -2952,38 +2697,26 @@ mpt_do_upload(MPT_ADAPTER *ioc, int sleepFlag)
 
 	prequest->ImageType = MPI_FW_UPLOAD_ITYPE_FW_IOC_MEM;
 	prequest->Function = MPI_FUNCTION_FW_UPLOAD;
-	prequest->MsgContext = 0;		/* anything */
 
 	ptcsge = (FWUploadTCSGE_t *) &prequest->SGL;
-	ptcsge->Reserved = 0;
-	ptcsge->ContextSize = 0;
 	ptcsge->DetailsLength = 12;
 	ptcsge->Flags = MPI_SGE_FLAGS_TRANSACTION_ELEMENT;
-	ptcsge->Reserved1 = 0;
-	ptcsge->ImageOffset = 0;
 	ptcsge->ImageSize = cpu_to_le32(sz);
 
 	sgeoffset = sizeof(FWUpload_t) - sizeof(SGE_MPI_UNION) + sizeof(FWUploadTCSGE_t);
 
-	for (ii = 0; ii < (num_frags-1); ii++) {
-		mpt_add_sge(&request[sgeoffset], MPT_SGE_FLAGS_SIMPLE_ELEMENT |	
-			MPT_SGE_FLAGS_ADDRESSING | MPT_TRANSFER_IOC_TO_HOST |
-			(u32) ioc->cached_fw[ii]->size, ioc->cached_fw[ii]->fw_dma);
-
-		sgeoffset += sizeof(u32) + sizeof(dma_addr_t);
-	}
-
-	mpt_add_sge(&request[sgeoffset],
-			MPT_SGE_FLAGS_SSIMPLE_READ |(u32) ioc->cached_fw[ii]->size,
-			ioc->cached_fw[ii]->fw_dma);
+	flagsLength = MPT_SGE_FLAGS_SSIMPLE_READ | sz;
+	mpt_add_sge(&request[sgeoffset], flagsLength, ioc->cached_fw_dma);
 
 	sgeoffset += sizeof(u32) + sizeof(dma_addr_t);
-
-	dprintk((MYIOC_s_INFO_FMT "Sending FW Upload (req @ %p) size %d \n",
-			ioc->name, prequest, sgeoffset));
+	dinitprintk((KERN_WARNING MYNAM "Sending FW Upload (req @ %p) sgeoffset=%d \n",
+			prequest, sgeoffset));
+	DBG_DUMP_FW_REQUEST_FRAME(prequest)
 
 	ii = mpt_handshake_req_reply_wait(ioc, sgeoffset, (u32*)prequest,
 				reply_sz, (u16*)preply, 65 /*seconds*/, sleepFlag);
+
+	dinitprintk((KERN_WARNING MYNAM "FW Upload completed rc=%x \n", ii));
 
 	cmdStatus = -EFAULT;
 	if (ii == 0) {
@@ -2998,28 +2731,15 @@ mpt_do_upload(MPT_ADAPTER *ioc, int sleepFlag)
 				cmdStatus = 0;
 		}
 	}
-	ddlprintk((MYIOC_s_INFO_FMT ": do_upload status %d \n",
+	dinitprintk((MYIOC_s_INFO_FMT ": do_upload status %d \n",
 			ioc->name, cmdStatus));
 
-	/* Check to see if we have a copy of this image in
-	 * host memory already.
-	 */
-	if (cmdStatus == 0) {
-		ioc->upload_fw = 0;
-		if (ioc->alt_ioc && ioc->alt_ioc->cached_fw)
-			freeMem = 1;
-	}
+	
+	if (cmdStatus) {
 
-	/* We already have a copy of this image or
-	 * we had some type of an error  - either the handshake
-	 * failed (i != 0) or the command did not complete successfully.
-	 */
-	if (cmdStatus || freeMem) {
-
-		ddlprintk((MYIOC_s_INFO_FMT ": do_upload freeing %s image \n",
-			ioc->name, cmdStatus ? "incomplete" : "duplicate"));
-		mpt_free_fw_memory(ioc, NULL);
-		ioc->cached_fw = NULL;
+		ddlprintk((MYIOC_s_INFO_FMT ": fw upload failed, freeing image \n",
+			ioc->name));
+		mpt_free_fw_memory(ioc);
 	}
 
 	return cmdStatus;
@@ -3042,241 +2762,123 @@ mpt_do_upload(MPT_ADAPTER *ioc, int sleepFlag)
 static int
 mpt_downloadboot(MPT_ADAPTER *ioc, int sleepFlag)
 {
-	MpiFwHeader_t		*FwHdr;
-	MpiExtImageHeader_t 	*ExtHdr;
-	fw_image_t		**pCached=NULL;
-	int			 fw_sz;
+	MpiFwHeader_t		*pFwHeader;
+	MpiExtImageHeader_t	*pExtImage;
+	u32			 fwSize;
 	u32			 diag0val;
-#ifdef MPT_DEBUG
-	u32			 diag1val = 0;
-#endif
-	int			 count = 0;
-	u32			*ptru32;
+	int			 count;
+	u32			*ptrFw;
 	u32			 diagRwData;
 	u32			 nextImage;
-	u32			 ext_offset;
 	u32			 load_addr;
-	int			 max_idx, fw_idx, ext_idx;
-	int			 left_u32s;
+	u32 			 ioc_state=0;
 
-	ddlprintk((MYIOC_s_INFO_FMT "DbGb0: downloadboot entered.\n",
-				ioc->name));
-#ifdef MPT_DEBUG
-	diag0val = CHIPREG_READ32(&ioc->chip->Diagnostic);
-	if (ioc->alt_ioc)
-		diag1val = CHIPREG_READ32(&ioc->alt_ioc->chip->Diagnostic);
-	ddlprintk((MYIOC_s_INFO_FMT "DbGb1: diag0=%08x, diag1=%08x\n",
-				ioc->name, diag0val, diag1val));
-#endif
-
-	ddlprintk((MYIOC_s_INFO_FMT "fw size 0x%x, ioc FW Ptr %p\n",
+	ddlprintk((MYIOC_s_INFO_FMT "downloadboot: fw size 0x%x, ioc FW Ptr %p\n",
 				ioc->name, ioc->facts.FWImageSize, ioc->cached_fw));
-	if (ioc->alt_ioc)
-		ddlprintk((MYIOC_s_INFO_FMT "alt ioc FW Ptr %p\n",
-				ioc->name, ioc->alt_ioc->cached_fw));
 
-	/* Get dma_addr and data transfer size.
-	 */
-	if ((fw_sz = ioc->facts.FWImageSize) == 0)
+	if ( ioc->facts.FWImageSize == 0 )
 		return -1;
 
-	/* Get the DMA from ioc or ioc->alt_ioc */
-	if (ioc->cached_fw != NULL)
-		pCached = (fw_image_t **)ioc->cached_fw;
-	else if (ioc->alt_ioc && (ioc->alt_ioc->cached_fw != NULL))
-		pCached = (fw_image_t **)ioc->alt_ioc->cached_fw;
-	else
+	if (ioc->cached_fw == NULL)
 		return -2;
 
-	ddlprintk((MYIOC_s_INFO_FMT "DbGb2: FW Image @ %p\n",
-			ioc->name, pCached));
+	/* prevent a second downloadboot and memory free with alt_ioc */
+	if (ioc->alt_ioc && ioc->alt_ioc->cached_fw)
+		ioc->alt_ioc->cached_fw = NULL;
+	
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, 0xFF);
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_1ST_KEY_VALUE);
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_2ND_KEY_VALUE);
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_3RD_KEY_VALUE);
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_4TH_KEY_VALUE);
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_5TH_KEY_VALUE);
 
-	/* Write magic sequence to WriteSequence register
-	 * until enter diagnostic mode
-	 */
-	diag0val = CHIPREG_READ32(&ioc->chip->Diagnostic);
-	while ((diag0val & MPI_DIAG_DRWE) == 0) {
-		CHIPREG_WRITE32(&ioc->chip->WriteSequence, 0xFF);
-		CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_1ST_KEY_VALUE);
-		CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_2ND_KEY_VALUE);
-		CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_3RD_KEY_VALUE);
-		CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_4TH_KEY_VALUE);
-		CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_5TH_KEY_VALUE);
+	CHIPREG_WRITE32(&ioc->chip->Diagnostic, (MPI_DIAG_PREVENT_IOC_BOOT | MPI_DIAG_DISABLE_ARM));
 
-		/* wait 100 msec */
-		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(100 * HZ / 1000);
-		} else {
-			mdelay (100);
-		}
-
-		count++;
-		if (count > 20) {
-			printk(MYIOC_s_ERR_FMT "Enable Diagnostic mode FAILED! (%02xh)\n",
-					ioc->name, diag0val);
-			return -EFAULT;
-
-		}
-
-		diag0val = CHIPREG_READ32(&ioc->chip->Diagnostic);
-#ifdef MPT_DEBUG
-		if (ioc->alt_ioc)
-			diag1val = CHIPREG_READ32(&ioc->alt_ioc->chip->Diagnostic);
-		ddlprintk((MYIOC_s_INFO_FMT "DbGb3: diag0=%08x, diag1=%08x\n",
-				ioc->name, diag0val, diag1val));
-#endif
-		ddlprintk((MYIOC_s_INFO_FMT "Wrote magic DiagWriteEn sequence (%x)\n",
-				ioc->name, diag0val));
+	/* wait 1 msec */
+	if (sleepFlag == CAN_SLEEP) {
+		msleep_interruptible(1);
+	} else {
+		mdelay (1);
 	}
 
+	diag0val = CHIPREG_READ32(&ioc->chip->Diagnostic);
+	CHIPREG_WRITE32(&ioc->chip->Diagnostic, diag0val | MPI_DIAG_RESET_ADAPTER);
+
+	for (count = 0; count < 30; count ++) {
+		diag0val = CHIPREG_READ32(&ioc->chip->Diagnostic);
+		if (!(diag0val & MPI_DIAG_RESET_ADAPTER)) {
+			ddlprintk((MYIOC_s_INFO_FMT "RESET_ADAPTER cleared, count=%d\n",
+				ioc->name, count));
+			break;
+		}
+		/* wait 1 sec */
+		if (sleepFlag == CAN_SLEEP) {
+			msleep_interruptible (1000);
+		} else {
+			mdelay (1000);
+		}
+	}
+
+	if ( count == 30 ) {
+		ddlprintk((MYIOC_s_INFO_FMT "downloadboot failed! Unable to RESET_ADAPTER diag0val=%x\n",
+		ioc->name, diag0val));
+		return -3;
+	}
+
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, 0xFF);
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_1ST_KEY_VALUE);
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_2ND_KEY_VALUE);
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_3RD_KEY_VALUE);
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_4TH_KEY_VALUE);
+	CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_5TH_KEY_VALUE);
+
 	/* Set the DiagRwEn and Disable ARM bits */
-	diag0val |= (MPI_DIAG_RW_ENABLE | MPI_DIAG_DISABLE_ARM);
-	CHIPREG_WRITE32(&ioc->chip->Diagnostic, diag0val);
+	CHIPREG_WRITE32(&ioc->chip->Diagnostic, (MPI_DIAG_RW_ENABLE | MPI_DIAG_DISABLE_ARM));
 
-#ifdef MPT_DEBUG
-	if (ioc->alt_ioc)
-		diag1val = CHIPREG_READ32(&ioc->alt_ioc->chip->Diagnostic);
-
-	ddlprintk((MYIOC_s_INFO_FMT "DbGb3: diag0=%08x, diag1=%08x\n",
-			ioc->name, diag0val, diag1val));
-#endif
-
-	/* max_idx = 1 + maximum valid buffer index
-	 */
-	max_idx = 0;
-	while (pCached[max_idx])
-		max_idx++;
-
-	fw_idx = 0;
-	FwHdr = (MpiFwHeader_t *) pCached[fw_idx]->fw;
-	ptru32 = (u32 *) FwHdr;
-	count = (FwHdr->ImageSize + 3)/4;
-	nextImage = FwHdr->NextImageHeaderOffset;
+	pFwHeader = (MpiFwHeader_t *) ioc->cached_fw;
+	fwSize = (pFwHeader->ImageSize + 3)/4;
+	ptrFw = (u32 *) pFwHeader;
 
 	/* Write the LoadStartAddress to the DiagRw Address Register
 	 * using Programmed IO
 	 */
-	CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwAddress, FwHdr->LoadStartAddress);
+	CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwAddress, pFwHeader->LoadStartAddress);
 	ddlprintk((MYIOC_s_INFO_FMT "LoadStart addr written 0x%x \n",
-		ioc->name, FwHdr->LoadStartAddress));
+		ioc->name, pFwHeader->LoadStartAddress));
 
-	ddlprintk((MYIOC_s_INFO_FMT "Write FW Image: 0x%x u32's @ %p\n",
-				ioc->name, count, ptru32));
-	left_u32s = pCached[fw_idx]->size/4;
-	while (count--) {
-		if (left_u32s == 0) {
-			fw_idx++;
-			if (fw_idx >= max_idx) {
-				/* FIXME
-				ERROR CASE
-				*/
-				;
-			}
-			ptru32 = (u32 *) pCached[fw_idx]->fw;
-			left_u32s = pCached[fw_idx]->size / 4;
-		}
-		left_u32s--;
-		CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwData, *ptru32);
-		ptru32++;
+	ddlprintk((MYIOC_s_INFO_FMT "Write FW Image: 0x%x bytes @ %p\n",
+				ioc->name, fwSize*4, ptrFw));
+	while (fwSize--) {
+		CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwData, *ptrFw++);
 	}
 
-	/* left_u32s, fw_idx and ptru32 are all valid
-	 */
+	nextImage = pFwHeader->NextImageHeaderOffset;
 	while (nextImage) {
-		ext_idx = 0;
-		ext_offset = nextImage;
-		while (ext_offset > pCached[ext_idx]->size) {
-			ext_idx++;
-			if (ext_idx >= max_idx) {
-				/* FIXME
-				ERROR CASE
-				*/
-				;
-			}
-			ext_offset -= pCached[ext_idx]->size;
-		}
-		ptru32 = (u32 *) ((char *)pCached[ext_idx]->fw + ext_offset);
-		left_u32s = pCached[ext_idx]->size - ext_offset;
+		pExtImage = (MpiExtImageHeader_t *) ((char *)pFwHeader + nextImage);
 
-		if ((left_u32s * 4) >= sizeof(MpiExtImageHeader_t)) {
-			ExtHdr = (MpiExtImageHeader_t *) ptru32;
-			count = (ExtHdr->ImageSize + 3 )/4;
-			nextImage = ExtHdr->NextImageHeaderOffset;
-			load_addr = ExtHdr->LoadStartAddress;
-		} else {
-			u32 * ptmp = (u32 *)pCached[ext_idx+1]->fw;
+		load_addr = pExtImage->LoadStartAddress;
 
-			switch (left_u32s) {
-			case 5:
-				count = *(ptru32 + 2);
-				nextImage = *(ptru32 + 3);
-				load_addr = *(ptru32 + 4);
-				break;
-			case 4:
-				count = *(ptru32 + 2);
-				nextImage = *(ptru32 + 3);
-				load_addr = *ptmp;
-				break;
-			case 3:
-				count = *(ptru32 + 2);
-				nextImage = *ptmp;
-				load_addr = *(ptmp + 1);
-				break;
-			case 2:
-				count = *ptmp;
-				nextImage = *(ptmp + 1);
-				load_addr = *(ptmp + 2);
-				break;
+		fwSize = (pExtImage->ImageSize + 3) >> 2;
+		ptrFw = (u32 *)pExtImage;
 
-			case 1:
-				count = *(ptmp + 1);
-				nextImage = *(ptmp + 2);
-				load_addr = *(ptmp + 3);
-				break;
-
-			default:
-				count = 0;
-				nextImage = 0;
-				load_addr = 0;
-				/* FIXME
-				ERROR CASE
-				*/
-				;
-
-			}
-			count = (count +3)/4;
-		}
-
-		ddlprintk((MYIOC_s_INFO_FMT "Write Ext Image: 0x%x u32's @ %p\n",
-						ioc->name, count, ptru32));
+		ddlprintk((MYIOC_s_INFO_FMT "Write Ext Image: 0x%x bytes @ %p load_addr=%x\n",
+						ioc->name, fwSize*4, ptrFw, load_addr));
 		CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwAddress, load_addr);
 
-		while (count--) {
-			if (left_u32s == 0) {
-				fw_idx++;
-				if (fw_idx >= max_idx) {
-					/* FIXME
-					ERROR CASE
-					*/
-					;
-				}
-				ptru32 = (u32 *) pCached[fw_idx]->fw;
-				left_u32s = pCached[fw_idx]->size / 4;
-			}
-			left_u32s--;
-			CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwData, *ptru32);
-			ptru32++;
+		while (fwSize--) {
+			CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwData, *ptrFw++);
 		}
+		nextImage = pExtImage->NextImageHeaderOffset;
 	}
 
 	/* Write the IopResetVectorRegAddr */
-	ddlprintk((MYIOC_s_INFO_FMT "Write IopResetVector Addr! \n", ioc->name));
-	CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwAddress, FwHdr->IopResetRegAddr);
+	ddlprintk((MYIOC_s_INFO_FMT "Write IopResetVector Addr=%x! \n", ioc->name, 	pFwHeader->IopResetRegAddr));
+	CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwAddress, pFwHeader->IopResetRegAddr);
 
 	/* Write the IopResetVectorValue */
-	ddlprintk((MYIOC_s_INFO_FMT "Write IopResetVector Value! \n", ioc->name));
-	CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwData, FwHdr->IopResetVectorValue);
+	ddlprintk((MYIOC_s_INFO_FMT "Write IopResetVector Value=%x! \n", ioc->name, pFwHeader->IopResetVectorValue));
+	CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwData, pFwHeader->IopResetVectorValue);
 
 	/* Clear the internal flash bad bit - autoincrementing register,
 	 * so must do two writes.
@@ -3287,15 +2889,39 @@ mpt_downloadboot(MPT_ADAPTER *ioc, int sleepFlag)
 	CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwAddress, 0x3F000000);
 	CHIPREG_PIO_WRITE32(&ioc->pio_chip->DiagRwData, diagRwData);
 
-	/* clear the RW enable and DISARM bits */
 	diag0val = CHIPREG_READ32(&ioc->chip->Diagnostic);
-	diag0val &= ~(MPI_DIAG_DISABLE_ARM | MPI_DIAG_RW_ENABLE | MPI_DIAG_FLASH_BAD_SIG);
+	ddlprintk((MYIOC_s_INFO_FMT "downloadboot diag0val=%x, turning off PREVENT_IOC_BOOT, DISABLE_ARM\n",
+		ioc->name, diag0val));
+	diag0val &= ~(MPI_DIAG_PREVENT_IOC_BOOT | MPI_DIAG_DISABLE_ARM);
+	ddlprintk((MYIOC_s_INFO_FMT "downloadboot now diag0val=%x\n",
+		ioc->name, diag0val));
 	CHIPREG_WRITE32(&ioc->chip->Diagnostic, diag0val);
 
 	/* Write 0xFF to reset the sequencer */
 	CHIPREG_WRITE32(&ioc->chip->WriteSequence, 0xFF);
 
-	return 0;
+	for (count=0; count<HZ*20; count++) {
+		if ((ioc_state = mpt_GetIocState(ioc, 0)) & MPI_IOC_STATE_READY) {
+			ddlprintk((MYIOC_s_INFO_FMT "downloadboot successful! (count=%d) IocState=%x\n",
+					ioc->name, count, ioc_state));
+			if ((SendIocInit(ioc, sleepFlag)) != 0) {
+				ddlprintk((MYIOC_s_INFO_FMT "downloadboot: SendIocInit failed\n",
+					ioc->name));
+				return -EFAULT;
+			}
+			ddlprintk((MYIOC_s_INFO_FMT "downloadboot: SendIocInit successful\n",
+					ioc->name));
+			return 0;
+		}
+		if (sleepFlag == CAN_SLEEP) {
+			msleep_interruptible (10);
+		} else {
+			mdelay (10);
+		}
+	}
+	ddlprintk((MYIOC_s_INFO_FMT "downloadboot failed! IocState=%x\n",
+		ioc->name, ioc_state));
+	return -EFAULT;
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -3328,19 +2954,18 @@ static int
 KickStart(MPT_ADAPTER *ioc, int force, int sleepFlag)
 {
 	int hard_reset_done = 0;
-	u32 ioc_state;
-	int cntdn, cnt = 0;
+	u32 ioc_state=0;
+	int cnt,cntdn;
 
-	dprintk((KERN_WARNING MYNAM ": KickStarting %s!\n", ioc->name));
-	if ((int)ioc->chip_type > (int)FC929) {
+	dinitprintk((KERN_WARNING MYNAM ": KickStarting %s!\n", ioc->name));
+	if (ioc->bus_type == SCSI) {
 		/* Always issue a Msg Unit Reset first. This will clear some
 		 * SCSI bus hang conditions.
 		 */
 		SendIocReset(ioc, MPI_FUNCTION_IOC_MESSAGE_UNIT_RESET, sleepFlag);
 
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(HZ);
+			msleep_interruptible (1000);
 		} else {
 			mdelay (1000);
 		}
@@ -3350,26 +2975,26 @@ KickStart(MPT_ADAPTER *ioc, int force, int sleepFlag)
 	if (hard_reset_done < 0)
 		return hard_reset_done;
 
-	dprintk((MYIOC_s_INFO_FMT "Diagnostic reset successful!\n",
+	dinitprintk((MYIOC_s_INFO_FMT "Diagnostic reset successful!\n",
 			ioc->name));
 
-	cntdn = ((sleepFlag == CAN_SLEEP) ? HZ : 1000) * 20;	/* 20 seconds */
+	cntdn = ((sleepFlag == CAN_SLEEP) ? HZ : 1000) * 2;	/* 2 seconds */
 	for (cnt=0; cnt<cntdn; cnt++) {
-		if ((ioc_state = mpt_GetIocState(ioc, 1)) == MPI_IOC_STATE_READY) {
-			dprintk((MYIOC_s_INFO_FMT "KickStart successful! (cnt=%d)\n",
-					ioc->name, cnt));
+		ioc_state = mpt_GetIocState(ioc, 1);
+		if ((ioc_state == MPI_IOC_STATE_READY) || (ioc_state == MPI_IOC_STATE_OPERATIONAL)) {
+			dinitprintk((MYIOC_s_INFO_FMT "KickStart successful! (cnt=%d)\n",
+ 					ioc->name, cnt));
 			return hard_reset_done;
 		}
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1);
+			msleep_interruptible (10);
 		} else {
 			mdelay (10);
 		}
 	}
 
-	printk(MYIOC_s_ERR_FMT "Failed to come READY after reset!\n",
-			ioc->name);
+	printk(MYIOC_s_ERR_FMT "Failed to come READY after reset! IocState=%x\n",
+			ioc->name, ioc_state);
 	return -1;
 }
 
@@ -3433,8 +3058,7 @@ mpt_diag_reset(MPT_ADAPTER *ioc, int ignore, int sleepFlag)
 
 			/* wait 100 msec */
 			if (sleepFlag == CAN_SLEEP) {
-				set_current_state(TASK_INTERRUPTIBLE);
-				schedule_timeout(100 * HZ / 1000);
+				msleep_interruptible (100);
 			} else {
 				mdelay (100);
 			}
@@ -3459,12 +3083,6 @@ mpt_diag_reset(MPT_ADAPTER *ioc, int ignore, int sleepFlag)
 		dprintk((MYIOC_s_INFO_FMT "DbG2: diag0=%08x, diag1=%08x\n",
 				ioc->name, diag0val, diag1val));
 #endif
-		/* Write the PreventIocBoot bit */
-		if ((ioc->cached_fw) || (ioc->alt_ioc && ioc->alt_ioc->cached_fw)) {
-			diag0val |= MPI_DIAG_PREVENT_IOC_BOOT;
-			CHIPREG_WRITE32(&ioc->chip->Diagnostic, diag0val);
-		}
-
 		/*
 		 * Disable the ARM (Bug fix)
 		 *
@@ -3506,28 +3124,20 @@ mpt_diag_reset(MPT_ADAPTER *ioc, int ignore, int sleepFlag)
 			/* FIXME?  Examine results here? */
 		}
 
-		if ((ioc->cached_fw) || (ioc->alt_ioc && ioc->alt_ioc->cached_fw)) {
+		if (ioc->cached_fw) {
 			/* If the DownloadBoot operation fails, the
 			 * IOC will be left unusable. This is a fatal error
 			 * case.  _diag_reset will return < 0
 			 */
 			for (count = 0; count < 30; count ++) {
 				diag0val = CHIPREG_READ32(&ioc->chip->Diagnostic);
-#ifdef MPT_DEBUG
-				if (ioc->alt_ioc)
-					diag1val = CHIPREG_READ32(&ioc->alt_ioc->chip->Diagnostic);
-				dprintk((MYIOC_s_INFO_FMT
-					"DbG2b: diag0=%08x, diag1=%08x\n",
-					ioc->name, diag0val, diag1val));
-#endif
 				if (!(diag0val & MPI_DIAG_RESET_ADAPTER)) {
 					break;
 				}
 
 				/* wait 1 sec */
 				if (sleepFlag == CAN_SLEEP) {
-					set_current_state(TASK_INTERRUPTIBLE);
-					schedule_timeout(HZ);
+					ssleep(1);
 				} else {
 					mdelay (1000);
 				}
@@ -3554,8 +3164,7 @@ mpt_diag_reset(MPT_ADAPTER *ioc, int ignore, int sleepFlag)
 
 				/* wait 1 sec */
 				if (sleepFlag == CAN_SLEEP) {
-					set_current_state(TASK_INTERRUPTIBLE);
-					schedule_timeout(HZ);
+					msleep_interruptible (1000);
 				} else {
 					mdelay (1000);
 				}
@@ -3580,6 +3189,7 @@ mpt_diag_reset(MPT_ADAPTER *ioc, int ignore, int sleepFlag)
 		/* Write magic sequence to WriteSequence register
 		 * Loop until in diagnostic mode
 		 */
+		CHIPREG_WRITE32(&ioc->chip->WriteSequence, 0xFF);
 		CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_1ST_KEY_VALUE);
 		CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_2ND_KEY_VALUE);
 		CHIPREG_WRITE32(&ioc->chip->WriteSequence, MPI_WRSEQ_3RD_KEY_VALUE);
@@ -3588,8 +3198,7 @@ mpt_diag_reset(MPT_ADAPTER *ioc, int ignore, int sleepFlag)
 
 		/* wait 100 msec */
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(100 * HZ / 1000);
+			msleep_interruptible (100);
 		} else {
 			mdelay (100);
 		}
@@ -3659,7 +3268,7 @@ SendIocReset(MPT_ADAPTER *ioc, u8 reset_type, int sleepFlag)
 	u32 state;
 	int cntdn, count;
 
-	dprintk((KERN_WARNING MYNAM ": %s: Sending IOC reset(0x%02x)!\n",
+	drsprintk((KERN_WARNING MYNAM ": %s: Sending IOC reset(0x%02x)!\n",
 			ioc->name, reset_type));
 	CHIPREG_WRITE32(&ioc->chip->Doorbell, reset_type<<MPI_DOORBELL_FUNCTION_SHIFT);
 	if ((r = WaitForDoorbellAck(ioc, 5, sleepFlag)) < 0)
@@ -3678,13 +3287,12 @@ SendIocReset(MPT_ADAPTER *ioc, u8 reset_type, int sleepFlag)
 				count *= 10;
 
 			printk(KERN_ERR MYNAM ": %s: ERROR - Wait IOC_READY state timeout(%d)!\n",
-					ioc->name, (count+5)/HZ);
+					ioc->name, (int)((count+5)/HZ));
 			return -ETIME;
 		}
 
 		if (sleepFlag == CAN_SLEEP) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1);
+			msleep_interruptible(1);
 		} else {
 			mdelay (1);	/* 1 msec delay */
 		}
@@ -3702,6 +3310,106 @@ SendIocReset(MPT_ADAPTER *ioc, u8 reset_type, int sleepFlag)
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
+ *	initChainBuffers - Allocate memory for and initialize
+ *	chain buffers, chain buffer control arrays and spinlock.
+ *	@hd: Pointer to MPT_SCSI_HOST structure
+ *	@init: If set, initialize the spin lock.
+ */
+static int
+initChainBuffers(MPT_ADAPTER *ioc)
+{
+	u8		*mem;
+	int		sz, ii, num_chain;
+	int 		scale, num_sge, numSGE;
+
+	/* ReqToChain size must equal the req_depth
+	 * index = req_idx
+	 */
+	if (ioc->ReqToChain == NULL) {
+		sz = ioc->req_depth * sizeof(int);
+		mem = kmalloc(sz, GFP_ATOMIC);
+		if (mem == NULL)
+			return -1;
+
+		ioc->ReqToChain = (int *) mem;
+		dinitprintk((KERN_INFO MYNAM ": %s ReqToChain alloc  @ %p, sz=%d bytes\n",
+			 	ioc->name, mem, sz));
+		mem = kmalloc(sz, GFP_ATOMIC);
+		if (mem == NULL)
+			return -1;
+
+		ioc->RequestNB = (int *) mem;
+		dinitprintk((KERN_INFO MYNAM ": %s RequestNB alloc  @ %p, sz=%d bytes\n",
+			 	ioc->name, mem, sz));
+	}
+	for (ii = 0; ii < ioc->req_depth; ii++) {
+		ioc->ReqToChain[ii] = MPT_HOST_NO_CHAIN;
+	}
+
+	/* ChainToChain size must equal the total number
+	 * of chain buffers to be allocated.
+	 * index = chain_idx
+	 *
+	 * Calculate the number of chain buffers needed(plus 1) per I/O
+	 * then multiply the the maximum number of simultaneous cmds
+	 *
+	 * num_sge = num sge in request frame + last chain buffer
+	 * scale = num sge per chain buffer if no chain element
+	 */
+	scale = ioc->req_sz/(sizeof(dma_addr_t) + sizeof(u32));
+	if (sizeof(dma_addr_t) == sizeof(u64))
+		num_sge =  scale + (ioc->req_sz - 60) / (sizeof(dma_addr_t) + sizeof(u32));
+	else
+		num_sge =  1+ scale + (ioc->req_sz - 64) / (sizeof(dma_addr_t) + sizeof(u32));
+
+	if (sizeof(dma_addr_t) == sizeof(u64)) {
+		numSGE = (scale - 1) * (ioc->facts.MaxChainDepth-1) + scale +
+			(ioc->req_sz - 60) / (sizeof(dma_addr_t) + sizeof(u32));
+	} else {
+		numSGE = 1 + (scale - 1) * (ioc->facts.MaxChainDepth-1) + scale +
+			(ioc->req_sz - 64) / (sizeof(dma_addr_t) + sizeof(u32));
+	}
+	dinitprintk((KERN_INFO MYNAM ": %s num_sge=%d numSGE=%d\n",
+		ioc->name, num_sge, numSGE));
+
+	if ( numSGE > MPT_SCSI_SG_DEPTH	)
+		numSGE = MPT_SCSI_SG_DEPTH;
+
+	num_chain = 1;
+	while (numSGE - num_sge > 0) {
+		num_chain++;
+		num_sge += (scale - 1);
+	}
+	num_chain++;
+
+	dinitprintk((KERN_INFO MYNAM ": %s Now numSGE=%d num_sge=%d num_chain=%d\n",
+		ioc->name, numSGE, num_sge, num_chain));
+
+	if (ioc->bus_type == SCSI)
+		num_chain *= MPT_SCSI_CAN_QUEUE;
+	else
+		num_chain *= MPT_FC_CAN_QUEUE;
+
+	ioc->num_chain = num_chain;
+
+	sz = num_chain * sizeof(int);
+	if (ioc->ChainToChain == NULL) {
+		mem = kmalloc(sz, GFP_ATOMIC);
+		if (mem == NULL)
+			return -1;
+
+		ioc->ChainToChain = (int *) mem;
+		dinitprintk((KERN_INFO MYNAM ": %s ChainToChain alloc @ %p, sz=%d bytes\n",
+			 	ioc->name, mem, sz));
+	} else {
+		mem = (u8 *) ioc->ChainToChain;
+	}
+	memset(mem, 0xFF, sz);
+	return num_chain;
+}
+
+/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+/*
  *	PrimeIocFifos - Initialize IOC request and reply FIFOs.
  *	@ioc: Pointer to MPT_ADAPTER structure
  *
@@ -3715,100 +3423,67 @@ static int
 PrimeIocFifos(MPT_ADAPTER *ioc)
 {
 	MPT_FRAME_HDR *mf;
-	unsigned long b;
 	unsigned long flags;
-	dma_addr_t aligned_mem_dma;
-	u8 *aligned_mem;
-	int i, sz;
-	int chain_buffer_sz, reply_buffer_sz, request_buffer_sz;
-	int scale, num_sge, num_chain;
+	dma_addr_t alloc_dma;
+	u8 *mem;
+	int i, reply_sz, sz, total_size, num_chain;
 
-	/* request buffer size,  rounding UP to nearest 4-kB boundary */
-	request_buffer_sz = (ioc->req_sz * ioc->req_depth) + 128;
-	request_buffer_sz = ((request_buffer_sz + 0x1000UL - 1UL) / 0x1000) * 0x1000;
+	/*  Prime reply FIFO...  */
 
-	/* reply buffer size */
-	reply_buffer_sz = (ioc->reply_sz * ioc->reply_depth) + 128;
+	if (ioc->reply_frames == NULL) {
+		if ( (num_chain = initChainBuffers(ioc)) < 0)
+			return -1;
 
-	/* chain buffer size, copied from from mptscsih_initChainBuffers()
-	 *
-	 * Calculate the number of chain buffers needed(plus 1) per I/O
-	 * then multiply the the maximum number of simultaneous cmds
-	 *
-	 * num_sge = num sge in request frame + last chain buffer
-	 * scale = num sge per chain buffer if no chain element
-	 */
+		total_size = reply_sz = (ioc->reply_sz * ioc->reply_depth);
+		dinitprintk((KERN_INFO MYNAM ": %s.ReplyBuffer sz=%d bytes, ReplyDepth=%d\n",
+			 	ioc->name, ioc->reply_sz, ioc->reply_depth));
+		dinitprintk((KERN_INFO MYNAM ": %s.ReplyBuffer sz=%d[%x] bytes\n",
+			 	ioc->name, reply_sz, reply_sz));
 
-	scale = ioc->req_sz/(sizeof(dma_addr_t) + sizeof(u32));
-	if (sizeof(dma_addr_t) == sizeof(u64))
-		num_sge =  scale + (ioc->req_sz - 60) / (sizeof(dma_addr_t) + sizeof(u32));
-	else
-		num_sge =  1 + scale + (ioc->req_sz - 64) / (sizeof(dma_addr_t) + sizeof(u32));
+		sz = (ioc->req_sz * ioc->req_depth);
+		dinitprintk((KERN_INFO MYNAM ": %s.RequestBuffer sz=%d bytes, RequestDepth=%d\n",
+			 	ioc->name, ioc->req_sz, ioc->req_depth));
+		dinitprintk((KERN_INFO MYNAM ": %s.RequestBuffer sz=%d[%x] bytes\n",
+			 	ioc->name, sz, sz));
+		total_size += sz;
 
-	num_chain = 1;
-	while (MPT_SCSI_SG_DEPTH - num_sge > 0) {
-		num_chain++;
-		num_sge += (scale - 1);
-	}
-	num_chain++;
+		sz = num_chain * ioc->req_sz; /* chain buffer pool size */
+		dinitprintk((KERN_INFO MYNAM ": %s.ChainBuffer sz=%d bytes, ChainDepth=%d\n",
+			 	ioc->name, ioc->req_sz, num_chain));
+		dinitprintk((KERN_INFO MYNAM ": %s.ChainBuffer sz=%d[%x] bytes num_chain=%d\n",
+			 	ioc->name, sz, sz, num_chain));
 
-	if ((int)ioc->chip_type > (int) FC929)
-		num_chain *= MPT_SCSI_CAN_QUEUE;
-	else
-		num_chain *= MPT_FC_CAN_QUEUE;
-
-	chain_buffer_sz = num_chain * ioc->req_sz;
-
-	if(ioc->fifo_pool == NULL) {
-
-		ioc->fifo_pool_sz = request_buffer_sz +
-			reply_buffer_sz + chain_buffer_sz;
-
-		ioc->fifo_pool = pci_alloc_consistent(ioc->pcidev,
-		ioc->fifo_pool_sz, &ioc->fifo_pool_dma);
-
-		if( ioc->fifo_pool == NULL)
+		total_size += sz;
+		mem = pci_alloc_consistent(ioc->pcidev, total_size, &alloc_dma);
+		if (mem == NULL) {
+			printk(MYIOC_s_ERR_FMT "Unable to allocate Reply, Request, Chain Buffers!\n",
+				ioc->name);
 			goto out_fail;
+		}
 
-		ioc->alloc_total += ioc->fifo_pool_sz;
-		memset(ioc->fifo_pool, 0, ioc->fifo_pool_sz);
+		dinitprintk((KERN_INFO MYNAM ": %s.Total alloc @ %p[%p], sz=%d[%x] bytes\n",
+			 	ioc->name, mem, (void *)(ulong)alloc_dma, total_size, total_size));
 
-		/* reply fifo pointers */
-		ioc->reply_alloc = ioc->fifo_pool;
-		ioc->reply_alloc_dma = ioc->fifo_pool_dma;
-		/* request fifo pointers */
-		ioc->req_alloc = ioc->reply_alloc+reply_buffer_sz;
-		ioc->req_alloc_dma = ioc->reply_alloc_dma+reply_buffer_sz;
-		/* chain buffer pointers */
-		ioc->chain_alloc = ioc->req_alloc+request_buffer_sz;
-		ioc->chain_alloc_dma = ioc->req_alloc_dma+request_buffer_sz;
-		ioc->chain_alloc_sz = chain_buffer_sz;
+		memset(mem, 0, total_size);
+		ioc->alloc_total += total_size;
+		ioc->alloc = mem;
+		ioc->alloc_dma = alloc_dma;
+		ioc->alloc_sz = total_size;
+		ioc->reply_frames = (MPT_FRAME_HDR *) mem;
+		ioc->reply_frames_low_dma = (u32) (alloc_dma & 0xFFFFFFFF);
 
-		/*  Prime reply FIFO...  */
-		dprintk((KERN_INFO MYNAM ": %s.reply_alloc  @ %p[%p], sz=%d bytes\n",
-			 	ioc->name, mem, (void *)(ulong)ioc->reply_alloc_dma, reply_buffer_sz));
+		alloc_dma += reply_sz;
+		mem += reply_sz;
 
-		b = (unsigned long) ioc->reply_alloc;
-		b = (b + (0x80UL - 1UL)) & ~(0x80UL - 1UL); /* round up to 128-byte boundary */
-		aligned_mem = (u8 *) b;
-		ioc->reply_frames = (MPT_FRAME_HDR *) aligned_mem;
-		ioc->reply_frames_dma =
-			(ioc->reply_alloc_dma + (aligned_mem - ioc->reply_alloc));
-
-		ioc->reply_frames_low_dma = (u32) (ioc->reply_frames_dma & 0xFFFFFFFF);
-	
 		/*  Request FIFO - WE manage this!  */
-		dprintk((KERN_INFO MYNAM ": %s.req_alloc    @ %p[%p], sz=%d bytes\n",
-			 	ioc->name, mem, (void *)(ulong)ioc->req_alloc_dma, request_buffer_sz));
 
-		b = (unsigned long) ioc->req_alloc;
-		b = (b + (0x80UL - 1UL)) & ~(0x80UL - 1UL); /* round up to 128-byte boundary */
-		aligned_mem = (u8 *) b;
-		ioc->req_frames = (MPT_FRAME_HDR *) aligned_mem;
-		ioc->req_frames_dma =
-			(ioc->req_alloc_dma + (aligned_mem - ioc->req_alloc));
+		ioc->req_frames = (MPT_FRAME_HDR *) mem;
+		ioc->req_frames_dma = alloc_dma;
 
-		ioc->req_frames_low_dma = (u32) (ioc->req_frames_dma & 0xFFFFFFFF);
+		dinitprintk((KERN_INFO MYNAM ": %s.RequestBuffers @ %p[%p]\n",
+			 	ioc->name, mem, (void *)(ulong)alloc_dma));
+
+		ioc->req_frames_low_dma = (u32) (alloc_dma & 0xFFFFFFFF);
 
 #if defined(CONFIG_MTRR) && 0
 		/*
@@ -3816,79 +3491,94 @@ PrimeIocFifos(MPT_ADAPTER *ioc)
 		 *  (at least as much as we can; "size and base must be
 		 *  multiples of 4 kiB"
 		 */
-		ioc->mtrr_reg = mtrr_add(ioc->fifo_pool,
-					 ioc->fifo_pool_sz,
+		ioc->mtrr_reg = mtrr_add(ioc->req_frames_dma,
+					 sz,
 					 MTRR_TYPE_WRCOMB, 1);
 		dprintk((MYIOC_s_INFO_FMT "MTRR region registered (base:size=%08x:%x)\n",
-				ioc->name, ioc->fifo_pool, ioc->fifo_pool_sz));
+				ioc->name, ioc->req_frames_dma, sz));
 #endif
 
-	} /* ioc->fifo_pool == NULL */
-	
-	/* Post Reply frames to FIFO
-	 */
-	aligned_mem_dma = ioc->reply_frames_dma;
-	dprintk((KERN_INFO MYNAM ": %s.reply_frames @ %p[%p]\n",
-		 	ioc->name, ioc->reply_frames, (void *)(ulong)aligned_mem_dma));
+		for (i = 0; i < ioc->req_depth; i++) {
+			alloc_dma += ioc->req_sz;
+			mem += ioc->req_sz;
+		}
 
-	for (i = 0; i < ioc->reply_depth; i++) {
-		/*  Write each address to the IOC!  */
-		CHIPREG_WRITE32(&ioc->chip->ReplyFifo, aligned_mem_dma);
-		aligned_mem_dma += ioc->reply_sz;
-	}
+		ioc->ChainBuffer = mem;
+		ioc->ChainBufferDMA = alloc_dma;
 
+		dinitprintk((KERN_INFO MYNAM " :%s.ChainBuffers @ %p(%p)\n",
+			ioc->name, ioc->ChainBuffer, (void *)(ulong)ioc->ChainBufferDMA));
 
-	/* Initialize Request frames linked list
-	 */
-	aligned_mem_dma = ioc->req_frames_dma;
-	aligned_mem = (u8 *) ioc->req_frames;
-	dprintk((KERN_INFO MYNAM ": %s.req_frames   @ %p[%p]\n",
-		 	ioc->name, aligned_mem, (void *)(ulong)aligned_mem_dma));
+		/* Initialize the free chain Q.
+	 	*/
 
-	spin_lock_irqsave(&ioc->FreeQlock, flags);
-	Q_INIT(&ioc->FreeQ, MPT_FRAME_HDR);
-	for (i = 0; i < ioc->req_depth; i++) {
-		mf = (MPT_FRAME_HDR *) aligned_mem;
+		INIT_LIST_HEAD(&ioc->FreeChainQ);
 
-		/*  Queue REQUESTs *internally*!  */
-		Q_ADD_TAIL(&ioc->FreeQ.head, &mf->u.frame.linkage, MPT_FRAME_HDR);
-		aligned_mem += ioc->req_sz;
-	}
-	spin_unlock_irqrestore(&ioc->FreeQlock, flags);
+		/* Post the chain buffers to the FreeChainQ.
+	 	*/
+		mem = (u8 *)ioc->ChainBuffer;
+		for (i=0; i < num_chain; i++) {
+			mf = (MPT_FRAME_HDR *) mem;
+			list_add_tail(&mf->u.frame.linkage.list, &ioc->FreeChainQ);
+			mem += ioc->req_sz;
+		}
 
+		/* Initialize Request frames linked list
+		 */
+		alloc_dma = ioc->req_frames_dma;
+		mem = (u8 *) ioc->req_frames;
 
-	if (ioc->sense_buf_pool == NULL) {
+		spin_lock_irqsave(&ioc->FreeQlock, flags);
+		INIT_LIST_HEAD(&ioc->FreeQ);
+		for (i = 0; i < ioc->req_depth; i++) {
+			mf = (MPT_FRAME_HDR *) mem;
+
+			/*  Queue REQUESTs *internally*!  */
+			list_add_tail(&mf->u.frame.linkage.list, &ioc->FreeQ);
+
+			mem += ioc->req_sz;
+		}
+		spin_unlock_irqrestore(&ioc->FreeQlock, flags);
+
 		sz = (ioc->req_depth * MPT_SENSE_BUFFER_ALLOC);
 		ioc->sense_buf_pool =
-				pci_alloc_consistent(ioc->pcidev, sz, &ioc->sense_buf_pool_dma);
-		if (ioc->sense_buf_pool == NULL)
+			pci_alloc_consistent(ioc->pcidev, sz, &ioc->sense_buf_pool_dma);
+		if (ioc->sense_buf_pool == NULL) {
+			printk(MYIOC_s_ERR_FMT "Unable to allocate Sense Buffers!\n",
+				ioc->name);
 			goto out_fail;
+		}
 
 		ioc->sense_buf_low_dma = (u32) (ioc->sense_buf_pool_dma & 0xFFFFFFFF);
 		ioc->alloc_total += sz;
+		dinitprintk((KERN_INFO MYNAM ": %s.SenseBuffers @ %p[%p]\n",
+ 			ioc->name, ioc->sense_buf_pool, (void *)(ulong)ioc->sense_buf_pool_dma));
+
+	}
+
+	/* Post Reply frames to FIFO
+	 */
+	alloc_dma = ioc->alloc_dma;
+	dinitprintk((KERN_INFO MYNAM ": %s.ReplyBuffers @ %p[%p]\n",
+	 	ioc->name, ioc->reply_frames, (void *)(ulong)alloc_dma));
+
+	for (i = 0; i < ioc->reply_depth; i++) {
+		/*  Write each address to the IOC!  */
+		CHIPREG_WRITE32(&ioc->chip->ReplyFifo, alloc_dma);
+		alloc_dma += ioc->reply_sz;
 	}
 
 	return 0;
 
 out_fail:
-	if (ioc->fifo_pool != NULL) {
+	if (ioc->alloc != NULL) {
+		sz = ioc->alloc_sz;
 		pci_free_consistent(ioc->pcidev,
-				ioc->fifo_pool_sz,
-				ioc->fifo_pool, ioc->fifo_pool_dma);
+				sz,
+				ioc->alloc, ioc->alloc_dma);
 		ioc->reply_frames = NULL;
-		ioc->reply_alloc = NULL;
 		ioc->req_frames = NULL;
-		ioc->req_alloc = NULL;
-		ioc->chain_alloc = NULL;
-		ioc->fifo_pool = NULL;
-		ioc->alloc_total -= ioc->fifo_pool_sz;
-#if defined(CONFIG_MTRR) && 0
-		if (ioc->mtrr_reg > 0) {
-			mtrr_del(ioc->mtrr_reg, 0, 0);
-			dprintk((MYIOC_s_INFO_FMT "MTRR region de-registered\n",
-					ioc->name));
-		}
-#endif
+		ioc->alloc_total -= sz;
 	}
 	if (ioc->sense_buf_pool != NULL) {
 		sz = (ioc->req_depth * MPT_SENSE_BUFFER_ALLOC);
@@ -3919,7 +3609,7 @@ out_fail:
  *
  *	Returns 0 for success, non-zero for failure.
  */
-int
+static int
 mpt_handshake_req_reply_wait(MPT_ADAPTER *ioc, int reqBytes, u32 *req,
 				int replyBytes, u16 *u16reply, int maxwait, int sleepFlag)
 {
@@ -3950,8 +3640,8 @@ mpt_handshake_req_reply_wait(MPT_ADAPTER *ioc, int reqBytes, u32 *req,
 	if ((t = WaitForDoorbellInt(ioc, 5, sleepFlag)) < 0)
 		failcnt++;
 
-	dhsprintk((MYIOC_s_INFO_FMT "HandShake request start, WaitCnt=%d%s\n",
-			ioc->name, t, failcnt ? " - MISSING DOORBELL HANDSHAKE!" : ""));
+	dhsprintk((MYIOC_s_INFO_FMT "HandShake request start reqBytes=%d, WaitCnt=%d%s\n",
+			ioc->name, reqBytes, t, failcnt ? " - MISSING DOORBELL HANDSHAKE!" : ""));
 
 	/* Read doorbell and check for active bit */
 	if (!(CHIPREG_READ32(&ioc->chip->Doorbell) & MPI_DOORBELL_ACTIVE))
@@ -3985,7 +3675,7 @@ mpt_handshake_req_reply_wait(MPT_ADAPTER *ioc, int reqBytes, u32 *req,
 				failcnt++;
 		}
 
-		dmfprintk((KERN_INFO MYNAM ": Handshake request frame (@%p) header\n", req));
+		dhsprintk((KERN_INFO MYNAM ": Handshake request frame (@%p) header\n", req));
 		DBG_DUMP_REQUEST_FRAME_HDR(req)
 
 		dhsprintk((MYIOC_s_INFO_FMT "HandShake request post done, WaitCnt=%d%s\n",
@@ -3996,6 +3686,9 @@ mpt_handshake_req_reply_wait(MPT_ADAPTER *ioc, int reqBytes, u32 *req,
 		 */
 		if (!failcnt && (t = WaitForDoorbellReply(ioc, maxwait, sleepFlag)) < 0)
 			failcnt++;
+		
+		dhsprintk((MYIOC_s_INFO_FMT "HandShake reply count=%d%s\n",
+				ioc->name, t, failcnt ? " - MISSING DOORBELL REPLY!" : ""));
 
 		/*
 		 * Copy out the cached reply...
@@ -4027,7 +3720,7 @@ WaitForDoorbellAck(MPT_ADAPTER *ioc, int howlong, int sleepFlag)
 {
 	int cntdn;
 	int count = 0;
-	u32 intstat;
+	u32 intstat=0;
 
 	cntdn = ((sleepFlag == CAN_SLEEP) ? HZ : 1000) * howlong;
 
@@ -4036,8 +3729,7 @@ WaitForDoorbellAck(MPT_ADAPTER *ioc, int howlong, int sleepFlag)
 			intstat = CHIPREG_READ32(&ioc->chip->IntStatus);
 			if (! (intstat & MPI_HIS_IOP_DOORBELL_STATUS))
 				break;
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1);
+			msleep_interruptible (1);
 			count++;
 		}
 	} else {
@@ -4051,13 +3743,13 @@ WaitForDoorbellAck(MPT_ADAPTER *ioc, int howlong, int sleepFlag)
 	}
 
 	if (cntdn) {
-		dhsprintk((MYIOC_s_INFO_FMT "WaitForDoorbell ACK (cnt=%d)\n",
+		dprintk((MYIOC_s_INFO_FMT "WaitForDoorbell ACK (count=%d)\n",
 				ioc->name, count));
 		return count;
 	}
 
-	printk(MYIOC_s_ERR_FMT "Doorbell ACK timeout(%d)!\n",
-			ioc->name, (count+5)/HZ);
+	printk(MYIOC_s_ERR_FMT "Doorbell ACK timeout (count=%d), IntStatus=%x!\n",
+			ioc->name, count, intstat);
 	return -1;
 }
 
@@ -4078,7 +3770,7 @@ WaitForDoorbellInt(MPT_ADAPTER *ioc, int howlong, int sleepFlag)
 {
 	int cntdn;
 	int count = 0;
-	u32 intstat;
+	u32 intstat=0;
 
 	cntdn = ((sleepFlag == CAN_SLEEP) ? HZ : 1000) * howlong;
 	if (sleepFlag == CAN_SLEEP) {
@@ -4086,8 +3778,7 @@ WaitForDoorbellInt(MPT_ADAPTER *ioc, int howlong, int sleepFlag)
 			intstat = CHIPREG_READ32(&ioc->chip->IntStatus);
 			if (intstat & MPI_HIS_DOORBELL_INTERRUPT)
 				break;
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(1);
+			msleep_interruptible(1);
 			count++;
 		}
 	} else {
@@ -4101,13 +3792,13 @@ WaitForDoorbellInt(MPT_ADAPTER *ioc, int howlong, int sleepFlag)
 	}
 
 	if (cntdn) {
-		dhsprintk((MYIOC_s_INFO_FMT "WaitForDoorbell INT (cnt=%d)\n",
-				ioc->name, count));
+		dprintk((MYIOC_s_INFO_FMT "WaitForDoorbell INT (cnt=%d) howlong=%d\n",
+				ioc->name, count, howlong));
 		return count;
 	}
 
-	printk(MYIOC_s_ERR_FMT "Doorbell INT timeout(%d)!\n",
-			ioc->name, (count+5)/HZ);
+	printk(MYIOC_s_ERR_FMT "Doorbell INT timeout (count=%d), IntStatus=%x!\n",
+			ioc->name, count, intstat);
 	return -1;
 }
 
@@ -4153,8 +3844,8 @@ WaitForDoorbellReply(MPT_ADAPTER *ioc, int howlong, int sleepFlag)
 		}
 	}
 
-	dhsprintk((MYIOC_s_INFO_FMT "First handshake reply word=%08x%s\n",
-			ioc->name, le32_to_cpu(*(u32 *)hs_reply),
+	dhsprintk((MYIOC_s_INFO_FMT "WaitCnt=%d First handshake reply word=%08x%s\n",
+			ioc->name, t, le32_to_cpu(*(u32 *)hs_reply), 
 			failcnt ? " - MISSING DOORBELL HANDSHAKE!" : ""));
 
 	/*
@@ -4189,11 +3880,11 @@ WaitForDoorbellReply(MPT_ADAPTER *ioc, int howlong, int sleepFlag)
 	}
 #endif
 
-	dmfprintk((MYIOC_s_INFO_FMT "Got Handshake reply:\n", ioc->name));
+	dhsprintk((MYIOC_s_INFO_FMT "Got Handshake reply:\n", ioc->name));
 	DBG_DUMP_REPLY_FRAME(mptReply)
 
-	dhsprintk((MYIOC_s_INFO_FMT "WaitForDoorbell REPLY (sz=%d)\n",
-			ioc->name, u16cnt/2));
+	dhsprintk((MYIOC_s_INFO_FMT "WaitForDoorbell REPLY WaitCnt=%d (sz=%d)\n",
+			ioc->name, t, u16cnt/2));
 	return u16cnt/2;
 }
 
@@ -4536,9 +4227,11 @@ mpt_GetScsiPortSettings(MPT_ADAPTER *ioc, int portnum)
 				pPP0->Capabilities = le32_to_cpu(pPP0->Capabilities);
 				pPP0->PhysicalInterface = le32_to_cpu(pPP0->PhysicalInterface);
 
-				if ( (pPP0->Capabilities & MPI_SCSIPORTPAGE0_CAP_QAS) == 0 )
+				if ( (pPP0->Capabilities & MPI_SCSIPORTPAGE0_CAP_QAS) == 0 ) {
 					ioc->spi_data.noQas |= MPT_TARGET_NO_NEGO_QAS;
-
+					dinitprintk((KERN_INFO MYNAM " :%s noQas due to Capabilities=%x\n",
+						ioc->name, pPP0->Capabilities));
+				}
 				ioc->spi_data.maxBusWidth = pPP0->Capabilities & MPI_SCSIPORTPAGE0_CAP_WIDE ? 1 : 0;
 				data = pPP0->Capabilities & MPI_SCSIPORTPAGE0_CAP_MAX_SYNC_OFFSET_MASK;
 				if (data) {
@@ -4985,7 +4678,7 @@ SendEventNotification(MPT_ADAPTER *ioc, u8 EvSwitch)
 {
 	EventNotification_t	*evnp;
 
-	evnp = (EventNotification_t *) mpt_get_msg_frame(mpt_base_index, ioc->id);
+	evnp = (EventNotification_t *) mpt_get_msg_frame(mpt_base_index, ioc);
 	if (evnp == NULL) {
 		dprintk((MYIOC_s_WARN_FMT "Unable to allocate event request frame!\n",
 				ioc->name));
@@ -5000,7 +4693,7 @@ SendEventNotification(MPT_ADAPTER *ioc, u8 EvSwitch)
 	evnp->MsgFlags = 0;
 	evnp->Switch = EvSwitch;
 
-	mpt_put_msg_frame(mpt_base_index, ioc->id, (MPT_FRAME_HDR *)evnp);
+	mpt_put_msg_frame(mpt_base_index, ioc, (MPT_FRAME_HDR *)evnp);
 
 	return 0;
 }
@@ -5016,7 +4709,7 @@ SendEventAck(MPT_ADAPTER *ioc, EventNotificationReply_t *evnp)
 {
 	EventAck_t	*pAck;
 
-	if ((pAck = (EventAck_t *) mpt_get_msg_frame(mpt_base_index, ioc->id)) == NULL) {
+	if ((pAck = (EventAck_t *) mpt_get_msg_frame(mpt_base_index, ioc)) == NULL) {
 		printk(MYIOC_s_WARN_FMT "Unable to allocate event ACK request frame!\n",
 				ioc->name);
 		return -1;
@@ -5031,7 +4724,7 @@ SendEventAck(MPT_ADAPTER *ioc, EventNotificationReply_t *evnp)
 	pAck->Event        = evnp->Event;
 	pAck->EventContext = evnp->EventContext;
 
-	mpt_put_msg_frame(mpt_base_index, ioc->id, (MPT_FRAME_HDR *)pAck);
+	mpt_put_msg_frame(mpt_base_index, ioc, (MPT_FRAME_HDR *)pAck);
 
 	return 0;
 }
@@ -5057,7 +4750,7 @@ mpt_config(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 	MPT_FRAME_HDR	*mf;
 	unsigned long	 flags;
 	int		 ii, rc;
-	int		 flagsLength;
+	u32		 flagsLength;
 	int		 in_isr;
 
 	/* (Bugzilla:fibrebugs, #513)
@@ -5074,7 +4767,7 @@ mpt_config(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 
 	/* Get and Populate a free Frame
 	 */
-	if ((mf = mpt_get_msg_frame(mpt_base_index, ioc->id)) == NULL) {
+	if ((mf = mpt_get_msg_frame(mpt_base_index, ioc)) == NULL) {
 		dcprintk((MYIOC_s_WARN_FMT "mpt_config: no msg frames!\n",
 				ioc->name));
 		return -EAGAIN;
@@ -5129,11 +4822,11 @@ mpt_config(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 
 	/* Add to end of Q, set timer and then issue this command */
 	spin_lock_irqsave(&ioc->FreeQlock, flags);
-	Q_ADD_TAIL(&ioc->configQ.head, &pCfg->linkage, Q_ITEM);
+	list_add_tail(&pCfg->linkage, &ioc->configQ);
 	spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 	add_timer(&pCfg->timer);
-	mpt_put_msg_frame(mpt_base_index, ioc->id, mf);
+	mpt_put_msg_frame(mpt_base_index, ioc, mf);
 	wait_event(mpt_waitq, pCfg->wait_done);
 
 	/* mf has been freed - do not access */
@@ -5162,9 +4855,10 @@ mpt_toolbox(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 {
 	ToolboxIstwiReadWriteRequest_t	*pReq;
 	MPT_FRAME_HDR	*mf;
+	struct pci_dev	*pdev;
 	unsigned long	 flags;
 	int		 rc;
-	int		 flagsLength;
+	u32		 flagsLength;
 	int		 in_isr;
 
 	/* (Bugzilla:fibrebugs, #513)
@@ -5181,7 +4875,7 @@ mpt_toolbox(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 
 	/* Get and Populate a free Frame
 	 */
-	if ((mf = mpt_get_msg_frame(mpt_base_index, ioc->id)) == NULL) {
+	if ((mf = mpt_get_msg_frame(mpt_base_index, ioc)) == NULL) {
 		dcprintk((MYIOC_s_WARN_FMT "mpt_toolbox: no msg frames!\n",
 				ioc->name));
 		return -EAGAIN;
@@ -5200,7 +4894,11 @@ mpt_toolbox(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 	pReq->NumAddressBytes = 0x01;
 	pReq->Reserved4 = 0;
 	pReq->DataLength = 0x04;
-	pReq->DeviceAddr = 0xB0;
+	pdev = (struct pci_dev *) ioc->pcidev;
+	if (pdev->devfn & 1)
+		pReq->DeviceAddr = 0xB2;
+	else
+		pReq->DeviceAddr = 0xB0;
 	pReq->Addr1 = 0;
 	pReq->Addr2 = 0;
 	pReq->Addr3 = 0;
@@ -5235,11 +4933,11 @@ mpt_toolbox(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 
 	/* Add to end of Q, set timer and then issue this command */
 	spin_lock_irqsave(&ioc->FreeQlock, flags);
-	Q_ADD_TAIL(&ioc->configQ.head, &pCfg->linkage, Q_ITEM);
+	list_add_tail(&pCfg->linkage, &ioc->configQ);
 	spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 	add_timer(&pCfg->timer);
-	mpt_put_msg_frame(mpt_base_index, ioc->id, mf);
+	mpt_put_msg_frame(mpt_base_index, ioc, mf);
 	wait_event(mpt_waitq, pCfg->wait_done);
 
 	/* mf has been freed - do not access */
@@ -5302,13 +5000,8 @@ mpt_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 		 * the FIFO's are primed.
 		 */
 		spin_lock_irqsave(&ioc->FreeQlock, flags);
-		if (! Q_IS_EMPTY(&ioc->configQ)){
-			pCfg = (CONFIGPARMS *)ioc->configQ.head;
-			do {
-				del_timer(&pCfg->timer);
-				pCfg = (CONFIGPARMS *) (pCfg->linkage.forw);
-			} while (pCfg != (CONFIGPARMS *)&ioc->configQ);
-		}
+		list_for_each_entry(pCfg, &ioc->configQ, linkage)
+			del_timer(&pCfg->timer);
 		spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 	} else {
@@ -5318,19 +5011,12 @@ mpt_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 		 * Flush the Q, and wake up all suspended threads.
 		 */
 		spin_lock_irqsave(&ioc->FreeQlock, flags);
-		if (! Q_IS_EMPTY(&ioc->configQ)){
-			pCfg = (CONFIGPARMS *)ioc->configQ.head;
-			do {
-				pNext = (CONFIGPARMS *) pCfg->linkage.forw;
+		list_for_each_entry_safe(pCfg, pNext, &ioc->configQ, linkage) {
+			list_del(&pCfg->linkage);
 
-				Q_DEL_ITEM(&pCfg->linkage);
-
-				pCfg->status = MPT_CONFIG_ERROR;
-				pCfg->wait_done = 1;
-				wake_up(&mpt_waitq);
-
-				pCfg = pNext;
-			} while (pCfg != (CONFIGPARMS *)&ioc->configQ);
+			pCfg->status = MPT_CONFIG_ERROR;
+			pCfg->wait_done = 1;
+			wake_up(&mpt_waitq);
 		}
 		spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 	}
@@ -5353,61 +5039,19 @@ mpt_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 static int
 procmpt_create(void)
 {
-	MPT_ADAPTER		*ioc;
 	struct proc_dir_entry	*ent;
-	int	 ii;
 
-	/*
-	 *	BEWARE: If/when MPT_PROCFS_MPTBASEDIR changes from "mpt"
-	 *	(single level) to multi level (e.g. "driver/message/fusion")
-	 *	something here needs to change.  -sralston
-	 */
 	mpt_proc_root_dir = proc_mkdir(MPT_PROCFS_MPTBASEDIR, NULL);
 	if (mpt_proc_root_dir == NULL)
 		return -ENOTDIR;
 
-	for (ii=0; ii < MPT_PROC_ENTRIES; ii++) {
-		ent = create_proc_entry(mpt_proc_list[ii].name,
-				S_IFREG|S_IRUGO, mpt_proc_root_dir);
-		if (!ent) {
-			printk(KERN_WARNING MYNAM
-					": WARNING - Could not create /proc/mpt/%s entry\n",
-					mpt_proc_list[ii].name);
-			continue;
-		}
-		ent->read_proc = mpt_proc_list[ii].f;
-		ent->data      = NULL;
-	}
+	ent = create_proc_entry("summary", S_IFREG|S_IRUGO, mpt_proc_root_dir);
+	if (ent)
+		ent->read_proc = procmpt_summary_read;
 
-	ioc = mpt_adapter_find_first();
-	while (ioc != NULL) {
-		struct proc_dir_entry	*dent;
-		/*
-		 *  Create "/proc/mpt/iocN" subdirectory entry for each MPT adapter.
-		 */
-		if ((dent = proc_mkdir(ioc->name, mpt_proc_root_dir)) != NULL) {
-			/*
-			 *  And populate it with mpt_ioc_proc_list[] entries.
-			 */
-			for (ii=0; ii < MPT_IOC_PROC_ENTRIES; ii++) {
-				ent = create_proc_entry(mpt_ioc_proc_list[ii].name,
-						S_IFREG|S_IRUGO, dent);
-				if (!ent) {
-					printk(KERN_WARNING MYNAM
-							": WARNING - Could not create /proc/mpt/%s/%s entry!\n",
-							ioc->name,
-							mpt_ioc_proc_list[ii].name);
-					continue;
-				}
-				ent->read_proc = mpt_ioc_proc_list[ii].f;
-				ent->data      = ioc;
-			}
-		} else {
-			printk(MYIOC_s_WARN_FMT "Could not create /proc/mpt/%s subdir entry!\n",
-					ioc->name, mpt_ioc_proc_list[ii].name);
-		}
-		ioc = mpt_adapter_find_next(ioc);
-	}
+	ent = create_proc_entry("version", S_IFREG|S_IRUGO, mpt_proc_root_dir);
+	if (ent)
+		ent->read_proc = procmpt_version_read;
 
 	return 0;
 }
@@ -5418,49 +5062,12 @@ procmpt_create(void)
  *
  *	Returns 0 for success, non-zero for failure.
  */
-static int
+static void
 procmpt_destroy(void)
 {
-	MPT_ADAPTER	*ioc;
-	int		 ii;
-
-	if (!mpt_proc_root_dir)
-		return 0;
-
-	/*
-	 *	BEWARE: If/when MPT_PROCFS_MPTBASEDIR changes from "mpt"
-	 *	(single level) to multi level (e.g. "driver/message/fusion")
-	 *	something here needs to change.  -sralston
-	 */
-
-	ioc = mpt_adapter_find_first();
-	while (ioc != NULL) {
-		char pname[32];
-		int namelen;
-
-		namelen = sprintf(pname, MPT_PROCFS_MPTBASEDIR "/%s", ioc->name);
-
-		/*
-		 *  Tear down each "/proc/mpt/iocN" subdirectory.
-		 */
-		for (ii=0; ii < MPT_IOC_PROC_ENTRIES; ii++) {
-			(void) sprintf(pname+namelen, "/%s", mpt_ioc_proc_list[ii].name);
-			remove_proc_entry(pname, NULL);
-		}
-		remove_proc_entry(ioc->name, mpt_proc_root_dir);
-		ioc = mpt_adapter_find_next(ioc);
-	}
-
-	for (ii=0; ii < MPT_PROC_ENTRIES; ii++)
-		remove_proc_entry(mpt_proc_list[ii].name, mpt_proc_root_dir);
-
-	if (atomic_read((atomic_t *)&mpt_proc_root_dir->count) == 0) {
-		remove_proc_entry(MPT_PROCFS_MPTBASEDIR, NULL);
-		mpt_proc_root_dir = NULL;
-		return 0;
-	}
-
-	return -1;
+	remove_proc_entry("version", mpt_proc_root_dir);
+	remove_proc_entry("summary", mpt_proc_root_dir);
+	remove_proc_entry(MPT_PROCFS_MPTBASEDIR, NULL);
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -5483,26 +5090,25 @@ procmpt_summary_read(char *buf, char **start, off_t offset, int request, int *eo
 	char *out = buf;
 	int len;
 
-	if (data == NULL)
-		ioc = mpt_adapter_find_first();
-	else
+	if (data) {
+		int more = 0;
+
 		ioc = data;
-
-	while (ioc) {
-		int	more = 0;
-
 		mpt_print_ioc_summary(ioc, out, &more, 0, 1);
 
 		out += more;
-		if ((out-buf) >= request) {
-			break;
-		}
+	} else {
+		list_for_each_entry(ioc, &ioc_list, list) {
+			int	more = 0;
 
-		if (data == NULL)
-			ioc = mpt_adapter_find_next(ioc);
-		else
-			ioc = NULL;		/* force exit for iocN */
+			mpt_print_ioc_summary(ioc, out, &more, 0, 1);
+
+			out += more;
+			if ((out-buf) >= request)
+				break;
+		}
 	}
+
 	len = out - buf;
 
 	MPT_PROC_READ_RETURN(buf,start,offset,request,eof,len);
@@ -5548,19 +5154,10 @@ procmpt_version_read(char *buf, char **start, off_t offset, int request, int *eo
 			case MPTCTL_DRIVER:
 				if (!ctl++) drvname = "ioctl";
 				break;
-			case MPTDMP_DRIVER:
-				if (!dmp++) drvname = "DMP";
-				break;
 			}
 
 			if (drvname)
 				len += sprintf(buf+len, "  Fusion MPT %s driver\n", drvname);
-			/*
-			 *	Handle isense special case, because it
-			 *	doesn't do a formal mpt_register call.
-			 */
-			if (isense_idx == ii)
-				len += sprintf(buf+len, "  Fusion MPT isense driver\n");
 		}
 	}
 
@@ -5615,7 +5212,7 @@ procmpt_iocinfo_read(char *buf, char **start, off_t offset, int request, int *eo
 	len += sprintf(buf+len, "  MinBlockSize = 0x%02x bytes\n", 4*ioc->facts.BlockSize);
 
 	len += sprintf(buf+len, "  RequestFrames @ 0x%p (Dma @ 0x%p)\n",
-					(void *)ioc->req_alloc, (void *)(ulong)ioc->req_alloc_dma);
+					(void *)ioc->req_frames, (void *)(ulong)ioc->req_frames_dma);
 	/*
 	 *  Rounding UP to nearest 4-kB boundary here...
 	 */
@@ -5627,8 +5224,8 @@ procmpt_iocinfo_read(char *buf, char **start, off_t offset, int request, int *eo
 					4*ioc->facts.RequestFrameSize,
 					ioc->facts.GlobalCredits);
 
-	len += sprintf(buf+len, "  ReplyFrames   @ 0x%p (Dma @ 0x%p)\n",
-					(void *)ioc->reply_alloc, (void *)(ulong)ioc->reply_alloc_dma);
+	len += sprintf(buf+len, "  Frames   @ 0x%p (Dma @ 0x%p)\n",
+					(void *)ioc->alloc, (void *)(ulong)ioc->alloc_dma);
 	sz = (ioc->reply_sz * ioc->reply_depth) + 128;
 	len += sprintf(buf+len, "    {CurRepSz=%d} x {CurRepDepth=%d} = %d bytes ^= 0x%x\n",
 					ioc->reply_sz, ioc->reply_depth, ioc->reply_sz*ioc->reply_depth, sz);
@@ -5645,7 +5242,7 @@ procmpt_iocinfo_read(char *buf, char **start, off_t offset, int request, int *eo
 		len += sprintf(buf+len, "  PortNumber = %d (of %d)\n",
 				p+1,
 				ioc->facts.NumberOfPorts);
-		if ((int)ioc->chip_type <= (int)FC929) {
+		if (ioc->bus_type == FC) {
 			if (ioc->pfacts[p].ProtocolFlags & MPI_PORTFACTS_PROTOCOL_LAN) {
 				u8 *a = (u8*)&ioc->lan_cnfg_page1.HardwareAddressLow;
 				len += sprintf(buf+len, "    LanAddr = %02X:%02X:%02X:%02X:%02X:%02X\n",
@@ -5921,7 +5518,7 @@ ProcessEventNotification(MPT_ADAPTER *ioc, EventNotificationReply_t *pEventReply
 	}
 
 	evStr = EventDescriptionStr(event, evData0);
-	dprintk((MYIOC_s_INFO_FMT "MPT event (%s=%02Xh) detected!\n",
+	devtprintk((MYIOC_s_INFO_FMT "MPT event (%s=%02Xh) detected!\n",
 			ioc->name,
 			evStr,
 			event));
@@ -5993,7 +5590,7 @@ ProcessEventNotification(MPT_ADAPTER *ioc, EventNotificationReply_t *pEventReply
 	 */
 	for (ii=MPT_MAX_PROTOCOL_DRIVERS-1; ii; ii--) {
 		if (MptEvHandlers[ii]) {
-			dprintk((MYIOC_s_INFO_FMT "Routing Event to event handler #%d\n",
+			devtprintk((MYIOC_s_INFO_FMT "Routing Event to event handler #%d\n",
 					ioc->name, ii));
 			r += (*(MptEvHandlers[ii]))(ioc, pEventReply);
 			handlers++;
@@ -6006,8 +5603,8 @@ ProcessEventNotification(MPT_ADAPTER *ioc, EventNotificationReply_t *pEventReply
 	 */
 	if (pEventReply->AckRequired == MPI_EVENT_NOTIFICATION_ACK_REQUIRED) {
 		if ((ii = SendEventAck(ioc, pEventReply)) != 0) {
-			printk(MYIOC_s_WARN_FMT "SendEventAck returned %d\n",
-					ioc->name, ii);
+			devtprintk((MYIOC_s_WARN_FMT "SendEventAck returned %d\n",
+					ioc->name, ii));
 		}
 	}
 
@@ -6031,9 +5628,8 @@ mpt_fc_log_info(MPT_ADAPTER *ioc, u32 log_info)
 		"FC Link", "Context Manager", "Invalid Field Offset", "State Change Info"
 	};
 	u8 subcl = (log_info >> 24) & 0x7;
-//	u32 SubCl = log_info & 0x27000000;
 
-	printk(MYIOC_s_INFO_FMT "LogInfo(0x%08x): SubCl={%s}",
+	printk(MYIOC_s_INFO_FMT "LogInfo(0x%08x): SubCl={%s}\n",
 			ioc->name, log_info, subcl_str[subcl]);
 }
 
@@ -6086,59 +5682,158 @@ mpt_sp_log_info(MPT_ADAPTER *ioc, u32 log_info)
 	case 0x00080000:
 		desc = "Outbound DMA Overrun";
 		break;
+	
+	case 0x00090000:
+		desc = "Task Management";
+		break;
+
+	case 0x000A0000:
+		desc = "Device Problem";
+		break;
+
+	case 0x000B0000:
+		desc = "Invalid Phase Change";
+		break;
+
+	case 0x000C0000:
+		desc = "Untagged Table Size";
+		break;
+	
 	}
 
 	printk(MYIOC_s_INFO_FMT "LogInfo(0x%08x): F/W: %s\n", ioc->name, log_info, desc);
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-/**
- *	mpt_register_ascqops_strings - Register SCSI ASC/ASCQ and SCSI
- *	OpCode strings from the (optional) isense module.
- *	@ascqTable: Pointer to ASCQ_Table_t structure
- *	@ascqtbl_sz: Number of entries in ASCQ_Table
- *	@opsTable: Pointer to array of SCSI OpCode strings (char pointers)
+/*
+ *	mpt_sp_ioc_info - IOC information returned from SCSI Parallel IOC.
+ *	@ioc: Pointer to MPT_ADAPTER structure
+ *	@ioc_status: U32 IOCStatus word from IOC
+ *	@mf: Pointer to MPT request frame
  *
- *	Specialized driver registration routine for the isense driver.
+ *	Refer to lsi/mpi.h.
  */
-int
-mpt_register_ascqops_strings(void *ascqTable, int ascqtbl_sz, const char **opsTable)
+static void
+mpt_sp_ioc_info(MPT_ADAPTER *ioc, u32 ioc_status, MPT_FRAME_HDR *mf)
 {
-	int r = 0;
+	u32 status = ioc_status & MPI_IOCSTATUS_MASK;
+	char *desc = "";
 
-	if (ascqTable && ascqtbl_sz && opsTable) {
-		mpt_v_ASCQ_TablePtr = ascqTable;
-		mpt_ASCQ_TableSz = ascqtbl_sz;
-		mpt_ScsiOpcodesPtr = opsTable;
-		printk(KERN_INFO MYNAM ": English readable SCSI-3 strings enabled:-)\n");
-		isense_idx = last_drv_idx;
-		r = 1;
+	switch (status) {
+	case MPI_IOCSTATUS_INVALID_FUNCTION: /* 0x0001 */
+		desc = "Invalid Function";
+		break;
+
+	case MPI_IOCSTATUS_BUSY: /* 0x0002 */
+		desc = "Busy";
+		break;
+
+	case MPI_IOCSTATUS_INVALID_SGL: /* 0x0003 */
+		desc = "Invalid SGL";
+		break;
+
+	case MPI_IOCSTATUS_INTERNAL_ERROR: /* 0x0004 */
+		desc = "Internal Error";
+		break;
+
+	case MPI_IOCSTATUS_RESERVED: /* 0x0005 */
+		desc = "Reserved";
+		break;
+
+	case MPI_IOCSTATUS_INSUFFICIENT_RESOURCES: /* 0x0006 */
+		desc = "Insufficient Resources";
+		break;
+
+	case MPI_IOCSTATUS_INVALID_FIELD: /* 0x0007 */
+		desc = "Invalid Field";
+		break;
+
+	case MPI_IOCSTATUS_INVALID_STATE: /* 0x0008 */
+		desc = "Invalid State";
+		break;
+
+	case MPI_IOCSTATUS_CONFIG_INVALID_ACTION: /* 0x0020 */
+	case MPI_IOCSTATUS_CONFIG_INVALID_TYPE:   /* 0x0021 */
+	case MPI_IOCSTATUS_CONFIG_INVALID_PAGE:   /* 0x0022 */
+	case MPI_IOCSTATUS_CONFIG_INVALID_DATA:   /* 0x0023 */
+	case MPI_IOCSTATUS_CONFIG_NO_DEFAULTS:    /* 0x0024 */
+	case MPI_IOCSTATUS_CONFIG_CANT_COMMIT:    /* 0x0025 */
+		/* No message for Config IOCStatus values */
+		break;
+
+	case MPI_IOCSTATUS_SCSI_RECOVERED_ERROR: /* 0x0040 */
+		/* No message for recovered error
+		desc = "SCSI Recovered Error";
+		*/
+		break;
+
+	case MPI_IOCSTATUS_SCSI_INVALID_BUS: /* 0x0041 */
+		desc = "SCSI Invalid Bus";
+		break;
+
+	case MPI_IOCSTATUS_SCSI_INVALID_TARGETID: /* 0x0042 */
+		desc = "SCSI Invalid TargetID";
+		break;
+
+	case MPI_IOCSTATUS_SCSI_DEVICE_NOT_THERE: /* 0x0043 */
+	  {
+		SCSIIORequest_t *pScsiReq = (SCSIIORequest_t *) mf;
+		U8 cdb = pScsiReq->CDB[0];
+		if (cdb != 0x12) { /* Inquiry is issued for device scanning */
+			desc = "SCSI Device Not There";
+		}
+		break;
+	  }
+
+	case MPI_IOCSTATUS_SCSI_DATA_OVERRUN: /* 0x0044 */
+		desc = "SCSI Data Overrun";
+		break;
+
+	case MPI_IOCSTATUS_SCSI_DATA_UNDERRUN: /* 0x0045 */
+		/* This error is checked in scsi_io_done(). Skip. 
+		desc = "SCSI Data Underrun";
+		*/
+		break;
+
+	case MPI_IOCSTATUS_SCSI_IO_DATA_ERROR: /* 0x0046 */
+		desc = "SCSI I/O Data Error";
+		break;
+
+	case MPI_IOCSTATUS_SCSI_PROTOCOL_ERROR: /* 0x0047 */
+		desc = "SCSI Protocol Error";
+		break;
+
+	case MPI_IOCSTATUS_SCSI_TASK_TERMINATED: /* 0x0048 */
+		desc = "SCSI Task Terminated";
+		break;
+
+	case MPI_IOCSTATUS_SCSI_RESIDUAL_MISMATCH: /* 0x0049 */
+		desc = "SCSI Residual Mismatch";
+		break;
+
+	case MPI_IOCSTATUS_SCSI_TASK_MGMT_FAILED: /* 0x004A */
+		desc = "SCSI Task Management Failed";
+		break;
+
+	case MPI_IOCSTATUS_SCSI_IOC_TERMINATED: /* 0x004B */
+		desc = "SCSI IOC Terminated";
+		break;
+
+	case MPI_IOCSTATUS_SCSI_EXT_TERMINATED: /* 0x004C */
+		desc = "SCSI Ext Terminated";
+		break;
+
+	default:
+		desc = "Others";
+		break;
 	}
-	return r;
+	if (desc != "")
+		printk(MYIOC_s_INFO_FMT "IOCStatus(0x%04x): %s\n", ioc->name, status, desc);
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-/**
- *	mpt_deregister_ascqops_strings - Deregister SCSI ASC/ASCQ and SCSI
- *	OpCode strings from the isense driver.
- *
- *	Specialized driver deregistration routine for the isense driver.
- */
-void
-mpt_deregister_ascqops_strings(void)
-{
-	mpt_v_ASCQ_TablePtr = NULL;
-	mpt_ASCQ_TableSz = 0;
-	mpt_ScsiOpcodesPtr = NULL;
-	printk(KERN_INFO MYNAM ": English readable SCSI-3 strings disabled)-:\n");
-	isense_idx = -1;
-}
-
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-
-EXPORT_SYMBOL(mpt_adapters);
+EXPORT_SYMBOL(ioc_list);
 EXPORT_SYMBOL(mpt_proc_root_dir);
-EXPORT_SYMBOL(DmpService);
 EXPORT_SYMBOL(mpt_register);
 EXPORT_SYMBOL(mpt_deregister);
 EXPORT_SYMBOL(mpt_event_register);
@@ -6151,11 +5846,7 @@ EXPORT_SYMBOL(mpt_get_msg_frame);
 EXPORT_SYMBOL(mpt_put_msg_frame);
 EXPORT_SYMBOL(mpt_free_msg_frame);
 EXPORT_SYMBOL(mpt_add_sge);
-EXPORT_SYMBOL(mpt_add_chain);
 EXPORT_SYMBOL(mpt_send_handshake_request);
-EXPORT_SYMBOL(mpt_handshake_req_reply_wait);
-EXPORT_SYMBOL(mpt_adapter_find_first);
-EXPORT_SYMBOL(mpt_adapter_find_next);
 EXPORT_SYMBOL(mpt_verify_adapter);
 EXPORT_SYMBOL(mpt_GetIocState);
 EXPORT_SYMBOL(mpt_print_ioc_summary);
@@ -6168,13 +5859,6 @@ EXPORT_SYMBOL(mpt_findImVolumes);
 EXPORT_SYMBOL(mpt_read_ioc_pg_3);
 EXPORT_SYMBOL(mpt_alloc_fw_memory);
 EXPORT_SYMBOL(mpt_free_fw_memory);
-
-EXPORT_SYMBOL(mpt_register_ascqops_strings);
-EXPORT_SYMBOL(mpt_deregister_ascqops_strings);
-EXPORT_SYMBOL(mpt_v_ASCQ_TablePtr);
-EXPORT_SYMBOL(mpt_ASCQ_TableSz);
-EXPORT_SYMBOL(mpt_ScsiOpcodesPtr);
-
 
 static struct pci_driver mptbase_driver = {
 	.name		= "mptbase",
@@ -6202,23 +5886,15 @@ fusion_init(void)
 	int i;
 	int r;
 
-	if (FusionInitCalled++) {
-		dprintk((KERN_INFO MYNAM ": INFO - Driver late-init entry point called\n"));
-		return 0;
-	}
-
 	show_mptmod_ver(my_NAME, my_VERSION);
 	printk(KERN_INFO COPYRIGHT "\n");
 
-	Q_INIT(&MptAdapters, MPT_ADAPTER);			/* set to empty */
 	for (i = 0; i < MPT_MAX_PROTOCOL_DRIVERS; i++) {
 		MptCallbacks[i] = NULL;
 		MptDriverClass[i] = MPTUNKNOWN_DRIVER;
 		MptEvHandlers[i] = NULL;
 		MptResetHandlers[i] = NULL;
 	}
-
-	DmpService = NULL;
 
 	/* NEW!  20010120 -sralston
 	 *  Register ourselves (mptbase) in order to facilitate
@@ -6234,13 +5910,12 @@ fusion_init(void)
 		/* FIXME! */
 	}
 
-	r = pci_module_init(&mptbase_driver);
-	if(r)
-		return(r);
-
 #ifdef CONFIG_PROC_FS
 	(void) procmpt_create();
 #endif
+	r = pci_register_driver(&mptbase_driver);
+	if(r)
+		return(r);
 
 	return r;
 }
@@ -6256,16 +5931,14 @@ static void __exit
 fusion_exit(void)
 {
 
-	dprintk((KERN_INFO MYNAM ": fusion_exit() called!\n"));
+	dexitprintk((KERN_INFO MYNAM ": fusion_exit() called!\n"));
 
-	/* Whups?  20010120 -sralston
-	 *  Moved this *above* removal of all MptAdapters!
-	 */
-#ifdef CONFIG_PROC_FS
-	(void) procmpt_destroy();
-#endif
 	pci_unregister_driver(&mptbase_driver);
 	mpt_reset_deregister(mpt_base_index);
+
+#ifdef CONFIG_PROC_FS
+	procmpt_destroy();
+#endif
 }
 
 

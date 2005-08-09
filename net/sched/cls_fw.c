@@ -11,13 +11,18 @@
  * Changes:
  * Karlis Peisenieks <karlis@mt.lv> : 990415 : fw_walk off by one
  * Karlis Peisenieks <karlis@mt.lv> : 990415 : fw_delete killed all the filter (and kernel).
+ * Alex <alex@pilotsoft.com> : 2004xxyy: Added Action extension
+ *
+ * JHS: We should remove the CONFIG_NET_CLS_IND from here
+ * eventually when the meta match extension is made available
+ *
  */
 
 #include <linux/config.h>
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -38,11 +43,14 @@
 #include <net/route.h>
 #include <linux/skbuff.h>
 #include <net/sock.h>
-#include <net/pkt_sched.h>
+#include <net/act_api.h>
+#include <net/pkt_cls.h>
+
+#define HTSIZE (PAGE_SIZE/sizeof(struct fw_filter *))
 
 struct fw_head
 {
-	struct fw_filter *ht[256];
+	struct fw_filter *ht[HTSIZE];
 };
 
 struct fw_filter
@@ -50,14 +58,41 @@ struct fw_filter
 	struct fw_filter	*next;
 	u32			id;
 	struct tcf_result	res;
-#ifdef CONFIG_NET_CLS_POLICE
-	struct tcf_police	*police;
-#endif
+#ifdef CONFIG_NET_CLS_IND
+	char			indev[IFNAMSIZ];
+#endif /* CONFIG_NET_CLS_IND */
+	struct tcf_exts		exts;
+};
+
+static struct tcf_ext_map fw_ext_map = {
+	.action = TCA_FW_ACT,
+	.police = TCA_FW_POLICE
 };
 
 static __inline__ int fw_hash(u32 handle)
 {
-	return handle&0xFF;
+	if (HTSIZE == 4096)
+		return ((handle >> 24) & 0xFFF) ^
+		       ((handle >> 12) & 0xFFF) ^
+		       (handle & 0xFFF);
+	else if (HTSIZE == 2048)
+		return ((handle >> 22) & 0x7FF) ^
+		       ((handle >> 11) & 0x7FF) ^
+		       (handle & 0x7FF);
+	else if (HTSIZE == 1024)
+		return ((handle >> 20) & 0x3FF) ^
+		       ((handle >> 10) & 0x3FF) ^
+		       (handle & 0x3FF);
+	else if (HTSIZE == 512)
+		return (handle >> 27) ^
+		       ((handle >> 18) & 0x1FF) ^
+		       ((handle >> 9) & 0x1FF) ^
+		       (handle & 0x1FF);
+	else if (HTSIZE == 256) {
+		u8 *t = (u8 *) &handle;
+		return t[0] ^ t[1] ^ t[2] ^ t[3];
+	} else 
+		return handle & (HTSIZE - 1);
 }
 
 static int fw_classify(struct sk_buff *skb, struct tcf_proto *tp,
@@ -65,34 +100,37 @@ static int fw_classify(struct sk_buff *skb, struct tcf_proto *tp,
 {
 	struct fw_head *head = (struct fw_head*)tp->root;
 	struct fw_filter *f;
+	int r;
 #ifdef CONFIG_NETFILTER
 	u32 id = skb->nfmark;
 #else
 	u32 id = 0;
 #endif
 
-	if (head == NULL)
-		goto old_method;
+	if (head != NULL) {
+		for (f=head->ht[fw_hash(id)]; f; f=f->next) {
+			if (f->id == id) {
+				*res = f->res;
+#ifdef CONFIG_NET_CLS_IND
+				if (!tcf_match_indev(skb, f->indev))
+					continue;
+#endif /* CONFIG_NET_CLS_IND */
+				r = tcf_exts_exec(skb, &f->exts, res);
+				if (r < 0)
+					continue;
 
-	for (f=head->ht[fw_hash(id)]; f; f=f->next) {
-		if (f->id == id) {
-			*res = f->res;
-#ifdef CONFIG_NET_CLS_POLICE
-			if (f->police)
-				return tcf_police(skb, f->police);
-#endif
+				return r;
+			}
+		}
+	} else {
+		/* old method */
+		if (id && (TC_H_MAJ(id) == 0 || !(TC_H_MAJ(id^tp->q->handle)))) {
+			res->classid = id;
+			res->class = 0;
 			return 0;
 		}
 	}
-	return -1;
 
-old_method:
-	if (id && (TC_H_MAJ(id) == 0 ||
-		     !(TC_H_MAJ(id^tp->q->handle)))) {
-		res->classid = id;
-		res->class = 0;
-		return 0;
-	}
 	return -1;
 }
 
@@ -120,6 +158,14 @@ static int fw_init(struct tcf_proto *tp)
 	return 0;
 }
 
+static inline void
+fw_delete_filter(struct tcf_proto *tp, struct fw_filter *f)
+{
+	tcf_unbind_filter(tp, &f->res);
+	tcf_exts_destroy(tp, &f->exts);
+	kfree(f);
+}
+
 static void fw_destroy(struct tcf_proto *tp)
 {
 	struct fw_head *head = (struct fw_head*)xchg(&tp->root, NULL);
@@ -129,17 +175,10 @@ static void fw_destroy(struct tcf_proto *tp)
 	if (head == NULL)
 		return;
 
-	for (h=0; h<256; h++) {
+	for (h=0; h<HTSIZE; h++) {
 		while ((f=head->ht[h]) != NULL) {
-			unsigned long cl;
 			head->ht[h] = f->next;
-
-			if ((cl = __cls_set_class(&f->res.class, 0)) != 0)
-				tp->q->ops->cl_ops->unbind_tcf(tp->q, cl);
-#ifdef CONFIG_NET_CLS_POLICE
-			tcf_police_release(f->police);
-#endif
-			kfree(f);
+			fw_delete_filter(tp, f);
 		}
 	}
 	kfree(head);
@@ -156,23 +195,50 @@ static int fw_delete(struct tcf_proto *tp, unsigned long arg)
 
 	for (fp=&head->ht[fw_hash(f->id)]; *fp; fp = &(*fp)->next) {
 		if (*fp == f) {
-			unsigned long cl;
-
 			tcf_tree_lock(tp);
 			*fp = f->next;
 			tcf_tree_unlock(tp);
-
-			if ((cl = cls_set_class(tp, &f->res.class, 0)) != 0)
-				tp->q->ops->cl_ops->unbind_tcf(tp->q, cl);
-#ifdef CONFIG_NET_CLS_POLICE
-			tcf_police_release(f->police);
-#endif
-			kfree(f);
+			fw_delete_filter(tp, f);
 			return 0;
 		}
 	}
 out:
 	return -EINVAL;
+}
+
+static int
+fw_change_attrs(struct tcf_proto *tp, struct fw_filter *f,
+	struct rtattr **tb, struct rtattr **tca, unsigned long base)
+{
+	struct tcf_exts e;
+	int err;
+
+	err = tcf_exts_validate(tp, tb, tca[TCA_RATE-1], &e, &fw_ext_map);
+	if (err < 0)
+		return err;
+
+	err = -EINVAL;
+	if (tb[TCA_FW_CLASSID-1]) {
+		if (RTA_PAYLOAD(tb[TCA_FW_CLASSID-1]) != sizeof(u32))
+			goto errout;
+		f->res.classid = *(u32*)RTA_DATA(tb[TCA_FW_CLASSID-1]);
+		tcf_bind_filter(tp, &f->res, base);
+	}
+
+#ifdef CONFIG_NET_CLS_IND
+	if (tb[TCA_FW_INDEV-1]) {
+		err = tcf_change_indev(tp, f->indev, tb[TCA_FW_INDEV-1]);
+		if (err < 0)
+			goto errout;
+	}
+#endif /* CONFIG_NET_CLS_IND */
+
+	tcf_exts_change(tp, &f->exts, &e);
+
+	return 0;
+errout:
+	tcf_exts_destroy(tp, &e);
+	return err;
 }
 
 static int fw_change(struct tcf_proto *tp, unsigned long base,
@@ -181,7 +247,7 @@ static int fw_change(struct tcf_proto *tp, unsigned long base,
 		     unsigned long *arg)
 {
 	struct fw_head *head = (struct fw_head*)tp->root;
-	struct fw_filter *f;
+	struct fw_filter *f = (struct fw_filter *) *arg;
 	struct rtattr *opt = tca[TCA_OPTIONS-1];
 	struct rtattr *tb[TCA_FW_MAX];
 	int err;
@@ -189,35 +255,13 @@ static int fw_change(struct tcf_proto *tp, unsigned long base,
 	if (!opt)
 		return handle ? -EINVAL : 0;
 
-	if (rtattr_parse(tb, TCA_FW_MAX, RTA_DATA(opt), RTA_PAYLOAD(opt)) < 0)
+	if (rtattr_parse_nested(tb, TCA_FW_MAX, opt) < 0)
 		return -EINVAL;
 
-	if ((f = (struct fw_filter*)*arg) != NULL) {
-		/* Node exists: adjust only classid */
-
+	if (f != NULL) {
 		if (f->id != handle && handle)
 			return -EINVAL;
-		if (tb[TCA_FW_CLASSID-1]) {
-			unsigned long cl;
-
-			f->res.classid = *(u32*)RTA_DATA(tb[TCA_FW_CLASSID-1]);
-			cl = tp->q->ops->cl_ops->bind_tcf(tp->q, base, f->res.classid);
-			cl = cls_set_class(tp, &f->res.class, cl);
-			if (cl)
-				tp->q->ops->cl_ops->unbind_tcf(tp->q, cl);
-		}
-#ifdef CONFIG_NET_CLS_POLICE
-		if (tb[TCA_FW_POLICE-1]) {
-			struct tcf_police *police = tcf_police_locate(tb[TCA_FW_POLICE-1], tca[TCA_RATE-1]);
-
-			tcf_tree_lock(tp);
-			police = xchg(&f->police, police);
-			tcf_tree_unlock(tp);
-
-			tcf_police_release(police);
-		}
-#endif
-		return 0;
+		return fw_change_attrs(tp, f, tb, tca, base);
 	}
 
 	if (!handle)
@@ -241,18 +285,9 @@ static int fw_change(struct tcf_proto *tp, unsigned long base,
 
 	f->id = handle;
 
-	if (tb[TCA_FW_CLASSID-1]) {
-		err = -EINVAL;
-		if (RTA_PAYLOAD(tb[TCA_FW_CLASSID-1]) != 4)
-			goto errout;
-		f->res.classid = *(u32*)RTA_DATA(tb[TCA_FW_CLASSID-1]);
-		cls_set_class(tp, &f->res.class, tp->q->ops->cl_ops->bind_tcf(tp->q, base, f->res.classid));
-	}
-
-#ifdef CONFIG_NET_CLS_POLICE
-	if (tb[TCA_FW_POLICE-1])
-		f->police = tcf_police_locate(tb[TCA_FW_POLICE-1], tca[TCA_RATE-1]);
-#endif
+	err = fw_change_attrs(tp, f, tb, tca, base);
+	if (err < 0)
+		goto errout;
 
 	f->next = head->ht[fw_hash(handle)];
 	tcf_tree_lock(tp);
@@ -279,7 +314,7 @@ static void fw_walk(struct tcf_proto *tp, struct tcf_walker *arg)
 	if (arg->stop)
 		return;
 
-	for (h = 0; h < 256; h++) {
+	for (h = 0; h < HTSIZE; h++) {
 		struct fw_filter *f;
 
 		for (f = head->ht[h]; f; f = f->next) {
@@ -289,7 +324,7 @@ static void fw_walk(struct tcf_proto *tp, struct tcf_walker *arg)
 			}
 			if (arg->fn(tp, (unsigned long)f, arg) < 0) {
 				arg->stop = 1;
-				break;
+				return;
 			}
 			arg->count++;
 		}
@@ -308,11 +343,7 @@ static int fw_dump(struct tcf_proto *tp, unsigned long fh,
 
 	t->tcm_handle = f->id;
 
-       if (!f->res.classid
-#ifdef CONFIG_NET_CLS_POLICE
-           && !f->police
-#endif
-           )
+	if (!f->res.classid && !tcf_exts_is_available(&f->exts))
 		return skb->len;
 
 	rta = (struct rtattr*)b;
@@ -320,26 +351,19 @@ static int fw_dump(struct tcf_proto *tp, unsigned long fh,
 
 	if (f->res.classid)
 		RTA_PUT(skb, TCA_FW_CLASSID, 4, &f->res.classid);
-#ifdef CONFIG_NET_CLS_POLICE
-	if (f->police) {
-		struct rtattr * p_rta = (struct rtattr*)skb->tail;
+#ifdef CONFIG_NET_CLS_IND
+	if (strlen(f->indev))
+		RTA_PUT(skb, TCA_FW_INDEV, IFNAMSIZ, f->indev);
+#endif /* CONFIG_NET_CLS_IND */
 
-		RTA_PUT(skb, TCA_FW_POLICE, 0, NULL);
-
-		if (tcf_police_dump(skb, f->police) < 0)
-			goto rtattr_failure;
-
-		p_rta->rta_len = skb->tail - (u8*)p_rta;
-	}
-#endif
+	if (tcf_exts_dump(skb, &f->exts, &fw_ext_map) < 0)
+		goto rtattr_failure;
 
 	rta->rta_len = skb->tail - b;
-#ifdef CONFIG_NET_CLS_POLICE
-	if (f->police) {
-		if (qdisc_copy_stats(skb, &f->police->stats))
-			goto rtattr_failure;
-	}
-#endif
+
+	if (tcf_exts_dump_stats(skb, &f->exts, &fw_ext_map) < 0)
+		goto rtattr_failure;
+
 	return skb->len;
 
 rtattr_failure:

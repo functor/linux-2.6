@@ -3,7 +3,7 @@
  * Copyright (C) 2001 Mark Langsdorf (mark.langsdorf@amd.com)
  *	based on sc520cdp.c by Sysgo Real-Time Solutions GmbH
  *
- * $Id: netsc520.c,v 1.9 2003/05/21 12:45:19 dwmw2 Exp $
+ * $Id: netsc520.c,v 1.13 2004/11/28 09:40:40 dwmw2 Exp $
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -84,7 +84,7 @@ static struct mtd_partition partition_info[]={
 static struct map_info netsc520_map = {
 	.name = "netsc520 Flash Bank",
 	.size = WINDOW_SIZE,
-	.buswidth = 4,
+	.bankwidth = 4,
 	.phys = WINDOW_ADDR,
 };
 
@@ -95,7 +95,7 @@ static struct mtd_info *mymtd;
 static int __init init_netsc520(void)
 {
 	printk(KERN_NOTICE "NetSc520 flash device: 0x%lx at 0x%lx\n", netsc520_map.size, netsc520_map.phys);
-	netsc520_map.virt = (unsigned long)ioremap_nocache(netsc520_map.phys, netsc520_map.size);
+	netsc520_map.virt = ioremap_nocache(netsc520_map.phys, netsc520_map.size);
 
 	if (!netsc520_map.virt) {
 		printk("Failed to ioremap_nocache\n");
@@ -111,7 +111,7 @@ static int __init init_netsc520(void)
 		mymtd = do_map_probe("map_rom", &netsc520_map);
 
 	if (!mymtd) {
-		iounmap((void *)netsc520_map.virt);
+		iounmap(netsc520_map.virt);
 		return -ENXIO;
 	}
 		
@@ -127,8 +127,8 @@ static void __exit cleanup_netsc520(void)
 		map_destroy(mymtd);
 	}
 	if (netsc520_map.virt) {
-		iounmap((void *)netsc520_map.virt);
-		netsc520_map.virt = 0;
+		iounmap(netsc520_map.virt);
+		netsc520_map.virt = NULL;
 	}
 }
 

@@ -141,11 +141,11 @@ struct bi_record {
 #define BI_MAC_GMTBIAS		0x8008	/* Mac GMT timezone offset */
 #define BI_MAC_MEMSIZE		0x8009	/* Mac RAM size (sanity check) */
 #define BI_MAC_CPUID		0x800a	/* Mac CPU type (sanity check) */
-#define BI_MAC_ROMBASE		0x800b	/* Mac system ROM base address */ 
+#define BI_MAC_ROMBASE		0x800b	/* Mac system ROM base address */
 
     /*
-     *  Macintosh hardware profile data - unused, see macintosh.h for 
-     *  resonable type values 
+     *  Macintosh hardware profile data - unused, see macintosh.h for
+     *  resonable type values
      */
 
 #define BI_MAC_VIA1BASE		0x8010	/* Mac VIA1 base address (always present) */
@@ -176,7 +176,7 @@ struct bi_record {
 
 #ifndef __ASSEMBLY__
 
-struct mac_booter_data 
+struct mac_booter_data
 {
 	unsigned long videoaddr;
 	unsigned long videorow;
@@ -202,7 +202,7 @@ struct mac_booter_data
 	unsigned long timedbra;
 };
 
-extern struct mac_booter_data 
+extern struct mac_booter_data
 	mac_bi_data;
 
 #endif
@@ -213,7 +213,13 @@ extern struct mac_booter_data
 
 #define BI_APOLLO_MODEL         0x8000  /* model (u_long) */
 
+    /*
+     *  HP300-specific tags
+     */
 
+#define BI_HP300_MODEL		0x8000	/* model (u_long) */
+#define BI_HP300_UART_SCODE	0x8001	/* UART select code (u_long) */
+#define BI_HP300_UART_ADDR	0x8002	/* phys. addr of UART (u_long) */
 
     /*
      * Stuff for bootinfo interface versioning
@@ -255,6 +261,7 @@ struct bootversion {
 #define MVME16x_BOOTI_VERSION  MK_BI_VERSION( 2, 0 )
 #define BVME6000_BOOTI_VERSION MK_BI_VERSION( 2, 0 )
 #define Q40_BOOTI_VERSION      MK_BI_VERSION( 2, 0 )
+#define HP300_BOOTI_VERSION    MK_BI_VERSION( 2, 0 )
 
 #ifdef BOOTINFO_COMPAT_1_0
 

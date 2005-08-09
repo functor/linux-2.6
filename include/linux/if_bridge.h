@@ -17,6 +17,12 @@
 
 #include <linux/types.h>
 
+#define SYSFS_BRIDGE_ATTR	"bridge"
+#define SYSFS_BRIDGE_FDB	"brforward"
+#define SYSFS_BRIDGE_PORT_SUBDIR "brif"
+#define SYSFS_BRIDGE_PORT_ATTR	"brport"
+#define SYSFS_BRIDGE_PORT_LINK	"bridge"
+
 #define BRCTL_VERSION 1
 
 #define BRCTL_GET_VERSION 0
@@ -98,8 +104,8 @@ struct __fdb_entry
 
 #include <linux/netdevice.h>
 
-extern void brioctl_set(int (*ioctl_hook)(unsigned long));
-extern int (*br_handle_frame_hook)(struct sk_buff *skb);
+extern void brioctl_set(int (*ioctl_hook)(unsigned int, void __user *));
+extern int (*br_handle_frame_hook)(struct net_bridge_port *p, struct sk_buff **pskb);
 extern int (*br_should_route_hook)(struct sk_buff **pskb);
 
 #endif

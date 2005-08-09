@@ -21,15 +21,14 @@ struct powernow_k8_data {
 	u32 plllock; /* pll lock time, units 1 us */
 
 	/* keep track of the current fid / vid */
-	u32 currvid;
-	u32 currfid;
+	u32 currvid, currfid;
 
 	/* the powernow_table includes all frequency and vid/fid pairings:
 	 * fid are the lower 8 bits of the index, vid are the upper 8 bits.
 	 * frequency is in kHz */
 	struct cpufreq_frequency_table  *powernow_table;
 
-#ifdef CONFIG_ACPI_PROCESSOR
+#ifdef CONFIG_X86_POWERNOW_K8_ACPI
 	/* the acpi table needs to be kept. it's only available if ACPI was
 	 * used to determine valid frequency/vid/fid states */
 	struct acpi_processor_performance acpi_data;
@@ -38,13 +37,15 @@ struct powernow_k8_data {
 
 
 /* processor's cpuid instruction support */
-#define CPUID_PROCESSOR_SIGNATURE             1	/* function 1 */
-#define CPUID_XFAM_MOD               0x0ff00ff0	/* extended fam, fam + model */
-#define ATHLON64_XFAM_MOD            0x00000f40	/* extended fam, fam + model */
-#define OPTERON_XFAM_MOD             0x00000f50	/* extended fam, fam + model */
-#define CPUID_GET_MAX_CAPABILITIES   0x80000000
-#define CPUID_FREQ_VOLT_CAPABILITIES 0x80000007
-#define P_STATE_TRANSITION_CAPABLE            6
+#define CPUID_PROCESSOR_SIGNATURE	1	/* function 1 */
+#define CPUID_XFAM			0x0ff00000	/* extended family */
+#define CPUID_XFAM_K8			0
+#define CPUID_XMOD			0x000f0000	/* extended model */
+#define CPUID_XMOD_REV_E		0x00020000
+#define CPUID_USE_XFAM_XMOD		0x00000f00
+#define CPUID_GET_MAX_CAPABILITIES	0x80000000
+#define CPUID_FREQ_VOLT_CAPABILITIES	0x80000007
+#define P_STATE_TRANSITION_CAPABLE	6
 
 /* Model Specific Registers for p-state transitions. MSRs are 64-bit. For     */
 /* writes (wrmsr - opcode 0f 30), the register number is placed in ecx, and   */
@@ -150,14 +151,14 @@ struct psb_s {
 	u8 signature[10];
 	u8 tableversion;
 	u8 flags1;
-	u16 voltagestabilizationtime;
+	u16 vstable;
 	u8 flags2;
-	u8 numpst;
+	u8 num_tables;
 	u32 cpuid;
 	u8 plllocktime;
 	u8 maxfid;
 	u8 maxvid;
-	u8 numpstates;
+	u8 numps;
 };
 
 /* Pairs of fid/vid values are appended to the version 1.4 PSB table. */
@@ -166,14 +167,25 @@ struct pst_s {
 	u8 vid;
 };
 
-#ifdef DEBUG
-#define dprintk(msg...) printk(msg)
-#else
-#define dprintk(msg...) do { } while(0)
-#endif
+#define dprintk(msg...) cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, "powernow-k8", msg)
 
 static int core_voltage_pre_transition(struct powernow_k8_data *data, u32 reqvid);
 static int core_voltage_post_transition(struct powernow_k8_data *data, u32 reqvid);
 static int core_frequency_transition(struct powernow_k8_data *data, u32 reqfid);
 
 static void powernow_k8_acpi_pst_values(struct powernow_k8_data *data, unsigned int index);
+
+#ifndef for_each_cpu_mask
+#define for_each_cpu_mask(i,mask) for (i=0;i<1;i++)
+#endif
+                                                                                
+#ifdef CONFIG_SMP
+static inline void define_siblings(int cpu, cpumask_t cpu_sharedcore_mask[])
+{
+}
+#else
+static inline void define_siblings(int cpu, cpumask_t cpu_sharedcore_mask[])
+{
+	cpu_set(0, cpu_sharedcore_mask[0]);
+}
+#endif

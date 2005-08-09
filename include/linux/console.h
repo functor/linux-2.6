@@ -19,6 +19,8 @@
 
 struct vc_data;
 struct console_font_op;
+struct console_font;
+struct module;
 
 /*
  * this is what the terminal answers to a ESC-Z or csi0c query.
@@ -27,6 +29,7 @@ struct console_font_op;
 #define VT102ID "\033[?6c"
 
 struct consw {
+	struct module *owner;
 	const char *(*con_startup)(void);
 	void	(*con_init)(struct vc_data *, int);
 	void	(*con_deinit)(struct vc_data *);
@@ -38,7 +41,10 @@ struct consw {
 	void	(*con_bmove)(struct vc_data *, int, int, int, int, int, int);
 	int	(*con_switch)(struct vc_data *);
 	int	(*con_blank)(struct vc_data *, int, int);
-	int	(*con_font_op)(struct vc_data *, struct console_font_op *);
+	int	(*con_font_set)(struct vc_data *, struct console_font *, unsigned);
+	int	(*con_font_get)(struct vc_data *, struct console_font *);
+	int	(*con_font_default)(struct vc_data *, struct console_font *, char *);
+	int	(*con_font_copy)(struct vc_data *, int);
 	int	(*con_resize)(struct vc_data *, unsigned int, unsigned int);
 	int	(*con_set_palette)(struct vc_data *, unsigned char *);
 	int	(*con_scrolldelta)(struct vc_data *, int);
@@ -53,12 +59,11 @@ struct consw {
 extern const struct consw *conswitchp;
 
 extern const struct consw dummy_con;	/* dummy console buffer */
-extern const struct consw fb_con;	/* frame buffer based console */
 extern const struct consw vga_con;	/* VGA text console */
 extern const struct consw newport_con;	/* SGI Newport console  */
 extern const struct consw prom_con;	/* SPARC PROM console */
 
-void take_over_console(const struct consw *sw, int first, int last, int deflt);
+int take_over_console(const struct consw *sw, int first, int last, int deflt);
 void give_up_console(const struct consw *sw);
 
 /* scroll */
@@ -71,13 +76,17 @@ void give_up_console(const struct consw *sw);
 #define CM_MOVE     (3)
 
 /*
- *	The interface for a console, or any other device that
- *	wants to capture console messages (printer driver?)
+ * The interface for a console, or any other device that wants to capture
+ * console messages (printer driver?)
+ *
+ * If a console driver is marked CON_BOOT then it will be auto-unregistered
+ * when the first real console is registered.  This is for early-printk drivers.
  */
 
 #define CON_PRINTBUFFER	(1)
 #define CON_CONSDEV	(2) /* Last on the command line */
 #define CON_ENABLED	(4)
+#define CON_BOOT	(8)
 
 struct console
 {
@@ -99,9 +108,13 @@ extern void register_console(struct console *);
 extern int unregister_console(struct console *);
 extern struct console *console_drivers;
 extern void acquire_console_sem(void);
+extern int try_acquire_console_sem(void);
 extern void release_console_sem(void);
 extern void console_conditional_schedule(void);
 extern void console_unblank(void);
+extern struct tty_driver *console_device(int *);
+extern void console_stop(struct console *);
+extern void console_start(struct console *);
 extern int is_console_locked(void);
 
 /* Some debug stub to catch some of the obvious races in the VT code */

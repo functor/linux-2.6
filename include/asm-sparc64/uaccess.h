@@ -14,6 +14,7 @@
 #include <asm/asi.h>
 #include <asm/system.h>
 #include <asm/spitfire.h>
+#include <asm-generic/uaccess.h>
 #endif
 
 #ifndef __ASSEMBLY__
@@ -48,12 +49,18 @@ do {										\
 	__asm__ __volatile__ ("wr %%g0, %0, %%asi" : : "r" ((val).seg));	\
 } while(0)
 
-#define __user_ok(addr,size) 1
-#define __kernel_ok (segment_eq(get_fs(), KERNEL_DS))
-#define __access_ok(addr,size) 1
-#define access_ok(type,addr,size) 1
+static inline int __access_ok(const void __user * addr, unsigned long size)
+{
+	return 1;
+}
 
-static inline int verify_area(int type, const void __user * addr, unsigned long size)
+static inline int access_ok(int type, const void __user * addr, unsigned long size)
+{
+	return 1;
+}
+
+/* this function will go away soon - use access_ok() instead */
+static inline int __deprecated verify_area(int type, const void __user * addr, unsigned long size)
 {
 	return 0;
 }
@@ -101,10 +108,12 @@ extern void __ret_efault(void);
  */
 #define put_user(x,ptr) ({ \
 unsigned long __pu_addr = (unsigned long)(ptr); \
+__chk_user_ptr(ptr); \
 __put_user_nocheck((__typeof__(*(ptr)))(x),__pu_addr,sizeof(*(ptr))); })
 
 #define get_user(x,ptr) ({ \
 unsigned long __gu_addr = (unsigned long)(ptr); \
+__chk_user_ptr(ptr); \
 __get_user_nocheck((x),__gu_addr,sizeof(*(ptr)),__typeof__(*(ptr))); })
 
 #define __put_user(x,ptr) put_user(x,ptr)
@@ -163,7 +172,7 @@ __asm__ __volatile__(							\
 	".previous\n\n\t"						\
        : "=r" (foo) : "r" (x), "r" (__m(addr)));			\
 else									\
-__asm__ __volatile(							\
+__asm__ __volatile__(							\
 	"/* Put user asm ret, inline. */\n"				\
 "1:\t"	"st"#size "a %1, [%2] %%asi\n\n\t"				\
 	".section .fixup,#alloc,#execinstr\n\t"				\
@@ -250,30 +259,66 @@ __asm__ __volatile__(							\
 
 extern int __get_user_bad(void);
 
-extern unsigned long __copy_from_user(void *to, const void __user *from,
-				      unsigned long size);
+extern unsigned long __must_check ___copy_from_user(void *to,
+						    const void __user *from,
+						    unsigned long size);
+extern unsigned long copy_from_user_fixup(void *to, const void __user *from,
+					  unsigned long size);
+static inline unsigned long __must_check
+copy_from_user(void *to, const void __user *from, unsigned long size)
+{
+	unsigned long ret = ___copy_from_user(to, from, size);
 
-extern unsigned long __copy_to_user(void __user *to, const void *from,
-				    unsigned long size);
+	if (ret)
+		ret = copy_from_user_fixup(to, from, size);
+	return ret;
+}
+#define __copy_from_user copy_from_user
 
-extern unsigned long __copy_in_user(void __user *to, const void __user *from,
-				    unsigned long size);
+extern unsigned long __must_check ___copy_to_user(void __user *to,
+						  const void *from,
+						  unsigned long size);
+extern unsigned long copy_to_user_fixup(void __user *to, const void *from,
+					unsigned long size);
+static inline unsigned long __must_check
+copy_to_user(void __user *to, const void *from, unsigned long size)
+{
+	unsigned long ret = ___copy_to_user(to, from, size);
 
-#define copy_from_user __copy_from_user
-#define copy_to_user __copy_to_user
-#define copy_in_user __copy_in_user
+	if (ret)
+		ret = copy_to_user_fixup(to, from, size);
+	return ret;
+}
+#define __copy_to_user copy_to_user
 
-extern unsigned long __bzero_noasi(void *, unsigned long);
+extern unsigned long __must_check ___copy_in_user(void __user *to,
+						  const void __user *from,
+						  unsigned long size);
+extern unsigned long copy_in_user_fixup(void __user *to, void __user *from,
+					unsigned long size);
+static inline unsigned long __must_check
+copy_in_user(void __user *to, void __user *from, unsigned long size)
+{
+	unsigned long ret = ___copy_in_user(to, from, size);
 
-static inline unsigned long __clear_user(void __user *addr, unsigned long size)
+	if (ret)
+		ret = copy_in_user_fixup(to, from, size);
+	return ret;
+}
+#define __copy_in_user copy_in_user
+
+extern unsigned long __must_check __bzero_noasi(void __user *, unsigned long);
+
+static inline unsigned long __must_check
+__clear_user(void __user *addr, unsigned long size)
 {
 	
-	return __bzero_noasi((void *) addr, size);
+	return __bzero_noasi(addr, size);
 }
 
 #define clear_user __clear_user
 
-extern long __strncpy_from_user(char *dest, const char __user *src, long count);
+extern long __must_check __strncpy_from_user(char *dest, const char __user *src, long count);
 
 #define strncpy_from_user __strncpy_from_user
 
@@ -282,6 +327,8 @@ extern long __strnlen_user(const char __user *, long len);
 
 #define strlen_user __strlen_user
 #define strnlen_user __strnlen_user
+#define __copy_to_user_inatomic __copy_to_user
+#define __copy_from_user_inatomic __copy_from_user
 
 #endif  /* __ASSEMBLY__ */
 

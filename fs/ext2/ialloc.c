@@ -57,8 +57,8 @@ read_inode_bitmap(struct super_block * sb, unsigned long block_group)
 	if (!bh)
 		ext2_error(sb, "read_inode_bitmap",
 			    "Cannot read inode bitmap - "
-			    "block_group = %lu, inode_bitmap = %lu",
-			    block_group, (unsigned long) desc->bg_inode_bitmap);
+			    "block_group = %lu, inode_bitmap = %u",
+			    block_group, le32_to_cpu(desc->bg_inode_bitmap));
 error_out:
 	return bh;
 }
@@ -577,7 +577,7 @@ got:
 	inode->i_ino = ino;
 	inode->i_blksize = PAGE_SIZE;	/* This is the optimal IO size (for stat), not the fs block size */
 	inode->i_blocks = 0;
-	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
+	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME_SEC;
 	memset(ei->i_data, 0, sizeof(ei->i_data));
 	ei->i_flags = EXT2_I(dir)->i_flags & ~EXT2_BTREE_FL;
 	if (S_ISLNK(mode))
@@ -663,7 +663,7 @@ unsigned long ext2_count_free_inodes (struct super_block * sb)
 	}
 	brelse(bitmap_bh);
 	printk("ext2_count_free_inodes: stored = %lu, computed = %lu, %lu\n",
-		percpu_counter_read(EXT2_SB(sb)->s_freeinodes_counter),
+		percpu_counter_read(&EXT2_SB(sb)->s_freeinodes_counter),
 		desc_count, bitmap_count);
 	unlock_super(sb);
 	return desc_count;
@@ -724,7 +724,7 @@ void ext2_check_inodes_bitmap (struct super_block * sb)
 		bitmap_count += x;
 	}
 	brelse(bitmap_bh);
-	if (percpu_counter_read(EXT2_SB(sb)->s_freeinodes_counter) !=
+	if (percpu_counter_read(&EXT2_SB(sb)->s_freeinodes_counter) !=
 				bitmap_count)
 		ext2_error(sb, "ext2_check_inodes_bitmap",
 			    "Wrong free inodes count in super block, "

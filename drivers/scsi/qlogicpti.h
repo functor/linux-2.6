@@ -6,8 +6,6 @@
 #ifndef _QLOGICPTI_H
 #define _QLOGICPTI_H
 
-#include <linux/config.h>
-
 /* Qlogic/SBUS controller registers. */
 #define SBUS_CFG1	0x006UL
 #define SBUS_CTRL	0x008UL
@@ -332,10 +330,12 @@ struct pti_queue_entry {
 	char __opaque[QUEUE_ENTRY_LEN];
 };
 
+struct scsi_cmnd;
+
 /* Software state for the driver. */
 struct qlogicpti {
 	/* These are the hot elements in the cache, so they come first. */
-	unsigned long             qregs;                /* Adapter registers          */
+	void __iomem             *qregs;                /* Adapter registers          */
 	struct pti_queue_entry   *res_cpu;              /* Ptr to RESPONSE bufs (CPU) */
 	struct pti_queue_entry   *req_cpu;              /* Ptr to REQUEST bufs (CPU)  */
 
@@ -352,7 +352,7 @@ struct qlogicpti {
 	 * Ex000 sparc64 machines with >4GB of ram we just keep track of the
 	 * scsi command pointers here.  This is essentially what Matt Jacob does. -DaveM
 	 */
-	Scsi_Cmnd                *cmd_slots[QLOGICPTI_REQ_QUEUE_LEN + 1];
+	struct scsi_cmnd         *cmd_slots[QLOGICPTI_REQ_QUEUE_LEN + 1];
 
 	/* The rest of the elements are unimportant for performance. */
 	struct qlogicpti         *next;
@@ -370,7 +370,7 @@ struct qlogicpti {
 	struct	host_param        host_param;
 	struct	dev_param         dev_param[MAX_TARGETS];
 
-	unsigned long             sreg;
+	void __iomem              *sreg;
 #define SREG_TPOWER               0x80   /* State of termpwr           */
 #define SREG_FUSE                 0x40   /* State of on board fuse     */
 #define SREG_PDISAB               0x20   /* Disable state for power on */

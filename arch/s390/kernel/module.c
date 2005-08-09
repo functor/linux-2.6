@@ -277,7 +277,8 @@ apply_rela(Elf_Rela *rela, Elf_Addr base, Elf_Sym *symtab,
 			*(unsigned int *) loc = val;
 		else if (r_type == R_390_GOTENT ||
 			 r_type == R_390_GOTPLTENT)
-			*(unsigned int *) loc = val >> 1;
+			*(unsigned int *) loc =
+				(val + (Elf_Addr) me->module_core - loc) >> 1;
 		else if (r_type == R_390_GOT64 ||
 			 r_type == R_390_GOTPLT64)
 			*(unsigned long *) loc = val;
@@ -395,8 +396,7 @@ int module_finalize(const Elf_Ehdr *hdr,
 		    const Elf_Shdr *sechdrs,
 		    struct module *me)
 {
-	if (me->arch.syminfo)
-		vfree(me->arch.syminfo);
+	vfree(me->arch.syminfo);
 	return 0;
 }
 

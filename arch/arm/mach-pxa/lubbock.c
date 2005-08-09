@@ -11,11 +11,13 @@
  *  it under the terms of the GNU General Public License version 2 as
  *  published by the Free Software Foundation.
  */
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/device.h>
+#include <linux/sysdev.h>
 #include <linux/major.h>
-#include <linux/fs.h>
+#include <linux/fb.h>
 #include <linux/interrupt.h>
 
 #include <asm/setup.h>
@@ -28,11 +30,28 @@
 #include <asm/mach/map.h>
 #include <asm/mach/irq.h>
 
-#include <asm/arch/udc.h>
 #include <asm/hardware/sa1111.h>
+
+#include <asm/arch/pxa-regs.h>
+#include <asm/arch/lubbock.h>
+#include <asm/arch/udc.h>
+#include <asm/arch/pxafb.h>
+#include <asm/arch/mmc.h>
 
 #include "generic.h"
 
+
+#define LUB_MISC_WR		__LUB_REG(LUBBOCK_FPGA_PHYS + 0x080)
+
+void lubbock_set_misc_wr(unsigned int mask, unsigned int set)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	LUB_MISC_WR = (LUB_MISC_WR & ~mask) | (set & mask);
+	local_irq_restore(flags);
+}
+EXPORT_SYMBOL(lubbock_set_misc_wr);
 
 static unsigned long lubbock_irq_enabled;
 
@@ -88,6 +107,35 @@ static void __init lubbock_init_irq(void)
 	set_irq_type(IRQ_GPIO(0), IRQT_FALLING);
 }
 
+#ifdef CONFIG_PM
+
+static int lubbock_irq_resume(struct sys_device *dev)
+{
+	LUB_IRQ_MASK_EN = lubbock_irq_enabled;
+	return 0;
+}
+
+static struct sysdev_class lubbock_irq_sysclass = {
+	set_kset_name("cpld_irq"),
+	.resume = lubbock_irq_resume,
+};
+
+static struct sys_device lubbock_irq_device = {
+	.cls = &lubbock_irq_sysclass,
+};
+
+static int __init lubbock_irq_device_init(void)
+{
+	int ret = sysdev_class_register(&lubbock_irq_sysclass);
+	if (ret == 0)
+		ret = sysdev_register(&lubbock_irq_device);
+	return ret;
+}
+
+device_initcall(lubbock_irq_device_init);
+
+#endif
+
 static int lubbock_udc_is_connected(void)
 {
 	return (LUB_MISC_RD & (1 << 9)) == 0;
@@ -113,13 +161,14 @@ static struct resource sa1111_resources[] = {
 
 static struct platform_device sa1111_device = {
 	.name		= "sa1111",
-	.id		= 0,
+	.id		= -1,
 	.num_resources	= ARRAY_SIZE(sa1111_resources),
 	.resource	= sa1111_resources,
 };
 
 static struct resource smc91x_resources[] = {
 	[0] = {
+		.name	= "smc91x-regs",
 		.start	= 0x0c000000,
 		.end	= 0x0c0fffff,
 		.flags	= IORESOURCE_MEM,
@@ -130,6 +179,7 @@ static struct resource smc91x_resources[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 	[2] = {
+		.name	= "smc91x-attrib",
 		.start	= 0x0e000000,
 		.end	= 0x0e0fffff,
 		.flags	= IORESOURCE_MEM,
@@ -138,7 +188,7 @@ static struct resource smc91x_resources[] = {
 
 static struct platform_device smc91x_device = {
 	.name		= "smc91x",
-	.id		= 0,
+	.id		= -1,
 	.num_resources	= ARRAY_SIZE(smc91x_resources),
 	.resource	= smc91x_resources,
 };
@@ -148,9 +198,44 @@ static struct platform_device *devices[] __initdata = {
 	&smc91x_device,
 };
 
+static struct pxafb_mach_info sharp_lm8v31 __initdata = {
+	.pixclock	= 270000,
+	.xres		= 640,
+	.yres		= 480,
+	.bpp		= 16,
+	.hsync_len	= 1,
+	.left_margin	= 3,
+	.right_margin	= 3,
+	.vsync_len	= 1,
+	.upper_margin	= 0,
+	.lower_margin	= 0,
+	.sync		= FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
+	.cmap_greyscale	= 0,
+	.cmap_inverse	= 0,
+	.cmap_static	= 0,
+	.lccr0		= LCCR0_SDS,
+	.lccr3		= LCCR3_PCP | LCCR3_Acb(255),
+};
+
+static int lubbock_mci_init(struct device *dev, irqreturn_t (*lubbock_detect_int)(int, void *, struct pt_regs *), void *data)
+{
+	/* setup GPIO for PXA25x MMC controller	*/
+	pxa_gpio_mode(GPIO6_MMCCLK_MD);
+	pxa_gpio_mode(GPIO8_MMCCS0_MD);
+
+	return 0;
+}
+
+static struct pxamci_platform_data lubbock_mci_platform_data = {
+	.ocr_mask	= MMC_VDD_32_33|MMC_VDD_33_34,
+	.init 		= lubbock_mci_init,
+};
+
 static void __init lubbock_init(void)
 {
 	pxa_set_udc_info(&udc_info);
+	set_pxa_fb_info(&sharp_lm8v31);
+	pxa_set_mci_info(&lubbock_mci_platform_data);
 	(void) platform_add_devices(devices, ARRAY_SIZE(devices));
 }
 
@@ -187,5 +272,6 @@ MACHINE_START(LUBBOCK, "Intel DBPXA250 Development Platform (aka Lubbock)")
 	BOOT_MEM(0xa0000000, 0x40000000, io_p2v(0x40000000))
 	MAPIO(lubbock_map_io)
 	INITIRQ(lubbock_init_irq)
+	.timer		= &pxa_timer,
 	INIT_MACHINE(lubbock_init)
 MACHINE_END

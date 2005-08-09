@@ -108,9 +108,6 @@ static struct file_operations acpi_button_state_fops = {
    -------------------------------------------------------------------------- */
 
 static struct proc_dir_entry	*acpi_button_dir;
-extern struct acpi_device 	*acpi_fixed_pwr_button;
-extern struct acpi_device	*acpi_fixed_sleep_button;
-
 
 static int acpi_button_info_seq_show(struct seq_file *seq, void *offset)
 {
@@ -119,12 +116,12 @@ static int acpi_button_info_seq_show(struct seq_file *seq, void *offset)
 	ACPI_FUNCTION_TRACE("acpi_button_info_seq_show");
 
 	if (!button || !button->device)
-		return 0;
+		return_VALUE(0);
 
 	seq_printf(seq, "type:                    %s\n", 
 		acpi_device_name(button->device));
 
-	return 0;
+	return_VALUE(0);
 }
 
 static int acpi_button_info_open_fs(struct inode *inode, struct file *file)
@@ -141,7 +138,7 @@ static int acpi_button_state_seq_show(struct seq_file *seq, void *offset)
 	ACPI_FUNCTION_TRACE("acpi_button_state_seq_show");
 
 	if (!button || !button->device)
-		return 0;
+		return_VALUE(0);
 
 	status = acpi_evaluate_integer(button->handle,"_LID",NULL,&state);
 	if (ACPI_FAILURE(status)) {
@@ -151,7 +148,7 @@ static int acpi_button_state_seq_show(struct seq_file *seq, void *offset)
 		seq_printf(seq, "state:      %s\n", (state ? "open" : "closed")); 
 	}
 
-	return 0;
+	return_VALUE(0);
 }
 
 static int acpi_button_state_open_fs(struct inode *inode, struct file *file)
@@ -241,6 +238,16 @@ acpi_button_remove_fs (
 
 	button = acpi_driver_data(device);
 	if (acpi_device_dir(device)) {
+		if (button->type == ACPI_BUTTON_TYPE_LID)
+			remove_proc_entry(ACPI_BUTTON_FILE_STATE,
+					     acpi_device_dir(device));
+		remove_proc_entry(ACPI_BUTTON_FILE_INFO,
+				     acpi_device_dir(device));
+
+		remove_proc_entry(acpi_device_bid(device),
+				     acpi_device_dir(device)->parent);
+
+
 		switch (button->type) {
 			case ACPI_BUTTON_TYPE_POWER:
 			case ACPI_BUTTON_TYPE_POWERF:
@@ -268,7 +275,7 @@ acpi_button_remove_fs (
                                 Driver Interface
    -------------------------------------------------------------------------- */
 
-void
+static void
 acpi_button_notify (
 	acpi_handle		handle,
 	u32			event,
@@ -295,7 +302,7 @@ acpi_button_notify (
 }
 
 
-acpi_status
+static acpi_status
 acpi_button_notify_fixed (
 	void			*data)
 {
@@ -449,6 +456,15 @@ acpi_button_add (
 		goto end;
 	}
 
+	if (device->wakeup.flags.valid) {
+		/* Button's GPE is run-wake GPE */
+		acpi_set_gpe_type(device->wakeup.gpe_device, 
+			device->wakeup.gpe_number, ACPI_GPE_TYPE_WAKE_RUN);
+		acpi_enable_gpe(device->wakeup.gpe_device, 
+			device->wakeup.gpe_number, ACPI_NOT_ISR);
+		device->wakeup.state.enabled = 1;
+	}
+
 	printk(KERN_INFO PREFIX "%s [%s]\n", 
 		acpi_device_name(device), acpi_device_bid(device));
 
@@ -529,12 +545,6 @@ static void __exit
 acpi_button_exit (void)
 {
 	ACPI_FUNCTION_TRACE("acpi_button_exit");
-
-	if(acpi_fixed_pwr_button) 
-		acpi_button_remove(acpi_fixed_pwr_button, ACPI_BUS_TYPE_POWER_BUTTON);
-
-	if(acpi_fixed_sleep_button)
-		acpi_button_remove(acpi_fixed_sleep_button, ACPI_BUS_TYPE_SLEEP_BUTTON);
 
 	acpi_bus_unregister_driver(&acpi_button_driver);
 

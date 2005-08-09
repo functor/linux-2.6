@@ -55,7 +55,7 @@ struct cmtp_conninfo {
 
 struct cmtp_connlist_req {
 	__u32  cnum;
-	struct cmtp_conninfo *ci;
+	struct cmtp_conninfo __user *ci;
 };
 
 int cmtp_add_connection(struct cmtp_connadd_req *req, struct socket *sock);
@@ -120,7 +120,6 @@ int  cmtp_attach_device(struct cmtp_session *session);
 void cmtp_detach_device(struct cmtp_session *session);
 
 void cmtp_recv_capimsg(struct cmtp_session *session, struct sk_buff *skb);
-void cmtp_send_capimsg(struct cmtp_session *session, struct sk_buff *skb);
 
 static inline void cmtp_schedule(struct cmtp_session *session)
 {

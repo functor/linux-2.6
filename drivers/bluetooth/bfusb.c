@@ -47,6 +47,8 @@
 
 #define VERSION "1.1"
 
+static int ignore = 0;
+
 static struct usb_driver bfusb_driver;
 
 static struct usb_device_id bfusb_table[] = {
@@ -61,7 +63,7 @@ MODULE_DEVICE_TABLE(usb, bfusb_table);
 
 #define BFUSB_MAX_BLOCK_SIZE	256
 
-#define BFUSB_BLOCK_TIMEOUT	(HZ * 3)
+#define BFUSB_BLOCK_TIMEOUT	3000
 
 #define BFUSB_TX_PROCESS	1
 #define BFUSB_TX_WAKEUP		2
@@ -98,14 +100,6 @@ struct bfusb_scb {
 static void bfusb_tx_complete(struct urb *urb, struct pt_regs *regs);
 static void bfusb_rx_complete(struct urb *urb, struct pt_regs *regs);
 
-static inline void bfusb_wait_for_urb(struct urb *urb)
-{
-	while (atomic_read(&urb->count) > 1) {
-		current->state = TASK_UNINTERRUPTIBLE;
-		schedule_timeout((5 * HZ + 999) / 1000);
-	}
-}
-
 static struct urb *bfusb_get_completed(struct bfusb *bfusb)
 {
 	struct sk_buff *skb;
@@ -131,8 +125,7 @@ static void bfusb_unlink_urbs(struct bfusb *bfusb)
 
 	while ((skb = skb_dequeue(&bfusb->pending_q))) {
 		urb = ((struct bfusb_scb *) skb->cb)->urb;
-		usb_unlink_urb(urb);
-		bfusb_wait_for_urb(urb);
+		usb_kill_urb(urb);
 		skb_queue_tail(&bfusb->completed_q, skb);
 	}
 
@@ -589,10 +582,12 @@ static int bfusb_load_firmware(struct bfusb *bfusb, unsigned char *firmware, int
 	pipe = usb_sndctrlpipe(bfusb->udev, 0);
 
 	if (usb_control_msg(bfusb->udev, pipe, USB_REQ_SET_CONFIGURATION,
-				0, 1, 0, NULL, 0, HZ * USB_CTRL_SET_TIMEOUT) < 0) {
+				0, 1, 0, NULL, 0, USB_CTRL_SET_TIMEOUT) < 0) {
 		BT_ERR("Can't change to loading configuration");
 		return -EBUSY;
 	}
+
+	bfusb->udev->toggle[0] = bfusb->udev->toggle[1] = 0;
 
 	buf = kmalloc(BFUSB_MAX_BLOCK_SIZE + 3, GFP_ATOMIC);
 	if (!buf) {
@@ -628,10 +623,12 @@ static int bfusb_load_firmware(struct bfusb *bfusb, unsigned char *firmware, int
 	pipe = usb_sndctrlpipe(bfusb->udev, 0);
 
         if ((err = usb_control_msg(bfusb->udev, pipe, USB_REQ_SET_CONFIGURATION,
-				0, 2, 0, NULL, 0, HZ * USB_CTRL_SET_TIMEOUT)) < 0) {
+				0, 2, 0, NULL, 0, USB_CTRL_SET_TIMEOUT)) < 0) {
 		BT_ERR("Can't change to running configuration");
 		goto error;
 	}
+
+	bfusb->udev->toggle[0] = bfusb->udev->toggle[1] = 0;
 
 	BT_INFO("BlueFRITZ! USB device ready");
 
@@ -644,7 +641,7 @@ error:
 	pipe = usb_sndctrlpipe(bfusb->udev, 0);
 
 	usb_control_msg(bfusb->udev, pipe, USB_REQ_SET_CONFIGURATION,
-				0, 0, 0, NULL, 0, HZ * USB_CTRL_SET_TIMEOUT);
+				0, 0, 0, NULL, 0, USB_CTRL_SET_TIMEOUT);
 
 	return err;
 }
@@ -660,12 +657,15 @@ static int bfusb_probe(struct usb_interface *intf, const struct usb_device_id *i
 
 	BT_DBG("intf %p id %p", intf, id);
 
+	if (ignore)
+		return -ENODEV;
+
 	/* Check number of endpoints */
-	if (intf->altsetting[0].desc.bNumEndpoints < 2)
+	if (intf->cur_altsetting->desc.bNumEndpoints < 2)
 		return -EIO;
 
-	bulk_out_ep = &intf->altsetting[0].endpoint[0];
-	bulk_in_ep  = &intf->altsetting[0].endpoint[1];
+	bulk_out_ep = &intf->cur_altsetting->endpoint[0];
+	bulk_in_ep  = &intf->cur_altsetting->endpoint[1];
 
 	if (!bulk_out_ep || !bulk_in_ep) {
 		BT_ERR("Bulk endpoints not found");
@@ -683,9 +683,9 @@ static int bfusb_probe(struct usb_interface *intf, const struct usb_device_id *i
 	bfusb->udev = udev;
 	bfusb->bulk_in_ep    = bulk_in_ep->desc.bEndpointAddress;
 	bfusb->bulk_out_ep   = bulk_out_ep->desc.bEndpointAddress;
-	bfusb->bulk_pkt_size = bulk_out_ep->desc.wMaxPacketSize;
+	bfusb->bulk_pkt_size = le16_to_cpu(bulk_out_ep->desc.wMaxPacketSize);
 
-	bfusb->lock = RW_LOCK_UNLOCKED;
+	rwlock_init(&bfusb->lock);
 
 	bfusb->reassembly = NULL;
 
@@ -796,6 +796,9 @@ static void __exit bfusb_exit(void)
 
 module_init(bfusb_init);
 module_exit(bfusb_exit);
+
+module_param(ignore, bool, 0644);
+MODULE_PARM_DESC(ignore, "Ignore devices from the matching table");
 
 MODULE_AUTHOR("Marcel Holtmann <marcel@holtmann.org>");
 MODULE_DESCRIPTION("BlueFRITZ! USB driver ver " VERSION);

@@ -3,13 +3,13 @@
 
 #include <asm/io.h>
 #include <linux/mmzone.h>
+#include <linux/nodemask.h>
 
 #define APIC_DFR_VALUE	(APIC_DFR_CLUSTER)
 
 static inline cpumask_t target_cpus(void)
 {
-	cpumask_t tmp = CPU_MASK_ALL;
-	return tmp;
+	return CPU_MASK_ALL;
 }
 
 #define TARGET_CPUS (target_cpus())
@@ -22,7 +22,6 @@ static inline cpumask_t target_cpus(void)
 #define INT_DELIVERY_MODE dest_LowestPrio
 #define INT_DEST_MODE 0     /* physical delivery on LOCAL quad */
  
-#define APIC_BROADCAST_ID      0x0F
 #define check_apicid_used(bitmap, apicid) physid_isset(apicid, bitmap)
 #define check_apicid_present(bit) physid_isset(bit, phys_cpu_present_map)
 #define apicid_cluster(apicid) (apicid & 0xF0)
@@ -114,13 +113,15 @@ static inline int mpc_apic_id(struct mpc_config_processor *m,
 
 static inline void setup_portio_remap(void)
 {
-	if (numnodes <= 1)
+	int num_quads = num_online_nodes();
+
+	if (num_quads <= 1)
        		return;
 
-	printk("Remapping cross-quad port I/O for %d quads\n", numnodes);
-	xquad_portio = ioremap (XQUAD_PORTIO_BASE, numnodes*XQUAD_PORTIO_QUAD);
+	printk("Remapping cross-quad port I/O for %d quads\n", num_quads);
+	xquad_portio = ioremap(XQUAD_PORTIO_BASE, num_quads*XQUAD_PORTIO_QUAD);
 	printk("xquad_portio vaddr 0x%08lx, len %08lx\n",
-		(u_long) xquad_portio, (u_long) numnodes*XQUAD_PORTIO_QUAD);
+		(u_long) xquad_portio, (u_long) num_quads*XQUAD_PORTIO_QUAD);
 }
 
 static inline int check_phys_apicid_present(int boot_cpu_physical_apicid)
@@ -136,7 +137,7 @@ static inline void enable_apic_mode(void)
  * We use physical apicids here, not logical, so just return the default
  * physical broadcast to stop people from breaking us
  */
-static inline unsigned int cpu_mask_to_apicid(cpumask_const_t cpumask)
+static inline unsigned int cpu_mask_to_apicid(cpumask_t cpumask)
 {
 	return (int) 0xF;
 }

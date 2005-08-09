@@ -56,11 +56,11 @@
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
 #include <linux/inet.h>
+#include <linux/bitops.h>
 
 #include <net/syncppp.h>
 
 #include <asm/processor.h>             /* Processor type for cache alignment. */
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/uaccess.h>
@@ -101,7 +101,6 @@ static int lmc_open(struct net_device *dev);
 static int lmc_close(struct net_device *dev);
 static struct net_device_stats *lmc_get_stats(struct net_device *dev);
 static irqreturn_t lmc_interrupt(int irq, void *dev_instance, struct pt_regs *regs);
-static int lmc_set_config(struct net_device *dev, struct ifmap *map);
 static void lmc_initcsrs(lmc_softc_t * const sc, lmc_csrptr_t csr_base, size_t csr_size);
 static void lmc_softreset(lmc_softc_t * const);
 static void lmc_running_reset(struct net_device *dev);
@@ -814,7 +813,6 @@ static void lmc_setup(struct net_device * const dev) /*fold00*/
     dev->stop = lmc_close;
     dev->get_stats = lmc_get_stats;
     dev->do_ioctl = lmc_ioctl;
-    dev->set_config = lmc_set_config;
     dev->tx_timeout = lmc_driver_timeout;
     dev->watchdog_timeo = (HZ); /* 1 second */
     
@@ -1250,7 +1248,7 @@ static int lmc_ifdown (struct net_device *dev) /*fold00*/
     for (i = 0; i < LMC_RXDESCS; i++)
     {
         struct sk_buff *skb = sc->lmc_rxq[i];
-        sc->lmc_rxq[i] = 0;
+        sc->lmc_rxq[i] = NULL;
         sc->lmc_rxring[i].status = 0;
         sc->lmc_rxring[i].length = 0;
         sc->lmc_rxring[i].buffer1 = 0xDEADBEEF;
@@ -1394,7 +1392,7 @@ static irqreturn_t lmc_interrupt (int irq, void *dev_instance, struct pt_regs *r
                 
                 //                dev_kfree_skb(sc->lmc_txq[i]);
                 dev_kfree_skb_irq(sc->lmc_txq[i]);
-                sc->lmc_txq[i] = 0;
+                sc->lmc_txq[i] = NULL;
 
                 badtx++;
                 i = badtx % LMC_TXDESCS;
@@ -1667,7 +1665,7 @@ static int lmc_rx (struct net_device *dev) /*fold00*/
              */
         give_it_anyways:
 
-            sc->lmc_rxq[i] = 0x0;
+            sc->lmc_rxq[i] = NULL;
             sc->lmc_rxring[i].buffer1 = 0x0;
 
             skb_put (skb, len);
@@ -1965,7 +1963,7 @@ static void lmc_softreset (lmc_softc_t * const sc) /*fold00*/
             dev_kfree_skb(sc->lmc_txq[i]);	/* free it */
             sc->stats.tx_dropped++;      /* We just dropped a packet */
         }
-        sc->lmc_txq[i] = 0;
+        sc->lmc_txq[i] = NULL;
         sc->lmc_txring[i].status = 0x00000000;
         sc->lmc_txring[i].buffer2 = virt_to_bus (&sc->lmc_txring[i + 1]);
     }
@@ -1973,13 +1971,6 @@ static void lmc_softreset (lmc_softc_t * const sc) /*fold00*/
     LMC_CSR_WRITE (sc, csr_txlist, virt_to_bus (sc->lmc_txring));
 
     lmc_trace(sc->lmc_device, "lmc_softreset out");
-}
-
-static int lmc_set_config(struct net_device *dev, struct ifmap *map) /*fold00*/
-{
-    lmc_trace(dev, "lmc_set_config in");
-    lmc_trace(dev, "lmc_set_config out");
-    return -EOPNOTSUPP;
 }
 
 void lmc_gpio_mkinput(lmc_softc_t * const sc, u_int32_t bits) /*fold00*/

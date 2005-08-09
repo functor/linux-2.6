@@ -16,6 +16,7 @@
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/ctype.h>
+#include <linux/sysctl.h>
 #include <asm/uaccess.h>
 #include <asm/semaphore.h>
 
@@ -24,7 +25,6 @@
 
 #include <asm/debug.h>
 
-#define MIN(a,b) (((a)<(b))?(a):(b))
 #define DEBUG_PROLOG_ENTRY -1
 
 /* typedefs */
@@ -54,7 +54,7 @@ typedef struct
          *
          */
 	long args[0];
-} debug_sprintf_entry;
+} debug_sprintf_entry_t;
 
 
 extern void tod_to_timeval(uint64_t todval, struct timeval *xtime);
@@ -62,9 +62,9 @@ extern void tod_to_timeval(uint64_t todval, struct timeval *xtime);
 /* internal function prototyes */
 
 static int debug_init(void);
-static ssize_t debug_output(struct file *file, char *user_buf,
+static ssize_t debug_output(struct file *file, char __user *user_buf,
 			    size_t user_len, loff_t * offset);
-static ssize_t debug_input(struct file *file, const char *user_buf,
+static ssize_t debug_input(struct file *file, const char __user *user_buf,
 			   size_t user_len, loff_t * offset);
 static int debug_open(struct inode *inode, struct file *file);
 static int debug_close(struct inode *inode, struct file *file);
@@ -74,10 +74,10 @@ static void debug_info_put(debug_info_t *);
 static int debug_prolog_level_fn(debug_info_t * id,
 				 struct debug_view *view, char *out_buf);
 static int debug_input_level_fn(debug_info_t * id, struct debug_view *view,
-				struct file *file, const char *user_buf,
+				struct file *file, const char __user *user_buf,
 				size_t user_buf_size, loff_t * offset);
 static int debug_input_flush_fn(debug_info_t * id, struct debug_view *view,
-                                struct file *file, const char *user_buf,
+                                struct file *file, const char __user *user_buf,
                                 size_t user_buf_size, loff_t * offset);
 static int debug_hex_ascii_format_fn(debug_info_t * id, struct debug_view *view,
                                 char *out_buf, const char *in_buf);
@@ -88,7 +88,7 @@ static int debug_raw_header_fn(debug_info_t * id, struct debug_view *view,
                          int area, debug_entry_t * entry, char *out_buf);
 
 static int debug_sprintf_format_fn(debug_info_t * id, struct debug_view *view,
-				   char *out_buf, debug_sprintf_entry *curr_event);
+				   char *out_buf, debug_sprintf_entry_t *curr_event);
 
 /* globals */
 
@@ -416,10 +416,10 @@ out:
  * - copies formated debug entries to the user buffer
  */
 
-static ssize_t debug_output(struct file *file,	/* file descriptor */
-			    char *user_buf,	/* user buffer */
-			    size_t  len,	/* length of buffer */
-			    loff_t *offset	/* offset in the file */ )
+static ssize_t debug_output(struct file *file,		/* file descriptor */
+			    char __user *user_buf,	/* user buffer */
+			    size_t  len,		/* length of buffer */
+			    loff_t *offset)	      /* offset in the file */
 {
 	size_t count = 0;
 	size_t entry_offset, size = 0;
@@ -435,7 +435,7 @@ static ssize_t debug_output(struct file *file,	/* file descriptor */
 
 	while(count < len){
 		size = debug_format_entry(p_info);
-		size = MIN((len - count), (size - entry_offset));
+		size = min((len - count), (size - entry_offset));
 
 		if(size){
 			if (copy_to_user(user_buf + count, 
@@ -462,7 +462,7 @@ out:
  */
 
 static ssize_t debug_input(struct file *file,
-			   const char *user_buf, size_t length,
+			   const char __user *user_buf, size_t length,
 			   loff_t *offset)
 {
 	int rc = 0;
@@ -692,32 +692,86 @@ extern inline debug_entry_t *get_active_entry(debug_info_t * id)
 }
 
 /*
- * debug_common:
+ * debug_finish_entry:
  * - set timestamp, caller address, cpu number etc.
  */
 
-extern inline debug_entry_t *debug_common(debug_info_t * id, int level, 
-                                    const void *buf, int len, int exception)
+extern inline void debug_finish_entry(debug_info_t * id, debug_entry_t* active,
+		int level, int exception)
 {
-	unsigned long flags;
-	debug_entry_t *active;
-
-	spin_lock_irqsave(&id->lock, flags);
-	active = get_active_entry(id);
 	STCK(active->id.stck);
 	active->id.fields.cpuid = smp_processor_id();
 	active->caller = __builtin_return_address(0);
 	active->id.fields.exception = exception;
 	active->id.fields.level     = level;
-	memset(DEBUG_DATA(active), 0, id->buf_size);
-	memcpy(DEBUG_DATA(active), buf, MIN(len, id->buf_size));
 	proceed_active_entry(id);
 	if(exception)
 		proceed_active_area(id);
-	spin_unlock_irqrestore(&id->lock, flags);
-
-	return active;
 }
+
+static int debug_stoppable=1;
+static int debug_active=1;
+
+#define CTL_S390DBF 5677
+#define CTL_S390DBF_STOPPABLE 5678
+#define CTL_S390DBF_ACTIVE 5679
+
+/*
+ * proc handler for the running debug_active sysctl
+ * always allow read, allow write only if debug_stoppable is set or
+ * if debug_active is already off
+ */
+static int s390dbf_procactive(ctl_table *table, int write, struct file *filp,
+                     void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	if (!write || debug_stoppable || !debug_active)
+		return proc_dointvec(table, write, filp, buffer, lenp, ppos);
+	else
+		return 0;
+}
+
+
+static struct ctl_table s390dbf_table[] = {
+	{
+		.ctl_name       = CTL_S390DBF_STOPPABLE,
+		.procname       = "debug_stoppable",
+		.data		= &debug_stoppable,
+		.maxlen		= sizeof(int),
+		.mode           = S_IRUGO | S_IWUSR,
+		.proc_handler   = &proc_dointvec,
+		.strategy	= &sysctl_intvec,
+	},
+	 {
+		.ctl_name       = CTL_S390DBF_ACTIVE,
+		.procname       = "debug_active",
+		.data		= &debug_active,
+		.maxlen		= sizeof(int),
+		.mode           = S_IRUGO | S_IWUSR,
+		.proc_handler   = &s390dbf_procactive,
+		.strategy	= &sysctl_intvec,
+	},
+	{ .ctl_name = 0 }
+};
+
+static struct ctl_table s390dbf_dir_table[] = {
+	{
+		.ctl_name       = CTL_S390DBF,
+		.procname       = "s390dbf",
+		.maxlen         = 0,
+		.mode           = S_IRUGO | S_IXUGO,
+		.child          = s390dbf_table,
+	},
+	{ .ctl_name = 0 }
+};
+
+struct ctl_table_header *s390dbf_sysctl_header;
+
+void debug_stop_all(void)
+{
+	if (debug_stoppable)
+		debug_active = 0;
+}
+
 
 /*
  * debug_event_common:
@@ -727,7 +781,19 @@ extern inline debug_entry_t *debug_common(debug_info_t * id, int level,
 debug_entry_t *debug_event_common(debug_info_t * id, int level, const void *buf,
 			          int len)
 {
-	return debug_common(id, level, buf, len, 0);
+	unsigned long flags;
+	debug_entry_t *active;
+
+	if (!debug_active)
+		return NULL;
+	spin_lock_irqsave(&id->lock, flags);
+	active = get_active_entry(id);
+	memset(DEBUG_DATA(active), 0, id->buf_size);
+	memcpy(DEBUG_DATA(active), buf, min(len, id->buf_size));
+	debug_finish_entry(id, active, level, 0);
+	spin_unlock_irqrestore(&id->lock, flags);
+
+	return active;
 }
 
 /*
@@ -738,7 +804,19 @@ debug_entry_t *debug_event_common(debug_info_t * id, int level, const void *buf,
 debug_entry_t *debug_exception_common(debug_info_t * id, int level, 
                                       const void *buf, int len)
 {
-	return debug_common(id, level, buf, len, 1);
+	unsigned long flags;
+	debug_entry_t *active;
+
+	if (!debug_active)
+		return NULL;
+	spin_lock_irqsave(&id->lock, flags);
+	active = get_active_entry(id);
+	memset(DEBUG_DATA(active), 0, id->buf_size);
+	memcpy(DEBUG_DATA(active), buf, min(len, id->buf_size));
+	debug_finish_entry(id, active, level, 1);
+	spin_unlock_irqrestore(&id->lock, flags);
+
+	return active;
 }
 
 /*
@@ -764,27 +842,29 @@ debug_entry_t *debug_sprintf_event(debug_info_t* id,
                                    int level,char *string,...)
 {
 	va_list   ap;
-	int numargs,alloc_size,idx;
-	debug_sprintf_entry *curr_event;
-	debug_entry_t *retval = NULL;
+	int numargs,idx;
+	unsigned long flags;
+	debug_sprintf_entry_t *curr_event;
+	debug_entry_t *active;
 
 	if((!id) || (level > id->level))
 		return NULL;
-	else {
-		numargs=debug_count_numargs(string);
-		alloc_size=offsetof(debug_sprintf_entry,args[numargs]);
-		curr_event=alloca(alloc_size);
+	if (!debug_active)
+		return NULL;
+	numargs=debug_count_numargs(string);
 
-		if(curr_event){
-			va_start(ap,string);
-			curr_event->string=string;
-			for(idx=0;idx<numargs;idx++)
-				curr_event->args[idx]=va_arg(ap,long);
-			retval=debug_common(id,level, curr_event,alloc_size,0);
-			va_end(ap);
-		}
-		return retval;
-	}
+	spin_lock_irqsave(&id->lock, flags);
+	active = get_active_entry(id);
+	curr_event=(debug_sprintf_entry_t *) DEBUG_DATA(active);
+	va_start(ap,string);
+	curr_event->string=string;
+	for(idx=0;idx<min(numargs,(int)(id->buf_size / sizeof(long))-1);idx++)
+		curr_event->args[idx]=va_arg(ap,long);
+	va_end(ap);
+	debug_finish_entry(id, active, level, 0);
+	spin_unlock_irqrestore(&id->lock, flags);
+
+	return active;
 }
 
 /*
@@ -795,27 +875,30 @@ debug_entry_t *debug_sprintf_exception(debug_info_t* id,
                                        int level,char *string,...)
 {
 	va_list   ap;
-	int numargs,alloc_size,idx;
-	debug_sprintf_entry *curr_event;
-	debug_entry_t *retval = NULL;
+	int numargs,idx;
+	unsigned long flags;
+	debug_sprintf_entry_t *curr_event;
+	debug_entry_t *active;
 
 	if((!id) || (level > id->level))
 		return NULL;
-	else {
-		numargs=debug_count_numargs(string);
-		alloc_size=offsetof(debug_sprintf_entry,args[numargs]);
-		curr_event=alloca(alloc_size);
+	if (!debug_active)
+		return NULL;
 
-		if(curr_event){
-			va_start(ap,string);
-			curr_event->string=string;
-			for(idx=0;idx<numargs;idx++)
-				curr_event->args[idx]=va_arg(ap,long);
-			retval=debug_common(id,level, curr_event,alloc_size,1);
-			va_end(ap);
-		}
-		return retval;
-	}
+	numargs=debug_count_numargs(string);
+
+	spin_lock_irqsave(&id->lock, flags);
+	active = get_active_entry(id);
+	curr_event=(debug_sprintf_entry_t *)DEBUG_DATA(active);
+	va_start(ap,string);
+	curr_event->string=string;
+	for(idx=0;idx<min(numargs,(int)(id->buf_size / sizeof(long))-1);idx++)
+		curr_event->args[idx]=va_arg(ap,long);
+	va_end(ap);
+	debug_finish_entry(id, active, level, 1);
+	spin_unlock_irqrestore(&id->lock, flags);
+
+	return active;
 }
 
 /*
@@ -827,6 +910,7 @@ static int __init debug_init(void)
 {
 	int rc = 0;
 
+	s390dbf_sysctl_header = register_sysctl_table(s390dbf_dir_table, 1);
 	down(&debug_lock);
 #ifdef CONFIG_PROC_FS
 	debug_proc_root_entry = proc_mkdir(DEBUG_DIR_ROOT, NULL);
@@ -852,6 +936,10 @@ int debug_register_view(debug_info_t * id, struct debug_view *view)
 
 	if (!id)
 		goto out;
+	if (view->prolog_proc || view->format_proc || view->header_proc)
+		mode |= S_IRUSR;
+	if (view->input_proc)
+		mode |= S_IWUSR;
 	pde = create_proc_entry(view->name, mode, id->proc_root_entry);
 	if (!pde){
 		printk(KERN_WARNING "debug: create_proc_entry() failed! Cannot register view %s/%s\n", id->name,view->name);
@@ -874,10 +962,6 @@ int debug_register_view(debug_info_t * id, struct debug_view *view)
 	}
 	else {
 		id->views[i] = view;
-		if (view->prolog_proc || view->format_proc || view->header_proc)
-			mode |= S_IRUSR;
-		if (view->input_proc)
-			mode |= S_IWUSR;
 		pde->proc_fops = &debug_file_ops;
 		id->proc_entries[i] = pde;
 	}
@@ -942,7 +1026,7 @@ static int debug_prolog_level_fn(debug_info_t * id,
  */
 
 static int debug_input_level_fn(debug_info_t * id, struct debug_view *view,
-				struct file *file, const char *user_buf,
+				struct file *file, const char __user *user_buf,
 				size_t in_buf_size, loff_t * offset)
 {
 	char input_buf[1];
@@ -1004,9 +1088,9 @@ void debug_flush(debug_info_t* id, int area)
 /*
  * view function: flushes debug areas 
  */
- 
+
 static int debug_input_flush_fn(debug_info_t * id, struct debug_view *view,
-                                struct file *file, const char *user_buf,
+                                struct file *file, const char __user *user_buf,
                                 size_t in_buf_size, loff_t * offset)
 {
         char input_buf[1];
@@ -1127,7 +1211,7 @@ int debug_dflt_header_fn(debug_info_t * id, struct debug_view *view,
 #define DEBUG_SPRINTF_MAX_ARGS 10
 
 int debug_sprintf_format_fn(debug_info_t * id, struct debug_view *view,
-                            char *out_buf, debug_sprintf_entry *curr_event)
+                            char *out_buf, debug_sprintf_entry_t *curr_event)
 {
 	int num_longs, num_used_args = 0,i, rc = 0;
 	int index[DEBUG_SPRINTF_MAX_ARGS];
@@ -1145,7 +1229,7 @@ int debug_sprintf_format_fn(debug_info_t * id, struct debug_view *view,
 	}
 
 	/* number of arguments used for sprintf (without the format string) */
-	num_used_args   = MIN(DEBUG_SPRINTF_MAX_ARGS, (num_longs - 1));
+	num_used_args   = min(DEBUG_SPRINTF_MAX_ARGS, (num_longs - 1));
 
 	memset(index,0, DEBUG_SPRINTF_MAX_ARGS * sizeof(int));
 
@@ -1175,6 +1259,7 @@ void __exit debug_exit(void)
 #ifdef CONFIG_PROC_FS
 	remove_proc_entry(debug_proc_root_entry->name, NULL);
 #endif /* CONFIG_PROC_FS */
+	unregister_sysctl_table(s390dbf_sysctl_header);
 	return;
 }
 
@@ -1188,6 +1273,7 @@ MODULE_LICENSE("GPL");
 EXPORT_SYMBOL(debug_register);
 EXPORT_SYMBOL(debug_unregister); 
 EXPORT_SYMBOL(debug_set_level);
+EXPORT_SYMBOL(debug_stop_all);
 EXPORT_SYMBOL(debug_register_view);
 EXPORT_SYMBOL(debug_unregister_view);
 EXPORT_SYMBOL(debug_event_common);

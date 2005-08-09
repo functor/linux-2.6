@@ -80,7 +80,7 @@ extern struct task_struct *_switch_to(struct task_struct *, struct task_struct *
 #define mtctl(gr, cr) \
 	__asm__ __volatile__("mtctl %0,%1" \
 		: /* no outputs */ \
-		: "r" (gr), "i" (cr))
+		: "r" (gr), "i" (cr) : "memory")
 
 /* these are here to de-mystefy the calling code, and to provide hooks */
 /* which I needed for debugging EIEM problems -PB */
@@ -102,7 +102,7 @@ static inline void set_eiem(unsigned long val)
 #define mtsp(gr, cr) \
 	__asm__ __volatile__("mtsp %0,%1" \
 		: /* no outputs */ \
-		: "r" (gr), "i" (cr))
+		: "r" (gr), "i" (cr) : "memory")
 
 
 /*
@@ -125,7 +125,7 @@ static inline void set_eiem(unsigned long val)
 ** The __asm__ op below simple prevents gcc/ld from reordering
 ** instructions across the mb() "call".
 */
-#define mb()		__asm__ __volatile__("":::"memory");	/* barrier() */
+#define mb()		__asm__ __volatile__("":::"memory")	/* barrier() */
 #define rmb()		mb()
 #define wmb()		mb()
 #define smp_mb()	mb()
@@ -145,6 +145,19 @@ static inline void set_eiem(unsigned long val)
 	__ret; \
 })
 
+/* Because kmalloc only guarantees 8-byte alignment for kmalloc'd data,
+   and GCC only guarantees 8-byte alignment for stack locals, we can't
+   be assured of 16-byte alignment for atomic lock data even if we
+   specify "__attribute ((aligned(16)))" in the type declaration.  So,
+   we use a struct containing an array of four ints for the atomic lock
+   type and dynamically select the 16-byte aligned int from the array
+   for the semaphore.  */
+#define __PA_LDCW_ALIGNMENT 16
+#define __ldcw_align(a) ({ \
+  unsigned long __ret = (unsigned long) &(a)->lock[0];        		\
+  __ret = (__ret + __PA_LDCW_ALIGNMENT - 1) & ~(__PA_LDCW_ALIGNMENT - 1); \
+  (volatile unsigned int *) __ret;                                      \
+})
 
 #ifdef CONFIG_SMP
 /*
@@ -152,8 +165,46 @@ static inline void set_eiem(unsigned long val)
  */
 
 typedef struct {
-	volatile unsigned int __attribute__((aligned(16))) lock;
-} spinlock_t;
+	volatile unsigned int lock[4];
+#ifdef CONFIG_DEBUG_SPINLOCK
+	unsigned long magic;
+	volatile unsigned int babble;
+	const char *module;
+	char *bfile;
+	int bline;
+	int oncpu;
+	void *previous;
+	struct task_struct * task;
 #endif
+#ifdef CONFIG_PREEMPT
+	unsigned int break_lock;
+#endif
+} spinlock_t;
+
+#define __lock_aligned __attribute__((__section__(".data.lock_aligned")))
+
+#endif
+
+#define KERNEL_START (0x10100000 - 0x1000)
+
+/* This is for the serialisation of PxTLB broadcasts.  At least on the
+ * N class systems, only one PxTLB inter processor broadcast can be
+ * active at any one time on the Merced bus.  This tlb purge
+ * synchronisation is fairly lightweight and harmless so we activate
+ * it on all SMP systems not just the N class. */
+#ifdef CONFIG_SMP
+extern spinlock_t pa_tlb_lock;
+
+#define purge_tlb_start(x) spin_lock(&pa_tlb_lock)
+#define purge_tlb_end(x) spin_unlock(&pa_tlb_lock)
+
+#else
+
+#define purge_tlb_start(x) do { } while(0)
+#define purge_tlb_end(x) do { } while (0)
+
+#endif
+
+#define arch_align_stack(x) (x)
 
 #endif

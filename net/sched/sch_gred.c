@@ -24,7 +24,7 @@
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -106,7 +106,7 @@ gred_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 {
 	psched_time_t now;
 	struct gred_sched_data *q=NULL;
-	struct gred_sched *t= (struct gred_sched *)sch->data;
+	struct gred_sched *t= qdisc_priv(sch);
 	unsigned long	qave=0;	
 	int i=0;
 
@@ -130,7 +130,7 @@ gred_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 
 	D2PRINTK("gred_enqueue virtualQ 0x%x classid %x backlog %d "
 	    "general backlog %d\n",skb->tc_index&0xf,sch->handle,q->backlog,
-	    sch->stats.backlog);
+	    sch->qstats.backlog);
 	/* sum up all the qaves of prios <= to ours to get the new qave*/
 	if (!t->eqp && t->grio) {
 		for (i=0;i<t->DPs;i++) {
@@ -155,13 +155,13 @@ gred_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 	if (!PSCHED_IS_PASTPERFECT(q->qidlestart)) {
 		long us_idle;
 		PSCHED_GET_TIME(now);
-		us_idle = PSCHED_TDIFF_SAFE(now, q->qidlestart, q->Scell_max, 0);
+		us_idle = PSCHED_TDIFF_SAFE(now, q->qidlestart, q->Scell_max);
 		PSCHED_SET_PASTPERFECT(q->qidlestart);
 
 		q->qave >>= q->Stab[(us_idle>>q->Scell_log)&0xFF];
 	} else {
 		if (t->eqp) {
-			q->qave += sch->stats.backlog - (q->qave >> q->Wlog);
+			q->qave += sch->qstats.backlog - (q->qave >> q->Wlog);
 		} else {
 			q->qave += q->backlog - (q->qave >> q->Wlog);
 		}
@@ -179,9 +179,9 @@ enqueue:
 			q->backlog += skb->len;
 do_enqueue:
 			__skb_queue_tail(&sch->q, skb);
-			sch->stats.backlog += skb->len;
-			sch->stats.bytes += skb->len;
-			sch->stats.packets++;
+			sch->qstats.backlog += skb->len;
+			sch->bstats.bytes += skb->len;
+			sch->bstats.packets++;
 			return 0;
 		} else {
 			q->pdrop++;
@@ -189,12 +189,12 @@ do_enqueue:
 
 drop:
 		kfree_skb(skb);
-		sch->stats.drops++;
+		sch->qstats.drops++;
 		return NET_XMIT_DROP;
 	}
 	if ((q->qave+qave) >= q->qth_max) {
 		q->qcount = -1;
-		sch->stats.overlimits++;
+		sch->qstats.overlimits++;
 		q->forced++;
 		goto drop;
 	}
@@ -203,7 +203,7 @@ drop:
 			goto enqueue;
 		q->qcount = 0;
 		q->qR = net_random()&q->Rmask;
-		sch->stats.overlimits++;
+		sch->qstats.overlimits++;
 		q->early++;
 		goto drop;
 	}
@@ -215,13 +215,14 @@ static int
 gred_requeue(struct sk_buff *skb, struct Qdisc* sch)
 {
 	struct gred_sched_data *q;
-	struct gred_sched *t= (struct gred_sched *)sch->data;
+	struct gred_sched *t= qdisc_priv(sch);
 	q= t->tab[(skb->tc_index&0xf)];
 /* error checking here -- probably unnecessary */
 	PSCHED_SET_PASTPERFECT(q->qidlestart);
 
 	__skb_queue_head(&sch->q, skb);
-	sch->stats.backlog += skb->len;
+	sch->qstats.backlog += skb->len;
+	sch->qstats.requeues++;
 	q->backlog += skb->len;
 	return 0;
 }
@@ -231,11 +232,11 @@ gred_dequeue(struct Qdisc* sch)
 {
 	struct sk_buff *skb;
 	struct gred_sched_data *q;
-	struct gred_sched *t= (struct gred_sched *)sch->data;
+	struct gred_sched *t= qdisc_priv(sch);
 
 	skb = __skb_dequeue(&sch->q);
 	if (skb) {
-		sch->stats.backlog -= skb->len;
+		sch->qstats.backlog -= skb->len;
 		q= t->tab[(skb->tc_index&0xf)];
 		if (q) {
 			q->backlog -= skb->len;
@@ -264,13 +265,13 @@ static unsigned int gred_drop(struct Qdisc* sch)
 	struct sk_buff *skb;
 
 	struct gred_sched_data *q;
-	struct gred_sched *t= (struct gred_sched *)sch->data;
+	struct gred_sched *t= qdisc_priv(sch);
 
 	skb = __skb_dequeue_tail(&sch->q);
 	if (skb) {
 		unsigned int len = skb->len;
-		sch->stats.backlog -= len;
-		sch->stats.drops++;
+		sch->qstats.backlog -= len;
+		sch->qstats.drops++;
 		q= t->tab[(skb->tc_index&0xf)];
 		if (q) {
 			q->backlog -= len;
@@ -300,11 +301,11 @@ static void gred_reset(struct Qdisc* sch)
 {
 	int i;
 	struct gred_sched_data *q;
-	struct gred_sched *t= (struct gred_sched *)sch->data;
+	struct gred_sched *t= qdisc_priv(sch);
 
 	__skb_queue_purge(&sch->q);
 
-	sch->stats.backlog = 0;
+	sch->qstats.backlog = 0;
 
         for (i=0;i<t->DPs;i++) {
 	        q= t->tab[i];
@@ -323,7 +324,7 @@ static void gred_reset(struct Qdisc* sch)
 
 static int gred_change(struct Qdisc *sch, struct rtattr *opt)
 {
-	struct gred_sched *table = (struct gred_sched *)sch->data;
+	struct gred_sched *table = qdisc_priv(sch);
 	struct gred_sched_data *q;
 	struct tc_gred_qopt *ctl;
 	struct tc_gred_sopt *sopt;
@@ -331,13 +332,11 @@ static int gred_change(struct Qdisc *sch, struct rtattr *opt)
 	struct rtattr *tb2[TCA_GRED_DPS];
 	int i;
 
-	if (opt == NULL ||
-		rtattr_parse(tb, TCA_GRED_STAB, RTA_DATA(opt), RTA_PAYLOAD(opt)) )
-			return -EINVAL;
+	if (opt == NULL || rtattr_parse_nested(tb, TCA_GRED_STAB, opt))
+		return -EINVAL;
 
 	if (tb[TCA_GRED_PARMS-1] == 0 && tb[TCA_GRED_STAB-1] == 0) {
-		rtattr_parse(tb2, TCA_GRED_DPS, RTA_DATA(opt),
-		    RTA_PAYLOAD(opt));
+		rtattr_parse_nested(tb2, TCA_GRED_DPS, opt);
 
 	    if (tb2[TCA_GRED_DPS-1] == 0) 
 			return -EINVAL;
@@ -469,17 +468,16 @@ static int gred_change(struct Qdisc *sch, struct rtattr *opt)
 
 static int gred_init(struct Qdisc *sch, struct rtattr *opt)
 {
-	struct gred_sched *table = (struct gred_sched *)sch->data;
+	struct gred_sched *table = qdisc_priv(sch);
 	struct tc_gred_sopt *sopt;
 	struct rtattr *tb[TCA_GRED_STAB];
 	struct rtattr *tb2[TCA_GRED_DPS];
 
-	if (opt == NULL ||
-		rtattr_parse(tb, TCA_GRED_STAB, RTA_DATA(opt), RTA_PAYLOAD(opt)) )
-			return -EINVAL;
+	if (opt == NULL || rtattr_parse_nested(tb, TCA_GRED_STAB, opt))
+		return -EINVAL;
 
 	if (tb[TCA_GRED_PARMS-1] == 0 && tb[TCA_GRED_STAB-1] == 0) {
-		rtattr_parse(tb2, TCA_GRED_DPS, RTA_DATA(opt),RTA_PAYLOAD(opt));
+		rtattr_parse_nested(tb2, TCA_GRED_DPS, opt);
 
 	    if (tb2[TCA_GRED_DPS-1] == 0) 
 			return -EINVAL;
@@ -502,7 +500,7 @@ static int gred_dump(struct Qdisc *sch, struct sk_buff *skb)
 	struct rtattr *rta;
 	struct tc_gred_qopt *opt = NULL ;
 	struct tc_gred_qopt *dst;
-	struct gred_sched *table = (struct gred_sched *)sch->data;
+	struct gred_sched *table = qdisc_priv(sch);
 	struct gred_sched_data *q;
 	int i;
 	unsigned char	 *b = skb->tail;
@@ -551,7 +549,7 @@ static int gred_dump(struct Qdisc *sch, struct sk_buff *skb)
 				long idle;
 				psched_time_t now;
 				PSCHED_GET_TIME(now);
-				idle = PSCHED_TDIFF_SAFE(now, q->qidlestart, q->Scell_max, 0);
+				idle = PSCHED_TDIFF_SAFE(now, q->qidlestart, q->Scell_max);
 				qave  = q->qave >> q->Stab[(idle>>q->Scell_log)&0xFF];
 				dst->qave = qave >> q->Wlog;
 
@@ -593,7 +591,7 @@ rtattr_failure:
 
 static void gred_destroy(struct Qdisc *sch)
 {
-	struct gred_sched *table = (struct gred_sched *)sch->data;
+	struct gred_sched *table = qdisc_priv(sch);
 	int i;
 
 	for (i = 0;i < table->DPs; i++) {

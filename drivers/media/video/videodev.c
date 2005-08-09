@@ -46,15 +46,7 @@ static ssize_t show_name(struct class_device *cd, char *buf)
 	return sprintf(buf,"%.*s\n",(int)sizeof(vfd->name),vfd->name);
 }
 
-static ssize_t show_dev(struct class_device *cd, char *buf)
-{
-	struct video_device *vfd = container_of(cd, struct video_device, class_dev);
-	dev_t dev = MKDEV(VIDEO_MAJOR, vfd->minor);
-	return print_dev_t(buf,dev);
-}
-
 static CLASS_DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
-static CLASS_DEVICE_ATTR(dev,  S_IRUGO, show_dev, NULL);
 
 struct video_device *video_device_alloc(void)
 {
@@ -183,7 +175,7 @@ video_usercopy(struct inode *inode, struct file *file,
 	/*  Copy arguments into temp kernel buffer  */
 	switch (_IOC_DIR(cmd)) {
 	case _IOC_NONE:
-		parg = (void *)arg;
+		parg = NULL;
 		break;
 	case _IOC_READ:
 	case _IOC_WRITE:
@@ -200,7 +192,7 @@ video_usercopy(struct inode *inode, struct file *file,
 		
 		err = -EFAULT;
 		if (_IOC_DIR(cmd) & _IOC_WRITE)
-			if (copy_from_user(parg, (void *)arg, _IOC_SIZE(cmd)))
+			if (copy_from_user(parg, (void __user *)arg, _IOC_SIZE(cmd)))
 				goto out;
 		break;
 	}
@@ -217,7 +209,7 @@ video_usercopy(struct inode *inode, struct file *file,
 	{
 	case _IOC_READ:
 	case (_IOC_WRITE | _IOC_READ):
-		if (copy_to_user((void *)arg, parg, _IOC_SIZE(cmd)))
+		if (copy_to_user((void __user *)arg, parg, _IOC_SIZE(cmd)))
 			err = -EFAULT;
 		break;
 	}
@@ -231,7 +223,7 @@ out:
 /*
  * open/release helper functions -- handle exclusive opens
  */
-extern int video_exclusive_open(struct inode *inode, struct file *file)
+int video_exclusive_open(struct inode *inode, struct file *file)
 {
 	struct  video_device *vfl = video_devdata(file);
 	int retval = 0;
@@ -246,7 +238,7 @@ extern int video_exclusive_open(struct inode *inode, struct file *file)
 	return retval;
 }
 
-extern int video_exclusive_release(struct inode *inode, struct file *file)
+int video_exclusive_release(struct inode *inode, struct file *file)
 {
 	struct  video_device *vfl = video_devdata(file);
 	
@@ -254,7 +246,7 @@ extern int video_exclusive_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-extern struct file_operations video_fops;
+static struct file_operations video_fops;
 
 /**
  *	video_register_device - register video4linux devices
@@ -347,12 +339,11 @@ int video_register_device(struct video_device *vfd, int type, int nr)
 	if (vfd->dev)
 		vfd->class_dev.dev = vfd->dev;
 	vfd->class_dev.class       = &video_class;
+	vfd->class_dev.devt       = MKDEV(VIDEO_MAJOR, vfd->minor);
 	strlcpy(vfd->class_dev.class_id, vfd->devfs_name + 4, BUS_ID_SIZE);
 	class_device_register(&vfd->class_dev);
 	class_device_create_file(&vfd->class_dev,
 				 &class_device_attr_name);
-	class_device_create_file(&vfd->class_dev,
-				 &class_device_attr_dev);
 
 #if 1 /* needed until all drivers are fixed */
 	if (!vfd->release)
@@ -397,12 +388,21 @@ static struct file_operations video_fops=
  
 static int __init videodev_init(void)
 {
+	int ret;
+
 	printk(KERN_INFO "Linux video capture interface: v1.00\n");
-	if (register_chrdev(VIDEO_MAJOR,VIDEO_NAME, &video_fops)) {
-		printk("video_dev: unable to get major %d\n", VIDEO_MAJOR);
+	if (register_chrdev(VIDEO_MAJOR, VIDEO_NAME, &video_fops)) {
+		printk(KERN_WARNING "video_dev: unable to get major %d\n", VIDEO_MAJOR);
 		return -EIO;
 	}
-	class_register(&video_class);
+
+	ret = class_register(&video_class);
+	if (ret < 0) {
+		unregister_chrdev(VIDEO_MAJOR, VIDEO_NAME);
+		printk(KERN_WARNING "video_dev: class_register failed\n");
+		return -EIO;
+	}
+
 	return 0;
 }
 

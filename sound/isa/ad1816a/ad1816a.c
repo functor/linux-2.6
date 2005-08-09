@@ -23,22 +23,19 @@
 #include <linux/time.h>
 #include <linux/wait.h>
 #include <linux/pnp.h>
+#include <linux/moduleparam.h>
 #include <sound/core.h>
-#define SNDRV_GET_ID
 #include <sound/initval.h>
 #include <sound/ad1816a.h>
 #include <sound/mpu401.h>
 #include <sound/opl3.h>
-
-#define chip_t ad1816a_t
 
 #define PFX "ad1816a: "
 
 MODULE_AUTHOR("Massimo Piccioni <dafastidio@libero.it>");
 MODULE_DESCRIPTION("AD1816A, AD1815");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_DEVICES("{{Highscreen,Sound-Boostar 16 3D},"
+MODULE_SUPPORTED_DEVICE("{{Highscreen,Sound-Boostar 16 3D},"
 		"{Analog Devices,AD1815},"
 		"{Analog Devices,AD1816A},"
 		"{TerraTec,Base 64},"
@@ -57,36 +54,26 @@ static int mpu_irq[SNDRV_CARDS] = SNDRV_DEFAULT_IRQ;	/* Pnp setup */
 static int dma1[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* PnP setup */
 static int dma2[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* PnP setup */
 
-MODULE_PARM(index, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for ad1816a based soundcard.");
-MODULE_PARM_SYNTAX(index, SNDRV_INDEX_DESC);
-MODULE_PARM(id, "1-" __MODULE_STRING(SNDRV_CARDS) "s");
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for ad1816a based soundcard.");
-MODULE_PARM_SYNTAX(id, SNDRV_ID_DESC);
-MODULE_PARM(enable, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable ad1816a based soundcard.");
-MODULE_PARM_SYNTAX(enable, SNDRV_ENABLE_DESC);
-MODULE_PARM(port, "1-" __MODULE_STRING(SNDRV_CARDS) "l");
+module_param_array(port, long, NULL, 0444);
 MODULE_PARM_DESC(port, "Port # for ad1816a driver.");
-MODULE_PARM_SYNTAX(port, SNDRV_PORT12_DESC);
-MODULE_PARM(mpu_port, "1-" __MODULE_STRING(SNDRV_CARDS) "l");
+module_param_array(mpu_port, long, NULL, 0444);
 MODULE_PARM_DESC(mpu_port, "MPU-401 port # for ad1816a driver.");
-MODULE_PARM_SYNTAX(mpu_port, SNDRV_PORT12_DESC);
-MODULE_PARM(fm_port, "1-" __MODULE_STRING(SNDRV_CARDS) "l");
+module_param_array(fm_port, long, NULL, 0444);
 MODULE_PARM_DESC(fm_port, "FM port # for ad1816a driver.");
-MODULE_PARM_SYNTAX(fm_port, SNDRV_PORT12_DESC);
-MODULE_PARM(irq, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(irq, int, NULL, 0444);
 MODULE_PARM_DESC(irq, "IRQ # for ad1816a driver.");
-MODULE_PARM_SYNTAX(irq, SNDRV_IRQ_DESC);
-MODULE_PARM(mpu_irq, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(mpu_irq, int, NULL, 0444);
 MODULE_PARM_DESC(mpu_irq, "MPU-401 IRQ # for ad1816a driver.");
-MODULE_PARM_SYNTAX(mpu_irq, SNDRV_IRQ_DESC);
-MODULE_PARM(dma1, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(dma1, int, NULL, 0444);
 MODULE_PARM_DESC(dma1, "1st DMA # for ad1816a driver.");
-MODULE_PARM_SYNTAX(dma1, SNDRV_DMA_DESC);
-MODULE_PARM(dma2, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(dma2, int, NULL, 0444);
 MODULE_PARM_DESC(dma2, "2nd DMA # for ad1816a driver.");
-MODULE_PARM_SYNTAX(dma2, SNDRV_DMA_DESC);
 
 struct snd_card_ad1816a {
 	struct pnp_dev *dev;
@@ -323,33 +310,3 @@ static void __exit alsa_card_ad1816a_exit(void)
 
 module_init(alsa_card_ad1816a_init)
 module_exit(alsa_card_ad1816a_exit)
-
-#ifndef MODULE
-
-/* format is: snd-ad1816a=enable,index,id,port,
-			  mpu_port,fm_port,irq,mpu_irq,
-			  dma1,dma2 */
-
-static int __init alsa_card_ad1816a_setup(char *str)
-{
-	static unsigned __initdata nr_dev = 0;
-
-	if (nr_dev >= SNDRV_CARDS)
-		return 0;
-	(void)(get_option(&str,&enable[nr_dev]) == 2 &&
-	       get_option(&str,&index[nr_dev]) == 2 &&
-	       get_id(&str,&id[nr_dev]) == 2 &&
-	       get_option_long(&str,&port[nr_dev]) == 2 &&
-	       get_option_long(&str,&mpu_port[nr_dev]) == 2 &&
-	       get_option_long(&str,&fm_port[nr_dev]) == 2 &&
-	       get_option(&str,&irq[nr_dev]) == 2 &&
-	       get_option(&str,&mpu_irq[nr_dev]) == 2 &&
-	       get_option(&str,&dma1[nr_dev]) == 2 &&
-	       get_option(&str,&dma2[nr_dev]) == 2);
-	nr_dev++;
-	return 1;
-}
-
-__setup("snd-ad1816a=", alsa_card_ad1816a_setup);
-
-#endif /* ifndef MODULE */

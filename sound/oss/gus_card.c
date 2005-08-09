@@ -41,9 +41,6 @@ static void __init attach_gus(struct address_info *hw_config)
 {
 	gus_wave_init(hw_config);
 
-	request_region(hw_config->io_base, 16, "GUS");
-	request_region(hw_config->io_base + 0x100, 12, "GUS");	/* 0x10c-> is MAX */
-
 	if (sound_alloc_dma(hw_config->dma, "GUS"))
 		printk(KERN_ERR "gus_card.c: Can't allocate DMA channel %d\n", hw_config->dma);
 	if (hw_config->dma2 != -1 && hw_config->dma2 != hw_config->dma)
@@ -73,11 +70,7 @@ static int __init probe_gus(struct address_info *hw_config)
 			  printk(KERN_ERR "GUS: Unsupported IRQ %d\n", irq);
 			  return 0;
 		  }
-	if (check_region(hw_config->io_base, 16))
-		printk(KERN_ERR "GUS: I/O range conflict (1)\n");
-	else if (check_region(hw_config->io_base + 0x100, 16))
-		printk(KERN_ERR "GUS: I/O range conflict (2)\n");
-	else if (gus_wave_detect(hw_config->io_base))
+	if (gus_wave_detect(hw_config->io_base))
 		return 1;
 
 #ifndef EXCLUDE_GUS_IODETECT
@@ -86,17 +79,14 @@ static int __init probe_gus(struct address_info *hw_config)
 	 * Look at the possible base addresses (0x2X0, X=1, 2, 3, 4, 5, 6)
 	 */
 
-	for (io_addr = 0x210; io_addr <= 0x260; io_addr += 0x10)
-		if (io_addr != hw_config->io_base)	/*
-							 * Already tested
-							 */
-			if (!check_region(io_addr, 16))
-				if (!check_region(io_addr + 0x100, 16))
-					if (gus_wave_detect(io_addr))
-					  {
-						  hw_config->io_base = io_addr;
-						  return 1;
-					  }
+	for (io_addr = 0x210; io_addr <= 0x260; io_addr += 0x10) {
+		if (io_addr == hw_config->io_base)	/* Already tested */
+			continue;
+		if (gus_wave_detect(io_addr)) {
+			hw_config->io_base = io_addr;
+			return 1;
+		}
+	}
 #endif
 
 	printk("NO GUS card found !\n");
@@ -170,22 +160,29 @@ irqreturn_t gusintr(int irq, void *dev_id, struct pt_regs *dummy)
 
 #ifdef CONFIG_SOUND_GUS16
 
-static int __init probe_gus_db16(struct address_info *hw_config)
+static int __init init_gus_db16(struct address_info *hw_config)
 {
-	return ad1848_detect(hw_config->io_base, NULL, hw_config->osp);
-}
+	struct resource *ports;
 
-static void __init attach_gus_db16(struct address_info *hw_config)
-{
+	ports = request_region(hw_config->io_base, 4, "ad1848");
+	if (!ports)
+		return 0;
+
+	if (!ad1848_detect(ports, NULL, hw_config->osp)) {
+		release_region(hw_config->io_base, 4);
+		return 0;
+	}
+
 	gus_pcm_volume = 100;
 	gus_wave_volume = 90;
 
-	hw_config->slots[3] = ad1848_init("GUS 16 bit sampling", hw_config->io_base,
+	hw_config->slots[3] = ad1848_init("GUS 16 bit sampling", ports,
 					  hw_config->irq,
 					  hw_config->dma,
 					  hw_config->dma, 0,
 					  hw_config->osp,
 					  THIS_MODULE);
+	return 1;
 }
 
 static void __exit unload_gus_db16(struct address_info *hw_config)
@@ -221,17 +218,17 @@ static int __initdata dma = -1;
 static int __initdata dma16 = -1;	/* Set this for modules that need it */
 static int __initdata type = 0;		/* 1 for PnP */
 
-MODULE_PARM(io, "i");
-MODULE_PARM(irq, "i");
-MODULE_PARM(dma, "i");
-MODULE_PARM(dma16, "i");
-MODULE_PARM(type, "i");
+module_param(io, int, 0);
+module_param(irq, int, 0);
+module_param(dma, int, 0);
+module_param(dma16, int, 0);
+module_param(type, int, 0);
 #ifdef CONFIG_SOUND_GUSMAX
-MODULE_PARM(no_wave_dma, "i");
+module_param(no_wave_dma, int, 0);
 #endif
 #ifdef CONFIG_SOUND_GUS16
-MODULE_PARM(db16, "i");
-MODULE_PARM(gus16, "i");
+module_param(db16, int, 0);
+module_param(gus16, int, 0);
 #endif
 MODULE_LICENSE("GPL");
 
@@ -254,11 +251,8 @@ static int __init init_gus(void)
 	}
 
 #ifdef CONFIG_SOUND_GUS16
-	if (probe_gus_db16(&cfg) && gus16) {
-		/* FIXME: This can't work, can it ? -- Christoph */
-		attach_gus_db16(&cfg);
+	if (gus16 && init_gus_db16(&cfg))
 		db16 = 1;
-	}	
 #endif
 	if (!probe_gus(&cfg))
 		return -ENODEV;

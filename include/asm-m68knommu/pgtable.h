@@ -1,6 +1,8 @@
 #ifndef _M68KNOMMU_PGTABLE_H
 #define _M68KNOMMU_PGTABLE_H
 
+#include <asm-generic/4level-fixup.h>
+
 /*
  * (C) Copyright 2000-2002, Greg Ungerer <gerg@snapgear.com>
  */
@@ -10,8 +12,6 @@
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <asm/io.h>
-
-typedef pte_t *pte_addr_t;
 
 /*
  * Trivial page table functions.
@@ -56,7 +56,15 @@ extern int is_in_rom(unsigned long);
  * No page table caches to initialise.
  */
 #define pgtable_cache_init()	do { } while (0)
-#define io_remap_page_range	remap_page_range
+#define io_remap_page_range(vma, vaddr, paddr, size, prot)		\
+		remap_pfn_range(vma, vaddr, (paddr) >> PAGE_SHIFT, size, prot)
+
+#define io_remap_pfn_range(vma, vaddr, pfn, size, prot)		\
+		remap_pfn_range(vma, vaddr, pfn, size, prot)
+
+#define MK_IOSPACE_PFN(space, pfn)	(pfn)
+#define GET_IOSPACE(pfn)		0
+#define GET_PFN(pfn)			(pfn)
 
 /*
  * All 32bit addresses are effectively valid for vmalloc...

@@ -55,6 +55,24 @@
 #include <net/sctp/sctp.h>
 #include <net/sctp/sm.h>
 
+static int sctp_cmd_interpreter(sctp_event_t event_type,
+				sctp_subtype_t subtype,
+				sctp_state_t state,
+				struct sctp_endpoint *ep,
+				struct sctp_association *asoc,
+				void *event_arg,
+			 	sctp_disposition_t status,
+				sctp_cmd_seq_t *commands,
+				int gfp);
+static int sctp_side_effects(sctp_event_t event_type, sctp_subtype_t subtype,
+			     sctp_state_t state,
+			     struct sctp_endpoint *ep,
+			     struct sctp_association *asoc,
+			     void *event_arg,
+			     sctp_disposition_t status,
+			     sctp_cmd_seq_t *commands,
+			     int gfp);
+
 /********************************************************************
  * Helper functions
  ********************************************************************/
@@ -134,8 +152,8 @@ static void sctp_do_ecn_cwr_work(struct sctp_association *asoc,
 }
 
 /* Generate SACK if necessary.  We call this at the end of a packet.  */
-int sctp_gen_sack(struct sctp_association *asoc, int force,
-		  sctp_cmd_seq_t *commands)
+static int sctp_gen_sack(struct sctp_association *asoc, int force,
+			 sctp_cmd_seq_t *commands)
 {
 	__u32 ctsn, max_tsn_seen;
 	struct sctp_chunk *sack;
@@ -276,31 +294,31 @@ out_unlock:
 	sctp_association_put(asoc);
 }
 
-void sctp_generate_t1_cookie_event(unsigned long data)
+static void sctp_generate_t1_cookie_event(unsigned long data)
 {
 	struct sctp_association *asoc = (struct sctp_association *) data;
 	sctp_generate_timeout_event(asoc, SCTP_EVENT_TIMEOUT_T1_COOKIE);
 }
 
-void sctp_generate_t1_init_event(unsigned long data)
+static void sctp_generate_t1_init_event(unsigned long data)
 {
 	struct sctp_association *asoc = (struct sctp_association *) data;
 	sctp_generate_timeout_event(asoc, SCTP_EVENT_TIMEOUT_T1_INIT);
 }
 
-void sctp_generate_t2_shutdown_event(unsigned long data)
+static void sctp_generate_t2_shutdown_event(unsigned long data)
 {
 	struct sctp_association *asoc = (struct sctp_association *) data;
 	sctp_generate_timeout_event(asoc, SCTP_EVENT_TIMEOUT_T2_SHUTDOWN);
 }
 
-void sctp_generate_t4_rto_event(unsigned long data)
+static void sctp_generate_t4_rto_event(unsigned long data)
 {
 	struct sctp_association *asoc = (struct sctp_association *) data;
 	sctp_generate_timeout_event(asoc, SCTP_EVENT_TIMEOUT_T4_RTO);
 }
 
-void sctp_generate_t5_shutdown_guard_event(unsigned long data)
+static void sctp_generate_t5_shutdown_guard_event(unsigned long data)
 {
         struct sctp_association *asoc = (struct sctp_association *)data;
         sctp_generate_timeout_event(asoc,
@@ -308,7 +326,7 @@ void sctp_generate_t5_shutdown_guard_event(unsigned long data)
 
 } /* sctp_generate_t5_shutdown_guard_event() */
 
-void sctp_generate_autoclose_event(unsigned long data)
+static void sctp_generate_autoclose_event(unsigned long data)
 {
 	struct sctp_association *asoc = (struct sctp_association *) data;
 	sctp_generate_timeout_event(asoc, SCTP_EVENT_TIMEOUT_AUTOCLOSE);
@@ -353,7 +371,7 @@ out_unlock:
 }
 
 /* Inject a SACK Timeout event into the state machine.  */
-void sctp_generate_sack_event(unsigned long data)
+static void sctp_generate_sack_event(unsigned long data)
 {
 	struct sctp_association *asoc = (struct sctp_association *) data;
 	sctp_generate_timeout_event(asoc, SCTP_EVENT_TIMEOUT_SACK);
@@ -397,7 +415,7 @@ static void sctp_do_8_2_transport_strike(struct sctp_association *asoc,
 	asoc->overall_error_count++;
 
 	if (transport->active &&
-	    (transport->error_count++ >= transport->error_threshold)) {
+	    (transport->error_count++ >= transport->max_retrans)) {
 		SCTP_DEBUG_PRINTK("transport_strike: transport "
 				  "IP:%d.%d.%d.%d failed.\n",
 				  NIPQUAD(transport->ipaddr.v4.sin_addr));
@@ -429,6 +447,9 @@ static void sctp_cmd_init_failed(sctp_cmd_seq_t *commands,
 		sctp_add_cmd_sf(commands, SCTP_CMD_EVENT_ULP,
 				SCTP_ULPEVENT(event));
 
+	sctp_add_cmd_sf(commands, SCTP_CMD_NEW_STATE,
+			SCTP_STATE(SCTP_STATE_CLOSED));
+
 	/* SEND_FAILED sent later when cleaning up the association. */
 	asoc->outqueue.error = error;
 	sctp_add_cmd_sf(commands, SCTP_CMD_DELETE_TCB, SCTP_NULL());
@@ -456,6 +477,10 @@ static void sctp_cmd_assoc_failed(sctp_cmd_seq_t *commands,
 
 	sctp_add_cmd_sf(commands, SCTP_CMD_NEW_STATE,
 			SCTP_STATE(SCTP_STATE_CLOSED));
+
+	/* Set sk_err to ECONNRESET on a 1-1 style socket. */
+	if (!sctp_style(asoc->base.sk, UDP))
+		asoc->base.sk->sk_err = ECONNRESET; 
 
 	/* SEND_FAILED sent later when cleaning up the association. */
 	asoc->outqueue.error = error;
@@ -521,6 +546,23 @@ static void sctp_cmd_hb_timers_stop(sctp_cmd_seq_t *cmds,
 			sctp_transport_put(t);
 	}
 }
+
+/* Helper function to stop any pending T3-RTX timers */
+static void sctp_cmd_t3_rtx_timers_stop(sctp_cmd_seq_t *cmds,
+				        struct sctp_association *asoc)
+{
+	struct sctp_transport *t;
+	struct list_head *pos;
+
+	list_for_each(pos, &asoc->peer.transport_addr_list) {
+		t = list_entry(pos, struct sctp_transport, transports);
+		if (timer_pending(&t->T3_rtx_timer) &&
+		    del_timer(&t->T3_rtx_timer)) {
+			sctp_transport_put(t);
+		}
+	}
+}
+
 
 /* Helper function to update the heartbeat timer. */
 static void sctp_cmd_hb_timer_update(sctp_cmd_seq_t *cmds,
@@ -742,6 +784,26 @@ static void sctp_cmd_process_fwdtsn(struct sctp_ulpq *ulpq,
 	return;
 }
 
+/* Helper function to remove the association non-primary peer 
+ * transports.
+ */ 
+static void sctp_cmd_del_non_primary(struct sctp_association *asoc)
+{
+	struct sctp_transport *t;
+	struct list_head *pos;
+	struct list_head *temp;
+
+	list_for_each_safe(pos, temp, &asoc->peer.transport_addr_list) {
+		t = list_entry(pos, struct sctp_transport, transports);
+		if (!sctp_cmp_addr_exact(&t->ipaddr,
+		                         &asoc->peer.primary_addr)) {
+			sctp_assoc_del_peer(asoc, &t->ipaddr);
+		}
+	}
+
+	return;
+}
+
 /* These three macros allow us to pull the debugging code out of the
  * main flow of sctp_do_sm() to keep attention focused on the real
  * functionality there.
@@ -813,14 +875,14 @@ int sctp_do_sm(sctp_event_t event_type, sctp_subtype_t subtype,
 /*****************************************************************
  * This the master state function side effect processing function.
  *****************************************************************/
-int sctp_side_effects(sctp_event_t event_type, sctp_subtype_t subtype,
-		      sctp_state_t state,
-		      struct sctp_endpoint *ep,
-		      struct sctp_association *asoc,
-		      void *event_arg,
-		      sctp_disposition_t status,
-		      sctp_cmd_seq_t *commands,
-		      int gfp)
+static int sctp_side_effects(sctp_event_t event_type, sctp_subtype_t subtype,
+			     sctp_state_t state,
+			     struct sctp_endpoint *ep,
+			     struct sctp_association *asoc,
+			     void *event_arg,
+			     sctp_disposition_t status,
+			     sctp_cmd_seq_t *commands,
+			     int gfp)
 {
 	int error;
 
@@ -900,11 +962,15 @@ bail:
  ********************************************************************/
 
 /* This is the side-effect interpreter.  */
-int sctp_cmd_interpreter(sctp_event_t event_type, sctp_subtype_t subtype,
-			 sctp_state_t state, struct sctp_endpoint *ep,
-			 struct sctp_association *asoc, void *event_arg,
-			 sctp_disposition_t status, sctp_cmd_seq_t *commands,
-			 int gfp)
+static int sctp_cmd_interpreter(sctp_event_t event_type,
+				sctp_subtype_t subtype,
+				sctp_state_t state,
+				struct sctp_endpoint *ep,
+				struct sctp_association *asoc,
+				void *event_arg,
+			 	sctp_disposition_t status,
+				sctp_cmd_seq_t *commands,
+				int gfp)
 {
 	int error = 0;
 	int force;
@@ -1041,6 +1107,27 @@ int sctp_cmd_interpreter(sctp_event_t event_type, sctp_subtype_t subtype,
 			if (cmd->obj.ptr)
 				sctp_add_cmd_sf(commands, SCTP_CMD_REPLY,
 						SCTP_CHUNK(cmd->obj.ptr));
+
+			/* FIXME - Eventually come up with a cleaner way to
+			 * enabling COOKIE-ECHO + DATA bundling during 
+			 * multihoming stale cookie scenarios, the following 
+			 * command plays with asoc->peer.retran_path to 
+			 * avoid the problem of sending the COOKIE-ECHO and 
+			 * DATA in different paths, which could result 
+			 * in the association being ABORTed if the DATA chunk 
+			 * is processed first by the server.  Checking the
+			 * init error counter simply causes this command
+			 * to be executed only during failed attempts of
+			 * association establishment.
+			 */
+			if ((asoc->peer.retran_path != 
+			     asoc->peer.primary_path) && 
+			    (asoc->counters[SCTP_COUNTER_INIT_ERROR] > 0)) {
+				sctp_add_cmd_sf(commands, 
+				                SCTP_CMD_FORCE_PRIM_RETRAN,
+						SCTP_NULL());
+			}
+
 			break;
 
 		case SCTP_CMD_GEN_SHUTDOWN:
@@ -1271,6 +1358,22 @@ int sctp_cmd_interpreter(sctp_event_t event_type, sctp_subtype_t subtype,
 
 		case SCTP_CMD_PROCESS_OPERR:
 			sctp_cmd_process_operr(commands, asoc, chunk);
+			break;
+		case SCTP_CMD_CLEAR_INIT_TAG:
+			asoc->peer.i.init_tag = 0;
+			break;
+		case SCTP_CMD_DEL_NON_PRIMARY:
+			sctp_cmd_del_non_primary(asoc);
+			break;
+		case SCTP_CMD_T3_RTX_TIMERS_STOP:
+			sctp_cmd_t3_rtx_timers_stop(commands, asoc);
+			break;
+		case SCTP_CMD_FORCE_PRIM_RETRAN:
+			t = asoc->peer.retran_path;
+			asoc->peer.retran_path = asoc->peer.primary_path;
+			error = sctp_outq_uncork(&asoc->outqueue);
+			local_cork = 0;
+			asoc->peer.retran_path = t;
 			break;
 		default:
 			printk(KERN_WARNING "Impossible command: %u, %p\n",

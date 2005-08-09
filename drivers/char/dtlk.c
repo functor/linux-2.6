@@ -52,7 +52,7 @@
 #define KERNEL
 #include <linux/types.h>
 #include <linux/fs.h>
-#include <linux/mm.h>		/* for verify_area */
+#include <linux/mm.h>
 #include <linux/errno.h>	/* for -EBUSY */
 #include <linux/ioport.h>	/* for request_region */
 #include <linux/delay.h>	/* for loops_per_jiffy */
@@ -85,9 +85,9 @@ static wait_queue_head_t dtlk_process_list;
 static struct timer_list dtlk_timer;
 
 /* prototypes for file_operations struct */
-static ssize_t dtlk_read(struct file *, char *,
+static ssize_t dtlk_read(struct file *, char __user *,
 			 size_t nbytes, loff_t * ppos);
-static ssize_t dtlk_write(struct file *, const char *,
+static ssize_t dtlk_write(struct file *, const char __user *,
 			  size_t nbytes, loff_t * ppos);
 static unsigned int dtlk_poll(struct file *, poll_table *);
 static int dtlk_open(struct inode *, struct file *);
@@ -107,7 +107,6 @@ static struct file_operations dtlk_fops =
 };
 
 /* local prototypes */
-static void dtlk_delay(int ms);
 static int dtlk_dev_probe(void);
 static struct dtlk_settings *dtlk_interrogate(void);
 static int dtlk_readable(void);
@@ -121,16 +120,12 @@ static char dtlk_write_tts(char);
  */
 static void dtlk_timer_tick(unsigned long data);
 
-static ssize_t dtlk_read(struct file *file, char *buf,
+static ssize_t dtlk_read(struct file *file, char __user *buf,
 			 size_t count, loff_t * ppos)
 {
 	unsigned int minor = iminor(file->f_dentry->d_inode);
 	char ch;
 	int i = 0, retries;
-
-	/* Can't seek (pread) on the DoubleTalk.  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
 
 	TRACE_TEXT("(dtlk_read");
 	/*  printk("DoubleTalk PC - dtlk_read()\n"); */
@@ -150,7 +145,7 @@ static ssize_t dtlk_read(struct file *file, char *buf,
 			return i;
 		if (file->f_flags & O_NONBLOCK)
 			break;
-		dtlk_delay(100);
+		msleep_interruptible(100);
 	}
 	if (retries == loops_per_jiffy)
 		printk(KERN_ERR "dtlk_read times out\n");
@@ -158,7 +153,7 @@ static ssize_t dtlk_read(struct file *file, char *buf,
 	return -EAGAIN;
 }
 
-static ssize_t dtlk_write(struct file *file, const char *buf,
+static ssize_t dtlk_write(struct file *file, const char __user *buf,
 			  size_t count, loff_t * ppos)
 {
 	int i = 0, retries = 0, ch;
@@ -180,10 +175,6 @@ static ssize_t dtlk_write(struct file *file, const char *buf,
 	}
 #endif
 
-	/* Can't seek (pwrite) on the DoubleTalk.  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
-
 	if (iminor(file->f_dentry->d_inode) != DTLK_MINOR)
 		return -EINVAL;
 
@@ -199,7 +190,7 @@ static ssize_t dtlk_write(struct file *file, const char *buf,
 				   rate to 500 bytes/sec, but that's
 				   still enough to keep up with the
 				   speech synthesizer. */
-				dtlk_delay(1);
+				msleep_interruptible(1);
 			else {
 				/* the RDY bit goes zero 2-3 usec
 				   after writing, and goes 1 again
@@ -220,7 +211,7 @@ static ssize_t dtlk_write(struct file *file, const char *buf,
 		if (file->f_flags & O_NONBLOCK)
 			break;
 
-		dtlk_delay(1);
+		msleep_interruptible(1);
 
 		if (++retries > 10 * HZ) { /* wait no more than 10 sec
 					      from last write */
@@ -277,6 +268,7 @@ static int dtlk_ioctl(struct inode *inode,
 		      unsigned int cmd,
 		      unsigned long arg)
 {
+	char __user *argp = (char __user *)arg;
 	struct dtlk_settings *sp;
 	char portval;
 	TRACE_TEXT(" dtlk_ioctl");
@@ -285,14 +277,13 @@ static int dtlk_ioctl(struct inode *inode,
 
 	case DTLK_INTERROGATE:
 		sp = dtlk_interrogate();
-		if (copy_to_user((char *) arg, (char *) sp,
-				   sizeof(struct dtlk_settings)))
+		if (copy_to_user(argp, sp, sizeof(struct dtlk_settings)))
 			return -EINVAL;
 		return 0;
 
 	case DTLK_STATUS:
 		portval = inb_p(dtlk_port_tts);
-		return put_user(portval, (char *) arg);
+		return put_user(portval, argp);
 
 	default:
 		return -EINVAL;
@@ -303,11 +294,12 @@ static int dtlk_open(struct inode *inode, struct file *file)
 {
 	TRACE_TEXT("(dtlk_open");
 
+	nonseekable_open(inode, file);
 	switch (iminor(inode)) {
 	case DTLK_MINOR:
 		if (dtlk_busy)
 			return -EBUSY;
-		return 0;
+		return nonseekable_open(inode, file);
 
 	default:
 		return -ENXIO;
@@ -358,8 +350,7 @@ static int __init dtlk_init(void)
 static void __exit dtlk_cleanup (void)
 {
 	dtlk_write_bytes("goodbye", 8);
-	current->state = TASK_INTERRUPTIBLE;
-	schedule_timeout(5 * HZ / 10);		/* nap 0.50 sec but
+	msleep_interruptible(500);		/* nap 0.50 sec but
 						   could be awakened
 						   earlier by
 						   signals... */
@@ -374,13 +365,6 @@ module_init(dtlk_init);
 module_exit(dtlk_cleanup);
 
 /* ------------------------------------------------------------------------ */
-
-/* sleep for ms milliseconds */
-static void dtlk_delay(int ms)
-{
-	current->state = TASK_INTERRUPTIBLE;
-	schedule_timeout((ms * HZ + 1000 - HZ) / 1000);
-}
 
 static int dtlk_readable(void)
 {
@@ -438,7 +422,7 @@ static int __init dtlk_dev_probe(void)
 			/* posting an index takes 18 msec.  Here, we
 			   wait up to 100 msec to see whether it
 			   appears. */
-			dtlk_delay(100);
+			msleep_interruptible(100);
 			dtlk_has_indexing = dtlk_readable();
 #ifdef TRACING
 			printk(", indexing %d\n", dtlk_has_indexing);

@@ -136,7 +136,8 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void __user
 			if (!ptr)
 				goto out;
 			err = -EFAULT;
-			if(get_user(fourth.__pad, (void __user **)ptr))
+			if (get_user(fourth.__pad,
+				     (void __user * __user *)ptr))
 				goto out;
 			err = sys_semctl (first, second, third, fourth);
 			goto out;
@@ -165,7 +166,9 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void __user
 				goto out;
 				}
 			case 1: default:
-				err = sys_msgrcv (first, (struct msgbuf *) ptr, second, fifth, third);
+				err = sys_msgrcv (first,
+						  (struct msgbuf __user *) ptr,
+						  second, fifth, third);
 				goto out;
 			}
 		case MSGGET:
@@ -194,7 +197,7 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void __user
 				goto out;
 				}
 			case 1:	/* iBCS2 emulator entry point */
-				err = do_shmat (first, (char __user *) ptr, second, (ulong __user *) third);
+				err = -EINVAL;
 				goto out;
 			}
 		case SHMDT: 
@@ -371,7 +374,7 @@ sparc_breakpoint (struct pt_regs *regs)
 	info.si_signo = SIGTRAP;
 	info.si_errno = 0;
 	info.si_code = TRAP_BRKPT;
-	info.si_addr = (void *)regs->pc;
+	info.si_addr = (void __user *)regs->pc;
 	info.si_trapno = 0;
 	force_sig_info(SIGTRAP, &info, current);
 
@@ -396,7 +399,7 @@ sparc_sigaction (int sig, const struct old_sigaction __user *act,
 	if (act) {
 		unsigned long mask;
 
-		if (verify_area(VERIFY_READ, act, sizeof(*act)) ||
+		if (!access_ok(VERIFY_READ, act, sizeof(*act)) ||
 		    __get_user(new_ka.sa.sa_handler, &act->sa_handler) ||
 		    __get_user(new_ka.sa.sa_restorer, &act->sa_restorer))
 			return -EFAULT;
@@ -414,7 +417,7 @@ sparc_sigaction (int sig, const struct old_sigaction __user *act,
 		 * deadlock us if we held the signal lock on SMP.  So for
 		 * now I take the easy way out and do no locking.
 		 */
-		if (verify_area(VERIFY_WRITE, oact, sizeof(*oact)) ||
+		if (!access_ok(VERIFY_WRITE, oact, sizeof(*oact)) ||
 		    __put_user(old_ka.sa.sa_handler, &oact->sa_handler) ||
 		    __put_user(old_ka.sa.sa_restorer, &oact->sa_restorer))
 			return -EFAULT;

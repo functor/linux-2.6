@@ -29,7 +29,7 @@
 
 
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include "NCR53C9x.h"
 
 #include <linux/zorro.h>
@@ -71,8 +71,6 @@ static void dma_mmu_release_scsi_one(struct NCR_ESP *,Scsi_Cmnd *);
 static void dma_mmu_release_scsi_sgl(struct NCR_ESP *,Scsi_Cmnd *);
 static void dma_advance_sg(Scsi_Cmnd *);
 static int  oktagon_notify_reboot(struct notifier_block *this, unsigned long code, void *x);
-
-void esp_bootup_reset(struct NCR_ESP *esp,struct ESP_regs *eregs);
 
 #ifdef USE_BOTTOM_HALF
 static void dma_commit(void *opaque);

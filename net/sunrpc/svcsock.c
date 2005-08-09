@@ -31,7 +31,6 @@
 #include <linux/slab.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
-#include <linux/suspend.h>
 #include <net/sock.h>
 #include <net/checksum.h>
 #include <net/ip.h>
@@ -125,7 +124,7 @@ svc_sock_wspace(struct svc_sock *svsk)
 	int wspace;
 
 	if (svsk->sk_sock->type == SOCK_STREAM)
-		wspace = tcp_wspace(svsk->sk_sk);
+		wspace = sk_stream_wspace(svsk->sk_sk);
 	else
 		wspace = sock_wspace(svsk->sk_sk);
 
@@ -414,7 +413,6 @@ svc_sendto(struct svc_rqst *rqstp, struct xdr_buf *xdr)
 	}
 	/* send tail */
 	if (xdr->tail[0].iov_len) {
-		/* The tail *will* be in respages[0]; */
 		result = sock->ops->sendpage(sock, rqstp->rq_respages[rqstp->rq_restailpage], 
 					     ((unsigned long)xdr->tail[0].iov_base)& (PAGE_SIZE-1),
 					     xdr->tail[0].iov_len, 0);
@@ -451,9 +449,8 @@ svc_recv_available(struct svc_sock *svsk)
  * Generic recvfrom routine.
  */
 static int
-svc_recvfrom(struct svc_rqst *rqstp, struct iovec *iov, int nr, int buflen)
+svc_recvfrom(struct svc_rqst *rqstp, struct kvec *iov, int nr, int buflen)
 {
-	mm_segment_t	oldfs;
 	struct msghdr	msg;
 	struct socket	*sock;
 	int		len, alen;
@@ -463,16 +460,12 @@ svc_recvfrom(struct svc_rqst *rqstp, struct iovec *iov, int nr, int buflen)
 
 	msg.msg_name    = &rqstp->rq_addr;
 	msg.msg_namelen = sizeof(rqstp->rq_addr);
-	msg.msg_iov     = iov;
-	msg.msg_iovlen  = nr;
 	msg.msg_control = NULL;
 	msg.msg_controllen = 0;
 
 	msg.msg_flags	= MSG_DONTWAIT;
 
-	oldfs = get_fs(); set_fs(KERNEL_DS);
-	len = sock_recvmsg(sock, &msg, buflen, MSG_DONTWAIT);
-	set_fs(oldfs);
+	len = kernel_recvmsg(sock, &msg, iov, nr, buflen, MSG_DONTWAIT);
 
 	/* sock_recvmsg doesn't fill in the name/namelen, so we must..
 	 * possibly we should cache this in the svc_sock structure
@@ -899,7 +892,7 @@ svc_tcp_recvfrom(struct svc_rqst *rqstp)
 	struct svc_sock	*svsk = rqstp->rq_sock;
 	struct svc_serv	*serv = svsk->sk_server;
 	int		len;
-	struct iovec vec[RPCSVC_MAXPAGES];
+	struct kvec vec[RPCSVC_MAXPAGES];
 	int pnum, vlen;
 
 	dprintk("svc: tcp_recv %p data %d conn %d close %d\n",
@@ -943,7 +936,7 @@ svc_tcp_recvfrom(struct svc_rqst *rqstp)
 	 */
 	if (svsk->sk_tcplen < 4) {
 		unsigned long	want = 4 - svsk->sk_tcplen;
-		struct iovec	iov;
+		struct kvec	iov;
 
 		iov.iov_base = ((char *) &svsk->sk_reclen) + svsk->sk_tcplen;
 		iov.iov_len  = want;
@@ -1017,7 +1010,7 @@ svc_tcp_recvfrom(struct svc_rqst *rqstp)
 		rqstp->rq_arg.page_len = len - rqstp->rq_arg.head[0].iov_len;
 	}
 
-	rqstp->rq_skbuff      = 0;
+	rqstp->rq_skbuff      = NULL;
 	rqstp->rq_prot	      = IPPROTO_TCP;
 
 	/* Reset TCP read info */
@@ -1057,8 +1050,8 @@ svc_tcp_sendto(struct svc_rqst *rqstp)
 	int sent;
 	u32 reclen;
 
-	/* Set up the first element of the reply iovec.
-	 * Any other iovecs that may be in use have been taken
+	/* Set up the first element of the reply kvec.
+	 * Any other kvecs that may be in use have been taken
 	 * care of by the server implementation itself.
 	 */
 	reclen = htonl(0x80000000|((xbufp->len ) - 4));
@@ -1083,7 +1076,7 @@ static void
 svc_tcp_init(struct svc_sock *svsk)
 {
 	struct sock	*sk = svsk->sk_sk;
-	struct tcp_opt  *tp = tcp_sk(sk);
+	struct tcp_sock *tp = tcp_sk(sk);
 
 	svsk->sk_recvfrom = svc_tcp_recvfrom;
 	svsk->sk_sendto = svc_tcp_sendto;
@@ -1193,6 +1186,7 @@ svc_recv(struct svc_serv *serv, struct svc_rqst *rqstp, long timeout)
 	arg->len = (pages-1)*PAGE_SIZE;
 	arg->tail[0].iov_len = 0;
 	
+	try_to_freeze(PF_FREEZE);
 	if (signalled())
 		return -EINTR;
 
@@ -1233,8 +1227,7 @@ svc_recv(struct svc_serv *serv, struct svc_rqst *rqstp, long timeout)
 
 		schedule_timeout(timeout);
 
-		if (current->flags & PF_FREEZE)
-			refrigerator(PF_FREEZE);
+		try_to_freeze(PF_FREEZE);
 
 		spin_lock_bh(&serv->sv_lock);
 		remove_wait_queue(&rqstp->rq_wait, &wait);
@@ -1255,6 +1248,7 @@ svc_recv(struct svc_serv *serv, struct svc_rqst *rqstp, long timeout)
 
 	/* No data, incomplete (TCP) read, or accept() */
 	if (len == 0 || len == -EAGAIN) {
+		rqstp->rq_res.len = 0;
 		svc_sock_release(rqstp);
 		return -EAGAIN;
 	}
@@ -1511,9 +1505,9 @@ static void svc_revisit(struct cache_deferred_req *dreq, int too_many)
 	dprintk("revisit queued\n");
 	svsk = dr->svsk;
 	dr->svsk = NULL;
-	spin_lock(&serv->sv_lock);
+	spin_lock_bh(&serv->sv_lock);
 	list_add(&dr->handle.recent, &svsk->sk_deferred);
-	spin_unlock(&serv->sv_lock);
+	spin_unlock_bh(&serv->sv_lock);
 	set_bit(SK_DEFERRED, &svsk->sk_flags);
 	svc_sock_enqueue(svsk);
 	svc_sock_put(svsk);
@@ -1544,10 +1538,10 @@ svc_defer(struct cache_req *req)
 		dr->argslen = rqstp->rq_arg.len >> 2;
 		memcpy(dr->args, rqstp->rq_arg.head[0].iov_base-skip, dr->argslen<<2);
 	}
-	spin_lock(&rqstp->rq_server->sv_lock);
+	spin_lock_bh(&rqstp->rq_server->sv_lock);
 	rqstp->rq_sock->sk_inuse++;
 	dr->svsk = rqstp->rq_sock;
-	spin_unlock(&rqstp->rq_server->sv_lock);
+	spin_unlock_bh(&rqstp->rq_server->sv_lock);
 
 	dr->handle.revisit = svc_revisit;
 	return &dr->handle;
@@ -1577,7 +1571,7 @@ static struct svc_deferred_req *svc_deferred_dequeue(struct svc_sock *svsk)
 	
 	if (!test_bit(SK_DEFERRED, &svsk->sk_flags))
 		return NULL;
-	spin_lock(&serv->sv_lock);
+	spin_lock_bh(&serv->sv_lock);
 	clear_bit(SK_DEFERRED, &svsk->sk_flags);
 	if (!list_empty(&svsk->sk_deferred)) {
 		dr = list_entry(svsk->sk_deferred.next,
@@ -1586,6 +1580,6 @@ static struct svc_deferred_req *svc_deferred_dequeue(struct svc_sock *svsk)
 		list_del_init(&dr->handle.recent);
 		set_bit(SK_DEFERRED, &svsk->sk_flags);
 	}
-	spin_unlock(&serv->sv_lock);
+	spin_unlock_bh(&serv->sv_lock);
 	return dr;
 }

@@ -33,7 +33,7 @@
 #include <asm/system.h>
 
 #include "../scsi.h"
-#include "../hosts.h"
+#include <scsi/scsi_host.h>
 
 #define NCR5380_implementation_fields	int port, ctrl
 #define NCR5380_local_declare()		struct Scsi_Host *_instance
@@ -222,6 +222,7 @@ static void __exit ecoscsi_exit(void)
 
 	if (shpnt->irq != IRQ_NONE)
 		free_irq(shpnt->irq, NULL);
+	NCR5380_exit(host);
 	if (shpnt->io_port)
 		release_region(shpnt->io_port, shpnt->n_io_port);
 

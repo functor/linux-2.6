@@ -23,7 +23,7 @@
 #include <net/x25.h>
 
 struct list_head x25_route_list = LIST_HEAD_INIT(x25_route_list);
-rwlock_t x25_route_list_lock = RW_LOCK_UNLOCKED;
+DEFINE_RWLOCK(x25_route_list_lock);
 
 /*
  *	Add a new route.
@@ -174,7 +174,7 @@ struct x25_route *x25_get_route(struct x25_address *addr)
 /*
  *	Handle the ioctls that control the routing functions.
  */
-int x25_route_ioctl(unsigned int cmd, void *arg)
+int x25_route_ioctl(unsigned int cmd, void __user *arg)
 {
 	struct x25_route_struct rt;
 	struct net_device *dev;

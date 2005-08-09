@@ -108,7 +108,7 @@ typedef struct {
 #endif
 } efi_memory_desc_t;
 
-typedef int efi_freemem_callback_t (unsigned long start, unsigned long end, void *arg);
+typedef int (*efi_freemem_callback_t) (unsigned long start, unsigned long end, void *arg);
 
 /*
  * Types and defines for Time Services
@@ -289,6 +289,7 @@ efi_guid_unparse(efi_guid_t *guid, char *out)
 }
 
 extern void efi_init (void);
+extern void *efi_get_pal_addr (void);
 extern void efi_map_pal_code (void);
 extern void efi_map_memmap(void);
 extern void efi_memmap_walk (efi_freemem_callback_t callback, void *arg);
@@ -300,10 +301,34 @@ extern u64 efi_mem_attributes (unsigned long phys_addr);
 extern int __init efi_uart_console_only (void);
 extern void efi_initialize_iomem_resources(struct resource *code_resource,
 					struct resource *data_resource);
-extern efi_status_t phys_efi_get_time(efi_time_t *tm, efi_time_cap_t *tc);
 extern unsigned long __init efi_get_time(void);
 extern int __init efi_set_rtc_mmss(unsigned long nowtime);
 extern struct efi_memory_map memmap;
+
+/**
+ * efi_range_is_wc - check the WC bit on an address range
+ * @start: starting kvirt address
+ * @len: length of range
+ *
+ * Consult the EFI memory map and make sure it's ok to set this range WC.
+ * Returns true or false.
+ */
+static inline int efi_range_is_wc(unsigned long start, unsigned long len)
+{
+	int i;
+
+	for (i = 0; i < len; i += (1UL << EFI_PAGE_SHIFT)) {
+		unsigned long paddr = __pa(start + i);
+		if (!(efi_mem_attributes(paddr) & EFI_MEMORY_WC))
+			return 0;
+	}
+	/* The range checked out */
+	return 1;
+}
+
+#ifdef CONFIG_EFI_PCDP
+extern int __init efi_setup_pcdp_console(char *);
+#endif
 
 /*
  * We play games with efi_enabled so that the compiler will, if possible, remove
@@ -369,12 +394,5 @@ struct efi_generic_dev_path {
 	u8 sub_type;
 	u16 length;
 } __attribute ((packed));
-
-/*
- * efi_dir is allocated in arch/ia64/kernel/efi.c.
- */
-#ifdef CONFIG_PROC_FS
-extern struct proc_dir_entry *efi_dir;
-#endif
 
 #endif /* _LINUX_EFI_H */

@@ -68,7 +68,7 @@ static int max_irqs __pmacdata;
 static int max_real_irqs __pmacdata;
 static u32 level_mask[4] __pmacdata;
 
-static spinlock_t pmac_pic_lock __pmacdata = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(pmac_pic_lock __pmacdata);
 
 
 #define GATWICK_IRQ_POOL_SIZE        10
@@ -144,6 +144,22 @@ static void __pmac pmac_set_irq_mask(unsigned int irq_nr, int nokicklost)
 	spin_unlock_irqrestore(&pmac_pic_lock, flags);
 }
 
+/* When an irq gets requested for the first client, if it's an
+ * edge interrupt, we clear any previous one on the controller
+ */
+static unsigned int __pmac pmac_startup_irq(unsigned int irq_nr)
+{
+        unsigned long bit = 1UL << (irq_nr & 0x1f);
+        int i = irq_nr >> 5;
+
+	if ((irq_desc[irq_nr].status & IRQ_LEVEL) == 0)
+		out_le32(&pmac_irq_hw[i]->ack, bit);
+        set_bit(irq_nr, ppc_cached_irq_mask);
+        pmac_set_irq_mask(irq_nr, 0);
+
+	return 0;
+}
+
 static void __pmac pmac_mask_irq(unsigned int irq_nr)
 {
         clear_bit(irq_nr, ppc_cached_irq_mask);
@@ -168,25 +184,21 @@ static void __pmac pmac_end_irq(unsigned int irq_nr)
 
 
 struct hw_interrupt_type pmac_pic = {
-        " PMAC-PIC ",
-        NULL,
-        NULL,
-        pmac_unmask_irq,
-        pmac_mask_irq,
-        pmac_mask_and_ack_irq,
-        pmac_end_irq,
-        NULL
+	.typename	= " PMAC-PIC ",
+	.startup	= pmac_startup_irq,
+	.enable		= pmac_unmask_irq,
+	.disable	= pmac_mask_irq,
+	.ack		= pmac_mask_and_ack_irq,
+	.end		= pmac_end_irq,
 };
 
 struct hw_interrupt_type gatwick_pic = {
-	" GATWICK  ",
-	NULL,
-	NULL,
-	pmac_unmask_irq,
-	pmac_mask_irq,
-	pmac_mask_and_ack_irq,
-	pmac_end_irq,
-	NULL
+	.typename	= " GATWICK  ",
+	.startup	= pmac_startup_irq,
+	.enable		= pmac_unmask_irq,
+	.disable	= pmac_mask_irq,
+	.ack		= pmac_mask_and_ack_irq,
+	.end		= pmac_end_irq,
 };
 
 static irqreturn_t gatwick_action(int cpl, void *dev_id, struct pt_regs *regs)
@@ -202,7 +214,7 @@ static irqreturn_t gatwick_action(int cpl, void *dev_id, struct pt_regs *regs)
 		if (bits == 0)
 			continue;
 		irq += __ilog2(bits);
-		ppc_irq_dispatch_handler(regs, irq);
+		__do_IRQ(irq, regs);
 		return IRQ_HANDLED;
 	}
 	printk("gatwick irq not from gatwick pic\n");
@@ -260,7 +272,7 @@ pmac_fix_gatwick_interrupts(struct device_node *gw, int irq_base)
 					node->child->intrs = &gatwick_int_pool[count];
 					count += 3;
 				}
-				node->child->n_intrs = 3;			
+				node->child->n_intrs = 3;
 				node->child->intrs[0].line = 15+irq_base;
 				node->child->intrs[1].line =  4+irq_base;
 				node->child->intrs[2].line =  5+irq_base;
@@ -279,7 +291,7 @@ pmac_fix_gatwick_interrupts(struct device_node *gw, int irq_base)
 			node->intrs[0].line = 29+irq_base;
 			printk(KERN_INFO "irq: fixed media-bay on second controller (%d)\n",
 					node->intrs[0].line);
-		
+
 			ya_node = node->child;
 			while(ya_node)
 			{
@@ -371,10 +383,33 @@ static irqreturn_t k2u3_action(int cpl, void *dev_id, struct pt_regs *regs)
 
 	irq = openpic2_get_irq(regs);
 	if (irq != -1)
-		ppc_irq_dispatch_handler(regs, irq);
+		__do_IRQ(irq, regs);
 	return IRQ_HANDLED;
 }
+
+static struct irqaction k2u3_cascade_action = {
+	.handler	= k2u3_action,
+	.flags		= 0,
+	.mask		= CPU_MASK_NONE,
+	.name		= "U3->K2 Cascade",
+};
 #endif /* CONFIG_POWER4 */
+
+#ifdef CONFIG_XMON
+static struct irqaction xmon_action = {
+	.handler	= xmon_irq,
+	.flags		= 0,
+	.mask		= CPU_MASK_NONE,
+	.name		= "NMI - XMON"
+};
+#endif
+
+static struct irqaction gatwick_cascade_action = {
+	.handler	= gatwick_action,
+	.flags		= SA_INTERRUPT,
+	.mask		= CPU_MASK_NONE,
+	.name		= "cascade",
+};
 
 void __init pmac_pic_init(void)
 {
@@ -428,8 +463,9 @@ void __init pmac_pic_init(void)
 				OpenPIC_InitSenses = senses;
 				OpenPIC_NumInitSenses = 128;
 				openpic2_init(PMAC_OPENPIC2_OFFSET);
-				if (request_irq(irqctrler2->intrs[0].line, k2u3_action, 0,
-						"U3->K2 Cascade", NULL))
+
+				if (setup_irq(irqctrler2->intrs[0].line,
+					      &k2u3_cascade_action))
 					printk("Unable to get OpenPIC IRQ for cascade\n");
 			}
 #endif /* CONFIG_POWER4 */
@@ -443,8 +479,7 @@ void __init pmac_pic_init(void)
 				if (pswitch && pswitch->n_intrs) {
 					nmi_irq = pswitch->intrs[0].line;
 					openpic_init_nmi_irq(nmi_irq);
-					request_irq(nmi_irq, xmon_irq, 0,
-						    "NMI - XMON", 0);
+					setup_irq(nmi_irq, &xmon_action);
 				}
 			}
 #endif	/* CONFIG_XMON */
@@ -501,7 +536,7 @@ void __init pmac_pic_init(void)
 				pmac_irq_hw[i] = (volatile struct pmac_irq_hw*)
 					(addr + (2 - i) * 0x10);
 		}
-	
+
 		/* get addresses of second controller */
 		irqctrler = irqctrler->next;
 		if (irqctrler && irqctrler->n_addrs > 0) {
@@ -541,8 +576,7 @@ void __init pmac_pic_init(void)
 			(int)irq_cascade);
 		for ( i = max_real_irqs ; i < max_irqs ; i++ )
 			irq_desc[i].handler = &gatwick_pic;
-		request_irq( irq_cascade, gatwick_action, SA_INTERRUPT,
-			     "cascade", 0 );
+		setup_irq(irq_cascade, &gatwick_cascade_action);
 	}
 	printk("System has %d possible interrupts\n", max_irqs);
 	if (max_irqs != max_real_irqs)
@@ -550,7 +584,7 @@ void __init pmac_pic_init(void)
 			max_real_irqs);
 
 #ifdef CONFIG_XMON
-	request_irq(20, xmon_irq, 0, "NMI - XMON", 0);
+	setup_irq(20, &xmon_action);
 #endif	/* CONFIG_XMON */
 }
 

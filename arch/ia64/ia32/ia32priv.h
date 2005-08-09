@@ -1,5 +1,5 @@
-#ifndef _ASM_IA64_IA32_H
-#define _ASM_IA64_IA32_H
+#ifndef _ASM_IA64_IA32_PRIV_H
+#define _ASM_IA64_IA32_PRIV_H
 
 #include <linux/config.h>
 
@@ -9,6 +9,7 @@
 
 #include <linux/binfmts.h>
 #include <linux/compat.h>
+#include <linux/rbtree.h>
 
 #include <asm/processor.h>
 
@@ -16,11 +17,38 @@
  * 32 bit structures for IA32 support.
  */
 
-#define IA32_PAGE_SHIFT		12	/* 4KB pages */
 #define IA32_PAGE_SIZE		(1UL << IA32_PAGE_SHIFT)
 #define IA32_PAGE_MASK		(~(IA32_PAGE_SIZE - 1))
 #define IA32_PAGE_ALIGN(addr)	(((addr) + IA32_PAGE_SIZE - 1) & IA32_PAGE_MASK)
 #define IA32_CLOCKS_PER_SEC	100	/* Cast in stone for IA32 Linux */
+
+/*
+ * partially mapped pages provide precise accounting of which 4k sub pages
+ * are mapped and which ones are not, thereby improving IA-32 compatibility.
+ */
+struct partial_page {
+	struct partial_page	*next; /* linked list, sorted by address */
+	struct rb_node		pp_rb;
+	/* 64K is the largest "normal" page supported by ia64 ABI. So 4K*32
+	 * should suffice.*/
+	unsigned int		bitmap;
+	unsigned int		base;
+};
+
+struct partial_page_list {
+	struct partial_page	*pp_head; /* list head, points to the lowest
+					   * addressed partial page */
+	struct rb_root		ppl_rb;
+	struct partial_page	*pp_hint; /* pp_hint->next is the last
+					   * accessed partial page */
+	atomic_t		pp_count; /* reference count */
+};
+
+#if PAGE_SHIFT > IA32_PAGE_SHIFT
+struct partial_page_list* ia32_init_pp_list (void);
+#else
+# define ia32_init_pp_list()	0
+#endif
 
 /* sigcontext.h */
 /*
@@ -140,6 +168,9 @@ struct ia32_user_fxsr_struct {
 #define IA32_SA_HANDLER(ka)	((unsigned long) (ka)->sa.sa_handler & 0xffffffff)
 #define IA32_SA_RESTORER(ka)	((unsigned long) (ka)->sa.sa_handler >> 32)
 
+#define __IA32_NR_sigreturn 119
+#define __IA32_NR_rt_sigreturn 173
+
 struct sigaction32 {
        unsigned int sa_handler;		/* Really a pointer, but need to deal with 32 bits */
        unsigned int sa_flags;
@@ -194,14 +225,7 @@ struct stat64 {
 	unsigned int	st_ino_hi;
 };
 
-typedef union sigval32 {
-	int sival_int;
-	unsigned int sival_ptr;
-} sigval_t32;
-
-#define SIGEV_PAD_SIZE32 ((SIGEV_MAX_SIZE/sizeof(int)) - 3)
-
-typedef struct siginfo32 {
+typedef struct compat_siginfo {
 	int si_signo;
 	int si_errno;
 	int si_code;
@@ -220,7 +244,7 @@ typedef struct siginfo32 {
 			timer_t _tid;		/* timer id */
 			int _overrun;		/* overrun count */
 			char _pad[sizeof(unsigned int) - sizeof(int)];
-			sigval_t32 _sigval;	/* same as below */
+			compat_sigval_t _sigval;	/* same as below */
 			int _sys_private;       /* not to be passed to user */
 		} _timer;
 
@@ -228,7 +252,7 @@ typedef struct siginfo32 {
 		struct {
 			unsigned int _pid;	/* sender's pid */
 			unsigned int _uid;	/* sender's uid */
-			sigval_t32 _sigval;
+			compat_sigval_t _sigval;
 		} _rt;
 
 		/* SIGCHLD */
@@ -251,20 +275,7 @@ typedef struct siginfo32 {
 			int _fd;
 		} _sigpoll;
 	} _sifields;
-} siginfo_t32;
-
-typedef struct sigevent32 {
-	sigval_t32 sigev_value;
-	int sigev_signo;
-	int sigev_notify;
-	union {
-		int _pad[SIGEV_PAD_SIZE32];
-		struct {
-			u32 _function;
-			u32 _attribute; /* really pthread_attr_t */
-		} _sigev_thread;
-	} _sigev_un;
-} sigevent_t32;
+} compat_siginfo_t;
 
 struct old_linux32_dirent {
 	u32	d_ino;
@@ -296,14 +307,16 @@ struct old_linux32_dirent {
 
 #define IA32_PAGE_OFFSET	0xc0000000
 #define IA32_STACK_TOP		IA32_PAGE_OFFSET
+#define IA32_GATE_OFFSET	IA32_PAGE_OFFSET
+#define IA32_GATE_END		IA32_PAGE_OFFSET + PAGE_SIZE
 
 /*
  * The system segments (GDT, TSS, LDT) have to be mapped below 4GB so the IA-32 engine can
  * access them.
  */
-#define IA32_GDT_OFFSET		(IA32_PAGE_OFFSET)
-#define IA32_TSS_OFFSET		(IA32_PAGE_OFFSET + PAGE_SIZE)
-#define IA32_LDT_OFFSET		(IA32_PAGE_OFFSET + 2*PAGE_SIZE)
+#define IA32_GDT_OFFSET		(IA32_PAGE_OFFSET + PAGE_SIZE)
+#define IA32_TSS_OFFSET		(IA32_PAGE_OFFSET + 2*PAGE_SIZE)
+#define IA32_LDT_OFFSET		(IA32_PAGE_OFFSET + 3*PAGE_SIZE)
 
 #define ELF_EXEC_PAGESIZE	IA32_PAGE_SIZE
 
@@ -328,7 +341,7 @@ void ia64_elf32_init(struct pt_regs *regs);
 /* This macro yields a string that ld.so will use to load
    implementation specific libraries for optimization.  Not terribly
    relevant until we have real hardware to play with... */
-#define ELF_PLATFORM	0
+#define ELF_PLATFORM	NULL
 
 #ifdef __KERNEL__
 # define SET_PERSONALITY(EX,IBCS2)				\
@@ -406,7 +419,7 @@ void ia64_elf32_init(struct pt_regs *regs);
 	 | ((((sd) >> IA32_SEG_DB) & 0x1) << SEG_DB)						 \
 	 | ((((sd) >> IA32_SEG_G) & 0x1) << SEG_G))
 
-#define IA32_IOBASE	0x2000000000000000 /* Virtual address for I/O space */
+#define IA32_IOBASE	0x2000000000000000UL /* Virtual address for I/O space */
 
 #define IA32_CR0	0x80000001	/* Enable PG and PE bits */
 #define IA32_CR4	0x600		/* MMXEX and FXSR on */
@@ -523,9 +536,9 @@ struct user_regs_struct32 {
 };
 
 /* Prototypes for use in elfcore32.h */
-extern int save_ia32_fpstate (struct task_struct *tsk, struct ia32_user_i387_struct *save);
-extern int save_ia32_fpxstate (struct task_struct *tsk, struct ia32_user_fxsr_struct *save);
+extern int save_ia32_fpstate (struct task_struct *, struct ia32_user_i387_struct __user *);
+extern int save_ia32_fpxstate (struct task_struct *, struct ia32_user_fxsr_struct __user *);
 
 #endif /* !CONFIG_IA32_SUPPORT */
 
-#endif /* _ASM_IA64_IA32_H */
+#endif /* _ASM_IA64_IA32_PRIV_H */

@@ -56,7 +56,8 @@
 
 
 /* Module and Version Information */
-#define DRIVER_VERSION "v1.00 (28/02/2004)"
+#define DRIVER_VERSION "1.01"
+#define DRIVER_DATE "15 Mar 2005"
 #define DRIVER_AUTHOR "Wim Van Sebroeck <wim@iguana.be>"
 #define DRIVER_DESC "Berkshire USB-PC Watchdog driver"
 #define DRIVER_LICENSE "GPL"
@@ -226,7 +227,7 @@ static int usb_pcwd_send_command(struct usb_pcwd_private *usb_pcwd, unsigned cha
 	if (usb_control_msg(usb_pcwd->udev, usb_sndctrlpipe(usb_pcwd->udev, 0),
 			HID_REQ_SET_REPORT, HID_DT_REPORT,
 			0x0200, usb_pcwd->interface_number, buf, sizeof(buf),
-			HZ) != sizeof(buf)) {
+			USB_COMMAND_TIMEOUT) != sizeof(buf)) {
 		dbg("usb_pcwd_send_command: error in usb_control_msg for cmd 0x%x 0x%x 0x%x\n", cmd, *msb, *lsb);
 	}
 	/* wait till the usb card processed the command,
@@ -325,13 +326,9 @@ static int usb_pcwd_get_temperature(struct usb_pcwd_private *usb_pcwd, int *temp
  *	/dev/watchdog handling
  */
 
-static ssize_t usb_pcwd_write(struct file *file, const char *data,
+static ssize_t usb_pcwd_write(struct file *file, const char __user *data,
 			      size_t len, loff_t *ppos)
 {
-	/* Can't seek (pwrite) on this device  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
-
 	/* See if we got the magic character 'V' and reload the timer */
 	if (len) {
 		if (!nowayout) {
@@ -360,6 +357,8 @@ static ssize_t usb_pcwd_write(struct file *file, const char *data,
 static int usb_pcwd_ioctl(struct inode *inode, struct file *file,
 			  unsigned int cmd, unsigned long arg)
 {
+	void __user *argp = (void __user *)arg;
+	int __user *p = argp;
 	static struct watchdog_info ident = {
 		.options =		WDIOF_KEEPALIVEPING |
 					WDIOF_SETTIMEOUT |
@@ -370,12 +369,12 @@ static int usb_pcwd_ioctl(struct inode *inode, struct file *file,
 
 	switch (cmd) {
 		case WDIOC_GETSUPPORT:
-			return copy_to_user((struct watchdog_info *) arg, &ident,
+			return copy_to_user(argp, &ident,
 				sizeof (ident)) ? -EFAULT : 0;
 
 		case WDIOC_GETSTATUS:
 		case WDIOC_GETBOOTSTATUS:
-			return put_user(0, (int *) arg);
+			return put_user(0, p);
 
 		case WDIOC_GETTEMP:
 		{
@@ -384,7 +383,7 @@ static int usb_pcwd_ioctl(struct inode *inode, struct file *file,
 			if (usb_pcwd_get_temperature(usb_pcwd_device, &temperature))
 				return -EFAULT;
 
-			return put_user(temperature, (int *) arg);
+			return put_user(temperature, p);
 		}
 
 		case WDIOC_KEEPALIVE:
@@ -395,7 +394,7 @@ static int usb_pcwd_ioctl(struct inode *inode, struct file *file,
 		{
 			int new_options, retval = -EINVAL;
 
-			if (get_user (new_options, (int *) arg))
+			if (get_user (new_options, p))
 				return -EFAULT;
 
 			if (new_options & WDIOS_DISABLECARD) {
@@ -415,7 +414,7 @@ static int usb_pcwd_ioctl(struct inode *inode, struct file *file,
 		{
 			int new_heartbeat;
 
-			if (get_user(new_heartbeat, (int *) arg))
+			if (get_user(new_heartbeat, p))
 				return -EFAULT;
 
 			if (usb_pcwd_set_heartbeat(usb_pcwd_device, new_heartbeat))
@@ -426,7 +425,7 @@ static int usb_pcwd_ioctl(struct inode *inode, struct file *file,
 		}
 
 		case WDIOC_GETTIMEOUT:
-			return put_user(heartbeat, (int *)arg);
+			return put_user(heartbeat, p);
 
 		default:
 			return -ENOIOCTLCMD;
@@ -442,7 +441,7 @@ static int usb_pcwd_open(struct inode *inode, struct file *file)
 	/* Activate */
 	usb_pcwd_start(usb_pcwd_device);
 	usb_pcwd_keepalive(usb_pcwd_device);
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int usb_pcwd_release(struct inode *inode, struct file *file)
@@ -456,8 +455,8 @@ static int usb_pcwd_release(struct inode *inode, struct file *file)
 		printk(KERN_CRIT PFX "Unexpected close, not stopping watchdog!\n");
 		usb_pcwd_keepalive(usb_pcwd_device);
 	}
-	clear_bit(0, &is_active);
 	expect_release = 0;
+	clear_bit(0, &is_active);
 	return 0;
 }
 
@@ -465,19 +464,15 @@ static int usb_pcwd_release(struct inode *inode, struct file *file)
  *	/dev/temperature handling
  */
 
-static ssize_t usb_pcwd_temperature_read(struct file *file, char *data,
+static ssize_t usb_pcwd_temperature_read(struct file *file, char __user *data,
 				size_t len, loff_t *ppos)
 {
 	int temperature;
 
-	/* Can't seek (pwrite) on this device  */
-	if (ppos != &file->f_pos)
-		return -ESPIPE;
-
 	if (usb_pcwd_get_temperature(usb_pcwd_device, &temperature))
 		return -EFAULT;
 
-	if (copy_to_user (data, &temperature, 1))
+	if (copy_to_user(data, &temperature, 1))
 		return -EFAULT;
 
 	return 1;
@@ -485,7 +480,7 @@ static ssize_t usb_pcwd_temperature_read(struct file *file, char *data,
 
 static int usb_pcwd_temperature_open(struct inode *inode, struct file *file)
 {
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static int usb_pcwd_temperature_release(struct inode *inode, struct file *file)
@@ -576,12 +571,6 @@ static int usb_pcwd_probe(struct usb_interface *interface, const struct usb_devi
 	char fw_ver_str[20];
 	unsigned char option_switches, dummy;
 
-	/* See if the device offered us matches what we can accept */
-	if ((udev->descriptor.idVendor != USB_PCWD_VENDOR_ID) ||
-	    (udev->descriptor.idProduct != USB_PCWD_PRODUCT_ID)) {
-		return -ENODEV;
-	}
-
 	cards_found++;
 	if (cards_found > 1) {
 		printk(KERN_ERR PFX "This driver only supports 1 device\n");
@@ -626,7 +615,7 @@ static int usb_pcwd_probe(struct usb_interface *interface, const struct usb_devi
 	usb_pcwd->udev = udev;
 	usb_pcwd->interface = interface;
 	usb_pcwd->interface_number = iface_desc->desc.bInterfaceNumber;
-	usb_pcwd->intr_size = (endpoint->wMaxPacketSize > 8 ? endpoint->wMaxPacketSize : 8);
+	usb_pcwd->intr_size = (le16_to_cpu(endpoint->wMaxPacketSize) > 8 ? le16_to_cpu(endpoint->wMaxPacketSize) : 8);
 
 	/* set up the memory buffer's */
 	if (!(usb_pcwd->intr_buffer = usb_buffer_alloc(udev, usb_pcwd->intr_size, SLAB_ATOMIC, &usb_pcwd->intr_dma))) {
@@ -681,14 +670,11 @@ static int usb_pcwd_probe(struct usb_interface *interface, const struct usb_devi
 		((option_switches & 0x08) ? "ON" : "OFF"));
 
 	/* Check that the heartbeat value is within it's range ; if not reset to the default */
-	if (heartbeat < 1 || heartbeat > 0xFFFF) {
-		heartbeat = WATCHDOG_HEARTBEAT;
+	if (usb_pcwd_set_heartbeat(usb_pcwd, heartbeat)) {
+		usb_pcwd_set_heartbeat(usb_pcwd, WATCHDOG_HEARTBEAT);
 		printk(KERN_INFO PFX "heartbeat value must be 0<heartbeat<65536, using %d\n",
-			heartbeat);
+			WATCHDOG_HEARTBEAT);
 	}
-
-	/* Calculate the watchdog's heartbeat */
-	usb_pcwd_set_heartbeat(usb_pcwd, heartbeat);
 
 	retval = register_reboot_notifier(&usb_pcwd_notifier);
 	if (retval != 0) {
@@ -697,17 +683,17 @@ static int usb_pcwd_probe(struct usb_interface *interface, const struct usb_devi
 		goto error;
 	}
 
-	retval = misc_register(&usb_pcwd_miscdev);
-	if (retval != 0) {
-		printk(KERN_ERR PFX "cannot register miscdev on minor=%d (err=%d)\n",
-			WATCHDOG_MINOR, retval);
-		goto err_out_unregister_reboot;
-	}
-
 	retval = misc_register(&usb_pcwd_temperature_miscdev);
 	if (retval != 0) {
 		printk(KERN_ERR PFX "cannot register miscdev on minor=%d (err=%d)\n",
 			TEMP_MINOR, retval);
+		goto err_out_unregister_reboot;
+	}
+
+	retval = misc_register(&usb_pcwd_miscdev);
+	if (retval != 0) {
+		printk(KERN_ERR PFX "cannot register miscdev on minor=%d (err=%d)\n",
+			WATCHDOG_MINOR, retval);
 		goto err_out_misc_deregister;
 	}
 
@@ -720,7 +706,7 @@ static int usb_pcwd_probe(struct usb_interface *interface, const struct usb_devi
 	return 0;
 
 err_out_misc_deregister:
-	misc_deregister(&usb_pcwd_miscdev);
+	misc_deregister(&usb_pcwd_temperature_miscdev);
 err_out_unregister_reboot:
 	unregister_reboot_notifier(&usb_pcwd_notifier);
 error:
@@ -758,8 +744,8 @@ static void usb_pcwd_disconnect(struct usb_interface *interface)
 	usb_pcwd->exists = 0;
 
 	/* Deregister */
-	misc_deregister(&usb_pcwd_temperature_miscdev);
 	misc_deregister(&usb_pcwd_miscdev);
+	misc_deregister(&usb_pcwd_temperature_miscdev);
 	unregister_reboot_notifier(&usb_pcwd_notifier);
 
 	up (&usb_pcwd->sem);
@@ -791,7 +777,7 @@ static int __init usb_pcwd_init(void)
 		return result;
 	}
 
-	printk(KERN_INFO PFX DRIVER_DESC " " DRIVER_VERSION "\n");
+	printk(KERN_INFO PFX DRIVER_DESC " v" DRIVER_VERSION " (" DRIVER_DATE ")\n");
 	return 0;
 }
 

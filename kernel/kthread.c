@@ -11,7 +11,14 @@
 #include <linux/err.h>
 #include <linux/unistd.h>
 #include <linux/file.h>
+#include <linux/module.h>
 #include <asm/semaphore.h>
+
+/*
+ * We dont want to execute off keventd since it might
+ * hold a semaphore our callers hold too:
+ */
+static struct workqueue_struct *helper_wq;
 
 struct kthread_create_info
 {
@@ -41,7 +48,7 @@ int kthread_should_stop(void)
 {
 	return (kthread_stop_info.k == current);
 }
-
+EXPORT_SYMBOL(kthread_should_stop);
 
 static void kthread_exit_files(void)
 {
@@ -64,7 +71,6 @@ static int kthread(void *_create)
 	void *data;
 	sigset_t blocked;
 	int ret = -EINTR;
-	cpumask_t mask = CPU_MASK_ALL;
 
 	kthread_exit_files();
 
@@ -78,7 +84,7 @@ static int kthread(void *_create)
 	flush_signals(current);
 
 	/* By default we can run anywhere, unlike keventd. */
-	set_cpus_allowed(current, mask);
+	set_cpus_allowed(current, CPU_MASK_ALL);
 
 	/* OK, tell user we're spawned, wait for stop or wakeup */
 	__set_current_state(TASK_INTERRUPTIBLE);
@@ -126,12 +132,13 @@ struct task_struct *kthread_create(int (*threadfn)(void *data),
 	init_completion(&create.started);
 	init_completion(&create.done);
 
-	/* If we're being called to start the first workqueue, we
-	 * can't use keventd. */
-	if (!keventd_up())
+	/*
+	 * The workqueue needs to start up first:
+	 */
+	if (!helper_wq)
 		work.func(work.data);
 	else {
-		schedule_work(&work);
+		queue_work(helper_wq, &work);
 		wait_for_completion(&create.done);
 	}
 	if (!IS_ERR(create.result)) {
@@ -144,6 +151,7 @@ struct task_struct *kthread_create(int (*threadfn)(void *data),
 
 	return create.result;
 }
+EXPORT_SYMBOL(kthread_create);
 
 void kthread_bind(struct task_struct *k, unsigned int cpu)
 {
@@ -153,6 +161,7 @@ void kthread_bind(struct task_struct *k, unsigned int cpu)
 	set_task_cpu(k, cpu);
 	k->cpus_allowed = cpumask_of_cpu(cpu);
 }
+EXPORT_SYMBOL(kthread_bind);
 
 int kthread_stop(struct task_struct *k)
 {
@@ -165,7 +174,7 @@ int kthread_stop(struct task_struct *k)
 
 	/* Must init completion *before* thread sees kthread_stop_info.k */
 	init_completion(&kthread_stop_info.done);
-	wmb();
+	smp_wmb();
 
 	/* Now set kthread_should_stop() to true, and wake it up. */
 	kthread_stop_info.k = k;
@@ -180,3 +189,14 @@ int kthread_stop(struct task_struct *k)
 
 	return ret;
 }
+EXPORT_SYMBOL(kthread_stop);
+
+static __init int helper_init(void)
+{
+	helper_wq = create_singlethread_workqueue("kthread");
+	BUG_ON(!helper_wq);
+
+	return 0;
+}
+core_initcall(helper_init);
+

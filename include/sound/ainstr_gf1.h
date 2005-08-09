@@ -203,15 +203,13 @@ typedef struct gf1_info {
 
 #include "seq_instr.h"
 
-extern char *snd_seq_gf1_id;
-
 typedef struct {
 	void *private_data;
 	int (*info)(void *private_data, gf1_info_t *info);
 	int (*put_sample)(void *private_data, gf1_wave_t *wave,
-	                  char *data, long len, int atomic);
+	                  char __user *data, long len, int atomic);
 	int (*get_sample)(void *private_data, gf1_wave_t *wave,
-			  char *data, long len, int atomic);
+			  char __user *data, long len, int atomic);
 	int (*remove_sample)(void *private_data, gf1_wave_t *wave,
 			     int atomic);
 	void (*notify)(void *private_data, snd_seq_kinstr_t *instr, int what);

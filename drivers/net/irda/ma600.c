@@ -184,7 +184,7 @@ static int ma600_change_speed(struct irda_task *task)
 
 	if (self->speed_task && self->speed_task != task) {
 		IRDA_DEBUG(0, "%s(), busy!\n", __FUNCTION__);
-		return MSECS_TO_JIFFIES(10);
+		return msecs_to_jiffies(10);
 	} else {
 		self->speed_task = task;
 	}
@@ -202,14 +202,15 @@ static int ma600_change_speed(struct irda_task *task)
 			irda_task_next_state(task, IRDA_TASK_CHILD_WAIT);
 	
 			/* give 1 second to finish */
-			ret = MSECS_TO_JIFFIES(1000);
+			ret = msecs_to_jiffies(1000);
 		} else {
 			irda_task_next_state(task, IRDA_TASK_CHILD_DONE);
 		}
 		break;
 
 	case IRDA_TASK_CHILD_WAIT:
-		WARNING("%s(), resetting dongle timed out!\n", __FUNCTION__);
+		IRDA_WARNING("%s(), resetting dongle timed out!\n",
+			     __FUNCTION__);
 		ret = -1;
 		break;
 
@@ -217,7 +218,7 @@ static int ma600_change_speed(struct irda_task *task)
 		/* Set DTR, Clear RTS */
 		self->set_dtr_rts(self->dev, TRUE, FALSE);
 	
-		ret = MSECS_TO_JIFFIES(1);		/* Sleep 1 ms */
+		ret = msecs_to_jiffies(1);		/* Sleep 1 ms */
 		irda_task_next_state(task, IRDA_TASK_WAIT);
 		break;
 
@@ -231,7 +232,7 @@ static int ma600_change_speed(struct irda_task *task)
 		irda_task_next_state(task, IRDA_TASK_WAIT1);
 
 		/* Wait at least 10 ms */
-		ret = MSECS_TO_JIFFIES(15);
+		ret = msecs_to_jiffies(15);
 		break;
 
 	case IRDA_TASK_WAIT1:
@@ -258,7 +259,7 @@ static int ma600_change_speed(struct irda_task *task)
 		irda_task_next_state(task, IRDA_TASK_WAIT2);
 
 		/* Wait at least 10 ms */
-		ret = MSECS_TO_JIFFIES(10);
+		ret = msecs_to_jiffies(10);
 		break;
 
 	case IRDA_TASK_WAIT2:
@@ -267,7 +268,8 @@ static int ma600_change_speed(struct irda_task *task)
 		break;
 
 	default:
-		ERROR("%s(), unknown state %d\n", __FUNCTION__, task->state);
+		IRDA_ERROR("%s(), unknown state %d\n",
+			   __FUNCTION__, task->state);
 		irda_task_next_state(task, IRDA_TASK_DONE);
 		self->speed_task = NULL;
 		ret = -1;
@@ -298,7 +300,7 @@ int ma600_reset(struct irda_task *task)
 
 	if (self->reset_task && self->reset_task != task) {
 		IRDA_DEBUG(0, "%s(), busy!\n", __FUNCTION__);
-		return MSECS_TO_JIFFIES(10);
+		return msecs_to_jiffies(10);
 	} else
 		self->reset_task = task;
 	
@@ -307,20 +309,21 @@ int ma600_reset(struct irda_task *task)
 		/* Clear DTR and Set RTS */
 		self->set_dtr_rts(self->dev, FALSE, TRUE);
 		irda_task_next_state(task, IRDA_TASK_WAIT1);
-		ret = MSECS_TO_JIFFIES(10);		/* Sleep 10 ms */
+		ret = msecs_to_jiffies(10);		/* Sleep 10 ms */
 		break;
 	case IRDA_TASK_WAIT1:
 		/* Set DTR and RTS */
 		self->set_dtr_rts(self->dev, TRUE, TRUE);
 		irda_task_next_state(task, IRDA_TASK_WAIT2);
-		ret = MSECS_TO_JIFFIES(10);		/* Sleep 10 ms */
+		ret = msecs_to_jiffies(10);		/* Sleep 10 ms */
 		break;
 	case IRDA_TASK_WAIT2:
 		irda_task_next_state(task, IRDA_TASK_DONE);
 		self->reset_task = NULL;
 		break;
 	default:
-		ERROR("%s(), unknown state %d\n", __FUNCTION__, task->state);
+		IRDA_ERROR("%s(), unknown state %d\n",
+			   __FUNCTION__, task->state);
 		irda_task_next_state(task, IRDA_TASK_DONE);		
 		self->reset_task = NULL;
 		ret = -1;

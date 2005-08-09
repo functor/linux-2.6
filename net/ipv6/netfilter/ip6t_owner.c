@@ -92,8 +92,7 @@ match(const struct sk_buff *skb,
       const struct net_device *out,
       const void *matchinfo,
       int offset,
-      const void *hdr,
-      u_int16_t datalen,
+      unsigned int protoff,
       int *hotdrop)
 {
 	const struct ip6t_owner_info *info = matchinfo;
@@ -143,7 +142,14 @@ checkentry(const char *tablename,
 
 	if (matchsize != IP6T_ALIGN(sizeof(struct ip6t_owner_info)))
 		return 0;
-
+#ifdef CONFIG_SMP
+	/* files->file_lock can not be used in a BH */
+	if (((struct ip6t_owner_info *)matchinfo)->match
+	    & (IP6T_OWNER_PID|IP6T_OWNER_SID)) {
+		printk("ip6t_owner: pid and sid matching is broken on SMP.\n");
+		return 0;
+	}
+#endif
 	return 1;
 }
 

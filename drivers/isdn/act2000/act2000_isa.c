@@ -18,13 +18,6 @@
 
 static act2000_card *irq2card_map[16];
 
-static void
-act2000_isa_delay(long t)
-{
-        set_current_state(TASK_INTERRUPTIBLE);
-        schedule_timeout(t);
-}
-
 /*
  * Reset Controller, then try to read the Card's signature.
  + Return:
@@ -405,27 +398,26 @@ act2000_isa_getid(act2000_card * card)
  * Download microcode into card, check Firmware signature.
  */
 int
-act2000_isa_download(act2000_card * card, act2000_ddef * cb)
+act2000_isa_download(act2000_card * card, act2000_ddef __user * cb)
 {
         unsigned int length;
-        int ret;
         int l;
         int c;
         long timeout;
         u_char *b;
-        u_char *p;
+        u_char __user *p;
         u_char *buf;
         act2000_ddef cblock;
 
         if (!act2000_isa_reset(card->port))
                 return -ENXIO;
-        act2000_isa_delay(HZ / 2);
-        if(copy_from_user(&cblock, (char *) cb, sizeof(cblock)))
+        msleep_interruptible(500);
+        if (copy_from_user(&cblock, cb, sizeof(cblock)))
         	return -EFAULT;
         length = cblock.length;
         p = cblock.buffer;
-        if ((ret = verify_area(VERIFY_READ, (void *) p, length)))
-                return ret;
+        if (!access_ok(VERIFY_READ, p, length))
+                return -EFAULT;
         buf = (u_char *) kmalloc(1024, GFP_KERNEL);
         if (!buf)
                 return -ENOMEM;
@@ -434,7 +426,10 @@ act2000_isa_download(act2000_card * card, act2000_ddef * cb)
                 l = (length > 1024) ? 1024 : length;
                 c = 0;
                 b = buf;
-                copy_from_user(buf, p, l);
+                if (copy_from_user(buf, p, l)) {
+                        kfree(buf);
+                        return -EFAULT;
+                }
                 while (c < l) {
                         if (act2000_isa_writeb(card, *b++)) {
                                 printk(KERN_WARNING
@@ -449,6 +444,6 @@ act2000_isa_download(act2000_card * card, act2000_ddef * cb)
                 p += l;
         }
         kfree(buf);
-        act2000_isa_delay(HZ / 2);
+        msleep_interruptible(500);
         return (act2000_isa_getid(card));
 }

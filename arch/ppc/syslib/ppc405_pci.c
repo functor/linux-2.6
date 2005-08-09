@@ -57,14 +57,6 @@ ppc405_pcibios_fixup_resources(struct pci_dev *dev)
 		    )
 		    ) {
 
-			DBG(KERN_ERR "PCI: 0x%lx <= resource[%d] <= 0x%lx"
-			    ", bus 0x%x dev 0x%2.2x.%1.1x,\n"
-			    KERN_ERR "  %s\n"
-			    KERN_ERR "  fixup will be attempted later\n",
-			    min_host_addr, i, max_host_addr,
-			    dev->bus->number, PCI_SLOT(dev->devfn),
-			    PCI_FUNC(dev->devfn), dev->slot.name);
-
 			/* force pcibios_assign_resources() to assign a new address */
 			res->end -= res->start;
 			res->start = 0;
@@ -90,8 +82,8 @@ ppc4xx_find_bridges(void)
 	unsigned int tmp_addr;
 	unsigned int tmp_size;
 	unsigned int reg_index;
-	unsigned int new_pmm_max;
-	unsigned int new_pmm_min;
+	unsigned int new_pmm_max = 0;
+	unsigned int new_pmm_min = 0;
 
 	isa_io_base = 0;
 	isa_mem_base = 0;

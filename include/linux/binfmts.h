@@ -35,8 +35,18 @@ struct linux_binprm{
 	char * interp;		/* Name of the binary really executed. Most
 				   of the time same as filename, but could be
 				   different for binfmt_{misc,script} */
+	unsigned interp_flags;
+	unsigned interp_data;
 	unsigned long loader, exec;
 };
+
+#define BINPRM_FLAGS_ENFORCE_NONDUMP_BIT 0
+#define BINPRM_FLAGS_ENFORCE_NONDUMP (1 << BINPRM_FLAGS_ENFORCE_NONDUMP_BIT)
+
+/* fd of the binary should be passed to the interpreter */
+#define BINPRM_FLAGS_EXECFD_BIT 1
+#define BINPRM_FLAGS_EXECFD (1 << BINPRM_FLAGS_EXECFD_BIT)
+
 
 /*
  * This structure defines the functions that are used to load the binary formats that
@@ -64,8 +74,9 @@ extern int flush_old_exec(struct linux_binprm * bprm);
 #define EXSTACK_DISABLE_X 1	/* Disable executable stacks */
 #define EXSTACK_ENABLE_X  2	/* Enable executable stacks */
 
-extern int setup_arg_pages(struct linux_binprm * bprm, int executable_stack);
-extern int copy_strings(int argc,char __user * __user * argv,struct linux_binprm *bprm); 
+extern int setup_arg_pages(struct linux_binprm * bprm,
+			   unsigned long stack_top,
+			   int executable_stack);
 extern int copy_strings_kernel(int argc,char ** argv,struct linux_binprm *bprm);
 extern void compute_creds(struct linux_binprm *binprm);
 extern int do_coredump(long signr, int exit_code, struct pt_regs * regs);

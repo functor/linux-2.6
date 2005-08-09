@@ -37,25 +37,9 @@
 #include <linux/seq_file.h>
 
 static ax25_route *ax25_route_list;
-static rwlock_t ax25_route_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(ax25_route_lock);
 
 static ax25_route *ax25_get_route(ax25_address *, struct net_device *);
-
-/*
- * small macro to drop non-digipeated digipeaters and reverse path
- */
-static inline void ax25_route_invert(ax25_digi *in, ax25_digi *out)
-{
-	int k;
-
-	for (k = 0; k < in->ndigi; k++)
-		if (!in->repeated[k])
-			break;
-
-	in->ndigi = k;
-
-	ax25_digi_invert(in, out);
-}
 
 void ax25_rt_device_down(struct net_device *dev)
 {
@@ -122,6 +106,7 @@ static int ax25_rt_add(struct ax25_routes_struct *route)
 					ax25_rt->digipeat->calls[i]    = route->digi_addr[i];
 				}
 			}
+			write_unlock(&ax25_route_lock);
 			return 0;
 		}
 		ax25_rt = ax25_rt->next;
@@ -253,7 +238,7 @@ out:
 	return err;
 }
 
-int ax25_rt_ioctl(unsigned int cmd, void *arg)
+int ax25_rt_ioctl(unsigned int cmd, void __user *arg)
 {
 	struct ax25_route_opt_struct rt_option;
 	struct ax25_routes_struct route;
@@ -470,7 +455,7 @@ int ax25_rt_autobind(ax25_cb *ax25, ax25_address *addr)
 
 	if (ax25->sk != NULL) {
 		bh_lock_sock(ax25->sk);
-		ax25->sk->sk_zapped = 0;
+		sock_reset_flag(ax25->sk, SOCK_ZAPPED);
 		bh_unlock_sock(ax25->sk);
 	}
 

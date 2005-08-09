@@ -281,8 +281,22 @@
 #define __NR_utimes		271
 #define __NR_fadvise64_64	272
 #define __NR_vserver		273
+#define __NR_mbind              274
+#define __NR_get_mempolicy      275
+#define __NR_set_mempolicy      276
+#define __NR_mq_open            277
+#define __NR_mq_unlink          (__NR_mq_open+1)
+#define __NR_mq_timedsend       (__NR_mq_open+2)
+#define __NR_mq_timedreceive    (__NR_mq_open+3)
+#define __NR_mq_notify          (__NR_mq_open+4)
+#define __NR_mq_getsetattr      (__NR_mq_open+5)
+#define __NR_sys_kexec_load	283
+#define __NR_waitid		284
+#define __NR_add_key		285
+#define __NR_request_key	286
+#define __NR_keyctl		287
 
-#define NR_syscalls 274
+#define NR_syscalls 288
 
 /* user-visible error numbers are in the range -1 - -124: see <asm-sh/errno.h> */
 
@@ -400,10 +414,36 @@ __asm__ __volatile__ ("trapa	#0x15" \
 __syscall_return(type,__sc0); \
 }
 
+#ifdef __KERNEL__
+#define __ARCH_WANT_IPC_PARSE_VERSION
+#define __ARCH_WANT_OLD_READDIR
+#define __ARCH_WANT_OLD_STAT
+#define __ARCH_WANT_STAT64
+#define __ARCH_WANT_SYS_ALARM
+#define __ARCH_WANT_SYS_GETHOSTNAME
+#define __ARCH_WANT_SYS_PAUSE
+#define __ARCH_WANT_SYS_SGETMASK
+#define __ARCH_WANT_SYS_SIGNAL
+#define __ARCH_WANT_SYS_TIME
+#define __ARCH_WANT_SYS_UTIME
+#define __ARCH_WANT_SYS_WAITPID
+#define __ARCH_WANT_SYS_SOCKETCALL
+#define __ARCH_WANT_SYS_FADVISE64
+#define __ARCH_WANT_SYS_GETPGRP
+#define __ARCH_WANT_SYS_LLSEEK
+#define __ARCH_WANT_SYS_NICE
+#define __ARCH_WANT_SYS_OLD_GETRLIMIT
+#define __ARCH_WANT_SYS_OLDUMOUNT
+#define __ARCH_WANT_SYS_SIGPENDING
+#define __ARCH_WANT_SYS_SIGPROCMASK
+#define __ARCH_WANT_SYS_RT_SIGACTION
+#endif
+
 #ifdef __KERNEL_SYSCALLS__
 
 #include <linux/compiler.h>
 #include <linux/types.h>
+#include <linux/linkage.h>
 #include <asm/ptrace.h>
 
 /*
@@ -429,7 +469,6 @@ static __inline__ _syscall1(int,dup,int,fd)
 static __inline__ _syscall3(int,execve,const char *,file,char **,argv,char **,envp)
 static __inline__ _syscall3(int,open,const char *,file,int,flag,int,mode)
 static __inline__ _syscall1(int,close,int,fd)
-static __inline__ _syscall1(int,_exit,int,exitcode)
 static __inline__ _syscall3(pid_t,waitpid,pid_t,pid,int *,wait_stat,int,options)
 static __inline__ _syscall1(int,delete_module,const char *,name)
 
@@ -478,7 +517,7 @@ asmlinkage long sys_rt_sigaction(int sig,
  * but it doesn't work on all toolchains, so we just do it by hand
  */
 #ifndef cond_syscall
-#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall");
+#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
 #endif
 
 #endif /* __ASM_SH_UNISTD_H */

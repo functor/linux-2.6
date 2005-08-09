@@ -11,18 +11,18 @@
 /*
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or 
+ * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- * 
+ *
  * Should you need to contact me, the author, you can do so either by
  * e-mail - mail your message to <vojtech@ucw.cz>, or by paper mail:
  * Vojtech Pavlik, Simunkova 1594, Prague 8, 182 00 Czech Republic
@@ -37,8 +37,10 @@
 #include <linux/serio.h>
 #include <linux/workqueue.h>
 
+#define DRIVER_DESC	"Sun keyboard driver"
+
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@ucw.cz>");
-MODULE_DESCRIPTION("Sun keyboard driver");
+MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
 
 static unsigned char sunkbd_keycode[128] = {
@@ -81,8 +83,8 @@ struct sunkbd {
 	char name[64];
 	char phys[32];
 	char type;
-	volatile char reset;
-	volatile char layout;
+	volatile s8 reset;
+	volatile s8 layout;
 };
 
 /*
@@ -93,7 +95,7 @@ struct sunkbd {
 static irqreturn_t sunkbd_interrupt(struct serio *serio,
 		unsigned char data, unsigned int flags, struct pt_regs *regs)
 {
-	struct sunkbd* sunkbd = serio->private;
+	struct sunkbd* sunkbd = serio_get_drvdata(serio);
 
 	if (sunkbd->reset <= -1) {		/* If cp[i] is 0xff, sunkbd->reset will stay -1. */
 		sunkbd->reset = data;		/* The keyboard sends 0xff 0xff 0xID on powerup */
@@ -148,7 +150,7 @@ static int sunkbd_event(struct input_dev *dev, unsigned int type, unsigned int c
 		case EV_LED:
 
 			sunkbd->serio->write(sunkbd->serio, SUNKBD_CMD_SETLED);
-			sunkbd->serio->write(sunkbd->serio, 
+			sunkbd->serio->write(sunkbd->serio,
 				(!!test_bit(LED_CAPSL, dev->led) << 3) | (!!test_bit(LED_SCROLLL, dev->led) << 2) |
 				(!!test_bit(LED_COMPOSE, dev->led) << 1) | !!test_bit(LED_NUML, dev->led));
 			return 0;
@@ -160,7 +162,7 @@ static int sunkbd_event(struct input_dev *dev, unsigned int type, unsigned int c
 				case SND_CLICK:
 					sunkbd->serio->write(sunkbd->serio, SUNKBD_CMD_NOCLICK - value);
 					return 0;
-	
+
 				case SND_BELL:
 					sunkbd->serio->write(sunkbd->serio, SUNKBD_CMD_BELLOFF - value);
 					return 0;
@@ -210,7 +212,7 @@ static void sunkbd_reinit(void *data)
 	wait_event_interruptible_timeout(sunkbd->wait, sunkbd->reset >= 0, HZ);
 
 	sunkbd->serio->write(sunkbd->serio, SUNKBD_CMD_SETLED);
-	sunkbd->serio->write(sunkbd->serio, 
+	sunkbd->serio->write(sunkbd->serio,
 		(!!test_bit(LED_CAPSL, sunkbd->dev.led) << 3) | (!!test_bit(LED_SCROLLL, sunkbd->dev.led) << 2) |
 		(!!test_bit(LED_COMPOSE, sunkbd->dev.led) << 1) | !!test_bit(LED_NUML, sunkbd->dev.led));
 	sunkbd->serio->write(sunkbd->serio, SUNKBD_CMD_NOCLICK - !!test_bit(SND_CLICK, sunkbd->dev.snd));
@@ -221,19 +223,14 @@ static void sunkbd_reinit(void *data)
  * sunkbd_connect() probes for a Sun keyboard and fills the necessary structures.
  */
 
-static void sunkbd_connect(struct serio *serio, struct serio_dev *dev)
+static int sunkbd_connect(struct serio *serio, struct serio_driver *drv)
 {
 	struct sunkbd *sunkbd;
 	int i;
+	int err;
 
-	if ((serio->type & SERIO_TYPE) != SERIO_RS232)
-		return;
-
-	if ((serio->type & SERIO_PROTO) && (serio->type & SERIO_PROTO) != SERIO_SUNKBD)
-		return;
-	
 	if (!(sunkbd = kmalloc(sizeof(struct sunkbd), GFP_KERNEL)))
-		return;
+		return -ENOMEM;
 
 	memset(sunkbd, 0, sizeof(struct sunkbd));
 
@@ -255,17 +252,20 @@ static void sunkbd_connect(struct serio *serio, struct serio_dev *dev)
 	sunkbd->dev.event = sunkbd_event;
 	sunkbd->dev.private = sunkbd;
 
-	serio->private = sunkbd;
+	serio_set_drvdata(serio, sunkbd);
 
-	if (serio_open(serio, dev)) {
+	err = serio_open(serio, drv);
+	if (err) {
+		serio_set_drvdata(serio, NULL);
 		kfree(sunkbd);
-		return;
+		return err;
 	}
 
 	if (sunkbd_initialize(sunkbd) < 0) {
 		serio_close(serio);
+		serio_set_drvdata(serio, NULL);
 		kfree(sunkbd);
-		return;
+		return -ENODEV;
 	}
 
 	sprintf(sunkbd->name, "Sun Type %d keyboard", sunkbd->type);
@@ -283,10 +283,13 @@ static void sunkbd_connect(struct serio *serio, struct serio_dev *dev)
 	sunkbd->dev.id.vendor = SERIO_SUNKBD;
 	sunkbd->dev.id.product = sunkbd->type;
 	sunkbd->dev.id.version = 0x0100;
+	sunkbd->dev.dev = &serio->dev;
 
 	input_register_device(&sunkbd->dev);
 
 	printk(KERN_INFO "input: %s on %s\n", sunkbd->name, serio->phys);
+
+	return 0;
 }
 
 /*
@@ -295,31 +298,55 @@ static void sunkbd_connect(struct serio *serio, struct serio_dev *dev)
 
 static void sunkbd_disconnect(struct serio *serio)
 {
-	struct sunkbd *sunkbd = serio->private;
+	struct sunkbd *sunkbd = serio_get_drvdata(serio);
 	input_unregister_device(&sunkbd->dev);
 	serio_close(serio);
+	serio_set_drvdata(serio, NULL);
 	kfree(sunkbd);
 }
 
-static struct serio_dev sunkbd_dev = {
-	.interrupt =	sunkbd_interrupt,
-	.connect =	sunkbd_connect,
-	.disconnect =	sunkbd_disconnect
+static struct serio_device_id sunkbd_serio_ids[] = {
+	{
+		.type	= SERIO_RS232,
+		.proto	= SERIO_SUNKBD,
+		.id	= SERIO_ANY,
+		.extra	= SERIO_ANY,
+	},
+	{
+		.type	= SERIO_RS232,
+		.proto	= SERIO_UNKNOWN, /* sunkbd does probe */
+		.id	= SERIO_ANY,
+		.extra	= SERIO_ANY,
+	},
+	{ 0 }
+};
+
+MODULE_DEVICE_TABLE(serio, sunkbd_serio_ids);
+
+static struct serio_driver sunkbd_drv = {
+	.driver		= {
+		.name	= "sunkbd",
+	},
+	.description	= DRIVER_DESC,
+	.id_table	= sunkbd_serio_ids,
+	.interrupt	= sunkbd_interrupt,
+	.connect	= sunkbd_connect,
+	.disconnect	= sunkbd_disconnect,
 };
 
 /*
  * The functions for insering/removing us as a module.
  */
 
-int __init sunkbd_init(void)
+static int __init sunkbd_init(void)
 {
-	serio_register_device(&sunkbd_dev);
+	serio_register_driver(&sunkbd_drv);
 	return 0;
 }
 
-void __exit sunkbd_exit(void)
+static void __exit sunkbd_exit(void)
 {
-	serio_unregister_device(&sunkbd_dev);
+	serio_unregister_driver(&sunkbd_drv);
 }
 
 module_init(sunkbd_init);

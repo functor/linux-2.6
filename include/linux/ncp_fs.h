@@ -24,7 +24,7 @@
 struct ncp_ioctl_request {
 	unsigned int function;
 	unsigned int size;
-	char *data;
+	char __user *data;
 };
 
 struct ncp_fs_info {
@@ -36,7 +36,7 @@ struct ncp_fs_info {
 				   used for read/write requests! */
 
 	int volume_number;
-	__u32 directory_id;
+	__le32 directory_id;
 };
 
 struct ncp_fs_info_v2 {
@@ -46,7 +46,7 @@ struct ncp_fs_info_v2 {
 	unsigned int buffer_size;
 
 	unsigned int volume_number;
-	__u32 directory_id;
+	__le32 directory_id;
 
 	__u32 dummy1;
 	__u32 dummy2;
@@ -78,7 +78,7 @@ struct ncp_setroot_ioctl
 {
 	int		volNumber;
 	int		namespace;
-	__u32		dirEntNum;
+	__le32		dirEntNum;
 };
 
 struct ncp_objectname_ioctl
@@ -88,13 +88,13 @@ struct ncp_objectname_ioctl
 #define NCP_AUTH_NDS	0x32
 	int		auth_type;
 	size_t		object_name_len;
-	void*		object_name;	/* an userspace data, in most cases user name */
+	void __user *	object_name;	/* an userspace data, in most cases user name */
 };
 
 struct ncp_privatedata_ioctl
 {
 	size_t		len;
-	void*		data;		/* ~1000 for NDS */
+	void __user *	data;		/* ~1000 for NDS */
 };
 
 /* NLS charsets by ioctl */
@@ -239,8 +239,8 @@ void ncp_update_inode2(struct inode *, struct ncp_entry_info *);
 extern struct inode_operations ncp_dir_inode_operations;
 extern struct file_operations ncp_dir_operations;
 int ncp_conn_logged_in(struct super_block *);
-int ncp_date_dos2unix(__u16 time, __u16 date);
-void ncp_date_unix2dos(int unix_date, __u16 * time, __u16 * date);
+int ncp_date_dos2unix(__le16 time, __le16 date);
+void ncp_date_unix2dos(int unix_date, __le16 * time, __le16 * date);
 
 /* linux/fs/ncpfs/ioctl.c */
 int ncp_ioctl(struct inode *, struct file *, unsigned int, unsigned long);

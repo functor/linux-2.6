@@ -10,6 +10,20 @@ struct mirror_info {
 	sector_t	head_position;
 };
 
+/*
+ * memory pools need a pointer to the mddev, so they can force an unplug
+ * when memory is tight, and a count of the number of drives that the
+ * pool was allocated for, so they know how much to allocate and free.
+ * mddev->raid_disks cannot be used, as it can change while a pool is active
+ * These two datums are stored in a kmalloced struct.
+ */
+
+struct pool_info {
+	mddev_t *mddev;
+	int	raid_disks;
+};
+
+
 typedef struct r1bio_s r1bio_t;
 
 struct r1_private_data_s {
@@ -21,6 +35,7 @@ struct r1_private_data_s {
 	sector_t		next_seq_sect;
 	spinlock_t		device_lock;
 
+	struct list_head	retry_list;
 	/* for use when syncing mirrors: */
 
 	spinlock_t		resync_lock;
@@ -30,6 +45,8 @@ struct r1_private_data_s {
 
 	wait_queue_head_t	wait_idle;
 	wait_queue_head_t	wait_resume;
+
+	struct pool_info	*poolinfo;
 
 	mempool_t *r1bio_pool;
 	mempool_t *r1buf_pool;

@@ -17,6 +17,7 @@
 
 #include <asm/btfixup.h>
 #include <asm/ptrace.h>
+#include <asm/page.h>
 
 /*
  * Low level task data.
@@ -137,6 +138,7 @@ BTFIXUPDEF_CALL(void, free_thread_info, struct thread_info *)
 					 * this quantum (SMP) */
 #define TIF_POLLING_NRFLAG	9	/* true if poll_idle() is polling
 					 * TIF_NEED_RESCHED */
+#define TIF_MEMDIE		10
 
 /* as above, but as bit values */
 #define _TIF_SYSCALL_TRACE	(1<<TIF_SYSCALL_TRACE)

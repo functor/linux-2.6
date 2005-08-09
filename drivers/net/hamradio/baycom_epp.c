@@ -58,6 +58,7 @@
 /* prototypes for ax25_encapsulate and ax25_rebuild_header */
 #include <net/ax25.h> 
 #endif /* CONFIG_AX25 || CONFIG_AX25_MODULE */
+#include <linux/crc-ccitt.h>
 
 /* --------------------------------------------------------------------- */
 
@@ -67,25 +68,7 @@
 /* --------------------------------------------------------------------- */
 
 static const char paranoia_str[] = KERN_ERR 
-"baycom_epp: bad magic number for hdlcdrv_state struct in routine %s\n";
-
-#define baycom_paranoia_check(dev,routine,retval)                                              \
-({                                                                                             \
-	if (!dev || !dev->priv || ((struct baycom_state *)dev->priv)->magic != BAYCOM_MAGIC) { \
-		printk(paranoia_str, routine);                                                 \
-		return retval;                                                                 \
-	}                                                                                      \
-})
-
-#define baycom_paranoia_check_void(dev,routine)                                                \
-({                                                                                             \
-	if (!dev || !dev->priv || ((struct baycom_state *)dev->priv)->magic != BAYCOM_MAGIC) { \
-		printk(paranoia_str, routine);                                                 \
-		return;                                                                        \
-	}                                                                                      \
-})
-
-/* --------------------------------------------------------------------- */
+	"baycom_epp: bad magic number for hdlcdrv_state struct in routine %s\n";
 
 static const char bc_drvname[] = "baycom_epp";
 static const char bc_drvinfo[] = KERN_INFO "baycom_epp: (C) 1998-2000 Thomas Sailer, HB9JNX/AE4WA\n"
@@ -260,40 +243,6 @@ struct baycom_state {
  * by Dieter Deyke
  */
 
-static const unsigned short crc_ccitt_table[] = {
-	0x0000, 0x1189, 0x2312, 0x329b, 0x4624, 0x57ad, 0x6536, 0x74bf,
-	0x8c48, 0x9dc1, 0xaf5a, 0xbed3, 0xca6c, 0xdbe5, 0xe97e, 0xf8f7,
-	0x1081, 0x0108, 0x3393, 0x221a, 0x56a5, 0x472c, 0x75b7, 0x643e,
-	0x9cc9, 0x8d40, 0xbfdb, 0xae52, 0xdaed, 0xcb64, 0xf9ff, 0xe876,
-	0x2102, 0x308b, 0x0210, 0x1399, 0x6726, 0x76af, 0x4434, 0x55bd,
-	0xad4a, 0xbcc3, 0x8e58, 0x9fd1, 0xeb6e, 0xfae7, 0xc87c, 0xd9f5,
-	0x3183, 0x200a, 0x1291, 0x0318, 0x77a7, 0x662e, 0x54b5, 0x453c,
-	0xbdcb, 0xac42, 0x9ed9, 0x8f50, 0xfbef, 0xea66, 0xd8fd, 0xc974,
-	0x4204, 0x538d, 0x6116, 0x709f, 0x0420, 0x15a9, 0x2732, 0x36bb,
-	0xce4c, 0xdfc5, 0xed5e, 0xfcd7, 0x8868, 0x99e1, 0xab7a, 0xbaf3,
-	0x5285, 0x430c, 0x7197, 0x601e, 0x14a1, 0x0528, 0x37b3, 0x263a,
-	0xdecd, 0xcf44, 0xfddf, 0xec56, 0x98e9, 0x8960, 0xbbfb, 0xaa72,
-	0x6306, 0x728f, 0x4014, 0x519d, 0x2522, 0x34ab, 0x0630, 0x17b9,
-	0xef4e, 0xfec7, 0xcc5c, 0xddd5, 0xa96a, 0xb8e3, 0x8a78, 0x9bf1,
-	0x7387, 0x620e, 0x5095, 0x411c, 0x35a3, 0x242a, 0x16b1, 0x0738,
-	0xffcf, 0xee46, 0xdcdd, 0xcd54, 0xb9eb, 0xa862, 0x9af9, 0x8b70,
-	0x8408, 0x9581, 0xa71a, 0xb693, 0xc22c, 0xd3a5, 0xe13e, 0xf0b7,
-	0x0840, 0x19c9, 0x2b52, 0x3adb, 0x4e64, 0x5fed, 0x6d76, 0x7cff,
-	0x9489, 0x8500, 0xb79b, 0xa612, 0xd2ad, 0xc324, 0xf1bf, 0xe036,
-	0x18c1, 0x0948, 0x3bd3, 0x2a5a, 0x5ee5, 0x4f6c, 0x7df7, 0x6c7e,
-	0xa50a, 0xb483, 0x8618, 0x9791, 0xe32e, 0xf2a7, 0xc03c, 0xd1b5,
-	0x2942, 0x38cb, 0x0a50, 0x1bd9, 0x6f66, 0x7eef, 0x4c74, 0x5dfd,
-	0xb58b, 0xa402, 0x9699, 0x8710, 0xf3af, 0xe226, 0xd0bd, 0xc134,
-	0x39c3, 0x284a, 0x1ad1, 0x0b58, 0x7fe7, 0x6e6e, 0x5cf5, 0x4d7c,
-	0xc60c, 0xd785, 0xe51e, 0xf497, 0x8028, 0x91a1, 0xa33a, 0xb2b3,
-	0x4a44, 0x5bcd, 0x6956, 0x78df, 0x0c60, 0x1de9, 0x2f72, 0x3efb,
-	0xd68d, 0xc704, 0xf59f, 0xe416, 0x90a9, 0x8120, 0xb3bb, 0xa232,
-	0x5ac5, 0x4b4c, 0x79d7, 0x685e, 0x1ce1, 0x0d68, 0x3ff3, 0x2e7a,
-	0xe70e, 0xf687, 0xc41c, 0xd595, 0xa12a, 0xb0a3, 0x8238, 0x93b1,
-	0x6b46, 0x7acf, 0x4854, 0x59dd, 0x2d62, 0x3ceb, 0x0e70, 0x1ff9,
-	0xf78f, 0xe606, 0xd49d, 0xc514, 0xb1ab, 0xa022, 0x92b9, 0x8330,
-	0x7bc7, 0x6a4e, 0x58d5, 0x495c, 0x3de3, 0x2c6a, 0x1ef1, 0x0f78
-};
 
 /*---------------------------------------------------------------------------*/
 
@@ -314,23 +263,14 @@ static inline void append_crc_ccitt(unsigned char *buffer, int len)
 
 static inline int check_crc_ccitt(const unsigned char *buf, int cnt)
 {
-	unsigned int crc = 0xffff;
-
-	for (; cnt > 0; cnt--)
-		crc = (crc >> 8) ^ crc_ccitt_table[(crc ^ *buf++) & 0xff];
-	return (crc & 0xffff) == 0xf0b8;
+	return (crc_ccitt(0xffff, buf, cnt) & 0xffff) == 0xf0b8;
 }
 
 /*---------------------------------------------------------------------------*/
 
 static inline int calc_crc_ccitt(const unsigned char *buf, int cnt)
 {
-	unsigned int crc = 0xffff;
-
-	for (; cnt > 0; cnt--)
-		crc = (crc >> 8) ^ crc_ccitt_table[(crc ^ *buf++) & 0xff];
-	crc ^= 0xffff;
-	return (crc & 0xffff);
+	return (crc_ccitt(0xffff, buf, cnt) ^ 0xffff) & 0xffff;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -434,29 +374,6 @@ static inline void do_kiss_params(struct baycom_state *bc,
 }
 
 /* --------------------------------------------------------------------- */
-/*
- * high performance HDLC encoder
- * yes, it's ugly, but generates pretty good code
- */
-
-#define ENCODEITERA(j)                         \
-({                                             \
-        if (!(notbitstream & (0x1f0 << j)))    \
-                goto stuff##j;                 \
-  encodeend##j:    	;                      \
-})
-
-#define ENCODEITERB(j)                                          \
-({                                                              \
-  stuff##j:                                                     \
-        bitstream &= ~(0x100 << j);                             \
-        bitbuf = (bitbuf & (((2 << j) << numbit) - 1)) |        \
-                ((bitbuf & ~(((2 << j) << numbit) - 1)) << 1);  \
-        numbit++;                                               \
-        notbitstream = ~bitstream;                              \
-        goto encodeend##j;                                      \
-})
-
 
 static void encode_hdlc(struct baycom_state *bc)
 {
@@ -465,6 +382,7 @@ static void encode_hdlc(struct baycom_state *bc)
 	int pkt_len;
         unsigned bitstream, notbitstream, bitbuf, numbit, crc;
 	unsigned char crcarr[2];
+	int j;
 	
 	if (bc->hdlctx.bufcnt > 0)
 		return;
@@ -489,24 +407,14 @@ static void encode_hdlc(struct baycom_state *bc)
 		pkt_len--;
 		if (!pkt_len)
 			bp = crcarr;
-		ENCODEITERA(0);
-		ENCODEITERA(1);
-		ENCODEITERA(2);
-		ENCODEITERA(3);
-		ENCODEITERA(4);
-		ENCODEITERA(5);
-		ENCODEITERA(6);
-		ENCODEITERA(7);
-		goto enditer;
-		ENCODEITERB(0);
-		ENCODEITERB(1);
-		ENCODEITERB(2);
-		ENCODEITERB(3);
-		ENCODEITERB(4);
-		ENCODEITERB(5);
-		ENCODEITERB(6);
-		ENCODEITERB(7);
-	enditer:
+		for (j = 0; j < 8; j++)
+			if (unlikely(!(notbitstream & (0x1f0 << j)))) {
+				bitstream &= ~(0x100 << j);
+ 				bitbuf = (bitbuf & (((2 << j) << numbit) - 1)) |
+					((bitbuf & ~(((2 << j) << numbit) - 1)) << 1);
+				numbit++;
+				notbitstream = ~bitstream;
+			}
 		numbit += 8;
 		while (numbit >= 8) {
 			*wp++ = bitbuf;
@@ -661,48 +569,15 @@ static void do_rxpacket(struct net_device *dev)
 		bc->stats.rx_dropped++;
 		return;
 	}
-	skb->dev = dev;
 	cp = skb_put(skb, pktlen);
 	*cp++ = 0; /* KISS kludge */
 	memcpy(cp, bc->hdlcrx.buf, pktlen - 1);
-	skb->protocol = htons(ETH_P_AX25);
-	skb->mac.raw = skb->data;
+	skb->protocol = ax25_type_trans(skb, dev);
 	netif_rx(skb);
 	dev->last_rx = jiffies;
 	bc->stats.rx_packets++;
 }
 
-#define DECODEITERA(j)                                                        \
-({                                                                            \
-        if (!(notbitstream & (0x0fc << j)))              /* flag or abort */  \
-                goto flgabrt##j;                                              \
-        if ((bitstream & (0x1f8 << j)) == (0xf8 << j))   /* stuffed bit */    \
-                goto stuff##j;                                                \
-  enditer##j:      ;                                                           \
-})
-
-#define DECODEITERB(j)                                                                 \
-({                                                                                     \
-  flgabrt##j:                                                                          \
-        if (!(notbitstream & (0x1fc << j))) {              /* abort received */        \
-                state = 0;                                                             \
-                goto enditer##j;                                                       \
-        }                                                                              \
-        if ((bitstream & (0x1fe << j)) != (0x0fc << j))   /* flag received */          \
-                goto enditer##j;                                                       \
-        if (state)                                                                     \
-                do_rxpacket(dev);                                                      \
-        bc->hdlcrx.bufcnt = 0;                                                         \
-        bc->hdlcrx.bufptr = bc->hdlcrx.buf;                                            \
-        state = 1;                                                                     \
-        numbits = 7-j;                                                                 \
-        goto enditer##j;                                                               \
-  stuff##j:                                                                            \
-        numbits--;                                                                     \
-        bitbuf = (bitbuf & ((~0xff) << j)) | ((bitbuf & ~((~0xff) << j)) << 1);        \
-        goto enditer##j;                                                               \
-})
-        
 static int receive(struct net_device *dev, int cnt)
 {
 	struct baycom_state *bc = netdev_priv(dev);
@@ -711,6 +586,7 @@ static int receive(struct net_device *dev, int cnt)
 	unsigned char tmp[128];
         unsigned char *cp;
 	int cnt2, ret = 0;
+	int j;
         
         numbits = bc->hdlcrx.numbits;
 	state = bc->hdlcrx.state;
@@ -731,24 +607,32 @@ static int receive(struct net_device *dev, int cnt)
 			bitbuf |= (*cp) << 8;
 			numbits += 8;
 			notbitstream = ~bitstream;
-			DECODEITERA(0);
-			DECODEITERA(1);
-			DECODEITERA(2);
-			DECODEITERA(3);
-			DECODEITERA(4);
-			DECODEITERA(5);
-			DECODEITERA(6);
-			DECODEITERA(7);
-			goto enddec;
-			DECODEITERB(0);
-			DECODEITERB(1);
-			DECODEITERB(2);
-			DECODEITERB(3);
-			DECODEITERB(4);
-			DECODEITERB(5);
-			DECODEITERB(6);
-			DECODEITERB(7);
-		enddec:
+			for (j = 0; j < 8; j++) {
+
+				/* flag or abort */
+			        if (unlikely(!(notbitstream & (0x0fc << j)))) {
+
+					/* abort received */
+					if (!(notbitstream & (0x1fc << j)))
+						state = 0;
+
+					/* not flag received */
+					else if (!(bitstream & (0x1fe << j)) != (0x0fc << j)) {
+						if (state)
+							do_rxpacket(dev);
+						bc->hdlcrx.bufcnt = 0;
+						bc->hdlcrx.bufptr = bc->hdlcrx.buf;
+						state = 1;
+						numbits = 7-j;
+						}
+					}
+
+				/* stuffed bit */
+				else if (unlikely((bitstream & (0x1f8 << j)) == (0xf8 << j))) {
+					numbits--;
+					bitbuf = (bitbuf & ((~0xff) << j)) | ((bitbuf & ~((~0xff) << j)) << 1);
+					}
+				}
 			while (state && numbits >= 8) {
 				if (bc->hdlcrx.bufcnt >= TXBUFFER_SIZE) {
 					state = 0;
@@ -789,7 +673,6 @@ static void epp_bh(struct net_device *dev)
 	unsigned int time1 = 0, time2 = 0, time3 = 0;
 	int cnt, cnt2;
 	
-	baycom_paranoia_check_void(dev, "epp_bh");
 	bc = netdev_priv(dev);
 	if (!bc->work_running)
 		return;
@@ -905,10 +788,8 @@ static void epp_bh(struct net_device *dev)
 
 static int baycom_send_packet(struct sk_buff *skb, struct net_device *dev)
 {
-	struct baycom_state *bc;
+	struct baycom_state *bc = netdev_priv(dev);
 
-	baycom_paranoia_check(dev, "baycom_send_packet", 0);
-	bc = netdev_priv(dev);
 	if (skb->data[0] != 0) {
 		do_kiss_params(bc, skb->data, skb->len);
 		dev_kfree_skb(skb);
@@ -941,10 +822,8 @@ static int baycom_set_mac_address(struct net_device *dev, void *addr)
 
 static struct net_device_stats *baycom_get_stats(struct net_device *dev)
 {
-	struct baycom_state *bc;
+	struct baycom_state *bc = netdev_priv(dev);
 
-	baycom_paranoia_check(dev, "baycom_get_stats", NULL);
-	bc = netdev_priv(dev);
 	/* 
 	 * Get the current statistics.  This may be called with the
 	 * card open or closed. 
@@ -957,10 +836,8 @@ static struct net_device_stats *baycom_get_stats(struct net_device *dev)
 static void epp_wakeup(void *handle)
 {
         struct net_device *dev = (struct net_device *)handle;
-        struct baycom_state *bc;
+        struct baycom_state *bc = netdev_priv(dev);
 
-	baycom_paranoia_check_void(dev, "epp_wakeup");
-        bc = netdev_priv(dev);
         printk(KERN_DEBUG "baycom_epp: %s: why am I being woken up?\n", dev->name);
         if (!parport_claim(bc->pdev))
                 printk(KERN_DEBUG "baycom_epp: %s: I'm broken.\n", dev->name);
@@ -979,16 +856,13 @@ static void epp_wakeup(void *handle)
 
 static int epp_open(struct net_device *dev)
 {
-	struct baycom_state *bc;
-        struct parport *pp;
+	struct baycom_state *bc = netdev_priv(dev);
+        struct parport *pp = parport_find_base(dev->base_addr);
 	unsigned int i, j;
 	unsigned char tmp[128];
 	unsigned char stat;
 	unsigned long tstart;
 	
-	baycom_paranoia_check(dev, "epp_open", -ENXIO);
-	bc = netdev_priv(dev);
-        pp = parport_find_base(dev->base_addr);
         if (!pp) {
                 printk(KERN_ERR "%s: parport at 0x%lx unknown\n", bc_drvname, dev->base_addr);
                 return -ENXIO;
@@ -1097,13 +971,10 @@ static int epp_open(struct net_device *dev)
 
 static int epp_close(struct net_device *dev)
 {
-	struct baycom_state *bc;
-	struct parport *pp;
+	struct baycom_state *bc = netdev_priv(dev);
+	struct parport *pp = bc->pdev->port;
 	unsigned char tmp[1];
 
-	baycom_paranoia_check(dev, "epp_close", -EINVAL);
-	bc = netdev_priv(dev);
-	pp = bc->pdev->port;
 	bc->work_running = 0;
 	flush_scheduled_work();
 	bc->stat = EPP_DCDBIT;
@@ -1159,15 +1030,11 @@ static int baycom_setmode(struct baycom_state *bc, const char *modestr)
 
 static int baycom_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
-	struct baycom_state *bc;
+	struct baycom_state *bc = netdev_priv(dev);
 	struct hdlcdrv_ioctl hi;
 
-	baycom_paranoia_check(dev, "baycom_ioctl", -EINVAL);
-	bc = netdev_priv(dev);
 	if (cmd != SIOCDEVPRIVATE)
 		return -ENOIOCTLCMD;
-	if (get_user(cmd, (int *)ifr->ifr_data))
-		return -EFAULT;
 
 	if (copy_from_user(&hi, ifr->ifr_data, sizeof(hi)))
 		return -EFAULT;
@@ -1338,9 +1205,9 @@ static void baycom_probe(struct net_device *dev)
 static const char *mode[NR_PORTS] = { "", };
 static int iobase[NR_PORTS] = { 0x378, };
 
-MODULE_PARM(mode, "1-" __MODULE_STRING(NR_PORTS) "s");
+module_param_array(mode, charp, NULL, 0);
 MODULE_PARM_DESC(mode, "baycom operating mode");
-MODULE_PARM(iobase, "1-" __MODULE_STRING(NR_PORTS) "i");
+module_param_array(iobase, int, NULL, 0);
 MODULE_PARM_DESC(iobase, "baycom io base address");
 
 MODULE_AUTHOR("Thomas M. Sailer, sailer@ife.ee.ethz.ch, hb9jnx@hb9w.che.eu");
@@ -1398,7 +1265,7 @@ static int __init init_baycomepp(void)
 			free_netdev(dev);
 			break;
 		}
-		if (set_hw && baycom_setmode(dev->priv, mode[i]))
+		if (set_hw && baycom_setmode(netdev_priv(dev), mode[i]))
 			set_hw = 0;
 		baycom_device[i] = dev;
 		found++;

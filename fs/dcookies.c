@@ -13,6 +13,7 @@
  */
 
 #include <linux/config.h>
+#include <linux/syscalls.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/list.h>
@@ -60,7 +61,7 @@ static size_t dcookie_hash(unsigned long dcookie)
 
 static struct dcookie_struct * find_dcookie(unsigned long dcookie)
 {
-	struct dcookie_struct * found = 0;
+	struct dcookie_struct *found = NULL;
 	struct dcookie_struct * dcs;
 	struct list_head * pos;
 	struct list_head * list;
@@ -142,7 +143,7 @@ out:
 /* And here is where the userspace process can look up the cookie value
  * to retrieve the path.
  */
-asmlinkage long sys_lookup_dcookie(u64 cookie64, char * buf, size_t len)
+asmlinkage long sys_lookup_dcookie(u64 cookie64, char __user * buf, size_t len)
 {
 	unsigned long cookie = (unsigned long)cookie64;
 	int err = -EINVAL;

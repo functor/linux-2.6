@@ -56,6 +56,7 @@ static struct smb_ops smb_ops_os2;
 static struct smb_ops smb_ops_win95;
 static struct smb_ops smb_ops_winNT;
 static struct smb_ops smb_ops_unix;
+static struct smb_ops smb_ops_null;
 
 static void
 smb_init_dirent(struct smb_sb_info *server, struct smb_fattr *fattr);
@@ -73,7 +74,7 @@ smb_proc_setattr_core(struct smb_sb_info *server, struct dentry *dentry,
 static int
 smb_proc_setattr_ext(struct smb_sb_info *server,
 		     struct inode *inode, struct smb_fattr *fattr);
-int
+static int
 smb_proc_query_cifsunix(struct smb_sb_info *server);
 static void
 install_ops(struct smb_ops *dst, struct smb_ops *src);
@@ -981,6 +982,9 @@ smb_newconn(struct smb_sb_info *server, struct smb_conn_opt *opt)
 	smbiod_wake_up();
 	if (server->opt.capabilities & SMB_CAP_UNIX)
 		smb_proc_query_cifsunix(server);
+
+	server->conn_complete++;
+	wake_up_interruptible_all(&server->conn_wq);
 	return error;
 
 out:
@@ -1423,9 +1427,9 @@ smb_proc_readX_data(struct smb_request *req)
 	 * So we must first calculate the amount of padding used by the server.
 	 */
 	data_off -= hdrlen;
-	if (data_off > SMB_READX_MAX_PAD) {
-		PARANOIA("offset is larger than max pad!\n");
-		PARANOIA("%d > %d\n", data_off, SMB_READX_MAX_PAD);
+	if (data_off > SMB_READX_MAX_PAD || data_off < 0) {
+		PARANOIA("offset is larger than SMB_READX_MAX_PAD or negative!\n");
+		PARANOIA("%d > %d || %d < 0\n", data_off, SMB_READX_MAX_PAD, data_off);
 		req->rq_rlen = req->rq_bufsize + 1;
 		return;
 	}
@@ -1848,12 +1852,13 @@ smb_finish_dirent(struct smb_sb_info *server, struct smb_fattr *fattr)
 }
 
 void
-smb_init_root_dirent(struct smb_sb_info *server, struct smb_fattr *fattr)
+smb_init_root_dirent(struct smb_sb_info *server, struct smb_fattr *fattr,
+		     struct super_block *sb)
 {
 	smb_init_dirent(server, fattr);
 	fattr->attr = aDIR;
 	fattr->f_ino = 2; /* traditional root inode number */
-	fattr->f_mtime = CURRENT_TIME;
+	fattr->f_mtime = current_fs_time(sb);
 	smb_finish_dirent(server, fattr);
 }
 
@@ -2070,8 +2075,10 @@ out:
 	return result;
 }
 
-void smb_decode_unix_basic(struct smb_fattr *fattr, char *p)
+static void smb_decode_unix_basic(struct smb_fattr *fattr, struct smb_sb_info *server, char *p)
 {
+	u64 size, disk_bytes;
+
 	/* FIXME: verify nls support. all is sent as utf8? */
 
 	fattr->f_unix = 1;
@@ -2089,13 +2096,33 @@ void smb_decode_unix_basic(struct smb_fattr *fattr, char *p)
 	/* 84 L permissions */
 	/* 92 L link count */
 
-	fattr->f_size = LVAL(p, 0);
-	fattr->f_blocks = LVAL(p, 8);
+	size = LVAL(p, 0);
+	disk_bytes = LVAL(p, 8);
+
+	/*
+	 * Some samba versions round up on-disk byte usage
+	 * to 1MB boundaries, making it useless. When seeing
+	 * that, use the size instead.
+	 */
+	if (!(disk_bytes & 0xfffff))
+		disk_bytes = size+511;
+
+	fattr->f_size = size;
+	fattr->f_blocks = disk_bytes >> 9;
 	fattr->f_ctime = smb_ntutc2unixutc(LVAL(p, 16));
 	fattr->f_atime = smb_ntutc2unixutc(LVAL(p, 24));
 	fattr->f_mtime = smb_ntutc2unixutc(LVAL(p, 32));
-	fattr->f_uid = LVAL(p, 40); 
-	fattr->f_gid = LVAL(p, 48); 
+
+	if (server->mnt->flags & SMB_MOUNT_UID)
+		fattr->f_uid = server->mnt->uid;
+	else
+		fattr->f_uid = LVAL(p, 40);
+
+	if (server->mnt->flags & SMB_MOUNT_GID)
+		fattr->f_gid = server->mnt->gid;
+	else
+		fattr->f_gid = LVAL(p, 48);
+
 	fattr->f_mode |= smb_filetype_to_mode(WVAL(p, 56));
 
 	if (S_ISBLK(fattr->f_mode) || S_ISCHR(fattr->f_mode)) {
@@ -2104,10 +2131,20 @@ void smb_decode_unix_basic(struct smb_fattr *fattr, char *p)
 
 		fattr->f_rdev = MKDEV(major & 0xffffffff, minor & 0xffffffff);
 		if (MAJOR(fattr->f_rdev) != (major & 0xffffffff) ||
-		    MINOR(fattr->f_rdev) != (minor & 0xffffffff))
+	    	MINOR(fattr->f_rdev) != (minor & 0xffffffff))
 			fattr->f_rdev = 0;
 	}
+
 	fattr->f_mode |= LVAL(p, 84);
+
+	if ( (server->mnt->flags & SMB_MOUNT_DMODE) &&
+	     (S_ISDIR(fattr->f_mode)) )
+		fattr->f_mode = (server->mnt->dir_mode & S_IRWXUGO) | S_IFDIR;
+	else if ( (server->mnt->flags & SMB_MOUNT_FMODE) &&
+	          !(S_ISDIR(fattr->f_mode)) )
+		fattr->f_mode = (server->mnt->file_mode & S_IRWXUGO) |
+				(fattr->f_mode & S_IFMT);
+
 }
 
 /*
@@ -2193,7 +2230,7 @@ smb_decode_long_dirent(struct smb_sb_info *server, char *p, int level,
 		/* FIXME: should we check the length?? */
 
 		p += 8;
-		smb_decode_unix_basic(fattr, p);
+		smb_decode_unix_basic(fattr, server, p);
 		VERBOSE("info SMB_FIND_FILE_UNIX at %p, len=%d, name=%.*s\n",
 			p, len, len, qname->name);
 		break;
@@ -2305,16 +2342,14 @@ smb_proc_readdir_long(struct file *filp, void *dirent, filldir_t filldir,
 	 */
 	mask = param + 12;
 
-	mask_len = smb_encode_path(server, mask, SMB_MAXPATHLEN+1, dir, &star);
-	if (mask_len < 0) {
-		result = mask_len;
+	result = smb_encode_path(server, mask, SMB_MAXPATHLEN+1, dir, &star);
+	if (result <= 0)
 		goto out_free;
-	}
-	mask_len--;	/* mask_len is strlen, not #bytes */
+	mask_len = result - 1;	/* mask_len is strlen, not #bytes */
+	result = 0;
 	first = 1;
 	VERBOSE("starting mask_len=%d, mask=%s\n", mask_len, mask);
 
-	result = 0;
 	entries_seen = 2;
 	ff_eos = 0;
 
@@ -2370,7 +2405,7 @@ smb_proc_readdir_long(struct file *filp, void *dirent, filldir_t filldir,
 		if (req->rq_rcls != 0) {
 			result = smb_errno(req);
 			PARANOIA("name=%s, result=%d, rcls=%d, err=%d\n",
-				 mask, result, server->rcls, server->err);
+				 mask, result, req->rq_rcls, req->rq_err);
 			break;
 		}
 
@@ -2460,8 +2495,6 @@ smb_proc_readdir_long(struct file *filp, void *dirent, filldir_t filldir,
 			/*
 			 * Update the mask string for the next message.
 			 */
-			if (mask_len < 0)
-				mask_len = 0;
 			if (mask_len > 255)
 				mask_len = 255;
 			if (mask_len)
@@ -2526,7 +2559,7 @@ smb_proc_getattr_ff(struct smb_sb_info *server, struct dentry *dentry,
 	result = smb_add_request(req);
 	if (result < 0)
 		goto out_free;
-	if (server->rcls != 0) {
+	if (req->rq_rcls != 0) {
 		result = smb_errno(req);
 #ifdef SMBFS_PARANOIA
 		if (result != -ENOENT)
@@ -2639,7 +2672,7 @@ smb_proc_getattr_trans2(struct smb_sb_info *server, struct dentry *dir,
 	result = smb_add_request(req);
 	if (result < 0)
 		goto out;
-	if (server->rcls != 0) {
+	if (req->rq_rcls != 0) {
 		VERBOSE("for %s: result=%d, rcls=%d, err=%d\n",
 			&param[6], result, req->rq_rcls, req->rq_err);
 		result = smb_errno(req);
@@ -2756,7 +2789,7 @@ smb_proc_getattr_unix(struct smb_sb_info *server, struct dentry *dir,
 	if (result < 0)
 		goto out_free;
 
-	smb_decode_unix_basic(attr, req->rq_data);
+	smb_decode_unix_basic(attr, server, req->rq_data);
 
 out_free:
 	smb_rput(req);
@@ -2794,10 +2827,45 @@ out:
 }
 
 static int
-smb_proc_getattr_null(struct smb_sb_info *server, struct dentry *dir,
-		      struct smb_fattr *attr)
+smb_proc_ops_wait(struct smb_sb_info *server)
 {
-	return -EIO;
+	int result;
+
+	result = wait_event_interruptible_timeout(server->conn_wq,
+				server->conn_complete, 30*HZ);
+
+	if (!result || signal_pending(current))
+		return -EIO;
+
+	return 0;
+}
+
+static int
+smb_proc_getattr_null(struct smb_sb_info *server, struct dentry *dir,
+			  struct smb_fattr *fattr)
+{
+	int result;
+
+	if (smb_proc_ops_wait(server) < 0)
+		return -EIO;
+
+	smb_init_dirent(server, fattr);
+	result = server->ops->getattr(server, dir, fattr);
+	smb_finish_dirent(server, fattr);
+
+	return result;
+}
+
+static int
+smb_proc_readdir_null(struct file *filp, void *dirent, filldir_t filldir,
+		      struct smb_cache_control *ctl)
+{
+	struct smb_sb_info *server = server_from_dentry(filp->f_dentry);
+
+	if (smb_proc_ops_wait(server) < 0)
+		return -EIO;
+
+	return server->ops->readdir(filp, dirent, filldir, ctl);
 }
 
 int
@@ -3218,7 +3286,7 @@ smb_proc_read_link(struct smb_sb_info *server, struct dentry *d,
 	if (result < 0)
 		goto out_free;
 	DEBUG1("for %s: result=%d, rcls=%d, err=%d\n",
-		&param[6], result, server->rcls, server->err);
+		&param[6], result, req->rq_rcls, req->rq_err);
 
 	/* copy data up to the \0 or buffer length */
 	result = len;
@@ -3268,7 +3336,7 @@ smb_proc_symlink(struct smb_sb_info *server, struct dentry *d,
 		goto out_free;
 
 	DEBUG1("for %s: result=%d, rcls=%d, err=%d\n",
-		&param[6], result, server->rcls, server->err);
+		&param[6], result, req->rq_rcls, req->rq_err);
 	result = 0;
 
 out_free:
@@ -3315,7 +3383,7 @@ smb_proc_link(struct smb_sb_info *server, struct dentry *dentry,
 		goto out_free;
 
 	DEBUG1("for %s: result=%d, rcls=%d, err=%d\n",
-	       &param[6], result, server->rcls, server->err);
+	       &param[6], result, req->rq_rcls, req->rq_err);
 	result = 0;
 
 out_free:
@@ -3324,7 +3392,7 @@ out:
 	return result;
 }
 
-int
+static int
 smb_proc_query_cifsunix(struct smb_sb_info *server)
 {
 	int result;
@@ -3431,6 +3499,7 @@ static struct smb_ops smb_ops_unix =
 /* Place holder until real ops are in place */
 static struct smb_ops smb_ops_null =
 {
+	.readdir	= smb_proc_readdir_null,
 	.getattr	= smb_proc_getattr_null,
 };
 

@@ -1,11 +1,11 @@
 #ifndef __V850_PGTABLE_H__
 #define __V850_PGTABLE_H__
 
+#include <asm-generic/4level-fixup.h>
+
 #include <linux/config.h>
 #include <asm/page.h>
 
-
-typedef pte_t *pte_addr_t;
 
 #define pgd_present(pgd)	(1) /* pages are always present on NO_MM */
 #define pgd_none(pgd)		(0)

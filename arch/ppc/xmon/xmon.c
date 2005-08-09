@@ -8,10 +8,10 @@
 #include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/interrupt.h>
+#include <linux/bitops.h>
 #include <asm/ptrace.h>
 #include <asm/string.h>
 #include <asm/prom.h>
-#include <asm/bitops.h>
 #include <asm/bootx.h>
 #include <asm/machdep.h>
 #include <asm/xmon.h>
@@ -239,7 +239,7 @@ xmon(struct pt_regs *excp)
 		set_backlight_level(BACKLIGHT_MAX);
 		sync();
 	}
-	debugger_fault_handler = 0;
+	debugger_fault_handler = NULL;
 #endif	/* CONFIG_PMAC_BACKLIGHT */
 	cmd = cmds(excp);
 	if (cmd == 's') {
@@ -253,7 +253,7 @@ xmon(struct pt_regs *excp)
 		insert_bpts();
 	}
 	xmon_leave();
-	xmon_regs[smp_processor_id()] = 0;
+	xmon_regs[smp_processor_id()] = NULL;
 #ifdef CONFIG_SMP
 	clear_bit(0, &got_xmon);
 	clear_bit(smp_processor_id(), &cpus_in_xmon);
@@ -352,7 +352,7 @@ at_breakpoint(unsigned pc)
 	for (i = 0; i < NBPTS; ++i, ++bp)
 		if (bp->enabled && pc == bp->address)
 			return bp;
-	return 0;
+	return NULL;
 }
 
 static void
@@ -962,7 +962,7 @@ print_sysmap(void)
 			xmon_puts(sysmap);
 			sync();
 		}
-		debugger_fault_handler = 0;
+		debugger_fault_handler = NULL;
 	}
 	else
 		printf("No System.map\n");
@@ -1033,9 +1033,9 @@ dump_hash_table_seg(unsigned seg, unsigned start, unsigned end)
 	extern unsigned long Hash_size;
 	unsigned *htab = Hash;
 	unsigned hsize = Hash_size;
-	unsigned v, hmask, va, last_va;
+	unsigned v, hmask, va, last_va = 0;
 	int found, last_found, i;
-	unsigned *hg, w1, last_w2, last_va0;
+	unsigned *hg, w1, last_w2 = 0, last_va0 = 0;
 
 	last_found = 0;
 	hmask = hsize / 64 - 1;
@@ -1203,7 +1203,7 @@ mread(unsigned adrs, void *buf, int size)
 		__delay(200);
 		n = size;
 	}
-	debugger_fault_handler = 0;
+	debugger_fault_handler = NULL;
 	return n;
 }
 
@@ -1233,7 +1233,7 @@ mwrite(unsigned adrs, void *buf, int size)
 	} else {
 		printf("*** Error writing address %x\n", adrs + n);
 	}
-	debugger_fault_handler = 0;
+	debugger_fault_handler = NULL;
 	return n;
 }
 
@@ -1492,7 +1492,7 @@ ppc_inst_dump(unsigned adr, int count)
 {
 	int nr, dotted;
 	unsigned first_adr;
-	unsigned long inst, last_inst;
+	unsigned long inst, last_inst = 0;
 	unsigned char val[4];
 
 	dotted = 0;
@@ -1673,7 +1673,7 @@ void proccall(void)
 	} else {
 		printf("*** %x exception occurred\n", fault_except);
 	}
-	debugger_fault_handler = 0;
+	debugger_fault_handler = NULL;
 }
 
 /* Input scanning routines */
@@ -1886,7 +1886,7 @@ sysmap_lookup(void)
 				} while (cur);
 				sync();
 			}
-			debugger_fault_handler = 0;
+			debugger_fault_handler = NULL;
 			termch = 0;
 			break;
 	}
@@ -1939,7 +1939,7 @@ xmon_find_symbol(unsigned long addr, unsigned long* saddr)
 				*(ep++) = 0;
 				if (saddr)
 					*saddr = prev;
-				debugger_fault_handler = 0;
+				debugger_fault_handler = NULL;
 				return rbuffer;
 			}
 			prev = next;
@@ -1951,7 +1951,7 @@ xmon_find_symbol(unsigned long addr, unsigned long* saddr)
 bail:
 		sync();
 	}
-	debugger_fault_handler = 0;
+	debugger_fault_handler = NULL;
 	return NULL;
 }
 
@@ -1959,7 +1959,7 @@ unsigned long
 xmon_symbol_to_addr(char* symbol)
 {
 	char *p, *cur;
-	char *match;
+	char *match = NULL;
 	int goodness = 0;
 	int result = 0;
 	
@@ -2003,6 +2003,6 @@ xmon_symbol_to_addr(char* symbol)
 		}
 		sync();
 	}
-	debugger_fault_handler = 0;
+	debugger_fault_handler = NULL;
 	return result;
 }		

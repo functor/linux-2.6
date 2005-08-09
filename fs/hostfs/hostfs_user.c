@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2000 Jeff Dike (jdike@karaya.com)
  * Licensed under the GPL
  */
@@ -18,20 +18,17 @@
 #include "user.h"
 
 int stat_file(const char *path, unsigned long long *inode_out, int *mode_out,
-	      int *nlink_out, int *uid_out, int *gid_out, 
+	      int *nlink_out, int *uid_out, int *gid_out,
 	      unsigned long long *size_out, struct timespec *atime_out,
 	      struct timespec *mtime_out, struct timespec *ctime_out,
 	      int *blksize_out, unsigned long long *blocks_out)
 {
 	struct stat64 buf;
 
-	if(lstat64(path, &buf) < 0) 
+	if(lstat64(path, &buf) < 0)
 		return(-errno);
 
-	/* See the Makefile for why STAT64_INO_FIELD is passed in
-	 * by the build
-	 */
-	if(inode_out != NULL) *inode_out = buf.STAT64_INO_FIELD;
+	if(inode_out != NULL) *inode_out = buf.st_ino;
 	if(mode_out != NULL) *mode_out = buf.st_mode;
 	if(nlink_out != NULL) *nlink_out = buf.st_nlink;
 	if(uid_out != NULL) *uid_out = buf.st_uid;
@@ -54,14 +51,18 @@ int stat_file(const char *path, unsigned long long *inode_out, int *mode_out,
 	return(0);
 }
 
-int file_type(const char *path, int *rdev)
+int file_type(const char *path, int *maj, int *min)
 {
  	struct stat64 buf;
 
-	if(lstat64(path, &buf) < 0) 
+	if(lstat64(path, &buf) < 0)
 		return(-errno);
-	if(rdev != NULL) 
-		*rdev = buf.st_rdev;
+	/*We cannot pass rdev as is because glibc and the kernel disagree
+	 *about its definition.*/
+	if(maj != NULL)
+		*maj = major(buf.st_rdev);
+	if(min != NULL)
+		*min = minor(buf.st_rdev);
 
 	if(S_ISDIR(buf.st_mode)) return(OS_TYPE_DIR);
 	else if(S_ISLNK(buf.st_mode)) return(OS_TYPE_SYMLINK);
@@ -87,11 +88,11 @@ int open_file(char *path, int r, int w, int append)
 {
 	int mode = 0, fd;
 
-	if(r && !w) 
+	if(r && !w)
 		mode = O_RDONLY;
-	else if(!r && w) 
+	else if(!r && w)
 		mode = O_WRONLY;
-	else if(r && w) 
+	else if(r && w)
 		mode = O_RDWR;
 	else panic("Impossible mode in open_file");
 
@@ -112,7 +113,7 @@ void *open_dir(char *path, int *err_out)
 	return(dir);
 }
 
-char *read_dir(void *stream, unsigned long long *pos, 
+char *read_dir(void *stream, unsigned long long *pos,
 	       unsigned long long *ino_out, int *len_out)
 {
 	DIR *dir = stream;
@@ -166,7 +167,7 @@ void close_dir(void *stream)
 	closedir(stream);
 }
 
-int file_create(char *name, int ur, int uw, int ux, int gr, 
+int file_create(char *name, int ur, int uw, int ux, int gr,
 		int gw, int gx, int or, int ow, int ox)
 {
 	int mode, fd;
@@ -182,7 +183,7 @@ int file_create(char *name, int ur, int uw, int ux, int gr,
 	mode |= ow ? S_IWOTH : 0;
 	mode |= ox ? S_IXOTH : 0;
 	fd = open64(name, O_CREAT | O_RDWR, mode);
-	if(fd < 0) 
+	if(fd < 0)
 		return(-errno);
 	return(fd);
 }
@@ -214,30 +215,30 @@ int set_attr(const char *file, struct hostfs_iattr *attrs)
 		struct timespec ts;
 
 		if(attrs->ia_valid & HOSTFS_ATTR_ATIME_SET){
-			err = stat_file(file, NULL, NULL, NULL, NULL, NULL, 
+			err = stat_file(file, NULL, NULL, NULL, NULL, NULL,
 					NULL, NULL, &ts, NULL, NULL, NULL);
-			if(err != 0) 
+			if(err != 0)
 				return(err);
 			buf.actime = attrs->ia_atime.tv_sec;
 			buf.modtime = ts.tv_sec;
-			if(utime(file, &buf) != 0) 
+			if(utime(file, &buf) != 0)
 				return(-errno);
 		}
 		if(attrs->ia_valid & HOSTFS_ATTR_MTIME_SET){
-			err = stat_file(file, NULL, NULL, NULL, NULL, NULL, 
+			err = stat_file(file, NULL, NULL, NULL, NULL, NULL,
 					NULL, &ts, NULL, NULL, NULL, NULL);
-			if(err != 0) 
+			if(err != 0)
 				return(err);
 			buf.actime = ts.tv_sec;
 			buf.modtime = attrs->ia_mtime.tv_sec;
-			if(utime(file, &buf) != 0) 
+			if(utime(file, &buf) != 0)
 				return(-errno);
 		}
 	}
 	if(attrs->ia_valid & HOSTFS_ATTR_CTIME) ;
 	if(attrs->ia_valid & (HOSTFS_ATTR_ATIME | HOSTFS_ATTR_MTIME)){
-		err = stat_file(file, NULL, NULL, NULL, NULL, NULL, NULL, 
-				&attrs->ia_atime, &attrs->ia_mtime, NULL, 
+		err = stat_file(file, NULL, NULL, NULL, NULL, NULL, NULL,
+				&attrs->ia_atime, &attrs->ia_mtime, NULL,
 				NULL, NULL);
 		if(err != 0) return(err);
 	}
@@ -303,9 +304,9 @@ int do_readlink(char *file, char *buf, int size)
 	int n;
 
 	n = readlink(file, buf, size);
-	if(n < 0) 
+	if(n < 0)
 		return(-errno);
-	if(n < size) 
+	if(n < size)
 		buf[n] = '\0';
 	return(n);
 }
@@ -316,13 +317,13 @@ int rename_file(char *from, char *to)
 
 	err = rename(from, to);
 	if(err < 0) return(-errno);
-	return(0);	
+	return(0);
 }
 
-int do_statfs(char *root, long *bsize_out, long long *blocks_out, 
-	      long long *bfree_out, long long *bavail_out, 
+int do_statfs(char *root, long *bsize_out, long long *blocks_out,
+	      long long *bfree_out, long long *bavail_out,
 	      long long *files_out, long long *ffree_out,
-	      void *fsid_out, int fsid_size, long *namelen_out, 
+	      void *fsid_out, int fsid_size, long *namelen_out,
 	      long *spare_out)
 {
 	struct statfs64 buf;
@@ -336,8 +337,8 @@ int do_statfs(char *root, long *bsize_out, long long *blocks_out,
 	*bavail_out = buf.f_bavail;
 	*files_out = buf.f_files;
 	*ffree_out = buf.f_ffree;
-	memcpy(fsid_out, &buf.f_fsid, 
-	       sizeof(buf.f_fsid) > fsid_size ? fsid_size : 
+	memcpy(fsid_out, &buf.f_fsid,
+	       sizeof(buf.f_fsid) > fsid_size ? fsid_size :
 	       sizeof(buf.f_fsid));
 	*namelen_out = buf.f_namelen;
 	spare_out[0] = buf.f_spare[0];

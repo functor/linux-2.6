@@ -110,6 +110,14 @@ static ctl_table sctp_table[] = {
 		.proc_handler	= &proc_dointvec
 	},
 	{
+		.ctl_name	= NET_SCTP_SNDBUF_POLICY,
+		.procname	= "sndbuf_policy",
+		.data		= &sctp_sndbuf_policy,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec
+	},
+	{
 		.ctl_name	= NET_SCTP_PATH_MAX_RETRANS,
 		.procname	= "path_max_retrans",
 		.data		= &sctp_max_retrans_path,
@@ -232,7 +240,7 @@ static int sctp_sysctl_jiffies_ms(ctl_table *table, int __user *name, int nlen,
 				return -EINVAL;
 		}
 		if (put_user((*(int *)(table->data) * 1000) / HZ,
-			(int *)oldval) ||
+			(int __user *)oldval) ||
 		    (oldlenp && put_user(sizeof (int), oldlenp)))
 			return -EFAULT;
 	}
@@ -242,7 +250,7 @@ static int sctp_sysctl_jiffies_ms(ctl_table *table, int __user *name, int nlen,
 		if (newlen != sizeof (int))
 			return -EINVAL;
 
-		if (get_user(new, (int *)newval))
+		if (get_user(new, (int __user *)newval))
 			return -EFAULT;
 
 		*(int *)(table->data) = (new * HZ) / 1000;

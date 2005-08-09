@@ -90,6 +90,7 @@ int acpi_pci_register_driver(struct acpi_pci_driver *driver)
 
 	return n;
 }
+EXPORT_SYMBOL(acpi_pci_register_driver);
 
 void acpi_pci_unregister_driver(struct acpi_pci_driver *driver)
 {
@@ -111,6 +112,41 @@ void acpi_pci_unregister_driver(struct acpi_pci_driver *driver)
 		root = list_entry(entry, struct acpi_pci_root, node);
 		driver->remove(root->handle);
 	}
+}
+EXPORT_SYMBOL(acpi_pci_unregister_driver);
+
+static acpi_status
+get_root_bridge_busnr_callback (struct acpi_resource *resource, void *data)
+{
+	int *busnr = (int *)data;
+	struct acpi_resource_address64 address;
+
+	if (resource->id != ACPI_RSTYPE_ADDRESS16 &&
+	    resource->id != ACPI_RSTYPE_ADDRESS32 &&
+	    resource->id != ACPI_RSTYPE_ADDRESS64)
+		return AE_OK;
+
+	acpi_resource_to_address64(resource, &address);
+	if ((address.address_length > 0) && 
+	   (address.resource_type == ACPI_BUS_NUMBER_RANGE))
+		*busnr = address.min_address_range;
+
+	return AE_OK;
+}
+
+static acpi_status 
+try_get_root_bridge_busnr(acpi_handle handle, int *busnum)
+{
+	acpi_status status;
+
+	*busnum = -1;
+	status = acpi_walk_resources(handle, METHOD_NAME__CRS, get_root_bridge_busnr_callback, busnum);
+	if (ACPI_FAILURE(status))
+		return status;
+	/* Check if we really get a bus number from _CRS */
+	if (*busnum == -1)
+		return AE_ERROR;
+	return AE_OK;
 }
 
 static int
@@ -190,9 +226,22 @@ acpi_pci_root_add (
 	/* Some systems have wrong _BBN */
 	list_for_each_entry(tmp, &acpi_pci_roots, node) {
 		if ((tmp->id.segment == root->id.segment)
-				&& (tmp->id.bus == root->id.bus))
+				&& (tmp->id.bus == root->id.bus)) {
+			int bus = 0;
+			acpi_status status;
+
 			ACPI_DEBUG_PRINT((ACPI_DB_ERROR, 
 				"Wrong _BBN value, please reboot and using option 'pci=noacpi'\n"));
+
+			status = try_get_root_bridge_busnr(root->handle, &bus);
+			if (ACPI_FAILURE(status))
+				break;
+			if (bus != root->id.bus) {
+				printk(KERN_INFO PREFIX "PCI _CRS %d overrides _BBN 0\n", bus);
+				root->id.bus = bus;
+			}
+			break;
+		}
 	}
 	/*
 	 * Device & Function
@@ -209,7 +258,7 @@ acpi_pci_root_add (
  	/* TBD: Locking */
  	list_add_tail(&root->node, &acpi_pci_roots);
 
-	printk(KERN_INFO PREFIX "%s [%s] (%02x:%02x)\n", 
+	printk(KERN_INFO PREFIX "%s [%s] (%04x:%02x)\n", 
 		acpi_device_name(device), acpi_device_bid(device),
 		root->id.segment, root->id.bus);
 
@@ -223,7 +272,7 @@ acpi_pci_root_add (
 	root->bus = pci_acpi_scan_root(device, root->id.segment, root->id.bus);
 	if (!root->bus) {
 		ACPI_DEBUG_PRINT((ACPI_DB_ERROR, 
-			"Bus %02x:%02x not present in PCI namespace\n", 
+			"Bus %04x:%02x not present in PCI namespace\n", 
 			root->id.segment, root->id.bus));
 		result = -ENODEV;
 		goto end;

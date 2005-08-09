@@ -96,7 +96,7 @@ hycapi_remove_ctr(struct capi_ctr *ctrl)
 		}
 	}
 	detach_capi_ctr(ctrl);
-	ctrl->driverdata = 0;
+	ctrl->driverdata = NULL;
 	kfree(card->hyctrlinfo);
 
 		
@@ -246,8 +246,6 @@ hycapi_register_appl(struct capi_ctr *ctrl, __u16 appl,
 	rp->level3cnt = MaxLogicalConnections;
 	memcpy(&hycapi_applications[appl-1].rp, 
 	       rp, sizeof(capi_register_params));
-	
-/*        MOD_INC_USE_COUNT; */
 }
 
 /*********************************************************************
@@ -311,7 +309,6 @@ hycapi_release_appl(struct capi_ctr *ctrl, __u16 appl)
 	{
 		hycapi_release_internal(ctrl, appl);
 	}
-/*        MOD_DEC_USE_COUNT;  */
 }
 
 
@@ -678,7 +675,7 @@ attach the capi-driver to the kernel-capi.
 
 ***********************************************************/
 
-int hycapi_init()
+int hycapi_init(void)
 {
 	int i;
 	for(i=0;i<CAPI_MAXAPPL;i++) {

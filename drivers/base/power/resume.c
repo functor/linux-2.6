@@ -22,8 +22,17 @@ extern int sysdev_resume(void);
 
 int resume_device(struct device * dev)
 {
-	if (dev->bus && dev->bus->resume)
+	if (dev->power.pm_parent
+			&& dev->power.pm_parent->power.power_state) {
+		dev_err(dev, "PM: resume from %d, parent %s still %d\n",
+			dev->power.power_state,
+			dev->power.pm_parent->bus_id,
+			dev->power.pm_parent->power.power_state);
+	}
+	if (dev->bus && dev->bus->resume) {
+		dev_dbg(dev,"resuming\n");
 		return dev->bus->resume(dev);
+	}
 	return 0;
 }
 
@@ -31,13 +40,22 @@ int resume_device(struct device * dev)
 
 void dpm_resume(void)
 {
+	down(&dpm_list_sem);
 	while(!list_empty(&dpm_off)) {
 		struct list_head * entry = dpm_off.next;
 		struct device * dev = to_device(entry);
+
+		get_device(dev);
 		list_del_init(entry);
-		resume_device(dev);
-		list_add_tail(entry,&dpm_active);
+		list_add_tail(entry, &dpm_active);
+
+		up(&dpm_list_sem);
+		if (!dev->power.prev_state)
+			resume_device(dev);
+		down(&dpm_list_sem);
+		put_device(dev);
 	}
+	up(&dpm_list_sem);
 }
 
 
@@ -45,7 +63,7 @@ void dpm_resume(void)
  *	device_resume - Restore state of each device in system.
  *
  *	Walk the dpm_off list, remove each entry, resume the device,
- *	then add it to the dpm_active list. 
+ *	then add it to the dpm_active list.
  */
 
 void device_resume(void)
@@ -55,27 +73,31 @@ void device_resume(void)
 	up(&dpm_sem);
 }
 
-EXPORT_SYMBOL(device_resume);
+EXPORT_SYMBOL_GPL(device_resume);
 
 
 /**
- *	device_power_up_irq - Power on some devices. 
+ *	device_power_up_irq - Power on some devices.
  *
- *	Walk the dpm_off_irq list and power each device up. This 
+ *	Walk the dpm_off_irq list and power each device up. This
  *	is used for devices that required they be powered down with
  *	interrupts disabled. As devices are powered on, they are moved to
  *	the dpm_suspended list.
  *
- *	Interrupts must be disabled when calling this. 
+ *	Interrupts must be disabled when calling this.
  */
 
 void dpm_power_up(void)
 {
 	while(!list_empty(&dpm_off_irq)) {
 		struct list_head * entry = dpm_off_irq.next;
+		struct device * dev = to_device(entry);
+
+		get_device(dev);
 		list_del_init(entry);
-		resume_device(to_device(entry));
-		list_add_tail(entry,&dpm_active);
+		list_add_tail(entry, &dpm_active);
+		resume_device(dev);
+		put_device(dev);
 	}
 }
 
@@ -94,6 +116,6 @@ void device_power_up(void)
 	dpm_power_up();
 }
 
-EXPORT_SYMBOL(device_power_up);
+EXPORT_SYMBOL_GPL(device_power_up);
 
 

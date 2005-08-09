@@ -8,6 +8,7 @@
  */
 #include <linux/stddef.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <asm/system.h>
 #include <asm/iSeries/HvLpEvent.h>
 #include <asm/iSeries/HvCallEvent.h>
@@ -33,14 +34,24 @@ int HvLpEvent_registerHandler( HvLpEvent_Type eventType, LpEventHandler handler 
 int HvLpEvent_unregisterHandler( HvLpEvent_Type eventType )
 {
 	int rc = 1;
+
+	might_sleep();
+
 	if ( eventType < HvLpEvent_Type_NumTypes ) {
 		if ( !lpEventHandlerPaths[eventType] ) {
 			lpEventHandler[eventType] = NULL;
 			rc = 0;
+
+			/* We now sleep until all other CPUs have scheduled. This ensures that
+			 * the deletion is seen by all other CPUs, and that the deleted handler
+			 * isn't still running on another CPU when we return. */
+			synchronize_rcu();
 		}
 	}
 	return rc;
 }
+EXPORT_SYMBOL(HvLpEvent_registerHandler);
+EXPORT_SYMBOL(HvLpEvent_unregisterHandler);
 
 /* (lpIndex is the partition index of the target partition.  
  * needed only for VirtualIo, VirtualLan and SessionMgr.  Zero

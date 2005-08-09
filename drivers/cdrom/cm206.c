@@ -302,7 +302,7 @@ struct cm206_struct {
 
 static struct cm206_struct *cd;	/* the main memory structure */
 static struct request_queue *cm206_queue;
-static spinlock_t cm206_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(cm206_lock);
 
 /* First, we define some polling functions. These are actually
    only being used in the initialization. */
@@ -1363,7 +1363,7 @@ static int cm206_block_release(struct inode *inode, struct file *file)
 static int cm206_block_ioctl(struct inode *inode, struct file *file,
 				unsigned cmd, unsigned long arg)
 {
-	return cdrom_ioctl(&cm206_info, inode, cmd, arg);
+	return cdrom_ioctl(file, &cm206_info, inode, cmd, arg);
 }
 
 static int cm206_block_media_changed(struct gendisk *disk)

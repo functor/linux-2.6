@@ -160,9 +160,9 @@ static char *version =
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
+#include <linux/bitops.h>
 
 #include <asm/system.h>		  
-#include <asm/bitops.h>		  
 #include <asm/io.h>		  
 #include <asm/dma.h>
 
@@ -458,6 +458,7 @@ static int __init do_eth16i_probe(struct net_device *dev)
 	return -ENODEV;
 }
 
+#ifndef MODULE
 struct net_device * __init eth16i_probe(int unit)
 {
 	struct net_device *dev = alloc_etherdev(sizeof(struct eth16i_local));
@@ -483,6 +484,7 @@ out:
 	free_netdev(dev);
 	return ERR_PTR(err);
 }
+#endif
 
 static int __init eth16i_probe1(struct net_device *dev, int ioaddr)
 {
@@ -491,7 +493,7 @@ static int __init eth16i_probe1(struct net_device *dev, int ioaddr)
 	int retval;
 
 	/* Let's grab the region */
-	if (!request_region(ioaddr, ETH16I_IO_EXTENT, dev->name))
+	if (!request_region(ioaddr, ETH16I_IO_EXTENT, cardname))
 		return -EBUSY;
 
 	/*
@@ -538,9 +540,9 @@ static int __init eth16i_probe1(struct net_device *dev, int ioaddr)
 
 	/* Try to obtain interrupt vector */
 
-	if ((retval = request_irq(dev->irq, (void *)&eth16i_interrupt, 0, dev->name, dev))) {
-		printk(KERN_WARNING "%s: %s at %#3x, but is unusable due conflicting IRQ %d.\n", 
-		       dev->name, cardname, ioaddr, dev->irq);
+	if ((retval = request_irq(dev->irq, (void *)&eth16i_interrupt, 0, cardname, dev))) {
+		printk(KERN_WARNING "%s at %#3x, but is unusable due to conflicting IRQ %d.\n", 
+		       cardname, ioaddr, dev->irq);
 		goto out;
 	}
 
@@ -1418,18 +1420,18 @@ MODULE_DESCRIPTION("ICL EtherTeam 16i/32 driver");
 MODULE_LICENSE("GPL");
 
 
-MODULE_PARM(io, "1-" __MODULE_STRING(MAX_ETH16I_CARDS) "i");
+module_param_array(io, int, NULL, 0);
 MODULE_PARM_DESC(io, "eth16i I/O base address(es)");
 
 #if 0
-MODULE_PARM(irq, "1-" __MODULE_STRING(MAX_ETH16I_CARDS) "i");
+module_param_array(irq, int, NULL, 0);
 MODULE_PARM_DESC(irq, "eth16i interrupt request number");
 #endif
 
-MODULE_PARM(mediatype, "1-" __MODULE_STRING(MAX_ETH16I_CARDS) "s");
+module_param_array(mediatype, charp, NULL, 0);
 MODULE_PARM_DESC(mediatype, "eth16i media type of interface(s) (bnc,tp,dix,auto,eprom)");
 
-MODULE_PARM(debug, "i");
+module_param(debug, int, 0);
 MODULE_PARM_DESC(debug, "eth16i debug level (0-6)");
 
 int init_module(void)

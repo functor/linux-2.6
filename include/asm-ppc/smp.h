@@ -40,14 +40,11 @@ extern void smp_send_tlb_invalidate(int);
 extern void smp_send_xmon_break(int cpu);
 struct pt_regs;
 extern void smp_message_recv(int, struct pt_regs *);
-extern void smp_local_timer_interrupt(struct pt_regs *);
 
 #define NO_PROC_ID		0xFF            /* No processor magic marker */
 #define PROC_CHANGE_PENALTY	20
 
 #define smp_processor_id() (current_thread_info()->cpu)
-
-#define cpu_online(cpu) cpu_isset(cpu, cpu_online_map)
 
 extern int __cpu_up(unsigned int cpu);
 

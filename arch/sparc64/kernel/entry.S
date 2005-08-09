@@ -26,7 +26,7 @@
 
 #define curptr      g6
 
-#define NR_SYSCALLS 283      /* Each OS is different... */
+#define NR_SYSCALLS 284      /* Each OS is different... */
 
 	.text
 	.align		32
@@ -38,97 +38,150 @@
  * range (note that this is only possible for instruction miss, data misses to
  * obp range do not use vpte). If so, go back directly to the faulting address.
  * This is because we want to read the tpc, otherwise we have no way of knowing
- * the 8k aligned faulting address if we are using >8k kernel pagesize. This also
- * ensures no vpte range addresses are dropped into tlb while obp is executing
- * (see inherit_locked_prom_mappings() rant).
+ * the 8k aligned faulting address if we are using >8k kernel pagesize. This
+ * also ensures no vpte range addresses are dropped into tlb while obp is
+ * executing (see inherit_locked_prom_mappings() rant).
  */
 sparc64_vpte_nucleus:
+	/* Load 0xf0000000, which is LOW_OBP_ADDRESS.  */
 	mov		0xf, %g5
-	sllx		%g5, 28, %g5			! Load 0xf0000000
-	cmp		%g4, %g5			! Is addr >= LOW_OBP_ADDRESS?
+	sllx		%g5, 28, %g5
+
+	/* Is addr >= LOW_OBP_ADDRESS?  */
+	cmp		%g4, %g5
 	blu,pn		%xcc, sparc64_vpte_patchme1
 	 mov		0x1, %g5
-	sllx		%g5, 32, %g5			! Load 0x100000000
-	cmp		%g4, %g5			! Is addr < HI_OBP_ADDRESS?
+
+	/* Load 0x100000000, which is HI_OBP_ADDRESS.  */
+	sllx		%g5, 32, %g5
+
+	/* Is addr < HI_OBP_ADDRESS?  */
+	cmp		%g4, %g5
 	blu,pn		%xcc, obp_iaddr_patch
 	 nop
+
+	/* These two instructions are patched by paginig_init().  */
 sparc64_vpte_patchme1:
-	sethi		%hi(0), %g5			! This has to be patched
+	sethi		%hi(0), %g5
 sparc64_vpte_patchme2:
-	or		%g5, %lo(0), %g5		! This is patched too
-	ba,pt		%xcc, sparc64_kpte_continue	! Part of dtlb_backend
-	 add		%g1, %g1, %g1			! Finish PMD offset adjustment
+	or		%g5, %lo(0), %g5
+
+	/* With kernel PGD in %g5, branch back into dtlb_backend.  */
+	ba,pt		%xcc, sparc64_kpte_continue
+	 andn		%g1, 0x3, %g1	/* Finish PMD offset adjustment.  */
 
 vpte_noent:
-	mov		TLB_SFSR, %g1			! Restore %g1 value
-	stxa		%g4, [%g1 + %g1] ASI_DMMU	! Restore previous TAG_ACCESS
-	done						! Slick trick
+	/* Restore previous TAG_ACCESS, %g5 is zero, and we will
+	 * skip over the trap instruction so that the top level
+	 * TLB miss handler will thing this %g5 value is just an
+	 * invalid PTE, thus branching to full fault processing.
+	 */
+	mov		TLB_SFSR, %g1
+	stxa		%g4, [%g1 + %g1] ASI_DMMU
+	done
 
 	.globl		obp_iaddr_patch
-	.globl		obp_daddr_patch
-
 obp_iaddr_patch:
-	sethi		%hi(0), %g5			! This and following is patched
-	or		%g5, %lo(0), %g5		! g5 now holds obp pmd base physaddr
-	wrpr		%g0, 1, %tl			! Behave as if we are at TL0
-	rdpr		%tpc, %g4			! Find original faulting iaddr
-	srlx		%g4, 13, %g4			! Throw out context bits
-	sllx		%g4, 13, %g4			! g4 has vpn + ctx0 now
-	mov		TLB_SFSR, %g1			! Restore %g1 value
-	stxa		%g4, [%g1 + %g1] ASI_IMMU	! Restore previous TAG_ACCESS
-	srlx		%g4, 23, %g6			! Find pmd number
-	and		%g6, 0x7ff, %g6			! Find pmd number
-	sllx		%g6, 2, %g6			! Find pmd offset
-	lduwa		[%g5 + %g6] ASI_PHYS_USE_EC, %g5! Load pmd, ie pagetable physaddr
-	brz,pn		%g5, longpath			! Kill the PROM ? :-)
-	 sllx		%g5, 11, %g5			! Shift into place
-	srlx		%g4, 13, %g6			! find pte number in pagetable
-	and		%g6, 0x3ff, %g6			! find pte number in pagetable
-	sllx		%g6, 3, %g6			! find pte offset in pagetable
-	ldxa		[%g5 + %g6] ASI_PHYS_USE_EC, %g5! Load pte
-	brgez,pn	%g5, longpath			! Kill the PROM ? :-)
-	 nop
-	stxa		%g5, [%g0] ASI_ITLB_DATA_IN	! put into tlb
-	retry						! go back to original fault
+	/* These two instructions patched by inherit_prom_mappings().  */
+	sethi		%hi(0), %g5
+	or		%g5, %lo(0), %g5
 
-obp_daddr_patch:
-	sethi		%hi(0), %g5			! This and following is patched
-	or		%g5, %lo(0), %g5		! g5 now holds obp pmd base physaddr
-	srlx		%g4, 23, %g6			! Find pmd number
-	and		%g6, 0x7ff, %g6			! Find pmd number
-	sllx		%g6, 2, %g6			! Find pmd offset
-	lduwa		[%g5 + %g6] ASI_PHYS_USE_EC, %g5! Load pmd, ie pagetable physaddr
+	/* Behave as if we are at TL0.  */
+	wrpr		%g0, 1, %tl
+	rdpr		%tpc, %g4	/* Find original faulting iaddr */
+	srlx		%g4, 13, %g4	/* Throw out context bits */
+	sllx		%g4, 13, %g4	/* g4 has vpn + ctx0 now */
+
+	/* Restore previous TAG_ACCESS.  */
+	mov		TLB_SFSR, %g1
+	stxa		%g4, [%g1 + %g1] ASI_IMMU
+
+	/* Get PMD offset.  */
+	srlx		%g4, 23, %g6
+	and		%g6, 0x7ff, %g6
+	sllx		%g6, 2, %g6
+
+	/* Load PMD, is it valid?  */
+	lduwa		[%g5 + %g6] ASI_PHYS_USE_EC, %g5
 	brz,pn		%g5, longpath
-	 sllx		%g5, 11, %g5			! Shift into place
-	srlx		%g4, 13, %g6			! find pte number in pagetable
-	and		%g6, 0x3ff, %g6			! find pte number in pagetable
-	sllx		%g6, 3, %g6			! find pte offset in pagetable
-	ldxa		[%g5 + %g6] ASI_PHYS_USE_EC, %g5! Load pte
+	 sllx		%g5, 11, %g5
+
+	/* Get PTE offset.  */
+	srlx		%g4, 13, %g6
+	and		%g6, 0x3ff, %g6
+	sllx		%g6, 3, %g6
+
+	/* Load PTE.  */
+	ldxa		[%g5 + %g6] ASI_PHYS_USE_EC, %g5
 	brgez,pn	%g5, longpath
 	 nop
-	stxa		%g5, [%g0] ASI_DTLB_DATA_IN	! put into tlb
+
+	/* TLB load and return from trap.  */
+	stxa		%g5, [%g0] ASI_ITLB_DATA_IN
+	retry
+
+	.globl		obp_daddr_patch
+obp_daddr_patch:
+	/* These two instructions patched by inherit_prom_mappings().  */
+	sethi		%hi(0), %g5
+	or		%g5, %lo(0), %g5
+
+	/* Get PMD offset.  */
+	srlx		%g4, 23, %g6
+	and		%g6, 0x7ff, %g6
+	sllx		%g6, 2, %g6
+
+	/* Load PMD, is it valid?  */
+	lduwa		[%g5 + %g6] ASI_PHYS_USE_EC, %g5
+	brz,pn		%g5, longpath
+	 sllx		%g5, 11, %g5
+
+	/* Get PTE offset.  */
+	srlx		%g4, 13, %g6
+	and		%g6, 0x3ff, %g6
+	sllx		%g6, 3, %g6
+
+	/* Load PTE.  */
+	ldxa		[%g5 + %g6] ASI_PHYS_USE_EC, %g5
+	brgez,pn	%g5, longpath
+	 nop
+
+	/* TLB load and return from trap.  */
+	stxa		%g5, [%g0] ASI_DTLB_DATA_IN
 	retry
 
 /*
- * On a first level data miss, check whether this is to the OBP range (note that
- * such accesses can be made by prom, as well as by kernel using prom_getproperty
- * on "address"), and if so, do not use vpte access ... rather, use information
- * saved during inherit_prom_mappings() using 8k pagesize.
+ * On a first level data miss, check whether this is to the OBP range (note
+ * that such accesses can be made by prom, as well as by kernel using
+ * prom_getproperty on "address"), and if so, do not use vpte access ...
+ * rather, use information saved during inherit_prom_mappings() using 8k
+ * pagesize.
  */
 kvmap:
+	/* Load 0xf0000000, which is LOW_OBP_ADDRESS.  */
 	mov		0xf, %g5
-	sllx		%g5, 28, %g5			! Load 0xf0000000
-	cmp		%g4, %g5			! Is addr >= LOW_OBP_ADDRESS?
+	sllx		%g5, 28, %g5
+
+	/* Is addr >= LOW_OBP_ADDRESS?  */
+	cmp		%g4, %g5
 	blu,pn		%xcc, vmalloc_addr
 	 mov		0x1, %g5
-	sllx		%g5, 32, %g5			! Load 0x100000000
-	cmp		%g4, %g5			! Is addr < HI_OBP_ADDRESS?
+
+	/* Load 0x100000000, which is HI_OBP_ADDRESS.  */
+	sllx		%g5, 32, %g5
+
+	/* Is addr < HI_OBP_ADDRESS?  */
+	cmp		%g4, %g5
 	blu,pn		%xcc, obp_daddr_patch
 	 nop
-vmalloc_addr:						! vmalloc addr accessed
-	ldxa		[%g3 + %g6] ASI_N, %g5		! Yep, load k-vpte
-	brgez,pn	%g5, longpath			! Valid, load into TLB
+
+vmalloc_addr:
+	/* If we get here, a vmalloc addr accessed, load kernel VPTE.  */
+	ldxa		[%g3 + %g6] ASI_N, %g5
+	brgez,pn	%g5, longpath
 	 nop
+
+	/* PTE is valid, load into TLB and return from trap.  */
 	stxa		%g5, [%g0] ASI_DTLB_DATA_IN	! Reload TLB
 	retry
 
@@ -199,9 +252,11 @@ do_fpdis:
 	faddd		%f0, %f2, %f4
 	fmuld		%f0, %f2, %f6
 	ldxa		[%g3] ASI_DMMU, %g5
-	add		%g6, TI_FPREGS + 0xc0, %g2
-	stxa		%g0, [%g3] ASI_DMMU
+cplus_fptrap_insn_1:
+	sethi		%hi(0), %g2
+	stxa		%g2, [%g3] ASI_DMMU
 	membar		#Sync
+	add		%g6, TI_FPREGS + 0xc0, %g2
 	faddd		%f0, %f2, %f8
 	fmuld		%f0, %f2, %f10
 	ldda		[%g1] ASI_BLK_S, %f32	! grrr, where is ASI_BLK_NUCLEUS 8-(
@@ -225,7 +280,9 @@ do_fpdis:
 	fzero		%f34
 	ldxa		[%g3] ASI_DMMU, %g5
 	add		%g6, TI_FPREGS, %g1
-	stxa		%g0, [%g3] ASI_DMMU
+cplus_fptrap_insn_2:
+	sethi		%hi(0), %g2
+	stxa		%g2, [%g3] ASI_DMMU
 	membar		#Sync
 	add		%g6, TI_FPREGS + 0x40, %g2
 	faddd		%f32, %f34, %f36
@@ -249,9 +306,11 @@ do_fpdis:
 3:	mov		SECONDARY_CONTEXT, %g3
 	add		%g6, TI_FPREGS, %g1
 	ldxa		[%g3] ASI_DMMU, %g5
-	mov		0x40, %g2
-	stxa		%g0, [%g3] ASI_DMMU
+cplus_fptrap_insn_3:
+	sethi		%hi(0), %g2
+	stxa		%g2, [%g3] ASI_DMMU
 	membar		#Sync
+	mov		0x40, %g2
 	ldda		[%g1] ASI_BLK_S, %f0		! grrr, where is ASI_BLK_NUCLEUS 8-(
 	ldda		[%g1 + %g2] ASI_BLK_S, %f16
 	add		%g1, 0x80, %g1
@@ -412,10 +471,12 @@ do_fptrap_after_fsr:
 	rd		%gsr, %g3
 	stx		%g3, [%g6 + TI_GSR]
 	mov		SECONDARY_CONTEXT, %g3
-	add		%g6, TI_FPREGS, %g2
 	ldxa		[%g3] ASI_DMMU, %g5
-	stxa		%g0, [%g3] ASI_DMMU
+cplus_fptrap_insn_4:
+	sethi		%hi(0), %g2
+	stxa		%g2, [%g3] ASI_DMMU
 	membar		#Sync
+	add		%g6, TI_FPREGS, %g2
 	andcc		%g1, FPRS_DL, %g0
 	be,pn		%icc, 4f
 	 mov		0x40, %g3
@@ -432,6 +493,33 @@ do_fptrap_after_fsr:
 	membar		#Sync
 	ba,pt		%xcc, etrap
 	 wr		%g0, 0, %fprs
+
+cplus_fptrap_1:
+	sethi		%hi(CTX_CHEETAH_PLUS_CTX0), %g2
+
+	.globl		cheetah_plus_patch_fpdis
+cheetah_plus_patch_fpdis:
+	/* We configure the dTLB512_0 for 4MB pages and the
+	 * dTLB512_1 for 8K pages when in context zero.
+	 */
+	sethi			%hi(cplus_fptrap_1), %o0
+	lduw			[%o0 + %lo(cplus_fptrap_1)], %o1
+
+	set			cplus_fptrap_insn_1, %o2
+	stw			%o1, [%o2]
+	flush			%o2
+	set			cplus_fptrap_insn_2, %o2
+	stw			%o1, [%o2]
+	flush			%o2
+	set			cplus_fptrap_insn_3, %o2
+	stw			%o1, [%o2]
+	flush			%o2
+	set			cplus_fptrap_insn_4, %o2
+	stw			%o1, [%o2]
+	flush			%o2
+
+	retl
+	 nop
 
 	/* The registers for cross calls will be:
 	 *
@@ -1496,28 +1584,30 @@ sunos_getgid:
 	/* SunOS's execv() call only specifies the argv argument, the
 	 * environment settings are the same as the calling processes.
 	 */
-	.globl	sunos_execv, sys_execve, sys32_execve
+	.globl	sunos_execv
 sys_execve:
 	sethi		%hi(sparc_execve), %g1
 	ba,pt		%xcc, execve_merge
 	 or		%g1, %lo(sparc_execve), %g1
+#ifdef CONFIG_COMPAT
+	.globl	sys_execve
 sunos_execv:
 	stx		%g0, [%sp + PTREGS_OFF + PT_V9_I2]
+	.globl	sys32_execve
 sys32_execve:
 	sethi		%hi(sparc32_execve), %g1
 	or		%g1, %lo(sparc32_execve), %g1
+#endif
 execve_merge:
 	flushw
 	jmpl		%g1, %g0
 	 add		%sp, PTREGS_OFF, %o0
 
 	.globl	sys_pipe, sys_sigpause, sys_nis_syscall
-	.globl	sys_sigsuspend, sys_rt_sigsuspend, sys32_rt_sigsuspend
+	.globl	sys_sigsuspend, sys_rt_sigsuspend
 	.globl	sys_rt_sigreturn
-	.globl	sys32_sigreturn, sys32_rt_sigreturn
-	.globl	sys32_execve, sys_ptrace
-	.globl	sys_sigaltstack, sys32_sigaltstack
-	.globl	sys32_sigstack
+	.globl	sys_ptrace
+	.globl	sys_sigaltstack
 	.align	32
 sys_pipe:	ba,pt		%xcc, sparc_pipe
 		 add		%sp, PTREGS_OFF, %o0
@@ -1528,12 +1618,15 @@ sys_memory_ordering:
 		 add		%sp, PTREGS_OFF, %o1
 sys_sigaltstack:ba,pt		%xcc, do_sigaltstack
 		 add		%i6, STACK_BIAS, %o2
+#ifdef CONFIG_COMPAT
+	.globl	sys32_sigstack
 sys32_sigstack:	ba,pt		%xcc, do_sys32_sigstack
 		 mov		%i6, %o2
+	.globl	sys32_sigaltstack
 sys32_sigaltstack:
 		ba,pt		%xcc, do_sys32_sigaltstack
 		 mov		%i6, %o2
-
+#endif
 		.align		32
 sys_sigsuspend:	add		%sp, PTREGS_OFF, %o0
 		call		do_sigsuspend
@@ -1544,31 +1637,40 @@ sys_rt_sigsuspend: /* NOTE: %o0,%o1 have a correct value already */
 		call		do_rt_sigsuspend
 		 add		%o7, 1f-.-4, %o7
 		nop
+#ifdef CONFIG_COMPAT
+	.globl	sys32_rt_sigsuspend
 sys32_rt_sigsuspend: /* NOTE: %o0,%o1 have a correct value already */
 		srl		%o0, 0, %o0
 		add		%sp, PTREGS_OFF, %o2
 		call		do_rt_sigsuspend32
 		 add		%o7, 1f-.-4, %o7
+#endif
 		/* NOTE: %o0 has a correct value already */
 sys_sigpause:	add		%sp, PTREGS_OFF, %o1
 		call		do_sigpause
 		 add		%o7, 1f-.-4, %o7
 		nop
+#ifdef CONFIG_COMPAT
+	.globl	sys32_sigreturn
 sys32_sigreturn:
 		add		%sp, PTREGS_OFF, %o0
 		call		do_sigreturn32
 		 add		%o7, 1f-.-4, %o7
 		nop
+#endif
 sys_rt_sigreturn:
 		add		%sp, PTREGS_OFF, %o0
 		call		do_rt_sigreturn
 		 add		%o7, 1f-.-4, %o7
 		nop
+#ifdef CONFIG_COMPAT
+	.globl	sys32_rt_sigreturn
 sys32_rt_sigreturn:
 		add		%sp, PTREGS_OFF, %o0
 		call		do_rt_sigreturn32
 		 add		%o7, 1f-.-4, %o7
 		nop
+#endif
 sys_ptrace:	add		%sp, PTREGS_OFF, %o0
 		call		do_ptrace
 		 add		%o7, 1f-.-4, %o7
@@ -1628,7 +1730,7 @@ ret_from_syscall:
 		andn		%o7, _TIF_NEWCHILD, %l0
 		stx		%l0, [%g6 + TI_FLAGS]
 		call		schedule_tail
-		 mov		%g5, %o0
+		 mov		%g7, %o0
 		andcc		%l0, _TIF_PERFCTR, %g0
 		be,pt		%icc, 1f
 		 nop
@@ -1697,12 +1799,12 @@ linux_sparc_syscall32:
 	 add		%sp, PTREGS_OFF, %o0
 	srl		%i0, 0, %o0
 #endif
-	mov		%i4, %o4				! IEU1
+	srl		%i4, 0, %o4				! IEU1
 	lduw		[%l7 + %l4], %l7			! Load
 	srl		%i1, 0, %o1				! IEU0	Group
 	ldx		[%curptr + TI_FLAGS], %l0		! Load
 
-	mov		%i5, %o5				! IEU1
+	srl		%i5, 0, %o5				! IEU1
 	srl		%i2, 0, %o2				! IEU0	Group
 	andcc		%l0, _TIF_SYSCALL_TRACE, %g0		! IEU0	Group
 	bne,pn		%icc, linux_syscall_trace32		! CTI
@@ -1751,42 +1853,44 @@ ret_sys_call:
 	ldx		[%sp + PTREGS_OFF + PT_V9_TNPC], %l1 ! pc = npc
 	sra		%o0, 0, %o0
 	mov		%ulo(TSTATE_XCARRY | TSTATE_ICARRY), %g2
-	cmp		%o0, -ENOIOCTLCMD
 	sllx		%g2, 32, %g2
+
+	/* Check if force_successful_syscall_return()
+	 * was invoked.
+	 */
+	ldx		[%curptr + TI_FLAGS], %l0
+	andcc		%l0, _TIF_SYSCALL_SUCCESS, %g0
+	be,pt		%icc, 1f
+	 andn		%l0, _TIF_SYSCALL_SUCCESS, %l0
+	ba,pt		%xcc, 80f
+	 stx		%l0, [%curptr + TI_FLAGS]
+
+1:
+	cmp		%o0, -ERESTART_RESTARTBLOCK
 	bgeu,pn		%xcc, 1f
 	 andcc		%l0, _TIF_SYSCALL_TRACE, %l6	
 80:
-	andn		%g3, %g2, %g3		/* System call success, clear Carry condition code. */
+	/* System call success, clear Carry condition code. */
+	andn		%g3, %g2, %g3
 	stx		%g3, [%sp + PTREGS_OFF + PT_V9_TSTATE]	
 	bne,pn		%icc, linux_syscall_trace2
-	 add		%l1, 0x4, %l2				         ! npc = npc+4
+	 add		%l1, 0x4, %l2			! npc = npc+4
 	stx		%l1, [%sp + PTREGS_OFF + PT_V9_TPC]
 	ba,pt		%xcc, rtrap_clr_l6
 	 stx		%l2, [%sp + PTREGS_OFF + PT_V9_TNPC]
 
 1:
-	/* Really a failure?  Check if force_successful_syscall_return()
-	 * was invoked.
-	 */
-	ldx		[%curptr + TI_FLAGS], %l0		! Load
-	andcc		%l0, _TIF_SYSCALL_SUCCESS, %g0
-	be,pt		%icc, 1f
-	 andcc		%l0, _TIF_SYSCALL_TRACE, %l6	
-	andn		%l0, _TIF_SYSCALL_SUCCESS, %l0
-	ba,pt		%xcc, 80b
-	 stx		%l0, [%curptr + TI_FLAGS]
-
 	/* System call failure, set Carry condition code.
 	 * Also, get abs(errno) to return to the process.
 	 */
-1:
+	andcc		%l0, _TIF_SYSCALL_TRACE, %l6	
 	sub		%g0, %o0, %o0
 	or		%g3, %g2, %g3
 	stx		%o0, [%sp + PTREGS_OFF + PT_V9_I0]
 	mov		1, %l6
 	stx		%g3, [%sp + PTREGS_OFF + PT_V9_TSTATE]
 	bne,pn		%icc, linux_syscall_trace2
-	 add		%l1, 0x4, %l2				         !npc = npc+4
+	 add		%l1, 0x4, %l2			! npc = npc+4
 	stx		%l1, [%sp + PTREGS_OFF + PT_V9_TPC]
 
 	b,pt		%xcc, rtrap

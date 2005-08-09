@@ -115,7 +115,7 @@ is_valid_acpi_path(const char* methodName)
 	acpi_handle handle;
 	acpi_status status;
 
-	status = acpi_get_handle(0, (char*)methodName, &handle);
+	status = acpi_get_handle(NULL, (char*)methodName, &handle);
 	return !ACPI_FAILURE(status);
 }
 
@@ -131,7 +131,7 @@ write_acpi_int(const char* methodName, int val)
 	in_objs[0].type = ACPI_TYPE_INTEGER;
 	in_objs[0].integer.value = val;
 
-	status = acpi_evaluate_object(0, (char*)methodName, &params, 0);
+	status = acpi_evaluate_object(NULL, (char*)methodName, &params, NULL);
 	return (status == AE_OK);
 }
 
@@ -178,7 +178,7 @@ hci_raw(const u32 in[HCI_WORDS], u32 out[HCI_WORDS])
 	results.length = sizeof(out_objs);
 	results.pointer = out_objs;
 
-	status = acpi_evaluate_object(0, (char*)method_hci, &params,
+	status = acpi_evaluate_object(NULL, (char*)method_hci, &params,
 		&results);
 	if ((status == AE_OK) && (out_objs->package.count <= HCI_WORDS)) {
 		for (i = 0; i < out_objs->package.count; ++i) {
@@ -252,7 +252,7 @@ dispatch_read(char* page, char** start, off_t off, int count, int* eof,
 }
 
 static int
-dispatch_write(struct file* file, __user const char* buffer,
+dispatch_write(struct file* file, const char __user * buffer,
 	unsigned long count, ProcItem* item)
 {
 	int result;
@@ -481,14 +481,14 @@ read_version(char* p)
 
 #define PROC_TOSHIBA		"toshiba"
 
-ProcItem proc_items[] =
+static ProcItem proc_items[] =
 {
 	{ "lcd"		, read_lcd	, write_lcd	},
 	{ "video"	, read_video	, write_video	},
 	{ "fan"		, read_fan	, write_fan	},
 	{ "keys"	, read_keys	, write_keys	},
-	{ "version"	, read_version	, 0		},
-	{ 0		, 0		, 0		},
+	{ "version"	, read_version	, NULL		},
+	{ NULL }
 };
 
 static acpi_status __init
@@ -508,7 +508,7 @@ add_device(void)
 			proc->write_proc = (write_proc_t*)dispatch_write;
 	}
 
-	return(AE_OK);
+	return AE_OK;
 }
 
 static acpi_status __exit
@@ -518,7 +518,7 @@ remove_device(void)
 
 	for (item = proc_items; item->name; ++item)
 		remove_proc_entry(item->name, toshiba_proc_dir);
-	return(AE_OK);
+	return AE_OK;
 }
 
 static int __init

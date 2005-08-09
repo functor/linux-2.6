@@ -1,8 +1,8 @@
 VERSION = 2
 PATCHLEVEL = 6
-SUBLEVEL = 6
-EXTRAVERSION =
-NAME=Zonked Quokka
+SUBLEVEL = 12
+EXTRAVERSION = .2
+NAME=Woozy Numbat
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
@@ -18,7 +18,7 @@ MAKEFLAGS += --no-print-directory
 #
 # Most importantly: sub-Makefiles should only ever modify files in
 # their own directory. If in some directory we have a dependency on
-# a file in another dir (which doesn't happen often, but it's of
+# a file in another dir (which doesn't happen often, but it's often
 # unavoidable when linking the built-in.o targets which finally
 # turn into vmlinux), we will call a sub make in that other dir, and
 # after that we are sure that everything which is in that other dir
@@ -53,7 +53,7 @@ ifndef KBUILD_CHECKSRC
   KBUILD_CHECKSRC = 0
 endif
 
-# Use make M=dir to specify direcotry of external module to build
+# Use make M=dir to specify directory of external module to build
 # Old syntax make ... SUBDIRS=$PWD is still supported
 # Setting the environment variable KBUILD_EXTMOD take precedence
 ifdef SUBDIRS
@@ -67,7 +67,7 @@ endif
 
 
 # kbuild supports saving output files in a separate directory.
-# To locate output files in a separate directory two syntax'es are supported.
+# To locate output files in a separate directory two syntaxes are supported.
 # In both cases the working directory must be the root of the kernel src.
 # 1) O=
 # Use "make O=dir/to/store/output/files/"
@@ -78,7 +78,8 @@ endif
 # export KBUILD_OUTPUT=dir/to/store/output/files/
 # make
 #
-# The O= assigment takes precedence over the KBUILD_OUTPUT environment variable.
+# The O= assignment takes precedence over the KBUILD_OUTPUT environment
+# variable.
 
 
 # KBUILD_SRC is set on invocation of make in OBJ directory
@@ -102,7 +103,7 @@ ifneq ($(KBUILD_OUTPUT),)
 # check that the output directory actually exists
 saved-output := $(KBUILD_OUTPUT)
 KBUILD_OUTPUT := $(shell cd $(KBUILD_OUTPUT) && /bin/pwd)
-$(if $(wildcard $(KBUILD_OUTPUT)),, \
+$(if $(KBUILD_OUTPUT),, \
      $(error output directory "$(saved-output)" does not exist))
 
 .PHONY: $(MAKECMDGOALS)
@@ -110,7 +111,7 @@ $(if $(wildcard $(KBUILD_OUTPUT)),, \
 $(filter-out _all,$(MAKECMDGOALS)) _all:
 	$(if $(KBUILD_VERBOSE:1=),@)$(MAKE) -C $(KBUILD_OUTPUT)		\
 	KBUILD_SRC=$(CURDIR)	     KBUILD_VERBOSE=$(KBUILD_VERBOSE)	\
-	KBUILD_CHECK=$(KBUILD_CHECK) KBUILD_EXTMOD=$(KBUILD_EXTMOD)     \
+	KBUILD_CHECK=$(KBUILD_CHECK) KBUILD_EXTMOD="$(KBUILD_EXTMOD)"	\
         -f $(CURDIR)/Makefile $@
 
 # Leave processing to above invocation of make
@@ -130,16 +131,6 @@ else
 _all: modules
 endif
 
-# Make sure we're not wasting cpu-cycles doing locale handling, yet do make
-# sure error messages appear in the user-desired language
-ifdef LC_ALL
-LANG := $(LC_ALL)
-LC_ALL :=
-endif
-LC_COLLATE := C
-LC_CTYPE := C
-export LANG LC_ALL LC_COLLATE LC_CTYPE
-
 srctree		:= $(if $(KBUILD_SRC),$(KBUILD_SRC),$(CURDIR))
 TOPDIR		:= $(srctree)
 # FIXME - TOPDIR is obsolete, use srctree/objtree
@@ -151,7 +142,24 @@ VPATH		:= $(srctree)
 
 export srctree objtree VPATH TOPDIR
 
-KERNELRELEASE=$(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)
+nullstring :=
+space      := $(nullstring) # end of line
+
+# Take the contents of any files called localversion* and the config
+# variable CONFIG_LOCALVERSION and append them to KERNELRELEASE. Be
+# careful not to include files twice if building in the source
+# directory. LOCALVERSION from the command line override all of this
+
+localver := $(objtree)/localversion* $(srctree)/localversion*
+localver := $(sort $(wildcard $(localver)))
+# skip backup files (containing '~')
+localver := $(foreach f, $(localver), $(if $(findstring ~, $(f)),,$(f)))
+
+LOCALVERSION = $(subst $(space),, \
+	       $(shell cat /dev/null $(localver)) \
+	       $(patsubst "%",%,$(CONFIG_LOCALVERSION)))
+
+KERNELRELEASE=$(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)$(LOCALVERSION)
 
 # SUBARCH tells the usermode build what the underlying arch is.  That is set
 # first, and if a usermode build is happening, the "ARCH=um" on the command
@@ -266,9 +274,37 @@ ifneq ($(findstring s,$(MAKEFLAGS)),)
   quiet=silent_
 endif
 
-check_gcc = $(shell if $(CC) $(CFLAGS) $(1) -S -o /dev/null -xc /dev/null > /dev/null 2>&1; then echo "$(1)"; else echo "$(2)"; fi ;)
+export quiet Q KBUILD_VERBOSE
 
-export quiet Q KBUILD_VERBOSE check_gcc
+######
+# cc support functions to be used (only) in arch/$(ARCH)/Makefile
+# See documentation in Documentation/kbuild/makefiles.txt
+
+# cc-option
+# Usage: cflags-y += $(call gcc-option, -march=winchip-c6, -march=i586)
+
+cc-option = $(shell if $(CC) $(CFLAGS) $(1) -S -o /dev/null -xc /dev/null \
+             > /dev/null 2>&1; then echo "$(1)"; else echo "$(2)"; fi ;)
+
+# For backward compatibility
+check_gcc = $(warning check_gcc is deprecated - use cc-option) \
+            $(call cc-option, $(1),$(2))
+
+# cc-option-yn
+# Usage: flag := $(call cc-option-yn, -march=winchip-c6)
+cc-option-yn = $(shell if $(CC) $(CFLAGS) $(1) -S -o /dev/null -xc /dev/null \
+                > /dev/null 2>&1; then echo "y"; else echo "n"; fi;)
+
+# cc-option-align
+# Prefix align with either -falign or -malign
+cc-option-align = $(subst -functions=0,,\
+	$(call cc-option,-falign-functions=0,-malign-functions=0))
+
+# cc-version
+# Usage gcc-ver := $(call cc-version $(CC))
+cc-version = $(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-version.sh \
+              $(if $(1), $(1), $(CC)))
+
 
 # Look for make include files relative to root of kernel src
 MAKEFLAGS += --include-dir=$(srctree)
@@ -290,13 +326,13 @@ STRIP		= $(CROSS_COMPILE)strip
 OBJCOPY		= $(CROSS_COMPILE)objcopy
 OBJDUMP		= $(CROSS_COMPILE)objdump
 AWK		= awk
-RPM 		:= $(shell if [ -x "/usr/bin/rpmbuild" ]; then echo rpmbuild; \
-		    	else echo rpm; fi)
 GENKSYMS	= scripts/genksyms/genksyms
 DEPMOD		= /sbin/depmod
 KALLSYMS	= scripts/kallsyms
 PERL		= perl
 CHECK		= sparse
+
+CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__
 MODFLAGS	= -DMODULE
 CFLAGS_MODULE   = $(MODFLAGS)
 AFLAGS_MODULE   = $(MODFLAGS)
@@ -304,28 +340,32 @@ LDFLAGS_MODULE  = -r
 CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
 
-NOSTDINC_FLAGS  = -nostdinc -iwithprefix include
 
-CPPFLAGS        := -D__KERNEL__ -Iinclude \
-		   $(if $(KBUILD_SRC),-Iinclude2 -I$(srctree)/include)
+# Use LINUXINCLUDE when you must reference the include/ directory.
+# Needed to be compatible with the O= option
+LINUXINCLUDE    := -Iinclude \
+                   $(if $(KBUILD_SRC),-Iinclude2 -I$(srctree)/include)
+
+CPPFLAGS        := -D__KERNEL__ $(LINUXINCLUDE)
 
 CFLAGS 		:= -Wall -Wstrict-prototypes -Wno-trigraphs \
-	  	   -fno-strict-aliasing -fno-common
+	  	   -fno-strict-aliasing -fno-common \
+		   -ffreestanding
 AFLAGS		:= -D__ASSEMBLY__
 
-export	VERSION PATCHLEVEL SUBLEVEL EXTRAVERSION KERNELRELEASE ARCH \
-	CONFIG_SHELL HOSTCC HOSTCFLAGS CROSS_COMPILE AS LD CC \
+export	VERSION PATCHLEVEL SUBLEVEL EXTRAVERSION LOCALVERSION KERNELRELEASE \
+	ARCH CONFIG_SHELL HOSTCC HOSTCFLAGS CROSS_COMPILE AS LD CC \
 	CPP AR NM STRIP OBJCOPY OBJDUMP MAKE AWK GENKSYMS PERL UTS_MACHINE \
-	HOSTCXX HOSTCXXFLAGS LDFLAGS_BLOB LDFLAGS_MODULE CHECK
+	HOSTCXX HOSTCXXFLAGS LDFLAGS_MODULE CHECK CHECKFLAGS
 
-export CPPFLAGS NOSTDINC_FLAGS OBJCOPYFLAGS LDFLAGS
+export CPPFLAGS NOSTDINC_FLAGS LINUXINCLUDE OBJCOPYFLAGS LDFLAGS
 export CFLAGS CFLAGS_KERNEL CFLAGS_MODULE 
 export AFLAGS AFLAGS_KERNEL AFLAGS_MODULE
 
 # When compiling out-of-tree modules, put MODVERDIR in the module
 # tree rather than in the kernel tree. The kernel tree might
 # even be read-only.
-export MODVERDIR := $(if $(KBUILD_EXTMOD),$(KBUILD_EXTMOD)/).tmp_versions
+export MODVERDIR := $(if $(KBUILD_EXTMOD),$(firstword $(KBUILD_EXTMOD))/).tmp_versions
 
 # The temporary file to save gcc -MD generated dependencies must not
 # contain a comma
@@ -334,8 +374,8 @@ depfile = $(subst $(comma),_,$(@D)/.$(@F).d)
 
 # Files to ignore in find ... statements
 
-RCS_FIND_IGNORE := \( -name SCCS -o -name BitKeeper -o -name .svn -o -name CVS \) -prune -o
-RCS_TAR_IGNORE := --exclude SCCS --exclude BitKeeper --exclude .svn --exclude CVS
+RCS_FIND_IGNORE := \( -name SCCS -o -name BitKeeper -o -name .svn -o -name CVS -o -name .pc \) -prune -o
+RCS_TAR_IGNORE := --exclude SCCS --exclude BitKeeper --exclude .svn --exclude CVS --exclude .pc
 
 # ===========================================================================
 # Rules shared between *config targets and build targets
@@ -344,6 +384,18 @@ RCS_TAR_IGNORE := --exclude SCCS --exclude BitKeeper --exclude .svn --exclude CV
 .PHONY: scripts_basic
 scripts_basic:
 	$(Q)$(MAKE) $(build)=scripts/basic
+
+.PHONY: outputmakefile
+# outputmakefile generate a Makefile to be placed in output directory, if
+# using a seperate output directory. This allows convinient use
+# of make in output directory
+outputmakefile:
+	$(Q)if test ! $(srctree) -ef $(objtree); then \
+	$(CONFIG_SHELL) $(srctree)/scripts/mkmakefile              \
+	    $(srctree) $(objtree) $(VERSION) $(PATCHLEVEL)         \
+	    > $(objtree)/Makefile;                                 \
+	    echo '  GEN    $(objtree)/Makefile';                   \
+	fi
 
 # To make sure we do not include .config for any of the *config targets
 # catch them early, and hand them over to scripts/kconfig/Makefile
@@ -389,9 +441,15 @@ ifeq ($(config-targets),1)
 # *config targets only - make sure prerequisites are updated, and descend
 # in scripts/kconfig to make the *config target
 
-config: scripts_basic FORCE
+# Read arch specific Makefile to set KBUILD_DEFCONFIG as needed.
+# KBUILD_DEFCONFIG may point out an alternative default configuration
+# used for 'make defconfig'
+include $(srctree)/arch/$(ARCH)/Makefile
+export KBUILD_DEFCONFIG
+
+config: scripts_basic outputmakefile FORCE
 	$(Q)$(MAKE) $(build)=scripts/kconfig $@
-%config: scripts_basic FORCE
+%config: scripts_basic outputmakefile FORCE
 	$(Q)$(MAKE) $(build)=scripts/kconfig $@
 
 else
@@ -408,13 +466,6 @@ scripts: scripts_basic include/config/MARKER
 	$(Q)$(MAKE) $(build)=$(@)
 
 scripts_basic: include/linux/autoconf.h
-
-
-# That's our default target when none is given on the command line
-# Note that 'modules' will be added as a prerequisite as well, 
-# in the CONFIG_MODULES part below
-
-all:	vmlinux
 
 # Objects we will link into vmlinux / subdirs we need to visit
 init-y		:= init/
@@ -447,7 +498,11 @@ else
 include/linux/autoconf.h: ;
 endif
 
-include $(srctree)/arch/$(ARCH)/Makefile
+# The all: target is the default when no target is given on the
+# command line.
+# This allow a user to issue only 'make' to build a kernel including modules
+# Defaults vmlinux but it is usually overriden in the arch makefile
+all: vmlinux
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
 CFLAGS		+= -Os
@@ -455,7 +510,16 @@ else
 CFLAGS		+= -O2
 endif
 
-ifndef CONFIG_FRAME_POINTER
+#Add align options if CONFIG_CC_* is not equal to 0
+add-align = $(if $(filter-out 0,$($(1))),$(cc-option-align)$(2)=$($(1)))
+CFLAGS		+= $(call add-align,CONFIG_CC_ALIGN_FUNCTIONS,-functions)
+CFLAGS		+= $(call add-align,CONFIG_CC_ALIGN_LABELS,-labels)
+CFLAGS		+= $(call add-align,CONFIG_CC_ALIGN_LOOPS,-loops)
+CFLAGS		+= $(call add-align,CONFIG_CC_ALIGN_JUMPS,-jumps)
+
+ifdef CONFIG_FRAME_POINTER
+CFLAGS		+= -fno-omit-frame-pointer
+else
 CFLAGS		+= -fomit-frame-pointer
 endif
 
@@ -463,15 +527,29 @@ ifdef CONFIG_DEBUG_INFO
 CFLAGS		+= -g
 endif
 
+include $(srctree)/arch/$(ARCH)/Makefile
+
+# arch Makefile may override CC so keep this after arch Makefile is included
+NOSTDINC_FLAGS += -nostdinc -isystem $(shell $(CC) -print-file-name=include)
+CHECKFLAGS     += $(NOSTDINC_FLAGS)
+
 # warn about C99 declaration after statement
-CFLAGS += $(call check_gcc,-Wdeclaration-after-statement,)
+CFLAGS += $(call cc-option,-Wdeclaration-after-statement,)
+
+# disable pointer signedness warnings in gcc 4.0
+CFLAGS += $(call cc-option,-Wno-pointer-sign,)
+
+# Default kernel image to build when no specific target is given.
+# KBUILD_IMAGE may be overruled on the commandline or
+# set in the environment
+# Also any assignments in arch/$(ARCH)/Makefile take precedence over
+# this default value
+export KBUILD_IMAGE ?= vmlinux
 
 #
 # INSTALL_PATH specifies where to place the updated kernel and system map
-# images.  Uncomment if you want to place them anywhere other than root.
-#
-
-#export	INSTALL_PATH=/boot
+# images. Default is /boot, but you can set it to other values
+export	INSTALL_PATH ?= /boot
 
 #
 # INSTALL_MOD_PATH specifies a prefix to MODLIB for module directory
@@ -505,95 +583,160 @@ libs-y		:= $(libs-y1) $(libs-y2)
 
 # Build vmlinux
 # ---------------------------------------------------------------------------
+# vmlinux is build from the objects selected by $(vmlinux-init) and
+# $(vmlinux-main). Most are built-in.o files from top-level directories
+# in the kernel tree, others are specified in arch/$(ARCH)Makefile.
+# Ordering when linking is important, and $(vmlinux-init) must be first.
+#
+# vmlinux
+#   ^
+#   |
+#   +-< $(vmlinux-init)
+#   |   +--< init/version.o + more
+#   |
+#   +--< $(vmlinux-main)
+#   |    +--< driver/built-in.o mm/built-in.o + more
+#   |
+#   +-< kallsyms.o (see description in CONFIG_KALLSYMS section)
+#
+# vmlinux version (uname -v) cannot be updated during normal
+# descending-into-subdirs phase since we do not yet know if we need to
+# update vmlinux.
+# Therefore this step is delayed until just before final link of vmlinux -
+# except in the kallsyms case where it is done just before adding the
+# symbols to the kernel.
+#
+# System.map is generated to document addresses of all kernel symbols
 
-#	This is a bit tricky: If we need to relink vmlinux, we want
-#	the version number incremented, which means recompile init/version.o
-#	and relink init/init.o. However, we cannot do this during the
-#       normal descending-into-subdirs phase, since at that time
-#       we cannot yet know if we will need to relink vmlinux.
-#	So we descend into init/ inside the rule for vmlinux again.
-head-y += $(HEAD)
-vmlinux-objs := $(head-y) $(init-y) $(core-y) $(libs-y) $(drivers-y) $(net-y)
+vmlinux-init := $(head-y) $(init-y)
+vmlinux-main := $(core-y) $(libs-y) $(drivers-y) $(net-y)
+vmlinux-all  := $(vmlinux-init) $(vmlinux-main)
+vmlinux-lds  := arch/$(ARCH)/kernel/vmlinux.lds
 
-quiet_cmd_vmlinux__ = LD      $@
-define cmd_vmlinux__
-	$(LD) $(LDFLAGS) $(LDFLAGS_vmlinux) $(head-y) $(init-y) \
-	--start-group \
-	$(core-y) \
-	$(libs-y) \
-	$(drivers-y) \
-	$(net-y) \
-	--end-group \
-	$(filter .tmp_kallsyms%,$^) \
-	-o $@
-endef
+# Rule to link vmlinux - also used during CONFIG_KALLSYMS
+# May be overridden by arch/$(ARCH)/Makefile
+quiet_cmd_vmlinux__ ?= LD      $@
+      cmd_vmlinux__ ?= $(LD) $(LDFLAGS) $(LDFLAGS_vmlinux) -o $@ \
+      -T $(vmlinux-lds) $(vmlinux-init)                          \
+      --start-group $(vmlinux-main) --end-group                  \
+      $(filter-out $(vmlinux-lds) $(vmlinux-init) $(vmlinux-main) FORCE ,$^)
 
-#	set -e makes the rule exit immediately on error
+# Generate new vmlinux version
+quiet_cmd_vmlinux_version = GEN     .version
+      cmd_vmlinux_version = set -e;                     \
+	. $(srctree)/scripts/mkversion > .tmp_version;	\
+	mv -f .tmp_version .version;			\
+	$(MAKE) $(build)=init
+
+# Generate System.map
+quiet_cmd_sysmap = SYSMAP 
+      cmd_sysmap = $(CONFIG_SHELL) $(srctree)/scripts/mksysmap
+
+# Link of vmlinux
+# If CONFIG_KALLSYMS is set .version is already updated
+# Generate System.map and verify that the content is consistent
 
 define rule_vmlinux__
-	+set -e;							\
-	$(if $(filter .tmp_kallsyms%,$^),,				\
-	  echo '  GEN     .version';					\
-	  . $(srctree)/scripts/mkversion > .tmp_version;		\
-	  mv -f .tmp_version .version;					\
-	  $(MAKE) $(build)=init;					\
-	)								\
-	$(if $($(quiet)cmd_vmlinux__),					\
-	  echo '  $($(quiet)cmd_vmlinux__)' &&) 			\
-	$(cmd_vmlinux__);						\
-	echo 'cmd_$@ := $(cmd_vmlinux__)' > $(@D)/.$(@F).cmd
+	$(if $(CONFIG_KALLSYMS),,+$(call cmd,vmlinux_version))
+
+	$(call cmd,vmlinux__)
+	$(Q)echo 'cmd_$@ := $(cmd_vmlinux__)' > $(@D)/.$(@F).cmd
+
+	$(Q)$(if $($(quiet)cmd_sysmap),                 \
+	  echo '  $($(quiet)cmd_sysmap) System.map' &&) \
+	$(cmd_sysmap) $@ System.map;                    \
+	if [ $$? -ne 0 ]; then                          \
+		rm -f $@;                               \
+		/bin/false;                             \
+	fi;
+	$(verify_kallsyms)
 endef
 
-define rule_vmlinux
-	$(rule_vmlinux__); \
-	$(NM) $@ | grep -v '\(compiled\)\|\(\.o$$\)\|\( [aUw] \)\|\(\.\.ng$$\)\|\(LASH[RL]DI\)' | sort > System.map
-endef
-
-LDFLAGS_vmlinux += -T arch/$(ARCH)/kernel/vmlinux.lds.s
-
-#	Generate section listing all symbols and add it into vmlinux
-#	It's a three stage process:
-#	o .tmp_vmlinux1 has all symbols and sections, but __kallsyms is
-#	  empty
-#	  Running kallsyms on that gives us .tmp_kallsyms1.o with
-#	  the right size
-#	o .tmp_vmlinux2 now has a __kallsyms section of the right size,
-#	  but due to the added section, some addresses have shifted
-#	  From here, we generate a correct .tmp_kallsyms2.o
-#	o The correct .tmp_kallsyms2.o is linked into the final vmlinux.
 
 ifdef CONFIG_KALLSYMS
+# Generate section listing all symbols and add it into vmlinux $(kallsyms.o)
+# It's a three stage process:
+# o .tmp_vmlinux1 has all symbols and sections, but __kallsyms is
+#   empty
+#   Running kallsyms on that gives us .tmp_kallsyms1.o with
+#   the right size - vmlinux version (uname -v) is updated during this step
+# o .tmp_vmlinux2 now has a __kallsyms section of the right size,
+#   but due to the added section, some addresses have shifted.
+#   From here, we generate a correct .tmp_kallsyms2.o
+# o The correct .tmp_kallsyms2.o is linked into the final vmlinux.
+# o Verify that the System.map from vmlinux matches the map from
+#   .tmp_vmlinux2, just in case we did not generate kallsyms correctly.
+# o If CONFIG_KALLSYMS_EXTRA_PASS is set, do an extra pass using
+#   .tmp_vmlinux3 and .tmp_kallsyms3.o.  This is only meant as a
+#   temporary bypass to allow the kernel to be built while the
+#   maintainers work out what went wrong with kallsyms.
 
-kallsyms.o := .tmp_kallsyms2.o
-
-quiet_cmd_kallsyms = KSYM    $@
-cmd_kallsyms = $(NM) -n $< | $(KALLSYMS) > $@
-
-.tmp_kallsyms1.o .tmp_kallsyms2.o: %.o: %.S scripts FORCE
-	$(call if_changed_dep,as_o_S)
-
-.tmp_kallsyms%.S: .tmp_vmlinux%
-	$(call cmd,kallsyms)
-
-.tmp_vmlinux1: $(vmlinux-objs) arch/$(ARCH)/kernel/vmlinux.lds.s FORCE
-	+$(call if_changed_rule,vmlinux__)
-
-.tmp_vmlinux2: $(vmlinux-objs) .tmp_kallsyms1.o arch/$(ARCH)/kernel/vmlinux.lds.s FORCE
-	$(call if_changed_rule,vmlinux__)
-
+ifdef CONFIG_KALLSYMS_EXTRA_PASS
+last_kallsyms := 3
+else
+last_kallsyms := 2
 endif
 
-#	Finally the vmlinux rule
+kallsyms.o := .tmp_kallsyms$(last_kallsyms).o
 
-vmlinux: $(vmlinux-objs) $(kallsyms.o) arch/$(ARCH)/kernel/vmlinux.lds.s FORCE
-	$(call if_changed_rule,vmlinux)
+define verify_kallsyms
+	$(Q)$(if $($(quiet)cmd_sysmap),                       \
+	  echo '  $($(quiet)cmd_sysmap) .tmp_System.map' &&)  \
+	  $(cmd_sysmap) .tmp_vmlinux$(last_kallsyms) .tmp_System.map
+	$(Q)cmp -s System.map .tmp_System.map ||              \
+		(echo Inconsistent kallsyms data;             \
+		 echo Try setting CONFIG_KALLSYMS_EXTRA_PASS; \
+		 rm .tmp_kallsyms* ; /bin/false )
+endef
 
-#	The actual objects are generated when descending, 
-#	make sure no implicit rule kicks in
+# Update vmlinux version before link
+# Use + in front of this rule to silent warning about make -j1
+cmd_ksym_ld = $(cmd_vmlinux__)
+define rule_ksym_ld
+	+$(call cmd,vmlinux_version)
+	$(call cmd,vmlinux__)
+	$(Q)echo 'cmd_$@ := $(cmd_vmlinux__)' > $(@D)/.$(@F).cmd
+endef
 
-$(sort $(vmlinux-objs)) arch/$(ARCH)/kernel/vmlinux.lds.s: $(vmlinux-dirs) ;
+# Generate .S file with all kernel symbols
+quiet_cmd_kallsyms = KSYM    $@
+      cmd_kallsyms = $(NM) -n $< | $(KALLSYMS) \
+                     $(if $(CONFIG_KALLSYMS_ALL),--all-symbols) > $@
 
-# 	Handle descending into subdirectories listed in $(vmlinux-dirs)
+.tmp_kallsyms1.o .tmp_kallsyms2.o .tmp_kallsyms3.o: %.o: %.S scripts FORCE
+	$(call if_changed_dep,as_o_S)
+
+.tmp_kallsyms%.S: .tmp_vmlinux% $(KALLSYMS)
+	$(call cmd,kallsyms)
+
+# .tmp_vmlinux1 must be complete except kallsyms, so update vmlinux version
+.tmp_vmlinux1: $(vmlinux-lds) $(vmlinux-all) FORCE
+	$(call if_changed_rule,ksym_ld)
+
+.tmp_vmlinux2: $(vmlinux-lds) $(vmlinux-all) .tmp_kallsyms1.o FORCE
+	$(call if_changed,vmlinux__)
+
+.tmp_vmlinux3: $(vmlinux-lds) $(vmlinux-all) .tmp_kallsyms2.o FORCE
+	$(call if_changed,vmlinux__)
+
+# Needs to visit scripts/ before $(KALLSYMS) can be used.
+$(KALLSYMS): scripts ;
+
+endif # ifdef CONFIG_KALLSYMS
+
+# vmlinux image - including updated kernel symbols
+vmlinux: $(vmlinux-lds) $(vmlinux-init) $(vmlinux-main) $(kallsyms.o) FORCE
+	$(call if_changed_rule,vmlinux__)
+
+# The actual objects are generated when descending, 
+# make sure no implicit rule kicks in
+$(sort $(vmlinux-init) $(vmlinux-main)) $(vmlinux-lds): $(vmlinux-dirs) ;
+
+# Handle descending into subdirectories listed in $(vmlinux-dirs)
+# Preset locale variables to speed up the build process. Limit locale
+# tweaks to this spot to avoid wrong language settings when running
+# make menuconfig etc.
+# Error messages still appears in the original language
 
 .PHONY: $(vmlinux-dirs)
 $(vmlinux-dirs): prepare-all scripts
@@ -604,14 +747,14 @@ $(vmlinux-dirs): prepare-all scripts
 # A multi level approach is used. prepare1 is updated first, then prepare0.
 # prepare-all is the collection point for the prepare targets.
 
-.PHONY: prepare-all prepare prepare0 prepare1
+.PHONY: prepare-all prepare prepare0 prepare1 prepare2
 
-# prepare1 is used to check if we are building in a separate output directory,
+# prepare2 is used to check if we are building in a separate output directory,
 # and if so do:
 # 1) Check that make has not been executed in the kernel src $(srctree)
 # 2) Create the include2 directory, used for the second asm symlink
 
-prepare1:
+prepare2:
 ifneq ($(KBUILD_SRC),)
 	@echo '  Using $(srctree) as source for kernel'
 	$(Q)if [ -h $(srctree)/include/asm -o -f $(srctree)/.config ]; then \
@@ -622,6 +765,9 @@ ifneq ($(KBUILD_SRC),)
 	$(Q)if [ ! -d include2 ]; then mkdir -p include2; fi;
 	$(Q)ln -fsn $(srctree)/include/asm-$(ARCH) include2/asm
 endif
+
+# prepare1 creates a makefile if using a separate output directory
+prepare1: prepare2 outputmakefile
 
 prepare0: prepare1 include/linux/version.h include/asm include/config/MARKER
 ifneq ($(KBUILD_MODULES),)
@@ -635,7 +781,7 @@ prepare-all: prepare0 prepare
 #	Leave this as default for preprocessing vmlinux.lds.S, which is now
 #	done in arch/$(ARCH)/kernel/Makefile
 
-export AFLAGS_vmlinux.lds.o += -P -C -U$(ARCH)
+export CPPFLAGS_vmlinux.lds += -P -C -U$(ARCH)
 
 # Single targets
 # ---------------------------------------------------------------------------
@@ -674,13 +820,13 @@ include/config/MARKER: include/linux/autoconf.h
 # Generate some files
 # ---------------------------------------------------------------------------
 
-#	version.h changes when $(KERNELRELEASE) etc change, as defined in
-#	this Makefile
+# KERNELRELEASE can change from a few different places, meaning version.h
+# needs to be updated, so this check is forced on all builds
 
 uts_len := 64
 
 define filechk_version.h
-	if ((`echo -n "$(KERNELRELEASE)" | wc -c ` > $(uts_len))); then \
+	if [ `echo -n "$(KERNELRELEASE)" | wc -c ` -gt $(uts_len) ]; then \
 	  echo '"$(KERNELRELEASE)" exceeds $(uts_len) characters' >&2; \
 	  exit 1; \
 	fi; \
@@ -690,7 +836,7 @@ define filechk_version.h
 	)
 endef
 
-include/linux/version.h: Makefile
+include/linux/version.h: $(srctree)/Makefile FORCE
 	$(call filechk,version.h)
 
 # ---------------------------------------------------------------------------
@@ -732,9 +878,13 @@ _modinst_:
 		sleep 1; \
 	fi
 	@rm -rf $(MODLIB)/kernel
-	@rm -f $(MODLIB)/build
+	@rm -f $(MODLIB)/source
 	@mkdir -p $(MODLIB)/kernel
-	@ln -s $(TOPDIR) $(MODLIB)/build
+	@ln -s $(srctree) $(MODLIB)/source
+	@if [ ! $(objtree) -ef  $(MODLIB)/build ]; then \
+		rm -f $(MODLIB)/build ; \
+		ln -s $(objtree) $(MODLIB)/build ; \
+	fi
 	$(Q)$(MAKE) -rR -f $(srctree)/scripts/Makefile.modinst
 
 # If System.map exists, run depmod.  This deliberately does not have a
@@ -749,7 +899,7 @@ depmod_opts	:= -b $(INSTALL_MOD_PATH) -r
 endif
 .PHONY: _modinst_post
 _modinst_post: _modinst_
-	if [ -r System.map ]; then $(DEPMOD) -ae -F System.map $(depmod_opts) $(KERNELRELEASE); fi
+	if [ -r System.map -a -x $(DEPMOD) ]; then $(DEPMOD) -ae -F System.map $(depmod_opts) $(KERNELRELEASE); fi
 
 else # CONFIG_MODULES
 
@@ -795,8 +945,8 @@ endef
 
 # Directories & files removed with 'make clean'
 CLEAN_DIRS  += $(MODVERDIR)
-CLEAN_FILES +=	vmlinux System.map kernel.spec \
-                .tmp_kallsyms* .tmp_version .tmp_vmlinux*
+CLEAN_FILES +=	vmlinux System.map \
+                .tmp_kallsyms* .tmp_version .tmp_vmlinux* .tmp_System.map
 
 # Directories & files removed with 'make mrproper'
 MRPROPER_DIRS  += include/config include2
@@ -841,44 +991,26 @@ mrproper: clean archmrproper $(mrproper-dirs)
 .PHONY: distclean
 
 distclean: mrproper
-	@find . $(RCS_FIND_IGNORE) \
+	@find $(srctree) $(RCS_FIND_IGNORE) \
 	 	\( -name '*.orig' -o -name '*.rej' -o -name '*~' \
 		-o -name '*.bak' -o -name '#*#' -o -name '.*.orig' \
 	 	-o -name '.*.rej' -o -size 0 \
 		-o -name '*%' -o -name '.*.cmd' -o -name 'core' \) \
 		-type f -print | xargs rm -f
 
-# RPM target
+
+# Packaging of the kernel to various formats
 # ---------------------------------------------------------------------------
+# rpm target kept for backward compatibility
+package-dir	:= $(srctree)/scripts/package
 
-.PHONY: rpm
+.PHONY: %-pkg rpm
 
-# Remove hyphens since they have special meaning in RPM filenames
-KERNELPATH=kernel-$(subst -,,$(KERNELRELEASE))
+%pkg: FORCE
+	$(Q)$(MAKE) -f $(package-dir)/Makefile $@
+rpm: FORCE
+	$(Q)$(MAKE) -f $(package-dir)/Makefile $@
 
-#	If you do a make spec before packing the tarball you can rpm -ta it
-
-spec:
-	$(CONFIG_SHELL) $(srctree)/scripts/mkspec > $(objtree)/kernel.spec
-
-#	a) Build a tar ball
-#	b) generate an rpm from it
-#	c) and pack the result
-#	- Use /. to avoid tar packing just the symlink
-
-rpm:	clean spec
-	set -e; \
-	cd .. ; \
-	ln -sf $(srctree) $(KERNELPATH) ; \
-	tar -cvz $(RCS_TAR_IGNORE) -f $(KERNELPATH).tar.gz $(KERNELPATH)/. ; \
-	rm $(KERNELPATH)
-
-	set -e; \
-	$(CONFIG_SHELL) $(srctree)/scripts/mkversion > $(objtree)/.tmp_version;\
-	mv -f $(objtree)/.tmp_version $(objtree)/.version;
-
-	$(RPM) --target $(UTS_MACHINE) -ta ../$(KERNELPATH).tar.gz
-	rm ../$(KERNELPATH).tar.gz
 
 # Brief documentation of the typical targets used
 # ---------------------------------------------------------------------------
@@ -905,6 +1037,15 @@ help:
 	@echo  '  tags/TAGS	  - Generate tags file for editors'
 	@echo  '  cscope	  - Generate cscope index'
 	@echo  ''
+	@echo  'Static analysers'
+	@echo  '  buildcheck      - List dangling references to vmlinux discarded sections'
+	@echo  '                    and init sections from non-init sections'
+	@echo  '  checkstack      - Generate a list of stack hogs'
+	@echo  '  namespacecheck  - Name space analysis on compiled kernel'
+	@echo  ''
+	@echo  'Kernel packaging:'
+	@$(MAKE) -f $(package-dir)/Makefile help
+	@echo  ''
 	@echo  'Documentation targets:'
 	@$(MAKE) -f $(srctree)/Documentation/DocBook/Makefile dochelp
 	@echo  ''
@@ -919,7 +1060,8 @@ help:
 
 	@echo  '  make V=0|1 [targets] 0 => quiet build (default), 1 => verbose build'
 	@echo  '  make O=dir [targets] Locate all output files in "dir", including .config'
-	@echo  '  make C=1   [targets] Check all c source with checker tool'
+	@echo  '  make C=1   [targets] Check all c source with $$CHECK (sparse)'
+	@echo  '  make C=2   [targets] Force check of all c source with $$CHECK (sparse)'
 	@echo  ''
 	@echo  'Execute "make" or "make all" to build all targets marked with [*] '
 	@echo  'For further info see the ./README file'
@@ -952,15 +1094,23 @@ else # KBUILD_EXTMOD
 # We are always building modules
 KBUILD_MODULES := 1
 .PHONY: crmodverdir
-crmodverdir: FORCE
+crmodverdir:
 	$(Q)mkdir -p $(MODVERDIR)
 
-.PHONY: $(KBUILD_EXTMOD)
-$(KBUILD_EXTMOD): crmodverdir FORCE
-	$(Q)$(MAKE) $(build)=$@
+.PHONY: $(objtree)/Module.symvers
+$(objtree)/Module.symvers:
+	@test -e $(objtree)/Module.symvers || ( \
+	echo; \
+	echo "  WARNING: Symbol version dump $(objtree)/Module.symvers"; \
+	echo "           is missing; modules will have no dependencies and modversions."; \
+	echo )
 
-.PHONY: modules
-modules: $(KBUILD_EXTMOD)
+module-dirs := $(addprefix _module_,$(KBUILD_EXTMOD))
+.PHONY: $(module-dirs) modules
+$(module-dirs): crmodverdir $(objtree)/Module.symvers
+	$(Q)$(MAKE) $(build)=$(patsubst _module_%,%,$@)
+
+modules: $(module-dirs)
 	@echo '  Building modules, stage 2.';
 	$(Q)$(MAKE) -rR -f $(srctree)/scripts/Makefile.modpost
 
@@ -968,7 +1118,7 @@ modules: $(KBUILD_EXTMOD)
 modules_install:
 	$(Q)$(MAKE) -rR -f $(srctree)/scripts/Makefile.modinst
 
-clean-dirs := _clean_$(KBUILD_EXTMOD)
+clean-dirs := $(addprefix _clean_,$(KBUILD_EXTMOD))
 
 .PHONY: $(clean-dirs) clean
 $(clean-dirs):
@@ -995,18 +1145,30 @@ endif # KBUILD_EXTMOD
 # Generate tags for editors
 # ---------------------------------------------------------------------------
 
+#We want __srctree to totally vanish out when KBUILD_OUTPUT is not set
+#(which is the most common case IMHO) to avoid unneeded clutter in the big tags file.
+#Adding $(srctree) adds about 20M on i386 to the size of the output file!
+
+ifeq ($(KBUILD_OUTPUT),)
+__srctree =
+else
+__srctree = $(srctree)/
+endif
+
 define all-sources
-	( find . $(RCS_FIND_IGNORE) \
+	( find $(__srctree) $(RCS_FIND_IGNORE) \
 	       \( -name include -o -name arch \) -prune -o \
 	       -name '*.[chS]' -print; \
-	  find arch/$(ARCH) $(RCS_FIND_IGNORE) \
+	  find $(__srctree)arch/$(ARCH) $(RCS_FIND_IGNORE) \
 	       -name '*.[chS]' -print; \
-	  find include $(RCS_FIND_IGNORE) \
+	  find $(__srctree)security/selinux/include $(RCS_FIND_IGNORE) \
+	       -name '*.[chS]' -print; \
+	  find $(__srctree)include $(RCS_FIND_IGNORE) \
 	       \( -name config -o -name 'asm-*' \) -prune \
 	       -o -name '*.[chS]' -print; \
-	  find include/asm-$(ARCH) $(RCS_FIND_IGNORE) \
+	  find $(__srctree)include/asm-$(ARCH) $(RCS_FIND_IGNORE) \
 	       -name '*.[chS]' -print; \
-	  find include/asm-generic $(RCS_FIND_IGNORE) \
+	  find $(__srctree)include/asm-generic $(RCS_FIND_IGNORE) \
 	       -name '*.[chS]' -print )
 endef
 
@@ -1028,7 +1190,7 @@ cmd_TAGS = $(all-sources) | etags -
 quiet_cmd_tags = MAKE   $@
 define cmd_tags
 	rm -f $@; \
-	CTAGSF=`ctags --version | grep -i exuberant >/dev/null && echo "-I __initdata,__exitdata,EXPORT_SYMBOL,EXPORT_SYMBOL_NOVERS"`; \
+	CTAGSF=`ctags --version | grep -i exuberant >/dev/null && echo "-I __initdata,__exitdata,EXPORT_SYMBOL,EXPORT_SYMBOL_GPL --extra=+f"`; \
 	$(all-sources) | xargs ctags $$CTAGSF -a
 endef
 
@@ -1057,8 +1219,23 @@ versioncheck:
 		-name '*.[hcS]' -type f -print | sort \
 		| xargs $(PERL) -w scripts/checkversion.pl
 
+buildcheck:
+	$(PERL) $(srctree)/scripts/reference_discarded.pl
+	$(PERL) $(srctree)/scripts/reference_init.pl
+
+namespacecheck:
+	$(PERL) $(srctree)/scripts/namespace.pl
+
 endif #ifeq ($(config-targets),1)
 endif #ifeq ($(mixed-targets),1)
+
+.PHONY: checkstack
+checkstack:
+	$(OBJDUMP) -d vmlinux $$(find . -name '*.ko') | \
+	$(PERL) $(src)/scripts/checkstack.pl $(ARCH)
+
+kernelrelease:
+	@echo $(KERNELRELEASE)
 
 # FIXME Should go into a make.lib or something 
 # ===========================================================================
@@ -1087,13 +1264,22 @@ ifneq ($(cmd_files),)
   include $(cmd_files)
 endif
 
-# execute the command and also postprocess generated .d dependencies
-# file
-
-if_changed_dep = $(if $(strip $? $(filter-out FORCE $(wildcard $^),$^)\
+# Execute command and generate cmd file
+if_changed = $(if $(strip $? \
 		          $(filter-out $(cmd_$(1)),$(cmd_$@))\
 			  $(filter-out $(cmd_$@),$(cmd_$(1)))),\
 	@set -e; \
+	$(if $($(quiet)cmd_$(1)),echo '  $(subst ','\'',$($(quiet)cmd_$(1)))';) \
+	$(cmd_$(1)); \
+	echo 'cmd_$@ := $(subst $$,$$$$,$(subst ','\'',$(cmd_$(1))))' > $(@D)/.$(@F).cmd)
+
+
+# execute the command and also postprocess generated .d dependencies
+# file
+if_changed_dep = $(if $(strip $? $(filter-out FORCE $(wildcard $^),$^)\
+		          $(filter-out $(cmd_$(1)),$(cmd_$@))\
+			  $(filter-out $(cmd_$@),$(cmd_$(1)))),\
+	$(Q)set -e; \
 	$(if $($(quiet)cmd_$(1)),echo '  $(subst ','\'',$($(quiet)cmd_$(1)))';) \
 	$(cmd_$(1)); \
 	scripts/basic/fixdep $(depfile) $@ '$(subst $$,$$$$,$(subst ','\'',$(cmd_$(1))))' > $(@D)/.$(@F).tmp; \
@@ -1107,7 +1293,7 @@ if_changed_dep = $(if $(strip $? $(filter-out FORCE $(wildcard $^),$^)\
 if_changed_rule = $(if $(strip $? \
 		               $(filter-out $(cmd_$(1)),$(cmd_$(@F)))\
 			       $(filter-out $(cmd_$(@F)),$(cmd_$(1)))),\
-	               @$(rule_$(1)))
+	               $(Q)$(rule_$(1)))
 
 # If quiet is set, only print short version of command
 

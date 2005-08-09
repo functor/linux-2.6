@@ -30,6 +30,7 @@
 #include <linux/config.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/prctl.h>
 
 #include <asm/pgtable.h>
 #include <asm/uaccess.h>
@@ -40,9 +41,7 @@
 #ifdef CONFIG_PMAC_BACKLIGHT
 #include <asm/backlight.h>
 #endif
-
-extern int fix_alignment(struct pt_regs *);
-extern void bad_page_fault(struct pt_regs *, unsigned long, int sig);
+#include <asm/perfmon.h>
 
 #ifdef CONFIG_XMON
 void (*debugger)(struct pt_regs *regs) = xmon;
@@ -73,8 +72,7 @@ void (*debugger_fault_handler)(struct pt_regs *regs);
  * Trap & Exception support
  */
 
-
-spinlock_t die_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(die_lock);
 
 void die(const char * str, struct pt_regs * fp, long err)
 {
@@ -105,8 +103,7 @@ void die(const char * str, struct pt_regs * fp, long err)
 	do_exit(err);
 }
 
-void
-_exception(int signr, struct pt_regs *regs, int code, unsigned long addr)
+void _exception(int signr, struct pt_regs *regs, int code, unsigned long addr)
 {
 	siginfo_t info;
 
@@ -117,7 +114,7 @@ _exception(int signr, struct pt_regs *regs, int code, unsigned long addr)
 	info.si_signo = signr;
 	info.si_errno = 0;
 	info.si_code = code;
-	info.si_addr = (void *) addr;
+	info.si_addr = (void __user *) addr;
 	force_sig_info(signr, &info, current);
 }
 
@@ -174,7 +171,12 @@ static inline int check_io_access(struct pt_regs *regs)
 /* On 4xx, the reason for the machine check or program exception
    is in the ESR. */
 #define get_reason(regs)	((regs)->dsisr)
-#define REASON_FP		0
+#ifndef CONFIG_E500
+#define get_mc_reason(regs)	((regs)->dsisr)
+#else
+#define get_mc_reason(regs)	(mfspr(SPRN_MCSR))
+#endif
+#define REASON_FP		ESR_FP
 #define REASON_ILLEGAL		ESR_PIL
 #define REASON_PRIVILEGED	ESR_PPR
 #define REASON_TRAP		ESR_PTR
@@ -187,6 +189,7 @@ static inline int check_io_access(struct pt_regs *regs)
 /* On non-4xx, the reason for the machine check or program
    exception is in the MSR. */
 #define get_reason(regs)	((regs)->msr)
+#define get_mc_reason(regs)	((regs)->msr)
 #define REASON_FP		0x100000
 #define REASON_ILLEGAL		0x80000
 #define REASON_PRIVILEGED	0x40000
@@ -196,10 +199,18 @@ static inline int check_io_access(struct pt_regs *regs)
 #define clear_single_step(regs)	((regs)->msr &= ~MSR_SE)
 #endif
 
-void
-MachineCheckException(struct pt_regs *regs)
+/*
+ * This is "fall-back" implementation for configurations
+ * which don't provide platform-specific machine check info
+ */
+void __attribute__ ((weak))
+platform_machine_check(struct pt_regs *regs)
 {
-	unsigned long reason = get_reason(regs);
+}
+
+void MachineCheckException(struct pt_regs *regs)
+{
+	unsigned long reason = get_mc_reason(regs);
 
 	if (user_mode(regs)) {
 		regs->msr |= MSR_RI;
@@ -222,15 +233,74 @@ MachineCheckException(struct pt_regs *regs)
 	if (check_io_access(regs))
 		return;
 
-#ifdef CONFIG_4xx
+#if defined(CONFIG_4xx) && !defined(CONFIG_440A)
 	if (reason & ESR_IMCP) {
 		printk("Instruction");
 		mtspr(SPRN_ESR, reason & ~ESR_IMCP);
 	} else
 		printk("Data");
 	printk(" machine check in kernel mode.\n");
+#elif defined(CONFIG_440A)
+	printk("Machine check in kernel mode.\n");
+	if (reason & ESR_IMCP){
+		printk("Instruction Synchronous Machine Check exception\n");
+		mtspr(SPRN_ESR, reason & ~ESR_IMCP);
+	}
+	else {
+		u32 mcsr = mfspr(SPRN_MCSR);
+		if (mcsr & MCSR_IB)
+			printk("Instruction Read PLB Error\n");
+		if (mcsr & MCSR_DRB)
+			printk("Data Read PLB Error\n");
+		if (mcsr & MCSR_DWB)
+			printk("Data Write PLB Error\n");
+		if (mcsr & MCSR_TLBP)
+			printk("TLB Parity Error\n");
+		if (mcsr & MCSR_ICP){
+			flush_instruction_cache();
+			printk("I-Cache Parity Error\n");
+		}
+		if (mcsr & MCSR_DCSP)
+			printk("D-Cache Search Parity Error\n");
+		if (mcsr & MCSR_DCFP)
+			printk("D-Cache Flush Parity Error\n");
+		if (mcsr & MCSR_IMPE)
+			printk("Machine Check exception is imprecise\n");
 
-#else /* !CONFIG_4xx */
+		/* Clear MCSR */
+		mtspr(SPRN_MCSR, mcsr);
+	}
+#elif defined (CONFIG_E500)
+	printk("Machine check in kernel mode.\n");
+	printk("Caused by (from MCSR=%lx): ", reason);
+
+	if (reason & MCSR_MCP)
+		printk("Machine Check Signal\n");
+	if (reason & MCSR_ICPERR)
+		printk("Instruction Cache Parity Error\n");
+	if (reason & MCSR_DCP_PERR)
+		printk("Data Cache Push Parity Error\n");
+	if (reason & MCSR_DCPERR)
+		printk("Data Cache Parity Error\n");
+	if (reason & MCSR_GL_CI)
+		printk("Guarded Load or Cache-Inhibited stwcx.\n");
+	if (reason & MCSR_BUS_IAERR)
+		printk("Bus - Instruction Address Error\n");
+	if (reason & MCSR_BUS_RAERR)
+		printk("Bus - Read Address Error\n");
+	if (reason & MCSR_BUS_WAERR)
+		printk("Bus - Write Address Error\n");
+	if (reason & MCSR_BUS_IBERR)
+		printk("Bus - Instruction Data Error\n");
+	if (reason & MCSR_BUS_RBERR)
+		printk("Bus - Read Data Bus Error\n");
+	if (reason & MCSR_BUS_WBERR)
+		printk("Bus - Read Data Bus Error\n");
+	if (reason & MCSR_BUS_IPERR)
+		printk("Bus - Instruction Parity Error\n");
+	if (reason & MCSR_BUS_RPERR)
+		printk("Bus - Read Parity Error\n");
+#else /* !CONFIG_4xx && !CONFIG_E500 */
 	printk("Machine check in kernel mode.\n");
 	printk("Caused by (from SRR1=%lx): ", reason);
 	switch (reason & 0x601F0000) {
@@ -262,12 +332,17 @@ MachineCheckException(struct pt_regs *regs)
 	}
 #endif /* CONFIG_4xx */
 
+	/*
+	 * Optional platform-provided routine to print out
+	 * additional info, e.g. bus error registers.
+	 */
+	platform_machine_check(regs);
+
 	debugger(regs);
 	die("machine check", regs, SIGBUS);
 }
 
-void
-SMIException(struct pt_regs *regs)
+void SMIException(struct pt_regs *regs)
 {
 	debugger(regs);
 #if !(defined(CONFIG_XMON) || defined(CONFIG_KGDB))
@@ -276,31 +351,28 @@ SMIException(struct pt_regs *regs)
 #endif
 }
 
-void
-UnknownException(struct pt_regs *regs)
+void UnknownException(struct pt_regs *regs)
 {
 	printk("Bad trap at PC: %lx, MSR: %lx, vector=%lx    %s\n",
 	       regs->nip, regs->msr, regs->trap, print_tainted());
 	_exception(SIGTRAP, regs, 0, 0);
 }
 
-void
-InstructionBreakpoint(struct pt_regs *regs)
+void InstructionBreakpoint(struct pt_regs *regs)
 {
 	if (debugger_iabr_match(regs))
 		return;
 	_exception(SIGTRAP, regs, TRAP_BRKPT, 0);
 }
 
-void
-RunModeException(struct pt_regs *regs)
+void RunModeException(struct pt_regs *regs)
 {
 	_exception(SIGTRAP, regs, 0, 0);
 }
 
 /* Illegal instruction emulation support.  Originally written to
  * provide the PVR to user applications using the mfspr rd, PVR.
- * Return non-zero if we can't emulate, or EFAULT if the associated
+ * Return non-zero if we can't emulate, or -EFAULT if the associated
  * memory access caused an access fault.  Return zero on success.
  *
  * There are a couple of ways to do this, either "decode" the instruction
@@ -311,17 +383,95 @@ RunModeException(struct pt_regs *regs)
 #define INST_MFSPR_PVR		0x7c1f42a6
 #define INST_MFSPR_PVR_MASK	0xfc1fffff
 
-static int
-emulate_instruction(struct pt_regs *regs)
+#define INST_DCBA		0x7c0005ec
+#define INST_DCBA_MASK		0x7c0007fe
+
+#define INST_MCRXR		0x7c000400
+#define INST_MCRXR_MASK		0x7c0007fe
+
+#define INST_STRING		0x7c00042a
+#define INST_STRING_MASK	0x7c0007fe
+#define INST_STRING_GEN_MASK	0x7c00067e
+#define INST_LSWI		0x7c0004aa
+#define INST_LSWX		0x7c00042a
+#define INST_STSWI		0x7c0005aa
+#define INST_STSWX		0x7c00052a
+
+static int emulate_string_inst(struct pt_regs *regs, u32 instword)
+{
+	u8 rT = (instword >> 21) & 0x1f;
+	u8 rA = (instword >> 16) & 0x1f;
+	u8 NB_RB = (instword >> 11) & 0x1f;
+	u32 num_bytes;
+	unsigned long EA;
+	int pos = 0;
+
+	/* Early out if we are an invalid form of lswx */
+	if ((instword & INST_STRING_MASK) == INST_LSWX)
+		if ((rT == rA) || (rT == NB_RB))
+			return -EINVAL;
+
+	EA = (rA == 0) ? 0 : regs->gpr[rA];
+
+	switch (instword & INST_STRING_MASK) {
+		case INST_LSWX:
+		case INST_STSWX:
+			EA += NB_RB;
+			num_bytes = regs->xer & 0x7f;
+			break;
+		case INST_LSWI:
+		case INST_STSWI:
+			num_bytes = (NB_RB == 0) ? 32 : NB_RB;
+			break;
+		default:
+			return -EINVAL;
+	}
+
+	while (num_bytes != 0)
+	{
+		u8 val;
+		u32 shift = 8 * (3 - (pos & 0x3));
+
+		switch ((instword & INST_STRING_MASK)) {
+			case INST_LSWX:
+			case INST_LSWI:
+				if (get_user(val, (u8 __user *)EA))
+					return -EFAULT;
+				/* first time updating this reg,
+				 * zero it out */
+				if (pos == 0)
+					regs->gpr[rT] = 0;
+				regs->gpr[rT] |= val << shift;
+				break;
+			case INST_STSWI:
+			case INST_STSWX:
+				val = regs->gpr[rT] >> shift;
+				if (put_user(val, (u8 __user *)EA))
+					return -EFAULT;
+				break;
+		}
+		/* move EA to next address */
+		EA += 1;
+		num_bytes--;
+
+		/* manage our position within the register */
+		if (++pos == 4) {
+			pos = 0;
+			if (++rT == 32)
+				rT = 0;
+		}
+	}
+
+	return 0;
+}
+
+static int emulate_instruction(struct pt_regs *regs)
 {
 	u32 instword;
 	u32 rd;
-	int retval;
-
-	retval = -EINVAL;
 
 	if (!user_mode(regs))
-		return retval;
+		return -EINVAL;
 	CHECK_FULL_REGS(regs);
 
 	if (get_user(instword, (u32 __user *)(regs->nip)))
@@ -331,11 +481,29 @@ emulate_instruction(struct pt_regs *regs)
 	 */
 	if ((instword & INST_MFSPR_PVR_MASK) == INST_MFSPR_PVR) {
 		rd = (instword >> 21) & 0x1f;
-		regs->gpr[rd] = mfspr(PVR);
-		retval = 0;
-		regs->nip += 4;
+		regs->gpr[rd] = mfspr(SPRN_PVR);
+		return 0;
 	}
-	return retval;
+
+	/* Emulating the dcba insn is just a no-op.  */
+	if ((instword & INST_DCBA_MASK) == INST_DCBA)
+		return 0;
+
+	/* Emulate the mcrxr insn.  */
+	if ((instword & INST_MCRXR_MASK) == INST_MCRXR) {
+		int shift = (instword >> 21) & 0x1c;
+		unsigned long msk = 0xf0000000UL >> shift;
+
+		regs->ccr = (regs->ccr & ~msk) | ((regs->xer >> shift) & msk);
+		regs->xer &= ~0xf0000000UL;
+		return 0;
+	}
+
+	/* Emulate load/store string insn. */
+	if ((instword & INST_STRING_GEN_MASK) == INST_STRING)
+		return emulate_string_inst(regs, instword);
+
+	return -EINVAL;
 }
 
 /*
@@ -375,8 +543,7 @@ static struct bug_entry *find_bug(unsigned long bugaddr)
 	return module_find_bug(bugaddr);
 }
 
-int
-check_bug_trap(struct pt_regs *regs)
+int check_bug_trap(struct pt_regs *regs)
 {
 	struct bug_entry *bug;
 	unsigned long addr;
@@ -413,8 +580,7 @@ check_bug_trap(struct pt_regs *regs)
 	return 0;
 }
 
-void
-ProgramCheckException(struct pt_regs *regs)
+void ProgramCheckException(struct pt_regs *regs)
 {
 	unsigned int reason = get_reason(regs);
 	extern int do_mathemu(struct pt_regs *regs);
@@ -474,36 +640,41 @@ ProgramCheckException(struct pt_regs *regs)
 		return;
 	}
 
-	if (reason & REASON_PRIVILEGED) {
-		/* Try to emulate it if we should. */
-		if (emulate_instruction(regs) == 0) {
+	/* Try to emulate it if we should. */
+	if (reason & (REASON_ILLEGAL | REASON_PRIVILEGED)) {
+		switch (emulate_instruction(regs)) {
+		case 0:
+			regs->nip += 4;
 			emulate_single_step(regs);
 			return;
+		case -EFAULT:
+			_exception(SIGSEGV, regs, SEGV_MAPERR, regs->nip);
+			return;
 		}
-		_exception(SIGILL, regs, ILL_PRVOPC, regs->nip);
-		return;
 	}
 
-	_exception(SIGILL, regs, ILL_ILLOPC, regs->nip);
+	if (reason & REASON_PRIVILEGED)
+		_exception(SIGILL, regs, ILL_PRVOPC, regs->nip);
+	else
+		_exception(SIGILL, regs, ILL_ILLOPC, regs->nip);
 }
 
-void
-SingleStepException(struct pt_regs *regs)
+void SingleStepException(struct pt_regs *regs)
 {
-	regs->msr &= ~MSR_SE;  /* Turn off 'trace' bit */
+	regs->msr &= ~(MSR_SE | MSR_BE);  /* Turn off 'trace' bits */
 	if (debugger_sstep(regs))
 		return;
 	_exception(SIGTRAP, regs, TRAP_TRACE, 0);
 }
 
-void
-AlignmentException(struct pt_regs *regs)
+void AlignmentException(struct pt_regs *regs)
 {
 	int fixed;
 
 	fixed = fix_alignment(regs);
 	if (fixed == 1) {
 		regs->nip += 4;	/* skip over emulated instruction */
+		emulate_single_step(regs);
 		return;
 	}
 	if (fixed == -EFAULT) {
@@ -517,8 +688,7 @@ AlignmentException(struct pt_regs *regs)
 	_exception(SIGBUS, regs, BUS_ADRALN, regs->dar);
 }
 
-void
-StackOverflow(struct pt_regs *regs)
+void StackOverflow(struct pt_regs *regs)
 {
 	printk(KERN_CRIT "Kernel stack overflow in process %p, r1=%lx\n",
 	       current, regs->gpr[1]);
@@ -535,8 +705,7 @@ void nonrecoverable_exception(struct pt_regs *regs)
 	die("nonrecoverable exception", regs, SIGKILL);
 }
 
-void
-trace_syscall(struct pt_regs *regs)
+void trace_syscall(struct pt_regs *regs)
 {
 	printk("Task: %p(%d), PC: %08lX/%08lX, Syscall: %3ld, Result: %s%ld    %s\n",
 	       current, current->pid, regs->nip, regs->link, regs->gpr[0],
@@ -544,8 +713,7 @@ trace_syscall(struct pt_regs *regs)
 }
 
 #ifdef CONFIG_8xx
-void
-SoftwareEmulation(struct pt_regs *regs)
+void SoftwareEmulation(struct pt_regs *regs)
 {
 	extern int do_mathemu(struct pt_regs *);
 	extern int Soft_emulate_8xx(struct pt_regs *);
@@ -575,50 +743,146 @@ SoftwareEmulation(struct pt_regs *regs)
 }
 #endif /* CONFIG_8xx */
 
-#if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
+#if defined(CONFIG_40x) || defined(CONFIG_BOOKE)
 
 void DebugException(struct pt_regs *regs, unsigned long debug_status)
 {
-#if 0
-	if (debug_status & DBSR_TIE) {		/* trap instruction*/
-		if (!user_mode(regs) && debugger_bpt(regs))
-			return;
-		_exception(SIGTRAP, regs, 0, 0);
-
-	}
-#endif
 	if (debug_status & DBSR_IC) {	/* instruction completion */
-		if (!user_mode(regs) && debugger_sstep(regs))
-			return;
-		current->thread.dbcr0 &= ~DBCR0_IC;
+		regs->msr &= ~MSR_DE;
+		if (user_mode(regs)) {
+			current->thread.dbcr0 &= ~DBCR0_IC;
+		} else {
+			/* Disable instruction completion */
+			mtspr(SPRN_DBCR0, mfspr(SPRN_DBCR0) & ~DBCR0_IC);
+			/* Clear the instruction completion event */
+			mtspr(SPRN_DBSR, DBSR_IC);
+			if (debugger_sstep(regs))
+				return;
+		}
 		_exception(SIGTRAP, regs, TRAP_TRACE, 0);
 	}
 }
 #endif /* CONFIG_4xx || CONFIG_BOOKE */
 
 #if !defined(CONFIG_TAU_INT)
-void
-TAUException(struct pt_regs *regs)
+void TAUException(struct pt_regs *regs)
 {
 	printk("TAU trap at PC: %lx, MSR: %lx, vector=%lx    %s\n",
 	       regs->nip, regs->msr, regs->trap, print_tainted());
 }
 #endif /* CONFIG_INT_TAU */
 
-#ifdef CONFIG_ALTIVEC
-void
-AltivecAssistException(struct pt_regs *regs)
+void AltivecUnavailException(struct pt_regs *regs)
 {
+	static int kernel_altivec_count;
+
+#ifndef CONFIG_ALTIVEC
+	if (user_mode(regs)) {
+		/* A user program has executed an altivec instruction,
+		   but this kernel doesn't support altivec. */
+		_exception(SIGILL, regs, ILL_ILLOPC, regs->nip);
+		return;
+	}
+#endif
+	/* The kernel has executed an altivec instruction without
+	   first enabling altivec.  Whinge but let it do it. */
+	if (++kernel_altivec_count < 10)
+		printk(KERN_ERR "AltiVec used in kernel (task=%p, pc=%lx)\n",
+		       current, regs->nip);
+	regs->msr |= MSR_VEC;
+}
+
+#ifdef CONFIG_ALTIVEC
+void AltivecAssistException(struct pt_regs *regs)
+{
+	int err;
+
 	preempt_disable();
 	if (regs->msr & MSR_VEC)
 		giveup_altivec(current);
 	preempt_enable();
+	if (!user_mode(regs)) {
+		printk(KERN_ERR "altivec assist exception in kernel mode"
+		       " at %lx\n", regs->nip);
+		debugger(regs);
+		die("altivec assist exception", regs, SIGFPE);
+		return;
+	}
 
-	/* XXX quick hack for now: set the non-Java bit in the VSCR */
-	current->thread.vscr.u[3] |= 0x10000;
+	err = emulate_altivec(regs);
+	if (err == 0) {
+		regs->nip += 4;		/* skip emulated instruction */
+		emulate_single_step(regs);
+		return;
+	}
+
+	if (err == -EFAULT) {
+		/* got an error reading the instruction */
+		_exception(SIGSEGV, regs, SEGV_ACCERR, regs->nip);
+	} else {
+		/* didn't recognize the instruction */
+		/* XXX quick hack for now: set the non-Java bit in the VSCR */
+		printk(KERN_ERR "unrecognized altivec instruction "
+		       "in %s at %lx\n", current->comm, regs->nip);
+		current->thread.vscr.u[3] |= 0x10000;
+	}
 }
 #endif /* CONFIG_ALTIVEC */
 
+void PerformanceMonitorException(struct pt_regs *regs)
+{
+	perf_irq(regs);
+}
+
+#ifdef CONFIG_FSL_BOOKE
+void CacheLockingException(struct pt_regs *regs, unsigned long address,
+			   unsigned long error_code)
+{
+	/* We treat cache locking instructions from the user
+	 * as priv ops, in the future we could try to do
+	 * something smarter
+	 */
+	if (error_code & (ESR_DLK|ESR_ILK))
+		_exception(SIGILL, regs, ILL_PRVOPC, regs->nip);
+	return;
+}
+#endif /* CONFIG_FSL_BOOKE */
+
+#ifdef CONFIG_SPE
+void SPEFloatingPointException(struct pt_regs *regs)
+{
+	unsigned long spefscr;
+	int fpexc_mode;
+	int code = 0;
+
+	spefscr = current->thread.spefscr;
+	fpexc_mode = current->thread.fpexc_mode;
+
+	/* Hardware does not neccessarily set sticky
+	 * underflow/overflow/invalid flags */
+	if ((spefscr & SPEFSCR_FOVF) && (fpexc_mode & PR_FP_EXC_OVF)) {
+		code = FPE_FLTOVF;
+		spefscr |= SPEFSCR_FOVFS;
+	}
+	else if ((spefscr & SPEFSCR_FUNF) && (fpexc_mode & PR_FP_EXC_UND)) {
+		code = FPE_FLTUND;
+		spefscr |= SPEFSCR_FUNFS;
+	}
+	else if ((spefscr & SPEFSCR_FDBZ) && (fpexc_mode & PR_FP_EXC_DIV))
+		code = FPE_FLTDIV;
+	else if ((spefscr & SPEFSCR_FINV) && (fpexc_mode & PR_FP_EXC_INV)) {
+		code = FPE_FLTINV;
+		spefscr |= SPEFSCR_FINVS;
+	}
+	else if ((spefscr & (SPEFSCR_FG | SPEFSCR_FX)) && (fpexc_mode & PR_FP_EXC_RES))
+		code = FPE_FLTRES;
+
+	current->thread.spefscr = spefscr;
+
+	_exception(SIGFPE, regs, code, regs->nip);
+	return;
+}
+#endif
 
 void __init trap_init(void)
 {

@@ -1,5 +1,5 @@
 /*
- * $Id: edb7312.c,v 1.9 2003/06/23 11:48:18 dwmw2 Exp $
+ * $Id: edb7312.c,v 1.13 2004/11/04 13:24:14 gleixner Exp $
  *
  * Handle mapping of the NOR flash on Cogent EDB7312 boards
  *
@@ -28,8 +28,8 @@
 #define BUSWIDTH    2
 #define FLASH_BLOCKSIZE_MAIN	0x20000
 #define FLASH_NUMBLOCKS_MAIN	128
-/* can be "cfi_probe", "jedec_probe", "map_rom", 0 }; */
-#define PROBETYPES { "cfi_probe", 0 }
+/* can be "cfi_probe", "jedec_probe", "map_rom", NULL }; */
+#define PROBETYPES { "cfi_probe", NULL }
 
 #define MSG_PREFIX "EDB7312-NOR:"   /* prefix for our printk()'s */
 #define MTDID      "edb7312-nor"    /* for mtdparts= partitioning */
@@ -39,7 +39,7 @@ static struct mtd_info *mymtd;
 struct map_info edb7312nor_map = {
 	.name = "NOR flash on EDB7312",
 	.size = WINDOW_SIZE,
-	.buswidth = BUSWIDTH,
+	.bankwidth = BUSWIDTH,
 	.phys = WINDOW_ADDR,
 };
 
@@ -82,8 +82,7 @@ int __init init_edb7312nor(void)
 
        	printk(KERN_NOTICE MSG_PREFIX "0x%08x at 0x%08x\n", 
 	       WINDOW_SIZE, WINDOW_ADDR);
-	edb7312nor_map.virt = (unsigned long)
-	  ioremap(WINDOW_ADDR, WINDOW_SIZE);
+	edb7312nor_map.virt = ioremap(WINDOW_ADDR, WINDOW_SIZE);
 
 	if (!edb7312nor_map.virt) {
 		printk(MSG_PREFIX "failed to ioremap\n");

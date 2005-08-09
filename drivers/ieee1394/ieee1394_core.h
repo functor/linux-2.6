@@ -89,7 +89,6 @@ static inline struct hpsb_packet *driver_packet(struct list_head *l)
 }
 
 void abort_timedouts(unsigned long __opaque);
-void abort_requests(struct hpsb_host *host);
 
 struct hpsb_packet *hpsb_alloc_packet(size_t data_size);
 void hpsb_free_packet(struct hpsb_packet *packet);
@@ -101,8 +100,6 @@ void hpsb_free_packet(struct hpsb_packet *packet);
  *
  * Use the functions, not the variable.
  */
-#include <asm/atomic.h>
-
 static inline unsigned int get_hpsb_generation(struct hpsb_host *host)
 {
         return atomic_read(&host->generation);
@@ -221,9 +218,11 @@ static inline unsigned char ieee1394_file_to_instance(struct file *file)
 	return file->f_dentry->d_inode->i_cindex;
 }
 
+extern int hpsb_disable_irm;
 
 /* Our sysfs bus entry */
 extern struct bus_type ieee1394_bus_type;
 extern struct class hpsb_host_class;
+extern struct class_simple *hpsb_protocol_class;
 
 #endif /* _IEEE1394_CORE_H */

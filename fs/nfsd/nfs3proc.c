@@ -171,7 +171,7 @@ nfsd3_proc_read(struct svc_rqst *rqstp, struct nfsd3_readargs *argp,
 	svc_reserve(rqstp, ((1 + NFS3_POST_OP_ATTR_WORDS + 3)<<2) + resp->count +4);
 
 	fh_copy(&resp->fh, &argp->fh);
-	nfserr = nfsd_read(rqstp, &resp->fh,
+	nfserr = nfsd_read(rqstp, &resp->fh, NULL,
 				  argp->offset,
 			   	  argp->vec, argp->vlen,
 				  &resp->count);
@@ -201,7 +201,7 @@ nfsd3_proc_write(struct svc_rqst *rqstp, struct nfsd3_writeargs *argp,
 
 	fh_copy(&resp->fh, &argp->fh);
 	resp->committed = argp->stable;
-	nfserr = nfsd_write(rqstp, &resp->fh,
+	nfserr = nfsd_write(rqstp, &resp->fh, NULL,
 				   argp->offset,
 				   argp->vec, argp->vlen,
 				   argp->len,
@@ -436,7 +436,6 @@ nfsd3_proc_readdir(struct svc_rqst *rqstp, struct nfsd3_readdirargs *argp,
 	resp->buflen = count;
 	resp->common.err = nfs_ok;
 	resp->buffer = argp->buffer;
-	resp->offset = NULL;
 	resp->rqstp = rqstp;
 	nfserr = nfsd_readdir(rqstp, &resp->fh, (loff_t*) &argp->cookie, 
 					&resp->common, nfs3svc_encode_entry);
@@ -493,8 +492,16 @@ nfsd3_proc_readdirplus(struct svc_rqst *rqstp, struct nfsd3_readdirargs *argp,
 		count += PAGE_SIZE;
 	}
 	resp->count = count >> 2;
-	if (resp->offset)
-		xdr_encode_hyper(resp->offset, offset);
+	if (resp->offset) {
+		if (unlikely(resp->offset1)) {
+			/* we ended up with offset on a page boundary */
+			*resp->offset = htonl(offset >> 32);
+			*resp->offset1 = htonl(offset & 0xffffffff);
+			resp->offset1 = NULL;
+		} else {
+			xdr_encode_hyper(resp->offset, offset);
+		}
+	}
 
 	RETURN_STATUS(nfserr);
 }

@@ -201,7 +201,7 @@ static void add_host(struct hpsb_host *host)
 				CSR_REGISTER_BASE + CSR_SPEED_MAP,
 				CSR_REGISTER_BASE + CSR_SPEED_MAP_END);
 
-        host->csr.lock = SPIN_LOCK_UNLOCKED;
+        spin_lock_init(&host->csr.lock);
 
         host->csr.state                 = 0;
         host->csr.node_ids              = 0;
@@ -250,8 +250,6 @@ static void add_host(struct hpsb_host *host)
 	 * bus reset is issued. */
 
 	csr1212_init_local_csr(host->csr.rom, bus_info, host->csr.max_rom);
-
-	host->csr.rom->max_rom = host->csr.max_rom;
 
 	root = host->csr.rom->root_kv;
 

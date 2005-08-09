@@ -26,7 +26,7 @@
 #include <linux/interrupt.h>
 
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include "NCR53C9x.h"
 
 #include <asm/io.h>
@@ -731,7 +731,7 @@ static void dma_setup_quick(struct NCR_ESP * esp, __u32 addr, int count, int wri
 }
 
 static Scsi_Host_Template driver_template = {
-	.proc_name		= "esp",
+	.proc_name		= "mac_esp",
 	.name			= "Mac 53C9x SCSI",
 	.detect			= mac_esp_detect,
 	.slave_alloc		= esp_slave_alloc,

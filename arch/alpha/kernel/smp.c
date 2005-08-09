@@ -25,6 +25,8 @@
 #include <linux/spinlock.h>
 #include <linux/irq.h>
 #include <linux/cache.h>
+#include <linux/profile.h>
+#include <linux/bitops.h>
 
 #include <asm/hwrpb.h>
 #include <asm/ptrace.h>
@@ -32,10 +34,8 @@
 
 #include <asm/io.h>
 #include <asm/irq.h>
-#include <asm/bitops.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
-#include <asm/hardirq.h>
 #include <asm/mmu_context.h>
 #include <asm/tlbflush.h>
 
@@ -68,7 +68,7 @@ enum ipi_message_type {
 static int smp_secondary_alive __initdata = 0;
 
 /* Which cpus ids came online.  */
-unsigned long cpu_present_mask;
+cpumask_t cpu_present_mask;
 cpumask_t cpu_online_map;
 
 EXPORT_SYMBOL(cpu_online_map);
@@ -78,8 +78,6 @@ static unsigned long hwrpb_cpu_present_mask __initdata = 0;
 
 int smp_num_probed;		/* Internal processor count */
 int smp_num_cpus = 1;		/* Number that came online.  */
-cycles_t cacheflush_time;
-unsigned long cache_decay_ticks;
 
 extern void calibrate_delay(void);
 
@@ -175,57 +173,6 @@ smp_callin(void)
 
 	/* Do nothing.  */
 	cpu_idle();
-}
-
-
-/*
- * Rough estimation for SMP scheduling, this is the number of cycles it
- * takes for a fully memory-limited process to flush the SMP-local cache.
- *
- * We are not told how much cache there is, so we have to guess.
- */
-static void __init
-smp_tune_scheduling (int cpuid)
-{
-	struct percpu_struct *cpu;
-	unsigned long on_chip_cache;	/* kB */
-	unsigned long freq;		/* Hz */
-	unsigned long bandwidth = 350;	/* MB/s */
-
-	cpu = (struct percpu_struct*)((char*)hwrpb + hwrpb->processor_offset
-				      + cpuid * hwrpb->processor_size);
-	switch (cpu->type)
-	{
-	case EV45_CPU:
-		on_chip_cache = 16 + 16;
-		break;
-
-	case EV5_CPU:
-	case EV56_CPU:
-		on_chip_cache = 8 + 8 + 96;
-		break;
-
-	case PCA56_CPU:
-		on_chip_cache = 16 + 8;
-		break;
-
-	case EV6_CPU:
-	case EV67_CPU:
-	default:
-		on_chip_cache = 64 + 64;
-		break;
-	}
-
-	freq = hwrpb->cycle_freq ? : est_cycle_freq;
-
-	cacheflush_time = (freq / 1000000) * (on_chip_cache << 10) / bandwidth;
-	cache_decay_ticks = cacheflush_time / (freq / 1000) * HZ / 1000;
-
-	printk("per-CPU timeslice cutoff: %ld.%02ld usecs.\n",
-	       cacheflush_time/(freq/1000000),
-	       (cacheflush_time*100/(freq/1000000)) % 100);
-	printk("task migration cache decay timeout: %ld msecs.\n",
-	       (cache_decay_ticks + 1) * 1000 / HZ);
 }
 
 /* Wait until hwrpb->txrdy is clear for cpu.  Return -1 on timeout.  */
@@ -411,15 +358,6 @@ secondary_cpu_start(int cpuid, struct task_struct *idle)
 	return 0;
 }
 
-static struct task_struct * __init
-fork_by_hand(void)
-{
-	/* Don't care about the contents of regs since we'll never
-	   reschedule the forked task. */
-	struct pt_regs regs;
-	return copy_process(CLONE_VM|CLONE_IDLETASK, 0, &regs, 0, NULL, NULL);
-}
-
 /*
  * Bring one cpu online.
  */
@@ -435,14 +373,9 @@ smp_boot_one_cpu(int cpuid)
 	   the other task-y sort of data structures set up like we
 	   wish.  We can't use kernel_thread since we must avoid
 	   rescheduling the child.  */
-	idle = fork_by_hand();
+	idle = fork_idle(cpuid);
 	if (IS_ERR(idle))
 		panic("failed fork for CPU %d", cpuid);
-
-	wake_up_forked_process(idle);
-
-	init_idle(idle, cpuid);
-	unhash_process(idle);
 
 	DBGS(("smp_boot_one_cpu: CPU %d state 0x%lx flags 0x%lx\n",
 	      cpuid, idle->state, idle->flags));
@@ -522,7 +455,7 @@ setup_smp(void)
 		smp_num_probed = 1;
 		hwrpb_cpu_present_mask = (1UL << boot_cpuid);
 	}
-	cpu_present_mask = 1UL << boot_cpuid;
+	cpu_present_mask = cpumask_of_cpu(boot_cpuid);
 
 	printk(KERN_INFO "SMP: %d CPUs probed -- cpu_present_mask = %lx\n",
 	       smp_num_probed, hwrpb_cpu_present_mask);
@@ -542,12 +475,11 @@ smp_prepare_cpus(unsigned int max_cpus)
 	current_thread_info()->cpu = boot_cpuid;
 
 	smp_store_cpu_info(boot_cpuid);
-	smp_tune_scheduling(boot_cpuid);
 	smp_setup_percpu_timer(boot_cpuid);
 
 	/* Nothing to do on a UP box, or when told not to.  */
 	if (smp_num_probed == 1 || max_cpus == 0) {
-		cpu_present_mask = 1UL << boot_cpuid;
+		cpu_present_mask = cpumask_of_cpu(boot_cpuid);
 		printk(KERN_INFO "SMP mode deactivated.\n");
 		return;
 	}
@@ -562,7 +494,7 @@ smp_prepare_cpus(unsigned int max_cpus)
 		if (((hwrpb_cpu_present_mask >> i) & 1) == 0)
 			continue;
 
-		cpu_present_mask |= 1UL << i;
+		cpu_set(i, cpu_possible_map);
 		cpu_count++;
 	}
 
@@ -597,7 +529,7 @@ smp_cpus_done(unsigned int max_cpus)
 		if (cpu_online(cpu))
 			bogosum += cpu_data[cpu].loops_per_jiffy;
 	
-	printk(KERN_INFO "SMP: Total of %ld processors activated "
+	printk(KERN_INFO "SMP: Total of %d processors activated "
 	       "(%lu.%02lu BogoMIPS).\n",
 	       num_online_cpus(), 
 	       (bogosum + 2500) / (500000/HZ),
@@ -613,8 +545,7 @@ smp_percpu_timer_interrupt(struct pt_regs *regs)
 	struct cpuinfo_alpha *data = &cpu_data[cpu];
 
 	/* Record kernel PC.  */
-	if (!user)
-		alpha_do_profile(regs->pc);
+	profile_tick(CPU_PROFILING, regs);
 
 	if (!--data->prof_counter) {
 		/* We need to make like a normal interrupt -- otherwise
@@ -638,23 +569,17 @@ setup_profiling_timer(unsigned int multiplier)
 
 
 static void
-send_ipi_message(unsigned long to_whom, enum ipi_message_type operation)
+send_ipi_message(cpumask_t to_whom, enum ipi_message_type operation)
 {
-	unsigned long i, set, n;
+	int i;
 
 	mb();
-	for (i = to_whom; i ; i &= ~set) {
-		set = i & -i;
-		n = __ffs(set);
-		set_bit(operation, &ipi_data[n].bits);
-	}
+	for_each_cpu_mask(i, to_whom)
+		set_bit(operation, &ipi_data[i].bits);
 
 	mb();
-	for (i = to_whom; i ; i &= ~set) {
-		set = i & -i;
-		n = __ffs(set);
-		wripir(n);
-	}
+	for_each_cpu_mask(i, to_whom)
+		wripir(i);
 }
 
 /* Structure and data for smp_call_function.  This is designed to 
@@ -779,19 +704,20 @@ handle_ipi(struct pt_regs *regs)
 void
 smp_send_reschedule(int cpu)
 {
-#if DEBUG_IPI_MSG
+#ifdef DEBUG_IPI_MSG
 	if (cpu == hard_smp_processor_id())
 		printk(KERN_WARNING
 		       "smp_send_reschedule: Sending IPI to self.\n");
 #endif
-	send_ipi_message(1UL << cpu, IPI_RESCHEDULE);
+	send_ipi_message(cpumask_of_cpu(cpu), IPI_RESCHEDULE);
 }
 
 void
 smp_send_stop(void)
 {
-	unsigned long to_whom = cpu_present_mask & ~(1UL << smp_processor_id());
-#if DEBUG_IPI_MSG
+	cpumask_t to_whom = cpu_possible_map;
+	cpu_clear(smp_processor_id(), to_whom);
+#ifdef DEBUG_IPI_MSG
 	if (hard_smp_processor_id() != boot_cpu_id)
 		printk(KERN_WARNING "smp_send_stop: Not on boot cpu.\n");
 #endif
@@ -814,18 +740,21 @@ smp_send_stop(void)
 
 int
 smp_call_function_on_cpu (void (*func) (void *info), void *info, int retry,
-			  int wait, unsigned long to_whom)
+			  int wait, cpumask_t to_whom)
 {
 	struct smp_call_struct data;
 	unsigned long timeout;
 	int num_cpus_to_call;
 	
+	/* Can deadlock when called with interrupts disabled */
+	WARN_ON(irqs_disabled());
+
 	data.func = func;
 	data.info = info;
 	data.wait = wait;
 
-	to_whom &= ~(1L << smp_processor_id());
-	num_cpus_to_call = hweight64(to_whom);
+	cpu_clear(smp_processor_id(), to_whom);
+	num_cpus_to_call = cpus_weight(to_whom);
 
 	atomic_set(&data.unstarted_count, num_cpus_to_call);
 	atomic_set(&data.unfinished_count, num_cpus_to_call);
@@ -866,7 +795,7 @@ smp_call_function_on_cpu (void (*func) (void *info), void *info, int retry,
 
 	/* We either got one or timed out -- clear the lock. */
 	mb();
-	smp_call_function_data = 0;
+	smp_call_function_data = NULL;
 
 	/* 
 	 * If after both the initial and long timeout periods we still don't

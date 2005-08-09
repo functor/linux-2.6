@@ -85,20 +85,14 @@ static int sticon_set_palette(struct vc_data *c, unsigned char *table)
     return -EINVAL;
 }
 
-static int sticon_font_op(struct vc_data *c, struct console_font_op *op)
-{
-    return -ENOSYS;
-}
-
 static void sticon_putc(struct vc_data *conp, int c, int ypos, int xpos)
 {
-    int unit = conp->vc_num;
     int redraw_cursor = 0;
 
     if (vga_is_gfx || console_blanked)
 	    return;
-	    
-    if (vt_cons[unit]->vc_mode != KD_TEXT)
+
+    if (conp->vc_mode != KD_TEXT)
     	    return;
 #if 0
     if ((p->cursor_x == xpos) && (p->cursor_y == ypos)) {
@@ -116,15 +110,14 @@ static void sticon_putc(struct vc_data *conp, int c, int ypos, int xpos)
 static void sticon_putcs(struct vc_data *conp, const unsigned short *s,
 			 int count, int ypos, int xpos)
 {
-    int unit = conp->vc_num;
     int redraw_cursor = 0;
 
     if (vga_is_gfx || console_blanked)
 	    return;
 
-    if (vt_cons[unit]->vc_mode != KD_TEXT)
+    if (conp->vc_mode != KD_TEXT)
     	    return;
-    
+
 #if 0
     if ((p->cursor_y == ypos) && (xpos <= p->cursor_x) &&
 	(p->cursor_x < (xpos + count))) {
@@ -222,7 +215,7 @@ static void sticon_init(struct vc_data *c, int init)
     } else {
 	/* vc_rows = (c->vc_rows > vc_rows) ? vc_rows : c->vc_rows; */
 	/* vc_cols = (c->vc_cols > vc_cols) ? vc_cols : c->vc_cols; */
-	vc_resize(c->vc_num, vc_cols, vc_rows); 
+	vc_resize(c, vc_cols, vc_rows);
 /*	vc_resize_con(vc_rows, vc_cols, c->vc_num); */
     }
 }
@@ -354,6 +347,7 @@ static void sticon_save_screen(struct vc_data *conp)
 }
 
 static struct consw sti_con = {
+	.owner			= THIS_MODULE,
 	.con_startup		= sticon_startup,
 	.con_init		= sticon_init,
 	.con_deinit		= sticon_deinit,
@@ -365,7 +359,6 @@ static struct consw sti_con = {
 	.con_bmove		= sticon_bmove,
 	.con_switch		= sticon_switch,
 	.con_blank		= sticon_blank,
-	.con_font_op		= sticon_font_op,
 	.con_set_palette	= sticon_set_palette,
 	.con_scrolldelta	= sticon_scrolldelta,
 	.con_set_origin		= sticon_set_origin,
@@ -390,7 +383,7 @@ int __init sticonsole_init(void)
 
     if (conswitchp == &dummy_con) {
 	printk(KERN_INFO "sticon: Initializing STI text console.\n");
-	take_over_console(&sti_con, 0, MAX_NR_CONSOLES - 1, 1);
+	return take_over_console(&sti_con, 0, MAX_NR_CONSOLES - 1, 1);
     }
     return 0;
 }

@@ -24,7 +24,6 @@
 #include <linux/reboot.h>
 #include <linux/sysrq.h>
 #include <asm/io.h>
-#include <asm/pgalloc.h>
 #include <asm/voyager.h>
 #include <asm/vic.h>
 #include <linux/pm.h>
@@ -36,8 +35,6 @@
  * Power off function, if any
  */
 void (*pm_power_off)(void);
-
-int reboot_thru_bios;
 
 int voyager_level = 0;
 
@@ -54,7 +51,7 @@ voyager_dump(int dummy1, struct pt_regs *dummy2, struct tty_struct *dummy3)
 static struct sysrq_key_op sysrq_voyager_dump_op = {
 	.handler	= voyager_dump,
 	.help_msg	= "Voyager",
-	.action_msg	= "Dump Voyager Status\n",
+	.action_msg	= "Dump Voyager Status",
 };
 #endif
 

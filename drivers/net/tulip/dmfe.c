@@ -86,12 +86,13 @@
 #include <linux/delay.h>
 #include <linux/spinlock.h>
 #include <linux/crc32.h>
+#include <linux/bitops.h>
 
 #include <asm/processor.h>
-#include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/uaccess.h>
+#include <asm/irq.h>
 
 
 /* Board/System/Debug information/definition ---------------- */
@@ -299,6 +300,9 @@ static void dmfe_set_filter_mode(struct DEVICE *);
 static struct ethtool_ops netdev_ethtool_ops;
 static u16 read_srom_word(long ,int);
 static irqreturn_t dmfe_interrupt(int , void *, struct pt_regs *);
+#ifdef CONFIG_NET_POLL_CONTROLLER
+static void poll_dmfe (struct net_device *dev);
+#endif
 static void dmfe_descriptor_init(struct dmfe_board_info *, unsigned long);
 static void allocate_rx_buffer(struct dmfe_board_info *);
 static void update_cr6(u32, unsigned long);
@@ -311,13 +315,13 @@ static u16 phy_read_1bit(unsigned long);
 static u8 dmfe_sense_speed(struct dmfe_board_info *);
 static void dmfe_process_mode(struct dmfe_board_info *);
 static void dmfe_timer(unsigned long);
+static inline u32 cal_CRC(unsigned char *, unsigned int, u8);
 static void dmfe_rx_packet(struct DEVICE *, struct dmfe_board_info *);
 static void dmfe_free_tx_pkt(struct DEVICE *, struct dmfe_board_info *);
 static void dmfe_reuse_skb(struct dmfe_board_info *, struct sk_buff *);
 static void dmfe_dynamic_reset(struct DEVICE *);
 static void dmfe_free_rxbuffer(struct dmfe_board_info *);
 static void dmfe_init_dm910x(struct DEVICE *);
-static inline u32 cal_CRC(unsigned char *, unsigned int, u8);
 static void dmfe_parse_srom(struct dmfe_board_info *);
 static void dmfe_program_DM9801(struct dmfe_board_info *, int);
 static void dmfe_program_DM9802(struct dmfe_board_info *);
@@ -417,6 +421,9 @@ static int __devinit dmfe_init_one (struct pci_dev *pdev,
 	dev->stop = &dmfe_stop;
 	dev->get_stats = &dmfe_get_stats;
 	dev->set_multicast_list = &dmfe_set_filter_mode;
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	dev->poll_controller = &poll_dmfe;
+#endif
 	dev->ethtool_ops = &netdev_ethtool_ops;
 	spin_lock_init(&db->lock);
 
@@ -791,6 +798,23 @@ static irqreturn_t dmfe_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 }
 
 
+#ifdef CONFIG_NET_POLL_CONTROLLER
+/*
+ * Polling 'interrupt' - used by things like netconsole to send skbs
+ * without having to re-enable interrupts. It's not called while
+ * the interrupt routine is executing.
+ */
+
+static void poll_dmfe (struct net_device *dev)
+{
+	/* disable_irq here is not very nice, but with the lockless
+	   interrupt handler we have no other choice. */
+	disable_irq(dev->irq);
+	dmfe_interrupt (dev->irq, dev, NULL);
+	enable_irq(dev->irq);
+}
+#endif
+
 /*
  *	Free TX resource after TX complete
  */
@@ -858,6 +882,20 @@ static void dmfe_free_tx_pkt(struct DEVICE *dev, struct dmfe_board_info * db)
 	/* Resource available check */
 	if ( db->tx_queue_cnt < TX_WAKE_DESC_CNT )
 		netif_wake_queue(dev);	/* Active upper layer, send again */
+}
+
+
+/*
+ *	Calculate the CRC valude of the Rx packet
+ *	flag = 	1 : return the reverse CRC (for the received packet CRC)
+ *		0 : return the normal CRC (for Hash Table index)
+ */
+
+static inline u32 cal_CRC(unsigned char * Data, unsigned int Len, u8 flag)
+{
+	u32 crc = crc32(~0, Data, Len);
+	if (flag) crc = ~crc;
+	return crc;
 }
 
 
@@ -1751,20 +1789,6 @@ static u16 phy_read_1bit(unsigned long ioaddr)
 
 
 /*
- *	Calculate the CRC valude of the Rx packet
- *	flag = 	1 : return the reverse CRC (for the received packet CRC)
- *		0 : return the normal CRC (for Hash Table index)
- */
-
-static inline u32 cal_CRC(unsigned char * Data, unsigned int Len, u8 flag)
-{
-	u32 crc = crc32(~0, Data, Len);
-	if (flag) crc = ~crc;
-	return crc;
-}
-
-
-/*
  *	Parser SROM and media mode
  */
 
@@ -1948,7 +1972,6 @@ static struct pci_device_id dmfe_pci_tbl[] = {
 	{ 0x1282, 0x9102, PCI_ANY_ID, PCI_ANY_ID, 0, 0, PCI_DM9102_ID },
 	{ 0x1282, 0x9100, PCI_ANY_ID, PCI_ANY_ID, 0, 0, PCI_DM9100_ID },
 	{ 0x1282, 0x9009, PCI_ANY_ID, PCI_ANY_ID, 0, 0, PCI_DM9009_ID },
-	{ 0x10B9, 0x5261, PCI_ANY_ID, PCI_ANY_ID, 0, 0, PCI_DM9102_ID },
 	{ 0, }
 };
 MODULE_DEVICE_TABLE(pci, dmfe_pci_tbl);
@@ -1964,16 +1987,17 @@ static struct pci_driver dmfe_driver = {
 MODULE_AUTHOR("Sten Wang, sten_wang@davicom.com.tw");
 MODULE_DESCRIPTION("Davicom DM910X fast ethernet driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DRV_VERSION);
 
-MODULE_PARM(debug, "i");
-MODULE_PARM(mode, "i");
-MODULE_PARM(cr6set, "i");
-MODULE_PARM(chkmode, "i");
-MODULE_PARM(HPNA_mode, "i");
-MODULE_PARM(HPNA_rx_cmd, "i");
-MODULE_PARM(HPNA_tx_cmd, "i");
-MODULE_PARM(HPNA_NoiseFloor, "i");
-MODULE_PARM(SF_mode, "i");
+module_param(debug, int, 0);
+module_param(mode, byte, 0);
+module_param(cr6set, int, 0);
+module_param(chkmode, byte, 0);
+module_param(HPNA_mode, byte, 0);
+module_param(HPNA_rx_cmd, byte, 0);
+module_param(HPNA_tx_cmd, byte, 0);
+module_param(HPNA_NoiseFloor, byte, 0);
+module_param(SF_mode, byte, 0);
 MODULE_PARM_DESC(debug, "Davicom DM9xxx enable debugging (0-1)");
 MODULE_PARM_DESC(mode, "Davicom DM9xxx: Bit 0: 10/100Mbps, bit 2: duplex, bit 8: HomePNA");
 MODULE_PARM_DESC(SF_mode, "Davicom DM9xxx special function (bit 0: VLAN, bit 1 Flow Control, bit 2: TX pause packet)");

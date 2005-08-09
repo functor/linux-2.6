@@ -12,6 +12,7 @@
  *            Wolfgang Taphorn
  *            Stefan Bader <stefan.bader@de.ibm.com> 
  *            Heiko Carstens <heiko.carstens@de.ibm.com> 
+ *            Andreas Herrmann <aherrman@de.ibm.com>
  * 
  * This program is free software; you can redistribute it and/or modify 
  * it under the terms of the GNU General Public License as published by 
@@ -30,10 +31,7 @@
 
 #define ZFCP_LOG_AREA			ZFCP_LOG_AREA_SCSI
 
-/* this drivers version (do not edit !!! generated and updated by cvs) */
-#define ZFCP_SCSI_REVISION "$Revision: 1.61 $"
-
-#include <linux/blkdev.h>
+#define ZFCP_SCSI_REVISION "$Revision: 1.74 $"
 
 #include "zfcp_ext.h"
 
@@ -50,8 +48,12 @@ static int zfcp_task_management_function(struct zfcp_unit *, u8);
 
 static struct zfcp_unit *zfcp_unit_lookup(struct zfcp_adapter *, int, scsi_id_t,
 					  scsi_lun_t);
+static struct zfcp_port *zfcp_port_lookup(struct zfcp_adapter *, int,
+					  scsi_id_t);
 
 static struct device_attribute *zfcp_sysfs_sdev_attrs[];
+
+struct scsi_transport_template *zfcp_transport_template;
 
 struct zfcp_data zfcp_data = {
 	.scsi_host_template = {
@@ -79,7 +81,8 @@ struct zfcp_data zfcp_data = {
 	      unchecked_isa_dma:       0,
 	      use_clustering:          1,
 	      sdev_attrs:              zfcp_sysfs_sdev_attrs,
-	}
+	},
+	.driver_version = ZFCP_VERSION,
 	/* rest initialised with zeros */
 };
 
@@ -247,15 +250,16 @@ zfcp_scsi_command_fail(struct scsi_cmnd *scpnt, int result)
 /**
  * zfcp_scsi_command_async - worker for zfcp_scsi_queuecommand and
  *	zfcp_scsi_command_sync
- * @adapter: adapter for where scsi command is issued
+ * @adapter: adapter where scsi command is issued
  * @unit: unit to which scsi command is sent
  * @scpnt: scsi command to be sent
+ * @timer: timer to be started if request is successfully initiated
  *
  * Note: In scsi_done function must be set in scpnt.
  */
 int
 zfcp_scsi_command_async(struct zfcp_adapter *adapter, struct zfcp_unit *unit,
-			struct scsi_cmnd *scpnt)
+			struct scsi_cmnd *scpnt, struct timer_list *timer)
 {
 	int tmp;
 	int retval;
@@ -291,7 +295,7 @@ zfcp_scsi_command_async(struct zfcp_adapter *adapter, struct zfcp_unit *unit,
 		goto out;
 	}
 
-	tmp = zfcp_fsf_send_fcp_command_task(adapter, unit, scpnt,
+	tmp = zfcp_fsf_send_fcp_command_task(adapter, unit, scpnt, timer,
 					     ZFCP_REQ_AUTO_CLEANUP);
 
 	if (unlikely(tmp < 0)) {
@@ -313,17 +317,27 @@ zfcp_scsi_command_sync_handler(struct scsi_cmnd *scpnt)
 
 /**
  * zfcp_scsi_command_sync - send a SCSI command and wait for completion
- * returns 0, errors are indicated by scsi_cmnd->result
+ * @unit: unit where command is sent to
+ * @scpnt: scsi command to be sent
+ * @timer: timer to be started if request is successfully initiated
+ * Return: 0
+ *
+ * Errors are indicated in scpnt->result
  */
 int
-zfcp_scsi_command_sync(struct zfcp_unit *unit, struct scsi_cmnd *scpnt)
+zfcp_scsi_command_sync(struct zfcp_unit *unit, struct scsi_cmnd *scpnt,
+		       struct timer_list *timer)
 {
+	int ret;
 	DECLARE_COMPLETION(wait);
 
 	scpnt->SCp.ptr = (void *) &wait;  /* silent re-use */
-	scpnt->done = zfcp_scsi_command_sync_handler;
-        zfcp_scsi_command_async(unit->port->adapter, unit, scpnt);
-	wait_for_completion(&wait);
+	scpnt->scsi_done = zfcp_scsi_command_sync_handler;
+	ret = zfcp_scsi_command_async(unit->port->adapter, unit, scpnt, timer);
+	if (ret == 0)
+		wait_for_completion(&wait);
+
+	scpnt->SCp.ptr = NULL;
 
 	return 0;
 }
@@ -355,7 +369,7 @@ zfcp_scsi_queuecommand(struct scsi_cmnd *scpnt,
 	adapter = (struct zfcp_adapter *) scpnt->device->host->hostdata[0];
 	unit = (struct zfcp_unit *) scpnt->device->hostdata;
 
-	return zfcp_scsi_command_async(adapter, unit, scpnt);
+	return zfcp_scsi_command_async(adapter, unit, scpnt, NULL);
 }
 
 /*
@@ -386,6 +400,18 @@ zfcp_unit_lookup(struct zfcp_adapter *adapter, int channel, scsi_id_t id,
 	}
  out:
 	return retval;
+}
+
+static struct zfcp_port *
+zfcp_port_lookup(struct zfcp_adapter *adapter, int channel, scsi_id_t id)
+{
+	struct zfcp_port *port;
+
+	list_for_each_entry(port, &adapter->port_list_head, list) {
+		if (id == port->scsi_id)
+			return port;
+	}
+	return (struct zfcp_port *) NULL;
 }
 
 /*
@@ -430,7 +456,7 @@ zfcp_scsi_eh_abort_handler(struct scsi_cmnd *scpnt)
 	u64 dbf_fsf_req = 0;
 	u64 dbf_fsf_status = 0;
 	u64 dbf_fsf_qual[2] = { 0, 0 };
-	char dbf_result[ZFCP_ABORT_DBF_LENGTH] = { "##undef" };
+	char dbf_result[ZFCP_ABORT_DBF_LENGTH] = "##undef";
 
 	memset(dbf_opcode, 0, ZFCP_ABORT_DBF_LENGTH);
 	memcpy(dbf_opcode,
@@ -510,8 +536,7 @@ zfcp_scsi_eh_abort_handler(struct scsi_cmnd *scpnt)
 	ZFCP_LOG_DEBUG("unit 0x%016Lx (%p)\n", unit->fcp_lun, unit);
 
 	/*
-	 * The 'Abort FCP Command' routine may block (call schedule)
-	 * because it may wait for a free SBAL.
+	 * We block (call schedule)
 	 * That's why we must release the lock and enable the
 	 * interrupts before.
 	 * On the other hand we do not need the lock anymore since
@@ -520,8 +545,7 @@ zfcp_scsi_eh_abort_handler(struct scsi_cmnd *scpnt)
 	write_unlock_irqrestore(&adapter->abort_lock, flags);
 	/* call FSF routine which does the abort */
 	new_fsf_req = zfcp_fsf_abort_fcp_command((unsigned long) old_fsf_req,
-						 adapter,
-						 unit, ZFCP_WAIT_FOR_SBAL);
+						 adapter, unit, 0);
 	ZFCP_LOG_DEBUG("new_fsf_req=%p\n", new_fsf_req);
 	if (!new_fsf_req) {
 		retval = FAILED;
@@ -620,7 +644,7 @@ zfcp_scsi_eh_device_reset_handler(struct scsi_cmnd *scpnt)
 	if (!atomic_test_mask(ZFCP_STATUS_UNIT_NOTSUPPUNITRESET,
 			      &unit->status)) {
 		retval =
-		    zfcp_task_management_function(unit, LOGICAL_UNIT_RESET);
+		    zfcp_task_management_function(unit, FCP_LOGICAL_UNIT_RESET);
 		if (retval) {
 			ZFCP_LOG_DEBUG("unit reset failed (unit=%p)\n", unit);
 			if (retval == -ENOTSUPP)
@@ -636,7 +660,7 @@ zfcp_scsi_eh_device_reset_handler(struct scsi_cmnd *scpnt)
 			goto out;
 		}
 	}
-	retval = zfcp_task_management_function(unit, TARGET_RESET);
+	retval = zfcp_task_management_function(unit, FCP_TARGET_RESET);
 	if (retval) {
 		ZFCP_LOG_DEBUG("target reset failed (unit=%p)\n", unit);
 		retval = FAILED;
@@ -659,7 +683,7 @@ zfcp_task_management_function(struct zfcp_unit *unit, u8 tm_flags)
 
 	/* issue task management function */
 	fsf_req = zfcp_fsf_send_fcp_command_task_management
-	    (adapter, unit, tm_flags, ZFCP_WAIT_FOR_SBAL);
+		(adapter, unit, tm_flags, 0);
 	if (!fsf_req) {
 		ZFCP_LOG_INFO("error: creation of task management request "
 			      "failed for unit 0x%016Lx on port 0x%016Lx on  "
@@ -770,6 +794,7 @@ zfcp_adapter_scsi_register(struct zfcp_adapter *adapter)
 	adapter->scsi_host->max_channel = 0;
 	adapter->scsi_host->unique_id = unique_id++;	/* FIXME */
 	adapter->scsi_host->max_cmd_len = ZFCP_MAX_SCSI_CMND_LENGTH;
+	adapter->scsi_host->transportt = zfcp_transport_template;
 	/*
 	 * Reverse mapping of the host number to avoid race condition
 	 */
@@ -825,6 +850,68 @@ zfcp_fsf_start_scsi_er_timer(struct zfcp_adapter *adapter)
 	add_timer(&adapter->scsi_er_timer);
 }
 
+/*
+ * Support functions for FC transport class
+ */
+static void
+zfcp_get_port_id(struct scsi_target *starget)
+{
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct zfcp_adapter *adapter = (struct zfcp_adapter *)shost->hostdata[0];
+	struct zfcp_port *port;
+	unsigned long flags;
+
+	read_lock_irqsave(&zfcp_data.config_lock, flags);
+	port = zfcp_port_lookup(adapter, starget->channel, starget->id);
+	if (port)
+		fc_starget_port_id(starget) = port->d_id;
+	else
+		fc_starget_port_id(starget) = -1;
+	read_unlock_irqrestore(&zfcp_data.config_lock, flags);
+}
+
+static void
+zfcp_get_port_name(struct scsi_target *starget)
+{
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct zfcp_adapter *adapter = (struct zfcp_adapter *)shost->hostdata[0];
+	struct zfcp_port *port;
+	unsigned long flags;
+
+	read_lock_irqsave(&zfcp_data.config_lock, flags);
+	port = zfcp_port_lookup(adapter, starget->channel, starget->id);
+	if (port)
+		fc_starget_port_name(starget) = port->wwpn;
+	else
+		fc_starget_port_name(starget) = -1;
+	read_unlock_irqrestore(&zfcp_data.config_lock, flags);
+}
+
+static void
+zfcp_get_node_name(struct scsi_target *starget)
+{
+	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
+	struct zfcp_adapter *adapter = (struct zfcp_adapter *)shost->hostdata[0];
+	struct zfcp_port *port;
+	unsigned long flags;
+
+	read_lock_irqsave(&zfcp_data.config_lock, flags);
+	port = zfcp_port_lookup(adapter, starget->channel, starget->id);
+	if (port)
+		fc_starget_node_name(starget) = port->wwnn;
+	else
+		fc_starget_node_name(starget) = -1;
+	read_unlock_irqrestore(&zfcp_data.config_lock, flags);
+}
+
+struct fc_function_template zfcp_transport_functions = {
+	.get_starget_port_id = zfcp_get_port_id,
+	.get_starget_port_name = zfcp_get_port_name,
+	.get_starget_node_name = zfcp_get_node_name,
+	.show_starget_port_id = 1,
+	.show_starget_port_name = 1,
+	.show_starget_node_name = 1,
+};
 
 /**
  * ZFCP_DEFINE_SCSI_ATTR

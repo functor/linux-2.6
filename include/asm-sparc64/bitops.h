@@ -7,19 +7,16 @@
 #ifndef _SPARC64_BITOPS_H
 #define _SPARC64_BITOPS_H
 
+#include <linux/config.h>
 #include <linux/compiler.h>
 #include <asm/byteorder.h>
 
-extern long ___test_and_set_bit(unsigned long nr, volatile unsigned long *addr);
-extern long ___test_and_clear_bit(unsigned long nr, volatile unsigned long *addr);
-extern long ___test_and_change_bit(unsigned long nr, volatile unsigned long *addr);
-
-#define test_and_set_bit(nr,addr)	({___test_and_set_bit(nr,addr)!=0;})
-#define test_and_clear_bit(nr,addr)	({___test_and_clear_bit(nr,addr)!=0;})
-#define test_and_change_bit(nr,addr)	({___test_and_change_bit(nr,addr)!=0;})
-#define set_bit(nr,addr)		((void)___test_and_set_bit(nr,addr))
-#define clear_bit(nr,addr)		((void)___test_and_clear_bit(nr,addr))
-#define change_bit(nr,addr)		((void)___test_and_change_bit(nr,addr))
+extern int test_and_set_bit(unsigned long nr, volatile unsigned long *addr);
+extern int test_and_clear_bit(unsigned long nr, volatile unsigned long *addr);
+extern int test_and_change_bit(unsigned long nr, volatile unsigned long *addr);
+extern void set_bit(unsigned long nr, volatile unsigned long *addr);
+extern void clear_bit(unsigned long nr, volatile unsigned long *addr);
+extern void change_bit(unsigned long nr, volatile unsigned long *addr);
 
 /* "non-atomic" versions... */
 
@@ -74,8 +71,13 @@ static __inline__ int __test_and_change_bit(int nr, volatile unsigned long *addr
 	return ((old & mask) != 0);
 }
 
-#define smp_mb__before_clear_bit()	do { } while(0)
-#define smp_mb__after_clear_bit()	do { } while(0)
+#ifdef CONFIG_SMP
+#define smp_mb__before_clear_bit()	membar("#StoreLoad | #LoadLoad")
+#define smp_mb__after_clear_bit()	membar("#StoreLoad | #StoreStore")
+#else
+#define smp_mb__before_clear_bit()	barrier()
+#define smp_mb__after_clear_bit()	barrier()
+#endif
 
 static __inline__ int test_bit(int nr, __const__ volatile unsigned long *addr)
 {
@@ -204,43 +206,8 @@ static __inline__ unsigned int hweight8(unsigned int w)
  * @offset: The bitnumber to start searching at
  * @size: The maximum size to search
  */
-static __inline__ unsigned long find_next_bit(unsigned long *addr, unsigned long size, unsigned long offset)
-{
-	unsigned long *p = addr + (offset >> 6);
-	unsigned long result = offset & ~63UL;
-	unsigned long tmp;
-
-	if (offset >= size)
-		return size;
-	size -= result;
-	offset &= 63UL;
-	if (offset) {
-		tmp = *(p++);
-		tmp &= (~0UL << offset);
-		if (size < 64)
-			goto found_first;
-		if (tmp)
-			goto found_middle;
-		size -= 64;
-		result += 64;
-	}
-	while (size & ~63UL) {
-		if ((tmp = *(p++)))
-			goto found_middle;
-		result += 64;
-		size -= 64;
-	}
-	if (!size)
-		return result;
-	tmp = *p;
-
-found_first:
-	tmp &= (~0UL >> (64 - size));
-	if (tmp == 0UL)        /* Are any bits set? */
-		return result + size; /* Nope. */
-found_middle:
-	return result + __ffs(tmp);
-}
+extern unsigned long find_next_bit(const unsigned long *, unsigned long,
+					unsigned long);
 
 /**
  * find_first_bit - find the first set bit in a memory region
@@ -258,54 +225,16 @@ found_middle:
  * on Linus's ALPHA routines, which are pretty portable BTW.
  */
 
-static __inline__ unsigned long find_next_zero_bit(unsigned long *addr, unsigned long size, unsigned long offset)
-{
-	unsigned long *p = addr + (offset >> 6);
-	unsigned long result = offset & ~63UL;
-	unsigned long tmp;
-
-	if (offset >= size)
-		return size;
-	size -= result;
-	offset &= 63UL;
-	if (offset) {
-		tmp = *(p++);
-		tmp |= ~0UL >> (64-offset);
-		if (size < 64)
-			goto found_first;
-		if (~tmp)
-			goto found_middle;
-		size -= 64;
-		result += 64;
-	}
-	while (size & ~63UL) {
-		if (~(tmp = *(p++)))
-			goto found_middle;
-		result += 64;
-		size -= 64;
-	}
-	if (!size)
-		return result;
-	tmp = *p;
-
-found_first:
-	tmp |= ~0UL << size;
-	if (tmp == ~0UL)        /* Are any bits zero? */
-		return result + size; /* Nope. */
-found_middle:
-	return result + ffz(tmp);
-}
+extern unsigned long find_next_zero_bit(const unsigned long *,
+					unsigned long, unsigned long);
 
 #define find_first_zero_bit(addr, size) \
         find_next_zero_bit((addr), (size), 0)
 
-extern long ___test_and_set_le_bit(int nr, volatile unsigned long *addr);
-extern long ___test_and_clear_le_bit(int nr, volatile unsigned long *addr);
-
-#define test_and_set_le_bit(nr,addr)	({___test_and_set_le_bit(nr,addr)!=0;})
-#define test_and_clear_le_bit(nr,addr)	({___test_and_clear_le_bit(nr,addr)!=0;})
-#define set_le_bit(nr,addr)		((void)___test_and_set_le_bit(nr,addr))
-#define clear_le_bit(nr,addr)		((void)___test_and_clear_le_bit(nr,addr))
+#define test_and_set_le_bit(nr,addr)	\
+	test_and_set_bit((nr) ^ 0x38, (addr))
+#define test_and_clear_le_bit(nr,addr)	\
+	test_and_clear_bit((nr) ^ 0x38, (addr))
 
 static __inline__ int test_le_bit(int nr, __const__ unsigned long * addr)
 {
@@ -320,61 +249,43 @@ static __inline__ int test_le_bit(int nr, __const__ unsigned long * addr)
 #define find_first_zero_le_bit(addr, size) \
         find_next_zero_le_bit((addr), (size), 0)
 
-static __inline__ unsigned long find_next_zero_le_bit(unsigned long *addr, unsigned long size, unsigned long offset)
-{
-	unsigned long *p = addr + (offset >> 6);
-	unsigned long result = offset & ~63UL;
-	unsigned long tmp;
-
-	if (offset >= size)
-		return size;
-	size -= result;
-	offset &= 63UL;
-	if(offset) {
-		tmp = __swab64p(p++);
-		tmp |= (~0UL >> (64-offset));
-		if(size < 64)
-			goto found_first;
-		if(~tmp)
-			goto found_middle;
-		size -= 64;
-		result += 64;
-	}
-	while(size & ~63) {
-		if(~(tmp = __swab64p(p++)))
-			goto found_middle;
-		result += 64;
-		size -= 64;
-	}
-	if(!size)
-		return result;
-	tmp = __swab64p(p);
-found_first:
-	tmp |= (~0UL << size);
-	if (tmp == ~0UL)        /* Are any bits zero? */
-		return result + size; /* Nope. */
-found_middle:
-	return result + ffz(tmp);
-}
+extern unsigned long find_next_zero_le_bit(unsigned long *, unsigned long, unsigned long);
 
 #ifdef __KERNEL__
 
-#define ext2_set_bit(nr,addr)		test_and_set_le_bit((nr),(unsigned long *)(addr))
-#define ext2_set_bit_atomic(lock,nr,addr) test_and_set_le_bit((nr),(unsigned long *)(addr))
-#define ext2_clear_bit(nr,addr)		test_and_clear_le_bit((nr),(unsigned long *)(addr))
-#define ext2_clear_bit_atomic(lock,nr,addr) test_and_clear_le_bit((nr),(unsigned long *)(addr))
-#define ext2_test_bit(nr,addr)		test_le_bit((nr),(unsigned long *)(addr))
+#define __set_le_bit(nr, addr) \
+	__set_bit((nr) ^ 0x38, (addr))
+#define __clear_le_bit(nr, addr) \
+	__clear_bit((nr) ^ 0x38, (addr))
+#define __test_and_clear_le_bit(nr, addr) \
+	__test_and_clear_bit((nr) ^ 0x38, (addr))
+#define __test_and_set_le_bit(nr, addr) \
+	__test_and_set_bit((nr) ^ 0x38, (addr))
+
+#define ext2_set_bit(nr,addr)	\
+	__test_and_set_le_bit((nr),(unsigned long *)(addr))
+#define ext2_set_bit_atomic(lock,nr,addr) \
+	test_and_set_le_bit((nr),(unsigned long *)(addr))
+#define ext2_clear_bit(nr,addr)	\
+	__test_and_clear_le_bit((nr),(unsigned long *)(addr))
+#define ext2_clear_bit_atomic(lock,nr,addr) \
+	test_and_clear_le_bit((nr),(unsigned long *)(addr))
+#define ext2_test_bit(nr,addr)	\
+	test_le_bit((nr),(unsigned long *)(addr))
 #define ext2_find_first_zero_bit(addr, size) \
 	find_first_zero_le_bit((unsigned long *)(addr), (size))
 #define ext2_find_next_zero_bit(addr, size, off) \
 	find_next_zero_le_bit((unsigned long *)(addr), (size), (off))
 
 /* Bitmap functions for the minix filesystem.  */
-#define minix_test_and_set_bit(nr,addr)	test_and_set_bit((nr),(unsigned long *)(addr))
-#define minix_set_bit(nr,addr)		set_bit((nr),(unsigned long *)(addr))
+#define minix_test_and_set_bit(nr,addr)	\
+	test_and_set_bit((nr),(unsigned long *)(addr))
+#define minix_set_bit(nr,addr)	\
+	set_bit((nr),(unsigned long *)(addr))
 #define minix_test_and_clear_bit(nr,addr) \
 	test_and_clear_bit((nr),(unsigned long *)(addr))
-#define minix_test_bit(nr,addr)		test_bit((nr),(unsigned long *)(addr))
+#define minix_test_bit(nr,addr)	\
+	test_bit((nr),(unsigned long *)(addr))
 #define minix_find_first_zero_bit(addr,size) \
 	find_first_zero_bit((unsigned long *)(addr),(size))
 

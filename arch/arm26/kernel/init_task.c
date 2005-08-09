@@ -1,5 +1,5 @@
 /*
- *  linux/arch/arm/kernel/init_task.c
+ *  linux/arch/arm26/kernel/init_task.c
  *
  * Copyright (C) 2003 Ian Molton
  *
@@ -10,6 +10,7 @@
 #include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/init_task.h>
+#include <linux/mqueue.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -28,7 +29,9 @@ EXPORT_SYMBOL(init_mm);
  * We need to make sure that this is 8192-byte aligned due to the
  * way process stacks are handled. This is done by making sure
  * the linker maps this in the .text segment right after head.S,
- * and making head.S ensure the proper alignment.
+ * and making the linker scripts ensure the proper alignment.
+ *
+ * FIXME - should this be 32K alignment on arm26?
  *
  * The things we do for performance...
  */

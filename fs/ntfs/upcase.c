@@ -3,7 +3,7 @@
  *	      Part of the Linux-NTFS project.
  *
  * Copyright (c) 2001 Richard Russon <ntfs@flatcap.org>
- * Copyright (c) 2001-2003 Anton Altaparmakov
+ * Copyright (c) 2001-2004 Anton Altaparmakov
  *
  * Modified for mkntfs inclusion 9 June 2001 by Anton Altaparmakov.
  * Modified for kernel inclusion 10 September 2001 by Anton Altparmakov.
@@ -24,9 +24,10 @@
  * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include "malloc.h"
 #include "ntfs.h"
 
-uchar_t *generate_default_upcase(void)
+ntfschar *generate_default_upcase(void)
 {
 	static const int uc_run_table[][3] = { /* Start, End, Add */
 	{0x0061, 0x007B,  -32}, {0x0451, 0x045D, -80}, {0x1F70, 0x1F72,  74},
@@ -68,12 +69,12 @@ uchar_t *generate_default_upcase(void)
 	};
 
 	int i, r;
-	uchar_t *uc;
+	ntfschar *uc;
 
-	uc = ntfs_malloc_nofs(default_upcase_len * sizeof(uchar_t));
+	uc = ntfs_malloc_nofs(default_upcase_len * sizeof(ntfschar));
 	if (!uc)
 		return uc;
-	memset(uc, 0, default_upcase_len * sizeof(uchar_t));
+	memset(uc, 0, default_upcase_len * sizeof(ntfschar));
 	for (i = 0; i < default_upcase_len; i++)
 		uc[i] = cpu_to_le16(i);
 	for (r = 0; uc_run_table[r][0]; r++)
@@ -87,4 +88,3 @@ uchar_t *generate_default_upcase(void)
 		uc[uc_word_table[r][0]] = cpu_to_le16(uc_word_table[r][1]);
 	return uc;
 }
-

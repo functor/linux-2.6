@@ -16,7 +16,7 @@ SECTIONS
 	SCHED_TEXT
 	*(.fixup)
 	*(.gnu.warning)
-	} = 0x4e75
+	} :text = 0x4e75
 	RODATA
 
   _etext = .;			/* End of text section */
@@ -24,38 +24,35 @@ SECTIONS
   .data : {			/* Data */
 	*(.data)
 	CONSTRUCTORS
-  	. = ALIGN(16);		/* Exception table */
-  	__start___ex_table = .;
-  	*(__ex_table) 
-  	__stop___ex_table = .;
-	}
+	. = ALIGN(16);		/* Exception table */
+	__start___ex_table = .;
+	*(__ex_table)
+	__stop___ex_table = .;
+	} :data
   /* End of data goes *here* so that freeing init code works properly. */
   _edata = .;
 
   /* will be freed after init */
   . = ALIGN(8192);	/* Init code and data */
 __init_begin = .;
-	.init.text : { 
+	.init.text : {
 		_sinittext = .;
 		*(.init.text)
 		_einittext = .;
 	}
-  	.init.data : { *(.init.data) }
+	.init.data : { *(.init.data) }
 	. = ALIGN(16);
 	__setup_start = .;
 	.init.setup : { *(.init.setup) }
 	__setup_end = .;
-	__start___param = .;
-	__param : { *(__param) }
-	__stop___param = .;
 	__initcall_start = .;
 	.initcall.init : {
-		*(.initcall1.init) 
-		*(.initcall2.init) 
-		*(.initcall3.init) 
-		*(.initcall4.init) 
-		*(.initcall5.init) 
-		*(.initcall6.init) 
+		*(.initcall1.init)
+		*(.initcall2.init)
+		*(.initcall3.init)
+		*(.initcall4.init)
+		*(.initcall5.init)
+		*(.initcall6.init)
 		*(.initcall7.init)
 	}
 	__initcall_end = .;
@@ -70,7 +67,7 @@ __init_begin = .;
 	. = ALIGN(8192);
 	__init_end = .;
 	.init.task : { *(init_task) }
-	
+
 
   .bss : { *(.bss) }		/* BSS */
 
@@ -84,7 +81,7 @@ __init_begin = .;
 	}
 
   .crap : {
-  	/* Stabs debugging sections.  */
+	/* Stabs debugging sections.  */
 	*(.stab)
 	*(.stabstr)
 	*(.stab.excl)

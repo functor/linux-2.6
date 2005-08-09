@@ -36,7 +36,7 @@
 #undef SHOW_SYSCALLS_TASK
 
 /*
- * MSR_KERNEL is > 0x10000 on 4xx since it include MSR_CE.
+ * MSR_KERNEL is > 0x10000 on 4xx/Book-E since it include MSR_CE.
  */
 #if MSR_KERNEL >= 0x10000
 #define LOAD_MSR_KERNEL(r, x)	lis r,(x)@h; ori r,r,(x)@l
@@ -44,7 +44,32 @@
 #define LOAD_MSR_KERNEL(r, x)	li r,(x)
 #endif
 
-#ifdef CONFIG_4xx
+#ifdef CONFIG_BOOKE
+#include "head_booke.h"
+	.globl	mcheck_transfer_to_handler
+mcheck_transfer_to_handler:
+	mtspr	MCHECK_SPRG,r8
+	BOOKE_LOAD_MCHECK_STACK
+	lwz	r0,GPR10-INT_FRAME_SIZE(r8)
+	stw	r0,GPR10(r11)
+	lwz	r0,GPR11-INT_FRAME_SIZE(r8)
+	stw	r0,GPR11(r11)
+	mfspr	r8,MCHECK_SPRG
+	b	transfer_to_handler_full
+
+	.globl	crit_transfer_to_handler
+crit_transfer_to_handler:
+	mtspr	CRIT_SPRG,r8
+	BOOKE_LOAD_CRIT_STACK
+	lwz	r0,GPR10-INT_FRAME_SIZE(r8)
+	stw	r0,GPR10(r11)
+	lwz	r0,GPR11-INT_FRAME_SIZE(r8)
+	stw	r0,GPR11(r11)
+	mfspr	r8,CRIT_SPRG
+	/* fall through */
+#endif
+
+#ifdef CONFIG_40x
 	.globl	crit_transfer_to_handler
 crit_transfer_to_handler:
 	lwz	r0,crit_r10@l(0)
@@ -73,18 +98,20 @@ transfer_to_handler:
 	stw	r9,_MSR(r11)
 	andi.	r2,r9,MSR_PR
 	mfctr	r12
-	mfspr	r2,XER
+	mfspr	r2,SPRN_XER
 	stw	r12,_CTR(r11)
 	stw	r2,_XER(r11)
-	mfspr	r12,SPRG3
+	mfspr	r12,SPRN_SPRG3
 	addi	r2,r12,-THREAD
 	tovirt(r2,r2)			/* set r2 to current */
 	beq	2f			/* if from user, fix up THREAD.regs */
 	addi	r11,r1,STACK_FRAME_OVERHEAD
 	stw	r11,PT_REGS(r12)
-#ifdef CONFIG_4xx
-	lwz	r12,PTRACE-THREAD(r12)
-	andi.	r12,r12,PT_PTRACED
+#if defined(CONFIG_40x) || defined(CONFIG_BOOKE)
+	/* Check to see if the dbcr0 register is set up to debug.  Use the
+	   single-step bit to do this. */
+	lwz	r12,THREAD_DBCR0(r12)
+	andis.	r12,r12,DBCR0_IC@h
 	beq+	3f
 	/* From user and task is ptraced - load up global dbcr0 */
 	li	r12,-1			/* clear all pending debug events */
@@ -122,8 +149,8 @@ transfer_to_handler_cont:
 	lwz	r11,0(r9)		/* virtual address of handler */
 	lwz	r9,4(r9)		/* where to go when done */
 	FIX_SRR1(r10,r12)
-	mtspr	SRR0,r11
-	mtspr	SRR1,r10
+	mtspr	SPRN_SRR0,r11
+	mtspr	SPRN_SRR1,r10
 	mtlr	r9
 	SYNC
 	RFI				/* jump to handler, enable MMU */
@@ -147,8 +174,8 @@ stack_ovf:
 	addi	r9,r9,StackOverflow@l
 	LOAD_MSR_KERNEL(r10,MSR_KERNEL)
 	FIX_SRR1(r10,r12)
-	mtspr	SRR0,r9
-	mtspr	SRR1,r10
+	mtspr	SPRN_SRR0,r9
+	mtspr	SPRN_SRR1,r10
 	SYNC
 	RFI
 
@@ -178,7 +205,7 @@ _GLOBAL(DoSyscall)
 	andi.	r11,r11,_TIF_SYSCALL_TRACE
 	bne-	syscall_dotrace
 syscall_dotrace_cont:
-	cmpli	0,r0,NR_syscalls
+	cmplwi	0,r0,NR_syscalls
 	lis	r10,sys_call_table@h
 	ori	r10,r10,sys_call_table@l
 	slwi	r0,r0,2
@@ -194,7 +221,7 @@ ret_from_syscall:
 #endif
 	mr	r6,r3
 	li	r11,-_LAST_ERRNO
-	cmpl	0,r3,r11
+	cmplw	0,r3,r11
 	rlwinm	r12,r1,0,0,18	/* current_thread_info() */
 	blt+	30f
 	lwz	r11,TI_LOCAL_FLAGS(r12)
@@ -213,11 +240,12 @@ ret_from_syscall:
 	andi.	r0,r9,(_TIF_SYSCALL_TRACE|_TIF_SIGPENDING|_TIF_NEED_RESCHED)
 	bne-	syscall_exit_work
 syscall_exit_cont:
-#ifdef CONFIG_4xx
-	/* If the process has its own DBCR0 value, load it up */
-	lwz	r0,PTRACE(r2)
-	andi.	r0,r0,PT_PTRACED
-	bnel-	load_4xx_dbcr0
+#if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
+	/* If the process has its own DBCR0 value, load it up.  The single
+	   step bit tells us that dbcr0 should be loaded. */
+	lwz	r0,THREAD+THREAD_DBCR0(r2)
+	andis.	r10,r0,DBCR0_IC@h
+	bnel-	load_dbcr0
 #endif
 	stwcx.	r0,0,r1			/* to clear the reservation */
 	lwz	r4,_LINK(r1)
@@ -229,8 +257,8 @@ syscall_exit_cont:
 	FIX_SRR1(r8, r0)
 	lwz	r2,GPR2(r1)
 	lwz	r1,GPR1(r1)
-	mtspr	SRR0,r7
-	mtspr	SRR1,r8
+	mtspr	SPRN_SRR0,r7
+	mtspr	SPRN_SRR1,r8
 	SYNC
 	RFI
 
@@ -424,6 +452,29 @@ ppc_swapcontext:
 	b	sys_swapcontext
 
 /*
+ * Top-level page fault handling.
+ * This is in assembler because if do_page_fault tells us that
+ * it is a bad kernel page fault, we want to save the non-volatile
+ * registers before calling bad_page_fault.
+ */
+	.globl	handle_page_fault
+handle_page_fault:
+	stw	r4,_DAR(r1)
+	addi	r3,r1,STACK_FRAME_OVERHEAD
+	bl	do_page_fault
+	cmpwi	r3,0
+	beq+	ret_from_except
+	SAVE_NVGPRS(r1)
+	lwz	r0,TRAP(r1)
+	clrrwi	r0,r0,1
+	stw	r0,TRAP(r1)
+	mr	r5,r3
+	addi	r3,r1,STACK_FRAME_OVERHEAD
+	lwz	r4,_DAR(r1)
+	bl	bad_page_fault
+	b	ret_from_except_full
+
+/*
  * This routine switches between two different tasks.  The process
  * state of one is saved on its kernel stack.  Then the state
  * of the other is restored from its kernel stack.  The memory
@@ -459,7 +510,12 @@ BEGIN_FTR_SECTION
 	stw	r12,THREAD+THREAD_VRSAVE(r2)
 END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
 #endif /* CONFIG_ALTIVEC */
-	and.	r0,r0,r11	/* FP or altivec enabled? */
+#ifdef CONFIG_SPE
+	oris	r0,r0,MSR_SPE@h	 /* Disable SPE */
+	mfspr	r12,SPRN_SPEFSCR /* save spefscr register value */
+	stw	r12,THREAD+THREAD_SPEFSCR(r2)
+#endif /* CONFIG_SPE */
+	and.	r0,r0,r11	/* FP or altivec or SPE enabled? */
 	beq+	1f
 	andc	r11,r11,r0
 	MTMSRD(r11)
@@ -479,7 +535,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
 
 	tophys(r0,r4)
 	CLR_TOP32(r0)
-	mtspr	SPRG3,r0	/* Update current THREAD phys addr */
+	mtspr	SPRN_SPRG3,r0	/* Update current THREAD phys addr */
 	lwz	r1,KSP(r4)	/* Load new stack pointer */
 
 	/* save the old current 'last' for return value */
@@ -492,6 +548,10 @@ BEGIN_FTR_SECTION
 	mtspr	SPRN_VRSAVE,r0		/* if G4, restore VRSAVE reg */
 END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
 #endif /* CONFIG_ALTIVEC */
+#ifdef CONFIG_SPE
+	lwz	r0,THREAD+THREAD_SPEFSCR(r2)
+	mtspr	SPRN_SPEFSCR,r0		/* restore SPEFSCR reg */
+#endif /* CONFIG_SPE */
 
 	lwz	r0,_CCR(r1)
 	mtcrf	0xFF,r0
@@ -502,6 +562,65 @@ END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
 	mtlr	r4
 	addi	r1,r1,INT_FRAME_SIZE
 	blr
+
+	.globl	fast_exception_return
+fast_exception_return:
+#if !(defined(CONFIG_4xx) || defined(CONFIG_BOOKE))
+	andi.	r10,r9,MSR_RI		/* check for recoverable interrupt */
+	beq	1f			/* if not, we've got problems */
+#endif
+
+2:	REST_4GPRS(3, r11)
+	lwz	r10,_CCR(r11)
+	REST_GPR(1, r11)
+	mtcr	r10
+	lwz	r10,_LINK(r11)
+	mtlr	r10
+	REST_GPR(10, r11)
+	mtspr	SPRN_SRR1,r9
+	mtspr	SPRN_SRR0,r12
+	REST_GPR(9, r11)
+	REST_GPR(12, r11)
+	lwz	r11,GPR11(r11)
+	SYNC
+	RFI
+
+#if !(defined(CONFIG_4xx) || defined(CONFIG_BOOKE))
+/* check if the exception happened in a restartable section */
+1:	lis	r3,exc_exit_restart_end@ha
+	addi	r3,r3,exc_exit_restart_end@l
+	cmplw	r12,r3
+	bge	3f
+	lis	r4,exc_exit_restart@ha
+	addi	r4,r4,exc_exit_restart@l
+	cmplw	r12,r4
+	blt	3f
+	lis	r3,fee_restarts@ha
+	tophys(r3,r3)
+	lwz	r5,fee_restarts@l(r3)
+	addi	r5,r5,1
+	stw	r5,fee_restarts@l(r3)
+	mr	r12,r4		/* restart at exc_exit_restart */
+	b	2b
+
+	.comm	fee_restarts,4
+
+/* aargh, a nonrecoverable interrupt, panic */
+/* aargh, we don't know which trap this is */
+/* but the 601 doesn't implement the RI bit, so assume it's OK */
+3:
+BEGIN_FTR_SECTION
+	b	2b
+END_FTR_SECTION_IFSET(CPU_FTR_601)
+	li	r10,-1
+	stw	r10,TRAP(r11)
+	addi	r3,r1,STACK_FRAME_OVERHEAD
+	lis	r10,MSR_KERNEL@h
+	ori	r10,r10,MSR_KERNEL@l
+	bl	transfer_to_handler_full
+	.long	nonrecoverable_exception
+	.long	ret_from_except
+#endif
 
 	.globl	sigreturn_exit
 sigreturn_exit:
@@ -538,11 +657,12 @@ user_exc_return:		/* r10 contains MSR_KERNEL here */
 	bne	do_work
 
 restore_user:
-#ifdef CONFIG_4xx
-	/* Check whether this process has its own DBCR0 value */
-	lwz	r0,PTRACE(r2)
-	andi.	r0,r0,PT_PTRACED
-	bnel-	load_4xx_dbcr0
+#if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
+	/* Check whether this process has its own DBCR0 value.  The single
+	   step bit tells us that dbcr0 should be loaded. */
+	lwz	r0,THREAD+THREAD_DBCR0(r2)
+	andis.	r10,r0,DBCR0_IC@h
+	bnel-	load_dbcr0
 #endif
 
 #ifdef CONFIG_PREEMPT
@@ -560,18 +680,8 @@ resume_kernel:
 	beq+	restore
 	andi.	r0,r3,MSR_EE	/* interrupts off? */
 	beq	restore		/* don't schedule if so */
-1:	lis	r0,PREEMPT_ACTIVE@h
-	stw	r0,TI_PREEMPT(r9)
-	ori	r10,r10,MSR_EE
-	SYNC
-	MTMSRD(r10)		/* hard-enable interrupts */
-	bl	schedule
-	LOAD_MSR_KERNEL(r10,MSR_KERNEL)
-	SYNC
-	MTMSRD(r10)		/* disable interrupts */
+1:	bl	preempt_schedule_irq
 	rlwinm	r9,r1,0,0,18
-	li	r0,0
-	stw	r0,TI_PREEMPT(r9)
 	lwz	r3,TI_FLAGS(r9)
 	andi.	r0,r3,_TIF_NEED_RESCHED
 	bne-	1b
@@ -588,13 +698,13 @@ restore:
 
 	lwz	r10,_XER(r1)
 	lwz	r11,_CTR(r1)
-	mtspr	XER,r10
+	mtspr	SPRN_XER,r10
 	mtctr	r11
 
 	PPC405_ERR77(0,r1)
 	stwcx.	r0,0,r1			/* to clear the reservation */
 
-#ifndef CONFIG_4xx
+#if !(defined(CONFIG_4xx) || defined(CONFIG_BOOKE))
 	lwz	r9,_MSR(r1)
 	andi.	r10,r9,MSR_RI		/* check if this exception occurred */
 	beql	nonrecoverable		/* at a bad place (MSR:RI = 0) */
@@ -621,8 +731,8 @@ exc_exit_restart:
 	lwz	r9,_MSR(r1)
 	lwz	r12,_NIP(r1)
 	FIX_SRR1(r9,r10)
-	mtspr	SRR0,r12
-	mtspr	SRR1,r9
+	mtspr	SPRN_SRR0,r12
+	mtspr	SPRN_SRR1,r9
 	REST_4GPRS(9, r1)
 	lwz	r1,GPR1(r1)
 	.globl exc_exit_restart_end
@@ -630,9 +740,9 @@ exc_exit_restart_end:
 	SYNC
 	RFI
 
-#else /* CONFIG_4xx */
+#else /* !(CONFIG_4xx || CONFIG_BOOKE) */
 	/*
-	 * This is a bit different on 4xx because 4xx doesn't have
+	 * This is a bit different on 4xx/Book-E because it doesn't have
 	 * the RI bit in the MSR.
 	 * The TLB miss handler checks if we have interrupted
 	 * the exception exit path and restarts it if so
@@ -648,8 +758,8 @@ exc_exit_restart:
 	lwz	r11,_NIP(r1)
 	lwz	r12,_MSR(r1)
 exc_exit_start:
-	mtspr	SRR0,r11
-	mtspr	SRR1,r12
+	mtspr	SPRN_SRR0,r11
+	mtspr	SPRN_SRR1,r12
 	REST_2GPRS(11, r1)
 	lwz	r1,GPR1(r1)
 	.globl exc_exit_restart_end
@@ -669,6 +779,7 @@ exc_exit_restart_end:
  * give the wrong answer).
  * We have to restore various SPRs that may have been in use at the
  * time of the critical interrupt.
+ *
  */
 	.globl	ret_from_crit_exc
 ret_from_crit_exc:
@@ -685,7 +796,7 @@ ret_from_crit_exc:
 
 	lwz	r10,_XER(r1)
 	lwz	r11,_CTR(r1)
-	mtspr	XER,r10
+	mtspr	SPRN_XER,r10
 	mtctr	r11
 
 	PPC405_ERR77(0,r1)
@@ -695,40 +806,24 @@ ret_from_crit_exc:
 	mtlr	r11
 	lwz	r10,_CCR(r1)
 	mtcrf	0xff,r10
+#ifdef CONFIG_40x
 	/* avoid any possible TLB misses here by turning off MSR.DR, we
 	 * assume the instructions here are mapped by a pinned TLB entry */
 	li	r10,MSR_IR
 	mtmsr	r10
 	isync
 	tophys(r1, r1)
+#endif
 	lwz	r9,_DEAR(r1)
 	lwz	r10,_ESR(r1)
 	mtspr	SPRN_DEAR,r9
 	mtspr	SPRN_ESR,r10
 	lwz	r11,_NIP(r1)
 	lwz	r12,_MSR(r1)
-	mtspr	CSRR0,r11
-	mtspr	CSRR1,r12
+	mtspr	SPRN_CSRR0,r11
+	mtspr	SPRN_CSRR1,r12
 	lwz	r9,GPR9(r1)
 	lwz	r12,GPR12(r1)
-	lwz	r10,crit_sprg0@l(0)
-	mtspr	SPRN_SPRG0,r10
-	lwz	r10,crit_sprg1@l(0)
-	mtspr	SPRN_SPRG1,r10
-	lwz	r10,crit_sprg4@l(0)
-	mtspr	SPRN_SPRG4,r10
-	lwz	r10,crit_sprg5@l(0)
-	mtspr	SPRN_SPRG5,r10
-	lwz	r10,crit_sprg6@l(0)
-	mtspr	SPRN_SPRG6,r10
-	lwz	r10,crit_sprg7@l(0)
-	mtspr	SPRN_SPRG7,r10
-	lwz	r10,crit_srr0@l(0)
-	mtspr	SRR0,r10
-	lwz	r10,crit_srr1@l(0)
-	mtspr	SRR1,r10
-	lwz	r10,crit_pid@l(0)
-	mtspr	SPRN_PID,r10
 	lwz	r10,GPR10(r1)
 	lwz	r11,GPR11(r1)
 	lwz	r1,GPR1(r1)
@@ -736,19 +831,64 @@ ret_from_crit_exc:
 	rfci
 	b	.		/* prevent prefetch past rfci */
 
+#ifdef CONFIG_BOOKE
+/*
+ * Return from a machine check interrupt, similar to a critical
+ * interrupt.
+ */
+	.globl	ret_from_mcheck_exc
+ret_from_mcheck_exc:
+	REST_NVGPRS(r1)
+	lwz	r3,_MSR(r1)
+	andi.	r3,r3,MSR_PR
+	LOAD_MSR_KERNEL(r10,MSR_KERNEL)
+	bne	user_exc_return
+
+	lwz	r0,GPR0(r1)
+	lwz	r2,GPR2(r1)
+	REST_4GPRS(3, r1)
+	REST_2GPRS(7, r1)
+
+	lwz	r10,_XER(r1)
+	lwz	r11,_CTR(r1)
+	mtspr	SPRN_XER,r10
+	mtctr	r11
+
+	stwcx.	r0,0,r1			/* to clear the reservation */
+
+	lwz	r11,_LINK(r1)
+	mtlr	r11
+	lwz	r10,_CCR(r1)
+	mtcrf	0xff,r10
+	lwz	r9,_DEAR(r1)
+	lwz	r10,_ESR(r1)
+	mtspr	SPRN_DEAR,r9
+	mtspr	SPRN_ESR,r10
+	lwz	r11,_NIP(r1)
+	lwz	r12,_MSR(r1)
+	mtspr	SPRN_MCSRR0,r11
+	mtspr	SPRN_MCSRR1,r12
+	lwz	r9,GPR9(r1)
+	lwz	r12,GPR12(r1)
+	lwz	r10,GPR10(r1)
+	lwz	r11,GPR11(r1)
+	lwz	r1,GPR1(r1)
+	RFMCI
+#endif /* CONFIG_BOOKE */
+
 /*
  * Load the DBCR0 value for a task that is being ptraced,
- * having first saved away the global DBCR0.
+ * having first saved away the global DBCR0.  Note that r0
+ * has the dbcr0 value to set upon entry to this.
  */
-load_4xx_dbcr0:
-	mfmsr	r0		/* first disable debug exceptions */
-	rlwinm	r0,r0,0,~MSR_DE
-	mtmsr	r0
+load_dbcr0:
+	mfmsr	r10		/* first disable debug exceptions */
+	rlwinm	r10,r10,0,~MSR_DE
+	mtmsr	r10
 	isync
 	mfspr	r10,SPRN_DBCR0
 	lis	r11,global_dbcr0@ha
 	addi	r11,r11,global_dbcr0@l
-	lwz	r0,THREAD+THREAD_DBCR0(r2)
 	stw	r10,0(r11)
 	mtspr	SPRN_DBCR0,r0
 	lwz	r10,4(r11)
@@ -759,7 +899,7 @@ load_4xx_dbcr0:
 	blr
 
 	.comm	global_dbcr0,8
-#endif /* CONFIG_4xx */
+#endif /* !(CONFIG_4xx || CONFIG_BOOKE) */
 
 do_work:			/* r10 contains MSR_KERNEL here */
 	andi.	r0,r9,_TIF_NEED_RESCHED
@@ -865,9 +1005,9 @@ _GLOBAL(enter_rtas)
 	li	r9,MSR_KERNEL & ~(MSR_IR|MSR_DR)
 	mtlr	r6
 	CLR_TOP32(r7)
-	mtspr	SPRG2,r7
-	mtspr	SRR0,r8
-	mtspr	SRR1,r9
+	mtspr	SPRN_SPRG2,r7
+	mtspr	SPRN_SRR0,r8
+	mtspr	SPRN_SRR1,r9
 	RFI
 1:	tophys(r9,r1)
 	lwz	r8,INT_FRAME_SIZE+4(r9)	/* get return address */
@@ -875,9 +1015,9 @@ _GLOBAL(enter_rtas)
 	FIX_SRR1(r9,r0)
 	addi	r1,r1,INT_FRAME_SIZE
 	li	r0,0
-	mtspr	SPRG2,r0
-	mtspr	SRR0,r8
-	mtspr	SRR1,r9
+	mtspr	SPRN_SPRG2,r0
+	mtspr	SPRN_SRR0,r8
+	mtspr	SPRN_SRR1,r9
 	RFI			/* return to caller */
 
 	.globl	machine_check_in_rtas

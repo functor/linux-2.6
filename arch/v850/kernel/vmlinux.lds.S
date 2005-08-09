@@ -1,8 +1,8 @@
 /*
  * arch/v850/vmlinux.lds.S -- kernel linker script for v850 platforms
  *
- *  Copyright (C) 2002,03  NEC Electronics Corporation
- *  Copyright (C) 2002,03  Miles Bader <miles@gnu.org>
+ *  Copyright (C) 2002,03,04  NEC Electronics Corporation
+ *  Copyright (C) 2002,03,04  Miles Bader <miles@gnu.org>
  *
  * This file is subject to the terms and conditions of the GNU General
  * Public License.  See the file COPYING in the main directory of this
@@ -12,6 +12,7 @@
  */
 
 #include <linux/config.h>
+#define VMLINUX_SYMBOL(_sym_) _##_sym_
 #include <asm-generic/vmlinux.lds.h>
 
 /* For most platforms, this will define useful things like RAM addr/size.  */
@@ -59,12 +60,17 @@
 		___start___kcrctab_gpl = .;				      \
 			*(__kcrctab_gpl)				      \
 		___stop___kcrctab_gpl = .;				      \
+		/* Built-in module parameters */			      \
+		___start___param = .;					      \
+		*(__param)						      \
+		___stop___param = .;
+
 
 /* Kernel text segment, and some constant data areas.  */
 #define TEXT_CONTENTS							      \
 		__stext = . ;						      \
         	*(.text)						      \
-		SCHED_TEXT
+		SCHED_TEXT						      \
 			*(.exit.text)	/* 2.5 convention */		      \
 			*(.text.exit)	/* 2.4 convention */		      \
 			*(.text.lock)					      \
@@ -110,9 +116,6 @@
 			*(.init.setup)	/* 2.5 convention */		      \
 			*(.setup.init)	/* 2.4 convention */		      \
 		___setup_end = . ;					      \
-		___start___param = . ;					      \
-			*(__param)					      \
-		___stop___param = . ;					      \
 		___initcall_start = . ;					      \
 			*(.initcall.init)				      \
 			*(.initcall1.init)				      \

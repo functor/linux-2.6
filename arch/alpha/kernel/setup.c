@@ -39,6 +39,7 @@
 #include <linux/reboot.h>
 #endif
 #include <linux/notifier.h>
+#include <asm/setup.h>
 #include <asm/io.h>
 
 extern struct notifier_block *panic_notifier_list;
@@ -110,8 +111,6 @@ struct alpha_machine_vector alpha_mv;
 int alpha_using_srm;
 #endif
 
-unsigned char aux_device_present = 0xaa;
-
 #define N(a) (sizeof(a)/sizeof(a[0]))
 
 static struct alpha_machine_vector *get_sysvec(unsigned long, unsigned long,
@@ -122,7 +121,6 @@ static void get_sysnames(unsigned long, unsigned long, unsigned long,
 static void determine_cpu_caches (unsigned int);
 
 static char command_line[COMMAND_LINE_SIZE];
-char saved_command_line[COMMAND_LINE_SIZE];
 
 /*
  * The format of "screen_info" is strange, and due to early
@@ -213,14 +211,14 @@ static void __init
 reserve_std_resources(void)
 {
 	static struct resource standard_io_resources[] = {
-		{ "rtc", -1, -1 },
-        	{ "dma1", 0x00, 0x1f },
-        	{ "pic1", 0x20, 0x3f },
-        	{ "timer", 0x40, 0x5f },
-        	{ "keyboard", 0x60, 0x6f },
-        	{ "dma page reg", 0x80, 0x8f },
-        	{ "pic2", 0xa0, 0xbf },
-        	{ "dma2", 0xc0, 0xdf },
+		{ .name = "rtc", .start = -1, .end = -1 },
+        	{ .name = "dma1", .start = 0x00, .end = 0x1f },
+        	{ .name = "pic1", .start = 0x20, .end = 0x3f },
+        	{ .name = "timer", .start = 0x40, .end = 0x5f },
+        	{ .name = "keyboard", .start = 0x60, .end = 0x6f },
+        	{ .name = "dma page reg", .start = 0x80, .end = 0x8f },
+        	{ .name = "pic2", .start = 0xa0, .end = 0xbf },
+        	{ .name = "dma2", .start = 0xc0, .end = 0xdf },
 	};
 
 	struct resource *io = &ioport_resource;
@@ -1246,9 +1244,9 @@ show_cpuinfo(struct seq_file *f, void *slot)
 		       platform_string(), nr_processors);
 
 #ifdef CONFIG_SMP
-	seq_printf(f, "cpus active\t\t: %ld\n"
+	seq_printf(f, "cpus active\t\t: %d\n"
 		      "cpu active mask\t\t: %016lx\n",
-		       num_online_cpus(), cpu_present_mask);
+		       num_online_cpus(), cpus_addr(cpu_possible_map)[0]);
 #endif
 
 	show_cache_size (f, "L1 Icache", alpha_l1i_cacheshape);
@@ -1359,7 +1357,7 @@ determine_cpu_caches (unsigned int cpu_type)
 		L1I = L1D = CSHAPE(8*1024, 5, 1);
 		L3 = -1;
 
-		car = *(vuip) phys_to_virt (0x120000078);
+		car = *(vuip) phys_to_virt (0x120000078UL);
 		size = 64*1024 * (1 << ((car >> 5) & 7));
 		/* No typo -- 8 byte cacheline size.  Whodathunk.  */
 		L2 = (car & 1 ? CSHAPE (size, 3, 1) : -1);
@@ -1374,7 +1372,7 @@ determine_cpu_caches (unsigned int cpu_type)
 		L1I = L1D = CSHAPE(8*1024, 5, 1);
 
 		/* Check the line size of the Scache.  */
-		sc_ctl = *(vulp) phys_to_virt (0xfffff000a8);
+		sc_ctl = *(vulp) phys_to_virt (0xfffff000a8UL);
 		width = sc_ctl & 0x1000 ? 6 : 5;
 		L2 = CSHAPE (96*1024, width, 3);
 
@@ -1406,7 +1404,7 @@ determine_cpu_caches (unsigned int cpu_type)
 		}
 		L3 = -1;
 
-		cbox_config = *(vulp) phys_to_virt (0xfffff00008);
+		cbox_config = *(vulp) phys_to_virt (0xfffff00008UL);
 		size = 512*1024 * (1 << ((cbox_config >> 12) & 3));
 
 #if 0

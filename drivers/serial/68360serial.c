@@ -700,12 +700,8 @@ static void do_softint(void *private_)
 	if (!tty)
 		return;
 
-	if (test_and_clear_bit(RS_EVENT_WRITE_WAKEUP, &info->event)) {
-		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-		    tty->ldisc.write_wakeup)
-			(tty->ldisc.write_wakeup)(tty);
-		wake_up_interruptible(&tty->write_wait);
-	}
+	if (test_and_clear_bit(RS_EVENT_WRITE_WAKEUP, &info->event))
+		tty_wakeup(tty);
 }
 
 
@@ -1051,7 +1047,7 @@ static void rs_360_put_char(struct tty_struct *tty, unsigned char ch)
 
 }
 
-static int rs_360_write(struct tty_struct * tty, int from_user,
+static int rs_360_write(struct tty_struct * tty,
 		    const unsigned char *buf, int count)
 {
 	int	c, ret = 0;
@@ -1083,16 +1079,8 @@ static int rs_360_write(struct tty_struct * tty, int from_user,
 			break;
 		}
 
-		if (from_user) {
-			if (copy_from_user((void *)bdp->buf, buf, c)) {
-				if (!ret)
-					ret = -EFAULT;
-				break;
-			}
-		} else {
-			/* memcpy(__va(bdp->buf), buf, c); */
-			memcpy((void *)bdp->buf, buf, c);
-		}
+		/* memcpy(__va(bdp->buf), buf, c); */
+		memcpy((void *)bdp->buf, buf, c);
 
 		bdp->length = c;
 		bdp->status |= BD_SC_READY;
@@ -1152,10 +1140,7 @@ static void rs_360_flush_buffer(struct tty_struct *tty)
 	/* There is nothing to "flush", whatever we gave the CPM
 	 * is on its way out.
 	 */
-	wake_up_interruptible(&tty->write_wait);
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-	    tty->ldisc.write_wakeup)
-		(tty->ldisc.write_wakeup)(tty);
+	tty_wakeup(tty);
 	info->flags &= ~TX_WAKEUP;
 }
 
@@ -1411,7 +1396,7 @@ static void end_break(ser_info_t *info)
  */
 static void send_break(ser_info_t *info, int duration)
 {
-	current->state = TASK_INTERRUPTIBLE;
+	set_current_state(TASK_INTERRUPTIBLE);
 #ifdef SERIAL_DEBUG_SEND_BREAK
 	printk("rs_send_break(%d) jiff=%lu...", duration, jiffies);
 #endif
@@ -1650,7 +1635,6 @@ static void rs_360_close(struct tty_struct *tty, struct file * filp)
 	
 	if (tty_hung_up_p(filp)) {
 		DBG_CNT("before DEC-hung");
-		MOD_DEC_USE_COUNT;
 		local_irq_restore(flags);
 		return;
 	}
@@ -1677,7 +1661,6 @@ static void rs_360_close(struct tty_struct *tty, struct file * filp)
 	}
 	if (state->count) {
 		DBG_CNT("before DEC-2");
-		MOD_DEC_USE_COUNT;
 		local_irq_restore(flags);
 		return;
 	}
@@ -1718,21 +1701,18 @@ static void rs_360_close(struct tty_struct *tty, struct file * filp)
 	shutdown(info);
 	if (tty->driver->flush_buffer)
 		tty->driver->flush_buffer(tty);
-	if (tty->ldisc.flush_buffer)
-		tty->ldisc.flush_buffer(tty);
+	tty_ldisc_flush(tty);		
 	tty->closing = 0;
 	info->event = 0;
 	info->tty = 0;
 	if (info->blocked_open) {
 		if (info->close_delay) {
-			current->state = TASK_INTERRUPTIBLE;
-			schedule_timeout(info->close_delay);
+			msleep_interruptible(jiffies_to_msecs(info->close_delay));
 		}
 		wake_up_interruptible(&info->open_wait);
 	}
 	info->flags &= ~(ASYNC_NORMAL_ACTIVE|ASYNC_CLOSING);
 	wake_up_interruptible(&info->close_wait);
-	MOD_DEC_USE_COUNT;
 	local_irq_restore(flags);
 }
 
@@ -1780,9 +1760,8 @@ static void rs_360_wait_until_sent(struct tty_struct *tty, int timeout)
 #ifdef SERIAL_DEBUG_RS_WAIT_UNTIL_SENT
 		printk("lsr = %d (jiff=%lu)...", lsr, jiffies);
 #endif
-		current->state = TASK_INTERRUPTIBLE;
 /*		current->counter = 0;	 make us low-priority */
-		schedule_timeout(char_time);
+		msleep_interruptible(jiffies_to_msecs(char_time));
 		if (signal_pending(current))
 			break;
 		if (timeout && ((orig_jiffies + timeout) < jiffies))
@@ -1993,14 +1972,12 @@ static int rs_360_open(struct tty_struct *tty, struct file * filp)
 	if (retval)
 		return retval;
 
-	MOD_INC_USE_COUNT;
 	retval = block_til_ready(tty, filp, info);
 	if (retval) {
 #ifdef SERIAL_DEBUG_OPEN
 		printk("rs_open returning after block_til_ready with %d\n",
 		       retval);
 #endif
-		MOD_DEC_USE_COUNT;
 		return retval;
 	}
 
@@ -2476,6 +2453,7 @@ long console_360_init(long kmem_start, long kmem_end)
 static	int	baud_idx;
 
 static struct tty_operations rs_360_ops = {
+	.owner = THIS_MODULE,
 	.open = rs_360_open,
 	.close = rs_360_close,
 	.write = rs_360_write,
@@ -2596,7 +2574,7 @@ int rs_360_init(void)
 		state->icount.rx = state->icount.tx = 0;
 		state->icount.frame = state->icount.parity = 0;
 		state->icount.overrun = state->icount.brk = 0;
-		printk(KERN_INFO "ttyS%02d at irq 0x%02x is an %s\n",
+		printk(KERN_INFO "ttyS%d at irq 0x%02x is an %s\n",
 		       i, (unsigned int)(state->irq),
 		       (state->smc_scc_num & NUM_IS_SCC) ? "SCC" : "SMC");
 

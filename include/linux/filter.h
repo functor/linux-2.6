@@ -5,6 +5,13 @@
 #ifndef __LINUX_FILTER_H__
 #define __LINUX_FILTER_H__
 
+#include <linux/compiler.h>
+#include <linux/types.h>
+
+#ifdef __KERNEL__
+#include <asm/atomic.h>
+#endif
+
 /*
  * Current version of the filter code architecture.
  */
@@ -27,7 +34,7 @@ struct sock_filter	/* Filter block */
 struct sock_fprog	/* Required for SO_ATTACH_FILTER. */
 {
 	unsigned short		len;	/* Number of filter blocks */
-	struct sock_filter	*filter;
+	struct sock_filter __user *filter;
 };
 
 #ifdef __KERNEL__
@@ -133,6 +140,9 @@ static inline unsigned int sk_filter_len(struct sk_filter *fp)
 #define SKF_LL_OFF    (-0x200000)
 
 #ifdef __KERNEL__
+struct sk_buff;
+struct sock;
+
 extern int sk_run_filter(struct sk_buff *skb, struct sock_filter *filter, int flen);
 extern int sk_attach_filter(struct sock_fprog *fprog, struct sock *sk);
 extern int sk_chk_filter(struct sock_filter *filter, int flen);

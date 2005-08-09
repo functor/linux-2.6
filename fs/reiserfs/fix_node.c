@@ -163,7 +163,7 @@ static void create_virtual_node (struct tree_balance * tb, int h)
   
     /* set right merge flag we take right delimiting key and check whether it is a mergeable item */
     if (tb->CFR[0]) {
-	struct key * key;
+	struct reiserfs_key * key;
 
 	key = B_N_PDELIM_KEY (tb->CFR[0], tb->rkey[0]);
 	if (op_is_left_mergeable (key, Sh->b_size) && (vn->vn_mode != M_DELETE ||
@@ -483,7 +483,8 @@ static int get_num_ver (int mode, struct tree_balance * tb, int h,
 	snum012[needed_nodes - 1 + 3] = units;
 
 	if (needed_nodes > 2)
-	    reiserfs_warning ("vs-8111: get_num_ver: split_item_position is out of boundary\n");
+	    reiserfs_warning (tb->tb_sb, "vs-8111: get_num_ver: "
+			      "split_item_position is out of boundary");
 	snum012[needed_nodes - 1] ++;
 	split_item_positions[needed_nodes - 1] = i;
 	needed_nodes ++;
@@ -509,8 +510,10 @@ static int get_num_ver (int mode, struct tree_balance * tb, int h,
 	// s2bytes
 	snum012[4] = op_unit_num (&vn->vn_vi[split_item_num]) - snum012[4] - bytes_to_r - bytes_to_l - bytes_to_S1new;
 
-	if (vn->vn_vi[split_item_num].vi_index != TYPE_DIRENTRY)
-	    reiserfs_warning ("vs-8115: get_num_ver: not directory item\n");
+	if (vn->vn_vi[split_item_num].vi_index != TYPE_DIRENTRY &&
+	    vn->vn_vi[split_item_num].vi_index != TYPE_INDIRECT)
+	    reiserfs_warning (tb->tb_sb, "vs-8115: get_num_ver: not "
+			      "directory or indirect item");
     }
 
     /* now we know S2bytes, calculate S1bytes */
@@ -722,7 +725,7 @@ else \
 }
 
 
-void free_buffers_in_tb (
+static void free_buffers_in_tb (
 		       struct tree_balance * p_s_tb
 		       ) {
   int n_counter;
@@ -795,8 +798,9 @@ static int  get_empty_nodes(
   else /* If we have enough already then there is nothing to do. */
     return CARRY_ON;
 
-  if ( reiserfs_new_form_blocknrs (p_s_tb, a_n_blocknrs,
-                                   n_amount_needed) == NO_DISK_SPACE )
+  /* No need to check quota - is not allocated for blocks used for formatted nodes */
+  if (reiserfs_new_form_blocknrs (p_s_tb, a_n_blocknrs,
+                                   n_amount_needed) == NO_DISK_SPACE)
     return NO_DISK_SPACE;
 
   /* for each blocknumber we just got, get a buffer and stick it on FEB */
@@ -817,7 +821,7 @@ static int  get_empty_nodes(
     RFALSE (p_s_tb->FEB[p_s_tb->cur_blknum],
 	    "PAP-8141: busy slot for new buffer");
 
-    mark_buffer_journal_new(p_s_new_bh) ;
+    set_buffer_journal_new (p_s_new_bh);
     p_s_tb->FEB[p_s_tb->cur_blknum++] = p_s_new_bh;
   }
 
@@ -1137,7 +1141,7 @@ static inline int can_node_be_removed (int mode, int lfree, int sfree, int rfree
     struct buffer_head * Sh = PATH_H_PBUFFER (tb->tb_path, h);
     int levbytes = tb->insert_size[h];
     struct item_head * ih;
-    struct key * r_key = NULL;
+    struct reiserfs_key * r_key = NULL;
 
     ih = B_N_PITEM_HEAD (Sh, 0);
     if ( tb->CFR[h] )
@@ -1973,11 +1977,12 @@ void * reiserfs_kmalloc (size_t size, int flags, struct super_block * s)
     if (vp) {
 	REISERFS_SB(s)->s_kmallocs += size;
 	if (REISERFS_SB(s)->s_kmallocs > malloced + 200000) {
-	    reiserfs_warning ("vs-8301: reiserfs_kmalloc: allocated memory %d\n", REISERFS_SB(s)->s_kmallocs);
+	    reiserfs_warning (s,
+			      "vs-8301: reiserfs_kmalloc: allocated memory %d",
+			      REISERFS_SB(s)->s_kmallocs);
 	    malloced = REISERFS_SB(s)->s_kmallocs;
 	}
     }
-/*printk ("malloc : size %d, allocated %d\n", size, REISERFS_SB(s)->s_kmallocs);*/
     return vp;
 }
 
@@ -1987,7 +1992,8 @@ void reiserfs_kfree (const void * vp, size_t size, struct super_block * s)
   
     REISERFS_SB(s)->s_kmallocs -= size;
     if (REISERFS_SB(s)->s_kmallocs < 0)
-	reiserfs_warning ("vs-8302: reiserfs_kfree: allocated memory %d\n", REISERFS_SB(s)->s_kmallocs);
+	reiserfs_warning (s, "vs-8302: reiserfs_kfree: allocated memory %d",
+			  REISERFS_SB(s)->s_kmallocs);
 
 }
 #endif
@@ -2047,8 +2053,9 @@ static int get_mem_for_virtual_node (struct tree_balance * tb)
 	    buf = reiserfs_kmalloc(size, GFP_NOFS, tb->tb_sb);
 	    if ( !buf ) {
 #ifdef CONFIG_REISERFS_CHECK
-		reiserfs_warning ("vs-8345: get_mem_for_virtual_node: "
-				  "kmalloc failed. reiserfs kmalloced %d bytes\n",
+		reiserfs_warning (tb->tb_sb,
+				  "vs-8345: get_mem_for_virtual_node: "
+				  "kmalloc failed. reiserfs kmalloced %d bytes",
 				  REISERFS_SB(tb->tb_sb)->s_kmallocs);
 #endif
 		tb->vn_buf_size = 0;
@@ -2210,7 +2217,10 @@ static int wait_tb_buffers_until_unlocked (struct tree_balance * p_s_tb)
 #ifdef CONFIG_REISERFS_CHECK
 	    repeat_counter++;
 	    if ( (repeat_counter % 10000) == 0) {
-		reiserfs_warning ("wait_tb_buffers_until_released(): too many iterations waiting for buffer to unlock (%b)\n", locked);
+		reiserfs_warning (p_s_tb->tb_sb,
+				  "wait_tb_buffers_until_released(): too many "
+				  "iterations waiting for buffer to unlock "
+				  "(%b)", locked);
 
 		/* Don't loop forever.  Try to recover from possible error. */
 
@@ -2323,8 +2333,7 @@ int fix_nodes (int n_op_mode,
     case M_CUT:
 	if ( n_item_num < 0 || n_item_num >= B_NR_ITEMS(p_s_tbS0) ) {
 	    print_block (p_s_tbS0, 0, -1, -1);
-	    printk("mode = %c insert_size = %d\n", n_op_mode, p_s_tb->insert_size[0]);
-	    reiserfs_panic(p_s_tb->tb_sb,"PAP-8335: fix_nodes: Incorrect item number(%d)", n_item_num);
+	    reiserfs_panic(p_s_tb->tb_sb,"PAP-8335: fix_nodes: Incorrect item number(%d); mode = %c insert_size = %d\n", n_item_num, n_op_mode, p_s_tb->insert_size[0]);
 	}
 	break;
     default:
@@ -2437,12 +2446,12 @@ int fix_nodes (int n_op_mode,
 		reiserfs_restore_prepared_buffer(p_s_tb->tb_sb, p_s_tb->CFR[i]);
 	    }
 
-	    brelse (p_s_tb->L[i]);p_s_tb->L[i] = 0;
-	    brelse (p_s_tb->R[i]);p_s_tb->R[i] = 0;
-	    brelse (p_s_tb->FL[i]);p_s_tb->FL[i] = 0;
-	    brelse (p_s_tb->FR[i]);p_s_tb->FR[i] = 0;
-	    brelse (p_s_tb->CFL[i]);p_s_tb->CFL[i] = 0;
-	    brelse (p_s_tb->CFR[i]);p_s_tb->CFR[i] = 0;
+	    brelse (p_s_tb->L[i]);p_s_tb->L[i] = NULL;
+	    brelse (p_s_tb->R[i]);p_s_tb->R[i] = NULL;
+	    brelse (p_s_tb->FL[i]);p_s_tb->FL[i] = NULL;
+	    brelse (p_s_tb->FR[i]);p_s_tb->FR[i] = NULL;
+	    brelse (p_s_tb->CFL[i]);p_s_tb->CFL[i] = NULL;
+	    brelse (p_s_tb->CFR[i]);p_s_tb->CFR[i] = NULL;
 	}
 
 	if (wait_tb_buffers_run) {
@@ -2492,7 +2501,7 @@ void unfix_nodes (struct tree_balance * tb)
 	    /* de-allocated block which was not used by balancing and
                bforget about buffer for it */
 	    brelse (tb->FEB[i]);
-	    reiserfs_free_block (tb->transaction_handle, blocknr);
+	    reiserfs_free_block (tb->transaction_handle, NULL, blocknr, 0);
 	}
 	if (tb->used[i]) {
 	    /* release used as new nodes including a new root */

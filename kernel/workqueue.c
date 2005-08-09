@@ -8,7 +8,7 @@
  *
  * Derived from the taskqueue/keventd code by:
  *
- *   David Woodhouse <dwmw2@redhat.com>
+ *   David Woodhouse <dwmw2@infradead.org>
  *   Andrew Morton <andrewm@uow.edu.au>
  *   Kai Petzke <wpp@marie.physik.tu-berlin.de>
  *   Theodore Ts'o <tytso@mit.edu>
@@ -64,7 +64,7 @@ struct workqueue_struct {
 
 /* All the per-cpu workqueues on the system, for hotplug cpu to add/remove
    threads to each one as cpus come/go. */
-static spinlock_t workqueue_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(workqueue_lock);
 static LIST_HEAD(workqueues);
 
 /* If it's single threaded, it isn't in the list of workqueues. */
@@ -188,7 +188,7 @@ static int worker_thread(void *__cwq)
 
 	current->flags |= PF_NOFREEZE;
 
-	set_user_nice(current, -10);
+	set_user_nice(current, -5);
 
 	/* Block and flush all signals */
 	sigfillset(&blocked);
@@ -201,20 +201,48 @@ static int worker_thread(void *__cwq)
 	siginitset(&sa.sa.sa_mask, sigmask(SIGCHLD));
 	do_sigaction(SIGCHLD, &sa, (struct k_sigaction *)0);
 
+	set_current_state(TASK_INTERRUPTIBLE);
 	while (!kthread_should_stop()) {
-		set_task_state(current, TASK_INTERRUPTIBLE);
-
 		add_wait_queue(&cwq->more_work, &wait);
 		if (list_empty(&cwq->worklist))
 			schedule();
 		else
-			set_task_state(current, TASK_RUNNING);
+			__set_current_state(TASK_RUNNING);
 		remove_wait_queue(&cwq->more_work, &wait);
 
 		if (!list_empty(&cwq->worklist))
 			run_workqueue(cwq);
+		set_current_state(TASK_INTERRUPTIBLE);
 	}
+	__set_current_state(TASK_RUNNING);
 	return 0;
+}
+
+static void flush_cpu_workqueue(struct cpu_workqueue_struct *cwq)
+{
+	if (cwq->thread == current) {
+		/*
+		 * Probably keventd trying to flush its own queue. So simply run
+		 * it by hand rather than deadlocking.
+		 */
+		run_workqueue(cwq);
+	} else {
+		DEFINE_WAIT(wait);
+		long sequence_needed;
+
+		spin_lock_irq(&cwq->lock);
+		sequence_needed = cwq->insert_sequence;
+
+		while (sequence_needed - cwq->remove_sequence > 0) {
+			prepare_to_wait(&cwq->work_done, &wait,
+					TASK_UNINTERRUPTIBLE);
+			spin_unlock_irq(&cwq->lock);
+			schedule();
+			spin_lock_irq(&cwq->lock);
+		}
+		finish_wait(&cwq->work_done, &wait);
+		spin_unlock_irq(&cwq->lock);
+	}
 }
 
 /*
@@ -233,43 +261,19 @@ static int worker_thread(void *__cwq)
  */
 void fastcall flush_workqueue(struct workqueue_struct *wq)
 {
-	struct cpu_workqueue_struct *cwq;
-	int cpu;
-
 	might_sleep();
 
-	lock_cpu_hotplug();
-	for_each_online_cpu(cpu) {
-		DEFINE_WAIT(wait);
-		long sequence_needed;
+	if (is_single_threaded(wq)) {
+		/* Always use cpu 0's area. */
+		flush_cpu_workqueue(wq->cpu_wq + 0);
+	} else {
+		int cpu;
 
-		if (is_single_threaded(wq))
-			cwq = wq->cpu_wq + 0; /* Always use cpu 0's area. */
-		else
-			cwq = wq->cpu_wq + cpu;
-
-		if (cwq->thread == current) {
-			/*
-			 * Probably keventd trying to flush its own queue.
-			 * So simply run it by hand rather than deadlocking.
-			 */
-			run_workqueue(cwq);
-			continue;
-		}
-		spin_lock_irq(&cwq->lock);
-		sequence_needed = cwq->insert_sequence;
-
-		while (sequence_needed - cwq->remove_sequence > 0) {
-			prepare_to_wait(&cwq->work_done, &wait,
-					TASK_UNINTERRUPTIBLE);
-			spin_unlock_irq(&cwq->lock);
-			schedule();
-			spin_lock_irq(&cwq->lock);
-		}
-		finish_wait(&cwq->work_done, &wait);
-		spin_unlock_irq(&cwq->lock);
+		lock_cpu_hotplug();
+		for_each_online_cpu(cpu)
+			flush_cpu_workqueue(wq->cpu_wq + cpu);
+		unlock_cpu_hotplug();
 	}
-	unlock_cpu_hotplug();
 }
 
 static struct task_struct *create_workqueue_thread(struct workqueue_struct *wq,
@@ -324,7 +328,7 @@ struct workqueue_struct *__create_workqueue(const char *name,
 	} else {
 		spin_lock(&workqueue_lock);
 		list_add(&wq->list, &workqueues);
-		spin_unlock_irq(&workqueue_lock);
+		spin_unlock(&workqueue_lock);
 		for_each_online_cpu(cpu) {
 			p = create_workqueue_thread(wq, cpu);
 			if (p) {
@@ -334,6 +338,7 @@ struct workqueue_struct *__create_workqueue(const char *name,
 				destroy = 1;
 		}
 	}
+	unlock_cpu_hotplug();
 
 	/*
 	 * Was there any error during startup? If yes then clean up:
@@ -342,7 +347,6 @@ struct workqueue_struct *__create_workqueue(const char *name,
 		destroy_workqueue(wq);
 		wq = NULL;
 	}
-	unlock_cpu_hotplug();
 	return wq;
 }
 
@@ -376,7 +380,7 @@ void destroy_workqueue(struct workqueue_struct *wq)
 			cleanup_workqueue_thread(wq, cpu);
 		spin_lock(&workqueue_lock);
 		list_del(&wq->list);
-		spin_unlock_irq(&workqueue_lock);
+		spin_unlock(&workqueue_lock);
 	}
 	unlock_cpu_hotplug();
 	kfree(wq);
@@ -394,10 +398,55 @@ int fastcall schedule_delayed_work(struct work_struct *work, unsigned long delay
 	return queue_delayed_work(keventd_wq, work, delay);
 }
 
+int schedule_delayed_work_on(int cpu,
+			struct work_struct *work, unsigned long delay)
+{
+	int ret = 0;
+	struct timer_list *timer = &work->timer;
+
+	if (!test_and_set_bit(0, &work->pending)) {
+		BUG_ON(timer_pending(timer));
+		BUG_ON(!list_empty(&work->entry));
+		/* This stores keventd_wq for the moment, for the timer_fn */
+		work->wq_data = keventd_wq;
+		timer->expires = jiffies + delay;
+		timer->data = (unsigned long)work;
+		timer->function = delayed_work_timer_fn;
+		add_timer_on(timer, cpu);
+		ret = 1;
+	}
+	return ret;
+}
+
 void flush_scheduled_work(void)
 {
 	flush_workqueue(keventd_wq);
 }
+
+/**
+ * cancel_rearming_delayed_workqueue - reliably kill off a delayed
+ *			work whose handler rearms the delayed work.
+ * @wq:   the controlling workqueue structure
+ * @work: the delayed work struct
+ */
+void cancel_rearming_delayed_workqueue(struct workqueue_struct *wq,
+				       struct work_struct *work)
+{
+	while (!cancel_delayed_work(work))
+		flush_workqueue(wq);
+}
+EXPORT_SYMBOL(cancel_rearming_delayed_workqueue);
+
+/**
+ * cancel_rearming_delayed_work - reliably kill off a delayed keventd
+ *			work whose handler rearms the delayed work.
+ * @work: the delayed work struct
+ */
+void cancel_rearming_delayed_work(struct work_struct *work)
+{
+	cancel_rearming_delayed_workqueue(keventd_wq, work);
+}
+EXPORT_SYMBOL(cancel_rearming_delayed_work);
 
 int keventd_up(void)
 {
@@ -461,8 +510,10 @@ static int __devinit workqueue_cpu_callback(struct notifier_block *nfb,
 
 	case CPU_ONLINE:
 		/* Kick off worker threads. */
-		list_for_each_entry(wq, &workqueues, list)
+		list_for_each_entry(wq, &workqueues, list) {
+			kthread_bind(wq->cpu_wq[hotcpu].thread, hotcpu);
 			wake_up_process(wq->cpu_wq[hotcpu].thread);
+		}
 		break;
 
 	case CPU_UP_CANCELED:
@@ -501,5 +552,5 @@ EXPORT_SYMBOL_GPL(destroy_workqueue);
 
 EXPORT_SYMBOL(schedule_work);
 EXPORT_SYMBOL(schedule_delayed_work);
+EXPORT_SYMBOL(schedule_delayed_work_on);
 EXPORT_SYMBOL(flush_scheduled_work);
-

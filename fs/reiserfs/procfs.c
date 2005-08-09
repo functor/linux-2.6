@@ -73,8 +73,8 @@ int reiserfs_global_version_in_proc( char *buffer, char **start, off_t offset,
 #define DFL( x ) D4C( rs -> s_v1.x )
 
 #define objectid_map( s, rs ) (old_format_only (s) ?				\
-                         (__u32 *)((struct reiserfs_super_block_v1 *)rs + 1) :	\
-			 (__u32 *)(rs + 1))
+                         (__le32 *)((struct reiserfs_super_block_v1 *)rs + 1) :	\
+			 (__le32 *)(rs + 1))
 #define MAP( i ) D4C( objectid_map( sb, rs )[ i ] )
 
 #define DJF( x ) le32_to_cpu( rs -> x )
@@ -399,7 +399,7 @@ static int show_journal(struct seq_file *m, struct super_block *sb)
                         DJP( jp_journal_trans_max ),
                         DJP( jp_journal_magic ),
                         DJP( jp_journal_max_batch ),
-                        SB_JOURNAL_MAX_COMMIT_AGE(sb),
+			SB_JOURNAL(sb)->j_max_commit_age,
                         DJP( jp_journal_max_trans_age ),
 
 			JF( j_1st_reserved_block ),			
@@ -548,8 +548,8 @@ int reiserfs_proc_info_init( struct super_block *sb )
 		add_file(sb, "journal", show_journal);
 		return 0;
 	}
-	reiserfs_warning( "reiserfs: cannot create /proc/%s/%s\n",
-			  proc_info_root_name, reiserfs_bdevname (sb) );
+	reiserfs_warning(sb, "reiserfs: cannot create /proc/%s/%s",
+			 proc_info_root_name, reiserfs_bdevname (sb) );
 	return 1;
 }
 
@@ -591,11 +591,12 @@ void reiserfs_proc_unregister_global( const char *name )
 int reiserfs_proc_info_global_init( void )
 {
 	if( proc_info_root == NULL ) {
-		proc_info_root = proc_mkdir( proc_info_root_name, 0 );
+		proc_info_root = proc_mkdir(proc_info_root_name, NULL);
 		if( proc_info_root ) {
 			proc_info_root -> owner = THIS_MODULE;
 		} else {
-			reiserfs_warning( "reiserfs: cannot create /proc/%s\n",
+			reiserfs_warning (NULL,
+					  "reiserfs: cannot create /proc/%s",
 					  proc_info_root_name );
 			return 1;
 		}
@@ -607,7 +608,7 @@ int reiserfs_proc_info_global_done( void )
 {
 	if ( proc_info_root != NULL ) {
 		proc_info_root = NULL;
-		remove_proc_entry( proc_info_root_name, 0 );
+		remove_proc_entry(proc_info_root_name, NULL);
 	}
 	return 0;
 }

@@ -61,7 +61,7 @@
 #define TIMEOUT		(HZ / 2)
 
 
-static void *ioaddr;
+static void __iomem *ioaddr;
 
 /* The voo GPIO registers don't have individual masks for each bit
    so we always have to read before writing. */
@@ -167,7 +167,7 @@ static struct i2c_algo_bit_data voo_i2c_bit_data = {
 
 static struct i2c_adapter voodoo3_i2c_adapter = {
 	.owner		= THIS_MODULE,
-	.class		= I2C_ADAP_CLASS_TV_ANALOG, 
+	.class		= I2C_CLASS_TV_ANALOG, 
 	.name		= "I2C Voodoo3/Banshee adapter",
 	.algo_data	= &voo_i2c_bit_data,
 };
@@ -184,7 +184,7 @@ static struct i2c_algo_bit_data voo_ddc_bit_data = {
 
 static struct i2c_adapter voodoo3_ddc_adapter = {
 	.owner		= THIS_MODULE,
-	.class		= I2C_ADAP_CLASS_DDC, 
+	.class		= I2C_CLASS_DDC, 
 	.name		= "DDC Voodoo3/Banshee adapter",
 	.algo_data	= &voo_ddc_bit_data,
 };
@@ -194,6 +194,8 @@ static struct pci_device_id voodoo3_ids[] __devinitdata = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_3DFX, PCI_DEVICE_ID_3DFX_BANSHEE) },
 	{ 0, }
 };
+
+MODULE_DEVICE_TABLE (pci, voodoo3_ids);
 
 static int __devinit voodoo3_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
@@ -224,7 +226,7 @@ static void __devexit voodoo3_remove(struct pci_dev *dev)
 }
 
 static struct pci_driver voodoo3_driver = {
-	.name		= "voodoo3 smbus",
+	.name		= "voodoo3_smbus",
 	.id_table	= voodoo3_ids,
 	.probe		= voodoo3_probe,
 	.remove		= __devexit_p(voodoo3_remove),
@@ -232,7 +234,7 @@ static struct pci_driver voodoo3_driver = {
 
 static int __init i2c_voodoo3_init(void)
 {
-	return pci_module_init(&voodoo3_driver);
+	return pci_register_driver(&voodoo3_driver);
 }
 
 static void __exit i2c_voodoo3_exit(void)

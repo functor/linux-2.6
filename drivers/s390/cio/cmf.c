@@ -1,5 +1,5 @@
 /*
- * linux/drivers/s390/cio/cmf.c ($Revision: 1.13 $)
+ * linux/drivers/s390/cio/cmf.c ($Revision: 1.16 $)
  *
  * Linux on zSeries Channel Measurement Facility support
  *
@@ -39,6 +39,7 @@
 #include "css.h"
 #include "device.h"
 #include "ioasm.h"
+#include "chsc.h"
 
 /* parameter to enable cmf during boot, possible uses are:
  *  "s390cmf" -- enable cmf and allocate 2 MB of ram so measuring can be
@@ -525,29 +526,26 @@ readall_cmb (struct ccw_device *cdev, struct cmbdata *data)
 	time = get_clock() - cdev->private->cmb_start_time;
 	spin_unlock_irqrestore(cdev->ccwlock, flags);
 
-	*data = (struct cmbdata) {
-		/* we only know values before device_busy_time */
-		.size = offsetof(struct cmbdata, device_busy_time),
+	memset(data, 0, sizeof(struct cmbdata));
 
-		/* conver to nanoseconds */
-		.elapsed_time = (time * 1000) >> 12,
+	/* we only know values before device_busy_time */
+	data->size = offsetof(struct cmbdata, device_busy_time);
 
-		/* copy data to new structure */
-		.ssch_rsch_count		= cmb.ssch_rsch_count,
-		.sample_count			= cmb.sample_count,
+	/* convert to nanoseconds */
+	data->elapsed_time = (time * 1000) >> 12;
 
-		/* time fields are converted to nanoseconds while copying */
-		.device_connect_time
-			= time_to_nsec(cmb.device_connect_time),
-		.function_pending_time
-			= time_to_nsec(cmb.function_pending_time),
-		.device_disconnect_time
-			= time_to_nsec(cmb.device_disconnect_time),
-		.control_unit_queuing_time
-		 	= time_to_nsec(cmb.control_unit_queuing_time),
-		.device_active_only_time
-			= time_to_nsec(cmb.device_active_only_time),
-	};
+	/* copy data to new structure */
+	data->ssch_rsch_count = cmb.ssch_rsch_count;
+	data->sample_count = cmb.sample_count;
+
+	/* time fields are converted to nanoseconds while copying */
+	data->device_connect_time = time_to_nsec(cmb.device_connect_time);
+	data->function_pending_time = time_to_nsec(cmb.function_pending_time);
+	data->device_disconnect_time = time_to_nsec(cmb.device_disconnect_time);
+	data->control_unit_queuing_time
+		= time_to_nsec(cmb.control_unit_queuing_time);
+	data->device_active_only_time
+		= time_to_nsec(cmb.device_active_only_time);
 
 	return 0;
 }
@@ -738,33 +736,29 @@ readall_cmbe (struct ccw_device *cdev, struct cmbdata *data)
 	time = get_clock() - cdev->private->cmb_start_time;
 	spin_unlock_irqrestore(cdev->ccwlock, flags);
 
-	*data = (struct cmbdata) {
-		/* we only know values before device_busy_time */
-		.size = offsetof(struct cmbdata, device_busy_time),
+	memset (data, 0, sizeof(struct cmbdata));
 
-		/* conver to nanoseconds */
-		.elapsed_time = (time * 1000) >> 12,
+	/* we only know values before device_busy_time */
+	data->size = offsetof(struct cmbdata, device_busy_time);
 
-		/* copy data to new structure */
-		.ssch_rsch_count		= cmb.ssch_rsch_count,
-		.sample_count			= cmb.sample_count,
+	/* conver to nanoseconds */
+	data->elapsed_time = (time * 1000) >> 12;
 
-		/* time fields are converted to nanoseconds while copying */
-		.device_connect_time
-			= time_to_nsec(cmb.device_connect_time),
-		.function_pending_time
-			= time_to_nsec(cmb.function_pending_time),
-		.device_disconnect_time
-			= time_to_nsec(cmb.device_disconnect_time),
-		.control_unit_queuing_time
-		 	= time_to_nsec(cmb.control_unit_queuing_time),
-		.device_active_only_time
-			= time_to_nsec(cmb.device_active_only_time),
-		.device_busy_time
-			= time_to_nsec(cmb.device_busy_time),
-		.initial_command_response_time
-			= time_to_nsec(cmb.initial_command_response_time),
-	};
+	/* copy data to new structure */
+	data->ssch_rsch_count = cmb.ssch_rsch_count;
+	data->sample_count = cmb.sample_count;
+
+	/* time fields are converted to nanoseconds while copying */
+	data->device_connect_time = time_to_nsec(cmb.device_connect_time);
+	data->function_pending_time = time_to_nsec(cmb.function_pending_time);
+	data->device_disconnect_time = time_to_nsec(cmb.device_disconnect_time);
+	data->control_unit_queuing_time
+		= time_to_nsec(cmb.control_unit_queuing_time);
+	data->device_active_only_time
+		= time_to_nsec(cmb.device_active_only_time);
+	data->device_busy_time = time_to_nsec(cmb.device_busy_time);
+	data->initial_command_response_time
+		= time_to_nsec(cmb.initial_command_response_time);
 
 	return 0;
 }
@@ -996,7 +990,8 @@ init_cmf(void)
 	   see if we are running on z990 or up, otherwise fall back to basic mode. */
 
 	if (format == CMF_AUTODETECT) {
-		if (!MACHINE_NEW_STIDP) {
+		if (!css_characteristics_avail ||
+		    !css_general_characteristics.ext_mb) {
 			format = CMF_BASIC;
 		} else {
 			format = CMF_EXTENDED;

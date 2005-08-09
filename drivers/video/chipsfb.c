@@ -362,7 +362,7 @@ static void __init init_chips(struct fb_info *p, unsigned long addr)
 	p->var = chipsfb_var;
 
 	p->fbops = &chipsfb_ops;
-	p->flags = FBINFO_FLAG_DEFAULT;
+	p->flags = FBINFO_DEFAULT;
 
 	fb_alloc_cmap(&p->cmap, 256, 0);
 
@@ -416,7 +416,7 @@ chipsfb_pci_init(struct pci_dev *dp, const struct pci_device_id *ent)
 		release_mem_region(addr, size);
 		return -ENOMEM;
 	}
-
+	p->device = &dp->dev;
 	init_chips(p, addr);
 
 #ifdef CONFIG_PMAC_PBOOK
@@ -462,8 +462,13 @@ static struct pci_driver chipsfb_driver = {
 
 int __init chips_init(void)
 {
-	return pci_module_init(&chipsfb_driver);
+	if (fb_get_options("chipsfb", NULL))
+		return -ENODEV;
+
+	return pci_register_driver(&chipsfb_driver);
 }
+
+module_init(chips_init);
 
 static void __exit chipsfb_exit(void)
 {
@@ -493,7 +498,7 @@ chips_sleep_notify(struct pmu_sleep_notifier *self, int when)
 	case PBOOK_SLEEP_REJECT:
 		if (save_framebuffer) {
 			vfree(save_framebuffer);
-			save_framebuffer = 0;
+			save_framebuffer = NULL;
 		}
 		break;
 	case PBOOK_SLEEP_NOW:
@@ -505,7 +510,7 @@ chips_sleep_notify(struct pmu_sleep_notifier *self, int when)
 		if (save_framebuffer) {
 			memcpy(p->screen_base, save_framebuffer, nb);
 			vfree(save_framebuffer);
-			save_framebuffer = 0;
+			save_framebuffer = NULL;
 		}
 		chipsfb_blank(0, p);
 		break;

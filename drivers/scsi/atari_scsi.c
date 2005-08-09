@@ -91,6 +91,7 @@
 #include <linux/interrupt.h>
 #include <linux/init.h>
 #include <linux/nvram.h>
+#include <linux/bitops.h>
 
 #include <asm/setup.h>
 #include <asm/atarihw.h>
@@ -99,10 +100,9 @@
 #include <asm/pgtable.h>
 #include <asm/irq.h>
 #include <asm/traps.h>
-#include <asm/bitops.h>
 
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include "atari_scsi.h"
 #include "NCR5380.h"
 #include <asm/atari_stdma.h>

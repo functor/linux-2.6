@@ -43,8 +43,6 @@ MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Routines for control of CS4231(A)/CS4232/InterWave & compatible chips");
 MODULE_LICENSE("GPL");
 
-#define chip_t cs4231_t
-
 #if 0
 #define SNDRV_DEBUG_MCE
 #endif
@@ -168,8 +166,8 @@ static __CS4231_INLINE__ u8 cs4231_inb(cs4231_t *chip, u8 offset)
 #endif
 }
 
-void snd_cs4231_outm(cs4231_t *chip, unsigned char reg,
-		     unsigned char mask, unsigned char value)
+static void snd_cs4231_outm(cs4231_t *chip, unsigned char reg,
+			    unsigned char mask, unsigned char value)
 {
 	int timeout;
 	unsigned char tmp;
@@ -273,9 +271,9 @@ unsigned char snd_cs4236_ext_in(cs4231_t *chip, unsigned char reg)
 #endif
 }
 
-#ifdef CONFIG_SND_DEBUG
+#if 0
 
-void snd_cs4231_debug(cs4231_t *chip)
+static void snd_cs4231_debug(cs4231_t *chip)
 {
 	printk("CS4231 REGS:      INDEX = 0x%02x  ", cs4231_inb(chip, CS4231P(REGSEL)));
 	printk("                 STATUS = 0x%02x\n", cs4231_inb(chip, CS4231P(STATUS)));
@@ -358,7 +356,6 @@ void snd_cs4231_mce_down(cs4231_t *chip)
 {
 	unsigned long flags;
 	int timeout;
-	signed long time;
 
 	snd_cs4231_busy_wait(chip);
 #if 0
@@ -392,34 +389,26 @@ void snd_cs4231_mce_down(cs4231_t *chip)
 #if 0
 	printk("(2) timeout = %i, jiffies = %li\n", timeout, jiffies);
 #endif
-	timeout = HZ / 4 / 2;
-	time = 2;
+	/* in 10 ms increments, check condition, up to 250 ms */
+	timeout = 25;
 	while (snd_cs4231_in(chip, CS4231_TEST_INIT) & CS4231_CALIB_IN_PROGRESS) {
-		set_current_state(TASK_INTERRUPTIBLE);
-		time = schedule_timeout(time);
-		if (time > 0)
-			continue;
-		time = 2;
 		if (--timeout < 0) {
 			snd_printk("mce_down - auto calibration time out (2)\n");
 			return;
 		}
+		msleep(10);
 	}
 #if 0
 	printk("(3) jiffies = %li\n", jiffies);
 #endif
-	timeout = HZ / 10 / 2;
-	time = 2;
+	/* in 10 ms increments, check condition, up to 100 ms */
+	timeout = 10;
 	while (cs4231_inb(chip, CS4231P(REGSEL)) & CS4231_INIT) {
-		set_current_state(TASK_INTERRUPTIBLE);		
-		time = schedule_timeout(time);
-		if (time > 0)
-			continue;
-		time = 2;
 		if (--timeout < 0) {
 			snd_printk(KERN_ERR "mce_down - auto calibration time out (3)\n");
 			return;
 		}
+		msleep(10);
 	}
 #if 0
 	printk("(4) jiffies = %li\n", jiffies);
@@ -696,7 +685,7 @@ static void snd_cs4231_init(cs4231_t *chip)
 
 	snd_cs4231_mce_down(chip);
 
-#ifdef SNDRV_DEBUGq_MCE
+#ifdef SNDRV_DEBUG_MCE
 	snd_printk("init: (1)\n");
 #endif
 	snd_cs4231_mce_up(chip);
@@ -969,7 +958,7 @@ static void snd_cs4231_overrange(cs4231_t *chip)
 
 irqreturn_t snd_cs4231_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
-	cs4231_t *chip = snd_magic_cast(cs4231_t, dev_id, return IRQ_NONE);
+	cs4231_t *chip = dev_id;
 	unsigned char status;
 
 	status = snd_cs4231_in(chip, CS4231_IRQ_STATUS);
@@ -979,19 +968,27 @@ irqreturn_t snd_cs4231_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	}		
 	if (chip->single_dma && chip->hardware != CS4231_HW_INTERWAVE) {
 		if (status & CS4231_PLAYBACK_IRQ) {
-			if (chip->mode & CS4231_MODE_PLAY)
-				snd_pcm_period_elapsed(chip->playback_substream);
+			if (chip->mode & CS4231_MODE_PLAY) {
+				if (chip->playback_substream)
+					snd_pcm_period_elapsed(chip->playback_substream);
+			}
 			if (chip->mode & CS4231_MODE_RECORD) {
-				snd_cs4231_overrange(chip);
-				snd_pcm_period_elapsed(chip->capture_substream);
+				if (chip->capture_substream) {
+					snd_cs4231_overrange(chip);
+					snd_pcm_period_elapsed(chip->capture_substream);
+				}
 			}
 		}
 	} else {
-		if (status & CS4231_PLAYBACK_IRQ)
-			snd_pcm_period_elapsed(chip->playback_substream);
+		if (status & CS4231_PLAYBACK_IRQ) {
+			if (chip->playback_substream)
+				snd_pcm_period_elapsed(chip->playback_substream);
+		}
 		if (status & CS4231_RECORD_IRQ) {
-			snd_cs4231_overrange(chip);
-			snd_pcm_period_elapsed(chip->capture_substream);
+			if (chip->capture_substream) {
+				snd_cs4231_overrange(chip);
+				snd_pcm_period_elapsed(chip->capture_substream);
+			}
 		}
 	}
 
@@ -1029,7 +1026,7 @@ static snd_pcm_uframes_t snd_cs4231_capture_pointer(snd_pcm_substream_t * substr
 
  */
 
-int snd_cs4231_probe(cs4231_t *chip)
+static int snd_cs4231_probe(cs4231_t *chip)
 {
 	unsigned long flags;
 	int i, id, rev;
@@ -1343,6 +1340,7 @@ static int snd_cs4231_capture_close(snd_pcm_substream_t * substream)
 
 #ifdef CONFIG_PM
 
+/* lowlevel suspend callback for CS4231 */
 static void snd_cs4231_suspend(cs4231_t *chip)
 {
 	int reg;
@@ -1354,6 +1352,7 @@ static void snd_cs4231_suspend(cs4231_t *chip)
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
 
+/* lowlevel resume callback for CS4231 */
 static void snd_cs4231_resume(cs4231_t *chip)
 {
 	int reg;
@@ -1395,25 +1394,21 @@ static void snd_cs4231_resume(cs4231_t *chip)
 #endif
 }
 
-static int snd_cs4231_pm_callback(struct pm_dev *dev, pm_request_t rqst, void *data)
+static int snd_cs4231_pm_suspend(snd_card_t *card, pm_message_t state)
 {
-	cs4231_t *chip = snd_magic_cast(cs4231_t, dev->data, return 0);
-
-	switch (rqst) {
-	case PM_SUSPEND:
-		if (chip->suspend) {
-			snd_pcm_suspend_all(chip->pcm);
-			(*chip->suspend)(chip);
-		}
-		break;
-	case PM_RESUME:
-		if (chip->resume)
-			(*chip->resume)(chip);
-		break;
-	}
+	cs4231_t *chip = card->pm_private_data;
+	if (chip->suspend)
+		chip->suspend(chip);
 	return 0;
 }
 
+static int snd_cs4231_pm_resume(snd_card_t *card)
+{
+	cs4231_t *chip = card->pm_private_data;
+	if (chip->resume)
+		chip->resume(chip);
+	return 0;
+}
 #endif /* CONFIG_PM */
 
 #ifdef LEGACY_SUPPORT
@@ -1441,19 +1436,15 @@ static int snd_cs4231_free(cs4231_t *chip)
 		snd_dma_disable(chip->dma2);
 		free_dma(chip->dma2);
 	}
-#ifdef CONFIG_PM
-	if (chip->pm_dev)
-		pm_unregister(chip->pm_dev);
-#endif
 	if (chip->timer)
 		snd_device_free(chip->card, chip->timer);
-	snd_magic_kfree(chip);
+	kfree(chip);
 	return 0;
 }
 
 static int snd_cs4231_dev_free(snd_device_t *device)
 {
-	cs4231_t *chip = snd_magic_cast(cs4231_t, device->device_data, return -ENXIO);
+	cs4231_t *chip = device->device_data;
 	return snd_cs4231_free(chip);	
 }
 
@@ -1487,7 +1478,7 @@ static int snd_cs4231_new(snd_card_t * card,
 	cs4231_t *chip;
 
 	*rchip = NULL;
-	chip = snd_magic_kcalloc(cs4231_t, 0, GFP_KERNEL);
+	chip = kcalloc(1, sizeof(*chip), GFP_KERNEL);
 	if (chip == NULL)
 		return -ENOMEM;
 	chip->hardware = hardware;
@@ -1587,9 +1578,7 @@ int snd_cs4231_create(snd_card_t * card,
 	/* Power Management */
 	chip->suspend = snd_cs4231_suspend;
 	chip->resume = snd_cs4231_resume;
-	chip->pm_dev = pm_register(PM_ISA_DEV, 0, snd_cs4231_pm_callback);
-	if (chip->pm_dev)
-		chip->pm_dev->data = chip;
+	snd_card_set_isa_pm_callback(card, snd_cs4231_pm_suspend, snd_cs4231_pm_resume, chip);
 #endif
 
 	*rchip = chip;
@@ -1622,7 +1611,7 @@ static snd_pcm_ops_t snd_cs4231_capture_ops = {
 
 static void snd_cs4231_pcm_free(snd_pcm_t *pcm)
 {
-	cs4231_t *chip = snd_magic_cast(cs4231_t, pcm->private_data, return);
+	cs4231_t *chip = pcm->private_data;
 	chip->pcm = NULL;
 	snd_pcm_lib_preallocate_free_for_all(pcm);
 }
@@ -1659,7 +1648,7 @@ int snd_cs4231_pcm(cs4231_t *chip, int device, snd_pcm_t **rpcm)
 #else
 #  ifdef EBUS_SUPPORT
         if (chip->ebus_flag) {
-                snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_PCI,
+                snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV,
                 				      chip->dev_u.pdev,
 						      64*1024, 128*1024);
         } else {
@@ -1682,7 +1671,7 @@ int snd_cs4231_pcm(cs4231_t *chip, int device, snd_pcm_t **rpcm)
 
 static void snd_cs4231_timer_free(snd_timer_t *timer)
 {
-	cs4231_t *chip = snd_magic_cast(cs4231_t, timer->private_data, return);
+	cs4231_t *chip = timer->private_data;
 	chip->timer = NULL;
 }
 
@@ -1894,8 +1883,6 @@ int snd_cs4231_put_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucon
 	return change;
 }
 
-#define CS4231_CONTROLS (sizeof(snd_cs4231_controls)/sizeof(snd_kcontrol_new_t))
-
 static snd_kcontrol_new_t snd_cs4231_controls[] = {
 CS4231_DOUBLE("PCM Playback Switch", 0, CS4231_LEFT_OUTPUT, CS4231_RIGHT_OUTPUT, 7, 7, 1, 1),
 CS4231_DOUBLE("PCM Playback Volume", 0, CS4231_LEFT_OUTPUT, CS4231_RIGHT_OUTPUT, 0, 0, 63, 1),
@@ -1934,7 +1921,7 @@ int snd_cs4231_mixer(cs4231_t *chip)
 
 	strcpy(card->mixername, chip->pcm->name);
 
-	for (idx = 0; idx < CS4231_CONTROLS; idx++) {
+	for (idx = 0; idx < ARRAY_SIZE(snd_cs4231_controls); idx++) {
 		if ((err = snd_ctl_add(card, snd_ctl_new1(&snd_cs4231_controls[idx], chip))) < 0)
 			return err;
 	}
@@ -1943,7 +1930,6 @@ int snd_cs4231_mixer(cs4231_t *chip)
 
 EXPORT_SYMBOL(snd_cs4231_out);
 EXPORT_SYMBOL(snd_cs4231_in);
-EXPORT_SYMBOL(snd_cs4231_outm);
 EXPORT_SYMBOL(snd_cs4236_ext_out);
 EXPORT_SYMBOL(snd_cs4236_ext_in);
 EXPORT_SYMBOL(snd_cs4231_mce_up);

@@ -81,7 +81,7 @@ static inline unsigned long _get_base(char * addr)
 #define loadsegment(seg,value)			\
 	asm volatile("\n"			\
 		"1:\t"				\
-		"movl %0,%%" #seg "\n"		\
+		"mov %0,%%" #seg "\n"		\
 		"2:\n"				\
 		".section .fixup,\"ax\"\n"	\
 		"3:\t"				\
@@ -93,13 +93,13 @@ static inline unsigned long _get_base(char * addr)
 		".align 4\n\t"			\
 		".long 1b,3b\n"			\
 		".previous"			\
-		: :"m" (*(unsigned int *)&(value)))
+		: :"m" (value))
 
 /*
  * Save a segment register away
  */
 #define savesegment(seg, value) \
-	asm volatile("movl %%" #seg ",%0":"=m" (*(int *)&(value)))
+	asm volatile("mov %%" #seg ",%0":"=m" (value))
 
 /*
  * Clear and set 'TS' bit respectively
@@ -321,7 +321,7 @@ struct alt_instr {
  * If you use variable sized constraints like "m" or "g" in the 
  * replacement maake sure to pad to the worst case length.
  */
-#define alternative_input(oldinstr, newinstr, feature, input)			\
+#define alternative_input(oldinstr, newinstr, feature, input...)		\
 	asm volatile ("661:\n\t" oldinstr "\n662:\n"				\
 		      ".section .altinstructions,\"a\"\n"			\
 		      "  .align 4\n"						\
@@ -333,7 +333,7 @@ struct alt_instr {
 		      ".previous\n"						\
 		      ".section .altinstr_replacement,\"ax\"\n"			\
 		      "663:\n\t" newinstr "\n664:\n"   /* replacement */ 	\
-		      ".previous" :: "i" (feature), input)  
+		      ".previous" :: "i" (feature), ##input)
 
 /*
  * Force strict CPU ordering.
@@ -465,13 +465,9 @@ struct alt_instr {
 void disable_hlt(void);
 void enable_hlt(void);
 
-extern unsigned long dmi_broken;
-extern int is_sony_vaio_laptop;
 extern int es7000_plat;
+void cpu_idle_wait(void);
 
-#define BROKEN_ACPI_Sx		0x0001
-#define BROKEN_INIT_AFTER_S1	0x0002
-#define BROKEN_PNP_BIOS		0x0004
-#define BROKEN_CPUFREQ		0x0008
+extern unsigned long arch_align_stack(unsigned long sp);
 
 #endif

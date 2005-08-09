@@ -40,7 +40,7 @@ extern void die_if_kernel(char *,struct pt_regs *,long, unsigned long *);
 unsigned long last_asn = ASN_FIRST_VERSION;
 #endif
 
-extern void
+void
 __load_new_mm_context(struct mm_struct *next_mm)
 {
 	unsigned long mmc;
@@ -98,7 +98,7 @@ do_page_fault(unsigned long address, unsigned long mmcsr,
 	   by ignoring such an instruction.  */
 	if (cause == 0) {
 		unsigned int insn;
-		__get_user(insn, (unsigned int *)regs->pc);
+		__get_user(insn, (unsigned int __user *)regs->pc);
 		if ((insn >> 21 & 0x1f) == 0x1f &&
 		    /* ldq ldl ldt lds ldg ldf ldwu ldbu */
 		    (1ul << (insn >> 26) & 0x30f00001400ul)) {
@@ -211,7 +211,7 @@ do_page_fault(unsigned long address, unsigned long mmcsr,
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;
 	info.si_code = BUS_ADRERR;
-	info.si_addr = (void *) address;
+	info.si_addr = (void __user *) address;
 	force_sig_info(SIGBUS, &info, current);
 	if (!user_mode(regs))
 		goto no_context;
@@ -221,7 +221,7 @@ do_page_fault(unsigned long address, unsigned long mmcsr,
 	info.si_signo = SIGSEGV;
 	info.si_errno = 0;
 	info.si_code = si_code;
-	info.si_addr = (void *) address;
+	info.si_addr = (void __user *) address;
 	force_sig_info(SIGSEGV, &info, current);
 	return;
 

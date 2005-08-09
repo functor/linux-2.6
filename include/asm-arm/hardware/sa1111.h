@@ -49,8 +49,8 @@
  */
 #define __CCREG(x)	__REGP(SA1111_VBASE + (x))
 
-#define sa1111_writel(val,addr)	({ *(volatile unsigned int *)(addr) = (val); })
-#define sa1111_readl(addr)	(*(volatile unsigned int *)(addr))
+#define sa1111_writel(val,addr)	__raw_writel(val, addr)
+#define sa1111_readl(addr)	__raw_readl(addr)
 
 /*
  * System Bus Interface (SBI)
@@ -405,22 +405,6 @@
 #define GPIO_C6		(1 << 22)
 #define GPIO_C7		(1 << 23)
 
-#define PA_DDR		__CCREG(0x1000)
-#define PA_DRR		__CCREG(0x1004)
-#define PA_DWR		__CCREG(0x1004)
-#define PA_SDR		__CCREG(0x1008)
-#define PA_SSR		__CCREG(0x100c)
-#define PB_DDR		__CCREG(0x1010)
-#define PB_DRR		__CCREG(0x1014)
-#define PB_DWR		__CCREG(0x1014)
-#define PB_SDR		__CCREG(0x1018)
-#define PB_SSR		__CCREG(0x101c)
-#define PC_DDR		__CCREG(0x1020)
-#define PC_DRR		__CCREG(0x1024)
-#define PC_DWR		__CCREG(0x1024)
-#define PC_SDR		__CCREG(0x1028)
-#define PC_SSR		__CCREG(0x102c)
-
 /*
  * Interrupt Controller
  *
@@ -567,7 +551,7 @@ struct sa1111_dev {
 	struct device	dev;
 	unsigned int	devid;
 	struct resource	res;
-	void		*mapbase;
+	void __iomem	*mapbase;
 	unsigned int	skpcr_mask;
 	unsigned int	irq[6];
 	u64		dma_mask;
@@ -583,7 +567,7 @@ struct sa1111_driver {
 	unsigned int		devid;
 	int (*probe)(struct sa1111_dev *);
 	int (*remove)(struct sa1111_dev *);
-	int (*suspend)(struct sa1111_dev *, u32);
+	int (*suspend)(struct sa1111_dev *, pm_message_t);
 	int (*resume)(struct sa1111_dev *);
 };
 

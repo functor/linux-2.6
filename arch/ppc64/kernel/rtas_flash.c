@@ -105,7 +105,7 @@ struct rtas_validate_flash_t
 	unsigned int update_results;	/* Update results token */
 };
 
-static spinlock_t flash_file_open_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(flash_file_open_lock);
 static struct proc_dir_entry *firmware_flash_pde;
 static struct proc_dir_entry *firmware_update_pde;
 static struct proc_dir_entry *validate_pde;
@@ -218,13 +218,12 @@ static void get_flash_status_msg(int status, char *buf)
 }
 
 /* Reading the proc file will show status (not the firmware contents) */
-static ssize_t rtas_flash_read(struct file *file, char *buf,
+static ssize_t rtas_flash_read(struct file *file, char __user *buf,
 			       size_t count, loff_t *ppos)
 {
 	struct proc_dir_entry *dp = PDE(file->f_dentry->d_inode);
 	struct rtas_update_flash_t *uf;
 	char msg[RTAS_MSG_MAXLEN];
-	int error;
 	int msglen;
 
 	uf = (struct rtas_update_flash_t *) dp->data;
@@ -241,8 +240,7 @@ static ssize_t rtas_flash_read(struct file *file, char *buf,
 	if (ppos && *ppos != 0)
 		return 0;	/* be cheap */
 
-	error = verify_area(VERIFY_WRITE, buf, msglen);
-	if (error)
+	if (!access_ok(VERIFY_WRITE, buf, msglen))
 		return -EINVAL;
 
 	if (copy_to_user(buf, msg, msglen))
@@ -258,7 +256,7 @@ static ssize_t rtas_flash_read(struct file *file, char *buf,
  * count is.  If the system is low on memory it will be just as well
  * that we fail....
  */
-static ssize_t rtas_flash_write(struct file *file, const char *buffer,
+static ssize_t rtas_flash_write(struct file *file, const char __user *buffer,
 				size_t count, loff_t *off)
 {
 	struct proc_dir_entry *dp = PDE(file->f_dentry->d_inode);
@@ -344,8 +342,8 @@ static void manage_flash(struct rtas_manage_flash_t *args_buf)
 	s32 rc;
 
 	while (1) {
-		rc = (s32) rtas_call(rtas_token("ibm,manage-flash-image"), 1, 
-				1, NULL, (long) args_buf->op);
+		rc = rtas_call(rtas_token("ibm,manage-flash-image"), 1, 
+			       1, NULL, args_buf->op);
 		if (rc == RTAS_RC_BUSY)
 			udelay(1);
 		else if (rtas_is_extended_busy(rc)) {
@@ -358,14 +356,13 @@ static void manage_flash(struct rtas_manage_flash_t *args_buf)
 	args_buf->status = rc;
 }
 
-static ssize_t manage_flash_read(struct file *file, char *buf,
+static ssize_t manage_flash_read(struct file *file, char __user *buf,
 			       size_t count, loff_t *ppos)
 {
 	struct proc_dir_entry *dp = PDE(file->f_dentry->d_inode);
 	struct rtas_manage_flash_t *args_buf;
 	char msg[RTAS_MSG_MAXLEN];
 	int msglen;
-	int error;
 
 	args_buf = (struct rtas_manage_flash_t *) dp->data;
 	if (args_buf == NULL)
@@ -378,8 +375,7 @@ static ssize_t manage_flash_read(struct file *file, char *buf,
 	if (ppos && *ppos != 0)
 		return 0;	/* be cheap */
 
-	error = verify_area(VERIFY_WRITE, buf, msglen);
-	if (error)
+	if (!access_ok(VERIFY_WRITE, buf, msglen))
 		return -EINVAL;
 
 	if (copy_to_user(buf, msg, msglen))
@@ -390,7 +386,7 @@ static ssize_t manage_flash_read(struct file *file, char *buf,
 	return msglen;
 }
 
-static ssize_t manage_flash_write(struct file *file, const char *buf,
+static ssize_t manage_flash_write(struct file *file, const char __user *buf,
 				size_t count, loff_t *off)
 {
 	struct proc_dir_entry *dp = PDE(file->f_dentry->d_inode);
@@ -429,15 +425,15 @@ static void validate_flash(struct rtas_validate_flash_t *args_buf)
 {
 	int token = rtas_token("ibm,validate-flash-image");
 	unsigned int wait_time;
-	long update_results;
+	int update_results;
 	s32 rc;	
 
 	rc = 0;
 	while(1) {
 		spin_lock(&rtas_data_buf_lock);
 		memcpy(rtas_data_buf, args_buf->buf, VALIDATE_BUF_SIZE);
-		rc = (s32) rtas_call(token, 2, 2, &update_results, 
-				     __pa(rtas_data_buf), args_buf->buf_size);
+		rc = rtas_call(token, 2, 2, &update_results, 
+			       (u32) __pa(rtas_data_buf), args_buf->buf_size);
 		memcpy(args_buf->buf, rtas_data_buf, VALIDATE_BUF_SIZE);
 		spin_unlock(&rtas_data_buf_lock);
 			
@@ -451,7 +447,7 @@ static void validate_flash(struct rtas_validate_flash_t *args_buf)
 	}
 
 	args_buf->status = rc;
-	args_buf->update_results = (u32) update_results;
+	args_buf->update_results = update_results;
 }
 
 static int get_validate_flash_msg(struct rtas_validate_flash_t *args_buf, 
@@ -470,14 +466,13 @@ static int get_validate_flash_msg(struct rtas_validate_flash_t *args_buf,
 	return n;
 }
 
-static ssize_t validate_flash_read(struct file *file, char *buf,
+static ssize_t validate_flash_read(struct file *file, char __user *buf,
 			       size_t count, loff_t *ppos)
 {
 	struct proc_dir_entry *dp = PDE(file->f_dentry->d_inode);
 	struct rtas_validate_flash_t *args_buf;
 	char msg[RTAS_MSG_MAXLEN];
 	int msglen;
-	int error;
 
 	args_buf = (struct rtas_validate_flash_t *) dp->data;
 
@@ -488,8 +483,7 @@ static ssize_t validate_flash_read(struct file *file, char *buf,
 	if (msglen > count)
 		msglen = count;
 
-	error = verify_area(VERIFY_WRITE, buf, msglen);
-	if (error)
+	if (!access_ok(VERIFY_WRITE, buf, msglen))
 		return -EINVAL;
 
 	if (copy_to_user(buf, msg, msglen))
@@ -500,7 +494,7 @@ static ssize_t validate_flash_read(struct file *file, char *buf,
 	return msglen;
 }
 
-static ssize_t validate_flash_write(struct file *file, const char *buf,
+static ssize_t validate_flash_write(struct file *file, const char __user *buf,
 				    size_t count, loff_t *off)
 {
 	struct proc_dir_entry *dp = PDE(file->f_dentry->d_inode);
@@ -531,7 +525,7 @@ static ssize_t validate_flash_write(struct file *file, const char *buf,
 		args_buf->status = VALIDATE_INCOMPLETE;
 	}
 
-	if (verify_area(VERIFY_READ, buf, count)) {
+	if (!access_ok(VERIFY_READ, buf, count)) {
 		rc = -EFAULT;
 		goto done;
 	}
@@ -562,6 +556,7 @@ static int validate_flash_release(struct inode *inode, struct file *file)
 		validate_flash(args_buf);
 	}
 
+	/* The matching atomic_inc was in rtas_excl_open() */
 	atomic_dec(&dp->count);
 
 	return 0;
@@ -572,7 +567,8 @@ static void remove_flash_pde(struct proc_dir_entry *dp)
 	if (dp) {
 		if (dp->data != NULL)
 			kfree(dp->data);
-		remove_proc_entry(dp->name, NULL);
+		dp->owner = NULL;
+		remove_proc_entry(dp->name, dp->parent);
 	}
 }
 
@@ -692,7 +688,7 @@ int __init rtas_flash_init(void)
 	if (rc != 0)
 		goto cleanup;
 
-	manage_pde = create_flash_pde("ppc64/rtas" MANAGE_FLASH_NAME,
+	manage_pde = create_flash_pde("ppc64/rtas/" MANAGE_FLASH_NAME,
 				      &manage_flash_operations);
 	if (manage_pde == NULL) {
 		rc = -ENOMEM;

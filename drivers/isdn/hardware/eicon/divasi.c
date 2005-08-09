@@ -1,4 +1,4 @@
-/* $Id: divasi.c,v 1.25 2003/09/09 06:46:29 schindler Exp $
+/* $Id: divasi.c,v 1.25.6.2 2005/01/31 12:22:20 armin Exp $
  *
  * Driver for Eicon DIVA Server ISDN cards.
  * User Mode IDI Interface 
@@ -20,6 +20,7 @@
 #include <linux/proc_fs.h>
 #include <linux/skbuff.h>
 #include <linux/devfs_fs_kernel.h>
+#include <asm/uaccess.h>
 
 #include "platform.h"
 #include "di_defs.h"
@@ -27,7 +28,7 @@
 #include "um_xdi.h"
 #include "um_idi.h"
 
-static char *main_revision = "$Revision: 1.25 $";
+static char *main_revision = "$Revision: 1.25.6.2 $";
 
 static int major;
 
@@ -71,9 +72,9 @@ static char *getrev(const char *revision)
 /*
  *  LOCALS
  */
-static ssize_t um_idi_read(struct file *file, char *buf, size_t count,
+static ssize_t um_idi_read(struct file *file, char __user *buf, size_t count,
 			   loff_t * offset);
-static ssize_t um_idi_write(struct file *file, const char *buf,
+static ssize_t um_idi_write(struct file *file, const char __user *buf,
 			    size_t count, loff_t * offset);
 static unsigned int um_idi_poll(struct file *file, poll_table * wait);
 static int um_idi_open(struct inode *inode, struct file *file);
@@ -231,7 +232,7 @@ divas_um_idi_copy_to_user(void *os_handle, void *dst, const void *src,
 }
 
 static ssize_t
-um_idi_read(struct file *file, char *buf, size_t count, loff_t * offset)
+um_idi_read(struct file *file, char __user *buf, size_t count, loff_t * offset)
 {
 	diva_um_idi_os_context_t *p_os;
 	int ret = -EINVAL;
@@ -312,7 +313,7 @@ static int um_idi_open_adapter(struct file *file, int adapter_nr)
 }
 
 static ssize_t
-um_idi_write(struct file *file, const char *buf, size_t count,
+um_idi_write(struct file *file, const char __user *buf, size_t count,
 	     loff_t * offset)
 {
 	diva_um_idi_os_context_t *p_os;

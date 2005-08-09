@@ -10,11 +10,13 @@
  */
 #ifndef __ASM_SH_UBC_H
 #define __ASM_SH_UBC_H
+#ifdef __KERNEL__
 
 #include <asm/cpu/ubc.h>
 
 /* User Break Controller */
-#if defined(CONFIG_CPU_SUBTYPE_SH7709)
+#if defined(CONFIG_CPU_SUBTYPE_SH7707) || defined(CONFIG_CPU_SUBTYPE_SH7709) || \
+    defined(CONFIG_CPU_SUBTYPE_SH7300)
 #define UBC_TYPE_SH7729	(cpu_data->type == CPU_SH7729)
 #else
 #define UBC_TYPE_SH7729	0
@@ -54,5 +56,5 @@ extern void ubc_wakeup(void);
 extern void ubc_sleep(void);
 #endif
 
+#endif /* __KERNEL__ */
 #endif /* __ASM_SH_UBC_H */
-

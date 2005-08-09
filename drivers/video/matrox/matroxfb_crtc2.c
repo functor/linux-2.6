@@ -21,7 +21,7 @@
 
 static int mem = 8192;
 
-MODULE_PARM(mem, "i");
+module_param(mem, int, 0);
 MODULE_PARM_DESC(mem, "Memory size reserved for dualhead (default=8MB)");
 
 /* **************************************************** */
@@ -387,6 +387,7 @@ static int matroxfb_dh_set_par(struct fb_info* info) {
 		up_read(&ACCESS_FBINFO(altout).lock);
 		matroxfb_dh_cfbX_init(m2info);
 	}
+	m2info->initialized = 1;
 	return 0;
 #undef m2info
 }
@@ -437,7 +438,7 @@ static int matroxfb_dh_ioctl(struct inode* inode,
 				err = matroxfb_dh_get_vblank(m2info, &vblank);
 				if (err)
 					return err;
-				if (copy_to_user((struct fb_vblank*)arg, &vblank, sizeof(vblank)))
+				if (copy_to_user((void __user *)arg, &vblank, sizeof(vblank)))
 					return -EFAULT;
 				return 0;
 			}
@@ -445,7 +446,7 @@ static int matroxfb_dh_ioctl(struct inode* inode,
 			{
 				u_int32_t crt;
 
-				if (get_user(crt, (u_int32_t *)arg))
+				if (get_user(crt, (u_int32_t __user *)arg))
 					return -EFAULT;
 
 				if (crt != 0)
@@ -464,7 +465,7 @@ static int matroxfb_dh_ioctl(struct inode* inode,
 				int out;
 				int changes;
 
-				if (get_user(tmp, (u_int32_t*)arg))
+				if (get_user(tmp, (u_int32_t __user *)arg))
 					return -EFAULT;
 				for (out = 0; out < 32; out++) {
 					if (tmp & (1 << out)) {
@@ -514,7 +515,7 @@ static int matroxfb_dh_ioctl(struct inode* inode,
 						conn |= 1 << out;
 					}
 				}
-				if (put_user(conn, (u_int32_t*)arg))
+				if (put_user(conn, (u_int32_t __user *)arg))
 					return -EFAULT;
 				return 0;
 			}
@@ -539,7 +540,7 @@ static int matroxfb_dh_ioctl(struct inode* inode,
 						tmp = 0;
 					}
 				}
-				if (put_user(tmp, (u_int32_t*)arg))
+				if (put_user(tmp, (u_int32_t __user *)arg))
 					return -EFAULT;
 				return 0;
 			}
@@ -603,7 +604,8 @@ static int matroxfb_dh_regit(CPMINFO struct matroxfb_dh_fb_info* m2info) {
 
 	m2info->fbcon.fbops = &matroxfb_dh_ops;
 	m2info->fbcon.flags = FBINFO_FLAG_DEFAULT;
-	m2info->fbcon.currcon = -1;
+	m2info->fbcon.flags |= FBINFO_HWACCEL_XPAN |
+			       FBINFO_HWACCEL_YPAN;
 	m2info->fbcon.pseudo_palette = m2info->cmap;
 	fb_alloc_cmap(&m2info->fbcon.cmap, 256, 1);
 
@@ -628,22 +630,12 @@ static int matroxfb_dh_regit(CPMINFO struct matroxfb_dh_fb_info* m2info) {
 	m2info->mmio.vbase = ACCESS_FBINFO(mmio.vbase);
 	m2info->mmio.len = ACCESS_FBINFO(mmio.len);
 
-	/*
-	 *  If we have unused output, connect CRTC2 to it...
-	 */
-	if (ACCESS_FBINFO(outputs[1]).output &&
-	    ACCESS_FBINFO(outputs[1]).src == MATROXFB_SRC_NONE &&
-	    ACCESS_FBINFO(outputs[2]).src == MATROXFB_SRC_NONE) {
-		ACCESS_FBINFO(outputs[1]).src = MATROXFB_SRC_CRTC2;
-	}
-
 	matroxfb_dh_init_fix(m2info);
 	if (register_framebuffer(&m2info->fbcon)) {
 		return -ENXIO;
 	}
-	if (m2info->fbcon.currcon < 0) {
+	if (!m2info->initialized)
 		fb_set_var(&m2info->fbcon, &matroxfb_dh_defined);
-	}
 	down_write(&ACCESS_FBINFO(crtc2.lock));
 	oldcrtc2 = ACCESS_FBINFO(crtc2.info);
 	ACCESS_FBINFO(crtc2.info) = m2info;
@@ -730,6 +722,9 @@ static struct matroxfb_driver crtc2 = {
 		.remove =	matroxfb_crtc2_remove };
 
 static int matroxfb_crtc2_init(void) {
+	if (fb_get_options("matrox_crtc2fb", NULL))
+		return -ENODEV;
+
 	matroxfb_register_driver(&crtc2);
 	return 0;
 }

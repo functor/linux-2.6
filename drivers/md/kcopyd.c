@@ -24,9 +24,6 @@
 
 #include "kcopyd.h"
 
-/* FIXME: this is only needed for the DMERR macros */
-#include "dm.h"
-
 static struct workqueue_struct *_kcopyd_wq;
 static struct work_struct _kcopyd_work;
 
@@ -87,7 +84,7 @@ static int kcopyd_get_pages(struct kcopyd_client *kc,
 		;
 
 	kc->pages = pl->next;
-	pl->next = 0;
+	pl->next = NULL;
 
 	spin_unlock(&kc->lock);
 
@@ -214,7 +211,7 @@ static mempool_t *_job_pool;
  *
  * All three of these are protected by job_lock.
  */
-static spinlock_t _job_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(_job_lock);
 
 static LIST_HEAD(_complete_jobs);
 static LIST_HEAD(_io_jobs);
@@ -576,12 +573,11 @@ int kcopyd_cancel(struct kcopyd_job *job, int block)
 static DECLARE_MUTEX(_client_lock);
 static LIST_HEAD(_clients);
 
-static int client_add(struct kcopyd_client *kc)
+static void client_add(struct kcopyd_client *kc)
 {
 	down(&_client_lock);
 	list_add(&kc->list, &_clients);
 	up(&_client_lock);
-	return 0;
 }
 
 static void client_del(struct kcopyd_client *kc)
@@ -653,7 +649,7 @@ int kcopyd_client_create(unsigned int nr_pages, struct kcopyd_client **result)
 		return -ENOMEM;
 	}
 
-	kc->lock = SPIN_LOCK_UNLOCKED;
+	spin_lock_init(&kc->lock);
 	kc->pages = NULL;
 	kc->nr_pages = kc->nr_free_pages = 0;
 	r = client_alloc_pages(kc, nr_pages);
@@ -671,15 +667,7 @@ int kcopyd_client_create(unsigned int nr_pages, struct kcopyd_client **result)
 		return r;
 	}
 
-	r = client_add(kc);
-	if (r) {
-		dm_io_put(nr_pages);
-		client_free_pages(kc);
-		kfree(kc);
-		kcopyd_exit();
-		return r;
-	}
-
+	client_add(kc);
 	*result = kc;
 	return 0;
 }

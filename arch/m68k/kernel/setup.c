@@ -62,7 +62,6 @@ struct mem_info m68k_memory[NUM_MEMINFO];
 static struct mem_info m68k_ramdisk;
 
 static char m68k_command_line[CL_SIZE];
-char saved_command_line[CL_SIZE];
 
 char m68k_debug_device[6] = "";
 
@@ -85,7 +84,7 @@ void (*mach_reset)( void );
 void (*mach_halt)( void );
 void (*mach_power_off)( void );
 long mach_max_dma_address = 0x00ffffff; /* default set to the lower 16MB */
-#if defined(CONFIG_AMIGA_FLOPPY) || defined(CONFIG_ATARI_FLOPPY) 
+#if defined(CONFIG_AMIGA_FLOPPY) || defined(CONFIG_ATARI_FLOPPY)
 void (*mach_floppy_setup) (char *, int *) __initdata = NULL;
 #endif
 #ifdef CONFIG_HEARTBEAT
@@ -110,6 +109,7 @@ extern int q40_parse_bootinfo(const struct bi_record *);
 extern int bvme6000_parse_bootinfo(const struct bi_record *);
 extern int mvme16x_parse_bootinfo(const struct bi_record *);
 extern int mvme147_parse_bootinfo(const struct bi_record *);
+extern int hp300_parse_bootinfo(const struct bi_record *);
 
 extern void config_amiga(void);
 extern void config_atari(void);
@@ -143,7 +143,7 @@ static void __init m68k_parse_bootinfo(const struct bi_record *record)
 		/* Already set up by head.S */
 		break;
 
- 	    case BI_MEMCHUNK:
+	    case BI_MEMCHUNK:
 		if (m68k_num_memory < NUM_MEMINFO) {
 		    m68k_memory[m68k_num_memory].addr = data[0];
 		    m68k_memory[m68k_num_memory].size = data[1];
@@ -176,6 +176,8 @@ static void __init m68k_parse_bootinfo(const struct bi_record *record)
 		    unknown = mvme16x_parse_bootinfo(record);
 		else if (MACH_IS_MVME147)
 		    unknown = mvme147_parse_bootinfo(record);
+		else if (MACH_IS_HP300)
+		    unknown = hp300_parse_bootinfo(record);
 		else
 		    unknown = 1;
 	}
@@ -205,20 +207,8 @@ void __init setup_arch(char **cmdline_p)
 	int i;
 	char *p, *q;
 
-	if (!MACH_IS_HP300) {
-		/* The bootinfo is located right after the kernel bss */
-		m68k_parse_bootinfo((const struct bi_record *)&_end);
-	} else {
-		/* FIXME HP300 doesn't use bootinfo yet */
-		extern unsigned long hp300_phys_ram_base;
-		unsigned long hp300_mem_size = 0xffffffff-hp300_phys_ram_base;
-		m68k_cputype = CPU_68030;
-		m68k_fputype = FPU_68882;
-		m68k_memory[0].addr = hp300_phys_ram_base;
-		/* 0.5M fudge factor */
-		m68k_memory[0].size = hp300_mem_size-512*1024;
-		m68k_num_memory++;
-	}
+	/* The bootinfo is located right after the kernel bss */
+	m68k_parse_bootinfo((const struct bi_record *)&_end);
 
 	if (CPU_IS_040)
 		m68k_is040or060 = 4;
@@ -236,7 +226,19 @@ void __init setup_arch(char **cmdline_p)
 		volatile int zero = 0;
 		asm __volatile__ ("frestore %0" : : "m" (zero));
 	}
-#endif	
+#endif
+
+	if (CPU_IS_060) {
+		u32 pcr;
+
+		asm (".chip 68060; movec %%pcr,%0; .chip 68k"
+		     : "=d" (pcr));
+		if (((pcr >> 8) & 0xff) <= 5) {
+			printk("Enabling workaround for errata I14\n");
+			asm (".chip 68060; movec %0,%%pcr; .chip 68k"
+			     : : "d" (pcr | 0x20));
+		}
+	}
 
 	init_mm.start_code = PAGE_OFFSET;
 	init_mm.end_code = (unsigned long) &_etext;
@@ -296,28 +298,28 @@ void __init setup_arch(char **cmdline_p)
 #endif
 #ifdef CONFIG_SUN3
 	    case MACH_SUN3:
-	    	config_sun3();
-	    	break;
+		config_sun3();
+		break;
 #endif
 #ifdef CONFIG_APOLLO
 	    case MACH_APOLLO:
-	    	config_apollo();
-	    	break;
+		config_apollo();
+		break;
 #endif
 #ifdef CONFIG_MVME147
 	    case MACH_MVME147:
-	    	config_mvme147();
-	    	break;
+		config_mvme147();
+		break;
 #endif
 #ifdef CONFIG_MVME16x
 	    case MACH_MVME16x:
-	    	config_mvme16x();
-	    	break;
+		config_mvme16x();
+		break;
 #endif
 #ifdef CONFIG_BVME6000
 	    case MACH_BVME6000:
-	    	config_bvme6000();
-	    	break;
+		config_bvme6000();
+		break;
 #endif
 #ifdef CONFIG_HP300
 	    case MACH_HP300:
@@ -341,7 +343,7 @@ void __init setup_arch(char **cmdline_p)
 #ifndef CONFIG_SUN3
 	startmem= m68k_memory[0].addr;
 	endmem = startmem + m68k_memory[0].size;
-	high_memory = PAGE_OFFSET;
+	high_memory = (void *)PAGE_OFFSET;
 	for (i = 0; i < m68k_num_memory; i++) {
 		m68k_memory[i].size &= MASK_256K;
 		if (m68k_memory[i].addr < startmem)
@@ -384,11 +386,11 @@ void __init setup_arch(char **cmdline_p)
 
 /* set ISA defs early as possible */
 #if defined(CONFIG_ISA) && defined(MULTI_ISA)
-#if defined(CONFIG_Q40) 
+#if defined(CONFIG_Q40)
 	if (MACH_IS_Q40) {
 	    isa_type = Q40_ISA;
 	    isa_sex = 0;
-	} 
+	}
 #elif defined(CONFIG_GG2)
 	if (MACH_IS_AMIGA && AMIGAHW_PRESENT(GG2_ISA)){
 	    isa_type = GG2_ISA;
@@ -539,7 +541,5 @@ void check_bugs(void)
 				"emulation project\n" );
 		panic( "no FPU" );
 	}
-
-#endif /* CONFIG_SUN3 */
-
+#endif /* !CONFIG_M68KFPU_EMU */
 }

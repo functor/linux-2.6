@@ -1,5 +1,5 @@
 /*
- *  arch/ppc/kernel/setup.c
+ *  arch/ppc/syslib/m8260_setup.c
  *
  *  Copyright (C) 1995  Linus Torvalds
  *  Adapted from 'alpha' version by Gary Thomas
@@ -8,58 +8,62 @@
  *  Further modified for generic 8xx and 8260 by Dan.
  */
 
-/*
- * bootup setup stuff..
- */
-
 #include <linux/config.h>
-#include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/stddef.h>
-#include <linux/unistd.h>
-#include <linux/ptrace.h>
 #include <linux/slab.h>
-#include <linux/user.h>
-#include <linux/a.out.h>
-#include <linux/tty.h>
-#include <linux/major.h>
-#include <linux/interrupt.h>
-#include <linux/reboot.h>
 #include <linux/init.h>
 #include <linux/initrd.h>
-#include <linux/ioport.h>
-#include <linux/ide.h>
+#include <linux/root_dev.h>
 #include <linux/seq_file.h>
+#include <linux/irq.h>
 
 #include <asm/mmu.h>
-#include <asm/residual.h>
 #include <asm/io.h>
 #include <asm/pgtable.h>
-#include <asm/ide.h>
 #include <asm/mpc8260.h>
-#include <asm/immap_8260.h>
+#include <asm/immap_cpm2.h>
 #include <asm/machdep.h>
 #include <asm/bootinfo.h>
 #include <asm/time.h>
 
-#include "ppc8260_pic.h"
-
-static int m8260_set_rtc_time(unsigned long time);
-static unsigned long m8260_get_rtc_time(void);
-static void m8260_calibrate_decr(void);
+#include "cpm2_pic.h"
 
 unsigned char __res[sizeof(bd_t)];
 
-extern void m8260_cpm_reset(void);
+extern void cpm2_reset(void);
+extern void pq2_find_bridges(void);
+extern void pq2pci_init_irq(void);
+extern void idma_pci9_init(void);
+
+/* Place-holder for board-specific init */
+void __attribute__ ((weak)) __init
+m82xx_board_setup(void)
+{
+}
 
 static void __init
 m8260_setup_arch(void)
 {
-	/* Reset the Communication Processor Module.
-	*/
-	m8260_cpm_reset();
+	/* Print out Vendor and Machine info. */
+	printk(KERN_INFO "%s %s port\n", CPUINFO_VENDOR, CPUINFO_MACHINE);
+
+	/* Reset the Communication Processor Module. */
+	cpm2_reset();
+#ifdef CONFIG_8260_PCI9
+	/* Initialise IDMA for PCI erratum workaround */
+	idma_pci9_init();
+#endif
+#ifdef CONFIG_PCI_8260
+	pq2_find_bridges();
+#endif
+#ifdef CONFIG_BLK_DEV_INITRD
+	if (initrd_start)
+		ROOT_DEV = Root_RAM0;
+#endif
+	m82xx_board_setup();
 }
 
 /* The decrementer counts at the system (internal) clock frequency
@@ -68,7 +72,7 @@ m8260_setup_arch(void)
 static void __init
 m8260_calibrate_decr(void)
 {
-	bd_t	*binfo = (bd_t *)__res;
+	bd_t *binfo = (bd_t *)__res;
 	int freq, divisor;
 
 	freq = binfo->bi_busfreq;
@@ -136,18 +140,22 @@ m8260_power_off(void)
 }
 
 static int
-m8260_show_percpuinfo(struct seq_file *m, int i)
+m8260_show_cpuinfo(struct seq_file *m)
 {
-	bd_t	*bp;
+	bd_t *bp = (bd_t *)__res;
 
-	bp = (bd_t *)__res;
-
-	seq_printf(m, "core clock\t: %d MHz\n"
-		   "CPM  clock\t: %d MHz\n"
-		   "bus  clock\t: %d MHz\n",
-		   bp->bi_intfreq / 1000000,
-		   bp->bi_cpmfreq / 1000000,
-		   bp->bi_busfreq / 1000000);
+	seq_printf(m, "vendor\t\t: %s\n"
+		   "machine\t\t: %s\n"
+		   "\n"
+		   "mem size\t\t: 0x%08x\n"
+		   "console baud\t\t: %d\n"
+		   "\n"
+		   "core clock\t: %u MHz\n"
+		   "CPM  clock\t: %u MHz\n"
+		   "bus  clock\t: %u MHz\n",
+		   CPUINFO_VENDOR, CPUINFO_MACHINE, bp->bi_memsize,
+		   bp->bi_baudrate, bp->bi_intfreq / 1000000,
+		   bp->bi_cpmfreq / 1000000, bp->bi_busfreq / 1000000);
 	return 0;
 }
 
@@ -160,19 +168,18 @@ m8260_show_percpuinfo(struct seq_file *m, int i)
 static void __init
 m8260_init_IRQ(void)
 {
-	int i;
-	void cpm_interrupt_init(void);
-
-        for ( i = 0 ; i < NR_SIU_INTS ; i++ )
-                irq_desc[i].handler = &ppc8260_pic;
+	cpm2_init_IRQ();
 
 	/* Initialize the default interrupt mapping priorities,
 	 * in case the boot rom changed something on us.
 	 */
-	immr->im_intctl.ic_sicr = 0;
-	immr->im_intctl.ic_siprr = 0x05309770;
-	immr->im_intctl.ic_scprrh = 0x05309770;
-	immr->im_intctl.ic_scprrl = 0x05309770;
+	cpm2_immr->im_intctl.ic_siprr = 0x05309770;
+
+#if defined(CONFIG_PCI) && (defined(CONFIG_ADS8272) || defined(CONFIG_PQ2FADS))
+ 	/* Initialize stuff for the 82xx CPLD IC and install demux  */
+ 	pq2pci_init_irq();
+#endif
+
 }
 
 /*
@@ -181,10 +188,7 @@ m8260_init_IRQ(void)
 static unsigned long __init
 m8260_find_end_of_memory(void)
 {
-	bd_t	*binfo;
-	extern unsigned char __res[];
-
-	binfo = (bd_t *)__res;
+	bd_t *binfo = (bd_t *)__res;
 
 	return binfo->bi_memsize;
 }
@@ -200,11 +204,17 @@ m8260_map_io(void)
 	uint addr;
 
 	/* Map IMMR region to a 256MB BAT */
-	addr = (immr != NULL) ? (uint)immr : IMAP_ADDR;
+	addr = (cpm2_immr != NULL) ? (uint)cpm2_immr : CPM_MAP_ADDR;
 	io_block_mapping(addr, addr, 0x10000000, _PAGE_IO);
 
 	/* Map I/O region to a 256MB BAT */
 	io_block_mapping(IO_VIRT_ADDR, IO_PHYS_ADDR, 0x10000000, _PAGE_IO);
+}
+
+/* Place-holder for board-specific ppc_md hooking */
+void __attribute__ ((weak)) __init
+m82xx_board_init(void)
+{
 }
 
 /* Inputs:
@@ -219,7 +229,7 @@ m8260_map_io(void)
  *        command-line parameters.
  */
 void __init
-m8260_init(unsigned long r3, unsigned long r4, unsigned long r5,
+platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
 	      unsigned long r6, unsigned long r7)
 {
 	parse_bootinfo(find_bootinfo());
@@ -241,21 +251,21 @@ m8260_init(unsigned long r3, unsigned long r4, unsigned long r5,
 	}
 
 	ppc_md.setup_arch		= m8260_setup_arch;
-	ppc_md.show_percpuinfo		= m8260_show_percpuinfo;
-	ppc_md.irq_canonicalize	= NULL;
+	ppc_md.show_cpuinfo		= m8260_show_cpuinfo;
 	ppc_md.init_IRQ			= m8260_init_IRQ;
-	ppc_md.get_irq			= m8260_get_irq;
-	ppc_md.init			= NULL;
+	ppc_md.get_irq			= cpm2_get_irq;
 
 	ppc_md.restart			= m8260_restart;
 	ppc_md.power_off		= m8260_power_off;
 	ppc_md.halt			= m8260_halt;
 
-	ppc_md.time_init		= NULL;
 	ppc_md.set_rtc_time		= m8260_set_rtc_time;
 	ppc_md.get_rtc_time		= m8260_get_rtc_time;
 	ppc_md.calibrate_decr		= m8260_calibrate_decr;
 
 	ppc_md.find_end_of_memory	= m8260_find_end_of_memory;
 	ppc_md.setup_io_mappings	= m8260_map_io;
+
+	/* Call back for board-specific settings and overrides. */
+	m82xx_board_init();
 }

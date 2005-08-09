@@ -19,6 +19,8 @@
 
 #include <asm/debug.h>
 
+#define TAPE_DBF_AREA	tape_core_dbf
+
 #include "tape.h"
 
 #define PRINTK_HEADER "TAPE_BLOCK: "
@@ -223,8 +225,8 @@ tapeblock_setup_device(struct tape_device * device)
 	if (!blkdat->request_queue)
 		return -ENOMEM;
 
-	elevator_exit(blkdat->request_queue);
-	rc = elevator_init(blkdat->request_queue, &elevator_noop);
+	elevator_exit(blkdat->request_queue->elevator);
+	rc = elevator_init(blkdat->request_queue, "noop");
 	if (rc)
 		goto cleanup_queue;
 

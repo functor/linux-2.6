@@ -1,4 +1,4 @@
-/* $Id: process.c,v 1.3 2003/07/04 08:27:41 starvik Exp $
+/* $Id: process.c,v 1.9 2004/10/19 13:07:37 starvik Exp $
  * 
  *  linux/arch/cris/kernel/process.c
  *
@@ -16,6 +16,7 @@
 #include <linux/err.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
+#include <asm/arch/svinto.h>
 #include <linux/init.h>
 
 #ifdef CONFIG_ETRAX_GPIO
@@ -31,6 +32,15 @@ void default_idle(void)
 #ifdef CONFIG_ETRAX_GPIO
   etrax_gpio_wake_up_check();
 #endif
+}
+
+/*
+ * Free current thread data structures etc..
+ */
+
+void exit_thread(void)
+{
+	/* Nothing needs to be done.  */
 }
 
 /* if the watchdog is enabled, we can simply disable interrupts and go
@@ -122,7 +132,7 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long usp,
 	*childregs = *regs;  /* struct copy of pt_regs */
         
         p->set_child_tid = p->clear_child_tid = NULL;
-	
+
         childregs->r10 = 0;  /* child returns 0 after a fork/clone */
 	
 	/* put the switch stack right below the pt_regs */
@@ -179,7 +189,7 @@ asmlinkage int sys_clone(unsigned long newusp, unsigned long flags,
 {
 	if (!newusp)
 		newusp = rdusp();
-	return do_fork(flags & ~CLONE_IDLETASK, newusp, regs, 0, parent_tid, child_tid);
+	return do_fork(flags, newusp, regs, 0, parent_tid, child_tid);
 }
 
 /* vfork is a system call in i386 because of register-pressure - maybe
@@ -213,13 +223,6 @@ asmlinkage int sys_execve(const char *fname, char **argv, char **envp,
 	return error;
 }
 
-/*
- * These bracket the sleeping functions..
- */
-
-#define first_sched     ((unsigned long) scheduling_functions_start_here)
-#define last_sched      ((unsigned long) scheduling_functions_end_here)
-
 unsigned long get_wchan(struct task_struct *p)
 {
 #if 0
@@ -240,8 +243,8 @@ unsigned long get_wchan(struct task_struct *p)
                 if (ebp < stack_page || ebp > 8184+stack_page)
                         return 0;
                 eip = *(unsigned long *) (ebp+4);
-                if (eip < first_sched || eip >= last_sched)
-                        return eip;
+		if (!in_sched_functions(eip))
+			return eip;
                 ebp = *(unsigned long *) ebp;
         } while (count++ < 16);
 #endif
@@ -249,3 +252,19 @@ unsigned long get_wchan(struct task_struct *p)
 }
 #undef last_sched
 #undef first_sched
+
+void show_regs(struct pt_regs * regs)
+{
+	unsigned long usp = rdusp();
+	printk("IRP: %08lx SRP: %08lx DCCR: %08lx USP: %08lx MOF: %08lx\n",
+	       regs->irp, regs->srp, regs->dccr, usp, regs->mof );
+	printk(" r0: %08lx  r1: %08lx   r2: %08lx  r3: %08lx\n",
+	       regs->r0, regs->r1, regs->r2, regs->r3);
+	printk(" r4: %08lx  r5: %08lx   r6: %08lx  r7: %08lx\n",
+	       regs->r4, regs->r5, regs->r6, regs->r7);
+	printk(" r8: %08lx  r9: %08lx  r10: %08lx r11: %08lx\n",
+	       regs->r8, regs->r9, regs->r10, regs->r11);
+	printk("r12: %08lx r13: %08lx oR10: %08lx\n",
+	       regs->r12, regs->r13, regs->orig_r10);
+}
+

@@ -31,15 +31,13 @@
 
 #include <linux/types.h>
 #include <linux/pci.h>
+#include <linux/delay.h>
 #include <asm/semaphore.h>
 #include <asm/io.h>		
+#include <linux/pcieport_if.h>
 #include "pci_hotplug.h"
 
-#if !defined(CONFIG_HOTPLUG_PCI_PCIE_MODULE)
-	#define MY_NAME	"pciehp"
-#else
-	#define MY_NAME	THIS_MODULE->name
-#endif
+#define MY_NAME	"pciehp"
 
 extern int pciehp_poll_mode;
 extern int pciehp_poll_time;
@@ -72,9 +70,7 @@ struct pci_func {
 	struct pci_dev* pci_dev;
 };
 
-#define SLOT_MAGIC	0x67267321
 struct slot {
-	u32 magic;
 	struct slot *next;
 	u8 bus;
 	u8 device;
@@ -108,9 +104,9 @@ struct event_info {
 struct controller {
 	struct controller *next;
 	struct semaphore crit_sect;	/* critical section semaphore */
-	void * hpc_ctlr_handle;		/* HPC controller handle */
+	void *hpc_ctlr_handle;		/* HPC controller handle */
 	int num_slots;			/* Number of slots on ctlr */
-	int slot_num_inc;			/* 1 or -1 */
+	int slot_num_inc;		/* 1 or -1 */
 	struct pci_resource *mem_head;
 	struct pci_resource *p_mem_head;
 	struct pci_resource *io_head;
@@ -132,9 +128,9 @@ struct controller {
 	enum pci_bus_speed speed;
 	u32 first_slot;		/* First physical slot number */  /* PCIE only has 1 slot */
 	u8 slot_bus;		/* Bus where the slots handled by this controller sit */
-	u8 push_flag;
-	u16 ctlrcap;
+	u8 ctrlcap;
 	u16 vendor_id;
+	u8 cap_base;
 };
 
 struct irq_mapping {
@@ -185,24 +181,35 @@ struct resource_lists {
 
 #define DISABLE_CARD			1
 
+/* Field definitions in Slot Capabilities Register */
+#define ATTN_BUTTN_PRSN	0x00000001
+#define	PWR_CTRL_PRSN	0x00000002
+#define MRL_SENS_PRSN	0x00000004
+#define ATTN_LED_PRSN	0x00000008
+#define PWR_LED_PRSN	0x00000010
+#define HP_SUPR_RM_SUP	0x00000020
+
+#define ATTN_BUTTN(cap)		(cap & ATTN_BUTTN_PRSN)
+#define POWER_CTRL(cap)		(cap & PWR_CTRL_PRSN)
+#define MRL_SENS(cap)		(cap & MRL_SENS_PRSN)
+#define ATTN_LED(cap)		(cap & ATTN_LED_PRSN)
+#define PWR_LED(cap)		(cap & PWR_LED_PRSN) 
+#define HP_SUPR_RM(cap)		(cap & HP_SUPR_RM_SUP)
+
 /*
  * error Messages
  */
 #define msg_initialization_err	"Initialization failure, error=%d\n"
 #define msg_HPC_rev_error	"Unsupported revision of the PCI hot plug controller found.\n"
 #define msg_HPC_non_pcie	"The PCI hot plug controller is not supported by this driver.\n"
-#define msg_HPC_not_supported	"This system is not supported by this version of pciephd mdoule. Upgrade to a newer version of pciehpd\n"
+#define msg_HPC_not_supported	"This system is not supported by this version of pciephd module. Upgrade to a newer version of pciehpd\n"
 #define msg_unable_to_save	"Unable to store PCI hot plug add resource information. This system must be rebooted before adding any PCI devices.\n"
 #define msg_button_on		"PCI slot #%d - powering on due to button press.\n"
 #define msg_button_off		"PCI slot #%d - powering off due to button press.\n"
 #define msg_button_cancel	"PCI slot #%d - action canceled due to button press.\n"
 #define msg_button_ignore	"PCI slot #%d - button press ignored.  (action in progress...)\n"
 
-/* sysfs function for the hotplug controller info */
-extern void pciehp_create_ctrl_files	(struct controller *ctrl);
-
 /* controller functions */
-extern void	pciehp_pushbutton_thread		(unsigned long event_pointer);
 extern int	pciehprm_find_available_resources	(struct controller *ctrl);
 extern int	pciehp_event_start_thread	(void);
 extern void	pciehp_event_stop_thread	(void);
@@ -239,46 +246,9 @@ extern struct pci_func *pciehp_slot_list[256];
 
 /* Inline functions */
 
-
-/* Inline functions to check the sanity of a pointer that is passed to us */
-static inline int slot_paranoia_check (struct slot *slot, const char *function)
-{
-	if (!slot) {
-		dbg("%s - slot == NULL", function);
-		return -1;
-	}
-	if (slot->magic != SLOT_MAGIC) {
-		dbg("%s - bad magic number for slot", function);
-		return -1;
-	}
-	if (!slot->hotplug_slot) {
-		dbg("%s - slot->hotplug_slot == NULL!", function);
-		return -1;
-	}
-	return 0;
-}
-
-static inline struct slot *get_slot (struct hotplug_slot *hotplug_slot, const char *function)
-{ 
-	struct slot *slot;
-
-	if (!hotplug_slot) {
-		dbg("%s - hotplug_slot == NULL\n", function);
-		return NULL;
-	}
-
-	slot = (struct slot *)hotplug_slot->private;
-	if (slot_paranoia_check (slot, function))
-                return NULL;
-	return slot;
-}
-
-static inline struct slot *pciehp_find_slot (struct controller *ctrl, u8 device)
+static inline struct slot *pciehp_find_slot(struct controller *ctrl, u8 device)
 {
 	struct slot *p_slot, *tmp_slot = NULL;
-
-	if (!ctrl)
-		return NULL;
 
 	p_slot = ctrl->slot;
 
@@ -294,10 +264,10 @@ static inline struct slot *pciehp_find_slot (struct controller *ctrl, u8 device)
 		p_slot = tmp_slot;
 	}
 
-	return (p_slot);
+	return p_slot;
 }
 
-static inline int wait_for_ctrl_irq (struct controller *ctrl)
+static inline int wait_for_ctrl_irq(struct controller *ctrl)
 {
 	int retval = 0;
 
@@ -305,14 +275,12 @@ static inline int wait_for_ctrl_irq (struct controller *ctrl)
 
 	dbg("%s : start\n", __FUNCTION__);
 	add_wait_queue(&ctrl->queue, &wait);
-	set_current_state(TASK_INTERRUPTIBLE);
-	if (!pciehp_poll_mode) {
+	if (!pciehp_poll_mode)
 		/* Sleep for up to 1 second */
-		schedule_timeout(1*HZ);
-	} else
-		schedule_timeout(2.5*HZ);
+		msleep_interruptible(1000);
+	else
+		msleep_interruptible(2500);
 	
-	set_current_state(TASK_RUNNING);
 	remove_wait_queue(&ctrl->queue, &wait);
 	if (signal_pending(current))
 		retval =  -EINTR;
@@ -345,7 +313,7 @@ enum php_ctlr_type {
 
 typedef u8(*php_intr_callback_t) (unsigned int change_id, void *instance_id);
 
-int pcie_init( struct controller *ctrl, struct pci_dev *pdev,
+int pcie_init(struct controller *ctrl, struct pcie_device *dev,
 		php_intr_callback_t attention_button_callback,
 		php_intr_callback_t switch_change_callback,
 		php_intr_callback_t presence_change_callback,
@@ -353,20 +321,19 @@ int pcie_init( struct controller *ctrl, struct pci_dev *pdev,
 
 
 /* This has no meaning for PCI Express, as there is only 1 slot per port */
-int pcie_get_ctlr_slot_config( struct controller *ctrl,
+int pcie_get_ctlr_slot_config(struct controller *ctrl,
 		int *num_ctlr_slots,
 		int *first_device_num,
 		int *physical_slot_num,
-		int *updown,
-		int *flags);
+		u8 *ctrlcap);
 
 struct hpc_ops {
-	int	(*power_on_slot )		(struct slot *slot);
-	int	(*power_off_slot )		(struct slot *slot);
-	int	(*get_power_status)		(struct slot *slot, u8 *status);
+	int	(*power_on_slot)	(struct slot *slot);
+	int	(*power_off_slot)	(struct slot *slot);
+	int	(*get_power_status)	(struct slot *slot, u8 *status);
 	int	(*get_attention_status)	(struct slot *slot, u8 *status);
 	int	(*set_attention_status)	(struct slot *slot, u8 status);
-	int	(*get_latch_status)		(struct slot *slot, u8 *status);
+	int	(*get_latch_status)	(struct slot *slot, u8 *status);
 	int	(*get_adapter_status)	(struct slot *slot, u8 *status);
 
 	int	(*get_max_bus_speed)	(struct slot *slot, enum pci_bus_speed *speed);
@@ -380,7 +347,7 @@ struct hpc_ops {
 	void	(*green_led_off)	(struct slot *slot);
 	void	(*green_led_blink)	(struct slot *slot);
 	void	(*release_ctlr)		(struct controller *ctrl);
-	int (*check_lnk_status)		(struct controller *ctrl);
+	int	(*check_lnk_status)	(struct controller *ctrl);
 };
 
 #endif				/* _PCIEHP_H */

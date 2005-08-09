@@ -19,10 +19,9 @@
  * be hash_next and hash_prev.
  */
 struct svc_cacherep {
-	struct svc_cacherep *	c_hash_next;
-	struct svc_cacherep *	c_hash_prev;
-	struct svc_cacherep *	c_lru_next;
-	struct svc_cacherep *	c_lru_prev;
+	struct hlist_node	c_hash;
+	struct list_head	c_lru;
+
 	unsigned char		c_state,	/* unused, inprog, done */
 				c_type,		/* status, buffer */
 				c_secure : 1;	/* req came from port < 1024 */
@@ -33,7 +32,7 @@ struct svc_cacherep {
 	u32			c_vers;
 	unsigned long		c_timestamp;
 	union {
-		struct iovec	u_vec;
+		struct kvec	u_vec;
 		u32		u_status;
 	}			c_u;
 };

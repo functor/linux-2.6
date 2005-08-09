@@ -3,23 +3,15 @@
 
 #include <linux/config.h>
 #include <linux/mm.h>
-#include <linux/device.h>
 #include <asm/scatterlist.h>
 #include <asm/io.h>
+
+extern struct bus_type pci_bus_type;
 
 /* arch/sh/mm/consistent.c */
 extern void *consistent_alloc(int gfp, size_t size, dma_addr_t *handle);
 extern void consistent_free(void *vaddr, size_t size);
 extern void consistent_sync(void *vaddr, size_t size, int direction);
-
-#ifdef CONFIG_SH_DREAMCAST
-struct pci_dev;
-extern struct bus_type pci_bus_type;
-extern void *__pci_alloc_consistent(struct pci_dev *hwdev, size_t size,
-				    dma_addr_t *dma_handle);
-extern void __pci_free_consistent(struct pci_dev *hwdev, size_t size,
-				  void *vaddr, dma_addr_t dma_handle);
-#endif
 
 #define dma_supported(dev, mask)	(1)
 
@@ -36,14 +28,13 @@ static inline int dma_set_mask(struct device *dev, u64 mask)
 static inline void *dma_alloc_coherent(struct device *dev, size_t size,
 			 dma_addr_t *dma_handle, int flag)
 {
-	/*
-	 * Some platforms have special pci_alloc_consistent() implementations,
-	 * in these instances we can't use the generic consistent_alloc().
-	 */
-#ifdef CONFIG_SH_DREAMCAST
-	if (dev && dev->bus == &pci_bus_type)
-		return __pci_alloc_consistent(NULL, size, dma_handle);
-#endif
+	if (sh_mv.mv_consistent_alloc) {
+		void *ret;
+
+		ret = sh_mv.mv_consistent_alloc(dev, size, dma_handle, flag);
+		if (ret != NULL)
+			return ret;
+	}
 
 	return consistent_alloc(flag, size, dma_handle);
 }
@@ -51,15 +42,13 @@ static inline void *dma_alloc_coherent(struct device *dev, size_t size,
 static inline void dma_free_coherent(struct device *dev, size_t size,
 		       void *vaddr, dma_addr_t dma_handle)
 {
-	/*
-	 * Same note as above applies to pci_free_consistent()..
-	 */
-#ifdef CONFIG_SH_DREAMCAST
-	if (dev && dev->bus == &pci_bus_type) {
-		__pci_free_consistent(NULL, size, vaddr, dma_handle);
-		return;
+	if (sh_mv.mv_consistent_free) {
+		int ret;
+
+		ret = sh_mv.mv_consistent_free(dev, size, vaddr, dma_handle);
+		if (ret == 0)
+			return;
 	}
-#endif
 
 	consistent_free(vaddr, size);
 }
@@ -152,6 +141,26 @@ static inline void dma_sync_sg(struct device *dev, struct scatterlist *sg,
 	}
 }
 
+static inline void dma_sync_single_for_cpu(struct device *dev,
+					   dma_addr_t dma_handle, size_t size,
+					   enum dma_data_direction dir)
+	__attribute__ ((alias("dma_sync_single")));
+
+static inline void dma_sync_single_for_device(struct device *dev,
+					   dma_addr_t dma_handle, size_t size,
+					   enum dma_data_direction dir)
+	__attribute__ ((alias("dma_sync_single")));
+
+static inline void dma_sync_sg_for_cpu(struct device *dev,
+				       struct scatterlist *sg, int nelems,
+				       enum dma_data_direction dir)
+	__attribute__ ((alias("dma_sync_sg")));
+
+static inline void dma_sync_sg_for_device(struct device *dev,
+				       struct scatterlist *sg, int nelems,
+				       enum dma_data_direction dir)
+	__attribute__ ((alias("dma_sync_sg")));
+
 static inline int dma_get_cache_alignment(void)
 {
 	/*
@@ -159,6 +168,11 @@ static inline int dma_get_cache_alignment(void)
 	 * L1_CACHE_BYTES wraps to this, so this is always safe.
 	 */
 	return L1_CACHE_BYTES;
+}
+
+static inline int dma_mapping_error(dma_addr_t dma_addr)
+{
+	return dma_addr == 0;
 }
 
 #endif /* __ASM_SH_DMA_MAPPING_H */

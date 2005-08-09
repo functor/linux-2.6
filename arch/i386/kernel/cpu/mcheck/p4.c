@@ -38,7 +38,9 @@ static int mce_num_extended_msrs = 0;
 #ifdef CONFIG_X86_MCE_P4THERMAL
 static void unexpected_thermal_interrupt(struct pt_regs *regs)
 {	
-	printk(KERN_ERR "CPU#%d: Unexpected LVT TMR interrupt!\n", smp_processor_id());
+	printk(KERN_ERR "CPU%d: Unexpected LVT TMR interrupt!\n",
+			smp_processor_id());
+	add_taint(TAINT_MACHINE_CHECK);
 }
 
 /* P4/Xeon Thermal transition interrupt handler */
@@ -46,25 +48,32 @@ static void intel_thermal_interrupt(struct pt_regs *regs)
 {
 	u32 l, h;
 	unsigned int cpu = smp_processor_id();
+	static unsigned long next[NR_CPUS];
 
 	ack_APIC_irq();
 
-	rdmsr (MSR_IA32_THERM_STATUS, l, h);
-	if (l & 1) {
-		printk(KERN_EMERG "CPU#%d: Temperature above threshold\n", cpu);
-		printk(KERN_EMERG "CPU#%d: Running in modulated clock mode\n", cpu);
+	if (time_after(next[cpu], jiffies))
+		return;
+
+	next[cpu] = jiffies + HZ*5;
+	rdmsr(MSR_IA32_THERM_STATUS, l, h);
+	if (l & 0x1) {
+		printk(KERN_EMERG "CPU%d: Temperature above threshold\n", cpu);
+		printk(KERN_EMERG "CPU%d: Running in modulated clock mode\n",
+				cpu);
+		add_taint(TAINT_MACHINE_CHECK);
 	} else {
-		printk(KERN_INFO "CPU#%d: Temperature/speed normal\n", cpu);
+		printk(KERN_INFO "CPU%d: Temperature/speed normal\n", cpu);
 	}
 }
 
 /* Thermal interrupt handler for this CPU setup */
 static void (*vendor_thermal_interrupt)(struct pt_regs *regs) = unexpected_thermal_interrupt;
 
-asmlinkage void smp_thermal_interrupt(struct pt_regs regs)
+fastcall void smp_thermal_interrupt(struct pt_regs *regs)
 {
 	irq_enter();
-	vendor_thermal_interrupt(&regs);
+	vendor_thermal_interrupt(regs);
 	irq_exit();
 }
 
@@ -89,13 +98,15 @@ static void __init intel_init_thermal(struct cpuinfo_x86 *c)
 	rdmsr (MSR_IA32_MISC_ENABLE, l, h);
 	h = apic_read(APIC_LVTTHMR);
 	if ((l & (1<<3)) && (h & APIC_DM_SMI)) {
-		printk(KERN_DEBUG "CPU#%d: Thermal monitoring handled by SMI\n", cpu);
+		printk(KERN_DEBUG "CPU%d: Thermal monitoring handled by SMI\n",
+				cpu);
 		return; /* -EBUSY */
 	}
 
 	/* check whether a vector already exists, temporarily masked? */	
 	if (h & APIC_VECTOR_MASK) {
-		printk(KERN_DEBUG "CPU#%d: Thermal LVT vector (%#x) already installed\n",
+		printk(KERN_DEBUG "CPU%d: Thermal LVT vector (%#x) already "
+				"installed\n",
 			cpu, (h & APIC_VECTOR_MASK));
 		return; /* -EBUSY */
 	}
@@ -116,7 +127,7 @@ static void __init intel_init_thermal(struct cpuinfo_x86 *c)
 	
 	l = apic_read (APIC_LVTTHMR);
 	apic_write_around (APIC_LVTTHMR, l & ~APIC_LVT_MASKED);
-	printk (KERN_INFO "CPU#%d: Thermal monitoring enabled\n", cpu);
+	printk (KERN_INFO "CPU%d: Thermal monitoring enabled\n", cpu);
 	return;
 }
 #endif /* CONFIG_X86_MCE_P4THERMAL */
@@ -148,7 +159,7 @@ done:
 	return mce_num_extended_msrs;
 }
 
-static asmlinkage void intel_machine_check(struct pt_regs * regs, long error_code)
+static fastcall void intel_machine_check(struct pt_regs * regs, long error_code)
 {
 	int recover=1;
 	u32 alow, ahigh, high, low;
@@ -213,6 +224,7 @@ static asmlinkage void intel_machine_check(struct pt_regs * regs, long error_cod
 			wrmsr(msr, 0UL, 0UL);
 			/* Serialize */
 			wmb();
+			add_taint(TAINT_MACHINE_CHECK);
 		}
 	}
 	mcgstl &= ~(1<<2);
@@ -247,7 +259,8 @@ void __init intel_p4_mcheck_init(struct cpuinfo_x86 *c)
 	rdmsr (MSR_IA32_MCG_CAP, l, h);
 	if (l & (1<<9))	{/* MCG_EXT_P */
 		mce_num_extended_msrs = (l >> 16) & 0xff;
-		printk (KERN_INFO "CPU#%d: Intel P4/Xeon Extended MCE MSRs (%d) available\n",
+		printk (KERN_INFO "CPU%d: Intel P4/Xeon Extended MCE MSRs (%d)"
+				" available\n",
 			smp_processor_id(), mce_num_extended_msrs);
 
 #ifdef CONFIG_X86_MCE_P4THERMAL

@@ -119,7 +119,9 @@ _GLOBAL(__save_cpu_setup)
 	/* We only deal with 970 for now */
 	mfspr	r0,SPRN_PVR
 	srwi	r0,r0,16
-	cmpwi	r0,0x39
+	cmpwi	cr0,r0,0x39
+	cmpwi	cr1,r0,0x3c
+	cror	4*cr0+eq,4*cr0+eq,4*cr1+eq
 	bne	1f
 
 	/* Save HID0,1,4 and 5 */
@@ -149,8 +151,19 @@ _GLOBAL(__restore_cpu_setup)
 	/* We only deal with 970 for now */
 	mfspr	r0,SPRN_PVR
 	srwi	r0,r0,16
-	cmpwi	r0,0x39
+	cmpwi	cr0,r0,0x39
+	cmpwi	cr1,r0,0x3c
+	cror	4*cr0+eq,4*cr0+eq,4*cr1+eq
 	bne	1f
+
+	/* Before accessing memory, we make sure rm_ci is clear */
+	li	r0,0
+	mfspr	r3,SPRN_HID4
+	rldimi	r3,r0,40,23	/* clear bit 23 (rm_ci) */
+	sync
+	mtspr	SPRN_HID4,r3
+	isync
+	sync
 
 	/* Clear interrupt prefix */
 	li	r0,0

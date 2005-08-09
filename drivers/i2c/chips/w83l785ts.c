@@ -32,8 +32,10 @@
 
 #include <linux/config.h>
 #include <linux/module.h>
+#include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/jiffies.h>
 #include <linux/i2c.h>
 #include <linux/i2c-sensor.h>
 
@@ -46,9 +48,7 @@
  */
 
 static unsigned short normal_i2c[] = { 0x2e, I2C_CLIENT_END };
-static unsigned short normal_i2c_range[] = { I2C_CLIENT_END };
 static unsigned int normal_isa[] = { I2C_CLIENT_ISA_END };
-static unsigned int normal_isa_range[] = { I2C_CLIENT_ISA_END };
 
 /*
  * Insmod parameters
@@ -115,12 +115,6 @@ struct w83l785ts_data {
 };
 
 /*
- * Internal variables
- */
-
-static int w83l785ts_id = 0;
-
-/*
  * Sysfs stuff
  */
 
@@ -136,8 +130,8 @@ static ssize_t show_temp_over(struct device *dev, char *buf)
 	return sprintf(buf, "%d\n", TEMP_FROM_REG(data->temp_over));
 }
 
-static DEVICE_ATTR(temp1_input, S_IRUGO, show_temp, NULL)
-static DEVICE_ATTR(temp1_max, S_IRUGO, show_temp_over, NULL)
+static DEVICE_ATTR(temp1_input, S_IRUGO, show_temp, NULL);
+static DEVICE_ATTR(temp1_max, S_IRUGO, show_temp_over, NULL);
 
 /*
  * Real code
@@ -145,7 +139,7 @@ static DEVICE_ATTR(temp1_max, S_IRUGO, show_temp_over, NULL)
 
 static int w83l785ts_attach_adapter(struct i2c_adapter *adapter)
 {
-	if (!(adapter->class & I2C_ADAP_CLASS_SMBUS))
+	if (!(adapter->class & I2C_CLASS_HWMON))
 		return 0;
 	return i2c_detect(adapter, &addr_data, w83l785ts_detect);
 }
@@ -230,7 +224,6 @@ static int w83l785ts_detect(struct i2c_adapter *adapter, int address, int kind)
 
 	/* We can fill in the remaining client fields. */
 	strlcpy(new_client->name, "w83l785ts", I2C_NAME_SIZE);
-	new_client->id = w83l785ts_id++;
 	data->valid = 0;
 	init_MUTEX(&data->update_lock);
 
@@ -281,14 +274,17 @@ static u8 w83l785ts_read_value(struct i2c_client *client, u8 reg, u8 defval)
 	 * default value requested by the caller. */
 	for (i = 1; i <= MAX_RETRIES; i++) {
 		value = i2c_smbus_read_byte_data(client, reg);
-		if (value >= 0)
+		if (value >= 0) {
+			dev_dbg(&client->dev, "Read 0x%02x from register "
+				"0x%02x.\n", value, reg);
 			return value;
+		}
 		dev_dbg(&client->dev, "Read failed, will retry in %d.\n", i);
-		i2c_delay(i);
+		msleep(i);
 	}
 
-	dev_err(&client->dev, "Couldn't read value from register. "
-		"Please report.\n");
+	dev_err(&client->dev, "Couldn't read value from register 0x%02x. "
+		"Please report.\n", reg);
 	return defval;
 }
 
@@ -299,9 +295,7 @@ static struct w83l785ts_data *w83l785ts_update_device(struct device *dev)
 
 	down(&data->update_lock);
 
-	if (!data->valid
-	 || (jiffies - data->last_updated > HZ * 2)
-	 || (jiffies < data->last_updated)) {
+	if (!data->valid || time_after(jiffies, data->last_updated + HZ * 2)) {
 		dev_dbg(&client->dev, "Updating w83l785ts data.\n");
 		data->temp = w83l785ts_read_value(client,
 			     W83L785TS_REG_TEMP, data->temp);

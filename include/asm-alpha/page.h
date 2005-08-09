@@ -1,6 +1,7 @@
 #ifndef _ALPHA_PAGE_H
 #define _ALPHA_PAGE_H
 
+#include <linux/config.h>
 #include <asm/pal.h>
 
 /* PAGE_SHIFT determines the page size */
@@ -16,6 +17,9 @@
 
 extern void clear_page(void *page);
 #define clear_user_page(page, vaddr, pg)	clear_page(page)
+
+#define alloc_zeroed_user_highpage(vma, vaddr) alloc_page_vma(GFP_HIGHUSER | __GFP_ZERO, vma, vmaddr)
+#define __HAVE_ARCH_ALLOC_ZEROED_USER_HIGHPAGE
 
 extern void copy_page(void * _to, void * _from);
 #define copy_user_page(to, from, vaddr, pg)	copy_page(to, from)
@@ -73,16 +77,24 @@ extern __inline__ int get_order(unsigned long size)
 	return order;
 }
 
-#endif /* !__ASSEMBLY__ */
+#ifdef USE_48_BIT_KSEG
+#define PAGE_OFFSET		0xffff800000000000UL
+#else
+#define PAGE_OFFSET		0xfffffc0000000000UL
+#endif
 
-/* to align the pointer to the (next) page boundary */
-#define PAGE_ALIGN(addr)	(((addr)+PAGE_SIZE-1)&PAGE_MASK)
+#else
 
 #ifdef USE_48_BIT_KSEG
 #define PAGE_OFFSET		0xffff800000000000
 #else
 #define PAGE_OFFSET		0xfffffc0000000000
 #endif
+
+#endif /* !__ASSEMBLY__ */
+
+/* to align the pointer to the (next) page boundary */
+#define PAGE_ALIGN(addr)	(((addr)+PAGE_SIZE-1)&PAGE_MASK)
 
 #define __pa(x)			((unsigned long) (x) - PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long) (x) + PAGE_OFFSET))

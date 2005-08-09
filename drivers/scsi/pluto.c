@@ -21,7 +21,7 @@
 #include <asm/irq.h>
 
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include "../fc4/fcp_impl.h"
 #include "pluto.h"
 
@@ -45,7 +45,7 @@ static struct ctrl_inquiry {
 	Scsi_Cmnd cmd;
 	char inquiry[256];
 	fc_channel *fc;
-} *fcs __initdata = { 0 };
+} *fcs __initdata;
 static int fcscount __initdata = 0;
 static atomic_t fcss __initdata = ATOMIC_INIT(0);
 DECLARE_MUTEX_LOCKED(fc_sem);

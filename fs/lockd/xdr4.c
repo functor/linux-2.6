@@ -56,16 +56,16 @@ nlm4_decode_cookie(u32 *p, struct nlm_cookie *c)
 		c->len=4;
 		memset(c->data, 0, 4);	/* hockeypux brain damage */
 	}
-	else if(len<=8)
+	else if(len<=NLM_MAXCOOKIELEN)
 	{
 		c->len=len;
 		memcpy(c->data, p, len);
-		p+=(len+3)>>2;
+		p+=XDR_QUADLEN(len);
 	}
 	else 
 	{
 		printk(KERN_NOTICE
-			"lockd: bad cookie size %d (only cookies under 8 bytes are supported.)\n", len);
+			"lockd: bad cookie size %d (only cookies under %d bytes are supported.)\n", len, NLM_MAXCOOKIELEN);
 		return NULL;
 	}
 	return p;
@@ -76,7 +76,7 @@ nlm4_encode_cookie(u32 *p, struct nlm_cookie *c)
 {
 	*p++ = htonl(c->len);
 	memcpy(p, c->data, c->len);
-	p+=(c->len+3)>>2;
+	p+=XDR_QUADLEN(c->len);
 	return p;
 }
 
@@ -191,7 +191,7 @@ nlm4_encode_testres(u32 *p, struct nlm_res *resp)
 
 	dprintk("xdr: before encode_testres (p %p resp %p)\n", p, resp);
 	if (!(p = nlm4_encode_cookie(p, &resp->cookie)))
-		return 0;
+		return NULL;
 	*p++ = resp->status;
 
 	if (resp->status == nlm_lck_denied) {
@@ -202,7 +202,7 @@ nlm4_encode_testres(u32 *p, struct nlm_res *resp)
 
 		/* Encode owner handle. */
 		if (!(p = xdr_encode_netobj(p, &resp->lock.oh)))
-			return 0;
+			return NULL;
 
 		start = loff_t_to_s64(fl->fl_start);
 		if (fl->fl_end == OFFSET_MAX)
@@ -515,7 +515,7 @@ nlm4clt_decode_res(struct rpc_rqst *req, u32 *p, struct nlm_res *resp)
  * Buffer requirements for NLM
  */
 #define NLM4_void_sz		0
-#define NLM4_cookie_sz		3	/* 1 len , 2 data */
+#define NLM4_cookie_sz		1+XDR_QUADLEN(NLM_MAXCOOKIELEN)
 #define NLM4_caller_sz		1+XDR_QUADLEN(NLM_MAXSTRLEN)
 #define NLM4_netobj_sz		1+XDR_QUADLEN(XDR_MAX_NETOBJ)
 /* #define NLM4_owner_sz		1+XDR_QUADLEN(NLM4_MAXOWNER) */

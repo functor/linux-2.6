@@ -18,6 +18,7 @@
 #include <linux/elfcore.h>
 #include <linux/vmalloc.h>
 #include <linux/highmem.h>
+#include <linux/init.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
@@ -53,7 +54,7 @@ struct memelfnote
 };
 
 static struct kcore_list *kclist;
-static rwlock_t kclist_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(kclist_lock);
 
 void
 kclist_add(struct kcore_list *new, void *addr, size_t size)
@@ -66,25 +67,6 @@ kclist_add(struct kcore_list *new, void *addr, size_t size)
 	kclist = new;
 	write_unlock(&kclist_lock);
 }
-
-struct kcore_list *
-kclist_del(void *addr)
-{
-	struct kcore_list *m, **p = &kclist;
-
-	write_lock(&kclist_lock);
-	for (m = *p; m; p = &m->next) {
-		if (m->addr == (unsigned long)addr) {
-			*p = m->next;
-			write_unlock(&kclist_lock);
-			return m;
-		}
-	}
-	write_unlock(&kclist_lock);
-	return 0;
-}
-
-extern char saved_command_line[];
 
 static size_t get_kcore_size(int *nphdr, size_t *elf_buflen)
 {
@@ -102,7 +84,7 @@ static size_t get_kcore_size(int *nphdr, size_t *elf_buflen)
 	}
 	*elf_buflen =	sizeof(struct elfhdr) + 
 			(*nphdr + 2)*sizeof(struct elf_phdr) + 
-			3 * sizeof(struct memelfnote) +
+			3 * (sizeof(struct elf_note) + 4) +
 			sizeof(struct elf_prstatus) +
 			sizeof(struct elf_prpsinfo) +
 			sizeof(struct task_struct);
@@ -183,7 +165,11 @@ static void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff)
 	elf->e_entry	= 0;
 	elf->e_phoff	= sizeof(struct elfhdr);
 	elf->e_shoff	= 0;
+#if defined(CONFIG_H8300)
+	elf->e_flags	= ELF_FLAGS;
+#else
 	elf->e_flags	= 0;
+#endif
 	elf->e_ehsize	= sizeof(struct elfhdr);
 	elf->e_phentsize= sizeof(struct elf_phdr);
 	elf->e_phnum	= nphdr;
@@ -278,8 +264,7 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 	unsigned long start;
 
 	read_lock(&kclist_lock);
-	tsz =  get_kcore_size(&nphdr, &elf_buflen);
-	proc_root_kcore->size = size = tsz + elf_buflen;
+	proc_root_kcore->size = size = get_kcore_size(&nphdr, &elf_buflen);
 	if (buflen == 0 || *fpos >= size) {
 		read_unlock(&kclist_lock);
 		return 0;

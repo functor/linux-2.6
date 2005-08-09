@@ -312,10 +312,10 @@ static inline int ffs(int x)
  * 'size' bits, starting the search at bit 'offset'. This is largely based
  * on Linus's ALPHA routines, which are pretty portable BTW.
  */
-static inline unsigned long find_next_zero_bit(unsigned long *addr,
+static inline unsigned long find_next_zero_bit(const unsigned long *addr,
     unsigned long size, unsigned long offset)
 {
-	unsigned long *p = addr + (offset >> 5);
+	const unsigned long *p = addr + (offset >> 5);
 	unsigned long result = offset & ~31UL;
 	unsigned long tmp;
 
@@ -366,9 +366,9 @@ found_middle:
  *
  * Scheduler induced bitop, do not use.
  */
-static inline int find_next_bit(unsigned long *addr, int size, int offset)
+static inline int find_next_bit(const unsigned long *addr, int size, int offset)
 {
-	unsigned long *p = addr + (offset >> 5);
+	const unsigned long *p = addr + (offset >> 5);
 	int num = offset & ~0x1f;
 	unsigned long word;
 
@@ -383,6 +383,17 @@ static inline int find_next_bit(unsigned long *addr, int size, int offset)
 	}
 	return num;
 }
+
+/**
+ * find_first_bit - find the first set bit in a memory region
+ * @addr: The address to start the search at
+ * @size: The maximum size to search
+ *
+ * Returns the bit-number of the first set bit, not the number of the byte
+ * containing a bit.
+ */
+#define find_first_bit(addr, size) \
+	find_next_bit((addr), (size), 0)
 
 /*
  */
@@ -435,10 +446,10 @@ static inline int __test_and_clear_le_bit(int nr, unsigned long *addr)
 	return retval;
 }
 
-static inline unsigned long find_next_zero_le_bit(unsigned long *addr,
+static inline unsigned long find_next_zero_le_bit(const unsigned long *addr,
     unsigned long size, unsigned long offset)
 {
-	unsigned long *p = addr + (offset >> 5);
+	const unsigned long *p = addr + (offset >> 5);
 	unsigned long result = offset & ~31UL;
 	unsigned long tmp;
 

@@ -187,9 +187,9 @@ int __init journal_init_revoke_caches(void)
 void journal_destroy_revoke_caches(void)
 {
 	kmem_cache_destroy(revoke_record_cache);
-	revoke_record_cache = 0;
+	revoke_record_cache = NULL;
 	kmem_cache_destroy(revoke_table_cache);
-	revoke_table_cache = 0;
+	revoke_table_cache = NULL;
 }
 
 /* Initialise the revoke table for a given journal to a given size. */
@@ -332,6 +332,7 @@ int journal_revoke(handle_t *handle, unsigned long blocknr,
 	struct block_device *bdev;
 	int err;
 
+	might_sleep();
 	if (bh_in)
 		BUFFER_TRACE(bh_in, "enter");
 
@@ -375,7 +376,12 @@ int journal_revoke(handle_t *handle, unsigned long blocknr,
            first having the revoke cancelled: it's illegal to free a
            block twice without allocating it in between! */
 	if (bh) {
-		J_ASSERT_BH(bh, !buffer_revoked(bh));
+		if (!J_EXPECT_BH(bh, !buffer_revoked(bh),
+				 "inconsistent data on disk")) {
+			if (!bh_in)
+				brelse(bh);
+			return -EIO;
+		}
 		set_buffer_revoked(bh);
 		set_buffer_revokevalid(bh);
 		if (bh_in) {
@@ -522,7 +528,7 @@ void journal_write_revoke_records(journal_t *journal,
 			kmem_cache_free(revoke_record_cache, record);
 		}
 	}
-	if (descriptor) 
+	if (descriptor)
 		flush_descriptor(journal, descriptor, offset);
 	jbd_debug(1, "Wrote %d revoke records\n", count);
 }
@@ -565,9 +571,9 @@ static void write_one_revoke_record(journal_t *journal,
 		if (!descriptor)
 			return;
 		header = (journal_header_t *) &jh2bh(descriptor)->b_data[0];
-		header->h_magic     = htonl(JFS_MAGIC_NUMBER);
-		header->h_blocktype = htonl(JFS_REVOKE_BLOCK);
-		header->h_sequence  = htonl(transaction->t_tid);
+		header->h_magic     = cpu_to_be32(JFS_MAGIC_NUMBER);
+		header->h_blocktype = cpu_to_be32(JFS_REVOKE_BLOCK);
+		header->h_sequence  = cpu_to_be32(transaction->t_tid);
 
 		/* Record it so that we can wait for IO completion later */
 		JBUFFER_TRACE(descriptor, "file as BJ_LogCtl");
@@ -577,8 +583,8 @@ static void write_one_revoke_record(journal_t *journal,
 		*descriptorp = descriptor;
 	}
 
-	* ((unsigned int *)(&jh2bh(descriptor)->b_data[offset])) = 
-		htonl(record->blocknr);
+	* ((__be32 *)(&jh2bh(descriptor)->b_data[offset])) = 
+		cpu_to_be32(record->blocknr);
 	offset += 4;
 	*offsetp = offset;
 }
@@ -603,10 +609,10 @@ static void flush_descriptor(journal_t *journal,
 	}
 
 	header = (journal_revoke_header_t *) jh2bh(descriptor)->b_data;
-	header->r_count = htonl(offset);
+	header->r_count = cpu_to_be32(offset);
 	set_buffer_jwrite(bh);
 	BUFFER_TRACE(bh, "write");
-	set_buffer_uptodate(bh);
+	set_buffer_dirty(bh);
 	ll_rw_block(WRITE, 1, &bh);
 }
 #endif

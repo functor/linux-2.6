@@ -1,7 +1,7 @@
 /*
- *	Intel CPU Microcode Update driver for Linux
+ *	Intel CPU Microcode Update Driver for Linux
  *
- *	Copyright (C) 2000 Tigran Aivazian
+ *	Copyright (C) 2000-2004 Tigran Aivazian
  *
  *	This driver allows to upgrade microcode on Intel processors
  *	belonging to IA-32 family - PentiumPro, Pentium II, 
@@ -32,7 +32,7 @@
  *		Added misc device support (now uses both devfs and misc).
  *		Added MICROCODE_IOCFREE ioctl to clear memory.
  *	1.05	09 Jun 2000, Simon Trimmer <simon@veritas.com>
- *		Messages for error cases (non intel & no suitable microcode).
+ *		Messages for error cases (non Intel & no suitable microcode).
  *	1.06	03 Aug 2000, Tigran Aivazian <tigran@veritas.com>
  *		Removed ->release(). Removed exclusive open and status bitmap.
  *		Added microcode_rwsem to serialize read()/write()/ioctl().
@@ -64,9 +64,13 @@
  *		Removed ->read() method and obsoleted MICROCODE_IOCFREE ioctl
  *		because we no longer hold a copy of applied microcode 
  *		in kernel memory.
+ *	1.14	25 Jun 2004 Tigran Aivazian <tigran@veritas.com>
+ *		Fix sigmatch() macro to handle old CPUs with pf == 0.
+ *		Thanks to Stuart Swales for pointing out this bug.
  */
 
-
+//#define DEBUG /* pr_debug */
+#include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/module.h>
@@ -80,17 +84,11 @@
 #include <asm/uaccess.h>
 #include <asm/processor.h>
 
-MODULE_DESCRIPTION("Intel CPU (IA-32) microcode update driver");
+MODULE_DESCRIPTION("Intel CPU (IA-32) Microcode Update Driver");
 MODULE_AUTHOR("Tigran Aivazian <tigran@veritas.com>");
 MODULE_LICENSE("GPL");
 
-#define MICROCODE_VERSION 	"1.13"
-#define MICRO_DEBUG 		0
-#if MICRO_DEBUG
-#define dprintk(x...) printk(KERN_INFO x)
-#else
-#define dprintk(x...)
-#endif
+#define MICROCODE_VERSION 	"1.14"
 
 #define DEFAULT_UCODE_DATASIZE 	(2000) 	  /* 2000 bytes */
 #define MC_HEADER_SIZE		(sizeof (microcode_header_t))  	  /* 48 bytes */
@@ -104,16 +102,19 @@ MODULE_LICENSE("GPL");
 #define get_datasize(mc) \
 	(((microcode_t *)mc)->hdr.datasize ? \
 	 ((microcode_t *)mc)->hdr.datasize : DEFAULT_UCODE_DATASIZE)
-#define sigmatch(s1, s2, p1, p2) (((s1) == (s2)) && ((p1) & (p2)))
+
+#define sigmatch(s1, s2, p1, p2) \
+	(((s1) == (s2)) && (((p1) & (p2)) || (((p1) == 0) && ((p2) == 0))))
+
 #define exttable_size(et) ((et)->count * EXT_SIGNATURE_SIZE + EXT_HEADER_SIZE)
 
 /* serialize access to the physical write to MSR 0x79 */
-static spinlock_t microcode_update_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(microcode_update_lock);
 
 /* no concurrent ->write()s are allowed on /dev/cpu/microcode */
 static DECLARE_MUTEX(microcode_sem);
 
-static void *user_buffer;		/* user area microcode data buffer */
+static void __user *user_buffer;	/* user area microcode data buffer */
 static unsigned int user_buffer_size;	/* it's size */
 
 typedef enum mc_error_code {
@@ -166,7 +167,7 @@ static void collect_cpu_info (void *unused)
 	__asm__ __volatile__ ("cpuid" : : : "ax", "bx", "cx", "dx");
 	/* get the current revision from MSR 0x8B */
 	rdmsr(MSR_IA32_UCODE_REV, val[0], uci->rev);
-	dprintk("microcode: collect_cpu_info : sig=0x%x, pf=0x%x, rev=0x%x\n", 
+	pr_debug("microcode: collect_cpu_info : sig=0x%x, pf=0x%x, rev=0x%x\n",
 			uci->sig, uci->pf, uci->rev);
 }
 
@@ -174,22 +175,22 @@ static inline void mark_microcode_update (int cpu_num, microcode_header_t *mc_he
 {
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu_num;
 
-	dprintk("Microcode Found.\n");
-	dprintk("   Header Revision 0x%x\n", mc_header->hdrver);
-	dprintk("   Loader Revision 0x%x\n", mc_header->ldrver);
-	dprintk("   Revision 0x%x \n", mc_header->rev);
-	dprintk("   Date %x/%x/%x\n",
+	pr_debug("Microcode Found.\n");
+	pr_debug("   Header Revision 0x%x\n", mc_header->hdrver);
+	pr_debug("   Loader Revision 0x%x\n", mc_header->ldrver);
+	pr_debug("   Revision 0x%x \n", mc_header->rev);
+	pr_debug("   Date %x/%x/%x\n",
 		((mc_header->date >> 24 ) & 0xff),
 		((mc_header->date >> 16 ) & 0xff),
 		(mc_header->date & 0xFFFF));
-	dprintk("   Signature 0x%x\n", sig);
-	dprintk("   Type 0x%x Family 0x%x Model 0x%x Stepping 0x%x\n",
+	pr_debug("   Signature 0x%x\n", sig);
+	pr_debug("   Type 0x%x Family 0x%x Model 0x%x Stepping 0x%x\n",
 		((sig >> 12) & 0x3),
 		((sig >> 8) & 0xf),
 		((sig >> 4) & 0xf),
 		((sig & 0xf)));
-	dprintk("   Processor Flags 0x%x\n", pf);
-	dprintk("   Checksum 0x%x\n", cksum);
+	pr_debug("   Processor Flags 0x%x\n", pf);
+	pr_debug("   Checksum 0x%x\n", cksum);
 
 	if (mc_header->rev < uci->rev) {
 		printk(KERN_ERR "microcode: CPU%d not 'upgrading' to earlier revision"
@@ -203,7 +204,7 @@ static inline void mark_microcode_update (int cpu_num, microcode_header_t *mc_he
 		goto out;
 	}
 
-	dprintk("microcode: CPU%d found a matching microcode update with "
+	pr_debug("microcode: CPU%d found a matching microcode update with "
 		" revision 0x%x (current=0x%x)\n", cpu_num, mc_header->rev, uci->rev);
 	uci->cksum = cksum;
 	uci->pf = pf; /* keep the original mc pf for cksum calculation */
@@ -363,7 +364,7 @@ static void do_update_one (void * unused)
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu_num;
 
 	if (uci->mc == NULL) {
-		printk(KERN_INFO "microcode: No suitable data for cpu %d\n", cpu_num);
+		printk(KERN_INFO "microcode: No new microcode data for CPU%d\n", cpu_num);
 		return;
 	}
 
@@ -425,7 +426,7 @@ out:
 	return error;
 }
 
-static ssize_t microcode_write (struct file *file, const char *buf, size_t len, loff_t *ppos)
+static ssize_t microcode_write (struct file *file, const char __user *buf, size_t len, loff_t *ppos)
 {
 	ssize_t ret;
 
@@ -441,7 +442,7 @@ static ssize_t microcode_write (struct file *file, const char *buf, size_t len, 
 
 	down(&microcode_sem);
 
-	user_buffer = (void *) buf;
+	user_buffer = (void __user *) buf;
 	user_buffer_size = (int) len;
 
 	ret = do_microcode_update();
@@ -479,6 +480,7 @@ static struct file_operations microcode_fops = {
 static struct miscdevice microcode_dev = {
 	.minor		= MICROCODE_MINOR,
 	.name		= "microcode",
+	.devfs_name	= "cpu/microcode",
 	.fops		= &microcode_fops,
 };
 
@@ -495,16 +497,14 @@ static int __init microcode_init (void)
 	}
 
 	printk(KERN_INFO 
-		"IA-32 Microcode Update Driver: v%s <tigran@veritas.com>\n", 
-		MICROCODE_VERSION);
+		"IA-32 Microcode Update Driver: v" MICROCODE_VERSION " <tigran@veritas.com>\n");
 	return 0;
 }
 
 static void __exit microcode_exit (void)
 {
 	misc_deregister(&microcode_dev);
-	printk(KERN_INFO "IA-32 Microcode Update Driver v%s unregistered\n", 
-			MICROCODE_VERSION);
+	printk(KERN_INFO "IA-32 Microcode Update Driver v" MICROCODE_VERSION " unregistered\n");
 }
 
 module_init(microcode_init)

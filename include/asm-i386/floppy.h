@@ -204,7 +204,7 @@ static unsigned long vdma_mem_alloc(unsigned long size)
 static void _fd_dma_mem_free(unsigned long addr, unsigned long size)
 {
 	if((unsigned int) addr >= (unsigned int) high_memory)
-		return vfree((void *)addr);
+		vfree((void *)addr);
 	else
 		free_pages(addr, get_order(size));		
 }
@@ -257,7 +257,7 @@ static int hard_dma_setup(char *addr, unsigned long size, int mode, int io)
 	return 0;
 }
 
-struct fd_routine_l {
+static struct fd_routine_l {
 	int (*_request_dma)(unsigned int dmanr, const char * device_id);
 	void (*_free_dma)(unsigned int dmanr);
 	int (*_get_dma_residue)(unsigned int dummy);

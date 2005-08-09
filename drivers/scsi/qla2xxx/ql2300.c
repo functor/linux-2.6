@@ -10,7 +10,6 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 
-#include "qla_os.h"
 #include "qla_def.h"
 
 static char qla_driver_name[] = "qla2300";
@@ -99,5 +98,6 @@ module_init(qla2300_init);
 module_exit(qla2300_exit);
 
 MODULE_AUTHOR("QLogic Corporation");
-MODULE_DESCRIPTION("QLogic ISP2300 FC-SCSI Host Bus Adapter driver");
+MODULE_DESCRIPTION("QLogic ISP23xx FC-SCSI Host Bus Adapter driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(QLA2XXX_VERSION);

@@ -32,6 +32,21 @@ static inline void wrmsrl (unsigned long msr, unsigned long long val)
 	wrmsr (msr, lo, hi);
 }
 
+/* wrmsr with exception handling */
+#define wrmsr_safe(msr,a,b) ({ int ret__;						\
+	asm volatile("2: wrmsr ; xorl %0,%0\n"						\
+		     "1:\n\t"								\
+		     ".section .fixup,\"ax\"\n\t"					\
+		     "3:  movl %4,%0 ; jmp 1b\n\t"					\
+		     ".previous\n\t"							\
+ 		     ".section __ex_table,\"a\"\n"					\
+		     "   .align 4\n\t"							\
+		     "   .long 	2b,3b\n\t"						\
+		     ".previous"							\
+		     : "=a" (ret__)							\
+		     : "c" (msr), "0" (a), "d" (b), "i" (-EFAULT));\
+	ret__; })
+
 #define rdtsc(low,high) \
      __asm__ __volatile__("rdtsc" : "=a" (low), "=d" (high))
 
@@ -216,6 +231,15 @@ static inline void wrmsrl (unsigned long msr, unsigned long long val)
 #define MSR_K7_CLK_CTL			0xC001001b
 #define MSR_K7_FID_VID_CTL		0xC0010041
 #define MSR_K7_FID_VID_STATUS		0xC0010042
+
+/* extended feature register */
+#define MSR_EFER 			0xc0000080
+
+/* EFER bits: */
+
+/* Execute Disable enable */
+#define _EFER_NX			11
+#define EFER_NX				(1<<_EFER_NX)
 
 /* Centaur-Hauls/IDT defined MSRs. */
 #define MSR_IDT_FCR1			0x107

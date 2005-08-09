@@ -26,6 +26,7 @@
  */
 
 #include <linux/bitops.h>
+#include "pcm.h"
 #include "control.h"
 #include "info.h"
 
@@ -51,7 +52,7 @@
 #define AC97_REC_GAIN_MIC	0x1e	/* Record Gain MIC (optional) */
 #define AC97_GENERAL_PURPOSE	0x20	/* General Purpose (optional) */
 #define AC97_3D_CONTROL		0x22	/* 3D Control (optional) */
-#define AC97_RESERVED		0x24	/* Reserved */
+#define AC97_INT_PAGING		0x24	/* Audio Interrupt & Paging (AC'97 2.3) */
 #define AC97_POWERDOWN		0x26	/* Powerdown control / status */
 /* range 0x28-0x3a - AUDIO AC'97 2.0 extensions */
 #define AC97_EXTENDED_ID	0x28	/* Extended Audio ID */
@@ -82,6 +83,13 @@
 /* range 0x5a-0x7b - Vendor Specific */
 #define AC97_VENDOR_ID1		0x7c	/* Vendor ID1 */
 #define AC97_VENDOR_ID2		0x7e	/* Vendor ID2 / revision */
+/* range 0x60-0x6f (page 1) - extended codec registers */
+#define AC97_CODEC_CLASS_REV	0x60	/* Codec Class/Revision */
+#define AC97_PCI_SVID		0x62	/* PCI Subsystem Vendor ID */
+#define AC97_PCI_SID		0x64	/* PCI Subsystem ID */
+#define AC97_FUNC_SELECT	0x66	/* Function Select */
+#define AC97_FUNC_INFO		0x68	/* Function Information */
+#define AC97_SENSE_INFO		0x6a	/* Sense Details */
 
 /* slot allocation */
 #define AC97_SLOT_TAG		0
@@ -126,6 +134,11 @@
 #define AC97_BC_20BIT_ADC	0x0200	/* 20-bit ADC resolution */
 #define AC97_BC_ADC_MASK	0x0300
 
+/* general purpose */
+#define AC97_GP_DRSS_MASK	0x0c00	/* double rate slot select */
+#define AC97_GP_DRSS_1011	0x0000	/* LR(C) 10+11(+12) */
+#define AC97_GP_DRSS_78		0x0400	/* LR 7+8 */
+
 /* extended audio ID bit defines */
 #define AC97_EI_VRA		0x0001	/* Variable bit rate supported */
 #define AC97_EI_DRA		0x0002	/* Double rate supported */
@@ -139,6 +152,7 @@
 #define AC97_EI_AMAP		0x0200	/* indicates optional slot/DAC mapping based on codec ID */
 #define AC97_EI_REV_MASK	0x0c00	/* AC'97 revision mask */
 #define AC97_EI_REV_22		0x0400	/* AC'97 revision 2.2 */
+#define AC97_EI_REV_23		0x0800	/* AC'97 revision 2.3 */
 #define AC97_EI_REV_SHIFT	10
 #define AC97_EI_ADDR_MASK	0xc000	/* physical codec ID (address) */
 #define AC97_EI_ADDR_SHIFT	14
@@ -179,6 +193,16 @@
 #define AC97_SC_SPSR_32K	0x3000	/* Use 32kHz Sample rate */
 #define AC97_SC_DRS		0x4000	/* Double Rate S/PDIF */
 #define AC97_SC_V		0x8000	/* Validity status */
+
+/* Interrupt and Paging bit defines (AC'97 2.3) */
+#define AC97_PAGE_MASK		0x000f	/* Page Selector */
+#define AC97_PAGE_VENDOR	0	/* Vendor-specific registers */
+#define AC97_PAGE_1		1	/* Extended Codec Registers page 1 */
+#define AC97_INT_ENABLE		0x0800	/* Interrupt Enable */
+#define AC97_INT_SENSE		0x1000	/* Sense Cycle */
+#define AC97_INT_CAUSE_SENSE	0x2000	/* Sense Cycle Completed (RO) */
+#define AC97_INT_CAUSE_GPIO	0x4000	/* GPIO bits changed (RO) */
+#define AC97_INT_STATUS		0x8000	/* Interrupt Status */
 
 /* extended modem ID bit defines */
 #define AC97_MEI_LINE1		0x0001	/* Line1 present */
@@ -330,6 +354,9 @@
 #define AC97_SCAP_SKIP_AUDIO	(1<<4)	/* skip audio part of codec */
 #define AC97_SCAP_SKIP_MODEM	(1<<5)	/* skip modem part of codec */
 #define AC97_SCAP_INDEP_SDIN	(1<<6)	/* independent SDIN */
+#define AC97_SCAP_INV_EAPD	(1<<7)	/* inverted EAPD */
+#define AC97_SCAP_DETECT_BY_VENDOR (1<<8) /* use vendor registers for read tests */
+#define AC97_SCAP_NO_SPDIF	(1<<9)	/* don't build SPDIF controls */
 
 /* ac97->flags */
 #define AC97_HAS_PC_BEEP	(1<<0)	/* force PC Speaker usage */
@@ -337,6 +364,16 @@
 #define AC97_CS_SPDIF		(1<<2)	/* Cirrus Logic uses funky SPDIF */
 #define AC97_CX_SPDIF		(1<<3)	/* Conexant's spdif interface */
 #define AC97_STEREO_MUTES	(1<<4)	/* has stereo mute bits */
+#define AC97_DOUBLE_RATE	(1<<5)	/* supports double rate playback */
+#define AC97_HAS_NO_MASTER_VOL	(1<<6)	/* no Master volume */
+#define AC97_HAS_NO_PCM_VOL	(1<<7)	/* no PCM volume */
+#define AC97_DEFAULT_POWER_OFF	(1<<8)	/* no RESET write */
+#define AC97_MODEM_PATCH	(1<<9)	/* modem patch */
+#define AC97_HAS_NO_REC_GAIN	(1<<10) /* no Record gain */
+#define AC97_HAS_NO_PHONE	(1<<11) /* no PHONE volume */
+#define AC97_HAS_NO_PC_BEEP	(1<<12) /* no PC Beep volume */
+#define AC97_HAS_NO_VIDEO	(1<<13) /* no Video volume */
+#define AC97_HAS_NO_CD		(1<<14) /* no CD volume */
 
 /* rates indexes */
 #define AC97_RATES_FRONT_DAC	0
@@ -346,11 +383,22 @@
 #define AC97_RATES_MIC_ADC	4
 #define AC97_RATES_SPDIF	5
 
+/* shared controllers */
+enum {
+	AC97_SHARED_TYPE_NONE,
+	AC97_SHARED_TYPE_ICH,
+	AC97_SHARED_TYPE_ATIIXP,
+	AC97_SHARED_TYPE_VIA,
+	AC97_SHARED_TYPES
+};
+
 /*
  *
  */
 
 typedef struct _snd_ac97_bus ac97_bus_t;
+typedef struct _snd_ac97_bus_ops ac97_bus_ops_t;
+typedef struct _snd_ac97_template ac97_template_t;
 typedef struct _snd_ac97 ac97_t;
 
 enum ac97_pcm_cfg {
@@ -385,29 +433,50 @@ struct snd_ac97_build_ops {
 	int (*build_specific) (ac97_t *ac97);
 	int (*build_spdif) (ac97_t *ac97);
 	int (*build_post_spdif) (ac97_t *ac97);
+#ifdef CONFIG_PM
+	void (*suspend) (ac97_t *ac97);
+	void (*resume) (ac97_t *ac97);
+#endif
 };
 
-struct _snd_ac97_bus {
-	/* -- lowlevel (hardware) driver specific -- */
+struct _snd_ac97_bus_ops {
 	void (*reset) (ac97_t *ac97);
 	void (*write) (ac97_t *ac97, unsigned short reg, unsigned short val);
 	unsigned short (*read) (ac97_t *ac97, unsigned short reg);
 	void (*wait) (ac97_t *ac97);
 	void (*init) (ac97_t *ac97);
+};
+
+struct _snd_ac97_bus {
+	/* -- lowlevel (hardware) driver specific -- */
+	ac97_bus_ops_t *ops;
 	void *private_data;
 	void (*private_free) (ac97_bus_t *bus);
 	/* --- */
 	snd_card_t *card;
 	unsigned short num;	/* bus number */
-	unsigned short vra: 1,	/* bridge supports VRA */
+	unsigned short no_vra: 1, /* bridge doesn't support VRA */
+		       dra: 1,	/* bridge supports double rate */
 		       isdin: 1;/* independent SDIN */
 	unsigned int clock;	/* AC'97 base clock (usually 48000Hz) */
 	spinlock_t bus_lock;	/* used mainly for slot allocation */
 	unsigned short used_slots[2][4]; /* actually used PCM slots */
 	unsigned short pcms_count; /* count of PCMs */
 	struct ac97_pcm *pcms;
+	unsigned int shared_type;	/* type of shared controller betwen audio and modem */
 	ac97_t *codec[4];
 	snd_info_entry_t *proc;
+};
+
+struct _snd_ac97_template {
+	void *private_data;
+	void (*private_free) (ac97_t *ac97);
+	struct pci_dev *pci;	/* assigned PCI device - used for quirks */
+	unsigned short num;	/* number of codec: 0 = primary, 1 = secondary */
+	unsigned short addr;	/* physical address of codec [0-3] */
+	unsigned int scaps;	/* driver capabilities */
+	unsigned int limited_regs; /* allow limited registers only */
+	DECLARE_BITMAP(reg_accessed, 0x80); /* bit flags */
 };
 
 struct _snd_ac97 {
@@ -422,7 +491,8 @@ struct _snd_ac97 {
 	snd_info_entry_t *proc_regs;
 	unsigned short subsystem_vendor;
 	unsigned short subsystem_device;
-	spinlock_t reg_lock;
+	struct semaphore reg_mutex;
+	struct semaphore page_mutex;	/* mutex for AD18xx multi-codecs and paging (2.3) */
 	unsigned short num;	/* number of codec: 0 = primary, 1 = secondary */
 	unsigned short addr;	/* physical address of codec [0-3] */
 	unsigned int id;	/* identification of codec */
@@ -443,7 +513,6 @@ struct _snd_ac97 {
 			unsigned short id[3];		// codec IDs (lower 16-bit word)
 			unsigned short pcmreg[3];	// PCM registers
 			unsigned short codec_cfg[3];	// CODEC_CFG bits
-			struct semaphore mutex;
 		} ad18xx;
 		unsigned int dev_flags;		/* device specific */
 	} spec;
@@ -466,10 +535,15 @@ static inline int ac97_can_amap(ac97_t * ac97)
 {
 	return (ac97->ext_id & AC97_EI_AMAP) != 0;
 }
+static inline int ac97_can_spdif(ac97_t * ac97)
+{
+	return (ac97->ext_id & AC97_EI_SPDIF) != 0;
+}
 
 /* functions */
-int snd_ac97_bus(snd_card_t * card, ac97_bus_t * _bus, ac97_bus_t ** rbus); /* create new AC97 bus */
-int snd_ac97_mixer(ac97_bus_t * bus, ac97_t * _ac97, ac97_t ** rac97);	/* create mixer controls */
+int snd_ac97_bus(snd_card_t *card, int num, ac97_bus_ops_t *ops, void *private_data, ac97_bus_t **rbus); /* create new AC97 bus */
+int snd_ac97_mixer(ac97_bus_t *bus, ac97_template_t *template, ac97_t **rac97);	/* create mixer controls */
+const char *snd_ac97_get_short_name(ac97_t *ac97);
 
 void snd_ac97_write(ac97_t *ac97, unsigned short reg, unsigned short value);
 unsigned short snd_ac97_read(ac97_t *ac97, unsigned short reg);
@@ -490,18 +564,21 @@ enum {
 	AC97_TUNE_SWAP_SURROUND, /* swap master and surround controls */
 	AC97_TUNE_AD_SHARING,	/* for AD1985, turn on OMS bit and use headphone */
 	AC97_TUNE_ALC_JACK,	/* for Realtek, enable JACK detection */
+	AC97_TUNE_INV_EAPD,	/* inverted EAPD implementation */
+	AC97_TUNE_MUTE_LED,	/* EAPD bit works as mute LED */
 };
 
 struct ac97_quirk {
 	unsigned short vendor;	/* PCI vendor id */
 	unsigned short device;	/* PCI device id */
 	unsigned short mask;	/* device id bit mask, 0 = accept all */
+	unsigned int codec_id;	/* codec id (if any), 0 = accept all */
 	const char *name;	/* name shown as info */
 	int type;		/* quirk type above */
 };
 
-int snd_ac97_tune_hardware(ac97_t *ac97, struct ac97_quirk *quirk, int override);
-int snd_ac97_set_rate(ac97_t *ac97, int reg, unsigned short rate);
+int snd_ac97_tune_hardware(ac97_t *ac97, struct ac97_quirk *quirk, const char *override);
+int snd_ac97_set_rate(ac97_t *ac97, int reg, unsigned int rate);
 
 int snd_ac97_pcm_assign(ac97_bus_t *ac97,
 			unsigned short pcms_count,
@@ -509,5 +586,13 @@ int snd_ac97_pcm_assign(ac97_bus_t *ac97,
 int snd_ac97_pcm_open(struct ac97_pcm *pcm, unsigned int rate,
 		      enum ac97_pcm_cfg cfg, unsigned short slots);
 int snd_ac97_pcm_close(struct ac97_pcm *pcm);
+int snd_ac97_pcm_double_rate_rules(snd_pcm_runtime_t *runtime);
 
+struct ac97_enum {
+	unsigned char reg;
+	unsigned char shift_l;
+	unsigned char shift_r;
+	unsigned short mask;
+	const char **texts;
+};
 #endif /* __SOUND_AC97_CODEC_H */

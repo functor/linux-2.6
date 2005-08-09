@@ -107,19 +107,11 @@
 #include <linux/module.h>
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
-
-#ifdef CONFIG_USB_SERIAL_DEBUG
-	static int debug = 1;
-	#define DEBUG
-#else
-	static int debug;
-	#undef DEBUG
-#endif
-
 #include <linux/usb.h>
-
 #include "usb-serial.h"
 #include "keyspan.h"
+
+static int debug;
 
 /*
  * Version Information
@@ -133,9 +125,6 @@
 
 	/* Per device and per port private data */
 struct keyspan_serial_private {
-	/* number of active ports */
-	atomic_t	active_count;
-
 	const struct keyspan_device_details	*device_details;
 
 	struct urb	*instat_urb;
@@ -353,7 +342,7 @@ static int keyspan_ioctl(struct usb_serial_port *port, struct file *file,
 
 	/* Write function is similar for the four protocols used
 	   with only a minor change for usa90 (usa19hs) required */
-static int keyspan_write(struct usb_serial_port *port, int from_user, 
+static int keyspan_write(struct usb_serial_port *port, 
 			 const unsigned char *buf, int count)
 {
 	struct keyspan_port_private 	*p_priv;
@@ -385,7 +374,7 @@ static int keyspan_write(struct usb_serial_port *port, int from_user,
 		flip = p_priv->out_flip;
 	
 		/* Check we have a valid urb/endpoint before we use it... */
-		if ((this_urb = p_priv->out_urbs[flip]) == 0) {
+		if ((this_urb = p_priv->out_urbs[flip]) == NULL) {
 			/* no bulk out, so return 0 bytes written */
 			dbg("%s - no output urb :(", __FUNCTION__);
 			return count;
@@ -407,12 +396,7 @@ static int keyspan_write(struct usb_serial_port *port, int from_user,
 		   for now so set to zero */
 		((char *)this_urb->transfer_buffer)[0] = 0;
 
-		if (from_user) {
-			if (copy_from_user(this_urb->transfer_buffer + dataOffset, buf, todo))
-				return -EFAULT;
-		} else {
-			memcpy (this_urb->transfer_buffer + dataOffset, buf, todo);
-		}
+		memcpy (this_urb->transfer_buffer + dataOffset, buf, todo);
 		buf += todo;
 
 		/* send the data out the bulk port */
@@ -1036,11 +1020,11 @@ static int keyspan_write_room (struct usb_serial_port *port)
 	flip = p_priv->out_flip;
 
 	/* Check both endpoints to see if any are available. */
-	if ((this_urb = p_priv->out_urbs[flip]) != 0) {
+	if ((this_urb = p_priv->out_urbs[flip]) != NULL) {
 		if (this_urb->status != -EINPROGRESS)
 			return (data_len);
 		flip = (flip + 1) & d_details->outdat_endp_flip;        
-		if ((this_urb = p_priv->out_urbs[flip]) != 0) 
+		if ((this_urb = p_priv->out_urbs[flip]) != NULL) 
 			if (this_urb->status != -EINPROGRESS)
 				return (data_len);
 	}
@@ -1137,20 +1121,16 @@ static inline void stop_urb(struct urb *urb)
 {
 	if (urb && urb->status == -EINPROGRESS) {
 		urb->transfer_flags &= ~URB_ASYNC_UNLINK;
-		usb_unlink_urb(urb);
+		usb_kill_urb(urb);
 	}
 }
 
 static void keyspan_close(struct usb_serial_port *port, struct file *filp)
 {
 	int			i;
-	struct usb_serial	*serial;
+	struct usb_serial	*serial = port->serial;
 	struct keyspan_serial_private 	*s_priv;
 	struct keyspan_port_private 	*p_priv;
-
-	serial = get_usb_serial (port, __FUNCTION__);
-	if (!serial)
-		return;
 
 	dbg("%s", __FUNCTION__);
 	s_priv = usb_get_serial_data(serial);
@@ -1182,7 +1162,7 @@ static void keyspan_close(struct usb_serial_port *port, struct file *filp)
 			stop_urb(p_priv->out_urbs[i]);
 		}
 	}
-	port->tty = 0;
+	port->tty = NULL;
 }
 
 
@@ -1194,16 +1174,16 @@ static int keyspan_fake_startup (struct usb_serial *serial)
 	char				*fw_name;
 
 	dbg("Keyspan startup version %04x product %04x",
-	    serial->dev->descriptor.bcdDevice,
-	    serial->dev->descriptor.idProduct); 
+	    le16_to_cpu(serial->dev->descriptor.bcdDevice),
+	    le16_to_cpu(serial->dev->descriptor.idProduct));
 	
-	if ((serial->dev->descriptor.bcdDevice & 0x8000) != 0x8000) {
+	if ((le16_to_cpu(serial->dev->descriptor.bcdDevice) & 0x8000) != 0x8000) {
 		dbg("Firmware already loaded.  Quitting.");
 		return(1);
 	}
 
 		/* Select firmware image on the basis of idProduct */
-	switch (serial->dev->descriptor.idProduct) {
+	switch (le16_to_cpu(serial->dev->descriptor.idProduct)) {
 	case keyspan_usa28_pre_product_id:
 		record = &keyspan_usa28_firmware[0];
 		fw_name = "USA28";
@@ -2268,10 +2248,10 @@ static int keyspan_startup (struct usb_serial *serial)
 	dbg("%s", __FUNCTION__);
 
 	for (i = 0; (d_details = keyspan_devices[i]) != NULL; ++i)
-		if (d_details->product_id == serial->dev->descriptor.idProduct)
+		if (d_details->product_id == le16_to_cpu(serial->dev->descriptor.idProduct))
 			break;
 	if (d_details == NULL) {
-		dev_err(&serial->dev->dev, "%s - unknown product id %x\n", __FUNCTION__, serial->dev->descriptor.idProduct);
+		dev_err(&serial->dev->dev, "%s - unknown product id %x\n", __FUNCTION__, le16_to_cpu(serial->dev->descriptor.idProduct));
 		return 1;
 	}
 
@@ -2369,6 +2349,6 @@ MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(debug, "i");
+module_param(debug, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "Debug enabled or not");
 

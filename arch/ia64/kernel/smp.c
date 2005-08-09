@@ -28,11 +28,10 @@
 #include <linux/mm.h>
 #include <linux/cache.h>
 #include <linux/delay.h>
-#include <linux/cache.h>
 #include <linux/efi.h>
+#include <linux/bitops.h>
 
 #include <asm/atomic.h>
-#include <asm/bitops.h>
 #include <asm/current.h>
 #include <asm/delay.h>
 #include <asm/machvec.h>
@@ -53,7 +52,7 @@
  * Structure and data for smp_call_function(). This is designed to minimise static memory
  * requirements. It also looks cleaner.
  */
-static spinlock_t call_lock __cacheline_aligned = SPIN_LOCK_UNLOCKED;
+static  __cacheline_aligned DEFINE_SPINLOCK(call_lock);
 
 struct call_data_struct {
 	void (*func) (void *info);
@@ -71,10 +70,23 @@ static volatile struct call_data_struct *call_data;
 /* This needs to be cacheline aligned because it is written to by *other* CPUs.  */
 static DEFINE_PER_CPU(u64, ipi_operation) ____cacheline_aligned;
 
+extern void cpu_halt (void);
+
+void
+lock_ipi_calllock(void)
+{
+	spin_lock_irq(&call_lock);
+}
+
+void
+unlock_ipi_calllock(void)
+{
+	spin_unlock_irq(&call_lock);
+}
+
 static void
 stop_this_cpu (void)
 {
-	extern void cpu_halt (void);
 	/*
 	 * Remove this CPU:
 	 */
@@ -82,6 +94,17 @@ stop_this_cpu (void)
 	max_xtp();
 	local_irq_disable();
 	cpu_halt();
+}
+
+void
+cpu_die(void)
+{
+	max_xtp();
+	local_irq_disable();
+	cpu_halt();
+	/* Should never be here */
+	BUG();
+	for (;;);
 }
 
 irqreturn_t
@@ -202,9 +225,8 @@ smp_send_reschedule (int cpu)
 void
 smp_flush_tlb_all (void)
 {
-	on_each_cpu((void (*)(void *))local_flush_tlb_all, 0, 1, 1);
+	on_each_cpu((void (*)(void *))local_flush_tlb_all, NULL, 1, 1);
 }
-EXPORT_SYMBOL(smp_flush_tlb_all);
 
 void
 smp_flush_tlb_mm (struct mm_struct *mm)
@@ -267,11 +289,11 @@ smp_call_function_single (int cpuid, void (*func) (void *info), void *info, int 
 
 	/* Wait for response */
 	while (atomic_read(&data.started) != cpus)
-		barrier();
+		cpu_relax();
 
 	if (wait)
 		while (atomic_read(&data.finished) != cpus)
-			barrier();
+			cpu_relax();
 	call_data = NULL;
 
 	spin_unlock_bh(&call_lock);
@@ -308,6 +330,9 @@ smp_call_function (void (*func) (void *info), void *info, int nonatomic, int wai
 	if (!cpus)
 		return 0;
 
+	/* Can deadlock when called with interrupts disabled */
+	WARN_ON(irqs_disabled());
+
 	data.func = func;
 	data.info = info;
 	atomic_set(&data.started, 0);
@@ -323,11 +348,11 @@ smp_call_function (void (*func) (void *info), void *info, int nonatomic, int wai
 
 	/* Wait for response */
 	while (atomic_read(&data.started) != cpus)
-		barrier();
+		cpu_relax();
 
 	if (wait)
 		while (atomic_read(&data.finished) != cpus)
-			barrier();
+			cpu_relax();
 	call_data = NULL;
 
 	spin_unlock(&call_lock);

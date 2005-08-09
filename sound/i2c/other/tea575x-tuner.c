@@ -85,11 +85,12 @@ static void snd_tea575x_set_freq(tea575x_t *tea)
  * Linux Video interface
  */
 
-static int snd_tea575x_do_ioctl(struct inode *inode, struct file *file,
-			        unsigned int cmd, void *arg)
+static int snd_tea575x_ioctl(struct inode *inode, struct file *file,
+			     unsigned int cmd, unsigned long data)
 {
 	struct video_device *dev = video_devdata(file);
 	tea575x_t *tea = video_get_drvdata(dev);
+	void __user *arg = (void __user *)data;
 	
 	switch(cmd) {
 		case VIDIOCGCAP:
@@ -167,10 +168,8 @@ static int snd_tea575x_do_ioctl(struct inode *inode, struct file *file,
 	}
 }
 
-static int snd_tea575x_ioctl(struct inode *inode, struct file *file,
-			     unsigned int cmd, unsigned long arg)
+static void snd_tea575x_release(struct video_device *vfd)
 {
-	return video_usercopy(inode, file, cmd, arg, snd_tea575x_do_ioctl);
 }
 
 /*
@@ -191,6 +190,7 @@ void snd_tea575x_init(tea575x_t *tea)
 	strcpy(tea->vd.name, tea->tea5759 ? "TEA5759 radio" : "TEA5757 radio");
 	tea->vd.type = VID_TYPE_TUNER;
 	tea->vd.hardware = VID_HARDWARE_RTRACK;	/* FIXME: assign new number */
+	tea->vd.release = snd_tea575x_release;
 	video_set_drvdata(&tea->vd, tea);
 	tea->vd.fops = &tea->fops;
 	tea->fops.owner = tea->card->module;

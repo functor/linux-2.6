@@ -375,10 +375,10 @@ static struct m3_card *devs;
  * I'm not very good at laying out functions in a file :)
  */
 static int m3_notifier(struct notifier_block *nb, unsigned long event, void *buf);
-static int m3_suspend(struct pci_dev *pci_dev, u32 state);
+static int m3_suspend(struct pci_dev *pci_dev, pm_message_t state);
 static void check_suspend(struct m3_card *card);
 
-struct notifier_block m3_reboot_nb = {
+static struct notifier_block m3_reboot_nb = {
 	.notifier_call = m3_notifier,
 };
 
@@ -1024,8 +1024,8 @@ static void set_dmac(struct m3_state *s, unsigned int addr, unsigned int count)
     DPRINTK(DPINT,"set_dmac??\n");
 }
 
-u32 get_dma_pos(struct m3_card *card,
-        int instance_addr)
+static u32 get_dma_pos(struct m3_card *card,
+		       int instance_addr)
 {
     u16 hi = 0, lo = 0;
     int retry = 10;
@@ -1047,7 +1047,7 @@ u32 get_dma_pos(struct m3_card *card,
     return lo | (hi<<16);
 }
 
-u32 get_dmaa(struct m3_state *s)
+static u32 get_dmaa(struct m3_state *s)
 {
     u32 offset;
 
@@ -1059,7 +1059,7 @@ u32 get_dmaa(struct m3_state *s)
     return offset;
 }
 
-u32 get_dmac(struct m3_state *s)
+static u32 get_dmac(struct m3_state *s)
 {
     u32 offset;
 
@@ -1324,7 +1324,7 @@ static int drain_dac(struct m3_state *s, int nonblock)
     return 0;
 }
 
-static ssize_t m3_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
+static ssize_t m3_read(struct file *file, char __user *buffer, size_t count, loff_t *ppos)
 {
     struct m3_state *s = (struct m3_state *)file->private_data;
     ssize_t ret;
@@ -1333,8 +1333,6 @@ static ssize_t m3_read(struct file *file, char *buffer, size_t count, loff_t *pp
     int cnt;
     
     VALIDATE_STATE(s);
-    if (ppos != &file->f_pos)
-        return -ESPIPE;
     if (s->dma_adc.mapped)
         return -ENXIO;
     if (!s->dma_adc.ready && (ret = prog_dmabuf(s, 1)))
@@ -1405,7 +1403,7 @@ out:
     return ret;
 }
 
-static ssize_t m3_write(struct file *file, const char *buffer, size_t count, loff_t *ppos)
+static ssize_t m3_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos)
 {
     struct m3_state *s = (struct m3_state *)file->private_data;
     ssize_t ret;
@@ -1414,8 +1412,6 @@ static ssize_t m3_write(struct file *file, const char *buffer, size_t count, lof
     int cnt;
     
     VALIDATE_STATE(s);
-    if (ppos != &file->f_pos)
-        return -ESPIPE;
     if (s->dma_dac.mapped)
         return -ENXIO;
     if (!s->dma_dac.ready && (ret = prog_dmabuf(s, 0)))
@@ -1561,7 +1557,9 @@ static int m3_mmap(struct file *file, struct vm_area_struct *vma)
      * ask Jeff what the hell I'm doing wrong.
      */
     ret = -EAGAIN;
-    if (remap_page_range(vma, vma->vm_start, virt_to_phys(db->rawbuf), size, vma->vm_page_prot))
+    if (remap_pfn_range(vma, vma->vm_start,
+			virt_to_phys(db->rawbuf) >> PAGE_SHIFT,
+			size, vma->vm_page_prot))
         goto out;
 
     db->mapped = 1;
@@ -1584,6 +1582,8 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
     count_info cinfo;
     int val, mapped, ret;
     unsigned char fmtm, fmtd;
+    void __user *argp = (void __user *)arg;
+    int __user *p = argp;
 
     VALIDATE_STATE(s);
 
@@ -1594,7 +1594,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
 
     switch (cmd) {
     case OSS_GETVERSION:
-        return put_user(SOUND_VERSION, (int *)arg);
+        return put_user(SOUND_VERSION, p);
 
     case SNDCTL_DSP_SYNC:
         if (file->f_mode & FMODE_WRITE)
@@ -1606,7 +1606,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         return 0;
 
     case SNDCTL_DSP_GETCAPS:
-        return put_user(DSP_CAP_DUPLEX | DSP_CAP_REALTIME | DSP_CAP_TRIGGER | DSP_CAP_MMAP, (int *)arg);
+        return put_user(DSP_CAP_DUPLEX | DSP_CAP_REALTIME | DSP_CAP_TRIGGER | DSP_CAP_MMAP, p);
         
     case SNDCTL_DSP_RESET:
         spin_lock_irqsave(&card->lock, flags);
@@ -1624,7 +1624,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         return 0;
 
     case SNDCTL_DSP_SPEED:
-        get_user_ret(val, (int *)arg, -EFAULT);
+        get_user_ret(val, p, -EFAULT);
         spin_lock_irqsave(&card->lock, flags);
         if (val >= 0) {
             if (file->f_mode & FMODE_READ) {
@@ -1639,10 +1639,10 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
             }
         }
         spin_unlock_irqrestore(&card->lock, flags);
-        return put_user((file->f_mode & FMODE_READ) ? s->rateadc : s->ratedac, (int *)arg);
+        return put_user((file->f_mode & FMODE_READ) ? s->rateadc : s->ratedac, p);
         
     case SNDCTL_DSP_STEREO:
-        get_user_ret(val, (int *)arg, -EFAULT);
+        get_user_ret(val, p, -EFAULT);
         spin_lock_irqsave(&card->lock, flags);
         fmtd = 0;
         fmtm = ~0;
@@ -1667,7 +1667,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         return 0;
 
     case SNDCTL_DSP_CHANNELS:
-        get_user_ret(val, (int *)arg, -EFAULT);
+        get_user_ret(val, p, -EFAULT);
         spin_lock_irqsave(&card->lock, flags);
         if (val != 0) {
             fmtd = 0;
@@ -1692,13 +1692,13 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         }
         spin_unlock_irqrestore(&card->lock, flags);
         return put_user((s->fmt & ((file->f_mode & FMODE_READ) ? (ESS_FMT_STEREO << ESS_ADC_SHIFT) 
-                       : (ESS_FMT_STEREO << ESS_DAC_SHIFT))) ? 2 : 1, (int *)arg);
+                       : (ESS_FMT_STEREO << ESS_DAC_SHIFT))) ? 2 : 1, p);
         
     case SNDCTL_DSP_GETFMTS: /* Returns a mask */
-        return put_user(AFMT_U8|AFMT_S16_LE, (int *)arg);
+        return put_user(AFMT_U8|AFMT_S16_LE, p);
         
     case SNDCTL_DSP_SETFMT: /* Selects ONE fmt*/
-        get_user_ret(val, (int *)arg, -EFAULT);
+        get_user_ret(val, p, -EFAULT);
         spin_lock_irqsave(&card->lock, flags);
         if (val != AFMT_QUERY) {
             fmtd = 0;
@@ -1727,7 +1727,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
             : (ESS_FMT_16BIT << ESS_DAC_SHIFT))) ? 
                 AFMT_S16_LE : 
                 AFMT_U8, 
-            (int *)arg);
+            p);
         
     case SNDCTL_DSP_POST:
         return 0;
@@ -1738,10 +1738,10 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
             val |= PCM_ENABLE_INPUT;
         if ((file->f_mode & FMODE_WRITE) && (s->enable & DAC_RUNNING)) 
             val |= PCM_ENABLE_OUTPUT;
-        return put_user(val, (int *)arg);
+        return put_user(val, p);
         
     case SNDCTL_DSP_SETTRIGGER:
-        get_user_ret(val, (int *)arg, -EFAULT);
+        get_user_ret(val, p, -EFAULT);
         if (file->f_mode & FMODE_READ) {
             if (val & PCM_ENABLE_INPUT) {
                 if (!s->dma_adc.ready && (ret =  prog_dmabuf(s, 1)))
@@ -1772,7 +1772,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         abinfo.fragstotal = s->dma_dac.numfrag;
         abinfo.fragments = abinfo.bytes >> s->dma_dac.fragshift;      
         spin_unlock_irqrestore(&card->lock, flags);
-        return copy_to_user((void *)arg, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
+        return copy_to_user(argp, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
 
     case SNDCTL_DSP_GETISPACE:
         if (!(file->f_mode & FMODE_READ))
@@ -1786,7 +1786,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         abinfo.fragstotal = s->dma_adc.numfrag;
         abinfo.fragments = abinfo.bytes >> s->dma_adc.fragshift;      
         spin_unlock_irqrestore(&card->lock, flags);
-        return copy_to_user((void *)arg, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
+        return copy_to_user(argp, &abinfo, sizeof(abinfo)) ? -EFAULT : 0;
         
     case SNDCTL_DSP_NONBLOCK:
         file->f_flags |= O_NONBLOCK;
@@ -1799,7 +1799,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         m3_update_ptr(s);
         val = s->dma_dac.count;
         spin_unlock_irqrestore(&card->lock, flags);
-        return put_user(val, (int *)arg);
+        return put_user(val, p);
 
     case SNDCTL_DSP_GETIPTR:
         if (!(file->f_mode & FMODE_READ))
@@ -1812,7 +1812,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         if (s->dma_adc.mapped)
             s->dma_adc.count &= s->dma_adc.fragsize-1;
         spin_unlock_irqrestore(&card->lock, flags);
-	if (copy_to_user((void *)arg, &cinfo, sizeof(cinfo)))
+	if (copy_to_user(argp, &cinfo, sizeof(cinfo)))
 		return -EFAULT;
 	return 0;
 
@@ -1827,7 +1827,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         if (s->dma_dac.mapped)
             s->dma_dac.count &= s->dma_dac.fragsize-1;
         spin_unlock_irqrestore(&card->lock, flags);
-	if (copy_to_user((void *)arg, &cinfo, sizeof(cinfo)))
+	if (copy_to_user(argp, &cinfo, sizeof(cinfo)))
 		return -EFAULT;
 	return 0;
 
@@ -1835,14 +1835,14 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         if (file->f_mode & FMODE_WRITE) {
             if ((val = prog_dmabuf(s, 0)))
                 return val;
-            return put_user(s->dma_dac.fragsize, (int *)arg);
+            return put_user(s->dma_dac.fragsize, p);
         }
         if ((val = prog_dmabuf(s, 1)))
             return val;
-        return put_user(s->dma_adc.fragsize, (int *)arg);
+        return put_user(s->dma_adc.fragsize, p);
 
     case SNDCTL_DSP_SETFRAGMENT:
-        get_user_ret(val, (int *)arg, -EFAULT);
+        get_user_ret(val, p, -EFAULT);
         spin_lock_irqsave(&card->lock, flags);
         if (file->f_mode & FMODE_READ) {
             s->dma_adc.ossfragshift = val & 0xffff;
@@ -1871,7 +1871,7 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         if ((file->f_mode & FMODE_READ && s->dma_adc.subdivision) ||
             (file->f_mode & FMODE_WRITE && s->dma_dac.subdivision))
             return -EINVAL;
-                get_user_ret(val, (int *)arg, -EFAULT);
+                get_user_ret(val, p, -EFAULT);
         if (val != 1 && val != 2 && val != 4)
             return -EINVAL;
         if (file->f_mode & FMODE_READ)
@@ -1881,15 +1881,15 @@ static int m3_ioctl(struct inode *inode, struct file *file, unsigned int cmd, un
         return 0;
 
     case SOUND_PCM_READ_RATE:
-        return put_user((file->f_mode & FMODE_READ) ? s->rateadc : s->ratedac, (int *)arg);
+        return put_user((file->f_mode & FMODE_READ) ? s->rateadc : s->ratedac, p);
 
     case SOUND_PCM_READ_CHANNELS:
         return put_user((s->fmt & ((file->f_mode & FMODE_READ) ? (ESS_FMT_STEREO << ESS_ADC_SHIFT) 
-                       : (ESS_FMT_STEREO << ESS_DAC_SHIFT))) ? 2 : 1, (int *)arg);
+                       : (ESS_FMT_STEREO << ESS_DAC_SHIFT))) ? 2 : 1, p);
 
     case SOUND_PCM_READ_BITS:
         return put_user((s->fmt & ((file->f_mode & FMODE_READ) ? (ESS_FMT_16BIT << ESS_ADC_SHIFT) 
-                       : (ESS_FMT_16BIT << ESS_DAC_SHIFT))) ? 16 : 8, (int *)arg);
+                       : (ESS_FMT_16BIT << ESS_DAC_SHIFT))) ? 16 : 8, p);
 
     case SOUND_PCM_WRITE_FILTER:
     case SNDCTL_DSP_SETSYNCRO:
@@ -2049,7 +2049,7 @@ static int m3_open(struct inode *inode, struct file *file)
 
     up(&s->open_sem);
     spin_unlock_irqrestore(&c->lock, flags);
-    return 0;
+    return nonseekable_open(inode, file);
 }
 
 static int m3_release(struct inode *inode, struct file *file)
@@ -2102,7 +2102,7 @@ static int m3_ac97_wait(struct m3_card *card)
     return i == 0;
 }
 
-u16 m3_ac97_read(struct ac97_codec *codec, u8 reg)
+static u16 m3_ac97_read(struct ac97_codec *codec, u8 reg)
 {
     u16 ret = 0;
     struct m3_card *card = codec->private_data;
@@ -2129,7 +2129,7 @@ out:
     return ret;
 }
 
-void m3_ac97_write(struct ac97_codec *codec, u8 reg, u16 val)
+static void m3_ac97_write(struct ac97_codec *codec, u8 reg, u16 val)
 {
     struct m3_card *card = codec->private_data;
 
@@ -2163,7 +2163,7 @@ static int m3_open_mixdev(struct inode *inode, struct file *file)
 
     file->private_data = card->ac97;
 
-    return 0;
+    return nonseekable_open(inode, file);
 }
 
 static int m3_release_mixdev(struct inode *inode, struct file *file)
@@ -2187,7 +2187,7 @@ static struct file_operations m3_mixer_fops = {
 	.release = m3_release_mixdev,
 };
 
-void remote_codec_config(int io, int isremote)
+static void remote_codec_config(int io, int isremote)
 {
     isremote = isremote ? 1 : 0;
 
@@ -2571,7 +2571,7 @@ static struct file_operations m3_audio_fops = {
 };
 
 #ifdef CONFIG_PM
-int alloc_dsp_suspendmem(struct m3_card *card)
+static int alloc_dsp_suspendmem(struct m3_card *card)
 {
     int len = sizeof(u16) * (REV_B_CODE_MEMORY_LENGTH + REV_B_DATA_MEMORY_LENGTH);
 
@@ -2580,7 +2580,7 @@ int alloc_dsp_suspendmem(struct m3_card *card)
 
     return 0;
 }
-void free_dsp_suspendmem(struct m3_card *card)
+static void free_dsp_suspendmem(struct m3_card *card)
 {
    if(card->suspend_mem)
        vfree(card->suspend_mem);
@@ -2777,12 +2777,12 @@ static int m3_notifier(struct notifier_block *nb, unsigned long event, void *buf
 
     for(card = devs; card != NULL; card = card->next) {
         if(!card->in_suspend)
-            m3_suspend(card->pcidev, 3); /* XXX legal? */
+            m3_suspend(card->pcidev, PMSG_SUSPEND); /* XXX legal? */
     }
     return 0;
 }
 
-static int m3_suspend(struct pci_dev *pci_dev, u32 state)
+static int m3_suspend(struct pci_dev *pci_dev, pm_message_t state)
 {
     unsigned long flags;
     int i;
@@ -2919,10 +2919,10 @@ MODULE_DESCRIPTION("ESS Maestro3/Allegro Driver");
 MODULE_LICENSE("GPL");
 
 #ifdef M_DEBUG
-MODULE_PARM(debug,"i");
+module_param(debug, int, 0);
 #endif
-MODULE_PARM(external_amp,"i");
-MODULE_PARM(gpio_pin, "i");
+module_param(external_amp, int, 0);
+module_param(gpio_pin, int, 0);
 
 static struct pci_driver m3_pci_driver = {
 	.name	  = "ess_m3_audio",
@@ -2942,8 +2942,7 @@ static int __init m3_init_module(void)
         return -ENODEV; /* ? */
     }
 
-    if (!pci_register_driver(&m3_pci_driver)) {
-        pci_unregister_driver(&m3_pci_driver);
+    if (pci_register_driver(&m3_pci_driver)) {
         unregister_reboot_notifier(&m3_reboot_nb);
         return -ENODEV;
     }

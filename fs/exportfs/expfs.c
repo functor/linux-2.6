@@ -1,5 +1,6 @@
 
 #include <linux/fs.h>
+#include <linux/file.h>
 #include <linux/module.h>
 #include <linux/smp_lock.h>
 #include <linux/namei.h>
@@ -54,7 +55,7 @@ find_exported_dentry(struct super_block *sb, void *obj, void *parent,
 	struct list_head *le, *head;
 	struct dentry *toput = NULL;
 	int noprogress;
-
+	char nbuf[NAME_MAX+1];
 
 	/*
 	 * Attempt to find the inode.
@@ -155,11 +156,15 @@ find_exported_dentry(struct super_block *sb, void *obj, void *parent,
 
 		if (!IS_ROOT(pd)) {
 			/* must have found a connected parent - great */
+			spin_lock(&pd->d_lock);
 			pd->d_flags &= ~DCACHE_DISCONNECTED;
+			spin_unlock(&pd->d_lock);
 			noprogress = 0;
 		} else if (pd == sb->s_root) {
 			printk(KERN_ERR "export: Eeek filesystem root is not connected, impossible\n");
+			spin_lock(&pd->d_lock);
 			pd->d_flags &= ~DCACHE_DISCONNECTED;
+			spin_unlock(&pd->d_lock);
 			noprogress = 0;
 		} else {
 			/* we have hit the top of a disconnected path.  Try
@@ -171,7 +176,6 @@ find_exported_dentry(struct super_block *sb, void *obj, void *parent,
 			 */
 			struct dentry *ppd;
 			struct dentry *npd;
-			char nbuf[NAME_MAX+1];
 
 			down(&pd->d_inode->i_sem);
 			ppd = CALL(nops,get_parent)(pd);
@@ -236,7 +240,6 @@ find_exported_dentry(struct super_block *sb, void *obj, void *parent,
 	/* if we weren't after a directory, have one more step to go */
 	if (result != target_dir) {
 		struct dentry *nresult;
-		char nbuf[NAME_MAX+1];
 		err = CALL(nops,get_name)(target_dir, nbuf, result);
 		if (!err) {
 			down(&target_dir->d_inode->i_sem);
@@ -278,7 +281,12 @@ find_exported_dentry(struct super_block *sb, void *obj, void *parent,
 
 	/* drat - I just cannot find anything acceptable */
 	dput(result);
-	return ERR_PTR(-ESTALE);
+	/* It might be justifiable to return ESTALE here,
+	 * but the filehandle at-least looks reasonable good
+	 * and it just be a permission problem, so returning
+	 * -EACCESS is safer
+	 */
+	return ERR_PTR(-EACCES);
 
  err_target:
 	dput(target_dir);
@@ -343,7 +351,7 @@ static int get_name(struct dentry *dentry, char *name,
 {
 	struct inode *dir = dentry->d_inode;
 	int error;
-	struct file file;
+	struct file *file;
 	struct getdents_callback buffer;
 
 	error = -ENOTDIR;
@@ -355,11 +363,13 @@ static int get_name(struct dentry *dentry, char *name,
 	/*
 	 * Open the directory ...
 	 */
-	error = open_private_file(&file, dentry, O_RDONLY);
-	if (error)
+	file = dentry_open(dget(dentry), NULL, O_RDONLY);
+	error = PTR_ERR(file);
+	if (IS_ERR(file))
 		goto out;
+
 	error = -EINVAL;
-	if (!file.f_op->readdir)
+	if (!file->f_op->readdir)
 		goto out_close;
 
 	buffer.name = name;
@@ -369,7 +379,7 @@ static int get_name(struct dentry *dentry, char *name,
 	while (1) {
 		int old_seq = buffer.sequence;
 
-		error = vfs_readdir(&file, filldir_one, &buffer);
+		error = vfs_readdir(file, filldir_one, &buffer);
 
 		if (error < 0)
 			break;
@@ -383,7 +393,7 @@ static int get_name(struct dentry *dentry, char *name,
 	}
 
 out_close:
-	close_private_file(&file);
+	fput(file);
 out:
 	return error;
 }

@@ -1,4 +1,5 @@
 /* $XFree86$ */
+/* $XdotOrg$ */
 /*
  * OEM Data for 300 series
  *
@@ -31,10 +32,7 @@
  * * 2) Redistributions in binary form must reproduce the above copyright
  * *    notice, this list of conditions and the following disclaimer in the
  * *    documentation and/or other materials provided with the distribution.
- * * 3) All advertising materials mentioning features or use of this software
- * *    must display the following acknowledgement: "This product includes
- * *    software developed by Thomas Winischhofer, Vienna, Austria."
- * * 4) The name of the author may not be used to endorse or promote products
+ * * 3) The name of the author may not be used to endorse or promote products
  * *    derived from this software without specific prior written permission.
  * *
  * * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -52,7 +50,7 @@
  *
  */
 
-const UCHAR SiS300_OEMTVDelay301[8][4] =
+static const UCHAR SiS300_OEMTVDelay301[8][4] =
 {
 	{0x08,0x08,0x08,0x08},
 	{0x08,0x08,0x08,0x08},
@@ -64,7 +62,7 @@ const UCHAR SiS300_OEMTVDelay301[8][4] =
 	{0x20,0x20,0x20,0x20}
 };
 
-const UCHAR SiS300_OEMTVDelayLVDS[8][4] =
+static const UCHAR SiS300_OEMTVDelayLVDS[8][4] =
 {
 	{0x20,0x20,0x20,0x20},
 	{0x20,0x20,0x20,0x20},
@@ -76,7 +74,7 @@ const UCHAR SiS300_OEMTVDelayLVDS[8][4] =
 	{0x20,0x20,0x20,0x20}
 };
 
-const UCHAR SiS300_OEMTVFlicker[8][4] =
+static const UCHAR SiS300_OEMTVFlicker[8][4] =
 {
 	{0x00,0x00,0x00,0x00},
 	{0x00,0x00,0x00,0x00},
@@ -89,7 +87,7 @@ const UCHAR SiS300_OEMTVFlicker[8][4] =
 };
 
 #if 0   /* TW: Not used */
-const UCHAR SiS300_OEMLCDDelay1[12][4]={
+static const UCHAR SiS300_OEMLCDDelay1[12][4]={
 	{0x2c,0x2c,0x2c,0x2c},
 	{0x20,0x20,0x20,0x20},
 	{0x20,0x20,0x20,0x20},
@@ -105,8 +103,8 @@ const UCHAR SiS300_OEMLCDDelay1[12][4]={
 };
 #endif
 
-/* TW: From 630/301B BIOS */
-const UCHAR SiS300_OEMLCDDelay2[64][4] =		 /* for 301/301b/302b/301LV/302LV */
+/* From 630/301B BIOS */
+static const UCHAR SiS300_OEMLCDDelay2[64][4] =		 /* for 301/301b/302b/301LV/302LV */
 {
 	{0x20,0x20,0x20,0x20},
 	{0x20,0x20,0x20,0x20},
@@ -174,8 +172,8 @@ const UCHAR SiS300_OEMLCDDelay2[64][4] =		 /* for 301/301b/302b/301LV/302LV */
 	{0x20,0x20,0x20,0x20}
 };
 
-/* TW: From 300/301LV BIOS */
-const UCHAR SiS300_OEMLCDDelay4[12][4] =
+/* From 300/301LV BIOS */
+static const UCHAR SiS300_OEMLCDDelay4[12][4] =
 {
 	{0x2c,0x2c,0x2c,0x2c},
 	{0x20,0x20,0x20,0x20},
@@ -191,8 +189,8 @@ const UCHAR SiS300_OEMLCDDelay4[12][4] =
 	{0x24,0x24,0x24,0x24}
 };
 
-/* TW: From 300/301LV BIOS */
-const UCHAR SiS300_OEMLCDDelay5[32][4] =
+/* From 300/301LV BIOS */
+static const UCHAR SiS300_OEMLCDDelay5[32][4] =
 {
 	{0x20,0x20,0x20,0x20},
 	{0x20,0x20,0x20,0x20},
@@ -228,8 +226,8 @@ const UCHAR SiS300_OEMLCDDelay5[32][4] =
 	{0x20,0x20,0x20,0x20},
 };
 
-/* TW: Added for LVDS */
-const UCHAR SiS300_OEMLCDDelay3[64][4] = {	/* For LVDS */
+/* Added for LVDS */
+static const UCHAR SiS300_OEMLCDDelay3[64][4] = {	/* For LVDS */
 	{0x20,0x20,0x20,0x20},
 	{0x20,0x20,0x20,0x20},
 	{0x20,0x20,0x20,0x20},
@@ -296,7 +294,7 @@ const UCHAR SiS300_OEMLCDDelay3[64][4] = {	/* For LVDS */
 	{0x20,0x20,0x20,0x20}
 };
 
-const UCHAR SiS300_Phase1[8][5][4] =
+static const UCHAR SiS300_Phase1[8][5][4] =
 {
     {
 	{0x21,0xed,0x00,0x08},
@@ -357,7 +355,7 @@ const UCHAR SiS300_Phase1[8][5][4] =
 };
 
 
-const UCHAR SiS300_Phase2[8][5][4] =
+static const UCHAR SiS300_Phase2[8][5][4] =
 {
     {
         {0x21,0xed,0x00,0x08},
@@ -417,7 +415,7 @@ const UCHAR SiS300_Phase2[8][5][4] =
     }
 };
 
-const UCHAR SiS300_Filter1[10][16][4] =
+static const UCHAR SiS300_Filter1[10][16][4] =
 {
     {
 	{0x00,0xf4,0x10,0x38},
@@ -601,7 +599,7 @@ const UCHAR SiS300_Filter1[10][16][4] =
     },
 };
 
-const UCHAR SiS300_Filter2[10][9][7] =
+static const UCHAR SiS300_Filter2[10][9][7] =
 {
     {
 	{0xFF,0x03,0x02,0xF6,0xFC,0x27,0x46},
@@ -716,7 +714,7 @@ const UCHAR SiS300_Filter2[10][9][7] =
 };
 
 /* Custom data for Barco iQ Pro R300 */
-const UCHAR barco_p1[2][9][7][3] = {
+static const UCHAR barco_p1[2][9][7][3] = {
     {
 	{  { 0x16, 0xcf, 0x00 },
 	   { 0x18, 0x00, 0x00 },

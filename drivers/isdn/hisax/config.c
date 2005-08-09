@@ -8,7 +8,7 @@
  * of the GNU General Public License, incorporated herein by reference.
  *
  * For changes and modifications please read
- * ../../../Documentation/isdn/HiSax.cert
+ * Documentation/isdn/HiSax.cert
  *
  * based on the teles driver from Jan den Ouden
  *
@@ -354,20 +354,18 @@ static int irq[HISAX_MAX_CARDS] __devinitdata = { 0, };
 static int mem[HISAX_MAX_CARDS] __devinitdata = { 0, };
 static char *id = HiSaxID;
 
-#define PARM_PARA "1-" __MODULE_STRING(HISAX_MAX_CARDS) "i"
-
 MODULE_DESCRIPTION("ISDN4Linux: Driver for passive ISDN cards");
 MODULE_AUTHOR("Karsten Keil");
 MODULE_LICENSE("GPL");
-MODULE_PARM(type, PARM_PARA);
-MODULE_PARM(protocol, PARM_PARA);
-MODULE_PARM(io, PARM_PARA);
-MODULE_PARM(irq, PARM_PARA);
-MODULE_PARM(mem, PARM_PARA);
-MODULE_PARM(id, "s");
+module_param_array(type, int, NULL, 0);
+module_param_array(protocol, int, NULL, 0);
+module_param_array(io, int, NULL, 0);
+module_param_array(irq, int, NULL, 0);
+module_param_array(mem, int, NULL, 0);
+module_param(id, charp, 0);
 #ifdef IO0_IO1
-MODULE_PARM(io0, PARM_PARA);
-MODULE_PARM(io1, PARM_PARA);
+module_param_array(io0, int, NULL, 0);
+module_param_array(io1, int, NULL, 0);
 #endif
 #endif /* MODULE */
 
@@ -618,10 +616,10 @@ struct IsdnCardState *hisax_get_card(int cardnr)
 	return NULL;
 }
 
-int HiSax_readstatus(u_char * buf, int len, int user, int id, int channel)
+int HiSax_readstatus(u_char __user *buf, int len, int id, int channel)
 {
 	int count, cnt;
-	u_char *p = buf;
+	u_char __user *p = buf;
 	struct IsdnCardState *cs = hisax_findcard(id);
 
 	if (cs) {
@@ -633,10 +631,7 @@ int HiSax_readstatus(u_char * buf, int len, int user, int id, int channel)
 		count = cs->status_end - cs->status_read + 1;
 		if (count >= len)
 			count = len;
-		if (user)
-			copy_to_user(p, cs->status_read, count);
-		else
-			memcpy(p, cs->status_read, count);
+		copy_to_user(p, cs->status_read, count);
 		cs->status_read += count;
 		if (cs->status_read > cs->status_end)
 			cs->status_read = cs->status_buf;
@@ -647,10 +642,7 @@ int HiSax_readstatus(u_char * buf, int len, int user, int id, int channel)
 				cnt = HISAX_STATUS_BUFSIZE;
 			else
 				cnt = count;
-			if (user)
-				copy_to_user(p, cs->status_read, cnt);
-			else
-				memcpy(p, cs->status_read, cnt);
+			copy_to_user(p, cs->status_read, cnt);
 			p += cnt;
 			cs->status_read += cnt % HISAX_STATUS_BUFSIZE;
 			count -= cnt;
@@ -849,9 +841,8 @@ static int init_card(struct IsdnCardState *cs)
 	}
 	while (cnt) {
 		cs->cardmsg(cs, CARD_INIT, NULL);
-		set_current_state(TASK_UNINTERRUPTIBLE);
 		/* Timeout 10ms */
-		schedule_timeout((10 * HZ) / 1000);
+		msleep(10);
 		printk(KERN_INFO "%s: IRQ %d count %d\n",
 		       CardType[cs->typ], cs->irq, kstat_irqs(cs->irq));
 		if (kstat_irqs(cs->irq) == irq_cnt) {
@@ -1586,7 +1577,7 @@ int hisax_register(struct hisax_d_if *hisax_d_if, struct hisax_b_if *b_if[],
 	cards[i].protocol = protocol;
 	sprintf(id, "%s%d", name, i);
 	nrcards++;
-	retval = checkcard(i, id, 0, hisax_d_if->owner);
+	retval = checkcard(i, id, NULL, hisax_d_if->owner);
 	if (retval == 0) { // yuck
 		cards[i].typ = 0;
 		nrcards--;
@@ -1884,6 +1875,7 @@ static void EChannel_proc_rcv(struct hisax_d_if *d_if)
 	}
 }
 
+#ifdef CONFIG_PCI
 #include <linux/pci.h>
 
 static struct pci_device_id hisax_pci_tbl[] __initdata = {
@@ -1952,6 +1944,7 @@ static struct pci_device_id hisax_pci_tbl[] __initdata = {
 };
 
 MODULE_DEVICE_TABLE(pci, hisax_pci_tbl);
+#endif /* CONFIG_PCI */
 
 module_init(HiSax_init);
 module_exit(HiSax_exit);

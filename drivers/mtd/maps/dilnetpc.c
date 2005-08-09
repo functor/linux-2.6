@@ -14,7 +14,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA
  *
- * $Id: dilnetpc.c,v 1.12 2003/05/21 12:45:18 dwmw2 Exp $
+ * $Id: dilnetpc.c,v 1.17 2004/11/28 09:40:39 dwmw2 Exp $
  *
  * The DIL/Net PC is a tiny embedded PC board made by SSV Embedded Systems
  * featuring the AMD Elan SC410 processor. There are two variants of this
@@ -197,7 +197,7 @@ static void dnpc_unmap_flash(void)
 ************************************************************
 */
 
-static spinlock_t dnpc_spin   = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(dnpc_spin);
 static int        vpp_counter = 0;
 /*
 ** This is what has to be done for the DNP board ..
@@ -252,7 +252,7 @@ static void adnp_set_vpp(struct map_info *not_used, int on)
 static struct map_info dnpc_map = {
 	.name = "ADNP Flash Bank",
 	.size = ADNP_WINDOW_SIZE,
-	.buswidth = 1,
+	.bankwidth = 1,
 	.set_vpp = adnp_set_vpp,
 	.phys = WINDOW_ADDR
 };
@@ -403,7 +403,7 @@ static int __init init_dnpc(void)
 	printk(KERN_NOTICE "DIL/Net %s flash: 0x%lx at 0x%lx\n", 
 		is_dnp ? "DNPC" : "ADNP", dnpc_map.size, dnpc_map.phys);
 
-	dnpc_map.virt = (unsigned long)ioremap_nocache(dnpc_map.phys, dnpc_map.size);
+	dnpc_map.virt = ioremap_nocache(dnpc_map.phys, dnpc_map.size);
 
 	dnpc_map_flash(dnpc_map.phys, dnpc_map.size);
 
@@ -413,7 +413,7 @@ static int __init init_dnpc(void)
 	}
 	simple_map_init(&dnpc_map);
 
-	printk("FLASH virtual address: 0x%lx\n", dnpc_map.virt);
+	printk("FLASH virtual address: 0x%p\n", dnpc_map.virt);
 
 	mymtd = do_map_probe("jedec_probe", &dnpc_map);
 
@@ -430,7 +430,7 @@ static int __init init_dnpc(void)
 			mymtd->erasesize = 0x10000;
 
 	if (!mymtd) {
-		iounmap((void *)dnpc_map.virt);
+		iounmap(dnpc_map.virt);
 		return -ENXIO;
 	}
 		
@@ -481,9 +481,9 @@ static void __exit cleanup_dnpc(void)
 		map_destroy(mymtd);
 	}
 	if (dnpc_map.virt) {
-		iounmap((void *)dnpc_map.virt);
+		iounmap(dnpc_map.virt);
 		dnpc_unmap_flash();
-		dnpc_map.virt = 0;
+		dnpc_map.virt = NULL;
 	}
 }
 

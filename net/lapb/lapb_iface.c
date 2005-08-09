@@ -40,7 +40,7 @@
 #include <net/lapb.h>
 
 static struct list_head lapb_list = LIST_HEAD_INIT(lapb_list);
-static rwlock_t lapb_list_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(lapb_list_lock);
 
 /*
  *	Free an allocated lapb control block. 
@@ -176,7 +176,7 @@ int lapb_unregister(struct net_device *dev)
 	struct lapb_cb *lapb;
 	int rc = LAPB_BADTOKEN;
 
-	write_unlock_bh(&lapb_list_lock);
+	write_lock_bh(&lapb_list_lock);
 	lapb = __lapb_devtostruct(dev);
 	if (!lapb)
 		goto out;

@@ -109,30 +109,11 @@ typedef unsigned long sigset_t;
 #define MINSIGSTKSZ	4096
 #define SIGSTKSZ	16384
 
-
-#ifdef __KERNEL__
-/*
- * These values of sa_flags are used only by the kernel as part of the
- * irq handling routines.
- *
- * SA_INTERRUPT is also used by the irq handling routines.
- * SA_SHIRQ is for shared interrupt support on PCI and EISA.
- */
-#define SA_PROBE		SA_ONESHOT
-#define SA_SAMPLE_RANDOM	SA_RESTART
-#define SA_SHIRQ		0x40000000
-#endif
-
 #define SIG_BLOCK          1	/* for blocking signals */
 #define SIG_UNBLOCK        2	/* for unblocking signals */
 #define SIG_SETMASK        3	/* for setting the signal mask */
 
-/* Type of a signal handler.  */
-typedef void (*__sighandler_t)(int);
-
-#define SIG_DFL	((__sighandler_t)0)	/* default signal handling */
-#define SIG_IGN	((__sighandler_t)1)	/* ignore signal */
-#define SIG_ERR	((__sighandler_t)-1)	/* error return from signal */
+#include <asm-generic/signal.h>
 
 #ifdef __KERNEL__
 struct osf_sigaction {
@@ -149,7 +130,7 @@ struct sigaction {
 
 struct k_sigaction {
 	struct sigaction sa;
-	void (*ka_restorer)(void);
+	__sigrestore_t ka_restorer;
 };
 #else
 /* Here we must cater to libcs that poke about in kernel headers.  */
@@ -169,7 +150,7 @@ struct sigaction {
 #endif /* __KERNEL__ */
 
 typedef struct sigaltstack {
-	void *ss_sp;
+	void __user *ss_sp;
 	int ss_flags;
 	size_t ss_size;
 } stack_t;
@@ -179,7 +160,7 @@ typedef struct sigaltstack {
    implemented here for OSF/1 compatibility.  */
 
 struct sigstack {
-	void *ss_sp;
+	void __user *ss_sp;
 	int ss_onstack;
 };
 
@@ -187,7 +168,6 @@ struct sigstack {
 #include <asm/sigcontext.h>
 
 #define ptrace_signal_deliver(regs, cookie) do { } while (0)
-#define HAVE_ARCH_SYS_PAUSE
 
 #endif
 

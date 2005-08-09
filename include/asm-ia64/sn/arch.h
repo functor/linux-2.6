@@ -5,38 +5,63 @@
  *
  * SGI specific setup.
  *
- * Copyright (C) 1995-1997,1999,2001-2003 Silicon Graphics, Inc.  All rights reserved.
+ * Copyright (C) 1995-1997,1999,2001-2005 Silicon Graphics, Inc.  All rights reserved.
  * Copyright (C) 1999 Ralf Baechle (ralf@gnu.org)
  */
 #ifndef _ASM_IA64_SN_ARCH_H
 #define _ASM_IA64_SN_ARCH_H
 
 #include <asm/types.h>
+#include <asm/percpu.h>
 #include <asm/sn/types.h>
 #include <asm/sn/sn_cpuid.h>
 
-typedef u64	shubreg_t;
-typedef u64	hubreg_t;
-typedef u64	mmr_t;
-typedef u64	nic_t;
+/*
+ * The following defines attributes of the HUB chip. These attributes are
+ * frequently referenced. They are kept in the per-cpu data areas of each cpu.
+ * They are kept together in a struct to minimize cache misses.
+ */
+struct sn_hub_info_s {
+	u8 shub2;
+	u8 nasid_shift;
+	u8 as_shift;
+	u8 shub_1_1_found;
+	u16 nasid_bitmask;
+};
+DECLARE_PER_CPU(struct sn_hub_info_s, __sn_hub_info);
+#define sn_hub_info 	(&__get_cpu_var(__sn_hub_info))
+#define is_shub2()	(sn_hub_info->shub2)
+#define is_shub1()	(sn_hub_info->shub2 == 0)
 
-#define CNODE_TO_CPU_BASE(_cnode)	(NODEPDA(_cnode)->node_first_cpu)
+/*
+ * Use this macro to test if shub 1.1 wars should be enabled
+ */
+#define enable_shub_wars_1_1()	(sn_hub_info->shub_1_1_found)
 
-#define NASID_TO_COMPACT_NODEID(nasid)  (nasid_to_cnodeid(nasid))
-#define COMPACT_TO_NASID_NODEID(cnode)  (cnodeid_to_nasid(cnode))
+
+/*
+ * This is the maximum number of nodes that can be part of a kernel.
+ * Effectively, it's the maximum number of compact node ids (cnodeid_t).
+ * This is not necessarily the same as MAX_NASIDS.
+ */
+#define MAX_COMPACT_NODES	2048
+#define CPUS_PER_NODE		4
 
 
-#define INVALID_NASID		((nasid_t)-1)
-#define INVALID_CNODEID		((cnodeid_t)-1)
-#define INVALID_PNODEID		((pnodeid_t)-1)
-#define INVALID_SLAB            (slabid_t)-1
-#define INVALID_MODULE		((moduleid_t)-1)
-#define	INVALID_PARTID		((partid_t)-1)
+/*
+ * Compact node ID to nasid mappings kept in the per-cpu data areas of each
+ * cpu.
+ */
+DECLARE_PER_CPU(short, __sn_cnodeid_to_nasid[MAX_NUMNODES]);
+#define sn_cnodeid_to_nasid	(&__get_cpu_var(__sn_cnodeid_to_nasid[0]))
 
-extern cpuid_t cnodetocpu(cnodeid_t);
-void   sn_flush_all_caches(long addr, long bytes);
 
-extern int     is_fine_dirmode(void);
 
+extern u8 sn_partition_id;
+extern u8 sn_system_size;
+extern u8 sn_sharing_domain_size;
+extern u8 sn_region_size;
+
+extern void sn_flush_all_caches(long addr, long bytes);
 
 #endif /* _ASM_IA64_SN_ARCH_H */

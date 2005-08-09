@@ -40,7 +40,6 @@
 #include <linux/module.h>
 #include <linux/console.h>
 #include <linux/tty_driver.h>
-#include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/string.h>
 #include <linux/sysrq.h>
@@ -61,6 +60,7 @@ static struct netpoll np = {
 	.local_port = 6665,
 	.remote_port = 6666,
 	.remote_mac = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+	.drop = netpoll_queue,
 };
 static int configured = 0;
 

@@ -61,6 +61,10 @@ static __inline__ void atomic_sub(int i, atomic_t * v)
 {
 	       __CS_LOOP(v, i, "sr");
 }
+static __inline__ int atomic_sub_return(int i, atomic_t * v)
+{
+	return __CS_LOOP(v, i, "sr");
+}
 static __inline__ void atomic_inc(volatile atomic_t * v)
 {
 	       __CS_LOOP(v, 1, "ar");
@@ -69,9 +73,10 @@ static __inline__ int atomic_inc_return(volatile atomic_t * v)
 {
 	return __CS_LOOP(v, 1, "ar");
 }
+
 static __inline__ int atomic_inc_and_test(volatile atomic_t * v)
 {
-	return __CS_LOOP(v, 1, "ar") != 0;
+	return __CS_LOOP(v, 1, "ar") == 0;
 }
 static __inline__ void atomic_dec(volatile atomic_t * v)
 {
@@ -144,7 +149,7 @@ static __inline__ long long atomic64_inc_return(volatile atomic64_t * v)
 }
 static __inline__ long long atomic64_inc_and_test(volatile atomic64_t * v)
 {
-	return __CSG_LOOP(v, 1, "agr") != 0;
+	return __CSG_LOOP(v, 1, "agr") == 0;
 }
 static __inline__ void atomic64_dec(volatile atomic64_t * v)
 {

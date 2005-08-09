@@ -17,7 +17,6 @@
 #include <asm/sigcontext.h>
 #include <asm/user.h>
 
-extern unsigned long mxcsr_feature_mask;
 extern void mxcsr_feature_mask_init(void);
 extern void init_fpu(struct task_struct *);
 /*
@@ -51,7 +50,7 @@ static inline void __save_init_fpu( struct task_struct *tsk )
 #define __clear_fpu( tsk )					\
 do {								\
 	if ((tsk)->thread_info->status & TS_USEDFPU) {		\
-		asm volatile("fwait");				\
+		asm volatile("fnclex ; fwait");				\
 		(tsk)->thread_info->status &= ~TS_USEDFPU;	\
 		stts();						\
 	}							\
@@ -86,12 +85,7 @@ static inline void save_init_fpu( struct task_struct *tsk )
  */
 extern unsigned short get_fpu_cwd( struct task_struct *tsk );
 extern unsigned short get_fpu_swd( struct task_struct *tsk );
-extern unsigned short get_fpu_twd( struct task_struct *tsk );
 extern unsigned short get_fpu_mxcsr( struct task_struct *tsk );
-
-extern void set_fpu_cwd( struct task_struct *tsk, unsigned short cwd );
-extern void set_fpu_swd( struct task_struct *tsk, unsigned short swd );
-extern void set_fpu_twd( struct task_struct *tsk, unsigned short twd );
 
 /*
  * Signal frame handlers...
@@ -117,7 +111,5 @@ extern int set_fpxregs( struct task_struct *tsk,
  */
 extern int dump_fpu( struct pt_regs *regs,
 		     struct user_i387_struct *fpu );
-extern int dump_extended_fpu( struct pt_regs *regs,
-			      struct user_fxsr_struct *fpu );
 
 #endif /* __ASM_I386_I387_H */

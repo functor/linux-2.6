@@ -1,21 +1,17 @@
 /*
- * linux/kernel/id.c
- *
  * 2002-10-18  written by Jim Houston jim.houston@ccur.com
  *	Copyright (C) 2002 by Concurrent Computer Corporation
  *	Distributed under the GNU GPL license version 2.
+ *
+ * Modified by George Anzinger to reuse immediately and to use
+ * find bit instructions.  Also removed _irq on spinlocks.
  *
  * Small id to pointer translation service.  
  *
  * It uses a radix tree like structure as a sparse array indexed 
  * by the id to obtain the pointer.  The bitmap makes allocating
  * a new id quick.  
-
- * Modified by George Anzinger to reuse immediately and to use
- * find bit instructions.  Also removed _irq on spinlocks.
-
- * So here is what this bit of code does:
-
+ *
  * You call it to allocate an id (an int) an associate with that id a
  * pointer or what ever, we treat it as a (void *).  You can pass this
  * id to a user for him to pass back at a later time.  You then pass
@@ -26,75 +22,7 @@
  * don't need to go to the memory "store" during an id allocate, just 
  * so you don't need to be too concerned about locking and conflicts
  * with the slab allocator.
-
- * A word on reuse.  We reuse empty id slots as soon as we can, always
- * using the lowest one available.  But we also merge a counter in the
- * high bits of the id.  The counter is RESERVED_ID_BITS (8 at this time)
- * long.  This means that if you allocate and release the same id in a 
- * loop we will reuse an id after about 256 times around the loop.  The
- * word about is used here as we will NOT return a valid id of -1 so if
- * you loop on the largest possible id (and that is 24 bits, wow!) we
- * will kick the counter to avoid -1.  (Paranoid?  You bet!)
- *
- * What you need to do is, since we don't keep the counter as part of
- * id / ptr pair, to keep a copy of it in the pointed to structure
- * (or else where) so that when you ask for a ptr you can varify that
- * the returned ptr is correct by comparing the id it contains with the one
- * you asked for.  In other words, we only did half the reuse protection.
- * Since the code depends on your code doing this check, we ignore high
- * order bits in the id, not just the count, but bits that would, if used,
- * index outside of the allocated ids.  In other words, if the largest id
- * currently allocated is 32 a look up will only look at the low 5 bits of
- * the id.  Since you will want to keep this id in the structure anyway
- * (if for no other reason than to be able to eliminate the id when the
- * structure is found in some other way) this seems reasonable.  If you
- * really think otherwise, the code to check these bits here, it is just
- * disabled with a #if 0.
-
-
- * So here are the complete details:
-
- *  include <linux/idr.h>
-
- * void idr_init(struct idr *idp)
-
- *   This function is use to set up the handle (idp) that you will pass
- *   to the rest of the functions.  The structure is defined in the
- *   header.
-
- * int idr_pre_get(struct idr *idp, unsigned gfp_mask)
-
- *   This function should be called prior to locking and calling the
- *   following function.  It pre allocates enough memory to satisfy the
- *   worst possible allocation.  Unless gfp_mask is GFP_ATOMIC, it can
- *   sleep, so must not be called with any spinlocks held.  If the system is
- *   REALLY out of memory this function returns 0, other wise 1.
-
- * int idr_get_new(struct idr *idp, void *ptr);
- 
- *   This is the allocate id function.  It should be called with any
- *   required locks.  In fact, in the SMP case, you MUST lock prior to
- *   calling this function to avoid possible out of memory problems.  If
- *   memory is required, it will return a -1, in which case you should
- *   unlock and go back to the idr_pre_get() call.  ptr is the pointer
- *   you want associated with the id.  In other words:
-
- * void *idr_find(struct idr *idp, int id);
- 
- *   returns the "ptr", given the id.  A NULL return indicates that the
- *   id is not valid (or you passed NULL in the idr_get_new(), shame on
- *   you).  This function must be called with a spinlock that prevents
- *   calling either idr_get_new() or idr_remove() or idr_find() while it
- *   is working.
-
- * void idr_remove(struct idr *idp, int id);
-
- *   removes the given id, freeing that slot and any memory that may
- *   now be unused.  See idr_find() for locking restrictions.
-
  */
-
-
 
 #ifndef TEST                        // to test in user space...
 #include <linux/slab.h>
@@ -104,21 +32,18 @@
 #include <linux/string.h>
 #include <linux/idr.h>
 
-
 static kmem_cache_t *idr_layer_cache;
-
-
 
 static struct idr_layer *alloc_layer(struct idr *idp)
 {
 	struct idr_layer *p;
 
 	spin_lock(&idp->lock);
-	if (!(p = idp->id_free))
-		BUG();
-	idp->id_free = p->ary[0];
-	idp->id_free_cnt--;
-	p->ary[0] = 0;
+	if ((p = idp->id_free)) {
+		idp->id_free = p->ary[0];
+		idp->id_free_cnt--;
+		p->ary[0] = NULL;
+	}
 	spin_unlock(&idp->lock);
 	return(p);
 }
@@ -135,6 +60,18 @@ static void free_layer(struct idr *idp, struct idr_layer *p)
 	spin_unlock(&idp->lock);
 }
 
+/**
+ * idr_pre_get - reserver resources for idr allocation
+ * @idp:	idr handle
+ * @gfp_mask:	memory allocation flags
+ *
+ * This function should be called prior to locking and calling the
+ * following function.  It preallocates enough memory to satisfy
+ * the worst possible allocation.
+ *
+ * If the system is REALLY out of memory this function returns 0,
+ * otherwise 1.
+ */
 int idr_pre_get(struct idr *idp, unsigned gfp_mask)
 {
 	while (idp->id_free_cnt < IDR_FREE_MAX) {
@@ -181,8 +118,8 @@ static int sub_alloc(struct idr *idp, void *ptr, int *starting_id)
 			sh = IDR_BITS*l;
 			id = ((id >> sh) ^ n ^ m) << sh;
 		}
-		if (id >= MAX_ID_BIT)
-			return -1;
+		if ((id >= MAX_ID_BIT) || (id < 0))
+			return -3;
 		if (l == 0)
 			break;
 		/*
@@ -220,7 +157,7 @@ static int sub_alloc(struct idr *idp, void *ptr, int *starting_id)
 	return(id);
 }
 
-int idr_get_new_above(struct idr *idp, void *ptr, int starting_id)
+static int idr_get_new_above_int(struct idr *idp, void *ptr, int starting_id)
 {
 	struct idr_layer *p, *new;
 	int layers, v, id;
@@ -238,7 +175,7 @@ build_up:
 	 * Add a new layer to the top of the tree if the requested
 	 * id is larger than the currently allocated space.
 	 */
-	while (id >= (1 << (layers*IDR_BITS))) {
+	while ((layers < MAX_LEVEL) && (id >= (1 << (layers*IDR_BITS)))) {
 		layers++;
 		if (!p->count)
 			continue;
@@ -249,7 +186,7 @@ build_up:
 			 */
 			for (new = p; p && p != idp->top; new = p) {
 				p = p->ary[0];
-				new->ary[0] = 0;
+				new->ary[0] = NULL;
 				new->bitmap = new->count = 0;
 				free_layer(idp, new);
 			}
@@ -266,41 +203,103 @@ build_up:
 	v = sub_alloc(idp, ptr, &id);
 	if (v == -2)
 		goto build_up;
-	if ( likely(v >= 0 )) {
-		idp->count++;
-		v += (idp->count << MAX_ID_SHIFT);
-		if ( unlikely( v == -1 ))
-		     v += (1L << MAX_ID_SHIFT);
-	}
 	return(v);
+}
+
+/**
+ * idr_get_new_above - allocate new idr entry above a start id
+ * @idp: idr handle
+ * @ptr: pointer you want associated with the ide
+ * @start_id: id to start search at
+ * @id: pointer to the allocated handle
+ *
+ * This is the allocate id function.  It should be called with any
+ * required locks.
+ *
+ * If memory is required, it will return -EAGAIN, you should unlock
+ * and go back to the idr_pre_get() call.  If the idr is full, it will
+ * return -ENOSPC.
+ *
+ * @id returns a value in the range 0 ... 0x7fffffff
+ */
+int idr_get_new_above(struct idr *idp, void *ptr, int starting_id, int *id)
+{
+	int rv;
+	rv = idr_get_new_above_int(idp, ptr, starting_id);
+	/*
+	 * This is a cheap hack until the IDR code can be fixed to
+	 * return proper error values.
+	 */
+	if (rv < 0) {
+		if (rv == -1)
+			return -EAGAIN;
+		else /* Will be -3 */
+			return -ENOSPC;
+	}
+	*id = rv;
+	return 0;
 }
 EXPORT_SYMBOL(idr_get_new_above);
 
-int idr_get_new(struct idr *idp, void *ptr)
+/**
+ * idr_get_new - allocate new idr entry
+ * @idp: idr handle
+ * @ptr: pointer you want associated with the ide
+ * @id: pointer to the allocated handle
+ *
+ * This is the allocate id function.  It should be called with any
+ * required locks.
+ *
+ * If memory is required, it will return -EAGAIN, you should unlock
+ * and go back to the idr_pre_get() call.  If the idr is full, it will
+ * return -ENOSPC.
+ *
+ * @id returns a value in the range 0 ... 0x7fffffff
+ */
+int idr_get_new(struct idr *idp, void *ptr, int *id)
 {
-	return idr_get_new_above(idp, ptr, 0);
+	int rv;
+	rv = idr_get_new_above_int(idp, ptr, 0);
+	/*
+	 * This is a cheap hack until the IDR code can be fixed to
+	 * return proper error values.
+	 */
+	if (rv < 0) {
+		if (rv == -1)
+			return -EAGAIN;
+		else /* Will be -3 */
+			return -ENOSPC;
+	}
+	*id = rv;
+	return 0;
 }
 EXPORT_SYMBOL(idr_get_new);
 
+static void idr_remove_warning(int id)
+{
+	printk("idr_remove called for id=%d which is not allocated.\n", id);
+	dump_stack();
+}
 
 static void sub_remove(struct idr *idp, int shift, int id)
 {
 	struct idr_layer *p = idp->top;
 	struct idr_layer **pa[MAX_LEVEL];
 	struct idr_layer ***paa = &pa[0];
+	int n;
 
 	*paa = NULL;
 	*++paa = &idp->top;
 
 	while ((shift > 0) && p) {
-		int n = (id >> shift) & IDR_MASK;
+		n = (id >> shift) & IDR_MASK;
 		__clear_bit(n, &p->bitmap);
 		*++paa = &p->ary[n];
 		p = p->ary[n];
 		shift -= IDR_BITS;
 	}
-	if (likely(p != NULL)){
-		int n = id & IDR_MASK;
+	n = id & IDR_MASK;
+	if (likely(p != NULL && test_bit(n, &p->bitmap))){
 		__clear_bit(n, &p->bitmap);
 		p->ary[n] = NULL;
 		while(*paa && ! --((**paa)->count)){
@@ -309,11 +308,22 @@ static void sub_remove(struct idr *idp, int shift, int id)
 		}
 		if ( ! *paa )
 			idp->layers = 0;
+	} else {
+		idr_remove_warning(id);
 	}
 }
+
+/**
+ * idr_remove - remove the given id and free it's slot
+ * idp: idr handle
+ * id: uniqueue key
+ */
 void idr_remove(struct idr *idp, int id)
 {
 	struct idr_layer *p;
+
+	/* Mask off upper bits we don't use for the search. */
+	id &= MAX_ID_MASK;
 
 	sub_remove(idp, (idp->layers - 1) * IDR_BITS, id);
 	if ( idp->top && idp->top->count == 1 && 
@@ -335,6 +345,17 @@ void idr_remove(struct idr *idp, int id)
 }
 EXPORT_SYMBOL(idr_remove);
 
+/**
+ * idr_find - return pointer for given id
+ * @idp: idr handle
+ * @id: lookup key
+ *
+ * Return the pointer given the id it has been registered with.  A %NULL
+ * return indicates that @id is not valid or you passed %NULL in
+ * idr_get_new().
+ *
+ * The caller must serialize idr_find() vs idr_get_new() and idr_remove().
+ */
 void *idr_find(struct idr *idp, int id)
 {
 	int n;
@@ -342,14 +363,13 @@ void *idr_find(struct idr *idp, int id)
 
 	n = idp->layers * IDR_BITS;
 	p = idp->top;
-#if 0
-	/*
-	 * This tests to see if bits outside the current tree are
-	 * present.  If so, tain't one of ours!
-	 */
-	if ( unlikely( (id & ~(~0 << MAX_ID_SHIFT)) >> (n + IDR_BITS)))
-	     return NULL;
-#endif
+
+	/* Mask off upper bits we don't use for the search. */
+	id &= MAX_ID_MASK;
+
+	if (id >= (1 << n))
+		return NULL;
+
 	while (n > 0 && p) {
 		n -= IDR_BITS;
 		p = p->ary[(id >> n) & IDR_MASK];
@@ -368,10 +388,17 @@ static  int init_id_cache(void)
 {
 	if (!idr_layer_cache)
 		idr_layer_cache = kmem_cache_create("idr_layer_cache", 
-			sizeof(struct idr_layer), 0, 0, idr_cache_ctor, 0);
+			sizeof(struct idr_layer), 0, 0, idr_cache_ctor, NULL);
 	return 0;
 }
 
+/**
+ * idr_init - initialize idr handle
+ * @idp:	idr handle
+ *
+ * This function is use to set up the handle (@idp) that you will pass
+ * to the rest of the functions.
+ */
 void idr_init(struct idr *idp)
 {
 	init_id_cache();
@@ -379,4 +406,3 @@ void idr_init(struct idr *idp)
 	spin_lock_init(&idp->lock);
 }
 EXPORT_SYMBOL(idr_init);
-

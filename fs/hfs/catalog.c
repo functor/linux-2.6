@@ -33,9 +33,9 @@ void hfs_cat_build_key(btree_key *key, u32 parent, struct qstr *name)
 	}
 }
 
-int hfs_cat_build_record(hfs_cat_rec *rec, u32 cnid, struct inode *inode)
+static int hfs_cat_build_record(hfs_cat_rec *rec, u32 cnid, struct inode *inode)
 {
-	u32 mtime = hfs_mtime();
+	__be32 mtime = hfs_mtime();
 
 	memset(rec, 0, sizeof(*rec));
 	if (S_ISDIR(inode->i_mode)) {
@@ -101,11 +101,11 @@ int hfs_cat_create(u32 cnid, struct inode *dir, struct qstr *str, struct inode *
 	if (err != -ENOENT) {
 		if (!err)
 			err = -EEXIST;
-		goto out;
+		goto err2;
 	}
 	err = hfs_brec_insert(&fd, &entry, entry_size);
 	if (err)
-		goto out;
+		goto err2;
 
 	hfs_cat_build_key(fd.search_key, dir->i_ino, str);
 	entry_size = hfs_cat_build_record(&entry, cnid, inode);
@@ -114,16 +114,24 @@ int hfs_cat_create(u32 cnid, struct inode *dir, struct qstr *str, struct inode *
 		/* panic? */
 		if (!err)
 			err = -EEXIST;
-		goto out;
+		goto err1;
 	}
 	err = hfs_brec_insert(&fd, &entry, entry_size);
-	if (!err) {
-		dir->i_size++;
-		mark_inode_dirty(dir);
-	}
-out:
-	hfs_find_exit(&fd);
+	if (err)
+		goto err1;
 
+	dir->i_size++;
+	dir->i_mtime = dir->i_ctime = CURRENT_TIME_SEC;
+	mark_inode_dirty(dir);
+	hfs_find_exit(&fd);
+	return 0;
+
+err1:
+	hfs_cat_build_key(fd.search_key, cnid, NULL);
+	if (!hfs_brec_find(&fd))
+		hfs_brec_remove(&fd);
+err2:
+	hfs_find_exit(&fd);
 	return err;
 }
 
@@ -240,6 +248,7 @@ int hfs_cat_delete(u32 cnid, struct inode *dir, struct qstr *str)
 	}
 
 	dir->i_size--;
+	dir->i_mtime = dir->i_ctime = CURRENT_TIME_SEC;
 	mark_inode_dirty(dir);
 	res = 0;
 out:
@@ -292,6 +301,7 @@ int hfs_cat_move(u32 cnid, struct inode *src_dir, struct qstr *src_name,
 	if (err)
 		goto out;
 	dst_dir->i_size++;
+	dst_dir->i_mtime = dst_dir->i_ctime = CURRENT_TIME_SEC;
 	mark_inode_dirty(dst_dir);
 
 	/* finally remove the old entry */
@@ -303,6 +313,7 @@ int hfs_cat_move(u32 cnid, struct inode *src_dir, struct qstr *src_name,
 	if (err)
 		goto out;
 	src_dir->i_size--;
+	src_dir->i_mtime = src_dir->i_ctime = CURRENT_TIME_SEC;
 	mark_inode_dirty(src_dir);
 
 	type = entry.type;

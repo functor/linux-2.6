@@ -28,7 +28,7 @@
 #define APC_OBPNAME	"power-management"
 #define APC_DEVNAME "apc"
 
-volatile static u8 *regs; 
+volatile static u8 __iomem *regs; 
 static int apc_regsize;
 static int apc_no_idle __initdata = 0;
 
@@ -70,7 +70,7 @@ void apc_swift_idle(void)
 
 static inline void apc_free(void)
 {
-	sbus_iounmap((unsigned long)regs, apc_regsize);
+	sbus_iounmap(regs, apc_regsize);
 }
 
 static int apc_open(struct inode *inode, struct file *f)
@@ -84,47 +84,44 @@ static int apc_release(struct inode *inode, struct file *f)
 }
 
 static int apc_ioctl(struct inode *inode, struct file *f, 
-		     unsigned int cmd, unsigned long arg)
+		     unsigned int cmd, unsigned long __arg)
 {
-	__u8 inarg;
+	__u8 inarg, __user *arg;
 
+	arg = (__u8 __user *) __arg;
 	switch (cmd) {
-		case APCIOCGFANCTL:
-			if(put_user(apc_readb(APC_FANCTL_REG) & APC_REGMASK, (__u8*) arg)) {
+	case APCIOCGFANCTL:
+		if (put_user(apc_readb(APC_FANCTL_REG) & APC_REGMASK, arg))
 				return -EFAULT;
-			}
-			break;
-		case APCIOCGCPWR:
-			if(put_user(apc_readb(APC_CPOWER_REG) & APC_REGMASK, (__u8*) arg)) {
-				return -EFAULT;
-			}
-			break;
-		case APCIOCGBPORT:
-			if(put_user(apc_readb(APC_BPORT_REG) & APC_BPMASK, (__u8*) arg)) {
-				return -EFAULT;
-			}
-			break;
+		break;
 
-		case APCIOCSFANCTL:
-			if(get_user(inarg, (__u8*) arg)) {
-				return -EFAULT;
-			}
-			apc_writeb(inarg & APC_REGMASK, APC_FANCTL_REG);
-			break;
-		case APCIOCSCPWR:
-			if(get_user(inarg, (__u8*) arg)) {
-				return -EFAULT;
-			}
-			apc_writeb(inarg & APC_REGMASK, APC_CPOWER_REG);
-			break;
-		case APCIOCSBPORT:
-			if(get_user(inarg, (__u8*) arg)) {
-				return -EFAULT;
-			}
-			apc_writeb(inarg & APC_BPMASK, APC_BPORT_REG);
-			break;
-		default:
-			return -EINVAL;
+	case APCIOCGCPWR:
+		if (put_user(apc_readb(APC_CPOWER_REG) & APC_REGMASK, arg))
+			return -EFAULT;
+		break;
+
+	case APCIOCGBPORT:
+		if (put_user(apc_readb(APC_BPORT_REG) & APC_BPMASK, arg))
+			return -EFAULT;
+		break;
+
+	case APCIOCSFANCTL:
+		if (get_user(inarg, arg))
+			return -EFAULT;
+		apc_writeb(inarg & APC_REGMASK, APC_FANCTL_REG);
+		break;
+	case APCIOCSCPWR:
+		if (get_user(inarg, arg))
+			return -EFAULT;
+		apc_writeb(inarg & APC_REGMASK, APC_CPOWER_REG);
+		break;
+	case APCIOCSBPORT:
+		if (get_user(inarg, arg))
+			return -EFAULT;
+		apc_writeb(inarg & APC_BPMASK, APC_BPORT_REG);
+		break;
+	default:
+		return -EINVAL;
 	};
 
 	return 0;
@@ -158,9 +155,9 @@ sbus_done:
 	}
 
 	apc_regsize = sdev->reg_addrs[0].reg_size;
-	regs = (u8*) sbus_ioremap(&sdev->resource[0], 0, 
+	regs = sbus_ioremap(&sdev->resource[0], 0, 
 				   apc_regsize, APC_OBPNAME);
-	if(NULL == regs) {
+	if(!regs) {
 		printk(KERN_ERR "%s: unable to map registers\n", APC_DEVNAME);
 		return -ENODEV;
 	}

@@ -19,8 +19,6 @@
  * -  Kissed strtok() goodbye
  */
 
-#define IN_STRING_C 1
- 
 #include <linux/types.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
@@ -67,6 +65,7 @@ EXPORT_SYMBOL(strnicmp);
  * @dest: Where to copy the string to
  * @src: Where to copy the string from
  */
+#undef strcpy
 char * strcpy(char * dest,const char *src)
 {
 	char *tmp = dest;
@@ -75,6 +74,7 @@ char * strcpy(char * dest,const char *src)
 		/* nothing */;
 	return tmp;
 }
+EXPORT_SYMBOL(strcpy);
 #endif
 
 #ifndef __HAVE_ARCH_STRNCPY
@@ -86,6 +86,10 @@ char * strcpy(char * dest,const char *src)
  *
  * The result is not %NUL-terminated if the source exceeds
  * @count bytes.
+ *
+ * In the case where the length of @src is less than  that  of
+ * count, the remainder of @dest will be padded with %NUL.
+ *
  */
 char * strncpy(char * dest,const char *src,size_t count)
 {
@@ -98,6 +102,7 @@ char * strncpy(char * dest,const char *src,size_t count)
 	}
 	return dest;
 }
+EXPORT_SYMBOL(strncpy);
 #endif
 
 #ifndef __HAVE_ARCH_STRLCPY
@@ -132,6 +137,7 @@ EXPORT_SYMBOL(strlcpy);
  * @dest: The string to be appended to
  * @src: The string to append to it
  */
+#undef strcat
 char * strcat(char * dest, const char * src)
 {
 	char *tmp = dest;
@@ -143,6 +149,7 @@ char * strcat(char * dest, const char * src)
 
 	return tmp;
 }
+EXPORT_SYMBOL(strcat);
 #endif
 
 #ifndef __HAVE_ARCH_STRNCAT
@@ -162,7 +169,7 @@ char * strncat(char *dest, const char *src, size_t count)
 	if (count) {
 		while (*dest)
 			dest++;
-		while ((*dest++ = *src++)) {
+		while ((*dest++ = *src++) != 0) {
 			if (--count == 0) {
 				*dest = '\0';
 				break;
@@ -172,6 +179,7 @@ char * strncat(char *dest, const char *src, size_t count)
 
 	return tmp;
 }
+EXPORT_SYMBOL(strncat);
 #endif
 
 #ifndef __HAVE_ARCH_STRLCAT
@@ -207,6 +215,7 @@ EXPORT_SYMBOL(strlcat);
  * @cs: One string
  * @ct: Another string
  */
+#undef strcmp
 int strcmp(const char * cs,const char * ct)
 {
 	register signed char __res;
@@ -218,6 +227,7 @@ int strcmp(const char * cs,const char * ct)
 
 	return __res;
 }
+EXPORT_SYMBOL(strcmp);
 #endif
 
 #ifndef __HAVE_ARCH_STRNCMP
@@ -239,6 +249,7 @@ int strncmp(const char * cs,const char * ct,size_t count)
 
 	return __res;
 }
+EXPORT_SYMBOL(strncmp);
 #endif
 
 #ifndef __HAVE_ARCH_STRCHR
@@ -254,6 +265,7 @@ char * strchr(const char * s, int c)
 			return NULL;
 	return (char *) s;
 }
+EXPORT_SYMBOL(strchr);
 #endif
 
 #ifndef __HAVE_ARCH_STRRCHR
@@ -271,6 +283,7 @@ char * strrchr(const char * s, int c)
        } while (--p >= s);
        return NULL;
 }
+EXPORT_SYMBOL(strrchr);
 #endif
 
 #ifndef __HAVE_ARCH_STRNCHR
@@ -287,6 +300,7 @@ char *strnchr(const char *s, size_t count, int c)
 			return (char *) s;
 	return NULL;
 }
+EXPORT_SYMBOL(strnchr);
 #endif
 
 #ifndef __HAVE_ARCH_STRLEN
@@ -302,6 +316,7 @@ size_t strlen(const char * s)
 		/* nothing */;
 	return sc - s;
 }
+EXPORT_SYMBOL(strlen);
 #endif
 
 #ifndef __HAVE_ARCH_STRNLEN
@@ -318,6 +333,7 @@ size_t strnlen(const char * s, size_t count)
 		/* nothing */;
 	return sc - s;
 }
+EXPORT_SYMBOL(strnlen);
 #endif
 
 #ifndef __HAVE_ARCH_STRSPN
@@ -371,6 +387,7 @@ size_t strcspn(const char *s, const char *reject)
 
 	return count;
 }	
+EXPORT_SYMBOL(strcspn);
 
 #ifndef __HAVE_ARCH_STRPBRK
 /**
@@ -390,6 +407,7 @@ char * strpbrk(const char * cs,const char * ct)
 	}
 	return NULL;
 }
+EXPORT_SYMBOL(strpbrk);
 #endif
 
 #ifndef __HAVE_ARCH_STRSEP
@@ -440,29 +458,7 @@ void * memset(void * s,int c,size_t count)
 
 	return s;
 }
-#endif
-
-#ifndef __HAVE_ARCH_BCOPY
-/**
- * bcopy - Copy one area of memory to another
- * @src: Where to copy from
- * @dest: Where to copy to
- * @count: The size of the area.
- *
- * Note that this is the same as memcpy(), with the arguments reversed.
- * memcpy() is the standard, bcopy() is a legacy BSD function.
- *
- * You should not use this function to access IO space, use memcpy_toio()
- * or memcpy_fromio() instead.
- */
-void bcopy(const void * srcp, void * destp, size_t count)
-{
-	const char *src = srcp;
-	char *dest = destp;
-
-	while (count--)
-		*dest++ = *src++;
-}
+EXPORT_SYMBOL(memset);
 #endif
 
 #ifndef __HAVE_ARCH_MEMCPY
@@ -484,6 +480,7 @@ void * memcpy(void * dest,const void *src,size_t count)
 
 	return dest;
 }
+EXPORT_SYMBOL(memcpy);
 #endif
 
 #ifndef __HAVE_ARCH_MEMMOVE
@@ -514,6 +511,7 @@ void * memmove(void * dest,const void *src,size_t count)
 
 	return dest;
 }
+EXPORT_SYMBOL(memmove);
 #endif
 
 #ifndef __HAVE_ARCH_MEMCMP
@@ -523,6 +521,7 @@ void * memmove(void * dest,const void *src,size_t count)
  * @ct: Another area of memory
  * @count: The size of the area.
  */
+#undef memcmp
 int memcmp(const void * cs,const void * ct,size_t count)
 {
 	const unsigned char *su1, *su2;
@@ -533,6 +532,7 @@ int memcmp(const void * cs,const void * ct,size_t count)
 			break;
 	return res;
 }
+EXPORT_SYMBOL(memcmp);
 #endif
 
 #ifndef __HAVE_ARCH_MEMSCAN
@@ -557,6 +557,7 @@ void * memscan(void * addr, int c, size_t size)
 	}
   	return (void *) p;
 }
+EXPORT_SYMBOL(memscan);
 #endif
 
 #ifndef __HAVE_ARCH_STRSTR
@@ -581,6 +582,7 @@ char * strstr(const char * s1,const char * s2)
 	}
 	return NULL;
 }
+EXPORT_SYMBOL(strstr);
 #endif
 
 #ifndef __HAVE_ARCH_MEMCHR
@@ -603,5 +605,5 @@ void *memchr(const void *s, int c, size_t n)
 	}
 	return NULL;
 }
-
+EXPORT_SYMBOL(memchr);
 #endif

@@ -1,5 +1,5 @@
 /*
- * $Id: beech-mtd.c,v 1.7 2003/05/21 12:45:18 dwmw2 Exp $
+ * $Id: beech-mtd.c,v 1.10 2004/11/04 13:24:14 gleixner Exp $
  * 
  * drivers/mtd/maps/beech-mtd.c MTD mappings and partition tables for 
  *                              IBM 405LP Beech boards.
@@ -51,7 +51,7 @@
 static struct map_info beech_mtd_map = {
 	.name =		NAME,
 	.size =		SIZE,
-	.buswidth =	BUSWIDTH,
+	.bankwidth =	BUSWIDTH,
 	.phys =		PADDR
 };
 
@@ -74,7 +74,7 @@ init_beech_mtd(void)
 {
 	printk("%s: 0x%08x at 0x%08x\n", NAME, SIZE, PADDR);
 
-	beech_mtd_map.virt = (unsigned long) ioremap(PADDR, SIZE);
+	beech_mtd_map.virt = ioremap(PADDR, SIZE);
 
 	if (!beech_mtd_map.virt) {
 		printk("%s: failed to ioremap 0x%x\n", NAME, PADDR);

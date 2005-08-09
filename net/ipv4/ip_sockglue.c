@@ -92,7 +92,7 @@ static void ip_cmsg_recv_opts(struct msghdr *msg, struct sk_buff *skb)
 }
 
 
-void ip_cmsg_recv_retopts(struct msghdr *msg, struct sk_buff *skb)
+static void ip_cmsg_recv_retopts(struct msghdr *msg, struct sk_buff *skb)
 {
 	unsigned char optbuf[sizeof(struct ip_options) + 40];
 	struct ip_options * opt = (struct ip_options*)optbuf;
@@ -112,7 +112,7 @@ void ip_cmsg_recv_retopts(struct msghdr *msg, struct sk_buff *skb)
 
 void ip_cmsg_recv(struct msghdr *msg, struct sk_buff *skb)
 {
-	struct inet_opt *inet = inet_sk(skb->sk);
+	struct inet_sock *inet = inet_sk(skb->sk);
 	unsigned flags = inet->cmsg_flags;
 
 	/* Ordered by supposed usage frequency */
@@ -146,11 +146,8 @@ int ip_cmsg_send(struct msghdr *msg, struct ipcm_cookie *ipc)
 	struct cmsghdr *cmsg;
 
 	for (cmsg = CMSG_FIRSTHDR(msg); cmsg; cmsg = CMSG_NXTHDR(msg, cmsg)) {
-		if (cmsg->cmsg_len < sizeof(struct cmsghdr) ||
-		    (unsigned long)(((char*)cmsg - (char*)msg->msg_control)
-				    + cmsg->cmsg_len) > msg->msg_controllen) {
+		if (!CMSG_OK(msg, cmsg))
 			return -EINVAL;
-		}
 		if (cmsg->cmsg_level != SOL_IP)
 			continue;
 		switch (cmsg->cmsg_type) {
@@ -189,7 +186,7 @@ int ip_cmsg_send(struct msghdr *msg, struct ipcm_cookie *ipc)
    sent to multicast group to reach destination designated router.
  */
 struct ip_ra_chain *ip_ra_chain;
-rwlock_t ip_ra_lock = RW_LOCK_UNLOCKED;
+DEFINE_RWLOCK(ip_ra_lock);
 
 int ip_ra_control(struct sock *sk, unsigned char on, void (*destructor)(struct sock *))
 {
@@ -237,7 +234,7 @@ int ip_ra_control(struct sock *sk, unsigned char on, void (*destructor)(struct s
 void ip_icmp_error(struct sock *sk, struct sk_buff *skb, int err, 
 		   u16 port, u32 info, u8 *payload)
 {
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	struct sock_exterr_skb *serr;
 
 	if (!inet->recverr)
@@ -266,7 +263,7 @@ void ip_icmp_error(struct sock *sk, struct sk_buff *skb, int err,
 
 void ip_local_error(struct sock *sk, int err, u32 daddr, u16 port, u32 info)
 {
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	struct sock_exterr_skb *serr;
 	struct iphdr *iph;
 	struct sk_buff *skb;
@@ -345,7 +342,7 @@ int ip_recv_error(struct sock *sk, struct msghdr *msg, int len)
 	sin = &errhdr.offender;
 	sin->sin_family = AF_UNSPEC;
 	if (serr->ee.ee_origin == SO_EE_ORIGIN_ICMP) {
-		struct inet_opt *inet = inet_sk(sk);
+		struct inet_sock *inet = inet_sk(sk);
 
 		sin->sin_family = AF_INET;
 		sin->sin_addr.s_addr = skb->nh.iph->saddr;
@@ -384,9 +381,9 @@ out:
  *	an IP socket.
  */
 
-int ip_setsockopt(struct sock *sk, int level, int optname, char *optval, int optlen)
+int ip_setsockopt(struct sock *sk, int level, int optname, char __user *optval, int optlen)
 {
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	int val=0,err;
 
 	if (level != SOL_IP)
@@ -401,12 +398,12 @@ int ip_setsockopt(struct sock *sk, int level, int optname, char *optval, int opt
 				optname == IP_MULTICAST_TTL || 
 				optname == IP_MULTICAST_LOOP) { 
 		if (optlen >= sizeof(int)) {
-			if (get_user(val, (int *) optval))
+			if (get_user(val, (int __user *) optval))
 				return -EFAULT;
 		} else if (optlen >= sizeof(char)) {
 			unsigned char ucval;
 
-			if (get_user(ucval, (unsigned char *) optval))
+			if (get_user(ucval, (unsigned char __user *) optval))
 				return -EFAULT;
 			val = (int) ucval;
 		}
@@ -432,7 +429,7 @@ int ip_setsockopt(struct sock *sk, int level, int optname, char *optval, int opt
 			if (err)
 				break;
 			if (sk->sk_type == SOCK_STREAM) {
-				struct tcp_opt *tp = tcp_sk(sk);
+				struct tcp_sock *tp = tcp_sk(sk);
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 				if (sk->sk_family == PF_INET ||
 				    (!((1 << sk->sk_state) &
@@ -759,6 +756,7 @@ int ip_setsockopt(struct sock *sk, int level, int optname, char *optval, int opt
 				err = ip_mc_join_group(sk, &mreq);
 				if (err)
 					break;
+				greqs.gsr_interface = mreq.imr_ifindex;
 				omode = MCAST_INCLUDE;
 				add = 1;
 			} else /* MCAST_LEAVE_SOURCE_GROUP */ {
@@ -774,8 +772,8 @@ int ip_setsockopt(struct sock *sk, int level, int optname, char *optval, int opt
 			extern int sysctl_optmem_max;
 			extern int sysctl_igmp_max_msf;
 			struct sockaddr_in *psin;
-			struct ip_msfilter *msf = 0;
-			struct group_filter *gsf = 0;
+			struct ip_msfilter *msf = NULL;
+			struct group_filter *gsf = NULL;
 			int msize, i, ifindex;
 
 			if (optlen < GROUP_FILTER_SIZE(0))
@@ -828,7 +826,7 @@ int ip_setsockopt(struct sock *sk, int level, int optname, char *optval, int opt
 				msf->imsf_slist[i] = psin->sin_addr.s_addr;
 			}
 			kfree(gsf);
-			gsf = 0;
+			gsf = NULL;
 
 			err = ip_mc_msfilter(sk, msf, ifindex);
 mc_msf_out:
@@ -875,9 +873,9 @@ e_inval:
  *	_received_ ones. The set sets the _sent_ ones.
  */
 
-int ip_getsockopt(struct sock *sk, int level, int optname, char *optval, int *optlen)
+int ip_getsockopt(struct sock *sk, int level, int optname, char __user *optval, int __user *optlen)
 {
-	struct inet_opt *inet = inet_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	int val;
 	int len;
 	
@@ -957,7 +955,7 @@ int ip_getsockopt(struct sock *sk, int level, int optname, char *optval, int *op
 			val = 0;
 			dst = sk_dst_get(sk);
 			if (dst) {
-				val = dst_pmtu(dst) - dst->header_len;
+				val = dst_mtu(dst);
 				dst_release(dst);
 			}
 			if (!val) {
@@ -984,7 +982,7 @@ int ip_getsockopt(struct sock *sk, int level, int optname, char *optval, int *op
 
   			if(put_user(len, optlen))
   				return -EFAULT;
-			if(copy_to_user((void *)optval, &addr, len))
+			if(copy_to_user(optval, &addr, len))
 				return -EFAULT;
 			return 0;
 		}
@@ -1002,7 +1000,7 @@ int ip_getsockopt(struct sock *sk, int level, int optname, char *optval, int *op
 				return -EFAULT;
 			}
 			err = ip_mc_msfget(sk, &msf,
-				(struct ip_msfilter *)optval, optlen);
+				(struct ip_msfilter __user *)optval, optlen);
 			release_sock(sk);
 			return err;
 		}
@@ -1020,7 +1018,7 @@ int ip_getsockopt(struct sock *sk, int level, int optname, char *optval, int *op
 				return -EFAULT;
 			}
 			err = ip_mc_gsfget(sk, &gsf,
-				(struct group_filter *)optval, optlen);
+				(struct group_filter __user *)optval, optlen);
 			release_sock(sk);
 			return err;
 		}

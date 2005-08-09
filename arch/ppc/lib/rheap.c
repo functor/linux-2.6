@@ -216,7 +216,7 @@ static void attach_free_block(rh_info_t * info, rh_block_t * blkn)
 
 	/* Grow the after block backwards */
 	if (before == NULL && after != NULL) {
-		(int8_t *) after->start -= size;
+		after->start = (int8_t *)after->start - size;
 		after->size += size;
 		return;
 	}
@@ -254,11 +254,11 @@ rh_info_t *rh_create(unsigned int alignment)
 
 	/* Alignment must be a power of two */
 	if ((alignment & (alignment - 1)) != 0)
-		return NULL;
+		return ERR_PTR(-EINVAL);
 
 	info = kmalloc(sizeof(*info), GFP_KERNEL);
 	if (info == NULL)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	info->alignment = alignment;
 
@@ -366,7 +366,7 @@ void *rh_detach_region(rh_info_t * info, void *start, int size)
 
 	/* Validate size */
 	if (size <= 0)
-		return NULL;
+		return ERR_PTR(-EINVAL);
 
 	/* The region must be aligned */
 	s = (unsigned long)start;
@@ -380,7 +380,7 @@ void *rh_detach_region(rh_info_t * info, void *start, int size)
 	e = e & ~m;
 
 	if (assure_empty(info, 1) < 0)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	blk = NULL;
 	list_for_each(l, &info->free_list) {
@@ -394,7 +394,7 @@ void *rh_detach_region(rh_info_t * info, void *start, int size)
 	}
 
 	if (blk == NULL)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	/* Perfect fit */
 	if (bs == s && be == e) {
@@ -407,7 +407,7 @@ void *rh_detach_region(rh_info_t * info, void *start, int size)
 	/* blk still in free list, with updated start and/or size */
 	if (bs == s || be == e) {
 		if (bs == s)
-			(int8_t *) blk->start += size;
+			blk->start = (int8_t *)blk->start + size;
 		blk->size -= size;
 
 	} else {
@@ -434,13 +434,13 @@ void *rh_alloc(rh_info_t * info, int size, const char *owner)
 
 	/* Validate size */
 	if (size <= 0)
-		return NULL;
+		return ERR_PTR(-EINVAL);
 
 	/* Align to configured alignment */
 	size = (size + (info->alignment - 1)) & ~(info->alignment - 1);
 
 	if (assure_empty(info, 1) < 0)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	blk = NULL;
 	list_for_each(l, &info->free_list) {
@@ -451,7 +451,7 @@ void *rh_alloc(rh_info_t * info, int size, const char *owner)
 	}
 
 	if (blk == NULL)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	/* Just fits */
 	if (blk->size == size) {
@@ -471,7 +471,7 @@ void *rh_alloc(rh_info_t * info, int size, const char *owner)
 	newblk->owner = owner;
 
 	/* blk still in free list, with updated start, size */
-	(int8_t *) blk->start += size;
+	blk->start = (int8_t *)blk->start + size;
 	blk->size -= size;
 
 	start = newblk->start;
@@ -490,7 +490,7 @@ void *rh_alloc_fixed(rh_info_t * info, void *start, int size, const char *owner)
 
 	/* Validate size */
 	if (size <= 0)
-		return NULL;
+		return ERR_PTR(-EINVAL);
 
 	/* The region must be aligned */
 	s = (unsigned long)start;
@@ -504,7 +504,7 @@ void *rh_alloc_fixed(rh_info_t * info, void *start, int size, const char *owner)
 	e = e & ~m;
 
 	if (assure_empty(info, 2) < 0)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	blk = NULL;
 	list_for_each(l, &info->free_list) {
@@ -517,7 +517,7 @@ void *rh_alloc_fixed(rh_info_t * info, void *start, int size, const char *owner)
 	}
 
 	if (blk == NULL)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	/* Perfect fit */
 	if (bs == s && be == e) {
@@ -535,7 +535,7 @@ void *rh_alloc_fixed(rh_info_t * info, void *start, int size, const char *owner)
 	/* blk still in free list, with updated start and/or size */
 	if (bs == s || be == e) {
 		if (bs == s)
-			(int8_t *) blk->start += size;
+			blk->start = (int8_t *)blk->start + size;
 		blk->size -= size;
 
 	} else {
@@ -645,6 +645,7 @@ int rh_set_owner(rh_info_t * info, void *start, const char *owner)
 		return -EINVAL;
 
 	blk->owner = owner;
+	size = blk->size;
 
 	return size;
 }

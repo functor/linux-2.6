@@ -14,6 +14,7 @@
 #define __do_strncpy_from_user(dst,src,count,res)			   \
 do {									   \
 	long __d0, __d1, __d2;						   \
+	might_sleep();							   \
 	__asm__ __volatile__(						   \
 		"	testq %1,%1\n"					   \
 		"	jz 2f\n"					   \
@@ -40,7 +41,7 @@ do {									   \
 } while (0)
 
 long
-__strncpy_from_user(char *dst, const char *src, long count)
+__strncpy_from_user(char *dst, const char __user *src, long count)
 {
 	long res;
 	__do_strncpy_from_user(dst, src, count, res);
@@ -48,7 +49,7 @@ __strncpy_from_user(char *dst, const char *src, long count)
 }
 
 long
-strncpy_from_user(char *dst, const char *src, long count)
+strncpy_from_user(char *dst, const char __user *src, long count)
 {
 	long res = -EFAULT;
 	if (access_ok(VERIFY_READ, src, 1))
@@ -60,9 +61,10 @@ strncpy_from_user(char *dst, const char *src, long count)
  * Zero Userspace
  */
 
-unsigned long __clear_user(void *addr, unsigned long size)
+unsigned long __clear_user(void __user *addr, unsigned long size)
 {
 	long __d0;
+	might_sleep();
 	/* no memory constraint because it doesn't change any memory gcc knows
 	   about */
 	asm volatile(
@@ -94,7 +96,7 @@ unsigned long __clear_user(void *addr, unsigned long size)
 }
 
 
-unsigned long clear_user(void *to, unsigned long n)
+unsigned long clear_user(void __user *to, unsigned long n)
 {
 	if (access_ok(VERIFY_WRITE, to, n))
 		return __clear_user(to, n);
@@ -107,7 +109,7 @@ unsigned long clear_user(void *to, unsigned long n)
  * Return 0 on exception, a value greater than N if too long
  */
 
-long strnlen_user(const char *s, long n)
+long strnlen_user(const char __user *s, long n)
 {
 	long res = 0;
 	char c;
@@ -127,7 +129,7 @@ long strnlen_user(const char *s, long n)
 	}
 }
 
-long strlen_user(const char *s)
+long strlen_user(const char __user *s)
 {
 	long res = 0;
 	char c;
@@ -142,10 +144,10 @@ long strlen_user(const char *s)
 	}
 }
 
-unsigned long copy_in_user(void *to, const void *from, unsigned len)
+unsigned long copy_in_user(void __user *to, const void __user *from, unsigned len)
 {
 	if (access_ok(VERIFY_WRITE, to, len) && access_ok(VERIFY_READ, from, len)) { 
-		return copy_user_generic(to, from, len);
+		return copy_user_generic((__force void *)to, (__force void *)from, len);
 	} 
 	return len;		
 }

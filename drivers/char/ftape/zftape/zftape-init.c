@@ -23,7 +23,6 @@
 #include <linux/config.h>
 #include <linux/module.h>
 #include <linux/errno.h>
-#include <linux/version.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/signal.h>
@@ -45,10 +44,6 @@
 #include "../zftape/zftape-write.h"
 #include "../zftape/zftape-ctl.h"
 #include "../zftape/zftape-buffers.h"
-
-char zft_src[] __initdata = "$Source: /homes/cvs/ftape-stacked/ftape/zftape/zftape-init.c,v $";
-char zft_rev[] __initdata = "$Revision: 1.8 $";
-char zft_dat[] __initdata = "$Date: 1997/11/06 00:48:56 $";
 
 MODULE_AUTHOR("(c) 1996, 1997 Claus-Justus Heine "
 	      "(claus@momo.math.rwth-aachen.de)");
@@ -88,9 +83,9 @@ static int zft_close(struct inode *ino, struct file *filep);
 static int  zft_ioctl(struct inode *ino, struct file *filep,
 		      unsigned int command, unsigned long arg);
 static int  zft_mmap(struct file *filep, struct vm_area_struct *vma);
-static ssize_t zft_read (struct file *fp, char *buff,
+static ssize_t zft_read (struct file *fp, char __user *buff,
 			 size_t req_len, loff_t *ppos);
-static ssize_t zft_write(struct file *fp, const char *buff,
+static ssize_t zft_write(struct file *fp, const char __user *buff,
 			 size_t req_len, loff_t *ppos);
 
 static struct file_operations zft_cdev =
@@ -113,6 +108,7 @@ static int zft_open(struct inode *ino, struct file *filep)
 	int result;
 	TRACE_FUN(ft_t_flow);
 
+	nonseekable_open(ino, filep);
 	TRACE(ft_t_flow, "called for minor %d", iminor(ino));
 	if ( test_and_set_bit(0,&busy_flag) ) {
 		TRACE_ABORT(-EBUSY, ft_t_warn, "failed: already busy");
@@ -177,7 +173,7 @@ static int zft_ioctl(struct inode *ino, struct file *filep,
 	old_sigmask = current->blocked; /* save mask */
 	sigfillset(&current->blocked);
 	/* This will work as long as sizeof(void *) == sizeof(long) */
-	result = _zft_ioctl(command, (void *) arg);
+	result = _zft_ioctl(command, (void __user *) arg);
 	current->blocked = old_sigmask; /* restore mask */
 	TRACE_EXIT result;
 }
@@ -211,7 +207,7 @@ static int  zft_mmap(struct file *filep, struct vm_area_struct *vma)
 
 /*      Read from floppy tape device
  */
-static ssize_t zft_read(struct file *fp, char *buff,
+static ssize_t zft_read(struct file *fp, char __user *buff,
 			size_t req_len, loff_t *ppos)
 {
 	int result = -EIO;
@@ -234,7 +230,7 @@ static ssize_t zft_read(struct file *fp, char *buff,
 
 /*      Write to tape device
  */
-static ssize_t zft_write(struct file *fp, const char *buff,
+static ssize_t zft_write(struct file *fp, const char __user *buff,
 			 size_t req_len, loff_t *ppos)
 {
 	int result = -EIO;
@@ -275,15 +271,6 @@ int zft_cmpr_register(struct zft_cmpr_ops *new_ops)
 		zft_cmpr_ops = new_ops;
 		TRACE_EXIT 0;
 	}
-}
-
-struct zft_cmpr_ops *zft_cmpr_unregister(void)
-{
-	struct zft_cmpr_ops *old_ops = zft_cmpr_ops;
-	TRACE_FUN(ft_t_flow);
-
-	zft_cmpr_ops = NULL;
-	TRACE_EXIT old_ops;
 }
 
 /*  lock the zft-compressor() module.
@@ -331,13 +318,11 @@ KERN_INFO
 KERN_INFO
 "Support for QIC-113 compatible volume table, dynamic memory allocation\n"
 KERN_INFO
-"and builtin compression (lzrw3 algorithm).\n"
-KERN_INFO
-"Compiled for Linux version %s\n", UTS_RELEASE);
+"and builtin compression (lzrw3 algorithm).\n");
         }
 #else /* !MODULE */
 	/* print a short no-nonsense boot message */
-	printk(KERN_INFO ZFTAPE_VERSION " for Linux " UTS_RELEASE "\n");
+	printk(KERN_INFO ZFTAPE_VERSION "\n");
 #endif /* MODULE */
 	TRACE(ft_t_info, "zft_init @ 0x%p", zft_init);
 	TRACE(ft_t_info,

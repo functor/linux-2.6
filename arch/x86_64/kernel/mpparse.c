@@ -30,6 +30,7 @@
 #include <asm/pgalloc.h>
 #include <asm/io_apic.h>
 #include <asm/proto.h>
+#include <asm/acpi.h>
 
 /* Have we found an MP table */
 int smp_found_config;
@@ -44,9 +45,9 @@ int acpi_found_madt;
 int apic_version [MAX_APICS];
 unsigned char mp_bus_id_to_type [MAX_MP_BUSSES] = { [0 ... MAX_MP_BUSSES-1] = -1 };
 int mp_bus_id_to_pci_bus [MAX_MP_BUSSES] = { [0 ... MAX_MP_BUSSES-1] = -1 };
-cpumask_t mp_bus_to_cpumask [MAX_MP_BUSSES] = { [0 ... MAX_MP_BUSSES-1] = CPU_MASK_ALL };
+cpumask_t pci_bus_to_cpumask [256] = { [0 ... 255] = CPU_MASK_ALL };
 
-int mp_current_pci_id = 0;
+static int mp_current_pci_id = 0;
 /* I/O APIC entries */
 struct mpc_config_ioapic mp_ioapics[MAX_IO_APICS];
 
@@ -107,6 +108,7 @@ static int __init mpf_checksum(unsigned char *mp, int len)
 static void __init MP_processor_info (struct mpc_config_processor *m)
 {
 	int ver;
+	static int found_bsp=0;
 
 	if (!(m->mpc_cpuflag & CPU_ENABLED))
 		return;
@@ -124,11 +126,6 @@ static void __init MP_processor_info (struct mpc_config_processor *m)
 	if (num_processors >= NR_CPUS) {
 		printk(KERN_WARNING "WARNING: NR_CPUS limit of %i reached."
 			" Processor ignored.\n", NR_CPUS);
-		return;
-	}
-	if (num_processors >= maxcpus) {
-		printk(KERN_WARNING "WARNING: maxcpus limit of %i reached."
-			" Processor ignored.\n", maxcpus);
 		return;
 	}
 
@@ -150,7 +147,19 @@ static void __init MP_processor_info (struct mpc_config_processor *m)
 		ver = 0x10;
 	}
 	apic_version[m->mpc_apicid] = ver;
-	bios_cpu_apicid[num_processors - 1] = m->mpc_apicid;
+ 	if (m->mpc_cpuflag & CPU_BOOTPROCESSOR) {
+ 		/*
+ 		 * bios_cpu_apicid is required to have processors listed
+ 		 * in same order as logical cpu numbers. Hence the first
+ 		 * entry is BSP, and so on.
+ 		 */
+ 		bios_cpu_apicid[0] = m->mpc_apicid;
+ 		x86_cpu_to_apicid[0] = m->mpc_apicid;
+ 		found_bsp = 1;
+ 	} else {
+ 		bios_cpu_apicid[num_processors - found_bsp] = m->mpc_apicid;
+ 		x86_cpu_to_apicid[num_processors - found_bsp] = m->mpc_apicid;
+ 	}
 }
 
 static void __init MP_bus_info (struct mpc_config_bus *m)
@@ -330,6 +339,7 @@ static int __init smp_read_mpc(struct mp_config_table *mpc)
 			}
 		}
 	}
+	clustered_apic_check();
 	if (!num_processors)
 		printk(KERN_ERR "SMP mptable: no processors registered!\n");
 	return num_processors;
@@ -598,7 +608,6 @@ static int __init smp_scan_config (unsigned long base, unsigned long length)
 		bp += 4;
 		length -= 16;
 	}
-	printk(KERN_INFO "No mptable found.\n");
 	return 0;
 }
 
@@ -635,7 +644,11 @@ void __init find_intel_smp (void)
 
 	address = *(unsigned short *)phys_to_virt(0x40E);
 	address <<= 4;
-	smp_scan_config(address, 0x1000);
+	if (smp_scan_config(address, 0x1000))
+		return;
+
+	/* If we have come this far, we did not find an MP table  */
+	 printk(KERN_INFO "No mptable found.\n");
 }
 
 /*
@@ -704,7 +717,7 @@ void __init mp_register_lapic (
 #define MP_ISA_BUS		0
 #define MP_MAX_IOAPIC_PIN	127
 
-struct mp_ioapic_routing {
+static struct mp_ioapic_routing {
 	int			apic_id;
 	int			gsi_start;
 	int			gsi_end;
@@ -712,7 +725,7 @@ struct mp_ioapic_routing {
 } mp_ioapic_routing[MAX_IO_APICS];
 
 
-static int __init mp_find_ioapic (
+static int mp_find_ioapic (
 	int			gsi)
 {
 	int			i = 0;
@@ -755,7 +768,7 @@ void __init mp_register_ioapic (
 	mp_ioapics[idx].mpc_apicaddr = address;
 
 	set_fixmap_nocache(FIX_IO_APIC_BASE_0 + idx, address);
-	mp_ioapics[idx].mpc_apicid = io_apic_get_unique_id(idx, id);
+	mp_ioapics[idx].mpc_apicid = id;
 	mp_ioapics[idx].mpc_apicver = io_apic_get_version(idx);
 	
 	/* 
@@ -855,15 +868,22 @@ void __init mp_config_acpi_legacy_irqs (void)
 	for (i = 0; i < 16; i++) {
 		int idx;
 
-		for (idx = 0; idx < mp_irq_entries; idx++)
-			if (mp_irqs[idx].mpc_srcbus == MP_ISA_BUS &&
-				(mp_irqs[idx].mpc_srcbusirq == i ||
-				mp_irqs[idx].mpc_dstirq == i))
-					break;
+		for (idx = 0; idx < mp_irq_entries; idx++) {
+			struct mpc_config_intsrc *irq = mp_irqs + idx;
+
+			/* Do we already have a mapping for this ISA IRQ? */
+			if (irq->mpc_srcbus == MP_ISA_BUS && irq->mpc_srcbusirq == i)
+				break;
+
+			/* Do we already have a mapping for this IOAPIC pin */
+			if ((irq->mpc_dstapic == intsrc.mpc_dstapic) &&
+				(irq->mpc_dstirq == i))
+				break;
+		}
 
 		if (idx != mp_irq_entries) {
 			printk(KERN_DEBUG "ACPI: IRQ%d used by override.\n", i);
-			continue;			 /* IRQ already used */
+			continue;			/* IRQ already used */
 		}
 
 		intsrc.mpc_irqtype = mp_INT;
@@ -884,88 +904,55 @@ void __init mp_config_acpi_legacy_irqs (void)
 	return;
 }
 
-
-extern FADT_DESCRIPTOR acpi_fadt;
-
-#ifdef CONFIG_ACPI_PCI
-
-void __init mp_parse_prt (void)
+int mp_register_gsi(u32 gsi, int edge_level, int active_high_low)
 {
-	struct list_head	*node = NULL;
-	struct acpi_prt_entry	*entry = NULL;
 	int			ioapic = -1;
 	int			ioapic_pin = 0;
-	int			gsi = 0;
 	int			idx, bit = 0;
-	int			edge_level = 0;
-	int			active_high_low = 0;
 
-	/*
-	 * Parsing through the PCI Interrupt Routing Table (PRT) and program
-	 * routing for all static (IOAPIC-direct) entries.
-	 */
-	list_for_each(node, &acpi_prt.entries) {
-		entry = list_entry(node, struct acpi_prt_entry, node);
+	if (acpi_irq_model != ACPI_IRQ_MODEL_IOAPIC)
+		return gsi;
 
-		/* Need to get gsi for dynamic entry */
-		if (entry->link.handle) {
-			gsi = acpi_pci_link_get_irq(entry->link.handle, entry->link.index, &edge_level, &active_high_low);
-			if (!gsi)
-				continue;
-		} else {
-			/* Hardwired GSI. Assume PCI standard settings */
-			gsi = entry->link.index;
-			edge_level = 1;
-			active_high_low = 1;
-		}
+#ifdef CONFIG_ACPI_BUS
+	/* Don't set up the ACPI SCI because it's already set up */
+	if (acpi_fadt.sci_int == gsi)
+		return gsi;
+#endif
 
-		/* Don't set up the ACPI SCI because it's already set up */
-		if (acpi_fadt.sci_int == gsi)
-			continue;
-
-		ioapic = mp_find_ioapic(gsi);
-		if (ioapic < 0)
-			continue;
-		ioapic_pin = gsi - mp_ioapic_routing[ioapic].gsi_start;
-
-		/* 
-		 * Avoid pin reprogramming.  PRTs typically include entries  
-		 * with redundant pin->gsi mappings (but unique PCI devices);
-		 * we only only program the IOAPIC on the first.
-		 */
-		bit = ioapic_pin % 32;
-		idx = (ioapic_pin < 32) ? 0 : (ioapic_pin / 32);
-		if (idx > 3) {
-			printk(KERN_ERR "Invalid reference to IOAPIC pin "
-				"%d-%d\n", mp_ioapic_routing[ioapic].apic_id, 
-				ioapic_pin);
-			continue;
-		}
-		if ((1<<bit) & mp_ioapic_routing[ioapic].pin_programmed[idx]) {
-			Dprintk(KERN_DEBUG "Pin %d-%d already programmed\n",
-				mp_ioapic_routing[ioapic].apic_id, ioapic_pin);
-			acpi_gsi_to_irq(gsi, &entry->irq);
-			continue;
-		}
-
-		mp_ioapic_routing[ioapic].pin_programmed[idx] |= (1<<bit);
-		if (!io_apic_set_pci_routing(ioapic, ioapic_pin, gsi, edge_level, active_high_low)) {
-			acpi_gsi_to_irq(gsi, &entry->irq);
- 		}
-		printk(KERN_DEBUG "%02x:%02x:%02x[%c] -> %d-%d -> IRQ %d\n",
-			entry->id.segment, entry->id.bus,
-			entry->id.device, ('A' + entry->pin), 
-			mp_ioapic_routing[ioapic].apic_id, ioapic_pin,
-			entry->irq);
+	ioapic = mp_find_ioapic(gsi);
+	if (ioapic < 0) {
+		printk(KERN_WARNING "No IOAPIC for GSI %u\n", gsi);
+		return gsi;
 	}
-	
-	print_IO_APIC();
 
-	return;
+	ioapic_pin = gsi - mp_ioapic_routing[ioapic].gsi_start;
+
+	/* 
+	 * Avoid pin reprogramming.  PRTs typically include entries  
+	 * with redundant pin->gsi mappings (but unique PCI devices);
+	 * we only program the IOAPIC on the first.
+	 */
+	bit = ioapic_pin % 32;
+	idx = (ioapic_pin < 32) ? 0 : (ioapic_pin / 32);
+	if (idx > 3) {
+		printk(KERN_ERR "Invalid reference to IOAPIC pin "
+			"%d-%d\n", mp_ioapic_routing[ioapic].apic_id, 
+			ioapic_pin);
+		return gsi;
+	}
+	if ((1<<bit) & mp_ioapic_routing[ioapic].pin_programmed[idx]) {
+		Dprintk(KERN_DEBUG "Pin %d-%d already programmed\n",
+			mp_ioapic_routing[ioapic].apic_id, ioapic_pin);
+		return gsi;
+	}
+
+	mp_ioapic_routing[ioapic].pin_programmed[idx] |= (1<<bit);
+
+	io_apic_set_pci_routing(ioapic, ioapic_pin, gsi,
+		edge_level == ACPI_EDGE_SENSITIVE ? 0 : 1,
+		active_high_low == ACPI_ACTIVE_HIGH ? 0 : 1);
+	return gsi;
 }
 
-#endif /*CONFIG_ACPI_PCI*/
-
 #endif /*CONFIG_X86_IO_APIC*/
-
 #endif /*CONFIG_ACPI_BOOT*/

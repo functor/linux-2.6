@@ -24,15 +24,14 @@
  * References to members of the new_cpu_data structure.
  */
 
-#define CPU_PARAMS	new_cpu_data
-#define X86		CPU_PARAMS+0
-#define X86_VENDOR	CPU_PARAMS+1
-#define X86_MODEL	CPU_PARAMS+2
-#define X86_MASK	CPU_PARAMS+3
-#define X86_HARD_MATH	CPU_PARAMS+6
-#define X86_CPUID	CPU_PARAMS+8
-#define X86_CAPABILITY	CPU_PARAMS+12
-#define X86_VENDOR_ID	CPU_PARAMS+36	/* offset dependent on NCAPINTS */
+#define X86		new_cpu_data+CPUINFO_x86
+#define X86_VENDOR	new_cpu_data+CPUINFO_x86_vendor
+#define X86_MODEL	new_cpu_data+CPUINFO_x86_model
+#define X86_MASK	new_cpu_data+CPUINFO_x86_mask
+#define X86_HARD_MATH	new_cpu_data+CPUINFO_hard_math
+#define X86_CPUID	new_cpu_data+CPUINFO_cpuid_level
+#define X86_CAPABILITY	new_cpu_data+CPUINFO_x86_capability
+#define X86_VENDOR_ID	new_cpu_data+CPUINFO_x86_vendor_id
 
 /*
  * This is how much memory *in addition to the memory covered up to
@@ -129,9 +128,6 @@ ENTRY(startup_32_smp)
 	movl %eax,%fs
 	movl %eax,%gs
 
-	xorl %ebx,%ebx
-	incl %ebx				/* This is a secondary processor (AP) */
-
 /*
  *	New page tables may be in 4Mbyte page mode and may
  *	be using the global pages. 
@@ -149,10 +145,37 @@ ENTRY(startup_32_smp)
 #define cr4_bits mmu_cr4_features-__PAGE_OFFSET
 	movl cr4_bits,%edx
 	andl %edx,%edx
-	jz 3f
+	jz 6f
 	movl %cr4,%eax		# Turn on paging options (PSE,PAE,..)
 	orl %edx,%eax
 	movl %eax,%cr4
+
+	btl $5, %eax		# check if PAE is enabled
+	jnc 6f
+
+	/* Check if extended functions are implemented */
+	movl $0x80000000, %eax
+	cpuid
+	cmpl $0x80000000, %eax
+	jbe 6f
+	mov $0x80000001, %eax
+	cpuid
+	/* Execute Disable bit supported? */
+	btl $20, %edx
+	jnc 6f
+
+	/* Setup EFER (Extended Feature Enable Register) */
+	movl $0xc0000080, %ecx
+	rdmsr
+
+	btsl $11, %eax
+	/* Make changes effective */
+	wrmsr
+
+6:
+	/* This is a secondary processor (AP) */
+	xorl %ebx,%ebx
+	incl %ebx
 
 3:
 #endif /* CONFIG_SMP */
@@ -357,6 +380,7 @@ rp_sidt:
 	ALIGN
 ignore_int:
 	cld
+#ifdef CONFIG_PRINTK
 	pushl %eax
 	pushl %ecx
 	pushl %edx
@@ -377,6 +401,7 @@ ignore_int:
 	popl %edx
 	popl %ecx
 	popl %eax
+#endif
 	iret
 
 /*
@@ -489,13 +514,10 @@ ENTRY(cpu_gdt_table)
 	.quad 0x00009a0000000000	/* 0xc0 APM CS 16 code (16 bit) */
 	.quad 0x0040920000000000	/* 0xc8 APM DS    data */
 
-	.quad 0x0000000000000000	/* 0xd0 - unused */
+	.quad 0x0000920000000000	/* 0xd0 - ESPFIX 16-bit SS */
 	.quad 0x0000000000000000	/* 0xd8 - unused */
 	.quad 0x0000000000000000	/* 0xe0 - unused */
 	.quad 0x0000000000000000	/* 0xe8 - unused */
 	.quad 0x0000000000000000	/* 0xf0 - unused */
 	.quad 0x0000000000000000	/* 0xf8 - GDT entry 31: double-fault TSS */
 
-#ifdef CONFIG_SMP
-	.fill (NR_CPUS-1)*GDT_ENTRIES,8,0 /* other CPU's GDT */
-#endif

@@ -15,6 +15,9 @@
 #include <linux/backing-dev.h>
 #include <linux/pagevec.h>
 #include <linux/fadvise.h>
+#include <linux/syscalls.h>
+
+#include <asm/unistd.h>
 
 /*
  * POSIX_FADV_WILLNEED could set PG_Referenced, and POSIX_FADV_NOREUSE could
@@ -98,8 +101,11 @@ out:
 	return ret;
 }
 
+#ifdef __ARCH_WANT_SYS_FADVISE64
+
 asmlinkage long sys_fadvise64(int fd, loff_t offset, size_t len, int advice)
 {
 	return sys_fadvise64_64(fd, offset, len, advice);
 }
 
+#endif

@@ -10,6 +10,7 @@
 #define _ASM_ARCH_PCMCIA
 
 /* include the world */
+#include <linux/cpufreq.h>
 #include <pcmcia/version.h>
 #include <pcmcia/cs_types.h>
 #include <pcmcia/cs.h>
@@ -52,7 +53,7 @@ struct soc_pcmcia_socket {
 	struct resource		res_io;
 	struct resource		res_mem;
 	struct resource		res_attr;
-	void			*virt_io;
+	void __iomem		*virt_io;
 
 	unsigned int		irq_state;
 
@@ -103,6 +104,13 @@ struct pcmcia_low_level {
 	unsigned int (*get_timing)(struct soc_pcmcia_socket *, unsigned int, unsigned int);
 	int (*set_timing)(struct soc_pcmcia_socket *);
 	int (*show_timing)(struct soc_pcmcia_socket *, char *);
+
+#ifdef CONFIG_CPU_FREQ
+	/*
+	 * CPUFREQ support.
+	 */
+	int (*frequency_change)(struct soc_pcmcia_socket *, unsigned long, struct cpufreq_freqs *);
+#endif
 };
 
 

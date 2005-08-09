@@ -20,11 +20,11 @@
 #include <linux/swap.h>
 #include <linux/bootmem.h>
 #include <linux/irq.h>
+#include <linux/bitops.h>
 
 #include <asm/atomic.h>
 #include <asm/page.h>
 #include <asm/machdep.h>
-#include <asm/bitops.h>
 
 #include "mach.h"
 
@@ -42,7 +42,6 @@ void __init mach_early_init (void)
 	int i;
 	const u32 *src;
 	register u32 *dst asm ("ep");
-	extern int panic_timeout;
 	extern u32 _intv_end, _intv_load_start;
 
 	/* Set bus sizes: CS0 32-bit, CS1 16-bit, CS7 8-bit,
@@ -168,5 +167,5 @@ static void make_reg_snap (int irq, void *dummy, struct pt_regs *regs)
 
 static int reg_snap_dev_id;
 static struct irqaction reg_snap_action = {
-	make_reg_snap, 0, 0, "reg_snap", &reg_snap_dev_id, 0
+	make_reg_snap, 0, CPU_MASK_NONE, "reg_snap", &reg_snap_dev_id, 0
 };

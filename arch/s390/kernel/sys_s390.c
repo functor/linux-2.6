@@ -37,7 +37,7 @@
  * sys_pipe() is the normal C calling standard for creating
  * a pipe. It's not the way Unix traditionally does this, though.
  */
-asmlinkage long sys_pipe(unsigned long * fildes)
+asmlinkage long sys_pipe(unsigned long __user *fildes)
 {
 	int fd[2];
 	int error;
@@ -92,7 +92,7 @@ struct mmap_arg_struct {
 	unsigned long offset;
 };
 
-asmlinkage long sys_mmap2(struct mmap_arg_struct *arg)
+asmlinkage long sys_mmap2(struct mmap_arg_struct __user  *arg)
 {
 	struct mmap_arg_struct a;
 	int error = -EFAULT;
@@ -104,7 +104,7 @@ out:
 	return error;
 }
 
-asmlinkage long old_mmap(struct mmap_arg_struct *arg)
+asmlinkage long old_mmap(struct mmap_arg_struct __user *arg)
 {
 	struct mmap_arg_struct a;
 	long error = -EFAULT;
@@ -128,7 +128,7 @@ struct sel_arg_struct {
 	struct timeval *tvp;
 };
 
-asmlinkage long old_select(struct sel_arg_struct *arg)
+asmlinkage long old_select(struct sel_arg_struct __user *arg)
 {
 	struct sel_arg_struct a;
 
@@ -138,38 +138,6 @@ asmlinkage long old_select(struct sel_arg_struct *arg)
 	return sys_select(a.n, a.inp, a.outp, a.exp, a.tvp);
 
 }
-#else /* CONFIG_ARCH_S390X */
-unsigned long
-arch_get_unmapped_area(struct file *filp, unsigned long addr,
-		       unsigned long len, unsigned long pgoff,
-		       unsigned long flags)
-{
-	struct vm_area_struct *vma;
-	unsigned long end;
-
-	if (test_thread_flag(TIF_31BIT)) { 
-		if (!addr) 
-			addr = 0x40000000; 
-		end = 0x80000000;		
-	} else { 
-		if (!addr) 
-			addr = TASK_SIZE / 2;
-		end = TASK_SIZE; 
-	}
-
-	if (len > end)
-		return -ENOMEM;
-	addr = PAGE_ALIGN(addr);
-
-	for (vma = find_vma(current->mm, addr); ; vma = vma->vm_next) {
-		/* At this point:  (!vma || addr < vma->vm_end). */
-		if (end - len < addr)
-			return -ENOMEM;
-		if (!vma || addr + len <= vma->vm_start)
-			return addr;
-		addr = vma->vm_end;
-	}
-}
 #endif /* CONFIG_ARCH_S390X */
 
 /*
@@ -177,71 +145,74 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
  *
  * This is really horribly ugly.
  */
-asmlinkage long sys_ipc (uint call, int first, int second,
-				  unsigned long third, void *ptr)
+asmlinkage long sys_ipc(uint call, int first, unsigned long second,
+				  unsigned long third, void __user *ptr)
 {
         struct ipc_kludge tmp;
 	int ret;
 
         switch (call) {
         case SEMOP:
-		return sys_semtimedop (first, (struct sembuf *) ptr, second,
-				       NULL);
+		return sys_semtimedop(first, (struct sembuf __user *)ptr,
+				       (unsigned)second, NULL);
 	case SEMTIMEDOP:
-		return sys_semtimedop (first, (struct sembuf *) ptr, second,
-				       (const struct timespec *) third);
+		return sys_semtimedop(first, (struct sembuf __user *)ptr,
+				       (unsigned)second,
+				       (const struct timespec __user *) third);
         case SEMGET:
-                return sys_semget (first, second, third);
+                return sys_semget(first, (int)second, third);
         case SEMCTL: {
                 union semun fourth;
                 if (!ptr)
                         return -EINVAL;
-                if (get_user(fourth.__pad, (void **) ptr))
+                if (get_user(fourth.__pad, (void __user * __user *) ptr))
                         return -EFAULT;
-                return sys_semctl (first, second, third, fourth);
-        } 
+                return sys_semctl(first, (int)second, third, fourth);
+        }
         case MSGSND:
-		return sys_msgsnd (first, (struct msgbuf *) ptr, 
-                                   second, third);
+		return sys_msgsnd (first, (struct msgbuf __user *) ptr,
+                                   (size_t)second, third);
 		break;
         case MSGRCV:
                 if (!ptr)
                         return -EINVAL;
-                if (copy_from_user (&tmp, (struct ipc_kludge *) ptr,
+                if (copy_from_user (&tmp, (struct ipc_kludge __user *) ptr,
                                     sizeof (struct ipc_kludge)))
                         return -EFAULT;
                 return sys_msgrcv (first, tmp.msgp,
-                                   second, tmp.msgtyp, third);
+                                   (size_t)second, tmp.msgtyp, third);
         case MSGGET:
-                return sys_msgget ((key_t) first, second);
+                return sys_msgget((key_t)first, (int)second);
         case MSGCTL:
-                return sys_msgctl (first, second, (struct msqid_ds *) ptr);
-                
+                return sys_msgctl(first, (int)second,
+				   (struct msqid_ds __user *)ptr);
+
 	case SHMAT: {
 		ulong raddr;
-		ret = do_shmat (first, (char *) ptr, second, &raddr);
+		ret = do_shmat(first, (char __user *)ptr,
+				(int)second, &raddr);
 		if (ret)
 			return ret;
-		return put_user (raddr, (ulong *) third);
+		return put_user (raddr, (ulong __user *) third);
 		break;
         }
-	case SHMDT: 
-		return sys_shmdt ((char *)ptr);
+	case SHMDT:
+		return sys_shmdt ((char __user *)ptr);
 	case SHMGET:
-		return sys_shmget (first, second, third);
+		return sys_shmget(first, (size_t)second, third);
 	case SHMCTL:
-		return sys_shmctl (first, second,
-                                   (struct shmid_ds *) ptr);
+		return sys_shmctl(first, (int)second,
+                                   (struct shmid_ds __user *) ptr);
 	default:
 		return -ENOSYS;
 
 	}
-        
+
 	return -EINVAL;
 }
 
 #ifdef CONFIG_ARCH_S390X
-asmlinkage long s390x_newuname(struct new_utsname * name)
+asmlinkage long s390x_newuname(struct new_utsname __user *name)
 {
 	int ret = sys_newuname(name);
 
@@ -288,7 +259,7 @@ struct fadvise64_64_args {
 };
 
 asmlinkage long
-s390_fadvise64_64(struct fadvise64_64_args *args)
+s390_fadvise64_64(struct fadvise64_64_args __user *args)
 {
 	struct fadvise64_64_args a;
 

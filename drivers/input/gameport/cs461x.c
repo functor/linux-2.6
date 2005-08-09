@@ -1,8 +1,8 @@
 /*
-	The all defines and part of code (such as cs461x_*) are 
-	contributed from ALSA 0.5.8 sources. 
+	The all defines and part of code (such as cs461x_*) are
+	contributed from ALSA 0.5.8 sources.
 	See http://www.alsa-project.org/ for sources
-	
+
 	Tested on Linux 686 2.4.0-test9, ALSA 0.5.8a and CS4610
 */
 
@@ -16,7 +16,7 @@
 #include <linux/slab.h>
 #include <linux/pci.h>
 
-MODULE_AUTHOR("Victor Krapivin <vik@belcaf.minsk.by>");
+MODULE_AUTHOR("Victor Krapivin");
 MODULE_LICENSE("GPL");
 
 /*
@@ -89,8 +89,8 @@ MODULE_LICENSE("GPL");
 #define JSIO_BXOE                               0x00000040
 #define JSIO_BYOE                               0x00000080
 
-/* 
-   The card initialization code is obfuscated; the module cs461x 
+/*
+   The card initialization code is obfuscated; the module cs461x
    need to be loaded after ALSA modules initialized and something
    played on the CS 4610 chip (see sources for details of CS4610
    initialization code from ALSA)
@@ -112,58 +112,55 @@ MODULE_LICENSE("GPL");
 #define BA1_DWORD_SIZE          (13 * 1024 + 512)
 #define BA1_MEMORY_COUNT        3
 
-/* 
+/*
    Only one CS461x card is still suppoted; the code requires
    redesign to avoid this limitatuion.
 */
 
 static unsigned long ba0_addr;
-static unsigned int *ba0;
-
-static char phys[32];
-static char name[] = "CS416x Gameport";
+static unsigned int __iomem *ba0;
 
 #ifdef CS461X_FULL_MAP
 static unsigned long ba1_addr;
 static union ba1_t {
         struct {
-                unsigned int *data0;
-                unsigned int *data1;
-                unsigned int *pmem;
-                unsigned int *reg;
+                unsigned int __iomem *data0;
+                unsigned int __iomem *data1;
+                unsigned int __iomem *pmem;
+                unsigned int __iomem *reg;
         } name;
-        unsigned int *idx[4];
+        unsigned int __iomem *idx[4];
 } ba1;
 
 static void cs461x_poke(unsigned long reg, unsigned int val)
 {
-        ba1.idx[(reg >> 16) & 3][(reg >> 2) & 0x3fff] = val;
+        writel(val, &ba1.idx[(reg >> 16) & 3][(reg >> 2) & 0x3fff]);
 }
 
 static unsigned int cs461x_peek(unsigned long reg)
 {
-        return ba1.idx[(reg >> 16) & 3][(reg >> 2) & 0x3fff];
+        return readl(&ba1.idx[(reg >> 16) & 3][(reg >> 2) & 0x3fff]);
 }
 
 #endif
 
 static void cs461x_pokeBA0(unsigned long reg, unsigned int val)
 {
-        ba0[reg >> 2] = val;
+        writel(val, &ba0[reg >> 2]);
 }
 
 static unsigned int cs461x_peekBA0(unsigned long reg)
 {
-        return ba0[reg >> 2];
+        return readl(&ba0[reg >> 2]);
 }
 
 static int cs461x_free(struct pci_dev *pdev)
 {
 	struct gameport *port = pci_get_drvdata(pdev);
-	if(port){
+
+	if (port)
 	    gameport_unregister_port(port);
-	    kfree(port);
-	}    
+
 	if (ba0) iounmap(ba0);
 #ifdef CS461X_FULL_MAP
 	if (ba1.name.data0) iounmap(ba1.name.data0);
@@ -187,13 +184,13 @@ static unsigned char cs461x_gameport_read(struct gameport *gameport)
 static int cs461x_gameport_cooked_read(struct gameport *gameport, int *axes, int *buttons)
 {
 	unsigned js1, js2, jst;
-	
+
 	js1 = cs461x_peekBA0(BA0_JSC1);
 	js2 = cs461x_peekBA0(BA0_JSC2);
 	jst = cs461x_peekBA0(BA0_JSPT);
-	
-	*buttons = (~jst >> 4) & 0x0F; 
-	
+
+	*buttons = (~jst >> 4) & 0x0F;
+
 	axes[0] = ((js1 & JSC1_Y1V_MASK) >> JSC1_Y1V_SHIFT) & 0xFFFF;
 	axes[1] = ((js1 & JSC1_X1V_MASK) >> JSC1_X1V_SHIFT) & 0xFFFF;
 	axes[2] = ((js2 & JSC2_Y2V_MASK) >> JSC2_Y2V_SHIFT) & 0xFFFF;
@@ -228,7 +225,7 @@ static int __devinit cs461x_pci_probe(struct pci_dev *pdev, const struct pci_dev
 {
 	int rc;
 	struct gameport* port;
-	
+
 	rc = pci_enable_device(pdev);
 	if (rc) {
 		printk(KERN_ERR "cs461x: Cannot enable PCI gameport (bus %d, devfn %d) error=%d\n",
@@ -240,7 +237,7 @@ static int __devinit cs461x_pci_probe(struct pci_dev *pdev, const struct pci_dev
 #ifdef CS461X_FULL_MAP
 	ba1_addr = pci_resource_start(pdev, 1);
 #endif
-	if (ba0_addr == 0 || ba0_addr == ~0 
+	if (ba0_addr == 0 || ba0_addr == ~0
 #ifdef CS461X_FULL_MAP
             || ba1_addr == 0 || ba1_addr == ~0
 #endif
@@ -267,41 +264,33 @@ static int __devinit cs461x_pci_probe(struct pci_dev *pdev, const struct pci_dev
                 return -ENOMEM;
         }
 #else
-	if (ba0 == NULL){
+	if (ba0 == NULL) {
 		cs461x_free(pdev);
 		return -ENOMEM;
 	}
 #endif
 
-	if (!(port = kmalloc(sizeof(struct gameport), GFP_KERNEL))) {
-		printk(KERN_ERR "Memory allocation failed.\n");
+	if (!(port = gameport_allocate_port())) {
+		printk(KERN_ERR "cs461x: Memory allocation failed\n");
 		cs461x_free(pdev);
 		return -ENOMEM;
 	}
-	memset(port, 0, sizeof(struct gameport));
 
 	pci_set_drvdata(pdev, port);
-	
+
 	port->open = cs461x_gameport_open;
 	port->trigger = cs461x_gameport_trigger;
 	port->read = cs461x_gameport_read;
 	port->cooked_read = cs461x_gameport_cooked_read;
 
-	sprintf(phys, "pci%s/gameport0", pci_name(pdev));
-
-	port->name = name;
-	port->phys = phys;
-	port->id.bustype = BUS_PCI;
-	port->id.vendor = pdev->vendor;
-	port->id.product = pdev->device;
+	gameport_set_name(port, "CS416x");
+	gameport_set_phys(port, "pci%s/gameport0", pci_name(pdev));
+	port->dev.parent = &pdev->dev;
 
 	cs461x_pokeBA0(BA0_JSIO, 0xFF); // ?
 	cs461x_pokeBA0(BA0_JSCTL, JSCTL_SP_MEDIUM_SLOW);
 
 	gameport_register_port(port);
-
-	printk(KERN_INFO "gameport: %s on pci%s speed %d kHz\n",
-		name, pci_name(pdev), port->speed);
 
 	return 0;
 }
@@ -310,20 +299,20 @@ static void __devexit cs461x_pci_remove(struct pci_dev *pdev)
 {
 	cs461x_free(pdev);
 }
-	
+
 static struct pci_driver cs461x_pci_driver = {
-        .name =         "CS461x Gameport",
+        .name =         "CS461x_gameport",
         .id_table =     cs461x_pci_tbl,
         .probe =        cs461x_pci_probe,
         .remove =       __devexit_p(cs461x_pci_remove),
 };
 
-int __init cs461x_init(void)
+static int __init cs461x_init(void)
 {
-        return pci_module_init(&cs461x_pci_driver);
+        return pci_register_driver(&cs461x_pci_driver);
 }
 
-void __exit cs461x_exit(void)
+static void __exit cs461x_exit(void)
 {
         pci_unregister_driver(&cs461x_pci_driver);
 }

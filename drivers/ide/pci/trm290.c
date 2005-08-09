@@ -3,6 +3,10 @@
  *
  *  Copyright (c) 1997-1998  Mark Lord
  *  May be copied or modified under the terms of the GNU General Public License
+ *
+ *  June 22, 2004 - get rid of check_region
+ *                  Jesper Juhl <juhl-lkml@dif.dk>
+ *
  */
 
 /*
@@ -140,8 +144,6 @@
 
 #include <asm/io.h>
 
-#include "trm290.h"
-
 static void trm290_prepare_drive (ide_drive_t *drive, unsigned int use_dma)
 {
 	ide_hwif_t *hwif = HWIF(drive);
@@ -177,64 +179,32 @@ static void trm290_selectproc (ide_drive_t *drive)
 }
 
 #ifdef CONFIG_BLK_DEV_IDEDMA
-static int trm290_ide_dma_write (ide_drive_t *drive /*, struct request *rq */)
+static void trm290_ide_dma_exec_cmd(ide_drive_t *drive, u8 command)
 {
 	ide_hwif_t *hwif	= HWIF(drive);
-	struct request *rq	= HWGROUP(drive)->rq;
-//	ide_task_t *args	= rq->special;
-	task_ioreg_t command	= WIN_NOP;
-	unsigned int count, reading = 2, writing = 0;
 
-	reading = 0;
-	writing = 1;
+	if (HWGROUP(drive)->handler != NULL)	/* paranoia check */
+		BUG();
+	ide_set_handler(drive, &ide_dma_intr, WAIT_CMD, NULL);
+	/* issue cmd to drive */
+	hwif->OUTB(command, IDE_COMMAND_REG);
+}
+
+static int trm290_ide_dma_setup(ide_drive_t *drive)
+{
+	ide_hwif_t *hwif = drive->hwif;
+	struct request *rq = hwif->hwgroup->rq;
+	unsigned int count, rw;
+
+	if (rq_data_dir(rq)) {
 #ifdef TRM290_NO_DMA_WRITES
-	/* always use PIO for writes */
-	trm290_prepare_drive(drive, 0);	/* select PIO xfer */
-	return 1;
-#endif
-	if (!(count = ide_build_dmatable(drive, rq))) {
-		/* try PIO instead of DMA */
-		trm290_prepare_drive(drive, 0); /* select PIO xfer */
+		/* always use PIO for writes */
+		trm290_prepare_drive(drive, 0);	/* select PIO xfer */
 		return 1;
-	}
-	/* select DMA xfer */
-	trm290_prepare_drive(drive, 1);
-	hwif->OUTL(hwif->dmatable_dma|reading|writing, hwif->dma_command);
-	drive->waiting_for_dma = 1;
-	/* start DMA */
-	hwif->OUTW((count * 2) - 1, hwif->dma_status);
-	if (drive->media != ide_disk)
-		return 0;
-	if (HWGROUP(drive)->handler != NULL)	/* paranoia check */
-		BUG();
-	ide_set_handler(drive, &ide_dma_intr, WAIT_CMD, NULL);
-	/*
-	 * FIX ME to use only ACB ide_task_t args Struct
-	 */
-#if 0
-	{
-		ide_task_t *args = rq->special;
-		command = args->tfRegister[IDE_COMMAND_OFFSET];
-	}
-#else
-	command = /* (lba48) ? WIN_READDMA_EXT : */ WIN_READDMA;
-	if (rq->flags & REQ_DRIVE_TASKFILE) {
-		ide_task_t *args = rq->special;
-		command = args->tfRegister[IDE_COMMAND_OFFSET];
-	}
 #endif
-	/* issue cmd to drive */
-	hwif->OUTB(command, IDE_COMMAND_REG);
-	return hwif->ide_dma_begin(drive);
-}
-
-static int trm290_ide_dma_read (ide_drive_t *drive  /*, struct request *rq */)
-{
-	ide_hwif_t *hwif	= HWIF(drive);
-	struct request *rq	= HWGROUP(drive)->rq;
-//	ide_task_t *args	= rq->special;
-	task_ioreg_t command	= WIN_NOP;
-	unsigned int count, reading = 2, writing = 0;
+		rw = 1;
+	} else
+		rw = 2;
 
 	if (!(count = ide_build_dmatable(drive, rq))) {
 		/* try PIO instead of DMA */
@@ -243,38 +213,15 @@ static int trm290_ide_dma_read (ide_drive_t *drive  /*, struct request *rq */)
 	}
 	/* select DMA xfer */
 	trm290_prepare_drive(drive, 1);
-	hwif->OUTL(hwif->dmatable_dma|reading|writing, hwif->dma_command);
+	hwif->OUTL(hwif->dmatable_dma|rw, hwif->dma_command);
 	drive->waiting_for_dma = 1;
 	/* start DMA */
 	hwif->OUTW((count * 2) - 1, hwif->dma_status);
-	if (drive->media != ide_disk)
-		return 0;
-	if (HWGROUP(drive)->handler != NULL)	/* paranoia check */
-		BUG();
-	ide_set_handler(drive, &ide_dma_intr, WAIT_CMD, NULL);
-	/*
-	 * FIX ME to use only ACB ide_task_t args Struct
-	 */
-#if 0
-	{
-		ide_task_t *args = rq->special;
-		command = args->tfRegister[IDE_COMMAND_OFFSET];
-	}
-#else
-	command = /* (lba48) ? WIN_WRITEDMA_EXT : */ WIN_WRITEDMA;
-	if (rq->flags & REQ_DRIVE_TASKFILE) {
-		ide_task_t *args = rq->special;
-		command = args->tfRegister[IDE_COMMAND_OFFSET];
-	}
-#endif
-	/* issue cmd to drive */
-	hwif->OUTB(command, IDE_COMMAND_REG);
-	return hwif->ide_dma_begin(drive);
-}
-
-static int trm290_ide_dma_begin (ide_drive_t *drive)
-{
 	return 0;
+}
+
+static void trm290_ide_dma_start(ide_drive_t *drive)
+{
 }
 
 static int trm290_ide_dma_end (ide_drive_t *drive)
@@ -302,7 +249,7 @@ static int trm290_ide_dma_test_irq (ide_drive_t *drive)
 /*
  * Invoked from ide-dma.c at boot time.
  */
-void __init init_hwif_trm290 (ide_hwif_t *hwif)
+static void __devinit init_hwif_trm290(ide_hwif_t *hwif)
 {
 	unsigned int cfgbase = 0;
 	unsigned long flags;
@@ -345,9 +292,9 @@ void __init init_hwif_trm290 (ide_hwif_t *hwif)
 	ide_setup_dma(hwif, (hwif->config_data + 4) ^ (hwif->channel ? 0x0080 : 0x0000), 3);
 
 #ifdef CONFIG_BLK_DEV_IDEDMA
-	hwif->ide_dma_write = &trm290_ide_dma_write;
-	hwif->ide_dma_read = &trm290_ide_dma_read;
-	hwif->ide_dma_begin = &trm290_ide_dma_begin;
+	hwif->dma_setup = &trm290_ide_dma_setup;
+	hwif->dma_exec_cmd = &trm290_ide_dma_exec_cmd;
+	hwif->dma_start = &trm290_ide_dma_start;
 	hwif->ide_dma_end = &trm290_ide_dma_end;
 	hwif->ide_dma_test_irq = &trm290_ide_dma_test_irq;
 #endif /* CONFIG_BLK_DEV_IDEDMA */
@@ -374,16 +321,6 @@ void __init init_hwif_trm290 (ide_hwif_t *hwif)
 		if (old != compat && old_mask == 0xff) {
 			/* leave lower 10 bits untouched */
 			compat += (next_offset += 0x400);
-#  if 1
-			if (check_region(compat + 2, 1))
-				printk(KERN_ERR "%s: check_region failure at 0x%04x\n",
-					hwif->name, (compat + 2));
-			/*
-			 * The region check is not needed; however.........
-			 * Since this is the checked in ide-probe.c,
-			 * this is only an assignment.
-			 */
-#  endif
 			hwif->io_ports[IDE_CONTROL_OFFSET] = compat + 2;
 			hwif->OUTW(compat|1, hwif->config_data);
 			new = hwif->INW(hwif->config_data);
@@ -395,13 +332,17 @@ void __init init_hwif_trm290 (ide_hwif_t *hwif)
 #endif
 }
 
+static ide_pci_device_t trm290_chipset __devinitdata = {
+	.name		= "TRM290",
+	.init_hwif	= init_hwif_trm290,
+	.channels	= 2,
+	.autodma	= NOAUTODMA,
+	.bootable	= ON_BOARD,
+};
+
 static int __devinit trm290_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	ide_pci_device_t *d = &trm290_chipsets[id->driver_data];
-	if (dev->device != d->device)
-		BUG();
-	ide_setup_pci_device(dev, d);
-	return 0;
+	return ide_setup_pci_device(dev, &trm290_chipset);
 }
 
 static struct pci_device_id trm290_pci_tbl[] = {
@@ -411,7 +352,7 @@ static struct pci_device_id trm290_pci_tbl[] = {
 MODULE_DEVICE_TABLE(pci, trm290_pci_tbl);
 
 static struct pci_driver driver = {
-	.name		= "TRM290 IDE",
+	.name		= "TRM290_IDE",
 	.id_table	= trm290_pci_tbl,
 	.probe		= trm290_init_one,
 };

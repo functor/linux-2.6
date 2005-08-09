@@ -36,7 +36,7 @@ diag210(struct diag210 * addr)
 	 * use a static data area to be sure
 	 */
 	static struct diag210 diag210_tmp;
-	static spinlock_t diag210_lock = SPIN_LOCK_UNLOCKED;
+	static DEFINE_SPINLOCK(diag210_lock);
 	unsigned long flags;
 	int ccode;
 
@@ -303,20 +303,20 @@ ccw_device_sense_id_irq(struct ccw_device *cdev, enum dev_event dev_event)
 
 	sch = to_subchannel(cdev->dev.parent);
 	irb = (struct irb *) __LC_IRB;
-	/*
-	 * Unsolicited interrupts may pertain to an earlier status pending or
-	 * busy condition on the subchannel. Retry sense id.
-	 */
+	/* Retry sense id, if needed. */
 	if (irb->scsw.stctl ==
 	    (SCSW_STCTL_STATUS_PEND | SCSW_STCTL_ALERT_STATUS)) {
-		ret = __ccw_device_sense_id_start(cdev);
-		if (ret && ret != -EBUSY)
-			ccw_device_sense_id_done(cdev, ret);
+		if ((irb->scsw.cc == 1) || !irb->scsw.actl) {
+			ret = __ccw_device_sense_id_start(cdev);
+			if (ret && ret != -EBUSY)
+				ccw_device_sense_id_done(cdev, ret);
+		}
 		return;
 	}
 	if (ccw_device_accumulate_and_sense(cdev, irb) != 0)
 		return;
 	ret = ccw_device_check_sense_id(cdev);
+	memset(&cdev->private->irb, 0, sizeof(struct irb));
 	switch (ret) {
 	/* 0, -ETIME, -EOPNOTSUPP, -EAGAIN or -EACCES */
 	case 0:			/* Sense id succeeded. */

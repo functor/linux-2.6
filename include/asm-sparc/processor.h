@@ -24,12 +24,6 @@
 #include <asm/page.h>
 
 /*
- * Bus types
- */
-#define MCA_bus 0
-#define MCA_bus__is_a_macro /* for versions in ksyms.c */
-
-/*
  * The sparc has no problems with write protection
  */
 #define wp_works_ok 1
@@ -43,10 +37,12 @@
 
 struct task_struct;
 
+#ifdef __KERNEL__
 struct fpq {
 	unsigned long *insn_addr;
 	unsigned long insn;
 };
+#endif
 
 typedef struct {
 	int seg;
@@ -76,20 +72,8 @@ struct thread_struct {
 #define SPARC_FLAG_UNALIGNED    0x2    /* is allowed to do unaligned accesses */
 
 #define INIT_THREAD  { \
-/* kregs, _pad1, */ \
-   0, 0,  \
-/* fork_kpsr, fork_kwim */ \
-   0,         0, \
-/* FPU regs */   { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, \
-                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, }, \
-/* FPU status, FPU qdepth, FPU queue */ \
-   0,          0,  { { 0, 0, }, }, \
-/* flags,              current_ds, */ \
-   SPARC_FLAG_KTHREAD, KERNEL_DS, \
-/* core_exec */ \
-{ 0, }, \
-/* new_signal */ \
-  0, \
+	.flags = SPARC_FLAG_KTHREAD, \
+	.current_ds = KERNEL_DS, \
 }
 
 /* Return saved PC of a blocked thread. */

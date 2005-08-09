@@ -22,6 +22,8 @@
 #include <linux/msg.h>
 #include <linux/skbuff.h>
 #include <linux/netlink.h>
+#include <linux/syscalls.h>
+#include <linux/signal.h>
 #include <net/sock.h>
 #include "util.h"
 
@@ -43,10 +45,10 @@
 #define CTL_MSGSIZEMAX 	4
 
 /* default values */
-#define DFLT_QUEUESMAX	64	/* max number of message queues */
-#define DFLT_MSGMAX 	40	/* max number of messages in each queue */
+#define DFLT_QUEUESMAX	256	/* max number of message queues */
+#define DFLT_MSGMAX 	10	/* max number of messages in each queue */
 #define HARD_MSGMAX 	(131072/sizeof(void*))
-#define DFLT_MSGSIZEMAX 16384	/* max message size */
+#define DFLT_MSGSIZEMAX 8192	/* max message size */
 
 #define NOTIFY_COOKIE_LEN	32
 
@@ -67,6 +69,7 @@ struct mqueue_inode_info {
 
 	struct sigevent notify;
 	pid_t notify_owner;
+ 	struct user_struct *user;	/* user who created, for accouting */
 	struct sock *notify_sock;
 	struct sk_buff *notify_cookie;
 
@@ -97,7 +100,8 @@ static inline struct mqueue_inode_info *MQUEUE_I(struct inode *inode)
 	return container_of(inode, struct mqueue_inode_info, vfs_inode);
 }
 
-static struct inode *mqueue_get_inode(struct super_block *sb, int mode)
+static struct inode *mqueue_get_inode(struct super_block *sb, int mode,
+							struct mq_attr *attr)
 {
 	struct inode *inode;
 
@@ -113,6 +117,9 @@ static struct inode *mqueue_get_inode(struct super_block *sb, int mode)
 
 		if (S_ISREG(mode)) {
 			struct mqueue_inode_info *info;
+			struct task_struct *p = current;
+			struct user_struct *u = p->user;
+			unsigned long mq_bytes, mq_msg_tblsz;
 
 			inode->i_fop = &mqueue_file_operations;
 			inode->i_size = FILENT_SIZE;
@@ -122,17 +129,40 @@ static struct inode *mqueue_get_inode(struct super_block *sb, int mode)
 			init_waitqueue_head(&info->wait_q);
 			INIT_LIST_HEAD(&info->e_wait_q[0].list);
 			INIT_LIST_HEAD(&info->e_wait_q[1].list);
+			info->messages = NULL;
 			info->notify_owner = 0;
 			info->qsize = 0;
+			info->user = NULL;	/* set when all is ok */
 			memset(&info->attr, 0, sizeof(info->attr));
 			info->attr.mq_maxmsg = DFLT_MSGMAX;
 			info->attr.mq_msgsize = DFLT_MSGSIZEMAX;
-			info->messages = kmalloc(DFLT_MSGMAX * sizeof(struct msg_msg *), GFP_KERNEL);
-			if (!info->messages) {
-				make_bad_inode(inode);
-				iput(inode);
-				inode = NULL;
+			if (attr) {
+				info->attr.mq_maxmsg = attr->mq_maxmsg;
+				info->attr.mq_msgsize = attr->mq_msgsize;
 			}
+			mq_msg_tblsz = info->attr.mq_maxmsg * sizeof(struct msg_msg *);
+			mq_bytes = (mq_msg_tblsz +
+				(info->attr.mq_maxmsg * info->attr.mq_msgsize));
+
+			spin_lock(&mq_lock);
+			if (u->mq_bytes + mq_bytes < u->mq_bytes ||
+		 	    u->mq_bytes + mq_bytes >
+			    p->signal->rlim[RLIMIT_MSGQUEUE].rlim_cur) {
+				spin_unlock(&mq_lock);
+				goto out_inode;
+			}
+			u->mq_bytes += mq_bytes;
+			spin_unlock(&mq_lock);
+
+			info->messages = kmalloc(mq_msg_tblsz, GFP_KERNEL);
+			if (!info->messages) {
+				spin_lock(&mq_lock);
+				u->mq_bytes -= mq_bytes;
+				spin_unlock(&mq_lock);
+				goto out_inode;
+			}
+			/* all is ok */
+			info->user = get_uid(u);
 		} else if (S_ISDIR(mode)) {
 			inode->i_nlink++;
 			/* Some things misbehave if size == 0 on a directory */
@@ -142,6 +172,10 @@ static struct inode *mqueue_get_inode(struct super_block *sb, int mode)
 		}
 	}
 	return inode;
+out_inode:
+	make_bad_inode(inode);
+	iput(inode);
+	return NULL;
 }
 
 static int mqueue_fill_super(struct super_block *sb, void *data, int silent)
@@ -153,7 +187,7 @@ static int mqueue_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_magic = MQUEUE_MAGIC;
 	sb->s_op = &mqueue_super_ops;
 
-	inode = mqueue_get_inode(sb, S_IFDIR | S_ISVTX | S_IRWXUGO);
+	inode = mqueue_get_inode(sb, S_IFDIR | S_ISVTX | S_IRWXUGO, NULL);
 	if (!inode)
 		return -ENOMEM;
 
@@ -200,6 +234,8 @@ static void mqueue_destroy_inode(struct inode *inode)
 static void mqueue_delete_inode(struct inode *inode)
 {
 	struct mqueue_inode_info *info;
+	struct user_struct *user;
+	unsigned long mq_bytes;
 	int i;
 
 	if (S_ISDIR(inode->i_mode)) {
@@ -215,10 +251,15 @@ static void mqueue_delete_inode(struct inode *inode)
 
 	clear_inode(inode);
 
-	if (info->messages) {
+	mq_bytes = (info->attr.mq_maxmsg * sizeof(struct msg_msg *) +
+		   (info->attr.mq_maxmsg * info->attr.mq_msgsize));
+	user = info->user;
+	if (user) {
 		spin_lock(&mq_lock);
+		user->mq_bytes -= mq_bytes;
 		queues_count--;
 		spin_unlock(&mq_lock);
+		free_uid(user);
 	}
 }
 
@@ -226,6 +267,7 @@ static int mqueue_create(struct inode *dir, struct dentry *dentry,
 				int mode, struct nameidata *nd)
 {
 	struct inode *inode;
+	struct mq_attr *attr = dentry->d_fsdata;
 	int error;
 
 	spin_lock(&mq_lock);
@@ -236,7 +278,7 @@ static int mqueue_create(struct inode *dir, struct dentry *dentry,
 	queues_count++;
 	spin_unlock(&mq_lock);
 
-	inode = mqueue_get_inode(dir->i_sb, mode);
+	inode = mqueue_get_inode(dir->i_sb, mode, attr);
 	if (!inode) {
 		error = -ENOMEM;
 		spin_lock(&mq_lock);
@@ -528,6 +570,28 @@ static void remove_notification(struct mqueue_inode_info *info)
 	info->notify_owner = 0;
 }
 
+static int mq_attr_ok(struct mq_attr *attr)
+{
+	if (attr->mq_maxmsg <= 0 || attr->mq_msgsize <= 0)
+		return 0;
+	if (capable(CAP_SYS_RESOURCE)) {
+		if (attr->mq_maxmsg > HARD_MSGMAX)
+			return 0;
+	} else {
+		if (attr->mq_maxmsg > msg_max ||
+				attr->mq_msgsize > msgsize_max)
+			return 0;
+	}
+	/* check for overflow */
+	if (attr->mq_msgsize > ULONG_MAX/attr->mq_maxmsg)
+		return 0;
+	if ((unsigned long)(attr->mq_maxmsg * attr->mq_msgsize) +
+	    (attr->mq_maxmsg * sizeof (struct msg_msg *)) <
+	    (unsigned long)(attr->mq_maxmsg * attr->mq_msgsize))
+		return 0;
+	return 1;
+}
+
 /*
  * Invoked when creating a new queue via sys_mq_open
  */
@@ -535,48 +599,22 @@ static struct file *do_create(struct dentry *dir, struct dentry *dentry,
 			int oflag, mode_t mode, struct mq_attr __user *u_attr)
 {
 	struct file *filp;
-	struct inode *inode;
-	struct mqueue_inode_info *info;
-	struct msg_msg **msgs = NULL;
 	struct mq_attr attr;
 	int ret;
 
 	if (u_attr != NULL) {
 		if (copy_from_user(&attr, u_attr, sizeof(attr)))
 			return ERR_PTR(-EFAULT);
-
-		if (attr.mq_maxmsg <= 0 || attr.mq_msgsize <= 0)
+		if (!mq_attr_ok(&attr))
 			return ERR_PTR(-EINVAL);
-		if (capable(CAP_SYS_RESOURCE)) {
-			if (attr.mq_maxmsg > HARD_MSGMAX)
-				return ERR_PTR(-EINVAL);
-		} else {
-			if (attr.mq_maxmsg > msg_max ||
-					attr.mq_msgsize > msgsize_max)
-				return ERR_PTR(-EINVAL);
-		}
-		msgs = kmalloc(attr.mq_maxmsg * sizeof(*msgs), GFP_KERNEL);
-		if (!msgs)
-			return ERR_PTR(-ENOMEM);
-	} else {
-		msgs = NULL;
+		/* store for use during create */
+		dentry->d_fsdata = &attr;
 	}
 
 	ret = vfs_create(dir->d_inode, dentry, mode, NULL);
-	if (ret) {
-		kfree(msgs);
+	dentry->d_fsdata = NULL;
+	if (ret)
 		return ERR_PTR(ret);
-	}
-
-	inode = dentry->d_inode;
-	info = MQUEUE_I(inode);
-
-	if (msgs) {
-		info->attr.mq_maxmsg = attr.mq_maxmsg;
-		info->attr.mq_msgsize = attr.mq_msgsize;
-		kfree(info->messages);
-		info->messages = msgs;
-	}
 
 	filp = dentry_open(dentry, mqueue_mnt, oflag);
 	if (!IS_ERR(filp))
@@ -730,7 +768,7 @@ static inline void pipelined_send(struct mqueue_inode_info *info,
 	list_del(&receiver->list);
 	receiver->state = STATE_PENDING;
 	wake_up_process(receiver->task);
-	wmb();
+	smp_wmb();
 	receiver->state = STATE_READY;
 }
 
@@ -749,7 +787,7 @@ static inline void pipelined_receive(struct mqueue_inode_info *info)
 	list_del(&sender->list);
 	sender->state = STATE_PENDING;
 	wake_up_process(sender->task);
-	wmb();
+	smp_wmb();
 	sender->state = STATE_READY;
 }
 
@@ -791,8 +829,8 @@ asmlinkage long sys_mq_timedsend(mqd_t mqdes, const char __user *u_msg_ptr,
 
 	/* First try to allocate memory, before doing anything with
 	 * existing queues. */
-	msg_ptr = load_msg((void *)u_msg_ptr, msg_len);
-	if (unlikely(IS_ERR(msg_ptr))) {
+	msg_ptr = load_msg(u_msg_ptr, msg_len);
+	if (IS_ERR(msg_ptr)) {
 		ret = PTR_ERR(msg_ptr);
 		goto out_fput;
 	}
@@ -939,8 +977,7 @@ asmlinkage long sys_mq_notify(mqd_t mqdes,
 			     notification.sigev_notify != SIGEV_THREAD))
 			return -EINVAL;
 		if (notification.sigev_notify == SIGEV_SIGNAL &&
-			(notification.sigev_signo < 0 ||
-			 notification.sigev_signo > _NSIG)) {
+			!valid_signal(notification.sigev_signo)) {
 			return -EINVAL;
 		}
 		if (notification.sigev_notify == SIGEV_THREAD) {
@@ -1182,11 +1219,8 @@ static int __init init_mqueue_fs(void)
 	if (mqueue_inode_cachep == NULL)
 		return -ENOMEM;
 
+	/* ignore failues - they are not fatal */
 	mq_sysctl_table = register_sysctl_table(mq_sysctl_root, 0);
-	if (!mq_sysctl_table) {
-		error = -ENOMEM;
-		goto out_cache;
-	}
 
 	error = register_filesystem(&mqueue_fs_type);
 	if (error)
@@ -1206,8 +1240,8 @@ static int __init init_mqueue_fs(void)
 out_filesystem:
 	unregister_filesystem(&mqueue_fs_type);
 out_sysctl:
-	unregister_sysctl_table(mq_sysctl_table);
-out_cache:
+	if (mq_sysctl_table)
+		unregister_sysctl_table(mq_sysctl_table);
 	if (kmem_cache_destroy(mqueue_inode_cachep)) {
 		printk(KERN_INFO
 			"mqueue_inode_cache: not all structures were freed\n");

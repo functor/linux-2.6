@@ -5,33 +5,28 @@
  *   for the ones that remain
  */
 #include <linux/module.h>
-
-#include <asm/io.h>
-#include <asm/uaccess.h>
-#include <asm/system.h>
-#include <asm/page.h>
-
+#include <linux/blkdev.h>
 #include <linux/interrupt.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/string.h>
+#include <asm/uaccess.h>
 
-#include <linux/blkdev.h>
-#include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi.h>
+#include <scsi/scsi_device.h>
+#include <scsi/scsi_eh.h>
+#include <scsi/scsi_host.h>
 #include <scsi/scsi_ioctl.h>
+#include <scsi/scsi_request.h>
+#include <scsi/sg.h>
+#include <scsi/scsi_dbg.h>
 
 #include "scsi_logging.h"
 
 #define NORMAL_RETRIES			5
 #define IOCTL_NORMAL_TIMEOUT			(10 * HZ)
-#define FORMAT_UNIT_TIMEOUT		(2 * 60 * 60 * HZ)
-#define START_STOP_TIMEOUT		(60 * HZ)
-#define MOVE_MEDIUM_TIMEOUT		(5 * 60 * HZ)
-#define READ_ELEMENT_STATUS_TIMEOUT	(5 * 60 * HZ)
-#define READ_DEFECT_DATA_TIMEOUT	(60 * HZ )  /* ZIP-250 on parallel port takes as long! */
 
 #define MAX_BUF PAGE_SIZE
 
@@ -42,14 +37,14 @@
  * (int *) arg
  */
 
-static int ioctl_probe(struct Scsi_Host *host, void *buffer)
+static int ioctl_probe(struct Scsi_Host *host, void __user *buffer)
 {
 	unsigned int len, slen;
 	const char *string;
 	int temp = host->hostt->present;
 
 	if (temp && buffer) {
-		if (get_user(len, (unsigned int *) buffer))
+		if (get_user(len, (unsigned int __user *) buffer))
 			return -EFAULT;
 
 		if (host->hostt->info)
@@ -95,12 +90,13 @@ static int ioctl_internal_command(struct scsi_device *sdev, char *cmd,
 {
 	struct scsi_request *sreq;
 	int result;
+	struct scsi_sense_hdr sshdr;
 
 	SCSI_LOG_IOCTL(1, printk("Trying ioctl with scsi command %d\n", *cmd));
 
 	sreq = scsi_allocate_request(sdev, GFP_KERNEL);
 	if (!sreq) {
-		printk("SCSI internal ioctl failed, no memory\n");
+		printk(KERN_WARNING "SCSI internal ioctl failed, no memory\n");
 		return -ENOMEM;
 	}
 
@@ -109,17 +105,21 @@ static int ioctl_internal_command(struct scsi_device *sdev, char *cmd,
 
 	SCSI_LOG_IOCTL(2, printk("Ioctl returned  0x%x\n", sreq->sr_result));
 
-	if (driver_byte(sreq->sr_result)) {
-		switch (sreq->sr_sense_buffer[2] & 0xf) {
+	if ((driver_byte(sreq->sr_result) & DRIVER_SENSE) &&
+	    (scsi_request_normalize_sense(sreq, &sshdr))) {
+		switch (sshdr.sense_key) {
 		case ILLEGAL_REQUEST:
 			if (cmd[0] == ALLOW_MEDIUM_REMOVAL)
 				sdev->lockable = 0;
 			else
-				printk("SCSI device (ioctl) reports ILLEGAL REQUEST.\n");
+				printk(KERN_INFO "ioctl_internal_command: "
+				       "ILLEGAL REQUEST asc=0x%x ascq=0x%x\n",
+				       sshdr.asc, sshdr.ascq);
 			break;
 		case NOT_READY:	/* This happens if there is no disc in drive */
 			if (sdev->removable && (cmd[0] != TEST_UNIT_READY)) {
-				printk(KERN_INFO "Device not ready.  Make sure there is a disc in the drive.\n");
+				printk(KERN_INFO "Device not ready. Make sure"
+				       " there is a disc in the drive.\n");
 				break;
 			}
 		case UNIT_ATTENTION:
@@ -129,16 +129,15 @@ static int ioctl_internal_command(struct scsi_device *sdev, char *cmd,
 				break;
 			}
 		default:	/* Fall through for non-removable media */
-			printk("SCSI error: host %d id %d lun %d return code = %x\n",
+			printk(KERN_INFO "ioctl_internal_command: <%d %d %d "
+			       "%d> return code = %x\n",
 			       sdev->host->host_no,
+			       sdev->channel,
 			       sdev->id,
 			       sdev->lun,
 			       sreq->sr_result);
-			printk("\tSense class %x, sense error %x, extended sense %x\n",
-			       sense_class(sreq->sr_sense_buffer[0]),
-			       sense_error(sreq->sr_sense_buffer[0]),
-			       sreq->sr_sense_buffer[2] & 0xf);
-
+			scsi_print_req_sense("   ", sreq);
+			break;
 		}
 	}
 
@@ -169,6 +168,7 @@ int scsi_set_medium_removal(struct scsi_device *sdev, char state)
 		sdev->locked = (state == SCSI_REMOVAL_PREVENT);
 	return ret;
 }
+EXPORT_SYMBOL(scsi_set_medium_removal);
 
 /*
  * This interface is deprecated - users should use the scsi generic (sg)
@@ -204,11 +204,11 @@ int scsi_set_medium_removal(struct scsi_device *sdev, char state)
 #define OMAX_SB_LEN 16		/* Old sense buffer length */
 
 int scsi_ioctl_send_command(struct scsi_device *sdev,
-			    struct scsi_ioctl_command *sic)
+			    struct scsi_ioctl_command __user *sic)
 {
 	char *buf;
 	unsigned char cmd[MAX_COMMAND_SIZE];
-	char *cmd_in;
+	char __user *cmd_in;
 	struct scsi_request *sreq;
 	unsigned char opcode;
 	unsigned int inlen, outlen, cmdlen;
@@ -225,7 +225,7 @@ int scsi_ioctl_send_command(struct scsi_device *sdev,
 	/*
 	 * Verify that we can read at least this much.
 	 */
-	if (verify_area(VERIFY_READ, sic, sizeof(Scsi_Ioctl_Command)))
+	if (!access_ok(VERIFY_READ, sic, sizeof(Scsi_Ioctl_Command)))
 		return -EFAULT;
 
 	if(__get_user(inlen, &sic->inlen))
@@ -280,7 +280,7 @@ int scsi_ioctl_send_command(struct scsi_device *sdev,
 	
 	result = -EFAULT;
 
-	if (verify_area(VERIFY_READ, cmd_in, cmdlen + inlen))
+	if (!access_ok(VERIFY_READ, cmd_in, cmdlen + inlen))
 		goto error;
 
 	if(__copy_from_user(cmd, cmd_in, cmdlen))
@@ -350,6 +350,7 @@ error:
 	kfree(buf);
 	return result;
 }
+EXPORT_SYMBOL(scsi_ioctl_send_command);
 
 /*
  * The scsi_ioctl_get_pci() function places into arg the value
@@ -361,7 +362,7 @@ error:
  *                  device)
  *          any copy_to_user() error on failure there
  */
-static int scsi_ioctl_get_pci(struct scsi_device *sdev, void *arg)
+static int scsi_ioctl_get_pci(struct scsi_device *sdev, void __user *arg)
 {
 	struct device *dev = scsi_get_device(sdev->host);
 
@@ -376,7 +377,7 @@ static int scsi_ioctl_get_pci(struct scsi_device *sdev, void *arg)
  * not take a major/minor number as the dev field.  Rather, it takes
  * a pointer to a scsi_devices[] element, a structure. 
  */
-int scsi_ioctl(struct scsi_device *sdev, int cmd, void *arg)
+int scsi_ioctl(struct scsi_device *sdev, int cmd, void __user *arg)
 {
 	char scsi_cmd[MAX_COMMAND_SIZE];
 
@@ -393,39 +394,50 @@ int scsi_ioctl(struct scsi_device *sdev, int cmd, void *arg)
 	if (!scsi_block_when_processing_errors(sdev))
 		return -ENODEV;
 
+	/* Check for deprecated ioctls ... all the ioctls which don't
+	 * follow the new unique numbering scheme are deprecated */
+	switch (cmd) {
+	case SCSI_IOCTL_SEND_COMMAND:
+	case SCSI_IOCTL_TEST_UNIT_READY:
+	case SCSI_IOCTL_BENCHMARK_COMMAND:
+	case SCSI_IOCTL_SYNC:
+	case SCSI_IOCTL_START_UNIT:
+	case SCSI_IOCTL_STOP_UNIT:
+		printk(KERN_WARNING "program %s is using a deprecated SCSI "
+		       "ioctl, please convert it to SG_IO\n", current->comm);
+		break;
+	default:
+		break;
+	}
+
 	switch (cmd) {
 	case SCSI_IOCTL_GET_IDLUN:
-		if (verify_area(VERIFY_WRITE, arg, sizeof(struct scsi_idlun)))
+		if (!access_ok(VERIFY_WRITE, arg, sizeof(struct scsi_idlun)))
 			return -EFAULT;
 
 		__put_user((sdev->id & 0xff)
 			 + ((sdev->lun & 0xff) << 8)
 			 + ((sdev->channel & 0xff) << 16)
 			 + ((sdev->host->host_no & 0xff) << 24),
-			 &((struct scsi_idlun *)arg)->dev_id);
+			 &((struct scsi_idlun __user *)arg)->dev_id);
 		__put_user(sdev->host->unique_id,
-			 &((struct scsi_idlun *)arg)->host_unique_id);
+			 &((struct scsi_idlun __user *)arg)->host_unique_id);
 		return 0;
 	case SCSI_IOCTL_GET_BUS_NUMBER:
-		return put_user(sdev->host->host_no, (int *)arg);
+		return put_user(sdev->host->host_no, (int __user *)arg);
 	case SCSI_IOCTL_PROBE_HOST:
 		return ioctl_probe(sdev->host, arg);
 	case SCSI_IOCTL_SEND_COMMAND:
 		if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO))
 			return -EACCES;
-		return scsi_ioctl_send_command(sdev,
-				(struct scsi_ioctl_command *)arg);
+		return scsi_ioctl_send_command(sdev, arg);
 	case SCSI_IOCTL_DOORLOCK:
 		return scsi_set_medium_removal(sdev, SCSI_REMOVAL_PREVENT);
 	case SCSI_IOCTL_DOORUNLOCK:
 		return scsi_set_medium_removal(sdev, SCSI_REMOVAL_ALLOW);
 	case SCSI_IOCTL_TEST_UNIT_READY:
-		scsi_cmd[0] = TEST_UNIT_READY;
-		scsi_cmd[1] = 0;
-		scsi_cmd[2] = scsi_cmd[3] = scsi_cmd[5] = 0;
-		scsi_cmd[4] = 0;
-		return ioctl_internal_command(sdev, scsi_cmd,
-				   IOCTL_NORMAL_TIMEOUT, NORMAL_RETRIES);
+		return scsi_test_unit_ready(sdev, IOCTL_NORMAL_TIMEOUT,
+					    NORMAL_RETRIES);
 	case SCSI_IOCTL_START_UNIT:
 		scsi_cmd[0] = START_STOP;
 		scsi_cmd[1] = 0;
@@ -448,19 +460,52 @@ int scsi_ioctl(struct scsi_device *sdev, int cmd, void *arg)
 	}
 	return -EINVAL;
 }
+EXPORT_SYMBOL(scsi_ioctl);
 
 /*
- * Just like scsi_ioctl, only callable from kernel space with no 
- * fs segment fiddling.
+ * the scsi_nonblock_ioctl() function is designed for ioctls which may
+ * be executed even if the device is in recovery.
  */
-
-int kernel_scsi_ioctl(struct scsi_device *sdev, int cmd, void *arg)
+int scsi_nonblockable_ioctl(struct scsi_device *sdev, int cmd,
+			    void __user *arg, struct file *filp)
 {
-	mm_segment_t oldfs;
-	int tmp;
-	oldfs = get_fs();
-	set_fs(get_ds());
-	tmp = scsi_ioctl(sdev, cmd, arg);
-	set_fs(oldfs);
-	return tmp;
+	int val, result;
+
+	/* The first set of iocts may be executed even if we're doing
+	 * error processing, as long as the device was opened
+	 * non-blocking */
+	if (filp && filp->f_flags & O_NONBLOCK) {
+		if (test_bit(SHOST_RECOVERY,
+			     &sdev->host->shost_state))
+			return -ENODEV;
+	} else if (!scsi_block_when_processing_errors(sdev))
+		return -ENODEV;
+
+	switch (cmd) {
+	case SG_SCSI_RESET:
+		result = get_user(val, (int __user *)arg);
+		if (result)
+			return result;
+		if (val == SG_SCSI_RESET_NOTHING)
+			return 0;
+		switch (val) {
+		case SG_SCSI_RESET_DEVICE:
+			val = SCSI_TRY_RESET_DEVICE;
+			break;
+		case SG_SCSI_RESET_BUS:
+			val = SCSI_TRY_RESET_BUS;
+			break;
+		case SG_SCSI_RESET_HOST:
+			val = SCSI_TRY_RESET_HOST;
+			break;
+		default:
+			return -EINVAL;
+		}
+		if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO))
+			return -EACCES;
+		return (scsi_reset_provider(sdev, val) ==
+			SUCCESS) ? 0 : -EIO;
+	}
+	return -ENODEV;
 }
+EXPORT_SYMBOL(scsi_nonblockable_ioctl);

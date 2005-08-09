@@ -91,7 +91,7 @@
 #include <linux/pci.h>
 #include <asm/uaccess.h>
 #include <asm/atomic.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <linux/spinlock.h>
 #include <asm/semaphore.h>
 #include <linux/init.h>
@@ -123,7 +123,7 @@ static unsigned long board2;
 static unsigned long board3;
 static unsigned long board4;
 static unsigned long controller;
-static unsigned long support_low_speed;
+static int support_low_speed;
 static unsigned long modem1;
 static unsigned long modem2;
 static unsigned long modem3;
@@ -181,33 +181,33 @@ static void rp_start(struct tty_struct *tty);
 #ifdef MODULE
 MODULE_AUTHOR("Theodore Ts'o");
 MODULE_DESCRIPTION("Comtrol RocketPort driver");
-MODULE_PARM(board1, "i");
+module_param(board1, ulong, 0);
 MODULE_PARM_DESC(board1, "I/O port for (ISA) board #1");
-MODULE_PARM(board2, "i");
+module_param(board2, ulong, 0);
 MODULE_PARM_DESC(board2, "I/O port for (ISA) board #2");
-MODULE_PARM(board3, "i");
+module_param(board3, ulong, 0);
 MODULE_PARM_DESC(board3, "I/O port for (ISA) board #3");
-MODULE_PARM(board4, "i");
+module_param(board4, ulong, 0);
 MODULE_PARM_DESC(board4, "I/O port for (ISA) board #4");
-MODULE_PARM(controller, "i");
+module_param(controller, ulong, 0);
 MODULE_PARM_DESC(controller, "I/O port for (ISA) rocketport controller");
-MODULE_PARM(support_low_speed, "i");
+module_param(support_low_speed, bool, 0);
 MODULE_PARM_DESC(support_low_speed, "1 means support 50 baud, 0 means support 460400 baud");
-MODULE_PARM(modem1, "i");
+module_param(modem1, ulong, 0);
 MODULE_PARM_DESC(modem1, "1 means (ISA) board #1 is a RocketModem");
-MODULE_PARM(modem2, "i");
+module_param(modem2, ulong, 0);
 MODULE_PARM_DESC(modem2, "1 means (ISA) board #2 is a RocketModem");
-MODULE_PARM(modem3, "i");
+module_param(modem3, ulong, 0);
 MODULE_PARM_DESC(modem3, "1 means (ISA) board #3 is a RocketModem");
-MODULE_PARM(modem4, "i");
+module_param(modem4, ulong, 0);
 MODULE_PARM_DESC(modem4, "1 means (ISA) board #4 is a RocketModem");
-MODULE_PARM(pc104_1, "1-8i");
+module_param_array(pc104_1, ulong, NULL, 0);
 MODULE_PARM_DESC(pc104_1, "set interface types for ISA(PC104) board #1 (e.g. pc104_1=232,232,485,485,...");
-MODULE_PARM(pc104_2, "1-8i");
+module_param_array(pc104_2, ulong, NULL, 0);
 MODULE_PARM_DESC(pc104_2, "set interface types for ISA(PC104) board #2 (e.g. pc104_2=232,232,485,485,...");
-MODULE_PARM(pc104_3, "1-8i");
+module_param_array(pc104_3, ulong, NULL, 0);
 MODULE_PARM_DESC(pc104_3, "set interface types for ISA(PC104) board #3 (e.g. pc104_3=232,232,485,485,...");
-MODULE_PARM(pc104_4, "1-8i");
+module_param_array(pc104_4, ulong, NULL, 0);
 MODULE_PARM_DESC(pc104_4, "set interface types for ISA(PC104) board #4 (e.g. pc104_4=232,232,485,485,...");
 
 int rp_init(void);
@@ -250,12 +250,16 @@ static void rp_do_receive(struct r_port *info,
 			  CHANNEL_t * cp, unsigned int ChanStatus)
 {
 	unsigned int CharNStat;
-	int ToRecv, wRecv, space, count;
+	int ToRecv, wRecv, space = 0, count;
 	unsigned char *cbuf;
 	char *fbuf;
+	struct tty_ldisc *ld;
+
+	ld = tty_ldisc_ref(tty);
 
 	ToRecv = sGetRxCnt(cp);
-	space = tty->ldisc.receive_room(tty);
+	if (ld)
+		space = ld->receive_room(tty);
 	if (space > 2 * TTY_FLIPBUF_SIZE)
 		space = 2 * TTY_FLIPBUF_SIZE;
 	cbuf = tty->flip.char_buf;
@@ -354,7 +358,8 @@ static void rp_do_receive(struct r_port *info,
 		count += ToRecv;
 	}
 	/*  Push the data up to the tty layer */
-	tty->ldisc.receive_buf(tty, tty->flip.char_buf, tty->flip.flag_buf, count);
+	ld->receive_buf(tty, tty->flip.char_buf, tty->flip.flag_buf, count);
+	tty_ldisc_deref(ld);
 }
 
 /*
@@ -389,7 +394,7 @@ static void rp_do_transmit(struct r_port *info)
 	while (1) {
 		if (tty->stopped || tty->hw_stopped)
 			break;
-		c = MIN(info->xmit_fifo_room, MIN(info->xmit_cnt, XMIT_BUF_SIZE - info->xmit_tail));
+		c = min(info->xmit_fifo_room, min(info->xmit_cnt, XMIT_BUF_SIZE - info->xmit_tail));
 		if (c <= 0 || info->xmit_fifo_room <= 0)
 			break;
 		sOutStrW(sGetTxRxDataIO(cp), (unsigned short *) (info->xmit_buf + info->xmit_tail), c / 2);
@@ -408,8 +413,7 @@ static void rp_do_transmit(struct r_port *info)
 		clear_bit((info->aiop * 8) + info->chan, (void *) &xmit_flags[info->board]);
 
 	if (info->xmit_cnt < WAKEUP_CHARS) {
-		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) && tty->ldisc.write_wakeup)
-			(tty->ldisc.write_wakeup) (tty);
+		tty_wakeup(tty);
 		wake_up_interruptible(&tty->write_wait);
 #ifdef ROCKETPORT_HAVE_POLL_WAIT
 		wake_up_interruptible(&tty->poll_wait);
@@ -1022,7 +1026,7 @@ static void rp_close(struct tty_struct *tty, struct file *filp)
 	unsigned long flags;
 	int timeout;
 	CHANNEL_t *cp;
-
+	
 	if (rocket_paranoia_check(info, "rp_close"))
 		return;
 
@@ -1101,21 +1105,20 @@ static void rp_close(struct tty_struct *tty, struct file *filp)
 
 	if (TTY_DRIVER_FLUSH_BUFFER_EXISTS(tty))
 		TTY_DRIVER_FLUSH_BUFFER(tty);
-	if (tty->ldisc.flush_buffer)
-		tty->ldisc.flush_buffer(tty);
+		
+	tty_ldisc_flush(tty);
 
 	clear_bit((info->aiop * 8) + info->chan, (void *) &xmit_flags[info->board]);
 
 	if (info->blocked_open) {
 		if (info->close_delay) {
-			current->state = TASK_INTERRUPTIBLE;
-			schedule_timeout(info->close_delay);
+			msleep_interruptible(jiffies_to_msecs(info->close_delay));
 		}
 		wake_up_interruptible(&info->open_wait);
 	} else {
 		if (info->xmit_buf) {
 			free_page((unsigned long) info->xmit_buf);
-			info->xmit_buf = 0;
+			info->xmit_buf = NULL;
 		}
 	}
 	info->flags &= ~(ROCKET_INITIALIZED | ROCKET_CLOSING | ROCKET_NORMAL_ACTIVE);
@@ -1258,7 +1261,7 @@ static int rp_tiocmset(struct tty_struct *tty, struct file *file,
 	return 0;
 }
 
-static int get_config(struct r_port *info, struct rocket_config *retinfo)
+static int get_config(struct r_port *info, struct rocket_config __user *retinfo)
 {
 	struct rocket_config tmp;
 
@@ -1276,23 +1279,19 @@ static int get_config(struct r_port *info, struct rocket_config *retinfo)
 	return 0;
 }
 
-static int set_config(struct r_port *info, struct rocket_config *new_info)
+static int set_config(struct r_port *info, struct rocket_config __user *new_info)
 {
 	struct rocket_config new_serial;
 
 	if (copy_from_user(&new_serial, new_info, sizeof (new_serial)))
 		return -EFAULT;
 
-#ifdef CAP_SYS_ADMIN
 	if (!capable(CAP_SYS_ADMIN))
-#else
-	if (!suser())
-#endif
 	{
 		if ((new_serial.flags & ~ROCKET_USR_MASK) != (info->flags & ~ROCKET_USR_MASK))
 			return -EPERM;
 		info->flags = ((info->flags & ~ROCKET_USR_MASK) | (new_serial.flags & ROCKET_USR_MASK));
-		configure_r_port(info, 0);
+		configure_r_port(info, NULL);
 		return 0;
 	}
 
@@ -1309,7 +1308,7 @@ static int set_config(struct r_port *info, struct rocket_config *new_info)
 	if ((info->flags & ROCKET_SPD_MASK) == ROCKET_SPD_WARP)
 		info->tty->alt_speed = 460800;
 
-	configure_r_port(info, 0);
+	configure_r_port(info, NULL);
 	return 0;
 }
 
@@ -1319,7 +1318,7 @@ static int set_config(struct r_port *info, struct rocket_config *new_info)
  *  to user space.  See setrocket.c where the info is used to create
  *  the /dev/ttyRx ports.
  */
-static int get_ports(struct r_port *info, struct rocket_ports *retports)
+static int get_ports(struct r_port *info, struct rocket_ports __user *retports)
 {
 	struct rocket_ports tmp;
 	int board;
@@ -1341,11 +1340,11 @@ static int get_ports(struct r_port *info, struct rocket_ports *retports)
 	return 0;
 }
 
-static int reset_rm2(struct r_port *info, unsigned long arg)
+static int reset_rm2(struct r_port *info, void __user *arg)
 {
 	int reset;
 
-	if (copy_from_user(&reset, (void *) arg, sizeof (int)))
+	if (copy_from_user(&reset, arg, sizeof (int)))
 		return -EFAULT;
 	if (reset)
 		reset = 1;
@@ -1362,7 +1361,7 @@ static int reset_rm2(struct r_port *info, unsigned long arg)
 	return 0;
 }
 
-static int get_version(struct r_port *info, struct rocket_version *retvers)
+static int get_version(struct r_port *info, struct rocket_version __user *retvers)
 {
 	if (copy_to_user(retvers, &driver_version, sizeof (*retvers)))
 		return -EFAULT;
@@ -1374,25 +1373,26 @@ static int rp_ioctl(struct tty_struct *tty, struct file *file,
 		    unsigned int cmd, unsigned long arg)
 {
 	struct r_port *info = (struct r_port *) tty->driver_data;
+	void __user *argp = (void __user *)arg;
 
 	if (cmd != RCKP_GET_PORTS && rocket_paranoia_check(info, "rp_ioctl"))
 		return -ENXIO;
 
 	switch (cmd) {
 	case RCKP_GET_STRUCT:
-		if (copy_to_user((void *) arg, info, sizeof (struct r_port)))
+		if (copy_to_user(argp, info, sizeof (struct r_port)))
 			return -EFAULT;
 		return 0;
 	case RCKP_GET_CONFIG:
-		return get_config(info, (struct rocket_config *) arg);
+		return get_config(info, argp);
 	case RCKP_SET_CONFIG:
-		return set_config(info, (struct rocket_config *) arg);
+		return set_config(info, argp);
 	case RCKP_GET_PORTS:
-		return get_ports(info, (struct rocket_ports *) arg);
+		return get_ports(info, argp);
 	case RCKP_RESET_RM2:
-		return reset_rm2(info, arg);
+		return reset_rm2(info, argp);
 	case RCKP_GET_VERSION:
-		return get_version(info, (struct rocket_version *) arg);
+		return get_version(info, argp);
 	default:
 		return -ENOIOCTLCMD;
 	}
@@ -1537,8 +1537,7 @@ static void rp_wait_until_sent(struct tty_struct *tty, int timeout)
 #ifdef ROCKET_DEBUG_WAIT_UNTIL_SENT
 		printk(KERN_INFO "txcnt = %d (jiff=%lu,check=%d)...", txcnt, jiffies, check_time);
 #endif
-		current->state = TASK_INTERRUPTIBLE;
-		schedule_timeout(check_time);
+		msleep_interruptible(jiffies_to_msecs(check_time));
 		if (signal_pending(current))
 			break;
 	}
@@ -1571,7 +1570,7 @@ static void rp_hangup(struct tty_struct *tty)
 
 	info->count = 0;
 	info->flags &= ~ROCKET_NORMAL_ACTIVE;
-	info->tty = 0;
+	info->tty = NULL;
 
 	cp = &info->channel;
 	sDisRxFIFO(cp);
@@ -1634,7 +1633,7 @@ static void rp_put_char(struct tty_struct *tty, unsigned char ch)
  *  or get control of the CPU if the copy_from_user() blocks due to a page fault (swapped out). 
  *  Spinlocks protect the info xmit members.
  */
-static int rp_write(struct tty_struct *tty, int from_user,
+static int rp_write(struct tty_struct *tty,
 		    const unsigned char *buf, int count)
 {
 	struct r_port *info = (struct r_port *) tty->driver_data;
@@ -1661,18 +1660,8 @@ static int rp_write(struct tty_struct *tty, int from_user,
 	 *  into FIFO.  Use the write queue for temp storage.
          */
 	if (!tty->stopped && !tty->hw_stopped && info->xmit_cnt == 0 && info->xmit_fifo_room > 0) {
-		c = MIN(count, info->xmit_fifo_room);
+		c = min(count, info->xmit_fifo_room);
 		b = buf;
-		if (from_user) {
-			if (copy_from_user(info->xmit_buf, buf, c)) {
-				retval = -EFAULT;
-				goto end;
-			}
-			if (info->tty == 0)
-				goto end;
-			b = info->xmit_buf;
-			c = MIN(c, info->xmit_fifo_room);
-		}
 
 		/*  Push data into FIFO, 2 bytes at a time */
 		sOutStrW(sGetTxRxDataIO(cp), (unsigned short *) b, c / 2);
@@ -1699,19 +1688,12 @@ static int rp_write(struct tty_struct *tty, int from_user,
 		if (info->tty == 0)	/*   Seemingly obligatory check... */
 			goto end;
 
-		c = MIN(count, MIN(XMIT_BUF_SIZE - info->xmit_cnt - 1, XMIT_BUF_SIZE - info->xmit_head));
+		c = min(count, min(XMIT_BUF_SIZE - info->xmit_cnt - 1, XMIT_BUF_SIZE - info->xmit_head));
 		if (c <= 0)
 			break;
 
 		b = buf;
-		if (from_user) {
-			if (copy_from_user(info->xmit_buf + info->xmit_head, b, c)) {
-				retval = -EFAULT;
-				goto end_intr;
-			} else {
-				memcpy(info->xmit_buf + info->xmit_head, b, c);
-			}
-		}
+		memcpy(info->xmit_buf + info->xmit_head, b, c);
 
 		spin_lock_irqsave(&info->slock, flags);
 		info->xmit_head =
@@ -1724,14 +1706,12 @@ static int rp_write(struct tty_struct *tty, int from_user,
 		retval += c;
 	}
 
-end_intr:
 	if ((retval > 0) && !tty->stopped && !tty->hw_stopped)
 		set_bit((info->aiop * 8) + info->chan, (void *) &xmit_flags[info->board]);
 	
 end:
  	if (info->xmit_cnt < WAKEUP_CHARS) {
-		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP))  && tty->ldisc.write_wakeup)
-			(tty->ldisc.write_wakeup) (tty);
+ 		tty_wakeup(tty);
 		wake_up_interruptible(&tty->write_wait);
 #ifdef ROCKETPORT_HAVE_POLL_WAIT
 		wake_up_interruptible(&tty->poll_wait);
@@ -1805,8 +1785,7 @@ static void rp_flush_buffer(struct tty_struct *tty)
 #ifdef ROCKETPORT_HAVE_POLL_WAIT
 	wake_up_interruptible(&tty->poll_wait);
 #endif
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) && tty->ldisc.write_wakeup)
-		(tty->ldisc.write_wakeup) (tty);
+	tty_wakeup(tty);
 
 	cp = &info->channel;
 	sFlushTxFIFO(cp);
@@ -2473,30 +2452,6 @@ static void rp_cleanup_module(void)
 		release_region(controller, 4);
 }
 #endif
-
-/***********************************************************************
-		Copyright 1994 Comtrol Corporation.
-			All Rights Reserved.
-
-The following source code is subject to Comtrol Corporation's
-Developer's License Agreement.
-
-This source code is protected by United States copyright law and 
-international copyright treaties.
-
-This source code may only be used to develop software products that
-will operate with Comtrol brand hardware.
-
-You may not reproduce nor distribute this source code in its original
-form but must produce a derivative work which includes portions of
-this source code only.
-
-The portions of this source code which you use in your derivative
-work must bear Comtrol's copyright notice:
-
-		Copyright 1994 Comtrol Corporation.
-
-***********************************************************************/
 
 #ifndef TRUE
 #define TRUE 1

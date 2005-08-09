@@ -38,6 +38,7 @@
 #include <linux/input.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/pci.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -98,26 +99,40 @@ static int pc110pad_open(struct input_dev *dev)
 	if (pc110pad_used++)
 		return 0;
 
-	pc110pad_interrupt(0,0,0);
-	pc110pad_interrupt(0,0,0);
-	pc110pad_interrupt(0,0,0);
+	pc110pad_interrupt(0,NULL,NULL);
+	pc110pad_interrupt(0,NULL,NULL);
+	pc110pad_interrupt(0,NULL,NULL);
 	outb(PC110PAD_ON, pc110pad_io + 2);
 	pc110pad_count = 0;
 
 	return 0;
 }
 
+/*
+ * We try to avoid enabling the hardware if it's not
+ * there, but we don't know how to test. But we do know
+ * that the PC110 is not a PCI system. So if we find any
+ * PCI devices in the machine, we don't have a PC110.
+ */
 static int __init pc110pad_init(void)
 {
-	if (request_region(pc110pad_io, 4, "pc110pad"))
-	{
-		printk(KERN_ERR "pc110pad: I/O area %#x-%#x in use.\n", pc110pad_io, pc110pad_io + 4);
+	struct pci_dev *dev;
+
+	dev = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, NULL);
+	if (dev) {
+		pci_dev_put(dev);
+		return -ENOENT;
+	}
+
+	if (!request_region(pc110pad_io, 4, "pc110pad")) {
+		printk(KERN_ERR "pc110pad: I/O area %#x-%#x in use.\n",
+				pc110pad_io, pc110pad_io + 4);
 		return -EBUSY;
 	}
 
 	outb(PC110PAD_OFF, pc110pad_io + 2);
 
-	if (request_irq(pc110pad_irq, pc110pad_interrupt, 0, "pc110pad", 0))
+	if (request_irq(pc110pad_irq, pc110pad_interrupt, 0, "pc110pad", NULL))
 	{
 		release_region(pc110pad_io, 4);
 		printk(KERN_ERR "pc110pad: Unable to get irq %d.\n", pc110pad_irq);
@@ -155,7 +170,7 @@ static void __exit pc110pad_exit(void)
 
 	outb(PC110PAD_OFF, pc110pad_io + 2);
 
-	free_irq(pc110pad_irq, 0);
+	free_irq(pc110pad_irq, NULL);
 	release_region(pc110pad_io, 4);
 }
 

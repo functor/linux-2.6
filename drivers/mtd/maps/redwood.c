@@ -1,14 +1,13 @@
 /*
- * $Id: redwood.c,v 1.6 2003/05/21 12:45:19 dwmw2 Exp $
+ * $Id: redwood.c,v 1.10 2004/11/04 13:24:15 gleixner Exp $
  *
  * drivers/mtd/maps/redwood.c
  *
  * FLASH map for the IBM Redwood 4/5/6 boards.
  *
+ * Author: MontaVista Software, Inc. <source@mvista.com>
  *
- * Author: Armin Kuster <akuster@mvista.com>
- *
- * 2001-2002 (c) MontaVista, Software, Inc. This file is licensed under
+ * 2001-2003 (c) MontaVista, Software, Inc. This file is licensed under
  * the terms of the GNU General Public License version 2. This program
  * is licensed "as is" without any warranty of any kind, whether express
  * or implied.
@@ -89,7 +88,7 @@ static struct mtd_partition redwood_flash_partitions[] = {
 
 static struct mtd_partition redwood_flash_partitions[] = {
 	{
-		.name = "Redwood kernel",
+		.name = "Redwood filesystem",
 		.offset = RW_PART0_OF,
 		.size = RW_PART0_SZ
 	},
@@ -100,7 +99,7 @@ static struct mtd_partition redwood_flash_partitions[] = {
 		.mask_flags = MTD_WRITEABLE	/* force read-only */
 	},
 	{
-		.name = "Redwood filesystem",
+		.name = "Redwood kernel",
 		.offset = RW_PART2_OF,
 		.size = RW_PART2_SZ
 	},
@@ -117,7 +116,7 @@ static struct mtd_partition redwood_flash_partitions[] = {
 struct map_info redwood_flash_map = {
 	.name = "IBM Redwood",
 	.size = WINDOW_SIZE,
-	.buswidth = 2,
+	.bankwidth = 2,
 	.phys = WINDOW_ADDR,
 };
 
@@ -132,8 +131,7 @@ int __init init_redwood_flash(void)
 	printk(KERN_NOTICE "redwood: flash mapping: %x at %x\n",
 			WINDOW_SIZE, WINDOW_ADDR);
 
-	redwood_flash_map.virt =
-		(unsigned long)ioremap(WINDOW_ADDR, WINDOW_SIZE);
+	redwood_flash_map.virt = ioremap(WINDOW_ADDR, WINDOW_SIZE);
 
 	if (!redwood_flash_map.virt) {
 		printk("init_redwood_flash: failed to ioremap\n");
@@ -167,5 +165,5 @@ module_init(init_redwood_flash);
 module_exit(cleanup_redwood_flash);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Armin Kuster <akuster@mvista.com>");
+MODULE_AUTHOR("MontaVista Software <source@mvista.com>");
 MODULE_DESCRIPTION("MTD map driver for the IBM Redwood reference boards");

@@ -83,15 +83,15 @@ static int debug;
 #define DEBUG_LED_ON_TRANSFER	0x01
 #define DEBUG_BATTERY_POLLING	0x02
 
-MODULE_PARM(debug, "i");
+module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "Debug bitmask");
 
 static int pci_read_cmd = 0x0C;		/* Read Multiple */
-MODULE_PARM(pci_read_cmd, "i");
+module_param(pci_read_cmd, int, 0);
 MODULE_PARM_DESC(pci_read_cmd, "PCI read command");
 
 static int pci_write_cmd = 0x0F;	/* Write and Invalidate */
-MODULE_PARM(pci_write_cmd, "i");
+module_param(pci_write_cmd, int, 0);
 MODULE_PARM_DESC(pci_write_cmd, "PCI write command");
 
 static int pci_cmds;
@@ -108,11 +108,11 @@ struct cardinfo {
 	int		irq;
 
 	unsigned long	csr_base;
-	unsigned char	*csr_remap;
+	unsigned char	__iomem *csr_remap;
 	unsigned long	csr_len;
 #ifdef CONFIG_MM_MAP_MEMORY
 	unsigned long	mem_base;
-	unsigned char	*mem_remap;
+	unsigned char	__iomem *mem_remap;
 	unsigned long	mem_len;
 #endif
 
@@ -278,7 +278,7 @@ static void dump_dmastat(struct cardinfo *card, unsigned int dmastat)
  * Whenever IO on the active page completes, the Ready page is activated
  * and the ex-Active page is clean out and made Ready.
  * Otherwise the Ready page is only activated when it becomes full, or
- * when mm_unplug_device is called via blk_run_queues().
+ * when mm_unplug_device is called via the unplug_io_fn.
  *
  * If a request arrives while both pages a full, it is queued, and b_rdev is
  * overloaded to record whether it was a read or a write.
@@ -833,7 +833,7 @@ static int mm_ioctl(struct inode *i, struct file *f, unsigned int cmd, unsigned 
 		geo.start     = get_start_sect(i->i_bdev);
 		geo.cylinders = size / (geo.heads * geo.sectors);
 
-		if (copy_to_user((void *) arg, &geo, sizeof(geo)))
+		if (copy_to_user((void __user *) arg, &geo, sizeof(geo)))
 			return -EFAULT;
 		return 0;
 	}
@@ -926,7 +926,7 @@ static int __devinit mm_pci_probe(struct pci_dev *dev, const struct pci_device_i
 		goto failed_req_mem;
 	}
 
-	if (!(card->mem_remap = (unsigned char *)ioremap(card->mem_base, cards->mem_len))) {
+	if (!(card->mem_remap = ioremap(card->mem_base, cards->mem_len))) {
 		printk(KERN_ERR "MM%d: Unable to remap memory region\n", card->card_number);
 		ret = -ENOMEM;
 
@@ -1107,12 +1107,12 @@ static int __devinit mm_pci_probe(struct pci_dev *dev, const struct pci_device_i
 				    card->mm_pages[1].page_dma);
  failed_magic:
 #ifdef CONFIG_MM_MAP_MEMORY
-	iounmap((void *) card->mem_remap);
+	iounmap(card->mem_remap);
  failed_remap_mem:
 	release_mem_region(card->mem_base, card->mem_len);
  failed_req_mem:
 #endif
-	iounmap((void *) card->csr_remap);
+	iounmap(card->csr_remap);
  failed_remap_csr:
 	release_mem_region(card->csr_base, card->csr_len);
  failed_req_csr:
@@ -1181,7 +1181,7 @@ static struct pci_driver mm_pci_driver = {
 -----------------------------------------------------------------------------------
 */
 
-int __init mm_init(void)
+static int __init mm_init(void)
 {
 	int retval, i;
 	int err;
@@ -1232,7 +1232,7 @@ out:
 --                             mm_cleanup
 -----------------------------------------------------------------------------------
 */
-void __exit mm_cleanup(void)
+static void __exit mm_cleanup(void)
 {
 	int i;
 

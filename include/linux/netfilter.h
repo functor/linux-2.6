@@ -10,6 +10,7 @@
 #include <linux/wait.h>
 #include <linux/list.h>
 #endif
+#include <linux/compiler.h>
 
 /* Responses from hook functions. */
 #define NF_DROP 0
@@ -17,7 +18,8 @@
 #define NF_STOLEN 2
 #define NF_QUEUE 3
 #define NF_REPEAT 4
-#define NF_MAX_VERDICT NF_REPEAT
+#define NF_STOP 5
+#define NF_MAX_VERDICT NF_STOP
 
 /* Generic cache responses from hook functions.
    <= 0x2000 is used for protocol-flags. */
@@ -64,11 +66,11 @@ struct nf_sockopt_ops
 	/* Non-inclusive ranges: use 0/0/NULL to never get called. */
 	int set_optmin;
 	int set_optmax;
-	int (*set)(struct sock *sk, int optval, void *user, unsigned int len);
+	int (*set)(struct sock *sk, int optval, void __user *user, unsigned int len);
 
 	int get_optmin;
 	int get_optmax;
-	int (*get)(struct sock *sk, int optval, void *user, int *len);
+	int (*get)(struct sock *sk, int optval, void __user *user, int *len);
 
 	/* Number of users inside set() or get(). */
 	unsigned int use;
@@ -137,28 +139,39 @@ void nf_log_packet(int pf,
 /* This is gross, but inline doesn't cut it for avoiding the function
    call in fast path: gcc doesn't inline (needs value tracking?). --RR */
 #ifdef CONFIG_NETFILTER_DEBUG
-#define NF_HOOK(pf, hook, skb, indev, outdev, okfn)			\
- nf_hook_slow((pf), (hook), (skb), (indev), (outdev), (okfn), INT_MIN)
-#define NF_HOOK_THRESH nf_hook_slow
+#define NF_HOOK(pf, hook, skb, indev, outdev, okfn)			       \
+({int __ret;								       \
+if ((__ret=nf_hook_slow(pf, hook, &(skb), indev, outdev, okfn, INT_MIN)) == 1) \
+	__ret = (okfn)(skb);						       \
+__ret;})
+#define NF_HOOK_THRESH(pf, hook, skb, indev, outdev, okfn, thresh)	       \
+({int __ret;								       \
+if ((__ret=nf_hook_slow(pf, hook, &(skb), indev, outdev, okfn, thresh)) == 1)  \
+	__ret = (okfn)(skb);						       \
+__ret;})
 #else
-#define NF_HOOK(pf, hook, skb, indev, outdev, okfn)			\
-(list_empty(&nf_hooks[(pf)][(hook)])					\
- ? (okfn)(skb)								\
- : nf_hook_slow((pf), (hook), (skb), (indev), (outdev), (okfn), INT_MIN))
-#define NF_HOOK_THRESH(pf, hook, skb, indev, outdev, okfn, thresh)	\
-(list_empty(&nf_hooks[(pf)][(hook)])					\
- ? (okfn)(skb)								\
- : nf_hook_slow((pf), (hook), (skb), (indev), (outdev), (okfn), (thresh)))
+#define NF_HOOK(pf, hook, skb, indev, outdev, okfn)			       \
+({int __ret;								       \
+if (list_empty(&nf_hooks[pf][hook]) ||					       \
+    (__ret=nf_hook_slow(pf, hook, &(skb), indev, outdev, okfn, INT_MIN)) == 1) \
+	__ret = (okfn)(skb);						       \
+__ret;})
+#define NF_HOOK_THRESH(pf, hook, skb, indev, outdev, okfn, thresh)	       \
+({int __ret;								       \
+if (list_empty(&nf_hooks[pf][hook]) ||					       \
+    (__ret=nf_hook_slow(pf, hook, &(skb), indev, outdev, okfn, thresh)) == 1)  \
+	__ret = (okfn)(skb);						       \
+__ret;})
 #endif
 
-int nf_hook_slow(int pf, unsigned int hook, struct sk_buff *skb,
+int nf_hook_slow(int pf, unsigned int hook, struct sk_buff **pskb,
 		 struct net_device *indev, struct net_device *outdev,
 		 int (*okfn)(struct sk_buff *), int thresh);
 
 /* Call setsockopt() */
-int nf_setsockopt(struct sock *sk, int pf, int optval, char *opt, 
+int nf_setsockopt(struct sock *sk, int pf, int optval, char __user *opt, 
 		  int len);
-int nf_getsockopt(struct sock *sk, int pf, int optval, char *opt,
+int nf_getsockopt(struct sock *sk, int pf, int optval, char __user *opt,
 		  int *len);
 
 /* Packet queuing */
@@ -171,17 +184,15 @@ extern void nf_reinject(struct sk_buff *skb,
 			struct nf_info *info,
 			unsigned int verdict);
 
-extern void (*ip_ct_attach)(struct sk_buff *, struct nf_ct_info *);
-
-#ifdef CONFIG_NETFILTER_DEBUG
-extern void nf_dump_skb(int pf, struct sk_buff *skb);
-#endif
+extern void (*ip_ct_attach)(struct sk_buff *, struct sk_buff *);
+extern void nf_ct_attach(struct sk_buff *, struct sk_buff *);
 
 /* FIXME: Before cache is ever used, this must be implemented for real. */
 extern void nf_invalidate_cache(int pf);
 
 #else /* !CONFIG_NETFILTER */
 #define NF_HOOK(pf, hook, skb, indev, outdev, okfn) (okfn)(skb)
+static inline void nf_ct_attach(struct sk_buff *new, struct sk_buff *skb) {}
 #endif /*CONFIG_NETFILTER*/
 
 #endif /*__KERNEL__*/

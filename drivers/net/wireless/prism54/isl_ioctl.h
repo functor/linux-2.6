@@ -1,4 +1,4 @@
-/*  $Header: /var/lib/cvs/prism54-ng/ksrc/isl_ioctl.h,v 1.30 2004/01/30 16:24:00 ajfa Exp $
+/*
  *  
  *  Copyright (C) 2002 Intersil Americas Inc.
  *            (C) 2003 Aurelien Alleaume <slts@free.fr>
@@ -30,7 +30,6 @@
 #define SUPPORTED_WIRELESS_EXT                  16
 
 void prism54_mib_init(islpci_private *);
-void prism54_mib_init_work(islpci_private *);
 
 struct iw_statistics *prism54_get_wireless_stats(struct net_device *);
 void prism54_update_stats(islpci_private *);
@@ -42,9 +41,6 @@ void prism54_process_trap(void *);
 
 void prism54_wpa_ie_init(islpci_private *priv);
 void prism54_wpa_ie_clean(islpci_private *priv);
-void prism54_wpa_ie_add(islpci_private *priv, u8 *bssid,
-			u8 *wpa_ie, size_t wpa_ie_len);
-size_t prism54_wpa_ie_get(islpci_private *priv, u8 *bssid, u8 *wpa_ie);
 
 int prism54_set_mac_address(struct net_device *, void *);
 

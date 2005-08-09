@@ -2,7 +2,7 @@
  * $Id: spaceorb.c,v 1.15 2002/01/22 20:29:19 vojtech Exp $
  *
  *  Copyright (c) 1999-2001 Vojtech Pavlik
- * 
+ *
  *  Based on the work of:
  *  	David Thompson
  */
@@ -14,18 +14,18 @@
 /*
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or 
+ * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- * 
+ *
  *  Should you need to contact me, the author, you can do so either by
  * e-mail - mail your message to <vojtech@ucw.cz>, or by paper mail:
  * Vojtech Pavlik, Simunkova 1594, Prague 8, 182 00 Czech Republic
@@ -38,8 +38,10 @@
 #include <linux/input.h>
 #include <linux/serio.h>
 
+#define DRIVER_DESC	"SpaceTec SpaceOrb 360 and Avenger 6dof controller driver"
+
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@ucw.cz>");
-MODULE_DESCRIPTION("SpaceTec SpaceOrb 360 and Avenger 6dof controller driver");
+MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
 
 /*
@@ -67,7 +69,7 @@ struct spaceorb {
 static unsigned char spaceorb_xor[] = "SpaceWare";
 
 static unsigned char *spaceorb_errors[] = { "EEPROM storing 0 failed", "Receive queue overflow", "Transmit queue timeout",
-		"Bad packet", "Power brown-out", "EEPROM checksum error", "Hardware fault" }; 
+		"Bad packet", "Power brown-out", "EEPROM checksum error", "Hardware fault" };
 
 /*
  * spaceorb_process_packet() decodes packets the driver receives from the
@@ -99,7 +101,7 @@ static void spaceorb_process_packet(struct spaceorb *spaceorb, struct pt_regs *r
 
 		case 'D':				/* Ball + button data */
 			if (spaceorb->idx != 12) return;
-			for (i = 0; i < 9; i++) spaceorb->data[i+2] ^= spaceorb_xor[i]; 
+			for (i = 0; i < 9; i++) spaceorb->data[i+2] ^= spaceorb_xor[i];
 			axes[0] = ( data[2]	 << 3) | (data[ 3] >> 4);
 			axes[1] = ((data[3] & 0x0f) << 6) | (data[ 4] >> 1);
 			axes[2] = ((data[4] & 0x01) << 9) | (data[ 5] << 2) | (data[4] >> 5);
@@ -114,7 +116,7 @@ static void spaceorb_process_packet(struct spaceorb *spaceorb, struct pt_regs *r
 
 		case 'K':				/* Button data */
 			if (spaceorb->idx != 5) return;
-			for (i = 0; i < 7; i++)
+			for (i = 0; i < 6; i++)
 				input_report_key(dev, spaceorb_buttons[i], (data[2] >> i) & 1);
 
 			break;
@@ -133,7 +135,7 @@ static void spaceorb_process_packet(struct spaceorb *spaceorb, struct pt_regs *r
 static irqreturn_t spaceorb_interrupt(struct serio *serio,
 		unsigned char data, unsigned int flags, struct pt_regs *regs)
 {
-	struct spaceorb* spaceorb = serio->private;
+	struct spaceorb* spaceorb = serio_get_drvdata(serio);
 
 	if (~data & 0x80) {
 		if (spaceorb->idx) spaceorb_process_packet(spaceorb, regs);
@@ -150,31 +152,32 @@ static irqreturn_t spaceorb_interrupt(struct serio *serio,
 
 static void spaceorb_disconnect(struct serio *serio)
 {
-	struct spaceorb* spaceorb = serio->private;
+	struct spaceorb* spaceorb = serio_get_drvdata(serio);
+
 	input_unregister_device(&spaceorb->dev);
 	serio_close(serio);
+	serio_set_drvdata(serio, NULL);
 	kfree(spaceorb);
 }
 
 /*
  * spaceorb_connect() is the routine that is called when someone adds a
- * new serio device. It looks for the SpaceOrb/Avenger, and if found, registers
+ * new serio device that supports SpaceOrb/Avenger protocol and registers
  * it as an input device.
  */
 
-static void spaceorb_connect(struct serio *serio, struct serio_dev *dev)
+static int spaceorb_connect(struct serio *serio, struct serio_driver *drv)
 {
 	struct spaceorb *spaceorb;
 	int i, t;
-
-	if (serio->type != (SERIO_RS232 | SERIO_SPACEORB))
-		return;
+	int err;
 
 	if (!(spaceorb = kmalloc(sizeof(struct spaceorb), GFP_KERNEL)))
-		return;
+		return -ENOMEM;
+
 	memset(spaceorb, 0, sizeof(struct spaceorb));
 
-	spaceorb->dev.evbit[0] = BIT(EV_KEY) | BIT(EV_ABS);	
+	spaceorb->dev.evbit[0] = BIT(EV_KEY) | BIT(EV_ABS);
 
 	for (i = 0; i < 6; i++)
 		set_bit(spaceorb_buttons[i], spaceorb->dev.keybit);
@@ -198,40 +201,62 @@ static void spaceorb_connect(struct serio *serio, struct serio_dev *dev)
 	spaceorb->dev.id.vendor = SERIO_SPACEORB;
 	spaceorb->dev.id.product = 0x0001;
 	spaceorb->dev.id.version = 0x0100;
-	
-	serio->private = spaceorb;
+	spaceorb->dev.dev = &serio->dev;
 
-	if (serio_open(serio, dev)) {
+	serio_set_drvdata(serio, spaceorb);
+
+	err = serio_open(serio, drv);
+	if (err) {
+		serio_set_drvdata(serio, NULL);
 		kfree(spaceorb);
-		return;
+		return err;
 	}
 
 	input_register_device(&spaceorb->dev);
+
+	return 0;
 }
 
 /*
- * The serio device structure.
+ * The serio driver structure.
  */
 
-static struct serio_dev spaceorb_dev = {
-	.interrupt =	spaceorb_interrupt,
-	.connect =	spaceorb_connect,
-	.disconnect =	spaceorb_disconnect,
+static struct serio_device_id spaceorb_serio_ids[] = {
+	{
+		.type	= SERIO_RS232,
+		.proto	= SERIO_SPACEORB,
+		.id	= SERIO_ANY,
+		.extra	= SERIO_ANY,
+	},
+	{ 0 }
+};
+
+MODULE_DEVICE_TABLE(serio, spaceorb_serio_ids);
+
+static struct serio_driver spaceorb_drv = {
+	.driver		= {
+		.name	= "spaceorb",
+	},
+	.description	= DRIVER_DESC,
+	.id_table	= spaceorb_serio_ids,
+	.interrupt	= spaceorb_interrupt,
+	.connect	= spaceorb_connect,
+	.disconnect	= spaceorb_disconnect,
 };
 
 /*
  * The functions for inserting/removing us as a module.
  */
 
-int __init spaceorb_init(void)
+static int __init spaceorb_init(void)
 {
-	serio_register_device(&spaceorb_dev);
+	serio_register_driver(&spaceorb_drv);
 	return 0;
 }
 
-void __exit spaceorb_exit(void)
+static void __exit spaceorb_exit(void)
 {
-	serio_unregister_device(&spaceorb_dev);
+	serio_unregister_driver(&spaceorb_drv);
 }
 
 module_init(spaceorb_init);

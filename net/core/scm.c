@@ -15,7 +15,6 @@
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/kernel.h>
-#include <linux/major.h>
 #include <linux/stat.h>
 #include <linux/socket.h>
 #include <linux/file.h>
@@ -127,9 +126,7 @@ int __scm_send(struct socket *sock, struct msghdr *msg, struct scm_cookie *p)
 		   for too short ancillary data object at all! Oops.
 		   OK, let's add it...
 		 */
-		if (cmsg->cmsg_len < sizeof(struct cmsghdr) ||
-		    (unsigned long)(((char*)cmsg - (char*)msg->msg_control)
-				    + cmsg->cmsg_len) > msg->msg_controllen)
+		if (!CMSG_OK(msg, cmsg))
 			goto error;
 
 		if (cmsg->cmsg_level != SOL_SOCKET)
@@ -169,7 +166,7 @@ error:
 
 int put_cmsg(struct msghdr * msg, int level, int type, int len, void *data)
 {
-	struct cmsghdr *cm = (struct cmsghdr*)msg->msg_control;
+	struct cmsghdr __user *cm = (struct cmsghdr __user *)msg->msg_control;
 	struct cmsghdr cmhdr;
 	int cmlen = CMSG_LEN(len);
 	int err;
@@ -204,16 +201,18 @@ out:
 
 void scm_detach_fds(struct msghdr *msg, struct scm_cookie *scm)
 {
-	struct cmsghdr *cm = (struct cmsghdr*)msg->msg_control;
+	struct cmsghdr __user *cm = (struct cmsghdr __user*)msg->msg_control;
 
 	int fdmax = 0;
 	int fdnum = scm->fp->count;
 	struct file **fp = scm->fp->fp;
-	int *cmfptr;
+	int __user *cmfptr;
 	int err = 0, i;
 
-	if (MSG_CMSG_COMPAT & msg->msg_flags)
-		return scm_detach_fds_compat(msg, scm);
+	if (MSG_CMSG_COMPAT & msg->msg_flags) {
+		scm_detach_fds_compat(msg, scm);
+		return;
+	}
 
 	if (msg->msg_controllen > sizeof(struct cmsghdr))
 		fdmax = ((msg->msg_controllen - sizeof(struct cmsghdr))
@@ -222,7 +221,7 @@ void scm_detach_fds(struct msghdr *msg, struct scm_cookie *scm)
 	if (fdnum < fdmax)
 		fdmax = fdnum;
 
-	for (i=0, cmfptr=(int*)CMSG_DATA(cm); i<fdmax; i++, cmfptr++)
+	for (i=0, cmfptr=(int __user *)CMSG_DATA(cm); i<fdmax; i++, cmfptr++)
 	{
 		int new_fd;
 		err = security_file_receive(fp[i]);

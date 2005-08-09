@@ -133,7 +133,7 @@ struct mpt_lan_priv {
 	u32 total_received;
 	struct net_device_stats stats;	/* Per device statistics */
 
-	struct mpt_work_struct post_buckets_task;
+	struct work_struct post_buckets_task;
 	unsigned long post_buckets_active;
 };
 
@@ -177,11 +177,9 @@ static int LanCtx = -1;
 static u32 max_buckets_out = 127;
 static u32 tx_max_out_p = 127 - 16;
 
-static struct net_device *mpt_landev[MPT_MAX_ADAPTERS+1];
-
 #ifdef QLOGIC_NAA_WORKAROUND
 static struct NAA_Hosed *mpt_bad_naa = NULL;
-rwlock_t bad_naa_lock;
+DEFINE_RWLOCK(bad_naa_lock);
 #endif
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -203,7 +201,7 @@ extern int mpt_lan_index;
 static int
 lan_reply (MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 {
-	struct net_device *dev = mpt_landev[ioc->id];
+	struct net_device *dev = ioc->netdev;
 	int FreeReqFrame = 0;
 
 	dioprintk((KERN_INFO MYNAM ": %s/%s: Got reply.\n",
@@ -336,7 +334,7 @@ lan_reply (MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 static int
 mpt_lan_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 {
-	struct net_device *dev = mpt_landev[ioc->id];
+	struct net_device *dev = ioc->netdev;
 	struct mpt_lan_priv *priv = netdev_priv(dev);
 
 	dlprintk((KERN_INFO MYNAM ": IOC %s_reset routed to LAN driver!\n",
@@ -502,7 +500,7 @@ mpt_lan_reset(struct net_device *dev)
 	LANResetRequest_t *pResetReq;
 	struct mpt_lan_priv *priv = netdev_priv(dev);
 
-	mf = mpt_get_msg_frame(LanCtx, priv->mpt_dev->id);
+	mf = mpt_get_msg_frame(LanCtx, priv->mpt_dev);
 
 	if (mf == NULL) {
 /*		dlprintk((KERN_ERR MYNAM "/reset: Evil funkiness abounds! "
@@ -520,7 +518,7 @@ mpt_lan_reset(struct net_device *dev)
 	pResetReq->MsgFlags	= 0;
 	pResetReq->Reserved2	= 0;
 
-	mpt_put_msg_frame(LanCtx, priv->mpt_dev->id, mf);
+	mpt_put_msg_frame(LanCtx, priv->mpt_dev, mf);
 
 	return 0;
 }
@@ -754,7 +752,7 @@ mpt_lan_sdu_send (struct sk_buff *skb, struct net_device *dev)
 		return 1;
 	}
 
-	mf = mpt_get_msg_frame(LanCtx, mpt_dev->id);
+	mf = mpt_get_msg_frame(LanCtx, mpt_dev);
 	if (mf == NULL) {
 		netif_stop_queue(dev);
 		spin_unlock_irqrestore(&priv->txfidx_lock, flags);
@@ -859,7 +857,7 @@ mpt_lan_sdu_send (struct sk_buff *skb, struct net_device *dev)
 	else
 		pSimple->Address.High = 0;
 
-	mpt_put_msg_frame (LanCtx, mpt_dev->id, mf);
+	mpt_put_msg_frame (LanCtx, mpt_dev, mf);
 	dev->trans_start = jiffies;
 
 	dioprintk((KERN_INFO MYNAM ": %s/%s: Sending packet. FlagsLength = %08x.\n",
@@ -880,18 +878,9 @@ mpt_lan_wake_post_buckets_task(struct net_device *dev, int priority)
 	
 	if (test_and_set_bit(0, &priv->post_buckets_active) == 0) {
 		if (priority) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,41)
 			schedule_work(&priv->post_buckets_task);
-#else
-			queue_task(&priv->post_buckets_task, &tq_immediate);
-			mark_bh(IMMEDIATE_BH);
-#endif
 		} else {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,41)
 			schedule_delayed_work(&priv->post_buckets_task, 1);
-#else
-			queue_task(&priv->post_buckets_task, &tq_timer);
-#endif
 			dioprintk((KERN_INFO MYNAM ": post_buckets queued on "
 				   "timer.\n"));
 		}
@@ -1253,7 +1242,7 @@ mpt_lan_post_receive_buckets(void *dev_id)
 			(MPT_LAN_TRANSACTION32_SIZE + sizeof(SGESimple64_t));
 
 	while (buckets) {
-		mf = mpt_get_msg_frame(LanCtx, mpt_dev->id);
+		mf = mpt_get_msg_frame(LanCtx, mpt_dev);
 		if (mf == NULL) {
 			printk (KERN_ERR "%s: Unable to alloc request frame\n",
 				__FUNCTION__);
@@ -1343,7 +1332,7 @@ mpt_lan_post_receive_buckets(void *dev_id)
 		if (pSimple == NULL) {
 /**/			printk (KERN_WARNING MYNAM "/%s: No buckets posted\n",
 /**/				__FUNCTION__);
-			mpt_free_msg_frame(LanCtx, mpt_dev->id, mf);
+			mpt_free_msg_frame(mpt_dev, mf);
 			goto out;
 		}
 
@@ -1357,7 +1346,7 @@ mpt_lan_post_receive_buckets(void *dev_id)
  *	printk ("\n");
  */
 
-		mpt_put_msg_frame(LanCtx, mpt_dev->id, mf);
+		mpt_put_msg_frame(LanCtx, mpt_dev, mf);
 
 		priv->total_posted += i;
 		buckets -= i;
@@ -1391,8 +1380,8 @@ mpt_register_lan_device (MPT_ADAPTER *mpt_dev, int pnum)
 	priv->mpt_dev = mpt_dev;
 	priv->pnum = pnum;
 
-	memset(&priv->post_buckets_task, 0, sizeof(struct mpt_work_struct));
-	MPT_INIT_WORK(&priv->post_buckets_task, mpt_lan_post_receive_buckets, dev);
+	memset(&priv->post_buckets_task, 0, sizeof(struct work_struct));
+	INIT_WORK(&priv->post_buckets_task, mpt_lan_post_receive_buckets, dev);
 	priv->post_buckets_active = 0;
 
 	dlprintk((KERN_INFO MYNAM "@%d: bucketlen = %d\n",
@@ -1412,8 +1401,8 @@ mpt_register_lan_device (MPT_ADAPTER *mpt_dev, int pnum)
 			priv->max_buckets_out));
 
 	priv->bucketthresh = priv->max_buckets_out * 2 / 3;
-	priv->txfidx_lock = SPIN_LOCK_UNLOCKED;
-	priv->rxfidx_lock = SPIN_LOCK_UNLOCKED;
+	spin_lock_init(&priv->txfidx_lock);
+	spin_lock_init(&priv->rxfidx_lock);
 
 	memset(&priv->stats, 0, sizeof(priv->stats));
 
@@ -1460,20 +1449,74 @@ mpt_register_lan_device (MPT_ADAPTER *mpt_dev, int pnum)
 	return dev;
 }
 
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+static int
+mptlan_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+{
+	MPT_ADAPTER 		*ioc = pci_get_drvdata(pdev);
+	struct net_device	*dev;
+	int			i;
+
+	for (i = 0; i < ioc->facts.NumberOfPorts; i++) {
+		printk(KERN_INFO MYNAM ": %s: PortNum=%x, "
+		       "ProtocolFlags=%02Xh (%c%c%c%c)\n",
+		       ioc->name, ioc->pfacts[i].PortNumber,
+		       ioc->pfacts[i].ProtocolFlags,
+		       MPT_PROTOCOL_FLAGS_c_c_c_c(
+			       ioc->pfacts[i].ProtocolFlags));
+
+		if (!(ioc->pfacts[i].ProtocolFlags &
+					MPI_PORTFACTS_PROTOCOL_LAN)) {
+			printk(KERN_INFO MYNAM ": %s: Hmmm... LAN protocol "
+			       "seems to be disabled on this adapter port!\n",
+			       ioc->name);
+			continue;
+		}
+
+		dev = mpt_register_lan_device(ioc, i);
+		if (!dev) {
+			printk(KERN_ERR MYNAM ": %s: Unable to register "
+			       "port%d as a LAN device\n", ioc->name,
+			       ioc->pfacts[i].PortNumber);
+			continue;
+		}
+		
+		printk(KERN_INFO MYNAM ": %s: Fusion MPT LAN device "
+		       "registered as '%s'\n", ioc->name, dev->name);
+		printk(KERN_INFO MYNAM ": %s/%s: "
+		       "LanAddr = %02X:%02X:%02X:%02X:%02X:%02X\n",
+		       IOC_AND_NETDEV_NAMES_s_s(dev),
+		       dev->dev_addr[0], dev->dev_addr[1],
+		       dev->dev_addr[2], dev->dev_addr[3],
+		       dev->dev_addr[4], dev->dev_addr[5]);
+	
+		ioc->netdev = dev;
+
+		return 0;
+	}
+
+	return -ENODEV;
+}
+
+static void
+mptlan_remove(struct pci_dev *pdev)
+{
+	MPT_ADAPTER 		*ioc = pci_get_drvdata(pdev);
+	struct net_device	*dev = ioc->netdev;
+
+	if(dev != NULL) {
+		unregister_netdev(dev);
+		free_netdev(dev);
+	}
+}
+
+static struct mpt_pci_driver mptlan_driver = {
+	.probe		= mptlan_probe,
+	.remove		= mptlan_remove,
+};
+
 static int __init mpt_lan_init (void)
 {
-	struct net_device *dev;
-	MPT_ADAPTER *p;
-	int i, j;
-
 	show_mptmod_ver(LANAME, LANVER);
-
-#ifdef QLOGIC_NAA_WORKAROUND
-	/* Init the global r/w lock for the bad_naa list. We want to do this
-	   before any boards are initialized and may be used. */
-	rwlock_init(&bad_naa_lock);
-#endif
 
 	if ((LanCtx = mpt_register(lan_reply, MPTLAN_DRIVER)) <= 0) {
 		printk (KERN_ERR MYNAM ": Failed to register with MPT base driver\n");
@@ -1485,91 +1528,31 @@ static int __init mpt_lan_init (void)
 
 	dlprintk((KERN_INFO MYNAM ": assigned context of %d\n", LanCtx));
 
-	if (mpt_reset_register(LanCtx, mpt_lan_ioc_reset) == 0) {
-		dlprintk((KERN_INFO MYNAM ": Registered for IOC reset notifications\n"));
-	} else {
+	if (mpt_reset_register(LanCtx, mpt_lan_ioc_reset)) {
 		printk(KERN_ERR MYNAM ": Eieee! unable to register a reset "
 		       "handler with mptbase! The world is at an end! "
 		       "Everything is fading to black! Goodbye.\n");
 		return -EBUSY;
 	}
 
-	for (j = 0; j < MPT_MAX_ADAPTERS; j++) {
-		mpt_landev[j] = NULL;
-	}
-
-	for (p = mpt_adapter_find_first(); p; p = mpt_adapter_find_next(p)) {
-		for (i = 0; i < p->facts.NumberOfPorts; i++) {
-			printk (KERN_INFO MYNAM ": %s: PortNum=%x, ProtocolFlags=%02Xh (%c%c%c%c)\n",
-					p->name,
-					p->pfacts[i].PortNumber,
-					p->pfacts[i].ProtocolFlags,
-					MPT_PROTOCOL_FLAGS_c_c_c_c(p->pfacts[i].ProtocolFlags));
-
-			if (!(p->pfacts[i].ProtocolFlags & MPI_PORTFACTS_PROTOCOL_LAN)) {
-				printk (KERN_INFO MYNAM ": %s: Hmmm... LAN protocol seems to be disabled on this adapter port!\n",
-						p->name);
-				continue;
-			}
-
-			dev = mpt_register_lan_device (p, i);
-			if (!dev) {
-				printk (KERN_ERR MYNAM ": %s: Unable to register port%d as a LAN device\n",
-						p->name,
-						p->pfacts[i].PortNumber);
-			}
-			printk (KERN_INFO MYNAM ": %s: Fusion MPT LAN device registered as '%s'\n",
-					p->name, dev->name);
-			printk (KERN_INFO MYNAM ": %s/%s: LanAddr = %02X:%02X:%02X:%02X:%02X:%02X\n",
-					IOC_AND_NETDEV_NAMES_s_s(dev),
-					dev->dev_addr[0], dev->dev_addr[1],
-					dev->dev_addr[2], dev->dev_addr[3],
-					dev->dev_addr[4], dev->dev_addr[5]);
-//					printk (KERN_INFO MYNAM ": %s/%s: Max_TX_outstanding = %d\n",
-//							IOC_AND_NETDEV_NAMES_s_s(dev),
-//							NETDEV_TO_LANPRIV_PTR(dev)->tx_max_out);
-			j = p->id;
-			mpt_landev[j] = dev;
-			dlprintk((KERN_INFO MYNAM "/init: dev_addr=%p, mpt_landev[%d]=%p\n",
-					dev, j,  mpt_landev[j]));
-
-		}
-	}
-
+	dlprintk((KERN_INFO MYNAM ": Registered for IOC reset notifications\n"));
+	
+	if (mpt_device_driver_register(&mptlan_driver, MPTLAN_DRIVER))
+		dprintk((KERN_INFO MYNAM ": failed to register dd callbacks\n"));
 	return 0;
 }
 
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 static void __exit mpt_lan_exit(void)
 {
-	int i;
-
+	mpt_device_driver_deregister(MPTLAN_DRIVER);
 	mpt_reset_deregister(LanCtx);
-
-	for (i = 0; mpt_landev[i] != NULL; i++) {
-		struct net_device *dev = mpt_landev[i];
-
-		printk (KERN_INFO ": %s/%s: Fusion MPT LAN device unregistered\n",
-			       IOC_AND_NETDEV_NAMES_s_s(dev));
-		unregister_netdev(dev);
-		free_netdev(dev);
-		mpt_landev[i] = NULL;
-	}
 
 	if (LanCtx >= 0) {
 		mpt_deregister(LanCtx);
 		LanCtx = -1;
 		mpt_lan_index = 0;
 	}
-
-	/* deregister any send/receive handler structs. I2Oism? */
 }
-
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,59)
-MODULE_PARM(tx_max_out_p, "i");
-MODULE_PARM(max_buckets_out, "i"); // Debug stuff. FIXME!
-#endif
 
 module_init(mpt_lan_init);
 module_exit(mpt_lan_exit);

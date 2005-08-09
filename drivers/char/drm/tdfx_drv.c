@@ -31,62 +31,77 @@
  */
 
 #include <linux/config.h>
-#include "tdfx.h"
 #include "drmP.h"
+#include "tdfx_drv.h"
 
-#define DRIVER_AUTHOR		"VA Linux Systems Inc."
+#include "drm_pciids.h"
 
-#define DRIVER_NAME		"tdfx"
-#define DRIVER_DESC		"3dfx Banshee/Voodoo3+"
-#define DRIVER_DATE		"20010216"
+static int postinit( struct drm_device *dev, unsigned long flags )
+{
+	DRM_INFO( "Initialized %s %d.%d.%d %s on minor %d: %s\n",
+		DRIVER_NAME,
+		DRIVER_MAJOR,
+		DRIVER_MINOR,
+		DRIVER_PATCHLEVEL,
+		DRIVER_DATE,
+		dev->primary.minor,
+		pci_pretty_name(dev->pdev)
+		);
+	return 0;
+}
 
-#define DRIVER_MAJOR		1
-#define DRIVER_MINOR		0
-#define DRIVER_PATCHLEVEL	0
+static int version( drm_version_t *version )
+{
+	int len;
 
-#ifndef PCI_VENDOR_ID_3DFX
-#define PCI_VENDOR_ID_3DFX 0x121A
-#endif
-#ifndef PCI_DEVICE_ID_3DFX_VOODOO5
-#define PCI_DEVICE_ID_3DFX_VOODOO5 0x0009
-#endif
-#ifndef PCI_DEVICE_ID_3DFX_VOODOO4
-#define PCI_DEVICE_ID_3DFX_VOODOO4 0x0007
-#endif
-#ifndef PCI_DEVICE_ID_3DFX_VOODOO3_3000 /* Voodoo3 3000 */
-#define PCI_DEVICE_ID_3DFX_VOODOO3_3000 0x0005
-#endif
-#ifndef PCI_DEVICE_ID_3DFX_VOODOO3_2000 /* Voodoo3 3000 */
-#define PCI_DEVICE_ID_3DFX_VOODOO3_2000 0x0004
-#endif
-#ifndef PCI_DEVICE_ID_3DFX_BANSHEE
-#define PCI_DEVICE_ID_3DFX_BANSHEE 0x0003
-#endif
+	version->version_major = DRIVER_MAJOR;
+	version->version_minor = DRIVER_MINOR;
+	version->version_patchlevel = DRIVER_PATCHLEVEL;
+	DRM_COPY( version->name, DRIVER_NAME );
+	DRM_COPY( version->date, DRIVER_DATE );
+	DRM_COPY( version->desc, DRIVER_DESC );
+	return 0;
+}
 
-static drm_pci_list_t DRM(idlist)[] = {
-	{ PCI_VENDOR_ID_3DFX, PCI_DEVICE_ID_3DFX_BANSHEE },
-	{ PCI_VENDOR_ID_3DFX, PCI_DEVICE_ID_3DFX_VOODOO3_2000 },
-	{ PCI_VENDOR_ID_3DFX, PCI_DEVICE_ID_3DFX_VOODOO3_3000 },
-	{ PCI_VENDOR_ID_3DFX, PCI_DEVICE_ID_3DFX_VOODOO4 },
-	{ PCI_VENDOR_ID_3DFX, PCI_DEVICE_ID_3DFX_VOODOO5 },
-	{ 0, 0 }
+static struct pci_device_id pciidlist[] = {
+	tdfx_PCI_IDS
 };
 
-#define DRIVER_CARD_LIST DRM(idlist)
+static struct drm_driver driver = {
+	.driver_features = DRIVER_USE_MTRR,
+	.reclaim_buffers = drm_core_reclaim_buffers,
+	.get_map_ofs = drm_core_get_map_ofs,
+	.get_reg_ofs = drm_core_get_reg_ofs,
+	.postinit = postinit,
+	.version = version,
+	.fops = {
+		.owner = THIS_MODULE,
+		.open = drm_open,
+		.release = drm_release,
+		.ioctl = drm_ioctl,
+		.mmap = drm_mmap,
+		.poll = drm_poll,
+		.fasync = drm_fasync,
+	},
+	.pci_driver = {
+		.name          = DRIVER_NAME,
+		.id_table      = pciidlist,
+	}
+};
 
+static int __init tdfx_init(void)
+{
+	return drm_init(&driver);
+}
 
-#include "drm_auth.h"
-#include "drm_bufs.h"
-#include "drm_context.h"
-#include "drm_dma.h"
-#include "drm_drawable.h"
-#include "drm_drv.h"
+static void __exit tdfx_exit(void)
+{
+	drm_exit(&driver);
+}
 
-#include "drm_fops.h"
-#include "drm_init.h"
-#include "drm_ioctl.h"
-#include "drm_lock.h"
-#include "drm_memory.h"
-#include "drm_proc.h"
-#include "drm_vm.h"
-#include "drm_stub.h"
+module_init(tdfx_init);
+module_exit(tdfx_exit);
+
+MODULE_AUTHOR( DRIVER_AUTHOR );
+MODULE_DESCRIPTION( DRIVER_DESC );
+MODULE_LICENSE("GPL and additional rights");

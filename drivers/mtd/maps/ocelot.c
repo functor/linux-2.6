@@ -1,5 +1,5 @@
 /*
- * $Id: ocelot.c,v 1.12 2003/05/21 12:45:19 dwmw2 Exp $
+ * $Id: ocelot.c,v 1.16 2005/01/05 18:05:13 dwmw2 Exp $
  *
  * Flash on Momenco Ocelot
  */
@@ -28,7 +28,7 @@ static struct mtd_info *nvram_mtd;
 
 static void ocelot_ram_write(struct mtd_info *mtd, loff_t to, size_t len, size_t *retlen, const u_char *buf)
 {
-        struct map_info *map = (struct map_info *)mtd->priv;
+        struct map_info *map = mtd->priv;
 	size_t done = 0;
 
 	/* If we use memcpy, it does word-wide writes. Even though we told the 
@@ -49,14 +49,14 @@ static struct mtd_partition *parsed_parts;
 struct map_info ocelot_flash_map = {
 	.name = "Ocelot boot flash",
 	.size = FLASH_WINDOW_SIZE,
-	.buswidth = FLASH_BUSWIDTH,
+	.bankwidth = FLASH_BUSWIDTH,
 	.phys = FLASH_WINDOW_ADDR,
 };
 
 struct map_info ocelot_nvram_map = {
 	.name = "Ocelot NVRAM",
 	.size = NVRAM_WINDOW_SIZE,
-	.buswidth = NVRAM_BUSWIDTH,
+	.bankwidth = NVRAM_BUSWIDTH,
 	.phys = NVRAM_WINDOW_ADDR,
 };
 
@@ -81,7 +81,7 @@ static int __init init_ocelot_maps(void)
 	iounmap(pld);
 
 	/* Now ioremap the NVRAM space */
-	ocelot_nvram_map.virt = (unsigned long)ioremap_nocache(NVRAM_WINDOW_ADDR, NVRAM_WINDOW_SIZE);
+	ocelot_nvram_map.virt = ioremap_nocache(NVRAM_WINDOW_ADDR, NVRAM_WINDOW_SIZE);
 	if (!ocelot_nvram_map.virt) {
 		printk(KERN_NOTICE "Failed to ioremap Ocelot NVRAM space\n");
 		return -EIO;
@@ -101,7 +101,7 @@ static int __init init_ocelot_maps(void)
 	nvram_mtd->write = ocelot_ram_write;
 
 	/* Now map the flash space */
-	ocelot_flash_map.virt = (unsigned long)ioremap_nocache(FLASH_WINDOW_ADDR, FLASH_WINDOW_SIZE);
+	ocelot_flash_map.virt = ioremap_nocache(FLASH_WINDOW_ADDR, FLASH_WINDOW_SIZE);
 	if (!ocelot_flash_map.virt) {
 		printk(KERN_NOTICE "Failed to ioremap Ocelot flash space\n");
 		goto fail_2;

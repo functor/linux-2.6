@@ -12,6 +12,7 @@
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/device.h>
+#include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/sysdev.h>
@@ -23,7 +24,10 @@
 #include <asm/mach-types.h>
 #include <asm/hardware/amba.h>
 #include <asm/hardware/amba_kmi.h>
+#include <asm/hardware/amba_clcd.h>
+#include <asm/hardware/icst525.h>
 
+#include <asm/arch/cm.h>
 #include <asm/arch/lm.h>
 
 #include <asm/mach/arch.h>
@@ -31,12 +35,18 @@
 #include <asm/mach/irq.h>
 #include <asm/mach/mmc.h>
 #include <asm/mach/map.h>
+#include <asm/mach/time.h>
+
+#include "common.h"
+#include "clock.h"
 
 #define INTCP_PA_MMC_BASE		0x1c000000
 #define INTCP_PA_AACI_BASE		0x1d000000
 
 #define INTCP_PA_FLASH_BASE		0x24000000
 #define INTCP_FLASH_SIZE		SZ_32M
+
+#define INTCP_PA_CLCD_BASE		0xc0000000
 
 #define INTCP_VA_CIC_BASE		0xf1000040
 #define INTCP_VA_PIC_BASE		0xf1400000
@@ -73,7 +83,6 @@ static struct map_desc intcp_io_desc[] __initdata = {
  { IO_ADDRESS(INTEGRATOR_UART1_BASE), INTEGRATOR_UART1_BASE, SZ_4K,  MT_DEVICE },
  { IO_ADDRESS(INTEGRATOR_DBG_BASE),   INTEGRATOR_DBG_BASE,   SZ_4K,  MT_DEVICE },
  { IO_ADDRESS(INTEGRATOR_GPIO_BASE),  INTEGRATOR_GPIO_BASE,  SZ_4K,  MT_DEVICE },
- { 0xfc900000, 0xc9000000, SZ_4K, MT_DEVICE },
  { 0xfca00000, 0xca000000, SZ_4K, MT_DEVICE },
  { 0xfcb00000, 0xcb000000, SZ_4K, MT_DEVICE },
 };
@@ -210,6 +219,44 @@ static void __init intcp_init_irq(void)
 }
 
 /*
+ * Clock handling
+ */
+#define CM_LOCK (IO_ADDRESS(INTEGRATOR_HDR_BASE)+INTEGRATOR_HDR_LOCK_OFFSET)
+#define CM_AUXOSC (IO_ADDRESS(INTEGRATOR_HDR_BASE)+0x1c)
+
+static const struct icst525_params cp_auxvco_params = {
+	.ref		= 24000,
+	.vco_max	= 320000,
+	.vd_min 	= 8,
+	.vd_max 	= 263,
+	.rd_min 	= 3,
+	.rd_max 	= 65,
+};
+
+static void cp_auxvco_set(struct clk *clk, struct icst525_vco vco)
+{
+	u32 val;
+
+	val = readl(CM_AUXOSC) & ~0x7ffff;
+	val |= vco.v | (vco.r << 9) | (vco.s << 16);
+
+	writel(0xa05f, CM_LOCK);
+	writel(val, CM_AUXOSC);
+	writel(0, CM_LOCK);
+}
+
+static struct clk cp_clcd_clk = {
+	.name	= "CLCDCLK",
+	.params	= &cp_auxvco_params,
+	.setvco = cp_auxvco_set,
+};
+
+static struct clk cp_mmci_clk = {
+	.name	= "MCLK",
+	.rate	= 14745600,
+};
+
+/*
  * Flash handling.
  */
 static int intcp_flash_init(void)
@@ -308,7 +355,6 @@ static unsigned int mmc_status(struct device *dev)
 }
 
 static struct mmc_platform_data mmc_data = {
-	.mclk		= 33000000,
 	.ocr_mask	= MMC_VDD_32_33|MMC_VDD_33_34,
 	.status		= mmc_status,
 };
@@ -340,14 +386,130 @@ static struct amba_device aaci_device = {
 	.periphid	= 0,
 };
 
+
+/*
+ * CLCD support
+ */
+static struct clcd_panel vga = {
+	.mode		= {
+		.name		= "VGA",
+		.refresh	= 60,
+		.xres		= 640,
+		.yres		= 480,
+		.pixclock	= 39721,
+		.left_margin	= 40,
+		.right_margin	= 24,
+		.upper_margin	= 32,
+		.lower_margin	= 11,
+		.hsync_len	= 96,
+		.vsync_len	= 2,
+		.sync		= 0,
+		.vmode		= FB_VMODE_NONINTERLACED,
+	},
+	.width		= -1,
+	.height		= -1,
+	.tim2		= TIM2_BCD | TIM2_IPC,
+	.cntl		= CNTL_LCDTFT | CNTL_LCDVCOMP(1),
+	.bpp		= 16,
+	.grayscale	= 0,
+};
+
+/*
+ * Ensure VGA is selected.
+ */
+static void cp_clcd_enable(struct clcd_fb *fb)
+{
+	u32 val;
+
+	if (fb->fb.var.bits_per_pixel <= 8)
+		val = CM_CTRL_LCDMUXSEL_VGA_8421BPP;
+	else if (fb->fb.var.bits_per_pixel <= 16)
+		val = CM_CTRL_LCDMUXSEL_VGA_16BPP;
+	else
+		val = 0; /* no idea for this, don't trust the docs */
+
+	cm_control(CM_CTRL_LCDMUXSEL_MASK|
+		   CM_CTRL_LCDEN0|
+		   CM_CTRL_LCDEN1|
+		   CM_CTRL_STATIC1|
+		   CM_CTRL_STATIC2|
+		   CM_CTRL_STATIC|
+		   CM_CTRL_n24BITEN, val);
+}
+
+static unsigned long framesize = SZ_1M;
+
+static int cp_clcd_setup(struct clcd_fb *fb)
+{
+	dma_addr_t dma;
+
+	fb->panel = &vga;
+
+	fb->fb.screen_base = dma_alloc_writecombine(&fb->dev->dev, framesize,
+						    &dma, GFP_KERNEL);
+	if (!fb->fb.screen_base) {
+		printk(KERN_ERR "CLCD: unable to map framebuffer\n");
+		return -ENOMEM;
+	}
+
+	fb->fb.fix.smem_start	= dma;
+	fb->fb.fix.smem_len	= framesize;
+
+	return 0;
+}
+
+static int cp_clcd_mmap(struct clcd_fb *fb, struct vm_area_struct *vma)
+{
+	return dma_mmap_writecombine(&fb->dev->dev, vma,
+				     fb->fb.screen_base,
+				     fb->fb.fix.smem_start,
+				     fb->fb.fix.smem_len);
+}
+
+static void cp_clcd_remove(struct clcd_fb *fb)
+{
+	dma_free_writecombine(&fb->dev->dev, fb->fb.fix.smem_len,
+			      fb->fb.screen_base, fb->fb.fix.smem_start);
+}
+
+static struct clcd_board clcd_data = {
+	.name		= "Integrator/CP",
+	.check		= clcdfb_check,
+	.decode		= clcdfb_decode,
+	.enable		= cp_clcd_enable,
+	.setup		= cp_clcd_setup,
+	.mmap		= cp_clcd_mmap,
+	.remove		= cp_clcd_remove,
+};
+
+static struct amba_device clcd_device = {
+	.dev		= {
+		.bus_id	= "mb:c0",
+		.coherent_dma_mask = ~0,
+		.platform_data = &clcd_data,
+	},
+	.res		= {
+		.start	= INTCP_PA_CLCD_BASE,
+		.end	= INTCP_PA_CLCD_BASE + SZ_4K - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	.dma_mask	= ~0,
+	.irq		= { IRQ_CP_CLCDCINT, NO_IRQ },
+	.periphid	= 0,
+};
+
 static struct amba_device *amba_devs[] __initdata = {
 	&mmc_device,
 	&aaci_device,
+	&clcd_device,
 };
 
 static void __init intcp_init(void)
 {
 	int i;
+
+	clk_register(&cp_clcd_clk);
+	clk_register(&cp_mmci_clk);
 
 	platform_add_devices(intcp_devs, ARRAY_SIZE(intcp_devs));
 
@@ -357,11 +519,24 @@ static void __init intcp_init(void)
 	}
 }
 
+#define TIMER_CTRL_IE	(1 << 5)			/* Interrupt Enable */
+
+static void __init intcp_timer_init(void)
+{
+	integrator_time_init(1000000 / HZ, TIMER_CTRL_IE);
+}
+
+static struct sys_timer cp_timer = {
+	.init		= intcp_timer_init,
+	.offset		= integrator_gettimeoffset,
+};
+
 MACHINE_START(CINTEGRATOR, "ARM-IntegratorCP")
 	MAINTAINER("ARM Ltd/Deep Blue Solutions Ltd")
 	BOOT_MEM(0x00000000, 0x16000000, 0xf1600000)
 	BOOT_PARAMS(0x00000100)
 	MAPIO(intcp_map_io)
 	INITIRQ(intcp_init_irq)
+	.timer		= &cp_timer,
 	INIT_MACHINE(intcp_init)
 MACHINE_END

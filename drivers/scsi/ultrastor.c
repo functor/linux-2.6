@@ -137,15 +137,15 @@
 #include <linux/proc_fs.h>
 #include <linux/spinlock.h>
 #include <linux/stat.h>
+#include <linux/bitops.h>
 
 #include <asm/io.h>
-#include <asm/bitops.h>
 #include <asm/system.h>
 #include <asm/dma.h>
 
 #define ULTRASTOR_PRIVATE	/* Get the private stuff from ultrastor.h */
 #include "scsi.h"
-#include "hosts.h"
+#include <scsi/scsi_host.h>
 #include "ultrastor.h"
 
 #define FALSE 0
@@ -259,7 +259,7 @@ static struct ultrastor_config
 } config = {0};
 
 /* Set this to 1 to reset the SCSI bus on error.  */
-int ultrastor_bus_reset;
+static int ultrastor_bus_reset;
 
 
 /* Allowed BIOS base addresses (NULL indicates reserved) */
@@ -945,12 +945,12 @@ static int ultrastor_abort(Scsi_Cmnd *SCpnt)
 	       config.mscp[mscp_index].SCint, SCpnt);
 #endif
     if (config.mscp[mscp_index].SCint == 0)
-	return SCSI_ABORT_NOT_RUNNING;
+	return FAILED;
 
     if (config.mscp[mscp_index].SCint != SCpnt) panic("Bad abort");
-    config.mscp[mscp_index].SCint = 0;
+    config.mscp[mscp_index].SCint = NULL;
     done = config.mscp[mscp_index].done;
-    config.mscp[mscp_index].done = 0;
+    config.mscp[mscp_index].done = NULL;
     SCpnt->result = DID_ABORT << 16;
     
     /* Take the host lock to guard against scsi layer re-entry */
@@ -1000,9 +1000,9 @@ static int ultrastor_host_reset(Scsi_Cmnd * SCpnt)
 	  {
 	    config.mscp[i].SCint->result = DID_RESET << 16;
 	    config.mscp[i].done(config.mscp[i].SCint);
-	    config.mscp[i].done = 0;
+	    config.mscp[i].done = NULL;
 	  }
-	config.mscp[i].SCint = 0;
+	config.mscp[i].SCint = NULL;
       }
 #endif
 
@@ -1020,7 +1020,7 @@ static int ultrastor_host_reset(Scsi_Cmnd * SCpnt)
 #endif
 
     spin_unlock_irqrestore(host->host_lock, flags);
-    return SCSI_RESET_SUCCESS;
+    return SUCCESS;
 
 }
 
@@ -1083,7 +1083,7 @@ static void ultrastor_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	if (icm_status == 3) {
 	    void (*done)(Scsi_Cmnd *) = mscp->done;
 	    if (done) {
-		mscp->done = 0;
+		mscp->done = NULL;
 		mscp->SCint->result = DID_ABORT << 16;
 		done(mscp->SCint);
 	    }
@@ -1114,7 +1114,7 @@ static void ultrastor_interrupt(int irq, void *dev_id, struct pt_regs *regs)
        once we call done, we may get another command queued before this
        interrupt service routine can return. */
     done = mscp->done;
-    mscp->done = 0;
+    mscp->done = NULL;
 
     /* Let the higher levels know that we're done */
     switch (mscp->adapter_status)
@@ -1138,7 +1138,7 @@ static void ultrastor_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
     SCtmp->result = status | mscp->target_status;
 
-    SCtmp->host_scribble = 0;
+    SCtmp->host_scribble = NULL;
 
     /* Free up mscp block for next command */
 #if ULTRASTOR_MAX_CMDS == 1

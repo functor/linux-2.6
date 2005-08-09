@@ -27,7 +27,7 @@ static char *sparcspkr_ebus_name = "Sparc EBUS Speaker";
 static char *sparcspkr_phys = "sparc/input0";
 static struct input_dev sparcspkr_dev;
 
-spinlock_t beep_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(beep_lock);
 
 static void __init init_sparcspkr_struct(void)
 {
@@ -53,11 +53,11 @@ static int ebus_spkr_event(struct input_dev *dev, unsigned int type, unsigned in
 		case SND_BELL: if (value) value = 1000;
 		case SND_TONE: break;
 		default: return -1;
-	} 
+	}
 
 	if (value > 20 && value < 32767)
 		count = 1193182 / value;
-	
+
 	spin_lock_irqsave(&beep_lock, flags);
 
 	/* EBUS speaker only has on/off state, the frequency does not
@@ -108,11 +108,11 @@ static int isa_spkr_event(struct input_dev *dev, unsigned int type, unsigned int
 		case SND_BELL: if (value) value = 1000;
 		case SND_TONE: break;
 		default: return -1;
-	} 
+	}
 
 	if (value > 20 && value < 32767)
 		count = 1193182 / value;
-	
+
 	spin_lock_irqsave(&beep_lock, flags);
 
 	if (count) {

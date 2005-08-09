@@ -9,7 +9,7 @@
  * Copyright (C) 1999 Silicon Graphics, Inc.
  * Kevin D. Kissell, kevink@mips.com and Carsten Langgaard, carstenl@mips.com
  * Copyright (C) 2000, 01 MIPS Technologies, Inc.
- * Copyright (C) 2002, 2003  Maciej W. Rozycki
+ * Copyright (C) 2002, 2003, 2004  Maciej W. Rozycki
  */
 #include <linux/config.h>
 #include <linux/init.h>
@@ -23,6 +23,7 @@
 
 #include <asm/bootinfo.h>
 #include <asm/branch.h>
+#include <asm/break.h>
 #include <asm/cpu.h>
 #include <asm/fpu.h>
 #include <asm/module.h>
@@ -37,12 +38,9 @@
 #include <asm/watch.h>
 #include <asm/types.h>
 
-extern asmlinkage void handle_mod(void);
+extern asmlinkage void handle_tlbm(void);
 extern asmlinkage void handle_tlbl(void);
 extern asmlinkage void handle_tlbs(void);
-extern asmlinkage void __xtlb_mod(void);
-extern asmlinkage void __xtlb_tlbl(void);
-extern asmlinkage void __xtlb_tlbs(void);
 extern asmlinkage void handle_adel(void);
 extern asmlinkage void handle_ades(void);
 extern asmlinkage void handle_ibe(void);
@@ -81,7 +79,12 @@ void show_stack(struct task_struct *task, unsigned long *sp)
 	long stackdata;
 	int i;
 
-	sp = sp ? sp : (unsigned long *) &sp;
+	if (!sp) {
+		if (task && task != current)
+			sp = (unsigned long *) task->thread.reg29;
+		else
+			sp = (unsigned long *) &sp;
+	}
 
 	printk("Stack :");
 	i = 0;
@@ -109,8 +112,12 @@ void show_trace(struct task_struct *task, unsigned long *stack)
 	const int field = 2 * sizeof(unsigned long);
 	unsigned long addr;
 
-	if (!stack)
-		stack = (unsigned long*)&stack;
+	if (!stack) {
+		if (task && task != current)
+			stack = (unsigned long *) task->thread.reg29;
+		else
+			stack = (unsigned long *) &stack;
+	}
 
 	printk("Call Trace:");
 #ifdef CONFIG_KALLSYMS
@@ -118,7 +125,7 @@ void show_trace(struct task_struct *task, unsigned long *stack)
 #endif
 	while (!kstack_end(stack)) {
 		addr = *stack++;
-		if (kernel_text_address(addr)) {
+		if (__kernel_text_address(addr)) {
 			printk(" [<%0*lx>] ", field, addr);
 			print_symbol("%s\n", addr);
 		}
@@ -234,6 +241,7 @@ void show_regs(struct pt_regs *regs)
 void show_registers(struct pt_regs *regs)
 {
 	show_regs(regs);
+	print_modules();
 	printk("Process %s (pid: %d, threadinfo=%p, task=%p)\n",
 	        current->comm, current->pid, current_thread_info(), current);
 	show_stack(current, (long *) regs->regs[29]);
@@ -242,7 +250,7 @@ void show_registers(struct pt_regs *regs)
 	printk("\n");
 }
 
-static spinlock_t die_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(die_lock);
 
 NORET_TYPE void __die(const char * str, struct pt_regs * regs,
 	const char * file, const char * func, unsigned long line)
@@ -278,47 +286,8 @@ void __declare_dbe_table(void)
 	);
 }
 
-#ifdef CONFIG_MDULES
-
-/* Given an address, look for it in the module exception tables. */
-const struct exception_table_entry *search_module_dbetables(unsigned long addr)
-{
-	unsigned long flags;
-	const struct exception_table_entry *e = NULL;
-	struct module *mod;
-
-	spin_lock_irqsave(&modlist_lock, flags);
-	list_for_each_entry(mod, &modules, list) {
-		if (mod->arch.num_dbeentries == 0)
-			continue;
-				
-		e = search_extable(mod->arch.dbe_table_start,
-				   mod->arch.dbe_table_end +
-		                   mod->arch.num_dbeentries - 1,
-				   addr);
-		if (e)
-			break;
-	}
-	spin_unlock_irqrestore(&modlist_lock, flags);
-
-	/* Now, if we found one, we are running inside it now, hence
-           we cannot unload the module, hence no refcnt needed. */
-	return e;
-}
-
-#else
-
 /* Given an address, look for it in the exception tables. */
-static inline const struct exception_table_entry *
-search_module_dbetables(unsigned long addr)
-{
-	return NULL;
-}
-
-#endif
-
-/* Given an address, look for it in the exception tables. */
-const struct exception_table_entry *search_dbe_tables(unsigned long addr)
+static const struct exception_table_entry *search_dbe_tables(unsigned long addr)
 {
 	const struct exception_table_entry *e;
 
@@ -427,12 +396,16 @@ static inline void simulate_ll(struct pt_regs *regs, unsigned int opcode)
 		goto sig;
 	}
 
+	preempt_disable();
+
 	if (ll_task == NULL || ll_task == current) {
 		ll_bit = 1;
 	} else {
 		ll_bit = 0;
 	}
 	ll_task = current;
+
+	preempt_enable();
 
 	regs->regs[(opcode & RT) >> 16] = value;
 
@@ -466,11 +439,17 @@ static inline void simulate_sc(struct pt_regs *regs, unsigned int opcode)
 		signal = SIGBUS;
 		goto sig;
 	}
+
+	preempt_disable();
+
 	if (ll_bit == 0 || ll_task != current) {
 		regs->regs[reg] = 0;
+		preempt_enable();
 		compute_return_epc(regs);
 		return;
 	}
+
+	preempt_enable();
 
 	if (put_user(regs->regs[reg], vaddr)) {
 		signal = SIGSEGV;
@@ -531,6 +510,8 @@ asmlinkage void do_fpe(struct pt_regs *regs, unsigned long fcr31)
 	if (fcr31 & FPU_CSR_UNI_X) {
 		int sig;
 
+		preempt_disable();
+
 		/*
 	 	 * Unimplemented operation exception.  If we've got the full
 		 * software emulator on-board, let's use it...
@@ -556,6 +537,8 @@ asmlinkage void do_fpe(struct pt_regs *regs, unsigned long fcr31)
 		/* Restore the hardware register state */
 		restore_fp(current);
 
+		preempt_enable();
+
 		/* If something went wrong, signal */
 		if (sig)
 			force_sig(sig, current);
@@ -579,9 +562,12 @@ asmlinkage void do_bp(struct pt_regs *regs)
 	/*
 	 * There is the ancient bug in the MIPS assemblers that the break
 	 * code starts left to bit 16 instead to bit 6 in the opcode.
-	 * Gas is bug-compatible ...
+	 * Gas is bug-compatible, but not always, grrr...
+	 * We handle both cases with a simple heuristics.  --macro
 	 */
-	bcode = ((opcode >> 16) & ((1 << 20) - 1));
+	bcode = ((opcode >> 6) & ((1 << 20) - 1));
+	if (bcode < (1 << 10))
+		bcode <<= 10;
 
 	/*
 	 * (A short test says that IRIX 5.3 sends SIGTRAP for all break
@@ -590,9 +576,9 @@ asmlinkage void do_bp(struct pt_regs *regs)
 	 * But should we continue the brokenness???  --macro
 	 */
 	switch (bcode) {
-	case 6:
-	case 7:
-		if (bcode == 7)
+	case BRK_OVERFLOW << 10:
+	case BRK_DIVZERO << 10:
+		if (bcode == (BRK_DIVZERO << 10))
 			info.si_code = FPE_INTDIV;
 		else
 			info.si_code = FPE_INTOVF;
@@ -618,7 +604,7 @@ asmlinkage void do_tr(struct pt_regs *regs)
 
 	/* Immediate versions don't provide a code.  */
 	if (!(opcode & OPCODE))
-		tcode = ((opcode >> 6) & ((1 << 20) - 1));
+		tcode = ((opcode >> 6) & ((1 << 10) - 1));
 
 	/*
 	 * (A short test says that IRIX 5.3 sends SIGTRAP for all trap
@@ -627,9 +613,9 @@ asmlinkage void do_tr(struct pt_regs *regs)
 	 * But should we continue the brokenness???  --macro
 	 */
 	switch (tcode) {
-	case 6:
-	case 7:
-		if (tcode == 7)
+	case BRK_OVERFLOW:
+	case BRK_DIVZERO:
+		if (tcode == BRK_DIVZERO)
 			info.si_code = FPE_INTDIV;
 		else
 			info.si_code = FPE_INTOVF;
@@ -672,12 +658,14 @@ asmlinkage void do_cpu(struct pt_regs *regs)
 		break;
 
 	case 1:
+		preempt_disable();
+
 		own_fpu();
-		if (current->used_math) {	/* Using the FPU again.  */
+		if (used_math()) {	/* Using the FPU again.  */
 			restore_fp(current);
 		} else {			/* First time FPU user.  */
 			init_fpu();
-			current->used_math = 1;
+			set_used_math();
 		}
 
 		if (!cpu_has_fpu) {
@@ -686,6 +674,8 @@ asmlinkage void do_cpu(struct pt_regs *regs)
 			if (sig)
 				force_sig(sig, current);
 		}
+
+		preempt_enable();
 
 		return;
 
@@ -745,11 +735,24 @@ asmlinkage void do_reserved(struct pt_regs *regs)
 static inline void parity_protection_init(void)
 {
 	switch (current_cpu_data.cputype) {
+	case CPU_24K:
+		/* 24K cache parity not currently implemented in FPGA */
+		printk(KERN_INFO "Disable cache parity protection for "
+		       "MIPS 24K CPU.\n");
+		write_c0_ecc(read_c0_ecc() & ~0x80000000);
+		break;
 	case CPU_5KC:
 		/* Set the PE bit (bit 31) in the c0_ecc register. */
-		printk(KERN_INFO "Enable the cache parity protection for "
-		       "MIPS 5KC CPUs.\n");
+		printk(KERN_INFO "Enable cache parity protection for "
+		       "MIPS 5KC/24K CPUs.\n");
 		write_c0_ecc(read_c0_ecc() | 0x80000000);
+		break;
+	case CPU_20KC:
+	case CPU_25KF:
+		/* Clear the DE bit (bit 16) in the c0_status register. */
+		printk(KERN_INFO "Enable cache parity protection for "
+		       "MIPS 20KC/25KF CPUs.\n");
+		clear_c0_status(ST0_DE);
 		break;
 	default:
 		break;
@@ -913,15 +916,21 @@ extern void tlb_init(void);
 void __init per_cpu_trap_init(void)
 {
 	unsigned int cpu = smp_processor_id();
+	unsigned int status_set = ST0_CU0;
 
-	/* Some firmware leaves the BEV flag set, clear it.  */
-	clear_c0_status(ST0_CU1|ST0_CU2|ST0_CU3|ST0_BEV);
+	/*
+	 * Disable coprocessors and select 32-bit or 64-bit addressing
+	 * and the 16/32 or 32/32 FPR register model.  Reset the BEV
+	 * flag that some firmware may have left set and the TS bit (for
+	 * IP27).  Set XX for ISA IV code to work.
+	 */
 #ifdef CONFIG_MIPS64
-	set_c0_status(ST0_CU0|ST0_FR|ST0_KX|ST0_SX|ST0_UX);
+	status_set |= ST0_FR|ST0_KX|ST0_SX|ST0_UX;
 #endif
-
 	if (current_cpu_data.isa_level == MIPS_CPU_ISA_IV)
-		set_c0_status(ST0_XX);
+		status_set |= ST0_XX;
+	change_c0_status(ST0_CU|ST0_FR|ST0_BEV|ST0_TS|ST0_KX|ST0_SX|ST0_UX,
+			 status_set);
 
 	/*
 	 * Some MIPS CPUs have a dedicated interrupt vector which reduces the
@@ -998,16 +1007,10 @@ void __init trap_init(void)
 	if (board_be_init)
 		board_be_init();
 
-#ifdef CONFIG_MIPS32
-	set_except_vector(1, handle_mod);
+	set_except_vector(1, handle_tlbm);
 	set_except_vector(2, handle_tlbl);
 	set_except_vector(3, handle_tlbs);
-#endif
-#ifdef CONFIG_MIPS64
-	set_except_vector(1, __xtlb_mod);
-	set_except_vector(2, __xtlb_tlbl);
-	set_except_vector(3, __xtlb_tlbs);
-#endif
+
 	set_except_vector(4, handle_adel);
 	set_except_vector(5, handle_ades);
 
@@ -1029,7 +1032,8 @@ void __init trap_init(void)
 		set_except_vector(24, handle_mcheck);
 
 	if (cpu_has_vce)
-		memcpy((void *)(CAC_BASE + 0x180), &except_vec3_r4000, 0x80);
+		/* Special exception: R4[04]00 uses also the divec space. */
+		memcpy((void *)(CAC_BASE + 0x180), &except_vec3_r4000, 0x100);
 	else if (cpu_has_4kex)
 		memcpy((void *)(CAC_BASE + 0x180), &except_vec3_generic, 0x80);
 	else
@@ -1043,7 +1047,7 @@ void __init trap_init(void)
 		 * unaligned ldc1/sdc1 exception.  The handlers have not been
 		 * written yet.  Well, anyway there is no R6000 machine on the
 		 * current list of targets for Linux/MIPS.
-		 * (Duh, crap, there is someone with a tripple R6k machine)
+		 * (Duh, crap, there is someone with a triple R6k machine)
 		 */
 		//set_except_vector(14, handle_mc);
 		//set_except_vector(15, handle_ndc);

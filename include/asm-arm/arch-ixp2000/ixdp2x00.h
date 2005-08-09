@@ -21,7 +21,7 @@
  * On board CPLD memory map
  */
 #define IXDP2X00_PHYS_CPLD_BASE		0xc7000000
-#define IXDP2X00_VIRT_CPLD_BASE		0xfefdd000
+#define IXDP2X00_VIRT_CPLD_BASE		0xfafff000
 #define IXDP2X00_CPLD_SIZE		0x00001000
 
 
@@ -53,7 +53,7 @@
 
 /*
  * PCI devfns for on-board devices. We need these to be able to
- * properly translte IRQs and for device removal.
+ * properly translate IRQs and for device removal.
  */
 #define	IXDP2400_SLAVE_ENET_DEVFN	0x18	/* Bus 1 */
 #define	IXDP2400_MASTER_ENET_DEVFN	0x20	/* Bus 1 */

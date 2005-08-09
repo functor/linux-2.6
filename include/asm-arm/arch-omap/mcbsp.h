@@ -29,7 +29,7 @@
 #define OMAP730_MCBSP1_BASE	0xfffb1000
 #define OMAP730_MCBSP2_BASE	0xfffb1800
 
-#define OMAP1510_MCBSP1_BASE	0xe1011000
+#define OMAP1510_MCBSP1_BASE	0xe1011800
 #define OMAP1510_MCBSP2_BASE	0xfffb1000
 #define OMAP1510_MCBSP3_BASE	0xe1017000
 
@@ -249,5 +249,9 @@ int omap_mcbsp_recv_buffer(unsigned int id, dma_addr_t buffer, unsigned int leng
 
 /* SPI specific API */
 void omap_mcbsp_set_spi_mode(unsigned int id, const struct omap_mcbsp_spi_cfg * spi_cfg);
+
+/* Polled read/write functions */
+int omap_mcbsp_pollread(unsigned int id, u16 * buf);
+int omap_mcbsp_pollwrite(unsigned int id, u16 buf);
 
 #endif

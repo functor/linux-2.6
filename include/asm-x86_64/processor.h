@@ -18,6 +18,7 @@
 #include <asm/current.h>
 #include <asm/system.h>
 #include <asm/mmsegment.h>
+#include <asm/percpu.h>
 #include <linux/personality.h>
 
 #define TF_MASK		0x00000100
@@ -44,8 +45,6 @@
 
 /*
  *  CPU type and hardware bug flags. Kept separately for each CPU.
- *  Members of this structure are referenced in head.S, so think twice
- *  before touching them. [mj]
  */
 
 struct cpuinfo_x86 {
@@ -62,7 +61,9 @@ struct cpuinfo_x86 {
 	int	x86_cache_alignment;
 	int	x86_tlbsize;	/* number of 4K pages in DTLB/ITLB combined(in pages)*/
         __u8    x86_virt_bits, x86_phys_bits;
+	__u8	x86_num_cores;
         __u32   x86_power; 	
+	__u32   extended_cpuid_level;	/* Max extended CPUID function supported */
 	unsigned long loops_per_jiffy;
 } ____cacheline_aligned;
 
@@ -77,14 +78,11 @@ struct cpuinfo_x86 {
 #define X86_VENDOR_NUM 8
 #define X86_VENDOR_UNKNOWN 0xff
 
-extern struct cpuinfo_x86 boot_cpu_data;
-extern struct tss_struct init_tss[NR_CPUS];
-
 #ifdef CONFIG_SMP
 extern struct cpuinfo_x86 cpu_data[];
 #define current_cpu_data cpu_data[smp_processor_id()]
 #else
-#define cpu_data &boot_cpu_data
+#define cpu_data (&boot_cpu_data)
 #define current_cpu_data boot_cpu_data
 #endif
 
@@ -92,7 +90,7 @@ extern char ignore_irq13;
 
 extern void identify_cpu(struct cpuinfo_x86 *);
 extern void print_cpu_info(struct cpuinfo_x86 *);
-extern void dodgy_tsc(void);
+extern unsigned int init_intel_cacheinfo(struct cpuinfo_x86 *c);
 
 /*
  * EFLAGS bits
@@ -158,17 +156,11 @@ static inline void clear_in_cr4 (unsigned long mask)
 		:"ax");
 }
 
-/*
- * Bus types
- */
-#define MCA_bus 0
-#define MCA_bus__is_a_macro
-
 
 /*
- * User space process size: 512GB - 1GB (default).
+ * User space process size. 47bits minus one guard page.
  */
-#define TASK_SIZE	(0x0000007fc0000000)
+#define TASK_SIZE	(0x800000000000UL - 4096)
 
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
@@ -180,9 +172,9 @@ static inline void clear_in_cr4 (unsigned long mask)
 	(test_thread_flag(TIF_IA32) ? TASK_UNMAPPED_32 : TASK_UNMAPPED_64)  
 
 /*
- * Size of io_bitmap, covering ports 0 to 0x3ff.
+ * Size of io_bitmap.
  */
-#define IO_BITMAP_BITS  1024
+#define IO_BITMAP_BITS  65536
 #define IO_BITMAP_BYTES (IO_BITMAP_BITS/8)
 #define IO_BITMAP_LONGS (IO_BITMAP_BYTES/sizeof(long))
 #define IO_BITMAP_OFFSET offsetof(struct tss_struct,io_bitmap)
@@ -229,6 +221,11 @@ struct tss_struct {
 	unsigned long io_bitmap[IO_BITMAP_LONGS + 1];
 } __attribute__((packed)) ____cacheline_aligned;
 
+extern struct cpuinfo_x86 boot_cpu_data;
+DECLARE_PER_CPU(struct tss_struct,init_tss);
+
+#define ARCH_MIN_TASKALIGN	16
+
 struct thread_struct {
 	unsigned long	rsp0;
 	unsigned long	rsp;
@@ -246,14 +243,15 @@ struct thread_struct {
 /* fault info */
 	unsigned long	cr2, trap_no, error_code;
 /* floating point info */
-	union i387_union	i387;
+	union i387_union	i387  __attribute__((aligned(16)));
 /* IO permissions. the bitmap could be moved into the GDT, that would make
    switch faster for a limited number of ioperm using tasks. -AK */
 	int		ioperm;
 	unsigned long	*io_bitmap_ptr;
+	unsigned io_bitmap_max;
 /* cached TLS descriptors. */
 	u64 tls_array[GDT_ENTRY_TLS_ENTRIES];
-};
+} __attribute__((aligned(16)));
 
 #define INIT_THREAD  {}
 
@@ -455,5 +453,9 @@ static inline void __mwait(unsigned long eax, unsigned long ecx)
 })
 
 #define cache_line_size() (boot_cpu_data.x86_cache_alignment)
+
+extern unsigned long boot_option_idle_override;
+/* Boot loader type from the setup header */
+extern int bootloader_type;
 
 #endif /* __ASM_X86_64_PROCESSOR_H */

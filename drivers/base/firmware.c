@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2002-3 Patrick Mochel
  * Copyright (c) 2002-3 Open Source Development Labs
- * 
+ *
  * This file is released under the GPLv2
  *
  */
@@ -12,11 +12,11 @@
 #include <linux/module.h>
 #include <linux/init.h>
 
-static decl_subsys(firmware,NULL,NULL);
+static decl_subsys(firmware, NULL, NULL);
 
 int firmware_register(struct subsystem * s)
 {
-	kset_set_kset_s(s,firmware_subsys);
+	kset_set_kset_s(s, firmware_subsys);
 	return subsystem_register(s);
 }
 
@@ -30,5 +30,5 @@ int __init firmware_init(void)
 	return subsystem_register(&firmware_subsys);
 }
 
-EXPORT_SYMBOL(firmware_register);
-EXPORT_SYMBOL(firmware_unregister);
+EXPORT_SYMBOL_GPL(firmware_register);
+EXPORT_SYMBOL_GPL(firmware_unregister);

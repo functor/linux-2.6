@@ -45,7 +45,7 @@
 #include <linux/spinlock.h>
 
 #include "scsi.h"
-#include "hosts.h"   // Scsi_Host definition for INT handler
+#include <scsi/scsi_host.h>   // Scsi_Host definition for INT handler
 #include "cpqfcTSchip.h"
 #include "cpqfcTSstructs.h"
 
@@ -116,7 +116,6 @@ int CpqTsCreateTachLiteQues( void* pHBA, int opcode)
   cpqfcHBAdata->fcLQ = pci_alloc_consistent(cpqfcHBAdata->PciDev,
 				 sizeof( FC_LINK_QUE), &cpqfcHBAdata->fcLQ_dma_handle);
   /* printk("@ %p (%u elements)\n", cpqfcHBAdata->fcLQ, FC_LINKQ_DEPTH); */
-  memset( cpqfcHBAdata->fcLQ, 0, sizeof( FC_LINK_QUE));
 
   if( cpqfcHBAdata->fcLQ == NULL ) // fatal error!!
   {
@@ -607,6 +606,7 @@ static int PeekIMQEntry( PTACHYON fcChip, ULONG type)
         if( (fcChip->IMQ->QEntry[CI].type & 0x1FF) == 0x104 )
         { 
           TachFCHDR_GCMND* fchs;
+#error This is too much stack
           ULONG ulFibreFrame[2048/4];  // max DWORDS in incoming FC Frame
 	  USHORT SFQpi = (USHORT)(fcChip->IMQ->QEntry[CI].word[0] & 0x0fffL);
 
@@ -718,6 +718,7 @@ int CpqTsProcessIMQEntry(void *host)
   ULONG x_ID;
   ULONG ulBuff, dwStatus;
   TachFCHDR_GCMND* fchs;
+#error This is too much stack
   ULONG ulFibreFrame[2048/4];  // max number of DWORDS in incoming Fibre Frame
   UCHAR ucInboundMessageType;  // Inbound CM, dword 3 "type" field
 

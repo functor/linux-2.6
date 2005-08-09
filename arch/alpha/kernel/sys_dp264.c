@@ -19,12 +19,12 @@
 #include <linux/sched.h>
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/bitops.h>
 
 #include <asm/ptrace.h>
 #include <asm/system.h>
 #include <asm/dma.h>
 #include <asm/irq.h>
-#include <asm/bitops.h>
 #include <asm/mmu_context.h>
 #include <asm/io.h>
 #include <asm/pgtable.h>
@@ -43,7 +43,7 @@ static unsigned long cached_irq_mask;
 /* dp264 boards handle at max four CPUs */
 static unsigned long cpu_irq_affinity[4] = { 0UL, 0UL, 0UL, 0UL };
 
-spinlock_t dp264_irq_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(dp264_irq_lock);
 
 static void
 tsunami_update_irq_hw(unsigned long mask)
@@ -53,7 +53,6 @@ tsunami_update_irq_hw(unsigned long mask)
 	register int bcpu = boot_cpuid;
 
 #ifdef CONFIG_SMP
-	register unsigned long cpm = cpu_present_mask;
 	volatile unsigned long *dim0, *dim1, *dim2, *dim3;
 	unsigned long mask0, mask1, mask2, mask3, dummy;
 
@@ -72,10 +71,10 @@ tsunami_update_irq_hw(unsigned long mask)
 	dim1 = &cchip->dim1.csr;
 	dim2 = &cchip->dim2.csr;
 	dim3 = &cchip->dim3.csr;
-	if ((cpm & 1) == 0) dim0 = &dummy;
-	if ((cpm & 2) == 0) dim1 = &dummy;
-	if ((cpm & 4) == 0) dim2 = &dummy;
-	if ((cpm & 8) == 0) dim3 = &dummy;
+	if (!cpu_possible(0)) dim0 = &dummy;
+	if (!cpu_possible(1)) dim1 = &dummy;
+	if (!cpu_possible(2)) dim2 = &dummy;
+	if (!cpu_possible(3)) dim3 = &dummy;
 
 	*dim0 = mask0;
 	*dim1 = mask1;
@@ -164,13 +163,13 @@ clipper_end_irq(unsigned int irq)
 }
 
 static void
-cpu_set_irq_affinity(unsigned int irq, unsigned long affinity)
+cpu_set_irq_affinity(unsigned int irq, cpumask_t affinity)
 {
 	int cpu;
 
 	for (cpu = 0; cpu < 4; cpu++) {
 		unsigned long aff = cpu_irq_affinity[cpu];
-		if (affinity & (1UL << cpu))
+		if (cpu_isset(cpu, affinity))
 			aff |= 1UL << irq;
 		else
 			aff &= ~(1UL << irq);
@@ -179,7 +178,7 @@ cpu_set_irq_affinity(unsigned int irq, unsigned long affinity)
 }
 
 static void
-dp264_set_affinity(unsigned int irq, unsigned long affinity)
+dp264_set_affinity(unsigned int irq, cpumask_t affinity)
 { 
 	spin_lock(&dp264_irq_lock);
 	cpu_set_irq_affinity(irq, affinity);
@@ -188,7 +187,7 @@ dp264_set_affinity(unsigned int irq, unsigned long affinity)
 }
 
 static void
-clipper_set_affinity(unsigned int irq, unsigned long affinity)
+clipper_set_affinity(unsigned int irq, cpumask_t affinity)
 { 
 	spin_lock(&dp264_irq_lock);
 	cpu_set_irq_affinity(irq - 16, affinity);
@@ -570,7 +569,6 @@ struct alpha_machine_vector dp264_mv __initmv = {
 	DO_EV6_MMU,
 	DO_DEFAULT_RTC,
 	DO_TSUNAMI_IO,
-	DO_TSUNAMI_BUS,
 	.machine_check		= tsunami_machine_check,
 	.max_isa_dma_address	= ALPHA_MAX_ISA_DMA_ADDRESS,
 	.min_io_address		= DEFAULT_IO_BASE,
@@ -595,7 +593,6 @@ struct alpha_machine_vector monet_mv __initmv = {
 	DO_EV6_MMU,
 	DO_DEFAULT_RTC,
 	DO_TSUNAMI_IO,
-	DO_TSUNAMI_BUS,
 	.machine_check		= tsunami_machine_check,
 	.max_isa_dma_address	= ALPHA_MAX_ISA_DMA_ADDRESS,
 	.min_io_address		= DEFAULT_IO_BASE,
@@ -619,7 +616,6 @@ struct alpha_machine_vector webbrick_mv __initmv = {
 	DO_EV6_MMU,
 	DO_DEFAULT_RTC,
 	DO_TSUNAMI_IO,
-	DO_TSUNAMI_BUS,
 	.machine_check		= tsunami_machine_check,
 	.max_isa_dma_address	= ALPHA_MAX_ISA_DMA_ADDRESS,
 	.min_io_address		= DEFAULT_IO_BASE,
@@ -643,7 +639,6 @@ struct alpha_machine_vector clipper_mv __initmv = {
 	DO_EV6_MMU,
 	DO_DEFAULT_RTC,
 	DO_TSUNAMI_IO,
-	DO_TSUNAMI_BUS,
 	.machine_check		= tsunami_machine_check,
 	.max_isa_dma_address	= ALPHA_MAX_ISA_DMA_ADDRESS,
 	.min_io_address		= DEFAULT_IO_BASE,
@@ -672,7 +667,6 @@ struct alpha_machine_vector shark_mv __initmv = {
 	DO_EV6_MMU,
 	DO_DEFAULT_RTC,
 	DO_TSUNAMI_IO,
-	DO_TSUNAMI_BUS,
 	.machine_check		= tsunami_machine_check,
 	.max_isa_dma_address	= ALPHA_MAX_ISA_DMA_ADDRESS,
 	.min_io_address		= DEFAULT_IO_BASE,

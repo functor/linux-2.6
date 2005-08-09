@@ -34,13 +34,13 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/moduleparam.h>
 
 #include <sound/driver.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/info.h>
 #include <sound/control.h>
-#define SNDRV_GET_ID
 #include <sound/initval.h>
 
 #include <asm/io.h>
@@ -51,20 +51,16 @@ static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
 
-MODULE_PARM(index, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for Sun AMD7930 soundcard.");
-MODULE_PARM_SYNTAX(index, SNDRV_INDEX_DESC);
-MODULE_PARM(id, "1-" __MODULE_STRING(SNDRV_CARDS) "s");
+module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for Sun AMD7930 soundcard.");
-MODULE_PARM_SYNTAX(id, SNDRV_ID_DESC);
-MODULE_PARM(enable, "1-" __MODULE_STRING(SNDRV_CARDS) "i");
+module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable Sun AMD7930 soundcard.");
-MODULE_PARM_SYNTAX(enable, SNDRV_ENABLE_DESC);
 MODULE_AUTHOR("Thomas K. Dyas and David S. Miller");
 MODULE_DESCRIPTION("Sun AMD7930");
 MODULE_LICENSE("GPL");
-MODULE_CLASSES("{sound}");
-MODULE_DEVICES("{{Sun,AMD7930}}");
+MODULE_SUPPORTED_DEVICE("{{Sun,AMD7930}}");
 
 /* Device register layout.  */
 
@@ -317,7 +313,7 @@ struct amd7930_map {
 
 typedef struct snd_amd7930 {
 	spinlock_t		lock;
-	unsigned long		regs;
+	void __iomem		*regs;
 	u32			flags;
 #define AMD7930_FLAG_PLAYBACK	0x00000001
 #define AMD7930_FLAG_CAPTURE	0x00000002
@@ -344,7 +340,6 @@ typedef struct snd_amd7930 {
 	unsigned int		regs_size;
 	struct snd_amd7930	*next;
 } amd7930_t;
-#define chip_t amd7930_t
 
 static amd7930_t *amd7930_list;
 
@@ -474,7 +469,6 @@ static __const__ __u16 ger_coeff[] = {
 	0x000b, /* 16.9 dB */
 	0x000f  /* 18. dB */
 };
-#define NR_GER_COEFFS (sizeof(ger_coeff) / sizeof(ger_coeff[0]))
 
 /* Update amd7930_map settings and program them into the hardware.
  * The amd->lock is held and local interrupts are disabled.
@@ -486,7 +480,7 @@ static void __amd7930_update_map(amd7930_t *amd)
 
 	map->gx = gx_coeff[amd->rgain];
 	map->stgr = gx_coeff[amd->mgain];
-	level = (amd->pgain * (256 + NR_GER_COEFFS)) >> 8;
+	level = (amd->pgain * (256 + ARRAY_SIZE(ger_coeff))) >> 8;
 	if (level >= 256) {
 		map->ger = ger_coeff[level - 256];
 		map->gr = gx_coeff[255];
@@ -763,7 +757,7 @@ static snd_pcm_ops_t snd_amd7930_capture_ops = {
 
 static void snd_amd7930_pcm_free(snd_pcm_t *pcm)
 {
-	amd7930_t *amd = snd_magic_cast(amd7930_t, pcm->private_data, return);
+	amd7930_t *amd = pcm->private_data;
 
 	amd->pcm = NULL;
 	snd_pcm_lib_preallocate_free_for_all(pcm);
@@ -915,8 +909,6 @@ static snd_kcontrol_new_t amd7930_controls[] __initdata = {
 	},
 };
 
-#define NUM_AMD7930_CONTROLS (sizeof(amd7930_controls)/sizeof(snd_kcontrol_new_t))
-
 static int __init snd_amd7930_mixer(amd7930_t *amd)
 {
 	snd_card_t *card;
@@ -927,7 +919,7 @@ static int __init snd_amd7930_mixer(amd7930_t *amd)
 	card = amd->card;
 	strcpy(card->mixername, card->shortname);
 
-	for (idx = 0; idx < NUM_AMD7930_CONTROLS; idx++) {
+	for (idx = 0; idx < ARRAY_SIZE(amd7930_controls); idx++) {
 		if ((err = snd_ctl_add(card,
 				       snd_ctl_new1(&amd7930_controls[idx], amd))) < 0)
 			return err;
@@ -946,14 +938,14 @@ static int snd_amd7930_free(amd7930_t *amd)
 	if (amd->regs)
 		sbus_iounmap(amd->regs, amd->regs_size);
 
-	snd_magic_kfree(amd);
+	kfree(amd);
 
 	return 0;
 }
 
 static int snd_amd7930_dev_free(snd_device_t *device)
 {
-	amd7930_t *amd = snd_magic_cast(amd7930_t, device->device_data, return -ENXIO);
+	amd7930_t *amd = device->device_data;
 
 	return snd_amd7930_free(amd);
 }
@@ -975,7 +967,7 @@ static int __init snd_amd7930_create(snd_card_t *card,
 	int err;
 
 	*ramd = NULL;
-	amd = snd_magic_kcalloc(amd7930_t, 0, GFP_KERNEL);
+	amd = kcalloc(1, sizeof(*amd), GFP_KERNEL);
 	if (amd == NULL)
 		return -ENOMEM;
 
@@ -1152,24 +1144,3 @@ static void __exit amd7930_exit(void)
 
 module_init(amd7930_init);
 module_exit(amd7930_exit);
-
-#ifndef MODULE
-
-/* format is: snd-sun-amd7930=index,id,enable */
-
-static int __init alsa_card_sun_amd7930_setup(char *str)
-{
-	static unsigned __initdata nr_dev = 0;
-
-	if (nr_dev >= SNDRV_CARDS)
-		return 0;
-	(void)(get_option(&str,&index[nr_dev]) == 2 &&
-	       get_option(&str,&id[nr_dev]) == 2 &&
-	       get_id(&str,&enable[nr_dev]) == 2);
-	nr_dev++;
-	return 1;
-}
-
-__setup("snd-sun-amd7930=", alsa_card_sun_amd7930_setup);
-
-#endif /* ifndef MODULE */

@@ -38,11 +38,12 @@
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
 #include <linux/spinlock.h>
+#include <linux/dma-mapping.h>
+#include <linux/bitops.h>
 
 #include <asm/8xx_immap.h>
 #include <asm/pgtable.h>
 #include <asm/mpc8xx.h>
-#include <asm/bitops.h>
 #include <asm/uaccess.h>
 #include <asm/commproc.h>
 
@@ -581,10 +582,10 @@ static void set_multicast_list(struct net_device *dev)
 	
 		/* Log any net taps. */
 		printk("%s: Promiscuous mode enabled.\n", dev->name);
-		cep->sccp->scc_pmsr |= SCC_PMSR_PRO;
+		cep->sccp->scc_psmr |= SCC_PSMR_PRO;
 	} else {
 
-		cep->sccp->scc_pmsr &= ~SCC_PMSR_PRO;
+		cep->sccp->scc_psmr &= ~SCC_PSMR_PRO;
 
 		if (dev->flags & IFF_ALLMULTI) {
 			/* Catch all multicast addresses, so set the
@@ -644,6 +645,7 @@ static int __init scc_enet_init(void)
 	struct net_device *dev;
 	struct scc_enet_private *cep;
 	int i, j, k, err;
+	uint dp_offset;
 	unsigned char	*eap, *ba;
 	dma_addr_t	mem_addr;
 	bd_t		*bd;
@@ -655,7 +657,7 @@ static int __init scc_enet_init(void)
 
 	cp = cpmp;	/* Get pointer to Communication Processor */
 
-	immap = (immap_t *)(mfspr(IMMR) & 0xFFFF0000);	/* and to internal registers */
+	immap = (immap_t *)(mfspr(SPRN_IMMR) & 0xFFFF0000);	/* and to internal registers */
 
 	bd = (bd_t *)__res;
 
@@ -738,13 +740,13 @@ static int __init scc_enet_init(void)
 	 * These are relative offsets in the DP ram address space.
 	 * Initialize base addresses for the buffer descriptors.
 	 */
-	i = m8xx_cpm_dpalloc(sizeof(cbd_t) * RX_RING_SIZE);
-	ep->sen_genscc.scc_rbase = i;
-	cep->rx_bd_base = (cbd_t *)&cp->cp_dpmem[i];
+	dp_offset = cpm_dpalloc(sizeof(cbd_t) * RX_RING_SIZE, 8);
+	ep->sen_genscc.scc_rbase = dp_offset;
+	cep->rx_bd_base = cpm_dpram_addr(dp_offset);
 
-	i = m8xx_cpm_dpalloc(sizeof(cbd_t) * TX_RING_SIZE);
-	ep->sen_genscc.scc_tbase = i;
-	cep->tx_bd_base = (cbd_t *)&cp->cp_dpmem[i];
+	dp_offset = cpm_dpalloc(sizeof(cbd_t) * TX_RING_SIZE, 8);
+	ep->sen_genscc.scc_tbase = dp_offset;
+	cep->tx_bd_base = cpm_dpram_addr(dp_offset);
 
 	cep->dirty_tx = cep->cur_tx = cep->tx_bd_base;
 	cep->cur_rx = cep->rx_bd_base;
@@ -834,7 +836,8 @@ static int __init scc_enet_init(void)
 
 		/* Allocate a page.
 		*/
-		ba = (unsigned char *)consistent_alloc(GFP_KERNEL, PAGE_SIZE, &mem_addr);
+		ba = (unsigned char *)dma_alloc_coherent(NULL, PAGE_SIZE,
+				&mem_addr, GFP_KERNEL);
 		/* BUG: no check for failure */
 
 		/* Initialize the BD for every fragment in the page.
@@ -888,7 +891,7 @@ static int __init scc_enet_init(void)
 	/* Set processing mode.  Use Ethernet CRC, catch broadcast, and
 	 * start frame search 22 bit times after RENA.
 	 */
-	sccp->scc_pmsr = (SCC_PMSR_ENCRC | SCC_PMSR_NIB22);
+	sccp->scc_psmr = (SCC_PSMR_ENCRC | SCC_PSMR_NIB22);
 
 	/* It is now OK to enable the Ethernet transmitter.
 	 * Unfortunately, there are board implementation differences here.

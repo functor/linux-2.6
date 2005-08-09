@@ -30,6 +30,10 @@
 #include <linux/pci.h>
 #include "pci_hotplug.h"
 
+#define	PHB     2
+#define	HOTPLUG	1
+#define	EMBEDDED 0
+
 #define DR_INDICATOR 9002
 #define DR_ENTITY_SENSE 9003
 
@@ -40,11 +44,6 @@
 #define LED_ON		1	/* continuous on */
 #define LED_ID		2	/* slow blinking */
 #define LED_ACTION	3	/* fast blinking */
-
-/* Error status from rtas_get-sensor */
-#define NEED_POWER    -9000	/* slot must be power up and unisolated to get state */
-#define PWR_ONLY      -9001	/* slot must be powerd up to get state, leave isolated */
-#define ERR_SENSE_USE -9002	/* No DR operation will succeed, slot is unusable  */
 
 /* Sensor values from rtas_get-sensor */
 #define EMPTY           0	/* No card in slot */
@@ -62,8 +61,6 @@ extern int debug;
 #define info(format, arg...) printk(KERN_INFO "%s: " format, MY_NAME , ## arg)
 #define warn(format, arg...) printk(KERN_WARNING "%s: " format, MY_NAME , ## arg)
 
-#define SLOT_MAGIC	0x67267322
-
 /* slot types */
 #define VIO_DEV	1
 #define PCI_DEV	2
@@ -75,29 +72,32 @@ extern int debug;
 #define	CONFIGURED	1
 #define	EMPTY		0
 
+struct rpaphp_pci_func {
+	struct pci_dev *pci_dev;
+	struct list_head sibling;
+};
+
 /*
  * struct slot - slot information for each *physical* slot
  */
 struct slot {
-	u32 magic;
+	struct list_head rpaphp_slot_list;
 	int state;
 	u32 index;
 	u32 type;
 	u32 power_domain;
 	char *name;
 	char *location;
+	u8 removable;
+	u8 dev_type;		/* VIO or PCI */
 	struct device_node *dn;	/* slot's device_node in OFDT */
-	/* dn has phb info */
+				/* dn has phb info */
 	struct pci_dev *bridge;	/* slot's pci_dev in pci_devices */
 	union {
-		struct pci_dev *pci_dev;	/* pci_dev of device in this slot */
-		/* it will be used for unconfig */
-		/* NULL if slot is empty */
-		struct vio_dev *vio_dev;	/* vio_dev of the device in this slot */
+		struct list_head *pci_devs; /* pci_devs in PCI slot */
+		struct vio_dev *vio_dev; /* vio_dev in VIO slot */
 	} dev;
-	u8 dev_type;		/* VIO or PCI */
 	struct hotplug_slot *hotplug_slot;
-	struct list_head rpaphp_slot_list;
 };
 
 extern struct hotplug_slot_ops rpaphp_hotplug_slot_ops;
@@ -113,10 +113,13 @@ extern int rpaphp_enable_pci_slot(struct slot *slot);
 extern int register_pci_slot(struct slot *slot);
 extern int rpaphp_unconfig_pci_adapter(struct slot *slot);
 extern int rpaphp_get_pci_adapter_status(struct slot *slot, int is_init, u8 * value);
+extern struct hotplug_slot *rpaphp_find_hotplug_slot(struct pci_dev *dev);
 
 /* rpaphp_core.c */
 extern int rpaphp_add_slot(struct device_node *dn);
 extern int rpaphp_remove_slot(struct slot *slot);
+extern int rpaphp_get_drc_props(struct device_node *dn, int *drc_index,
+		char **drc_name, char **drc_type, int *drc_power_domain);
 
 /* rpaphp_vio.c */
 extern int rpaphp_get_vio_adapter_status(struct slot *slot, int is_init, u8 * value);
@@ -128,8 +131,8 @@ extern int rpaphp_enable_vio_slot(struct slot *slot);
 extern void dealloc_slot_struct(struct slot *slot);
 extern struct slot *alloc_slot_struct(struct device_node *dn, int drc_index, char *drc_name, int power_domain);
 extern int register_slot(struct slot *slot);
+extern int deregister_slot(struct slot *slot);
 extern int rpaphp_get_power_status(struct slot *slot, u8 * value);
 extern int rpaphp_set_attention_status(struct slot *slot, u8 status);
-extern void rpaphp_sysfs_remove_attr_location(struct hotplug_slot *slot);
 	
 #endif				/* _PPC64PHP_H */

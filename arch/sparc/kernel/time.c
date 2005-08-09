@@ -50,11 +50,11 @@ u64 jiffies_64 = INITIAL_JIFFIES;
 
 EXPORT_SYMBOL(jiffies_64);
 
-spinlock_t rtc_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(rtc_lock);
 enum sparc_clock_type sp_clock_typ;
-spinlock_t mostek_lock = SPIN_LOCK_UNLOCKED;
-unsigned long mstk48t02_regs = 0UL;
-static struct mostek48t08 *mstk48t08_regs = 0;
+DEFINE_SPINLOCK(mostek_lock);
+void __iomem *mstk48t02_regs = NULL;
+static struct mostek48t08 *mstk48t08_regs = NULL;
 static int set_rtc_mmss(unsigned long);
 static int sbus_do_settimeofday(struct timespec *tv);
 
@@ -79,38 +79,26 @@ struct intersil *intersil_clock;
 
 #endif
 
-static spinlock_t ticker_lock = SPIN_LOCK_UNLOCKED;
-
-/* 32-bit Sparc specific profiling function. */
-void sparc_do_profile(unsigned long pc, unsigned long o7)
+unsigned long profile_pc(struct pt_regs *regs)
 {
-	if(prof_buffer && current->pid) {
-		extern int _stext;
-		extern int __copy_user_begin, __copy_user_end;
-		extern int __atomic_begin, __atomic_end;
-		extern int __bzero_begin, __bzero_end;
-		extern int __bitops_begin, __bitops_end;
+	extern char __copy_user_begin[], __copy_user_end[];
+	extern char __atomic_begin[], __atomic_end[];
+	extern char __bzero_begin[], __bzero_end[];
+	extern char __bitops_begin[], __bitops_end[];
 
-		if ((pc >= (unsigned long) &__copy_user_begin &&
-		     pc < (unsigned long) &__copy_user_end) ||
-		    (pc >= (unsigned long) &__atomic_begin &&
-		     pc < (unsigned long) &__atomic_end) ||
-		    (pc >= (unsigned long) &__bzero_begin &&
-		     pc < (unsigned long) &__bzero_end) ||
-		    (pc >= (unsigned long) &__bitops_begin &&
-		     pc < (unsigned long) &__bitops_end))
-			pc = o7;
+	unsigned long pc = regs->pc;
 
-		pc -= (unsigned long) &_stext;
-		pc >>= prof_shift;
-
-		spin_lock(&ticker_lock);
-		if(pc < prof_len)
-			prof_buffer[pc]++;
-		else
-			prof_buffer[prof_len - 1]++;
-		spin_unlock(&ticker_lock);
-	}
+	if (in_lock_functions(pc) ||
+	    (pc >= (unsigned long) __copy_user_begin &&
+	     pc < (unsigned long) __copy_user_end) ||
+	    (pc >= (unsigned long) __atomic_begin &&
+	     pc < (unsigned long) __atomic_end) ||
+	    (pc >= (unsigned long) __bzero_begin &&
+	     pc < (unsigned long) __bzero_end) ||
+	    (pc >= (unsigned long) __bitops_begin &&
+	     pc < (unsigned long) __bitops_end))
+		pc = regs->u_regs[UREG_RETPC];
+	return pc;
 }
 
 __volatile__ unsigned int *master_l10_counter;
@@ -129,8 +117,7 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs * regs)
 	static long last_rtc_update;
 
 #ifndef CONFIG_SMP
-	if(!user_mode(regs))
-		sparc_do_profile(regs->pc, regs->u_regs[UREG_RETPC]);
+	profile_tick(CPU_PROFILING, regs);
 #endif
 
 	/* Protect counter clear so that do_gettimeoffset works */
@@ -147,6 +134,10 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs * regs)
 	clear_clock_irq();
 
 	do_timer(regs);
+#ifndef CONFIG_SMP
+	update_process_times(user_mode(regs));
+#endif
+
 
 	/* Determine when to update the Mostek clock. */
 	if ((time_status & STA_UNSYNC) == 0 &&
@@ -251,9 +242,9 @@ static __inline__ void sun4_clock_probe(void)
 		sp_clock_typ = MSTK48T02;
 		r.start = sun4_clock_physaddr;
 		mstk48t02_regs = sbus_ioremap(&r, 0,
-				       sizeof(struct mostek48t02), 0);
-		mstk48t08_regs = 0;  /* To catch weirdness */
-		intersil_clock = 0;  /* just in case */
+				       sizeof(struct mostek48t02), NULL);
+		mstk48t08_regs = NULL;  /* To catch weirdness */
+		intersil_clock = NULL;  /* just in case */
 
 		/* Kick start the clock if it is completely stopped. */
 		if (mostek_read(mstk48t02_regs + MOSTEK_SEC) & MSTK_STOP)
@@ -266,7 +257,7 @@ static __inline__ void sun4_clock_probe(void)
 		intersil_clock = (struct intersil *) 
 		    sbus_ioremap(&r, 0, sizeof(*intersil_clock), "intersil");
 		mstk48t02_regs = 0;  /* just be sure */
-		mstk48t08_regs = 0;  /* ditto */
+		mstk48t08_regs = NULL;  /* ditto */
 		/* initialise the clock */
 
 		intersil_intr(intersil_clock,INTERSIL_INT_100HZ);
@@ -340,7 +331,7 @@ static __inline__ void clock_probe(void)
 		r.start = clk_reg[0].phys_addr;
 		mstk48t02_regs = sbus_ioremap(&r, 0,
 		    sizeof(struct mostek48t02), "mk48t02");
-		mstk48t08_regs = 0;  /* To catch weirdness */
+		mstk48t08_regs = NULL;  /* To catch weirdness */
 	} else if (strcmp(model, "mk48t08") == 0) {
 		sp_clock_typ = MSTK48T08;
 		if(prom_getproperty(node, "reg", (char *) clk_reg,
@@ -359,7 +350,7 @@ static __inline__ void clock_probe(void)
 		mstk48t08_regs = (struct mostek48t08 *) sbus_ioremap(&r, 0,
 		    sizeof(struct mostek48t08), "mk48t08");
 
-		mstk48t02_regs = (unsigned long)&mstk48t08_regs->regs;
+		mstk48t02_regs = &mstk48t08_regs->regs;
 	} else {
 		prom_printf("CLOCK: Unknown model name '%s'\n",model);
 		prom_halt();

@@ -55,7 +55,7 @@ MODULE_DESCRIPTION("VIA VT82xx modem");
 MODULE_LICENSE("GPL");
 MODULE_SUPPORTED_DEVICE("{{VIA,VT82C686A/B/C modem,pci}}");
 
-static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
+static int index[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = -2}; /* Exclude the first card */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
 static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
 static int ac97_clock[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 48000};
@@ -940,13 +940,9 @@ static void __devinit snd_via82xx_proc_init(via82xx_t *chip)
 
 static int __devinit snd_via82xx_chip_init(via82xx_t *chip)
 {
-	ac97_t ac97;
 	unsigned int val;
 	int max_count;
 	unsigned char pval;
-
-	memset(&ac97, 0, sizeof(ac97));
-	ac97.private_data = chip;
 
 	pci_read_config_byte(chip->pci, VIA_MC97_CTRL, &pval);
 	if((pval & VIA_MC97_CTRL_INIT) != VIA_MC97_CTRL_INIT) {
@@ -996,13 +992,6 @@ static int __devinit snd_via82xx_chip_init(via82xx_t *chip)
 	if ((val = snd_via82xx_codec_xread(chip)) & VIA_REG_AC97_BUSY)
 		snd_printk("AC'97 codec is not ready [0x%x]\n", val);
 
-	/* and then reset codec.. */
-#if 0 /* do we need it? when? */
-	snd_via82xx_codec_ready(chip, 0);
-	snd_via82xx_codec_write(&ac97, AC97_RESET, 0x0000);
-	snd_via82xx_codec_read(&ac97, 0);
-#endif
-
 	snd_via82xx_codec_xwrite(chip, VIA_REG_AC97_READ |
 				 VIA_REG_AC97_SECONDARY_VALID |
 				 (VIA_REG_AC97_CODEC_ID_SECONDARY << VIA_REG_AC97_CODEC_ID_SHIFT));
@@ -1034,7 +1023,7 @@ static int __devinit snd_via82xx_chip_init(via82xx_t *chip)
 /*
  * power management
  */
-static int snd_via82xx_suspend(snd_card_t *card, unsigned int state)
+static int snd_via82xx_suspend(snd_card_t *card, pm_message_t state)
 {
 	via82xx_t *chip = card->pm_private_data;
 	int i;
@@ -1051,7 +1040,7 @@ static int snd_via82xx_suspend(snd_card_t *card, unsigned int state)
 	return 0;
 }
 
-static int snd_via82xx_resume(snd_card_t *card, unsigned int state)
+static int snd_via82xx_resume(snd_card_t *card)
 {
 	via82xx_t *chip = card->pm_private_data;
 	int i;

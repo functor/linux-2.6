@@ -55,7 +55,7 @@
 #include <net/sock.h>
 
 #include <net/ipv6.h>
-#include <net/checksum.h>
+#include <net/ip6_checksum.h>
 #include <net/protocol.h>
 #include <net/raw.h>
 #include <net/rawv6.h>
@@ -135,14 +135,16 @@ static int is_ineligible(struct sk_buff *skb)
 	if (len < 0)
 		return 1;
 
-	ptr = ipv6_skip_exthdr(skb, ptr, &nexthdr, len);
+	ptr = ipv6_skip_exthdr(skb, ptr, &nexthdr);
 	if (ptr < 0)
 		return 0;
 	if (nexthdr == IPPROTO_ICMPV6) {
-		u8 type;
-		if (skb_copy_bits(skb, ptr+offsetof(struct icmp6hdr, icmp6_type),
-				  &type, 1)
-		    || !(type & ICMPV6_INFOMSG_MASK))
+		u8 _type, *tp;
+		tp = skb_header_pointer(skb,
+			ptr+offsetof(struct icmp6hdr, icmp6_type),
+			sizeof(_type), &_type);
+		if (tp == NULL ||
+		    !(*tp & ICMPV6_INFOMSG_MASK))
 			return 1;
 	}
 	return 0;
@@ -174,7 +176,7 @@ static inline int icmpv6_xrlim_allow(struct sock *sk, int type,
 	 */
 	dst = ip6_route_output(sk, fl);
 	if (dst->error) {
-		IP6_INC_STATS(Ip6OutNoRoutes);
+		IP6_INC_STATS(IPSTATS_MIB_OUTNOROUTES);
 	} else if (dst->dev && (dst->dev->flags&IFF_LOOPBACK)) {
 		res = 1;
 	} else {
@@ -200,15 +202,16 @@ static inline int icmpv6_xrlim_allow(struct sock *sk, int type,
 
 static __inline__ int opt_unrec(struct sk_buff *skb, __u32 offset)
 {
-	u8 optval;
+	u8 _optval, *op;
 
 	offset += skb->nh.raw - skb->data;
-	if (skb_copy_bits(skb, offset, &optval, 1))
+	op = skb_header_pointer(skb, offset, sizeof(_optval), &_optval);
+	if (op == NULL)
 		return 1;
-	return (optval&0xC0) == 0x80;
+	return (*op & 0xC0) == 0x80;
 }
 
-int icmpv6_push_pending_frames(struct sock *sk, struct flowi *fl, struct icmp6hdr *thdr, int len)
+static int icmpv6_push_pending_frames(struct sock *sk, struct flowi *fl, struct icmp6hdr *thdr, int len)
 {
 	struct sk_buff *skb;
 	struct icmp6hdr *icmp6h;
@@ -274,8 +277,8 @@ void icmpv6_send(struct sk_buff *skb, int type, int code, __u32 info,
 {
 	struct inet6_dev *idev = NULL;
 	struct ipv6hdr *hdr = skb->nh.ipv6h;
-	struct sock *sk = icmpv6_socket->sk;
-	struct ipv6_pinfo *np = inet6_sk(sk);
+	struct sock *sk;
+	struct ipv6_pinfo *np;
 	struct in6_addr *saddr = NULL;
 	struct dst_entry *dst;
 	struct icmp6hdr tmp_hdr;
@@ -284,7 +287,7 @@ void icmpv6_send(struct sk_buff *skb, int type, int code, __u32 info,
 	int iif = 0;
 	int addr_type = 0;
 	int len;
-	int hlimit = -1;
+	int hlimit;
 	int err = 0;
 
 	if ((u8*)hdr < skb->head || (u8*)(hdr+1) > skb->tail)
@@ -355,6 +358,9 @@ void icmpv6_send(struct sk_buff *skb, int type, int code, __u32 info,
 	if (icmpv6_xmit_lock())
 		return;
 
+	sk = icmpv6_socket->sk;
+	np = inet6_sk(sk);
+
 	if (!icmpv6_xrlim_allow(sk, type, &fl))
 		goto out;
 
@@ -369,15 +375,17 @@ void icmpv6_send(struct sk_buff *skb, int type, int code, __u32 info,
 	err = ip6_dst_lookup(sk, &dst, &fl);
 	if (err)
 		goto out;
+	if ((err = xfrm_lookup(&dst, &fl, sk, 0)) < 0)
+		goto out_dst_release;
 
-	if (hlimit < 0) {
-		if (ipv6_addr_is_multicast(&fl.fl6_dst))
-			hlimit = np->mcast_hops;
-		else
-			hlimit = np->hop_limit;
-		if (hlimit < 0)
-			hlimit = dst_metric(dst, RTAX_HOPLIMIT);
-	}
+	if (ipv6_addr_is_multicast(&fl.fl6_dst))
+		hlimit = np->mcast_hops;
+	else
+		hlimit = np->hop_limit;
+	if (hlimit < 0)
+		hlimit = dst_metric(dst, RTAX_HOPLIMIT);
+	if (hlimit < 0)
+		hlimit = ipv6_get_hoplimit(dst->dev);
 
 	msg.skb = skb;
 	msg.offset = skb->nh.raw - skb->data;
@@ -404,8 +412,8 @@ void icmpv6_send(struct sk_buff *skb, int type, int code, __u32 info,
 	err = icmpv6_push_pending_frames(sk, &fl, &tmp_hdr, len + sizeof(struct icmp6hdr));
 
 	if (type >= ICMPV6_DEST_UNREACH && type <= ICMPV6_PARAMPROB)
-		ICMP6_INC_STATS_OFFSET_BH(idev, Icmp6OutDestUnreachs, type - ICMPV6_DEST_UNREACH);
-	ICMP6_INC_STATS_BH(idev, Icmp6OutMsgs);
+		ICMP6_INC_STATS_OFFSET_BH(idev, ICMP6_MIB_OUTDESTUNREACHS, type - ICMPV6_DEST_UNREACH);
+	ICMP6_INC_STATS_BH(idev, ICMP6_MIB_OUTMSGS);
 
 out_put:
 	if (likely(idev != NULL))
@@ -418,9 +426,9 @@ out:
 
 static void icmpv6_echo_reply(struct sk_buff *skb)
 {
-	struct sock *sk = icmpv6_socket->sk;
+	struct sock *sk;
 	struct inet6_dev *idev;
-	struct ipv6_pinfo *np = inet6_sk(sk);
+	struct ipv6_pinfo *np;
 	struct in6_addr *saddr = NULL;
 	struct icmp6hdr *icmph = (struct icmp6hdr *) skb->h.raw;
 	struct icmp6hdr tmp_hdr;
@@ -428,7 +436,7 @@ static void icmpv6_echo_reply(struct sk_buff *skb)
 	struct icmpv6_msg msg;
 	struct dst_entry *dst;
 	int err = 0;
-	int hlimit = -1;
+	int hlimit;
 
 	saddr = &skb->nh.ipv6h->daddr;
 
@@ -449,21 +457,26 @@ static void icmpv6_echo_reply(struct sk_buff *skb)
 	if (icmpv6_xmit_lock())
 		return;
 
+	sk = icmpv6_socket->sk;
+	np = inet6_sk(sk);
+
 	if (!fl.oif && ipv6_addr_is_multicast(&fl.fl6_dst))
 		fl.oif = np->mcast_oif;
 
 	err = ip6_dst_lookup(sk, &dst, &fl);
 	if (err)
 		goto out;
+	if ((err = xfrm_lookup(&dst, &fl, sk, 0)) < 0)
+		goto out_dst_release;
 
-	if (hlimit < 0) {
-		if (ipv6_addr_is_multicast(&fl.fl6_dst))
-			hlimit = np->mcast_hops;
-		else
-			hlimit = np->hop_limit;
-		if (hlimit < 0)
-			hlimit = dst_metric(dst, RTAX_HOPLIMIT);
-	}
+	if (ipv6_addr_is_multicast(&fl.fl6_dst))
+		hlimit = np->mcast_hops;
+	else
+		hlimit = np->hop_limit;
+	if (hlimit < 0)
+		hlimit = dst_metric(dst, RTAX_HOPLIMIT);
+	if (hlimit < 0)
+		hlimit = ipv6_get_hoplimit(dst->dev);
 
 	idev = in6_dev_get(skb->dev);
 
@@ -480,12 +493,13 @@ static void icmpv6_echo_reply(struct sk_buff *skb)
 	}
 	err = icmpv6_push_pending_frames(sk, &fl, &tmp_hdr, skb->len + sizeof(struct icmp6hdr));
 
-        ICMP6_INC_STATS_BH(idev, Icmp6OutEchoReplies);
-        ICMP6_INC_STATS_BH(idev, Icmp6OutMsgs);
+        ICMP6_INC_STATS_BH(idev, ICMP6_MIB_OUTECHOREPLIES);
+        ICMP6_INC_STATS_BH(idev, ICMP6_MIB_OUTMSGS);
 
 out_put: 
 	if (likely(idev != NULL))
 		in6_dev_put(idev);
+out_dst_release:
 	dst_release(dst);
 out: 
 	icmpv6_xmit_unlock();
@@ -506,7 +520,7 @@ static void icmpv6_notify(struct sk_buff *skb, int type, int code, u32 info)
 	nexthdr = ((struct ipv6hdr *)skb->data)->nexthdr;
 	if (ipv6_ext_hdr(nexthdr)) {
 		/* now skip over extension headers */
-		inner_offset = ipv6_skip_exthdr(skb, sizeof(struct ipv6hdr), &nexthdr, skb->len - sizeof(struct ipv6hdr));
+		inner_offset = ipv6_skip_exthdr(skb, sizeof(struct ipv6hdr), &nexthdr);
 		if (inner_offset<0)
 			return;
 	} else {
@@ -530,8 +544,7 @@ static void icmpv6_notify(struct sk_buff *skb, int type, int code, u32 info)
 	hash = nexthdr & (MAX_INET_PROTOS - 1);
 
 	rcu_read_lock();
-	ipprot = inet6_protos[hash];
-	smp_read_barrier_depends();
+	ipprot = rcu_dereference(inet6_protos[hash]);
 	if (ipprot && ipprot->err_handler)
 		ipprot->err_handler(skb, NULL, type, code, inner_offset, info);
 	rcu_read_unlock();
@@ -560,7 +573,7 @@ static int icmpv6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 	struct icmp6hdr *hdr;
 	int type;
 
-	ICMP6_INC_STATS_BH(idev, Icmp6InMsgs);
+	ICMP6_INC_STATS_BH(idev, ICMP6_MIB_INMSGS);
 
 	saddr = &skb->nh.ipv6h->saddr;
 	daddr = &skb->nh.ipv6h->daddr;
@@ -593,9 +606,9 @@ static int icmpv6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 	type = hdr->icmp6_type;
 
 	if (type >= ICMPV6_DEST_UNREACH && type <= ICMPV6_PARAMPROB)
-		ICMP6_INC_STATS_OFFSET_BH(idev, Icmp6InDestUnreachs, type - ICMPV6_DEST_UNREACH);
+		ICMP6_INC_STATS_OFFSET_BH(idev, ICMP6_MIB_INDESTUNREACHS, type - ICMPV6_DEST_UNREACH);
 	else if (type >= ICMPV6_ECHO_REQUEST && type <= NDISC_REDIRECT)
-		ICMP6_INC_STATS_OFFSET_BH(idev, Icmp6InEchos, type - ICMPV6_ECHO_REQUEST);
+		ICMP6_INC_STATS_OFFSET_BH(idev, ICMP6_MIB_INECHOS, type - ICMPV6_ECHO_REQUEST);
 
 	switch (type) {
 	case ICMPV6_ECHO_REQUEST:
@@ -646,7 +659,13 @@ static int icmpv6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 		break;
 
 	case ICMPV6_MGM_REDUCTION:
+	case ICMPV6_NI_QUERY:
+	case ICMPV6_NI_REPLY:
 	case ICMPV6_MLD2_REPORT:
+	case ICMPV6_DHAAD_REQUEST:
+	case ICMPV6_DHAAD_REPLY:
+	case ICMPV6_MOBILE_PREFIX_SOL:
+	case ICMPV6_MOBILE_PREFIX_ADV:
 		break;
 
 	default:
@@ -668,7 +687,7 @@ static int icmpv6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 	return 0;
 
 discard_it:
-	ICMP6_INC_STATS_BH(idev, Icmp6InErrors);
+	ICMP6_INC_STATS_BH(idev, ICMP6_MIB_INERRORS);
 	kfree_skb(skb);
 	return 0;
 }

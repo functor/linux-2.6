@@ -10,20 +10,9 @@
  * 
  *  isofs directory handling functions
  */
-#include <linux/errno.h>
-#include <linux/fs.h>
-#include <linux/iso_fs.h>
-#include <linux/kernel.h>
-#include <linux/stat.h>
-#include <linux/string.h>
-#include <linux/mm.h>
-#include <linux/slab.h>
-#include <linux/time.h>
 #include <linux/config.h>
 #include <linux/smp_lock.h>
-#include <linux/buffer_head.h>
-
-#include <asm/uaccess.h>
+#include "isofs.h"
 
 static int isofs_readdir(struct file *, void *, filldir_t);
 
@@ -64,7 +53,8 @@ int isofs_name_translate(struct iso_directory_record *de, char *new, struct inod
 			break;
 
 		/* Convert remaining ';' to '.' */
-		if (c == ';')
+		/* Also '/' to '.' (broken Acorn-generated ISO9660 images) */
+		if (c == ';' || c == '/')
 			c = '.';
 
 		new[i] = c;
@@ -106,8 +96,8 @@ static int do_isofs_readdir(struct inode *inode, struct file *filp,
 {
 	unsigned long bufsize = ISOFS_BUFFER_SIZE(inode);
 	unsigned char bufbits = ISOFS_BUFFER_BITS(inode);
-	unsigned int block, offset;
-	int inode_number = 0;	/* Quiet GCC */
+	unsigned long block, offset, block_saved, offset_saved;
+	unsigned long inode_number = 0;	/* Quiet GCC */
 	struct buffer_head *bh = NULL;
 	int len;
 	int map;
@@ -129,8 +119,6 @@ static int do_isofs_readdir(struct inode *inode, struct file *filp,
 		}
 
 		de = (struct iso_directory_record *) (bh->b_data + offset);
-		if (first_de)
-			inode_number = (bh->b_blocknr << bufbits) + offset;
 
 		de_len = *(unsigned char *) de;
 
@@ -147,6 +135,8 @@ static int do_isofs_readdir(struct inode *inode, struct file *filp,
 			continue;
 		}
 
+		block_saved = block;
+		offset_saved = offset;
 		offset += de_len;
 
 		/* Make sure we have a full directory entry */
@@ -164,6 +154,15 @@ static int do_isofs_readdir(struct inode *inode, struct file *filp,
 				memcpy((void *) tmpde + slop, bh->b_data, offset);
 			}
 			de = tmpde;
+		}
+
+		if (first_de) {
+			isofs_normalize_block_and_offset(de,
+							 &block_saved,
+							 &offset_saved);
+			inode_number = isofs_get_ino(block_saved,
+						     offset_saved,
+						     bufbits);
 		}
 
 		if (de->flags[-sbi->s_high_sierra] & 0x80) {

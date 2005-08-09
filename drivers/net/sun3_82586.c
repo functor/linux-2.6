@@ -39,7 +39,7 @@ static int fifo=0x8;	/* don't change */
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/init.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <asm/io.h>
 #include <asm/idprom.h>
 #include <asm/machines.h>
@@ -52,6 +52,8 @@ static int fifo=0x8;	/* don't change */
 #include <linux/skbuff.h>
 
 #include "sun3_82586.h"
+
+#define DRV_NAME "sun3_82586"
 
 #define DEBUG       /* debug on */
 #define SYSBUSVAL 0 /* 16 Bit */
@@ -336,7 +338,7 @@ static int __init sun3_82586_probe1(struct net_device *dev,int ioaddr)
 {
 	int i, size, retval;
 
-	if (!request_region(ioaddr, SUN3_82586_TOTAL_SIZE, dev->name))
+	if (!request_region(ioaddr, SUN3_82586_TOTAL_SIZE, DRV_NAME))
 		return -EBUSY;
 
 	/* copy in the ethernet address from the prom */

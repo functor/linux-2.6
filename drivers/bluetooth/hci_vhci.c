@@ -127,7 +127,7 @@ static unsigned int hci_vhci_chr_poll(struct file *file, poll_table * wait)
 }
 
 /* Get packet from user space buffer(already verified) */
-static inline ssize_t hci_vhci_get_user(struct hci_vhci_struct *hci_vhci, const char *buf, size_t count)
+static inline ssize_t hci_vhci_get_user(struct hci_vhci_struct *hci_vhci, const char __user *buf, size_t count)
 {
 	struct sk_buff *skb;
 
@@ -152,12 +152,12 @@ static inline ssize_t hci_vhci_get_user(struct hci_vhci_struct *hci_vhci, const 
 } 
 
 /* Write */
-static ssize_t hci_vhci_chr_write(struct file * file, const char * buf, 
+static ssize_t hci_vhci_chr_write(struct file * file, const char __user * buf, 
 			     size_t count, loff_t *pos)
 {
 	struct hci_vhci_struct *hci_vhci = (struct hci_vhci_struct *) file->private_data;
 
-	if (verify_area(VERIFY_READ, buf, count))
+	if (!access_ok(VERIFY_READ, buf, count))
 		return -EFAULT;
 
 	return hci_vhci_get_user(hci_vhci, buf, count);
@@ -165,10 +165,11 @@ static ssize_t hci_vhci_chr_write(struct file * file, const char * buf,
 
 /* Put packet to user space buffer(already verified) */
 static inline ssize_t hci_vhci_put_user(struct hci_vhci_struct *hci_vhci,
-				       struct sk_buff *skb, char *buf, int count)
+				       struct sk_buff *skb, char __user *buf,
+				       int count)
 {
 	int len = count, total = 0;
-	char *ptr = buf;
+	char __user *ptr = buf;
 
 	len = min_t(unsigned int, skb->len, len);
 	if (copy_to_user(ptr, skb->data, len))
@@ -194,7 +195,7 @@ static inline ssize_t hci_vhci_put_user(struct hci_vhci_struct *hci_vhci,
 }
 
 /* Read */
-static ssize_t hci_vhci_chr_read(struct file * file, char * buf, size_t count, loff_t *pos)
+static ssize_t hci_vhci_chr_read(struct file * file, char __user * buf, size_t count, loff_t *pos)
 {
 	struct hci_vhci_struct *hci_vhci = (struct hci_vhci_struct *) file->private_data;
 	DECLARE_WAITQUEUE(wait, current);
@@ -221,7 +222,7 @@ static ssize_t hci_vhci_chr_read(struct file * file, char * buf, size_t count, l
 			continue;
 		}
 
-		if (!verify_area(VERIFY_WRITE, buf, count))
+		if (access_ok(VERIFY_WRITE, buf, count))
 			ret = hci_vhci_put_user(hci_vhci, skb, buf, count);
 		else
 			ret = -EFAULT;
@@ -301,18 +302,19 @@ static int hci_vhci_chr_open(struct inode *inode, struct file * file)
 	}
 
 	file->private_data = hci_vhci;
-	return 0;   
+	return nonseekable_open(inode, file);   
 }
 
 static int hci_vhci_chr_close(struct inode *inode, struct file *file)
 {
 	struct hci_vhci_struct *hci_vhci = (struct hci_vhci_struct *) file->private_data;
+	struct hci_dev *hdev = hci_vhci->hdev;
 
-	if (hci_unregister_dev(hci_vhci->hdev) < 0) {
-		BT_ERR("Can't unregister HCI device %s", hci_vhci->hdev->name);
+	if (hci_unregister_dev(hdev) < 0) {
+		BT_ERR("Can't unregister HCI device %s", hdev->name);
 	}
 
-	hci_free_dev(hci_vhci->hdev);
+	hci_free_dev(hdev);
 
 	file->private_data = NULL;
 	return 0;
@@ -337,7 +339,7 @@ static struct miscdevice hci_vhci_miscdev=
         &hci_vhci_fops
 };
 
-int __init hci_vhci_init(void)
+static int __init hci_vhci_init(void)
 {
 	BT_INFO("VHCI driver ver %s", VERSION);
 
@@ -349,7 +351,7 @@ int __init hci_vhci_init(void)
 	return 0;
 }
 
-void hci_vhci_cleanup(void)
+static void hci_vhci_cleanup(void)
 {
 	misc_deregister(&hci_vhci_miscdev);
 }

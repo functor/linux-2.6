@@ -29,20 +29,20 @@ static struct pcmcia_irqs irqs[] = {
 	{ 1, IRQ_S1_BVD1_STSCHG, "SA1111 CF BVD1"            },
 };
 
-int sa1111_pcmcia_hw_init(struct sa1100_pcmcia_socket *skt)
+int sa1111_pcmcia_hw_init(struct soc_pcmcia_socket *skt)
 {
 	if (skt->irq == NO_IRQ)
 		skt->irq = skt->nr ? IRQ_S1_READY_NINT : IRQ_S0_READY_NINT;
 
-	return sa11xx_request_irqs(skt, irqs, ARRAY_SIZE(irqs));
+	return soc_pcmcia_request_irqs(skt, irqs, ARRAY_SIZE(irqs));
 }
 
-void sa1111_pcmcia_hw_shutdown(struct sa1100_pcmcia_socket *skt)
+void sa1111_pcmcia_hw_shutdown(struct soc_pcmcia_socket *skt)
 {
-	sa11xx_free_irqs(skt, irqs, ARRAY_SIZE(irqs));
+	soc_pcmcia_free_irqs(skt, irqs, ARRAY_SIZE(irqs));
 }
 
-void sa1111_pcmcia_socket_state(struct sa1100_pcmcia_socket *skt, struct pcmcia_state *state)
+void sa1111_pcmcia_socket_state(struct soc_pcmcia_socket *skt, struct pcmcia_state *state)
 {
 	struct sa1111_dev *sadev = SA1111_DEV(skt->dev);
 	unsigned long status = sa1111_readl(sadev->mapbase + SA1111_PCSR);
@@ -70,7 +70,7 @@ void sa1111_pcmcia_socket_state(struct sa1100_pcmcia_socket *skt, struct pcmcia_
 	}
 }
 
-int sa1111_pcmcia_configure_socket(struct sa1100_pcmcia_socket *skt, const socket_state_t *state)
+int sa1111_pcmcia_configure_socket(struct soc_pcmcia_socket *skt, const socket_state_t *state)
 {
 	struct sa1111_dev *sadev = SA1111_DEV(skt->dev);
 	unsigned int pccr_skt_mask, pccr_set_mask, val;
@@ -110,14 +110,14 @@ int sa1111_pcmcia_configure_socket(struct sa1100_pcmcia_socket *skt, const socke
 	return 0;
 }
 
-void sa1111_pcmcia_socket_init(struct sa1100_pcmcia_socket *skt)
+void sa1111_pcmcia_socket_init(struct soc_pcmcia_socket *skt)
 {
-	sa11xx_enable_irqs(skt, irqs, ARRAY_SIZE(irqs));
+	soc_pcmcia_enable_irqs(skt, irqs, ARRAY_SIZE(irqs));
 }
 
-void sa1111_pcmcia_socket_suspend(struct sa1100_pcmcia_socket *skt)
+void sa1111_pcmcia_socket_suspend(struct soc_pcmcia_socket *skt)
 {
-	sa11xx_disable_irqs(skt, irqs, ARRAY_SIZE(irqs));
+	soc_pcmcia_disable_irqs(skt, irqs, ARRAY_SIZE(irqs));
 }
 
 static int pcmcia_probe(struct sa1111_dev *dev)
@@ -136,41 +136,29 @@ static int pcmcia_probe(struct sa1111_dev *dev)
 	sa1111_writel(PCSSR_S0_SLEEP | PCSSR_S1_SLEEP, base + SA1111_PCSSR);
 	sa1111_writel(PCCR_S0_FLT | PCCR_S1_FLT, base + SA1111_PCCR);
 
-#ifdef CONFIG_SA1100_ADSBITSY
-	pcmcia_adsbitsy_init(&dev->dev);
-#endif
 #ifdef CONFIG_SA1100_BADGE4
 	pcmcia_badge4_init(&dev->dev);
-#endif
-#ifdef CONFIG_SA1100_GRAPHICSMASTER
-	pcmcia_graphicsmaster_init(&dev->dev);
 #endif
 #ifdef CONFIG_SA1100_JORNADA720
 	pcmcia_jornada720_init(&dev->dev);
 #endif
+#ifdef CONFIG_ARCH_LUBBOCK
+	pcmcia_lubbock_init(dev);
+#endif
 #ifdef CONFIG_ASSABET_NEPONSET
 	pcmcia_neponset_init(dev);
-#endif
-#ifdef CONFIG_SA1100_PFS168
-	pcmcia_pfs_init(&dev->dev);
-#endif
-#ifdef CONFIG_SA1100_PT_SYSTEM3
-	pcmcia_system3_init(&dev->dev);
-#endif
-#ifdef CONFIG_SA1100_XP860
-	pcmcia_xp860_init(&dev->dev);
 #endif
 	return 0;
 }
 
 static int __devexit pcmcia_remove(struct sa1111_dev *dev)
 {
-	sa11xx_drv_pcmcia_remove(&dev->dev);
+	soc_common_drv_pcmcia_remove(&dev->dev);
 	release_mem_region(dev->res.start, 512);
 	return 0;
 }
 
-static int pcmcia_suspend(struct sa1111_dev *dev, u32 state)
+static int pcmcia_suspend(struct sa1111_dev *dev, pm_message_t state)
 {
 	return pcmcia_socket_dev_suspend(&dev->dev, state);
 }

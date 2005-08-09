@@ -53,6 +53,7 @@
 #include <linux/vfs.h>
 #include <linux/jiffies.h>
 #include <linux/times.h>
+#include <linux/syscalls.h>
 #include <asm/uaccess.h>
 #include <asm/div64.h>
 #include <linux/blkdev.h> /* sector_div */
@@ -169,7 +170,7 @@ out:
  *
  * NOTE: acct_globals.lock MUST be held on entry and exit.
  */
-void acct_file_reopen(struct file *file)
+static void acct_file_reopen(struct file *file)
 {
 	struct file *old_acct = NULL;
 
@@ -204,7 +205,7 @@ void acct_file_reopen(struct file *file)
  *  should be written. If the filename is NULL, accounting will be
  *  shutdown.
  */
-asmlinkage long sys_acct(const char *name)
+asmlinkage long sys_acct(const char __user *name)
 {
 	struct file *file = NULL;
 	char *tmp;
@@ -302,6 +303,69 @@ static comp_t encode_comp_t(unsigned long value)
 	return exp;
 }
 
+#if ACCT_VERSION==1 || ACCT_VERSION==2
+/*
+ * encode an u64 into a comp2_t (24 bits)
+ *
+ * Format: 5 bit base 2 exponent, 20 bits mantissa.
+ * The leading bit of the mantissa is not stored, but implied for
+ * non-zero exponents.
+ * Largest encodable value is 50 bits.
+ */
+
+#define MANTSIZE2       20                      /* 20 bit mantissa. */
+#define EXPSIZE2        5                       /* 5 bit base 2 exponent. */
+#define MAXFRACT2       ((1ul << MANTSIZE2) - 1) /* Maximum fractional value. */
+#define MAXEXP2         ((1 <<EXPSIZE2) - 1)    /* Maximum exponent. */
+
+static comp2_t encode_comp2_t(u64 value)
+{
+        int exp, rnd;
+
+        exp = (value > (MAXFRACT2>>1));
+        rnd = 0;
+        while (value > MAXFRACT2) {
+                rnd = value & 1;
+                value >>= 1;
+                exp++;
+        }
+
+        /*
+         * If we need to round up, do it (and handle overflow correctly).
+         */
+        if (rnd && (++value > MAXFRACT2)) {
+                value >>= 1;
+                exp++;
+        }
+
+        if (exp > MAXEXP2) {
+                /* Overflow. Return largest representable number instead. */
+                return (1ul << (MANTSIZE2+EXPSIZE2-1)) - 1;
+        } else {
+                return (value & (MAXFRACT2>>1)) | (exp << (MANTSIZE2-1));
+        }
+}
+#endif
+
+#if ACCT_VERSION==3
+/*
+ * encode an u64 into a 32 bit IEEE float
+ */
+static u32 encode_float(u64 value)
+{
+	unsigned exp = 190;
+	unsigned u;
+
+	if (value==0) return 0;
+	while ((s64)value > 0){
+		value <<= 1;
+		exp--;
+	}
+	u = (u32)(value >> 40) & 0x7fffffu;
+	return u | (exp << 23);
+}
+#endif
+
 /*
  *  Write an accounting entry for an exiting process
  *
@@ -316,11 +380,13 @@ static comp_t encode_comp_t(unsigned long value)
  */
 static void do_acct_process(long exitcode, struct file *file)
 {
-	struct acct ac;
+	acct_t ac;
 	mm_segment_t fs;
 	unsigned long vsize;
 	unsigned long flim;
 	u64 elapsed;
+	u64 run_time;
+	struct timespec uptime;
 
 	/*
 	 * First check to see if there is enough free_space to continue
@@ -333,20 +399,55 @@ static void do_acct_process(long exitcode, struct file *file)
 	 * Fill the accounting struct with the needed info as recorded
 	 * by the different kernel functions.
 	 */
-	memset((caddr_t)&ac, 0, sizeof(struct acct));
+	memset((caddr_t)&ac, 0, sizeof(acct_t));
 
+	ac.ac_version = ACCT_VERSION | ACCT_BYTEORDER;
 	strlcpy(ac.ac_comm, current->comm, sizeof(ac.ac_comm));
 
-	elapsed = jiffies_64_to_clock_t(get_jiffies_64() - current->start_time);
+	/* calculate run_time in nsec*/
+	do_posix_clock_monotonic_gettime(&uptime);
+	run_time = (u64)uptime.tv_sec*NSEC_PER_SEC + uptime.tv_nsec;
+	run_time -= (u64)current->start_time.tv_sec*NSEC_PER_SEC
+					+ current->start_time.tv_nsec;
+	/* convert nsec -> AHZ */
+	elapsed = nsec_to_AHZ(run_time);
+#if ACCT_VERSION==3
+	ac.ac_etime = encode_float(elapsed);
+#else
 	ac.ac_etime = encode_comp_t(elapsed < (unsigned long) -1l ?
 	                       (unsigned long) elapsed : (unsigned long) -1l);
-	do_div(elapsed, USER_HZ);
+#endif
+#if ACCT_VERSION==1 || ACCT_VERSION==2
+	{
+		/* new enlarged etime field */
+		comp2_t etime = encode_comp2_t(elapsed);
+		ac.ac_etime_hi = etime >> 16;
+		ac.ac_etime_lo = (u16) etime;
+	}
+#endif
+	do_div(elapsed, AHZ);
 	ac.ac_btime = xtime.tv_sec - elapsed;
-	ac.ac_utime = encode_comp_t(jiffies_to_clock_t(current->utime));
-	ac.ac_stime = encode_comp_t(jiffies_to_clock_t(current->stime));
+	ac.ac_utime = encode_comp_t(jiffies_to_AHZ(
+					    current->signal->utime +
+					    current->group_leader->utime));
+	ac.ac_stime = encode_comp_t(jiffies_to_AHZ(
+					    current->signal->stime +
+					    current->group_leader->stime));
 	/* we really need to bite the bullet and change layout */
 	ac.ac_uid = current->uid;
 	ac.ac_gid = current->gid;
+#if ACCT_VERSION==2
+	ac.ac_ahz = AHZ;
+#endif
+#if ACCT_VERSION==1 || ACCT_VERSION==2
+	/* backward-compatible 16 bit fields */
+	ac.ac_uid16 = current->uid;
+	ac.ac_gid16 = current->gid;
+#endif
+#if ACCT_VERSION==3
+	ac.ac_pid = current->tgid;
+	ac.ac_ppid = current->parent->tgid;
+#endif
 
 	read_lock(&tasklist_lock);	/* pin current->signal */
 	ac.ac_tty = current->signal->tty ?
@@ -378,8 +479,10 @@ static void do_acct_process(long exitcode, struct file *file)
 	ac.ac_mem = encode_comp_t(vsize);
 	ac.ac_io = encode_comp_t(0 /* current->io_usage */);	/* %% */
 	ac.ac_rw = encode_comp_t(ac.ac_io / 1024);
-	ac.ac_minflt = encode_comp_t(current->min_flt);
-	ac.ac_majflt = encode_comp_t(current->maj_flt);
+	ac.ac_minflt = encode_comp_t(current->signal->min_flt +
+				     current->group_leader->min_flt);
+	ac.ac_majflt = encode_comp_t(current->signal->maj_flt +
+				     current->group_leader->maj_flt);
 	ac.ac_swaps = encode_comp_t(0);
 	ac.ac_exitcode = exitcode;
 
@@ -392,11 +495,11 @@ static void do_acct_process(long exitcode, struct file *file)
 	/*
  	 * Accounting records are not subject to resource limits.
  	 */
-	flim = current->rlim[RLIMIT_FSIZE].rlim_cur;
-	current->rlim[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
+	flim = current->signal->rlim[RLIMIT_FSIZE].rlim_cur;
+	current->signal->rlim[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
 	file->f_op->write(file, (char *)&ac,
-			       sizeof(struct acct), &file->f_pos);
-	current->rlim[RLIMIT_FSIZE].rlim_cur = flim;
+			       sizeof(acct_t), &file->f_pos);
+	current->signal->rlim[RLIMIT_FSIZE].rlim_cur = flim;
 	set_fs(fs);
 }
 
@@ -424,4 +527,35 @@ void acct_process(long exitcode)
 
 	do_acct_process(exitcode, file);
 	fput(file);
+}
+
+
+/*
+ * acct_update_integrals
+ *    -  update mm integral fields in task_struct
+ */
+void acct_update_integrals(struct task_struct *tsk)
+{
+	if (likely(tsk->mm)) {
+		long delta = tsk->stime - tsk->acct_stimexpd;
+
+		if (delta == 0)
+			return;
+		tsk->acct_stimexpd = tsk->stime;
+		tsk->acct_rss_mem1 += delta * get_mm_counter(tsk->mm, rss);
+		tsk->acct_vm_mem1 += delta * tsk->mm->total_vm;
+	}
+}
+
+/*
+ * acct_clear_integrals
+ *    - clear the mm integral fields in task_struct
+ */
+void acct_clear_integrals(struct task_struct *tsk)
+{
+	if (tsk) {
+		tsk->acct_stimexpd = 0;
+		tsk->acct_rss_mem1 = 0;
+		tsk->acct_vm_mem1 = 0;
+	}
 }

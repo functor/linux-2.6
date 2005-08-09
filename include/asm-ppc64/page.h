@@ -12,30 +12,34 @@
 
 #include <linux/config.h>
 
+#ifdef __ASSEMBLY__
+  #define ASM_CONST(x) x
+#else
+  #define __ASM_CONST(x) x##UL
+  #define ASM_CONST(x) __ASM_CONST(x)
+#endif
+
 /* PAGE_SHIFT determines the page size */
 #define PAGE_SHIFT	12
-#ifndef __ASSEMBLY__
-# define PAGE_SIZE	(1UL << PAGE_SHIFT)
-#else
-# define PAGE_SIZE	(1 << PAGE_SHIFT)
-#endif
+#define PAGE_SIZE	(ASM_CONST(1) << PAGE_SHIFT)
 #define PAGE_MASK	(~(PAGE_SIZE-1))
-#define PAGE_OFFSET_MASK (PAGE_SIZE-1)
 
 #define SID_SHIFT       28
-#define SID_MASK        0xfffffffff
+#define SID_MASK        0xfffffffffUL
+#define ESID_MASK	0xfffffffff0000000UL
 #define GET_ESID(x)     (((x) >> SID_SHIFT) & SID_MASK)
-
-#ifdef CONFIG_HUGETLB_PAGE
 
 #define HPAGE_SHIFT	24
 #define HPAGE_SIZE	((1UL) << HPAGE_SHIFT)
 #define HPAGE_MASK	(~(HPAGE_SIZE - 1))
+
+#ifdef CONFIG_HUGETLB_PAGE
+
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
 
 /* For 64-bit processes the hugepage range is 1T-1.5T */
-#define TASK_HPAGE_BASE 	(0x0000010000000000UL)
-#define TASK_HPAGE_END 	(0x0000018000000000UL)
+#define TASK_HPAGE_BASE ASM_CONST(0x0000010000000000)
+#define TASK_HPAGE_END 	ASM_CONST(0x0000018000000000)
 
 #define LOW_ESID_MASK(addr, len)	(((1U << (GET_ESID(addr+len-1)+1)) \
 	   	                	- (1U << GET_ESID(addr))) & 0xffff)
@@ -43,8 +47,8 @@
 #define ARCH_HAS_HUGEPAGE_ONLY_RANGE
 #define ARCH_HAS_PREPARE_HUGEPAGE_RANGE
 
-#define touches_hugepage_low_range(addr, len) \
-	(LOW_ESID_MASK((addr), (len)) & current->mm->context.htlb_segs)
+#define touches_hugepage_low_range(mm, addr, len) \
+	(LOW_ESID_MASK((addr), (len)) & mm->context.htlb_segs)
 #define touches_hugepage_high_range(addr, len) \
 	(((addr) > (TASK_HPAGE_BASE-(len))) && ((addr) < TASK_HPAGE_END))
 
@@ -56,14 +60,13 @@
 #define within_hugepage_high_range(addr, len) (((addr) >= TASK_HPAGE_BASE) \
 	  && ((addr)+(len) <= TASK_HPAGE_END) && ((addr)+(len) >= (addr)))
 
-#define is_hugepage_only_range(addr, len) \
+#define is_hugepage_only_range(mm, addr, len) \
 	(touches_hugepage_high_range((addr), (len)) || \
-	  touches_hugepage_low_range((addr), (len)))
-#define hugetlb_free_pgtables free_pgtables
+	  touches_hugepage_low_range((mm), (addr), (len)))
 #define HAVE_ARCH_HUGETLB_UNMAPPED_AREA
 
 #define in_hugepage_area(context, addr) \
-	((cur_cpu_spec->cpu_features & CPU_FTR_16M_PAGE) && \
+	(cpu_has_feature(CPU_FTR_16M_PAGE) && \
 	 ( (((addr) >= TASK_HPAGE_BASE) && ((addr) < TASK_HPAGE_END)) || \
 	   ( ((addr) < 0x100000000L) && \
 	     ((1 << GET_ESID(addr)) & (context).htlb_segs) ) ) )
@@ -81,29 +84,25 @@
 /* align addr on a size boundary - adjust address up if needed */
 #define _ALIGN(addr,size)     _ALIGN_UP(addr,size)
 
-/* to align the pointer to the (next) double word boundary */
-#define DOUBLEWORD_ALIGN(addr)	_ALIGN(addr,sizeof(unsigned long))
-
 /* to align the pointer to the (next) page boundary */
 #define PAGE_ALIGN(addr)	_ALIGN(addr, PAGE_SIZE)
 
 #ifdef __KERNEL__
 #ifndef __ASSEMBLY__
-#include <asm/naca.h>
+#include <asm/cache.h>
 
 #undef STRICT_MM_TYPECHECKS
 
 #define REGION_SIZE   4UL
 #define REGION_SHIFT  60UL
 #define REGION_MASK   (((1UL<<REGION_SIZE)-1UL)<<REGION_SHIFT)
-#define REGION_STRIDE (1UL << REGION_SHIFT)
 
 static __inline__ void clear_page(void *addr)
 {
 	unsigned long lines, line_size;
 
-	line_size = systemcfg->dCacheL1LineSize; 
-	lines = naca->dCacheL1LinesPerPage;
+	line_size = ppc64_caches.dline_size;
+	lines = ppc64_caches.dlines_per_page;
 
 	__asm__ __volatile__(
 	"mtctr  	%1	# clear_page\n\
@@ -177,8 +176,12 @@ static inline int get_order(unsigned long size)
 
 #define __pa(x) ((unsigned long)(x)-PAGE_OFFSET)
 
-/* Not 100% correct, for use by /dev/mem only */
-extern int page_is_ram(unsigned long physaddr);
+extern int page_is_ram(unsigned long pfn);
+
+extern u64 ppc64_pft_size;		/* Log 2 of page table size */
+
+/* We do define AT_SYSINFO_EHDR but don't use the gate mecanism */
+#define __HAVE_ARCH_GATE_AREA		1
 
 #endif /* __ASSEMBLY__ */
 
@@ -196,31 +199,18 @@ extern int page_is_ram(unsigned long physaddr);
 /*       KERNELBASE is defined for performance reasons. */
 /*       When KERNELBASE moves, those macros may have   */
 /*             to change!                               */
-#define PAGE_OFFSET     0xC000000000000000
+#define PAGE_OFFSET     ASM_CONST(0xC000000000000000)
 #define KERNELBASE      PAGE_OFFSET
-#define VMALLOCBASE     0xD000000000000000
-#define IOREGIONBASE    0xE000000000000000
-#define EEHREGIONBASE   0xA000000000000000
+#define VMALLOCBASE     ASM_CONST(0xD000000000000000)
+#define IOREGIONBASE    ASM_CONST(0xE000000000000000)
 
-#define IO_REGION_ID       (IOREGIONBASE>>REGION_SHIFT)
-#define EEH_REGION_ID      (EEHREGIONBASE>>REGION_SHIFT)
-#define VMALLOC_REGION_ID  (VMALLOCBASE>>REGION_SHIFT)
-#define KERNEL_REGION_ID   (KERNELBASE>>REGION_SHIFT)
+#define IO_REGION_ID       (IOREGIONBASE >> REGION_SHIFT)
+#define VMALLOC_REGION_ID  (VMALLOCBASE >> REGION_SHIFT)
+#define KERNEL_REGION_ID   (KERNELBASE >> REGION_SHIFT)
 #define USER_REGION_ID     (0UL)
-#define REGION_ID(X)	   (((unsigned long)(X))>>REGION_SHIFT)
+#define REGION_ID(ea)	   (((unsigned long)(ea)) >> REGION_SHIFT)
 
-/*
- * Define valid/invalid EA bits (for all ranges)
- */
-#define VALID_EA_BITS   (0x000001ffffffffffUL)
-#define INVALID_EA_BITS (~(REGION_MASK|VALID_EA_BITS))
-
-#define IS_VALID_REGION_ID(x) \
-        (((x) == USER_REGION_ID) || ((x) >= KERNEL_REGION_ID))
-#define IS_VALID_EA(x) \
-        ((!((x) & INVALID_EA_BITS)) && IS_VALID_REGION_ID(REGION_ID(x)))
-
-#define __bpn_to_ba(x) ((((unsigned long)(x))<<PAGE_SHIFT) + KERNELBASE)
+#define __bpn_to_ba(x) ((((unsigned long)(x)) << PAGE_SHIFT) + KERNELBASE)
 #define __ba_to_bpn(x) ((((unsigned long)(x)) & ~REGION_MASK) >> PAGE_SHIFT)
 
 #define __va(x) ((void *)((unsigned long)(x) + KERNELBASE))
@@ -236,11 +226,40 @@ extern int page_is_ram(unsigned long physaddr);
 #endif
 
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
+#define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
 
 #define virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
 
-#define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
+/*
+ * Unfortunately the PLT is in the BSS in the PPC32 ELF ABI,
+ * and needs to be executable.  This means the whole heap ends
+ * up being executable.
+ */
+#define VM_DATA_DEFAULT_FLAGS32	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+
+#define VM_DATA_DEFAULT_FLAGS64	(VM_READ | VM_WRITE | \
+				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+
+#define VM_DATA_DEFAULT_FLAGS \
+	(test_thread_flag(TIF_32BIT) ? \
+	 VM_DATA_DEFAULT_FLAGS32 : VM_DATA_DEFAULT_FLAGS64)
+
+/*
+ * This is the default if a program doesn't have a PT_GNU_STACK
+ * program header entry. The PPC64 ELF ABI has a non executable stack
+ * stack by default, so in the absense of a PT_GNU_STACK program header
+ * we turn execute permission off.
+ */
+#define VM_STACK_DEFAULT_FLAGS32	(VM_READ | VM_WRITE | VM_EXEC | \
+					 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+
+#define VM_STACK_DEFAULT_FLAGS64	(VM_READ | VM_WRITE | \
+					 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+
+#define VM_STACK_DEFAULT_FLAGS \
+	(test_thread_flag(TIF_32BIT) ? \
+	 VM_STACK_DEFAULT_FLAGS32 : VM_STACK_DEFAULT_FLAGS64)
 
 #endif /* __KERNEL__ */
 #endif /* _PPC64_PAGE_H */

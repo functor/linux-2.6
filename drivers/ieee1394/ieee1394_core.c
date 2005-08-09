@@ -32,6 +32,7 @@
 #include <linux/bitops.h>
 #include <linux/kdev_t.h>
 #include <linux/skbuff.h>
+#include <linux/suspend.h>
 
 #include <asm/byteorder.h>
 #include <asm/semaphore.h>
@@ -55,11 +56,18 @@ static int disable_nodemgr = 0;
 module_param(disable_nodemgr, int, 0444);
 MODULE_PARM_DESC(disable_nodemgr, "Disable nodemgr functionality.");
 
+/* Disable Isochronous Resource Manager functionality */
+int hpsb_disable_irm = 0;
+module_param_named(disable_irm, hpsb_disable_irm, bool, 0);
+MODULE_PARM_DESC(disable_irm,
+		 "Disable Isochronous Resource Manager functionality.");
+
 /* We are GPL, so treat us special */
 MODULE_LICENSE("GPL");
 
 /* Some globals used */
 const char *hpsb_speedto_str[] = { "S100", "S200", "S400", "S800", "S1600", "S3200" };
+struct class_simple *hpsb_protocol_class;
 
 #ifdef CONFIG_IEEE1394_VERBOSEDEBUG
 static void dump_packet(const char *text, quadlet_t *data, int size)
@@ -78,6 +86,7 @@ static void dump_packet(const char *text, quadlet_t *data, int size)
 #define dump_packet(x,y,z)
 #endif
 
+static void abort_requests(struct hpsb_host *host);
 static void queue_packet_complete(struct hpsb_packet *packet);
 
 
@@ -400,30 +409,34 @@ void hpsb_selfid_complete(struct hpsb_host *host, int phyid, int isroot)
 void hpsb_packet_sent(struct hpsb_host *host, struct hpsb_packet *packet,
                       int ackcode)
 {
+	unsigned long flags;
+
+	spin_lock_irqsave(&host->pending_packet_queue.lock, flags);
+
 	packet->ack_code = ackcode;
 
-	if (packet->no_waiter) {
-		/* must not have a tlabel allocated */
+	if (packet->no_waiter || packet->state == hpsb_complete) {
+		/* if packet->no_waiter, must not have a tlabel allocated */
+		spin_unlock_irqrestore(&host->pending_packet_queue.lock, flags);
 		hpsb_free_packet(packet);
 		return;
 	}
 
+	atomic_dec(&packet->refcnt);	/* drop HC's reference */
+	/* here the packet must be on the host->pending_packet_queue */
+
 	if (ackcode != ACK_PENDING || !packet->expect_response) {
-		atomic_dec(&packet->refcnt);
-		skb_unlink(packet->skb);
 		packet->state = hpsb_complete;
+		__skb_unlink(packet->skb, &host->pending_packet_queue);
+		spin_unlock_irqrestore(&host->pending_packet_queue.lock, flags);
 		queue_packet_complete(packet);
 		return;
 	}
 
-	if (packet->state == hpsb_complete) {
-		hpsb_free_packet(packet);
-		return;
-	}
-
-	atomic_dec(&packet->refcnt);
 	packet->state = hpsb_pending;
 	packet->sendtime = jiffies;
+
+	spin_unlock_irqrestore(&host->pending_packet_queue.lock, flags);
 
 	mod_timer(&host->timeout, jiffies + host->timeout_interval);
 }
@@ -507,6 +520,7 @@ int hpsb_send_packet(struct hpsb_packet *packet)
 
 	if (!packet->no_waiter || packet->expect_response) {
 		atomic_inc(&packet->refcnt);
+		packet->sendtime = jiffies + 10 * HZ;
 		skb_queue_tail(&host->pending_packet_queue, packet->skb);
 	}
 
@@ -658,14 +672,13 @@ static void handle_packet_response(struct hpsb_host *host, int tcode,
         }
 
         if (!tcode_match) {
+		spin_unlock_irqrestore(&host->pending_packet_queue.lock, flags);
                 HPSB_INFO("unsolicited response packet received - tcode mismatch");
                 dump_packet("contents:", data, 16);
-		spin_unlock_irqrestore(&host->pending_packet_queue.lock, flags);
                 return;
         }
 
 	__skb_unlink(skb, skb->list);
-	spin_unlock_irqrestore(&host->pending_packet_queue.lock, flags);
 
 	if (packet->state == hpsb_queued) {
 		packet->sendtime = jiffies;
@@ -673,6 +686,8 @@ static void handle_packet_response(struct hpsb_host *host, int tcode,
 	}
 
 	packet->state = hpsb_complete;
+	spin_unlock_irqrestore(&host->pending_packet_queue.lock, flags);
+
 	queue_packet_complete(packet);
 }
 
@@ -933,7 +948,7 @@ void hpsb_packet_received(struct hpsb_host *host, quadlet_t *data, size_t size,
 }
 
 
-void abort_requests(struct hpsb_host *host)
+static void abort_requests(struct hpsb_host *host)
 {
 	struct hpsb_packet *packet;
 	struct sk_buff *skb;
@@ -996,12 +1011,16 @@ void abort_timedouts(unsigned long __opaque)
  * the stack. */
 static int khpsbpkt_pid = -1, khpsbpkt_kill;
 static DECLARE_COMPLETION(khpsbpkt_complete);
-struct sk_buff_head hpsbpkt_queue;
+static struct sk_buff_head hpsbpkt_queue;
 static DECLARE_MUTEX_LOCKED(khpsbpkt_sig);
 
 
 static void queue_packet_complete(struct hpsb_packet *packet)
 {
+	if (packet->no_waiter) {
+		hpsb_free_packet(packet);
+		return;
+	}
 	if (packet->complete_routine != NULL) {
 		skb_queue_tail(&hpsbpkt_queue, packet->skb);
 
@@ -1020,7 +1039,16 @@ static int hpsbpkt_thread(void *__hi)
 
 	daemonize("khpsbpkt");
 
-	while (!down_interruptible(&khpsbpkt_sig)) {
+	while (1) {
+		if (down_interruptible(&khpsbpkt_sig)) {
+			if (current->flags & PF_FREEZE) {
+				refrigerator(0);
+				continue;
+			}
+			printk("khpsbpkt: received unexpected signal?!\n" );
+			break;
+		}
+
 		if (khpsbpkt_kill)
 			break;
 
@@ -1039,13 +1067,13 @@ static int hpsbpkt_thread(void *__hi)
 	complete_and_exit(&khpsbpkt_complete, 0);
 }
 
-
 static int __init ieee1394_init(void)
 {
-	int i;
+	int i, ret;
 
 	skb_queue_head_init(&hpsbpkt_queue);
 
+	/* non-fatal error */
 	if (hpsb_init_config_roms()) {
 		HPSB_ERR("Failed to initialize some config rom entries.\n");
 		HPSB_ERR("Some features may not be available\n");
@@ -1054,32 +1082,102 @@ static int __init ieee1394_init(void)
 	khpsbpkt_pid = kernel_thread(hpsbpkt_thread, NULL, CLONE_KERNEL);
 	if (khpsbpkt_pid < 0) {
 		HPSB_ERR("Failed to start hpsbpkt thread!\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto exit_cleanup_config_roms;
 	}
-
-	devfs_mk_dir("ieee1394");
 
 	if (register_chrdev_region(IEEE1394_CORE_DEV, 256, "ieee1394")) {
 		HPSB_ERR("unable to register character device major %d!\n", IEEE1394_MAJOR);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto exit_release_kernel_thread;
 	}
 
-	devfs_mk_dir("ieee1394");
+	/* actually this is a non-fatal error */
+	ret = devfs_mk_dir("ieee1394");
+	if (ret < 0) {
+		HPSB_ERR("unable to make devfs dir for device major %d!\n", IEEE1394_MAJOR);
+		goto release_chrdev;
+	}
 
-	bus_register(&ieee1394_bus_type);
-	for (i = 0; fw_bus_attrs[i]; i++)
-		bus_create_file(&ieee1394_bus_type, fw_bus_attrs[i]);
-	class_register(&hpsb_host_class);
+	ret = bus_register(&ieee1394_bus_type);
+	if (ret < 0) {
+		HPSB_INFO("bus register failed");
+		goto release_devfs;
+	}
 
-	if (init_csr())
-		return -ENOMEM;
+	for (i = 0; fw_bus_attrs[i]; i++) {
+		ret = bus_create_file(&ieee1394_bus_type, fw_bus_attrs[i]);
+		if (ret < 0) {
+			while (i >= 0) {
+				bus_remove_file(&ieee1394_bus_type,
+						fw_bus_attrs[i--]);
+			}
+			bus_unregister(&ieee1394_bus_type);
+			goto release_devfs;
+		}
+	}
 
-	if (!disable_nodemgr)
-		init_ieee1394_nodemgr();
-	else
-		HPSB_INFO("nodemgr functionality disabled");
+	ret = class_register(&hpsb_host_class);
+	if (ret < 0)
+		goto release_all_bus;
+
+	hpsb_protocol_class = class_simple_create(THIS_MODULE, "ieee1394_protocol");
+	if (IS_ERR(hpsb_protocol_class)) {
+		ret = PTR_ERR(hpsb_protocol_class);
+		goto release_class_host;
+	}
+
+	ret = init_csr();
+	if (ret) {
+		HPSB_INFO("init csr failed");
+		ret = -ENOMEM;
+		goto release_class_protocol;
+	}
+
+	if (disable_nodemgr) {
+		HPSB_INFO("nodemgr and IRM functionality disabled");
+		/* We shouldn't contend for IRM with nodemgr disabled, since
+		   nodemgr implements functionality required of ieee1394a-2000
+		   IRMs */
+		hpsb_disable_irm = 1;
+                      
+		return 0;
+	}
+
+	if (hpsb_disable_irm) {
+		HPSB_INFO("IRM functionality disabled");
+	}
+
+	ret = init_ieee1394_nodemgr();
+	if (ret < 0) {
+		HPSB_INFO("init nodemgr failed");
+		goto cleanup_csr;
+	}
 
 	return 0;
+
+cleanup_csr:
+	cleanup_csr();
+release_class_protocol:
+	class_simple_destroy(hpsb_protocol_class);
+release_class_host:
+	class_unregister(&hpsb_host_class);
+release_all_bus:
+	for (i = 0; fw_bus_attrs[i]; i++)
+		bus_remove_file(&ieee1394_bus_type, fw_bus_attrs[i]);
+	bus_unregister(&ieee1394_bus_type);
+release_devfs:
+	devfs_remove("ieee1394");
+release_chrdev:
+	unregister_chrdev_region(IEEE1394_CORE_DEV, 256);
+exit_release_kernel_thread:
+	if (khpsbpkt_pid >= 0) {
+		kill_proc(khpsbpkt_pid, SIGTERM, 1);
+		wait_for_completion(&khpsbpkt_complete);
+	}
+exit_cleanup_config_roms:
+	hpsb_cleanup_config_roms();
+	return ret;
 }
 
 static void __exit ieee1394_cleanup(void)
@@ -1091,6 +1189,7 @@ static void __exit ieee1394_cleanup(void)
 
 	cleanup_csr();
 
+	class_simple_destroy(hpsb_protocol_class);
 	class_unregister(&hpsb_host_class);
 	for (i = 0; fw_bus_attrs[i]; i++)
 		bus_remove_file(&ieee1394_bus_type, fw_bus_attrs[i]);
@@ -1122,6 +1221,7 @@ EXPORT_SYMBOL(hpsb_update_config_rom_image);
 
 /** ieee1394_core.c **/
 EXPORT_SYMBOL(hpsb_speedto_str);
+EXPORT_SYMBOL(hpsb_protocol_class);
 EXPORT_SYMBOL(hpsb_set_packet_complete_task);
 EXPORT_SYMBOL(hpsb_alloc_packet);
 EXPORT_SYMBOL(hpsb_free_packet);
@@ -1134,6 +1234,7 @@ EXPORT_SYMBOL(hpsb_selfid_received);
 EXPORT_SYMBOL(hpsb_selfid_complete);
 EXPORT_SYMBOL(hpsb_packet_sent);
 EXPORT_SYMBOL(hpsb_packet_received);
+EXPORT_SYMBOL_GPL(hpsb_disable_irm);
 
 /** ieee1394_transactions.c **/
 EXPORT_SYMBOL(hpsb_get_tlabel);
@@ -1147,9 +1248,6 @@ EXPORT_SYMBOL(hpsb_make_phypacket);
 EXPORT_SYMBOL(hpsb_make_isopacket);
 EXPORT_SYMBOL(hpsb_read);
 EXPORT_SYMBOL(hpsb_write);
-EXPORT_SYMBOL(hpsb_lock);
-EXPORT_SYMBOL(hpsb_lock64);
-EXPORT_SYMBOL(hpsb_send_gasp);
 EXPORT_SYMBOL(hpsb_packet_success);
 
 /** highlevel.c **/
@@ -1161,28 +1259,18 @@ EXPORT_SYMBOL(hpsb_allocate_and_register_addrspace);
 EXPORT_SYMBOL(hpsb_listen_channel);
 EXPORT_SYMBOL(hpsb_unlisten_channel);
 EXPORT_SYMBOL(hpsb_get_hostinfo);
-EXPORT_SYMBOL(hpsb_get_host_bykey);
 EXPORT_SYMBOL(hpsb_create_hostinfo);
 EXPORT_SYMBOL(hpsb_destroy_hostinfo);
 EXPORT_SYMBOL(hpsb_set_hostinfo_key);
-EXPORT_SYMBOL(hpsb_get_hostinfo_key);
 EXPORT_SYMBOL(hpsb_get_hostinfo_bykey);
 EXPORT_SYMBOL(hpsb_set_hostinfo);
-EXPORT_SYMBOL(highlevel_read);
-EXPORT_SYMBOL(highlevel_write);
-EXPORT_SYMBOL(highlevel_lock);
-EXPORT_SYMBOL(highlevel_lock64);
 EXPORT_SYMBOL(highlevel_add_host);
 EXPORT_SYMBOL(highlevel_remove_host);
 EXPORT_SYMBOL(highlevel_host_reset);
 
 /** nodemgr.c **/
-EXPORT_SYMBOL(hpsb_guid_get_entry);
-EXPORT_SYMBOL(hpsb_nodeid_get_entry);
 EXPORT_SYMBOL(hpsb_node_fill_packet);
-EXPORT_SYMBOL(hpsb_node_read);
 EXPORT_SYMBOL(hpsb_node_write);
-EXPORT_SYMBOL(hpsb_node_lock);
 EXPORT_SYMBOL(hpsb_register_protocol);
 EXPORT_SYMBOL(hpsb_unregister_protocol);
 EXPORT_SYMBOL(ieee1394_bus_type);
@@ -1226,27 +1314,14 @@ EXPORT_SYMBOL(hpsb_iso_recv_flush);
 EXPORT_SYMBOL(csr1212_create_csr);
 EXPORT_SYMBOL(csr1212_init_local_csr);
 EXPORT_SYMBOL(csr1212_new_immediate);
-EXPORT_SYMBOL(csr1212_new_leaf);
-EXPORT_SYMBOL(csr1212_new_csr_offset);
 EXPORT_SYMBOL(csr1212_new_directory);
 EXPORT_SYMBOL(csr1212_associate_keyval);
 EXPORT_SYMBOL(csr1212_attach_keyval_to_directory);
-EXPORT_SYMBOL(csr1212_new_extended_immediate);
-EXPORT_SYMBOL(csr1212_new_extended_leaf);
-EXPORT_SYMBOL(csr1212_new_descriptor_leaf);
-EXPORT_SYMBOL(csr1212_new_textual_descriptor_leaf);
 EXPORT_SYMBOL(csr1212_new_string_descriptor_leaf);
-EXPORT_SYMBOL(csr1212_new_icon_descriptor_leaf);
-EXPORT_SYMBOL(csr1212_new_modifiable_descriptor_leaf);
-EXPORT_SYMBOL(csr1212_new_keyword_leaf);
 EXPORT_SYMBOL(csr1212_detach_keyval_from_directory);
-EXPORT_SYMBOL(csr1212_disassociate_keyval);
 EXPORT_SYMBOL(csr1212_release_keyval);
 EXPORT_SYMBOL(csr1212_destroy_csr);
 EXPORT_SYMBOL(csr1212_read);
-EXPORT_SYMBOL(csr1212_generate_positions);
-EXPORT_SYMBOL(csr1212_generate_layout_order);
-EXPORT_SYMBOL(csr1212_fill_cache);
 EXPORT_SYMBOL(csr1212_generate_csr_image);
 EXPORT_SYMBOL(csr1212_parse_keyval);
 EXPORT_SYMBOL(csr1212_parse_csr);

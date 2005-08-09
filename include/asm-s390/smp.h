@@ -5,6 +5,7 @@
  *    Copyright (C) 1999 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *    Author(s): Denis Joseph Barrow (djbarrow@de.ibm.com,barrow_dj@yahoo.com),
  *               Martin Schwidefsky (schwidefsky@de.ibm.com)
+ *               Heiko Carstens (heiko.carstens@de.ibm.com)
  */
 #ifndef __ASM_SMP_H
 #define __ASM_SMP_H
@@ -17,6 +18,7 @@
 #if defined(__KERNEL__) && defined(CONFIG_SMP) && !defined(__ASSEMBLY__)
 
 #include <asm/lowcore.h>
+#include <asm/sigp.h>
 
 /*
   s390 specific smp.c headers
@@ -31,10 +33,6 @@ typedef struct
 
 extern int smp_call_function_on(void (*func) (void *info), void *info,
 				int nonatomic, int wait, int cpu);
-
-extern cpumask_t cpu_online_map;
-extern cpumask_t cpu_possible_map;
-
 #define NO_PROC_ID		0xFF		/* No processor magic marker */
 
 /*
@@ -51,7 +49,8 @@ extern cpumask_t cpu_possible_map;
 
 #define smp_processor_id() (S390_lowcore.cpu_data.cpu_nr)
 
-#define cpu_online(cpu) cpu_isset(cpu, cpu_online_map)
+extern int smp_get_cpu(cpumask_t cpu_map);
+extern void smp_put_cpu(int cpu);
 
 extern __inline__ __u16 hard_smp_processor_id(void)
 {
@@ -61,12 +60,49 @@ extern __inline__ __u16 hard_smp_processor_id(void)
         return cpu_address;
 }
 
+/*
+ * returns 1 if cpu is in stopped/check stopped state or not operational
+ * returns 0 otherwise
+ */
+static inline int
+smp_cpu_not_running(int cpu)
+{
+	__u32 status;
+
+	switch (signal_processor_ps(&status, 0, cpu, sigp_sense)) {
+	case sigp_order_code_accepted:
+	case sigp_status_stored:
+		/* Check for stopped and check stop state */
+		if (status & 0x50)
+			return 1;
+		break;
+	case sigp_not_operational:
+		return 1;
+	default:
+		break;
+	}
+	return 0;
+}
+
 #define cpu_logical_map(cpu) (cpu)
+
+extern int __cpu_disable (void);
+extern void __cpu_die (unsigned int cpu);
+extern void cpu_die (void) __attribute__ ((noreturn));
+extern int __cpu_up (unsigned int cpu);
 
 #endif
 
 #ifndef CONFIG_SMP
-#define smp_call_function_on(func,info,nonatomic,wait,cpu)      ({ 0; })
+static inline int
+smp_call_function_on(void (*func) (void *info), void *info,
+		     int nonatomic, int wait, int cpu)
+{
+	func(info);
+	return 0;
+}
+#define smp_get_cpu(cpu) ({ 0; })
+#define smp_put_cpu(cpu) ({ 0; })
 #endif
 
 #endif

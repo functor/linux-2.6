@@ -8,14 +8,7 @@
  *  affs symlink handling code
  */
 
-#include <linux/errno.h>
-#include <linux/fs.h>
-#include <linux/stat.h>
-#include <linux/affs_fs.h>
-#include <linux/amigaffs.h>
-#include <linux/pagemap.h>
-#include <linux/smp_lock.h>
-#include <linux/buffer_head.h>
+#include "affs.h"
 
 static int affs_symlink_readpage(struct file *file, struct page *page)
 {
@@ -78,7 +71,8 @@ struct address_space_operations affs_symlink_aops = {
 };
 
 struct inode_operations affs_symlink_inode_operations = {
-	.readlink	= page_readlink,
-	.follow_link	= page_follow_link,
+	.readlink	= generic_readlink,
+	.follow_link	= page_follow_link_light,
+	.put_link	= page_put_link,
 	.setattr	= affs_notify_change,
 };

@@ -13,16 +13,12 @@
 
 #ifdef __KERNEL__
 
-#include <linux/config.h>
-
 #ifndef MAX_HWIFS
 #define MAX_HWIFS	2
 #endif
 
-#define ide_default_irq(base) (0)
-#define ide_default_io_base(index) (0)
-
-#define ide_init_default_irq(base)	(0)
+#define IDE_ARCH_OBSOLETE_INIT
+#define ide_default_io_ctl(base)	((base) + 0x206) /* obsolete */
 
 #define ide_request_irq(irq,hand,flg,dev,id)	request_irq((irq),(hand),(flg),(dev),(id))
 #define ide_free_irq(irq,dev_id)		free_irq((irq), (dev_id))
@@ -36,7 +32,7 @@
 #define __ide_outsw	outsw
 #define __ide_outsl	outsl
 
-static __inline__ void __ide_mm_insw(unsigned long port, void *addr, u32 count)
+static __inline__ void __ide_mm_insw(void __iomem *port, void *addr, u32 count)
 {
 	while (count--) {
 		*(u16 *)addr = __raw_readw(port);
@@ -44,7 +40,7 @@ static __inline__ void __ide_mm_insw(unsigned long port, void *addr, u32 count)
 	}
 }
 
-static __inline__ void __ide_mm_insl(unsigned long port, void *addr, u32 count)
+static __inline__ void __ide_mm_insl(void __iomem *port, void *addr, u32 count)
 {
 	while (count--) {
 		*(u32 *)addr = __raw_readl(port);
@@ -52,7 +48,7 @@ static __inline__ void __ide_mm_insl(unsigned long port, void *addr, u32 count)
 	}
 }
 
-static __inline__ void __ide_mm_outsw(unsigned long port, void *addr, u32 count)
+static __inline__ void __ide_mm_outsw(void __iomem *port, void *addr, u32 count)
 {
 	while (count--) {
 		__raw_writew(*(u16 *)addr, port);
@@ -60,7 +56,7 @@ static __inline__ void __ide_mm_outsw(unsigned long port, void *addr, u32 count)
 	}
 }
 
-static __inline__ void __ide_mm_outsl(unsigned long port, void *addr, u32 count)
+static __inline__ void __ide_mm_outsl(void __iomem *port, void *addr, u32 count)
 {
 	while (count--) {
 		__raw_writel(*(u32 *)addr, port);

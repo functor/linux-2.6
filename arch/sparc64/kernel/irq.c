@@ -33,7 +33,6 @@
 #include <asm/oplib.h>
 #include <asm/timer.h>
 #include <asm/smp.h>
-#include <asm/hardirq.h>
 #include <asm/starfire.h>
 #include <asm/uaccess.h>
 #include <asm/cache.h>
@@ -102,7 +101,7 @@ struct irqaction *irq_action[NR_IRQS+1] = {
  * read things in the table.  IRQ handler processing orders
  * its' accesses such that no locking is needed.
  */
-static spinlock_t irq_action_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(irq_action_lock);
 
 static void register_irq_proc (unsigned int irq);
 
@@ -117,10 +116,6 @@ static void register_irq_proc (unsigned int irq);
 	else \
 		action->flags |= __irq_ino(irq) << 48;
 #define get_ino_in_irqaction(action)	(action->flags >> 48)
-
-#if NR_CPUS > 64
-#error irqaction embedded smp affinity does not work with > 64 cpus, FIXME
-#endif
 
 #define put_smpaff_in_irqaction(action, smpaff)	(action)->mask = (smpaff)
 #define get_smpaff_in_irqaction(action) 	((action)->mask)
@@ -174,6 +169,8 @@ void enable_irq(unsigned int irq)
 	if (imap == 0UL)
 		return;
 
+	preempt_disable();
+
 	if (tlb_type == cheetah || tlb_type == cheetah_plus) {
 		unsigned long ver;
 
@@ -214,6 +211,8 @@ void enable_irq(unsigned int irq)
 	 * Things like FFB can now be handled via the new IRQ mechanism.
 	 */
 	upa_writel(tid | IMAP_VALID, imap);
+
+	preempt_enable();
 }
 
 /* This now gets passed true ino's as well. */
@@ -454,7 +453,7 @@ int request_irq(unsigned int irq, irqreturn_t (*handler)(int, void *, struct pt_
 	action->next = NULL;
 	action->dev_id = dev_id;
 	put_ino_in_irqaction(action, irq);
-	put_smpaff_in_irqaction(action, 0);
+	put_smpaff_in_irqaction(action, CPU_MASK_NONE);
 
 	if (tmp)
 		tmp->next = action;
@@ -687,9 +686,10 @@ static inline void redirect_intr(int cpu, struct ino_bucket *bp)
 	 *    Just Do It.
 	 */
 	struct irqaction *ap = bp->irq_info;
-	cpumask_t cpu_mask = get_smpaff_in_irqaction(ap);
+	cpumask_t cpu_mask;
 	unsigned int buddy, ticks;
 
+	cpu_mask = get_smpaff_in_irqaction(ap);
 	cpus_and(cpu_mask, cpu_mask, cpu_online_map);
 	if (cpus_empty(cpu_mask))
 		cpu_mask = cpu_online_map;
@@ -710,7 +710,7 @@ static inline void redirect_intr(int cpu, struct ino_bucket *bp)
 		if (++buddy >= NR_CPUS)
 			buddy = 0;
 		if (++ticks > NR_CPUS) {
-			put_smpaff_in_irqaction(ap, 0);
+			put_smpaff_in_irqaction(ap, CPU_MASK_NONE);
 			goto out;
 		}
 	}
@@ -756,7 +756,7 @@ void handler_irq(int irq, struct pt_regs *regs)
 		clear_softint(clr_mask);
 	}
 #else
-	int should_forward = 1;
+	int should_forward = 0;
 
 	clear_softint(1 << irq);
 #endif
@@ -790,16 +790,24 @@ void handler_irq(int irq, struct pt_regs *regs)
 #endif
 			if ((flags & IBF_MULTI) == 0) {
 				struct irqaction *ap = bp->irq_info;
-				ap->handler(__irq(bp), ap->dev_id, regs);
-				random |= ap->flags & SA_SAMPLE_RANDOM;
+				int ret;
+
+				ret = ap->handler(__irq(bp), ap->dev_id, regs);
+				if (ret == IRQ_HANDLED)
+					random |= ap->flags;
 			} else {
 				void **vector = (void **)bp->irq_info;
 				int ent;
 				for (ent = 0; ent < 4; ent++) {
 					struct irqaction *ap = vector[ent];
 					if (ap != NULL) {
-						ap->handler(__irq(bp), ap->dev_id, regs);
-						random |= ap->flags & SA_SAMPLE_RANDOM;
+						int ret;
+
+						ret = ap->handler(__irq(bp),
+								  ap->dev_id,
+								  regs);
+						if (ret == IRQ_HANDLED)
+							random |= ap->flags;
 					}
 				}
 			}
@@ -812,8 +820,9 @@ void handler_irq(int irq, struct pt_regs *regs)
 				}
 #endif
 				upa_writel(ICLR_IDLE, bp->iclr);
+
 				/* Test and add entropy */
-				if (random)
+				if (random & SA_SAMPLE_RANDOM)
 					add_interrupt_randomness(irq);
 			}
 		} else
@@ -944,7 +953,7 @@ int request_fast_irq(unsigned int irq,
 	action->name = name;
 	action->next = NULL;
 	put_ino_in_irqaction(action, irq);
-	put_smpaff_in_irqaction(action, 0);
+	put_smpaff_in_irqaction(action, CPU_MASK_NONE);
 
 	*(bucket->pil + irq_action) = action;
 	enable_irq(irq);
@@ -998,10 +1007,10 @@ static int retarget_one_irq(struct irqaction *p, int goal_cpu)
 	}
 	upa_writel(tid | IMAP_VALID, imap);
 
-	while (!cpu_online(goal_cpu)) {
+	do {
 		if (++goal_cpu >= NR_CPUS)
 			goal_cpu = 0;
-	}
+	} while (!cpu_online(goal_cpu));
 
 	return goal_cpu;
 }
@@ -1103,7 +1112,7 @@ void enable_prom_timer(void)
 void init_irqwork_curcpu(void)
 {
 	register struct irq_work_struct *workp asm("o2");
-	unsigned long tmp;
+	register unsigned long tmp asm("o3");
 	int cpu = hard_smp_processor_id();
 
 	memset(__irq_work + cpu, 0, sizeof(*workp));
@@ -1162,53 +1171,15 @@ static struct proc_dir_entry * irq_dir [NUM_IVECS];
 
 #ifdef CONFIG_SMP
 
-#define HEX_DIGITS 16
-
-static unsigned int parse_hex_value (const char *buffer,
-		unsigned long count, unsigned long *ret)
-{
-	unsigned char hexnum [HEX_DIGITS];
-	unsigned long value;
-	int i;
-
-	if (!count)
-		return -EINVAL;
-	if (count > HEX_DIGITS)
-		count = HEX_DIGITS;
-	if (copy_from_user(hexnum, buffer, count))
-		return -EFAULT;
-
-	/*
-	 * Parse the first 8 characters as a hex string, any non-hex char
-	 * is end-of-string. '00e1', 'e1', '00E1', 'E1' are all the same.
-	 */
-	value = 0;
-
-	for (i = 0; i < count; i++) {
-		unsigned int c = hexnum[i];
-
-		switch (c) {
-			case '0' ... '9': c -= '0'; break;
-			case 'a' ... 'f': c -= 'a'-10; break;
-			case 'A' ... 'F': c -= 'A'-10; break;
-		default:
-			goto out;
-		}
-		value = (value << 4) | c;
-	}
-out:
-	*ret = value;
-	return 0;
-}
-
 static int irq_affinity_read_proc (char *page, char **start, off_t off,
 			int count, int *eof, void *data)
 {
 	struct ino_bucket *bp = ivector_table + (long)data;
 	struct irqaction *ap = bp->irq_info;
-	cpumask_t mask = get_smpaff_in_irqaction(ap);
+	cpumask_t mask;
 	int len;
 
+	mask = get_smpaff_in_irqaction(ap);
 	if (cpus_empty(mask))
 		mask = cpu_online_map;
 
@@ -1219,7 +1190,7 @@ static int irq_affinity_read_proc (char *page, char **start, off_t off,
 	return len;
 }
 
-static inline void set_intr_affinity(int irq, unsigned long hw_aff)
+static inline void set_intr_affinity(int irq, cpumask_t hw_aff)
 {
 	struct ino_bucket *bp = ivector_table + irq;
 
@@ -1233,26 +1204,21 @@ static inline void set_intr_affinity(int irq, unsigned long hw_aff)
 	 */
 }
 
-static int irq_affinity_write_proc (struct file *file, const char *buffer,
+static int irq_affinity_write_proc (struct file *file, const char __user *buffer,
 					unsigned long count, void *data)
 {
 	int irq = (long) data, full_count = count, err;
-	unsigned long new_value, i;
+	cpumask_t new_value;
 
-	err = parse_hex_value(buffer, count, &new_value);
+	err = cpumask_parse(buffer, count, new_value);
 
 	/*
 	 * Do not allow disabling IRQs completely - it's a too easy
 	 * way to make the system unusable accidentally :-) At least
 	 * one online CPU still has to be targeted.
 	 */
-	for (i = 0; i < NR_CPUS; i++) {
-		if ((new_value & (1UL << i)) != 0 &&
-		    !cpu_online(i))
-			new_value &= ~(1UL << i);
-	}
-
-	if (!new_value)
+	cpus_and(new_value, new_value, cpu_online_map);
+	if (cpus_empty(new_value))
 		return -EINVAL;
 
 	set_intr_affinity(irq, new_value);
@@ -1298,6 +1264,6 @@ static void register_irq_proc (unsigned int irq)
 void init_irq_proc (void)
 {
 	/* create /proc/irq */
-	root_irq_dir = proc_mkdir("irq", 0);
+	root_irq_dir = proc_mkdir("irq", NULL);
 }
 

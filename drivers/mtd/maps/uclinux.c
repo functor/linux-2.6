@@ -5,7 +5,7 @@
  *
  *	(C) Copyright 2002, Greg Ungerer (gerg@snapgear.com)
  *
- * 	$Id: uclinux.c,v 1.5 2003/05/20 20:59:32 dwmw2 Exp $
+ * 	$Id: uclinux.c,v 1.10 2005/01/05 18:05:13 dwmw2 Exp $
  */
 
 /****************************************************************************/
@@ -17,6 +17,7 @@
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/major.h>
+#include <linux/root_dev.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/map.h>
 #include <linux/mtd/partitions.h>
@@ -46,7 +47,7 @@ struct mtd_partition uclinux_romfs[] = {
 int uclinux_point(struct mtd_info *mtd, loff_t from, size_t len,
 	size_t *retlen, u_char **mtdbuf)
 {
-	struct map_info *map = (struct map_info *) mtd->priv;
+	struct map_info *map = mtd->priv;
 	*mtdbuf = (u_char *) (map->virt + ((int) from));
 	*retlen = len;
 	return(0);
@@ -63,13 +64,12 @@ int __init uclinux_mtd_init(void)
 	mapp = &uclinux_ram_map;
 	mapp->phys = (unsigned long) &_ebss;
 	mapp->size = PAGE_ALIGN(*((unsigned long *)((&_ebss) + 8)));
-	mapp->buswidth = 4;
+	mapp->bankwidth = 4;
 
 	printk("uclinux[mtd]: RAM probe address=0x%x size=0x%x\n",
 	       	(int) mapp->map_priv_2, (int) mapp->size);
 
-	mapp->virt = (unsigned long)
-		ioremap_nocache(mapp->phys, mapp->size);
+	mapp->virt = ioremap_nocache(mapp->phys, mapp->size);
 
 	if (mapp->virt == 0) {
 		printk("uclinux[mtd]: ioremap_nocache() failed\n");
@@ -81,7 +81,7 @@ int __init uclinux_mtd_init(void)
 	mtd = do_map_probe("map_ram", mapp);
 	if (!mtd) {
 		printk("uclinux[mtd]: failed to find a mapping?\n");
-		iounmap((void *) mapp->virt);
+		iounmap(mapp->virt);
 		return(-ENXIO);
 	}
 		
