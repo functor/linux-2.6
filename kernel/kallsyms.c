@@ -18,19 +18,25 @@
 #include <linux/fs.h>
 #include <linux/err.h>
 #include <linux/proc_fs.h>
+#include <linux/mm.h>
+
+#include <asm/sections.h>
+
+#ifdef CONFIG_KALLSYMS_ALL
+#define all_var 1
+#else
+#define all_var 0
+#endif
 
 /* These will be re-linked against their real values during the second link stage */
 extern unsigned long kallsyms_addresses[] __attribute__((weak));
-extern unsigned long kallsyms_num_syms __attribute__((weak));
+extern unsigned long kallsyms_num_syms __attribute__((weak,section("data")));
 extern u8 kallsyms_names[] __attribute__((weak));
 
 extern u8 kallsyms_token_table[] __attribute__((weak));
 extern u16 kallsyms_token_index[] __attribute__((weak));
 
 extern unsigned long kallsyms_markers[] __attribute__((weak));
-
-/* Defined by the linker script. */
-extern char _stext[], _etext[], _sinittext[], _einittext[];
 
 static inline int is_kernel_inittext(unsigned long addr)
 {
@@ -40,11 +46,26 @@ static inline int is_kernel_inittext(unsigned long addr)
 	return 0;
 }
 
+static inline int is_kernel_extratext(unsigned long addr)
+{
+	if (addr >= (unsigned long)_sextratext
+	    && addr <= (unsigned long)_eextratext)
+		return 1;
+	return 0;
+}
+
 static inline int is_kernel_text(unsigned long addr)
 {
 	if (addr >= (unsigned long)_stext && addr <= (unsigned long)_etext)
 		return 1;
-	return 0;
+	return in_gate_area_no_task(addr);
+}
+
+static inline int is_kernel(unsigned long addr)
+{
+	if (addr >= (unsigned long)_stext && addr <= (unsigned long)_end)
+		return 1;
+	return in_gate_area_no_task(addr);
 }
 
 /* expand a compressed symbol data into the resulting uncompressed string,
@@ -132,14 +153,22 @@ unsigned long kallsyms_lookup_name(const char *name)
 	}
 	return module_kallsyms_lookup_name(name);
 }
+EXPORT_SYMBOL_GPL(kallsyms_lookup_name);
 
-/* Lookup an address.  modname is set to NULL if it's in the kernel. */
+/*
+ * Lookup an address
+ * - modname is set to NULL if it's in the kernel
+ * - we guarantee that the returned name is valid until we reschedule even if
+ *   it resides in a module
+ * - we also guarantee that modname will be valid until rescheduled
+ */
 const char *kallsyms_lookup(unsigned long addr,
 			    unsigned long *symbolsize,
 			    unsigned long *offset,
 			    char **modname, char *namebuf)
 {
 	unsigned long i, low, high, mid;
+	const char *msym;
 
 	/* This kernel should never had been booted. */
 	BUG_ON(!kallsyms_addresses);
@@ -147,8 +176,10 @@ const char *kallsyms_lookup(unsigned long addr,
 	namebuf[KSYM_NAME_LEN] = 0;
 	namebuf[0] = 0;
 
-	if (is_kernel_text(addr) || is_kernel_inittext(addr)) {
-		unsigned long symbol_end=0;
+	if ((all_var && is_kernel(addr)) ||
+	    (!all_var && (is_kernel_text(addr) || is_kernel_inittext(addr) ||
+				is_kernel_extratext(addr)))) {
+		unsigned long symbol_end = 0;
 
 		/* do a binary search on the sorted kallsyms_addresses array */
 		low = 0;
@@ -181,7 +212,7 @@ const char *kallsyms_lookup(unsigned long addr,
 			if (is_kernel_inittext(addr))
 				symbol_end = (unsigned long)_einittext;
 			else
-				symbol_end = (unsigned long)_etext;
+				symbol_end = all_var ? (unsigned long)_end : (unsigned long)_etext;
 		}
 
 		*symbolsize = symbol_end - kallsyms_addresses[low];
@@ -190,7 +221,12 @@ const char *kallsyms_lookup(unsigned long addr,
 		return namebuf;
 	}
 
-	return module_address_lookup(addr, symbolsize, offset, modname);
+	/* see if it's in a module */
+	msym = module_address_lookup(addr, symbolsize, offset, modname);
+	if (msym)
+		return strncpy(namebuf, msym, KSYM_NAME_LEN);
+
+	return NULL;
 }
 
 /* Replace "%s" in format with address, or returns -errno. */
@@ -328,7 +364,7 @@ static int s_show(struct seq_file *m, void *p)
 	return 0;
 }
 
-struct seq_operations kallsyms_op = {
+static struct seq_operations kallsyms_op = {
 	.start = s_start,
 	.next = s_next,
 	.stop = s_stop,
@@ -370,7 +406,7 @@ static struct file_operations kallsyms_operations = {
 	.release = kallsyms_release,
 };
 
-int __init kallsyms_init(void)
+static int __init kallsyms_init(void)
 {
 	struct proc_dir_entry *entry;
 

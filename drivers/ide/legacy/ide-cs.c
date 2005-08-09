@@ -43,7 +43,6 @@
 #include <linux/ide.h>
 #include <linux/hdreg.h>
 #include <linux/major.h>
-#include <linux/delay.h>
 #include <asm/io.h>
 #include <asm/system.h>
 
@@ -63,12 +62,7 @@ MODULE_AUTHOR("David Hinds <dahinds@users.sourceforge.net>");
 MODULE_DESCRIPTION("PCMCIA ATA/IDE card driver");
 MODULE_LICENSE("Dual MPL/GPL");
 
-#define INT_MODULE_PARM(n, v) static int n = v; MODULE_PARM(n, "i")
-
-/* Bit map of interrupts to choose from */
-INT_MODULE_PARM(irq_mask, 0xdeb8);
-static int irq_list[4] = { -1 };
-MODULE_PARM(irq_list, "1-4i");
+#define INT_MODULE_PARM(n, v) static int n = v; module_param(n, int, 0)
 
 #ifdef PCMCIA_DEBUG
 INT_MODULE_PARM(pc_debug, PCMCIA_DEBUG);
@@ -91,7 +85,6 @@ typedef struct ide_info_t {
     int		ndev;
     dev_node_t	node;
     int		hd;
-    ide_hwif_t *hwif;
 } ide_info_t;
 
 static void ide_release(dev_link_t *);
@@ -118,7 +111,7 @@ static dev_link_t *ide_attach(void)
     ide_info_t *info;
     dev_link_t *link;
     client_reg_t client_reg;
-    int i, ret;
+    int ret;
     
     DEBUG(0, "ide_attach()\n");
 
@@ -132,12 +125,7 @@ static dev_link_t *ide_attach(void)
     link->io.Attributes2 = IO_DATA_PATH_WIDTH_8;
     link->io.IOAddrLines = 3;
     link->irq.Attributes = IRQ_TYPE_EXCLUSIVE;
-    link->irq.IRQInfo1 = IRQ_INFO2_VALID|IRQ_LEVEL_ID;
-    if (irq_list[0] == -1)
-	link->irq.IRQInfo2 = irq_mask;
-    else
-	for (i = 0; i < 4; i++)
-	    link->irq.IRQInfo2 |= 1 << irq_list[i];
+    link->irq.IRQInfo1 = IRQ_LEVEL_ID;
     link->conf.Attributes = CONF_ENABLE_IRQ;
     link->conf.Vcc = 50;
     link->conf.IntType = INT_MEMORY_AND_IO;
@@ -146,7 +134,6 @@ static dev_link_t *ide_attach(void)
     link->next = dev_list;
     dev_list = link;
     client_reg.dev_info = &dev_info;
-    client_reg.Attributes = INFO_IO_CLIENT | INFO_CARD_SHARE;
     client_reg.EventMask =
 	CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL |
 	CS_EVENT_RESET_PHYSICAL | CS_EVENT_CARD_RESET |
@@ -201,14 +188,14 @@ static void ide_detach(dev_link_t *link)
     
 } /* ide_detach */
 
-static int idecs_register(unsigned long io, unsigned long ctl, unsigned long irq, ide_hwif_t **hwif)
+static int idecs_register(unsigned long io, unsigned long ctl, unsigned long irq)
 {
     hw_regs_t hw;
     memset(&hw, 0, sizeof(hw));
     ide_init_hwif_ports(&hw, io, ctl, NULL);
     hw.irq = irq;
     hw.chipset = ide_pci;
-    return ide_register_hw_with_fixup(&hw, hwif, ide_undecoded_slave);
+    return ide_register_hw_with_fixup(&hw, NULL, ide_undecoded_slave);
 }
 
 /*======================================================================
@@ -222,11 +209,10 @@ static int idecs_register(unsigned long io, unsigned long ctl, unsigned long irq
 #define CS_CHECK(fn, ret) \
 do { last_fn = (fn); if ((last_ret = (ret)) != 0) goto cs_failed; } while (0)
 
-void ide_config(dev_link_t *link)
+static void ide_config(dev_link_t *link)
 {
     client_handle_t handle = link->handle;
     ide_info_t *info = link->priv;
-    ide_hwif_t *hwif;
     tuple_t tuple;
     struct {
 	u_short		buf[128];
@@ -346,24 +332,22 @@ void ide_config(dev_link_t *link)
     if (is_kme)
 	outb(0x81, ctl_base+1);
 
-    /* retry registration in case device is still spinning up 
-    
-       FIXME: now handled by IDE layer... ?? */
-       
+    /* retry registration in case device is still spinning up */
     for (hd = -1, i = 0; i < 10; i++) {
-	hd = idecs_register(io_base, ctl_base, link->irq.AssignedIRQ, &hwif);
+	hd = idecs_register(io_base, ctl_base, link->irq.AssignedIRQ);
 	if (hd >= 0) break;
 	if (link->io.NumPorts1 == 0x20) {
 	    outb(0x02, ctl_base + 0x10);
 	    hd = idecs_register(io_base + 0x10, ctl_base + 0x10,
-				link->irq.AssignedIRQ, &hwif);
+				link->irq.AssignedIRQ);
 	    if (hd >= 0) {
 		io_base += 0x10;
 		ctl_base += 0x10;
 		break;
 	    }
 	}
-	msleep(100);
+	__set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(HZ/10);
     }
 
     if (hd < 0) {
@@ -378,7 +362,6 @@ void ide_config(dev_link_t *link)
     info->node.major = ide_major[hd];
     info->node.minor = 0;
     info->hd = hd;
-    info->hwif = hwif;
     link->dev = &info->node;
     printk(KERN_INFO "ide-cs: %s: Vcc = %d.%d, Vpp = %d.%d\n",
 	   info->node.dev_name, link->conf.Vcc / 10, link->conf.Vcc % 10,
@@ -415,11 +398,9 @@ void ide_release(dev_link_t *link)
     DEBUG(0, "ide_release(0x%p)\n", link);
 
     if (info->ndev) {
-    	/* Wait for the interface to cease to be busy */
-	while(ide_unregister_hwif(info->hwif) < 0) {
-		removed_hwif_iops(info->hwif);
-		msleep(1000);
-	}
+	/* FIXME: if this fails we need to queue the cleanup somehow
+	   -- need to investigate the required PCMCIA magic */
+	ide_unregister(info->hd);
     }
     info->ndev = 0;
     link->dev = NULL;
@@ -493,8 +474,7 @@ static int __init init_ide_cs(void)
 static void __exit exit_ide_cs(void)
 {
 	pcmcia_unregister_driver(&ide_cs_driver);
-	while (dev_list != NULL)
-		ide_detach(dev_list);
+	BUG_ON(dev_list != NULL);
 }
 
 module_init(init_ide_cs);

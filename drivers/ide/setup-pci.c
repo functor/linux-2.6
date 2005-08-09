@@ -1,8 +1,7 @@
 /*
- *  linux/drivers/ide/setup-pci.c		Version 1.14	2004/08/10
+ *  linux/drivers/ide/setup-pci.c		Version 1.10	2002/08/19
  *
  *  Copyright (c) 1998-2000  Andre Hedrick <andre@linux-ide.org>
- *  Copyright (c) 2004 Red Hat <alan@redhat.com>
  *
  *  Copyright (c) 1995-1998  Mark Lord
  *  May be copied or modified under the terms of the GNU General Public License
@@ -12,7 +11,6 @@
  *	Use pci_set_master
  *	Fix misreporting of I/O v MMIO problems
  *	Initial fixups for simplex devices
- *	Hot unplug paths
  */
 
 /*
@@ -30,7 +28,7 @@
 #include <linux/mm.h>
 #include <linux/interrupt.h>
 #include <linux/ide.h>
-#include <linux/delay.h>
+#include <linux/dma-mapping.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -45,7 +43,7 @@
  *	Match a PCI IDE port against an entry in ide_hwifs[],
  *	based on io_base port if possible. Return the matching hwif,
  *	or a new hwif. If we find an error (clashing, out of devices, etc)
- *	return NULL. The caller must hold the ide_cfg_sem.
+ *	return NULL
  *
  *	FIXME: we need to handle mmio matches here too
  */
@@ -90,8 +88,6 @@ static ide_hwif_t *ide_match_hwif(unsigned long io_base, u8 bootable, const char
 	 *
 	 * Unless there is a bootable card that does not use the standard
 	 * ports 1f0/170 (the ide0/ide1 defaults). The (bootable) flag.
-	 *
-	 * FIXME: migrate use of ide_unknown to also use ->configured
 	 */
 	if (bootable) {
 		for (h = 0; h < MAX_HWIFS; ++h) {
@@ -295,14 +291,16 @@ EXPORT_SYMBOL_GPL(ide_setup_pci_noise);
  
 static int ide_pci_enable(struct pci_dev *dev, ide_pci_device_t *d)
 {
-	
+	int ret;
+
 	if (pci_enable_device(dev)) {
-		if (pci_enable_device_bars(dev, 1 << 4)) {
+		ret = pci_enable_device_bars(dev, 1 << 4);
+		if (ret < 0) {
 			printk(KERN_WARNING "%s: (ide_setup_pci_device:) "
 				"Could not enable device.\n", d->name);
-			return -EBUSY;
-		} else
-			printk(KERN_WARNING "%s: BIOS configuration fixed.\n", d->name);
+			goto out;
+		}
+		printk(KERN_WARNING "%s: BIOS configuration fixed.\n", d->name);
 	}
 
 	/*
@@ -310,18 +308,21 @@ static int ide_pci_enable(struct pci_dev *dev, ide_pci_device_t *d)
 	 * dma mask field to the ide_pci_device_t if we need it (or let
 	 * lower level driver set the dma mask)
 	 */
-	if (pci_set_dma_mask(dev, 0xffffffff)) {
+	ret = pci_set_dma_mask(dev, DMA_32BIT_MASK);
+	if (ret < 0) {
 		printk(KERN_ERR "%s: can't set dma mask\n", d->name);
-		return -EBUSY;
+		goto out;
 	}
-	 
+
 	/* FIXME: Temporary - until we put in the hotplug interface logic
-	   Check that the bits we want are not in use by someone else */
-	if (pci_request_region(dev, 4, "ide_tmp"))
-		return -EBUSY;
+	   Check that the bits we want are not in use by someone else. */
+	ret = pci_request_region(dev, 4, "ide_tmp");
+	if (ret < 0)
+		goto out;
+
 	pci_release_region(dev, 4);
-	
-	return 0;	
+out:
+	return ret;
 }
 
 /**
@@ -425,22 +426,17 @@ static ide_hwif_t *ide_hwif_configure(struct pci_dev *dev, ide_pci_device_t *d, 
 		ctl = port ? 0x374 : 0x3f4;
 		base = port ? 0x170 : 0x1f0;
 	}
-	
-	/*
-	 * Protect against a hwif being unloaded as we attach to it
-	 */
-	down(&ide_cfg_sem);
-	
 	if ((hwif = ide_match_hwif(base, d->bootable, d->name)) == NULL)
-	{
-		up(&ide_cfg_sem);
 		return NULL;	/* no room in ide_hwifs[] */
-	}
-	
 	if (hwif->io_ports[IDE_DATA_OFFSET] != base ||
 	    hwif->io_ports[IDE_CONTROL_OFFSET] != (ctl | 2)) {
 		memset(&hwif->hw, 0, sizeof(hwif->hw));
+#ifndef IDE_ARCH_OBSOLETE_INIT
+		ide_std_init_ports(&hwif->hw, base, (ctl | 2));
+		hwif->hw.io_ports[IDE_IRQ_OFFSET] = 0;
+#else
 		ide_init_hwif_ports(&hwif->hw, base, (ctl | 2), NULL);
+#endif
 		memcpy(hwif->io_ports, hwif->hw.io_ports, sizeof(hwif->io_ports));
 		hwif->noprobe = !hwif->io_ports[IDE_DATA_OFFSET];
 	}
@@ -448,9 +444,6 @@ static ide_hwif_t *ide_hwif_configure(struct pci_dev *dev, ide_pci_device_t *d, 
 	hwif->pci_dev = dev;
 	hwif->cds = (struct ide_pci_device_s *) d;
 	hwif->channel = port;
-	hwif->configured = 1;
-	
-	up(&ide_cfg_sem);
 
 	if (!hwif->irq)
 		hwif->irq = irq;
@@ -533,22 +526,26 @@ static void ide_hwif_setup_dma(struct pci_dev *dev, ide_pci_device_t *d, ide_hwi
  
 static int ide_setup_pci_controller(struct pci_dev *dev, ide_pci_device_t *d, int noisy, int *config)
 {
+	int ret;
 	u32 class_rev;
 	u16 pcicmd;
 
 	if (noisy)
 		ide_setup_pci_noise(dev, d);
 
-	if (ide_pci_enable(dev, d))
-		return -EBUSY;
-		
-	if (pci_read_config_word(dev, PCI_COMMAND, &pcicmd)) {
+	ret = ide_pci_enable(dev, d);
+	if (ret < 0)
+		goto out;
+
+	ret = pci_read_config_word(dev, PCI_COMMAND, &pcicmd);
+	if (ret < 0) {
 		printk(KERN_ERR "%s: error accessing PCI regs\n", d->name);
-		return -EIO;
+		goto out;
 	}
 	if (!(pcicmd & PCI_COMMAND_IO)) {	/* is device disabled? */
-		if (ide_pci_configure(dev, d))
-			return -ENODEV;
+		ret = ide_pci_configure(dev, d);
+		if (ret < 0)
+			goto out;
 		*config = 1;
 		printk(KERN_INFO "%s: device enabled (Linux)\n", d->name);
 	}
@@ -557,7 +554,8 @@ static int ide_setup_pci_controller(struct pci_dev *dev, ide_pci_device_t *d, in
 	class_rev &= 0xff;
 	if (noisy)
 		printk(KERN_INFO "%s: chipset revision %d\n", d->name, class_rev);
-	return 0;
+out:
+	return ret;
 }
 
 /**
@@ -661,14 +659,16 @@ EXPORT_SYMBOL_GPL(ide_pci_setup_ports);
  * we "know" about, this information is in the ide_pci_device_t struct;
  * for all other chipsets, we just assume both interfaces are enabled.
  */
-static ata_index_t do_ide_setup_pci_device (struct pci_dev *dev, ide_pci_device_t *d, u8 noisy)
+static int do_ide_setup_pci_device(struct pci_dev *dev, ide_pci_device_t *d,
+				   ata_index_t *index, u8 noisy)
 {
-	int pciirq = 0;
+	static ata_index_t ata_index = { .b = { .low = 0xff, .high = 0xff } };
 	int tried_config = 0;
-	ata_index_t index = { .b = { .low = 0xff, .high = 0xff } };
+	int pciirq, ret;
 
-	if (ide_setup_pci_controller(dev, d, noisy, &tried_config) < 0)
-		return index;
+	ret = ide_setup_pci_controller(dev, d, noisy, &tried_config);
+	if (ret < 0)
+		goto out;
 
 	/*
 	 * Can we trust the reported IRQ?
@@ -686,7 +686,10 @@ static ata_index_t do_ide_setup_pci_device (struct pci_dev *dev, ide_pci_device_
 		 * space, place chipset into init-mode, and/or preserve
 		 * an interrupt if the card is not native ide support.
 		 */
-		pciirq = (d->init_chipset) ? d->init_chipset(dev, d->name) : 0;
+		ret = d->init_chipset ? d->init_chipset(dev, d->name) : 0;
+		if (ret < 0)
+			goto out;
+		pciirq = ret;
 	} else if (tried_config) {
 		if (noisy)
 			printk(KERN_INFO "%s: will probe irqs later\n", d->name);
@@ -697,10 +700,10 @@ static ata_index_t do_ide_setup_pci_device (struct pci_dev *dev, ide_pci_device_
 				d->name, pciirq);
 		pciirq = 0;
 	} else {
-		if (d->init_chipset)
-		{
-			if(d->init_chipset(dev, d->name) < 0)
-				return index;
+		if (d->init_chipset) {
+			ret = d->init_chipset(dev, d->name);
+			if (ret < 0)
+				goto out;
 		}
 		if (noisy)
 #ifdef __sparc__
@@ -711,18 +714,23 @@ static ata_index_t do_ide_setup_pci_device (struct pci_dev *dev, ide_pci_device_
 				d->name, pciirq);
 #endif
 	}
-	
-	if(pciirq < 0)		/* Error not an IRQ */
-		return index;
 
-	ide_pci_setup_ports(dev, d, pciirq, &index);
+	/* FIXME: silent failure can happen */
 
-	return index;
+	*index = ata_index;
+	ide_pci_setup_ports(dev, d, pciirq, index);
+out:
+	return ret;
 }
 
-void ide_setup_pci_device (struct pci_dev *dev, ide_pci_device_t *d)
+int ide_setup_pci_device(struct pci_dev *dev, ide_pci_device_t *d)
 {
-	ata_index_t index_list = do_ide_setup_pci_device(dev, d, 1);
+	ata_index_t index_list;
+	int ret;
+
+	ret = do_ide_setup_pci_device(dev, d, &index_list, 1);
+	if (ret < 0)
+		goto out;
 
 	if ((index_list.b.low & 0xf0) != 0xf0)
 		probe_hwif_init_with_fixup(&ide_hwifs[index_list.b.low], d->fixup);
@@ -730,87 +738,45 @@ void ide_setup_pci_device (struct pci_dev *dev, ide_pci_device_t *d)
 		probe_hwif_init_with_fixup(&ide_hwifs[index_list.b.high], d->fixup);
 
 	create_proc_ide_interfaces();
+out:
+	return ret;
 }
 
 EXPORT_SYMBOL_GPL(ide_setup_pci_device);
 
-void ide_setup_pci_devices (struct pci_dev *dev, struct pci_dev *dev2, ide_pci_device_t *d)
+int ide_setup_pci_devices(struct pci_dev *dev1, struct pci_dev *dev2,
+			  ide_pci_device_t *d)
 {
-	ata_index_t index_list  = do_ide_setup_pci_device(dev, d, 1);
-	ata_index_t index_list2 = do_ide_setup_pci_device(dev2, d, 0);
+	struct pci_dev *pdev[] = { dev1, dev2 };
+	ata_index_t index_list[2];
+	int ret, i;
 
-	if ((index_list.b.low & 0xf0) != 0xf0)
-		probe_hwif_init_with_fixup(&ide_hwifs[index_list.b.low], d->fixup);
-	if ((index_list.b.high & 0xf0) != 0xf0)
-		probe_hwif_init_with_fixup(&ide_hwifs[index_list.b.high], d->fixup);
-	if ((index_list2.b.low & 0xf0) != 0xf0)
-		probe_hwif_init_with_fixup(&ide_hwifs[index_list2.b.low], d->fixup);
-	if ((index_list2.b.high & 0xf0) != 0xf0)
-		probe_hwif_init_with_fixup(&ide_hwifs[index_list2.b.high], d->fixup);
+	for (i = 0; i < 2; i++) {
+		ret = do_ide_setup_pci_device(pdev[i], d, index_list + i, !i);
+		/*
+		 * FIXME: Mom, mom, they stole me the helper function to undo
+		 * do_ide_setup_pci_device() on the first device!
+		 */
+		if (ret < 0)
+			goto out;
+	}
+
+	for (i = 0; i < 2; i++) {
+		u8 idx[2] = { index_list[i].b.low, index_list[i].b.high };
+		int j;
+
+		for (j = 0; j < 2; j++) {
+			if ((idx[j] & 0xf0) != 0xf0)
+				probe_hwif_init(ide_hwifs + idx[j]);
+		}
+	}
 
 	create_proc_ide_interfaces();
+out:
+	return ret;
 }
 
 EXPORT_SYMBOL_GPL(ide_setup_pci_devices);
-
-
-static int ide_pci_try_unregister(struct pci_dev *dev) 
-{
-	int i;
-	int err = 0;
-	ide_hwif_t *hwif = ide_hwifs;
-	
-	for(i = 0; i < MAX_HWIFS; i++) {
-		if(hwif->configured && hwif->pci_dev == dev)
-			err |= __ide_unregister_hwif(hwif);
-		i++;
-		hwif++;
-	}
-	return err;
-}
-
-/**
- *	ide_pci_remove_hwifs	-	remove PCI interfaces
- *	@dev: PCI device
- *
- *	Remove any hwif attached to this PCI device. This will call
- *	back the various hwif->remove functions. In order to get the
- *	best results when delays occur we kill the iops before we
- *	potentially start blocking for long periods untangling the
- *	IDE layer.
- *
- *	Takes the ide_cfg_sem in order to protect against races with
- *	new/old hwifs. Calls functions that take all the other locks
- *	so should be called with no locks held.
- */
- 
-void ide_pci_remove_hwifs(struct pci_dev *dev)
-{
-	int i;
-	ide_hwif_t *hwif = ide_hwifs;
-	int err;
-
-	down(&ide_cfg_sem);
-	
-	err = ide_pci_try_unregister(dev);
-
-	if(err < 0) {
-		printk(KERN_ERR "ide: PCI interfaces busy during hotplug. Waiting....\n");
-		for(i = 0; i < MAX_HWIFS; i++) {
-			if(hwif->configured && hwif->pci_dev == dev)
-				removed_hwif_iops(hwif);
-			i++;
-			hwif++;
-		}
-	}
-	/* Should drop this out to a work queue I think ? */
-	while(ide_pci_try_unregister(dev) < 0)
-		msleep(1000);
-	up(&ide_cfg_sem);
-}
-
-EXPORT_SYMBOL_GPL(ide_pci_remove_hwifs);
-
 
 /*
  *	Module interfaces

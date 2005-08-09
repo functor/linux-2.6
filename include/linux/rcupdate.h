@@ -65,7 +65,6 @@ struct rcu_ctrlblk {
 	long	cur;		/* Current batch number.                      */
 	long	completed;	/* Number of the last completed batch         */
 	int	next_pending;	/* Is the next batch already waiting?         */
-	seqcount_t lock;	/* For atomic reads of cur and next_pending.  */
 } ____cacheline_maxaligned_in_smp;
 
 /* Is batch a before batch b ? */
@@ -88,9 +87,7 @@ static inline int rcu_batch_after(long a, long b)
 struct rcu_data {
 	/* 1) quiescent state handling : */
 	long		quiescbatch;     /* Batch # for grace period */
-	long		qsctr;		 /* User-mode/idle loop etc. */
-	long            last_qsctr;	 /* value of qsctr at beginning */
-					 /* of rcu grace period */
+	int		passed_quiesc;	 /* User-mode/idle loop etc. */
 	int		qs_pending;	 /* core waits for quiesc state */
 
 	/* 2) batch handling */
@@ -110,17 +107,20 @@ extern struct rcu_ctrlblk rcu_ctrlblk;
 extern struct rcu_ctrlblk rcu_bh_ctrlblk;
 
 /*
- * Increment the quiscent state counter.
+ * Increment the quiescent state counter.
+ * The counter is a bit degenerated: We do not need to know
+ * how many quiescent states passed, just if there was at least
+ * one since the start of the grace period. Thus just a flag.
  */
 static inline void rcu_qsctr_inc(int cpu)
 {
 	struct rcu_data *rdp = &per_cpu(rcu_data, cpu);
-	rdp->qsctr++;
+	rdp->passed_quiesc = 1;
 }
 static inline void rcu_bh_qsctr_inc(int cpu)
 {
 	struct rcu_data *rdp = &per_cpu(rcu_bh_data, cpu);
-	rdp->qsctr++;
+	rdp->passed_quiesc = 1;
 }
 
 static inline int __rcu_pending(struct rcu_ctrlblk *rcp,
@@ -157,9 +157,9 @@ static inline int rcu_pending(int cpu)
 /**
  * rcu_read_lock - mark the beginning of an RCU read-side critical section.
  *
- * When synchronize_kernel() is invoked on one CPU while other CPUs
+ * When synchronize_rcu() is invoked on one CPU while other CPUs
  * are within RCU read-side critical sections, then the
- * synchronize_kernel() is guaranteed to block until after all the other
+ * synchronize_rcu() is guaranteed to block until after all the other
  * CPUs exit their critical sections.  Similarly, if call_rcu() is invoked
  * on one CPU while other CPUs are within RCU read-side critical
  * sections, invocation of the corresponding RCU callback is deferred
@@ -256,6 +256,21 @@ static inline int rcu_pending(int cpu)
 						(p) = (v); \
 					})
 
+/**
+ * synchronize_sched - block until all CPUs have exited any non-preemptive
+ * kernel code sequences.
+ *
+ * This means that all preempt_disable code sequences, including NMI and
+ * hardware-interrupt handlers, in progress on entry will have completed
+ * before this primitive returns.  However, this does not guarantee that
+ * softirq handlers will have completed, since in some kernels
+ *
+ * This primitive provides the guarantees made by the (deprecated)
+ * synchronize_kernel() API.  In contrast, synchronize_rcu() only
+ * guarantees that rcu_read_lock() sections will have completed.
+ */
+#define synchronize_sched() synchronize_rcu()
+
 extern void rcu_init(void);
 extern void rcu_check_callbacks(int cpu, int user);
 extern void rcu_restart_cpu(int cpu);
@@ -265,7 +280,9 @@ extern void FASTCALL(call_rcu(struct rcu_head *head,
 				void (*func)(struct rcu_head *head)));
 extern void FASTCALL(call_rcu_bh(struct rcu_head *head,
 				void (*func)(struct rcu_head *head)));
-extern void synchronize_kernel(void);
+extern __deprecated_for_modules void synchronize_kernel(void);
+extern void synchronize_rcu(void);
+void synchronize_idle(void);
 
 #endif /* __KERNEL__ */
 #endif /* __LINUX_RCUPDATE_H */

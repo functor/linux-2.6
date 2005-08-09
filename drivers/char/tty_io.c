@@ -132,6 +132,8 @@ LIST_HEAD(tty_drivers);			/* linked list of tty drivers */
    vt.c for deeply disgusting hack reasons */
 DECLARE_MUTEX(tty_sem);
 
+int console_use_vt = 1;
+
 #ifdef CONFIG_UNIX98_PTYS
 extern struct tty_driver *ptm_driver;	/* Unix98 pty masters; for /dev/ptmx */
 extern int pty_limit;		/* Config limit on Unix98 ptys */
@@ -186,7 +188,7 @@ char *tty_name(struct tty_struct *tty, char *buf)
 
 EXPORT_SYMBOL(tty_name);
 
-inline int tty_paranoia_check(struct tty_struct *tty, struct inode *inode,
+int tty_paranoia_check(struct tty_struct *tty, struct inode *inode,
 			      const char *routine)
 {
 #ifdef TTY_PARANOIA_CHECK
@@ -250,7 +252,7 @@ static void tty_set_termios_ldisc(struct tty_struct *tty, int num)
  *	callers who will do ldisc lookups and cannot sleep.
  */
  
-static spinlock_t tty_ldisc_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(tty_ldisc_lock);
 static DECLARE_WAIT_QUEUE_HEAD(tty_ldisc_wait);
 static struct tty_ldisc tty_ldiscs[NR_LDISCS];	/* line disc dispatch table	*/
 
@@ -328,7 +330,7 @@ void tty_ldisc_put(int disc)
 	
 EXPORT_SYMBOL_GPL(tty_ldisc_put);
 
-void tty_ldisc_assign(struct tty_struct *tty, struct tty_ldisc *ld)
+static void tty_ldisc_assign(struct tty_struct *tty, struct tty_ldisc *ld)
 {
 	tty->ldisc = *ld;
 	tty->ldisc.refcount = 0;
@@ -584,7 +586,7 @@ restart:
 /*
  * This routine returns a tty driver structure, given a device number
  */
-struct tty_driver *get_tty_driver(dev_t device, int *index)
+static struct tty_driver *get_tty_driver(dev_t device, int *index)
 {
 	struct tty_driver *p;
 
@@ -691,7 +693,7 @@ static struct file_operations hung_up_tty_fops = {
 	.release	= tty_release,
 };
 
-static spinlock_t redirect_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(redirect_lock);
 static struct file *redirect;
 
 /**
@@ -745,7 +747,7 @@ EXPORT_SYMBOL_GPL(tty_ldisc_flush);
  * but doesn't hold any locks, so we need to make sure we have the appropriate
  * locks for what we're doing..
  */
-void do_tty_hangup(void *data)
+static void do_tty_hangup(void *data)
 {
 	struct tty_struct *tty = (struct tty_struct *) data;
 	struct file * cons_filp = NULL;
@@ -1019,7 +1021,7 @@ static ssize_t tty_read(struct file * file, char __user * buf, size_t count,
 	tty_ldisc_deref(ld);
 	unlock_kernel();
 	if (i > 0)
-		inode->i_atime = CURRENT_TIME;
+		inode->i_atime = current_fs_time(inode->i_sb);
 	return i;
 }
 
@@ -1048,8 +1050,13 @@ static inline ssize_t do_tty_write(
 	 *
 	 * But if TTY_NO_WRITE_SPLIT is set, we should use a
 	 * big chunk-size..
+	 *
+	 * The default chunk-size is 2kB, because the NTTY
+	 * layer has problems with bigger chunks. It will
+	 * claim to be able to handle more characters than
+	 * it actually does.
 	 */
-	chunk = 4096;
+	chunk = 2048;
 	if (test_bit(TTY_NO_WRITE_SPLIT, &tty->flags))
 		chunk = 65536;
 	if (count < chunk)
@@ -1096,7 +1103,8 @@ static inline ssize_t do_tty_write(
 		cond_resched();
 	}
 	if (written) {
-		file->f_dentry->d_inode->i_mtime = CURRENT_TIME;
+		struct inode *inode = file->f_dentry->d_inode;
+		inode->i_mtime = current_fs_time(inode->i_sb);
 		ret = written;
 	}
 	up(&tty->atomic_write);
@@ -1156,8 +1164,8 @@ static inline void pty_line_name(struct tty_driver *driver, int index, char *p)
 	int i = index + driver->name_base;
 	/* ->name is initialized to "ttyp", but "tty" is expected */
 	sprintf(p, "%s%c%x",
-		driver->subtype == PTY_TYPE_SLAVE ? "pty" : driver->name,
-		ptychar[i >> 4 & 0xf], i & 0xf);
+			driver->subtype == PTY_TYPE_SLAVE ? "tty" : driver->name,
+			ptychar[i >> 4 & 0xf], i & 0xf);
 }
 
 static inline void tty_line_name(struct tty_driver *driver, int index, char *p)
@@ -1783,8 +1791,7 @@ retry_open:
 		goto got_driver;
 	}
 #ifdef CONFIG_VT
-	if (device == MKDEV(TTY_MAJOR,0)) {
-		extern int fg_console;
+	if (console_use_vt && device == MKDEV(TTY_MAJOR,0)) {
 		extern struct tty_driver *console_driver;
 		driver = console_driver;
 		index = fg_console;
@@ -2011,11 +2018,10 @@ static int tiocswinsz(struct tty_struct *tty, struct tty_struct *real_tty,
 		return 0;
 #ifdef CONFIG_VT
 	if (tty->driver->type == TTY_DRIVER_TYPE_CONSOLE) {
-		unsigned int currcons = tty->index;
 		int rc;
 
 		acquire_console_sem();
-		rc = vc_resize(currcons, tmp_ws.ws_col, tmp_ws.ws_row);
+		rc = vc_resize(tty->driver_data, tmp_ws.ws_col, tmp_ws.ws_row);
 		release_console_sem();
 		if (rc)
 			return -ENXIO;
@@ -2529,28 +2535,6 @@ out:
 }
 
 /*
- *	Call the ldisc flush directly from a driver. This function may
- *	return an error and need retrying by the user.
- */
-
-int tty_push_data(struct tty_struct *tty, unsigned char *cp, unsigned char *fp, int count)
-{
-	int ret = 0;
-	struct tty_ldisc *disc;
-	
-	disc = tty_ldisc_ref(tty);
-	if(test_bit(TTY_DONT_FLIP, &tty->flags))
-		ret = -EAGAIN;
-	else if(disc == NULL)
-		ret = -EIO;
-	else
-		disc->receive_buf(tty, cp, fp, count);
-	tty_ldisc_deref(disc);
-	return ret;
-	
-}
-
-/*
  * Routine which returns the baud rate of the tty
  *
  * Note that the baud_table needs to be kept in sync with the
@@ -2654,6 +2638,7 @@ static void initialize_tty_struct(struct tty_struct *tty)
 	tty->magic = TTY_MAGIC;
 	tty_ldisc_assign(tty, tty_ldisc_get(N_TTY));
 	tty->pgrp = -1;
+	tty->overrun_time = jiffies;
 	tty->flip.char_buf_ptr = tty->flip.char_buf;
 	tty->flip.flag_buf_ptr = tty->flip.flag_buf;
 	INIT_WORK(&tty->flip.work, flush_to_ldisc, tty);
@@ -2928,8 +2913,8 @@ void __init console_init(void)
 	   So I haven't moved it. dwmw2 */
         rs_360_init();
 #endif
-	call = &__con_initcall_start;
-	while (call < &__con_initcall_end) {
+	call = __con_initcall_start;
+	while (call < __con_initcall_end) {
 		(*call)();
 		call++;
 	}
@@ -2989,14 +2974,19 @@ static int __init tty_init(void)
 #endif
 
 #ifdef CONFIG_VT
-	cdev_init(&vc0_cdev, &console_fops);
-	if (cdev_add(&vc0_cdev, MKDEV(TTY_MAJOR, 0), 1) ||
-	    register_chrdev_region(MKDEV(TTY_MAJOR, 0), 1, "/dev/vc/0") < 0)
-		panic("Couldn't register /dev/tty0 driver\n");
-	devfs_mk_cdev(MKDEV(TTY_MAJOR, 0), S_IFCHR|S_IRUSR|S_IWUSR, "vc/0");
-	class_simple_device_add(tty_class, MKDEV(TTY_MAJOR, 0), NULL, "tty0");
+	if (console_use_vt) {
+		cdev_init(&vc0_cdev, &console_fops);
+		if (cdev_add(&vc0_cdev, MKDEV(TTY_MAJOR, 0), 1) ||
+		    register_chrdev_region(MKDEV(TTY_MAJOR, 0), 1,
+					   "/dev/vc/0") < 0)
+			panic("Couldn't register /dev/tty0 driver\n");
+		devfs_mk_cdev(MKDEV(TTY_MAJOR, 0), S_IFCHR|S_IRUSR|S_IWUSR,
+			      "vc/0");
+		class_simple_device_add(tty_class, MKDEV(TTY_MAJOR, 0), NULL,
+					"tty0");
 
-	vty_init();
+		vty_init();
+	}
 #endif
 	return 0;
 }

@@ -3,7 +3,7 @@
  *
  *  Virtual Server: Scheduler Support
  *
- *  Copyright (C) 2004  Herbert Pötzl
+ *  Copyright (C) 2004-2005  Herbert Pötzl
  *
  *  V0.01  adapted Sam Vilains version to 2.6.3
  *  V0.02  removed legacy interface
@@ -12,7 +12,6 @@
 
 #include <linux/config.h>
 #include <linux/sched.h>
-// #include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_sched.h>
 #include <linux/vserver/sched_cmd.h>
@@ -103,9 +102,8 @@ int vx_tokens_recalc(struct vx_info *vxi)
  *
  * Both properties are important to certain workloads.
  */
-int effective_vavavoom(task_t *p, int max_prio)
+int vx_effective_vavavoom(struct vx_info *vxi, int max_prio)
 {
-	struct vx_info *vxi = p->vx_info;
 	int vavavoom, max;
 
 	/* lots of tokens = lots of vavavoom
@@ -116,15 +114,10 @@ int effective_vavavoom(task_t *p, int max_prio)
 		max = max * max;
 		vavavoom = max_prio * VAVAVOOM_RATIO / 100
 			* (vavavoom*vavavoom - (max >> 2)) / max;
-		/*  alternative, geometric mapping
-		vavavoom = -( MAX_USER_PRIO*VAVAVOOM_RATIO/100 * vavavoom
-			/ vxi->sched.tokens_max -
-			MAX_USER_PRIO*VAVAVOOM_RATIO/100/2); */
 	} else
 		vavavoom = 0;
-	/* vavavoom = ( MAX_USER_PRIO*VAVAVOOM_RATIO/100*tokens_left(p) -
-		MAX_USER_PRIO*VAVAVOOM_RATIO/100/2); */
 
+	vxi->sched.vavavoom = vavavoom;
 	return vavavoom;
 }
 

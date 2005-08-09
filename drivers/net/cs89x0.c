@@ -136,6 +136,7 @@
 #include <linux/string.h>
 #include <linux/init.h>
 #include <linux/bitops.h>
+#include <linux/delay.h>
 
 #include <asm/system.h>
 #include <asm/io.h>
@@ -909,8 +910,7 @@ void  __init reset_chip(struct net_device *dev)
 	writereg(dev, PP_SelfCTL, readreg(dev, PP_SelfCTL) | POWER_ON_RESET);
 
 	/* wait 30 ms */
-	current->state = TASK_INTERRUPTIBLE;
-	schedule_timeout(30*HZ/1000);
+	msleep(30);
 
 #ifndef CONFIG_ARCH_IXDP2X01
 	if (lp->chip_type != CS8900) {
@@ -1710,14 +1710,14 @@ static int use_dma;			/* These generate unused var warnings if ALLOW_DMA = 0 */
 static int dma;
 static int dmasize=16;			/* or 64 */
 
-MODULE_PARM(io, "i");
-MODULE_PARM(irq, "i");
-MODULE_PARM(debug, "i");
-MODULE_PARM(media, "c8");
-MODULE_PARM(duplex, "i");
-MODULE_PARM(dma , "i");
-MODULE_PARM(dmasize , "i");
-MODULE_PARM(use_dma , "i");
+module_param(io, int, 0);
+module_param(irq, int, 0);
+module_param(debug, int, 0);
+module_param_string(media, media, sizeof(media), 0);
+module_param(duplex, int, 0);
+module_param(dma , int, 0);
+module_param(dmasize , int, 0);
+module_param(use_dma , int, 0);
 MODULE_PARM_DESC(io, "cs89x0 I/O base address");
 MODULE_PARM_DESC(irq, "cs89x0 IRQ number");
 #if DEBUGGING

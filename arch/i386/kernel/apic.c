@@ -548,8 +548,7 @@ void __init setup_local_APIC (void)
  * disable it down before re-entering the BIOS on shutdown.
  * Otherwise the BIOS may get confused and not power-off.
  */
-void
-lapic_shutdown(void)
+void lapic_shutdown(void)
 {
 	if (!cpu_has_apic || !enabled_via_apicbase)
 		return;
@@ -579,7 +578,7 @@ static struct {
 	unsigned int apic_thmr;
 } apic_pm_state;
 
-static int lapic_suspend(struct sys_device *dev, u32 state)
+static int lapic_suspend(struct sys_device *dev, pm_message_t state)
 {
 	unsigned long flags;
 
@@ -907,30 +906,25 @@ static unsigned int __init get_8254_timer_count(void)
 /* next tick in 8254 can be caught by catching timer wraparound */
 static void __init wait_8254_wraparound(void)
 {
-	unsigned int curr_count, prev_count=~0;
-	int delta;
+	unsigned int curr_count, prev_count;
 
 	curr_count = get_8254_timer_count();
-
 	do {
 		prev_count = curr_count;
 		curr_count = get_8254_timer_count();
-		delta = curr_count-prev_count;
 
-	/*
-	 * This limit for delta seems arbitrary, but it isn't, it's
-	 * slightly above the level of error a buggy Mercury/Neptune
-	 * chipset timer can cause.
-	 */
+		/* workaround for broken Mercury/Neptune */
+		if (prev_count >= curr_count + 0x100)
+			curr_count = get_8254_timer_count();
 
-	} while (delta < 300);
+	} while (prev_count >= curr_count);
 }
 
 /*
  * Default initialization for 8254 timers. If we use other timers like HPET,
  * we override this later
  */
-void (*wait_timer_tick)(void) = wait_8254_wraparound;
+void (*wait_timer_tick)(void) __initdata = wait_8254_wraparound;
 
 /*
  * This function sets up the local APIC timer, with a timeout of
@@ -945,7 +939,7 @@ void (*wait_timer_tick)(void) = wait_8254_wraparound;
 
 #define APIC_DIVISOR 16
 
-void __setup_APIC_LVTT(unsigned int clocks)
+static void __setup_APIC_LVTT(unsigned int clocks)
 {
 	unsigned int lvtt_value, tmp_value, ver;
 
@@ -966,7 +960,7 @@ void __setup_APIC_LVTT(unsigned int clocks)
 	apic_write_around(APIC_TMICT, clocks/APIC_DIVISOR);
 }
 
-static void setup_APIC_timer(unsigned int clocks)
+static void __init setup_APIC_timer(unsigned int clocks)
 {
 	unsigned long flags;
 
@@ -995,7 +989,7 @@ static void setup_APIC_timer(unsigned int clocks)
  * APIC irq that way.
  */
 
-int __init calibrate_APIC_clock(void)
+static int __init calibrate_APIC_clock(void)
 {
 	unsigned long long t1 = 0, t2 = 0;
 	long tt1, tt2;
@@ -1081,9 +1075,7 @@ void __init setup_boot_APIC_clock(void)
 
 void __init setup_secondary_APIC_clock(void)
 {
-	local_irq_disable(); /* FIXME: Do we need this? --RR */
 	setup_APIC_timer(calibration_result);
-	local_irq_enable();
 }
 
 void __init disable_APIC_timer(void)
@@ -1203,7 +1195,7 @@ fastcall void smp_apic_timer_interrupt(struct pt_regs *regs)
 	/*
 	 * the NMI deadlock-detector uses this.
 	 */
-	irq_stat[cpu].apic_timer_irqs++;
+	per_cpu(irq_stat, cpu).apic_timer_irqs++;
 
 	/*
 	 * NOTE! We'd better ACK the irq immediately,
@@ -1303,8 +1295,6 @@ int __init APIC_init_uniprocessor (void)
 
 	setup_local_APIC();
 
-	if (nmi_watchdog == NMI_LOCAL_APIC)
-		check_nmi_watchdog();
 #ifdef CONFIG_X86_IO_APIC
 	if (smp_found_config)
 		if (!skip_ioapic_setup && nr_ioapics)

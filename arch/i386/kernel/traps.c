@@ -94,7 +94,7 @@ asmlinkage void machine_check(void);
 
 static int kstack_depth_to_print = 24;
 struct notifier_block *i386die_chain;
-static spinlock_t die_notifier_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(die_notifier_lock);
 
 int register_die_notifier(struct notifier_block *nb)
 {
@@ -183,7 +183,10 @@ void show_stack(struct task_struct *task, unsigned long *esp)
 			break;
 		if (i && ((i % 8) == 0))
 			printk("\n       ");
-		printk("%08lx ", *stack++);
+		if ((check_tainted() != 0) && (i==0))
+			printk("badc0ded ");
+		else
+			printk("%08lx ", *stack++);
 	}
 	printk("\nCall Trace:\n");
 	show_trace(task, esp);
@@ -308,7 +311,7 @@ void die(const char * str, struct pt_regs * regs, long err)
 	static int die_counter;
 
 	vxh_throw_oops();
-	if (die.lock_owner != smp_processor_id()) {
+	if (die.lock_owner != _smp_processor_id()) {
 		console_verbose();
 		spin_lock_irq(&die.lock);
 		die.lock_owner = smp_processor_id();
@@ -351,8 +354,7 @@ void die(const char * str, struct pt_regs * regs, long err)
 		if (netdump_func)
 			netdump_func = NULL;
 		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout(5 * HZ);
+		ssleep(5);
 		panic("Fatal exception");
 	}
 	do_exit(SIGSEGV);
@@ -459,15 +461,88 @@ DO_ERROR(11, SIGBUS,  "segment not present", segment_not_present)
 DO_ERROR(12, SIGBUS,  "stack segment", stack_segment)
 DO_ERROR_INFO(17, SIGBUS, "alignment check", alignment_check, BUS_ADRALN, 0)
 
+
 /*
+ * lazy-check for CS validity on exec-shield binaries:
+ *
  * the original non-exec stack patch was written by
  * Solar Designer <solar at openwall.com>. Thanks!
  */
+static int
+check_lazy_exec_limit(int cpu, struct pt_regs *regs, long error_code)
+{
+	struct desc_struct *desc1, *desc2;
+	struct vm_area_struct *vma;
+	unsigned long limit;
+
+	if (current->mm == NULL)
+		return 0;
+
+	limit = -1UL;
+	if (current->mm->context.exec_limit != -1UL) {
+		limit = PAGE_SIZE;
+		spin_lock(&current->mm->page_table_lock);
+		for (vma = current->mm->mmap; vma; vma = vma->vm_next)
+			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
+				limit = vma->vm_end;
+		spin_unlock(&current->mm->page_table_lock);
+		if (limit >= TASK_SIZE)
+			limit = -1UL;
+		current->mm->context.exec_limit = limit;
+	}
+	set_user_cs(&current->mm->context.user_cs, limit);
+
+	desc1 = &current->mm->context.user_cs;
+	desc2 = per_cpu(cpu_gdt_table, cpu) + GDT_ENTRY_DEFAULT_USER_CS;
+
+	if (desc1->a != desc2->a || desc1->b != desc2->b) {
+		/*
+		 * The CS was not in sync - reload it and retry the
+		 * instruction. If the instruction still faults then
+		 * we won't hit this branch next time around.
+		 */
+		if (print_fatal_signals >= 2) {
+			printk("#GPF fixup (%ld[seg:%lx]) at %08lx, CPU#%d.\n", error_code, error_code/8, regs->eip, smp_processor_id());
+			printk(" exec_limit: %08lx, user_cs: %08lx/%08lx, CPU_cs: %08lx/%08lx.\n", current->mm->context.exec_limit, desc1->a, desc1->b, desc2->a, desc2->b);
+		}
+		load_user_cs_desc(cpu, current->mm);
+		return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * The fixup code for errors in iret jumps to here (iret_exc).  It loses
+ * the original trap number and error code.  The bogus trap 32 and error
+ * code 0 are what the vanilla kernel delivers via:
+ * DO_ERROR_INFO(32, SIGSEGV, "iret exception", iret_error, ILL_BADSTK, 0)
+ *
+ * In case of a general protection fault in the iret instruction, we
+ * need to check for a lazy CS update for exec-shield.
+ */
+fastcall void do_iret_error(struct pt_regs *regs, long error_code)
+{
+	int ok = check_lazy_exec_limit(get_cpu(), regs, error_code);
+	put_cpu();
+	if (!ok && notify_die(DIE_TRAP, "iret exception", regs,
+			      error_code, 32, SIGSEGV) != NOTIFY_STOP) {
+		siginfo_t info;
+		info.si_signo = SIGSEGV;
+		info.si_errno = 0;
+		info.si_code = ILL_BADSTK;
+		info.si_addr = 0;
+		do_trap(32, SIGSEGV, "iret exception", 0, regs, error_code,
+			&info);
+	}
+}
+
 fastcall void do_general_protection(struct pt_regs * regs, long error_code)
 {
 	int cpu = get_cpu();
 	struct tss_struct *tss = &per_cpu(init_tss, cpu);
 	struct thread_struct *thread = &current->thread;
+	int ok;
 
 	/*
 	 * Perform the lazy TSS's I/O bitmap copy. If the TSS has an
@@ -493,7 +568,6 @@ fastcall void do_general_protection(struct pt_regs * regs, long error_code)
 		put_cpu();
 		return;
 	}
-	put_cpu();
 
 	if (regs->eflags & VM_MASK)
 		goto gp_in_vm86;
@@ -501,41 +575,13 @@ fastcall void do_general_protection(struct pt_regs * regs, long error_code)
 	if (!(regs->xcs & 3))
 		goto gp_in_kernel;
 
-	/*
-	 * lazy-check for CS validity on exec-shield binaries:
-	 */
-	if (current->mm) {
-		int cpu = smp_processor_id();
-		struct desc_struct *desc1, *desc2;
-		struct vm_area_struct *vma;
-		unsigned long limit = 0;
-		
-		spin_lock(&current->mm->page_table_lock);
-		for (vma = current->mm->mmap; vma; vma = vma->vm_next)
-			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
-				limit = vma->vm_end;
-		spin_unlock(&current->mm->page_table_lock);
+	ok = check_lazy_exec_limit(cpu, regs, error_code);
 
-		current->mm->context.exec_limit = limit;
-		set_user_cs(&current->mm->context.user_cs, limit);
+	put_cpu();
 
-		desc1 = &current->mm->context.user_cs;
-		desc2 = per_cpu(cpu_gdt_table, cpu) + GDT_ENTRY_DEFAULT_USER_CS;
+	if (ok)
+		return;
 
-		/*
-		 * The CS was not in sync - reload it and retry the
-		 * instruction. If the instruction still faults then
-		 * we wont hit this branch next time around.
-		 */
-		if (desc1->a != desc2->a || desc1->b != desc2->b) {
-			if (print_fatal_signals >= 2) {
-				printk("#GPF fixup (%ld[seg:%lx]) at %08lx, CPU#%d.\n", error_code, error_code/8, regs->eip, smp_processor_id());
-				printk(" exec_limit: %08lx, user_cs: %08lx/%08lx, CPU_cs: %08lx/%08lx.\n", current->mm->context.exec_limit, desc1->a, desc1->b, desc2->a, desc2->b);
-			}
-			load_user_cs_desc(cpu, current->mm);
-			return;
-		}
-	}
 	if (print_fatal_signals) {
 		printk("#GPF(%ld[seg:%lx]) at %08lx, CPU#%d.\n", error_code, error_code/8, regs->eip, smp_processor_id());
 		printk(" exec_limit: %08lx, user_cs: %08lx/%08lx.\n", current->mm->context.exec_limit, current->mm->context.user_cs.a, current->mm->context.user_cs.b);
@@ -547,11 +593,13 @@ fastcall void do_general_protection(struct pt_regs * regs, long error_code)
 	return;
 
 gp_in_vm86:
+	put_cpu();
 	local_irq_enable();
 	handle_vm86_fault((struct kernel_vm86_regs *) regs, error_code);
 	return;
 
 gp_in_kernel:
+	put_cpu();
 	if (!fixup_exception(regs)) {
 		if (notify_die(DIE_GPF, "general protection fault", regs,
 				error_code, 13, SIGSEGV) == NOTIFY_STOP)
@@ -601,7 +649,7 @@ static void unknown_nmi_error(unsigned char reason, struct pt_regs * regs)
 	printk("Do you have a strange power saving mode enabled?\n");
 }
 
-static spinlock_t nmi_print_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(nmi_print_lock);
 
 void die_nmi (struct pt_regs *regs, const char *msg)
 {
@@ -693,16 +741,15 @@ void unset_nmi_callback(void)
 }
 
 #ifdef CONFIG_KPROBES
-fastcall int do_int3(struct pt_regs *regs, long error_code)
+fastcall void do_int3(struct pt_regs *regs, long error_code)
 {
 	if (notify_die(DIE_INT3, "int3", regs, error_code, 3, SIGTRAP)
 			== NOTIFY_STOP)
-		return 1;
+		return;
 	/* This is an interrupt gate, because kprobes wants interrupts
 	disabled.  Normal trap handlers don't. */
 	restore_interrupts(regs);
 	do_trap(3, SIGTRAP, "int3", 1, regs, error_code, NULL);
-	return 0;
 }
 #endif
 
@@ -732,7 +779,6 @@ fastcall void do_debug(struct pt_regs * regs, long error_code)
 {
 	unsigned int condition;
 	struct task_struct *tsk = current;
-	siginfo_t info;
 
 	__asm__ __volatile__("movl %%db6,%0" : "=r" (condition));
 
@@ -755,36 +801,22 @@ fastcall void do_debug(struct pt_regs * regs, long error_code)
 	/* Save debug status register where ptrace can see it */
 	tsk->thread.debugreg[6] = condition;
 
-	/* Mask out spurious TF errors due to lazy TF clearing */
+	/*
+	 * Single-stepping through TF: make sure we ignore any events in
+	 * kernel space (but re-enable TF when returning to user mode).
+	 */
 	if (condition & DR_STEP) {
 		/*
-		 * The TF error should be masked out only if the current
-		 * process is not traced and if the TRAP flag has been set
-		 * previously by a tracing process (condition detected by
-		 * the PT_DTRACE flag); remember that the i386 TRAP flag
-		 * can be modified by the process itself in user mode,
-		 * allowing programs to debug themselves without the ptrace()
-		 * interface.
+		 * We already checked v86 mode above, so we can
+		 * check for kernel mode by just checking the CPL
+		 * of CS.
 		 */
 		if ((regs->xcs & 3) == 0)
 			goto clear_TF_reenable;
-		if ((tsk->ptrace & (PT_DTRACE|PT_PTRACED)) == PT_DTRACE)
-			goto clear_TF;
 	}
 
 	/* Ok, finally something we can handle */
-	tsk->thread.trap_no = 1;
-	tsk->thread.error_code = error_code;
-	info.si_signo = SIGTRAP;
-	info.si_errno = 0;
-	info.si_code = TRAP_BRKPT;
-	
-	/* If this is a kernel mode trap, save the user PC on entry to 
-	 * the kernel, that's what the debugger can make sense of.
-	 */
-	info.si_addr = ((regs->xcs & 3) == 0) ? (void __user *)tsk->thread.eip
-	                                      : (void __user *)regs->eip;
-	force_sig_info(SIGTRAP, &info, tsk);
+	send_sigtrap(tsk, regs, error_code);
 
 	/* Disable additional traps. They'll be re-enabled when
 	 * the signal is delivered.
@@ -801,7 +833,6 @@ debug_vm86:
 
 clear_TF_reenable:
 	set_tsk_thread_flag(tsk, TIF_SINGLESTEP);
-clear_TF:
 	regs->eflags &= ~TF_MASK;
 	return;
 }
@@ -873,7 +904,7 @@ fastcall void do_coprocessor_error(struct pt_regs * regs, long error_code)
 	math_error((void __user *)regs->eip);
 }
 
-void simd_math_error(void __user *eip)
+static void simd_math_error(void __user *eip)
 {
 	struct task_struct * task;
 	siginfo_t info;
@@ -954,6 +985,51 @@ fastcall void do_spurious_interrupt_bug(struct pt_regs * regs,
 #endif
 }
 
+fastcall void setup_x86_bogus_stack(unsigned char * stk)
+{
+	unsigned long *switch16_ptr, *switch32_ptr;
+	struct pt_regs *regs;
+	unsigned long stack_top, stack_bot;
+	unsigned short iret_frame16_off;
+	int cpu = smp_processor_id();
+	/* reserve the space on 32bit stack for the magic switch16 pointer */
+	memmove(stk, stk + 8, sizeof(struct pt_regs));
+	switch16_ptr = (unsigned long *)(stk + sizeof(struct pt_regs));
+	regs = (struct pt_regs *)stk;
+	/* now the switch32 on 16bit stack */
+	stack_bot = (unsigned long)&per_cpu(cpu_16bit_stack, cpu);
+	stack_top = stack_bot +	CPU_16BIT_STACK_SIZE;
+	switch32_ptr = (unsigned long *)(stack_top - 8);
+	iret_frame16_off = CPU_16BIT_STACK_SIZE - 8 - 20;
+	/* copy iret frame on 16bit stack */
+	memcpy((void *)(stack_bot + iret_frame16_off), &regs->eip, 20);
+	/* fill in the switch pointers */
+	switch16_ptr[0] = (regs->esp & 0xffff0000) | iret_frame16_off;
+	switch16_ptr[1] = __ESPFIX_SS;
+	switch32_ptr[0] = (unsigned long)stk + sizeof(struct pt_regs) +
+		8 - CPU_16BIT_STACK_SIZE;
+	switch32_ptr[1] = __KERNEL_DS;
+}
+
+fastcall unsigned char * fixup_x86_bogus_stack(unsigned short sp)
+{
+	unsigned long *switch32_ptr;
+	unsigned char *stack16, *stack32;
+	unsigned long stack_top, stack_bot;
+	int len;
+	int cpu = smp_processor_id();
+	stack_bot = (unsigned long)&per_cpu(cpu_16bit_stack, cpu);
+	stack_top = stack_bot +	CPU_16BIT_STACK_SIZE;
+	switch32_ptr = (unsigned long *)(stack_top - 8);
+	/* copy the data from 16bit stack to 32bit stack */
+	len = CPU_16BIT_STACK_SIZE - 8 - sp;
+	stack16 = (unsigned char *)(stack_bot + sp);
+	stack32 = (unsigned char *)
+		(switch32_ptr[0] + CPU_16BIT_STACK_SIZE - 8 - len);
+	memcpy(stack32, stack16, len);
+	return stack32;
+}
+
 /*
  *  'math_state_restore()' saves the current math information in the
  * old math state array, and gets the new ones from the current task
@@ -970,7 +1046,7 @@ asmlinkage void math_state_restore(struct pt_regs regs)
 	struct task_struct *tsk = thread->task;
 
 	clts();		/* Allow maths ops (or we recurse) */
-	if (!tsk->used_math)
+	if (!tsk_used_math(tsk))
 		init_fpu(tsk);
 	restore_fpu(tsk);
 	thread->status |= TS_USEDFPU;	/* So we fnsave on switch_to() */
@@ -1054,9 +1130,11 @@ static void __init set_task_gate(unsigned int n, unsigned int gdt_entry)
 void __init trap_init(void)
 {
 #ifdef CONFIG_EISA
-	if (isa_readl(0x0FFFD9) == 'E'+('I'<<8)+('S'<<16)+('A'<<24)) {
+	void __iomem *p = ioremap(0x0FFFD9, 4);
+	if (readl(p) == 'E'+('I'<<8)+('S'<<16)+('A'<<24)) {
 		EISA_bus = 1;
 	}
+	iounmap(p);
 #endif
 
 #ifdef CONFIG_X86_LOCAL_APIC
@@ -1095,3 +1173,10 @@ void __init trap_init(void)
 
 	trap_init_hook();
 }
+
+static int __init kstack_setup(char *s)
+{
+	kstack_depth_to_print = simple_strtoul(s, NULL, 0);
+	return 0;
+}
+__setup("kstack=", kstack_setup);

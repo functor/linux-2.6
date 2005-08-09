@@ -19,10 +19,9 @@
 #include <linux/init.h>
 #include <linux/pnp.h>
 #include <linux/ide.h>
-#include <linux/delay.h>
 
 /* Add your devices here :)) */
-struct pnp_device_id idepnp_devices[] = {
+static struct pnp_device_id idepnp_devices[] = {
   	/* Generic ESDI/IDE/ATA compatible hard disk controller */
 	{.id = "PNP0600", .driver_data = 0},
 	{.id = ""}
@@ -58,11 +57,7 @@ static void idepnp_remove(struct pnp_dev * dev)
 {
 	ide_hwif_t *hwif = pnp_get_drvdata(dev);
 	if (hwif) {
-		/* FIXME: will want pushing into a helper workqueue */
-		while(ide_unregister_hwif(hwif) < 0) {
-			removed_hwif_iops(hwif);
-			msleep(1000);
-		}
+		ide_unregister(hwif->index);
 	} else
 		printk(KERN_ERR "idepnp: Unable to remove device, please report.\n");
 }

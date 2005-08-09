@@ -18,12 +18,12 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # that the kernel isn't the stock distribution kernel, for example by
 # adding some text to the end of the version number.
 #
-%define sublevel 10
+%define sublevel 12
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
 %define rhbsys  %([ -r /etc/beehive-root -o -n "%{?__beehive_build}" ] && echo || echo .`whoami`)
 
-%define release 1.771_FC2.2.planetlab%{?date:.%{date}}
+%define release 1.1398_FC4.0.planetlab%{?date:.%{date}}
 
 %define signmodules 0
 %define make_target bzImage

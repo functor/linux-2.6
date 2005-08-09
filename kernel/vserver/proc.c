@@ -3,7 +3,7 @@
  *
  *  Virtual Context Support
  *
- *  Copyright (C) 2003-2004  Herbert Pötzl
+ *  Copyright (C) 2003-2005  Herbert Pötzl
  *
  *  V0.01  basic structure
  *  V0.02  adaptation vs1.3.0
@@ -31,6 +31,7 @@
 #include "cvirt_proc.h"
 #include "limit_proc.h"
 #include "sched_proc.h"
+#include "vci_config.h"
 
 static struct proc_dir_entry *proc_virtual;
 
@@ -62,9 +63,11 @@ static int proc_virtual_info(int vid, char *buffer)
 	return sprintf(buffer,
 		"VCIVersion:\t%04x:%04x\n"
 		"VCISyscall:\t%d\n"
+		"VCIKernel:\t%08x\n"
 		,VCI_VERSION >> 16
 		,VCI_VERSION & 0xFFFF
 		,__NR_vserver
+		,vci_kernel_config()
 		);
 }
 
@@ -99,13 +102,13 @@ int proc_xid_status (int vid, char *buffer)
 		return 0;
 	length = sprintf(buffer,
 		"UseCnt:\t%d\n"
-		"RefCnt:\t%d\n"
+		"Tasks:\t%d\n"
 		"Flags:\t%016llx\n"
 		"BCaps:\t%016llx\n"
 		"CCaps:\t%016llx\n"
 		"Ticks:\t%d\n"
 		,atomic_read(&vxi->vx_usecnt)
-		,atomic_read(&vxi->vx_refcnt)
+		,atomic_read(&vxi->vx_tasks)
 		,(unsigned long long)vxi->vx_flags
 		,(unsigned long long)vxi->vx_bcaps
 		,(unsigned long long)vxi->vx_ccaps
@@ -218,9 +221,9 @@ int proc_nid_status (int vid, char *buffer)
 		return 0;
 	length = sprintf(buffer,
 		"UseCnt:\t%d\n"
-		"RefCnt:\t%d\n"
+		"Tasks:\t%d\n"
 		,atomic_read(&nxi->nx_usecnt)
-		,atomic_read(&nxi->nx_refcnt)
+		,atomic_read(&nxi->nx_tasks)
 		);
 	put_nx_info(nxi);
 	return length;
@@ -252,7 +255,6 @@ static struct inode *proc_vid_make_inode(struct super_block * sb,
 
 	inode->i_uid = 0;
 	inode->i_gid = 0;
-	// inode->i_xid = xid;
 out:
 	return inode;
 }
@@ -265,10 +267,10 @@ static int proc_vid_revalidate(struct dentry * dentry, struct nameidata *nd)
 	vid = inode_vid(inode);
 	switch (inode_type(inode) & PROC_VID_MASK) {
 		case PROC_XID_INO:
-			hashed = vx_info_is_hashed(vid);
+			hashed = xid_is_hashed(vid);
 			break;
 		case PROC_NID_INO:
-			hashed = nx_info_is_hashed(vid);
+			hashed = nid_is_hashed(vid);
 			break;
 	}
 	if (hashed)
@@ -276,13 +278,6 @@ static int proc_vid_revalidate(struct dentry * dentry, struct nameidata *nd)
 	d_drop(dentry);
 	return 0;
 }
-
-/*
-static int proc_vid_delete_dentry(struct dentry * dentry)
-{
-	return 1;
-}
-*/
 
 
 #define PROC_BLOCK_SIZE (PAGE_SIZE - 1024)
@@ -293,7 +288,6 @@ static ssize_t proc_vid_info_read(struct file * file, char * buf,
 	struct inode * inode = file->f_dentry->d_inode;
 	unsigned long page;
 	ssize_t length;
-	ssize_t end;
 	int vid;
 
 	if (count > PROC_BLOCK_SIZE)
@@ -304,22 +298,11 @@ static ssize_t proc_vid_info_read(struct file * file, char * buf,
 	vid = inode_vid(inode);
 	length = PROC_I(inode)->op.proc_vid_read(vid, (char*)page);
 
-	if (length < 0) {
-		free_page(page);
-		return length;
-	}
-	/* Static 4kB (or whatever) block capacity */
-	if (*ppos >= length) {
-		free_page(page);
-		return 0;
-	}
-	if (count + *ppos > length)
-		count = length - *ppos;
-	end = count + *ppos;
-	copy_to_user(buf, (char *) page + *ppos, count);
-	*ppos = end;
+	if (length >= 0)
+		length = simple_read_from_buffer(buf, count, ppos,
+			(char *)page, length);
 	free_page(page);
-	return count;
+	return length;
 }
 
 
@@ -334,7 +317,6 @@ static struct file_operations proc_vid_info_file_operations = {
 
 static struct dentry_operations proc_vid_dentry_operations = {
 	d_revalidate:	proc_vid_revalidate,
-//	d_delete:       proc_vid_delete_dentry,
 };
 
 
@@ -433,7 +415,6 @@ static struct dentry *proc_vid_lookup(struct inode *dir,
 			return ERR_PTR(-EINVAL);
 	}
 	inode->i_mode = p->mode;
-//	inode->i_op = &proc_vid_info_inode_operations;
 	inode->i_fop = &proc_vid_info_file_operations;
 	inode->i_nlink = 1;
 	inode->i_flags|=S_IMMUTABLE;
@@ -555,8 +536,6 @@ struct dentry *proc_virtual_lookup(struct inode *dir,
 		inode->i_ino = fake_ino(1, PROC_XID_INO);
 		inode->i_mode = S_IFLNK|S_IRWXUGO;
 		inode->i_uid = inode->i_gid = 0;
-		inode->i_size = 64;
-//		inode->i_op = &proc_current_inode_operations;
 		d_add(dentry, inode);
 		return NULL;
 	}
@@ -567,8 +546,6 @@ struct dentry *proc_virtual_lookup(struct inode *dir,
 		inode->i_fop = &proc_vid_info_file_operations;
 		PROC_I(inode)->op.proc_vid_read = proc_virtual_info;
 		inode->i_mode = S_IFREG|S_IRUGO;
-//		inode->i_size = 64;
-//		inode->i_op = &proc_current_inode_operations;
 		d_add(dentry, inode);
 		return NULL;
 	}
@@ -625,8 +602,6 @@ struct dentry *proc_vnet_lookup(struct inode *dir,
 		inode->i_ino = fake_ino(1, PROC_NID_INO);
 		inode->i_mode = S_IFLNK|S_IRWXUGO;
 		inode->i_uid = inode->i_gid = 0;
-		inode->i_size = 64;
-//		inode->i_op = &proc_current_inode_operations;
 		d_add(dentry, inode);
 		return NULL;
 	}
@@ -637,8 +612,6 @@ struct dentry *proc_vnet_lookup(struct inode *dir,
 		inode->i_fop = &proc_vid_info_file_operations;
 		PROC_I(inode)->op.proc_vid_read = proc_vnet_info;
 		inode->i_mode = S_IFREG|S_IRUGO;
-//		inode->i_size = 64;
-//		inode->i_op = &proc_current_inode_operations;
 		d_add(dentry, inode);
 		return NULL;
 	}
@@ -842,9 +815,10 @@ void proc_vx_init(void)
 /* per pid info */
 
 
-char *task_vx_info(struct task_struct *p, char *buffer)
+int proc_pid_vx_info(struct task_struct *p, char *buffer)
 {
 	struct vx_info *vxi;
+	char * orig = buffer;
 
 	buffer += sprintf (buffer,"XID:\t%d\n", vx_task_xid(p));
 	vxi = task_get_vx_info(p);
@@ -859,20 +833,14 @@ char *task_vx_info(struct task_struct *p, char *buffer)
 			,vxi->vx_initpid);
 	}
 	put_vx_info(vxi);
-	return buffer;
-}
-
-int proc_pid_vx_info(struct task_struct *p, char *buffer)
-{
-	char * orig = buffer;
-
-	buffer = task_vx_info(p, buffer);
 	return buffer - orig;
 }
 
-char *task_nx_info(struct task_struct *p, char *buffer)
+
+int proc_pid_nx_info(struct task_struct *p, char *buffer)
 {
 	struct nx_info *nxi;
+	char * orig = buffer;
 
 	buffer += sprintf (buffer,"NID:\t%d\n", nx_task_nid(p));
 	nxi = task_get_nx_info(p);
@@ -890,14 +858,6 @@ char *task_nx_info(struct task_struct *p, char *buffer)
 			,NIPQUAD(nxi->v4_bcast));
 	}
 	put_nx_info(nxi);
-	return buffer;
-}
-
-int proc_pid_nx_info(struct task_struct *p, char *buffer)
-{
-	char * orig = buffer;
-
-	buffer = task_nx_info(p, buffer);
 	return buffer - orig;
 }
 

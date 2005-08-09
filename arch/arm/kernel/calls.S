@@ -295,7 +295,6 @@ __syscall_start:
 		.long	sys_mq_notify
 		.long	sys_mq_getsetattr
 /* 280 */	.long	sys_waitid
-		.long	sys_socket
 		.long	sys_bind
 		.long	sys_connect
 		.long	sys_listen
@@ -327,6 +326,7 @@ __syscall_start:
 /* 310 */	.long	sys_request_key
 		.long	sys_keyctl
 		.long	sys_semtimedop
+		.long	sys_vserver
 __syscall_end:
 
 		.rept	NR_syscalls - (__syscall_end - __syscall_start) / 4

@@ -18,9 +18,8 @@
 #include <linux/backing-dev.h>
 #include <linux/buffer_head.h>
 #include <linux/random.h>
-
 #include <linux/vs_dlimit.h>
-
+#include <linux/vserver/xid.h>
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"
@@ -469,11 +468,7 @@ struct inode *ext2_new_inode(struct inode *dir, int mode)
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
 
-	if (sb->s_flags & MS_TAGXID)
-		inode->i_xid = vx_current_xid();
-	else
-		inode->i_xid = 0;
-
+	inode->i_xid = vx_current_fsxid(sb);
 	if (DLIMIT_ALLOC_INODE(sb, inode->i_xid)) {
 		err = -ENOSPC;
 		goto fail_dlim;
@@ -590,7 +585,7 @@ got:
 	inode->i_ino = ino;
 	inode->i_blksize = PAGE_SIZE;	/* This is the optimal IO size (for stat), not the fs block size */
 	inode->i_blocks = 0;
-	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
+	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME_SEC;
 	memset(ei->i_data, 0, sizeof(ei->i_data));
 	ei->i_flags = EXT2_I(dir)->i_flags &
 		~(EXT2_BTREE_FL|EXT2_IUNLINK_FL|EXT2_BARRIER_FL);

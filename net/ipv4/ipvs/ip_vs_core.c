@@ -57,7 +57,6 @@ EXPORT_SYMBOL(ip_vs_conn_put);
 #ifdef CONFIG_IP_VS_DEBUG
 EXPORT_SYMBOL(ip_vs_get_debug_level);
 #endif
-EXPORT_SYMBOL(check_for_ip_vs_out);
 EXPORT_SYMBOL(ip_vs_make_skb_writable);
 
 
@@ -835,31 +834,6 @@ ip_vs_out(unsigned int hooknum, struct sk_buff **pskb,
 
 
 /*
- *      Check if the packet is for VS/NAT connections, then send it
- *      immediately.
- *      Called by ip_fw_compact to detect packets for VS/NAT before
- *      they are changed by ipchains masquerading code.
- */
-unsigned int
-check_for_ip_vs_out(struct sk_buff **pskb, int (*okfn)(struct sk_buff *))
-{
-	unsigned int ret;
-
-	ret = ip_vs_out(NF_IP_FORWARD, pskb, NULL, NULL, NULL);
-	if (ret != NF_ACCEPT) {
-		return ret;
-	} else {
-		/* send the packet immediately if it is already mangled
-		   by ip_vs_out */
-		if ((*pskb)->nfcache & NFC_IPVS_PROPERTY) {
-			(*okfn)(*pskb);
-			return NF_STOLEN;
-		}
-	}
-	return NF_ACCEPT;
-}
-
-/*
  *	Handle ICMP messages in the outside-to-inside direction (incoming).
  *	Find any that might be relevant, check against existing connections,
  *	forward to the right destination host if relevant.
@@ -1029,7 +1003,7 @@ ip_vs_in(unsigned int hooknum, struct sk_buff **pskb,
 
 	/* Check the server status */
 	if (cp->dest && !(cp->dest->flags & IP_VS_DEST_F_AVAILABLE)) {
-		/* the destination server is not availabe */
+		/* the destination server is not available */
 
 		if (sysctl_ip_vs_expire_nodest_conn) {
 			/* try to expire the connection immediately */

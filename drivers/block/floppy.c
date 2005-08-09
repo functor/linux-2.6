@@ -155,7 +155,6 @@ static int print_unex = 1;
 #include <linux/kernel.h>
 #include <linux/timer.h>
 #include <linux/workqueue.h>
-#include <linux/version.h>
 #define FDPATCHES
 #include <linux/fdreg.h>
 
@@ -217,7 +216,7 @@ static int use_virtual_dma;
  * record each buffers capabilities
  */
 
-static spinlock_t floppy_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(floppy_lock);
 static struct completion device_release;
 
 static unsigned short virtual_dma_port = 0x3f0;
@@ -1073,7 +1072,7 @@ static int fd_wait_for_completion(unsigned long delay, timeout_fn function)
 	return 0;
 }
 
-static spinlock_t floppy_hlt_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(floppy_hlt_lock);
 static int hlt_disabled;
 static void floppy_disable_hlt(void)
 {
@@ -3319,11 +3318,6 @@ static int invalidate_drive(struct block_device *bdev)
 	return 0;
 }
 
-static inline void clear_write_error(int drive)
-{
-	CLEARSTRUCT(UDRWE);
-}
-
 static inline int set_geometry(unsigned int cmd, struct floppy_struct *g,
 			       int drive, int type, struct block_device *bdev)
 {
@@ -3351,7 +3345,7 @@ static inline int set_geometry(unsigned int cmd, struct floppy_struct *g,
 			struct block_device *bdev = opened_bdev[cnt];
 			if (!bdev || ITYPE(drive_state[cnt].fd_device) != type)
 				continue;
-			__invalidate_device(bdev, 0);
+			__invalidate_device(bdev);
 		}
 		up(&open_lock);
 	} else {
@@ -4090,7 +4084,7 @@ static void __init daring(int *ints, int param, int param2)
 			    FD_SILENT_DCL_CLEAR;
 		} else {
 			default_drive_params[i].params.select_delay =
-			    2 * HZ / 100;
+			    SEL_DLY;
 			default_drive_params[i].params.flags &=
 			    ~FD_SILENT_DCL_CLEAR;
 		}
@@ -4223,7 +4217,7 @@ static struct kobject *floppy_find(dev_t dev, int *part, void *data)
 	return get_disk(disks[drive]);
 }
 
-int __init floppy_init(void)
+static int __init floppy_init(void)
 {
 	int i, unit, drive;
 	int err, dr;
@@ -4376,6 +4370,10 @@ int __init floppy_init(void)
 		goto out_flush_work;
 	}
 
+	err = platform_device_register(&floppy_device);
+	if (err)
+		goto out_flush_work;
+
 	for (drive = 0; drive < N_DRIVE; drive++) {
 		if (!(allowed_drive_mask & (1 << drive)))
 			continue;
@@ -4385,23 +4383,12 @@ int __init floppy_init(void)
 		disks[drive]->private_data = (void *)(long)drive;
 		disks[drive]->queue = floppy_queue;
 		disks[drive]->flags |= GENHD_FL_REMOVABLE;
+		disks[drive]->driverfs_dev = &floppy_device.dev;
 		add_disk(disks[drive]);
 	}
 
-	err = platform_device_register(&floppy_device);
-	if (err)
-		goto out_del_disk;
-
 	return 0;
 
-out_del_disk:
-	for (drive = 0; drive < N_DRIVE; drive++) {
-		if (!(allowed_drive_mask & (1 << drive)))
-			continue;
-		if (fdc_state[FDC(drive)].version == FDC_NONE)
-			continue;
-		del_gendisk(disks[drive]);
-	}
 out_flush_work:
 	flush_scheduled_work();
 	if (usage_count)
@@ -4421,7 +4408,7 @@ out_put_disk:
 	return err;
 }
 
-static spinlock_t floppy_usage_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(floppy_usage_lock);
 
 static int floppy_grab_irq_and_dma(void)
 {
@@ -4564,7 +4551,7 @@ static void floppy_release_irq_and_dma(void)
 
 #ifdef MODULE
 
-char *floppy;
+static char *floppy;
 
 static void unregister_devfs_entries(int drive)
 {
@@ -4606,7 +4593,6 @@ void cleanup_module(void)
 	int drive;
 
 	init_completion(&device_release);
-	platform_device_unregister(&floppy_device);
 	blk_unregister_region(MKDEV(FLOPPY_MAJOR, 0), 256);
 	unregister_blkdev(FLOPPY_MAJOR, "fd");
 
@@ -4620,6 +4606,7 @@ void cleanup_module(void)
 		}
 		put_disk(disks[drive]);
 	}
+	platform_device_unregister(&floppy_device);
 	devfs_remove("floppy");
 
 	del_timer_sync(&fd_timeout);

@@ -55,8 +55,7 @@ EXPORT_SYMBOL(panic_blink);
  *	panic - halt the system
  *	@fmt: The text string to print
  *
- *	Display a message, then perform cleanups. Functions in the panic
- *	notifier list are called after the filesystem cache is flushed (when possible).
+ *	Display a message, then perform cleanups.
  *
  *	This function never returns.
  */
@@ -75,6 +74,7 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
+	dump_stack();
 	if (crashdump_func())
 		BUG();
 	bust_spinlocks(0);
@@ -127,9 +127,9 @@ NORET_TYPE void panic(const char * fmt, ...)
 #ifdef __sparc__
 	{
 		extern int stop_a_enabled;
-		/* Make sure the user can actually press L1-A */
+		/* Make sure the user can actually press Stop-A (L1-A) */
 		stop_a_enabled = 1;
-		printk(KERN_EMERG "Press L1-A to return to the boot prom\n");
+		printk(KERN_EMERG "Press Stop-A (L1-A) to return to the boot prom\n");
 	}
 #endif
 #if defined(CONFIG_ARCH_S390)
@@ -174,9 +174,17 @@ const char *print_tainted(void)
 		snprintf(buf, sizeof(buf), "Not tainted");
 	return(buf);
 }
+EXPORT_SYMBOL(print_tainted);
 
 void add_taint(unsigned flag)
 {
 	tainted |= flag;
 }
 EXPORT_SYMBOL(add_taint);
+
+int check_tainted(void)
+{
+	return tainted;
+}
+EXPORT_SYMBOL_GPL(check_tainted);
+

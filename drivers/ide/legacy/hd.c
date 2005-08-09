@@ -94,7 +94,7 @@
 #define BBD_ERR			0x80	/* pre-EIDE meaning:  block marked bad */
 #define ICRC_ERR		0x80	/* new meaning:  CRC error during transfer */
 
-static spinlock_t hd_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(hd_lock);
 static struct request_queue *hd_queue;
 
 #define MAJOR_NR HD_MAJOR
@@ -851,7 +851,7 @@ Enomem:
 	goto out;
 }
 
-static int parse_hd_setup (char *line) {
+static int __init parse_hd_setup (char *line) {
 	int ints[6];
 
 	(void) get_options(line, ARRAY_SIZE(ints), ints);

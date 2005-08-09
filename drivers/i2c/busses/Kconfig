@@ -7,7 +7,7 @@ menu "I2C Hardware Bus support"
 
 config I2C_ALI1535
 	tristate "ALI 1535"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on X86 && I2C && PCI && EXPERIMENTAL
 	help
 	  If you say yes to this option, support will be included for the SMB
 	  Host controller on Acer Labs Inc. (ALI) M1535 South Bridges.  The SMB
@@ -19,7 +19,7 @@ config I2C_ALI1535
 
 config I2C_ALI1563
 	tristate "ALI 1563"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on X86 && I2C && PCI && EXPERIMENTAL
 	help
 	  If you say yes to this option, support will be included for the SMB
 	  Host controller on Acer Labs Inc. (ALI) M1563 South Bridges.  The SMB
@@ -31,7 +31,7 @@ config I2C_ALI1563
 
 config I2C_ALI15X3
 	tristate "ALI 15x3"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on (X86 || MIPS) && I2C && PCI && EXPERIMENTAL
 	help
 	  If you say yes to this option, support will be included for the
 	  Acer Labs Inc. (ALI) M1514 and M1543 motherboard I2C interfaces.
@@ -41,7 +41,7 @@ config I2C_ALI15X3
 
 config I2C_AMD756
 	tristate "AMD 756/766/768/8111 and nVidia nForce"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on (X86 || PPC64 || ALPHA )&& I2C && PCI && EXPERIMENTAL
 	help
 	  If you say yes to this option, support will be included for the AMD
 	  756/766/768 mainboard I2C interfaces.  The driver also includes
@@ -53,7 +53,7 @@ config I2C_AMD756
 
 config I2C_AMD756_S4882
 	tristate "SMBus multiplexing on the Tyan S4882"
-	depends on I2C_AMD756 && EXPERIMENTAL
+	depends on X86 && I2C_AMD756 && EXPERIMENTAL
 	help
 	  Enabling this option will add specific SMBus support for the Tyan
 	  S4882 motherboard.  On this 4-CPU board, the SMBus is multiplexed
@@ -66,13 +66,23 @@ config I2C_AMD756_S4882
 
 config I2C_AMD8111
 	tristate "AMD 8111"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on (X86 || PPC64) && I2C && PCI && EXPERIMENTAL
 	help
 	  If you say yes to this option, support will be included for the
 	  second (SMBus 2.0) AMD 8111 mainboard I2C interface.
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-amd8111.
+
+config I2C_AU1550
+	tristate "Au1550 SMBus interface"
+	depends on I2C && SOC_AU1550
+	help
+	  If you say yes to this option, support will be included for the
+	  Au1550 SMBus interface.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called i2c-au1550.
 
 config I2C_ELEKTOR
 	tristate "Elektor ISA card"
@@ -98,8 +108,8 @@ config I2C_HYDRA
 	  will be called i2c-hydra.
 
 config I2C_I801
-	tristate "Intel 801"
-	depends on I2C && PCI && EXPERIMENTAL
+	tristate "Intel 82801 (ICH)"
+	depends on X86 && I2C && PCI && EXPERIMENTAL
 	help
 	  If you say yes to this option, support will be included for the Intel
 	  801 family of mainboard I2C interfaces.  Specifically, the following
@@ -109,17 +119,18 @@ config I2C_I801
 	    82801BA
 	    82801CA/CAM
 	    82801DB
-	    82801EB
+	    82801EB/ER (ICH5/ICH5R)
 	    6300ESB
 	    ICH6
 	    ICH7
+	    ESB2
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-i801.
 
 config I2C_I810
 	tristate "Intel 810/815"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on X86 && I2C && PCI && EXPERIMENTAL
 	select I2C_ALGOBIT
 	help
 	  If you say yes to this option, support will be included for the Intel
@@ -133,6 +144,23 @@ config I2C_I810
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-i810.
 
+config I2C_PIIX4
+	tristate "Intel PIIX4"
+	depends on (X86 || PPC || PPC64 || MIPS || MIPS64) && I2C && PCI
+	help
+	  If you say yes to this option, support will be included for the Intel
+	  PIIX4 family of mainboard I2C interfaces.  Specifically, the following
+	  versions of the chipset are supported:
+	    Intel PIIX4
+	    Intel 440MX
+	    Serverworks OSB4
+	    Serverworks CSB5
+	    Serverworks CSB6
+	    SMSC Victory66
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called i2c-piix4.
+
 config I2C_IBM_IIC
 	tristate "IBM PPC 4xx on-chip I2C interface"
 	depends on IBM_OCP && I2C
@@ -144,8 +172,14 @@ config I2C_IBM_IIC
 	  will be called i2c-ibm_iic.
 
 config I2C_IOP3XX
-	tristate "Intel XScale IOP3xx on-chip I2C interface"
-	depends on ARCH_IOP3XX && I2C
+	tristate "Intel IOP3xx and IXP4xx on-chip I2C interface"
+	depends on (ARCH_IOP3XX || ARCH_IXP4XX) && I2C
+	help
+	  Say Y here if you want to use the IIC bus controller on
+	  the Intel IOP3xx I/O Processors or IXP4xx Network Processors.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called i2c-iop3xx.
 
 config I2C_ISA
 	tristate "ISA Bus support"
@@ -203,7 +237,7 @@ config I2C_KEYWEST
 
 config I2C_MPC
 	tristate "MPC107/824x/85xx/52xx"
-	depends on I2C && FSL_OCP
+	depends on I2C && PPC32
 	help
 	  If you say yes to this option, support will be included for the
 	  built-in I2C interface on the MPC107/Tsi107/MPC8240/MPC8245 and
@@ -269,23 +303,6 @@ config I2C_PARPORT_LIGHT
 	  This support is also available as a module.  If so, the module 
 	  will be called i2c-parport-light.
 
-config I2C_PIIX4
-	tristate "Intel PIIX4"
-	depends on I2C && PCI && EXPERIMENTAL && !64BIT
-	help
-	  If you say yes to this option, support will be included for the Intel
-	  PIIX4 family of mainboard I2C interfaces.  Specifically, the following
-	  versions of the chipset are supported:
-	    Intel PIIX4
-	    Intel 440MX
-	    Serverworks OSB4
-	    Serverworks CSB5
-	    Serverworks CSB6
-	    SMSC Victory66
-
-	  This driver can also be built as a module.  If so, the module
-	  will be called i2c-piix4.
-
 config I2C_PROSAVAGE
 	tristate "S3/VIA (Pro)Savage"
 	depends on I2C && PCI && EXPERIMENTAL
@@ -324,6 +341,12 @@ config I2C_SAVAGE4
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-savage4.
 
+config I2C_SIBYTE
+	tristate "SiByte SMBus interface"
+	depends on SIBYTE_SB1xxx_SOC && I2C
+	help
+	  Supports the SiByte SOC on-chip I2C interfaces (2 channels).
+
 config SCx200_I2C
 	tristate "NatSemi SCx200 I2C using GPIO pins"
 	depends on SCx200_GPIO && I2C
@@ -354,7 +377,7 @@ config SCx200_I2C_SDA
 
 config SCx200_ACB
 	tristate "NatSemi SCx200 ACCESS.bus"
-	depends on I2C && PCI
+	depends on SCx200 && PCI
 	help
 	  Enable the use of the ACCESS.bus controllers of a SCx200 processor.
 
@@ -365,7 +388,7 @@ config SCx200_ACB
 
 config I2C_SIS5595
 	tristate "SiS 5595"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on X86 && I2C && PCI && EXPERIMENTAL
 	help
 	  If you say yes to this option, support will be included for the 
 	  SiS5595 SMBus (a subset of I2C) interface.
@@ -375,7 +398,7 @@ config I2C_SIS5595
 
 config I2C_SIS630
 	tristate "SiS 630/730"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on X86 && I2C && PCI && EXPERIMENTAL
 	help
 	  If you say yes to this option, support will be included for the 
 	  SiS630 and SiS730 SMBus (a subset of I2C) interface.
@@ -385,7 +408,7 @@ config I2C_SIS630
 
 config I2C_SIS96X
 	tristate "SiS 96x"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on X86 && I2C && PCI && EXPERIMENTAL
 	help
 	  If you say yes to this option, support will be included for the SiS
 	  96x SMBus (a subset of I2C) interfaces.  Specifically, the following
@@ -409,16 +432,15 @@ config I2C_STUB
 	  especially for certain kinds of sensor chips.
 
 	  If you do build this module, be sure to read the notes and warnings
-	  in Documentation/i2c/i2c-stub.
+	  in <file:Documentation/i2c/i2c-stub>.
 
 	  If you don't know what to do here, definitely say N.
 
 config I2C_VIA
 	tristate "VIA 82C586B"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on (X86 || PPC) && I2C && PCI && EXPERIMENTAL
 	select I2C_ALGOBIT
 	help
-
 	  If you say yes to this option, support will be included for the VIA
           82C586B I2C interface
 
@@ -427,9 +449,8 @@ config I2C_VIA
 
 config I2C_VIAPRO
 	tristate "VIA 82C596/82C686/823x"
-	depends on I2C && PCI && EXPERIMENTAL
+	depends on (X86 || PPC) && I2C && PCI && EXPERIMENTAL
 	help
-
 	  If you say yes to this option, support will be included for the VIA
 	  82C596/82C686/823x I2C interfaces.  Specifically, the following 
 	  chipsets are supported:
@@ -449,7 +470,6 @@ config I2C_VOODOO3
 	depends on I2C && PCI && EXPERIMENTAL
 	select I2C_ALGOBIT
 	help
-
 	  If you say yes to this option, support will be included for the
 	  Voodoo 3 I2C interface.
 
@@ -466,5 +486,15 @@ config I2C_PCA_ISA
 	  
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-pca-isa.
+
+config I2C_MV64XXX
+	tristate "Marvell mv64xxx I2C Controller"
+	depends on I2C && MV64X60 && EXPERIMENTAL
+	help
+	  If you say yes to this option, support will be included for the
+	  built-in I2C interface on the Marvell 64xxx line of host bridges.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called i2c-mv64xxx.
 
 endmenu

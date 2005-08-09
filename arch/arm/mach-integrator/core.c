@@ -115,7 +115,7 @@ arch_initcall(integrator_init);
 
 #define CM_CTRL	IO_ADDRESS(INTEGRATOR_HDR_BASE) + INTEGRATOR_HDR_CTRL_OFFSET
 
-static spinlock_t cm_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(cm_lock);
 
 /**
  * cm_control - update the CM_CTRL register.
@@ -216,7 +216,9 @@ integrator_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 	write_seqlock(&xtime_lock);
 
-	// ...clear the interrupt
+	/*
+	 * clear the interrupt
+	 */
 	timer1->TimerClear = 1;
 
 	timer_tick(regs);
@@ -264,7 +266,7 @@ void __init integrator_time_init(unsigned long reload, unsigned int ctrl)
 	timer1->TimerValue   = timer_reload;
 	timer1->TimerControl = timer_ctrl;
 
-	/* 
+	/*
 	 * Make irqs happen for the system timer
 	 */
 	setup_irq(IRQ_TIMERINT1, &integrator_timer_irq);

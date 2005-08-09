@@ -73,6 +73,7 @@
 #include <linux/highmem.h>
 #include <linux/file.h>
 #include <linux/times.h>
+#include <linux/cpuset.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vs_cvirt.h>
@@ -81,6 +82,7 @@
 #include <asm/pgtable.h>
 #include <asm/io.h>
 #include <asm/processor.h>
+#include "internal.h"
 
 /* Gcc optimizes away "strlen(x)" for constant x */
 #define ADDBUF(buffer, string) \
@@ -247,6 +249,8 @@ static inline char * task_sig(struct task_struct *p, char *buffer)
 {
 	sigset_t pending, shpending, blocked, ignored, caught;
 	int num_threads = 0;
+	unsigned long qsize = 0;
+	unsigned long qlim = 0;
 
 	sigemptyset(&pending);
 	sigemptyset(&shpending);
@@ -263,11 +267,14 @@ static inline char * task_sig(struct task_struct *p, char *buffer)
 		blocked = p->blocked;
 		collect_sigign_sigcatch(p, &ignored, &caught);
 		num_threads = atomic_read(&p->signal->count);
+		qsize = atomic_read(&p->user->sigpending);
+		qlim = p->signal->rlim[RLIMIT_SIGPENDING].rlim_cur;
 		spin_unlock_irq(&p->sighand->siglock);
 	}
 	read_unlock(&tasklist_lock);
 
 	buffer += sprintf(buffer, "Threads:\t%d\n", num_threads);
+	buffer += sprintf(buffer, "SigQ:\t%lu/%lu\n", qsize, qlim);
 
 	/* render them all */
 	buffer = render_sigset_t("SigPnd:\t", &pending, buffer);
@@ -294,6 +301,8 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 	char * orig = buffer;
 #ifdef	CONFIG_VSERVER_LEGACY
 	struct vx_info *vxi;
+#endif
+#ifdef	CONFIG_VSERVER_LEGACYNET
 	struct nx_info *nxi;
 #endif
 	struct mm_struct *mm = get_task_mm(task);
@@ -307,7 +316,10 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 	}
 	buffer = task_sig(task, buffer);
 	buffer = task_cap(task, buffer);
+	buffer = cpuset_task_status_allowed(task, buffer);
 
+	if (task_vx_flags(task, VXF_INFO_HIDE, 0))
+		goto skip;
 #ifdef	CONFIG_VSERVER_LEGACY
 	buffer += sprintf (buffer,"s_context: %d\n", vx_task_xid(task));
 	vxi = task_get_vx_info(task);
@@ -321,6 +333,10 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 		buffer += sprintf (buffer,"initpid: none\n");
 	}
 	put_vx_info(vxi);
+#else
+	buffer += sprintf (buffer,"VxID: %d\n", vx_task_xid(task));
+#endif
+#ifdef	CONFIG_VSERVER_LEGACYNET
 	nxi = task_get_nx_info(task);
 	if (nxi) {
 		int i;
@@ -340,6 +356,7 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 	}
 	put_nx_info(nxi);
 #endif
+skip:
 #if defined(CONFIG_ARCH_S390)
 	buffer = task_show_regs(task, buffer);
 #endif
@@ -359,9 +376,11 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	int num_threads = 0;
 	struct mm_struct *mm;
 	unsigned long long start_time;
-	unsigned long cmin_flt = 0, cmaj_flt = 0, cutime = 0, cstime = 0;
-	unsigned long  min_flt = 0,  maj_flt = 0,  utime = 0,  stime = 0;
+	unsigned long cmin_flt = 0, cmaj_flt = 0;
+	unsigned long  min_flt = 0,  maj_flt = 0;
+	cputime_t cutime, cstime, utime, stime;
 	unsigned long rsslim = 0;
+	unsigned long it_real_value = 0;
 	struct task_struct *t;
 	char tcomm[sizeof(task->comm)];
 
@@ -378,6 +397,7 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 
 	sigemptyset(&sigign);
 	sigemptyset(&sigcatch);
+	cutime = cstime = utime = stime = cputime_zero;
 	read_lock(&tasklist_lock);
 	if (task->sighand) {
 		spin_lock_irq(&task->sighand->siglock);
@@ -390,8 +410,8 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 			do {
 				min_flt += t->min_flt;
 				maj_flt += t->maj_flt;
-				utime += t->utime;
-				stime += t->stime;
+				utime = cputime_add(utime, t->utime);
+				stime = cputime_add(stime, t->stime);
 				t = next_thread(t);
 			} while (t != task);
 		}
@@ -413,9 +433,10 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 		if (whole) {
 			min_flt += task->signal->min_flt;
 			maj_flt += task->signal->maj_flt;
-			utime += task->signal->utime;
-			stime += task->signal->stime;
+			utime = cputime_add(utime, task->signal->utime);
+			stime = cputime_add(stime, task->signal->stime);
 		}
+		it_real_value = task->signal->it_real_value;
 	}
 	pid = vx_info_map_pid(task->vx_info, pid_alive(task) ? task->pid : 0);
 	ppid = (!(pid > 1)) ? 0 : vx_info_map_tgid(task->vx_info,
@@ -427,7 +448,7 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	if (!whole || num_threads<2) {
 		wchan = 0;
 		if (current->uid == task->uid || current->euid == task->uid ||
-						capable(CAP_SYS_NICE))
+				capable(CAP_SYS_NICE))
 			wchan = get_wchan(task);
 	}
 	if (!whole) {
@@ -468,6 +489,39 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 			start_time = 0;
 	}
 
+	/* fixup start time for virt uptime */
+	if (vx_flags(VXF_VIRT_UPTIME, 0)) {
+		unsigned long long bias =
+			current->vx_info->cvirt.bias_clock;
+
+		if (start_time > bias)
+			start_time -= bias;
+		else
+			start_time = 0;
+	}
+
+	/* fixup start time for virt uptime */
+	if (vx_flags(VXF_VIRT_UPTIME, 0)) {
+		unsigned long long bias =
+			current->vx_info->cvirt.bias_clock;
+
+		if (start_time > bias)
+			start_time -= bias;
+		else
+			start_time = 0;
+	}
+
+	/* fixup start time for virt uptime */
+	if (vx_flags(VXF_VIRT_UPTIME, 0)) {
+		unsigned long long bias =
+			current->vx_info->cvirt.bias_clock;
+
+		if (start_time > bias)
+			start_time -= bias;
+		else
+			start_time = 0;
+	}
+
 	res = sprintf(buffer,"%d (%s) %c %d %d %d %d %d %lu %lu \
 %lu %lu %lu %lu %lu %ld %ld %ld %ld %d %ld %llu %lu %ld %lu %lu %lu %lu %lu \
 %lu %lu %lu %lu %lu %lu %lu %lu %d %d %lu %lu\n",
@@ -484,17 +538,17 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 		cmin_flt,
 		maj_flt,
 		cmaj_flt,
-		jiffies_to_clock_t(utime),
-		jiffies_to_clock_t(stime),
-		jiffies_to_clock_t(cutime),
-		jiffies_to_clock_t(cstime),
+		cputime_to_clock_t(utime),
+		cputime_to_clock_t(stime),
+		cputime_to_clock_t(cutime),
+		cputime_to_clock_t(cstime),
 		priority,
 		nice,
 		num_threads,
-		jiffies_to_clock_t(task->it_real_value),
+		jiffies_to_clock_t(it_real_value),
 		start_time,
 		vsize,
-		mm ? mm->rss : 0, /* you might want to shift this left 3 */
+		mm ? get_mm_counter(mm, rss) : 0, /* you might want to shift this left 3 */
 	        rsslim,
 		mm ? mm->start_code : 0,
 		mm ? mm->end_code : 0,

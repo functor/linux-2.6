@@ -18,6 +18,7 @@ obj-$(CONFIG_MODULES)		+= armksyms.o module.o
 obj-$(CONFIG_ARTHUR)		+= arthur.o
 obj-$(CONFIG_ISA_DMA)		+= dma-isa.o
 obj-$(CONFIG_PCI)		+= bios32.o
+obj-$(CONFIG_SMP)		+= smp.o
 
 obj-$(CONFIG_IWMMXT)		+= iwmmxt.o
 AFLAGS_iwmmxt.o			:= -Wa,-mcpu=iwmmxt
@@ -30,8 +31,3 @@ head-y			:= head.o
 obj-$(CONFIG_DEBUG_LL)	+= debug.o
 
 extra-y := $(head-y) init_task.o vmlinux.lds
-
-# Spell out some dependencies that aren't automatically figured out
-$(obj)/entry-armv.o: 	$(obj)/entry-header.S include/asm-arm/constants.h
-$(obj)/entry-common.o: 	$(obj)/entry-header.S include/asm-arm/constants.h \
-			$(obj)/calls.S

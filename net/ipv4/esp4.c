@@ -17,11 +17,9 @@ struct esp_decap_data {
 	__u8		proto;
 };
 
-static int esp_output(struct sk_buff *skb)
+static int esp_output(struct xfrm_state *x, struct sk_buff *skb)
 {
 	int err;
-	struct dst_entry *dst = skb->dst;
-	struct xfrm_state *x  = dst->xfrm;
 	struct iphdr *top_iph;
 	struct ip_esp_hdr *esph;
 	struct crypto_tfm *tfm;
@@ -392,7 +390,7 @@ static int esp_init_state(struct xfrm_state *x, void *args)
 			goto error;
 		esp->auth.icv = esp_hmac_digest;
 
-		aalg_desc = xfrm_aalg_get_byname(x->aalg->alg_name);
+		aalg_desc = xfrm_aalg_get_byname(x->aalg->alg_name, 0);
 		BUG_ON(!aalg_desc);
 
 		if (aalg_desc->uinfo.auth.icv_fullbits/8 !=
@@ -427,7 +425,8 @@ static int esp_init_state(struct xfrm_state *x, void *args)
 			goto error;
 		get_random_bytes(esp->conf.ivec, esp->conf.ivlen);
 	}
-	crypto_cipher_setkey(esp->conf.tfm, esp->conf.key, esp->conf.key_len);
+	if (crypto_cipher_setkey(esp->conf.tfm, esp->conf.key, esp->conf.key_len))
+		goto error;
 	x->props.header_len = sizeof(struct ip_esp_hdr) + esp->conf.ivlen;
 	if (x->props.mode)
 		x->props.header_len += sizeof(struct iphdr);
@@ -479,7 +478,7 @@ static int __init esp4_init(void)
 {
 	struct xfrm_decap_state decap;
 
-	if (sizeof(struct esp_decap_data)  <
+	if (sizeof(struct esp_decap_data)  >
 	    sizeof(decap.decap_data)) {
 		extern void decap_data_too_small(void);
 

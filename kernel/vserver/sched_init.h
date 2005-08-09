@@ -14,6 +14,7 @@ static inline void vx_info_init_sched(struct _vx_sched *sched)
 	atomic_set(&sched->tokens, HZ >> 2);
 	sched->cpus_allowed	= CPU_MASK_ALL;
 	sched->priority_bias	= 0;
+	sched->vavavoom		= 0;
 
 	for_each_cpu(i) {
 		sched->cpu[i].user_ticks	= 0;

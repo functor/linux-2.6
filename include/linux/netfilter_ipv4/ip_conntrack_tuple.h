@@ -70,7 +70,10 @@ struct ip_conntrack_tuple
 		} u;
 
 		/* The protocol. */
-		u_int16_t protonum;
+		u_int8_t protonum;
+
+		/* The direction (for tuplehash) */
+		u_int8_t dir;
 	} dst;
 };
 
@@ -106,7 +109,7 @@ DEBUGP("tuple %p: %u %u.%u.%u.%u:%u -> %u.%u.%u.%u:%u\n",	\
 #define CTINFO2DIR(ctinfo) ((ctinfo) >= IP_CT_IS_REPLY ? IP_CT_DIR_REPLY : IP_CT_DIR_ORIGINAL)
 
 /* If we're the first tuple, it's the original dir. */
-#define DIRECTION(h) ((enum ip_conntrack_dir)(&(h)->ctrack->tuplehash[1] == (h)))
+#define DIRECTION(h) ((enum ip_conntrack_dir)(h)->tuple.dst.dir)
 
 /* Connections have two entries in the hash table: one for each way */
 struct ip_conntrack_tuple_hash
@@ -114,9 +117,6 @@ struct ip_conntrack_tuple_hash
 	struct list_head list;
 
 	struct ip_conntrack_tuple tuple;
-
-	/* this == &ctrack->tuplehash[DIRECTION(this)]. */
-	struct ip_conntrack *ctrack;
 };
 
 #endif /* __KERNEL__ */

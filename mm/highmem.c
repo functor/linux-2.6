@@ -30,9 +30,9 @@
 
 static mempool_t *page_pool, *isa_page_pool;
 
-static void *page_pool_alloc(int gfp_mask, void *data)
+static void *page_pool_alloc(unsigned int __nocast gfp_mask, void *data)
 {
-	int gfp = gfp_mask | (int) (long) data;
+	unsigned int gfp = gfp_mask | (unsigned int) (long) data;
 
 	return alloc_page(gfp);
 }
@@ -53,7 +53,7 @@ static void page_pool_free(void *page, void *data)
 #ifdef CONFIG_HIGHMEM
 static int pkmap_count[LAST_PKMAP];
 static unsigned int last_pkmap_nr;
-static spinlock_t kmap_lock __cacheline_aligned_in_smp = SPIN_LOCK_UNLOCKED;
+static  __cacheline_aligned_in_smp DEFINE_SPINLOCK(kmap_lock);
 
 pte_t * pkmap_page_table;
 
@@ -90,7 +90,8 @@ static void flush_all_zero_pkmaps(void)
 		 * So no dangers, even with speculative execution.
 		 */
 		page = pte_page(pkmap_page_table[i]);
-		pte_clear(&pkmap_page_table[i]);
+		pte_clear(&init_mm, (unsigned long)page_address(page),
+			  &pkmap_page_table[i]);
 
 		set_page_address(page, NULL);
 	}
@@ -138,13 +139,23 @@ start:
 		}
 	}
 	vaddr = PKMAP_ADDR(last_pkmap_nr);
-	set_pte(&(pkmap_page_table[last_pkmap_nr]), mk_pte(page, kmap_prot));
+	set_pte_at(&init_mm, vaddr,
+		   &(pkmap_page_table[last_pkmap_nr]), mk_pte(page, kmap_prot));
 
 	pkmap_count[last_pkmap_nr] = 1;
 	set_page_address(page, (void *)vaddr);
 
 	return vaddr;
 }
+
+void kmap_flush_unused(void)
+{
+	spin_lock(&kmap_lock);
+	flush_all_zero_pkmaps();
+	spin_unlock(&kmap_lock);
+}
+
+EXPORT_SYMBOL(kmap_flush_unused);
 
 void fastcall *kmap_high(struct page *page)
 {
@@ -323,6 +334,7 @@ static void bounce_end_io(struct bio *bio, mempool_t *pool, int err)
 			continue;
 
 		mempool_free(bvec->bv_page, pool);	
+		dec_page_state(nr_bounce);
 	}
 
 	bio_endio(bio_orig, bio_orig->bi_size, err);
@@ -403,6 +415,7 @@ static void __blk_queue_bounce(request_queue_t *q, struct bio **bio_orig,
 		to->bv_page = mempool_alloc(pool, q->bounce_gfp);
 		to->bv_len = from->bv_len;
 		to->bv_offset = from->bv_offset;
+		inc_page_state(nr_bounce);
 
 		if (rw == WRITE) {
 			char *vto, *vfrom;
@@ -425,7 +438,7 @@ static void __blk_queue_bounce(request_queue_t *q, struct bio **bio_orig,
 	 * at least one page was bounced, fill in possible non-highmem
 	 * pages
 	 */
-	bio_for_each_segment(from, *bio_orig, i) {
+	__bio_for_each_segment(from, *bio_orig, i, 0) {
 		to = bio_iovec_idx(bio, i);
 		if (!to->bv_page) {
 			to->bv_page = from->bv_page;

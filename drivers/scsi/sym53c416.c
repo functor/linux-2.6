@@ -239,7 +239,7 @@ static void sym53c416_set_transfer_counter(int base, unsigned int len)
 	outb((len & 0xFF0000) >> 16, base + TC_HIGH);
 }
 
-static spinlock_t sym53c416_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(sym53c416_lock);
 
 /* Returns the number of bytes read */
 static __inline__ unsigned int sym53c416_read(int base, unsigned char *buffer, unsigned int len)
@@ -616,7 +616,7 @@ static struct isapnp_device_id id_table[] __devinitdata = {
 
 MODULE_DEVICE_TABLE(isapnp, id_table);
 
-void sym53c416_probe(void)
+static void sym53c416_probe(void)
 {
 	int *base = probeaddrs;
 	int ints[2];
@@ -809,7 +809,7 @@ static int sym53c416_host_reset(Scsi_Cmnd *SCpnt)
 	/* printk("sym53c416_reset\n"); */
 	base = SCpnt->device->host->io_port;
 	/* search scsi_id - fixme, we shouldnt need to iterate for this! */
-	for(i = 0; i < host_index && scsi_id != -1; i++)
+	for(i = 0; i < host_index && scsi_id == -1; i++)
 		if(hosts[i].base == base)
 			scsi_id = hosts[i].scsi_id;
 	outb(RESET_CHIP, base + COMMAND_REG);

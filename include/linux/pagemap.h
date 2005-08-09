@@ -19,7 +19,7 @@
 #define	AS_EIO		(__GFP_BITS_SHIFT + 0)	/* IO error on async write */
 #define AS_ENOSPC	(__GFP_BITS_SHIFT + 1)	/* ENOSPC on async write */
 
-static inline int mapping_gfp_mask(struct address_space * mapping)
+static inline unsigned int __nocast mapping_gfp_mask(struct address_space * mapping)
 {
 	return mapping->flags & __GFP_BITS_MASK;
 }
@@ -141,6 +141,14 @@ static inline unsigned long get_page_cache_size(void)
 	if (unlikely(ret < 0))
 		ret = 0;
 	return ret;
+}
+
+/*
+ * Return byte-offset into filesystem object for page.
+ */
+static inline loff_t page_offset(struct page *page)
+{
+	return ((loff_t)page->index) << PAGE_CACHE_SHIFT;
 }
 
 static inline pgoff_t linear_page_index(struct vm_area_struct *vma,

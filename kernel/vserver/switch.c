@@ -10,12 +10,14 @@
  *  V0.03  added rlimit functions
  *  V0.04  added iattr, task/xid functions
  *  V0.05  added debug/history stuff
+ *  V0.06  added compat32 layer
  *
  */
 
 #include <linux/config.h>
 #include <linux/linkage.h>
 #include <linux/sched.h>
+#include <linux/compat.h>
 #include <asm/errno.h>
 
 #include <linux/vserver/network.h>
@@ -23,9 +25,13 @@
 #include <linux/vserver/debug.h>
 
 
-static inline int
-vc_get_version(uint32_t id)
+static inline
+int vc_get_version(uint32_t id)
 {
+#ifdef	CONFIG_VSERVER_LEGACY_VERSION
+	if (id == 63)
+		return VCI_LEGACY_VERSION;
+#endif
 	return VCI_VERSION;
 }
 
@@ -35,21 +41,32 @@ vc_get_version(uint32_t id)
 #include <linux/vserver/network_cmd.h>
 #include <linux/vserver/sched_cmd.h>
 #include <linux/vserver/debug_cmd.h>
+#include <linux/vserver/inode_cmd.h>
+#include <linux/vserver/dlimit_cmd.h>
+#include <linux/vserver/signal_cmd.h>
+#include <linux/vserver/namespace_cmd.h>
 
 #include <linux/vserver/legacy.h>
-#include <linux/vserver/namespace.h>
 #include <linux/vserver/inode.h>
-#include <linux/vserver/signal.h>
 #include <linux/vserver/dlimit.h>
 
 
-extern asmlinkage long
-sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
+#ifdef	CONFIG_COMPAT
+#define	__COMPAT(name, id, data, compat) 	\
+	(compat) ? name ## _x32 (id, data) : name (id, data)
+#else
+#define	__COMPAT(name, id, data, compat) 	\
+	name (id, data)
+#endif
+
+
+static inline
+long do_vserver(uint32_t cmd, uint32_t id, void __user *data, int compat)
 {
 	vxdprintk(VXD_CBIT(switch, 0),
-		"vc: VCMD_%02d_%d[%d], %d",
+		"vc: VCMD_%02d_%d[%d], %d,%p,%d",
 		VC_CATEGORY(cmd), VC_COMMAND(cmd),
-		VC_VERSION(cmd), id);
+		VC_VERSION(cmd), id, data, compat);
 
 #ifdef	CONFIG_VSERVER_LEGACY
 	if (!capable(CAP_CONTEXT) &&
@@ -75,6 +92,8 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 #ifdef	CONFIG_VSERVER_LEGACY
 	case VCMD_new_s_context:
 		return vc_new_s_context(id, data);
+#endif
+#ifdef	CONFIG_VSERVER_LEGACYNET
 	case VCMD_set_ipv4root:
 		return vc_set_ipv4root(id, data);
 #endif
@@ -117,9 +136,9 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 	case VCMD_get_rlimit_mask:
 		return vc_get_rlimit_mask(id, data);
 
-	case VCMD_vx_get_vhi_name:
+	case VCMD_get_vhi_name:
 		return vc_get_vhi_name(id, data);
-	case VCMD_vx_set_vhi_name:
+	case VCMD_set_vhi_name:
 		return vc_set_vhi_name(id, data);
 
 	case VCMD_set_cflags:
@@ -149,13 +168,13 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 		return vc_set_sched(id, data);
 
 	case VCMD_add_dlimit:
-		return vc_add_dlimit(id, data);
+		return __COMPAT(vc_add_dlimit, id, data, compat);
 	case VCMD_rem_dlimit:
-		return vc_rem_dlimit(id, data);
+		return __COMPAT(vc_rem_dlimit, id, data, compat);
 	case VCMD_set_dlimit:
-		return vc_set_dlimit(id, data);
+		return __COMPAT(vc_set_dlimit, id, data, compat);
 	case VCMD_get_dlimit:
-		return vc_get_dlimit(id, data);
+		return __COMPAT(vc_get_dlimit, id, data, compat);
 	}
 
 	/* below here only with VX_ADMIN */
@@ -171,36 +190,71 @@ sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
 
 	case VCMD_create_context:
 #ifdef	CONFIG_VSERVER_LEGACY
-		return vc_ctx_create(id, data);
+		return vc_ctx_create(id, NULL);
 #else
 		return -ENOSYS;
 #endif
 
 	case VCMD_get_iattr:
-		return vc_get_iattr(id, data);
+		return __COMPAT(vc_get_iattr, id, data, compat);
 	case VCMD_set_iattr:
-		return vc_set_iattr(id, data);
+		return __COMPAT(vc_set_iattr, id, data, compat);
 
 	case VCMD_enter_namespace:
 		return vc_enter_namespace(id, data);
 
-	case VCMD_ctx_create:
+	case VCMD_ctx_create_v0:
 #ifdef	CONFIG_VSERVER_LEGACY
 		if (id == 1) {
 			current->xid = 1;
 			return 1;
 		}
 #endif
+		return vc_ctx_create(id, NULL);
+	case VCMD_ctx_create:
 		return vc_ctx_create(id, data);
 	case VCMD_ctx_migrate:
 		return vc_ctx_migrate(id, data);
 
+	case VCMD_net_create_v0:
+		return vc_net_create(id, NULL);
 	case VCMD_net_create:
 		return vc_net_create(id, data);
 	case VCMD_net_migrate:
 		return vc_net_migrate(id, data);
+	case VCMD_net_add:
+		return vc_net_add(id, data);
+	case VCMD_net_remove:
+		return vc_net_remove(id, data);
 
 	}
 	return -ENOSYS;
 }
 
+extern asmlinkage long
+sys_vserver(uint32_t cmd, uint32_t id, void __user *data)
+{
+	long ret = do_vserver(cmd, id, data, 0);
+
+	vxdprintk(VXD_CBIT(switch, 1),
+		"vc: VCMD_%02d_%d[%d] = %08lx(%ld)",
+		VC_CATEGORY(cmd), VC_COMMAND(cmd),
+		VC_VERSION(cmd), ret, ret);
+	return ret;
+}
+
+#ifdef	CONFIG_COMPAT
+
+extern asmlinkage long
+sys32_vserver(uint32_t cmd, uint32_t id, void __user *data)
+{
+	long ret = do_vserver(cmd, id, data, 1);
+
+	vxdprintk(VXD_CBIT(switch, 1),
+		"vc: VCMD_%02d_%d[%d] = %08lx(%ld)",
+		VC_CATEGORY(cmd), VC_COMMAND(cmd),
+		VC_VERSION(cmd), ret, ret);
+	return ret;
+}
+
+#endif	/* CONFIG_COMPAT */

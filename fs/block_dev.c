@@ -237,7 +237,7 @@ static int block_fsync(struct file *filp, struct dentry *dentry, int datasync)
  * pseudo-fs
  */
 
-static spinlock_t bdev_lock __cacheline_aligned_in_smp = SPIN_LOCK_UNLOCKED;
+static  __cacheline_aligned_in_smp DEFINE_SPINLOCK(bdev_lock);
 static kmem_cache_t * bdev_cachep;
 
 static struct inode *bdev_alloc_inode(struct super_block *sb)
@@ -530,7 +530,7 @@ int check_disk_change(struct block_device *bdev)
 	if (!bdops->media_changed(bdev->bd_disk))
 		return 0;
 
-	if (__invalidate_device(bdev, 0))
+	if (__invalidate_device(bdev))
 		printk("VFS: busy inodes on changed media.\n");
 
 	if (bdops->revalidate_disk)
@@ -804,6 +804,9 @@ struct file_operations def_blk_fops = {
 	.mmap		= generic_file_mmap,
 	.fsync		= block_fsync,
 	.ioctl		= block_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= compat_blkdev_ioctl,
+#endif
 	.readv		= generic_file_readv,
 	.writev		= generic_file_write_nolock,
 	.sendfile	= generic_file_sendfile,

@@ -146,9 +146,14 @@ int can_request_irq(unsigned int irq, unsigned long irqflags)
 	return !action;
 }
 
-/*
- * Internal function to register an irqaction - typically used to
- * allocate special interrupts that are part of the architecture.
+/**
+ *	setup_irq - register an irqaction structure
+ *	@irq: Interrupt to register
+ *	@irqaction: The irqaction structure to be registered
+ *
+ *	Normally called by request_irq, this function can be used
+ *	directly to allocate special interrupts that are part of the
+ *	architecture.
  */
 int setup_irq(unsigned int irq, struct irqaction * new)
 {
@@ -217,6 +222,63 @@ int setup_irq(unsigned int irq, struct irqaction * new)
 	return 0;
 }
 
+/*
+ *	teardown_irq - unregister an irqaction
+ *	@irq: Interrupt line being freed
+ *	@old: Pointer to the irqaction that is to be unregistered
+ *
+ *	This function is called by free_irq and does the actual
+ *	business of unregistering the handler. It exists as a 
+ *	seperate function to enable handlers to be unregistered 
+ *	for irqactions that have been allocated statically at 
+ *	boot time.
+ *
+ *	This function must not be called from interrupt context.
+ */
+int teardown_irq(unsigned int irq, struct irqaction * old)
+{
+	struct irq_desc *desc;
+	struct irqaction **p;
+	unsigned long flags;
+
+	if (irq >= NR_IRQS)
+		return -ENOENT;
+
+	desc = irq_desc + irq;
+	spin_lock_irqsave(&desc->lock,flags);
+	p = &desc->action;
+	for (;;) {
+		struct irqaction * action = *p;
+
+		if (action) {
+			struct irqaction **pp = p;
+
+			p = &action->next;
+			if (action != old)
+				continue;
+
+			/* Found it - now remove it from the list of entries */
+			*pp = action->next;
+			if (!desc->action) {
+				desc->status |= IRQ_DISABLED;
+				if (desc->handler->shutdown)
+					desc->handler->shutdown(irq);
+				else
+					desc->handler->disable(irq);
+			}
+			spin_unlock_irqrestore(&desc->lock,flags);
+			unregister_handler_proc(irq, action);
+
+			/* Make sure it's not being used on another CPU */
+			synchronize_irq(irq);
+			return 0;
+		}
+		printk(KERN_ERR "Trying to teardown free IRQ%d\n",irq);
+		spin_unlock_irqrestore(&desc->lock,flags);
+		return -ENOENT;
+	}
+}
+
 /**
  *	free_irq - free an interrupt
  *	@irq: Interrupt line to free
@@ -234,7 +296,7 @@ int setup_irq(unsigned int irq, struct irqaction * new)
 void free_irq(unsigned int irq, void *dev_id)
 {
 	struct irq_desc *desc;
-	struct irqaction **p;
+	struct irqaction *action;
 	unsigned long flags;
 
 	if (irq >= NR_IRQS)
@@ -242,38 +304,19 @@ void free_irq(unsigned int irq, void *dev_id)
 
 	desc = irq_desc + irq;
 	spin_lock_irqsave(&desc->lock,flags);
-	p = &desc->action;
-	for (;;) {
-		struct irqaction * action = *p;
+	for (action = desc->action; action != NULL; action = action->next) {
+		if (action->dev_id != dev_id)
+			continue;
 
-		if (action) {
-			struct irqaction **pp = p;
-
-			p = &action->next;
-			if (action->dev_id != dev_id)
-				continue;
-
-			/* Found it - now remove it from the list of entries */
-			*pp = action->next;
-			if (!desc->action) {
-				desc->status |= IRQ_DISABLED;
-				if (desc->handler->shutdown)
-					desc->handler->shutdown(irq);
-				else
-					desc->handler->disable(irq);
-			}
-			spin_unlock_irqrestore(&desc->lock,flags);
-			unregister_handler_proc(irq, action);
-
-			/* Make sure it's not being used on another CPU */
-			synchronize_irq(irq);
-			kfree(action);
-			return;
-		}
-		printk(KERN_ERR "Trying to free free IRQ%d\n",irq);
 		spin_unlock_irqrestore(&desc->lock,flags);
+
+		if (teardown_irq(irq, action) == 0)
+			kfree(action);
 		return;
 	}
+	printk(KERN_ERR "Trying to free free IRQ%d\n",irq);
+	spin_unlock_irqrestore(&desc->lock,flags);
+	return;
 }
 
 EXPORT_SYMBOL(free_irq);

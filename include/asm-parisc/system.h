@@ -125,7 +125,7 @@ static inline void set_eiem(unsigned long val)
 ** The __asm__ op below simple prevents gcc/ld from reordering
 ** instructions across the mb() "call".
 */
-#define mb()		__asm__ __volatile__("":::"memory");	/* barrier() */
+#define mb()		__asm__ __volatile__("":::"memory")	/* barrier() */
 #define rmb()		mb()
 #define wmb()		mb()
 #define smp_mb()	mb()
@@ -176,6 +176,9 @@ typedef struct {
 	void *previous;
 	struct task_struct * task;
 #endif
+#ifdef CONFIG_PREEMPT
+	unsigned int break_lock;
+#endif
 } spinlock_t;
 
 #define __lock_aligned __attribute__((__section__(".data.lock_aligned")))
@@ -201,5 +204,7 @@ extern spinlock_t pa_tlb_lock;
 #define purge_tlb_end(x) do { } while (0)
 
 #endif
+
+#define arch_align_stack(x) (x)
 
 #endif

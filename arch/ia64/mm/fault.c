@@ -42,10 +42,8 @@ expand_backing_store (struct vm_area_struct *vma, unsigned long address)
 		!vx_vmlocked_avail(vma->vm_mm, grow)))
 		return -ENOMEM;
 	vma->vm_end += PAGE_SIZE;
-	// vma->vm_mm->total_vm += grow;
 	vx_vmpages_add(vma->vm_mm, grow);
 	if (vma->vm_flags & VM_LOCKED)
-		// vma->vm_mm->locked_vm += grow;
 		vx_vmlocked_add(vma->vm_mm, grow);
 	__vm_stat_account(vma->vm_mm, vma->vm_flags, vma->vm_file, grow);
 	return 0;
@@ -59,6 +57,7 @@ static int
 mapped_kernel_page_is_present (unsigned long address)
 {
 	pgd_t *pgd;
+	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *ptep, pte;
 
@@ -66,7 +65,11 @@ mapped_kernel_page_is_present (unsigned long address)
 	if (pgd_none(*pgd) || pgd_bad(*pgd))
 		return 0;
 
-	pmd = pmd_offset(pgd, address);
+	pud = pud_offset(pgd, address);
+	if (pud_none(*pud) || pud_bad(*pud))
+		return 0;
+
+	pmd = pmd_offset(pud, address);
 	if (pmd_none(*pmd) || pmd_bad(*pmd))
 		return 0;
 
@@ -212,10 +215,13 @@ ia64_do_page_fault (unsigned long address, unsigned long isr, struct pt_regs *re
 	}
 
   no_context:
-	if (isr & IA64_ISR_SP) {
+	if ((isr & IA64_ISR_SP)
+	    || ((isr & IA64_ISR_NA) && (isr & IA64_ISR_CODE_MASK) == IA64_ISR_CODE_LFETCH))
+	{
 		/*
-		 * This fault was due to a speculative load set the "ed" bit in the psr to
-		 * ensure forward progress (target register will get a NaT).
+		 * This fault was due to a speculative load or lfetch.fault, set the "ed"
+		 * bit in the psr to ensure forward progress.  (Target register will get a
+		 * NaT for ld.s, lfetch will be canceled.)
 		 */
 		ia64_psr(regs)->ed = 1;
 		return;

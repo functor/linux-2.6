@@ -32,7 +32,7 @@
 #include <asm/cpu/sq.h>
 
 static LIST_HEAD(sq_mapping_list);
-static spinlock_t sq_mapping_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(sq_mapping_lock);
 
 /**
  * sq_flush - Flush (prefetch) the store queue cache
@@ -379,7 +379,7 @@ static int sq_mmap(struct file *file, struct vm_area_struct *vma)
 
 	map = __sq_alloc_mapping(vma->vm_start, offset, size, "Userspace");
 
-	if (io_remap_page_range(vma, map->sq_addr, map->addr,
+	if (io_remap_pfn_range(vma, map->sq_addr, map->addr >> PAGE_SHIFT,
 				size, vma->vm_page_prot))
 		return -EAGAIN;
 

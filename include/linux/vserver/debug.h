@@ -1,6 +1,9 @@
 #ifndef _VX_DEBUG_H
 #define _VX_DEBUG_H
 
+#ifndef	CONFIG_VSERVER
+#warning config options missing
+#endif
 
 #define VXD_CBIT(n,m)	(vx_debug_ ## n & (1 << (m)))
 #define VXD_CMIN(n,m)	(vx_debug_ ## n > (m))
@@ -88,7 +91,7 @@ struct _vxhe_vxi {
 	struct vx_info *ptr;
 	unsigned xid;
 	unsigned usecnt;
-	unsigned refcnt;
+	unsigned tasks;
 };
 
 struct _vxhe_set_clr {
@@ -105,14 +108,18 @@ enum {
 
 	VXH_GET_VX_INFO,
 	VXH_PUT_VX_INFO,
+	VXH_INIT_VX_INFO,
 	VXH_SET_VX_INFO,
 	VXH_CLR_VX_INFO,
+	VXH_CLAIM_VX_INFO,
+	VXH_RELEASE_VX_INFO,
 	VXH_ALLOC_VX_INFO,
 	VXH_DEALLOC_VX_INFO,
 	VXH_HASH_VX_INFO,
 	VXH_UNHASH_VX_INFO,
 	VXH_LOC_VX_INFO,
 	VXH_LOOKUP_VX_INFO,
+	VXH_CREATE_VX_INFO,
 };
 
 struct _vx_hist_entry {
@@ -140,129 +147,123 @@ static inline void __vxh_copy_vxi(struct _vx_hist_entry *entry, struct vx_info *
 	entry->vxi.ptr = vxi;
 	if (vxi) {
 		entry->vxi.usecnt = atomic_read(&vxi->vx_usecnt);
-		entry->vxi.refcnt = atomic_read(&vxi->vx_refcnt);
+		entry->vxi.tasks = atomic_read(&vxi->vx_tasks);
 		entry->vxi.xid = vxi->vx_id;
 	}
 }
 
+
+#define __VXH_BODY(__type, __data)		\
+	struct _vx_hist_entry *entry;		\
+						\
+	preempt_disable();			\
+	entry = vxh_advance(VXH_HERE());	\
+	__data;					\
+	entry->type = __type;			\
+	preempt_enable();
+
+
+	/* pass vxi only */
+#define __VXH_SIMPLE				\
+	__vxh_copy_vxi(entry, vxi)
+
+#define VXH_SIMPLE(__name, __type)		\
+static inline void __name(struct vx_info *vxi)	\
+{						\
+	__VXH_BODY(__type, __VXH_SIMPLE)	\
+}
+
+	/* pass vxi and data (void *) */
+#define __VXH_DATA				\
+	__vxh_copy_vxi(entry, vxi);		\
+	entry->sc.data = data
+
+#define VXH_DATA(__name, __type)		\
+static inline 					\
+void __name(struct vx_info *vxi, void *data)	\
+{						\
+	__VXH_BODY(__type, __VXH_DATA)		\
+}
+
+	/* pass vxi and arg (long) */
+#define __VXH_LARG				\
+	__vxh_copy_vxi(entry, vxi);		\
+	entry->ll.arg = arg
+
+#define VXH_LARG(__name, __type)		\
+static inline 					\
+void __name(struct vx_info *vxi, long arg)	\
+{						\
+	__VXH_BODY(__type, __VXH_LARG)		\
+}
+
+
 static inline void vxh_throw_oops(void)
 {
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
-
-	entry->type = VXH_THROW_OOPS;
-
+	__VXH_BODY(VXH_THROW_OOPS, {});
 	/* prevent further acquisition */
 	vxh_active = 0;
 }
 
-static inline void vxh_get_vx_info(struct vx_info *vxi)
-{
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
+VXH_SIMPLE(vxh_get_vx_info,	VXH_GET_VX_INFO);
+VXH_SIMPLE(vxh_put_vx_info,	VXH_PUT_VX_INFO);
 
-	__vxh_copy_vxi(entry, vxi);
-	entry->type = VXH_GET_VX_INFO;
-}
+VXH_DATA(vxh_init_vx_info,	VXH_INIT_VX_INFO);
+VXH_DATA(vxh_set_vx_info,	VXH_SET_VX_INFO);
+VXH_DATA(vxh_clr_vx_info,	VXH_CLR_VX_INFO);
 
-static inline void vxh_put_vx_info(struct vx_info *vxi)
-{
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
+VXH_DATA(vxh_claim_vx_info,	VXH_CLAIM_VX_INFO);
+VXH_DATA(vxh_release_vx_info,	VXH_RELEASE_VX_INFO);
 
-	__vxh_copy_vxi(entry, vxi);
-	entry->type = VXH_PUT_VX_INFO;
-}
+VXH_SIMPLE(vxh_alloc_vx_info,	VXH_ALLOC_VX_INFO);
+VXH_SIMPLE(vxh_dealloc_vx_info, VXH_DEALLOC_VX_INFO);
 
-static inline void vxh_set_vx_info(struct vx_info *vxi, void *data)
-{
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
+VXH_SIMPLE(vxh_hash_vx_info,	VXH_HASH_VX_INFO);
+VXH_SIMPLE(vxh_unhash_vx_info,	VXH_UNHASH_VX_INFO);
 
-	__vxh_copy_vxi(entry, vxi);
-	entry->sc.data = data;
-	entry->type = VXH_SET_VX_INFO;
-}
-
-static inline void vxh_clr_vx_info(struct vx_info *vxi, void *data)
-{
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
-
-	__vxh_copy_vxi(entry, vxi);
-	entry->sc.data = data;
-	entry->type = VXH_CLR_VX_INFO;
-}
-
-static inline void vxh_alloc_vx_info(struct vx_info *vxi)
-{
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
-
-	__vxh_copy_vxi(entry, vxi);
-	entry->type = VXH_ALLOC_VX_INFO;
-}
-
-static inline void vxh_dealloc_vx_info(struct vx_info *vxi)
-{
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
-
-	__vxh_copy_vxi(entry, vxi);
-	entry->type = VXH_DEALLOC_VX_INFO;
-}
-
-static inline void vxh_hash_vx_info(struct vx_info *vxi)
-{
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
-
-	__vxh_copy_vxi(entry, vxi);
-	entry->type = VXH_HASH_VX_INFO;
-}
-
-static inline void vxh_unhash_vx_info(struct vx_info *vxi)
-{
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
-
-	__vxh_copy_vxi(entry, vxi);
-	entry->type = VXH_UNHASH_VX_INFO;
-}
-
-static inline void vxh_loc_vx_info(unsigned arg, struct vx_info *vxi)
-{
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
-
-	__vxh_copy_vxi(entry, vxi);
-	entry->ll.arg = arg;
-	entry->type = VXH_LOC_VX_INFO;
-}
-
-static inline void vxh_lookup_vx_info(unsigned arg, struct vx_info *vxi)
-{
-	struct _vx_hist_entry *entry = vxh_advance(VXH_HERE());
-
-	__vxh_copy_vxi(entry, vxi);
-	entry->ll.arg = arg;
-	entry->type = VXH_LOOKUP_VX_INFO;
-}
+VXH_LARG(vxh_loc_vx_info,	VXH_LOC_VX_INFO);
+VXH_LARG(vxh_lookup_vx_info,	VXH_LOOKUP_VX_INFO);
+VXH_LARG(vxh_create_vx_info,	VXH_CREATE_VX_INFO);
 
 extern void vxh_dump_history(void);
 
+
 #else  /* CONFIG_VSERVER_HISTORY */
 
-#define	vxh_throw_oops()	do { } while (0)
 
-#define vxh_get_vx_info(v)	do { } while (0)
-#define vxh_put_vx_info(v)	do { } while (0)
+#define vxh_throw_oops()		do { } while (0)
 
-#define vxh_set_vx_info(v,d)	do { } while (0)
-#define vxh_clr_vx_info(v,d)	do { } while (0)
+#define vxh_get_vx_info(v)		do { } while (0)
+#define vxh_put_vx_info(v)		do { } while (0)
 
-#define vxh_alloc_vx_info(v)	do { } while (0)
-#define vxh_dealloc_vx_info(v)	do { } while (0)
+#define vxh_init_vx_info(v,d)		do { } while (0)
+#define vxh_set_vx_info(v,d)		do { } while (0)
+#define vxh_clr_vx_info(v,d)		do { } while (0)
 
-#define vxh_hash_vx_info(v)	do { } while (0)
-#define vxh_unhash_vx_info(v)	do { } while (0)
+#define vxh_claim_vx_info(v,d)		do { } while (0)
+#define vxh_release_vx_info(v,d)	do { } while (0)
 
-#define vxh_loc_vx_info(a,v)	do { } while (0)
-#define vxh_lookup_vx_info(a,v) do { } while (0)
+#define vxh_alloc_vx_info(v)		do { } while (0)
+#define vxh_dealloc_vx_info(v)		do { } while (0)
 
-#define vxh_dump_history()	do { } while (0)
+#define vxh_hash_vx_info(v)		do { } while (0)
+#define vxh_unhash_vx_info(v)		do { } while (0)
+
+#define vxh_loc_vx_info(a,v)		do { } while (0)
+#define vxh_lookup_vx_info(a,v)		do { } while (0)
+#define vxh_create_vx_info(a,v)		do { } while (0)
+
+#define vxh_dump_history()		do { } while (0)
 
 
 #endif /* CONFIG_VSERVER_HISTORY */
+
+
+#ifdef	CONFIG_VSERVER_DEBUG
+#define vxd_assert_lock(l)	assert_spin_locked(l)
+#else
+#define	vxd_assert_lock(l)	do { } while (0)
+#endif
+
 
 #endif /* _VX_DEBUG_H */

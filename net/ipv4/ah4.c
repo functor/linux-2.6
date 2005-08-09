@@ -53,11 +53,9 @@ static int ip_clear_mutable_options(struct iphdr *iph, u32 *daddr)
 	return 0;
 }
 
-static int ah_output(struct sk_buff *skb)
+static int ah_output(struct xfrm_state *x, struct sk_buff *skb)
 {
 	int err;
-	struct dst_entry *dst = skb->dst;
-	struct xfrm_state *x  = dst->xfrm;
 	struct iphdr *iph, *top_iph;
 	struct ip_auth_hdr *ah;
 	struct ah_data *ahp;
@@ -236,7 +234,7 @@ static int ah_init_state(struct xfrm_state *x, void *args)
 	 * we need for AH processing.  This lookup cannot fail here
 	 * after a successful crypto_alloc_tfm().
 	 */
-	aalg_desc = xfrm_aalg_get_byname(x->aalg->alg_name);
+	aalg_desc = xfrm_aalg_get_byname(x->aalg->alg_name, 0);
 	BUG_ON(!aalg_desc);
 
 	if (aalg_desc->uinfo.auth.icv_fullbits/8 !=

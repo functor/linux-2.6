@@ -253,7 +253,7 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_NFORCE2, pci
 #define MAX_PCIEROOT	6
 static int quirk_aspm_offset[MAX_PCIEROOT << 3];
 
-#define GET_INDEX(a, b) (((a - PCI_DEVICE_ID_INTEL_MCH_PA) << 3) + b)
+#define GET_INDEX(a, b) ((((a) - PCI_DEVICE_ID_INTEL_MCH_PA) << 3) + ((b) & 7))
 
 static int quirk_pcie_aspm_read(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 *value)
 {
@@ -276,7 +276,7 @@ static int quirk_pcie_aspm_write(struct pci_bus *bus, unsigned int devfn, int wh
 	return raw_pci_ops->write(0, bus->number, devfn, where, size, value);
 }
 
-struct pci_ops quirk_pcie_aspm_ops = {
+static struct pci_ops quirk_pcie_aspm_ops = {
 	.read = quirk_pcie_aspm_read,
 	.write = quirk_pcie_aspm_write,
 };
@@ -289,7 +289,7 @@ struct pci_ops quirk_pcie_aspm_ops = {
  * the root port in an array for fast indexing. Replace the bus ops
  * with the modified one.
  */
-void pcie_rootport_aspm_quirk(struct pci_dev *pdev)
+static void pcie_rootport_aspm_quirk(struct pci_dev *pdev)
 {
 	int cap_base, i;
 	struct pci_bus  *pbus;
@@ -343,7 +343,7 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_MCH_PC1,	pcie_r
 /*
  * Fixup to mark boot BIOS video selected by BIOS before it changes
  *
- * From information provided by "Jon Smirl" <jonsmirl@yahoo.com>
+ * From information provided by "Jon Smirl" <jonsmirl@gmail.com>
  *
  * The standard boot ROM sequence for an x86 machine uses the BIOS
  * to select an initial video card for boot display. This boot video 
@@ -354,12 +354,13 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_MCH_PC1,	pcie_r
  * See pci_map_rom() for use of this flag. IORESOURCE_ROM_SHADOW
  * is marked here since the boot video device will be the only enabled
  * video device at this point.
- *
- */static void __devinit pci_fixup_video(struct pci_dev *pdev)
+ */
+
+static void __devinit pci_fixup_video(struct pci_dev *pdev)
 {
 	struct pci_dev *bridge;
 	struct pci_bus *bus;
-	u16 l;
+	u16 config;
 
 	if ((pdev->class >> 8) != PCI_CLASS_DISPLAY_VGA)
 		return;
@@ -369,12 +370,17 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_MCH_PC1,	pcie_r
 	while (bus) {
 		bridge = bus->self;
 		if (bridge) {
-			pci_read_config_word(bridge, PCI_BRIDGE_CONTROL, &l);
-			if (!(l & PCI_BRIDGE_CTL_VGA))
+			pci_read_config_word(bridge, PCI_BRIDGE_CONTROL,
+						&config);
+			if (!(config & PCI_BRIDGE_CTL_VGA))
 				return;
 		}
 		bus = bus->parent;
 	}
-	pdev->resource[PCI_ROM_RESOURCE].flags |= IORESOURCE_ROM_SHADOW;
+	pci_read_config_word(pdev, PCI_COMMAND, &config);
+	if (config & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY)) {
+		pdev->resource[PCI_ROM_RESOURCE].flags |= IORESOURCE_ROM_SHADOW;
+		printk(KERN_DEBUG "Boot video device is %s\n", pci_name(pdev));
+	}
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_ANY_ID, PCI_ANY_ID, pci_fixup_video);

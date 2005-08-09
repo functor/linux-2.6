@@ -25,11 +25,13 @@
 #include <linux/file.h>
 #include <linux/vfs.h>
 #include <linux/ioctl32.h>
+#include <linux/ioctl.h>
 #include <linux/init.h>
 #include <linux/sockios.h>	/* for SIOCDEVPRIVATE */
 #include <linux/smb.h>
 #include <linux/smb_mount.h>
 #include <linux/ncp_mount.h>
+#include <linux/nfs4_mount.h>
 #include <linux/smp_lock.h>
 #include <linux/syscalls.h>
 #include <linux/ctype.h>
@@ -47,6 +49,7 @@
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
+#include <asm/ioctls.h>
 
 /*
  * Not all architectures have sys_utime, so implement this in terms
@@ -129,7 +132,7 @@ static int put_compat_statfs(struct compat_statfs __user *ubuf, struct kstatfs *
 		 && (kbuf->f_ffree & 0xffffffff00000000ULL))
 			return -EOVERFLOW;
 	}
-	if (verify_area(VERIFY_WRITE, ubuf, sizeof(*ubuf)) ||
+	if (!access_ok(VERIFY_WRITE, ubuf, sizeof(*ubuf)) ||
 	    __put_user(kbuf->f_type, &ubuf->f_type) ||
 	    __put_user(kbuf->f_bsize, &ubuf->f_bsize) ||
 	    __put_user(kbuf->f_blocks, &ubuf->f_blocks) ||
@@ -203,7 +206,7 @@ static int put_compat_statfs64(struct compat_statfs64 __user *ubuf, struct kstat
 		 && (kbuf->f_ffree & 0xffffffff00000000ULL))
 			return -EOVERFLOW;
 	}
-	if (verify_area(VERIFY_WRITE, ubuf, sizeof(*ubuf)) ||
+	if (!access_ok(VERIFY_WRITE, ubuf, sizeof(*ubuf)) ||
 	    __put_user(kbuf->f_type, &ubuf->f_type) ||
 	    __put_user(kbuf->f_bsize, &ubuf->f_bsize) ||
 	    __put_user(kbuf->f_blocks, &ubuf->f_blocks) ||
@@ -397,77 +400,121 @@ out:
 }
 EXPORT_SYMBOL(unregister_ioctl32_conversion); 
 
+static void compat_ioctl_error(struct file *filp, unsigned int fd,
+		unsigned int cmd, unsigned long arg)
+{
+	char buf[10];
+	char *fn = "?";
+	char *path;
+
+	/* find the name of the device. */
+	path = (char *)__get_free_page(GFP_KERNEL);
+	if (path) {
+		fn = d_path(filp->f_dentry, filp->f_vfsmnt, path, PAGE_SIZE);
+		if (IS_ERR(fn))
+			fn = "?";
+	}
+
+	sprintf(buf,"'%c'", (cmd>>24) & 0x3f);
+	if (!isprint(buf[1]))
+		sprintf(buf, "%02x", buf[1]);
+	printk("ioctl32(%s:%d): Unknown cmd fd(%d) "
+			"cmd(%08x){%s} arg(%08x) on %s\n",
+			current->comm, current->pid,
+			(int)fd, (unsigned int)cmd, buf,
+			(unsigned int)arg, fn);
+
+	if (path)
+		free_page((unsigned long)path);
+}
+
 asmlinkage long compat_sys_ioctl(unsigned int fd, unsigned int cmd,
 				unsigned long arg)
 {
-	struct file * filp;
+	struct file *filp;
 	int error = -EBADF;
 	struct ioctl_trans *t;
+	int fput_needed;
 
-	filp = fget(fd);
-	if(!filp)
-		goto out2;
-
-	if (!filp->f_op || !filp->f_op->ioctl) {
-		error = sys_ioctl (fd, cmd, arg);
+	filp = fget_light(fd, &fput_needed);
+	if (!filp)
 		goto out;
+
+	/* RED-PEN how should LSM module know it's handling 32bit? */
+	error = security_file_ioctl(filp, cmd, arg);
+	if (error)
+		goto out_fput;
+
+	/*
+	 * To allow the compat_ioctl handlers to be self contained
+	 * we need to check the common ioctls here first.
+	 * Just handle them with the standard handlers below.
+	 */
+	switch (cmd) {
+	case FIOCLEX:
+	case FIONCLEX:
+	case FIONBIO:
+	case FIOASYNC:
+	case FIOQSIZE:
+		break;
+
+	case FIBMAP:
+	case FIGETBSZ:
+	case FIONREAD:
+		if (S_ISREG(filp->f_dentry->d_inode->i_mode))
+			break;
+		/*FALL THROUGH*/
+
+	default:
+		if (filp->f_op && filp->f_op->compat_ioctl) {
+			error = filp->f_op->compat_ioctl(filp, cmd, arg);
+			if (error != -ENOIOCTLCMD)
+				goto out_fput;
+		}
+
+		if (!filp->f_op ||
+		    (!filp->f_op->ioctl && !filp->f_op->unlocked_ioctl))
+			goto do_ioctl;
+		break;
 	}
 
+	/* When register_ioctl32_conversion is finally gone remove
+	   this lock! -AK */
 	down_read(&ioctl32_sem);
-
-	t = ioctl32_hash_table[ioctl32_hash (cmd)];
-
-	while (t && t->cmd != cmd)
-		t = t->next;
-	if (t) {
-		if (t->handler) { 
-			lock_kernel();
-			error = t->handler(fd, cmd, arg, filp);
-			unlock_kernel();
-			up_read(&ioctl32_sem);
-		} else {
-			up_read(&ioctl32_sem);
-			error = sys_ioctl(fd, cmd, arg);
-		}
-	} else {
-		up_read(&ioctl32_sem);
-		if (cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15)) {
-			error = siocdevprivate_ioctl(fd, cmd, arg);
-		} else {
-			static int count;
-			if (++count <= 50) {
-				char buf[10];
-				char *fn = "?";
-				char *path;
-
-				path = (char *)__get_free_page(GFP_KERNEL);
-
-				/* find the name of the device. */
-				if (path) {
-			       		fn = d_path(filp->f_dentry,
-						filp->f_vfsmnt, path,
-						PAGE_SIZE);
-					if (IS_ERR(fn))
-						fn = "?";
-				}
-
-				sprintf(buf,"'%c'", (cmd>>24) & 0x3f);
-				if (!isprint(buf[1]))
-				    sprintf(buf, "%02x", buf[1]);
-				printk("ioctl32(%s:%d): Unknown cmd fd(%d) "
-					"cmd(%08x){%s} arg(%08x) on %s\n",
-					current->comm, current->pid,
-					(int)fd, (unsigned int)cmd, buf,
-					(unsigned int)arg, fn);
-				if (path)
-					free_page((unsigned long)path);
-			}
-			error = -EINVAL;
-		}
+	for (t = ioctl32_hash_table[ioctl32_hash(cmd)]; t; t = t->next) {
+		if (t->cmd == cmd)
+			goto found_handler;
 	}
-out:
-	fput(filp);
-out2:
+	up_read(&ioctl32_sem);
+
+	if (S_ISSOCK(filp->f_dentry->d_inode->i_mode) &&
+	    cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15)) {
+		error = siocdevprivate_ioctl(fd, cmd, arg);
+	} else {
+		static int count;
+
+		if (++count <= 50)
+			compat_ioctl_error(filp, fd, cmd, arg);
+		error = -EINVAL;
+	}
+
+	goto out_fput;
+
+ found_handler:
+	if (t->handler) {
+		lock_kernel();
+		error = t->handler(fd, cmd, arg, filp);
+		unlock_kernel();
+		up_read(&ioctl32_sem);
+		goto out_fput;
+	}
+
+	up_read(&ioctl32_sem);
+ do_ioctl:
+	error = vfs_ioctl(filp, fd, cmd, arg);
+ out_fput:
+	fput_light(filp, fput_needed);
+ out:
 	return error;
 }
 
@@ -760,10 +807,79 @@ static void *do_smb_super_data_conv(void *raw_data)
 	return raw_data;
 }
 
+struct compat_nfs_string {
+	compat_uint_t len;
+	compat_uptr_t data;
+};
+
+static inline void compat_nfs_string(struct nfs_string *dst,
+				     struct compat_nfs_string *src)
+{
+	dst->data = compat_ptr(src->data);
+	dst->len = src->len;
+}
+
+struct compat_nfs4_mount_data_v1 {
+	compat_int_t version;
+	compat_int_t flags;
+	compat_int_t rsize;
+	compat_int_t wsize;
+	compat_int_t timeo;
+	compat_int_t retrans;
+	compat_int_t acregmin;
+	compat_int_t acregmax;
+	compat_int_t acdirmin;
+	compat_int_t acdirmax;
+	struct compat_nfs_string client_addr;
+	struct compat_nfs_string mnt_path;
+	struct compat_nfs_string hostname;
+	compat_uint_t host_addrlen;
+	compat_uptr_t host_addr;
+	compat_int_t proto;
+	compat_int_t auth_flavourlen;
+	compat_uptr_t auth_flavours;
+};
+
+static int do_nfs4_super_data_conv(void *raw_data)
+{
+	int version = *(compat_uint_t *) raw_data;
+
+	if (version == 1) {
+		struct compat_nfs4_mount_data_v1 *raw = raw_data;
+		struct nfs4_mount_data *real = raw_data;
+
+		/* copy the fields backwards */
+		real->auth_flavours = compat_ptr(raw->auth_flavours);
+		real->auth_flavourlen = raw->auth_flavourlen;
+		real->proto = raw->proto;
+		real->host_addr = compat_ptr(raw->host_addr);
+		real->host_addrlen = raw->host_addrlen;
+		compat_nfs_string(&real->hostname, &raw->hostname);
+		compat_nfs_string(&real->mnt_path, &raw->mnt_path);
+		compat_nfs_string(&real->client_addr, &raw->client_addr);
+		real->acdirmax = raw->acdirmax;
+		real->acdirmin = raw->acdirmin;
+		real->acregmax = raw->acregmax;
+		real->acregmin = raw->acregmin;
+		real->retrans = raw->retrans;
+		real->timeo = raw->timeo;
+		real->wsize = raw->wsize;
+		real->rsize = raw->rsize;
+		real->flags = raw->flags;
+		real->version = raw->version;
+	}
+	else {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 extern int copy_mount_options (const void __user *, unsigned long *);
 
 #define SMBFS_NAME      "smbfs"
 #define NCPFS_NAME      "ncpfs"
+#define NFS4_NAME	"nfs4"
 
 asmlinkage long compat_sys_mount(char __user * dev_name, char __user * dir_name,
 				 char __user * type, unsigned long flags,
@@ -799,6 +915,9 @@ asmlinkage long compat_sys_mount(char __user * dev_name, char __user * dir_name,
 			do_smb_super_data_conv((void *)data_page);
 		} else if (!strcmp((char *)type_page, NCPFS_NAME)) {
 			do_ncp_super_data_conv((void *)data_page);
+		} else if (!strcmp((char *)type_page, NFS4_NAME)) {
+			if (do_nfs4_super_data_conv((void *) data_page))
+				goto out4;
 		}
 	}
 
@@ -807,6 +926,7 @@ asmlinkage long compat_sys_mount(char __user * dev_name, char __user * dir_name,
 			flags, (void*)data_page);
 	unlock_kernel();
 
+ out4:
 	free_page(data_page);
  out3:
 	free_page(dev_page);
@@ -1080,7 +1200,6 @@ static ssize_t compat_do_readv_writev(int type, struct file *file,
 	int seg;
 	io_fn_t fn;
 	iov_fn_t fnv;
-	struct inode *inode;
 
 	/*
 	 * SuS says "The readv() function *may* fail if the iovcnt argument
@@ -1107,7 +1226,7 @@ static ssize_t compat_do_readv_writev(int type, struct file *file,
 			goto out;
 	}
 	ret = -EFAULT;
-	if (verify_area(VERIFY_READ, uvector, nr_segs*sizeof(*uvector)))
+	if (!access_ok(VERIFY_READ, uvector, nr_segs*sizeof(*uvector)))
 		goto out;
 
 	/*
@@ -1145,11 +1264,7 @@ static ssize_t compat_do_readv_writev(int type, struct file *file,
 		goto out;
 	}
 
-	inode = file->f_dentry->d_inode;
-	/* VERIFY_WRITE actually means a read, as we write to user space */
-	ret = locks_verify_area((type == READ
-				 ? FLOCK_VERIFY_READ : FLOCK_VERIFY_WRITE),
-				inode, file, *pos, tot_len);
+	ret = rw_verify_area(type, file, pos, tot_len);
 	if (ret)
 		goto out;
 
@@ -1496,7 +1611,7 @@ int compat_get_fd_set(unsigned long nr, compat_ulong_t __user *ufdset,
 	if (ufdset) {
 		unsigned long odd;
 
-		if (verify_area(VERIFY_WRITE, ufdset, nr*sizeof(compat_ulong_t)))
+		if (!access_ok(VERIFY_WRITE, ufdset, nr*sizeof(compat_ulong_t)))
 			return -EFAULT;
 
 		odd = nr & 1UL;
@@ -1579,18 +1694,19 @@ compat_sys_select(int n, compat_ulong_t __user *inp, compat_ulong_t __user *outp
 	fd_set_bits fds;
 	char *bits;
 	long timeout;
-	int ret, size, max_fdset;
+	int size, max_fdset, ret = -EINVAL;
 
 	timeout = MAX_SCHEDULE_TIMEOUT;
 	if (tvp) {
 		time_t sec, usec;
 
-		if ((ret = verify_area(VERIFY_READ, tvp, sizeof(*tvp)))
-		    || (ret = __get_user(sec, &tvp->tv_sec))
-		    || (ret = __get_user(usec, &tvp->tv_usec)))
+		if (!access_ok(VERIFY_READ, tvp, sizeof(*tvp))
+		    || __get_user(sec, &tvp->tv_sec)
+		    || __get_user(usec, &tvp->tv_usec)) {
+			ret = -EFAULT;
 			goto out_nofds;
+		}
 
-		ret = -EINVAL;
 		if (sec < 0 || usec < 0)
 			goto out_nofds;
 
@@ -1600,7 +1716,6 @@ compat_sys_select(int n, compat_ulong_t __user *inp, compat_ulong_t __user *outp
 		}
 	}
 
-	ret = -EINVAL;
 	if (n < 0)
 		goto out_nofds;
 

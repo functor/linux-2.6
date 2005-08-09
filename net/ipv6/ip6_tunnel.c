@@ -85,7 +85,7 @@ static struct ip6_tnl *tnls_wc[1];
 static struct ip6_tnl **tnls[2] = { tnls_wc, tnls_r_l };
 
 /* lock for the tunnel lists */
-static rwlock_t ip6ip6_lock = RW_LOCK_UNLOCKED;
+static DEFINE_RWLOCK(ip6ip6_lock);
 
 static inline struct dst_entry *ip6_tnl_dst_check(struct ip6_tnl *t)
 {
@@ -94,6 +94,7 @@ static inline struct dst_entry *ip6_tnl_dst_check(struct ip6_tnl *t)
 	if (dst && dst->obsolete && 
 	    dst->ops->check(dst, t->dst_cookie) == NULL) {
 		t->dst_cache = NULL;
+		dst_release(dst);
 		return NULL;
 	}
 
@@ -180,10 +181,10 @@ ip6ip6_tnl_link(struct ip6_tnl *t)
 {
 	struct ip6_tnl **tp = ip6ip6_bucket(&t->parms);
 
-	write_lock_bh(&ip6ip6_lock);
 	t->next = *tp;
-	write_unlock_bh(&ip6ip6_lock);
+	write_lock_bh(&ip6ip6_lock);
 	*tp = t;
+	write_unlock_bh(&ip6ip6_lock);
 }
 
 /**
@@ -688,14 +689,14 @@ ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 			       t->parms.name);
 		goto tx_err_dst_release;
 	}
-	mtu = dst_pmtu(dst) - sizeof (*ipv6h);
+	mtu = dst_mtu(dst) - sizeof (*ipv6h);
 	if (opt) {
 		max_headroom += 8;
 		mtu -= 8;
 	}
 	if (mtu < IPV6_MIN_MTU)
 		mtu = IPV6_MIN_MTU;
-	if (skb->dst && mtu < dst_pmtu(skb->dst)) {
+	if (skb->dst && mtu < dst_mtu(skb->dst)) {
 		struct rt6_info *rt = (struct rt6_info *) skb->dst;
 		rt->rt6i_flags |= RTF_MODIFIED;
 		rt->u.dst.metrics[RTAX_MTU-1] = mtu;
@@ -881,6 +882,7 @@ ip6ip6_tnl_change(struct ip6_tnl *t, struct ip6_tnl_parm *p)
 	t->parms.hop_limit = p->hop_limit;
 	t->parms.encap_limit = p->encap_limit;
 	t->parms.flowinfo = p->flowinfo;
+	t->parms.link = p->link;
 	ip6ip6_tnl_link_config(t);
 	return 0;
 }

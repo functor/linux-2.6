@@ -755,8 +755,10 @@
 #define __NR_mbind		(__NR_Linux + 260)
 #define __NR_get_mempolicy	(__NR_Linux + 261)
 #define __NR_set_mempolicy	(__NR_Linux + 262)
+
 #define __NR_vserver		(__NR_Linux + 273)
 
+#define __NR_Linux_syscalls	273
 
 #define HPUX_GATEWAY_ADDR       0xC0000004
 #define LINUX_GATEWAY_ADDR      0x100
@@ -822,7 +824,7 @@
 		__sys_res = (long)__res;				\
 	}								\
 	if ( (unsigned long)__sys_res >= (unsigned long)-4095 ){	\
-		errno = -__sys_res);		        		\
+		errno = -__sys_res;		        		\
 		__sys_res = -1;						\
 	}								\
 	__sys_res;							\
@@ -912,6 +914,7 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5)	\
 #define __ARCH_WANT_SYS_SGETMASK
 #define __ARCH_WANT_SYS_SIGNAL
 #define __ARCH_WANT_SYS_TIME
+#define __ARCH_WANT_COMPAT_SYS_TIME
 #define __ARCH_WANT_SYS_UTIME
 #define __ARCH_WANT_SYS_WAITPID
 #define __ARCH_WANT_SYS_SOCKETCALL
@@ -1023,6 +1026,6 @@ asmlinkage long sys_rt_sigaction(int sig,
  * What we want is __attribute__((weak,alias("sys_ni_syscall"))),
  * but it doesn't work on all toolchains, so we just do it by hand
  */
-#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall");
+#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
 
 #endif /* _ASM_PARISC_UNISTD_H_ */

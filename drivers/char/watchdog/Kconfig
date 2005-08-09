@@ -93,6 +93,11 @@ config IXP4XX_WATCHDOG
 	  be built as a module by choosing M. The module will
 	  be called ixp4xx_wdt.
 
+	  Note: The internal IXP4xx watchdog does a soft CPU reset
+	  which doesn't reset any peripherals. There are circumstances
+	  where the watchdog will fail to reset the board correctly
+	  (e.g., if the boot ROM is in an unreadable state).
+
 	  Say N if you are unsure.
 
 config IXP2000_WATCHDOG
@@ -263,12 +268,12 @@ config SC1200_WDT
 
 config SCx200_WDT
 	tristate "National Semiconductor SCx200 Watchdog"
-	depends on WATCHDOG && X86 && PCI
+	depends on WATCHDOG && SCx200 && PCI
 	help
 	  Enable the built-in watchdog timer support on the National
 	  Semiconductor SCx200 processors.
 
-	  If compiled as a module, it will be called scx200_watchdog.
+	  If compiled as a module, it will be called scx200_wdt.
 
 config 60XX_WDT
 	tristate "SBC-60XX Watchdog Timer"

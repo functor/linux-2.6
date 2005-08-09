@@ -24,7 +24,6 @@
 #include <linux/mount.h>
 #include <linux/vserver/namespace.h>
 #include <linux/vserver/xid.h>
-
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 
@@ -40,7 +39,7 @@ static inline int sysfs_init(void)
 #endif
 
 /* spinlock for vfsmount related operations, inplace of dcache_lock */
-spinlock_t vfsmount_lock __cacheline_aligned_in_smp = SPIN_LOCK_UNLOCKED;
+ __cacheline_aligned_in_smp DEFINE_SPINLOCK(vfsmount_lock);
 
 static struct list_head *mount_hashtable;
 static int hash_mask, hash_bits;
@@ -219,56 +218,82 @@ static inline void mangle(struct seq_file *m, const char *s)
 	seq_escape(m, s, " \t\n\\");
 }
 
+static int mnt_is_reachable(struct vfsmount *mnt)
+{
+	struct vfsmount *root_mnt;
+	struct dentry *root, *point;
+	int ret;
+
+	if (!mnt)
+		return 1;
+	if (mnt == mnt->mnt_namespace->root)
+		return 1;
+
+	spin_lock(&dcache_lock);
+	root_mnt = current->fs->rootmnt;
+	root = current->fs->root;
+	point = root;
+
+	while ((mnt != mnt->mnt_parent) && (mnt != root_mnt)) {
+		point = mnt->mnt_mountpoint;
+		mnt = mnt->mnt_parent;
+	}
+
+	ret = (mnt == root_mnt) && is_subdir(point, root);
+
+	spin_unlock(&dcache_lock);
+
+	return ret;
+}
+
 static int show_vfsmnt(struct seq_file *m, void *v)
 {
 	struct vfsmount *mnt = v;
 	int err = 0;
 	static struct proc_fs_info {
-		int s_flag;
-		int mnt_flag;
-		char *set_str;
-		char *unset_str;
+		int flag;
+		char *str;
 	} fs_info[] = {
-		{ MS_RDONLY, MNT_RDONLY, "ro", "rw" },
-		{ MS_SYNCHRONOUS, 0, ",sync", NULL },
-		{ MS_DIRSYNC, 0, ",dirsync", NULL },
-		{ MS_MANDLOCK, 0, ",mand", NULL },
-		{ MS_NOATIME, MNT_NOATIME, ",noatime", NULL },
-		{ MS_NODIRATIME, MNT_NODIRATIME, ",nodiratime", NULL },
-		{ MS_TAGXID, MS_TAGXID, ",tagxid", NULL },
-		{ 0, MNT_NOSUID, ",nosuid", NULL },
-		{ 0, MNT_NODEV, ",nodev", NULL },
-		{ 0, MNT_NOEXEC, ",noexec", NULL },
-		{ 0, 0, NULL, NULL }
+		{ MS_SYNCHRONOUS, ",sync" },
+		{ MS_DIRSYNC, ",dirsync" },
+		{ MS_MANDLOCK, ",mand" },
+		{ MS_NOATIME, ",noatime" },
+		{ MS_NODIRATIME, ",nodiratime" },
+		{ MS_TAGXID, ",tagxid" },
+		{ 0, NULL }
 	};
-	struct proc_fs_info *p;
-	unsigned long s_flags = mnt->mnt_sb->s_flags;
-	int mnt_flags = mnt->mnt_flags;
+	static struct proc_fs_info mnt_info[] = {
+		{ MNT_NOSUID, ",nosuid" },
+		{ MNT_NODEV, ",nodev" },
+		{ MNT_NOEXEC, ",noexec" },
+		{ 0, NULL }
+	};
+
+	struct proc_fs_info *fs_infop;
 
 	if (vx_flags(VXF_HIDE_MOUNT, 0))
 		return 0;
-	if (!vx_check_vfsmount(current->vx_info, mnt))
+	if (!mnt_is_reachable(mnt))
 		return 0;
 
-	if (vx_flags(VXF_HIDE_MOUNT, 0))
-		return 0;
-	if (!vx_check_vfsmount(current->vx_info, mnt))
-		return 0;
-
-	mangle(m, mnt->mnt_devname ? mnt->mnt_devname : "none");
-	seq_putc(m, ' ');
-	seq_path(m, mnt, mnt->mnt_root, " \t\n\\");
-	seq_putc(m, ' ');
+	if (!vx_check(0, VX_ADMIN|VX_WATCH) &&
+		mnt == current->fs->rootmnt) {
+		seq_puts(m, "/dev/root / ");
+	} else {
+		mangle(m, mnt->mnt_devname ? mnt->mnt_devname : "none");
+		seq_putc(m, ' ');
+		seq_path(m, mnt, mnt->mnt_root, " \t\n\\");
+		seq_putc(m, ' ');
+	}
 	mangle(m, mnt->mnt_sb->s_type->name);
-	seq_putc(m, ' ');
-	for (p = fs_info; (p->s_flag | p->mnt_flag) ; p++) {
-		if ((s_flags & p->s_flag) || (mnt_flags & p->mnt_flag)) {
-			if (p->set_str)
-				seq_puts(m, p->set_str);
-		} else {
-			if (p->unset_str)
-				seq_puts(m, p->unset_str);
-		}
+	seq_puts(m, mnt->mnt_sb->s_flags & MS_RDONLY ? " ro" : " rw");
+	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+		if (mnt->mnt_sb->s_flags & fs_infop->flag)
+			seq_puts(m, fs_infop->str);
+	}
+	for (fs_infop = mnt_info; fs_infop->flag; fs_infop++) {
+		if (mnt->mnt_flags & fs_infop->flag)
+			seq_puts(m, fs_infop->str);
 	}
 	if (mnt->mnt_flags & MNT_XID)
 		seq_printf(m, ",xid=%d", mnt->mnt_xid);
@@ -1121,7 +1146,6 @@ long do_mount(char * dev_name, char * dir_name, char *type_page,
 				    data_page, xid);
 	else if (flags & MS_BIND)
 		retval = do_loopback(&nd, dev_name, xid, flags, mnt_flags);
-
 	else if (flags & MS_MOVE)
 		retval = do_move_mount(&nd, dev_name);
 	else
@@ -1330,10 +1354,19 @@ static void chroot_fs_refs(struct nameidata *old_nd, struct nameidata *new_nd)
 }
 
 /*
- * Moves the current root to put_root, and sets root/cwd of all processes
- * which had them on the old root to new_root.
+ * pivot_root Semantics:
+ * Moves the root file system of the current process to the directory put_old,
+ * makes new_root as the new root file system of the current process, and sets
+ * root/cwd of all processes which had them on the current root to new_root.
  *
- * Note:
+ * Restrictions:
+ * The new_root and put_old must be directories, and  must not be on the
+ * same file  system as the current process root. The put_old  must  be
+ * underneath new_root,  i.e. adding a non-zero number of /.. to the string
+ * pointed to by put_old must yield the same directory as new_root. No other
+ * file system may be mounted on put_old. After all, new_root is a mountpoint.
+ *
+ * Notes:
  *  - we don't move root/cwd if they are not at the root (reason: if something
  *    cared enough to change them, it's probably wrong to force them elsewhere)
  *  - it's okay to pick a root that isn't the root of a file system, e.g.
@@ -1388,10 +1421,10 @@ asmlinkage long sys_pivot_root(const char __user *new_root, const char __user *p
 		goto out2;
 	error = -EBUSY;
 	if (new_nd.mnt == user_nd.mnt || old_nd.mnt == user_nd.mnt)
-		goto out2; /* loop */
+		goto out2; /* loop, on the same file system  */
 	error = -EINVAL;
 	if (user_nd.mnt->mnt_root != user_nd.dentry)
-		goto out2;
+		goto out2; /* not a mountpoint */
 	if (new_nd.mnt->mnt_root != new_nd.dentry)
 		goto out2; /* not a mountpoint */
 	tmp = old_nd.mnt; /* make sure we can reach put_old from new_root */
@@ -1399,7 +1432,7 @@ asmlinkage long sys_pivot_root(const char __user *new_root, const char __user *p
 	if (tmp != new_nd.mnt) {
 		for (;;) {
 			if (tmp->mnt_parent == tmp)
-				goto out3;
+				goto out3; /* already mounted on put_old */
 			if (tmp->mnt_parent == new_nd.mnt)
 				break;
 			tmp = tmp->mnt_parent;
@@ -1410,8 +1443,8 @@ asmlinkage long sys_pivot_root(const char __user *new_root, const char __user *p
 		goto out3;
 	detach_mnt(new_nd.mnt, &parent_nd);
 	detach_mnt(user_nd.mnt, &root_parent);
-	attach_mnt(user_nd.mnt, &old_nd);
-	attach_mnt(new_nd.mnt, &root_parent);
+	attach_mnt(user_nd.mnt, &old_nd);     /* mount old root on put_old */
+	attach_mnt(new_nd.mnt, &root_parent); /* mount new_root on / */
 	spin_unlock(&vfsmount_lock);
 	chroot_fs_refs(&user_nd, &new_nd);
 	security_sb_post_pivotroot(&user_nd, &new_nd);
@@ -1467,16 +1500,14 @@ static void __init init_mount_tree(void)
 void __init mnt_init(unsigned long mempages)
 {
 	struct list_head *d;
-	unsigned long order;
 	unsigned int nr_hash;
 	int i;
 
 	mnt_cache = kmem_cache_create("mnt_cache", sizeof(struct vfsmount),
 			0, SLAB_HWCACHE_ALIGN|SLAB_PANIC, NULL, NULL);
 
-	order = 0; 
 	mount_hashtable = (struct list_head *)
-		__get_free_pages(GFP_ATOMIC, order);
+		__get_free_page(GFP_ATOMIC);
 
 	if (!mount_hashtable)
 		panic("Failed to allocate mount hash table\n");
@@ -1486,7 +1517,7 @@ void __init mnt_init(unsigned long mempages)
 	 * We don't guarantee that "sizeof(struct list_head)" is necessarily
 	 * a power-of-two.
 	 */
-	nr_hash = (1UL << order) * PAGE_SIZE / sizeof(struct list_head);
+	nr_hash = PAGE_SIZE / sizeof(struct list_head);
 	hash_bits = 0;
 	do {
 		hash_bits++;
@@ -1500,8 +1531,7 @@ void __init mnt_init(unsigned long mempages)
 	nr_hash = 1UL << hash_bits;
 	hash_mask = nr_hash-1;
 
-	printk("Mount-cache hash table entries: %d (order: %ld, %ld bytes)\n",
-			nr_hash, order, (PAGE_SIZE << order));
+	printk("Mount-cache hash table entries: %d\n", nr_hash);
 
 	/* And initialize the newly allocated array */
 	d = mount_hashtable;

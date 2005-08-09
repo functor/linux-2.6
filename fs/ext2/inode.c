@@ -56,6 +56,21 @@ static inline int ext2_inode_is_fast_symlink(struct inode *inode)
 static void ext2_truncate_nocheck (struct inode * inode);
 
 /*
+ * Called at each iput().
+ *
+ * The inode may be "bad" if ext2_read_inode() saw an error from
+ * ext2_get_inode(), so we need to check that to avoid freeing random disk
+ * blocks.
+ */
+void ext2_put_inode(struct inode *inode)
+{
+	if (!is_bad_inode(inode))
+		ext2_discard_prealloc(inode);
+}
+
+static void ext2_truncate_nocheck (struct inode * inode);
+
+/*
  * Called at the last iput() if i_nlink is zero.
  */
 void ext2_delete_inode (struct inode * inode)
@@ -357,7 +372,7 @@ static inline int ext2_find_goal(struct inode *inode,
 {
 	struct ext2_inode_info *ei = EXT2_I(inode);
 	write_lock(&ei->i_meta_lock);
-	if (block == ei->i_next_alloc_block + 1) {
+	if ((block == ei->i_next_alloc_block + 1) && ei->i_next_alloc_goal) {
 		ei->i_next_alloc_block++;
 		ei->i_next_alloc_goal++;
 	} 
@@ -496,7 +511,7 @@ static inline int ext2_splice_branch(struct inode *inode,
 
 	/* We are done with atomic stuff, now do the rest of housekeeping */
 
-	inode->i_ctime = CURRENT_TIME;
+	inode->i_ctime = CURRENT_TIME_SEC;
 
 	/* had we spliced it onto indirect block? */
 	if (where->bh)
@@ -527,7 +542,7 @@ changed:
  * reachable from inode.
  */
 
-static int ext2_get_block(struct inode *inode, sector_t iblock, struct buffer_head *bh_result, int create)
+int ext2_get_block(struct inode *inode, sector_t iblock, struct buffer_head *bh_result, int create)
 {
 	int err = -EIO;
 	int offsets[4];
@@ -629,6 +644,12 @@ ext2_nobh_prepare_write(struct file *file, struct page *page,
 	return nobh_prepare_write(page,from,to,ext2_get_block);
 }
 
+static int ext2_nobh_writepage(struct page *page,
+			struct writeback_control *wbc)
+{
+	return nobh_writepage(page, ext2_get_block, wbc);
+}
+
 static sector_t ext2_bmap(struct address_space *mapping, sector_t block)
 {
 	return generic_block_bmap(mapping,block,ext2_get_block);
@@ -678,7 +699,7 @@ struct address_space_operations ext2_aops = {
 struct address_space_operations ext2_nobh_aops = {
 	.readpage		= ext2_readpage,
 	.readpages		= ext2_readpages,
-	.writepage		= ext2_writepage,
+	.writepage		= ext2_nobh_writepage,
 	.sync_page		= block_sync_page,
 	.prepare_write		= ext2_nobh_prepare_write,
 	.commit_write		= nobh_commit_write,
@@ -954,7 +975,7 @@ do_indirects:
 		case EXT2_TIND_BLOCK:
 			;
 	}
-	inode->i_mtime = inode->i_ctime = CURRENT_TIME;
+	inode->i_mtime = inode->i_ctime = CURRENT_TIME_SEC;
 	if (inode_needs_sync(inode)) {
 		sync_mapping_buffers(inode->i_mapping);
 		ext2_sync_inode (inode);

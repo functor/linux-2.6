@@ -35,7 +35,7 @@ extern void ia64_elf32_init (struct pt_regs *regs);
 
 static void elf32_set_personality (void);
 
-#define setup_arg_pages(bprm,exec)		ia32_setup_arg_pages(bprm,exec)
+#define setup_arg_pages(bprm,tos,exec)		ia32_setup_arg_pages(bprm,exec)
 #define elf_map				elf32_map
 
 #undef SET_PERSONALITY
@@ -103,7 +103,7 @@ ia64_elf32_init (struct pt_regs *regs)
 			if (insert_vm_struct(current->mm, vma)) {
 				kmem_cache_free(vm_area_cachep, vma);
 				up_write(&current->mm->mmap_sem);
-				return;
+				BUG();
 			}
 		}
 		up_write(&current->mm->mmap_sem);
@@ -130,7 +130,7 @@ ia64_elf32_init (struct pt_regs *regs)
 			if (insert_vm_struct(current->mm, vma)) {
 				kmem_cache_free(vm_area_cachep, vma);
 				up_write(&current->mm->mmap_sem);
-				return;
+				BUG();
 			}
 		}
 		up_write(&current->mm->mmap_sem);
@@ -176,7 +176,7 @@ ia64_elf32_init (struct pt_regs *regs)
 			if (insert_vm_struct(current->mm, vma)) {
 				kmem_cache_free(vm_area_cachep, vma);
 				up_write(&current->mm->mmap_sem);
-				return;
+				BUG();
 			}
 		}
 		up_write(&current->mm->mmap_sem);
@@ -267,7 +267,6 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 			kmem_cache_free(vm_area_cachep, mpnt);
 			return ret;
 		}
-		// current->mm->stack_vm = current->mm->total_vm = vma_pages(mpnt);
 		vx_vmpages_sub(current->mm, current->mm->total_vm - vma_pages(mpnt));
 		current->mm->stack_vm = current->mm->total_vm;
 	}

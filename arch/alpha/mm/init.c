@@ -20,6 +20,7 @@
 #include <linux/init.h>
 #include <linux/bootmem.h> /* max_low_pfn */
 #include <linux/vmalloc.h>
+#include <linux/pagemap.h>
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
@@ -42,10 +43,9 @@ pgd_alloc(struct mm_struct *mm)
 {
 	pgd_t *ret, *init;
 
-	ret = (pgd_t *)__get_free_page(GFP_KERNEL);
+	ret = (pgd_t *)__get_free_page(GFP_KERNEL | __GFP_ZERO);
 	init = pgd_offset(&init_mm, 0UL);
 	if (ret) {
-		clear_page(ret);
 #ifdef CONFIG_ALPHA_LARGE_VMALLOC
 		memcpy (ret + USER_PTRS_PER_PGD, init + USER_PTRS_PER_PGD,
 			(PTRS_PER_PGD - USER_PTRS_PER_PGD - 1)*sizeof(pgd_t));
@@ -63,9 +63,7 @@ pgd_alloc(struct mm_struct *mm)
 pte_t *
 pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)
 {
-	pte_t *pte = (pte_t *)__get_free_page(GFP_KERNEL|__GFP_REPEAT);
-	if (pte)
-		clear_page(pte);
+	pte_t *pte = (pte_t *)__get_free_page(GFP_KERNEL|__GFP_REPEAT|__GFP_ZERO);
 	return pte;
 }
 

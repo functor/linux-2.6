@@ -124,7 +124,7 @@ typedef struct user_fxsr_struct elf_fpxregset_t;
  * An executable for which elf_read_implies_exec() returns TRUE will
  * have the READ_IMPLIES_EXEC personality flag set automatically.
  */
-#define elf_read_implies_exec(ex, have_pt_gnu_stack)	(!(have_pt_gnu_stack))
+#define elf_read_implies_exec(ex, executable_stack)	(executable_stack != EXSTACK_DISABLE_X)
 
 extern int dump_task_regs (struct task_struct *, elf_gregset_t *);
 extern int dump_task_fpu (struct task_struct *, elf_fpregset_t *);
@@ -152,6 +152,12 @@ do {									\
 	}								\
 } while (0)
 
+#define ARCH_HAS_SETUP_ADDITIONAL_PAGES
+struct linux_binprm;
+extern int arch_setup_additional_pages(struct linux_binprm *bprm,
+				       int executable_stack);
+
+#if 0	/* Disabled for exec-shield, where a normal vma holds the vDSO.  */
 /*
  * These macros parameterize elf_core_dump in fs/binfmt_elf.c to write out
  * extra segments containing the vsyscall DSO contents.  Dumping its
@@ -195,13 +201,11 @@ do {									      \
 				   PAGE_ALIGN(vsyscall_phdrs[i].p_memsz));    \
 	}								      \
 } while (0)
+#endif
 
 #endif
 
 #define __HAVE_ARCH_RANDOMIZE_BRK
 extern void randomize_brk(unsigned long old_brk);
-
-#define __HAVE_ARCH_VSYSCALL
-extern void map_vsyscall(void);
 
 #endif

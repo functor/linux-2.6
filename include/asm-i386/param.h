@@ -4,21 +4,11 @@
 #include <linux/config.h>
 
 #ifdef __KERNEL__
-
-#if defined(CONFIG_X86_HZ) && defined(CONFIG_KERNEL_HZ)
-#error MEF: fix up CONFIG to only use one of these
-#endif
-
-#ifdef CONFIG_X86_HZ
-# define HZ		CONFIG_X86_HZ
-#else
 # ifdef CONFIG_KERNEL_HZ
 #  define HZ		CONFIG_KERNEL_HZ
 # else
 #  define HZ		1000		/* Internal kernel timer frequency */
 # endif
-#endif
-
 # define USER_HZ	100		/* .. some user interfaces are in "ticks" */
 # define CLOCKS_PER_SEC		(USER_HZ)	/* like times() */
 #endif

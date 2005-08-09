@@ -54,7 +54,6 @@
 #include <linux/rmap.h>
 #include <linux/rcupdate.h>
 #include <linux/vs_memory.h>
-#include <linux/rcupdate.h>
 
 #include <asm/tlbflush.h>
 
@@ -122,14 +121,7 @@ int anon_vma_prepare(struct vm_area_struct *vma)
 
 void __anon_vma_merge(struct vm_area_struct *vma, struct vm_area_struct *next)
 {
-	if (!vma->anon_vma) {
-		BUG_ON(!next->anon_vma);
-		vma->anon_vma = next->anon_vma;
-		list_add(&vma->anon_vma_node, &next->anon_vma_node);
-	} else {
-		/* if they're both non-null they must be the same */
-		BUG_ON(vma->anon_vma != next->anon_vma);
-	}
+	BUG_ON(vma->anon_vma != next->anon_vma);
 	list_del(&next->anon_vma_node);
 }
 
@@ -252,6 +244,42 @@ unsigned long page_address_in_vma(struct page *page, struct vm_area_struct *vma)
 }
 
 /*
+ * Check that @page is mapped at @address into @mm.
+ *
+ * On success returns with mapped pte and locked mm->page_table_lock.
+ */
+static pte_t *page_check_address(struct page *page, struct mm_struct *mm,
+					unsigned long address)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+
+	/*
+	 * We need the page_table_lock to protect us from page faults,
+	 * munmap, fork, etc...
+	 */
+	spin_lock(&mm->page_table_lock);
+	pgd = pgd_offset(mm, address);
+	if (likely(pgd_present(*pgd))) {
+		pud = pud_offset(pgd, address);
+		if (likely(pud_present(*pud))) {
+			pmd = pmd_offset(pud, address);
+			if (likely(pmd_present(*pmd))) {
+				pte = pte_offset_map(pmd, address);
+				if (likely(pte_present(*pte) &&
+					   page_to_pfn(page) == pte_pfn(*pte)))
+					return pte;
+				pte_unmap(pte);
+			}
+		}
+	}
+	spin_unlock(&mm->page_table_lock);
+	return ERR_PTR(-ENOENT);
+}
+
+/*
  * Subfunctions of page_referenced: page_referenced_one called
  * repeatedly from either page_referenced_anon or page_referenced_file.
  */
@@ -260,46 +288,27 @@ static int page_referenced_one(struct page *page,
 {
 	struct mm_struct *mm = vma->vm_mm;
 	unsigned long address;
-	pgd_t *pgd;
-	pmd_t *pmd;
 	pte_t *pte;
 	int referenced = 0;
 
-	if (!mm->rss)
+	if (!get_mm_counter(mm, rss))
 		goto out;
 	address = vma_address(page, vma);
 	if (address == -EFAULT)
 		goto out;
 
-	spin_lock(&mm->page_table_lock);
+	pte = page_check_address(page, mm, address);
+	if (!IS_ERR(pte)) {
+		if (ptep_clear_flush_young(vma, address, pte))
+			referenced++;
 
-	pgd = pgd_offset(mm, address);
-	if (!pgd_present(*pgd))
-		goto out_unlock;
+		if (mm != current->mm && !ignore_token && has_swap_token(mm))
+			referenced++;
 
-	pmd = pmd_offset(pgd, address);
-	if (!pmd_present(*pmd))
-		goto out_unlock;
-
-	pte = pte_offset_map(pmd, address);
-	if (!pte_present(*pte))
-		goto out_unmap;
-
-	if (page_to_pfn(page) != pte_pfn(*pte))
-		goto out_unmap;
-
-	if (ptep_clear_flush_young(vma, address, pte))
-		referenced++;
-
-	if (mm != current->mm && !ignore_token && has_swap_token(mm))
-		referenced++;
-
-	(*mapcount)--;
-
-out_unmap:
-	pte_unmap(pte);
-out_unlock:
-	spin_unlock(&mm->page_table_lock);
+		(*mapcount)--;
+		pte_unmap(pte);
+		spin_unlock(&mm->page_table_lock);
+	}
 out:
 	return referenced;
 }
@@ -440,7 +449,7 @@ void page_add_anon_rmap(struct page *page,
 	BUG_ON(PageReserved(page));
 	BUG_ON(!anon_vma);
 
-	vma->vm_mm->anon_rss++;
+	inc_mm_counter(vma->vm_mm, anon_rss);
 
 	anon_vma = (void *) anon_vma + PAGE_MAPPING_ANON;
 	index = (address - vma->vm_start) >> PAGE_SHIFT;
@@ -506,38 +515,19 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	unsigned long address;
-	pgd_t *pgd;
-	pmd_t *pmd;
 	pte_t *pte;
 	pte_t pteval;
 	int ret = SWAP_AGAIN;
 
-	if (!mm->rss)
+	if (!get_mm_counter(mm, rss))
 		goto out;
 	address = vma_address(page, vma);
 	if (address == -EFAULT)
 		goto out;
 
-	/*
-	 * We need the page_table_lock to protect us from page faults,
-	 * munmap, fork, etc...
-	 */
-	spin_lock(&mm->page_table_lock);
-
-	pgd = pgd_offset(mm, address);
-	if (!pgd_present(*pgd))
-		goto out_unlock;
-
-	pmd = pmd_offset(pgd, address);
-	if (!pmd_present(*pmd))
-		goto out_unlock;
-
-	pte = pte_offset_map(pmd, address);
-	if (!pte_present(*pte))
-		goto out_unmap;
-
-	if (page_to_pfn(page) != pte_pfn(*pte))
-		goto out_unmap;
+	pte = page_check_address(page, mm, address);
+	if (IS_ERR(pte))
+		goto out;
 
 	/*
 	 * If the page is mlock()d, we cannot swap it out.
@@ -572,7 +562,7 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	}
 
 	/* Nuke the page table entry. */
-	flush_cache_page(vma, address);
+	flush_cache_page(vma, address, page_to_pfn(page));
 	pteval = ptep_clear_flush(vma, address, pte);
 
 	/* Move the dirty bit to the physical page now the pte is gone. */
@@ -592,19 +582,17 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 			list_add(&mm->mmlist, &init_mm.mmlist);
 			spin_unlock(&mmlist_lock);
 		}
-		set_pte(pte, swp_entry_to_pte(entry));
+		set_pte_at(mm, address, pte, swp_entry_to_pte(entry));
 		BUG_ON(pte_file(*pte));
-		mm->anon_rss--;
+		dec_mm_counter(mm, anon_rss);
 	}
 
-	// mm->rss--;
-	vx_rsspages_dec(mm);
+	dec_mm_counter(mm, rss);
 	page_remove_rmap(page);
 	page_cache_release(page);
 
 out_unmap:
 	pte_unmap(pte);
-out_unlock:
 	spin_unlock(&mm->page_table_lock);
 out:
 	return ret;
@@ -637,8 +625,9 @@ static void try_to_unmap_cluster(unsigned long cursor,
 {
 	struct mm_struct *mm = vma->vm_mm;
 	pgd_t *pgd;
+	pud_t *pud;
 	pmd_t *pmd;
-	pte_t *pte;
+	pte_t *pte, *original_pte;
 	pte_t pteval;
 	struct page *page;
 	unsigned long address;
@@ -662,11 +651,15 @@ static void try_to_unmap_cluster(unsigned long cursor,
 	if (!pgd_present(*pgd))
 		goto out_unlock;
 
-	pmd = pmd_offset(pgd, address);
+	pud = pud_offset(pgd, address);
+	if (!pud_present(*pud))
+		goto out_unlock;
+
+	pmd = pmd_offset(pud, address);
 	if (!pmd_present(*pmd))
 		goto out_unlock;
 
-	for (pte = pte_offset_map(pmd, address);
+	for (original_pte = pte = pte_offset_map(pmd, address);
 			address < end; pte++, address += PAGE_SIZE) {
 
 		if (!pte_present(*pte))
@@ -685,12 +678,12 @@ static void try_to_unmap_cluster(unsigned long cursor,
 			continue;
 
 		/* Nuke the page table entry. */
-		flush_cache_page(vma, address);
+		flush_cache_page(vma, address, pfn);
 		pteval = ptep_clear_flush(vma, address, pte);
 
 		/* If nonlinear, store the file page offset in the pte. */
 		if (page->index != linear_page_index(vma, address))
-			set_pte(pte, pgoff_to_pte(page->index));
+			set_pte_at(mm, address, pte, pgoff_to_pte(page->index));
 
 		/* Move the dirty bit to the physical page now the pte is gone. */
 		if (pte_dirty(pteval))
@@ -698,13 +691,11 @@ static void try_to_unmap_cluster(unsigned long cursor,
 
 		page_remove_rmap(page);
 		page_cache_release(page);
-		// mm->rss--;
-		vx_rsspages_dec(mm);
+		dec_mm_counter(mm, rss);
 		(*mapcount)--;
 	}
 
-	pte_unmap(pte);
-
+	pte_unmap(original_pte);
 out_unlock:
 	spin_unlock(&mm->page_table_lock);
 }
@@ -798,7 +789,7 @@ static int try_to_unmap_file(struct page *page)
 			if (vma->vm_flags & (VM_LOCKED|VM_RESERVED))
 				continue;
 			cursor = (unsigned long) vma->vm_private_data;
-			while (vma->vm_mm->rss &&
+			while (get_mm_counter(vma->vm_mm, rss) &&
 				cursor < max_nl_cursor &&
 				cursor < vma->vm_end - vma->vm_start) {
 				try_to_unmap_cluster(cursor, &mapcount, vma);
@@ -856,3 +847,4 @@ int try_to_unmap(struct page *page)
 		ret = SWAP_SUCCESS;
 	return ret;
 }
+

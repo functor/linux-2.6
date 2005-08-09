@@ -26,7 +26,7 @@
 #include <linux/sched.h>
 #include <linux/vs_base.h>
 #include <linux/syscalls.h>
-
+#include <linux/audit.h>
 #include <asm/current.h>
 #include <asm/uaccess.h>
 #include "util.h"
@@ -428,6 +428,8 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds __user *buf)
 			return -EFAULT;
 		if (copy_msqid_from_user (&setbuf, buf, version))
 			return -EFAULT;
+		if ((err = audit_ipc_perms(setbuf.qbytes, setbuf.uid, setbuf.gid, setbuf.mode)))
+			return err;
 		break;
 	case IPC_RMID:
 		break;

@@ -369,33 +369,6 @@ linvfs_rename(
 	return 0;
 }
 
-STATIC int
-linvfs_readlink(
-	struct dentry	*dentry,
-	char		__user *buf,
-	int		size)
-{
-	vnode_t		*vp = LINVFS_GET_VP(dentry->d_inode);
-	uio_t		uio;
-	iovec_t		iov;
-	int		error;
-
-	iov.iov_base = buf;
-	iov.iov_len = size;
-
-	uio.uio_iov = &iov;
-	uio.uio_offset = 0;
-	uio.uio_segflg = UIO_USERSPACE;
-	uio.uio_resid = size;
-	uio.uio_iovcnt = 1;
-
-	VOP_READLINK(vp, &uio, 0, NULL, error);
-	if (error)
-		return -error;
-
-	return (size - uio.uio_resid);
-}
-
 /*
  * careful here - this function can get called recursively, so
  * we need to be very careful about how much stack we use.
@@ -528,6 +501,10 @@ linvfs_setattr(
 	int		flags = 0;
 	int		error;
 
+	error = inode_change_ok(inode, attr);
+	if (error)
+		return error;
+
 	memset(&vattr, 0, sizeof(vattr_t));
 	if (ia_valid & ATTR_UID) {
 		vattr.va_mask |= XFS_AT_UID;
@@ -536,6 +513,10 @@ linvfs_setattr(
 	if (ia_valid & ATTR_GID) {
 		vattr.va_mask |= XFS_AT_GID;
 		vattr.va_gid = attr->ia_gid;
+	}
+	if (ia_valid & ATTR_XID) {
+		vattr.va_mask |= XFS_AT_XID;
+		vattr.va_xid = attr->ia_xid;
 	}
 	if (ia_valid & ATTR_SIZE) {
 		vattr.va_mask |= XFS_AT_SIZE;
@@ -721,7 +702,7 @@ struct inode_operations linvfs_dir_inode_operations = {
 };
 
 struct inode_operations linvfs_symlink_inode_operations = {
-	.readlink		= linvfs_readlink,
+	.readlink		= generic_readlink,
 	.follow_link		= linvfs_follow_link,
 	.put_link		= linvfs_put_link,
 	.permission		= linvfs_permission,

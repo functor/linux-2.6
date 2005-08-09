@@ -1,6 +1,9 @@
 #ifndef _VX_VS_SCHED_H
 #define _VX_VS_SCHED_H
 
+#ifndef	CONFIG_VSERVER
+#warning config options missing
+#endif
 
 #include "vserver/sched.h"
 
@@ -66,6 +69,26 @@ static inline void vx_onhold_dec(struct vx_info *vxi)
 {
 	if (atomic_dec_and_test(&vxi->cvirt.nr_onhold))
 		__vx_onhold_update(vxi);
+}
+
+static inline void vx_account_user(struct vx_info *vxi,
+	cputime_t cputime, int nice)
+{
+	int cpu = smp_processor_id();
+
+	if (!vxi)
+		return;
+	vxi->sched.cpu[cpu].user_ticks += cputime;
+}
+
+static inline void vx_account_system(struct vx_info *vxi,
+	cputime_t cputime, int idle)
+{
+	int cpu = smp_processor_id();
+
+	if (!vxi)
+		return;
+	vxi->sched.cpu[cpu].sys_ticks += cputime;
 }
 
 #else

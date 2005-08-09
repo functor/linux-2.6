@@ -187,6 +187,7 @@ static void __stop_cachemiss_threads (iothread_t *iot)
 	DECLARE_WAITQUEUE(wait, current);
 
 	__set_current_state(TASK_UNINTERRUPTIBLE);
+
 	Dprintk("stopping async IO threads %p.\n", iot);
 	add_wait_queue(&iot->wait_shutdown, &wait);
 
@@ -198,7 +199,7 @@ static void __stop_cachemiss_threads (iothread_t *iot)
 	iot->shutdown = 1;
 	wake_up_all(&iot->async_sleep);
 	spin_unlock(&iot->async_lock);
-		
+
 	Dprintk("waiting for async IO threads %p to exit.\n", iot);
 	schedule();
 	remove_wait_queue(&iot->wait_shutdown, &wait);

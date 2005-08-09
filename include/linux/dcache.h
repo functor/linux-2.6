@@ -78,7 +78,13 @@ full_name_hash(const unsigned char *name, unsigned int len)
 
 struct dcookie_struct;
 
-#define DNAME_INLINE_LEN_MIN 36
+#ifdef CONFIG_64BIT
+/* Total dentry size=256 bytes */
+#define DNAME_INLINE_LEN_MIN 60
+#else
+/* Total dentry size=128 bytes */
+#define DNAME_INLINE_LEN_MIN 16
+#endif
 
 struct dentry {
 	atomic_t d_count;
@@ -163,17 +169,16 @@ extern spinlock_t dcache_lock;
  * d_drop - drop a dentry
  * @dentry: dentry to drop
  *
- * d_drop() unhashes the entry from the parent
- * dentry hashes, so that it won't be found through
- * a VFS lookup any more. Note that this is different
- * from deleting the dentry - d_delete will try to
- * mark the dentry negative if possible, giving a
- * successful _negative_ lookup, while d_drop will
+ * d_drop() unhashes the entry from the parent dentry hashes, so that it won't
+ * be found through a VFS lookup any more. Note that this is different from
+ * deleting the dentry - d_delete will try to mark the dentry negative if
+ * possible, giving a successful _negative_ lookup, while d_drop will
  * just make the cache lookup fail.
  *
- * d_drop() is used mainly for stuff that wants
- * to invalidate a dentry for some reason (NFS
- * timeouts or autofs deletes).
+ * d_drop() is used mainly for stuff that wants to invalidate a dentry for some
+ * reason (NFS timeouts or autofs deletes).
+ *
+ * __d_drop requires dentry->d_lock.
  */
 
 static inline void __d_drop(struct dentry *dentry)
@@ -187,7 +192,9 @@ static inline void __d_drop(struct dentry *dentry)
 static inline void d_drop(struct dentry *dentry)
 {
 	spin_lock(&dcache_lock);
+	spin_lock(&dentry->d_lock);
  	__d_drop(dentry);
+	spin_unlock(&dentry->d_lock);
 	spin_unlock(&dcache_lock);
 }
 
@@ -200,6 +207,7 @@ static inline int dname_external(struct dentry *dentry)
  * These are the low-level FS interfaces to the dcache..
  */
 extern void d_instantiate(struct dentry *, struct inode *);
+extern struct dentry * d_instantiate_unique(struct dentry *, struct inode *);
 extern void d_delete(struct dentry *);
 
 /* allocate/de-allocate */
@@ -242,6 +250,23 @@ static inline void d_add(struct dentry *entry, struct inode *inode)
 {
 	d_instantiate(entry, inode);
 	d_rehash(entry);
+}
+
+/**
+ * d_add_unique - add dentry to hash queues without aliasing
+ * @entry: dentry to add
+ * @inode: The inode to attach to this dentry
+ *
+ * This adds the entry to the hash queues and initializes @inode.
+ * The entry was actually filled in earlier during d_alloc().
+ */
+static inline struct dentry *d_add_unique(struct dentry *entry, struct inode *inode)
+{
+	struct dentry *res;
+
+	res = d_instantiate_unique(entry, inode);
+	d_rehash(res != NULL ? res : entry);
+	return res;
 }
 
 /* used for rename() and baskets */

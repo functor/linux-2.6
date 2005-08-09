@@ -106,7 +106,8 @@ static int amd64_insert_memory(struct agp_memory *mem, off_t pg_start, int type)
 	}
 
 	for (i = 0, j = pg_start; i < mem->page_count; i++, j++) {
-		tmp = agp_bridge->driver->mask_memory(mem->memory[i], mem->type);
+		tmp = agp_bridge->driver->mask_memory(agp_bridge,
+			mem->memory[i], mem->type);
 
 		BUG_ON(tmp & 0xffffff0000000ffcULL);
 		pte = (tmp & 0x000000ff00000000ULL) >> 28;
@@ -218,7 +219,7 @@ static struct aper_size_info_32 amd_8151_sizes[7] =
 
 static int amd_8151_configure(void)
 {
-	unsigned long gatt_bus = virt_to_phys(agp_bridge->gatt_table_real);
+	unsigned long gatt_bus = virt_to_gart(agp_bridge->gatt_table_real);
 
 	/* Configure AGP regs in each x86-64 host bridge. */
 	for_each_nb() {
@@ -242,7 +243,7 @@ static void amd64_cleanup(void)
 }
 
 
-struct agp_bridge_driver amd_8151_driver = {
+static struct agp_bridge_driver amd_8151_driver = {
 	.owner			= THIS_MODULE,
 	.aperture_sizes		= amd_8151_sizes,
 	.size_type		= U32_APER_SIZE,
@@ -415,55 +416,54 @@ static void __devinit amd8151_init(struct pci_dev *pdev, struct agp_bridge_data 
 static struct aper_size_info_32 uli_sizes[7] =
 {
 	{256, 65536, 6, 10},
-        {128, 32768, 5, 9},
-        {64, 16384, 4, 8},
-        {32, 8192, 3, 7},
-        {16, 4096, 2, 6},
-        {8, 2048, 1, 4},
-        {4, 1024, 0, 3}
+	{128, 32768, 5, 9},
+	{64, 16384, 4, 8},
+	{32, 8192, 3, 7},
+	{16, 4096, 2, 6},
+	{8, 2048, 1, 4},
+	{4, 1024, 0, 3}
 };
-
 static int __devinit uli_agp_init(struct pci_dev *pdev)
 {
 	u32 httfea,baseaddr,enuscr;
 	struct pci_dev *dev1;
 	int i;
 	unsigned size = amd64_fetch_size();
-	printk(KERN_INFO PFX "Setting up ULi AGP. \n");
+	printk(KERN_INFO "Setting up ULi AGP. \n");
 	dev1 = pci_find_slot ((unsigned int)pdev->bus->number,PCI_DEVFN(0,0));
 	if (dev1 == NULL) {
-		printk(KERN_INFO PFX "agpgart: Detected a ULi chipset, "
+		printk(KERN_INFO PFX "Detected a ULi chipset, "
 			"but could not fine the secondary device.\n");
 		return -ENODEV;
 	}
-        for (i = 0; i < ARRAY_SIZE(uli_sizes); i++)
-                if (uli_sizes[i].size == size)
-                        break;
 
-        if (i == ARRAY_SIZE(uli_sizes)) {
-                printk(KERN_INFO PFX "No ULi size found for %d\n", size);
-                return -ENODEV;
-        }
+	for (i = 0; i < ARRAY_SIZE(uli_sizes); i++)
+		if (uli_sizes[i].size == size)
+			break;
 
+	if (i == ARRAY_SIZE(uli_sizes)) {
+		printk(KERN_INFO PFX "No ULi size found for %d\n", size);
+		return -ENODEV;
+	}
 
-        /* shadow x86-64 registers into ULi registers */
-        pci_read_config_dword (hammers[0], AMD64_GARTAPERTUREBASE, &httfea);
+	/* shadow x86-64 registers into ULi registers */
+	pci_read_config_dword (hammers[0], AMD64_GARTAPERTUREBASE, &httfea);
 
-        /* if x86-64 aperture base is beyond 4G, exit here */
-        if ( (httfea & 0x7fff) >> (32 - 25) )
-                 return -ENODEV;
+	/* if x86-64 aperture base is beyond 4G, exit here */
+	if ((httfea & 0x7fff) >> (32 - 25))
+		return -ENODEV;
 
-        httfea = (httfea& 0x7fff) << 25;
+	httfea = (httfea& 0x7fff) << 25;
 
-        pci_read_config_dword(pdev, ULI_X86_64_BASE_ADDR, &baseaddr);
-        baseaddr&= ~PCI_BASE_ADDRESS_MEM_MASK;
-        baseaddr|= httfea;
-        pci_write_config_dword(pdev, ULI_X86_64_BASE_ADDR, baseaddr);
+	pci_read_config_dword(pdev, ULI_X86_64_BASE_ADDR, &baseaddr);
+	baseaddr&= ~PCI_BASE_ADDRESS_MEM_MASK;
+	baseaddr|= httfea;
+	pci_write_config_dword(pdev, ULI_X86_64_BASE_ADDR, baseaddr);
 
-        enuscr= httfea+ (size * 1024 * 1024) - 1;
-        pci_write_config_dword(dev1, ULI_X86_64_HTT_FEA_REG, httfea);
-        pci_write_config_dword(dev1, ULI_X86_64_ENU_SCR_REG, enuscr);
-        return 0;
+	enuscr= httfea+ (size * 1024 * 1024) - 1;
+	pci_write_config_dword(dev1, ULI_X86_64_HTT_FEA_REG, httfea);
+	pci_write_config_dword(dev1, ULI_X86_64_ENU_SCR_REG, enuscr);
+	return 0;
 }
 
 
@@ -591,7 +591,7 @@ static void __devexit agp_amd64_remove(struct pci_dev *pdev)
 {
 	struct agp_bridge_data *bridge = pci_get_drvdata(pdev);
 
-	release_mem_region(virt_to_phys(bridge->gatt_table_real),
+	release_mem_region(virt_to_gart(bridge->gatt_table_real),
 			   amd64_aperture_sizes[bridge->aperture_size_idx].size);
 	agp_remove_bridge(bridge);
 	agp_put_bridge(bridge);
@@ -660,7 +660,6 @@ static struct pci_device_id agp_amd64_pci_table[] = {
 	.subvendor	= PCI_ANY_ID,
 	.subdevice	= PCI_ANY_ID,
 	},
-
 	/* NForce3 */
 	{
 	.class		= (PCI_CLASS_BRIDGE_HOST << 8),
@@ -711,7 +710,7 @@ int __init agp_amd64_init(void)
 
 	if (agp_off)
 		return -EINVAL;
-	if (pci_module_init(&agp_amd64_pci_driver) > 0) {
+	if (pci_register_driver(&agp_amd64_pci_driver) > 0) {
 		struct pci_dev *dev;
 		if (!agp_try_unsupported && !agp_try_unsupported_boot) {
 			printk(KERN_INFO PFX "No supported AGP bridge found.\n");
@@ -758,5 +757,5 @@ module_exit(agp_amd64_cleanup);
 #endif
 
 MODULE_AUTHOR("Dave Jones <davej@codemonkey.org.uk>, Andi Kleen");
-MODULE_PARM(agp_try_unsupported, "1i");
+module_param(agp_try_unsupported, bool, 0);
 MODULE_LICENSE("GPL");

@@ -50,7 +50,9 @@ static void set_brk(unsigned long start, unsigned long end)
 	end = PAGE_ALIGN(end);
 	if (end <= start)
 		return;
+	down_write(&current->mm->mmap_sem);
 	do_brk(start, end - start);
+	up_write(&current->mm->mmap_sem);
 }
 
 /*
@@ -96,7 +98,7 @@ static int aout32_core_dump(long signr, struct pt_regs *regs, struct file *file)
 	set_fs(KERNEL_DS);
 	has_dumped = 1;
 	current->flags |= PF_DUMPCORE;
-       	strncpy(dump.u_comm, current->comm, sizeof(current->comm));
+       	strncpy(dump.u_comm, current->comm, sizeof(dump.u_comm));
 	dump.signal = signr;
 	dump_thread(regs, &dump);
 
@@ -113,9 +115,9 @@ static int aout32_core_dump(long signr, struct pt_regs *regs, struct file *file)
 
 /* make sure we actually have a data and stack area to dump */
 	set_fs(USER_DS);
-	if (verify_area(VERIFY_READ, (void __user *) START_DATA(dump), dump.u_dsize))
+	if (!access_ok(VERIFY_READ, (void __user *) START_DATA(dump), dump.u_dsize))
 		dump.u_dsize = 0;
-	if (verify_area(VERIFY_READ, (void __user *) START_STACK(dump), dump.u_ssize))
+	if (!access_ok(VERIFY_READ, (void __user *) START_STACK(dump), dump.u_ssize))
 		dump.u_ssize = 0;
 
 	set_fs(KERNEL_DS);
@@ -240,18 +242,21 @@ static int load_aout32_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	current->mm->brk = ex.a_bss +
 		(current->mm->start_brk = N_BSSADDR(ex));
 
-	// current->mm->rss = 0;
-	vx_rsspages_sub(current->mm, current->mm->rss);
+	set_mm_counter(current->mm, rss, 0);
 	current->mm->mmap = NULL;
 	compute_creds(bprm);
  	current->flags &= ~PF_FORKNOEXEC;
 	if (N_MAGIC(ex) == NMAGIC) {
 		loff_t pos = fd_offset;
 		/* Fuck me plenty... */
+		down_write(&current->mm->mmap_sem);	
 		error = do_brk(N_TXTADDR(ex), ex.a_text);
+		up_write(&current->mm->mmap_sem);
 		bprm->file->f_op->read(bprm->file, (char __user *)N_TXTADDR(ex),
 			  ex.a_text, &pos);
+		down_write(&current->mm->mmap_sem);
 		error = do_brk(N_DATADDR(ex), ex.a_data);
+		up_write(&current->mm->mmap_sem);
 		bprm->file->f_op->read(bprm->file, (char __user *)N_DATADDR(ex),
 			  ex.a_data, &pos);
 		goto beyond_if;
@@ -259,8 +264,10 @@ static int load_aout32_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 	if (N_MAGIC(ex) == OMAGIC) {
 		loff_t pos = fd_offset;
+		down_write(&current->mm->mmap_sem);
 		do_brk(N_TXTADDR(ex) & PAGE_MASK,
 			ex.a_text+ex.a_data + PAGE_SIZE - 1);
+		up_write(&current->mm->mmap_sem);
 		bprm->file->f_op->read(bprm->file, (char __user *)N_TXTADDR(ex),
 			  ex.a_text+ex.a_data, &pos);
 	} else {
@@ -274,7 +281,9 @@ static int load_aout32_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 		if (!bprm->file->f_op->mmap) {
 			loff_t pos = fd_offset;
+			down_write(&current->mm->mmap_sem);
 			do_brk(0, ex.a_text+ex.a_data);
+			up_write(&current->mm->mmap_sem);
 			bprm->file->f_op->read(bprm->file,
 				  (char __user *)N_TXTADDR(ex),
 				  ex.a_text+ex.a_data, &pos);
@@ -313,7 +322,7 @@ beyond_if:
 	orig_thr_flags = current_thread_info()->flags;
 	current_thread_info()->flags |= _TIF_32BIT;
 
-	retval = setup_arg_pages(bprm, EXSTACK_DEFAULT);
+	retval = setup_arg_pages(bprm, STACK_TOP, EXSTACK_DEFAULT);
 	if (retval < 0) { 
 		current_thread_info()->flags = orig_thr_flags;
 
@@ -325,9 +334,8 @@ beyond_if:
 	current->mm->start_stack =
 		(unsigned long) create_aout32_tables((char __user *)bprm->p, bprm);
 	if (!(orig_thr_flags & _TIF_32BIT)) {
-		unsigned long pgd_cache;
+		unsigned long pgd_cache = get_pgd_cache(current->mm->pgd);
 
-		pgd_cache = ((unsigned long)current->mm->pgd[0])<<11UL;
 		__asm__ __volatile__("stxa\t%0, [%1] %2\n\t"
 				     "membar #Sync"
 				     : /* no outputs */
@@ -391,7 +399,9 @@ static int load_aout32_library(struct file *file)
 	len = PAGE_ALIGN(ex.a_text + ex.a_data);
 	bss = ex.a_text + ex.a_data + ex.a_bss;
 	if (bss > len) {
+		down_write(&current->mm->mmap_sem);
 		error = do_brk(start_addr + len, bss - len);
+		up_write(&current->mm->mmap_sem);
 		retval = error;
 		if (error != start_addr + len)
 			goto out;

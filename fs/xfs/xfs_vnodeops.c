@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2003 Silicon Graphics, Inc.  All Rights Reserved.
+ * Copyright (c) 2000-2004 Silicon Graphics, Inc.  All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -167,6 +167,7 @@ xfs_getattr(
 	vap->va_mode = ip->i_d.di_mode & MODEMASK;
 	vap->va_uid = ip->i_d.di_uid;
 	vap->va_gid = ip->i_d.di_gid;
+	vap->va_xid = ip->i_d.di_xid;
 	vap->va_projid = ip->i_d.di_projid;
 
 	/*
@@ -248,7 +249,7 @@ xfs_getattr(
 	/*
 	 * Convert di_flags to xflags.
 	 */
-	vap->va_xflags = xfs_dic2xflags(&ip->i_d, ARCH_NOCONVERT);
+	vap->va_xflags = xfs_ip2xflags(ip);
 
 	/*
 	 * Exit for inode revalidate.  See if any of the rest of
@@ -299,13 +300,14 @@ xfs_setattr(
 	uint			commit_flags=0;
 	uid_t			uid=0, iuid=0;
 	gid_t			gid=0, igid=0;
+	xid_t			xid=0, ixid=0;
 	int			timeflags = 0;
 	vnode_t			*vp;
 	xfs_prid_t		projid=0, iprojid=0;
 	int			mandlock_before, mandlock_after;
 	struct xfs_dquot	*udqp, *gdqp, *olddquot1, *olddquot2;
 	int			file_owner;
-	int			need_iolock = (flags & ATTR_DMI) == 0;
+	int			need_iolock = 1;
 
 	vp = BHV_TO_VNODE(bdp);
 	vn_trace_entry(vp, __FUNCTION__, (inst_t *)__return_address);
@@ -354,6 +356,7 @@ xfs_setattr(
 	if (XFS_IS_QUOTA_ON(mp) && (mask & (XFS_AT_UID|XFS_AT_GID))) {
 		uint	qflags = 0;
 
+		/* FIXME: handle xid? */
 		if (mask & XFS_AT_UID) {
 			uid = vap->va_uid;
 			qflags |= XFS_QMOPT_UQUOTA;
@@ -384,6 +387,9 @@ xfs_setattr(
 	 */
 	tp = NULL;
 	lock_flags = XFS_ILOCK_EXCL;
+	ASSERT(flags & ATTR_NOLOCK ? flags & ATTR_DMI : 1);
+	if (flags & ATTR_NOLOCK)
+		need_iolock = 0;
 	if (!(mask & XFS_AT_SIZE)) {
 		if ((mask != (XFS_AT_CTIME|XFS_AT_ATIME|XFS_AT_MTIME)) ||
 		    (mp->m_flags & XFS_MOUNT_WSYNC)) {
@@ -424,6 +430,8 @@ xfs_setattr(
 	if (mask &
 	    (XFS_AT_MODE|XFS_AT_XFLAGS|XFS_AT_EXTSIZE|XFS_AT_UID|
 	     XFS_AT_GID|XFS_AT_PROJID)) {
+		/* FIXME: handle xid? */
+
 		/*
 		 * CAP_FOWNER overrides the following restrictions:
 		 *
@@ -472,7 +480,7 @@ xfs_setattr(
 	 * and can change the group id only to a group of which he
 	 * or she is a member.
 	 */
-	if (mask & (XFS_AT_UID|XFS_AT_GID|XFS_AT_PROJID)) {
+	if (mask & (XFS_AT_UID|XFS_AT_GID|XFS_AT_XID|XFS_AT_PROJID)) {
 		/*
 		 * These IDs could have changed since we last looked at them.
 		 * But, we're assured that if the ownership did change
@@ -480,10 +488,12 @@ xfs_setattr(
 		 * would have changed also.
 		 */
 		iuid = ip->i_d.di_uid;
-		iprojid = ip->i_d.di_projid;
 		igid = ip->i_d.di_gid;
-		gid = (mask & XFS_AT_GID) ? vap->va_gid : igid;
+		ixid = ip->i_d.di_xid;
+		iprojid = ip->i_d.di_projid;
 		uid = (mask & XFS_AT_UID) ? vap->va_uid : iuid;
+		gid = (mask & XFS_AT_GID) ? vap->va_gid : igid;
+		xid = (mask & XFS_AT_XID) ? vap->va_xid : ixid;
 		projid = (mask & XFS_AT_PROJID) ? (xfs_prid_t)vap->va_projid :
 			 iprojid;
 
@@ -512,6 +522,7 @@ xfs_setattr(
 		 */
 		if ((XFS_IS_UQUOTA_ON(mp) && iuid != uid) ||
 		    (XFS_IS_GQUOTA_ON(mp) && igid != gid)) {
+			/* FIXME: handle xid? */
 			ASSERT(tp);
 			code = XFS_QM_DQVOPCHOWNRESV(mp, tp, ip, udqp, gdqp,
 						capable(CAP_FOWNER) ?
@@ -744,7 +755,7 @@ xfs_setattr(
 	 * and can change the group id only to a group of which he
 	 * or she is a member.
 	 */
-	if (mask & (XFS_AT_UID|XFS_AT_GID|XFS_AT_PROJID)) {
+	if (mask & (XFS_AT_UID|XFS_AT_GID|XFS_AT_XID|XFS_AT_PROJID)) {
 		/*
 		 * CAP_FSETID overrides the following restrictions:
 		 *
@@ -760,6 +771,12 @@ xfs_setattr(
 		 * Change the ownerships and register quota modifications
 		 * in the transaction.
 		 */
+		if (ixid != xid) {
+			if (XFS_IS_GQUOTA_ON(mp)) {
+				/* FIXME: handle xid quota? */
+			}
+			ip->i_d.di_xid = xid;
+		}
 		if (iuid != uid) {
 			if (XFS_IS_UQUOTA_ON(mp)) {
 				ASSERT(mask & XFS_AT_UID);
@@ -1999,7 +2016,7 @@ xfs_create(
 	 * create transaction goes to disk before returning to
 	 * the user.
 	 */
-	if (mp->m_flags & XFS_MOUNT_WSYNC) {
+	if (mp->m_flags & (XFS_MOUNT_WSYNC|XFS_MOUNT_DIRSYNC)) {
 		xfs_trans_set_sync(tp);
 	}
 
@@ -2496,7 +2513,7 @@ xfs_remove(
 	 * remove transaction goes to disk before returning to
 	 * the user.
 	 */
-	if (mp->m_flags & XFS_MOUNT_WSYNC) {
+	if (mp->m_flags & (XFS_MOUNT_WSYNC|XFS_MOUNT_DIRSYNC)) {
 		xfs_trans_set_sync(tp);
 	}
 
@@ -2708,7 +2725,7 @@ xfs_link(
 	 * link transaction goes to disk before returning to
 	 * the user.
 	 */
-	if (mp->m_flags & XFS_MOUNT_WSYNC) {
+	if (mp->m_flags & (XFS_MOUNT_WSYNC|XFS_MOUNT_DIRSYNC)) {
 		xfs_trans_set_sync(tp);
 	}
 
@@ -2925,7 +2942,7 @@ xfs_mkdir(
 	 * mkdir transaction goes to disk before returning to
 	 * the user.
 	 */
-	if (mp->m_flags & XFS_MOUNT_WSYNC) {
+	if (mp->m_flags & (XFS_MOUNT_WSYNC|XFS_MOUNT_DIRSYNC)) {
 		xfs_trans_set_sync(tp);
 	}
 
@@ -3172,7 +3189,7 @@ xfs_rmdir(
 	 * rmdir transaction goes to disk before returning to
 	 * the user.
 	 */
-	if (mp->m_flags & XFS_MOUNT_WSYNC) {
+	if (mp->m_flags & (XFS_MOUNT_WSYNC|XFS_MOUNT_DIRSYNC)) {
 		xfs_trans_set_sync(tp);
 	}
 
@@ -3524,7 +3541,7 @@ xfs_symlink(
 	 * symlink transaction goes to disk before returning to
 	 * the user.
 	 */
-	if (mp->m_flags & XFS_MOUNT_WSYNC) {
+	if (mp->m_flags & (XFS_MOUNT_WSYNC|XFS_MOUNT_DIRSYNC)) {
 		xfs_trans_set_sync(tp);
 	}
 
@@ -3685,27 +3702,27 @@ xfs_inode_flush(
 {
 	xfs_inode_t	*ip;
 	xfs_mount_t	*mp;
+	xfs_inode_log_item_t *iip;
 	int		error = 0;
 
 	ip = XFS_BHVTOI(bdp);
 	mp = ip->i_mount;
+	iip = ip->i_itemp;
 
 	if (XFS_FORCED_SHUTDOWN(mp))
 		return XFS_ERROR(EIO);
 
-	/* Bypass inodes which have already been cleaned by
+	/*
+	 * Bypass inodes which have already been cleaned by
 	 * the inode flush clustering code inside xfs_iflush
 	 */
 	if ((ip->i_update_core == 0) &&
-	    ((ip->i_itemp == NULL) ||
-	     !(ip->i_itemp->ili_format.ilf_fields & XFS_ILOG_ALL)))
+	    ((iip == NULL) || !(iip->ili_format.ilf_fields & XFS_ILOG_ALL)))
 		return 0;
 
 	if (flags & FLUSH_LOG) {
-		xfs_inode_log_item_t *iip = ip->i_itemp;
-
 		if (iip && iip->ili_last_lsn) {
-			xlog_t	*log = mp->m_log;
+			xlog_t		*log = mp->m_log;
 			xfs_lsn_t	sync_lsn;
 			int		s, log_flags = XFS_LOG_FORCE;
 
@@ -3718,12 +3735,12 @@ xfs_inode_flush(
 
 			if (flags & FLUSH_SYNC)
 				log_flags |= XFS_LOG_SYNC;
-			return xfs_log_force(mp, iip->ili_last_lsn,
-						log_flags);
+			return xfs_log_force(mp, iip->ili_last_lsn, log_flags);
 		}
 	}
 
-	/* We make this non-blocking if the inode is contended,
+	/*
+	 * We make this non-blocking if the inode is contended,
 	 * return EAGAIN to indicate to the caller that they
 	 * did not succeed. This prevents the flush path from
 	 * blocking on inodes inside another operation right
@@ -3904,7 +3921,7 @@ xfs_finish_reclaim(
 	int		error;
 
 	if (vp && VN_BAD(vp))
-		return 0;
+		goto reclaim;
 
 	/* The hash lock here protects a thread in xfs_iget_core from
 	 * racing with us on linking the inode back with a vnode.
@@ -3952,8 +3969,7 @@ xfs_finish_reclaim(
 			 */
 			if (error) {
 				xfs_iunlock(ip, XFS_ILOCK_EXCL);
-				xfs_ireclaim(ip);
-				return (0);
+				goto reclaim;
 			}
 			xfs_iflock(ip); /* synchronize with xfs_iflush_done */
 		}
@@ -3972,6 +3988,7 @@ xfs_finish_reclaim(
 		xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	}
 
+ reclaim:
 	xfs_ireclaim(ip);
 	return 0;
 }
@@ -4324,7 +4341,7 @@ xfs_free_file_space(
 	int			rt;
 	xfs_fileoff_t		startoffset_fsb;
 	xfs_trans_t		*tp;
-	int			need_iolock = (attr_flags & ATTR_DMI) == 0;
+	int			need_iolock = 1;
 
 	vn_trace_entry(XFS_ITOV(ip), __FUNCTION__, (inst_t *)__return_address);
 	mp = ip->i_mount;
@@ -4352,8 +4369,12 @@ xfs_free_file_space(
 			return(error);
 	}
 
+	ASSERT(attr_flags & ATTR_NOLOCK ? attr_flags & ATTR_DMI : 1);
+	if (attr_flags & ATTR_NOLOCK)
+		need_iolock = 0;
 	if (need_iolock)
 		xfs_ilock(ip, XFS_IOLOCK_EXCL);
+
 	rounding = MAX((__uint8_t)(1 << mp->m_sb.sb_blocklog),
 			(__uint8_t)NBPP);
 	ilen = len + (offset & (rounding - 1));

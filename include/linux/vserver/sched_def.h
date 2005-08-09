@@ -28,6 +28,8 @@ struct _vx_sched {
 	uint32_t jiffies;		/* last time accounted */
 
 	int priority_bias;		/* bias offset for priority */
+	int vavavoom;			/* last calculated vavavoom */
+
 	cpumask_t cpus_allowed;		/* cpu mask for context */
 
 	struct _vx_ticks cpu[NR_CPUS];

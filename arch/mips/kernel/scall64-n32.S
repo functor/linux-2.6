@@ -243,7 +243,7 @@ EXPORT(sysn32_call_table)
 	PTR	sys_capget
 	PTR	sys_capset
 	PTR	sys32_rt_sigpending		/* 6125 */
-	PTR	sys32_rt_sigtimedwait
+	PTR	compat_sys_rt_sigtimedwait
 	PTR	sys32_rt_sigqueueinfo
 	PTR	sys32_rt_sigsuspend
 	PTR	sys32_sigaltstack
@@ -357,7 +357,7 @@ EXPORT(sysn32_call_table)
 	PTR	compat_sys_mq_timedreceive
 	PTR	compat_sys_mq_notify
 	PTR	compat_sys_mq_getsetattr
-	PTR	sys_ni_syscall			/* 6240, sys_vserver */
+	PTR	sys32_vserver			/* 6240 */
 	PTR	sys_waitid
 	PTR	sys_ni_syscall			/* available, was setaltroot */
 	PTR	sys_add_key
