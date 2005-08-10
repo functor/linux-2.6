@@ -3,8 +3,9 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # What parts do we want to build?  We must build at least one kernel.
 # These are the kernels that are built IF the architecture allows it.
 
-%define buildup 1
+%define buildup 0
 %define buildsmp 0
+%define buildxenU 1
 %define builduml 0
 %define buildsource 0
 %define builddoc 0
@@ -173,6 +174,29 @@ hyperthreading technology.
 
 Install the kernel-smp package if your machine uses two or more CPUs.
 
+%package xenU
+Summary: The Linux kernel compiled for xenU virtual machines.
+
+Group: System Environment/Kernel
+Provides: kernel = %{version}
+Provides: kernel-drm = 4.3.0
+Prereq: %{kernel_prereq}
+Conflicts: %{kernel_dot_org_conflicts}
+Conflicts: %{package_conflicts}
+Conflicts: %{nptl_conflicts}
+Obsoletes: kernel-enterprise < 2.4.10
+# We can't let RPM do the dependencies automatic because it'll then pick up
+# a correct but undesirable perl dependency from the module headers which
+# isn't required for the kernel proper to function
+AutoReqProv: no
+
+%description xenU
+This package includes a xenU version of the Linux kernel. It is used
+to run the Linux kernel in an unprivileged Xen domain.
+
+Install the kernel-xenU package if your machine supports the Xen VMM.
+
+
 %package uml
 Summary: The Linux kernel compiled for use in user mode (User Mode Linux).
 
@@ -231,6 +255,11 @@ BuildKernel() {
     # override ARCH in the case of UML
     if [ "$1" = "uml" ] ; then
         export ARCH=um
+    fi
+
+    # override ARCH in the case of UML
+    if [ "$1" = "xenU" ] ; then
+        export ARCH=xen
     fi
 
     # and now to start the build process
@@ -342,6 +371,11 @@ BuildKernel smp
 BuildKernel uml
 %endif
 
+%if %{buildxenU}
+BuildKernel xenU
+%endif
+
+
 ###
 ### install
 ###
@@ -409,6 +443,10 @@ exit 0
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
 exit 0
 
+%pre xenU
+/sbin/modprobe loop 2> /dev/null > /dev/null  || :
+exit 0
+
 %post 
 # trick mkinitrd in case the current environment does not have device mapper
 rootdev=$(awk '/^[ \t]*[^#]/ { if ($2 == "/") { print $1; }}' /etc/fstab)
@@ -455,6 +493,17 @@ pushd /lib/modules/%{KVERREL}smp/build > /dev/null ; {
 popd > /dev/null
 fi
 
+%post xenU
+[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}xenU
+if [ -x /usr/sbin/hardlink ] ; then
+pushd /lib/modules/%{KVERREL}xenU/build > /dev/null ; {
+	cd /lib/modules/%{KVERREL}xenU/build
+	find . -type f | while read f; do hardlink -c /lib/modules/*/build/$f $f ; done
+}
+popd > /dev/null
+fi
+
+
 %preun 
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
 [ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --rminitrd --rmmoddep --remove %{KVERREL}
@@ -462,6 +511,11 @@ fi
 %preun smp
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
 [ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --rminitrd --rmmoddep --remove %{KVERREL}smp
+
+%preun xenU
+/sbin/modprobe loop 2> /dev/null > /dev/null  || :
+[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --rminitrd --rmmoddep --remove %{KVERREL}xenU
+
 
 ###
 ### file lists
@@ -493,10 +547,22 @@ fi
 /lib/modules/%{KVERREL}smp/source
 %endif
 
+%if %{buildxenU}
+%files xenU
+%defattr(-,root,root)
+/%{image_install_path}/*-%{KVERREL}xenU
+#/boot/Kerntypes-%{KVERREL}xenU
+/boot/System.map-%{KVERREL}xenU
+/boot/config-%{KVERREL}xenU
+%dir /lib/modules/%{KVERREL}xenU
+/lib/modules/%{KVERREL}xenU/kernel
+%verify(not mtime) /lib/modules/%{KVERREL}xenU/build
+/lib/modules/%{KVERREL}xenU/source
+%endif
+
 %if %{builduml}
 %files uml
 %defattr(-,root,root)
-
 %endif
 
 # only some architecture builds need kernel-source and kernel-doc
