@@ -3,7 +3,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # What parts do we want to build?  We must build at least one kernel.
 # These are the kernels that are built IF the architecture allows it.
 
-%define buildup 0
+%define buildup 1
 %define buildsmp 0
 %define buildxenU 1
 %define builduml 0
