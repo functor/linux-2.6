@@ -3,9 +3,9 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # What parts do we want to build?  We must build at least one kernel.
 # These are the kernels that are built IF the architecture allows it.
 
+%define buildxenU 1
 %define buildup 1
 %define buildsmp 0
-%define buildxenU 1
 %define builduml 0
 %define buildsource 0
 %define builddoc 0
@@ -238,35 +238,35 @@ find . -name "*~" -exec rm -fv {} \;
 %build
 
 BuildKernel() {
+    # clean out any old configuration
+    make -s mrproper
 
     # Pick the right config file for the kernel we're building
     if [ -n "$1" ] ; then
 	Config=kernel-%{kversion}-%{_target_cpu}-$1-planetlab.config
+    	# override ARCH in the case of UML
+    	if [ "$1" = "uml" ] ; then
+        	export ARCH=um
+    	fi
+    	# override ARCH in the case of UML
+    	if [ "$1" = "xenU" ] ; then
+        	export ARCH=xen
+    	fi
+    	# clean out any configuration with the new ARCH
+    	make -s mrproper
     else
 	Config=kernel-%{kversion}-%{_target_cpu}-planetlab.config
     fi
 
+    # and now to start the build process
     KernelVer=%{version}-%{release}$1
     echo BUILDING A KERNEL FOR $1 %{_target_cpu}...
 
     # make sure EXTRAVERSION says what we want it to say
-    perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = -%{release}$1/" Makefile
+    ExtraVer=%{release}$1
+    perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = -$ExtraVer/" Makefile
 
-    # override ARCH in the case of UML
-    if [ "$1" = "uml" ] ; then
-        export ARCH=um
-    fi
-
-    # override ARCH in the case of UML
-    if [ "$1" = "xenU" ] ; then
-        export ARCH=xen
-    fi
-
-    # and now to start the build process
-
-    make -s mrproper
     cp configs/$Config .config
-
     make -s nonint_oldconfig > /dev/null
     make -s include/linux/version.h 
 
