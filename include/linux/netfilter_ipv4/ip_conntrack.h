@@ -90,7 +90,6 @@ union ip_conntrack_proto {
 
 union ip_conntrack_expect_proto {
 	/* insert expect proto private data here */
-	struct ip_ct_gre_expect gre;
 };
 
 /* Add protocol helper include file here */
@@ -109,6 +108,13 @@ union ip_conntrack_help {
 
 #ifdef CONFIG_IP_NF_NAT_NEEDED
 #include <linux/netfilter_ipv4/ip_nat.h>
+#include <linux/netfilter_ipv4/ip_nat_pptp.h>
+
+/* per conntrack: nat application helper private data */
+union ip_conntrack_nat_help {
+	/* insert nat helper private data here */
+	struct ip_nat_pptp nat_pptp_info;
+};
 #endif
 
 #include <linux/types.h>
@@ -168,6 +174,7 @@ struct ip_conntrack
 #ifdef CONFIG_IP_NF_NAT_NEEDED
 	struct {
 		struct ip_nat_info info;
+		union ip_conntrack_nat_help help;
 #if defined(CONFIG_IP_NF_TARGET_MASQUERADE) || \
 	defined(CONFIG_IP_NF_TARGET_MASQUERADE_MODULE)
 		int masq_index;

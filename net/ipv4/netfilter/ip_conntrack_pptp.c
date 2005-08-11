@@ -1,5 +1,5 @@
 /*
- * ip_conntrack_pptp.c	- Version 2.0
+ * ip_conntrack_pptp.c	- Version 3.0
  *
  * Connection tracking support for PPTP (Point to Point Tunneling Protocol).
  * PPTP is a a protocol for creating virtual private networks.
@@ -9,7 +9,7 @@
  * GRE is defined in RFC 1701 and RFC 1702.  Documentation of
  * PPTP can be found in RFC 2637
  *
- * (C) 2000-2003 by Harald Welte <laforge@gnumonks.org>
+ * (C) 2000-2005 by Harald Welte <laforge@gnumonks.org>
  *
  * Development of this code funded by Astaro AG (http://www.astaro.com/)
  *
@@ -17,9 +17,9 @@
  * 	 - We blindly assume that control connections are always
  * 	   established in PNS->PAC direction.  This is a violation
  * 	   of RFFC2673
+ * 	 - We can only support one single call within each session
  *
- * TODO: - finish support for multiple calls within one session
- * 	   (needs expect reservations in newnat)
+ * TODO:
  *	 - testing of incoming PPTP calls 
  *
  * Changes: 
@@ -35,6 +35,12 @@
  * 	2004-10-22 - Version 2.0
  * 	  - merge Mandrake's 2.6.x port with recent 2.6.x API changes
  * 	  - fix lots of linear skb assumptions from Mandrake's port
+ * 	2005-06-10 - Version 2.1
+ * 	  - use ip_conntrack_expect_free() instead of kfree() on the
+ * 	    expect's (which are from the slab for quite some time)
+ * 	2005-06-10 - Version 3.0
+ * 	  - port helper to post-2.6.11 API changes,
+ * 	    funded by Oxcoda NetBox Blue (http://www.netboxblue.com/)
  *
  */
 
@@ -46,17 +52,41 @@
 #include <net/tcp.h>
 
 #include <linux/netfilter_ipv4/lockhelp.h>
+#include <linux/netfilter_ipv4/ip_conntrack.h>
+#include <linux/netfilter_ipv4/ip_conntrack_core.h>
 #include <linux/netfilter_ipv4/ip_conntrack_helper.h>
 #include <linux/netfilter_ipv4/ip_conntrack_proto_gre.h>
 #include <linux/netfilter_ipv4/ip_conntrack_pptp.h>
 
-#define IP_CT_PPTP_VERSION "2.0"
+#define IP_CT_PPTP_VERSION "3.0"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Harald Welte <laforge@gnumonks.org>");
 MODULE_DESCRIPTION("Netfilter connection tracking helper module for PPTP");
 
 DECLARE_LOCK(ip_pptp_lock);
+
+int
+(*ip_nat_pptp_hook_outbound)(struct sk_buff **pskb,
+			  struct ip_conntrack *ct,
+			  enum ip_conntrack_info ctinfo,
+			  struct PptpControlHeader *ctlh,
+			  union pptp_ctrl_union *pptpReq);
+
+int
+(*ip_nat_pptp_hook_inbound)(struct sk_buff **pskb,
+			  struct ip_conntrack *ct,
+			  enum ip_conntrack_info ctinfo,
+			  struct PptpControlHeader *ctlh,
+			  union pptp_ctrl_union *pptpReq);
+
+int
+(*ip_nat_pptp_hook_exp_gre)(struct ip_conntrack_expect *expect_orig,
+			    struct ip_conntrack_expect *expect_reply);
+
+void
+(*ip_nat_pptp_hook_expectfn)(struct ip_conntrack *ct,
+			     struct ip_conntrack_expect *exp);
 
 #if 0
 #include "ip_conntrack_pptp_priv.h"
@@ -73,96 +103,98 @@ DECLARE_LOCK(ip_pptp_lock);
 #define PPTP_GRE_TIMEOUT 		(10 MINS)
 #define PPTP_GRE_STREAM_TIMEOUT 	(5 DAYS)
 
-static int pptp_expectfn(struct ip_conntrack *ct)
+static void pptp_expectfn(struct ip_conntrack *ct,
+			 struct ip_conntrack_expect *exp)
 {
-	struct ip_conntrack *master;
-	struct ip_conntrack_expect *exp;
-
 	DEBUGP("increasing timeouts\n");
+
 	/* increase timeout of GRE data channel conntrack entry */
 	ct->proto.gre.timeout = PPTP_GRE_TIMEOUT;
 	ct->proto.gre.stream_timeout = PPTP_GRE_STREAM_TIMEOUT;
 
-	master = master_ct(ct);
-	if (!master) {
-		DEBUGP(" no master!!!\n");
-		return 0;
-	}
+	/* Can you see how rusty this code is, compared with the pre-2.6.11
+	 * one? That's what happened to my shiny newnat of 2002 ;( -HW */
 
-	exp = ct->master;
-	if (!exp) {
-		DEBUGP("no expectation!!\n");
-		return 0;
-	}
+	if (!ip_nat_pptp_hook_expectfn) {
+		struct ip_conntrack_tuple inv_t;
+		struct ip_conntrack_expect *exp_other;
 
-	DEBUGP("completing tuples with ct info\n");
-	/* we can do this, since we're unconfirmed */
-	if (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.gre.key == 
-		htonl(master->help.ct_pptp_info.pac_call_id)) {	
-		/* assume PNS->PAC */
-		ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.gre.key = 
-			htonl(master->help.ct_pptp_info.pns_call_id);
-		ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u.gre.key =
-			htonl(master->help.ct_pptp_info.pns_call_id);
-	} else {
-		/* assume PAC->PNS */
-		ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.gre.key =
-			htonl(master->help.ct_pptp_info.pac_call_id);
-		ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u.gre.key =
-			htonl(master->help.ct_pptp_info.pac_call_id);
-	}
+		/* obviously this tuple inversion only works until you do NAT */
+		invert_tuplepr(&inv_t, &exp->tuple);
+		DEBUGP("trying to unexpect other dir: ");
+		DUMP_TUPLE(&inv_t);
 	
-	/* delete other expectation */
-	if (exp->expected_list.next != &exp->expected_list) {
-		struct ip_conntrack_expect *other_exp;
-		struct list_head *cur_item, *next;
+		exp_other = __ip_conntrack_exp_find(&inv_t);
+		if (exp_other) {
+			/* delete other expectation.  */
+			DEBUGP("found\n");
+			ip_conntrack_unexpect_related(exp_other);
+		} else {
+			DEBUGP("not found\n");
+		}
+	} else {
+		/* we need more than simple inversion */
+		ip_nat_pptp_hook_expectfn(ct, exp);
+	}
+}
 
-		for (cur_item = master->sibling_list.next;
-		     cur_item != &master->sibling_list; cur_item = next) {
-			next = cur_item->next;
-			other_exp = list_entry(cur_item,
-					       struct ip_conntrack_expect,
-					       expected_list);
-			/* remove only if occurred at same sequence number */
-			if (other_exp != exp && other_exp->seq == exp->seq) {
-				DEBUGP("unexpecting other direction\n");
-				ip_ct_gre_keymap_destroy(other_exp);
-				ip_conntrack_unexpect_related(other_exp);
-			}
+static int timeout_ct_or_exp(const struct ip_conntrack_tuple *t)
+{
+	struct ip_conntrack_tuple_hash *h;
+	struct ip_conntrack_expect *exp;
+
+	DEBUGP("trying to timeout ct or exp for tuple ");
+	DUMP_TUPLE(t);
+
+	h = __ip_conntrack_find(t, NULL);
+	if (h)  {
+		struct ip_conntrack *sibling = tuplehash_to_ctrack(h);
+		DEBUGP("setting timeout of conntrack %p to 0\n", sibling);
+		sibling->proto.gre.timeout = 0;
+		sibling->proto.gre.stream_timeout = 0;
+		/* refresh_acct will not modify counters if skb == NULL */
+		ip_ct_refresh_acct(sibling, 0, NULL, 0);
+		return 1;
+	} else {
+		exp = __ip_conntrack_exp_find(t);
+		if (exp) {
+			DEBUGP("unexpect_related of expect %p\n", exp);
+			ip_conntrack_unexpect_related(exp);
+			return 1;
 		}
 	}
 
 	return 0;
 }
 
+
 /* timeout GRE data connections */
 static int pptp_timeout_related(struct ip_conntrack *ct)
 {
-	struct list_head *cur_item, *next;
-	struct ip_conntrack_expect *exp;
+	struct ip_conntrack_tuple t;
+	int ret;
 
-	/* FIXME: do we have to lock something ? */
-	for (cur_item = ct->sibling_list.next;
-	    cur_item != &ct->sibling_list; cur_item = next) {
-		next = cur_item->next;
-		exp = list_entry(cur_item, struct ip_conntrack_expect,
-				 expected_list);
+	/* Since ct->sibling_list has literally rusted away in 2.6.11, 
+	 * we now need another way to find out about our sibling
+	 * contrack and expects... -HW */
 
-		ip_ct_gre_keymap_destroy(exp);
-		if (!exp->sibling) {
-			ip_conntrack_unexpect_related(exp);
-			continue;
-		}
+	/* try original (pns->pac) tuple */
+	memcpy(&t, &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple, sizeof(t));
+	t.dst.protonum = IPPROTO_GRE;
+	t.src.u.gre.key = htons(ct->help.ct_pptp_info.pns_call_id);
+	t.dst.u.gre.key = htons(ct->help.ct_pptp_info.pac_call_id);
 
-		DEBUGP("setting timeout of conntrack %p to 0\n",
-			exp->sibling);
-		exp->sibling->proto.gre.timeout = 0;
-		exp->sibling->proto.gre.stream_timeout = 0;
-		/* refresh_acct will not modify counters if skb == NULL */
-		ip_ct_refresh_acct(exp->sibling, 0, NULL, 0);
-	}
+	ret = timeout_ct_or_exp(&t);
 
-	return 0;
+	/* try reply (pac->pns) tuple */
+	memcpy(&t, &ct->tuplehash[IP_CT_DIR_REPLY].tuple, sizeof(t));
+	t.dst.protonum = IPPROTO_GRE;
+	t.src.u.gre.key = htons(ct->help.ct_pptp_info.pac_call_id);
+	t.dst.u.gre.key = htons(ct->help.ct_pptp_info.pns_call_id);
+
+	ret += timeout_ct_or_exp(&t);
+
+	return ret;
 }
 
 /* expect GRE connections (PNS->PAC and PAC->PNS direction) */
@@ -176,79 +208,109 @@ exp_gre(struct ip_conntrack *master,
 	struct ip_conntrack_tuple exp_tuples[] = {
 		/* tuple in original direction, PNS->PAC */
 		{ .src = { .ip = master->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.ip,
-			   .u = { .gre = { .key = htonl(ntohs(peer_callid)) } }
+			   .u = { .gre = { .key = peer_callid } }
 			 },
 		  .dst = { .ip = master->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.ip,
-			   .u = { .gre = { .key = htonl(ntohs(callid)) } },
+			   .u = { .gre = { .key = callid } },
 			   .protonum = IPPROTO_GRE
 			 },
 		 },
 		/* tuple in reply direction, PAC->PNS */
 		{ .src = { .ip = master->tuplehash[IP_CT_DIR_REPLY].tuple.src.ip,
-			   .u = { .gre = { .key = htonl(ntohs(callid)) } }
+			   .u = { .gre = { .key = callid } }
 			 },
 		  .dst = { .ip = master->tuplehash[IP_CT_DIR_REPLY].tuple.dst.ip,
-			   .u = { .gre = { .key = htonl(ntohs(peer_callid)) } },
+			   .u = { .gre = { .key = peer_callid } },
 			   .protonum = IPPROTO_GRE
 			 },
 		 }
-	}, *exp_tuple;
+	};
 
-	for (exp_tuple = exp_tuples; exp_tuple < &exp_tuples[2]; exp_tuple++) {
-		struct ip_conntrack_expect *exp;
+	struct ip_conntrack_expect *exp_orig, *exp_reply;
 
-		exp = ip_conntrack_expect_alloc();
-		if (exp == NULL)
-			return 1;
+	exp_orig = ip_conntrack_expect_alloc();
+	if (exp_orig == NULL)
+		return 1;
 
-		memcpy(&exp->tuple, exp_tuple, sizeof(exp->tuple));
+	exp_reply = ip_conntrack_expect_alloc();
+	if (exp_reply == NULL) {
+		ip_conntrack_expect_free(exp_orig);
+		return 1;
+	}
 
-		exp->mask.src.ip = 0xffffffff;
-		exp->mask.src.u.all = 0;
-		exp->mask.dst.u.all = 0;
-		exp->mask.dst.u.gre.key = 0xffffffff;
-		exp->mask.dst.ip = 0xffffffff;
-		exp->mask.dst.protonum = 0xffff;
-			
-		exp->seq = seq;
-		exp->expectfn = pptp_expectfn;
+	memcpy(&exp_orig->tuple, &exp_tuples[0], sizeof(exp_orig->tuple));
 
-		exp->help.exp_pptp_info.pac_call_id = ntohs(callid);
-		exp->help.exp_pptp_info.pns_call_id = ntohs(peer_callid);
+	exp_orig->mask.src.ip = 0xffffffff;
+	exp_orig->mask.src.u.all = 0;
+	exp_orig->mask.dst.u.all = 0;
+	exp_orig->mask.dst.u.gre.key = 0xffff;
+	exp_orig->mask.dst.ip = 0xffffffff;
+	exp_orig->mask.dst.protonum = 0xff;
+		
+	exp_orig->master = master;
+	exp_orig->expectfn = pptp_expectfn;
 
-		DEBUGP("calling expect_related ");
-		DUMP_TUPLE_RAW(&exp->tuple);
-	
-		/* Add GRE keymap entries */
-		if (ip_ct_gre_keymap_add(exp, &exp->tuple, 0) != 0) {
-			kfree(exp);
-			return 1;
-		}
+	exp_orig->dir = IP_CT_DIR_ORIGINAL;
 
-		invert_tuplepr(&inv_tuple, &exp->tuple);
-		if (ip_ct_gre_keymap_add(exp, &inv_tuple, 1) != 0) {
-			ip_ct_gre_keymap_destroy(exp);
-			kfree(exp);
-			return 1;
-		}
-	
-		if (ip_conntrack_expect_related(exp, master) != 0) {
-			ip_ct_gre_keymap_destroy(exp);
-			kfree(exp);
+	/* both expectations are identical apart from tuple */
+	memcpy(exp_reply, exp_orig, sizeof(*exp_reply));
+	memcpy(&exp_reply->tuple, &exp_tuples[1], sizeof(exp_reply->tuple));
+
+	exp_reply->dir = !exp_orig->dir;
+
+	if (ip_nat_pptp_hook_exp_gre)
+		return ip_nat_pptp_hook_exp_gre(exp_orig, exp_reply);
+	else {
+
+		DEBUGP("calling expect_related PNS->PAC");
+		DUMP_TUPLE(&exp_orig->tuple);
+
+		if (ip_conntrack_expect_related(exp_orig) != 0) {
+			ip_conntrack_expect_free(exp_orig);
+			ip_conntrack_expect_free(exp_reply);
 			DEBUGP("cannot expect_related()\n");
 			return 1;
 		}
+
+		DEBUGP("calling expect_related PAC->PNS");
+		DUMP_TUPLE(&exp_reply->tuple);
+
+		if (ip_conntrack_expect_related(exp_reply) != 0) {
+			ip_conntrack_unexpect_related(exp_orig);
+			ip_conntrack_expect_free(exp_reply);
+			DEBUGP("cannot expect_related()\n");
+			return 1;
+		}
+
+		/* Add GRE keymap entries */
+		if (ip_ct_gre_keymap_add(master, &exp_reply->tuple, 0) != 0) {
+			ip_conntrack_unexpect_related(exp_orig);
+			ip_conntrack_unexpect_related(exp_reply);
+			DEBUGP("cannot keymap_add() exp\n");
+			return 1;
+		}
+
+		invert_tuplepr(&inv_tuple, &exp_reply->tuple);
+		if (ip_ct_gre_keymap_add(master, &inv_tuple, 1) != 0) {
+			ip_conntrack_unexpect_related(exp_orig);
+			ip_conntrack_unexpect_related(exp_reply);
+			ip_ct_gre_keymap_destroy(master);
+			DEBUGP("cannot keymap_add() exp_inv\n");
+			return 1;
+		}
+	
 	}
 
 	return 0;
 }
 
 static inline int 
-pptp_inbound_pkt(struct sk_buff *skb,
+pptp_inbound_pkt(struct sk_buff **pskb,
 		 struct tcphdr *tcph,
 		 unsigned int ctlhoff,
 		 size_t datalen,
-		 struct ip_conntrack *ct)
+		 struct ip_conntrack *ct,
+		 enum ip_conntrack_info ctinfo)
 {
 	struct PptpControlHeader _ctlh, *ctlh;
 	unsigned int reqlen;
@@ -257,14 +319,14 @@ pptp_inbound_pkt(struct sk_buff *skb,
 	u_int16_t msg, *cid, *pcid;
 	u_int32_t seq;	
 
-	ctlh = skb_header_pointer(skb, ctlhoff, sizeof(_ctlh), &_ctlh);
+	ctlh = skb_header_pointer(*pskb, ctlhoff, sizeof(_ctlh), &_ctlh);
 	if (unlikely(!ctlh)) {
 		DEBUGP("error during skb_header_pointer\n");
 		return NF_ACCEPT;
 	}
 
 	reqlen = datalen - sizeof(struct pptp_pkt_hdr) - sizeof(_ctlh);
-	pptpReq = skb_header_pointer(skb, ctlhoff+sizeof(struct pptp_pkt_hdr),
+	pptpReq = skb_header_pointer(*pskb, ctlhoff+sizeof(_ctlh),
 				     reqlen, &_pptpReq);
 	if (unlikely(!pptpReq)) {
 		DEBUGP("error during skb_header_pointer\n");
@@ -441,16 +503,22 @@ pptp_inbound_pkt(struct sk_buff *skb,
 		break;
 	}
 
+
+	if (ip_nat_pptp_hook_inbound)
+		return ip_nat_pptp_hook_inbound(pskb, ct, ctinfo, ctlh,
+						pptpReq);
+
 	return NF_ACCEPT;
 
 }
 
 static inline int
-pptp_outbound_pkt(struct sk_buff *skb,
+pptp_outbound_pkt(struct sk_buff **pskb,
 		  struct tcphdr *tcph,
 		  unsigned int ctlhoff,
 		  size_t datalen,
-		  struct ip_conntrack *ct)
+		  struct ip_conntrack *ct,
+		  enum ip_conntrack_info ctinfo)
 {
 	struct PptpControlHeader _ctlh, *ctlh;
 	unsigned int reqlen;
@@ -458,12 +526,12 @@ pptp_outbound_pkt(struct sk_buff *skb,
 	struct ip_ct_pptp_master *info = &ct->help.ct_pptp_info;
 	u_int16_t msg, *cid, *pcid;
 
-	ctlh = skb_header_pointer(skb, ctlhoff, sizeof(_ctlh), &_ctlh);
+	ctlh = skb_header_pointer(*pskb, ctlhoff, sizeof(_ctlh), &_ctlh);
 	if (!ctlh)
 		return NF_ACCEPT;
 	
 	reqlen = datalen - sizeof(struct pptp_pkt_hdr) - sizeof(_ctlh);
-	pptpReq = skb_header_pointer(skb, ctlhoff+sizeof(_ctlh), reqlen, 
+	pptpReq = skb_header_pointer(*pskb, ctlhoff+sizeof(_ctlh), reqlen, 
 				     &_pptpReq);
 	if (!pptpReq)
 		return NF_ACCEPT;
@@ -488,7 +556,7 @@ pptp_outbound_pkt(struct sk_buff *skb,
 	case PPTP_OUT_CALL_REQUEST:
 		if (reqlen < sizeof(_pptpReq.ocreq)) {
 			DEBUGP("%s: short packet\n", strMName[msg]);
-			break;
+			/* FIXME: break; */
 		}
 
 		/* client initiating connection to server */
@@ -555,6 +623,10 @@ pptp_outbound_pkt(struct sk_buff *skb,
 		/* unknown: no need to create GRE masq table entry */
 		break;
 	}
+	
+	if (ip_nat_pptp_hook_outbound)
+		return ip_nat_pptp_hook_outbound(pskb, ct, ctinfo, ctlh,
+						 pptpReq);
 
 	return NF_ACCEPT;
 }
@@ -562,14 +634,14 @@ pptp_outbound_pkt(struct sk_buff *skb,
 
 /* track caller id inside control connection, call expect_related */
 static int 
-conntrack_pptp_help(struct sk_buff *skb,
+conntrack_pptp_help(struct sk_buff **pskb,
 		    struct ip_conntrack *ct, enum ip_conntrack_info ctinfo)
 
 {
 	struct pptp_pkt_hdr _pptph, *pptph;
 	
 	struct tcphdr _tcph, *tcph;
-	u_int32_t tcplen = skb->len - skb->nh.iph->ihl * 4;
+	u_int32_t tcplen = (*pskb)->len - (*pskb)->nh.iph->ihl * 4;
 	u_int32_t datalen;
 	void *datalimit;
 	int dir = CTINFO2DIR(ctinfo);
@@ -586,8 +658,8 @@ conntrack_pptp_help(struct sk_buff *skb,
 		return NF_ACCEPT;
 	}
 	
-	nexthdr_off = skb->nh.iph->ihl*4;
-	tcph = skb_header_pointer(skb, skb->nh.iph->ihl*4, sizeof(_tcph),
+	nexthdr_off = (*pskb)->nh.iph->ihl*4;
+	tcph = skb_header_pointer(*pskb, (*pskb)->nh.iph->ihl*4, sizeof(_tcph),
 				  &_tcph);
 	if (!tcph)
 		return NF_ACCEPT;
@@ -602,9 +674,10 @@ conntrack_pptp_help(struct sk_buff *skb,
  	datalen = tcplen - tcph->doff * 4;
 
 	/* checksum invalid? */
-	if (tcp_v4_check(tcph, tcplen, skb->nh.iph->saddr, skb->nh.iph->daddr,
-			csum_partial((char *) tcph, tcplen, 0))) {
-		printk(KERN_NOTICE __FILE__ ": bad csum\n");
+	if (tcp_v4_check(tcph, tcplen, (*pskb)->nh.iph->saddr,
+			 (*pskb)->nh.iph->daddr,
+			 csum_partial((char *) tcph, tcplen, 0))) {
+		DEBUGP(" bad csum\n");
 		/* W2K PPTP server sends TCP packets with wrong checksum :(( */
 		//return NF_ACCEPT;
 	}
@@ -619,7 +692,7 @@ conntrack_pptp_help(struct sk_buff *skb,
 	}
 
 	nexthdr_off += tcph->doff*4;
-	pptph = skb_header_pointer(skb, skb->nh.iph->ihl*4 + tcph->doff*4,
+	pptph = skb_header_pointer(*pskb, (*pskb)->nh.iph->ihl*4 + tcph->doff*4,
 				   sizeof(_pptph), &_pptph);
 	if (!pptph) {
 		DEBUGP("no full PPTP header, can't track\n");
@@ -645,10 +718,12 @@ conntrack_pptp_help(struct sk_buff *skb,
 	 * established from PNS->PAC.  However, RFC makes no guarantee */
 	if (dir == IP_CT_DIR_ORIGINAL)
 		/* client -> server (PNS -> PAC) */
-		ret = pptp_outbound_pkt(skb, tcph, nexthdr_off, datalen, ct);
+		ret = pptp_outbound_pkt(pskb, tcph, nexthdr_off, datalen, ct,
+					ctinfo);
 	else
 		/* server -> client (PAC -> PNS) */
-		ret = pptp_inbound_pkt(skb, tcph, nexthdr_off, datalen, ct);
+		ret = pptp_inbound_pkt(pskb, tcph, nexthdr_off, datalen, ct,
+				       ctinfo);
 	DEBUGP("sstate: %d->%d, cstate: %d->%d\n",
 		oldsstate, info->sstate, oldcstate, info->cstate);
 	UNLOCK_BH(&ip_pptp_lock);
@@ -660,10 +735,9 @@ conntrack_pptp_help(struct sk_buff *skb,
 static struct ip_conntrack_helper pptp = { 
 	.list = { NULL, NULL },
 	.name = "pptp", 
-	.flags = IP_CT_HELPER_F_REUSE_EXPECT,
 	.me = THIS_MODULE,
 	.max_expected = 2,
-	.timeout = 0,
+	.timeout = 5 * 60,
 	.tuple = { .src = { .ip = 0, 
 		 	    .u = { .tcp = { .port =  
 				    __constant_htons(PPTP_CONTROL_PORT) } } 
@@ -678,7 +752,7 @@ static struct ip_conntrack_helper pptp = {
 			 }, 
 		  .dst = { .ip = 0, 
 			   .u = { .all = 0 },
-			   .protonum = 0xffff 
+			   .protonum = 0xff 
 		 	 } 
 		},
 	.help = conntrack_pptp_help
@@ -689,7 +763,7 @@ static int __init init(void)
 {
 	int retcode;
 
-	DEBUGP(__FILE__ ": registering helper\n");
+	DEBUGP(" registering helper\n");
 	if ((retcode = ip_conntrack_helper_register(&pptp))) {
 		printk(KERN_ERR "Unable to register conntrack application "
 				"helper for pptp: %d\n", retcode);
@@ -710,3 +784,7 @@ module_init(init);
 module_exit(fini);
 
 EXPORT_SYMBOL(ip_pptp_lock);
+EXPORT_SYMBOL(ip_nat_pptp_hook_outbound);
+EXPORT_SYMBOL(ip_nat_pptp_hook_inbound);
+EXPORT_SYMBOL(ip_nat_pptp_hook_exp_gre);
+EXPORT_SYMBOL(ip_nat_pptp_hook_expectfn);
