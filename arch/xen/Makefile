@@ -62,6 +62,7 @@ archclean:
 	@if [ -e arch/xen/arch ]; then $(MAKE) $(clean)=arch/xen/arch; fi;
 	@rm -f arch/xen/arch include/.asm-ignore include/asm-xen/asm
 	@rm -f vmlinux-stripped vmlinuz
+	@rm -f boot/bzImage
 
 define archhelp
   echo  '* vmlinuz	- Compressed kernel image'
