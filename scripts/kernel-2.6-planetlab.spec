@@ -359,10 +359,6 @@ BuildKernel() {
 rm -rf $RPM_BUILD_ROOT
 mkdir -p $RPM_BUILD_ROOT/boot
 
-%if %{buildup}
-BuildKernel
-%endif
-
 %if %{buildsmp}
 BuildKernel smp
 %endif
@@ -373,6 +369,10 @@ BuildKernel uml
 
 %if %{buildxenU}
 BuildKernel xenU
+%endif
+
+%if %{buildup}
+BuildKernel
 %endif
 
 
