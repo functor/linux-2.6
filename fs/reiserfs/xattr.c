@@ -831,7 +831,7 @@ reiserfs_delete_xattrs (struct inode *inode)
     if (dir->d_inode->i_nlink <= 2) {
         root = get_xa_root (inode->i_sb);
         reiserfs_write_lock_xattrs (inode->i_sb);
-        err = vfs_rmdir (root->d_inode, dir);
+	err = vfs_rmdir (root->d_inode, dir, NULL);
         reiserfs_write_unlock_xattrs (inode->i_sb);
         dput (root);
     } else {
@@ -1347,10 +1347,6 @@ __reiserfs_permission (struct inode *inode, int mask, struct nameidata *nd,
                        int need_lock)
 {
 	umode_t			mode = inode->i_mode;
-
-	/* Prevent vservers from escaping chroot() barriers */
-	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
-		return -EACCES;
 
 	if (mask & MAY_WRITE) {
 		/*
