@@ -60,7 +60,6 @@
 #include <linux/ptrace.h>
 #include <linux/aio_abi.h>
 #include <linux/elf.h>
-#include <linux/vs_cvirt.h>
 
 #include <net/scm.h>
 #include <net/sock.h>
