@@ -21,7 +21,6 @@
 #include <linux/pagemap.h>
 #include <linux/cdev.h>
 #include <linux/bootmem.h>
-#include <linux/vs_base.h>
 
 /*
  * This is needed for the following functions:
