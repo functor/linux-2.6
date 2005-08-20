@@ -20,6 +20,7 @@
 #include <asm/sn/clksupport.h>
 
 extern unsigned long sn_rtc_cycles_per_second;
+
 static struct time_interpolator sn2_interpolator = {
 	.drift = -1,
 	.shift = 10,
