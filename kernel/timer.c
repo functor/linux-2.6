@@ -32,8 +32,6 @@
 #include <linux/jiffies.h>
 #include <linux/posix-timers.h>
 #include <linux/cpu.h>
-#include <linux/vs_cvirt.h>
-#include <linux/vserver/sched.h>
 #include <linux/syscalls.h>
 #include <linux/delay.h>
 #include <linux/diskdump.h>
@@ -1263,9 +1261,6 @@ asmlinkage long sys_sysinfo(struct sysinfo __user *info)
 		val.procs = nr_threads;
 	} while (read_seqretry(&xtime_lock, seq));
 
-/*	if (vx_flags(VXF_VIRT_CPU, 0))
-		vx_vsi_cpu(val);
-*/
 	si_meminfo(&val);
 	si_swapinfo(&val);
 
