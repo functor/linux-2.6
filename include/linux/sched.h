@@ -694,6 +694,7 @@ struct task_struct {
 /* signal handlers */
 	struct signal_struct *signal;
 	struct sighand_struct *sighand;
+
 	sigset_t blocked, real_blocked;
 	struct sigpending pending;
 
@@ -927,7 +928,6 @@ static inline struct user_struct *get_uid(struct user_struct *u)
 	atomic_inc(&u->__count);
 	return u;
 }
-
 extern void free_uid(struct user_struct *);
 extern void switch_uid(struct user_struct *);
 
@@ -1038,7 +1038,6 @@ static inline int vx_capable(int cap, int ccap)
 	return 0;
 }
 #endif
-
 
 /*
  * Routines for handling mm_structs
@@ -1270,88 +1269,6 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 }
 
 #endif /* CONFIG_SMP */
-
-/* API for registering delay info */
-#ifdef CONFIG_DELAY_ACCT
-
-#define test_delay_flag(tsk,flg)                ((tsk)->flags & (flg))
-#define set_delay_flag(tsk,flg)                 ((tsk)->flags |= (flg))
-#define clear_delay_flag(tsk,flg)               ((tsk)->flags &= ~(flg))
-
-#define def_delay_var(var)		        unsigned long long var
-#define get_delay(tsk,field)                    ((tsk)->delays.field)
-
-#define start_delay(var)                        ((var) = sched_clock())
-#define start_delay_set(var,flg)                (set_delay_flag(current,flg),(var) = sched_clock())
-
-#define inc_delay(tsk,field) (((tsk)->delays.field)++)
-
-/* because of hardware timer drifts in SMPs and task continue on different cpu
- * then where the start_ts was taken there is a possibility that
- * end_ts < start_ts by some usecs. In this case we ignore the diff
- * and add nothing to the total.
- */
-#ifdef CONFIG_SMP
-#define test_ts_integrity(start_ts,end_ts)  (likely((end_ts) > (start_ts)))
-#else
-#define test_ts_integrity(start_ts,end_ts)  (1)
-#endif
-
-#define add_delay_ts(tsk,field,start_ts,end_ts) \
-	do { if (test_ts_integrity(start_ts,end_ts)) (tsk)->delays.field += ((end_ts)-(start_ts)); } while (0)
-
-#define add_delay_clear(tsk,field,start_ts,flg)        \
-	do {                                           \
-		unsigned long long now = sched_clock();\
-           	add_delay_ts(tsk,field,start_ts,now);  \
-           	clear_delay_flag(tsk,flg);             \
-        } while (0)
-
-static inline void add_io_delay(unsigned long long dstart) 
-{
-	struct task_struct * tsk = current;
-	unsigned long long now = sched_clock();
-	unsigned long long val;
-
-	if (test_ts_integrity(dstart,now))
-		val = now - dstart;
-	else
-		val = 0;
-	if (test_delay_flag(tsk,PF_MEMIO)) {
-		tsk->delays.mem_iowait_total += val;
-		tsk->delays.num_memwaits++;
-	} else {
-		tsk->delays.iowait_total += val;
-		tsk->delays.num_iowaits++;
-	}
-	clear_delay_flag(tsk,PF_IOWAIT);
-}
-
-inline static void init_delays(struct task_struct *tsk)
-{
-	memset((void*)&tsk->delays,0,sizeof(tsk->delays));
-}
-
-#else
-
-#define test_delay_flag(tsk,flg)                (0)
-#define set_delay_flag(tsk,flg)                 do { } while (0)
-#define clear_delay_flag(tsk,flg)               do { } while (0)
-
-#define def_delay_var(var)			      
-#define get_delay(tsk,field)                    (0)
-
-#define start_delay(var)                        do { } while (0)
-#define start_delay_set(var,flg)                do { } while (0)
-
-#define inc_delay(tsk,field)                    do { } while (0)
-#define add_delay_ts(tsk,field,start_ts,now)    do { } while (0)
-#define add_delay_clear(tsk,field,start_ts,flg) do { } while (0)
-#define add_io_delay(dstart)			do { } while (0) 
-#define init_delays(tsk)                        do { } while (0)
-#endif
-
-
 
 #ifdef HAVE_ARCH_PICK_MMAP_LAYOUT
 extern void arch_pick_mmap_layout(struct mm_struct *mm);
