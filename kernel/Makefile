@@ -9,20 +9,6 @@ obj-y     = sched.o fork.o exec_domain.o panic.o printk.o profile.o \
 	    rcupdate.o intermodule.o extable.o params.o posix-timers.o \
 	    kthread.o wait.o kfifo.o sys_ni.o posix-cpu-timers.o dump.o
 
-# mod-subdirs := vserver
-
-subdir-y  += vserver
-obj-y	  += vserver/vserver.o
-
-subdir-y	+= vserver
-obj-y	  += vserver/vserver.o
-
-subdir-y	+= vserver
-obj-y	  += vserver/vserver.o
-
-subdir-y	+= vserver
-obj-y	  += vserver/vserver.o
-
 subdir-y	+= vserver
 obj-y	  += vserver/vserver.o
 
