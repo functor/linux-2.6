@@ -27,7 +27,6 @@
  */
 unsigned long max_low_pfn;
 unsigned long min_low_pfn;
-EXPORT_SYMBOL(min_low_pfn);
 unsigned long max_pfn;
 /*
  * If we have booted due to a crash, max_pfn will be a very low value. We need

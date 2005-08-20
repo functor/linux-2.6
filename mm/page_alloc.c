@@ -65,11 +65,6 @@ int sysctl_lowmem_reserve_ratio[MAX_NR_ZONES-1] = { 256, 32 };
 EXPORT_SYMBOL(totalram_pages);
 EXPORT_SYMBOL(nr_swap_pages);
 
-#ifdef CONFIG_CRASH_DUMP
-/* This symbol has to be exported to use 'for_each_pgdat' macro by modules. */
-EXPORT_SYMBOL(pgdat_list);
-#endif
-
 /*
  * Used by page_zone() to look up the address of the struct zone whose
  * id is encoded in the upper bits of page->flags
@@ -124,7 +119,7 @@ static void bad_page(const char *function, struct page *page)
 	tainted |= TAINT_BAD_PAGE;
 }
 
-#if !defined(CONFIG_HUGETLB_PAGE) && !defined(CONFIG_CRASH_DUMP)
+#ifndef CONFIG_HUGETLB_PAGE
 #define prep_compound_page(page, order) do { } while (0)
 #define destroy_compound_page(page, order) do { } while (0)
 #else
