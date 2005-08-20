@@ -1,6 +1,7 @@
 #ifndef _VX_INODE_H
 #define _VX_INODE_H
 
+
 #define IATTR_XID	0x01000000
 
 #define IATTR_ADMIN	0x00000001
@@ -28,21 +29,17 @@
 
 #define vx_hide_check(c,m)	(((m) & IATTR_HIDE) ? vx_check(c,m) : 1)
 
-extern int vc_get_iattr_v0(uint32_t, void __user *);
-extern int vc_set_iattr_v0(uint32_t, void __user *);
-
-extern int vc_get_iattr(uint32_t, void __user *);
-extern int vc_set_iattr(uint32_t, void __user *);
-
 extern int vc_iattr_ioctl(struct dentry *de,
 			  unsigned int cmd,
 			  unsigned long arg);
+
 #endif	/* __KERNEL__ */
 
 /* inode ioctls */
 
 #define FIOC_GETXFLG	_IOR('x', 5, long)
 #define FIOC_SETXFLG	_IOW('x', 6, long)
+
 #define FIOC_GETIATTR   _IOR('x', 7, long)
 #define FIOC_SETIATTR   _IOR('x', 8, long)
 
