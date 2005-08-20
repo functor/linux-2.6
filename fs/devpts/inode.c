@@ -181,7 +181,6 @@ static struct dentry *get_node(int num)
 	return lookup_one_len(s, root, sprintf(s, "%d", num));
 }
 
-
 int devpts_pty_new(struct tty_struct *tty)
 {
 	int number = tty->index;
