@@ -71,7 +71,6 @@
 #include <linux/time.h>
 #include <linux/smp_lock.h>
 #include <linux/security.h>
-#include <linux/vs_base.h>
 #include <linux/syscalls.h>
 #include <linux/audit.h>
 #include <asm/uaccess.h>

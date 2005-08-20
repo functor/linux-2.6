@@ -57,6 +57,7 @@ static inline void __vx_add_cres(struct vx_info *vxi,
 		atomic_add(amount, &vxi->limit.rcur[res]);
 }
 
+
 /* process and file limits */
 
 #define vx_nproc_inc(p) \
@@ -125,6 +126,7 @@ static inline int __vx_cres_avail(struct vx_info *vxi,
 
 #define vx_openfd_avail(n) \
 	vx_cres_avail(current->vx_info, n, VLIMIT_OPENFD)
+
 
 /* socket limits */
 

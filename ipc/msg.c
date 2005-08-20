@@ -24,7 +24,6 @@
 #include <linux/list.h>
 #include <linux/security.h>
 #include <linux/sched.h>
-#include <linux/vs_base.h>
 #include <linux/syscalls.h>
 #include <linux/audit.h>
 #include <asm/current.h>
