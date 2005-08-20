@@ -11,7 +11,6 @@
 #include <linux/uts.h>
 #include <linux/utsname.h>
 #include <linux/version.h>
-#include <linux/stringify.h>
 
 #define version(a) Version_ ## a
 #define version_string(a) version(a)
@@ -33,9 +32,7 @@ const char linux_banner[] =
 	"Linux version " UTS_RELEASE " (" LINUX_COMPILE_BY "@"
 	LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") " UTS_VERSION "\n";
 
-const char *LINUX_COMPILE_VERSION_ID = __stringify(LINUX_COMPILE_VERSION_ID);
-LINUX_COMPILE_VERSION_ID_TYPE;
-
 const char vx_linux_banner[] =
 	"Linux version %s (" LINUX_COMPILE_BY "@"
 	LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") %s\n";
+

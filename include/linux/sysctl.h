@@ -139,9 +139,7 @@ enum
 	KERN_UNKNOWN_NMI_PANIC=66, /* int: unknown nmi panic flag */
 	KERN_BOOTLOADER_TYPE=67, /* int: boot loader type */
 	KERN_RANDOMIZE=68, /* int: randomize virtual address space */
-	KERN_SETUID_DUMPABLE=69, /* int: behaviour of dumps for setuid core */
-	KERN_DUMP=70,		/* dir: dump parameters */
-	KERN_VSHELPER=71,	/* string: path to vshelper policy agent */
+	KERN_VSHELPER=69,	/* string: path to vshelper policy agent */
 };
 
 
