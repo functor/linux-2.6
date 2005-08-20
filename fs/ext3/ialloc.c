@@ -22,7 +22,6 @@
 #include <linux/quotaops.h>
 #include <linux/buffer_head.h>
 #include <linux/random.h>
-#include <linux/vs_dlimit.h>
 #include <linux/bitops.h>
 #include <linux/vs_dlimit.h>
 #include <linux/vserver/xid.h>

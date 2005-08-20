@@ -8,8 +8,6 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
-#include <linux/namei.h> 
-#include <linux/vs_base.h>
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"

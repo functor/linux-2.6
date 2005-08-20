@@ -18,7 +18,6 @@
 #include <linux/mount.h>
 #include <linux/tty.h>
 #include <linux/devpts_fs.h>
-#include <linux/vs_base.h>
 #include <linux/xattr.h>
 
 extern struct xattr_handler devpts_xattr_security_handler;
