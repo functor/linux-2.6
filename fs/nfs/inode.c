@@ -381,9 +381,9 @@ nfs_create_client(struct nfs_server *server, const struct nfs_mount_data *data)
 		goto out_fail;
 	}
 
-	clnt->cl_intr     = (server->flags & NFS_MOUNT_INTR) ? 1 : 0;
-	clnt->cl_softrtry = (server->flags & NFS_MOUNT_SOFT) ? 1 : 0;
-	clnt->cl_tagxid   = (server->flags & NFS_MOUNT_TAGXID) ? 1 : 0;
+	clnt->cl_intr     = 1;
+	clnt->cl_softrtry = 1;
+	clnt->cl_tagxid   = 1;
 	clnt->cl_chatty   = 1;
 
 	return clnt;
@@ -555,7 +555,6 @@ static int nfs_show_options(struct seq_file *m, struct vfsmount *mnt)
 		{ NFS_MOUNT_NOCTO, ",nocto", "" },
 		{ NFS_MOUNT_NOAC, ",noac", "" },
 		{ NFS_MOUNT_NONLM, ",nolock", ",lock" },
-		{ NFS_MOUNT_BROKEN_SUID, ",broken_suid", "" },
 		{ NFS_MOUNT_TAGXID, ",tagxid", "" },
 		{ 0, NULL, NULL }
 	};
@@ -750,12 +749,7 @@ nfs_fhget(struct super_block *sb, struct nfs_fh *fh, struct nfs_fattr *fattr)
 
 out:
 	return inode;
-/*	FIXME
-fail_dlim:
-	make_bad_inode(inode);
-	iput(inode);
-	inode = NULL;
-*/
+
 out_no_inode:
 	printk("nfs_fhget: iget failed\n");
 	goto out;
