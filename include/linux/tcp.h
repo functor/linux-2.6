@@ -384,6 +384,7 @@ struct tcp_sock {
 	/* FIFO of established children */
 	struct open_request	*accept_queue;
 	struct open_request	*accept_queue_tail;
+
 	unsigned int		keepalive_time;	  /* time before keep alive takes place */
 	unsigned int		keepalive_intvl;  /* time interval between keep alive probes */
 	int			linger2;

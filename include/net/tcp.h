@@ -1764,16 +1764,6 @@ static inline int tcp_full_space(const struct sock *sk)
 	return tcp_win_from_space(sk->sk_rcvbuf); 
 }
 
-struct tcp_listen_opt
-{
-	u8			max_qlen_log;	/* log_2 of maximal queued SYNs */
-	int			qlen;
-	int			qlen_young;
-	int			clock_hand;
-	u32			hash_rnd;
-	struct open_request	*syn_table[TCP_SYNQ_HSIZE];
-};
-
 static inline void tcp_acceptq_queue(struct sock *sk, struct open_request *req,
 					 struct sock *child)
 {
@@ -1791,6 +1781,15 @@ static inline void tcp_acceptq_queue(struct sock *sk, struct open_request *req,
 	req->dl_next = NULL;
 }
 
+struct tcp_listen_opt
+{
+	u8			max_qlen_log;	/* log_2 of maximal queued SYNs */
+	int			qlen;
+	int			qlen_young;
+	int			clock_hand;
+	u32			hash_rnd;
+	struct open_request	*syn_table[TCP_SYNQ_HSIZE];
+};
 
 static inline void
 tcp_synq_removed(struct sock *sk, struct open_request *req)
