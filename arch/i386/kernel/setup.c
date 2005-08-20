@@ -665,8 +665,6 @@ static inline void copy_edd(void)
  */
 #define LOWMEMSIZE()	(0x9f000)
 
-unsigned long crashdump_addr = 0xdeadbeef;
-
 static void __init parse_cmdline_early (char ** cmdline_p)
 {
 	char c = ' ', *to = command_line, *from = saved_command_line;
@@ -834,9 +832,6 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 		if (!memcmp(from, "dump", 4))
 			dump_enabled = 1;
 	
-		if (c == ' ' && !memcmp(from, "crashdump=", 10))
-			crashdump_addr = memparse(from+10, &from); 
-			
 		/*
 		 * vmalloc=size forces the vmalloc area to be exactly 'size'
 		 * bytes. This can be used to increase (or decrease) the
@@ -1393,10 +1388,6 @@ __setup("noreplacement", noreplacement_setup);
 
 static char * __init machine_specific_memory_setup(void);
 
-#ifdef CONFIG_CRASH_DUMP_SOFTBOOT
-extern void crashdump_reserve(void);
-#endif
-
 #ifdef CONFIG_MCA
 static void set_mca_bus(int x)
 {
@@ -1512,10 +1503,6 @@ void __init setup_arch(char **cmdline_p)
 	}
 #endif
 
-
-#ifdef CONFIG_CRASH_DUMP_SOFTBOOT
-	crashdump_reserve(); /* Preserve crash dump state from prev boot */
-#endif
 
 	dmi_scan_machine();
 
