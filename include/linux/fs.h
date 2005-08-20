@@ -9,6 +9,7 @@
 #include <linux/config.h>
 #include <linux/limits.h>
 #include <linux/ioctl.h>
+#include <linux/mount.h>
 
 /*
  * It's silly to have NR_OPEN bigger than NR_FILE, but you can change
@@ -853,12 +854,12 @@ static inline void unlock_super(struct super_block * sb)
  * VFS helper functions..
  */
 extern int vfs_create(struct inode *, struct dentry *, int, struct nameidata *);
-extern int vfs_mkdir(struct inode *, struct dentry *, int);
-extern int vfs_mknod(struct inode *, struct dentry *, int, dev_t);
-extern int vfs_symlink(struct inode *, struct dentry *, const char *, int);
-extern int vfs_link(struct dentry *, struct inode *, struct dentry *);
-extern int vfs_rmdir(struct inode *, struct dentry *);
-extern int vfs_unlink(struct inode *, struct dentry *);
+extern int vfs_mkdir(struct inode *, struct dentry *, int, struct nameidata *);
+extern int vfs_mknod(struct inode *, struct dentry *, int, dev_t, struct nameidata *);
+extern int vfs_symlink(struct inode *, struct dentry *, const char *, int, struct nameidata *);
+extern int vfs_link(struct dentry *, struct inode *, struct dentry *, struct nameidata *);
+extern int vfs_rmdir(struct inode *, struct dentry *, struct nameidata *);
+extern int vfs_unlink(struct inode *, struct dentry *, struct nameidata *);
 extern int vfs_rename(struct inode *, struct dentry *, struct inode *, struct dentry *);
 
 /*
