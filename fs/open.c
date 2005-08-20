@@ -22,10 +22,6 @@
 #include <asm/uaccess.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
-#include <linux/vs_base.h>
-#include <linux/vs_limit.h>
-#include <linux/vs_dlimit.h>
-#include <linux/vserver/xid.h>
 #include <linux/syscalls.h>
 #include <linux/vs_limit.h>
 #include <linux/vs_dlimit.h>
@@ -622,7 +618,7 @@ asmlinkage long sys_fchmod(unsigned int fd, mode_t mode)
 	inode = dentry->d_inode;
 
 	err = -EROFS;
-	if (IS_RDONLY(inode) || (file && MNT_IS_RDONLY(file->f_vfsmnt)))
+	if (IS_RDONLY(inode) || MNT_IS_RDONLY(file->f_vfsmnt))
 		goto out_putf;
 	err = -EPERM;
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
