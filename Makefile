@@ -2,7 +2,7 @@ VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 12
 EXTRAVERSION = -1.1_1390_FC4.1.planetlab
-NAME=Woozy Beaver
+NAME=Woozy Numbat
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
