@@ -1563,6 +1563,7 @@ static int __init proto_init(void)
 subsys_initcall(proto_init);
 
 #endif /* PROC_FS */
+
 EXPORT_SYMBOL(sk_alloc);
 EXPORT_SYMBOL(sk_free);
 EXPORT_SYMBOL(sk_send_sigurg);
