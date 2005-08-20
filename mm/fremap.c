@@ -14,7 +14,6 @@
 #include <linux/swapops.h>
 #include <linux/rmap.h>
 #include <linux/module.h>
-#include <linux/vs_memory.h>
 #include <linux/syscalls.h>
 #include <linux/vs_memory.h>
 
@@ -69,9 +68,6 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	pgd = pgd_offset(mm, addr);
 	spin_lock(&mm->page_table_lock);
-
-	if (!vx_rsspages_avail(mm, 1))
-		goto err_unlock;
 	
 	if (!vx_rsspages_avail(mm, 1))
 		goto err_unlock;
