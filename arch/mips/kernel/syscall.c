@@ -25,7 +25,6 @@
 #include <linux/sem.h>
 #include <linux/msg.h>
 #include <linux/shm.h>
-#include <linux/vs_cvirt.h>
 #include <linux/compiler.h>
 #include <linux/vs_cvirt.h>
 
