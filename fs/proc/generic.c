@@ -18,8 +18,6 @@
 #include <linux/init.h>
 #include <linux/idr.h>
 #include <linux/namei.h>
-#include <linux/vs_base.h>
-#include <linux/vserver/inode.h>
 #include <linux/bitops.h>
 #include <linux/vserver/inode.h>
 #include <asm/uaccess.h>
