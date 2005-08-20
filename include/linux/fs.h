@@ -221,7 +221,6 @@ extern int dir_notify_enable;
 #include <linux/radix-tree.h>
 #include <linux/prio_tree.h>
 #include <linux/init.h>
-#include <linux/mount.h>
 
 #include <asm/atomic.h>
 #include <asm/semaphore.h>
