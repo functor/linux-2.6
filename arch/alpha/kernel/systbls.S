@@ -299,7 +299,7 @@ sys_call_table:
 	.quad alpha_ni_syscall			/* 270 */
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall
-	.quad sys_vserver			/* 273 sys_vserver */
+	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 275 */
 	.quad alpha_ni_syscall
