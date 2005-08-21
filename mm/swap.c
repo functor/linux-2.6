@@ -71,7 +71,7 @@ EXPORT_SYMBOL(put_page);
  */
 int rotate_reclaimable_page(struct page *page)
 {
-	struct zone *zone = page_zone(page);
+	struct zone *zone;
 	unsigned long flags;
 
 	if (PageLocked(page))
@@ -83,6 +83,7 @@ int rotate_reclaimable_page(struct page *page)
 	if (!PageLRU(page))
 		return 1;
 
+	zone = page_zone(page);
 	spin_lock_irqsave(&zone->lru_lock, flags);
 	if (PageLRU(page) && !PageActive(page)) {
 		list_del(&page->lru);
