@@ -887,71 +887,6 @@ static task_t *copy_process(unsigned long clone_flags,
 		goto fork_out;
 	p->tux_info = NULL;
 
-	p->vx_info = NULL;
-	set_vx_info(&p->vx_info, current->vx_info);
-	p->nx_info = NULL;
-	set_nx_info(&p->nx_info, current->nx_info);
-
-	/* check vserver memory */
-	if (p->mm && !(clone_flags & CLONE_VM)) {
-		if (vx_vmpages_avail(p->mm, p->mm->total_vm))
-			vx_pages_add(p->mm->mm_vx_info, RLIMIT_AS, p->mm->total_vm);
-		else
-			goto bad_fork_free;
-	}
-	if (p->mm && vx_flags(VXF_FORK_RSS, 0)) {
-		if (!vx_rsspages_avail(p->mm, get_mm_counter(p->mm, rss)))
-			goto bad_fork_cleanup_vm;
-	}
-
-	p->vx_info = NULL;
-	set_vx_info(&p->vx_info, current->vx_info);
-	p->nx_info = NULL;
-	set_nx_info(&p->nx_info, current->nx_info);
-
-	/* check vserver memory */
-	if (p->mm && !(clone_flags & CLONE_VM)) {
-		if (vx_vmpages_avail(p->mm, p->mm->total_vm))
-			vx_pages_add(p->mm->mm_vx_info, RLIMIT_AS, p->mm->total_vm);
-		else
-			goto bad_fork_free;
-	}
-	if (p->mm && vx_flags(VXF_FORK_RSS, 0)) {
-		if (!vx_rsspages_avail(p->mm, get_mm_counter(p->mm, rss)))
-			goto bad_fork_cleanup_vm;
-	}
-
-	init_vx_info(&p->vx_info, current->vx_info);
-	p->nx_info = NULL;
-	set_nx_info(&p->nx_info, current->nx_info);
-
-	/* check vserver memory */
-	if (p->mm && !(clone_flags & CLONE_VM)) {
-		if (vx_vmpages_avail(p->mm, p->mm->total_vm))
-			vx_pages_add(p->mm->mm_vx_info, RLIMIT_AS, p->mm->total_vm);
-		else
-			goto bad_fork_free;
-	}
-	if (p->mm && vx_flags(VXF_FORK_RSS, 0)) {
-		if (!vx_rsspages_avail(p->mm, get_mm_counter(p->mm, rss)))
-			goto bad_fork_cleanup_vm;
-	}
-
-	init_vx_info(&p->vx_info, current->vx_info);
-	init_nx_info(&p->nx_info, current->nx_info);
-
-	/* check vserver memory */
-	if (p->mm && !(clone_flags & CLONE_VM)) {
-		if (vx_vmpages_avail(p->mm, p->mm->total_vm))
-			vx_pages_add(p->mm->mm_vx_info, RLIMIT_AS, p->mm->total_vm);
-		else
-			goto bad_fork_free;
-	}
-	if (p->mm && vx_flags(VXF_FORK_RSS, 0)) {
-		if (!vx_rsspages_avail(p->mm, get_mm_counter(p->mm, rss)))
-			goto bad_fork_cleanup_vm;
-	}
-
 	init_vx_info(&p->vx_info, current->vx_info);
 	init_nx_info(&p->nx_info, current->nx_info);
 
@@ -1196,7 +1131,6 @@ static task_t *copy_process(unsigned long clone_flags,
 			__get_cpu_var(process_counts)++;
 	}
 
-	p->ioprio = current->ioprio;
 	nr_threads++;
 	total_forks++;
 
@@ -1322,7 +1256,6 @@ long do_fork(unsigned long clone_flags,
 	}
 
 	p = copy_process(clone_flags, stack_start, regs, stack_size, parent_tidptr, child_tidptr, pid);
-
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.
