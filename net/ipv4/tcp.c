@@ -496,6 +496,7 @@ int tcp_listen_start(struct sock *sk)
 
 		sk_dst_reset(sk);
 		sk->sk_prot->hash(sk);
+
 		return 0;
 	}
 
@@ -526,9 +527,7 @@ static void tcp_listen_stop (struct sock *sk)
 	write_lock_bh(&tp->syn_wait_lock);
 	tp->listen_opt = NULL;
 	write_unlock_bh(&tp->syn_wait_lock);
-
-	tp->accept_queue_tail = NULL;
-	tp->accept_queue = NULL;
+	tp->accept_queue = tp->accept_queue_tail = NULL;
 
 	if (lopt->qlen) {
 		for (i = 0; i < TCP_SYNQ_HSIZE; i++) {
@@ -1912,6 +1911,7 @@ struct sock *tcp_accept(struct sock *sk, int flags, int *err)
 	/* Find already established connection */
 	if (!tp->accept_queue) {
 		long timeo = sock_rcvtimeo(sk, flags & O_NONBLOCK);
+
 		/* If this is a non blocking socket don't sleep */
 		error = -EAGAIN;
 		if (!timeo)
@@ -1925,7 +1925,8 @@ struct sock *tcp_accept(struct sock *sk, int flags, int *err)
 	req = tp->accept_queue;
 	if ((tp->accept_queue = req->dl_next) == NULL)
 		tp->accept_queue_tail = NULL;
-	newsk = req->sk;
+
+ 	newsk = req->sk;
 	sk_acceptq_removed(sk);
 	tcp_openreq_fastfree(req);
 	BUG_TRAP(newsk->sk_state != TCP_SYN_RECV);
@@ -1937,7 +1938,6 @@ out:
 	*err = error;
 	return NULL;
 }
-
 
 /*
  *	Socket option code for TCP.
@@ -2097,7 +2097,7 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 			}
 		}
 		break;
-		
+
 	default:
 		err = -ENOPROTOOPT;
 		break;
@@ -2237,7 +2237,6 @@ int tcp_getsockopt(struct sock *sk, int level, int optname, char __user *optval,
 	case TCP_QUICKACK:
 		val = !tp->ack.pingpong;
 		break;
-
 	default:
 		return -ENOPROTOOPT;
 	};

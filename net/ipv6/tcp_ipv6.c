@@ -1296,7 +1296,6 @@ static int tcp_v6_conn_request(struct sock *sk, struct sk_buff *skb)
 	if (!ipv6_unicast_destination(skb))
 		goto drop; 
 
-
 	/*
 	 *	There are no SYN attacks on IPv6, yet...	
 	 */
@@ -1308,7 +1307,6 @@ static int tcp_v6_conn_request(struct sock *sk, struct sk_buff *skb)
 
 	if (sk_acceptq_is_full(sk) && tcp_synq_young(sk) > 1)
 		goto drop;
-
 
 	req = tcp_openreq_alloc();
 	if (req == NULL)
