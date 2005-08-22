@@ -2,7 +2,6 @@
  * Written by Martin Mares <mj@atrey.karlin.mff.cuni.cz>;
  */
 
-#define LOAD_OFFSET __PAGE_OFFSET
 
 #include <asm-generic/vmlinux.lds.h>
 #include <asm/thread_info.h>
@@ -12,6 +11,7 @@
 OUTPUT_FORMAT("elf32-i386", "elf32-i386", "elf32-i386")
 OUTPUT_ARCH(i386)
 #ifdef ALK_KEXEC	
+#define LOAD_OFFSET __PAGE_OFFSET
 #define KERN_PHYS_OFFSET (CONFIG_KERN_PHYS_OFFSET * 0x100000)
 ENTRY(phys_startup_32)
 jiffies = jiffies_64;
