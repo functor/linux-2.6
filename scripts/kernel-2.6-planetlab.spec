@@ -534,8 +534,37 @@ popd > /dev/null
 fi
 
 %post smp
+# trick mkinitrd in case the current environment does not have device mapper
+rootdev=$(awk '/^[ \t]*[^#]/ { if ($2 == "/") { print $1; }}' /etc/fstab)
+if echo $rootdev |grep -q /dev/mapper 2>/dev/null ; then
+    if [ ! -f $rootdev ]; then
+	fake_root_lvm=1
+	mkdir -p $(dirname $rootdev)
+	touch $rootdev
+    fi
+fi
+
 [ ! -x /usr/sbin/module_upgrade ] || /usr/sbin/module_upgrade
-[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --package kernel-smp --mkinitrd --depmod --install %{KVERREL}smp
+#[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --package kernel-smp --mkinitrd --depmod --install %{KVERREL}smp
+# Older modutils do not support --package option
+[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}smp
+
+# remove fake handle
+if [ -n "$fake_root_lvm" ]; then
+    rm -f $rootdev
+fi
+
+# make some useful links
+pushd /boot > /dev/null ; {
+	ln -sf config-%{KVERREL} config
+	ln -sf initrd-%{KVERREL}.img initrd-boot
+	ln -sf vmlinuz-%{KVERREL} kernel-boot
+}
+popd > /dev/null
+
+# ask for a reboot
+mkdir -p /etc/planetlab
+touch /etc/planetlab/update-reboot
 
 %post smp-devel
 if [ -x /usr/sbin/hardlink ] ; then
