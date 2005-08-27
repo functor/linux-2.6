@@ -505,7 +505,9 @@ if echo $rootdev |grep -q /dev/mapper 2>/dev/null ; then
 fi
 
 [ ! -x /usr/sbin/module_upgrade ] || /usr/sbin/module_upgrade
-[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --package kernel --mkinitrd --depmod --install %{KVERREL}
+#[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --package kernel --mkinitrd --depmod --install %{KVERREL}
+# Older modutils do not support --package option
+[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}
 
 # remove fake handle
 if [ -n "$fake_root_lvm" ]; then
