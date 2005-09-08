@@ -2453,6 +2453,10 @@ void scheduler_tick(void)
 
 	rq->timestamp_last_tick = now;
 
+#if defined(CONFIG_VSERVER_HARDCPU) && defined(CONFIG_VSERVER_ACB_SCHED) 
+	vx_scheduler_tick();
+#endif
+
 	if (p == rq->idle) {
 		if (wake_priority_sleeper(rq))
 			goto out;
@@ -2711,6 +2715,10 @@ asmlinkage void __sched schedule(void)
 	struct vx_info *vxi;
 #ifdef	CONFIG_VSERVER_HARDCPU
 	int maxidle = -HZ;
+# ifdef CONFIG_VSERVER_ACB_SCHED
+        int min_guarantee_ticks = VX_INVALID_TICKS;
+        int min_best_effort_ticks = VX_INVALID_TICKS;
+# endif
 #endif
 	int cpu, idx;
 
@@ -2781,6 +2789,9 @@ need_resched_nonpreemptible:
 	}
 
 #ifdef CONFIG_VSERVER_HARDCPU
+# ifdef CONFIG_VSERVER_ACB_SCHED
+drain_hold_queue:
+# endif	
 	if (!list_empty(&rq->hold_queue)) {
 		struct list_head *l, *n;
 		int ret;
@@ -2800,6 +2811,17 @@ need_resched_nonpreemptible:
 			}
 			if ((ret < 0) && (maxidle < ret))
 				maxidle = ret;
+# ifdef CONFIG_VSERVER_ACB_SCHED
+			if (ret < 0) {
+			        if (IS_BEST_EFFORT(vxi)) {
+				        if (min_best_effort_ticks < ret) 
+					        min_best_effort_ticks = ret;
+				} else {
+				        if (min_guarantee_ticks < ret)
+					        min_guarantee_ticks = ret;
+				}
+			}
+# endif
 		}
 	}
 	rq->idle_tokens = -maxidle;
@@ -2860,8 +2882,19 @@ go_idle:
 		int ret = vx_tokens_recalc(vxi);
 
 		if (unlikely(ret <= 0)) {
-			if (ret && (rq->idle_tokens > -ret))
-				rq->idle_tokens = -ret;
+			if (ret) {
+			        if ((rq->idle_tokens > -ret))
+				        rq->idle_tokens = -ret;
+# ifdef CONFIG_VSERVER_ACB_SCHED
+				if (IS_BEST_EFFORT(vxi)) {
+				        if (min_best_effort_ticks < ret) 
+					        min_best_effort_ticks = ret;
+				} else {
+				        if (min_guarantee_ticks < ret)
+					        min_guarantee_ticks = ret;
+				}
+# endif
+			}
 			vx_hold_task(vxi, next, rq);
 			goto pick_next;
 		}
@@ -2885,6 +2918,18 @@ go_idle:
 	}
 	next->activated = 0;
 switch_tasks:
+#if defined(CONFIG_VSERVER_HARDCPU) && defined(CONFIG_VSERVER_ACB_SCHED)
+	if (next == rq->idle && !list_empty(&rq->hold_queue)) {
+	        if (min_best_effort_ticks != VX_INVALID_TICKS) {
+		        vx_advance_best_effort_ticks(-min_best_effort_ticks);
+			goto drain_hold_queue;
+		} 
+		if (min_guarantee_ticks != VX_INVALID_TICKS) {
+		        vx_advance_guaranteed_ticks(-min_guarantee_ticks);
+			goto drain_hold_queue;
+		}
+	}
+#endif
 	if (next == rq->idle)
 		schedstat_inc(rq, sched_goidle);
 	prefetch(next);
