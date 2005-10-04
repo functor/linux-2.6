@@ -370,8 +370,11 @@ BuildKernel() {
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     (cd $RPM_BUILD_ROOT/lib/modules/$KernelVer ; ln -s build source)
     # first copy everything
-    cp --parents `find  -type f -name Makefile -o -name "Kconfig*"` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build 
+    cp --parents `find  -type f -name "Makefile*" -o -name "Kconfig*"` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build 
     cp Module.symvers $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
+    if [ "$1" = "uml" ] ; then
+      cp --parents -a `find arch/um -name include` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
+    fi
     # then drop all but the needed Makefiles/Kconfig files
     rm -rf $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/Documentation
     rm -rf $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/scripts
@@ -393,6 +396,11 @@ BuildKernel() {
 %if %{buildxen}
     cp -a asm-xen $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
 %endif
+    if [ "$1" = "uml" ] ; then
+      cd asm	
+      cp -a `readlink arch` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+      cd ..
+    fi
     cp -a `readlink asm` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     # Make sure the Makefile and version.h have a matching timestamp so that
     # external modules can be built
