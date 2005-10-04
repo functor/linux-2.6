@@ -62,7 +62,9 @@ Summary: The Linux kernel (the core of the Linux operating system)
 #
 # The ld.so.conf.d file we install uses syntax older ldconfig's don't grok.
 #
-%define xen_conflicts glibc < 2.3.5-1
+
+# MEF commented out
+# %define xen_conflicts glibc < 2.3.5-1
 
 #
 # Packages that need to be installed before the kernel is, because the %post
@@ -189,7 +191,10 @@ Prereq: %{kernel_prereq}
 Conflicts: %{kernel_dot_org_conflicts}
 Conflicts: %{package_conflicts}
 Conflicts: %{nptl_conflicts}
-Conflicts: %{xen_conflicts}
+
+# MEF commented out 
+# Conflicts: %{xen_conflicts}
+
 # We can't let RPM do the dependencies automatic because it'll then pick up
 # a correct but undesirable perl dependency from the module headers which
 # isn't required for the kernel proper to function
