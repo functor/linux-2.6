@@ -47,6 +47,7 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
+#include <linux/vs_memory.h>
 #include <linux/acct.h>
 #include <linux/vs_memory.h>
 
@@ -760,14 +761,11 @@ no_thread_group:
 		atomic_set(&newsighand->count, 1);
 		memcpy(newsighand->action, oldsighand->action,
 		       sizeof(newsighand->action));
-
 		write_lock_irq(&tasklist_lock);
 		spin_lock(&oldsighand->siglock);
 		spin_lock(&newsighand->siglock);
-
 		current->sighand = newsighand;
 		recalc_sigpending();
-
 		spin_unlock(&newsighand->siglock);
 		spin_unlock(&oldsighand->siglock);
 		write_unlock_irq(&tasklist_lock);

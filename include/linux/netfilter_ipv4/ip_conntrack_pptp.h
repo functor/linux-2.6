@@ -33,10 +33,6 @@ struct ip_ct_pptp_master {
 	enum pptp_ctrlcall_state cstate;	/* call state */
 	u_int16_t pac_call_id;			/* call id of PAC, host byte order */
 	u_int16_t pns_call_id;			/* call id of PNS, host byte order */
-
-	/* in pre-2.6.11 this used to be per-expect. Now it is per-conntrack
-	 * and therefore imposes a fixed limit on the number of maps */
-	struct ip_ct_gre_keymap *keymap_orig, *keymap_reply;
 };
 
 /* conntrack_expect private member */
@@ -48,7 +44,6 @@ struct ip_ct_pptp_expect {
 
 
 #ifdef __KERNEL__
-
 
 #include <linux/netfilter_ipv4/lockhelp.h>
 DECLARE_LOCK_EXTERN(ip_pptp_lock);
@@ -311,28 +306,5 @@ union pptp_ctrl_union {
                 struct PptpSetLinkInfo          setlink;
 };
 
-struct ip_conntrack;
-
-extern int
-(*ip_nat_pptp_hook_outbound)(struct sk_buff **pskb,
-			  struct ip_conntrack *ct,
-			  enum ip_conntrack_info ctinfo,
-			  struct PptpControlHeader *ctlh,
-			  union pptp_ctrl_union *pptpReq);
-
-extern int
-(*ip_nat_pptp_hook_inbound)(struct sk_buff **pskb,
-			  struct ip_conntrack *ct,
-			  enum ip_conntrack_info ctinfo,
-			  struct PptpControlHeader *ctlh,
-			  union pptp_ctrl_union *pptpReq);
-
-extern int
-(*ip_nat_pptp_hook_exp_gre)(struct ip_conntrack_expect *exp_orig,
-			    struct ip_conntrack_expect *exp_reply);
-
-extern void
-(*ip_nat_pptp_hook_expectfn)(struct ip_conntrack *ct,
-			     struct ip_conntrack_expect *exp);
 #endif /* __KERNEL__ */
 #endif /* _CONNTRACK_PPTP_H */

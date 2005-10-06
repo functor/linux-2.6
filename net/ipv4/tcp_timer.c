@@ -518,9 +518,8 @@ static void tcp_synack_timer(struct sock *sk)
 					unsigned long timeo;
 
 					if (req->retrans++ == 0)
-						lopt->qlen_young--;
-					timeo = min((TCP_TIMEOUT_INIT << req->retrans),
-						    TCP_RTO_MAX);
+			         		lopt->qlen_young--;
+					timeo = min((TCP_TIMEOUT_INIT << req->retrans), TCP_RTO_MAX);
 					req->expires = now + timeo;
 					reqp = &req->dl_next;
 					continue;
@@ -532,7 +531,7 @@ static void tcp_synack_timer(struct sock *sk)
 				write_unlock(&tp->syn_wait_lock);
 				lopt->qlen--;
 				if (req->retrans == 0)
-					lopt->qlen_young--;
+			         		lopt->qlen_young--;
 				tcp_openreq_free(req);
 				continue;
 			}

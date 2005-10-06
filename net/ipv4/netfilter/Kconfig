@@ -692,14 +692,91 @@ config IP_NF_ARP_MANGLE
 	  Allows altering the ARP packet payload: source and destination
 	  hardware and network addresses.
 
+# Backwards compatibility modules: only if you don't build in the others.
+config IP_NF_COMPAT_IPCHAINS
+	tristate "ipchains (2.2-style) support"
+	depends on IP_NF_CONNTRACK!=y && IP_NF_IPTABLES!=y
+	help
+	  This option places ipchains (with masquerading and redirection
+	  support) back into the kernel, using the new netfilter
+	  infrastructure.  It is not recommended for new installations (see
+	  `Packet filtering').  With this enabled, you should be able to use
+	  the ipchains tool exactly as in 2.2 kernels.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_COMPAT_IPFWADM
+	tristate "ipfwadm (2.0-style) support"
+	depends on IP_NF_CONNTRACK!=y && IP_NF_IPTABLES!=y && IP_NF_COMPAT_IPCHAINS!=y
+	help
+	  This option places ipfwadm (with masquerading and redirection
+	  support) back into the kernel, using the new netfilter
+	  infrastructure.  It is not recommended for new installations (see
+	  `Packet filtering').  With this enabled, you should be able to use
+	  the ipfwadm tool exactly as in 2.0 kernels.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_TARGET_NOTRACK
+	tristate  'NOTRACK target support'
+	depends on IP_NF_RAW
+	depends on IP_NF_CONNTRACK
+	help
+	  The NOTRACK target allows a select rule to specify
+	  which packets *not* to enter the conntrack/NAT
+	  subsystem with all the consequences (no ICMP error tracking,
+	  no protocol helpers for the selected packets).
+	
+	  If you want to compile it as a module, say M here and read
+	  <file:Documentation/modules.txt>.  If unsure, say `N'.
+
+config IP_NF_RAW
+	tristate  'raw table support (required for NOTRACK/TRACE)'
+	depends on IP_NF_IPTABLES
+	help
+	  This option adds a `raw' table to iptables. This table is the very
+	  first in the netfilter framework and hooks in at the PREROUTING
+	  and OUTPUT chains.
+	
+	  If you want to compile it as a module, say M here and read
+	  <file:Documentation/modules.txt>.  If unsure, say `N'.
+	  help
+
+config IP_NF_MATCH_ADDRTYPE
+	tristate  'address type match support'
+	depends on IP_NF_IPTABLES
+	help
+	  This option allows you to match what routing thinks of an address,
+	  eg. UNICAST, LOCAL, BROADCAST, ...
+	
+	  If you want to compile it as a module, say M here and read
+	  Documentation/modules.txt.  If unsure, say `N'.
+
+config IP_NF_MATCH_REALM
+	tristate  'realm match support'
+	depends on IP_NF_IPTABLES
+	select NET_CLS_ROUTE
+	help
+	  This option adds a `realm' match, which allows you to use the realm
+	  key from the routing subsytem inside iptables.
+	
+	  This match pretty much resembles the CONFIG_NET_CLS_ROUTE4 option 
+	  in tc world.
+	
+	  If you want to compile it as a module, say M here and read
+	  Documentation/modules.txt.  If unsure, say `N'.
+
+config IP_NF_CT_ACCT
+	bool "Connection tracking flow accounting"
+	depends on IP_NF_CONNTRACK
+
 config IP_NF_CT_PROTO_GRE
 	tristate  ' GRE protocol support'
 	depends on IP_NF_CONNTRACK
 	help
-	  This module adds generic support for connection tracking and NAT of
-	  the GRE protocol (RFC1701, RFC2784).  Please note that this will
-	  only work with GRE connections using the key field of the GRE
-	  header.
+	  This module adds generic support for connection tracking and NAT of the
+	  GRE protocol (RFC1701, RFC2784).  Please note that this will only work
+	  with GRE connections using the key field of the GRE header.
 	
 	  You will need GRE support to enable PPTP support.
 	
@@ -710,15 +787,14 @@ config IP_NF_PPTP
 	tristate  'PPTP protocol support'
 	depends on IP_NF_CT_PROTO_GRE
 	help
-	  This module adds support for PPTP (Point to Point Tunnelling
-	  Protocol, RFC2637) conncection tracking and NAT. 
+	  This module adds support for PPTP (Point to Point Tunnelling Protocol, 
+	  RFC2637) conncection tracking and NAT. 
 	
-	  If you are running PPTP sessions over a stateful firewall or NAT
-	  box, you may want to enable this feature.  
+	  If you are running PPTP sessions over a stateful firewall or NAT box,
+	  you may want to enable this feature.  
 	
 	  Please note that not all PPTP modes of operation are supported yet.
-	  For more info, read top of the file
-	  net/ipv4/netfilter/ip_conntrack_pptp.c
+	  For more info, read top of the file net/ipv4/netfilter/ip_conntrack_pptp.c
 	
 	  If you want to compile it as a module, say M here and read
 	  Documentation/modules.txt.  If unsure, say `N'.

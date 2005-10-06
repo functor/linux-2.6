@@ -88,8 +88,8 @@ $(obj)/vsyscall-syms.o: $(obj)/vsyscall.lds \
 	$(call if_changed,syscall)
 
 c-link	:= init_task.o
-s-link	:= vsyscall-int80.o vsyscall-sysenter.o vsyscall-sigreturn.o # \
-		# vsyscall-note.o MEF: looks like this should not be here.
+s-link	:= vsyscall-int80.o vsyscall-sysenter.o vsyscall-sigreturn.o \
+		vsyscall-note.o
 
 $(patsubst %.o,$(obj)/%.c,$(c-obj-y) $(c-link)) $(patsubst %.o,$(obj)/%.S,$(s-obj-y) $(s-link)):
 	@ln -fsn $(srctree)/arch/i386/kernel/$(notdir $@) $@

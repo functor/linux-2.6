@@ -13,18 +13,6 @@
 #define MAX_PRIO_BIAS		 20
 #define MIN_PRIO_BIAS		-20
 
-#ifdef CONFIG_VSERVER_ACB_SCHED
-
-#define VX_INVALID_TICKS        -1000000
-#define IS_BEST_EFFORT(vxi)     (vx_info_flags(vxi, VXF_SCHED_SHARE, 0))
-
-int vx_tokens_avail(struct vx_info *vxi);
-void vx_consume_token(struct vx_info *vxi);
-void vx_scheduler_tick(void);
-void vx_advance_best_effort_ticks(int ticks);
-void vx_advance_guaranteed_ticks(int ticks);
-
-#else
 
 static inline int vx_tokens_avail(struct vx_info *vxi)
 {
@@ -35,8 +23,6 @@ static inline void vx_consume_token(struct vx_info *vxi)
 {
 	atomic_dec(&vxi->sched.tokens);
 }
-
-#endif /* CONFIG_VSERVER_ACB_SCHED */
 
 static inline int vx_need_resched(struct task_struct *p)
 {

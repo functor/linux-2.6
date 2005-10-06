@@ -204,7 +204,7 @@ static void nf_dump_skb(int pf, struct sk_buff *skb)
 
 		for (opti = 0; opti < (ip->ihl - sizeof(struct iphdr) / 4); opti++)
 			printk(" O=0x%8.8X", *opt++);
-		printk(" MARK=%lu (0x%lx)",
+		printk(" MARK=%lu (0x%lu)",
 		       (long unsigned int)skb->nfmark,
 		       (long unsigned int)skb->nfmark);
 		printk("\n");

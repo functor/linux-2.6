@@ -36,8 +36,8 @@ MODULE_AUTHOR("Harald Welte <laforge@gnumonks.org>");
 MODULE_DESCRIPTION("Netfilter NAT protocol helper module for GRE");
 
 #if 0
-#define DEBUGP(format, args...) printk(KERN_DEBUG "%s:%s: " format, __FILE__, \
-				       __FUNCTION__, ## args)
+#define DEBUGP(format, args...) printk(KERN_DEBUG __FILE__ ":" __FUNCTION__ \
+				       ": " format, ## args)
 #else
 #define DEBUGP(x, args...)
 #endif
@@ -68,7 +68,7 @@ gre_unique_tuple(struct ip_conntrack_tuple *tuple,
 		 const struct ip_conntrack *conntrack)
 {
 	u_int32_t min, i, range_size;
-	u_int16_t key = 0, *keyptr;
+	u_int32_t key = 0, *keyptr;
 
 	if (maniptype == IP_NAT_MANIP_SRC)
 		keyptr = &tuple->src.u.gre.key;
@@ -100,18 +100,14 @@ gre_unique_tuple(struct ip_conntrack_tuple *tuple,
 /* manipulate a GRE packet according to maniptype */
 static int
 gre_manip_pkt(struct sk_buff **pskb,
-	      unsigned int iphdroff,
-	      const struct ip_conntrack_tuple *tuple,
+	      unsigned int hdroff,
+	      const struct ip_conntrack_manip *manip,
 	      enum ip_nat_manip_type maniptype)
 {
 	struct gre_hdr *greh;
 	struct gre_hdr_pptp *pgreh;
-	struct iphdr *iph = (struct iphdr *)((*pskb)->data + iphdroff);
-	unsigned int hdroff = iphdroff + iph->ihl*4;
 
-	/* pgreh includes two optional 32bit fields which are not required
-	 * to be there.  That's where the magic '8' comes from */
-	if (!skb_ip_make_writable(pskb, hdroff + sizeof(*pgreh)-8))
+	if (!skb_ip_make_writable(pskb, hdroff + sizeof(*pgreh)))
 		return 0;
 
 	greh = (void *)(*pskb)->data + hdroff;
@@ -131,15 +127,15 @@ gre_manip_pkt(struct sk_buff **pskb,
 				/* FIXME: Never tested this code... */
 				*(gre_csum(greh)) = 
 					ip_nat_cheat_check(~*(gre_key(greh)),
-							tuple->dst.u.gre.key,
+							manip->u.gre.key,
 							*(gre_csum(greh)));
 			}
-			*(gre_key(greh)) = tuple->dst.u.gre.key;
+			*(gre_key(greh)) = manip->u.gre.key;
 			break;
 		case GRE_VERSION_PPTP:
 			DEBUGP("call_id -> 0x%04x\n", 
-				ntohl(tuple->dst.u.gre.key));
-			pgreh->call_id = htons(ntohl(tuple->dst.u.gre.key));
+				ntohl(manip->u.gre.key));
+			pgreh->call_id = htons(ntohl(manip->u.gre.key));
 			break;
 		default:
 			DEBUGP("can't nat unknown GRE version\n");

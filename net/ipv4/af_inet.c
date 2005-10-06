@@ -153,6 +153,16 @@ void inet_sock_destruct(struct sock *sk)
 
 	if (inet->opt)
 		kfree(inet->opt);
+
+#warning MEF: figure out whether the following vserver net code is required by PlanetLab
+#if 0
+	vx_sock_dec(sk);
+	clr_vx_info(&sk->sk_vx_info);
+	sk->sk_xid = -1;
+	clr_nx_info(&sk->sk_nx_info);
+	sk->sk_nid = -1;
+#endif
+
 	dst_release(sk->sk_dst_cache);
 #ifdef INET_REFCNT_DEBUG
 	atomic_dec(&inet_sock_nr);
@@ -315,6 +325,15 @@ override:
 	sk->sk_protocol	   = protocol;
 	sk->sk_backlog_rcv = sk->sk_prot->backlog_rcv;
 
+#warning MEF: figure out whether the following vserver net code is required by PlanetLab
+#if 0
+	set_vx_info(&sk->sk_vx_info, current->vx_info);
+	sk->sk_xid = vx_current_xid();
+	vx_sock_inc(sk);
+	set_nx_info(&sk->sk_nx_info, current->nx_info);
+	sk->sk_nid = nx_current_nid();
+#endif
+
 	inet->uc_ttl	= -1;
 	inet->mc_loop	= 1;
 	inet->mc_ttl	= 1;
@@ -376,6 +395,15 @@ int inet_release(struct socket *sock)
 		    !(current->flags & PF_EXITING))
 			timeout = sk->sk_lingertime;
 		sock->sk = NULL;
+
+#warning MEF: figure out whether the following vserver net code is required by PlanetLab
+#if 0
+		vx_sock_dec(sk);
+		clr_vx_info(&sk->sk_vx_info);
+		//sk->sk_xid = -1;
+		clr_nx_info(&sk->sk_nx_info);
+		//sk->sk_nid = -1;
+#endif
 		sk->sk_prot->close(sk, timeout);
 	}
 	return 0;

@@ -170,8 +170,7 @@ flags_err:
 		if (!test_opt(inode->i_sb, RESERVATION) ||!S_ISREG(inode->i_mode))
 			return -ENOTTY;
 
-		if (IS_RDONLY(inode) ||
-			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
+		if (IS_RDONLY(inode))
 			return -EROFS;
 
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
@@ -206,8 +205,7 @@ flags_err:
 		if (!capable(CAP_SYS_RESOURCE))
 			return -EPERM;
 
-		if (IS_RDONLY(inode) ||
-			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
+		if (IS_RDONLY(inode))
 			return -EROFS;
 
 		if (get_user(n_blocks_count, (__u32 __user *)arg))
@@ -228,8 +226,7 @@ flags_err:
 		if (!capable(CAP_SYS_RESOURCE))
 			return -EPERM;
 
-		if (IS_RDONLY(inode) ||
-			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
+		if (IS_RDONLY(inode))
 			return -EROFS;
 
 		if (copy_from_user(&input, (struct ext3_new_group_input __user *)arg,
@@ -254,8 +251,7 @@ flags_err:
 		/* fixme: if stealth, return -ENOTTY */
 		if (!capable(CAP_CONTEXT))
 			return -EPERM;
-		if (IS_RDONLY(inode) ||
-			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
+		if (IS_RDONLY(inode))
 			return -EROFS;
 		if (!(inode->i_sb->s_flags & MS_TAGXID))
 			return -ENOSYS;

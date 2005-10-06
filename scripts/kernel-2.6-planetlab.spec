@@ -3,11 +3,12 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # What parts do we want to build?  We must build at least one kernel.
 # These are the kernels that are built IF the architecture allows it.
 
-%define buildup 1
-%define buildsmp 1
-%define builduml 1
-%define buildxen 1
-%define builddoc 1
+%define buildup 0
+%define buildsmp 0
+%define buildxenU 1
+%define builduml 0
+%define buildsource 0
+%define builddoc 0
 
 
 # Versions of various parts
@@ -60,13 +61,6 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define nptl_conflicts SysVinit < 2.84-13, pam < 0.75-48, vixie-cron < 3.0.1-73, privoxy < 3.0.0-8, spamassassin < 2.44-4.8.x,  cups < 1.1.17-13
 
 #
-# The ld.so.conf.d file we install uses syntax older ldconfig's don't grok.
-#
-
-# MEF commented out
-# %define xen_conflicts glibc < 2.3.5-1
-
-#
 # Packages that need to be installed before the kernel is, because the %post
 # scripts use them.
 #
@@ -85,7 +79,6 @@ Release: %{release}
 ExclusiveOS: Linux
 Provides: kernel = %{version}
 Provides: kernel-drm = 4.3.0
-Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}
 Prereq: %{kernel_prereq}
 Conflicts: %{kernel_dot_org_conflicts}
 Conflicts: %{package_conflicts}
@@ -99,8 +92,8 @@ AutoReqProv: no
 # List the packages used during the kernel build
 #
 BuildPreReq: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
-BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg, diffutils
-#BuildRequires: gcc >= 3.4.2, binutils >= 2.12, redhat-rpm-config
+BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg
+#BuildPreReq: kernel-utils >= 1:2.4-12.1.142
 BuildRequires: gcc >= 2.96-98, binutils >= 2.12, redhat-rpm-config
 BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 BuildArchitectures: i686
@@ -117,21 +110,35 @@ Linux operating system.  The kernel handles the basic functions
 of the operating system:  memory allocation, process allocation, device
 input and output, etc.
 
-%package devel
-Summary: Development package for building kernel modules to match the kernel.
-Group: System Environment/Kernel
-AutoReqProv: no
-Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}
-Prereq: /usr/sbin/hardlink, /usr/bin/find
 
-%description devel
-This package provides kernel headers and makefiles sufficient to build modules
-against the kernel package.
+%package sourcecode
+Summary: The source code for the Linux kernel.
+Group: Development/System
+Prereq: fileutils
+Requires: make >= 3.78
+Requires: gcc >= 3.2
+Requires: /usr/bin/strip
+# for xconfig and gconfig
+Requires: qt-devel, gtk2-devel readline-devel ncurses-devel
+Provides: kernel-source
+Obsoletes: kernel-source <= 2.6.6
 
+%description sourcecode
+The kernel-sourcecode package contains the source code files for the Linux
+kernel. The source files can be used to build a custom kernel that is
+smaller by virtue of only including drivers for your particular hardware, if
+you are so inclined (and you know what you're doing). The customisation
+guide in the documentation describes in detail how to do this. This package
+is neither needed nor usable for building external kernel modules for
+linking such modules into the default operating system kernels.
 
 %package doc
 Summary: Various documentation bits found in the kernel source.
 Group: Documentation
+%if !%{buildsource}
+Obsoletes: kernel-source <= 2.6.6
+Obsoletes: kernel-sourcecode <= 2.6.6
+%endif
 
 %description doc
 This package contains documentation files from the kernel
@@ -148,7 +155,6 @@ Summary: The Linux kernel compiled for SMP machines.
 Group: System Environment/Kernel
 Provides: kernel = %{version}
 Provides: kernel-drm = 4.3.0
-Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}smp
 Prereq: %{kernel_prereq}
 Conflicts: %{kernel_dot_org_conflicts}
 Conflicts: %{package_conflicts}
@@ -168,56 +174,28 @@ hyperthreading technology.
 
 Install the kernel-smp package if your machine uses two or more CPUs.
 
-%package smp-devel
-Summary: Development package for building kernel modules to match the SMP kernel.
-Group: System Environment/Kernel
-Provides: kernel-smp-devel-%{_target_cpu} = %{rpmversion}-%{release}
-Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}smp
-Provides: kernel-devel = %{rpmversion}-%{release}smp
-AutoReqProv: no
-Prereq: /usr/sbin/hardlink, /usr/bin/find
-
-%description smp-devel
-This package provides kernel headers and makefiles sufficient to build modules
-against the SMP kernel package.
-
 %package xenU
-Summary: The Linux kernel compiled for unprivileged Xen guest VMs
+Summary: The Linux kernel compiled for xenU virtual machines.
 
 Group: System Environment/Kernel
 Provides: kernel = %{version}
-Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}xenU
+Provides: kernel-drm = 4.3.0
 Prereq: %{kernel_prereq}
 Conflicts: %{kernel_dot_org_conflicts}
 Conflicts: %{package_conflicts}
 Conflicts: %{nptl_conflicts}
-
-# MEF commented out 
-# Conflicts: %{xen_conflicts}
-
+Obsoletes: kernel-enterprise < 2.4.10
 # We can't let RPM do the dependencies automatic because it'll then pick up
 # a correct but undesirable perl dependency from the module headers which
 # isn't required for the kernel proper to function
 AutoReqProv: no
 
 %description xenU
-This package includes a version of the Linux kernel which
-runs in Xen unprivileged guest VMs.  This should be installed
-both inside the unprivileged guest (for the modules) and in
-the guest0 domain.
+This package includes a xenU version of the Linux kernel. It is used
+to run the Linux kernel in an unprivileged Xen domain.
 
-%package xenU-devel
-Summary: Development package for building kernel modules to match the kernel.
-Group: System Environment/Kernel
-AutoReqProv: no
-Provides: kernel-xenU-devel-%{_target_cpu} = %{rpmversion}-%{release}
-Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}xenU
-Provides: kernel-devel = %{rpmversion}-%{release}xenU
-Prereq: /usr/sbin/hardlink, /usr/bin/find
+Install the kernel-xenU package if your machine supports the Xen VMM.
 
-%description xenU-devel
-This package provides kernel headers and makefiles sufficient to build modules
-against the kernel package.
 
 %package uml
 Summary: The Linux kernel compiled for use in user mode (User Mode Linux).
@@ -227,34 +205,12 @@ Group: System Environment/Kernel
 %description uml
 This package includes a user mode version of the Linux kernel.
 
-%package uml-devel
-Summary: Development package for building kernel modules to match the UML kernel.
-Group: System Environment/Kernel
-Provides: kernel-uml-devel-%{_target_cpu} = %{rpmversion}-%{release}
-Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}smp
-Provides: kernel-devel = %{rpmversion}-%{release}smp
-AutoReqProv: no
-Prereq: /usr/sbin/hardlink, /usr/bin/find
-
-%description uml-devel
-This package provides kernel headers and makefiles sufficient to build modules
-against the User Mode Linux kernel package.
-
-%package uml-modules
-Summary: The Linux kernel modules compiled for use in user mode (User Mode Linux).
-
-Group: System Environment/Kernel
-
-%description uml-modules
-This package includes a user mode version of the Linux kernel modules.
-
 %package vserver
 Summary: A placeholder RPM that provides kernel and kernel-drm
 
 Group: System Environment/Kernel
 Provides: kernel = %{version}
 Provides: kernel-drm = 4.3.0
-Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}
 
 %description vserver
 VServers do not require and cannot use kernels, but some RPMs have
@@ -262,18 +218,9 @@ implicit or explicit dependencies on the "kernel" package
 (e.g. tcpdump). This package installs no files but provides the
 necessary dependencies to make rpm and yum happy.
 
-
-
 %prep
-if [ ! -d kernel-%{kversion}/vanilla ]; then
-%setup -q -n %{name}-%{version} -c
-rm -f pax_global_header
-mv linux-%{kversion} vanilla
-else
- cd kernel-%{kversion}
-fi
 
-cd vanilla
+%setup -n linux-%{kversion}
 
 # make sure the kernel has the sublevel we know it has. This looks weird
 # but for -pre and -rc versions we need it since we only want to use
@@ -291,31 +238,12 @@ find . -name "*~" -exec rm -fv {} \;
 %build
 
 BuildKernel() {
-    # create a clean copy in BUILD/ (for backward compatibility with
-    # other RPMs that bootstrap off of the kernel build)
-    cd $RPM_BUILD_DIR
-    rm -rf linux-%{kversion}$1
-    cp -rl kernel-%{kversion}/vanilla linux-%{kversion}$1
-    cd linux-%{kversion}$1
 
     # Pick the right config file for the kernel we're building
-    Arch=i386
-    Target=%{make_target}
     if [ -n "$1" ] ; then
 	Config=kernel-%{kversion}-%{_target_cpu}-$1-planetlab.config
-	DevelDir=/usr/src/kernels/%{KVERREL}-$1-%{_target_cpu}
-	DevelLink=/usr/src/kernels/%{KVERREL}$1-%{_target_cpu}
-    	# override ARCH in the case of UML or Xen
-    	if [ "$1" = "uml" ] ; then
-	    Arch=um
-	    Target=linux
-	elif [ "$1" = "xenU" ] ; then
-	    Arch=xen
-    	fi
     else
 	Config=kernel-%{kversion}-%{_target_cpu}-planetlab.config
-	DevelDir=/usr/src/kernels/%{KVERREL}-%{_target_cpu}
-	DevelLink=
     fi
 
     KernelVer=%{version}-%{release}$1
@@ -324,39 +252,51 @@ BuildKernel() {
     # make sure EXTRAVERSION says what we want it to say
     perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = -%{release}$1/" Makefile
 
+    # override ARCH in the case of UML
+    if [ "$1" = "uml" ] ; then
+        export ARCH=um
+    fi
+
+    # override ARCH in the case of UML
+    if [ "$1" = "xenU" ] ; then
+        export ARCH=xen
+    fi
+
     # and now to start the build process
 
-    make -s ARCH=$Arch mrproper
+    make -s mrproper
     cp configs/$Config .config
 
-    echo USING ARCH=$Arch
+    make -s nonint_oldconfig > /dev/null
+    make -s include/linux/version.h 
 
-    make -s ARCH=$Arch nonint_oldconfig > /dev/null
-    make -s ARCH=$Arch include/linux/version.h 
-
-    make -s ARCH=$Arch %{?_smp_mflags} $Target
-    make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
-    make ARCH=$Arch buildcheck
+    make -s %{?_smp_mflags} %{make_target}
+    make -s %{?_smp_mflags} modules || exit 1
+    make buildcheck
     
     # Start installing the results
 
-%if "%{_enable_debug_packages}" == "1"
     mkdir -p $RPM_BUILD_ROOT/usr/lib/debug/boot
-%endif
     mkdir -p $RPM_BUILD_ROOT/%{image_install_path}
+    install -m 644 System.map $RPM_BUILD_ROOT/usr/lib/debug/boot/System.map-$KernelVer
+    objdump -t vmlinux | grep ksymtab | cut -f2 | cut -d" " -f2 | cut -c11- | sort -u  > exported
+    echo "_stext" >> exported
+    echo "_end" >> exported
+    touch $RPM_BUILD_ROOT/boot/System.map-$KernelVer
+    for i in `cat exported` 
+    do 
+	 grep " $i\$" System.map >> $RPM_BUILD_ROOT/boot/System.map-$KernelVer || :
+	 grep "tab_$i\$" System.map >> $RPM_BUILD_ROOT/boot/System.map-$KernelVer || :
+	 grep "__crc_$i\$" System.map >> $RPM_BUILD_ROOT/boot/System.map-$KernelVer ||:
+    done
+    rm -f exported
+#    install -m 644 init/kerntypes.o $RPM_BUILD_ROOT/boot/Kerntypes-$KernelVer
     install -m 644 .config $RPM_BUILD_ROOT/boot/config-$KernelVer
-    install -m 644 System.map $RPM_BUILD_ROOT/boot/System.map-$KernelVer
-    if [ -f arch/$Arch/boot/bzImage ]; then
-	cp arch/$Arch/boot/bzImage $RPM_BUILD_ROOT/%{image_install_path}/vmlinuz-$KernelVer
-    fi
-    if [ -f arch/$Arch/boot/zImage.stub ]; then
-	cp arch/$Arch/boot/zImage.stub $RPM_BUILD_ROOT/%{image_install_path}/zImage.stub-$KernelVer
-    fi
-    if [ "$1" = "uml" ] ; then
-	install -D -m 755 linux $RPM_BUILD_ROOT/%{_bindir}/linux
-    fi
+    rm -f System.map
+    cp arch/*/boot/bzImage $RPM_BUILD_ROOT/%{image_install_path}/vmlinuz-$KernelVer
+
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer
-    make -s ARCH=$Arch INSTALL_MOD_PATH=$RPM_BUILD_ROOT modules_install KERNELRELEASE=$KernelVer
+    make -s INSTALL_MOD_PATH=$RPM_BUILD_ROOT modules_install KERNELRELEASE=$KernelVer
  
     # And save the headers/makefiles etc for building modules against
     #
@@ -370,11 +310,8 @@ BuildKernel() {
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     (cd $RPM_BUILD_ROOT/lib/modules/$KernelVer ; ln -s build source)
     # first copy everything
-    cp --parents `find  -type f -name "Makefile*" -o -name "Kconfig*"` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build 
+    cp --parents `find  -type f -name Makefile -o -name "Kconfig*"` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build 
     cp Module.symvers $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
-    if [ "$1" = "uml" ] ; then
-      cp --parents -a `find arch/um -name include` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
-    fi
     # then drop all but the needed Makefiles/Kconfig files
     rm -rf $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/Documentation
     rm -rf $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/scripts
@@ -382,25 +319,13 @@ BuildKernel() {
     cp arch/%{_arch}/kernel/asm-offsets.s $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/arch/%{_arch}/kernel || :
     cp .config $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     cp -a scripts $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
-    if [ -d arch/%{_arch}/scripts ]; then
-      cp -a arch/%{_arch}/scripts $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/arch/%{_arch} || :
-    fi
-    if [ -f arch/%{_arch}/*lds ]; then
-      cp -a arch/%{_arch}/*lds $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/arch/%{_arch}/ || :
-    fi
+    cp -a arch/%{_arch}/scripts $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/arch/%{_arch} || :
+    cp -a arch/%{_arch}/*lds $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/arch/%{_arch}/ || :
     rm -f $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/scripts/*.o
     rm -f $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/scripts/*/*.o
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     cd include
     cp -a acpi config linux math-emu media net pcmcia rxrpc scsi sound video asm asm-generic $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
-%if %{buildxen}
-    cp -a asm-xen $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
-%endif
-    if [ "$1" = "uml" ] ; then
-      cd asm	
-      cp -a `readlink arch` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
-      cd ..
-    fi
     cp -a `readlink asm` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     # Make sure the Makefile and version.h have a matching timestamp so that
     # external modules can be built
@@ -411,22 +336,19 @@ BuildKernel() {
     #
     # save the vmlinux file for kernel debugging into the kernel-debuginfo rpm
     #
-%if "%{_enable_debug_packages}" == "1"
     mkdir -p $RPM_BUILD_ROOT/usr/lib/debug/lib/modules/$KernelVer
     cp vmlinux $RPM_BUILD_ROOT/usr/lib/debug/lib/modules/$KernelVer
-%endif
 
     # mark modules executable so that strip-to-file can strip them
     find $RPM_BUILD_ROOT/lib/modules/$KernelVer -name "*.ko" -type f  | xargs chmod u+x
 
+    # detect missing or incorrect license tags
+    for i in `find $RPM_BUILD_ROOT/lib/modules/$KernelVer -name "*.ko" ` ; do echo -n "$i " ; /sbin/modinfo -l $i >> modinfo ; done
+    cat modinfo | grep -v "^GPL" | grep -v "^Dual BSD/GPL" | grep -v "^Dual MPL/GPL" | grep -v "^GPL and additional rights" | grep -v "^GPL v2" && exit 1 
+    rm -f modinfo
     # remove files that will be auto generated by depmod at rpm -i time
     rm -f $RPM_BUILD_ROOT/lib/modules/$KernelVer/modules.*
 
-    # Move the devel headers out of the root file system
-    mkdir -p $RPM_BUILD_ROOT/usr/src/kernels
-    mv $RPM_BUILD_ROOT/lib/modules/$KernelVer/build $RPM_BUILD_ROOT/$DevelDir
-    ln -sf ../../..$DevelDir $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
-    [ -z "$DevelLink" ] || ln -sf `basename $DevelDir` $RPM_BUILD_ROOT/$DevelLink
 }
 
 ###
@@ -449,7 +371,7 @@ BuildKernel smp
 BuildKernel uml
 %endif
 
-%if %{buildxen}
+%if %{buildxenU}
 BuildKernel xenU
 %endif
 
@@ -460,21 +382,8 @@ BuildKernel xenU
 
 %install
 
-cd vanilla
-
-%if %{buildxen}
-mkdir -p $RPM_BUILD_ROOT/etc/ld.so.conf.d
-rm -f $RPM_BUILD_ROOT/etc/ld.so.conf.d/kernelcap-%{KVERREL}.conf
-cat > $RPM_BUILD_ROOT/etc/ld.so.conf.d/kernelcap-%{KVERREL}.conf <<\EOF
-# This directive teaches ldconfig to search in nosegneg subdirectories
-# and cache the DSOs there with extra bit 0 set in their hwcap match
-# fields.  In Xen guest kernels, the vDSO tells the dynamic linker to
-# search in nosegneg subdirectories and to match this extra hwcap bit
-# in the ld.so.cache file.
-hwcap 0 nosegneg
-EOF
-chmod 444 $RPM_BUILD_ROOT/etc/ld.so.conf.d/kernelcap-%{KVERREL}.conf
-%endif
+# architectures that don't get kernel-source (i586/i686/athlon) dont need
+# much of an install because the build phase already copied the needed files
 
 %if %{builddoc}
 mkdir -p $RPM_BUILD_ROOT/usr/share/doc/kernel-doc-%{kversion}/Documentation
@@ -483,6 +392,34 @@ mkdir -p $RPM_BUILD_ROOT/usr/share/doc/kernel-doc-%{kversion}/Documentation
 chmod -R a+r *
 # copy the source over
 tar cf - Documentation | tar xf - -C $RPM_BUILD_ROOT/usr/share/doc/kernel-doc-%{kversion}
+%endif
+
+%if %{buildsource}
+
+mkdir -p $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}
+chmod -R a+r *
+
+# clean up the source tree so that it is ready for users to build their own
+# kernel
+make -s mrproper
+# copy the source over
+tar cf - . | tar xf - -C $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}
+
+# set the EXTRAVERSION to <version>custom, so that people who follow a kernel building howto
+# don't accidentally overwrite their currently working moduleset and hose
+# their system
+perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = -%{release}custom/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/Makefile
+
+# some config options may be appropriate for an rpm kernel build but are less so for custom user builds,
+# change those to values that are more appropriate as default for people who build their own kernel.
+perl -p -i -e "s/^CONFIG_DEBUG_INFO.*/# CONFIG_DEBUG_INFO is not set/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/configs/*
+perl -p -i -e "s/^.*CONFIG_DEBUG_PAGEALLOC.*/# CONFIG_DEBUG_PAGEALLOC is not set/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/configs/*
+perl -p -i -e "s/^.*CONFIG_DEBUG_SLAB.*/# CONFIG_DEBUG_SLAB is not set/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/configs/*
+perl -p -i -e "s/^.*CONFIG_DEBUG_SPINLOCK.*/# CONFIG_DEBUG_SPINLOCK is not set/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/configs/*
+perl -p -i -e "s/^.*CONFIG_DEBUG_HIGHMEM.*/# CONFIG_DEBUG_HIGHMEM is not set/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/configs/*
+perl -p -i -e "s/^.*CONFIG_MODULE_SIG.*/# CONFIG_MODULE_SIG is not set/" $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}/configs/*
+
+install -m 644 %{SOURCE10}  $RPM_BUILD_ROOT/usr/src/linux-%{KVERREL}
 %endif
 
 ###
@@ -506,6 +443,10 @@ exit 0
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
 exit 0
 
+%pre xenU
+/sbin/modprobe loop 2> /dev/null > /dev/null  || :
+exit 0
+
 %post 
 # trick mkinitrd in case the current environment does not have device mapper
 rootdev=$(awk '/^[ \t]*[^#]/ { if ($2 == "/") { print $1; }}' /etc/fstab)
@@ -516,19 +457,22 @@ if echo $rootdev |grep -q /dev/mapper 2>/dev/null ; then
 	touch $rootdev
     fi
 fi
-
-[ ! -x /usr/sbin/module_upgrade ] || /usr/sbin/module_upgrade
-#[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --package kernel --mkinitrd --depmod --install %{KVERREL}
-# Older modutils do not support --package option
 [ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}
-
-# remove fake handle
 if [ -n "$fake_root_lvm" ]; then
     rm -f $rootdev
+fi
+if [ -x /usr/sbin/hardlink ] ; then
+pushd /lib/modules/%{KVERREL}/build > /dev/null ; {
+	cd /lib/modules/%{KVERREL}/build
+	find . -type f | while read f; do hardlink -c /lib/modules/*/build/$f $f ; done
+}
+popd > /dev/null
 fi
 
 # make some useful links
 pushd /boot > /dev/null ; {
+	ln -sf System.map-%{KVERREL} System.map
+#	ln -sf Kerntypes-%{KVERREL} Kerntypes
 	ln -sf config-%{KVERREL} config
 	ln -sf initrd-%{KVERREL}.img initrd-boot
 	ln -sf vmlinuz-%{KVERREL} kernel-boot
@@ -538,62 +482,24 @@ popd > /dev/null
 # ask for a reboot
 mkdir -p /etc/planetlab
 touch /etc/planetlab/update-reboot
-
-%post devel
-if [ -x /usr/sbin/hardlink ] ; then
-pushd /usr/src/kernels/%{KVERREL}-%{_target_cpu} > /dev/null
-/usr/bin/find . -type f | while read f; do hardlink -c /usr/src/kernels/*FC*/$f $f ; done
-popd > /dev/null
-fi
 
 %post smp
-# trick mkinitrd in case the current environment does not have device mapper
-rootdev=$(awk '/^[ \t]*[^#]/ { if ($2 == "/") { print $1; }}' /etc/fstab)
-if echo $rootdev |grep -q /dev/mapper 2>/dev/null ; then
-    if [ ! -f $rootdev ]; then
-	fake_root_lvm=1
-	mkdir -p $(dirname $rootdev)
-	touch $rootdev
-    fi
-fi
-
-[ ! -x /usr/sbin/module_upgrade ] || /usr/sbin/module_upgrade
-#[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --package kernel-smp --mkinitrd --depmod --install %{KVERREL}smp
-# Older modutils do not support --package option
 [ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}smp
-
-# remove fake handle
-if [ -n "$fake_root_lvm" ]; then
-    rm -f $rootdev
-fi
-
-# make some useful links
-pushd /boot > /dev/null ; {
-	ln -sf config-%{KVERREL} config
-	ln -sf initrd-%{KVERREL}.img initrd-boot
-	ln -sf vmlinuz-%{KVERREL} kernel-boot
-}
-popd > /dev/null
-
-# ask for a reboot
-mkdir -p /etc/planetlab
-touch /etc/planetlab/update-reboot
-
-%post smp-devel
 if [ -x /usr/sbin/hardlink ] ; then
-pushd /usr/src/kernels/%{KVERREL}-smp-%{_target_cpu} > /dev/null
-/usr/bin/find . -type f | while read f; do hardlink -c /usr/src/kernels/*FC*/$f $f ; done
+pushd /lib/modules/%{KVERREL}smp/build > /dev/null ; {
+	cd /lib/modules/%{KVERREL}smp/build
+	find . -type f | while read f; do hardlink -c /lib/modules/*/build/$f $f ; done
+}
 popd > /dev/null
 fi
 
 %post xenU
-[ ! -x /usr/sbin/module_upgrade ] || /usr/sbin/module_upgrade
-[ ! -x /sbin/ldconfig ] || /sbin/ldconfig -X
-
-%post xenU-devel
+[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}xenU
 if [ -x /usr/sbin/hardlink ] ; then
-pushd /usr/src/kernels/%{KVERREL}-xenU-%{_target_cpu} > /dev/null
-/usr/bin/find . -type f | while read f; do hardlink -c /usr/src/kernels/*FC*/$f $f ; done
+pushd /lib/modules/%{KVERREL}xenU/build > /dev/null ; {
+	cd /lib/modules/%{KVERREL}xenU/build
+	find . -type f | while read f; do hardlink -c /lib/modules/*/build/$f $f ; done
+}
 popd > /dev/null
 fi
 
@@ -608,7 +514,7 @@ fi
 
 %preun xenU
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
-[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --rmmoddep --remove %{KVERREL}xenU
+[ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --rminitrd --rmmoddep --remove %{KVERREL}xenU
 
 
 ###
@@ -619,715 +525,180 @@ fi
 %files 
 %defattr(-,root,root)
 /%{image_install_path}/*-%{KVERREL}
+#/boot/Kerntypes-%{KVERREL}
 /boot/System.map-%{KVERREL}
 /boot/config-%{KVERREL}
 %dir /lib/modules/%{KVERREL}
 /lib/modules/%{KVERREL}/kernel
-/lib/modules/%{KVERREL}/build
+%verify(not mtime) /lib/modules/%{KVERREL}/build
 /lib/modules/%{KVERREL}/source
-
-%files devel
-%defattr(-,root,root)
-%verify(not mtime) /usr/src/kernels/%{KVERREL}-%{_target_cpu}
 %endif
 
 %if %{buildsmp}
 %files smp
 %defattr(-,root,root)
 /%{image_install_path}/*-%{KVERREL}smp
+#/boot/Kerntypes-%{KVERREL}smp
 /boot/System.map-%{KVERREL}smp
 /boot/config-%{KVERREL}smp
 %dir /lib/modules/%{KVERREL}smp
 /lib/modules/%{KVERREL}smp/kernel
-/lib/modules/%{KVERREL}smp/build
+%verify(not mtime) /lib/modules/%{KVERREL}smp/build
 /lib/modules/%{KVERREL}smp/source
-
-%files smp-devel
-%defattr(-,root,root)
-%verify(not mtime) /usr/src/kernels/%{KVERREL}-smp-%{_target_cpu}
-/usr/src/kernels/%{KVERREL}smp-%{_target_cpu}
 %endif
 
-%if %{builduml}
-%files uml
-%defattr(-,root,root)
-%{_bindir}/linux
-
-%files uml-devel
-%defattr(-,root,root)
-%verify(not mtime) /usr/src/kernels/%{KVERREL}-uml-%{_target_cpu}
-/usr/src/kernels/%{KVERREL}uml-%{_target_cpu}
-
-%files uml-modules
-%defattr(-,root,root)
-/boot/System.map-%{KVERREL}uml
-/boot/config-%{KVERREL}uml
-%dir /lib/modules/%{KVERREL}uml
-/lib/modules/%{KVERREL}uml/kernel
-%verify(not mtime) /lib/modules/%{KVERREL}uml/build
-/lib/modules/%{KVERREL}uml/source
-%endif
-
-%if %{buildxen}
+%if %{buildxenU}
 %files xenU
 %defattr(-,root,root)
 /%{image_install_path}/*-%{KVERREL}xenU
+#/boot/Kerntypes-%{KVERREL}xenU
 /boot/System.map-%{KVERREL}xenU
 /boot/config-%{KVERREL}xenU
 %dir /lib/modules/%{KVERREL}xenU
 /lib/modules/%{KVERREL}xenU/kernel
 %verify(not mtime) /lib/modules/%{KVERREL}xenU/build
 /lib/modules/%{KVERREL}xenU/source
-/etc/ld.so.conf.d/kernelcap-%{KVERREL}.conf
-
-%files xenU-devel
-%defattr(-,root,root)
-%verify(not mtime) /usr/src/kernels/%{KVERREL}-xenU-%{_target_cpu}
-/usr/src/kernels/%{KVERREL}xenU-%{_target_cpu}
 %endif
+
+%if %{builduml}
+%files uml
+%defattr(-,root,root)
+%endif
+
+# only some architecture builds need kernel-source and kernel-doc
+
+%if %{buildsource}
+%files sourcecode
+%defattr(-,root,root)
+/usr/src/linux-%{KVERREL}/
+%endif
+
+
+%if %{builddoc}
+%files doc
+%defattr(-,root,root)
+/usr/share/doc/kernel-doc-%{kversion}/Documentation/*
+%endif
+
 
 %files vserver
 %defattr(-,root,root)
 # no files
 
-
-# only some architecture builds need kernel-doc
-
-%if %{builddoc}
-%files doc
-%defattr(-,root,root)
-%{_datadir}/doc/kernel-doc-%{kversion}/Documentation/*
-%dir %{_datadir}/doc/kernel-doc-%{kversion}/Documentation
-%dir %{_datadir}/doc/kernel-doc-%{kversion}
-%endif
-
 %changelog
-* Fri Jul 15 2005 Dave Jones <davej@redhat.com>
-- Include a number of patches likely to show up in 2.6.12.3
-
-* Thu Jul 14 2005 Dave Jones <davej@redhat.com>
-- Add Appletouch support.
-
-* Wed Jul 13 2005 David Woodhouse <dwmw2@redhat.com>
-- Audit updates. In particular, don't printk audit messages that 
-  are passed from userspace when auditing is disabled.
-
-* Tue Jul 12 2005 Dave Jones <davej@redhat.com>
-- Fix up several reports of CD's causing crashes.
-- Make -p port arg of rpc.nfsd work.
-- Work around a usbmon deficiency.
-- Fix connection tracking bug with bridging. (#162438)
-
-* Mon Jul 11 2005 Dave Jones <davej@redhat.com>
-- Fix up locking in piix IDE driver whilst tuning chipset.
-
-* Tue Jul  5 2005 Dave Jones <davej@redhat.com>
-- Fixup ACPI IRQ routing bug that prevented booting for some folks.
-- Reenable ISA I2C drivers for x86-64.
-- Bump requirement on mkinitrd to something newer (#160492)
-
-* Wed Jun 29 2005 Dave Jones <davej@redhat.com>
-- 2.6.12.2
-
-* Mon Jun 27 2005 Dave Jones <davej@redhat.com>
-- Disable multipath caches. (#161168)
-- Reenable AMD756 I2C driver for x86-64. (#159609)
-- Add more IBM r40e BIOS's to the C2/C3 blacklist.
-
-* Thu Jun 23 2005 Dave Jones <davej@redhat.com>
-- Make orinoco driver suck less.
-  (Scanning/roaming/ethtool support).
-- Exec-shield randomisation fix.
-- pwc driver warning fix.
-- Prevent potential oops in tux with symlinks. (#160219)
-
-* Wed Jun 22 2005 Dave Jones <davej@redhat.com>
-- 2.6.12.1
-  - Clean up subthread exec (CAN-2005-1913)
-  - ia64 ptrace + sigrestore_context (CAN-2005-1761)
-
-* Wed Jun 22 2005 David Woodhouse <dwmw2@redhat.com>
-- Update audit support
-
-* Mon Jun 20 2005 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.12
-  - Temporarily drop Alans IDE fixes whilst they get redone.
-- Enable userspace queueing of ipv6 packets.
-
-* Tue Jun  7 2005 Dave Jones <davej@redhat.com>
-- Drop recent b44 changes which broke some setups.
-
-* Wed Jun  1 2005 Dave Jones <davej@redhat.com>
-- Fix up ALI IDE regression. (#157175)
-
-* Mon May 30 2005 Dave Jones <davej@redhat.com>
-- Fix up VIA IRQ quirk.
-
-* Sun May 29 2005 Dave Jones <davej@redhat.com>
-- Fix slab corruption in firewire (#158424)
-
-* Fri May 27 2005 Dave Jones <davej@redhat.com>
-- remove non-cleanroom pwc driver compression.
-- Fix unintialised value in single bit error detector. (#158825)
-
-* Wed May 25 2005 Dave Jones <davej@redhat.com>
-- Disable TPM driver, it breaks 8139 driver.
-- Revert to previous version of ipw2x00 drivers.
-  The newer ones sadly brought too many problems this close to
-  the release. I'll look at updating them again for an update.
-- Update to 2.6.12rc5
-  Fix potential local DoS. 1-2 other small fixes.
-- Tweak to fix up some vdso arithmetic.
-- Disable sysenter again for now.
-
-* Wed May 25 2005 David Woodhouse <dwmw2@redhat.com>
-- Turn off CONFIG_ISA on PPC again. It makes some Macs unhappy (#149200)
-- Make Speedtouch DSL modem resync automatically
-
-* Tue May 24 2005 Dave Jones <davej@redhat.com>
-- Update various cpufreq drivers.
-- 2.6.12-rc4-git8
-  kobject ordering, tg3 fixes, ppc32 ipic fix,
-  ppc64 powermac smp fix. token-ring fixes,
-  TCP fix. ipv6 fix.
-- Disable slab debugging.
-
-* Mon May 23 2005 Dave Jones <davej@redhat.com>
-- Add extra id to SATA Sil driver. (#155748)
-- Fix oops on rmmod of lanai & ms558 drivers when no hardware present.
-
-* Mon May 23 2005 Dave Jones <davej@redhat.com>
-- Fix double unlock of spinlock on tulip. (#158522)
-
-* Mon May 23 2005 David Woodhouse <dwmw2@redhat.com>
-- audit updates: log serial # in user messages, escape comm= in syscalls
-
-* Mon May 23 2005 Dave Jones <davej@redhat.com>
-- 2.6.12-rc4-git6
-  MMC update, reiserfs fixes, AIO fix.
-- Fix absolute symlink in -devel (#158582)
-- 2.6.12-rc4-git7
-  PPC64 & i2c fixes
-- Fix another divide by zero in ipw2100 (#158406)
-- Fix dir ownership in kernel-doc rpm (#158478)
-
-* Sun May 22 2005 Dave Jones <davej@redhat.com>
-- Fix divide by zero in ipw2100 driver. (#158406)
-- 2.6.12-rc4-git5
-  More x86-64 updates, Further pktcdvd frobbing,
-  yet more dvb updates, x86(64) ioremap fixes,
-  ppc updates, IPMI sysfs support (reverted for now due to breakage),
-  various SCSI fixes (aix7xxx, spi transport), vmalloc improvements
-
-* Sat May 21 2005 David Woodhouse <dwmw2@redhat.com>
-- Fix oops in avc_audit() (#158377)
-- Include serial numbers in non-syscall audit messages
-
-* Sat May 21 2005 Bill Nottingham <notting@redhat.com>
-- bump ipw2200 conflict
-
-* Sat May 21 2005 Dave Jones <davej@redhat.com> [2.6.11-1.1334_FC4]
-- driver core: restore event order for device_add()
-
-* Sat May 21 2005 David Woodhouse <dwmw2@redhat.com>
-- More audit updates. Including a fix for AVC_USER messages.
-
-* Fri May 20 2005 Dave Jones <davej@redhat.com>
-- 2.6.12-rc4-git4
-  networking fixes (netlink, pkt_sched, ipsec, netfilter,
-  ip_vs, af_unix, ipv4/6, xfrm). TG3 driver improvements.
-
-* Thu May 19 2005 Dave Jones <davej@redhat.com> [2.6.11-1.1327_FC4]
-- 2.6.12-rc4-git3
-  Further fixing to raw driver. More DVB updates,
-  driver model updates, power management improvements,
-  ext3 fixes.  
-- Radeon on thinkpad backlight power-management goodness.
-  (Peter Jones owes me two tacos).
-- Fix ieee1394 smp init.
-
-* Thu May 19 2005 Rik van Riel <riel@redhat.com>
-- Xen: disable TLS warning (#156414)
-
-* Thu May 19 2005 David Woodhouse <dwmw2@redhat.com>
-- Update audit patches
-
-* Thu May 19 2005 Dave Jones <davej@redhat.com> [2.6.11-1.1325_FC4]
-- Fix up missing symbols in ipw2200 driver.
-- Reenable debugfs / usbmon. SELinux seems to cope ok now.
-  (Needs selinux-targeted-policy >= 1.23.16-1)
-
-* Wed May 18 2005 Dave Jones <davej@redhat.com>
-- Fix up some warnings in the IDE patches.
-- 2.6.12-rc4-git2
-  Further pktcdvd fixing, DVB update, Lots of x86-64 updates,
-  ptrace fixes, ieee1394 changes, input layer tweaks,
-  md layer fixes, PCI hotplug improvements, PCMCIA fixes,
-  libata fixes, serial layer, usb core, usbnet, VM fixes,
-  SELinux tweaks.
-- Update ipw2100 driver to 1.1.0
-- Update ipw2200 driver to 1.0.4 (#158073)
-
-* Tue May 17 2005 Dave Jones <davej@redhat.com>
-- 2.6.12-rc4-git1
-  ARM, ioctl security fixes, mmc driver update,
-  ibm_emac & tulip netdriver fixes, serial updates
-  ELF loader security fix.
-
-* Mon May 16 2005 Rik van Riel <riel@redhat.com>
-- enable Xen again (not tested yet)
-- fix a typo in the EXPORT_SYMBOL patch
-
-* Sat May 14 2005 Dave Jones <davej@redhat.com>
-- Update E1000 driver from netdev-2.6 tree. 
-- Add some missing EXPORT_SYMBOLs.
-
-* Fri May 13 2005 Dave Jones <davej@redhat.com>
-- Bump maximum supported CPUs on x86-64 to 32.
-- Tickle the NMI watchdog when we're doing serial writes.
-- SCSI CAM geometry fix.
-- Slab debug single-bit error improvement.
-
-* Thu May 12 2005 David Woodhouse <dwmw2@redhat.com>
-- Enable CONFIG_ISA on ppc32 to make the RS/6000 user happy.
-- Update audit patches
-
-* Wed May 11 2005 Dave Jones <davej@redhat.com>
-- Add Ingo's patch to detect soft lockups.
-- Thread exits silently via __RESTORE_ALL exception for iret. (#154369)
-
-* Wed May 11 2005 David Woodhouse <dwmw2@redhat.com>
-- Import post-rc4 audit fixes from git, including ppc syscall auditing
-
-* Wed May 11 2005 Dave Jones <davej@redhat.com>
-- Revert NMI watchdog changes.
-
-* Tue May 10 2005 Dave Jones <davej@redhat.com>
-- Enable PNP on x86-64
-
-* Tue May 10 2005 Jeremy Katz <katzj@redhat.com>
-- make other -devel packages provide kernel-devel so they get 
-  installed instead of upgraded (#155988)
-
-* Mon May  9 2005 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.12-rc4
-  | Xen builds are temporarily disabled again.
-- Conflict if old version of ipw firmware is present.
-
-* Fri May  6 2005 Dave Jones <davej@redhat.com>
-- Add PCI ID for new sundance driver. (#156859)
-
-* Thu May  5 2005 David Woodhouse <dwmw2@redhat.com>
-- Import audit fixes from upstream
-
-* Wed May  4 2005 Jeremy Katz <katzj@redhat.com>
-- enable radeonfb and agp on ppc64 to fix X on the G5
-
-* Tue May  3 2005 Dave Jones <davej@redhat.com>
-- Disable usbmon/debugfs again for now until SELinux policy is fixed.
-
-* Mon May  2 2005 David Woodhouse <dwmw2@redhat.com>
-- Make kallsyms include platform-specific symbols
-- Fix might_sleep warning in pbook clock-spreading fix
-
-* Sun May  1 2005 Dave Jones <davej@redhat.com>
-- Fix yesterdays IDE fixes.
-- Blacklist another brainless SCSI scanner. (#155457)
-
-* Sun May  1 2005 David Woodhouse <dwmw2@redhat.com>
-- Fix EHCI port power switching
-
-* Sun May  1 2005 Dave Jones <davej@redhat.com>
-- Enable usbmon & debugfs. (#156489)
-
-* Sat Apr 30 2005 Dave Jones <davej@redhat.com>
-- Numerous IDE layer fixes from Alan Cox.
-- Kill off some stupid messages from the input layer.
-
-* Fri Apr 29 2005 Roland McGrath <roland@redhat.com>
-- Fix the 32bit emulation on x86-64 segfaults.
-
-* Wed Apr 27 2005 Dave Jones <davej@redhat.com>
-- Hopefully fix the random reboots some folks saw on x86-64.
-
-* Wed Apr 27 2005 Jeremy Katz <katzj@redhat.com>
-- fix prereqs for -devel packages
-
-* Wed Apr 27 2005 Rik van Riel <riel@redhat.com>
-- Fix up the vdso stuff so kernel-xen* compile again
-- Import upstream bugfix so xenU domains can be started again
-
-* Tue Apr 26 2005 Dave Jones <davej@redhat.com>
-- Fix up the vdso again, which broke on the last rebase to -rc3
-- Fix the put_user() fix. (#155999)
-
-* Mon Apr 25 2005 Dave Jones <davej@redhat.com>
-- Fix x86-64 put_user()
-- Fix serio oops.
-- Fix ipv6_skip_exthdr() invocation causing OOPS.
-- Fix up some permissions on some /proc files.
-- Support PATA drives on Promise SATA. (#147303)
-
-* Mon Apr 25 2005 Rik van Riel <riel@redhat.com>
-- upgrade to the latest version of xenolinux patches
-- reenable xen (it boots, ship it!)
-
-* Sat Apr 23 2005 David Woodhouse <dwmw2@redhat.com>
-- Enable adt746x and windtunnel thermal modules
-- Disable clock spreading on certain pbooks before sleep
-- Sound support for Mac Mini
-
-* Fri Apr 22 2005 Dave Jones <davej@redhat.com>
-- Reenable i2c-viapro on x86-64.
-
-* Fri Apr 22 2005 Dave Jones <davej@redhat.com>
-- Don't build powernow-k6 on anything other than 586 kernels.
-- Temporarily disable Xen again.
-
-* Wed Apr 20 2005 Dave Jones <davej@redhat.com>
-- 2.6.12rc3
-
-* Wed Apr 20 2005 Dave Jones <davej@redhat.com>
-- Adjust struct dentry 'padding' based on 64bit'ness.
-
-* Tue Apr 19 2005 Dave Jones <davej@redhat.com>
-- Print stack trace when we panic.
-  Might give more clues for some of the wierd panics being seen right now.
-- Blacklist another 'No C2/C3 states' Thinkpad R40e BIOS. (#155236)
-
-* Mon Apr 18 2005 Dave Jones <davej@redhat.com>
-- Make ISDN ICN driver not oops when probed with no hardware present.
-- Add missing MODULE_LICENSE to mac_modes.ko
-
-* Sat Apr 16 2005 Dave Jones <davej@redhat.com>
-- Make some i2c drivers arch dependant.
-- Make multimedia buttons on Dell inspiron 8200 work. (#126148)
-- Add diffutils buildreq (#155121)
-
-* Thu Apr 14 2005 Dave Jones <davej@redhat.com>
-- Build DRM modular. (#154769)
-
-* Wed Apr 13 2005 Rik van Riel <riel@redhat.com>
-- fix up Xen for 2.6.12-rc2
-- drop arch/xen/i386/signal.c, thanks to Roland's vdso patch (yay!)
-- reenable xen compile - this kernel test boots on my system
-
-* Tue Apr 12 2005 Dave Jones <davej@redhat.com>
-- Further vdso work from Roland.
-
-* Mon Apr 11 2005 David Woodhouse <dwmw2@redhat.com>
-- Disable PPC cpufreq/sleep patches which make sleep less reliable
-- Add TIMEOUT to hotplug environment when requesting firmware (#153993)
-
-* Sun Apr 10 2005 Dave Jones <davej@redhat.com>
-- Integrate Roland McGrath's changes to make exec-shield
-  and vdso play nicely together.
-
-* Fri Apr  8 2005 Dave Jones <davej@redhat.com>
-- Disable Longhaul driver (again).
-
-* Wed Apr  6 2005 Dave Jones <davej@redhat.com>
-- 2.6.12rc2
-  - netdump/netconsole currently broken.
-  - Xen temporarily disabled.
-
-* Fri Apr  1 2005 Dave Jones <davej@redhat.com>
-- Make the CFQ elevator the default again.
-
-* Thu Mar 31 2005 Rik van Riel <riel@redhat.com>
-- upgrade to new upstream Xen code, twice 
-- for performance reasons, disable CONFIG_DEBUG_PAGEALLOC for FC4t2
-
-* Wed Mar 30 2005 Rik van Riel <riel@redhat.com>
-- fix Xen kernel compilation (pci, page table, put_user, execshield, ...)
-- reenable Xen kernel compilation
-
-* Tue Mar 29 2005 Rik van Riel <riel@redhat.com>
-- apply Xen patches again (they don't compile yet, though)
-- Use uname in kernel-devel directories (#145914)
-- add uname-based kernel-devel provisions (#152357)
-- make sure /usr/share/doc/kernel-doc-%%{kversion} is owned by a
-  package, so it will get removed again on uninstall/upgrade (#130667)
-
-* Mon Mar 28 2005 Dave Jones <davej@redhat.com>
-- Don't generate debuginfo files if %%_enable_debug_packages isnt set. (#152268)
-
 * Sun Mar 27 2005 Dave Jones <davej@redhat.com>
-- 2.6.12rc1-bk2
-- Disable NVidia FB driver for time being, it isn't stable.
-
-* Thu Mar 24 2005 Dave Jones <davej@redhat.com>
-- rebuild
+- Catch up with all recent security issues.
+  - CAN-2005-0210 : dst leak
+  - CAN-2005-0384 : ppp dos
+  - CAN-2005-0531 : Sign handling issues.
+  - CAN-2005-0400 : EXT2 information leak.
+  - CAN-2005-0449 : Remote oops.
+  - CAN-2005-0736 : Epoll overflow
+  - CAN-2005-0749 : ELF loader may kfree wrong memory.
+  - CAN-2005-0750 : Missing range checking in bluetooth 
+  - CAN-2005-0767 : drm race in radeon
+  - CAN-2005-0815 : Corrupt isofs images could cause oops.
 
 * Tue Mar 22 2005 Dave Jones <davej@redhat.com>
-- Fix several instances of swapped arguments to memset()
-- 2.6.12rc1-bk1
-
-* Fri Mar 18 2005 Dave Jones <davej@redhat.com>
-- kjournald release race. (#146344)
-- 2.6.12rc1
-
-* Thu Mar 17 2005 Rik van Riel <riel@redhat.com>
-- upgrade to latest upstream Xen code
-
-* Tue Mar 15 2005 Rik van Riel <riel@redhat.com>
-- add Provides: headers for external kernel modules (#149249)
-- move build & source symlinks from kernel-*-devel to kernel-* (#149210)
-- fix xen0 and xenU devel %%post scripts to use /usr/src/kernels (#149210)
-
-* Thu Mar 10 2005 Dave Jones <davej@redhat.com>
-- Reenable advansys driver for x86
-
-* Tue Mar  8 2005 Dave Jones <davej@redhat.com>
-- Change SELinux execute-related permission checking. (#149819)
-
-* Sun Mar  6 2005 Dave Jones <davej@redhat.com>
-- Forward port some FC3 patches that got lost.
-
-* Fri Mar  4 2005 Dave Jones <davej@redhat.com>
-- Fix up ACPI vs keyboard controller problem.
-- Fix up Altivec usage on PPC/PPC64.
-
-* Fri Mar  4 2005 Dave Jones <davej@redhat.com>
-- Finger the programs that try to read from /dev/mem.
-- Improve spinlock debugging a little.
-
-* Thu Mar  3 2005 Dave Jones <davej@redhat.com>
-- Fix up the unresolved symbols problem.
-
-* Thu Mar  3 2005 Rik van Riel <riel@redhat.com>
-- upgrade to new Xen snapshot (requires new xen RPM, too)
-
-* Wed Mar  2 2005 Dave Jones <davej@redhat.com>
-- 2.6.11
-
-* Tue Mar 1 2005 David Woodhouse <dwmw2@redhat.com>
-- Building is nice. Booting would be better. Work around GCC -Os bug which
-  which makes the PPC kernel die when extracting its initramfs. (#150020)
-- Update include/linux/compiler-gcc+.h
-
-* Tue Mar 1 2005 Dave Jones <davej@redhat.com>
-- 802.11b/ipw2100/ipw2200 update.
-- 2.6.11-rc5-bk4
-
-* Tue Mar 1 2005 David Woodhouse <dwmw2@redhat.com>
-- Fix ppc/ppc64/ppc64iseries builds for gcc 4.0
-- Fix Xen build too
-
-* Mon Feb 28 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc5-bk3
-- Various compile fixes for building with gcc-4.0
-
-* Sat Feb 26 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc5-bk1
-
-* Fri Feb 25 2005 Dave Jones <davej@redhat.com>
-- Hopefully fix the zillion unresolved symbols. (#149758)
+- Fix swapped parameters to memset in ieee802.11 code.
 
 * Thu Feb 24 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc5
-
-* Wed Feb 23 2005 Rik van Riel <riel@redhat.com>
-- get rid of unknown symbols in kernel-xen0 (#149495)
+- Use old scheme first when probing USB. (#145273)
 
 * Wed Feb 23 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc4-bk11
+- Try as you may, there's no escape from crap SCSI hardware. (#149402)
 
 * Mon Feb 21 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc4-bk9
-
-* Sat Feb 19 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc4-bk7
-
-* Sat Feb 19 2005 Rik van Riel <riel@redhat.com>
-- upgrade to newer Xen code, needs xen-20050218 to run
-
-* Sat Feb 19 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc4-bk6
-
-* Fri Feb 18 2005 David Woodhouse <dwmw2@redhat.com>
-- Add SMP kernel for PPC32
-
-* Fri Feb 18 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc4-bk5
+- Disable some experimental USB EHCI features.
 
 * Tue Feb 15 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc4-bk3
+- Fix bio leak in md layer.
 
-* Mon Feb 14 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc4-bk2
-
-* Sun Feb 13 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc4-bk1
-
-* Sat Feb 12 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc4
-
-* Fri Feb 11 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc3-bk8
-
-* Thu Feb 10 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc3-bk7
-
-* Wed Feb  9 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc3-bk6
+* Wed Feb  9 2005 Dave Jones <davej@redhat.com> [2.6.10-1.766_FC3, 2.6.10-1.14_FC2]
+- Backport some exec-shield fixes from devel/ branch.
+- Scan all SCSI LUNs by default.
+  Theoretically, some devices may hang when being probed, though
+  there should be few enough of these that we can blacklist them
+  instead of having to whitelist every other device on the planet.
 
 * Tue Feb  8 2005 Dave Jones <davej@redhat.com>
-- Enable old style and new style USB initialisation.
-- More PPC jiggery pokery hackery.
-- 2.6.11-rc3-bk5
+- Use both old-style and new-style for USB initialisation.
 
-* Mon Feb  7 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc3-bk4
-- Various patches to unbork PPC.
-- Display taint bits on VM error.
+* Mon Feb  7 2005 Dave Jones <davej@redhat.com>	[2.6.10-1.762_FC3, 2.6.10-1.13_FC2]
+- Update to 2.6.10-ac12
 
-* Mon Feb  7 2005 Rik van Riel <riel@redhat.com>
-- upgrade to latest upstream Xen bits, upgrade those to 2.6.11-rc3-bk2
+* Tue Feb  1 2005 Dave Jones <davej@redhat.com> [2.6.10-1.760_FC3, 2.6.10-1.12_FC2]
+- Disable longhaul driver, it causes random hangs. (#140873)
+- Fixup NFSv3 oops when mounting with sec=krb5 (#146703)
 
-* Sat Feb  5 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc3-bk2
+* Mon Jan 31 2005 Dave Jones <davej@redhat.com>
+- Rebase to 2.6.10-ac11
 
-* Fri Feb  4 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc3-bk1
+* Sat Jan 29 2005 Dave Jones <davej@redhat.com>
+- Reintegrate Tux. (#144812)
 
-* Wed Feb  2 2005 Dave Jones <davej@redhat.com>
-- Stop the input layer spamming the console. (#146906)
-- 2.6.11-rc3
-
-* Tue Feb  1 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc2-bk10
-- Reenable periodic slab checker.
-
-* Tue Feb  1 2005 Rik van Riel <riel@redhat.com>
-- update to latest xen-unstable source snapshot
-- add agpgart patch from upstream xen tree
-- port Ingo's latest execshield updates to Xen
-
-* Mon Jan 31 2005 Rik van Riel <riel@redhat.com>
-- enable SMP support in xenU kernel, use the xen0 kernel for the
-  unprivileged domains if the SMP xenU breaks on your system
-
-* Thu Jan 27 2005 Dave Jones <davej@redhat.com>
-- Drop VM hack that broke in yesterdays rebase.
-
-* Wed Jan 26 2005 Dave Jones <davej@redhat.com>
-- Drop 586-SMP kernels.  These are a good candidate for
-  fedora-extras when it appears. The number of people
-  actually using this variant is likely to be very very small.
-- 2.6.11-rc2-bk4
-
-* Tue Jan 25 2005 Dave Jones <davej@redhat.com>
-- 2.6.11-rc2-bk3
-
-* Sun Jan 23 2005 Dave Jones <davej@redhat.com>
-- Updated periodic slab debug check from Manfred.
-- Enable PAGE_ALLOC debugging again, it should now be fixed.
-- 2.6.11-rc2-bk1
-
-* Fri Jan 21 2005 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.11-rc2
-
-* Fri Jan 21 2005 Rik van Riel <riel@redhat.com>
-- make exec-shield segment limits work inside the xen kernels
-
-* Thu Jan 20 2005 Dave Jones <davej@redhat.com>
-- Rebase to -bk8
-
-* Wed Jan 19 2005 Dave Jones <davej@redhat.com>
-- Re-add diskdump/netdump based on Jeff Moyers patches.
-- Rebase to -bk7
-
-* Tue Jan 18 2005 Jeremy Katz <katzj@redhat.com>
-- fixup xen0 %%post to use new grubby features for multiboot kernels
-- conflict with older mkinitrd for kernel-xen0
+* Thu Jan 20 2005 Dave Jones <davej@redhat.com>	[2.6.10-1.753_FC3, 2.6.10-1.11_FC2]
+- Fix x87 fnsave Tag Word emulation when using FXSR (SSE)
+- Add multi-card reader of the day to the whitelist. (#145587)
 
 * Tue Jan 18 2005 Dave Jones <davej@redhat.com>
-- -bk6
+- Reintegrate netdump/netconsole. (#144068)
 
 * Mon Jan 17 2005 Dave Jones <davej@redhat.com>
-- First stab at kernel-devel packages. (David Woodhouse).
-
-* Mon Jan 17 2005 Rik van Riel <riel@redhat.com>
-- apply dmi fix, now xenU boots again
+- Update to 2.6.10-ac10
+- Revert module loader patch that caused lots of invalid parameter problems.
+- Print more debug info when spinlock code triggers a panic.
+- Print tainted information on various mm debug info.
 
 * Fri Jan 14 2005 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.11-bk2
+- Enable advansys scsi module on x86. (#141004)
 
 * Thu Jan 13 2005 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.11-bk1
+- Reenable CONFIG_PARIDE (#127333)
 
-* Wed Jan 12 2005 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.11rc1
-
-* Tue Jan 11 2005 Rik van Riel <riel@redhat.com>
-- fix Xen compile with -bk14
-
-* Tue Jan 11 2005 Dave Jones <davej@redhat.com>
-- Update to -bk14
-- Print tainted information in slab corruption messages.
-
-* Tue Jan 11 2005 Rik van Riel <riel@redhat.com>
-- merge fix for the Xen TLS segment fixup issue
-
-* Tue Jan 11 2005 Dave Jones <davej@redhat.com>
-- Depend on hardlink, not kernel-utils.
+* Thu Jan 13 2005 Dave Jones <davej@redhat.com>  [2.6.10-1.741_FC3, 2.6.10-1.9_FC2]
+- Update to 2.6.10-ac9
+- Fix slab corruption in ACPI video code.
 
 * Mon Jan 10 2005 Dave Jones <davej@redhat.com>
-- Update to -bk13, reinstate GFP_ZERO patch which hopefully
-  is now fixed.
 - Add another Lexar card reader to the whitelist. (#143600)
 - Package asm-m68k for asm-ppc includes. (don't ask). (#144604)
+
+* Mon Jan 10 2005 Dave Jones <davej@redhat.com>  [2.6.10-1.737_FC3, 2.6.10-1.8_FC2]
+- Disable slab debugging.
 
 * Sat Jan  8 2005 Dave Jones <davej@redhat.com>
 - Periodic slab debug is incompatable with pagealloc debug.
   Disable the latter.
+- Update to 2.6.10-ac8
 
 * Fri Jan  7 2005 Dave Jones <davej@redhat.com>
-- Santa came to Notting's house too. (another new card reader)
-- Rebase to 2.6.10-bk10
-
-* Thu Jan  6 2005 Rik van Riel <riel@redhat.com>
-- update to latest xen-unstable tree
-- fix up Xen compile with -bk9, mostly pudding
+- Bump up to -ac7
+- Another new card reader.
 
 * Thu Jan  6 2005 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.10-bk9
+- Rebase to 2.6.10-ac5
 
 * Tue Jan  4 2005 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.10-bk7
+- Rebase to 2.6.10-ac4
 - Add periodic slab debug checker.
 
-* Sun Jan  2 2005 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.10-bk5
+* Mon Jan  3 2005 Dave Jones <davej@redhat.com>
+- Drop patch which meant we needed a newer gcc. (#144035)
+- Rebase to 2.6.10-ac2
+- Enable SL82C104 IDE driver as built-in on PPC64 (#131033)
 
 * Sat Jan  1 2005 Dave Jones <davej@redhat.com>
 - Fix probing of vesafb. (#125890)
-- Reenable EDD.
-- Don't assume existance of ~/.gnupg (#142201)
+- Enable PCILynx driver. (#142173)
 
 * Fri Dec 31 2004 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.10-bk4
-
-* Thu Dec 30 2004 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.10-bk3
+- Drop 4g/4g patch completely.
 
 * Tue Dec 28 2004 Dave Jones <davej@redhat.com>
 - Drop bogus ethernet slab cache.
 
-* Sun Dec 26 2004 Dave Jones <davej@redhat.com>
-- Santa brought a new card reader that needs whitelisting.
-
-* Fri Dec 24 2004 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.10
-
-* Wed Dec 22 2004 Dave Jones <davej@redhat.com>
-- Re-add missing part of the exit() race fix. (#142505, #141896)
-
-* Tue Dec 21 2004 Dave Jones <davej@redhat.com>
-- Fix two silly bugs in the AGP posting fixes.
-
-* Fri Dec 17 2004 Dave Jones <davej@redhat.com>
+* Thu Dec 23 2004 Dave Jones <davej@redhat.com>
 - Fix bio error propagation.
 - Clear ebp on sysenter return.
 - Extra debugging info on OOM kill.
@@ -1337,24 +708,22 @@ fi
 - Fix ext2/3 leak on umount.
 - fix missing wakeup in ipc/sem
 - Fix another tux corner case bug.
-- NULL out ptrs in airo driver after kfree'ing them.
+
+* Wed Dec 22 2004 Dave Jones <davej@redhat.com>
+- Add another ipod to the unusual usb devices list. (#142779)
+
+* Tue Dec 21 2004 Dave Jones <davej@redhat.com>
+- Fix two silly bugs in the AGP posting fixes.
 
 * Thu Dec 16 2004 Dave Jones <davej@redhat.com>
-- Better version of the PCI Posting fixes for AGPGART.
+- Better version of the PCI Posting fixes for agpgart.
 - Add missing cache flush to the AGP code.
-- Drop netdump and common crashdump code.
-
-* Mon Dec 13 2004 Dave Jones <davej@redhat.com>
-- Drop diskdump. Aiming for a better kexec based solution for FC4.
 
 * Sun Dec 12 2004 Dave Jones <davej@redhat.com>
 - fix false ECHILD result from wait* with zombie group leader.
 
 * Sat Dec 11 2004 Dave Jones <davej@redhat.com>
 - Workaround broken pci posting in AGPGART.
-- Compile 686 kernel tuned for pentium4.
-  | Needs benchmarking across various CPUs under
-  | various workloads to find out if its worth keeping.
 - Make sure VC resizing fits in s16.
 
 * Fri Dec 10 2004 Dave Jones <davej@redhat.com>
@@ -1371,6 +740,17 @@ fi
 - SELinux: Fix avc_node_update oops. (#142353)
 - Fix CCISS ioctl return code.
 - Make ppc64's pci_alloc_consistent() conform to documentation. (#140047)
+- Disable tiglusb module. (#142102)
+- E1000 64k-alignment fix. (#140047)
+- Disable tiglusb module. (#142102)
+- ID updates for cciss driver.
+- Fix overflows in USB Edgeport-IO driver. (#142258)
+- Fix wrong TASK_SIZE for 32bit processes on x86-64. (#141737)
+- Fix ext2/ext3 xattr/mbcache race. (#138951)
+- Fix bug where __getblk_slow can loop forever when pages are partially mapped. (#140424)
+- Add missing cache flushes in agpgart code.
+
+* Wed Dec  8 2004 Dave Jones <davej@redhat.com>
 - Enable EDD
 - Enable ETH1394. (#138497)
 - Workaround E1000 post-maturely writing back to TX descriptors. (#133261)
@@ -1388,54 +768,198 @@ fi
 - Fix compat fcntl F_GETLK{,64} (#141680)
 - blkdev_get_blocks(): handle eof
 - Another card reader for the whitelist. (#134094)
-- Disable tiglusb module. (#142102)
-- E1000 64k-alignment fix. (#140047)
-- Disable tiglusb module. (#142102)
-- ID updates for cciss driver.
-- Fix overflows in USB Edgeport-IO driver. (#142258)
-- Fix wrong TASK_SIZE for 32bit processes on x86-64. (#141737)
-- Fix ext2/ext3 xattr/mbcache race. (#138951)
-- Fix bug where __getblk_slow can loop forever when pages are partially mapped. (#140424)
-- Add missing cache flushes in agpgart code.
-
-* Thu Dec  9 2004 Dave Jones <davej@redhat.com>
-- Drop the 4g/4g hugemem kernel completely.
-
-* Wed Dec  8 2004 Rik van Riel <riel@redhat.com>
-- make Xen inherit config options from x86
-
-* Mon Dec  6 2004 Rik van Riel <riel@redhat.com>
-- apparently Xen works better without serial drivers in domain0 (#141497)
-
-* Sun Dec  5 2004 Rik van Riel <riel@redhat.com>
-- Fix up and reenable Xen compile.
-- Fix bug in install part of BuildKernel. 
 
 * Sat Dec  4 2004 Dave Jones <davej@redhat.com>
 - Enable both old and new megaraid drivers.
 - Add yet another card reader to usb scsi whitelist. (#141367)
+- Fix oops in conntrack on rmmod.
 
 * Fri Dec  3 2004 Dave Jones <davej@redhat.com>
-- Sync all patches with latest updates in FC3.
-- Fix up xen0/xenU uninstall.
-- Temporarily disable xen builds.
+- Pull in bits of -ac12
+  Should fix the smbfs & visor issues among others.
 
-* Wed Dec  1 2004 Rik van Riel <riel@redhat.com>
-- replace VM hack with the upstream version
-- more Xen bugfixes
+* Thu Dec  2 2004 Dave Jones <davej@redhat.com>
+- Drop the futex debug patch, it served its purpose.
+- XFRM layer bug fixes
+- ppc64: Convert to using ibm,read-slot-reset-state2 RTAS call
+- ide: Make CSB6 driver support configurations.
+- ide: Handle early EOF on CDs.
+- Fix sx8 device naming in sysfs
+- e100/e1000: return -EINVAL when setting rx-mini or rx-jumbo. (#140793)
 
-* Tue Nov 30 2004 Rik van Riel <riel@redhat.com>
-- upgrade to later Xen sources, with upstream bugfixes
-- export direct_remap_area_pages for Xen
+* Wed Dec  1 2004 Dave Jones <davej@redhat.com>
+- Disable 4G/4G for i686.
+- Workaround for the E1000 erratum 23 (#140047)
+- Remove bogus futex warning. (#138179)
+- x86_64: Fix lost edge triggered irqs on UP kernel.
+- x86_64: Reenable DRI for MGA.
+- Workaround E1000 post-maturely writing back to TX descriptors (#133261)
+- 3c59x: add EEPROM_RESET for 3c900 Boomerang
+- Fix buffer overrun in arch/x86_64/sys_ia32.c:sys32_ni_syscall()
+- ext3: improves ext3's error logging when we encounter an on-disk corruption.
+- ext3: improves ext3's ability to deal with corruption on-disk
+- ext3: Handle double-delete of indirect blocks.
+- Disable SCB2 flash driver for RHEL4. (#141142)
+
+* Tue Nov 30 2004 Dave Jones <davej@redhat.com>
+- x86_64: add an option to configure oops stack dump
+- x86[64]: display phys_proc_id only when it is initialized
+- x86_64: no TIOCSBRK/TIOCCBRK in ia32 emulation
+- via-rhine: references __init code during resume
+- Add barriers to generic timer code to prevent race. (#128242)
+- ppc64: Add PURR and version data to /proc/ppc64/lparcfg
+- Prevent xtime value becoming incorrect.
+- scsi: return full SCSI status byte in SG_IO
+- Fix show_trace() in irq context with CONFIG_4KSTACKS
+- Adjust alignment of pagevec structure.
+- md: make sure md always uses rdev_dec_pending properly.
+- Make proc_pid_status not dereference dead task structs.
+- sg: Fix oops of sg_cmd_done and sg_release race (#140648)
+- fix bad segment coalescing in blk_recalc_rq_segments()
+- fix missing security_*() check in net/compat.c
+- ia64/x86_64/s390 overlapping vma fix
+- Update Emulex lpfc to 8.0.15
 
 * Mon Nov 29 2004 Dave Jones <davej@redhat.com>
 - Add another card reader to whitelist. (#141022)
+- Fix possible hang in do_wait() (#140042)
+- Fix ps showing wrong ppid. (#132030)
+- Print advice to use -hugemem if >=16GB of memory is detected.
+- Enable ICOM serial driver. (#136150)
+- Enable acpi hotplug driver for IA64.
+- SCSI: fix USB forced remove oops.
+- ia64: add missing sn2 timer mask in time_interpolator code. (#140580)
+- ia64: Fix hang reading /proc/pal/cpu0/tr_info (#139571)
+- ia64: bump number of UARTS. (#139100)
+- Fix ACPI debug level (#141292)
+- Make EDD runtime configurable, and reenable.
+- ppc64: IBM VSCSI driver race fix. (#138725)
+- ppc64: Ensure PPC64 interrupts don't end up hard-disabled. (#139020, #131590)
+- ppc64: Yet more sigsuspend/singlestep fixing. (#140102, #137931)
+- x86-64: Implement ACPI based reset mechanism. (#139104)
+- Backport 2.6.10rc sysfs changes needed for IBM hotplug driver. (#140372)
+- Update Emulex lpfc driver to v8.0.14
+- Optimize away the unconditional write to debug registers on signal delivery path.
+- Fix up scsi_test_unit_ready() to work correctly with CD-ROMs.
+- md: fix two little bugs in raid10
+- Remove incorrect ELF check from module loading. (#140954)
+- Plug leaks in error paths of aic driver.
+- Add refcounting to scsi command allocation.
+- Taint oopses on machine checks, bad_page()'s calls and forced rmmod's.
+- Share Intel cache descriptors between x86 & x86-64.
+- rx checksum support for gige nForce ethernet
+- vm: vm_dirty_ratio initialisation fix
 
-* Fri Nov 26 2004 Rik van Riel <riel@redhat.com>
-- add Xen kernels for i686, plus various bits and pieces to make them work
+* Mon Nov 29 2004 Soeren Sandmann <sandmann@redhat.com>
+- Build FC-3 kernel in RHEL build root
 
-* Mon Nov 15 2004 Dave Jones <davej@redhat.com>
-- Rebase to 2.6.9-ac9
+* Sun Nov 28 2004 Dave Jones <davej@redhat.com>
+- Move 4g/4g kernel into -hugemem.
+
+* Sat Nov 27 2004 Dave Jones <davej@redhat.com>
+- Recognise Shuttle SN85G4 card reader. (#139163)
+
+* Tue Nov 23 2004 Dave Jones <davej@redhat.com>
+- Add futex debug patch.
+
+* Mon Nov 22 2004 Dave Jones <davej@redhat.com>
+- Update -ac patch to 2.6.9-ac11
+- make tulip_stop_rxtx() wait for DMA to fully stop. (#138240)
+- ACPI: Make LEqual less strict about operand types matching.
+- scsi: avoid extra 'put' on devices in __scsi_iterate_device() (#138135)
+- Fix bugs with SOCK_SEQPACKET AF_UNIX sockets
+- Reenable token ring drivers. (#119345)
+- SELinux: Map Unix seqpacket sockets to appropriate security class
+- SELinux: destroy avtab node cache in policy load error path.
+- AF_UNIX: Serialize dgram read using semaphore just like stream.
+- lockd: NLM blocks locks don't sleep
+- NFS lock recovery fixes
+- Add more MODULE_VERSION tags (#136403)
+- Update qlogic driver to 2.6.10rc2 level.
+- cciss: fixes for clustering
+- ieee802.11 update.
+- ipw2100: update to ver 1.0.0
+- ipw2200: update to ver 1.0.0
+- Enable promisc mode on ipw2100
+- 3c59x: reload EEPROM values at rmmod for needy cards
+- ppc64: Prevent sigsuspend stomping on r4 and r5
+- ppc64: Alternative single-step fix.
+- fix for recursive netdump oops on x86_64
+- ia64: Fix IRQ routing fix when booted with maxcpus=  (#138236)
+- ia64: search the iommu for the correct size
+- Deal with fraglists correctly on ipv4/ipv6 output
+- Various statm accounting fixes (#139447)
+- Reenable CMM /proc interface for s390 (#137397)
+
+* Fri Nov 19 2004 Dave Jones <davej@redhat.com>
+- e100: fix improper enabling of interrupts. (#139706)
+- autofs4: allow map update recognition
+- Various TCP fixes from 2.6.10rc
+- Various netlink fixes from 2.6.10rc
+- [IPV4]: Do not try to unhash null-netdev nexthops.
+- ppc64: Make NUMA map CPU->node before bringing up the CPU (#128063)
+- ppc64: sched domains / cpu hotplug cleanup. (#128063)
+- ppc64: Add a CPU_DOWN_PREPARE hotplug CPU notifier (#128063)
+- ppc64: Register a cpu hotplug notifier to reinitialize the
+  scheduler domains hierarchy (#128063)
+- ppc64: Introduce CPU_DOWN_FAILED notifier (#128063)
+- ppc64: Make arch_destroy_sched_domains() conditional (#128063)
+- ppc64: Use CPU_DOWN_FAILED notifier in the sched-domains hotplug code (#128063)
+- Various updates to the SCSI midlayer from 2.6.10rc.
+- vlan_dev: return 0 on vlan_dev_change_mtu success. (#139760)
+- Update Emulex lpfc driver to v8013
+- Fix problem with b44 driver and 4g/4g patch. (#118165)
+- Prevent oops when loading aic79xx on machine without hardware. (#125982)
+- Use correct spinlock functions in token ring net code. (#135462)
+- scsi: Add reset ioctl capability to ULDs
+- scsi: update ips driver to 7.10.18
+- Reenable ACPI hotplug driver. (#139976, #140130, #132691)
+
+* Thu Nov 18 2004 Dave Jones <davej@redhat.com>
+- Drop 2.6.9 changes that broke megaraid. (#139723)
+- Update to 2.6.9-ac10, fixing the SATA problems (#139674)
+- Update the OOM-killer tamer to upstream.
+- Implement an RCU scheme for the SELinux AVC
+- Improve on the OOM-killer taming patch.
+- device-mapper: Remove duplicate kfree in dm_register_target error path.
+- Make SHA1 guard against misaligned accesses
+- ASPM workaround for PCIe. (#123360)
+- Hot-plug driver updates due to MSI change (#134290)
+- Workaround for 80332 IOP hot-plug problem (#139041)
+- ExpressCard hot-plug support for ICH6M (#131800)
+- Fix boot crash on VIA systems (noted on x86-64)
+- PPC64: Store correct backtracking info in ppc64 signal frames
+- PPC64: Prevent HVSI from oopsing on hangup (#137912)
+- Fix poor performance b/c of noncacheable mapping in 4g/4g (#130842)
+- Fix PCI-X hotplug issues (#132852, #134290)
+- Re-export force_sig() (#139503)
+- Various fixes for more security issues from latest -ac patch.
+- Fix d_find_alias brokenness (#137791)
+- tg3: Fix fiber hw autoneg bounces (#138738)
+- diskdump: Fix issue with NMI watchdog. (#138041)
+- diskdump: Export disk_dump_state. (#138132)
+- diskdump: Tickle NMI watchdog in diskdump_mdelay() (#138036)
+- diskdump: Fix mem= for x86-64 (#138139)
+- diskdump: Fix missing system_state setting. (#138130)
+- diskdump: Fix diskdump completion message (#138028)
+- Re-add aic host raid support.
+- Take a few more export removal patches from 2.6.10rc
+- SATA: Make AHCI work
+- SATA: Core updates.
+- S390: Fix Incorrect registers in core dumps. (#138206)
+- S390: Fix up lcs device state. (#131167)
+- S390: Fix possible qeth IP registration failure.
+- S390: Support broadcast on z800/z900 HiperSockets
+- S390: Allow FCP port to recover after aborted nameserver request.
+- Flush error in pci_mmcfg_write (#129338)
+- hugetlb_get_unmapped_area fix (#135364, #129525)
+- Fix ia64 cyclone timer on ia64 (#137842, #136684)
+- Fix ipv6 MTU calculation. (#130397)
+- ACPI: Don't display messages about ACPI breakpoints. (#135856)
+- Fix x86_64 copy_user_generic (#135655)
+- lockd: remove hardcoded maximum NLM cookie length
+- Fix SCSI bounce limit
+- Disable polling mode on hotplug controllers in favour of interrupt driven. (#138737)
 
 * Sat Nov 13 2004 Dave Jones <davej@redhat.com>
 - Drop some bogus patches.
@@ -1906,7 +1430,5 @@ fi
 - re-add and enable the Auditing patch
 - switch several cpufreq modules to built in since detecting in userspace
   which to use is unpleasant
-
 * Thu Jul 03 2003 Arjan van de Ven <arjanv@redhat.com>
 - 2.6 start
-
