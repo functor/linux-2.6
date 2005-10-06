@@ -62,9 +62,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 #
 # The ld.so.conf.d file we install uses syntax older ldconfig's don't grok.
 #
-
-# MEF commented out
-# %define xen_conflicts glibc < 2.3.5-1
+%define xen_conflicts glibc < 2.3.5-1
 
 #
 # Packages that need to be installed before the kernel is, because the %post
@@ -191,10 +189,7 @@ Prereq: %{kernel_prereq}
 Conflicts: %{kernel_dot_org_conflicts}
 Conflicts: %{package_conflicts}
 Conflicts: %{nptl_conflicts}
-
-# MEF commented out 
-# Conflicts: %{xen_conflicts}
-
+Conflicts: %{xen_conflicts}
 # We can't let RPM do the dependencies automatic because it'll then pick up
 # a correct but undesirable perl dependency from the module headers which
 # isn't required for the kernel proper to function
@@ -370,11 +365,8 @@ BuildKernel() {
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     (cd $RPM_BUILD_ROOT/lib/modules/$KernelVer ; ln -s build source)
     # first copy everything
-    cp --parents `find  -type f -name "Makefile*" -o -name "Kconfig*"` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build 
+    cp --parents `find  -type f -name Makefile -o -name "Kconfig*"` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build 
     cp Module.symvers $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
-    if [ "$1" = "uml" ] ; then
-      cp --parents -a `find arch/um -name include` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
-    fi
     # then drop all but the needed Makefiles/Kconfig files
     rm -rf $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/Documentation
     rm -rf $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/scripts
@@ -396,11 +388,6 @@ BuildKernel() {
 %if %{buildxen}
     cp -a asm-xen $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
 %endif
-    if [ "$1" = "uml" ] ; then
-      cd asm	
-      cp -a `readlink arch` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
-      cd ..
-    fi
     cp -a `readlink asm` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     # Make sure the Makefile and version.h have a matching timestamp so that
     # external modules can be built
