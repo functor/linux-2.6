@@ -135,7 +135,6 @@ long vs_state_change(struct vx_info *vxi, unsigned int cmd)
 	return 0;
 }
 
-
 /*
  *      argv [0] = vshelper_path;
  *      argv [1] = action: "netup", "netdown"

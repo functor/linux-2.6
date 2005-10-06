@@ -18,6 +18,7 @@
 #include <linux/mount.h>
 #include <linux/tty.h>
 #include <linux/devpts_fs.h>
+#include <linux/vs_base.h>
 #include <linux/xattr.h>
 
 extern struct xattr_handler devpts_xattr_security_handler;
@@ -180,6 +181,7 @@ static struct dentry *get_node(int num)
 	down(&root->d_inode->i_sem);
 	return lookup_one_len(s, root, sprintf(s, "%d", num));
 }
+
 
 int devpts_pty_new(struct tty_struct *tty)
 {

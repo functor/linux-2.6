@@ -665,9 +665,7 @@ static int init(void * unused)
 	 * firmware files.
 	 */
 	populate_rootfs();
-
 	do_basic_setup();
-
 	sched_init_smp();
 
 	/*

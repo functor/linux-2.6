@@ -1868,6 +1868,8 @@ retry:
 		return VM_FAULT_SIGBUS;
 	if (new_page == NOPAGE_OOM)
 		return VM_FAULT_OOM;
+	if (!vx_rsspages_avail(mm, 1))
+		return VM_FAULT_OOM;
 
 	/*
 	 * Should we do an early C-O-W break?

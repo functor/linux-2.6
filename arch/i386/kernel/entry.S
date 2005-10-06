@@ -659,3 +659,4 @@ ENTRY(spurious_interrupt_bug)
 #include "syscall_table.S"
 
 syscall_table_size=(.-sys_call_table)
+

@@ -276,6 +276,8 @@
 #define __NR_set_mempolicy	270
 #define __NR_mq_open		271
 #define __NR_mq_unlink		272
+#warning __NR_vserver is the wrong number
+#define __NR_vserver		273
 #define __NR_mq_timedsend	273
 #define __NR_mq_timedreceive	274
 #define __NR_mq_notify		275
@@ -285,7 +287,7 @@
 #define __NR_add_key		279
 #define __NR_request_key	280
 #define __NR_keyctl		281
- 
+
 #define NR_syscalls		282
 
 /* user-visible error numbers are in the range -1 - -122: see

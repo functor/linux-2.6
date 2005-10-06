@@ -223,6 +223,8 @@ static void packet_sock_destruct(struct sock *sk)
 {
 	BUG_TRAP(!atomic_read(&sk->sk_rmem_alloc));
 	BUG_TRAP(!atomic_read(&sk->sk_wmem_alloc));
+	BUG_ON(sk->sk_nx_info);
+	BUG_ON(sk->sk_vx_info);
 
 	if (!sock_flag(sk, SOCK_DEAD)) {
 		printk("Attempt to release alive packet socket: %p\n", sk);
@@ -273,9 +275,6 @@ static int packet_rcv_spkt(struct sk_buff *skb, struct net_device *dev,  struct 
 	/* drop any routing info */
 	dst_release(skb->dst);
 	skb->dst = NULL;
-
-	/* drop conntrack reference */
-	nf_reset(skb);
 
 	spkt = (struct sockaddr_pkt*)skb->cb;
 
@@ -525,9 +524,6 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,  struct packe
 	skb->dev = NULL;
 	dst_release(skb->dst);
 	skb->dst = NULL;
-
-	/* drop conntrack reference */
-	nf_reset(skb);
 
 	spin_lock(&sk->sk_receive_queue.lock);
 	po->stats.tp_packets++;
@@ -837,6 +833,12 @@ static int packet_release(struct socket *sock)
 	}
 #endif
 
+#warning MEF: figure out whether the following vserver net code is required by PlanetLab
+#if 0
+	clr_vx_info(&sk->sk_vx_info);
+	clr_nx_info(&sk->sk_nx_info);
+#endif
+
 	/*
 	 *	Now the socket is dead. No more input will appear.
 	 */
@@ -1012,6 +1014,14 @@ static int packet_create(struct socket *sock, int protocol)
 
 	sk->sk_destruct = packet_sock_destruct;
 	atomic_inc(&packet_socks_nr);
+
+#warning MEF: figure out whether the following vserver net code is required by PlanetLab
+#if 0
+	set_vx_info(&sk->sk_vx_info, current->vx_info);
+	sk->sk_xid = vx_current_xid();
+	set_nx_info(&sk->sk_nx_info, current->nx_info);
+	sk->sk_nid = nx_current_nid();
+#endif
 
 	/*
 	 *	Attach a protocol block

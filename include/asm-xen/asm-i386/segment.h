@@ -93,6 +93,4 @@
  */
 #define IDT_ENTRIES 256
 
-#define KERN_PHYS_OFFSET (CONFIG_KERN_PHYS_OFFSET * 0x100000)
-
 #endif

@@ -24,6 +24,9 @@
 #include <linux/security.h>
 #include <linux/rcupdate.h>
 #include <linux/workqueue.h>
+#include <linux/vs_base.h>
+
+#include <asm/unistd.h>
 
 #include <asm/unistd.h>
 

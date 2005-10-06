@@ -18,6 +18,8 @@
 #include <linux/init.h>
 #include <linux/idr.h>
 #include <linux/namei.h>
+#include <linux/vs_base.h>
+#include <linux/vserver/inode.h>
 #include <linux/bitops.h>
 #include <linux/vserver/inode.h>
 #include <asm/uaccess.h>
@@ -352,8 +354,15 @@ static int proc_delete_dentry(struct dentry * dentry)
 	return 1;
 }
 
+static int proc_revalidate_dentry(struct dentry *de, struct nameidata *nd)
+{
+	/* maybe add a check if it's really necessary? */
+	return 0;
+}
+
 static struct dentry_operations proc_dentry_operations =
 {
+	.d_revalidate	= proc_revalidate_dentry,
 	.d_delete	= proc_delete_dentry,
 };
 

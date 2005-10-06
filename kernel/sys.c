@@ -365,7 +365,8 @@ asmlinkage long sys_getpriority(int which, int who)
 out_unlock:
 	read_unlock(&tasklist_lock);
 
-	return retval;
+	key_fsgid_changed(current);
+	return 0;
 }
 
 long vs_reboot(unsigned int, void *);
@@ -508,6 +509,7 @@ void ctrl_alt_del(void)
 }
 	
 
+
 /*
  * Unprivileged users may change the real gid to the effective gid
  * or vice versa.  (BSD-style)
@@ -567,6 +569,7 @@ asmlinkage long sys_setregid(gid_t rgid, gid_t egid)
 	current->fsgid = new_egid;
 	current->egid = new_egid;
 	current->gid = new_rgid;
+
 	key_fsgid_changed(current);
 	return 0;
 }
@@ -607,6 +610,7 @@ asmlinkage long sys_setgid(gid_t gid)
 		return -EPERM;
 
 	key_fsgid_changed(current);
+
 	return 0;
 }
   

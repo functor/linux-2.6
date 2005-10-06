@@ -263,6 +263,14 @@ menuconfig EMBEDDED
           environments which can tolerate a "non-standard" kernel.
           Only use this if you really know what you are doing.
 
+config DELAY_ACCT
+	bool "Enable delay accounting (EXPERIMENTAL)"
+	help
+	  In addition to counting frequency the total delay in ns is also
+	  recorded. CPU delays are specified as cpu-wait and cpu-run. 
+	  I/O delays are recorded for memory and regular I/O.
+	  Information is accessible through /proc/<pid>/delay.
+
 config KALLSYMS
 	 bool "Load all symbols for debugging/kksymoops" if EMBEDDED
 	 default y
