@@ -3937,6 +3937,7 @@ void tcp_cwnd_application_limited(struct sock *sk)
 	tp->snd_cwnd_stamp = tcp_time_stamp;
 }
 
+EXPORT_SYMBOL_GPL(tcp_cwnd_application_limited);
 
 /* When incoming ACK allowed to free some skb from write_queue,
  * we remember this event in flag SOCK_QUEUE_SHRUNK and wake up socket

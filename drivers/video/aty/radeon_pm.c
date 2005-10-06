@@ -25,7 +25,257 @@
 #include <asm/pmac_feature.h>
 #endif
 
+/* For detecting supported PC laptops */
+#ifdef CONFIG_X86
+#include <linux/dmi.h>
+#endif
+
 #include "ati_ids.h"
+
+#ifdef CONFIG_X86
+/* This array holds a list of supported PC laptops.
+ * Currently only few IBM models are tested.
+ * If you want to experiment, use dmidecode to find out
+ * vendor and product codes for Your laptop.
+ */
+static struct dmi_system_id __devinitdata radeonfb_dmi_table[] = {
+	{
+		/* Reported by George Avrunin <avrunin@math.umass.edu> */
+		.ident = "IBM ThinkPad T40 (2372-9CU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23729CU"),
+		},
+	},
+	{
+		/* Reported by Pete Toscano <pete@verisignlabs.com> */
+		.ident = "IBM ThinkPad R40 (2722-B3G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2722B3G"),
+		},
+	},
+	{
+		/* Reported by Klaus Kurzmann <mok@fluxnetz.de> */
+		.ident = "IBM ThinkPad T40 (2373-25G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "237325G"),
+		},
+	},
+	{
+		/* Reported by Antti Andreimann <Antti.Andreimann@mail.ee> */
+		.ident = "IBM ThinkPad T41 (2373-2FG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23732FG"),
+		},
+	},
+	{
+		/* Reported by Antti P Miettinen <apm@brigitte.dna.fi> */
+		.ident = "IBM ThinkPad T40 (2373-4G2)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23734G2"),
+	      },
+	},
+	{
+		/* Reported by Pete Toscano <pete@verisignlabs.com> */
+		.ident = "IBM ThinkPad T40 (2373-92G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "237392G"),
+	      },
+	},
+	{
+		/* Reported by Pete Toscano <pete@verisignlabs.com> */
+		.ident = "IBM ThinkPad T40 (2373-8CG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23738CG"),
+		},
+	},
+	{
+		/* Reported by Pete Toscano <pete@verisignlabs.com> */
+		.ident = "IBM ThinkPad T40 (2373-94U)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "237394U"),
+		},
+	},
+	{
+		/* Reported by Manuel Carro <mcarro@fi.upm.es> */
+		.ident = "IBM ThinkPad T40 (2373-94G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "237394G"),
+		},
+	},
+	{
+		/* Reported by Peter Jones <pjones@redhat.com> */
+		.ident = "IBM ThinkPad T41 (2373-9FU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23739FU"),
+		},
+	},
+	{
+		/* Reported by Ajay Ramaswamy <ajay@ramaswamy.net> */
+		.ident = "IBM ThinkPad T41 (2373-9HU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23739HU"),
+	      },
+	},
+	{
+		/* Reported by Peter Jones <pjones@redhat.com> */
+		.ident = "IBM ThinkPad T40 (2373-BU7)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373BU7"),
+		},
+	},
+	{
+		/* Reported by Jerome Poggi <Jerome.Poggi@hsc.fr> */
+		.ident = "IBM ThinkPad T42 (2373-FWG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373FWG"),
+		},
+	},
+	{
+		/* Reported by Juerg Billeter <j@bitron.ch> */
+		.ident = "IBM ThinkPad T40p (2373-G1G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373G1G"),
+		},
+	},
+	{
+		/* Reported by Hartwig, Thomas <t.hartwig@itth.com> */
+		.ident = "IBM ThinkPad T40p (2373-G3G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373G3G"),
+		},
+	},
+	{
+		/* Reported by Eric Benson <eric_a_benson@yahoo.com> */
+		.ident = "IBM ThinkPad T41p (2373-GEU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373GEU"),
+		},
+	},
+	{
+		/* Reported by Dwight Barkley <barkley@maths.warwick.ac.uk> */
+		.ident = "IBM ThinkPad T42 (2373-JTU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373JTU"),
+		},
+	},
+	{
+		/* Reported by Vernon Mauery <vernux@us.ibm.com> */
+		.ident = "IBM ThinkPad T40 (2373-MU4)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373MU4"),
+		},
+	},
+	{
+		/* Reported by Ajay Ramaswamy <ajay@ramaswamy.net> */
+		.ident = "IBM ThinkPad T41 (2373-XNX)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373XNX"),
+	      },
+	},
+	{
+		/* Reported by obi <graziano@cs.ucsb.edu> */
+		.ident = "IBM ThinkPad T41 (2378-DEU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2378DEU"),
+		},
+	},
+	{
+		/* Reported by Volker Braun <vbraun@physics.upenn.edu> */
+		.ident = "IBM ThinkPad T41 (2379-DJU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2379DJU"),
+		},
+	},
+	{
+		/* Reported by Pete Toscano <pete@verisignlabs.com> */
+		.ident = "IBM ThinkPad T42 (2373-FWG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373FWG"),
+		},
+	},
+	{
+		/* Reported by Frank Schmitt <tonne2004@gehheimdienst.de> */
+		.ident = "IBM ThinkPad R40 (2722-3GG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "27223GG"),
+		},
+	},
+	{
+		/* Reported by Nils Trebing <nils.trebing@uni-konstanz.de> */
+		.ident = "IBM ThinkPad R40 (2722-5MG)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "27225MG"),
+		},
+	},
+	{
+		/* Reported by Paul Ionescu <i_p_a_u_l@yahoo.com> */
+		.ident = "IBM ThinkPad T41 (2373-TG5)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2373TG5"),
+		},
+	},
+	{
+		/* Reported by Michele Lamarca <lammic@gmail.com> */
+		.ident = "IBM ThinkPad T40 (2373-22G)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "237322G"),
+		},
+	},
+	{
+		/* Reported by Henrik Brix Andersen <brix@gentoo.org> */
+		.ident = "IBM ThinkPad X31 (2672-XXH)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "2672XXH"),
+		},
+	},
+	{
+		/* Reported by Matthew Saltzman <mjs@clemson.edu> */
+		.ident = "IBM ThinkPad T41 (2373-7JU)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "23737JU"),
+		},
+	},
+	{ },
+	/* Negative reports: */
+	/* IBM thinkpad T30 2366 -> machine hangs 
+	   Reported by: Jakob Schiotz <schiotz@fysik.dtu.dk> */
+	/* IBM thinkpad T42p 2373-KUU -> machine hangs as X starts
+	   Reported by: Dax Kelson <dax@gurulabs.com> */
+	/* IBM ThinkPad X31 2672-XXH -> works, but doesn't fix the LCD 
+	   backlight on during S3 issue.
+	   Reported by: Henrik Brix Andersen <brix@gentoo.org> */
+};
+
+extern int radeon_force_sleep;
+#endif
 
 static void radeon_pm_disable_dynamic_mode(struct radeonfb_info *rinfo)
 {
@@ -852,7 +1102,14 @@ static void radeon_pm_setup_for_suspend(struct radeonfb_info *rinfo)
 	/* because both INPLL and OUTPLL take the same lock, that's why. */
 	tmp = INPLL( pllMCLK_MISC) | MCLK_MISC__EN_MCLK_TRISTATE_IN_SUSPEND;
 	OUTPLL( pllMCLK_MISC, tmp);
-	
+
+	/* BUS_CNTL1__MOBILE_PLATORM_SEL setting is northbridge chipset
+	 * and radeon chip dependent. Thus we only enable it on Mac for
+	 * now (until we get more info on how to compute the correct
+	 * value for various X86 bridges).
+	 */
+
+#ifdef CONFIG_PPC_PMAC
 	/* AGP PLL control */
 	if (rinfo->family <= CHIP_FAMILY_RV280) {
 		OUTREG(BUS_CNTL1, INREG(BUS_CNTL1) |  BUS_CNTL1__AGPCLK_VALID);
@@ -864,6 +1121,7 @@ static void radeon_pm_setup_for_suspend(struct radeonfb_info *rinfo)
 		OUTREG(BUS_CNTL1, INREG(BUS_CNTL1));
 		OUTREG(BUS_CNTL1, (INREG(BUS_CNTL1) & ~0x4000) | 0x8000);
 	}
+#endif
 
 	OUTREG(CRTC_OFFSET_CNTL, (INREG(CRTC_OFFSET_CNTL)
 				  & ~CRTC_OFFSET_CNTL__CRTC_STEREO_SYNC_OUT_EN));
@@ -2777,6 +3035,29 @@ void radeonfb_pm_init(struct radeonfb_info *rinfo, int dynclk)
 #endif
 	}
 #endif /* defined(CONFIG_PM) && defined(CONFIG_PPC_OF) */
+
+/* The PM code also works on some PC laptops.
+ * Only a few models are actually tested so Your mileage may vary.
+ * We can do D2 on at least M7 and M9 on some IBM ThinkPad T41 models.
+ */
+#if defined(CONFIG_PM) && defined(CONFIG_X86)
+	if (radeon_force_sleep || dmi_check_system(radeonfb_dmi_table)) {
+		if (radeon_force_sleep)
+			printk("radeonfb: forcefully enabling sleep mode\n");
+		else
+			printk("radeonfb: enabling sleep mode\n");
+
+		if (rinfo->is_mobility && rinfo->pm_reg &&
+		    rinfo->family <= CHIP_FAMILY_RV250)
+			rinfo->pm_mode |= radeon_pm_d2;
+
+		/* Power down TV DAC, that saves a significant amount of power,
+		 * we'll have something better once we actually have some TVOut
+		 * support
+		 */
+		OUTREG(TV_DAC_CNTL, INREG(TV_DAC_CNTL) | 0x07000000);
+	}
+#endif /* defined(CONFIG_PM) && defined(CONFIG_X86) */
 }
 
 void radeonfb_pm_exit(struct radeonfb_info *rinfo)

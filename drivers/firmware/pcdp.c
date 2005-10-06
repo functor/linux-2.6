@@ -16,6 +16,7 @@
 #include <linux/console.h>
 #include <linux/efi.h>
 #include <linux/serial.h>
+#include <acpi/actypes.h>
 #include "pcdp.h"
 
 static int __init

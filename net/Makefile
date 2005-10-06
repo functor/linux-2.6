@@ -21,6 +21,7 @@ obj-$(CONFIG_UNIX)		+= unix/
 ifneq ($(CONFIG_IPV6),)
 obj-y				+= ipv6/
 endif
+obj-$(CONFIG_TUX)		+= tux/
 obj-$(CONFIG_PACKET)		+= packet/
 obj-$(CONFIG_NET_KEY)		+= key/
 obj-$(CONFIG_NET_SCHED)		+= sched/

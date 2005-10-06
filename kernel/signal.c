@@ -24,6 +24,7 @@
 #include <linux/ptrace.h>
 #include <linux/posix-timers.h>
 #include <linux/signal.h>
+#include <linux/audit.h>
 #include <asm/param.h>
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -439,6 +440,7 @@ flush_signal_handlers(struct task_struct *t, int force_default)
 	}
 }
 
+EXPORT_SYMBOL_GPL(flush_signal_handlers);
 
 /* Notify the system that a driver wants to block all signals for this
  * process, and wants to be notified if any signals at all were to be
@@ -656,18 +658,30 @@ static int check_kill_permission(int sig, struct siginfo *info,
 				 struct task_struct *t)
 {
 	int error = -EINVAL;
+	int user;
+
 	if (!valid_signal(sig))
 		return error;
+
+	user = (!info || ((unsigned long)info != 1 &&
+		(unsigned long)info != 2 && SI_FROMUSER(info)));
+
 	error = -EPERM;
-	if ((!info || ((unsigned long)info != 1 &&
-			(unsigned long)info != 2 && SI_FROMUSER(info)))
-	    && ((sig != SIGCONT) ||
+	if (user && ((sig != SIGCONT) ||
 		(current->signal->session != t->signal->session))
 	    && (current->euid ^ t->suid) && (current->euid ^ t->uid)
 	    && (current->uid ^ t->suid) && (current->uid ^ t->uid)
 	    && !capable(CAP_KILL))
 		return error;
-	return security_task_kill(t, info, sig);
+
+	error = -ESRCH;
+	if (user && !vx_check(vx_task_xid(t), VX_ADMIN|VX_IDENT))
+		return error;
+
+	error = security_task_kill(t, info, sig);
+	if (!error)
+		audit_signal_info(sig, t); /* Let audit system see the signal */
+	return error;
 }
 
 /* forward decl */
@@ -1203,6 +1217,37 @@ kill_proc_info(int sig, struct siginfo *info, pid_t pid)
 	return error;
 }
 
+int print_fatal_signals = 0;
+
+static void print_fatal_signal(struct pt_regs *regs, int signr)
+{
+	printk("%s/%d: potentially unexpected fatal signal %d.\n",
+		current->comm, current->pid, signr);
+		
+#ifdef __i386__
+	printk("code at %08lx: ", regs->eip);
+	{
+		int i;
+		for (i = 0; i < 16; i++) {
+			unsigned char insn;
+
+			__get_user(insn, (unsigned char *)(regs->eip + i));
+			printk("%02x ", insn);
+		}
+	}
+#endif	
+	printk("\n");
+	show_regs(regs);
+}
+
+static int __init setup_print_fatal_signals(char *str)
+{
+	get_option (&str, &print_fatal_signals);
+
+	return 1;
+}
+
+__setup("print-fatal-signals=", setup_print_fatal_signals);
 
 /*
  * kill_something_info() interprets pid in interesting ways just like kill(2).
@@ -1853,6 +1898,11 @@ relock:
 		if (!signr)
 			break; /* will return 0 */
 
+		if ((signr == SIGSEGV) && print_fatal_signals) {
+			spin_unlock_irq(&current->sighand->siglock);
+			print_fatal_signal(regs, signr);
+			spin_lock_irq(&current->sighand->siglock);
+		}
 		if ((current->ptrace & PT_PTRACED) && signr != SIGKILL) {
 			ptrace_signal_deliver(regs, cookie);
 
@@ -1908,6 +1958,11 @@ relock:
 		if (current->pid == 1)
 			continue;
 
+		/* virtual init is protected against user signals */
+		if ((info->si_code == SI_USER) &&
+			vx_current_initpid(current->pid))
+			continue;
+
 		if (sig_kernel_stop(signr)) {
 			/*
 			 * The default action is to stop all threads in
@@ -1948,6 +2003,8 @@ relock:
 		 * Anything else is fatal, maybe with a core dump.
 		 */
 		current->flags |= PF_SIGNALED;
+		if (print_fatal_signals)
+			print_fatal_signal(regs, signr);
 		if (sig_kernel_coredump(signr)) {
 			/*
 			 * If it was able to dump core, this kills all

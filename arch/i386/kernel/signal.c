@@ -380,7 +380,7 @@ static void setup_frame(int sig, struct k_sigaction *ka,
 			goto give_sigsegv;
 	}
 
-	restorer = &__kernel_sigreturn;
+	restorer = current->mm->context.vdso + (long)&__kernel_sigreturn;
 	if (ka->sa.sa_flags & SA_RESTORER)
 		restorer = ka->sa.sa_restorer;
 
@@ -475,7 +475,7 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 		goto give_sigsegv;
 
 	/* Set up to return from userspace.  */
-	restorer = &__kernel_rt_sigreturn;
+	restorer = current->mm->context.vdso + (long)&__kernel_rt_sigreturn;
 	if (ka->sa.sa_flags & SA_RESTORER)
 		restorer = ka->sa.sa_restorer;
 	err |= __put_user(restorer, &frame->pretcode);

@@ -5223,6 +5223,7 @@ out:
 	rcu_read_unlock();
 }
 
+#ifdef CONFIG_QETH_IPV6
 static void
 qeth_free_vlan_addresses6(struct qeth_card *card, unsigned short vid)
 {
@@ -5251,6 +5252,9 @@ qeth_free_vlan_addresses6(struct qeth_card *card, unsigned short vid)
 	in6_dev_put(in6_dev);
 #endif /* CONFIG_QETH_IPV6 */
 }
+#else
+#define qeth_free_vlan_addresses6(card, vid)	do{ ; }while(0)
+#endif
 
 static void
 qeth_layer2_send_setdelvlan(struct qeth_card *card, __u16 i,

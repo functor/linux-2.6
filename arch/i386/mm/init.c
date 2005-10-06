@@ -229,6 +229,74 @@ static inline int page_is_ram(unsigned long pagenr)
 	return 0;
 }
 
+unsigned long next_ram_page(unsigned long pagenr)
+{
+	int i;
+	unsigned long addr, end;
+	unsigned long min_pageno = ULONG_MAX;
+
+	pagenr++;
+
+	if (efi_enabled) {
+		efi_memory_desc_t *md;
+
+		for (i = 0; i < memmap.nr_map; i++) {
+			md = &memmap.map[i];
+			if (!is_available_memory(md))
+				continue;
+			addr = (md->phys_addr+PAGE_SIZE-1) >> PAGE_SHIFT;
+			end = (md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT)) >> PAGE_SHIFT;
+
+			if ((pagenr >= addr) && (pagenr < end))
+				return pagenr;
+			if ((pagenr < addr) && (addr < min_pageno))
+				min_pageno = addr;
+		}
+		return min_pageno;
+	}
+
+	for (i = 0; i < e820.nr_map; i++) {
+
+		if (e820.map[i].type != E820_RAM)	/* not usable memory */
+			continue;
+		/*
+		 *	!!!FIXME!!! Some BIOSen report areas as RAM that
+		 *	are not. Notably the 640->1Mb area. We need a sanity
+		 *	check here.
+		 */
+		addr = (e820.map[i].addr+PAGE_SIZE-1) >> PAGE_SHIFT;
+		end = (e820.map[i].addr+e820.map[i].size) >> PAGE_SHIFT;
+		if  ((pagenr >= addr) && (pagenr < end))
+			return pagenr;
+		if ((pagenr < addr) && (addr < min_pageno))
+			min_pageno = addr;
+	}
+	return min_pageno;
+}
+
+EXPORT_SYMBOL_GPL(next_ram_page);
+
+/*
+ * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
+ * valid. The argument is a physical page number.
+ *
+ *
+ * On x86, access has to be given to the first megabyte of ram because that area
+ * contains bios code and data regions used by X and dosemu and similar apps.
+ * Access has to be given to non-kernel-ram areas as well, these contain the PCI
+ * mmio resources as well as potential bios/acpi data regions.
+ */
+int devmem_is_allowed(unsigned long pagenr)
+{
+   if (pagenr <= 256)
+       return 1;
+   if (!page_is_ram(pagenr))
+       return 1;
+   return 0;
+}
+
+EXPORT_SYMBOL_GPL(page_is_ram);
+
 #ifdef CONFIG_HIGHMEM
 pte_t *kmap_pte;
 pgprot_t kmap_prot;
@@ -400,7 +468,7 @@ u64 __supported_pte_mask = ~_PAGE_NX;
  * Control non executable mappings.
  *
  * on      Enable
- * off     Disable
+ * off     Disable (disables exec-shield too)
  */
 void __init noexec_setup(const char *str)
 {
@@ -410,6 +478,7 @@ void __init noexec_setup(const char *str)
 	} else if (!strncmp(str,"off",3)) {
 		disable_nx = 1;
 		__supported_pte_mask &= ~_PAGE_NX;
+		exec_shield = 0;
 	}
 }
 
@@ -474,7 +543,10 @@ void __init paging_init(void)
 	set_nx();
 	if (nx_enabled)
 		printk("NX (Execute Disable) protection: active\n");
+	else
 #endif
+	if (exec_shield)
+		printk("Using x86 segment limits to approximate NX protection\n");
 
 	pagetable_init();
 

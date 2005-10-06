@@ -293,7 +293,7 @@ static int usb_stor_control_thread(void * __us)
 	 * so get rid of all our resources.
 	 */
 	daemonize("usb-storage");
-	current->flags |= PF_NOFREEZE;
+	current->flags |= PF_NOFREEZE|PF_MEMALLOC;
 	unlock_kernel();
 
 	/* acquire a reference to the host, so it won't be deallocated

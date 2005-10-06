@@ -30,6 +30,10 @@ update-po-config: $(obj)/kxgettext
 	-o scripts/kconfig/linux.pot
 	scripts/kconfig/kxgettext arch/$(ARCH)/Kconfig >> scripts/kconfig/linux.pot
 
+nonint_oldconfig: scripts/kconfig/conf
+	./scripts/kconfig/conf -b arch/$(ARCH)/Kconfig
+
+
 .PHONY: randconfig allyesconfig allnoconfig allmodconfig defconfig
 
 randconfig: $(obj)/conf
@@ -130,7 +134,7 @@ QTLIBPATH = $(QTDIR)/lib
 
 # QT needs some extra effort...
 $(obj)/.tmp_qtcheck:
-	@set -e; for d in $$QTDIR /usr/share/qt* /usr/lib/qt*; do \
+	@set -e; for d in $$QTDIR /usr/share/qt* /usr/lib/qt* /usr/lib64/qt* ; do \
 	  if [ -f $$d/include/qconfig.h ]; then DIR=$$d; break; fi; \
 	done; \
 	if [ -z "$$DIR" ]; then \

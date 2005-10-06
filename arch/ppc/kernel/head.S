@@ -1349,7 +1349,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_HIGH_BATS)
 flush_tlbs:
 	lis	r10, 0x40
 1:	addic.	r10, r10, -0x1000
-	tlbie	r10
+	tlbie	r10,0
 	blt	1b
 	sync
 	blr

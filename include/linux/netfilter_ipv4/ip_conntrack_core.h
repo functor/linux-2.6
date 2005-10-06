@@ -34,6 +34,13 @@ struct ip_conntrack_tuple_hash *
 ip_conntrack_find_get(const struct ip_conntrack_tuple *tuple,
 		      const struct ip_conntrack *ignored_conntrack);
 
+struct ip_conntrack_tuple_hash *
+__ip_conntrack_find(const struct ip_conntrack_tuple *tuple,
+		    const struct ip_conntrack *ignored_conntrack);
+
+struct ip_conntrack_expect *
+__ip_conntrack_exp_find(const struct ip_conntrack_tuple *tuple);
+
 extern int __ip_conntrack_confirm(struct sk_buff **pskb);
 
 /* Confirm a connection: returns NF_DROP if packet must be dropped. */

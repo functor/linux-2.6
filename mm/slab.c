@@ -189,7 +189,7 @@
  */
 
 #define BUFCTL_END	(((kmem_bufctl_t)(~0U))-0)
-#define BUFCTL_FREE	(((kmem_bufctl_t)(~0U))-1)
+#define BUFCTL_ALLOC	(((kmem_bufctl_t)(~0U))-1)
 #define	SLAB_LIMIT	(((kmem_bufctl_t)(~0U))-2)
 
 /* Max number of objs-per-slab for caches which use off-slab slabs.
@@ -355,6 +355,7 @@ struct kmem_cache_s {
 #if DEBUG
 	int			dbghead;
 	int			reallen;
+	unsigned long		redzonetest;
 #endif
 };
 
@@ -370,6 +371,7 @@ struct kmem_cache_s {
  */
 #define REAPTIMEOUT_CPUC	(2*HZ)
 #define REAPTIMEOUT_LIST3	(4*HZ)
+#define REDZONETIMEOUT		(300*HZ)
 
 #if STATS
 #define	STATS_INC_ACTIVE(x)	((x)->num_active++)
@@ -1005,11 +1007,37 @@ static void poison_obj(kmem_cache_t *cachep, void *addr, unsigned char val)
 static void dump_line(char *data, int offset, int limit)
 {
 	int i;
+	unsigned char total=0;
+
 	printk(KERN_ERR "%03x:", offset);
 	for (i=0;i<limit;i++) {
-		printk(" %02x", (unsigned char)data[offset+i]);
+		if (data[offset+i] != POISON_FREE)
+			total += data[offset+i];
+		if (check_tainted() == 0)
+			printk(" %02x", (unsigned char)data[offset+i]);
+		else {
+			switch (i) {
+			case 0:	printk(" f3 3d");
+					break;
+			case 1: break;
+			default:
+				printk(" %02x", (unsigned char)data[offset+i]);
+			}
+		}
 	}
 	printk("\n");
+	switch (total) {
+		case 0x36:
+		case 0x6a:
+		case 0x6f:
+		case 0x81:
+		case 0xac:
+		case 0xd3:
+		case 0xd5:
+		case 0xea:
+			printk (KERN_ERR "Single bit error detected. Possibly bad RAM. Run memtest86.\n");
+			return;
+	}
 }
 #endif
 
@@ -1062,9 +1090,10 @@ static void check_poison_obj(kmem_cache_t *cachep, void *objp)
 			/* Mismatch ! */
 			/* Print header */
 			if (lines == 0) {
-				printk(KERN_ERR "Slab corruption: start=%p, len=%d\n",
-						realobj, size);
+				printk(KERN_ERR "Slab corruption: (%s) start=%p, len=%d\n",
+						print_tainted(), realobj, size);
 				print_objinfo(cachep, objp, 0);
+				dump_stack();
 			}
 			/* Hexdump the affected line */
 			i = (i/16)*16;
@@ -1457,7 +1486,11 @@ next:
 	} 
 
 	cachep->lists.next_reap = jiffies + REAPTIMEOUT_LIST3 +
-					((unsigned long)cachep)%REAPTIMEOUT_LIST3;
+					((unsigned long)cachep/L1_CACHE_BYTES)%REAPTIMEOUT_LIST3;
+#if DEBUG
+	cachep->redzonetest = jiffies + REDZONETIMEOUT +
+					((unsigned long)cachep/L1_CACHE_BYTES)%REDZONETIMEOUT;
+#endif
 
 	/* Need the semaphore to access the chain. */
 	down(&cache_chain_sem);
@@ -2052,7 +2085,7 @@ retry:
 			slabp->inuse++;
 			next = slab_bufctl(slabp)[slabp->free];
 #if DEBUG
-			slab_bufctl(slabp)[slabp->free] = BUFCTL_FREE;
+			slab_bufctl(slabp)[slabp->free] = BUFCTL_ALLOC;
 #endif
 		       	slabp->free = next;
 		}
@@ -2190,7 +2223,7 @@ static void free_block(kmem_cache_t *cachep, void **objpp, int nr_objects)
 		objnr = (objp - slabp->s_mem) / cachep->objsize;
 		check_slabp(cachep, slabp);
 #if DEBUG
-		if (slab_bufctl(slabp)[objnr] != BUFCTL_FREE) {
+		if (slab_bufctl(slabp)[objnr] != BUFCTL_ALLOC) {
 			printk(KERN_ERR "slab: double free detected in cache '%s', objp %p.\n",
 						cachep->name, objp);
 			BUG();
@@ -2417,7 +2450,7 @@ got_slabp:
 	slabp->inuse++;
 	next = slab_bufctl(slabp)[slabp->free];
 #if DEBUG
-	slab_bufctl(slabp)[slabp->free] = BUFCTL_FREE;
+	slab_bufctl(slabp)[slabp->free] = BUFCTL_ALLOC;
 #endif
 	slabp->free = next;
 	check_slabp(cachep, slabp);
@@ -2620,6 +2653,94 @@ unsigned int kmem_cache_size(kmem_cache_t *cachep)
 }
 EXPORT_SYMBOL(kmem_cache_size);
 
+#if DEBUG
+static void check_slabuse(kmem_cache_t *cachep, struct slab *slabp)
+{
+	int i;
+
+	if (!(cachep->flags & SLAB_RED_ZONE))
+		return;	/* no redzone data to check */
+
+#if CONFIG_DEBUG_PAGEALLOC
+	/* Page alloc debugging on for this cache. Mapping & Unmapping happens
+	 * without any locking, thus parallel checks are impossible.
+	 */
+	if ((cachep->objsize%PAGE_SIZE)==0 && OFF_SLAB(cachep))
+		return;
+#endif
+
+	for (i=0;i<cachep->num;i++) {
+		void *objp = slabp->s_mem + cachep->objsize * i;
+		unsigned long red1, red2;
+
+		red1 = *dbg_redzone1(cachep, objp);
+		red2 = *dbg_redzone2(cachep, objp);
+
+		/* simplest case: marked as inactive */
+		if (red1 == RED_INACTIVE && red2 == RED_INACTIVE)
+			continue;
+
+		/* tricky case: if the bufctl value is BUFCTL_ALLOC, then
+		 * the object is either allocated or somewhere in a cpu
+		 * cache. The cpu caches are lockless and there might be
+		 * a concurrent alloc/free call, thus we must accept random
+		 * combinations of RED_ACTIVE and _INACTIVE
+		 */
+		if (slab_bufctl(slabp)[i] == BUFCTL_ALLOC &&
+				(red1 == RED_INACTIVE || red1 == RED_ACTIVE) &&
+				(red2 == RED_INACTIVE || red2 == RED_ACTIVE))
+			continue;
+
+		printk(KERN_ERR "slab %s: redzone mismatch in slabp %p, objp %p, bufctl 0x%x\n",
+				cachep->name, slabp, objp, slab_bufctl(slabp)[i]);
+		print_objinfo(cachep, objp, 2);
+	}
+}
+
+/*
+ * Perform a self test on all slabs from a cache
+ */
+static void check_redzone(kmem_cache_t *cachep)
+{
+	struct list_head *q;
+	struct slab *slabp;
+
+	check_spinlock_acquired(cachep);
+
+	list_for_each(q,&cachep->lists.slabs_full) {
+		slabp = list_entry(q, struct slab, list);
+
+		if (slabp->inuse != cachep->num) {
+			printk(KERN_INFO "slab %s: wrong slabp found in full slab chain at %p (%d/%d).\n",
+					cachep->name, slabp, slabp->inuse, cachep->num);
+		}
+		check_slabp(cachep, slabp);
+		check_slabuse(cachep, slabp);
+	}
+	list_for_each(q,&cachep->lists.slabs_partial) {
+		slabp = list_entry(q, struct slab, list);
+
+		if (slabp->inuse == cachep->num || slabp->inuse == 0) {
+			printk(KERN_INFO "slab %s: wrong slab found in partial chain at %p (%d/%d).\n",
+					cachep->name, slabp, slabp->inuse, cachep->num);
+		}
+		check_slabp(cachep, slabp);
+		check_slabuse(cachep, slabp);
+	}
+	list_for_each(q,&cachep->lists.slabs_free) {
+		slabp = list_entry(q, struct slab, list);
+
+		if (slabp->inuse != 0) {
+			printk(KERN_INFO "slab %s: wrong slab found in free chain at %p (%d/%d).\n",
+					cachep->name, slabp, slabp->inuse, cachep->num);
+		}
+		check_slabp(cachep, slabp);
+		check_slabuse(cachep, slabp);
+	}
+}
+
+#endif
+
 struct ccupdate_struct {
 	kmem_cache_t *cachep;
 	struct array_cache *new[NR_CPUS];
@@ -2804,6 +2925,12 @@ static void cache_reap(void *unused)
 
 		drain_array_locked(searchp, ac_data(searchp), 0);
 
+#if DEBUG
+		if(time_before(searchp->redzonetest, jiffies)) {
+			searchp->redzonetest = jiffies + REDZONETIMEOUT;
+			check_redzone(searchp);
+		}
+#endif
 		if(time_after(searchp->lists.next_reap, jiffies))
 			goto next_unlock;
 

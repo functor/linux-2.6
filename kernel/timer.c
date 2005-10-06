@@ -33,6 +33,10 @@
 #include <linux/posix-timers.h>
 #include <linux/cpu.h>
 #include <linux/syscalls.h>
+#include <linux/delay.h>
+#include <linux/diskdump.h>
+#include <linux/vs_cvirt.h>
+#include <linux/vserver/sched.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -436,8 +440,9 @@ static int cascade(tvec_base_t *base, tvec_t *tv, int index)
 static inline void __run_timers(tvec_base_t *base)
 {
 	struct timer_list *timer;
+	unsigned long flags;
 
-	spin_lock_irq(&base->lock);
+	spin_lock_irqsave(&base->lock, flags);
 	while (time_after_eq(jiffies, base->timer_jiffies)) {
 		struct list_head work_list = LIST_HEAD_INIT(work_list);
 		struct list_head *head = &work_list;
@@ -466,7 +471,7 @@ repeat:
 			set_running_timer(base, timer);
 			smp_wmb();
 			timer->base = NULL;
-			spin_unlock_irq(&base->lock);
+			spin_unlock_irqrestore(&base->lock, flags);
 			{
 				u32 preempt_count = preempt_count();
 				fn(data);
@@ -480,7 +485,7 @@ repeat:
 		}
 	}
 	set_running_timer(base, NULL);
-	spin_unlock_irq(&base->lock);
+	spin_unlock_irqrestore(&base->lock, flags);
 }
 
 #ifdef CONFIG_NO_IDLE_HZ
@@ -686,7 +691,11 @@ static void second_overflow(void)
 	if (ltemp > (MAXPHASE / MINSEC) << SHIFT_UPDATE)
 	    ltemp = (MAXPHASE / MINSEC) << SHIFT_UPDATE;
 	time_offset += ltemp;
+	#if SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE > 0
 	time_adj = -ltemp << (SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE);
+	#else
+	time_adj = -ltemp >> (SHIFT_HZ + SHIFT_UPDATE - SHIFT_SCALE);
+	#endif
     } else {
 	ltemp = time_offset;
 	if (!(time_status & STA_FLL))
@@ -694,7 +703,11 @@ static void second_overflow(void)
 	if (ltemp > (MAXPHASE / MINSEC) << SHIFT_UPDATE)
 	    ltemp = (MAXPHASE / MINSEC) << SHIFT_UPDATE;
 	time_offset -= ltemp;
+	#if SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE > 0
 	time_adj = ltemp << (SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE);
+	#else
+	time_adj = ltemp >> (SHIFT_HZ + SHIFT_UPDATE - SHIFT_SCALE);
+	#endif
     }
 
     /*
@@ -953,12 +966,6 @@ asmlinkage unsigned long sys_alarm(unsigned int seconds)
 
 #endif
 
-#ifndef __alpha__
-
-/*
- * The Alpha uses getxpid, getxuid, and getxgid instead.  Maybe this
- * should be moved into arch/i386 instead?
- */
 
 /**
  * sys_getpid - return the thread group id of the current process
@@ -971,7 +978,7 @@ asmlinkage unsigned long sys_alarm(unsigned int seconds)
  */
 asmlinkage long sys_getpid(void)
 {
-	return current->tgid;
+	return vx_map_tgid(current->tgid);
 }
 
 /*
@@ -1015,8 +1022,22 @@ asmlinkage long sys_getppid(void)
 #endif
 		break;
 	}
-	return pid;
+	return vx_map_pid(pid);
 }
+
+#ifdef __alpha__
+
+/*
+ * The Alpha uses getxpid, getxuid, and getxgid instead.
+ */
+
+asmlinkage long do_getxpid(long *ppid)
+{
+	*ppid = sys_getppid();
+	return sys_getpid();
+}
+
+#else /* _alpha_ */
 
 asmlinkage long sys_getuid(void)
 {
@@ -1079,6 +1100,12 @@ fastcall signed long __sched schedule_timeout(signed long timeout)
 {
 	struct timer_list timer;
 	unsigned long expire;
+
+	if (crashdump_mode()) {
+		diskdump_mdelay(timeout);
+		set_current_state(TASK_RUNNING);
+		return timeout;
+	}
 
 	switch (timeout)
 	{
@@ -1223,6 +1250,8 @@ asmlinkage long sys_sysinfo(struct sysinfo __user *info)
 			tp.tv_nsec = tp.tv_nsec - NSEC_PER_SEC;
 			tp.tv_sec++;
 		}
+		if (vx_flags(VXF_VIRT_UPTIME, 0))
+			vx_vsi_uptime(&tp, NULL);
 		val.uptime = tp.tv_sec + (tp.tv_nsec ? 1 : 0);
 
 		val.loads[0] = avenrun[0] << (SI_LOAD_SHIFT - FSHIFT);
@@ -1282,7 +1311,7 @@ asmlinkage long sys_sysinfo(struct sysinfo __user *info)
 	return 0;
 }
 
-static void __devinit init_timers_cpu(int cpu)
+static void /* __devinit */ init_timers_cpu(int cpu)
 {
 	int j;
 	tvec_base_t *base;
@@ -1300,6 +1329,27 @@ static void __devinit init_timers_cpu(int cpu)
 
 	base->timer_jiffies = jiffies;
 }
+
+static tvec_base_t saved_tvec_base;
+
+void dump_clear_timers(void)
+{
+	tvec_base_t *base = &per_cpu(tvec_bases, smp_processor_id());
+
+	memcpy(&saved_tvec_base, base, sizeof(saved_tvec_base));
+	init_timers_cpu(smp_processor_id());
+}
+
+EXPORT_SYMBOL_GPL(dump_clear_timers);
+
+void dump_run_timers(void)
+{
+	tvec_base_t *base = &__get_cpu_var(tvec_bases);
+
+	__run_timers(base);
+}
+
+EXPORT_SYMBOL_GPL(dump_run_timers);
 
 #ifdef CONFIG_HOTPLUG_CPU
 static int migrate_timer_list(tvec_base_t *new_base, struct list_head *head)
@@ -1584,6 +1634,11 @@ unregister_time_interpolator(struct time_interpolator *ti)
 void msleep(unsigned int msecs)
 {
 	unsigned long timeout = msecs_to_jiffies(msecs) + 1;
+
+	if (unlikely(crashdump_mode())) {
+		while (msecs--) udelay(1000);
+		return;
+	}
 
 	while (timeout) {
 		set_current_state(TASK_UNINTERRUPTIBLE);

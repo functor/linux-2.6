@@ -10,7 +10,7 @@
 extern unsigned long loops_per_jiffy;
 
 #include <asm/delay.h>
-
+#include <linux/hardirq.h>
 /*
  * Using udelay() for intervals greater than a few milliseconds can
  * risk overflow for high loops_per_jiffy (high bogomips) machines. The
@@ -25,14 +25,13 @@ extern unsigned long loops_per_jiffy;
 #define MAX_UDELAY_MS	5
 #endif
 
-#ifdef notdef
-#define mdelay(n) (\
-	{unsigned long __ms=(n); while (__ms--) udelay(1000);})
-#else
-#define mdelay(n) (\
-	(__builtin_constant_p(n) && (n)<=MAX_UDELAY_MS) ? udelay((n)*1000) : \
-	({unsigned long __ms=(n); while (__ms--) udelay(1000);}))
-#endif
+#define mdelay(n) (					\
+	{						\
+		static int warned=0; 			\
+		unsigned long __ms=(n); 		\
+		WARN_ON(in_irq() && !(warned++)); 	\
+		while (__ms--) udelay(1000);		\
+	})
 
 #ifndef ndelay
 #define ndelay(x)	udelay(((x)+999)/1000)

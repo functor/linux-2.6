@@ -21,6 +21,7 @@
 #include <linux/acpi.h>
 #include <linux/efi.h>
 #include <linux/nodemask.h>
+#include <linux/module.h>
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
 #include <asm/meminit.h>
@@ -586,6 +587,8 @@ void show_mem(void)
 		pgtable_quicklist_total_size());
 	printk("%d free buffer pages\n", nr_free_buffer_pages());
 }
+
+EXPORT_SYMBOL_GPL(show_mem);
 
 /**
  * call_pernode_memory - use SRAT to call callback functions with node info

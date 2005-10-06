@@ -131,6 +131,7 @@ int die(const char *str, struct pt_regs *regs, long err)
 		printk("\n");
 	print_modules();
 	show_regs(regs);
+	try_crashdump(regs);
 	bust_spinlocks(0);
 	spin_unlock_irq(&die_lock);
 
@@ -138,6 +139,8 @@ int die(const char *str, struct pt_regs *regs, long err)
 		panic("Fatal exception in interrupt");
 
 	if (panic_on_oops) {
+		if (netdump_func)
+			netdump_func = NULL;
 		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
 		ssleep(5);
 		panic("Fatal exception");

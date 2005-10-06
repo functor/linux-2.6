@@ -160,7 +160,13 @@ static inline void clear_in_cr4 (unsigned long mask)
 /*
  * User space process size. 47bits minus one guard page.
  */
-#define TASK_SIZE	(0x800000000000UL - 4096)
+#define TASK_SIZE_64	(0x800000000000UL - 4096)
+#define TASK_SIZE	(test_thread_flag(TIF_IA32) ? IA32_PAGE_OFFSET : TASK_SIZE_64)
+
+#define __HAVE_ARCH_ALIGN_STACK
+extern unsigned long arch_align_stack(unsigned long sp);
+
+#define HAVE_ARCH_PICK_MMAP_LAYOUT
 
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.

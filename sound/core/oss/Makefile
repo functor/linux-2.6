@@ -3,6 +3,7 @@
 # Copyright (c) 1999 by Jaroslav Kysela <perex@suse.cz>
 #
 
+CFLAGS_pcm_plugin.o += -g0
 snd-mixer-oss-objs := mixer_oss.o
 
 snd-pcm-oss-objs := pcm_oss.o pcm_plugin.o \

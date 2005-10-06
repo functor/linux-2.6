@@ -84,6 +84,9 @@ enum
 
 	KERN_CAP_BSET=14,	/* int: capability bounding set */
 	KERN_PANIC=15,		/* int: panic timeout */
+	KERN_EXEC_SHIELD=1000,	/* int: exec-shield enabled (0/1/2) */
+	KERN_PRINT_FATAL=1001,	/* int: print fatal signals (0/1/2) */
+	KERN_VDSO=1002,		/* int: VDSO enabled (0/1) */
 	KERN_REALROOTDEV=16,	/* real root device to mount after initrd */
 
 	KERN_SPARC_REBOOT=21,	/* reboot command on Sparc */
@@ -136,6 +139,7 @@ enum
 	KERN_UNKNOWN_NMI_PANIC=66, /* int: unknown nmi panic flag */
 	KERN_BOOTLOADER_TYPE=67, /* int: boot loader type */
 	KERN_RANDOMIZE=68, /* int: randomize virtual address space */
+	KERN_VSHELPER=69,	/* string: path to vshelper policy agent */
 };
 
 
@@ -193,6 +197,7 @@ enum
 	NET_DECNET=15,
 	NET_ECONET=16,
 	NET_SCTP=17, 
+	NET_TUX=18,
 };
 
 /* /proc/sys/kernel/random */
@@ -347,6 +352,13 @@ enum
 	NET_TCP_TSO_WIN_DIVISOR=107,
 	NET_TCP_BIC_BETA=108,
 	NET_IPV4_ICMP_ERRORS_USE_INBOUND_IFADDR=109,
+#ifdef CONFIG_ICMP_IPOD
+	NET_IPV4_ICMP_IPOD_VERSION,
+	NET_IPV4_ICMP_IPOD_ENABLED,
+	NET_IPV4_ICMP_IPOD_HOST,
+	NET_IPV4_ICMP_IPOD_MASK,
+	NET_IPV4_ICMP_IPOD_KEY
+#endif
 };
 
 enum {
@@ -656,6 +668,55 @@ enum {
 	NET_BRIDGE_NF_FILTER_VLAN_TAGGED = 4,
 };
 
+/* /proc/sys/net/tux/ */
+enum {
+	NET_TUX_DOCROOT			=  1,
+	NET_TUX_LOGFILE			=  2,
+	NET_TUX_EXTCGI			=  3,
+	NET_TUX_STOP			=  4,
+	NET_TUX_CLIENTPORT		=  5,
+	NET_TUX_LOGGING			=  6,
+	NET_TUX_SERVERPORT		=  7,
+	NET_TUX_THREADS			=  8,
+	NET_TUX_KEEPALIVE_TIMEOUT	=  9,
+	NET_TUX_MAX_KEEPALIVE_BW	= 10,
+	NET_TUX_DEFER_ACCEPT		= 11,
+	NET_TUX_MAX_FREE_REQUESTS	= 12,
+	NET_TUX_MAX_CONNECT		= 13,
+	NET_TUX_MAX_BACKLOG		= 14,
+	NET_TUX_MODE_FORBIDDEN		= 15,
+	NET_TUX_MODE_ALLOWED		= 16,
+	NET_TUX_MODE_USERSPACE		= 17,
+	NET_TUX_MODE_CGI		= 18,
+	NET_TUX_CGI_UID			= 19,
+	NET_TUX_CGI_GID			= 20,
+	NET_TUX_CGIROOT			= 21,
+	NET_TUX_LOGENTRY_ALIGN_ORDER	= 22,
+	NET_TUX_NONAGLE			= 23,
+	NET_TUX_ACK_PINGPONG		= 24,
+	NET_TUX_PUSH_ALL		= 25,
+	NET_TUX_ZEROCOPY_PARSE		= 26,
+	NET_CONFIG_TUX_DEBUG_BLOCKING	= 27,
+	NET_TUX_PAGE_AGE_START		= 28,
+	NET_TUX_PAGE_AGE_ADV		= 29,
+	NET_TUX_PAGE_AGE_MAX		= 30,
+	NET_TUX_VIRTUAL_SERVER		= 31,
+	NET_TUX_MAX_OBJECT_SIZE		= 32,
+	NET_TUX_COMPRESSION		= 33,
+	NET_TUX_NOID			= 34,
+	NET_TUX_CGI_INHERIT_CPU		= 35,
+	NET_TUX_CGI_CPU_MASK		= 36,
+	NET_TUX_ZEROCOPY_HEADER		= 37,
+	NET_TUX_ZEROCOPY_SENDFILE	= 38,
+	NET_TUX_ALL_USERSPACE		= 39,
+	NET_TUX_REDIRECT_LOGGING	= 40,
+	NET_TUX_REFERER_LOGGING		= 41,
+	NET_TUX_MAX_HEADER_LEN		= 42,
+	NET_TUX_404_PAGE		= 43,
+	NET_TUX_MAX_KEEPALIVES		= 44,
+	NET_TUX_IGNORE_QUERY		= 45,
+};
+
 /* CTL_PROC names: */
 
 /* CTL_FS names: */
@@ -795,6 +856,9 @@ typedef int ctl_handler (ctl_table *table, int __user *name, int nlen,
 typedef int proc_handler (ctl_table *ctl, int write, struct file * filp,
 			  void __user *buffer, size_t *lenp, loff_t *ppos);
 
+typedef int virt_handler (struct ctl_table *ctl, int write, xid_t xid,
+			  void **datap, size_t *lenp);
+
 extern int proc_dostring(ctl_table *, int, struct file *,
 			 void __user *, size_t *, loff_t *);
 extern int proc_dointvec(ctl_table *, int, struct file *,
@@ -876,6 +940,7 @@ struct ctl_table
 	mode_t mode;
 	ctl_table *child;
 	proc_handler *proc_handler;	/* Callback for text formatting */
+	virt_handler *virt_handler;	/* Context virtualization */
 	ctl_handler *strategy;		/* Callback function for all r/w */
 	struct proc_dir_entry *de;	/* /proc control block */
 	void *extra1;

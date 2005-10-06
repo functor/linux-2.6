@@ -79,6 +79,8 @@ struct fsxattr {
 #define XFS_XFLAG_RTINHERIT	0x00000100	/* create with rt bit set */
 #define XFS_XFLAG_PROJINHERIT	0x00000200	/* create with parents projid */
 #define XFS_XFLAG_NOSYMLINKS	0x00000400	/* disallow symlink creation */
+#define XFS_XFLAG_BARRIER	0x00004000	/* chroot() barrier */
+#define XFS_XFLAG_IUNLINK	0x00008000	/* immutable unlink */
 #define XFS_XFLAG_HASATTR	0x80000000	/* no DIFLAG for this	*/
 
 /*
@@ -306,7 +308,8 @@ typedef struct xfs_bstat {
 	__s32		bs_extents;	/* number of extents		*/
 	__u32		bs_gen;		/* generation count		*/
 	__u16		bs_projid;	/* project id			*/
-	unsigned char	bs_pad[14];	/* pad space, unused		*/
+	__u16		bs_xid;		/* context id			*/
+	unsigned char	bs_pad[12];	/* pad space, unused		*/
 	__u32		bs_dmevmask;	/* DMIG event mask		*/
 	__u16		bs_dmstate;	/* DMIG state info		*/
 	__u16		bs_aextents;	/* attribute number of extents	*/

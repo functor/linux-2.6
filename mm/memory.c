@@ -1691,6 +1691,10 @@ static int do_swap_page(struct mm_struct * mm,
 		grab_swap_token();
 	}
 
+	if (!vx_rsspages_avail(mm, 1)) {
+		ret = VM_FAULT_OOM;
+		goto out;
+	}
 	mark_page_accessed(page);
 	lock_page(page);
 
@@ -1772,6 +1776,8 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		pte_unmap(page_table);
 		spin_unlock(&mm->page_table_lock);
 
+		if (!vx_rsspages_avail(mm, 1))
+			goto no_mem;
 		if (unlikely(anon_vma_prepare(vma)))
 			goto no_mem;
 		page = alloc_zeroed_user_highpage(vma, addr);
@@ -1796,7 +1802,7 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		page_add_anon_rmap(page, vma, addr);
 	}
 
-	set_pte_at(mm, addr, page_table, entry);
+	set_pte_at_new(mm, addr, page_table, entry);
 	pte_unmap(page_table);
 
 	/* No need to invalidate - it was non-present before */
@@ -1845,6 +1851,9 @@ do_no_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	}
 retry:
 	cond_resched();
+	/* FIXME: is that check useful here? */
+	if (!vx_rsspages_avail(mm, 1))
+		return VM_FAULT_OOM;
 	new_page = vma->vm_ops->nopage(vma, address & PAGE_MASK, &ret);
 	/*
 	 * No smp_rmb is needed here as long as there's a full
@@ -1910,7 +1919,7 @@ retry:
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		if (write_access)
 			entry = maybe_mkwrite(pte_mkdirty(entry), vma);
-		set_pte_at(mm, address, page_table, entry);
+		set_pte_at_new(mm, address, page_table, entry);
 		if (anon) {
 			lru_cache_add_active(new_page);
 			page_add_anon_rmap(new_page, vma, address);

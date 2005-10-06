@@ -277,6 +277,9 @@ static void __exit ns558_exit(void)
 {
 	struct ns558 *ns558;
 
+	if (list_empty(&ns558_list))
+		return;
+
 	list_for_each_entry(ns558, &ns558_list, node) {
 		gameport_unregister_port(ns558->gameport);
 		release_region(ns558->io & ~(ns558->size - 1), ns558->size);

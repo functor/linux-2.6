@@ -176,6 +176,12 @@ EXPORT_SYMBOL(_atomic_dec_and_lock);
 
 EXPORT_SYMBOL(__PAGE_KERNEL);
 
+#ifdef CONFIG_X86_STACK_CHECK
+extern void mcount(void);
+EXPORT_SYMBOL(mcount);
+#endif
+
+
 #ifdef CONFIG_HIGHMEM
 EXPORT_SYMBOL(kmap);
 EXPORT_SYMBOL(kunmap);

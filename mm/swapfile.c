@@ -30,6 +30,7 @@
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 #include <linux/swapops.h>
+#include <linux/vs_memory.h>
 
 DEFINE_SPINLOCK(swaplock);
 unsigned int nr_swapfiles;
@@ -1590,6 +1591,8 @@ void si_swapinfo(struct sysinfo *val)
 	val->freeswap = nr_swap_pages + nr_to_be_unused;
 	val->totalswap = total_swap_pages + nr_to_be_unused;
 	swap_list_unlock();
+	if (vx_flags(VXF_VIRT_MEM, 0))
+		vx_vsi_swapinfo(val);
 }
 
 /*

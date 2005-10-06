@@ -165,8 +165,8 @@ static void expectation_timed_out(unsigned long ul_expect)
 
 /* If an expectation for this connection is found, it gets delete from
  * global list then returned. */
-static struct ip_conntrack_expect *
-find_expectation(const struct ip_conntrack_tuple *tuple)
+struct ip_conntrack_expect *
+__ip_conntrack_exp_find(const struct ip_conntrack_tuple *tuple)
 {
 	struct ip_conntrack_expect *i;
 
@@ -287,7 +287,7 @@ conntrack_tuple_cmp(const struct ip_conntrack_tuple_hash *i,
 		&& ip_ct_tuple_equal(tuple, &i->tuple);
 }
 
-static struct ip_conntrack_tuple_hash *
+struct ip_conntrack_tuple_hash *
 __ip_conntrack_find(const struct ip_conntrack_tuple *tuple,
 		    const struct ip_conntrack *ignored_conntrack)
 {
@@ -499,6 +499,10 @@ init_conntrack(const struct ip_conntrack_tuple *tuple,
 	conntrack->ct_general.destroy = destroy_conntrack;
 	conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple = *tuple;
 	conntrack->tuplehash[IP_CT_DIR_REPLY].tuple = repl_tuple;
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	conntrack->xid[IP_CT_DIR_ORIGINAL] = -1;
+	conntrack->xid[IP_CT_DIR_REPLY] = -1;
+#endif
 	if (!protocol->new(conntrack, skb)) {
 		kmem_cache_free(ip_conntrack_cachep, conntrack);
 		return NULL;
@@ -509,7 +513,7 @@ init_conntrack(const struct ip_conntrack_tuple *tuple,
 	conntrack->timeout.function = death_by_timeout;
 
 	WRITE_LOCK(&ip_conntrack_lock);
-	exp = find_expectation(tuple);
+	exp = __ip_conntrack_exp_find(tuple);
 
 	if (exp) {
 		DEBUGP("conntrack: expectation arrives ct=%p exp=%p\n",

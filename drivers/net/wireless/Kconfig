@@ -137,6 +137,197 @@ config PCMCIA_RAYCS
 comment "Wireless 802.11b ISA/PCI cards support"
 	depends on NET_RADIO && (ISA || PCI || PPC_PMAC || PCMCIA)
 
+
+config IEEE80211
+        tristate "Generic IEEE 802.11 Networking Stack"
+        depends on NET_RADIO
+        select CRYPTO
+        select CRYPTO_ARC4
+        select CRC32
+
+config IEEE80211_DEBUG
+	bool "Enable full debugging output"
+	depends on IEEE80211
+	---help---
+	  This option will enable debug tracing output for the 
+	  ieee80211 network stack.  
+
+	  This will result in the kernel module being ~70k larger.  You 
+	  can control which debug output is sent to the kernel log by 
+	  setting the value in 
+
+	  /proc/net/ieee80211/debug_level
+
+	  For example:
+
+	  % echo 0x00000FFO > /sys/bus/pci/drivers/ipw2200/debug_level
+
+	  For a list of values you can assign to debug_level, simply perform:
+
+	  % . idvals
+	  
+	  From within drivers/net/wireless/ipw2200
+
+	  If you are not trying to debug or develop the IPW2200 driver, you 
+	  most likely want to say N here.
+
+
+config IEEE80211_CRYPT
+        tristate "IEEE 802.11 encryption"
+        depends on IEEE80211
+        ---help---
+        Software implementation of IEEE 802.11 encryption.  This module
+	adds WEP support, and the baseline capabilities required for WPA.
+
+        This can be compiled as a modules and it will be called
+        "ieee80211_crypt.ko".
+
+config IEEE80211_WPA
+        tristate "IEEE 802.11 WPA"
+        depends on IEEE80211_CRYPT
+        ---help---
+        Software implementation of IEEE 802.11 WPA.  You will need
+        to select the WPA algorithms you wish to use.
+
+config IEEE80211_CRYPT_CCMP
+        tristate "IEEE 802.11 CCMP encryption"
+        depends on IEEE80211_WPA
+	depends on CRYPTO_AES_586
+        ---help---
+        Software implementation of IEEE 802.11 CCMP encryption.
+
+        This can be compiled as a modules and it will be called
+        "ieee80211_crypt_ccmp.ko".
+
+config IEEE80211_CRYPT_TKIP
+        tristate "IEEE 802.11 TKIP encryption"
+        depends on IEEE80211_WPA
+	depends on CRYPTO_MICHAEL_MIC
+        ---help---
+        Software implementation of IEEE 802.11 TKIP encryption.
+
+        This can be compiled as a modules and it will be called
+        "ieee80211_crypt_tkip.ko".
+
+config IPW2100
+	tristate "Intel PRO/Wireless 2100 802.11b"
+	depends on NET_RADIO && PCI && IEEE80211
+	select FW_LOADER
+	select CRYPTO
+	select CRYPTO_ARC4
+	select CRC32
+	---help---
+          A driver for the Intel PRO/Wireless 2100 802.11b wireless network
+          adapter.
+
+          See <file:Documentation/networking/README.ipw2100> for information on
+          the capabilities currently enabled in this driver and for tips
+          for debugging issues and problems.
+
+	  In order to use this driver, you will need a firmware image for it.
+          You can obtain the firmware from
+	  <http://ipw2100.sf.net/>.  Once you have the firmware image, you 
+	  will need to place it in /etc/firmware.
+
+          You will also very likely need the Wireless Tools in order to
+          configure your card:
+
+          <http://www.hpl.hp.com/personal/Jean_Tourrilhes/Linux/Tools.html>.
+ 
+          If you want to compile the driver as a module ( = code which can be
+          inserted in and remvoed from the running kernel whenever you want),
+          say M here and read <file:Documentation/modules.txt>.  The module
+          will be called ipw2100.ko.
+
+	  NOTE:  The IPW2200 relies on the kernel crypto support 
+    	  (CONFIG_CRYPTO) in order to support WEP.  In addition to 
+	  requiring crypto support, you must have the ARC4 module 
+	  enabled, as well as the CRC library function.
+
+config IPW_DEBUG
+	bool "Enable full debugging output"
+	depends on IPW2100
+	---help---
+	  This option will enable debug tracing output for the IPW2100.  
+
+	  This will result in the kernel module being ~60k larger.  You can 
+	  control which debug output is sent to the kernel log by setting the 
+	  value in 
+
+	  /proc/ipw2100/debug_level
+
+	  This entry will only exist if this option is enabled.  For a list of 
+	  values you can assign to debug_level, simply perform:
+
+	  % cat /proc/ipw2100/debug_level
+
+	  To set a value, simply echo an 8-byte hex value to the same file:
+
+	  % echo 00000FFO > /proc/ipw2100/debug_level
+
+	  If you are not trying to debug or develop the IPW2100 driver, you 
+	  most likely want to say N here.
+
+config IPW2100_PROMISC
+        bool "Enable promiscuous mode"
+        depends on IPW2100
+        ---help---
+	  Enables promiscuous/monitor mode support for the ipw2100 driver.
+	  With this feature compiled into the driver, you can switch to 
+	  promiscuous mode via the Wireless Tool's Monitor mode.  While in this
+	  mode, no packets can be sent.
+
+config IPW2100_LEGACY_FW_LOAD
+	bool "Legacy firmware loading (non-hotplug)"
+	depends on IPW2100
+	---help---
+	  As of 0.33 we added the ability to use the hotplug request_firmware
+	  capability of Linux to load the firmware image.  If you do not have
+	  hot plug configured, or have compilation or other errors while trying
+	  to use the new mechanism, you can enable this option to use the
+	  legacy approach (loading the firmware from /etc/firmware/).
+
+	  Legacy approach will not work when IPW2100 support is directly in the
+	  kernel (not module).
+
+	  Saying Y here will result in the kernel module being ~4k larger.
+
+
+config IPW2200
+	tristate "Intel PRO/Wireless 2200 802.11bg"
+	depends on NET_RADIO && PCI && IEEE80211
+	select FW_LOADER
+	select CRYPTO
+	select CRYPTO_ARC4
+	select CRC32
+	---help---
+          A driver for the Intel PRO/Wireless 2200 802.11bg wireless 
+	  network adapter.
+
+          See <file:Documentation/networking/README.ipw2200> for 
+	  information on the capabilities currently enabled in this 
+	  driver and for tips for debugging issues and problems.
+
+	  In order to use this driver, you will need a firmware image for it.
+          You can obtain the firmware from
+	  <http://ipw2200.sf.net/>.  See the above referenced README.ipw2200 
+	  for information on where to install the firmare images.
+
+          You will also very likely need the Wireless Tools in order to
+          configure your card:
+
+          <http://www.hpl.hp.com/personal/Jean_Tourrilhes/Linux/Tools.html>.
+ 
+          If you want to compile the driver as a module ( = code which can be
+          inserted in and remvoed from the running kernel whenever you want),
+          say M here and read <file:Documentation/modules.txt>.  The module
+          will be called ipw2200.ko.
+
+	  NOTE:  The IPW2200 relies on the kernel crypto support 
+    	  (CONFIG_CRYPTO) in order to support WEP.  In addition to 
+	  requiring crypto support, you must have the ARC4 module 
+	  enabled, as well as the CRC library function.
+	
 config AIRO
 	tristate "Cisco/Aironet 34X/35X/4500/4800 ISA and PCI cards"
 	depends on NET_RADIO && ISA && (PCI || BROKEN)

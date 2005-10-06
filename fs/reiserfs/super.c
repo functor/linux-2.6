@@ -850,6 +850,7 @@ static int reiserfs_parse_options (struct super_block * s, char * options, /* st
 	{"user_xattr",	.setmask = 1<<REISERFS_UNSUPPORTED_OPT},
 	{"nouser_xattr",.clrmask = 1<<REISERFS_UNSUPPORTED_OPT},
 #endif
+	{"tagxid",	.setmask = 1<<REISERFS_TAGXID},
 #ifdef CONFIG_REISERFS_FS_POSIX_ACL
 	{"acl",		.setmask = 1<<REISERFS_POSIXACL},
 	{"noacl",	.clrmask = 1<<REISERFS_POSIXACL},
@@ -1624,6 +1625,10 @@ static int reiserfs_fill_super (struct super_block * s, void * data, int silent)
       SWARN(silent, s, "sh-2021: reiserfs_fill_super: can not find reiserfs on %s", reiserfs_bdevname (s));
       goto error;
     }
+
+    /* map mount option tagxid */
+    if (REISERFS_SB(s)->s_mount_opt & (1 << REISERFS_TAGXID))
+	s->s_flags |= MS_TAGXID ;
 
     rs = SB_DISK_SUPER_BLOCK (s);
     /* Let's do basic sanity check to verify that underlying device is not

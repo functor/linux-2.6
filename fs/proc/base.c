@@ -35,6 +35,7 @@
 #include <linux/seccomp.h>
 #include <linux/cpuset.h>
 #include <linux/audit.h>
+#include <linux/vs_network.h>
 #include "internal.h"
 
 /*
@@ -80,6 +81,8 @@ enum pid_directory_inos {
 	PROC_TGID_ATTR_EXEC,
 	PROC_TGID_ATTR_FSCREATE,
 #endif
+	PROC_TGID_VX_INFO,
+	PROC_TGID_IP_INFO,
 #ifdef CONFIG_AUDITSYSCALL
 	PROC_TGID_LOGINUID,
 #endif
@@ -117,6 +120,8 @@ enum pid_directory_inos {
 	PROC_TID_ATTR_EXEC,
 	PROC_TID_ATTR_FSCREATE,
 #endif
+	PROC_TID_VX_INFO,
+	PROC_TID_IP_INFO,
 #ifdef CONFIG_AUDITSYSCALL
 	PROC_TID_LOGINUID,
 #endif
@@ -143,7 +148,7 @@ static struct pid_entry tgid_base_stuff[] = {
 	E(PROC_TGID_CMDLINE,   "cmdline", S_IFREG|S_IRUGO),
 	E(PROC_TGID_STAT,      "stat",    S_IFREG|S_IRUGO),
 	E(PROC_TGID_STATM,     "statm",   S_IFREG|S_IRUGO),
-	E(PROC_TGID_MAPS,      "maps",    S_IFREG|S_IRUGO),
+	E(PROC_TGID_MAPS,      "maps",    S_IFREG|S_IRUSR),
 	E(PROC_TGID_MEM,       "mem",     S_IFREG|S_IRUSR|S_IWUSR),
 #ifdef CONFIG_SECCOMP
 	E(PROC_TGID_SECCOMP,   "seccomp", S_IFREG|S_IRUSR|S_IWUSR),
@@ -164,6 +169,8 @@ static struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_CPUSETS
 	E(PROC_TGID_CPUSET,    "cpuset",  S_IFREG|S_IRUGO),
 #endif
+	E(PROC_TGID_VX_INFO,   "vinfo",   S_IFREG|S_IRUGO),
+	E(PROC_TGID_IP_INFO,   "ninfo",   S_IFREG|S_IRUGO),
 	E(PROC_TGID_OOM_SCORE, "oom_score",S_IFREG|S_IRUGO),
 	E(PROC_TGID_OOM_ADJUST,"oom_adj", S_IFREG|S_IRUGO|S_IWUSR),
 #ifdef CONFIG_AUDITSYSCALL
@@ -179,7 +186,7 @@ static struct pid_entry tid_base_stuff[] = {
 	E(PROC_TID_CMDLINE,    "cmdline", S_IFREG|S_IRUGO),
 	E(PROC_TID_STAT,       "stat",    S_IFREG|S_IRUGO),
 	E(PROC_TID_STATM,      "statm",   S_IFREG|S_IRUGO),
-	E(PROC_TID_MAPS,       "maps",    S_IFREG|S_IRUGO),
+	E(PROC_TID_MAPS,       "maps",    S_IFREG|S_IRUSR),
 	E(PROC_TID_MEM,        "mem",     S_IFREG|S_IRUSR|S_IWUSR),
 #ifdef CONFIG_SECCOMP
 	E(PROC_TID_SECCOMP,    "seccomp", S_IFREG|S_IRUSR|S_IWUSR),
@@ -200,6 +207,8 @@ static struct pid_entry tid_base_stuff[] = {
 #ifdef CONFIG_CPUSETS
 	E(PROC_TID_CPUSET,     "cpuset",  S_IFREG|S_IRUGO),
 #endif
+	E(PROC_TID_VX_INFO,    "vinfo",   S_IFREG|S_IRUGO),
+	E(PROC_TID_IP_INFO,    "ninfo",   S_IFREG|S_IRUGO),
 	E(PROC_TID_OOM_SCORE,  "oom_score",S_IFREG|S_IRUGO),
 	E(PROC_TID_OOM_ADJUST, "oom_adj", S_IFREG|S_IRUGO|S_IWUSR),
 #ifdef CONFIG_AUDITSYSCALL
@@ -1042,7 +1051,7 @@ static int proc_pident_readdir(struct file *filp,
 	struct inode *inode = dentry->d_inode;
 	struct pid_entry *p;
 	ino_t ino;
-	int ret;
+	int ret, hide;
 
 	ret = -ENOENT;
 	if (!pid_alive(proc_task(inode)))
@@ -1073,11 +1082,20 @@ static int proc_pident_readdir(struct file *filp,
 			goto out;
 		}
 		p = ents + i;
+		hide = vx_flags(VXF_INFO_HIDE, 0);
 		while (p->name) {
+			if (hide) {
+				switch (p->type) {
+				case PROC_TGID_VX_INFO:
+				case PROC_TGID_IP_INFO:
+					goto skip;
+				}
+			}
 			if (filldir(dirent, p->name, p->len, filp->f_pos,
 				    fake_ino(pid, p->type), p->mode >> 12) < 0)
 				goto out;
 			filp->f_pos++;
+		skip:
 			p++;
 		}
 	}
@@ -1149,6 +1167,7 @@ static struct inode *proc_pid_make_inode(struct super_block * sb, struct task_st
 		inode->i_uid = task->euid;
 		inode->i_gid = task->egid;
 	}
+	inode->i_xid = vx_task_xid(task);
 	security_task_to_inode(task, inode);
 
 out:
@@ -1174,6 +1193,11 @@ static int pid_revalidate(struct dentry *dentry, struct nameidata *nd)
 {
 	struct inode *inode = dentry->d_inode;
 	struct task_struct *task = proc_task(inode);
+
+	if (!vx_check(vx_task_xid(task), VX_IDENT))
+		goto out_drop;
+	/* discard wrong fakeinit */
+
 	if (pid_alive(task)) {
 		if (proc_type(inode) == PROC_TGID_INO || proc_type(inode) == PROC_TID_INO || task_dumpable(task)) {
 			inode->i_uid = task->euid;
@@ -1185,6 +1209,7 @@ static int pid_revalidate(struct dentry *dentry, struct nameidata *nd)
 		security_task_to_inode(task, inode);
 		return 1;
 	}
+out_drop:
 	d_drop(dentry);
 	return 0;
 }
@@ -1419,6 +1444,9 @@ static struct file_operations proc_tgid_attr_operations;
 static struct inode_operations proc_tgid_attr_inode_operations;
 #endif
 
+extern int proc_pid_vx_info(struct task_struct *, char *);
+extern int proc_pid_nx_info(struct task_struct *, char *);
+
 static int get_tid_list(int index, unsigned int *tids, struct inode *dir);
 
 /* SMP-safe */
@@ -1594,15 +1622,33 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 			inode->i_fop = &proc_loginuid_operations;
 			break;
 #endif
+		case PROC_TID_VX_INFO:
+		case PROC_TGID_VX_INFO:
+			if (task_vx_flags(task, VXF_INFO_HIDE, 0))
+				goto out_noent;
+			inode->i_fop = &proc_info_file_operations;
+			ei->op.proc_read = proc_pid_vx_info;
+			break;
+		case PROC_TID_IP_INFO:
+		case PROC_TGID_IP_INFO:
+			if (task_vx_flags(task, VXF_INFO_HIDE, 0))
+				goto out_noent;
+			inode->i_fop = &proc_info_file_operations;
+			ei->op.proc_read = proc_pid_nx_info;
+			break;
 		default:
 			printk("procfs: impossible type (%d)",p->type);
-			iput(inode);
-			return ERR_PTR(-EINVAL);
+			error = -EINVAL;
+			goto out_put;
 	}
 	dentry->d_op = &pid_dentry_operations;
 	d_add(dentry, inode);
 	return NULL;
 
+out_noent:
+	error=-ENOENT;
+out_put:
+	iput(inode);
 out:
 	return ERR_PTR(error);
 }
@@ -1686,14 +1732,14 @@ static int proc_self_readlink(struct dentry *dentry, char __user *buffer,
 			      int buflen)
 {
 	char tmp[30];
-	sprintf(tmp, "%d", current->tgid);
+	sprintf(tmp, "%d", vx_map_tgid(current->tgid));
 	return vfs_readlink(dentry,buffer,buflen,tmp);
 }
 
 static int proc_self_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	char tmp[30];
-	sprintf(tmp, "%d", current->tgid);
+	sprintf(tmp, "%d", vx_map_tgid(current->tgid));
 	return vfs_follow_link(nd,tmp);
 }	
 
@@ -1756,6 +1802,20 @@ void proc_pid_flush(struct dentry *proc_dentry)
 	}
 }
 
+#define	VXF_FAKE_INIT	(VXF_INFO_INIT|VXF_STATE_INIT)
+
+static inline int proc_pid_visible(struct task_struct *task, int pid)
+{
+	if ((pid == 1) &&
+		!vx_flags(VXF_FAKE_INIT, VXF_FAKE_INIT))
+		goto visible;
+	if (vx_check(vx_task_xid(task), VX_WATCH|VX_IDENT))
+		goto visible;
+	return 0;
+visible:
+	return 1;
+}
+
 /* SMP-safe */
 struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, struct nameidata *nd)
 {
@@ -1792,13 +1852,14 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, struct
 	if (!task)
 		goto out;
 
+	/* check for context visibility */
+	if (!proc_pid_visible(task, tgid))
+		goto out_drop_task;
+
 	inode = proc_pid_make_inode(dir->i_sb, task, PROC_TGID_INO);
+	if (!inode)
+		goto out_drop_task;
 
-
-	if (!inode) {
-		put_task_struct(task);
-		goto out;
-	}
 	inode->i_mode = S_IFDIR|S_IRUGO|S_IXUGO;
 	inode->i_op = &proc_tgid_base_inode_operations;
 	inode->i_fop = &proc_tgid_base_operations;
@@ -1827,6 +1888,8 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, struct
 		goto out;
 	}
 	return NULL;
+out_drop_task:
+	put_task_struct(task);
 out:
 	return ERR_PTR(-ENOENT);
 }
@@ -1842,6 +1905,8 @@ static struct dentry *proc_task_lookup(struct inode *dir, struct dentry * dentry
 	tid = name_to_int(dentry);
 	if (tid == ~0U)
 		goto out;
+	if (vx_current_initpid(tid))
+		goto out;
 
 	read_lock(&tasklist_lock);
 	task = find_task_by_pid(tid);
@@ -1853,11 +1918,14 @@ static struct dentry *proc_task_lookup(struct inode *dir, struct dentry * dentry
 	if (leader->tgid != task->tgid)
 		goto out_drop_task;
 
+	/* check for context visibility */
+	if (!proc_pid_visible(task, tid))
+		goto out_drop_task;
+
 	inode = proc_pid_make_inode(dir->i_sb, task, PROC_TID_INO);
-
-
 	if (!inode)
 		goto out_drop_task;
+
 	inode->i_mode = S_IFDIR|S_IRUGO|S_IXUGO;
 	inode->i_op = &proc_tid_base_inode_operations;
 	inode->i_fop = &proc_tid_base_operations;
@@ -1897,7 +1965,7 @@ static int get_tgid_list(int index, unsigned long version, unsigned int *tgids)
 	read_lock(&tasklist_lock);
 	p = NULL;
 	if (version) {
-		p = find_task_by_pid(version);
+		p = find_task_by_real_pid(version);
 		if (p && !thread_group_leader(p))
 			p = NULL;
 	}
@@ -1909,11 +1977,15 @@ static int get_tgid_list(int index, unsigned long version, unsigned int *tgids)
 
 	for ( ; p != &init_task; p = next_task(p)) {
 		int tgid = p->pid;
+
 		if (!pid_alive(p))
+			continue;
+		/* check for context visibility */
+		if (!proc_pid_visible(p, tgid))
 			continue;
 		if (--index >= 0)
 			continue;
-		tgids[nr_tgids] = tgid;
+		tgids[nr_tgids] = vx_map_tgid(tgid);
 		nr_tgids++;
 		if (nr_tgids >= PROC_MAXPIDS)
 			break;
@@ -1943,10 +2015,13 @@ static int get_tid_list(int index, unsigned int *tids, struct inode *dir)
 	if (pid_alive(task)) do {
 		int tid = task->pid;
 
+		/* check for context visibility */
+		if (!proc_pid_visible(task, tid))
+			continue;
 		if (--index >= 0)
 			continue;
 		if (tids != NULL)
-			tids[nr_tids] = tid;
+			tids[nr_tids] = vx_map_pid(tid);
 		nr_tids++;
 		if (nr_tids >= PROC_MAXPIDS)
 			break;
@@ -2022,11 +2097,14 @@ static int proc_task_readdir(struct file * filp, void * dirent, filldir_t filldi
 	unsigned int nr_tids, i;
 	struct dentry *dentry = filp->f_dentry;
 	struct inode *inode = dentry->d_inode;
+	struct task_struct *task = proc_task(inode);
 	int retval = -ENOENT;
 	ino_t ino;
 	unsigned long pos = filp->f_pos;  /* avoiding "long long" filp->f_pos */
 
-	if (!pid_alive(proc_task(inode)))
+	if (!vx_check(vx_task_xid(task), VX_WATCH|VX_IDENT))
+		goto out;
+	if (!pid_alive(task))
 		goto out;
 	retval = 0;
 

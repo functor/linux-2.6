@@ -214,6 +214,26 @@ config MATH_EMULATION
 	  here.  Saying Y here will not hurt performance (on any machine) but
 	  will increase the size of the kernel.
 
+config KEXEC
+	bool "kexec system call (EXPERIMENTAL)"
+	depends on EXPERIMENTAL
+	help
+	  kexec is a system call that implements the ability to shutdown your
+	  current kernel, and to start another kernel.  It is like a reboot
+	  but it is indepedent of the system firmware.   And like a reboot
+	  you can start any kernel with it, not just Linux.
+
+	  The name comes from the similiarity to the exec system call.
+
+	  It is an ongoing process to be certain the hardware in a machine
+	  is properly shutdown, so do not be surprised if this code does not
+	  initially work for you.  It may help to enable device hotplugging
+	  support.  As of this writing the exact hardware interface is
+	  strongly in flux, so no good recommendation can be made.
+
+	  In the GameCube implementation, kexec allows you to load and
+	  run DOL files, including kernel and homebrew DOLs.
+
 source "drivers/cpufreq/Kconfig"
 
 config CPU_FREQ_PMAC
@@ -1083,6 +1103,23 @@ source "drivers/zorro/Kconfig"
 
 source kernel/power/Kconfig
 
+config SECCOMP
+	bool "Enable seccomp to safely compute untrusted bytecode"
+	depends on PROC_FS
+	default y
+	help
+	  This kernel feature is useful for number crunching applications
+	  that may need to compute untrusted bytecode during their
+	  execution. By using pipes or other transports made available to
+	  the process as file descriptors supporting the read/write
+	  syscalls, it's possible to isolate those applications in
+	  their own address space using seccomp. Once seccomp is
+	  enabled via /proc/<pid>/seccomp, it cannot be disabled
+	  and the task is only allowed to execute a few safe syscalls
+	  defined by each seccomp mode.
+
+	  If unsure, say Y. Only embedded should say N here.
+
 endmenu
 
 config ISA_DMA_API
@@ -1331,6 +1368,8 @@ source "lib/Kconfig"
 source "arch/ppc/oprofile/Kconfig"
 
 source "arch/ppc/Kconfig.debug"
+
+source "kernel/vserver/Kconfig"
 
 source "security/Kconfig"
 

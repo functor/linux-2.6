@@ -6,6 +6,13 @@
 #include <linux/threads.h>
 #include <linux/mm.h>
 
+#define arch_add_exec_range(mm, limit) \
+		do { (void)(mm), (void)(limit); } while (0)
+#define arch_flush_exec_range(mm) \
+		do { (void)(mm); } while (0)
+#define arch_remove_exec_range(mm, limit) \
+		do { (void)(mm), (void)(limit); } while (0)
+
 #define pmd_populate_kernel(mm, pmd, pte) \
 		set_pmd(pmd, __pmd(_PAGE_TABLE | __pa(pte)))
 #define pud_populate(mm, pud, pmd) \

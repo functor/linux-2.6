@@ -42,6 +42,17 @@ do {				  					  \
 } while (0)
 #endif
 
+#ifndef __HAVE_ARCH_PTEP_ESTABLISH_NEW
+/*
+ * Establish a mapping where none previously existed
+ */
+#define ptep_establish_new(__vma, __address, __ptep, __entry)		\
+do {									\
+	set_pte(__ptep, __entry);					\
+} while (0)
+#define set_pte_at_new(__a, __b, __c, __d) set_pte_at(__a, __b, __c, __d)
+#endif
+
 #ifndef __HAVE_ARCH_PTEP_TEST_AND_CLEAR_YOUNG
 #define ptep_test_and_clear_young(__vma, __address, __ptep)		\
 ({									\

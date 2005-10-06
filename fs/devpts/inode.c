@@ -20,8 +20,6 @@
 #include <linux/devpts_fs.h>
 #include <linux/xattr.h>
 
-#define DEVPTS_SUPER_MAGIC 0x1cd1
-
 extern struct xattr_handler devpts_xattr_security_handler;
 
 static struct xattr_handler *devpts_xattr_handlers[] = {
@@ -31,6 +29,15 @@ static struct xattr_handler *devpts_xattr_handlers[] = {
 	NULL
 };
 
+static int devpts_permission(struct inode *inode, int mask, struct nameidata *nd)
+{
+	int ret = -EACCES;
+
+	if (vx_check(inode->i_xid, VX_IDENT))
+		ret = generic_permission(inode, mask, NULL);
+	return ret;
+}
+
 static struct inode_operations devpts_file_inode_operations = {
 #ifdef CONFIG_DEVPTS_FS_XATTR
 	.setxattr	= generic_setxattr,
@@ -38,6 +45,7 @@ static struct inode_operations devpts_file_inode_operations = {
 	.listxattr	= generic_listxattr,
 	.removexattr	= generic_removexattr,
 #endif
+	.permission	= devpts_permission,
 };
 
 static struct vfsmount *devpts_mnt;
@@ -88,6 +96,24 @@ static int devpts_remount(struct super_block *sb, int *flags, char *data)
 	return 0;
 }
 
+static int devpts_filter(struct dentry *de)
+{
+	return vx_check(de->d_inode->i_xid, VX_IDENT);
+}
+
+static int devpts_readdir(struct file * filp, void * dirent, filldir_t filldir)
+{
+	return dcache_readdir_filter(filp, dirent, filldir, devpts_filter);
+}
+
+static struct file_operations devpts_dir_operations = {
+	.open		= dcache_dir_open,
+	.release	= dcache_dir_close,
+	.llseek		= dcache_dir_lseek,
+	.read		= generic_read_dir,
+	.readdir	= devpts_readdir,
+};
+
 static struct super_operations devpts_sops = {
 	.statfs		= simple_statfs,
 	.remount_fs	= devpts_remount,
@@ -115,8 +141,9 @@ devpts_fill_super(struct super_block *s, void *data, int silent)
 	inode->i_uid = inode->i_gid = 0;
 	inode->i_mode = S_IFDIR | S_IRUGO | S_IXUGO | S_IWUSR;
 	inode->i_op = &simple_dir_inode_operations;
-	inode->i_fop = &simple_dir_operations;
+	inode->i_fop = &devpts_dir_operations;
 	inode->i_nlink = 2;
+	inode->i_xid = vx_current_xid();
 
 	devpts_root = s->s_root = d_alloc_root(inode);
 	if (s->s_root)
@@ -175,6 +202,7 @@ int devpts_pty_new(struct tty_struct *tty)
 	inode->i_gid = config.setgid ? config.gid : current->fsgid;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	init_special_inode(inode, S_IFCHR|config.mode, device);
+	inode->i_xid = vx_current_xid();
 	inode->i_op = &devpts_file_inode_operations;
 	inode->u.generic_ip = tty;
 

@@ -908,7 +908,15 @@ _GLOBAL(sys_call_table32)
 	.llong .compat_sys_sched_setaffinity
 	.llong .compat_sys_sched_getaffinity
 	.llong .sys_ni_syscall
-	.llong .sys_ni_syscall		/* 225 - reserved for tux */
+#ifdef CONFIG_TUX
+        .llong .__sys_tux
+#else
+# ifdef CONFIG_TUX_MODULE
+        .llong .sys_tux
+# else
+	.llong .sys_ni_syscall
+# endif
+#endif
 	.llong .sys32_sendfile64
 	.llong .compat_sys_io_setup
 	.llong .sys_io_destroy
@@ -940,7 +948,7 @@ _GLOBAL(sys_call_table32)
 	.llong .ppc32_fadvise64_64	/* 32bit only fadvise64_64 */
 	.llong .ppc_rtas		/* 255 */
 	.llong .sys_ni_syscall		/* 256 reserved for sys_debug_setcontext */
-	.llong .sys_ni_syscall		/* 257 reserved for vserver */
+	.llong .sys32_vserver
 	.llong .sys_ni_syscall		/* 258 reserved for new sys_remap_file_pages */
 	.llong .compat_sys_mbind
 	.llong .compat_sys_get_mempolicy	/* 260 */
@@ -1184,7 +1192,15 @@ _GLOBAL(sys_call_table)
 	.llong .sys_sched_setaffinity
 	.llong .sys_sched_getaffinity
 	.llong .sys_ni_syscall
-	.llong .sys_ni_syscall		/* 225 - reserved for tux */
+#ifdef CONFIG_TUX
+        .llong .__sys_tux
+#else
+# ifdef CONFIG_TUX_MODULE
+        .llong .sys_tux
+# else
+	.llong .sys_ni_syscall
+# endif
+#endif
 	.llong .sys_ni_syscall		/* 32bit only sendfile64 */
 	.llong .sys_io_setup
 	.llong .sys_io_destroy
@@ -1216,7 +1232,7 @@ _GLOBAL(sys_call_table)
 	.llong .sys_ni_syscall		/* 32bit only fadvise64_64 */
 	.llong .ppc_rtas		/* 255 */
 	.llong .sys_ni_syscall		/* 256 reserved for sys_debug_setcontext */
-	.llong .sys_ni_syscall		/* 257 reserved for vserver */
+	.llong .sys_vserver
 	.llong .sys_ni_syscall		/* 258 reserved for new sys_remap_file_pages */
 	.llong .sys_mbind
 	.llong .sys_get_mempolicy	/* 260 */

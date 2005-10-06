@@ -287,6 +287,8 @@ void show_regs(struct pt_regs * regs)
 	show_trace(NULL, &regs->esp);
 }
 
+EXPORT_SYMBOL_GPL(show_regs);
+
 /*
  * This gets run with %ebx containing the
  * function to call, and %edx containing
@@ -597,6 +599,8 @@ struct task_struct fastcall * __switch_to(struct task_struct *prev_p, struct tas
 	/* never put a printk in __switch_to... printk() calls wake_up*() indirectly */
 
 	__unlazy_fpu(prev_p);
+	if (next_p->mm)
+		load_user_cs_desc(cpu, next_p->mm);
 
 	/*
 	 * Reload esp0, LDT and the page table pointer:
@@ -850,3 +854,60 @@ unsigned long arch_align_stack(unsigned long sp)
 		sp -= get_random_int() % 8192;
 	return sp & ~0xf;
 }
+
+void arch_add_exec_range(struct mm_struct *mm, unsigned long limit)
+{
+	if (limit > mm->context.exec_limit) {
+		mm->context.exec_limit = limit;
+		set_user_cs(&mm->context.user_cs, limit);
+		if (mm == current->mm) {
+			preempt_disable();
+			load_user_cs_desc(smp_processor_id(), mm);
+			preempt_enable();
+		}
+	}
+}
+
+void arch_remove_exec_range(struct mm_struct *mm, unsigned long old_end)
+{
+	struct vm_area_struct *vma;
+	unsigned long limit = PAGE_SIZE;
+
+	if (old_end == mm->context.exec_limit) {
+		for (vma = mm->mmap; vma; vma = vma->vm_next)
+			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
+				limit = vma->vm_end;
+
+		mm->context.exec_limit = limit;
+		set_user_cs(&mm->context.user_cs, limit);
+		if (mm == current->mm) {
+			preempt_disable();
+			load_user_cs_desc(smp_processor_id(), mm);
+			preempt_enable();
+		}
+	}
+}
+
+void arch_flush_exec_range(struct mm_struct *mm)
+{
+	mm->context.exec_limit = 0;
+	set_user_cs(&mm->context.user_cs, 0);
+}
+
+/*
+ * Generate random brk address between 128MB and 196MB. (if the layout
+ * allows it.)
+ */
+void randomize_brk(unsigned long old_brk)
+{
+	unsigned long new_brk, range_start, range_end;
+
+	range_start = 0x08000000;
+	if (current->mm->brk >= range_start)
+		range_start = current->mm->brk;
+	range_end = range_start + 0x02000000;
+	new_brk = randomize_range(range_start, range_end, 0);
+	if (new_brk)
+		current->mm->brk = new_brk;
+}
+

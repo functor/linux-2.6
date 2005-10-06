@@ -164,6 +164,7 @@ config SYSCTL
 
 config AUDIT
 	bool "Auditing support"
+	depends on NET
 	default y if SECURITY_SELINUX
 	help
 	  Enable auditing infrastructure that can be used with another
@@ -173,7 +174,7 @@ config AUDIT
 
 config AUDITSYSCALL
 	bool "Enable system-call auditing support"
-	depends on AUDIT && (X86 || PPC64 || ARCH_S390 || IA64 || UML)
+	depends on AUDIT && (X86 || PPC || PPC64 || ARCH_S390 || IA64 || UML)
 	default y if SECURITY_SELINUX
 	help
 	  Enable low-overhead system-call auditing infrastructure that
@@ -225,6 +226,23 @@ config IKCONFIG_PROC
 	---help---
 	  This option enables access to the kernel configuration file
 	  through /proc/config.gz.
+
+config OOM_PANIC
+	bool "OOM Panic"
+	default y
+	---help---
+	  This option enables panic() to be called when a system is out of
+	  memory. This feature along with /proc/sys/kernel/panic allows a
+	  different behavior on out-of-memory conditions when the standard
+	  behavior (killing processes in an attempt to recover) does not
+	  make sense.
+
+	  If unsure, say N.
+
+config OOM_KILL
+	bool
+	depends on !OOM_PANIC
+	default y
 
 config CPUSETS
 	bool "Cpuset support"
@@ -320,7 +338,7 @@ config EPOLL
 	  support for epoll family of system calls.
 
 config CC_OPTIMIZE_FOR_SIZE
-	bool "Optimize for size" if EMBEDDED
+	bool "Optimize for size"
 	default y if ARM || H8300
 	help
 	  Enabling this option will pass "-Os" instead of "-O2" to gcc
@@ -462,6 +480,22 @@ config MODULE_SRCVERSION_ALL
 	  others sometimes change the module source without updating
 	  the version).  With this option, such a "srcversion" field
 	  will be created for all modules.  If unsure, say N.
+
+config MODULE_SIG
+	bool "Module signature verification (EXPERIMENTAL)"
+	depends on MODULES && EXPERIMENTAL
+	select CRYPTO
+	select CRYPTO_SHA1
+	select CRYPTO_SIGNATURE
+	help
+	  Check modules for valid signatures upon load.
+
+config MODULE_SIG_FORCE
+	bool "Required modules to be validly signed (EXPERIMENTAL)"
+	depends on MODULE_SIG
+	help
+	  Reject unsigned modules or signed modules for which we don't have a
+	  key.
 
 config KMOD
 	bool "Automatic kernel module loading"

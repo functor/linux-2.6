@@ -171,6 +171,7 @@ xfs_revalidate_inode(
 	inode->i_nlink	= ip->i_d.di_nlink;
 	inode->i_uid	= ip->i_d.di_uid;
 	inode->i_gid	= ip->i_d.di_gid;
+	inode->i_xid	= ip->i_d.di_xid;
 	if (((1 << vp->v_type) & ((1<<VBLK) | (1<<VCHR))) == 0) {
 		inode->i_rdev = 0;
 	} else {
@@ -192,6 +193,14 @@ xfs_revalidate_inode(
 		inode->i_flags |= S_IMMUTABLE;
 	else
 		inode->i_flags &= ~S_IMMUTABLE;
+	if (ip->i_d.di_flags & XFS_DIFLAG_IUNLINK)
+		inode->i_flags |= S_IUNLINK;
+	else
+		inode->i_flags &= ~S_IUNLINK;
+	if (ip->i_d.di_flags & XFS_DIFLAG_BARRIER)
+		inode->i_flags |= S_BARRIER;
+	else
+		inode->i_flags &= ~S_BARRIER;
 	if (ip->i_d.di_flags & XFS_DIFLAG_APPEND)
 		inode->i_flags |= S_APPEND;
 	else

@@ -75,7 +75,7 @@ endif
 
 # Enable unit-at-a-time mode when possible. It shrinks the
 # kernel considerably.
-CFLAGS += $(call cc-option,-funit-at-a-time)
+CFLAGS += $(call cc-option,-fno-unit-at-a-time)
 
 head-y := arch/ppc64/kernel/head.o
 
@@ -86,8 +86,10 @@ core-$(CONFIG_XMON)		+= arch/ppc64/xmon/
 drivers-$(CONFIG_OPROFILE)	+= arch/ppc64/oprofile/
 
 boot := arch/ppc64/boot
+bzImage: vmlinux
+	cp vmlinux arch/ppc64/boot/bzImage
 
-boottarget-$(CONFIG_PPC_PSERIES) := zImage zImage.initrd
+boottarget-$(CONFIG_PPC_PSERIES) := zImage zImage.initrd zImage.stub
 boottarget-$(CONFIG_PPC_MAPLE) := zImage zImage.initrd
 boottarget-$(CONFIG_PPC_ISERIES) := vmlinux.sminitrd vmlinux.initrd vmlinux.sm
 $(boottarget-y): vmlinux

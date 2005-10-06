@@ -132,8 +132,9 @@ static __inline__ int get_order(unsigned long size)
 
 extern struct page *arch_validate(struct page *page, int mask, int order);
 #define HAVE_ARCH_VALIDATE
+#define devmem_is_allowed(x) 1
 
-extern void arch_free_page(struct page *page, int order);
+extern int arch_free_page(struct page *page, int order);
 #define HAVE_ARCH_FREE_PAGE
 
 #endif

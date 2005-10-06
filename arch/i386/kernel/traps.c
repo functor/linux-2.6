@@ -53,6 +53,7 @@
 
 #include <linux/irq.h>
 #include <linux/module.h>
+#include <linux/vserver/debug.h>
 
 #include "mach_traps.h"
 
@@ -182,7 +183,10 @@ void show_stack(struct task_struct *task, unsigned long *esp)
 			break;
 		if (i && ((i % 8) == 0))
 			printk("\n       ");
-		printk("%08lx ", *stack++);
+		if ((check_tainted() != 0) && (i==0))
+			printk("badc0ded ");
+		else
+			printk("%08lx ", *stack++);
 	}
 	printk("\nCall Trace:\n");
 	show_trace(task, esp);
@@ -306,6 +310,7 @@ void die(const char * str, struct pt_regs * regs, long err)
 	};
 	static int die_counter;
 
+	vxh_throw_oops();
 	if (die.lock_owner != _smp_processor_id()) {
 		console_verbose();
 		spin_lock_irq(&die.lock);
@@ -332,18 +337,22 @@ void die(const char * str, struct pt_regs * regs, long err)
 #endif
 		if (nl)
 			printk("\n");
-	notify_die(DIE_OOPS, (char *)str, regs, err, 255, SIGSEGV);
+		notify_die(DIE_OOPS, (char *)str, regs, err, 255, SIGSEGV);
 		show_registers(regs);
+		try_crashdump(regs);
   	} else
 		printk(KERN_ERR "Recursive die() failure, output suppressed\n");
 
 	bust_spinlocks(0);
 	die.lock_owner = -1;
 	spin_unlock_irq(&die.lock);
+	vxh_dump_history();
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 
 	if (panic_on_oops) {
+		if (netdump_func)
+			netdump_func = NULL;
 		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
 		ssleep(5);
 		panic("Fatal exception");
@@ -451,13 +460,89 @@ DO_ERROR(10, SIGSEGV, "invalid TSS", invalid_TSS)
 DO_ERROR(11, SIGBUS,  "segment not present", segment_not_present)
 DO_ERROR(12, SIGBUS,  "stack segment", stack_segment)
 DO_ERROR_INFO(17, SIGBUS, "alignment check", alignment_check, BUS_ADRALN, 0)
-DO_ERROR_INFO(32, SIGSEGV, "iret exception", iret_error, ILL_BADSTK, 0)
+
+
+/*
+ * lazy-check for CS validity on exec-shield binaries:
+ *
+ * the original non-exec stack patch was written by
+ * Solar Designer <solar at openwall.com>. Thanks!
+ */
+static int
+check_lazy_exec_limit(int cpu, struct pt_regs *regs, long error_code)
+{
+	struct desc_struct *desc1, *desc2;
+	struct vm_area_struct *vma;
+	unsigned long limit;
+
+	if (current->mm == NULL)
+		return 0;
+
+	limit = -1UL;
+	if (current->mm->context.exec_limit != -1UL) {
+		limit = PAGE_SIZE;
+		spin_lock(&current->mm->page_table_lock);
+		for (vma = current->mm->mmap; vma; vma = vma->vm_next)
+			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
+				limit = vma->vm_end;
+		spin_unlock(&current->mm->page_table_lock);
+		if (limit >= TASK_SIZE)
+			limit = -1UL;
+		current->mm->context.exec_limit = limit;
+	}
+	set_user_cs(&current->mm->context.user_cs, limit);
+
+	desc1 = &current->mm->context.user_cs;
+	desc2 = per_cpu(cpu_gdt_table, cpu) + GDT_ENTRY_DEFAULT_USER_CS;
+
+	if (desc1->a != desc2->a || desc1->b != desc2->b) {
+		/*
+		 * The CS was not in sync - reload it and retry the
+		 * instruction. If the instruction still faults then
+		 * we won't hit this branch next time around.
+		 */
+		if (print_fatal_signals >= 2) {
+			printk("#GPF fixup (%ld[seg:%lx]) at %08lx, CPU#%d.\n", error_code, error_code/8, regs->eip, smp_processor_id());
+			printk(" exec_limit: %08lx, user_cs: %08lx/%08lx, CPU_cs: %08lx/%08lx.\n", current->mm->context.exec_limit, desc1->a, desc1->b, desc2->a, desc2->b);
+		}
+		load_user_cs_desc(cpu, current->mm);
+		return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * The fixup code for errors in iret jumps to here (iret_exc).  It loses
+ * the original trap number and error code.  The bogus trap 32 and error
+ * code 0 are what the vanilla kernel delivers via:
+ * DO_ERROR_INFO(32, SIGSEGV, "iret exception", iret_error, ILL_BADSTK, 0)
+ *
+ * In case of a general protection fault in the iret instruction, we
+ * need to check for a lazy CS update for exec-shield.
+ */
+fastcall void do_iret_error(struct pt_regs *regs, long error_code)
+{
+	int ok = check_lazy_exec_limit(get_cpu(), regs, error_code);
+	put_cpu();
+	if (!ok && notify_die(DIE_TRAP, "iret exception", regs,
+			      error_code, 32, SIGSEGV) != NOTIFY_STOP) {
+		siginfo_t info;
+		info.si_signo = SIGSEGV;
+		info.si_errno = 0;
+		info.si_code = ILL_BADSTK;
+		info.si_addr = 0;
+		do_trap(32, SIGSEGV, "iret exception", 0, regs, error_code,
+			&info);
+	}
+}
 
 fastcall void do_general_protection(struct pt_regs * regs, long error_code)
 {
 	int cpu = get_cpu();
 	struct tss_struct *tss = &per_cpu(init_tss, cpu);
 	struct thread_struct *thread = &current->thread;
+	int ok;
 
 	/*
 	 * Perform the lazy TSS's I/O bitmap copy. If the TSS has an
@@ -483,7 +568,6 @@ fastcall void do_general_protection(struct pt_regs * regs, long error_code)
 		put_cpu();
 		return;
 	}
-	put_cpu();
 
 	if (regs->eflags & VM_MASK)
 		goto gp_in_vm86;
@@ -491,17 +575,31 @@ fastcall void do_general_protection(struct pt_regs * regs, long error_code)
 	if (!(regs->xcs & 3))
 		goto gp_in_kernel;
 
+	ok = check_lazy_exec_limit(cpu, regs, error_code);
+
+	put_cpu();
+
+	if (ok)
+		return;
+
+	if (print_fatal_signals) {
+		printk("#GPF(%ld[seg:%lx]) at %08lx, CPU#%d.\n", error_code, error_code/8, regs->eip, smp_processor_id());
+		printk(" exec_limit: %08lx, user_cs: %08lx/%08lx.\n", current->mm->context.exec_limit, current->mm->context.user_cs.a, current->mm->context.user_cs.b);
+	}
+
 	current->thread.error_code = error_code;
 	current->thread.trap_no = 13;
 	force_sig(SIGSEGV, current);
 	return;
 
 gp_in_vm86:
+	put_cpu();
 	local_irq_enable();
 	handle_vm86_fault((struct kernel_vm86_regs *) regs, error_code);
 	return;
 
 gp_in_kernel:
+	put_cpu();
 	if (!fixup_exception(regs)) {
 		if (notify_die(DIE_GPF, "general protection fault", regs,
 				error_code, 13, SIGSEGV) == NOTIFY_STOP)

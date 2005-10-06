@@ -38,6 +38,7 @@ struct thread_info {
 					 	   0-0xBFFFFFFF for user-thead
 						   0-0xFFFFFFFF for kernel-thread
 						*/
+	void			*sysenter_return;
 	struct restart_block    restart_block;
 
 	unsigned long           previous_esp;   /* ESP of the previous stack in case
@@ -53,13 +54,10 @@ struct thread_info {
 #endif
 
 #define PREEMPT_ACTIVE		0x10000000
-#ifdef CONFIG_4KSTACKS
-#define THREAD_SIZE            (4096)
-#else
-#define THREAD_SIZE		(8192)
-#endif
+#define THREAD_SIZE            (1<<CONFIG_STACK_SIZE_SHIFT)
+#define STACK_WARN             (CONFIG_STACK_WARN)
+#define STACK_PANIC            (0x200ul)
 
-#define STACK_WARN             (THREAD_SIZE/8)
 /*
  * macros/functions for gaining access to the thread information structure
  *

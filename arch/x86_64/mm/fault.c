@@ -74,7 +74,7 @@ static noinline int is_prefetch(struct pt_regs *regs, unsigned long addr,
 	instr = (unsigned char *)convert_rip_to_linear(current, regs);
 	max_instr = instr + 15;
 
-	if ((regs->cs & 3) != 0 && instr >= (unsigned char *)TASK_SIZE)
+	if ((regs->cs & 3) != 0 && instr >= (unsigned char *)TASK_SIZE_64)
 		return 0;
 
 	while (scan_more && instr < max_instr) { 
@@ -350,7 +350,7 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 * (error_code & 4) == 0, and that the fault was not a
 	 * protection error (error_code & 1) == 0.
 	 */
-	if (unlikely(address >= TASK_SIZE)) {
+	if (unlikely(address >= TASK_SIZE_64)) {
 		if (!(error_code & 5) &&
 		      ((address >= VMALLOC_START && address < VMALLOC_END) ||
 		       (address >= MODULES_VADDR && address < MODULES_END))) {
@@ -535,6 +535,7 @@ no_context:
 	__die("Oops", regs, error_code);
 	/* Executive summary in case the body of the oops scrolled away */
 	printk(KERN_EMERG "CR2: %016lx\n", address);
+	try_crashdump(regs);
 	oops_end(); 
 	do_exit(SIGKILL);
 

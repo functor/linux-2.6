@@ -134,6 +134,10 @@ extern __inline__ int get_order(unsigned long size)
 
 #define __HAVE_ARCH_GATE_AREA 1	
 
+#ifndef __ASSEMBLY__
+extern int devmem_is_allowed(unsigned long pagenr);
+#endif
+
 #endif /* __KERNEL__ */
 
 #endif /* _X86_64_PAGE_H */

@@ -129,7 +129,7 @@ int conf_read(const char *name)
 				continue;
 			sym = sym_find(line + 9);
 			if (!sym) {
-				fprintf(stderr, "%s:%d: trying to assign nonexistent symbol %s\n", name, lineno, line + 9);
+				//fprintf(stderr, "%s:%d: trying to assign nonexistent symbol %s\n", name, lineno, line + 9);
 				break;
 			}
 			switch (sym->type) {
@@ -154,7 +154,7 @@ int conf_read(const char *name)
 				*p2 = 0;
 			sym = sym_find(line + 7);
 			if (!sym) {
-				fprintf(stderr, "%s:%d: trying to assign nonexistent symbol %s\n", name, lineno, line + 7);
+				//fprintf(stderr, "%s:%d: trying to assign nonexistent symbol %s\n", name, lineno, line + 7);
 				break;
 			}
 			switch (sym->type) {

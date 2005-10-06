@@ -555,7 +555,7 @@ struct kioctx *lookup_ioctx(unsigned long ctx_id)
  *	(Note: this routine is intended to be called only
  *	from a kernel thread context)
  */
-static void use_mm(struct mm_struct *mm)
+void use_mm(struct mm_struct *mm)
 {
 	struct mm_struct *active_mm;
 	struct task_struct *tsk = current;

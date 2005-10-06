@@ -272,6 +272,11 @@ struct ucred {
 #define SOL_NETBEUI	267
 #define SOL_LLC		268
 
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+/* PlanetLab PL2525: reset the context ID of an existing socket */
+#define SO_SETXID	SO_PEERCRED
+#endif
+
 /* IPX options */
 #define IPX_TYPE	1
 
@@ -289,6 +294,11 @@ extern int memcpy_toiovec(struct iovec *v, unsigned char *kdata, int len);
 extern int move_addr_to_user(void *kaddr, int klen, void __user *uaddr, int __user *ulen);
 extern int move_addr_to_kernel(void __user *uaddr, int ulen, void *kaddr);
 extern int put_cmsg(struct msghdr*, int level, int type, int len, void *data);
+
+struct socket;
+struct file * sock_map_file(struct socket *sock);
+extern int sock_map_fd(struct socket *sock);
+extern struct socket *sockfd_lookup(int fd, int *err);
 
 #endif
 #endif /* not kernel and not glibc */

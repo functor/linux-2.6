@@ -277,6 +277,9 @@ struct module
 
 	/* Am I GPL-compatible */
 	int license_gplok;
+	
+	/* Am I gpg signed */
+	int gpgsig_ok;
 
 #ifdef CONFIG_MODULE_UNLOAD
 	/* Reference counts */

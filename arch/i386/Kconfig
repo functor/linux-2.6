@@ -574,6 +574,14 @@ config X86_VISWS_APIC
 	depends on X86_VISWS
 	default y
 
+config KERNEL_HZ
+	int "Timer Frequency (100-10000)"
+	range 100 10000
+	default "1000"
+	help
+	  This allows you to specify the frequency at which the
+	  kernel timer interrupt will occur.
+
 config X86_TSC
 	bool
 	depends on (MWINCHIP3D || MWINCHIP2 || MCRUSOE || MEFFICEON || MCYRIXIII || MK7 || MK6 || MPENTIUM4 || MPENTIUMM || MPENTIUMIII || MPENTIUMII || M686 || M586MMX || M586TSC || MK8 || MVIAC3_2 || MGEODEGX1) && !X86_NUMAQ
@@ -759,6 +767,46 @@ config HIGHMEM64G
 
 endchoice
 
+choice
+	prompt "Memory Split User Space"
+	default SPLIT_3GB
+	help
+	  A different Userspace/Kernel split allows you to
+	  utilize up to alsmost 3GB of RAM without the requirement
+	  for HIGHMEM. It also increases the available lowmem.
+
+config SPLIT_3GB
+	bool "3.0GB/1.0GB Kernel (Default)"
+	help
+	  This is the default split of 3GB userspace to 1GB kernel
+	  space, which will result in about 860MB of lowmem.
+
+config SPLIT_25GB
+	bool "2.5GB/1.5GB Kernel"
+	help
+	  This split provides 2.5GB userspace and 1.5GB kernel
+	  space, which will result in about 1370MB of lowmem.
+
+config SPLIT_2GB
+	bool "2.0GB/2.0GB Kernel"
+	help
+	  This split provides 2GB userspace and 2GB kernel
+	  space, which will result in about 1880MB of lowmem.
+
+config SPLIT_15GB
+	bool "1.5GB/2.5GB Kernel"
+	help
+	  This split provides 1.5GB userspace and 2.5GB kernel
+	  space, which will result in about 2390MB of lowmem.
+
+config SPLIT_1GB
+	bool "1.0GB/3.0GB Kernel"
+	help
+	  This split provides 1GB userspace and 3GB kernel
+	  space, which will result in about 2900MB of lowmem.
+
+endchoice
+
 config HIGHMEM
 	bool
 	depends on HIGHMEM64G || HIGHMEM4G
@@ -921,6 +969,54 @@ config REGPARM
 	This feature is only enabled for gcc-3.0 and later - earlier compilers
 	generate incorrect output with certain kernel constructs when
 	-mregparm=3 is used.
+
+config KERN_PHYS_OFFSET
+	int "Physical address where the kernel is loaded (1-112)MB"
+	range 1 112
+	default "1"
+	help
+	  This gives the physical address where the kernel is loaded.
+	  Primarily used in the case of kexec on panic where the
+	  recovery kernel needs to run at a different address than
+	  the panic-ed kernel.
+
+config KEXEC
+	bool "kexec system call (EXPERIMENTAL)"
+	depends on EXPERIMENTAL
+	help
+	  kexec is a system call that implements the ability to shutdown your
+	  current kernel, and to start another kernel.  It is like a reboot
+	  but it is indepedent of the system firmware.   And like a reboot
+	  you can start any kernel with it, not just Linux.
+
+	  The name comes from the similiarity to the exec system call.
+
+	  It is an ongoing process to be certain the hardware in a machine
+	  is properly shutdown, so do not be surprised if this code does not
+	  initially work for you.  It may help to enable device hotplugging
+	  support.  As of this writing the exact hardware interface is
+	  strongly in flux, so no good recommendation can be made.
+
+config CRASH_DUMP
+	bool "kernel crash dumps (EXPERIMENTAL)"
+	depends on KEXEC
+	help
+	  Generate crash dump using kexec.
+
+config BACKUP_BASE
+	int "location from where the crash dumping kernel will boot (MB)"
+	depends on CRASH_DUMP
+	default 16
+	help
+	This is the location where the second kernel will boot from.
+
+config BACKUP_SIZE
+	int "Size of memory used by the crash dumping kernel (MB)"
+	depends on CRASH_DUMP
+	range 16 64
+	default 32
+	help
+	The size of the second kernel's memory.
 
 config SECCOMP
 	bool "Enable seccomp to safely compute untrusted bytecode"
@@ -1245,6 +1341,8 @@ source "fs/Kconfig"
 source "arch/i386/oprofile/Kconfig"
 
 source "arch/i386/Kconfig.debug"
+
+source "kernel/vserver/Kconfig"
 
 source "security/Kconfig"
 

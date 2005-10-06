@@ -30,7 +30,7 @@ void ack_bad_irq(unsigned int irq)
 }
 #endif
 
-#ifdef CONFIG_4KSTACKS
+#ifdef CONFIG_IRQSTACKS
 /*
  * per-CPU IRQ handling contexts (thread information and stack)
  */
@@ -39,9 +39,13 @@ union irq_ctx {
 	u32                     stack[THREAD_SIZE/sizeof(u32)];
 };
 
+/*
+ * per-CPU IRQ handling stacks
+ */
 static union irq_ctx *hardirq_ctx[NR_CPUS];
 static union irq_ctx *softirq_ctx[NR_CPUS];
 #endif
+
 
 /*
  * do_IRQ handles all normal device IRQ's (the special
@@ -52,7 +56,7 @@ fastcall unsigned int do_IRQ(struct pt_regs *regs)
 {	
 	/* high bits used in ret_from_ code */
 	int irq = regs->orig_eax & 0xff;
-#ifdef CONFIG_4KSTACKS
+#ifdef CONFIG_IRQSTACKS
 	union irq_ctx *curctx, *irqctx;
 	u32 *isp;
 #endif
@@ -73,7 +77,7 @@ fastcall unsigned int do_IRQ(struct pt_regs *regs)
 	}
 #endif
 
-#ifdef CONFIG_4KSTACKS
+#ifdef CONFIG_IRQSTACKS
 
 	curctx = (union irq_ctx *) current_thread_info();
 	irqctx = hardirq_ctx[smp_processor_id()];
@@ -109,8 +113,7 @@ fastcall unsigned int do_IRQ(struct pt_regs *regs)
 	return 1;
 }
 
-#ifdef CONFIG_4KSTACKS
-
+#ifdef CONFIG_IRQSTACKS
 /*
  * These should really be __section__(".bss.page_aligned") as well, but
  * gcc's 3.0 and earlier don't handle that correctly.
