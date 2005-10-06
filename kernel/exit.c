@@ -386,7 +386,7 @@ static inline void close_files(struct files_struct * files)
 		while (set) {
 			if (set & 1) {
 				struct file * file = xchg(&files->fd[i], NULL);
-				if (file)
+				if (file) 
 					filp_close(file, files);
 				vx_openfd_dec(i);
 			}
@@ -1420,6 +1420,7 @@ check_continued:
 				flag = 1;
 				if (!unlikely(options & WCONTINUED))
 					continue;
+
 				retval = wait_task_continued(
 					p, (options & WNOWAIT),
 					infop, stat_addr, ru);

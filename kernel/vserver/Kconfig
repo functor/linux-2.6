@@ -101,13 +101,6 @@ config	VSERVER_HARDCPU_IDLE
 	  This might improve interactivity and latency, but
 	  will also marginally increase scheduling overhead.
 
-config	VSERVER_ACB_SCHED
-	bool	"Guaranteed/fair share scheduler"
-	depends on VSERVER_HARDCPU
-	default n
-	help
-	  Andy Bavier's experimental scheduler
-
 choice
 	prompt	"Persistent Inode Context Tagging"
 	default	INOXID_UGID24

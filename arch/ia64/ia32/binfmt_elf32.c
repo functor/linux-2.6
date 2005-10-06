@@ -137,6 +137,29 @@ ia64_elf32_init (struct pt_regs *regs)
 	}
 
 	/*
+	 * When user stack is not executable, push sigreturn code to stack makes
+	 * segmentation fault raised when returning to kernel. So now sigreturn
+	 * code is locked in specific gate page, which is pointed by pretcode
+	 * when setup_frame_ia32
+	 */
+	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	if (vma) {
+		memset(vma, 0, sizeof(*vma));
+		vma->vm_mm = current->mm;
+		vma->vm_start = IA32_GATE_OFFSET;
+		vma->vm_end = vma->vm_start + PAGE_SIZE;
+		vma->vm_page_prot = PAGE_COPY_EXEC;
+		vma->vm_flags = VM_READ | VM_MAYREAD | VM_EXEC
+				| VM_MAYEXEC | VM_RESERVED;
+		vma->vm_ops = &ia32_gate_page_vm_ops;
+		down_write(&current->mm->mmap_sem);
+		{
+			insert_vm_struct(current->mm, vma);
+		}
+		up_write(&current->mm->mmap_sem);
+	}
+
+	/*
 	 * Install LDT as anonymous memory.  This gives us all-zero segment descriptors
 	 * until a task modifies them via modify_ldt().
 	 */

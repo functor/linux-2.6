@@ -10,6 +10,7 @@
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/security.h>
+#include <linux/vs_cvirt.h>
 #include <linux/syscalls.h>
 #include <linux/vs_cvirt.h>
 #include <asm/uaccess.h>

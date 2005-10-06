@@ -246,6 +246,9 @@ struct ext3_new_group_data {
 #ifdef CONFIG_JBD_DEBUG
 #define EXT3_IOC_WAIT_FOR_READONLY	_IOR('f', 99, long)
 #endif
+#ifdef	CONFIG_VSERVER_LEGACY
+#define EXT3_IOC_SETXID			FIOC_SETXIDJ
+#endif
 #define EXT3_IOC_GETRSVSZ		_IOR('f', 5, long)
 #define EXT3_IOC_SETRSVSZ		_IOW('f', 6, long)
 

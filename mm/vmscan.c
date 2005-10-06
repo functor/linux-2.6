@@ -39,6 +39,7 @@
 
 #include <linux/swapops.h>
 
+
 /* possible outcome of pageout() */
 typedef enum {
 	/* failed to write page out, page is locked */
@@ -602,6 +603,8 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 	LIST_HEAD(page_list);
 	struct pagevec pvec;
 	int max_scan = sc->nr_to_scan;
+	struct list_head *inactive_list = &zone->inactive_list;
+	struct list_head *active_list = &zone->active_list;
 
 	pagevec_init(&pvec, 1);
 
@@ -643,10 +646,13 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 			if (TestSetPageLRU(page))
 				BUG();
 			list_del(&page->lru);
-			if (PageActive(page))
-				add_page_to_active_list(zone, page);
-			else
-				add_page_to_inactive_list(zone, page);
+			if (PageActive(page)) {
+				zone->nr_active++;
+				list_add(&page->lru, active_list);
+			} else {
+				zone->nr_inactive++;
+				list_add(&page->lru, inactive_list);
+			}
 			if (!pagevec_add(&pvec, page)) {
 				spin_unlock_irq(&zone->lru_lock);
 				__pagevec_release(&pvec);
@@ -692,6 +698,8 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 	long mapped_ratio;
 	long distress;
 	long swap_tendency;
+	struct list_head *active_list = &zone->active_list;
+	struct list_head *inactive_list = &zone->inactive_list;
 
 	lru_add_drain();
 	spin_lock_irq(&zone->lru_lock);
@@ -757,7 +765,7 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 			BUG();
 		if (!TestClearPageActive(page))
 			BUG();
-		list_move(&page->lru, &zone->inactive_list);
+		list_move(&page->lru, inactive_list);
 		pgmoved++;
 		if (!pagevec_add(&pvec, page)) {
 			zone->nr_inactive += pgmoved;
@@ -785,7 +793,7 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 		if (TestSetPageLRU(page))
 			BUG();
 		BUG_ON(!PageActive(page));
-		list_move(&page->lru, &zone->active_list);
+		list_move(&page->lru, active_list);
 		pgmoved++;
 		if (!pagevec_add(&pvec, page)) {
 			zone->nr_active += pgmoved;
@@ -1103,7 +1111,7 @@ scan:
 			shrink_slab(sc.nr_scanned, GFP_KERNEL, lru_pages);
 			sc.nr_reclaimed += reclaim_state->reclaimed_slab;
 			total_reclaimed += sc.nr_reclaimed;
-			total_scanned += sc.nr_scanned;
+ 			total_scanned += sc.nr_scanned;
 			if (zone->all_unreclaimable)
 				continue;
 			if (zone->pages_scanned >= (zone->nr_active +

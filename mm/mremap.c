@@ -244,6 +244,7 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 			vma->vm_next->vm_flags |= VM_ACCOUNT;
 	}
 
+	vx_vmpages_add(mm, new_len >> PAGE_SHIFT);
 	__vm_stat_account(mm, vma->vm_flags, vma->vm_file, new_len>>PAGE_SHIFT);
 	if (vm_flags & VM_LOCKED) {
 		vx_vmlocked_add(mm, new_len >> PAGE_SHIFT);
@@ -360,6 +361,10 @@ unsigned long do_mremap(unsigned long addr,
 		ret = -ENOMEM;
 		goto out;
 	}
+
+	/* check context space, maybe only Private writable mapping? */
+	if (!vx_vmpages_avail(current->mm, (new_len - old_len) >> PAGE_SHIFT))
+		goto out;
 
 	if (vma->vm_flags & VM_ACCOUNT) {
 		charged = (new_len - old_len) >> PAGE_SHIFT;

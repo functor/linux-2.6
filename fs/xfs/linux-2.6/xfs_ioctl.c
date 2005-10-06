@@ -1201,7 +1201,7 @@ xfs_ioc_xattr(
 		attr_flags = 0;
 		if (filp->f_flags & (O_NDELAY|O_NONBLOCK))
 			attr_flags |= ATTR_NONBLOCK;
-
+		
 		va.va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE;
 		va.va_xflags  = fa.fsx_xflags;
 		va.va_extsize = fa.fsx_extsize;

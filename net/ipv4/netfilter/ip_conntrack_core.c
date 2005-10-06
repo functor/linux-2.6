@@ -117,6 +117,7 @@ ip_ct_get_tuple(const struct iphdr *iph,
 	tuple->src.ip = iph->saddr;
 	tuple->dst.ip = iph->daddr;
 	tuple->dst.protonum = iph->protocol;
+	tuple->src.u.all = tuple->dst.u.all = 0;
 	tuple->dst.dir = IP_CT_DIR_ORIGINAL;
 
 	return protocol->pkt_to_tuple(skb, dataoff, tuple);
@@ -131,6 +132,8 @@ ip_ct_invert_tuple(struct ip_conntrack_tuple *inverse,
 	inverse->dst.ip = orig->src.ip;
 	inverse->dst.protonum = orig->dst.protonum;
 	inverse->dst.dir = !orig->dst.dir;
+
+	inverse->src.u.all = inverse->dst.u.all = 0;
 
 	return protocol->invert_tuple(inverse, orig);
 }
@@ -165,8 +168,8 @@ static void expectation_timed_out(unsigned long ul_expect)
 
 /* If an expectation for this connection is found, it gets delete from
  * global list then returned. */
-struct ip_conntrack_expect *
-__ip_conntrack_exp_find(const struct ip_conntrack_tuple *tuple)
+static struct ip_conntrack_expect *
+find_expectation(const struct ip_conntrack_tuple *tuple)
 {
 	struct ip_conntrack_expect *i;
 
@@ -287,7 +290,7 @@ conntrack_tuple_cmp(const struct ip_conntrack_tuple_hash *i,
 		&& ip_ct_tuple_equal(tuple, &i->tuple);
 }
 
-struct ip_conntrack_tuple_hash *
+static struct ip_conntrack_tuple_hash *
 __ip_conntrack_find(const struct ip_conntrack_tuple *tuple,
 		    const struct ip_conntrack *ignored_conntrack)
 {
@@ -513,7 +516,7 @@ init_conntrack(const struct ip_conntrack_tuple *tuple,
 	conntrack->timeout.function = death_by_timeout;
 
 	WRITE_LOCK(&ip_conntrack_lock);
-	exp = __ip_conntrack_exp_find(tuple);
+	exp = find_expectation(tuple);
 
 	if (exp) {
 		DEBUGP("conntrack: expectation arrives ct=%p exp=%p\n",

@@ -662,15 +662,6 @@ config REGPARM
 	generate incorrect output with certain kernel constructs when
 	-mregparm=3 is used.
 
-config KERN_PHYS_OFFSET
-	int "Physical address where the kernel is loaded (1-112)MB"
-	range 1 112
-	default "1"
-	help
-	  This gives the physical address where the kernel is loaded.
-	  Primarily used in the case of kexec on panic where the
-	  recovery kernel needs to run at a different address than
-	  the panic-ed kernel.
 
 config X86_LOCAL_APIC
 	bool

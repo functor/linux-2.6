@@ -295,7 +295,6 @@ __syscall_start:
 		.long	sys_mq_notify
 		.long	sys_mq_getsetattr
 /* 280 */	.long	sys_waitid
-		.long	sys_socket
 		.long	sys_bind
 		.long	sys_connect
 		.long	sys_listen

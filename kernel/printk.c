@@ -30,6 +30,7 @@
 #include <linux/smp.h>
 #include <linux/security.h>
 #include <linux/bootmem.h>
+#include <linux/vs_base.h>
 #include <linux/syscalls.h>
 #include <linux/vserver/cvirt.h>
 
